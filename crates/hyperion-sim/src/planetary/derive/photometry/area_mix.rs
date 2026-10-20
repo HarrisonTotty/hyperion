@@ -3,9 +3,8 @@
 //! over them, and a gas envelope's from its class.
 //!
 //! Every piece is a pure function of the registry's rows and of plain values. T13.c's passes call
-//! it only under the `p14-snapshot` lane's hold (`SnapshotRules::Batch`, `SNAPSHOT_VERSION`), until
-//! P14.T54.a, so that nothing on the record moves at version 22; T49.c's tripwire holds this file
-//! for that reason. Every optical value is read through the registry when it is used
+//! it on the record since P14.T54.a deleted the `p14-snapshot` lane's hold; T49.c's tripwire lists
+//! this file as wired for that reason. Every optical value is read through the registry when it is used
 //! (`Substance::condensed_optics` and its spherical albedos, and
 //! [`liquid_properties`]), with no copied value, so that P14.T49.i's rows flow through with no
 //! edit here.

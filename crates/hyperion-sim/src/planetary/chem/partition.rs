@@ -46,19 +46,17 @@
 //!
 //! # What this module is, and is not, yet
 //!
-//! It is P14.T51.a: a pure module that nothing on the record calls at generator version 22. Its
-//! call into T13's passes is `atmosphere_under` in
+//! It is P14.T51.a. Its call into T13's passes is `atmosphere_under` in
 //! [`atmosphere`](crate::planetary::derive::atmosphere), and its call on the record
-//! `GlobalFigures::condensates_under`, both held at generator version 22 by the `p14-snapshot`
-//! lane's hold (`SNAPSHOT_VERSION`). From that version its rules and constants are output, and a
-//! change to any of them a generator-version change. Left to P14.T54.a: the record's `condensates`
-//! member, which takes [`Condensates`], and the passes' climate (P14.T24.a's range,
-//! `step_climate`, from the body's spin derived before them).
+//! `GlobalFigures::condensates_under`, both on the record since P14.T54.a deleted the
+//! `p14-snapshot` lane's hold, so its rules and constants are output, and a change to any of them a
+//! generator-version change. Left to P14.T54.a's later steps: the record's `condensates` member,
+//! which takes [`Condensates`], and the passes' climate (P14.T24.a's range, `step_climate`, from
+//! the body's spin derived before them).
 //!
 //! Every saturation pressure is the registry's phase diagram's
 //! ([`diagram::saturation_pressure`](crate::substance::diagram::saturation_pressure), P14.T49.b's
-//! fitted curves), as T13.c's greenhouse reads it too since P14.T54.a retired the held
-//! Clausius–Clapeyron sets. The
+//! fitted curves), since P14.T54.a retired the held Clausius–Clapeyron sets. The
 //! frost and boiling points are compared through the saturation pressure, which rises monotonically,
 //! so the partition never inverts a curve (`saturation_temperature`'s 64 bisections are not on the
 //! snapshot path).
@@ -1524,7 +1522,7 @@ impl fmt::Debug for Cover<'_> {
 /// Plain data with public fields.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WaterCover {
-    /// The surface water `σ_s` (`cover::surface_water_under`): the share of the partition's
+    /// The surface water `σ_s` (`cover::surface_water`): the share of the partition's
     /// condensed water that lies at the surface.
     pub surface_water: KilogramsPerSquareMetre,
     /// The potential ocean `f_pot` it fills ([`cover::potential_ocean`]), the liquid entry's area.

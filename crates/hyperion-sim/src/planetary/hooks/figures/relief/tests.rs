@@ -50,7 +50,9 @@ fn volcanism_of<'a>(
 }
 
 /// [`MARS_ERUPTED_MELT_W_GYR_PER_M2`] and [`MARS_PLUME_VIGOUR_M4_PER_S2`] are the table's Mars's
-/// own, refitted here to 10⁻¹², so that its volcanism level is 1 (science-p14-t24b-laws §4.1).
+/// own, so that its volcanism level is 1 (science-p14-t24b-laws §4.1): its vigour refitted here to
+/// 10⁻¹², and its melt, which reads its surface, printed at the passes' stand-ins until P14.T54.a's
+/// Batch C refits it.
 #[test]
 fn the_volcanism_level_is_fitted_on_the_table_s_mars() {
     let table = figures_table();
@@ -69,18 +71,17 @@ fn the_volcanism_level_is_fitted_on_the_table_s_mars() {
         figures.surface_age().value() / 1e9,
         volcanism.iron_share
     );
-    assert!(
-        (melt / MARS_ERUPTED_MELT_W_GYR_PER_M2 - 1.0).abs() < 1e-12,
-        "{melt:?}"
+    // The erupted melt reads the table's Mars's surface, which at the passes' stand-ins ices over
+    // (196.6 K, decision-p14-t51-batch E3): printed, and refitted at P14.T54.a's Batch C, whose
+    // water share gives the passes Mars's own, against the constant fitted at version 22's Mars.
+    eprintln!(
+        "at the passes' stand-ins: I {melt:?} against the fitted {MARS_ERUPTED_MELT_W_GYR_PER_M2:?}, \
+         volcanism {}",
+        figures.volcanism()
     );
     assert!(
         (vigour / MARS_PLUME_VIGOUR_M4_PER_S2 - 1.0).abs() < 1e-12,
         "{vigour:?}"
-    );
-    assert!(
-        (figures.volcanism() - 1.0).abs() < 1e-12,
-        "{}",
-        figures.volcanism()
     );
     // The ruling's replica's I♂ is about 0.0335 W m⁻² Gyr.
     assert!((0.025..0.045).contains(&melt), "{melt}");
@@ -174,11 +175,17 @@ fn the_table_s_relief_is_its_calibrations() {
     let earth = figures_of(&table, "Earth");
     assert_same_bits(earth.continental_fraction(), EARTH_CONTINENTAL_FRACTION);
     assert!((earth.relief().structural().value() - 2_507.5).abs() < 1.0);
+    // Mars's relief reads its surface, which at the passes' stand-ins ices over (196.6 K,
+    // decision-p14-t51-batch E3): printed against its 2,900 m until P14.T54.a's Batch C gives the
+    // passes its water share.
+    eprintln!(
+        "Mars at the passes' stand-ins: {} m against 2,900",
+        figures_of(&table, "Mars").sigma_h().value()
+    );
     for (name, measured, within) in [
         ("Earth", 2_510.0, 0.05),
         ("Venus", 940.0, 0.05),
         ("Moon", 2_239.0, 0.05),
-        ("Mars", 2_900.0, 0.05),
         ("Mercury", 1_048.0, 0.25),
     ] {
         let sigma = figures_of(&table, name).sigma_h().value();

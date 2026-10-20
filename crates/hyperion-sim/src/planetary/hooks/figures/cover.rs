@@ -36,13 +36,13 @@
 //!
 //! # The cloud (§4.4)
 //!
-//! The atmosphere's cloud fraction, unchanged, since its Bond albedo was solved with it: P14.T13.c's
-//! [`SurfaceState::cloud_fraction`], and under the `p14-snapshot` lane's batch P14.T51.b's area mix's
-//! (the state's share times its condensable's availability). A cover weighted by θ or the climate
-//! here would publish one the albedo does not have.
+//! The atmosphere's cloud fraction, unchanged, since its Bond albedo was solved with it: P14.T51.b's
+//! area mix's, the state's share ([`SurfaceState::cloud_fraction`]) times its condensable's
+//! availability. A cover weighted by θ or the climate here would publish one the albedo does not
+//! have.
 
 use crate::math;
-use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SnapshotRules, SurfaceState};
+use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceState};
 use crate::planetary::hooks::figures::Crust;
 use crate::planetary::hooks::figures::interior::REGIME_WATER_DENSITY;
 use crate::planetary::hooks::figures::relief::Hypsometry;
@@ -54,7 +54,7 @@ use crate::planetary::moons::regular::ICE_CONDUCTIVITY_COEFFICIENT;
 use crate::substance;
 use crate::units::{
     Kelvin, Kilograms, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metres,
-    MetresPerSecondSquared, Pascals, WattsPerSquareMetre,
+    MetresPerSecondSquared, WattsPerSquareMetre,
 };
 
 #[cfg(test)]
@@ -139,14 +139,19 @@ pub fn liquid_water_density() -> KilogramsPerCubicMetre {
 
 /// The surface water `σ_s` of a body of atmosphere `atmosphere` holding P14.T13.a's `water` over a
 /// radius `radius` at a surface gravity `surface_gravity`, at the present outgassing `outgassing`
-/// (science-p14-t24b-laws §4.2), kg m⁻²: the water condensed at the surface, over 4πR², while O is
-/// at least [`VOLCANIC_GREENHOUSE_OUTGASSING`], and [`DRY_SURFACE_WATER_SHARE`] of it after.
+/// (science-p14-t24b-laws §4.2; decision-p14-t51a-part2 §4.2), kg m⁻²: the water condensed at the
+/// surface, over 4πR², while O is at least [`VOLCANIC_GREENHOUSE_OUTGASSING`], and
+/// [`DRY_SURFACE_WATER_SHARE`] of it after.
 ///
-/// The condensed water is T13.a's less what P14.T13.c holds in the air: T13.c keeps water vapour
-/// at its saturation pressure at the mean surface temperature, the rest condensed, so the surface
-/// holds `M` ÷ 4πR² − `p_H₂O` ÷ g where the air is saturated, and none where all the water is
-/// vapour, a steam atmosphere's: continuous at the edge, where the surface's share falls to
-/// nothing. None too for a surface that holds no water: a body that keeps no atmosphere or no H₂O
+/// The condensed water is T13.a's less what the air holds, P14.T51.a's partition's airborne
+/// weight: the surface holds `M` ÷ 4πR² − `p_H₂O` ÷ g, and none where all the water is vapour, a
+/// steam atmosphere's: continuous at the edge, where the surface's share falls to nothing. The
+/// vapour is not tested against its saturation: the partition holds a minor condensable's vapour
+/// at its humidity, 0.77 of saturation for water, on T49.b's curve, which version 22's test, the
+/// vapour at least its saturation pressure, would read as no reservoir on every wet world. It is
+/// the one water that the potential ocean, its weight θ, the ice, the ocean under a `Snowball`'s
+/// ice, the own sea's weight in the partition and the published water entries all read. None too
+/// for a surface that holds no water: a body that keeps no atmosphere or no H₂O
 /// (P14.T13.b), a runaway greenhouse, which has lost its oceans (P14.T13.c), and a molten or
 /// enveloped one, which has no solid surface (the lane's readings of "T13.a's water", plan 14's
 /// Risks). It reads O and T13.c's state, not the climate, so the order has no loop.
@@ -199,66 +204,6 @@ pub fn surface_water(
     surface_gravity: MetresPerSecondSquared,
     outgassing: f64,
 ) -> KilogramsPerSquareMetre {
-    let holds = match atmosphere.state() {
-        SurfaceState::Temperate | SurfaceState::Snowball => true,
-        SurfaceState::GasEnvelope
-        | SurfaceState::MagmaOcean
-        | SurfaceState::Airless
-        | SurfaceState::RunawayGreenhouse => false,
-    };
-    let (kg, r, g) = (water.value(), radius.value(), surface_gravity.value());
-    // By comparison, so that a NaN water, radius or gravity holds none.
-    if !(holds && atmosphere.retention().retains(Gas::Water) && kg > 0.0 && r > 0.0 && g > 0.0) {
-        return KilogramsPerSquareMetre::ZERO;
-    }
-    // T13.c's test of a gas held at saturation, as P14.T24.a's greenhouse gain takes it: equal to
-    // the bit where the air holds all it can.
-    let vapour = atmosphere.partial_pressures().of(Gas::Water);
-    let saturation = Gas::Water
-        .substance()
-        .substance()
-        .phase_diagram()
-        .map_or(Pascals::new(f64::INFINITY), |diagram| {
-            diagram.saturation_pressure(atmosphere.surface_temperature())
-        });
-    if vapour < saturation {
-        return KilogramsPerSquareMetre::ZERO;
-    }
-    let condensed = kg / (4.0 * core::f64::consts::PI * r * r) - vapour.value() / g;
-    if condensed.is_nan() || condensed <= 0.0 {
-        return KilogramsPerSquareMetre::ZERO;
-    }
-    KilogramsPerSquareMetre::new(condensed * water_surface_share(outgassing))
-}
-
-/// [`surface_water`] under the `p14-snapshot` lane's rules `rules` (decision-p14-t51a-part2 §4.2):
-/// T24.b's under [`SnapshotRules::Held`], and under [`SnapshotRules::Batch`] the share of
-/// P14.T51.a's condensed water that lies at the surface.
-///
-/// That share is all of it while the volcanic greenhouse runs and [`DRY_SURFACE_WATER_SHARE`]
-/// after, as T24.b's, of the water condensed at the surface, `M` ÷ 4πR² − `p_H₂O` ÷ g, with T24.b's
-/// gate on the state and the retention, but with no test of the vapour's saturation: the partition
-/// holds a minor condensable's vapour at its humidity, 0.77 of saturation for water, on T49.b's
-/// curve, which version 22's test, the vapour at least its saturation pressure, would read as no
-/// reservoir on every wet world. The
-/// condensed water is the partition's, the vapour its airborne weight: the one water that the
-/// potential ocean, its weight θ, the ice, the ocean under a `Snowball`'s ice, the own sea's weight
-/// in the partition and the published water entries all read.
-#[must_use]
-pub(crate) fn surface_water_under(
-    rules: SnapshotRules,
-    atmosphere: &Atmosphere,
-    water: Kilograms,
-    radius: Metres,
-    surface_gravity: MetresPerSecondSquared,
-    outgassing: f64,
-) -> KilogramsPerSquareMetre {
-    match rules {
-        SnapshotRules::Held => {
-            return surface_water(atmosphere, water, radius, surface_gravity, outgassing);
-        }
-        SnapshotRules::Batch => {}
-    }
     let holds = match atmosphere.state() {
         SurfaceState::Temperate | SurfaceState::Snowball => true,
         SurfaceState::GasEnvelope

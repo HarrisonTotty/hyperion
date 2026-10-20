@@ -25,8 +25,8 @@
 //!
 //! Both contrasts are closed forms of a linear energy balance on the body's mean state, so that
 //! they need no field and are continuous in every input but one switch, a gas's reaching its cap
-//! (which turns on its vapour feedback): its saturation pressure under version 22's rules, and
-//! from 23 the condensate partition's holding of it (`greenhouse_gain`). A world's wetness enters
+//! (which turns on its vapour feedback): the condensate partition's holding of it
+//! (`greenhouse_gain`). A world's wetness enters
 //! continuously, as P14.T24.b's ocean weight θ ([`OceanWeight`], [`SurfaceInputs::ocean_weight`]), which weights
 //! the transport's moist share and Φ (science-p14-t24a-climate.md §1; science-p14-t24b-laws
 //! §4.4). They are science-p14-t24a-climate.md's (2026-10-11), each piece cited on its constant;
@@ -132,8 +132,9 @@ use crate::orbit::KeplerElements;
 use crate::planetary::chem::partition::{ClimateSpan, CondensatePhase, Condensates};
 use crate::planetary::context::XuvHistory;
 use crate::planetary::derive::atmosphere::{
-    AIRLESS_PRESSURE, Atmosphere, EARTH_REFERENCE_AGE, Gas, MOLAR_GAS_CONSTANT, PartialPressures,
-    REFERENCE_SUN_ZAMS_LUMINOSITY, SnapshotRules, SurfaceMaterial, SurfaceState,
+    AIRLESS_PRESSURE, Atmosphere, EARTH_REFERENCE_AGE, Gas, GreenhouseConstants,
+    MOLAR_GAS_CONSTANT, PartialPressures, REFERENCE_SUN_ZAMS_LUMINOSITY, SurfaceMaterial,
+    SurfaceState,
 };
 use crate::planetary::derive::rotation::{SpinOrbitResonance, SpinState};
 use crate::planetary::frames::BodyFixedFrame;
@@ -196,7 +197,8 @@ pub const EARTH_OUTGOING_LONGWAVE_SLOPE_W_PER_M2_K: f64 = 2.09;
 /// diffusion's flux divergence per kelvin of the `P₂` mode is 6D): 0.6760, so that Earth's
 /// measured state, at its own restoring with its vapour feedback, `B_eff`⊕, and at
 /// [`WET_ALBEDO_GRADIENT`], holds [`EARTH_EQUATOR_POLE_CONTRAST_K`] (`Fitted`, by bisection on the
-/// batch's zonal solver, with version 22's bisection of each end as its oracle; a test refits it).
+/// zonal solver, with the 64-step bisection of each end, the tests', as its oracle; a test refits
+/// it).
 ///
 /// It is North, Cahalan and Coakley's procedure carried to the model's own restoring
 /// (decision-p14-t54a-bands §2.6, amending decision-pre-23-review item 20(2)): they measured B and
@@ -250,8 +252,8 @@ pub const EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K: f64 = 0.676_013_14;
 /// ([`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`]'s state) with its gain set so that its `B_eff` is
 /// their B, 2.09 ([`EARTH_OUTGOING_LONGWAVE_SLOPE_W_PER_M2_K`]), and D their 0.310 × 2.09
 /// ([`EARTH_TRANSPORT_PARTITION`]), by a 200-step bisection on [1, 3] to the 42 K contrast on the
-/// batch's zonal solver, the safeguarded Newton steps, which version 22's bisection of each end
-/// matches within 10⁻⁹. So it reads none of the greenhouse chain: only their B and partition, the
+/// zonal solver, the safeguarded Newton steps, which the 64-step bisection of each end, the
+/// tests' oracle, matches within 10⁻⁹. So it reads none of the greenhouse chain: only their B and partition, the
 /// 42 K and the measured Earth's absorbed flux move it, and a refit of the water moves D⊕ alone.
 /// Under a uniform albedo (Φ = 1) the measured Earth's contrast, at D⊕, is 28.4 K.
 ///
@@ -872,15 +874,6 @@ impl SurfaceConditions {
     /// ```
     #[must_use]
     pub fn derive(inputs: &SurfaceInputs<'_>) -> Option<Self> {
-        Self::derive_under(SnapshotRules::in_force(), inputs)
-    }
-
-    /// [`derive`](Self::derive) under the `p14-snapshot` lane's rules `rules`: its zonal points
-    /// solved by the 64-step bisection under [`SnapshotRules::Held`], version 22's, and by the
-    /// safeguarded Newton steps under [`SnapshotRules::Batch`] (decision-p14-t51a-part2 §1), so
-    /// that the tests can run the batch's arm at 22.
-    #[must_use]
-    pub(crate) fn derive_under(rules: SnapshotRules, inputs: &SurfaceInputs<'_>) -> Option<Self> {
         let Surface {
             column,
             gases,
@@ -899,7 +892,6 @@ impl SurfaceConditions {
             inputs.ocean_weight,
             inputs.material,
             floor,
-            rules,
         );
         let equator_pole = zonal.ends.0 - zonal.ends.1;
         let air = AirTransport {
@@ -1037,7 +1029,7 @@ impl SurfaceConditions {
 
     /// Whether water can be liquid at the surface pressure somewhere in the climate's range of
     /// temperature ([`climate_range`](Self::climate_range), [`liquid_water`]): a condition of the
-    /// surface, whether or not the body holds water. From 22 → 23 P14.T51.a derives it from the
+    /// surface, whether or not the body holds water. On the record P14.T51.a derives it from the
     /// partition (`with_condensates`).
     #[must_use]
     pub const fn liquid_water(&self) -> bool {
@@ -1045,8 +1037,8 @@ impl SurfaceConditions {
     }
 
     /// The conditions with their liquid-water flag read from P14.T51.a's published condensates
-    /// `condensates` (P14.T51.a's second part, held by the `p14-snapshot` lane's hold): true where
-    /// they hold liquid water, a condition of the body's own water, no longer of its surface alone.
+    /// `condensates` (P14.T51.a's second part): true where they hold liquid water, a condition of
+    /// the body's own water, no longer of its surface alone.
     #[must_use]
     pub(crate) fn with_condensates(self, condensates: &Condensates) -> Self {
         let water = Gas::Water.substance();
@@ -1397,9 +1389,8 @@ pub(crate) struct Column {
     pub(crate) surface_gravity: MetresPerSecondSquared,
     /// The grey optical depth of the greenhouse (P14.T13.c).
     pub(crate) optical_depth: f64,
-    /// The greenhouse gain g of the gases the surface holds at their cap, at their saturation
-    /// pressure under version 22's rules and by the condensate partition from 23
-    /// ([`greenhouse_gain`]): zero for none.
+    /// The greenhouse gain g of the gases the surface holds at their cap, by the condensate
+    /// partition ([`greenhouse_gain`]): zero for none.
     pub(crate) greenhouse_gain: f64,
     /// The body's mean radius.
     pub(crate) radius: Metres,
@@ -1496,7 +1487,6 @@ impl Surface {
             equilibrium_temperature: inputs.equilibrium_temperature,
             surface_gravity: inputs.surface_gravity,
             radius: inputs.radius,
-            greenhouse: air.rules(),
             inventory: air.inventory_weights(),
         }
         .column()
@@ -1608,9 +1598,6 @@ struct StepColumn<'a> {
     surface_gravity: MetresPerSecondSquared,
     /// The mean radius.
     radius: Metres,
-    /// The `p14-snapshot` lane's rules its greenhouse was taken under, whose constants and
-    /// holding of its condensables the greenhouse gain reads ([`greenhouse_gain`]).
-    greenhouse: SnapshotRules,
     /// Its airborne inventory before any of it condensed, as column weights
     /// ([`Atmosphere::inventory_weights`]).
     inventory: &'a PartialPressures,
@@ -1660,7 +1647,6 @@ impl StepColumn<'_> {
                     self.optical_depth,
                     fractions.as_slice(),
                     self.equilibrium_temperature,
-                    self.greenhouse,
                     self.inventory,
                 )
             },
@@ -1681,8 +1667,9 @@ struct ColumnClimate {
 }
 
 /// The climate of the column `column` under the spin `spin` at the ocean weight `weight`, its
-/// ground of the material `material`, over a night floored at `floor`, its zonal points solved
-/// under the rules `rules` ([`zonal_point_under`]): P14.T24.a's range and what it is made of, the
+/// ground of the material `material`, over a night floored at `floor`, its zonal points solved by
+/// the safeguarded Newton steps ([`zonal_point_newton`]): P14.T24.a's range and what it is made of,
+/// the
 /// one computation [`SurfaceConditions::derive`] publishes and T13.c's passes read
 /// ([`step_climate`]; decision-p14-t51a-partition §6, condition 1).
 #[must_use]
@@ -1692,9 +1679,8 @@ fn climate_of(
     weight: OceanWeight,
     material: SurfaceMaterial,
     floor: Kelvin,
-    rules: SnapshotRules,
 ) -> ColumnClimate {
-    let zonal = ZonalProfile::of(column, spin, weight, rules);
+    let zonal = ZonalProfile::of(column, spin, weight);
     let response = diurnal_response(column, spin, material, floor);
     let (day, night) = day_and_night_of(column, response);
     let range = climate_range(column.surface_temperature, zonal.ends, day, night, floor);
@@ -1730,11 +1716,6 @@ pub(crate) struct ClimateBody {
     pub(crate) spin: SeasonalSpin,
     /// Its internal heat flow at the surface, which raises the night's floor.
     pub(crate) heat_flow: WattsPerSquareMetre,
-    /// The `p14-snapshot` lane's rules the pass's greenhouse is taken under, whose constants give
-    /// the step's optical depth and whose holding of the condensables the greenhouse gain reads
-    /// ([`Atmosphere::rules`]): the passes' own. The zonal solver's are [`step_climate`]'s
-    /// `rules`, the same in the passes, which the tests may set apart.
-    pub(crate) greenhouse: SnapshotRules,
     /// The pass's airborne inventory before any of it condensed, as column weights
     /// ([`Atmosphere::inventory_weights`]): the condensate partition's inventory.
     pub(crate) inventory: PartialPressures,
@@ -1742,16 +1723,14 @@ pub(crate) struct ClimateBody {
 
 /// The span of the climate of the body `body` at a step of T13.c's passes whose mean surface
 /// temperature is `surface_temperature` over the column of partial pressures `partials`, at the
-/// ocean weight `ocean_weight`, its zonal points solved under the rules `rules` (P14.T51.a's
-/// second part; decision-p14-t51a-partition §6): the passes reach it only under
-/// [`SnapshotRules::Batch`], whose safeguarded Newton steps make it a partition step's cost
-/// (decision-p14-t51a-part2 §1).
+/// ocean weight `ocean_weight` (P14.T51.a's second part; decision-p14-t51a-partition §6), whose
+/// safeguarded Newton steps make it a partition step's cost (decision-p14-t51a-part2 §1).
 ///
 /// It is P14.T24.a's range by the one computation the record's
 /// [`climate_range`](SurfaceConditions::climate_range) is (`climate_of`), on the column the
 /// conditions would build of an atmosphere of that temperature and those partial pressures: its
-/// greenhouse's optical depth T13.c's under the pass's greenhouse
-/// ([`ClimateBody::greenhouse`]'s constants), and airless below
+/// greenhouse's optical depth T13.c's under P14.T57.a's constants
+/// ([`GreenhouseConstants::FITTED`]), and airless below
 /// [`AIRLESS_PRESSURE`], as T13.c's state is but for a molten surface, which T13.c calls a
 /// `MagmaOcean` and on which nothing condenses. So a body's last step reads the range its record
 /// publishes, but where the range does not hold the mean, whose ends are then widened to it
@@ -1762,7 +1741,6 @@ pub(crate) struct ClimateBody {
     expect(dead_code, reason = "P14.T54.a's passes are the first callers")
 )]
 pub(crate) fn step_climate(
-    rules: SnapshotRules,
     body: &ClimateBody,
     ocean_weight: OceanWeight,
     surface_temperature: Kelvin,
@@ -1773,15 +1751,12 @@ pub(crate) fn step_climate(
         surface_temperature,
         partials,
         surface_pressure,
-        optical_depth: body
-            .greenhouse
-            .greenhouse()
+        optical_depth: GreenhouseConstants::FITTED
             .optical_depth(partials, body.equilibrium_temperature),
         airless: surface_pressure < AIRLESS_PRESSURE,
         equilibrium_temperature: body.equilibrium_temperature,
         surface_gravity: body.surface_gravity,
         radius: body.radius,
-        greenhouse: body.greenhouse,
         inventory: &body.inventory,
     };
     let Ok((column, _)) = step.column() else {
@@ -1789,22 +1764,15 @@ pub(crate) fn step_climate(
         return ClimateSpan::isothermal(surface_temperature);
     };
     let floor = night_floor(body.heat_flow);
-    let climate = climate_of(
-        &column,
-        &body.spin,
-        ocean_weight,
-        body.material,
-        floor,
-        rules,
-    );
+    let climate = climate_of(&column, &body.spin, ocean_weight, body.material, floor);
     ClimateSpan::about(climate.range, surface_temperature)
 }
 
 /// The greenhouse gain g of an air over a surface at `surface` under the partial pressures
 /// `partials`, whose greenhouse's optical depth is `optical_depth` and whose published mole
-/// fractions are `gases`, over a surface in equilibrium at `equilibrium`, its greenhouse taken under
-/// the `p14-snapshot` lane's rules `greenhouse` from the airborne inventory `inventory`, as column
-/// weights before any of it condensed ([`StepColumn::column`], at a step of T13.c's passes as on
+/// fractions are `gases`, over a surface in equilibrium at `equilibrium`, its greenhouse taken from
+/// the airborne inventory `inventory`, as column weights before any of it condensed
+/// ([`StepColumn::column`], at a step of T13.c's passes as on
 /// the record): the share of the grey column's Planck restoring that its condensing gases' vapour
 /// feedback takes back, `B_eff` = `B_P` (1 − g) (science-p14-t24a-climate.md §1).
 ///
@@ -1813,25 +1781,20 @@ pub(crate) fn step_climate(
 ///
 /// g = (`T_s` ÷ 4) ¾ Σᵢ (1 − xᵢ) ½τᵢ Lᵢ ÷ (R `T_s`²) ÷ (1 + ¾τ),
 ///
-/// summed in their order over T13.c's τ terms, at the constants of `greenhouse`
-/// ([`SnapshotRules::greenhouse`]), whose gas the surface holds at its cap:
-///
-/// - under [`SnapshotRules::Held`], version 22's, where its partial pressure is at least the
-///   saturation pressure at `T_s` (equal to the bit, since P14.T13.c held each condensing gas at
-///   the lesser of the two at the same temperature);
-/// - under [`SnapshotRules::Batch`], where P14.T51.a's partition holds it at its cap, on either
-///   branch, by the partition's own state: some of its inventory condensed, so that its airborne
-///   weight lies below its inventory's. The partition holds a minor condensable's partial pressure
-///   at its humidity, below its saturation pressure (Earth's water at 0.77 of it, a weight of 0.496
-///   of it), where version 22's comparison would drop its feedback, which h `p_sat`(T) keeps, with
-///   the same ∂ln p ÷ ∂T (decision-p14-t57a-fits §5; P14.T51.a's fix).
+/// summed in their order over T13.c's τ terms, at P14.T57.a's constants
+/// ([`GreenhouseConstants::FITTED`]), whose gas the surface holds at its cap: where P14.T51.a's
+/// partition holds it at its cap, on either branch, by the partition's own state, some of its
+/// inventory condensed, so that its airborne weight lies below its inventory's. The partition holds
+/// a minor condensable's partial pressure at its humidity, below its saturation pressure (Earth's
+/// water at 0.77 of it, a weight of 0.496 of it), where version 22's comparison with the saturation
+/// pressure would drop its feedback, which h `p_sat`(T) keeps, with the same ∂ln p ÷ ∂T
+/// (decision-p14-t57a-fits §5; P14.T51.a's fix).
 ///
 /// - ½τᵢ is ∂τᵢ ÷ ∂ln pᵢ for the terms in √pᵢ;
 /// - Lᵢ ÷ (R `T_s`²) is d ln `p_sat` ÷ dT at `T_s` on the gas's phase diagram, P14.T49.b's fitted
 ///   curves ([`PhaseDiagram::clausius_clapeyron_enthalpy_j_per_mol`]): the slope of the branch in
-///   force there, sublimation's below the triple point and vaporisation's from it, under either
-///   rules, whose vapour is held on that curve, at `p_sat` under version 22's and at h `p_sat`
-///   under the batch's (P14.T54.a's switch from the held constant-enthalpy curves;
+///   force there, sublimation's below the triple point and vaporisation's from it, on which the
+///   vapour is held at h `p_sat` (P14.T54.a's switch from the held constant-enthalpy curves;
 ///   decision-pre-23-review item 23). Water's is 44.47 kJ mol⁻¹ at
 ///   Earth's 288 K, where the held curve took 43.5. A gas at or above its critical temperature at
 ///   `T_s`, where the curve has no slope, adds none;
@@ -1841,9 +1804,9 @@ pub(crate) fn step_climate(
 /// The batch's measured Earth gives 0.4311 (`B_eff` 1.898 W m⁻² K⁻¹), as
 /// [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] is fitted on it (decision-p14-t57a-fits §1.3), the
 /// counterpart of Kaspi and Showman's prescribed τ, which they state stands in for water vapour,
-/// with no feedback of its own. The table's Earth gives 0.3997 (`B_eff` 1.987) under version 22's
-/// rules, and 0.4545 (`B_eff` 1.841) under the batch's, through the passes' stand-ins. Zero where
-/// no gas is held, or at a surface not above 0 K.
+/// with no feedback of its own. The table's Earth gives 0.4545 (`B_eff` 1.841) through the passes'
+/// stand-ins (version 22's rules gave it 0.3997, `B_eff` 1.987). Zero where no gas is held, or at a
+/// surface not above 0 K.
 #[must_use]
 fn greenhouse_gain(
     surface: Kelvin,
@@ -1851,15 +1814,13 @@ fn greenhouse_gain(
     optical_depth: f64,
     gases: &[(SubstanceId, f64)],
     equilibrium: Kelvin,
-    greenhouse: SnapshotRules,
     inventory: &PartialPressures,
 ) -> f64 {
     let t = surface.value();
     if t.is_nan() || t <= 0.0 {
         return 0.0;
     }
-    let slope = greenhouse
-        .greenhouse()
+    let slope = GreenhouseConstants::FITTED
         .terms(partials, equilibrium)
         .into_iter()
         .fold(0.0, |sum, (gas, term)| {
@@ -1867,15 +1828,12 @@ fn greenhouse_gain(
             let Some(diagram) = id.substance().phase_diagram() else {
                 return sum;
             };
-            let unheld = match greenhouse {
-                SnapshotRules::Held => partials.of(gas) < diagram.saturation_pressure(surface),
-                // Held only where some of it condensed: a weight that is not a number is not.
-                SnapshotRules::Batch => !matches!(
-                    partials.of(gas).partial_cmp(&inventory.of(gas)),
-                    Some(core::cmp::Ordering::Less)
-                ),
-            };
-            if unheld {
+            // Held only where some of it condensed: a weight that is not a number is not.
+            let held = matches!(
+                partials.of(gas).partial_cmp(&inventory.of(gas)),
+                Some(core::cmp::Ordering::Less)
+            );
+            if !held {
                 return sum;
             }
             // The curve's own slope at T_s, R T_s² d ln p_sat ÷ dT: none at or above the critical
@@ -2027,8 +1985,9 @@ pub(crate) fn equator_pole_contrast_k(
 /// converge by degree 16 to 10⁻⁴ `T_s`.
 const ZONAL_MODES: usize = 16;
 
-/// The bisection steps that solve each zonal end for its own restoring: 64, past the last bit of
-/// its bracket, which doubles from 2 `T_s` at most as many times.
+/// The steps of each zonal point's bracket: 64. Its upper end doubles from 2 `T_s` at most as many
+/// times ([`zonal_point_newton`]'s bracket), and the bisection that solves the point for its own
+/// restoring, the tests' oracle, halves it as many times, past its last bit.
 const ZONAL_END_STEPS: u32 = 64;
 
 /// One even Legendre mode of the annual-mean insolation over S ÷ 4 ([`insolation_modes`]).
@@ -2132,7 +2091,7 @@ fn legendre_at(x: f64) -> ModeValues {
 
 /// The emitted flux over the mean at a point of the zonal profile whose modes' Legendre
 /// polynomials are `legendre`, of insolation `insolation` over S ÷ 4 and modes `modes`, under the
-/// transport `transport` at the point's restoring over `B_P`, `scale` ([`zonal_ends_under`]).
+/// transport `transport` at the point's restoring over `B_P`, `scale` ([`zonal_ends`]).
 #[must_use]
 fn point_flux(
     insolation: f64,
@@ -2158,11 +2117,33 @@ fn point_flux(
     flux + (insolation - partial) * (response(modes[ZONAL_MODES - 1].degree + 2.0) - 1.0)
 }
 
+/// The radiative temperature, K, of a point of the profile about the mean `surface_k` whose
+/// insolation over S ÷ 4 is `insolation` and whose modes' Legendre polynomials are `legendre`,
+/// under the transport `transport` with the modes `modes`, at the restoring's scale `scale`:
+/// `T_s` max(0, E(s))^¼ ([`point_flux`]). At s = 1 with no transport it is the point itself
+/// ([`zonal_point_newton`]).
+#[must_use]
+fn point_temperature(
+    surface_k: f64,
+    transport: &ZonalTransport,
+    modes: &[InsolationMode; ZONAL_MODES],
+    (insolation, legendre): (f64, &ModeValues),
+    scale: f64,
+) -> f64 {
+    surface_k
+        * math::powf(
+            point_flux(insolation, modes, legendre, transport, scale).max(0.0),
+            0.25,
+        )
+}
+
 /// The annual-mean surface temperature, K, at a point of the profile about the mean `surface_k`
 /// whose insolation over S ÷ 4 is `insolation` and whose modes' Legendre polynomials are
-/// `legendre`, under the transport `transport` with the modes `modes` ([`zonal_ends_under`]): with
-/// no transport its radiative temperature, and otherwise its own restoring's fixed point, by
-/// [`ZONAL_END_STEPS`] doublings of the bracket at most and as many halvings.
+/// `legendre`, under the transport `transport` with the modes `modes`, by bisection: with no
+/// transport its radiative temperature, and otherwise its own restoring's fixed point, by
+/// [`ZONAL_END_STEPS`] doublings of the bracket at most and as many halvings. Version 22's
+/// solver, kept for the tests as the oracle of [`zonal_point_newton`]'s sweeps.
+#[cfg(test)]
 #[must_use]
 fn zonal_point(
     surface_k: f64,
@@ -2171,13 +2152,8 @@ fn zonal_point(
     insolation: f64,
     legendre: &ModeValues,
 ) -> f64 {
-    let temperature = |scale: f64| {
-        surface_k
-            * math::powf(
-                point_flux(insolation, modes, legendre, transport, scale).max(0.0),
-                0.25,
-            )
-    };
+    let temperature =
+        |scale: f64| point_temperature(surface_k, transport, modes, (insolation, legendre), scale);
     let transported = transport.conductance > 0.0 || transport.weak > 0.0;
     if !transported {
         return temperature(1.0);
@@ -2202,8 +2178,8 @@ fn zonal_point(
     f64::midpoint(low, high)
 }
 
-/// The safeguarded Newton steps that solve each zonal point from generator version 23: 16, a fixed
-/// count from a fixed start (decision-composition §1.3; decision-p14-t51a-part2 §1.3).
+/// The safeguarded Newton steps that solve each zonal point: 16, a fixed count from a fixed start
+/// (decision-composition §1.3; decision-p14-t51a-part2 §1.3).
 ///
 /// The ruling's default sweep (`the_newton_zonal_points_are_the_bisection_s`: obliquities of
 /// 0–180°, mean temperatures of 40–737 K, 6D ÷ `B_eff` of 10⁻⁴ to 50, Koll's W of 0 or `B_P`,
@@ -2278,9 +2254,12 @@ impl PointTerms {
     }
 }
 
-/// [`zonal_point`] from generator version 23: the same point, the root of
-/// t = `T_s` max(0, E(s))^¼ with s = (t ÷ `T_s`)³, by [`ZONAL_NEWTON_STEPS`] Newton steps
-/// safeguarded by the bisection's bracket (decision-p14-t51a-part2 §1.3).
+/// The annual-mean surface temperature, K, at a point of the profile about the mean `surface_k`
+/// whose insolation over S ÷ 4 is `insolation` and whose modes' Legendre polynomials are
+/// `legendre`, under the transport `transport` with the modes `modes` (`zonal_point`'s, the
+/// bisection the tests keep as its oracle): the root of t = `T_s` max(0, E(s))^¼ with
+/// s = (t ÷ `T_s`)³, by [`ZONAL_NEWTON_STEPS`] Newton steps safeguarded by the bisection's bracket
+/// (decision-p14-t51a-part2 §1.3).
 ///
 /// The steps are taken on g(u) = u⁴ − E(u³), u = t ÷ `T_s`, whose root is the same: g > 0 exactly
 /// where t exceeds `T_s` max(0, E)^¼, E ≤ 0 included, so the bracket narrows on the same sign as
@@ -2299,7 +2278,8 @@ impl PointTerms {
 ///   transition spans decades in s. The bracket and the candidate read the one g, so that at the
 ///   root they agree to the last bit.
 ///
-/// A point with no transport is [`zonal_point`]'s, its radiative temperature, bit for bit.
+/// A point with no transport is its radiative temperature ([`point_temperature`] at s = 1), as the
+/// bisection's is, bit for bit.
 #[must_use]
 fn zonal_point_newton(
     surface_k: f64,
@@ -2330,7 +2310,7 @@ fn newton_point(
 ) -> (f64, (f64, f64)) {
     let transported = transport.conductance > 0.0 || transport.weak > 0.0;
     if !transported {
-        let t = zonal_point(surface_k, transport, modes, insolation, legendre);
+        let t = point_temperature(surface_k, transport, modes, (insolation, legendre), 1.0);
         return (t, (t, t));
     }
     // g and g′ at u, the point's terms read once.
@@ -2379,28 +2359,8 @@ fn newton_point(
     (surface_k * u, (surface_k * low, surface_k * high))
 }
 
-/// The zonal point [`zonal_point`] solves, under the `p14-snapshot` lane's rules `rules`: by its
-/// 64-step bisection under [`SnapshotRules::Held`], version 22's, and by
-/// [`zonal_point_newton`] under [`SnapshotRules::Batch`] (decision-p14-t51a-part2 §1).
-#[must_use]
-fn zonal_point_under(
-    rules: SnapshotRules,
-    surface_k: f64,
-    transport: &ZonalTransport,
-    modes: &[InsolationMode; ZONAL_MODES],
-    insolation: f64,
-    legendre: &ModeValues,
-) -> f64 {
-    match rules {
-        SnapshotRules::Held => zonal_point(surface_k, transport, modes, insolation, legendre),
-        SnapshotRules::Batch => {
-            zonal_point_newton(surface_k, transport, modes, insolation, legendre)
-        }
-    }
-}
-
 /// The annual-mean surface temperatures at the equator and at a pole of the column `column` under
-/// the spin `spin` at the ocean weight `weight`, K ([`zonal_ends_under`];
+/// the spin `spin` at the ocean weight `weight`, K ([`zonal_ends`];
 /// science-p14-t24a-climate.md §7). Their difference is the equator–pole contrast. Both are `T_s`
 /// where no light is absorbed, or where nothing restores the column.
 ///
@@ -2413,7 +2373,7 @@ pub(crate) fn zonal_ends_k(
     spin: &SeasonalSpin,
     weight: OceanWeight,
 ) -> (f64, f64) {
-    ZonalProfile::of(column, spin, weight, SnapshotRules::Held).ends
+    ZonalProfile::of(column, spin, weight).ends
 }
 
 /// The annual-mean surface temperatures at the equator and at a pole, K, of a profile about the
@@ -2434,9 +2394,8 @@ pub(crate) fn zonal_ends_k(
 /// - The sum runs to degree 32, and the tail beyond takes degree 34's response; the modes sum to
 ///   q at each end.
 /// - Φ multiplies the `P₂` forcing, the coalbedo gradient it stands for.
-/// - Each end solves for its own s, since T − T(E(T)) rises with T: by bisection over a fixed
-///   number of steps under the rules `rules`' [`SnapshotRules::Held`], and from generator
-///   version 23 by safeguarded Newton steps ([`zonal_point_under`]).
+/// - Each end solves for its own s, since T − T(E(T)) rises with T, by safeguarded Newton steps
+///   ([`zonal_point_newton`]).
 ///
 /// The limits:
 /// - With no transport the ends are the radiative ones, `T_s` q^¼, bit for bit on an airless
@@ -2450,11 +2409,10 @@ pub(crate) fn zonal_ends_k(
 /// at low obliquity, where it is a narrow polar cap that any transport erases. Both ends are
 /// `surface_k` where nothing restores the column.
 #[must_use]
-pub(crate) fn zonal_ends_under(
+pub(crate) fn zonal_ends(
     surface_k: f64,
     transport: &ZonalTransport,
     obliquity: Radians,
-    rules: SnapshotRules,
 ) -> (f64, f64) {
     if !restored(transport) {
         return (surface_k, surface_k);
@@ -2463,7 +2421,7 @@ pub(crate) fn zonal_ends_under(
     let (equator, pole) = annual_insolation(obliquity);
     let at_equator = modes.map(|mode| mode.at_equator);
     let point = |insolation: f64, legendre: &ModeValues| {
-        zonal_point_under(rules, surface_k, transport, &modes, insolation, legendre)
+        zonal_point_newton(surface_k, transport, &modes, insolation, legendre)
     };
     (
         point(equator, &at_equator),
@@ -2545,22 +2503,15 @@ pub(crate) struct ZonalProfile {
     modal: Option<(ZonalTransport, Radians)>,
     /// The temperatures at the equator and at a pole, K: the contrast's ends.
     ends: (f64, f64),
-    /// Which solver its points take ([`zonal_point_under`]).
-    rules: SnapshotRules,
 }
 
 impl ZonalProfile {
     /// The profile of the column `column` under the spin `spin` at the ocean weight `weight`,
     /// whose transport keeps ½ + ½θ of the meridional conductance and whose cold zones brighten by
-    /// 1 + (Φ⊕ − 1)θ ([`OceanWeight`]), its points solved under the rules `rules`
-    /// ([`zonal_point_under`]).
+    /// 1 + (Φ⊕ − 1)θ ([`OceanWeight`]), its points solved by the safeguarded Newton steps
+    /// ([`zonal_point_newton`]).
     #[must_use]
-    pub(crate) fn of(
-        column: &Column,
-        spin: &SeasonalSpin,
-        weight: OceanWeight,
-        rules: SnapshotRules,
-    ) -> Self {
+    pub(crate) fn of(column: &Column, spin: &SeasonalSpin, weight: OceanWeight) -> Self {
         let t_s = column.surface_temperature.value();
         let planck = column.restoring_w_per_m2_k();
         if !(planck.is_finite() && planck > 0.0 && t_s > 0.0) {
@@ -2568,7 +2519,6 @@ impl ZonalProfile {
                 surface_k: t_s,
                 modal: None,
                 ends: (t_s, t_s),
-                rules,
             };
         }
         let transport = ZonalTransport {
@@ -2581,8 +2531,7 @@ impl ZonalProfile {
         Self {
             surface_k: t_s,
             modal: restored(&transport).then_some((transport, spin.obliquity)),
-            ends: zonal_ends_under(t_s, &transport, spin.obliquity, rules),
-            rules,
+            ends: zonal_ends(t_s, &transport, spin.obliquity),
         }
     }
 
@@ -2635,8 +2584,7 @@ impl ZonalProfile {
         x: f64,
         (modes, cosines): (&[InsolationMode; ZONAL_MODES], &[f64]),
     ) -> f64 {
-        zonal_point_under(
-            self.rules,
+        zonal_point_newton(
             self.surface_k,
             transport,
             modes,

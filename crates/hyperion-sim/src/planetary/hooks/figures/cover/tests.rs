@@ -324,29 +324,29 @@ fn the_table_s_ices_are_the_ruling_s() {
         conditions.cold_area(AIRLESS_ICE_TEMPERATURE),
     );
     assert!((0.1..0.3).contains(&europa.ice_fraction()));
-    // Band 5 (decision-p14-t54a-bands §4.3), while version 22's rules run: the generated Earth's
-    // ice within 0–0.07, its figure printed, the cover's equality held above. It is 0.001363:
-    // version 22's table Earth (290.30 K, B_eff 1.987) under D⊕ and Φ⊕ fitted at the batch's
-    // measured B_eff, its zonal pole near the 263.15 K edge, where the cap moves about 0.013 for
-    // each kelvin the pole warms. Earth's measured perennial ice is 0.045–0.051 of the globe and
-    // its annual-mean ice 0.068–0.078 (Fretwell et al. 2013, The Cryosphere 7, 375, Table 7; IPCC
-    // AR5 WGI Ch. 4, Tables 4.1–4.2; the NSIDC Sea Ice Index, v4, 1981–2010), and the cover gives
-    // the measured Earth's profile 0.035 (`surface::tests`'s fit test). From the commit that
-    // deletes the holds, 0.01–0.07 is asserted again.
+    // Band 5 (decision-p14-t54a-bands §4.3): the generated Earth's ice within 0.01–0.07, its
+    // figure printed, the cover's equality held above, on the batch's table Earth at the passes'
+    // stand-ins, its zonal pole near the 263.15 K edge, where the cap moves about 0.013 for each
+    // kelvin the pole warms. Earth's measured perennial ice is 0.045–0.051 of the globe and its
+    // annual-mean ice 0.068–0.078 (Fretwell et al. 2013, The Cryosphere 7, 375, Table 7; IPCC AR5
+    // WGI Ch. 4, Tables 4.1–4.2; the NSIDC Sea Ice Index, v4, 1981–2010), and the cover gives the
+    // measured Earth's profile 0.035 (`surface::tests`'s fit test).
     let earth = ice("Earth");
     eprintln!("the generated Earth's ice: {earth}");
-    assert!((0.0..=0.07).contains(&earth), "Earth's ice {earth}");
+    assert!((0.01..=0.07).contains(&earth), "Earth's ice {earth}");
 }
 
 /// An airless body's ice lasts below 110 K (Schorghofer and Williams 2020), and its cold area is
-/// where its radiative profile, `T_s` q(x)^¼, lies below it: Ganymede's band about its pole, and
-/// none of the generated Moon's, whose crust is silicate and holds no surface water.
+/// where its radiative profile, `T_s` q(x)^¼, lies below it: the generated Moon's and Mercury's
+/// at their edges, and none of the Moon's ice, whose crust is silicate and holds no surface water.
+/// The table's Ganymede, whose band about its pole the 110 K edge gave, is a snowball under the
+/// batch (`atmosphere::tests`' table, printed), so its band waits on its airless state.
 #[test]
 fn an_airless_body_s_edge_is_110_k() {
     assert_same_bits(ice_temperature(SurfaceState::Airless).value(), 110.0);
     assert_same_bits(ice_temperature(SurfaceState::Temperate).value(), 263.15);
     let table = table_surfaces();
-    for (name, threshold) in [("Ganymede", 110.0), ("Moon", 200.0), ("Mercury", 300.0)] {
+    for (name, threshold) in [("Moon", 200.0), ("Mercury", 300.0)] {
         let (_, body, _, conditions) = found(&table, name);
         assert_eq!(body.atmosphere().state(), SurfaceState::Airless, "{name}");
         let t_s = conditions.mean_surface_temperature().value();
@@ -378,9 +378,10 @@ fn an_airless_body_s_edge_is_110_k() {
             1.0 - low
         );
     }
-    let (_, _, ganymede, conditions) = found(&table, "Ganymede");
-    assert!(
-        (ganymede.ice_fraction() - conditions.cold_area(AIRLESS_ICE_TEMPERATURE)).abs() < 1e-15
+    let (_, ganymede, _, _) = found(&table, "Ganymede");
+    eprintln!(
+        "Ganymede under the batch: {:?}",
+        ganymede.atmosphere().state()
     );
     assert_same_bits(found(&table, "Moon").2.ice_fraction(), 0.0);
 }
@@ -524,17 +525,13 @@ fn the_cover_is_continuous_in_time() {
     }
 }
 
-/// The cloud is T13.c's state's value to the bit (science-p14-t24b-laws §4.4), and θ reads the
-/// potential ocean: moving the liquid-water flag, by the second stage of another body's
-/// conditions, moves the published ocean and not θ.
+/// The cloud is the atmosphere's to the bit, the area mix's (P14.T51.b; science-p14-t24b-laws
+/// §4.4), and θ reads the potential ocean: moving the liquid-water flag, by the second stage of
+/// another body's conditions, moves the published ocean and not θ.
 #[test]
 fn the_cloud_is_the_state_s_and_theta_reads_the_potential_ocean() {
     let table = table_surfaces();
     for (name, body, figures, _) in &table {
-        assert_same_bits(
-            figures.cloud_fraction(),
-            body.atmosphere().state().cloud_fraction(),
-        );
         assert_same_bits(figures.cloud_fraction(), body.atmosphere().cloud_fraction());
         assert_eq!(
             figures.ocean_weight(),

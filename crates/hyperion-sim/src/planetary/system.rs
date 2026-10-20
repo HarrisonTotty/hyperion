@@ -106,10 +106,8 @@ use crate::planetary::belts::{
 use crate::planetary::chem::partition::{Condensates, Partition};
 use crate::planetary::context::{SystemContext, XuvHistory};
 use crate::planetary::derive::atmosphere::{
-    Atmosphere, SnapshotRules, SurfaceMaterial, VolatileDraws, VolatileInventory,
+    Atmosphere, SurfaceMaterial, VolatileDraws, VolatileInventory,
 };
-#[cfg(doc)]
-use crate::planetary::derive::derive_body;
 use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
 use crate::planetary::derive::irradiation::{BondAlbedo, luminosity_flux};
 use crate::planetary::derive::photometry::{BodyPhotometry, PhotometryInputs};
@@ -117,9 +115,8 @@ use crate::planetary::derive::rotation::{
     BodyRotation, ObliquityLaw, SpinDraws, SpinInputs, SpinTides,
 };
 use crate::planetary::derive::{
-    BodyHolds, BodyHosts, DerivedBody, GivenBulk, GivenFractions, HabitableZone, HostLight,
-    Illumination, MassFractions, PlacedBody, PlanetClass, derive_body_under, habitable_zone_of,
-    radius_chen_kipping,
+    BodyHosts, DerivedBody, GivenBulk, GivenFractions, HabitableZone, HostLight, Illumination,
+    MassFractions, PlacedBody, PlanetClass, derive_body, habitable_zone_of, radius_chen_kipping,
 };
 use crate::planetary::disc::{self, Disc, DiscProfile, Truncation};
 use crate::planetary::drift::{DriftingOrbit, drift_cell};
@@ -135,7 +132,6 @@ use crate::planetary::hooks::figures::{
     ImpactorSources, MoonBirth, SourceBelt, VolatileHistory, VolatileHistoryInputs, WindowAt,
     WindowEntryInputs, past_outgassing, relief, window_entry,
 };
-use crate::planetary::hooks::surface::regime::surface_reservoirs;
 use crate::planetary::hooks::surface::{ClimateInputs, SeasonalSpin, SeasonsFrom, SurfaceInputs};
 use crate::planetary::hooks::{
     self, BodyHooks, BulkComposition, GlobalFigures, Subsurface, SurfaceConditions, SurfaceSeed,
@@ -146,8 +142,8 @@ use crate::planetary::index::{BodyIndex, LAST_PLANET_SLOT};
 use crate::planetary::label::{self, BodyLabel};
 use crate::planetary::laplace::{LaplaceFrame, LaplaceFrameParts, hydrostatic_j2};
 use crate::planetary::moons::regular::{
-    DerivedMoon, MOON_ICE_DENSITY, MOON_ROCK_DENSITY, MoonBulk, MoonHolds, MoonInputs, MoonNursery,
-    MoonSky, derive_moon_under,
+    DerivedMoon, MOON_ICE_DENSITY, MOON_ROCK_DENSITY, MoonBulk, MoonInputs, MoonNursery, MoonSky,
+    derive_moon,
 };
 use crate::planetary::moons::regular::{ICY_MOON_ICE_FRACTION, moon_radius};
 use crate::planetary::moons::{
@@ -647,45 +643,30 @@ impl Body {
 }
 
 /// The photometry of a present body whose bulk is `bulk`, whose last atmosphere pass is
-/// `atmosphere` and whose equilibrium temperature was taken at the albedo `albedo` (P14.T47.c),
-/// under the `p14-snapshot` lane's rules `rules`: its surface state with the material of its
-/// record's composition.
-///
-/// - Under [`SnapshotRules::Held`] its Bond albedo is the state's on that material (P14.T13.c),
-///   since a moon's and an icy member's derivation read another composition than their record's
-///   (P14.T47's exception, as built).
-/// - Under [`SnapshotRules::Batch`] it is `albedo` itself, the area mix's, whose passes read the
-///   record's composition (P14.T51.b), so that the two agree to the bit by construction, and its
-///   template's reference is the batch's ([`BodyPhotometry::derive_under`]).
+/// `atmosphere` and whose equilibrium temperature was taken at the albedo `albedo` (P14.T47.c):
+/// its surface state with the material of its record's composition, and its Bond albedo `albedo`
+/// itself, the area mix's, whose passes read the record's composition (P14.T51.b), so that the two
+/// agree to the bit by construction; its template's reference is the area mix's
+/// ([`TemplateRow::reference_bond`](crate::planetary::derive::photometry::TemplateRow::reference_bond)).
 #[must_use]
 fn photometry_of(
-    rules: SnapshotRules,
     albedo: BondAlbedo,
     atmosphere: &Atmosphere,
     bulk: &BulkProperties,
 ) -> BodyPhotometry {
     let fractions = bulk.fractions();
-    let material = SurfaceMaterial::of(&fractions);
-    let state = atmosphere.state();
-    let bond = match rules {
-        SnapshotRules::Held => state.albedo(material),
-        SnapshotRules::Batch => albedo,
-    };
-    BodyPhotometry::derive_under(
-        rules,
-        &PhotometryInputs {
-            state,
-            material,
-            surface_pressure: atmosphere.surface_pressure(),
-            cloud_fraction: atmosphere.cloud_fraction(),
-            surface_temperature: atmosphere.surface_temperature(),
-            equilibrium_temperature: bulk.equilibrium_temperature(),
-            surface_gravity: bulk.surface_gravity(),
-            class: bulk.class(),
-            fractions,
-            bond,
-        },
-    )
+    BodyPhotometry::derive(&PhotometryInputs {
+        state: atmosphere.state(),
+        material: SurfaceMaterial::of(&fractions),
+        surface_pressure: atmosphere.surface_pressure(),
+        cloud_fraction: atmosphere.cloud_fraction(),
+        surface_temperature: atmosphere.surface_temperature(),
+        equilibrium_temperature: bulk.equilibrium_temperature(),
+        surface_gravity: bulk.surface_gravity(),
+        class: bulk.class(),
+        fractions,
+        bond: albedo,
+    })
 }
 
 /// The density of a sphere of `mass` and `radius`.
@@ -761,15 +742,14 @@ fn icy_member_given_bulk(body: &Body, mass: EarthMasses) -> Option<GivenBulk> {
     ))
 }
 
-/// `placed`, the placement of `body`, under the `p14-snapshot` lane's rules `rules`: with its
-/// record's bulk ([`icy_member_given_bulk`]) under [`SnapshotRules::Batch`] for an icy belt's
-/// member, so that its air and albedo read the material its bulk section states (P14.T51.b), and
-/// as it is otherwise, version 22's below the bump.
+/// `placed`, the placement of `body`: with its record's bulk ([`icy_member_given_bulk`]) for an
+/// icy belt's member, so that its air and albedo read the material its bulk section states
+/// (P14.T51.b), and as it is otherwise.
 #[must_use]
-fn with_record_bulk(rules: SnapshotRules, body: &Body, placed: &PlacedBody) -> PlacedBody {
-    match (rules, icy_member_given_bulk(body, placed.mass())) {
-        (SnapshotRules::Batch, Some(bulk)) => placed.with_bulk(bulk),
-        (SnapshotRules::Held, _) | (SnapshotRules::Batch, None) => *placed,
+fn with_record_bulk(body: &Body, placed: &PlacedBody) -> PlacedBody {
+    match icy_member_given_bulk(body, placed.mass()) {
+        Some(bulk) => placed.with_bulk(bulk),
+        None => *placed,
     }
 }
 
@@ -944,22 +924,15 @@ pub struct PlanetarySystem {
     satellites: Vec<Satellites>,
     belts: Vec<Belt>,
     halo: Option<SystemHalo>,
-    /// Which rules its records' passes follow (the `p14-snapshot` lane's hold, P14.T51.a–b):
-    /// version 22's below the bump, and the batch's area-mix albedo, on the bulk its record
-    /// states, from it.
-    snapshot: SnapshotRules,
-    /// Which rules its records' partition and cold traps follow (P14.T51.a, P14.T51.f): those in
-    /// force, which the tests may change ([`with_record_rules`](Self::with_record_rules)).
+    /// Which rules its records' cold traps follow (P14.T51.f): those in force, which the tests may
+    /// change ([`with_record_rules`](Self::with_record_rules)).
     record: RecordRules,
 }
 
-/// The rules a system's records' partition and cold traps follow (P14.T51.a's second part,
-/// P14.T51.f): the generator version's, and for the tests the batches' ahead of their bumps.
-/// P14.T54.b deletes it with the holds.
+/// The rules a system's records' cold traps follow (P14.T51.f): the generator version's, and for
+/// the tests the batch's ahead of its bump. P14.T54.b deletes it with the holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RecordRules {
-    /// The record's partition: the `p14-snapshot` lane's hold.
-    pub(crate) partition: SnapshotRules,
     /// Its cold traps: their hold at 24.
     pub(crate) cold_traps: ColdTrapRules,
 }
@@ -969,7 +942,6 @@ impl RecordRules {
     #[must_use]
     pub(crate) fn in_force() -> Self {
         Self {
-            partition: SnapshotRules::in_force(),
             cold_traps: ColdTrapRules::in_force(),
         }
     }
@@ -1235,7 +1207,6 @@ pub fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
         satellites: Vec::new(),
         belts: Vec::new(),
         halo: None,
-        snapshot: SnapshotRules::in_force(),
         record: RecordRules::in_force(),
     }
 }
@@ -1282,9 +1253,8 @@ fn parent_at_epoch(
     let hosts = BodyHosts::new(host_mass, *ctx.composition(), &orbited, &companions).ok()?;
     // An icy member's bulk moves only its air, albedo and temperatures, none of which its moons'
     // parent reads (its mass, its bulk's radius and class, its moon limit and its orbit).
-    let holds = BodyHolds::in_force();
-    let placed = with_record_bulk(holds.snapshot, body, &placed);
-    let derived = derive_body_under(holds, &placed, &hosts, profile, ctx.age_at_epoch(), t).ok()?;
+    let placed = with_record_bulk(body, &placed);
+    let derived = derive_body(&placed, &hosts, profile, ctx.age_at_epoch(), t).ok()?;
     let id = body.index.body_id(ctx.id());
     let parent = match icy_member_bulk(body, &derived) {
         // Ruling 112.8: an icy belt's member is its moons' parent as rock and ice.
@@ -1630,22 +1600,7 @@ impl PlanetarySystem {
         &self.satellites
     }
 
-    /// The same system with its records' passes under the `p14-snapshot` lane's rules `rules`
-    /// (P14.T51.a–b), for the tests to reach the batch's area-mix albedo ahead of the bump: its
-    /// planets', members' and moons' derivations at a record's time and their photometry. What
-    /// generation derived (its moons' parents and its held rotation laws) stays as the rules in
-    /// force derived it; an icy member's parent reads none of its air or albedo. P14.T54.a deletes
-    /// it with the hold.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn with_snapshot_rules(self, rules: SnapshotRules) -> Self {
-        Self {
-            snapshot: rules,
-            ..self
-        }
-    }
-
-    /// The same system with its records' partition and cold traps under `rules` (P14.T51.i), for
+    /// The same system with its records' cold traps under `rules` (P14.T51.i), for
     /// the tests and the cold traps' probe to reach 24's record path ahead of the bump. P14.T54.b
     /// deletes it with the holds.
     #[cfg(test)]
@@ -2154,7 +2109,7 @@ impl PlanetarySystem {
                 let state = moon_state(now.state, &moon.satellite, ctx.age_at_epoch(), t);
                 let bulk = if state == BodyState::Present && now.position.is_some() {
                     let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
-                    match self.moon_derived(&epoch, moon, &orbit, &now) {
+                    match Self::moon_derived(&epoch, moon, &orbit, &now) {
                         Some(derived) => {
                             let properties = Self::moon_bulk_of(moon, &derived, &now);
                             bulk_composition(ctx, properties.fractions(), *derived.inventory())
@@ -2568,7 +2523,7 @@ impl PlanetarySystem {
             return None;
         }
         let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(epoch.t));
-        let derived = self.moon_derived(epoch, moon, &orbit, now)?;
+        let derived = Self::moon_derived(epoch, moon, &orbit, now)?;
         let bulk = Self::moon_bulk_of(moon, &derived, now);
         self.rotation_from(ctx, body, &orbit, &bulk, body.mass(), derived.spin_tides())
     }
@@ -2806,7 +2761,7 @@ impl PlanetarySystem {
                     Part::Member(_) => section.about(body.host),
                     Part::Planet(_) | Part::Moon(_) | Part::Ring(_) => section,
                 };
-                let placed = self.placed_now(body, orbit, at.mass());
+                let placed = Self::placed_now(body, orbit, at.mass());
                 let (derived, sky) =
                     self.derive(epoch, body, zone, &placed, fate.host_mass(epoch.t));
                 let position = epoch.position(
@@ -2839,7 +2794,6 @@ impl PlanetarySystem {
                     .surface(surface)
                     .envelope(envelope)
                     .photometry(Section::Ok(photometry_of(
-                        self.snapshot,
                         derived.albedo(),
                         derived.atmosphere(),
                         &bulk,
@@ -2881,16 +2835,16 @@ impl PlanetarySystem {
     }
 
     /// The planet or member `body` on its orbit `orbit` at the time, of mass `mass` then, as
-    /// [`derive_body`] reads it, with its record's bulk under the batch's rules for an icy
-    /// member ([`with_record_bulk`]).
+    /// [`derive_body`] reads it, with its record's bulk for an icy member
+    /// ([`with_record_bulk`]).
     #[must_use]
-    fn placed_now(&self, body: &Body, orbit: &KeplerElements, mass: EarthMasses) -> PlacedBody {
+    fn placed_now(body: &Body, orbit: &KeplerElements, mass: EarthMasses) -> PlacedBody {
         let placed = match &body.part {
             Part::Planet(planet) => planet.placed_body(mass),
             Part::Member(member) => member.member.placed_body(),
             Part::Moon(_) | Part::Ring(_) => unreachable!("a satellite is derived by its own rule"),
         };
-        with_record_bulk(self.snapshot, body, &placed.with_orbit_now(*orbit))
+        with_record_bulk(body, &placed.with_orbit_now(*orbit))
     }
 
     /// Where the moons of `body` formed (P14.T17.b), if it has any.
@@ -2955,17 +2909,12 @@ impl PlanetarySystem {
             (Part::Moon(moon), true, Some(centre)) => {
                 let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
                 let (trajectory, valid_until) = moon_trajectory(ctx, moon, t, parent.changes_at);
-                let derived = self.moon_derived(epoch, moon, &orbit, parent);
+                let derived = Self::moon_derived(epoch, moon, &orbit, parent);
                 let bulk = derived
                     .as_ref()
                     .map(|derived| (Self::moon_bulk_of(moon, derived, parent), derived));
                 let photometry = bulk.map_or(Section::NotModelled, |(bulk, derived)| {
-                    Section::Ok(photometry_of(
-                        self.snapshot,
-                        derived.albedo(),
-                        derived.atmosphere(),
-                        &bulk,
-                    ))
+                    Section::Ok(photometry_of(derived.albedo(), derived.atmosphere(), &bulk))
                 });
                 // P14.T48.e: a moon's surface section, and its envelope's tag, as a planet's. A
                 // moon's fractions hold no envelope, so its class always has a solid surface.
@@ -3027,11 +2976,9 @@ impl PlanetarySystem {
     /// The derivation of the present moon `moon` on `orbit` at the epoch's time, whose parent is
     /// as `parent` says (P14.T17.b): its own volatiles (P14.T56.c), its inventory, atmosphere and
     /// tides read at its own bulk ([`moon_own_bulk`](Self::moon_own_bulk); T56.c's follow-up and
-    /// P14.T56.d), and its atmosphere's passes under the system's snapshot rules; `None` where
-    /// this generator version does not compute it.
+    /// P14.T56.d); `None` where this generator version does not compute it.
     #[must_use]
     fn moon_derived(
-        &self,
         epoch: &Epoch<'_>,
         moon: &MoonPart,
         orbit: &KeplerElements,
@@ -3044,9 +2991,6 @@ impl PlanetarySystem {
             return None;
         };
         let satellite = &moon.satellite;
-        let holds = MoonHolds {
-            snapshot: self.snapshot,
-        };
         let inputs = MoonInputs {
             mass: satellite.mass(),
             orbit: *orbit,
@@ -3056,8 +3000,7 @@ impl PlanetarySystem {
         };
         // As above: the derivation refuses only inputs the generator never makes, so its error
         // carries nothing a caller could act on.
-        derive_moon_under(
-            holds,
+        derive_moon(
             &inputs,
             &moon.parent,
             nursery,
@@ -3337,11 +3280,8 @@ impl PlanetarySystem {
             &companions,
         )
         .expect("a present body orbits a positive mass and at least one star");
-        let holds = BodyHolds {
-            snapshot: self.snapshot,
-        };
         let age = epoch.ctx.age_at_epoch();
-        let derived = derive_body_under(holds, placed, &hosts, disc, age, epoch.t).expect(
+        let derived = derive_body(placed, &hosts, disc, age, epoch.t).expect(
             "a present body's system is born, and a placed planet lies below 13 Jupiter masses",
         );
         let has_moons = self.children(body.index).next().is_some();
@@ -3389,9 +3329,8 @@ struct SurfaceSky<'a> {
     equilibrium_temperature: Kelvin,
     flux: EarthFluxes,
     xuv_flux: WattsPerSquareMetre,
-    /// The bare regolith's Bond albedo its derivation gives under the batch (P14.T51.i), which its
-    /// cold traps read.
-    regolith_albedo: Option<f64>,
+    /// The bare regolith's Bond albedo its derivation gives (P14.T51.i), which its cold traps read.
+    regolith_albedo: f64,
 }
 
 /// What a body's global figures read at a time beyond its bulk section, its sky and its spin
@@ -3513,7 +3452,7 @@ struct SurfaceCase<'a> {
     continental_asymptote: f64,
     /// What its cold traps read beyond its sky (P14.T51.f).
     cold_traps: ColdTrapCase,
-    /// The rules its partition and cold traps follow.
+    /// The rules its cold traps follow.
     record: RecordRules,
 }
 
@@ -3714,18 +3653,12 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         window,
         outgassing: |age: Years| past_outgassing(&figure_inputs, age),
     });
-    let figures = figures.with_surface_under(
-        &conditions,
-        history,
-        condensates.as_ref().map(|(_, published)| published),
-    );
+    let (partition, published) = &condensates;
+    let figures = figures.with_surface_under(&conditions, history, Some(published));
     // Step 10, the climate regime (P14.T48.d): it reads the cover, which reads no regime (an ice
     // belt's band is the profile's cold equator, science-p14-t24b-laws §4.3), so it follows the
     // second stage with no loop.
-    let reservoirs = match &condensates {
-        Some((partition, _)) => partition.reservoirs(),
-        None => surface_reservoirs(sky.atmosphere),
-    };
+    let reservoirs = partition.reservoirs();
     let conditions = conditions.with_climate(&ClimateInputs {
         mass: interior.mass,
         reservoirs: &reservoirs,
@@ -3741,20 +3674,19 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
 }
 
 /// The conditions `conditions` of the body `case` describes, of figures `figures`, spin and seasonal
-/// orbit `seasons`, with P14.T51.a's partition on the record, held by the `p14-snapshot` lane's
-/// hold ([`GlobalFigures::condensates_under`]): from 23 the conditions' liquid-water flag, the ocean
-/// and ices, and the regime's reservoirs read it; below 23 nothing. Its cold traps (P14.T51.f)
-/// take the sky [`cold_trap_sky`] gives and the bare regolith's albedo its derivation gives
-/// (P14.T51.i), under their own hold at 24. Both follow the case's rules, those in force.
+/// orbit `seasons`, with P14.T51.a's partition on the record
+/// ([`GlobalFigures::condensates_under`]): the conditions' liquid-water flag, the ocean and ices,
+/// and the regime's reservoirs read it. Its cold traps (P14.T51.f) take the sky [`cold_trap_sky`]
+/// gives and the bare regolith's albedo its derivation gives (P14.T51.i), under their own hold at
+/// 24, which follows the case's rules, those in force.
 #[must_use]
 fn with_partition(
     figures: &GlobalFigures,
     case: &SurfaceCase<'_>,
     seasons: (&SeasonalSpin, &KeplerElements),
     conditions: SurfaceConditions,
-) -> (SurfaceConditions, Option<(Partition, Condensates)>) {
+) -> (SurfaceConditions, (Partition, Condensates)) {
     let condensates = figures.condensates_under(
-        case.record.partition,
         case.sky.atmosphere,
         &conditions,
         case.bulk.surface_gravity(),
@@ -3764,10 +3696,7 @@ fn with_partition(
             regolith_albedo: case.sky.regolith_albedo,
         },
     );
-    let conditions = match &condensates {
-        Some((_, published)) => conditions.with_condensates(published),
-        None => conditions,
-    };
+    let conditions = conditions.with_condensates(&condensates.1);
     (conditions, condensates)
 }
 

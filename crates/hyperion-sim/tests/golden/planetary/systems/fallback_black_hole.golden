@@ -87,9 +87,9 @@ figure_pole_y = 0xbfd8c877ec5e01b9  # -0.3872356231950352
 figure_pole_z = 0x3fea57cc1c7052ac  # 0.8232174449390945
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fbae147ae147ae1  # 0.105
-geometric_albedo_v = 0x3fc22d0e56041893  # 0.142
-geometric_albedo_r = 0x3fc604189374bc6a  # 0.172
+geometric_albedo_b = 0x3fe901943464a2b7  # 0.7814427398016822
+geometric_albedo_v = 0x3ff0e8afcba802c0  # 1.0568082766841798
+geometric_albedo_r = 0x3ff47b32ae91d0da  # 1.2800776309132318
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -97,8 +97,8 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
-bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+bond_albedo = 0x3fea326a8007e76b  # 0.8186542988398576
+bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x0000000000000000  # 0.0
 equator_pole_contrast_k = 0x0000000000000000  # 0.0
@@ -109,7 +109,7 @@ continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fd7c5272132391c  # 0.37140825502219044
 surface_age_yr = 0x41313b142e1e9262  # 1129236.1801539888
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fece7ac035387f6  # 0.9032802643744151
 envelope: NotApplicable
 body 0300 A d: Planet about Some(Star(0)), Present
 mass_mearth = 0x3fff11f14936ec3c  # 1.9418804988806775
@@ -172,9 +172,9 @@ figure_pole_y = 0xbfdaf776866264b1  # -0.4213539421412618
 figure_pole_z = 0x3fe5d19b16a1139f  # 0.6818366472222016
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fbae147ae147ae1  # 0.105
-geometric_albedo_v = 0x3fc22d0e56041893  # 0.142
-geometric_albedo_r = 0x3fc604189374bc6a  # 0.172
+geometric_albedo_b = 0x3fde05fcceb8763a  # 0.46911544978670217
+geometric_albedo_v = 0x3fe44d310a903c70  # 0.6344227987591591
+geometric_albedo_r = 0x3fe8973095cf28c1  # 0.7684557844125025
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -182,8 +182,8 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
-bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+bond_albedo = 0x3fdf73fca7cd6faa  # 0.49145428072892605
+bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x0000000000000000  # 0.0
 equator_pole_contrast_k = 0x0000000000000000  # 0.0
@@ -194,7 +194,7 @@ continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fd6f6e198b61125  # 0.358818434841185
 surface_age_yr = 0x41330c53a85e4638  # 1248339.6576885115
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fdf188c403aae0c  # 0.4858732821691951
 envelope: NotApplicable
 body e100 BELT 1: Belt(Asteroid) about Some(Star(0)), Present
 mass_mearth = 0x3fe6e321c5b03c7f  # 0.715226064787103
@@ -277,9 +277,9 @@ figure_pole_y = 0xbfdc120604440315  # -0.43860006729669127
 figure_pole_z = 0x3feb1b2a4f324514  # 0.8470660731128725
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fbae147ae147ae1  # 0.105
-geometric_albedo_v = 0x3fc22d0e56041893  # 0.142
-geometric_albedo_r = 0x3fc604189374bc6a  # 0.172
+geometric_albedo_b = 0x3fc49e813d71ddfb  # 0.16108718395456365
+geometric_albedo_v = 0x3fcbe28ca5fdf420  # 0.21785123925283845
+geometric_albedo_r = 0x3fd0e358c97cf534  # 0.26387614895414235
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -287,8 +287,8 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
-bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+bond_albedo = 0x3fc599dcba468707  # 0.1687580022381143
+bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x0000000000000000  # 0.0
 equator_pole_contrast_k = 0x0000000000000000  # 0.0
@@ -299,7 +299,7 @@ continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fbda16c216fd876  # 0.11574436012583242
 surface_age_yr = 0x417ff3c6084fb4e5  # 33504352.519459624
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fb32d9eb79fbc06  # 0.07491485579497245
 envelope: NotApplicable
 body e102 BELT 1-2: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3fb0222e14f81102  # 0.06302154552401265
@@ -362,9 +362,9 @@ figure_pole_y = 0xbfc635eccde967cd  # -0.17352066091808496
 figure_pole_z = 0x3fecb70b1d5bfb99  # 0.8973441670822125
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fbae147ae147ae1  # 0.105
-geometric_albedo_v = 0x3fc22d0e56041893  # 0.142
-geometric_albedo_r = 0x3fc604189374bc6a  # 0.172
+geometric_albedo_b = 0x3fc49ef5c1984fdd  # 0.16110107376937224
+geometric_albedo_v = 0x3fcbe32a39039f35  # 0.2178700235738177
+geometric_albedo_r = 0x3fd0e3b83829db03  # 0.26389890179363834
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -372,8 +372,8 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
-bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+bond_albedo = 0x3fc59a56cad053ab  # 0.1687725534726757
+bond_ratio = 0x3fe3d1f73ec84f2d  # 0.6193805910320173
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x0000000000000000  # 0.0
 equator_pole_contrast_k = 0x0000000000000000  # 0.0
@@ -384,7 +384,7 @@ continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fb244f972b2b599  # 0.07136496591802767
 surface_age_yr = 0x41a04bac434ed9bf  # 136697377.65400502
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fb32edb8ce7c207  # 0.07493374052115352
 envelope: NotApplicable
 body e103 BELT 1-3: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3fa06a8e6c15ec4f  # 0.03206296033291577
@@ -977,9 +977,9 @@ figure_pole_y = 0x3fce007e6fc923b4  # 0.23439007242475685
 figure_pole_z = 0x3fd62e3f578abe6f  # 0.3465727190877947
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fbae147ae147ae1  # 0.105
-geometric_albedo_v = 0x3fc22d0e56041893  # 0.142
-geometric_albedo_r = 0x3fc604189374bc6a  # 0.172
+geometric_albedo_b = 0x3fc5df34f64f4da8  # 0.17087423350186026
+geometric_albedo_v = 0x3fcd9442bfb1f3fe  # 0.23108705864061102
+geometric_albedo_r = 0x3fd1ea045e769760  # 0.2799082682125711
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -987,8 +987,8 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
-bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+bond_albedo = 0x3fc6e9d5f5d92cc9  # 0.17901110176385363
+bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x0000000000000000  # 0.0
 equator_pole_contrast_k = 0x0000000000000000  # 0.0
@@ -999,7 +999,7 @@ continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fb7c5b81b058a4d  # 0.09286070499141737
 surface_age_yr = 0x418e5067230a83d2  # 63573220.38013424
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fb6792eb2b0d946  # 0.08778659689491972
 envelope: NotApplicable
 body e202 BELT 2-2: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3fa28c1358328f4b  # 0.036224941746040594
@@ -1062,9 +1062,9 @@ figure_pole_y = 0xbfe1718d08058dfd  # -0.5451111942933832
 figure_pole_z = 0x3fe5803a603519f7  # 0.6719028357554738
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fbae147ae147ae1  # 0.105
-geometric_albedo_v = 0x3fc22d0e56041893  # 0.142
-geometric_albedo_r = 0x3fc604189374bc6a  # 0.172
+geometric_albedo_b = 0x3fc2d11aa6fd30e7  # 0.1470063510299788
+geometric_albedo_v = 0x3fc9728f51fc3382  # 0.19880858901197135
+geometric_albedo_r = 0x3fced2e013fb660d  # 0.2408104035919653
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -1072,8 +1072,8 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
-bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+bond_albedo = 0x3fc3b67d71fd0ea9  # 0.1540066534599778
+bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x0000000000000000  # 0.0
 equator_pole_contrast_k = 0x0000000000000000  # 0.0
@@ -1084,7 +1084,7 @@ continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fb046d559f7c46f  # 0.06358083197098251
 surface_age_yr = 0x41a6cc8f383b1762  # 191252380.11541277
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3facb9be6bc180c8  # 0.05610461297396935
 envelope: NotApplicable
 body e203 BELT 2-3: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f92df479df8315f  # 0.018429869667714423
@@ -1763,9 +1763,9 @@ figure_pole_y = 0xbfd8c877ec5e01b9  # -0.3872356231950352
 figure_pole_z = 0x3fea57cc1c7052ac  # 0.8232174449390945
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fbae147ae147ae1  # 0.105
-geometric_albedo_v = 0x3fc22d0e56041893  # 0.142
-geometric_albedo_r = 0x3fc604189374bc6a  # 0.172
+geometric_albedo_b = 0x3fe901943468bc95  # 0.7814427398315212
+geometric_albedo_v = 0x3ff0e8afcbaac8a9  # 1.0568082767245335
+geometric_albedo_r = 0x3ff47b32ae952cbe  # 1.280077630962111
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -1773,8 +1773,8 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
-bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+bond_albedo = 0x3fea326a800c3347  # 0.8186542988711175
+bond_ratio = 0x3fe3d1f73ec84f2d  # 0.6193805910320173
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x0000000000000000  # 0.0
 equator_pole_contrast_k = 0x0000000000000000  # 0.0
@@ -1785,7 +1785,7 @@ continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fd7c5265236df7b  # 0.3714080622553337
 surface_age_yr = 0x41313b15e2639252  # 1129237.8843318415
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fece7ac03585bc0  # 0.9032802644095383
 envelope: NotApplicable
 body 0300 A d: Planet about Some(Star(0)), Present
 mass_mearth = 0x3fff11f14936ec3c  # 1.9418804988806775
@@ -1848,9 +1848,9 @@ figure_pole_y = 0xbfdaf776866264b1  # -0.4213539421412618
 figure_pole_z = 0x3fe5d19b16a1139f  # 0.6818366472222016
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fbae147ae147ae1  # 0.105
-geometric_albedo_v = 0x3fc22d0e56041893  # 0.142
-geometric_albedo_r = 0x3fc604189374bc6a  # 0.172
+geometric_albedo_b = 0x3fde05fccec04136  # 0.4691154498150526
+geometric_albedo_v = 0x3fe44d310a95816e  # 0.6344227987974997
+geometric_albedo_r = 0x3fe8973095d58abf  # 0.7684557844589434
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -1858,8 +1858,8 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
-bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+bond_albedo = 0x3fdf73fca7d599a7  # 0.49145428075862657
+bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x0000000000000000  # 0.0
 equator_pole_contrast_k = 0x0000000000000000  # 0.0
@@ -1870,7 +1870,7 @@ continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fd6f6e0d0bedb5a  # 0.3588182486086474
 surface_age_yr = 0x41330c558aa6fb44  # 1248341.5416104356
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fdf188c4043da5a  # 0.48587328220256654
 envelope: NotApplicable
 body e100 BELT 1: Belt(Asteroid) about Some(Star(0)), Present
 mass_mearth = 0x3fe6e321c33e54e4  # 0.7152260602330469
@@ -1953,9 +1953,9 @@ figure_pole_y = 0xbfdc120604440315  # -0.43860006729669127
 figure_pole_z = 0x3feb1b2a4f324514  # 0.8470660731128725
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fbae147ae147ae1  # 0.105
-geometric_albedo_v = 0x3fc22d0e56041893  # 0.142
-geometric_albedo_r = 0x3fc604189374bc6a  # 0.172
+geometric_albedo_b = 0x3fc49e813d7711c3  # 0.16108718396402652
+geometric_albedo_v = 0x3fcbe28ca604fd33  # 0.21785123926563585
+geometric_albedo_r = 0x3fd0e358c98137fe  # 0.2638761489696434
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -1963,8 +1963,8 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
-bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+bond_albedo = 0x3fc599dcba4bfa3a  # 0.16875800224802778
+bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x0000000000000000  # 0.0
 equator_pole_contrast_k = 0x0000000000000000  # 0.0
@@ -1975,7 +1975,7 @@ continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fbda16b1f6cae5c  # 0.1157443000526483
 surface_age_yr = 0x417ff3c931510d90  # 33504403.082288325
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fb32d9eb7abfb4d  # 0.0749148558061112
 envelope: NotApplicable
 body e102 BELT 1-2: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3fb0222e14f81102  # 0.06302154552401265
@@ -2038,9 +2038,9 @@ figure_pole_y = 0xbfc635eccde967cd  # -0.17352066091808496
 figure_pole_z = 0x3fecb70b1d5bfb99  # 0.8973441670822125
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fbae147ae147ae1  # 0.105
-geometric_albedo_v = 0x3fc22d0e56041893  # 0.142
-geometric_albedo_r = 0x3fc604189374bc6a  # 0.172
+geometric_albedo_b = 0x3fc49ef5c19b3061  # 0.1611010737746055
+geometric_albedo_v = 0x3fcbe32a39078340  # 0.21787002358089502
+geometric_albedo_r = 0x3fd0e3b8382c3640  # 0.2638989018022109
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -2048,7 +2048,7 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
+bond_albedo = 0x3fc59a56cad35741  # 0.16877255347815814
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x0000000000000000  # 0.0
@@ -2060,7 +2060,7 @@ continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fb244f8d39d46ef  # 0.07136492887846278
 surface_age_yr = 0x41a04baddfe64878  # 136697583.94977164
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fb32edb8cee87ea  # 0.07493374052731352
 envelope: NotApplicable
 body e103 BELT 1-3: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3fa06a8e6c15ec4f  # 0.03206296033291577
@@ -2653,9 +2653,9 @@ figure_pole_y = 0x3fce007e6fc923b4  # 0.23439007242475685
 figure_pole_z = 0x3fd62e3f578abe6f  # 0.3465727190877947
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fbae147ae147ae1  # 0.105
-geometric_albedo_v = 0x3fc22d0e56041893  # 0.142
-geometric_albedo_r = 0x3fc604189374bc6a  # 0.172
+geometric_albedo_b = 0x3fc5df34f6532d05  # 0.17087423350890432
+geometric_albedo_v = 0x3fcd9442bfb730b1  # 0.23108705865013726
+geometric_albedo_r = 0x3fd1ea045e79c35a  # 0.27990826822410997
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -2663,8 +2663,8 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
-bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+bond_albedo = 0x3fc6e9d5f5dd3b5b  # 0.1790111017712331
+bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x0000000000000000  # 0.0
 equator_pole_contrast_k = 0x0000000000000000  # 0.0
@@ -2675,7 +2675,7 @@ continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fb7c5b74c054246  # 0.09286065679521824
 surface_age_yr = 0x418e506a2291bad2  # 63573316.32115711
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fb6792eb2b9f726  # 0.0877865969032113
 envelope: NotApplicable
 body e202 BELT 2-2: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3fa28c1358328f4b  # 0.036224941746040594
@@ -2738,9 +2738,9 @@ figure_pole_y = 0xbfe1718d08058dfd  # -0.5451111942933832
 figure_pole_z = 0x3fe5803a603519f7  # 0.6719028357554738
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fbae147ae147ae1  # 0.105
-geometric_albedo_v = 0x3fc22d0e56041893  # 0.142
-geometric_albedo_r = 0x3fc604189374bc6a  # 0.172
+geometric_albedo_b = 0x3fc2d11aa6ffe072  # 0.1470063510348641
+geometric_albedo_v = 0x3fc9728f51ffd552  # 0.19880858901857806
+geometric_albedo_r = 0x3fced2e013ffcc4e  # 0.2408104035999678
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -2748,8 +2748,8 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
-bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+bond_albedo = 0x3fc3b67d71ffdef1  # 0.1540066534650957
+bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x0000000000000000  # 0.0
 equator_pole_contrast_k = 0x0000000000000000  # 0.0
@@ -2760,7 +2760,7 @@ continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fb046d4cc3c7634  # 0.06358079897150831
 surface_age_yr = 0x41a6cc91797c1fc7  # 191252668.74242994
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3facb9be6bc180c8  # 0.05610461297396935
 envelope: NotApplicable
 body e203 BELT 2-3: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f92df479df8315f  # 0.018429869667714423

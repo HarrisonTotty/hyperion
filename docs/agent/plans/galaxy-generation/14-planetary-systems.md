@@ -21603,3 +21603,156 @@ planetary::record` (624 tests at T57.a's commit).
         (k₂ 0.0615), while the table's, at its derivation's 45.6 K, is on the ocean branch
         (k₂ 0.145) on the same rock heat, since a colder top thickens the shell. T51.g's shell
         and P14.T53.c's ice temperature decide it.
+  - _B3, the snapshot hold_ (P14.T51.a, T51.b, T51.h, T57.a; docs-batch-24-queue (f);
+    decision-p14-t54a-bands §4.3, band 5). A checkpoint at 22: `GENERATOR_VERSION` stays 22, and
+    the 22 goldens that move re-bless at header 22 in the same commit. The batch's partition, area
+    mix, bracketed passes and P14.T57.a's constants are on the record, over the passes' stand-ins
+    (`PassSurface::stand_in`, `linear_cold_area`, the passes' water cover and
+    `Regolith::of_material`), which Batch C replaces. `COLD_TRAPS_VERSION` (24) with
+    `ColdTrapRules`, `RecordRules`' cold traps, `with_record_rules` and their tripwire, and the
+    other holds at 24, stay; so do the optics tripwire's hold of `crust.rs` and the crust and
+    thermal tripwires.
+    - _Deleted, as the tripwire listed:_ `SNAPSHOT_VERSION`; `SnapshotRules` with its `Held` arm,
+      `in_force` and `greenhouse`; T13.c's `greenhouse` and `capped_methane_weight` (with
+      `the_humidity_caps_methane_s_partial_pressure_in_the_air`, the partition's
+      `weight_meeting_cap` holding the same quadratic); `GreenhouseConstants::VERSION_22`
+      (`FITTED` stays, the one set); the fixed `ATMOSPHERE_PASSES` and `Convergence::Fixed`;
+      `TemplateRow::reference_bond`, the field, with `reference_bond_under` and
+      `BodyPhotometry::derive_under`; `photometry_of`'s held albedo; `PlanetarySystem`'s
+      `snapshot` field and `with_snapshot_rules`; `Atmosphere::rules`, `ClimateBody::greenhouse`,
+      `StepColumn`'s rules and the greenhouse gain's held arm; and the tripwire
+      `the_snapshot_lane_is_held_only_until_the_batch_s_bump`.
+      - The seams with it: `BodyHolds`, `MoonHolds`, `derive_body_under` and `derive_moon_under`
+        (their callers take `derive_body` and `derive_moon`; `derive_body_driven` keeps the
+        test-only `PassDriver::T51b`); the solar table's `derive_historic_under` and
+        `historic_under` (the tests' `historic(name)`); `table_figures_under`,
+        `GlobalFigures::derive_under` and `SurfaceConditions::derive_under`; cover's
+        `surface_water_under`, whose batch arm is now the public `surface_water` (no test of the
+        vapour's saturation); `condensates_under`'s held arm (it returns the partition and its
+        condensates, and its cold traps' arm at 24 stays); `RecordRules.partition`; and
+        `under_the_held_rules_the_passes_are_t13c_s_three`. `PlanetarySystem::moon_derived` and
+        `placed_now`, which read nothing of the system once its `snapshot` field went, are
+        associated functions.
+      - `TemplateRow::reference_bond()` is a method: the area mix's `A_ref` about a Sun, computed
+        when called, the giants' class I (0.570), airless ice's fresh `H2O` frost (0.83204), the
+        airless rocks' 0.11, the state's table for Earth, Mars, Venus and the thin magma ocean, and
+        Europa's 0.68 for the snowball. The public `BodyPhotometry::derive` takes it.
+      - T49.c's optics tripwire: `HELD` keeps `crust.rs` alone, and `partition.rs` and
+        `area_mix.rs` move to a new `WIRED` list, the files on the record, which it passes too.
+      - `Sky.shade` is a `HostShade`, always summed, so `DerivedBody::regolith_albedo` (and
+        `DerivedMoon`'s, `SurfaceSky`'s, `RecordColdTraps`' and `ColdTrapBody`'s) is an `f64`,
+        not an `Option` whose `None` was version 22's.
+    - _The solver_ (docs-batch-24-queue (f)): `zonal_point_under` goes, and every zonal point is
+      `zonal_point_newton`'s. An untransported point's radiative branch is pulled out as
+      `point_temperature`, which both solvers read, bit for bit; the 64-step bisection
+      `zonal_point` moves under `#[cfg(test)]`, the Newton sweeps' oracle, and the tests'
+      `zonal_ends_bisected` and `bisected_points` hold the fit test's Φ⊕ and D⊕ and the table's
+      ends, contrasts and cold areas against it (within 10⁻⁹ and 10⁻¹² `T_s`).
+      `zonal_ends_under` is `zonal_ends`, and `ZonalProfile.rules` goes.
+    - _Beyond the list_, each found once the batch reached the record:
+      - _The crater screening_ (`figures.rs`) takes no atmosphere for a column under
+        `f64::MIN_POSITIVE` kg m⁻². The partition leaves a subnormal residue over some airless
+        bodies (5 × 10⁻³²⁴ kg m⁻² in the test systems), whose cutoff underflows to 0 km, which
+        `CraterParams::new` refuses: a debug assertion that 21 lib tests met, and in release a
+        surface `NotModelled`.
+      - _`regime::surface_reservoirs`_ takes the partition's rule, a gas whose airborne weight
+        lies below its inventory's, as the greenhouse gain counts it. Version 22's test, the
+        partial pressure at least its saturation pressure, read Earth's water at 0.77 of
+        saturation as no reservoir. `RESERVOIR_CAP_TOLERANCE` (its methane arm's) goes, and
+        `an_oxygen_reservoir_lies_below_its_critical_temperature_only` asks the partition.
+      - `Atmosphere::with_air` (test-only, its one caller gone) goes.
+    - _The tests, one arm each_, the batch's printed figures kept:
+      - the fit test (`earth_s_measured_state_takes_north_cahalan_and_coakley_s_partition`)
+        holds Φ⊕ and D⊕ on the Newton steps with the bisection as its oracle;
+        `batch_earth_air`, `the_measured_earth_s_gain_is_the_batch_s_rule` and
+        `the_greenhouse_gain_is_the_held_gases_feedback` read the one rule (the table's Earth
+        0.4545, `B_eff` 1.841);
+      - `the_batch_holds_earth_s_water_and_titan_s_methane_on_the_minor_branch` holds Titan's
+        methane at 0.5 of saturation to 10⁻⁹ (94.153 K), in place of within 1% of version 22's;
+      - the photometry's references (`the_references_are_the_area_mix_s`, was
+        `under_the_batch_the_references_are_the_area_mix_s`), the Solar System
+        drawing itself where its albedo is its reference (Mercury, Venus and the four giants),
+        and the record's lists (`the_hooks_publish_the_record_s_surface_conditions_and_figures`:
+        each substance once, water's liquid at most its potential ocean);
+      - T13.c's and T24.a's table checks at the batch's table: Jupiter's class I albedo and its
+        `T_eq` at it, the passes' read and given albedo within 10⁻⁸, the ranges with Venus's
+        696 K median ([694.91, 697.22] K), the cloud the atmosphere's, and the 90° world at
+        1.12 au (at 1.1 au its equator lies 0.8 K above the edge).
+    - _Figures at B3_ (the passes' stand-ins; debug builds):
+      - the table's Earth: 290.568 K at a Bond albedo of 0.27983 (`T_eq` 256.409 K, 0.67 of
+        cloud); its ice 0.0138, so band 5's 0.01–0.07 is asserted again in
+        `the_table_s_ices_are_the_ruling_s` and `the_batch_publishes_the_table_s_condensates`;
+      - Mars: 196.614 K at 0.49932 under 0.0003 of cloud (`T_eq` 189.880 K, 6 passes), 8.6%
+        under 215 K, and the record's water ice 0.0114 (decision-p14-t51-batch E3: against
+        Mars's 0.250, above E3's 0.30, so it goes to main with its terms before the bump's bless
+        unless Batch C's water share brings it under);
+      - Venus: the median 696.334 K at 57.843 bar, the measured one 736.980 K;
+      - Titan: 92.752 K at 0.53617, 1.466 bar (methane 5.17% by number).
+      - T57.a's tripwire (`the_greenhouse_constants_are_their_fits`) is green, its fits unmoved:
+        k(CO₂) 14.8616 at the measured Venus (90.422 bar of CO₂, `T_eq` 229.0585 K) and k(H₂O)
+        4.4690 on the table's Earth (water 837.204 Pa at 288 K, `T_eq` 255.1385 K). Its anchors:
+        the measured Earth 288.006 K, the measured Venus 736.980 K, Titan 92.752 K at 0.5362.
+      - The sample (`under_the_batch_the_photometry_states_the_derivation_s_albedo`, 60 systems,
+        954 bodies: 793 planets and members, 326 of them icy members, and 161 moons): 8
+        bracketed (0.84%), 4 jumps (0.42%) and 4 fixed points (residuals 8.8 × 10⁻¹²–1.1 ×
+        10⁻¹⁰), no frost at the clamp; passes {3: 778, 4: 82, 5: 31, 6: 13, 7: 11, 8: 2, 10: 3,
+        11: 4, 12: 1, 13: 2, 14: 2, 15: 3, 16: 6, 17: 5, 18: 2, 19: 1, 36: 2, 37: 3, 38: 1, 39: 1,
+        40: 1}. Three jumps sit at the airless threshold's 44.74 K, one at 23.99 K.
+    - _Printed, not asserted_, at the passes' stand-ins (each test says so):
+      - Mars in T13.c's 8% (196.6 K), its σ_h (3,092 m against 2,900, 6.6% over 5%) and its
+        volcanism fit (I♂ 0.03589 against the fitted 0.03494, V 1.027): the passes ice it over
+        until Batch C's water share (E3), whose fit then re-reads Mars;
+      - the table's Ganymede, a body at 5.2 au, a 2.2-bar N₂ and CH₄ snowball at 117.02 K where
+        T13.b keeps it airless (four tests: its airless state, the 110 K edge, the airless gases,
+        the airless warmest), and as a moon of the table's Jupiter a 133–166 mbar snowball of CH₄
+        with some 1.4 kPa of N₂ at 91–93 K at every radius rank, its exobase 445–453 K
+        (`the_table_s_ganymede_and_callisto_stay_airless` and its own-bulk sibling; Callisto stays
+        airless at every rank). The passes' icy regolith is `H2O`'s fresh frost, 0.832, the
+        stand-in until T51.c's lid (Batch C) and P14.T54.b's weathering, where T13.c's airless
+        ice was Ganymede's 0.35, so these bodies lie colder and their exobase under Jeans's
+        threshold for N₂: a finding for main;
+      - Jupiter's helium (`the_table_giants_match_their_measured_atmospheres`): at class I's
+        0.570 its `T_eff` is 121.24 K, against the measured 125.57 K, and it rains below
+        Galileo's 0.157, He/H₂ 0.1410 (0.171 under T13.c's 0.34); the test asserts only that it
+        rains;
+      - the airless-ice template's stated ratio, 0.43 × 0.80 ÷ 0.83204 = 0.4134 (0.98 at
+        Ganymede's measured 0.35), its p the row's Ganymede and its reference the frost's.
+    - _Moved goldens_, re-blessed at header 22 (`golden_diff.py`: 22 changed, none new):
+      - `frame/body_rotations` (1): the moon `42006cba00000009.0503`'s locking age, 344.3 →
+        422.8 Gyr, its tides reading its own derivation at the batch's passes.
+      - `planetary/atmosphere_speciation` (16) and `planetary/derive_body` (59): the table's
+        bodies through the batch's passes: `T_eq` at the area mix's albedos (Earth 0.294 →
+        0.27983, Mars 0.294 → 0.49932, Titan 0.50 → 0.53617) and the partition's columns under
+        P14.T57.a's constants (Venus 735.07 → 696.33 K, Earth 290.30 → 290.57 K, Mars 215.06 →
+        196.61 K, Titan 93.99 → 92.75 K).
+      - `planetary/envelope_abundances` (12): Jupiter's helium and neon rain at its `T_eff` under
+        class I's 0.570 (127.84 → 121.24 K): its helium depletion 0.8832 → 0.7280 and Ne/H
+        4.71 × 10⁻⁵ → 3.51 × 10⁻⁶, its X and Y with them.
+      - `planetary/global_figures` (23): the table's figures at the batch's surfaces (Venus's
+        volcanism 0.904 → 1.164, Mars's 1 → 1.027 and its σ_h 3,025 → 3,092 m, Earth's surface
+        water and potential ocean in their last digits).
+      - `planetary/surface_conditions` (82, 3 new): the table's conditions at the batch's means
+        and columns, on the Newton steps; Ganymede, a snowball, gains its N₂, CH₄ and Ar.
+      - `planetary/surface_conditions_published` (650; 58 new, 117 gone): the lib sample's
+        records at the batch's derivations, their liquids and ices the partition's published
+        condensates (the keys by substance new and gone), their reservoirs the partition's.
+      - `planetary/vertical_structure` (274; 4 gone): the table's columns at the batch's surface
+        (Earth 290.30 → 290.57 K and 78.0 → 77.0 kPa); the colder Venus has one node fewer.
+      - `planetary/systems`: `close_binary` (911; 92 new and 92 gone), `eccentric_giant` (210),
+        `fallback_black_hole` (71), `filler_a` (6), `filler_b` (377; 46 and 46), `filler_c` (332;
+        48 and 48), `halo_star` (12), `hierarchical_triple` (685; 46 and 46), `hot_jupiter`
+        (154), `m_dwarf_resonant_chain` (122), `red_giant` (234), `solar_like` (309; 68 and 68),
+        `subgiant` (743; 44 and 44) and `wide_binary` (387; 22 and 22): every present body's
+        `T_eq` and Bond albedo at its area mix (the giants at class I), its photometry's p at the
+        area mix's references and its stated ratio, its surface conditions, figures, ices and
+        oceans; the new and gone lines are surface sections relabelled by their climate model
+        (`Isothermal` → `EnergyBalance` among them).
+      - The rest hold: the other golden integration targets run (`planetary_moons_golden`,
+        `observe_in_system_golden`, `body_frame_golden`, `body_fixed_golden`,
+        `orbit_drifting_states`, `orbit_states`, `photometry_templates_golden`,
+        `planetary_small_bodies_golden`, `planetary_derive_golden`, `planetary_giants_golden`,
+        `planetary_context_golden`, `planetary_fate_golden`, `planetary_masses_golden`,
+        `planetary_placement_golden`, `planetary_placement`, `frame`, `aerosol_golden` and
+        `formation_golden`), the lib's other goldens (`moon_tides`, `moon_volatiles` and
+        `partition` among them), and the server's `scene_systems`, `system_bodies` and
+        `systems_in_range`.

@@ -74,10 +74,8 @@
 use hyperion_surface::field::ClimateModelKind;
 
 use crate::math;
-use crate::planetary::derive::atmosphere::{Atmosphere, Gas, METHANE_RELATIVE_HUMIDITY};
-use crate::planetary::hooks::surface::{
-    AirTransport, SurfaceConditions, annual_insolation, atmosphere_mole_fractions,
-};
+use crate::planetary::derive::atmosphere::{Atmosphere, Gas};
+use crate::planetary::hooks::surface::{AirTransport, SurfaceConditions, annual_insolation};
 use crate::substance::{self, Phase, SubstanceId, phase_at, saturation_pressure};
 use crate::units::{Days, EarthMasses, Kelvin, Pascals, Seconds, WattsPerSquareMetre};
 
@@ -158,11 +156,6 @@ pub const SLOW_ROTATOR_BRACKETS: [(WattsPerSquareMetre, Days, Days); 2] = [
         Days::new(48.0),
     ),
 ];
-
-/// How close to its humidity's cap methane's partial pressure lies where the surface holds a
-/// reservoir of it, as a share of the cap: 10⁻⁹, far beyond the rounding of P14.T24.f's
-/// quadratic, which meets the cap to 10⁻¹² (its tests).
-pub const RESERVOIR_CAP_TOLERANCE: f64 = 1e-9;
 
 /// How much of a climate's heat its air moves from day to night, the classifier's thermal regime
 /// (P14.T48.d, after Koll 2022's redistribution factor f = 2/3 − (5/12) X ÷ (k + X) at the body's
@@ -658,28 +651,17 @@ pub fn climate_condensable(
 }
 
 /// The condensables the surface under the atmosphere `atmosphere` holds a reservoir of, in
-/// registry order: those its air holds at their cap at the mean surface temperature, the rest of
-/// the inventory condensed onto the surface.
+/// registry order: those P14.T51.a's partition holds at their cap, on either branch, the rest of
+/// the inventory condensed onto the surface, so that the air's weight of each lies below its
+/// inventory's (`Atmosphere::inventory_weights`), as P14.T24.a's greenhouse gain counts a held gas.
 ///
-/// - P14.T13.c holds water, nitrogen, carbon dioxide and argon at their saturation pressure where
-///   their inventory would weigh more: a gas whose partial pressure is at least its saturation
-///   pressure is held there, equal to the bit (T13.c's own test, as P14.T24.a's greenhouse gain
-///   reads it).
-/// - P14.T24.f holds methane's partial pressure in the air, x `p_s`, at
-///   [`METHANE_RELATIVE_HUMIDITY`] of its saturation pressure where the surface holds a reservoir
-///   of it, met to [`RESERVOIR_CAP_TOLERANCE`].
-///
-/// Every saturation pressure is the row's phase diagram's, as T13.c's own is (P14.T49.b's curves,
-/// since P14.T54.a's switch). The loop runs over the fourteen condensables, of which seven are
-/// T13.c's gases and carry a partial pressure here: with the held columns' five, ammonia, which
-/// T13.c never writes, and oxygen, which it writes uncapped where a runaway past left some
-/// (P14.T24.f), so that it is read as a reservoir only below its critical temperature, 154.581 K,
-/// where its weight reaches its saturation pressure: a surface it would frost onto, though
-/// version 22's air keeps it all aloft (the batch's partition caps it on the same curve).
-///
-/// A row the atmosphere does not carry holds none, until P14.T51.a's partition names its
-/// reservoir (22 → 23). An atmosphere with no surface pressure, an envelope's, or over a surface
-/// not above 0 K holds none.
+/// The partition holds a minor condensable's partial pressure at its humidity, below its
+/// saturation pressure (Earth's water at 0.77 of it), which version 22's test, the partial pressure
+/// at least its saturation pressure, would read as no reservoir; a gas above its critical
+/// temperature has no cap and is all aloft. On the record the regime reads the record's own
+/// partition's reservoirs ([`Partition::reservoirs`](crate::planetary::chem::partition::Partition::reservoirs)),
+/// the same rule over the record's climate. A row the atmosphere does not carry holds none, and
+/// an atmosphere with no surface pressure, an envelope's, holds none.
 ///
 /// # Examples
 ///
@@ -717,41 +699,25 @@ pub fn climate_condensable(
 #[must_use]
 pub fn surface_reservoirs(atmosphere: &Atmosphere) -> Vec<SubstanceId> {
     let partials = atmosphere.partial_pressures();
-    let surface = atmosphere.surface_temperature();
     let pressure = partials.total().value();
-    // By comparison: a saturation pressure is zero at a surface that is not above 0 K, which
-    // would read every gas as held at its cap.
-    if pressure.is_nan() || pressure <= 0.0 || surface.value().is_nan() || surface.value() <= 0.0 {
+    // By comparison, so that a pressure that is not a number holds none.
+    if pressure.is_nan() || pressure <= 0.0 {
         return Vec::new();
     }
-    let gases = atmosphere_mole_fractions(partials);
+    let inventory = atmosphere.inventory_weights();
     substance::condensables()
         .filter(|&id| {
-            let (Some(gas), Some(saturation)) = (id.gas(), saturation_pressure(id, surface)) else {
+            let Some(gas) = id.gas() else {
                 return false;
             };
             let weight = partials.of(gas).value();
-            if weight.is_nan() || weight <= 0.0 {
-                return false;
-            }
-            match gas {
-                Gas::Methane => {
-                    let share = gases
-                        .iter()
-                        .find(|&&(row, _)| row == id)
-                        .map_or(0.0, |&(_, x)| x);
-                    let cap = METHANE_RELATIVE_HUMIDITY * saturation.value();
-                    share * pressure >= cap * (1.0 - RESERVOIR_CAP_TOLERANCE)
-                }
-                Gas::Hydrogen
-                | Gas::Helium
-                | Gas::Water
-                | Gas::Ammonia
-                | Gas::Nitrogen
-                | Gas::Oxygen
-                | Gas::CarbonDioxide
-                | Gas::Argon => weight >= saturation.value(),
-            }
+            // Held only where some of it condensed, below an inventory it carries: a weight that
+            // is not a number is not.
+            weight > 0.0
+                && matches!(
+                    weight.partial_cmp(&inventory.of(gas).value()),
+                    Some(core::cmp::Ordering::Less)
+                )
         })
         .collect()
 }

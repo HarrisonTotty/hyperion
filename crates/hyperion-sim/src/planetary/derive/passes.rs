@@ -1,5 +1,5 @@
-//! The batch's passes as a bracketed fixed point (P14.T51.h; decision-p14-t51-batch §4), under the
-//! `p14-snapshot` lane's hold ([`SnapshotRules::Batch`]) until P14.T54.a.
+//! The batch's passes as a bracketed fixed point (P14.T51.h; decision-p14-t51-batch §4), on the
+//! record since P14.T54.a deleted the `p14-snapshot` lane's hold.
 //!
 //! T12's and T13's passes iterate Aₙ₊₁ = F(Aₙ), F(A) being the Bond albedo one pass at the albedo A
 //! gives (P14.T13.c, P14.T51.b). Under the batch they run until the equilibrium temperature settles
@@ -37,7 +37,7 @@ use crate::planetary::derive::atmosphere::LARGEST_BOND_ALBEDO;
 use crate::planetary::derive::irradiation::BondAlbedo;
 
 #[cfg(doc)]
-use crate::planetary::derive::{ATMOSPHERE_CONVERGENCE, atmosphere::SnapshotRules};
+use crate::planetary::derive::ATMOSPHERE_CONVERGENCE;
 
 /// The most plain passes the batch iterates before it brackets (P14.T51.h): 24, above the 19 that
 /// the slowest converging body of P14.T51.b's sample took (decision-p14-t51-batch §4). A body that
@@ -57,8 +57,6 @@ pub(crate) const JUMP_RESIDUAL: f64 = 1e-6;
 /// How a body's passes ended (P14.T51.h; crate-private, for the tests and the bless note).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Convergence {
-    /// T13.c's fixed three passes, under version 22's rules ([`SnapshotRules::Held`]).
-    Fixed,
     /// The plain passes settled, within [`PLAIN_PASSES`].
     Converged,
     /// The passes did not settle, and bisection found the published pass.
@@ -84,7 +82,7 @@ impl Convergence {
     pub(crate) fn is_jump(self) -> bool {
         match self {
             Self::Bracketed { residual } => residual > JUMP_RESIDUAL,
-            Self::Fixed | Self::Converged => false,
+            Self::Converged => false,
         }
     }
 }

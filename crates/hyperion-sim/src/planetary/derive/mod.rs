@@ -50,11 +50,11 @@
 //!    envelope by the energy delivered, and the radius is the envelope's at the body's age and
 //!    present flux on what is left, or its core's once none is; from it density, surface gravity
 //!    and class.
-//! 4. **The atmosphere** (T12 and T13, three passes, [`ATMOSPHERE_PASSES`]): the equilibrium
+//! 4. **The atmosphere** (T12 and T13, with P14.T51.b's and P14.T51.h's passes): the equilibrium
 //!    temperature at an albedo, from 0.3 on the first pass, gives the atmosphere its escape leaves
-//!    and its greenhouse holds, whose surface state sets the albedo of the next pass. From the
-//!    22 → 23 bump (the `p14-snapshot` lane's hold) the albedo is P14.T51.b's area mix under the
-//!    light of the body's hosts, and the passes run until the equilibrium temperature converges.
+//!    and its greenhouse holds, whose area-mix Bond albedo under the light of the body's hosts
+//!    (P14.T51.b) the next pass reads. The passes run until the equilibrium temperature converges,
+//!    and a body they do not settle takes its bracketed fixed point (P14.T51.h).
 //! 5. **Rotation and tides** (T14) are not run here: a body's spin reads its drawn pole against
 //!    its orbit's normal and whether it had a giant impact, which only the generator knows (a moon
 //!    of its is a body of its system), so the generator derives it from this assembly's radius,
@@ -114,8 +114,8 @@ pub use rotation::tidal_locking_time;
 use crate::orbit::KeplerElements;
 use crate::planetary::derive::atmosphere::{
     AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, PassLight, PassSurface,
-    SnapshotRules, SurfaceMaterial, VolatileDraws, VolatileInventory, atmosphere_under,
-    energy_limited_loss, formation_temperature, volatile_inventory,
+    SurfaceMaterial, VolatileDraws, VolatileInventory, atmosphere_under, energy_limited_loss,
+    formation_temperature, volatile_inventory,
 };
 use crate::planetary::derive::composition::{
     SolveCompositionError, dry_composition, formed_with_envelope,
@@ -680,7 +680,7 @@ pub struct DerivedBody {
     atmosphere: Atmosphere,
     atmosphere_passes: u32,
     convergence: Convergence,
-    regolith_albedo: Option<f64>,
+    regolith_albedo: f64,
     internal_luminosity: Watts,
     radius: EarthRadii,
     density: KilogramsPerCubicMetre,
@@ -787,20 +787,18 @@ impl DerivedBody {
         self.envelope_lost
     }
 
-    /// The Bond albedo the equilibrium temperature was taken at: the one the body's surface state
-    /// gives, after the fixed three passes of P14.T12 and T13 ([`ATMOSPHERE_PASSES`]). From the
-    /// 22 → 23 bump (the `p14-snapshot` lane's hold), the area mix's that the published pass read:
-    /// the last of the passes, which converge to 10⁻⁹ in the equilibrium temperature (P14.T51.b),
-    /// or for a body they do not settle, the end of its bracket with the smaller residual
-    /// (P14.T51.h).
+    /// The Bond albedo the equilibrium temperature was taken at: the area mix's that the published
+    /// pass of P14.T12 and T13 read (P14.T51.b), the last of the passes, which converge to 10⁻⁹ in
+    /// the equilibrium temperature, or for a body they do not settle, the end of its bracket with
+    /// the smaller residual (P14.T51.h).
     #[must_use]
     pub const fn albedo(&self) -> BondAlbedo {
         self.albedo
     }
 
-    /// How many passes of P14.T12 and T13 the derivation took: [`ATMOSPHERE_PASSES`] under version
-    /// 22's rules, and under the batch's as many as converge, at most `PLAIN_PASSES` (P14.T51.b),
-    /// and for a body they do not settle its bisection's too, at most 57 in all (P14.T51.h).
+    /// How many passes of P14.T12 and T13 the derivation took: as many as converge, at most
+    /// `PLAIN_PASSES` (P14.T51.b), and for a body they do not settle its bisection's too, at most
+    /// 57 in all (P14.T51.h).
     #[cfg_attr(
         not(test),
         expect(
@@ -813,8 +811,8 @@ impl DerivedBody {
         self.atmosphere_passes
     }
 
-    /// How the derivation's passes ended (P14.T51.h): fixed under version 22's rules, and under the
-    /// batch's converged or bracketed, with the published pass's residual.
+    /// How the derivation's passes ended (P14.T51.h): converged or bracketed, with the published
+    /// pass's residual.
     #[cfg_attr(
         not(test),
         expect(
@@ -831,9 +829,9 @@ impl DerivedBody {
     /// passes' regolith row (T51.b's `Regolith`, its lid not known until P14.T54.a, weathered by the
     /// stand-in until P14.T54.b) on an airless body, which its cold traps' flat ground and shadows
     /// read, so that their field does not move with the area mix (decision-p14-t51-batch §6).
-    /// Dimensionless, 0 to 1; `None` under version 22's rules, whose passes read no light.
+    /// Dimensionless, 0 to 1.
     #[must_use]
-    pub(crate) const fn regolith_albedo(&self) -> Option<f64> {
+    pub(crate) const fn regolith_albedo(&self) -> f64 {
         self.regolith_albedo
     }
 
@@ -1165,52 +1163,10 @@ pub fn derive_body(
     age: Years,
     t: UniverseTime,
 ) -> Result<DerivedBody, DeriveBodyError> {
-    derive_body_under(BodyHolds::in_force(), placed, hosts, disc, age, t)
+    derive_body_driven(PassDriver::Solve, placed, hosts, disc, age, t)
 }
 
-/// The holds a body's derivation is read under (crate-private): the `p14-snapshot` lane's rules
-/// (P14.T51.a–b), which its passes follow, version 22's until the 22 → 23 bump.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct BodyHolds {
-    /// The rules its passes follow.
-    pub(crate) snapshot: SnapshotRules,
-}
-
-impl BodyHolds {
-    /// The holds the generator version in force takes.
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        Self {
-            snapshot: SnapshotRules::in_force(),
-        }
-    }
-}
-
-/// [`derive_body`] under the holds `holds`, for the holds' tests and the system's switches
-/// (P14.T51.a–b): [`derive_body`] is this under [`BodyHolds::in_force`].
-///
-/// Under [`SnapshotRules::Held`] the passes are P14.T13.c's fixed three ([`ATMOSPHERE_PASSES`]).
-/// Under [`SnapshotRules::Batch`] they take the area-mix albedo (P14.T51.b) and run from
-/// [`BondAlbedo::BEFORE_ATMOSPHERES`] until the equilibrium temperature changes by at most
-/// [`ATMOSPHERE_CONVERGENCE`] of itself between passes, at most
-/// [`PLAIN_PASSES`](passes::PLAIN_PASSES) of them, under the light of its hosts built once before
-/// them; a body they do not settle takes its bracketed fixed point (P14.T51.h, [`passes`]).
-///
-/// # Errors
-///
-/// As [`derive_body`].
-pub(crate) fn derive_body_under(
-    holds: BodyHolds,
-    placed: &PlacedBody,
-    hosts: &BodyHosts<'_>,
-    disc: &DiscProfile,
-    age: Years,
-    t: UniverseTime,
-) -> Result<DerivedBody, DeriveBodyError> {
-    derive_body_driven(holds, PassDriver::Solve, placed, hosts, disc, age, t)
-}
-
-/// What drives the batch's passes (P14.T51.h): the bracketed fixed point, and for the tests the loop
+/// What drives the passes (P14.T51.h): the bracketed fixed point, and for the tests the loop
 /// P14.T51.b built, to which a body that settles within the plain passes is held bit for bit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PassDriver {
@@ -1221,13 +1177,19 @@ pub(crate) enum PassDriver {
     T51b,
 }
 
-/// [`derive_body_under`], its batch's passes driven by `driver` (P14.T51.h).
+/// [`derive_body`], its passes driven by `driver` (P14.T51.h): [`derive_body`] is this under
+/// [`PassDriver::Solve`].
+///
+/// The passes take the area-mix albedo (P14.T51.b) and run from
+/// [`BondAlbedo::BEFORE_ATMOSPHERES`] until the equilibrium temperature changes by at most
+/// [`ATMOSPHERE_CONVERGENCE`] of itself between passes, at most
+/// [`PLAIN_PASSES`](passes::PLAIN_PASSES) of them, under the light of its hosts built once before
+/// them; a body they do not settle takes its bracketed fixed point ([`passes`]).
 ///
 /// # Errors
 ///
 /// As [`derive_body`].
 pub(crate) fn derive_body_driven(
-    holds: BodyHolds,
     driver: PassDriver,
     placed: &PlacedBody,
     hosts: &BodyHosts<'_>,
@@ -1244,7 +1206,7 @@ pub(crate) fn derive_body_driven(
     // T12, at the time: the light now, the worst it has been, and the X-rays so far.
     let a = placed.orbit_now.semi_major_axis();
     let e = placed.orbit_now.eccentricity().value();
-    let sky = Sky::of(placed, hosts, age_now, holds.snapshot);
+    let sky = Sky::of(placed, hosts, age_now);
 
     // T13.b, energy-limited escape, and T11, the radius at the time.
     let escape = envelope_escape(placed, hosts, disc, solved.as_ref(), sky.xuv_fluence);
@@ -1280,7 +1242,7 @@ pub(crate) fn derive_body_driven(
         radius: Metres::new(r),
         age: age_now,
     }
-    .passes(holds.snapshot, driver);
+    .passes(driver);
     let (passes, regolith_albedo) = passes;
 
     let volume = 4.0 / 3.0 * core::f64::consts::PI * (r * r * r);
@@ -1354,11 +1316,6 @@ fn tidal_planet(
     )
 }
 
-/// How many times [`derive_body`] passes between the equilibrium temperature (P14.T12) and the
-/// atmosphere (P14.T13), each taking the albedo the last one's surface state gave: a fixed three
-/// (P14.T13.c), from the 0.3 of [`BondAlbedo::BEFORE_ATMOSPHERES`].
-pub const ATMOSPHERE_PASSES: u32 = 3;
-
 /// The change in the equilibrium temperature between passes, as a share of it, at which the
 /// batch's passes have converged: 10⁻⁹ (plan 14, P14.T51.b, "the passes converge to 10⁻⁹ in
 /// `T_eq`").
@@ -1391,16 +1348,10 @@ struct Passes {
 }
 
 impl PassBody<'_> {
-    /// One pass under the lane's rules `rules` at the albedo `albedo` over the surface `surface`:
-    /// the equilibrium temperature it gives, the temperature with the body's own heat, and the
-    /// atmosphere they hold.
+    /// One pass at the albedo `albedo` over the surface `surface`: the equilibrium temperature it
+    /// gives, the temperature with the body's own heat, and the atmosphere they hold.
     #[must_use]
-    fn pass(
-        &self,
-        rules: SnapshotRules,
-        surface: &PassSurface<'_>,
-        albedo: BondAlbedo,
-    ) -> (Kelvin, Kelvin, Atmosphere) {
+    fn pass(&self, surface: &PassSurface<'_>, albedo: BondAlbedo) -> (Kelvin, Kelvin, Atmosphere) {
         let (sky, bulk) = (self.sky, self.bulk);
         let irradiated = equilibrium_temperature(sky.flux, albedo);
         let heated = if self.internal_luminosity > Watts::ZERO {
@@ -1426,99 +1377,69 @@ impl PassBody<'_> {
             age: self.age,
             hottest_host: sky.hottest,
         };
-        let air = atmosphere_under(rules, &inputs, surface);
+        let air = atmosphere_under(&inputs, surface);
         (irradiated, heated, air)
     }
 
-    /// The passes under the lane's rules `rules`, from the 0.3 of
-    /// [`BondAlbedo::BEFORE_ATMOSPHERES`], each taking the albedo the last one's atmosphere gave:
-    /// a fixed [`ATMOSPHERE_PASSES`] under [`SnapshotRules::Held`], and under
-    /// [`SnapshotRules::Batch`] until the equilibrium temperature changes by at most
+    /// The passes, from the 0.3 of [`BondAlbedo::BEFORE_ATMOSPHERES`], each taking the albedo the
+    /// last one's atmosphere gave, until the equilibrium temperature changes by at most
     /// [`ATMOSPHERE_CONVERGENCE`] of itself, at most [`PLAIN_PASSES`](passes::PLAIN_PASSES) of
     /// them, a body they do not settle then taking its bracketed fixed point ([`passes::solve`],
     /// P14.T51.h), as `driver` drives them.
     ///
     /// Every pass reads one surface, built once before the first: the passes' stand-in surface
-    /// ([`PassSurface::stand_in`]) under the body's hosts' light, which [`Sky::of`] builds under
-    /// the batch's rules alone (the held rules read no light). So a pass is a function of the
-    /// albedo it reads alone, which the bisection needs.
+    /// ([`PassSurface::stand_in`]) under the body's hosts' light, which [`Sky::of`] builds. So a
+    /// pass is a function of the albedo it reads alone, which the bisection needs.
     ///
     /// Beside them, the bare regolith's Bond albedo the cold traps read (P14.T51.i): the passes'
-    /// regolith provider on the airless state under the hosts' light, `None` where the held rules
-    /// build no light.
+    /// regolith provider on the airless state under the hosts' light.
     #[must_use]
-    fn passes(&self, rules: SnapshotRules, driver: PassDriver) -> (Passes, Option<f64>) {
-        let light = self
-            .sky
-            .shade
-            .as_ref()
-            .map_or(PassLight::HottestHost, PassLight::Shade);
-        let surface = PassSurface::stand_in(light);
+    fn passes(&self, driver: PassDriver) -> (Passes, f64) {
+        let shade = &self.sky.shade;
+        let surface = PassSurface::stand_in(PassLight::Shade(shade));
         // The bare regolith the cold traps read (P14.T51.i): the passes' row on an airless body,
-        // under the hosts' light, which the held rules do not build.
-        let regolith_albedo = self.sky.shade.as_ref().map(|shade| {
-            (surface.regolith)(SurfaceMaterial::of(&self.bulk.fractions))
-                .bond(SurfaceState::Airless, shade.bands())
-                .bond
-        });
-        let ended = match rules {
-            SnapshotRules::Held => {
-                let mut albedo = BondAlbedo::BEFORE_ATMOSPHERES;
-                let (mut irradiated, mut heated, mut air) = self.pass(rules, &surface, albedo);
-                for _ in 1..ATMOSPHERE_PASSES {
-                    albedo = air.albedo();
-                    (irradiated, heated, air) = self.pass(rules, &surface, albedo);
-                }
+        // under the hosts' light.
+        let regolith_albedo = (surface.regolith)(SurfaceMaterial::of(&self.bulk.fractions))
+            .bond(SurfaceState::Airless, shade.bands())
+            .bond;
+        let ended = match driver {
+            PassDriver::Solve => {
+                let solved = passes::solve(
+                    BondAlbedo::BEFORE_ATMOSPHERES,
+                    |albedo| self.pass(&surface, albedo),
+                    |&(_, _, air): &(Kelvin, Kelvin, Atmosphere)| air.albedo(),
+                    |&(last, ..), &(now, ..)| {
+                        (now.value() - last.value()).abs() <= ATMOSPHERE_CONVERGENCE * now.value()
+                    },
+                );
+                let (irradiated, heated, air) = solved.pass;
                 Passes {
-                    albedo,
+                    albedo: solved.albedo,
                     irradiated,
                     heated,
                     air,
-                    count: ATMOSPHERE_PASSES,
-                    convergence: Convergence::Fixed,
+                    count: solved.count,
+                    convergence: solved.convergence,
                 }
             }
-            SnapshotRules::Batch => match driver {
-                PassDriver::Solve => {
-                    let solved = passes::solve(
-                        BondAlbedo::BEFORE_ATMOSPHERES,
-                        |albedo| self.pass(rules, &surface, albedo),
-                        |&(_, _, air): &(Kelvin, Kelvin, Atmosphere)| air.albedo(),
-                        |&(last, ..), &(now, ..)| {
-                            (now.value() - last.value()).abs()
-                                <= ATMOSPHERE_CONVERGENCE * now.value()
-                        },
-                    );
-                    let (irradiated, heated, air) = solved.pass;
-                    Passes {
-                        albedo: solved.albedo,
-                        irradiated,
-                        heated,
-                        air,
-                        count: solved.count,
-                        convergence: solved.convergence,
-                    }
-                }
-                #[cfg(test)]
-                PassDriver::T51b => self.t51b_passes(&surface),
-            },
+            #[cfg(test)]
+            PassDriver::T51b => self.t51b_passes(&surface),
         };
         (ended, regolith_albedo)
     }
 
-    /// The batch's passes over `surface` by P14.T51.b's loop as it was built, for the tests that
-    /// hold a body settling within the plain passes to its bits: from 0.3, until one settles to
+    /// The passes over `surface` by P14.T51.b's loop as it was built, for the tests that hold a
+    /// body settling within the plain passes to its bits: from 0.3, until one settles to
     /// [`ATMOSPHERE_CONVERGENCE`], at most 64, the last published and called converged.
     #[cfg(test)]
     #[must_use]
     fn t51b_passes(&self, surface: &PassSurface<'_>) -> Passes {
-        let rules = SnapshotRules::Batch;
         let mut albedo = BondAlbedo::BEFORE_ATMOSPHERES;
-        let (mut irradiated, mut heated, mut air) = self.pass(rules, surface, albedo);
+        let (mut irradiated, mut heated, mut air) = self.pass(surface, albedo);
         let mut count = 1;
         while count < 64 {
             let next = air.albedo();
-            let (now, warmed, held) = self.pass(rules, surface, next);
+            let (now, warmed, held) = self.pass(surface, next);
             count += 1;
             let change = (now.value() - irradiated.value()).abs();
             let settled = change <= ATMOSPHERE_CONVERGENCE * now.value();
@@ -1556,9 +1477,8 @@ struct Sky {
     insolation: Insolation,
     /// The hottest effective temperature among the luminous hosts; zero if none shines.
     hottest: Kelvin,
-    /// The hosts' light by band as the batch's area mix reads it (P14.T51.b), built under its rules
-    /// alone; `None` under version 22's.
-    shade: Option<HostShade>,
+    /// The hosts' light by band as the area mix reads it (P14.T51.b).
+    shade: HostShade,
 }
 
 impl Sky {
@@ -1570,10 +1490,9 @@ impl Sky {
     /// body is inside the runaway limit when Σ Fᵢ ÷ `S_eff,i` reaches 1 at the hosts' largest past
     /// luminosities, and beyond the maximum-greenhouse limit when it falls below 1 now.
     ///
-    /// Under the lane's rules `rules`' [`SnapshotRules::Batch`] it also sums the luminous hosts'
-    /// light by band, each weighted by its flux now ([`HostShadeSum`]), for the area mix
-    /// (P14.T51.b): once per body, before its passes.
-    fn of(placed: &PlacedBody, hosts: &BodyHosts<'_>, age: Years, rules: SnapshotRules) -> Self {
+    /// It also sums the luminous hosts' light by band, each weighted by its flux now
+    /// ([`HostShadeSum`]), for the area mix (P14.T51.b): once per body, before its passes.
+    fn of(placed: &PlacedBody, hosts: &BodyHosts<'_>, age: Years) -> Self {
         let (a, e) = (
             placed.orbit_now.semi_major_axis(),
             placed.orbit_now.eccentricity().value(),
@@ -1582,19 +1501,14 @@ impl Sky {
             placed.orbit.semi_major_axis(),
             placed.orbit.eccentricity().value(),
         );
-        let mut sky = Self {
+        let mut sums = SkySums {
             flux: EarthFluxes::ZERO,
             peak_flux: EarthFluxes::ZERO,
             xuv_fluence: JoulesPerSquareMetre::ZERO,
             xuv_flux: WattsPerSquareMetre::ZERO,
             saturated_xuv_flux: WattsPerSquareMetre::ZERO,
-            insolation: Insolation::Habitable,
             hottest: Kelvin::ZERO,
-            shade: None,
-        };
-        let mut shade = match rules {
-            SnapshotRules::Held => None,
-            SnapshotRules::Batch => Some(HostShadeSum::EMPTY),
+            shade: HostShadeSum::EMPTY,
         };
         let (mut runaway, mut maximum) = (0.0, 0.0);
         let mut add = |host: &HostLight, (a, e): (Metres, f64), (xuv_a, xuv_e): (Metres, f64)| {
@@ -1603,22 +1517,21 @@ impl Sky {
             let fluence = host.xuv().fluence(age, xuv_a, xuv_e);
             let xuv = host.xuv().flux(age, a, e);
             let saturated = host.xuv().saturated_flux(xuv_a, xuv_e);
-            sky.flux = sky.flux + flux;
-            sky.peak_flux = sky.peak_flux + peak;
-            sky.xuv_fluence = JoulesPerSquareMetre::new(sky.xuv_fluence.value() + fluence.value());
-            sky.xuv_flux = WattsPerSquareMetre::new(sky.xuv_flux.value() + xuv.value());
-            sky.saturated_xuv_flux =
-                WattsPerSquareMetre::new(sky.saturated_xuv_flux.value() + saturated.value());
+            sums.flux = sums.flux + flux;
+            sums.peak_flux = sums.peak_flux + peak;
+            sums.xuv_fluence =
+                JoulesPerSquareMetre::new(sums.xuv_fluence.value() + fluence.value());
+            sums.xuv_flux = WattsPerSquareMetre::new(sums.xuv_flux.value() + xuv.value());
+            sums.saturated_xuv_flux =
+                WattsPerSquareMetre::new(sums.saturated_xuv_flux.value() + saturated.value());
             if host.luminosity().value() > 0.0 {
                 let t_eff = host.effective_temperature();
                 runaway += peak.value() / HabitableLimit::RunawayGreenhouse.flux(t_eff).value();
                 maximum += flux.value() / HabitableLimit::MaximumGreenhouse.flux(t_eff).value();
-                if t_eff > sky.hottest {
-                    sky.hottest = t_eff;
+                if t_eff > sums.hottest {
+                    sums.hottest = t_eff;
                 }
-                if let Some(shade) = shade.as_mut() {
-                    shade.add(flux, t_eff);
-                }
+                sums.shade.add(flux, t_eff);
             }
         };
         for host in hosts.orbited {
@@ -1628,16 +1541,36 @@ impl Sky {
             let orbit = (companion.semi_major_axis(), companion.eccentricity());
             add(companion.host(), orbit, orbit);
         }
-        sky.insolation = if runaway >= 1.0 {
+        let insolation = if runaway >= 1.0 {
             Insolation::InsideRunaway
         } else if maximum < 1.0 {
             Insolation::BeyondMaximumGreenhouse
         } else {
             Insolation::Habitable
         };
-        sky.shade = shade.map(HostShadeSum::finish);
-        sky
+        Self {
+            flux: sums.flux,
+            peak_flux: sums.peak_flux,
+            xuv_fluence: sums.xuv_fluence,
+            xuv_flux: sums.xuv_flux,
+            saturated_xuv_flux: sums.saturated_xuv_flux,
+            insolation,
+            hottest: sums.hottest,
+            shade: sums.shade.finish(),
+        }
     }
+}
+
+/// What [`Sky::of`] sums over a body's hosts, in their order, before the sky is built from it.
+#[derive(Debug, Clone, Copy)]
+struct SkySums {
+    flux: EarthFluxes,
+    peak_flux: EarthFluxes,
+    xuv_fluence: JoulesPerSquareMetre,
+    xuv_flux: WattsPerSquareMetre,
+    saturated_xuv_flux: WattsPerSquareMetre,
+    hottest: Kelvin,
+    shade: HostShadeSum,
 }
 
 /// What energy-limited escape leaves of a body's envelope (P14.T13.b).
@@ -2262,32 +2195,13 @@ pub(crate) mod solar {
             .collect()
     }
 
-    /// [`derive_historic`] under the `p14-snapshot` lane's rules `snapshot`.
-    pub(crate) fn derive_historic_under(
-        snapshot: SnapshotRules,
-        placed: &PlacedBody,
-        disc: &DiscProfile,
-        age: Years,
-    ) -> DerivedBody {
-        let lights = [historic_sun()];
-        let hosts = BodyHosts::new(
-            Kilograms::new(SOLAR_MASS_KG),
-            Composition::SOLAR,
-            &lights,
-            &[],
-        )
-        .unwrap();
-        let holds = BodyHolds { snapshot };
-        derive_body_under(holds, placed, &hosts, disc, age, UniverseTime::EPOCH).unwrap()
-    }
-
-    /// The table's body `name` ([`historic_table`]) derived under the `p14-snapshot` lane's rules
-    /// `snapshot` ([`derive_historic_under`]).
-    pub(crate) fn historic_under(snapshot: SnapshotRules, name: &str) -> DerivedBody {
+    /// The table's body `name` ([`historic_table`]), at the rank that keeps its radius, about the
+    /// present Sun with its history at its age.
+    pub(crate) fn historic(name: &str) -> DerivedBody {
         let disc = solar_disc();
         let &(_, kg, km, a, e) = table_bodies().find(|(n, ..)| *n == name).unwrap();
         let placed = placed_about_the_sun(&disc, (kg, km, a, e));
-        derive_historic_under(snapshot, &placed, &disc, SOLAR_AGE)
+        derive_historic(&placed, &disc, SOLAR_AGE)
     }
 
     pub(crate) fn found<'a>(bodies: &'a [(&str, DerivedBody)], name: &str) -> &'a DerivedBody {
@@ -2365,9 +2279,9 @@ mod tests {
             (heavy * jupiter.mass().value() - 57.9).abs() < 0.1,
             "{heavy}"
         );
-        // T12: the flux and equilibrium temperature are T12's at the albedo of the body's surface
-        // state (T13.c); a giant adds its internal luminosity, and Jupiter's makes it warmer than
-        // sunlight alone would.
+        // T12: the flux and equilibrium temperature are T12's at the albedo the published pass
+        // read, its atmosphere's area mix to the passes' convergence (P14.T51.b); a giant adds its
+        // internal luminosity, and Jupiter's makes it warmer than sunlight alone would.
         for (name, _, _, a, e) in PLANETS {
             let Some((_, body)) = bodies.iter().find(|(n, _)| *n == name) else {
                 continue;
@@ -2375,12 +2289,10 @@ mod tests {
             let light = Illumination::new(sun(), Metres::new(a * METRES_PER_AU), e).unwrap();
             let flux = total_flux(&[light]);
             assert_same_bits(body.flux().value(), flux.value());
-            assert_same_bits(
-                body.albedo().value(),
-                body.atmosphere()
-                    .state()
-                    .albedo(atmosphere::SurfaceMaterial::of(&body.fractions()))
-                    .value(),
+            let (read, gave) = (body.albedo().value(), body.atmosphere().albedo().value());
+            assert!(
+                (read - gave).abs() < 1e-8,
+                "{name}: read {read}, gave {gave}"
             );
             let t = equilibrium_temperature(flux, body.albedo());
             // Ruling 112.7: the equilibrium temperature is the light's alone, and a giant's

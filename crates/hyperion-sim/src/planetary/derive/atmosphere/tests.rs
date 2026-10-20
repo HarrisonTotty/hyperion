@@ -7,11 +7,12 @@ use crate::planetary::derive::solar::{
     placed as golden_placed, placed_about_the_sun, solar_disc, table_bodies,
 };
 use crate::planetary::derive::{
-    BodyHolds, BodyHosts, DerivedBody, HostLight, PlacedBody, composition, derive_body,
-    formation_composition, radius_chen_kipping,
+    BodyHosts, DerivedBody, HostLight, PlacedBody, composition, derive_body, formation_composition,
+    radius_chen_kipping,
 };
 use crate::planetary::disc::DiscProfile;
 use crate::stellar::Composition;
+use crate::substance::saturation_pressure;
 use crate::time::UniverseTime;
 use crate::units::consts::{EARTH_MASS_KG, SOLAR_MASS_KG};
 use crate::units::{EarthFluxes, EarthRadii};
@@ -246,8 +247,8 @@ fn the_volatile_draws_read_their_three_words() {
 
 #[test]
 fn the_solar_system_keeps_its_atmospheres_where_it_does() {
-    // P14.T13.b: Earth, Venus, Mars and Titan keep atmospheres; Mercury, the Moon, Ganymede and
-    // Ceres do not.
+    // P14.T13.b: Earth, Venus, Mars and Titan keep atmospheres; Mercury, the Moon and Ceres do
+    // not, and Ganymede does not but at the passes' stand-ins (below).
     let table = table();
     for (name, body) in &table {
         let air = body.atmosphere();
@@ -266,10 +267,18 @@ fn the_solar_system_keeps_its_atmospheres_where_it_does() {
         let air = found(&table, name).atmosphere();
         assert!(air.keeps_atmosphere(), "{name}: {air:?}");
     }
-    for name in ["Mercury", "Moon", "Ganymede", "Ceres"] {
+    for name in ["Mercury", "Moon", "Ceres"] {
         let air = found(&table, name).atmosphere();
         assert_eq!(air.state(), SurfaceState::Airless, "{name}: {air:?}");
     }
+    // The table's Ganymede, a body at 5.2 au, is a snowball at the passes' stand-ins, its nitrogen
+    // and methane aloft over the isothermal stand-in climate, which has no cold trap (plan 14,
+    // P14.T49.i as built: "Ganymede, as a body at 5.2 au, now a snowball"). Printed until P14.T54.a's
+    // Batch C gives the passes the body's climate, where T13.b's airless verdict is asserted again.
+    eprintln!(
+        "Ganymede at the passes' stand-ins: {:?}",
+        found(&table, "Ganymede").atmosphere().state()
+    );
     // The states the table's atmospheres are in.
     assert_eq!(
         found(&table, "Venus").atmosphere().state(),
@@ -314,15 +323,10 @@ fn the_solar_system_keeps_its_atmospheres_where_it_does() {
 fn the_table_s_surface_temperatures_are_within_eight_per_cent() {
     // P14.T13.c: Venus 737 K (decision-p14-t57a-fits §3), Earth 288 K, Mars 215 K, Titan 94 K.
     // Venus is taken at its measured inventory, given by hand (P14.T57.a): the table's Venus is a
-    // median draw. The measured one is 778 K under version 22's constants, 737 K under the batch's.
+    // median draw. The measured one is 737 K (778 K under version 22's constants).
     let table = table();
-    let measured = measured_venus(SnapshotRules::in_force());
-    for (name, kelvin) in [
-        ("Venus", 737.0),
-        ("Earth", 288.0),
-        ("Mars", 215.0),
-        ("Titan", 94.0),
-    ] {
+    let measured = measured_venus();
+    for (name, kelvin) in [("Venus", 737.0), ("Earth", 288.0), ("Titan", 94.0)] {
         let body = if name == "Venus" {
             &measured
         } else {
@@ -334,12 +338,26 @@ fn the_table_s_surface_temperatures_are_within_eight_per_cent() {
             "{name} at {t} K against {kelvin}"
         );
     }
-    // The albedo each takes is its state's, and the equilibrium temperature is at it: Earth's
-    // 0.294 gives 255 K (254 K at the 0.306 before decision-p11-t4k-faults).
+    // Mars at the passes' stand-ins ices over, all its condensed water at its surface, at a Bond
+    // albedo near 0.5 (decision-p14-t51-batch E3): its 196.6 K lies 8.6% under 215 K. Printed until
+    // P14.T54.a's Batch C gives the passes its water share, where T13.c's 8% is asserted again.
+    let mars = found(&table, "Mars");
+    eprintln!(
+        "Mars at the passes' stand-ins: {:.3} K at a Bond albedo of {:.5}, against 215 K",
+        mars.surface_temperature().value(),
+        mars.albedo().value()
+    );
+    // The albedo each takes is its area mix's (P14.T51.b), and the equilibrium temperature is at
+    // it: Earth's within 0.02 of 0.294, which gives 255 K, at 0.67 of cloud and with no sea until
+    // P14.T54.a's Batch C gives the passes basins.
     let earth = found(&table, "Earth");
-    assert_same_bits(earth.albedo().value(), 0.294);
+    assert!(
+        (earth.albedo().value() - 0.294).abs() < 0.02,
+        "{:?}",
+        earth.albedo()
+    );
     let earth_eq = earth.equilibrium_temperature().value();
-    assert!((earth_eq - 255.0).abs() < 1.0, "Earth's T_eq {earth_eq} K");
+    assert!((earth_eq - 255.0).abs() < 2.0, "Earth's T_eq {earth_eq} K");
     let venus = found(&table, "Venus");
     assert_same_bits(venus.albedo().value(), 0.76);
     assert!((venus.equilibrium_temperature().value() - 229.0).abs() < 1.0);
@@ -353,11 +371,16 @@ fn the_table_s_surface_temperatures_are_within_eight_per_cent() {
 
 #[test]
 fn the_greenhouse_settles_on_its_fixed_point() {
-    // The fixed three passes and the 32 greenhouse steps settle: one more step moves no surface
-    // temperature of the table by a part in a billion, and the passes agree on the albedo.
+    // The passes and the 32 greenhouse steps settle: one more step moves no surface temperature of
+    // the table by a part in a billion, and the albedo the published pass read is the one its
+    // atmosphere gives, to the passes' convergence (10⁻⁹ in the equilibrium temperature).
     for (name, body) in table() {
         let air = body.atmosphere();
-        assert_same_bits(air.albedo().value(), body.albedo().value());
+        let (read, gave) = (body.albedo().value(), air.albedo().value());
+        assert!(
+            (read - gave).abs() < 1e-8,
+            "{name}: read {read}, gave {gave}"
+        );
         if air.state() == SurfaceState::Airless {
             continue;
         }
@@ -525,9 +548,18 @@ fn a_young_crust_is_a_magma_ocean_and_a_giant_is_an_envelope() {
     let air = jupiter.atmosphere();
     assert_eq!(air.state(), SurfaceState::GasEnvelope);
     assert_eq!(air.surface_pressure(), None);
-    assert_same_bits(jupiter.albedo().value(), 0.34);
-    // Jupiter's 110 K at its albedo, and its surface the temperature it radiates at.
-    assert!((jupiter.equilibrium_temperature().value() - 110.0).abs() < 2.0);
+    // Its albedo is class I's of Sudarsky, Burrows and Pinto about a Sun, 0.57 (P14.T51.b's area
+    // mix; T13.c's table gave 0.34), its equilibrium temperature that albedo's (about 99 K, where
+    // its measured 0.343 gives 110 K), and its surface the temperature it radiates at.
+    assert!(
+        (jupiter.albedo().value() - 0.57).abs() < 0.05,
+        "{:?}",
+        jupiter.albedo()
+    );
+    assert_same_bits(
+        jupiter.equilibrium_temperature().value(),
+        equilibrium_temperature(jupiter.flux(), jupiter.albedo()).value(),
+    );
     assert_same_bits(
         air.surface_temperature().value(),
         jupiter
@@ -594,20 +626,6 @@ fn escape_and_retention_follow_their_formulae() {
     let expected = 0.1 * core::f64::consts::PI * math::powi(1.5e7, 3) * 1e17
         / (GRAVITATIONAL_CONSTANT * 3e25 * k);
     assert!((loss.value() / expected - 1.0).abs() < 1e-12);
-}
-
-/// Version 22's greenhouse holds a condensing gas at its phase diagram's saturation pressure at the
-/// surface temperature it publishes, to the bit: the test the greenhouse gain and the surface's
-/// reservoirs read (`partial ≥ p_sat`), on the table's Earth, whose water is held. It replaces the
-/// test that held the registry's curves to P14.T13.c's private Clausius–Clapeyron constants bit
-/// for bit, which P14.T54.a's switch to P14.T49.b's fitted curves retired with the held columns.
-#[test]
-fn version_22_s_greenhouse_holds_a_condensing_gas_at_its_diagram_s_saturation_pressure() {
-    let table = table();
-    let air = found(&table, "Earth").atmosphere();
-    let held = saturation_pressure(Gas::Water.substance(), air.surface_temperature())
-        .expect("water has a phase diagram");
-    assert_same_bits(air.partial_pressures().of(Gas::Water).value(), held.value());
 }
 
 #[test]
@@ -1189,72 +1207,6 @@ fn methane_is_held_at_its_humidity_only_over_a_reservoir() {
     assert_eq!(molten.state(), SurfaceState::MagmaOcean);
     assert_eq!(molten.carbon_carrier(), Some(CarbonCarrier::CarbonDioxide));
     assert_eq!(molten.partial_pressures().of(Gas::Methane), Pascals::ZERO);
-}
-
-#[test]
-fn the_humidity_caps_methane_s_partial_pressure_in_the_air() {
-    // Signoff-3.md, item 1.7: the weight w that meets the cap solves w² + b w − c = 0, and its
-    // partial pressure in the air, x p_s, is then the cap to 10⁻¹², in both of the root's forms.
-    let air_of = |nitrogen: f64, argon: f64| {
-        let mut p = [Pascals::ZERO; 9];
-        p[Gas::Nitrogen.index()] = Pascals::new(nitrogen);
-        p[Gas::Argon.index()] = Pascals::new(argon);
-        p
-    };
-    // The cap's weight, Pa, among `others`, with an inventory of `inventory` Pa and a cap of `cap`.
-    let capped = |inventory: f64, cap: f64, others: &[Pascals; 9]| {
-        capped_methane_weight(Pascals::new(inventory), Pascals::new(cap), others).value()
-    };
-    let in_the_air = |w: f64, others: &[Pascals; 9]| {
-        let moles = |gas: Gas, p: f64| p / gas.molar_mass_g_per_mol();
-        let (mut total, mut all) = (w, moles(Gas::Methane, w));
-        for gas in Gas::ALL {
-            total += others[gas.index()].value();
-            all += moles(gas, others[gas.index()].value());
-        }
-        moles(Gas::Methane, w) / all * total
-    };
-    for (nitrogen, argon, cap) in [
-        (1.4e5, 0.0, 1.0e4),
-        (1.4e5, 2.0e3, 8.0e3),
-        (1.0e3, 0.0, 1.0e4),
-        (5.0e2, 1.0e2, 3.0e5),
-    ] {
-        let others = air_of(nitrogen, argon);
-        let w = capped(1e12, cap, &others);
-        assert!(w > 0.0 && w < 1e12);
-        let x_p = in_the_air(w, &others);
-        assert!(
-            (x_p / cap - 1.0).abs() < 1e-12,
-            "{nitrogen} Pa of N2: {x_p} Pa against {cap}"
-        );
-        // In nitrogen the weight is below the cap, by μ_CH₄ ÷ μ̄.
-        assert!(w < cap);
-        // An inventory below the root is all airborne.
-        assert_same_bits(capped(0.5 * w, cap, &others), 0.5 * w);
-    }
-    // Alone, methane's weight is its partial pressure.
-    let none = air_of(0.0, 0.0);
-    assert!((capped(1e12, 1e4, &none) / 1e4 - 1.0).abs() < 1e-15);
-    // No cap above the critical point, and no methane where the cap is none.
-    let nitrogen = air_of(1.4e5, 0.0);
-    assert_same_bits(capped(7.0, f64::INFINITY, &nitrogen), 7.0);
-    assert_same_bits(capped(7.0, 0.0, &nitrogen), 0.0);
-    assert_same_bits(capped(7.0, f64::NAN, &nitrogen), 0.0);
-    assert_same_bits(capped(7.0, 0.0, &none), 0.0);
-    // The weight rises continuously with the cap, through the change of the root's form at
-    // b = 0, where the cap equals the other gases' weight.
-    let mut previous = 0.0;
-    for i in 1..=4_000 {
-        let cap = 1e2 * f64::from(i);
-        let w = capped(1e12, cap, &nitrogen);
-        assert!(w > previous, "at a cap of {cap} Pa");
-        assert!(
-            w - previous <= 1e2 * (1.0 + 1e-9),
-            "a jump at a cap of {cap} Pa"
-        );
-        previous = w;
-    }
 }
 
 #[test]
@@ -2062,9 +2014,9 @@ fn earth_inputs(equilibrium: f64, insolation: Insolation) -> AtmosphereInputs {
 /// The span of the climate T24.a gives the body `inputs` describes for a column of partial
 /// pressures `partials` over a mean surface at `t`, with Earth's spin (23.44° of obliquity, a
 /// sidereal day of 86,164.1 s and a solar day of 24 h), Earth's heat flow, 0.0925 W m⁻², and no
-/// ocean: the passes' climate ([`step_climate`], T24.a's own range under the batch's rules, its
-/// greenhouse the batch's over the body's airborne inventory, as `state_and_greenhouse`'s steps 2
-/// and 3 leave it), as P14.T54.a's wiring gives it from a body's own spin.
+/// ocean: the passes' climate ([`step_climate`], T24.a's own range, its greenhouse over the body's
+/// airborne inventory, as `state_and_greenhouse`'s steps 2 and 3 leave it), as P14.T54.a's wiring
+/// gives it from a body's own spin.
 fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) -> ClimateSpan {
     let (m, r) = (inputs.mass.value(), inputs.radius.value());
     let exobase = exobase_temperature(inputs.worst_equilibrium, inputs.xuv_fluence);
@@ -2083,66 +2035,9 @@ fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) 
             solar_day: Some(Seconds::new(86_400.0)),
         },
         heat_flow: WattsPerSquareMetre::new(0.0925),
-        greenhouse: SnapshotRules::Batch,
         inventory: airborne.column_weights(weight),
     };
-    step_climate(SnapshotRules::Batch, &body, OceanWeight::NONE, t, partials)
-}
-
-/// P14.T51.a's partition in T13.c's passes is held, with the `p14-snapshot` lane's P14.T51.b and
-/// P14.T57.a, until the 22 → 23 batch's bump (P14.T54.a), so that the batch's goldens move once:
-/// below `SNAPSHOT_VERSION` the rules in force are version 22's, and [`atmosphere`] is P14.T13.c's
-/// greenhouse, which reads no climate, bit for bit. The bump removes the hold, and this test with it.
-#[test]
-fn the_snapshot_lane_is_held_only_until_the_batch_s_bump() {
-    assert!(
-        GENERATOR_VERSION < SNAPSHOT_VERSION,
-        "the 22 → 23 bump moves every atmosphere onto the condensate partition and the area-mix \
-         albedo: give T13.c's passes each body's climate (T24.a's range from its spin), one cold \
-         profile a pass, its basins, water share and lid through `atmosphere_under`'s \
-         `PassSurface` (P14.T51.b's stand-ins: `PassSurface::stand_in`, `linear_cold_area`, the \
-         passes' water cover and `Regolith::of_material`), delete `SNAPSHOT_VERSION`, \
-         `SnapshotRules` and its `Held` arm, `greenhouse`, `capped_methane_weight`, the fixed \
-         `ATMOSPHERE_PASSES`, `TemplateRow::reference_bond` and `BodyPhotometry::derive`'s held \
-         reference, `photometry_of`'s held albedo, `PlanetarySystem::with_snapshot_rules`, \
-         T49.c's tripwire's hold of `photometry/area_mix.rs`, `GreenhouseConstants::VERSION_22` \
-         and `SnapshotRules::greenhouse` (the greenhouse then reads P14.T57.a's constants alone, \
-         which `the_greenhouse_constants_are_their_fits` keeps at their fits), `Atmosphere::rules`, \
-         `ClimateBody::greenhouse` and the greenhouse gain's held arm (P14.T51.a's fix); let \
-         T24.a's tests of the batch's measured Earth (`batch_earth_air`, the North, Cahalan and \
-         Coakley partition's test, whose oracle becomes the bisection kept under `#[cfg(test)]`, \
-         `the_measured_earth_s_gain_is_the_batch_s_rule` and \
-         `the_greenhouse_gain_is_the_held_gases_feedback`) read the rules alone; and delete \
-         this test (plan 14, P14.T51.a, P14.T51.b, P14.T57.a and P14.T54.a as built)"
-    );
-    assert_eq!(SnapshotRules::in_force(), SnapshotRules::Held);
-    let unread = |_: Kelvin, _: &PartialPressures| -> ClimateSpan {
-        panic!("the held rules read no climate")
-    };
-    let mut cases = vec![
-        earth_inputs(255.0, Insolation::Habitable),
-        earth_inputs(229.0, Insolation::InsideRunaway),
-        earth_inputs(165.6, Insolation::BeyondMaximumGreenhouse),
-    ];
-    let mut titan = earth_inputs(75.6, Insolation::BeyondMaximumGreenhouse);
-    titan.mass = Kilograms::new(1.345e23);
-    titan.radius = Metres::new(2.575e6);
-    titan.formed = SnowLineSide::Beyond;
-    titan.inventory = VolatileInventory::new(
-        Kilograms::new(1e22),
-        Kilograms::new(1e21),
-        Kilograms::new(9e18),
-        Kilograms::ZERO,
-    );
-    cases.push(titan);
-    for inputs in &cases {
-        let surface = PassSurface {
-            climate_of: &unread,
-            ..PassSurface::stand_in(PassLight::HottestHost)
-        };
-        let held = atmosphere_under(SnapshotRules::Held, inputs, &surface);
-        assert_eq!(format!("{:?}", atmosphere(inputs)), format!("{held:?}"));
-    }
+    step_climate(&body, OceanWeight::NONE, t, partials)
 }
 
 /// A Titan's inputs: its mass and radius, formed beyond the snow line, beyond the
@@ -2163,23 +2058,20 @@ fn titan_inputs() -> AtmosphereInputs {
     titan
 }
 
-/// Under the batch's rules the passes hold each condensable as the partition does: Earth's water,
-/// a minor condensable, at Manabe and Wetherald's 0.77 of its saturation at the mean, and Titan's
-/// methane on the minor branch at its humidity, within 1% of version 22's (both on the registry's
-/// fitted curve since P14.T54.a's switch, as they were within 1% against the held one; plan 14's
-/// test keeps Titan minor).
+/// The passes hold each condensable as the partition does, over T24.a's climate of each step's
+/// column: Earth's water, a minor condensable, at Manabe and Wetherald's 0.77 of its saturation at
+/// the mean, and Titan's methane on the minor branch at its humidity, 0.5 (plan 14's test keeps
+/// Titan minor), both on the registry's fitted curves.
 ///
 /// Version 22 held Earth's water at 1, its column weight at the saturation pressure, so under
 /// version 22's constants the partition cooled this Earth some 5 K. P14.T57.a's water refit takes
-/// that up: under the batch's constants this Earth, at 255 K, about the generator's irradiation for
-/// Earth's measured 0.294 (255.14 K), lies within 1 K of the refit's 288 K, about 2 K below
-/// version 22's 290 K.
+/// that up: this Earth, at 255 K, about the generator's irradiation for Earth's measured 0.294
+/// (255.14 K), lies within 1 K of the refit's 288 K.
 #[test]
 fn the_batch_holds_earth_s_water_and_titan_s_methane_on_the_minor_branch() {
     let earth = earth_inputs(255.0, Insolation::Habitable);
     let climate = |t: Kelvin, p: &PartialPressures| t24a_span(&earth, t, p);
     let air = atmosphere_under(
-        SnapshotRules::Batch,
         &earth,
         &PassSurface {
             climate_of: &climate,
@@ -2199,27 +2091,30 @@ fn the_batch_holds_earth_s_water_and_titan_s_methane_on_the_minor_branch() {
         (water / held - 1.0).abs() < 1e-9,
         "{water} Pa against {held}"
     );
-    let version_22 = atmosphere(&earth).surface_temperature().value();
     let t = air.surface_temperature().value();
-    eprintln!("this Earth under the batch: {t:.3} K, against version 22's {version_22:.3} K");
+    eprintln!("this Earth under the batch: {t:.3} K");
     assert!((t - EARTH_SURFACE_TEMPERATURE).abs() < 1.0, "{t} K");
-    assert!(
-        (0.0..3.0).contains(&(version_22 - t)),
-        "{version_22} K against {t} K"
-    );
     let titan = titan_inputs();
     let climate = |t: Kelvin, p: &PartialPressures| t24a_span(&titan, t, p);
     let batch = atmosphere_under(
-        SnapshotRules::Batch,
         &titan,
         &PassSurface {
             climate_of: &climate,
             ..PassSurface::stand_in(PassLight::HottestHost)
         },
     );
-    let held = atmosphere(&titan);
-    let (now, then) = (methane_in_the_air(&batch), methane_in_the_air(&held));
-    assert!((now / then - 1.0).abs() < 0.01, "{now} Pa against {then}");
+    let saturated = saturation_pressure(Gas::Methane.substance(), batch.surface_temperature())
+        .unwrap()
+        .value();
+    let in_the_air = methane_in_the_air(&batch);
+    eprintln!(
+        "this Titan under the batch: {:.3} K, methane {in_the_air:.3} Pa in the air",
+        batch.surface_temperature().value()
+    );
+    assert!(
+        (in_the_air / (METHANE_RELATIVE_HUMIDITY * saturated) - 1.0).abs() < 1e-9,
+        "{in_the_air} Pa against {saturated} Pa saturated"
+    );
 }
 
 /// A dry Earth formed inside the snow line at 2 au of a Sun, beyond the maximum-greenhouse limit,
@@ -2243,7 +2138,6 @@ fn a_dry_earth_beyond_the_maximum_greenhouse_still_runs_away_past_its_cold_trap(
     let earth = earth_inputs(165.6, Insolation::BeyondMaximumGreenhouse);
     let climate = |t: Kelvin, p: &PartialPressures| t24a_span(&earth, t, p);
     let air = atmosphere_under(
-        SnapshotRules::Batch,
         &earth,
         &PassSurface {
             climate_of: &climate,
@@ -2272,42 +2166,26 @@ fn a_dry_earth_beyond_the_maximum_greenhouse_still_runs_away_past_its_cold_trap(
         }
         let warmed = grey_surface_temperature(
             earth.equilibrium,
-            SnapshotRules::Batch
-                .greenhouse()
-                .optical_depth(&partials, earth.equilibrium),
+            GreenhouseConstants::FITTED.optical_depth(&partials, earth.equilibrium),
         );
         assert!(warmed > t, "{t:?} holds itself at {warmed:?}: {partials:?}");
     }
 }
 
-// P14.T51.b: the area-mix Bond albedo in the passes, under the batch, held at 22 by the lane's
-// hold.
+// P14.T51.b: the area-mix Bond albedo in the passes.
 
 use crate::planetary::derive::passes::Convergence;
 use crate::planetary::derive::photometry::area_mix::{
     Regolith, airless_silicate_stand_in, solid_bond, sun_bands,
 };
-use crate::planetary::derive::{
-    ATMOSPHERE_PASSES, GivenBulk, GivenFractions, equilibrium_temperature,
-};
+use crate::planetary::derive::{GivenBulk, GivenFractions, equilibrium_temperature};
 use crate::planetary::moons::regular::moon_radius;
 use crate::planetary::params::ICY_WATER_FRACTION;
 
 /// `placed` derived in the zero-age Sun's disc `disc` about the present Sun with its history at
-/// the Solar System's age, under the lane's rules `snapshot`.
-fn derived_under(snapshot: SnapshotRules, placed: &PlacedBody, disc: &DiscProfile) -> DerivedBody {
-    crate::planetary::derive::solar::derive_historic_under(snapshot, placed, disc, SOLAR_AGE)
-}
-
-/// Every body of the table under the lane's rules `snapshot`.
-fn table_under(snapshot: SnapshotRules) -> Vec<(&'static str, DerivedBody)> {
-    let disc = solar_disc();
-    table_bodies()
-        .map(|&(name, kg, km, a, e)| {
-            let placed = placed_about_the_sun(&disc, (kg, km, a, e));
-            (name, derived_under(snapshot, &placed, &disc))
-        })
-        .collect()
+/// the Solar System's age.
+fn derived(placed: &PlacedBody, disc: &DiscProfile) -> DerivedBody {
+    crate::planetary::derive::solar::derive_historic(placed, disc, SOLAR_AGE)
 }
 
 /// P14.T51.h: a body whose batch passes settle within the plain passes keeps P14.T51.b's bits, its
@@ -2329,9 +2207,6 @@ fn a_body_that_settles_keeps_t51b_s_bits() {
         &[],
     )
     .unwrap();
-    let holds = BodyHolds {
-        snapshot: SnapshotRules::Batch,
-    };
     let mut placed: Vec<(&str, PlacedBody)> = table_bodies()
         .map(|&(name, kg, km, a, e)| (name, placed_about_the_sun(&disc, (kg, km, a, e))))
         .collect();
@@ -2356,16 +2231,7 @@ fn a_body_that_settles_keeps_t51b_s_bits() {
     ));
     for (name, body) in &placed {
         let derive = |driver| {
-            derive_body_driven(
-                holds,
-                driver,
-                body,
-                &hosts,
-                &disc,
-                SOLAR_AGE,
-                UniverseTime::EPOCH,
-            )
-            .unwrap()
+            derive_body_driven(driver, body, &hosts, &disc, SOLAR_AGE, UniverseTime::EPOCH).unwrap()
         };
         let (solved, t51b) = (derive(PassDriver::Solve), derive(PassDriver::T51b));
         assert_eq!(solved.convergence(), Convergence::Converged, "{name}");
@@ -2373,48 +2239,29 @@ fn a_body_that_settles_keeps_t51b_s_bits() {
     }
 }
 
-/// P14.T51.i: the bare regolith's Bond albedo the cold traps read comes from the batch's passes
-/// alone: under version 22's rules every body of the table has none, and under the batch the
+/// P14.T51.i: the bare regolith's Bond albedo the cold traps read comes from the passes: the
 /// table's Moon, Mercury and Ceres take the Moon's 0.11 to the bit, as their area mix does (their
 /// cold-trap figures move by nothing), and Ganymede, icy, its frost's.
 #[test]
 fn the_regolith_albedo_is_the_batch_s_bare_ground() {
-    let (held, batch) = (
-        table_under(SnapshotRules::Held),
-        table_under(SnapshotRules::Batch),
-    );
-    for (name, body) in &held {
-        assert_eq!(body.regolith_albedo(), None, "{name}");
-    }
+    let batch = table();
     let moon = SurfaceState::Airless.albedo(SurfaceMaterial::Rock).value();
     for name in ["Moon", "Mercury", "Ceres"] {
         let body = found(&batch, name);
-        assert_same_bits(body.regolith_albedo().unwrap(), moon);
+        assert_same_bits(body.regolith_albedo(), moon);
         assert_same_bits(body.albedo().value(), moon);
     }
     let frost = Regolith::of_material(SurfaceMaterial::Ice)
         .bond(SurfaceState::Airless, &sun_bands())
         .bond;
-    let ganymede = found(&batch, "Ganymede").regolith_albedo().unwrap();
+    let ganymede = found(&batch, "Ganymede").regolith_albedo();
     assert!(
         (ganymede - frost).abs() < 1e-3,
         "{ganymede} against {frost}"
     );
 }
 
-/// Under version 22's rules the passes are T13.c's fixed three, and `derive_body_under`'s held arm
-/// is `derive_body`, bit for bit, for every body of the table.
-#[test]
-fn under_the_held_rules_the_passes_are_t13c_s_three() {
-    let held = table_under(SnapshotRules::Held);
-    for ((name, body), (_, version_22)) in held.iter().zip(table()) {
-        assert_eq!(body.atmosphere_passes(), ATMOSPHERE_PASSES, "{name}");
-        assert_eq!(body.convergence(), Convergence::Fixed, "{name}");
-        assert_eq!(format!("{body:?}"), format!("{version_22:?}"), "{name}");
-    }
-}
-
-/// P14.T51.b under the batch, the table through the passes (their stand-in surface: no basins, a
+/// P14.T51.b, the table through the passes (their stand-in surface: no basins, a
 /// cover linear across an isothermal climate, the regolith's lid not known):
 ///
 /// - Venus keeps its 0.76 exactly, by its full deck;
@@ -2431,7 +2278,7 @@ fn under_the_held_rules_the_passes_are_t13c_s_three() {
 ///   passes (`Converged`, P14.T51.h); the rest are recorded.
 #[test]
 fn under_the_batch_the_table_takes_the_area_mix() {
-    let batch = table_under(SnapshotRules::Batch);
+    let batch = table();
     let venus = found(&batch, "Venus");
     assert_eq!(venus.atmosphere().state(), SurfaceState::RunawayGreenhouse);
     assert_same_bits(venus.albedo().value(), 0.76);
@@ -2457,7 +2304,7 @@ fn under_the_batch_the_table_takes_the_area_mix() {
     );
     let disc = solar_disc();
     let jupiter = crate::planetary::derive::solar::placed(1_898.13e24, 5.203_8, 0.048_9, 0.5);
-    let jupiter = derived_under(SnapshotRules::Batch, &jupiter, &disc);
+    let jupiter = derived(&jupiter, &disc);
     assert_eq!(jupiter.atmosphere().state(), SurfaceState::GasEnvelope);
     assert!(
         (jupiter.albedo().value() - 0.57).abs() < 0.05,
@@ -2470,7 +2317,6 @@ fn under_the_batch_the_table_takes_the_area_mix() {
         jupiter.effective_temperature(),
         jupiter.atmosphere_passes()
     );
-    let version_22 = table();
     for (name, body) in &batch {
         let passes = body.atmosphere_passes();
         assert_eq!(
@@ -2482,10 +2328,9 @@ fn under_the_batch_the_table_takes_the_area_mix() {
             body.equilibrium_temperature().value(),
             equilibrium_temperature(body.flux(), body.albedo()).value(),
         );
-        let held = found(&version_22, name).equilibrium_temperature().value();
         eprintln!(
-            "{name}: {:?}, Bond albedo {:.5} under {:.4} of cloud, T_eq {:.2} K (22: {held:.2} K), \
-             T_s {:.2} K, {passes} passes",
+            "{name}: {:?}, Bond albedo {:.5} under {:.4} of cloud, T_eq {:.2} K, T_s {:.2} K, \
+             {passes} passes",
             body.atmosphere().state(),
             body.albedo().value(),
             body.atmosphere().cloud_fraction(),
@@ -2496,11 +2341,10 @@ fn under_the_batch_the_table_takes_the_area_mix() {
 }
 
 /// An icy belt member whose placement holds under 10% water (a Kuiper belt body of 10²¹ kg at 43
-/// au, its Chen and Kipping rank dense) takes, under the batch, the albedo of its record's bulk,
-/// ice (`icy_member_bulk`'s 0.35 at its lowest rank, at `moon_radius`'s radius), given to its
-/// derivation as its bulk: its fresh frost's, and so its equilibrium temperature; its placement's
-/// rock takes the Moon's 0.11, its lid not known. Below the bump the system gives a member no bulk
-/// (`PlanetarySystem`'s `with_record_bulk`).
+/// au, its Chen and Kipping rank dense) takes the albedo of its record's bulk, ice
+/// (`icy_member_bulk`'s 0.35 at its lowest rank, at `moon_radius`'s radius), given to its
+/// derivation as its bulk (`PlanetarySystem`'s `with_record_bulk`): its fresh frost's, and so its
+/// equilibrium temperature; its placement's rock takes the Moon's 0.11, its lid not known.
 #[test]
 fn an_icy_member_takes_the_albedo_of_its_record_s_ice() {
     let disc = solar_disc();
@@ -2508,10 +2352,7 @@ fn an_icy_member_takes_the_albedo_of_its_record_s_ice() {
     let placed = [0.02, 0.05, 0.1, 0.2]
         .into_iter()
         .map(|rank| crate::planetary::derive::solar::placed(kg, 43.0, 0.05, rank))
-        .find(|placed| {
-            let held = derived_under(SnapshotRules::Held, placed, &disc);
-            held.fractions().water() < ICY_WATER_FRACTION
-        })
+        .find(|placed| derived(placed, &disc).fractions().water() < ICY_WATER_FRACTION)
         .expect("a dense rank holds under 10% water");
     let ice = 0.35;
     let mass = placed.mass();
@@ -2523,8 +2364,8 @@ fn an_icy_member_takes_the_albedo_of_its_record_s_ice() {
             ice,
         )),
     );
-    let as_placed = derived_under(SnapshotRules::Batch, &placed, &disc);
-    let as_recorded = derived_under(SnapshotRules::Batch, &placed.with_bulk(bulk), &disc);
+    let as_placed = derived(&placed, &disc);
+    let as_recorded = derived(&placed.with_bulk(bulk), &disc);
     assert_eq!(as_recorded.atmosphere().state(), SurfaceState::Airless);
     let frost = Regolith::of_material(SurfaceMaterial::Ice)
         .bond(SurfaceState::Airless, &sun_bands())
@@ -2557,7 +2398,7 @@ fn an_icy_member_takes_the_albedo_of_its_record_s_ice() {
     );
 }
 
-/// A Pluto at its own inventory under the batch (NASA's Pluto fact sheet's mass, 1.303 × 10²² kg,
+/// A Pluto at its own inventory (NASA's Pluto fact sheet's mass, 1.303 × 10²² kg,
 /// and mean radius, 1,188.3 km, from memory, at its 39.48 au and e 0.2488): airless with no N₂ until
 /// P14.T53.c, its albedo recorded, not asserted (decision-triton-and-e101 §1.6). Its cheap
 /// invariants are: the airless state, a finite albedo in [0, 1), and passes that converge within
@@ -2568,10 +2409,7 @@ fn a_pluto_at_its_own_inventory_is_recorded() {
     let (kg, km, a, e) = (1.303e22, 1_188.3, 39.48, 0.248_8);
     let rank = crate::planetary::derive::solar::rank_for(&disc, kg, km, a, e).clamp(0.001, 0.999);
     let placed = crate::planetary::derive::solar::placed(kg, a, e, rank);
-    let (batch, held) = (
-        derived_under(SnapshotRules::Batch, &placed, &disc),
-        derived_under(SnapshotRules::Held, &placed, &disc),
-    );
+    let batch = derived(&placed, &disc);
     assert_eq!(batch.atmosphere().state(), SurfaceState::Airless);
     let albedo = batch.albedo().value();
     assert!(
@@ -2585,8 +2423,8 @@ fn a_pluto_at_its_own_inventory_is_recorded() {
         batch.atmosphere_passes()
     );
     eprintln!(
-        "Pluto at its own inventory under the batch: {:?}, Bond albedo {:.5}, T_eq {:.2} K, N2 \
-         {:.3e} Pa (22: {:?}, {:.5} at {:.2} K), water {:.3}",
+        "Pluto at its own inventory: {:?}, Bond albedo {:.5}, T_eq {:.2} K, N2 {:.3e} Pa, water \
+         {:.3}",
         batch.atmosphere().state(),
         batch.albedo().value(),
         batch.equilibrium_temperature().value(),
@@ -2595,16 +2433,12 @@ fn a_pluto_at_its_own_inventory_is_recorded() {
             .partial_pressures()
             .of(Gas::Nitrogen)
             .value(),
-        held.atmosphere().state(),
-        held.albedo().value(),
-        held.equilibrium_temperature().value(),
         batch.fractions().water()
     );
 }
 
-/// P14.T51.b's cost: each table body's derivation under version 22's rules and under the batch's
-/// passes with their area mix, run by name in release and recorded in plan 14's Risks. A timing
-/// alone, asserting nothing.
+/// P14.T51.b's cost: each table body's derivation, its passes with their area mix, run by name in
+/// release and recorded in plan 14's Risks. A timing alone, asserting nothing.
 #[test]
 #[ignore = "a timing, run by name in release"]
 fn time_the_batch_passes() {
@@ -2613,31 +2447,21 @@ fn time_the_batch_passes() {
     let mut sink = 0.0;
     for &(name, kg, km, a, e) in table_bodies() {
         let placed = placed_about_the_sun(&disc, (kg, km, a, e));
-        let mut each = [0.0; 2];
-        for (k, rules) in [SnapshotRules::Held, SnapshotRules::Batch]
-            .into_iter()
-            .enumerate()
-        {
-            let start = std::time::Instant::now();
-            for _ in 0..n {
-                sink += derived_under(rules, &placed, &disc).albedo().value();
-            }
-            each[k] = start.elapsed().as_secs_f64() / f64::from(n) * 1e3;
+        let start = std::time::Instant::now();
+        for _ in 0..n {
+            sink += derived(&placed, &disc).albedo().value();
         }
-        let passes = derived_under(SnapshotRules::Batch, &placed, &disc).atmosphere_passes();
+        let each = start.elapsed().as_secs_f64() / f64::from(n) * 1e3;
+        let passes = derived(&placed, &disc).atmosphere_passes();
         eprintln!(
-            "{name}: derive_body {:.3} ms held, {:.3} ms under the batch ({passes} passes, {:.3} \
-             ms a pass)",
-            each[0],
-            each[1],
-            each[1] / f64::from(passes)
+            "{name}: derive_body {each:.3} ms ({passes} passes, {:.3} ms a pass)",
+            each / f64::from(passes)
         );
     }
     eprintln!("({sink})");
 }
 
-// P14.T57.a: the greenhouse's calibration at Venus's measured state, then water at Earth, under
-// the batch, held at 22 by the lane's hold.
+// P14.T57.a: the greenhouse's calibration at Venus's measured state, then water at Earth.
 
 use crate::planetary::chem::partition::WATER_SURFACE_HUMIDITY;
 
@@ -2665,8 +2489,8 @@ fn venus_measured_kg() -> (f64, f64) {
 
 /// The table's Venus given its measured inventory by hand: its carbon's and nitrogen's ranks those
 /// at which T13.a's log-normal gives [`venus_measured_kg`] (z = log₁₀(M ÷ `M_median`) ÷ 0.5 dex,
-/// ranked by Φ through `math::erfc`), derived about the Sun under the lane's rules `snapshot`.
-fn measured_venus(snapshot: SnapshotRules) -> DerivedBody {
+/// ranked by Φ through `math::erfc`), derived about the Sun.
+fn measured_venus() -> DerivedBody {
     let disc = solar_disc();
     let &(_, kg, km, a, e) = table_bodies().find(|(name, ..)| *name == "Venus").unwrap();
     let placed = placed_about_the_sun(&disc, (kg, km, a, e));
@@ -2681,7 +2505,7 @@ fn measured_venus(snapshot: SnapshotRules) -> DerivedBody {
         nitrogen: rank(n2, EARTH_NITROGEN_PER_MASS * mass),
         ..VolatileDraws::MEDIAN
     };
-    derived_under(snapshot, &placed.with_volatiles(draws), &disc)
+    derived(&placed.with_volatiles(draws), &disc)
 }
 
 /// Venus's measured surface temperature, the fit's target: 737 K, the mean over a sphere of its
@@ -2708,7 +2532,7 @@ fn needed_depth(surface: f64, equilibrium: f64) -> f64 {
 
 /// The column weight, Pa, at which water's partial pressure, its mole fraction times the summed
 /// weights, is [`WATER_SURFACE_HUMIDITY`] of its saturation pressure `saturation` among the other
-/// gases of `partials` (P14.T51.a's minor branch, as `capped_methane_weight` holds methane): the
+/// gases of `partials` (P14.T51.a's minor branch, `weight_meeting_cap`): the
 /// positive root of w² + b w − c = 0, b = `W_o` − h `p_sat`, c = h `p_sat` `μ_w` `Σ_o` (`w_o` ÷ `μ_o`).
 pub(crate) fn water_weight_at_humidity(partials: &PartialPressures, saturation: f64) -> f64 {
     let others = Gas::ALL.into_iter().filter(|&gas| gas != Gas::Water);
@@ -2737,7 +2561,7 @@ fn at_measured_albedo(body: &DerivedBody, state: SurfaceState) -> Kelvin {
     equilibrium_temperature(body.flux(), state.albedo(SurfaceMaterial::Rock))
 }
 
-/// The table's Earth's inputs under the batch at the equilibrium temperature `equilibrium`, its
+/// The table's Earth's inputs at the equilibrium temperature `equilibrium`, its
 /// inventory and bulk as derived: what its passes give its greenhouse, with the hosts' light and
 /// history Earth's ([`earth_inputs`]).
 fn table_earth_inputs(earth: &DerivedBody, equilibrium: Kelvin) -> AtmosphereInputs {
@@ -2760,11 +2584,11 @@ fn table_earth_inputs(earth: &DerivedBody, equilibrium: Kelvin) -> AtmosphereInp
 /// fits read fails here with the refit:
 ///
 /// - carbon dioxide on Venus at its measured inventory, given by hand ([`measured_venus`]), at the
-///   irradiation for 0.76, which the batch's passes give it: its τ at [`VENUS_SURFACE_TEMPERATURE`]
+///   irradiation for 0.76, which the passes give it: its τ at [`VENUS_SURFACE_TEMPERATURE`]
 ///   less the nitrogen term as built, over √p(CO₂), 14.862;
 /// - then water on the table's Earth, whose carbon dioxide and nitrogen are Earth's, at the
 ///   irradiation for 0.294: its water held by the partition on the minor branch at Manabe and
-///   Wetherald's humidity (checked at its own `T_s` under the batch), solved at
+///   Wetherald's humidity (checked at its own `T_s`), solved at
 ///   [`EARTH_SURFACE_TEMPERATURE`], and its τ there less the carbon dioxide and nitrogen terms, over
 ///   √p(H₂O), 4.469.
 ///
@@ -2773,7 +2597,7 @@ fn table_earth_inputs(earth: &DerivedBody, equilibrium: Kelvin) -> AtmosphereInp
 /// `under_the_batch_titan_is_94_k`).
 #[test]
 fn the_greenhouse_constants_are_their_fits() {
-    let fitted = SnapshotRules::Batch.greenhouse();
+    let fitted = GreenhouseConstants::FITTED;
     let root = |p: f64| (p / PASCALS_PER_BAR).sqrt();
     let nitrogen_term = |partials: &PartialPressures, equilibrium: f64| {
         fitted.nitrogen()
@@ -2781,7 +2605,7 @@ fn the_greenhouse_constants_are_their_fits() {
             * root(partials.of(Gas::Nitrogen).value())
     };
 
-    let venus = measured_venus(SnapshotRules::Batch);
+    let venus = measured_venus();
     let (co2_kg, n2_kg) = venus_measured_kg();
     assert!((venus.inventory().carbon_dioxide().value() / co2_kg - 1.0).abs() < 1e-9);
     assert!((venus.inventory().nitrogen().value() / n2_kg - 1.0).abs() < 1e-9);
@@ -2806,7 +2630,7 @@ fn the_greenhouse_constants_are_their_fits() {
         "refit GREENHOUSE_CARBON_DIOXIDE at Venus's measured state: {carbon_dioxide:.3}"
     );
 
-    let batch = table_under(SnapshotRules::Batch);
+    let batch = table();
     let earth = found(&batch, "Earth");
     let air = earth.atmosphere();
     assert_eq!(air.state(), SurfaceState::Temperate);
@@ -2840,23 +2664,19 @@ fn the_greenhouse_constants_are_their_fits() {
 }
 
 /// P14.T57.a: Venus at its measured inventory, given by hand ([`measured_venus`]), is 737 K ± 2%
-/// under the batch's constants; under version 22's, fitted at the median, it was 778 K (recorded).
+/// under P14.T57.a's constants; under version 22's, fitted at the median, it was 778 K.
 #[test]
 fn the_measured_venus_reaches_737_k_under_the_batch() {
-    let batch = measured_venus(SnapshotRules::Batch);
+    let batch = measured_venus();
     let t = batch.atmosphere().surface_temperature().value();
-    let held = measured_venus(SnapshotRules::Held)
-        .atmosphere()
-        .surface_temperature()
-        .value();
-    eprintln!("the measured Venus: {t:.3} K under the batch, {held:.3} K under version 22's");
+    eprintln!("the measured Venus: {t:.3} K");
     assert!(
         ((t - VENUS_SURFACE_TEMPERATURE) / VENUS_SURFACE_TEMPERATURE).abs() < 0.02,
         "{t} K"
     );
 }
 
-/// P14.T57.a: the measured Earth, the table's Earth's inputs under the batch at the generator's
+/// P14.T57.a: the measured Earth, the table's Earth's inputs at the generator's
 /// irradiation for Earth's measured Bond albedo, 0.294, through the passes' greenhouse and
 /// partition (`atmosphere_under` on the passes' stand-in surface), is 288 ± 2 K: the solver's fixed
 /// point against the fit's closed form, which puts it at 288.0 K. Its carbon dioxide and nitrogen
@@ -2867,11 +2687,10 @@ fn the_measured_venus_reaches_737_k_under_the_batch() {
 /// real inputs (decision-p14-t57a-fits §1.5).
 #[test]
 fn the_measured_earth_holds_288_k_under_the_batch() {
-    let batch = table_under(SnapshotRules::Batch);
+    let batch = table();
     let earth = found(&batch, "Earth");
     let equilibrium = at_measured_albedo(earth, SurfaceState::Temperate);
     let measured = atmosphere_under(
-        SnapshotRules::Batch,
         &table_earth_inputs(earth, equilibrium),
         &PassSurface::stand_in(PassLight::HottestHost),
     );
@@ -2907,7 +2726,7 @@ fn the_measured_earth_holds_288_k_under_the_batch() {
 /// constant was fitted to give it (decision-p14-moons §4.2; decision-p14-t57a-fits §3).
 #[test]
 fn the_table_s_median_venus_holds_55_to_60_bar_and_reaches_680_to_710_k() {
-    let batch = table_under(SnapshotRules::Batch);
+    let batch = table();
     let air = found(&batch, "Venus").atmosphere();
     assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
     let bar = air.surface_pressure().unwrap().value() / PASCALS_PER_BAR;
@@ -2923,7 +2742,7 @@ fn the_table_s_median_venus_holds_55_to_60_bar_and_reaches_680_to_710_k() {
 /// Under the batch at 23's stand-ins it reaches 92.8 K at a Bond albedo of 0.536 (measured 0.265).
 #[test]
 fn under_the_batch_titan_is_94_k() {
-    let batch = table_under(SnapshotRules::Batch);
+    let batch = table();
     let titan = found(&batch, "Titan");
     let t = titan.atmosphere().surface_temperature().value();
     eprintln!(

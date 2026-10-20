@@ -11,9 +11,8 @@ use crate::id::SystemId;
 use crate::planetary::chem::partition::{
     ClimateSpan, ColumnInventory, Ground, WaterCover, partition,
 };
-use crate::planetary::derive::atmosphere::SnapshotRules;
 use crate::planetary::derive::solar::historic_table;
-use crate::planetary::hooks::figures::table_figures_under;
+use crate::planetary::hooks::figures::table_figures;
 use crate::planetary::hooks::surface::tests::{inputs_of, spin_of};
 use crate::planetary::hooks::surface::{SurfaceConditions, SurfaceInputs, ZONAL_AREA_POINTS};
 use crate::units::KilogramsPerCubicMetre;
@@ -166,7 +165,7 @@ fn the_cold_traps_are_held_only_until_the_24_bump() {
     let sky = lunar_sky();
     let mut held_bodies = 0;
     for (name, body) in historic_table() {
-        let Some(figures) = table_figures_under(SnapshotRules::Batch, &body) else {
+        let Some(figures) = table_figures(&body) else {
             continue;
         };
         let inputs = SurfaceInputs {
@@ -174,21 +173,17 @@ fn the_cold_traps_are_held_only_until_the_24_bump() {
             ocean_weight: figures.ocean_weight(),
             ..inputs_of(&body, spin_of(name))
         };
-        let Some(conditions) = SurfaceConditions::derive_under(SnapshotRules::Batch, &inputs)
-        else {
+        let Some(conditions) = SurfaceConditions::derive(&inputs) else {
             continue;
         };
         let (air, g) = (body.atmosphere(), body.surface_gravity());
         let under = |traps| {
-            figures
-                .condensates_under(
-                    SnapshotRules::Batch,
-                    air,
-                    &conditions,
-                    g,
-                    &RecordColdTraps::at_the_albedo_of(traps, &sky, air),
-                )
-                .unwrap()
+            figures.condensates_under(
+                air,
+                &conditions,
+                g,
+                &RecordColdTraps::at_the_albedo_of(traps, &sky, air),
+            )
         };
         let (solved, held) = under(ColdTrapRules::Held);
         let profile = conditions.cold_profile();
@@ -732,25 +727,23 @@ fn the_merge_keeps_t51a_s_order() {
 fn the_record_path_publishes_the_moon_s_cold_traps_under_the_batch() {
     let bodies = historic_table();
     let (_, moon) = bodies.iter().find(|(name, _)| *name == "Moon").unwrap();
-    let figures = table_figures_under(SnapshotRules::Batch, moon).unwrap();
+    let figures = table_figures(moon).unwrap();
     let inputs = SurfaceInputs {
         heat_flow: figures.heat_flow(),
         ocean_weight: figures.ocean_weight(),
         ..inputs_of(moon, spin_of("Moon"))
     };
-    let conditions = SurfaceConditions::derive_under(SnapshotRules::Batch, &inputs).unwrap();
+    let conditions = SurfaceConditions::derive(&inputs).unwrap();
     let (air, g) = (moon.atmosphere(), moon.surface_gravity());
     let sky = lunar_sky();
     let under = |traps| {
         figures
             .condensates_under(
-                SnapshotRules::Batch,
                 air,
                 &conditions,
                 g,
                 &RecordColdTraps::at_the_albedo_of(traps, &sky, air),
             )
-            .unwrap()
             .1
     };
     let (held, batch) = (under(ColdTrapRules::Held), under(ColdTrapRules::Batch));
@@ -813,7 +806,7 @@ fn time_the_cold_traps() {
             "Ceres" => own(4.0, (2.767, 0.0785)),
             _ => lunar_sky(),
         };
-        let Some(figures) = table_figures_under(SnapshotRules::Batch, &body) else {
+        let Some(figures) = table_figures(&body) else {
             continue;
         };
         let inputs = SurfaceInputs {
@@ -821,8 +814,7 @@ fn time_the_cold_traps() {
             ocean_weight: figures.ocean_weight(),
             ..inputs_of(&body, spin_of(name))
         };
-        let Some(conditions) = SurfaceConditions::derive_under(SnapshotRules::Batch, &inputs)
-        else {
+        let Some(conditions) = SurfaceConditions::derive(&inputs) else {
             continue;
         };
         let (air, g) = (body.atmosphere(), body.surface_gravity());
@@ -837,15 +829,12 @@ fn time_the_cold_traps() {
             {
                 let start = std::time::Instant::now();
                 for _ in 0..n {
-                    let (_, published) = figures
-                        .condensates_under(
-                            SnapshotRules::Batch,
-                            air,
-                            &conditions,
-                            g,
-                            &RecordColdTraps::at_the_albedo_of(traps, &sky, air),
-                        )
-                        .unwrap();
+                    let (_, published) = figures.condensates_under(
+                        air,
+                        &conditions,
+                        g,
+                        &RecordColdTraps::at_the_albedo_of(traps, &sky, air),
+                    );
                     entries += published.entries().len();
                 }
                 let ms = start.elapsed().as_secs_f64() / f64::from(n) * 1e3;
@@ -873,7 +862,7 @@ fn table_moon() -> (
         .into_iter()
         .find(|(name, _)| *name == "Moon")
         .unwrap();
-    let figures = table_figures_under(SnapshotRules::Batch, &moon).unwrap();
+    let figures = table_figures(&moon).unwrap();
     (moon, figures)
 }
 
@@ -924,18 +913,15 @@ fn the_trap_fraction_is_the_latitude_integral_of_fractions_at() {
         ocean_weight: figures.ocean_weight(),
         ..inputs_of(&moon, spin_of("Moon"))
     };
-    let conditions = SurfaceConditions::derive_under(SnapshotRules::Batch, &inputs).unwrap();
+    let conditions = SurfaceConditions::derive(&inputs).unwrap();
     let (air, g) = (moon.atmosphere(), moon.surface_gravity());
     let sky = lunar_sky();
-    let (_, batch) = figures
-        .condensates_under(
-            SnapshotRules::Batch,
-            air,
-            &conditions,
-            g,
-            &RecordColdTraps::at_the_albedo_of(ColdTrapRules::Batch, &sky, air),
-        )
-        .unwrap();
+    let (_, batch) = figures.condensates_under(
+        air,
+        &conditions,
+        g,
+        &RecordColdTraps::at_the_albedo_of(ColdTrapRules::Batch, &sky, air),
+    );
     let ground = ColdTrapGround::new(&ColdTrapGroundParts {
         bond_albedo: air.albedo().value(),
         heat_flow: figures.heat_flow(),
@@ -1353,7 +1339,7 @@ impl RecordMoon {
             ocean_weight: figures.ocean_weight(),
             ..inputs_of(&moon, spin_of("Moon"))
         };
-        let conditions = SurfaceConditions::derive_under(SnapshotRules::Batch, &inputs).unwrap();
+        let conditions = SurfaceConditions::derive(&inputs).unwrap();
         Self {
             figures,
             conditions,
@@ -1364,29 +1350,22 @@ impl RecordMoon {
 
     /// Its published condensates under the batch's cold traps, its atmosphere `air` and its
     /// regolith's albedo `regolith`.
-    fn published(&self, air: &Atmosphere, regolith: Option<f64>, sky: &ColdTrapSky) -> Condensates {
+    fn published(&self, air: &Atmosphere, regolith: f64, sky: &ColdTrapSky) -> Condensates {
         let traps = RecordColdTraps {
             rules: ColdTrapRules::Batch,
             sky,
             regolith_albedo: regolith,
         };
         self.figures
-            .condensates_under(
-                SnapshotRules::Batch,
-                air,
-                &self.conditions,
-                self.gravity,
-                &traps,
-            )
-            .unwrap()
+            .condensates_under(air, &self.conditions, self.gravity, &traps)
             .1
     }
 }
 
 /// P14.T51.i: the cold traps read the bare regolith's albedo, not the area mix's
 /// (decision-p14-t51-batch §6). The table's Moon whose area-mix albedo has risen to 0.6 under a
-/// frost keeps, to the bit, the condensates its regolith's 0.11 gives; a brighter regolith moves
-/// them; and a derivation that gives no regolith albedo keeps P14.T51.a's.
+/// frost keeps, to the bit, the condensates its regolith's 0.11 gives, and a brighter regolith
+/// moves them.
 #[test]
 fn a_body_whose_area_mix_albedo_rises_keeps_the_traps_its_regolith_gives() {
     let moon = RecordMoon::new();
@@ -1395,27 +1374,14 @@ fn a_body_whose_area_mix_albedo_rises_keeps_the_traps_its_regolith_gives() {
     let frosted = moon
         .air
         .with_albedo(crate::planetary::derive::BondAlbedo::new(0.6).unwrap());
-    let bare = moon.published(&moon.air, Some(regolith), &sky);
-    let frost = moon.published(&frosted, Some(regolith), &sky);
+    let bare = moon.published(&moon.air, regolith, &sky);
+    let frost = moon.published(&frosted, regolith, &sky);
     assert_eq!(format!("{frost:?}"), format!("{bare:?}"));
     let water = Gas::Water.substance();
     let ice = bare.entry(water, CondensatePhase::Solid).unwrap();
     assert!(ice.trapped_area_fraction() > 0.0, "{ice:?}");
-    let brighter = moon.published(&moon.air, Some(0.6), &sky);
+    let brighter = moon.published(&moon.air, 0.6, &sky);
     assert_ne!(format!("{brighter:?}"), format!("{bare:?}"));
-    let held = moon
-        .figures
-        .condensates_under(
-            SnapshotRules::Batch,
-            &moon.air,
-            &moon.conditions,
-            moon.gravity,
-            &RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, &moon.air),
-        )
-        .unwrap()
-        .1;
-    let none = moon.published(&moon.air, None, &sky);
-    assert_eq!(format!("{none:?}"), format!("{held:?}"));
 }
 
 /// P14.T51.i: one field, built once a body, serves every publish (decision-p14-t51-batch §6):
@@ -1426,16 +1392,12 @@ fn a_body_whose_area_mix_albedo_rises_keeps_the_traps_its_regolith_gives() {
 fn one_field_built_once_serves_every_publish() {
     let moon = RecordMoon::new();
     let sky = lunar_sky();
-    let (solved, _) = moon
-        .figures
-        .condensates_under(
-            SnapshotRules::Batch,
-            &moon.air,
-            &moon.conditions,
-            moon.gravity,
-            &RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, &moon.air),
-        )
-        .unwrap();
+    let (solved, _) = moon.figures.condensates_under(
+        &moon.air,
+        &moon.conditions,
+        moon.gravity,
+        &RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, &moon.air),
+    );
     let profile = moon.conditions.cold_profile();
     let cold_area = |t: Kelvin| profile.area_below(t);
     let cover = Cover {
@@ -1451,7 +1413,7 @@ fn one_field_built_once_serves_every_publish() {
         crust: moon.figures.impactors().crust(),
         craters: moon.figures.craters(),
         sky: &sky,
-        regolith_albedo: Some(moon.air.albedo().value()),
+        regolith_albedo: moon.air.albedo().value(),
     };
     let field = ColdTrapField::of(&body(&moon.air), &solved).unwrap();
     let frosted = moon

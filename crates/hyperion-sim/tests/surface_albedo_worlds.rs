@@ -69,7 +69,7 @@ fn the_scaled_classes_give_each_thin_aired_reference_world_s_p() {
         );
         let bond = inputs.surface_state().albedo(inputs.surface_material());
         assert!(
-            (row.reference_bond.value() - bond.value()).abs() < 1e-15,
+            (row.reference_bond().value() - bond.value()).abs() < 1e-15,
             "{name}: the photometry draws it with its analogue's own p"
         );
         let target = [row.albedo.b, row.albedo.v, row.albedo.r];

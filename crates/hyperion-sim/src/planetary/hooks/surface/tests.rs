@@ -9,8 +9,7 @@ use crate::planetary::derive::atmosphere::{
     GreenhouseConstants, NITROGEN_REFERENCE_TEMPERATURE, VolatileDraws,
 };
 use crate::planetary::derive::solar::{
-    PLANETS, SMALL_BODIES, SOLAR_AGE, derive_historic, historic_table, historic_under, orbit,
-    solar_disc,
+    PLANETS, SMALL_BODIES, SOLAR_AGE, derive_historic, historic, historic_table, orbit, solar_disc,
 };
 use crate::planetary::derive::{DerivedBody, PlacedBody};
 use crate::planetary::frames::FrameSpin;
@@ -201,14 +200,13 @@ fn the_greenhouse_gain_takes_nothing_from_a_gas_at_or_above_its_critical_tempera
     let (air, inventory) = (weights(5e5), weights(1e6));
     let moles = |gas: Gas| 5e5 / gas.molar_mass_g_per_mol();
     let x = moles(co2) / (moles(co2) + moles(n2));
-    let gain = |t: f64, rules: SnapshotRules| {
+    let gain = |t: f64| {
         greenhouse_gain(
             Kelvin::new(t),
             &air,
             1.0,
             &[(n2.substance(), 1.0 - x), (co2.substance(), x)],
             Kelvin::new(250.0),
-            rules,
             &inventory,
         )
     };
@@ -219,11 +217,9 @@ fn the_greenhouse_gain_takes_nothing_from_a_gas_at_or_above_its_critical_tempera
         .unwrap()
         .critical_temperature()
         .value();
-    assert!(gain(300.0, SnapshotRules::Batch) > 0.0);
+    assert!(gain(300.0) > 0.0);
     for t in [critical, 310.0] {
-        for rules in [SnapshotRules::Batch, SnapshotRules::Held] {
-            assert_same_bits(gain(t, rules), 0.0);
-        }
+        assert_same_bits(gain(t), 0.0);
     }
 }
 
@@ -382,20 +378,24 @@ fn a_weight_without_a_molar_mass_or_not_finite_is_refused() {
 
 #[test]
 fn an_airless_body_has_no_gases_and_no_mean_molar_mass() {
-    let mut airless = 0;
+    let mut airless = Vec::new();
     for (name, body, conditions) in table() {
         if body.atmosphere().state() != SurfaceState::Airless {
             continue;
         }
-        airless += 1;
+        airless.push(name);
         assert!(conditions.gases().is_empty(), "{name}");
         assert_eq!(conditions.mean_molar_mass_g_per_mol(), None, "{name}");
         assert_eq!(conditions.heat_capacity_over_r(), None, "{name}");
         assert_eq!(conditions.surface_pressure(), Pascals::ZERO, "{name}");
         assert!(!conditions.liquid_water(), "{name}");
     }
-    // Mercury, the Moon, Ganymede and Ceres.
-    assert_eq!(airless, 4);
+    // Mercury, the Moon and Ceres; the table's Ganymede, airless under T13.c's ice, is a snowball
+    // under the batch (`atmosphere::tests`' table, printed).
+    eprintln!("airless: {airless:?}");
+    for name in ["Mercury", "Moon", "Ceres"] {
+        assert!(airless.contains(&name), "{name}");
+    }
 }
 
 #[test]
@@ -487,7 +487,7 @@ fn earth_column() -> (Column, SeasonalSpin) {
 fn batch_earth_air() -> &'static (PartialPressures, PartialPressures) {
     static AIR: OnceLock<(PartialPressures, PartialPressures)> = OnceLock::new();
     AIR.get_or_init(|| {
-        let earth = historic_under(SnapshotRules::Batch, "Earth");
+        let earth = historic("Earth");
         let air = earth.atmosphere();
         (*air.partial_pressures(), *air.inventory_weights())
     })
@@ -522,7 +522,7 @@ fn with_water_at_humidity(air: &PartialPressures, surface: Kelvin) -> (PartialPr
 /// The greenhouse gain of the batch's measured Earth, by hand (decision-pre-23-review item 20;
 /// decision-p14-t57a-fits §1.3): its air ([`batch_earth_air`]) with its water at the partition's
 /// humidity at `surface` ([`with_water_at_humidity`]), under P14.T57.a's constants, water's 4.47
-/// ([`GreenhouseConstants::FITTED`], whichever rules are in force), in a column of grey optical
+/// ([`GreenhouseConstants::FITTED`]), in a column of grey optical
 /// depth `tau`. The water counts as the batch's rule counts a gas the partition holds at its cap,
 /// at its curve's slope at `surface` on water's phase diagram (44.47 kJ mol⁻¹ at 288 K).
 fn earth_gain(surface: Kelvin, tau: f64) -> f64 {
@@ -546,10 +546,6 @@ fn earth_gain(surface: Kelvin, tau: f64) -> f64 {
 #[test]
 fn the_measured_earth_s_gain_is_the_batch_s_rule() {
     let (column, _) = earth_column();
-    assert_eq!(
-        SnapshotRules::Batch.greenhouse(),
-        GreenhouseConstants::FITTED
-    );
     let (air, inventory) = batch_earth_air();
     let t_s = column.surface_temperature;
     let (wet, x_w) = with_water_at_humidity(air, t_s);
@@ -559,7 +555,6 @@ fn the_measured_earth_s_gain_is_the_batch_s_rule() {
         column.optical_depth,
         &[(Gas::Water.substance(), x_w)],
         column.equilibrium_temperature,
-        SnapshotRules::Batch,
         inventory,
     );
     let diagram = Gas::Water.substance().substance().phase_diagram().unwrap();
@@ -587,7 +582,8 @@ fn the_measured_earth_s_gain_is_the_batch_s_rule() {
 ///
 /// 1. Φ⊕ in their measured balance: the measured Earth's column ([`earth_column`]) with its gain
 ///    set so that its `B_eff` is their B, 2.09, and D = 0.310 × 2.09, by bisection to the 42 K
-///    contrast on the batch's zonal solver, with version 22's bisection of each end as its oracle;
+///    contrast on the zonal solver, with the 64-step bisection of each end, version 22's solver
+///    kept for the tests ([`zonal_ends_bisected`]), as its oracle;
 /// 2. D⊕ at the batch's measured Earth ([`earth_gain`], `B_eff` 1.898), at that Φ⊕, by bisection
 ///    to 42 K, with the same oracle; the last of plan 14's order (N₂ on Titan, CO₂ on Venus, water
 ///    on Earth, then D⊕ on Earth's contrast).
@@ -604,7 +600,7 @@ fn earth_s_measured_state_takes_north_cahalan_and_coakley_s_partition() {
     let planck = column.restoring_w_per_m2_k();
     let effective = column.effective_restoring_w_per_m2_k();
     let weak = weak_gradient_transport(&column, &spin) * planck;
-    let contrast_under = |rules: SnapshotRules, effective: f64, conductance: f64, albedo: f64| {
+    let contrast_under = |solver: ZonalEnds, effective: f64, conductance: f64, albedo: f64| {
         let transport = ZonalTransport {
             planck,
             effective,
@@ -612,14 +608,14 @@ fn earth_s_measured_state_takes_north_cahalan_and_coakley_s_partition() {
             weak,
             albedo,
         };
-        let (equator, pole) = zonal_ends_under(
+        let (equator, pole) = solver(
             column.surface_temperature.value(),
             &transport,
             spin.obliquity,
-            rules,
         );
         equator - pole
     };
+    let (newton, oracle): (ZonalEnds, ZonalEnds) = (zonal_ends, zonal_ends_bisected);
     // 200 bisections of `range` for the value at which `contrast` is 42 K, rising in it where
     // `rising` and falling otherwise.
     let bisect = |range: (f64, f64), rising: bool, contrast: &dyn Fn(f64) -> f64| {
@@ -641,43 +637,37 @@ fn earth_s_measured_state_takes_north_cahalan_and_coakley_s_partition() {
     };
     let measured = balance.effective_restoring_w_per_m2_k();
     let partition = EARTH_TRANSPORT_PARTITION * measured;
-    let albedo_under = |rules: SnapshotRules| {
+    let albedo_under = |solver: ZonalEnds| {
         bisect((1.0, 3.0), true, &|albedo| {
-            contrast_under(rules, measured, partition, albedo)
+            contrast_under(solver, measured, partition, albedo)
         })
     };
-    let (albedo, albedo_oracle) = (
-        albedo_under(SnapshotRules::Batch),
-        albedo_under(SnapshotRules::Held),
-    );
+    let (albedo, albedo_oracle) = (albedo_under(newton), albedo_under(oracle));
     // 2. D⊕ at the batch's measured Earth, at that Φ⊕: the contrast falls as D grows.
-    let conductance_under = |rules: SnapshotRules| {
+    let conductance_under = |solver: ZonalEnds| {
         bisect((0.0, 3.0), false, &|conductance| {
-            contrast_under(rules, effective, conductance, albedo)
+            contrast_under(solver, effective, conductance, albedo)
         })
     };
-    let (conductance, conductance_oracle) = (
-        conductance_under(SnapshotRules::Batch),
-        conductance_under(SnapshotRules::Held),
-    );
+    let (conductance, conductance_oracle) = (conductance_under(newton), conductance_under(oracle));
     let ratio = 6.0 * conductance / effective;
     eprintln!(
         "the measured balance: B_eff {measured:.9} W/m2/K, D {partition:.10} W/m2/K, Phi \
-         {albedo:.10} (the held bisection's {albedo_oracle:.10}); the batch's measured Earth: B_P \
+         {albedo:.10} (the bisection's {albedo_oracle:.10}); the batch's measured Earth: B_P \
          {planck:.9} W/m2/K, gain {:.9}, B_eff {effective:.9} W/m2/K, D {conductance:.10} W/m2/K \
-         (the held bisection's {conductance_oracle:.10}), 6D/B_eff {ratio:.4}, tau {:.6}, at Phi \
-         1: {:.6} K",
+         (the bisection's {conductance_oracle:.10}), 6D/B_eff {ratio:.4}, tau {:.6}, at Phi 1: \
+         {:.6} K",
         column.greenhouse_gain,
         column.optical_depth,
-        contrast_under(SnapshotRules::Batch, effective, conductance, 1.0)
+        contrast_under(newton, effective, conductance, 1.0)
     );
-    for rules in [SnapshotRules::Batch, SnapshotRules::Held] {
-        let balanced = contrast_under(rules, measured, partition, albedo);
-        let at = contrast_under(rules, effective, conductance, albedo);
+    for (solver, name) in [(newton, "Newton"), (oracle, "bisection")] {
+        let balanced = contrast_under(solver, measured, partition, albedo);
+        let at = contrast_under(solver, effective, conductance, albedo);
         for contrast in [balanced, at] {
             assert!(
                 (contrast - EARTH_EQUATOR_POLE_CONTRAST_K).abs() < 1e-9,
-                "{rules:?}: {contrast} K"
+                "{name}: {contrast} K"
             );
         }
     }
@@ -743,7 +733,7 @@ fn the_measured_earth_s_fitted_profile_meets_its_checks() {
     // (decision-p14-t54a-bands §4.3): 0.035, against Earth's perennial ice, 0.045–0.051 of the
     // globe, and its annual mean, 0.068–0.078 (Fretwell et al. 2013, The Cryosphere 7, 375, Table
     // 7; IPCC AR5 WGI Ch. 4, Tables 4.1–4.2; the NSIDC Sea Ice Index, v4, 1981–2010).
-    let profile = ZonalProfile::of(&column, &spin, OceanWeight::FULL, SnapshotRules::Batch);
+    let profile = ZonalProfile::of(&column, &spin, OceanWeight::FULL);
     let cover = area_below(&profile.points(), PERENNIAL_ICE_TEMPERATURE);
     eprintln!("the measured Earth's cover: {cover}");
     assert!((0.02..=0.07).contains(&cover), "{cover}");
@@ -788,15 +778,15 @@ fn earth_s_restoring_and_transport_are_the_measured_ones() {
 }
 
 /// The greenhouse gain is the vapour feedback of the gases the surface holds at their cap. On the
-/// table's bodies under the rules in force an airless body has none, and T13.c's terms sum to its
-/// τ to the bit; no gas of Venus's or Titan's bulk is held, so neither feeds back. At the batch's
-/// state (decision-pre-23-review item 20; decision-p14-t54a-bands §3):
+/// table's bodies an airless body has none, and T13.c's terms sum to its τ to the bit; no gas of
+/// Venus's or Titan's bulk is held, so neither feeds back (decision-pre-23-review item 20;
+/// decision-p14-t54a-bands §3):
 ///
-/// - the generated Earth's water is held at its cap, below its inventory (some of it condensed, the
-///   batch's rule), and its gain is that water's feedback by hand under P14.T57.a's constants;
-/// - the table's Earth gives 0.3997 (`B_eff` 1.987 W m⁻² K⁻¹) under version 22's rules, and the
-///   batch's 0.4545 (`B_eff` 1.841) through the batch's passes at their stand-in surface, at
-///   290.57 K, the figures [`greenhouse_gain`]'s documentation states;
+/// - the generated Earth's water is held at its cap, below its inventory (some of it condensed),
+///   and its gain is that water's feedback by hand under P14.T57.a's constants;
+/// - the table's Earth gives 0.4545 (`B_eff` 1.841 W m⁻² K⁻¹) through the passes at their stand-in
+///   surface, at 290.57 K, the figures [`greenhouse_gain`]'s documentation states (version 22's
+///   rules gave 0.3997, `B_eff` 1.987);
 /// - band 3: the batch's generated Earth restores as the measured Earth does, its `B_eff` within
 ///   the fixed relative humidity Planck feedback's 1.7–2.3 W m⁻² K⁻¹ and within 0.10 of the
 ///   measured Earth's `B_eff`⊕ ([`earth_column`]), 1.841 against 1.898 at the stand-ins (printed
@@ -814,9 +804,7 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
             continue;
         }
         // T13.c's terms sum to its τ to the bit, at the derivation's equilibrium temperature.
-        let terms = air
-            .rules()
-            .greenhouse()
+        let terms = GreenhouseConstants::FITTED
             .terms(air.partial_pressures(), body.equilibrium_temperature());
         let sum = terms.iter().fold(0.0, |sum, &(_, term)| sum + term);
         assert_same_bits(sum, air.optical_depth());
@@ -826,19 +814,13 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
             column.greenhouse_gain,
             column.restoring_w_per_m2_k(),
         );
-        if *name == "Earth" {
-            assert!((column.greenhouse_gain - 0.3997).abs() < 5e-5, "{name}");
-            assert!((effective - 1.987).abs() < 5e-4, "{name}: {effective}");
-        }
     }
-    // The batch's generated Earth holds its water at its cap: below its inventory, some of it
-    // condensed. By hand, as `earth_gain` takes the measured state, at its own temperature, depth
-    // and water fraction, under P14.T57.a's constants, its curve's slope at T_s on water's phase
-    // diagram.
+    // The generated Earth holds its water at its cap: below its inventory, some of it condensed.
+    // By hand, as `earth_gain` takes the measured state, at its own temperature, depth and water
+    // fraction, under P14.T57.a's constants, its curve's slope at T_s on water's phase diagram.
     let spin = spin_of("Earth");
-    let earth = historic_under(SnapshotRules::Batch, "Earth");
-    let conditions = conditions_of(&earth, spin).unwrap();
-    let (column, _) = column_of(&earth, spin);
+    let (_, earth, conditions) = found(&table, "Earth");
+    let (column, _) = column_of(earth, spin);
     let air = earth.atmosphere();
     let t_s = air.surface_temperature();
     let water = Gas::Water;
@@ -853,12 +835,12 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
     let t = t_s.value();
     let tau_w = fitted.water() * (p_w.value() / 1e5).sqrt();
     let enthalpy = diagram.clausius_clapeyron_enthalpy_j_per_mol(t_s).unwrap();
-    let slope = (1.0 - fraction(&conditions, water)) * 0.5 * tau_w * enthalpy
-        / (MOLAR_GAS_CONSTANT * t * t);
+    let slope =
+        (1.0 - fraction(conditions, water)) * 0.5 * tau_w * enthalpy / (MOLAR_GAS_CONSTANT * t * t);
     let by_hand = t / 4.0 * 0.75 * slope / (1.0 + 0.75 * air.optical_depth());
     let effective = column.effective_restoring_w_per_m2_k();
     eprintln!(
-        "the batch's Earth: T_s {t:.3} K, gain {:.4} ({by_hand:.4} by hand), B_P {:.4}, B_eff \
+        "the generated Earth: T_s {t:.3} K, gain {:.4} ({by_hand:.4} by hand), B_P {:.4}, B_eff \
          {effective:.4} W/m2/K",
         column.greenhouse_gain,
         column.restoring_w_per_m2_k()
@@ -944,18 +926,18 @@ fn a_wet_world_s_gain_lies_within_zero_and_one_and_rises_to_330_k() {
 }
 
 /// P14.T51.a's partition holds a minor condensable's partial pressure at its humidity, below its
-/// saturation pressure: Earth's water at 0.77 of it, a column weight of 0.496 of it. So under the
-/// batch the greenhouse gain counts a gas where the partition holds it at its cap, on either
-/// branch, as the partition's own state says (some of its inventory condensed: its airborne weight
-/// below its inventory's), not where its weight reaches its saturation pressure, version 22's rule,
-/// under which the batch's Earth lost its water's feedback (decision-p14-t57a-fits §5). The batch's
-/// Earth keeps it, by hand as `the_greenhouse_gain_is_the_held_gases_feedback` takes it, with the
-/// batch's constants, the ones its τ was taken under; Venus's and Titan's bulk, which nothing
-/// condenses, give none.
+/// saturation pressure: Earth's water at 0.77 of it, a column weight of 0.496 of it. So the
+/// greenhouse gain counts a gas where the partition holds it at its cap, on either branch, as the
+/// partition's own state says (some of its inventory condensed: its airborne weight below its
+/// inventory's), not where its weight reaches its saturation pressure, version 22's rule, under
+/// which the batch's Earth lost its water's feedback (decision-p14-t57a-fits §5). The Earth keeps
+/// it, by hand as `the_greenhouse_gain_is_the_held_gases_feedback` takes it, with P14.T57.a's
+/// constants, the ones its τ was taken under; Venus's and Titan's bulk, which nothing condenses,
+/// give none.
 #[test]
 fn under_the_batch_the_greenhouse_gain_counts_the_water_the_partition_holds() {
     let spin = spin_of("Earth");
-    let earth = historic_under(SnapshotRules::Batch, "Earth");
+    let earth = historic("Earth");
     let conditions = conditions_of(&earth, spin).unwrap();
     let (column, _) = column_of(&earth, spin);
     let air = earth.atmosphere();
@@ -966,19 +948,15 @@ fn under_the_batch_the_greenhouse_gain_counts_the_water_the_partition_holds() {
     // Version 22's rule would not count it.
     assert!(p_w < diagram.saturation_pressure(t_s), "{p_w:?}");
     let t = t_s.value();
-    let tau_w = SnapshotRules::Batch.greenhouse().water() * (p_w.value() / 1e5).sqrt();
+    let tau_w = GreenhouseConstants::FITTED.water() * (p_w.value() / 1e5).sqrt();
     let slope = (1.0 - fraction(&conditions, water))
         * 0.5
         * tau_w
         * diagram.clausius_clapeyron_enthalpy_j_per_mol(t_s).unwrap()
         / (MOLAR_GAS_CONSTANT * t * t);
     let by_hand = t / 4.0 * 0.75 * slope / (1.0 + 0.75 * air.optical_depth());
-    let held = column_of(&found(&table(), "Earth").1, spin)
-        .0
-        .greenhouse_gain;
     eprintln!(
-        "Earth's greenhouse gain: {:.4} under the batch ({:.4} by hand), {held:.4} under version \
-         22's rules",
+        "Earth's greenhouse gain: {:.4} ({:.4} by hand)",
         column.greenhouse_gain, by_hand
     );
     assert!(
@@ -988,7 +966,7 @@ fn under_the_batch_the_greenhouse_gain_counts_the_water_the_partition_holds() {
     );
     assert!(column.greenhouse_gain > 0.3, "{}", column.greenhouse_gain);
     for name in ["Venus", "Titan"] {
-        let body = historic_under(SnapshotRules::Batch, name);
+        let body = historic(name);
         let (column, _) = column_of(&body, spin_of(name));
         assert!(
             column.greenhouse_gain.abs() < 1e-3,
@@ -1403,12 +1381,7 @@ fn the_zonal_ends_follow_a_nonlinear_diffusive_balance() {
     };
     for (degrees, six_d_over_b, equator, pole) in BALANCE {
         let obliquity = Radians::from(Degrees::new(degrees));
-        let (modal_equator, modal_pole) = zonal_ends_under(
-            1.0,
-            &transport(six_d_over_b),
-            obliquity,
-            SnapshotRules::Held,
-        );
+        let (modal_equator, modal_pole) = zonal_ends(1.0, &transport(six_d_over_b), obliquity);
         let contrast = (modal_equator - modal_pole) / (equator - pole) - 1.0;
         assert!(
             contrast.abs() < 0.06
@@ -1419,18 +1392,16 @@ fn the_zonal_ends_follow_a_nonlinear_diffusive_balance() {
         );
         // With no transport the ends are the radiative ones, to the bit.
         let (q_eq, q_pole) = annual_insolation(obliquity);
-        let (bare_equator, bare_pole) =
-            zonal_ends_under(1.0, &transport(0.0), obliquity, SnapshotRules::Held);
+        let (bare_equator, bare_pole) = zonal_ends(1.0, &transport(0.0), obliquity);
         assert_same_bits(bare_equator, math::powf(q_eq, 0.25));
         assert_same_bits(bare_pole, math::powf(q_pole, 0.25));
     }
     // The adopted values at two of the rows (the ruling's `zonal7.py`).
     let at = |degrees: f64, six_d_over_b: f64| {
-        zonal_ends_under(
+        zonal_ends(
             1.0,
             &transport(six_d_over_b),
             Radians::from(Degrees::new(degrees)),
-            SnapshotRules::Held,
         )
     };
     for (degrees, six_d_over_b, adopted_equator, adopted_pole) in
@@ -2033,14 +2004,25 @@ fn the_table_s_climate_ranges_are_the_ruling_s() {
             night_floor(heat_flow_of(body)).value(),
         );
     }
+    // Under the batch the table's Venus is the median draw at P14.T57.a's constants, 696.3 K
+    // (decision-p14-t57a-fits §3), where the ruling's 733.5–736.1 K was version 22's 735.1 K.
+    // Mars and Ganymede at the passes' stand-ins are printed: Mars ices over (196.6 K;
+    // decision-p14-t51-batch E3) and Ganymede is a snowball, until P14.T54.a's Batch C and main's
+    // ruling; the ruling's [203.3, 221.2] and [17.9, 142.8] K were version 22's.
+    for name in ["Mars", "Ganymede"] {
+        let (cold, warm) = found(&table, name).2.climate_range();
+        eprintln!(
+            "{name} at the passes' stand-ins: [{:.2}, {:.2}] K",
+            cold.value(),
+            warm.value()
+        );
+    }
     for (name, coldest, warmest) in [
         ("Earth", 261.7, 305.1),
         ("Mercury", 21.1, 585.2),
         ("Moon", 20.0, 361.0),
-        ("Venus", 733.5, 736.1),
-        ("Mars", 203.3, 221.2),
+        ("Venus", 694.9, 697.2),
         ("Ceres", 56.7, 202.9),
-        ("Ganymede", 17.9, 142.8),
     ] {
         let (cold, warm) = found(&table, name).2.climate_range();
         eprintln!("{name}: [{:.2}, {:.2}] K", cold.value(), warm.value());
@@ -2123,6 +2105,10 @@ fn an_airless_body_s_warmest_lies_between_its_dayside_and_its_subsolar_point() {
     let table = table();
     for name in ["Mercury", "Moon", "Ganymede", "Ceres"] {
         let (_, body, _) = found(&table, name);
+        if body.atmosphere().state() != SurfaceState::Airless {
+            // The table's Ganymede, a snowball under the batch (printed in `atmosphere::tests`).
+            continue;
+        }
         let base = spin_of(name);
         for spin in [
             base,
@@ -2485,7 +2471,7 @@ fn a_europa_at_102_k_is_cold_everywhere() {
         rotation_period: Seconds::new(3.551 * SECONDS_PER_DAY),
         solar_day: Some(Seconds::new(3.554 * SECONDS_PER_DAY)),
     };
-    let profile = ZonalProfile::of(&column, &spin, OceanWeight::NONE, SnapshotRules::Held);
+    let profile = ZonalProfile::of(&column, &spin, OceanWeight::NONE);
     let points = profile.points();
     let warmest = points.iter().fold(0.0_f64, |high, &(_, t)| high.max(t));
     assert!((warmest - 108.3).abs() < 0.1, "{warmest} K");
@@ -2601,42 +2587,36 @@ fn the_annual_insolation_at_a_latitude_meets_the_closed_forms() {
 }
 
 /// T13.c's passes read the record's own range (decision-p14-t51a-partition §6, condition 1): for
-/// every body of the table, on both arms of the lane's hold, the passes' climate at the body's own
-/// surface temperature and partial pressures is the record's [`SurfaceConditions::climate_range`],
-/// bit for bit, about its mean.
+/// every body of the table, the passes' climate at the body's own surface temperature and partial
+/// pressures is the record's [`SurfaceConditions::climate_range`], bit for bit, about its mean.
 #[test]
 fn the_passes_climate_is_the_record_s_range() {
     let mut compared = 0;
-    for rules in [SnapshotRules::Held, SnapshotRules::Batch] {
-        for (name, body) in historic_table() {
-            let spin = spin_of(name);
-            let Some(conditions) = SurfaceConditions::derive_under(rules, &inputs_of(&body, spin))
-            else {
-                continue;
-            };
-            let air = body.atmosphere();
-            let passes = step_climate(
-                rules,
-                &climate_body(&body, spin),
-                ocean_weight_of(&body),
-                air.surface_temperature(),
-                air.partial_pressures(),
-            );
-            let (cold, warm) = conditions.climate_range();
-            let mean = conditions.mean_surface_temperature();
-            assert_same_bits(passes.mean().value(), mean.value());
-            // The ends are the record's, widened to the mean only where the range does not hold
-            // it.
-            assert_same_bits(passes.coldest().value(), cold.value().min(mean.value()));
-            assert_same_bits(passes.warmest().value(), warm.value().max(mean.value()));
-            compared += 1;
-        }
+    for (name, body) in historic_table() {
+        let spin = spin_of(name);
+        let Some(conditions) = SurfaceConditions::derive(&inputs_of(&body, spin)) else {
+            continue;
+        };
+        let air = body.atmosphere();
+        let passes = step_climate(
+            &climate_body(&body, spin),
+            ocean_weight_of(&body),
+            air.surface_temperature(),
+            air.partial_pressures(),
+        );
+        let (cold, warm) = conditions.climate_range();
+        let mean = conditions.mean_surface_temperature();
+        assert_same_bits(passes.mean().value(), mean.value());
+        // The ends are the record's, widened to the mean only where the range does not hold it.
+        assert_same_bits(passes.coldest().value(), cold.value().min(mean.value()));
+        assert_same_bits(passes.warmest().value(), warm.value().max(mean.value()));
+        compared += 1;
     }
-    assert!(compared >= 16, "{compared} bodies compared");
+    assert!(compared >= 8, "{compared} bodies compared");
 }
 
 /// What the passes' climate reads of the table's derived body `body` under the spin `spin`, its
-/// greenhouse its atmosphere's ([`Atmosphere::rules`], [`Atmosphere::inventory_weights`]).
+/// greenhouse's inventory its atmosphere's ([`Atmosphere::inventory_weights`]).
 fn climate_body(body: &DerivedBody, spin: SeasonalSpin) -> ClimateBody {
     ClimateBody {
         equilibrium_temperature: body.equilibrium_temperature(),
@@ -2645,14 +2625,13 @@ fn climate_body(body: &DerivedBody, spin: SeasonalSpin) -> ClimateBody {
         material: SurfaceMaterial::of(&body.fractions()),
         spin,
         heat_flow: heat_flow_of(body),
-        greenhouse: body.atmosphere().rules(),
         inventory: *body.atmosphere().inventory_weights(),
     }
 }
 
-/// The cost of the passes' climate on both arms, against a partition step's (P14.T51.a's second
-/// part, decision-p14-t51a-part2 §1.3: at most 5 µs a call with air under the batch's Newton
-/// steps): run by name, in release, and recorded in plan 14's Risks.
+/// The cost of the passes' climate, against a partition step's (P14.T51.a's second part,
+/// decision-p14-t51a-part2 §1.3: at most 5 µs a call with air under the Newton steps): run by name,
+/// in release, and recorded in plan 14's Risks.
 #[test]
 #[ignore = "a timing, run by name in release"]
 fn time_the_passes_climate() {
@@ -2667,33 +2646,21 @@ fn time_the_passes_climate() {
         let weight = ocean_weight_of(&body);
         let n = 2_000;
         let mut sink = 0.0;
-        let mut each = [0.0; 2];
-        for (k, rules) in [SnapshotRules::Held, SnapshotRules::Batch]
-            .into_iter()
-            .enumerate()
-        {
-            let start = std::time::Instant::now();
-            for i in 0..n {
-                let t = Kelvin::new(air.surface_temperature().value() + 1e-9 * f64::from(i));
-                sink += step_climate(rules, &climate, weight, t, air.partial_pressures())
-                    .coldest()
-                    .value();
-            }
-            each[k] = start.elapsed().as_secs_f64() / f64::from(n) * 1e6;
+        let start = std::time::Instant::now();
+        for i in 0..n {
+            let t = Kelvin::new(air.surface_temperature().value() + 1e-9 * f64::from(i));
+            sink += step_climate(&climate, weight, t, air.partial_pressures())
+                .coldest()
+                .value();
         }
+        let each = start.elapsed().as_secs_f64() / f64::from(n) * 1e6;
         let partials = air.partial_pressures();
         let inv = ColumnInventory::new(Gas::ALL.iter().filter_map(|&g| {
             let p = partials.of(g);
             (p.value() > 0.0).then(|| (g.substance(), Pascals::new(p.value() * 1.5)))
         }))
         .unwrap();
-        let passes = step_climate(
-            SnapshotRules::Batch,
-            &climate,
-            weight,
-            air.surface_temperature(),
-            partials,
-        );
+        let passes = step_climate(&climate, weight, air.surface_temperature(), partials);
         let mut w = AirborneWeights::new();
         let ground = Ground::without_basins(body.surface_gravity());
         let start = std::time::Instant::now();
@@ -2702,16 +2669,13 @@ fn time_the_passes_climate() {
             sink += w.weights().first().map_or(0.0, |p| p.value());
         }
         let solve = start.elapsed().as_secs_f64() / f64::from(n) * 1e6;
-        eprintln!(
-            "{name}: climate {:.2} µs held, {:.2} µs batch; partition step {solve:.2} µs ({sink:e})",
-            each[0], each[1]
-        );
+        eprintln!("{name}: climate {each:.2} µs; partition step {solve:.2} µs ({sink:e})");
     }
 }
 
-/// From generator version 23 the safeguarded Newton steps ([`zonal_point_newton`],
-/// [`ZONAL_NEWTON_STEPS`]) solve every zonal point within 10⁻¹² `T_s` of version 22's 64-step
-/// bisection (decision-p14-t51a-part2 §1.4): at the equator, the pole and every eighth area point,
+/// The safeguarded Newton steps ([`zonal_point_newton`], [`ZONAL_NEWTON_STEPS`]) solve every zonal
+/// point within 10⁻¹² `T_s` of the 64-step bisection, version 22's solver, which the tests keep as
+/// their oracle (`zonal_point`) (decision-p14-t51a-part2 §1.4): at the equator, the pole and every eighth area point,
 /// over obliquities of 0–180°, mean temperatures of 40–737 K, 6D ÷ `B_eff` of 10⁻⁴ to 50, Koll's W
 /// of 0 or `B_P`, `B_eff` ÷ `B_P` of 1 or 0.3, and Φ of 1 or Φ⊕. The dark pole at 0° and weak
 /// transport, where E → 0, is among them. Two steps fewer still hold 10⁻¹³ `T_s`: the count is the
@@ -2851,93 +2815,129 @@ fn the_newton_zonal_points_are_the_bisection_s_over_a_wider_sweep() {
     );
 }
 
-/// The table's bodies under the batch's solver: their ranges, contrasts and zonal ends within
-/// 10⁻¹² `T_s` of version 22's, and their cold areas below 263.15 K within 10⁻⁹
+/// The zonal ends of a transport `transport` at the obliquity `obliquity` about the mean
+/// `surface_k`, K, as one solver gives them ([`zonal_ends`]'s signature).
+type ZonalEnds = fn(f64, &ZonalTransport, Radians) -> (f64, f64);
+
+/// [`zonal_ends`] with each end solved by the 64-step bisection (`zonal_point`), version 22's
+/// solver, which the tests keep as the Newton steps' oracle.
+fn zonal_ends_bisected(
+    surface_k: f64,
+    transport: &ZonalTransport,
+    obliquity: Radians,
+) -> (f64, f64) {
+    if !restored(transport) {
+        return (surface_k, surface_k);
+    }
+    let modes = insolation_modes(obliquity);
+    let (equator, pole) = annual_insolation(obliquity);
+    let at_equator = modes.map(|mode| mode.at_equator);
+    (
+        zonal_point(surface_k, transport, &modes, equator, &at_equator),
+        zonal_point(surface_k, transport, &modes, pole, &[1.0; ZONAL_MODES]),
+    )
+}
+
+/// The points of the profile `profile` ([`ZonalProfile::points`]), each solved by the 64-step
+/// bisection (`zonal_point`), the Newton steps' oracle.
+fn bisected_points(profile: &ZonalProfile) -> Vec<(f64, f64)> {
+    let Some((transport, obliquity)) = profile.modal else {
+        return profile.points();
+    };
+    let (modes, cosines) = (insolation_modes(obliquity), hour_cosines());
+    let n = f64::from(ZONAL_AREA_POINTS);
+    let surface_k = profile.surface_k;
+    let inner = (0..ZONAL_AREA_POINTS).map(|k| {
+        let x = (f64::from(k) + 0.5) / n;
+        let insolation = insolation_with(obliquity, x, &cosines);
+        (
+            x,
+            zonal_point(surface_k, &transport, &modes, insolation, &legendre_at(x)),
+        )
+    });
+    let (equator, pole) = zonal_ends_bisected(surface_k, &transport, obliquity);
+    core::iter::once((0.0, equator))
+        .chain(inner)
+        .chain(core::iter::once((1.0, pole)))
+        .collect()
+}
+
+/// The table's bodies on the Newton steps: their zonal ends and contrasts within 10⁻¹² `T_s` of
+/// the 64-step bisection's, version 22's solver, and their cold areas below 263.15 K within 10⁻⁹
 /// (decision-p14-t51a-part2 §1.4).
 #[test]
 fn the_batch_s_zonal_solver_moves_the_table_only_at_its_last_bits() {
     let mut compared = 0;
     for (name, body) in historic_table() {
         let inputs = inputs_of(&body, spin_of(name));
-        let (Some(held), Some(batch)) = (
-            SurfaceConditions::derive_under(SnapshotRules::Held, &inputs),
-            SurfaceConditions::derive_under(SnapshotRules::Batch, &inputs),
-        ) else {
+        let Some(conditions) = SurfaceConditions::derive(&inputs) else {
             continue;
         };
-        let t_s = held.mean_surface_temperature().value();
+        let profile = conditions.zonal;
+        let t_s = conditions.mean_surface_temperature().value();
         let near = |a: f64, b: f64| (a - b).abs() <= 1e-12 * t_s;
-        let (ranges, ends) = (
-            (held.climate_range(), batch.climate_range()),
-            (held.zonal.ends, batch.zonal.ends),
-        );
+        let bisected = match profile.modal {
+            Some((transport, obliquity)) => zonal_ends_bisected(t_s, &transport, obliquity),
+            None => profile.ends,
+        };
+        let ends = (profile.ends, bisected);
         assert!(
-            near(ranges.0.0.value(), ranges.1.0.value())
-                && near(ranges.0.1.value(), ranges.1.1.value())
-                && near(ends.0.0, ends.1.0)
+            near(ends.0.0, ends.1.0)
                 && near(ends.0.1, ends.1.1)
                 && near(
-                    held.equator_pole_contrast_k(),
-                    batch.equator_pole_contrast_k()
+                    conditions.equator_pole_contrast_k(),
+                    bisected.0 - bisected.1
                 ),
-            "{name}: {ranges:?} {ends:?}"
+            "{name}: {ends:?}"
         );
         let threshold = PERENNIAL_ICE_TEMPERATURE;
-        let (a, b) = (held.cold_area(threshold), batch.cold_area(threshold));
+        let (a, b) = (
+            area_below(&profile.points(), threshold),
+            area_below(&bisected_points(&profile), threshold),
+        );
         assert!((a - b).abs() <= 1e-9, "{name}: {a} against {b}");
         compared += 1;
     }
     assert!(compared >= 8, "{compared}");
 }
 
-/// The batch's record path on the table (P14.T51.a's second part; decision-p14-t51a-part2 §3.7 and
-/// §4.4): every wet world keeps its surface water, Earth's published water ice is T24.b's
-/// `ice_fraction` to the bit at the same surface water, within 0–0.07 while version 22's rules
-/// run (decision-p14-t54a-bands §4.3), Earth holds liquid water and the regime's reservoirs are
-/// the partition's; under the held rules nothing is partitioned on the record.
+/// The record path on the table (P14.T51.a's second part; decision-p14-t51a-part2 §3.7 and
+/// §4.4): the wet worlds hold surface water, Earth's published water ice is T24.b's `ice_fraction`
+/// to the bit at the same surface water, within 0.01–0.07 (decision-p14-t54a-bands §4.3), Earth
+/// holds liquid water and the regime's reservoirs are the partition's.
 #[test]
 fn the_batch_publishes_the_table_s_condensates() {
     use crate::planetary::chem::partition::CondensatePhase;
     use crate::planetary::hooks::cold_traps::{ColdTrapRules, RecordColdTraps, lunar_sky};
-    use crate::planetary::hooks::figures::{VolatileHistory, cover, table_figures_under};
+    use crate::planetary::hooks::figures::{VolatileHistory, cover};
 
     let water = Gas::Water.substance();
     let sky = lunar_sky();
     let mut wet = 0;
     let mut earth_ice = None;
     for (name, body) in historic_table() {
-        let (Some(held), Some(batch)) = (
-            table_figures_under(SnapshotRules::Held, &body),
-            table_figures_under(SnapshotRules::Batch, &body),
-        ) else {
+        let Some(batch) = table_figures(&body) else {
             continue;
         };
-        if held.surface_water().value() > 0.0 {
+        if batch.surface_water().value() > 0.0 {
             wet += 1;
-            assert!(
-                batch.surface_water().value() > 0.0,
-                "{name} loses its water"
-            );
         }
         let inputs = SurfaceInputs {
             heat_flow: batch.heat_flow(),
             ocean_weight: batch.ocean_weight(),
             ..inputs_of(&body, spin_of(name))
         };
-        let Some(conditions) = SurfaceConditions::derive_under(SnapshotRules::Batch, &inputs)
-        else {
+        let Some(conditions) = SurfaceConditions::derive(&inputs) else {
             continue;
         };
         let gravity = body.surface_gravity();
         let atmosphere = body.atmosphere();
         // P14.T51.a's published condensates, with the cold traps held (P14.T51.f).
-        let under = |rules| {
+        let under = || {
             let traps = RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, atmosphere);
-            batch.condensates_under(rules, atmosphere, &conditions, gravity, &traps)
+            batch.condensates_under(atmosphere, &conditions, gravity, &traps)
         };
-        assert!(under(SnapshotRules::Held).is_none());
-        let (partition, published) =
-            under(SnapshotRules::Batch).expect("the batch partitions the record");
+        let (partition, published) = under();
         if let Some(ice) = published.entry(water, CondensatePhase::Solid) {
             let t24b = cover::ice_fraction(&cover::IceInputs {
                 conditions: &conditions,
@@ -2948,17 +2948,12 @@ fn the_batch_publishes_the_table_s_condensates() {
             assert_same_bits(ice.area_fraction(), t24b);
         }
         // The same twice (the sim-determinism skill).
-        let again = under(SnapshotRules::Batch).expect("the batch partitions the record");
+        let again = under();
         assert_eq!(
             format!("{:?}", (&partition, &published)),
             format!("{again:?}")
         );
-        // Every surface water the held rules keep, the batch keeps to the bit: the saturation
-        // test that the batch drops holds on every held atmosphere.
-        if held.surface_water().value() > 0.0 {
-            assert_same_bits(held.surface_water().value(), batch.surface_water().value());
-        }
-        // T24.b's gate on the state holds under the batch: an airless body has no surface water.
+        // T24.b's gate on the state holds: an airless body has no surface water.
         if body.atmosphere().state() == SurfaceState::Airless {
             assert_same_bits(batch.surface_water().value(), 0.0);
         }
@@ -3001,15 +2996,14 @@ fn the_batch_publishes_the_table_s_condensates() {
         }
     }
     assert!(wet >= 2, "{wet} wet worlds");
-    // Band 5 (decision-p14-t54a-bands §4.3), while version 22's rules run: the generated Earth's
-    // perennial ice within 0–0.07, its figure printed. It is 0.001363: version 22's table Earth
-    // (290.30 K, B_eff 1.987) under D⊕ and Φ⊕ fitted at the batch's measured B_eff, its zonal pole
-    // near the 263.15 K edge, where the cap moves about 0.013 for each kelvin the pole warms. With
-    // no ice the partition publishes no solid water, and that is allowed. From the commit that
-    // deletes the holds, 0.01–0.07 is asserted again on the batch's table Earth.
+    // Band 5 (decision-p14-t54a-bands §4.3): the generated Earth's perennial ice within 0.01–0.07,
+    // its figure printed, on the batch's table Earth at the passes' stand-ins. Earth's perennial
+    // ice is 0.045–0.051 of the globe and its annual mean 0.068–0.078 (Fretwell et al. 2013, The
+    // Cryosphere 7, 375, Table 7; IPCC AR5 WGI Ch. 4, Tables 4.1–4.2; the NSIDC Sea Ice Index, v4,
+    // 1981–2010).
     let ice = earth_ice.unwrap_or(0.0);
-    eprintln!("the generated Earth's ice under the batch: {ice}");
-    assert!((0.0..=0.07).contains(&ice), "Earth's ice {ice}");
+    eprintln!("the generated Earth's ice: {ice}");
+    assert!((0.01..=0.07).contains(&ice), "Earth's ice {ice}");
 }
 
 /// The ocean fraction the published condensates `published` give: their liquids' areas summed.

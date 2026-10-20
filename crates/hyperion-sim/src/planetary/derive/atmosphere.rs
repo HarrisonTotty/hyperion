@@ -25,14 +25,15 @@
 //!   condenses at the surface temperature, give the partial pressures from the body's gravity; a
 //!   grey atmosphere warms the surface to `T_s` = `T_eq` (1 + ¾τ)^¼ ([`atmosphere`]). The state,
 //!   and from it the Bond albedo and cloud fraction that the equilibrium temperature reads next,
-//!   follow ([`SurfaceState`]). From version 23 (`SNAPSHOT_VERSION`, the `p14-snapshot` lane's
-//!   hold) each condensable is held in the greenhouse by P14.T51.a's condensate partition
-//!   ([`partition`](crate::planetary::chem::partition)) over the body's climate, on the
-//!   registry's phase diagrams, and the Bond albedo and cloud fraction are P14.T51.b's area mix
-//!   over the condensates the pass publishes, its regolith and its cloud
-//!   (`area_mix`), in place of the state's table. From the same version the grey greenhouse's
-//!   carbon dioxide and water constants are P14.T57.a's, fitted at Venus's and then Earth's
-//!   measured states ([`GREENHOUSE_CARBON_DIOXIDE`], [`GREENHOUSE_WATER`]).
+//!   follow ([`SurfaceState`]). Each condensable is held in the greenhouse by P14.T51.a's
+//!   condensate partition ([`partition`](crate::planetary::chem::partition)) over the body's
+//!   climate, on the registry's phase diagrams, and the Bond albedo and cloud fraction are
+//!   P14.T51.b's area mix over the condensates the pass publishes, its regolith and its cloud
+//!   (`area_mix`), in place of the state's table. The grey greenhouse's carbon dioxide and water
+//!   constants are P14.T57.a's, fitted at Venus's and then Earth's measured states
+//!   ([`GREENHOUSE_CARBON_DIOXIDE`], [`GREENHOUSE_WATER`]). Version 22's rules, each condensable
+//!   at its saturation pressure under P14.T13.c's constants, went with the `p14-snapshot` lane's
+//!   hold (P14.T54.a).
 //! - **Carbon speciation and oxygen** (P14.T24.f). A body formed beyond the snow line that lies
 //!   beyond the maximum-greenhouse limit carries its carbon as methane, held where a reservoir lies
 //!   on its surface at [`METHANE_RELATIVE_HUMIDITY`] of its saturation pressure; a runaway world
@@ -54,6 +55,7 @@ mod surface_mix;
 
 pub(crate) use surface_mix::{LARGEST_BOND_ALBEDO, PassLight, PassSurface};
 
+use crate::Seed;
 use crate::id::BodyId;
 use crate::math;
 use crate::planetary::chem::partition::{
@@ -66,7 +68,7 @@ use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::params::{ICY_WATER_FRACTION, THIN_ENVELOPE_FRACTION};
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::draws::UnitUniform;
-use crate::substance::{Element, saturation_pressure};
+use crate::substance::Element;
 use crate::units::consts::{
     BOLTZMANN_CONSTANT, EARTH_MASS_KG, EARTH_RADIUS_M, GRAVITATIONAL_CONSTANT, METRES_PER_AU,
     SECONDS_PER_JULIAN_YEAR,
@@ -75,7 +77,6 @@ use crate::units::{
     EarthMasses, JoulesPerSquareMetre, Kelvin, Kilograms, Metres, MetresPerSecondSquared, Pascals,
     SolarLuminosities, SolarMasses, WattsPerSquareMetre, Years,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion, Seed};
 
 /// The atomic mass constant, kg (CODATA 2022: 1.660 539 068 92 × 10⁻²⁷ kg), in which molecular
 /// masses are counted.
@@ -470,56 +471,6 @@ pub fn ammonia_line(snow_line: Metres) -> Metres {
     snow_line * (ratio * ratio)
 }
 
-/// The generator version from which T13.c's passes take the `p14-snapshot` lane's rules: 23, the
-/// 22 → 23 batch's bump (plan 14, "Order and parallelism", Phase L; decision-bump-plan-after-22
-/// §1.2, "The lane's hold").
-///
-/// It is the one hold of the lane's edits on the record path: P14.T51.a's condensate partition in
-/// the greenhouse ([`SnapshotRules::Batch`], [`atmosphere_under`]), P14.T51.b's area-mix albedo
-/// with its converging passes, its record bulk for icy members and its photometry's references, and
-/// P14.T57.a's refitted greenhouse constants, which its `Batch` arm reads
-/// ([`SnapshotRules::greenhouse`]). Below it [`SnapshotRules::in_force`] is [`SnapshotRules::Held`], so that every atmosphere is version
-/// 22's bit for bit until P14.T54.a's wiring, which gives the passes the body's climate and removes
-/// this hold and its tripwire (`the_snapshot_lane_is_held_only_until_the_batch_s_bump`).
-pub(crate) const SNAPSHOT_VERSION: GeneratorVersion = GeneratorVersion::new(23);
-
-/// Which rules T13.c's passes follow (the `p14-snapshot` lane's hold, [`SNAPSHOT_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum SnapshotRules {
-    /// Version 22's: P14.T13.c's greenhouse, each condensable held at its saturation pressure at
-    /// the mean surface temperature on the registry's phase diagrams (P14.T49.b's fitted curves,
-    /// in place of the held constant-enthalpy Clausius–Clapeyron curves since P14.T54.a's
-    /// switch), and methane at its humidity ([`greenhouse`]).
-    Held,
-    /// The 22 → 23 batch's: the condensate partition over the body's climate
-    /// ([`partition`](crate::planetary::chem::partition), P14.T51.a) on the registry's phase
-    /// diagrams.
-    Batch,
-}
-
-impl SnapshotRules {
-    /// The rules this generator version gives: the batch's from [`SNAPSHOT_VERSION`], and version
-    /// 22's below it.
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        if GENERATOR_VERSION >= SNAPSHOT_VERSION {
-            Self::Batch
-        } else {
-            Self::Held
-        }
-    }
-
-    /// The grey greenhouse's constants these rules give: version 22's under
-    /// [`SnapshotRules::Held`], and P14.T57.a's fits under [`SnapshotRules::Batch`].
-    #[must_use]
-    pub(crate) const fn greenhouse(self) -> GreenhouseConstants {
-        match self {
-            Self::Held => GreenhouseConstants::VERSION_22,
-            Self::Batch => GreenhouseConstants::FITTED,
-        }
-    }
-}
-
 /// The log-normal scatter of each volatile's inventory about its median, dex: 0.5 (the lane's,
 /// provisional). Earth, Venus and Mars differ in nitrogen and carbon per unit mass by factors of a
 /// few, which half a decade of scatter spans at one sigma.
@@ -791,8 +742,8 @@ pub fn volatile_inventory(
 /// carbon and the 86th of its nitrogen under [`VOLATILE_SCATTER_DEX`] (decision-p14-moons §4.1).
 /// P14.T13.c's 18.5 was fitted at the median's 57 bar, and put the measured Venus at 778 K.
 ///
-/// It takes effect with the `p14-snapshot` lane's hold (`SNAPSHOT_VERSION`, 23); below it the
-/// greenhouse reads version 22's 18.5.
+/// It replaced P14.T13.c's 18.5, which version 22 read, with the `p14-snapshot` lane's hold
+/// (P14.T54.a).
 pub const GREENHOUSE_CARBON_DIOXIDE: f64 = 14.86;
 
 /// The greenhouse constant of water vapour, per √bar: 4.47, fitted on Earth's measured state after
@@ -823,8 +774,8 @@ pub const GREENHOUSE_CARBON_DIOXIDE: f64 = 14.86;
 /// The fit reads none of the passes' stand-ins, and the generated Earth is not fitted: through the
 /// batch's passes at their stand-in surface (no basins, so no sea; a Bond albedo of 0.2798) the
 /// table's Earth reaches about 290.6 K, which P14.T54.a's real inputs settle and its test holds
-/// to 288 ± 2 K. It takes effect with the `p14-snapshot` lane's hold (`SNAPSHOT_VERSION`, 23);
-/// below it the greenhouse reads version 22's 2.89.
+/// to 288 ± 2 K. It replaced P14.T13.c's 2.89, which version 22 read, with the `p14-snapshot`
+/// lane's hold (P14.T54.a).
 ///
 /// [`WATER_SURFACE_HUMIDITY`]: crate::planetary::chem::partition::WATER_SURFACE_HUMIDITY
 pub const GREENHOUSE_WATER: f64 = 4.47;
@@ -844,9 +795,9 @@ pub const GREENHOUSE_NITROGEN: f64 = 1.55;
 /// snowball albedo.
 pub const NITROGEN_REFERENCE_TEMPERATURE: Kelvin = Kelvin::new(75.6);
 
-/// The grey greenhouse's constants, per √bar, under one of the `p14-snapshot` lane's rules
-/// ([`SnapshotRules::greenhouse`]; P14.T13.c, P14.T57.a): carbon dioxide's, water's and nitrogen's
-/// at [`NITROGEN_REFERENCE_TEMPERATURE`].
+/// The grey greenhouse's constants, per √bar (P14.T13.c, P14.T57.a): carbon dioxide's, water's and
+/// nitrogen's at [`NITROGEN_REFERENCE_TEMPERATURE`], P14.T57.a's fits
+/// ([`GreenhouseConstants::FITTED`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct GreenhouseConstants {
     carbon_dioxide: f64,
@@ -855,16 +806,7 @@ pub(crate) struct GreenhouseConstants {
 }
 
 impl GreenhouseConstants {
-    /// Version 22's, P14.T13.c's fits: carbon dioxide 18.5, at the median Venus's 57 bar, and
-    /// water 2.89, on Earth with its water's column weight at its saturation pressure, with
-    /// [`GREENHOUSE_NITROGEN`]. P14.T54.a deletes them with the lane's hold.
-    pub(crate) const VERSION_22: Self = Self {
-        carbon_dioxide: 18.5,
-        water: 2.89,
-        nitrogen: GREENHOUSE_NITROGEN,
-    };
-
-    /// The batch's: P14.T57.a's [`GREENHOUSE_CARBON_DIOXIDE`] and [`GREENHOUSE_WATER`], with
+    /// P14.T57.a's [`GREENHOUSE_CARBON_DIOXIDE`] and [`GREENHOUSE_WATER`], with
     /// [`GREENHOUSE_NITROGEN`].
     pub(crate) const FITTED: Self = Self {
         carbon_dioxide: GREENHOUSE_CARBON_DIOXIDE,
@@ -908,8 +850,8 @@ impl GreenhouseConstants {
     /// The terms of [`optical_depth`](Self::optical_depth) one by one, each with its gas, in its
     /// order (carbon dioxide, water, nitrogen), so that their sum in that order is its τ to the bit
     /// (tested). Each term goes as the square root of its gas's partial pressure, so that
-    /// ∂τᵢ ÷ ∂ln pᵢ = ½τᵢ, which P14.T24.a's greenhouse gain reads, under its atmosphere's rules
-    /// ([`Atmosphere::rules`]; science-p14-t24a-climate.md §1). [`optical_depth`](Self::optical_depth)'s own arithmetic is T13.c's output, and stays as
+    /// ∂τᵢ ÷ ∂ln pᵢ = ½τᵢ, which P14.T24.a's greenhouse gain reads (science-p14-t24a-climate.md
+    /// §1). [`optical_depth`](Self::optical_depth)'s own arithmetic is T13.c's output, and stays as
     /// it is.
     #[must_use]
     pub(crate) fn terms(
@@ -951,14 +893,11 @@ fn collision_factor(equilibrium: Kelvin) -> f64 {
 /// plan's square root of each partial pressure, nitrogen's scaled for collision-induced
 /// absorption. Methane and oxygen enter no term ([`atmosphere`] says why).
 ///
-/// The constants are the generator version's: version 22's below the `p14-snapshot` lane's hold
-/// (`SNAPSHOT_VERSION`, 23), and from it P14.T57.a's [`GREENHOUSE_CARBON_DIOXIDE`] and
-/// [`GREENHOUSE_WATER`], with [`GREENHOUSE_NITROGEN`] at [`NITROGEN_REFERENCE_TEMPERATURE`].
+/// The constants are P14.T57.a's [`GREENHOUSE_CARBON_DIOXIDE`] and [`GREENHOUSE_WATER`], with
+/// [`GREENHOUSE_NITROGEN`] at [`NITROGEN_REFERENCE_TEMPERATURE`].
 #[must_use]
 pub fn optical_depth(partials: &PartialPressures, equilibrium: Kelvin) -> f64 {
-    SnapshotRules::in_force()
-        .greenhouse()
-        .optical_depth(partials, equilibrium)
+    GreenhouseConstants::FITTED.optical_depth(partials, equilibrium)
 }
 
 /// The surface temperature of a grey atmosphere of optical depth `tau` over a surface in
@@ -1387,22 +1326,9 @@ pub struct Atmosphere {
     cloud_fraction: f64,
     carbon_carrier: Option<CarbonCarrier>,
     column: PartialPressures,
-    /// The `p14-snapshot` lane's rules its greenhouse was taken under.
-    rules: SnapshotRules,
 }
 
 impl Atmosphere {
-    /// The `p14-snapshot` lane's rules its greenhouse was taken under ([`atmosphere_under`]): their
-    /// constants ([`SnapshotRules::greenhouse`]) gave its optical depth, and their rule held its
-    /// condensables, at their saturation pressure under [`SnapshotRules::Held`] and by P14.T51.a's
-    /// partition under [`SnapshotRules::Batch`]. P14.T24.a's column reads both of it
-    /// (`hooks::surface`'s greenhouse gain), so that a record's column and its greenhouse cannot
-    /// read two sets.
-    #[must_use]
-    pub(crate) const fn rules(&self) -> SnapshotRules {
-        self.rules
-    }
-
     /// What escape and the climate left free to fill the air, before any of it condensed, as
     /// column weights M g ÷ 4πR² by gas ([`column_inventory`](Self::column_inventory)'s): all
     /// zero for a gas envelope, a body of no mass or radius, and one whose weights are not finite.
@@ -1513,19 +1439,6 @@ impl Atmosphere {
     #[must_use]
     pub(crate) const fn with_albedo(self, albedo: BondAlbedo) -> Self {
         Self { albedo, ..self }
-    }
-
-    /// The same atmosphere with the partial pressures `partials`, its surface pressure their sum,
-    /// over a surface at `surface_temperature`, for the tests of what reads them.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn with_air(self, surface_temperature: Kelvin, partials: PartialPressures) -> Self {
-        Self {
-            surface_temperature,
-            surface_pressure: Some(partials.total()),
-            partials,
-            ..self
-        }
     }
 }
 
@@ -1668,8 +1581,7 @@ impl Airborne {
 
     /// What the climate leaves free to fill the air, as the condensate partition reads it: each
     /// gas's column weight, its mass times `weight` pascals per kilogram, in registry order, with
-    /// the carbon as its carrier and the oxygen only where there is some, as [`greenhouse`] takes
-    /// them (P14.T51.a).
+    /// the carbon as its carrier and the oxygen only where there is some (P14.T51.a).
     ///
     /// # Errors
     ///
@@ -1714,118 +1626,6 @@ impl Airborne {
     }
 }
 
-/// The weight of methane over a surface whose inventory would weigh `inventory` and whose
-/// humidity caps its partial pressure in the air at `cap`, [`METHANE_RELATIVE_HUMIDITY`] ×
-/// `p_sat`, among the other airborne gases' weights `others` (P14.T24.f; signoff-3.md, item 1.7).
-///
-/// The cap is on the partial pressure x `p_s`, with x methane's mole fraction, its weight over its
-/// molar mass against every gas's, and `p_s` the summed weights: never on the column weight
-/// M g ÷ 4πR², from which it differs by `μ_CH₄` ÷ μ̄ for a minor gas. With W and Σ the other
-/// gases' summed weights and weights over molar masses, the weight w that meets the cap solves
-/// w² + b w − c = 0, b = W − cap and c = cap `μ_CH₄` Σ; its positive root is taken as
-/// 2c ÷ (b + √(b² + 4c)) for b ≥ 0 and (√(b² + 4c) − b) ÷ 2 below, so that neither cancels. The
-/// weight is the smaller of that root and the inventory's: all of it above the critical point,
-/// where the cap is infinite, and none where the cap is not positive. The other gases are summed
-/// in [`Gas::ALL`]'s order.
-#[must_use]
-fn capped_methane_weight(inventory: Pascals, cap: Pascals, others: &[Pascals; 9]) -> Pascals {
-    let cap = cap.value();
-    if cap.is_nan() || cap <= 0.0 {
-        return Pascals::ZERO;
-    }
-    if cap.is_infinite() {
-        return inventory;
-    }
-    let (mut total, mut moles) = (0.0, 0.0);
-    for gas in Gas::ALL {
-        if gas != Gas::Methane {
-            let w = others[gas.index()].value();
-            total += w;
-            moles += w / gas.molar_mass_g_per_mol();
-        }
-    }
-    let b = total - cap;
-    let c = cap * Gas::Methane.molar_mass_g_per_mol() * moles;
-    let root = if b >= 0.0 {
-        if c > 0.0 {
-            2.0 * c / (b + (b * b + 4.0 * c).sqrt())
-        } else {
-            0.0
-        }
-    } else {
-        ((b * b + 4.0 * c).sqrt() - b) / 2.0
-    };
-    Pascals::new(inventory.value().min(root))
-}
-
-/// The surface temperature, partial pressures and optical depth of the airborne masses
-/// `airborne`, each weighing `weight` pascals per kilogram at the surface, over a surface in
-/// equilibrium at `equilibrium`: the temperature iterated [`GREENHOUSE_STEPS`] times upward from
-/// the equilibrium temperature through the grey greenhouse its partial pressures give, each held at
-/// its saturation vapour pressure there (the substance registry's
-/// [`saturation_pressure`](crate::substance::saturation_pressure), on P14.T49.b's phase diagrams
-/// since P14.T54.a's switch from the held Clausius–Clapeyron curves; this arm dies with the
-/// snapshot hold at the 22 → 23 bump), methane's partial pressure in
-/// the air at [`METHANE_RELATIVE_HUMIDITY`] of it ([`capped_methane_weight`]), and held by
-/// `saturate` at the hottest host's. The carbon is airborne as its carrier
-/// ([`Airborne::carbon_carrier`]). The greenhouse's constants are version 22's
-/// ([`GreenhouseConstants::VERSION_22`]).
-fn greenhouse(
-    airborne: &Airborne,
-    weight: f64,
-    equilibrium: Kelvin,
-    saturate: &impl Fn(f64) -> Kelvin,
-) -> (f64, PartialPressures, f64) {
-    let partials_at = |t: f64| {
-        let saturation = |gas: Gas| {
-            saturation_pressure(gas.substance(), Kelvin::new(t))
-                .map_or(f64::INFINITY, Pascals::value)
-        };
-        // A gas with no phase data never condenses: its saturation pressure is infinite.
-        let held = |mass: f64, gas: Gas| (mass * weight).min(saturation(gas));
-        let mut p = [Pascals::ZERO; 9];
-        p[Gas::Water.index()] = Pascals::new(held(airborne.water, Gas::Water));
-        let carrier = airborne.carbon_carrier();
-        match carrier {
-            CarbonCarrier::CarbonDioxide => {
-                p[Gas::CarbonDioxide.index()] =
-                    Pascals::new(held(airborne.carbon_dioxide, Gas::CarbonDioxide));
-            }
-            // Written last, below.
-            CarbonCarrier::Methane => {}
-        }
-        p[Gas::Nitrogen.index()] = Pascals::new(held(airborne.nitrogen, Gas::Nitrogen));
-        // Version 22 never holds oxygen at its saturation pressure, though its row has a phase
-        // diagram now (the batch's partition caps it on that curve). It is written only where
-        // there is some (P14.T24.f's), leaving a body without it as P14.T13.c built it.
-        if airborne.oxygen > 0.0 {
-            p[Gas::Oxygen.index()] = Pascals::new(airborne.oxygen * weight);
-        }
-        p[Gas::Argon.index()] = Pascals::new(held(airborne.argon, Gas::Argon));
-        // Methane last: its humidity caps its share of the air the others make.
-        match carrier {
-            CarbonCarrier::Methane => {
-                p[Gas::Methane.index()] = capped_methane_weight(
-                    Pascals::new(airborne.methane * weight),
-                    Pascals::new(METHANE_RELATIVE_HUMIDITY * saturation(Gas::Methane)),
-                    &p,
-                );
-            }
-            CarbonCarrier::CarbonDioxide => {}
-        }
-        PartialPressures(p)
-    };
-    let constants = SnapshotRules::Held.greenhouse();
-    let mut t = equilibrium.value();
-    for _ in 0..GREENHOUSE_STEPS {
-        let tau = constants.optical_depth(&partials_at(t), equilibrium);
-        t = saturate(grey_surface_temperature(equilibrium, tau).value()).value();
-    }
-    let partials = partials_at(t);
-    let tau = constants.optical_depth(&partials, equilibrium);
-    (t, partials, tau)
-}
-
 /// The climate the condensate partition reads at a step of the greenhouse: a function of the
 /// step's mean surface temperature and of the partial pressures the previous step gave (P14.T51.a;
 /// [`atmosphere_under`]).
@@ -1864,8 +1664,9 @@ fn whole_column(inventory: &ColumnInventory) -> PartialPressures {
     PartialPressures(p)
 }
 
-/// [`greenhouse`] under the condensate partition (P14.T51.a, [`SnapshotRules::Batch`]): the
-/// temperature iterated [`GREENHOUSE_STEPS`] times upward from the equilibrium temperature through
+/// The surface temperature, partial pressures and optical depth of a body's air under the
+/// condensate partition (P14.T51.a): the temperature iterated [`GREENHOUSE_STEPS`] times upward
+/// from the equilibrium temperature through
 /// the grey greenhouse its partial pressures give, each step's partial pressures the partition's
 /// of the airborne inventory `inventory`, as column weights ([`Airborne::column`]), over the climate
 /// `climate` gives for the step's temperature and the previous step's partial pressures, on the
@@ -1887,7 +1688,7 @@ fn partitioned_greenhouse(
     climate: &ClimateOf<'_>,
     ground: &Ground,
 ) -> (f64, PartialPressures, f64) {
-    let constants = SnapshotRules::Batch.greenhouse();
+    let constants = GreenhouseConstants::FITTED;
     let mut weights = AirborneWeights::new();
     let mut partials = whole_column(inventory);
     let mut t = equilibrium.value();
@@ -1936,17 +1737,17 @@ fn partitioned_greenhouse(
 ///    water stores all but [`TEMPERATE_AIRBORNE_CARBON`] of its carbon in rock; beyond the
 ///    maximum-greenhouse limit the carbon is airborne, since no ocean weathers it. A molten crust
 ///    holds nothing back.
-/// 4. The partial pressures are each airborne mass's weight over the surface, M g ÷ 4πR², held at
-///    each gas's saturation vapour pressure at the surface temperature (water, carbon dioxide,
-///    nitrogen and argon condense, by their rows of the substance registry,
-///    [`saturation_pressure`]), which is iterated
+/// 4. The partial pressures are each airborne mass's weight over the surface, M g ÷ 4πR², less
+///    what condenses: each gas whose row of the substance registry has a phase diagram is held at
+///    its cap as P14.T51.a's
+///    [`partition`](crate::planetary::chem::partition) holds it over the passes' climate, a minor
+///    one at its surface humidity of its saturation pressure at the mean (methane's
+///    [`METHANE_RELATIVE_HUMIDITY`], signoff-3.md, item 1.7) and a dominant one at its saturation
+///    pressure at the coldest, on the registry's phase diagrams. The temperature is iterated
 ///    [`GREENHOUSE_STEPS`] times upward from the equilibrium temperature through the grey
 ///    greenhouse they give ([`optical_depth`], [`grey_surface_temperature`]). On a body formed
 ///    beyond the snow line that lies beyond the maximum-greenhouse limit the carbon is methane,
-///    mole for mole ([`CarbonCarrier::Methane`]); where its surface holds a reservoir of it, its
-///    partial pressure in the air, its mole fraction times the surface pressure, is held at
-///    [`METHANE_RELATIVE_HUMIDITY`] of its saturation pressure (signoff-3.md, item 1.7); oxygen
-///    never condenses (P14.T24.f).
+///    mole for mole ([`CarbonCarrier::Methane`]).
 /// 5. A surface pressure below [`AIRLESS_PRESSURE`] is [`SurfaceState::Airless`], at the
 ///    equilibrium temperature; a surface over the [`SILICATE_SOLIDUS`], or a crust not yet formed,
 ///    a [`SurfaceState::MagmaOcean`] (the young one at least at the solidus), whose melt holds any
@@ -1971,9 +1772,9 @@ fn partitioned_greenhouse(
 ///
 /// # Examples
 ///
-/// An Earth with its median inventory keeps its air, warms to about 288 K and is temperate. Its
-/// equilibrium temperature of 254 K is illustrative: it is Earth's at the earlier temperate albedo
-/// of 0.306, and 255 K at today's 0.294.
+/// An Earth with its median inventory keeps its air, warms to about 288 K and is temperate, at
+/// an equilibrium temperature of 255 K, about the generator's irradiation for Earth's measured Bond
+/// albedo of 0.294 (255.14 K), to which P14.T57.a fitted the water's greenhouse constant.
 ///
 /// ```
 /// use hyperion_sim::planetary::derive::atmosphere::{
@@ -2000,9 +1801,9 @@ fn partitioned_greenhouse(
 ///     envelope_fraction: 0.0,
 ///     inventory,
 ///     formed: SnowLineSide::Inside,
-///     equilibrium: Kelvin::new(254.0),
-///     worst_equilibrium: Kelvin::new(254.0),
-///     heated: Kelvin::new(254.0),
+///     equilibrium: Kelvin::new(255.0),
+///     worst_equilibrium: Kelvin::new(255.0),
+///     heated: Kelvin::new(255.0),
 ///     xuv_fluence: earth_xuv_fluence(),
 ///     saturated_xuv_flux: WattsPerSquareMetre::new(0.3),
 ///     insolation: Insolation::Habitable,
@@ -2017,62 +1818,13 @@ fn partitioned_greenhouse(
 /// ```
 #[must_use]
 pub fn atmosphere(inputs: &AtmosphereInputs) -> Atmosphere {
-    // Until P14.T54.a gives the passes the body's climate, which `derive_body` has not (its range
-    // is T24.a's, of the body's spin), the batch's partition would read a climate with no contrast,
-    // and its area mix a cover, basins and a regolith that stand in for the body's. The hold's
-    // tripwire stops the bump until it does.
-    atmosphere_under(
-        SnapshotRules::in_force(),
-        inputs,
-        &PassSurface::stand_in(PassLight::HottestHost),
-    )
+    // A single pass has no climate, basins or lid of the body's: it reads the passes' stand-in
+    // surface, as `derive_body`'s passes do until P14.T54.a's Batch C.
+    atmosphere_under(inputs, &PassSurface::stand_in(PassLight::HottestHost))
 }
 
-/// What step 4 of [`atmosphere_under`] follows ([`greenhouse_under`]): the lane's rules, the
-/// climate the condensate partition reads at each step, and the ground it lies on.
-#[derive(Clone, Copy)]
-struct Greenhouse<'a> {
-    rules: SnapshotRules,
-    climate_of: &'a ClimateOf<'a>,
-    ground: Ground,
-}
-
-/// Step 4 of [`atmosphere_under`] as `how` says: the surface temperature, partial pressures and
-/// optical depth of the airborne masses `airborne`, each weighing `weight` pascals per kilogram,
-/// over a surface in equilibrium at `equilibrium`, by [`greenhouse`] or, under the batch's rules,
-/// [`partitioned_greenhouse`] over the climate `how.climate_of` gives on the ground `how.ground`.
-///
-/// `None` only under the batch's rules, where a weight is not finite and the partition cannot
-/// weigh the inventory ([`Airborne::column`]'s error, which says no more than that).
-#[must_use]
-fn greenhouse_under(
-    how: &Greenhouse<'_>,
-    airborne: &Airborne,
-    weight: f64,
-    equilibrium: Kelvin,
-    saturate: &impl Fn(f64) -> Kelvin,
-) -> Option<(f64, PartialPressures, f64)> {
-    match how.rules {
-        SnapshotRules::Held => Some(greenhouse(airborne, weight, equilibrium, saturate)),
-        SnapshotRules::Batch => airborne.column(weight).ok().map(|inventory| {
-            partitioned_greenhouse(
-                &inventory,
-                equilibrium,
-                saturate,
-                how.climate_of,
-                &how.ground,
-            )
-        }),
-    }
-}
-
-/// [`atmosphere`] under the lane's rules `rules`, over the surface `surface` (P14.T51.a–b, held by
-/// [`SNAPSHOT_VERSION`]): [`atmosphere`] is this under [`SnapshotRules::in_force`] on the passes'
+/// [`atmosphere`] over the surface `surface` (P14.T51.a–b): [`atmosphere`] is this on the passes'
 /// stand-in surface ([`PassSurface::stand_in`]).
-///
-/// Under [`SnapshotRules::Held`] step 4 is P14.T13.c's ([`greenhouse`]), `surface` is not read, and
-/// the Bond albedo and cloud fraction are T13.c's table's ([`SurfaceState::albedo`],
-/// [`SurfaceState::cloud_fraction`]). Under [`SnapshotRules::Batch`]:
 ///
 /// - step 4 is the partition's ([`partitioned_greenhouse`]): after escape (step 2) and the
 ///   climate's division (step 3), each greenhouse step holds every condensable as
@@ -2086,30 +1838,17 @@ fn greenhouse_under(
 /// - after step 5 the Bond albedo and cloud fraction are the area mix's (P14.T51.b) over the
 ///   condensates the pass's partition publishes at its final climate, its regolith and its cloud
 ///   (`surface_mix::area_mixed`).
-///
-/// Every other step is the same.
 #[must_use]
-pub(crate) fn atmosphere_under(
-    rules: SnapshotRules,
-    inputs: &AtmosphereInputs,
-    surface: &PassSurface<'_>,
-) -> Atmosphere {
-    let air = state_and_greenhouse(rules, inputs, surface);
-    match rules {
-        SnapshotRules::Held => air,
-        SnapshotRules::Batch => surface_mix::area_mixed(air, inputs, surface),
-    }
+pub(crate) fn atmosphere_under(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) -> Atmosphere {
+    let air = state_and_greenhouse(inputs, surface);
+    surface_mix::area_mixed(air, inputs, surface)
 }
 
-/// Steps 1 to 5 of [`atmosphere_under`] under the lane's rules `rules`, over the surface `surface`:
-/// the state, the greenhouse and the partial pressures, with T13.c's table's Bond albedo and cloud
-/// fraction of the state.
+/// Steps 1 to 5 of [`atmosphere_under`] over the surface `surface`: the state, the greenhouse and
+/// the partial pressures, with T13.c's table's Bond albedo and cloud fraction of the state, which
+/// the area mix then replaces.
 #[must_use]
-fn state_and_greenhouse(
-    rules: SnapshotRules,
-    inputs: &AtmosphereInputs,
-    surface: &PassSurface<'_>,
-) -> Atmosphere {
+fn state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) -> Atmosphere {
     let cap = inputs.hottest_host.value();
     let saturate = |t: f64| Kelvin::new(if cap > 0.0 { t.min(cap) } else { t });
     let exobase = exobase_temperature(inputs.worst_equilibrium, inputs.xuv_fluence);
@@ -2133,7 +1872,6 @@ fn state_and_greenhouse(
         cloud_fraction: state.cloud_fraction(),
         carbon_carrier: carrier,
         column: PartialPressures::default(),
-        rules,
     };
     if inputs.envelope_fraction >= THIN_ENVELOPE_FRACTION {
         let state = SurfaceState::GasEnvelope;
@@ -2164,15 +1902,10 @@ fn state_and_greenhouse(
     let equilibrium = inputs.equilibrium;
     let gravity = MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r));
     let weight = gravity.value() / (4.0 * core::f64::consts::PI * r * r);
-    let how = Greenhouse {
-        rules,
-        climate_of: surface.climate_of,
-        ground: Ground::new(gravity, surface.basins, surface.water_at_surface),
-    };
-    let step = greenhouse_under(&how, &airborne, weight, equilibrium, &saturate);
-    let Some((mut t, mut partials, tau)) = step else {
+    let ground = Ground::new(gravity, surface.basins, surface.water_at_surface);
+    let Ok(inventory) = airborne.column(weight) else {
         // A weight that is not finite, of a body far smaller than any the generator makes, holds
-        // nothing it can weigh: the body is airless, as one of no mass or radius is.
+        // nothing the partition can weigh: the body is airless, as one of no mass or radius is.
         return airless(
             SurfaceState::Airless,
             PartialPressures::default(),
@@ -2180,6 +1913,13 @@ fn state_and_greenhouse(
             None,
         );
     };
+    let (mut t, mut partials, tau) = partitioned_greenhouse(
+        &inventory,
+        equilibrium,
+        &saturate,
+        surface.climate_of,
+        &ground,
+    );
     let carrier = Some(airborne.carbon_carrier());
     let column = airborne.column_weights(weight);
 
@@ -2215,7 +1955,6 @@ fn state_and_greenhouse(
         cloud_fraction: state.cloud_fraction(),
         carbon_carrier: carrier,
         column,
-        rules,
     }
 }
 

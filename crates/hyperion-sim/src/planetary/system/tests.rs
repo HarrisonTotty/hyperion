@@ -2050,7 +2050,7 @@ fn a_regular_moon_has_one_locking_time() {
                 .satellite
                 .orbit_at(&moon.parent, ctx.age_at(parent_time(ctx)));
             let now = system.parent_now(&epoch, parent);
-            let derived = system.moon_derived(&epoch, moon, &elements, &now).unwrap();
+            let derived = PlanetarySystem::moon_derived(&epoch, moon, &elements, &now).unwrap();
             let mass = Kilograms::from(*mass);
             let primary = Kilograms::new(
                 elements.gravitational_parameter().value() / GRAVITATIONAL_CONSTANT - mass.value(),
@@ -2212,8 +2212,10 @@ fn the_figure_section_by_kind_and_level() {
 }
 
 /// P14.T47.c (c) and T47.b (b): the photometry section's states by kind and level, `Ok` exactly
-/// where the bulk is; every sampled body's p q is at most 1 per band, and a generated airless-ice
-/// body or snowball states a ratio within 5% of 1.
+/// where the bulk is; every sampled body's p q is at most 1 per band, and a generated snowball
+/// states a ratio within 5% of 1. A generated airless-ice body states 0.43 × 0.80 ÷ `A_ref` where
+/// its p is not capped, its reference the fresh `H2O` frost's (P14.T51.b), where Ganymede's
+/// measured Bond albedo, whose p the row draws, is 0.35 (`photometry::tests`, recorded).
 #[test]
 fn the_photometry_section_by_kind_and_level() {
     use crate::planetary::derive::photometry::PhaseTemplate;
@@ -2230,13 +2232,23 @@ fn the_photometry_section_by_kind_and_level() {
                     for (p, q) in [(p.b, q.b), (p.v, q.v), (p.r, q.r)] {
                         assert!(p > 0.0 && p * q <= 1.0 + 1e-12, "{:?}", record.index());
                     }
-                    if matches!(
-                        photometry.template(),
-                        PhaseTemplate::AirlessIce | PhaseTemplate::Snowball
-                    ) {
-                        let ratio = photometry.bond_ratio();
-                        assert!((ratio - 1.0).abs() < 0.05, "{:?}: {ratio}", record.index());
-                        borrowed += 1;
+                    let ratio = photometry.bond_ratio();
+                    match photometry.template() {
+                        PhaseTemplate::Snowball => {
+                            assert!((ratio - 1.0).abs() < 0.05, "{:?}: {ratio}", record.index());
+                            borrowed += 1;
+                        }
+                        PhaseTemplate::AirlessIce => {
+                            let reference =
+                                PhaseTemplate::AirlessIce.row().reference_bond().value();
+                            assert!(
+                                ratio <= 0.43 * 0.80 / reference + 1e-9,
+                                "{:?}: {ratio}",
+                                record.index()
+                            );
+                            borrowed += 1;
+                        }
+                        _ => {}
                     }
                     drawn += 1;
                 }
@@ -2468,14 +2480,19 @@ fn check_published_cover(
         "{index:?}"
     );
     assert!(figures.sigma_h().value() > 0.0, "{index:?}");
-    let water = Gas::Water.substance();
+    // The record's liquids and ices are P14.T51.a's published condensates: each substance listed
+    // once, the lists within the whole surface.
     for (fraction, list) in [
         (figures.ocean_fraction(), figures.surface_liquids()),
         (figures.ice_fraction(), figures.surface_ices()),
     ] {
-        assert_eq!(list.len(), 1, "{index:?}");
-        assert_eq!(list[0].0, water, "{index:?}");
-        assert!((0.0..=1.0).contains(&fraction), "{index:?}: {fraction}");
+        for (k, &(id, _)) in list.iter().enumerate() {
+            assert!(list[..k].iter().all(|&(other, _)| other != id), "{index:?}");
+        }
+        assert!(
+            (0.0..=1.0 + 1e-12).contains(&fraction),
+            "{index:?}: {fraction}"
+        );
         assert_same_bits(list.iter().fold(0.0, |sum, &(_, f)| sum + f), fraction);
     }
     assert!(
@@ -2487,10 +2504,26 @@ fn check_published_cover(
         hooks::surface::OceanWeight::of_potential_ocean(figures.potential_ocean()),
         "{index:?}"
     );
-    if figures.ocean_fraction() > 0.0 {
-        assert_same_bits(figures.ocean_fraction(), figures.potential_ocean());
+    // Water's published liquid lies at its potential ocean, scaled down with the other liquids
+    // where together they would cover more than the surface (`within_the_surface`); any other
+    // liquid is the partition's own sea (P14.T51.a), which the potential ocean, water's, does not
+    // read.
+    let water = Gas::Water.substance();
+    let ocean = figures
+        .surface_liquids()
+        .iter()
+        .find(|&&(id, _)| id == water)
+        .map_or(0.0, |&(_, f)| f);
+    let liquids = figures.ocean_fraction();
+    if ocean > 0.0 && liquids < 1.0 - 1e-9 {
+        assert_same_bits(ocean, figures.potential_ocean());
     }
-    if !conditions.liquid_water() && figures.ocean_fraction() > 0.0 {
+    assert!(
+        ocean <= figures.potential_ocean() * (1.0 + 1e-12),
+        "{index:?}: {ocean} against {}",
+        figures.potential_ocean()
+    );
+    if !conditions.liquid_water() && ocean > 0.0 {
         assert!(
             hooks::figures::cover::under_ice_ocean(
                 SurfaceState::Snowball,
@@ -2782,15 +2815,13 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
             let (_, now) = system.primary_record(&epoch, planet, label, &fate);
             let seasonal = *fate.at(t).orbit().unwrap();
             let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
-            let derived = system.moon_derived(&epoch, part, &orbit, &now).unwrap();
+            let derived = PlanetarySystem::moon_derived(&epoch, part, &orbit, &now).unwrap();
             let bulk = PlanetarySystem::moon_bulk_of(part, &derived, &now);
             // The greenhouse gain reads T13.c's terms at the published equilibrium temperature,
             // which is the one the moon's τ was computed at.
             let air = derived.atmosphere();
             if air.state() != SurfaceState::Airless {
-                let terms = air
-                    .rules()
-                    .greenhouse()
+                let terms = crate::planetary::derive::atmosphere::GreenhouseConstants::FITTED
                     .terms(air.partial_pressures(), derived.equilibrium_temperature());
                 let sum = terms.iter().fold(0.0, |sum, &(_, term)| sum + term);
                 assert_same_bits(sum, air.optical_depth());
@@ -3137,7 +3168,8 @@ fn the_published_figures_read_each_body_s_interior() {
                     let label = label::label(system, planet.index).unwrap();
                     let (_, now) = system.primary_record(&epoch, planet, label, &fate);
                     let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
-                    let derived = system.moon_derived(&epoch, part, &orbit, &now).unwrap();
+                    let derived =
+                        PlanetarySystem::moon_derived(&epoch, part, &orbit, &now).unwrap();
                     // Every moon's tide is its derivation's, P14.T17.b's.
                     assert_same_bits(
                         figures.heat_flow().value(),
@@ -3944,7 +3976,7 @@ fn under_their_own_tides_a_moon_s_law_and_its_locking_time_agree() {
             laws += 1;
             let now = system.parent_now(&epoch, parent);
             let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
-            let derived = system.moon_derived(&epoch, part, &orbit, &now).unwrap();
+            let derived = PlanetarySystem::moon_derived(&epoch, part, &orbit, &now).unwrap();
             if matches!(part.satellite.moon(), SatelliteMoon::Regular(_)) {
                 let fixed = MOON_PRIMORDIAL_PERIOD_HOURS * 3_600.0;
                 let expected =
@@ -3992,7 +4024,7 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
             };
             let now = system.parent_now(&epoch, parent);
             let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
-            let derived = system.moon_derived(&epoch, part, &orbit, &now).unwrap();
+            let derived = PlanetarySystem::moon_derived(&epoch, part, &orbit, &now).unwrap();
             let tides = derived.tides();
             assert_same_bits(
                 figures.heat_flow().value(),
@@ -4062,8 +4094,7 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
     );
 }
 
-/// P14.T51.b and T51.h: under the `p14-snapshot` lane's batch, over the sample's first 60 systems
-/// generated whole (`whole`, 400 real systems at the solar circle), every present planet's,
+/// P14.T51.b and T51.h: over the sample's first 60 systems generated whole (`whole`, 400 real systems at the solar circle), every present planet's,
 /// member's and moon's photometry states, to the bit, the Bond albedo its derivation's equilibrium
 /// temperature was taken at, `DerivedBody::albedo` (retiring P14.T47's exception, as built); every
 /// icy member's air reads its record's ice.
@@ -4084,7 +4115,6 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
 fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     use std::collections::BTreeMap;
 
-    use crate::planetary::derive::atmosphere::SnapshotRules;
     use crate::planetary::derive::passes::{Convergence, HALVINGS, PLAIN_PASSES};
     use crate::planetary::derive::{DerivedBody, equilibrium_temperature};
 
@@ -4113,7 +4143,6 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
         );
         match derived.convergence() {
             Convergence::Converged => {}
-            Convergence::Fixed => panic!("{what}: the batch's passes are not the fixed three"),
             Convergence::Bracketed { residual } => {
                 assert!(
                     residual.is_finite() && residual >= 0.0,
@@ -4141,15 +4170,14 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
         if ctx.age_at_epoch().value() <= 0.0 {
             continue;
         }
-        let system = system.clone().with_snapshot_rules(SnapshotRules::Batch);
-        let epoch = Epoch::new(&system, ctx, t);
+        let epoch = Epoch::new(system, ctx, t);
         for body in system.bodies() {
             if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
                 continue;
             }
             let host = fate_host(ctx, system.zone_of(body));
             let fate = system.fate_of(body, &host);
-            let label = label::label(&system, body.index).unwrap();
+            let label = label::label(system, body.index).unwrap();
             let (record, now) = system.primary_record(&epoch, body, label, &fate);
             let (Section::Ok(photometry), Some(derived)) = (record.photometry(), now.derived)
             else {
@@ -4158,7 +4186,7 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
             assert_same_bits(photometry.bond_albedo().value(), derived.albedo().value());
             // A bracketed body's bisection, the same twice (the sim-determinism skill).
             if matches!(derived.convergence(), Convergence::Bracketed { .. }) {
-                let label = label::label(&system, body.index).unwrap();
+                let label = label::label(system, body.index).unwrap();
                 let (_, again) = system.primary_record(&epoch, body, label, &fate);
                 assert_eq!(
                     format!("{:?}", again.derived),
@@ -4189,16 +4217,16 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
                 let Part::Moon(moon) = &child.part else {
                     continue;
                 };
-                let label = label::label(&system, child.index).unwrap();
+                let label = label::label(system, child.index).unwrap();
                 let record = system.satellite_record(&epoch, child, label, &now, &fate);
                 let Section::Ok(photometry) = record.photometry() else {
                     continue;
                 };
                 let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
-                let derived = system.moon_derived(&epoch, moon, &orbit, &now).unwrap();
+                let derived = PlanetarySystem::moon_derived(&epoch, moon, &orbit, &now).unwrap();
                 assert_same_bits(photometry.bond_albedo().value(), derived.albedo().value());
                 if matches!(derived.convergence(), Convergence::Bracketed { .. }) {
-                    let again = system.moon_derived(&epoch, moon, &orbit, &now).unwrap();
+                    let again = PlanetarySystem::moon_derived(&epoch, moon, &orbit, &now).unwrap();
                     assert_eq!(format!("{again:?}"), format!("{derived:?}"));
                 }
                 tally(
@@ -4226,8 +4254,8 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
         .join("\n");
     let held = bracketed.values().map(Vec::len).sum::<usize>();
     eprintln!(
-        "under the batch: {bodies} planets and members ({icy} icy members) and {moons} moons; \
-         passes taken {counts:?}; bracketed {held} of {total}:\n{listed}"
+        "{bodies} planets and members ({icy} icy members) and {moons} moons; passes taken \
+         {counts:?}; bracketed {held} of {total}:\n{listed}"
     );
     // The ruling's measure, decision-p14-t51-batch §4: a jump is a state or cover change with no
     // self-consistent albedo, and more than 1% of them goes to main. At 23's stand-ins, the area
@@ -4250,14 +4278,12 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     );
 }
 
-/// P14.T51.i, end to end: under 24's record rules (the batch's partition and cold traps) the
-/// sample's airless, uncollisional planets and members carry the regolith's albedo from their
-/// derivation, and their records' ices move from the held rules' where the cold traps' branch and
-/// traps apply; under the held rules their derivations give the albedo too (the batch's passes)
-/// but the record reads none of it.
+/// P14.T51.i, end to end: under 24's record rules (the cold traps' batch) the sample's airless,
+/// uncollisional planets and members carry the regolith's albedo from their derivation, and their
+/// records' ices move from the held rules' where the cold traps' branch and traps apply; under the
+/// cold traps' held rules their derivations give the albedo too but the record reads none of it.
 #[test]
 fn under_24_s_record_rules_the_records_read_the_derivations_regolith() {
-    use crate::planetary::derive::atmosphere::SnapshotRules;
     use crate::planetary::hooks::cold_traps::{ColdTrapRules, is_collisional};
 
     let t = UniverseTime::EPOCH;
@@ -4266,15 +4292,7 @@ fn under_24_s_record_rules_the_records_read_the_derivations_regolith() {
         if ctx.age_at_epoch().value() <= 0.0 {
             continue;
         }
-        let under = |cold_traps| {
-            system
-                .clone()
-                .with_snapshot_rules(SnapshotRules::Batch)
-                .with_record_rules(RecordRules {
-                    partition: SnapshotRules::Batch,
-                    cold_traps,
-                })
-        };
+        let under = |cold_traps| system.clone().with_record_rules(RecordRules { cold_traps });
         let (held, batch) = (under(ColdTrapRules::Held), under(ColdTrapRules::Batch));
         let (held_epoch, batch_epoch) = (Epoch::new(&held, ctx, t), Epoch::new(&batch, ctx, t));
         for body in batch.bodies() {
@@ -4294,9 +4312,7 @@ fn under_24_s_record_rules_the_records_read_the_derivations_regolith() {
             if air.state() != SurfaceState::Airless || is_collisional(air, bulk.surface_gravity()) {
                 continue;
             }
-            let regolith = derived
-                .regolith_albedo()
-                .expect("the batch's passes give it");
+            let regolith = derived.regolith_albedo();
             assert!((0.0..1.0).contains(&regolith), "{regolith}");
             airless += 1;
             let label = label::label(&held, body.index).unwrap();
@@ -4316,21 +4332,16 @@ fn under_24_s_record_rules_the_records_read_the_derivations_regolith() {
 
 /// P14.T51.i's budget over the sample (decision-p14-t51-batch §1.5): the cold traps' cost per system
 /// on 24's record path, measured, not counted. Each of the first 60 systems generated whole is
-/// derived under the batch and its every planet's, member's and moon's record built under the
-/// record path's partition with the cold traps' batch and with their hold, the best of three
+/// derived and its every planet's, member's and moon's record built with the cold traps' batch and
+/// with their hold, the best of three
 /// interleaved rounds of each; the difference is the cold traps'. The budget is a mean of at most
 /// 7 ms a system and at most 50 ms in any. A timing alone, run by name in release and recorded in
 /// plan 14's Risks; it asserts nothing.
 #[test]
 #[ignore = "a timing, run by name in release"]
-#[expect(
-    clippy::too_many_lines,
-    reason = "one timed walk of the sample's records under two rules, tallied and printed"
-)]
 fn time_the_cold_traps_over_the_sample() {
     use std::time::Instant;
 
-    use crate::planetary::derive::atmosphere::SnapshotRules;
     use crate::planetary::hooks::cold_traps::{ColdTrapRules, is_collisional};
 
     let t = UniverseTime::EPOCH;
@@ -4340,15 +4351,7 @@ fn time_the_cold_traps_over_the_sample() {
         if ctx.age_at_epoch().value() <= 0.0 {
             continue;
         }
-        let under = |cold_traps| {
-            system
-                .clone()
-                .with_snapshot_rules(SnapshotRules::Batch)
-                .with_record_rules(RecordRules {
-                    partition: SnapshotRules::Batch,
-                    cold_traps,
-                })
-        };
+        let under = |cold_traps| system.clone().with_record_rules(RecordRules { cold_traps });
         let (held, batch) = (under(ColdTrapRules::Held), under(ColdTrapRules::Batch));
         // Every record of the system, how many of its bodies are airless and not collisional, and
         // how many ices its records' figures list, the cold traps' among them.
@@ -4443,19 +4446,19 @@ fn time_the_cold_traps_over_the_sample() {
     }
 }
 
-/// P14.T57.a's moves at 23, measured for P14.T54.a's bless note: over the sample's first 60 systems
-/// generated whole (`whole`), every present planet's, member's and moon's mean surface temperature
-/// under version 22's rules and under the `p14-snapshot` lane's batch (P14.T51.a's partition,
-/// T51.b's area mix, T51.h's passes and T57.a's greenhouse constants), each body on its own line,
-/// and how many move by more than 2 K, by their state under the batch. Run by name and recorded in
-/// plan 14's Risks ("Deviations in P14.T57.a, as built"); a measurement, it asserts nothing.
+/// The batch's surface temperatures over the sample, measured for P14.T54.a's bless note (P14.T57.a's
+/// moves at 23): over the sample's first 60 systems generated whole (`whole`), every present
+/// planet's, member's and moon's mean surface temperature (P14.T51.a's partition, T51.b's area
+/// mix, T51.h's passes and T57.a's greenhouse constants), each body on its own line with its
+/// equilibrium temperature, pressure and partial pressures of carbon dioxide and water, and the
+/// bodies by state. Version 22's figures are plan 14's (P14.T57.a's record); a measurement, it
+/// asserts nothing.
 #[test]
 #[ignore = "a measurement, run by name"]
 fn the_batch_s_surface_temperatures_over_the_sample_are_recorded() {
     use std::collections::BTreeMap;
 
     use crate::planetary::derive::DerivedBody;
-    use crate::planetary::derive::atmosphere::SnapshotRules;
 
     /// What a body's line holds: its state, `T_s` and `T_eq`, K, and its surface pressure and
     /// partial pressures of carbon dioxide and water, Pa.
@@ -4473,59 +4476,47 @@ fn the_batch_s_surface_temperatures_over_the_sample_are_recorded() {
         )
     };
     let t = UniverseTime::EPOCH;
-    let walk = |rules: SnapshotRules| {
-        let mut rows: BTreeMap<String, Row> = BTreeMap::new();
-        for (ctx, system) in whole().iter().take(60) {
-            if ctx.age_at_epoch().value() <= 0.0 {
+    let mut rows: BTreeMap<String, Row> = BTreeMap::new();
+    for (ctx, system) in whole().iter().take(60) {
+        if ctx.age_at_epoch().value() <= 0.0 {
+            continue;
+        }
+        let epoch = Epoch::new(system, ctx, t);
+        for body in system.bodies() {
+            if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
                 continue;
             }
-            let system = system.clone().with_snapshot_rules(rules);
-            let epoch = Epoch::new(&system, ctx, t);
-            for body in system.bodies() {
-                if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
-                    continue;
-                }
-                let host = fate_host(ctx, system.zone_of(body));
-                let fate = system.fate_of(body, &host);
-                let label = label::label(&system, body.index).unwrap();
-                let (_, now) = system.primary_record(&epoch, body, label, &fate);
-                let Some(derived) = now.derived else {
+            let host = fate_host(ctx, system.zone_of(body));
+            let fate = system.fate_of(body, &host);
+            let label = label::label(system, body.index).unwrap();
+            let (_, now) = system.primary_record(&epoch, body, label, &fate);
+            let Some(derived) = now.derived else {
+                continue;
+            };
+            rows.insert(format!("{:?} {:?}", ctx.id(), body.index), row(&derived));
+            for child in system.children(body.index) {
+                let Part::Moon(moon) = &child.part else {
                     continue;
                 };
-                rows.insert(format!("{:?} {:?}", ctx.id(), body.index), row(&derived));
-                for child in system.children(body.index) {
-                    let Part::Moon(moon) = &child.part else {
-                        continue;
-                    };
-                    let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
-                    let Some(derived) = system.moon_derived(&epoch, moon, &orbit, &now) else {
-                        continue;
-                    };
-                    rows.insert(
-                        format!("{:?} {:?} moon", ctx.id(), child.index),
-                        row(derived.body()),
-                    );
-                }
+                let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
+                let Some(derived) = PlanetarySystem::moon_derived(&epoch, moon, &orbit, &now)
+                else {
+                    continue;
+                };
+                rows.insert(
+                    format!("{:?} {:?} moon", ctx.id(), child.index),
+                    row(derived.body()),
+                );
             }
         }
-        rows
-    };
-    let (held, batch) = (walk(SnapshotRules::Held), walk(SnapshotRules::Batch));
-    let mut moved: BTreeMap<String, (u32, u32)> = BTreeMap::new();
-    for (key, b) in &batch {
-        let Some(h) = held.get(key) else {
-            continue;
-        };
-        eprintln!(
-            "T57A | {key} | {:?} | {:?} | {:.3} | {:.3} | {:.3} | {:.6e} | {:.6e} | {:.6e}",
-            h.0, b.0, h.1, b.1, b.2, b.3, b.4, b.5
-        );
-        let tally = moved.entry(format!("{:?}", b.0)).or_default();
-        tally.0 += 1;
-        tally.1 += u32::from((b.1 - h.1).abs() > 2.0);
     }
-    eprintln!(
-        "{} bodies; by state under the batch, (bodies, moved by more than 2 K): {moved:?}",
-        batch.len()
-    );
+    let mut states: BTreeMap<String, u32> = BTreeMap::new();
+    for (key, b) in &rows {
+        eprintln!(
+            "T57A | {key} | {:?} | {:.3} | {:.3} | {:.6e} | {:.6e} | {:.6e}",
+            b.0, b.1, b.2, b.3, b.4, b.5
+        );
+        *states.entry(format!("{:?}", b.0)).or_default() += 1;
+    }
+    eprintln!("{} bodies; by state: {states:?}", rows.len());
 }

@@ -4,7 +4,7 @@ use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
 use crate::planetary::derive::DerivedBody;
-use crate::planetary::derive::atmosphere::{PartialPressures, SurfaceMaterial, SurfaceState};
+use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::solar::{
     PLANETS, SOLAR_AGE, derive_historic, placed_about_the_sun, solar_disc,
 };
@@ -226,21 +226,23 @@ fn earth_at(a_au: f64) -> DerivedBody {
 
 #[test]
 fn a_ninety_degree_world_started_cold_has_an_equatorial_belt_and_one_started_warm_has_none() {
-    // An Earth at 1.1 au, tilted to 90°: a temperate world at 270.8 K, whose equator's annual mean,
-    // 262.7 K, lies under the perennial ice edge and whose poles, at 286.2 K, lie above it. It is
-    // a test of the model's own profile: at 0.83 S⊕ it lies under the fluxes at which Kilic et
-    // al. 2018 found their belts (0.93–1.10 of the solar constant).
+    // An Earth at 1.12 au, tilted to 90°: a temperate world at 271.1 K, whose equator's annual
+    // mean, 262.9 K, lies under the perennial ice edge and whose poles, at 286.8 K, lie above it.
+    // It is a test of the model's own profile: at 0.80 S⊕ it lies under the fluxes at which Kilic
+    // et al. 2018 found their belts (0.93–1.10 of the solar constant). (At 1.1 au, version 22's
+    // distance, the batch's Earth at the passes' stand-ins puts its equator at 263.9 K, above the
+    // edge.)
     let spin = SeasonalSpin {
         obliquity: Radians::from(Degrees::new(90.0)),
         ..spin_of("Earth")
     };
-    let body = earth_at(1.1);
+    let body = earth_at(1.12);
     let conditions = conditions_of(&body, spin).unwrap();
     let figures = table_figures(&body)
         .unwrap()
         .with_surface(&conditions, VolatileHistory::NONE);
     eprintln!(
-        "an Earth at 1.1 au tilted to 90°: {:?}, T_s {:.1} K, equator {:.1} K, pole {:.1} K, ice {:.3}",
+        "an Earth at 1.12 au tilted to 90°: {:?}, T_s {:.1} K, equator {:.1} K, pole {:.1} K, ice {:.3}",
         body.atmosphere().state(),
         conditions.mean_surface_temperature().value(),
         conditions.zonal_temperature(0.0).value(),
@@ -311,12 +313,7 @@ fn a_mars_given_its_measured_air_by_hand_takes_carbon_dioxide_not_water() {
     let mars = measured_mars();
     let spin = spin_of("Mars");
     let floor = night_floor(WattsPerSquareMetre::new(0.019));
-    let zonal = ZonalProfile::of(
-        &mars,
-        &spin,
-        OceanWeight::NONE,
-        crate::planetary::derive::atmosphere::SnapshotRules::Held,
-    );
+    let zonal = ZonalProfile::of(&mars, &spin, OceanWeight::NONE);
     let (day, night) = day_and_night(&mars, &spin, SurfaceMaterial::Rock, floor);
     let range = climate_range(mars.surface_temperature, zonal.ends, day, night, floor);
     eprintln!(
@@ -433,20 +430,22 @@ fn the_reservoirs_are_the_gases_held_at_their_caps() {
     assert_eq!(found("Venus"), []);
 }
 
-/// Oxygen, a row the held phase columns lacked, is a reservoir by its phase diagram: an air of
-/// 100 bar of it is held at its cap over a surface at 150 K, where its saturation pressure is some
-/// 42 bar, and over one at 160 K, above its critical temperature, 154.581 K, there is none.
+/// Oxygen, a row the held phase columns lacked, is a reservoir by its phase diagram: P14.T51.a's
+/// partition holds an inventory of 100 bar of it at its cap over a surface at 150 K, where its
+/// saturation pressure is some 42 bar, the rest condensed, and over one at 160 K, above its
+/// critical temperature, 154.581 K, holds it all aloft.
 #[test]
 fn an_oxygen_reservoir_lies_below_its_critical_temperature_only() {
-    let table = table();
-    let (_, earth, _) = table.iter().find(|(n, ..)| *n == "Earth").unwrap();
-    let oxygen = PartialPressures::from_fn(|gas| match gas {
-        Gas::Oxygen => Pascals::new(1e7),
-        _ => Pascals::ZERO,
-    });
+    use crate::planetary::chem::partition::{ClimateSpan, ColumnInventory, Ground, partition};
+    let inventory = ColumnInventory::new([(Gas::Oxygen.substance(), Pascals::new(1e7))]).unwrap();
+    let ground = Ground::without_basins(crate::units::MetresPerSecondSquared::new(9.82));
     let at = |t: f64| {
-        let air = (*earth.atmosphere()).with_air(Kelvin::new(t), oxygen);
-        surface_reservoirs(&air)
+        partition(
+            &ClimateSpan::isothermal(Kelvin::new(t)),
+            &ground,
+            &inventory,
+        )
+        .reservoirs()
     };
     let critical = Gas::Oxygen
         .substance()

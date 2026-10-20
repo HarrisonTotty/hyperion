@@ -4,8 +4,9 @@
 //! exposed, and P14.T51.a's airless branch keyed on the zonal annual maximum, not the mean.
 //!
 //! All of it is held at generator version 24 (`COLD_TRAPS_VERSION`; decision-bump-plan-after-22
-//! §1.3), and at 22 the `p14-snapshot` lane's hold publishes no condensates at all, so the cold
-//! traps are held twice and nothing on the record moves before P14.T54.b's bump.
+//! §1.3), so that nothing on the record moves before P14.T54.b's bump; the record's partition, which
+//! the `p14-snapshot` lane's hold kept off it until P14.T54.a, publishes P14.T51.a's condensates
+//! meanwhile.
 //!
 //! # Which bodies
 //!
@@ -447,16 +448,15 @@ pub(crate) struct RecordColdTraps<'a> {
     /// The body's sky and its exposed fraction.
     pub(crate) sky: &'a ColdTrapSky,
     /// The bare regolith's Bond albedo about the body's hosts' bands, airless
-    /// (`DerivedBody::regolith_albedo`), 0 to 1; `None` from a derivation under version 22's rules.
-    pub(crate) regolith_albedo: Option<f64>,
+    /// (`DerivedBody::regolith_albedo`), 0 to 1.
+    pub(crate) regolith_albedo: f64,
 }
 
 #[cfg(test)]
 impl<'a> RecordColdTraps<'a> {
     /// The record's cold traps under `rules` and the sky `sky`, at the Bond albedo of the
-    /// atmosphere `air` as the regolith's: what the tests of bodies derived under version 22's
-    /// rules take, whose airless rock is the Moon's 0.11, the regolith's under the batch, so that
-    /// their figures are P14.T51.f's.
+    /// atmosphere `air` as the regolith's: what the tests of bodies whose regolith is the airless
+    /// rock's take, the Moon's 0.11, so that their figures are P14.T51.f's.
     #[must_use]
     pub(crate) fn at_the_albedo_of(
         rules: ColdTrapRules,
@@ -466,7 +466,7 @@ impl<'a> RecordColdTraps<'a> {
         Self {
             rules,
             sky,
-            regolith_albedo: Some(air.albedo().value()),
+            regolith_albedo: air.albedo().value(),
         }
     }
 }
@@ -494,9 +494,8 @@ pub(crate) struct ColdTrapBody<'a> {
     /// Its sky and its exposed fraction.
     pub(crate) sky: &'a ColdTrapSky,
     /// Its bare regolith's Bond albedo about its hosts' bands, airless (P14.T51.i;
-    /// `DerivedBody::regolith_albedo`), 0 to 1, which its flat ground and its shadows read; `None`
-    /// from a derivation under version 22's rules, which gives none, and so takes no cold traps.
-    pub(crate) regolith_albedo: Option<f64>,
+    /// `DerivedBody::regolith_albedo`), 0 to 1, which its flat ground and its shadows read.
+    pub(crate) regolith_albedo: f64,
 }
 
 /// The published condensates of the partition `partition` over the cover `cover` with the cold
@@ -654,10 +653,10 @@ impl ColdTrapField {
     /// The record path's field of the body `body` of partition `partition`: its ground under its
     /// sky at its regolith's albedo, over [`terrain_of`] its craters, at its profile's area points,
     /// for its [`condensables`], water left out on an ice-rich crust, which keeps P14.T24.b's ice.
-    /// `None` where its derivation gives no regolith albedo, or its profile is not zonal.
+    /// `None` where its profile is not zonal.
     #[must_use]
     pub(crate) fn of(body: &ColdTrapBody<'_>, partition: &Partition) -> Option<Self> {
-        let albedo = body.regolith_albedo?;
+        let albedo = body.regolith_albedo;
         let ColdProfile::Zonal(points) = body.profile else {
             return None;
         };

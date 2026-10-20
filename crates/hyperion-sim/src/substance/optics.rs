@@ -1696,23 +1696,27 @@ mod tests {
 
     /// The files outside the substance module whose calls into the held columns sit behind a
     /// named hold, each with it: the tripwire below passes them. A lane that adds a call behind its
-    /// hold adds its file here (P14.T51.b adds `planetary/derive/photometry/area_mix.rs`, the
-    /// photometry's area-mix module, behind `SNAPSHOT_VERSION`; decision-p14-t49c-split §8.2).
-    const HELD: [(&str, &str); 3] = [
+    /// hold adds its file here (decision-p14-t49c-split §8.2).
+    const HELD: [(&str, &str); 1] = [(
+        "planetary/hooks/crust.rs",
+        "P14.T51.c's crust, a pure module the record calls only from P14.T54.a, which reads \
+         its lid's first melt, the condensed columns' transition, through `.condensed()`",
+    )];
+
+    /// The files outside the substance module whose calls into the held columns are on the record,
+    /// each with the step that put them there: the tripwire below passes them too. P14.T51.a's
+    /// partition and P14.T51.b's area mix sat in [`HELD`] behind the `p14-snapshot` lane's hold
+    /// (`SNAPSHOT_VERSION`) until P14.T54.a deleted it.
+    const WIRED: [(&str, &str); 2] = [
         (
             "planetary/chem/partition.rs",
-            "P14.T51.a's partition, which the record calls only behind the p14-snapshot lane's \
-             hold until P14.T54.a",
-        ),
-        (
-            "planetary/hooks/crust.rs",
-            "P14.T51.c's crust, a pure module the record calls only from P14.T54.a, which reads \
-             its lid's first melt, the condensed columns' transition, through `.condensed()`",
+            "P14.T51.a's partition, on the record since P14.T54.a deleted the p14-snapshot \
+             lane's hold",
         ),
         (
             "planetary/derive/photometry/area_mix.rs",
-            "P14.T51.b's area-mix Bond albedo, which T13.c's passes call only behind the \
-             p14-snapshot lane's hold until P14.T54.a",
+            "P14.T51.b's area-mix Bond albedo, which T13.c's passes call since P14.T54.a deleted \
+             the p14-snapshot lane's hold",
         ),
     ];
 
@@ -1848,8 +1852,8 @@ mod tests {
     /// §1.2; plan 14's Risks, P14.T49.b part 2: "no caller of `Substance::condensed` or
     /// `grain_density` is reachable from `record::Surface` before T54.a"). Every file of the
     /// crate's `src/` is read, in sorted order, by `substance::thermal`'s tripwire's walk, but this
-    /// module's own ([`OWN`]), [`HELD`]'s, each inline test module and every file an out-of-line
-    /// test module declares ([`named`]): outside the substance module no code names
+    /// module's own ([`OWN`]), [`HELD`]'s, [`WIRED`]'s, each inline test module and every file an
+    /// out-of-line test module declares ([`named`]): outside the substance module no code names
     /// [`PATTERNS`], and inside it none names [`OPTICS_PATTERNS`]. **P14.T54.a deletes this
     /// tripwire** when it wires them.
     #[test]
@@ -1862,7 +1866,7 @@ mod tests {
             std::fs::read_to_string(path)
                 .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
         };
-        for (held, hold) in HELD {
+        for (held, hold) in HELD.iter().chain(&WIRED) {
             assert!(!hold.is_empty(), "{held} names its hold");
             assert!(
                 files.iter().any(|(relative, _)| relative == held),
@@ -1880,7 +1884,7 @@ mod tests {
                 .any(|t| relative == t || (t.ends_with('/') && relative.starts_with(t.as_str())));
             if test_file
                 || OWN.contains(&relative.as_str())
-                || HELD.iter().any(|(held, _)| held == relative)
+                || HELD.iter().chain(&WIRED).any(|(held, _)| held == relative)
             {
                 continue;
             }

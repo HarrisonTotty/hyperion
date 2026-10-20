@@ -1,6 +1,5 @@
-//! What T13.c's passes read of a body's surface beyond [`AtmosphereInputs`], and, under the
-//! `p14-snapshot` lane's rules ([`SnapshotRules::Batch`]), the area-mix Bond albedo over it
-//! (P14.T51.a–b; [`area_mix`]).
+//! What T13.c's passes read of a body's surface beyond [`AtmosphereInputs`], and the area-mix Bond
+//! albedo over it (P14.T51.a–b; [`area_mix`]).
 //!
 //! The passes have no cold profile, hypsometry or spin of their own until P14.T54.a gives them the
 //! body's (one cold profile a pass, decision-p14-t51a-part2 §3.5). So the cover that the pass's
@@ -26,7 +25,7 @@ use crate::units::consts::GRAVITATIONAL_CONSTANT;
 use crate::units::{Kelvin, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared};
 
 #[cfg(doc)]
-use super::{SnapshotRules, atmosphere_under};
+use super::atmosphere_under;
 
 /// The share of a body's surface, 0 to 1, whose annual-mean climate lies below a temperature, over
 /// the pass's climate span: the pass's cover provider (P14.T51.b; [`PassSurface::cold_area`]).
@@ -41,7 +40,7 @@ pub(crate) type RegolithOf<'a> = dyn Fn(SurfaceMaterial) -> Regolith + 'a;
 pub(crate) enum PassLight<'a> {
     /// A host at the hottest host's effective temperature ([`AtmosphereInputs::hottest_host`]),
     /// built when the pass reads it: the stand-in of a single pass with no shade of its own (the
-    /// public [`atmosphere`](super::atmosphere), and the held rules, which read none).
+    /// public [`atmosphere`](super::atmosphere)).
     HottestHost,
     /// The light of the body's hosts, built once per body before its passes.
     Shade(&'a HostShade),
@@ -49,9 +48,8 @@ pub(crate) enum PassLight<'a> {
 
 /// What [`atmosphere_under`] reads of a body's surface beyond [`AtmosphereInputs`] (P14.T51.a–b):
 /// the climate its partition reads, the ground its liquids lie on, the cover its condensates are
-/// published over, the light of its hosts and its regolith. Under [`SnapshotRules::Held`] none of
-/// it is read but the climate and the ground, which T13.c's greenhouse does not read either. The
-/// passes build it once, before the first.
+/// published over, the light of its hosts and its regolith. The passes build it once, before the
+/// first.
 #[derive(Clone, Copy)]
 pub(crate) struct PassSurface<'a> {
     /// The climate the condensate partition reads at each step, from the step's mean surface

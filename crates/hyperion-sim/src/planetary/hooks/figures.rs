@@ -131,7 +131,7 @@ use crate::planetary::chem::partition::{
     Basins, ClimateSpan, CondensatePhase, Condensates, Cover, Ground, Partition, WaterCover,
     partition,
 };
-use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SnapshotRules, SurfaceState};
+use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceState};
 use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
 use crate::planetary::hooks::cold_traps::{self, ColdTrapBody, ColdTrapRules, RecordColdTraps};
 use crate::planetary::hooks::surface::{ColdProfile, OceanWeight, SurfaceConditions};
@@ -2014,21 +2014,6 @@ impl GlobalFigures {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn derive(inputs: &FiguresInputs<'_>) -> Result<Option<Self>, DeriveFiguresError> {
-        Self::derive_under(inputs, SnapshotRules::in_force())
-    }
-
-    /// [`derive`](Self::derive) under the `p14-snapshot` lane's rules `rules`, which pick the
-    /// surface water: T24.b's under [`SnapshotRules::Held`] and under [`SnapshotRules::Batch`] the
-    /// share of P14.T51.a's condensed water ([`cover::surface_water_under`];
-    /// decision-p14-t51a-part2 §4), for the system's batch switches and the tests.
-    ///
-    /// # Errors
-    ///
-    /// As [`derive`](Self::derive).
-    pub(crate) fn derive_under(
-        inputs: &FiguresInputs<'_>,
-        rules: SnapshotRules,
-    ) -> Result<Option<Self>, DeriveFiguresError> {
         let air = inputs.atmosphere;
         if matches!(air.state(), SurfaceState::GasEnvelope) {
             return Ok(None);
@@ -2084,8 +2069,7 @@ impl GlobalFigures {
             lithosphere: relief::lithosphere_thickness(crust, surface_temperature, heat.heat_flow),
         });
         // Step 6: the surface water, its potential ocean, and the weight θ the conditions read.
-        let surface_water = cover::surface_water_under(
-            rules,
+        let surface_water = cover::surface_water(
             air,
             inputs.inventory_water,
             inputs.radius,
@@ -2261,8 +2245,8 @@ impl GlobalFigures {
     }
 
     /// [`with_surface`](Self::with_surface), with its ocean and ices from P14.T51.a's published
-    /// condensates `condensates` where they are given (the `p14-snapshot` lane's hold,
-    /// [`SnapshotRules::Batch`]; [`condensates_under`](Self::condensates_under)).
+    /// condensates `condensates` where they are given, as the record gives them
+    /// ([`condensates_under`](Self::condensates_under)).
     ///
     /// - The liquids are the condensates' ([`Condensates::surface_liquids`]), with water's ocean
     ///   under a `Snowball`'s ice ([`cover::under_ice_ocean`]) at its potential ocean where they hold
@@ -2323,20 +2307,17 @@ impl GlobalFigures {
             from_colder: history.from_colder(),
             surface_liquids,
             surface_ices,
-            // Step 12: the cloud, the atmosphere's: the state's below the bump, bit for bit.
+            // Step 12: the cloud, the atmosphere's, bit for bit.
             cloud_fraction: self.air_cloud_fraction,
             ..self
         }
     }
 
     /// What P14.T51.a's partition gives the record of the body whose atmosphere is `atmosphere`,
-    /// whose conditions are `conditions` and whose surface gravity is `gravity`, under the lane's
-    /// rules `rules` (P14.T51.a's second part, held by
-    /// [`SNAPSHOT_VERSION`](crate::planetary::derive::atmosphere)) and the cold traps' rules, sky
-    /// and regolith `traps` (P14.T51.f and P14.T51.i, held by
-    /// [`COLD_TRAPS_VERSION`](crate::planetary::hooks::cold_traps)): nothing under
-    /// [`SnapshotRules::Held`], and under [`SnapshotRules::Batch`] its partition and its published
-    /// condensates.
+    /// whose conditions are `conditions` and whose surface gravity is `gravity` (P14.T51.a's second
+    /// part), under the cold traps' rules, sky and regolith `traps` (P14.T51.f and P14.T51.i, held
+    /// by [`COLD_TRAPS_VERSION`](crate::planetary::hooks::cold_traps)): its partition and its
+    /// published condensates.
     ///
     /// The partition is of the atmosphere's inventory before condensation
     /// ([`Atmosphere::column_inventory`]), over the conditions' climate (their range about their
@@ -2350,16 +2331,11 @@ impl GlobalFigures {
     #[must_use]
     pub(crate) fn condensates_under(
         &self,
-        rules: SnapshotRules,
         atmosphere: &Atmosphere,
         conditions: &SurfaceConditions,
         gravity: MetresPerSecondSquared,
         traps: &RecordColdTraps<'_>,
-    ) -> Option<(Partition, Condensates)> {
-        match rules {
-            SnapshotRules::Held => return None,
-            SnapshotRules::Batch => {}
-        }
+    ) -> (Partition, Condensates) {
         let (coldest, warmest) = conditions.climate_range();
         let climate = ClimateSpan::about((coldest, warmest), conditions.mean_surface_temperature());
         let ground = Ground::new(
@@ -2393,7 +2369,7 @@ impl GlobalFigures {
                 },
             ),
         };
-        Some((solved, published))
+        (solved, published)
     }
 
     /// Water's cover under the conditions `conditions`, whose cold profile is `profile`: P14.T24.b's
@@ -2587,9 +2563,11 @@ impl GlobalFigures {
             .fold(0.0, |sum, &(_, f)| sum + f)
     }
 
-    /// The liquids at the surface as `(SubstanceId, area fraction)` (P14.T24.b): `H2O` alone here,
-    /// at the potential ocean where the body holds liquid now and zero otherwise (T51.a widens
-    /// them); empty before the second stage.
+    /// The liquids at the surface as `(SubstanceId, area fraction)` (P14.T24.b): on the record
+    /// P14.T51.a's published liquids, with water's ocean under a `Snowball`'s ice
+    /// (`with_surface_under`); with no condensates given
+    /// ([`with_surface`](Self::with_surface)) `H2O` alone, at the potential ocean where the body
+    /// holds liquid now and zero otherwise; empty before the second stage.
     #[must_use]
     pub fn surface_liquids(&self) -> &[(SubstanceId, f64)] {
         &self.surface_liquids
@@ -2610,16 +2588,18 @@ impl GlobalFigures {
         cover::ice_threshold(self.state)
     }
 
-    /// The ices at the surface as `(SubstanceId, area fraction)` (P14.T24.b): `H2O` alone here,
-    /// the perennial water ice of [`cover::ice_fraction`] (T51.a widens them); empty before the
-    /// second stage. An ice may lie over an ocean, as R09's cover convention has it.
+    /// The ices at the surface as `(SubstanceId, area fraction)` (P14.T24.b): on the record
+    /// P14.T51.a's published ices, with T24.b's water ice where they hold none
+    /// (`with_surface_under`); with no condensates given `H2O` alone,
+    /// the perennial water ice of [`cover::ice_fraction`]; empty before the second stage. An ice
+    /// may lie over an ocean, as R09's cover convention has it.
     #[must_use]
     pub fn surface_ices(&self) -> &[(SubstanceId, f64)] {
         &self.surface_ices
     }
 
-    /// The cloud fraction, 0 to 1: the atmosphere's, P14.T13.c's [`SurfaceState::cloud_fraction`]
-    /// and the area mix's under the `p14-snapshot` lane's batch (P14.T51.b), with which its Bond
+    /// The cloud fraction, 0 to 1: the atmosphere's, the area mix's (P14.T51.b; the state's share,
+    /// [`SurfaceState::cloud_fraction`], times its condensable's availability), with which its Bond
     /// albedo was solved; zero before the second stage.
     #[must_use]
     pub const fn cloud_fraction(&self) -> f64 {
@@ -2945,10 +2925,15 @@ fn crater_contract(
     let gyr = |years: Years| Gigayears::new(years.value() / YEARS_PER_GIGAYEAR);
     let system_age = gyr(inputs.age);
     let n_1km = craters::lunar_chronology(gyr(surface_age), system_age) * impactors.rate();
+    // A column too thin to be a normal number screens nothing (its cutoff underflows to 0 km,
+    // which the crater contract refuses): the subnormal residue the partition can leave over an
+    // airless body, some 10⁻³²³ Pa.
     let screening = match air.surface_pressure() {
-        Some(pressure) if pressure.value() > 0.0 => Screening::Atmosphere {
-            column_mass: KilogramsPerSquareMetre::new(pressure.value() / gravity.value()),
-        },
+        Some(pressure) if pressure.value() / gravity.value() >= f64::MIN_POSITIVE => {
+            Screening::Atmosphere {
+                column_mass: KilogramsPerSquareMetre::new(pressure.value() / gravity.value()),
+            }
+        }
         Some(_) | None => Screening::None,
     };
     let craters = CraterParams::new(CraterParamsParts {
@@ -2985,16 +2970,6 @@ fn rock_core_radius(kilograms: f64) -> Metres {
 #[cfg(test)]
 #[must_use]
 pub(crate) fn table_figures(body: &crate::planetary::derive::DerivedBody) -> Option<GlobalFigures> {
-    table_figures_under(SnapshotRules::Held, body)
-}
-
-/// [`table_figures`] under the `p14-snapshot` lane's rules `rules` ([`GlobalFigures::derive_under`]).
-#[cfg(test)]
-#[must_use]
-pub(crate) fn table_figures_under(
-    rules: SnapshotRules,
-    body: &crate::planetary::derive::DerivedBody,
-) -> Option<GlobalFigures> {
     let orbit = ImpactorOrbit::Host(HostOrbiter {
         orbit: HostOrbit {
             semi_major_axis: Metres::new(METRES_PER_AU),
@@ -3004,30 +2979,27 @@ pub(crate) fn table_figures_under(
         mass: body.mass(),
         belt: None,
     });
-    GlobalFigures::derive_under(
-        &FiguresInputs {
-            atmosphere: body.atmosphere(),
-            mass: body.mass(),
-            radius: Metres::from(body.radius()),
-            surface_gravity: body.surface_gravity(),
-            class: body.class(),
-            fractions: body.fractions(),
-            inventory_water: body.inventory().water(),
-            rotation_period: Seconds::new(86_164.1),
-            fe_h: Dex::new(0.0),
-            age: crate::planetary::derive::solar::SOLAR_AGE,
-            tidal_heat_flow: WattsPerSquareMetre::new(0.0),
-            subsurface_ocean: Subsurface::NotComputed,
-            craters: CraterInputs {
-                orbit,
-                density: body.density(),
-                sources: tests::solar_sources(),
-                molten_until: None,
-                last_giant_impact: None,
-            },
-            continents: Continents::Given(relief::EARTH_CONTINENTAL_FRACTION),
+    GlobalFigures::derive(&FiguresInputs {
+        atmosphere: body.atmosphere(),
+        mass: body.mass(),
+        radius: Metres::from(body.radius()),
+        surface_gravity: body.surface_gravity(),
+        class: body.class(),
+        fractions: body.fractions(),
+        inventory_water: body.inventory().water(),
+        rotation_period: Seconds::new(86_164.1),
+        fe_h: Dex::new(0.0),
+        age: crate::planetary::derive::solar::SOLAR_AGE,
+        tidal_heat_flow: WattsPerSquareMetre::new(0.0),
+        subsurface_ocean: Subsurface::NotComputed,
+        craters: CraterInputs {
+            orbit,
+            density: body.density(),
+            sources: tests::solar_sources(),
+            molten_until: None,
+            last_giant_impact: None,
         },
-        rules,
-    )
+        continents: Continents::Given(relief::EARTH_CONTINENTAL_FRACTION),
+    })
     .expect("the table's bodies are in range")
 }

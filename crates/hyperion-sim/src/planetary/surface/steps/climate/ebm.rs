@@ -121,9 +121,7 @@ use super::sun::Sunlight;
 use super::transport::{Diffusing, REFERENCE_PRESSURE_PA, rotation_ratio, transport_kg_m2_s};
 use crate::math;
 use crate::planetary::chem::partition::WATER_SURFACE_HUMIDITY;
-use crate::planetary::derive::atmosphere::{
-    Gas, GreenhouseConstants, PartialPressures, SnapshotRules,
-};
+use crate::planetary::derive::atmosphere::{Gas, GreenhouseConstants, PartialPressures};
 use crate::planetary::hooks::surface::{
     EARTH_AIR_MOLAR_MASS_G_PER_MOL, EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K,
     FLUX_OPTICAL_DEPTH_PER_GREY, night_floor,
@@ -1179,43 +1177,23 @@ fn partial_pressure_pa(gas: Gas, mole_fraction: f64, surface_pressure_pa: f64, a
 /// of (P14.T13.c, `derive::atmosphere`'s τ = Σ k (p ÷ 1 bar)^½).
 const BAR_PA: f64 = 1e5;
 
-/// Plan 14's grey greenhouse under the generator version's rules in force, as the energy balance
-/// reads its water term (R1, decision-r09-t13i §2.2): the constants, and the share of water's
-/// saturation pressure, by weight, that the water term's partial pressure takes, for the air
-/// `air`.
+/// Plan 14's grey greenhouse, as the energy balance reads its water term (R1, decision-r09-t13i
+/// §2.2): the constants, and the share of water's saturation pressure, by weight, that the water
+/// term's partial pressure takes, for the air `air`.
 ///
-/// - Under [`SnapshotRules::Held`] (version 22): P14.T13.c's constants
-///   ([`GreenhouseConstants::VERSION_22`], water 2.89 per √bar), the water's column weight held at
-///   its saturation pressure, a share of 1.
-/// - Under [`SnapshotRules::Batch`] (from 23): P14.T57.a's fits ([`GreenhouseConstants::FITTED`],
-///   water 4.47 per √bar) with the water held at [`WATER_SURFACE_HUMIDITY`] of its saturation
-///   pressure by mole (Manabe and Wetherald's 0.77, P14.T51.a's partition), so
-///   [`WATER_SURFACE_HUMIDITY`] × `M_w` ÷ μ of it by weight, μ the air's mean molar mass: 0.482 on
-///   the reference Earth's air ([`greenhouse_for`]).
-///
-/// P14.T54.a, the 22 → 23 bump, deletes the snapshot lane's hold and its `SnapshotRules`: the
-/// batch's arm is then the only one, and this is the one function to change (main's ruling on
-/// decision-r09-t13i, 2026-10-20). Whichever of R09.T13.i and P14.T54.a lands second re-measures
-/// the climate (decision-r09-t13i §4).
+/// P14.T57.a's fits ([`GreenhouseConstants::FITTED`], water 4.47 per √bar) with the water held at
+/// [`WATER_SURFACE_HUMIDITY`] of its saturation pressure by mole (Manabe and Wetherald's 0.77,
+/// P14.T51.a's partition), so [`WATER_SURFACE_HUMIDITY`] × `M_w` ÷ μ of it by weight, μ the air's
+/// mean molar mass: 0.482 on the reference Earth's air (μ 28.78 g mol⁻¹; plan 14's
+/// `GREENHOUSE_WATER` documents 0.496 from its own conversion). P14.T54.a's deletion of the
+/// snapshot lane's hold left this, the batch's arm, the only one (main's ruling on
+/// decision-r09-t13i, 2026-10-20).
 #[must_use]
 fn greenhouse_in_force(air: &Air) -> (GreenhouseConstants, f64) {
-    greenhouse_for(SnapshotRules::in_force(), air)
-}
-
-/// Plan 14's grey greenhouse under the rules `rules` for the air `air` ([`greenhouse_in_force`]):
-/// the constants, and the water's share of its saturation pressure by weight, 1 under
-/// [`SnapshotRules::Held`] and [`WATER_SURFACE_HUMIDITY`] × `M_w` ÷ μ under
-/// [`SnapshotRules::Batch`], 0.482 on the reference Earth's air (μ 28.78 g mol⁻¹; plan 14's
-/// `GREENHOUSE_WATER` documents 0.496 from its own conversion).
-#[must_use]
-fn greenhouse_for(rules: SnapshotRules, air: &Air) -> (GreenhouseConstants, f64) {
-    match rules {
-        SnapshotRules::Held => (GreenhouseConstants::VERSION_22, 1.0),
-        SnapshotRules::Batch => (
-            GreenhouseConstants::FITTED,
-            WATER_SURFACE_HUMIDITY * Gas::Water.molar_mass_g_per_mol() / air.molar_mass_g_per_mol,
-        ),
-    }
+    (
+        GreenhouseConstants::FITTED,
+        WATER_SURFACE_HUMIDITY * Gas::Water.molar_mass_g_per_mol() / air.molar_mass_g_per_mol,
+    )
 }
 
 /// Plan 14's water term of the grey optical depth at a temperature (R1, decision-r09-t13i §2.2):
@@ -6811,11 +6789,10 @@ mod tests {
         assert!(runs[answer].0.run.converged);
     }
 
-    /// Plan 14's greenhouse under each generator version's rules (decision-r09-t13i §2.2): under
-    /// version 22 water's 2.89 per √bar at its saturation, under 23's batch rules 4.47 per √bar at
-    /// 0.77 of it by mole, `M_w` ÷ μ of that by weight on the reference Earth's air.
+    /// Plan 14's greenhouse (decision-r09-t13i §2.2): water's 4.47 per √bar at 0.77 of its
+    /// saturation by mole, `M_w` ÷ μ of that by weight on the reference Earth's air.
     #[test]
-    fn the_greenhouse_reads_each_version_s_rules() {
+    fn the_greenhouse_reads_the_batch_s_rules() {
         let inputs = reference::earth_like();
         let air = Air::of(&inputs);
         let water_term = |constants: &GreenhouseConstants| {
@@ -6836,10 +6813,7 @@ mod tests {
                 .find(|(gas, _)| *gas == Gas::Water)
                 .map_or(0.0, |&(_, term)| term)
         };
-        let (held, held_humidity) = greenhouse_for(SnapshotRules::Held, &air);
-        assert!((water_term(&held) - 2.89).abs() < 1e-12);
-        assert_same_bits(held_humidity, 1.0);
-        let (batch, batch_humidity) = greenhouse_for(SnapshotRules::Batch, &air);
+        let (batch, batch_humidity) = greenhouse_in_force(&air);
         assert!((water_term(&batch) - 4.47).abs() < 1e-12);
         let expected =
             WATER_SURFACE_HUMIDITY * Gas::Water.molar_mass_g_per_mol() / air.molar_mass_g_per_mol;
@@ -6864,10 +6838,7 @@ mod tests {
             water.humidity
         );
         assert!((0.40..0.55).contains(&share), "{share}");
-        if SnapshotRules::in_force() == SnapshotRules::Held {
-            assert_same_bits(water.constant, 2.89);
-            assert_same_bits(water.humidity, 1.0);
-        }
+        assert_same_bits(water.constant, 4.47);
         let radiation = Radiation::at(model.greenhouse, 1.65, 288.0);
         let Radiation::Vapour { multiplier, .. } = radiation else {
             panic!("a water term")
