@@ -2,20 +2,21 @@
 //! environment variables, that an option given wins over its variable, and that the sky is served
 //! unless it is turned off.
 //!
-//! Each run listens on port 0 and is killed if it does not exit within [`EXIT_TIMEOUT`], so a
-//! regression that starts the server fails the test instead of hanging the suite. The tests that
-//! let it start read its log up to its `listening` line and kill it ([`common::process`]).
+//! Each run listens on port 0 and is killed if it does not exit within the harness's
+//! [`patience`](common::patience), so a regression that starts the server fails the test instead of
+//! hanging the suite. The tests that let it start read its log up to its `listening` line and kill
+//! it ([`common::process`]).
 
 mod common;
 
 use std::path::Path;
 use std::process::Output;
 
-use common::process::{EXIT_TIMEOUT, Running, server_binary};
+use common::patiently;
+use common::process::{Running, server_binary};
 use hyperion_server::config::{
     ENV_DATA_DIR, ENV_SERVE_SKY, ENV_SKY_CACHE_MB, ENV_STOP_ON_STDIN_CLOSE, ENV_WORKERS,
 };
-use tokio::time::timeout;
 
 /// The exit code for a command line clap refuses.
 const USAGE_ERROR: i32 = 2;
@@ -33,9 +34,8 @@ async fn run(dir: &Path, args: &[&str], vars: &[(&str, &Path)]) -> Output {
         .args(args)
         .envs(vars.iter().copied())
         .kill_on_drop(true);
-    timeout(EXIT_TIMEOUT, command.output())
+    patiently("waiting for the server to exit by itself", command.output())
         .await
-        .expect("the server exits by itself")
         .expect("the server runs")
 }
 

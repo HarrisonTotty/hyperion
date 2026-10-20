@@ -39,17 +39,18 @@ pub const PATIENCE_ENV: &str = "HYPERION_TEST_PATIENCE_SECS";
 /// [`patience`] when [`PATIENCE_ENV`] is not set.
 ///
 /// Every wait here is on work that a loaded machine only makes slower, never wrong: a galaxy build,
-/// a query, a band of a map, a teardown. `open_universe` always builds a galaxy (plan 04, design
-/// note 6), about 130 ms in a release build (plan 02, Risks, R19), but these tests run under
-/// `just test`, where `hyperion-sim` is `opt-level = 2` with debug assertions and overflow checks
-/// still on, and `cargo test` runs a binary's tests in parallel, so as many galaxies are built at
-/// once as the binary has tests. Measured over a loopback socket on eight cores at load average 14
-/// (2026-09-22): one cold `open_universe` took 0.85–0.93 s on its own and up to 2.04 s with twelve
-/// running together. At load average 20–22 with other worktrees building (2026-09-29), the nine
-/// tests of `system_bodies` each waited over 20 s for their first answers, and two runs in six
-/// failed at the 20 s this bound once was. The longest job the server cannot abort, which a
-/// teardown waits for, is one band of 16 rows of a 1,024-pixel edge-on map, about 13 s on an idle
-/// machine (plan 04, "Measured map costs"), and so the longest wait here.
+/// a query, a band of a map, a teardown, a server process's start, its answer to `/healthz` and its
+/// exit. `open_universe` always builds a galaxy (plan 04, design note 6), about 130 ms in a release
+/// build (plan 02, Risks, R19), but these tests run under `just test`, where `hyperion-sim` is
+/// `opt-level = 2` with debug assertions and overflow checks still on, and `cargo test` runs a
+/// binary's tests in parallel, so as many galaxies are built at once as the binary has tests.
+/// Measured over a loopback socket on eight cores at load average 14 (2026-09-22): one cold
+/// `open_universe` took 0.85–0.93 s on its own and up to 2.04 s with twelve running together. At
+/// load average 20–22 with other worktrees building (2026-09-29), the nine tests of `system_bodies`
+/// each waited over 20 s for their first answers, and two runs in six failed at the 20 s this bound
+/// once was. The longest job the server cannot abort, which a teardown waits for, is one band of 16
+/// rows of a 1,024-pixel edge-on map, about 13 s on an idle machine (plan 04, "Measured map
+/// costs"), and so the longest wait here.
 ///
 /// Three minutes is some six times the worst of those under the load that failed, and still turns
 /// a hung server into a failed test rather than a hung suite. No assertion depends on it: a test of
@@ -57,7 +58,7 @@ pub const PATIENCE_ENV: &str = "HYPERION_TEST_PATIENCE_SECS";
 pub const DEFAULT_PATIENCE: Duration = Duration::from_secs(180);
 
 /// Upper bound on any single wait of the harness: a message, a connection, a state of the server's
-/// counters, a teardown.
+/// counters, a teardown, a server process's start, its answer to `/healthz` and its exit.
 ///
 /// This is the harness's patience and not a property of the server, so it can be raised for a
 /// machine slower or busier than any it was measured on: [`PATIENCE_ENV`] gives it in whole

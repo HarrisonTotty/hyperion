@@ -1954,3 +1954,17 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
   `cargo test -p hyperion-server config` on Linux selects as many tests as before. They run once a
   Windows runner exists, and are untested until then, as the ruling accepts: the Windows run is
   still owed.
+- **Amended 2026-10-20: the process tests wait under the harness's patience** (issue #59; main's
+  ruling of 2026-10-20).
+  - `tests/common/process.rs`'s `START_TIMEOUT` (30 s) and `EXIT_TIMEOUT` (10 s) are gone, and so
+    is `tests/stop.rs`'s `ANSWER_TIMEOUT` (10 s).
+  - The start, the exit, a run in `tests/cli.rs` that exits before serving, and `/healthz` now wait
+    under `tests/common`'s `patiently`. So `HYPERION_TEST_PATIENCE_SECS` sets them, and they are
+    180 s by default.
+  - T17.a's "within `tokio::time::timeout(10 s)`" and its record's "allows 30 s to reach
+    `listening`" now read as that patience. They were guards against a hang, not contracts:
+    - T17.a's ruling states no time;
+    - the server's shutdown contract is still P04.T15's 20 s with work queued, `tests/abuse.rs`'s
+      `SHUTDOWN_WITH_WORK_QUEUED`, unchanged;
+    - T17.c's 10 s in the launch contract is the launcher's wait before `kill()`, which no server
+      test asserts.
