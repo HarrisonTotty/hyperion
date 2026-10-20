@@ -6,9 +6,9 @@
  * The fixture holds the registry's rows in index order, append-only, each with the client optics
  * the sim may ask of it (decision-composition §1.1 and §1.9). The client's optics are keyed by the
  * sim's strings, every look-up returns a provenance, and the fallback never drops a species. This
- * check reads only each row's key, its molar mass and its three flags: never `heat_capacity_over_r`,
- * which is for display and cross-check only and is renamed `heat_capacity_over_r_298k` at P14.T54.a
- * (science-r08-gases-2 §1.4, which drops the c_p row). It fails if:
+ * check reads each row's key, its molar mass, its three flags and its grain density: never
+ * `heat_capacity_over_r_298k`, which is for display and cross-check only (science-r08-gases-2 §1.4,
+ * which drops the c_p row). It fails if:
  *
  * 1. a row flagged `rayleigh` has neither measured nor estimated Rayleigh optics;
  * 2. a row flagged `absorber` has no cross-sections (H⁻'s closed form among them), no committed
@@ -18,7 +18,10 @@
  *    whose provenance is `standIn` and whose text says what stands in (the generic stand-in alone
  *    fails); or a file's key is not a row (R08.T5.b's test, which T19 checks);
  * 4. `GAS_MOLAR_MASS_G_PER_MOL` differs from the fixture's molar mass by more than 10⁻¹² g mol⁻¹ for
- *    a key in both.
+ *    a key in both;
+ * 5. an index file of an `aerosol_material` row has no grain density of its phase and variant at
+ *    any temperature (`grainDensity.ts`), unless it is one of the sim's stated refusals
+ *    (decision-p14-t54a-grain-density §2.6): condition 3's density analogue.
  *
  * The fifth row, the client's τ(550) against the record's within 1%, is held
  * (decision-bump-plan-after-22): see its tripwire below.
@@ -34,7 +37,8 @@ import registry from "../../../../../../../packages/protocol/fixtures/substances
 import { crossSectionAt } from "./absorbers";
 import { committedLineSpecies } from "./absorbers/kDistribution";
 import { NO_VISIBLE_ABSORPTION, PENDING_ABSORBERS } from "./absorbers/transparency";
-import { MATERIAL_FILES, resolveMaterial } from "./materials/materials";
+import { type GrainDensityRow, grainDensityKgPerM3 } from "./grainDensity";
+import { MATERIAL_FILES, type MaterialPhase, resolveMaterial } from "./materials/materials";
 import { GAS_MOLAR_MASS_G_PER_MOL, GASES, rayleighOf } from "./rayleigh";
 
 /** A fixture row as this check reads it: its key, its molar mass and its three optics flags. */
@@ -115,46 +119,6 @@ describe("the registry's absorbers", () => {
   });
 });
 
-/**
- * The fifteen rows P14.T49.b appended with `absorber: false` (R08.T19's known gaps), whose flags
- * P14.T54.a's bump turns on once each is answered.
- *
- * @remarks
- * R08.T4.h answered each: interim pending entries with their cell means for Al, V, Mn, Ni, Zn, V⁺,
- * Cr⁺ and Mn⁺; stated nones by their lines' share for Na⁺, Al⁺, Si⁺, K⁺, Ni⁺ and Zn⁺; HCl's
- * HITRAN2024 answer. R08.T4.e then drew Zn's table, from 3,300 K, and Si⁺'s, from 4,600 K, each a
- * stated none below; the rest keep T4.h's answers, Al, V, Mn, Ni, V⁺, Cr⁺, Mn⁺ and Ni⁺ deferred past
- * its byte budget. This test may go once the fixture flags them, when the check above holds them.
- * The fixture is the sim's, written by its test: this test never edits it.
- */
-const AWAITING_THEIR_FLAG = [
-  "Al",
-  "V",
-  "Mn",
-  "Ni",
-  "Zn",
-  "HCl",
-  "Na+",
-  "Al+",
-  "Si+",
-  "K+",
-  "V+",
-  "Cr+",
-  "Mn+",
-  "Ni+",
-  "Zn+",
-] as const;
-
-describe("the fifteen rows awaiting their absorber flag (R08.T4.h)", () => {
-  it("are rows of the fixture", () => {
-    expect(AWAITING_THEIR_FLAG.filter((key) => !ROWS.some((row) => row.key === key))).toEqual([]);
-  });
-
-  it("each have condition 2's answer already, so that P14.T54.a's flags pass", () => {
-    expect(unanswered(AWAITING_THEIR_FLAG)).toEqual([]);
-  });
-});
-
 describe("the registry's aerosol materials (R08.T5.d)", () => {
   it("serve every aerosol-material row of the registry's fixture with a file of their own", () => {
     // A row the generic stand-in alone serves fails: its key would have no file.
@@ -174,6 +138,71 @@ describe("the registry's aerosol materials (R08.T5.d)", () => {
   it("key every index file by a row of the fixture (R08.T5.b)", () => {
     const keys = new Set(ROWS.map((row) => row.key));
     expect(MATERIAL_FILES.map((file) => file.key).filter((key) => !keys.has(key))).toEqual([]);
+  });
+});
+
+/** An index file as the density check names it: its key, its phase and its variant. */
+interface FileForm {
+  readonly key: string;
+  readonly phase: MaterialPhase;
+  readonly variant: string | null;
+}
+
+/**
+ * The index files of aerosol-material rows that have no grain density of their phase and variant
+ * at any temperature, each with its reason: the sim's `NoDensity` refusals
+ * (`substance_aerosol_refuses_what_it_cannot_serve`; decision-p14-t54a-grain-density §2.6).
+ */
+const NO_GRAIN_DENSITY: ReadonlyArray<FileForm & { readonly reason: string }> = [
+  { key: "H2SO4", phase: "liquid", variant: "84.5wt%", reason: "not the row's 75 wt% reference" },
+  { key: "S8", phase: "liquid", variant: null, reason: "liquid sulphur's density not read" },
+  { key: "H2S", phase: "solid", variant: null, reason: "solid H2S's density not read" },
+  { key: "Ar", phase: "solid", variant: null, reason: "solid argon's density not read" },
+  { key: "H2O", phase: "liquid", variant: "S35", reason: "seawater, not the row's pure water" },
+];
+
+/**
+ * Whether a row has a grain density as a phase of a variant at some temperature: the reader gives
+ * one at a node of the phase's member, of the file's variant.
+ */
+function hasGrainDensity(row: GrainDensityRow, form: FileForm): boolean {
+  const pieces = form.phase === "solid" ? row.solid_grain_density : row.liquid_grain_density;
+  return (pieces ?? []).some((piece) =>
+    piece.temperatures_k.some(
+      (t) => grainDensityKgPerM3(row, form.phase, t, form.variant ?? undefined) !== undefined,
+    ),
+  );
+}
+
+/** A file's form as one string, for comparing lists in any order. */
+function formName({ key, phase, variant }: FileForm): string {
+  return `${phase} ${key} ${variant ?? ""}`;
+}
+
+describe("the registry's aerosol materials' grain densities (decision-p14-t54a-grain-density)", () => {
+  /** The fixture's aerosol-material rows by key. */
+  const rows = new Map(
+    registry.substances.filter((row) => row.aerosol_material).map((row) => [row.key, row]),
+  );
+  /** The index files of those rows, as the density check names them. */
+  const files: ReadonlyArray<FileForm> = MATERIAL_FILES.filter((file) => rows.has(file.key)).map(
+    (file) => ({ key: file.key, phase: file.phase, variant: file.variant ?? null }),
+  );
+
+  it("are found for the rows' files", () => {
+    expect(files.length).toBeGreaterThan(0);
+  });
+
+  it("give every file of an aerosol-material row a density of its phase and variant, or a stated refusal", () => {
+    const undensed = files.filter((form) => {
+      const row = rows.get(form.key);
+      return row === undefined || !hasGrainDensity(row, form);
+    });
+    expect(undensed.map(formName).toSorted()).toEqual(NO_GRAIN_DENSITY.map(formName).toSorted());
+  });
+
+  it("state a reason for each refusal", () => {
+    expect(NO_GRAIN_DENSITY.filter(({ reason }) => reason.length === 0)).toEqual([]);
   });
 });
 

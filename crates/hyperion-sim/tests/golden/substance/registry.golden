@@ -251,14 +251,14 @@ identity 110 chondrite_e: molar_mass_g_per_mol none
 identity 111 cometary: lithology, charge 0, elements []
 identity 111 cometary: molar_mass_g_per_mol none
 [optics]
-optics 0 H2: rayleigh true, absorber false, aerosol_material false
-optics 1 He: rayleigh true, absorber false, aerosol_material false
+optics 0 H2: rayleigh true, absorber true, aerosol_material false
+optics 1 He: rayleigh true, absorber true, aerosol_material false
 optics 2 H2O: rayleigh true, absorber true, aerosol_material true
 optics 3 CH4: rayleigh true, absorber true, aerosol_material true
 optics 4 NH3: rayleigh true, absorber true, aerosol_material true
-optics 5 N2: rayleigh true, absorber false, aerosol_material true
+optics 5 N2: rayleigh true, absorber true, aerosol_material true
 optics 6 O2: rayleigh true, absorber true, aerosol_material true
-optics 7 CO2: rayleigh true, absorber false, aerosol_material true
+optics 7 CO2: rayleigh true, absorber true, aerosol_material true
 optics 8 Ar: rayleigh true, absorber false, aerosol_material true
 optics 9 Ne: rayleigh true, absorber false, aerosol_material false
 optics 10 Kr: rayleigh true, absorber false, aerosol_material false
@@ -289,25 +289,25 @@ optics 34 SiO: rayleigh true, absorber true, aerosol_material false
 optics 35 TiO: rayleigh true, absorber true, aerosol_material false
 optics 36 VO: rayleigh true, absorber true, aerosol_material false
 optics 37 FeH: rayleigh true, absorber true, aerosol_material false
-optics 38 Al: rayleigh true, absorber false, aerosol_material false
-optics 39 V: rayleigh true, absorber false, aerosol_material false
-optics 40 Mn: rayleigh true, absorber false, aerosol_material false
-optics 41 Ni: rayleigh true, absorber false, aerosol_material false
-optics 42 Zn: rayleigh true, absorber false, aerosol_material false
-optics 43 Na+: rayleigh false, absorber false, aerosol_material false
+optics 38 Al: rayleigh true, absorber true, aerosol_material false
+optics 39 V: rayleigh true, absorber true, aerosol_material false
+optics 40 Mn: rayleigh true, absorber true, aerosol_material false
+optics 41 Ni: rayleigh true, absorber true, aerosol_material false
+optics 42 Zn: rayleigh true, absorber true, aerosol_material false
+optics 43 Na+: rayleigh false, absorber true, aerosol_material false
 optics 44 Mg+: rayleigh false, absorber true, aerosol_material false
-optics 45 Al+: rayleigh false, absorber false, aerosol_material false
-optics 46 Si+: rayleigh false, absorber false, aerosol_material false
-optics 47 K+: rayleigh false, absorber false, aerosol_material false
+optics 45 Al+: rayleigh false, absorber true, aerosol_material false
+optics 46 Si+: rayleigh false, absorber true, aerosol_material false
+optics 47 K+: rayleigh false, absorber true, aerosol_material false
 optics 48 Ca+: rayleigh false, absorber true, aerosol_material false
 optics 49 Ti+: rayleigh false, absorber true, aerosol_material false
-optics 50 V+: rayleigh false, absorber false, aerosol_material false
-optics 51 Cr+: rayleigh false, absorber false, aerosol_material false
-optics 52 Mn+: rayleigh false, absorber false, aerosol_material false
+optics 50 V+: rayleigh false, absorber true, aerosol_material false
+optics 51 Cr+: rayleigh false, absorber true, aerosol_material false
+optics 52 Mn+: rayleigh false, absorber true, aerosol_material false
 optics 53 Fe+: rayleigh false, absorber true, aerosol_material false
-optics 54 Ni+: rayleigh false, absorber false, aerosol_material false
-optics 55 Zn+: rayleigh false, absorber false, aerosol_material false
-optics 56 HCl: rayleigh true, absorber false, aerosol_material false
+optics 54 Ni+: rayleigh false, absorber true, aerosol_material false
+optics 55 Zn+: rayleigh false, absorber true, aerosol_material false
+optics 56 HCl: rayleigh true, absorber true, aerosol_material false
 optics 57 NH4SH: rayleigh false, absorber false, aerosol_material true
 optics 58 H2SO4: rayleigh false, absorber false, aerosol_material true
 optics 59 S8: rayleigh false, absorber false, aerosol_material true
@@ -364,8 +364,6 @@ optics 109 chondrite_ll: rayleigh false, absorber false, aerosol_material false
 optics 110 chondrite_e: rayleigh false, absorber false, aerosol_material false
 optics 111 cometary: rayleigh false, absorber false, aerosol_material false
 [gas]
-gas 0 H2: Linear
-gas 0 H2: heat_capacity_over_r = 0x400c000000000000  # 3.5
 gas 0 H2: rotation InLevels
 gas 0 H2: level set 0, term (0, 0) cm = 0x40a0f4bf8bac710c  # 2170.3741124999997
 gas 0 H2: level set 0, rovibrational Ortho, weight = 0x3fe8000000000000  # 0.75
@@ -380,8 +378,6 @@ gas 0 H2: heat_capacity_over_r at 1000 K = 0x400d1a4130d4ee28  # 3.6378196539860
 gas 0 H2: heat_capacity_over_r at 2000 K = 0x40109883e2dac269  # 4.1489406057377005
 gas 0 H2: enthalpy_over_r_k at 298.15 K = 0x408bd47af0bae992  # 890.5600294687777
 gas 0 H2: entropy_over_r at 298.15 K = 0x402fa29df1e53fac  # 15.817611273989165
-gas 1 He: Atom
-gas 1 He: heat_capacity_over_r = 0x4004000000000000  # 2.5
 gas 1 He: rotation None
 gas 1 He: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
 gas 1 He: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
@@ -392,8 +388,6 @@ gas 1 He: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
 gas 1 He: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
 gas 1 He: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
 gas 1 He: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
-gas 2 H2O: NonLinear
-gas 2 H2O: heat_capacity_over_r = 0x4010000000000000  # 4.0
 gas 2 H2O: rotation NonLinear
 gas 2 H2O: vibration 0, degeneracy 1, wavenumber_cm = 0x40ac920000000000  # 3657.0
 gas 2 H2O: vibration 1, degeneracy 1, wavenumber_cm = 0x4098ec0000000000  # 1595.0
@@ -407,8 +401,6 @@ gas 2 H2O: heat_capacity_over_r at 1000 K = 0x4013bc6b8a37bfb6  # 4.934003982212
 gas 2 H2O: heat_capacity_over_r at 2000 K = 0x40182784b62ac89d  # 6.038592192040736
 gas 2 H2O: enthalpy_over_r_k at 298.15 K = 0x4092a6926c9e6da8  # 1193.642992473071
 gas 2 H2O: entropy_over_r at 298.15 K = 0x4036cb59d404ff65  # 22.794339419574857
-gas 3 CH4: NonLinear
-gas 3 CH4: heat_capacity_over_r = 0x4010000000000000  # 4.0
 gas 3 CH4: rotation NonLinear
 gas 3 CH4: vibration 0, degeneracy 1, wavenumber_cm = 0x40a6ca0000000000  # 2917.0
 gas 3 CH4: vibration 1, degeneracy 2, wavenumber_cm = 0x4097f80000000000  # 1534.0
@@ -423,8 +415,6 @@ gas 3 CH4: heat_capacity_over_r at 1000 K = 0x402144ffc1c59cb0  # 8.634763770458
 gas 3 CH4: heat_capacity_over_r at 2000 K = 0x4026b4f83d62fcb2  # 11.35345641930903
 gas 3 CH4: enthalpy_over_r_k at 298.15 K = 0x4092d697ffc6c9f4  # 1205.6484366474879
 gas 3 CH4: entropy_over_r at 298.15 K = 0x4036d7438d34b629  # 22.840874505394968
-gas 4 NH3: NonLinear
-gas 4 NH3: heat_capacity_over_r = 0x4010000000000000  # 4.0
 gas 4 NH3: rotation NonLinear
 gas 4 NH3: vibration 0, degeneracy 1, wavenumber_cm = 0x40aa120000000000  # 3337.0
 gas 4 NH3: vibration 1, degeneracy 1, wavenumber_cm = 0x408db00000000000  # 950.0
@@ -439,8 +429,6 @@ gas 4 NH3: heat_capacity_over_r at 1000 K = 0x401ac578275200da  # 6.692841162090
 gas 4 NH3: heat_capacity_over_r at 2000 K = 0x4021378976ff1729  # 8.608470648421262
 gas 4 NH3: enthalpy_over_r_k at 298.15 K = 0x4092e217cca5781d  # 1208.5232416014253
 gas 4 NH3: entropy_over_r at 298.15 K = 0x4036dad6750c2821  # 22.85483485743328
-gas 5 N2: Linear
-gas 5 N2: heat_capacity_over_r = 0x400c000000000000  # 3.5
 gas 5 N2: rotation Linear
 gas 5 N2: vibration 0, degeneracy 1, wavenumber_cm = 0x40a233d810624dd3  # 2329.922
 gas 5 N2: heat_capacity_over_r at 30 K = 0x400c000000000000  # 3.5
@@ -452,8 +440,6 @@ gas 5 N2: heat_capacity_over_r at 1000 K = 0x400f6126a655cf21  # 3.9224369997917
 gas 5 N2: heat_capacity_over_r at 2000 K = 0x40112e869422b1ef  # 4.295435251824968
 gas 5 N2: enthalpy_over_r_k at 298.15 K = 0x40904e468b2646f1  # 1043.5688901882934
 gas 5 N2: entropy_over_r at 298.15 K = 0x4033f116732130e7  # 19.941748805621412
-gas 6 O2: Linear
-gas 6 O2: heat_capacity_over_r = 0x400c000000000000  # 3.5
 gas 6 O2: rotation Linear
 gas 6 O2: vibration 0, degeneracy 1, wavenumber_cm = 0x409850ec8b439581  # 1556.231
 gas 6 O2: level set 0, 3 levels, digest 36debfa18bd55379, weight = 0x3ff0000000000000  # 1.0
@@ -466,8 +452,6 @@ gas 6 O2: heat_capacity_over_r at 1000 K = 0x4010ae4f30419511  # 4.1702239551571
 gas 6 O2: heat_capacity_over_r at 2000 K = 0x4011e7cd11efa25a  # 4.476368217707739
 gas 6 O2: enthalpy_over_r_k at 298.15 K = 0x40905301f15fd5ee  # 1044.7518973326037
 gas 6 O2: entropy_over_r at 298.15 K = 0x40350b7c2ec126b8  # 21.04486362662894
-gas 7 CO2: LinearTriatomic
-gas 7 CO2: heat_capacity_over_r = 0x4011555555555555  # 4.333333333333333
 gas 7 CO2: rotation Linear
 gas 7 CO2: vibration 0, degeneracy 1, wavenumber_cm = 0x4094d40000000000  # 1333.0
 gas 7 CO2: vibration 1, degeneracy 2, wavenumber_cm = 0x4084d80000000000  # 667.0
@@ -481,8 +465,6 @@ gas 7 CO2: heat_capacity_over_r at 1000 K = 0x401a0d234c80c417  # 6.512829966887
 gas 7 CO2: heat_capacity_over_r at 2000 K = 0x401cb9b2cbe30811  # 7.181346116763977
 gas 7 CO2: enthalpy_over_r_k at 298.15 K = 0x40919a8e3ddf6950  # 1126.6389079006221
 gas 7 CO2: entropy_over_r at 298.15 K = 0x40344dbacc2a7db5  # 20.303631554006376
-gas 8 Ar: Atom
-gas 8 Ar: heat_capacity_over_r = 0x4004000000000000  # 2.5
 gas 8 Ar: rotation None
 gas 8 Ar: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
 gas 8 Ar: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5

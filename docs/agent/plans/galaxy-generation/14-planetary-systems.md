@@ -20989,3 +20989,103 @@ planetary::record` (624 tests at T57.a's commit).
         as `close_binary`'s 566 K body seems to show (its water by number above `p_sat` at its
         warmest, its weight below the cap). This was so before the switch.
       - The 2.73 GPa methane air is T13.c's version-22 state, which a solid bulk gas cannot hold.
+  - _A2, c_p(T), the gas columns and `substances.json`'s schema_ (decision-pre-23-review item 18
+    and "For main" item 2; decision-p14-t54a-grain-density §2, §4 and §5, which overrides item
+    18's single grain-density column; P14.T49.b's step 1 record). `GENERATOR_VERSION` stays 22,
+    and every golden that moves re-blesses at 22 in the same commit.
+    - _c_p(T) for the classes._ `SurfaceConditions::heat_capacity_over_r` (wire
+      `heat_capacity_over_r`) and the column's `specific_heat_j_per_kg_k` are
+      `mixture_heat_capacity_over_r_at` over the published gases, both at the column's mean
+      surface temperature: the record's mean `T_s`, and a pass step's own `T_s` in
+      `step_climate`, one computation (`GasFractions::heat_capacity_over_r_at`). No circle
+      closes: `c_p` enters the meridional conductance D, the column's heat capacity (the diurnal
+      response) and Koll's wave speed, so the contrasts, the range and the regime, never the mean
+      `T_s` that T13.c's greenhouse or the step gives the column. The table's Venus goes 4.319 →
+      6.001 at 735 K, its Earth 3.508 → 3.510 at 290 K. `EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K`, the
+      conductance's reference, keeps 7/2 R over M₀: the sum gives Earth's dry air 3.498 at 288 K.
+    - _Retired:_ `HeatCapacityClass`, `heat_capacity_over_r(mixture)` and its doctest,
+      `GasColumns::heat_capacity` and `heat_capacity_over_r`, the `held_class` field (58 rows),
+      the four class sources (`ATOM_CLASS`, `LINEAR_CLASS`, `NON_LINEAR_CLASS`,
+      `CARBON_DIOXIDE_CLASS`), the re-export, `mix.rs`'s two class tests, and the golden's
+      `[gas]` class lines (18). The measured Mars of the surface's and the regime's tests takes
+      CO₂'s `c_p` at its 210 K; `substance_gas_rows_carry_their_gas_columns` holds every gas row's
+      `c_p` ÷ R at 298.15 K to at least 5/2.
+    - _The flags_ (§5): `absorber` is on for `H2`, `He`, `N2` and `CO2` and the fifteen rows of
+      R08.T19 (`Al`, `V`, `Mn`, `Ni`, `Zn`, `HCl`, `Na+`, `Al+`, `Si+`, `K+`, `V+`, `Cr+`, `Mn+`,
+      `Ni+`, `Zn+`), which take `RAYLEIGH_ABSORBER` and `ABSORBER_ONLY`;
+      `RAYLEIGH_AWAITING_ABSORPTION` and `ION_AWAITING_ABSORPTION` are gone.
+      `substance_client_flags_follow_the_ruling` drops `awaiting` and asserts the four on, and
+      `parity.test.ts`'s `AWAITING_THEIR_FLAG` block is gone (its first `describe` holds them).
+      `SO2`, `HCN` and `C2H2` keep `aerosol_material` false (§4).
+    - _`substances.json`, as built._ Each row is `index`, `key`, `kind`, `molar_mass_g_per_mol`,
+      `heat_capacity_over_r_298k` (`heat_capacity_over_r_at` at 298.15 K for the 58 gas rows,
+      `null` for the 54 others: H₂ 3.4683, H₂O 4.0269, CO₂ 4.4678), the three flags,
+      `grain_density_variant` (`"75wt%"` for `H2SO4`, `null` otherwise), `solid_grain_density`
+      and `liquid_grain_density` (`null`, or pieces of `from_k`, `to_k`, `temperatures_k` and
+      `densities_kg_per_m3`, one a line). The evaluation rule (§2.2) is written in the
+      description, in `grainDensity.ts` and in the test's `mirror_density`, and the description
+      states the 0.99 `T_c` cut.
+      - A fixed row's phase is one node at its `at`, both bounds `null`: 49 solids, 8 liquids.
+      - A diagram row's solid has a piece a solid phase with a density, nodes at its ends and at
+        its law's kinks (CO₂'s 80 K, Xe's 14 measured nodes), the interior ones placed greedily on
+        a 0.01 K grid, each the farthest from the last node whose chord holds the law within 5 ×
+        10⁻⁵ at 128 interior points, by bisection, with the law, + − × ÷, `floor` and comparisons
+        alone. Ice Ih 12 nodes, CH₄ II and I 8 and 14, N₂ α and β 13 and 5, CO₂ 15, Xe 16, each
+        flat piece 2: 97 in all. O₂'s β (23.14–43.78 K) is a gap.
+      - Its liquid is one piece from `T_t` to 0.99 `T_c` (the f64 product): 53 (CO₂) to 81 (H₂O)
+        nodes, 906 in all. The fixture holds 1,060 nodes and 77 kB; the ruling's orientation
+        counts (about 800) were taken at 10⁻⁴, and placing to 5 × 10⁻⁵ takes about √2 more.
+      - _Deviation:_ a member's last piece covers its `to_k`, so CO's α piece, the last, ends at
+        the double below β-CO's 61.585 K (`61.584999999999994`), so that 61.585 K reads none, as
+        the sim's `>= start` has it. Its node lies there too. The description says so.
+    - _The tests._ (a) `substance_fixture_grain_density_holds_the_registry` reads the writer's
+      text back and holds every node to its law to the bit (a solid phase's own at the bound it
+      shares with the next), every sample within 10⁻⁴ (64 points an interval, each bound and
+      10⁻⁹ K either side, a 4,097-point sweep of each diagram phase), none exactly where the sim
+      gives none but the liquid above 0.99 `T_c`, fixed rows to the bit at 0, `at` and 3,000 K,
+      and §2.6's shapes. The worst error is 5.0 × 10⁻⁵ (ice Ih near 208 K). (b)
+      `grainDensity.test.ts` holds §2.6's figures within 10⁻⁴ and the rule on a hand-made row.
+      (c) `parity.test.ts` holds every index file of an `aerosol_material` row to a density of
+      its phase and variant through the reader, or to the five stated refusals (solid `Ar` and
+      `H2S`, liquid `S8`, `84.5wt%` and `S35`). The TS reader equals the Rust one to the bit at
+      the 179,548 temperatures of a one-off comparison (the test's samples, 0–1.1 `T_c`, NaN,
+      −1 K).
+    - _The writer, the reader, the parity test, one place each:_ `fixture()` and
+      `grain_density_pieces` in `tests/substance_golden.rs`; `read_grain_densities` and
+      `mirror_density` beside them, and `grainDensity.ts` for the client; (a), (b) and (c).
+      Prettier leaves the fixture alone (`.prettierignore`, with the reason), so that a piece
+      keeps its line.
+    - _T57.a's tripwire_ stays green, its figures unmoved, so no refit: k(CO₂) 14.8616 (Venus,
+      90.422 bar CO₂ and 2.0876 N₂, `T_eq` 229.0585 K), k(H₂O) 4.4690 (Earth, water 837.204 Pa at
+      288 K, `T_eq` 255.1385 K), the measured Earth 288.006 K, the measured Venus 736.980 K
+      (778.051 K under version 22's), Titan 92.752 K at 0.5362. The fits read inventories and
+      the partition's water at its humidity, and the batch's passes do not yet read the climate
+      range (`step_climate` waits for P14.T54.a's passes).
+    - _Moved goldens_, re-blessed at header 22:
+      - `substance/registry`: 19 optics lines (the flags) and the 18 class lines retired.
+      - `planetary/surface_conditions` (33 lines): `c_p` ÷ R, and the contrasts and ranges it
+        moves; Venus's day–night contrast 1.149 → 0.859 K by its larger column heat capacity.
+      - `planetary/surface_conditions_published` (62 lines): the same on the generated bodies,
+        most on the hot airs, where `c_p` rose most: a 1,527 K CO₂ air's equator–pole contrast
+        goes 168.6 → 201.3 K, its weak-gradient transport falling with the waves' speed
+        `R_air` √(`T_eq` ÷ `c_p`).
+      - `planetary/global_figures` (1 line): Earth's surface ice 0.011025 → 0.010882, from its
+        coldest zone.
+      - Nine `planetary/systems` goldens (all but `eccentric_giant`, `fallback_black_hole`,
+        `filler_b`, `hot_jupiter`, `red_giant` and `t_tauri`): the contrasts, `close_binary`'s
+        ice fraction (0.516049 → 0.516040), and two regime readings: `solar_like`'s 597 K
+        runaway `0200` (EnergyBalance → Isothermal) and `hierarchical_triple`'s 2,879 K magma
+        ocean `0c00` (Isothermal → LockedEnergyBalance, its contrast 57.8 → 89.2 K).
+      - `golden_diff.py`: 13 moved and the version not bumped, as main's ruling for a checkpoint
+        has it; the server's `scene_systems` and the other integration goldens hold.
+    - _Files:_ `substance/{mix, mod, rows, thermo}.rs`; `planetary/hooks/surface.rs` with its
+      and the regime's tests; `tests/substance_golden.rs`; `hyperion-protocol`'s
+      `record/surface.rs` (a doc) and the regenerated `BodySurfaceDto.ts`; the fixture;
+      `view/atmosphere/grainDensity.ts` and its test, and `parity.test.ts`; `.prettierignore`;
+      the 13 goldens.
+    - _Deferred_ (2026-10-13 rule):
+      - The client's `column.ts` still holds the kinetic classes (R08's Design note 3), which
+        science-r08-gases-2 §1.4 retires on the client's side: R08's.
+      - Xe's piece keeps its 14 measured nodes as kinks (16 nodes, the ruling's table 12).
+      - Magma oceans read `c_p` up to about 2,900 K, past the golden's 2,000 K pins and NASA
+        Glenn's 1,500 K checks, where the harmonic sum leaves out anharmonicity and dissociation.

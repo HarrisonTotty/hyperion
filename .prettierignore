@@ -24,6 +24,11 @@ crates/hyperion-fit/data/nasa_cea_thermo/
 crates/hyperion-fit/data/ordal_1988_fe/
 crates/hyperion-fit/data/warren_brandt_2008_h2o/
 
+# The substance registry's public mirror, written by the sim's `tests/substance_golden.rs` under
+# HYPERION_BLESS=1 and checked byte for byte; its grain-density pieces keep a line each (plan 14,
+# P14.T54.a; decision-p14-t54a-grain-density §2.5)
+packages/protocol/fixtures/substances.json
+
 # Tables a bless-style vitest writes and compares byte for byte (`src/renderer/src/test/bless.ts`)
 apps/hyperion/src/renderer/src/test/blessProbe.json
 apps/hyperion/src/renderer/src/view/atmosphere/channels.json

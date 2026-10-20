@@ -139,7 +139,7 @@ use crate::planetary::hooks::figures::GlobalFigures;
 #[cfg(doc)]
 use crate::substance::PhaseDiagram;
 use crate::substance::{
-    Phase, SubstanceId, heat_capacity_over_r, mean_molar_mass_g_per_mol, phase_at,
+    Phase, SubstanceId, mean_molar_mass_g_per_mol, mixture_heat_capacity_over_r_at, phase_at,
 };
 use crate::time::UniverseTime;
 use crate::units::consts::{METRES_PER_AU, STEFAN_BOLTZMANN};
@@ -232,7 +232,9 @@ pub const EARTH_COLUMN_MASS_KG_PER_M2: f64 = 10_094.0;
 /// Dry air's specific heat at constant pressure, the one the conductance is relative to: 1,004.7
 /// J kg⁻¹ K⁻¹, 7/2 R over 28.9644 g mol⁻¹.
 ///
-/// 7/2 is the registry's `c_p` ÷ R class for N₂ and O₂, and 28.9644 g mol⁻¹ the sea-level mean
+/// 7/2 is kinetic theory's `c_p` ÷ R for a diatomic molecule's five degrees, N₂'s and O₂'s, which
+/// the registry's statistical sum gives Earth's dry air at 288 K within 0.1% (`c_p` ÷ R 3.498,
+/// science-r08-gases-2.md §1.2's R ÷ `c_p` 0.2859), and 28.9644 g mol⁻¹ the sea-level mean
 /// molar mass M₀ of the US Standard Atmosphere 1976 (NOAA, NASA and USAF; not re-read). T24.a as
 /// first built took 28.9647.
 pub const EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K: f64 =
@@ -951,9 +953,11 @@ impl SurfaceConditions {
         self.mean_molar_mass_g_per_mol
     }
 
-    /// The gases' mixed `c_p` ÷ R, Σ xᵢ (`c_p,ᵢ` ÷ R), summed over [`gases`](Self::gases) in its
-    /// order (T49.a's [`heat_capacity_over_r`]), each row's class value at 21 → 22 and T49.b's
-    /// function's at the mean surface temperature from 22 → 23; `None` with an empty `gases`: an
+    /// The gases' mixed ideal-gas `c_p` ÷ R at the [mean surface
+    /// temperature](Self::mean_surface_temperature), Σ xᵢ (`c_p,ᵢ` ÷ R), summed over
+    /// [`gases`](Self::gases) in its order: T49.b's statistical sum
+    /// ([`mixture_heat_capacity_over_r_at`]), the one its column's specific heat takes, since
+    /// P14.T54.a's switch from the kinetic-theory classes; `None` with an empty `gases`: an
     /// airless body, or a surface holding melt with no volatile air.
     #[must_use]
     pub const fn heat_capacity_over_r(&self) -> Option<f64> {
@@ -1442,20 +1446,19 @@ impl Surface {
             column,
             gases: fractions.as_slice().to_vec(),
             mean_molar_mass_g_per_mol: fractions.mean_molar_mass_g_per_mol,
-            heat_capacity_over_r: fractions.heat_capacity_over_r,
+            heat_capacity_over_r: fractions.heat_capacity_over_r_at(column.surface_temperature),
         })
     }
 }
 
-/// The gases of a column as mole fractions, on the stack, with their mean molar mass and mixed
-/// `c_p` ÷ R ([`StepColumn::column`]): what [`atmosphere_mole_fractions`] lists, without the
-/// allocation T13.c's passes cannot afford at every step.
+/// The gases of a column as mole fractions, on the stack, with their mean molar mass
+/// ([`StepColumn::column`]): what [`atmosphere_mole_fractions`] lists, without the allocation
+/// T13.c's passes cannot afford at every step.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct GasFractions {
     list: [(SubstanceId, f64); Gas::ALL.len()],
     len: usize,
     mean_molar_mass_g_per_mol: Option<f64>,
-    heat_capacity_over_r: Option<f64>,
 }
 
 impl GasFractions {
@@ -1502,7 +1505,6 @@ impl GasFractions {
             list,
             len,
             mean_molar_mass_g_per_mol: mean_molar_mass_g_per_mol(gases),
-            heat_capacity_over_r: heat_capacity_over_r(gases),
         })
     }
 
@@ -1510,6 +1512,19 @@ impl GasFractions {
     #[must_use]
     fn as_slice(&self) -> &[(SubstanceId, f64)] {
         &self.list[..self.len]
+    }
+
+    /// The gases' mixed ideal-gas `c_p` ÷ R at `temperature`, summed over
+    /// [`as_slice`](Self::as_slice) in its order ([`mixture_heat_capacity_over_r_at`]); `None`
+    /// for no gases.
+    ///
+    /// The column takes it at its mean surface temperature, the one its step or its record
+    /// publishes ([`StepColumn::column`]). No circle closes there: the specific heat enters the
+    /// contrasts, the diurnal response and the range, never the mean temperature it is taken at,
+    /// which T13.c's greenhouse, or the step of its passes, gives the column.
+    #[must_use]
+    fn heat_capacity_over_r_at(&self, temperature: Kelvin) -> Option<f64> {
+        mixture_heat_capacity_over_r_at(self.as_slice(), temperature)
     }
 }
 
@@ -1543,7 +1558,8 @@ struct StepColumn<'a> {
 }
 
 impl StepColumn<'_> {
-    /// The column, with its gases' mole fractions, mean molar mass and `c_p` ÷ R.
+    /// The column, with its gases' mole fractions and mean molar mass; its specific heat takes
+    /// their `c_p` ÷ R at its mean surface temperature ([`GasFractions::heat_capacity_over_r_at`]).
     ///
     /// # Errors
     ///
@@ -1565,7 +1581,7 @@ impl StepColumn<'_> {
             air_mass_kg_per_m2: column_mass_kg_per_m2(surface_pressure, self.surface_gravity),
             specific_heat_j_per_kg_k: match (
                 fractions.mean_molar_mass_g_per_mol,
-                fractions.heat_capacity_over_r,
+                fractions.heat_capacity_over_r_at(self.surface_temperature),
             ) {
                 (Some(mu), Some(cp)) => specific_heat_j_per_kg_k(cp, mu),
                 (None, _) | (_, None) => 0.0,

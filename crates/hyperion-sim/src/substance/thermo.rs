@@ -38,9 +38,10 @@
 //! either, since they do not reach the cold worlds and decision-composition §5 allows NIST's
 //! Standard Reference Data only as asserted cross-checks.
 //!
-//! These functions are in force but read by nothing on the record until the 22 → 23 batch's
-//! wiring (P14.T24.e's profile, P14.T54.a): until then a published `c_p` ÷ R is the held class
-//! of [`heat_capacity_over_r`](super::heat_capacity_over_r).
+//! P14.T24.a's surface conditions take them since P14.T54.a's switch: their published `c_p` ÷ R
+//! and their column's specific heat are [`mixture_heat_capacity_over_r_at`] at the mean surface
+//! temperature, in place of the kinetic-theory classes rows 0–8 held until then. P14.T24.e's
+//! vertical structure integrates its adiabat on them.
 
 use super::SubstanceId;
 use super::mix::mixed;

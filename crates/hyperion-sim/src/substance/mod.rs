@@ -17,9 +17,11 @@
 //!   row serves every phase of its substance, so a phase is never part of a key. The key type lives
 //!   in `hyperion-surface`, whose field header carries keys; the rows here use it.
 //! - **The registry's public mirror** is `packages/protocol/fixtures/substances.json` (index, key,
-//!   kind, molar mass, `c_p` ÷ R and the client's three optics flags), which the client's tests
-//!   read, and `crates/hyperion-sim/tests/golden/substance/registry.golden`
-//!   pins the rows' values. A test writes both and holds each to its committed rows as a prefix.
+//!   kind, molar mass, `c_p` ÷ R at 298.15 K, the client's three optics flags, and the grain
+//!   density's variant and its solid and liquid tables, linear in temperature, from
+//!   [`Substance::grain_density`]), which the client's tests read, and
+//!   `crates/hyperion-sim/tests/golden/substance/registry.golden` pins the rows' values. A test
+//!   writes both and holds each to its committed rows as a prefix.
 //!
 //! # Columns
 //!
@@ -87,7 +89,7 @@ pub use liquid::{
     LiquidComposition, LiquidMember, ResolveLiquidError, liquid_properties,
     pure_liquid_scattering_per_m,
 };
-pub use mix::{GasColumns, HeatCapacityClass, heat_capacity_over_r, mean_molar_mass_g_per_mol};
+pub use mix::{GasColumns, mean_molar_mass_g_per_mol};
 pub use optics::{CondensedOptics, ReferenceForm, ResolvePaletteEntryError, resolve_palette_entry};
 pub use phase::{MOLAR_GAS_CONSTANT, Phase, ice_ih_density};
 pub use rows::EQUILIBRIUM_HYDROGEN;
@@ -610,11 +612,11 @@ mod tests {
     }
 
     /// The client-optics flags of P14.T49.b's rows (decision-r08-t4b-t12c, follow-ups 2 and 4):
-    /// every gas row absorbs but the noble gases and the fifteen rows
-    /// science-r08-unowned-absorbers adds, whose flag waits for R08's answers, and every gas row
-    /// but the electron, H⁻ and the ions scatters; the condensates aloft and the hazes are aerosol materials and nothing else;
-    /// a surface material is none of the three. Rows 0–8 keep generator version 22's flags until
-    /// the bump, which turns on `absorber` for H₂, He, N₂ and CO₂ (P14.T54.a).
+    /// every gas row absorbs but the noble gases (the fifteen rows science-r08-unowned-absorbers
+    /// adds too, since R08.T4.h answered them), and every gas row but the electron, H⁻ and the
+    /// ions scatters; the condensates aloft and the hazes are aerosol materials and nothing else;
+    /// a surface material is none of the three. Of rows 0–8, P14.T54.a's switch turned on
+    /// `absorber` for H₂, He, N₂ and CO₂ (decision-p14-t54a-grain-density §5).
     #[test]
     fn substance_client_flags_follow_the_ruling() {
         for id in ids().skip(9) {
@@ -624,25 +626,7 @@ mod tests {
             let optics = row.optics();
             if row.gas().is_some() {
                 let noble = matches!(key, "Ne" | "Kr" | "Xe");
-                // The rows science-r08-unowned-absorbers adds wait for the client's answers.
-                let awaiting = matches!(
-                    key,
-                    "Al" | "V"
-                        | "Mn"
-                        | "Ni"
-                        | "Zn"
-                        | "HCl"
-                        | "Na+"
-                        | "Al+"
-                        | "Si+"
-                        | "K+"
-                        | "V+"
-                        | "Cr+"
-                        | "Mn+"
-                        | "Ni+"
-                        | "Zn+"
-                );
-                assert_eq!(optics.absorber(), !noble && !awaiting, "{key}");
+                assert_eq!(optics.absorber(), !noble, "{key}");
                 assert_eq!(optics.rayleigh(), row.kind() != SubstanceKind::Ion, "{key}");
             } else {
                 assert!(!optics.rayleigh() && !optics.absorber(), "{key}");
@@ -713,7 +697,7 @@ mod tests {
             Gas::Nitrogen,
             Gas::CarbonDioxide,
         ] {
-            assert!(!gas.substance().substance().optics().absorber(), "{gas:?}");
+            assert!(gas.substance().substance().optics().absorber(), "{gas:?}");
         }
     }
 
@@ -1096,21 +1080,21 @@ mod tests {
         }
     }
 
-    /// Every one of P14.T13's gases is a gas row the client may scatter, holding generator
-    /// version 22's class; every later gas row has its molecular constants and no class; and the
-    /// kinds name themselves.
+    /// Every one of P14.T13's gases is a gas row the client may scatter, and every gas row's
+    /// molecular constants give it a `c_p` ÷ R at 298.15 K, the mirror's
+    /// `heat_capacity_over_r_298k`, of at least 5/2; and the kinds name themselves.
     #[test]
     fn substance_gas_rows_carry_their_gas_columns() {
         for gas in Gas::ALL {
             let row = gas.substance().substance();
             assert!(row.gas().is_some(), "{gas:?}");
             assert!(row.optics().rayleigh(), "{gas:?}");
-            assert!(row.gas().unwrap().heat_capacity().is_some(), "{gas:?}");
         }
-        for id in ids().skip(9) {
-            if let Some(gas) = id.substance().gas() {
-                assert_eq!(gas.heat_capacity(), None, "{:?}", id.substance().key());
-                assert_eq!(gas.heat_capacity_over_r(), None);
+        for id in ids() {
+            if id.substance().gas().is_some() {
+                let c = heat_capacity_over_r_at(id, Kelvin::new(298.15))
+                    .expect("a gas row has its molecular constants");
+                assert!(c >= 2.5, "{:?}: {c}", id.substance().key());
             }
         }
         assert_eq!(SubstanceKind::Molecule.name(), "molecule");

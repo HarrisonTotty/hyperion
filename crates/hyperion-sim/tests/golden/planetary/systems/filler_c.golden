@@ -164,8 +164,8 @@ bond_albedo = 0x3fd2d0e560418937  # 0.294
 bond_ratio = 0x3feeb14d8a2e4532  # 0.9591434191553729
 surface_state: Temperate, Rock; climate Efficient, Seasonal, H2O, EnergyBalance
 mean_surface_temperature_k = 0x40720f364c14f983  # 288.9507561511347
-equator_pole_contrast_k = 0x4041f6858c3d2840  # 35.925950555669715
-day_night_contrast_k = 0x3facfaf10fd1c000  # 0.05660203283412102
+equator_pole_contrast_k = 0x4041f53b4d92f220  # 35.91587228465164
+day_night_contrast_k = 0x3facf80f9c464000  # 0.05658005507132202
 surface_pressure_pa = 0x41204925436de664  # 533650.6316978452
 sigma_h_m = 0x409b43dab504c95c  # 1744.9635811565304
 continental_fraction = 0x3fbc0e7ff4e19704  # 0.10959624985261135
@@ -337,7 +337,7 @@ bond_albedo = 0x3fe0000000000000  # 0.5
 bond_ratio = 0x3fefd83ea50b71d8  # 0.9951470588235294
 surface_state: Snowball, Rock; climate Efficient, Seasonal, CH4, Isothermal
 mean_surface_temperature_k = 0x4067322122de0208  # 185.56654494629788
-equator_pole_contrast_k = 0x3fffc17151d9e200  # 1.9847272107418803
+equator_pole_contrast_k = 0x3fffb7f4a102d000  # 1.9824110307208684
 day_night_contrast_k = 0x0000000000000000  # 0.0
 surface_pressure_pa = 0x4157fba9c7b21f62  # 6287015.12024674
 sigma_h_m = 0x408c20b02afa21a8  # 900.0860194722673
@@ -422,8 +422,8 @@ bond_albedo = 0x3fe0000000000000  # 0.5
 bond_ratio = 0x3fefd83ea50b71d8  # 0.9951470588235294
 surface_state: Snowball, Ice; climate Efficient, Seasonal, CH4, Isothermal
 mean_surface_temperature_k = 0x406078f18bed5ec6  # 131.77948566781396
-equator_pole_contrast_k = 0x3fefde1d7beafa00  # 0.9958636684676208
-day_night_contrast_k = 0x3f4be6d9b6980000  # 0.0008514941266071219
+equator_pole_contrast_k = 0x3fefdd91e8c53400  # 0.9957971140189557
+day_night_contrast_k = 0x3f4be65af09c0000  # 0.0008514350931534409
 surface_pressure_pa = 0x4113d713de2cca86  # 325060.9669677395
 sigma_h_m = 0x408dc50c2009f51e  # 952.6309204843453
 continental_fraction = 0x0000000000000000  # 0.0
@@ -510,7 +510,7 @@ bond_albedo = 0x3fe0000000000000  # 0.5
 bond_ratio = 0x3fefd83ea50b71d8  # 0.9951470588235294
 surface_state: Snowball, Rock; climate Efficient, Seasonal, CH4, Isothermal
 mean_surface_temperature_k = 0x40623ab66c1a1224  # 145.83476834384885
-equator_pole_contrast_k = 0xbfd785640afc6000  # -0.3675165278705208
+equator_pole_contrast_k = 0xbfd78507fc9d4800  # -0.36749457997677837
 day_night_contrast_k = 0x0000000000000000  # 0.0
 surface_pressure_pa = 0x4144e52cd48c9159  # 2738777.6605397877
 sigma_h_m = 0x408c20297bc67c92  # 900.0202556139723
@@ -1576,7 +1576,7 @@ bond_albedo = 0x3fe0000000000000  # 0.5
 bond_ratio = 0x3fefd83ea50b71d8  # 0.9951470588235294
 surface_state: Snowball, Ice; climate Efficient, Seasonal, CH4, Isothermal
 mean_surface_temperature_k = 0x40648fdb2c29cdf6  # 164.49550445713948
-equator_pole_contrast_k = 0x40000a11226a6500  # 2.0049154938429865
+equator_pole_contrast_k = 0x4000067c2bd12300  # 2.003166525192114
 day_night_contrast_k = 0x0000000000000000  # 0.0
 surface_pressure_pa = 0x4133573aa2b79736  # 1267514.6356138713
 sigma_h_m = 0x408cecd189dbae09  # 925.6023137247549
@@ -3215,8 +3215,8 @@ bond_albedo = 0x3fd2d0e560418937  # 0.294
 bond_ratio = 0x3feeb14d8a2e4532  # 0.9591434191553729
 surface_state: Temperate, Rock; climate Efficient, Seasonal, H2O, EnergyBalance
 mean_surface_temperature_k = 0x40720f36590983ed  # 288.95076850621155
-equator_pole_contrast_k = 0x4041f685b3b952a0  # 35.92595526265109
-day_night_contrast_k = 0x3facfaf14a9ae000  # 0.056602039677670746
+equator_pole_contrast_k = 0x4041f53b75020730  # 35.91587698554065
+day_night_contrast_k = 0x3facf80fd6f2e000  # 0.05658006190191145
 surface_pressure_pa = 0x41204925446185fb  # 533650.6335565442
 sigma_h_m = 0x409b43dd2154bf10  # 1744.9659474603286
 continental_fraction = 0x3fbc0e87e2f16ae0  # 0.10959672251321306
@@ -3388,7 +3388,7 @@ bond_albedo = 0x3fe0000000000000  # 0.5
 bond_ratio = 0x3fefd83ea50b71d8  # 0.9951470588235294
 surface_state: Snowball, Rock; climate Efficient, Seasonal, CH4, Isothermal
 mean_surface_temperature_k = 0x406732212ab3954f  # 185.566548681973
-equator_pole_contrast_k = 0x3fffc171895dcf00  # 1.9847274175526195
+equator_pole_contrast_k = 0x3fffb7f4d84e1a00  # 1.982411236707435
 day_night_contrast_k = 0x0000000000000000  # 0.0
 surface_pressure_pa = 0x4157fba9d2b9d637  # 6287015.292592577
 sigma_h_m = 0x408c20b02abb0921  # 900.0860190021668
@@ -3473,8 +3473,8 @@ bond_albedo = 0x3fe0000000000000  # 0.5
 bond_ratio = 0x3fefd83ea50b71d8  # 0.9951470588235294
 surface_state: Snowball, Ice; climate Efficient, Seasonal, CH4, Isothermal
 mean_surface_temperature_k = 0x406078f192f06494  # 131.77948901130424
-equator_pole_contrast_k = 0x3fefde1d9e48da00  # 0.9958637324805863
-day_night_contrast_k = 0x3f4be6d9abf40000  # 0.0008514941072519377
+equator_pole_contrast_k = 0x3fefdd920b1eea00  # 0.9957971780016237
+day_night_contrast_k = 0x3f4be65ae5f80000  # 0.0008514350737982568
 surface_pressure_pa = 0x4113d71403284182  # 325061.00308325153
 sigma_h_m = 0x408dc50c2009f51e  # 952.6309204843453
 continental_fraction = 0x0000000000000000  # 0.0
@@ -3561,7 +3561,7 @@ bond_albedo = 0x3fe0000000000000  # 0.5
 bond_ratio = 0x3fefd83ea50b71d8  # 0.9951470588235294
 surface_state: Snowball, Rock; climate Efficient, Seasonal, CH4, Isothermal
 mean_surface_temperature_k = 0x40623ab6720f2e8f  # 145.83477118458947
-equator_pole_contrast_k = 0xbfd78564367fa400  # -0.3675165683949331
+equator_pole_contrast_k = 0xbfd78508281de000  # -0.3674946204914704
 day_night_contrast_k = 0x0000000000000000  # 0.0
 surface_pressure_pa = 0x4144e52cd9707be7  # 2738777.698745239
 sigma_h_m = 0x408c20297bb7a38f  # 900.0202555033483
@@ -4627,7 +4627,7 @@ bond_albedo = 0x3fe0000000000000  # 0.5
 bond_ratio = 0x3fefd83ea50b71d8  # 0.9951470588235294
 surface_state: Snowball, Ice; climate Efficient, Seasonal, CH4, Isothermal
 mean_surface_temperature_k = 0x40648fdb34ca9836  # 164.49550857133153
-equator_pole_contrast_k = 0x40000a113c271d80  # 2.0049156855999968
+equator_pole_contrast_k = 0x4000067c45777a00  # 2.0031667162977556
 day_night_contrast_k = 0x0000000000000000  # 0.0
 surface_pressure_pa = 0x4133573ac72cbc1b  # 1267514.7780263487
 sigma_h_m = 0x408cecd189dbae09  # 925.6023137247549

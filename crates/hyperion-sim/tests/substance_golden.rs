@@ -3,8 +3,8 @@
 //!
 //! - `tests/golden/substance/registry.golden` pins every row's values by their bits, at the
 //!   generator version: the elements' order, each row's identity (index, key, kind, charge,
-//!   stoichiometry and molar mass), its client optics, its gas columns (the held class, the
-//!   molecular constants, and `c_p` ÷ R, H̃ and S̃ at fixed temperatures; P14.T49.b), its phase
+//!   stoichiometry and molar mass), its client optics, its gas columns (the molecular constants,
+//!   and `c_p` ÷ R, H̃ and S̃ at fixed temperatures; P14.T49.b), its phase
 //!   diagram (its points, anchors, curve, densities and enthalpies at fixed fractions of its triple
 //!   and critical temperatures; P14.T49.b), and its condensed columns (grain density, transition
 //!   and mechanics family; P14.T49.b), and its condensed optics (each modelled row's reference
@@ -14,12 +14,18 @@
 //!   nothing on the record reads the condensed and albedo sections, which re-bless at the version
 //!   in force.
 //! - `packages/protocol/fixtures/substances.json` mirrors the rows for the client (index, key,
-//!   kind, molar mass, `c_p` ÷ R and the three optics flags), which rendering plan R08's parity
-//!   check and P14.T35.e's decode tests read. `just bless` (`HYPERION_BLESS=1`) writes it, and
-//!   otherwise this test holds it to the registry byte for byte. Its `c_p` ÷ R is generator
-//!   version 22's held class, `null` for the rows P14.T49.b appends; P14.T54.a's bump renames it
-//!   `heat_capacity_over_r_298k`, the statistical sum's at 298.15 K, for display and cross-check
-//!   only (science-r08-gases-2.md §1.4; decision-bump-plan-after-22 §1.2).
+//!   kind, molar mass, `heat_capacity_over_r_298k`, the three optics flags, and the grain
+//!   density's `grain_density_variant`, `solid_grain_density` and `liquid_grain_density`), which
+//!   rendering plan R08's parity check and P14.T35.e's decode tests read. `just bless`
+//!   (`HYPERION_BLESS=1`) writes it, and otherwise this test holds it to the registry byte for
+//!   byte. Its `heat_capacity_over_r_298k` is a gas row's statistical sum at 298.15 K, `null`
+//!   without gas columns, for display and cross-check only (science-r08-gases-2.md §1.4;
+//!   P14.T54.a). Its grain densities are tables of (T, ρ) nodes, linear in T, held to 10⁻⁴ of
+//!   `Substance::grain_density` (decision-p14-t54a-grain-density §2): the writer is
+//!   [`fixture`], the reader [`read_grain_densities`] and [`mirror_density`], and their test
+//!   `substance_fixture_grain_density_holds_the_registry`. The client's reader is
+//!   `apps/hyperion/src/renderer/src/view/atmosphere/grainDensity.ts`. Prettier leaves the file
+//!   alone (`.prettierignore`), so that its pieces keep a line each.
 //!
 //! Both are append-only in their identities: a row or an element is appended, never renumbered,
 //! renamed or re-kinded. Each test reads the committed file before it compares or blesses, and
@@ -30,12 +36,14 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use hyperion_sim::GENERATOR_VERSION;
+use hyperion_sim::substance::aerosol::{self, FileVariant};
 use hyperion_sim::substance::optics::{EndMember, GrainScaling, LabSpectrum, OpticsInput};
 use hyperion_sim::substance::{
-    self, CondensedPhase, EQUILIBRIUM_HYDROGEN, Element, GasColumns, GrainDensity, LevelSet,
-    MolecularConstants, PhaseDiagram, Substance, TransitionKind,
+    self, CondensedColumns, CondensedPhase, EQUILIBRIUM_HYDROGEN, Element, GrainDensity, LevelSet,
+    MolecularConstants, PhaseDiagram, SolidDensity, Substance, TransitionKind,
 };
 use hyperion_sim::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
+use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::{GoldenWriter, Mode, f64_digest};
 
@@ -43,7 +51,8 @@ use hyperion_testkit::golden::{GoldenWriter, Mode, f64_digest};
 /// near-runaway world's.
 const PINNED_TEMPERATURES: [f64; 7] = [30.0, 100.0, 200.0, 298.15, 500.0, 1_000.0, 2_000.0];
 
-/// The temperature, kelvin, at which the golden pins each gas row's H̃ and S̃.
+/// The temperature, kelvin, at which the golden pins each gas row's H̃ and S̃, and the fixture
+/// gives its `c_p` ÷ R.
 const STANDARD_TEMPERATURE: f64 = 298.15;
 
 /// The repository's root, two levels above this crate.
@@ -97,7 +106,7 @@ fn elements(row: &Substance) -> String {
     text
 }
 
-/// The golden's gas section: each gas row's held class, molecular constants, and its `c_p` ÷ R at
+/// The golden's gas section: each gas row's molecular constants, and its `c_p` ÷ R at
 /// [`PINNED_TEMPERATURES`] and H̃ and S̃ at [`STANDARD_TEMPERATURE`] (P14.T49.b).
 fn gas_section(w: &mut GoldenWriter) {
     w.line("[gas]");
@@ -107,11 +116,6 @@ fn gas_section(w: &mut GoldenWriter) {
             continue;
         };
         let label = format!("gas {} {}", id.index(), row.key());
-        // The held class of rows 0–8, generator version 22's published value, keeps T49.a's lines.
-        if let (Some(class), Some(over_r)) = (gas.heat_capacity(), gas.heat_capacity_over_r()) {
-            w.line(&format!("{label}: {class:?}"));
-            w.f64(&format!("{label}: heat_capacity_over_r"), over_r);
-        }
         let molecular = gas.molecular();
         w.line(&format!("{label}: rotation {:?}", molecular.rotation()));
         for (k, vibration) in molecular.vibrations().iter().enumerate() {
@@ -567,35 +571,297 @@ fn substance_registry_is_pinned_and_append_only() {
     golden!("substance/registry", &text);
 }
 
-/// The fixture's text: one object a row, a value a line, as Prettier keeps it.
+/// The relative error within which the fixture's nodes are placed, so that linear interpolation
+/// between them holds [`GRAIN_DENSITY_TOLERANCE`] at every temperature the test samples
+/// (decision-p14-t54a-grain-density §2.4).
+const GRAIN_DENSITY_PLACEMENT_TOLERANCE: f64 = 5e-5;
+
+/// The relative error within which the fixture's grain density holds `Substance::grain_density`
+/// wherever both give one (decision-p14-t54a-grain-density §2.4).
+const GRAIN_DENSITY_TOLERANCE: f64 = 1e-4;
+
+/// The grid, nodes a kelvin, on which a piece's interior nodes lie: 0.01 K, for readability.
+const GRAIN_DENSITY_GRID_PER_K: f64 = 100.0;
+
+/// The interior points of an interval at which the placement checks its chord.
+const PLACEMENT_SAMPLES: u32 = 128;
+
+/// The interior points of an interval at which the test checks the interpolation.
+const TEST_SAMPLES: u32 = 64;
+
+/// The fraction of the critical temperature to which the fixture holds a diagram row's liquid:
+/// no linear table follows the saturated liquid's approach to the critical density above it
+/// (decision-p14-t54a-grain-density §2.3).
+const LIQUID_CUT: f64 = 0.99;
+
+/// One piece of a phase's grain-density table in the fixture: the temperatures it covers, kelvin,
+/// `None` for no bound, and its nodes, linear in temperature between them and held beyond them.
+#[derive(Debug, Clone, PartialEq)]
+struct Piece {
+    from_k: Option<f64>,
+    to_k: Option<f64>,
+    temperatures_k: Vec<f64>,
+    densities_kg_per_m3: Vec<f64>,
+}
+
+/// The linear interpolation between the nodes (`t0`, `r0`) and (`t1`, `r1`) at `t`, as the
+/// fixture's readers evaluate it: r0 + f (r1 − r0), f = (t − t0) ÷ (t1 − t0).
+fn interpolate(t0: f64, r0: f64, t1: f64, r1: f64, t: f64) -> f64 {
+    let f = (t - t0) / (t1 - t0);
+    r0 + f * (r1 - r0)
+}
+
+/// Whether the chord from (`t0`, `law(t0)`) to (`t1`, `law(t1)`) holds `law` within
+/// [`GRAIN_DENSITY_PLACEMENT_TOLERANCE`] at [`PLACEMENT_SAMPLES`] points inside it.
+fn chord_holds(law: &dyn Fn(f64) -> f64, t0: f64, t1: f64) -> bool {
+    let (r0, r1) = (law(t0), law(t1));
+    let n = f64::from(PLACEMENT_SAMPLES + 1);
+    (1..=PLACEMENT_SAMPLES).all(|j| {
+        let t = t0 + (t1 - t0) * f64::from(j) / n;
+        let exact = law(t);
+        (interpolate(t0, r0, t1, r1, t) - exact).abs() <= GRAIN_DENSITY_PLACEMENT_TOLERANCE * exact
+    })
+}
+
+/// The nodes' temperatures of a piece of `law` from `from` to `to`, kelvin: those two, every kink
+/// of the law between them (`kinks`, rising), and between each pair as few interior nodes as
+/// hold linear interpolation within [`GRAIN_DENSITY_PLACEMENT_TOLERANCE`].
+///
+/// The interior nodes lie on a grid of [`GRAIN_DENSITY_GRID_PER_K`] a kelvin. Each is the farthest
+/// grid point from the last node to which the chord holds, found by bisection on the grid. The
+/// placement uses only the law, the four arithmetic operations, `floor` and comparisons, so that
+/// it is the same on every platform, whose `powf`, `exp` and `ln` differ.
+fn place_nodes(law: &dyn Fn(f64) -> f64, from: f64, to: f64, kinks: &[f64]) -> Vec<f64> {
+    let grid = |k: f64| k / GRAIN_DENSITY_GRID_PER_K;
+    let mut stops = vec![from];
+    stops.extend(kinks.iter().copied().filter(|&k| from < k && k < to));
+    stops.push(to);
+    let mut nodes = vec![from];
+    for pair in stops.windows(2) {
+        let (mut current, end) = (pair[0], pair[1]);
+        while !chord_holds(law, current, end) {
+            // The grid points strictly between the last node and the stop.
+            let mut first = (current * GRAIN_DENSITY_GRID_PER_K).floor() + 1.0;
+            while grid(first) <= current {
+                first += 1.0;
+            }
+            let mut last = (end * GRAIN_DENSITY_GRID_PER_K).ceil() - 1.0;
+            while grid(last) >= end {
+                last -= 1.0;
+            }
+            if first > last {
+                break;
+            }
+            // The chord holds to `held` and fails to `failed`, one past the last grid point
+            // standing for the stop.
+            let (mut held, mut failed) = (first, last + 1.0);
+            if chord_holds(law, current, grid(first)) {
+                while failed - held > 1.0 {
+                    let middle = f64::midpoint(held, failed).floor();
+                    if chord_holds(law, current, grid(middle)) {
+                        held = middle;
+                    } else {
+                        failed = middle;
+                    }
+                }
+            }
+            current = grid(held);
+            nodes.push(current);
+        }
+        nodes.push(end);
+    }
+    nodes
+}
+
+/// A piece of `law` from `from` to `to`, covering `[from_k, to_k)` (or to `to_k` for its member's
+/// last piece), with its nodes placed by [`place_nodes`].
+fn law_piece(law: &dyn Fn(f64) -> f64, from: f64, to: f64, kinks: &[f64]) -> Piece {
+    let temperatures_k = place_nodes(law, from, to, kinks);
+    let densities_kg_per_m3 = temperatures_k.iter().map(|&t| law(t)).collect();
+    Piece {
+        from_k: Some(from),
+        to_k: Some(to),
+        temperatures_k,
+        densities_kg_per_m3,
+    }
+}
+
+/// The kinks of a solid phase's density law: a polynomial's held end and a measured law's nodes.
+fn kinks(law: &SolidDensity) -> Vec<f64> {
+    match *law {
+        SolidDensity::Polynomial { held_below, .. } => vec![held_below.value()],
+        SolidDensity::Measured(points) => points.iter().map(|(t, _)| t.value()).collect(),
+        SolidDensity::IceIh | SolidDensity::CellVolume { .. } | SolidDensity::Fixed { .. } => {
+            Vec::new()
+        }
+    }
+}
+
+/// The fixture's grain-density pieces of `row` as `phase` (decision-p14-t54a-grain-density §2.3),
+/// or `None` where it has none at any temperature.
+///
+/// - A [`GrainDensity::Fixed`] row's phase that was read is one piece with no bounds and one node
+///   at its stated temperature, held at every temperature, as the sim holds it.
+/// - A [`GrainDensity::OfDiagram`] row's solid is a piece for each solid phase with a density,
+///   from its start to the next phase's start, or to the triple temperature for the warmest; a
+///   phase with no density is a gap. A last piece that ends where such a gap begins ends at the
+///   double below the gap's start, so that the start itself reads none, as the sim's phases begin
+///   at their starts (carbon monoxide's α, before β-CO at 61.585 K).
+/// - Its liquid is one piece from the triple temperature to [`LIQUID_CUT`] of the critical
+///   temperature.
+fn grain_density_pieces(row: &Substance, phase: CondensedPhase) -> Option<Vec<Piece>> {
+    let pieces = match row.condensed()?.grain_density() {
+        GrainDensity::Fixed { solid, liquid } => {
+            let given = match phase {
+                CondensedPhase::Solid => solid,
+                CondensedPhase::Liquid => liquid,
+            }?;
+            vec![Piece {
+                from_k: None,
+                to_k: None,
+                temperatures_k: vec![given.at().value()],
+                densities_kg_per_m3: vec![given.density().value()],
+            }]
+        }
+        GrainDensity::OfDiagram => {
+            let diagram = row
+                .phase_diagram()
+                .expect("a diagram row has a phase diagram");
+            let triple = diagram.triple_temperature().value();
+            match phase {
+                CondensedPhase::Solid => {
+                    let solids = diagram.solid_phases();
+                    let mut pieces = Vec::new();
+                    for (i, solid) in solids.iter().enumerate() {
+                        let Some(law) = solid.density() else {
+                            continue;
+                        };
+                        let from = solid.start().value();
+                        let mut to = solids
+                            .get(i + 1)
+                            .map_or(triple, |next| next.start().value());
+                        if to < triple
+                            && solids[i + 1..]
+                                .iter()
+                                .all(|later| later.density().is_none())
+                        {
+                            to = to.next_down();
+                        }
+                        let at = |t: f64| law.at(Kelvin::new(t)).value();
+                        pieces.push(law_piece(&at, from, to, &kinks(law)));
+                    }
+                    pieces
+                }
+                CondensedPhase::Liquid => {
+                    let cut = LIQUID_CUT * diagram.critical_temperature().value();
+                    let at = |t: f64| {
+                        row.grain_density(CondensedPhase::Liquid, Kelvin::new(t))
+                            .expect("the saturated liquid has a density from T_t to T_c")
+                            .value()
+                    };
+                    vec![law_piece(&at, triple, cut, &[])]
+                }
+            }
+        }
+    };
+    (!pieces.is_empty()).then_some(pieces)
+}
+
+/// `value` as the fixture writes a number, to the bit, or `null`.
+fn json_number(value: Option<f64>) -> String {
+    value.map_or_else(|| "null".to_owned(), |v| format!("{v:?}"))
+}
+
+/// The fixture's text of a phase's pieces: `null`, or the pieces one a line.
+fn pieces_json(pieces: Option<&[Piece]>) -> String {
+    let Some(pieces) = pieces else {
+        return "null".to_owned();
+    };
+    let list = |values: &[f64]| {
+        values
+            .iter()
+            .map(|v| format!("{v:?}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let lines: Vec<String> = pieces
+        .iter()
+        .map(|piece| {
+            format!(
+                "        {{ \"from_k\": {}, \"to_k\": {}, \"temperatures_k\": [{}], \
+                 \"densities_kg_per_m3\": [{}] }}",
+                json_number(piece.from_k),
+                json_number(piece.to_k),
+                list(&piece.temperatures_k),
+                list(&piece.densities_kg_per_m3),
+            )
+        })
+        .collect();
+    format!("[\n{}\n      ]", lines.join(",\n"))
+}
+
+/// The fixture's description: what it holds, and how a reader evaluates its grain density
+/// (decision-p14-t54a-grain-density §2.2).
+const FIXTURE_DESCRIPTION: &str = "The substance registry's public mirror (galaxy plan 14, \
+     P14.T49.a and P14.T54.a; decision-composition 1.1; decision-p14-t54a-grain-density 2): each \
+     row in index order, append-only, with its key, kind, molar mass (g/mol), \
+     heat_capacity_over_r_298k (a gas row's ideal-gas c_p/R at 298.15 K, the sum over its \
+     molecular constants, for display and cross-check only; null for a row with no gas columns), \
+     the client optics the sim may ask of it, and its grain density without pore space. \
+     grain_density_variant names the index-file variant whose composition the densities are \
+     (null: the substance itself). solid_grain_density and liquid_grain_density are each null, \
+     where none was read at any temperature, or pieces of nodes: temperatures_k (K) strictly \
+     rising, densities_kg_per_m3 (kg/m3) finite and positive, the two of equal length, at least \
+     one. To evaluate a phase's density at T: if its member is null there is none; otherwise take \
+     the piece with from_k <= T < to_k, the member's last piece also covering T = to_k and a null \
+     bound being unbounded, and if no piece covers T there is none; within the piece the density \
+     is the first node's at or below it, the last node's above it, and between the nodes T0 < T \
+     <= T1 it is rho0 + f (rho1 - rho0) with f = (T - T0) / (T1 - T0). It holds the sim's \
+     Substance::grain_density within 1e-4 (relative) wherever both give one, each node to the bit. \
+     A row with a phase diagram gives each solid phase's density with a piece of its own, a phase \
+     with none being a gap (a last piece that ends where one begins ends at the double below its \
+     start, so that the start reads none), and its saturated liquid from the triple temperature \
+     to 0.99 of the critical temperature only: the sim gives one above it too, to the critical \
+     density, which no linear table follows. Any other row holds each phase that was read at its \
+     stated temperature, one node held at every temperature. Written by \
+     crates/hyperion-sim/tests/substance_golden.rs under HYPERION_BLESS=1 and checked against the \
+     registry otherwise; never edit it by hand.";
+
+/// The fixture's text: one object a row, a value a line, and a grain-density piece a line.
 fn fixture() -> String {
     let mut rows = Vec::new();
     for id in substance::ids() {
         let row = id.substance();
-        let number =
-            |value: Option<f64>| value.map_or_else(|| "null".to_owned(), |v| format!("{v:?}"));
         let optics = row.optics();
+        let variant = match aerosol::density_variant(row.key().as_str()) {
+            FileVariant::Substance => "null".to_owned(),
+            FileVariant::Named(variant) => format!("\"{variant}\""),
+        };
+        let solid = grain_density_pieces(row, CondensedPhase::Solid);
+        let liquid = grain_density_pieces(row, CondensedPhase::Liquid);
         rows.push(format!(
             "    {{\n      \"index\": {},\n      \"key\": \"{}\",\n      \"kind\": \"{}\",\n      \
-             \"molar_mass_g_per_mol\": {},\n      \"heat_capacity_over_r\": {},\n      \
-             \"rayleigh\": {},\n      \"absorber\": {},\n      \"aerosol_material\": {}\n    }}",
+             \"molar_mass_g_per_mol\": {},\n      \"heat_capacity_over_r_298k\": {},\n      \
+             \"rayleigh\": {},\n      \"absorber\": {},\n      \"aerosol_material\": {},\n      \
+             \"grain_density_variant\": {variant},\n      \"solid_grain_density\": {},\n      \
+             \"liquid_grain_density\": {}\n    }}",
             id.index(),
             row.key(),
             row.kind().name(),
-            number(row.molar_mass_g_per_mol()),
-            number(row.gas().and_then(GasColumns::heat_capacity_over_r)),
+            json_number(row.molar_mass_g_per_mol()),
+            json_number(substance::heat_capacity_over_r_at(
+                id,
+                Kelvin::new(STANDARD_TEMPERATURE)
+            )),
             optics.rayleigh(),
             optics.absorber(),
             optics.aerosol_material(),
+            pieces_json(solid.as_deref()),
+            pieces_json(liquid.as_deref()),
         ));
     }
     format!(
-        "{{\n  \"description\": \"The substance registry's public mirror (galaxy plan 14, \
-         P14.T49.a; decision-composition 1.1): each row in index order, append-only, with its key, \
-         kind, molar mass (g/mol), c_p/R for a gas row and the client optics the sim may ask of \
-         it. Written by \
-         crates/hyperion-sim/tests/substance_golden.rs under HYPERION_BLESS=1 and checked against \
-         the registry otherwise; never edit it by hand.\",\n  \"substances\": [\n{}\n  ]\n}}\n",
+        "{{\n  \"description\": \"{FIXTURE_DESCRIPTION}\",\n  \"substances\": [\n{}\n  ]\n}}\n",
         rows.join(",\n")
     )
 }
@@ -667,4 +933,417 @@ fn substance_fixture_mirrors_the_registry() {
             path.display()
         ),
     }
+}
+
+/// A fixture row's grain density as the test reads it back from the fixture's text.
+#[derive(Debug, Clone, PartialEq)]
+struct MirrorRow {
+    key: String,
+    variant: Option<String>,
+    solid: Option<Vec<Piece>>,
+    liquid: Option<Vec<Piece>>,
+}
+
+impl MirrorRow {
+    /// The member of `phase`.
+    fn member(&self, phase: CondensedPhase) -> Option<&[Piece]> {
+        match phase {
+            CondensedPhase::Solid => self.solid.as_deref(),
+            CondensedPhase::Liquid => self.liquid.as_deref(),
+        }
+    }
+}
+
+/// The number the fixture writes as `text`, or `None` for `null`.
+fn read_number(text: &str) -> Option<f64> {
+    let text = text.trim();
+    (text != "null").then(|| {
+        text.parse()
+            .unwrap_or_else(|e| panic!("{text:?} is no number: {e}"))
+    })
+}
+
+/// The text of the member `name` in a piece's line `line`, up to its end `end`.
+fn member_text<'a>(line: &'a str, name: &str, end: char) -> &'a str {
+    let start = format!("\"{name}\": ");
+    let rest = &line[line
+        .find(&start)
+        .unwrap_or_else(|| panic!("a piece names {name}: {line}"))
+        + start.len()..];
+    &rest[..rest
+        .find(end)
+        .unwrap_or_else(|| panic!("{name} ends: {line}"))]
+}
+
+/// A piece the fixture writes on the line `line`.
+fn read_piece(line: &str) -> Piece {
+    let numbers = |name: &str| -> Vec<f64> {
+        member_text(line, name, ']')
+            .trim_start_matches('[')
+            .split(", ")
+            .map(|v| read_number(v).unwrap_or_else(|| panic!("a node is a number: {line}")))
+            .collect()
+    };
+    Piece {
+        from_k: read_number(member_text(line, "from_k", ',')),
+        to_k: read_number(member_text(line, "to_k", ',')),
+        temperatures_k: numbers("temperatures_k"),
+        densities_kg_per_m3: numbers("densities_kg_per_m3"),
+    }
+}
+
+/// Every row's grain density as the fixture's text `text` writes it, in its order.
+fn read_grain_densities(text: &str) -> Vec<MirrorRow> {
+    let mut rows: Vec<MirrorRow> = Vec::new();
+    let mut lines = text.lines();
+    while let Some(line) = lines.next() {
+        let line = line.trim();
+        let value = |name: &str| {
+            line.strip_prefix(&format!("\"{name}\": "))
+                .map(|rest| rest.trim_end_matches(','))
+        };
+        if let Some(key) = value("key") {
+            rows.push(MirrorRow {
+                key: key.trim_matches('"').to_owned(),
+                variant: None,
+                solid: None,
+                liquid: None,
+            });
+            continue;
+        }
+        if let Some(variant) = value("grain_density_variant") {
+            let row = rows.last_mut().expect("a row's key comes first");
+            row.variant = (variant != "null").then(|| variant.trim_matches('"').to_owned());
+            continue;
+        }
+        for (name, solid) in [
+            ("solid_grain_density", true),
+            ("liquid_grain_density", false),
+        ] {
+            let Some(rest) = value(name) else {
+                continue;
+            };
+            let pieces = (rest == "[").then(|| {
+                lines
+                    .by_ref()
+                    .map(str::trim)
+                    .take_while(|line| !line.starts_with(']'))
+                    .map(read_piece)
+                    .collect::<Vec<_>>()
+            });
+            assert!(pieces.is_some() || rest == "null", "{name}: {line}");
+            let row = rows.last_mut().expect("a row's key comes first");
+            if solid {
+                row.solid = pieces;
+            } else {
+                row.liquid = pieces;
+            }
+        }
+    }
+    rows
+}
+
+/// The fixture's grain density of a member `pieces` at `t`, kelvin, by its description's rule
+/// (decision-p14-t54a-grain-density §2.2): the piece with `from_k ≤ t < to_k` (the last piece's
+/// `to_k` too, a missing bound unbounded), linear between its nodes and held beyond them; `None`
+/// for no member or no piece.
+fn mirror_density(pieces: Option<&[Piece]>, t: f64) -> Option<f64> {
+    let pieces = pieces?;
+    let last = pieces.len() - 1;
+    let piece = pieces.iter().enumerate().find_map(|(i, piece)| {
+        let above = piece.from_k.is_none_or(|from| from <= t);
+        let below = piece.to_k.is_none_or(|to| t < to || (i == last && t <= to));
+        (above && below).then_some(piece)
+    })?;
+    let (ts, rs) = (&piece.temperatures_k, &piece.densities_kg_per_m3);
+    if t <= ts[0] {
+        return Some(rs[0]);
+    }
+    Some(
+        ts.windows(2)
+            .zip(rs.windows(2))
+            .find(|(span, _)| t <= span[1])
+            .map_or(rs[rs.len() - 1], |(span, rho)| {
+                interpolate(span[0], rho[0], span[1], rho[1], t)
+            }),
+    )
+}
+
+/// The temperatures, kelvin, at which [`substance_fixture_grain_density_holds_the_registry`]
+/// compares the fixture's grain density of `pieces` with the registry's: [`TEST_SAMPLES`] points
+/// inside each interval between nodes, each node, and each bound and 10⁻⁹ K either side of it.
+fn piece_samples(pieces: &[Piece]) -> Vec<f64> {
+    let mut samples = Vec::new();
+    let n = f64::from(TEST_SAMPLES + 1);
+    for piece in pieces {
+        let ts = &piece.temperatures_k;
+        samples.extend(ts);
+        for span in ts.windows(2) {
+            samples.extend(
+                (1..=TEST_SAMPLES).map(|j| span[0] + (span[1] - span[0]) * f64::from(j) / n),
+            );
+        }
+        for bound in [piece.from_k, piece.to_k].into_iter().flatten() {
+            samples.extend([bound - 1e-9, bound, bound + 1e-9]);
+        }
+    }
+    samples
+}
+
+/// `count` + 1 temperatures evenly from `low` to `high`, kelvin.
+fn sweep(low: f64, high: f64, count: u32) -> impl Iterator<Item = f64> {
+    (0..=count).map(move |j| low + (high - low) * f64::from(j) / f64::from(count))
+}
+
+/// The temperatures, kelvin, at which a diagram row's or a fixed row's `phase` is compared beyond
+/// its pieces' own samples: a diagram's solid phases' starts, its triple and critical temperatures
+/// and 10⁻⁹ K either side of each, and a sweep of the solid over [0, 1.05 `T_t`] or of the liquid
+/// over [0.9 `T_t`, `T_c`]; a fixed row's 0 K, 300 K, 3,000 K and its stated temperature.
+fn row_samples(row: &Substance, phase: CondensedPhase) -> Vec<f64> {
+    let mut samples = Vec::new();
+    match row.condensed().map(CondensedColumns::grain_density) {
+        Some(GrainDensity::OfDiagram) => {
+            let d = row
+                .phase_diagram()
+                .expect("a diagram row has a phase diagram");
+            let (t_t, t_c) = (
+                d.triple_temperature().value(),
+                d.critical_temperature().value(),
+            );
+            let mut ends = vec![t_t, t_c];
+            ends.extend(d.solid_phases().iter().map(|s| s.start().value()));
+            for end in ends {
+                samples.extend([end - 1e-9, end, end + 1e-9]);
+            }
+            match phase {
+                CondensedPhase::Solid => samples.extend(sweep(0.0, 1.05 * t_t, 4_096)),
+                CondensedPhase::Liquid => samples.extend(sweep(0.9 * t_t, t_c, 4_096)),
+            }
+        }
+        Some(GrainDensity::Fixed { solid, liquid }) => {
+            samples.extend([0.0, 300.0, 3_000.0]);
+            let given = match phase {
+                CondensedPhase::Solid => solid,
+                CondensedPhase::Liquid => liquid,
+            };
+            samples.extend(given.map(|given| given.at().value()));
+        }
+        None => samples.extend([0.0, 300.0, 3_000.0]),
+    }
+    samples
+}
+
+/// The largest relative error of the fixture's `phase` of `row`, read back as `pieces`, against
+/// `Substance::grain_density` over `samples`, with where it lies, after asserting that the two give
+/// a density at the same temperatures, within 10⁻⁴, a fixed row's to the bit: the one difference a
+/// diagram row's liquid above [`LIQUID_CUT`] of its critical temperature, where the fixture gives
+/// none.
+fn compare_samples(
+    row: &Substance,
+    phase: CondensedPhase,
+    pieces: Option<&[Piece]>,
+    samples: &[f64],
+) -> (f64, f64) {
+    let key = row.key();
+    let diagram = match row.condensed().map(CondensedColumns::grain_density) {
+        Some(GrainDensity::OfDiagram) => row.phase_diagram(),
+        Some(GrainDensity::Fixed { .. }) | None => None,
+    };
+    let mut worst = (0.0_f64, f64::NAN);
+    for &t in samples {
+        let sim = row
+            .grain_density(phase, Kelvin::new(t))
+            .map(KilogramsPerCubicMetre::value);
+        match (mirror_density(pieces, t), sim) {
+            (Some(m), Some(s)) => {
+                let error = (m - s).abs() / s;
+                assert!(
+                    error <= GRAIN_DENSITY_TOLERANCE,
+                    "{key} {phase:?} at {t} K: {m} against {s}"
+                );
+                if error > worst.0 {
+                    worst = (error, t);
+                }
+                if diagram.is_none() {
+                    assert_same_bits(m, s);
+                }
+            }
+            (None, None) => {}
+            (None, Some(_)) => assert!(
+                phase == CondensedPhase::Liquid
+                    && diagram.is_some_and(|d| {
+                        let t_c = d.critical_temperature().value();
+                        t > LIQUID_CUT * t_c && t <= t_c
+                    }),
+                "{key} {phase:?} at {t} K: the sim gives a density and the fixture none"
+            ),
+            (Some(m), None) => {
+                panic!("{key} {phase:?} at {t} K: the fixture gives {m} and the sim none")
+            }
+        }
+    }
+    worst
+}
+
+/// Asserts the shape of `row`'s `pieces` as `phase` (decision-p14-t54a-grain-density §2.1): nodes
+/// strictly rising, densities finite and positive, a bounded piece's ends its first and last
+/// nodes, the pieces rising and apart; and that each node is its law's value to the bit, the
+/// phase's own at the bound it shares with the next phase, where `grain_density` reads the next
+/// phase's.
+fn check_pieces(row: &Substance, phase: CondensedPhase, pieces: &[Piece]) {
+    let key = row.key();
+    let diagram = match row.condensed().map(CondensedColumns::grain_density) {
+        Some(GrainDensity::OfDiagram) => row.phase_diagram(),
+        Some(GrainDensity::Fixed { .. }) | None => None,
+    };
+    for (i, piece) in pieces.iter().enumerate() {
+        let (ts, rs) = (&piece.temperatures_k, &piece.densities_kg_per_m3);
+        assert!(
+            !ts.is_empty() && ts.len() == rs.len(),
+            "{key} {phase:?} piece {i}"
+        );
+        assert!(
+            ts.windows(2).all(|w| w[0] < w[1]),
+            "{key} {phase:?} piece {i} rises"
+        );
+        assert!(
+            rs.iter().all(|r| r.is_finite() && *r > 0.0),
+            "{key} {phase:?} piece {i}'s densities"
+        );
+        if let (Some(from), Some(to)) = (piece.from_k, piece.to_k) {
+            assert!(from < to, "{key} {phase:?} piece {i}'s bounds");
+            assert_same_bits(ts[0], from);
+            assert_same_bits(ts[ts.len() - 1], to);
+        }
+        if let Some(next) = pieces.get(i + 1) {
+            let (Some(to), Some(from)) = (piece.to_k, next.from_k) else {
+                panic!("{key} {phase:?}: a piece with a later one is bounded");
+            };
+            assert!(
+                to <= from,
+                "{key} {phase:?}: pieces {i} and {} overlap",
+                i + 1
+            );
+        }
+        for (&t, &r) in ts.iter().zip(rs) {
+            let law = match (diagram, phase) {
+                (Some(d), CondensedPhase::Solid) => d
+                    .solid_phase_at(Kelvin::new(piece.from_k.expect("bounded")))
+                    .and_then(|solid| solid.density())
+                    .map(|law| law.at(Kelvin::new(t)).value()),
+                (Some(_) | None, _) => row
+                    .grain_density(phase, Kelvin::new(t))
+                    .map(KilogramsPerCubicMetre::value),
+            };
+            assert_same_bits(r, law.expect("a node has its law's value"));
+        }
+    }
+}
+
+/// Asserts the shapes the ruling names (decision-p14-t54a-grain-density §2.6): O₂'s two solid
+/// pieces about the β gap, CO's one, N₂'s and CH₄'s two; no solid for Ar, H₂S and C₂H₆; and the
+/// acid's liquid alone, one node of 1,662.6 kg m⁻³ at 300 K held at every temperature, of its
+/// `75wt%` variant.
+fn check_named_shapes(mirror: &[MirrorRow]) {
+    let read = |key: &str| {
+        mirror
+            .iter()
+            .find(|row| row.key == key)
+            .unwrap_or_else(|| panic!("{key} is a row"))
+    };
+    let oxygen = read("O2")
+        .solid
+        .as_ref()
+        .expect("α- and γ-O₂ have densities");
+    assert_eq!(oxygen.len(), 2, "β-O₂ is a gap");
+    let (Some(alpha_end), Some(gamma_start)) = (oxygen[0].to_k, oxygen[1].from_k) else {
+        panic!("O₂'s pieces are bounded: {oxygen:?}");
+    };
+    assert_same_bits(alpha_end, 23.14);
+    assert_same_bits(gamma_start, 43.78);
+    for (key, count) in [("CO", 1), ("N2", 2), ("CH4", 2)] {
+        assert_eq!(read(key).solid.as_ref().map_or(0, Vec::len), count, "{key}");
+    }
+    for key in ["Ar", "H2S", "C2H6"] {
+        assert_eq!(read(key).solid, None, "{key} has no solid density");
+    }
+    let acid = read("H2SO4");
+    assert_eq!(acid.solid, None);
+    assert_eq!(acid.variant.as_deref(), Some("75wt%"));
+    let [held] = acid.liquid.as_deref().expect("the acid's liquid was read") else {
+        panic!("the acid's liquid is one piece");
+    };
+    assert_eq!(
+        (held.from_k, held.to_k),
+        (None, None),
+        "held at every temperature"
+    );
+    let ([t], [rho]) = (&held.temperatures_k[..], &held.densities_kg_per_m3[..]) else {
+        panic!("the acid's liquid is one node: {held:?}");
+    };
+    assert_same_bits(*t, 300.0);
+    assert_same_bits(*rho, 1_662.6);
+}
+
+/// The fixture's grain density holds the registry's (decision-p14-t54a-grain-density §2.6). The
+/// writer's text, read back and evaluated by its description's rule ([`mirror_density`]):
+///
+/// - gives each node the registry's law to the bit, and `Substance::grain_density` within 10⁻⁴
+///   at [`TEST_SAMPLES`] points inside each interval, at each piece bound and 10⁻⁹ K either side
+///   of it;
+/// - gives a diagram row none exactly where the sim gives none, its solid swept over [0,
+///   1.05 `T_t`] and its liquid over [0.9 `T_t`, `T_c`], the one difference the liquid above
+///   0.99 `T_c`, where the sim gives one and the fixture none;
+/// - gives a fixed row its value at 0 K, at its stated temperature and at 3,000 K;
+/// - names each row's variant, and has the shapes the ruling names, each piece's nodes rising and
+///   its densities positive.
+#[test]
+fn substance_fixture_grain_density_holds_the_registry() {
+    let mirror = read_grain_densities(&fixture());
+    assert_eq!(
+        mirror.len(),
+        substance::ids().len(),
+        "every row is read back"
+    );
+    let mut worst = (0.0_f64, String::new());
+    let mut nodes = [0_usize; 2];
+    for (id, read) in substance::ids().zip(&mirror) {
+        let row = id.substance();
+        let key = row.key();
+        assert_eq!(read.key, key.as_str(), "the rows are in index order");
+        let variant = match aerosol::density_variant(key.as_str()) {
+            FileVariant::Substance => None,
+            FileVariant::Named(variant) => Some(variant.to_owned()),
+        };
+        assert_eq!(read.variant, variant, "{key}'s variant");
+        for (p, phase) in [CondensedPhase::Solid, CondensedPhase::Liquid]
+            .into_iter()
+            .enumerate()
+        {
+            let pieces = read.member(phase);
+            let mut samples = pieces.map(piece_samples).unwrap_or_default();
+            samples.extend(row_samples(row, phase));
+            let (error, at) = compare_samples(row, phase, pieces, &samples);
+            if error > worst.0 {
+                worst = (error, format!("{key} {phase:?} at {at} K"));
+            }
+            if let Some(pieces) = pieces {
+                check_pieces(row, phase, pieces);
+                nodes[p] += pieces.iter().map(|p| p.temperatures_k.len()).sum::<usize>();
+                eprintln!(
+                    "{key} {phase:?}: {} piece(s) of {:?} nodes",
+                    pieces.len(),
+                    pieces
+                        .iter()
+                        .map(|p| p.temperatures_k.len())
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+    }
+    eprintln!(
+        "{} solid and {} liquid nodes; the worst error {:.3e} ({})",
+        nodes[0], nodes[1], worst.0, worst.1
+    );
+    check_named_shapes(&mirror);
 }

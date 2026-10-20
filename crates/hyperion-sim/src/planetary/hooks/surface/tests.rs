@@ -359,7 +359,10 @@ fn the_mean_molar_mass_and_heat_capacity_are_the_registry_s_over_the_published_o
         );
         assert_eq!(
             conditions.heat_capacity_over_r(),
-            heat_capacity_over_r(conditions.gases()),
+            mixture_heat_capacity_over_r_at(
+                conditions.gases(),
+                conditions.mean_surface_temperature()
+            ),
             "{name}"
         );
     }
@@ -857,11 +860,11 @@ fn the_generated_venus_and_titan_are_near_isothermal() {
 fn a_mars_given_its_measured_state_lies_within_30_to_70_k() {
     // The measured Mars, by hand: 6.1 mbar of CO₂ at 210 K, 586.2 W m⁻² at a Bond albedo of 0.25,
     // 3.71 m s⁻², 3,389.5 km and 43.34 g mol⁻¹ (NASA's Mars fact sheet), the registry's c_p ÷ R
-    // for CO₂, 25.19° and 24.62 h. Its measured annual contrast is some 50–65 K, short by its CO₂
-    // caps' brightening, which is P14.T51.a's.
+    // for CO₂ at 210 K, 25.19° and 24.62 h. Its measured annual contrast is some 50–65 K, short by
+    // its CO₂ caps' brightening, which is P14.T51.a's.
     let co2 = Gas::CarbonDioxide.substance();
     let mu = 43.34;
-    let cp = heat_capacity_over_r(&[(co2, 1.0)]).unwrap();
+    let cp = mixture_heat_capacity_over_r_at(&[(co2, 1.0)], Kelvin::new(210.0)).unwrap();
     let equilibrium = math::powf(0.75 * 586.2 / 4.0 / STEFAN_BOLTZMANN, 0.25);
     let (pressure, gravity) = (610.0, 3.71);
     let mars = Column {
@@ -2714,8 +2717,8 @@ fn batch_ocean(published: &crate::planetary::chem::partition::Condensates) -> f6
 
 /// The conditions' gases are one computation with `mole_fractions` (the sim-determinism skill's
 /// precomputed path): `GasFractions`, which the passes' columns and the record's share, gives the
-/// generic form's fractions, mean molar mass and `c_p` ÷ R bit for bit on every atmosphere of the
-/// table, and on a single gas.
+/// generic form's fractions, mean molar mass and `c_p` ÷ R at the mean surface temperature bit for
+/// bit on every atmosphere of the table, and on a single gas.
 #[test]
 fn the_conditions_gases_are_the_mole_fractions() {
     for (_, body) in historic_table() {
@@ -2724,12 +2727,16 @@ fn the_conditions_gases_are_the_mole_fractions() {
             mole_fractions(Gas::ALL.map(|gas| (gas.substance(), partials.of(gas)))).unwrap();
         let ours = GasFractions::of(partials, false).unwrap();
         assert_eq!(format!("{:?}", ours.as_slice()), format!("{generic:?}"));
+        let t = body.atmosphere().surface_temperature();
         for (a, b) in [
             (
                 ours.mean_molar_mass_g_per_mol,
                 mean_molar_mass_g_per_mol(&generic),
             ),
-            (ours.heat_capacity_over_r, heat_capacity_over_r(&generic)),
+            (
+                ours.heat_capacity_over_r_at(t),
+                mixture_heat_capacity_over_r_at(&generic, t),
+            ),
         ] {
             match (a, b) {
                 (Some(a), Some(b)) => assert_same_bits(a, b),

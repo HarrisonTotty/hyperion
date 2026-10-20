@@ -15,7 +15,7 @@ use crate::planetary::hooks::surface::{
     Column, OceanWeight, SeasonalSpin, SurfaceInputs, ZonalProfile, climate_range, day_and_night,
     diurnal_response, heat_redistribution, night_floor, specific_heat_j_per_kg_k,
 };
-use crate::substance::heat_capacity_over_r;
+use crate::substance::mixture_heat_capacity_over_r_at;
 use crate::units::consts::{SECONDS_PER_DAY, SOLAR_CONSTANT_W_PER_M2, STEFAN_BOLTZMANN};
 use crate::units::{Degrees, Metres, MetresPerSecondSquared, Radians};
 
@@ -289,7 +289,7 @@ fn a_ninety_degree_world_started_cold_has_an_equatorial_belt_and_one_started_war
 fn measured_mars() -> Column {
     let co2 = Gas::CarbonDioxide.substance();
     let mu = 43.34;
-    let cp = heat_capacity_over_r(&[(co2, 1.0)]).unwrap();
+    let cp = mixture_heat_capacity_over_r_at(&[(co2, 1.0)], Kelvin::new(210.0)).unwrap();
     let equilibrium = math::powf(0.75 * 586.2 / 4.0 / STEFAN_BOLTZMANN, 0.25);
     let (pressure, gravity) = (610.0, 3.71);
     Column {

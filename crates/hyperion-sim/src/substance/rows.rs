@@ -13,10 +13,11 @@
 //!
 //! P14.T49.b appends rows 9–111 in its plan's order and gives every gas row its molecular
 //! constants ([`MolecularConstants`]), over which [`thermo`](super::thermo) sums its heat
-//! capacity. Rows 0–8 keep every value generator version 22 publishes until the 22 → 23 bump
-//! (P14.T54.a; decision-bump-plan-after-22 §1.2): their held `c_p` ÷ R class and their client
-//! flags (P14.T49.b's flags for `H2`, `He`, `N2` and `CO2`, `absorber`
-//! true for their collision-induced and band absorption, wait for the bump).
+//! capacity. P14.T54.a's switch retired the `c_p` ÷ R classes rows 0–8 held for generator version
+//! 22, and turned on the `absorber` flags held until then: `H2`'s, `He`'s, `N2`'s and `CO2`'s, for
+//! their collision-induced and band absorption, and those of the fifteen rows
+//! science-r08-unowned-absorbers adds, which R08.T4.h answered (decision-p14-t54a-grain-density
+//! §5).
 //!
 //! Each gas's harmonic fundamentals are Shimanouchi's selected gas-phase values (NSRDS-NBS 39,
 //! 1972, a US-government work, and its 1977 Volume II for ozone), a diatomic's are Huber and
@@ -42,7 +43,7 @@ pub(super) mod liquids;
 mod melts;
 pub(super) mod optics;
 
-use super::mix::{GasColumns, HeatCapacityClass};
+use super::mix::GasColumns;
 use super::thermo::{
     Level, LevelSet, MolecularConstants, NuclearSpin, Rotation, RovibrationalTerms, Vibration,
 };
@@ -183,44 +184,6 @@ const ATOMIC_WEIGHTS: Source = Source {
 /// The identity's sources, for every row of one formula.
 const IDENTITY: &[Source] = &[ATOMIC_WEIGHTS];
 
-/// An atom's held `c_p` ÷ R class.
-const ATOM_CLASS: Source = Source {
-    covers: "c_p ÷ R class",
-    citation: "1 + N ÷ 2 with N = 3 for an atom, equipartition with fixed degrees of freedom in the \
-               form of Robinson and Catling 2012, ApJ 757, 104, eq. 9; exact for a monatomic ideal \
-               gas; generator version 22's published value, held until the 22 → 23 bump",
-    basis: Basis::Fact,
-};
-
-/// A linear molecule's held `c_p` ÷ R class.
-const LINEAR_CLASS: Source = Source {
-    covers: "c_p ÷ R class",
-    citation: "1 + N ÷ 2 with N = 5 for a linear molecule (Robinson and Catling 2012, ApJ 757, 104, \
-               §2.3 and eq. 9); generator version 22's published value, held until the 22 → 23 \
-               bump",
-    basis: Basis::Fact,
-};
-
-/// A non-linear molecule's held `c_p` ÷ R class.
-const NON_LINEAR_CLASS: Source = Source {
-    covers: "c_p ÷ R class",
-    citation: "1 + N ÷ 2 with N = 6 for a non-linear molecule, equipartition in the form of Robinson \
-               and Catling 2012, ApJ 757, 104, eq. 9; NIST-JANAF's ideal-gas c_p at 298.15 K exceeds \
-               it by 1.0% for H₂O and 7.2% for CH₄ and NH₃ (Chase 1998); generator version 22's \
-               published value, held until the 22 → 23 bump",
-    basis: Basis::Fact,
-};
-
-/// Carbon dioxide's held `c_p` ÷ R class.
-const CARBON_DIOXIDE_CLASS: Source = Source {
-    covers: "c_p ÷ R class",
-    citation: "γ = 1.3, so 13 ÷ 3 (Robinson and Catling 2012, ApJ 757, 104, §2.3: N ≈ 7 with about \
-               two vibrational degrees, after Bent 1965); NIST-JANAF's 37.129 J mol⁻¹ K⁻¹ at 298.15 \
-               K gives 4.47 (Chase 1998, table C-095); generator version 22's published value, held \
-               until the 22 → 23 bump",
-    basis: Basis::Fact,
-};
-
 /// A listed level `energy_cm` cm⁻¹ above its set's lowest, of `degeneracy`.
 #[must_use]
 const fn level(energy_cm: f64, degeneracy: f64) -> Level {
@@ -330,26 +293,6 @@ const ABSORBER_ONLY: ClientOptics = ClientOptics {
     aerosol_material: false,
 };
 
-/// The client optics of a gas the client scatters, whose absorption R08 has not yet answered:
-/// the atoms `Al`, `V`, `Mn`, `Ni` and `Zn` and `HCl`, which science-r08-unowned-absorbers adds.
-/// The client's test holds every flagged row to a line table, a pending entry or a stated none,
-/// which R08.T4.c and T4.e owe these rows (R08.T19's parity extension); their `absorber` flag
-/// turns on at the 22 → 23 bump (P14.T54.a), with rows 0–8's.
-const RAYLEIGH_AWAITING_ABSORPTION: ClientOptics = ClientOptics {
-    rayleigh: true,
-    absorber: false,
-    aerosol_material: false,
-};
-
-/// The client optics of a first ion whose absorption R08 has not yet answered (`Na+`, `Al+`,
-/// `Si+`, `K+`, `V+`, `Cr+`, `Mn+`, `Ni+` and `Zn+`): no Rayleigh row, and `absorber` held as for
-/// [`RAYLEIGH_AWAITING_ABSORPTION`], owed T4.e's lines or T4.c's stated none.
-const ION_AWAITING_ABSORPTION: ClientOptics = ClientOptics {
-    rayleigh: false,
-    absorber: false,
-    aerosol_material: false,
-};
-
 /// The client optics of a condensate aloft, a haze or a dust: a cloud's or a dust's material
 /// and nothing else, with an index file of its own (R08.T5.d).
 const AEROSOL_ONLY: ClientOptics = ClientOptics {
@@ -375,14 +318,13 @@ const HYDROGEN: Substance = Substance {
     molar_mass_g_per_mol: Some(2.016),
     gas: Some(GasColumns {
         molecular: NORMAL_HYDROGEN,
-        held_class: Some(HeatCapacityClass::Linear),
-        sources: &[LINEAR_CLASS, HYDROGEN_TERMS_SOURCE],
+        sources: &[HYDROGEN_TERMS_SOURCE],
     }),
     diagram: None,
     condensed: None,
     optics: ClientOptics {
         rayleigh: true,
-        absorber: false,
+        absorber: true,
         aerosol_material: false,
     },
     sources: IDENTITY,
@@ -401,21 +343,17 @@ const HELIUM: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: Some(HeatCapacityClass::Atom),
-        sources: &[
-            ATOM_CLASS,
-            Source {
-                covers: "electronic levels",
-                citation: "an atom whose first excited level lies 19.82 eV up (Martin 1973, J. Phys. Chem. Ref. Data 2, 257, with Kandula et al. 2010 and Drake 2023, as NIST's Atomic Spectra Database v5.12 lists it), so `c_p` ÷ R is 5/2 at every temperature the generator reaches",
-                basis: Basis::Fact,
-            },
-        ],
+        sources: &[Source {
+            covers: "electronic levels",
+            citation: "an atom whose first excited level lies 19.82 eV up (Martin 1973, J. Phys. Chem. Ref. Data 2, 257, with Kandula et al. 2010 and Drake 2023, as NIST's Atomic Spectra Database v5.12 lists it), so `c_p` ÷ R is 5/2 at every temperature the generator reaches",
+            basis: Basis::Fact,
+        }],
     }),
     diagram: None,
     condensed: None,
     optics: ClientOptics {
         rayleigh: true,
-        absorber: false,
+        absorber: true,
         aerosol_material: false,
     },
     sources: IDENTITY,
@@ -439,15 +377,11 @@ const WATER: Substance = Substance {
             ],
             levels: &[],
         },
-        held_class: Some(HeatCapacityClass::NonLinear),
-        sources: &[
-            NON_LINEAR_CLASS,
-            Source {
-                covers: "rotation, vibrations",
-                citation: "the fundamentals 3657, 1595, 3756 cm⁻¹ (Shimanouchi 1972, Tables of Molecular Vibrational Frequencies, Consolidated Volume I, NSRDS-NBS 39, p. 10, its selected values), as harmonic oscillators; a non-linear rotor",
-                basis: Basis::Fact,
-            },
-        ],
+        sources: &[Source {
+            covers: "rotation, vibrations",
+            citation: "the fundamentals 3657, 1595, 3756 cm⁻¹ (Shimanouchi 1972, Tables of Molecular Vibrational Frequencies, Consolidated Volume I, NSRDS-NBS 39, p. 10, its selected values), as harmonic oscillators; a non-linear rotor",
+            basis: Basis::Fact,
+        }],
     }),
     diagram: Some(diagrams::WATER),
     condensed: Some(condensed::WATER),
@@ -478,15 +412,11 @@ const METHANE: Substance = Substance {
             ],
             levels: &[],
         },
-        held_class: Some(HeatCapacityClass::NonLinear),
-        sources: &[
-            NON_LINEAR_CLASS,
-            Source {
-                covers: "rotation, vibrations",
-                citation: "the fundamentals 2917, 1534 (×2), 3019 (×3), 1306 (×3) cm⁻¹ (Shimanouchi 1972, Tables of Molecular Vibrational Frequencies, Consolidated Volume I, NSRDS-NBS 39, p. 45, its selected values), as harmonic oscillators; a non-linear rotor",
-                basis: Basis::Fact,
-            },
-        ],
+        sources: &[Source {
+            covers: "rotation, vibrations",
+            citation: "the fundamentals 2917, 1534 (×2), 3019 (×3), 1306 (×3) cm⁻¹ (Shimanouchi 1972, Tables of Molecular Vibrational Frequencies, Consolidated Volume I, NSRDS-NBS 39, p. 45, its selected values), as harmonic oscillators; a non-linear rotor",
+            basis: Basis::Fact,
+        }],
     }),
     diagram: Some(diagrams::METHANE),
     condensed: Some(condensed::METHANE),
@@ -517,15 +447,11 @@ const AMMONIA: Substance = Substance {
             ],
             levels: &[],
         },
-        held_class: Some(HeatCapacityClass::NonLinear),
-        sources: &[
-            NON_LINEAR_CLASS,
-            Source {
-                covers: "rotation, vibrations",
-                citation: "the fundamentals 3337, 950, 3444 (×2), 1627 (×2) cm⁻¹ (Shimanouchi 1972, Tables of Molecular Vibrational Frequencies, Consolidated Volume I, NSRDS-NBS 39, p. 15, its selected values), as harmonic oscillators; a non-linear rotor",
-                basis: Basis::Fact,
-            },
-        ],
+        sources: &[Source {
+            covers: "rotation, vibrations",
+            citation: "the fundamentals 3337, 950, 3444 (×2), 1627 (×2) cm⁻¹ (Shimanouchi 1972, Tables of Molecular Vibrational Frequencies, Consolidated Volume I, NSRDS-NBS 39, p. 15, its selected values), as harmonic oscillators; a non-linear rotor",
+            basis: Basis::Fact,
+        }],
     }),
     diagram: Some(diagrams::AMMONIA),
     condensed: Some(condensed::AMMONIA),
@@ -551,21 +477,17 @@ const NITROGEN: Substance = Substance {
             vibrations: &[vibration(2329.922, 1)],
             levels: &[],
         },
-        held_class: Some(HeatCapacityClass::Linear),
-        sources: &[
-            LINEAR_CLASS,
-            Source {
-                covers: "rotation, vibrations, electronic levels",
-                citation: "Huber and Herzberg 1979, Constants of Diatomic Molecules (the NIST WebBook's transcription as the finding aid): ω_e 2,358.57 and ω_e x_e 14.324 cm⁻¹, so the fundamental ω_e − 2ω_e x_e is 2,329.922 cm⁻¹; its X¹Σg⁺ ground alone lies below 15,000 cm⁻¹",
-                basis: Basis::Fact,
-            },
-        ],
+        sources: &[Source {
+            covers: "rotation, vibrations, electronic levels",
+            citation: "Huber and Herzberg 1979, Constants of Diatomic Molecules (the NIST WebBook's transcription as the finding aid): ω_e 2,358.57 and ω_e x_e 14.324 cm⁻¹, so the fundamental ω_e − 2ω_e x_e is 2,329.922 cm⁻¹; its X¹Σg⁺ ground alone lies below 15,000 cm⁻¹",
+            basis: Basis::Fact,
+        }],
     }),
     diagram: Some(diagrams::NITROGEN),
     condensed: Some(condensed::NITROGEN),
     optics: ClientOptics {
         rayleigh: true,
-        absorber: false,
+        absorber: true,
         aerosol_material: true,
     },
     sources: IDENTITY,
@@ -589,15 +511,11 @@ const OXYGEN: Substance = Substance {
                 levels: &OXYGEN_STATES,
             }],
         },
-        held_class: Some(HeatCapacityClass::Linear),
-        sources: &[
-            LINEAR_CLASS,
-            Source {
-                covers: "rotation, vibrations, electronic levels",
-                citation: "Huber and Herzberg 1979 (the NIST WebBook's transcription as the finding aid): ω_e 1,580.193 and ω_e x_e 11.981 cm⁻¹, so the fundamental is 1,556.231 cm⁻¹; the X³Σg⁻ ground (g = 3, its spin–spin splitting of about 4 cm⁻¹ left out) and the a¹Δg (7,918.1 cm⁻¹, g = 2) and b¹Σg⁺ (13,195.1 cm⁻¹, g = 1) states at their T_e",
-                basis: Basis::Fact,
-            },
-        ],
+        sources: &[Source {
+            covers: "rotation, vibrations, electronic levels",
+            citation: "Huber and Herzberg 1979 (the NIST WebBook's transcription as the finding aid): ω_e 1,580.193 and ω_e x_e 11.981 cm⁻¹, so the fundamental is 1,556.231 cm⁻¹; the X³Σg⁻ ground (g = 3, its spin–spin splitting of about 4 cm⁻¹ left out) and the a¹Δg (7,918.1 cm⁻¹, g = 2) and b¹Σg⁺ (13,195.1 cm⁻¹, g = 1) states at their T_e",
+            basis: Basis::Fact,
+        }],
     }),
     diagram: Some(diagrams::OXYGEN),
     condensed: Some(condensed::OXYGEN),
@@ -626,21 +544,17 @@ const CARBON_DIOXIDE: Substance = Substance {
             ],
             levels: &[],
         },
-        held_class: Some(HeatCapacityClass::LinearTriatomic),
-        sources: &[
-            CARBON_DIOXIDE_CLASS,
-            Source {
-                covers: "rotation, vibrations",
-                citation: "the fundamentals 1333, 667 (×2), 2349 cm⁻¹ (Shimanouchi 1972, Tables of Molecular Vibrational Frequencies, Consolidated Volume I, NSRDS-NBS 39, p. 39, its selected values), as harmonic oscillators; a linear rotor",
-                basis: Basis::Fact,
-            },
-        ],
+        sources: &[Source {
+            covers: "rotation, vibrations",
+            citation: "the fundamentals 1333, 667 (×2), 2349 cm⁻¹ (Shimanouchi 1972, Tables of Molecular Vibrational Frequencies, Consolidated Volume I, NSRDS-NBS 39, p. 39, its selected values), as harmonic oscillators; a linear rotor",
+            basis: Basis::Fact,
+        }],
     }),
     diagram: Some(diagrams::CARBON_DIOXIDE),
     condensed: Some(condensed::CARBON_DIOXIDE),
     optics: ClientOptics {
         rayleigh: true,
-        absorber: false,
+        absorber: true,
         aerosol_material: true,
     },
     sources: IDENTITY,
@@ -659,15 +573,11 @@ const ARGON: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: Some(HeatCapacityClass::Atom),
-        sources: &[
-            ATOM_CLASS,
-            Source {
-                covers: "electronic levels",
-                citation: "an atom whose first excited level lies 11.55 eV up (Minnhagen 1973, J. Opt. Soc. Am. 63, 1185, as NIST's Atomic Spectra Database v5.12 lists it), so `c_p` ÷ R is 5/2 at every temperature the generator reaches",
-                basis: Basis::Fact,
-            },
-        ],
+        sources: &[Source {
+            covers: "electronic levels",
+            citation: "an atom whose first excited level lies 11.55 eV up (Minnhagen 1973, J. Opt. Soc. Am. 63, 1185, as NIST's Atomic Spectra Database v5.12 lists it), so `c_p` ÷ R is 5/2 at every temperature the generator reaches",
+            basis: Basis::Fact,
+        }],
     }),
     diagram: Some(diagrams::ARGON),
     condensed: Some(condensed::ARGON),
@@ -1146,7 +1056,6 @@ const NEON: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "an atom whose first excited level lies 16.62 eV up (Saloman and Sansonetti 2004, J. Phys. Chem. Ref. Data 33, 1113, as NIST's Atomic Spectra Database v5.12 lists it), so `c_p` ÷ R is 5/2 at every temperature the generator reaches",
@@ -1172,7 +1081,6 @@ const KRYPTON: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "an atom whose first excited level lies 9.92 eV up (Saloman 2007, J. Phys. Chem. Ref. Data 36, 215, as NIST's Atomic Spectra Database v5.12 lists it), so `c_p` ÷ R is 5/2 at every temperature the generator reaches",
@@ -1198,7 +1106,6 @@ const XENON: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "an atom whose first excited level lies 8.32 eV up (Saloman 2004, J. Phys. Chem. Ref. Data 33, 765, as NIST's Atomic Spectra Database v5.12 lists it), so `c_p` ÷ R is 5/2 at every temperature the generator reaches",
@@ -1228,7 +1135,6 @@ const NITROUS_OXIDE: Substance = Substance {
             ],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "rotation, vibrations",
             citation: "the fundamentals 2224, 589 (×2), 1285 cm⁻¹ (Shimanouchi 1972, Tables of Molecular Vibrational Frequencies, Consolidated Volume I, NSRDS-NBS 39, p. 9, its selected values), as harmonic oscillators; a linear rotor",
@@ -1254,7 +1160,6 @@ const CARBON_MONOXIDE: Substance = Substance {
             vibrations: &[vibration(2143.237, 1)],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "rotation, vibrations, electronic levels",
             citation: "Huber and Herzberg 1979, Constants of Diatomic Molecules (the NIST WebBook's transcription as the finding aid): ω_e 2,169.813 58 and ω_e x_e 13.288 31 cm⁻¹, so the fundamental ω_e − 2ω_e x_e is 2,143.237 cm⁻¹; its X¹Σ⁺ ground alone lies below 15,000 cm⁻¹",
@@ -1284,7 +1189,6 @@ const SULPHUR_DIOXIDE: Substance = Substance {
             ],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "rotation, vibrations",
             citation: "the fundamentals 1151, 518, 1362 cm⁻¹ (Shimanouchi 1972, Tables of Molecular Vibrational Frequencies, Consolidated Volume I, NSRDS-NBS 39, p. 13, its selected values), as harmonic oscillators; a non-linear rotor",
@@ -1314,7 +1218,6 @@ const HYDROGEN_SULPHIDE: Substance = Substance {
             ],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "rotation, vibrations",
             citation: "the fundamentals 2615, 1183, 2626 cm⁻¹ (Shimanouchi 1972, Tables of Molecular Vibrational Frequencies, Consolidated Volume I, NSRDS-NBS 39, p. 12, its selected values), as harmonic oscillators; a non-linear rotor",
@@ -1344,7 +1247,6 @@ const OZONE: Substance = Substance {
             ],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "rotation, vibrations",
             citation: "the fundamentals 1103, 701, 1042 cm⁻¹ (Shimanouchi 1977, Tables of Molecular Vibrational Frequencies, Consolidated Volume II, J. Phys. Chem. Ref. Data 6, 993, p. 1001, its selected values), as harmonic oscillators; a non-linear rotor",
@@ -1374,7 +1276,6 @@ const HYDROGEN_CYANIDE: Substance = Substance {
             ],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "rotation, vibrations",
             citation: "the fundamentals 3311, 712 (×2), 2097 cm⁻¹ (Shimanouchi 1972, Tables of Molecular Vibrational Frequencies, Consolidated Volume I, NSRDS-NBS 39, p. 41, its selected values), as harmonic oscillators; a linear rotor",
@@ -1406,7 +1307,6 @@ const ACETYLENE: Substance = Substance {
             ],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "rotation, vibrations",
             citation: "the fundamentals 3374, 1974, 3289, 612 (×2), 730 (×2) cm⁻¹ (Shimanouchi 1972, Tables of Molecular Vibrational Frequencies, Consolidated Volume I, NSRDS-NBS 39, p. 71, its selected values), as harmonic oscillators; a linear rotor",
@@ -1445,7 +1345,6 @@ const ETHYLENE: Substance = Substance {
             ],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "rotation, vibrations",
             citation: "the fundamentals 3026, 1623, 1342, 1023, 3103, 1236, 949, 943, 3106, 826, 2989, 1444 cm⁻¹ (Shimanouchi 1972, Tables of Molecular Vibrational Frequencies, Consolidated Volume I, NSRDS-NBS 39, p. 74, its selected values), as harmonic oscillators; a non-linear rotor",
@@ -1486,7 +1385,6 @@ const ETHANE: Substance = Substance {
                 levels: &ETHANE_TORSION_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[
             Source {
                 covers: "rotation, vibrations",
@@ -1525,7 +1423,6 @@ const PHOSPHINE: Substance = Substance {
             ],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "rotation, vibrations",
             citation: "the fundamentals 2323, 992, 2328 (×2), 1118 (×2) cm⁻¹ (Shimanouchi 1972, Tables of Molecular Vibrational Frequencies, Consolidated Volume I, NSRDS-NBS 39, p. 16, its selected values), as harmonic oscillators; a non-linear rotor",
@@ -1566,7 +1463,6 @@ const METHANOL: Substance = Substance {
                 levels: &METHANOL_TORSION_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[
             Source {
                 covers: "rotation, vibrations",
@@ -1599,7 +1495,6 @@ const ATOMIC_HYDROGEN: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its ground level alone below 15,000 cm⁻¹, so its `c_p` ÷ R is 5/2 (Kramida 2010, At. Data Nucl. Data Tables 96, 586; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -1628,7 +1523,6 @@ const ATOMIC_OXYGEN: Substance = Substance {
                 levels: &ATOMIC_OXYGEN_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 3 levels below 15,000 cm⁻¹ (Moore 1993, CRC Series in Evaluated Data in Atomic Physics (Tables of Spectra of H, C, N and O); NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -1654,7 +1548,6 @@ const ELECTRON: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "molecular constants",
             citation: "the free electron, translation alone: `c_p` ÷ R is 5/2 (science-r08-gases-2.md §1.2)",
@@ -1680,7 +1573,6 @@ const HYDRIDE: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "molecular constants",
             citation: "the hydride ion, whose one bound state is its ¹S ground: `c_p` ÷ R is 5/2 (science-r08-gases-2.md §1.2)",
@@ -1706,7 +1598,6 @@ const SODIUM: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its ground level alone below 15,000 cm⁻¹, so its `c_p` ÷ R is 5/2 (Sansonetti 2008, J. Phys. Chem. Ref. Data 37, 1659; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -1735,7 +1626,6 @@ const POTASSIUM: Substance = Substance {
                 levels: &POTASSIUM_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 3 levels below 15,000 cm⁻¹ (Sansonetti 2008, J. Phys. Chem. Ref. Data 37, 7, its 4p levels from Falke et al. 2006 (Phys. Rev. A 74, 032503); NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -1764,7 +1654,6 @@ const IRON: Substance = Substance {
                 levels: &IRON_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 13 levels below 15,000 cm⁻¹ (Nave et al. 1994, ApJS 94, 221; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -1790,7 +1679,6 @@ const MAGNESIUM: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its ground level alone below 15,000 cm⁻¹, so its `c_p` ÷ R is 5/2 (Martin and Zalubas 1980, J. Phys. Chem. Ref. Data 9, 1; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -1819,7 +1707,6 @@ const SILICON: Substance = Substance {
                 levels: &SILICON_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 4 levels below 15,000 cm⁻¹ (Martin and Zalubas 1983, J. Phys. Chem. Ref. Data 12, 323; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -1845,7 +1732,6 @@ const CALCIUM: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its ground level alone below 15,000 cm⁻¹, so its `c_p` ÷ R is 5/2 (Sugar and Corliss 1985, J. Phys. Chem. Ref. Data 14, Suppl. 2; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -1874,7 +1760,6 @@ const TITANIUM: Substance = Substance {
                 levels: &TITANIUM_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 19 levels below 15,000 cm⁻¹ (Saloman 2012, J. Phys. Chem. Ref. Data 41, 013101; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -1900,7 +1785,6 @@ const SILICON_MONOXIDE: Substance = Substance {
             vibrations: &[vibration(1229.625, 1)],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "rotation, vibrations, electronic levels",
             citation: "Huber and Herzberg 1979 (the NIST WebBook's transcription as the finding aid): ω_e 1,241.557 and ω_e x_e 5.966 cm⁻¹, so the fundamental is 1,229.625 cm⁻¹; its X¹Σ⁺ ground alone lies below 15,000 cm⁻¹",
@@ -1929,7 +1813,6 @@ const TITANIUM_MONOXIDE: Substance = Substance {
                 levels: &TITANIUM_MONOXIDE_STATES,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "rotation, vibrations, electronic levels",
             citation: "Huber and Herzberg 1979 (the NIST WebBook's transcription as the finding aid): ω_e 1,009.02 and ω_e x_e 4.498 cm⁻¹, so the fundamental is 1,000.024 cm⁻¹; the X³Δ_r ground's Ω = 1, 2 and 3 at 0, 96.4 and 197.5 cm⁻¹ (Phillips 1971, Huber and Herzberg's note 18), each doubly degenerate, and the a¹Δ (3,440), d¹Σ⁺ (5,655.6), E³Π (12,025, its components unresolved, g = 6), A³Φ_r (Ω = 2, 3, 4 at 14,089.91, 14,262.8 and 14,431.0) and b¹Π (14,762.0 cm⁻¹) states below 15,000 cm⁻¹ at Huber and Herzberg's T_e (the a¹Δ at 3,440 ± 10, their note 17, and d and b above it), McKemmish et al. 2019's term table (MNRAS 488, 2836, arXiv:1905.04587, Tables 1 and 2) as the check",
@@ -1958,7 +1841,6 @@ const VANADIUM_MONOXIDE: Substance = Substance {
                 levels: &VANADIUM_MONOXIDE_STATES,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "rotation, vibrations, electronic levels",
             citation: "Huber and Herzberg 1979 (the NIST WebBook's transcription as the finding aid): ω_e 1,011.3 (uncertain) and ω_e x_e 4.86 cm⁻¹, so the fundamental is 1,001.58 cm⁻¹; the X⁴Σ⁻ ground, its spin components within about 3 cm⁻¹, as one level of g = 4, and the B⁴Π_r components at 12,567, 12,625, 12,689 and 12,760.8 cm⁻¹, the only states Huber and Herzberg tabulate below 15,000 cm⁻¹. McKemmish, Yurchenko and Tennyson 2016's A′⁴Φ (7,293) and A⁴Π (9,562 cm⁻¹) and their doublets are left out, as P14.T49.b's rule takes Huber and Herzberg's states; with them the sum would be 1.0% below NASA Glenn at 1,000 K, against 1.35% without",
@@ -1987,7 +1869,6 @@ const IRON_HYDRIDE: Substance = Substance {
                 levels: &IRON_HYDRIDE_STATES,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "rotation, vibrations, electronic levels",
             citation: "Dulick et al. 2003, ApJ 594, 651 (arXiv:astro-ph/0305162, Tables 1, 7 and 9a), Huber and Herzberg 1979 tabulating no ground state: ω_e 1,831.8 and ω_e x_e 34.86 cm⁻¹, so the fundamental is 1,762.08 cm⁻¹; and their Table 9a's 29 term values for thermochemistry below 15,000 cm⁻¹ above the X⁴Δ_i Ω = 7/2 ground: the X⁴Δ_i, A⁴Π, a⁶Δ, C⁴Φ and b⁶Π components at g = 2 each, and the c⁶Σ⁺, B⁴Σ⁻, D⁴Σ⁺, E⁴Π and F⁴Δ_i states, whose components the table does not list, at 2S + 1 for a Σ state and 2(2S + 1) otherwise (the degeneracies assumed, the table printing none; F⁴Δ_i at its Ω = 7/2 origin, so its other components lie up to about 750 cm⁻¹ too low). Each state takes the ground's vibration and rotation, the ruling's product form",
@@ -2016,7 +1897,6 @@ const ALUMINIUM: Substance = Substance {
                 levels: &ALUMINIUM_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 2 levels below 15,000 cm⁻¹ (Martin and Zalubas 1979, J. Phys. Chem. Ref. Data 8, 817; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2025,7 +1905,7 @@ const ALUMINIUM: Substance = Substance {
     }),
     diagram: None,
     condensed: None,
-    optics: RAYLEIGH_AWAITING_ABSORPTION,
+    optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
 
@@ -2045,7 +1925,6 @@ const VANADIUM: Substance = Substance {
                 levels: &VANADIUM_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 24 levels below 15,000 cm⁻¹ (Saloman and Kramida 2017, ApJS 231, 18; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2054,7 +1933,7 @@ const VANADIUM: Substance = Substance {
     }),
     diagram: None,
     condensed: None,
-    optics: RAYLEIGH_AWAITING_ABSORPTION,
+    optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
 
@@ -2071,7 +1950,6 @@ const MANGANESE: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its ground level alone below 15,000 cm⁻¹, so its `c_p` ÷ R is 5/2 (Sugar and Corliss 1985, J. Phys. Chem. Ref. Data 14, Suppl. 2; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2080,7 +1958,7 @@ const MANGANESE: Substance = Substance {
     }),
     diagram: None,
     condensed: None,
-    optics: RAYLEIGH_AWAITING_ABSORPTION,
+    optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
 
@@ -2100,7 +1978,6 @@ const NICKEL: Substance = Substance {
                 levels: &NICKEL_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 9 levels below 15,000 cm⁻¹ (Litzén, Brault and Thorne 1993, Phys. Scr. 47, 628; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2109,7 +1986,7 @@ const NICKEL: Substance = Substance {
     }),
     diagram: None,
     condensed: None,
-    optics: RAYLEIGH_AWAITING_ABSORPTION,
+    optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
 
@@ -2126,7 +2003,6 @@ const ZINC: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its ground level alone below 15,000 cm⁻¹, so its `c_p` ÷ R is 5/2 (Sugar and Musgrove 1995, J. Phys. Chem. Ref. Data 24, 1803; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2135,7 +2011,7 @@ const ZINC: Substance = Substance {
     }),
     diagram: None,
     condensed: None,
-    optics: RAYLEIGH_AWAITING_ABSORPTION,
+    optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
 
@@ -2152,7 +2028,6 @@ const SODIUM_ION: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its ground level alone below 15,000 cm⁻¹, so its `c_p` ÷ R is 5/2 (Sansonetti 2008, J. Phys. Chem. Ref. Data 37, 1659; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2161,7 +2036,7 @@ const SODIUM_ION: Substance = Substance {
     }),
     diagram: None,
     condensed: None,
-    optics: ION_AWAITING_ABSORPTION,
+    optics: ABSORBER_ONLY,
     sources: IDENTITY,
 };
 
@@ -2178,7 +2053,6 @@ const MAGNESIUM_ION: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its ground level alone below 15,000 cm⁻¹, so its `c_p` ÷ R is 5/2 (Martin and Zalubas 1980, J. Phys. Chem. Ref. Data 9, 1; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2204,7 +2078,6 @@ const ALUMINIUM_ION: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its ground level alone below 15,000 cm⁻¹, so its `c_p` ÷ R is 5/2 (Martin and Zalubas 1979, J. Phys. Chem. Ref. Data 8, 817; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2213,7 +2086,7 @@ const ALUMINIUM_ION: Substance = Substance {
     }),
     diagram: None,
     condensed: None,
-    optics: ION_AWAITING_ABSORPTION,
+    optics: ABSORBER_ONLY,
     sources: IDENTITY,
 };
 
@@ -2233,7 +2106,6 @@ const SILICON_ION: Substance = Substance {
                 levels: &SILICON_ION_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 2 levels below 15,000 cm⁻¹ (Martin and Zalubas 1983, J. Phys. Chem. Ref. Data 12, 323; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2242,7 +2114,7 @@ const SILICON_ION: Substance = Substance {
     }),
     diagram: None,
     condensed: None,
-    optics: ION_AWAITING_ABSORPTION,
+    optics: ABSORBER_ONLY,
     sources: IDENTITY,
 };
 
@@ -2259,7 +2131,6 @@ const POTASSIUM_ION: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its ground level alone below 15,000 cm⁻¹, so its `c_p` ÷ R is 5/2 (Sansonetti 2008, J. Phys. Chem. Ref. Data 37, 7; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2268,7 +2139,7 @@ const POTASSIUM_ION: Substance = Substance {
     }),
     diagram: None,
     condensed: None,
-    optics: ION_AWAITING_ABSORPTION,
+    optics: ABSORBER_ONLY,
     sources: IDENTITY,
 };
 
@@ -2288,7 +2159,6 @@ const CALCIUM_ION: Substance = Substance {
                 levels: &CALCIUM_ION_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 3 levels below 15,000 cm⁻¹ (Sugar and Corliss 1985, J. Phys. Chem. Ref. Data 14, Suppl. 2; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2317,7 +2187,6 @@ const TITANIUM_ION: Substance = Substance {
                 levels: &TITANIUM_ION_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 26 levels below 15,000 cm⁻¹ (Saloman 2012, J. Phys. Chem. Ref. Data 41, 013101; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2346,7 +2215,6 @@ const VANADIUM_ION: Substance = Substance {
                 levels: &VANADIUM_ION_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 28 levels below 15,000 cm⁻¹ (Saloman and Kramida 2017, ApJS 231, 19; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2355,7 +2223,7 @@ const VANADIUM_ION: Substance = Substance {
     }),
     diagram: None,
     condensed: None,
-    optics: ION_AWAITING_ABSORPTION,
+    optics: ABSORBER_ONLY,
     sources: IDENTITY,
 };
 
@@ -2375,7 +2243,6 @@ const CHROMIUM_ION: Substance = Substance {
                 levels: &CHROMIUM_ION_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 6 levels below 15,000 cm⁻¹ (Sansonetti and Nave 2014, ApJS 213, 28; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2384,7 +2251,7 @@ const CHROMIUM_ION: Substance = Substance {
     }),
     diagram: None,
     condensed: None,
-    optics: ION_AWAITING_ABSORPTION,
+    optics: ABSORBER_ONLY,
     sources: IDENTITY,
 };
 
@@ -2404,7 +2271,6 @@ const MANGANESE_ION: Substance = Substance {
                 levels: &MANGANESE_ION_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 7 levels below 15,000 cm⁻¹ (Kramida and Sansonetti 2013, ApJS 205, 14; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2413,7 +2279,7 @@ const MANGANESE_ION: Substance = Substance {
     }),
     diagram: None,
     condensed: None,
-    optics: ION_AWAITING_ABSORPTION,
+    optics: ABSORBER_ONLY,
     sources: IDENTITY,
 };
 
@@ -2433,7 +2299,6 @@ const IRON_ION: Substance = Substance {
                 levels: &IRON_ION_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 16 levels below 15,000 cm⁻¹ (Nave and Johansson 2013, ApJS 204, 1; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2462,7 +2327,6 @@ const NICKEL_ION: Substance = Substance {
                 levels: &NICKEL_ION_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 8 levels below 15,000 cm⁻¹ (Sugar and Corliss 1985, J. Phys. Chem. Ref. Data 14, Suppl. 2; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2471,7 +2335,7 @@ const NICKEL_ION: Substance = Substance {
     }),
     diagram: None,
     condensed: None,
-    optics: ION_AWAITING_ABSORPTION,
+    optics: ABSORBER_ONLY,
     sources: IDENTITY,
 };
 
@@ -2488,7 +2352,6 @@ const ZINC_ION: Substance = Substance {
             vibrations: &[],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its ground level alone below 15,000 cm⁻¹, so its `c_p` ÷ R is 5/2 (Sugar and Musgrove 1995, J. Phys. Chem. Ref. Data 24, 1803; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
@@ -2497,7 +2360,7 @@ const ZINC_ION: Substance = Substance {
     }),
     diagram: None,
     condensed: None,
-    optics: ION_AWAITING_ABSORPTION,
+    optics: ABSORBER_ONLY,
     sources: IDENTITY,
 };
 
@@ -2514,7 +2377,6 @@ const HYDROGEN_CHLORIDE: Substance = Substance {
             vibrations: &[vibration(2885.309, 1)],
             levels: &[],
         },
-        held_class: None,
         sources: &[Source {
             covers: "rotation, vibrations, electronic levels",
             citation: "Huber and Herzberg 1979 (the NIST WebBook's transcription as the finding aid), H³⁵Cl: ω_e 2,990.946 3 and ω_e x_e 52.818 6 cm⁻¹, so the fundamental is 2,885.309 cm⁻¹; its X¹Σ⁺ ground alone lies below 15,000 cm⁻¹",
@@ -2523,7 +2385,7 @@ const HYDROGEN_CHLORIDE: Substance = Substance {
     }),
     diagram: None,
     condensed: None,
-    optics: RAYLEIGH_AWAITING_ABSORPTION,
+    optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
 
@@ -2655,7 +2517,6 @@ const CHROMIUM: Substance = Substance {
                 levels: &CHROMIUM_LEVELS,
             }],
         },
-        held_class: None,
         sources: &[Source {
             covers: "electronic levels",
             citation: "its 7 levels below 15,000 cm⁻¹ (Saloman 2012, J. Phys. Chem. Ref. Data 41, 043103; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values; Moore's NBS Circular 467 agrees for Fe I, Ti I and O I to 0.5 cm⁻¹). A cut at 15,000 cm⁻¹ holds `c_p` within 0.8 per cent to 2,000 K, but misses up to 14 per cent at 3,000 K (Ca I), recorded",
