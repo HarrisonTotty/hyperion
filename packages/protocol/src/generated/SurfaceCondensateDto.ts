@@ -3,8 +3,9 @@ import type { SubstancePhaseDto } from "./SubstancePhaseDto";
 
 /**
  * One condensate at a surface (plan 14, P14.T51.a's partition): a substance in one phase, with
- * its share of the substance's reservoir at the surface, the area it covers and whether it is
- * seasonal. Sent from P14.T54.a's batch.
+ * its share of the substance's reservoir at the surface, as a mass and as a layer, the area it
+ * covers, the part of that area in cold traps and whether it is seasonal. Sent from P14.T54.a's
+ * batch (decision-p14-t54a-water-consistency §5).
  */
 export type SurfaceCondensateDto = { 
 /**
@@ -17,23 +18,41 @@ substance: string,
  */
 phase: SubstancePhaseDto, 
 /**
+ * Its condensed mass in this phase over the body's whole surface, kg m⁻²: the list's sort
+ * key, and its amount where its layer is absent; 0 for a supercritical fluid. On a body whose
+ * water froze, as `reservoir_gel_m`. Finite and not negative, and always sent.
+ */
+reservoir_kg_m2: number, 
+/**
  * Its condensed reservoir as a global equivalent layer, m, not negative: its mass over the
  * whole surface over its grain density in its phase at the temperature it lies at, and 0 for a
  * supercritical fluid. On a body whose water froze, the whole frozen water the partition
- * holds, shell and deeper ice included, until P14.T53.c divides it between the condensate,
- * the crust and the shell (decision-pre-23-review item 12).
+ * holds, shell, any ocean under a `Snowball`'s ice and deeper ice included, until P14.T53.c
+ * divides it between the condensate, the crust and the shell (decision-pre-23-review item
+ * 12).
  *
  * Absent where the registry has not read the phase's density (argon's ice and oxygen's β ice
  * among them), so that a reader takes the layer as not modelled, never as none. Optional on
- * the wire, as a ring's `normal` is.
+ * the wire, as a ring's [`normal`](crate::RingDto::normal) is.
  */
 reservoir_gel_m?: number, 
 /**
- * The share of the surface it covers, in `[0, 1]`: a liquid's by its volume over the basins,
- * a solid's the climate's cold area below its edge, capped by its mass; 0 for a supercritical
- * fluid, which is the air at the surface.
+ * The share of the surface it covers, in `[0, 1]`: a liquid's the share of the body's basins
+ * its layer fills (water's alone, the other liquids' together, divided by volume), so none
+ * where its reservoir lies whole as ice; a solid's the climate's cold area below its edge,
+ * at most its mass spread at 1.93 km of its density (but water on an ice-rich crust, which
+ * is the crust's own ice); 0 for a supercritical fluid, which is the air at the surface and
+ * the only entry with no mass. Entries may overlap: an ice over a sea, and ices in the same
+ * cold zones (decision-p14-t54a-water-consistency §4, W4–W5).
  */
 area_fraction: number, 
+/**
+ * The part of `area_fraction` in cold traps (P14.T51.f), in `[0, area_fraction]`. Absent
+ * from a server whose generator does not model cold traps, every server before P14.T54.b's
+ * bump, which a reader takes as not modelled, never as none; from it, sent on every entry, 0
+ * where none of the deposit lies in a cold trap.
+ */
+trapped_area_fraction?: number, 
 /**
  * Whether it is seasonal: the warmest zone takes this phase off the surface, melting or
  * subliming a solid and boiling a liquid.

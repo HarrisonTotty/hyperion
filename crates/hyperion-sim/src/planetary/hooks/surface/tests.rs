@@ -2021,6 +2021,7 @@ fn the_table_s_climate_ranges_are_the_ruling_s() {
         ("Earth", 261.7, 305.1),
         ("Mercury", 21.1, 585.2),
         ("Moon", 20.0, 361.0),
+        // The batch's own Venus, as P14.T54.a's B3 record and its bless note measure it.
         ("Venus", 694.9, 697.2),
         ("Ceres", 56.7, 202.9),
     ] {
@@ -2106,7 +2107,9 @@ fn an_airless_body_s_warmest_lies_between_its_dayside_and_its_subsolar_point() {
     for name in ["Mercury", "Moon", "Ganymede", "Ceres"] {
         let (_, body, _) = found(&table, name);
         if body.atmosphere().state() != SurfaceState::Airless {
-            // The table's Ganymede, a snowball under the batch (printed in `atmosphere::tests`).
+            // The table's Ganymede, a snowball under the batch (printed in `atmosphere::tests`), and
+            // no other.
+            assert_eq!(name, "Ganymede", "{:?}", body.atmosphere().state());
             continue;
         }
         let base = spin_of(name);
@@ -2675,11 +2678,11 @@ fn time_the_passes_climate() {
 
 /// The safeguarded Newton steps ([`zonal_point_newton`], [`ZONAL_NEWTON_STEPS`]) solve every zonal
 /// point within 10⁻¹² `T_s` of the 64-step bisection, version 22's solver, which the tests keep as
-/// their oracle (`zonal_point`) (decision-p14-t51a-part2 §1.4): at the equator, the pole and every eighth area point,
-/// over obliquities of 0–180°, mean temperatures of 40–737 K, 6D ÷ `B_eff` of 10⁻⁴ to 50, Koll's W
-/// of 0 or `B_P`, `B_eff` ÷ `B_P` of 1 or 0.3, and Φ of 1 or Φ⊕. The dark pole at 0° and weak
-/// transport, where E → 0, is among them. Two steps fewer still hold 10⁻¹³ `T_s`: the count is the
-/// least that does, plus two.
+/// their oracle (`zonal_point`) (decision-p14-t51a-part2 §1.4): at the equator, the pole and every
+/// eighth area point, over obliquities of 0–180°, mean temperatures of 40–737 K, 6D ÷ `B_eff` of
+/// 10⁻⁴ to 50, Koll's W of 0 or `B_P`, `B_eff` ÷ `B_P` of 1 or 0.3, and Φ of 1 or Φ⊕. The dark pole
+/// at 0° and weak transport, where E → 0, is among them. Two steps fewer still hold 10⁻¹³ `T_s`:
+/// the count is the least that does, plus two.
 #[test]
 fn the_newton_zonal_points_are_the_bisection_s() {
     let (mut worst, mut fewer) = (0.0_f64, 0.0_f64);
@@ -2877,7 +2880,9 @@ fn the_batch_s_zonal_solver_moves_the_table_only_at_its_last_bits() {
         let t_s = conditions.mean_surface_temperature().value();
         let near = |a: f64, b: f64| (a - b).abs() <= 1e-12 * t_s;
         let bisected = match profile.modal {
-            Some((transport, obliquity)) => zonal_ends_bisected(t_s, &transport, obliquity),
+            Some((transport, obliquity)) => {
+                zonal_ends_bisected(profile.surface_k, &transport, obliquity)
+            }
             None => profile.ends,
         };
         let ends = (profile.ends, bisected);

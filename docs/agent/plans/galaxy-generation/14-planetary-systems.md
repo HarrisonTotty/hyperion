@@ -21413,7 +21413,9 @@ planetary::record` (624 tests at T57.a's commit).
       - `planetary/derive_body` (10): `beyond_dry` and `beyond_watery`, between the lines at
         4.0 au. Their N₂ falls 90.1 → 0.901 and 66.1 → 0.661 bar, their CH₄, held at
         saturation, 10.1 → 1.41 and 8.49 → 1.32 bar, their totals 100.2 → 2.32 and
-        74.6 → 1.99 bar, and their surfaces 180.1 → 128.7 and 174.5 → 127.2 K.
+        74.6 → 1.99 bar, and their surfaces 180.1 → 128.7 and 174.5 → 127.2 K; their water's
+        and methane's partial pressures fall with the cooler surfaces (corrected by Batch B's
+        review, PB3).
       - `planetary/surface_conditions_published` (46): the lib sample's three snowballs above.
       - `planetary/systems/close_binary` (16): `0900` and `0a00`, at the epoch and at +H.
       - `planetary/systems/filler_c` (24): `0300`, `0400` and `e201`.
@@ -21576,11 +21578,14 @@ planetary::record` (624 tests at T57.a's commit).
       - `frame/body_rotations` (123): the moons' laws, their poles with their orbits and their
         locking ages by their own pairs.
       - `orbit/drifting_states` (10): the giant-impact moons' drifting orbits, on their planes.
-      - `planetary/global_figures` (4): the measured Europa's surface age, craters, σ_h and
-        basin relief, by the constant.
+      - `planetary/global_figures` (4): the measured Europa's surface age, and with it its
+        `crater_density`, `sigma_h` and `relief_basin`, by the constant.
       - `planetary/surface_conditions_published` (153 changed, 1 new, 2 gone): 30 bodies, 20
         moons by their planes' seasons, own air and tides (`01fffb2c9fff0000.0601` loses its
-        ocean), and 7 planets and 3 dwarf planets by the constant.
+        ocean), and 7 planets and 3 dwarf planets by the constant. Two of the planets,
+        `01fffb2c9fff0000.0300` and `02000b2ca0000000.0200`, also move `potential_ocean`,
+        `ocean_weight`, `surface_liquid_H2O` and their contrasts, through the surface age, the
+        hypsometry and `cover::potential_ocean` (corrected by Batch B's review, PB3).
       - `planetary/systems`: `close_binary` (913 changed; 390 new and 390 gone, the rotation
         lines relabelled by their new lock), `eccentric_giant` (149; 188 and 182),
         `fallback_black_hole` (18; 46 and 46), `filler_b` (563; 584 and 572), `filler_c` (698;
@@ -21589,8 +21594,8 @@ planetary::record` (624 tests at T57.a's commit).
         (371; 418 and 412), `subgiant` (1,115; 920 and 896) and `wide_binary` (152; 242 and
         230): every moon by its plane, laws and tides, the icy planets' and dwarf planets'
         surfaces by the constant, and each ring's normal, new.
-      - The server's `scene_systems` (6 frames): the moons' orbits and laws, and the rings'
-        `normal`, sent.
+      - The server's `scene_systems` (6 frames): the moons' `orbit` and `position_m`, and the
+        rings' `normal`, sent; the scene carries no law (corrected by Batch B's review, PB3).
       - The rest hold, `planetary/moons` among them (the local elements, as §1.5 says), with the
         other golden integration targets run (`body_frame_golden`, `body_fixed_golden`,
         `orbit_states`, `frame`, `photometry_templates_golden` and the planetary ones) and the
@@ -21701,7 +21706,11 @@ planetary::record` (624 tests at T57.a's commit).
     - _Printed, not asserted_, at the passes' stand-ins (each test says so):
       - Mars in T13.c's 8% (196.6 K), its σ_h (3,092 m against 2,900, 6.6% over 5%) and its
         volcanism fit (I♂ 0.03589 against the fitted 0.03494, V 1.027): the passes ice it over
-        until Batch C's water share (E3), whose fit then re-reads Mars;
+        until Batch C's water share (E3). Each comes back with Batch C's second commit, the
+        passes' spin, basins and water share, which re-reads Mars's surface: T13.c's 8% at once,
+        and σ_h's 5% and the volcanism fit through the figures at that surface's temperature,
+        which set its volcanism and relief; any still out at Batch C's fourth commit, the
+        convergence re-check, goes to main with its terms (PB5);
       - the table's Ganymede, a body at 5.2 au, a 2.2-bar N₂ and CH₄ snowball at 117.02 K where
         T13.b keeps it airless (four tests: its airless state, the 110 K edge, the airless gases,
         the airless warmest), and as a moon of the table's Jupiter a 133–166 mbar snowball of CH₄
@@ -21718,8 +21727,10 @@ planetary::record` (624 tests at T57.a's commit).
       - the airless-ice template's stated ratio, 0.43 × 0.80 ÷ 0.83204 = 0.4134 (0.98 at
         Ganymede's measured 0.35), its p the row's Ganymede and its reference the frost's.
     - _Moved goldens_, re-blessed at header 22 (`golden_diff.py`: 22 changed, none new):
-      - `frame/body_rotations` (1): the moon `42006cba00000009.0503`'s locking age, 344.3 →
-        422.8 Gyr, its tides reading its own derivation at the batch's passes.
+      - `frame/body_rotations` (1): the moon `42006cba00000009.0503`'s locking age,
+        3.443 × 10¹¹ → 4.228 × 10¹¹ s (10.9 → 13.4 kyr), so its lock instant moves 2,485 yr
+        later, its tides reading its own derivation at the batch's passes (corrected by Batch B's
+        review, PB2; the figure was seconds).
       - `planetary/atmosphere_speciation` (16) and `planetary/derive_body` (59): the table's
         bodies through the batch's passes: `T_eq` at the area mix's albedos (Earth 0.294 →
         0.27983, Mars 0.294 → 0.49932, Titan 0.50 → 0.53617) and the partition's columns under
@@ -21745,8 +21756,43 @@ planetary::record` (624 tests at T57.a's commit).
         `subgiant` (743; 44 and 44) and `wide_binary` (387; 22 and 22): every present body's
         `T_eq` and Bond albedo at its area mix (the giants at class I), its photometry's p at the
         area mix's references and its stated ratio, its surface conditions, figures, ices and
-        oceans; the new and gone lines are surface sections relabelled by their climate model
-        (`Isothermal` → `EnergyBalance` among them).
+        oceans; the new and gone lines are the states and labels below, no new files (new labels
+        in 9 files).
+      - _States and labels that move_ (epoch and +H alike; this account replaces the commit
+        message's "surface sections relabelled", Batch B's review, PB1):
+        - `close_binary`:
+          - `e304` Temperate → Airless, photometry Earth → Mercury (accepted,
+            decision-p14-t54a-ganymede 1c; Batch C's exobase returns it to air);
+          - `0800`, a Snowball, AirlessLike → Efficient on H₂O;
+          - `0700` H₂O → no condensable;
+          - `0600` EnergyBalance → Isothermal.
+        - `filler_c` `e305`, an N₂ Snowball → Airless, photometry Snowball → AirlessIce (ibid.).
+        - `subgiant`:
+          - `0402` CO₂ → none;
+          - `0503` CO₂ → N₂;
+          - `0504` Efficient → Transitional, Isothermal → EnergyBalance.
+        - `solar_like` `0200` Isothermal → EnergyBalance.
+        - `wide_binary` `0700` EnergyBalance → Isothermal, which undoes B1's relabel.
+        - The moons `solar_like` `0503`, `filler_b` `0303` and `hierarchical_triple` `1201`:
+          lock instants 98–2,485 yr later, their tides reading their own derivations.
+        - 14 systems files move; `t_tauri` holds.
+      - _The sample's flips:_
+        - `01fffb2c9fff0000.e101` Efficient N₂ → AirlessLike (accepted, ibid.);
+        - `02000b2ca0000001.1100` CO₂ → N₂, Efficient → Transitional, Isothermal →
+          LockedEnergyBalance;
+        - `21fff6587ff80000.0100` and `.0200` HeatPipe → Episodic, with their climate models.
+      - _`derive_body`, beyond the four anchors:_
+        - the giants at class I, 0.34 → 0.570: Jupiter `T_eq` 110.0 → 98.8 K and `T_eff`
+          127.8 → 121.2 K, Saturn 81.1 → 72.8 K, Uranus 57.28 → 51.46 K, Neptune 45.7 → 41.1 K,
+          the blended giant 112.2 → 100.8 K (moved again by Batch B's fix commit,
+          decision-p14-t54a-ganymede items 2–3);
+        - the hot Jupiter and hot sub-Neptune 0.34 → 0.061 and 0.058 (1,122 → 1,225 and
+          1,226 K);
+        - the snowballs 0.5 → 0.536: `beyond_dry` 128.7 → 126.7 K, 2.32 → 3.28 bar;
+          `beyond_watery` 127.2 → 125.2 K, 1.99 → 2.97 bar;
+        - the wet runaway 820.4 → 777.1 K.
+      - _Ruled since:_ decision-p14-t54a-ganymede (items 2–4 in Batch B's fix commit; item 1 in
+        Batch C).
       - The rest hold: the other golden integration targets run (`planetary_moons_golden`,
         `observe_in_system_golden`, `body_frame_golden`, `body_fixed_golden`,
         `orbit_drifting_states`, `orbit_states`, `photometry_templates_golden`,
@@ -21817,7 +21863,7 @@ planetary::record` (624 tests at T57.a's commit).
     - _D3's doc lines_ (item 24), on `SurfaceConditions::mean_surface_temperature` and
       `BodySurfaceDto.mean_surface_temperature_k`: "the surface's emission mean, (⟨σT⁴⟩ ÷ σ)^¼,
       about 1.3 K above the area mean for Earth-like contrasts (decision-p14-t57a-fits §2.2)".
-    - _The tests:_
+    - _The tests_ (the sim's by the filter `--lib planetary::system`, PB5):
       - sim, `the_record_s_surface_holds_its_published_condensates` (60 systems, 893 surfaces,
         441 entries, 41 supercritical, 115 with no layer, every one argon's ice): at most eight,
         each substance and phase once in `publish`'s order, areas fractions, reservoirs and layers
@@ -21876,13 +21922,166 @@ planetary::record` (624 tests at T57.a's commit).
         area: `01ffeb2ce0000000.0300` publishes 2.9 × 10⁻¹¹ kg m⁻² of liquid water over 28% of
         its surface beside 183 m of ice, and the record's `ocean_fraction` reads the same 0.28.
         The ocean and the ice are both read from the whole surface water. It was so before B4;
-        the wire now shows it. For main: P14.T53.c, which divides a body's water, or a T51.a
-        follow-up that takes the liquid's area from its own volume on the basins, as the other
-        liquids'.
+        the wire now shows it. Ruled A and fixed in Batch B's fix commit
+        (decision-p14-t54a-water-consistency §1; below).
       - _Argon's ice has no layer_: 115 of the sample's 441 entries (26%) are argon ice with no
         solid density in the registry (T51.a part 2's finding, p14-registry), so the wire sends
         no `reservoir_gel_m` for them; the golden systems pin 56 (`hot_jupiter`'s only entries
-        among them, one body's at the epoch and at +H).
+        among them, one body's at the epoch and at +H). Ruled B at 23
+        (decision-p14-t54a-water-consistency §2): absent means not modelled, and Batch B's fix
+        commit's `reservoir_kg_m2` gives these entries their amount on the wire; the densities go
+        to new P14.T49.n, the registry's unread solid densities, at 24 if ready.
+      - _The water worlds' sea under 57% ice_ (decision-p14-t54a-water-consistency §3, B):
+        `02000b2cdfff0000.0200` and `02000b2ce0000001.0200` hold their sea over the whole surface
+        under 1.1 km of ice over 0.573: ice floating on a global sea, which the docs allow. The
+        1.93 km sheet puts 2.6% and 11.5% of their water into ice, a stand-in where sea ice is
+        metres thick: a sea's ice, its floating thickness and its mass in the sea's level are
+        P14.T53.c's. Both join decision-pre-23-review item 26's bistability re-check (an ice edge
+        near 25° lies on an energy-balance model's unstable branch).
       - The water the figures list with no condensate entry (T24.b's ice where the partition
         holds no water solid, and the ocean under ice) is not on the wire's condensates, which
-        hold the partition's alone.
+        hold the partition's alone: the consistency rule's two W3 items, stated in the docs by
+        Batch B's fix commit and ended by P14.T53.c (decision-p14-t54a-water-consistency §4).
+  - _Batch B's fix commit_ (the review of B1–B4, `batch-b-fixes`; decision-p14-t54a-ganymede items
+    2–4; decision-p14-t54a-water-consistency items 1, 4 and 5; decision-p14-t54a-states §6.1–6.2).
+    A checkpoint at 22: `GENERATOR_VERSION` stays 22, and the goldens that move re-bless at header
+    22 in the same commit. Ganymede's exobase (decision-p14-t54a-ganymede item 1), its test (the
+    review's RB6) and the states ruling's re-check from a second albedo (its §6.3) are Batch C's.
+    - _Jupiter's class I_ (decision-p14-t54a-ganymede §2, A): class I's column is the Fiducial's
+      × 0.48 ÷ 0.57 (`CLASS_I_HAZE_RATIO`), Sudarsky, Burrows and Pinto's own tholin-haze case
+      about a G2V star applied about every host (M4V 0.32, G2V 0.48, A8V 0.53), labelled. The
+      table's Jupiter: Bond albedo 0.570 → 0.48007, `T_eff` 121.24 → 123.95 K against the measured
+      125.57 ± 0.07 K (Li et al. 2012), He/H₂ 0.1410 → 0.1533 against the probe's 0.157, Ne/H
+      1.019 × 10⁻⁵ against the probe's 1.24 × 10⁻⁵ (0.82 of it). The envelope test
+      (`the_table_giants_match_their_measured_atmospheres`) now asserts `T_eff` within 123–128 K
+      and He/H₂ within 0.145–0.170, and states Ne/H. _Recorded, not tuned:_ the remaining −1.6 K
+      is the cooling fit's internal flux, 6.84 W m⁻² against 7.485 ± 0.160 W m⁻² (Li et al. 2018),
+      8.6% low (ruling 112.7's split, the giants' cooling); P14.T24.h, widened, gives an envelope
+      its albedo from its own decks and hazes.
+    - _The ice giants_ (§3, A): `ICE_GIANT_CLASS_I_RATIO`, 0.32 ÷ 0.57 of the Fiducial class I,
+      for a `PlanetClass::IceGiant` at and below class I's 130 K node (0.32 about G2V, the mean of
+      Uranus's 0.349 ± 0.016, Irwin et al. 2025, and Neptune's 0.290 ± 0.067, Pearl and Conrath
+      1991), without the haze ratio, interpolated to class II above it; labelled. `giant_bond` and
+      `class_i_bond` take the body's class, which `AtmosphereInputs` now carries (`class`, the
+      body's `PlanetClass::of`, read by nothing else). The table's Uranus: 51.46 → 57.71 K
+      (57.28 K at version 22) against 59.1 ± 0.3 K. _Stated:_ the table's Neptune, 41.10 →
+      46.09 K against 59.3 ± 0.8 K, since the record gives a giant under 0.3 M_J no internal heat,
+      and Neptune emits 2.61 times what it absorbs (the giants' cooling).
+    - _The photometry's references_ follow: Jupiter's and Saturn's templates take the hazy class
+      I (0.48007), Uranus's and Neptune's the ice giants' (0.32005), and the four rows' sources
+      state their measured Bond albedos (Li et al. 2018's 0.503 for Jupiter, Hanel et al. 1981's
+      0.343 superseded; Wang et al. 2024's 0.41 for Saturn; Irwin et al. 2025's 0.349 for Uranus)
+      and the generator's. `photometry/templates.golden` now pins each template's
+      `reference_bond` by its bits (the review's DB3).
+    - _The citations_ (§4): Jupiter's 124.4 ± 0.3 K is Hanel et al. 1981's, as Guillot 2005,
+      Table 2, lists it; 125.57 ± 0.07 K is Li et al. 2012's; the measured Bond albedo is Li et
+      al. 2018's 0.503 ± 0.012 (102.4 K), Hanel's 0.343 superseded. The exobase constants' docs
+      are dated to the albedos T13.c's table calibrated them at (Ganymede's measured 0.35, Titan's
+      0.50).
+    - _Water's sea_ (decision-p14-t54a-water-consistency §1, A): `water_parts`' liquid is the
+      share of the basins its own layer fills, `Basins::area_filled` of its mass over the liquid's
+      density where it lies (`liquid_density_kg_per_m3`), as every other liquid's; and where
+      T24.b's cap binds, `ice_fraction ≥ σ_s ÷ (ρ_ice × 1.93 km)`, the expression
+      `ice_fraction_over` and the passes' water cover cap with, the ice takes the whole surface
+      water and there is no liquid entry. No minimum depth. `WaterCover.potential_ocean` stays
+      (θ, the liquid flag and a `Snowball`'s ocean under its ice read it), and is no longer the
+      sea's area. Tests: `the_ice_holds_the_whole_water_where_its_cap_binds` (600 reservoirs about
+      `01ffeb2ce0000000.0300`'s 1.68 × 10⁵ kg m⁻², each and one ulp either side: the solid holds
+      σ_s to the bit and nothing is liquid; the rule before left a sea of an ulp at 33 of them),
+      `with_no_ice_the_sea_is_the_whole_water_s_fill`,
+      `the_sea_rises_from_none_as_the_water_passes_the_ice_s_cap` and
+      `earth_publishes_its_ocean_and_its_ice` (its sea its own layer's fill, below the whole
+      water's potential ocean); over the sample
+      (`the_record_s_surface_holds_its_published_condensates`) every water sea is its layer's
+      fill, 0300 publishes none and R09's inputs read none.
+      - _Every water sea, before (the whole water's potential ocean) and after_, the sample's
+        and the goldens' at the epoch:
+        - `01ffeb2ce0000000.0300` (277.7 K): 0.280 → none, its 183 m of ice holding its water;
+        - `01fffb2be0000001.0100` (282.9 K): 0.030394 → 0.030397, its density alone;
+        - `02000b2cdfff0000.0200` and `02000b2ce0000001.0200`, the water worlds (274.8 and
+          279.9 K): 1 → 1, their 37.8 and 7.74 km remainders still drowning their surfaces;
+        - `02000b2cdfff0000.0300`, a `Snowball` at 546.9 K: 1 → 1;
+        - `02000b2ca0000000.0400` and `01ffeb2ce0000000.0400`, `Snowball`s at 546.3 and 573.8 K:
+          0.8892 → 0.9717 and 0.9335 → 0.9973, larger, since the liquid's density at their
+          temperature lies well under the triple point's that the potential ocean reads;
+        - the goldens' `filler_c` `0200` (286.2 K, 5.3 bar): 0.88108 → 0.88064, its 12.2 m of
+          ice;
+        - the goldens' `close_binary` `0800`, a `Snowball` at 596.4 K and 225 bar: 0.3134 →
+          0.4190, by the hot liquid's density (decision-p14-t54a-states' hot snowballs);
+        - the table's Earth (`hooks` tests): 0.7465 → 0.7425, its 0.0138 of ice holding 26.6 m of
+          its 2.70 km; the partition's Earth on Earth's hypsometry 0.7558 → 0.7398 under its test
+          profile's 5% of ice.
+      - The class (liquid-flagged, 0 < σ_s ≤ its cold area's sheet): 1 of the sample's wet
+        worlds, 0300. No surface temperature moves here: the passes read no basins until Batch C,
+        whose area mix then reads these areas.
+    - _The consistency rule, W1–W5_ (§4, docs and tests, no value moved): `CondensateEntry` and
+      `SurfaceCondensateDto`'s `area_fraction` state W4–W5, `BodySurfaceDto.condensates` W1–W3,
+      and the lists' and sums' docs, sim and wire, "the cover by substance, from `condensates` by
+      its rule"; `reservoir_gel_m`'s frozen water includes "any ocean under a `Snowball`'s ice".
+      Tests: the sim's `check_cover_rule` over the sample (every list its phase's entries in order,
+      to the bit or divided by its total, the two `H2O` items each only under its condition, each
+      sea its layer's fill, the other liquids sharing the basins by volume, no massless entry but
+      a supercritical one, a solid within its mass at 1.93 km but water on an ice-rich crust or a
+      `Snowball`'s cover); the server's `the_wire_s_cover_is_its_condensates_by_their_rule` over
+      the golden systems' DTOs (the lists the condensates' by the rule, `ocean_fraction` and
+      `ice_fraction` their sums to the bit). Counted: the sample's 893 surfaces, 470 with W3 (a)'s
+      water ice with an area, 19 with W3 (b)'s ocean under ice and 127 lists scaled (their total
+      with the appended item over 1); the golden systems' 341 surfaces, 152 with W3 (a), 8 with
+      W3 (b) and 27 lists scaled. None breaks W1–W4.
+    - _The DTO's two members_ (§5): `reservoir_kg_m2`, required, the record's `reservoir()` to the
+      bit; `trapped_area_fraction: Option<f64>`, optional (serde's `default` and
+      `skip_serializing_if`, ts-rs's `optional`, as the layer's) and absent while the record
+      holds no cold traps (`record::Surface::cold_traps_modelled`, false until P14.T54.b's bump at
+      24; `no_condensate_sends_its_trapped_area_while_the_cold_traps_are_held`). Protocol tests: the
+      mass refused when missing, the trapped area absent or `null` read as absent; the shared
+      fixture's Earth carries its two condensates (its ice with a trapped area of 0, its sea
+      without), which both languages decode. The client reads both optional members as
+      `Pending<number>`, a `null` like an absent key. `PROTOCOL_VERSION` stays 2.
+    - _The states_ (decision-p14-t54a-states §6.1–6.2): `SurfaceState`'s and `SurfaceStateDto`'s
+      docs take the ruling's text (the insolation class, not the present climate), and
+      `cover::under_ice_ocean` is false at and above 273.15 K, its formula's domain
+      (`a_snowball_above_melting_holds_no_ocean_under_ice`); no golden moves by it.
+    - _The review's fixes_: RB1 (`InventoryInputs` for a `volatile_zone`), RB2 (the flowcharts and
+      the life brainstorm), RB3, RB4, RB5 and RB11's rewraps and nits (the albedo bound derived
+      from `ATMOSPHERE_CONVERGENCE`, the oracle at `profile.surface_k`, the Ganymede-only airless
+      skip, the Venus row's source), RB7 (the airless-ice ratio's owner, P14.T49.m), RB8
+      (`screening_of` and `a_subnormal_column_screens_nothing`), RB9, RB10, RB12, RB14
+      (`record::Surface::condensates()` returns `&Condensates`), RB15 (`elements`, a `BTreeSet`
+      check, the ring `normal` link), DB3 (the cold traps' doc, `templates.golden`'s
+      `reference_bond`), PB1–PB5 above, and the client's TB1–TB7. Not taken: DB3's zeroing of the
+      partition's subnormal residue, a value change with no consumer found to meet it now (the
+      screening is its one); RB6 is Batch C's.
+    - _Moved goldens_, re-blessed at header 22 (`golden_diff.py`: 15 changed, none new):
+      - `planetary/derive_body` (17): the giants (Jupiter `T_eq` 98.83 → 103.64 K and `T_eff`
+        121.24 → 123.95 K at 0.48007; Saturn 72.83 → 76.38 K; Uranus 51.46 → 57.71 K and
+        Neptune 41.10 → 46.09 K at 0.32005; the blended giant 100.82 → 105.73 K, `T_eff`
+        103.33 → 107.92 K).
+      - `planetary/envelope_abundances` (12): Jupiter's rain at 123.95 K, its helium depletion
+        0.7280 → 0.7917, He/H 0.0705 → 0.0767 and Ne/H 3.51 × 10⁻⁶ → 1.019 × 10⁻⁵, X, Y and Z
+        with them.
+      - `planetary/partition` (4): water's sea at its own layer's fill: Earth 0.7558 → 0.7398, the
+        ocean worlds at 360, 373 and 310 K 0.7551 → 0.7727, 0.7545 → 0.7771 and 0.7557 → 0.7592
+        (their warm liquid's density).
+      - `planetary/surface_conditions_published` (1): `02000b2ca0000000.0400`'s water sea
+        0.8892 → 0.9717.
+      - `photometry/templates` (13 lines): each template's `reference_bond`, new on its line
+        (the giants at 0.48007 and 0.32005); its laws and q unmoved.
+      - `planetary/systems`: `close_binary` (16), `eccentric_giant` (12), `filler_b` (20),
+        `filler_c` (16), `hierarchical_triple` (75), `hot_jupiter` (8), `red_giant` (8),
+        `solar_like` (10), `subgiant` (45) and `wide_binary` (8): every gas envelope's `T_eq` and
+        Bond albedo at class I's new values and its photometry's p and stated ratio at the
+        templates' new references; `close_binary` `0800`'s and `filler_c` `0200`'s seas.
+      - The rest hold: the other golden integration targets (`planetary_moons_golden`,
+        `observe_in_system_golden`, `body_frame_golden`, `body_fixed_golden`,
+        `body_rotations_golden`, `orbit_drifting_states`, `orbit_states`,
+        `planetary_small_bodies_golden`, `planetary_derive_golden`, `planetary_giants_golden`,
+        `planetary_context_golden`, `planetary_fate_golden`, `planetary_masses_golden`,
+        `planetary_placement_golden`, `planetary_placement`, `frame`, `aerosol_golden`,
+        `formation_golden`, `liquids_golden` and `substance_golden`), the lib's other goldens, and
+        the server's `scene_systems`, `system_bodies` and `systems_in_range`.
+    - _Deferred_ (2026-10-13 rule):
+      - The hot snowballs' seas grow with their liquid's density (close_binary `0800` +0.106, the
+        sample's two +0.06–0.08): the ruled rule, recorded; their temperatures are T13.c's √p CO₂
+        finding (decision-p14-t54a-states), which P14.T53.a's form at 24 cools.
+      - DB3's subnormal residue: zero it where the partition makes it, if a later reader of a
+        `> 0` test on an airless body meets it.

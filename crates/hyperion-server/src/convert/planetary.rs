@@ -925,10 +925,14 @@ fn substance_areas(areas: &[(SubstanceId, f64)]) -> Vec<SubstanceAreaDto> {
 }
 
 /// A surface's published condensates as the wire carries them (P14.T51.a, sent from P14.T54.a):
-/// in the record's order, each substance by its registry key, its layer absent where the record
-/// has none (the registry has not read its phase's density, decision-pre-23-review item 12).
+/// in the record's order, each substance by its registry key, its mass always sent, its layer
+/// absent where the record has none (the registry has not read its phase's density,
+/// decision-pre-23-review item 12), and its trapped area absent while the record holds no cold
+/// traps ([`Surface::cold_traps_modelled`], until P14.T54.b; decision-p14-t54a-water-consistency
+/// §5.3).
 #[must_use]
 fn condensates(condensates: &Condensates) -> Vec<SurfaceCondensateDto> {
+    let traps = Surface::cold_traps_modelled();
     condensates
         .entries()
         .iter()
@@ -939,8 +943,10 @@ fn condensates(condensates: &Condensates) -> Vec<SurfaceCondensateDto> {
                 CondensatePhase::Liquid => SubstancePhaseDto::Liquid,
                 CondensatePhase::Supercritical => SubstancePhaseDto::Supercritical,
             },
+            reservoir_kg_m2: entry.reservoir().value(),
             reservoir_gel_m: entry.reservoir_gel().map(Metres::value),
             area_fraction: entry.area_fraction(),
+            trapped_area_fraction: traps.then_some(entry.trapped_area_fraction()),
             seasonal: entry.is_seasonal(),
         })
         .collect()
@@ -1015,9 +1021,7 @@ fn surface(surface: &Surface) -> BodySurfaceDto {
             |structure| match *structure {},
         ),
         aerosols: later(surface.aerosols(), |aerosols| match *aerosols {}),
-        condensates: later(surface.condensates(), |published| {
-            Some(condensates(published))
-        }),
+        condensates: Modelled::Value(condensates(surface.condensates())),
         crust: later(surface.crust(), |crust| match *crust {}),
         modifiers: later(surface.modifiers(), |modifiers| match *modifiers {}),
         biosphere: later(surface.biosphere(), |biosphere| match *biosphere {}),
@@ -1496,16 +1500,15 @@ mod tests {
 
     /// P14.T54.a: every `ok` surface sends its record's published condensates (P14.T51.a), a
     /// list, never absent or `null`: the record's entries in its order, each substance by its
-    /// registry key and phase, its layer, area and seasonal flag to the bit, the layer absent
-    /// where the record has none. An Earth's hold `H2O`: every temperate surface with liquid
-    /// water whose liquids list water sends a liquid `H2O` entry with a layer.
+    /// registry key and phase, its mass, layer, area, trapped area and seasonal flag to the bit,
+    /// the layer absent where the record has none and the trapped area while the record holds no
+    /// cold traps. An Earth's hold `H2O`: every temperate surface with liquid water whose liquids
+    /// list water sends a liquid `H2O` entry with a layer.
     #[test]
     fn every_surface_sends_its_record_s_condensates() {
         let (mut surfaces, mut entries, mut earths, mut unlayered) = (0, 0, 0, 0);
         for (sim, dto, wire) in ok_surfaces() {
-            let RecordModelled::Ok(published) = sim.condensates() else {
-                panic!("{}: a record's surface holds its condensates", wire.id);
-            };
+            let published = sim.condensates();
             let Modelled::Value(sent) = &dto.condensates else {
                 panic!("{}: the condensates are sent", wire.id);
             };
@@ -1519,6 +1522,12 @@ mod tests {
                 };
                 assert_eq!(dto.phase, phase, "{}", wire.id);
                 assert_eq!(
+                    dto.reservoir_kg_m2.to_bits(),
+                    entry.reservoir().value().to_bits(),
+                    "{}",
+                    wire.id
+                );
+                assert_eq!(
                     dto.reservoir_gel_m.map(f64::to_bits),
                     entry.reservoir_gel().map(|gel| gel.value().to_bits()),
                     "{}",
@@ -1527,6 +1536,13 @@ mod tests {
                 assert_eq!(
                     dto.area_fraction.to_bits(),
                     entry.area_fraction().to_bits(),
+                    "{}",
+                    wire.id
+                );
+                assert_eq!(
+                    dto.trapped_area_fraction.map(f64::to_bits),
+                    Surface::cold_traps_modelled()
+                        .then_some(entry.trapped_area_fraction().to_bits()),
                     "{}",
                     wire.id
                 );
@@ -1559,6 +1575,134 @@ mod tests {
             surfaces > 50 && entries > 50 && earths > 0,
             "{surfaces} {entries} {earths}"
         );
+    }
+
+    /// Decision-p14-t54a-water-consistency §5.3: while the record holds no cold traps (until
+    /// P14.T54.b's bump at generator version 24), no condensate sends its trapped area, which a
+    /// reader takes as not modelled, never as none.
+    #[test]
+    fn no_condensate_sends_its_trapped_area_while_the_cold_traps_are_held() {
+        assert_eq!(
+            Surface::cold_traps_modelled(),
+            hyperion_sim::GENERATOR_VERSION.get() >= 24,
+            "the cold traps are on the record from P14.T54.b's bump"
+        );
+        let mut entries = 0;
+        for (_, dto, wire) in ok_surfaces() {
+            let Modelled::Value(sent) = &dto.condensates else {
+                panic!("{}: the condensates are sent", wire.id);
+            };
+            for condensate in sent {
+                assert_eq!(
+                    condensate.trapped_area_fraction.is_some(),
+                    Surface::cold_traps_modelled(),
+                    "{}: {condensate:?}",
+                    wire.id
+                );
+                entries += 1;
+            }
+        }
+        assert!(entries > 50, "{entries}");
+    }
+
+    /// Decision-p14-t54a-water-consistency §4.2, the wire's own consistency: on every `ok` surface
+    /// `surface_liquids` and `surface_ices` are the cover its `condensates` give (W1–W3). Each
+    /// list's leading items are that phase's condensates, in their order, at their areas: to the
+    /// bit where the list is not scaled, and each divided by one total where it is, to the bit
+    /// where nothing is appended. At most one `H2O` item follows them, only where no `H2O`
+    /// condensate of the phase is sent. Each list sums to at most 1 (W5), and `ocean_fraction` and
+    /// `ice_fraction` are their lists' sums to the bit.
+    #[test]
+    fn the_wire_s_cover_is_its_condensates_by_their_rule() {
+        let (mut surfaces, mut scaled) = (0, 0);
+        let (mut crust_ice, mut under_ice) = (0, 0);
+        for (_, dto, wire) in ok_surfaces() {
+            let Modelled::Value(sent) = &dto.condensates else {
+                panic!("{}: the condensates are sent", wire.id);
+            };
+            for (list, phase, fraction) in [
+                (
+                    &dto.surface_liquids,
+                    SubstancePhaseDto::Liquid,
+                    dto.ocean_fraction,
+                ),
+                (
+                    &dto.surface_ices,
+                    SubstancePhaseDto::Solid,
+                    dto.ice_fraction,
+                ),
+            ] {
+                let entries: Vec<&SurfaceCondensateDto> =
+                    sent.iter().filter(|c| c.phase == phase).collect();
+                let extra = list
+                    .len()
+                    .checked_sub(entries.len())
+                    .unwrap_or_else(|| panic!("{}: {phase:?} entries unlisted", wire.id));
+                assert!(extra <= 1, "{}: {list:?} against {entries:?}", wire.id);
+                if let (1, Some(last)) = (extra, list.last()) {
+                    assert_eq!(last.substance, "H2O", "{}", wire.id);
+                    assert!(
+                        entries.iter().all(|c| c.substance != "H2O"),
+                        "{}: {list:?} against {entries:?}",
+                        wire.id
+                    );
+                    if last.area_fraction > 0.0 {
+                        match phase {
+                            SubstancePhaseDto::Liquid => under_ice += 1,
+                            SubstancePhaseDto::Solid
+                            | SubstancePhaseDto::Supercritical
+                            | SubstancePhaseDto::Vapour => crust_ice += 1,
+                        }
+                    }
+                }
+                for (item, entry) in list.iter().zip(&entries) {
+                    assert_eq!(item.substance, entry.substance, "{}", wire.id);
+                }
+                let unscaled = list.iter().zip(&entries).all(|(item, entry)| {
+                    item.area_fraction.to_bits() == entry.area_fraction.to_bits()
+                });
+                let listed = list.iter().fold(0.0, |sum, item| sum + item.area_fraction);
+                if !unscaled {
+                    scaled += 1;
+                    assert!((listed - 1.0).abs() <= 1e-12, "{}: {list:?}", wire.id);
+                    // Where nothing is appended the total is the entries' own, in their order;
+                    // where an item is, every entry shares one ratio to its listed area.
+                    let total = entries.iter().fold(0.0, |sum, c| sum + c.area_fraction);
+                    let mut ratio = None;
+                    for (item, entry) in list.iter().zip(&entries) {
+                        if extra == 0 {
+                            assert_eq!(
+                                item.area_fraction.to_bits(),
+                                (entry.area_fraction / total).to_bits(),
+                                "{}: {list:?}",
+                                wire.id
+                            );
+                        } else if entry.area_fraction > 0.0 {
+                            let this = item.area_fraction / entry.area_fraction;
+                            let first = *ratio.get_or_insert(this);
+                            assert!(
+                                this < 1.0 && (this / first - 1.0).abs() <= 1e-12,
+                                "{}: {list:?}",
+                                wire.id
+                            );
+                        }
+                    }
+                }
+                assert!(listed <= 1.0 + 1e-12, "{}: {list:?}", wire.id);
+                assert_eq!(
+                    fraction.to_bits(),
+                    listed.to_bits(),
+                    "{}: {phase:?}",
+                    wire.id
+                );
+            }
+            surfaces += 1;
+        }
+        eprintln!(
+            "{surfaces} surfaces: appended H2O with an area, {crust_ice} ices (W3 a) and \
+             {under_ice} oceans under ice (W3 b); {scaled} scaled lists"
+        );
+        assert!(surfaces > 50, "{surfaces}");
     }
 
     /// P14.T35.e: the gases sum to 1 to 10⁻⁹ and descend, an airless body's are empty, a body with
@@ -1704,8 +1848,14 @@ mod tests {
                 continue;
             };
             let sent = dto.normal.expect("every ring's normal is sent");
-            for (wire, sim) in sent.into_iter().zip(ring.normal()) {
-                assert_eq!(wire.to_bits(), sim.to_bits());
+            for ((sent_x, sim_x), axis) in sent.into_iter().zip(ring.normal()).zip(["x", "y", "z"])
+            {
+                assert_eq!(
+                    sent_x.to_bits(),
+                    sim_x.to_bits(),
+                    "{}: the ring's normal's {axis}, sent {sent_x} against the sim's {sim_x}",
+                    wire.id
+                );
             }
             rings += 1;
         }

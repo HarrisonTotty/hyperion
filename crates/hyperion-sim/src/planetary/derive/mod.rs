@@ -677,7 +677,7 @@ pub struct DerivedBody {
     albedo: BondAlbedo,
     equilibrium_temperature: Kelvin,
     effective_temperature: Option<Kelvin>,
-    inventory: ElementInventory,
+    elements: ElementInventory,
     atmosphere: Atmosphere,
     atmosphere_passes: u32,
     convergence: Convergence,
@@ -847,7 +847,7 @@ impl DerivedBody {
     /// ([`ElementInventory::volatiles`]).
     #[must_use]
     pub const fn inventory(&self) -> &VolatileInventory {
-        self.inventory.volatiles()
+        self.elements.volatiles()
     }
 
     /// The element inventory at the time (P14.T50.a), what P14.T23's
@@ -857,7 +857,7 @@ impl DerivedBody {
     /// ([`inventory`](Self::inventory)).
     #[must_use]
     pub const fn element_inventory(&self) -> &ElementInventory {
-        &self.inventory
+        &self.elements
     }
 
     /// The mean surface temperature: the atmosphere's (P14.T13.c).
@@ -1245,10 +1245,12 @@ pub(crate) fn derive_body_driven(
         Some(until) if age_now < until => Crust::Molten,
         Some(_) | None => Crust::Solid,
     };
+    let class = PlanetClass::of(mass, &fractions);
     let passes = PassBody {
         placed,
         sky: &sky,
         bulk: &bulk,
+        class,
         crust,
         internal_luminosity,
         radius: Metres::new(r),
@@ -1260,7 +1262,6 @@ pub(crate) fn derive_body_driven(
     let volume = 4.0 / 3.0 * core::f64::consts::PI * (r * r * r);
     let density = KilogramsPerCubicMetre::new(mass_kg.value() / volume);
     let surface_gravity = MetresPerSecondSquared::new(GM_EARTH * mass.value() / (r * r));
-    let class = PlanetClass::of(mass, &fractions);
 
     // T15.
     let hill = hill_radius(a, 0.0, mass_kg, hosts.primary_mass);
@@ -1285,7 +1286,7 @@ pub(crate) fn derive_body_driven(
         albedo: passes.albedo,
         equilibrium_temperature: passes.irradiated,
         effective_temperature: (internal_luminosity > Watts::ZERO).then_some(passes.heated),
-        inventory: bulk.inventory,
+        elements: bulk.elements,
         atmosphere: passes.air,
         atmosphere_passes: passes.count,
         convergence: passes.convergence,
@@ -1334,12 +1335,14 @@ fn tidal_planet(
 pub(crate) const ATMOSPHERE_CONVERGENCE: f64 = 1e-9;
 
 /// What each of T12's and T13's passes reads of a body (P14.T13.c): its placement, its sky, the
-/// bulk its air reads, its crust, its own luminosity and radius, and its age.
+/// bulk its air reads, its class (which a gas envelope's albedo reads), its crust, its own
+/// luminosity and radius, and its age.
 #[derive(Debug, Clone, Copy)]
 struct PassBody<'a> {
     placed: &'a PlacedBody,
     sky: &'a Sky,
     bulk: &'a AirBulk,
+    class: PlanetClass,
     crust: Crust,
     internal_luminosity: Watts,
     radius: Metres,
@@ -1376,7 +1379,8 @@ impl PassBody<'_> {
             radius: bulk.radius,
             material: SurfaceMaterial::of(&bulk.fractions),
             envelope_fraction: bulk.fractions.envelope(),
-            inventory: *bulk.inventory.volatiles(),
+            class: self.class,
+            inventory: *bulk.elements.volatiles(),
             formed: bulk.side,
             equilibrium: irradiated,
             worst_equilibrium: equilibrium_temperature(sky.peak_flux, albedo),
@@ -1682,7 +1686,7 @@ struct AirBulk {
     /// own, or a captured or giant-impact moon's parent's (P14.T56.c).
     side: SnowLineSide,
     /// Its element inventory, whose carriers its atmosphere reads.
-    inventory: ElementInventory,
+    elements: ElementInventory,
 }
 
 impl PlacedBody {
@@ -1696,10 +1700,11 @@ impl PlacedBody {
     ///   distance and snow line where it has one (P14.T56.c: a captured or giant-impact moon's
     ///   parent's zone of the star's disc), and otherwise at `formed`, the side of `disc`'s snow
     ///   line it formed on, its formation distance and `disc`'s snow line. Its carriers are
-    ///   therefore [`volatile_inventory`](crate::planetary::derive::atmosphere::volatile_inventory)'s
-    ///   at that side and the [`formation_temperature`] of that distance and snow line, to the bit,
-    ///   which is [`FormationZone::temperature`] for a zone; its ΔIW reads the same distance and
-    ///   snow line.
+    ///   therefore
+    ///   [`volatile_inventory`](crate::planetary::derive::atmosphere::volatile_inventory)'s at that
+    ///   side and the [`formation_temperature`] of that distance and snow line, to the bit, which
+    ///   is [`FormationZone::temperature`] for a zone; its ΔIW reads the same distance and snow
+    ///   line.
     #[must_use]
     fn air_of(
         &self,
@@ -1716,7 +1721,7 @@ impl PlacedBody {
             Some(zone) => (zone.side(), zone.distance(), zone.snow_line()),
             None => (formed, self.formation_distance, disc.snow_line()),
         };
-        let inventory = element_inventory(&InventoryInputs {
+        let elements = element_inventory(&InventoryInputs {
             mass,
             fractions,
             formed: side,
@@ -1730,7 +1735,7 @@ impl PlacedBody {
             radius,
             fractions,
             side,
-            inventory,
+            elements,
         }
     }
 }
@@ -2300,8 +2305,11 @@ mod tests {
             "{heavy}"
         );
         // T12: the flux and equilibrium temperature are T12's at the albedo the published pass
-        // read, its atmosphere's area mix to the passes' convergence (P14.T51.b); a giant adds its
-        // internal luminosity, and Jupiter's makes it warmer than sunlight alone would.
+        // read, its atmosphere's area mix to the passes' convergence (P14.T51.b): T_eq ∝
+        // (1 − A)^¼, so a step of `ATMOSPHERE_CONVERGENCE` of it is one of at most 4 ×
+        // `ATMOSPHERE_CONVERGENCE` in the albedo. A giant adds its internal luminosity, and
+        // Jupiter's makes it warmer than sunlight alone would.
+        let bound = 4.0 * ATMOSPHERE_CONVERGENCE;
         for (name, _, _, a, e) in PLANETS {
             let Some((_, body)) = bodies.iter().find(|(n, _)| *n == name) else {
                 continue;
@@ -2311,7 +2319,7 @@ mod tests {
             assert_same_bits(body.flux().value(), flux.value());
             let (read, gave) = (body.albedo().value(), body.atmosphere().albedo().value());
             assert!(
-                (read - gave).abs() < 1e-8,
+                (read - gave).abs() <= bound,
                 "{name}: read {read}, gave {gave}"
             );
             let t = equilibrium_temperature(flux, body.albedo());

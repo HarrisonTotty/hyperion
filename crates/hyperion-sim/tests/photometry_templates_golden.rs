@@ -5,14 +5,16 @@
 //! For every template of `PHASE_TEMPLATES`, in its order, and for each Lommel–Seeliger share L in
 //! {0, 0.5, 1}, the file holds the law's phase function `Φ_c(α)` ([`channel_phase`]) at every whole
 //! degree from 0° to 180° and its phase integral q ([`phase_integral`]), each in B, V and R at the
-//! template's exponents s.
+//! template's exponents s, and the template's reference Bond albedo `A_ref`
+//! ([`TemplateRow::reference_bond`](hyperion_sim::planetary::derive::photometry::TemplateRow::reference_bond)),
+//! by its bits (P14.T54.a).
 //!
 //! # Line format
 //!
 //! After the `# generator_version` header and a comment line:
 //!
 //! ```text
-//! template <name> share=<the row's L> valid_to=<rad> s=<b>,<v>,<r>
+//! template <name> share=<the row's L> valid_to=<rad> s=<b>,<v>,<r> reference_bond=<A_ref>
 //! l=<L> q=<b>,<v>,<r>
 //! a=<degrees> phi=<b>,<v>,<r>
 //! ```
@@ -65,12 +67,16 @@ fn bands(s: Bands, f: impl Fn(f64) -> f64) -> String {
 }
 
 /// P14.T47.d: every template's law is pinned at 1° steps for L in {0, 0.5, 1}, with its q, and
-/// at the row's own L the pinned q is the row's literal to 10⁻⁹ (decision-p14-phase-j, A6).
+/// at the row's own L the pinned q is the row's literal to 10⁻⁹ (decision-p14-phase-j, A6); its
+/// reference Bond albedo is pinned by its bits (P14.T54.a).
 #[test]
 fn the_phase_templates_are_pinned_for_the_client() {
     let mut w = GoldenWriter::new();
     w.header(GENERATOR_VERSION.get());
-    w.line("# every template's law at 1 degree steps for L in {0, 0.5, 1}, and its q, in B, V, R");
+    w.line(
+        "# every template's law at 1 degree steps for L in {0, 0.5, 1}, and its q, in B, V, R; its \
+         reference Bond albedo",
+    );
     for row in &PHASE_TEMPLATES {
         assert!(
             SHARES
@@ -83,11 +89,12 @@ fn the_phase_templates_are_pinned_for_the_client() {
         let template = row.template;
         let s = row.exponents;
         w.line(&format!(
-            "template {} share={} valid_to={} s={}",
+            "template {} share={} valid_to={} s={} reference_bond={}",
             name(template),
             float(row.lunar_lambert_share),
             float(row.valid_to.value()),
-            bands(s, |s| s)
+            bands(s, |s| s),
+            float(row.reference_bond().value())
         ));
         for l in SHARES {
             let q = |s: f64| phase_integral(template, l, s);

@@ -655,13 +655,13 @@ pub fn climate_condensable(
 /// the inventory condensed onto the surface, so that the air's weight of each lies below its
 /// inventory's (`Atmosphere::inventory_weights`), as P14.T24.a's greenhouse gain counts a held gas.
 ///
-/// The partition holds a minor condensable's partial pressure at its humidity, below its
-/// saturation pressure (Earth's water at 0.77 of it), which version 22's test, the partial pressure
-/// at least its saturation pressure, would read as no reservoir; a gas above its critical
-/// temperature has no cap and is all aloft. On the record the regime reads the record's own
-/// partition's reservoirs ([`Partition::reservoirs`](crate::planetary::chem::partition::Partition::reservoirs)),
-/// the same rule over the record's climate. A row the atmosphere does not carry holds none, and
-/// an atmosphere with no surface pressure, an envelope's, holds none.
+/// The partition holds a minor condensable's partial pressure at its humidity, below its saturation
+/// pressure (Earth's water at 0.77 of it), which version 22's test, the partial pressure at least
+/// its saturation pressure, would read as no reservoir; a gas above its critical temperature has no
+/// cap and is all aloft. On the record the regime reads the record's own partition's reservoirs
+/// ([`Partition::reservoirs`](crate::planetary::chem::partition::Partition::reservoirs)), the same
+/// rule over the record's climate. A row the atmosphere does not carry holds none, and an
+/// atmosphere with no surface pressure, an envelope's, holds none.
 ///
 /// # Examples
 ///

@@ -1139,11 +1139,11 @@ summary = "Moons and rings on the parent's Laplace surface"
 detail = [
   "r_L^5 = J2' R² a_p³ (1 - e_p²)^(3/2) M_p / M*",
   "hydrostatic J2 by Darwin-Radau; unstable band removed",
-  "held behind MOONS_VERSION = 23 (22 → 23 batch)",
+  "in force from P14.T54.a's batch (MOONS_VERSION deleted)",
 ]
 cite = ["Tremaine, Touma & Namouni 2009", "Goldreich 1965"]
-source = ["P14.T56.a"]
-status = "planned"
+source = ["crates/hyperion-sim/src/planetary/laplace.rs", "P14.T56.a", "P14.T54.a"]
+status = "built"
 
 # ---------------------------------------------------------------- belts & halo
 

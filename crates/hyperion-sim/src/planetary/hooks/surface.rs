@@ -252,10 +252,10 @@ pub const EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K: f64 = 0.676_013_14;
 /// ([`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`]'s state) with its gain set so that its `B_eff` is
 /// their B, 2.09 ([`EARTH_OUTGOING_LONGWAVE_SLOPE_W_PER_M2_K`]), and D their 0.310 × 2.09
 /// ([`EARTH_TRANSPORT_PARTITION`]), by a 200-step bisection on [1, 3] to the 42 K contrast on the
-/// zonal solver, the safeguarded Newton steps, which the 64-step bisection of each end, the
-/// tests' oracle, matches within 10⁻⁹. So it reads none of the greenhouse chain: only their B and partition, the
-/// 42 K and the measured Earth's absorbed flux move it, and a refit of the water moves D⊕ alone.
-/// Under a uniform albedo (Φ = 1) the measured Earth's contrast, at D⊕, is 28.4 K.
+/// zonal solver, the safeguarded Newton steps, which the 64-step bisection of each end, the tests'
+/// oracle, matches within 10⁻⁹. So it reads none of the greenhouse chain: only their B and
+/// partition, the 42 K and the measured Earth's absorbed flux move it, and a refit of the water
+/// moves D⊕ alone. Under a uniform albedo (Φ = 1) the measured Earth's contrast, at D⊕, is 28.4 K.
 ///
 /// Earth's cold zones are brighter, by ice, cloud and low sun, which a uniform albedo misses. No
 /// closed form on this task's inputs supplies it: P14.T24.b's ice and P14.T24.c's clouds come
@@ -1671,8 +1671,7 @@ struct ColumnClimate {
 /// The climate of the column `column` under the spin `spin` at the ocean weight `weight`, its
 /// ground of the material `material`, over a night floored at `floor`, its zonal points solved by
 /// the safeguarded Newton steps ([`zonal_point_newton`]): P14.T24.a's range and what it is made of,
-/// the
-/// one computation [`SurfaceConditions::derive`] publishes and T13.c's passes read
+/// the one computation [`SurfaceConditions::derive`] publishes and T13.c's passes read
 /// ([`step_climate`]; decision-p14-t51a-partition §6, condition 1).
 #[must_use]
 fn climate_of(

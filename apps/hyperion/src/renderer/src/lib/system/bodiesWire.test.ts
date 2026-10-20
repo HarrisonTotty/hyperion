@@ -13,6 +13,7 @@ import type {
   ResponseFor,
   SectionDto,
   SubsurfaceOceanDto,
+  SurfaceCondensateDto,
   SurfaceModifiersDto,
   UniverseTime,
   VerticalStructureDto,
@@ -25,12 +26,14 @@ import {
   earthDetailOfAnOlderServer,
   earthMassAndOrbit,
   FIXTURE_EARTH,
+  FIXTURE_RING_NORMAL,
   FIXTURE_SYSTEM,
   jupiterDetail,
   populatedBodies,
   populatedBodiesWith,
   sliceBodies,
   sliceBodiesWith,
+  tiltedPole,
   withoutRingNormal,
   withRingNormal,
 } from "../../test/planetaryFixture";
@@ -46,7 +49,7 @@ import {
   toBodyDetailRequest,
   toSystemBodiesModel,
 } from "./bodiesWire";
-import type { Section } from "./model";
+import type { Section, SurfaceCondensate } from "./model";
 
 const DESIGNATION = "H7K 4C0RFZ D-7";
 
@@ -61,6 +64,14 @@ function bodiesOf(response = sliceBodies()) {
 function faultOf(response = sliceBodies()): string {
   const result = toSystemBodiesModel(response, DESIGNATION);
   return result.kind === "fault" ? result.fault : "no fault";
+}
+
+/** The plane's normal of the populated answer's ring as `response` reads, if it reads a ring. */
+function ringNormalOf(response: ResponseFor<"system_bodies">) {
+  const ring = bodiesOf(response).bodies.bodies.find((body) => body.bodyIndex === 0x0180);
+  return ring?.population.state === "ok" && ring.population.value.kind === "ring"
+    ? ring.population.value.normal
+    : undefined;
 }
 
 /** The slice's answer with its first body in `state`, and so with no orbit. */
@@ -251,20 +262,26 @@ describe("toSystemBodiesModel", () => {
     expect(faultOf(reversed)).toBe("ring edges unusable");
   });
 
-  it("reads a ring's plane's normal, and none where an older server leaves it out", () => {
-    const normal: [number, number, number] = [0, -0.6, 0.8];
-    const ringNormal = (response: ResponseFor<"system_bodies">) => {
-      const ring = bodiesOf(response).bodies.bodies.find((body) => body.bodyIndex === 0x0180);
-      return ring?.population.state === "ok" && ring.population.value.kind === "ring"
-        ? ring.population.value.normal
-        : undefined;
-    };
-
-    expect(ringNormal(populatedBodies())).toEqual(
-      vec3(0.5906558005684119, 0.7906802819028946, 0.1610913314391793),
+  it("reads a ring's plane's normal", () => {
+    expect(ringNormalOf(populatedBodies())).toEqual(FIXTURE_RING_NORMAL);
+    expect(ringNormalOf(populatedBodiesWith(withRingNormal([0, -0.6, 0.8])))).toEqual(
+      vec3(0, -0.6, 0.8),
     );
-    expect(ringNormal(populatedBodiesWith(withRingNormal(normal)))).toEqual(vec3(0, -0.6, 0.8));
-    expect(ringNormal(populatedBodiesWith(withoutRingNormal))).toBeNull();
+  });
+
+  it("reads a ring's plane's normal as none where an older server leaves it out", () => {
+    expect(ringNormalOf(populatedBodiesWith(withoutRingNormal))).toBeNull();
+  });
+
+  it("holds the fixture's ring normal as A b's pole at the slice Earth's obliquity", () => {
+    const { pole } = tiltedPole(populatedBodies(), `${FIXTURE_SYSTEM}.0100`, 0.409);
+    const error = Math.max(
+      Math.abs(pole.x - FIXTURE_RING_NORMAL.x),
+      Math.abs(pole.y - FIXTURE_RING_NORMAL.y),
+      Math.abs(pole.z - FIXTURE_RING_NORMAL.z),
+    );
+
+    expect(error).toBeLessThanOrEqual(1e-12);
   });
 
   it("refuses a ring normal that is not of unit length", () => {
@@ -630,10 +647,52 @@ const EARTH_STRUCTURE: VerticalStructureDto = {
   ],
 };
 
+/** An Earth's ocean as a surface condensate, illustrative: its mass and its 2.6 km layer. */
+const OCEAN: SurfaceCondensateDto = {
+  substance: "H2O",
+  phase: "liquid",
+  reservoir_kg_m2: 2_652_000,
+  reservoir_gel_m: 2_600,
+  area_fraction: 0.71,
+  seasonal: false,
+};
+
+/** A seasonal cap of carbon dioxide ice, illustrative: 320 kg m⁻², a 0.2 m layer. */
+const DRY_ICE: SurfaceCondensateDto = {
+  substance: "CO2",
+  phase: "solid",
+  reservoir_kg_m2: 320,
+  reservoir_gel_m: 0.2,
+  area_fraction: 0.02,
+  seasonal: true,
+};
+
+/** A seasonal argon frost, illustrative, with no layer: the registry has not read its density. */
+const ARGON_FROST: SurfaceCondensateDto = {
+  substance: "Ar",
+  phase: "solid",
+  reservoir_kg_m2: 15,
+  area_fraction: 0.01,
+  seasonal: true,
+};
+
 /** The fault the Earth reads as with its surface changed by `change`. */
 function surfaceFault(change: Partial<BodySurfaceDto>): string {
   const result = earthWithSurface({ ...earthSurface(), ...change });
   return result.kind === "fault" ? result.fault : "no fault";
+}
+
+/** The condensates the Earth reads as with its surface's list `condensates`, which must be usable. */
+function condensatesOf(
+  condensates: ReadonlyArray<SurfaceCondensateDto>,
+): ReadonlyArray<SurfaceCondensate> {
+  const read = okSection(
+    recordOf(earthWithSurface({ ...earthSurface(), condensates: [...condensates] })).surface,
+  ).condensates;
+  if (read.kind !== "value") {
+    throw new Error(`expected condensates, got ${read.kind}`);
+  }
+  return read.value;
 }
 
 /** The fault the Jupiter reads as with its envelope changed by `change`. */
@@ -674,7 +733,6 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
       surface.subsurfaceOcean,
       surface.verticalStructure,
       surface.aerosols,
-      surface.condensates,
       surface.crust,
       surface.modifiers,
       surface.biosphere,
@@ -682,6 +740,36 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
     ];
 
     expect(later).toEqual(Array.from({ length: later.length }, () => ({ kind: "not_modelled" })));
+  });
+
+  it("reads the Earth's condensates in the display's units, in the server's order (P14.T54.a)", () => {
+    const surface = okSection(
+      recordOf(toBodyDetail(earthDetail(), FIXTURE_SYSTEM, DESIGNATION)).surface,
+    );
+
+    expect(surface.condensates).toEqual({
+      kind: "value",
+      value: [
+        {
+          substance: "H2O",
+          phase: "liquid",
+          reservoirKgM2: 2_652_000,
+          reservoirGelM: { kind: "value", value: 2_600 },
+          areaFraction: 0.71,
+          trappedAreaFraction: { kind: "not_modelled" },
+          seasonal: false,
+        },
+        {
+          substance: "H2O",
+          phase: "solid",
+          reservoirKgM2: 53_100,
+          reservoirGelM: { kind: "value", value: 57.9 },
+          areaFraction: 0.03,
+          trappedAreaFraction: { kind: "value", value: 0 },
+          seasonal: false,
+        },
+      ],
+    });
   });
 
   it("reads a later member's null as none", () => {
@@ -853,6 +941,7 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
         {
           substance: unknown,
           phase: "solid",
+          reservoir_kg_m2: 320,
           reservoir_gel_m: 0.2,
           area_fraction: 0.02,
           seasonal: true,
@@ -1034,75 +1123,67 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
   });
 
   it("refuses a surface condensate that is a vapour", () => {
-    expect(
-      surfaceFault({
-        condensates: [
-          {
-            substance: "CO2",
-            phase: "vapour",
-            reservoir_gel_m: 0.2,
-            area_fraction: 0.02,
-            seasonal: true,
-          },
-        ],
-      }),
-    ).toBe("condensate unusable");
-  });
-
-  it("reads a condensate's layer, and an absent one as not modelled (P14.T54.a)", () => {
-    const surface = okSection(
-      recordOf(
-        earthWithSurface({
-          ...earthSurface(),
-          condensates: [
-            {
-              substance: "H2O",
-              phase: "liquid",
-              reservoir_gel_m: 2_600,
-              area_fraction: 0.71,
-              seasonal: false,
-            },
-            { substance: "Ar", phase: "solid", area_fraction: 0.01, seasonal: true },
-          ],
-        }),
-      ).surface,
+    expect(surfaceFault({ condensates: [{ ...DRY_ICE, phase: "vapour" }] })).toBe(
+      "condensate unusable",
     );
-
-    expect(surface.condensates).toEqual({
-      kind: "value",
-      value: [
-        {
-          substance: "H2O",
-          phase: "liquid",
-          reservoirGelM: 2_600,
-          areaFraction: 0.71,
-          seasonal: false,
-        },
-        {
-          substance: "Ar",
-          phase: "solid",
-          reservoirGelM: null,
-          areaFraction: 0.01,
-          seasonal: true,
-        },
-      ],
-    });
   });
 
-  it("refuses a surface condensate whose layer is negative", () => {
-    expect(
-      surfaceFault({
-        condensates: [
-          {
-            substance: "CO2",
-            phase: "solid",
-            reservoir_gel_m: -0.2,
-            area_fraction: 0.02,
-            seasonal: true,
-          },
-        ],
-      }),
-    ).toBe("condensate unusable");
+  it("reads a condensate's layer where the server sends one (P14.T54.a)", () => {
+    const [ocean] = condensatesOf([OCEAN]);
+
+    expect(ocean?.reservoirGelM).toEqual({ kind: "value", value: 2_600 });
+  });
+
+  it("reads a condensate's absent layer as not modelled, never as none (P14.T54.a)", () => {
+    const [frost] = condensatesOf([ARGON_FROST]);
+
+    expect(frost?.reservoirGelM).toEqual({ kind: "not_modelled" });
+  });
+
+  it("reads a condensate's layer sent as null as not modelled, as the server reads it", () => {
+    const [frost] = condensatesOf([
+      {
+        ...ARGON_FROST,
+        // @ts-expect-error -- the binding leaves an absent layer out, but the server reads null as absent, and an older or hand-written frame may send it.
+        reservoir_gel_m: null,
+      },
+    ]);
+
+    expect(frost?.reservoirGelM).toEqual({ kind: "not_modelled" });
+  });
+
+  it("reads a condensate's trapped area where the server sends one (P14.T54.b)", () => {
+    const [ice] = condensatesOf([{ ...DRY_ICE, trapped_area_fraction: 0.005 }]);
+
+    expect(ice?.trappedAreaFraction).toEqual({ kind: "value", value: 0.005 });
+  });
+
+  it("reads a condensate's absent trapped area as not modelled, never as none", () => {
+    const [ice] = condensatesOf([DRY_ICE]);
+
+    expect(ice?.trappedAreaFraction).toEqual({ kind: "not_modelled" });
+  });
+
+  it("reads a condensate's trapped area sent as null as not modelled, as the server reads it", () => {
+    const [ice] = condensatesOf([
+      {
+        ...DRY_ICE,
+        // @ts-expect-error -- the binding leaves an absent trapped area out, but the server reads null as absent, and an older or hand-written frame may send it.
+        trapped_area_fraction: null,
+      },
+    ]);
+
+    expect(ice?.trappedAreaFraction).toEqual({ kind: "not_modelled" });
+  });
+
+  it.each<[string, SurfaceCondensateDto]>([
+    ["whose mass is negative", { ...DRY_ICE, reservoir_kg_m2: -320 }],
+    ["whose layer is negative", { ...DRY_ICE, reservoir_gel_m: -0.2 }],
+    ["whose trapped area is larger than its area", { ...DRY_ICE, trapped_area_fraction: 0.03 }],
+    ["whose trapped area is negative", { ...DRY_ICE, trapped_area_fraction: -0.005 }],
+    ["whose trapped area is not finite", { ...DRY_ICE, trapped_area_fraction: Number.NaN }],
+  ])("refuses a surface condensate %s", (_, condensate) => {
+    expect(surfaceFault({ condensates: [condensate] })).toBe("condensate unusable");
   });
 
   it.each<[string, Partial<SurfaceModifiersDto>]>([

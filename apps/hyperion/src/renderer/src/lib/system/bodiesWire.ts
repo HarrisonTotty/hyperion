@@ -110,7 +110,7 @@ import type {
   WetEpoch,
   Zone,
 } from "./model";
-import { bodyDesignation, modelled, toKeplerOrbit, toSystemModel } from "./wire";
+import { bodyDesignation, modelled, pending, toKeplerOrbit, toSystemModel } from "./wire";
 
 /**
  * The simulation's Earth mass, in kilograms: GM⊕ ÷ G, 3.986 004 × 10¹⁴ m³ s⁻² over
@@ -1223,28 +1223,46 @@ function toCondensatePhase(phase: SubstancePhaseDto): CondensatePhase {
 }
 
 /**
- * A surface's condensates, checked: each layer, where the server sends one, not negative, and each
- * area a fraction. A layer is absent where the server's registry has not read the phase's
- * density (P14.T54.a), which reads `null`.
+ * An optional wire member as absent where a frame sends `null` for it, as the server's own reader
+ * takes it: the type leaves the key out, but an older or hand-written frame may send `null`.
+ */
+function absentIfNull(value: number | null | undefined): number | undefined {
+  return value ?? undefined;
+}
+
+/**
+ * A surface's condensates, checked: each mass not negative, each layer, where the server sends
+ * one, not negative, each area a fraction, and each trapped area, where the server sends one, a
+ * fraction no larger than its area.
+ *
+ * @remarks
+ * A layer is absent where the server's registry has not read the phase's density (P14.T54.a), and
+ * a trapped area from every server before P14.T54.b's cold traps; either reads not modelled, never
+ * none, and so does either sent as `null`.
  */
 function toCondensates(
   condensates: ReadonlyArray<SurfaceCondensateDto>,
 ): ReadonlyArray<SurfaceCondensate> {
-  check(
-    condensates.every(
-      (condensate) =>
-        (condensate.reservoir_gel_m === undefined || atLeastZero(condensate.reservoir_gel_m)) &&
-        fraction(condensate.area_fraction),
-    ),
-    "condensate unusable",
-  );
-  return condensates.map((condensate) => ({
-    substance: condensate.substance,
-    phase: toCondensatePhase(condensate.phase),
-    reservoirGelM: condensate.reservoir_gel_m ?? null,
-    areaFraction: condensate.area_fraction,
-    seasonal: condensate.seasonal,
-  }));
+  return condensates.map((condensate) => {
+    const layer = absentIfNull(condensate.reservoir_gel_m);
+    const trapped = absentIfNull(condensate.trapped_area_fraction);
+    check(
+      atLeastZero(condensate.reservoir_kg_m2) &&
+        (layer === undefined || atLeastZero(layer)) &&
+        fraction(condensate.area_fraction) &&
+        (trapped === undefined || (fraction(trapped) && trapped <= condensate.area_fraction)),
+      "condensate unusable",
+    );
+    return {
+      substance: condensate.substance,
+      phase: toCondensatePhase(condensate.phase),
+      reservoirKgM2: condensate.reservoir_kg_m2,
+      reservoirGelM: pending(layer, (metres) => metres),
+      areaFraction: condensate.area_fraction,
+      trappedAreaFraction: pending(trapped, (share) => share),
+      seasonal: condensate.seasonal,
+    };
+  });
 }
 
 /** Whether a crust's lid names one of its present members. */

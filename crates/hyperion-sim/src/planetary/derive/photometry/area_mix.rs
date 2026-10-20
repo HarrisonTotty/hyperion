@@ -4,10 +4,9 @@
 //!
 //! Every piece is a pure function of the registry's rows and of plain values. T13.c's passes call
 //! it on the record since P14.T54.a deleted the `p14-snapshot` lane's hold; T49.c's tripwire lists
-//! this file as wired for that reason. Every optical value is read through the registry when it is used
-//! (`Substance::condensed_optics` and its spherical albedos, and
-//! [`liquid_properties`]), with no copied value, so that P14.T49.i's rows flow through with no
-//! edit here.
+//! this file as wired for that reason. Every optical value is read through the registry when it is
+//! used (`Substance::condensed_optics` and its spherical albedos, and [`liquid_properties`]), with
+//! no copied value, so that P14.T49.i's rows flow through with no edit here.
 //!
 //! # The host's light (decision-p14-t49c-split §2)
 //!
@@ -55,7 +54,16 @@
 //! [`giant_bond`]: the "Fiducial" Bond albedos of Sudarsky, Burrows and Pinto's (2000, ApJ 538,
 //! 885) Tables 1A–1B by the host's effective temperature, flux-weighted over the hosts, and then by
 //! the planet's effective temperature across the five classes' model planets, piecewise-linear so
-//! that the albedo and the temperature converge together.
+//! that the albedo and the temperature converge together. Two labelled stand-ins replace class I's
+//! column (decision-p14-t54a-ganymede §2–3) until P14.T24.h gives an envelope its albedo from its
+//! own decks and hazes:
+//!
+//! - **class I's hazes** ([`CLASS_I_HAZE_RATIO`]): the Fiducial column times their own tholin-haze
+//!   case's 0.48 ÷ 0.57 about every host, since the Fiducial, with no photochemical haze, is
+//!   brighter than both measured cold H/He giants;
+//! - **an ice giant's class I** ([`ICE_GIANT_CLASS_I_RATIO`]): the measured ice giants' mean, 0.32
+//!   about a G2V star, scaled across hosts as the Fiducial class I is, since their classes hold no
+//!   methane-absorbing giant.
 //!
 //! # The stand-ins ([`StandIn`])
 //!
@@ -72,6 +80,7 @@ use crate::math;
 use crate::planetary::chem::partition::{
     Condensate, CondensateEntry, CondensatePhase, Condensates, Partition, WATER_SURFACE_HUMIDITY,
 };
+use crate::planetary::derive::PlanetClass;
 use crate::planetary::derive::atmosphere::{Gas, SurfaceMaterial, SurfaceState};
 use crate::planetary::hooks::surface::regime::climate_condensable;
 use crate::substance::optics::{SPECTRAL_BIN_EDGES_NM, SPECTRAL_BINS};
@@ -262,6 +271,32 @@ const SUDARSKY_BOND: [[f64; SUDARSKY_CLASSES]; 6] = [
     [0.63, 0.88, 0.17, 0.04, 0.57],
 ];
 
+/// Class I's tholin-haze ratio, 0.48 ÷ 0.57 = 0.842: Sudarsky, Burrows and Pinto's (2000, §§6–7,
+/// p. 901) class I about a G2V star under a photochemical haze of tholin (mixing ratio 10⁻⁸,
+/// 0.05 µm grains), 0.48, over their haze-free Fiducial 0.57, applied to class I's column about
+/// every host (M4V 0.32, G2V 0.48, A8V 0.53; decision-p14-t54a-ganymede §2).
+///
+/// Labelled: their G2V case stands for the hazes of every cold, `CH4`-bearing H/He giant under
+/// ultraviolet. Both measured cold giants lie below the Fiducial: Jupiter at 0.503 ± 0.012 (Li et
+/// al. 2018, Nat. Commun. 9, 3709), where Hanel et al. 1981's 0.343 ± 0.032 is superseded, and
+/// Saturn at 0.41 ± 0.02 (Wang et al. 2024). P14.T24.h replaces it with an envelope's albedo from
+/// its own decks and hazes.
+pub(crate) const CLASS_I_HAZE_RATIO: f64 = 0.48 / 0.57;
+
+/// An ice giant's class I as a share of class I's Fiducial column, 0.32 ÷ 0.57 = 0.561
+/// (decision-p14-t54a-ganymede §3): 0.32 about a G2V star, the mean of the two measured ice giants'
+/// Bond albedos, Uranus's 0.349 ± 0.016 as an orbital mean (Irwin et al. 2025) and Neptune's
+/// 0.290 ± 0.067 (Pearl and Conrath 1991, JGR 96, 18921), scaled across hosts by the Fiducial class
+/// I's host dependence (M4V 0.21, A8V 0.35), without [`CLASS_I_HAZE_RATIO`], since the measured
+/// values hold their own hazes.
+///
+/// Labelled: an ice giant's darkness is its 2–4% of `CH4` absorbing in the red and the near
+/// infrared, which none of Sudarsky, Burrows and Pinto's solar-composition classes holds, so the
+/// class's only measured members stand for it, as the Moon's 0.11 stands for an airless rock. It
+/// applies to a [`PlanetClass::IceGiant`] at and below class I's 130 K model planet, and is
+/// interpolated to class II above it, as class I is. P14.T24.h replaces it.
+pub(crate) const ICE_GIANT_CLASS_I_RATIO: f64 = 0.32 / 0.57;
+
 /// The effective temperatures of the classes' model planets, K, the nodes a giant's albedo is
 /// interpolated between: 130, 250, 600 and 1,200 K, their isolated profiles, and 1,700 K, the 1,200
 /// K profile "scaled up" for class V (Sudarsky, Burrows and Pinto 2000, p. 887). The classes are
@@ -292,10 +327,10 @@ fn piecewise_linear(nodes: &[f64], values: &[f64], x: f64) -> f64 {
     values[values.len() - 1]
 }
 
-/// Classes I to V's Bond albedos about a host of effective temperature `host`: Sudarsky, Burrows
-/// and Pinto's [`SUDARSKY_BOND`] interpolated linearly in the host's temperature between its hosts,
-/// and held at M4V's below 3,200 K and A8V's above 7,500 K (a clamp, labelled: their table spans no
-/// cooler or hotter host).
+/// Classes I to V's Fiducial Bond albedos about a host of effective temperature `host`: Sudarsky,
+/// Burrows and Pinto's [`SUDARSKY_BOND`] interpolated linearly in the host's temperature between
+/// its hosts, and held at M4V's below 3,200 K and A8V's above 7,500 K (a clamp, labelled: their
+/// table spans no cooler or hotter host). A giant reads them through [`class_bonds`].
 #[must_use]
 pub(crate) fn sudarsky_bonds(host: Kelvin) -> [f64; SUDARSKY_CLASSES] {
     let mut bonds = [0.0; SUDARSKY_CLASSES];
@@ -306,17 +341,32 @@ pub(crate) fn sudarsky_bonds(host: Kelvin) -> [f64; SUDARSKY_CLASSES] {
     bonds
 }
 
+/// A gas envelope's Bond albedos about a host of effective temperature `host`, as a giant reads
+/// them: classes I to V of [`sudarsky_bonds`] with class I's under its hazes
+/// ([`CLASS_I_HAZE_RATIO`]), and an ice giant's class I ([`ICE_GIANT_CLASS_I_RATIO`]), each a
+/// product of the Fiducial class I, so that [`class_i_bond`] and a one-host [`HostShade`] agree to
+/// the bit.
+#[must_use]
+fn class_bonds(host: Kelvin) -> ([f64; SUDARSKY_CLASSES], f64) {
+    let mut classes = sudarsky_bonds(host);
+    let fiducial = classes[0];
+    classes[0] = fiducial * CLASS_I_HAZE_RATIO;
+    (classes, fiducial * ICE_GIANT_CLASS_I_RATIO)
+}
+
 /// The light a body's hosts give it, by bin, as the area mix reads it (P14.T51.b): each luminous
 /// host's Planck shares in the optics' bins ([`optics_shares`]) and the liquids' weights
 /// ([`liquid_shares`]), each of its whole spectrum, weighted by its flux at the body, its
-/// gas-envelope albedos by class flux-weighted, the water cloud's albedo calibrated on Earth
-/// ([`water_cloud_albedo`]) and the reference cloud column ([`reference_cloud_column`]), built
-/// once per body before its passes ([`HostShadeSum`]) and never across bodies.
+/// gas-envelope albedos by class flux-weighted ([`class_bonds`]), the water cloud's albedo
+/// calibrated on Earth ([`water_cloud_albedo`]) and the reference cloud column
+/// ([`reference_cloud_column`]), built once per body before its passes ([`HostShadeSum`]) and never
+/// across bodies.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct HostShade {
     bands: [f64; OPTICS_BANDS],
     bins: [f64; LIQUID_WEIGHTS],
     giants: [f64; SUDARSKY_CLASSES],
+    ice_giant: f64,
     water_cloud: f64,
     cloud_column: KilogramsPerSquareMetre,
 }
@@ -346,7 +396,8 @@ impl HostShade {
 }
 
 /// A [`HostShade`] being summed over a body's hosts, in their order: each luminous host's Planck
-/// shares times its flux at the body, and its giant albedos by class times that flux.
+/// shares times its flux at the body, and its giant albedos by class ([`class_bonds`]) times that
+/// flux.
 ///
 /// Everything is linear in the hosts' fluxes, so it is summed once per body before the passes.
 #[derive(Debug, Clone, Copy)]
@@ -354,6 +405,7 @@ pub(crate) struct HostShadeSum {
     bands: [f64; OPTICS_BANDS],
     bins: [f64; LIQUID_WEIGHTS],
     giants: [f64; SUDARSKY_CLASSES],
+    ice_giant: f64,
     flux: f64,
 }
 
@@ -363,6 +415,7 @@ impl HostShadeSum {
         bands: [0.0; OPTICS_BANDS],
         bins: [0.0; LIQUID_WEIGHTS],
         giants: [0.0; SUDARSKY_CLASSES],
+        ice_giant: 0.0,
         flux: 0.0,
     };
 
@@ -382,9 +435,11 @@ impl HostShadeSum {
         for (sum, share) in self.bins.iter_mut().zip(bins) {
             *sum += flux * share;
         }
-        for (sum, bond) in self.giants.iter_mut().zip(sudarsky_bonds(host)) {
+        let (classes, ice_giant) = class_bonds(host);
+        for (sum, bond) in self.giants.iter_mut().zip(classes) {
             *sum += flux * bond;
         }
+        self.ice_giant += flux * ice_giant;
         self.flux += flux;
     }
 
@@ -399,6 +454,7 @@ impl HostShadeSum {
             bands: self.bands,
             bins: self.bins,
             giants: self.giants.map(|sum| sum / self.flux),
+            ice_giant: self.ice_giant / self.flux,
             water_cloud: water_cloud_albedo(),
             cloud_column: reference_cloud_column(),
         }
@@ -407,23 +463,40 @@ impl HostShadeSum {
 
 /// A gas envelope's Bond albedo at its effective temperature `heated` (its equilibrium
 /// temperature with its internal heat) about the hosts of `shade` (Sudarsky, Burrows and Pinto
-/// 2000): the hosts' flux-weighted albedos of classes I to V, piecewise-linear between the classes'
-/// model planets at [`SUDARSKY_PLANETS_K`] and held at class I's below 130 K and class V's above
-/// 1,700 K, so that it is continuous in the temperature.
+/// 2000), for a body of class `class`: the hosts' flux-weighted albedos of classes I to V
+/// ([`class_bonds`]), class I's under its hazes and, for a [`PlanetClass::IceGiant`], the ice
+/// giants' class I, piecewise-linear between the classes' model planets at [`SUDARSKY_PLANETS_K`]
+/// and held at class I's below 130 K and class V's above 1,700 K, so that it is continuous in the
+/// temperature.
 ///
 /// The classes are by effective temperature, as the paper has them, not by the equilibrium
 /// temperature (P14.T51.b's plan text; a deviation, recorded). Class V's low-gravity case (g ≲ 10³
-/// cm s⁻² is class V "even for `T_eff` < 1500 K", p. 897) is not modelled.
+/// cm s⁻² is class V "even for `T_eff` < 1500 K", p. 897) is not modelled. A sub-Neptune takes
+/// their classes (none is measured).
 #[must_use]
-pub(crate) fn giant_bond(shade: &HostShade, heated: Kelvin) -> f64 {
-    piecewise_linear(&SUDARSKY_PLANETS_K, &shade.giants, heated.value())
+pub(crate) fn giant_bond(shade: &HostShade, heated: Kelvin, class: PlanetClass) -> f64 {
+    let mut nodes = shade.giants;
+    match class {
+        PlanetClass::IceGiant => nodes[0] = shade.ice_giant,
+        PlanetClass::Rocky | PlanetClass::Icy | PlanetClass::SubNeptune | PlanetClass::GasGiant => {
+        }
+    }
+    piecewise_linear(&SUDARSKY_PLANETS_K, &nodes, heated.value())
 }
 
-/// Class I's Bond albedo about a host of effective temperature `host` ([`sudarsky_bonds`]): a
-/// giant's at any effective temperature up to class I's 130 K model planet ([`giant_bond`]).
+/// Class I's Bond albedo about a host of effective temperature `host` for a body of class `class`
+/// ([`class_bonds`]): a giant's at any effective temperature up to class I's 130 K model planet
+/// ([`giant_bond`]), the ice giants' stand-in for a [`PlanetClass::IceGiant`] and the hazy class I
+/// otherwise.
 #[must_use]
-pub(crate) fn class_i_bond(host: Kelvin) -> f64 {
-    sudarsky_bonds(host)[0]
+pub(crate) fn class_i_bond(host: Kelvin, class: PlanetClass) -> f64 {
+    let (classes, ice_giant) = class_bonds(host);
+    match class {
+        PlanetClass::IceGiant => ice_giant,
+        PlanetClass::Rocky | PlanetClass::Icy | PlanetClass::SubNeptune | PlanetClass::GasGiant => {
+            classes[0]
+        }
+    }
 }
 
 /// A melt's Bond albedo, 0.10, dark lava (Essack, Seager and Pajusalu 2020, ApJ 898, 160), T13.c's

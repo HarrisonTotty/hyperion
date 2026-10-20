@@ -47,7 +47,7 @@ use hyperion_sim::planetary::placement::{
     satisfies_floor, spacing_floor,
 };
 use hyperion_sim::planetary::record::{
-    BodyKind, BodyRecord, DetailLevel, Modelled, Population as BodyPopulation, Section, Surface,
+    BodyKind, BodyRecord, DetailLevel, Population as BodyPopulation, Section, Surface,
     SystemSnapshot,
 };
 use hyperion_sim::planetary::{self, Body, BodyIndex, PlanetarySystem, SystemContext};
@@ -1210,10 +1210,7 @@ fn write_surface(w: &mut GoldenWriter, surface: &Surface) {
     w.f64("surface_age_yr", figures.surface_age().value());
     w.f64("ocean_fraction", figures.ocean_fraction());
     w.f64("ice_fraction", figures.ice_fraction());
-    let Modelled::Ok(condensates) = surface.condensates() else {
-        panic!("a record's surface holds its condensates");
-    };
-    for entry in condensates.entries() {
+    for entry in surface.condensates().entries() {
         w.line(&format!(
             "condensate: {}, {:?}, seasonal {}",
             entry.substance().substance().key(),

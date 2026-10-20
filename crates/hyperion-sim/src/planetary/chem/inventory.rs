@@ -111,6 +111,13 @@ impl Reservoir {
 ///
 /// The fields are public, as the volatiles' draws are. A mass that is not positive gives an empty
 /// inventory; the distances must be positive and finite, as [`redox::mean_delta_iw`] requires.
+///
+/// A body with a [`volatile_zone`](PlacedBody::volatile_zone), a captured or giant-impact moon
+/// since P14.T56.c, takes that zone's side, distance and snow line together, as its derivation
+/// does ([`FormationZone::side`](crate::planetary::derive::FormationZone::side),
+/// [`FormationZone::distance`](crate::planetary::derive::FormationZone::distance) and
+/// [`FormationZone::snow_line`](crate::planetary::derive::FormationZone::snow_line)): given its own
+/// instead, its carriers are not its derivation's to the bit (P14.T56.c's record).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct InventoryInputs {
     /// The body's mass.
@@ -118,8 +125,8 @@ pub struct InventoryInputs {
     /// Its bulk composition.
     pub fractions: MassFractions,
     /// The side of its host's snow line its volatiles formed on: the atmosphere's
-    /// ([`DerivedBody::formed`](crate::planetary::derive::DerivedBody::formed), or for a captured or
-    /// giant-impact moon its parent's zone's,
+    /// ([`DerivedBody::formed`](crate::planetary::derive::DerivedBody::formed), or for a captured
+    /// or giant-impact moon its parent's zone's,
     /// [`FormationZone::side`](crate::planetary::derive::FormationZone::side)), which sets its
     /// carriers and its chlorine. The caller keeps it consistent with the distances, which set its
     /// ΔIW and its formation temperature, and so whether its nitrogen takes the icy boost

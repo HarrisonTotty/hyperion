@@ -117,7 +117,11 @@ export function modelled<T, U>(
   return value === null ? { kind: "none" } : { kind: "value", value: convert(value) };
 }
 
-function pending<T, U>(value: T | undefined, convert: (present: T) => U): Pending<U> {
+/**
+ * A wire field a later task fills, as the client holds it: absent is not modelled, and anything
+ * else its value, converted by `convert`.
+ */
+export function pending<T, U>(value: T | undefined, convert: (present: T) => U): Pending<U> {
   return value === undefined ? { kind: "not_modelled" } : { kind: "value", value: convert(value) };
 }
 

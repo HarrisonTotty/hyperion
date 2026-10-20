@@ -86,9 +86,9 @@ figure_pole_y = 0xbfdc6efc845c91b9  # -0.44427407194077834
 figure_pole_z = 0xbfe121faf30870d7  # -0.5353979822862368
 moment_of_inertia_factor = 0x3fcd70a3d70a3d71  # 0.23
 photometry: Neptune, provisional true
-geometric_albedo_b = 0x3fb5394e3377ae6a  # 0.08290566212206732
-geometric_albedo_v = 0x3fb0b12b485d372e  # 0.06520338551237323
-geometric_albedo_r = 0x3f9b577d5741cf61  # 0.026700933886288584
+geometric_albedo_b = 0x3fc2e709a5d69756  # 0.1476757106549324
+geometric_albedo_v = 0x3fbdbb9518e60a49  # 0.1161435304439148
+geometric_albedo_r = 0x3fa859eba1b69cb2  # 0.04756103848495154
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -97,7 +97,7 @@ phase_integral_v = 0x3ff3df41a7b098bf  # 1.242005972898866
 phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fb587787f3902b4  # 0.08409836870215309
-bond_ratio = 0x3feed0883ddea580  # 0.9629555900948361
+bond_ratio = 0x3ffb71b9571a4b66  # 1.7152646448564268
 envelope: NotModelled
 body 0101 A b IV: Moon(Captured) about Some(Body(BodyIndex(256))), Present
 mass_mearth = 0x3ec0aaf0cde991eb  # 1.9869490722071446e-6
@@ -3508,9 +3508,9 @@ figure_pole_y = 0xbfdc6efc845c91b9  # -0.44427407194077834
 figure_pole_z = 0xbfe121faf30870d7  # -0.5353979822862368
 moment_of_inertia_factor = 0x3fcd70a3d70a3d71  # 0.23
 photometry: Neptune, provisional true
-geometric_albedo_b = 0x3fb5394e35a4ceb1  # 0.08290566262877054
-geometric_albedo_v = 0x3fb0b12b4a1361e0  # 0.0652033859108836
-geometric_albedo_r = 0x3f9b577d5a0f87fe  # 0.02670093404947948
+geometric_albedo_b = 0x3fc2e709a7c6c815  # 0.1476757115574975
+geometric_albedo_v = 0x3fbdbb951bf28655  # 0.11614353115376137
+geometric_albedo_r = 0x3fa859eba435d51d  # 0.04756103877563531
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -3519,7 +3519,7 @@ phase_integral_v = 0x3ff3df41a7b098bf  # 1.242005972898866
 phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fb58778816e26d1  # 0.0840983692161459
-bond_ratio = 0x3feed0883ddea582  # 0.9629555900948363
+bond_ratio = 0x3ffb71b9571a4b66  # 1.7152646448564268
 envelope: NotModelled
 body 0101 A b IV: Moon(Captured) about Some(Body(BodyIndex(256))), Present
 mass_mearth = 0x3ec0aaf0cde991eb  # 1.9869490722071446e-6

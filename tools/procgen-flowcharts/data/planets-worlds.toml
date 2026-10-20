@@ -147,7 +147,7 @@ summary = "Water, carbon, nitrogen: one open uniform each"
 detail = [
   "words 0-2 of planet.volatiles; words 3-7 reserved",
   "rank 0.5 gives Earth's inventory per unit mass",
-  "moons' own ranks are planned (P14.T56.c)",
+  "moons' own ranks (P14.T56.c), in force from P14.T54.a",
 ]
 source = ["crates/hyperion-sim/src/planetary/derive/atmosphere.rs", "crates/hyperion-sim/src/rng/tags.rs", "P14.T13.a"]
 status = "built"
@@ -409,15 +409,15 @@ kind = "model"
 cluster = "pw.hooks"
 summary = "Ices and liquids by substance; crust lithologies"
 detail = [
-  "T51.a: each condensable's partition, x_s p ≤ h p_sat",
-  "  up to 8 condensates by reservoir, with phase",
+  "T51.a: each condensable's partition, x_s p ≤ h p_sat;",
+  "  up to 8 condensates, on the wire from P14.T54.a",
+  "T51.b: Bond A = Σ a_i A_i in the passes (P14.T54.a)",
   "T51.c: primary, secondary, tertiary crust,",
-  "  provinces, redox class, melt area",
+  "  provinces, redox class, melt area (planned)",
   "feeds the field's palette (P14.T54.a)",
-  "T51.b: Bond A = Σ a_i A_i inside the three passes",
 ]
-source = ["P14.T51.a", "P14.T51.b", "P14.T51.c", "P14.T54.a"]
-status = "planned"
+source = ["crates/hyperion-sim/src/planetary/chem/partition.rs", "crates/hyperion-sim/src/planetary/derive/photometry/area_mix.rs", "P14.T51.a", "P14.T51.b", "P14.T51.c", "P14.T54.a"]
+status = "partial"
 
 [[node]]
 id = "pw.aerosols"
@@ -2277,7 +2277,7 @@ label = "condensable sets α"
 from = "pw.surface_composition"
 to = "pw.surface_state"
 kind = "constraint"
-label = "area-mix Bond A (planned)"
+label = "area-mix Bond A"
 
 [[edge]]
 from = "pw.surface_state"

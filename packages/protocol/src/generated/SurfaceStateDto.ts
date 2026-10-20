@@ -3,5 +3,10 @@
 /**
  * The state of a body's surface (plan 14's `SurfaceState`, P14.T13.c), less the gas envelope,
  * which has no surface section: its air is the envelope section's.
+ *
+ * `RunawayGreenhouse`, `Temperate` and `Snowball` are the body's insolation class against its
+ * hosts' habitable zone (P14.T12.b's limits), not its present climate: read the mean surface
+ * temperature, the ice and ocean fractions and the condensates for that, as the climate regime
+ * does (decision-p14-t54a-states). P14.T53.b makes the state follow the present climate.
  */
 export type SurfaceStateDto = "magma_ocean" | "airless" | "runaway_greenhouse" | "temperate" | "snowball" | "steam_envelope" | "tenuous";

@@ -1291,9 +1291,11 @@ fn linear_cold_area(cold: f64, warm: f64) -> impl Fn(Kelvin) -> f64 {
 }
 
 /// Earth publishes its ocean and its ice as P14.T24.b's to the bit (decision-p14-t51a-part2 §4.2):
-/// the ice T24.b's perennial ice below 263.15 K at its sheet's mass, the ocean the rest over its
-/// potential ocean, the two summing to its surface water; each entry's layer its reservoir over its
-/// grain density. A dry Earth's water at T24.b's 2% surface share publishes 2% of it.
+/// the ice T24.b's perennial ice below 263.15 K at its sheet's mass, the ocean the rest, over the
+/// share of the basins its own layer fills, to the bit, below the potential ocean of the whole
+/// (decision-p14-t54a-water-consistency §1.4); the two summing to its surface water; each entry's
+/// layer its reservoir over its grain density. A dry Earth's water at T24.b's 2% surface share
+/// publishes 2% of it.
 #[test]
 fn earth_publishes_its_ocean_and_its_ice() {
     let body = earth();
@@ -1315,7 +1317,19 @@ fn earth_publishes_its_ocean_and_its_ice() {
     let ice = published.entry(water, CondensatePhase::Solid).unwrap();
     assert!(!ocean.is_seasonal() && ice.is_seasonal());
     assert_same_bits(ice.area_fraction(), cover.ice_fraction);
-    assert_same_bits(ocean.area_fraction(), cover.potential_ocean);
+    let own = ocean
+        .reservoir_gel()
+        .expect("liquid water's density is read");
+    assert_same_bits(ocean.area_fraction(), earth_basins().area_filled(own));
+    assert!(
+        ocean.area_fraction() < cover.potential_ocean,
+        "{ocean:?}: {cover:?}"
+    );
+    eprintln!(
+        "Earth's sea {:.6} against the whole water's potential ocean {:.6}",
+        ocean.area_fraction(),
+        cover.potential_ocean
+    );
     let sheet = cover.ice_fraction * cover.ice_density.value() * ICE_SHEET_THICKNESS.value();
     assert_same_bits(ice.reservoir().value(), sheet);
     let layer = ice.reservoir_gel().unwrap().value();
@@ -1336,6 +1350,128 @@ fn earth_publishes_its_ocean_and_its_ice() {
         .iter()
         .fold(0.0, |sum, e| sum + e.reservoir().value());
     assert!(relative(total, 0.02 * whole) < 1e-12, "{dry:?}");
+}
+
+/// Earth's partition, whose water lies as a liquid, published under the profile `profile` with
+/// the surface water `sigma`, kg m⁻², all of it at the surface: T24.b's water cover by hand (the
+/// ice capped at its sheet on a silicate crust, `cover::ice_fraction_over`'s rule), over Earth's
+/// basins.
+fn earth_with_water(profile: &dyn Fn(Kelvin) -> f64, sigma: f64) -> (Condensates, WaterCover) {
+    let body = earth();
+    let earth = partition(&body.climate, &on_earth(EARTH_GRAVITY), &body.inventory);
+    let rho = ice_ih_density(earth.climate().mean());
+    let cap = sigma / (rho.value() * ICE_SHEET_THICKNESS.value());
+    let cold = profile(PERENNIAL_ICE_TEMPERATURE);
+    let water = WaterCover {
+        surface_water: KilogramsPerSquareMetre::new(sigma),
+        potential_ocean: cover::potential_ocean(
+            earth_relief().hypsometry(),
+            KilogramsPerSquareMetre::new(sigma),
+        ),
+        ice_fraction: if cold < cap { cold } else { cap },
+        ice_density: rho,
+    };
+    let published = earth.publish(&Cover {
+        cold_area: profile,
+        state: SurfaceState::Temperate,
+        water,
+    });
+    (published, water)
+}
+
+/// Decision-p14-t54a-water-consistency §1.4 (b): where T24.b's cap binds, a silicate temperate
+/// body's ice holds its whole surface water, to the bit, and it publishes no sea, so that its
+/// ocean fraction is 0: at 200 reservoirs from one like `01ffeb2ce0000000.0300`'s,
+/// 1.68 × 10⁵ kg m⁻², and one ulp either side of each, where the sheet's mass alone, the rule
+/// before, left some a sea of an ulp over the whole water's potential ocean.
+#[test]
+fn the_ice_holds_the_whole_water_where_its_cap_binds() {
+    // Two-thirds of the surface below 263.15 K: the cap binds.
+    let profile = linear_cold_area(200.0, 300.0);
+    let water = id("H2O");
+    let reservoirs = (0..200_u32).flat_map(|k| {
+        let sigma = 1.68e5 * (1.0 + f64::from(k) * 1e-6);
+        [f64::next_down(sigma), sigma, f64::next_up(sigma)]
+    });
+    let mut seas_before = 0;
+    for sigma in reservoirs {
+        let (published, cover) = earth_with_water(&profile, sigma);
+        let rho_h = cover.ice_density.value() * ICE_SHEET_THICKNESS.value();
+        assert!(profile(PERENNIAL_ICE_TEMPERATURE) >= sigma / rho_h);
+        let ice = published.entry(water, CondensatePhase::Solid).unwrap();
+        assert_same_bits(ice.reservoir().value(), sigma);
+        assert_same_bits(ice.area_fraction(), cover.ice_fraction);
+        assert!(
+            published.entry(water, CondensatePhase::Liquid).is_none(),
+            "{sigma}: {published:?}"
+        );
+        assert!(published.surface_liquids().is_empty(), "{sigma}");
+        // The rule before: the sheet's mass, then the rest as sea.
+        let sheet = cover.ice_fraction * cover.ice_density.value() * ICE_SHEET_THICKNESS.value();
+        seas_before += usize::from(sheet < sigma);
+    }
+    eprintln!("the sheet's mass alone left a sea of an ulp at {seas_before} of 600 reservoirs");
+    assert!(seas_before > 0, "the regression is exercised");
+}
+
+/// Decision-p14-t54a-water-consistency §1.4 (a): with no ice, water's sea is the share of the
+/// basins its whole surface water fills at its liquid's density where it lies, to the bit, its
+/// own layer's fill.
+#[test]
+fn with_no_ice_the_sea_is_the_whole_water_s_fill() {
+    // No zone below 263.15 K.
+    let profile = linear_cold_area(270.0, 330.0);
+    let sigma = 2.7e6;
+    let (published, cover) = earth_with_water(&profile, sigma);
+    assert_same_bits(cover.ice_fraction, 0.0);
+    let water = id("H2O");
+    assert!(published.entry(water, CondensatePhase::Solid).is_none());
+    let sea = published.entry(water, CondensatePhase::Liquid).unwrap();
+    let body = earth();
+    let earth = partition(&body.climate, &on_earth(EARTH_GRAVITY), &body.inventory);
+    let c = earth.condensate(water).unwrap();
+    let diagram = water.substance().phase_diagram().unwrap();
+    let rho_l = liquid_density_kg_per_m3(c, diagram).unwrap();
+    assert_same_bits(sea.reservoir().value(), sigma);
+    assert_same_bits(
+        sea.area_fraction(),
+        earth_basins().area_filled(Metres::new(sigma / rho_l)),
+    );
+    assert!(
+        sea.area_fraction() > 0.0 && sea.area_fraction() < 1.0,
+        "{sea:?}"
+    );
+}
+
+/// Decision-p14-t54a-water-consistency §1.4 (a)–(c): as the surface water passes the ice's cap
+/// over a fixed cold area, the sea rises from none, never falling, with no step: none at and below
+/// the cap's water, some just above it, its own layer's fill.
+#[test]
+fn the_sea_rises_from_none_as_the_water_passes_the_ice_s_cap() {
+    let profile = linear_cold_area(200.0, 300.0);
+    let cold = profile(PERENNIAL_ICE_TEMPERATURE);
+    let (_, cover) = earth_with_water(&profile, 1.0);
+    let crossing = cold * cover.ice_density.value() * ICE_SHEET_THICKNESS.value();
+    let water = id("H2O");
+    let sea = |sigma: f64| {
+        let (published, _) = earth_with_water(&profile, sigma);
+        published
+            .entry(water, CondensatePhase::Liquid)
+            .map_or(0.0, CondensateEntry::area_fraction)
+    };
+    let mut last = 0.0;
+    for step in 0..=400 {
+        let sigma = crossing * (0.5 + f64::from(step) / 200.0);
+        let area = sea(sigma);
+        assert!(area >= last, "{sigma}: {area} after {last}");
+        if sigma <= crossing {
+            assert_same_bits(area, 0.0);
+        }
+        last = area;
+    }
+    let just_above = sea(crossing * (1.0 + 1e-6));
+    assert!(just_above > 0.0 && just_above < 1e-3, "{just_above}");
+    assert!(last > just_above, "{last}");
 }
 
 /// Titan publishes its seas as `ch4_c2h6_n2`, its layer over that liquid's grain density, and its

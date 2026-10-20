@@ -19,20 +19,20 @@
 //! it to the Roche limit for rock, so that every giant denser than 225 kg m⁻³ has one (the plan
 //! gives no extent for a dusty ring; Jupiter's run from 1.4 to 1.81 Jupiter radii, and on out as
 //! the gossamer rings, 0.9 of its Roche limit for rock and beyond, de Pater et al. 2017). The
-//! materials: [`RingMaterial::PorousIce`] of 600 kg m⁻³, or [`RingMaterial::Rock`] of 2,500
-//! kg m⁻³ ([`roche_limit_fluid`]). A ring whose outer edge would not lie beyond its inner one is
-//! not there: about a giant of low density whose Roche limit for rock lies inside 1.1 planetary
-//! radii no rocky ring forms, and inside 1.1 ÷ 0.6 = 1.83 radii only some draws leave a massive
-//! one. A ring is one plane through its planet's centre ([`RingPlane`], [`Ring::normal`]), and its
-//! radii are distances from the centre in it: the local Laplace plane at the geometric mean of
-//! its edges, on which its particles' orbits settle (P14.T56.a, [`laplace`]), the planet's
-//! equator well inside its Laplace radius, and none reaches into the eccentricity band about it
-//! (a ring that would is not made); about a planet with no Laplace frame (no rotation law), its
-//! orbital plane. The warp of a wide ring's plane across its width is not drawn: for a Jupiter-like giant with a
-//! ring to 2.4 radii it is 0.24% of the obliquity at 0.5 au and 3.7% at 0.2 au
-//! (decision-p14-moons §1.2). A massive ring has a mass of 10⁻⁹–10⁻⁷ of its planet's
-//! ([`MASSIVE_RING_MASS_RATIO`]), gaps at the 2:1 and 3:2 inner resonances of the regular moons
-//! passed in that fall inside it, and an optical depth from its surface density.
+//! materials: [`RingMaterial::PorousIce`] of 600 kg m⁻³, or [`RingMaterial::Rock`] of 2,500 kg m⁻³
+//! ([`roche_limit_fluid`]). A ring whose outer edge would not lie beyond its inner one is not
+//! there: about a giant of low density whose Roche limit for rock lies inside 1.1 planetary radii
+//! no rocky ring forms, and inside 1.1 ÷ 0.6 = 1.83 radii only some draws leave a massive one. A
+//! ring is one plane through its planet's centre ([`RingPlane`], [`Ring::normal`]), and its radii
+//! are distances from the centre in it: the local Laplace plane at the geometric mean of its edges,
+//! on which its particles' orbits settle (P14.T56.a, [`laplace`]), the planet's equator well inside
+//! its Laplace radius, and none reaches into the eccentricity band about it (a ring that would is
+//! not made); about a planet with no Laplace frame (no rotation law), its orbital plane. The warp
+//! of a wide ring's plane across its width is not drawn: for a Jupiter-like giant with a ring to
+//! 2.4 radii it is 0.24% of the obliquity at 0.5 au and 3.7% at 0.2 au (decision-p14-moons §1.2). A
+//! massive ring has a mass of 10⁻⁹–10⁻⁷ of its planet's ([`MASSIVE_RING_MASS_RATIO`]), gaps at the
+//! 2:1 and 3:2 inner resonances of the regular moons passed in that fall inside it, and an optical
+//! depth from its surface density.
 //!
 //! # The moons
 //!

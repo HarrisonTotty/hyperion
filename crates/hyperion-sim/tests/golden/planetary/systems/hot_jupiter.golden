@@ -76,9 +76,9 @@ figure_pole_y = 0x3fd8b61b29da8108  # 0.3861148747182743
 figure_pole_z = 0xbfed098e916a463a  # -0.907416614545759
 moment_of_inertia_factor = 0x3fcf83a1388cf69c  # 0.24620452176343555
 photometry: Jupiter, provisional true
-geometric_albedo_b = 0x3fa8134b2d9a05df  # 0.04702219897900383
-geometric_albedo_v = 0x3fad3cfe42f037ac  # 0.05710596625441097
-geometric_albedo_r = 0x3faae6c010dc10f6  # 0.05254173475080563
+geometric_albedo_b = 0x3fac96e94626e6f8  # 0.05583886128756704
+geometric_albedo_v = 0x3fb15c36f7bea10e  # 0.06781333492711303
+geometric_albedo_r = 0x3faff20414055423  # 0.06239331001658168
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -87,7 +87,7 @@ phase_integral_v = 0x3ff4fccd045b90a7  # 1.3117189569684713
 phase_integral_r = 0x3ff4fccd045b90a7  # 1.3117189569684713
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3faefb619e23dc78  # 0.060511637262543994
-bond_ratio = 0x3ff3ce69b15a36dc  # 1.2378937652423962
+bond_ratio = 0x3ff7851d829b2126  # 1.4699988462253457
 envelope: NotModelled
 body 0180 A b RING 1: Ring about Some(Body(BodyIndex(256))), Present
 mass_mearth = 0x3c912e65df4b7a7d  # 5.960940750416032e-17
@@ -883,9 +883,9 @@ figure_pole_y = 0x3fd8b61b29da8108  # 0.3861148747182743
 figure_pole_z = 0xbfed098e916a463a  # -0.907416614545759
 moment_of_inertia_factor = 0x3fcf83a1388cf69c  # 0.24620452176343555
 photometry: Jupiter, provisional true
-geometric_albedo_b = 0x3fa8134b2434d4ff  # 0.04702219788524963
-geometric_albedo_v = 0x3fad3cfe37873d9e  # 0.05710596492610452
-geometric_albedo_r = 0x3faae6c0065c8cea  # 0.05254173352866494
+geometric_albedo_b = 0x3fac96e93afebced  # 0.055838859988733926
+geometric_albedo_v = 0x3fb15c36f0f84c95  # 0.06781333334974911
+geometric_albedo_r = 0x3faff204078de754  # 0.0623933085652896
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -894,7 +894,7 @@ phase_integral_v = 0x3ff4fccd045b90a7  # 1.3117189569684713
 phase_integral_r = 0x3ff4fccd045b90a7  # 1.3117189569684713
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3faefb61920caf18  # 0.06051163585502034
-bond_ratio = 0x3ff3ce69b15a36dd  # 1.2378937652423965
+bond_ratio = 0x3ff7851d829b2126  # 1.4699988462253457
 envelope: NotModelled
 body 0180 A b RING 1: Ring about Some(Body(BodyIndex(256))), Present
 mass_mearth = 0x3c912e65df4b7a7d  # 5.960940750416032e-17

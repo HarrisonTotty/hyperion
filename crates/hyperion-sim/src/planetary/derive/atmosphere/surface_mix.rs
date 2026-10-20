@@ -223,8 +223,8 @@ fn bond_albedo(value: f64, state: SurfaceState, material: SurfaceMaterial) -> Bo
 /// describe, whose state and greenhouse the batch's rules gave, with its Bond albedo and cloud
 /// fraction from the area mix over the surface `surface` in place of T13.c's table:
 ///
-/// - a gas envelope its class's ([`area_mix::giant_bond`]) at its heated temperature, under a full
-///   cover, which its class's albedo includes;
+/// - a gas envelope its class's ([`area_mix::giant_bond`]) at its heated temperature and for its
+///   planet class, under a full cover, which its class's albedo includes;
 /// - a magma ocean the melt's 0.10 ([`area_mix::melt_bond`]), cloudless;
 /// - every other state the area mix over the condensates its pass publishes and its regolith, with
 ///   the cloud fraction of its state and condensable at its cloud's albedo
@@ -245,7 +245,7 @@ pub(super) fn area_mixed(
     };
     let (albedo, cloud_fraction) = match air.state {
         SurfaceState::GasEnvelope => (
-            area_mix::giant_bond(shade, inputs.heated),
+            area_mix::giant_bond(shade, inputs.heated, inputs.class),
             area_mix::cloud_share_of_state(SurfaceState::GasEnvelope),
         ),
         SurfaceState::MagmaOcean => (area_mix::melt_bond(), 0.0),

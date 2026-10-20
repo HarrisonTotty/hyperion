@@ -23,9 +23,7 @@ use crate::planetary::hooks::figures::{Crust, LEFTOVER_DENSITY, TectonicRegime};
 use crate::planetary::index::{BodySlot, BodySub};
 use crate::planetary::params::{FLATTENING_CAP, HILL_STABLE_GAP};
 use crate::planetary::placement::mutual_hill_radius;
-use crate::planetary::record::{
-    DetailLevel, Modelled, MoonOrigin, Population, RecordSection, SectionState,
-};
+use crate::planetary::record::{DetailLevel, MoonOrigin, Population, RecordSection, SectionState};
 use crate::planetary::satellites::{MoonPlane, generate_satellites};
 use crate::planetary::testing::{SampleFilter, sample_contexts, synthetic_binary, synthetic_star};
 use crate::stellar::Phase;
@@ -611,9 +609,7 @@ fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
             };
             let (state, material) = (surface.state(), surface.material());
             let (conditions, figures) = (surface.conditions().clone(), surface.figures().clone());
-            let Modelled::Ok(condensates) = surface.condensates() else {
-                panic!("a record's surface holds its condensates");
-            };
+            let condensates = surface.condensates();
             assert_ne!(state, SurfaceState::GasEnvelope);
             assert_eq!(
                 surface.conditions().climate_regime().as_ref(),
@@ -654,22 +650,53 @@ fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
 }
 
 /// P14.T54.a: a record's surface section holds P14.T51.a's published condensates, the ones its
-/// liquids and ices read ([`check_record_condensates`]), and an Earth's condensates hold `H2O`:
-/// every temperate world with liquid water whose figures list a water ocean holds a liquid `H2O`
-/// entry with a reservoir, a layer and an area, which the test prints.
+/// liquids and ices read ([`check_record_condensates`]), by the cover's rule W1–W4, exactly
+/// ([`check_cover_rule`]; decision-p14-t54a-water-consistency §4), and an Earth's condensates hold
+/// `H2O`: every temperate world with liquid water whose figures list a water ocean holds a liquid
+/// `H2O` entry with a reservoir, a layer and an area, which the test prints.
+///
+/// Water's sea is its own layer's fill (§1): `01ffeb2ce0000000.0300`, whose ice holds its water,
+/// publishes no sea, and R09's inputs read none. Every water sea is printed against the whole
+/// water's potential ocean, which it took before, for the bless note.
 #[test]
 fn the_record_s_surface_holds_its_published_condensates() {
     use crate::planetary::chem::partition::CondensatePhase;
     let water = Gas::Water.substance();
     let (mut surfaces, mut entries, mut earths) = (0_u32, 0_usize, 0_u32);
     let mut tally = CondensateTally::default();
+    let mut cover = CoverRuleTally::default();
+    let mut dry = false;
     for (ctx, system) in whole().iter().take(60) {
-        for record in system.snapshot_at(ctx, UniverseTime::EPOCH).bodies() {
+        let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
+        for record in snapshot.bodies() {
             let Section::Ok(surface) = record.surface() else {
                 continue;
             };
             let id = record.identity().id();
             let condensates = check_record_condensates(id, surface, &mut tally);
+            check_cover_rule(id, surface, &mut cover);
+            if let Some(sea) = condensates.entry(water, CondensatePhase::Liquid) {
+                eprintln!(
+                    "{id}: water's sea {:.6} (the whole water's potential ocean {:.6}), {:?} m, a \
+                     {:?} at {:.2} K",
+                    sea.area_fraction(),
+                    surface.figures().potential_ocean(),
+                    sea.reservoir_gel().map(crate::units::Metres::value),
+                    surface.state(),
+                    surface.conditions().mean_surface_temperature().value()
+                );
+            }
+            if id.to_string() == "01ffeb2ce0000000.0300" {
+                assert!(
+                    condensates.entry(water, CondensatePhase::Liquid).is_none(),
+                    "{id}: {:?}",
+                    condensates.entries()
+                );
+                let inputs = r09_inputs(record);
+                assert!(inputs.liquids().is_empty(), "{id}: {:?}", inputs.liquids());
+                assert_same_bits(inputs.ocean_fraction(), 0.0);
+                dry = true;
+            }
             let ocean = surface
                 .figures()
                 .surface_liquids()
@@ -706,13 +733,173 @@ fn the_record_s_surface_holds_its_published_condensates() {
     }
     eprintln!(
         "{surfaces} surfaces, {entries} entries ({} supercritical; with no layer {:?}), {earths} \
-         Earths",
-        tally.supercritical, tally.unlayered
+         Earths; the cover's appended water ice (W3 a) {}, ocean under ice (W3 b) {}, scaled \
+         lists {}",
+        tally.supercritical, tally.unlayered, cover.crust_ice, cover.under_ice, cover.scaled
     );
     assert!(
         surfaces > 100 && entries > 100 && earths > 0,
         "{surfaces} {entries} {earths}"
     );
+    assert!(dry, "01ffeb2ce0000000.0300 is in the sample");
+}
+
+/// What [`check_cover_rule`] counts for the bless note: the surfaces whose ices take T24.b's water
+/// ice with an area and no `H2O` solid entry (W3 (a)), whose liquids take a `Snowball`'s ocean
+/// under its ice (W3 (b)), and the lists scaled to the surface (W2).
+#[derive(Debug, Default)]
+struct CoverRuleTally {
+    crust_ice: u32,
+    under_ice: u32,
+    scaled: u32,
+}
+
+/// Decision-p14-t54a-water-consistency §4.2: `surface`'s liquids and ices, the record of `id`, are
+/// the cover its condensates give, exactly.
+///
+/// - **W1–W3.** Each list is its phase's entries in their order, with at most one `H2O` item
+///   appended: in the ices T24.b's water ice where no `H2O` solid is listed, in the liquids a
+///   `Snowball`'s ocean under its ice at its potential ocean where no `H2O` liquid is; each divided
+///   by the list's total, the appended item included, where that total exceeds 1, and otherwise to
+///   the bit. Nothing else is listed.
+/// - **W4.** Water's sea is the share of the basins its own layer fills, to the bit, and the other
+///   liquids share the basins by volume; no entry has no mass but a supercritical one, which
+///   covers nothing; a solid's area is at most its layer spread at the sheet's thickness, but
+///   water on an ice-rich crust or under a `Snowball`'s cover, which T24.b does not cap, and an
+///   entry with no layer, whose density is not read.
+/// - **W5.** Each list sums to at most 1.
+fn check_cover_rule(id: crate::id::BodyId, surface: &Surface, tally: &mut CoverRuleTally) {
+    use crate::planetary::chem::partition::{Basins, CondensatePhase};
+    use crate::planetary::hooks::figures::cover;
+    let water = Gas::Water.substance();
+    let (figures, conditions) = (surface.figures(), surface.conditions());
+    let condensates = surface.condensates();
+    let mut liquids = condensates.surface_liquids();
+    let under_ice = cover::under_ice_ocean(
+        surface.state(),
+        figures.surface_water(),
+        conditions.mean_surface_temperature(),
+        figures.heat_flow(),
+    );
+    if under_ice && condensates.entry(water, CondensatePhase::Liquid).is_none() {
+        liquids.push((water, figures.potential_ocean()));
+        tally.under_ice += 1;
+    }
+    let mut ices = condensates.surface_ices();
+    let crust = figures.impactors().crust();
+    if condensates.entry(water, CondensatePhase::Solid).is_none() {
+        let ice = cover::ice_fraction(&cover::IceInputs {
+            conditions,
+            state: surface.state(),
+            crust,
+            surface_water: figures.surface_water(),
+        });
+        ices.push((water, ice));
+        tally.crust_ice += u32::from(ice > 0.0);
+    }
+    for (raw, listed) in [
+        (liquids, figures.surface_liquids()),
+        (ices, figures.surface_ices()),
+    ] {
+        let total = raw.iter().fold(0.0, |sum, &(_, f)| sum + f);
+        assert_eq!(
+            raw.iter().map(|&(s, _)| s).collect::<Vec<_>>(),
+            listed.iter().map(|&(s, _)| s).collect::<Vec<_>>(),
+            "{id}: {raw:?} against {listed:?}"
+        );
+        for (&(_, f), &(_, area)) in raw.iter().zip(listed) {
+            assert_same_bits(area, if total > 1.0 { f / total } else { f });
+        }
+        tally.scaled += u32::from(total > 1.0);
+        let sum = listed.iter().fold(0.0, |sum, &(_, f)| sum + f);
+        assert!(sum <= 1.0 + 1e-12, "{id}: {listed:?}");
+    }
+    let basins = Basins::of(figures.relief().hypsometry());
+    let (mut others, mut other_area) = (0.0, 0.0);
+    for e in condensates.entries() {
+        match e.phase() {
+            CondensatePhase::Supercritical => {
+                assert_same_bits(e.reservoir().value(), 0.0);
+                assert_same_bits(e.area_fraction(), 0.0);
+                continue;
+            }
+            CondensatePhase::Liquid | CondensatePhase::Solid => {
+                assert!(e.reservoir().value() > 0.0, "{id}: {e:?}");
+            }
+        }
+        let Some(layer) = e.reservoir_gel() else {
+            continue;
+        };
+        match e.phase() {
+            CondensatePhase::Liquid if e.substance() == water => {
+                assert_same_bits(e.area_fraction(), basins.area_filled(layer));
+            }
+            CondensatePhase::Liquid => {
+                others += layer.value();
+                other_area += e.area_fraction();
+            }
+            CondensatePhase::Solid => {
+                let uncapped = e.substance() == water
+                    && (crust == Crust::IceRich || surface.state() == SurfaceState::Snowball);
+                let spread = layer.value() / cover::ICE_SHEET_THICKNESS.value();
+                assert!(
+                    uncapped || e.area_fraction() <= spread * (1.0 + 1e-12),
+                    "{id}: {e:?} over {spread}"
+                );
+            }
+            CondensatePhase::Supercritical => {}
+        }
+    }
+    let filled = basins.area_filled(crate::units::Metres::new(others));
+    assert!(
+        (other_area - filled).abs() <= 1e-12,
+        "{id}: the other liquids cover {other_area}, their layers fill {filled}"
+    );
+}
+
+/// R09's coarse inputs of `record` (`CoarseInputs::from_record`), with a basalt lid and an entry
+/// for each ice on the ground, as its documentation's example builds them: for a planet, whose
+/// seasons are its own orbit's.
+fn r09_inputs(record: &BodyRecord) -> crate::planetary::surface::CoarseInputs {
+    use crate::planetary::surface::{CoarseInputs, CrustInputs, LidCrust, SeasonsFromRecord};
+    use hyperion_surface::field::{MaterialPalette, MechanicsFamily, PaletteEntry, PaletteRole};
+    use hyperion_surface::substance_key::SubstanceKey;
+    let Section::Ok(surface) = record.surface() else {
+        panic!("{:?} has a surface", record.index());
+    };
+    let basalt = SubstanceKey::new("basalt").unwrap();
+    let entry = |substance, role| PaletteEntry {
+        substance,
+        role,
+        normal_albedo_bvr: [0.1; 3],
+        phase_row: 0,
+        grain_density_kg_m3: 3_010.0,
+        transition: Kelvin::new(1_253.15),
+        mechanics: MechanicsFamily::Silicate,
+        liquid: None,
+        feo_mass_fraction: None,
+    };
+    let mut entries = vec![entry(basalt, PaletteRole::SecondaryCrust)];
+    let ices = surface.figures().surface_ices().iter();
+    let on_the_ground = ices.filter(|&&(_, area_fraction)| area_fraction > 0.0);
+    entries.extend(on_the_ground.map(|&(id, _)| entry(id.substance().key(), PaletteRole::Ice)));
+    let crust = CrustInputs {
+        primary: None,
+        secondary: Some(basalt),
+        tertiary: None,
+        bulk: None,
+        lid: LidCrust::Secondary,
+        provinces: basalt,
+        melt_area_fraction: 0.0,
+    };
+    CoarseInputs::from_record(
+        record,
+        SeasonsFromRecord::Own,
+        crust,
+        [],
+        MaterialPalette::new(entries).unwrap(),
+    )
+    .unwrap()
 }
 
 /// What [`check_record_condensates`] counts: the supercritical entries, and the entries with no
@@ -761,14 +948,19 @@ fn check_record_condensates<'a>(
             .then(a.substance().cmp(&b.substance()))
             .then(a.phase().cmp(&b.phase()))
     };
-    let Modelled::Ok(condensates) = surface.condensates() else {
-        panic!("{id}: a record's surface holds its condensates");
-    };
+    let condensates = surface.condensates();
     let (figures, list) = (surface.figures(), condensates.entries());
     assert!(list.len() <= MAX_CONDENSATES, "{id}: {list:?}");
     for pair in list.windows(2) {
         assert_eq!(order(&pair[0], &pair[1]), Ordering::Less, "{id}: {list:?}");
     }
+    let unique: std::collections::BTreeSet<_> =
+        list.iter().map(|e| (e.substance(), e.phase())).collect();
+    assert_eq!(
+        unique.len(),
+        list.len(),
+        "{id}: each substance and phase once: {list:?}"
+    );
     let listed = |areas: &[(crate::substance::SubstanceId, f64)], e: &CondensateEntry| {
         areas.iter().any(|&(other, _)| other == e.substance())
     };
@@ -2392,7 +2584,9 @@ fn the_figure_section_by_kind_and_level() {
 /// where the bulk is; every sampled body's p q is at most 1 per band, and a generated snowball
 /// states a ratio within 5% of 1. A generated airless-ice body states 0.43 × 0.80 ÷ `A_ref` where
 /// its p is not capped, its reference the fresh `H2O` frost's (P14.T51.b), where Ganymede's
-/// measured Bond albedo, whose p the row draws, is 0.35 (`photometry::tests`, recorded).
+/// measured Bond albedo, whose p the row draws, is 0.35 (`photometry::tests`, recorded in the bless
+/// note): the closed form stands until the weathered icy regolith, its owner P14.T49.m
+/// (decision-p14-t54a-ganymede §1b), darkens the reference.
 #[test]
 fn the_photometry_section_by_kind_and_level() {
     use crate::planetary::derive::photometry::PhaseTemplate;
@@ -2425,7 +2619,16 @@ fn the_photometry_section_by_kind_and_level() {
                             );
                             borrowed += 1;
                         }
-                        _ => {}
+                        PhaseTemplate::Moon
+                        | PhaseTemplate::Mercury
+                        | PhaseTemplate::Mars
+                        | PhaseTemplate::Venus
+                        | PhaseTemplate::Earth
+                        | PhaseTemplate::Jupiter
+                        | PhaseTemplate::Saturn
+                        | PhaseTemplate::Uranus
+                        | PhaseTemplate::Neptune
+                        | PhaseTemplate::Magma => {}
                     }
                     drawn += 1;
                 }
@@ -2545,7 +2748,8 @@ fn the_hooks_publish_the_record_s_surface_conditions_and_figures() {
                         panic!("{index:?} has conditions but no figures");
                     };
                     check_published_figures(index, conditions, figures);
-                    check_published_cover(index, conditions, figures, bulk.surface_gravity());
+                    let cover_of = (bulk.surface_gravity(), water_sea(&record));
+                    check_published_cover(index, conditions, figures, cover_of);
                     assert_same_bits(
                         figures.craters().system_age().value(),
                         ctx.age_at(t).value() / 1e9,
@@ -2601,17 +2805,30 @@ fn the_hooks_publish_the_record_s_surface_conditions_and_figures() {
     assert!(planets > 20 && moons > 5 && envelopes > 20);
 }
 
+/// The area of `record`'s water sea, its surface's liquid `H2O` condensate's, where it has one.
+fn water_sea(record: &BodyRecord) -> Option<f64> {
+    use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
+    let Section::Ok(surface) = record.surface() else {
+        return None;
+    };
+    surface
+        .condensates()
+        .entry(Gas::Water.substance(), CondensatePhase::Liquid)
+        .map(CondensateEntry::area_fraction)
+}
+
 /// The published relief and cover of one body follow their rules (P14.T48.a, P14.T24.b;
 /// science-p14-t24b-laws §4.1–4.6 and §4.x): continents only on a mobile lid; V in [0, `V_s`] and
 /// the constructional share under the strength limit, `h♂` (g♂ ÷ g) ÷ 4, at the body's gravity
-/// `gravity`; every fraction in [0, 1] and each list `H2O` alone summing to its fraction; an ocean
-/// only where water is liquid or under a `Snowball`'s ice; no ice where the coldest zone is above
-/// the melting point; θ the potential ocean's; and the cloud in [0, 1].
+/// `gravity`; every fraction in [0, 1] and each list summing to its fraction; water's ocean its
+/// `sea`, its condensate's own layer's fill (decision-p14-t54a-water-consistency §1), or where it
+/// has none only under a `Snowball`'s ice; no ice where the coldest zone is above the melting
+/// point; θ the potential ocean's; and the cloud in [0, 1].
 fn check_published_cover(
     index: BodyIndex,
     conditions: &SurfaceConditions,
     figures: &GlobalFigures,
-    gravity: crate::units::MetresPerSecondSquared,
+    (gravity, sea): (crate::units::MetresPerSecondSquared, Option<f64>),
 ) {
     use hooks::figures::relief::{
         CONSTRUCTIONAL_REFERENCE_GRAVITY, TALLEST_EDIFICE_RELIEF, VOLCANISM_SATURATION,
@@ -2681,8 +2898,10 @@ fn check_published_cover(
         hooks::surface::OceanWeight::of_potential_ocean(figures.potential_ocean()),
         "{index:?}"
     );
-    // Water's published liquid lies at its potential ocean, scaled down with the other liquids
-    // where together they would cover more than the surface (`within_the_surface`); any other
+    // Water's published liquid is its condensate's `sea`, the share of the basins its own layer
+    // fills (decision-p14-t54a-water-consistency §1), or where it has none a `Snowball`'s ocean
+    // under its ice at its potential ocean (W3 (b)); each is scaled down with the other liquids
+    // where together they would cover more than the surface (`within_the_surface`). Any other
     // liquid is the partition's own sea (P14.T51.a), which the potential ocean, water's, does not
     // read.
     let water = Gas::Water.substance();
@@ -2692,13 +2911,13 @@ fn check_published_cover(
         .find(|&&(id, _)| id == water)
         .map_or(0.0, |&(_, f)| f);
     let liquids = figures.ocean_fraction();
+    let whole = sea.unwrap_or(figures.potential_ocean());
     if ocean > 0.0 && liquids < 1.0 - 1e-9 {
-        assert_same_bits(ocean, figures.potential_ocean());
+        assert_same_bits(ocean, whole);
     }
     assert!(
-        ocean <= figures.potential_ocean() * (1.0 + 1e-12),
-        "{index:?}: {ocean} against {}",
-        figures.potential_ocean()
+        ocean <= whole * (1.0 + 1e-12),
+        "{index:?}: {ocean} against {whole}"
     );
     if !conditions.liquid_water() && ocean > 0.0 {
         assert!(
@@ -4277,10 +4496,11 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
     );
 }
 
-/// P14.T51.b and T51.h: over the sample's first 60 systems generated whole (`whole`, 400 real systems at the solar circle), every present planet's,
-/// member's and moon's photometry states, to the bit, the Bond albedo its derivation's equilibrium
-/// temperature was taken at, `DerivedBody::albedo` (retiring P14.T47's exception, as built); every
-/// icy member's air reads its record's ice.
+/// P14.T51.b and T51.h: over the sample's first 60 systems generated whole (`whole`, 400 real
+/// systems at the solar circle), every present planet's, member's and moon's photometry states, to
+/// the bit, the Bond albedo its derivation's equilibrium temperature was taken at,
+/// `DerivedBody::albedo` (retiring P14.T47's exception, as built); every icy member's air reads its
+/// record's ice.
 ///
 /// Every body's passes end (P14.T51.h): converged within the plain passes, or bracketed, its
 /// published pass a fixed point or a jump across the diagonal, each bracketed body listed by its
@@ -4629,10 +4849,10 @@ fn time_the_cold_traps_over_the_sample() {
     }
 }
 
-/// The batch's surface temperatures over the sample, measured for P14.T54.a's bless note (P14.T57.a's
-/// moves at 23): over the sample's first 60 systems generated whole (`whole`), every present
-/// planet's, member's and moon's mean surface temperature (P14.T51.a's partition, T51.b's area
-/// mix, T51.h's passes and T57.a's greenhouse constants), each body on its own line with its
+/// The batch's surface temperatures over the sample, measured for P14.T54.a's bless note
+/// (P14.T57.a's moves at 23): over the sample's first 60 systems generated whole (`whole`), every
+/// present planet's, member's and moon's mean surface temperature (P14.T51.a's partition, T51.b's
+/// area mix, T51.h's passes and T57.a's greenhouse constants), each body on its own line with its
 /// equilibrium temperature, pressure and partial pressures of carbon dioxide and water, and the
 /// bodies by state. Version 22's figures are plan 14's (P14.T57.a's record); a measurement, it
 /// asserts nothing.

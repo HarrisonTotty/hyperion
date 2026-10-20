@@ -220,9 +220,9 @@ fn the_table_s_oceans_are_published_where_water_is_liquid() {
     }
 }
 
-/// The ice (science-p14-t24b-laws §4.5): Earth 0.02–0.07 by the ruling, held at 0–0.07 while
-/// version 22's rules run (decision-p14-t54a-bands §4.3), Mars 0.005–0.02, Europa and a `Snowball`
-/// 1; `surface_ices` holds `H2O` alone and sums to it to 10⁻¹².
+/// The ice (science-p14-t24b-laws §4.5): Earth 0.01–0.07, band 5 as decision-p14-t54a-bands §4.3
+/// asserts it on the batch's table Earth, Mars 0.005–0.02, Europa and a `Snowball` 1;
+/// `surface_ices` holds `H2O` alone and sums to it to 10⁻¹².
 #[test]
 fn the_table_s_ices_are_the_ruling_s() {
     let table = table_surfaces();
@@ -529,7 +529,7 @@ fn the_cover_is_continuous_in_time() {
 /// §4.4), and θ reads the potential ocean: moving the liquid-water flag, by the second stage of
 /// another body's conditions, moves the published ocean and not θ.
 #[test]
-fn the_cloud_is_the_state_s_and_theta_reads_the_potential_ocean() {
+fn the_cloud_is_the_atmosphere_s_and_theta_reads_the_potential_ocean() {
     let table = table_surfaces();
     for (name, body, figures, _) in &table {
         assert_same_bits(figures.cloud_fraction(), body.atmosphere().cloud_fraction());
@@ -585,6 +585,29 @@ fn a_snowball_s_ocean_lies_under_its_ice() {
         water(shell * 2.0),
         t_s,
         WattsPerSquareMetre::new(0.0)
+    ));
+}
+
+/// Decision-p14-t54a-states §6.2, a regression test: a `Snowball` at or above the melting point at
+/// its ice's base holds no ocean under ice, however much surface water and heat it has, since no
+/// shell conducts there; above 273.15 K the shell term, 651 ln(273.15 K ÷ `T_s`) ÷ F, is negative,
+/// and the comparison alone once called every such world's water an ocean under its ice.
+#[test]
+fn a_snowball_above_melting_holds_no_ocean_under_ice() {
+    let f = WattsPerSquareMetre::new(0.05);
+    let water = KilogramsPerSquareMetre::new(2.7e6);
+    for t in [300.0, UNDER_ICE_MELTING_POINT.value()] {
+        assert!(
+            !under_ice_ocean(SurfaceState::Snowball, water, Kelvin::new(t), f),
+            "{t} K"
+        );
+    }
+    let just_below = Kelvin::new(UNDER_ICE_MELTING_POINT.value() - 0.01);
+    assert!(under_ice_ocean(
+        SurfaceState::Snowball,
+        water,
+        just_below,
+        f
     ));
 }
 

@@ -1525,7 +1525,9 @@ pub struct WaterCover {
     /// The surface water `σ_s` (`cover::surface_water`): the share of the partition's
     /// condensed water that lies at the surface.
     pub surface_water: KilogramsPerSquareMetre,
-    /// The potential ocean `f_pot` it fills ([`cover::potential_ocean`]), the liquid entry's area.
+    /// The potential ocean `f_pot` the whole of it fills ([`cover::potential_ocean`]), which the
+    /// liquid entry's area no longer takes: that is its own layer's fill
+    /// (decision-p14-t54a-water-consistency §1.4).
     pub potential_ocean: f64,
     /// Its perennial ice's share of the surface ([`cover::ice_fraction`]), the solid entry's area.
     pub ice_fraction: f64,
@@ -1764,9 +1766,17 @@ impl CondensateEntry {
         self.reservoir_gel
     }
 
-    /// The share of the surface it covers, 0 to 1: a liquid's by its volume over the basins, a
-    /// solid's its climate's cold area below its ice line, capped by its mass at
-    /// [`ICE_SHEET_THICKNESS`]; none for a supercritical fluid, which is the air at the surface.
+    /// The share of the surface it covers, 0 to 1 (decision-p14-t54a-water-consistency §4, W4–W5):
+    ///
+    /// - a liquid's: the share of the body's basins its layer fills (water's alone, the other
+    ///   liquids' together, divided by volume), so none where its reservoir lies whole as ice;
+    /// - a solid's: its climate's cold area below its ice line, at most its mass spread at
+    ///   [`ICE_SHEET_THICKNESS`] of its grain density, but water on an ice-rich crust, which is the
+    ///   crust's own ice;
+    /// - none for a supercritical fluid, which is the air at the surface and the only entry with no
+    ///   mass.
+    ///
+    /// Entries may overlap: an ice over a sea, and ices in the same cold zones.
     #[must_use]
     pub const fn area_fraction(&self) -> f64 {
         self.area_fraction
@@ -1956,8 +1966,10 @@ impl Partition {
     /// most [`MAX_CONDENSATES`] entries, the smallest reservoirs dropped beyond them.
     ///
     /// - **Water** is P14.T24.b's to the bit ([`WaterCover`]): its reservoir the surface water
-    ///   `σ_s`, its ice T24.b's perennial ice at its sheet of [`ICE_SHEET_THICKNESS`], at most the
-    ///   whole, and its liquid, where it lies as one, the rest, over the potential ocean.
+    ///   `σ_s`, its ice T24.b's perennial ice at its sheet of [`ICE_SHEET_THICKNESS`], the whole
+    ///   where T24.b's cap binds, and its liquid, where it lies as one, the rest, over the share of
+    ///   the basins its own layer fills, none where the ice holds the whole
+    ///   (decision-p14-t54a-water-consistency §1.4).
     /// - **Any other solid** covers its climate's cold area below its edge (r × its first melt under
     ///   air, r = 263.15 ÷ 273.16; airless, blended by its dominance with its net Hertz–Knudsen edge
     ///   at its own partial pressure; decision-p14-t51a-part2 §3.2–3.3), at most the area its
@@ -2045,7 +2057,7 @@ impl Partition {
             }
             let [solid, liquid] =
                 if c.substance == Gas::Water.substance() && edges.water_keeps_cover() {
-                    water_parts(c, diagram, &cover.water)
+                    water_parts(c, diagram, &cover.water, &self.ground.basins)
                 } else {
                     let held = self
                         .of(c.substance)
@@ -2088,10 +2100,24 @@ impl Partition {
     }
 }
 
-/// The ice and the sea of water's condensate `c`, of `diagram`, over its cover `water`
-/// (decision-p14-t51a-part2 §4.2): P14.T24.b's surface water, ice and potential ocean.
+/// The ice and the sea of water's condensate `c`, of `diagram`, over its cover `water` on the
+/// basins `basins` (decision-p14-t51a-part2 §4.2): P14.T24.b's surface water and ice, the sea
+/// the rest.
+///
+/// The ice takes its sheet first, and the whole surface water where T24.b's cap binds, so that
+/// there is exactly no sea where the ice holds all the water (decision-p14-t54a-water-consistency
+/// §1.4): the test is the expression `cover::ice_fraction_over` and the passes' water cover cap
+/// with, `σ_s` ÷ (`ρ_ice` × [`ICE_SHEET_THICKNESS`]) at the cover's own density, so that rounding
+/// leaves no sea of an ulp on either path. The sea's area is the share of the basins its own
+/// layer fills ([`Basins::area_filled`]), as every other liquid's is, with no minimum depth: the
+/// fill bounds it by its volume, continuously.
 #[must_use]
-fn water_parts(c: &Condensate, diagram: &PhaseDiagram, water: &WaterCover) -> [Option<Part>; 2] {
+fn water_parts(
+    c: &Condensate,
+    diagram: &PhaseDiagram,
+    water: &WaterCover,
+    basins: &Basins,
+) -> [Option<Part>; 2] {
     let reservoir = water.surface_water.value();
     // A NaN holds none.
     if reservoir.is_nan() || reservoir <= 0.0 {
@@ -2102,8 +2128,13 @@ fn water_parts(c: &Condensate, diagram: &PhaseDiagram, water: &WaterCover) -> [O
     let solid_mass = if !c.phases.contains(CondensatePhase::Solid) {
         0.0
     } else if lies_as_liquid {
+        let capped = water.ice_fraction >= reservoir / (rho * ICE_SHEET_THICKNESS.value());
         let sheet = water.ice_fraction * rho * ICE_SHEET_THICKNESS.value();
-        if sheet < reservoir { sheet } else { reservoir }
+        if capped || sheet >= reservoir {
+            reservoir
+        } else {
+            sheet
+        }
     } else {
         reservoir
     };
@@ -2116,13 +2147,18 @@ fn water_parts(c: &Condensate, diagram: &PhaseDiagram, water: &WaterCover) -> [O
         seasonal: c.is_seasonal_as(CondensatePhase::Solid),
     });
     let liquid_mass = reservoir - solid_mass;
-    let liquid = (lies_as_liquid && liquid_mass > 0.0).then(|| Part {
-        substance: c.liquid,
-        phase: CondensatePhase::Liquid,
-        mass_kg_per_m2: liquid_mass,
-        density_kg_per_m3: liquid_density_kg_per_m3(c, diagram),
-        area: water.potential_ocean,
-        seasonal: c.is_seasonal_as(CondensatePhase::Liquid),
+    let liquid = (lies_as_liquid && liquid_mass > 0.0).then(|| {
+        let density = liquid_density_kg_per_m3(c, diagram);
+        Part {
+            substance: c.liquid,
+            phase: CondensatePhase::Liquid,
+            mass_kg_per_m2: liquid_mass,
+            density_kg_per_m3: density,
+            area: density.map_or(0.0, |rho_l| {
+                basins.area_filled(Metres::new(liquid_mass / rho_l))
+            }),
+            seasonal: c.is_seasonal_as(CondensatePhase::Liquid),
+        }
     });
     [solid, liquid]
 }

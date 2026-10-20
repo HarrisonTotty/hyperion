@@ -228,7 +228,6 @@ describe("body_detail", () => {
       "subsurface_ocean",
       "vertical_structure",
       "aerosols",
-      "condensates",
       "crust",
       "modifiers",
       "biosphere",
@@ -236,6 +235,30 @@ describe("body_detail", () => {
     ]) {
       expect(member in surface).toBe(false);
     }
+  });
+
+  it("decodes an Earth's condensates, its ice's trapped area sent and its ocean's absent (P14.T54.a)", () => {
+    const surface = okValue(response("body_detail_response", "body_detail").record.surface);
+
+    expect(surface.condensates).toEqual([
+      {
+        substance: "H2O",
+        phase: "liquid",
+        reservoir_kg_m2: 2_652_000,
+        reservoir_gel_m: 2_600,
+        area_fraction: 0.71,
+        seasonal: false,
+      },
+      {
+        substance: "H2O",
+        phase: "solid",
+        reservoir_kg_m2: 53_100,
+        reservoir_gel_m: 57.9,
+        area_fraction: 0.03,
+        trapped_area_fraction: 0,
+        seasonal: false,
+      },
+    ]);
   });
 
   it("reads a melt's own vapour absent as not modelled and null as none (P14.T35.f)", () => {
@@ -303,13 +326,26 @@ describe("body_detail", () => {
     const [belt] = population("belt");
     const [halo] = population("cometary_halo");
     expect(ring?.type === "ring" && ring.inner_edge_m < ring.outer_edge_m).toBe(true);
-    // Its plane's normal, a unit vector, as every server from the 22 → 23 batch sends it.
-    const normal = ring?.type === "ring" ? ring.normal : undefined;
-    expect(normal && Math.hypot(...normal)).toBeCloseTo(1, 12);
     expect(belt?.type === "belt" && belt.members.state).toBe("ok");
     expect(halo?.type === "cometary_halo" && halo.comets).toBeGreaterThan(0);
     const planet = bodies.find((body) => body.kind.type === "planet");
     expect(planet?.population).toEqual({ state: "not_applicable" });
+  });
+
+  it("carries the ring's plane's normal as a unit vector", () => {
+    const { bodies } = response("system_bodies_populated", "system_bodies");
+    const ring = bodies.flatMap((body) =>
+      body.population.state === "ok" && body.population.value.type === "ring"
+        ? [body.population.value]
+        : [],
+    )[0];
+    // As every server from the 22 → 23 batch sends it.
+    const normal = ring?.normal;
+    if (normal === undefined) {
+      throw new Error("the populated answer's ring lost its plane's normal");
+    }
+
+    expect(Math.hypot(...normal)).toBeCloseTo(1, 12);
   });
 
   it("holds the same body in the list and in its whole record", () => {

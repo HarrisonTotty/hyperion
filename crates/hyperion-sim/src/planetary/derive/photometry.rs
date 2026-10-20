@@ -294,10 +294,12 @@ impl TemplateRow {
     /// computed from the registry when it is called, so that an analogue in its own state is drawn
     /// with its row's p:
     ///
-    /// - the four giants' (Jupiter, Saturn, Uranus and Neptune), class I's of Sudarsky, Burrows and
-    ///   Pinto 2000 about a 5,772 K host, every analogue's effective temperature lying below class
-    ///   I's 130 K model planet (Jupiter's 124.4 K the warmest, Hanel et al. 1981, from memory),
-    ///   where a giant's albedo is held at class I's;
+    /// - the four giants', class I's about a 5,772 K host: Jupiter's and Saturn's Sudarsky, Burrows
+    ///   and Pinto 2000's class I under its hazes, and Uranus's and Neptune's the ice giants' class
+    ///   I (decision-p14-t54a-ganymede §2–3), every analogue's effective temperature lying below
+    ///   class I's 130 K model planet, where a giant's albedo is held at class I's (Jupiter's the
+    ///   warmest: 124.4 ± 0.3 K, Hanel et al. 1981, as Guillot 2005, Annu. Rev. Earth Planet. Sci.
+    ///   33, 493, Table 2, lists it; 125.57 ± 0.07 K, Li et al. 2012);
     /// - airless ice's, `H2O`'s fresh frost;
     /// - the airless rock analogues' (the Moon's and Mercury's), an airless rocky body's whose lid
     ///   the passes do not know, the Moon's 0.11, until P14.T54.a passes T51.c's lid;
@@ -315,11 +317,13 @@ impl TemplateRow {
         let sun = Kelvin::new(SOLAR_EFFECTIVE_TEMPERATURE_K);
         let rock = SurfaceMaterial::Rock;
         let (computed, state, material) = match self.template {
-            PhaseTemplate::Jupiter
-            | PhaseTemplate::Saturn
-            | PhaseTemplate::Uranus
-            | PhaseTemplate::Neptune => (
-                Some(area_mix::class_i_bond(sun)),
+            PhaseTemplate::Jupiter | PhaseTemplate::Saturn => (
+                Some(area_mix::class_i_bond(sun, PlanetClass::GasGiant)),
+                SurfaceState::GasEnvelope,
+                rock,
+            ),
+            PhaseTemplate::Uranus | PhaseTemplate::Neptune => (
+                Some(area_mix::class_i_bond(sun, PlanetClass::IceGiant)),
                 SurfaceState::GasEnvelope,
                 rock,
             ),
@@ -452,8 +456,8 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
         valid_to: Radians::new(130.0 * DEG),
         provisional: false,
         source: "Mallama and Hilton 2018, eqs. 8–9, joined at 12°, to 130°; Mallama et al. 2017, \
-                 Table 7; measured Bond albedo 0.343 (Hanel et al. 1981), the generator's gas \
-                 envelope 0.34",
+                 Table 7; measured Bond albedo 0.503 ± 0.012 (Li et al. 2018; Hanel et al. 1981's \
+                 0.343 superseded), the generator's hazy class I 0.48",
     },
     TemplateRow {
         template: PhaseTemplate::Saturn,
@@ -468,8 +472,8 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
         valid_to: Radians::new(150.0 * DEG),
         provisional: false,
         source: "Mallama and Hilton 2018, eqs. 11–12, the globe without rings, joined at 6°, to \
-                 150°; Mallama et al. 2017, Table 7; measured Bond albedo 0.342 (NASA's fact \
-                 sheet), the generator's gas envelope 0.34",
+                 150°; Mallama et al. 2017, Table 7; measured Bond albedo 0.41 ± 0.02 (Wang et \
+                 al. 2024; NASA's fact sheet's 0.342 older), the generator's hazy class I 0.48",
     },
     TemplateRow {
         template: PhaseTemplate::Uranus,
@@ -484,8 +488,8 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
         valid_to: Radians::new(154.0 * DEG),
         provisional: false,
         source: "Mallama and Hilton 2018, eq. 15 at a sub-latitude of 0, to 154°; Mallama et al. \
-                 2017, Table 7; measured Bond albedo 0.300 (NASA's fact sheet), the generator's \
-                 gas envelope 0.34",
+                 2017, Table 7; measured Bond albedo 0.349 ± 0.016 (Irwin et al. 2025; NASA's \
+                 fact sheet's 0.300 older), the generator's ice-giant class I 0.32",
     },
     TemplateRow {
         template: PhaseTemplate::Neptune,
@@ -500,8 +504,8 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
         valid_to: Radians::new(133.0 * DEG),
         provisional: false,
         source: "Mallama and Hilton 2018, eq. 17, to 133°; Mallama et al. 2017, Table 7; \
-                 measured Bond albedo 0.290 (Pearl and Conrath 1991), the generator's gas \
-                 envelope 0.34",
+                 measured Bond albedo 0.290 ± 0.067 (Pearl and Conrath 1991), the generator's \
+                 ice-giant class I 0.32",
     },
     TemplateRow {
         template: PhaseTemplate::AirlessIce,
@@ -1109,8 +1113,10 @@ mod tests {
     /// (b) A snowball states a ratio within 5% of 1 (0.99). An airless-ice body states `p_V` `q_V`
     /// ÷ A = 0.43 × 0.80 ÷ `A_ref`, its reference the fresh `H2O` frost's about a Sun (0.832,
     /// P14.T51.b's area mix), where Ganymede's measured Bond albedo, whose p the row draws, is
-    /// 0.35 (0.98 at it): a stated check, recorded. The rest of the rule; two calls agree bit for
-    /// bit.
+    /// 0.35 (0.98 at it): a stated check, recorded in the bless note. Its owner is the weathered
+    /// icy regolith, P14.T49.m (decision-p14-t54a-ganymede §1b), whose darker frost brings the
+    /// reference toward the measured; until then the closed form stands. The rest of the rule; two
+    /// calls agree bit for bit.
     #[test]
     fn the_borrowed_curves_keep_their_ratios() {
         let ice =
@@ -1165,8 +1171,9 @@ mod tests {
     }
 
     /// P14.T51.b: each template's reference is the Bond albedo the area mix gives its analogue
-    /// about a Sun, where its rule changes it in closed form (the giants' class I of Sudarsky,
-    /// Burrows and Pinto, airless ice's fresh `H2O` frost), read from the registry, and the airless
+    /// about a Sun, where its rule changes it in closed form (the gas giants' hazy class I of
+    /// Sudarsky, Burrows and Pinto and the ice giants' class I, decision-p14-t54a-ganymede §2–3;
+    /// airless ice's fresh `H2O` frost), read from the registry, and the airless
     /// rock analogues' the Moon's 0.11 while no lid is known; the rest are their state's table
     /// albedo, and the snowball's Europa's 0.68. An analogue in its own state at its reference is
     /// drawn with its row's p.
@@ -1178,12 +1185,14 @@ mod tests {
         for template in PhaseTemplate::ALL {
             let reference = template.row().reference_bond().value();
             let expected = match template {
-                PhaseTemplate::Jupiter
-                | PhaseTemplate::Saturn
-                | PhaseTemplate::Uranus
-                | PhaseTemplate::Neptune => {
-                    area_mix::class_i_bond(Kelvin::new(SOLAR_EFFECTIVE_TEMPERATURE_K))
-                }
+                PhaseTemplate::Jupiter | PhaseTemplate::Saturn => area_mix::class_i_bond(
+                    Kelvin::new(SOLAR_EFFECTIVE_TEMPERATURE_K),
+                    PlanetClass::GasGiant,
+                ),
+                PhaseTemplate::Uranus | PhaseTemplate::Neptune => area_mix::class_i_bond(
+                    Kelvin::new(SOLAR_EFFECTIVE_TEMPERATURE_K),
+                    PlanetClass::IceGiant,
+                ),
                 PhaseTemplate::AirlessIce => water,
                 PhaseTemplate::Moon | PhaseTemplate::Mercury | PhaseTemplate::Magma => {
                     SurfaceState::Airless.albedo(rock).value()

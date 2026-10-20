@@ -2567,7 +2567,7 @@ mod tests {
     /// needs the generated Saturn's ice line within (123 ÷ 170)² of Titan's distance, 10.6 of
     /// Saturn's 60,268 km equatorial radii (decision-ammonia-line; NASA's Saturn fact sheet). The
     /// generated line lies at 4.5 of them, so Titan formed near 80 K. Its air is read at its own
-    /// bulk, as from version 23 (P14.T56.c's follow-up).
+    /// bulk (P14.T56.c's follow-up, in force since P14.T54.a deleted the moons' hold).
     #[test]
     fn the_table_s_titan_forms_below_123_k_and_keeps_a_bar_of_nitrogen() {
         use crate::planetary::derive::atmosphere::{
@@ -2600,14 +2600,16 @@ mod tests {
     /// that keeps their measured radii. At the median rank that solve gives Ganymede 2,281 km
     /// against its own 2,653 km, so it held 3.6 bar (2.8 of N₂, 0.8 of CH₄) before the ammonia line
     /// and 0.31 bar, mostly CH₄, under it; at the lowest ranks Ganymede held 9.4 bar (0.39 under
-    /// the line) and Callisto 7.4. Read at its own radius, 2,574–2,731 km across the ranks, the airless body's
-    /// N₂ is at λ 22.3–23.6 at its 548 K exobase, under the threshold of 25. At the lowest ranks a
-    /// snowball's 513 K exobase would hold it (λ 25.2 at 2,574 km); the passes, which start from
-    /// an albedo of 0.3 (`BondAlbedo::BEFORE_ATMOSPHERES`), settle on the airless state.
+    /// the line) and Callisto 7.4. Read at its own radius, 2,574–2,731 km across the ranks, the
+    /// airless body's N₂ is at λ 22.3–23.6 at its 548 K exobase, under the threshold of 25. At the
+    /// lowest ranks a snowball's 513 K exobase would hold it (λ 25.2 at 2,574 km); the passes,
+    /// which start from an albedo of 0.3 (`BondAlbedo::BEFORE_ATMOSPHERES`), settle on the airless
+    /// state.
     ///
-    /// Under P14.T51.b's area mix their frost is brighter than T13.c's ice, their exobase colder, and
-    /// where a rank's N₂ passes Jeans's test there the passes settle on a snowball instead: those
-    /// ranks are printed, a finding for main at P14.T54.a's bless, and the rest asserted airless.
+    /// Under P14.T51.b's area mix their frost is brighter than T13.c's ice, their exobase colder,
+    /// and where a rank's N₂ passes Jeans's test there the passes settle on a snowball instead:
+    /// those ranks are printed, a finding for main at P14.T54.a's bless, and the rest asserted
+    /// airless.
     #[test]
     fn the_table_s_ganymede_and_callisto_stay_airless() {
         use crate::planetary::derive::atmosphere::SurfaceState;
@@ -2796,11 +2798,11 @@ mod tests {
         }
     }
 
-    /// P14.T56.c's follow-up: a Triton-like capture inside the generated Jupiter's
-    /// circumplanetary ice line (T56.c's case, at 10 Jupiter radii) takes carbon's and nitrogen's
-    /// boosts from Jupiter's zone, and its water from its own icy bulk, Triton's measured radius and
-    /// the ice its density holds (0.24), where a moon of its mass formed in the nursery there, dry,
-    /// holds the drawn inventory's water.
+    /// P14.T56.c's follow-up: a Triton-like capture inside the generated Jupiter's circumplanetary
+    /// ice line (T56.c's case, at 10 Jupiter radii) takes carbon's and nitrogen's boosts from
+    /// Jupiter's zone, and its water from its own icy bulk, Triton's measured radius and the ice
+    /// its density holds (0.24), where a moon of its mass formed in the nursery there, dry, holds
+    /// the drawn inventory's water.
     #[test]
     fn a_capture_s_water_floor_is_its_own_ice() {
         use crate::planetary::derive::atmosphere::EARTH_WATER_PER_MASS;
@@ -3446,9 +3448,10 @@ mod tests {
         );
     }
 
-    /// The table's Triton at its own inventory, about the table's Neptune: airless with no N₂ until P14.T53.c, recorded, not asserted
-    /// (decision-triton-and-e101 §1.6). Its cheap invariants are: the airless state, a finite
-    /// albedo in [0, 1), and passes that converge within the plain passes (`Converged`, P14.T51.h).
+    /// The table's Triton at its own inventory, about the table's Neptune: airless with no N₂ until
+    /// P14.T53.c, recorded, not asserted (decision-triton-and-e101 §1.6). Its cheap invariants are:
+    /// the airless state, a finite albedo in [0, 1), and passes that converge within the plain
+    /// passes (`Converged`, P14.T51.h).
     #[test]
     fn the_table_s_triton_at_its_own_inventory_is_recorded() {
         let volatiles = MoonVolatiles {

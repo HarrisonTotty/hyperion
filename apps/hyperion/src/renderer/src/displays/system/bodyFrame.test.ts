@@ -9,6 +9,7 @@ import type { SystemBody } from "../../lib/system/model";
 import { localFrameAt } from "../../geometry/frame";
 import { dot, norm, scale, sub, vec3, type Vec3 } from "../../geometry/vec3";
 import {
+  FIXTURE_RING_NORMAL,
   FIXTURE_SYSTEM,
   populatedBodies,
   populatedBodiesWith,
@@ -332,7 +333,7 @@ describe("bodyScene", () => {
   it("draws the fixture's ring in the plane its normal gives, without a pole", () => {
     const [ring] = sceneOf().annuli ?? [];
 
-    expect(ring?.normal).toEqual(vec3(0.5906558005684119, 0.7906802819028946, 0.1610913314391793));
+    expect(ring?.normal).toEqual(FIXTURE_RING_NORMAL);
   });
 
   it("draws a ring under a tilted pole in the plane its normal gives, not the equator's", () => {

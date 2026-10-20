@@ -3015,9 +3015,9 @@ impl PlanetarySystem {
     }
 
     /// The bulk the moon `moon`, whose parent is as `parent` says, states, at which its inventory,
-    /// atmosphere and tides are read (P14.T56.c's follow-up, P14.T56.d): a regular moon's as its derivation gives it, and a giant-impact
-    /// moon's or a capture's radius and fractions as its record's bulk
-    /// ([`moon_bulk_of`](Self::moon_bulk_of)) states them.
+    /// atmosphere and tides are read (P14.T56.c's follow-up, P14.T56.d): a regular moon's as its
+    /// derivation gives it, and a giant-impact moon's or a capture's radius and fractions as its
+    /// record's bulk ([`moon_bulk_of`](Self::moon_bulk_of)) states them.
     #[must_use]
     fn moon_own_bulk(moon: &MoonPart, parent: &ParentNow) -> MoonBulk {
         match Self::stated_moon_bulk(moon, parent) {
@@ -3310,16 +3310,16 @@ struct ParentNow {
 }
 
 /// The bulk composition hook of a body of mass fractions `fractions` and element inventory
-/// `inventory` (P14.T50.a) in the system of `ctx`, at its \[Fe/H\] and \[α/Fe\] (P14.T23).
+/// `elements` (P14.T50.a) in the system of `ctx`, at its \[Fe/H\] and \[α/Fe\] (P14.T23).
 #[must_use]
 fn bulk_composition(
     ctx: &SystemContext,
     fractions: MassFractions,
-    inventory: ElementInventory,
+    elements: ElementInventory,
 ) -> Section<BulkComposition> {
     Section::Ok(BulkComposition::new(
         fractions,
-        inventory,
+        elements,
         ctx.fe_h(),
         ctx.alpha_fe(),
     ))
@@ -3387,10 +3387,10 @@ impl SurfaceInterior {
     }
 
     /// The interior of the moon `moon`, derived as `derived`: its tide is its derivation's,
-    /// P14.T17.b's (science-p14-t24b-laws §1.1's `q_tid`) at its own tides (P14.T56.d), and a regular
-    /// moon's ocean is its flag's ([`DerivedMoon::subsurface`]: its branch's at its whole heat
-    /// flow, decision-p14-moons §F-ocean F3); no rule publishes another moon's ocean, though its
-    /// tides read one.
+    /// P14.T17.b's (science-p14-t24b-laws §1.1's `q_tid`) at its own tides (P14.T56.d), and a
+    /// regular moon's ocean is its flag's ([`DerivedMoon::subsurface`]: its branch's at its whole
+    /// heat flow, decision-p14-moons §F-ocean F3); no rule publishes another moon's ocean, though
+    /// its tides read one.
     #[must_use]
     fn of_moon(moon: &MoonPart, derived: &DerivedMoon) -> Self {
         let subsurface_ocean = match moon.satellite.moon() {

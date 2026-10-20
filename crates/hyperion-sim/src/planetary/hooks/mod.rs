@@ -75,25 +75,25 @@ use crate::units::Dex;
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct BulkComposition {
     fractions: MassFractions,
-    inventory: ElementInventory,
+    elements: ElementInventory,
     fe_h: Dex,
     alpha_fe: Option<Dex>,
 }
 
 impl BulkComposition {
     /// The composition of a body of mass fractions `fractions` and element inventory
-    /// `inventory`, about a host of \[Fe/H\] `fe_h` and \[α/Fe\] `alpha_fe` (`None` for a host
+    /// `elements`, about a host of \[Fe/H\] `fe_h` and \[α/Fe\] `alpha_fe` (`None` for a host
     /// with no stellar abundances of its own, as [`SystemContext::alpha_fe`](crate::planetary::SystemContext::alpha_fe) keeps it).
     #[must_use]
     pub const fn new(
         fractions: MassFractions,
-        inventory: ElementInventory,
+        elements: ElementInventory,
         fe_h: Dex,
         alpha_fe: Option<Dex>,
     ) -> Self {
         Self {
             fractions,
-            inventory,
+            elements,
             fe_h,
             alpha_fe,
         }
@@ -111,7 +111,7 @@ impl BulkComposition {
     /// [`element_inventory`](Self::element_inventory), its view ([`ElementInventory::volatiles`]).
     #[must_use]
     pub const fn inventory(&self) -> &VolatileInventory {
-        self.inventory.volatiles()
+        self.elements.volatiles()
     }
 
     /// The element inventory at the time (P14.T50.a): its eleven elements by reservoir, its stored
@@ -119,7 +119,7 @@ impl BulkComposition {
     /// ([`DerivedBody::element_inventory`](crate::planetary::derive::DerivedBody::element_inventory)).
     #[must_use]
     pub const fn element_inventory(&self) -> &ElementInventory {
-        &self.inventory
+        &self.elements
     }
 
     /// The host's \[Fe/H\], dex: the system's, as drawn (plan 06).

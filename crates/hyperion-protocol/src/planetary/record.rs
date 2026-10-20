@@ -583,7 +583,7 @@ pub struct BodyDetailDto {
 pub(crate) mod tests {
     use serde_json::{Value, json};
 
-    pub(crate) use super::surface::tests::jupiter_envelope;
+    pub(crate) use super::surface::tests::{earth_condensates, jupiter_envelope};
     use super::surface::tests::{
         earth_surface, earth_surface_json, jupiter_envelope_json, sub_neptune_envelope,
         sub_neptune_envelope_json, venus_surface, venus_surface_json,

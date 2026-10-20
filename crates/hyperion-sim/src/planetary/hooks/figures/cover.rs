@@ -36,10 +36,10 @@
 //!
 //! # The cloud (§4.4)
 //!
-//! The atmosphere's cloud fraction, unchanged, since its Bond albedo was solved with it: P14.T51.b's
-//! area mix's, the state's share ([`SurfaceState::cloud_fraction`]) times its condensable's
-//! availability. A cover weighted by θ or the climate here would publish one the albedo does not
-//! have.
+//! The atmosphere's cloud fraction, unchanged, since its Bond albedo was solved with it:
+//! P14.T51.b's area mix's, the state's share ([`SurfaceState::cloud_fraction`]) times its
+//! condensable's availability. A cover weighted by θ or the climate here would publish one the
+//! albedo does not have.
 
 use crate::math;
 use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceState};
@@ -444,7 +444,8 @@ pub fn potential_ocean(hypsometry: &Hypsometry, surface_water: KilogramsPerSquar
 /// water's global layer, `σ_s` ÷ [`REGIME_WATER_DENSITY`], outruns the ice that conducts its heat
 /// flow F from [`UNDER_ICE_MELTING_POINT`] to its surface at `surface_temperature`, 651 ln(273.15 K
 /// ÷ `T_s`) ÷ F ([`ICE_CONDUCTIVITY_COEFFICIENT`]). False for any other state, and with no heat
-/// flow.
+/// flow; false at and above [`UNDER_ICE_MELTING_POINT`], the formula's domain, where no shell
+/// conducts and the shell term would be negative (decision-p14-t54a-states §6.2).
 #[must_use]
 pub fn under_ice_ocean(
     state: SurfaceState,
@@ -461,7 +462,7 @@ pub fn under_ice_ocean(
         | SurfaceState::Temperate => return false,
     }
     let (f, t_s) = (heat_flow.value(), surface_temperature.value());
-    if !(f > 0.0 && t_s > 0.0) {
+    if !(f > 0.0 && t_s > 0.0 && t_s < UNDER_ICE_MELTING_POINT.value()) {
         return false;
     }
     let layer = surface_water.value() / REGIME_WATER_DENSITY.value();

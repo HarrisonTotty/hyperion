@@ -38,6 +38,7 @@ fn assert_same_shade(a: &HostShade, b: &HostShade) {
     for (x, y) in a.giants.iter().zip(&b.giants) {
         assert_same_bits(*x, *y);
     }
+    assert_same_bits(a.ice_giant, b.ice_giant);
     assert_same_bits(a.water_cloud, b.water_cloud);
     assert_same_bits(a.cloud_column.value(), b.cloud_column.value());
 }
@@ -367,6 +368,8 @@ fn several_hosts_weigh_by_their_flux() {
         let mean = f64::midpoint(alone.giants[class], 3.0 * dwarf.giants[class]) / 2.0;
         assert!((both.giants[class] - mean).abs() < 1e-15);
     }
+    let mean = f64::midpoint(alone.ice_giant, 3.0 * dwarf.ice_giant) / 2.0;
+    assert!((both.ice_giant - mean).abs() < 1e-15);
     let mut bright = HostShadeSum::EMPTY;
     bright.add(flux(40.0), sun);
     let bright = bright.finish();
@@ -384,20 +387,35 @@ fn several_hosts_weigh_by_their_flux() {
 }
 
 /// Every one of Sudarsky, Burrows and Pinto's Fiducial albedos is reproduced at its tabled host and
-/// its class's model planet; the hosts interpolate linearly and clamp beyond M4V and A8V; the
-/// planets clamp below class I's 130 K and above class V's 1,700 K.
+/// its class's model planet, class I's times its stand-ins (decision-p14-t54a-ganymede §2–3): the
+/// hazes' 0.48 ÷ 0.57 for a gas giant and a sub-Neptune, the ice giants' 0.32 ÷ 0.57 for an ice
+/// giant, which classes II to V leave alone; the hosts interpolate linearly and clamp beyond M4V
+/// and A8V; the planets clamp below class I's 130 K and above class V's 1,700 K.
 #[test]
 fn every_sudarsky_node_is_reproduced_at_each_tabled_host() {
     for (row, &host) in SUDARSKY_HOSTS_K.iter().enumerate() {
         let shade = HostShade::of_host(kelvin(host));
         for (class, &planet) in SUDARSKY_PLANETS_K.iter().enumerate() {
-            let bond = giant_bond(&shade, kelvin(planet));
-            let table = SUDARSKY_BOND[row][class];
-            assert!(
-                (bond - table).abs() < 1e-12,
-                "{host} K, class {class}: {bond}"
-            );
+            for (body, ratio) in [
+                (PlanetClass::GasGiant, CLASS_I_HAZE_RATIO),
+                (PlanetClass::SubNeptune, CLASS_I_HAZE_RATIO),
+                (PlanetClass::IceGiant, ICE_GIANT_CLASS_I_RATIO),
+            ] {
+                let bond = giant_bond(&shade, kelvin(planet), body);
+                let table = SUDARSKY_BOND[row][class] * if class == 0 { ratio } else { 1.0 };
+                assert!(
+                    (bond - table).abs() < 1e-12,
+                    "{host} K, class {class}, {body:?}: {bond}"
+                );
+            }
         }
+    }
+    // Their stated values: class I about M4V, G2V and A8V under the hazes and for an ice giant.
+    for (row, hazy, ice) in [(0, 0.32, 0.213), (3, 0.48, 0.32), (5, 0.531, 0.354)] {
+        let shade = HostShade::of_host(kelvin(SUDARSKY_HOSTS_K[row]));
+        let at = |class| giant_bond(&shade, kelvin(SUDARSKY_PLANETS_K[0]), class);
+        assert!((at(PlanetClass::GasGiant) - hazy).abs() < 5e-4, "{row}");
+        assert!((at(PlanetClass::IceGiant) - ice).abs() < 5e-4, "{row}");
     }
     let between = sudarsky_bonds(kelvin(f64::midpoint(5_770.0, 6_240.0)));
     assert!((between[0] - 0.58).abs() < 1e-12, "{between:?}");
@@ -409,9 +427,44 @@ fn every_sudarsky_node_is_reproduced_at_each_tabled_host() {
         }
     }
     let g2 = HostShade::of_host(kelvin(5_770.0));
-    assert!((giant_bond(&g2, kelvin(50.0)) - 0.57).abs() < 1e-12);
-    assert!((giant_bond(&g2, kelvin(3_000.0)) - 0.55).abs() < 1e-12);
-    assert!((class_i_bond(kelvin(5_772.0)) - 0.570_085).abs() < 1e-6);
+    let giant = PlanetClass::GasGiant;
+    assert!((giant_bond(&g2, kelvin(50.0), giant) - 0.48).abs() < 1e-12);
+    assert!((giant_bond(&g2, kelvin(50.0), PlanetClass::IceGiant) - 0.32).abs() < 1e-12);
+    assert!((giant_bond(&g2, kelvin(3_000.0), giant) - 0.55).abs() < 1e-12);
+    assert!((giant_bond(&g2, kelvin(3_000.0), PlanetClass::IceGiant) - 0.55).abs() < 1e-12);
+    // About a Sun, 5,772 K: the Fiducial 0.570 085 times each ratio, and a one-host shade's class I
+    // is `class_i_bond`'s to the bit.
+    let sun = kelvin(5_772.0);
+    assert!((class_i_bond(sun, giant) - 0.570_085 * 0.48 / 0.57).abs() < 1e-6);
+    assert!((class_i_bond(sun, PlanetClass::IceGiant) - 0.570_085 * 0.32 / 0.57).abs() < 1e-6);
+    let shade = HostShade::of_host(sun);
+    for class in [giant, PlanetClass::IceGiant] {
+        assert_same_bits(
+            giant_bond(&shade, kelvin(50.0), class),
+            class_i_bond(sun, class),
+        );
+    }
+}
+
+/// An ice giant takes the ice giants' class I only at and below class I's 130 K model planet: above
+/// it, its albedo runs to class II's as a gas giant's does, and at 250 K and above the two are the
+/// same (decision-p14-t54a-ganymede §3).
+#[test]
+fn an_ice_giant_s_class_i_joins_class_ii() {
+    let g2 = HostShade::of_host(kelvin(5_770.0));
+    let (gas, ice) = (PlanetClass::GasGiant, PlanetClass::IceGiant);
+    let at_190 = giant_bond(&g2, kelvin(190.0), ice);
+    assert!(
+        (at_190 - f64::midpoint(0.32, 0.81)).abs() < 1e-12,
+        "{at_190}"
+    );
+    assert!(at_190 < giant_bond(&g2, kelvin(190.0), gas));
+    for t in [250.0, 400.0, 1_500.0] {
+        assert_same_bits(
+            giant_bond(&g2, kelvin(t), ice),
+            giant_bond(&g2, kelvin(t), gas),
+        );
+    }
 }
 
 /// A 1,200 K giant about a G2V star takes class IV's 0.03, between IV's and V's inclusive; a 1,500
@@ -419,15 +472,16 @@ fn every_sudarsky_node_is_reproduced_at_each_tabled_host() {
 #[test]
 fn a_hot_giant_lies_between_its_classes() {
     let g2 = HostShade::of_host(kelvin(5_770.0));
-    let at_1200 = giant_bond(&g2, kelvin(1_200.0));
+    let giant = PlanetClass::GasGiant;
+    let at_1200 = giant_bond(&g2, kelvin(1_200.0), giant);
     assert!((at_1200 - 0.03).abs() < 1e-12, "{at_1200}");
     assert!((0.03..=0.55).contains(&at_1200));
-    let at_1500 = giant_bond(&g2, kelvin(1_500.0));
+    let at_1500 = giant_bond(&g2, kelvin(1_500.0), giant);
     assert!(at_1500 > 0.03 && at_1500 < 0.55, "{at_1500}");
     for node in SUDARSKY_PLANETS_K {
         let (below, above) = (
-            giant_bond(&g2, kelvin(node - 1e-9)),
-            giant_bond(&g2, kelvin(node + 1e-9)),
+            giant_bond(&g2, kelvin(node - 1e-9), giant),
+            giant_bond(&g2, kelvin(node + 1e-9), giant),
         );
         assert!((above - below).abs() < 1e-9, "{node} K");
     }

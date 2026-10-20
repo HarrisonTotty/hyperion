@@ -40,8 +40,7 @@
 //! with no loop.
 //!
 //! [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at) publishes them with
-//! the surface conditions, under the same hold until the batch's bump, and passes their heat
-//! flow to the conditions' night floor.
+//! the surface conditions, and passes their heat flow to the conditions' night floor.
 //!
 //! # The impactors (P14.T48.f)
 //!
@@ -142,8 +141,8 @@ use crate::substance::{self, SubstanceId};
 use crate::units::consts::METRES_PER_AU;
 use crate::units::{
     Dex, EarthMasses, Gigayears, GravitationalParameter, Kelvin, Kilograms, KilogramsPerCubicMetre,
-    KilogramsPerSquareMetre, Metres, MetresPerSecond, MetresPerSecondSquared, PerSquareKilometre,
-    Radians, Seconds, WattsPerSquareMetre, Years,
+    KilogramsPerSquareMetre, Metres, MetresPerSecond, MetresPerSecondSquared, Pascals,
+    PerSquareKilometre, Radians, Seconds, WattsPerSquareMetre, Years,
 };
 
 pub mod cover;
@@ -2246,16 +2245,21 @@ impl GlobalFigures {
 
     /// [`with_surface`](Self::with_surface), with its ocean and ices from P14.T51.a's published
     /// condensates `condensates` where they are given, as the record gives them
-    /// ([`condensates_under`](Self::condensates_under)).
+    /// ([`condensates_under`](Self::condensates_under)): the cover by substance, from the
+    /// condensates by their rule (decision-p14-t54a-water-consistency §4, W1–W3).
     ///
-    /// - The liquids are the condensates' ([`Condensates::surface_liquids`]), with water's ocean
-    ///   under a `Snowball`'s ice ([`cover::under_ice_ocean`]) at its potential ocean where they hold
-    ///   no liquid water.
-    /// - The ices are the condensates' ([`Condensates::surface_ices`]), with T24.b's water ice
-    ///   ([`cover::ice_fraction`]) where they hold none, as an icy body's crust is whose water the
-    ///   partition does not hold (decision-p14-t51a-partition §2).
-    /// - Each list is scaled down, in proportion, where it would cover more than the whole surface:
-    ///   ices of several substances compete for the same cold zones.
+    /// - The liquids are the condensates' ([`Condensates::surface_liquids`]), in the entries'
+    ///   order, with water's ocean under a `Snowball`'s ice ([`cover::under_ice_ocean`]) at its
+    ///   potential ocean appended where they hold no liquid water, its water inside the `H2O`
+    ///   solid (W3 (b)).
+    /// - The ices are the condensates' ([`Condensates::surface_ices`]), in the entries' order, with
+    ///   T24.b's water ice ([`cover::ice_fraction`]) appended where they hold none, as an icy
+    ///   body's crust is, or a `Snowball`'s cover, whose water the partition does not hold
+    ///   (decision-p14-t51a-partition §2; W3 (a)).
+    /// - Each list is divided by its total, its appended item included, where that total exceeds
+    ///   the whole surface (W2): ices of several substances compete for the same cold zones.
+    ///
+    /// Nothing else is appended; P14.T53.c ends both appended items.
     #[must_use]
     pub(crate) fn with_surface_under(
         self,
@@ -2555,7 +2559,8 @@ impl GlobalFigures {
     }
 
     /// The ocean fraction `f_o`, 0 to 1: the sum of [`surface_liquids`](Self::surface_liquids),
-    /// zero before the second stage.
+    /// the cover by substance, from the condensates by their rule on the record; zero before the
+    /// second stage. With [`ice_fraction`](Self::ice_fraction) it may exceed 1.
     #[must_use]
     pub fn ocean_fraction(&self) -> f64 {
         self.surface_liquids
@@ -2563,9 +2568,9 @@ impl GlobalFigures {
             .fold(0.0, |sum, &(_, f)| sum + f)
     }
 
-    /// The liquids at the surface as `(SubstanceId, area fraction)` (P14.T24.b): on the record
-    /// P14.T51.a's published liquids, with water's ocean under a `Snowball`'s ice
-    /// (`with_surface_under`); with no condensates given
+    /// The liquids at the surface as `(SubstanceId, area fraction)` (P14.T24.b): on the record the
+    /// cover by substance, from P14.T51.a's published condensates by their rule, their liquids with
+    /// water's ocean under a `Snowball`'s ice (`with_surface_under`); with no condensates given
     /// ([`with_surface`](Self::with_surface)) `H2O` alone, at the potential ocean where the body
     /// holds liquid now and zero otherwise; empty before the second stage.
     #[must_use]
@@ -2573,8 +2578,8 @@ impl GlobalFigures {
         &self.surface_liquids
     }
 
-    /// The ice fraction, 0 to 1: the sum of [`surface_ices`](Self::surface_ices), zero before the
-    /// second stage.
+    /// The ice fraction, 0 to 1: the sum of [`surface_ices`](Self::surface_ices), the cover by
+    /// substance, from the condensates by their rule on the record; zero before the second stage.
     #[must_use]
     pub fn ice_fraction(&self) -> f64 {
         self.surface_ices.iter().fold(0.0, |sum, &(_, f)| sum + f)
@@ -2588,9 +2593,10 @@ impl GlobalFigures {
         cover::ice_threshold(self.state)
     }
 
-    /// The ices at the surface as `(SubstanceId, area fraction)` (P14.T24.b): on the record
-    /// P14.T51.a's published ices, with T24.b's water ice where they hold none
-    /// (`with_surface_under`); with no condensates given `H2O` alone,
+    /// The ices at the surface as `(SubstanceId, area fraction)` (P14.T24.b): on the record the
+    /// cover by substance, from P14.T51.a's published condensates by their rule, their ices with
+    /// T24.b's water ice where they hold none (`with_surface_under`); with no condensates given
+    /// `H2O` alone,
     /// the perennial water ice of [`cover::ice_fraction`]; empty before the second stage. An ice
     /// may lie over an ocean, as R09's cover convention has it.
     #[must_use]
@@ -2925,20 +2931,9 @@ fn crater_contract(
     let gyr = |years: Years| Gigayears::new(years.value() / YEARS_PER_GIGAYEAR);
     let system_age = gyr(inputs.age);
     let n_1km = craters::lunar_chronology(gyr(surface_age), system_age) * impactors.rate();
-    // A column too thin to be a normal number screens nothing (its cutoff underflows to 0 km,
-    // which the crater contract refuses): the subnormal residue the partition can leave over an
-    // airless body, some 10⁻³²³ Pa.
-    let screening = match air.surface_pressure() {
-        Some(pressure) if pressure.value() / gravity.value() >= f64::MIN_POSITIVE => {
-            Screening::Atmosphere {
-                column_mass: KilogramsPerSquareMetre::new(pressure.value() / gravity.value()),
-            }
-        }
-        Some(_) | None => Screening::None,
-    };
     let craters = CraterParams::new(CraterParamsParts {
         n_1km,
-        screening,
+        screening: screening_of(air.surface_pressure(), gravity),
         gravity,
         k_target: impactors.k_target(),
         impact_velocity: Some(impactors.velocity()),
@@ -2948,6 +2943,23 @@ fn crater_contract(
     })
     .map_err(DeriveFiguresError::Craters)?;
     Ok((surface_age, impactors, craters))
+}
+
+/// The crater contract's screening by an air of surface pressure `pressure` over a gravity
+/// `gravity` ([`crater_contract`]): its column mass P ÷ g, and none with no air and for a column too
+/// thin to be a normal number, which screens nothing (its cutoff underflows to 0 km, which the
+/// crater contract refuses): the subnormal residue the partition can leave over an airless body,
+/// some 10⁻³²³ Pa.
+#[must_use]
+fn screening_of(pressure: Option<Pascals>, gravity: MetresPerSecondSquared) -> Screening {
+    match pressure {
+        Some(pressure) if pressure.value() / gravity.value() >= f64::MIN_POSITIVE => {
+            Screening::Atmosphere {
+                column_mass: KilogramsPerSquareMetre::new(pressure.value() / gravity.value()),
+            }
+        }
+        Some(_) | None => Screening::None,
+    }
 }
 
 /// The radius of a sphere of `kilograms` of rock at [`interior::ROCK_CORE_DENSITY`]: an icy

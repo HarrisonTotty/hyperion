@@ -134,7 +134,8 @@ pub(crate) mod tests {
     use crate::envelope::{ClientMessage, ResponseBody, ServerMessage};
     use crate::orbit::{HierarchyDto, HierarchyNodeDto};
     use crate::planetary::record::tests::{
-        SYSTEM, jupiter_envelope, planet_record, planet_summary, planet_summary_json,
+        SYSTEM, earth_condensates, jupiter_envelope, planet_record, planet_summary,
+        planet_summary_json,
     };
     use crate::planetary::zones::tests::{solar_zone, solar_zone_json};
     use crate::planetary::{BodyKindDto, BodyRecordDto, BodyStateDto};
@@ -421,7 +422,14 @@ pub(crate) mod tests {
             panic!("body_detail_response is not a body_detail response");
         };
         assert_eq!(detail.granted, DetailLevelDto::Full);
-        assert_eq!(detail.record, planet_record());
+        // The fixture's Earth carries its condensates (P14.T54.a), which `planet_record`'s surface,
+        // the later members' base, leaves absent.
+        let mut record = planet_record();
+        let SectionDto::Ok(surface) = &mut record.surface else {
+            panic!("the slice's Earth's surface is ok");
+        };
+        surface.condensates = crate::Modelled::Value(earth_condensates());
+        assert_eq!(detail.record, record);
     }
 
     /// P14.T35.e: the shared Jupiter's record is the slice's list entry for it, its surface not

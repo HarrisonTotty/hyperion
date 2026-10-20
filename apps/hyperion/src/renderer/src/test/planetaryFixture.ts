@@ -64,8 +64,8 @@ export function populatedBodies(): ResponseFor<"system_bodies"> {
 }
 
 /**
- * The slice's Earth at the `full` level: its surface `ok` (P14.T35.e, illustrative values) and its
- * envelope not applicable.
+ * The slice's Earth at the `full` level: its surface `ok` (P14.T35.e, illustrative values), with
+ * its condensates (P14.T54.a, illustrative values), and its envelope not applicable.
  */
 export function earthDetail(): ResponseFor<"body_detail"> {
   return response("body_detail_response", "body_detail");
@@ -115,6 +115,21 @@ export function populatedBodiesWith(
   const populated = populatedBodies();
   return { ...populated, bodies: populated.bodies.map(change) };
 }
+
+/**
+ * The shared fixture's ring's plane's normal, a unit vector along the galactic axes, as the
+ * populated answer sends it (P14.T56.a).
+ *
+ * @remarks
+ * It is `tiltedPole(…, 0.409).pole` for the populated answer's planet `A b`, whose orbit has
+ * i = 1.0 rad and Ω = 2.5 rad: the pole at the slice Earth's obliquity, 0.409 rad, turned from its
+ * planet's orbit normal about its ascending node.
+ */
+export const FIXTURE_RING_NORMAL: Vec3 = vec3(
+  0.5906558005684119,
+  0.7906802819028946,
+  0.1610913314391793,
+);
 
 /**
  * A change, for {@link populatedBodiesWith}, that gives the populated answer's ring the plane's

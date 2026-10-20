@@ -153,7 +153,8 @@ fn the_inventory_scales_with_the_side_of_the_snow_line() {
     .unwrap();
     let fractions = solved.fractions();
     // Formed at 1 au and at 5 au of the zero-age Sun: inside its snow line and beyond its
-    // ammonia line, where the nitrogen of either rule is the same.
+    // ammonia line, so that neither lies between the two lines, where P14.T50.c's ammonia line
+    // grades the nitrogen.
     let formed_at = |side| {
         let snow = solar_disc().snow_line();
         let au = match side {
@@ -273,8 +274,9 @@ fn the_solar_system_keeps_its_atmospheres_where_it_does() {
     }
     // The table's Ganymede, a body at 5.2 au, is a snowball at the passes' stand-ins, its nitrogen
     // and methane aloft over the isothermal stand-in climate, which has no cold trap (plan 14,
-    // P14.T49.i as built: "Ganymede, as a body at 5.2 au, now a snowball"). Printed until P14.T54.a's
-    // Batch C gives the passes the body's climate, where T13.b's airless verdict is asserted again.
+    // P14.T49.i as built: "Ganymede, as a body at 5.2 au, now a snowball"). Printed until
+    // P14.T54.a's Batch C gives the passes the body's climate, where T13.b's airless verdict is
+    // asserted again.
     eprintln!(
         "Ganymede at the passes' stand-ins: {:?}",
         found(&table, "Ganymede").atmosphere().state()
@@ -373,12 +375,15 @@ fn the_table_s_surface_temperatures_are_within_eight_per_cent() {
 fn the_greenhouse_settles_on_its_fixed_point() {
     // The passes and the 32 greenhouse steps settle: one more step moves no surface temperature of
     // the table by a part in a billion, and the albedo the published pass read is the one its
-    // atmosphere gives, to the passes' convergence (10⁻⁹ in the equilibrium temperature).
+    // atmosphere gives, to the passes' convergence: T_eq ∝ (1 − A)^¼, so a step of
+    // `ATMOSPHERE_CONVERGENCE` (10⁻⁹) of the equilibrium temperature is one of at most 4 × 10⁻⁹ in
+    // the albedo.
+    let bound = 4.0 * crate::planetary::derive::ATMOSPHERE_CONVERGENCE;
     for (name, body) in table() {
         let air = body.atmosphere();
         let (read, gave) = (body.albedo().value(), air.albedo().value());
         assert!(
-            (read - gave).abs() < 1e-8,
+            (read - gave).abs() <= bound,
             "{name}: read {read}, gave {gave}"
         );
         if air.state() == SurfaceState::Airless {
@@ -497,6 +502,7 @@ fn no_surface_is_hotter_than_its_hottest_host() {
         radius: Metres::new(1.6 * crate::units::consts::EARTH_RADIUS_M),
         material: SurfaceMaterial::Rock,
         envelope_fraction: 0.0,
+        class: PlanetClass::Rocky,
         inventory: VolatileInventory::new(
             Kilograms::ZERO,
             Kilograms::new(1e24),
@@ -548,11 +554,13 @@ fn a_young_crust_is_a_magma_ocean_and_a_giant_is_an_envelope() {
     let air = jupiter.atmosphere();
     assert_eq!(air.state(), SurfaceState::GasEnvelope);
     assert_eq!(air.surface_pressure(), None);
-    // Its albedo is class I's of Sudarsky, Burrows and Pinto about a Sun, 0.57 (P14.T51.b's area
-    // mix; T13.c's table gave 0.34), its equilibrium temperature that albedo's (about 99 K, where
-    // its measured 0.343 gives 110 K), and its surface the temperature it radiates at.
+    // Its albedo is class I's of Sudarsky, Burrows and Pinto about a Sun under its hazes, 0.48
+    // (P14.T51.b's area mix, decision-p14-t54a-ganymede §2; T13.c's table gave 0.34), its
+    // equilibrium temperature that albedo's (about 103.6 K, where its measured 0.503 ± 0.012, Li et
+    // al. 2018, Nat. Commun. 9, 3709, gives 102.4 K, and Hanel et al. 1981's superseded 0.343 gives
+    // 110 K), and its surface the temperature it radiates at.
     assert!(
-        (jupiter.albedo().value() - 0.57).abs() < 0.05,
+        (jupiter.albedo().value() - 0.48).abs() < 0.05,
         "{:?}",
         jupiter.albedo()
     );
@@ -820,6 +828,7 @@ fn runaway_earth(water: f64, age: f64, xuv: f64, equilibrium: f64) -> Atmosphere
         radius: Metres::new(crate::units::consts::EARTH_RADIUS_M),
         material: SurfaceMaterial::Rock,
         envelope_fraction: 0.0,
+        class: PlanetClass::Rocky,
         inventory: VolatileInventory::new(
             Kilograms::new(water),
             Kilograms::new(3.6e20),
@@ -1149,6 +1158,7 @@ fn cold_moon(carbon: f64, equilibrium: f64, formed: SnowLineSide, crust: Crust) 
         radius: Metres::new(2.575e6),
         material: SurfaceMaterial::Ice,
         envelope_fraction: 0.0,
+        class: PlanetClass::Icy,
         inventory: VolatileInventory::new(
             Kilograms::new(1e22),
             Kilograms::new(carbon),
@@ -1211,11 +1221,12 @@ fn methane_is_held_at_its_humidity_only_over_a_reservoir() {
 
 #[test]
 fn a_gas_envelope_and_a_body_of_no_mass_have_no_carbon_carrier() {
-    let inputs = |envelope_fraction: f64, mass: Kilograms| AtmosphereInputs {
+    let inputs = |envelope_fraction: f64, mass: Kilograms, class: PlanetClass| AtmosphereInputs {
         mass,
         radius: Metres::new(2.5e7),
         material: SurfaceMaterial::Ice,
         envelope_fraction,
+        class,
         inventory: VolatileInventory::new(
             Kilograms::new(1e22),
             Kilograms::new(1e21),
@@ -1234,10 +1245,14 @@ fn a_gas_envelope_and_a_body_of_no_mass_have_no_carbon_carrier() {
         age: SOLAR_AGE,
         hottest_host: Kelvin::new(5_772.0),
     };
-    let envelope = atmosphere(&inputs(0.1, Kilograms::new(15.0 * EARTH_MASS_KG)));
+    let envelope = atmosphere(&inputs(
+        0.1,
+        Kilograms::new(15.0 * EARTH_MASS_KG),
+        PlanetClass::IceGiant,
+    ));
     assert_eq!(envelope.state(), SurfaceState::GasEnvelope);
     assert_eq!(envelope.carbon_carrier(), None);
-    let nothing = atmosphere(&inputs(0.0, Kilograms::ZERO));
+    let nothing = atmosphere(&inputs(0.0, Kilograms::ZERO, PlanetClass::Icy));
     assert_eq!(nothing.state(), SurfaceState::Airless);
     assert_eq!(nothing.carbon_carrier(), None);
 }
@@ -1991,6 +2006,7 @@ fn earth_inputs(equilibrium: f64, insolation: Insolation) -> AtmosphereInputs {
         radius: Metres::new(crate::units::consts::EARTH_RADIUS_M),
         material: SurfaceMaterial::Rock,
         envelope_fraction: 0.0,
+        class: PlanetClass::Rocky,
         inventory: VolatileInventory::new(
             Kilograms::new(EARTH_WATER_PER_MASS * mass),
             Kilograms::new(EARTH_CARBON_DIOXIDE_PER_MASS * mass),
@@ -2047,6 +2063,7 @@ fn titan_inputs() -> AtmosphereInputs {
     titan.mass = Kilograms::new(1.345e23);
     titan.radius = Metres::new(2.575e6);
     titan.material = SurfaceMaterial::Ice;
+    titan.class = PlanetClass::Icy;
     titan.formed = SnowLineSide::Beyond;
     titan.worst_equilibrium = Kelvin::new(82.0);
     titan.inventory = VolatileInventory::new(
@@ -2271,9 +2288,9 @@ fn the_regolith_albedo_is_the_batch_s_bare_ground() {
 ///   Mercury's 0.088 and its 0.068 in V are P14.T54.b's (decision-p14-t51d-weathering §3);
 /// - Earth takes its area mix within 0.02 of 0.294 under Earth's 0.67 of cloud, its value
 ///   recorded: with no basins its water fills no sea, and its land is `basalt`'s;
-/// - Jupiter, class I of Sudarsky, Burrows and Pinto about a Sun, lies within 0.05 of 0.57,
-///   recorded against Li et al. 2018's measured 0.503 ± 0.012 (Nat. Commun. 9, 3709) and Hanel et
-///   al. 1981's 0.343 ± 0.032;
+/// - Jupiter, class I of Sudarsky, Burrows and Pinto about a Sun under its hazes, lies within 0.05
+///   of 0.48 (decision-p14-t54a-ganymede §2), recorded against Li et al. 2018's measured
+///   0.503 ± 0.012 (Nat. Commun. 9, 3709), which supersedes Hanel et al. 1981's 0.343 ± 0.032;
 /// - every body's equilibrium temperature is its albedo's, and its passes converge within the plain
 ///   passes (`Converged`, P14.T51.h); the rest are recorded.
 #[test]
@@ -2307,7 +2324,7 @@ fn under_the_batch_the_table_takes_the_area_mix() {
     let jupiter = derived(&jupiter, &disc);
     assert_eq!(jupiter.atmosphere().state(), SurfaceState::GasEnvelope);
     assert!(
-        (jupiter.albedo().value() - 0.57).abs() < 0.05,
+        (jupiter.albedo().value() - 0.48).abs() < 0.05,
         "{:?}",
         jupiter.albedo()
     );
@@ -2570,6 +2587,7 @@ fn table_earth_inputs(earth: &DerivedBody, equilibrium: Kelvin) -> AtmosphereInp
         radius: Metres::from(earth.radius()),
         material: SurfaceMaterial::of(&earth.fractions()),
         envelope_fraction: earth.fractions().envelope(),
+        class: earth.class(),
         inventory: *earth.inventory(),
         equilibrium,
         worst_equilibrium: equilibrium,

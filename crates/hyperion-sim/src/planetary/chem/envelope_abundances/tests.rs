@@ -447,10 +447,11 @@ fn envelopes_carry_the_rain_on_their_primordial_helium() {
 
 /// P14.T50.b, the fit checked: about the Sun's own ratios, the table's four giants' carbon lies
 /// within 0.15 dex of their measured C/H (Guillot et al. 2022, Table 2); the table's Jupiter rains,
-/// and at Jupiter's measured state its helium is the Galileo probe's and its oxygen, sulphur, noble
-/// gases and neon fall inside what the probe and Juno measured; Saturn, with no luminosity of its
-/// own, takes Saturn's helium; Uranus and Neptune keep protosolar helium, as Voyager's and ISO's
-/// measurements allow.
+/// at its own effective temperature within 123–128 K and its He/H₂ within 0.145–0.170
+/// (decision-p14-t54a-ganymede §2), its Ne/H stated; at Jupiter's measured state its helium is the
+/// Galileo probe's and its oxygen, sulphur, noble gases and neon fall inside what the probe and
+/// Juno measured; Saturn, with no luminosity of its own, takes Saturn's helium; Uranus and Neptune
+/// keep protosolar helium, as Voyager's and ISO's measurements allow.
 #[test]
 fn the_table_giants_match_their_measured_atmospheres() {
     let protosolar = |e: Element| e.protosolar_abundance_per_hydrogen();
@@ -467,21 +468,29 @@ fn the_table_giants_match_their_measured_atmospheres() {
     }
     let (body, mut inputs) = table_giant("Jupiter", HostAbundances::protosolar());
     assert_eq!(body.class(), PlanetClass::GasGiant);
-    let he_h2 = EnvelopeAbundances::derive(&inputs)
-        .unwrap()
-        .helium_to_molecular_hydrogen();
+    let table = EnvelopeAbundances::derive(&inputs).unwrap();
+    let he_h2 = table.helium_to_molecular_hydrogen();
     // The table's Jupiter rains, below the protosolar 0.194. Under T13.c's Bond albedo, 0.34, it
-    // was 2.3 K warmer than measured (127.84 K) and rained less than Galileo found, He/H₂ 0.171;
-    // under P14.T51.b's area mix it takes class I's 0.570 (Li et al. 2018 measured 0.503), is
-    // colder than measured and rains more, below the probe's 0.157 (printed; a finding for main
-    // at P14.T54.a's bless).
+    // was 2.3 K warmer than measured (127.84 K) and rained less than Galileo found, He/H₂ 0.171.
+    // Under P14.T51.b's area mix it takes class I's hazy 0.48 about a Sun
+    // (decision-p14-t54a-ganymede §2; Li et al. 2018 measured 0.503 ± 0.012), which puts it within
+    // 123–128 K of the measured 125.57 ± 0.07 K (Li et al. 2012) and its He/H₂ within 0.145–0.170
+    // of the probe's 0.157 (von Zahn et al. 1998). The rest of its effective temperature, about
+    // −1.6 K, is the cooling fit's internal flux, 6.84 W m⁻² against 7.485 ± 0.160 W m⁻² (Li et al.
+    // 2018), recorded, not tuned. Its Ne/H is stated against the probe's 1.24 × 10⁻⁵ (Mahaffy et
+    // al. 2000, as Atreya et al. 2016, Table 2.1, list it).
     let protosolar_he_h2 = 2.0 * protosolar(Element::He);
+    let t_eff = inputs.effective_temperature.value();
+    let neon = table.per_hydrogen(Element::Ne);
     eprintln!(
-        "the table's Jupiter: T_eff {:.3} K at a Bond albedo of {:.5}, He/H2 {he_h2:.4}",
-        inputs.effective_temperature.value(),
-        body.albedo().value()
+        "the table's Jupiter: T_eff {t_eff:.3} K at a Bond albedo of {:.5}, He/H2 {he_h2:.4}, Ne/H \
+         {neon:.4e} ({:.3} of the probe's 1.24e-5)",
+        body.albedo().value(),
+        neon / 1.24e-5
     );
     assert!(he_h2 < protosolar_he_h2, "{he_h2}");
+    assert!((123.0..=128.0).contains(&t_eff), "{t_eff} K");
+    assert!((0.145..=0.170).contains(&he_h2), "{he_h2}");
     // The rest at Jupiter's measured state.
     inputs.effective_temperature = JUPITER_EFFECTIVE_TEMPERATURE;
     inputs.surface_gravity = JUPITER_SURFACE_GRAVITY;
@@ -509,9 +518,22 @@ fn the_table_giants_match_their_measured_atmospheres() {
     ] {
         measured(e, per_h, 1.0 / 1.5, 1.5);
     }
+    // The ice giants take the ice giants' class I, 0.32 about a Sun (decision-p14-t54a-ganymede
+    // §3): Uranus lies within 56–62 K of its measured 59.1 ± 0.3 K. Neptune, about 46 K against its
+    // measured 59.3 ± 0.8 K (Pearl and Conrath 1991), emits 2.61 times what it absorbs, and the
+    // record gives a giant under 0.3 M_J no internal heat: the giants' cooling, stated, not fixed.
     for name in ["Uranus", "Neptune"] {
         let (body, inputs) = table_giant(name, HostAbundances::protosolar());
         assert_eq!(body.class(), PlanetClass::IceGiant, "{name}");
+        let t = body.equilibrium_temperature().value();
+        eprintln!(
+            "the table's {name}: T_eq {t:.3} K at a Bond albedo of {:.5}, its own heat {:?}",
+            body.albedo().value(),
+            body.effective_temperature()
+        );
+        if name == "Uranus" {
+            assert!((56.0..=62.0).contains(&t), "{name}: {t} K");
+        }
         let got = EnvelopeAbundances::derive(&inputs).unwrap();
         assert_same_bits(got.per_hydrogen(Element::He), protosolar(Element::He));
         // Uranus's helium mole fraction, 0.152 ± 0.033 (Conrath et al. 1987), as He/H₂.

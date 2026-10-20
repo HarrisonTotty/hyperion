@@ -4,9 +4,9 @@
 //! exposed, and P14.T51.a's airless branch keyed on the zonal annual maximum, not the mean.
 //!
 //! All of it is held at generator version 24 (`COLD_TRAPS_VERSION`; decision-bump-plan-after-22
-//! §1.3), so that nothing on the record moves before P14.T54.b's bump; the record's partition, which
-//! the `p14-snapshot` lane's hold kept off it until P14.T54.a, publishes P14.T51.a's condensates
-//! meanwhile.
+//! §1.3), so that nothing on the record moves before P14.T54.b's bump; the record's partition,
+//! which the `p14-snapshot` lane's hold kept off it until P14.T54.a, publishes P14.T51.a's
+//! condensates meanwhile.
 //!
 //! # Which bodies
 //!
@@ -502,8 +502,9 @@ pub(crate) struct ColdTrapBody<'a> {
 /// traps (P14.T51.f, under [`ColdTrapRules::Batch`]): P14.T51.a's publish on a body that does not
 /// qualify ([`qualifies`]), and on one that does the zonal annual maximum's branch
 /// ([`SolidEdges::Exosphere`]) with each condensable's cold-trapped ice merged in, over the field
-/// it builds once ([`ColdTrapField::of`], P14.T51.i). A body whose derivation gives no regolith
-/// albedo keeps P14.T51.a's publish. From P14.T54.b the record takes the passes' field instead
+/// it builds once ([`ColdTrapField::of`], P14.T51.i), at the regolith albedo its derivation always
+/// gives (`DerivedBody::regolith_albedo`). A body whose profile is not zonal, which has no field,
+/// keeps P14.T51.a's publish. From P14.T54.b the record takes the passes' field instead
 /// ([`publish_over`]), so that a body builds one field, not one for its passes and one here.
 #[must_use]
 pub(crate) fn publish(

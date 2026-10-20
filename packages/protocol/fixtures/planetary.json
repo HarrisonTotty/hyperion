@@ -1,5 +1,5 @@
 {
-  "description": "Plan 14's system_bodies, body_detail and body_events messages, pinned from both languages, every number at the full precision of its f64, since the server parses floats exactly (serde_json's float_roundtrip, ruling 64.7): the Rust wire-form tests of hyperion-protocol read this file and require every message to round-trip exactly, and @hyperion/protocol's tests decode it. system_bodies_response is the vertical slice's: one Sun-like star, its zone, and two planets whose label, moons and rings are not_modelled, with the system's belts and halo not_modelled; the Earth carries the rotation, figure and photometry sections (P14.T46.f, T47.d, illustrative values), and the giant keeps the form of a server before them, without the three keys. system_bodies_populated exercises every kind, state and section state a later generator version gives, its ring with its plane's normal (P14.T56.a; the client's tests remove it for an older server's), and is shapes, not a generator's output: which sections a destroyed, unbound or not-yet-formed body keeps is P14.T28's and T30's to say. body_events_response has no events, since BodyEventDto has no variant before P14.T31. The body_detail answers are one Earth at three detail levels and the slice's Jupiter: the Earth's full record carries its surface (P14.T35.e, illustrative values) and an envelope not_applicable, its mass_and_orbit record withholds both, and its contact record keeps the form of a server before P14.T35.e, with no envelope key; the Jupiter's record is its list entry with its surface not_applicable and its envelope ok (illustrative values).",
+  "description": "Plan 14's system_bodies, body_detail and body_events messages, pinned from both languages, every number at the full precision of its f64, since the server parses floats exactly (serde_json's float_roundtrip, ruling 64.7): the Rust wire-form tests of hyperion-protocol read this file and require every message to round-trip exactly, and @hyperion/protocol's tests decode it. system_bodies_response is the vertical slice's: one Sun-like star, its zone, and two planets whose label, moons and rings are not_modelled, with the system's belts and halo not_modelled; the Earth carries the rotation, figure and photometry sections (P14.T46.f, T47.d, illustrative values), and the giant keeps the form of a server before them, without the three keys. system_bodies_populated exercises every kind, state and section state a later generator version gives, its ring with its plane's normal, the pole at the slice Earth's obliquity, 0.409 rad, turned from its planet's orbit normal about its ascending node (P14.T56.a; the client's tests remove it for an older server's), and is shapes, not a generator's output: which sections a destroyed, unbound or not-yet-formed body keeps is P14.T28's and T30's to say. body_events_response has no events, since BodyEventDto has no variant before P14.T31. The body_detail answers are one Earth at three detail levels and the slice's Jupiter: the Earth's full record carries its surface (P14.T35.e, illustrative values), with its condensates (P14.T54.a, illustrative values: its ocean and its ice, the ice's trapped area sent and the ocean's absent), and an envelope not_applicable, its mass_and_orbit record withholds both, and its contact record keeps the form of a server before P14.T35.e, with no envelope key; the Jupiter's record is its list entry with its surface not_applicable and its envelope ok (illustrative values).",
   "system_bodies_request": {
     "type": "request",
     "id": 21,
@@ -1194,7 +1194,26 @@
               "effective_flow_yr": 43000000.0,
               "runoff_m_per_yr": 0.3,
               "paleo_inventory_kg_m2": 2700000.0
-            }
+            },
+            "condensates": [
+              {
+                "substance": "H2O",
+                "phase": "liquid",
+                "reservoir_kg_m2": 2652000.0,
+                "reservoir_gel_m": 2600.0,
+                "area_fraction": 0.71,
+                "seasonal": false
+              },
+              {
+                "substance": "H2O",
+                "phase": "solid",
+                "reservoir_kg_m2": 53100.0,
+                "reservoir_gel_m": 57.9,
+                "area_fraction": 0.03,
+                "trapped_area_fraction": 0.0,
+                "seasonal": false
+              }
+            ]
           }
         },
         "envelope": {

@@ -280,9 +280,9 @@ figure_pole_y = 0x3fe8e94d6d42589e  # 0.7784793027847348
 figure_pole_z = 0x3fe155fe1cb3d810  # 0.541747146663285
 moment_of_inertia_factor = 0x3fcae147ae147ae1  # 0.21
 photometry: Saturn, provisional true
-geometric_albedo_b = 0x3f9011aa5ac4a203  # 0.015692388334317197
-geometric_albedo_v = 0x3f97a737ed10d34a  # 0.023098825306266314
-geometric_albedo_r = 0x3f9aec8360f4e223  # 0.02629285125041937
+geometric_albedo_b = 0x3f9314fa4bc98063  # 0.01863471114700167
+geometric_albedo_v = 0x3f9c16926983fae7  # 0.027429855051191245
+geometric_albedo_r = 0x3f9ff8dc0322cc89  # 0.031222760859872998
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -291,7 +291,7 @@ phase_integral_v = 0x3ff5b4ba8d5a1b00  # 1.3566232224999908
 phase_integral_r = 0x3ff5b4ba8d5a1b00  # 1.3566232224999908
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3f9b05d0bae5ac0a  # 0.02638937130670275
-bond_ratio = 0x3ff2ffd93c0e5e52  # 1.1874630304281664
+bond_ratio = 0x3ff68fd1f7511000  # 1.4101123486334473
 envelope: NotModelled
 body 0501 A f I: Moon(Regular) about Some(Body(BodyIndex(1280))), Present
 mass_mearth = 0x3ed785ccda93cf6b  # 5.608238475607887e-6
@@ -2031,9 +2031,9 @@ figure_pole_y = 0x3fe8e94d6d42589e  # 0.7784793027847348
 figure_pole_z = 0x3fe155fe1cb3d810  # 0.541747146663285
 moment_of_inertia_factor = 0x3fcae147ae147ae1  # 0.21
 photometry: Saturn, provisional true
-geometric_albedo_b = 0x3f90117527928959  # 0.015691595592792627
-geometric_albedo_v = 0x3f97a6e99dee5a68  # 0.02309765840944991
-geometric_albedo_r = 0x3f9aec2a3dc5f2f6  # 0.026291522999133364
+geometric_albedo_b = 0x3f9314bb1efe0319  # 0.018633769766441242
+geometric_albedo_v = 0x3f9c16356b8b0b5a  # 0.027428469361221765
+geometric_albedo_r = 0x3f9ff872295b1083  # 0.031221183561470866
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -2042,7 +2042,7 @@ phase_integral_v = 0x3ff5b4ba8d5a1b00  # 1.3566232224999908
 phase_integral_r = 0x3ff5b4ba8d5a1b00  # 1.3566232224999908
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3f9b057743f20a0b  # 0.026388038179456823
-bond_ratio = 0x3ff2ffd93c0e5e52  # 1.1874630304281664
+bond_ratio = 0x3ff68fd1f7511000  # 1.4101123486334473
 envelope: NotModelled
 body 0501 A f I: Moon(Regular) about Some(Body(BodyIndex(1280))), Present
 mass_mearth = 0x3ed785ccda93cf6b  # 5.608238475607887e-6

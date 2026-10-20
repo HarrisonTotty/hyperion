@@ -98,12 +98,14 @@ liquid_water: boolean,
 climate_regime: ClimateRegimeDto, 
 /**
  * The ocean fraction, the share of the surface under liquid, in `[0, 1]`: the sum of
- * `surface_liquids`.
+ * `surface_liquids`, the cover by substance, from `condensates` by its rule. With
+ * `ice_fraction` it may exceed 1, since an ice may lie over an ocean.
  */
 ocean_fraction: number, 
 /**
  * The ice fraction, the share of the surface under perennial ice, in `[0, 1]`: the sum of
- * `surface_ices`. An ice may lie over an ocean.
+ * `surface_ices`, the cover by substance, from `condensates` by its rule. An ice may lie over
+ * an ocean.
  */
 ice_fraction: number, 
 /**
@@ -111,11 +113,13 @@ ice_fraction: number,
  */
 cloud_fraction: number, 
 /**
- * The liquids at the surface by substance.
+ * The liquids at the surface by substance: the cover by substance, from `condensates` by its
+ * rule, summing to at most 1.
  */
 surface_liquids: Array<SubstanceAreaDto>, 
 /**
- * The ices at the surface by substance.
+ * The ices at the surface by substance: the cover by substance, from `condensates` by its
+ * rule, summing to at most 1.
  */
 surface_ices: Array<SubstanceAreaDto>, 
 /**
@@ -177,9 +181,19 @@ vertical_structure?: VerticalStructureDto | null,
  */
 aerosols?: AerosolInventoryDto | null, 
 /**
- * The condensates at the surface, at most eight, one for each substance and phase, by
- * reservoir mass with ties by registry order, then phase (P14.T51.a); sent from P14.T54.a's
- * batch, and absent from a server whose generator does not model them.
+ * The condensates at the surface, at most eight, one for each substance and phase (P14.T51.a):
+ * by reservoir mass, largest first; ties by registry order, then solid, liquid, supercritical;
+ * the smallest dropped beyond eight. An empty list where the surface holds none, never `null`.
+ * Sent from P14.T54.a's batch, and absent from a server whose generator does not model them.
+ *
+ * `surface_liquids` and `surface_ices` are the cover they give
+ * (decision-p14-t54a-water-consistency §4, W1–W3): every liquid and every solid entry is in
+ * its list, in the entries' order, at its own area, divided by the list's total where that
+ * total exceeds 1. At most one `H2O` item is appended to each without an entry: in
+ * `surface_ices`, P14.T24.b's water ice where no `H2O` solid is listed (an ice-rich crust's
+ * own ice or a `Snowball`'s cover, whose water the partition does not hold); in
+ * `surface_liquids`, the ocean under a `Snowball`'s ice where no `H2O` liquid is listed, its
+ * water inside the `H2O` solid. Nothing else; P14.T53.c ends both.
  */
 condensates?: Array<SurfaceCondensateDto> | null, 
 /**

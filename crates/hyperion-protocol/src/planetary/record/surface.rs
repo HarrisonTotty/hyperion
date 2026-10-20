@@ -42,6 +42,11 @@ use crate::surface::ClimateModelDto;
 
 /// The state of a body's surface (plan 14's `SurfaceState`, P14.T13.c), less the gas envelope,
 /// which has no surface section: its air is the envelope section's.
+///
+/// `RunawayGreenhouse`, `Temperate` and `Snowball` are the body's insolation class against its
+/// hosts' habitable zone (P14.T12.b's limits), not its present climate: read the mean surface
+/// temperature, the ice and ocean fractions and the condensates for that, as the climate regime
+/// does (decision-p14-t54a-states). P14.T53.b makes the state follow the present climate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -51,12 +56,18 @@ pub enum SurfaceStateDto {
     MagmaOcean,
     /// A surface pressure below the airless limit: bare rock or ice.
     Airless,
-    /// Inside the runaway-greenhouse limit when water was present: the oceans lost, a thick
-    /// carbon-dioxide air, as on Venus.
+    /// Inside the runaway-greenhouse limit at the hosts' largest past luminosity when water was
+    /// present: the oceans lost, a thick carbon-dioxide air, as on Venus. About an evolved host its
+    /// present climate can be cold (decision-pre-23-review item 33).
     RunawayGreenhouse,
-    /// Between the runaway and maximum-greenhouse limits, as on Earth and Mars.
+    /// Between the runaway limit, at the hosts' largest past luminosity, and the maximum-greenhouse
+    /// limit now, as on Earth and Mars. A world here can be ice-covered, on the cold side of the
+    /// ice-albedo bistability (decision-pre-23-review item 26).
     Temperate,
-    /// Beyond the maximum-greenhouse limit: frozen, as Titan is.
+    /// Beyond the maximum-greenhouse limit now, where a carbon-dioxide and water greenhouse cannot
+    /// hold the surface above freezing (Kopparapu et al. 2013), as on Titan. Until P14.T53.a's
+    /// carbon-dioxide form, a dry carbon-dioxide world here can be published above melting with no
+    /// ice (P14.T13.c's finding "No maximum-greenhouse ceiling"; decision-p14-t51a-partition §1).
     Snowball,
     /// A steam envelope over a magma ocean (P14.T53.b): produced by no rule until that task.
     SteamEnvelope,
@@ -521,8 +532,9 @@ pub struct AerosolInventoryDto {
 }
 
 /// One condensate at a surface (plan 14, P14.T51.a's partition): a substance in one phase, with
-/// its share of the substance's reservoir at the surface, the area it covers and whether it is
-/// seasonal. Sent from P14.T54.a's batch.
+/// its share of the substance's reservoir at the surface, as a mass and as a layer, the area it
+/// covers, the part of that area in cold traps and whether it is seasonal. Sent from P14.T54.a's
+/// batch (decision-p14-t54a-water-consistency §5).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SurfaceCondensateDto {
@@ -531,22 +543,38 @@ pub struct SurfaceCondensateDto {
     pub substance: String,
     /// Its phase where it lies: `solid`, `liquid` or `supercritical`, never `vapour`.
     pub phase: SubstancePhaseDto,
+    /// Its condensed mass in this phase over the body's whole surface, kg m⁻²: the list's sort
+    /// key, and its amount where its layer is absent; 0 for a supercritical fluid. On a body whose
+    /// water froze, as `reservoir_gel_m`. Finite and not negative, and always sent.
+    pub reservoir_kg_m2: f64,
     /// Its condensed reservoir as a global equivalent layer, m, not negative: its mass over the
     /// whole surface over its grain density in its phase at the temperature it lies at, and 0 for a
     /// supercritical fluid. On a body whose water froze, the whole frozen water the partition
-    /// holds, shell and deeper ice included, until P14.T53.c divides it between the condensate,
-    /// the crust and the shell (decision-pre-23-review item 12).
+    /// holds, shell, any ocean under a `Snowball`'s ice and deeper ice included, until P14.T53.c
+    /// divides it between the condensate, the crust and the shell (decision-pre-23-review item
+    /// 12).
     ///
     /// Absent where the registry has not read the phase's density (argon's ice and oxygen's β ice
     /// among them), so that a reader takes the layer as not modelled, never as none. Optional on
-    /// the wire, as a ring's `normal` is.
+    /// the wire, as a ring's [`normal`](crate::RingDto::normal) is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub reservoir_gel_m: Option<f64>,
-    /// The share of the surface it covers, in `[0, 1]`: a liquid's by its volume over the basins,
-    /// a solid's the climate's cold area below its edge, capped by its mass; 0 for a supercritical
-    /// fluid, which is the air at the surface.
+    /// The share of the surface it covers, in `[0, 1]`: a liquid's the share of the body's basins
+    /// its layer fills (water's alone, the other liquids' together, divided by volume), so none
+    /// where its reservoir lies whole as ice; a solid's the climate's cold area below its edge,
+    /// at most its mass spread at 1.93 km of its density (but water on an ice-rich crust, which
+    /// is the crust's own ice); 0 for a supercritical fluid, which is the air at the surface and
+    /// the only entry with no mass. Entries may overlap: an ice over a sea, and ices in the same
+    /// cold zones (decision-p14-t54a-water-consistency §4, W4–W5).
     pub area_fraction: f64,
+    /// The part of `area_fraction` in cold traps (P14.T51.f), in `[0, area_fraction]`. Absent
+    /// from a server whose generator does not model cold traps, every server before P14.T54.b's
+    /// bump, which a reader takes as not modelled, never as none; from it, sent on every entry, 0
+    /// where none of the deposit lies in a cold trap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub trapped_area_fraction: Option<f64>,
     /// Whether it is seasonal: the warmest zone takes this phase off the surface, melting or
     /// subliming a solid and boiling a liquid.
     pub seasonal: bool,
@@ -698,16 +726,20 @@ pub struct BodySurfaceDto {
     /// The climate regime (P14.T48.d).
     pub climate_regime: ClimateRegimeDto,
     /// The ocean fraction, the share of the surface under liquid, in `[0, 1]`: the sum of
-    /// `surface_liquids`.
+    /// `surface_liquids`, the cover by substance, from `condensates` by its rule. With
+    /// `ice_fraction` it may exceed 1, since an ice may lie over an ocean.
     pub ocean_fraction: f64,
     /// The ice fraction, the share of the surface under perennial ice, in `[0, 1]`: the sum of
-    /// `surface_ices`. An ice may lie over an ocean.
+    /// `surface_ices`, the cover by substance, from `condensates` by its rule. An ice may lie over
+    /// an ocean.
     pub ice_fraction: f64,
     /// The cloud fraction, in `[0, 1]`.
     pub cloud_fraction: f64,
-    /// The liquids at the surface by substance.
+    /// The liquids at the surface by substance: the cover by substance, from `condensates` by its
+    /// rule, summing to at most 1.
     pub surface_liquids: Vec<SubstanceAreaDto>,
-    /// The ices at the surface by substance.
+    /// The ices at the surface by substance: the cover by substance, from `condensates` by its
+    /// rule, summing to at most 1.
     pub surface_ices: Vec<SubstanceAreaDto>,
     /// The hypsometric standard deviation `σ_h`, m, not negative, relative to the reference
     /// equipotential (P14.T48.a).
@@ -747,9 +779,19 @@ pub struct BodySurfaceDto {
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<AerosolInventoryDto>>", optional)]
     pub aerosols: Modelled<AerosolInventoryDto>,
-    /// The condensates at the surface, at most eight, one for each substance and phase, by
-    /// reservoir mass with ties by registry order, then phase (P14.T51.a); sent from P14.T54.a's
-    /// batch, and absent from a server whose generator does not model them.
+    /// The condensates at the surface, at most eight, one for each substance and phase (P14.T51.a):
+    /// by reservoir mass, largest first; ties by registry order, then solid, liquid, supercritical;
+    /// the smallest dropped beyond eight. An empty list where the surface holds none, never `null`.
+    /// Sent from P14.T54.a's batch, and absent from a server whose generator does not model them.
+    ///
+    /// `surface_liquids` and `surface_ices` are the cover they give
+    /// (decision-p14-t54a-water-consistency §4, W1–W3): every liquid and every solid entry is in
+    /// its list, in the entries' order, at its own area, divided by the list's total where that
+    /// total exceeds 1. At most one `H2O` item is appended to each without an entry: in
+    /// `surface_ices`, P14.T24.b's water ice where no `H2O` solid is listed (an ice-rich crust's
+    /// own ice or a `Snowball`'s cover, whose water the partition does not hold); in
+    /// `surface_liquids`, the ocean under a `Snowball`'s ice where no `H2O` liquid is listed, its
+    /// water inside the `H2O` solid. Nothing else; P14.T53.c ends both.
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<Vec<SurfaceCondensateDto>>>", optional)]
     pub condensates: Modelled<Vec<SurfaceCondensateDto>>,
@@ -1468,18 +1510,48 @@ pub(crate) mod tests {
         vec![SurfaceCondensateDto {
             substance: "CO2".to_owned(),
             phase: SubstancePhaseDto::Solid,
+            reservoir_kg_m2: 320.0,
             reservoir_gel_m: Some(0.2),
             area_fraction: 0.02,
+            trapped_area_fraction: Some(0.005),
             seasonal: true,
         }]
+    }
+
+    /// The shared fixture's Earth's condensates (`packages/protocol/fixtures/planetary.json`,
+    /// illustrative): its sea, then its ice, by reservoir mass, as its liquids and ices list them;
+    /// the ice sends its trapped area and the sea does not, so that the client decodes both.
+    pub(crate) fn earth_condensates() -> Vec<SurfaceCondensateDto> {
+        vec![
+            SurfaceCondensateDto {
+                substance: "H2O".to_owned(),
+                phase: SubstancePhaseDto::Liquid,
+                reservoir_kg_m2: 2_652_000.0,
+                reservoir_gel_m: Some(2_600.0),
+                area_fraction: 0.71,
+                trapped_area_fraction: None,
+                seasonal: false,
+            },
+            SurfaceCondensateDto {
+                substance: "H2O".to_owned(),
+                phase: SubstancePhaseDto::Solid,
+                reservoir_kg_m2: 53_100.0,
+                reservoir_gel_m: Some(57.9),
+                area_fraction: 0.03,
+                trapped_area_fraction: Some(0.0),
+                seasonal: false,
+            },
+        ]
     }
 
     fn condensates_json() -> Value {
         json!([{
             "substance": "CO2",
             "phase": "solid",
+            "reservoir_kg_m2": 320.0,
             "reservoir_gel_m": 0.2,
             "area_fraction": 0.02,
+            "trapped_area_fraction": 0.005,
             "seasonal": true,
         }])
     }
@@ -1672,6 +1744,42 @@ pub(crate) mod tests {
         let null: SurfaceCondensateDto = serde_json::from_value(wire).unwrap();
         assert_eq!(null, argon);
         assert_wire_form(&condensates()[0], condensates_json()[0].clone());
+    }
+
+    /// Decision-p14-t54a-water-consistency §5.2: a condensate's mass is always sent, so that a
+    /// condensate without it is refused, never read as none.
+    #[test]
+    fn a_condensate_s_mass_is_required() {
+        let mut wire = condensates_json()[0].clone();
+        wire.as_object_mut()
+            .expect("a condensate is an object")
+            .remove("reservoir_kg_m2");
+        let refused = serde_json::from_value::<SurfaceCondensateDto>(wire).unwrap_err();
+        assert!(
+            refused
+                .to_string()
+                .contains("missing field `reservoir_kg_m2`"),
+            "{refused}"
+        );
+    }
+
+    /// Decision-p14-t54a-water-consistency §5.3: a condensate's trapped area is absent until
+    /// P14.T54.b, written with no key, and a condensate without one, or with `null`, reads as
+    /// absent, as its layer does.
+    #[test]
+    fn a_condensate_s_trapped_area_is_optional_on_the_wire() {
+        let untrapped = SurfaceCondensateDto {
+            trapped_area_fraction: None,
+            ..condensates()[0].clone()
+        };
+        let mut wire = condensates_json()[0].clone();
+        wire.as_object_mut()
+            .expect("a condensate is an object")
+            .remove("trapped_area_fraction");
+        assert_wire_form(&untrapped, wire.clone());
+        wire["trapped_area_fraction"] = Value::Null;
+        let null: SurfaceCondensateDto = serde_json::from_value(wire).unwrap();
+        assert_eq!(null, untrapped);
     }
 
     /// Decision-p14-t35e-wire §1.5 item 3: an `ok` surface with a member the types lack still
@@ -2039,7 +2147,7 @@ pub(crate) mod tests {
     /// ends in a unit, or is a dimensionless quantity named as one.
     #[test]
     fn every_quantity_s_name_carries_its_unit() {
-        const DIMENSIONLESS: [&str; 24] = [
+        const DIMENSIONLESS: [&str; 25] = [
             "mole_fraction",
             "area_fraction",
             "heat_capacity_over_r",
@@ -2064,6 +2172,7 @@ pub(crate) mod tests {
             "redistribution_factor",
             "haze_tau_550",
             "flux_earth",
+            "trapped_area_fraction",
         ];
         const MORE: [&str; 5] = [
             "mantle_redox_iw",

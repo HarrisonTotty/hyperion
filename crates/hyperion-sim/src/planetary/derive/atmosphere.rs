@@ -63,6 +63,7 @@ use crate::planetary::chem::partition::{
 };
 use crate::planetary::chem::redox::SNOW_LINE_TEMPERATURE;
 use crate::planetary::context::XuvHistory;
+use crate::planetary::derive::PlanetClass;
 use crate::planetary::derive::composition::{MassFractions, SnowLineSide};
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::params::{ICY_WATER_FRACTION, THIN_ENVELOPE_FRACTION};
@@ -201,8 +202,11 @@ pub fn jeans_parameter(mass: Kilograms, radius: Metres, gas: Gas, exobase: Kelvi
 }
 
 /// The Jeans parameter above which a species is retained over a system's age: 25 (plan 14,
-/// P14.T13.b, "a threshold near 25"), fixed by the Solar System table with
-/// [`EXOBASE_MULTIPLE`]: Ganymede's nitrogen, at λ ≈ 23, is lost, and Titan's, at λ ≈ 31, kept.
+/// P14.T13.b, "a threshold near 25"), fixed by T13.c's Solar System table with
+/// [`EXOBASE_MULTIPLE`] at that table's albedos: Ganymede's nitrogen, airless at its measured Bond
+/// albedo of 0.35 (λ ≈ 23), is lost, and Titan's, a snowball at 0.50 (λ ≈ 31), kept. The passes'
+/// area-mix albedo does not keep that calibration, which P14.T54.a's Batch C re-bases on the
+/// irradiation (decision-p14-t54a-ganymede §1).
 pub const JEANS_RETENTION_THRESHOLD: f64 = 25.0;
 
 /// The exobase temperature as a multiple of the equilibrium temperature: 5 (the lane's, fixed by
@@ -210,8 +214,10 @@ pub const JEANS_RETENTION_THRESHOLD: f64 = 25.0;
 ///
 /// It is larger than a real exobase's ratio (Earth's 1,000 K is about 4 `T_eq`, Titan's 150–180 K
 /// about 2), because Jeans escape alone must stand in for the non-thermal losses, sputtering and
-/// pick-up ions, that empty the Moon and Mercury. Within the table it has a window of 4.6–5.5:
-/// below it Ganymede keeps its nitrogen, above it Titan loses its own.
+/// pick-up ions, that empty the Moon and Mercury. Within T13.c's table, at its albedos (Ganymede's
+/// measured 0.35, Titan's 0.50), it has a window of 4.6–5.5: below it Ganymede keeps its nitrogen,
+/// above it Titan loses its own. The window does not hold under the passes' area-mix albedo, which
+/// P14.T54.a's Batch C re-bases on the irradiation (decision-p14-t54a-ganymede §1).
 pub const EXOBASE_MULTIPLE: f64 = 5.0;
 
 /// The index by which the X-ray and ultraviolet energy a body has received beyond Earth's raises
@@ -742,8 +748,8 @@ pub fn volatile_inventory(
 /// carbon and the 86th of its nitrogen under [`VOLATILE_SCATTER_DEX`] (decision-p14-moons §4.1).
 /// P14.T13.c's 18.5 was fitted at the median's 57 bar, and put the measured Venus at 778 K.
 ///
-/// It replaced P14.T13.c's 18.5, which version 22 read, with the `p14-snapshot` lane's hold
-/// (P14.T54.a).
+/// It replaced P14.T13.c's 18.5, which version 22 read, when P14.T54.a deleted the
+/// `p14-snapshot` lane's hold.
 pub const GREENHOUSE_CARBON_DIOXIDE: f64 = 14.86;
 
 /// The greenhouse constant of water vapour, per √bar: 4.47, fitted on Earth's measured state after
@@ -774,8 +780,8 @@ pub const GREENHOUSE_CARBON_DIOXIDE: f64 = 14.86;
 /// The fit reads none of the passes' stand-ins, and the generated Earth is not fitted: through the
 /// batch's passes at their stand-in surface (no basins, so no sea; a Bond albedo of 0.2798) the
 /// table's Earth reaches about 290.6 K, which P14.T54.a's real inputs settle and its test holds
-/// to 288 ± 2 K. It replaced P14.T13.c's 2.89, which version 22 read, with the `p14-snapshot`
-/// lane's hold (P14.T54.a).
+/// to 288 ± 2 K. It replaced P14.T13.c's 2.89, which version 22 read, when P14.T54.a deleted the
+/// `p14-snapshot` lane's hold.
 ///
 /// [`WATER_SURFACE_HUMIDITY`]: crate::planetary::chem::partition::WATER_SURFACE_HUMIDITY
 pub const GREENHOUSE_WATER: f64 = 4.47;
@@ -1162,6 +1168,11 @@ pub const SILICATE_SOLIDUS: Kelvin = Kelvin::new(1_394.0);
 pub const GREENHOUSE_STEPS: u32 = 32;
 
 /// What a body's surface is, which sets its albedo and cloud (P14.T13.c).
+///
+/// `RunawayGreenhouse`, `Temperate` and `Snowball` are the body's insolation class against its
+/// hosts' habitable zone (P14.T12.b's limits), not its present climate: read the mean surface
+/// temperature, the ice and ocean fractions and the condensates for that, as the climate regime
+/// does (decision-p14-t54a-states). P14.T53.b makes the state follow the present climate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SurfaceState {
     /// A hydrogen and helium envelope of at least 0.1% of the mass: no solid surface (a gas giant,
@@ -1172,12 +1183,18 @@ pub enum SurfaceState {
     MagmaOcean,
     /// A surface pressure below [`AIRLESS_PRESSURE`]: bare rock or ice.
     Airless,
-    /// Inside the runaway-greenhouse limit when water was present: the oceans lost, a thick
-    /// carbon-dioxide atmosphere, as on Venus.
+    /// Inside the runaway-greenhouse limit at the hosts' largest past luminosity when water was
+    /// present: the oceans lost, a thick carbon-dioxide air, as on Venus. About an evolved host its
+    /// present climate can be cold (decision-pre-23-review item 33).
     RunawayGreenhouse,
-    /// Between the runaway and maximum-greenhouse limits, as on Earth and Mars.
+    /// Between the runaway limit, at the hosts' largest past luminosity, and the maximum-greenhouse
+    /// limit now, as on Earth and Mars. A world here can be ice-covered, on the cold side of the
+    /// ice-albedo bistability (decision-pre-23-review item 26).
     Temperate,
-    /// Beyond the maximum-greenhouse limit: frozen, as Titan is.
+    /// Beyond the maximum-greenhouse limit now, where a carbon-dioxide and water greenhouse cannot
+    /// hold the surface above freezing (Kopparapu et al. 2013), as on Titan. Until P14.T53.a's
+    /// carbon-dioxide form, a dry carbon-dioxide world here can be published above melting with no
+    /// ice (P14.T13.c's finding "No maximum-greenhouse ceiling"; decision-p14-t51a-partition §1).
     Snowball,
 }
 
@@ -1278,6 +1295,10 @@ pub struct AtmosphereInputs {
     pub material: SurfaceMaterial,
     /// Its hydrogen and helium envelope's share of its mass at the time.
     pub envelope_fraction: f64,
+    /// Its class ([`PlanetClass::of`]), which only a gas envelope's Bond albedo reads: an ice
+    /// giant takes the measured ice giants' class I, every other class Sudarsky, Burrows and
+    /// Pinto's (decision-p14-t54a-ganymede §3).
+    pub class: PlanetClass,
     /// Its volatile inventory ([`volatile_inventory`]).
     pub inventory: VolatileInventory,
     /// The side of the snow line its volatiles formed on, which its inventory and, beyond the
@@ -1666,12 +1687,12 @@ fn whole_column(inventory: &ColumnInventory) -> PartialPressures {
 
 /// The surface temperature, partial pressures and optical depth of a body's air under the
 /// condensate partition (P14.T51.a): the temperature iterated [`GREENHOUSE_STEPS`] times upward
-/// from the equilibrium temperature through
-/// the grey greenhouse its partial pressures give, each step's partial pressures the partition's
-/// of the airborne inventory `inventory`, as column weights ([`Airborne::column`]), over the climate
-/// `climate` gives for the step's temperature and the previous step's partial pressures, on the
-/// ground `ground`, and held by `saturate` at the hottest host's. The greenhouse's constants are
-/// P14.T57.a's fits ([`GreenhouseConstants::FITTED`]).
+/// from the equilibrium temperature through the grey greenhouse its partial pressures give, each
+/// step's partial pressures the partition's of the airborne inventory `inventory`, as column
+/// weights ([`Airborne::column`]), over the climate `climate` gives for the step's temperature and
+/// the previous step's partial pressures, on the ground `ground`, and held by `saturate` at the
+/// hottest host's. The greenhouse's constants are P14.T57.a's fits
+/// ([`GreenhouseConstants::FITTED`]).
 ///
 /// The climate reads the column of the step before, so that a column's contrasts can follow its
 /// pressure: a thin air's large contrast holds its dominant condensable at a cold trap, which keeps
@@ -1781,7 +1802,7 @@ fn partitioned_greenhouse(
 ///     AtmosphereInputs, Crust, Insolation, SurfaceMaterial, SurfaceState, VolatileDraws,
 ///     atmosphere, earth_xuv_fluence, formation_temperature, volatile_inventory,
 /// };
-/// use hyperion_sim::planetary::derive::{SnowLineSide, composition};
+/// use hyperion_sim::planetary::derive::{PlanetClass, SnowLineSide, composition};
 /// use hyperion_sim::units::{
 ///     EarthMasses, EarthFluxes, EarthRadii, Kelvin, Kilograms, Metres, WattsPerSquareMetre, Years,
 /// };
@@ -1799,6 +1820,7 @@ fn partitioned_greenhouse(
 ///     radius: Metres::new(EARTH_RADIUS_M),
 ///     material: SurfaceMaterial::of(&fractions),
 ///     envelope_fraction: 0.0,
+///     class: PlanetClass::of(EarthMasses::new(1.0), &fractions),
 ///     inventory,
 ///     formed: SnowLineSide::Inside,
 ///     equilibrium: Kelvin::new(255.0),

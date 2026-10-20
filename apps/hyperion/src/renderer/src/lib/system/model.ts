@@ -705,13 +705,24 @@ export interface SurfaceCondensate {
   readonly substance: string;
   readonly phase: CondensatePhase;
   /**
-   * Its reservoir as a global equivalent layer; on a body whose water froze, its whole frozen
-   * water, shell and deeper ice included, until plan 14's P14.T53.c divides it. `null` where the
-   * server's registry has not read the phase's density, which is not modelled, never none.
+   * Its condensed mass in this phase over the whole surface, kg m⁻²: the list's sort key, and its
+   * only amount where its layer is not modelled.
    */
-  readonly reservoirGelM: number | null;
+  readonly reservoirKgM2: number;
+  /**
+   * Its reservoir as a global equivalent layer; on a body whose water froze, its whole frozen
+   * water, shell, any ocean under a Snowball's ice and deeper ice included, until plan 14's
+   * P14.T53.c divides it. Not modelled where the server's registry has not read the phase's
+   * density, never none.
+   */
+  readonly reservoirGelM: Pending<number>;
   /** In `[0, 1]`. */
   readonly areaFraction: number;
+  /**
+   * The part of its area in cold traps, in `[0, areaFraction]`; not modelled until plan 14's
+   * P14.T54.b.
+   */
+  readonly trappedAreaFraction: Pending<number>;
   readonly seasonal: boolean;
 }
 

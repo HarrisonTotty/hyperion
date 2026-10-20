@@ -47,6 +47,7 @@ use crate::planetary::drift::{DriftingOrbit, OrbitDrift};
 use crate::planetary::fate::BodyState;
 use crate::planetary::frames::BodyFixedFrame;
 use crate::planetary::hooks::DetailSeed;
+use crate::planetary::hooks::cold_traps::ColdTrapRules;
 use crate::planetary::hooks::figures::GlobalFigures;
 use crate::planetary::hooks::surface::{ClimateRegime, SurfaceConditions};
 use crate::planetary::index::{BodyIndex, BodySub};
@@ -609,7 +610,7 @@ pub struct Surface {
     figures: GlobalFigures,
     vertical_structure: Modelled<VerticalStructure>,
     aerosols: Modelled<AerosolInventory>,
-    condensates: Modelled<Condensates>,
+    condensates: Condensates,
     crust: Modelled<CrustComposition>,
     modifiers: Modelled<SurfaceModifiers>,
     biosphere: Modelled<Biosphere>,
@@ -641,7 +642,7 @@ impl Surface {
             figures,
             vertical_structure: Modelled::NotModelled,
             aerosols: Modelled::NotModelled,
-            condensates: Modelled::Ok(condensates),
+            condensates,
             crust: Modelled::NotModelled,
             modifiers: Modelled::NotModelled,
             biosphere: Modelled::NotModelled,
@@ -707,11 +708,24 @@ impl Surface {
     /// The condensates at the surface by substance and phase (P14.T51.a's published partition, on
     /// the record from P14.T54.a): at most eight entries, by reservoir mass, each with its
     /// reservoir, its global equivalent layer where the registry has read its density, its area
-    /// and whether it is seasonal. Always [`Modelled::Ok`] on a record's surface; an empty list is
-    /// a surface with none.
+    /// and whether it is seasonal. Every record's surface holds them, unlike the members of later
+    /// tasks; an empty list is a surface with none.
     #[must_use]
-    pub const fn condensates(&self) -> Modelled<&Condensates> {
-        self.condensates.as_ref()
+    pub const fn condensates(&self) -> &Condensates {
+        &self.condensates
+    }
+
+    /// Whether a record's condensates carry their cold-trapped areas
+    /// ([`CondensateEntry::trapped_area_fraction`](crate::planetary::chem::partition::CondensateEntry::trapped_area_fraction)):
+    /// not while P14.T51.f's cold traps are held off the record, until P14.T54.b's bump at
+    /// generator version 24, when every entry's is 0 for want of the traps, not for want of a
+    /// trap, and a reader takes it as not modelled (decision-p14-t54a-water-consistency §5.3).
+    #[must_use]
+    pub fn cold_traps_modelled() -> bool {
+        match ColdTrapRules::in_force() {
+            ColdTrapRules::Held => false,
+            ColdTrapRules::Batch => true,
+        }
     }
 
     /// The crust by substance (P14.T51.c), not modelled until it lands.

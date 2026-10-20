@@ -2565,6 +2565,38 @@ fn europa_s_surface_at_its_own_tides_is_its_calibration() {
     assert!((f - ICE_RESURFACING_HEAT_FLOW.value()).abs() < 1e-6, "{f}");
 }
 
+/// P14.T54.a's B3 fix, a regression test: a column too thin to be a normal number screens nothing,
+/// and the contract it gives is accepted; from the least normal column, `f64::MIN_POSITIVE` × g,
+/// the air screens, at that column, and that contract is accepted too. The partition's subnormal
+/// residue over an airless body, some 10⁻³²³ Pa, once gave a cutoff of 0 km, which the contract
+/// refuses.
+#[test]
+fn a_subnormal_column_screens_nothing() {
+    let g = MetresPerSecondSquared::new(4.0);
+    let moon = the_giant_impact_moon();
+    let contract = |screening| {
+        CraterParams::new(CraterParamsParts {
+            screening,
+            gravity: g,
+            ..*moon.craters().parts()
+        })
+    };
+    for pressure in [None, Some(Pascals::ZERO), Some(Pascals::new(5e-324))] {
+        let screening = screening_of(pressure, g);
+        assert_eq!(screening, Screening::None, "{pressure:?}");
+        assert!(contract(screening).is_ok(), "{pressure:?}");
+    }
+    let least = Pascals::new(f64::MIN_POSITIVE * g.value());
+    let screening = screening_of(Some(least), g);
+    let Screening::Atmosphere { column_mass } = screening else {
+        panic!("the least normal column screens");
+    };
+    assert_same_bits(column_mass.value(), f64::MIN_POSITIVE);
+    assert!(contract(screening).is_ok(), "{screening:?}");
+    let below = Pascals::new(f64::MIN_POSITIVE.next_down() * g.value());
+    assert_eq!(screening_of(Some(below), g), Screening::None);
+}
+
 /// P14.T48.c: the shared density returns the published N☾(>1 km) at 1 km on an unscreened body at
 /// the lunar reference, and N☾ × `own_density_at_1km` ÷ `n_1km` under a map; Venus's screened
 /// density at 1 km is far below its production, 2% of it, the craters above its cutoff of some
