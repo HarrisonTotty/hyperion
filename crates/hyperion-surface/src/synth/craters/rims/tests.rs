@@ -384,25 +384,31 @@ fn a_query_sums_the_craters_reaching_it_in_list_order() {
         let rims = CoarseRims::new(header);
         let radius_m = header.figure().volumetric_radius_m();
         let level = BandLevel::new(header.level().get() + 3).unwrap();
-        let (mut sharpened, mut samples) = (0, 0);
+        // Samples across each crater's reach, and across its coarse fillet's span, where its
+        // sharpening lies (R09.T7.i), so that most of the latter are sharpened.
+        let (mut sharpened, mut samples) = ([0, 0], [0, 0]);
         for crater in field.craters().iter().take(8) {
+            let w = rims.sharpening(crater, level).coarse().fillet;
             for k in 0..24_u8 {
-                let x = 0.11 * f64::from(k);
-                let dir = near(crater, x, 0.37 * f64::from(k), radius_m);
-                let sample = rims.at(field, dir, level).unwrap();
-                assert_eq!(
-                    sample_bits(sample),
-                    sample_bits(from_the_whole_list(field, dir, level))
-                );
-                samples += 1;
-                if sample.height_m.abs() > 1.0 {
-                    sharpened += 1;
+                let across = 0.11 * f64::from(k);
+                let on_span = 1.0 - w + 2.0 * w * (f64::from(k) + 0.5) / 24.0;
+                for (n, x) in [across, on_span].into_iter().enumerate() {
+                    let dir = near(crater, x, 0.37 * f64::from(k), radius_m);
+                    let sample = rims.at(field, dir, level).unwrap();
+                    assert_eq!(
+                        sample_bits(sample),
+                        sample_bits(from_the_whole_list(field, dir, level))
+                    );
+                    samples[n] += 1;
+                    if sample.height_m.abs() > 1.0 {
+                        sharpened[n] += 1;
+                    }
                 }
             }
         }
         assert!(
-            2 * sharpened > samples,
-            "{sharpened} of {samples} samples sharpened"
+            sharpened[0] > 0 && 2 * sharpened[1] > samples[1],
+            "{sharpened:?} of {samples:?} samples sharpened, across the reaches and on the spans"
         );
     }
 }
@@ -634,9 +640,14 @@ fn on_an_oblate_figure_the_ground_integral_is_off_by_a_small_residual() {
     // one's, whose ground within a chord is not π c² (R09.T7.c's deferred finding): about
     // f² (c ÷ ρ)² + f (c ÷ ρ)⁴ (the science check). Over every listed crater it stays within the
     // task's 10⁻⁶ of the cavity on the Moon-, Mars- and Earth-like figures (flattening 0.0012,
-    // 0.0059 and 0.0034; 2.5 × 10⁻⁷ measured, for the Moon-like 2,500 km basin), but on the
-    // Ceres-like world's 0.075 it is up to 3.1 × 10⁻⁵, for its 280 km crater, whose reach spans
-    // 0.76 of the body's radius: pinned here as it stands.
+    // 0.0059 and 0.0034), but on the Ceres-like world's 0.075 it is larger: pinned here as it
+    // stands. Under T7.b's compensation spread over the whole reach the worst were 2.5 × 10⁻⁷ (the
+    // Moon-like 2,500 km basin) and 3.1 × 10⁻⁵ (the Ceres-like 280 km crater, whose reach spans
+    // 0.76 of the body's radius); with it on the fillet's span (R09.T7.i), 7.3 × 10⁻⁹ (the
+    // Moon-like 323 km crater) and 7.9 × 10⁻⁶ (the Ceres-like 107 km one). The sharpening's own
+    // magnitude, which keeps the test from being vacuous, is then the rim's alone, down to
+    // 2.9 × 10⁻³ of the cavity for the Moon-like 2,500 km basin, whose coarse fillet is 0.07 of its
+    // rim radius.
     let field = one_crater();
     let crater = &field.craters()[0];
     let (volume, magnitude) = ground_integral(field, crater, BandLevel::new(8).unwrap(), 16);
@@ -658,7 +669,7 @@ fn on_an_oblate_figure_the_ground_integral_is_off_by_a_small_residual() {
             let (volume, magnitude) = ground_integral(field, crater, level, 64);
             let cavity = crater_shape(field.header().craters(), crater.diameter).cavity_volume_m3();
             assert!(
-                magnitude > 0.01 * cavity,
+                magnitude > 1e-3 * cavity,
                 "{kind:?}: {magnitude} m³ of {cavity} m³"
             );
             assert!(
@@ -696,6 +707,64 @@ fn by_pieces(first: &CraterProfile, second: &CraterProfile, f: impl Fn(f64) -> f
         }
     }
     total
+}
+
+/// ∫ F(x) x² 2x dx over `profile`'s pieces, metres: its ∫F r² dA over π R⁴, the long-wavelength
+/// moment that every isotropic low-pass of a zero-volume profile keeps.
+fn second_moment(profile: &CraterProfile) -> f64 {
+    profile
+        .breakpoints()
+        .windows(2)
+        .filter(|p| p[1] > p[0])
+        .map(|p| quadrature(p[0], p[1], |x| profile.at(x).height_m * x * x))
+        .sum()
+}
+
+/// The reference Moon's 113 km crater over its coarse band (92.6 km, which holds its fillet at one
+/// rim radius) is a depression in the coarse profile (R09.T7.i): −(d − h) at its centre, about
+/// −3,330 m (+2,165 m as built, the cone's slope carried into the Hermite and the volume put back
+/// as a dome), and below its rim and exterior; its profile at 0, 0.2, 0.6, 1, 1.5 and 2 R, beside
+/// main's Table A, and ∫F r² dA beside the fresh crater's (about 0.69 of it under the fillet
+/// through the peak, 0.555 as built), are printed, with that ratio for the first octave's other
+/// craters.
+#[test]
+fn the_reference_moon_s_113_km_crater_is_a_depression_over_its_coarse_band() {
+    let (params, figure, level) = super::super::tests::reference_moon();
+    let band = coarse_band_half_width(&figure, level);
+    assert!((band.value() / 92.6e3 - 1.0).abs() < 1e-3, "{band:?}");
+    let shape = crater_shape(&params, Metres::new(113e3));
+    let coarse = CraterProfile::filleted(shape, band);
+    let fresh = CraterProfile::filleted(shape, Metres::ZERO);
+    let row = |p: &CraterProfile| {
+        [0.0, 0.2, 0.6, 1.0, 1.5, 2.0].map(|x| format!("{:+.0}", p.at(x).height_m))
+    };
+    eprintln!(
+        "113 km on the reference Moon (d {:.0} m, h {:.0} m, d − h {:.0} m, peak {:.0} m on a \
+         base of {:.4} R, a {:.4}), filleted over {:.1} m ({} R):",
+        shape.depth().value(),
+        shape.rim_height().value(),
+        shape.floor_depth().value(),
+        shape.peak_relief().value(),
+        shape.peak_fraction(),
+        shape.exterior_width(),
+        band.value(),
+        coarse.fillet
+    );
+    eprintln!("  fresh  at 0, 0.2, 0.6, 1, 1.5, 2 R: {:?}", row(&fresh));
+    eprintln!("  coarse at 0, 0.2, 0.6, 1, 1.5, 2 R: {:?}", row(&coarse));
+    for d_km in [95.0, 113.0, 150.0, 185.0] {
+        let shape = crater_shape(&params, Metres::new(d_km * 1e3));
+        let ratio = second_moment(&CraterProfile::filleted(shape, band))
+            / second_moment(&CraterProfile::filleted(shape, Metres::ZERO));
+        eprintln!("  {d_km} km: ∫F r² dA ÷ the fresh crater's {ratio:.4}");
+    }
+    assert_same_bits(coarse.fillet, 1.0);
+    let centre = coarse.at(0.0).height_m;
+    assert_same_bits(centre, -shape.floor_depth().value());
+    for k in 0..=200 {
+        let x = 1.0 + shape.exterior_width() * f64::from(k) / 200.0;
+        assert!(centre < coarse.at(x).height_m, "at {x} R");
+    }
 }
 
 /// The per-crater forms over the whole ground (main's ruling R2 on R09.T12.e, 2026-10-19): a

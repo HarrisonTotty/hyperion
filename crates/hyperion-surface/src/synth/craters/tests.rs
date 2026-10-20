@@ -1,7 +1,8 @@
 //! The small craters' tests (plan R09, T7.b): the octaves and their levels, the density capped at
 //! saturation and the ages' windows, the cells' true areas and the placement, the realised
 //! size–frequency, the 3 × 3 search across face edges, the profile's fillet and its volume balance
-//! at every level, the height's gradient, order independence and the closed forms.
+//! at every level, the fillet through the central peak (T7.i), the height's gradient, order
+//! independence and the closed forms.
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -549,6 +550,32 @@ fn the_three_by_three_search_finds_every_crater_within_reach() {
     }
 }
 
+/// The reference Moon's crater contract, figure and coarse level, as the sim's
+/// `planetary::surface::reference::moon_like` builds them (R09.T7.i's tests): its gravity GM ÷ R²
+/// with GM 4.9028 × 10¹² m³ s⁻² and R 1,737.4 km, 1.6243 m s⁻², on the lunar non-porous target,
+/// unscreened, at `k_target` 1; its figure of that volumetric radius and flattening 0.0012; and
+/// its coarse level, 6, whose coarse band is 92.6 km. Only the gravity, the target and the
+/// screening shape a crater; the density is the lunar chronology's at its 4.4 Gyr surface.
+pub(super) fn reference_moon() -> (CraterParams, Spheroid, crate::field::CoarseLevel) {
+    let radius_m = 1_737.4e3;
+    let params = CraterParams::new(CraterParamsParts {
+        n_1km: lunar_chronology(Gigayears::new(4.4), SOLAR_SYSTEM_AGE),
+        screening: crate::craters::Screening::None,
+        gravity: hyperion_base::units::MetresPerSecondSquared::new(
+            4.902_800e12 / (radius_m * radius_m),
+        ),
+        k_target: 1.0,
+        impact_velocity: Some(crate::craters::LUNAR_IMPACT_VELOCITY),
+        projectile_density: crate::craters::LUNAR_PROJECTILE_DENSITY,
+        target: crate::craters::LUNAR_TARGET,
+        system_age: SOLAR_SYSTEM_AGE,
+    })
+    .unwrap();
+    let figure = Spheroid::from_volumetric(radius_m, 0.0012).unwrap();
+    let level = crate::field::coarse_level(Metres::new(radius_m));
+    (params, figure, level)
+}
+
 /// The crater contracts of the worlds' bodies, and a porous one.
 fn contracts() -> Vec<CraterParams> {
     let mut all: Vec<CraterParams> = WORLDS
@@ -598,20 +625,60 @@ pub(super) fn quadrature(lo: f64, hi: f64, f: impl Fn(f64) -> f64) -> f64 {
     total
 }
 
+/// The diameters over each contract's transition diameter that R09.T7.i's tests take: bowls,
+/// transitional craters, central-peak craters, peak rings while the cone fades (9–13 `D_t`) and
+/// after, to 30 `D_t`.
+const TRANSITION_RATIOS: [f64; 17] = [
+    0.5, 0.8, 1.0, 1.2, 1.5, 2.0, 3.0, 4.0, 6.0, 8.5, 9.0, 10.0, 11.0, 12.0, 13.0, 20.0, 30.0,
+];
+
+/// The fillets' half-widths in rim radii that R09.T7.i's tests take, from 0.05 to past the hold at
+/// min(1, a), with some about the switch at 1 − `c_p` (0.74–0.81 for central peaks and peak rings).
+const FILLET_RATIOS: [f64; 13] = [
+    0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.75, 0.78, 0.8, 0.9, 0.95, 1.0, 3.0,
+];
+
+/// Each contract's shapes at [`TRANSITION_RATIOS`] of its transition diameter.
+fn transition_shapes() -> Vec<CraterShape> {
+    let mut all = Vec::new();
+    for params in contracts() {
+        let transition = crate::craters::transition_diameter(&params);
+        for ratio in TRANSITION_RATIOS {
+            all.push(crater_shape(&params, transition * ratio));
+        }
+    }
+    all
+}
+
 /// Every profile the balance tests check: each contract's shapes at [`DIAMETERS_M`], filleted at
-/// every level of an Earth's figure for craters of 0, 0.3 and 4 Gyr.
+/// every level of an Earth's figure for craters of 0, 0.3 and 4 Gyr; and its shapes at
+/// [`TRANSITION_RATIOS`], fresh, filleted at every level and at each of [`FILLET_RATIOS`] of their
+/// rim radius (R09.T7.i).
 fn profiles() -> Vec<CraterProfile> {
     let mut all = Vec::new();
+    let bands: Vec<Metres> = (0..=MAX_LEVEL)
+        .map(|level| band_half_width(&Spheroid::WGS84, BandLevel::new(level).unwrap()))
+        .collect();
     for params in contracts() {
         for d in DIAMETERS_M {
             let shape = crater_shape(&params, Metres::new(d));
             for age in [0.0, 0.3, 4.0] {
                 let diffusion = diffusion_length(Gigayears::new(age));
-                for level in 0..=MAX_LEVEL {
-                    let band = band_half_width(&Spheroid::WGS84, BandLevel::new(level).unwrap());
+                for &band in &bands {
                     all.push(CraterProfile::new(shape, band, diffusion));
                 }
             }
+        }
+    }
+    for shape in transition_shapes() {
+        for &band in &bands {
+            all.push(CraterProfile::filleted(shape, band));
+        }
+        for ratio in FILLET_RATIOS {
+            all.push(CraterProfile::filleted(
+                shape,
+                shape.diameter() * (0.5 * ratio),
+            ));
         }
     }
     all
@@ -653,17 +720,27 @@ fn every_crater_integrates_to_zero_at_every_level() {
 
 #[test]
 fn the_fillet_s_closed_form_is_its_quadrature() {
+    // Δ, the volume the fillet (and, where its inner end lies within the cone's base, the faded
+    // cone) took, by quadrature of each piece against the closed forms, and the compensation
+    // c = −15 Δ ÷ (32 w) whose own volume over the span is 32 w c ÷ 15 (R09.T7.i).
+    let mut into_cone = 0;
     for profile in profiles() {
         if profile.fillet <= 0.0 {
             continue;
         }
         let shape = profile.shape();
-        let (x0, x1) = (1.0 - profile.fillet, 1.0 + profile.fillet);
+        let w = profile.fillet;
+        let (x0, x1) = (1.0 - w, 1.0 + w);
+        let cone = shape.peak_fraction();
+        let fades = x0 < cone;
+        assert_eq!(profile.cone_kept.is_some(), fades, "{shape:?} over {w} R");
         let scale = shape.rim_height().value() * (0.8 + 0.2 * shape.exterior_width());
-        // The fresh profile's moment, piece by piece, against quadrature between its pieces.
-        let mut cuts = vec![x0, x1];
-        for x in [shape.peak_fraction(), shape.floor_fraction(), 1.0] {
-            if x > x0 && x < x1 {
+        // The fresh profile's moment from the centre where the cone fades, or from x₀, piece by
+        // piece, against quadrature between its pieces.
+        let lower = if fades { 0.0 } else { x0 };
+        let mut cuts = vec![lower, x1];
+        for x in [cone, shape.floor_fraction(), 1.0] {
+            if x > lower && x < x1 {
                 cuts.push(x);
             }
         }
@@ -673,30 +750,50 @@ fn the_fillet_s_closed_form_is_its_quadrature() {
             .map(|p| quadrature(p[0], p[1], |x| shape.relief_and_slope(x).0))
             .sum();
         assert!(
-            (shape.moment(x0, x1) - fresh).abs() <= 1e-9 * scale,
+            (shape.moment(lower, x1) - fresh).abs() <= 1e-9 * scale,
             "{shape:?}: {} against {fresh}",
-            shape.moment(x0, x1)
+            shape.moment(lower, x1)
         );
-        // The Hermite's moment, and so the compensation.
+        // The Hermite's moment; and where the cone fades, the floor's to x₀ and the kept cone's.
         let hermite_volume = quadrature(x0, x1, |x| {
             hermite(x0, x1 - x0, profile.inner, profile.outer, x).0
         });
-        let change = hermite_volume - fresh;
-        let reach = 1.0 + shape.exterior_width();
-        let expected = -3.0 * change / (reach * reach);
+        let filleted = if fades {
+            into_cone += 1;
+            let floor_m = shape.floor_depth().value();
+            assert_same_bits(profile.inner.0, -floor_m);
+            assert_same_bits(profile.inner.1, 0.0);
+            let kept = profile.cone_kept.unwrap();
+            assert_same_bits(kept, x0 / cone);
+            assert!((0.0..1.0).contains(&kept), "{kept}");
+            let relief_m = kept * shape.peak_relief().value();
+            hermite_volume
+                + quadrature(0.0, x0, |_| -floor_m)
+                + quadrature(0.0, cone, |x| relief_m * (1.0 - x / cone))
+        } else {
+            let start = shape.relief_and_slope(x0);
+            assert_same_bits(profile.inner.0, start.0);
+            assert_same_bits(profile.inner.1, start.1);
+            hermite_volume
+        };
+        let change = filleted - fresh;
+        let expected = -15.0 * change / (32.0 * w);
         assert!(
             (profile.compensation().value() - expected).abs() <= 1e-9 * scale,
-            "{shape:?}: compensation {:?} against {expected}",
+            "{shape:?} over {w} R: compensation {:?} against {expected}",
             profile.compensation()
         );
-        // The compensating term's own volume, c r₁² ÷ 3.
+        // The compensating term's own volume over the span, 32 w c ÷ 15.
         let c = profile.compensation().value();
-        let term = quadrature(0.0, reach, |x| {
-            let b = 1.0 - (x / reach) * (x / reach);
+        let term = |x: f64| {
+            let u = (x - 1.0) / w;
+            let b = 1.0 - u * u;
             c * b * b
-        });
-        assert!((term - c * reach * reach / 3.0).abs() <= 1e-12 * scale.max(c.abs()));
+        };
+        let volume = quadrature(x0, 1.0, term) + quadrature(1.0, x1, term);
+        assert!((volume - 32.0 * w * c / 15.0).abs() <= 1e-12 * scale.max(c.abs()));
     }
+    assert!(into_cone > 400, "{into_cone} profiles with the cone faded");
 }
 
 #[test]
@@ -793,6 +890,267 @@ fn the_fillet_is_held_inside_the_crater() {
         // A filleted rim is lower than the fresh crest.
         assert!(narrow.at(1.0).height_m < shape.rim_height().value());
     }
+}
+
+#[test]
+fn a_central_cone_s_base_lies_within_its_floor() {
+    // Where a fillet's inner end lies within the cone's base, the profile there is the coneless
+    // shape, which is the floor only if the base lies within the floor (`crater_shape` holds it
+    // there): from 0.5 to 100 `D_t` on every contract (R09.T7.i).
+    let mut peaked = 0;
+    for params in contracts() {
+        let transition = crate::craters::transition_diameter(&params);
+        for k in 0..=400 {
+            let ratio = 0.5 * math::powf(200.0, f64::from(k) / 400.0);
+            let shape = crater_shape(&params, transition * ratio);
+            let (cone, floor) = (shape.peak_fraction(), shape.floor_fraction());
+            if shape.peak_relief().value() > 0.0 {
+                peaked += 1;
+                assert!(cone > 0.0 && cone <= floor, "{shape:?}");
+            } else {
+                assert_same_bits(cone, 0.0);
+            }
+        }
+    }
+    assert!(peaked > 400, "{peaked} shapes with a peak");
+}
+
+/// The breakpoints R09.T7.i's profiles need, sorted: the centre, the cone's base, the floor's
+/// edge, the fillet's ends, the rim and the reach, each held to [0, the reach].
+fn expected_breakpoints(profile: &CraterProfile) -> Vec<f64> {
+    let shape = profile.shape();
+    let reach = 1.0 + shape.exterior_width();
+    let mut points: Vec<f64> = [
+        0.0,
+        shape.peak_fraction(),
+        shape.floor_fraction(),
+        1.0 - profile.fillet,
+        1.0,
+        1.0 + profile.fillet,
+        reach,
+    ]
+    .map(|x| x.clamp(0.0, reach))
+    .to_vec();
+    points.sort_by(f64::total_cmp);
+    points
+}
+
+#[test]
+fn the_fillet_through_the_peak_is_continuous_and_fresh_outside_its_span() {
+    // Height and slope continuous at 1 − w and 1 + w, from the floor and the faded cone at 1 − w
+    // where the cone fades, to 10⁻⁹ relative between a point and its neighbouring float; the
+    // fresh shape outside [1 − w, 1 + w], or outside [0, 1 + w] where the cone fades, to the bit;
+    // and the breakpoints bracketing the pieces (R09.T7.i).
+    let mut into_cone = 0;
+    for profile in profiles() {
+        let shape = profile.shape();
+        let g = profile.relief;
+        let at = |x: f64| profile.height_and_slope(x);
+        assert_eq!(
+            profile.breakpoints().map(bits).to_vec(),
+            expected_breakpoints(&profile)
+                .into_iter()
+                .map(bits)
+                .collect::<Vec<_>>(),
+            "{shape:?}"
+        );
+        if profile.fillet <= 0.0 {
+            continue;
+        }
+        let depth = shape.depth().value();
+        let (x0, x1) = (1.0 - profile.fillet, 1.0 + profile.fillet);
+        let fades = profile.cone_kept.is_some();
+        into_cone += usize::from(fades);
+        let mut ends = vec![(x1.next_down(), x1)];
+        if x0 > 0.0 {
+            ends.push((x0, x0.next_up()));
+        } else {
+            // From the centre itself, with no point of its own.
+            ends.push((0.0, 1e-12));
+        }
+        for (below, above) in ends {
+            let (lo, hi) = (at(below), at(above));
+            let slope_scale = depth.max(lo.1.abs()).max(hi.1.abs());
+            assert!(
+                (lo.0 - hi.0).abs() <= 1e-9 * g * depth,
+                "{shape:?} over {} R at {below}: {lo:?} against {hi:?}",
+                profile.fillet
+            );
+            assert!(
+                (lo.1 - hi.1).abs() <= 1e-9 * g * slope_scale,
+                "{shape:?} over {} R at {below}: {lo:?} against {hi:?}",
+                profile.fillet
+            );
+        }
+        let reach = 1.0 + shape.exterior_width();
+        let mut xs: Vec<f64> = (0..=300)
+            .map(|k| reach * 1.1 * f64::from(k) / 300.0)
+            .collect();
+        xs.extend([0.0, x0, x1, reach]);
+        for x in xs {
+            let outside = x >= x1 || (!fades && x <= x0);
+            if !outside {
+                continue;
+            }
+            let (h, s) = at(x);
+            let (h0, s0) = shape.relief_and_slope(x);
+            assert_same_bits(h, g * h0);
+            assert_same_bits(s, g * s0);
+        }
+    }
+    assert!(into_cone > 400, "{into_cone} profiles with the cone faded");
+}
+
+#[test]
+fn the_profile_is_continuous_across_the_switch_into_the_cone() {
+    // Either side of w = (1 − `c_p`) R the profile agrees to 10⁻⁹ of the depth at every x: the
+    // cone's kept share p = (1 − w) ÷ `c_p` is 1 at the switch (main's ruling: a cone dropped
+    // outright would jump by its whole relief there).
+    let mut switched = 0;
+    for shape in transition_shapes() {
+        let cone = shape.peak_fraction();
+        if cone <= 0.0 {
+            continue;
+        }
+        let rim_m = 0.5 * shape.diameter().value();
+        let held = num::min(1.0, shape.exterior_width());
+        if (1.0 - cone) * (1.0 + 1e-12) >= held {
+            // The switch lies at or past the hold: a cone of a few 10⁻¹⁷ rim radii at 0.8 `D_t`,
+            // or a porous transitional crater's exterior narrower than 1 − `c_p`.
+            continue;
+        }
+        let switch_m = (1.0 - cone) * rim_m;
+        let short = CraterProfile::filleted(shape, Metres::new(switch_m * (1.0 - 1e-12)));
+        let into = CraterProfile::filleted(shape, Metres::new(switch_m * (1.0 + 1e-12)));
+        assert!(short.cone_kept.is_none(), "{shape:?}");
+        let kept = into.cone_kept.expect("the fillet reaches into the cone");
+        assert!(kept > 1.0 - 1e-9, "{kept}");
+        let depth = shape.depth().value();
+        let reach = 1.0 + shape.exterior_width();
+        for k in 0..=4_000 {
+            let x = reach * f64::from(k) / 4_000.0;
+            let (a, b) = (short.at(x).height_m, into.at(x).height_m);
+            assert!(
+                (a - b).abs() <= 1e-9 * depth,
+                "{shape:?} at {x}: {a} against {b}"
+            );
+        }
+        // And the fade is continuous within the cone: the centre's height at p from 1 to 0.
+        let mut previous = short.at(0.0).height_m;
+        for k in 1..=100 {
+            let w = num::min((1.0 - cone) + cone * f64::from(k) / 100.0, held);
+            let profile = CraterProfile::filleted(shape, Metres::new(w * rim_m));
+            let centre = profile.at(0.0).height_m;
+            assert!(
+                (centre - previous).abs() <= 0.05 * depth,
+                "{shape:?} over {w} R: {centre} after {previous}"
+            );
+            previous = centre;
+        }
+        switched += 1;
+    }
+    assert!(switched > 30, "{switched} shapes with a cone");
+}
+
+#[test]
+fn every_crater_filleted_through_its_peak_is_a_depression() {
+    // Over 0.5–30 `D_t` and every fillet from 0.05 rim radii to held: the centre lies below the
+    // surroundings and below the profile at every x from the rim outwards (R09.T7.i; as built, a
+    // held fillet's Hermite from the cone's top inverted the craters of `D_b` to 2 `D_b`).
+    let mut checked = 0;
+    for shape in transition_shapes() {
+        let rim_m = 0.5 * shape.diameter().value();
+        let reach = 1.0 + shape.exterior_width();
+        let mut fillets: Vec<Metres> = FILLET_RATIOS
+            .iter()
+            .map(|&r| Metres::new(r * rim_m))
+            .collect();
+        fillets.extend(
+            (0..=MAX_LEVEL)
+                .map(|level| band_half_width(&Spheroid::WGS84, BandLevel::new(level).unwrap())),
+        );
+        for band in fillets {
+            let profile = CraterProfile::filleted(shape, band);
+            let centre = profile.at(0.0).height_m;
+            assert!(centre < 0.0, "{shape:?} over {band:?}: {centre} m");
+            for k in 0..=400 {
+                let x = 1.0 + (reach - 1.0) * f64::from(k) / 400.0;
+                let h = profile.at(x).height_m;
+                assert!(
+                    centre < h,
+                    "{shape:?} over {band:?} at {x}: {centre} against {h}"
+                );
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked > 2_000, "{checked} profiles");
+}
+
+#[test]
+fn the_moments_are_exact_on_every_piece() {
+    // `square_moment` and `difference_moments` against an independent five-point rule on 16
+    // panels of each piece between the pieces' own ends (`expected_breakpoints`), to 10⁻⁹: every
+    // piece is one polynomial of degree at most 4 (R09.T7.i), so both rules are exact to rounding.
+    let mut checked = 0;
+    for shape in transition_shapes() {
+        let rim_m = 0.5 * shape.diameter().value();
+        let ground = CraterProfile::filleted(shape, GROUND_FILLET);
+        let held = CraterProfile::filleted(shape, Metres::new(1e12));
+        for ratio in FILLET_RATIOS {
+            let profile = CraterProfile::filleted(shape, Metres::new(ratio * rim_m));
+            let pieces = |first: &CraterProfile, second: &CraterProfile| {
+                let mut points = expected_breakpoints(first);
+                points.extend(expected_breakpoints(second));
+                points.sort_by(f64::total_cmp);
+                points
+            };
+            let square: f64 = pieces(&profile, &profile)
+                .windows(2)
+                .filter(|p| p[1] > p[0])
+                .map(|p| {
+                    quadrature(p[0], p[1], |x| {
+                        profile.at(x).height_m * profile.at(x).height_m
+                    })
+                })
+                .sum();
+            let closed = profile.square_moment();
+            assert!(
+                (closed / square - 1.0).abs() <= 1e-9,
+                "{shape:?} over {ratio} R: {closed} against {square}"
+            );
+            for other in [&ground, &held] {
+                let (heights, slopes) = super::rims::difference_moments(other, &profile);
+                if heights <= 0.0 {
+                    // Both held at min(1, a) rim radii.
+                    assert_same_bits(other.fillet, profile.fillet);
+                    continue;
+                }
+                let (mut h2, mut s2) = (0.0, 0.0);
+                for p in pieces(other, &profile).windows(2).filter(|p| p[1] > p[0]) {
+                    h2 += quadrature(p[0], p[1], |x| {
+                        let d = other.at(x).height_m - profile.at(x).height_m;
+                        d * d
+                    });
+                    s2 += quadrature(p[0], p[1], |x| {
+                        let d = other.at(x).slope_m_per_rim_radius
+                            - profile.at(x).slope_m_per_rim_radius;
+                        d * d
+                    });
+                }
+                assert!(
+                    (heights / h2 - 1.0).abs() <= 1e-9,
+                    "{shape:?} over {ratio} R: {heights} against {h2}"
+                );
+                assert!(
+                    (slopes / s2 - 1.0).abs() <= 1e-9,
+                    "{shape:?} over {ratio} R: {slopes} against {s2}"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 1_000, "{checked} pairs");
 }
 
 #[test]
@@ -1405,10 +1763,13 @@ fn one_crater_s_sharpening_is_its_two_profiles_sampled() {
     // One crater's sharpening moments, the ground's fillet against a level's, against brute force
     // over the two profiles. Radially, by the midpoint rule on 2 × 10⁵ panels blind to their
     // pieces: to 10⁻⁶ in the heights, and to 10⁻⁴ in the slopes, whose difference jumps where a
-    // level's fillet passes a floor's or a peak's edge. Over the plane, on a 400 × 400 grid with
-    // the slope along one axis by central differences, so that half the radial slope moment is a
-    // random direction's: to 5 × 10⁻³, the grid's own error on a fillet 16 cells wide (measured
-    // 2.2 × 10⁻³ at worst; R09.T7.h).
+    // level's fillet passes a floor's or a peak's edge. Over the plane, on a 1,200 × 1,200 grid
+    // with the slope along one axis by central differences, so that half the radial slope moment
+    // is a random direction's: to 5 × 10⁻³, the grid's own error on a fillet 48 cells wide and on
+    // the ground's, about one cell wide on the 1 km crater. R09.T7.h measured 2.2 × 10⁻³ at worst
+    // on a 400 grid; with R09.T7.i's compensation on each fillet's span, whose curvature 8c ÷ w²
+    // lies within it, the 400 grid's error rose to 7.5 × 10⁻³ and the 800 grid's to 4.5 × 10⁻³,
+    // and this grid's is 3.1 × 10⁻³ (the 1 km crater's slopes at 0.1 rim radii).
     let params = *world(SyntheticWorld::MoonLike).header().craters();
     let mut sharpened = 0;
     // Each diameter and band, and whether the plane is sampled there too.
@@ -1446,7 +1807,7 @@ fn one_crater_s_sharpening_is_its_two_profiles_sampled() {
                 "{at}: {slopes} against {radial_s}"
             );
             if plane_d && plane_band {
-                let (area_h, area_s) = planar_moments(&ground, &level, 400);
+                let (area_h, area_s) = planar_moments(&ground, &level, 1_200);
                 let closed_h = core::f64::consts::PI * rim_m * rim_m * heights;
                 let closed_s = core::f64::consts::PI * 0.5 * slopes;
                 eprintln!(

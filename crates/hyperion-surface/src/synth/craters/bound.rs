@@ -24,9 +24,13 @@
 //! δ(w) + δ(w′) between bands w and w′. The supremums are sampled: each octave's diameters at
 //! [`DIAMETER_SAMPLES`] even steps in ln D across its kept span, each crater's fresh height on
 //! [`PROFILE_SAMPLES`] radii out to its reach with its centre and rim, and each fillet's change
-//! at its centre (the compensation's largest) and at the ends of [`FILLET_SAMPLES`] steps across
-//! the fillet, the rim among them, where the change is largest, each widened by
-//! [`SAMPLED_MARGIN`].
+//! at the ends of [`FILLET_SAMPLES`] steps across the fillet's span, the rim among them, and at
+//! its centre, each widened by [`SAMPLED_MARGIN`]. The change is nothing outside the span but for
+//! the central cone where the fillet reaches into it (R09.T7.i): there the profile keeps the share
+//! p = (1 − w) ÷ `c_p` of the cone, so from the centre to the span's inner end it changes by the
+//! rest of the cone, (1 − p) of its relief at the centre and falling linearly outwards. So the
+//! span's samples and the centre take the change's largest wherever it lies: on the span, where
+//! the fillet and its compensating term sit, or at the centre, where the cone fades.
 
 use core::f64::consts::PI;
 
@@ -198,7 +202,8 @@ fn largest_height(profile: &CraterProfile) -> f64 {
 }
 
 /// δ(w), the largest change from `fresh` of `shape`'s profile filleted over the half-width `band`
-/// metres, sampled at the centre, where its compensation is largest, and across its fillet.
+/// metres, sampled across its fillet's span, where the fillet and its compensating term change it,
+/// and at the centre, where the faded cone changes it most (the module documentation).
 #[must_use]
 fn fillet_change(shape: &crate::craters::CraterShape, fresh: &CraterProfile, band: f64) -> f64 {
     let filleted = CraterProfile::filleted(*shape, Metres::new(band));

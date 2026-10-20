@@ -6540,6 +6540,8 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     g × F(w) only where the base reproduces g × F(w_c). T12.d could prefilter its coarse values.
   - _The cone's kinks return unfiltered_ in the sharpening wherever the coarse fillet is held at
     min(1, a) rim radii (D below about 2 D_b), which extends T7.b's finding to coarse craters.
+    _Resolved in the coarse profile by R09.T7.i, the cone fading with a held fillet; T7.b's finding
+    stands where the fillet stops short of the cone_ (2026-10-20).
   - _Per-cell means and the brainstorm._ Main's option 2 rules the task. The brainstorm's
     sentence "nothing may be added at a fine level that changes the mean at a coarse one" is
     read per crater, and is not itself ruled on.
@@ -8592,7 +8594,9 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
   - _The coarse profile of a crater near `D_b` is inverted_ (main's figures, §2.2.9, not
     re-measured): a 113 km crater's coarse profile stands +2,165 m at its centre and −607 m at its
     rim, where the fresh crater is −1,080 and +1,553 m. For T7.c's and T12.d's re-validation
-    before T14's drainage.
+    before T14's drainage. _Resolved by R09.T7.i_ (2026-10-20): the 113 km crater's coarse profile
+    is −3,330 m at its centre and +76 m at its rim, and 259 of the reference Moon's 260 first-octave
+    coarse craters lie below their 1.2–2 R cells (120 before).
   - _Ceres's non-crater field carries plan 14's basin share._ Its population stretches from
     900 m to 1,918 m RMS on the cells (`s_N` 2.13), since its craters realise about 0.77 km of
     plan 14's 1.87 km (none of its 2.1 expected third-octave craters was drawn). For P14.T48.a,
@@ -11097,3 +11101,208 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     coastal air (_The large-scale rate_, the part-1 sea's paragraph and _The orography_), _A wholly
     calm month_, the runoff function's (1 − ε(z)) P of the annual rate, and _The balance_'s `P_ls`;
     T13.e's figures stand as the as-built record of that model.
+- **Deviations in T7.i, as built** (2026-10-20; lane `r09-craters`, from
+  `origin/rendering-and-planets` at `8f307d16` with the plan text of `84c56ed5`, measured there and
+  merged with `1870973b` before its goldens were blessed; main's rulings of 2026-10-19,
+  `decision-r09-t12-coarse.md` addendum 5 and `decision-r09-t7ij-refresh.md`; no bump,
+  `GENERATOR_VERSION` 22).
+  - _Files and items._ In the surface crate, `synth/craters.rs`: `CraterProfile::filleted` and its
+    private `height_and_slope`, with one private field, `cone_kept`, the cone's kept share p (`None`
+    where the fillet stops short of the cone); and the documentation of the module's "# The profile"
+    and "# The closed forms", of `CraterProfile`, `filleted` and `compensation`.
+    `synth/craters/rims.rs`' "# The sharpening" and `synth/craters/bound.rs`' "# One crater's
+    shares" and `fillet_change` changed in their documentation alone. Tests in
+    `synth/craters/tests.rs`, `synth/craters/rims/tests.rs` and the sim's `steps/craters/tests.rs`.
+    - No public signature changed and no item or panic was added. `CraterProfile::compensation`
+      keeps its signature, and its amplitude c is now the term's height at the rim, x = 1, where it
+      was its height at the centre: its documentation says so.
+    - `RimSharpening`, `CoarseRims::coarse_profile`, `sharpening_moment_m4`, `increase_m4` and the
+      sim's `each_lift` call `filleted` and are unchanged, as are `breakpoints`, `square_moment` and
+      `rims::difference_moments`: the breakpoints already bracket [0, x₀], `c_p` and the span, and
+      every piece stays one polynomial of degree at most 4.
+  - _The construction, as the brief's §2.3 has it._ On the span [x₀, x₁] = [1 − w, 1 + w] the
+    profile is the cubic Hermite plus c (1 − u²)², u = (x − 1) ÷ w, with c = −15 Δ ÷ (32 w); outside
+    it, the fresh shape, to the bit. Where x₀ < `c_p` it is the floor, −d₀, for x ≤ x₀ (the centre
+    itself where x₀ is 0), the Hermite from (−d₀, 0) at x₀, and the cone at p = x₀ ÷ `c_p` of its
+    relief P on [0, `c_p`]; there Δ = ∫ H + (−d₀) x₀² + p P `c_p`² ÷ 3 less the fresh moment over
+    [0, x₁]. The leans:
+    - The floor for x ≤ x₀ is −d₀ itself: the coneless shape is the floor there, since the cone's
+      base is never wider than the floor (`crater_shape` takes the lesser).
+      `a_central_cone_s_base_lies_within_its_floor` holds it from 0.5 to 100 `D_t` on the five test
+      contracts; `craters/shape.rs` is unchanged.
+    - The fade is x₀ < `c_p`, strictly. At x₀ = `c_p` the profile takes the as-built form, where p
+      would be 1 and the two forms agree.
+    - The Hermite and the compensation take the open span, x₀ < x < x₁, so x₀ and x₁ themselves are
+      the fresh shape's bits (or the floor's and the faded cone's); the term is zero with a zero
+      slope at both ends.
+    - Δ is summed left to right as written, in `f64`, with no transcendental; p is one division.
+  - _Tests._
+    - New, in `synth/craters/tests.rs`:
+      - `a_central_cone_s_base_lies_within_its_floor` (the lean's premise, above);
+      - `the_fillet_through_the_peak_is_continuous_and_fresh_outside_its_span`: height and slope at
+        x₀ and x₁ against the neighbouring float, to 10⁻⁹ of the depth and of the larger slope, from
+        10⁻¹² rim radii where x₀ is 0; the fresh shape to the bit outside [x₀, x₁], or outside
+        [0, x₁] where the cone fades; and `breakpoints` against the pieces' own ends;
+      - `the_profile_is_continuous_across_the_switch_into_the_cone`: fillets of (1 − `c_p`) R
+        (1 ± 10⁻¹²) agree to 10⁻⁹ of the depth at 4,001 radii, the one fading, the other not, and
+        the centre steps smoothly over the fade;
+      - `every_crater_filleted_through_its_peak_is_a_depression`: F(0) < 0 and F(0) below F at 401
+        radii from the rim to the reach, over 0.5–30 `D_t` on the five contracts at 13 fillets from
+        0.05 to 3 rim radii and every WGS 84 level's band;
+      - `the_moments_are_exact_on_every_piece`: `square_moment` and `difference_moments` (against
+        the ground's 1 m fillet and the held one) to 10⁻⁹ of a five-point rule on 16 panels of each
+        piece.
+    - New elsewhere: in `rims/tests.rs`,
+      `the_reference_moon_s_113_km_crater_is_a_depression_over_its_coarse_band` (the reference
+      Moon's contract, figure and level built as the sim's `reference::moon_like` builds them, by
+      `tests::reference_moon`); in the sim,
+      `a_lone_113_km_lunar_crater_is_a_depression_in_the_coarse_field` and the measurement
+      `measure_r09_t7i_first_octave_depressions` (`#[ignore]`).
+    - Changed:
+      - `profiles()`, which T7.b's balance, closed-form and continuity tests read, adds each
+        contract's shapes at 17 ratios of 0.5–30 `D_t`, filleted at every level and at 13 fillets of
+        0.05 to 3 rim radii: the balance to 10⁻⁶ of the cavity at levels 0–24 holds on them all.
+      - `the_fillet_s_closed_form_is_its_quadrature` checks Δ, c = −15 Δ ÷ (32 w) and the term's own
+        volume over the span, 32 w c ÷ 15, against quadrature, and p = x₀ ÷ `c_p` and the floor's
+        start where the cone fades.
+      - `one_crater_s_sharpening_is_its_two_profiles_sampled`: its planar grid, 400 → 1,200 a side.
+        The span term's curvature, 8c ÷ w², lies within each fillet, and the ground's 1 m fillet is
+        about one cell wide on the 1 km crater: on the 400 grid the planar heights were 7.5 × 10⁻³
+        off, on 800 the slopes 4.5 × 10⁻³, on 1,200 3.1 × 10⁻³, against the kept 5 × 10⁻³; the
+        radial checks stay exact.
+      - `a_query_sums_the_craters_reaching_it_in_list_order` adds 24 samples on each crater's coarse
+        span beside the 24 across its reach, whose "more than half sharpened" was the reach-wide
+        term's (64 of 192 now); more than half the span's samples are sharpened.
+      - `on_an_oblate_figure_the_ground_integral_is_off_by_a_small_residual`: its non-vacuity floor,
+        the sharpening's magnitude over the cavity, is 10⁻³ where it was 10⁻²: the sharpening is now
+        the rim's alone, 2.9 × 10⁻³ of the cavity on the Moon-like 2,500 km basin, whose coarse
+        fillet is 0.07 of its rim radius. The residuals it bounds fell: 7.3 × 10⁻⁹ of the cavity at
+        worst on the Moon-, Mars- and Earth-like worlds (2.5 × 10⁻⁷ before) and 7.9 × 10⁻⁶ on the
+        Ceres-like (3.1 × 10⁻⁵ before; pinned at 5 × 10⁻⁵).
+  - _Measured_ (the reference worlds at `reference::SEED`; before in brackets).
+    - _Table A._ The reference Moon's 113 km crater (`D_t` 18.95 km; d 4,883 m, h 1,553 m, d − h
+      3,330 m, a peak of 2,250 m on a base of 0.237 R, a 1.2965), filleted over 92.6 km and held at
+      one rim radius, at 0, 0.2, 0.6, 1, 1.5 and 2 R: −3,330, −3,021, −1,419, +76, +575 and +62 m,
+      the lean's row to the metre (as built +2,165, +620, −735, −607, +223 and +251 m). Its centre
+      is −(d − h) to the bit.
+    - _∫F r² dA_, the long-wavelength moment, over the fresh crater's: 0.692 at 113 km (0.555), and
+      0.702, 0.677 and 0.664 at 95, 150 and 185 km (0.569, 0.538 and 0.551).
+    - _Table B_, on the sphere: one crater smoothed alone into a flat state at level 6 and read
+      through T4's interpolant at 32 placements in two cells (face 0's middle, and face 2 between
+      its middle and an edge), its centre less its area mean over 1.2–2 R, worst in brackets: 95 km
+      −1,521 (−1,199) m, 113 km −1,990 (−1,709), 150 km −2,750 (−2,547), 185 km −3,277 (−3,122) and
+      228 km −4,138 (−3,934) m. As built −429 (−63), −353 (+10), +18 (+438), +1 (+346) and −2,349
+      (−2,240) m. Main's planar lean −1,512, −2,008, −2,752, −3,264 and −4,232 m.
+    - _The first coarse octave_ (93–185 km, 260 craters) below the mean of its 1.2–2 R cells: 259
+      (99.6%) with the coarse craters alone, all 260 after T12.e's entry and all 260 each alone; as
+      built 120 (46.2%), 121 (46.5%) and 128 (49.2%).
+    - _The coarse craters_ before T12.e's scale: 2,035 m RMS on the cells (1,848; main's re-based
+      estimate about 2,050) and 1,938 m reconstructed (1,784; main's 1,975). The rendered
+      √(`V_C` + `R_inc`), 2,276 m before the scale (2,298) and 1,812 m after it (1,811). The
+      analytic rendered share at T12.d's bytes, Σ g² ∫F(w₂)² dA over the body's area:
+      5.695298548 × 10⁶ m² (5.695298547 × 10⁶; 2,386.48 m), 2.5 × 10⁻¹⁰ apart: the compensation
+      moves only its place at a 1 m fillet.
+    - _T8's slope probe_ on the Moon-like lid: median slope 5.40° at 17 m (5.43°), RMS height
+      differences 248.4 m at 1.9 km (248.4) and 671.1 m at 7.6 km (670.3), against Rosenburg et al.
+      2011's 7.5° and LOLA's 171 and 546 m.
+    - _T12.e's figures after T7.i_ (`measure_r09_t12e`). Test 2, the share finer than λ_c ÷ σ_h²
+      after the scale: the Moon 22.45% (27.04%; band 4–10%; main's 22.4%), of which the small
+      craters 20.81% (22.04%) and the rims' sharpening 1.56% (4.92%); Mars 1.978% (2.255%; 0.3–1%;
+      main's 1.96%), small 1.782% and rims 0.169%; Ceres 7.12% (9.83%; 3–8%, now inside its band;
+      main's 7.15%), small 6.25% and rims 0.82%; the Earth 0.435%, unmoved.
+    - The scale: the Moon s* 0.7955 (0.7892), `s_N` 0.7917 (0.7952), `Rule::Whole`, largest byte 52
+      (54); Mars s* 0.9602 (0.9596), `s_N` 0.9602, largest byte 10; Ceres s* 1.7600 (1.7302), `s_N`
+      2.1449 (2.1311), `Rule::NonCrater`, bytes 0; the Earth s* 0.9602, byte 10, unmoved. So at T7.i
+      T12.e's as-built tests still hold (Ceres's bytes 0, the Moon's s* about 0.8), as
+      `decision-r09-t7ij-refresh.md` expects; `steps::relief` passes whole.
+    - Each share's RMS, on the cells and reconstructed: the Moon's population 900 and 884 m (713 and
+      700 after the scale; 716 and 703), its coarse craters after the scale 1,620 and 1,543 m (1,456
+      and 1,406); Mars's coarse craters 527 and 503 m (476 and 462), rendered 598 m (608); Ceres's
+      coarse craters 489 and 402 m (366 and 312), its population after the scale 1,930 and 1,862 m
+      (1,918 and 1,850), rendered 736 m (766); the Earth's coarse craters 1.3 and 0.7 m (0.8 and
+      0.4).
+    - Test 6's range, the realised relief over σ_h: the Moon 6.52 (6.37), Mars 9.64 (9.52), Ceres
+      6.86 (6.41) and the Earth 7.41 (unmoved), all in 6–16; Mars after the whole pass 29,596 m,
+      10.2 σ_h (27,599 m).
+    - _The slow level bound_ at 10⁴ points (`--release`): the worst |h(n) − h(m)| over the bound
+      0.019–0.071 Earth-like, 0.001–0.082 Mars-like, 0.002–0.076 Moon-like, 0.006–0.072 Ceres-like
+      and 0–0.014 on the one crater (T8's record: 0.016–0.063, 0.002–0.064, 0.005–0.066, 0.006–0.058
+      and 0–0.014).
+  - _Goldens_, re-blessed at 22 on the tree merged with `1870973b`
+    (`HYPERION_BLESS=1 cargo test -p hyperion-surface --features testing`), with no bump of
+    `GENERATOR_VERSION`, `SURFACE_PAYLOAD_FORMAT` or `TEST_PLANET_VERSION`: the serve gate's rule,
+    and for `wire/` the 2026-10-09 exception. `golden_diff.py`, the working tree against `adc2c04c`:
+    `GENERATOR_VERSION` 22 → 22 and `TEST_PLANET_VERSION` 2 → 2; 29 files' pinned values moved, all
+    in the surface crate, and its verdict, "pinned values changed but `GENERATOR_VERSION` was not
+    bumped", is that ruled re-bless. Each moved because T7.i moved a crater's profile, directly or
+    through the testing builder's coarse elevation, which smooths each coarse crater in as its
+    `coarse_profile`, and what the builder derives from it (the steepest-descent routing, the
+    header's sea level and realised figures):
+    - `height/`: the cratered worlds' points (`moon_like`, `mars_like`, `ceres_like`, `earth_like`
+      and `one_crater`; heights and gradients at their levels, about the coarse rims, the small
+      craters and elsewhere) and parts (the base elevation's sites; the small craters; the coarse
+      rims, whose face-edge vertices are picked where the finest sharpening exceeds 1 m and so moved
+      with the span; the channels, whose cells are picked by depth from the routing); `closed_forms`
+      (the variance and structure function finer than each wavelength at every cratered world's
+      cells, the octaves' sharpening Φ_k and the rims' shares among them); `levels` (the level
+      bounds, whose δ(w) samples the new fillets); and `bakes` (the cratered worlds' patches).
+    - `ground/` (`ceres_like`, `earth_like`, `mars_like`, `moon_like`, `one_crater`): the ground's
+      heights at their points.
+    - `terrain_bake/earth_like` and `moon_like`: the patches' heights, normals, origins and ranges;
+      `horizon/blend`: the far field's horizon codes.
+    - `weights/earth_like` (3 lines), `moon_like` (24) and `cold_trap` (92): the class blends at
+      points whose slopes or R09's closed forms moved.
+    - `material/mars_like`: one of its thousand points, which read Sediment (a closed basin's floor
+      or a channel's bed) under the routing over the old coarse elevation, reads Dust, the arid,
+      thin-aired world's default.
+    - `albedo/worlds`: the Earth-like world's 20 class shares and its scale at level 8.
+    - `wire/payloads`: the five cratered worlds' payload digests (the coarse elevation's codes, the
+      flow and the header's figures), their sizes and block lengths unchanged.
+    - `worker/moon_like` and R10.T16's `worker/terrain_test`, which `worker/golden.rs` writes in the
+      same run: the Moon-like payload blocks, the patches' heights and offsets, and in the terrain
+      test the header's sea level (−8,715.095 → −9,538.078 m), realised σ_h (1,832.25 → 1,899.16 m)
+      and realised relief (14,921.5 → 15,812.2 m).
+    - Unmoved: every R05 golden directly in `tests/golden/` (`bake`, `collision`, `cube_sphere`,
+      `level_table`, `test_planet`, `vertex_f32`), `craters/density_and_shapes`, `field/months`, the
+      flat world in every directory, `height/common`, `material/` for the other four cratered worlds
+      and `maturity`, `table` and `weathering`, `weights/` for the Mars-like, Ceres-like and
+      one-crater worlds, `horizon/encoding` and `grid_azimuth`, the albedo's and the weights'
+      kernels, and `wire/codes`. No sim or server golden moved: `golden_diff.py` reads every crate's
+      goldens, and none of the sim's or the server's reads the coarse pass or `synth::craters`.
+    - After the bless the surface crate's suite passes whole (663 library tests, 29 ignored; its
+      integration tests, the panics' 173 among them). So do the readers of the re-blessed goldens
+      outside it that run natively: the server's `requests::surface` tests (19,
+      `terrain_test_golden` among them), the client's `terrainGolden.test.ts` (8) on
+      `worker/terrain_test` and `horizonLookup.test.ts` (7) on `horizon/blend`. The client's tests
+      that read `worker/moon_like` through its WebAssembly module need `just gen-surface` first, as
+      the gate runs them.
+    - On the merged tree the sim's `steps::climate` (137 passed, 6 ignored; T13.e–g's, which read
+      the coarse elevation, among them), `steps::craters` (9) and `steps::relief` (59) pass, as do
+      `surface_ground_worlds` (1), `surface_material_worlds` (2), `surface_albedo_worlds` (2) and
+      the server's `surface_knowledge` (2).
+  - _Cost_ (not timed; provisional). Building a profile takes one comparison more and, where the
+    cone fades, one division and the floor's and the cone's moments; evaluating one takes the term
+    on the span alone, where it took it over the whole reach, and the faded cone's term within the
+    cone.
+- **Deferred findings (2026-10-13 rule) (R09.T7.i–j)** (recorded, not ruled; T7.i's items).
+  - _The cone's kinks_ stay where a fillet stops short of the cone (x₀ ≥ `c_p`): the fresh apex's
+    and base's, unfiltered, T7.b's finding, still open there; where the cone fades, their kept share
+    p. On the reference Moon every coarse crater to about 2 `D_b` is held at one rim radius (p = 0);
+    at the client's levels every complex crater keeps its whole cone until a level's fillet reaches
+    1 − `c_p`.
+  - _The coarse reconstruction's residual_, recon(F(`w_c`)) − F(`w_c`), what the finest level shows:
+    390, 329, 234, 174 and 160 m RMS over the reach's disc at 95, 113, 150, 185 and 228 km, on the
+    sphere through T4's interpolant at the 32 placements (as built 264, 260, 243, 181 and 145 m).
+    Main's planar 0.11–0.22 km (addendum 5, E1.4) is over a disc two cells wider, about 2.6 times
+    the 113 km crater's reach in area, so the two agree within that ratio. `R_inc` books it on the
+    analytic profile.
+  - _The coarse profile's large-scale moment_, ∫F r² dA, which every isotropic low-pass of a
+    zero-volume profile keeps whole: 0.66–0.70 of the fresh crater's for held fillets on 95–185 km
+    lunar craters (0.54–0.57 as built).
+  - _A dry world's late craters dig below its placed sea level._ On the reference Mars after the
+    whole pass the lowest cell is −7,123 m against a sea level of −5,482 m; before T7.i both were
+    −5,214 m, the late craters' centres being inverted. It is the header's documented rule (the
+    lowest cell's elevation "when the pass placed the sea"), and under R8 a depression below the sea
+    level stays dry. For R09.T14.d's re-match.
+  - _T7.c's probe of the cells' means_ (up to 0.28–0.35 d on a cell) was taken under the reach-wide
+    term and not repeated under the span's; `rims.rs` says so.

@@ -58,15 +58,27 @@
 //! # The profile
 //!
 //! A crater's height is its fresh profile ([`CraterShape::relief`]) with its rim filleted and its
-//! volume restored ([`CraterProfile`]; Design note 13): on [1 − w, 1 + w] rim radii the profile is
-//! the cubic Hermite through the fresh profile's heights and slopes at both ends, which removes
-//! the sharp rim crest, and a compensating term c (1 − (r ÷ r₁)²)² out to the crater's reach
-//! r₁ = 1 + a puts back the volume the fillet took, so every crater integrates to zero at every
-//! level. Both volumes are closed forms: the fresh profile's piece by piece
-//! (`CraterShape::moment`), the Hermite's from its basis's first two moments, and the term's
-//! c r₁² ÷ 3. The fillet's half-width w is the level's band ([`band_half_width`]), held to
-//! min(1, a) rim radii so that the fillet stays between the centre and the reach. The central
-//! cone's apex and base are not filleted.
+//! volume restored ([`CraterProfile`]; Design note 13): on the fillet's span, [1 − w, 1 + w] rim
+//! radii, the profile is the cubic Hermite through the fresh profile's heights and slopes at both
+//! ends, which removes the sharp rim crest, and a compensating term c (1 − u²)² with
+//! u = (r − 1) ÷ w, on the same span, puts back the volume the fillet took, so every crater
+//! integrates to zero at every level and is its fresh shape, to the bit, outside the span.
+//!
+//! Where the span's inner end 1 − w lies within the central cone's base `c_p`, as it does wherever
+//! the fillet is held at one rim radius, the profile is the coneless shape filleted from the
+//! floor instead: the floor, −d₀, from the centre to 1 − w, the Hermite from there at zero slope,
+//! and the cone at the share p = (1 − w) ÷ `c_p` of its relief, so that the cone fades with the
+//! rim, continuously in w, to nothing where 1 − w reaches the centre (R09.T7.i). As T7.b built
+//! it, such a Hermite started at the cone's top and slope and ran below the floor, and a term
+//! spread over the whole reach put the volume back as a dome on the centre: the coarse craters of
+//! `D_b` to about 2 `D_b` stood inverted in the coarse field.
+//!
+//! The volumes are closed forms: the fresh profile's piece by piece (`CraterShape::moment`), the
+//! Hermite's from its basis's first two moments, the faded cone's p P `c_p`² ÷ 3 (P its fresh
+//! relief), and the term's 32 w c ÷ 15. The fillet's half-width w is the level's band
+//! ([`band_half_width`]), held to min(1, a) rim radii so that the fillet stays between the centre
+//! and the reach. The central cone's apex and base are not filleted: their kinks stay, at the kept
+//! share p where the cone fades.
 //!
 //! # Degradation
 //!
@@ -116,11 +128,11 @@
 //! The structure function at a lag b adds 2 `s_k` `G_k` (1 − J₀(2π b ÷ `λ_k`)) for an octave's
 //! share left out, `λ_k` = √(D₀ D₁) the geometric mean of its diameters, as R10's bands do; and for
 //! its share kept, the rims' 2Φ (1 − exp(−S b² ÷ 2Φ)), with S its sharpening's slopes' mean square
-//! along a random direction, the same sum over ½ ∫ |∇(F(`w₂`) − F(w))|² dA. The sharpening lies
-//! mostly on an annulus about the fillet's width whatever the crater's size, so its spectrum is
-//! near the band, not near D, though the term that restores the fillet's volume spreads part of it
-//! over the whole reach; the form's small-lag limit, S b², and its long-lag one, 2Φ, are both
-//! exact.
+//! along a random direction, the same sum over ½ ∫ |∇(F(`w₂`) − F(w))|² dA. The sharpening lies on
+//! an annulus about the fillet's width whatever the crater's size, the term that restores the
+//! fillet's volume with it on the fillet's span, so its spectrum is near the band, not near D, but
+//! for the cone's faded share at the centre where a level's fillet reaches into the cone; the
+//! form's small-lag limit, S b², and its long-lag one, 2Φ, are both exact.
 //!
 //! # The coarse craters
 //!
@@ -276,13 +288,15 @@ pub fn relief_factor(rim_radius: Metres, diffusion: Metres) -> f64 {
 }
 
 /// A crater's band-limited, degraded profile: its fresh shape with the rim filleted over a
-/// half-width, the volume the fillet removes put back by a compensating term (Design note 13),
-/// and the whole scaled by the relief its diffusive age leaves ([`relief_factor`]; the module
+/// half-width, the central cone faded where the fillet reaches into it, the volume the fillet
+/// removes put back by a compensating term on the fillet's span (Design note 13; R09.T7.i), and
+/// the whole scaled by the relief its diffusive age leaves ([`relief_factor`]; the module
 /// documentation).
 ///
 /// It integrates to zero over the crater, as the fresh shape does, whatever the fillet and the
-/// relief, and reaches no farther. Built once per crater, band and age, it is evaluated at any
-/// distance by [`at`](Self::at).
+/// relief, and reaches no farther; outside the fillet's span it is the fresh shape's, to the bit,
+/// but for the floor and the faded cone within the span's inner end where the cone fades. Built
+/// once per crater, band and age, it is evaluated at any distance by [`at`](Self::at).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CraterProfile {
     shape: CraterShape,
@@ -290,11 +304,16 @@ pub struct CraterProfile {
     relief: f64,
     /// The fillet's half-width in rim radii, at most min(1, a); zero for none.
     fillet: f64,
-    /// The fresh height, metres, and slope, metres per rim radius, at 1 − w.
+    /// The Hermite's start at x₀ = 1 − w, its height, metres, and slope, metres per rim radius:
+    /// the fresh shape's there, or the floor's, (−d₀, 0), where the cone fades.
     inner: (f64, f64),
     /// The fresh height and slope at 1 + w.
     outer: (f64, f64),
-    /// The compensating term's amplitude c, metres.
+    /// The share p = x₀ ÷ `c_p` of the central cone's relief kept where the fillet's inner end x₀
+    /// lies within the cone's base `c_p`, in [0, 1); `None` where it does not, and the profile is
+    /// the fresh shape's from the centre to x₀.
+    cone_kept: Option<f64>,
+    /// The compensating term's amplitude c, metres: its height at the rim.
     compensation_m: f64,
 }
 
@@ -320,6 +339,20 @@ impl CraterProfile {
     /// The profile of `shape` with its rim filleted over the half-width `fillet_half_width`,
     /// metres, held to min(1, a) rim radii, and its whole relief kept: the fillet alone.
     ///
+    /// On the fillet's span [x₀, x₁] = [1 − w, 1 + w] rim radii it is the cubic Hermite from the
+    /// fresh height and slope at x₀ to those at x₁, plus the compensating c (1 − u²)² with
+    /// u = (x − 1) ÷ w and c = −15 Δ ÷ (32 w), since ∫ (1 − u²)² 2x dx over the span is 32 w ÷ 15,
+    /// so that it restores the volume Δ the fillet took (∫ … 2x dx, in rim radii); outside the
+    /// span it is the fresh shape.
+    ///
+    /// Where x₀ lies within the central cone's base `c_p` (x₀ < `c_p`), it is instead the coneless
+    /// shape filleted from the floor: −d₀ from the centre to x₀ and the Hermite from (−d₀, 0) at
+    /// x₀, plus the cone at the share p = x₀ ÷ `c_p` of its relief P, p P (1 − x ÷ `c_p`) on
+    /// [0, `c_p`]; and Δ counts the faded cone, ∫ H + (−d₀) x₀² + p P `c_p`² ÷ 3 less the fresh
+    /// shape's moment over [0, x₁] (R09.T7.i; main's rulings of 2026-10-19). p is 1 at x₀ = `c_p`,
+    /// where the two forms meet, so the profile is continuous in w, and 0 where the fillet is held
+    /// at one rim radius, where the cone is gone.
+    ///
     /// # Panics
     ///
     /// If `fillet_half_width` is not finite and non-negative.
@@ -330,8 +363,7 @@ impl CraterProfile {
             w_m.is_finite() && w_m >= 0.0,
             "a fillet's half-width must be finite and non-negative, got {w_m} m"
         );
-        let a = shape.exterior_width();
-        let held = num::min(1.0, a);
+        let held = num::min(1.0, shape.exterior_width());
         let fillet = num::min(w_m / (0.5 * shape.diameter().value()), held);
         if fillet <= 0.0 {
             return Self {
@@ -340,21 +372,36 @@ impl CraterProfile {
                 fillet: 0.0,
                 inner: (0.0, 0.0),
                 outer: (0.0, 0.0),
+                cone_kept: None,
                 compensation_m: 0.0,
             };
         }
         let (x0, x1) = (1.0 - fillet, 1.0 + fillet);
-        let inner = shape.relief_and_slope(x0);
         let outer = shape.relief_and_slope(x1);
-        let change = hermite_moment(x0, x1 - x0, inner, outer) - shape.moment(x0, x1);
-        let reach = 1.0 + a;
+        let cone = shape.peak_fraction();
+        let (inner, cone_kept, change) = if x0 < cone {
+            // The coneless shape is the floor out to x₀, since the cone's base is never wider than
+            // the floor (`crater_shape`), so the Hermite starts there flat.
+            let floor_m = shape.floor_depth().value();
+            let kept = x0 / cone;
+            let inner = (-floor_m, 0.0);
+            let change = hermite_moment(x0, x1 - x0, inner, outer) - floor_m * x0 * x0
+                + kept * shape.peak_relief().value() * cone * cone / 3.0
+                - shape.moment(0.0, x1);
+            (inner, Some(kept), change)
+        } else {
+            let inner = shape.relief_and_slope(x0);
+            let change = hermite_moment(x0, x1 - x0, inner, outer) - shape.moment(x0, x1);
+            (inner, None, change)
+        };
         Self {
             shape,
             relief: 1.0,
             fillet,
             inner,
             outer,
-            compensation_m: -3.0 * change / (reach * reach),
+            cone_kept,
+            compensation_m: -15.0 * change / (32.0 * fillet),
         }
     }
 
@@ -371,7 +418,8 @@ impl CraterProfile {
     }
 
     /// The compensating term's amplitude c, metres, before the relief factor: its height at the
-    /// centre, positive where the fillet took volume from the rim.
+    /// rim, x = 1, the middle of the fillet's span, positive where the fillet (and the faded cone)
+    /// took volume.
     #[must_use]
     pub const fn compensation(&self) -> Metres {
         Metres::new(self.compensation_m)
@@ -411,17 +459,28 @@ impl CraterProfile {
             return (self.relief * height, self.relief * slope);
         }
         let (x0, x1) = (1.0 - self.fillet, 1.0 + self.fillet);
-        let (mut height, mut slope) = if x > x0 && x < x1 {
+        let on_span = x > x0 && x < x1;
+        let (mut height, mut slope) = if on_span {
             hermite(x0, x1 - x0, self.inner, self.outer, x)
+        } else if self.cone_kept.is_some() && x <= x0 {
+            // The floor, from the centre itself where x₀ is 0.
+            self.inner
         } else {
             self.shape.relief_and_slope(x)
         };
-        let reach = 1.0 + self.shape.exterior_width();
-        if x < reach {
-            let q = x / reach;
-            let b = 1.0 - q * q;
+        if let Some(kept) = self.cone_kept {
+            let cone = self.shape.peak_fraction();
+            if x < cone {
+                let relief_m = kept * self.shape.peak_relief().value();
+                height += relief_m * (1.0 - x / cone);
+                slope -= relief_m / cone;
+            }
+        }
+        if on_span {
+            let u = (x - 1.0) / self.fillet;
+            let b = 1.0 - u * u;
             height += self.compensation_m * b * b;
-            slope += -4.0 * self.compensation_m * q * b / reach;
+            slope += -4.0 * self.compensation_m * u * b / self.fillet;
         }
         (self.relief * height, self.relief * slope)
     }

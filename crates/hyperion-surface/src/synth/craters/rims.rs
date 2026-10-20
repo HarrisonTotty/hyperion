@@ -28,24 +28,28 @@
 //! (both held at min(1, a) rim radii) or one whose relief is gone. Main ruled each part on
 //! R09.T7.c, 2026-10-13.
 //!
-//! Each fillet's compensating term restores the volume its fillet moved, so the sharpening
-//! integrates to zero over its reach at every level, as every small crater does (T7.b). It reaches
-//! no farther than the crater, (1 + a) rim radii, and is a function of the chord from the crater's
+//! Each fillet's compensating term restores the volume its fillet moved on the fillet's own span,
+//! [1 − w, 1 + w] rim radii, so the sharpening integrates to zero over its reach at every level, as
+//! every small crater does (T7.b). It lies on the coarse fillet's span, and at the centre too where
+//! the coarse fillet reaches into the central cone, whose relief the coarse profile keeps in part
+//! and the level's profile more fully (R09.T7.i; [`CraterProfile::filleted`]). It reaches no
+//! farther than the crater, (1 + a) rim radii, and is a function of the chord from the crater's
 //! centre alone, so it is continuous across every coarse cell edge and face edge it spans: a query
 //! finds it through the field's index of the craters reaching its own cell
 //! ([`FieldView::craters_reaching`]), which holds every crater whose reach touches the cell.
 //!
-//! It does not integrate to zero over each coarse cell. The compensating term spreads over the
-//! whole reach while the fillet's change sits on the rim, so a cell that a crater crosses takes a
-//! share of the sharpening's relief: fresh bowls of depth d on planar cells of `D_b` ÷ 2, at a fine
-//! band of 0.004 rim radii and the worst of three placements, put up to 0.28 d of mean height on a
-//! cell at D = `D_b`, 0.35 d at 2 `D_b`, 0.15 d at 4 `D_b` and 0.085 d at 8 `D_b` (R09.T7.c's
-//! probe), as a small crater moves the means of the cells it crosses. Zeroing each
-//! cell's mean would take a bump in every cell of about 3.5 times that, 0.3–1.2 d, so the coarse
-//! cells' means are left to the coarse values (R09.T12.d and T4) instead: main ruled the
-//! brainstorm's "nothing may be added at a fine level that changes the mean at a coarse one" met
-//! per crater, as its craters' "profile must integrate to the same displacement at every finer
-//! level" asks.
+//! It does not integrate to zero over each coarse cell. The coarse fillet's span is up to two rim
+//! radii wide and crosses cells, and the sharpening integrates to zero over the whole of it, not
+//! over each part: a cell that a crater crosses takes a share of the sharpening's relief, as a
+//! small crater moves the means of the cells it crosses. R09.T7.c's probe, under the term T7.b
+//! spread over the whole reach (fresh bowls of depth d on planar cells of `D_b` ÷ 2, a fine band of
+//! 0.004 rim radii and the worst of three placements), found up to 0.28 d of mean height on a cell
+//! at D = `D_b`, 0.35 d at 2 `D_b`, 0.15 d at 4 `D_b` and 0.085 d at 8 `D_b`; it was not repeated
+//! under the term on the span. Zeroing each cell's mean would take a bump in every cell of about
+//! 3.5 times that, 0.3–1.2 d, so the coarse cells' means are left to the coarse values (R09.T12.d
+//! and T4) instead: main ruled the brainstorm's "nothing may be added at a fine level that changes
+//! the mean at a coarse one" met per crater, as its craters' "profile must integrate to the same
+//! displacement at every finer level" asks.
 //!
 //! # Degradation
 //!

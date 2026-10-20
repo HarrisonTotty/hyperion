@@ -404,6 +404,339 @@ fn the_degradation_byte_rounds_the_lost_relief() {
     assert_eq!(degradation(Metres::new(2.0), Gigayears::new(4.5)), 255);
 }
 
+/// The unit direction `psi` radians from the unit direction `centre`, towards the azimuth `azimuth`
+/// radians in a tangent basis of `centre`.
+fn around(centre: [f64; 3], psi: f64, azimuth: f64) -> [f64; 3] {
+    let cross = |a: [f64; 3], b: [f64; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let helper = if centre[2].abs() < 0.9 {
+        [0.0, 0.0, 1.0]
+    } else {
+        [1.0, 0.0, 0.0]
+    };
+    let e1 = hyperion_surface::cube::unit_dir(cross(centre, helper));
+    let e2 = cross(centre, e1);
+    let (sin_psi, cos_psi) = math::sin_cos(psi);
+    let (sin_a, cos_a) = math::sin_cos(azimuth);
+    hyperion_surface::cube::unit_dir(
+        [0, 1, 2].map(|k| cos_psi * centre[k] + sin_psi * (cos_a * e1[k] + sin_a * e2[k])),
+    )
+}
+
+/// One fresh coarse crater of `diameter` centred on the unit direction `centre` of `world`, its
+/// reach as the step draws it ([`reach_cells`]).
+fn lone_crater(world: &World, centre: [f64; 3], diameter: Metres) -> CoarseCrater {
+    let figure = world.inputs.figure();
+    let shape = crater_shape(world.inputs.craters(), diameter);
+    let home = cell_index(PatchKey::containing(world.grid.level(), centre).unwrap());
+    let smallest = num::min(figure.equatorial_radius_m, figure.polar_radius_m);
+    let reach_angle = 2.0 * math::asin(num::min(0.5 * shape.reach().value() / smallest, 1.0));
+    CoarseCrater {
+        centre,
+        diameter,
+        morphology: shape.morphology(),
+        age: Gigayears::ZERO,
+        degradation: 0,
+        reach: Cover::from_cells(reach_cells(&world.grid, centre, home, reach_angle)),
+    }
+}
+
+/// The placements of the lone-crater tests: 4 × 4 offsets within each of two coarse cells of the
+/// reference Moon's level 6, one at the middle of face 0 and one between face 2's middle and its
+/// edges, where the cells are sheared, both at least 18 cells from a face edge.
+fn placements(level: u8) -> Vec<[f64; 3]> {
+    let side = f64::from(1_u32 << level);
+    let mut out = Vec::new();
+    for (face, i, j) in [
+        (hyperion_surface::cube::Face::PosX, 32.0, 32.0),
+        (hyperion_surface::cube::Face::PosZ, 20.0, 41.0),
+    ] {
+        for a in 0..4 {
+            for b in 0..4 {
+                let s = (i + (f64::from(a) + 0.5) / 4.0) / side;
+                let t = (j + (f64::from(b) + 0.5) / 4.0) / side;
+                out.push(hyperion_surface::cube::unit_dir(
+                    hyperion_surface::cube::face_uv_to_xyz(hyperion_surface::cube::FaceUv {
+                        face,
+                        u: hyperion_surface::cube::st_to_uv(s),
+                        v: hyperion_surface::cube::st_to_uv(t),
+                    }),
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// One placement of a lone crater, read through R09.T4's interpolant: its centre less its
+/// area-weighted mean over 1.2–2 rim radii, metres, and the RMS over its reach's disc of the
+/// reconstruction less the analytic coarse profile, metres.
+#[derive(Debug, Clone, Copy)]
+struct LonePlacement {
+    centre_less_annulus_m: f64,
+    residual_rms_m: f64,
+}
+
+/// A fresh coarse crater of `diameter` smoothed alone (by [`each_lift`]) into a flat state of
+/// `world` at each of [`placements`], read through R09.T4's interpolant over the cells
+/// ([`interpolate`](hyperion_surface::synth::interp::interpolate), through R09.T12.e's
+/// `quadrature::Values`, a `CellValues` of them).
+fn lone_placements(world: &World, diameter: Metres) -> Vec<LonePlacement> {
+    use crate::planetary::surface::steps::relief::quadrature::Values;
+    let pass = world.pass(reference::SEED);
+    let figure = world.inputs.figure();
+    let rims = CoarseRims::for_body(*world.inputs.craters(), figure, pass.level());
+    let profile = rims.coarse_profile(diameter);
+    let rim = 0.5 * diameter.value();
+    let reach = 1.0 + profile.shape().exterior_width();
+    let radius = figure.volumetric_radius_m();
+    // The angle at which a chord of x rim radii is seen from the centre, on the volumetric sphere.
+    let angle = |x: f64| 2.0 * math::asin(0.5 * x * rim / radius);
+    let azimuth = |k: u32, n: u32| core::f64::consts::TAU * (f64::from(k) + 0.5) / f64::from(n);
+    let mut out = Vec::new();
+    for centre in placements(world.grid.level()) {
+        let crater = lone_crater(world, centre, diameter);
+        let mut z = vec![0.0; world.grid.cells().len()];
+        each_lift(&world.grid, &figure, &rims, &crater, |cell, lift| {
+            z[slot(cell)] += lift;
+        });
+        let field = Values::new(&world.grid, &z);
+        let middle = field.interpolated(centre);
+        // The annulus's area mean: 16 radii at the midpoints of 1.2–2 R, each weighted by x, and
+        // 48 azimuths.
+        let (mut sum, mut weight) = (0.0, 0.0);
+        for i in 0..16 {
+            let x = 1.2 + 0.8 * (f64::from(i) + 0.5) / 16.0;
+            for k in 0..48 {
+                sum += x * field.interpolated(around(centre, angle(x), azimuth(k, 48)));
+                weight += x;
+            }
+        }
+        // The residual over the reach's disc, against the profile at each point's own chord.
+        let p0 = figure.point(centre);
+        let (mut square, mut area) = (0.0, 0.0);
+        for i in 0..32 {
+            let x = reach * (f64::from(i) + 0.5) / 32.0;
+            for k in 0..48 {
+                let dir = around(centre, angle(x), azimuth(k, 48));
+                let p = figure.point(dir);
+                let gap = [p[0] - p0[0], p[1] - p0[1], p[2] - p0[2]];
+                let chord = (gap[0] * gap[0] + gap[1] * gap[1] + gap[2] * gap[2]).sqrt();
+                let analytic = profile.at(chord / rim).height_m;
+                let r = field.interpolated(dir) - analytic;
+                square += x * r * r;
+                area += x;
+            }
+        }
+        out.push(LonePlacement {
+            centre_less_annulus_m: middle - sum / weight,
+            residual_rms_m: (square / area).sqrt(),
+        });
+    }
+    out
+}
+
+/// A 113 km lunar crater, smoothed alone into a flat state at the reference Moon's coarse level
+/// and read through R09.T4's interpolant, is a depression: at each of 32 placements its centre
+/// lies at least 1,000 m below its mean over 1.2–2 rim radii (R09.T7.i; main's planar estimates,
+/// on the cells of the Moon's mean width reconstructed by the cubic B-spline, −2,008 m under the
+/// fillet through the peak, −1,447 m under a Gaussian low-pass of s.d. `w_c` ÷ π, and −316 m as
+/// built, the inverted profile).
+#[test]
+fn a_lone_113_km_lunar_crater_is_a_depression_in_the_coarse_field() {
+    let world = World::new(reference::moon_like());
+    let placed = lone_placements(&world, Metres::new(113e3));
+    let mut mean = 0.0;
+    for (n, p) in placed.iter().enumerate() {
+        eprintln!(
+            "placement {n}: centre less annulus {:.0} m, residual {:.0} m RMS",
+            p.centre_less_annulus_m, p.residual_rms_m
+        );
+        mean += p.centre_less_annulus_m;
+    }
+    #[expect(clippy::cast_precision_loss, reason = "a count of placements")]
+    let count = placed.len() as f64;
+    eprintln!("113 km: mean centre less annulus {:.0} m", mean / count);
+    for (n, p) in placed.iter().enumerate() {
+        assert!(
+            p.centre_less_annulus_m <= -1_000.0,
+            "placement {n}: {:.0} m",
+            p.centre_less_annulus_m
+        );
+    }
+}
+
+/// Whether `crater`'s centre's cell lies below the area mean of the cells whose centres lie at
+/// chords of 1.2–2 rim radii from its centre, in the cell values `z` of `world`.
+fn centre_below_annulus(world: &World, crater: &CoarseCrater, z: &[f64]) -> bool {
+    let figure = world.inputs.figure();
+    let rim = 0.5 * crater.diameter.value();
+    let centre = figure.point(crater.centre);
+    let home = cell_index(PatchKey::containing(world.grid.level(), crater.centre).unwrap());
+    let (mut sum, mut area) = (0.0, 0.0);
+    for cell in crater.reach.cells() {
+        let p = figure.point(world.grid.centre(cell));
+        let gap = [p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]];
+        let x = (gap[0] * gap[0] + gap[1] * gap[1] + gap[2] * gap[2]).sqrt() / rim;
+        if (1.2..=2.0).contains(&x) {
+            let w = world.grid.solid_angle_sr(cell);
+            sum += w * z[slot(cell)];
+            area += w;
+        }
+    }
+    assert!(area > 0.0, "a crater's annulus holds a cell centre");
+    z[slot(home)] < sum / area
+}
+
+/// ∫ F² 2x dx over a coarse crater's reach, square metres, of `profile`, by four-point
+/// Gauss–Legendre on 64 panels of each of its pieces, cut at its centre, the cone's base, the
+/// floor's edge, the fillet's ends, the rim and the reach: exact to rounding but for the rule's
+/// own error on a degree-9 integrand, under 10⁻¹³.
+fn analytic_square(profile: &hyperion_surface::synth::craters::CraterProfile) -> f64 {
+    use crate::planetary::surface::steps::relief::quadrature::gauss_legendre;
+    let shape = profile.shape();
+    let rim = 0.5 * shape.diameter().value();
+    let w = profile.fillet_half_width().value() / rim;
+    let reach = 1.0 + shape.exterior_width();
+    let mut cuts = [
+        0.0,
+        shape.peak_radius().value() / rim,
+        shape.floor_radius().value() / rim,
+        1.0 - w,
+        1.0,
+        1.0 + w,
+        reach,
+    ];
+    cuts.sort_by(f64::total_cmp);
+    let nodes = gauss_legendre(4);
+    let mut total = 0.0;
+    for pair in cuts.windows(2) {
+        let (lo, hi) = (pair[0], pair[1]);
+        if hi <= lo {
+            continue;
+        }
+        let panel = (hi - lo) / 64.0;
+        for k in 0..64 {
+            let mid = lo + panel * (f64::from(k) + 0.5);
+            for &(node, weight) in &nodes {
+                let x = mid + 0.5 * panel * node;
+                let h = profile.at(x).height_m;
+                total += 0.5 * panel * weight * h * h * 2.0 * x;
+            }
+        }
+    }
+    total
+}
+
+/// R09.T7.i's figures on the reference Moon, printed for the plan's record, run by hand before
+/// and after the fillet through the peak: the share of the first coarse octave's craters whose
+/// centre's cell lies below the mean of their 1.2–2 R cells (the craters alone after the step,
+/// each alone, and the field after R09.T12.e's entry); the coarse craters' analytic rendered share
+/// Σ g² ∫F(`w₂`)² dA ÷ the body's area at the band limit's 1 m fillet; and Table B's lone craters
+/// through R09.T4's interpolant, with the reconstruction's residual.
+#[test]
+#[ignore = "measurement: R09.T7.i's figures on the reference Moon, printed"]
+fn measure_r09_t7i_first_octave_depressions() {
+    let world = World::new(reference::moon_like());
+    let pass = world.pass(reference::SEED);
+    let first = octaves(&pass)[0].diameters;
+    let in_first = |c: &&CoarseCrater| {
+        c.diameter.value() >= first.lower().value() && c.diameter.value() < first.upper().value()
+    };
+    let (alone, _) = cratered(&world);
+    let mut entered = Working::initial(&pass);
+    crate::planetary::surface::steps::plates::run(&pass, &mut entered);
+    crate::planetary::surface::steps::relief::run(&pass, &mut entered);
+    run(&pass, &mut entered);
+    crate::planetary::surface::steps::relief::run_after_craters(&pass, &mut entered);
+    for (label, state) in [
+        ("the coarse craters alone", &alone),
+        ("after R09.T12.e's entry", &entered),
+    ] {
+        let z: Vec<f64> = state.cells.iter().map(|c| c.elevation.value()).collect();
+        let listed: Vec<&CoarseCrater> = state.craters.iter().filter(in_first).collect();
+        let below = listed
+            .iter()
+            .filter(|c| centre_below_annulus(&world, c, &z))
+            .count();
+        #[expect(clippy::cast_precision_loss, reason = "counts of craters")]
+        let share = below as f64 / listed.len() as f64;
+        eprintln!(
+            "{label}: {below} of the first octave's {} craters ({:.0}–{:.0} km) lie below their \
+             1.2–2 R cells: {:.1}%",
+            listed.len(),
+            first.lower().value() / 1e3,
+            first.upper().value() / 1e3,
+            100.0 * share
+        );
+    }
+    // Each first-octave crater alone in a flat state.
+    let figure = world.inputs.figure();
+    let rims = CoarseRims::for_body(*world.inputs.craters(), figure, pass.level());
+    let listed: Vec<&CoarseCrater> = alone.craters.iter().filter(in_first).collect();
+    let mut below = 0;
+    for crater in &listed {
+        let mut z = vec![0.0; world.grid.cells().len()];
+        each_lift(&world.grid, &figure, &rims, crater, |cell, lift| {
+            z[slot(cell)] += lift;
+        });
+        if centre_below_annulus(&world, crater, &z) {
+            below += 1;
+        }
+    }
+    eprintln!(
+        "each alone: {below} of {} lie below their 1.2–2 R cells",
+        listed.len()
+    );
+    // The analytic rendered share, at T12.d's bytes and at T12.e's.
+    let area_m2 = spheroid_area_m2(&figure);
+    for (label, list) in [
+        ("T12.d's bytes", &alone.craters),
+        ("T12.e's bytes", &entered.craters),
+    ] {
+        let mut sum = 0.0;
+        for crater in list {
+            let g = kept_relief(crater);
+            let shape = crater_shape(world.inputs.craters(), crater.diameter);
+            let ground =
+                hyperion_surface::synth::craters::CraterProfile::filleted(shape, Metres::new(1.0));
+            let rim = 0.5 * crater.diameter.value();
+            sum += g * g * analytic_square(&ground) * core::f64::consts::PI * rim * rim;
+        }
+        eprintln!(
+            "the analytic rendered share at {label}: Σ g² ∫F(w₂)² dA ÷ A = {:.10e} m² ({:.4} m)",
+            sum / area_m2,
+            (sum / area_m2).sqrt()
+        );
+    }
+    // Table B.
+    for d_km in [95.0, 113.0, 150.0, 185.0, 228.0] {
+        let placed = lone_placements(&world, Metres::new(d_km * 1e3));
+        #[expect(clippy::cast_precision_loss, reason = "a count of placements")]
+        let count = placed.len() as f64;
+        let mean = placed.iter().map(|p| p.centre_less_annulus_m).sum::<f64>() / count;
+        let worst = placed
+            .iter()
+            .map(|p| p.centre_less_annulus_m)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let residual = (placed
+            .iter()
+            .map(|p| p.residual_rms_m * p.residual_rms_m)
+            .sum::<f64>()
+            / count)
+            .sqrt();
+        eprintln!(
+            "lone {d_km} km: centre less 1.2–2 R annulus {mean:.0} m (worst {worst:.0} m) over \
+             {count} placements; reconstruction residual {residual:.0} m RMS over the reach"
+        );
+    }
+}
+
 /// The cost probes, timed by hand from outside the test binary (the sim reads no clock): each runs
 /// one stage on one reference world, so that the differences between them are each step's cost.
 mod cost {
