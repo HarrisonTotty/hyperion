@@ -143,6 +143,7 @@ impl Routing {
     }
 
     /// The roots, the seeds' cells, ascending.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
     #[must_use]
     pub(crate) fn roots(&self) -> &[u32] {
         &self.roots
@@ -193,6 +194,7 @@ impl Routing {
     /// # Panics
     ///
     /// If `cell` is not below [`len`](Self::len).
+    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
     #[must_use]
     pub(crate) fn donors(&self, cell: u32) -> &[u32] {
         let c = slot(cell);
@@ -275,9 +277,42 @@ pub(crate) fn receiver_uniforms(seed: SurfaceSeed, graph: &CellGraph) -> Vec<f64
 ///
 /// If `z` or `uniforms` is not one a cell, a height or a seed's level is not finite, a seed's
 /// level is below its ground, or the seeds are empty or do not ascend strictly by cell.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the erosion's tests route without a previous routing"
+    )
+)]
 #[must_use]
 pub(crate) fn route(mesh: &Mesh, z: &[f64], seeds: &[Seed], uniforms: &[f64]) -> Routing {
+    route_from(mesh, z, seeds, uniforms, None)
+}
+
+/// [`route`], each cell that `previous` (a routing of the same mesh) gave a receiver keeping it
+/// while it stays strictly below the cell on the filled surface, and drawing afresh only where it
+/// does not: the sticky receivers of decision-r09-t14-choices, "T14.b follow-up" item 2, a channel
+/// staying in its valley until it is captured. With `previous` `None` it is [`route`].
+///
+/// # Panics
+///
+/// As [`route`], and if `previous` is not a routing of `mesh`.
+#[must_use]
+pub(crate) fn route_from(
+    mesh: &Mesh,
+    z: &[f64],
+    seeds: &[Seed],
+    uniforms: &[f64],
+    previous: Option<&Routing>,
+) -> Routing {
     let n = slot(mesh.len());
+    if let Some(previous) = previous {
+        assert_eq!(
+            previous.len(),
+            mesh.len(),
+            "the previous routing is of the mesh"
+        );
+    }
     assert_eq!(z.len(), n, "one height a cell");
     assert_eq!(uniforms.len(), n, "one uniform a cell");
     assert!(!seeds.is_empty(), "a flood starts from at least one seed");
@@ -295,7 +330,16 @@ pub(crate) fn route(mesh: &Mesh, z: &[f64], seeds: &[Seed], uniforms: &[f64]) ->
             continue;
         }
         let cell = cell_of(c);
-        let k = receiver_edge(mesh, &filled, cell, uniforms[c], parent[c]);
+        let kept = previous
+            .and_then(|routing| routing.receiver(cell))
+            .filter(|link| filled[slot(link.cell)].total_cmp(&filled[c]).is_lt())
+            .map(|link| {
+                Edge::ALL
+                    .iter()
+                    .position(|&edge| edge == link.edge)
+                    .expect("a link's edge is one of the four")
+            });
+        let k = kept.unwrap_or_else(|| receiver_edge(mesh, &filled, cell, uniforms[c], parent[c]));
         let neighbours = mesh.neighbours(cell);
         let length_m = mesh.link_m(cell, k);
         let gradient = math::hypot(

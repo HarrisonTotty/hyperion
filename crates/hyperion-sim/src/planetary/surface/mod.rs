@@ -72,11 +72,14 @@
 //! P14.T54.b, and their placement in each field cell's cold-trap fraction, read through plan 14's
 //! `ColdTrapGround`, scaled to plan 14's area and held to the fraction, after the zonal parts.
 //! R09.T13.h balanced the thin air's grey slab with its column's own emission, bounded at the
-//! bulk gas's frost point aloft, its deficit falling as snow. Erosion and the classes are still
-//! no-ops: run on any inputs, the pass yields that relief and
-//! sea, with their ices and liquids, under the climate its regime names, with the inputs'
-//! palette. The rest of R09.T13, R09.T14 and T15 fill the rest and R09.T16 pins the reference
-//! worlds' fields.
+//! bulk gas's frost point aloft, its deficit falling as snow. R09.T14.a–c built the erosion: the
+//! drainage over the coarse cells, Tzathas et al.'s stream-power solver with its multigrid, to
+//! steady state under each basin's uplift on a world wet now and for its wet epoch's flow over the
+//! paleo-inventory's lakes on one dry now, and nothing on a world never wet; the wet-now branch
+//! reads the climate's runoff, which outside the crate's own tests it does from R09.T14.d. The
+//! classes are still a no-op: run on any inputs, the pass yields that eroded relief and sea, with
+//! their ices and liquids, under the climate its regime names, with the inputs' palette. The rest
+//! of R09.T13, R09.T14 and T15 fill the rest and R09.T16 pins the reference worlds' fields.
 //!
 //! # Consumed items, by their paths in the code
 //!
@@ -201,6 +204,7 @@ use steps::{Pass, Working};
 ///     .volcanism(0.0)
 ///     .heat_flow(WattsPerSquareMetre::new(0.002))
 ///     .surface_age(Gigayears::new(4.0))
+///     .province_surface_age(Gigayears::new(4.0))
 ///     .craters(craters)
 ///     .climate(ClimateRegime {
 ///         thermal: ThermalRegime::AirlessLike,

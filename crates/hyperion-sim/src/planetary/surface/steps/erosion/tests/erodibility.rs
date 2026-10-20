@@ -1,6 +1,7 @@
 //! The erodibility's tests: the plan's three calibrated K values (an Earth's rock under water, a
-//! saturated Mars's regolith, a Titan's ice under methane), each to 2%; the bed table's rows; and
-//! the rock-equivalent of a pair the table does not hold.
+//! saturated Mars's regolith, a Titan's ice under methane), each to 2%; the bed table's rows;
+//! a saturated pair's fallback to its bedrock row; and the rock-equivalent of a pair the table
+//! does not hold.
 
 use hyperion_surface::field::{Crust, MechanicsFamily};
 use hyperion_surface::substance_key::SubstanceKey;
@@ -8,11 +9,12 @@ use hyperion_testkit::float::assert_same_bits;
 
 use super::super::erodibility::{
     BED_FACTORS, EARTH_ERODIBILITY_M0_1_PER_YEAR, Erodibility, Fluid, Substrate, Surface,
-    bed_factor, crater_saturated, effective_crater_density, erodibility_m0_1_per_year,
+    bed_factor, crater_density_seen, crater_saturated, effective_crater_density,
+    erodibility_m0_1_per_year,
 };
 use crate::planetary::hooks::figures::relief::BASIN_SATURATION_DENSITY;
 use crate::planetary::surface::grid::CellGraph;
-use crate::planetary::surface::reference;
+use crate::planetary::surface::reference::{self, builder_of};
 use crate::planetary::surface::steps::relief::convergent::EARTH_GRAVITY;
 use crate::planetary::surface::steps::{Pass, Working};
 use crate::substance;
@@ -85,8 +87,8 @@ fn an_earth_s_rock_under_water_has_the_reference_erodibility() {
         entry.liquid.as_ref().unwrap().density_kg_m3,
     );
     assert!(!crater_saturated(&inputs));
-    assert_eq!(erodibility.surface(), Surface::Bedrock);
     for crust in [Crust::Continental, Crust::Oceanic] {
+        assert_eq!(erodibility.surface(crust), Surface::Bedrock);
         let k = erodibility.of_crust(crust);
         assert_within(
             &format!("the reference Earth's {crust:?} crust"),
@@ -125,7 +127,7 @@ fn a_saturated_mars_s_regolith_has_ten_times_the_rock_s_erodibility() {
         water.phase().unwrap().triple_liquid_density().value(),
     );
     assert!(crater_saturated(&inputs));
-    assert_eq!(erodibility.surface(), Surface::SaturatedRegolith);
+    assert_eq!(erodibility.surface(Crust::Lid), Surface::SaturatedRegolith);
     let k = erodibility.of_crust(Crust::Lid);
     assert_within("the reference Mars's regolith", k, MARS_REGOLITH_K);
     let rock = erodibility_m0_1_per_year(inputs.gravity(), fluid.density_kg_m3, 1.0);
@@ -213,22 +215,79 @@ fn the_bed_table_holds_the_three_calibrated_cases() {
     }
 }
 
+/// A volcanic province's bed is its own surface's (decision-r09-t14-mars-ceiling §2.1): the
+/// reference Mars's provinces, no older than its epoch's end (their age 0), saw no crater before
+/// it, so their ground is bedrock at B = 1, a tenth of its regolith's K; on a Mars whose provinces
+/// are as old as its surface they share the lid's saturated regolith; and the crater density seen
+/// on the whole surface is [`crater_density_seen`] at the surface age.
+#[test]
+fn a_province_s_bed_is_its_own_surface_s() {
+    let mars = reference::mars_like();
+    let erodibility = Erodibility::of(&mars).unwrap();
+    assert_same_bits(
+        crater_density_seen(&mars, mars.province_surface_age()).value(),
+        0.0,
+    );
+    assert_same_bits(
+        crater_density_seen(&mars, mars.surface_age()).value(),
+        effective_crater_density(&mars).value(),
+    );
+    assert_eq!(erodibility.surface(Crust::Province), Surface::Bedrock);
+    let ratio = erodibility.of_crust(Crust::Lid) / erodibility.of_crust(Crust::Province);
+    assert!((ratio - 10.0).abs() < 1e-12, "{ratio}");
+    let old = builder_of(&mars)
+        .province_surface_age(mars.surface_age())
+        .build()
+        .unwrap();
+    let erodibility = Erodibility::of(&old).unwrap();
+    assert_eq!(
+        erodibility.surface(Crust::Province),
+        Surface::SaturatedRegolith
+    );
+    assert_same_bits(
+        erodibility.of_crust(Crust::Province),
+        erodibility.of_crust(Crust::Lid),
+    );
+}
+
 /// A pair the table does not hold is the rock-equivalent, B = 1, not modelled: a volatile ice
-/// under nitrogen, rock under methane, water ice under water, a regolith of water ice under
-/// methane and an organic bed under ethane.
+/// under nitrogen, rock under methane, water ice under water, an organic bed under ethane, and
+/// the saturated regoliths of rock under methane and of water ice under water, whose bedrock rows
+/// the table does not hold either.
 #[test]
 fn an_unknown_pair_is_the_rock_equivalent() {
     let pairs = [
         (MechanicsFamily::VolatileIce, Surface::Bedrock, "N2"),
         (MechanicsFamily::Silicate, Surface::Bedrock, "CH4"),
         (MechanicsFamily::WaterIce, Surface::Bedrock, "H2O"),
-        (MechanicsFamily::WaterIce, Surface::SaturatedRegolith, "CH4"),
         (MechanicsFamily::Organic, Surface::Bedrock, "C2H6"),
+        (MechanicsFamily::Silicate, Surface::SaturatedRegolith, "CH4"),
+        (MechanicsFamily::WaterIce, Surface::SaturatedRegolith, "H2O"),
     ];
     for (mechanics, surface, fluid) in pairs {
         let b = bed_factor(Substrate { mechanics, surface }, key(fluid));
         assert_same_bits(b, 1.0);
     }
+}
+
+/// A crater-saturated pair with no row takes its bedrock row, a lower bound for an icy regolith
+/// (decision-r09-t14-choices, "T14.b follow-up" item (b)): a saturated water ice under methane,
+/// ethane or Titan's sea takes water ice's 8, and a saturated silicate under water keeps its own
+/// row's 10, not its bedrock's 1.
+#[test]
+fn a_saturated_pair_with_no_row_takes_its_bedrock_row() {
+    let icy = Substrate {
+        mechanics: MechanicsFamily::WaterIce,
+        surface: Surface::SaturatedRegolith,
+    };
+    for fluid in ["CH4", "C2H6", "ch4_c2h6_n2"] {
+        assert_same_bits(bed_factor(icy, key(fluid)), 8.0);
+    }
+    let regolith = Substrate {
+        mechanics: MechanicsFamily::Silicate,
+        surface: Surface::SaturatedRegolith,
+    };
+    assert_same_bits(bed_factor(regolith, key("H2O")), 10.0);
 }
 
 /// A world never wet has no erodibility: the reference Moon.

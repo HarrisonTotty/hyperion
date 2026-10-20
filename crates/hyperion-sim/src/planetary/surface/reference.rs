@@ -76,6 +76,15 @@ use crate::units::{
 /// The surface seed the reference worlds' tests run under.
 pub const SEED: SurfaceSeed = SurfaceSeed::new(0x5eed_0009_0010);
 
+/// The reference Mars's volcanic provinces' surface age: 0, by hand (decision-r09-t14-mars-ceiling
+/// §2.1). Mars's youngest lavas are a few million years old (science-p14-t24b-laws §1.3, from
+/// memory), and any age at or under its wet epoch's 3.6 Ga end gives the same field: its provinces
+/// did not see the epoch (Hynek, Beach and Hoke 2010, JGR 115, E09008, ¶16 and ¶26: 91% of the
+/// valley segments on Noachian terrain, and the drainage density on volcanoes younger than 2.9 Ga
+/// approaching zero). The other reference worlds' provinces take their surface age: they have
+/// none (a mobile lid, no volcanism, or an ice crust).
+const MARS_PROVINCE_SURFACE_AGE: Gigayears = Gigayears::new(0.0);
+
 /// Water.
 const H2O: SubstanceKey = SubstanceKey::new_const("H2O");
 /// Carbon dioxide.
@@ -707,6 +716,7 @@ pub fn earth_like() -> CoarseInputs {
         .volcanism(1.0)
         .heat_flow(WattsPerSquareMetre::new(0.0916))
         .surface_age(surface_age)
+        .province_surface_age(surface_age)
         .craters(crater_params(
             surface_age,
             gravity,
@@ -790,6 +800,7 @@ const fn earth_wet_epoch(ocean: KilogramsPerSquareMetre) -> WetEpoch {
 /// | regime | stagnant lid, V = 1 | Design note 3 (Mars calibrates V) |
 /// | heat flow | 0.019 W m⁻² | Parro et al. 2017, Sci. Rep. 7, 45629 (Design note 3) |
 /// | surface age | 3.9 Gyr | a placeholder: the Noachian highlands' age, from memory |
+/// | the provinces' surface age | 0 | younger than the wet epoch's end, its provinces renewed after it (decision-r09-t14-mars-ceiling §2.1; Hynek, Beach and Hoke 2010) |
 /// | craters | lunar-equivalent: the lunar chronology at that age times `R_b` = 1.92, screened by the air (d\* = 8.5 cm at 636 Pa); struck at 10.6 km/s by stony projectiles of 3,000 kg m⁻³, on a non-porous target of 2,550 kg m⁻³ | Design note 12, whose 8.2 cm takes about 610 Pa; `R_b` is Ivanov 2001's Mars-to-Moon impact rate under the map, standing for plan 14's belt scaling (science-r09-craters.md F1, F4.1); P14.T48.f's model (items 2 and 4) |
 /// | wet epoch | water, 3.9 to 3.6 Gyr ago, 2.2 × 10⁵ Earth-equivalent years at a runoff of 0.1 m a⁻¹, 1.56 × 10⁵ kg m⁻² of water | the valley networks of about 3.6–3.8 Ga (Hoke and Hynek 2009); science-hoke.md §4: the foot of Hoke, Hynek and Tucker 2011's 10⁵–10⁸ yr, where the saturated regolith's K reaches Black et al. 2017's K t ≈ 1.9 m^0.1 (plan 14's `MARS_EFFECTIVE_FLOW` and `PAST_EPOCH_RUNOFF_M_PER_YEAR`); Carr and Head 2003's ocean, about 2.3 × 10⁷ km³, 156 m as a global layer (low confidence) |
 /// | crust | iron-rich basalt (secondary crust, its provinces' too), the lid; no primary crust named | P14.T51.c's Mars; science-composition-crusts.md §2 and §5 |
@@ -804,8 +815,7 @@ pub fn mars_like() -> CoarseInputs {
     let pressure = Pascals::new(636.0);
     let year = Seconds::new(686.980 * SECONDS_PER_DAY);
     let rotation = Seconds::new(24.6229 * 3_600.0);
-    let surface_age = Gigayears::new(3.9);
-    let (mean, contrast) = (Kelvin::new(214.0), 55.0);
+    let (surface_age, mean, contrast) = (Gigayears::new(3.9), Kelvin::new(214.0), 55.0);
     CoarseInputs::builder()
         .body(BodyRef::new(0, 2))
         .figure(figure(3_389.5e3, 0.005_89))
@@ -842,6 +852,7 @@ pub fn mars_like() -> CoarseInputs {
         .volcanism(1.0)
         .heat_flow(WattsPerSquareMetre::new(0.019))
         .surface_age(surface_age)
+        .province_surface_age(MARS_PROVINCE_SURFACE_AGE)
         .craters(crater_params(
             surface_age,
             gravity,
@@ -956,6 +967,7 @@ pub fn moon_like() -> CoarseInputs {
         .volcanism(0.0)
         .heat_flow(WattsPerSquareMetre::new(0.018))
         .surface_age(surface_age)
+        .province_surface_age(surface_age)
         .craters(crater_params(
             surface_age,
             gravity,
@@ -1045,6 +1057,7 @@ pub fn ceres_like() -> CoarseInputs {
         .volcanism(0.0)
         .heat_flow(WattsPerSquareMetre::new(0.001))
         .surface_age(surface_age)
+        .province_surface_age(surface_age)
         .craters(crater_params(
             surface_age,
             gravity,
@@ -1131,6 +1144,7 @@ pub(crate) fn builder_of(inputs: &CoarseInputs) -> CoarseInputsBuilder {
         .volcanism(inputs.volcanism())
         .heat_flow(inputs.heat_flow())
         .surface_age(inputs.surface_age())
+        .province_surface_age(inputs.province_surface_age())
         .craters(*inputs.craters())
         .climate(*inputs.climate())
         .crust(*inputs.crust())

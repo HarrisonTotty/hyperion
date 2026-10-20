@@ -55,6 +55,7 @@ impl Mesh {
     }
 
     /// The quadtree level.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
     #[must_use]
     pub(crate) const fn level(&self) -> u8 {
         self.level

@@ -18,8 +18,8 @@ use super::super::depressions::{WaterBodies, route_with_water};
 use super::super::drainage::{RECEIVER_INSTANCE, receiver_uniforms};
 use super::super::erodibility::EARTH_ERODIBILITY_M0_1_PER_YEAR;
 use super::super::multigrid::{
-    ITERATIONS_PER_LEVEL, JITTER_INSTANCE, LevelResidual, MULTIGRID_FLOOR_LEVEL, Outcome, Problem,
-    Uplift, Water, erode, jitter_uniforms, upsample,
+    ITERATIONS_PER_LEVEL, JITTER_INSTANCE, LEVEL_START, LevelResidual, MULTIGRID_FLOOR_LEVEL,
+    Options, Outcome, Problem, Start, Uplift, UpliftFit, Water, erode, jitter_uniforms, upsample,
 };
 use super::super::solver::Time;
 use super::*;
@@ -105,54 +105,34 @@ impl Synthetic {
     }
 
     fn erode(&self, uplift: Uplift, water: Water<'_>, time: Time) -> Outcome {
-        erode(&Problem {
-            seed: reference::SEED,
-            radius: RADIUS,
-            grid: &self.graph,
-            parent_grid: Some(&self.parent),
-            z0_m: &self.z0,
-            runoff_m_per_year: &self.runoff,
-            erodibility_m0_1_per_year: &self.erodibility,
-            sea: &self.sea,
-            sea_level_m: SEA_LEVEL_M,
-            water,
-            uplift,
-            time,
-        })
+        self.erode_with(uplift, water, time, Options::STEP)
     }
-}
 
-/// Prints `outcome`'s records under `what`: each level's residuals, `λ_b`'s distribution and the
-/// implied uplift.
-fn report(what: &str, outcome: &Outcome) {
-    let d = &outcome.diagnostics;
-    for r in &d.residuals {
-        let each: Vec<String> = r.by_iteration_m.iter().map(|x| format!("{x:.1}")).collect();
-        eprintln!(
-            "{what}: level {} residual {:.3} m (by iteration: {} m)",
-            r.level,
-            r.last_m(),
-            each.join(", ")
-        );
+    fn erode_with(
+        &self,
+        uplift: Uplift,
+        water: Water<'_>,
+        time: Time,
+        options: Options,
+    ) -> Outcome {
+        erode(
+            &Problem {
+                seed: reference::SEED,
+                radius: RADIUS,
+                grid: &self.graph,
+                parent_grid: Some(&self.parent),
+                z0_m: &self.z0,
+                runoff_m_per_year: &self.runoff,
+                erodibility_m0_1_per_year: &self.erodibility,
+                sea: &self.sea,
+                sea_level_m: SEA_LEVEL_M,
+                water,
+                uplift,
+                time,
+            },
+            options,
+        )
     }
-    if let Some(l) = d.lambda {
-        eprintln!(
-            "{what}: λ_b over {} basins, a⁻¹: min {:.3e}, p10 {:.3e}, p25 {:.3e}, p50 {:.3e}, \
-             p75 {:.3e}, p90 {:.3e}, max {:.3e}",
-            l.basins,
-            l.min,
-            l.percentiles[0],
-            l.percentiles[1],
-            l.percentiles[2],
-            l.percentiles[3],
-            l.percentiles[4],
-            l.max
-        );
-    }
-    eprintln!(
-        "{what}: implied mean uplift over the land {:.4} mm a⁻¹",
-        1_000.0 * d.mean_uplift_m_per_year
-    );
 }
 
 /// The cells `outcome`'s bodies and `sea` hold as bounds, with their bases: the sea at
@@ -186,9 +166,13 @@ fn land_mean(outcome: &Outcome, sea: &[bool], z: &[f64]) -> f64 {
 /// The fixed point's residual falls over each level's iterations: on both synthetic worlds at
 /// level 6 (levels 4, 5 and 6, six iterations each), wet now (steady state, each basin's uplift
 /// its freeboard scaled by its fitted `λ_b`, every depression a dry playa), each level's last
-/// residual is below a quarter of its first; the sea's cells keep their ground; and each level's
-/// residuals (the plan's "falls monotonically over the levels" among them, recorded in the module
-/// documentation), `λ_b`'s distribution, the implied uplift and the land's mean are printed.
+/// residual is below a quarter of its first; the final elevation is the solve on its last
+/// routing, every cell not bound lying above its receiver on it where both lie in one basin of the
+/// construction ([`assert_above_receivers`]; decision-r09-t14-choices, "T14.b follow-up" item 5,
+/// whose across-basin exceptions it prints); the sea's cells keep their ground; and each level's
+/// first and last residual, largest change and changed receivers (the plan's "falls
+/// monotonically over the levels" among them, recorded in the module documentation), `λ_b`'s
+/// distribution, the implied uplift and the land's mean are printed.
 #[test]
 fn the_residual_falls_over_each_level_s_iterations() {
     for roughness in [Roughness::Smooth, Roughness::Rough] {
@@ -228,6 +212,7 @@ fn the_residual_falls_over_each_level_s_iterations() {
             }
         );
         assert!(outcome.diagnostics.lambda.is_some());
+        assert_above_receivers(&what, &outcome);
         for (c, &wet) in world.sea.iter().enumerate() {
             if wet {
                 assert_same_bits(outcome.z_m[c], world.z0[c]);
@@ -444,4 +429,97 @@ fn a_smooth_field_upsamples_close_to_itself() {
         .fold(0.0, f64::max);
     eprintln!("worst departure {worst:.2} m of a 2,300 m range");
     assert!(worst < 0.05 * 2_300.0, "{worst} m");
+}
+
+/// The three starts of a finer level (decision-r09-t14-choices, "T14.b follow-up" item 3): on both
+/// synthetic worlds at level 6, wet now, each level's first and last residual, largest change and
+/// changed receivers for T14.b's upsample, the construction and the correction (multigrid's full
+/// approximation scheme). The rule: the correction start unless the construction start ends lower
+/// at the finest level on both worlds. Asserts nothing but the step's own start.
+#[test]
+#[ignore = "measurement: the multigrid's level starts, R09.T14.c"]
+fn measure_the_level_starts() {
+    assert_eq!(LEVEL_START, Start::Correction);
+    for roughness in [Roughness::Smooth, Roughness::Rough] {
+        let world = Synthetic::new(6, roughness, true);
+        let mut finest = Vec::new();
+        for start in [Start::AsBuilt, Start::Construction, Start::Correction] {
+            let outcome = world.erode_with(
+                Uplift::BasinFreeboard,
+                Water::None,
+                Time::Steady,
+                Options {
+                    start,
+                    ..Options::STEP
+                },
+            );
+            let what = format!("{roughness:?}, {start:?}");
+            report(&what, &outcome);
+            let (within, across) = not_above_receivers(&outcome);
+            eprintln!(
+                "{what}: cells not above their receiver, {} within their construction basin and \
+                 {} across its edge",
+                within.len(),
+                across.len()
+            );
+            let last = outcome
+                .diagnostics
+                .residuals
+                .last()
+                .expect("a level")
+                .clone();
+            finest.push((start, last.first_m(), last.last_m()));
+        }
+        for (start, first, last) in finest {
+            eprintln!(
+                "{roughness:?}: finest level, {start:?}: first {first:.2} m, last {last:.2} m"
+            );
+        }
+    }
+}
+
+/// The two uplift fits (the lane's fix of R09.T14.c's record): on both synthetic worlds at level 6,
+/// wet now, each level's residuals, the cells not above their receiver, the land's greatest height
+/// and the implied uplift, for [`UpliftFit::Diagonal`] and [`UpliftFit::SpatialField`]. Asserts
+/// nothing.
+#[test]
+#[ignore = "measurement: the multigrid's uplift fits, R09.T14.c"]
+fn measure_the_uplift_fits() {
+    for roughness in [Roughness::Smooth, Roughness::Rough] {
+        let world = Synthetic::new(6, roughness, true);
+        for uplift_fit in [UpliftFit::Diagonal, UpliftFit::SpatialField] {
+            let outcome = world.erode_with(
+                Uplift::BasinFreeboard,
+                Water::None,
+                Time::Steady,
+                Options {
+                    uplift_fit,
+                    ..Options::STEP
+                },
+            );
+            let what = format!("{roughness:?}, {uplift_fit:?}");
+            report(&what, &outcome);
+            let (within, across) = not_above_receivers(&outcome);
+            let highest = outcome
+                .z_m
+                .iter()
+                .zip(&world.sea)
+                .filter(|&(_, &wet)| !wet)
+                .fold(f64::NEG_INFINITY, |hi, (&z, _)| hi.max(z));
+            let highest0 = world
+                .z0
+                .iter()
+                .zip(&world.sea)
+                .filter(|&(_, &wet)| !wet)
+                .fold(f64::NEG_INFINITY, |hi, (&z, _)| hi.max(z));
+            eprintln!(
+                "{what}: not above {} within, {} across; the land's highest {highest:.0} m \
+                 ({highest0:.0} m constructed); the land's mean {:.1} m ({:.1} m constructed)",
+                within.len(),
+                across.len(),
+                land_mean(&outcome, &world.sea, &outcome.z_m),
+                land_mean(&outcome, &world.sea, &world.z0)
+            );
+        }
+    }
 }

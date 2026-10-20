@@ -703,6 +703,7 @@ mod tests {
             .volcanism(moon.volcanism())
             .heat_flow(moon.heat_flow())
             .surface_age(moon.surface_age())
+            .province_surface_age(moon.province_surface_age())
             .craters(*moon.craters())
             .climate(*moon.climate())
             .crust(*moon.crust())

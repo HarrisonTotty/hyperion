@@ -29,7 +29,7 @@ use super::super::CellState;
 use super::super::relief::convergent::EARTH_GRAVITY;
 use crate::planetary::hooks::figures::interior::REGIME_WATER_DENSITY;
 use crate::planetary::hooks::figures::relief::BASIN_SATURATION_DENSITY;
-use crate::planetary::surface::inputs::CoarseInputs;
+use crate::planetary::surface::inputs::{CoarseInputs, WetEpoch};
 use crate::units::{Gigayears, MetresPerSecondSquared, PerSquareKilometre};
 
 /// K⊕, the erodibility of Earth's rock under water at the reference runoff, m^0.1 a⁻¹: 6.3 × 10⁻⁶
@@ -119,8 +119,13 @@ const ICE_UNDER_HYDROCARBON_SOURCE: &str =
 /// - (water-ice bedrock, CH₄), and the same under ethane and Titan's CH₄–C₂H₆–N₂ sea, 8
 ///   ([`ICE_UNDER_HYDROCARBON`]).
 ///
-/// Any other pair is **not modelled** and takes 1, the rock-equivalent ([`bed_factor`]): a closed
-/// set, for the composition audit (plan R09's Risks). A row is added as data.
+/// A pair with no row takes its substrate's bedrock row where its surface is a saturated
+/// regolith, and any other pair is **not modelled** and takes 1, the rock-equivalent
+/// ([`bed_factor`]): a closed set, for the composition audit (plan R09's Risks). A row is added as
+/// data. So a crater-saturated water ice under methane takes 8, a **lower bound** for an icy
+/// regolith, which is surely at least as erodible as its bedrock: Barnhart et al.'s tenfold is a
+/// silicate regolith's under water, and is not carried to ice without a source
+/// (decision-r09-t14-choices, "T14.b follow-up" item (b)).
 pub(crate) const BED_FACTORS: [BedFactor; 5] = [
     BedFactor {
         substrate: ROCK,
@@ -154,14 +159,27 @@ pub(crate) const BED_FACTORS: [BedFactor; 5] = [
     },
 ];
 
-/// B for `substrate` under the fluid `fluid`: its row of [`BED_FACTORS`], or 1, the
-/// rock-equivalent, for a pair the table does not hold (not modelled).
+/// B for `substrate` under the fluid `fluid`: its row of [`BED_FACTORS`]; for a saturated
+/// regolith with no row, its mechanics' bedrock row, a lower bound (decision-r09-t14-choices,
+/// "T14.b follow-up" item (b)); else 1, the rock-equivalent, for a pair the table does not hold
+/// (not modelled).
 #[must_use]
 pub(crate) fn bed_factor(substrate: Substrate, fluid: SubstanceKey) -> f64 {
-    BED_FACTORS
-        .iter()
-        .find(|row| row.substrate == substrate && row.fluid == fluid.as_str())
-        .map_or(1.0, |row| row.factor)
+    let row = |substrate: Substrate| {
+        BED_FACTORS
+            .iter()
+            .find(|row| row.substrate == substrate && row.fluid == fluid.as_str())
+            .map(|row| row.factor)
+    };
+    row(substrate)
+        .or_else(|| match substrate.surface {
+            Surface::SaturatedRegolith => row(Substrate {
+                surface: Surface::Bedrock,
+                ..substrate
+            }),
+            Surface::Bedrock => None,
+        })
+        .unwrap_or(1.0)
 }
 
 /// The liquid that cuts the channels: its registry key and its density.
@@ -204,15 +222,26 @@ impl Fluid {
                 density_kg_m3: liquid.density_kg_m3,
             });
         }
+        Some(Self::of_epoch(epoch))
+    }
+
+    /// The liquid of the wet epoch `epoch`: its registry row, at its saturated liquid's density at
+    /// the triple point (as plan 14's ocean takes water's; decision-r09-t14-choices Q2 and Q6a).
+    ///
+    /// # Panics
+    ///
+    /// Never for built inputs: the builder checks the epoch's liquid's phase columns.
+    #[must_use]
+    pub(crate) fn of_epoch(epoch: &WetEpoch) -> Self {
         let row = epoch.liquid.substance();
         let density = row
             .phase()
             .expect("the builder checks the epoch's liquid's phase columns")
             .triple_liquid_density();
-        Some(Self {
+        Self {
             key: row.key(),
             density_kg_m3: density.value(),
-        })
+        }
     }
 }
 
@@ -220,37 +249,83 @@ impl Fluid {
 /// share of the surface's craters that formed before the wet epoch's end,
 /// `N_e` = N☾ (C(S) − C(E)) ÷ C(S), C the lunar chronology in the body's system
 /// ([`lunar_chronology`]), S the surface age and E the lesser of the epoch's end and S (0 on a
-/// world never wet or wet now). Zero on a surface of age zero.
+/// world never wet or wet now). Zero on a surface of age zero. It is [`crater_density_seen`] at
+/// the surface age.
 ///
 /// The reference Mars's is about 0.050 km⁻², the reference Earth's about 8.4 × 10⁻⁵ (the research
 /// subagent's figures, R09.T14's lane design §3.1).
+#[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
 #[must_use]
 pub(crate) fn effective_crater_density(inputs: &CoarseInputs) -> PerSquareKilometre {
+    crater_density_seen(inputs, inputs.surface_age())
+}
+
+/// The crater density N(>1 km) the erosion saw on a surface of `inputs` `age` old (at most the
+/// surface age), per km²: N☾(>1 km) (C(`S_x`) − C(min(E, `S_x`))) ÷ C(S), `S_x` = `age`, the
+/// craters on it that formed before the wet epoch's end E (0 on a world never wet or wet now), C
+/// the lunar chronology in the body's system ([`lunar_chronology`]) and S the surface age, as
+/// [`effective_crater_density`] counts the whole surface's (decision-r09-t14-mars-ceiling §2.1).
+/// Zero where `age` is at most the epoch's end, and on a surface of age zero.
+#[must_use]
+pub(crate) fn crater_density_seen(inputs: &CoarseInputs, age: Gigayears) -> PerSquareKilometre {
     let craters = inputs.craters();
     let system = craters.system_age();
-    let surface = inputs.surface_age();
-    let end = num::min(
-        inputs.wet_epoch().map_or(0.0, |epoch| epoch.end.value()),
-        surface.value(),
-    );
-    let whole = lunar_chronology(surface, system).value();
+    let whole = lunar_chronology(inputs.surface_age(), system).value();
     if whole <= 0.0 {
         return PerSquareKilometre::ZERO;
     }
+    let end = num::min(
+        inputs.wet_epoch().map_or(0.0, |epoch| epoch.end.value()),
+        age.value(),
+    );
+    let since = lunar_chronology(age, system).value();
     let before_end = lunar_chronology(Gigayears::new(end), system).value();
-    craters.n_1km() * ((whole - before_end) / whole)
+    craters.n_1km() * ((since - before_end) / whole)
 }
 
-/// Whether `inputs`' surface is a crater-saturated regolith, per world: its
-/// [`effective_crater_density`] at or above [`BASIN_SATURATION_DENSITY`] (0.018 km⁻², the lunar
-/// chronology at about 3.8 Ga).
+/// The surface a channel cut on `inputs` where the ground is `age` old: a crater-saturated
+/// regolith where the erosion saw at least [`BASIN_SATURATION_DENSITY`] (0.018 km⁻², the lunar
+/// chronology at about 3.8 Ga) of craters on it ([`crater_density_seen`]), else bedrock.
 ///
 /// Lean, the research subagent's criterion as the lane records it (R09.T14's lane design §3.1):
 /// the craters the erosion sees are those older than the epoch's end, and a surface saturated with
-/// basins is brecciated to depth (Barnhart, Howard and Moore 2009's Noachian regolith).
+/// basins is brecciated to depth (Barnhart, Howard and Moore 2009's Noachian regolith). A volcanic
+/// province no older than the epoch's end saw none: an erupting surface, permeable and never
+/// saturated during the epoch, bedrock (Gulick and Baker 1990; decision-r09-t14-mars-ceiling
+/// §2.1).
+#[must_use]
+pub(crate) fn surface_at(inputs: &CoarseInputs, age: Gigayears) -> Surface {
+    if crater_density_seen(inputs, age).value() >= BASIN_SATURATION_DENSITY.value() {
+        Surface::SaturatedRegolith
+    } else {
+        Surface::Bedrock
+    }
+}
+
+/// Whether `inputs`' surface is a crater-saturated regolith, per world: its
+/// [`effective_crater_density`] at or above [`BASIN_SATURATION_DENSITY`] ([`surface_at`] the
+/// surface age).
+#[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
 #[must_use]
 pub(crate) fn crater_saturated(inputs: &CoarseInputs) -> bool {
-    effective_crater_density(inputs).value() >= BASIN_SATURATION_DENSITY.value()
+    surface_at(inputs, inputs.surface_age()) == Surface::SaturatedRegolith
+}
+
+/// The surface each [`Crust`] variant's ground shows on `inputs`, in its byte's order: the
+/// world's ([`surface_at`] its surface age), but a volcanic province's by the provinces' own
+/// surface age ([`CoarseInputs::province_surface_age`]; decision-r09-t14-mars-ceiling §2.1).
+#[must_use]
+pub(crate) fn crust_surfaces(inputs: &CoarseInputs) -> [Surface; 4] {
+    let world = surface_at(inputs, inputs.surface_age());
+    let province = surface_at(inputs, inputs.province_surface_age());
+    core::array::from_fn(|k| {
+        let crust = Crust::try_from(u8::try_from(k).expect("four crusts"))
+            .expect("each of the four bytes is a crust");
+        match crust {
+            Crust::Province => province,
+            Crust::Continental | Crust::Oceanic | Crust::Lid => world,
+        }
+    })
 }
 
 /// K = K⊕ (g ÷ g⊕)(`ρ_f` ÷ `ρ_ref`) B, m^0.1 a⁻¹, for a surface gravity `gravity`, the fluid's
@@ -282,18 +357,20 @@ pub(crate) fn erodibility_m0_1_per_year(
         * bed
 }
 
-/// The erodibility of each crust of a world, for its fluid and surface.
+/// The erodibility of each crust of a world, for its fluid and surfaces: the one place the cells'
+/// K and the bed lookup are made.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Erodibility {
     fluid: Fluid,
-    surface: Surface,
+    surfaces: [Surface; 4],
     by_crust_m0_1_per_year: [f64; 4],
 }
 
 impl Erodibility {
     /// The erodibility of `inputs`' crusts, or `None` for a world never wet: for each [`Crust`]
-    /// variant, K of its palette entry's mechanics on the world's [`Surface`] under its
-    /// [`Fluid`]. A variant with no entry, which no cell carries, takes the lid's.
+    /// variant, K of its palette entry's mechanics on its [`Surface`] ([`crust_surfaces`], the
+    /// world's, a province's by its own age) under the world's [`Fluid`]. A variant with no entry,
+    /// which no cell carries, takes the lid's.
     ///
     /// # Panics
     ///
@@ -301,11 +378,7 @@ impl Erodibility {
     #[must_use]
     pub(crate) fn of(inputs: &CoarseInputs) -> Option<Self> {
         let fluid = Fluid::of(inputs)?;
-        let surface = if crater_saturated(inputs) {
-            Surface::SaturatedRegolith
-        } else {
-            Surface::Bedrock
-        };
+        let surfaces = crust_surfaces(inputs);
         let entries = inputs.crust_palette();
         let by_crust_m0_1_per_year = core::array::from_fn(|k| {
             let entry = entries[k].unwrap_or(inputs.lid_entry());
@@ -314,26 +387,29 @@ impl Erodibility {
                 .get(entry)
                 .expect("a crust's entry is the palette's")
                 .mechanics;
+            let surface = surfaces[k];
             let bed = bed_factor(Substrate { mechanics, surface }, fluid.key);
             erodibility_m0_1_per_year(inputs.gravity(), fluid.density_kg_m3, bed)
         });
         Some(Self {
             fluid,
-            surface,
+            surfaces,
             by_crust_m0_1_per_year,
         })
     }
 
     /// The fluid.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
     #[must_use]
     pub(crate) const fn fluid(&self) -> Fluid {
         self.fluid
     }
 
-    /// The surface, bedrock or a saturated regolith.
+    /// The surface of crust `crust`'s ground, bedrock or a saturated regolith.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
     #[must_use]
-    pub(crate) const fn surface(&self) -> Surface {
-        self.surface
+    pub(crate) fn surface(&self, crust: Crust) -> Surface {
+        self.surfaces[usize::from(u8::from(crust))]
     }
 
     /// K on crust `crust`, m^0.1 a⁻¹.

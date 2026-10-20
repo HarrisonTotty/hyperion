@@ -178,18 +178,21 @@ pub(crate) struct Node {
 
 impl Node {
     /// The lowest cell beneath the node.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
     #[must_use]
     pub(crate) const fn pit(&self) -> u32 {
         self.pit
     }
 
     /// Where it spills; `None` for the root of a world with no sea.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
     #[must_use]
     pub(crate) const fn spill(&self) -> Option<Spill> {
         self.spill
     }
 
     /// The node it merged into; `None` for a tree's root.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
     #[must_use]
     pub(crate) const fn parent(&self) -> Option<u32> {
         self.parent
@@ -485,6 +488,7 @@ impl Hierarchy {
     /// # Panics
     ///
     /// If there is no node `k`.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
     #[must_use]
     pub(crate) fn node(&self, k: u32) -> &Node {
         &self.nodes[slot(k)]
@@ -495,6 +499,7 @@ impl Hierarchy {
     /// # Panics
     ///
     /// If `cell` is not a cell of the field.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
     #[must_use]
     pub(crate) fn holder(&self, cell: u32) -> Option<u32> {
         self.holder[slot(cell)]
@@ -903,6 +908,7 @@ pub(crate) struct Body {
 
 impl Body {
     /// Whether it is a dry playa: terminal, and under it no cell.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
     #[must_use]
     pub(crate) fn is_playa(&self) -> bool {
         !self.full && self.cells.is_empty()
@@ -933,6 +939,7 @@ impl WaterBodies {
     }
 
     /// What passed to the sea, in the measure's unit.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
     #[must_use]
     pub(crate) const fn discharged(&self) -> f64 {
         self.discharged
@@ -943,6 +950,7 @@ impl WaterBodies {
     /// # Panics
     ///
     /// If `cell` is not a cell of the field.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
     #[must_use]
     pub(crate) fn water_level_m(&self, cell: u32) -> Option<f64> {
         self.water_level_m[slot(cell)]
@@ -987,6 +995,25 @@ pub(crate) fn route_with_water(
     bodies: &WaterBodies,
     uniforms: &[f64],
 ) -> Routing {
+    route_with_water_from(mesh, z, sea, sea_level_m, bodies, uniforms, None)
+}
+
+/// [`route_with_water`] with each cell keeping its receiver of `previous` while it stays strictly
+/// below it ([`drainage::route_from`], the sticky receivers).
+///
+/// # Panics
+///
+/// As [`route_with_water`] and [`drainage::route_from`].
+#[must_use]
+pub(crate) fn route_with_water_from(
+    mesh: &Mesh,
+    z: &[f64],
+    sea: &[bool],
+    sea_level_m: f64,
+    bodies: &WaterBodies,
+    uniforms: &[f64],
+    previous: Option<&Routing>,
+) -> Routing {
     assert_eq!(sea.len(), slot(mesh.len()), "one sea flag a cell");
     let mut seeds: Vec<Seed> = sea
         .iter()
@@ -1015,5 +1042,5 @@ pub(crate) fn route_with_water(
             level_m: z[slot(lowest)],
         });
     }
-    drainage::route(mesh, z, &seeds, uniforms)
+    drainage::route_from(mesh, z, &seeds, uniforms, previous)
 }

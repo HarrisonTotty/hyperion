@@ -59,49 +59,45 @@
 //!   construction, the water bodies, the bounds and, on a world wet now, each cell's basin and
 //!   base level, with the uplift u = `λ_b` max(0, z0 − `ℓ_b`) refitted every iteration so that
 //!   each basin keeps its construction's mean height above its base level
-//!   (decision-r09-t14-choices Q1); and the upsample through R09.T4's interpolant at child centres
-//!   jittered on `surface.coarse.erosion` (instance 1, the receivers' being 0), with each level's
-//!   last residual, `λ_b`'s distribution and the implied mean uplift recorded.
+//!   (decision-r09-t14-choices Q1); and each finer level's start, its construction plus the
+//!   upsample of the coarser level's change through R09.T4's interpolant at child centres
+//!   jittered on `surface.coarse.erosion` (instance 1, the receivers' being 0; "T14.b follow-up"
+//!   item 3), with each level's residuals, largest changes and changed receivers, `λ_b`'s
+//!   distribution and the implied mean uplift recorded.
 //!
-//! R09.T14.c–d build the rest: the wet-now, dry-now and never-wet branches (R09.T14.c); and the
-//! re-match of `σ_h` with the outputs, the flow directions, the geometric drainage area, the
-//! steepness index, the two runoffs and the water surfaces (R09.T14.d). Until R09.T14.c, [`run`]
-//! is a no-op.
+//! R09.T14.c builds the branches and the outputs, which [`run`] calls:
+//!
+//! - `branches`: never wet, nothing; dry now, the transient for the wet epoch's effective flow
+//!   times the share of the epoch the surface saw, nothing where it saw none, with no uplift, the
+//!   epoch's runoff on every cell and the paleo-inventory's lakes as bounds, the young surface
+//!   inside the waiting craters' rims eroded but shedding no runoff of its own (Q2, Q4), the
+//!   volcanic provinces exposed and bedded by their own surface's age and renewed after the solve
+//!   where younger than the epoch, and each eroded cell lowered by its valley's void, its
+//!   bankfull floor and 10:1 walls, not its channel's whole incision
+//!   (decision-r09-t14-mars-ceiling §2.1–2.2); wet now, the steady state under each basin's
+//!   freeboard with the climate's runoff, ice cells shedding it as it is, the sea the bound and
+//!   every closed depression a dry playa (Q1, Q3, Q5).
+//! - `outputs`: the elevation, the water surfaces, the final elevation's routing, flow, geometric
+//!   drainage and steepness index on the filled surface, the own and catchment runoffs, a world
+//!   dry now's channel incision (F2), and the marker that the field is routed.
+//!
+//! Until R09.T14.d lifts the climate's runoff into the step, the wet-now branch runs in the
+//! crate's own tests only, and elsewhere leaves a world wet now as the climate step left it.
+//! R09.T14.d builds the rest: the re-match of `σ_h`, the sea and the lakes on the final field, the
+//! climate's re-application and the re-routing after the late craters.
 //!
 //! Every part is implemented from the papers alone: no code is copied or paraphrased from Tzathas
 //! et al.'s repository (Inria research-only licence), Dendry (GPL-3.0) or Barnes's `RichDEM`.
 //!
 //! [`Edge::ALL`]: hyperion_surface::cube::Edge::ALL
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "R09.T14.b's multigrid calls it, which R09.T14.c's branches call"
-    )
-)]
+mod branches;
 mod depressions;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "R09.T14.b's multigrid calls it, which R09.T14.c's branches call"
-    )
-)]
 mod drainage;
-#[cfg_attr(not(test), expect(dead_code, reason = "R09.T14.c's branches call it"))]
 mod erodibility;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "R09.T14.b's multigrid calls it, which R09.T14.c's branches call"
-    )
-)]
 mod mesh;
-#[cfg_attr(not(test), expect(dead_code, reason = "R09.T14.c's branches call it"))]
 mod multigrid;
-#[cfg_attr(not(test), expect(dead_code, reason = "R09.T14.c's branches call it"))]
+mod outputs;
 mod solver;
 
 #[cfg(test)]
@@ -115,8 +111,78 @@ const _: () = assert!(
 );
 
 use super::{Pass, Working};
+use branches::Branch;
 
-/// Runs the step on `working`, which it leaves unchanged until R09.T14.c's branches call the
-/// drainage and R09.T14.b's solver: it will write the cells' elevation, flow, drainage, steepness,
-/// runoffs and water surfaces.
-pub fn run(_pass: &Pass<'_>, _working: &mut Working) {}
+/// Runs the step on `working` as the climate step left it (see the module documentation): by the
+/// world's branch, the multigrid's erosion and its outputs, the cells' elevation, water surfaces,
+/// flow, drainage, steepness, runoffs and channel incision, the field marked routed; nothing on a
+/// world never wet or where the surface is no older than its wet epoch's end.
+///
+/// # Panics
+///
+/// Never on a working state the steps before it left: every value is finite, and every sea cell's
+/// ground at or below the sea's level.
+pub fn run(pass: &Pass<'_>, working: &mut Working) {
+    match Branch::of(pass.inputs()) {
+        Branch::NeverWet => {}
+        Branch::DryNow => dry_now(pass, working),
+        Branch::WetNow => wet_now(pass, working),
+    }
+}
+
+/// The dry-now branch's erosion and outputs (decision-r09-t14-choices Q2 and Q4;
+/// decision-r09-t14-mars-ceiling §2.1–2.2), nothing where the surface is no older than the epoch's
+/// end.
+fn dry_now(pass: &Pass<'_>, working: &mut Working) {
+    let Some(eroded) = branches::dry_now(pass, working) else {
+        return;
+    };
+    let epoch = pass
+        .inputs()
+        .wet_epoch()
+        .expect("a world dry now has a wet epoch");
+    let young = branches::inside_waiting_rims(pass, working);
+    let runoff = eroded.output_runoff_m_per_year(epoch, &young);
+    let sea = branches::sea_cells(working);
+    let sea_level_m = working.sea_level.value();
+    outputs::write(
+        working,
+        sea_level_m,
+        &eroded.outcome,
+        &outputs::Written {
+            elevation_m: &eroded.elevation_m,
+            sea: &sea,
+            runoff_m_per_year: &runoff,
+            channel_incision_m: Some(&eroded.incision_m),
+        },
+    );
+}
+
+/// The wet-now branch's erosion and outputs (decision-r09-t14-choices Q1, Q3 and Q5), its source
+/// the climate's annual runoff, read for every cell before any changes.
+#[cfg(test)]
+fn wet_now(pass: &Pass<'_>, working: &mut Working) {
+    let fluid = erodibility::Fluid::of(pass.inputs()).expect("a world wet now has a fluid");
+    let runoff = branches::wet_now_runoff_m_per_year(pass, working, fluid);
+    let outcome = branches::erode_wet_now(pass, working, &runoff);
+    let sea = branches::sea_cells(working);
+    let sea_level_m = working.sea_level.value();
+    outputs::write(
+        working,
+        sea_level_m,
+        &outcome,
+        &outputs::Written {
+            elevation_m: &outcome.z_m,
+            sea: &sea,
+            runoff_m_per_year: &runoff,
+            channel_incision_m: None,
+        },
+    );
+}
+
+/// The wet-now branch outside the crate's own tests: nothing until R09.T14.d, whose commit lifts
+/// the climate's runoff (`climate::annual_runoff_kg_m2_s`, which the branch reads) out of its
+/// `expect(dead_code)` (the lane's design §0), so that a world wet now stays as the climate step
+/// left it, unrouted.
+#[cfg(not(test))]
+fn wet_now(_pass: &Pass<'_>, _working: &mut Working) {}

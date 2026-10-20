@@ -56,8 +56,11 @@
 //! cold-trapped part, the inputs' `cold_traps`, placed after its zonal part in each field cell's
 //! cold-trap fraction from plan 14's closed form, scaled to plan 14's area, one ice a cell, the
 //! rest counted as undrawn. R09.T13.h balanced the radiative model's thin-air slab with its
-//! column's own emission, bounded at the frost point aloft with its snowfall. Erosion and the
-//! classes are still no-ops.
+//! column's own emission, bounded at the frost point aloft with its snowfall. R09.T14.a–c filled
+//! [`erosion`]: the drainage, the stream-power solver and its multigrid, and the branches of a
+//! world wet now, dry now and never wet, writing each cell's elevation, flow, drainage, steepness,
+//! runoffs and, dry now, its channel incision (the wet-now branch outside the crate's own tests
+//! from R09.T14.d, which brings the climate's runoff to it). The classes are still a no-op.
 
 pub mod classes;
 pub mod climate;
@@ -188,6 +191,11 @@ pub struct CellState {
     /// drainage area, its own included, metres a Julian year, non-negative: the solver's
     /// equivalent area over the geometric, times 1 m a⁻¹.
     pub catchment_runoff_m_per_year: f64,
+    /// The erosion's channel incision at the cell on a world dry now, z0 less the solver's
+    /// elevation, before any width closure: what the wet epoch cut (R09.T14.c;
+    /// decision-r09-t14-choices F2, for R09.T6.c's valleys of a short wet epoch). Zero on every
+    /// other world and before the erosion. Unquantised: no field member carries it yet.
+    pub channel_incision: Metres,
     /// The share of the cell under ice, 0 to 1.
     pub ice_fraction: f64,
     /// The palette entry of the cell's ice, an index into the inputs' palette
@@ -335,6 +343,12 @@ pub struct Working {
     pub realised_relief: Metres,
     /// The plates, in plate-index order (R09.T11): none on a world without them.
     pub plates: Vec<plates::Plate>,
+    /// Whether the erosion step routed the field, writing its flow, drainage, steepness and
+    /// runoffs (R09.T14.c): false on a world never wet, where the surface is no older than its
+    /// wet epoch's end, and before the step, where every cell stays terminal with no drainage,
+    /// steepness or runoff (decision-r09-t14-choices, "T14.d follow-up" C), so that R09.T14.d's
+    /// re-routing after the late craters runs only where the step routed.
+    pub routed: bool,
 }
 
 impl Working {
@@ -364,6 +378,7 @@ impl Working {
             steepness_index_m0_9: 0.0,
             runoff_m_per_year: 0.0,
             catchment_runoff_m_per_year: 0.0,
+            channel_incision: Metres::ZERO,
             ice_fraction: 0.0,
             ice_entry: None,
             liquid_entry: None,
@@ -404,6 +419,7 @@ impl Working {
             realised_sigma_h: Metres::ZERO,
             realised_relief: Metres::ZERO,
             plates: Vec::new(),
+            routed: false,
         }
     }
 }

@@ -416,6 +416,7 @@ pub struct CoarseInputs {
     volcanism: f64,
     heat_flow: WattsPerSquareMetre,
     surface_age: Gigayears,
+    province_surface_age: Gigayears,
     craters: CraterParams,
     wet_epoch: Option<WetEpoch>,
     climate: ClimateRegime,
@@ -943,6 +944,13 @@ impl CoarseInputs {
             .surface_age(Gigayears::new(
                 figures.surface_age().value() / YEARS_PER_GIGAYEAR,
             ))
+            // Interim, labelled: 0, the provinces erupting to now, until plan 14's
+            // `GlobalFigures::volcanic_surface_age` lands (decision-r09-t14-mars-ceiling §2.1, a new
+            // P14.T48 sub-task). That is right for every wet epoch its outgassing clause ends, which
+            // leaves the volcanism running, and wrong only where a dimming host ended the epoch
+            // after the volcanism died. Tripwire: when `volcanic_surface_age` lands, read it here
+            // (in Gyr, as the surface age above) and delete this comment, before the gate.
+            .province_surface_age(Gigayears::new(0.0))
             .craters(*figures.craters())
             .climate(ClimateRegime::from(surface.climate_regime()))
             .crust(crust)
@@ -1156,6 +1164,17 @@ impl CoarseInputs {
     #[must_use]
     pub const fn surface_age(&self) -> Gigayears {
         self.surface_age
+    }
+
+    /// The volcanic provinces' surface age, 0 to the surface age: the time since their surface
+    /// last formed, the time since the heat flow last stood at or above the volcanism's threshold
+    /// (plan 14's `volcanic_surface_age`, decision-r09-t14-mars-ceiling §2.1). The erosion's
+    /// exposure of a [`Crust::Province`] cell is its wet epoch's share by this age rather than the
+    /// global one: a province no older than the epoch's end is renewed to its construction after
+    /// the solve. [`from_record`](Self::from_record) takes 0 until plan 14's figure lands.
+    #[must_use]
+    pub const fn province_surface_age(&self) -> Gigayears {
+        self.province_surface_age
     }
 
     /// The crater contract (P14.T48.c), whose gravity is the body's.
@@ -1594,6 +1613,14 @@ pub enum BuildCoarseInputsError {
         /// The crater contract's system age.
         system: Gigayears,
     },
+    /// The provinces' surface age is not finite or lies outside 0 to the surface age
+    /// (decision-r09-t14-mars-ceiling §2.1).
+    ProvinceSurfaceAge {
+        /// The provinces' surface age.
+        province: Gigayears,
+        /// The surface age.
+        surface: Gigayears,
+    },
 }
 
 impl fmt::Display for BuildCoarseInputsError {
@@ -1671,6 +1698,12 @@ impl fmt::Display for BuildCoarseInputsError {
                 surface.value(),
                 system.value()
             ),
+            Self::ProvinceSurfaceAge { province, surface } => write!(
+                f,
+                "a province surface of {} Gyr is not from 0 to the surface's {} Gyr",
+                province.value(),
+                surface.value()
+            ),
         }
     }
 }
@@ -1709,6 +1742,7 @@ pub struct CoarseInputsBuilder {
     volcanism: Option<f64>,
     heat_flow: Option<WattsPerSquareMetre>,
     surface_age: Option<Gigayears>,
+    province_surface_age: Option<Gigayears>,
     craters: Option<CraterParams>,
     wet_epoch: Option<WetEpoch>,
     climate: Option<ClimateRegime>,
@@ -2028,6 +2062,14 @@ impl CoarseInputsBuilder {
         self
     }
 
+    /// The volcanic provinces' surface age, finite and from 0 to the surface age
+    /// ([`CoarseInputs::province_surface_age`]).
+    #[must_use]
+    pub const fn province_surface_age(mut self, age: Gigayears) -> Self {
+        self.province_surface_age = Some(age);
+        self
+    }
+
     /// The crater contract, whose gravity must be the body's and whose system must be at least
     /// as old as the surface.
     #[must_use]
@@ -2152,6 +2194,7 @@ impl CoarseInputsBuilder {
         check_non_negative("heat flow", heat_flow.value())?;
         let surface_age = required(self.surface_age, "surface age")?;
         check_non_negative("surface age", surface_age.value())?;
+        let province_surface_age = province_surface_age(self.province_surface_age, surface_age)?;
         let craters = required(self.craters, "crater contract")?;
         check_craters(&craters, gravity, surface_age)?;
         if let Some(epoch) = &self.wet_epoch {
@@ -2188,6 +2231,7 @@ impl CoarseInputsBuilder {
             volcanism,
             heat_flow,
             surface_age,
+            province_surface_age,
             craters,
             wet_epoch: self.wet_epoch,
             climate,
@@ -2240,6 +2284,21 @@ fn check_crust(crust: &CrustInputs) -> Result<SubstanceKey, BuildCoarseInputsErr
     .ok_or(BuildCoarseInputsError::LidAbsent(crust.lid))?;
     check_fraction("melt area fraction", crust.melt_area_fraction)?;
     Ok(lid)
+}
+
+/// The provinces' surface age `province`, refused where it is missing, not finite, or outside 0
+/// to the surface age `surface`.
+fn province_surface_age(
+    province: Option<Gigayears>,
+    surface: Gigayears,
+) -> Result<Gigayears, BuildCoarseInputsError> {
+    let province = required(province, "province surface age")?;
+    let age = province.value();
+    if age.is_finite() && age >= 0.0 && age <= surface.value() {
+        Ok(province)
+    } else {
+        Err(BuildCoarseInputsError::ProvinceSurfaceAge { province, surface })
+    }
 }
 
 /// Refuses a wet epoch outside its ranges or ending before it starts.
@@ -2662,6 +2721,50 @@ mod tests {
                 system
             }
         );
+    }
+
+    /// The provinces' surface age is required and lies from 0 to the surface age
+    /// (decision-r09-t14-mars-ceiling §2.1): the builder refuses none, a NaN, a negative age and
+    /// one above the surface age, and takes 0 and the surface age itself; the reference Mars's is
+    /// 0, the reference Earth's, Moon's and Ceres's their surface age.
+    #[test]
+    fn the_province_surface_age_lies_from_zero_to_the_surface_age() {
+        let earth = reference::earth_like();
+        let surface = earth.surface_age();
+        let mut missing = earth_builder();
+        missing.province_surface_age = None;
+        assert_eq!(
+            missing.build().unwrap_err(),
+            BuildCoarseInputsError::Missing("province surface age")
+        );
+        for bad in [f64::NAN, -1e-9, surface.value() + 1e-9, f64::INFINITY] {
+            let error = earth_builder()
+                .province_surface_age(Gigayears::new(bad))
+                .build()
+                .unwrap_err();
+            assert!(
+                matches!(
+                    error,
+                    BuildCoarseInputsError::ProvinceSurfaceAge { surface: s, .. } if s == surface
+                ),
+                "{bad}: {error:?}"
+            );
+            assert!(error.to_string().contains("province surface"));
+        }
+        for good in [0.0, 0.5 * surface.value(), surface.value()] {
+            let inputs = earth_builder()
+                .province_surface_age(Gigayears::new(good))
+                .build()
+                .unwrap();
+            assert_same_bits(inputs.province_surface_age().value(), good);
+        }
+        assert_same_bits(reference::mars_like().province_surface_age().value(), 0.0);
+        for world in [earth, reference::moon_like(), reference::ceres_like()] {
+            assert_same_bits(
+                world.province_surface_age().value(),
+                world.surface_age().value(),
+            );
+        }
     }
 
     /// The builder refuses a wet epoch whose runoff is negative, or whose liquid has no liquid
@@ -4071,6 +4174,8 @@ mod tests {
             inputs.surface_age().value(),
             figures.surface_age().value() / 1e9,
         );
+        // The interim until plan 14's `volcanic_surface_age` (decision-r09-t14-mars-ceiling §2.1).
+        assert_same_bits(inputs.province_surface_age().value(), 0.0);
         assert_eq!(inputs.craters(), figures.craters());
         assert_eq!(
             inputs.wet_epoch().copied(),
