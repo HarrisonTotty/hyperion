@@ -1945,3 +1945,12 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
     `HYPERION_STOP_ON_STDIN_CLOSE=1`) and an explicit `--data-dir`, as this task's contract says.
     Its last step is corrected above. A SIGTERM after the server has seen stdin end is a second
     request, and forces exit 1 rather than stopping gracefully.
+- **Deviations in T17.d, as built.** None from the task's text. The twins sit beside their Unix
+  tests in `config.rs`'s tests, under `#[cfg(windows)]`, with the same names and assertions, and
+  build the value with `OsString::from_wide(&[0x66, 0x6F, 0xD800])` through
+  `std::os::windows::ffi::OsStringExt`, imported inside each test as the Unix ones import theirs.
+  Each has a one-line doc comment naming the value. They compile under the Windows Clippy with
+  `--all-targets` (`just smart-ci`'s `_cross-clippy-for` step for `x86_64-pc-windows-msvc`), and
+  `cargo test -p hyperion-server config` on Linux selects as many tests as before. They run once a
+  Windows runner exists, and are untested until then, as the ruling accepts: the Windows run is
+  still owed.
