@@ -925,7 +925,7 @@ impl RayExtinctions {
     /// at each of the profiles' nodes (R06.T7.b).
     ///
     /// The sub-rays are the ray itself and `sub_rays` − 1 more, spread evenly round it at
-    /// [`SUB_RAY_RING_SPACINGS`] of the lattice's spacing, within its cone. The least extinction at
+    /// `SUB_RAY_RING_SPACINGS` of the lattice's spacing, within its cone. The least extinction at
     /// each node, interpolated linearly, is at most each sub-ray's own between the nodes, so a ray
     /// counts at least the stars of its clearest sub-ray: a window between the rays narrower than
     /// their spacing, which one profile a ray misses, is counted where a sub-ray meets it.

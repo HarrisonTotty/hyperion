@@ -221,9 +221,9 @@ const H_SERIES_BELOW_RAD: f64 = 0.05;
 /// Kawabata 2016's eqs. 2–3 (arXiv 1611.10197, p. 2), whose (1 + tan² θ) ÷ (1 + μ² tan² θ) is
 /// this kernel.
 ///
-/// The integral is taken in s, θ = (π ÷ 2) s², by [`H_PANELS`] panels of 32-point Gauss–Legendre,
+/// The integral is taken in s, θ = (π ÷ 2) s², by `H_PANELS` panels of 32-point Gauss–Legendre,
 /// so that the logarithm's singularity at θ = 0 when w = 1 is integrable smoothly; below
-/// [`H_SERIES_BELOW_RAD`] the bracket is (1 − w) + w (θ² ÷ 3 + θ⁴ ÷ 45 + 2θ⁶ ÷ 945 + θ⁸ ÷ 4,725), θ
+/// `H_SERIES_BELOW_RAD` the bracket is (1 − w) + w (θ² ÷ 3 + θ⁴ ÷ 45 + 2θ⁶ ÷ 945 + θ⁸ ÷ 4,725), θ
 /// cot θ's series. The tests hold it to Kawabata 2016's exact values to 10⁻⁸ and to its zeroth
 /// moment, ∫₀¹ H dμ = (2 ÷ w)(1 − √(1 − w)).
 #[must_use]
@@ -398,7 +398,7 @@ impl Medium {
     }
 
     /// The directional-hemispherical albedo at incidence cosine `mu0` in (0, 1]: (1 ÷ π) ∫ r μ dΩ
-    /// over the upper hemisphere, by 32-point Gauss–Legendre in μ on each panel of [`MU_EDGES`]
+    /// over the upper hemisphere, by 32-point Gauss–Legendre in μ on each panel of `MU_EDGES`
     /// and 64-point in the azimuth on [0, π], the integrand being even in it, summed in order.
     #[must_use]
     pub fn directional_hemispherical_albedo(&self, mu0: f64) -> f64 {
@@ -457,7 +457,7 @@ pub fn similar_isotropic_albedo(w: f64, asymmetry: f64) -> f64 {
 
 /// The energy albedos of grains of albedo `w` and asymmetry `asymmetry` by the similarity
 /// relation: the plane albedo at each of [`HEMISPHERICAL_INCIDENCE_COSINES`], and the spherical
-/// albedo 2 ∫₀¹ `A_h`(μ₀) μ₀ dμ₀ by the hemisphere's nodes ([`mu_nodes`]), summed in order and
+/// albedo 2 ∫₀¹ `A_h`(μ₀) μ₀ dμ₀ by the hemisphere's nodes (`mu_nodes`), summed in order and
 /// held at most 1.
 ///
 /// The spherical albedo is van de Hulst's similar quantity, within 0.004 of the anisotropic

@@ -105,7 +105,7 @@
 //!   `T_eff`⁴ = `T_int`⁴ + `T_eq`⁴: Fortney and Hubbard (2004, ApJ 608, 1039,
 //!   arXiv:astro-ph/0402620, read) set the deep entropy from the isolated models at the planet's
 //!   `T_eff` and gravity, S = S(`T_eff`, g, X) (their eq. 4, with eq. 6, for planets "at least 5
-//!   AU" out). A giant within a few au "will cool to [its] equilibrium temperatures, determined by
+//!   AU" out). A giant within a few au "will cool to \[its] equilibrium temperatures, determined by
 //!   stellar heating, before the onset of phase separation" (their abstract), and so, keyed on
 //!   `T_eff`, never rains, whatever its record's `T_int`.
 //! - **Calibrated on the two giants measured.** He/H over the primordial falls linearly in x,

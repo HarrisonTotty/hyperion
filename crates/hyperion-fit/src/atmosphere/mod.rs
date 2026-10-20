@@ -14,23 +14,23 @@
 //! output, and its runs are by hand, their outputs committed beside the cases (R08.T12.b).
 //!
 //! - [`case`]: the case format and its validation;
-//! - [`transport`]: the estimator (absorption as a weight, delta tracking, a forced first
+//! - `transport`: the estimator (absorption as a weight, delta tracking, a forced first
 //!   collision, next-event estimation to every sun, a Lambertian ground, Russian roulette, Buras
 //!   and Mayer 2011's VROOM where a medium is forward-peaked (R08.T12.f) and the Stokes mode,
 //!   which scores the scalar radiance of the same paths beside the vector one);
-//! - [`optics`]: profiles, phase functions (closed forms, tables on u = √(Θ ÷ π) and Legendre
+//! - `optics`: profiles, phase functions (closed forms, tables on u = √(Θ ÷ π) and Legendre
 //!   series) and the block-diagonal scattering matrices;
-//! - [`geometry`]: frames and the shells;
-//! - [`spheroid`]: the level spheroid of an oblate body, its normal gravity, geodetic coordinates
+//! - `geometry`: frames and the shells;
+//! - `spheroid`: the level spheroid of an oblate body, its normal gravity, geodetic coordinates
 //!   and quadric shells, over which the medium is read at the gravity-scaled height;
-//! - [`reference`]: the output and its moments;
+//! - [`mod@reference`]: the output and its moments;
 //! - `benchmarks` (tests only): the published benchmarks the tracer is held to before its
 //!   references are trusted (R08.T12.c), slow tests run by `just test-slow atmosphere::benchmarks`.
 //!
 //! **Reproducible for any thread count**, by the crate's convention: the samples of each geometry,
 //! aggregate and wavelength are cut into blocks of [`BLOCK_SAMPLES`] mapped by
 //! [`parallel::map_reduce_chunks`](crate::parallel::map_reduce_chunks), and every sample draws from
-//! its own counter-based stream ([`Draws`](crate::tasks::displaced_forms::births::Draws), as the
+//! its own counter-based stream ([`Draws`], as the
 //! displaced forms' orbits draw), so that a sample is a pure function of its key and the blocks'
 //! moments are merged in index order. A sample's key is the case's seed salted with
 //! [`ATMOSPHERE_STREAM`], its wavelength and its geometry or aggregate by their own indices (so

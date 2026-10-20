@@ -435,7 +435,7 @@ pub enum BuildFieldError {
     /// There are more craters than a `u32` can count.
     TooManyCraters(usize),
     /// The craters' reaches, cell by cell, hold more entries than the per-cell index admits: more
-    /// than [`MAX_MEAN_REACHES_PER_CELL`] a cell of the level on average, or than memory holds.
+    /// than `MAX_MEAN_REACHES_PER_CELL` a cell of the level on average, or than memory holds.
     TooManyReaches,
     /// A crater's centre is not a finite unit vector.
     CraterCentre {

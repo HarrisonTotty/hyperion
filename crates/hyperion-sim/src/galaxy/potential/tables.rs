@@ -466,7 +466,7 @@ impl PotentialTables {
     /// denominator at the floor, in metres (rendering plan R06, R06.T8.b).
     ///
     /// The denominator is never below 0.05 Ω² at its own radius. `Ω²_min` is the least Ω² at `r`
-    /// and at every grid point within it, less [`TIDAL_BOUND_MARGIN`] for the interpolation
+    /// and at every grid point within it, less `TIDAL_BOUND_MARGIN` for the interpolation
     /// between points: Ω² = `v_c²` ÷ R² falls by some 40% from one grid point to the next wherever
     /// the mean density enclosed falls outward, so no interpolated value between two points lies
     /// that far below both (a test checks it over many drawn galaxies). Zero at `r` = 0.

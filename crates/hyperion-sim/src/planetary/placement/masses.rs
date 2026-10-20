@@ -132,7 +132,7 @@
 //! 1–10 days, structurally empty. Above the ceiling a drift-fed member's law now falls as Pascucci
 //! et al.'s (2018, Table 1) mass-ratio function does above its break, dN ÷ d log q ∝ q^−2.9
 //! ([`MASS_TAPER_INDEX`]), never above the member's own law and continuous with it at the ceiling
-//! ([`tapered_log_mass`]), and ends at a giant's
+//! (`tapered_log_mass`), and ends at a giant's
 //! mass, so that a chain's planets stay small planets ([`taper_limit`]). The taper starts at the
 //! ceiling, not at Pascucci et al.'s break (q ≈ 2.8 × 10⁻⁵, 9.3 M⊕ × M★): here the break is the
 //! law's median, Wu's 7.7 M⊕ × M★, which their forward-modelled 7.7 ± 1.7 M⊕ confirms, and the

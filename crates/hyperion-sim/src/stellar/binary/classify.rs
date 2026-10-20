@@ -234,7 +234,7 @@ pub const MIN_DETONATABLE_MASS: SolarMasses = SolarMasses::new(0.85);
 /// The least accretion luminosity at which a white dwarf fed by a giant's wind is a symbiotic
 /// star: 10 L☉, the faint end of the accretion-powered high states, "10–1000 L⊙" (Mikołajewska
 /// 2011, arXiv:1011.5657, section 4; ruling 129.5). Steady hydrogen burning would add to it only
-/// above [`STEADY_BURNING_RATE`], where accretion onto any white dwarf already gives more than a
+/// above `STEADY_BURNING_RATE`, where accretion onto any white dwarf already gives more than a
 /// hundred L☉, so accretion alone is compared.
 pub const SYMBIOTIC_MIN_LUMINOSITY: SolarLuminosities = SolarLuminosities::new(10.0);
 

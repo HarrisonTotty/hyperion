@@ -8,7 +8,7 @@
 //! # The pipeline
 //!
 //! 1. The land–sea state, from the working field: a field cell is under liquid where the relief
-//!    step flooded it, its water surface strictly above its ground ([`seas::under_sea`]: R09.T12.e's
+//!    step flooded it, its water surface strictly above its ground (`seas::under_sea`: R09.T12.e's
 //!    ocean, decision-r09-t12-coarse R8, and later R09.T14's lakes), and each model grid point's
 //!    sea share is the solid angle of its flooded cells over all of its cells', each cell binned
 //!    by its centre's latitude and longitude in the model's coordinates; a point that holds no

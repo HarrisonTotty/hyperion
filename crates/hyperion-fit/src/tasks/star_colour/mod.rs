@@ -489,7 +489,7 @@ fn read_models(
 ///
 /// # Errors
 ///
-/// [`RunTaskError`] if the source holds no such model or a blackbody, or as [`read_models`].
+/// [`RunTaskError`] if the source holds no such model or a blackbody, or as `read_models`.
 pub fn read_model_spectrum(
     manifest: &Manifest,
     source: Source,
@@ -584,7 +584,7 @@ fn build_grid(
 ///
 /// # Errors
 ///
-/// [`RunTaskError`] as [`read_models`] and [`build_grid`].
+/// [`RunTaskError`] as `read_models` and `build_grid`.
 pub fn fit(
     manifest: &Manifest,
     observer: &Observer,
@@ -1290,7 +1290,7 @@ impl FitTask for StarColourReddeningTask {
         }
     }
 
-    /// The sim probes every reddening table reads ([`reddening_fingerprint`]).
+    /// The sim probes every reddening table reads (`reddening_fingerprint`).
     fn fingerprint(&self) -> SimFingerprint {
         reddening_fingerprint()
     }

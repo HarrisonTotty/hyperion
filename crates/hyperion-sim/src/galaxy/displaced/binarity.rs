@@ -5,7 +5,7 @@
 //! carbon–oxygen core of 3 M☉, may take the kick law's low mode (plan 06, design note 11), so the
 //! share of stripped primaries sets how many remnants stay near their birth sites. It is built on
 //! plan 11's quadrature of the companions the hierarchy draw gives,
-//! [`band_share_as_drawn`](crate::stellar::multiplicity::band_share_as_drawn): the share of
+//! [`band_share_as_drawn`]: the share of
 //! primaries whose innermost companion's periastron lies in a band of periastra that depends on
 //! the mass ratio, over plan 11's count, period, mass-ratio and eccentricity laws (ruling 81's
 //! direct construction from 3 M☉, [`MultiplicityModel::default_v1`] below).

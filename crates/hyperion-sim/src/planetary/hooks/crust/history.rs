@@ -28,7 +28,7 @@
 //!   times, μₙ t ≪ 1 for many n) the terms alternate at a near-constant size and the plain partial
 //!   sums swing between about 0 and twice the answer. The sum taken is therefore the Euler
 //!   transform of order 3 of the last four partial sums, (`S_N` + 3 `S_{N−1}` + 3 `S_{N−2}` + `S_{N−3}`) ÷ 8:
-//!   the last three terms weighted 7/8, 1/2 and 1/8 ([`taper`]). It is exact on the plateau and
+//!   the last three terms weighted 7/8, 1/2 and 1/8 (`taper`). It is exact on the plateau and
 //!   holds the constant source's steady state within 3 × 10⁻⁷ at 24 terms.
 //! - **Each term's quotient** (e^(−λt) − e^(−μt)) ÷ (μ − λ) is t e^(−λt) (1 − e^(−x)) ÷ x with
 //!   x = (μ − λ) t, taken by its series where |x| < [`SMALL_EXPONENT`], so that a mode whose rate

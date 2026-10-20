@@ -835,7 +835,7 @@ pub const CHAIN_COUNT: CountLaw = CountLaw::ZeroTruncatedPoisson {
 };
 
 /// The share of an early M dwarf's chains that take the hot variant: 0.43 (ruling 102.4; 0.55
-/// under ruling 85.4), where [`HOT_VARIANT`]'s 0.4 is Mulders et al.'s (2018) for FGK hosts.
+/// under ruling 85.4), where `HOT_VARIANT`'s 0.4 is Mulders et al.'s (2018) for FGK hosts.
 ///
 /// Ballard and Johnson (2016, ApJ 816, 66, Table 1) fit 0.55 (+0.23 −0.12) of M-dwarf systems to
 /// their mode of single or inclined systems, so the cold chains take at most 0.57. Ruling 102.4

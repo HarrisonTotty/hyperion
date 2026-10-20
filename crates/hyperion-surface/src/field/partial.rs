@@ -112,7 +112,7 @@ pub enum InsertBlockError {
     /// The craters held would be more than a `u32` counts.
     TooManyCraters,
     /// The craters' reaches would hold more entries than the per-cell index admits: more than
-    /// [`MAX_MEAN_REACHES_PER_CELL`](super::MAX_MEAN_REACHES_PER_CELL), 32, a cell of the level
+    /// `MAX_MEAN_REACHES_PER_CELL`, 32, a cell of the level
     /// on average, or than memory holds.
     TooManyReaches,
 }

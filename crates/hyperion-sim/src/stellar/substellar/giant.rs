@@ -11,7 +11,7 @@
 //!    laws, which the brainstorm cites, were tried first and fail Jupiter in every quantity (the
 //!    fitting task's documentation gives the figures and the reasons for the grid). The table is
 //!    interpolated bilinearly in log₁₀ mass and log₁₀ age, so the state is continuous in both and
-//!    has no step in age. Below 1 Myr ([`MIN_AGE`](super::MIN_AGE), where [`cooling`] holds too)
+//!    has no step in age. Below 1 Myr ([`MIN_AGE`], where [`cooling`] holds too)
 //!    the state is that of 1 Myr. Past the table's last age, 15 Gyr, the state goes on as
 //!    Burrows et al.'s late-time laws have it, L ∝ t^−1.3 and R ∝ t^−0.056 (their equation 1,
 //!    and equation 5 at the gravity of equation 3 and the temperature of equation 2), as

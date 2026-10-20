@@ -17,7 +17,7 @@
 //! [`classify`] joins them into a [`Classification`], whose `Display` is the class as an
 //! astronomer writes it: `G2V`, `M5III`, `K1.5IV`, `B8Ia`, `sdM3`, `T6`, `DA4.2`, `NS`. The classes
 //! beyond the MK grid are [`PeculiarClass`]es: P06.T25's Be, Ap, Bp and Am stars follow from the
-//! star's rotation and magnetism draws ([`rotation`](crate::stellar::rotation)); P06.T24.a's
+//! star's rotation and magnetism draws ([`rotation`]); P06.T24.a's
 //! Wolf-Rayet stars (`WN6`, `WN7h`, `WC5`, `WO2`), hot subdwarfs (`sdB0`, `sdO5`) and luminous
 //! blue variables (`B2Ia+ LBV`) follow from the state (`peculiar`), and P06.T24.b's carbon and S
 //! stars and young stars are still to come. What only a star's history knows, a neutron star's
@@ -356,7 +356,7 @@ impl PeculiarClass {
 /// WN (P06.T24.a: the mass it has lost since it became one).
 ///
 /// The peculiar classes of P06.T25 (Be, Ap, Bp, Am) need no extra: they are a function of the
-/// state and the star's rotation and magnetism draws ([`rotation`](crate::stellar::rotation)).
+/// state and the star's rotation and magnetism draws ([`rotation`]).
 /// The caller that holds a star's model (P06.T29) fills the rest.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[non_exhaustive]

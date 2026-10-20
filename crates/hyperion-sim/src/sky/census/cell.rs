@@ -62,6 +62,8 @@
 //! The census reads no luminosity table: its skips read the envelope, and each star's own state.
 //! Readers of the tables (the caps, the band) pass their light ages through
 //! [`LuminosityTables::age_for`](crate::sky::luminosity::LuminosityTables::age_for).
+//!
+//! [`ConeRegion::holds`]: super::ConeRegion::holds
 
 use core::f64::consts::LN_2;
 
@@ -669,7 +671,7 @@ const OFFSET_OCTAVES: u32 = 21;
 /// barycentre, read in O(1) a cell (R06.T8.f): [`cell_offset_bound`] costs some 40 µs, since its
 /// tidal-radius bound scans the potential's grid points.
 ///
-/// It holds, on galactocentric distance nodes [`OFFSET_NODES_PER_OCTAVE`] to the octave, the
+/// It holds, on galactocentric distance nodes `OFFSET_NODES_PER_OCTAVE` to the octave, the
 /// running maximum of [`cell_offset_bound`]'s quantity at each node, and gives a cell the value at
 /// the first node at or beyond its farthest corner from the centre. The tidal-radius bound within a
 /// radius bounds the tidal radius of every point inside it, so the value bounds every record's
@@ -679,7 +681,7 @@ const OFFSET_OCTAVES: u32 = 21;
 ///
 /// It depends on the galaxy's potential alone, which its parameters fix, so a server builds it once
 /// per galaxy, beside the luminosity tables, and every census job of that galaxy reads it through
-/// its [`SkyContext`](super::SkyContext). Another galaxy's bounds could be too small for this one's
+/// its [`SkyContext`]. Another galaxy's bounds could be too small for this one's
 /// stars, so it keeps the parameters it was built for, and the census checks them in debug builds
 /// ([`is_for`](Self::is_for)).
 #[derive(Debug, Clone, PartialEq)]

@@ -31,7 +31,7 @@
 //! tabulated potential. Plan 02 draws every non-dominant apocentre log-uniform on 20,000–200,000
 //! ly, so about 70% of recent progenitors fall below the window and none above it: the range
 //! fails, and plan 10 says it is corrected in plan 02's parameter table with a version bump, not
-//! patched here. So the orbits are used as drawn, and [`OrbitCheck`] records each one's standing
+//! patched here. So the orbits are used as drawn, and `OrbitCheck` records each one's standing
 //! (P10.T3, as built; reported to the orchestrator).
 
 use crate::coords::{GalacticDisplacement, GalacticVelocity, ROOT_HALF_WIDTH_LY};

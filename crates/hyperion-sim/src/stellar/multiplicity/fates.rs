@@ -90,7 +90,7 @@ impl<'n> Sweep<'n> {
 /// [`track_fates_grid`] and at Moe and Di Stefano's lowest mass, 0.8 M☉, where the law changes
 /// from Duchêne and Kraus's single slope to theirs; each side of it is its own part, the lower
 /// holding the limit from below. Below 0.8 M☉ the columns are
-/// [`COMPANION_LAW_LOW_COLUMNS`] even steps of `ln(q ÷ q_min) ÷ ln(1 ÷ q_min)`, the companion's
+/// `COMPANION_LAW_LOW_COLUMNS` even steps of `ln(q ÷ q_min) ÷ ln(1 ÷ q_min)`, the companion's
 /// place in its own range from `q_min` = 0.08 M☉ ÷ m₁, so that the range's lower end, which moves
 /// with m₁, is a column; from 0.8 M☉ up they are every [`COMPANION_LAW_LN_RATIO_STEP`] in ln q from
 /// 0.08 M☉ ÷ 150 M☉ to 1, with the laws' breaks (0.1, 0.3, 0.95) among them. Each part is

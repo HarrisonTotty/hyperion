@@ -224,7 +224,7 @@ impl Element {
     /// Table 8:
     ///
     /// - **Lodders, Palme and Gail** (2009, Landolt-Börnstein VI/4B, 560, arXiv:0901.1149,
-    ///   Table 1, "taken from [03L]"; read) agree for H 182, He (below 3; 3 is taken), C 40,
+    ///   Table 1, "taken from \[03L\]"; read) agree for H 182, He (below 3; 3 is taken), C 40,
     ///   N 123, O 180, Ne 9.1, Na 958, Al 1,653, S 664, Ti 1,582, Fe 1,334, Ni 1,353, Zn 726,
     ///   Kr 52 and Xe 68. Lodders (2010, read) gives S's 664 too.
     /// - **Si**, 1,310: Wang, Lineweaver and Ireland (2019, Icarus 328, 287, arXiv:1810.12741,

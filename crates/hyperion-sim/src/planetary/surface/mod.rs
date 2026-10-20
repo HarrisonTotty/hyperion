@@ -17,7 +17,7 @@
 //!    the coarse elevation's scale to plan 14's `σ_h` and its sea (the relief step's second entry,
 //!    which counts the craters), climate, erosion, the coarse craters younger than a wet epoch's
 //!    end (Design note 5), then the classes and crater state, each updating the `f64`
-//!    [`Working`](steps::Working) state in place, every loop and sum in cell-index order.
+//!    [`Working`] state in place, every loop and sum in cell-index order.
 //! 3. The quantiser ([`quantise()`]): the working state turned into the field's codes once, so
 //!    that the server's own synthesis and collision read exactly what a client receives (Design
 //!    note 17).

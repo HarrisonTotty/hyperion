@@ -23,7 +23,7 @@
 //!   locked world; on a rotator the column's storage over the solar day damps the day–night
 //!   departures by κ = 1 ÷ √(1 + (ω C (1 − ε) ÷ `B_P`)²), P14.T24.a's, so its effective
 //!   redistribution, 1 − κ (1 − ε) with ε the air's, takes the thresholds
-//!   ([`effective_redistribution`]; "main"'s ruling of 2026-10-13). That is Koll's own ε on a locked
+//!   (`effective_redistribution`; "main"'s ruling of 2026-10-13). That is Koll's own ε on a locked
 //!   world and as the storage vanishes, continuous in the rotation. The generated Earth's κ is
 //!   0.020, so efficient, and the measured Mars's, at 6 mbar, 0.27, so transitional.
 //! - **Its thin end** is the air's collapse onto its night side, which leaves it airless-like, read

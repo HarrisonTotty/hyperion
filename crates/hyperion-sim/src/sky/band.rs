@@ -989,7 +989,7 @@ impl Reach {
 const NOWHERE_LY: [f64; 1] = [0.0];
 
 /// A face's rows of a band, marched (R06.T9.f; see the [module](self) documentation): each ray's
-/// five sums ([`Sums`]) of a reply complete to each radius the march keeps, per layer, from which
+/// five sums (`Sums`) of a reply complete to each radius the march keeps, per layer, from which
 /// [`sum_rows`] gives any of those replies' texels; and, where a camera's deeper cut set the
 /// query's, the same of the light fainter than the eye's cut, the eye's background (R06.T9.j).
 ///

@@ -12,7 +12,7 @@
 //!   held below `r_h ÷ 10^0.1` so that a core never outgrows the half-mass radius (ours).
 //! - **The half-mass relaxation time** `t★ = 0.138 √(M r_h³ ÷ G) ÷ (⟨m⟩ ln Λ)` with ⟨m⟩ = 0.45 M☉
 //!   and ln Λ = 10 (Spitzer 1987; the prefactor is
-//!   [`BH_RELAXATION_PREFACTOR`](crate::tables::cluster_dynamics::BH_RELAXATION_PREFACTOR)).
+//!   [`BH_RELAXATION_PREFACTOR`]).
 //! - **The central escape speed** `√(G M ÷ r_h) × 10^(0.1055 + 0.2550 u − 0.0769 u²)` with
 //!   `u = log₁₀(r_h ÷ r_c)`, the brainstorm's fit to the Baumgardt–Hilker catalogue (Baumgardt and Hilker 2018, MNRAS 478, 1520; re-checked
 //!   against it: P09.T7's test), and at birth today's times `√((M₀ ÷ M)(r_h ÷ r_h0))`.
@@ -41,6 +41,8 @@
 //! rise as `Γ^0.74` (Pooley et al. 2003, ApJ 591, L131); blue stragglers number `N = 10^1.6 ×
 //! (M_core ÷ 10⁴ M☉)^0.38` (ours, the slope of Knigge, Leigh and Sills 2009, Nature 457, 288, with
 //! a normalisation of our own). The last two are provisional.
+//!
+//! [`retention`]: super::interior::retention
 
 use crate::galaxy::consts::{G, LIGHT_YEARS_PER_PARSEC, LIGHT_YEARS_PER_YEAR_PER_KM_S};
 use crate::galaxy::fields::ComponentId;

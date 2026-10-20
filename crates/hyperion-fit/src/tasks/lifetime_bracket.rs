@@ -180,7 +180,7 @@ impl FitTask for LifetimeBracketTask {
         &ITEMS
     }
 
-    /// The lifetimes at [`PROBE_MASSES`] at both ends of [`BRACKET_Z_RANGE`], median draws, so that
+    /// The lifetimes at `PROBE_MASSES` at both ends of [`BRACKET_Z_RANGE`], median draws, so that
     /// a change to plan 06's tracks is caught; and the bracket's constants: its metallicities, its
     /// nodes, the bands' edges, the tracks' heaviest mass and Z☉.
     fn fingerprint(&self) -> SimFingerprint {

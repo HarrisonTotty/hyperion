@@ -5,7 +5,7 @@
 //! The committed table is P06.T19.b's provisional one, made by the sim's own [`score_quantiles`]
 //! with 10⁶ scores, and `manifests/kick_rank.toml` describes it. Plan 15's P15.T5.a takes the task
 //! over: [`KickRankTask`] runs the same computation in chunks through
-//! [`map_reduce_chunks`](crate::parallel::map_reduce_chunks) ([`fit_parallel`]), bit for bit the
+//! [`map_reduce_chunks`] ([`fit_parallel`]), bit for bit the
 //! same as [`score_quantiles`] for every chunking and thread count, and the production run of 10⁷
 //! scores is `manifests/kick_rank.production.toml`, written with `--out` to a scratch path. Plan
 //! 06's P06.T19.e is the commit that swaps it in, with the bumped generator version. Every score

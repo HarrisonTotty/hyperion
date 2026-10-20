@@ -13,7 +13,7 @@
 //!   heights `z_lo` to `z_hi`: the column along `+y`, averaged over the pixel's height, so that a
 //!   disc thinner than a pixel keeps its light instead of falling between samples. The height
 //!   integral is closed-form for every disc and for the bar, and a 4-node rule on panels of at most
-//!   [`PANEL_SCALES`] of the component's vertical scale for the bulge and the halo; along the line of
+//!   `PANEL_SCALES` of the component's vertical scale for the bulge and the halo; along the line of
 //!   sight the integral runs over fixed panels symmetric about `y = 0` with [`gl16`] on each.
 //!
 //! [`render_rows`] fills a range of a [`MapSpec`]'s rows, so that a pool can split a map into bands

@@ -466,7 +466,7 @@ pub(crate) fn arrival_years(mass: f64, luminosity: f64, radius: f64) -> f64 {
 /// The arrival on the zero-age main sequence of a star of initial mass `mass` and `composition`,
 /// counted from the onset of its collapse: `t_zams`(m, Z) (plan 06, P06.T15.b, design note 4).
 ///
-/// See [`arrival_years`] for the law. It is where the formulae of Hurley, Pols and Tout start
+/// See `arrival_years` for the law. It is where the formulae of Hurley, Pols and Tout start
 /// their clock: every phase from the main sequence on is offset by it, and a star's lifetime
 /// includes it.
 ///

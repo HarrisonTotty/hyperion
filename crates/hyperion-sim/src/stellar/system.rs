@@ -80,7 +80,7 @@ use crate::units::{
 /// - The helium excess is zero for every grid system (plan 06, design note 5); only plan 09's
 ///   cluster members carry one, and they bring their own [`Composition`].
 /// - The function is for grid records, whose origin is
-///   [`SystemOrigin::Grid`](crate::galaxy::placement::SystemOrigin::Grid) and whose
+///   [`SystemOrigin::Grid`] and whose
 ///   [`component`](SystemRecord::component) is therefore `Some`. A record without a component,
 ///   which no origin of this generator version builds, fails a debug assertion and in release
 ///   reads the first component of its population.
@@ -839,7 +839,7 @@ pub enum RemnantDetail {
 
 impl StarSummary {
     /// Which body of its system the star is: its body index is its
-    /// [`StarIndex`](crate::stellar::multiplicity::StarIndex) in the system's hierarchy, 0 for the
+    /// [`StarIndex`] in the system's hierarchy, 0 for the
     /// primary (plan 11, design note 5).
     #[must_use]
     pub const fn body(&self) -> BodyId {

@@ -7,8 +7,8 @@
 //! grids, and of the [`Working`] state the steps before it left, which it updates in place. Every
 //! loop runs in cell-index order and every sum in that order, every sort is keyed by (value, cell
 //! index), the arithmetic is `f64`, and no `HashMap` is used (Design note 5). The working state
-//! is `f64` throughout; only [`quantise`](super::quantise) turns it into the field, whose codes are
-//! the only input of the synthesis (Design note 17).
+//! is `f64` throughout; only [`quantise`](super::quantise()) turns it into the field, whose codes
+//! are the only input of the synthesis (Design note 17).
 //!
 //! One exception to the order, Design note 5's: on a world whose wet epoch ended before its
 //! surface age ran out (a Mars), each coarse crater is drawn a formation age, and only those older
@@ -138,7 +138,7 @@ impl<'a> Pass<'a> {
 /// their codes and Hergarten's normalisation are: what its synthesis record will hold before it
 /// is quantised (Design note 17).
 ///
-/// Plain data with public fields, which the steps write in turn; [`quantise`](super::quantise)
+/// Plain data with public fields, which the steps write in turn; [`quantise`](super::quantise())
 /// checks every value against its code.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CellState {
@@ -293,7 +293,7 @@ pub struct ClimateState {
 /// The pass's working state: every cell's and climate cell's, the coarse craters, and the body's
 /// figures that the header carries, all in SI units.
 ///
-/// Plain data with public fields, which the steps write in turn; [`quantise`](super::quantise)
+/// Plain data with public fields, which the steps write in turn; [`quantise`](super::quantise())
 /// checks it whole.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Working {

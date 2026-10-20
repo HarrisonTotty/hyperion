@@ -147,7 +147,7 @@ pub enum DestructionCause {
     TidallyDisrupted,
     /// The body collided with a heavier neighbour whose orbit its own crossed after a supernova,
     /// and merged into it (P14.T28.c's scattering step, ruling 71): the heavier's Safronov number
-    /// was under 1, too small to eject it (Ford and Rasio 2008; [`scatter`]).
+    /// was under 1, too small to eject it (Ford and Rasio 2008; `scatter`).
     Collided,
 }
 
@@ -651,7 +651,7 @@ impl<'a> BodyFate<'a> {
 
     /// The histories of `bodies`, every body of one host in slot order, on `host`: each as
     /// [`BodyFate::resolve`] would have it alone, but for the scattering step after each of the
-    /// host's sudden deaths (P14.T28.c, ruling 71, [`scatter`]).
+    /// host's sudden deaths (P14.T28.c, ruling 71, `scatter`).
     ///
     /// A supernova gives each survivor its own eccentricity, and orbits that cross, or come within
     /// 2√3 mutual Hill radii, scatter within a few orbits. So at each sudden death the bodies it

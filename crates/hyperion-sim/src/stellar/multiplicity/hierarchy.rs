@@ -102,7 +102,7 @@ pub(super) const WINDOW_MARGIN: f64 = 1e-6;
 /// `m_cc(Z)` − 1 M☉, the lower end of the companion-stripped electron-capture window, from which
 /// the track reads the same mark (ruling 93.3 of 2026-09-22, after ruling 45.2; plan 11, Design
 /// note 1). It is 7.2 M☉ at Z = 0.02 and never below 5.72 M☉, the lowest `m_cc` of the fits
-/// ([`STRIPPED_MARK_FLOOR`]).
+/// (`STRIPPED_MARK_FLOOR`).
 ///
 /// The track tests its window in the mass its early AGB's `m_c_bagb` reads, a little below the
 /// initial mass after the main sequence's winds (ruling 45.1); this compares the initial mass,
@@ -582,8 +582,8 @@ impl SystemHierarchy {
 /// new one encloses; against the orbit that encloses it, the criterion with that orbit's own
 /// eccentricity, which is known; and the tidal cut for a new outermost orbit. Each node's window
 /// has a weight, its period distribution's share inside the window, times Tokovinin's (2014)
-/// correlation of subsystems for a node inside a secondary component ([`SUBSYSTEM_WEIGHT_SINGLE`]
-/// and [`SUBSYSTEM_WEIGHT_PAIRED`], ruling 74). One mark then picks both the
+/// correlation of subsystems for a node inside a secondary component (`SUBSYSTEM_WEIGHT_SINGLE`
+/// and `SUBSYSTEM_WEIGHT_PAIRED`, ruling 74). One mark then picks both the
 /// node, by integer thresholds on the weights, and the period, by inverse transform inside that
 /// node's window of the mark's residual, and the whole test accepts or rejects the try.
 ///

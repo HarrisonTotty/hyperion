@@ -43,7 +43,7 @@
 //!    members, if a planet over 10 M⊕ beyond its host's snow line scatters one.
 //!
 //! Then every planet's and member's rotation law, and from [`MOONS_VERSION`] its satellites' frame
-//! on its Laplace surface, on which they are found again (P14.T56.a, [`generate_with`]).
+//! on its Laplace surface, on which they are found again (P14.T56.a, `generate_with`).
 //!
 //! [`MOONS_VERSION`]: crate::planetary::moons::MOONS_VERSION
 //!
@@ -2150,7 +2150,7 @@ impl PlanetarySystem {
 
     /// The surface seed of body `index` (P14.T23, [`hooks::surface_seed`]): a planet's, a
     /// moon's or a dwarf planet's, whatever happens to it; `None` for a ring, a belt or the halo,
-    /// which have no surface. Server-only (the [`hooks`](crate::planetary::hooks) module
+    /// which have no surface. Server-only (the [`hooks`] module
     /// documentation).
     ///
     /// # Errors

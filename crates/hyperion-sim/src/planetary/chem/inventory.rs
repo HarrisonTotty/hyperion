@@ -3,7 +3,7 @@
 //!
 //! [`ElementInventory`] replaces [`VolatileInventory`]'s four masses with the masses of eleven
 //! elements, H, He, C, N, O, Ne, S, Cl, Ar, Kr and Xe ([`INVENTORY_ELEMENTS`]), in two
-//! [`Reservoir`]s, with the mantle's one redox figure, ΔIW ([`redox`](super::redox)).
+//! [`Reservoir`]s, with the mantle's one redox figure, ΔIW ([`redox`]).
 //!
 //! - **The stored carriers.** P14.T13.a's water, carbon dioxide, nitrogen and radiogenic ⁴⁰Ar are
 //!   kept as they are drawn

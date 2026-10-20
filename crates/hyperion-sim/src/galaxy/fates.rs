@@ -86,7 +86,7 @@ pub trait StellarFates: fmt::Debug + Send + Sync {
     ///
     /// By default the ratio is uniform on `[max(0.1, 0.08 M☉ ÷ m1), 1]`, plan 02's stand-in (see
     /// the module documentation): a companion's mass uniform on `[max(0.1 m1, 0.08 M☉), m1]`.
-    /// Plan 11's [`MultiplicityFates`](crate::stellar::multiplicity::MultiplicityFates) gives the
+    /// Plan 11's [`MultiplicityFates`] gives the
     /// distribution the hierarchy draw has. It is 0 below the lightest companion and 1 from q = 1.
     fn companion_mass_ratio_cdf(&self, m1: f64, q: f64) -> f64 {
         if q >= 1.0 {
@@ -808,9 +808,9 @@ const fn reference_index(population: Population) -> usize {
 }
 
 /// The fates of the systems of `population` for the mean mass per system (plan 06, P06.T30; plan
-/// 11, P11.T1.d): plan 06's [`TrackFates`](crate::stellar::fates::TrackFates) at the population's
+/// 11, P11.T1.d): plan 06's [`TrackFates`] at the population's
 /// [`reference_fe_h`], with plan 11's companions
-/// ([`MultiplicityFates`](crate::stellar::multiplicity::MultiplicityFates)).
+/// ([`MultiplicityFates`]).
 ///
 /// The tables depend on the generator version alone, not on the seed or any parameter, so the
 /// four are built once, on first use, and shared by every galaxy (some tens of milliseconds of

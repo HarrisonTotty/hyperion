@@ -131,7 +131,7 @@ use hyperion_base::units::{
 use super::{MaterialProperties, MohrCoulomb};
 
 /// The bearing-capacity factors of a friction angle: `N_q`, `N_c` and `N_γ` (Vesić 1973, 1975; the
-/// [module](self)'s formula).
+/// `bearing` module's formula).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BearingFactors {
     surcharge: f64,
@@ -140,7 +140,7 @@ pub struct BearingFactors {
 }
 
 impl BearingFactors {
-    /// The factors at `strength`'s friction angle φ (the [module](self)'s formulas).
+    /// The factors at `strength`'s friction angle φ (the `bearing` module's formulas).
     ///
     /// A φ at or below 0 takes the frictionless limit, `N_q` = 1, `N_c` = π + 2 (Prandtl 1921)
     /// and `N_γ` = 0.
@@ -303,7 +303,7 @@ fn level_terms(
 /// The ultimate bearing capacity, Pa, of ground of strength `strength` and bulk density
 /// `bulk_density` under a square or circular surface footing of width `width` at gravity
 /// `gravity`, on level ground: `q_ult` = c `N_c` `s_c` + ½ ρ g B `N_γ` `s_γ` (the
-/// [module](self)'s formula).
+/// `bearing` module's formula).
 ///
 /// On a slope it is [`ultimate_bearing_capacity_on_slope`], which gives this figure bit for bit at
 /// a slope of 0.
@@ -329,7 +329,7 @@ pub fn ultimate_bearing_capacity(
 /// flush on ground of slope `slope`, radians.
 ///
 /// It is the ultimate pressure normal to the pad's base, under a vertical load through its centre,
-/// by the [module](self)'s formula. At a slope of 0, of either sign, it is
+/// by the `bearing` module's formula. At a slope of 0, of either sign, it is
 /// [`ultimate_bearing_capacity`]'s figure bit for bit, with no solve, whatever φ, wherever that
 /// figure is positive and finite. The slope's basis is [`bearing_capacity_on_slope`]'s.
 ///
@@ -410,7 +410,7 @@ pub fn bearing_capacity(
 ///
 /// It is taken from the layer at the depth of one footing width
 /// ([`MaterialProperties::shear_layer_at`]) with its bulk density
-/// ([`MaterialProperties::bulk_density`]) (Design note 2), by the [module](self)'s formula: the
+/// ([`MaterialProperties::bulk_density`]) (Design note 2), by the `bearing` module's formula: the
 /// ultimate pressure normal to the pad's base, under a vertical load through its centre, on a
 /// uniform slope. A crest's or a toe's nearness is not modelled.
 ///
