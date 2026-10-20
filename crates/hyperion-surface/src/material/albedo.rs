@@ -43,6 +43,24 @@
 //! a body is scaled no further than its classes need. c is at least [`ALBEDO_SCALE_FLOOR`], so it
 //! is always the positive scale the header carries. The residual says how far p is missed.
 //!
+//! # The haloes
+//!
+//! A body whose header carries a maturity is drawn at each point's own maturity, its young craters'
+//! fresh ejecta brighter than the background about them (R10.T1.c), so a scale solved at `m_body`
+//! alone would draw a young body some 5% brighter than its p (the sampled mean V excess of the
+//! testing Moon-like world, 5.2% at 3.5 Gyr and 5.7% at 1 Gyr: plan R10's Risks, "Deviations in
+//! T1.c's Rust half, as built"). [`haloed_albedo_scale`] solves over
+//! the body's maturity mix instead ([`maturity_mix`](super::maturity_mix);
+//! decision-r10-t1c-halo R1): each material of share a is one term at each of the mix's nodes,
+//! of share a w, at its exposed albedo, law and range there, what a point of that maturity draws,
+//! and the solve above runs unchanged on the terms, exact for albedos linear between the nodes. A
+//! material whose albedo does not move with the maturity keeps its one term, so a body of such
+//! ground, or one on which no crater leaves a deficit, solves as before to the bit. The excess the
+//! haloes add at the solved scale is stated ([`AlbedoScale::halo_excess_v`]). The mix is the
+//! haloes' expectation, which leaves out the realised small craters' shot noise about it, the
+//! correlation between a crater and the material it lies on, and the coarse haloes' overlaps
+//! (labelled).
+//!
 //! Nothing here draws from a stream, so the module opens no domain tag; the sums run in a fixed
 //! order, so the scale is the same to the bit on every target.
 
@@ -50,8 +68,8 @@ use std::collections::BTreeMap;
 
 use super::{
     AlbedoSpan, BRIGHT_FROST_NORMAL_ALBEDO, GroundExposure, GroundMaterial,
-    LUNAR_LIMB_ONSET_NORMAL_ALBEDO, MaterialProperties, PhaseLaw, ResolvePropertiesError,
-    exposed_properties, weights_at,
+    LUNAR_LIMB_ONSET_NORMAL_ALBEDO, MaterialProperties, MaturityMix, PhaseLaw,
+    ResolvePropertiesError, exposed_properties, weights_at,
 };
 use crate::cube::{FaceUv, PATCH_QUADS, PatchKey, st_to_uv};
 use crate::field::{FieldView, MaterialPalette, cell_at_index};
@@ -301,6 +319,7 @@ pub struct AlbedoScale {
     clamped_low: f64,
     clamped_high: f64,
     unnamed: f64,
+    halo_excess_v: f64,
 }
 
 impl AlbedoScale {
@@ -356,6 +375,16 @@ impl AlbedoScale {
     #[must_use]
     pub const fn unnamed_share(&self) -> f64 {
         self.unnamed
+    }
+
+    /// The mean excess in V that the young craters' haloes add to the named ground's geometric
+    /// albedo at the solved scale, dimensionless: the model in V over the body's maturity mix,
+    /// which the scale is solved on, over the same materials' model at the body's maturity alone,
+    /// less 1 ([`haloed_albedo_scale`]; decision-r10-t1c-halo R1). 0 without a mix, from
+    /// [`exposed_albedo_scale`] and [`albedo_scale`], and where every material is black in V.
+    #[must_use]
+    pub const fn halo_excess_v(&self) -> f64 {
+        self.halo_excess_v
     }
 }
 
@@ -459,6 +488,114 @@ pub fn exposed_albedo_scale(
     exposure: GroundExposure,
     geometric_albedo_bvr: [f64; 3],
 ) -> Result<AlbedoScale, SolveAlbedoScaleError> {
+    let named = named_share(fractions, geometric_albedo_bvr)?;
+    let mut terms = Vec::with_capacity(fractions.shares().len());
+    for &(ground, share) in fractions.shares() {
+        let Some(material) = ground.material() else {
+            continue;
+        };
+        let p = exposed_properties(material, palette, exposure)?;
+        terms.push(Term::of(share / named, &p));
+    }
+    Ok(solved(
+        &terms,
+        geometric_albedo_bvr,
+        fractions.unnamed_share(),
+    ))
+}
+
+/// The scale on the class albedos of a body of palette `palette` whose ground's area fractions are
+/// `fractions`, its ground exposed as `exposure` has it and its maturity spread over its young
+/// craters' haloes as `mix` gives it ([`maturity_mix`](super::maturity_mix)), that makes the
+/// scaled materials' geometric albedo in V the body's, `geometric_albedo_bvr[1]`, with the
+/// residual in each band and the excess the haloes add (the `albedo` module documentation, "The
+/// haloes"; R10.T1.c, decision-r10-t1c-halo R1).
+///
+/// Each named material of share a becomes one term per node of the mix, of share a w, its albedo,
+/// law and range its [`exposed_properties`] at the node's maturity, the cover kept: what the worker
+/// draws at a point of that maturity, `scaled_normal_albedo` of the point's exposed properties.
+/// A material whose exposed albedo at the mix's least maturity is its albedo at `m_body` to the
+/// bit in every band (`Melt`, an entry of `FeO_T` `None` or 0, an uncovered ice) keeps one term, of
+/// share a at `exposure`. So a body of such ground, or a mix of one node, solves as
+/// [`exposed_albedo_scale`] to the bit, its [`halo_excess_v`](AlbedoScale::halo_excess_v) 0. The
+/// solve is [`exposed_albedo_scale`]'s exact piecewise-linear one, unchanged.
+///
+/// # Errors
+///
+/// As [`exposed_albedo_scale`].
+///
+/// # Panics
+///
+/// If `mix`'s background maturity is not `exposure`'s to the bit, or `exposure` carries none: the
+/// mix is of the header whose exposure is solved, so another is a bug. And as
+/// [`exposed_properties`].
+pub fn haloed_albedo_scale(
+    fractions: &ClassFractions,
+    palette: &MaterialPalette,
+    exposure: GroundExposure,
+    mix: &MaturityMix,
+    geometric_albedo_bvr: [f64; 3],
+) -> Result<AlbedoScale, SolveAlbedoScaleError> {
+    assert!(
+        exposure
+            .maturity()
+            .is_some_and(|m| m.total_cmp(&mix.body()).is_eq()),
+        "a maturity mix of m_body {} is solved at its own maturity, not at {:?}",
+        mix.body(),
+        exposure.maturity()
+    );
+    let named = named_share(fractions, geometric_albedo_bvr)?;
+    let least = mix.nodes().last().expect("a mix holds a node").maturity();
+    let mut alone = Vec::with_capacity(fractions.shares().len());
+    let mut terms = Vec::with_capacity(fractions.shares().len() * mix.nodes().len());
+    for &(ground, share) in fractions.shares() {
+        let Some(material) = ground.material() else {
+            continue;
+        };
+        let a = share / named;
+        let at_body = exposed_properties(material, palette, exposure)?;
+        let term = Term::of(a, &at_body);
+        alone.push(term);
+        let at_least = exposed_properties(material, palette, exposure.with_maturity(least))?;
+        // To the bit, as `total_cmp` orders them: the same value of the same sign in every band.
+        let unmoved = at_least
+            .normal_albedo_bvr()
+            .iter()
+            .zip(&at_body.normal_albedo_bvr())
+            .all(|(least, body)| least.total_cmp(body).is_eq());
+        if unmoved {
+            terms.push(term);
+            continue;
+        }
+        for node in mix.nodes() {
+            let p = exposed_properties(material, palette, exposure.with_maturity(node.maturity()))?;
+            terms.push(Term::of(a * node.weight(), &p));
+        }
+    }
+    let solved = solved(&terms, geometric_albedo_bvr, fractions.unnamed_share());
+    let without = model_v(&alone, solved.scale);
+    let halo_excess_v = if without > 0.0 {
+        model_v(&terms, solved.scale) / without - 1.0
+    } else {
+        0.0
+    };
+    Ok(AlbedoScale {
+        halo_excess_v,
+        ..solved
+    })
+}
+
+/// The named ground's share of `fractions`, once `geometric_albedo_bvr` is checked.
+///
+/// # Errors
+///
+/// [`SolveAlbedoScaleError::GeometricAlbedo`] for a band of `geometric_albedo_bvr` that is not
+/// finite and positive, and [`SolveAlbedoScaleError::NoNamedGround`] where no material names an
+/// entry.
+fn named_share(
+    fractions: &ClassFractions,
+    geometric_albedo_bvr: [f64; 3],
+) -> Result<f64, SolveAlbedoScaleError> {
     for (band, &value) in ["B", "V", "R"].into_iter().zip(&geometric_albedo_bvr) {
         if !value.is_finite() || value <= 0.0 {
             return Err(SolveAlbedoScaleError::GeometricAlbedo { band, value });
@@ -472,21 +609,15 @@ pub fn exposed_albedo_scale(
     if named <= 0.0 {
         return Err(SolveAlbedoScaleError::NoNamedGround);
     }
-    let mut terms = Vec::with_capacity(fractions.shares().len());
-    for &(ground, share) in fractions.shares() {
-        let Some(material) = ground.material() else {
-            continue;
-        };
-        let p = exposed_properties(material, palette, exposure)?;
-        terms.push(Term::new(
-            share / named,
-            p.normal_albedo_bvr(),
-            p.phase_law(),
-            scale_range(&p),
-        ));
-    }
+    Ok(named)
+}
+
+/// The solve of `terms` for the V of `geometric_albedo_bvr`, with what it gives, `unnamed` the
+/// share of the ground left out, and no halo excess.
+#[must_use]
+fn solved(terms: &[Term], geometric_albedo_bvr: [f64; 3], unnamed: f64) -> AlbedoScale {
     let target = geometric_albedo_bvr[V];
-    let scale = solve(&terms, target);
+    let scale = solve(terms, target);
     let mut clamped_low = 0.0;
     let mut clamped_high = 0.0;
     for term in terms.iter().filter(|term| term.albedo[V] > 0.0) {
@@ -497,14 +628,15 @@ pub fn exposed_albedo_scale(
             clamped_high += term.share;
         }
     }
-    Ok(AlbedoScale {
+    AlbedoScale {
         scale,
-        geometric_albedo_bvr: model(&terms, scale),
+        geometric_albedo_bvr: model(terms, scale),
         target_bvr: geometric_albedo_bvr,
         clamped_low,
         clamped_high,
-        unnamed: fractions.unnamed_share(),
-    })
+        unnamed,
+        halo_excess_v: 0.0,
+    }
 }
 
 /// One material in the solve: its share of the named ground, its normal albedo in B, V and R, its
@@ -526,6 +658,13 @@ impl Term {
             law,
             range,
         }
+    }
+
+    /// The term of a material of properties `p` and share `share`: its albedo, its law and its
+    /// [`scale_range`].
+    #[must_use]
+    fn of(share: f64, p: &MaterialProperties) -> Self {
+        Self::new(share, p.normal_albedo_bvr(), p.phase_law(), scale_range(p))
     }
 
     /// Whether the material's scaled albedo moves with the scale at `scale`: c `A_N` lies strictly

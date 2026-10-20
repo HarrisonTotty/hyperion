@@ -638,6 +638,84 @@ fn albedo_every_form_and_family_has_a_scale() {
     }
 }
 
+/// The haloed solve is the solve over its mix's terms (decision-r10-t1c-halo R1): on the young
+/// single crater's world weathered at maturity 1, its ground an iron-bearing basalt of several
+/// forms beside unnamed ground, the solved model in V is Σ a Σ w G(m) over the mix's nodes, each G
+/// the material drawn at the node's maturity, `scaled_normal_albedo` of its exposed properties
+/// there, and it is p; the stated excess is that sum over the same at `m_body`, less 1; and the
+/// excess is positive, the scale below the halo-free one.
+#[test]
+fn albedo_the_haloed_solve_is_the_solve_over_its_mix_s_terms() {
+    let basalt = PaletteEntry {
+        role: PaletteRole::PrimaryCrust,
+        normal_albedo_bvr: [0.1, 0.11, 0.12],
+        grain_density_kg_m3: 3_310.0,
+        mechanics: MechanicsFamily::Silicate,
+        feo_mass_fraction: Some(0.16),
+        ..entry("basalt_fe", MechanicsFamily::Silicate, [0.1; 3], 0)
+    };
+    let field = crate::testing::one_crater_builder(hyperion_base::units::Gigayears::new(0.1), 51)
+        .palette(MaterialPalette::new(vec![basalt]).expect("one entry is a palette"))
+        .crust_palette([Some(0); 4])
+        .maturity(1.0)
+        .weathering_rate(1.0)
+        .build();
+    let header = field.header();
+    let synth = Synthesiser::new(&field, crate::synth::test_support::SEED);
+    let mix = crate::material::maturity_mix(&synth).expect("the field carries a maturity");
+    assert!(mix.nodes().len() > 1, "{:?}", mix.nodes());
+    let forms = [
+        MaterialClass::Regolith,
+        MaterialClass::Bedrock,
+        MaterialClass::Sand,
+        MaterialClass::Melt,
+    ];
+    let fractions = ClassFractions::new(
+        forms
+            .iter()
+            .zip([5.0, 2.0, 1.0, 0.5])
+            .map(|(&class, area)| (named(class, 0), area))
+            .chain([(GroundMaterial::of(MaterialClass::Regolith, None), 0.5)]),
+    )
+    .expect("positive areas");
+    let (palette, exposure) = (header.palette(), GroundExposure::of_header(header));
+    let target = [0.10, 0.12, 0.14];
+    let haloed = haloed_albedo_scale(&fractions, palette, exposure, &mix, target).unwrap();
+    let free = exposed_albedo_scale(&fractions, palette, exposure, target).unwrap();
+    let c = haloed.scale();
+    let g = |m: Material, maturity: f64| {
+        let p = exposed_properties(m, palette, exposure.with_maturity(maturity)).unwrap();
+        let x = scaled_normal_albedo(&p, c)[1];
+        x * (2.0 + p.phase_law().limb_parameter(x)) / 3.0
+    };
+    let named_share = 1.0 - fractions.unnamed_share();
+    let (mut over, mut under) = (0.0, 0.0);
+    for &(ground, share) in fractions.shares() {
+        let Some(m) = ground.material() else {
+            continue;
+        };
+        let a = share / named_share;
+        over += a * mix
+            .nodes()
+            .iter()
+            .fold(0.0, |sum, n| sum + n.weight() * g(m, n.maturity()));
+        under += a * g(m, mix.body());
+    }
+    let model = haloed.geometric_albedo_bvr()[1];
+    assert!((over / model - 1.0).abs() < 1e-12, "{over} against {model}");
+    assert!((model / target[1] - 1.0).abs() < 1e-9, "{haloed:?}");
+    let excess = over / under - 1.0;
+    assert!(
+        (haloed.halo_excess_v() / excess - 1.0).abs() < 1e-9,
+        "{} against {excess}",
+        haloed.halo_excess_v()
+    );
+    assert!(haloed.halo_excess_v() > 0.0);
+    assert!(c < free.scale(), "{c} against {}", free.scale());
+    assert_eq!(bits(free.halo_excess_v()), bits(0.0));
+    assert_eq!(bits(haloed.unnamed_share()), bits(free.unnamed_share()));
+}
+
 /// The kernel cases the golden pins: random cases, whose palettes, fractions and targets are the
 /// generator's, so that a change to the solve or the ranges moves the golden.
 fn kernel_text() -> String {

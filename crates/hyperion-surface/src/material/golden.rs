@@ -47,6 +47,17 @@
 //! ([`exposed_properties`](super::exposed_properties)) at `m_body` and at maturities 0.3 and 0.7
 //! (the single crater's palette is empty); and the organic cover's blend on the Pluto-like world
 //! at covers 0, ½ and 1.
+//!
+//! `tests/golden/material/halo.golden` is R10.T1.c's halo follow-up (decision-r10-t1c-halo),
+//! counted here and written by the `maturity` module's tests alike: the inverse halo
+//! ([`halo_reach`](super::halo_reach)) on a grid of shares and ends; and on the Moon-like world
+//! weathered at maturity 1 and the Moon's rate, its 3.5, 1 and 0.1 Gyr variants and the single
+//! crater's world on an iron-bearing basalt, the body's maturity mix
+//! ([`maturity_mix`](super::maturity_mix)), its nodes' maturities and weights as bits, its shares
+//! above deficits of 0.05, 0.2 and 0.5, and the halo-free and haloed scales
+//! ([`exposed_albedo_scale`](super::exposed_albedo_scale),
+//! [`haloed_albedo_scale`](super::haloed_albedo_scale)) for p = 0.10, 0.12 and 0.14 with the
+//! stated excess.
 
 use std::fmt::Write as _;
 
@@ -507,8 +518,8 @@ mod native_only {
     use std::path::Path;
 
     /// The material goldens: one for each synthetic world, the property table's, the
-    /// space-weathering law's and R10.T1.c's maturity's.
-    const MATERIAL_GOLDENS: usize = 9;
+    /// space-weathering law's, and R10.T1.c's maturity's and halo's.
+    const MATERIAL_GOLDENS: usize = 10;
 
     /// Every golden file of `tests/golden/material/` carries `GENERATOR_VERSION`, not R05's
     /// `TEST_PLANET_VERSION`, which heads the files directly under `tests/golden/`.

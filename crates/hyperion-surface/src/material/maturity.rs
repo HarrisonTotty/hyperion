@@ -81,18 +81,24 @@
 //!   synthesis measures it. Grier, McEwen, Milazzo, Hester and Lucey 2000 (LPSC XXXI, abstract
 //!   1950, Fig. 3, whose axis is in crater diameters) radially average the optical maturity (OMAT,
 //!   by Lucey et al.'s technique, from Clementine's images) about North Ray and South Ray, 1 and
-//!   0.8 km across and 50 and 2 Ma old. The excess over the background, as a share of the rim's, is
-//!   North Ray's 0.60–0.62 at 2 R, 0.25–0.30 at 4 R, 0.14–0.15 at 6 R and 0.085–0.095 at 8 R (the
-//!   ruling's ranges; South Ray's, read by this lane's science check, 0.68, 0.24, 0.13 and 0.08),
-//!   reaching the background by about 10–14 R. λ = 3.0 R is the ruling's value, which it gives as a
-//!   least-squares fit of exp(−(x − 1) ÷ λ); the science check's fits to those points and to both
-//!   profiles give 2.3–2.8 R (recorded, plan R10's Risks). p is 1 inside the rim, x ≤ 1, and for a
+//!   0.8 km across and 50 and 2 Ma old. The excess over the background as a share of the rim's,
+//!   e(x), at 2, 4, 6, 8 and 10 R is North Ray's 0.620, 0.301, 0.145, 0.084 and 0.023 and South
+//!   Ray's 0.687, 0.235, 0.132, 0.078 and 0.040 (main's re-reading of the figure from its vector
+//!   form, decision-r10-t1c-halo R2, North Ray's against a background of 0.143 and South Ray's
+//!   against its own floor, 0.1468; the other choice moves them by up to 0.02), reaching the
+//!   background by about 10–14 R. λ = 3.0 R keeps the halo's area moment ∫₁¹⁰ e 2x dx, the
+//!   integrated fresh share that a body's mean brightness counts, within 7% of both craters' (the
+//!   ruling's "within 6%" is 6.5% at the top of the range): the model's 15.98 against the
+//!   measured 15.5–17.1 over both backgrounds, whose own fits give 2.90–3.25 R. Labelled
+//!   alternatives: least squares on e gives 2.42–2.63 R and on ln e 3.35–3.86 R. The shape's cost
+//!   is a share within 0.10 of the measured one at 2–8 R. p is 1 inside the rim, x ≤ 1, and for a
 //!   small crater (e^(−(x − 1) ÷ 3) − e^(−3)) ÷ (1 − e^(−3)) out to 10 R
-//!   ([`HALO_LENGTH_RIM_RADII`], [`HALO_EXTENT_RIM_RADII`]), 0 beyond. A coarse crater's is shifted
-//!   to 0 at its reach (1 + a) R instead, since the field carries a coarse crater only on the cells
-//!   its reach touches, and an answer must not depend on which blocks a client holds. Labelled:
-//!   λ = 3 R and 10 R are two lunar 1 km craters', taken for every size and body, and the OMAT
-//!   excess stands in for the fresh share. For context, the continuous ejecta reach `R_ce` =
+//!   ([`HALO_LENGTH_RIM_RADII`], [`HALO_EXTENT_RIM_RADII`]), 0 beyond, which drops the profiles'
+//!   10–15 R tail, 4–20% of their moment. A coarse crater's is shifted to 0 at its reach (1 + a) R
+//!   instead, since the field carries a coarse crater only on the cells its reach touches, and an
+//!   answer must not depend on which blocks a client holds. Labelled: λ = 3 R and 10 R are two
+//!   lunar 1 km craters', taken for every size and body, and the OMAT excess stands in for the
+//!   fresh share. For context, the continuous ejecta reach `R_ce` =
 //!   2.348 R^1.006 km (Moore, Hodges and Scott 1974, Proc. LSC 5th, 71, eq. 1, p. 83, fitted to
 //!   craters of 0.65–218 km), the model's reach, and new 18–70 m craters' proximal zones "fall
 //!   within about five crater radii of the impact" (Speyerer et al. 2026, PSJ 7, 73, p. 7; the
@@ -146,12 +152,64 @@
 //! craters are read through the caller's cache, which draws a cell from its own stream as the
 //! height does, and no answer depends on what it holds.
 //!
+//! # The body's maturity mix
+//!
+//! A body drawn at each point's `m_local` is brighter than one drawn at `m_body`, so the server's
+//! albedo scale counts the haloes (decision-r10-t1c-halo R1): [`maturity_mix`] gives the
+//! distribution of the point deficit D = `m_body` − `m_local` over the body's ground in closed
+//! form, the exact expectation of [`maturity_at`]'s rule, and cuts it at nodes for the solve
+//! ([`haloed_albedo_scale`](super::haloed_albedo_scale)).
+//!
+//! - **The small craters.** Each octave's craters are a Poisson field (`synth/craters.rs`'s draw),
+//!   and under the largest-deficit rule a point's deficit is at most d exactly where no crater's
+//!   exceeds d, so over the body P(D ≤ d) = exp(−`Λ_s`(d)), `Λ_s`(d) the expected number of small
+//!   craters whose deficit at a point exceeds d. A crater of rim deficit δ₀ = g `f_ex` max(0,
+//!   `m_body` − `maturity_after`(`t_c`, k)) exceeds d < δ₀ within x*(d ÷ δ₀) rim radii
+//!   ([`halo_reach`]): an area of π (R x*)², exact on a sphere, where a cap within a chord c has
+//!   the area π c² (Archimedes: the cap's area is 2π R h, and c² = 2 R h), and nearly so on a
+//!   spheroid of flattening 10⁻³ (labelled). So `Λ_s`(d) sums, over the octaves that can expose
+//!   fresh ground from the largest, the kept density per m² times the mean of π (R x*)² over the
+//!   octave's diameters and ages where d < δ₀. The diameters are the eight Gauss–Legendre nodes
+//!   on the octave's kept share through its own inversion, as its closed forms take them; the ages
+//!   are the draw's, `chronology_age`(u × N(τ; A), A) of a uniform u, by eight-point
+//!   Gauss–Legendre on 24 panels of u graded towards 0, [0, 2⁻²³] and then halvings up to [½, 1],
+//!   which resolve the young end, where g falls on the scale b R² ÷ κ (27 kyr for a 2 m crater).
+//! - **The coarse craters.** `F_c`(d) = max(0, 1 − Σ π (R x*)² ÷ A) over the field's list in order,
+//!   each crater with its own shape, its halo ending at its reach (1 + a) and g its kept relief,
+//!   and A the body's area, its cells' summed in index order as
+//!   [`class_fractions`](super::class_fractions) weights the materials. 1 − Σ is exact where the
+//!   haloes whose deficit exceeds d do not overlap, and coarse craters are few (labelled).
+//! - **F.** The small craters are drawn independently of the coarse list, so F(d) =
+//!   `F_c`(d) exp(−`Λ_s`(d)) below `m_body`, and 1 from it. At d = 0 it is its limit from above,
+//!   every halo of a positive δ₀ whole: the ground in none, an atom at `m_body`.
+//! - **The nodes.** The deficit is cut at 52 edges, d = `m_body` e for e = 0, then 2⁻²⁴, 2⁻²³, …,
+//!   2⁻⁵ by halvings, then 2/32, 3/32, …, 32/32: on old ground nearly all the probability lies
+//!   below 1/64, where 64 uniform bins miss the excess by 53–69% (main's check). The atom goes to
+//!   the first node, and each bin (a, b]'s mass P = F(b) − F(a) is shared between its edges so
+//!   that its mean deficit, (b F(b) − a F(a) − ∫ₐᵇ F) ÷ P, is kept: exact for an albedo linear on
+//!   the bin with the bin's true mean, and to Simpson's rule for the integral here, which a jump
+//!   of F inside a bin (a crater's floor, an atom at its δ₀) makes approximate; the convergence
+//!   test bounds it. That is 103 evaluations of F. Each node's
+//!   maturity is `m_body` less its edge, and the zero weights are dropped. Main's replica of the
+//!   scheme was within 0.36% of a 4,000-bin reference's excess; the convergence test holds it to
+//!   1%, and its doublings of the diameters, the ages and the bins likewise.
+//!
+//! Labelled, and deferred (plan R10's Risks): the mix leaves out the material–crater correlation
+//! (crater interiors' `Bedrock`, a young coarse crater's own terrain); the realised small craters'
+//! shot noise about the expectation, by main's estimate at most 0.15% of p on the testing rows at
+//! 1–3.5 Gyr and 0.26% on R10.T1.d's highland row (Campbell's theorem, overlaps ignored); the
+//! coarse haloes' overlaps; and the spheroid's area within a chord, taken as π c². It costs some
+//! tens of milliseconds a body, where 10⁴ sampled points of [`maturity_at`] would take 30–50 s.
+//!
 //! # Determinism
 //!
-//! Pure `f64` arithmetic and `hyperion_base::math` ([`math::exp_m1`], [`math::powf`]); no draw, so
-//! no domain tag. The result at zero exposure or zero rate is +0, never −0, as the field header's
-//! reserved `maturity` part requires. Every comparison is explicit, never `f64::min` or `max`, and
-//! the deficits are compared, never summed.
+//! Pure `f64` arithmetic and `hyperion_base::math` ([`math::exp`], [`math::exp_m1`],
+//! [`math::ln_1p`], [`math::powf`]); no draw, so no domain tag. The result at zero exposure or zero
+//! rate is +0, never −0, as the field header's reserved `maturity` part requires. Every comparison
+//! is explicit, never `f64::min` or `max`, and the deficits are compared, never summed. The mix's
+//! sums run in a fixed order from +0 (the octaves from the largest, each one's diameter nodes and
+//! then its age nodes in order, the coarse list in order, the bins in order), and it holds no
+//! cache: it is a function of the header and the coarse list alone.
 //!
 //! # Not on the record yet
 //!
@@ -159,10 +217,10 @@
 //! fills the header's `maturity` from P14.T51.d's `hooks/modifiers.rs`, which calls it, and deletes
 //! the sim's tripwire (`modifiers_nothing_on_the_record_reads_the_modifiers_yet`) that holds the
 //! line. No header outside the `testing` builder carries a maturity, a rate or a cover before it,
-//! so every exposure the server and the worker take is [`GroundExposure::NONE`]'s, and every albedo
-//! and answer is as it was. The point maturity is presentation (plan R10's Generator version); the
-//! solve's per-form rule (`Melt`, the cover) reaches the header's generator-versioned
-//! `albedo_scale` at 24.
+//! so every exposure the server and the worker take is [`GroundExposure::NONE`]'s, every mix the
+//! server asks for is `None`, and every albedo and answer is as it was. The point maturity is
+//! presentation (plan R10's Generator version); the solve's per-form rule (`Melt`, the cover) and
+//! its haloes reach the header's generator-versioned `albedo_scale` at 24.
 
 use hyperion_base::math;
 use hyperion_base::units::{Gigayears, Metres};
@@ -173,14 +231,19 @@ use super::{
     Material, MaterialClass, MaterialProperties, ResolvePropertiesError, properties,
     weathered_entry_bvr,
 };
-use crate::craters::crater_shape;
+use crate::craters::density::GAUSS_LEGENDRE_8;
+use crate::craters::{
+    UnitUniform, chronology_age, crater_shape, diameter_in_octave, lunar_chronology,
+};
 use crate::cube::{Edge, FaceUv, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir};
 use crate::field::{
-    FieldHeader, FieldView, MaterialPalette, PaletteEntry, PaletteRole, cell_at_index,
+    CoarseField, FieldHeader, FieldView, MaterialPalette, PaletteEntry, PaletteRole, cell_at_index,
 };
 use crate::substance_key::{SubstanceKey, SubstanceKeyForm};
 use crate::synth::craters::rims::kept_relief;
-use crate::synth::craters::{CraterCache, CraterOctave, SmallCrater, relief_factor};
+use crate::synth::craters::{
+    CraterCache, CraterOctave, SmallCrater, cell_area, diffusion_length, relief_factor,
+};
 use crate::synth::{QueryHeightError, SmallCraters, SynthCache, Synthesiser};
 
 /// The lunar maturation time `τ_L`: 0.3277 Gyr, the time over which the Moon's ground matures by a
@@ -266,22 +329,28 @@ pub fn body_maturity(surface_age: Gigayears, weathering_rate: f64) -> f64 {
     maturity_after(surface_age, weathering_rate)
 }
 
-/// The e-folding length of a young crater's fresh halo, rim radii: 3, the ruling's value
-/// (decision-r10-t1c-maturity R4), given there as a least-squares fit of exp(−(x − 1) ÷ λ) to
-/// Grier et al. 2000's radially averaged optical maturity about North Ray (LPSC XXXI, abstract
-/// 1950, Fig. 3).
+/// The e-folding length of a young crater's fresh halo, rim radii: 3, the length that keeps the
+/// halo's area moment, the integrated fresh share a body's mean brightness counts, within 7% of
+/// both craters' that Grier et al. 2000 profile (LPSC XXXI, abstract 1950, Fig. 3: the radially
+/// averaged optical maturity about North Ray and South Ray; decision-r10-t1c-halo R2, from main's
+/// re-reading of the figure, whose "within 6%" is 6.5% at the top of the measured range).
 ///
-/// Labelled: two lunar 1 km craters' figure, taken for every size and body. This lane's science
-/// check fits 2.3–2.8 R to the same points and to both craters' profiles, not 3 (recorded, plan
-/// R10's Risks); the ruled value is kept.
+/// The moment ∫₁¹⁰ e(x) 2x dx of the excess over the background as a share of the rim's, e(x), is
+/// 15.5–17.1 measured, over both craters and both backgrounds, and the code's shifted form
+/// ([`halo_share`]) gives 15.98 at λ = 3.0, the moment's fits giving 2.90–3.25 R. Labelled
+/// alternatives: least squares on e gives 2.42–2.63 R, which fits the near-rim points but loses 18%
+/// of the moment at 2.45 R, and least squares on ln e 3.35–3.86 R. The cost is the shape: within
+/// 0.10 of the measured share at 2–8 R (p(2) 0.702, p(4) 0.335, p(8) 0.050). Labelled too: two
+/// lunar 1 km craters' figure, taken for every size and body.
 pub const HALO_LENGTH_RIM_RADII: f64 = 3.0;
 
 /// How far a small crater's fresh halo reaches, rim radii: 10, where Grier et al. 2000's profiles
 /// reach the background, "by about 10–14 R" (Fig. 3, as the ruling reads it; North Ray's excess is
 /// about 0.025 of its rim's at 10 R), [`halo_share`]'s 0.
 ///
-/// Labelled, as [`HALO_LENGTH_RIM_RADII`] is. A coarse crater's halo ends at its own reach
-/// instead, (1 + a) rim radii, the farthest the field carries it.
+/// Labelled, as [`HALO_LENGTH_RIM_RADII`] is: the 10 R end drops the profiles' 10–15 R tail, 4–20%
+/// of their measured moment (decision-r10-t1c-halo R2). A coarse crater's halo ends at its own
+/// reach instead, (1 + a) rim radii, the farthest the field carries it.
 pub const HALO_EXTENT_RIM_RADII: f64 = 10.0;
 
 /// A simple crater's maximum excavation depth over its diameter: 0.084 (Melosh 1989, *Impact
@@ -581,6 +650,46 @@ pub fn halo_share(distance_rim_radii: f64, outer_rim_radii: f64) -> f64 {
     ((here - tail) / -tail).clamp(0.0, 1.0)
 }
 
+/// The distance from a crater's centre at which its fresh share falls to `share`, rim radii, for a
+/// halo that ends at `outer_rim_radii`: [`halo_share`]'s inverse, x* = 1 − λ ln(1 − (1 − s)(1 − T))
+/// with T = e^(−(x₁ − 1) ÷ λ), by `ln_1p` (decision-r10-t1c-halo R1).
+///
+/// It is 1 at a share of 1, the rim, and tends to the halo's end as the share falls to 0. The
+/// area within it, π (R x*)² on a sphere (Archimedes: a cap within a chord c has the area π c²),
+/// is the ground where the crater's deficit exceeds `share` times its rim's, which the body's
+/// maturity mix ([`maturity_mix`]) counts.
+///
+/// # Panics
+///
+/// If the share is outside (0, 1] or NaN, or the end is not finite or is below 1.
+#[must_use]
+pub fn halo_reach(share: f64, outer_rim_radii: f64) -> f64 {
+    let end = outer_rim_radii;
+    assert!(
+        share > 0.0 && share <= 1.0,
+        "a halo's share must be in (0, 1], got {share}"
+    );
+    assert!(
+        end.is_finite() && end >= 1.0,
+        "a halo must end finite and at or beyond the rim, got {end} rim radii"
+    );
+    reach_at(share, halo_opening(end))
+}
+
+/// 1 − T = −expm1(−(x₁ − 1) ÷ λ) for a halo that ends at `end` rim radii: the share of the rim's
+/// excess the halo's exponential loses by its end, before [`halo_share`]'s shift.
+#[must_use]
+fn halo_opening(end: f64) -> f64 {
+    -math::exp_m1(-(end - 1.0) / HALO_LENGTH_RIM_RADII)
+}
+
+/// [`halo_reach`] of `share` in [0, 1] for a halo of opening `opening` ([`halo_opening`]),
+/// unchecked: its end at a share of 0, where every halo of a positive rim deficit counts whole.
+#[must_use]
+fn reach_at(share: f64, opening: f64) -> f64 {
+    1.0 - HALO_LENGTH_RIM_RADII * math::ln_1p(-(1.0 - share) * opening)
+}
+
 /// The maturity a crater of age `crater_age` leaves at a point where its fresh share is
 /// `fresh_share`, on ground of background maturity `body_maturity` weathered at the rate
 /// `weathering_rate` (k): `m_body` − s × max(0, `m_body` − [`maturity_after`](`t_c`, k)),
@@ -706,7 +815,7 @@ pub fn maturity_at<F: FieldView>(
             smallest_radius_m,
             cache.craters_mut(),
             |crater, x| {
-                let share = relief_factor(crater.diameter() * 0.5, crater.diffusion())
+                let share = small_crater_wear(crater.diameter() * 0.5, crater.age())
                     * excavated_share(surface_age, crater.age(), crater.diameter())
                     * halo_share(x, HALO_EXTENT_RIM_RADII);
                 take(deficit_of(body, crater.age(), rate, share));
@@ -725,6 +834,18 @@ fn deficit_of(body: f64, age: Gigayears, rate: f64, share: f64) -> f64 {
     } else {
         0.0
     }
+}
+
+/// The wear g of a small crater of rim radius `rim_radius` and age `age`, in [0, 1]: its kept
+/// relief as the synthesis computes it, [`relief_factor`] of its rim radius and its
+/// [`diffusion_length`].
+///
+/// The one helper that [`maturity_at`] and the body's maturity mix ([`maturity_mix`]) both take a
+/// small crater's g from, so that the two cannot disagree and one change moves both
+/// (decision-r10-t1c-halo R3).
+#[must_use]
+fn small_crater_wear(rim_radius: Metres, age: Gigayears) -> f64 {
+    relief_factor(rim_radius, diffusion_length(age))
 }
 
 /// Whether some crater of `octave` can expose fresh ground on a surface `surface_age` old: it draws
@@ -919,6 +1040,423 @@ fn neighbourhood(cell: PatchKey) -> ([PatchKey; 9], usize) {
     (cells, kept)
 }
 
+/// The halvings below `m_body` that the mix's finest deficit edge lies at: 24, so that the edges
+/// run 2⁻²⁴ `m_body`, 2⁻²³ `m_body`, … up to 2⁻⁵ `m_body` (decision-r10-t1c-halo R1).
+const FINEST_DEFICIT_HALVINGS: u32 = 24;
+
+/// The halvings below `m_body` of the last halved deficit edge, 2⁻⁵ `m_body`, from which the edges
+/// step by 1/32 of `m_body` to `m_body` itself.
+const COARSEST_DEFICIT_HALVINGS: u32 = 5;
+
+/// The steps of `m_body` the mix's edges take from 2⁻⁵ `m_body` on: 32, edges at 2/32 to 32/32.
+const DEFICIT_STEPS: u32 = 32;
+
+/// The panels of the mix's mean over a crater's age share u, graded towards u = 0: 24, [0, 2⁻²³],
+/// then [2⁻ᵏ, 2⁻ᵏ⁺¹] for k from 23 down to 1 (decision-r10-t1c-halo R1).
+const AGE_PANELS: u32 = 24;
+
+/// One node of a body's maturity mix ([`MaturityMix`]): a maturity, dimensionless in
+/// [0, `m_body`], and the share of the body's ground the mix gives it, in (0, 1].
+///
+/// A mix holds no node of zero weight, so the type has no default.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct MaturityNode {
+    maturity: f64,
+    weight: f64,
+}
+
+impl MaturityNode {
+    /// The node's maturity, `m_body` less one of the mix's deficit edges, dimensionless in
+    /// [0, `m_body`].
+    #[must_use]
+    pub const fn maturity(&self) -> f64 {
+        self.maturity
+    }
+
+    /// The node's share of the body's ground, in (0, 1].
+    #[must_use]
+    pub const fn weight(&self) -> f64 {
+        self.weight
+    }
+}
+
+/// A body's maturity mix (decision-r10-t1c-halo R1; the module documentation): the distribution
+/// over its ground of the maturity its young craters' haloes leave, as the point query
+/// ([`maturity_at`]) draws it, cut at nodes of falling maturity whose weights sum to 1, so that a
+/// material's albedo averaged over the nodes is its albedo averaged over the body wherever the
+/// albedo is linear between two nodes.
+///
+/// It is built in closed form ([`maturity_mix`]), the exact expectation of the drawn rule, and
+/// holds no cache: the nodes and the law that gave them, from which
+/// [`share_above`](Self::share_above) reads the share of the ground at any deficit.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MaturityMix {
+    nodes: Vec<MaturityNode>,
+    law: HaloLaw,
+}
+
+impl MaturityMix {
+    /// The body's background maturity, `m_body`, the header's: the first node's maturity, and the
+    /// one an albedo solve over the mix must be exposed at.
+    #[must_use]
+    pub fn body(&self) -> f64 {
+        self.law.body
+    }
+
+    /// The nodes, in falling maturity from `m_body`, each of a positive weight, the weights summing
+    /// to 1 to rounding.
+    #[must_use]
+    pub fn nodes(&self) -> &[MaturityNode] {
+        &self.nodes
+    }
+
+    /// The share of the body's ground whose deficit `m_body` − `m_local` exceeds `deficit`,
+    /// 1 − F(d), dimensionless in [0, 1]: 0 from `m_body` on, and never rising with the deficit.
+    ///
+    /// # Panics
+    ///
+    /// If `deficit` is negative or NaN.
+    #[must_use]
+    pub fn share_above(&self, deficit: f64) -> f64 {
+        assert!(
+            deficit >= 0.0,
+            "a deficit must be non-negative, got {deficit}"
+        );
+        1.0 - self.law.cumulative(deficit)
+    }
+}
+
+/// The distribution F(d) = P(D ≤ d) of a body's point deficit D over its ground, from which its
+/// mix is cut: F(d) = `F_c`(d) exp(−`Λ_s`(d)) below `m_body` and 1 from it (the module
+/// documentation).
+#[derive(Debug, Clone, PartialEq)]
+struct HaloLaw {
+    /// The background maturity, `m_body`.
+    body: f64,
+    /// A small crater's [`halo_opening`], for its end at [`HALO_EXTENT_RIM_RADII`].
+    small_opening: f64,
+    /// The octaves that can expose fresh ground, from the largest.
+    octaves: Vec<OctaveHaloes>,
+    /// The coarse craters of a positive rim deficit, in the field's list order, and the body's
+    /// area; `None` where there are none.
+    coarse: Option<CoarseHaloes>,
+}
+
+/// An octave's part of `Λ_s`: its kept density and its nodes in diameter and age.
+#[derive(Debug, Clone, PartialEq)]
+struct OctaveHaloes {
+    /// The craters it keeps per square metre ([`CraterOctave::density`]).
+    density_per_m2: f64,
+    /// Its (diameter, age) nodes of a positive rim deficit, diameters outer and ages inner.
+    haloes: Vec<SmallHalo>,
+}
+
+/// One (diameter, age) node of an octave: its crater's rim deficit and its weight.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SmallHalo {
+    /// The rim deficit δ₀ = g `f_ex` max(0, `m_body` − `maturity_after`(`t_c`, k)), as
+    /// [`maturity_at`] takes it.
+    deficit: f64,
+    /// The node's weight in the octave's mean over diameters and ages, ½ ω times the age node's,
+    /// times its crater's disc π R², square metres.
+    disc_m2: f64,
+}
+
+/// The coarse craters' part of F: each one's halo, and the body's area.
+#[derive(Debug, Clone, PartialEq)]
+struct CoarseHaloes {
+    haloes: Vec<CoarseHalo>,
+    /// The body's area, square metres: its cells' [`cell_area`]s summed in index order, as
+    /// [`class_fractions`](super::class_fractions) weights its materials.
+    area_m2: f64,
+}
+
+/// One coarse crater's halo.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CoarseHalo {
+    /// Its rim deficit δ₀, as [`maturity_at`] takes it.
+    deficit: f64,
+    /// Its disc π R², square metres.
+    disc_m2: f64,
+    /// Its [`halo_opening`], for its end at its reach, (1 + a) rim radii.
+    opening: f64,
+}
+
+impl HaloLaw {
+    /// F(`deficit`), the share of the ground whose deficit is at most `deficit`: 1 from `m_body`
+    /// on, and below it `F_c` exp(−`Λ_s`), each crater counted where its rim deficit is above
+    /// `deficit` (strictly), out to where its share falls to `deficit` over its rim deficit. At
+    /// `deficit` 0 it is F's limit from above, every halo of a positive rim deficit counted whole.
+    /// Every sum runs in a fixed order from +0, of terms that never rise with `deficit`, so that F
+    /// never falls as `deficit` rises.
+    #[must_use]
+    fn cumulative(&self, deficit: f64) -> f64 {
+        if deficit >= self.body {
+            return 1.0;
+        }
+        let mut rate = 0.0;
+        for octave in &self.octaves {
+            let mut mean = 0.0;
+            for halo in &octave.haloes {
+                if deficit < halo.deficit {
+                    let x = reach_at(deficit / halo.deficit, self.small_opening);
+                    mean += halo.disc_m2 * x * x;
+                }
+            }
+            rate += octave.density_per_m2 * mean;
+        }
+        let free = self.coarse.as_ref().map_or(1.0, |coarse| {
+            let mut covered = 0.0;
+            for halo in &coarse.haloes {
+                if deficit < halo.deficit {
+                    let x = reach_at(deficit / halo.deficit, halo.opening);
+                    covered += halo.disc_m2 * x * x;
+                }
+            }
+            let share = covered / coarse.area_m2;
+            if share < 1.0 { 1.0 - share } else { 0.0 }
+        });
+        free * math::exp(-rate)
+    }
+}
+
+/// How finely the mix is taken: R1's scheme, or a finer one that the convergence tests take.
+#[derive(Debug, Clone, Copy)]
+struct MixScheme<'a> {
+    /// The Gauss–Legendre rule on [−1, 1] in each octave's kept share of diameters.
+    diameters: &'a [(f64, f64)],
+    /// The parts each graded age panel is split into, each taking the eight-point rule.
+    age_parts: u32,
+    /// The parts each of R1's 51 deficit bins is split into.
+    bin_parts: u32,
+}
+
+impl MixScheme<'static> {
+    /// R1's scheme: eight diameter nodes, the 24 graded age panels whole, the 51 bins whole.
+    const RULED: Self = Self {
+        diameters: &GAUSS_LEGENDRE_8,
+        age_parts: 1,
+        bin_parts: 1,
+    };
+}
+
+/// The maturity mix of the body whose coarse field `synth` reads, or `None` where its header
+/// carries no maturity or no weathering rate (decision-r10-t1c-halo R1; the module
+/// documentation).
+///
+/// The young craters' haloes, the coarse field's list and the small craters' octaves alike, are
+/// counted in closed form at their synthesis's own laws, so the mix is the exact expectation of
+/// [`maturity_at`]'s rule over the body, to its quadratures and its labelled limits. Where no
+/// crater leaves a deficit (no maturity above any crater's, no crater density, no young coarse
+/// crater) it is one node, `m_body`, of weight 1. Nothing is drawn: it is a function of the
+/// header (crater contract, figure, boundary diameter, surface age, maturity, rate) and the coarse
+/// list, the same on every target.
+///
+/// # Panics
+///
+/// As [`maturity_after`], [`excavated_share`] and the octaves' laws, for a header whose values the
+/// field validated (a bug).
+#[must_use]
+pub fn maturity_mix(synth: &Synthesiser<'_, CoarseField>) -> Option<MaturityMix> {
+    mix_with(synth, &MixScheme::RULED)
+}
+
+/// [`maturity_mix`] under `scheme`.
+#[must_use]
+fn mix_with(synth: &Synthesiser<'_, CoarseField>, scheme: &MixScheme<'_>) -> Option<MaturityMix> {
+    let law = halo_law(synth, scheme)?;
+    let nodes = cut(&law, scheme.bin_parts);
+    Some(MaturityMix { nodes, law })
+}
+
+/// The deficit law of the body `synth` reads, under `scheme`, or `None` without a maturity and a
+/// rate.
+#[must_use]
+fn halo_law(synth: &Synthesiser<'_, CoarseField>, scheme: &MixScheme<'_>) -> Option<HaloLaw> {
+    let field = synth.field();
+    let header = field.header();
+    let (Some(body), Some(rate)) = (header.maturity(), header.weathering_rate()) else {
+        return None;
+    };
+    let params = header.craters();
+    let system = params.system_age();
+    let surface_age = header.surface_age();
+    let shares = age_nodes(scheme.age_parts);
+    let mut octaves = Vec::new();
+    for octave in synth.craters().octaves().octaves() {
+        if !can_expose(octave, surface_age) {
+            continue;
+        }
+        // The draw's ages: a uniform u of the window's count, through the chronology's inverse.
+        let window_density = lunar_chronology(octave.window(), system);
+        let dated: Vec<(Gigayears, f64, f64)> = shares
+            .iter()
+            .map(|&(u, weight)| {
+                let age = chronology_age(window_density * u, system);
+                (
+                    age,
+                    ejecta_deficit(body, maturity_after(age, rate), 1.0),
+                    weight,
+                )
+            })
+            .collect();
+        // The last octave keeps the share of its draw from 2 m up.
+        let kept = octave.density().value() / octave.drawn_density().value();
+        let dropped = 1.0 - kept;
+        let mut haloes = Vec::with_capacity(scheme.diameters.len() * dated.len());
+        for &(node, weight) in scheme.diameters {
+            let size = UnitUniform::new(dropped + kept * f64::midpoint(1.0, node))
+                .expect("a Gauss–Legendre node's share lies in [0, 1)");
+            let diameter = diameter_in_octave(params, octave.diameters(), size);
+            let rim = diameter * 0.5;
+            let disc_m2 = 0.5 * weight * core::f64::consts::PI * rim.value() * rim.value();
+            for &(age, fresher, age_weight) in &dated {
+                if fresher > 0.0 {
+                    let deficit = small_crater_wear(rim, age)
+                        * excavated_share(surface_age, age, diameter)
+                        * fresher;
+                    if deficit > 0.0 {
+                        haloes.push(SmallHalo {
+                            deficit,
+                            disc_m2: disc_m2 * age_weight,
+                        });
+                    }
+                }
+            }
+        }
+        octaves.push(OctaveHaloes {
+            density_per_m2: octave.density().value() * 1e-6,
+            haloes,
+        });
+    }
+    let mut coarse = Vec::new();
+    for crater in field.craters() {
+        let fresh = kept_relief(crater) * excavated_share(surface_age, crater.age, crater.diameter);
+        let deficit = deficit_of(body, crater.age, rate, fresh);
+        if deficit > 0.0 {
+            let shape = crater_shape(params, crater.diameter);
+            let rim_m = 0.5 * shape.diameter().value();
+            coarse.push(CoarseHalo {
+                deficit,
+                disc_m2: core::f64::consts::PI * rim_m * rim_m,
+                opening: halo_opening(1.0 + shape.exterior_width()),
+            });
+        }
+    }
+    let coarse = (!coarse.is_empty()).then(|| {
+        let level = header.level();
+        let figure = header.figure();
+        let area_m2 = (0..level.cell_count()).fold(0.0, |sum, index| {
+            let cell =
+                cell_at_index(level.get(), index).expect("every index below the count is a cell");
+            sum + cell_area(cell, &figure).value()
+        });
+        CoarseHaloes {
+            haloes: coarse,
+            area_m2,
+        }
+    });
+    Some(HaloLaw {
+        body,
+        small_opening: halo_opening(HALO_EXTENT_RIM_RADII),
+        octaves,
+        coarse,
+    })
+}
+
+/// The age shares u and their weights of the mix's mean over a crater's age: eight-point
+/// Gauss–Legendre on each of the [`AGE_PANELS`] graded panels split into `parts`, in order, the
+/// weights summing to 1.
+#[must_use]
+fn age_nodes(parts: u32) -> Vec<(f64, f64)> {
+    let edge = |k: u32| {
+        if k == 0 {
+            0.0
+        } else {
+            1.0 / f64::from(1_u32 << (AGE_PANELS - k))
+        }
+    };
+    // A capacity hint alone: a count past usize's range leaves it at none.
+    let panels = usize::try_from(AGE_PANELS.saturating_mul(parts)).unwrap_or(0);
+    let mut nodes = Vec::with_capacity(panels.saturating_mul(GAUSS_LEGENDRE_8.len()));
+    for panel in 0..AGE_PANELS {
+        let (low, high) = (edge(panel), edge(panel + 1));
+        let width = (high - low) / f64::from(parts);
+        for part in 0..parts {
+            let half = 0.5 * width;
+            let middle = low + width * f64::from(part) + half;
+            for (node, weight) in GAUSS_LEGENDRE_8 {
+                nodes.push((middle + half * node, half * weight));
+            }
+        }
+    }
+    nodes
+}
+
+/// The mix's deficit edges as shares of `m_body`, ascending from 0 to 1: R1's 52, 0, then 2⁻²⁴ to
+/// 2⁻⁵ by halvings, then 2/32 to 32/32, each of their 51 bins split into `parts` equal parts.
+#[must_use]
+fn deficit_edges(parts: u32) -> Vec<f64> {
+    let halved = (COARSEST_DEFICIT_HALVINGS..=FINEST_DEFICIT_HALVINGS)
+        .rev()
+        .map(|k| 1.0 / f64::from(1_u32 << k));
+    let stepped = (2..=DEFICIT_STEPS).map(|j| f64::from(j) / f64::from(DEFICIT_STEPS));
+    let ruled: Vec<f64> = core::iter::once(0.0).chain(halved).chain(stepped).collect();
+    // A capacity hint alone, as `age_nodes`' is.
+    let bins = usize::try_from(parts)
+        .unwrap_or(0)
+        .saturating_mul(ruled.len() - 1);
+    let mut edges = Vec::with_capacity(bins.saturating_add(1));
+    edges.push(0.0);
+    for pair in ruled.windows(2) {
+        let (low, high) = (pair[0], pair[1]);
+        for part in 1..parts {
+            edges.push(low + (high - low) * f64::from(part) / f64::from(parts));
+        }
+        edges.push(high);
+    }
+    edges
+}
+
+/// The nodes `law`'s distribution is cut at, its bins split into `parts` (R1): `m_body` less each
+/// deficit edge d, with the atom F(0) at the first and each bin's mass P = F(b) − F(a) shared
+/// between its two edges so that its mean deficit is kept, the zero weights dropped.
+///
+/// A bin's mean deficit is d̄ = (b F(b) − a F(a) − ∫ₐᵇ F) ÷ P, the integral by Simpson's rule on
+/// F(a), F at the midpoint m and F(b); its share towards b, t = (d̄ − a) ÷ (b − a), is then
+/// exactly (P + 4 (F(b) − F(m))) ÷ 6P, which is how it is computed, since the first form cancels
+/// digits where F is near 1 and P small. For an F that never falls, t lies in [1/6, 5/6], so the
+/// clamp to [0, 1] guards only rounding; the bin gives P (1 − t) to the node at a and P t to the
+/// node at b.
+#[must_use]
+fn cut(law: &HaloLaw, parts: u32) -> Vec<MaturityNode> {
+    let body = law.body;
+    let deficits: Vec<f64> = deficit_edges(parts).into_iter().map(|e| body * e).collect();
+    let below: Vec<f64> = deficits.iter().map(|&d| law.cumulative(d)).collect();
+    let mut weights = vec![0.0; deficits.len()];
+    weights[0] = below[0];
+    for k in 0..deficits.len() - 1 {
+        let mass = below[k + 1] - below[k];
+        if mass > 0.0 {
+            let middle = law.cumulative(f64::midpoint(deficits[k], deficits[k + 1]));
+            // Never −0: the numerator is a positive mass plus a difference of at least −mass to
+            // rounding, which rounds to +0 where it cancels.
+            let towards = ((mass + 4.0 * (below[k + 1] - middle)) / (6.0 * mass)).clamp(0.0, 1.0);
+            weights[k] += mass * (1.0 - towards);
+            weights[k + 1] += mass * towards;
+        }
+    }
+    deficits
+        .iter()
+        .zip(&weights)
+        .filter(|&(_, &weight)| weight > 0.0)
+        .map(|(&d, &weight)| MaturityNode {
+            maturity: body - d,
+            weight,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     //! The maturity's tests: the time law (P14.T51.d), and R10.T1.c's exposure, cover and maturity
@@ -943,8 +1481,9 @@ mod tests {
     use crate::field::{BVR_EFFECTIVE_WAVELENGTHS_NM, CoarseCrater, CoarseField, MechanicsFamily};
     use crate::geometry::min_rate;
     use crate::material::{
-        PhaseLaw, albedo_scale, class_fractions, exposed_albedo_scale, material_at,
-        scaled_normal_albedo, weathered_normal_albedo,
+        AlbedoScale, ClassFractions, GroundMaterial, PhaseLaw, albedo_scale, class_fractions,
+        exposed_albedo_scale, haloed_albedo_scale, material_at, scaled_normal_albedo,
+        weathered_normal_albedo,
     };
     use crate::synth::craters::diffusion_length;
     use crate::synth::test_support::{SEED, along_chord, king_distances, world};
@@ -2115,16 +2654,24 @@ mod tests {
     /// The points each field is sampled at, uniform in area.
     const SAMPLES: u32 = 10_000;
 
-    /// A field's sampled maturities: the shares of its ground above each of [`DEFICITS`], and the
-    /// mean V excess of its named ground's exposed albedo at `m_local` over its albedo at `m_body`.
+    /// A field's sampled maturities: the shares of its ground above each of [`DEFICITS`], the mean
+    /// V excess of its named ground's exposed albedo at `m_local` over its albedo at `m_body`, and
+    /// the named points' drawn geometric albedo in V ([`drawn_g`]).
     #[derive(Debug)]
     struct Sampled {
         above: [f64; 3],
         mean_v_excess: f64,
+        /// Σ G(`m_local`) over the named points at each of the scales sampled.
+        drawn: [f64; 2],
+        /// Σ G(`m_body`) over the named points at the first scale.
+        at_body: f64,
+        /// The named points.
+        named: u32,
     }
 
-    /// [`SAMPLES`] points of `field`, uniform in area on its near-spherical figure.
-    fn sample(field: &CoarseField) -> Sampled {
+    /// [`SAMPLES`] points of `field`, uniform in area on its near-spherical figure, its named
+    /// ground drawn at the two scales `scales`.
+    fn sample(field: &CoarseField, scales: [f64; 2]) -> Sampled {
         let header = field.header();
         let palette = header.palette();
         let synth = Synthesiser::new(field, SEED);
@@ -2134,6 +2681,7 @@ mod tests {
         let exposure = GroundExposure::of_header(header);
         let mut above = [0_u32; 3];
         let (mut excess, mut named) = (0.0, 0_u32);
+        let (mut drawn, mut at_body) = ([0.0; 2], 0.0);
         for _ in 0..SAMPLES {
             let z = 2.0 * rng.next_f64() - 1.0;
             let (s, c) = math::sin_cos(core::f64::consts::TAU * rng.next_f64());
@@ -2154,11 +2702,18 @@ mod tests {
                 };
                 excess += v(exposure.with_maturity(local)) / v(exposure) - 1.0;
                 named += 1;
+                for (sum, &scale) in drawn.iter_mut().zip(&scales) {
+                    *sum += drawn_g(m, palette, exposure, local, scale);
+                }
+                at_body += drawn_g(m, palette, exposure, body, scales[0]);
             }
         }
         Sampled {
             above: above.map(|n| f64::from(n) / f64::from(SAMPLES)),
             mean_v_excess: excess / f64::from(named),
+            drawn,
+            at_body,
+            named,
         }
     }
 
@@ -2205,25 +2760,34 @@ mod tests {
     const GRIER_IMMATURE_PER_KM2: f64 = 327.0 / 2.60e6;
 
     /// R4's shares on the weathered Moon-like world, on its 3.5 Gyr variant, where the share above
-    /// a deficit of 0.5 is under 10% (without `f_ex` and g it would be 57%), and on a 1 Gyr
-    /// variant, printed beside the ruling's estimates, with Grier et al. 2000's count in closed
-    /// form and R5b's mean V excess.
+    /// a deficit of 0.5 is under 10% (without `f_ex` and g it would be 57%), and on its 1 and
+    /// 0.1 Gyr variants, printed beside the ruling's estimates, with Grier et al. 2000's count in
+    /// closed form and R5b's mean V excess.
+    ///
+    /// And the haloed solve against the drawn ground (decision-r10-t1c-halo's brute force): at each
+    /// point its material's G(m) at the haloed scale for [`TARGET`], the stated excess within
+    /// max(10%, 0.002) of the drawn one, Σ G(`m_local`) ÷ Σ G(`m_body`) − 1; the drawn mean
+    /// Σ G(`m_local`) ÷ N within 1% of p, printed beside the same at the halo-free scale; and the
+    /// mix's shares above 0.05, 0.2 and 0.5 within 10% of the sampled share plus three binomial
+    /// standard errors.
     #[test]
-    #[ignore = "slow: the maturity and the material at 10^4 points of three Moon-like worlds"]
+    #[ignore = "slow: the maturity and the material at 10^4 points of four Moon-like worlds"]
     fn maturity_immature_shares_are_held_and_grier_s_count_stated() {
-        let middle = younger_moon(3.5, 4.8e-3);
-        let young = younger_moon(1.0, 8.4e-4);
-        for (name, field, estimates, excess) in [
-            ("4.4 Gyr", weathered_moon(), "0.3% above 0.2", 0.004),
-            ("3.5 Gyr", &middle, "16% above 0.2, 2.1% above 0.5", 0.18),
-            ("1 Gyr", &young, "none stated", 0.20),
+        let worlds = halo_worlds();
+        for (world, estimates, excess) in [
+            (&worlds[0], "0.3% above 0.2", "0.004"),
+            (&worlds[1], "16% above 0.2, 2.1% above 0.5", "0.18"),
+            (&worlds[2], "none stated", "0.20"),
+            (&worlds[3], "none stated", "none stated"),
         ] {
-            let s = sample(field);
+            let (name, field) = (world.name, world.field);
+            let s = sample(field, [world.haloed.scale(), world.halo_free.scale()]);
             eprintln!(
                 "{name}: shares above {DEFICITS:?}: {:.4} {:.4} {:.4} (R4's estimates: \
                  {estimates}); mean V excess {:.4} (R5b's estimate, an upper bound, {excess})",
                 s.above[0], s.above[1], s.above[2], s.mean_v_excess
             );
+            check_the_haloed_solve(world, &s);
             let params = field.header().craters();
             let surface = field.header().surface_age();
             let (above_02, above_05) = (
@@ -2235,9 +2799,197 @@ mod tests {
                  0.5 {above_05:.2e} km⁻² (the ruling's 4.2e-4 and 1.7e-4), against Grier et al. \
                  2000's {GRIER_IMMATURE_PER_KM2:.2e}"
             );
-            if name == "3.5 Gyr" {
+            if name == "moon_like 3.5 Gyr" {
                 assert!(s.above[2] < 0.10, "{s:?}");
             }
+        }
+    }
+
+    /// The brute force's checks of `world`'s haloed solve against its sample `s`, printed and
+    /// asserted (the bounds are the ruling's, never widened).
+    fn check_the_haloed_solve(world: &HaloWorld, s: &Sampled) {
+        let name = world.name;
+        let n = f64::from(s.named);
+        let drawn = s.drawn[0] / s.at_body - 1.0;
+        let stated = world.haloed.halo_excess_v();
+        let (mean, free_mean) = (s.drawn[0] / n, s.drawn[1] / n);
+        eprintln!(
+            "{name}: the stated excess {:.4}% against the drawn {:.4}%; the drawn mean over p \
+             {:.4} at the haloed scale {:.6}, {:.4} at the halo-free {:.6}; {} named points",
+            100.0 * stated,
+            100.0 * drawn,
+            mean / TARGET[1],
+            world.haloed.scale(),
+            free_mean / TARGET[1],
+            world.halo_free.scale(),
+            s.named
+        );
+        let bound = if 0.1 * drawn > 0.002 {
+            0.1 * drawn
+        } else {
+            0.002
+        };
+        assert!(
+            (stated - drawn).abs() <= bound,
+            "{name}: the stated excess {stated} against the drawn {drawn}"
+        );
+        assert!(
+            (mean / TARGET[1] - 1.0).abs() < 0.01,
+            "{name}: the drawn mean {mean} against p {}",
+            TARGET[1]
+        );
+        for (&d, &sampled) in DEFICITS.iter().zip(&s.above) {
+            let closed = world.mix.share_above(d);
+            let error = (sampled * (1.0 - sampled) / f64::from(SAMPLES)).sqrt();
+            eprintln!(
+                "{name}: the share above {d}: the mix's {closed:.5} against the sampled \
+                 {sampled:.5} (± {error:.5})"
+            );
+            assert!(
+                (closed - sampled).abs() <= 0.1 * sampled + 3.0 * error,
+                "{name}: the share above {d}, {closed}, against the sampled {sampled}"
+            );
+        }
+    }
+
+    /// The `n`-point Gauss–Legendre rule on [−1, 1], ascending: Newton's method on Pₙ from the
+    /// usual cosine guesses, to rounding.
+    fn gauss_legendre(n: u32) -> Vec<(f64, f64)> {
+        let order = f64::from(n);
+        (0..n)
+            .map(|i| {
+                let mut x =
+                    -math::cos(core::f64::consts::PI * (f64::from(i) + 0.75) / (order + 0.5));
+                let mut slope = 1.0;
+                for _ in 0..100 {
+                    let (mut before, mut here) = (1.0, x);
+                    for k in 2..=n {
+                        let k = f64::from(k);
+                        let next = ((2.0 * k - 1.0) * x * here - (k - 1.0) * before) / k;
+                        before = here;
+                        here = next;
+                    }
+                    slope = order * (x * here - before) / (x * x - 1.0);
+                    let step = here / slope;
+                    x -= step;
+                    if step.abs() < 1e-16 {
+                        break;
+                    }
+                }
+                (x, 2.0 / ((1.0 - x * x) * slope * slope))
+            })
+            .collect()
+    }
+
+    /// The figures the convergence test holds: the stated excess of `mix`'s haloed solve on
+    /// `world`, and its shares above [`DEFICITS`].
+    fn figures(world: &HaloWorld, mix: &MaturityMix) -> [f64; 4] {
+        let header = world.field.header();
+        let haloed = haloed_albedo_scale(
+            &world.fractions,
+            header.palette(),
+            GroundExposure::of_header(header),
+            mix,
+            TARGET,
+        )
+        .unwrap();
+        let [a, b, c] = DEFICITS.map(|d| mix.share_above(d));
+        [haloed.halo_excess_v(), a, b, c]
+    }
+
+    /// The excess in V of `world`'s named ground over `mix`'s nodes at the scale `scale`, against
+    /// its ground at `m_body`: Σ a Σ w G(m) ÷ Σ a G(`m_body`) − 1.
+    fn excess_at(world: &HaloWorld, mix: &MaturityMix, scale: f64) -> f64 {
+        let header = world.field.header();
+        let (palette, exposure) = (header.palette(), GroundExposure::of_header(header));
+        let (mut over, mut under) = (0.0, 0.0);
+        for &(ground, a) in world.fractions.shares() {
+            let Some(m) = ground.material() else {
+                continue;
+            };
+            let g = |maturity| drawn_g(m, palette, exposure, maturity, scale);
+            over += a * mix
+                .nodes()
+                .iter()
+                .fold(0.0, |sum, n| sum + n.weight() * g(n.maturity()));
+            under += a * g(mix.body());
+        }
+        over / under - 1.0
+    }
+
+    /// Convergence (decision-r10-t1c-halo's test 5): doubling the diameter nodes (16
+    /// Gauss–Legendre), the age panels (each split in two) or the bins (each split in two), one at
+    /// a time, moves the stated excess and the shares above 0.05, 0.2 and 0.5 by under 1% of
+    /// themselves on the four Moon-like worlds; and the excess over R1's nodes is within 1% of a
+    /// 4,080-bin reference's on the same law (each bin split into 80), both at the haloed scale.
+    #[test]
+    #[ignore = "slow: the mix under four schemes and the haloed solve on four Moon-like worlds"]
+    fn maturity_mix_converges_in_its_diameters_ages_and_bins() {
+        let rule = gauss_legendre(8);
+        for (got, want) in rule.iter().zip(&GAUSS_LEGENDRE_8) {
+            assert!((got.0 - want.0).abs() < 1e-15 && (got.1 - want.1).abs() < 1e-15);
+        }
+        let sixteen = gauss_legendre(16);
+        let total = sixteen.iter().fold(0.0, |sum, &(_, w)| sum + w);
+        assert!((total - 2.0).abs() < 1e-14, "{total}");
+        let ruled = MixScheme::RULED;
+        let schemes = [
+            (
+                "16 diameter nodes",
+                MixScheme {
+                    diameters: &sixteen,
+                    ..ruled
+                },
+            ),
+            (
+                "the age panels split in two",
+                MixScheme {
+                    age_parts: 2,
+                    ..ruled
+                },
+            ),
+            (
+                "the bins split in two",
+                MixScheme {
+                    bin_parts: 2,
+                    ..ruled
+                },
+            ),
+        ];
+        let names = ["the stated excess", "above 0.05", "above 0.2", "above 0.5"];
+        for world in &halo_worlds()[..4] {
+            let synth = Synthesiser::new(world.field, SEED);
+            let base = figures(world, &world.mix);
+            for (what, scheme) in &schemes {
+                let mix = mix_with(&synth, scheme).unwrap();
+                let moved = figures(world, &mix);
+                for ((name, &b), &m) in names.iter().zip(&base).zip(&moved) {
+                    let change = m / b - 1.0;
+                    eprintln!(
+                        "{}: {what}: {name} {b:.6e} to {m:.6e}, {:+.4}%",
+                        world.name,
+                        100.0 * change
+                    );
+                    assert!(change.abs() < 0.01, "{}: {what}: {name}", world.name);
+                }
+            }
+            let reference = MaturityMix {
+                nodes: cut(&world.mix.law, 80),
+                law: world.mix.law.clone(),
+            };
+            let scale = world.haloed.scale();
+            let (nodes, fine) = (
+                excess_at(world, &world.mix, scale),
+                excess_at(world, &reference, scale),
+            );
+            let gap = nodes / fine - 1.0;
+            eprintln!(
+                "{}: the excess at the haloed scale over R1's nodes {nodes:.6e}, over 4,080 bins \
+                 {fine:.6e}, {:+.4}%",
+                world.name,
+                100.0 * gap
+            );
+            assert!(gap.abs() < 0.01, "{}: {nodes} against {fine}", world.name);
         }
     }
 
@@ -2424,6 +3176,569 @@ mod tests {
         golden!("material/maturity", &maturity_text());
     }
 
+    // ---- decision-r10-t1c-halo: the inverse halo, the body's maturity mix and the haloed solve
+    // ----
+
+    /// The weathered Moon-like world on its 3.5 Gyr surface (N(>1 km) 4.8 × 10⁻³), built once per
+    /// test process.
+    fn middle_moon() -> &'static CoarseField {
+        static FIELD: OnceLock<CoarseField> = OnceLock::new();
+        FIELD.get_or_init(|| younger_moon(3.5, 4.8e-3))
+    }
+
+    /// The weathered Moon-like world on its 1 Gyr surface (N(>1 km) 8.4 × 10⁻⁴), built once per
+    /// test process.
+    fn young_moon() -> &'static CoarseField {
+        static FIELD: OnceLock<CoarseField> = OnceLock::new();
+        FIELD.get_or_init(|| younger_moon(1.0, 8.4e-4))
+    }
+
+    /// The weathered Moon-like world on its 0.1 Gyr surface (N(>1 km) 8.4 × 10⁻⁵), built once per
+    /// test process.
+    fn youngest_moon() -> &'static CoarseField {
+        static FIELD: OnceLock<CoarseField> = OnceLock::new();
+        FIELD.get_or_init(|| younger_moon(0.1, 8.4e-5))
+    }
+
+    /// An iron-bearing basalt regolith (`FeO_T` 0.16), the server test's `weathering_field`'s
+    /// crust, so that the ground it covers weathers.
+    fn basalt_fe() -> PaletteEntry {
+        PaletteEntry {
+            substance: SubstanceKey::new("basalt_fe").expect("a test key is in the grammar"),
+            role: PaletteRole::PrimaryCrust,
+            normal_albedo_bvr: [0.1, 0.11, 0.12],
+            phase_row: 0,
+            grain_density_kg_m3: 3_310.0,
+            transition: Kelvin::new(1_323.15),
+            mechanics: MechanicsFamily::Silicate,
+            liquid: None,
+            feo_mass_fraction: Some(0.16),
+        }
+    }
+
+    /// `builder` on a one-entry palette of [`basalt_fe`], every crust of it.
+    fn on_basalt(builder: FieldBuilder) -> FieldBuilder {
+        builder
+            .palette(MaterialPalette::new(vec![basalt_fe()]).expect("one entry is a palette"))
+            .crust_palette([Some(0); 4])
+    }
+
+    /// The young single crater's world ([`young_crater_with`] at [`YOUNG_CRATER_DEGRADATION`], g
+    /// 0.8) on [`basalt_fe`], so that its ground weathers: built once per test process.
+    fn basalt_crater() -> &'static CoarseField {
+        static FIELD: OnceLock<CoarseField> = OnceLock::new();
+        FIELD.get_or_init(|| {
+            on_basalt(one_crater_builder(
+                Gigayears::new(YOUNG_CRATER_AGE),
+                YOUNG_CRATER_DEGRADATION,
+            ))
+            .maturity(body_maturity(Gigayears::new(4.0), 1.0))
+            .weathering_rate(1.0)
+            .build()
+        })
+    }
+
+    /// The worlds the mix is held on: the weathered Moon-like world and its younger variants, and
+    /// the young single crater on basalt.
+    fn halo_fields() -> [(&'static str, &'static CoarseField); 5] {
+        [
+            ("moon_like 4.4 Gyr", weathered_moon()),
+            ("moon_like 3.5 Gyr", middle_moon()),
+            ("moon_like 1 Gyr", young_moon()),
+            ("moon_like 0.1 Gyr", youngest_moon()),
+            ("one_crater", basalt_crater()),
+        ]
+    }
+
+    /// The geometric albedo in B, V and R the solves are taken for, as
+    /// `maturity_the_solve_on_the_exposed_albedos_gives_p` takes it.
+    const TARGET: [f64; 3] = [0.10, 0.12, 0.14];
+
+    /// What the solve's tests and the golden read of a world: its class fractions, its mix, and its
+    /// halo-free and haloed scales for [`TARGET`].
+    struct HaloWorld {
+        name: &'static str,
+        field: &'static CoarseField,
+        fractions: ClassFractions,
+        mix: MaturityMix,
+        halo_free: AlbedoScale,
+        haloed: AlbedoScale,
+    }
+
+    /// The [`halo_fields`]' [`HaloWorld`]s, computed once per test process: the class fractions
+    /// are the costly part.
+    fn halo_worlds() -> &'static [HaloWorld] {
+        static WORLDS: OnceLock<Vec<HaloWorld>> = OnceLock::new();
+        WORLDS.get_or_init(|| {
+            halo_fields()
+                .into_iter()
+                .map(|(name, field)| {
+                    let header = field.header();
+                    let synth = Synthesiser::new(field, SEED);
+                    let fractions = class_fractions(&synth, &mut SynthCache::new())
+                        .expect("a coarse field holds every cell");
+                    let mix = maturity_mix(&synth).expect("the field carries a maturity");
+                    let exposure = GroundExposure::of_header(header);
+                    let palette = header.palette();
+                    let halo_free = exposed_albedo_scale(&fractions, palette, exposure, TARGET)
+                        .expect("the world names its ground");
+                    let haloed = haloed_albedo_scale(&fractions, palette, exposure, &mix, TARGET)
+                        .expect("the world names its ground");
+                    HaloWorld {
+                        name,
+                        field,
+                        fractions,
+                        mix,
+                        halo_free,
+                        haloed,
+                    }
+                })
+                .collect()
+        })
+    }
+
+    /// The inverse halo is [`halo_share`]'s inverse, to 10⁻¹², across (0, 1] for a small crater's
+    /// end and coarse craters' (1 + a), and 1 at a share of 1.
+    #[test]
+    fn maturity_halo_reach_inverts_the_halo() {
+        let (_, a) = rim_radii_from(
+            young_crater().header(),
+            &young_crater().craters()[0],
+            one_crater_centre(),
+        );
+        for end in [HALO_EXTENT_RIM_RADII, 1.0 + a, 1.3, 2.543, 1.0] {
+            assert_same_bits(halo_reach(1.0, end), 1.0);
+            let mut previous = 1.0;
+            for k in 0..=2_000_u32 {
+                let s = if k == 0 {
+                    1e-300
+                } else {
+                    f64::from(k) / 2_000.0
+                };
+                let x = halo_reach(s, end);
+                assert!((1.0..=end).contains(&x), "end {end}, s {s}: {x}");
+                let back = halo_share(x, end);
+                if end > 1.0 {
+                    assert!((back - s).abs() < 1e-12, "end {end}, s {s}: {back}");
+                }
+                if k > 0 {
+                    assert!(x <= previous, "end {end}: {x} at {s} after {previous}");
+                }
+                previous = x;
+            }
+            // The end at a share falling to 0.
+            assert!((halo_reach(1e-300, end) - end).abs() < 1e-12 * end, "{end}");
+        }
+    }
+
+    /// The scheme's counts: 192 age nodes on 24 graded panels whose weights sum to 1, and 52
+    /// deficit edges, 0, the 20 halvings from 2⁻²⁴ and the 31 steps of 1/32 to 1, each split in
+    /// two when the bins are.
+    #[test]
+    fn maturity_mix_scheme_has_the_ruled_nodes() {
+        let ages = age_nodes(1);
+        assert_eq!(ages.len(), 192);
+        let total = ages.iter().fold(0.0, |sum, &(_, w)| sum + w);
+        assert!((total - 1.0).abs() < 1e-15, "{total}");
+        assert!(ages.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        assert!(ages[0].0 > 0.0 && ages[0].0 < 1.0 / f64::from(1_u32 << 23));
+        assert!(ages[191].0 < 1.0);
+        assert_eq!(age_nodes(2).len(), 384);
+        let edges = deficit_edges(1);
+        assert_eq!(edges.len(), 52);
+        assert_same_bits(edges[0], 0.0);
+        for (k, &e) in edges[1..=20].iter().enumerate() {
+            let halvings = 24 - u32::try_from(k).unwrap();
+            assert_same_bits(e, 1.0 / f64::from(1_u32 << halvings));
+        }
+        for (j, &e) in (2..=32_u32).zip(&edges[21..]) {
+            assert_same_bits(e, f64::from(j) / 32.0);
+        }
+        let split = deficit_edges(2);
+        assert_eq!(split.len(), 103);
+        for (k, &e) in edges.iter().enumerate() {
+            assert_same_bits(split[2 * k], e);
+        }
+        assert!(split.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    /// The mix is a distribution over the body's maturity: positive weights summing to 1 within
+    /// 10⁻¹², nodes in [0, `m_body`] in falling maturity, the first `m_body` where the atom holds,
+    /// and a share above a deficit that is 0 from `m_body` on and never rises, on every world.
+    #[test]
+    fn maturity_mix_is_a_distribution_over_the_body_s_maturity() {
+        for world in halo_worlds() {
+            let (name, mix) = (world.name, &world.mix);
+            let body = world.field.header().maturity().unwrap();
+            assert_same_bits(mix.body(), body);
+            let nodes = mix.nodes();
+            assert!(
+                !nodes.is_empty() && nodes.len() <= 52,
+                "{name}: {}",
+                nodes.len()
+            );
+            let total = nodes.iter().fold(0.0, |sum, n| sum + n.weight());
+            assert!((total - 1.0).abs() < 1e-12, "{name}: {total}");
+            for node in nodes {
+                assert!(
+                    node.weight() > 0.0 && node.weight() <= 1.0,
+                    "{name}: {node:?}"
+                );
+                assert!((0.0..=body).contains(&node.maturity()), "{name}: {node:?}");
+            }
+            assert!(
+                nodes
+                    .windows(2)
+                    .all(|pair| pair[0].maturity() > pair[1].maturity()),
+                "{name}"
+            );
+            assert!(nodes.len() > 1, "{name}: its young craters leave deficits");
+            assert_same_bits(mix.share_above(body), 0.0);
+            assert_same_bits(mix.share_above(2.0), 0.0);
+            let mut previous = mix.share_above(0.0);
+            assert!((0.0..=1.0).contains(&previous), "{name}: {previous}");
+            for k in 1..=4_000_u32 {
+                let d = body * f64::from(k) / 4_000.0;
+                let share = mix.share_above(d);
+                assert!(
+                    share <= previous && share >= 0.0,
+                    "{name}: {share} at {d} after {previous}"
+                );
+                previous = share;
+            }
+            for &e in &deficit_edges(1) {
+                let share = mix.share_above(body * e);
+                assert!((0.0..=1.0).contains(&share), "{name}: {share}");
+            }
+        }
+    }
+
+    /// The mix is the same twice, and the same under another detail seed, to the bit: a function
+    /// of the header and the coarse list alone, on the weathered Moon-like world (the small
+    /// craters' octaves) and the young single crater (the coarse list).
+    #[test]
+    fn maturity_mix_is_the_same_twice_and_under_any_seed() {
+        let node_bits = |mix: &MaturityMix| -> Vec<(u64, u64)> {
+            mix.nodes()
+                .iter()
+                .map(|n| (bits(n.maturity()), bits(n.weight())))
+                .collect()
+        };
+        for field in [weathered_moon(), basalt_crater()] {
+            let once = maturity_mix(&Synthesiser::new(field, SEED)).unwrap();
+            let twice = maturity_mix(&Synthesiser::new(field, SEED)).unwrap();
+            let other = maturity_mix(&Synthesiser::new(
+                field,
+                hyperion_base::rng::DetailSeed::new(0x5eed_0000_0000_0051),
+            ))
+            .unwrap();
+            assert_eq!(node_bits(&once), node_bits(&twice));
+            assert_eq!(node_bits(&once), node_bits(&other));
+            assert_eq!(once, other);
+            for d in DEFICITS {
+                assert_same_bits(once.share_above(d), other.share_above(d));
+            }
+        }
+    }
+
+    /// A share of the ground in each of `classes` of entry 0, and in an unnamed form, the shares
+    /// summing to 1.
+    fn hand_fractions(classes: &[MaterialClass]) -> ClassFractions {
+        ClassFractions::new(
+            classes
+                .iter()
+                .enumerate()
+                .map(|(k, &class)| {
+                    let k = u32::try_from(k).unwrap();
+                    (GroundMaterial::of(class, Some(0)), f64::from(k + 2))
+                })
+                .chain([(GroundMaterial::of(MaterialClass::Regolith, None), 1.0)]),
+        )
+        .unwrap()
+    }
+
+    /// The identity, to the bit: no maturity gives no mix; a maturity where no crater leaves a
+    /// deficit (no crater density and no coarse crater, an old coarse crater no fresher than the
+    /// ground, or a maturity of 0 on cratered ground) gives one node, `m_body`, of weight 1, and
+    /// the haloed solve is `exposed_albedo_scale`'s; and a palette whose every material is
+    /// maturity-independent (an entry of `FeO_T` `None` or 0, `Melt`) solves as
+    /// `exposed_albedo_scale` on a cratered, weathered world.
+    #[test]
+    fn maturity_mix_is_the_identity_where_no_crater_leaves_a_deficit() {
+        for &w in SyntheticWorld::ALL {
+            let field = world(w);
+            assert_eq!(field.header().maturity(), None);
+            assert!(
+                maturity_mix(&Synthesiser::new(field, SEED)).is_none(),
+                "{w:?}"
+            );
+        }
+        let radius = Metres::new(1.7374e6);
+        let fields = [
+            on_basalt(FieldBuilder::new(radius))
+                .maturity(1.0)
+                .weathering_rate(1.0)
+                .build(),
+            on_basalt(one_crater_builder(Gigayears::new(3.9), 0))
+                .maturity(0.6)
+                .weathering_rate(1.0)
+                .build(),
+            on_basalt(moon_like_builder())
+                .maturity(0.0)
+                .weathering_rate(1.0)
+                .build(),
+        ];
+        let forms = [
+            MaterialClass::Regolith,
+            MaterialClass::Bedrock,
+            MaterialClass::Sand,
+            MaterialClass::Melt,
+        ];
+        let fractions = hand_fractions(&forms);
+        for field in &fields {
+            let header = field.header();
+            let mix = maturity_mix(&Synthesiser::new(field, SEED)).unwrap();
+            let body = header.maturity().unwrap();
+            assert_eq!(
+                mix.nodes()
+                    .iter()
+                    .map(|n| (bits(n.maturity()), bits(n.weight())))
+                    .collect::<Vec<_>>(),
+                [(bits(body), bits(1.0))]
+            );
+            let exposure = GroundExposure::of_header(header);
+            let palette = header.palette();
+            let haloed = haloed_albedo_scale(&fractions, palette, exposure, &mix, TARGET).unwrap();
+            let halo_free = exposed_albedo_scale(&fractions, palette, exposure, TARGET).unwrap();
+            assert_eq!(haloed, halo_free);
+            assert_same_bits(haloed.scale(), halo_free.scale());
+            assert_same_bits(haloed.halo_excess_v(), 0.0);
+        }
+        // Maturity-independent ground on the cratered, weathered Moon-like world.
+        let mix = &halo_worlds()[0].mix;
+        assert!(mix.nodes().len() > 1);
+        let without_iron = |key: &str, feo: Option<f64>| PaletteEntry {
+            substance: SubstanceKey::new(key).unwrap(),
+            feo_mass_fraction: feo,
+            ..basalt_fe()
+        };
+        let palette = MaterialPalette::new(vec![
+            without_iron("basalt_a", None),
+            without_iron("basalt_b", Some(0.0)),
+            ice("H2O", PaletteRole::Ice, 0.8),
+        ])
+        .unwrap();
+        let fractions = ClassFractions::new([
+            (GroundMaterial::of(MaterialClass::Regolith, Some(0)), 3.0),
+            (GroundMaterial::of(MaterialClass::Bedrock, Some(1)), 2.0),
+            (GroundMaterial::of(MaterialClass::Glacier, Some(2)), 1.0),
+            (GroundMaterial::of(MaterialClass::Frost, Some(2)), 1.0),
+            (GroundMaterial::of(MaterialClass::Melt, Some(0)), 0.5),
+        ])
+        .unwrap();
+        let exposure = GroundExposure::NONE.with_maturity(mix.body());
+        let haloed = haloed_albedo_scale(&fractions, &palette, exposure, mix, TARGET).unwrap();
+        let halo_free = exposed_albedo_scale(&fractions, &palette, exposure, TARGET).unwrap();
+        assert_eq!(haloed, halo_free);
+        assert_same_bits(haloed.halo_excess_v(), 0.0);
+        // And `Melt` of an iron-bearing entry beside them.
+        let palette = MaterialPalette::new(vec![basalt_fe()]).unwrap();
+        let fractions = hand_fractions(&[MaterialClass::Melt]);
+        let haloed = haloed_albedo_scale(&fractions, &palette, exposure, mix, TARGET).unwrap();
+        let halo_free = exposed_albedo_scale(&fractions, &palette, exposure, TARGET).unwrap();
+        assert_eq!(haloed, halo_free);
+    }
+
+    /// The rim deficit of `field`'s one coarse crater, δ₀ = g `f_ex` (`m_body` −
+    /// `maturity_after`(`t_c`, k)), its rim radius, metres, and its halo's end, 1 + a.
+    fn coarse_rim(field: &CoarseField) -> (f64, f64, f64) {
+        let header = field.header();
+        let crater = &field.craters()[0];
+        let (body, rate) = (
+            header.maturity().unwrap(),
+            header.weathering_rate().unwrap(),
+        );
+        let fresh = kept_relief(crater)
+            * excavated_share(header.surface_age(), crater.age, crater.diameter);
+        let deficit = deficit_of(body, crater.age, rate, fresh);
+        let (_, a) = rim_radii_from(header, crater, crater.centre);
+        (deficit, 0.5 * crater.diameter.value(), 1.0 + a)
+    }
+
+    /// The body's area as the mix takes it: its cells' areas summed in index order.
+    fn body_area(field: &CoarseField) -> f64 {
+        let level = field.header().level();
+        let figure = field.header().figure();
+        (0..level.cell_count()).fold(0.0, |sum, index| {
+            sum + cell_area(cell_at_index(level.get(), index).unwrap(), &figure).value()
+        })
+    }
+
+    /// The geometric albedo in V of `material` drawn at maturity `m` under the scale `scale`,
+    /// G(m) = x (2 + L(x)) ÷ 3, x its scaled V and L its law's limb parameter (the brute force's).
+    fn drawn_g(
+        material: Material,
+        palette: &MaterialPalette,
+        exposure: GroundExposure,
+        m: f64,
+        scale: f64,
+    ) -> f64 {
+        let p = exposed_properties(material, palette, exposure.with_maturity(m)).unwrap();
+        let x = scaled_normal_albedo(&p, scale)[1];
+        x * (2.0 + p.phase_law().limb_parameter(x)) / 3.0
+    }
+
+    /// One coarse crater, the small craters' density 0: the share above d is the halo's disc out
+    /// to x*(d ÷ δ₀) over the body's area, to 10⁻¹², below the rim deficit δ₀, and 0 beyond; and
+    /// each form's excess over the mix at a fixed scale, Σ w G(m) ÷ G(`m_body`) − 1, is the direct
+    /// radial integral of G(`m_local`(x)) ÷ G(`m_body`) − 1 over the halo's area to 0.5%.
+    #[test]
+    fn maturity_mix_of_one_coarse_crater_is_its_halo_s_closed_form() {
+        /// The midpoints of the direct radial integral.
+        const STEPS: u32 = 10_000;
+        let field = basalt_crater();
+        let header = field.header();
+        let mix = maturity_mix(&Synthesiser::new(field, SEED)).unwrap();
+        let (deficit, rim_m, end) = coarse_rim(field);
+        let area = body_area(field);
+        let body = header.maturity().unwrap();
+        assert!(deficit > 0.5 && deficit < body, "{deficit}");
+        for k in 0..=1_000_u32 {
+            let d = deficit * f64::from(k) / 1_000.0;
+            let got = mix.share_above(d);
+            if k < 1_000 {
+                let share = if k == 0 { 1e-300 } else { d / deficit };
+                let reach = halo_reach(share, end) * rim_m;
+                let want = core::f64::consts::PI * reach * reach / area;
+                assert!(
+                    (got / want - 1.0).abs() < 1e-12,
+                    "{d}: {got} against {want}"
+                );
+            } else {
+                assert_same_bits(got, 0.0);
+            }
+        }
+        for d in [deficit * (1.0 + 1e-12), 0.7, body] {
+            assert_same_bits(mix.share_above(d), 0.0);
+        }
+        // The excess, form by form, at the entry's own albedo (c = 1).
+        let palette = header.palette();
+        let exposure = GroundExposure::of_header(header);
+        let crater = &field.craters()[0];
+        let rate = header.weathering_rate().unwrap();
+        let fresh = kept_relief(crater)
+            * excavated_share(header.surface_age(), crater.age, crater.diameter);
+        let mut checked = 0;
+        for &class in MaterialClass::ALL {
+            let material = Material::new(class, 0).unwrap();
+            let g = |m: f64| drawn_g(material, palette, exposure, m, 1.0);
+            let at_body = g(body);
+            let mixed = mix
+                .nodes()
+                .iter()
+                .fold(0.0, |sum, n| sum + n.weight() * g(n.maturity()))
+                / at_body
+                - 1.0;
+            let dx = end / f64::from(STEPS);
+            let mut direct = 0.0;
+            for i in 0..STEPS {
+                let x = dx * (f64::from(i) + 0.5);
+                let share = fresh * halo_share(x, end);
+                let local = less(body, deficit_of(body, crater.age, rate, share));
+                direct += (g(local) / at_body - 1.0) * 2.0 * x * dx;
+            }
+            let direct = direct * core::f64::consts::PI * rim_m * rim_m / area;
+            eprintln!("one crater, {class:?}: the mix's excess {mixed:.6e}, direct {direct:.6e}");
+            if class == MaterialClass::Melt {
+                assert_same_bits(mixed, 0.0);
+                continue;
+            }
+            assert!(direct > 0.0, "{class:?}: {direct}");
+            assert!(
+                (mixed / direct - 1.0).abs() < 0.005,
+                "{class:?}: the mix's {mixed} against the direct {direct}"
+            );
+            checked += 1;
+        }
+        assert!(checked > 5, "{checked}");
+    }
+
+    /// The haloed solve: on every world the haloed scale is at most the halo-free one, and below it
+    /// where the stated excess is positive, the V residual is under 10⁻⁹ relative, and the
+    /// halo-free solve states no excess.
+    #[test]
+    fn maturity_the_haloed_scale_is_below_the_halo_free_one() {
+        for world in halo_worlds() {
+            let (name, haloed, free) = (world.name, &world.haloed, &world.halo_free);
+            eprintln!(
+                "{name}: halo-free scale {:.6}, haloed {:.6}, stated excess {:.4}%; {} nodes",
+                free.scale(),
+                haloed.scale(),
+                100.0 * haloed.halo_excess_v(),
+                world.mix.nodes().len()
+            );
+            assert_same_bits(free.halo_excess_v(), 0.0);
+            assert!(haloed.halo_excess_v() >= 0.0, "{name}: {haloed:?}");
+            assert!(haloed.scale() <= free.scale(), "{name}");
+            if haloed.halo_excess_v() > 0.0 {
+                assert!(haloed.scale() < free.scale(), "{name}");
+            }
+            assert!(
+                haloed.relative_residual()[1].abs() < 1e-9,
+                "{name}: {haloed:?}"
+            );
+            assert!(free.relative_residual()[1].abs() < 1e-9, "{name}: {free:?}");
+        }
+        assert!(
+            halo_worlds()[1].haloed.halo_excess_v() > 0.01,
+            "the 3.5 Gyr ground's haloes brighten it"
+        );
+    }
+
+    // ---- The golden: `tests/golden/material/halo.golden` (`material/golden.rs` counts it) ----
+
+    /// The halo golden's text: the inverse halo on a grid, and on each of [`halo_worlds`] the mix's
+    /// nodes and weights, the shares above 0.05, 0.2 and 0.5, and the halo-free and haloed scales
+    /// with the stated excess.
+    fn halo_text() -> String {
+        let mut out = GoldenWriter::new();
+        out.header(crate::generator_version());
+        out.line("halo_reach: s <share> end <end>");
+        for s in [1e-12, 0.01, 0.1, 0.3, 0.5, 0.9, 0.999, 1.0] {
+            for end in [1.0, 1.3, 2.543, 10.0] {
+                out.f64(&format!("s {s} end {end}"), halo_reach(s, end));
+            }
+        }
+        for world in halo_worlds() {
+            let mix = &world.mix;
+            out.line(&format!(
+                "mix {}: m_body {}, {} nodes: <maturity> <weight>",
+                world.name,
+                hex(mix.body()),
+                mix.nodes().len()
+            ));
+            for node in mix.nodes() {
+                out.line(&format!(
+                    "  {} {}",
+                    hex(node.maturity()),
+                    hex(node.weight())
+                ));
+            }
+            for d in DEFICITS {
+                out.f64(&format!("  share_above {d}"), mix.share_above(d));
+            }
+            out.f64("  scale halo-free", world.halo_free.scale());
+            out.f64("  scale haloed", world.haloed.scale());
+            out.f64("  halo_excess_v", world.haloed.halo_excess_v());
+        }
+        out.finish()
+    }
+
+    #[test]
+    fn maturity_halo_matches_its_golden() {
+        golden!("material/halo", &halo_text());
+    }
+
     /// The tests that read the clock, which the browser target cannot.
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     mod native_only {
@@ -2480,6 +3795,55 @@ mod tests {
                      patch",
                     1e6 * lone,
                     1e6 * baked
+                );
+            }
+        }
+
+        /// The mix's and the haloed solve's cost (decision-r10-t1c-halo's test 11):
+        /// `maturity_mix` and `haloed_albedo_scale` on each world, beside `class_fractions` and
+        /// `exposed_albedo_scale` on the same world, each the best of three, printed.
+        #[test]
+        #[ignore = "measurement, run by hand with --nocapture: the mix's and the solve's cost"]
+        fn maturity_mix_s_and_the_haloed_solve_s_time() {
+            let best = |mut run: Box<dyn FnMut() + '_>| {
+                (0..3)
+                    .map(|_| {
+                        let start = Instant::now();
+                        run();
+                        start.elapsed().as_secs_f64()
+                    })
+                    .fold(f64::INFINITY, |a, b| if b < a { b } else { a })
+            };
+            for (name, field) in halo_fields() {
+                let header = field.header();
+                let (palette, exposure) = (header.palette(), GroundExposure::of_header(header));
+                let synth = Synthesiser::new(field, SEED);
+                let fractions = class_fractions(&synth, &mut SynthCache::new()).unwrap();
+                let mix = maturity_mix(&synth).unwrap();
+                let classes = best(Box::new(|| {
+                    assert!(class_fractions(&synth, &mut SynthCache::new()).is_ok());
+                }));
+                let mixing = best(Box::new(|| assert!(maturity_mix(&synth).is_some())));
+                let haloed = best(Box::new(|| {
+                    assert!(
+                        haloed_albedo_scale(&fractions, palette, exposure, &mix, TARGET).is_ok()
+                    );
+                }));
+                let alone = best(Box::new(|| {
+                    assert!(exposed_albedo_scale(&fractions, palette, exposure, TARGET).is_ok());
+                }));
+                let small: usize = mix.law.octaves.iter().map(|o| o.haloes.len()).sum();
+                eprintln!(
+                    "{name}: class_fractions {:.1} ms, maturity_mix {:.1} ms ({small} small \
+                     haloes in {} octaves, {} nodes), haloed_albedo_scale {:.2} ms, \
+                     exposed_albedo_scale {:.3} ms ({} materials)",
+                    1e3 * classes,
+                    1e3 * mixing,
+                    mix.law.octaves.len(),
+                    mix.nodes().len(),
+                    1e3 * haloed,
+                    1e3 * alone,
+                    fractions.shares().len()
                 );
             }
         }

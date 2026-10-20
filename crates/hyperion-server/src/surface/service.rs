@@ -22,7 +22,7 @@ use hyperion_sim::units::Metres;
 use hyperion_surface::field::{CoarseField, CoarseLevel, FieldView, coarse_level};
 use hyperion_surface::material::{
     GroundExposure, SolveAlbedoScaleError, THIN_ATMOSPHERE_PRESSURE, class_fractions,
-    exposed_albedo_scale,
+    exposed_albedo_scale, haloed_albedo_scale, maturity_mix,
 };
 use hyperion_surface::synth::{SynthCache, Synthesiser};
 use tokio::sync::watch;
@@ -596,8 +596,19 @@ fn compute(
 /// albedos at the same exposure. Without either, it is solved on the palette's albedos as they
 /// are, as before.
 ///
+/// Where the header carries a maturity and a weathering rate, the scale is solved over the body's
+/// maturity mix ([`maturity_mix`], from the field's [`Synthesiser`]: its young craters' haloes,
+/// the coarse list's and the small craters' octaves', in closed form), each material a term at
+/// each of the mix's maturities ([`haloed_albedo_scale`]; decision-r10-t1c-halo R1), so that the
+/// body's drawn mean brightness, its ground drawn at each point's own maturity, stays its p: at
+/// `m_body` alone a young body would be drawn about 5% brighter (5.2% and 5.7% on the testing
+/// Moon-like world at 3.5 and 1 Gyr, plan R10's Risks). Where no crater leaves a
+/// deficit, or a material's albedo does not move with the maturity, the solve is the halo-free one
+/// to the bit; without a maturity it is [`exposed_albedo_scale`] as above.
+///
 /// It reads every cell, about 20 µs each (provisional: R10's Risks, "Deviations in T10.a, as
-/// built"), and runs on the pool with the pass.
+/// built"), and the mix some tens of milliseconds more (R10's Risks, "Deviations in T1.c's halo
+/// follow-up, as built"), and runs on the pool with the pass.
 ///
 /// # Panics
 ///
@@ -622,12 +633,16 @@ pub fn field_albedo_scale(
     let synth = Synthesiser::new(field, detail);
     let fractions = class_fractions(&synth, &mut SynthCache::new())
         .expect("a coarse field holds every cell its classes read");
-    match exposed_albedo_scale(
-        &fractions,
+    let (palette, exposure, target) = (
         header.palette(),
         GroundExposure::of_header(header),
         [p.b, p.v, p.r],
-    ) {
+    );
+    let solved = match maturity_mix(&synth) {
+        Some(mix) => haloed_albedo_scale(&fractions, palette, exposure, &mix, target),
+        None => exposed_albedo_scale(&fractions, palette, exposure, target),
+    };
+    match solved {
         Ok(scale) => Some(scale.scale()),
         Err(SolveAlbedoScaleError::NoNamedGround) => None,
         Err(
@@ -815,8 +830,14 @@ mod tests {
     use hyperion_sim::planetary::surface::{CoarseInputs, reference};
     use hyperion_sim::planetary::{DecodeBodyIndexError, SystemContext, generate};
     use hyperion_sim::time::UniverseTime;
-    use hyperion_sim::units::{Kelvin, Pascals};
+    use hyperion_sim::units::{
+        Gigayears, Kelvin, MetresPerSecondSquared, Pascals, PerSquareKilometre,
+    };
     use hyperion_sim::{GENERATOR_VERSION, Seed};
+    use hyperion_surface::craters::{
+        CraterParams, CraterParamsParts, LUNAR_PROJECTILE_DENSITY, LUNAR_TARGET, SOLAR_SYSTEM_AGE,
+        Screening,
+    };
     use hyperion_surface::field::{
         Cover, CoverRange, MaterialPalette, MechanicsFamily, PaletteEntry, PaletteRole,
         ResolutionCode,
@@ -1814,8 +1835,40 @@ mod tests {
     }
 
     /// A small airless field whose one crust is an iron-bearing basalt (`FeO_T` 0.16), at
-    /// `maturity` with the Moon's weathering rate, or with neither.
+    /// `maturity` with the Moon's weathering rate, or with neither; it has no crater.
     fn weathering_field(maturity: Option<f64>) -> CoarseField {
+        let builder = weathering_builder();
+        match maturity {
+            Some(m) => builder.maturity(m).weathering_rate(1.0).build(),
+            None => builder.build(),
+        }
+    }
+
+    /// [`weathering_field`] weathered as the Moon is, at maturity 1 and the Moon's rate, on a
+    /// young surface, 1 Gyr old, cratered at the lunar chronology's N(>1 km) there, 8.4 × 10⁻⁴ per
+    /// km², so that its young small craters' haloes leave deficits.
+    fn cratered_weathering_field() -> CoarseField {
+        let craters = CraterParams::new(CraterParamsParts {
+            n_1km: PerSquareKilometre::new(8.4e-4),
+            screening: Screening::None,
+            gravity: MetresPerSecondSquared::new(1.62),
+            k_target: 1.0,
+            impact_velocity: None,
+            projectile_density: LUNAR_PROJECTILE_DENSITY,
+            target: LUNAR_TARGET,
+            system_age: SOLAR_SYSTEM_AGE,
+        })
+        .unwrap();
+        weathering_builder()
+            .crater_params(craters)
+            .surface_age(Gigayears::new(1.0))
+            .maturity(1.0)
+            .weathering_rate(1.0)
+            .build()
+    }
+
+    /// The builder of [`weathering_field`], with neither a maturity nor craters.
+    fn weathering_builder() -> FieldBuilder {
         let crust = PaletteEntry {
             substance: SubstanceKey::new("basalt_fe").unwrap(),
             role: PaletteRole::PrimaryCrust,
@@ -1827,14 +1880,10 @@ mod tests {
             liquid: None,
             feo_mass_fraction: Some(0.16),
         };
-        let builder = FieldBuilder::new(Metres::new(300e3))
+        FieldBuilder::new(Metres::new(300e3))
             .surface_pressure(Pascals::ZERO)
             .palette(MaterialPalette::new(vec![crust]).unwrap())
-            .crust_palette([Some(0); 4]);
-        match maturity {
-            Some(m) => builder.maturity(m).weathering_rate(1.0).build(),
-            None => builder.build(),
-        }
+            .crust_palette([Some(0); 4])
     }
 
     /// The scale is solved on the albedos the header's exposure gives (R10.T1.c's shared solve,
@@ -1899,6 +1948,67 @@ mod tests {
             GroundExposure::of_header(young_field.header()),
         );
         assert_eq!(young_shared.to_bits(), fresh.to_bits());
+    }
+
+    /// The scale counts the young craters' haloes (decision-r10-t1c-halo R1): on a cratered,
+    /// weathered field it is `haloed_albedo_scale` over the field's maturity mix on the same
+    /// fractions, to the bit, and below `exposed_albedo_scale`'s, since the haloes' fresher ground
+    /// is brighter; with no maturity, and with a maturity but no crater, it is the halo-free solve
+    /// to the bit.
+    #[test]
+    fn a_field_s_albedo_scale_counts_its_young_craters_haloes() {
+        let detail = detail_seed(Seed::new(SEED), system().1[0]);
+        let photometry = photometry_in(SurfaceState::Airless, Pascals::ZERO);
+        let p = photometry.geometric_albedo();
+        let target = [p.b, p.v, p.r];
+        let section = Section::Ok(photometry);
+        let field = cratered_weathering_field();
+        let synth = Synthesiser::new(&field, detail);
+        let fractions = class_fractions(&synth, &mut SynthCache::new()).unwrap();
+        let mix = maturity_mix(&synth).expect("the field carries a maturity and a rate");
+        assert!(mix.nodes().len() > 1, "{:?}", mix.nodes());
+        let (palette, exposure) = (
+            field.header().palette(),
+            GroundExposure::of_header(field.header()),
+        );
+        let haloed = haloed_albedo_scale(&fractions, palette, exposure, &mix, target).unwrap();
+        let halo_free = exposed_albedo_scale(&fractions, palette, exposure, target).unwrap();
+        let served = field_albedo_scale(&field, &section, detail)
+            .expect("a weathered airless field of named ground has a scale");
+        assert_eq!(served.to_bits(), haloed.scale().to_bits());
+        assert!(haloed.halo_excess_v() > 0.0, "{haloed:?}");
+        assert!(
+            served < halo_free.scale(),
+            "{served} against {}",
+            halo_free.scale()
+        );
+        // No maturity: no mix, and the fresh solve.
+        let none = weathering_field(None);
+        let synth = Synthesiser::new(&none, detail);
+        assert!(maturity_mix(&synth).is_none());
+        let fractions = class_fractions(&synth, &mut SynthCache::new()).unwrap();
+        let fresh = albedo_scale(&fractions, none.header().palette(), target).unwrap();
+        assert_eq!(
+            field_albedo_scale(&none, &section, detail).map(f64::to_bits),
+            Some(fresh.scale().to_bits())
+        );
+        // A maturity but no crater: one node, and the halo-free solve.
+        let bare = weathering_field(Some(1.0));
+        let synth = Synthesiser::new(&bare, detail);
+        let mix = maturity_mix(&synth).unwrap();
+        assert_eq!(mix.nodes().len(), 1);
+        let fractions = class_fractions(&synth, &mut SynthCache::new()).unwrap();
+        let halo_free = exposed_albedo_scale(
+            &fractions,
+            bare.header().palette(),
+            GroundExposure::of_header(bare.header()),
+            target,
+        )
+        .unwrap();
+        assert_eq!(
+            field_albedo_scale(&bare, &section, detail).map(f64::to_bits),
+            Some(halo_free.scale().to_bits())
+        );
     }
 
     /// A field of a generator version this build does not generate is refused.
