@@ -1,8 +1,10 @@
 //! R09.T12.d's tests of the coarse craters (Design notes 5, 10, 12 and 13; R09.T7.c's and T8's
 //! contract for T12.d).
 
-use hyperion_surface::craters::{crater_shape, cumulative_density};
+use hyperion_surface::craters::{SOLAR_SYSTEM_AGE, crater_shape, cumulative_density};
 use hyperion_surface::field::{CoarseField, FieldView, ResolutionCode, coarse_level};
+use hyperion_surface::synth::craters::{VISIBILITY_COEFFICIENT, diffusion_length};
+use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::stats::{ALPHA, assert_poisson_count};
 
 use super::*;
@@ -233,14 +235,43 @@ fn the_list_is_sorted_and_each_reach_complete() {
     assert!(mean < 32.0);
 }
 
+/// The coarse octave of `octaves` whose diameters hold `diameter`.
+fn octave_of(octaves: &[CoarseOctave], diameter: Metres) -> &CoarseOctave {
+    let d = diameter.value();
+    octaves
+        .iter()
+        .find(|o| d >= o.diameters.lower().value() && d < o.diameters.upper().value())
+        .expect("every listed crater is of an octave")
+}
+
+/// (15 ÷ 32)², the share of its fresh relief a crater keeps at the visibility limit where κ is
+/// negligible: (b ÷ (`K_v` + b))² (R09.T7.j).
+const AT_THE_LIMIT: f64 = (15.0 / 32.0) * (15.0 / 32.0);
+
 /// Before degradation, the reference Moon's coarse craters' rim heights are Pike 1980b's
 /// 0.236 D^0.399 km to 1% (USGS Prof. Paper 1046-C, eq. 4, for complex craters); the Pike test is on
 /// the listed craters' fresh shapes, since the coarse elevation holds them filleted over the coarse
-/// band. Their degradation bytes are 0: T7.b's relief factor keeps at least 99.95% of each.
+/// band. Every coarse octave is saturated on its 4.4 Gyr surface, so R09.T7.j's closure wears its
+/// craters uniformly in q from fresh to the visibility limit: every byte is at most 199, the
+/// nearest integer to 255 (1 − (15 ÷ 32)²) = 198.97, and the listed craters' mean g² lies in
+/// 0.21–0.32 (E[g²] 0.2638, g²'s standard deviation 0.236: ±4 standard errors over about 320
+/// craters; `decision-r09-t7ij-refresh.md` Q1.3).
 #[test]
-fn the_moon_s_coarse_rims_are_pike_s_and_near_fresh() {
+fn the_moon_s_coarse_rims_are_pike_s_and_worn_to_equilibrium() {
     let world = World::new(reference::moon_like());
+    let pass = world.pass(reference::SEED);
     let (state, _) = cratered(&world);
+    let octaves = octaves(&pass);
+    for octave in &octaves {
+        assert!(
+            octave.production.value() > octave.saturation.value(),
+            "octave {} is not saturated",
+            octave.index
+        );
+    }
+    let limit = (255.0 * (1.0 - AT_THE_LIMIT)).round();
+    assert_same_bits(limit, 199.0);
+    let mut square = 0.0;
     for crater in &state.craters {
         let shape = crater_shape(world.inputs.craters(), crater.diameter);
         let d_km = crater.diameter.value() / 1e3;
@@ -251,13 +282,72 @@ fn the_moon_s_coarse_rims_are_pike_s_and_near_fresh() {
             "{d_km} km: {rim} m against {pike} m"
         );
         assert_eq!(crater.morphology, shape.morphology());
-        assert_eq!(
-            crater.degradation,
-            0,
-            "{d_km} km at {} Gyr",
-            crater.age.value()
+        assert!(
+            f64::from(crater.degradation) <= limit,
+            "{d_km} km at {} Gyr: byte {}",
+            crater.age.value(),
+            crater.degradation
+        );
+        let wear = CraterWear::of_age(crater.age, &octave_of(&octaves, crater.diameter).wear);
+        assert!(wear.share() <= 1.0 + 1e-12, "{d_km} km: q {}", wear.share());
+        let g = kept_relief(crater);
+        square += g * g;
+    }
+    #[expect(clippy::cast_precision_loss, reason = "a count of craters")]
+    let mean = square / state.craters.len() as f64;
+    eprintln!(
+        "the reference Moon's {} coarse craters: mean g² {mean:.4}, largest byte {:?}",
+        state.craters.len(),
+        state.craters.iter().map(|c| c.degradation).max()
+    );
+    assert!((0.21..=0.32).contains(&mean), "{mean}");
+}
+
+/// On the reference Mars no coarse octave is saturated, so its craters' share q runs to their
+/// octave's production over its saturation, P ÷ S, and no byte exceeds the nearest integer to
+/// 255 (1 − g) at q = P ÷ S with κ at the octave's oldest age (about 105 in the first coarse
+/// octave, P ÷ S near 0.27: R09.T7.j).
+#[test]
+fn the_reference_mars_s_coarse_craters_are_worn_no_further_than_their_octave_s_production() {
+    let world = World::new(reference::mars_like());
+    let pass = world.pass(reference::SEED);
+    let (state, _) = cratered(&world);
+    let octaves = octaves(&pass);
+    let mut checked = 0;
+    for octave in &octaves {
+        let ratio = octave.production.value() / octave.saturation.value();
+        let reach = num::min(ratio, 1.0);
+        let oldest = diffusion_length(octave.wear.window());
+        let mut largest = 0;
+        for crater in state
+            .craters
+            .iter()
+            .filter(|c| octave_of(&octaves, c.diameter).index == octave.index)
+        {
+            let g = relief_factor(crater.diameter * 0.5, CraterWear::new(oldest, reach));
+            let bound = (255.0 * (1.0 - g)).round();
+            assert!(
+                f64::from(crater.degradation) <= bound,
+                "octave {}: {} km byte {} over {bound}",
+                octave.index,
+                crater.diameter.value() / 1e3,
+                crater.degradation
+            );
+            largest = largest.max(crater.degradation);
+            checked += 1;
+        }
+        let lower = relief_factor(
+            octave.diameters.lower() * 0.5,
+            CraterWear::new(oldest, reach),
+        );
+        eprintln!(
+            "Mars octave {}: P ÷ S {ratio:.3}, bound {:.0} at its lower diameter, largest byte \
+             {largest}",
+            octave.index,
+            (255.0 * (1.0 - lower)).round()
         );
     }
+    assert!(checked > 0);
 }
 
 /// The coarse elevation holds each crater as its kept relief times its coarse profile at the chord
@@ -386,22 +476,56 @@ fn the_body_s_area_is_its_spheroid_s() {
     );
 }
 
-/// The degradation byte is the nearest integer to 255 × (1 − g), g T7.b's relief factor of the rim
-/// radius and the age's diffusion length, held to 255: a mid-range byte for a kilometre crater
-/// 3 Gyr old (g about 0.48), none for a fresh one, and 255 where the relief is all but gone.
+/// The degradation byte is the nearest integer to 255 × (1 − g), g the relief factor of the rim
+/// radius and the crater's wear in its octave (R09.T7.j), held to 255: a mid-range byte for a
+/// kilometre crater 3 Gyr old on maria whose octave's production is 0.07 of its saturation, where
+/// κ binds (g about 0.48); 199 for a 50 km crater at the end of a saturated octave's window, the
+/// visibility limit; about 151 halfway through it (q = ½, g 0.407); none for a fresh one; and 255
+/// where the relief is all but gone.
 #[test]
 fn the_degradation_byte_rounds_the_lost_relief() {
+    let saturation = PerSquareKilometre::new(1e-2);
+    let maria = OctaveWear::new(
+        Gigayears::new(3.0),
+        SOLAR_SYSTEM_AGE,
+        saturation * 0.07,
+        saturation,
+    );
     let (d, age) = (Metres::new(1_000.0), Gigayears::new(3.0));
-    let g = relief_factor(d * 0.5, diffusion_length(age));
+    let g = relief_factor(d * 0.5, CraterWear::of_age(age, &maria));
+    assert_same_bits(
+        g,
+        relief_factor(d * 0.5, CraterWear::new(diffusion_length(age), 0.0)),
+    );
     assert!((0.4..0.6).contains(&g), "{g}");
-    let byte = degradation(d, age);
+    let byte = degradation(d, age, &maria);
     assert!(
         (f64::from(byte) - 255.0 * (1.0 - g)).abs() <= 0.5,
         "{byte} for g {g}"
     );
     assert!((100..160).contains(&byte), "{byte}");
-    assert_eq!(degradation(d, Gigayears::ZERO), 0);
-    assert_eq!(degradation(Metres::new(2.0), Gigayears::new(4.5)), 255);
+    assert_eq!(degradation(d, Gigayears::ZERO, &maria), 0);
+    assert_eq!(
+        degradation(Metres::new(2.0), Gigayears::new(3.0), &maria),
+        255
+    );
+    // A saturated octave of 50 km craters on a 4.4 Gyr surface: its window's oldest crater at the
+    // visibility limit, and one at half its window's density halfway there.
+    let capped = OctaveWear::new(
+        Gigayears::new(4.4),
+        SOLAR_SYSTEM_AGE,
+        saturation * 3.0,
+        saturation,
+    );
+    let d = Metres::new(50e3);
+    let oldest = chronology_age(capped.window_density(), SOLAR_SYSTEM_AGE);
+    assert_eq!(degradation(d, oldest, &capped), 199);
+    let middle = chronology_age(capped.window_density() * 0.5, SOLAR_SYSTEM_AGE);
+    let g = relief_factor(d * 0.5, CraterWear::of_age(middle, &capped));
+    let halfway = 0.15 / (0.5 * VISIBILITY_COEFFICIENT + 0.15);
+    assert!((g - halfway * halfway).abs() < 1e-6, "{g}");
+    assert_eq!(degradation(d, middle, &capped), 151);
+    assert_eq!(degradation(d, Gigayears::ZERO, &capped), 0);
 }
 
 /// The unit direction `psi` radians from the unit direction `centre`, towards the azimuth `azimuth`
@@ -597,7 +721,7 @@ fn centre_below_annulus(world: &World, crater: &CoarseCrater, z: &[f64]) -> bool
 /// Gauss–Legendre on 64 panels of each of its pieces, cut at its centre, the cone's base, the
 /// floor's edge, the fillet's ends, the rim and the reach: exact to rounding but for the rule's
 /// own error on a degree-9 integrand, under 10⁻¹³.
-fn analytic_square(profile: &hyperion_surface::synth::craters::CraterProfile) -> f64 {
+pub(crate) fn analytic_square(profile: &hyperion_surface::synth::craters::CraterProfile) -> f64 {
     use crate::planetary::surface::steps::relief::quadrature::gauss_legendre;
     let shape = profile.shape();
     let rim = 0.5 * shape.diameter().value();
@@ -734,6 +858,89 @@ fn measure_r09_t7i_first_octave_depressions() {
             "lone {d_km} km: centre less 1.2–2 R annulus {mean:.0} m (worst {worst:.0} m) over \
              {count} placements; reconstruction residual {residual:.0} m RMS over the reach"
         );
+    }
+}
+
+/// R09.T7.j's figures on the reference worlds, printed for the plan's record, run by hand: each
+/// coarse octave's production over its saturation, its craters' mean g² by the closed form at its
+/// eight diameter nodes ([`OctaveWear::mean_square_relief`]) and the listed craters' (their
+/// bytes'), with the largest byte; and each small octave's (`CraterOctaves::for_body`).
+#[test]
+#[ignore = "measurement: R09.T7.j's wear on the reference worlds, printed"]
+fn measure_r09_t7j_wear() {
+    use crate::tables::gauss_legendre::{GL8_NODES, GL8_WEIGHTS};
+    use hyperion_surface::craters::DiameterOctave;
+    use hyperion_surface::synth::craters::CraterOctaves;
+    let mean_square = |params: &CraterParams, diameters: DiameterOctave, wear: &OctaveWear| {
+        let mut mean = 0.0;
+        for (&node, &weight) in GL8_NODES.iter().zip(&GL8_WEIGHTS) {
+            let share = UnitUniform::new(f64::midpoint(1.0, node)).unwrap();
+            let d = diameter_in_octave(params, diameters, share);
+            mean += 0.5 * weight * wear.mean_square_relief(d * 0.5);
+        }
+        mean
+    };
+    for (name, inputs) in [
+        ("Earth", reference::earth_like()),
+        ("Mars", reference::mars_like()),
+        ("Moon", reference::moon_like()),
+        ("Ceres", reference::ceres_like()),
+    ] {
+        let world = World::new(inputs);
+        let pass = world.pass(reference::SEED);
+        let (state, _) = cratered(&world);
+        let params = world.inputs.craters();
+        let list = octaves(&pass);
+        eprintln!("== {name}: {} coarse craters", state.craters.len());
+        let (mut all_square, mut all_largest) = (0.0, 0);
+        for octave in &list {
+            let listed: Vec<&CoarseCrater> = state
+                .craters
+                .iter()
+                .filter(|c| octave_of(&list, c.diameter).index == octave.index)
+                .collect();
+            let square: f64 = listed.iter().map(|c| kept_relief(c) * kept_relief(c)).sum();
+            all_square += square;
+            let largest = listed.iter().map(|c| c.degradation).max().unwrap_or(0);
+            all_largest = all_largest.max(largest);
+            #[expect(clippy::cast_precision_loss, reason = "a count of craters")]
+            let mean = square / num::max(listed.len() as f64, 1.0);
+            eprintln!(
+                "  coarse {} ({:.0}–{:.0} km): P ÷ S {:.3}, capped {}, E[g²] {:.4}; {} listed, \
+                 mean g² {mean:.4}, largest byte {largest}",
+                octave.index,
+                octave.diameters.lower().value() / 1e3,
+                octave.diameters.upper().value() / 1e3,
+                octave.production.value() / octave.saturation.value(),
+                octave.production.value() > octave.saturation.value(),
+                mean_square(params, octave.diameters, &octave.wear),
+                listed.len()
+            );
+        }
+        #[expect(clippy::cast_precision_loss, reason = "a count of craters")]
+        let mean = all_square / num::max(state.craters.len() as f64, 1.0);
+        eprintln!("  all listed: mean g² {mean:.4}, largest byte {all_largest}");
+        let d_b = boundary_diameter(pass.level(), world.inputs.radius());
+        let small = CraterOctaves::for_body(
+            *params,
+            world.inputs.figure(),
+            d_b,
+            world.inputs.surface_age(),
+        );
+        for octave in small.octaves() {
+            eprintln!(
+                "  small {} ({:.3}–{:.3} km): P ÷ S {:.3}, capped {}, window {:.3} Gyr, E[g²] \
+                 {:.4}, variance {:.4e} m²",
+                octave.index(),
+                octave.diameters().lower().value() / 1e3,
+                octave.diameters().upper().value() / 1e3,
+                octave.production().value() / octave.saturation().value(),
+                octave.is_saturated(),
+                octave.window().value(),
+                mean_square(params, octave.diameters(), octave.wear()),
+                octave.variance().value()
+            );
+        }
     }
 }
 

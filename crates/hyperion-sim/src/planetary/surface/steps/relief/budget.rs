@@ -42,8 +42,9 @@
 //!    whole coarse field, each crater's sharpening scaled with it.
 //! 2. Where s\* ≤ 1, each coarse crater keeps s\* g of its fresh relief, g its kept relief before:
 //!    its degradation byte becomes the nearest integer to 255 (1 − s\* g), at most 255, R09.T12.d's
-//!    wear (T7.b's relief factor) times this crater scale, a stand-in for the large craters'
-//!    unmodelled wear (later impacts and their ejecta, infill, relaxation) set by plan 14's `σ_h`
+//!    wear (the small craters' relief factor, worn to equilibrium by R09.T7.j: the larger of κ's
+//!    diffusion and the octave's closure `K_v` q) times this crater scale, a stand-in for the
+//!    large craters' wear that law leaves out (infill, relaxation) set by plan 14's `σ_h`
 //!    (labelled). Every crater is smoothed in again at its new byte, so that its coarse profile and
 //!    its client-side sharpening stay one profile, and `s_N` solves
 //!    `s_N`² `V_N` + 2 `s_N` K′ + `V_C`′ + `R_inc`′ = T at the new bytes.

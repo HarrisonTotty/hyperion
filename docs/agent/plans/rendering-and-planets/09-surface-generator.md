@@ -264,7 +264,7 @@ pub mod craters {
         peak_radius, exterior_width (a) */ }
     pub fn crater_shape(p: &CraterParams, d: Metres) -> CraterShape;  // Design notes 12, 13
     pub fn diameter_in_octave(p: &CraterParams, octave: Octave, u: UnitUniform) -> Metres;
-    pub fn profile(r_over_radius: f64, crater: &CraterShape, band: BandLevel) -> (f64, f64);
+    // `profile`: in `synth::craters` as built (R09.T7.b), taking the crater's wear (R09.T7.j).
 }
 pub mod cold_trap {                      // T7.d (science-r09-drainage.md §8); T13.f and P14.T51.f
     pub struct DepthRatios;              // log-normal d/D by mean and variance; HAYNE_A, HAYNE_B
@@ -316,6 +316,23 @@ pub mod synth {
         lag: Metres) -> Option<SquareMetres>;              // shorter than λ; R10 reads the
     pub fn unresolved_rms(field: &impl FieldView, cell: PatchKey, resolution: Metres)
         -> Option<Metres>;                                 // level-keyed forms above
+    pub mod craters {                    // R09.T7.b's small craters; their wear by R09.T7.j
+        pub const DEGRADATION_B: f64 = 0.15;               // Minton et al. 2019, eq. 8
+        pub const VISIBILITY_COEFFICIENT: f64 = 0.17;      // K_v: their eq. 7 and Fig. 5
+        pub struct CraterWear;           // its diffusion length and share q: FRESH, new,
+                                         // of_age(age, &OctaveWear), diffusion, share
+        pub struct OctaveWear;           // an octave's window and wear rate: new(surface_age,
+            // system_age, production, saturation), window, window_density,
+            // mean_square_relief(rim_radius), E[g²]
+        pub fn relief_factor(rim_radius: Metres, wear: CraterWear) -> f64;  // max(κt, K_v q)
+        pub fn profile(r_over_radius: f64, crater: &CraterShape, band: Metres,
+            wear: CraterWear) -> ProfileSample;            // band as its half-width
+        impl CraterProfile {
+            pub fn new(shape: CraterShape, band: Metres, wear: CraterWear) -> Self;
+        }
+        impl CraterOctave { pub const fn wear(&self) -> &OctaveWear; }
+        impl SmallCrater { pub const fn wear(&self) -> CraterWear; }
+    }
 }
 pub mod testing {                                          // feature `testing`
     pub enum SyntheticWorld { EarthLike, MarsLike, MoonLike, CeresLike, Flat, OneCrater }
@@ -6056,7 +6073,10 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     the relief factor g_ (main's ruling, 2026-10-13; "Deviations in T7.b, as built"): the fillet
     alone could not degrade a crater far enough, so every profile is scaled by Minton et al.
     2019's g. κ is Fassett and Thomson 2014's 5.5 m² Myr⁻¹, now read in their abstract; its
-    calibration against the slopes stays T8's (T7.b's deferred findings).
+    calibration against the slopes stays T8's (T7.b's deferred findings). _And worn to equilibrium
+    by R09.T7.j_ (2026-10-20): g's K ÷ R² is the larger of κt ÷ R² and Minton et al.'s closure
+    `K_v` q, so a saturated octave's craters run from fresh to the visibility limit, (15 ÷ 32)² of
+    their relief (E[g²] 0.2638), where κ alone left them fresh above a few kilometres.
   - _A province gets the body's crater density._ Design note 13 reads one density per body, so the
     maria would be as cratered as the highlands, and T8's maria band could fail on craters alone.
     The lean of "Physics leans still to rule" (regional ages from the centre cell where the search
@@ -8269,7 +8289,11 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
   - _The coarse craters stay near fresh_ (item 5b): T7.b's relief factor keeps at least 99.95% of
     every coarse crater on the Moon, so every byte is 0. What wears old large craters is not
     modelled: later large impacts and their ejecta (which the list's overlaps represent only where
-    craters overlap), infill, and on warm or icy crusts viscous relaxation.
+    craters overlap), infill, and on warm or icy crusts viscous relaxation. _Resolved by R09.T7.j_
+    (2026-10-20) for the later impacts: the coarse pass wears its craters by the small craters'
+    law, the larger of κ and the equilibrium closure; the reference Moon's bytes run to 199 (every
+    octave saturated, the listed craters' mean g² 0.283) and the reference Mars's to 106 (P ÷ S
+    0.17–0.27). Infill and relaxation stay not modelled.
   - _The draw within a capped octave follows the production's distribution_ (as T7.b's small
     craters), not saturation's, so the octave that straddles 100 km on the Moon holds 289 craters
     above it in expectation, against Trask's cumulative 300.
@@ -8583,14 +8607,20 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     kilometres. Ruled by main: keep as built. R09.T7.i–j (the coarse profile through the central
     peak, and craters worn to equilibrium after Minton et al. 2019) is expected to close these
     misses: main estimates the Moon's share finer than λ_c at about 6% after it. It re-measures
-    T12.e's figures. For T7.b's and T12.d's re-validation before R09.T16's goldens.
+    T12.e's figures. For T7.b's and T12.d's re-validation before R09.T16's goldens. _Resolved by
+    R09.T7.j_ (2026-10-20) on the Moon, 6.31% (4–10%), and Mars, 0.99% (0.3–1%, on its band's
+    edge), both now asserted; Ceres still misses, 2.46% against 3–8% (T7.i–j's deferred findings).
   - _The reference Moon's `s_N` is 0.795, under §2.3.4's 0.8._ As the client renders them, its
     coarse craters (2,298 m RMS with their increase) and small craters (1,064 m) overfill plan 14's
     2.05 km basin share. So s* is 0.789 where main estimated 0.86, and the bytes are 54 where main
     estimated about 35. The coarse craters' cells RMS is 1,848 m, against main's 1,594 m from the
     realised counts. Ruled by main: keep as built, not tuned. The cause is the crater model's
     calibration, which R09.T7.i–j is expected to close, putting the craters' expected relief at
-    about 1.9 km and the Moon's s* back near 1.
+    about 1.9 km and the Moon's s* back near 1. _After R09.T7.i–j_ (2026-10-20): the craters'
+    relief in expectation, rendered, is 1,894 m against plan 14's 2,045 m, and on this seed s* is
+    1.398 and `s_N` 1.948 (`Rule::NonCrater`, its bytes kept), beside the expectation's s* of
+    1.0–1.1, this finding's "back near 1": this seed draws no basin of the 1,481–2,962 km octave
+    (1.0 expected) and 7 of the 370–741 km octave's 16.4 (T7.i–j's deferred findings).
   - _The coarse profile of a crater near `D_b` is inverted_ (main's figures, §2.2.9, not
     re-measured): a 113 km crater's coarse profile stands +2,165 m at its centre and −607 m at its
     rim, where the fresh crater is −1,080 and +1,553 m. For T7.c's and T12.d's re-validation
@@ -8622,6 +8652,11 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     - The suites slow with it: `surface/mod.rs`'s order test goes from about 20 s to about 70 s
       (its eight reference-Earth passes). That test is left as it is: its property needs each pass
       computed in several orders, so one Earth shared across its cases would not hold it.
+    - After R09.T7.j (2026-10-20; the same probes on the lane's desktop, provisional): the entry
+      adds 5.99 s to the reference Earth, 2.70 s to Mars, 0.47 s to the Moon and 0.13 s to Ceres
+      (6.33, 1.78, 0.47 and 0.13 s as built). Mars's bytes now differ where s\* ≤ 1, so its second
+      quadrature reads C′ again, about +0.9 s; reusing N's node values from the first quadrature
+      would save it (`decision-r09-t7ij-refresh.md` Q3: a report item, no bound).
   - _The ice-rich anchor does not reproduce the measurement it rests on_ (a source mismatch with
     `decision-r09-t5.md` item 3 and the plan, from R09.T12.e's science check; for main's ruling).
     - Nimmo and Schenk 2008's Fig. 5a puts Europa's RMS deviation at 1 km at 35–50 m (log₁₀ about
@@ -11204,7 +11239,7 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       moves only its place at a 1 m fillet.
     - _T8's slope probe_ on the Moon-like lid: median slope 5.40° at 17 m (5.43°), RMS height
       differences 248.4 m at 1.9 km (248.4) and 671.1 m at 7.6 km (670.3), against Rosenburg et al.
-      2011's 7.5° and LOLA's 171 and 546 m.
+      2011's 7.5° and R09.T5's LOLA LDEM_16 measurement of 171 and 546 m.
     - _T12.e's figures after T7.i_ (`measure_r09_t12e`). Test 2, the share finer than λ_c ÷ σ_h²
       after the scale: the Moon 22.45% (27.04%; band 4–10%; main's 22.4%), of which the small
       craters 20.81% (22.04%) and the rims' sharpening 1.56% (4.92%); Mars 1.978% (2.255%; 0.3–1%;
@@ -11284,7 +11319,8 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     cone fades, one division and the floor's and the cone's moments; evaluating one takes the term
     on the span alone, where it took it over the whole reach, and the faded cone's term within the
     cone.
-- **Deferred findings (2026-10-13 rule) (R09.T7.i–j)** (recorded, not ruled; T7.i's items).
+- **Deferred findings (2026-10-13 rule) (R09.T7.i–j)** (recorded, not ruled; T7.i's items, then
+  T7.j's).
   - _The cone's kinks_ stay where a fillet stops short of the cone (x₀ ≥ `c_p`): the fresh apex's
     and base's, unfiltered, T7.b's finding, still open there; where the cone fades, their kept share
     p. On the reference Moon every coarse crater to about 2 `D_b` is held at one rim radius (p = 0);
@@ -11306,3 +11342,345 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     level stays dry. For R09.T14.d's re-match.
   - _T7.c's probe of the cells' means_ (up to 0.28–0.35 d on a cell) was taken under the reach-wide
     term and not repeated under the span's; `rims.rs` says so.
+  - _`K_v`: the paper's 0.17 against its eq. 8's 0.163_ (T7.j). Eq. 8 inverted at (d/D)_visible
+    0.050 (Minton et al. 2019, eqs. 9–10, p. 16) gives 0.163; the paper prints 0.17 and its
+    equilibrium model uses it (eq. 30, p. 26), which under eq. 8 puts the limit at d/D 0.048. 0.163
+    would raise a saturated octave's E[g²] 3.5% (0.2730 against 0.2638). Kept as ruled.
+  - _Trask's cap is 2.4 times Minton et al.'s Fit 1 mare equilibrium_ (0.034 D⁻² km⁻², 2.2% of
+    geometric saturation, p. 6, against Trask's 0.079): the cap sets which octaves are saturated and
+    the unsaturated octaves' P ÷ S, so how far T7.j wears Mars's and Ceres's craters. For T7.b's
+    re-validation.
+  - _Plan 14's Mars shares sum to 3.02 km against MOLA's 2.90 km_ (`CONSTRUCTIONAL_RELIEF` is fitted
+    with no basin share), so plan 14's 0.89 km Mars basin share is not MOLA's; the reference Mars's
+    crater term in expectation is 952 m. For P14.T48.a.
+  - _Design note 7's test-2 bands are the plan's own computation_ (7, 5 and 0.6% above `l_N`, from
+    spherical-harmonic models DN7 does not name by product), not a published figure; T12.e's test 2
+    asserts them.
+  - _LOLA's 171 and 546 m_ at 1.9 and 7.6 km, the slope probe's reference, are R09.T5's ruling's own
+    measurement on LDEM_16 (|latitude| < 60°), not a published figure.
+  - _Ceres's test 2 misses after T7.j_: 2.46% of σ_h² against 3–8% (the structural share 0.048%, the
+    small craters 2.151%, the coarse craters' sharpening 0.256%; 7.12% after T7.i, 9.83% as built).
+    Its 25–200 km octaves sit at or near the cap (P ÷ S 1.01 and 1.32, saturated, at 25–100 km,
+    E[g²] 0.264; 0.93 at 100–200 km, E[g²] 0.281), so they take nearly the whole wear (a figure
+    mismatch: the brief estimated P ÷ S 0.85–0.96, E[g²] 0.30 at 25–50 km and 0.27 at 50–100 km),
+    and its crater term in expectation is 895 m against plan 14's 1,872 m basin share, whose
+    `k_comp` is fitted to Ceres's whole non-structural relief, not all of which need be craters
+    (addendum 4, D4.4; Ceres's lack of large craters, Marchi et al. 2016, from memory). For
+    P14.T48.a and T12.d's re-validation.
+  - _The reference Moon's `s_N` on this seed is 1.948_ (s\* 1.398, `Rule::NonCrater`), against about
+    1.1–1.4 (s\* 1.0–1.1) in expectation: the seed draws no basin of the 1,481–2,962 km octave (1.0
+    expected) and 7 of the 370–741 km octave's 16.4, so T12.e's rule stretches the stagnant lid's
+    red field, as on Ceres (2.311). A budget whose crater part followed the realised large-crater
+    draw (σ_h² less the craters' expected share plus the realised one) would remove the stretch and
+    let a body's σ_h vary with its basins, as the Moon's does with South Pole–Aitken; it changes
+    T12.e's rule and plan 14's contract. For T12.e's re-validation and P14.T48.a.
+  - _The uniform q against Minton et al.'s first-order loss_ (their eqs. 11 and 27–28, and the
+    abstracts of Riedel et al. 2020 and Talkington et al. 2022): booked as a first-order rate shared
+    with obliteration, mostly obliteration at the coarse sizes' slopes, the survivors would be
+    fresher (E[g²] 0.36–0.51 at η 2.4–2.8, main's estimate, against the uniform reading's 0.2638; η
+    is the production's local cumulative slope, N(>D) ∝ D^−η, which sets Minton et al.'s eqs. 27–28
+    split, read from the code's Neukum polynomial, addendum 5, E1.6), so the largest, oldest craters
+    may be over-worn; the superposition's missing overprinting may offset it. For T7.j's
+    re-validation, with a measured depth distribution of degraded highland complex craters, none
+    read.
+  - _κ takes the oldest small craters past the visibility limit below about 0.5 km_ (T7.b's κ
+    finding): κτ ÷ R² ≈ 1.0 at 0.27 km on the reference Moon, so its capped octaves of 0.18–0.72 km
+    keep E[g²] 0.026–0.041, against the closure's 0.2638, and below them less: craters equilibrium
+    would have lost, held by a κ applied below its 0.8–5 km calibration. Not changed.
+  - _The lid's metre-scale slopes fall further from Rosenburg et al. 2011's_: the Moon-like lid's
+    median slope at 17 m is 5.03° after T7.j (5.40° after T7.i, 5.43° as built) against the
+    highlands' 7.5°, while its RMS height differences, 177.9 m at 1.9 km and 453.1 m at 7.6 km
+    (248.4 and 671.1 m), now bracket R09.T5's LOLA measurement of 171 and 546 m. The metre-scale
+    slopes are left to T8's calibration, with κ's.
+  - _Nothing pins the coarse craters' degradation bytes before R09.T16_ (the determinism audit):
+    after T7.j they run 0–199, and a one-ulp move of a crater's g near a half-integer of 255 (1 − g)
+    flips one byte; R09.T16's coarse goldens should include a digest of the reference worlds' byte
+    lists.
+  - _The level bound still takes fresh craters_ (T8's finding): its crater terms bound g ≤ 1, so
+    T7.j's wear only loosens them.
+  - _κ is held constant over a system's age_ (T7.b's finding, still deferred): a flux-following rate
+    would degrade a 4 Gyr crater about 18 times more by κ.
+  - _The second quadrature's cost_ (`decision-r09-t7ij-refresh.md` Q3): T7.j's bytes differ on Mars
+    (s\* 0.972), so `scale_bytes` reads C′ again: T12.e's entry costs 2.70 s on the reference Mars
+    after T7.j against 1.78 s as built (provisional; T7.j's record), about main's estimate of +0.6
+    s. For R09.T16, with T12.e's performance finding.
+- **Deviations in T7.j, as built** (2026-10-20; lane `r09-craters`, built on T7.i's `6daf60a5` over
+  `origin/rendering-and-planets` at `1870973b` and merged with it at `8a7378d6` (#51, R10.T1.c's
+  haloes) as `0e34b164` before its goldens were blessed; main's rulings of 2026-10-19,
+  `decision-r09-t12-coarse.md` addenda 4 and 5 and `decision-r09-t7ij-refresh.md`, and the brief's
+  amendment for `material/maturity.rs`; no bump, `GENERATOR_VERSION` 22).
+  - _Files and items._ In the surface crate, `synth/craters.rs`:
+    - New public items: `VISIBILITY_COEFFICIENT`, `K_v` = 0.17; `CraterWear`, a crater's diffusion
+      length and its share q of its octave's saturation (`FRESH`, which is its `Default`, `new`,
+      `of_age(age, &OctaveWear)`, `diffusion`, `share`); `OctaveWear`, an octave's window of ages
+      and its wear rate (`new(surface_age, system_age, production, saturation)`, in
+      `lunar_chronology`'s order, `window`, `window_density` and `mean_square_relief(rim_radius)`,
+      the closed form; its `share_at(age)` is `pub(crate)`, `CraterWear::of_age` the public way to
+      q); `CraterOctave::wear` and `SmallCrater::wear`.
+    - Changed signatures: `relief_factor(rim_radius, wear: CraterWear)`,
+      `CraterProfile::new(shape, band, wear: CraterWear)` and
+      `profile(r_over_radius, crater, band, wear: CraterWear)`, each taking the wear where it took
+      the diffusion length. `SmallCrater::diffusion` stays, its wear's.
+    - Private: `mean_square_relief` became `OctaveWear::mean_square_relief`, with
+      `diffusion_ends_at`, `diffusive_relief`, `closure_relief` (their arguments named with their
+      units: `alpha_per_gyr`, `c_km2`, `offset_gyr`, `end_gyr`, `reached_per_km2`, `total_per_km2`)
+      and `WEAR_SPLIT_STEPS` (64), and the field `share_per_density_km2`, P ÷ (S `N_S`);
+      `CraterOctave`'s window and window density are its wear's.
+    - Documentation: the module's "# Degradation" and "# The closed forms", `relief_factor`,
+      `DIFFUSIVITY_M2_PER_MYR`, `CraterProfile`, `CraterProfile::new`, `profile`, `SmallCraters::at`
+      and `octave_moments`; `synth/craters/rims.rs`' "# Degradation".
+    - `material/maturity.rs`, the amendment's branch with #51 landed: #51's one helper takes the
+      crater's wear, `small_crater_wear(rim_radius, wear)`, `relief_factor` of it; `maturity_at`
+      gives it each crater's `SmallCrater::wear`, and the maturity mix's `halo_law` each age node's
+      `CraterWear::of_age(age, octave.wear())`, q = u at the node on a saturated octave and u P ÷ S
+      on an unsaturated one. The node's age is `chronology_age(u N_w)` with `N_w` from
+      `OctaveWear::window_density`, the draw's own, where #51 took `lunar_chronology(window)`: the
+      same on an unsaturated octave, and on a saturated one but for the rounding of the window's
+      bisection. The module's "The wear g" and "The body's maturity mix" follow.
+      `material/albedo.rs` is unchanged.
+    - `tests/panics.rs`: nine refusals (`CraterWear::new` of a negative diffusion, a negative share
+      and a NaN share; `OctaveWear::new` of no saturation, a NaN and a negative production, which
+      `cumulative_density`, non-increasing in D to the last bit, never gives, and a surface older
+      than its system; `relief_factor` and `mean_square_relief` of no rim radius) in place of
+      `relief_factor`'s negative diffusion.
+  - In the sim, `steps/craters.rs`: `CoarseOctave`'s `window_density` became `wear: OctaveWear`,
+    whose window density the draw reads by the same expression, so no age moves;
+    `degradation(diameter, age, &OctaveWear)`; the module's "Its wear". Its tests module is
+    `pub(crate)`, with `analytic_square`, which the basin-share test reads.
+    `steps/relief/budget.rs`: "# The scale" item 2, documentation only. Tests in
+    `steps/craters/tests.rs` and `steps/relief/tests/sigma_h.rs`.
+  - No stream, tag, draw, key or word moved: the height golden's draw digests (centre, diameter,
+    age, diffusion) and every octave's window and production are unmoved to the bit, and the coarse
+    craters' list differs in its bytes alone.
+  - _The law, as the brief's §2.4 has it._ g = (b ÷ (K ÷ R² + b))², b = `DEGRADATION_B`, with K ÷ R²
+    = `num::max`(κt ÷ R², `K_v` q) and κt ÷ R² = ½ (L ÷ R)² as built, so that a crater whose
+    diffusion is the larger keeps its g, its profile and its heights to the bit. The leans:
+    - _`OctaveWear`, a public type the brief does not name._ It holds T7.b's and T12.d's window rule
+      (τ and `N_w` from `N_S`, P, S and the system's age, by the expressions both used) and q's rate
+      P ÷ (S `N_S`), so the synthesis, the coarse pass and the maturity mix read one window and one
+      law; and it makes the closed form public, which the sim's basin-share test reads at the coarse
+      octaves.
+    - _q from the age_ (the lane's lean): `CraterWear::of_age(age, &octave)` is
+      `diffusion_length(age)` and q = N(t) × P ÷ (S `N_S`), N(t) = `lunar_chronology(age, A)`, zero
+      where P or `N_S` is zero; so q is the draw share u through `chronology_age` (tested).
+    - `CraterWear::new` refuses a diffusion or share that is not finite and non-negative, and
+      accepts q above 1 (a crater past its window, which the maturity helper's bisection reaches);
+      `relief_factor` now refuses a bad rim radius alone, the wear carrying the rest.
+    - _The basin-share term at the nodes._ The test sums Σ_k `e_k` ⟨`E_k`[g²](D) ∫F(`w₂`)² dA⟩_k,
+      the mean over each coarse octave's eight Gauss–Legendre diameter nodes of the node's
+      closed-form E[g²] times its ∫F(`w₂`)² dA, where the brief wrote `E_k`[g²] ⟨∫F(`w₂`)² dA⟩_k.
+      The two agree on the Moon, whose every coarse octave keeps E[g²] 0.2638 at every diameter, and
+      the node form is the exact expectation where E[g²] varies with D (Mars, Ceres). The test also
+      holds plan 14's `Relief::of` basin share for the reference Moon within 10 m of 2,050 m (2,045
+      m, at its gravity of 1.6243 m s⁻²).
+    - `for_body` still reads the surface's density before its loop, so that a surface older than its
+      system is refused on a body of no octave too, as its documentation says.
+    - _The maturity helper_ (the lane's lean): the test helper `immature_rims_per_km2`, the closed
+      form of the synthesis's rim deficit compared with Grier et al.'s count, takes the same law,
+      each diameter's octave from `CraterOctaves::new`, and prints the ruling's κ-only figures
+      beside it, labelled.
+  - _The closed form, as the lane designed it._ With c = `K_v` P ÷ (S `N_S`), the closure's K ÷ R²
+    is c N(t). N is convex in t with N(0) = 0, so α t − c N(t) changes sign at most once, at t\*: 0
+    where α ≤ c N′(0), τ where α τ ≥ c `N_w`, else a bisection of 64 halvings. κ's part on [0, t\*]
+    is T7.b's (the linear term closed, the exponential's eight panels of eight-point
+    Gauss–Legendre), to the bit as built where t\* = τ; the closure's is closed in N, (b ÷ 3c)
+    [(b ÷ (c N\* + b))³ − (b ÷ (c `N_w` + b))³], written as the span times (1 + y\*)⁻³ (1 −
+    e^(−3d)) ÷ 3δ through `exp_m1` and `ln_1p`, which tends to the span as c falls to zero.
+  - _Constants._ `K_v` = 0.17, Minton et al. 2019's `K_v,1` at γ = 2 (eq. 7, p. 15; Fig. 5, p. 16;
+    the accepted manuscript, arXiv:1902.07746; Icarus 326, 63–87), with their (d/D)_visible 0.050:
+    carried to complex craters and basins as relative relief, (15 ÷ 32)² = 0.2197 of the fresh
+    relief, medium-low confidence; the unsaturated octaves' rate by geometric similarity (γ = ψ = 2,
+    their eqs. 7 and 23), medium-low; q uniform against their first-order loss (eqs. 11, 27–28) and
+    the abstracts of Riedel et al. 2020 and Talkington et al. 2022, labelled, the extra wear
+    standing in for the overprinting the superposed craters lack. b = 0.15 and κ = 5.5 m² Myr⁻¹ as
+    built. Not modelled, and labelled: fluvial and aeolian infill, viscous relaxation, mare or melt
+    infill.
+  - _Tests._
+    - New, in `synth/craters/tests.rs`:
+      - `a_crater_at_the_visibility_limit_keeps_fifteen_thirty_seconds_squared_of_its_relief`: g at
+        q = 1 and no diffusion is (15 ÷ 32)² to 10⁻¹² at rim radii of 1 m to 1,000 km, and 1 to the
+        bit when fresh; the larger reading binds, to the bit; the 1 km crater on 3 Gyr maria (P ÷ S
+        0.07) keeps κ's 48%; a crater of no age is `FRESH`;
+      - `a_crater_s_share_is_its_draw_share_on_a_saturated_octave`: q = u where capped and u P ÷ S
+        where not, to 10⁻¹², at 101 shares on every octave of the four cratered worlds, and each
+        drawn crater's wear its age's;
+      - `a_saturated_octave_of_50_km_craters_keeps_the_equilibrium_s_mean_square_relief`: the closed
+        form at a 25 km rim radius on a capped octave is (b ÷ `K_v`)(1 − (b ÷ (`K_v` + b))³) ÷ 3 =
+        0.26382 to 10⁻³, and a dense sum of 10⁴ ages uniform in N to 10⁻³;
+      - `every_octave_s_mean_square_relief_is_its_dense_sum`: at every node of every octave of the
+        four worlds, to 0.1% (measured within 5.9 × 10⁻⁶; 42 nodes split between κ and the closure),
+        each node's mean the closed form's to the bit;
+      - `native_only::measure_the_octaves_construction_time` (`#[ignore]`).
+    - Changed there: `dense_mean_square_relief` takes each g by the public law over 10⁴ panels,
+      5,000 geometric in t to a hundredth of the window and 5,000 even beyond it (geometric
+      throughout, its own error was 6 × 10⁻⁴ on the Moon-like world's capped bowls, where the closed
+      form is within 10⁻⁷ of a 10⁶-panel sum); `profiles()` and the degraded-profile test add shares
+      of 0.5 to 1; the rest take the new signatures. The size–frequency, balance, placement and
+      order-independence tests are unchanged.
+    - In the sim's `steps/craters/tests.rs`: `the_degradation_byte_rounds_the_lost_relief`,
+      re-derived for the law (the 1 km maria crater κ's, g 0.48 and a byte in 100–160; a 50 km
+      crater at its saturated window's end 199 and halfway 151, g 0.407; fresh 0; a 2 m crater 255);
+      `the_moon_s_coarse_rims_are_pike_s_and_near_fresh` renamed
+      `the_moon_s_coarse_rims_are_pike_s_and_worn_to_equilibrium`, its Pike test standing, with
+      every coarse octave of the reference Moon saturated, every byte at most 199 and the listed
+      craters' mean g² in 0.21–0.32; new,
+      `the_reference_mars_s_coarse_craters_are_worn_no_further_than_their_octave_s_production` (each
+      byte at most the nearest integer to 255 (1 − g) at q = min(1, P ÷ S) and κ at the octave's
+      window) and the measurement `measure_r09_t7j_wear` (`#[ignore]`).
+    - In `steps/relief/tests/sigma_h.rs` (`decision-r09-t7ij-refresh.md` Q1; each re-derivation
+      keeps its invariant):
+      - test 2: `the_local_share_finer_than_the_coarse_cell_is_reported` became
+        `the_local_share_finer_than_the_coarse_cell_is_in_its_band_where_it_holds`, with a table of
+        Design note 7's bands, asserted on the Moon, Mars and, in its slow test, the Earth, and
+        Ceres's miss printed with its parts and commented (R7); no band moved.
+      - `assert_scale_rule` (`the_scale_follows_its_rule` and the Earth's slow test): its "largest
+        byte 0 where s\* > 1" held only of T12.d's fresh bytes, which T7.j makes positive. Where s\*
+        exceeds 1 it asserts each crater's byte after the entry equal to its byte before, in list
+        order, and `largest_byte` their largest and positive (the Moon's 199, Ceres's 198); and,
+        new, `second_quadrature` set exactly where s\* ≤ 1 and the bytes before differ
+        (Mars's, now).
+      - `uneven_bytes_are_read_in_a_second_quadrature`: it asserted `Rule::Whole` on the reference
+        Moon, whose s\* T7.j takes to 1.398, above which no second quadrature is read. It runs on
+        the reference Moon asked for a σ_h of 1,200 m, at its own T7.j bytes, which differ,
+        asserting so and s\* ≤ 1 (0.6867) first, then as before.
+      - New, beside test 2: `the_moon_s_craters_in_expectation_are_plan_14_s_basin_share`.
+      - Test 6's documentation gains its figures after T7.i and T7.j; tests 3, 6 and the rest stand
+        unchanged.
+  - _Measured_ (the reference worlds at `reference::SEED`; as built (T12.e's record) / after T7.i /
+    after T7.j, beside the brief's Table C; `measure_r09_t12e` and `measure_r09_t7j_wear`).
+    - _Test 2_, the share finer than λ_c ÷ σ_h² after the scale: the Moon 27.04% / 22.45% / 6.31%
+      (band 4–10%; Table C 6.2%): the structural share 0.079%, the small craters 22.04 / 20.81 /
+      5.53% and the coarse craters' sharpening 4.92 / 1.56 / 0.70%; Mars 2.255 / 1.978 / 0.992%
+      (0.3–1%, on its edge; Table C 1.0–1.1%): small 1.902 / 1.782 / 0.857% and rims 0.327 / 0.169 /
+      0.108%; Ceres 9.83 / 7.12 / 2.46% (3–8%, a miss; Table C 2.4–2.7%): small 6.89 / 6.25 / 2.15%
+      and rims 2.89 / 0.82 / 0.26%; the Earth 0.435% throughout (0.3–1%). Whole, the small craters'
+      `K_w` is 1,064 → 548 m on the Moon (Table C 548), 403 → 279 m on Mars (278–300), 559 → 323 m
+      on Ceres (322–339) and 9 m on the Earth, unmoved.
+    - _The basin share_, the crater term in expectation rendered at the band limit,
+      √(`K_w` + Σ_k `e_k` ⟨`E_k`[g²](D) ∫F(`w₂`)² dA⟩_k ÷ A) (above), against plan 14's
+      `Relief::of`: the Moon 1,894 m against 2,045 m (−7.4%, inside 25%; Table C 1,883–2,020 m,
+      3,671 m before), its coarse part 1,813 m and its small 548 m; Mars 952 m against 891 m (Table
+      C 1,013 m); Ceres 895 m against 1,872 m (Table C 952 m).
+    - _T12.e's scale_: the Moon s\* 0.789 / 0.796 / 1.398, `s_N` 0.795 / 0.792 / 1.948
+      (`Rule::NonCrater`, its bytes kept; Table C 1.43 and 1.99); Mars s\* 0.960 / 0.960 / 0.972
+      (`Rule::Whole`, a second quadrature; Table C 0.97); Ceres s\* 1.730 / 1.760 / 2.111, `s_N`
+      2.131 / 2.145 / 2.311 (Table C 2.13 and 2.31); the Earth 0.960 throughout. The Moon's `s_N`
+      lies inside 1.5–3, and Mars's and the Earth's s\* inside 0.8–1.25.
+    - _The bytes and the listed craters' mean g²_ (before T12.e's scale; after it they are kept on
+      the Moon and Ceres): the Moon's largest 199 and mean g² 0.283 (octaves 0.276, 0.311, 0.319 and
+      0.251 at 93–1,481 km; 324 craters); Mars's largest 106 and mean g² 0.627 (0.613, 0.730, 0.739
+      and 0.668), after the scale its largest 110; Ceres's largest 198 and mean g² 0.311 (0.288 and
+      0.463); the Earth's one crater 0, then 10 after the scale.
+    - _E[g²] by octave_ (the closed form, the mean over each octave's eight diameter nodes): the
+      Moon 0.2638 in every coarse octave (P ÷ S 5.0–10.0) and every small one from 5.8 km up (P ÷ S
+      3.4–14.9), then 0.262, 0.237, 0.127, 0.041 and 0.026 from 5.8 km down to 0.18 km, and below
+      0.02 under 0.18 km, where κ binds; Mars 0.599, 0.709, 0.690, 0.662, 0.633 and 0.602 in its
+      coarse octaves (P ÷ S 0.17–0.27, none saturated), 0.451 and 0.431 in its small octaves of
+      22.6–90 km (P ÷ S 0.47–0.51) and 0.59–0.78 at 2.8–22.6 km; Ceres 0.264, 0.281, 0.432 and 0.473
+      in its coarse octaves (P ÷ S 1.32, 0.93, 0.51 and 0.44) and 0.264, 0.480 and 0.603 in its
+      small octaves of 6.3–50 km. The closed form against the dense sums: worst 5.9 × 10⁻⁶ (the
+      Mars-like world's octave 9).
+    - _Each share's RMS_ (cells / reconstructed, before T12.e's scale; after it in brackets): the
+      Moon's coarse craters 2,035 / 1,938 m after T7.i, 1,087 / 1,035 m after T7.j (unscaled; Table
+      C 1,013 m reconstructed), its population 900 / 884 m (1,753 / 1,722 m), its craters as
+      rendered 1,226 m; Mars's coarse craters 437 / 418 m (425 / 406 m; Table C 446 m), its
+      population 900 / 892 m (875 / 867 m) and provinces 2,854 / 2,825 m (2,774 / 2,745 m), rendered
+      494 m (480 m); Ceres's coarse craters 298 / 249 m (Table C 236 m), its population 900 / 868 m
+      (2,080 / 2,006 m), rendered 444 m; the Earth's coarse craters 1.3 / 0.7 m.
+    - _Test 6_, the realised relief over σ_h: the Moon 6.37 / 6.52 / 6.91, Mars 9.52 / 9.64 / 9.55,
+      Ceres 6.41 / 6.86 / 6.70, the Earth 7.41 throughout, all in 6–16; Mars after the whole pass
+      28,970 m, 9.99 σ_h.
+    - _R09.T7.i's figures after T7.j_ (`measure_r09_t7i_first_octave_depressions`): of the first
+      coarse octave's 260 craters, 257 lie below their 1.2–2 R cells with the coarse craters alone
+      (259 after T7.i), 250 after T12.e's entry (260), and all 260 each alone; the analytic rendered
+      share Σ g² ∫F(`w₂`)² dA ÷ A is 1,286 m at T7.j's bytes (2,386 m at T12.d's fresh bytes), the
+      same at T12.e's, which keeps them.
+    - _T8's slope probe_ on the Moon-like lid: median slope 5.43° / 5.40° / 5.03° at 17 m, RMS
+      height differences 248.4 / 248.4 / 177.9 m at 1.9 km and 670.3 / 671.1 / 453.1 m at 7.6 km,
+      against Rosenburg et al. 2011's 7.5° in the highlands and R09.T5's LOLA LDEM_16 measurement of
+      171 and 546 m.
+    - _`CraterOctaves::for_body`'s construction_ (`--profile slow-test`, one thread, the mean of 20,
+      a shared machine: provisional): 0.93 ms on the Moon-like world, 10.64 ms Mars-like, 0.83 ms
+      Ceres-like and 12.04 ms Earth-like, beside T7.h's 0.9–13 ms.
+    - _T12.e's cost after T7.j_ (`sigma_h::cost`'s probes, each a test binary's whole run of one
+      probe; the test profile, one test thread, on this lane's desktop, a Ryzen 7 3700X at a load of
+      about 8 beside other lanes: provisional, and not the laptop T12.e's figures were taken on):
+      the entry adds 5.99 s to the reference Earth (2.68 s through the coarse craters, 8.67 s with
+      T12.e; 6.33 s as built), 2.70 s to Mars (0.33 → 3.03 s; 1.78 s as built), 0.47 s to the Moon
+      (0.08 → 0.55 s; 0.47 s) and 0.13 s to Ceres (0.02 → 0.15 s; 0.13 s). Only Mars's bytes now
+      differ where s\* ≤ 1, so only Mars reads the second quadrature, about +0.9 s (main's estimate
+      +0.6 s); the Earth's one crater scales alike.
+    - _The slow tests_: the level bound at 10⁴ points (`--release`) holds, its worst |h(n) − h(m)|
+      over the bound 0.019–0.071 on the Earth-like world, 0.001–0.082 Mars-like, 0.002–0.064
+      Moon-like (0.002–0.076 after T7.i), 0.006–0.071 Ceres-like and 0–0.014 on the one crater; the
+      reference Earth's T12.e tests pass, test 2 at 0.435% asserted. The pooled reading test
+      (`surface_reading_worlds`, `--cargo-profile slow-test --profile slow`, by name on the final
+      tree, 544 s; T7.i's tree was not run separately) passes: RMS ÷ σ and var z at 100 m and 1 km,
+      the Earth-like 0.9828 / 0.9389 and 0.9870 / 0.9733, the Mars-like 0.9883 / 0.9488 and 1.0217 /
+      1.0141, the Moon-like 1.0247 / 1.0418 and 1.0000 / 0.9986, the Ceres-like 1.0194 / 1.0393 and
+      1.0867 / 1.1808, against T7.h's 0.9831 / 0.9318 to 1.0858 / 1.1762; every case within the
+      plan's 10% and 15% but `CRATER_GAP`'s, the Ceres-like world at 1 km, whose var z 1.1808 lies
+      inside its [0.85, 1.25] (1.1762 with T7.h).
+    - _`maturity_immature`_ (the amendment; 10⁴ points a world): before T7.j and #51, the shares
+      above deficits of 0.05, 0.2 and 0.5 were 0.0397, 0.0071 and 0.0013 at 4.4 Gyr, 0.5387, 0.1253
+      and 0.0164 at 3.5 Gyr and 0.5609, 0.1439 and 0.0215 at 1 Gyr, the mean V excess 0.0044, 0.0516
+      and 0.0569; after both, 0.0397, 0.0071 and 0.0013, 0.5386, 0.1251 and 0.0164, 0.5608, 0.1439
+      and 0.0215, and at #51's 0.1 Gyr 0.4328, 0.1176 and 0.0200, the mean V excess 0.0044, 0.0515,
+      0.0569 and 0.0466. #51's haloed solve holds: the stated excess against the drawn one 0.405
+      against 0.442%, 5.294 against 5.235%, 5.763 against 5.746% and 4.933 against 4.652% (#51's
+      record: 0.405/0.442, 5.297/5.238, 5.766/5.749 and 4.933/4.652%), the drawn mean over p 0.9987,
+      0.9977, 0.9981 and 0.9956, and the haloed scales 1.295607, 1.235448, 1.229967 and 1.239698
+      (1.295607, 1.235411, 1.229932 and 1.239695). Grier et al.'s closed-form count is the same
+      under T7.j's wear and κ's alone, 4.12 × 10⁻⁴ and 1.75 × 10⁻⁴ km⁻² above 0.2 and 0.5 at 4.4
+      Gyr: the 1–20 km rims that are still immature are young, and the closure is negligible for
+      them (a Tycho-aged crater's `K_v` q is at most about 2 × 10⁻⁴ on a saturated 4.4 Gyr lunar
+      surface).
+  - _Goldens_, re-blessed at 22 on the merged tree
+    (`HYPERION_BLESS=1 cargo test -p hyperion-surface --features testing`), with no bump of
+    `GENERATOR_VERSION`, `SURFACE_PAYLOAD_FORMAT` or `TEST_PLANET_VERSION`: the serve gate's rule.
+    `golden_diff.py`, the working tree against `0e34b164`: `GENERATOR_VERSION` 22 → 22 and
+    `TEST_PLANET_VERSION` 2 → 2; 22 files' pinned values moved, all in the surface crate, and its
+    verdict, "pinned values changed but `GENERATOR_VERSION` was not bumped", is that ruled re-bless.
+    Each moved because T7.j wears the small craters where their octave's closure binds (their
+    heights and slopes, and the closed forms' E[g²]), or the maturity mix's age nodes with them:
+    - `height/`: each cratered world's parts (every octave's variance, the craters' centre and rim
+      heights at their levels, the sites' small-crater heights) and points (`moon_like` 319 values,
+      `mars_like` 42, `ceres_like` 14, `earth_like` 7: heights and gradients where a crater whose
+      closure binds reaches); `closed_forms` (796 values: the variance and structure function finer
+      than each wavelength on every cratered world, the octaves' sharpening); `bakes` (the Moon-like
+      patch). The draw digests and each octave's window and production are unmoved.
+    - `ground/ceres_like` and `moon_like`: the ground's heights at their points.
+    - `material/moon_like`: six of its points, on gentler slopes, read Regolith where they read
+      Bedrock; `material/maturity`: the maturity at the points of the weathered Moon-like world;
+      `material/halo`: the maturity mix's nodes, its age nodes now worn by the closure.
+    - `weights/moon_like` (24 values and 5 lines) and `cold_trap` (94 and 8): the class blends at
+      points whose slopes or closed forms moved; `albedo/worlds`: the Earth-like world's class
+      shares and its scale at level 8, by rounding-sized amounts.
+    - `terrain_bake/earth_like` (one roughness) and `moon_like` (25: the patches' heights, normals,
+      origins, ranges and roughness); `horizon/blend`: the far field's horizon codes;
+      `worker/moon_like`: the Moon-like payload's baked patches, their heights, offsets, normals and
+      bounds, and its palette's weights.
+    - Unmoved: every R05 golden directly in `tests/golden/` (`bake`, `collision`, `cube_sphere`,
+      `level_table`, `test_planet`, `vertex_f32`), `craters/density_and_shapes`, `field/months`, the
+      flat world in every directory, `height/common`, `wire/` (the testing builder's coarse craters
+      take their bytes from the spec, so its coarse elevation and payloads are unchanged),
+      `worker/terrain_test` with them, `ground/` for the Mars-like, Earth-like and one-crater
+      worlds, `material/` for the other worlds and `table` and `weathering`, `weights/` for the
+      Mars-like, Ceres-like and one-crater worlds, `horizon/encoding` and `grid_azimuth`, and the
+      kernels. No sim or server golden moved: `golden_diff.py` reads every crate's goldens.
+    - The maturity mix's age nodes now read the octave's stored window density
+      (`OctaveWear::window_density`, the draw's own) where #51 recomputed
+      `lunar_chronology(window)`; on a saturated octave the two differ in their last bits, which
+      moves `material/halo` and `material/maturity` in their last bits there too, beside T7.j's
+      wear.
+    - After the bless the surface crate's suite passes whole without it (676 library tests, 32
+      ignored; its integration tests, the panics' 189 among them, 190 after the review's added
+      refusal). On the merged tree the sim's `planetary::surface` passes (288, 37 ignored), with
+      `steps::climate` (137, 6 ignored), `steps::craters` (10, 10 ignored) and `steps::relief` (60,
+      19 ignored) among them; so do `surface_ground_worlds` (1), `surface_material_worlds` (2),
+      `surface_albedo_worlds` (2), the server's `surface_knowledge` (2), the sim's doctests of
+      `planetary::surface` (4) and the reference Earth's slow T12.e test (1).
+  - _Cost_ (not timed beyond T12.e's probes; provisional). A small crater's wear costs one more
+    chronology evaluation at its draw (beside the 64 of its age's bisection) and one comparison in
+    its relief factor; the closed form adds a bisection of 64 chronology evaluations at each node of
+    an octave whose κ and closure cross.

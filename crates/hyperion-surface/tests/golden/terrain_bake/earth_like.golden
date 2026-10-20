@@ -15,7 +15,7 @@ palette 3:1 none none none none none none none
 weights = 0x6ed185c899743302
 mask = 0xcee5805972a6dd42
 bound = 0x40908660ecf4fbae  # 1057.5946539190877
-sigma = 0x3febc91ec9c5264f  # 0.8683008137533735
+sigma = 0x3febc91ebdfb329f  # 0.8683007917948834
 complete true
 patch finest 0 19 424618 90794
 heights = 0x0e98e15044f08fb8

@@ -19,11 +19,17 @@
 //!   `N_sat` ÷ `N_prod` of it where capped), through [`chronology_age`] at the contract's system age
 //!   (Design note 12), as the synthesis's small craters draw theirs; its morphology its fresh
 //!   [`crater_shape`]'s.
-//! - **Its wear.** Its degradation byte first, the nearest integer to 255 × (1 − g), g T7.b's
-//!   relief factor of its rim radius and its age's diffusion length ([`relief_factor`],
-//!   [`diffusion_length`]: Minton et al. 2019's eq. 8 with Fassett and Thomson 2014's κ of
-//!   5.5 m² Myr⁻¹; `decision-r09-t12-coarse.md` item 5b), one law with the small craters. On the
-//!   Moon it keeps at least 99.95% of every coarse crater's relief, so the bytes are 0.
+//! - **Its wear.** Its degradation byte first, the nearest integer to 255 × (1 − g), at most 255,
+//!   g the small craters' relief factor of its rim radius and its wear in its octave
+//!   ([`relief_factor`] of [`CraterWear::of_age`]; `decision-r09-t12-coarse.md` item 5b, R09.T7.j),
+//!   one law with the small craters: Minton et al. 2019's eq. 8 with K ÷ R² the larger of Fassett
+//!   and Thomson 2014's diffusion, κt ÷ R² (5.5 m² Myr⁻¹), and the equilibrium closure, `K_v` q,
+//!   q the octave's production since the crater formed over its saturation ([`OctaveWear`]).
+//!   Diffusion alone would keep at least 99.95% of every coarse crater's relief on the Moon; the
+//!   closure wears a saturated octave's craters uniformly in q from fresh to the visibility limit,
+//!   (15 ÷ 32)² of the fresh relief (bytes 0 to 199, E\[g²\] 0.2638), and an unsaturated octave's
+//!   to its production's share of its saturation (on the reference Mars, P ÷ S about 0.27 at its
+//!   first coarse octave, bytes to about 105). Infill, relaxation and erosion are not modelled.
 //! - **Its relief.** Smoothed in as its kept relief ([`kept_relief`], the byte's) times its coarse
 //!   profile ([`CoarseRims::coarse_profile`]: its fresh shape filleted over the coarse band), at
 //!   the chord from its centre's spheroid point in rim radii, sampled at each cell's centre, so
@@ -50,13 +56,13 @@
 
 use hyperion_surface::craters::{
     CraterParams, DiameterOctave, UnitUniform, chronology_age, crater_shape, cumulative_density,
-    diameter_in_octave, lunar_chronology, saturation,
+    diameter_in_octave, saturation,
 };
 use hyperion_surface::cube::PatchKey;
 use hyperion_surface::field::{CoarseCrater, Cover, boundary_diameter, cell_index};
 use hyperion_surface::num;
 use hyperion_surface::synth::craters::rims::{CoarseRims, kept_relief};
-use hyperion_surface::synth::craters::{diffusion_length, relief_factor};
+use hyperion_surface::synth::craters::{CraterWear, OctaveWear, relief_factor};
 use hyperion_surface::tags::SURFACE_COARSE_CRATER;
 
 use super::plates::slot;
@@ -76,7 +82,7 @@ pub(crate) const WORDS_PER_CRATER: u64 = 8;
 const MAX_OCTAVES: u32 = 24;
 
 /// One coarse octave as the step draws it: its diameters, its expected count over the body and
-/// its craters' age window's density.
+/// its craters' window of ages and wear.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct CoarseOctave {
     /// Its index k, from 0 at `D_b`.
@@ -89,9 +95,10 @@ pub(crate) struct CoarseOctave {
     pub(crate) saturation: PerSquareKilometre,
     /// Its expected count over the body, min(production, saturation) × the body's area.
     pub(crate) expected: f64,
-    /// The lunar-equivalent density at the start of its age window: the surface's, or its youngest
-    /// share `N_sat` ÷ `N_prod` of it where saturation caps it.
-    pub(crate) window_density: PerSquareKilometre,
+    /// Its window of ages and its craters' wear ([`OctaveWear`]): the lunar-equivalent density at
+    /// the start of its age window (the surface's, or its youngest share `N_sat` ÷ `N_prod` of it
+    /// where saturation caps it), and each crater's share of its saturation (R09.T7.j).
+    pub(crate) wear: OctaveWear,
 }
 
 /// The coarse octaves of the body of `pass` (see the module documentation).
@@ -100,7 +107,6 @@ pub(crate) fn octaves(pass: &Pass<'_>) -> Vec<CoarseOctave> {
     let inputs = pass.inputs();
     let params = inputs.craters();
     let area_km2 = spheroid_area_m2(&inputs.figure()) * 1e-6;
-    let surface_density = lunar_chronology(inputs.surface_age(), params.system_age());
     let d_b = boundary_diameter(pass.level(), inputs.radius()).value();
     let radius = inputs.radius().value();
     let mut list = Vec::new();
@@ -115,18 +121,22 @@ pub(crate) fn octaves(pass: &Pass<'_>) -> Vec<CoarseOctave> {
         let production =
             cumulative_density(params, low).value() - cumulative_density(params, high).value();
         let capped = saturation(low).value() - saturation(high).value();
-        let window = if production > capped {
-            surface_density.value() * (capped / production)
-        } else {
-            surface_density.value()
-        };
+        let (production, capped) = (
+            PerSquareKilometre::new(production),
+            PerSquareKilometre::new(capped),
+        );
         list.push(CoarseOctave {
             index: k,
             diameters,
-            production: PerSquareKilometre::new(production),
-            saturation: PerSquareKilometre::new(capped),
-            expected: num::min(production, capped) * area_km2,
-            window_density: PerSquareKilometre::new(window),
+            production,
+            saturation: capped,
+            expected: num::min(production.value(), capped.value()) * area_km2,
+            wear: OctaveWear::new(
+                inputs.surface_age(),
+                params.system_age(),
+                production,
+                capped,
+            ),
         });
     }
     list
@@ -147,12 +157,13 @@ pub(crate) fn spheroid_area_m2(figure: &hyperion_surface::spheroid::Spheroid) ->
     0.5 * full * (1.0 + (1.0 - e * e) / e * math::atanh(e))
 }
 
-/// The degradation byte of a coarse crater of `diameter` `age` old: the nearest integer to
-/// 255 × (1 − g), g T7.b's relief factor of its rim radius and diffusion length, at most 255
-/// (`decision-r09-t12-coarse.md` item 5b).
+/// The degradation byte of a coarse crater of `diameter` `age` old in an octave of wear `octave`:
+/// the nearest integer to 255 × (1 − g), at most 255, g the relief factor of its rim radius and
+/// its wear ([`relief_factor`] of [`CraterWear::of_age`]; `decision-r09-t12-coarse.md` item 5b,
+/// R09.T7.j), the small craters' law.
 #[must_use]
-pub(crate) fn degradation(diameter: Metres, age: Gigayears) -> u8 {
-    let g = relief_factor(diameter * 0.5, diffusion_length(age));
+pub(crate) fn degradation(diameter: Metres, age: Gigayears, octave: &OctaveWear) -> u8 {
+    let g = relief_factor(diameter * 0.5, CraterWear::of_age(age, octave));
     let lost = (255.0 * (1.0 - g)).round().clamp(0.0, 255.0);
     #[expect(
         clippy::cast_possible_truncation,
@@ -309,7 +320,10 @@ fn draw(pass: &Pass<'_>) -> Vec<CoarseCrater> {
             let size = UnitUniform::new(stream.uniform()).expect("a uniform is in [0, 1)");
             let age_share = stream.uniform();
             let diameter = diameter_in_octave(params, octave.diameters, size);
-            let age = chronology_age(octave.window_density * age_share, params.system_age());
+            let age = chronology_age(
+                octave.wear.window_density() * age_share,
+                params.system_age(),
+            );
             let shape = crater_shape(params, diameter);
             let home = cell_index(
                 PatchKey::containing(level, centre).expect("a coarse level is a patch level"),
@@ -330,7 +344,7 @@ fn draw(pass: &Pass<'_>) -> Vec<CoarseCrater> {
                 diameter,
                 morphology: shape.morphology(),
                 age,
-                degradation: degradation(diameter, age),
+                degradation: degradation(diameter, age, &octave.wear),
                 reach: Cover::from_cells(cells),
             });
         }
@@ -387,4 +401,4 @@ fn reach_cells(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

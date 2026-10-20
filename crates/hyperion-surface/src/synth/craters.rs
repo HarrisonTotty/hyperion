@@ -82,16 +82,38 @@
 //!
 //! # Degradation
 //!
-//! The band is in the fillet and the age in the relief factor: diffusion over a crater's age,
-//! K = κt = L² ÷ 2 with L = √(2κt) ([`diffusion_length`]), scales its whole profile by
-//! g = (b ÷ (K ÷ R² + b))² with b = 0.15 and R the rim radius, Minton et al. 2019's depth law
-//! (eq. 8) over its fresh depth ([`relief_factor`]). The scaling keeps the profile's zero volume
-//! and its reach. Eq. 8 is the whole outcome of diffusion, the rim's rounding included, so the
-//! fillet takes the band alone (main's ruling on R09.T7.b, 2026-10-13). Eq. 8 is fitted over
-//! K ÷ r² from 0 to 0.3 on CTEM's crater profile, so a 300 m crater at 3 Gyr (K ÷ R² = 0.73) is
-//! extrapolated beyond Minton et al.'s fitted range: it keeps 2.9% of its relief, against about 7%
-//! in Fassett and Thomson 2014 and 5.2% under exact diffusion of this bowl, and a 1 km crater 48%,
-//! against about 52% and 64%.
+//! The band is in the fillet and the age in the relief factor: a crater's wear scales its whole
+//! profile by g = (b ÷ (K ÷ R² + b))² with b = 0.15 and R the rim radius, Minton et al. 2019's
+//! depth law (eq. 8) over its fresh depth ([`relief_factor`]), with
+//!
+//! > K ÷ R² = max(κt ÷ R², `K_v` q)
+//!
+//! (R09.T7.j; main's rulings of 2026-10-19). The scaling keeps the profile's zero volume and its
+//! reach. Eq. 8 is the whole outcome of degradation, the rim's rounding included, so the fillet
+//! takes the band alone (main's ruling on R09.T7.b, 2026-10-13).
+//!
+//! - **Diffusion**, κt = L² ÷ 2 with L = √(2κt) ([`diffusion_length`]), κ Fassett and Thomson
+//!   2014's for the lunar maria ([`DIFFUSIVITY_M2_PER_MYR`]). Eq. 8 is fitted over K ÷ r² from 0 to
+//!   0.3 on CTEM's crater profile, so a 300 m crater at 3 Gyr (κt ÷ R² = 0.73) is extrapolated
+//!   beyond Minton et al.'s fitted range: it keeps 2.9% of its relief, against about 7% in Fassett
+//!   and Thomson 2014 and 5.2% under exact diffusion of this bowl, and a 1 km crater 48%, against
+//!   about 52% and 64%. κ alone barely touches craters wider than a few kilometres (κt ÷ R² is
+//!   3.5 × 10⁻⁵ for a 50 km crater at 4 Gyr).
+//! - **The equilibrium closure**, `K_v` q: q the share of its octave's saturation produced since
+//!   the crater formed ([`OctaveWear`]) and `K_v` = 0.17 Minton et al.'s visibility limit
+//!   ([`VISIBILITY_COEFFICIENT`]). Over a saturated octave's window q runs uniformly from 0 to 1,
+//!   so its oldest craters stand at the limit, where equilibrium loses them, and the surface at
+//!   Trask's saturation is an equilibrium population (Head et al. 2010, Science 329, 1504, the
+//!   abstract: "the most-densely cratered portion of the highlands reached a state of saturation
+//!   equilibrium"), not a field of fresh profiles; on an unsaturated octave q runs to P ÷ S.
+//!   Carried to complex craters and basins as relative relief, and the unsaturated octaves' rate by
+//!   geometric similarity: medium-low confidence. No constant is fitted.
+//!
+//! The larger of the two binds: κ below a few kilometres, where it was measured, and the closure
+//! where saturation caps an octave. The synthesis superposes its craters and erases none, so the
+//! closure's wear stands in too for the overprinting it does not do. Fluvial and aeolian infill
+//! (Craddock et al. 1997; Forsberg-Taylor et al. 2004, not read), viscous relaxation, and mare or
+//! melt infill are not modelled.
 //!
 //! # The closed forms
 //!
@@ -115,6 +137,13 @@
 //! Both are sums at the octave's own eight nodes in diameter, as its variance is, with the same
 //! mean of g² over the ages, and the radial integrals are Gauss–Legendre on the profiles'
 //! polynomial pieces, exact to rounding.
+//!
+//! The mean of g² over a window's ages, uniform in the production N, is in closed form
+//! ([`OctaveWear::mean_square_relief`]; R09.T7.j): κ's α t and the closure's c N(t) cross at most
+//! once, N being convex in t, so the window splits there, κ's part closed in its linear term and
+//! Gauss–Legendre in its exponential's, and the closure's closed in N, ∫ (b ÷ (c N + b))⁴ dN.
+//! Over a saturated octave where κ is negligible it is (b ÷ `K_v`)(1 − (b ÷ (`K_v` + b))³) ÷ 3 =
+//! 0.2638 at every size.
 //!
 //! The wavelength-keyed forms ([`CraterOctaves::unresolved_variance`],
 //! [`CraterOctaves::structure_function`]) place each octave on the wavelengths of its diameters:
@@ -196,6 +225,13 @@ pub const MAX_EXTERIOR_WIDTH: f64 = 1.543;
 /// 4 Gyr crater many times the degradation; and for every body, where weathering, wind and water
 /// differ. Nor is it calibrated against the slopes of cratered ground. Low confidence (plan R09,
 /// Risks, "Deferred findings (2026-10-13 rule)").
+///
+/// It is one of the two readings of a crater's wear in [`relief_factor`], the larger of which
+/// binds (R09.T7.j): it binds below a few kilometres, where it was measured, and the equilibrium
+/// closure ([`VISIBILITY_COEFFICIENT`]) where saturation caps an octave, which κ alone leaves fresh
+/// (a 50 km crater keeps 99.95% of its relief after 4 Gyr). Below about 0.5 km it takes a
+/// saturated window's oldest craters far past the visibility limit (κτ ÷ R² ≈ 1.0 at 0.27 km on
+/// the reference Moon), craters equilibrium would have lost: recorded, not changed.
 pub const DIFFUSIVITY_M2_PER_MYR: f64 = 5.5;
 
 /// The share of a level's narrowest cell width that an octave's reach may take: 0.98, a safety
@@ -257,32 +293,394 @@ pub fn diffusion_length(age: Gigayears) -> Metres {
 /// extrapolated beyond that range (R09.T7.b's science check).
 pub const DEGRADATION_B: f64 = 0.15;
 
-/// The share of its fresh relief a crater of rim radius `rim_radius` keeps after diffusion over a
-/// length `diffusion` ([`diffusion_length`]): g = (b ÷ (K ÷ R² + b))² with K = κt = L² ÷ 2 and
-/// b = [`DEGRADATION_B`], Minton et al. 2019's depth law (eq. 8) over its fresh depth, so that g
-/// is 1 for a fresh crater and falls as κt grows against R².
+/// The visibility limit `K_v`, 0.17: the degradation K ÷ R² at which a crater stops being
+/// countable, Minton et al. 2019's visibility function coefficient `K_v,1` at γ = 2.
+///
+/// The source is Icarus 326, 63–87 (doi:10.1016/j.icarus.2019.02.021), read in the accepted
+/// manuscript (arXiv:1902.07746). Their eq. 7, `K_v`(r) = `K_v,1` r^γ, is "the maximum
+/// degradation state that a crater can undergo before it becomes uncountable", and "exponent
+/// γ = 2 is a special case in which the coefficient `K_v,1` is dimensionless, and so represents
+/// the condition of geometric similarity" (p. 15); a human count of their CTEM terrain gave
+/// "(d/D)_visible = 0.050" (p. 15), and Fig. 5's caption has "the visibility function
+/// coefficient of `K_v,1` = 0.17" (p. 16).
+///
+/// Their eq. 8 inverted at d/D = 0.050 (their eqs. 9–10) gives 0.163; 0.17 is the paper's own
+/// figure and its equilibrium model's (eq. 30, p. 26), and under eq. 8 it puts the limit at d/D
+/// 0.048 (0.163 would raise a saturated octave's E\[g²\] by 3.5%: plan R09's deferred findings).
+///
+/// Minton et al.'s limit is for simple mare craters ("an investigation of the visibility function
+/// of complex craters is beyond the scope of this work", p. 16). It is carried to complex craters
+/// and basins as relative relief, g = (b ÷ (`K_v` + b))² = (15 ÷ 32)² = 0.2197 of the fresh relief
+/// at every size, since their fresh d/D falls with D (Kalynn et al. 2013, GRL 40, 38–42, the
+/// abstract; Pike 1977, not re-read) and an absolute d/D of 0.05 would erase a fresh 113 km lunar
+/// crater (d/D 0.043, [`crater_shape`]'s): medium-low confidence
+/// (main's rulings of 2026-10-19, `decision-r09-t12-coarse.md` addendum 5, Q5).
+pub const VISIBILITY_COEFFICIENT: f64 = 0.17;
+
+/// A crater's wear (R09.T7.j): its diffusion length L ([`diffusion_length`] of its age), and its
+/// share q of its octave's saturation produced since it formed ([`CraterWear::of_age`]), which
+/// [`relief_factor`] reads.
+///
+/// Plain data: [`FRESH`](Self::FRESH), a crater of no age, is the default.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct CraterWear {
+    diffusion: Metres,
+    share: f64,
+}
+
+impl CraterWear {
+    /// A fresh crater's: no diffusion and no share, so that its relief factor is 1 to the bit.
+    pub const FRESH: Self = Self {
+        diffusion: Metres::ZERO,
+        share: 0.0,
+    };
+
+    /// The wear of a diffusion length `diffusion` and a share `share` of its octave's saturation.
+    ///
+    /// # Panics
+    ///
+    /// If `diffusion` or `share` is not finite and non-negative.
+    #[must_use]
+    pub fn new(diffusion: Metres, share: f64) -> Self {
+        let l = diffusion.value();
+        assert!(
+            l.is_finite() && l >= 0.0 && share.is_finite() && share >= 0.0,
+            "a crater's diffusion length and share must be finite and non-negative, got {l} m \
+             and {share}"
+        );
+        Self { diffusion, share }
+    }
+
+    /// The wear of a crater `age` old in the octave of `octave`: its [`diffusion_length`] and its
+    /// share q = N(t) P ÷ (`N_S` S) of the octave's saturation ([`OctaveWear`]), zero where the
+    /// octave's production or the surface's density is.
+    ///
+    /// # Panics
+    ///
+    /// If `age` is not finite and non-negative, or is older than the octave's system
+    /// ([`lunar_chronology`]).
+    #[must_use]
+    pub fn of_age(age: Gigayears, octave: &OctaveWear) -> Self {
+        Self::new(diffusion_length(age), octave.share_at(age))
+    }
+
+    /// Its diffusion length L, metres: K = κt = L² ÷ 2.
+    #[must_use]
+    pub const fn diffusion(&self) -> Metres {
+        self.diffusion
+    }
+
+    /// Its share q of its octave's saturation produced since it formed, dimensionless: from 0 when
+    /// it formed to 1 at the oldest age a saturated octave keeps.
+    #[must_use]
+    pub const fn share(&self) -> f64 {
+        self.share
+    }
+}
+
+/// A crater octave's window of ages and its craters' wear rate (R09.T7.b's window, T7.j's wear).
+///
+/// It gives the share q of the octave's saturation its production since a crater formed
+/// ([`CraterWear::of_age`]) and the mean of g² over its window
+/// ([`mean_square_relief`](Self::mean_square_relief)). The small craters' octaves
+/// ([`CraterOctave::wear`]) and the coarse pass's (R09.T12.d) take it alike. P is the octave's
+/// production and S Trask's saturation over its diameters, per km².
+///
+/// - **The window** τ: the surface's age `t_S` where P is at most S, so that every crater formed
+///   survives; where it is capped, only the youngest share S ÷ P of the craters formed survive, so
+///   the window's density is `N_w` = `N_S` S ÷ P and τ the age at which the chronology has
+///   accumulated it, [`chronology_age`]`(N_w, A)`, with `N_S` = [`lunar_chronology`]`(t_S, A)` and
+///   A the contract's system age (Design note 12). A crater drawn with the uniform u is
+///   `chronology_age`(u `N_w`, A) old.
+/// - **The share** q = N(t) P ÷ (`N_S` S), N(t) = `lunar_chronology`(t, A): the octave's production
+///   since the crater formed over its saturation. Over a capped octave's window it is the crater's
+///   draw share u, uniform from 0 to 1, so that the oldest craters stand at the visibility limit
+///   ([`VISIBILITY_COEFFICIENT`]), where equilibrium loses them: degradation accumulates with the
+///   production, and "the oldest crater in the sequence will accumulate enough degradation that
+///   it becomes too degraded to recognize, and is no longer counted" (Minton et al. 2019, §2.2,
+///   p. 17; their eq. 11). On an uncapped octave q runs to P ÷ S < 1, the rate per unit production
+///   being the cap's at every size: geometric similarity, γ = ψ = 2 (their eqs. 7 and 23, pp. 15
+///   and 20, "ψ = 2 … a special case in which `K_d,1` contains no information about absolute
+///   scale"), medium-low confidence. N(t) and `N_S` are the chronology's, before plan 14's belt
+///   scaling, which would multiply both alike and so cancels in N(t) ÷ `N_S`, as in the window's
+///   own rule; P is the contract's, after it.
+///
+/// q uniform reads degradation accumulating deterministically to the limit over the window's
+/// uniform ages. Minton et al.'s analytic model books the loss as a first-order rate shared with
+/// total obliteration (eqs. 11, 27–28, pp. 17 and 21), mostly obliteration at the coarse sizes'
+/// slopes, which would leave the survivors fresher, as Riedel et al. 2020 (JGR Planets 125,
+/// e2019JE006273: cookie cutting in the pre-Nectarian highlands) and Talkington et al. 2022 (GRL
+/// 49, e2022GL099241: Nectarian and pre-Nectarian complex craters "degraded less efficiently")
+/// suggest, both read as abstracts only. The synthesis superposes its craters and erases none, so
+/// the extra wear stands in for the overprinting it does not do (labelled; main's rulings of
+/// 2026-10-19).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OctaveWear {
+    system_age: Gigayears,
+    window: Gigayears,
+    window_density: PerSquareKilometre,
+    /// P ÷ (S `N_S`), km², the share q per unit of the chronology's density; zero where P or `N_S`
+    /// is.
+    share_per_density_km2: f64,
+}
+
+impl OctaveWear {
+    /// The wear of an octave of production `production` and Trask's saturation `saturation` over
+    /// its diameters, on a surface `surface_age` old in a system `system_age` old.
+    ///
+    /// The production is the contract's per km², after plan 14's belt scaling, as
+    /// [`cumulative_density`] gives it, and the saturation an absolute density ([`saturation`]);
+    /// `N_S`, the surface's density, is the chronology's, before the scaling, which cancels in
+    /// N(t) ÷ `N_S`.
+    ///
+    /// # Panics
+    ///
+    /// If either age is not finite and non-negative, or the surface is older than its system
+    /// ([`lunar_chronology`]); if the production is not finite and non-negative, or the saturation
+    /// not finite and positive.
+    #[must_use]
+    pub fn new(
+        surface_age: Gigayears,
+        system_age: Gigayears,
+        production: PerSquareKilometre,
+        saturation: PerSquareKilometre,
+    ) -> Self {
+        let (p, s) = (production.value(), saturation.value());
+        assert!(
+            p.is_finite() && p >= 0.0 && s.is_finite() && s > 0.0,
+            "an octave's production must be finite and non-negative and its saturation finite and \
+             positive, got {p} and {s} per km²"
+        );
+        let surface_density = lunar_chronology(surface_age, system_age);
+        let (window, window_density) = if p > s {
+            let survivors = surface_density * (s / p);
+            (chronology_age(survivors, system_age), survivors)
+        } else {
+            (surface_age, surface_density)
+        };
+        let n_s = surface_density.value();
+        let share_per_density_km2 = if p > 0.0 && n_s > 0.0 {
+            p / (s * n_s)
+        } else {
+            0.0
+        };
+        Self {
+            system_age,
+            window,
+            window_density,
+            share_per_density_km2,
+        }
+    }
+
+    /// The window τ its craters' ages are drawn from: the surface's age, or under saturation the
+    /// age at which the chronology has accumulated the surviving share.
+    #[must_use]
+    pub const fn window(&self) -> Gigayears {
+        self.window
+    }
+
+    /// The chronology's density over the window, `N_w`, per km²: the surface's, `N_S`, or its
+    /// youngest share S ÷ P of it where saturation caps the octave.
+    #[must_use]
+    pub const fn window_density(&self) -> PerSquareKilometre {
+        self.window_density
+    }
+
+    /// The share q of the octave's saturation produced since a crater `age` old formed,
+    /// N(t) P ÷ (`N_S` S), dimensionless: zero where P or `N_S` is.
+    ///
+    /// # Panics
+    ///
+    /// If `age` is not finite and non-negative, or is older than the system ([`lunar_chronology`]).
+    #[must_use]
+    pub(crate) fn share_at(&self, age: Gigayears) -> f64 {
+        lunar_chronology(age, self.system_age).value() * self.share_per_density_km2
+    }
+
+    /// The mean of g² ([`relief_factor`]) over the window for craters of rim radius `rim_radius`,
+    /// ages uniform in the production: E\[g²\] = ∫ G dN ÷ `N_w` over [0, τ], with
+    /// G = (b ÷ (K ÷ R² + b))⁴ and K ÷ R² = max(α t, c N(t)), α = κ ÷ R² per Gyr and c = `K_v` P ÷
+    /// (S `N_S`), so that c N(t) = `K_v` q.
+    ///
+    /// N is convex in t with N(0) = 0, so N(t) ÷ t rises and α t − c N(t) changes sign at most
+    /// once, at t\*: 0 where α ≤ c N′(0) = c (L + E λ e^(λ o)), τ where α τ ≥ c `N_w`, and between
+    /// them by a bisection of 64 halvings (the same work on every target). On [0, t\*] κ is the
+    /// larger: L ∫ G dt is closed, L t\* (1 − (1 + x)⁻³) ÷ (3x) with x = α t\* ÷ b, and the
+    /// exponential's E λ ∫ G e^(λ (o + t)) dt is eight-point Gauss–Legendre on eight equal panels
+    /// (L, E, λ and o the chronology's, [`lunar_chronology`]). On [t\*, τ] the closure is, linear
+    /// in N: ∫ (b ÷ (c N + b))⁴ dN from N(t\*) to `N_w` is (b ÷ 3c) [(b ÷ (c N\* + b))³ −
+    /// (b ÷ (c `N_w` + b))³], written through `exp_m1` and `ln_1p` so that it holds as c falls.
+    /// Over a capped octave where κ is negligible it is (b ÷ `K_v`)(1 − (b ÷ (`K_v` + b))³) ÷ 3 =
+    /// 0.2638. One for a window of no age or no craters.
+    ///
+    /// # Panics
+    ///
+    /// If `rim_radius` is not finite and positive.
+    #[must_use]
+    pub fn mean_square_relief(&self, rim_radius: Metres) -> f64 {
+        let rim_m = rim_radius.value();
+        assert!(
+            rim_m.is_finite() && rim_m > 0.0,
+            "a rim radius must be finite and positive, got {rim_m} m"
+        );
+        let tau_gyr = self.window.value();
+        let total_per_km2 = self.window_density.value();
+        if tau_gyr <= 0.0 || total_per_km2 <= 0.0 {
+            return 1.0;
+        }
+        let alpha_per_gyr = DIFFUSIVITY_M2_PER_MYR * 1e3 / (rim_m * rim_m);
+        let c_km2 = VISIBILITY_COEFFICIENT * self.share_per_density_km2;
+        let offset_gyr = SOLAR_SYSTEM_AGE.value() - self.system_age.value();
+        let split_gyr = self.diffusion_ends_at(alpha_per_gyr, c_km2, offset_gyr);
+        let diffusive = diffusive_relief(alpha_per_gyr, split_gyr, offset_gyr);
+        if split_gyr >= tau_gyr {
+            return diffusive / total_per_km2;
+        }
+        let reached_per_km2 = if split_gyr > 0.0 {
+            lunar_chronology(Gigayears::new(split_gyr), self.system_age).value()
+        } else {
+            0.0
+        };
+        (diffusive + closure_relief(c_km2, reached_per_km2, total_per_km2)) / total_per_km2
+    }
+
+    /// t\*, Gyr, where κ's α t and the closure's c N(t) meet in the window (the bisection's
+    /// steps: [`WEAR_SPLIT_STEPS`]), for κ's `alpha_per_gyr` (κ ÷ R²), the closure's `c_km2`
+    /// (`K_v` P ÷ (S `N_S`)) and the chronology's offset `offset_gyr` (o): 0 where the closure is
+    /// the larger from the start, the window where κ is the larger throughout.
+    #[must_use]
+    fn diffusion_ends_at(&self, alpha_per_gyr: f64, c_km2: f64, offset_gyr: f64) -> f64 {
+        let tau_gyr = self.window.value();
+        let start_per_km2_gyr = LINEAR_RATE
+            + EXPONENTIAL_COEFFICIENT * EXPONENTIAL_RATE * math::exp(EXPONENTIAL_RATE * offset_gyr);
+        if alpha_per_gyr <= c_km2 * start_per_km2_gyr {
+            return 0.0;
+        }
+        if alpha_per_gyr * tau_gyr >= c_km2 * self.window_density.value() {
+            return tau_gyr;
+        }
+        let (mut lo, mut hi) = (0.0, tau_gyr);
+        for _ in 0..WEAR_SPLIT_STEPS {
+            let mid = f64::midpoint(lo, hi);
+            let n_per_km2 = lunar_chronology(Gigayears::new(mid), self.system_age).value();
+            if alpha_per_gyr * mid > c_km2 * n_per_km2 {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        f64::midpoint(lo, hi)
+    }
+}
+
+/// The bisection steps of [`OctaveWear::mean_square_relief`]'s split t\*: 64 halvings of the
+/// window, below an f64's resolution of any age, as [`chronology_age`]'s.
+const WEAR_SPLIT_STEPS: u32 = 64;
+
+/// ∫ G dN over [0, `end_gyr`], per km², with κ's G(t) = (b ÷ (α t + b))⁴, α = `alpha_per_gyr`
+/// (κ ÷ R²), and dN ÷ dt = L + E λ e^(λ (o + t)), o = `offset_gyr` (the module documentation's
+/// closed forms): L's part closed, the exponential's eight-point Gauss–Legendre on eight equal
+/// panels, where it is smooth. Zero over no time.
+#[must_use]
+fn diffusive_relief(alpha_per_gyr: f64, end_gyr: f64, offset_gyr: f64) -> f64 {
+    if end_gyr <= 0.0 {
+        return 0.0;
+    }
+    let b = DEGRADATION_B;
+    let x = alpha_per_gyr * end_gyr / b;
+    let linear = if x > 0.0 {
+        LINEAR_RATE * end_gyr * -math::exp_m1(-3.0 * math::ln_1p(x)) / (3.0 * x)
+    } else {
+        LINEAR_RATE * end_gyr
+    };
+    let panels = 8_u8;
+    let width = end_gyr / f64::from(panels);
+    let mut exponential = 0.0;
+    for panel in 0..panels {
+        let mid = width * (f64::from(panel) + 0.5);
+        let mut sum = 0.0;
+        for (node, weight) in GAUSS_LEGENDRE_8 {
+            let t = mid + 0.5 * width * node;
+            let fall = b / (alpha_per_gyr * t + b);
+            let g2 = fall * fall * fall * fall;
+            sum += weight * g2 * math::exp(EXPONENTIAL_RATE * (offset_gyr + t));
+        }
+        exponential += 0.5 * width * sum;
+    }
+    linear + EXPONENTIAL_COEFFICIENT * EXPONENTIAL_RATE * exponential
+}
+
+/// ∫ (b ÷ (c N + b))⁴ dN from N\* = `reached_per_km2` to `N_w` = `total_per_km2`, per km², with
+/// c = `c_km2`, the closure's part of [`OctaveWear::mean_square_relief`]: with y = c N ÷ b,
+/// (b ÷ 3c) [(1 + y\*)⁻³ − (1 + `y_w`)⁻³], written as the span `N_w` − N\* times
+/// (1 + y\*)⁻³ (1 − e^(−3 d)) ÷ 3δ, with δ = `y_w` − y\* and d = ln(1 + δ ÷ (1 + y\*)), which
+/// tends to the span as c falls to zero. Zero over no span.
+#[must_use]
+fn closure_relief(c_km2: f64, reached_per_km2: f64, total_per_km2: f64) -> f64 {
+    let span = total_per_km2 - reached_per_km2;
+    if span <= 0.0 {
+        return 0.0;
+    }
+    let b = DEGRADATION_B;
+    let from = c_km2 * reached_per_km2 / b;
+    let kept = math::exp(-3.0 * math::ln_1p(from));
+    let delta = c_km2 * span / b;
+    if delta > 0.0 {
+        let d = math::ln_1p(delta / (1.0 + from));
+        span * kept * -math::exp_m1(-3.0 * d) / (3.0 * delta)
+    } else {
+        span * kept
+    }
+}
+
+/// The share of its fresh relief g a crater of rim radius `rim_radius` keeps under its wear `wear`
+/// (R09.T7.b; R09.T7.j).
+///
+/// g = (b ÷ (K ÷ R² + b))² with b = [`DEGRADATION_B`], Minton et al. 2019's depth law (eq. 8) over
+/// its fresh depth, and
+///
+/// > K ÷ R² = max(κt ÷ R², `K_v` q),
+///
+/// κt = L² ÷ 2 its diffusion ([`diffusion_length`], Fassett and Thomson 2014's κ) and `K_v` q its
+/// octave's equilibrium closure ([`VISIBILITY_COEFFICIENT`] times its share, [`OctaveWear`]), so
+/// that g is 1 for a fresh crater and (15 ÷ 32)² = 0.2197 at the visibility limit, q = 1, where κ
+/// is negligible.
+///
+/// The two are two readings of one process, impact degradation, and the larger is taken, not the
+/// sum, which would count it twice (main's ruling of 2026-10-19): κ, measured on 0.8–5 km mare
+/// craters, binds below a few kilometres, where it keeps its calibration (a 1 km crater on 3 Gyr
+/// maria, P ÷ S about 0.07 and `K_v` q at most 0.012 against κt ÷ R² 0.066, keeps 48%, against
+/// Fassett and Thomson's about 52%), and the closure binds where saturation caps an octave,
+/// leaving every capped octave's oldest crater at or past the limit. Below about 0.5 km κ alone
+/// takes a capped window's oldest craters far past the limit (κτ ÷ R² ≈ 1.0 at 0.27 km on the
+/// reference Moon), craters equilibrium would have lost: the reference Moon's capped octaves of
+/// 0.18–0.72 km keep E\[g²\] 0.026–0.041, and those below 0.18 km under 0.02 (the brief estimated
+/// about 0.02), T7.b's κ finding, recorded, not changed.
 ///
 /// A rim fillet rounds a crater's crest but leaves its floor and, once held at the crater's own
 /// size, most of its relief: a 300 m bowl kept 55% of its relief at 3 Gyr by a fillet over its
 /// diffusion alone, against 5.2% under exact two-dimensional diffusion of the same bowl and about
 /// 7% in Fassett and Thomson 2014's abstract ("a 300 m diameter crater is reduced to only ~7% of
 /// its initial depth"). So the whole profile is scaled by g, which keeps its zero volume and its
-/// reach, and the fillet takes the level's band alone (main's ruling on R09.T7.b, 2026-10-13). g
-/// keeps 2.9% for that crater (K ÷ R² = 0.73, extrapolated beyond Minton et al.'s fitted range)
-/// and 48% for a 1 km one (0.066; Fassett and Thomson's ~52%).
+/// reach, and the fillet takes the level's band alone (main's ruling on R09.T7.b, 2026-10-13). By
+/// κ, g keeps 2.9% for that crater (K ÷ R² = 0.73, extrapolated beyond Minton et al.'s fitted
+/// range) and 48% for a 1 km one (0.066; Fassett and Thomson's ~52%). Fluvial and aeolian
+/// infill, viscous relaxation, and mare or melt infill are not modelled (the module
+/// documentation).
 ///
 /// # Panics
 ///
-/// If `rim_radius` is not finite and positive, or `diffusion` is not finite and non-negative.
+/// If `rim_radius` is not finite and positive.
 #[must_use]
-pub fn relief_factor(rim_radius: Metres, diffusion: Metres) -> f64 {
-    let (r, l) = (rim_radius.value(), diffusion.value());
+pub fn relief_factor(rim_radius: Metres, wear: CraterWear) -> f64 {
+    let r = rim_radius.value();
     assert!(
-        r.is_finite() && r > 0.0 && l.is_finite() && l >= 0.0,
-        "a rim radius must be finite and positive and a diffusion length finite and \
-         non-negative, got {r} m and {l} m"
+        r.is_finite() && r > 0.0,
+        "a rim radius must be finite and positive, got {r} m"
     );
-    let k_over_r2 = 0.5 * (l / r) * (l / r);
+    let l = wear.diffusion.value();
+    let diffusion = 0.5 * (l / r) * (l / r);
+    let k_over_r2 = num::max(diffusion, VISIBILITY_COEFFICIENT * wear.share);
     let g = DEGRADATION_B / (k_over_r2 + DEGRADATION_B);
     g * g
 }
@@ -290,8 +688,8 @@ pub fn relief_factor(rim_radius: Metres, diffusion: Metres) -> f64 {
 /// A crater's band-limited, degraded profile: its fresh shape with the rim filleted over a
 /// half-width, the central cone faded where the fillet reaches into it, the volume the fillet
 /// removes put back by a compensating term on the fillet's span (Design note 13; R09.T7.i), and
-/// the whole scaled by the relief its diffusive age leaves ([`relief_factor`]; the module
-/// documentation).
+/// the whole scaled by the relief its wear leaves ([`relief_factor`]; R09.T7.b and T7.j; the
+/// module documentation).
 ///
 /// It integrates to zero over the crater, as the fresh shape does, whatever the fillet and the
 /// relief, and reaches no farther; outside the fillet's span it is the fresh shape's, to the bit,
@@ -319,19 +717,19 @@ pub struct CraterProfile {
 
 impl CraterProfile {
     /// The profile of `shape` at a level of band half-width `band` ([`band_half_width`]) for a
-    /// crater of diffusion length `diffusion` ([`diffusion_length`]): the band in the fillet and
-    /// the age in the relief, its rim filleted over `band`, held to min(1, a) rim radii, and its
-    /// whole relief scaled by [`relief_factor`] of its rim radius and the diffusion. The
-    /// synthesis's craters (R09.T7.b) and the coarse craters' sharpening (T7.c) take it.
+    /// crater of wear `wear` ([`CraterWear`]): the band in the fillet and the age in the relief,
+    /// its rim filleted over `band`, held to min(1, a) rim radii, and its whole relief scaled by
+    /// [`relief_factor`] of its rim radius and its wear. The synthesis's craters (R09.T7.b) take
+    /// it.
     ///
     /// # Panics
     ///
-    /// If `band` or `diffusion` is not finite and non-negative.
+    /// If `band` is not finite and non-negative.
     #[must_use]
-    pub fn new(shape: CraterShape, band: Metres, diffusion: Metres) -> Self {
+    pub fn new(shape: CraterShape, band: Metres, wear: CraterWear) -> Self {
         let rim = shape.diameter() * 0.5;
         Self {
-            relief: relief_factor(rim, diffusion),
+            relief: relief_factor(rim, wear),
             ..Self::filleted(shape, band)
         }
     }
@@ -545,22 +943,21 @@ pub struct ProfileSample {
 }
 
 /// The band-limited, degraded profile of `crater` at a level of band half-width `band` for a
-/// crater of diffusion length `diffusion`, at `r_over_radius` rim radii from the centre: its
-/// height and slope ([`CraterProfile::new`]; Provides' `profile`, with the band given as its
-/// half-width and the crater's age as its diffusion length, since a band level alone names no
-/// width in metres).
+/// crater of wear `wear`, at `r_over_radius` rim radii from the centre: its height and slope
+/// ([`CraterProfile::new`]; Provides' `profile`, with the band given as its half-width and the
+/// crater's age as its wear, since a band level alone names no width in metres).
 ///
 /// # Panics
 ///
-/// If `r_over_radius`, `band` or `diffusion` is not finite and non-negative.
+/// If `r_over_radius` or `band` is not finite and non-negative.
 #[must_use]
 pub fn profile(
     r_over_radius: f64,
     crater: &CraterShape,
     band: Metres,
-    diffusion: Metres,
+    wear: CraterWear,
 ) -> ProfileSample {
-    CraterProfile::new(*crater, band, diffusion).at(r_over_radius)
+    CraterProfile::new(*crater, band, wear).at(r_over_radius)
 }
 
 /// The cubic Hermite on [`x0`, `x0` + `span`] through the heights and slopes `from` and `to` at its
@@ -605,8 +1002,8 @@ pub struct CraterOctave {
     level: u8,
     production: PerSquareKilometre,
     saturation: PerSquareKilometre,
-    window: Gigayears,
-    window_density: PerSquareKilometre,
+    /// Its window of ages and its craters' wear (R09.T7.j).
+    wear: OctaveWear,
     variance: SquareMetres,
     /// Its variance at the ground's fillet, `G_k`, square metres, by the same nodes as the
     /// variance (R09.T7.h).
@@ -678,10 +1075,17 @@ impl CraterOctave {
     }
 
     /// The window τ its craters' ages are drawn from: the surface age, or under saturation the age
-    /// at which the chronology has accumulated the surviving share.
+    /// at which the chronology has accumulated the surviving share ([`OctaveWear::window`]).
     #[must_use]
     pub const fn window(&self) -> Gigayears {
-        self.window
+        self.wear.window()
+    }
+
+    /// Its window of ages and its craters' wear rate, from which each crater's wear
+    /// ([`CraterWear::of_age`]) and the mean of g² over the window are read (R09.T7.j).
+    #[must_use]
+    pub const fn wear(&self) -> &OctaveWear {
+        &self.wear
     }
 
     /// Its closed-form variance, square metres: its kept density times its kept craters' mean
@@ -817,7 +1221,9 @@ impl CraterOctaves {
             surface_age,
         };
         let system = params.system_age();
-        let surface_density = lunar_chronology(surface_age, system);
+        // Every octave's wear reads the surface's density; read here too, it refuses a surface
+        // older than its system on a body of no octave as on any other.
+        let _surface_density = lunar_chronology(surface_age, system);
         let smallest_radius_m = num::min(figure.equatorial_radius_m, figure.polar_radius_m);
         let mut octaves: Vec<CraterOctave> = Vec::new();
         let mut nodes: Vec<Vec<OctaveNode>> = Vec::new();
@@ -846,12 +1252,12 @@ impl CraterOctaves {
                 1.0
             };
             let capped = saturation(lower).value() - saturation(upper).value();
-            let (window, window_density) = if production > capped {
-                let survivors = surface_density * (capped / production);
-                (chronology_age(survivors, system), survivors)
-            } else {
-                (surface_age, surface_density)
-            };
+            let wear = OctaveWear::new(
+                surface_age,
+                system,
+                PerSquareKilometre::new(production),
+                PerSquareKilometre::new(capped),
+            );
             let level = search_level((1.0 + MAX_EXTERIOR_WIDTH) * lower_m, smallest_radius_m);
             // The level names the octave in its cells' keys and streams, so no two may share one.
             assert!(
@@ -866,8 +1272,7 @@ impl CraterOctaves {
                 level,
                 production: PerSquareKilometre::new(production),
                 saturation: PerSquareKilometre::new(capped),
-                window,
-                window_density,
+                wear,
                 variance: SquareMetres::ZERO,
                 ground_variance: SquareMetres::ZERO,
                 reach_area_m2: 0.0,
@@ -1104,9 +1509,10 @@ fn octave_wavelength(octave: &CraterOctave) -> f64 {
 /// Gauss–Legendre in the diameter's share, by the octave's own inversion ([`diameter_in_octave`])
 /// over the shares it keeps, from 1 − kept to 1; a power law fitted to the octave's ends at the
 /// same nodes lay 12% high on Mars (R09.T7.b's build). The mean of g² over the ages is
-/// [`mean_square_relief`]'s, in closed form where the production is linear: g² falls by orders
-/// of magnitude across a window, so a few young craters carry an octave's variance, which nodes in
-/// the age's share would miss (R09.T7.b's build found them 120 times short).
+/// [`OctaveWear::mean_square_relief`]'s, in closed form where the production is linear and in N
+/// where the closure binds (R09.T7.j): g² falls by orders of magnitude across a window where κ
+/// binds, so a few young craters carry an octave's variance, which nodes in the age's share would
+/// miss (R09.T7.b's build found them 120 times short).
 ///
 /// Beside it, at the same nodes: its ground variance, the same sum with each crater filleted over
 /// [`GROUND_FILLET`] in place of its fresh profile (R09.T7.h); each node's crater at that fillet
@@ -1139,7 +1545,7 @@ fn octave_moments(params: &CraterParams, octave: &CraterOctave) -> OctaveMoments
         let rim_m = 0.5 * diameter.value();
         let fresh = CraterProfile::filleted(shape, Metres::ZERO).square_moment();
         let ground = CraterProfile::filleted(shape, GROUND_FILLET);
-        let relief = mean_square_relief(rim_m, octave, params.system_age());
+        let relief = octave.wear.mean_square_relief(Metres::new(rim_m));
         // ½ ω π R², the leading factors of the variance's term in their order, so that the
         // variance keeps its bits.
         let disc_m2 = 0.5 * weight * core::f64::consts::PI * rim_m * rim_m;
@@ -1171,48 +1577,6 @@ struct OctaveMoments {
     reach_area_m2: f64,
     /// Its nodes.
     nodes: Vec<OctaveNode>,
-}
-
-/// The mean of g² ([`relief_factor`]) over `octave`'s window of ages for craters of rim radius
-/// `rim_m` metres, in a system `system` old: E[g²] = ∫ G(t) dN(t) ÷ N(τ) over [0, τ], with
-/// G(t) = (b ÷ (α t + b))⁴, α = κ ÷ R² per Gyr and dN ÷ dt = L + E λ e^(λ (o + t)), the
-/// chronology's rate ([`lunar_chronology`]'s L, E, λ and o).
-///
-/// The linear part is closed: L ∫ G dt = L τ (1 − (1 + x)⁻³) ÷ (3x) with x = α τ ÷ b. The
-/// exponential part is eight-point Gauss–Legendre on eight equal panels of the window, where it
-/// is smooth: it matters only in a window's oldest Gyr, far from G's fall near t = 0. One for a
-/// window of no age or no craters.
-#[must_use]
-fn mean_square_relief(rim_m: f64, octave: &CraterOctave, system: Gigayears) -> f64 {
-    let tau = octave.window.value();
-    let total = octave.window_density.value();
-    if tau <= 0.0 || total <= 0.0 {
-        return 1.0;
-    }
-    let alpha = DIFFUSIVITY_M2_PER_MYR * 1e3 / (rim_m * rim_m);
-    let b = DEGRADATION_B;
-    let x = alpha * tau / b;
-    let linear = if x > 0.0 {
-        LINEAR_RATE * tau * -math::exp_m1(-3.0 * math::ln_1p(x)) / (3.0 * x)
-    } else {
-        LINEAR_RATE * tau
-    };
-    let offset = SOLAR_SYSTEM_AGE.value() - system.value();
-    let panels = 8_u8;
-    let width = tau / f64::from(panels);
-    let mut exponential = 0.0;
-    for panel in 0..panels {
-        let mid = width * (f64::from(panel) + 0.5);
-        let mut sum = 0.0;
-        for (node, weight) in GAUSS_LEGENDRE_8 {
-            let t = mid + 0.5 * width * node;
-            let fall = b / (alpha * t + b);
-            let g2 = fall * fall * fall * fall;
-            sum += weight * g2 * math::exp(EXPONENTIAL_RATE * (offset + t));
-        }
-        exponential += 0.5 * width * sum;
-    }
-    (linear + EXPONENTIAL_COEFFICIENT * EXPONENTIAL_RATE * exponential) / total
 }
 
 /// The deepest quadtree level whose narrowest cell, as a chord on a sphere of the figure's smallest
@@ -1326,7 +1690,7 @@ fn area_density_bound(cell: PatchKey, figure: &Spheroid) -> f64 {
 }
 
 /// A crater narrower than the boundary diameter, as the synthesis draws it: its octave, centre,
-/// fresh shape and age.
+/// fresh shape, age and wear.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SmallCrater {
     octave: u8,
@@ -1334,7 +1698,7 @@ pub struct SmallCrater {
     point_m: [f64; 3],
     shape: CraterShape,
     age: Gigayears,
-    diffusion: Metres,
+    wear: CraterWear,
 }
 
 impl SmallCrater {
@@ -1377,7 +1741,14 @@ impl SmallCrater {
     /// Its diffusion length ([`diffusion_length`] of its age).
     #[must_use]
     pub const fn diffusion(&self) -> Metres {
-        self.diffusion
+        self.wear.diffusion()
+    }
+
+    /// Its wear ([`CraterWear::of_age`] of its age in its octave), which its relief factor reads
+    /// (R09.T7.j).
+    #[must_use]
+    pub const fn wear(&self) -> CraterWear {
+        self.wear
     }
 }
 
@@ -1520,7 +1891,7 @@ impl SmallCraters {
             if diameter.value() < band.smallest.value() {
                 continue;
             }
-            let age = chronology_age(band.window_density * age_share, params.system_age());
+            let age = chronology_age(band.wear.window_density() * age_share, params.system_age());
             let shape = crater_shape(params, diameter);
             assert!(
                 shape.exterior_width() <= MAX_EXTERIOR_WIDTH,
@@ -1533,7 +1904,7 @@ impl SmallCraters {
                 point_m: figure.point(centre),
                 shape,
                 age,
-                diffusion: diffusion_length(age),
+                wear: CraterWear::of_age(age, &band.wear),
             });
         }
         craters
@@ -1594,8 +1965,8 @@ impl SmallCraters {
     /// R09.T4's base elevation returns its own (the gradient of the height as a function of
     /// direction).
     ///
-    /// Each crater is [`CraterProfile::new`] of the level's [`band_half_width`] and its own
-    /// [`diffusion_length`]: its rim filleted over the band and its relief scaled by its age.
+    /// Each crater is [`CraterProfile::new`] of the level's [`band_half_width`] and its own wear
+    /// ([`SmallCrater::wear`]): its rim filleted over the band and its relief scaled by its age.
     /// `cache` is the caller's; the result is independent of what it holds.
     ///
     /// # Panics
@@ -1615,7 +1986,7 @@ impl SmallCraters {
         let mut height = 0.0;
         let mut gradient = [0.0; 3];
         self.each_reaching(dir, through, cache, |crater, delta, distance| {
-            let profile = CraterProfile::new(crater.shape, band, crater.diffusion);
+            let profile = CraterProfile::new(crater.shape, band, crater.wear);
             let rim_m = 0.5 * crater.shape.diameter().value();
             let (h, slope) = profile.height_and_slope(distance / rim_m);
             height += h;

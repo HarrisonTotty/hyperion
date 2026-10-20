@@ -651,7 +651,8 @@ fn transition_shapes() -> Vec<CraterShape> {
 }
 
 /// Every profile the balance tests check: each contract's shapes at [`DIAMETERS_M`], filleted at
-/// every level of an Earth's figure for craters of 0, 0.3 and 4 Gyr; and its shapes at
+/// every level of an Earth's figure for craters of 0, 0.3 and 4 Gyr, the last two at shares of
+/// their octave's saturation of 0.5 and 1 (R09.T7.j); and its shapes at
 /// [`TRANSITION_RATIOS`], fresh, filleted at every level and at each of [`FILLET_RATIOS`] of their
 /// rim radius (R09.T7.i).
 fn profiles() -> Vec<CraterProfile> {
@@ -662,10 +663,10 @@ fn profiles() -> Vec<CraterProfile> {
     for params in contracts() {
         for d in DIAMETERS_M {
             let shape = crater_shape(&params, Metres::new(d));
-            for age in [0.0, 0.3, 4.0] {
-                let diffusion = diffusion_length(Gigayears::new(age));
+            for (age, share) in [(0.0, 0.0), (0.3, 0.5), (4.0, 1.0)] {
+                let wear = CraterWear::new(diffusion_length(Gigayears::new(age)), share);
                 for &band in &bands {
-                    all.push(CraterProfile::new(shape, band, diffusion));
+                    all.push(CraterProfile::new(shape, band, wear));
                 }
             }
         }
@@ -808,7 +809,7 @@ fn a_profile_without_a_fillet_is_the_fresh_profile() {
                 let x = f64::from(k) / 100.0;
                 assert_same_bits(plain.at(x).height_m, shape.relief(x).value());
                 assert_same_bits(
-                    profile(x, &shape, Metres::ZERO, Metres::ZERO).height_m,
+                    profile(x, &shape, Metres::ZERO, CraterWear::FRESH).height_m,
                     shape.relief(x).value(),
                 );
             }
@@ -1179,33 +1180,40 @@ fn the_band_sets_the_fillet_and_the_age_the_relief() {
         world(SyntheticWorld::MoonLike).header().craters(),
         Metres::new(1e3),
     );
-    let profile = CraterProfile::new(shape, Metres::new(20.0), Metres::new(150.0));
+    let wear = CraterWear::new(Metres::new(150.0), 0.3);
+    let profile = CraterProfile::new(shape, Metres::new(20.0), wear);
     assert_same_bits(profile.fillet_half_width().value(), 20.0);
     assert_same_bits(
         profile.relief_factor(),
-        relief_factor(Metres::new(500.0), Metres::new(150.0)),
+        relief_factor(Metres::new(500.0), wear),
     );
+}
+
+/// The wear of a diffusion length `diffusion_m` metres alone, no share of its octave's saturation.
+fn diffused(diffusion_m: f64) -> CraterWear {
+    CraterWear::new(Metres::new(diffusion_m), 0.0)
 }
 
 #[test]
 fn the_relief_factor_is_minton_s_depth_law() {
     // g = (b ÷ (K ÷ R² + b))², K = κt = L² ÷ 2: 1 when fresh, ¼ where K ÷ R² is b.
-    assert_same_bits(relief_factor(Metres::new(150.0), Metres::ZERO), 1.0);
+    assert_same_bits(relief_factor(Metres::new(150.0), CraterWear::FRESH), 1.0);
+    assert_same_bits(relief_factor(Metres::new(150.0), diffused(0.0)), 1.0);
     let rim = 150.0;
     let at_b = (2.0 * DEGRADATION_B).sqrt() * rim;
-    assert!((relief_factor(Metres::new(rim), Metres::new(at_b)) - 0.25).abs() < 1e-12);
+    assert!((relief_factor(Metres::new(rim), diffused(at_b)) - 0.25).abs() < 1e-12);
     let mut previous = 1.0;
     for k in 1..=40 {
-        let g = relief_factor(Metres::new(rim), Metres::new(10.0 * f64::from(k)));
+        let g = relief_factor(Metres::new(rim), diffused(10.0 * f64::from(k)));
         assert!(g < previous && g > 0.0, "{k}: {g}");
         previous = g;
     }
     // At 3 Gyr, K = 16,500 m²: a 300 m crater (K ÷ R² = 0.73, extrapolated beyond Minton et
     // al.'s fitted 0 to 0.3) keeps 2.9% of its relief, against Fassett and Thomson 2014's ~7%,
     // and a 1 km one (0.066) 48%, against their ~52%.
-    let diffusion = diffusion_length(Gigayears::new(3.0));
-    let small = relief_factor(Metres::new(150.0), diffusion);
-    let large = relief_factor(Metres::new(500.0), diffusion);
+    let diffusion = diffusion_length(Gigayears::new(3.0)).value();
+    let small = relief_factor(Metres::new(150.0), diffused(diffusion));
+    let large = relief_factor(Metres::new(500.0), diffused(diffusion));
     assert!((small - 0.0288).abs() < 5e-4, "{small}");
     assert!((large - 0.482).abs() < 5e-3, "{large}");
 }
@@ -1219,9 +1227,9 @@ fn a_degraded_crater_scales_its_filleted_profile_by_its_relief_factor() {
         let shape = crater_shape(&moon, Metres::new(d));
         let band = Metres::new(1.0);
         let filleted = CraterProfile::filleted(shape, band);
-        for age in [0.0, 0.3, 3.0] {
-            let diffusion = diffusion_length(Gigayears::new(age));
-            let degraded = CraterProfile::new(shape, band, diffusion);
+        for (age, share) in [(0.0, 0.0), (0.3, 0.0), (3.0, 0.0), (1.0, 0.6), (4.0, 1.0)] {
+            let wear = CraterWear::new(diffusion_length(Gigayears::new(age)), share);
+            let degraded = CraterProfile::new(shape, band, wear);
             let g = degraded.relief_factor();
             for k in 0..=300 {
                 let x = f64::from(k) / 100.0;
@@ -1231,7 +1239,10 @@ fn a_degraded_crater_scales_its_filleted_profile_by_its_relief_factor() {
                 assert_same_bits(slope, g * slope0);
             }
             let ratio = degraded.square_moment() / filleted.square_moment();
-            assert!((ratio / (g * g) - 1.0).abs() < 1e-12, "{d} m, {age} Gyr");
+            assert!(
+                (ratio / (g * g) - 1.0).abs() < 1e-12,
+                "{d} m, {age} Gyr, share {share}"
+            );
         }
     }
     // A 300 m bowl at 3 Gyr, filleted at an Earth's finest band: its relief from rim to floor
@@ -1241,7 +1252,7 @@ fn a_degraded_crater_scales_its_filleted_profile_by_its_relief_factor() {
     let degraded = CraterProfile::new(
         bowl,
         Metres::new(1.0),
-        diffusion_length(Gigayears::new(3.0)),
+        diffused(diffusion_length(Gigayears::new(3.0)).value()),
     );
     let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
     for k in 0..=2_000 {
@@ -1251,6 +1262,170 @@ fn a_degraded_crater_scales_its_filleted_profile_by_its_relief_factor() {
     }
     let kept = (high - low) / bowl.depth().value();
     assert!((0.01..0.06).contains(&kept), "{kept}");
+}
+
+/// (15 ÷ 32)², the relief a crater keeps at the visibility limit where κ is negligible:
+/// (b ÷ (`K_v` + b))² with b = 0.15 and `K_v` = 0.17.
+const AT_THE_LIMIT: f64 = (15.0 / 32.0) * (15.0 / 32.0);
+
+#[test]
+fn a_crater_at_the_visibility_limit_keeps_fifteen_thirty_seconds_squared_of_its_relief() {
+    // R09.T7.j: g = (b ÷ (K ÷ R² + b))² with K ÷ R² = max(κt ÷ R², K_v q): at q = 1 and no
+    // diffusion (b ÷ (K_v + b))² = (15 ÷ 32)², at every size; 1 to the bit when fresh, at q = 0
+    // and t = 0.
+    for rim in [1.0, 150.0, 25e3, 1e6] {
+        let at_limit = relief_factor(Metres::new(rim), CraterWear::new(Metres::ZERO, 1.0));
+        assert!(
+            (at_limit - AT_THE_LIMIT).abs() < 1e-12,
+            "{rim} m: {at_limit}"
+        );
+        assert_same_bits(relief_factor(Metres::new(rim), CraterWear::FRESH), 1.0);
+        assert_same_bits(
+            relief_factor(Metres::new(rim), CraterWear::new(Metres::ZERO, 0.0)),
+            1.0,
+        );
+    }
+    assert_eq!(CraterWear::default(), CraterWear::FRESH);
+    // The larger of the two readings binds, not their sum.
+    let rim = Metres::new(500.0);
+    for (l, q) in [
+        (100.0, 0.05),
+        (100.0, 0.5),
+        (300.0, 0.2),
+        (30.0, 1.0),
+        (0.0, 0.3),
+    ] {
+        let both = relief_factor(rim, CraterWear::new(Metres::new(l), q));
+        let kappa = relief_factor(rim, diffused(l));
+        let closure = relief_factor(rim, CraterWear::new(Metres::ZERO, q));
+        assert_same_bits(both, num::min(kappa, closure));
+    }
+    // κ's calibration stands where it was measured: a 1 km crater on 3 Gyr maria, its octave's
+    // production 0.07 of its saturation, keeps κ's 48% (K_v q = 0.012 against κt ÷ R² = 0.066).
+    let saturation = PerSquareKilometre::new(1e-2);
+    let maria = OctaveWear::new(
+        Gigayears::new(3.0),
+        SOLAR_SYSTEM_AGE,
+        saturation * 0.07,
+        saturation,
+    );
+    let age = Gigayears::new(3.0);
+    let worn = CraterWear::of_age(age, &maria);
+    assert!((worn.share() - 0.07).abs() < 1e-12, "{worn:?}");
+    let g = relief_factor(Metres::new(500.0), worn);
+    assert_same_bits(
+        g,
+        relief_factor(Metres::new(500.0), diffused(diffusion_length(age).value())),
+    );
+    assert!((g - 0.482).abs() < 5e-3, "{g}");
+    // A crater of no age is fresh, whatever its octave.
+    assert_eq!(
+        CraterWear::of_age(Gigayears::ZERO, &maria),
+        CraterWear::FRESH
+    );
+}
+
+#[test]
+fn a_crater_s_share_is_its_draw_share_on_a_saturated_octave() {
+    // q = N(t) P ÷ (N_S S), computed from the crater's age: on a capped octave its draw share u,
+    // the age being chronology_age(u N_w), N_w = N_S S ÷ P; on an uncapped one u P ÷ S.
+    let (mut capped, mut open) = (0, 0);
+    for kind in WORLDS {
+        let header = world(kind).header();
+        let system = header.craters().system_age();
+        for octave in CraterOctaves::new(header).octaves() {
+            let wear = octave.wear();
+            let (p, s) = (octave.production().value(), octave.saturation().value());
+            if p <= 0.0 {
+                assert_same_bits(wear.share_at(octave.window()), 0.0);
+                continue;
+            }
+            let per_share = if octave.is_saturated() {
+                capped += 1;
+                1.0
+            } else {
+                open += 1;
+                p / s
+            };
+            for k in 0..=100 {
+                let u = f64::from(k) / 100.0;
+                let age = chronology_age(wear.window_density() * u, system);
+                let q = CraterWear::of_age(age, wear).share();
+                assert!(
+                    (q - u * per_share).abs() < 1e-12,
+                    "{kind:?} octave {} at u = {u}: {q}",
+                    octave.index()
+                );
+            }
+        }
+    }
+    assert!(capped >= 5 && open >= 5, "{capped} capped, {open} open");
+    // Each crater drawn carries its age's wear in its octave.
+    let craters = small(SyntheticWorld::MoonLike);
+    let mut cache = CraterCache::new();
+    let mut seen = 0;
+    for octave in craters.octaves().octaves() {
+        for dir in random_dirs(0x7765_6172, 8) {
+            let cell = PatchKey::containing(octave.level(), dir).unwrap();
+            for crater in craters.craters_in(octave.index(), cell, &mut cache) {
+                assert_eq!(
+                    crater.wear(),
+                    CraterWear::of_age(crater.age(), octave.wear())
+                );
+                assert_same_bits(
+                    crater.diffusion().value(),
+                    crater.wear().diffusion().value(),
+                );
+                seen += 1;
+            }
+        }
+    }
+    assert!(seen > 100, "{seen} craters");
+}
+
+#[test]
+fn a_saturated_octave_of_50_km_craters_keeps_the_equilibrium_s_mean_square_relief() {
+    // Ages uniform in N over a capped window put q uniform on [0, 1], so where κ is negligible
+    // E[g²] = ∫₀¹ (b ÷ (K_v q + b))⁴ dq = (b ÷ K_v)(1 − (b ÷ (K_v + b))³) ÷ 3 = 0.2638.
+    let b = DEGRADATION_B;
+    let fall = b / (VISIBILITY_COEFFICIENT + b);
+    let equilibrium = b / VISIBILITY_COEFFICIENT * (1.0 - fall * fall * fall) / 3.0;
+    assert!((equilibrium - 0.2638).abs() < 5e-5, "{equilibrium}");
+    // The lunar highlands' 4.4 Gyr density, at which the octave is capped.
+    let highlands = Gigayears::new(4.4);
+    let params =
+        crate::testing::moon_like_crater_params(lunar_chronology(highlands, SOLAR_SYSTEM_AGE));
+    let system = params.system_age();
+    let octave = DiameterOctave::new(Metres::new(50e3)).unwrap();
+    let (lo, hi) = (octave.lower(), octave.upper());
+    let production = PerSquareKilometre::new(
+        cumulative_density(&params, lo).value() - cumulative_density(&params, hi).value(),
+    );
+    let capped = PerSquareKilometre::new(saturation(lo).value() - saturation(hi).value());
+    let wear = OctaveWear::new(highlands, system, production, capped);
+    assert!(
+        production.value() > capped.value(),
+        "{production:?} {capped:?}"
+    );
+    let closed = wear.mean_square_relief(Metres::new(25e3));
+    assert!(
+        (closed - equilibrium).abs() < 1e-3,
+        "{closed} against {equilibrium}"
+    );
+    // And densely, ages uniform in N: 10⁴ at the midpoints of the window's shares.
+    let draws = 10_000;
+    let mut sum = 0.0;
+    for k in 0..draws {
+        let u = (f64::from(k) + 0.5) / f64::from(draws);
+        let age = chronology_age(wear.window_density() * u, system);
+        let g = relief_factor(Metres::new(25e3), CraterWear::of_age(age, &wear));
+        sum += g * g;
+    }
+    let dense = sum / f64::from(draws);
+    assert!(
+        (closed / dense - 1.0).abs() < 1e-3,
+        "{closed} against {dense}"
+    );
 }
 
 #[test]
@@ -1535,7 +1710,7 @@ fn octave_height(
             let chord = [0, 1, 2].map(|a| point[a] - centre[a]);
             let distance = dot(chord, chord).sqrt();
             if distance < crater.shape().reach().value() {
-                let profile = CraterProfile::new(*crater.shape(), band, crater.diffusion());
+                let profile = CraterProfile::new(*crater.shape(), band, crater.wear());
                 height += profile
                     .at(distance / (0.5 * crater.diameter().value()))
                     .height_m;
@@ -1588,27 +1763,43 @@ fn an_octave_s_closed_form_variance_is_near_its_sampled_one() {
     }
 }
 
-/// The mean of g² over `octave`'s window for craters of rim radius `rim_m`, densely: Σ G(t) ΔN
-/// over 8,000 panels of the window, geometric in t from 10⁻¹² of it, by the chronology's own
-/// differences.
+/// The mean of g² over `octave`'s window for craters of rim radius `rim_m`, densely, ages uniform
+/// in the production: Σ G(t) ΔN over 10⁴ panels of the window by the chronology's own differences,
+/// each g by the public law, [`relief_factor`] of the crater's [`CraterWear::of_age`] at the
+/// panel's middle (R09.T7.j). The first 5,000 panels are geometric in t from 10⁻¹² of the window
+/// to a hundredth of it, where κ's g² falls by orders of magnitude, and the rest even in t, where
+/// the exponential's dN is steep: geometric panels throughout put a 6 × 10⁻⁴ error on the Moon-like
+/// world's capped bowls (measured against 10⁶ panels; the closed form is within 10⁻⁷ of that).
 fn dense_mean_square_relief(rim_m: f64, octave: &CraterOctave, system: Gigayears) -> f64 {
     let tau = octave.window().value();
     let n = |t: f64| lunar_chronology(Gigayears::new(t), system).value();
-    let panels = 8_000;
+    let panels = 5_000;
     let first = 1e-12 * tau;
-    let ratio = math::powf(tau / first, 1.0 / f64::from(panels));
+    let knee = 1e-2 * tau;
+    let ratio = math::powf(knee / first, 1.0 / f64::from(panels));
     let g2 = |t: f64| {
-        let g = relief_factor(Metres::new(rim_m), diffusion_length(Gigayears::new(t)));
+        let wear = CraterWear::of_age(Gigayears::new(t), octave.wear());
+        let g = relief_factor(Metres::new(rim_m), wear);
         g * g
     };
     let mut total = g2(0.5 * first) * n(first);
     let mut lo = first;
-    for _ in 0..panels {
-        let hi = num::min(lo * ratio, tau);
+    for k in 0..panels {
+        let hi = if k + 1 == panels { knee } else { lo * ratio };
         total += g2((lo * hi).sqrt()) * (n(hi) - n(lo));
         lo = hi;
     }
-    total / octave.window_density.value()
+    let width = (tau - knee) / f64::from(panels);
+    for k in 0..panels {
+        let hi = if k + 1 == panels {
+            tau
+        } else {
+            knee + width * f64::from(k + 1)
+        };
+        total += g2(f64::midpoint(lo, hi)) * (n(hi) - n(lo));
+        lo = hi;
+    }
+    total / octave.wear().window_density().value()
 }
 
 #[test]
@@ -1659,7 +1850,7 @@ fn the_closed_form_variance_is_its_dense_quadrature() {
                     continue;
                 }
                 let rim = 0.5 * d.value();
-                let closed_g2 = mean_square_relief(rim, &octave, system);
+                let closed_g2 = octave.wear().mean_square_relief(Metres::new(rim));
                 let dense_g2 = dense_mean_square_relief(rim, &octave, system);
                 assert!(
                     (closed_g2 / dense_g2 - 1.0).abs() < 1e-3,
@@ -1714,6 +1905,47 @@ fn the_closed_form_variance_is_its_dense_quadrature() {
             }
         }
     }
+}
+
+#[test]
+fn every_octave_s_mean_square_relief_is_its_dense_sum() {
+    // R09.T7.j's closed form against the dense sum (10⁴ ages uniform in N, each g by the public
+    // law) to 0.1%, T7.b's standard, at every node of every octave of every cratered synthetic
+    // world, the capped octaves' split between κ and the closure among them; each node's mean the
+    // closed form's, to the bit. Measured within 6 × 10⁻⁶ (printed).
+    let mut worst = (0.0, String::new());
+    let mut split = 0;
+    for kind in WORLDS {
+        let header = world(kind).header();
+        let system = header.craters().system_age();
+        let octaves = CraterOctaves::new(header);
+        for (octave, nodes) in octaves.octaves().iter().zip(&octaves.nodes) {
+            for node in nodes {
+                let rim = 0.5 * node.ground.shape.diameter().value();
+                let closed = octave.wear().mean_square_relief(Metres::new(rim));
+                assert_same_bits(closed, node.relief2);
+                let dense = dense_mean_square_relief(rim, octave, system);
+                let off = (closed / dense - 1.0).abs();
+                let at = format!("{kind:?} octave {} at {rim} m", octave.index());
+                assert!(off < 1e-3, "{at}: {closed} against {dense}");
+                if off > worst.0 {
+                    worst = (off, at);
+                }
+                let alpha = DIFFUSIVITY_M2_PER_MYR * 1e3 / (rim * rim);
+                let tau = octave.window().value();
+                let end = octave.wear().diffusion_ends_at(
+                    alpha,
+                    VISIBILITY_COEFFICIENT * octave.wear().share_per_density_km2,
+                    SOLAR_SYSTEM_AGE.value() - system.value(),
+                );
+                if end > 0.0 && end < tau {
+                    split += 1;
+                }
+            }
+        }
+    }
+    eprintln!("worst {:.3e} ({}); {split} nodes split", worst.0, worst.1);
+    assert!(split > 0, "no node splits between κ and the closure");
 }
 
 /// ∫ f(x) 2x dx over [0, `reach`] by the midpoint rule on `panels` equal panels, blind to where a
@@ -2072,6 +2304,42 @@ fn measure_the_kept_octaves_sharpening_and_the_octaves_left_out() {
                     mean_square / closed
                 );
             }
+        }
+    }
+}
+
+/// The tests that read the clock, which the browser target cannot.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+mod native_only {
+    use std::time::Instant;
+
+    use super::*;
+
+    /// [`CraterOctaves::for_body`]'s construction time on each cratered synthetic world, the mean
+    /// of 20, printed (R09.T7.j's report beside T7.h's 0.9–13 ms; `--profile slow-test`, one
+    /// thread, `--ignored --nocapture`).
+    #[test]
+    #[ignore = "measurement, by hand: cargo test -p hyperion-surface --profile slow-test --lib synth::craters::tests::native_only::measure_the_octaves_construction_time -- --ignored --nocapture --test-threads 1"]
+    fn measure_the_octaves_construction_time() {
+        for kind in WORLDS {
+            let header = world(kind).header();
+            let runs = 20_u32;
+            let start = Instant::now();
+            for _ in 0..runs {
+                let octaves = CraterOctaves::for_body(
+                    *header.craters(),
+                    header.figure(),
+                    header.boundary_diameter(),
+                    header.surface_age(),
+                );
+                assert_ne!(octaves.octaves().len(), 0);
+            }
+            let each = start.elapsed().as_secs_f64() / f64::from(runs);
+            eprintln!(
+                "{kind:?}: CraterOctaves::for_body {:.2} ms, {} octaves",
+                1e3 * each,
+                CraterOctaves::new(header).octaves().len()
+            );
         }
     }
 }

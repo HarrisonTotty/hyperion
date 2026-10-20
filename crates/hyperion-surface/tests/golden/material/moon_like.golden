@@ -11,7 +11,7 @@
 4 0x3fd3cfd142661de0 0xbfe5b8cd70422876 1 Regolith 0
 1 0xbfb44005716acd37 0x3fcfee7be05d478c 1 Regolith 0
 5 0x3fd4a92892dc090c 0x3fd3334e7e6e7fec 1 Regolith 0
-4 0xbfddac5b8633c3b7 0xbfd1fd5e2bd9962a 0 Bedrock 0
+4 0xbfddac5b8633c3b7 0xbfd1fd5e2bd9962a 1 Regolith 0
 3 0xbfe2e906996a1b12 0xbfa1e8b57579f40c 1 Regolith 0
 5 0xbfe726889dc291d6 0xbfdd00c147ee7b58 1 Regolith 0
 2 0x3fea98462b39ee17 0x3fb0170db0d669fc 1 Regolith 0
@@ -242,7 +242,7 @@
 1 0xbfe56e37d1d85fc3 0x3feb1c1eb80355d4 1 Regolith 0
 5 0xbfd8df83d8062efa 0xbfedee776ab60040 1 Regolith 0
 4 0xbfea5f80ca632420 0x3fa27c3713573c00 1 Regolith 0
-0 0xbfe0a54d9c8ea5c0 0x3f9c343365dbac3d 0 Bedrock 0
+0 0xbfe0a54d9c8ea5c0 0x3f9c343365dbac3d 1 Regolith 0
 1 0xbfdd103c919ebd55 0xbfb755c71e54639b 1 Regolith 0
 0 0xbfb22d38796ccf13 0x3fd54ac19cd0a412 1 Regolith 0
 3 0x3feebdb4395aecab 0xbfc1e16130c43c66 1 Regolith 0
@@ -299,7 +299,7 @@
 4 0x3fd3fa69ad6f81de 0x3fdf8a99b0546690 1 Regolith 0
 0 0x3fcf8742e1062646 0x3fe5c261a8c280d0 1 Regolith 1
 3 0xbfecc4fa925f5bd5 0x3feb0ef964619877 1 Regolith 0
-2 0xbfe3f2f7e4bcc1f6 0x3fd2b99fc757c9fb 0 Bedrock 0
+2 0xbfe3f2f7e4bcc1f6 0x3fd2b99fc757c9fb 1 Regolith 0
 2 0x3fc1f686d7b84490 0x3fe2916d5c91a286 1 Regolith 0
 0 0xbfed6781b4cd986b 0xbfe74d8ab85ac17f 1 Regolith 0
 1 0xbfe3b0f09e12e04e 0xbfe5618655eb7086 1 Regolith 0
@@ -495,7 +495,7 @@
 2 0xbfa701ce1b6f6c5a 0xbfa02b8bbf3b30ff 1 Regolith 0
 2 0xbfeaccf0461aae5c 0xbfde07affa58d548 1 Regolith 0
 1 0x3fd7c8afb824d922 0x3fe6e8dfc26e3813 1 Regolith 0
-0 0x3fe25df8d9dc14e7 0xbfeaea603296074c 0 Bedrock 0
+0 0x3fe25df8d9dc14e7 0xbfeaea603296074c 1 Regolith 0
 4 0x3fcdd78e67b8aded 0x3fe14fa38da98aec 1 Regolith 0
 1 0x3fec3734ffd61ec7 0xbfd35c31c5a9385c 1 Regolith 0
 4 0x3f8184643bffb5f1 0x3fda204855752bf6 1 Regolith 0
@@ -825,7 +825,7 @@
 3 0xbfeec9c62316158b 0xbfc54359e58ac40c 1 Regolith 0
 2 0xbfe9c5fac52f9448 0x3fe31790e8126b76 1 Regolith 0
 1 0xbfe2558f4140e956 0x3fd1e43b125d8d42 1 Regolith 1
-2 0x3feba4729a045d81 0xbfc7d715387c3116 0 Bedrock 0
+2 0x3feba4729a045d81 0xbfc7d715387c3116 1 Regolith 0
 1 0xbfe097cdfc004eb8 0xbfc6fc60e7663b65 1 Regolith 0
 4 0xbfc6ad726309101e 0xbfec3ac4319746ab 1 Regolith 0
 3 0xbfd841ffaa21f245 0xbfd294700bc97804 1 Regolith 0
@@ -865,7 +865,7 @@
 3 0xbfbaabcadad68d06 0x3fc49516aed21f2d 1 Regolith 0
 2 0x3fdeea28f3335c27 0xbfeb97b120f13a22 1 Regolith 0
 5 0xbfc887ddd90e4a1c 0x3fe0b0b752ee6a8a 1 Regolith 0
-5 0xbfe437ece2b519c1 0x3fe5ebc17de8c1dc 0 Bedrock 0
+5 0xbfe437ece2b519c1 0x3fe5ebc17de8c1dc 1 Regolith 0
 0 0x3fbd498826221e37 0x3fdf3a348a6394ad 1 Regolith 0
 4 0xbfe735ad51fe6d9c 0x3fd1a70ec7f53258 1 Regolith 0
 1 0xbfca84f7ca0049ba 0x3fd3f2bc4c16fd84 1 Regolith 0

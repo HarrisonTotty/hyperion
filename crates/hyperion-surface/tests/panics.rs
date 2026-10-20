@@ -945,14 +945,14 @@ fn a_chronology_age_of_a_nan_density_is_refused() {
 /// The small craters' refusals (R09.T7.b).
 mod small_craters {
     use hyperion_base::rng::DetailSeed;
-    use hyperion_base::units::{Gigayears, Metres};
-    use hyperion_surface::craters::crater_shape;
+    use hyperion_base::units::{Gigayears, Metres, PerSquareKilometre};
+    use hyperion_surface::craters::{SOLAR_SYSTEM_AGE, crater_shape};
     use hyperion_surface::cube::PatchKey;
     use hyperion_surface::field::FieldView;
     use hyperion_surface::synth::BandLevel;
     use hyperion_surface::synth::craters::{
-        CraterCache, CraterOctaves, CraterProfile, SmallCraters, diffusion_length, profile,
-        relief_factor, structure_function, unresolved_variance,
+        CraterCache, CraterOctaves, CraterProfile, CraterWear, OctaveWear, SmallCraters,
+        diffusion_length, profile, relief_factor, structure_function, unresolved_variance,
     };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
@@ -970,16 +970,96 @@ mod small_craters {
     }
 
     #[test]
-    #[should_panic(expected = "a rim radius must be finite and positive and a diffusion length")]
-    fn a_relief_factor_of_a_negative_diffusion_is_refused() {
-        let _ = relief_factor(Metres::new(10.0), Metres::new(-1.0));
+    #[should_panic(expected = "a rim radius must be finite and positive")]
+    fn a_relief_factor_of_no_rim_radius_is_refused() {
+        let _ = relief_factor(Metres::ZERO, CraterWear::FRESH);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "a crater's diffusion length and share must be finite and non-negative"
+    )]
+    fn a_wear_of_a_negative_diffusion_is_refused() {
+        let _ = CraterWear::new(Metres::new(-1.0), 0.0);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "a crater's diffusion length and share must be finite and non-negative"
+    )]
+    fn a_wear_of_a_negative_share_is_refused() {
+        let _ = CraterWear::new(Metres::ZERO, -0.5);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "a crater's diffusion length and share must be finite and non-negative"
+    )]
+    fn a_wear_of_a_nan_share_is_refused() {
+        let _ = CraterWear::new(Metres::ZERO, f64::NAN);
+    }
+
+    #[test]
+    #[should_panic(expected = "an octave's production must be finite and non-negative and its")]
+    fn an_octave_s_wear_of_no_saturation_is_refused() {
+        let _ = OctaveWear::new(
+            Gigayears::new(4.0),
+            SOLAR_SYSTEM_AGE,
+            PerSquareKilometre::new(1e-3),
+            PerSquareKilometre::ZERO,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "an octave's production must be finite and non-negative and its")]
+    fn an_octave_s_wear_of_a_nan_production_is_refused() {
+        let _ = OctaveWear::new(
+            Gigayears::new(4.0),
+            SOLAR_SYSTEM_AGE,
+            PerSquareKilometre::new(f64::NAN),
+            PerSquareKilometre::new(1e-3),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "an octave's production must be finite and non-negative and its")]
+    fn an_octave_s_wear_of_a_negative_production_is_refused() {
+        let _ = OctaveWear::new(
+            Gigayears::new(4.0),
+            SOLAR_SYSTEM_AGE,
+            PerSquareKilometre::new(-1e-3),
+            PerSquareKilometre::new(1e-3),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "is older than its system")]
+    fn an_octave_s_wear_of_a_surface_older_than_its_system_is_refused() {
+        let _ = OctaveWear::new(
+            Gigayears::new(2.0),
+            Gigayears::new(1.0),
+            PerSquareKilometre::new(1e-3),
+            PerSquareKilometre::new(1e-3),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "a rim radius must be finite and positive")]
+    fn an_octave_s_mean_square_relief_of_no_rim_radius_is_refused() {
+        let wear = OctaveWear::new(
+            Gigayears::new(4.0),
+            SOLAR_SYSTEM_AGE,
+            PerSquareKilometre::new(1e-3),
+            PerSquareKilometre::new(1e-3),
+        );
+        let _ = wear.mean_square_relief(Metres::new(f64::NAN));
     }
 
     #[test]
     #[should_panic(expected = "a fillet's half-width must be finite and non-negative")]
     fn a_profile_of_a_negative_band_is_refused() {
         let shape = crater_shape(&lunar_craters(), Metres::new(100.0));
-        let _ = CraterProfile::new(shape, Metres::new(-1.0), Metres::ZERO);
+        let _ = CraterProfile::new(shape, Metres::new(-1.0), CraterWear::FRESH);
     }
 
     #[test]
@@ -993,7 +1073,7 @@ mod small_craters {
     #[should_panic(expected = "a distance from a crater's centre must be finite and non-negative")]
     fn a_profile_at_a_negative_distance_is_refused() {
         let shape = crater_shape(&lunar_craters(), Metres::new(100.0));
-        let _ = profile(-0.5, &shape, Metres::new(1.0), Metres::ZERO);
+        let _ = profile(-0.5, &shape, Metres::new(1.0), CraterWear::FRESH);
     }
 
     #[test]

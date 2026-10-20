@@ -213,7 +213,7 @@ fn assert_whole_sigma_h(world: Reference) {
 }
 
 /// Test 2 on `world`: the local share finer than the coarse cell's Nyquist wavelength, ÷ `σ_h`²,
-/// printed with its parts against its band; asserted on the Earth alone (below).
+/// printed with its parts against its band ([`TEST_2_BANDS`]).
 fn test_2_share(world: Reference) -> f64 {
     let f = finished(world);
     let sigma = f.inputs().sigma_h().value();
@@ -251,7 +251,9 @@ fn assert_structural_share(world: Reference) {
 /// Test 6 on `world`: the realised relief, the cells' range, lies at 6–16 `σ_h` (Design note 3's
 /// observed 7–15, widened by one `σ_h` each way), and bounds the reconstructed range, which is
 /// reported beside it. Main expected the reference Moon might miss (no large basin on this seed,
-/// and the coarse profile's filleted rims); it holds at 6.4 `σ_h`.
+/// and the coarse profile's filleted rims); it held at 6.4 `σ_h` as built, 6.5 after R09.T7.i and
+/// 6.9 after R09.T7.j, whose wear lowers its craters' relief and whose stretch of the non-crater
+/// field (`s_N` 1.95) raises the rest.
 fn assert_relief(world: Reference) {
     let f = finished(world);
     let sigma = f.inputs().sigma_h().value();
@@ -402,10 +404,16 @@ fn assert_one_profile(world: Reference) {
 }
 
 /// The scale's rule and figures on `world`: s\* and `s_N` positive and finite, the rule s\*'s,
-/// `s_N` within the bytes' rounding of s\* where s\* ≤ 1, and the bytes 0 where s\* > 1; reported
-/// beside main's estimates (§2.2.9).
+/// `s_N` within the bytes' rounding of s\* where s\* ≤ 1, and where s\* > 1 every crater keeps
+/// its byte, R1's rule (the craters before the entry against after, in list order), the largest
+/// of them positive so that the branch is not vacuous; and the second quadrature read exactly
+/// where s\* ≤ 1 and the bytes before differ (`scale_bytes`' test). Reported beside main's
+/// estimates (§2.2.9). Re-derived for R09.T7.j (`decision-r09-t7ij-refresh.md` Q1.1): as built
+/// it asserted the largest byte 0 where s\* > 1, true only of R09.T12.d's fresh bytes, which T7.j's
+/// wear makes positive on every cratered world.
 fn assert_scale_rule(world: Reference) {
-    let m = &finished(world).matched;
+    let f = finished(world);
+    let m = &f.matched;
     let s_star = m.whole_scale.unwrap();
     let s_n = m.non_crater_scale;
     eprintln!(
@@ -420,6 +428,9 @@ fn assert_scale_rule(world: Reference) {
         m.before.increase_m2
     );
     assert!(s_star.is_finite() && s_star > 0.0 && s_n.is_finite() && s_n > 0.0);
+    let before: Vec<u8> = f.cratered.craters.iter().map(|c| c.degradation).collect();
+    let after: Vec<u8> = f.working.craters.iter().map(|c| c.degradation).collect();
+    assert_eq!(before.len(), after.len(), "{world:?}");
     if s_star <= 1.0 {
         assert_eq!(m.rule, Rule::Whole);
         assert!(
@@ -428,8 +439,20 @@ fn assert_scale_rule(world: Reference) {
         );
     } else {
         assert_eq!(m.rule, Rule::NonCrater);
-        assert_eq!(m.largest_byte, 0, "{world:?}");
+        assert_eq!(after, before, "{world:?}");
+        let largest = before.iter().copied().max().unwrap_or(0);
+        assert_eq!(m.largest_byte, largest, "{world:?}");
+        assert!(
+            largest > 0,
+            "{world:?}: every byte 0 where the craters keep theirs"
+        );
     }
+    let differ = before.windows(2).any(|pair| pair[0] != pair[1]);
+    assert_eq!(
+        m.second_quadrature,
+        s_star <= 1.0 && differ,
+        "{world:?}: s* {s_star}, bytes before differ: {differ}"
+    );
 }
 
 /// The header-free closed forms are the field's on `world` (ruling R2): on its quantised field,
@@ -569,16 +592,161 @@ fn the_reference_mars_s_whole_pass_realises_its_sigma_h() {
     );
 }
 
-/// Test 2 on the reference Mars, Moon and Ceres, printed against Design note 7's bands (0.3–1% on
-/// Mars, 4–10% on the Moon, 3–8% on Ceres) and not asserted: main expected all three to miss, the
-/// crater model's calibration and not R09.T12.e's (§2.2.9), and ruled them kept for R09.T7.i–j
-/// (the plan's deferred findings). No band is loosened; the Earth's is asserted in the Earth's
-/// slow test.
+/// Test 2's bands, Design note 7's measured shares above `l_N` (the plan's own computation: 7, 5
+/// and 0.6%): each world's band and whether it is asserted, under main's ruling R7 (asserted
+/// where it holds, a miss printed with its parts, recorded and commented, never loosened).
+const TEST_2_BANDS: [(Reference, (f64, f64), Band); 4] = [
+    (Reference::Earth, (0.003, 0.01), Band::Asserted),
+    // Mars holds on its band's edge after R09.T7.j (0.99%; main's 1.0–1.1%). If a later change
+    // makes it miss, it moves to `Band::Reported` under R7, recorded; the band is never widened.
+    (Reference::Mars, (0.003, 0.01), Band::Asserted),
+    (Reference::Moon, (0.04, 0.10), Band::Asserted),
+    // Ceres misses below its band after R09.T7.j (2.46%), as main foresaw (2.4–2.7%): its octaves
+    // of 25–50 and 50–100 km are saturated (P ÷ S 1.01 and 1.32, E[g²] 0.264) and that of
+    // 100–200 km just under the cap (0.93, E[g²] 0.281), so they take nearly the whole wear (the
+    // brief estimated P ÷ S 0.85–0.96, E[g²] 0.27–0.30); and plan 14's `k_comp` is fitted to
+    // Ceres's whole non-structural relief, not all of which need be craters (addendum 4, D4.4).
+    // Recorded for P14.T48.a and R09.T12.d's re-validation (`09`'s deferred findings of
+    // R09.T7.i–j).
+    (Reference::Ceres, (0.03, 0.08), Band::Reported),
+];
+
+/// Whether a world's test-2 band is asserted or, where the world misses it, reported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Band {
+    Asserted,
+    Reported,
+}
+
+/// Test 2 on `world` against its band ([`TEST_2_BANDS`]): asserted where it holds; a miss
+/// printed with its parts.
+fn assert_test_2_band(world: Reference) {
+    let share = test_2_share(world);
+    assert!(share.is_finite() && share > 0.0, "{world:?}: {share}");
+    let &(_, (low, high), band) = TEST_2_BANDS
+        .iter()
+        .find(|(w, _, _)| *w == world)
+        .expect("every reference world has a band");
+    let holds = (low..=high).contains(&share);
+    match band {
+        Band::Asserted => assert!(holds, "{world:?}: {share} outside {low}–{high}"),
+        Band::Reported => eprintln!(
+            "{world:?}: test 2 misses its band, {:.2}% against {:.1}–{:.0}% (recorded)",
+            100.0 * share,
+            100.0 * low,
+            100.0 * high
+        ),
+    }
+}
+
+/// Test 2 on the reference Mars, Moon and Ceres against Design note 7's bands (0.3–1% on Mars,
+/// 4–10% on the Moon, 3–8% on Ceres), each asserted where it holds after R09.T7.j's wear and a
+/// miss printed with its parts ([`TEST_2_BANDS`]); the Earth's in the Earth's slow test. As built
+/// all three missed, the crater model's calibration (§2.2.9), which R09.T7.i–j's fixes address.
 #[test]
-fn the_local_share_finer_than_the_coarse_cell_is_reported() {
+fn the_local_share_finer_than_the_coarse_cell_is_in_its_band_where_it_holds() {
     for world in CHEAP {
-        let share = test_2_share(world);
-        assert!(share.is_finite() && share > 0.0, "{world:?}: {share}");
+        assert_test_2_band(world);
+    }
+}
+
+/// The reference world's crater term in expectation, rendered at the band limit, and plan 14's
+/// basin share, metres: `√(K_w + Σ_k e_k ⟨E_k[g²](D) ∫F(w₂)² dA⟩_k ÷ A)`, `K_w` the small
+/// craters' whole share, `e_k` each coarse octave's expected count (R09.T12.d's `octaves`),
+/// `E_k[g²](D)` the mean g² of its craters of diameter D by the closed form
+/// (`OctaveWear::mean_square_relief`), `⟨·⟩_k` the mean over its diameters by the production's
+/// distribution at eight Gauss–Legendre nodes in the diameter's share, as `CraterOctaves` takes
+/// them, and A the body's area; and plan 14's `Relief::of` basin share for the world's crust,
+/// gravity, radius and crater density. The brief wrote `E_k[g²] ⟨∫F(w₂)² dA⟩_k`: the two agree
+/// where `E[g²]` is the same at every diameter (every lunar coarse octave, 0.2638), and the node
+/// form is the exact expectation where it varies with D (Mars, Ceres).
+fn crater_term_in_expectation(world: Reference) -> (f64, f64) {
+    use crate::planetary::hooks::figures::relief::{Relief, ReliefInputs};
+    use crate::planetary::hooks::figures::{Crust as BasinCrust, TectonicRegime};
+    use crate::planetary::surface::steps::craters::tests::analytic_square;
+    use crate::tables::gauss_legendre::{GL8_NODES, GL8_WEIGHTS};
+    use hyperion_surface::craters::{UnitUniform, diameter_in_octave};
+    use hyperion_surface::geometry::BAND_LIMIT_M;
+    use hyperion_surface::synth::craters::CraterProfile;
+
+    let world_inputs = match world {
+        Reference::Earth => reference::earth_like(),
+        Reference::Mars => reference::mars_like(),
+        Reference::Moon => reference::moon_like(),
+        Reference::Ceres => reference::ceres_like(),
+    };
+    let built = World::new(world_inputs);
+    let pass = built.pass(reference::SEED);
+    let inputs = pass.inputs();
+    let params = inputs.craters();
+    // K_w, the budget's: every small octave whole, at twice D_b.
+    let d_b = boundary_diameter(pass.level(), inputs.radius());
+    let small = CraterOctaves::for_body(*params, inputs.figure(), d_b, inputs.surface_age())
+        .unresolved_variance(d_b * 2.0)
+        .value();
+    let mut coarse = 0.0;
+    for octave in craters::octaves(&pass) {
+        let mut mean = 0.0;
+        for (&node, &weight) in GL8_NODES.iter().zip(&GL8_WEIGHTS) {
+            let share =
+                UnitUniform::new(f64::midpoint(1.0, node)).expect("a node's share lies in [0, 1)");
+            let diameter = diameter_in_octave(params, octave.diameters, share);
+            let rim = 0.5 * diameter.value();
+            let ground = CraterProfile::filleted(
+                crater_shape(params, diameter),
+                Metres::new(0.5 * BAND_LIMIT_M),
+            );
+            let square_m4 = core::f64::consts::PI * rim * rim * analytic_square(&ground);
+            mean += 0.5 * weight * octave.wear.mean_square_relief(Metres::new(rim)) * square_m4;
+        }
+        coarse += octave.expected * mean;
+    }
+    let area_m2 = craters::spheroid_area_m2(&inputs.figure());
+    let term = (small + coarse / area_m2).sqrt();
+    let crust = if world == Reference::Ceres {
+        BasinCrust::IceRich
+    } else {
+        BasinCrust::Silicate
+    };
+    let basin = Relief::of(&ReliefInputs {
+        regime: TectonicRegime::StagnantLid,
+        continental_fraction: 0.0,
+        crust,
+        surface_gravity: inputs.gravity(),
+        radius: inputs.radius(),
+        crater_density: params.n_1km(),
+        volcanism: 0.0,
+        lithosphere: Metres::new(100e3),
+    })
+    .basin()
+    .value();
+    eprintln!(
+        "{world:?}: craters in expectation, rendered, {term:.0} m (small {:.0} m, coarse {:.0} m) \
+         against plan 14's basin share {basin:.0} m",
+        small.sqrt(),
+        (coarse / area_m2).sqrt()
+    );
+    (term, basin)
+}
+
+/// Plan 14's basin share against the reference Moon's crater term in expectation, rendered at the
+/// band limit, which R09.T7.j's wear brings within 25% of it (main's estimate 1,883–2,020 m;
+/// 3,671 m before; a check the law was not fitted to); Mars's and Ceres's printed beside plan
+/// 14's 0.89 and 1.87 km. 2.05 km is LOLA's 2.239 km `σ_h` with the stagnant lid's 0.9 km removed
+/// in quadrature (`BASIN_RELIEF`), so it holds the Moon's degree-1 shape and its nearside–farside
+/// asymmetry too (a centre-of-figure offset of about 1.9 km, from memory): an upper reference for
+/// the craters, which the 25% spans.
+#[test]
+fn the_moon_s_craters_in_expectation_are_plan_14_s_basin_share() {
+    for world in CHEAP {
+        let (term, basin) = crater_term_in_expectation(world);
+        if world == Reference::Moon {
+            assert!((basin - 2_050.0).abs() < 10.0, "{basin}");
+            assert!(
+                (term / basin - 1.0).abs() <= 0.25,
+                "{term} m against {basin} m"
+            );
+        }
     }
 }
 
@@ -674,8 +842,7 @@ fn the_figures_read_the_match_s_book_as_a_fresh_one() {
 fn the_reference_earth_holds_r09_t12e_s_tests() {
     let world = Reference::Earth;
     assert_whole_sigma_h(world);
-    let share = test_2_share(world);
-    assert!((0.003..=0.01).contains(&share), "{share}");
+    assert_test_2_band(world);
     let a2 = finished(world).matched.before.amplitude_square;
     assert!((0.6..=1.2).contains(&a2), "{a2}");
     assert_structural_share(world);
@@ -1166,39 +1333,39 @@ fn the_reflood_keeps_the_liquid_each_flooded_cell_held() {
 }
 
 /// Where the coarse craters' bytes differ, C′ is not C times one factor, so the match reads it in a
-/// second quadrature: on the reference Moon with every other crater worn to a byte of 40 and
-/// smoothed in again at it, the scale still meets plan 14's `σ_h` to 10⁻⁶, each byte is the
-/// nearest integer to 255 (1 − s\* g), and the state quantises.
+/// second quadrature: on the reference Moon asked for a `σ_h` of 1,200 m, whose own R09.T7.j bytes
+/// differ and whose whole field must scale down (s\* about 0.7), the scale still meets the `σ_h` to
+/// 10⁻⁶, each byte is the nearest integer to 255 (1 − s\* g), and the state quantises. Re-derived
+/// for R09.T7.j (`decision-r09-t7ij-refresh.md` Q1.2): as built it ran on the reference Moon itself
+/// with every other crater set to a byte of 40, since T12.d's bytes were 0 and the Moon's s\* 0.79;
+/// T7.j takes that s\* above 1, where no second quadrature is read. Only R09.T12.e's match reads
+/// `σ_h`, so the Moon's craters and non-crater field are the reference Moon's.
 #[test]
 fn uneven_bytes_are_read_in_a_second_quadrature() {
-    let f = finished(Reference::Moon);
-    let pass = f.pass();
-    let inputs = f.inputs();
-    let figure = inputs.figure();
-    let rims = CoarseRims::for_body(*inputs.craters(), figure, pass.level());
-    let mut working = f.cratered.clone();
-    for k in (1..working.craters.len()).step_by(2) {
-        let old = working.craters[k].clone();
-        craters::each_lift(f.grid(), &figure, &rims, &old, |cell, l| {
-            let state = &mut working.cells[slot(cell)];
-            state.elevation = Metres::new(state.elevation.value() - l);
-        });
-        working.craters[k].degradation = 40;
-        let new = working.craters[k].clone();
-        craters::each_lift(f.grid(), &figure, &rims, &new, |cell, l| {
-            let state = &mut working.cells[slot(cell)];
-            state.elevation = Metres::new(state.elevation.value() + l);
-        });
-    }
-    for cell in &mut working.cells {
-        cell.water_surface = cell.elevation;
-    }
+    let inputs = builder_of(&reference::moon_like())
+        .sigma_h(Metres::new(1_200.0))
+        .build()
+        .unwrap();
+    let world = World::new(inputs);
+    let pass = world.pass(reference::SEED);
+    let inputs = pass.inputs();
+    let mut working = Working::initial(&pass);
+    crate::planetary::surface::steps::plates::run(&pass, &mut working);
+    run(&pass, &mut working);
+    craters::run(&pass, &mut working);
+    let bytes: Vec<u8> = working.craters.iter().map(|c| c.degradation).collect();
+    assert!(
+        bytes.windows(2).any(|pair| pair[0] != pair[1]),
+        "the reference Moon's bytes are alike"
+    );
     let before: Vec<f64> = working.craters.iter().map(kept_relief).collect();
     working.spectrum = structural_spectrum(inputs);
     let matched = budget::match_sigma_h(&pass, &mut working);
+    let s_star = matched.whole_scale.unwrap();
+    eprintln!("the reference Moon at a σ_h of 1,200 m: s* {s_star:.4}");
+    assert!(s_star <= 1.0, "{s_star}");
     assert!(matched.second_quadrature);
     assert_eq!(matched.rule, Rule::Whole);
-    let s_star = matched.whole_scale.unwrap();
     for (crater, &g) in working.craters.iter().zip(&before) {
         let want = (255.0 * (1.0 - s_star * g)).round().clamp(0.0, 255.0);
         assert_same_bits(f64::from(crater.degradation), want);

@@ -120,10 +120,12 @@
 //! - **The wear g**: a crater's ejecta fade as its relief does, by the same gardening (Grier et al.
 //!   2000, p. 1: "the ejecta of small craters appears to mature faster than that of larger
 //!   craters"). g is the crater's kept relief exactly as the synthesis computes it: a small
-//!   crater's [`relief_factor`] of its rim radius and diffusion length, a coarse crater's
-//!   [`kept_relief`](crate::synth::craters::rims::kept_relief), one less its degradation. Tycho
-//!   keeps g ≈ 1 (κt ÷ R² ≈ 3 × 10⁻⁷), so `τ_L`'s calibration is untouched; a 25 m crater keeps 21%
-//!   of its relief after 5 Myr.
+//!   crater's [`relief_factor`] of its rim radius and its wear ([`SmallCrater::wear`]: the larger
+//!   of its diffusion and its octave's equilibrium closure, R09.T7.j), a coarse crater's
+//!   [`kept_relief`](crate::synth::craters::rims::kept_relief), one less its degradation, which the
+//!   coarse pass sets by the same law. Tycho keeps g ≈ 1 (κt ÷ R² ≈ 3 × 10⁻⁷, and its octave's
+//!   closure `K_v` q of order 10⁻⁴ on a saturated lunar surface), so `τ_L`'s calibration is
+//!   untouched; a 25 m crater keeps 21% of its relief after 5 Myr by κ.
 //!
 //! The halo, the excavation and the wear together keep old, small craters from leaving most of
 //! the ground immature: on a 3.5 Gyr Moon-like surface, the ruling's estimates of the ground whose
@@ -171,9 +173,13 @@
 //!   fresh ground from the largest, the kept density per m² times the mean of π (R x*)² over the
 //!   octave's diameters and ages where d < δ₀. The diameters are the eight Gauss–Legendre nodes
 //!   on the octave's kept share through its own inversion, as its closed forms take them; the ages
-//!   are the draw's, `chronology_age`(u × N(τ; A), A) of a uniform u, by eight-point
-//!   Gauss–Legendre on 24 panels of u graded towards 0, [0, 2⁻²³] and then halvings up to [½, 1],
-//!   which resolve the young end, where g falls on the scale b R² ÷ κ (27 kyr for a 2 m crater).
+//!   are the draw's, `chronology_age`(u × `N_w`, A) of a uniform u at the window's density `N_w`
+//!   ([`OctaveWear::window_density`](crate::synth::craters::OctaveWear::window_density)), by
+//!   eight-point Gauss–Legendre on 24 panels of u graded towards 0, [0, 2⁻²³] and then halvings up
+//!   to [½, 1], which resolve the young end, where g falls on the scale b R² ÷ κ (27 kyr for a 2 m
+//!   crater). Each age node's g reads its wear in the octave ([`CraterWear::of_age`]: the share q
+//!   = u at the node on a saturated octave and u P ÷ S on an unsaturated one, R09.T7.j), as the
+//!   draw's craters do.
 //! - **The coarse craters.** `F_c`(d) = max(0, 1 − Σ π (R x*)² ÷ A) over the field's list in order,
 //!   each crater with its own shape, its halo ending at its reach (1 + a) and g its kept relief,
 //!   and A the body's area, its cells' summed in index order as
@@ -232,9 +238,7 @@ use super::{
     weathered_entry_bvr,
 };
 use crate::craters::density::GAUSS_LEGENDRE_8;
-use crate::craters::{
-    UnitUniform, chronology_age, crater_shape, diameter_in_octave, lunar_chronology,
-};
+use crate::craters::{UnitUniform, chronology_age, crater_shape, diameter_in_octave};
 use crate::cube::{Edge, FaceUv, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir};
 use crate::field::{
     CoarseField, FieldHeader, FieldView, MaterialPalette, PaletteEntry, PaletteRole, cell_at_index,
@@ -242,7 +246,7 @@ use crate::field::{
 use crate::substance_key::{SubstanceKey, SubstanceKeyForm};
 use crate::synth::craters::rims::kept_relief;
 use crate::synth::craters::{
-    CraterCache, CraterOctave, SmallCrater, cell_area, diffusion_length, relief_factor,
+    CraterCache, CraterOctave, CraterWear, SmallCrater, cell_area, relief_factor,
 };
 use crate::synth::{QueryHeightError, SmallCraters, SynthCache, Synthesiser};
 
@@ -815,7 +819,7 @@ pub fn maturity_at<F: FieldView>(
             smallest_radius_m,
             cache.craters_mut(),
             |crater, x| {
-                let share = small_crater_wear(crater.diameter() * 0.5, crater.age())
+                let share = small_crater_wear(crater.diameter() * 0.5, crater.wear())
                     * excavated_share(surface_age, crater.age(), crater.diameter())
                     * halo_share(x, HALO_EXTENT_RIM_RADII);
                 take(deficit_of(body, crater.age(), rate, share));
@@ -836,16 +840,19 @@ fn deficit_of(body: f64, age: Gigayears, rate: f64, share: f64) -> f64 {
     }
 }
 
-/// The wear g of a small crater of rim radius `rim_radius` and age `age`, in [0, 1]: its kept
-/// relief as the synthesis computes it, [`relief_factor`] of its rim radius and its
-/// [`diffusion_length`].
+/// The wear g of a small crater of rim radius `rim_radius` and wear `wear`, in [0, 1]: its kept
+/// relief as the synthesis computes it, [`relief_factor`] of its rim radius and its wear, the
+/// larger of its diffusion and its octave's equilibrium closure (R09.T7.j). [`maturity_at`] gives
+/// it each crater's own [`SmallCrater::wear`], and the mix each age node's,
+/// [`CraterWear::of_age`] in the node's octave, which is q = u at the node's draw share u on a
+/// saturated octave and u P ÷ S on an unsaturated one, as the draw's are.
 ///
 /// The one helper that [`maturity_at`] and the body's maturity mix ([`maturity_mix`]) both take a
 /// small crater's g from, so that the two cannot disagree and one change moves both
 /// (decision-r10-t1c-halo R3).
 #[must_use]
-fn small_crater_wear(rim_radius: Metres, age: Gigayears) -> f64 {
-    relief_factor(rim_radius, diffusion_length(age))
+fn small_crater_wear(rim_radius: Metres, wear: CraterWear) -> f64 {
+    relief_factor(rim_radius, wear)
 }
 
 /// Whether some crater of `octave` can expose fresh ground on a surface `surface_age` old: it draws
@@ -1287,14 +1294,16 @@ fn halo_law(synth: &Synthesiser<'_, CoarseField>, scheme: &MixScheme<'_>) -> Opt
         if !can_expose(octave, surface_age) {
             continue;
         }
-        // The draw's ages: a uniform u of the window's count, through the chronology's inverse.
-        let window_density = lunar_chronology(octave.window(), system);
-        let dated: Vec<(Gigayears, f64, f64)> = shares
+        // The draw's ages: a uniform u of the window's count, through the chronology's inverse, at
+        // the draw's own window density, and each age's wear in the octave (R09.T7.j).
+        let window_density = octave.wear().window_density();
+        let dated: Vec<(Gigayears, CraterWear, f64, f64)> = shares
             .iter()
             .map(|&(u, weight)| {
                 let age = chronology_age(window_density * u, system);
                 (
                     age,
+                    CraterWear::of_age(age, octave.wear()),
                     ejecta_deficit(body, maturity_after(age, rate), 1.0),
                     weight,
                 )
@@ -1310,9 +1319,9 @@ fn halo_law(synth: &Synthesiser<'_, CoarseField>, scheme: &MixScheme<'_>) -> Opt
             let diameter = diameter_in_octave(params, octave.diameters(), size);
             let rim = diameter * 0.5;
             let disc_m2 = 0.5 * weight * core::f64::consts::PI * rim.value() * rim.value();
-            for &(age, fresher, age_weight) in &dated {
+            for &(age, wear, fresher, age_weight) in &dated {
                 if fresher > 0.0 {
-                    let deficit = small_crater_wear(rim, age)
+                    let deficit = small_crater_wear(rim, wear)
                         * excavated_share(surface_age, age, diameter)
                         * fresher;
                     if deficit > 0.0 {
@@ -1476,7 +1485,7 @@ mod tests {
     use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::*;
-    use crate::craters::{CraterParams, cumulative_density, lunar_chronology};
+    use crate::craters::{cumulative_density, lunar_chronology};
     use crate::cube::{Face, st_to_uv, xyz_to_face_uv};
     use crate::field::{BVR_EFFECTIVE_WAVELENGTHS_NM, CoarseCrater, CoarseField, MechanicsFamily};
     use crate::geometry::min_rate;
@@ -1485,7 +1494,7 @@ mod tests {
         exposed_albedo_scale, haloed_albedo_scale, material_at, scaled_normal_albedo,
         weathered_normal_albedo,
     };
-    use crate::synth::craters::diffusion_length;
+    use crate::synth::craters::{CraterOctaves, CraterWear, diffusion_length};
     use crate::synth::test_support::{SEED, along_chord, king_distances, world};
     use crate::testing::{
         FieldBuilder, SyntheticWorld, moon_like_builder, moon_like_crater_params,
@@ -2717,13 +2726,28 @@ mod tests {
         }
     }
 
+    /// Which wear a rim deficit's g reads in [`immature_rims_per_km2`].
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum RimWear {
+        /// R09.T7.j's, the synthesis's: the larger of κ's diffusion and the octave's equilibrium
+        /// closure ([`CraterWear::of_age`] in the crater's octave).
+        Equilibrium,
+        /// κ's diffusion alone, as the ruling (decision-r10-t1c-maturity) computed its figures.
+        DiffusionAlone,
+    }
+
     /// The 1–20 km craters per km² whose rim deficit, g `f_ex` (1 − `maturity_after`(t, 1)) on
-    /// mature ground, is above `threshold` on a surface `surface_age` old, from the production and
-    /// the chronology: over 400 bins of D uniform in its logarithm, each bin's share of N(>1 km)
-    /// times the chronology's count of craters formed in the age below which a crater's rim deficit
-    /// is above the threshold, at the present flux.
-    fn immature_rims_per_km2(params: &CraterParams, surface_age: Gigayears, threshold: f64) -> f64 {
+    /// mature ground, is above `threshold` on the surface of `header`, from the production and the
+    /// chronology: over 400 bins of D uniform in its logarithm, each bin's share of N(>1 km) times
+    /// the chronology's count of craters formed in the age below which a crater's rim deficit is
+    /// above the threshold, at the present flux. g is [`relief_factor`] of the crater's `wear`:
+    /// the closed form of the synthesis's rim deficit, its octave's ([`CraterOctaves::new`]) wear
+    /// at the crater's age, or κ's alone.
+    fn immature_rims_per_km2(header: &FieldHeader, threshold: f64, wear: RimWear) -> f64 {
         const BINS: u32 = 400;
+        let params = header.craters();
+        let surface_age = header.surface_age();
+        let octaves = CraterOctaves::new(header);
         let above = |d_m: f64| cumulative_density(params, Metres::new(d_m)).value();
         let per_1km = above(1e3);
         let mut total = 0.0;
@@ -2731,10 +2755,23 @@ mod tests {
             let edge = |n: u32| 1e3 * math::powf(20.0, f64::from(n) / f64::from(BINS));
             let (d0, d1) = (edge(k), edge(k + 1));
             let d = (d0 * d1).sqrt();
+            let octave = octaves
+                .octaves()
+                .iter()
+                .find(|o| d >= o.diameters().lower().value() && d < o.diameters().upper().value())
+                .expect("a 1–20 km crater is a small crater on the Moon-like worlds");
             let deficit = |t: f64| {
                 let age = Gigayears::new(t);
-                relief_factor(Metres::new(0.5 * d), diffusion_length(age))
-                    * excavated_share(surface_age, age, Metres::new(d))
+                let g = match wear {
+                    RimWear::Equilibrium => {
+                        relief_factor(Metres::new(0.5 * d), CraterWear::of_age(age, octave.wear()))
+                    }
+                    RimWear::DiffusionAlone => relief_factor(
+                        Metres::new(0.5 * d),
+                        CraterWear::new(diffusion_length(age), 0.0),
+                    ),
+                };
+                g * excavated_share(surface_age, age, Metres::new(d))
                     * (1.0 - maturity_after(age, 1.0))
             };
             if deficit(0.0) <= threshold {
@@ -2762,7 +2799,8 @@ mod tests {
     /// R4's shares on the weathered Moon-like world, on its 3.5 Gyr variant, where the share above
     /// a deficit of 0.5 is under 10% (without `f_ex` and g it would be 57%), and on its 1 and
     /// 0.1 Gyr variants, printed beside the ruling's estimates, with Grier et al. 2000's count in
-    /// closed form and R5b's mean V excess.
+    /// closed form, under R09.T7.j's wear and, beside it, κ's alone (the ruling's), and R5b's mean
+    /// V excess.
     ///
     /// And the haloed solve against the drawn ground (decision-r10-t1c-halo's brute force): at each
     /// point its material's G(m) at the haloed scale for [`TARGET`], the stated excess within
@@ -2788,17 +2826,21 @@ mod tests {
                 s.above[0], s.above[1], s.above[2], s.mean_v_excess
             );
             check_the_haloed_solve(world, &s);
-            let params = field.header().craters();
-            let surface = field.header().surface_age();
-            let (above_02, above_05) = (
-                immature_rims_per_km2(params, surface, 0.2),
-                immature_rims_per_km2(params, surface, 0.5),
-            );
-            eprintln!(
-                "{name}: 1–20 km craters with a rim deficit above 0.2 {above_02:.2e} km⁻², above \
-                 0.5 {above_05:.2e} km⁻² (the ruling's 4.2e-4 and 1.7e-4), against Grier et al. \
-                 2000's {GRIER_IMMATURE_PER_KM2:.2e}"
-            );
+            let header = field.header();
+            for (label, wear) in [
+                ("R09.T7.j's wear", RimWear::Equilibrium),
+                ("κ's alone, as the ruling's", RimWear::DiffusionAlone),
+            ] {
+                let (above_02, above_05) = (
+                    immature_rims_per_km2(header, 0.2, wear),
+                    immature_rims_per_km2(header, 0.5, wear),
+                );
+                eprintln!(
+                    "{name}, {label}: 1–20 km craters with a rim deficit above 0.2 \
+                     {above_02:.2e} km⁻², above 0.5 {above_05:.2e} km⁻² (the ruling's 4.2e-4 and \
+                     1.7e-4, κ's alone), against Grier et al. 2000's {GRIER_IMMATURE_PER_KM2:.2e}"
+                );
+            }
             if name == "moon_like 3.5 Gyr" {
                 assert!(s.above[2] < 0.10, "{s:?}");
             }

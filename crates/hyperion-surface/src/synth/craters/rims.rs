@@ -55,12 +55,18 @@
 //!
 //! g is the list's own record, one less the crater's degradation code over 255
 //! ([`CoarseCrater::degradation_fraction`]), which the coarse pass writes to match the relief it
-//! smooths in. Minton et al. 2019's relief factor ([`super::relief_factor`]), which carries a
-//! small crater's diffusive age, would keep 99.95% of the relief of the narrowest coarse crater of
-//! the Ceres-like world, a rim radius of 25 km at 4.5 Gyr (κt ÷ R² = 4 × 10⁻⁵), and more of every
-//! wider one (eq. 8 extrapolated, a simple crater's fit with κ calibrated on rim radii of 0.4–2.5
-//! km; exact diffusion of a paraboloid's centre keeps 99.98%): a coarse crater's wear is the coarse
-//! pass's, by infill, erosion and later impacts.
+//! smooths in. The coarse pass wears its craters by the small craters' law, one law
+//! (`decision-r09-t12-coarse.md` item 5b; R09.T7.j): the byte is the nearest integer to
+//! 255 (1 − g), g [`super::relief_factor`] of the crater's rim radius and its wear in its octave
+//! ([`super::CraterWear::of_age`]), the larger of Fassett and Thomson 2014's diffusion and the
+//! equilibrium closure, `K_v` q ([`super::VISIBILITY_COEFFICIENT`]). Diffusion alone would keep
+//! 99.95% of the relief of the narrowest coarse crater of the Ceres-like world, a rim radius of
+//! 25 km at 4.5 Gyr (κt ÷ R² = 4 × 10⁻⁵), and more of every wider one; the closure takes a
+//! saturated octave's oldest crater to the visibility limit, (15 ÷ 32)² = 0.22 of its fresh relief,
+//! and an unsaturated octave's to that of its production over its saturation. R09.T12.e's crater
+//! scale may lower the byte further where it scales the whole coarse field down (a stand-in for
+//! the large craters' wear that `σ_h` sets, labelled there). Fluvial and aeolian infill, viscous
+//! relaxation, and mare or melt infill are not modelled.
 //!
 //! # Determinism
 //!
