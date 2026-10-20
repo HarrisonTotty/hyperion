@@ -443,7 +443,7 @@ bond_albedo = 0x3fb999999999999a  # 0.1
 bond_ratio = 0x3ff37fa12ad18b15  # 1.2186595604513901
 surface_state: MagmaOcean, Rock; climate Efficient, Locked, none, LockedEnergyBalance
 mean_surface_temperature_k = 0x409b3f52f13e2a1b  # 1743.8309983933639
-equator_pole_contrast_k = 0x405848848b970320  # 97.13308992144857
+equator_pole_contrast_k = 0x405876ebebd63200  # 97.85814948956977
 day_night_contrast_k = 0x402fa6e7d4a57d80  # 15.825987477494664
 surface_pressure_pa = 0x417ce1d8eaa3b8b2  # 30285198.66497106
 sigma_h_m = 0x408c2002f37a3809  # 900.0014409588194
@@ -633,7 +633,7 @@ bond_albedo = 0x3fb999999999999a  # 0.1
 bond_ratio = 0x3ff37fa12ad18b15  # 1.2186595604513901
 surface_state: MagmaOcean, Rock; climate Efficient, Locked, none, LockedEnergyBalance
 mean_surface_temperature_k = 0x40a67d9baf5e79da  # 2878.8040723346467
-equator_pole_contrast_k = 0x40564f6ca26a8500  # 89.24100551988886
+equator_pole_contrast_k = 0x40565d2991e1dcc0  # 89.45566222245088
 day_night_contrast_k = 0x402203d1a0dd8500  # 9.00745871261688
 surface_pressure_pa = 0x419e652698578d28  # 127486374.0854994
 sigma_h_m = 0x408c2015db30c598  # 900.0106719789792
@@ -5001,7 +5001,7 @@ bond_albedo = 0x3fb999999999999a  # 0.1
 bond_ratio = 0x3ff37fa12ad18b15  # 1.2186595604513901
 surface_state: MagmaOcean, Rock; climate Efficient, Locked, none, LockedEnergyBalance
 mean_surface_temperature_k = 0x409b3f52f16de264  # 1743.8309991044453
-equator_pole_contrast_k = 0x405848848bd984c0  # 97.13308998338744
+equator_pole_contrast_k = 0x405876ebec19b0c0  # 97.8581495524295
 day_night_contrast_k = 0x402fa6e7d54ef600  # 15.82598749722365
 surface_pressure_pa = 0x417ce1d8eaa3cf26  # 30285198.664992474
 sigma_h_m = 0x408c2002f37a477c  # 900.0014409592691
@@ -5191,7 +5191,7 @@ bond_albedo = 0x3fb999999999999a  # 0.1
 bond_ratio = 0x3ff37fa12ad18b15  # 1.2186595604513901
 surface_state: MagmaOcean, Rock; climate Efficient, Locked, none, LockedEnergyBalance
 mean_surface_temperature_k = 0x40a67d9bb04b77da  # 2878.8040793975642
-equator_pole_contrast_k = 0x40564f6ca3bd30c0  # 89.24100583530071
+equator_pole_contrast_k = 0x40565d29932cf500  # 89.45566253080688
 day_night_contrast_k = 0x402203d1a2b13700  # 9.007458767063781
 surface_pressure_pa = 0x419e652698579311  # 127486374.08552195
 sigma_h_m = 0x408c2015db313802  # 900.0106719823091

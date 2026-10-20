@@ -21089,3 +21089,102 @@ planetary::record` (624 tests at T57.a's commit).
       - Xe's piece keeps its 14 measured nodes as kinks (16 nodes, the ruling's table 12).
       - Magma oceans read `c_p` up to about 2,900 K, past the golden's 2,000 K pins and NASA
         Glenn's 1,500 K checks, where the harmonic sum leaves out anharmonicity and dissociation.
+  - _A3, T24.a's Earth fits at the batch's state_ (decision-pre-23-review items 20, 23 and 27 and
+    "For main" item 3; decision-p14-t57a-fits §1.3–§1.4). `GENERATOR_VERSION` stays 22, and every
+    golden that moves re-blesses at 22 in the same commit. The snapshot hold stays.
+    - _The order of fits_ is now: N₂ on Titan, CO₂ on Venus, water on Earth, then D⊕ and Φ⊕ on
+      Earth's contrast. Both constants' docs state it.
+    - _The state._ `earth_column` keeps its form: 288 K over 240.25 W m⁻² absorbed, the τ that
+      holds it (0.8317), Earth's column of dry air, its radius and spin. Its `earth_gain` takes the
+      batch's measured Earth, the state P14.T57.a's water fit takes:
+      - the table's Earth's air under the batch, derived once (`batch_earth_air`): 42.084 Pa of
+        CO₂ and 0.74739 bar of N₂ by weight;
+      - its water where the partition holds a minor condensable at 288 K, at 0.77 of `p_sat` on the
+        diagram (`with_water_at_humidity`, `water_weight_at_humidity`'s arithmetic): 837.204 Pa by
+        weight, 0.4956 of `p_sat`, x = 0.01692;
+      - `GreenhouseConstants::FITTED`'s 4.47, explicitly, and L the diagram's slope, 44.47 kJ
+        mol⁻¹.
+      - `FITTED_WATER` (the held curve) is gone, with the tests' in-force `greenhouse()` helper,
+        which nothing then read. A new test, `the_measured_earth_s_gain_is_the_batch_s_rule`,
+        holds the by-hand gain to `greenhouse_gain` under `SnapshotRules::Batch` (its at-cap rule,
+        with the table's Earth's inventory weights, whose water is 2.64 × 10⁷ Pa) within 10⁻¹².
+    - _The fits_, at g⊕ 0.431137 (0.378 at version 22's 2.89 and held curve), `B_P` 3.336748 and
+      `B_eff`⊕ 1.898151 W m⁻² K⁻¹ (2.0753), in the partition 0.310 (6D⊕ ÷ `B_eff` = 1.86):
+      - D⊕ = 0.310 `B_eff`⊕ = 0.588 426 956, committed as 0.588_426_96, where it was 0.643_338_15.
+        The decision's 0.598 was at the held L; A1's 0.588 is at the diagram's.
+      - Φ⊕ by the 200-step bisection on [1, 3] to 42 K, on the batch's Newton zonal solver at the
+        fitted D⊕: 1.366 706 024, committed as 1.366_706_02, where it was 1.494_818_98. Version
+        22's bisection of each end, kept as the test's oracle, gives the same Φ⊕ within 10⁻⁹ (to
+        ten decimals). Both solvers hold 42 K within 10⁻⁹ K there. At Φ = 1 the contrast is 31.15
+        K.
+      - The test recomputes both to 10⁻⁷.
+      - Cross-checks that hold: W `B_P` 0.0212 against 6D 3.53; the ends 302.36 and 260.36 K
+        (North, Cahalan and Coakley's 302.1 and 260.1, within 1 K); the dry contrast 46.6 K
+        (42.8); the peak transport 4.85 PW (5.30; 4.5–6.5 holds); Kaspi and Showman's sweeps.
+        The diffusivity is 2.36 × 10⁶ m² s⁻¹, 13% under Siler, Roe and Armour's 2.70 × 10⁶
+        converted, where it was within 5%; the doc says so.
+    - _`the_greenhouse_gain_is_the_held_gases_feedback`, re-taken at the batch's state._
+      - Its generated Earth is the batch's (`historic_under`). The saturation check becomes the
+        batch's at-cap check: water's weight below its inventory's.
+      - The gain is held by hand under `FITTED` within 10⁻¹²: 0.4545 at 290.568 K, `B_P` 3.3741,
+        `B_eff` 1.8406 W m⁻² K⁻¹.
+      - The wet world takes its water at the partition's humidity among 0.75 bar of N₂ and 42 Pa
+        of CO₂, under `FITTED`, now sampled at 260, 273.17, 288, 300, 310, 320, 330, 340, 350 and
+        360 K: 0.217, 0.303, 0.432, 0.538, 0.618, 0.679, 0.712, 0.711, 0.672 and 0.602. At version
+        22's water at saturation it peaked at 0.565 at 320 K.
+      - Its doc states each figure. The table's loop and the Venus and Titan checks stay under the
+        rules in force.
+    - _Bands that fail at the batch's state._ Each is kept as stated and put to main (the brief's
+      rule, decision-pre-23-review item 20.5). One cause runs through them: the batch's measured
+      Earth's vapour feedback is about 9% stronger than at version 22 (`B_eff` 1.898 against
+      2.075). It comes from τ_w, 4.47 √(0.496 `p_sat`) against 2.89 √`p_sat` (decision-pre-23-review
+      item 25's 9%), and from L, 44.47 against 43.5 kJ mol⁻¹.
+      - `earth_s_restoring_and_transport_are_the_measured_ones`: `B_eff`⊕ 1.89815 against
+        1.9–2.3 (North, Cahalan and Coakley's 2.09; Koll and Cronin's ~2.2).
+      - The fit test: Φ⊕ 1.3667 against 1.40–1.60 (the Earth Radiation Budget's 1.54, within 3%).
+        Φ⊕ ÷ `B_eff`⊕ is nearly held, since every mode's response scales by `B_P` ÷ `B_eff` at the
+        fixed partition: 1.4948 ÷ 2.075 = 0.720 against 1.3667 ÷ 1.898 = 0.720. The miss is
+        `B_eff`'s, 9% under 2.09.
+      - `the_greenhouse_gain_is_the_held_gases_feedback`: the generated Earth's `B_eff` 1.8406
+        against 1.9–2.1, and the wet world's gain at 310–360 K (0.618–0.712) against 0.57.
+        Koll and Cronin (2018, from memory) find Earth's clear-sky OLR linear in `T_s` only up
+        to about 300 K, where the window closes and the feedback falls, so a rising g there is
+        physical. 0.57 was the model's own bound at version 22.
+      - T24.b's perennial ice on the generated Earth, 0.01–0.07, in
+        `cover::tests::the_table_s_ices_are_the_ruling_s` (version 22's rules) and
+        `the_batch_publishes_the_table_s_condensates` (the batch's): 0.003063 against 0.010882.
+        The lower D⊕ and Φ⊕ give the table's Earth a 41.51 K contrast (42.67), so its coldest
+        zone, 262.47 K (261.86), lies 0.68 K under the 263.15 K ice edge, where it lay 1.29 K
+        under. The record already deferred that pole's nearness to the edge (plan 14's Risks).
+    - _T57.a's tripwire_ stays green. D⊕ and Φ⊕ are not inputs of its fits (decision-p14-t57a-fits
+      §1.4), and its figures did not move:
+      - k(CO₂) 14.8616 (Venus: 90.422 bar of CO₂ and 2.0876 bar of N₂, `T_eq` 229.0585 K);
+      - k(H₂O) 4.4690 (Earth: water 837.204 Pa at 288 K, `T_eq` 255.1385 K);
+      - the measured Earth 288.006 K, the measured Venus 736.980 K under the batch (778.051 K
+        under version 22's), and Titan 92.752 K at a Bond albedo of 0.5362.
+    - _Moved goldens_, re-blessed at header 22 (`golden_diff.py`: 12 moved and the version not
+      bumped, as main's ruling for a checkpoint has it). D⊕ and Φ⊕ are shared by both arms, so the
+      record's contrasts move under version 22's rules: a dry world's rise with the lower D⊕ (Φ is
+      1), and a wet world's fall where the lower Φ⊕ outweighs it.
+      - `planetary/surface_conditions` (21): the table's contrasts and ranges. Earth goes 42.666 →
+        41.514 K (coldest 261.86 → 262.47 K), Mars 16.605 → 17.398 K (θ 0.03, nearly dry) and
+        Venus 1.4111 → 1.4161 K (its modes from degree 9, where n(n + 1)D exceeds W `B_P`).
+        Titan moves in its sixth digit, and the locked and 90° Earths move with Earth.
+      - `planetary/surface_conditions_published` (69): the same three figures on 23 generated
+        bodies.
+      - `planetary/global_figures` (1): Earth's surface ice 0.010882 → 0.003063, from its warmer
+        coldest zone.
+      - Nine `planetary/systems` goldens: `close_binary` (28), `filler_a` (2), `filler_c` (12),
+        `halo_star` (4), `hierarchical_triple` (4), `m_dwarf_resonant_chain` (10), `solar_like`
+        (6), `subgiant` (6) and `wide_binary` (4), each the contrasts. `close_binary`'s ice fraction
+        goes 0.516040 → 0.515411. `solar_like`'s 597 K runaway `0200` reads EnergyBalance again
+        (Isothermal at A2), since its contrast goes 13.96 → 15.11 K and spreads its emission past
+        `ISOTHERMAL_FLUX_SPREAD`. That re-keys its section (22 lines new and 22 gone).
+      - The server's `scene_systems` and `systems_in_range` goldens and the sim's other
+        integration goldens hold.
+    - _Files:_ `planetary/hooks/surface.rs` (the two constants and their docs, the module doc, the
+      gain's doc), `surface/tests.rs`, `planetary/derive/atmosphere/tests.rs` (the snapshot hold's
+      tripwire message), and the 12 goldens.
+    - _Deferred_ (2026-10-13 rule):
+      - `cover/tests.rs`'s comment on the generated Earth's pole ("262 K … holds 0.013") is stale
+        at 0.0031. It is left with its band for main's ruling.

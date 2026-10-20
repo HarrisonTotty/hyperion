@@ -49,8 +49,8 @@
 //!   max(n(n + 1)D, W `B_P`)).
 //!   - `B_P` = 4F ÷ `T_s` is the grey column's restoring at fixed τ, F the absorbed mean flux.
 //!     `B_eff` = `B_P` (1 − g) is its restoring with its own vapour feedback, g the gain of the
-//!     gases the surface holds at their cap (0.38 on Earth's measured state as its fit takes it,
-//!     on version 22's held water curve).
+//!     gases the surface holds at their cap (0.431 on the batch's measured Earth as its fit takes
+//!     it, `B_eff` 1.898 W m⁻² K⁻¹; decision-p14-t57a-fits §1.3).
 //!   - Φ multiplies a wet world's `P₂` forcing, its cold zones' brightening by ice, cloud and low
 //!     sun, which a uniform albedo misses ([`WET_ALBEDO_GRADIENT`], fitted on that partition; the
 //!     Earth Radiation Budget's gradient within 3%). It is 1 + (Φ⊕ − 1)θ at the ocean weight θ.
@@ -175,35 +175,55 @@ pub const EARTH_EQUATOR_POLE_CONTRAST_K: f64 = 42.0;
 pub const EARTH_TRANSPORT_PARTITION: f64 = 0.310;
 
 /// Earth's meridional conductance D⊕, W m⁻² K⁻¹ (North, Cahalan and Coakley's units: the
-/// diffusion's flux divergence per kelvin of the `P₂` mode is 6D): 0.6433, so that Earth's
+/// diffusion's flux divergence per kelvin of the `P₂` mode is 6D): 0.5884, so that Earth's
 /// measured state takes 6D⊕ ÷ `B_eff` = 6 × [`EARTH_TRANSPORT_PARTITION`], `B_eff` its restoring
 /// with its own vapour feedback (`Fitted`, in closed form, on the partition alone, whatever the
 /// contrast's form; [`WET_ALBEDO_GRADIENT`] is then fitted to the contrast; a test refits both).
 ///
+/// Plan 14's order of fits: nitrogen on Titan, carbon dioxide on Venus, water on Earth
+/// ([`GREENHOUSE_WATER`](crate::planetary::derive::atmosphere::GREENHOUSE_WATER)), then D⊕ and Φ⊕
+/// on Earth's contrast (decision-pre-23-review item 20). This fit reads the water's.
+///
 /// Earth's measured state: 288 K at the surface (NASA's Earth fact sheet), 23.44° of obliquity, an
 /// absorbed flux of (1 − 0.294) × 1,361.17 ÷ 4 = 240.25 W m⁻² (the fact sheet's Bond albedo, and
 /// [`SOLAR_CONSTANT_W_PER_M2`](crate::units::consts::SOLAR_CONSTANT_W_PER_M2)), the grey τ that
-/// holds 288 K over it, a column of [`EARTH_COLUMN_MASS_KG_PER_M2`] of dry air
-/// ([`EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K`]) under [`STANDARD_GRAVITY`], water vapour at its
-/// saturation pressure at 288 K on version 22's held Clausius–Clapeyron curve (1.64 kPa, and its
-/// 43.5 kJ mol⁻¹ as the gain's slope; the registry's curve when the fit was taken, which
-/// P14.T54.a's switch to P14.T49.b's phase diagrams retired, and whose Earth refit takes the
-/// batch's measured Earth on the diagram, decision-pre-23-review item 20), a radius of 6,371.0 km
-/// and [`EARTH_SIDEREAL_DAY`]. Its `B_eff` is 2.08 W m⁻² K⁻¹, against North, Cahalan and Coakley's
-/// 2.09 and the grey column's 3.34 at fixed τ.
+/// holds 288 K over it (0.8317), a column of [`EARTH_COLUMN_MASS_KG_PER_M2`] of dry air
+/// ([`EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K`]) under [`STANDARD_GRAVITY`], a radius of 6,371.0 km and
+/// [`EARTH_SIDEREAL_DAY`]. Its vapour feedback is the batch's measured Earth's, the state the
+/// water's fit takes (decision-p14-t57a-fits §1.3):
+///
+/// - the table's Earth's air under the batch (42.08 Pa of carbon dioxide and 0.7474 bar of
+///   nitrogen by weight, Earth's per unit mass), with its water where P14.T51.a's partition holds
+///   a minor condensable at 288 K, at 0.77 of its saturation pressure on water's phase diagram:
+///   837.2 Pa by weight, 0.496 of the 1.689 kPa saturation pressure, a mole fraction of 0.0169;
+/// - P14.T57.a's water constant, 4.47 per √bar, under which that water's τ is 0.409;
+/// - the batch's gain rule, which counts a gas the partition holds at its cap, at its curve's
+///   slope at 288 K, 44.47 kJ mol⁻¹ (P14.T49.b's fitted curve).
+///
+/// That gain is g = 0.4311, so `B_eff` is 1.898 W m⁻² K⁻¹, against North, Cahalan and Coakley's
+/// 2.09 and the grey column's 3.337 at fixed τ.
 ///
 /// Cross-checks, not fitted (science-p14-t24a-climate.md §1): the peak diffusive transport,
-/// 2πR² D⊕ (2 ÷ √3) × 28 K, is 5.3 PW, against North, Cahalan and Coakley's 5.35 at their D and
+/// 2πR² D⊕ (2 ÷ √3) × 28 K, is 4.85 PW, against North, Cahalan and Coakley's 5.35 at their D and
 /// the 5.5–6 PW measured (Trenberth and Caron 2001, J. Climate 14, 3433, not re-read). As a
-/// diffusivity of temperature, D⊕ R² ÷ (`c_p` m⊕), it is 2.6 × 10⁶ m² s⁻¹, within 5% of Siler,
-/// Roe and Armour's (2018, J. Climate 31, 7481, not re-read) diffusivity of moist static energy,
-/// 1.16 × 10⁶ m² s⁻¹, converted to temperature at 288 K and 80% relative humidity (× 2.33).
-pub const EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K: f64 = 0.643_338_15;
+/// diffusivity of temperature, D⊕ R² ÷ (`c_p` m⊕), it is 2.36 × 10⁶ m² s⁻¹, 13% under Siler, Roe
+/// and Armour's (2018, J. Climate 31, 7481, not re-read) diffusivity of moist static energy,
+/// 1.16 × 10⁶ m² s⁻¹, converted to temperature at 288 K and 80% relative humidity (× 2.33). Both
+/// fall with `B_eff`, which the partition ties D⊕ to.
+pub const EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K: f64 = 0.588_426_96;
 
-/// The factor Φ⊕ by which a wet world's cold zones brighten its equator–pole forcing: 1.4948,
+/// The factor Φ⊕ by which a wet world's cold zones brighten its equator–pole forcing: 1.3667,
 /// multiplying the `P₂` mode of the annual insolation of a world of ocean weight 1, and 1 + (Φ⊕ −
 /// 1)θ at a weight θ ([`OceanWeight::albedo_gradient`]; `Fitted`, so that Earth's measured state
 /// gives [`EARTH_EQUATOR_POLE_CONTRAST_K`]; a test refits it).
+///
+/// It is the last of plan 14's order of fits: nitrogen on Titan, carbon dioxide on Venus, water on
+/// Earth, then D⊕ and Φ⊕ on Earth's contrast (decision-pre-23-review item 20). It is fitted on the
+/// batch's measured Earth ([`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`]'s state: g = 0.4311,
+/// `B_eff` 1.898 W m⁻² K⁻¹, 6D⊕ ÷ `B_eff` = 1.86; decision-p14-t57a-fits §1.3), by a 200-step
+/// bisection on [1, 3] to the 42 K contrast on the batch's zonal solver, the safeguarded Newton
+/// steps, which version 22's bisection of each end matches within 10⁻⁹. Under a uniform albedo
+/// (Φ = 1) that Earth's contrast is 31.15 K.
 ///
 /// Earth's cold zones are brighter, by ice, cloud and low sun, which a uniform albedo misses. No
 /// closed form on this task's inputs supplies it: P14.T24.b's ice and P14.T24.c's clouds come
@@ -213,7 +233,10 @@ pub const EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K: f64 = 0.643_338_15;
 ///
 /// Cross-checks, not fitted:
 /// - the Earth Radiation Budget's coalbedo gradient amplifies the uniform `P₂` forcing by
-///   `H₂` ÷ (`S₂` `a₀`) = 1.54 (their `S₂` = −0.477), within 3%;
+///   `H₂` ÷ (`S₂` `a₀`) = 1.54 (their `S₂` = −0.477), 11% above Φ⊕: the measured Earth's vapour
+///   feedback, `B_eff` 1.898 against North, Cahalan and Coakley's 2.09, amplifies every mode of
+///   its contrast by `B_P` ÷ `B_eff` at the fixed partition, and so takes up a share that the
+///   albedo gradient gives Earth (Φ⊕ ÷ `B_eff`⊕ is 0.720, and 1.54 ÷ 2.09 is 0.737);
 /// - with it, the measured Earth's equator and pole are 302.4 and 260.4 K, against North,
 ///   Cahalan and Coakley's `P₂` fit of 302.1 and 260.1 K;
 /// - Komacek and Abbot (2019, ApJ 871, 245, Table 2) find that sea ice and clouds raise an
@@ -222,7 +245,7 @@ pub const EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K: f64 = 0.643_338_15;
 ///
 /// A Mars's CO₂ caps and a Titan's methane are not brightened until P14.T51.a names a cap at the
 /// cold zone (22 → 23).
-pub const WET_ALBEDO_GRADIENT: f64 = 1.494_818_98;
+pub const WET_ALBEDO_GRADIENT: f64 = 1.366_706_02;
 
 /// Earth's mean column of air, kg m⁻²: 10,094, its atmosphere's 5.1480 × 10¹⁸ kg over
 /// 5.100 × 10¹⁴ m² (Trenberth and Smith 2005, J. Climate 18, 864), the column the conductance's
@@ -1776,13 +1799,12 @@ pub(crate) fn step_climate(
 /// - xᵢ is the gas's published mole fraction: the factor 1 − xᵢ removes a dominant condensable,
 ///   whose pressure the cold trap sets globally, not locally, continuously in its share.
 ///
-/// Earth's measured state gives 0.38 (`B_eff` 2.08 W m⁻² K⁻¹) on version 22's held water curve,
-/// as [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] is fitted on it, the counterpart of Kaspi and
-/// Showman's prescribed τ, which they state stands in for water vapour, with no feedback of its
-/// own; the table's Earth, on the diagram under version 22's rules, gives 0.3997 (`B_eff` 1.987).
-/// Under the batch's, the table's Earth through the passes' stand-ins gives 0.4545, and Earth's
-/// measured state, at 288 K, about 0.431 (`B_eff` 1.898 W m⁻² K⁻¹, by hand: 0.422 and 1.929 at
-/// the held curve's 43.5 kJ mol⁻¹). Zero where no gas is held, or at a surface not above 0 K.
+/// The batch's measured Earth gives 0.4311 (`B_eff` 1.898 W m⁻² K⁻¹), as
+/// [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] is fitted on it (decision-p14-t57a-fits §1.3), the
+/// counterpart of Kaspi and Showman's prescribed τ, which they state stands in for water vapour,
+/// with no feedback of its own. The table's Earth gives 0.3997 (`B_eff` 1.987) under version 22's
+/// rules, and 0.4545 (`B_eff` 1.841) under the batch's, through the passes' stand-ins. Zero where
+/// no gas is held, or at a surface not above 0 K.
 #[must_use]
 fn greenhouse_gain(
     surface: Kelvin,

@@ -2210,13 +2210,11 @@ fn the_snapshot_lane_is_held_only_until_the_batch_s_bump() {
          T49.c's tripwire's hold of `photometry/area_mix.rs`, `GreenhouseConstants::VERSION_22` \
          and `SnapshotRules::greenhouse` (the greenhouse then reads P14.T57.a's constants alone, \
          which `the_greenhouse_constants_are_their_fits` keeps at their fits), `Atmosphere::rules`, \
-         `ClimateBody::greenhouse` and the greenhouse gain's held arm (P14.T51.a's fix); rework \
-         T24.a's tests that hold Earth's water at its saturation pressure by hand under the \
-         constants in force (`earth_gain`, the North, Cahalan and Coakley partition's test and \
-         `the_greenhouse_gain_is_the_held_gases_feedback`'s saturation check), whose \
-         `EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K` and `WET_ALBEDO_GRADIENT` were fitted at version \
-         22's 2.89 (plan 14, P14.T57.a's deferred findings); and delete this test (plan 14, \
-         P14.T51.a, P14.T51.b and P14.T57.a as built)"
+         `ClimateBody::greenhouse` and the greenhouse gain's held arm (P14.T51.a's fix); let \
+         T24.a's tests of the batch's measured Earth (`batch_earth_air`, the North, Cahalan and \
+         Coakley partition's test, whose oracle becomes the bisection kept under `#[cfg(test)]`, \
+         and `the_greenhouse_gain_is_the_held_gases_feedback`) read the rules alone; and delete \
+         this test (plan 14, P14.T51.a, P14.T51.b, P14.T57.a and P14.T54.a as built)"
     );
     assert_eq!(SnapshotRules::in_force(), SnapshotRules::Held);
     let unread = |_: Kelvin, _: &PartialPressures| -> ClimateSpan {

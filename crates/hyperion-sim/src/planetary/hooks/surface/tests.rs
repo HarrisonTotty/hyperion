@@ -1,7 +1,10 @@
+use std::sync::OnceLock;
+
 use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
 use crate::orbit::{Eccentricity, Orientation};
+use crate::planetary::chem::partition::WATER_SURFACE_HUMIDITY;
 use crate::planetary::derive::atmosphere::{
     GreenhouseConstants, NITROGEN_REFERENCE_TEMPERATURE, VolatileDraws,
 };
@@ -96,12 +99,6 @@ fn column_of(body: &DerivedBody, spin: SeasonalSpin) -> (Column, OceanWeight) {
     let inputs = inputs_of(body, spin);
     let surface = Surface::of(&inputs).unwrap();
     (surface.column, inputs.ocean_weight)
-}
-
-/// The grey greenhouse's constants the record reads: the rules in force's (version 22's below the
-/// `p14-snapshot` lane's hold, P14.T57.a's from it).
-fn greenhouse() -> GreenhouseConstants {
-    SnapshotRules::in_force().greenhouse()
 }
 
 /// The dayside's and nightside's temperatures of the derived body `body` under the spin `spin`,
@@ -403,8 +400,8 @@ fn methane_and_oxygen_reach_the_fractions_through_the_speciated_derivation() {
 
 /// Earth's measured state as [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] and
 /// [`WET_ALBEDO_GRADIENT`] are fitted to: 288 K over 240.25 W m⁻² absorbed, the grey τ that holds
-/// it, Earth's column of dry air under g₀, water vapour at its saturation pressure on the curve the
-/// fit took ([`FITTED_WATER`]), its radius, obliquity and sidereal day.
+/// it, Earth's column of dry air under g₀, its radius, obliquity and sidereal day, and the gain of
+/// the batch's measured Earth ([`earth_gain`]; decision-pre-23-review item 20).
 fn earth_column() -> (Column, SeasonalSpin) {
     let absorbed = (1.0 - 0.294) * crate::units::consts::SOLAR_CONSTANT_W_PER_M2 / 4.0;
     let surface = Kelvin::new(288.0);
@@ -420,7 +417,7 @@ fn earth_column() -> (Column, SeasonalSpin) {
         molar_mass_g_per_mol: EARTH_AIR_MOLAR_MASS_G_PER_MOL,
         surface_gravity: STANDARD_GRAVITY,
         optical_depth: tau,
-        greenhouse_gain: earth_gain(surface, tau, pressure),
+        greenhouse_gain: earth_gain(surface, tau),
         radius: Metres::new(6_371.0e3),
     };
     let spin = SeasonalSpin {
@@ -431,32 +428,111 @@ fn earth_column() -> (Column, SeasonalSpin) {
     (column, spin)
 }
 
-/// The water curve Earth's measured state was fitted on: version 22's held Clausius–Clapeyron
-/// curve of water (P14.T13.c's), `p_t` exp(−(L ÷ R)(1 ÷ T − 1 ÷ `T_t`)) from its triple point,
-/// 273.16 K and 611.657 Pa, at L = 43.5 kJ mol⁻¹, whose slope L ÷ (R T²) the gain took: the
-/// registry's until P14.T54.a's switch to P14.T49.b's fitted curves retired it (1.64 kPa at 288 K
-/// against the diagram's 1.689, and 43.5 kJ mol⁻¹ against its 44.47). The fit test keeps it until
-/// P14.T54.a's Earth refit takes the batch's measured Earth on the diagram
-/// (decision-pre-23-review item 20). Triple temperature (K), triple pressure (Pa) and enthalpy
-/// (J mol⁻¹).
-const FITTED_WATER: (f64, f64, f64) = (273.16, 611.657, 43_500.0);
+/// The batch's measured Earth's air, as P14.T57.a's water fit takes it (decision-p14-t57a-fits
+/// §1.3), derived once: the table's Earth's partial pressures under the batch, its carbon dioxide
+/// and nitrogen Earth's per unit mass (about 42 Pa and 0.747 bar by weight), and its airborne
+/// inventory as column weights, whose water lies above any weight its air holds.
+fn batch_earth_air() -> &'static (PartialPressures, PartialPressures) {
+    static AIR: OnceLock<(PartialPressures, PartialPressures)> = OnceLock::new();
+    AIR.get_or_init(|| {
+        let earth = historic_under(SnapshotRules::Batch, "Earth");
+        let air = earth.atmosphere();
+        (*air.partial_pressures(), *air.inventory_weights())
+    })
+}
 
-/// The greenhouse gain of Earth's measured state, by hand: water at its saturation pressure on
-/// the fit's curve ([`FITTED_WATER`]) at `surface`, its mole fraction among `pressure` of dry air,
-/// in a column of grey optical depth `tau`.
-fn earth_gain(surface: Kelvin, tau: f64, pressure: f64) -> f64 {
+/// The air `air` with its water at a surface at `surface` as P14.T51.a's partition holds a minor
+/// condensable: its partial pressure, its mole fraction times the summed weights, at
+/// [`WATER_SURFACE_HUMIDITY`] of its saturation pressure on water's phase diagram, so that its
+/// column weight is the positive root of w² + b w − c = 0, b = `W_o` − h `p_sat`,
+/// c = h `p_sat` `μ_w` Σ (`w_o` ÷ `μ_o`) over the other gases' weights `w_o` (the arithmetic of
+/// the atmosphere's tests' `water_weight_at_humidity`, which P14.T57.a's water fit takes). With
+/// water's mole fraction.
+fn with_water_at_humidity(air: &PartialPressures, surface: Kelvin) -> (PartialPressures, f64) {
     let water = Gas::Water;
-    let (triple_temperature, triple_pressure, enthalpy) = FITTED_WATER;
+    let others = Gas::ALL.into_iter().filter(|&gas| gas != water);
+    let (weight, moles) = others.fold((0.0, 0.0), |(w, n), gas| {
+        let p = air.of(gas).value();
+        (w + p, n + p / gas.molar_mass_g_per_mol())
+    });
+    let diagram = water.substance().substance().phase_diagram().unwrap();
+    let held = WATER_SURFACE_HUMIDITY * diagram.saturation_pressure(surface).value();
+    let b = weight - held;
+    let c = held * water.molar_mass_g_per_mol() * moles;
+    let w = 2.0 * c / (b + (b * b + 4.0 * c).sqrt());
+    let moles_w = w / water.molar_mass_g_per_mol();
+    let wet = PartialPressures::from_fn(|gas| {
+        if gas == water {
+            Pascals::new(w)
+        } else {
+            air.of(gas)
+        }
+    });
+    (wet, moles_w / (moles + moles_w))
+}
+
+/// The greenhouse gain of the batch's measured Earth, by hand (decision-pre-23-review item 20;
+/// decision-p14-t57a-fits §1.3): its air ([`batch_earth_air`]) with its water at the partition's
+/// humidity at `surface` ([`with_water_at_humidity`]), under P14.T57.a's constants, water's 4.47
+/// ([`GreenhouseConstants::FITTED`], whichever rules are in force), in a column of grey optical
+/// depth `tau`. The water counts as the batch's rule counts a gas the partition holds at its cap,
+/// at its curve's slope at `surface` on water's phase diagram (44.47 kJ mol⁻¹ at 288 K).
+fn earth_gain(surface: Kelvin, tau: f64) -> f64 {
+    let water = Gas::Water;
+    let (air, x_w) = with_water_at_humidity(&batch_earth_air().0, surface);
+    let diagram = water.substance().substance().phase_diagram().unwrap();
     let t = surface.value();
-    let p_w = triple_pressure
-        * math::exp(-(enthalpy / MOLAR_GAS_CONSTANT) * (1.0 / t - 1.0 / triple_temperature));
-    let moles_w = p_w / water.molar_mass_g_per_mol();
-    let x_w = moles_w / ((pressure - p_w) / EARTH_AIR_MOLAR_MASS_G_PER_MOL + moles_w);
-    let tau_w = greenhouse().water() * (p_w / 1e5).sqrt();
+    let tau_w = GreenhouseConstants::FITTED.water() * (air.of(water).value() / 1e5).sqrt();
+    let enthalpy = diagram
+        .clausius_clapeyron_enthalpy_j_per_mol(surface)
+        .unwrap();
     let slope = (1.0 - x_w) * 0.5 * tau_w * enthalpy / (MOLAR_GAS_CONSTANT * t * t);
     t / 4.0 * 0.75 * slope / (1.0 + 0.75 * tau)
 }
 
+/// The batch's measured Earth's gain, [`earth_gain`]'s by hand, is the code's under the batch's
+/// rule (decision-pre-23-review item 20): of its air ([`batch_earth_air`]) only its water counts,
+/// held at its cap by the partition, under P14.T57.a's constants.
+#[test]
+fn the_measured_earth_s_gain_is_the_batch_s_rule() {
+    let (column, _) = earth_column();
+    assert_eq!(
+        SnapshotRules::Batch.greenhouse(),
+        GreenhouseConstants::FITTED
+    );
+    let (air, inventory) = batch_earth_air();
+    let t_s = column.surface_temperature;
+    let (wet, x_w) = with_water_at_humidity(air, t_s);
+    let rule = greenhouse_gain(
+        t_s,
+        &wet,
+        column.optical_depth,
+        &[(Gas::Water.substance(), x_w)],
+        column.equilibrium_temperature,
+        SnapshotRules::Batch,
+        inventory,
+    );
+    let diagram = Gas::Water.substance().substance().phase_diagram().unwrap();
+    let water = wet.of(Gas::Water).value();
+    eprintln!(
+        "the batch's measured Earth: water {water:.3} Pa ({:.4} of p_sat), x {x_w:.5}, inventory \
+         {:.4e} Pa, gain {:.9} ({rule:.9} by the rule)",
+        water / diagram.saturation_pressure(t_s).value(),
+        inventory.of(Gas::Water).value(),
+        column.greenhouse_gain,
+    );
+    assert!(
+        (rule - column.greenhouse_gain).abs() < 1e-12,
+        "{rule} against {}",
+        column.greenhouse_gain
+    );
+}
+
+/// P14.T24.a's Earth fits, the fourth and fifth of plan 14's order (N₂ on Titan, CO₂ on Venus,
+/// water on Earth, then D⊕ and Φ⊕ on Earth's contrast), at the batch's measured Earth
+/// (decision-pre-23-review item 20; decision-p14-t57a-fits §1.3): D⊕ in closed form, 0.310
+/// `B_eff`⊕, then Φ⊕ by bisection to the 42 K contrast on the batch's zonal solver, with version
+/// 22's bisection of each end as its oracle. Each is held to its constant within 10⁻⁷.
 #[test]
 fn earth_s_measured_state_takes_north_cahalan_and_coakley_s_partition() {
     let (column, spin) = earth_column();
@@ -466,6 +542,45 @@ fn earth_s_measured_state_takes_north_cahalan_and_coakley_s_partition() {
     let planck = column.restoring_w_per_m2_k();
     let effective = column.effective_restoring_w_per_m2_k();
     let conductance = EARTH_TRANSPORT_PARTITION * effective;
+    let weak = weak_gradient_transport(&column, &spin) * planck;
+    let transport = |albedo: f64| ZonalTransport {
+        planck,
+        effective,
+        conductance,
+        weak,
+        albedo,
+    };
+    let contrast_under = |rules: SnapshotRules, albedo: f64| {
+        let (equator, pole) = zonal_ends_under(
+            column.surface_temperature.value(),
+            &transport(albedo),
+            spin.obliquity,
+            rules,
+        );
+        equator - pole
+    };
+    let fit = |rules: SnapshotRules| {
+        let (mut low, mut high) = (1.0, 3.0);
+        for _ in 0..200 {
+            let middle = f64::midpoint(low, high);
+            if contrast_under(rules, middle) > EARTH_EQUATOR_POLE_CONTRAST_K {
+                high = middle;
+            } else {
+                low = middle;
+            }
+        }
+        f64::midpoint(low, high)
+    };
+    let albedo = fit(SnapshotRules::Batch);
+    let oracle = fit(SnapshotRules::Held);
+    eprintln!(
+        "the batch's measured Earth: B_P {planck:.9} W/m2/K, gain {:.9}, B_eff {effective:.9} \
+         W/m2/K, D {conductance:.10} W/m2/K, Phi {albedo:.10} (the held bisection's \
+         {oracle:.10}), tau {:.6}, at Phi 1: {:.6} K",
+        column.greenhouse_gain,
+        column.optical_depth,
+        contrast_under(SnapshotRules::Batch, 1.0)
+    );
     assert!(
         (conductance / EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K - 1.0).abs() < 1e-7,
         "{conductance}"
@@ -476,51 +591,21 @@ fn earth_s_measured_state_takes_north_cahalan_and_coakley_s_partition() {
             .abs()
             < 1e-15
     );
-    let weak = weak_gradient_transport(&column, &spin) * planck;
-    let transport = |albedo: f64| ZonalTransport {
-        planck,
-        effective,
-        conductance: EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K,
-        weak,
-        albedo,
-    };
-    let contrast_at = |albedo: f64| {
-        let (equator, pole) = zonal_ends_under(
-            column.surface_temperature.value(),
-            &transport(albedo),
-            spin.obliquity,
-            SnapshotRules::Held,
+    for rules in [SnapshotRules::Batch, SnapshotRules::Held] {
+        let at = contrast_under(rules, albedo);
+        assert!(
+            (at - EARTH_EQUATOR_POLE_CONTRAST_K).abs() < 1e-9,
+            "{rules:?}: {at} K"
         );
-        equator - pole
-    };
-    let (mut low, mut high) = (1.0, 3.0);
-    for _ in 0..200 {
-        let middle = f64::midpoint(low, high);
-        if contrast_at(middle) > EARTH_EQUATOR_POLE_CONTRAST_K {
-            high = middle;
-        } else {
-            low = middle;
-        }
     }
-    let albedo = f64::midpoint(low, high);
-    eprintln!(
-        "B_P {planck} W/m2/K, gain {}, B_eff {effective} W/m2/K, D {conductance} W/m2/K, Phi \
-         {albedo}, tau {}, at Phi 1: {} K",
-        column.greenhouse_gain,
-        column.optical_depth,
-        contrast_at(1.0)
-    );
     assert!(
-        (contrast_at(albedo) - EARTH_EQUATOR_POLE_CONTRAST_K).abs() < 1e-9,
-        "{}",
-        contrast_at(albedo)
+        (albedo / oracle - 1.0).abs() < 1e-9,
+        "{albedo} against {oracle}"
     );
     assert!(
         (albedo / WET_ALBEDO_GRADIENT - 1.0).abs() < 1e-7,
         "{albedo}"
     );
-    // Φ is the Earth Radiation Budget's gradient, 1.52–1.54, within 3%.
-    assert!((1.40..1.60).contains(&albedo), "{albedo}");
     // Kaspi and Showman's law governs Earth, not Koll's weak gradient.
     eprintln!("W B_P {weak} against 6D {}", 6.0 * conductance);
     assert!(weak < 6.0 * EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K);
@@ -534,7 +619,7 @@ fn earth_s_measured_state_takes_north_cahalan_and_coakley_s_partition() {
     eprintln!("the measured Earth's ends: {equator} and {pole} K");
     assert!((equator - 302.1).abs() < 1.0 && (pole - 260.1).abs() < 1.0);
     // Dry, the same Earth keeps half its transport under a uniform albedo, and a larger contrast:
-    // 42.8 K against 42.0.
+    // 46.6 K against 42.0.
     let dry = equator_pole_contrast_k(&column, &spin, OceanWeight::NONE);
     eprintln!("dry: {dry} K");
     assert!(dry > contrast, "{dry}");
@@ -543,6 +628,8 @@ fn earth_s_measured_state_takes_north_cahalan_and_coakley_s_partition() {
     let (equator, pole) = annual_insolation(spin.obliquity);
     assert!((equator - 1.221_269).abs() < 1e-6, "{equator}");
     assert!((pole - 0.506_480).abs() < 1e-6, "{pole}");
+    // Φ is the Earth Radiation Budget's gradient, 1.52–1.54, within 3%.
+    assert!((1.40..1.60).contains(&albedo), "{albedo}");
 }
 
 #[test]
@@ -566,6 +653,24 @@ fn earth_s_restoring_and_transport_are_the_measured_ones() {
     assert!((4.5..6.5).contains(&peak), "{peak} PW");
 }
 
+/// The greenhouse gain is the vapour feedback of the gases the surface holds at their cap. On the
+/// table's bodies under the rules in force an airless body has none, and T13.c's terms sum to its
+/// τ to the bit; no gas of Venus's or Titan's bulk is held, so neither feeds back. At the batch's
+/// state (decision-pre-23-review item 20):
+///
+/// - the generated Earth's water is held at its cap, below its inventory (some of it condensed, the
+///   batch's rule), and its gain is that water's feedback by hand under P14.T57.a's constants;
+/// - its `B_eff` lies within 1.9–2.1 W m⁻² K⁻¹ (science-p14-t24a-climate.md §1, whose generated
+///   Earth gave 2.01 under version 22's rules). Through the batch's passes at their stand-in
+///   surface it gives 1.841 (g 0.4545 at 290.57 K), below the band;
+/// - a wet world's gain stays under 0.57 from 260 to 360 K: 0.75 bar of N₂ and 42 Pa of CO₂ over a
+///   surface in equilibrium at 255 K, its water at the partition's humidity, under P14.T57.a's
+///   constants (science-p14-t24a-climate.md §1, at version 22's water at saturation, peaked at
+///   0.565 at 320 K). At the batch's state it is 0.432 at 288 K and rises past 0.57 near 305 K, to
+///   0.712 at 330 K.
+///
+/// The two bands are science-p14-t24a-climate.md §1's, kept as stated; the batch's figures outside
+/// them are put to main (decision-pre-23-review item 20).
 #[test]
 fn the_greenhouse_gain_is_the_held_gases_feedback() {
     let table = table();
@@ -590,30 +695,39 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
             column.effective_restoring_w_per_m2_k()
         );
     }
-    // The generated Earth holds its water at saturation: by hand, as `earth_gain` takes the
-    // measured state, at its own temperature, depth and water fraction, on water's phase diagram,
-    // its curve's slope at T_s (44.47 kJ mol⁻¹ at 288 K).
-    let (_, earth, conditions) = found(&table, "Earth");
-    let (column, _) = column_of(earth, spin_of("Earth"));
+    // The batch's generated Earth holds its water at its cap: below its inventory, some of it
+    // condensed. By hand, as `earth_gain` takes the measured state, at its own temperature, depth
+    // and water fraction, under P14.T57.a's constants, its curve's slope at T_s on water's phase
+    // diagram.
+    let spin = spin_of("Earth");
+    let earth = historic_under(SnapshotRules::Batch, "Earth");
+    let conditions = conditions_of(&earth, spin).unwrap();
+    let (column, _) = column_of(&earth, spin);
     let air = earth.atmosphere();
     let t_s = air.surface_temperature();
     let water = Gas::Water;
     let diagram = water.substance().substance().phase_diagram().unwrap();
-    assert!(air.partial_pressures().of(water) >= diagram.saturation_pressure(t_s));
+    let p_w = air.partial_pressures().of(water);
+    assert!(p_w < air.inventory_weights().of(water), "{p_w:?}");
+    let fitted = GreenhouseConstants::FITTED;
     let t = t_s.value();
-    let tau_w = greenhouse().water() * (air.partial_pressures().of(water).value() / 1e5).sqrt();
+    let tau_w = fitted.water() * (p_w.value() / 1e5).sqrt();
     let enthalpy = diagram.clausius_clapeyron_enthalpy_j_per_mol(t_s).unwrap();
-    let slope =
-        (1.0 - fraction(conditions, water)) * 0.5 * tau_w * enthalpy / (MOLAR_GAS_CONSTANT * t * t);
+    let slope = (1.0 - fraction(&conditions, water)) * 0.5 * tau_w * enthalpy
+        / (MOLAR_GAS_CONSTANT * t * t);
     let by_hand = t / 4.0 * 0.75 * slope / (1.0 + 0.75 * air.optical_depth());
+    let effective = column.effective_restoring_w_per_m2_k();
+    eprintln!(
+        "the batch's Earth: T_s {t:.3} K, gain {:.4} ({by_hand:.4} by hand), B_P {:.4}, B_eff \
+         {effective:.4} W/m2/K",
+        column.greenhouse_gain,
+        column.restoring_w_per_m2_k()
+    );
     assert!(
         (column.greenhouse_gain - by_hand).abs() < 1e-12,
         "{} against {by_hand}",
         column.greenhouse_gain
     );
-    // Science-p14-t24a-climate.md §1: the generated Earth's B_eff is 2.01 W m⁻² K⁻¹.
-    let effective = column.effective_restoring_w_per_m2_k();
-    assert!((1.9..2.1).contains(&effective), "{effective}");
     // No gas of Venus's or Titan's bulk is held at saturation: neither feeds back.
     for name in ["Venus", "Titan"] {
         let (_, body, _) = found(&table, name);
@@ -625,25 +739,36 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
         );
     }
     // A wet world's gain stays under 0.57 from 260 to 360 K, bounded by its water's share: 0.75
-    // bar of N₂ and 42 Pa of CO₂ over a surface in equilibrium at 255 K, its water at saturation
-    // (science-p14-t24a-climate.md §1).
-    let n2 = Gas::Nitrogen.molar_mass_g_per_mol();
-    let dry_depth = greenhouse().carbon_dioxide() * (42.0_f64 / 1e5).sqrt()
-        + greenhouse().nitrogen()
+    // bar of N₂ and 42 Pa of CO₂ over a surface in equilibrium at 255 K, its water at the
+    // partition's humidity, under P14.T57.a's constants (science-p14-t24a-climate.md §1).
+    let dry_air = PartialPressures::from_fn(|gas| match gas {
+        Gas::Nitrogen => Pascals::new(75_000.0),
+        Gas::CarbonDioxide => Pascals::new(42.0),
+        _ => Pascals::ZERO,
+    });
+    let dry_depth = fitted.carbon_dioxide() * (42.0_f64 / 1e5).sqrt()
+        + fitted.nitrogen()
             * math::powi(NITROGEN_REFERENCE_TEMPERATURE.value() / 255.0, 2)
             * 0.75_f64.sqrt();
-    for t in [260.0, 273.17, 288.0, 300.0, 320.0, 340.0, 360.0] {
+    let mut gains = Vec::new();
+    for t in [
+        260.0, 273.17, 288.0, 300.0, 310.0, 320.0, 330.0, 340.0, 350.0, 360.0,
+    ] {
         let surface = Kelvin::new(t);
-        let p_w = diagram.saturation_pressure(surface).value();
-        let moles_w = p_w / water.molar_mass_g_per_mol();
-        let x_w = moles_w / (75_000.0 / n2 + moles_w);
-        let tau_w = greenhouse().water() * (p_w / 1e5).sqrt();
+        let (wet, x_w) = with_water_at_humidity(&dry_air, surface);
+        let w = wet.of(water).value();
+        let tau_w = fitted.water() * (w / 1e5).sqrt();
         let enthalpy = diagram
             .clausius_clapeyron_enthalpy_j_per_mol(surface)
             .unwrap();
         let slope = (1.0 - x_w) * 0.5 * tau_w * enthalpy / (MOLAR_GAS_CONSTANT * t * t);
         let gain = grey_gain(surface, tau_w + dry_depth, slope);
-        eprintln!("{t} K: gain {gain:.3}");
+        eprintln!("{t} K: water {w:.1} Pa, x {x_w:.4}, gain {gain:.4}");
+        gains.push((t, gain));
+    }
+    // The generated Earth's B_eff, within science-p14-t24a-climate.md §1's band.
+    assert!((1.9..2.1).contains(&effective), "{effective}");
+    for (t, gain) in gains {
         assert!((0.0..0.57).contains(&gain), "{t} K: {gain}");
     }
 }
