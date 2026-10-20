@@ -25,9 +25,18 @@
 //! (krypton, xenon, carbon monoxide, nitrous oxide and hydrogen sulphide) with CODATA 2014's R =
 //! 8.314 459 8 J mol⁻¹ K⁻¹ in place of the 8.314 472 they were fitted with, so its `κ_T` lies a
 //! constant 1.47 × 10⁻⁶ above theirs, the ratio of the two; each is kept with its own.
+//!
+//! Step 2's five equations carry their ideal-gas parts beside them ([`HelmholtzIdeal`]), for their
+//! saturated liquids' specific heats (rendering plan R09, R09.T13.i; decision-r09-t13i-cl-licence
+//! §6): the coefficients of the alpha0 blocks of the same CoolProp files (MIT, `NOTICE`), each
+//! number as the file writes it, of the terms whose second τ-derivative is not zero (the ln τ,
+//! power and Planck–Einstein terms; the lead and the reference-state offset terms fix only the zeros
+//! of energy and entropy). Each is checked with its residual: `c_p` and `c_v` at the states where
+//! `κ_T` is.
 
 use super::super::helmholtz::{
-    AssociatingTerm, GaussianTerm, HelmholtzResidual, NonAnalyticTerm, PowerTerm,
+    AssociatingTerm, GaussianTerm, HelmholtzIdeal, HelmholtzResidual, IdealPowerTerm,
+    NonAnalyticTerm, PlanckEinsteinTerm, PowerTerm,
 };
 use crate::units::{Kelvin, KilogramsPerCubicMetre};
 
@@ -88,6 +97,23 @@ pub(in crate::substance) const METHANE: HelmholtzResidual = HelmholtzResidual {
     associating: &[],
 };
 
+/// Methane's ideal-gas part, [`METHANE`]'s (Setzmann and Wagner 1991), as CoolProp's `Methane.json`
+/// holds it (its alpha0 block): the ln τ coefficient 3.0016 and five Planck–Einstein terms, each
+/// θ the file's v in kelvin over its `Tcrit` of 190.564 K, the residual's `T_c`. Its `c_p` and
+/// `c_v` reproduce Table 39's at 90.694, 100 and 120 K within 2 × 10⁻⁴ and the WebBook's within
+/// 10⁻⁶ (`liquid/tests.rs`).
+pub(in crate::substance) const METHANE_IDEAL: HelmholtzIdeal = HelmholtzIdeal {
+    log_tau: 3.0016,
+    power: &[],
+    planck_einstein: &[
+        PlanckEinsteinTerm::new(0.008_449, 648.0 / 190.564),
+        PlanckEinsteinTerm::new(4.6942, 1_957.0 / 190.564),
+        PlanckEinsteinTerm::new(3.4865, 3_895.0 / 190.564),
+        PlanckEinsteinTerm::new(1.6572, 5_705.0 / 190.564),
+        PlanckEinsteinTerm::new(1.4115, 15_080.0 / 190.564),
+    ],
+};
+
 /// Nitrogen: Span, Lemmon, Jacobsen, Wagner and Yokozeki 2000 (J. Phys. Chem. Ref. Data 29, 1361),
 /// valid from 63.151 to 1000 K, its residual part, 32 power and exponential terms and 4 Gaussian:
 /// `T_c` = 126.192 K, `ρ_c` = 11.1839 mol dm⁻³, R = 8.314 51 J mol⁻¹ K⁻¹ and M = 28.013 48 g mol⁻¹.
@@ -139,6 +165,21 @@ pub(in crate::substance) const NITROGEN: HelmholtzResidual = HelmholtzResidual {
     ],
     non_analytic: &[],
     associating: &[],
+};
+
+/// Nitrogen's ideal-gas part, [`NITROGEN`]'s (Span et al. 2000), as CoolProp's `Nitrogen.json`
+/// holds it (its alpha0 block): the ln τ coefficient 2.5, three power terms in τ⁻¹, τ⁻² and τ⁻³,
+/// and one Planck–Einstein term, θ the file's v of 3364.011 K over its `Tcrit` of 126.192 K, the
+/// residual's `T_c`. Its `c_p` and `c_v` reproduce the saturation table's (p. 1403) at 63.151, 70
+/// and 77 K within 3 × 10⁻⁴ and the WebBook's within 10⁻⁶ (`liquid/tests.rs`).
+pub(in crate::substance) const NITROGEN_IDEAL: HelmholtzIdeal = HelmholtzIdeal {
+    log_tau: 2.5,
+    power: &[
+        IdealPowerTerm::new(-0.000_193_481_9, -1.0),
+        IdealPowerTerm::new(-1.247_742e-5, -2.0),
+        IdealPowerTerm::new(6.678_326e-8, -3.0),
+    ],
+    planck_einstein: &[PlanckEinsteinTerm::new(1.012_941, 3_364.011 / 126.192)],
 };
 
 /// Ethane: Bücker and Wagner 2006 (J. Phys. Chem. Ref. Data 35, 205), valid from the melting line
@@ -203,6 +244,21 @@ pub(in crate::substance) const ETHANE: HelmholtzResidual = HelmholtzResidual {
     associating: &[],
 };
 
+/// Ethane's ideal-gas part, [`ETHANE`]'s (Bücker and Wagner 2006, its paper not read), as
+/// CoolProp's `Ethane.json` holds it (its alpha0 block): the ln τ coefficient 3.003 039 265 and
+/// four Planck–Einstein terms, θ reduced by the residual's `T_c`. Its `c_p` and `c_v` reproduce the
+/// WebBook's evaluation of the same equation within 3 × 10⁻⁶ (`liquid/tests.rs`).
+pub(in crate::substance) const ETHANE_IDEAL: HelmholtzIdeal = HelmholtzIdeal {
+    log_tau: 3.003_039_265,
+    power: &[],
+    planck_einstein: &[
+        PlanckEinsteinTerm::new(1.117_433_359, 1.409_105_233),
+        PlanckEinsteinTerm::new(3.467_773_215, 4.009_917_071),
+        PlanckEinsteinTerm::new(6.941_944_64, 6.596_709_834),
+        PlanckEinsteinTerm::new(5.970_850_948, 13.979_810_27),
+    ],
+};
+
 /// Ammonia: Gao, Wu, Bell, Harvey and Lemmon 2023 (J. Phys. Chem. Ref. Data 52, 013102), valid from
 /// the triple point to 725 K, its residual of Table 5, 8 power and exponential terms, 10 Gaussian
 /// and 2 associating: `T_c` = 405.56 K, `ρ_c` = 13.696 mol dm⁻³, R = 8.314 462 618 J mol⁻¹ K⁻¹
@@ -259,6 +315,21 @@ pub(in crate::substance) const AMMONIA: HelmholtzResidual = HelmholtzResidual {
             0.446_89,
             0.682_6,
         ),
+    ],
+};
+
+/// Ammonia's ideal-gas part, [`AMMONIA`]'s (Gao et al. 2023), as CoolProp's `Ammonia.json` holds
+/// it (its first equation's alpha0 block, Gao et al.'s): the ln τ coefficient 3 and three
+/// Planck–Einstein terms, θ reduced by the residual's `T_c`, the file's decimals of 1646, 3965
+/// and 7231 K over 405.56 K. Its `c_p` and `c_v` reproduce Table 7's within 2 × 10⁻⁶ at all eight
+/// states (`liquid/tests.rs`).
+pub(in crate::substance) const AMMONIA_IDEAL: HelmholtzIdeal = HelmholtzIdeal {
+    log_tau: 3.0,
+    power: &[],
+    planck_einstein: &[
+        PlanckEinsteinTerm::new(2.224, 4.058_585_659_335_240_5),
+        PlanckEinsteinTerm::new(3.148, 9.776_605_187_888_352),
+        PlanckEinsteinTerm::new(0.957_9, 17.829_667_620_080_876),
     ],
 };
 
@@ -322,6 +393,22 @@ pub(in crate::substance) const CARBON_DIOXIDE: HelmholtzResidual = HelmholtzResi
         NonAnalyticTerm::new(3.0, 0.875, 1.0, 0.055_068_668_612_8, 12.5, 275.0, 0.7, 0.3),
     ],
     associating: &[],
+};
+
+/// Carbon dioxide's ideal-gas part, [`CARBON_DIOXIDE`]'s (Span and Wagner 1996), as CoolProp's
+/// `CarbonDioxide.json` holds it (its alpha0 block): the ln τ coefficient 2.5 and five
+/// Planck–Einstein terms, θ reduced by the residual's `T_c`. Its `c_p` and `c_v` reproduce Table
+/// 34's at its five states within 10⁻⁴ and the WebBook's within 10⁻⁶ (`liquid/tests.rs`).
+pub(in crate::substance) const CARBON_DIOXIDE_IDEAL: HelmholtzIdeal = HelmholtzIdeal {
+    log_tau: 2.5,
+    power: &[],
+    planck_einstein: &[
+        PlanckEinsteinTerm::new(1.994_270_42, 3.151_63),
+        PlanckEinsteinTerm::new(0.621_052_48, 6.111_9),
+        PlanckEinsteinTerm::new(0.411_952_93, 6.777_08),
+        PlanckEinsteinTerm::new(1.040_289_22, 11.323_84),
+        PlanckEinsteinTerm::new(0.083_276_78, 27.087_92),
+    ],
 };
 
 /// Oxygen: Schmidt and Wagner 1985 (Fluid Phase Equilib. 19, 175), as Stewart, Jacobsen and Wagner

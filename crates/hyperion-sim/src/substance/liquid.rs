@@ -23,7 +23,14 @@
 //!   ([`SurfaceTensionEquation`]), and **the viscosity** a reference correlation
 //!   ([`ViscosityCorrelation`]);
 //! - **the density** is the condensed columns' (P14.T49.b): the saturated liquid's ancillary
-//!   equation for a row with a phase diagram, a stated value otherwise.
+//!   equation for a row with a phase diagram, a stated value otherwise;
+//! - **the specific heat** of the saturated liquid, `c_l`(T), J kg⁻¹ K⁻¹, is the row's reference
+//!   equation of state's `c_p` at its own saturated liquid over a range, held at its ends
+//!   ([`LiquidSpecificHeat`]; decision-r09-t13i §2.1, for the climate's sea of another liquid;
+//!   decision-r09-t13i-cl-licence §6), for water, methane, ethane, nitrogen, ammonia and carbon
+//!   dioxide, and a solution's its components' mass-weighted mean at its reference composition
+//!   ([`Substance::liquid_specific_heat_j_per_kg_k`]). It is internal: the public mirror
+//!   `substances.json` does not carry it.
 //!
 //! A solution's record is its components' instead ([`LiquidColumns::components`]): each component
 //! a neutral species row with liquid columns of its own, mixed at the reference composition
@@ -99,7 +106,7 @@ use hyperion_surface::substance_key::{SubstanceKey, SubstanceKeyForm};
 
 use super::condensed::{CondensedPhase, GrainDensity};
 use super::diagram::{AVOGADRO_PER_MOL, DensityEquation, DensityForm, PhaseDiagram};
-use super::helmholtz::HelmholtzResidual;
+use super::helmholtz::{HelmholtzIdeal, HelmholtzResidual};
 use super::rows::liquids::LIQUIDS;
 use super::{Source, Substance, SubstanceId};
 use crate::math;
@@ -992,6 +999,82 @@ impl SupercooledViscosity {
     }
 }
 
+/// A saturated liquid's specific isobaric heat capacity `c_l`(T), J kg⁻¹ K⁻¹, from its reference
+/// equation of state over a range (decision-r09-t13i §2.1; decision-r09-t13i-cl-licence §6),
+/// held at the range's ends.
+///
+/// At a temperature T in the range it is the equation's `c_p`
+/// ([`HelmholtzResidual::isobaric_heat_capacity_j_per_kg_k`]) at the equation's own saturated
+/// liquid on the row's phase diagram: the density four Newton steps take from the diagram's
+/// saturated-liquid density ([`PhaseDiagram::liquid_density`]) to the diagram's vapour pressure
+/// ([`PhaseDiagram::saturation_pressure`]) along the isotherm
+/// ([`HelmholtzResidual::density_at_pressure`]). Outside the range it is the nearer end's value, to
+/// the bit. The source is the row's [`LiquidColumns::sources`] entry that covers `c_l`; the
+/// equation is the row's scattering's, as a test holds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LiquidSpecificHeat {
+    pub(crate) equation: &'static HelmholtzResidual,
+    pub(crate) ideal: &'static HelmholtzIdeal,
+    pub(crate) low: Kelvin,
+    pub(crate) high: Kelvin,
+}
+
+impl LiquidSpecificHeat {
+    /// The reference equation of state's residual part.
+    #[must_use]
+    pub const fn equation(&self) -> &'static HelmholtzResidual {
+        self.equation
+    }
+
+    /// The same equation's ideal-gas part.
+    #[must_use]
+    pub const fn ideal(&self) -> &'static HelmholtzIdeal {
+        self.ideal
+    }
+
+    /// The lowest temperature of its range, above the row's triple point.
+    #[must_use]
+    pub const fn low(&self) -> Kelvin {
+        self.low
+    }
+
+    /// The highest temperature of its range, below the row's critical point.
+    #[must_use]
+    pub const fn high(&self) -> Kelvin {
+        self.high
+    }
+
+    /// Its range, from [`low`](Self::low) to [`high`](Self::high).
+    #[must_use]
+    pub const fn range(&self) -> (Kelvin, Kelvin) {
+        (self.low, self.high)
+    }
+
+    /// Its value at `temperature` on `diagram`, the row's own phase diagram, J kg⁻¹ K⁻¹: the
+    /// equation's `c_p` at its saturated liquid at `temperature` held to the range, so that outside
+    /// it the nearer end's value holds to the bit; a NaN gives a NaN. `None` where the diagram has
+    /// no liquid density there, which no row's range reaches, as a test holds.
+    #[must_use]
+    pub(crate) fn at(&self, diagram: &PhaseDiagram, temperature: Kelvin) -> Option<f64> {
+        if temperature.value().is_nan() {
+            return Some(f64::NAN);
+        }
+        let held = Kelvin::new(
+            temperature
+                .value()
+                .clamp(self.low.value(), self.high.value()),
+        );
+        let start = diagram.liquid_density(held)?;
+        let density =
+            self.equation
+                .density_at_pressure(start, diagram.saturation_pressure(held), held);
+        Some(
+            self.equation
+                .isobaric_heat_capacity_j_per_kg_k(self.ideal, density, held),
+        )
+    }
+}
+
 /// What a row's liquid is made of, and so which compositions its record resolves at.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum LiquidConstitution {
@@ -1028,6 +1111,7 @@ pub struct LiquidColumns {
     pub(crate) surface_tension: Option<SurfaceTensionEquation>,
     pub(crate) viscosity: Option<ViscosityCorrelation>,
     pub(crate) supercooled_viscosity: Option<SupercooledViscosity>,
+    pub(crate) specific_heat: Option<LiquidSpecificHeat>,
     pub(crate) constitution: LiquidConstitution,
     pub(crate) sources: &'static [Source],
 }
@@ -1111,6 +1195,14 @@ impl LiquidColumns {
         self.supercooled_viscosity.as_ref()
     }
 
+    /// The saturated liquid's own specific heat, for the six pure liquids decision-r09-t13i §2.1
+    /// gives one, from their reference equations of state; `None` for every other row, a
+    /// solution's being its components' ([`Substance::liquid_specific_heat_j_per_kg_k`]).
+    #[must_use]
+    pub const fn specific_heat(&self) -> Option<&LiquidSpecificHeat> {
+        self.specific_heat.as_ref()
+    }
+
     /// Where every value comes from, with its licence basis.
     #[must_use]
     pub const fn sources(&self) -> &'static [Source] {
@@ -1128,6 +1220,107 @@ impl Substance {
             .find(|(key, _)| key.as_str() == self.key().as_str())
             .map(|(_, columns)| columns)
     }
+
+    /// Its saturated liquid's specific heat `c_l` at `temperature`, J kg⁻¹ K⁻¹
+    /// (decision-r09-t13i §2.1), each column's end value held outside its range
+    /// ([`LiquidSpecificHeat`]); a NaN gives a NaN:
+    ///
+    /// - a pure liquid's is its own column's: its reference equation of state's `c_p` at the
+    ///   equation's saturated liquid on the row's phase diagram (decision-r09-t13i-cl-licence §6);
+    /// - a solution's is its components' mean weighted by mass at its reference composition,
+    ///   Σ wᵢ `c_l,i`(T) with wᵢ = xᵢ Mᵢ ÷ Σ xⱼ Mⱼ from the mole fractions xᵢ and the rows' molar
+    ///   masses Mᵢ, each component's own column at T, summed in the components' order. That is
+    ///   ideal mixing, with no excess heat capacity, and of low confidence, as the ruling states;
+    ///   Titan's seas and ammonia–water take it today.
+    ///
+    /// `None` where the row has no liquid columns, or no column of its own (a pure liquid the
+    /// ruling gives none), where any component of a solution lacks one or a molar mass (the
+    /// chloride and sulphate brines, whose salts have none, and the aqueous acid), for a solution
+    /// whose solute has no row yet and for a silicate melt.
+    ///
+    /// # Examples
+    ///
+    /// Titan's seas at the Huygens landing site's 93.65 K hold about seven tenths of the heat per
+    /// kilogram per kelvin of Earth's water at 285 K:
+    ///
+    /// ```
+    /// use hyperion_sim::substance::by_key;
+    /// use hyperion_sim::units::Kelvin;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let heat = |key: &str, t: f64| {
+    ///     by_key(key)
+    ///         .and_then(|id| id.substance().liquid_specific_heat_j_per_kg_k(Kelvin::new(t)))
+    ///         .ok_or("the row's liquid has a specific heat")
+    /// };
+    /// let ratio = heat("ch4_c2h6_n2", 93.65)? / heat("H2O", 285.0)?;
+    /// assert!((0.6..0.8).contains(&ratio), "{ratio}");
+    /// // Sodium chloride's liquid has no column, so its brine has none.
+    /// assert!(heat("brine_nacl", 285.0).is_err());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn liquid_specific_heat_j_per_kg_k(&self, temperature: Kelvin) -> Option<f64> {
+        let columns = self.liquid()?;
+        match &columns.constitution {
+            LiquidConstitution::Pure { .. } => self.own_liquid_specific_heat(temperature),
+            LiquidConstitution::Solution(solution) => {
+                mixed_specific_heat_j_per_kg_k(solution, temperature)
+            }
+            LiquidConstitution::AwaitingSolute(_) | LiquidConstitution::Melt(_) => None,
+        }
+    }
+
+    /// The range of its pure liquid's own specific heat column ([`LiquidSpecificHeat::range`]);
+    /// `None` where [`liquid_specific_heat_j_per_kg_k`](Self::liquid_specific_heat_j_per_kg_k)
+    /// is, and for a solution, whose components' columns each hold their own ends.
+    #[must_use]
+    pub fn liquid_specific_heat_range(&self) -> Option<(Kelvin, Kelvin)> {
+        let columns = self.liquid()?;
+        match &columns.constitution {
+            LiquidConstitution::Pure { .. } => {
+                columns.specific_heat().map(LiquidSpecificHeat::range)
+            }
+            LiquidConstitution::Solution(_)
+            | LiquidConstitution::AwaitingSolute(_)
+            | LiquidConstitution::Melt(_) => None,
+        }
+    }
+
+    /// Its own specific heat column's value at `temperature` on its own phase diagram, J kg⁻¹
+    /// K⁻¹; `None` for a row with no column or no diagram.
+    #[must_use]
+    fn own_liquid_specific_heat(&self, temperature: Kelvin) -> Option<f64> {
+        self.liquid()?
+            .specific_heat()?
+            .at(self.phase_diagram()?, temperature)
+    }
+}
+
+/// A solution's specific heat at its reference composition and `temperature`, J kg⁻¹ K⁻¹: Σ xᵢ Mᵢ
+/// `c_l,i`(T) ÷ Σ xⱼ Mⱼ, which is Σ wᵢ `c_l,i`(T) with the mass fractions wᵢ = xᵢ Mᵢ ÷ Σ xⱼ Mⱼ,
+/// over the solution's components in their order, each fraction read from the reference (0 where
+/// it is absent) and each component's own column at T on its own phase diagram, held at its own
+/// ends; `None` where any component lacks a column or a molar mass
+/// ([`Substance::liquid_specific_heat_j_per_kg_k`]).
+#[must_use]
+fn mixed_specific_heat_j_per_kg_k(solution: &SolutionColumns, temperature: Kelvin) -> Option<f64> {
+    let mut mass = 0.0;
+    let mut heat = 0.0;
+    for &component in solution.components {
+        let x = solution
+            .reference
+            .iter()
+            .find(|&&(id, _)| id == component)
+            .map_or(0.0, |&(_, x)| x);
+        let row = component.substance();
+        let molar_mass = row.molar_mass_g_per_mol()?;
+        let c = row.own_liquid_specific_heat(temperature)?;
+        mass += x * molar_mass;
+        heat += x * molar_mass * c;
+    }
+    Some(heat / mass)
 }
 
 /// A liquid's composition by mole fraction, each component a registry row that is a neutral

@@ -27,20 +27,29 @@
 //! evaluates the same correlation with the reference equation's critical temperature, as this
 //! does. The files' bins are `tables::liquid_optics`, reduced by `hyperion-fit` from rendering plan
 //! R08's committed files.
+//!
+//! The six pure liquids' saturated-liquid specific heats `c_l`(T) (decision-r09-t13i §2.1) are
+//! their reference equations of state's, evaluated here (decision-r09-t13i-cl-licence §6): each
+//! one's `c_p` at its saturated liquid, at the row's diagram saturation pressure, over the ruling's
+//! range and held at its ends ([`LiquidSpecificHeat`]). Water's ideal-gas part is IAPWS
+//! R6-95(2018)'s Table 1, read in the release; the other five's are `rows/equations.rs`'s, beside
+//! their residuals.
 
 use hyperion_surface::field::LiquidBasis;
 use hyperion_surface::substance_key::SubstanceKey;
 
 use super::super::element::Element;
-use super::super::helmholtz::{GaussianTerm, HelmholtzResidual, NonAnalyticTerm, PowerTerm};
+use super::super::helmholtz::{
+    GaussianTerm, HelmholtzIdeal, HelmholtzResidual, NonAnalyticTerm, PlanckEinsteinTerm, PowerTerm,
+};
 use super::super::liquid::{
     AcidOptics, AqueousAcid, AqueousElectrolyte, CorrelationLength, CriticalRegion,
     Friend1991Viscosity, Huber2024Viscosity, Iapws2008Viscosity, IdealLiquidMixing,
     LaeseckeMuzny2017Viscosity, LaliberteCooperDensity, LaliberteViscosity, LiquidColumns,
-    LiquidConstitution, LiquidOptics, LiquidScattering, MixingModel, Monogenidou2018Viscosity,
-    MyhreDensity, RowlessSolute, SoluteAbsorption, SolutionColumns, Sotiriadou2026Viscosity,
-    SupercooledViscosity, SurfaceTensionEquation, VehkamakiSurfaceTension, ViscosityCorrelation,
-    ViscosityRange, WilliamsLongViscosity,
+    LiquidConstitution, LiquidOptics, LiquidScattering, LiquidSpecificHeat, MixingModel,
+    Monogenidou2018Viscosity, MyhreDensity, RowlessSolute, SoluteAbsorption, SolutionColumns,
+    Sotiriadou2026Viscosity, SupercooledViscosity, SurfaceTensionEquation, VehkamakiSurfaceTension,
+    ViscosityCorrelation, ViscosityRange, WilliamsLongViscosity,
 };
 use super::super::{Basis, Source, SubstanceId};
 use super::{equations, melts};
@@ -292,6 +301,24 @@ pub(in crate::substance) const IAPWS_95: HelmholtzResidual = HelmholtzResidual {
     associating: &[],
 };
 
+/// IAPWS-95's ideal-gas part, for [`IAPWS_95`]: IAPWS R6-95(2018), its §3's Eq. (5) and Table 1 as
+/// printed, read in the release (from Cooper 1982's ideal-gas heat capacity, Int. J. Thermophys.
+/// 3, 35, its reference 6): the ln τ coefficient n°₃ = 3.006 32 and the five Planck–Einstein terms
+/// n°ᵢ ln(1 − e^(−γ°ᵢτ)), i = 4 to 8, in the residual's τ = 647.096 K ÷ T; n°₁ and n°₂, which fix
+/// only the zeros of energy and entropy, are not held. A test reproduces Table 6's `φ°_ττ` at 500
+/// K and 838.025 kg m⁻³, −1.932 491 85.
+pub(in crate::substance) const IAPWS_95_IDEAL: HelmholtzIdeal = HelmholtzIdeal {
+    log_tau: 3.006_32,
+    power: &[],
+    planck_einstein: &[
+        PlanckEinsteinTerm::new(0.012_436, 1.287_289_67),
+        PlanckEinsteinTerm::new(0.973_15, 3.537_342_22),
+        PlanckEinsteinTerm::new(1.279_50, 7.740_737_08),
+        PlanckEinsteinTerm::new(0.969_56, 9.244_377_96),
+        PlanckEinsteinTerm::new(0.248_73, 27.507_510_5),
+    ],
+};
+
 /// Water's surface tension against its vapour, IAPWS R1-76(2014), "Revised Release on Surface
 /// Tension of Ordinary Water Substance" (Moscow, 2014): σ = B τ^μ (1 + bτ), τ = 1 − T ÷ `T_c`, with
 /// B = 235.8 mN m⁻¹, b = −0.625, μ = 1.256 and `T_c` = 647.096 K, valid from the triple point to
@@ -416,6 +443,12 @@ const WATER: LiquidColumns = LiquidColumns {
     surface_tension: Some(IAPWS_SURFACE_TENSION),
     viscosity: Some(ViscosityCorrelation::Iapws2008(&IAPWS_VISCOSITY)),
     supercooled_viscosity: None,
+    specific_heat: Some(LiquidSpecificHeat {
+        equation: &IAPWS_95,
+        ideal: &IAPWS_95_IDEAL,
+        low: Kelvin::new(275.0),
+        high: Kelvin::new(305.0),
+    }),
     constitution: LiquidConstitution::Pure {
         components: &[WATER_ID],
         reference: &[(WATER_ID, 1.0)],
@@ -466,6 +499,17 @@ const WATER: LiquidColumns = LiquidColumns {
         Source {
             covers: "attribution",
             citation: IAPWS_ATTRIBUTION,
+            basis: Basis::Fact,
+        },
+        Source {
+            covers: "c_l",
+            citation: "IAPWS-95 (IAPWS R6-95(2018); Wagner and Pruß 2002, J. Phys. Chem. Ref. \
+                       Data 31, 387), evaluated here with Table 1's ideal-gas part and Table 2's \
+                       residual: the saturated liquid's c_p, at the row's diagram saturation \
+                       pressure on the equation's liquid branch, over 275–305 K and held at the \
+                       ends (decision-r09-t13i §2.1; decision-r09-t13i-cl-licence §6); checked \
+                       against the release's Table 6 and against NIST's Chemistry WebBook (SRD \
+                       69), which evaluates the same equation, at asserted states",
             basis: Basis::Fact,
         },
     ],
@@ -535,6 +579,12 @@ const METHANE: LiquidColumns = LiquidColumns {
         divergence: Kelvin::new(bins::METHANE_SUPERCOOLED_VISCOSITY_T0_K),
         triple: Kelvin::new(90.694_1),
     }),
+    specific_heat: Some(LiquidSpecificHeat {
+        equation: &equations::METHANE,
+        ideal: &equations::METHANE_IDEAL,
+        low: Kelvin::new(91.0),
+        high: Kelvin::new(116.0),
+    }),
     constitution: LiquidConstitution::Pure {
         components: &[METHANE_ID],
         reference: &[(METHANE_ID, 1.0)],
@@ -587,6 +637,18 @@ const METHANE: LiquidColumns = LiquidColumns {
                        point to the normal boiling point and anchored at the triple point, for a \
                        solution's component below it (decision-p14-t49b-condensed §2.5), `Derived`",
             basis: Basis::Fitted,
+        },
+        Source {
+            covers: "c_l",
+            citation: "Setzmann and Wagner 1991 (J. Phys. Chem. Ref. Data 20, 1061), its equation \
+                       of state evaluated here: the saturated liquid's c_p, at the row's diagram \
+                       saturation pressure on the equation's liquid branch, over 91–116 K and \
+                       held at the ends (decision-r09-t13i §2.1; decision-r09-t13i-cl-licence \
+                       §6); the residual as `rows/equations.rs` holds it, the ideal part as \
+                       CoolProp's Methane.json holds it (MIT, `NOTICE`); checked against its \
+                       Table 39 and against NIST's Chemistry WebBook (SRD 69), which evaluates \
+                       the same equation, at asserted states",
+            basis: Basis::Fact,
         },
     ],
 };
@@ -673,6 +735,12 @@ const AMMONIA: LiquidColumns = LiquidColumns {
     }),
     viscosity: Some(ViscosityCorrelation::Monogenidou2018(&MONOGENIDOU_2018)),
     supercooled_viscosity: None,
+    specific_heat: Some(LiquidSpecificHeat {
+        equation: &equations::AMMONIA,
+        ideal: &equations::AMMONIA_IDEAL,
+        low: Kelvin::new(196.0),
+        high: Kelvin::new(241.0),
+    }),
     constitution: LiquidConstitution::Pure {
         components: &[AMMONIA_ID],
         reference: &[(AMMONIA_ID, 1.0)],
@@ -709,6 +777,20 @@ const AMMONIA: LiquidColumns = LiquidColumns {
                        NIST's author manuscript, PMC6512859), Eqs. 1–8 with Tables 2 and 3, at the \
                        record's density; triple point to 725 K at pressures to 50 MPa, 2% (k = 2) \
                        in the saturated liquid to 285 K, 3.3% to 335 K, 5% elsewhere",
+            basis: Basis::Fact,
+        },
+        Source {
+            covers: "c_l",
+            citation: "Gao, Wu, Bell, Harvey and Lemmon 2023 (J. Phys. Chem. Ref. Data 52, \
+                       013102), its equation of state evaluated here: the saturated liquid's c_p, \
+                       at the row's diagram saturation pressure on the equation's liquid branch, \
+                       over 196–241 K and held at the ends (decision-r09-t13i §2.1; \
+                       decision-r09-t13i-cl-licence §6); the residual as `rows/equations.rs` \
+                       holds it, the ideal part as CoolProp's Ammonia.json holds it (MIT, \
+                       `NOTICE`); checked against its Table 7 and against NIST's Chemistry \
+                       WebBook (SRD 69), which evaluates the same equation, at asserted states; \
+                       the WebBook, which labels it Gao, Wu, Bell and Lemmon 2018, evaluates it \
+                       with CODATA 2014's R",
             basis: Basis::Fact,
         },
     ],
@@ -782,6 +864,12 @@ const NITROGEN: LiquidColumns = LiquidColumns {
     }),
     viscosity: Some(ViscosityCorrelation::Huber2024(&HUBER_2024)),
     supercooled_viscosity: None,
+    specific_heat: Some(LiquidSpecificHeat {
+        equation: &equations::NITROGEN,
+        ideal: &equations::NITROGEN_IDEAL,
+        low: Kelvin::new(64.0),
+        high: Kelvin::new(78.0),
+    }),
     constitution: LiquidConstitution::Pure {
         components: &[NITROGEN_ID],
         reference: &[(NITROGEN_ID, 1.0)],
@@ -814,6 +902,19 @@ const NITROGEN: LiquidColumns = LiquidColumns {
             citation: "Huber, Perkins and Lemmon 2024 (Int. J. Thermophys. 45:146, open access), \
                        Eqs. 1, 3 and 5 with Tables 3 and 4 and Δη_c = 1, at the record's density; \
                        triple point to 1000 K, 4% (k = 2) in the liquid to 34 MPa",
+            basis: Basis::Fact,
+        },
+        Source {
+            covers: "c_l",
+            citation: "Span, Lemmon, Jacobsen, Wagner and Yokozeki 2000 (J. Phys. Chem. Ref. Data \
+                       29, 1361), its equation of state evaluated here: the saturated liquid's \
+                       c_p, at the row's diagram saturation pressure on the equation's liquid \
+                       branch, over 64–78 K and held at the ends (decision-r09-t13i §2.1; \
+                       decision-r09-t13i-cl-licence §6); the residual as `rows/equations.rs` \
+                       holds it, the ideal part as CoolProp's Nitrogen.json holds it (MIT, \
+                       `NOTICE`); checked against its saturation table (p. 1403) and against \
+                       NIST's Chemistry WebBook (SRD 69), which evaluates the same equation, at \
+                       asserted states",
             basis: Basis::Fact,
         },
     ],
@@ -907,6 +1008,12 @@ const CARBON_DIOXIDE: LiquidColumns = LiquidColumns {
         &LAESECKE_MUZNY_2017,
     )),
     supercooled_viscosity: None,
+    specific_heat: Some(LiquidSpecificHeat {
+        equation: &equations::CARBON_DIOXIDE,
+        ideal: &equations::CARBON_DIOXIDE_IDEAL,
+        low: Kelvin::new(217.0),
+        high: Kelvin::new(272.0),
+    }),
     constitution: LiquidConstitution::Pure {
         components: &[CARBON_DIOXIDE_ID],
         reference: &[(CARBON_DIOXIDE_ID, 1.0)],
@@ -945,6 +1052,18 @@ const CARBON_DIOXIDE: LiquidColumns = LiquidColumns {
                        manuscript, OSTI 1463125), Eqs. 1, 4–6, 8 and 9 with Tables 2–4, \
                        without Δη_c, at the record's density; the liquid from the triple point to \
                        the critical point, 4% (k = 2, 'rather conservative')",
+            basis: Basis::Fact,
+        },
+        Source {
+            covers: "c_l",
+            citation: "Span and Wagner 1996 (J. Phys. Chem. Ref. Data 25, 1509), its equation of \
+                       state evaluated here: the saturated liquid's c_p, at the row's diagram \
+                       saturation pressure on the equation's liquid branch, over 217–272 K and \
+                       held at the ends (decision-r09-t13i §2.1; decision-r09-t13i-cl-licence \
+                       §6); the residual as `rows/equations.rs` holds it, the ideal part as \
+                       CoolProp's CarbonDioxide.json holds it (MIT, `NOTICE`); checked against \
+                       its Table 34 and against NIST's Chemistry WebBook (SRD 69), which \
+                       evaluates the same equation, at asserted states",
             basis: Basis::Fact,
         },
     ],
@@ -1149,6 +1268,7 @@ const OXYGEN: LiquidColumns = LiquidColumns {
     }),
     viscosity: None,
     supercooled_viscosity: None,
+    specific_heat: None,
     constitution: LiquidConstitution::Pure {
         components: &[OXYGEN_ID],
         reference: &[(OXYGEN_ID, 1.0)],
@@ -1229,6 +1349,7 @@ const ARGON: LiquidColumns = LiquidColumns {
     }),
     viscosity: None,
     supercooled_viscosity: None,
+    specific_heat: None,
     constitution: LiquidConstitution::Pure {
         components: &[ARGON_ID],
         reference: &[(ARGON_ID, 1.0)],
@@ -1309,6 +1430,7 @@ const KRYPTON: LiquidColumns = LiquidColumns {
     }),
     viscosity: None,
     supercooled_viscosity: None,
+    specific_heat: None,
     constitution: LiquidConstitution::Pure {
         components: &[KRYPTON_ID],
         reference: &[(KRYPTON_ID, 1.0)],
@@ -1386,6 +1508,7 @@ const XENON: LiquidColumns = LiquidColumns {
     }),
     viscosity: None,
     supercooled_viscosity: None,
+    specific_heat: None,
     constitution: LiquidConstitution::Pure {
         components: &[XENON_ID],
         reference: &[(XENON_ID, 1.0)],
@@ -1463,6 +1586,7 @@ const NITROUS_OXIDE: LiquidColumns = LiquidColumns {
     }),
     viscosity: None,
     supercooled_viscosity: None,
+    specific_heat: None,
     constitution: LiquidConstitution::Pure {
         components: &[NITROUS_OXIDE_ID],
         reference: &[(NITROUS_OXIDE_ID, 1.0)],
@@ -1537,6 +1661,7 @@ const CARBON_MONOXIDE: LiquidColumns = LiquidColumns {
     }),
     viscosity: None,
     supercooled_viscosity: None,
+    specific_heat: None,
     constitution: LiquidConstitution::Pure {
         components: &[CARBON_MONOXIDE_ID],
         reference: &[(CARBON_MONOXIDE_ID, 1.0)],
@@ -1602,6 +1727,7 @@ const SULPHUR_DIOXIDE: LiquidColumns = LiquidColumns {
     }),
     viscosity: None,
     supercooled_viscosity: None,
+    specific_heat: None,
     constitution: LiquidConstitution::Pure {
         components: &[SULPHUR_DIOXIDE_ID],
         reference: &[(SULPHUR_DIOXIDE_ID, 1.0)],
@@ -1671,6 +1797,7 @@ const HYDROGEN_SULPHIDE: LiquidColumns = LiquidColumns {
     }),
     viscosity: None,
     supercooled_viscosity: None,
+    specific_heat: None,
     constitution: LiquidConstitution::Pure {
         components: &[HYDROGEN_SULPHIDE_ID],
         reference: &[(HYDROGEN_SULPHIDE_ID, 1.0)],
@@ -1752,6 +1879,12 @@ const ETHANE: LiquidColumns = LiquidColumns {
         divergence: Kelvin::new(bins::ETHANE_SUPERCOOLED_VISCOSITY_T0_K),
         triple: Kelvin::new(90.368),
     }),
+    specific_heat: Some(LiquidSpecificHeat {
+        equation: &equations::ETHANE,
+        ideal: &equations::ETHANE_IDEAL,
+        low: Kelvin::new(95.0),
+        high: Kelvin::new(150.0),
+    }),
     constitution: LiquidConstitution::Pure {
         components: &[ETHANE_ID],
         reference: &[(ETHANE_ID, 1.0)],
@@ -1800,6 +1933,18 @@ const ETHANE: LiquidColumns = LiquidColumns {
                        rises with temperature over the window, and the ancillary density, 0.066% \
                        low at the triple point, flattens it further below about 100 K; `Derived`",
             basis: Basis::Fitted,
+        },
+        Source {
+            covers: "c_l",
+            citation: "Bücker and Wagner 2006 (J. Phys. Chem. Ref. Data 35, 205; its paper not \
+                       read), its equation of state evaluated here: the saturated liquid's c_p, \
+                       at the row's diagram saturation pressure on the equation's liquid branch, \
+                       over 95–150 K and held at the ends (decision-r09-t13i §2.1; \
+                       decision-r09-t13i-cl-licence §6); the residual as `rows/equations.rs` \
+                       holds it, the ideal part as CoolProp's Ethane.json holds it (MIT, \
+                       `NOTICE`); checked against NIST's Chemistry WebBook (SRD 69) alone, which \
+                       evaluates the same equation, at asserted states",
+            basis: Basis::Fact,
         },
     ],
 };
@@ -1964,6 +2109,7 @@ const SULPHURIC_ACID: LiquidColumns = LiquidColumns {
     surface_tension: None,
     viscosity: None,
     supercooled_viscosity: None,
+    specific_heat: None,
     constitution: LiquidConstitution::Solution(SolutionColumns {
         components: &[WATER_ID, SULPHURIC_ACID_ID],
         reference: &SULPHURIC_ACID_REFERENCE,
@@ -2126,6 +2272,7 @@ const TITAN_SEA: LiquidColumns = LiquidColumns {
     surface_tension: None,
     viscosity: None,
     supercooled_viscosity: None,
+    specific_heat: None,
     constitution: LiquidConstitution::Solution(SolutionColumns {
         components: &TITAN_SEA_COMPONENTS,
         reference: &TITAN_SEA_REFERENCE,
@@ -2401,6 +2548,7 @@ const BRINE_NACL: LiquidColumns = LiquidColumns {
     surface_tension: None,
     viscosity: None,
     supercooled_viscosity: None,
+    specific_heat: None,
     constitution: LiquidConstitution::Solution(SolutionColumns {
         components: &[WATER_ID, SODIUM_CHLORIDE_ID],
         reference: &BRINE_NACL_REFERENCE,
@@ -2487,6 +2635,7 @@ const BRINE_MGSO4: LiquidColumns = LiquidColumns {
     surface_tension: None,
     viscosity: None,
     supercooled_viscosity: None,
+    specific_heat: None,
     constitution: LiquidConstitution::Solution(SolutionColumns {
         components: &[WATER_ID, MAGNESIUM_SULPHATE_ID],
         reference: &BRINE_MGSO4_REFERENCE,
@@ -2593,6 +2742,7 @@ const BRINE_NACLO4: LiquidColumns = LiquidColumns {
     surface_tension: None,
     viscosity: None,
     supercooled_viscosity: None,
+    specific_heat: None,
     constitution: LiquidConstitution::AwaitingSolute(&SODIUM_PERCHLORATE),
     sources: &[
         Source {
@@ -2618,6 +2768,7 @@ const BRINE_MGCLO4: LiquidColumns = LiquidColumns {
     surface_tension: None,
     viscosity: None,
     supercooled_viscosity: None,
+    specific_heat: None,
     constitution: LiquidConstitution::AwaitingSolute(&MAGNESIUM_PERCHLORATE),
     sources: &[
         Source {
@@ -2655,6 +2806,7 @@ const AMMONIA_WATER: LiquidColumns = LiquidColumns {
     surface_tension: None,
     viscosity: None,
     supercooled_viscosity: None,
+    specific_heat: None,
     constitution: LiquidConstitution::Solution(SolutionColumns {
         components: &[WATER_ID, AMMONIA_ID],
         reference: &AMMONIA_WATER_REFERENCE,

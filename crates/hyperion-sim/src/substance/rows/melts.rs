@@ -53,6 +53,7 @@ const fn melt_columns(melt: &'static SilicateMelt, sources: &'static [Source]) -
         surface_tension: None,
         viscosity: None,
         supercooled_viscosity: None,
+        specific_heat: None,
         constitution: LiquidConstitution::Melt(melt),
         sources,
     }

@@ -253,6 +253,11 @@ crates/hyperion-sim/src/substance/rows/equations.rs, and their surface_tension a
 coefficients (Mulero, Cachadiña and Parra 2012) into crates/hyperion-sim/src/substance/rows/
 liquids.rs (galaxy plan 14, P14.T49.h's second step), each cited there.
 
+From the same five files, the ideal-gas parts' coefficients (alpha0: the logarithmic, power and
+Planck-Einstein terms) of the same equations are copied into
+crates/hyperion-sim/src/substance/rows/equations.rs, for the saturated liquids' specific heats
+(rendering plan R09, R09.T13.i), each cited there.
+
 --------------------------------------------------------------------------------
 CEA – Chemical Equilibrium with Applications (NASA's thermodynamic data, data/thermo.inp)
 https://github.com/nasa/cea
@@ -829,10 +834,11 @@ Geophys. Res. 109, D06303) join this list when their values are quoted; neither 
   ice at 19 K (two values, cited).
 
 - Liquid water's thermophysical properties in the substance registry's liquid columns (galaxy
-  plan 14, P14.T49.h), in crates/hyperion-sim/src/substance/rows/liquids.rs: the residual
-  Helmholtz energy of IAPWS R6-95(2018), Revised Release on the IAPWS Formulation 1995 for the
-  Thermodynamic Properties of Ordinary Water Substance for General and Scientific Use (after W.
-  Wagner and A. Pruss, J. Phys. Chem. Ref. Data 31 (2002) 387-535), its Table 2's coefficients;
+  plan 14, P14.T49.h; rendering plan R09, R09.T13.i), in
+  crates/hyperion-sim/src/substance/rows/liquids.rs: the Helmholtz energy of IAPWS R6-95(2018),
+  Revised Release on the IAPWS Formulation 1995 for the Thermodynamic Properties of Ordinary Water
+  Substance for General and Scientific Use (after W. Wagner and A. Pruss, J. Phys. Chem. Ref. Data
+  31 (2002) 387-535), its Table 1's ideal-gas and Table 2's residual coefficients;
   the viscosity of IAPWS R12-08, Release on the IAPWS Formulation 2008 for the Viscosity of
   Ordinary Water Substance (after M. L. Huber et al., J. Phys. Chem. Ref. Data 38 (2009) 101), its
   Tables 1 and 2; and the surface tension of IAPWS R1-76(2014), Revised Release on Surface Tension

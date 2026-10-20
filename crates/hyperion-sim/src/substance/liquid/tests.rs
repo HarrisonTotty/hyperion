@@ -7,7 +7,10 @@ use hyperion_surface::field::{
 use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::order::assert_order_independent;
 
-use super::super::rows::liquids::IAPWS_95;
+use super::super::rows::equations::{
+    AMMONIA_IDEAL, CARBON_DIOXIDE_IDEAL, ETHANE_IDEAL, METHANE_IDEAL, NITROGEN_IDEAL,
+};
+use super::super::rows::liquids::{IAPWS_95, IAPWS_95_IDEAL};
 use super::*;
 use crate::substance::{by_key, ids};
 use crate::tables::liquid_optics as bins;
@@ -72,7 +75,9 @@ fn the_liquid_bins_are_the_surface_crate_s() {
 /// −0.364 366 650, `φʳ_δδ` = 0.856 063 701) and its Table 7 pressures, each printed to nine
 /// figures, within 6 × 10⁻⁹ relative: just over half a unit of a ninth figure whose leading
 /// digit is 1 (the release warns that the liquid's pressure at low pressures may miss its ninth
-/// figure, its footnote a).
+/// figure, its footnote a). Its τ-derivatives and its ideal part's reproduce Table 6 too (`φʳ_ττ`
+/// = −2.234 407 37, `φʳ_δτ` = −1.121 769 15 and `φ°_ττ` = −1.932 491 85), within 5 × 10⁻⁹, half
+/// a unit of their ninth figure (4.5 × 10⁻⁹ for `φʳ_δτ`'s).
 #[test]
 fn iapws_95_reproduces_its_release_s_tables_6_and_7() {
     let d = IAPWS_95.density_derivatives(KilogramsPerCubicMetre::new(838.025), Kelvin::new(500.0));
@@ -82,6 +87,16 @@ fn iapws_95_reproduces_its_release_s_tables_6_and_7() {
         "{}",
         d.second
     );
+    let t =
+        IAPWS_95.temperature_derivatives(KilogramsPerCubicMetre::new(838.025), Kelvin::new(500.0));
+    assert!(
+        (t.second / -2.234_407_37 - 1.0).abs() < 5e-9,
+        "{}",
+        t.second
+    );
+    assert!((t.mixed / -1.121_769_15 - 1.0).abs() < 5e-9, "{}", t.mixed);
+    let ideal = IAPWS_95_IDEAL.second_tau_derivative(647.096 / 500.0);
+    assert!((ideal / -1.932_491_85 - 1.0).abs() < 5e-9, "{ideal}");
     for (t, rho, mpa) in [
         (300.0, 0.996_556_0e3, 0.992_418_352e-1),
         (300.0, 0.100_530_8e4, 0.200_022_515e2),
@@ -795,43 +810,74 @@ fn assert_compressibility(
     }
 }
 
+/// Asserts `equation`'s `c_v` and `c_p`, with its ideal-gas part `ideal`, at each (T, ρ, `c_v`,
+/// `c_p`, w) of `rows` within `tolerance` of the table's, ρ in kg m⁻³ and the table's heat
+/// capacities times `unit` in J kg⁻¹ K⁻¹ (1,000 for kJ kg⁻¹ K⁻¹ or J g⁻¹ K⁻¹, 1 ÷ M for J mol⁻¹
+/// K⁻¹ at M kg mol⁻¹).
+fn assert_heat_capacities(
+    name: &str,
+    equation: &HelmholtzResidual,
+    ideal: &HelmholtzIdeal,
+    rows: &[(f64, f64, f64, f64, f64)],
+    unit: f64,
+    tolerance: f64,
+) {
+    for &(t, rho, cv, cp, _) in rows {
+        let (density, temperature) = (KilogramsPerCubicMetre::new(rho), Kelvin::new(t));
+        let isochoric = equation.isochoric_heat_capacity_j_per_kg_k(ideal, density, temperature);
+        let isobaric = equation.isobaric_heat_capacity_j_per_kg_k(ideal, density, temperature);
+        let (table_isochoric, table_isobaric) = (cv * unit, cp * unit);
+        assert!(
+            (isochoric / table_isochoric - 1.0).abs() < tolerance,
+            "{name} at {t} K and {rho} kg/m³: c_v {isochoric} against the table's {table_isochoric}"
+        );
+        assert!(
+            (isobaric / table_isobaric - 1.0).abs() < tolerance,
+            "{name} at {t} K and {rho} kg/m³: c_p {isobaric} against the table's {table_isobaric}"
+        );
+    }
+}
+
 /// Setzmann and Wagner 1991's methane reproduces their Table 39's `κ_T` at the saturated liquid
 /// (90.694, 100 and 120 K) within 2 × 10⁻⁴, the reach of its five printed figures, and the
-/// WebBook's evaluation of the same equation within 10⁻⁶.
+/// WebBook's evaluation of the same equation within 10⁻⁶; with its ideal part, its `c_v` and `c_p`
+/// to the same tolerances.
 #[test]
 fn setzmann_and_wagner_s_methane_reproduces_its_table_39() {
     let methane = &super::super::rows::equations::METHANE;
-    assert_compressibility(
+    let table_39 = [
+        (90.694, 451.48, 2.1677, 3.3678, 1_538.6),
+        (100.0, 438.89, 2.1136, 3.4084, 1_452.0),
+        (120.0, 409.90, 2.0196, 3.5493, 1_253.5),
+    ];
+    assert_compressibility("CH4 Table 39", methane, &table_39, 2e-4);
+    assert_heat_capacities(
         "CH4 Table 39",
         methane,
-        &[
-            (90.694, 451.48, 2.1677, 3.3678, 1_538.6),
-            (100.0, 438.89, 2.1136, 3.4084, 1_452.0),
-            (120.0, 409.90, 2.0196, 3.5493, 1_253.5),
-        ],
+        &METHANE_IDEAL,
+        &table_39,
+        1e3,
         2e-4,
     );
-    assert_compressibility(
-        "CH4 WebBook",
-        methane,
-        &[
-            (
-                90.694_057,
-                451.475_17,
-                2.167_703_4,
-                3.367_793_4,
-                1_538.602_3,
-            ),
-            (143.794_26, 369.914_39, 1.934_015_9, 3.889_826_7, 994.196_08),
-            (169.726_30, 311.290_15, 1.908_936_5, 5.157_407_2, 661.520_68),
-            (184.778_79, 252.685_34, 2.055_606_5, 10.800_571, 403.422_41),
-        ],
-        1e-6,
-    );
+    let webbook = [
+        (
+            90.694_057,
+            451.475_17,
+            2.167_703_4,
+            3.367_793_4,
+            1_538.602_3,
+        ),
+        (143.794_26, 369.914_39, 1.934_015_9, 3.889_826_7, 994.196_08),
+        (169.726_30, 311.290_15, 1.908_936_5, 5.157_407_2, 661.520_68),
+        (184.778_79, 252.685_34, 2.055_606_5, 10.800_571, 403.422_41),
+    ];
+    assert_compressibility("CH4 WebBook", methane, &webbook, 1e-6);
+    assert_heat_capacities("CH4 WebBook", methane, &METHANE_IDEAL, &webbook, 1e3, 1e-6);
 }
 
 /// Span et al. 2000's nitrogen reproduces their saturation table's `κ_T` (p. 1403: 63.151, 70 and
-/// 77 K) within 3 × 10⁻⁴, the reach of its four printed figures, and the WebBook's within 10⁻⁶.
+/// 77 K) within 3 × 10⁻⁴, the reach of its four printed figures, and the WebBook's within 10⁻⁶;
+/// with its ideal part, its `c_v` and `c_p` to the same tolerances.
 #[test]
 fn span_s_nitrogen_reproduces_its_saturation_table() {
     let nitrogen = &super::super::rows::equations::NITROGEN;
@@ -845,48 +891,57 @@ fn span_s_nitrogen_reproduces_its_saturation_table() {
     .map(|&(t, molar, cv, cp, w)| (t, molar * 28.013_48, cv, cp, w))
     .collect();
     assert_compressibility("N2 table", nitrogen, &rows, 3e-4);
-    assert_compressibility(
-        "N2 WebBook",
+    assert_heat_capacities(
+        "N2 table",
         nitrogen,
-        &[
-            (63.151_008, 867.221_85, 1.176_258_9, 2.000_226_8, 995.279_57),
-            (
-                95.845_100,
-                713.544_24,
-                0.996_506_68,
-                2.227_649_1,
-                653.867_59,
-            ),
-            (
-                112.654_57,
-                599.831_68,
-                0.968_592_30,
-                2.962_472_8,
-                438.314_62,
-            ),
-            (122.431_11, 486.626_97, 1.061_541_7, 6.321_228_7, 266.829_54),
-        ],
-        1e-6,
+        &NITROGEN_IDEAL,
+        &rows,
+        1.0 / 0.028_013_48,
+        3e-4,
     );
+    let webbook = [
+        (63.151_008, 867.221_85, 1.176_258_9, 2.000_226_8, 995.279_57),
+        (
+            95.845_100,
+            713.544_24,
+            0.996_506_68,
+            2.227_649_1,
+            653.867_59,
+        ),
+        (
+            112.654_57,
+            599.831_68,
+            0.968_592_30,
+            2.962_472_8,
+            438.314_62,
+        ),
+        (122.431_11, 486.626_97, 1.061_541_7, 6.321_228_7, 266.829_54),
+    ];
+    assert_compressibility("N2 WebBook", nitrogen, &webbook, 1e-6);
+    assert_heat_capacities("N2 WebBook", nitrogen, &NITROGEN_IDEAL, &webbook, 1e3, 1e-6);
 }
 
 /// Span and Wagner 1996's carbon dioxide reproduces their Table 34's `κ_T` at five saturated-liquid
 /// states from the triple point to 300 K within 10⁻⁴, and its pressure there at 300 K, 4.1 K below
 /// the critical point, where the non-analytic terms bear, within 10⁻⁵; and the WebBook's `κ_T`
-/// within 10⁻⁶.
+/// within 10⁻⁶; with its ideal part, its `c_v` and `c_p` to the same tolerances.
 #[test]
 fn span_and_wagner_s_carbon_dioxide_reproduces_its_table_34() {
     let co2 = &super::super::rows::equations::CARBON_DIOXIDE;
-    assert_compressibility(
+    let table_34 = [
+        (216.592, 1_178.46, 0.974_66, 1.953_2, 975.85),
+        (250.0, 1_045.97, 0.936_43, 2.132_0, 731.78),
+        (270.0, 945.83, 0.939_59, 2.453_4, 565.46),
+        (290.0, 804.67, 0.993_73, 3.675_6, 371.95),
+        (300.0, 679.24, 1.119_9, 8.697_9, 245.67),
+    ];
+    assert_compressibility("CO2 Table 34", co2, &table_34, 1e-4);
+    assert_heat_capacities(
         "CO2 Table 34",
         co2,
-        &[
-            (216.592, 1_178.46, 0.974_66, 1.953_2, 975.85),
-            (250.0, 1_045.97, 0.936_43, 2.132_0, 731.78),
-            (270.0, 945.83, 0.939_59, 2.453_4, 565.46),
-            (290.0, 804.67, 0.993_73, 3.675_6, 371.95),
-            (300.0, 679.24, 1.119_9, 8.697_9, 245.67),
-        ],
+        &CARBON_DIOXIDE_IDEAL,
+        &table_34,
+        1e3,
         1e-4,
     );
     let p = co2.pressure(KilogramsPerCubicMetre::new(679.24), Kelvin::new(300.0));
@@ -895,63 +950,67 @@ fn span_and_wagner_s_carbon_dioxide_reproduces_its_table_34() {
         "{} Pa",
         p.value()
     );
-    assert_compressibility(
+    let webbook = [
+        (
+            216.591_36,
+            1_178.464_9,
+            0.974_662_32,
+            1.953_205_8,
+            975.849_78,
+        ),
+        (
+            247.749_60,
+            1_055.943_4,
+            0.938_175_99,
+            2.110_817_5,
+            748.839_86,
+        ),
+        (
+            277.934_57,
+            897.446_43,
+            0.955_293_81,
+            2.717_470_4,
+            491.339_37,
+        ),
+        (296.778_81, 730.095_49, 1.047_227_6, 5.557_621_3, 293.277_23),
+    ];
+    assert_compressibility("CO2 WebBook", co2, &webbook, 1e-6);
+    assert_heat_capacities(
         "CO2 WebBook",
         co2,
-        &[
-            (
-                216.591_36,
-                1_178.464_9,
-                0.974_662_32,
-                1.953_205_8,
-                975.849_78,
-            ),
-            (
-                247.749_60,
-                1_055.943_4,
-                0.938_175_99,
-                2.110_817_5,
-                748.839_86,
-            ),
-            (
-                277.934_57,
-                897.446_43,
-                0.955_293_81,
-                2.717_470_4,
-                491.339_37,
-            ),
-            (296.778_81, 730.095_49, 1.047_227_6, 5.557_621_3, 293.277_23),
-        ],
+        &CARBON_DIOXIDE_IDEAL,
+        &webbook,
+        1e3,
         1e-6,
     );
 }
 
 /// Bücker and Wagner 2006's ethane, its paper not read, reproduces the WebBook's evaluation of the
-/// same equation within 3 × 10⁻⁶ from the triple point to 296.7 K.
+/// same equation within 3 × 10⁻⁶ from the triple point to 296.7 K, and with its ideal part its
+/// `c_v` and `c_p` there to the same tolerance.
 #[test]
 fn bucker_and_wagner_s_ethane_reproduces_the_webbook() {
-    assert_compressibility(
-        "C2H6 WebBook",
-        &super::super::rows::equations::ETHANE,
-        &[
-            (
-                90.367_641,
-                651.529_88,
-                1.605_095_0,
-                2.325_817_4,
-                2_008.688_1,
-            ),
-            (234.486_41, 474.258_72, 1.494_489_0, 2.781_626_3, 919.146_46),
-            (273.999_22, 398.261_56, 1.623_585_8, 3.654_912_1, 571.043_40),
-            (296.663_84, 322.928_00, 1.822_061_4, 7.088_005_0, 322.953_97),
-        ],
-        3e-6,
-    );
+    let ethane = &super::super::rows::equations::ETHANE;
+    let webbook = [
+        (
+            90.367_641,
+            651.529_88,
+            1.605_095_0,
+            2.325_817_4,
+            2_008.688_1,
+        ),
+        (234.486_41, 474.258_72, 1.494_489_0, 2.781_626_3, 919.146_46),
+        (273.999_22, 398.261_56, 1.623_585_8, 3.654_912_1, 571.043_40),
+        (296.663_84, 322.928_00, 1.822_061_4, 7.088_005_0, 322.953_97),
+    ];
+    assert_compressibility("C2H6 WebBook", ethane, &webbook, 3e-6);
+    assert_heat_capacities("C2H6 WebBook", ethane, &ETHANE_IDEAL, &webbook, 1e3, 3e-6);
 }
 
 /// Gao et al. 2023's ammonia, its associating terms included, reproduces their Table 7's values for
 /// computer verification, pressure and `κ_T`, within 2 × 10⁻⁶ (seven printed figures) at eight
-/// liquid, vapour and supercritical states.
+/// liquid, vapour and supercritical states; with its ideal part, its `c_v` and `c_p` there too, in
+/// J mol⁻¹ K⁻¹ at their 17.030 52 g mol⁻¹.
 #[test]
 fn gao_s_ammonia_reproduces_its_table_7() {
     let ammonia = &super::super::rows::equations::AMMONIA;
@@ -977,6 +1036,14 @@ fn gao_s_ammonia_reproduces_its_table_7() {
         assert!(
             (kappa / table - 1.0).abs() < 2e-6,
             "{t} K, {molar} mol/dm³: κ_T {kappa} against {table}"
+        );
+        assert_heat_capacities(
+            "NH3 Table 7",
+            ammonia,
+            &AMMONIA_IDEAL,
+            &[(t, rho.value(), cv, cp, w)],
+            1.0 / molar_mass,
+            2e-6,
         );
     }
 }
@@ -2040,4 +2107,509 @@ fn the_gas_derived_rows_critical_rule_acts_where_the_research_found() {
             "{key}: q ξ {cooler} and {warmer} about {crossing} K"
         );
     }
+}
+
+/// A liquid's row in decision-r09-t13i §2.1's table: its key, its range, K, and the least and
+/// greatest of its specific heats there, J kg⁻¹ K⁻¹, as the ruling rounds them to the unit.
+type RuledSpecificHeat = (&'static str, (f64, f64), (f64, f64));
+
+/// decision-r09-t13i §2.1's table, a [`RuledSpecificHeat`] for each of its six liquids.
+const RULED_SPECIFIC_HEATS: [RuledSpecificHeat; 6] = [
+    ("H2O", (275.0, 305.0), (4_180.0, 4_214.0)),
+    ("CH4", (91.0, 116.0), (3_369.0, 3_515.0)),
+    ("C2H6", (95.0, 150.0), (2_273.0, 2_333.0)),
+    ("N2", (64.0, 78.0), (2_002.0, 2_045.0)),
+    ("NH3", (196.0, 241.0), (4_307.0, 4_470.0)),
+    ("CO2", (217.0, 272.0), (1_954.0, 2_508.0)),
+];
+
+/// The row `key`'s own specific heat column, which a test knows it has.
+fn specific_heat(key: &str) -> &'static LiquidSpecificHeat {
+    row(key)
+        .substance()
+        .liquid()
+        .unwrap()
+        .specific_heat()
+        .unwrap()
+}
+
+/// The row `key`'s `c_l` at `t` K, J kg⁻¹ K⁻¹, which a test knows it has.
+fn c_l(key: &str, t: f64) -> f64 {
+    row(key)
+        .substance()
+        .liquid_specific_heat_j_per_kg_k(Kelvin::new(t))
+        .unwrap()
+}
+
+/// A nine-figure saturated-liquid state of the WebBook: T, K; `p_σ`, MPa; ρ′, kg m⁻³; `c_v` and
+/// `c_p`, J g⁻¹ K⁻¹; and w, m s⁻¹, as its table prints them.
+type NineFigureState = (f64, f64, f64, f64, f64, f64);
+
+/// Water's saturated liquid at 275, 285, 295 and 305 K, four of the seven rows of NIST Chemistry
+/// WebBook, NIST Standard Reference Database 69: E. W. Lemmon, I. H. Bell, M. L. Huber and M. O.
+/// `McLinden`, "Thermophysical Properties of Fluid Systems", DOI 10.18434/T4D303, saturation table by
+/// temperature, nine figures, fetched 2026-10-20
+/// (`https://webbook.nist.gov/cgi/fluid.cgi?Action=Data&Wide=on&ID=C7732185&Type=SatP&Digits=9&PLow=&PHigh=&PInc=&THigh=305&TLow=275&TInc=5&RefState=DEF&TUnit=K&PUnit=MPa&DUnit=kg%2Fm3&HUnit=kJ%2Fkg&WUnit=m%2Fs&VisUnit=uPa*s&STUnit=N%2Fm`,
+/// SHA-256 86145c448199b0f24704040bfa6a152807d6d9fd326c200d36dcdc91a6eed198); the cross-check of
+/// asserted values only (decision-composition §5).
+const WATER_WEBBOOK: [NineFigureState; 4] = [
+    (
+        275.0,
+        0.000_698_451_164,
+        999.887_406,
+        4.213_256_85,
+        4.213_946_42,
+        1_411.352_19,
+    ),
+    (
+        285.0,
+        0.001_389_030_71,
+        999.469_969,
+        4.185_193_69,
+        4.192_729_30,
+        1_454.286_41,
+    ),
+    (
+        295.0,
+        0.002_621_235_83,
+        997.762_492,
+        4.150_105_40,
+        4.183_169_58,
+        1_487.724_88,
+    ),
+    (
+        305.0,
+        0.004_719_348_24,
+        995.032_997,
+        4.109_717_96,
+        4.179_773_48,
+        1_513.142_88,
+    ),
+];
+
+/// Ammonia's saturated liquid at 196, 211, 226 and 241 K, NIST Chemistry WebBook, NIST Standard
+/// Reference Database 69: E. W. Lemmon, I. H. Bell, M. L. Huber and M. O. `McLinden`,
+/// "Thermophysical Properties of Fluid Systems", DOI 10.18434/T4D303, saturation table by
+/// temperature, nine figures, fetched 2026-10-20
+/// (`https://webbook.nist.gov/cgi/fluid.cgi?Action=Data&Wide=on&ID=C7664417&Type=SatP&Digits=9&PLow=&PHigh=&PInc=&THigh=241&TLow=196&TInc=15&RefState=DEF&TUnit=K&PUnit=MPa&DUnit=kg%2Fm3&HUnit=kJ%2Fkg&WUnit=m%2Fs&VisUnit=uPa*s&STUnit=N%2Fm`,
+/// SHA-256 358b45ea4b5cf0a7ef6785845f6f96d9b1f46c6b4853cdf8e5e68abdbdaf8875); the cross-check of
+/// asserted values only (decision-composition §5).
+const AMMONIA_WEBBOOK: [NineFigureState; 4] = [
+    (
+        196.0,
+        0.006_305_237_90,
+        733.268_185,
+        2.967_754_62,
+        4.306_594_82,
+        2_008.133_92,
+    ),
+    (
+        211.0,
+        0.018_925_765_2,
+        715.969_947,
+        2.968_913_67,
+        4.355_569_95,
+        1_914.707_19,
+    ),
+    (
+        226.0,
+        0.048_158_998_1,
+        698.359_154,
+        2.951_997_58,
+        4.412_817_89,
+        1_822.092_59,
+    ),
+    (
+        241.0,
+        0.107_399_703,
+        680.199_467,
+        2.918_417_46,
+        4.469_765_42,
+        1_728.239_62,
+    ),
+];
+
+/// Methane's saturated liquid at its column's ends, 91 and 116 K, NIST Chemistry WebBook, NIST
+/// Standard Reference Database 69: E. W. Lemmon, I. H. Bell, M. L. Huber and M. O. `McLinden`,
+/// "Thermophysical Properties of Fluid Systems", DOI 10.18434/T4D303, saturation table by
+/// temperature, nine figures, fetched 2026-10-20
+/// (`https://webbook.nist.gov/cgi/fluid.cgi?Action=Data&Wide=on&ID=C74828&Type=SatP&Digits=9&PLow=&PHigh=&PInc=&THigh=116&TLow=91&TInc=25&RefState=DEF&TUnit=K&PUnit=MPa&DUnit=kg%2Fm3&HUnit=kJ%2Fkg&WUnit=m%2Fs&VisUnit=uPa*s&STUnit=N%2Fm`,
+/// SHA-256 a84f4ea4f602e2c7ab563accd34b598ead4b378226eeff96106e755def731b49); the cross-check of
+/// asserted values only (decision-composition §5).
+const METHANE_ENDS: [NineFigureState; 2] = [
+    (
+        91.0,
+        0.012_164_065_1,
+        451.068_214,
+        2.165_700_98,
+        3.368_812_96,
+        1_535.831_86,
+    ),
+    (
+        116.0,
+        0.142_753_834,
+        415.957_049,
+        2.036_885_46,
+        3.514_517_36,
+        1_294.440_59,
+    ),
+];
+
+/// Ethane's saturated liquid at its column's ends, 95 and 150 K, NIST Chemistry WebBook, NIST
+/// Standard Reference Database 69: E. W. Lemmon, I. H. Bell, M. L. Huber and M. O. `McLinden`,
+/// "Thermophysical Properties of Fluid Systems", DOI 10.18434/T4D303, saturation table by
+/// temperature, nine figures, fetched 2026-10-20
+/// (`https://webbook.nist.gov/cgi/fluid.cgi?Action=Data&Wide=on&ID=C74840&Type=SatP&Digits=9&PLow=&PHigh=&PInc=&THigh=150&TLow=95&TInc=55&RefState=DEF&TUnit=K&PUnit=MPa&DUnit=kg%2Fm3&HUnit=kJ%2Fkg&WUnit=m%2Fs&VisUnit=uPa*s&STUnit=N%2Fm`,
+/// SHA-256 ef0a1dff2b2c3a1f466e3df684b5fc334df5b402658638129a4c4c63394fc443); the cross-check of
+/// asserted values only (decision-composition §5).
+const ETHANE_ENDS: [NineFigureState; 2] = [
+    (
+        95.0,
+        3.626_791_31e-6,
+        646.433_821,
+        1.569_313_26,
+        2.299_065_26,
+        1_974.776_14,
+    ),
+    (
+        150.0,
+        0.009_637_999_31,
+        585.168_838,
+        1.441_718_11,
+        2.332_596_88,
+        1_575.529_88,
+    ),
+];
+
+/// Nitrogen's saturated liquid at its column's ends, 64 and 78 K, NIST Chemistry WebBook, NIST
+/// Standard Reference Database 69: E. W. Lemmon, I. H. Bell, M. L. Huber and M. O. `McLinden`,
+/// "Thermophysical Properties of Fluid Systems", DOI 10.18434/T4D303, saturation table by
+/// temperature, nine figures, fetched 2026-10-20
+/// (`https://webbook.nist.gov/cgi/fluid.cgi?Action=Data&Wide=on&ID=C7727379&Type=SatP&Digits=9&PLow=&PHigh=&PInc=&THigh=78&TLow=64&TInc=14&RefState=DEF&TUnit=K&PUnit=MPa&DUnit=kg%2Fm3&HUnit=kJ%2Fkg&WUnit=m%2Fs&VisUnit=uPa*s&STUnit=N%2Fm`,
+/// SHA-256 cf3b6b3b3c609f1e830b215047d1a25cf0f4a301eb8b43bcf2983102c062a238); the cross-check of
+/// asserted values only (decision-composition §5).
+const NITROGEN_ENDS: [NineFigureState; 2] = [
+    (
+        64.0,
+        0.014_602_334_6,
+        863.731_629,
+        1.170_348_15,
+        2.001_622_62,
+        986.570_915,
+    ),
+    (
+        78.0,
+        0.109_255_200,
+        803.148_076,
+        1.080_340_35,
+        2.044_668_41,
+        844.820_709,
+    ),
+];
+
+/// Carbon dioxide's saturated liquid at its column's ends, 217 and 272 K, the first and last of
+/// the twelve rows of NIST Chemistry WebBook, NIST Standard Reference Database 69: E. W. Lemmon, I.
+/// H. Bell, M. L. Huber and M. O. `McLinden`, "Thermophysical Properties of Fluid Systems", DOI
+/// 10.18434/T4D303, saturation table by temperature, nine figures, fetched 2026-10-20
+/// (`https://webbook.nist.gov/cgi/fluid.cgi?Action=Data&Wide=on&ID=C124389&Type=SatP&Digits=9&PLow=&PHigh=&PInc=&THigh=272&TLow=217&TInc=5&RefState=DEF&TUnit=K&PUnit=MPa&DUnit=kg%2Fm3&HUnit=kJ%2Fkg&WUnit=m%2Fs&VisUnit=uPa*s&STUnit=N%2Fm`,
+/// SHA-256 66d222adee2b7eb9edc57a5c5231b5a7d48d2558048b20088cd3b426310d04a6); the cross-check of
+/// asserted values only (decision-composition §5).
+const CARBON_DIOXIDE_ENDS: [NineFigureState; 2] = [
+    (
+        217.0,
+        0.527_215_953,
+        1_176.998_02,
+        0.974_074_048,
+        1.954_152_68,
+        972.892_274,
+    ),
+    (
+        272.0,
+        3.380_232_92,
+        934.258_898,
+        0.942_826_708,
+        2.507_868_71,
+        547.108_237,
+    ),
+];
+
+/// The gas constant the WebBook evaluates Gao et al. 2023's ammonia with, CODATA 2014's R =
+/// 8.314 459 8 J mol⁻¹ K⁻¹ (Mohr, Newell and Taylor 2016, Rev. Mod. Phys. 88, 035009), over the
+/// 8.314 462 618 J mol⁻¹ K⁻¹ its coefficients were fitted with (decision-r09-t13i-cl-licence §6.2):
+/// the WebBook's heat capacities are the equation's times this.
+const WEBBOOK_AMMONIA_GAS_CONSTANT_RATIO: f64 = 8.314_459_8 / 8.314_462_618;
+
+/// The six liquids with a column: each one's equation and ideal part, its nine-figure WebBook
+/// states (its column's two ends first and last), the factor that takes the table's heat
+/// capacities to J kg⁻¹ K⁻¹ at the equation's own gas constant, and the tolerance its `c_v`, `c_p`
+/// and `κ_T` meet there.
+type NineFigureRow = (
+    &'static str,
+    &'static HelmholtzResidual,
+    &'static HelmholtzIdeal,
+    &'static [NineFigureState],
+    f64,
+    f64,
+);
+
+/// [`NineFigureRow`]s: ethane's tolerance is its `κ_T` test's, and ammonia's heat capacities are
+/// taken to its own gas constant by [`WEBBOOK_AMMONIA_GAS_CONSTANT_RATIO`].
+const NINE_FIGURE_WEBBOOK: [NineFigureRow; 6] = [
+    ("H2O", &IAPWS_95, &IAPWS_95_IDEAL, &WATER_WEBBOOK, 1e3, 1e-6),
+    (
+        "CH4",
+        &super::super::rows::equations::METHANE,
+        &METHANE_IDEAL,
+        &METHANE_ENDS,
+        1e3,
+        1e-6,
+    ),
+    (
+        "C2H6",
+        &super::super::rows::equations::ETHANE,
+        &ETHANE_IDEAL,
+        &ETHANE_ENDS,
+        1e3,
+        3e-6,
+    ),
+    (
+        "N2",
+        &super::super::rows::equations::NITROGEN,
+        &NITROGEN_IDEAL,
+        &NITROGEN_ENDS,
+        1e3,
+        1e-6,
+    ),
+    (
+        "NH3",
+        &super::super::rows::equations::AMMONIA,
+        &AMMONIA_IDEAL,
+        &AMMONIA_WEBBOOK,
+        1e3 / WEBBOOK_AMMONIA_GAS_CONSTANT_RATIO,
+        1e-6,
+    ),
+    (
+        "CO2",
+        &super::super::rows::equations::CARBON_DIOXIDE,
+        &CARBON_DIOXIDE_IDEAL,
+        &CARBON_DIOXIDE_ENDS,
+        1e3,
+        1e-6,
+    ),
+];
+
+/// With its ideal part, each liquid's equation reproduces the WebBook's evaluation of the same
+/// equation at its nine-figure states ([`NINE_FIGURE_WEBBOOK`], each table cited at its constant):
+/// `c_v`, `c_p` and `κ_T` at the table's densities within 10⁻⁶, ethane's within 3 × 10⁻⁶ as its
+/// `κ_T` test holds, and ammonia's heat capacities after the ratio of the WebBook's gas constant to
+/// Gao et al.'s, 3.4 × 10⁻⁷ (decision-r09-t13i-cl-licence §6.3): water's and ammonia's at four
+/// states each, the others' at their columns' two ends.
+#[test]
+fn each_equation_s_heat_capacities_reproduce_the_webbook_s_nine_figures() {
+    for (key, equation, ideal, states, unit, tolerance) in NINE_FIGURE_WEBBOOK {
+        let rows: Vec<_> = states
+            .iter()
+            .map(|&(t, _, rho, cv, cp, w)| (t, rho, cv, cp, w))
+            .collect();
+        assert_heat_capacities(key, equation, ideal, &rows, unit, tolerance);
+        assert_compressibility(key, equation, &rows, tolerance);
+    }
+}
+
+/// Each column at its range's two ends, its equation's `c_p` at the equation's saturated liquid on
+/// the row's phase diagram, meets the WebBook's nine-figure saturated `c_p` within 10⁻⁴
+/// (decision-r09-t13i-cl-licence §6.3, item 4), the WebBook's own value, ammonia's not scaled by
+/// its gas constants' ratio; each end prints its miss, the diagram's vapour pressure against the
+/// WebBook's and the Newton density against the WebBook's.
+#[test]
+fn each_liquid_specific_heat_meets_the_webbook_at_its_range_s_ends() {
+    for (key, equation, _, states, _, _) in NINE_FIGURE_WEBBOOK {
+        let diagram = row(key).substance().phase_diagram().unwrap();
+        let (low, high) = specific_heat(key).range();
+        let ends = [states[0], states[states.len() - 1]];
+        for (end, (t, p_mpa, rho, _, cp, _)) in [low, high].into_iter().zip(ends) {
+            assert_same_bits(end.value(), t);
+            let temperature = Kelvin::new(t);
+            let c = c_l(key, t);
+            let webbook = cp * 1e3;
+            let miss = c / webbook - 1.0;
+            let p_sigma = diagram.saturation_pressure(temperature);
+            let p_webbook = p_mpa * 1e6;
+            let start = diagram.liquid_density(temperature).unwrap();
+            let density = equation.density_at_pressure(start, p_sigma, temperature);
+            let left = equation.pressure(density, temperature).value() - p_sigma.value();
+            println!(
+                "{key} at {t} K: c_l {c:.4} against {webbook:.4} J kg⁻¹ K⁻¹, miss {miss:.2e}; p_σ \
+                 {:.6e} against {p_webbook:.6e} Pa, miss {:.2e}; ρ {:.6} against {rho} kg m⁻³, \
+                 miss {:.2e} (the ancillary's {:.2e}); p − p_σ {left:.2e} Pa",
+                p_sigma.value(),
+                p_sigma.value() / p_webbook - 1.0,
+                density.value(),
+                density.value() / rho - 1.0,
+                start.value() / rho - 1.0,
+            );
+            assert!(
+                miss.abs() < 1e-4,
+                "{key} at {t} K: c_l {c} against the WebBook's {webbook}, miss {miss:e}"
+            );
+        }
+    }
+}
+
+/// Each column's range is the ruling's, through the column and the row, and outside it the end
+/// value is held to the bit; a NaN gives a NaN.
+#[test]
+fn each_liquid_specific_heat_holds_its_ends_outside_its_range() {
+    for (key, (low, high), _) in RULED_SPECIFIC_HEATS {
+        let substance = row(key).substance();
+        let column = specific_heat(key);
+        let (from, to) = column.range();
+        assert_same_bits(from.value(), low);
+        assert_same_bits(to.value(), high);
+        assert_same_bits(column.low().value(), low);
+        assert_same_bits(column.high().value(), high);
+        let (row_from, row_to) = substance.liquid_specific_heat_range().unwrap();
+        assert_same_bits(row_from.value(), low);
+        assert_same_bits(row_to.value(), high);
+        let (first, last) = (c_l(key, low), c_l(key, high));
+        for t in [0.0, low - 20.0, low - 1e-6] {
+            assert_same_bits(c_l(key, t), first);
+        }
+        for t in [high + 1e-6, high + 50.0, 1e4] {
+            assert_same_bits(c_l(key, t), last);
+        }
+        assert!(c_l(key, f64::NAN).is_nan(), "{key}");
+    }
+}
+
+/// The rows with a specific heat column are the ruling's six, each over a range above its triple
+/// point and below its critical point, from its scattering's own equation; at every half kelvin of
+/// the range its value is finite and positive, inside the ruling's rounded least and greatest,
+/// which its own least and greatest round to, and its saturated liquid's pressure is the
+/// diagram's vapour pressure within 10⁻⁴ Pa, the rounding of the dense liquid's pressure (3.3 ×
+/// 10⁻⁵ Pa at most in water, whose `ρRT` is about 1.3 × 10⁸ Pa; under 10⁻⁶ Pa in the others).
+#[test]
+fn each_liquid_specific_heat_is_ordered_and_physical() {
+    let mut with_column: Vec<&str> = super::super::rows::liquids::LIQUIDS
+        .iter()
+        .filter(|(_, columns)| columns.specific_heat().is_some())
+        .map(|(key, _)| key.as_str())
+        .collect();
+    let mut ruled: Vec<&str> = RULED_SPECIFIC_HEATS.iter().map(|&(key, ..)| key).collect();
+    with_column.sort_unstable();
+    ruled.sort_unstable();
+    assert_eq!(with_column, ruled);
+    for (key, (low, high), (least, greatest)) in RULED_SPECIFIC_HEATS {
+        let substance = row(key).substance();
+        let columns = substance.liquid().unwrap();
+        let column = specific_heat(key);
+        let diagram = substance.phase_diagram().unwrap();
+        assert!(low < high, "{key}");
+        assert!(diagram.triple_temperature().value() < low, "{key}");
+        assert!(high < diagram.critical_temperature().value(), "{key}");
+        assert_eq!(
+            column.equation(),
+            columns.scattering().unwrap().equation(),
+            "{key}"
+        );
+        let mut own_least = f64::INFINITY;
+        let mut own_greatest = f64::NEG_INFINITY;
+        let mut half_kelvins = 0.0;
+        loop {
+            let t = low + half_kelvins / 2.0;
+            if t > high {
+                break;
+            }
+            half_kelvins += 1.0;
+            let c = c_l(key, t);
+            assert!(c.is_finite() && c > 0.0, "{key} at {t} K: {c}");
+            assert!(
+                (least - 0.5..=greatest + 0.5).contains(&c),
+                "{key} at {t} K: {c} outside the ruling's {least}–{greatest}"
+            );
+            own_least = own_least.min(c);
+            own_greatest = own_greatest.max(c);
+            let temperature = Kelvin::new(t);
+            let p_sigma = diagram.saturation_pressure(temperature);
+            let start = diagram.liquid_density(temperature).unwrap();
+            let density = column
+                .equation()
+                .density_at_pressure(start, p_sigma, temperature);
+            let left = column.equation().pressure(density, temperature).value() - p_sigma.value();
+            assert!(left.abs() < 1e-4, "{key} at {t} K: p − p_σ = {left} Pa");
+        }
+        assert!(
+            (own_least - least).abs() <= 0.5 && (own_greatest - greatest).abs() <= 0.5,
+            "{key}: {own_least}–{own_greatest} against the ruling's {least}–{greatest}"
+        );
+    }
+}
+
+/// Titan's seas' specific heat at 100 K is its components' mean weighted by mass at its reference
+/// composition, by hand: methane's own column at 100 K, nitrogen's held from its 78 K end and
+/// ethane's at 100 K, each weighted by wᵢ = xᵢ Mᵢ ÷ Σ xⱼ Mⱼ. A solution has no range of its own.
+#[test]
+fn titan_s_seas_specific_heat_is_its_components_mass_weighted_mean() {
+    let titan = row("ch4_c2h6_n2").substance();
+    let reference = titan.liquid().unwrap().reference_composition().unwrap();
+    let fraction = |key: &str| {
+        reference
+            .mole_fractions()
+            .iter()
+            .find(|&&(id, _)| id == row(key))
+            .unwrap()
+            .1
+    };
+    let by_hand = [
+        ("CH4", c_l("CH4", 100.0)),
+        ("N2", c_l("N2", 78.0)),
+        ("C2H6", c_l("C2H6", 100.0)),
+    ];
+    assert_same_bits(c_l("N2", 100.0), by_hand[1].1);
+    let masses = by_hand.map(|(key, c)| {
+        let molar_mass = row(key).substance().molar_mass_g_per_mol().unwrap();
+        (fraction(key) * molar_mass, c)
+    });
+    let total: f64 = masses.iter().map(|&(m, _)| m).sum();
+    let mean: f64 = masses.iter().map(|&(m, c)| m / total * c).sum();
+    let c = titan
+        .liquid_specific_heat_j_per_kg_k(Kelvin::new(100.0))
+        .unwrap();
+    assert!(
+        (c / mean - 1.0).abs() < 1e-12,
+        "{c} J kg⁻¹ K⁻¹ against the hand mean {mean}"
+    );
+    assert!(titan.liquid_specific_heat_range().is_none());
+}
+
+/// A row with no column of its own or no liquid has no specific heat: a liquid the ruling gives
+/// none (oxygen), a row with no liquid columns (neon), a silicate melt, the chloride and sulphate
+/// brines (their salts have no column), the perchlorate brines (their solutes have no rows) and
+/// the aqueous acid (the acid has none). Ammonia–water, whose components both have one, lies
+/// between them.
+#[test]
+fn a_liquid_without_a_specific_heat_has_none() {
+    for key in [
+        "O2",
+        "Ne",
+        "basalt",
+        "brine_nacl",
+        "brine_mgso4",
+        "brine_naclo4",
+        "brine_mgclo4",
+        "H2SO4",
+    ] {
+        let substance = row(key).substance();
+        for t in [80.0, 280.0, 1_500.0] {
+            let c = substance.liquid_specific_heat_j_per_kg_k(Kelvin::new(t));
+            assert!(c.is_none(), "{key} at {t} K: {c:?}");
+        }
+        assert!(substance.liquid_specific_heat_range().is_none(), "{key}");
+    }
+    let mixed = c_l("nh3_h2o", 200.0);
+    let (water, ammonia) = (c_l("H2O", 200.0), c_l("NH3", 200.0));
+    assert!(
+        water.min(ammonia) < mixed && mixed < water.max(ammonia),
+        "{mixed} between {water} and {ammonia}"
+    );
 }
