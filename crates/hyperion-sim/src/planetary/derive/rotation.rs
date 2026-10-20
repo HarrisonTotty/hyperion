@@ -401,11 +401,9 @@ impl SpinningBody {
 /// Which tides a body's spin reads ([`SpinningBody::with_tides`]).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub enum SpinTides {
-    /// Its class's pair ([`tides`], P14.T14.d): every planet's and member's, and every moon's
-    /// below [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION).
+    /// Its class's pair ([`tides`], P14.T14.d): every planet's and member's.
     OfClass,
-    /// A pair given: a moon's own by its composition and state from
-    /// [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION)
+    /// A pair given: a moon's own by its composition and state
     /// ([`MoonTides`](crate::planetary::moons::tides::MoonTides), P14.T56.d).
     Given {
         /// Its Love number k₂, dimensionless, positive and finite.

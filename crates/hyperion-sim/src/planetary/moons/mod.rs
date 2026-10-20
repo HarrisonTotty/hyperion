@@ -35,8 +35,9 @@
 //! equatorial plane of the debris disc (see [`impact`]), and the orbital plane for captures.
 //! P14.T22.a places that plane in the parent's body frame: the parent's local Laplace plane at
 //! the moon's distance (P14.T56.a, [`laplace`](crate::planetary::laplace)), which is the equator
-//! well inside the Laplace radius and the orbital plane well beyond it, from [`MOONS_VERSION`],
-//! and the parent's orbital plane below it.
+//! well inside the Laplace radius and the orbital plane well beyond it. A parent with no Laplace
+//! frame, one with no rotation law, refers its moons to its orbital plane
+//! ([`satellites`](crate::planetary::satellites)).
 //!
 //! # Sub-indices
 //!
@@ -48,15 +49,12 @@
 use std::error::Error;
 use std::fmt;
 
-use crate::GeneratorVersion;
 use crate::id::BodyId;
 use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation};
 use crate::planetary::derive::{
     DerivedBody, OrbitSense, PlanetClass, hill_radius, roche_limit_fluid, satellite_stability_limit,
 };
-use crate::planetary::laplace::SatellitePlanes;
-use crate::planetary::moons::regular::{MoonInventories, MoonTideRule};
 use crate::rng::{Stream, Threshold};
 use crate::stellar::draws::UnitUniform;
 use crate::units::{
@@ -73,56 +71,6 @@ pub use irregular::{
     BeltAdjacency, CaptureKind, CapturedMoon, Captures, IrregularPopulation, NearestBelt, captures,
 };
 pub use regular::{DerivedMoon, RegularMoon, RegularMoons, Volcanism, regular_moons};
-
-/// The generator version from which every moon and ring lies on its parent's Laplace surface
-/// (P14.T56.a), and its later subtasks' moons' own ranks, read at their own bulk, and tides
-/// (P14.T56.c and its follow-up, T56.d): 23, the
-/// 22 → 23 batch's bump (plan 14, P14.T56; decision-bump-plan-after-22 §1.2).
-///
-/// Below it every value is version 22's, bit for bit
-/// ([`SatellitePlanes::in_force`](crate::planetary::laplace::SatellitePlanes::in_force), and the
-/// crate-private `MoonInventories::in_force`, `MoonBulkRule::in_force` and
-/// `MoonTideRule::in_force` for the moons' volatiles, the bulk their inventory and atmosphere are
-/// read at, and their tides; `MoonRules` gathers the generation's).
-/// P14.T54.a deletes the hold with its tripwire (`the_moons_are_held_only_until_the_batch_s_bump`)
-/// and blesses the moved goldens with its bump.
-pub const MOONS_VERSION: GeneratorVersion = GeneratorVersion::new(23);
-
-/// The rules a generated system's satellites are made under, P14.T56's holds at generation
-/// (crate-private): the planes they lie in (T56.a), the volatiles and bulk their moons' air is read
-/// with (T56.c and its follow-up), and the moons' tides (T56.d), which the stored rotation law
-/// reads, so that they are a switch of
-/// [`generate_with`](crate::planetary::system::generate_with) and not a setter after it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct MoonRules {
-    /// The planes its satellites lie in.
-    pub(crate) planes: SatellitePlanes,
-    /// The volatiles its moons are derived with, and the bulk their air is read at.
-    pub(crate) inventories: MoonInventories,
-    /// Its moons' tides.
-    pub(crate) tides: MoonTideRule,
-}
-
-impl MoonRules {
-    /// The rules the generator version in force takes: version 22's below [`MOONS_VERSION`].
-    #[must_use]
-    pub(crate) const fn in_force() -> Self {
-        Self {
-            planes: SatellitePlanes::in_force(),
-            inventories: MoonInventories::in_force(),
-            tides: MoonTideRule::in_force(),
-        }
-    }
-
-    /// Every rule of the 22 → 23 batch, as version 23 takes them: what the tests reach ahead of
-    /// the bump.
-    #[cfg(test)]
-    pub(crate) const BATCH: Self = Self {
-        planes: SatellitePlanes::LaplaceSurface,
-        inventories: MoonInventories::Own,
-        tides: MoonTideRule::ByState,
-    };
-}
 
 /// Which kind of body a [`MoonParent`] is: a planet, or a dwarf planet (P14.T21.c's largest belt
 /// members), which T18 gives its own range of mass ratios.
@@ -577,43 +525,6 @@ pub(crate) mod testing {
             1.000_002_61,
             0.0167,
         )
-    }
-
-    /// P14.T56's subtasks are held until the 22 → 23 batch's bump, so that the batch's goldens
-    /// move once: until then `generate` refers every moon and ring to its parent's orbital plane,
-    /// as version 22 does, the server sends no ring normal, and every moon is derived at the
-    /// median ranks in its nursery, its inventory and atmosphere read at its composition solve's
-    /// bulk. The bump removes the hold, and this test with it.
-    #[test]
-    fn the_moons_are_held_only_until_the_batch_s_bump() {
-        use crate::GENERATOR_VERSION;
-        use crate::planetary::moons::regular::MoonBulkRule;
-        assert!(
-            GENERATOR_VERSION < MOONS_VERSION,
-            "the 22 → 23 bump puts every moon and ring on its parent's Laplace surface and gives \
-             every moon its own volatiles, read at its own bulk, and its own tides: make \
-             `generate` take `SatellitePlanes::LaplaceSurface` and the server send every ring's \
-             normal (P14.T56.a as built), derive every moon with `Satellite::own_volatiles` and \
-             `PlanetarySystem::moon_own_bulk` and drop `MoonInventories`, `MoonBulkRule`, \
-             `PlanetarySystem::with_moon_inventories` and `derive_moon_under` (P14.T56.c and its \
-             follow-up as built), derive every moon's tides by `MoonTides` and drop \
-             `MoonTideRule`, `class_tides`, `MoonHolds`, `MoonRules` and \
-             `PlanetarySystem::moon_tides`'s branches with `ICE_RESURFACING_HEAT_FLOW_AT_22` and \
-             the `_under` arms of the figures' surface age (P14.T56.d as built), and remove \
-             `SatellitePlanes::in_force`, `MOONS_VERSION` and this test (plan 14)"
-        );
-        assert_eq!(SatellitePlanes::in_force(), SatellitePlanes::OrbitalPlane);
-        assert_eq!(MoonInventories::in_force(), MoonInventories::Shared);
-        assert_eq!(MoonBulkRule::in_force(), MoonBulkRule::Solved);
-        assert_eq!(MoonTideRule::in_force(), MoonTideRule::ClassPair);
-        assert_eq!(
-            MoonRules::in_force(),
-            MoonRules {
-                planes: SatellitePlanes::OrbitalPlane,
-                inventories: MoonInventories::Shared,
-                tides: MoonTideRule::ClassPair,
-            }
-        );
     }
 
     #[test]

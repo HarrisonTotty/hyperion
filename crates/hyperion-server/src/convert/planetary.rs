@@ -42,7 +42,6 @@ use hyperion_sim::planetary::hooks::{
     ClimateRegime, MagneticField, OceanFloor, RadiationClass, Subsurface, SubsurfaceOcean,
     TectonicRegime,
 };
-use hyperion_sim::planetary::laplace::SatellitePlanes;
 use hyperion_sim::planetary::placement::classes::orbits::SystemPlane;
 use hyperion_sim::planetary::placement::{OrbitHost, OrbitZone, ZoneDiscInputs};
 use hyperion_sim::planetary::record::{
@@ -718,11 +717,9 @@ fn population_dto(system: SystemId, population: &Population) -> PopulationDto {
                     }
                 })
                 .collect(),
-            // P14.T56.a: the plane of a ring on its planet's Laplace surface; below
-            // `MOONS_VERSION` every ring lies in its planet's orbital plane, which an absent
-            // normal says, so that nothing on the wire moves before the batch's bump.
-            normal: (SatellitePlanes::in_force() == SatellitePlanes::LaplaceSurface)
-                .then_some(ring.normal()),
+            // P14.T56.a: the plane of a ring on its planet's Laplace surface, sent for every ring;
+            // the field stays optional on the wire for older servers (decision-p14-t56a §1).
+            normal: Some(ring.normal()),
         }),
         Population::Belt(belt) => {
             let component = |(inner, outer): (Metres, Metres)| BeltComponentDto {
@@ -1599,10 +1596,10 @@ mod tests {
         }
     }
 
-    /// P14.T56.a: a ring's normal goes on the wire from `MOONS_VERSION`, and below it no ring
-    /// carries one, so that the golden scenes keep version 22's bytes.
+    /// P14.T56.a: every golden ring carries its plane's normal on the wire, the sim's
+    /// [`Ring::normal`](hyperion_sim::planetary::rings::Ring::normal) to the bit.
     #[test]
-    fn a_ring_s_normal_is_sent_from_the_batch_s_bump() {
+    fn every_golden_ring_carries_its_plane_s_normal() {
         let mut rings = 0;
         for (sim, wire) in GOLDEN_RECORDS.iter() {
             let (Section::Ok(Population::Ring(ring)), SectionDto::Ok(PopulationDto::Ring(dto))) =
@@ -1610,9 +1607,9 @@ mod tests {
             else {
                 continue;
             };
-            match SatellitePlanes::in_force() {
-                SatellitePlanes::OrbitalPlane => assert_eq!(dto.normal, None),
-                SatellitePlanes::LaplaceSurface => assert_eq!(dto.normal, Some(ring.normal())),
+            let sent = dto.normal.expect("every ring's normal is sent");
+            for (wire, sim) in sent.into_iter().zip(ring.normal()) {
+                assert_eq!(wire.to_bits(), sim.to_bits());
             }
             rings += 1;
         }

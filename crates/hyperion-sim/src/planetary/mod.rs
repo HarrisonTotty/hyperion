@@ -42,8 +42,7 @@
 //!   (plan R02, R02.T4), the rule the client's camera twins.
 //! - [`label`]: bodies' labels for people, `A b` onwards (design note 22, P14.T30.c).
 //! - [`laplace`]: the classical Laplace surface every moon and ring lies on, its Laplace radius,
-//!   the parent's hydrostatic J₂ and the eccentricity band (P14.T56.a, held behind
-//!   [`moons::MOONS_VERSION`]).
+//!   the parent's hydrostatic J₂ and the eccentricity band (P14.T56.a).
 //! - [`rings`], [`belts`] and [`halo`]: a giant's rings (P14.T20), a host's asteroid and
 //!   Kuiper-like belts with their fading debris and largest members (P14.T21.a–c), and the
 //!   cometary halo (P14.T21.d), each from plain arguments until P14.T22.a and T30.a call them.

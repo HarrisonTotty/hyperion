@@ -27,9 +27,8 @@
 //! radii are distances from the centre in it: the local Laplace plane at the geometric mean of
 //! its edges, on which its particles' orbits settle (P14.T56.a, [`laplace`]), the planet's
 //! equator well inside its Laplace radius, and none reaches into the eccentricity band about it
-//! (a ring that would is not made); below
-//! [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION), the planet's orbital plane. The
-//! warp of a wide ring's plane across its width is not drawn: for a Jupiter-like giant with a
+//! (a ring that would is not made); about a planet with no Laplace frame (no rotation law), its
+//! orbital plane. The warp of a wide ring's plane across its width is not drawn: for a Jupiter-like giant with a
 //! ring to 2.4 radii it is 0.24% of the obliquity at 0.5 au and 3.7% at 0.2 au
 //! (decision-p14-moons §1.2). A massive ring has a mass of 10⁻⁹–10⁻⁷ of its planet's
 //! ([`MASSIVE_RING_MASS_RATIO`]), gaps at the 2:1 and 3:2 inner resonances of the regular moons
@@ -452,8 +451,7 @@ impl RingGap {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RingPlane {
     /// One plane of this unit normal along the galactic axes for every ring: the planet's
-    /// orbital plane, version 22's, below
-    /// [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION).
+    /// orbital plane, about a planet with no Laplace frame.
     Fixed([f64; 3]),
     /// Each ring on the planet's Laplace surface (see the [module](self) documentation).
     Laplace(LaplaceFrame),
@@ -524,8 +522,8 @@ impl Ring {
     }
 
     /// The normal of its plane, a unit vector along the galactic axes ([`RingPlane`]): on its
-    /// planet's Laplace surface, the local plane's pole on the spin's side, or below
-    /// [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION) the planet's orbit normal.
+    /// planet's Laplace surface, the local plane's pole on the spin's side, or about a planet with
+    /// no Laplace frame its orbit normal.
     #[must_use]
     pub const fn normal(&self) -> [f64; 3] {
         self.normal
@@ -800,7 +798,7 @@ mod tests {
 
     const SEED: Seed = Seed::new(0x0005_a7e2);
 
-    /// One fixed plane for every ring, as version 22 has them.
+    /// One fixed plane for every ring, as a planet with no Laplace frame has them.
     const FLAT: RingPlane = RingPlane::Fixed([0.0, 0.0, 1.0]);
 
     /// A giant of effective temperature `t` K in a flux of `flux` Earth's.

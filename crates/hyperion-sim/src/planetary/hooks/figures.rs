@@ -136,7 +136,6 @@ use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
 use crate::planetary::hooks::cold_traps::{self, ColdTrapBody, ColdTrapRules, RecordColdTraps};
 use crate::planetary::hooks::surface::{ColdProfile, OceanWeight, SurfaceConditions};
 use crate::planetary::moons::CaptureKind;
-use crate::planetary::moons::regular::MoonTideRule;
 use crate::planetary::moons::regular::{ICE_MELTING_POINT, ocean_layers};
 use crate::planetary::record::BeltKind;
 use crate::substance::{self, SubstanceId};
@@ -2015,23 +2014,19 @@ impl GlobalFigures {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn derive(inputs: &FiguresInputs<'_>) -> Result<Option<Self>, DeriveFiguresError> {
-        Self::derive_under(inputs, MoonTideRule::in_force(), SnapshotRules::in_force())
+        Self::derive_under(inputs, SnapshotRules::in_force())
     }
 
-    /// [`derive`](Self::derive) under the moons' tide rule `tides` and the `p14-snapshot` lane's
-    /// rules `rules`: the tides pick an ice-rich crust's resurfacing calibration (P14.T56.d's hold,
-    /// decision-p14-t56d-membrane §4.6: [`surface_age::ICE_RESURFACING_HEAT_FLOW`] from
-    /// `MOONS_VERSION`, version 22's below it), and the lane's rules the surface water, T24.b's
-    /// under [`SnapshotRules::Held`] and under [`SnapshotRules::Batch`] the share of P14.T51.a's
-    /// condensed water ([`cover::surface_water_under`]; decision-p14-t51a-part2 §4), for the
-    /// system's batch switches and the tests.
+    /// [`derive`](Self::derive) under the `p14-snapshot` lane's rules `rules`, which pick the
+    /// surface water: T24.b's under [`SnapshotRules::Held`] and under [`SnapshotRules::Batch`] the
+    /// share of P14.T51.a's condensed water ([`cover::surface_water_under`];
+    /// decision-p14-t51a-part2 §4), for the system's batch switches and the tests.
     ///
     /// # Errors
     ///
     /// As [`derive`](Self::derive).
     pub(crate) fn derive_under(
         inputs: &FiguresInputs<'_>,
-        tides: MoonTideRule,
         rules: SnapshotRules,
     ) -> Result<Option<Self>, DeriveFiguresError> {
         let air = inputs.atmosphere;
@@ -2059,7 +2054,7 @@ impl GlobalFigures {
             rotation_period: inputs.rotation_period,
         });
         let (surface_age, impactors, craters) =
-            crater_contract(inputs, heat.water, heat.heat_flow, tides)?;
+            crater_contract(inputs, heat.water, heat.heat_flow)?;
         let outgassing = outgassing(heat.heat_flow);
         let crust = impactors.crust();
         let surface_temperature = air.surface_temperature();
@@ -2923,13 +2918,11 @@ pub fn past_outgassing(inputs: &FiguresInputs<'_>, age: Years) -> f64 {
 }
 
 /// The surface age, the impactors and the crater contract of the body `inputs` describe, holding
-/// `water` and of heat flow `heat_flow` ([`GlobalFigures::derive`]'s, whose age is checked), its
-/// ice-rich crust's resurfacing under the moons' tide rule `tides`.
+/// `water` and of heat flow `heat_flow` ([`GlobalFigures::derive`]'s, whose age is checked).
 fn crater_contract(
     inputs: &FiguresInputs<'_>,
     water: Kilograms,
     heat_flow: WattsPerSquareMetre,
-    tides: MoonTideRule,
 ) -> Result<(Years, Impactors, CraterParams), DeriveFiguresError> {
     let (air, crater_inputs, gravity) = (inputs.atmosphere, inputs.craters, inputs.surface_gravity);
     let impactors = impactors(&ImpactorBody {
@@ -2942,16 +2935,13 @@ fn crater_contract(
         sources: crater_inputs.sources,
     })
     .map_err(DeriveFiguresError::Impactors)?;
-    let surface_age = surface_age::surface_age_under(
-        tides,
-        &surface_age::SurfaceAgeInputs {
-            age: inputs.age,
-            molten_until: crater_inputs.molten_until,
-            last_giant_impact: crater_inputs.last_giant_impact,
-            heat_flow,
-            crust: impactors.crust(),
-        },
-    );
+    let surface_age = surface_age::surface_age(&surface_age::SurfaceAgeInputs {
+        age: inputs.age,
+        molten_until: crater_inputs.molten_until,
+        last_giant_impact: crater_inputs.last_giant_impact,
+        heat_flow,
+        crust: impactors.crust(),
+    });
     let gyr = |years: Years| Gigayears::new(years.value() / YEARS_PER_GIGAYEAR);
     let system_age = gyr(inputs.age);
     let n_1km = craters::lunar_chronology(gyr(surface_age), system_age) * impactors.rate();
@@ -3037,7 +3027,6 @@ pub(crate) fn table_figures_under(
             },
             continents: Continents::Given(relief::EARTH_CONTINENTAL_FRACTION),
         },
-        MoonTideRule::in_force(),
         rules,
     )
     .expect("the table's bodies are in range")

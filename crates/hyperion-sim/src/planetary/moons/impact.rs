@@ -30,8 +30,8 @@
 //! parent's Laplace surface adiabatically as it recedes (Goldreich 1965, AJ 70, 5): it lies on the
 //! parent's Laplace surface at its present distance, the equator while it is well inside the
 //! Laplace radius (P14.T56.a, [`laplace`](crate::planetary::laplace)). Its elements here are
-//! relative to that plane, which P14.T22.a orients; below
-//! [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION) it is the parent's orbital plane.
+//! relative to that plane, which P14.T22.a orients; about a parent with no Laplace frame it is the
+//! parent's orbital plane.
 //! One that recedes through the eccentricity band of a parent tilted beyond 68.875° keeps its
 //! circular orbit: what the transition does to it is not modelled (Ćuk et al. 2016, Nature 539,
 //! 402).

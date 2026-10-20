@@ -102,6 +102,9 @@ ring: Dusty of Rock
 inner_m = 0x419314c57f0b42f8  # 80032095.76099765
 outer_m = 0x419be2eed14170f4  # 116964276.31390744
 optical_depth = 0x3e94e7997c7001e0  # 3.115040922430344e-7
+normal_x = 0xbfc4799c9988be8a  # -0.1599612950972083
+normal_y = 0x3fd3883540f2a7de  # 0.30518847792211357
+normal_z = 0xbfee0a54b0834cb0  # -0.9387610862271654
 surface: NotApplicable
 hooks: NotApplicable
 rotation: NotApplicable
@@ -209,7 +212,7 @@ surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x4093831ae33382c7  # 1248.7762573288508
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3f7db8d99e0b58d1  # 0.007256364887061121
-surface_age_yr = 0x41dcf22eac798392  # 1942534833.8986554
+surface_age_yr = 0x41ce75c344546b5c  # 1022068360.6595263
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
@@ -294,7 +297,7 @@ surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x409858f0d2ce057a  # 1558.2351791563838
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3f783cdc01b9195f  # 0.005917415047923618
-surface_age_yr = 0x41dcf22eac798392  # 1942534833.8986554
+surface_age_yr = 0x41db8f7143cac5ef  # 1849541903.168331
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
@@ -902,6 +905,9 @@ ring: Dusty of Rock
 inner_m = 0x419314c57f0b42f8  # 80032095.76099765
 outer_m = 0x419be2eed14170f4  # 116964276.31390744
 optical_depth = 0x3e94e7997c7001e0  # 3.115040922430344e-7
+normal_x = 0xbfc4799c9988be8a  # -0.1599612950972083
+normal_y = 0x3fd3883540f2a7de  # 0.30518847792211357
+normal_z = 0xbfee0a54b0834cb0  # -0.9387610862271654
 surface: NotApplicable
 hooks: NotApplicable
 rotation: NotApplicable
@@ -1009,7 +1015,7 @@ surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x4093831ae33382c7  # 1248.7762573288508
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3f7db8d969bdd60d  # 0.00725636412595555
-surface_age_yr = 0x41dcf22fa6798392  # 1942535833.8986554
+surface_age_yr = 0x41ce75c3e02fa9e1  # 1022068672.3723718
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
@@ -1094,7 +1100,7 @@ surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x409858f0d2ce057a  # 1558.2351791563838
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3f783cdbb0371b3b  # 0.005917413861829253
-surface_age_yr = 0x41dcf22fa6798392  # 1942535833.8986554
+surface_age_yr = 0x41db8f725147dcac  # 1849542981.1228437
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable

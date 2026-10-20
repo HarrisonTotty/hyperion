@@ -21434,3 +21434,172 @@ planetary::record` (624 tests at T57.a's commit).
         world above methane's critical point and put its whole inventory in the air, recorded
         `AirlessLike`. This body no longer does, but bodies beyond the ammonia line still can:
         P14.T53.b's state classifier and T24.f's speciation.
+  - _B2, the moons' hold_ (P14.T56.a, T56.c, T56.d; decision-p14-moons §1.5, §2.4, §3.5 and "What
+    moves, at which bump"). A checkpoint at 22: `GENERATOR_VERSION` stays 22, and the 18 goldens
+    that move re-bless at header 22 in the same commit, with 2 new. The snapshot hold
+    (`SNAPSHOT_VERSION`) stays for B3, and `COLD_TRAPS_VERSION` (24) and its tripwire are
+    untouched.
+    - _Deleted, as the tripwire listed:_ `MOONS_VERSION`, `MoonRules` (with `generate_with`, which
+      only it fed: `generate` is its body), `laplace::SatellitePlanes` whole (its `in_force` and
+      both arms, which nothing else read), `MoonInventories`, `MoonBulkRule`, `MoonTideRule`,
+      `class_tides`, `MoonHolds::BATCH` and its bulk and tide members,
+      `PlanetarySystem::with_moon_inventories`, the system's `moon_inventories` and `moon_tides`
+      fields and their branches (step 7's rotation pass, `derive_rotation`'s moon arm, which now
+      always takes the moon's own pair, `moon_derived`, and `SurfaceTime.tides`),
+      `ICE_RESURFACING_HEAT_FLOW_AT_22`, `ice_resurfacing_heat_flow`, `resurfacing_time_under`,
+      `surface_age_under`, `crater_contract`'s and `GlobalFigures::derive_under`'s tide rule (the
+      published surface calls `GlobalFigures::derive`), `TideOf.density` (class_tides' alone), and
+      the tripwire `the_moons_are_held_only_until_the_batch_s_bump`.
+      - Every moon is derived with `Satellite::own_volatiles` at `PlanetarySystem::moon_own_bulk`,
+        its tides by `MoonTides`. `DerivedMoon::tides()` returns `MoonTides`, no longer an
+        `Option`, and `spin_tides()` is its pair (`const`).
+      - `derive_moon_under` stays as the seam of the snapshot hold that `MoonHolds { snapshot }`
+        still carries, as B1 kept `derive_body_under`; B3 deletes both. The tripwire named it for
+        the moon holds it carried, and it carries none now.
+    - _What stays, as nothing else could replace it_ (T56.a's "if nothing else needs them"):
+      - `MoonPlane::OrbitalPlane`, `SatelliteFrame::OrbitalPlane` and `RingPlane::Fixed`. Step 7's
+        first pass finds every parent's satellites before its law, and so its frame, exists, to
+        fix whether it had a giant impact (T56.a's crux); a parent with no law (every body of
+        `generate_planets`, or a refused frame) keeps its orbital plane; and `RingPlane::Fixed`
+        serves `rings`' doctest and the small bodies' golden. Their docs now say that, not
+        "version 22's".
+      - `SpinTides::OfClass`: every planet's and member's law reads it. Only the moons' arm goes,
+        as T56.d's record has it; the brief's "`SpinTides::OfClass` goes" read too wide.
+      - `MoonVolatiles::SHARED`, as T56.c's record keeps it, the table's and tools' convention.
+    - _The server, the fixture and the client._
+      - `convert/planetary.rs` sends every ring's normal, `Some(ring.normal())`; the field stays
+        optional on the wire (decision-p14-t56a §1), and `RingDto`'s doc, which says an older
+        server leaves it out, holds unchanged, so no bindings regenerate.
+        `a_ring_s_normal_is_sent_from_the_batch_s_bump` becomes
+        `every_golden_ring_carries_its_plane_s_normal`, `Ring::normal()` to the bit.
+      - The shared fixture's ring (`0200080020000000.0180`) gains the normal
+        [0.5906558005684119, 0.7906802819028946, 0.1610913314391793]: its planet's populated
+        entry has no rotation section, so this is the pole at the slice Earth's obliquity
+        (0.409 rad) turned from the planet's orbit normal about its ascending node, as the
+        client's `tiltedPole` builds poles. The fixture's description says so.
+      - The client's tests build the absent case by removing it: `withoutRingNormal`
+        (`test/planetaryFixture.ts`) beside `withRingNormal`. `bodyFrame.test.ts`'s
+        `tiltedPlanet` without `ring` removes it, its "without a pole or a ring normal" case does
+        too, and a case draws the fixture's own normal; `bodiesWire.test.ts` reads the fixture's
+        normal, a given one, and `null` once removed; `fromServer.test.ts`'s older-server case
+        removes it. `@hyperion/protocol`'s vitest holds the fixture's normal to unit length.
+    - _The tests, one arm each._
+      - `moons/regular.rs`: T17.b's old test (b) loses its class-pair half and becomes
+        `generated_moons_of_jupiter_are_dense_cold_and_outside_their_roche_limits`;
+        `a_moon_s_tides_are_version_22_s_below_the_bump_and_its_own_from_it` becomes
+        `a_regular_moon_s_heat_flag_and_locking_are_its_own_tides_s`; the cold rocky moon's test
+        reads version 22's flux from `io_response_flux` (Io's response at the same radius, still
+        the heated branch's to the bit); the unlocked share no longer counts version 22's; the
+        Solved halves of the own-bulk, stated-radius and Ganymede–Callisto tests go;
+        `a_capture_s_water_floor_is_its_own_ice` compares against a dry derived bulk, which holds
+        the drawn water; and `a_captured_moon_takes_the_volatiles_of_its_parent_s_zone` keeps its
+        bulk checks but not its tide equalities, since the tides now read the moon's water and
+        air. The helpers `moon_under` and `moon_read_at` go; `own_moon` and `regular_derived` are
+        the shipping path.
+      - `system/tests.rs`: `the_laplace_surface_is_the_same_twice_and_order_independent` and
+        `the_batch_s_moons_are_the_same_twice_and_order_independent` go, `generate`'s own tests
+        covering them; `the_laplace_surface_moves_no_satellite_s_elements_mass_or_count` compares
+        each parent's satellites with those it finds with no frame (step 7's), draws included;
+        `under_their_own_volatiles_the_moons_move_nothing_their_rotation_reads` becomes
+        `every_moon_s_inventory_is_its_own_ranks_at_its_own_bulk` (each differs from the median
+        ranks'); `a_regular_moon_has_one_locking_time` reads the moon's own pair; and
+        `generate_planets_is_generate_with_its_satellites_removed` clears the frames too.
+      - `satellites/tests.rs`: the orbital-plane tilt test reads each parent's frameless
+        satellites, and its shape check every moon too.
+      - `hooks/figures/tests.rs`: the Europa calibration tests read `ICE_RESURFACING_HEAT_FLOW`
+        and `surface_age` directly.
+    - _New goldens._
+      - `planetary/moon_tides` (`moons::tides::tests::the_measured_moons_tides_are_pinned`): the
+        branch, k₂, Q, loss, whole heat flow and the `F_nt` read, by bits, for the module's
+        eleven measured moons and a Triton at its measured elements (NEP097's GM and radius,
+        354,759 km on a circular orbit, 5.877 d, its N₂ ice's 38 K, 0.238 water; at e = 0 the
+        tide reads no planet GM). Moon cold (k₂ 0.0156, Q 38), Io heated (0.0893, 5.96;
+        2.247 W m⁻²), Europa on the ocean branch (0.2285, 312; 19.29 mW m⁻²), Ganymede (0.395,
+        160; 4.36), Callisto (0.417, 97.8; 4.02) and Titan (0.410, 158; 5.23) on it too,
+        Enceladus, Dione, Rhea, Iapetus and Mimas cold (Q 100), and the measured Triton cold
+        (0.0615; 4.31 mW m⁻² of rock).
+      - `planetary/moon_volatiles` (`satellites::tests::a_few_moons_volatile_ranks_are_pinned`):
+        the six ranks of the sample's first two regular moons (`02000b2ca0000001.0d01`, `.0d02`),
+        giant-impact moons (`02000b2c5fff0000.e181`, `02000b2ca0000001.0e01`) and captures
+        (`.0d03`, `.0d04`), so that a later bless shows the draws stay.
+      - `planetary/systems` lines each ring's normal (T56.a's "For T54.a"), after its older lines;
+        a moon's plane is in its body-frame elements already.
+    - _Bless note, by subtask_ (the planetary sample's first 400 systems, 1,220 moons and 145
+      rings, measured before the deletion under 22's rules, the planes alone, with the own
+      volatiles and bulk, and with the own tides; then the 15 golden systems' 107 moons and 15
+      rings, before and after).
+      - _T56.a, the planes._ Nothing but orientation moves. Regular moons' orbit normals turn
+        2.3–33° (median 13.0°; golden 3.5–24°, median 12.7°) and their positions by 0.01–1.7 a
+        (median 0.18 a); giant-impact moons' turn up to 180° (median 96°, the isotropic
+        obliquity), their positions by a median 0.89 a; captures' by a median 0.006° (at most
+        24°), 10⁻⁴ a. Rings' normals turn 0.002–0.59 rad from the orbit normal (median 0.19 rad;
+        golden 0.011–0.42, each its planet's obliquity) and lie 2 × 10⁻⁹ to 0.22 rad from the
+        spin pole (golden median 7 × 10⁻⁷ rad). No regular moon or ring falls in a band, so no
+        count moves.
+      - _T56.c, the volatiles and bulk._ No moon of the sample or the goldens changes state.
+        Twenty-three moons with air on both sides move × 0.053–4.8 in pressure (median 1.0),
+        the thirteen Titan-likes among them (snowballs over 0.1 bar of N₂) both ways, 10.4 →
+        0.55 bar and 0.28 → 1.36 bar at the ends; T_eq moves −100 to +13 K (p10 −25 K), icy
+        captures cooling and rocky giant-impact moons warming by their bulk's material's albedo
+        (in the goldens × 0.924 and × 1.08); 20 crusts turn silicate and 4 ice-rich. Of
+        the table's moons (median volatiles): Ganymede, a 0.305-bar snowball at the median rank
+        at 22 after B1 (0.277 of CH₄, 0.028 of N₂; T56.c's 3.6 bar was before the ammonia line)
+        and 0.387 bar at the lowest, goes airless (15 and 1.2 Pa); Callisto at the lowest rank,
+        7.36 bar, goes airless (0.9 Pa); Titan falls 2.65 → 1.44 bar and 98.4 → 93.8 K at the
+        median rank, 1.47 → 1.29 bar at the radius-keeping rank, 7.59 → 1.62 bar at the lowest.
+        In the goldens, `subgiant`'s rocky snowball moons `0402`, `0503` and `0504` rise ×2.5–3.2
+        (54 → 133, 53 → 167 and 605 → 1,709 mbar).
+      - _T56.d, the tides._ Tidal heat × 1.9 × 10⁻⁸–13 for captures (median 5.8 × 10⁻⁵),
+        × 9.5 × 10⁻⁵–0.73 for icy regular moons (median 0.0079), and unchanged for heated rocky
+        ones (the cold ones × 5 × 10⁻⁴ or more). Regular moons' published oceans: 51 off, 8 on;
+        a captured or giant-impact moon's flag moves (7 and 8 on, 2 off) but stays unpublished.
+        Locking times × 0.025–9.9 × 10⁶ (median × 804), and 170 moons are despinning at the epoch
+        where they were locked (148 captures at 3:2, 22 rocky giant-impact moons); 21 figures
+        move by the synchronous factor. Volcanism falls a level or more for 156 moons, rises for
+        one; 43 regimes go ice shell → stagnant lid and 2 back; 175 surface ages move. In the
+        goldens 97 of the 107 moons' locking ages move, 20 captures despin, 48 heat flows fall
+        and none rises (median × 0.77, to × 4.3 × 10⁻⁴), and `hierarchical_triple`'s `1101`,
+        `1102` and `1202` lose their oceans (`1101` and `1102` to a stagnant lid, their surfaces
+        2.2 Myr and 282 Myr → 8.27 Gyr).
+      - _The resurfacing constant_, 0.0386 → 0.019 239 4 W m⁻², is τ × (0.019 239 4 ÷ 0.0386)^n
+        = × 0.1320 at a given heat flow. Of the sample's 785 ice-rich moon surfaces, 48 sit at
+        their new τ. It moves bodies beyond the moons: in the goldens 11 icy planets and snowballs
+        (`close_binary` `0900`, `0a00`, `0b00`; `filler_c` `0300`, `0400`, `0500`;
+        `hierarchical_triple` `1800`, `1a00`, `1c00`; `m_dwarf_resonant_chain` `0400`;
+        `wide_binary` `0700`) take × 0.132 (e.g. 44.5 → 5.88 Myr), and 11 icy dwarf planets
+        (`filler_b` 4, `filler_c` 1, `hot_jupiter` 2, `subgiant` 2, `wide_binary` 2) × 0.13–0.99,
+        less where another limit takes over, each with its craters and basin relief. The measured
+        Europa under the generated Europa's tide goes 313 → 41.4 kyr.
+      - _Positions_ in `observe`, `frame` and `orbit` follow the planes and laws above.
+    - _Moved goldens_, re-blessed at header 22 (`golden_diff.py`: 18 changed, 2 new):
+      - `observe/in_system` (932): the moons' apparent positions and velocities, on their planes.
+      - `frame/body_rotations` (123): the moons' laws, their poles with their orbits and their
+        locking ages by their own pairs.
+      - `orbit/drifting_states` (10): the giant-impact moons' drifting orbits, on their planes.
+      - `planetary/global_figures` (4): the measured Europa's surface age, craters, σ_h and
+        basin relief, by the constant.
+      - `planetary/surface_conditions_published` (153 changed, 1 new, 2 gone): 30 bodies, 20
+        moons by their planes' seasons, own air and tides (`01fffb2c9fff0000.0601` loses its
+        ocean), and 7 planets and 3 dwarf planets by the constant.
+      - `planetary/systems`: `close_binary` (913 changed; 390 new and 390 gone, the rotation
+        lines relabelled by their new lock), `eccentric_giant` (149; 188 and 182),
+        `fallback_black_hole` (18; 46 and 46), `filler_b` (563; 584 and 572), `filler_c` (698;
+        252 and 252), `hierarchical_triple` (724; 1,000 and 982), `hot_jupiter` (4; 6 new),
+        `m_dwarf_resonant_chain` (22; 68 and 68), `red_giant` (442; 418 and 412), `solar_like`
+        (371; 418 and 412), `subgiant` (1,115; 920 and 896) and `wide_binary` (152; 242 and
+        230): every moon by its plane, laws and tides, the icy planets' and dwarf planets'
+        surfaces by the constant, and each ring's normal, new.
+      - The server's `scene_systems` (6 frames): the moons' orbits and laws, and the rings'
+        `normal`, sent.
+      - The rest hold, `planetary/moons` among them (the local elements, as §1.5 says), with the
+        other golden integration targets run (`body_frame_golden`, `body_fixed_golden`,
+        `orbit_states`, `frame`, `photometry_templates_golden` and the planetary ones) and the
+        server's `system_bodies` and `systems_in_range`.
+    - _Deferred_ (2026-10-13 rule):
+      - T56.a's cost (one more `satellites_of` per parent and one more primary record per
+        parent with moons) is untimed: T33.a's bench is a timed run, for the bump commit or the
+        owner.
+      - Triton's branch sits at a threshold: the measured one at its N₂ ice's 38 K is cold
+        (k₂ 0.0615), while the table's, at its derivation's 45.6 K, is on the ocean branch
+        (k₂ 0.145) on the same rock heat, since a colder top thickens the shell. T51.g's shell
+        and P14.T53.c's ice temperature decide it.

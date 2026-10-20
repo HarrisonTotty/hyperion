@@ -124,12 +124,14 @@ fn generate_planets_is_generate_with_its_satellites_removed() {
     for ((ctx, planets), (_, whole)) in generated().iter().zip(whole()) {
         assert_eq!(planets.zones(), whole.zones(), "{:?}", ctx.id());
         assert_eq!(planets.hosts(), whole.hosts());
-        // `generate` attaches the held rotation laws after phase D, and `generate_planets`
-        // holds none (P14.T46.b); every other part of a planet is the same.
+        // `generate` attaches the held rotation laws (P14.T46.b) and the satellites' Laplace frames
+        // (P14.T56.a) after phase D, and `generate_planets` holds neither; every other part of a
+        // planet is the same.
         let kept: Vec<Body> = whole
             .planets()
             .map(|body| Body {
                 rotation: None,
+                laplace: None,
                 ..body.clone()
             })
             .collect();
@@ -2021,13 +2023,14 @@ fn a_planets_only_system_holds_no_rotation() {
 }
 
 /// P14.T46.a (a): a regular moon's locking time and its held law's are one law, at one moment of
-/// inertia: they differ only by their primordial periods, the moon derivation's fixed 15 h and the
-/// law's drawn one (τ ∝ ω), to 10⁻¹².
+/// inertia and its own tides (P14.T56.d): they differ only by their primordial periods, the moon
+/// derivation's fixed 15 h and the law's drawn one (τ ∝ ω), to 10⁻¹².
 #[test]
 fn a_regular_moon_has_one_locking_time() {
     let mut moons = 0;
     for (ctx, system) in whole() {
         let snapshot = system.snapshot_at(ctx, parent_time(ctx));
+        let epoch = Epoch::new(system, ctx, parent_time(ctx));
         for record in snapshot.bodies() {
             if record.identity().kind() != BodyKind::Moon(MoonOrigin::Regular) {
                 continue;
@@ -2040,12 +2043,14 @@ fn a_regular_moon_has_one_locking_time() {
                 continue;
             };
             let body = system.body(record.index()).unwrap();
-            let Part::Moon(moon) = &body.part else {
-                unreachable!("a regular moon is a moon")
+            let (Part::Moon(moon), OrbitHost::Body(parent)) = (&body.part, body.host) else {
+                unreachable!("a regular moon is a moon of a body")
             };
             let elements = moon
                 .satellite
                 .orbit_at(&moon.parent, ctx.age_at(parent_time(ctx)));
+            let now = system.parent_now(&epoch, parent);
+            let derived = system.moon_derived(&epoch, moon, &elements, &now).unwrap();
             let mass = Kilograms::from(*mass);
             let primary = Kilograms::new(
                 elements.gravitational_parameter().value() / GRAVITATIONAL_CONSTANT - mass.value(),
@@ -2057,7 +2062,7 @@ fn a_regular_moon_has_one_locking_time() {
                 elements.semi_major_axis(),
                 bulk.class(),
                 &bulk.fractions(),
-                SpinTides::OfClass,
+                derived.spin_tides(),
             );
             let fixed = crate::planetary::moons::regular::MOON_PRIMORDIAL_PERIOD_HOURS * 3_600.0;
             let expected =
@@ -3475,27 +3480,7 @@ fn the_published_volatile_history_reads_each_body_s_past() {
     assert!(checked > 100 && moons > 5, "{checked}, {moons}");
 }
 
-// P14.T56.a: every moon and ring on its parent's Laplace surface, ahead of the bump.
-
-/// Version 22's rules but the planes: every satellite on its parent's Laplace surface.
-const LAPLACE_SURFACE: MoonRules = MoonRules {
-    planes: SatellitePlanes::LaplaceSurface,
-    ..MoonRules::in_force()
-};
-
-/// The sample's systems, generated whole on the Laplace surface (P14.T56.a), once.
-fn laplace_whole() -> &'static [(SystemContext, PlanetarySystem)] {
-    static SYSTEMS: OnceLock<Vec<(SystemContext, PlanetarySystem)>> = OnceLock::new();
-    SYSTEMS.get_or_init(|| {
-        sample()
-            .iter()
-            .map(|ctx| {
-                let system = generate_with(SEED, ctx, LAPLACE_SURFACE);
-                (ctx.clone(), system)
-            })
-            .collect()
-    })
-}
+// P14.T56.a: every moon and ring on its parent's Laplace surface.
 
 /// Asserts two vectors equal bit for bit.
 fn same3(a: [f64; 3], b: [f64; 3]) {
@@ -3518,40 +3503,27 @@ fn between(a: [f64; 3], b: [f64; 3]) -> f64 {
     crate::math::atan2(dot3(c, c).sqrt(), dot3(a, b))
 }
 
-#[test]
-fn the_laplace_surface_is_the_same_twice_and_order_independent() {
-    for (ctx, system) in laplace_whole().iter().take(40) {
-        assert_eq!(&generate_with(SEED, ctx, LAPLACE_SURFACE), system);
-    }
-    let contexts: Vec<SystemContext> = sample().iter().take(30).cloned().collect();
-    assert_order_independent(&contexts, |ctx| generate_with(SEED, ctx, LAPLACE_SURFACE));
-}
-
-/// P14.T56.a: the Laplace surface turns planes only. Every planet is as version 22 has it, with
-/// its frame held, and every satellite keeps its index, draws, local elements and mass, so that
-/// T22.b's properties, which read nothing else, stand; no regular moon or ring of the sample lies
-/// in an eccentricity band (decision-p14-moons §1.2 expects none of 5 × 10⁻¹¹ of giants), and each
-/// moon keeps whether it has a rotation law.
+/// P14.T56.a: the Laplace surface turns planes only. Each parent's satellites as its orbital plane
+/// gives them, those `generate_satellites` finds for the parent with no frame (step 7's first
+/// pass), keep their index, draws, local elements and mass on its frame, so that T22.b's
+/// properties, which read nothing else, stand; and no regular moon or ring of the sample lies in an
+/// eccentricity band (decision-p14-moons §1.2 expects none of 5 × 10⁻¹¹ of giants).
 #[test]
 fn the_laplace_surface_moves_no_satellite_s_elements_mass_or_count() {
     let (mut frames, mut moons, mut rings, mut tilted) = (0, 0, 0, 0);
-    for ((ctx, flat), (_, laid)) in whole().iter().zip(laplace_whole()) {
-        assert_eq!(flat.zones(), laid.zones());
-        let held: Vec<Body> = laid
-            .planets()
-            .map(|body| Body {
+    for (ctx, system) in whole() {
+        for b in system.satellites() {
+            let body = system.body(b.parent_index()).unwrap();
+            frames += usize::from(body.laplace().is_some());
+            let unframed = Body {
                 laplace: None,
                 ..body.clone()
-            })
-            .collect();
-        let before: Vec<Body> = flat.planets().cloned().collect();
-        assert_eq!(held, before, "{:?}", ctx.id());
-        frames += laid
-            .planets()
-            .filter(|body| body.laplace().is_some())
-            .count();
-        assert_eq!(flat.satellites().len(), laid.satellites().len());
-        for (a, b) in flat.satellites().iter().zip(laid.satellites()) {
+            };
+            let belt = match body.part {
+                Part::Planet(_) => system.nearest_belt(body.index()),
+                Part::Moon(_) | Part::Ring(_) | Part::Member(_) => None,
+            };
+            let a = &generate_satellites(SEED, ctx, &unframed, belt);
             assert_eq!(a.parent_index(), b.parent_index());
             assert_eq!(a.parent(), b.parent());
             assert_eq!(a.moonlets(), b.moonlets());
@@ -3563,28 +3535,13 @@ fn the_laplace_surface_moves_no_satellite_s_elements_mass_or_count() {
             let age = ctx.age_at_epoch();
             for (x, y) in a.moons().iter().zip(b.moons()) {
                 assert_eq!(
-                    (x.index(), x.moon(), x.radius_rank()),
-                    (y.index(), y.moon(), y.radius_rank())
+                    (x.index(), x.moon(), x.radius_rank(), x.volatiles()),
+                    (y.index(), y.moon(), y.radius_rank(), y.volatiles())
                 );
                 assert_eq!(x.local_orbit_at(parent, age), y.local_orbit_at(parent, age));
                 assert_eq!(x.plane(), &MoonPlane::OrbitalPlane);
                 if matches!(y.plane(), MoonPlane::Laplace(_)) {
                     tilted += 1;
-                }
-                // A moon's spin, lock and tilt are its own; only its frame turns with its orbit.
-                let (bx, by) = (flat.body(x.index()).unwrap(), laid.body(y.index()).unwrap());
-                assert_eq!(
-                    bx.rotation.is_some(),
-                    by.rotation.is_some(),
-                    "{:?}",
-                    x.index()
-                );
-                if let (Some(rx), Some(ry)) = (bx.rotation, by.rotation) {
-                    assert_eq!(
-                        (rx.obliquity_law(), rx.primordial_period(), rx.obliquity()),
-                        (ry.obliquity_law(), ry.primordial_period(), ry.obliquity())
-                    );
-                    assert_eq!(rx.locking_time(), ry.locking_time(), "{:?}", x.index());
                 }
                 moons += 1;
             }
@@ -3624,7 +3581,7 @@ fn the_laplace_surface_moves_no_satellite_s_elements_mass_or_count() {
 #[test]
 fn every_moon_lies_at_its_drawn_tilt_to_its_local_laplace_plane() {
     let mut moons = 0;
-    for (ctx, system) in laplace_whole() {
+    for (ctx, system) in whole() {
         let age = ctx.age_at(parent_time(ctx));
         for found in system.satellites() {
             let (Some(parent), Some(frame)) = (
@@ -3682,7 +3639,7 @@ fn every_moon_lies_at_its_drawn_tilt_to_its_local_laplace_plane() {
 #[test]
 fn every_ring_lies_on_its_local_laplace_plane_and_close_in_on_the_equator() {
     let (mut rings, mut close, mut nanoradian) = (0, 0, 0);
-    for (_, system) in laplace_whole() {
+    for (_, system) in whole() {
         for found in system.satellites() {
             let Some(frame) = system.body(found.parent_index()).and_then(Body::laplace) else {
                 continue;
@@ -3746,7 +3703,7 @@ fn on_the_laplace_surface_generate_satellites_is_each_parent_s_children_in_gener
     let contexts = sample_contexts(1_000, Seed::new(0x5a7e_1117), SampleFilter::ALL).unwrap();
     let (mut compared, mut impacts, mut widest) = (0, 0, 0.0_f64);
     for ctx in &contexts {
-        let system = generate_with(SEED, ctx, LAPLACE_SURFACE);
+        let system = generate(SEED, ctx);
         let (start, end) = (ctx.age_at(ClockWindow::START), ctx.age_at(ClockWindow::END));
         let parents = system
             .bodies()
@@ -3809,7 +3766,7 @@ fn on_the_laplace_surface_generate_satellites_is_each_parent_s_children_in_gener
 #[test]
 fn each_parent_s_frame_is_its_own_law_and_figure_at_its_time() {
     let mut frames = 0;
-    for (ctx, system) in laplace_whole().iter().take(150) {
+    for (ctx, system) in whole().iter().take(150) {
         let t = parent_time(ctx);
         for body in system.bodies() {
             let primary = matches!(body.part, Part::Planet(_) | Part::Member(_));
@@ -3859,7 +3816,7 @@ fn each_parent_s_frame_is_its_own_law_and_figure_at_its_time() {
 #[test]
 fn on_the_laplace_surface_every_law_is_its_record_s() {
     let mut laws = 0;
-    for (ctx, system) in laplace_whole().iter().take(150) {
+    for (ctx, system) in whole().iter().take(150) {
         let indices: Vec<BodyIndex> = system.bodies().iter().map(Body::index).collect();
         let held = |index: BodyIndex| system.rotation_of(ctx, index).unwrap();
         for &index in &indices {
@@ -3874,46 +3831,30 @@ fn on_the_laplace_surface_every_law_is_its_record_s() {
     assert!(laws > 300, "{laws} laws");
 }
 
-/// P14.T56.c's hold and its follow-up's, reached ahead of the bump (`with_moon_inventories`).
-/// Under their own volatiles, read at their own bulk, every moon's rotation law is still its
-/// record's at `parent_time`, so that setting the rule after `generate` is generating with it;
-/// every moon's inventory is the one its own ranks and site give
+/// P14.T56.c and its follow-up: every moon's inventory is the one its own ranks and site give
 /// ([`Satellite::own_volatiles`](crate::planetary::satellites::Satellite::own_volatiles)) at its
-/// own bulk ([`PlanetarySystem::moon_own_bulk`]), and differs from version 22's; and its
-/// atmosphere's escape is judged at its record's own radius and mass, which for a regular moon is
-/// its derivation's ([`DerivedMoon::radius`]).
+/// own bulk ([`PlanetarySystem::moon_own_bulk`]), and its atmosphere's escape is judged at its
+/// record's own radius and mass, which for a regular moon is its derivation's
+/// ([`DerivedMoon::radius`]).
 #[test]
-fn under_their_own_volatiles_the_moons_move_nothing_their_rotation_reads() {
+fn every_moon_s_inventory_is_its_own_ranks_at_its_own_bulk() {
     use crate::planetary::derive::atmosphere::Retention;
-    use crate::planetary::moons::regular::{MoonBulk, MoonBulkRule, MoonInventories};
-    let (mut laws, mut moved, mut stated) = (0, 0, 0);
+    use crate::planetary::moons::regular::{MoonBulk, MoonVolatiles, derive_moon};
+    let (mut moons, mut stated, mut own_ranks) = (0, 0, 0);
     for (ctx, system) in whole().iter().take(150) {
-        let own = system.clone().with_moon_inventories(MoonInventories::Own);
-        assert_eq!(
-            system
-                .clone()
-                .with_moon_inventories(MoonInventories::Shared),
-            *system
-        );
         let t = UniverseTime::EPOCH;
         for body in system.bodies() {
             let (Part::Moon(part), OrbitHost::Body(parent)) = (&body.part, body.host) else {
                 continue;
             };
             let index = body.index();
-            let record = own.body_at(ctx, index, parent_time(ctx)).unwrap();
-            let law = own.derive_rotation(ctx, body, &record);
-            assert_eq!(own.rotation_of(ctx, index).unwrap(), law, "{index:?}");
-            laws += usize::from(law.is_some());
-            let inventory = |of: &PlanetarySystem| {
-                of.hooks_at(ctx, index, t)
-                    .unwrap()
-                    .and_then(|hooks| hooks.bulk().ok().map(|bulk| *bulk.inventory()))
-            };
-            let (Some(shared), Some(mine)) = (inventory(system), inventory(&own)) else {
+            let Some(mine) = system
+                .hooks_at(ctx, index, t)
+                .unwrap()
+                .and_then(|hooks| hooks.bulk().ok().map(|bulk| *bulk.inventory()))
+            else {
                 continue;
             };
-            assert_ne!(shared, mine, "{index:?}");
             let planet = system.body(parent).unwrap();
             let epoch = Epoch::new(system, ctx, t);
             let host = fate_host(ctx, system.zone_of(planet));
@@ -3922,28 +3863,32 @@ fn under_their_own_volatiles_the_moons_move_nothing_their_rotation_reads() {
             let (_, now) = system.primary_record(&epoch, planet, label, &fate);
             let satellite = &part.satellite;
             let bulk = PlanetarySystem::moon_own_bulk(part, &now);
-            let holds = MoonHolds {
-                bulk: MoonBulkRule::Own,
-                ..MoonHolds::in_force()
-            };
-            let inputs = MoonInputs {
+            let mut inputs = MoonInputs {
                 mass: satellite.mass(),
                 orbit: satellite.orbit_at(&part.parent, ctx.age_at(t)),
                 radius_rank: satellite.radius_rank(),
                 volatiles: satellite.own_volatiles(),
                 bulk,
             };
-            let derived = derive_moon_under(
-                holds,
-                &inputs,
-                &part.parent,
-                now.nursery.as_ref().unwrap(),
-                now.sky.as_ref().unwrap(),
-                ctx.age_at_epoch(),
-                t,
-            )
-            .unwrap();
+            let derive = |inputs: &MoonInputs| {
+                derive_moon(
+                    inputs,
+                    &part.parent,
+                    now.nursery.as_ref().unwrap(),
+                    now.sky.as_ref().unwrap(),
+                    ctx.age_at_epoch(),
+                    t,
+                )
+                .unwrap()
+            };
+            let derived = derive(&inputs);
             assert_eq!(*derived.inventory(), mine, "{index:?}");
+            // Its own ranks, not the median's, make its inventory.
+            inputs.volatiles = MoonVolatiles {
+                site: satellite.volatile_site(),
+                ..MoonVolatiles::SHARED
+            };
+            own_ranks += usize::from(*derive(&inputs).inventory() != mine);
             // The air's escape reads the record's own radius and mass: the stated bulk's, or a
             // regular moon's derivation's.
             let radius = match bulk {
@@ -3963,50 +3908,16 @@ fn under_their_own_volatiles_the_moons_move_nothing_their_rotation_reads() {
             )
             .with_methane_as_nitrogen();
             assert_eq!(air.retention(), escape, "{index:?}");
-            moved += 1;
+            moons += 1;
         }
     }
     assert!(
-        laws > 100 && moved > 100 && stated > 10,
-        "{laws} laws, {moved} moons moved, {stated} stated bulks"
+        moons > 100 && stated > 10 && own_ranks * 10 > moons * 9,
+        "{moons} moons, {stated} stated bulks, {own_ranks} moved by their own ranks"
     );
 }
 
-// P14.T56.d: moons' Love numbers and dissipation by state, ahead of the bump.
-
-/// The sample's first systems, generated whole under every rule of the 22 → 23 batch (P14.T56's
-/// holds released, as version 23 takes them), once.
-fn batch_whole() -> &'static [(SystemContext, PlanetarySystem)] {
-    static SYSTEMS: OnceLock<Vec<(SystemContext, PlanetarySystem)>> = OnceLock::new();
-    SYSTEMS.get_or_init(|| {
-        sample()
-            .iter()
-            .take(150)
-            .map(|ctx| (ctx.clone(), generate_with(SEED, ctx, MoonRules::BATCH)))
-            .collect()
-    })
-}
-
-/// P14.T56.d's hold is a switch of generation: under the batch's rules a system is the same twice
-/// and whatever order its contexts come in, and its planets' laws are version 22's.
-#[test]
-fn the_batch_s_moons_are_the_same_twice_and_order_independent() {
-    for ((ctx, system), (_, held)) in batch_whole().iter().zip(whole()).take(25) {
-        assert_eq!(&generate_with(SEED, ctx, MoonRules::BATCH), system);
-        for body in system.bodies() {
-            if matches!(body.part, Part::Planet(_)) {
-                let index = body.index();
-                assert_eq!(
-                    system.rotation_of(ctx, index).unwrap(),
-                    held.rotation_of(ctx, index).unwrap(),
-                    "{index:?}"
-                );
-            }
-        }
-    }
-    let contexts: Vec<SystemContext> = sample().iter().take(20).cloned().collect();
-    assert_order_independent(&contexts, |ctx| generate_with(SEED, ctx, MoonRules::BATCH));
-}
+// P14.T56.d: moons' Love numbers and dissipation by state.
 
 /// P14.T56.d: under its own tides every moon's stored rotation law is its record's at
 /// `parent_time` through `derive_rotation`'s moon arm, with its own pair, and a regular moon's
@@ -4016,7 +3927,7 @@ fn the_batch_s_moons_are_the_same_twice_and_order_independent() {
 fn under_their_own_tides_a_moon_s_law_and_its_locking_time_agree() {
     use crate::planetary::moons::regular::MOON_PRIMORDIAL_PERIOD_HOURS;
     let (mut laws, mut regular) = (0, 0);
-    for (ctx, system) in batch_whole() {
+    for (ctx, system) in whole().iter().take(150) {
         let t = parent_time(ctx);
         let epoch = Epoch::new(system, ctx, t);
         for body in system.bodies() {
@@ -4034,7 +3945,6 @@ fn under_their_own_tides_a_moon_s_law_and_its_locking_time_agree() {
             let now = system.parent_now(&epoch, parent);
             let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
             let derived = system.moon_derived(&epoch, part, &orbit, &now).unwrap();
-            assert!(derived.tides().is_some(), "{index:?}");
             if matches!(part.satellite.moon(), SatelliteMoon::Regular(_)) {
                 let fixed = MOON_PRIMORDIAL_PERIOD_HOURS * 3_600.0;
                 let expected =
@@ -4060,14 +3970,14 @@ fn under_their_own_tides_a_moon_s_law_and_its_locking_time_agree() {
 /// branch's, kept at `F_ocean`; another moon's is not published.
 #[test]
 fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
-    use crate::planetary::hooks::figures::surface_age::resurfacing_time_under;
+    use crate::planetary::hooks::figures::surface_age::resurfacing_time;
     use crate::planetary::moons::regular::ICE_CONDUCTIVITY_COEFFICIENT;
     use crate::planetary::moons::tides::TidalBranch;
     let t = UniverseTime::EPOCH;
     let (mut regular, mut oceans, mut other) = (0_u32, 0_u32, 0_u32);
     let (mut ice_rich, mut at_its_tau) = (0_u32, 0_u32);
     let mut branches = [0_u32; 3];
-    for (ctx, system) in batch_whole() {
+    for (ctx, system) in whole().iter().take(150) {
         let epoch = Epoch::new(system, ctx, t);
         for body in system.bodies() {
             let (Part::Moon(part), OrbitHost::Body(parent)) = (&body.part, body.host) else {
@@ -4083,7 +3993,7 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
             let now = system.parent_now(&epoch, parent);
             let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
             let derived = system.moon_derived(&epoch, part, &orbit, &now).unwrap();
-            let tides = derived.tides().unwrap();
+            let tides = derived.tides();
             assert_same_bits(
                 figures.heat_flow().value(),
                 figures.non_tidal_heat_flow().value() + derived.heat_flux().value(),
@@ -4096,15 +4006,10 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
                 (published / f - 1.0).abs() < 1e-9,
                 "{index:?}: {published} {f}"
             );
-            // An ice-rich surface's age reads version 23's resurfacing calibration under the batch's
-            // rules (decision-p14-t56d-membrane §4.6): never older than its τ there.
+            // An ice-rich surface's age reads the moons' tides' resurfacing calibration
+            // (decision-p14-t56d-membrane §4.6): never older than its τ there.
             if figures.impactors().crust() == Crust::IceRich {
-                let tau = resurfacing_time_under(
-                    MoonTideRule::ByState,
-                    Crust::IceRich,
-                    figures.heat_flow(),
-                )
-                .value();
+                let tau = resurfacing_time(Crust::IceRich, figures.heat_flow()).value();
                 let age = figures.surface_age().value();
                 assert!(
                     age <= tau * (1.0 + 1e-12),

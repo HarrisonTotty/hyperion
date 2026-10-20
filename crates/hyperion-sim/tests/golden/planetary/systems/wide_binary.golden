@@ -103,17 +103,17 @@ body 0101 A b IV: Moon(Captured) about Some(Body(BodyIndex(256))), Present
 mass_mearth = 0x3ec0aaf0cde991eb  # 1.9869490722071446e-6
 a_m = 0x41a30b7c25e3b0d5  # 159759890.9447085
 e = 0x3fc0224e3711d92b  # 0.12604692162467165
-i_rad = 0x4002203759c090ea  # 2.265730572880888
-node_rad = 0x4018bdbf35279e7d  # 6.1852997117454125
-periapsis_rad = 0x4015f4f050c87541  # 5.489197981104838
+i_rad = 0x40022036c600ca2a  # 2.2657294720641135
+node_rad = 0x4018bdbe7d0dd610  # 6.18529696843099
+periapsis_rad = 0x4015f4effaddbb0a  # 5.489196700843204
 mean_anomaly_at_epoch_rad = 0x3ff789fd1b895b4b  # 1.4711886478086906
 period_s = 0x4106fa05c7bfa05e  # 188224.72253346717
 mu_m3_s2 = 0x43302478a689c3cf  # 4543700236092367.0
 valid_until: None
 drift: none
-x_m = 0xc263fedcbde70407  # -687042064184.1259
-y_m = 0x42710c6e86fbeeab  # 1171568226238.9167
-z_m = 0xc2a14c15b41cb96c  # -9509239656028.71
+x_m = 0xc263fedcbdef8dcd  # -687042064252.4313
+y_m = 0x42710c6e86f795bf  # 1171568226169.3591
+z_m = 0xc2a14c15b41cc100  # -9509239656032.5
 radius_rearth = 0x3f930e329555edae  # 0.018608847012257783
 density_kg_m3 = 0x409a900000000000  # 1700.0
 gravity_m_s2 = 0x3facd981849d43e7  # 0.0563469385512077
@@ -122,42 +122,42 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe401055c23bb9a  # 0.6251246261216352
 water = 0x3fd7fdf547b888cd  # 0.37487537387836484
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4084934008d9db95  # 658.4062668819557
+t_eq_k = 0x40830547c56f25e8  # 608.6600445445483
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
 hooks detail_seed = 0x8c774c3db60d507c
-rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73100693419212976, nanos: 0 })
-pole_x = 0xbfc06e1848d61d2a  # -0.12835982853378286
-pole_y = 0xbfeb26f57a0779e5  # -0.8485057242758641
-pole_z = 0xbfe06da18b060b04  # -0.5133826937966153
-equator_node_x = 0xbfee06cabc37a3d5  # -0.9383290935630791
-equator_node_y = 0x3fd15ffa9fa15408  # 0.2714830931557235
-equator_node_z = 0xbfcb675eff40aad3  # -0.21409213508135014
-equator_quarter_x = 0x3fd48bce83f04b7e  # 0.3210331238234899
-equator_quarter_y = 0x3fdd124936559ea7  # 0.4542410879716762
-equator_quarter_z = 0xbfea97c203ab4060  # -0.8310251304301453
+rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73099881880176800, nanos: 0 })
+pole_x = 0xbfc06e2c462e9e2a  # -0.12836221148357768
+pole_y = 0xbfeb26f5eaeeda3c  # -0.8485059345756052
+pole_z = 0xbfe06d9f908bd6ab  # -0.5133817504090151
+equator_node_x = 0xbfee06c938bd4a87  # -0.9383283718292014
+equator_node_y = 0x3fd160046fbce7b2  # 0.2714854327383548
+equator_node_z = 0xbfcb6760a52deef2  # -0.2140923315563366
+equator_quarter_x = 0x3fd48bd35df4c7be  # 0.3210342805424452
+equator_quarter_y = 0x3fdd1241b32141ba  # 0.4542392968478698
+equator_quarter_z = 0xbfea97c3216170cf  # -0.8310256626096136
 obliquity_rad = 0x3fc4ac3fce216fc1  # 0.1615066296097876
 initial_rate_rad_s = 0x3f10c1481bb82f36  # 6.391527761467623e-5
 locked_rate_rad_s = 0x3f0a408aee52d28c  # 5.007194503417909e-5
 age_at_epoch_s = 0x43703b4b1b72c9c7  # 7.310069434342514e16
-locking_age_s = 0x41cb8b2de3e4675c  # 924212167.7844043
+locking_age_s = 0x4267a552aa794e20  # 812463248330.4414
 clock_period_s = 0x4116fa05c7bfa05e  # 376449.44506693434
 clock_mean_anomaly_at_epoch_rad = 0x3fe789fd1b895b4b  # 0.7355943239043453
-sub_primary_angle_rad = 0xbff122b0b6204728  # -1.0709693064022279
+sub_primary_angle_rad = 0xbff122b21041c49e  # -1.070970595840016
 phase_at_epoch_rad = 0x3ff35067f0379361  # 1.2071303733329943
 capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x4005b40f948e88d4  # 2.71292034206372
-w_epoch_rad = 0x3ff22c4af32dc1c8  # 1.135813665310808
-w_end_rad = 0x40175e190393c992  # 5.841892295737482
+w_start_rad = 0x4005b40ee77dca18  # 2.7129190526259315
+w_epoch_rad = 0x3ff22c49990c4452  # 1.1358123758730199
+w_end_rad = 0x40175e18ad0b6a34  # 5.841891006299694
 figure: Sphere, SolidSurface
 equatorial_radius_m = 0x40fcf1cf6dd5aa13  # 118556.96431509433
 polar_radius_m = 0x40fcf1cf6dd5aa13  # 118556.96431509433
 flattening = 0x0000000000000000  # 0.0
-figure_pole_x = 0xbfc06e1848d61d2a  # -0.12835982853378286
-figure_pole_y = 0xbfeb26f57a0779e5  # -0.8485057242758641
-figure_pole_z = 0xbfe06da18b060b04  # -0.5133826937966153
+figure_pole_x = 0xbfc06e2c462e9e2a  # -0.12836221148357768
+figure_pole_y = 0xbfeb26f5eaeeda3c  # -0.8485059345756052
+figure_pole_z = 0xbfe06d9f908bd6ab  # -0.5133817504090151
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
 geometric_albedo_b = 0x3fdb851eb851eb85  # 0.43
@@ -173,14 +173,14 @@ lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x4084934008d9db95  # 658.4062668819557
-equator_pole_contrast_k = 0x405542e05443ae30  # 85.04494196519295
-day_night_contrast_k = 0x408558f15c71de5e  # 683.1178521057116
+mean_surface_temperature_k = 0x40830547c56f25e8  # 608.6600445445483
+equator_pole_contrast_k = 0x4053a7a904413ac0  # 78.61969095583027
+day_night_contrast_k = 0x40837c948e9595ea  # 623.5725375830054
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x408e092d3a68cd9d  # 961.1470840633152
+sigma_h_m = 0x40a3d0657fc6e820  # 2536.198240485988
 continental_fraction = 0x0000000000000000  # 0.0
-heat_flow_w_m2 = 0x3fbb470bfb8cc481  # 0.10655283824304897
-surface_age_yr = 0x418452572d9b22cb  # 42617573.700749956
+heat_flow_w_m2 = 0x3f3cced736f32020  # 0.0004395747591385852
+surface_age_yr = 0x41e142390cb3dec8  # 2316421221.620945
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
 envelope: NotApplicable
@@ -188,17 +188,17 @@ body 0102 A b I: Moon(Captured) about Some(Body(BodyIndex(256))), Present
 mass_mearth = 0x3e6f135d697a5873  # 5.7882897750206844e-8
 a_m = 0x419a791cc8580cf6  # 111036210.08598694
 e = 0x3fd4839f44ca152a  # 0.3205335780879347
-i_rad = 0x3ff21aeb585b2bf8  # 1.1315720988666254
-node_rad = 0x40034151cb0795e8  # 2.406894289177888
-periapsis_rad = 0x4007dcc063859be7  # 2.9827888274335126
+i_rad = 0x3ff21af4a8d738f2  # 1.131580981763872
+node_rad = 0x4003414b7eea55d4  # 2.40688227799067
+periapsis_rad = 0x4007dcc0dd70bd7c  # 2.982789735796983
 mean_anomaly_at_epoch_rad = 0x401209d34782edf9  # 4.509595029226596
 period_s = 0x40faa05a333e907e  # 109061.63751083796
 mu_m3_s2 = 0x4330247878b4e07a  # 4543699467165818.0
 valid_until: None
 drift: none
-x_m = 0xc264003cefaec78e  # -687226715510.2361
-y_m = 0x42710ceeabb110f6  # 1171702594321.06
-z_m = 0xc2a14c190c778ffa  # -9509267717063.988
+x_m = 0xc264003cef362726  # -687226714545.2234
+y_m = 0x42710ceeac125be4  # 1171702595877.7432
+z_m = 0xc2a14c190c749c9d  # -9509267716686.307
 radius_rearth = 0x3f7773ff8b92f378  # 0.005725858901482243
 density_kg_m3 = 0x409a8fffffffffff  # 1699.9999999999998
 gravity_m_s2 = 0x3f91c0f965cbe61e  # 0.01733770068947226
@@ -207,42 +207,42 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe401055c23bb98  # 0.625124626121635
 water = 0x3fd7fdf547b888cf  # 0.37487537387836495
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4084934008d9db95  # 658.4062668819557
+t_eq_k = 0x40830547c56f25e8  # 608.6600445445483
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
 hooks detail_seed = 0x03db9237b4a76a3b
-rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73100694078985488, nanos: 0 })
-pole_x = 0x3fe0bfb98ee82802  # 0.523403910746538
-pole_y = 0x3fe1723feb3abbfa  # 0.545196494514925
-pole_z = 0x3fe4f468eeb2da16  # 0.6548351919253175
-equator_node_x = 0x3fe86d8cdf477643  # 0.7633728371544709
-equator_node_y = 0xbfe486d7b47a5c9f  # -0.6414602780304398
-equator_node_z = 0xbfb37b0973de5946  # -0.07609614447423949
-equator_quarter_x = 0x3fd83a6209a45acc  # 0.37856341306307395
-equator_quarter_y = 0x3fe14552fa09670f  # 0.5397124179391727
-equator_quarter_z = 0xbfe80fd1a0acd217  # -0.7519310129342242
+rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73098239736246576, nanos: 0 })
+pole_x = 0x3fe0bfcf780cd4d9  # 0.5234143585900269
+pole_y = 0x3fe1723bc94f69df  # 0.5451945239868187
+pole_z = 0x3fe4f45adc169434  # 0.6548284815404544
+equator_node_x = 0x3fe86d7bc38ab510  # 0.7633646792579913
+equator_node_y = 0xbfe486ebfc4fc5d1  # -0.6414699485741783
+equator_node_z = 0xbfb37b0ec7e03c01  # -0.07609646205695243
+equator_quarter_x = 0x3fd83a6a7265186c  # 0.3785654179704412
+equator_quarter_y = 0x3fe1453f0c00789b  # 0.5397029146586364
+equator_quarter_z = 0xbfe80fddd0cd66a0  # -0.751936824624142
 obliquity_rad = 0x3fd1a84780ef2835  # 0.2758959540484541
 initial_rate_rad_s = 0x3f254420695b2222  # 0.0001622476162792689
 locked_rate_rad_s = 0x3f16a758821e4ada  # 8.64169856227658e-5
 age_at_epoch_s = 0x43703b4b1b72c9c7  # 7.310069434342514e16
-locking_age_s = 0x41af860ec4d9c407  # 264439650.4253237
+locking_age_s = 0x4281dc0fe959e789  # 2454607178556.942
 clock_period_s = 0x410aa05a333e907e  # 218123.27502167592
 clock_mean_anomaly_at_epoch_rad = 0x400209d34782edf9  # 2.254797514613298
-sub_primary_angle_rad = 0x4007427c5bf35de6  # 2.907463758816209
+sub_primary_angle_rad = 0x4007427cd1c3b203  # 2.907464636597298
 phase_at_epoch_rad = 0x4017fd9cd7f93ec7  # 5.997668623531076
 capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x3fdf7696b3deabc0  # 0.4916130787411781
-w_epoch_rad = 0x400b1bff89f3cda0  # 3.3886709954765166
-w_end_rad = 0x3f64d6538dae7000  # 0.0025436050322706905
+w_start_rad = 0x3fdf769a62614ca0  # 0.4916139565222668
+w_epoch_rad = 0x400b1bffffc421c0  # 3.388671873257607
+w_end_rad = 0x3f64d82acefee000  # 0.0025444828133593944
 figure: Sphere, SolidSurface
 equatorial_radius_m = 0x40e1cfee4e539723  # 36479.44706134337
 polar_radius_m = 0x40e1cfee4e539723  # 36479.44706134337
 flattening = 0x0000000000000000  # 0.0
-figure_pole_x = 0x3fe0bfb98ee82802  # 0.523403910746538
-figure_pole_y = 0x3fe1723feb3abbfa  # 0.545196494514925
-figure_pole_z = 0x3fe4f468eeb2da16  # 0.6548351919253175
+figure_pole_x = 0x3fe0bfcf780cd4d9  # 0.5234143585900269
+figure_pole_y = 0x3fe1723bc94f69df  # 0.5451945239868187
+figure_pole_z = 0x3fe4f45adc169434  # 0.6548284815404544
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
 geometric_albedo_b = 0x3fdb851eb851eb85  # 0.43
@@ -258,14 +258,14 @@ lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x4084934008d9db95  # 658.4062668819557
-equator_pole_contrast_k = 0x40769e3052a49e9a  # 361.8867975645495
-day_night_contrast_k = 0x4084f126bfca43ed  # 670.143920498083
+mean_surface_temperature_k = 0x40830547c56f25e8  # 608.6600445445483
+equator_pole_contrast_k = 0x4074e8c56405ca64  # 334.54819109212826
+day_night_contrast_k = 0x4083188ecde38bf6  # 611.0697286393249
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x408d1e4648e6e611  # 931.7843187369309
+sigma_h_m = 0x40921a4e907bc7b2  # 1158.5767230358729
 continental_fraction = 0x0000000000000000  # 0.0
-heat_flow_w_m2 = 0x3fd39b0cf06985dd  # 0.3063385341430072
-surface_age_yr = 0x413e2ac602707e29  # 1977030.009529004
+heat_flow_w_m2 = 0x3f2172f3ce4dc9ca  # 0.00013312555452278516
+surface_age_yr = 0x41e142390cb3dec8  # 2316421221.620945
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
 envelope: NotApplicable
@@ -273,17 +273,17 @@ body 0103 A b II: Moon(Captured) about Some(Body(BodyIndex(256))), Present
 mass_mearth = 0x3e332aaa3f0499cd  # 4.462585842773423e-9
 a_m = 0x41a0e7b4edb59650  # 141810294.85466242
 e = 0x3fe00681233100ba  # 0.500793999417531
-i_rad = 0x3ff5526b356a01fa  # 1.3326217733848567
-node_rad = 0x3ffe3fbfa684b276  # 1.8905636314986203
-periapsis_rad = 0x3fd7f8f928de4538  # 0.3745711230377142
+i_rad = 0x3ff5526dc23ba74f  # 1.3326242053248796
+node_rad = 0x3ffe3fbc48b20012  # 1.8905604209576308
+periapsis_rad = 0x3fd7f8f46bd36129  # 0.3745699933038105
 mean_anomaly_at_epoch_rad = 0x4010b8854f7fcb8b  # 4.180196039366716
 period_s = 0x4103371cbbb90bb0  # 157411.59166154033
 mu_m3_s2 = 0x43302478776ff74b  # 4543699445872459.0
 valid_until: None
 drift: none
-x_m = 0xc263fef5c063f3ce  # -687055176479.6189
-y_m = 0x42710c53a30605bb  # 1171540029536.3582
-z_m = 0xc2a14c31aab8bbc8  # -9509474229341.89
+x_m = 0xc263fef5c0b9377d  # -687055177161.734
+y_m = 0x42710c53a2e686bd  # 1171540029032.4211
+z_m = 0xc2a14c31aab8301a  # -9509474229272.05
 radius_rearth = 0x3f63f6ba08aeaf86  # 0.002436984393588251
 density_kg_m3 = 0x409a900000000000  # 1700.0
 gravity_m_s2 = 0x3f7e398d09c9aede  # 0.007379103594398832
@@ -292,42 +292,42 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe401055c23bb9a  # 0.6251246261216352
 water = 0x3fd7fdf547b888cd  # 0.37487537387836484
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4084934008d9db95  # 658.4062668819557
+t_eq_k = 0x40830547c56f25e8  # 608.6600445445483
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
 hooks detail_seed = 0xd4301b4ad051647c
-rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73100693420469120, nanos: 0 })
-pole_x = 0x3fec29f8933ccbe5  # 0.8801234126789238
-pole_y = 0x3fcd37f220bb7413  # 0.22826983068708326
-pole_z = 0x3fdaa4117be450a6  # 0.41626393412412666
-equator_node_x = 0x3fd77e7e2edc14f6  # 0.36709551406995844
-equator_node_y = 0xbfec43576975c1ee  # -0.8832203922048032
-equator_node_z = 0xbfd2ad48744f928e  # -0.29182635649184696
-equator_quarter_x = 0x3fd3443362ff6ea1  # 0.3010376421714032
-equator_quarter_y = 0x3fda37bc50f19802  # 0.4096518316713401
-equator_quarter_z = 0xbfeb8e750135f18e  # -0.8611397765776461
+rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73053400923653536, nanos: 0 })
+pole_x = 0x3fec29fc20a15bde  # 0.8801251065550522
+pole_y = 0x3fcd37dd1802d673  # 0.22826732323089835
+pole_z = 0x3fdaa4083ac5ee86  # 0.4162617277104136
+equator_node_x = 0x3fd77e6f76ba4c16  # 0.3670920047235894
+equator_node_y = 0xbfec435a59f893a0  # -0.8832217938657898
+equator_node_z = 0xbfd2ad492d51e3e2  # -0.29182652879495496
+equator_quarter_x = 0x3fd34430907f46ae  # 0.30103696929027535
+equator_quarter_y = 0x3fda37b580528cc0  # 0.4096502068661714
+equator_quarter_z = 0xbfeb8e771e761dcd  # -0.8611407847355906
 obliquity_rad = 0x3fc9bb5f4f93dc70  # 0.20103064904808177
 initial_rate_rad_s = 0x3f211a7c294b856a  # 0.0001304890216920305
 locked_rate_rad_s = 0x3f0f6414b5b31acf  # 5.987346841034512e-5
 age_at_epoch_s = 0x43703b4b1b72c9c7  # 7.310069434342514e16
-locking_age_s = 0x41cb81987832269b  # 922956016.3918031
+locking_age_s = 0x42c581adbe2b684f  # 47293419771600.62
 clock_period_s = 0x4113371cbbb90bb0  # 314823.18332308065
 clock_mean_anomaly_at_epoch_rad = 0x4000b8854f7fcb8b  # 2.090098019683358
-sub_primary_angle_rad = 0x3fb173291c3389de  # 0.06816346109875535
+sub_primary_angle_rad = 0x3fb1731688d4e5aa  # 0.0681623539029689
 phase_at_epoch_rad = 0x3fef3a3dd7cc210e  # 0.9758595671455923
 capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x401007f4f278eb03  # 4.007770336752176
-w_epoch_rad = 0x3fac4ca3b6292f80  # 0.055272212969241785
-w_end_rad = 0x40031671e147cdac  # 2.3859593963658963
+w_start_rad = 0x401007f4a82b7073  # 4.0077692295563905
+w_epoch_rad = 0x3fac4c7e8f6be780  # 0.055271105773456064
+w_end_rad = 0x400316714cacd888  # 2.3859582891701088
 figure: Sphere, SolidSurface
 equatorial_radius_m = 0x40ce53038776ee61  # 15526.027571550747
 polar_radius_m = 0x40ce53038776ee61  # 15526.027571550747
 flattening = 0x0000000000000000  # 0.0
-figure_pole_x = 0x3fec29f8933ccbe5  # 0.8801234126789238
-figure_pole_y = 0x3fcd37f220bb7413  # 0.22826983068708326
-figure_pole_z = 0x3fdaa4117be450a6  # 0.41626393412412666
+figure_pole_x = 0x3fec29fc20a15bde  # 0.8801251065550522
+figure_pole_y = 0x3fcd37dd1802d673  # 0.22826732323089835
+figure_pole_z = 0x3fdaa4083ac5ee86  # 0.4162617277104136
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
 geometric_albedo_b = 0x3fdb851eb851eb85  # 0.43
@@ -343,13 +343,13 @@ lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x4084934008d9db95  # 658.4062668819557
-equator_pole_contrast_k = 0x4059df9a18e778f0  # 103.49378035168388
-day_night_contrast_k = 0x4085282eb49e6304  # 677.0228054403274
+mean_surface_temperature_k = 0x40830547c56f25e8  # 608.6600445445483
+equator_pole_contrast_k = 0x4057eb15c6977850  # 95.67320408622732
+day_night_contrast_k = 0x40834c13db66a57a  # 617.5096958178758
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x408dc080027733ed  # 952.0625047028276
 continental_fraction = 0x0000000000000000  # 0.0
-heat_flow_w_m2 = 0x3f82f29712fe88bf  # 0.009251766459616893
+heat_flow_w_m2 = 0x3f0adff9ac2fc911  # 5.1259810355379816e-5
 surface_age_yr = 0x41e142390cb3dec8  # 2316421221.620945
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
@@ -358,17 +358,17 @@ body 0104 A b III: Moon(Captured) about Some(Body(BodyIndex(256))), Present
 mass_mearth = 0x3e2c17d28bd10018  # 3.2704622053320565e-9
 a_m = 0x41a2f132733cdb4f  # 158898489.6188607
 e = 0x3fde78d2c90b5eca  # 0.4761244738888136
-i_rad = 0x3ffc2affd343486d  # 1.7604978802160318
-node_rad = 0x4014b47f8ab9719e  # 5.17626778370723
-periapsis_rad = 0x40177a95c4071984  # 5.869711935933427
+i_rad = 0x3ffc2afe4cbe5d6a  # 1.7604964254186037
+node_rad = 0x4014b47f0bbc850a  # 5.176265891438797
+periapsis_rad = 0x40177a95e09b5091  # 5.869712361793192
 mean_anomaly_at_epoch_rad = 0x4014a3a8eae87a78  # 5.159824057044368
 period_s = 0x4106ca83c9c743c3  # 186704.4735245985
 mu_m3_s2 = 0x433024787768b71f  # 4543699445397279.0
 valid_until: None
 drift: none
-x_m = 0xc263ffd3405d9840  # -687171306220.7578
-y_m = 0x42710d3bb507afef  # 1171783372922.9958
-z_m = 0xc2a14c2caa50ffb4  # -9509432273023.852
+x_m = 0xc263ffd3404c1f43  # -687171306080.9769
+y_m = 0x42710d3bb506d2f3  # 1171783372909.1843
+z_m = 0xc2a14c2caa51a08f  # -9509432273104.28
 radius_rearth = 0x3f61ffc3706f2e2d  # 0.002197152821713086
 density_kg_m3 = 0x409a900000000000  # 1700.0
 gravity_m_s2 = 0x3f7b4012c6783cc7  # 0.006652901974589293
@@ -377,42 +377,42 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe401055c23bb9a  # 0.6251246261216352
 water = 0x3fd7fdf547b888cd  # 0.37487537387836484
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4084934008d9db95  # 658.4062668819557
+t_eq_k = 0x40830547c56f25e8  # 608.6600445445483
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
 hooks detail_seed = 0xb9e2b56332762d9b
-rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73100692445330848, nanos: 0 })
-pole_x = 0xbfec3db5433aeb89  # -0.8825327218140596
-pole_y = 0xbfd529df5f4dc53f  # -0.33068069750796164
-pole_z = 0xbfd565e6a3e535ca  # -0.33434453969388456
-equator_node_x = 0x3fdddf888a7c0e12  # 0.46676839374433243
-equator_node_y = 0xbfe679d291759390  # -0.7023709145547503
-equator_node_z = 0xbfe1326884d2afcf  # -0.5374033540915607
-equator_quarter_x = 0xbfad3f7bb997f88d  # -0.05712496414706534
-equator_quarter_y = 0xbfe42bb991150ee6  # -0.6303375085485328
-equator_quarter_z = 0x3fe8c661eb164845  # 0.7742166129630809
+rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -72981041785733920, nanos: 0 })
+pole_x = 0xbfec3db77cb57c55  # -0.8825337825509317
+pole_y = 0xbfd529d947d70c7d  # -0.33067924514416075
+pole_z = 0xbfd565e0ebe154a1  # -0.33434317622352167
+equator_node_x = 0x3fdddf8008a57a40  # 0.4667663654744594
+equator_node_y = 0xbfe679d527725a5a  # -0.7023721476023852
+equator_node_z = 0xbfe13268d56a6c46  # -0.5374035042071987
+equator_quarter_x = 0xbfad3f81f2b8091c  # -0.05712514961125434
+equator_quarter_y = 0xbfe42bb8487f47b3  # -0.6303368965111446
+equator_quarter_z = 0x3fe8c662ef42f01b  # 0.774217097575732
 obliquity_rad = 0x3fc750ca448d4356  # 0.18215301844841275
 initial_rate_rad_s = 0x3f21c5c2d54a364b  # 0.00013559344610707328
 locked_rate_rad_s = 0x3f0a7743d708d449  # 5.0479657947390617e-5
 age_at_epoch_s = 0x43703b4b1b72c9c7  # 7.310069434342514e16
-locking_age_s = 0x41dc48a7b4eeec0d  # 1898094291.7331574
+locking_age_s = 0x42db34b20ca653c7  # 119652557691215.11
 clock_period_s = 0x4116ca83c9c743c3  # 373408.947049197
 clock_mean_anomaly_at_epoch_rad = 0x4004a3a8eae87a78  # 2.579912028522184
-sub_primary_angle_rad = 0xc007d469ab534618  # -2.978717173079314
+sub_primary_angle_rad = 0xc007d469731015d9  # -2.978716753891359
 phase_at_epoch_rad = 0x40170e078ca4a074  # 5.763700673625966
 capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x3ff93d1c25d39d84  # 1.5774194219210083
-w_epoch_rad = 0x40130b488ab314a8  # 4.761018912487238
-w_end_rad = 0x3ffa953adeb45358  # 1.66143309587388
+w_start_rad = 0x3ff93d1c9659fe02  # 1.5774198411089633
+w_epoch_rad = 0x40130b48a6d4acc8  # 4.761019331675193
+w_end_rad = 0x3ffa953b4f3ab3d8  # 1.6614335150618356
 figure: Sphere, SolidSurface
 equatorial_radius_m = 0x40cb5707c2a1430b  # 13998.060627134071
 polar_radius_m = 0x40cb5707c2a1430b  # 13998.060627134071
 flattening = 0x0000000000000000  # 0.0
-figure_pole_x = 0xbfec3db5433aeb89  # -0.8825327218140596
-figure_pole_y = 0xbfd529df5f4dc53f  # -0.33068069750796164
-figure_pole_z = 0xbfd565e6a3e535ca  # -0.33434453969388456
+figure_pole_x = 0xbfec3db77cb57c55  # -0.8825337825509317
+figure_pole_y = 0xbfd529d947d70c7d  # -0.33067924514416075
+figure_pole_z = 0xbfd565e0ebe154a1  # -0.33434317622352167
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
 geometric_albedo_b = 0x3fdb851eb851eb85  # 0.43
@@ -428,13 +428,13 @@ lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x4084934008d9db95  # 658.4062668819557
-equator_pole_contrast_k = 0x40596ad5beef2a18  # 101.66929601055051
-day_night_contrast_k = 0x408558a8e3955c80  # 683.0824653309683
+mean_surface_temperature_k = 0x40830547c56f25e8  # 608.6600445445483
+equator_pole_contrast_k = 0x40577f2b405fa170  # 93.98701485957076
+day_night_contrast_k = 0x40837b56a28506d4  # 623.4173021691045
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x408d744e41f088f0  # 942.5382117072859
 continental_fraction = 0x0000000000000000  # 0.0
-heat_flow_w_m2 = 0x3f65a5d0ea608052  # 0.002642543829111368
+heat_flow_w_m2 = 0x3f08348358efd97b  # 4.616762009128618e-5
 surface_age_yr = 0x41e142390cb3dec8  # 2316421221.620945
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
@@ -452,6 +452,9 @@ ring: Dusty of Rock
 inner_m = 0x41722c74b158268f  # 19056459.084021147
 outer_m = 0x4182b4dc76657a7b  # 39230350.79955002
 optical_depth = 0x3ea15e8f94685208  # 5.176478133384096e-7
+normal_x = 0xbfe1b27e0441d0c8  # -0.5530386050363854
+normal_y = 0xbfdfc937ae413518  # -0.4966563417154517
+normal_z = 0xbfe567f4f255a0f5  # -0.6689400418372587
 surface: NotApplicable
 hooks: NotApplicable
 rotation: NotApplicable
@@ -471,6 +474,9 @@ ring: Massive of Rock
 inner_m = 0x41722c74b158268f  # 19056459.084021147
 outer_m = 0x4181af23dfcc411b  # 37086331.974733554
 optical_depth = 0x3fd5016afcd7c209  # 0.3282115430038464
+normal_x = 0xbfe1bed6899d7fc5  # -0.5545456588551977
+normal_y = 0xbfdfc39995f818ed  # -0.4963134731809891
+normal_z = 0xbfe55fd096692d24  # -0.6679461419784372
 surface: NotApplicable
 hooks: NotApplicable
 rotation: NotApplicable
@@ -847,10 +853,10 @@ mean_surface_temperature_k = 0x4060aa1dfa9d2c4b  # 133.3161595411096
 equator_pole_contrast_k = 0x400b2eb678e3ea80  # 3.3978089756540726
 day_night_contrast_k = 0x3f6286a2cb5b0000  # 0.0022614650323191654
 surface_pressure_pa = 0x410ce027b630f2ea  # 236548.96396055009
-sigma_h_m = 0x408c202e5c9100ed  # 900.0226374939353
+sigma_h_m = 0x408c20061efe3994  # 900.0029888020822
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fae9a71b91b2304  # 0.059772065969417226
-surface_age_yr = 0x41700b998389868e  # 16824728.221075587
+surface_age_yr = 0x4140f32302b1a846  # 2221638.021046671
 ocean_fraction = 0x3ff0000000000000  # 1.0
 ice_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
@@ -2034,10 +2040,10 @@ mean_surface_temperature_k = 0x406488b8e1e81c9d  # 164.27256865820246
 equator_pole_contrast_k = 0x404c327bc65f4666  # 56.39440230991458
 day_night_contrast_k = 0x4050b77d5db94a5c  # 66.8670267400243
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x408ef7ae4e887369  # 990.9601107273312
+sigma_h_m = 0x408c8c7e63b8951e  # 913.5617136402614
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3f896a3bc3103ded  # 0.012409655466426773
-surface_age_yr = 0x41d83b0712f251d8  # 1626086475.7862453
+surface_age_yr = 0x41a998ae05840556  # 214718210.7578532
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
 envelope: NotApplicable
@@ -2207,7 +2213,7 @@ surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x4093dd0d1a5c4bcf  # 1271.2627958699484
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3f76d08fa0f2942a  # 0.005569993066420623
-surface_age_yr = 0x41e142390cb3dec8  # 2316421221.620945
+surface_age_yr = 0x41e06e4e546c3a11  # 2205315747.382088
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3f84ad86181d0240  # 0.010096595393066399
 envelope: NotApplicable
@@ -3342,8 +3348,8 @@ body e581 BELT 5-1 I: Moon(GiantImpact) about Some(Body(BodyIndex(58625))), Pres
 mass_mearth = 0x3f168322f2405e75  # 8.587742610221569e-5
 a_m = 0x418eeb7f324ca484  # 64843750.28742316
 e = 0x0000000000000000  # 0.0
-i_rad = 0x3fffe295c5ecec95  # 1.9928186160530335
-node_rad = 0x400c15681001d58c  # 3.5104523897704834
+i_rad = 0x3ff21dd9c9eb9648  # 1.1322877776632527
+node_rad = 0x3fd89639c0d7aaf4  # 0.38416904289503795
 periapsis_rad = 0x0000000000000000  # 0.0
 mean_anomaly_at_epoch_rad = 0x40021654a4aa2a79  # 2.260903631632854
 period_s = 0x41490dc4d238fe18  # 3283849.6423642747
@@ -3353,9 +3359,9 @@ drift_reference: UniverseTime { seconds: 0, nanos: 0 }
 a_rate_m_s = 0x3de2c19200000000  # 1.3646883623152917e-10
 e_rate_s = 0x0000000000000000  # 0.0
 n_rate_rad_s2 = 0xbb1d356df3449c9e  # -6.0402194419220686e-24
-x_m = 0x426748219497abf4  # 799955264701.3735
-y_m = 0xc278baa6427c7c99  # -1699370772423.7874
-z_m = 0x42a6b197142d96de  # 12475999852235.434
+x_m = 0x4267478e0cc0cd3c  # 799877916166.4136
+y_m = 0xc278bac2a80c713f  # -1699400548551.078
+z_m = 0x42a6b19709af1da1  # 12475999508366.814
 radius_rearth = 0x3fb170c166d0ac7c  # 0.06812676200995499
 density_kg_m3 = 0x409765b7b6789a0f  # 1497.429407009509
 gravity_m_s2 = 0x3fc742191693a349  # 0.18170465090158874
@@ -3370,21 +3376,21 @@ rings: NotApplicable
 population: NotApplicable
 surface: Ok
 hooks detail_seed = 0x3bf4066342b43ae6
-rotation: Synchronous, locks at Some(UniverseTime { seconds: -72703261197577472, nanos: 0 })
-pole_x = 0xbfd8ee680466c005  # -0.38955116681881946
-pole_y = 0x3fe71e750ea5df6d  # 0.722467926606425
-pole_z = 0xbfe2476aef2e0346  # -0.5712179824332473
-equator_node_x = 0xbfec714ccaf40c67  # -0.8888305629665297
-equator_node_y = 0xbfc0f2941cacc928  # -0.13240291023391504
-equator_node_z = 0x3fdc1382f7bda406  # 0.43869089311061804
-equator_quarter_x = 0x3fcee338171b66ae  # 0.24130917671464175
-equator_quarter_y = 0x3fe5b729473ad27c  # 0.6786085501867798
-equator_quarter_z = 0x3fe63307c05d12f8  # 0.6937292821026793
+rotation: Synchronous, locks at Some(UniverseTime { seconds: -39395551857924912, nanos: 0 })
+pole_x = 0x3fdd3a4fd92337dc  # 0.4566840763553708
+pole_y = 0xbfeb5e1ee190b81c  # -0.8552393346378753
+pole_z = 0x3fcf5ad846023cc4  # 0.24495986383815282
+equator_node_x = 0x3fe7903407090975  # 0.736352933636495
+equator_node_y = 0x3fe092ac6c725ba2  # 0.5179044836139506
+equator_node_z = 0x3fdbdd55376cff58  # 0.4353840867297456
+equator_quarter_x = 0xbfdff346bd27c333  # -0.49922340843390883
+equator_quarter_y = 0xbf92e62590e30619  # -0.018456065147580334
+equator_quarter_z = 0x3febb889f6baedbf  # 0.8662767237614658
 obliquity_rad = 0x3fcb97c30ea82a33  # 0.2155689069334855
 initial_rate_rad_s = 0x3f3495aa7c989bf0  # 0.00031409656785047393
 locked_rate_rad_s = 0x3ec00ce89361c76b  # 1.913359621013549e-6
 age_at_epoch_s = 0x43703b4b1b72c9c7  # 7.310069434342514e16
-locking_age_s = 0x42f69769d7aef68f  # 397433145847656.94
+locking_age_s = 0x435defa9813cf04f  # 3.370514248550022e16
 clock_period_s = 0x41490dc4d238fe18  # 3283849.6423642747
 clock_mean_anomaly_at_epoch_rad = 0x40021654a4aa2a79  # 2.260903631632854
 sub_primary_angle_rad = 0x400532ac59cdd078  # 2.6497427955565023
@@ -3397,9 +3403,9 @@ figure: RotationalAndTidal, SolidSurface
 equatorial_radius_m = 0x411a7ddb0d629575  # 434038.7630713799
 polar_radius_m = 0x411a7db51ada1ada  # 434029.2762226291
 flattening = 0x3ef6eb3ba85f3173  # 2.185714631490602e-5
-figure_pole_x = 0xbfd8ee680466c005  # -0.38955116681881946
-figure_pole_y = 0x3fe71e750ea5df6d  # 0.722467926606425
-figure_pole_z = 0xbfe2476aef2e0346  # -0.5712179824332473
+figure_pole_x = 0x3fdd3a4fd92337dc  # 0.4566840763553708
+figure_pole_y = 0xbfeb5e1ee190b81c  # -0.8552393346378753
+figure_pole_z = 0x3fcf5ad846023cc4  # 0.24495986383815282
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
 geometric_albedo_b = 0x3fdb851eb851eb85  # 0.43
@@ -3416,15 +3422,15 @@ bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
 surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x405ca73d00ce3b7c  # 114.6130983366001
-equator_pole_contrast_k = 0x40434c8a2113ffc0  # 38.597965369000576
-day_night_contrast_k = 0x4054d1c5b5839dda  # 83.27769220212159
+equator_pole_contrast_k = 0x4043a1e1d8c3c0a0  # 39.264704795439
+day_night_contrast_k = 0x4054af2660ce0246  # 82.73671741598181
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40a7e755c9ea6f65  # 3059.6675561200123
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3f4d3426f6b62cb2  # 0.0008912267925763799
 surface_age_yr = 0x41e142390cb3dec8  # 2316421221.620945
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x3fd02a27588ec228  # 0.25257285736282364
+ice_fraction = 0x3fd02c45837f50cc  # 0.2527021202233868
 envelope: NotApplicable
 
 +H: 47 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
@@ -3511,17 +3517,17 @@ body 0101 A b IV: Moon(Captured) about Some(Body(BodyIndex(256))), Present
 mass_mearth = 0x3ec0aaf0cde991eb  # 1.9869490722071446e-6
 a_m = 0x41a30b7c25e3b0d5  # 159759890.9447085
 e = 0x3fc0224e3711d92b  # 0.12604692162467165
-i_rad = 0x4002203759c090ea  # 2.265730572880888
-node_rad = 0x4018bdbf35279e7d  # 6.1852997117454125
-periapsis_rad = 0x4015f4f050c87541  # 5.489197981104838
+i_rad = 0x40022036c600ca2a  # 2.2657294720641135
+node_rad = 0x4018bdbe7d0dd610  # 6.18529696843099
+periapsis_rad = 0x4015f4effaddbb0a  # 5.489196700843204
 mean_anomaly_at_epoch_rad = 0x3ff789fd1b895b4b  # 1.4711886478086906
 period_s = 0x4106fa05c7bfa05e  # 188224.72253346717
 mu_m3_s2 = 0x43302478a689c3cf  # 4543700236092367.0
 valid_until: None
 drift: none
-x_m = 0xc28a6a4ef7a66fbd  # -3630486713549.9673
-y_m = 0xc28a024f9afea3e8  # -3574653476820.4883
-z_m = 0xc295c3f032cdb5c4  # -5982823166829.441
+x_m = 0xc28a6a4ef7a83a56  # -3630486713607.292
+y_m = 0xc28a024f9af6ffd7  # -3574653476575.98
+z_m = 0xc295c3f032cb1651  # -5982823166661.579
 radius_rearth = 0x3f930e329555edae  # 0.018608847012257783
 density_kg_m3 = 0x409a900000000000  # 1700.0
 gravity_m_s2 = 0x3facd981849d43e7  # 0.0563469385512077
@@ -3530,42 +3536,42 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe401055c23bb9a  # 0.6251246261216352
 water = 0x3fd7fdf547b888cd  # 0.37487537387836484
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x408493400d5f4d95  # 658.4062755055953
+t_eq_k = 0x40830547c99d245b  # 608.6600525166244
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
 hooks detail_seed = 0x8c774c3db60d507c
-rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73100693419212976, nanos: 0 })
-pole_x = 0xbfc06e1848d61d2a  # -0.12835982853378286
-pole_y = 0xbfeb26f57a0779e5  # -0.8485057242758641
-pole_z = 0xbfe06da18b060b04  # -0.5133826937966153
-equator_node_x = 0xbfee06cabc37a3d5  # -0.9383290935630791
-equator_node_y = 0x3fd15ffa9fa15408  # 0.2714830931557235
-equator_node_z = 0xbfcb675eff40aad3  # -0.21409213508135014
-equator_quarter_x = 0x3fd48bce83f04b7e  # 0.3210331238234899
-equator_quarter_y = 0x3fdd124936559ea7  # 0.4542410879716762
-equator_quarter_z = 0xbfea97c203ab4060  # -0.8310251304301453
+rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73099881880176800, nanos: 0 })
+pole_x = 0xbfc06e2c462e9e2a  # -0.12836221148357768
+pole_y = 0xbfeb26f5eaeeda3c  # -0.8485059345756052
+pole_z = 0xbfe06d9f908bd6ab  # -0.5133817504090151
+equator_node_x = 0xbfee06c938bd4a87  # -0.9383283718292014
+equator_node_y = 0x3fd160046fbce7b2  # 0.2714854327383548
+equator_node_z = 0xbfcb6760a52deef2  # -0.2140923315563366
+equator_quarter_x = 0x3fd48bd35df4c7be  # 0.3210342805424452
+equator_quarter_y = 0x3fdd1241b32141ba  # 0.4542392968478698
+equator_quarter_z = 0xbfea97c3216170cf  # -0.8310256626096136
 obliquity_rad = 0x3fc4ac3fce216fc1  # 0.1615066296097876
 initial_rate_rad_s = 0x3f10c1481bb82f36  # 6.391527761467623e-5
 locked_rate_rad_s = 0x3f0a408aee52d28c  # 5.007194503417909e-5
 age_at_epoch_s = 0x43703b4b1b72c9c7  # 7.310069434342514e16
-locking_age_s = 0x41cb8b2de3e4675c  # 924212167.7844043
+locking_age_s = 0x4267a552aa794e20  # 812463248330.4414
 clock_period_s = 0x4116fa05c7bfa05e  # 376449.44506693434
 clock_mean_anomaly_at_epoch_rad = 0x3fe789fd1b895b4b  # 0.7355943239043453
-sub_primary_angle_rad = 0xbff122b0b6204728  # -1.0709693064022279
+sub_primary_angle_rad = 0xbff122b21041c49e  # -1.070970595840016
 phase_at_epoch_rad = 0x3ff35067f0379361  # 1.2071303733329943
 capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x4005b40f948e88d4  # 2.71292034206372
-w_epoch_rad = 0x3ff22c4af32dc1c8  # 1.135813665310808
-w_end_rad = 0x40175e190393c992  # 5.841892295737482
+w_start_rad = 0x4005b40ee77dca18  # 2.7129190526259315
+w_epoch_rad = 0x3ff22c49990c4452  # 1.1358123758730199
+w_end_rad = 0x40175e18ad0b6a34  # 5.841891006299694
 figure: Sphere, SolidSurface
 equatorial_radius_m = 0x40fcf1cf6dd5aa13  # 118556.96431509433
 polar_radius_m = 0x40fcf1cf6dd5aa13  # 118556.96431509433
 flattening = 0x0000000000000000  # 0.0
-figure_pole_x = 0xbfc06e1848d61d2a  # -0.12835982853378286
-figure_pole_y = 0xbfeb26f57a0779e5  # -0.8485057242758641
-figure_pole_z = 0xbfe06da18b060b04  # -0.5133826937966153
+figure_pole_x = 0xbfc06e2c462e9e2a  # -0.12836221148357768
+figure_pole_y = 0xbfeb26f5eaeeda3c  # -0.8485059345756052
+figure_pole_z = 0xbfe06d9f908bd6ab  # -0.5133817504090151
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
 geometric_albedo_b = 0x3fdb851eb851eb85  # 0.43
@@ -3581,14 +3587,14 @@ lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x408493400d5f4d95  # 658.4062755055953
-equator_pole_contrast_k = 0x405542e058efb7f0  # 85.04494307909022
-day_night_contrast_k = 0x408558f161e0d5e0  # 683.117862469222
+mean_surface_temperature_k = 0x40830547c99d245b  # 608.6600525166244
+equator_pole_contrast_k = 0x4053a7a90892e7c8  # 78.6196919855712
+day_night_contrast_k = 0x40837c949396dfdc  # 623.5725471293513
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x408e092d39daa3c0  # 961.1470830041144
+sigma_h_m = 0x40a3d0657fc6e820  # 2536.198240485988
 continental_fraction = 0x0000000000000000  # 0.0
-heat_flow_w_m2 = 0x3fbb470bfafcfc2f  # 0.10655283811227954
-surface_age_yr = 0x418452572ed299be  # 42617573.8528323
+heat_flow_w_m2 = 0x3f3cced6a72ace1f  # 0.00043957462836916207
+surface_age_yr = 0x41e1423989b3dec8  # 2316422221.620945
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
 envelope: NotApplicable
@@ -3596,17 +3602,17 @@ body 0102 A b I: Moon(Captured) about Some(Body(BodyIndex(256))), Present
 mass_mearth = 0x3e6f135d697a5873  # 5.7882897750206844e-8
 a_m = 0x419a791cc8580cf6  # 111036210.08598694
 e = 0x3fd4839f44ca152a  # 0.3205335780879347
-i_rad = 0x3ff21aeb585b2bf8  # 1.1315720988666254
-node_rad = 0x40034151cb0795e8  # 2.406894289177888
-periapsis_rad = 0x4007dcc063859be7  # 2.9827888274335126
+i_rad = 0x3ff21af4a8d738f2  # 1.131580981763872
+node_rad = 0x4003414b7eea55d4  # 2.40688227799067
+periapsis_rad = 0x4007dcc0dd70bd7c  # 2.982789735796983
 mean_anomaly_at_epoch_rad = 0x401209d34782edf9  # 4.509595029226596
 period_s = 0x40faa05a333e907e  # 109061.63751083796
 mu_m3_s2 = 0x4330247878b4e07a  # 4543699467165818.0
 valid_until: None
 drift: none
-x_m = 0xc28a6a4dd9760ffe  # -3630484369089.999
-y_m = 0xc28a01ee7b2586c9  # -3574449792176.848
-z_m = 0xc295c421a993319b  # -5983030633676.401
+x_m = 0xc28a6a4dd96174db  # -3630484368430.607
+y_m = 0xc28a01ee7b1f5c61  # -3574449791979.5474
+z_m = 0xc295c421a996ce63  # -5983030633907.597
 radius_rearth = 0x3f7773ff8b92f378  # 0.005725858901482243
 density_kg_m3 = 0x409a8fffffffffff  # 1699.9999999999998
 gravity_m_s2 = 0x3f91c0f965cbe61e  # 0.01733770068947226
@@ -3615,42 +3621,42 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe401055c23bb98  # 0.625124626121635
 water = 0x3fd7fdf547b888cf  # 0.37487537387836495
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x408493400d5f4d95  # 658.4062755055953
+t_eq_k = 0x40830547c99d245b  # 608.6600525166244
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
 hooks detail_seed = 0x03db9237b4a76a3b
-rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73100694078985488, nanos: 0 })
-pole_x = 0x3fe0bfb98ee82802  # 0.523403910746538
-pole_y = 0x3fe1723feb3abbfa  # 0.545196494514925
-pole_z = 0x3fe4f468eeb2da16  # 0.6548351919253175
-equator_node_x = 0x3fe86d8cdf477643  # 0.7633728371544709
-equator_node_y = 0xbfe486d7b47a5c9f  # -0.6414602780304398
-equator_node_z = 0xbfb37b0973de5946  # -0.07609614447423949
-equator_quarter_x = 0x3fd83a6209a45acc  # 0.37856341306307395
-equator_quarter_y = 0x3fe14552fa09670f  # 0.5397124179391727
-equator_quarter_z = 0xbfe80fd1a0acd217  # -0.7519310129342242
+rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73098239736246576, nanos: 0 })
+pole_x = 0x3fe0bfcf780cd4d9  # 0.5234143585900269
+pole_y = 0x3fe1723bc94f69df  # 0.5451945239868187
+pole_z = 0x3fe4f45adc169434  # 0.6548284815404544
+equator_node_x = 0x3fe86d7bc38ab510  # 0.7633646792579913
+equator_node_y = 0xbfe486ebfc4fc5d1  # -0.6414699485741783
+equator_node_z = 0xbfb37b0ec7e03c01  # -0.07609646205695243
+equator_quarter_x = 0x3fd83a6a7265186c  # 0.3785654179704412
+equator_quarter_y = 0x3fe1453f0c00789b  # 0.5397029146586364
+equator_quarter_z = 0xbfe80fddd0cd66a0  # -0.751936824624142
 obliquity_rad = 0x3fd1a84780ef2835  # 0.2758959540484541
 initial_rate_rad_s = 0x3f254420695b2222  # 0.0001622476162792689
 locked_rate_rad_s = 0x3f16a758821e4ada  # 8.64169856227658e-5
 age_at_epoch_s = 0x43703b4b1b72c9c7  # 7.310069434342514e16
-locking_age_s = 0x41af860ec4d9c407  # 264439650.4253237
+locking_age_s = 0x4281dc0fe959e789  # 2454607178556.942
 clock_period_s = 0x410aa05a333e907e  # 218123.27502167592
 clock_mean_anomaly_at_epoch_rad = 0x400209d34782edf9  # 2.254797514613298
-sub_primary_angle_rad = 0x4007427c5bf35de6  # 2.907463758816209
+sub_primary_angle_rad = 0x4007427cd1c3b203  # 2.907464636597298
 phase_at_epoch_rad = 0x4017fd9cd7f93ec7  # 5.997668623531076
 capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x3fdf7696b3deabc0  # 0.4916130787411781
-w_epoch_rad = 0x400b1bff89f3cda0  # 3.3886709954765166
-w_end_rad = 0x3f64d6538dae7000  # 0.0025436050322706905
+w_start_rad = 0x3fdf769a62614ca0  # 0.4916139565222668
+w_epoch_rad = 0x400b1bffffc421c0  # 3.388671873257607
+w_end_rad = 0x3f64d82acefee000  # 0.0025444828133593944
 figure: Sphere, SolidSurface
 equatorial_radius_m = 0x40e1cfee4e539723  # 36479.44706134337
 polar_radius_m = 0x40e1cfee4e539723  # 36479.44706134337
 flattening = 0x0000000000000000  # 0.0
-figure_pole_x = 0x3fe0bfb98ee82802  # 0.523403910746538
-figure_pole_y = 0x3fe1723feb3abbfa  # 0.545196494514925
-figure_pole_z = 0x3fe4f468eeb2da16  # 0.6548351919253175
+figure_pole_x = 0x3fe0bfcf780cd4d9  # 0.5234143585900269
+figure_pole_y = 0x3fe1723bc94f69df  # 0.5451945239868187
+figure_pole_z = 0x3fe4f45adc169434  # 0.6548284815404544
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
 geometric_albedo_b = 0x3fdb851eb851eb85  # 0.43
@@ -3666,14 +3672,14 @@ lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x408493400d5f4d95  # 658.4062755055953
-equator_pole_contrast_k = 0x40769e30579cfa33  # 361.8868023044517
-day_night_contrast_k = 0x4084f126c5328376  # 670.1439308115357
+mean_surface_temperature_k = 0x40830547c99d245b  # 608.6600525166244
+equator_pole_contrast_k = 0x4074e8c5689e0752  # 334.5481954739563
+day_night_contrast_k = 0x4083188ed2de04d8  # 611.0697381348828
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x408d1e46489a90d9  # 931.7843181682066
+sigma_h_m = 0x40921a4e907bc7b2  # 1158.5767230358729
 continental_fraction = 0x0000000000000000  # 0.0
-heat_flow_w_m2 = 0x3fd39b0cf05e8b99  # 0.30633853410307094
-surface_age_yr = 0x413e2ac602a19b6c  # 1977030.010278429
+heat_flow_w_m2 = 0x3f2172f3767bae1b  # 0.0001331255145865386
+surface_age_yr = 0x41e1423989b3dec8  # 2316422221.620945
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
 envelope: NotApplicable
@@ -3681,17 +3687,17 @@ body 0103 A b II: Moon(Captured) about Some(Body(BodyIndex(256))), Present
 mass_mearth = 0x3e332aaa3f0499cd  # 4.462585842773423e-9
 a_m = 0x41a0e7b4edb59650  # 141810294.85466242
 e = 0x3fe00681233100ba  # 0.500793999417531
-i_rad = 0x3ff5526b356a01fa  # 1.3326217733848567
-node_rad = 0x3ffe3fbfa684b276  # 1.8905636314986203
-periapsis_rad = 0x3fd7f8f928de4538  # 0.3745711230377142
+i_rad = 0x3ff5526dc23ba74f  # 1.3326242053248796
+node_rad = 0x3ffe3fbc48b20012  # 1.8905604209576308
+periapsis_rad = 0x3fd7f8f46bd36129  # 0.3745699933038105
 mean_anomaly_at_epoch_rad = 0x4010b8854f7fcb8b  # 4.180196039366716
 period_s = 0x4103371cbbb90bb0  # 157411.59166154033
 mu_m3_s2 = 0x43302478776ff74b  # 4543699445872459.0
 valid_until: None
 drift: none
-x_m = 0xc28a6a3012392f1e  # -3630421919525.8896
-y_m = 0xc28a02060cc20aef  # -3574499219521.3667
-z_m = 0xc295c4241a7a6acd  # -5983040872090.7
+x_m = 0xc28a6a3012390504  # -3630421919520.627
+y_m = 0xc28a02060cc78fed  # -3574499219697.9907
+z_m = 0xc295c4241a7c04b5  # -5983040872193.177
 radius_rearth = 0x3f63f6ba08aeaf86  # 0.002436984393588251
 density_kg_m3 = 0x409a900000000000  # 1700.0
 gravity_m_s2 = 0x3f7e398d09c9aede  # 0.007379103594398832
@@ -3700,42 +3706,42 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe401055c23bb9a  # 0.6251246261216352
 water = 0x3fd7fdf547b888cd  # 0.37487537387836484
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x408493400d5f4d95  # 658.4062755055953
+t_eq_k = 0x40830547c99d245b  # 608.6600525166244
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
 hooks detail_seed = 0xd4301b4ad051647c
-rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73100693420469120, nanos: 0 })
-pole_x = 0x3fec29f8933ccbe5  # 0.8801234126789238
-pole_y = 0x3fcd37f220bb7413  # 0.22826983068708326
-pole_z = 0x3fdaa4117be450a6  # 0.41626393412412666
-equator_node_x = 0x3fd77e7e2edc14f6  # 0.36709551406995844
-equator_node_y = 0xbfec43576975c1ee  # -0.8832203922048032
-equator_node_z = 0xbfd2ad48744f928e  # -0.29182635649184696
-equator_quarter_x = 0x3fd3443362ff6ea1  # 0.3010376421714032
-equator_quarter_y = 0x3fda37bc50f19802  # 0.4096518316713401
-equator_quarter_z = 0xbfeb8e750135f18e  # -0.8611397765776461
+rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73053400923653536, nanos: 0 })
+pole_x = 0x3fec29fc20a15bde  # 0.8801251065550522
+pole_y = 0x3fcd37dd1802d673  # 0.22826732323089835
+pole_z = 0x3fdaa4083ac5ee86  # 0.4162617277104136
+equator_node_x = 0x3fd77e6f76ba4c16  # 0.3670920047235894
+equator_node_y = 0xbfec435a59f893a0  # -0.8832217938657898
+equator_node_z = 0xbfd2ad492d51e3e2  # -0.29182652879495496
+equator_quarter_x = 0x3fd34430907f46ae  # 0.30103696929027535
+equator_quarter_y = 0x3fda37b580528cc0  # 0.4096502068661714
+equator_quarter_z = 0xbfeb8e771e761dcd  # -0.8611407847355906
 obliquity_rad = 0x3fc9bb5f4f93dc70  # 0.20103064904808177
 initial_rate_rad_s = 0x3f211a7c294b856a  # 0.0001304890216920305
 locked_rate_rad_s = 0x3f0f6414b5b31acf  # 5.987346841034512e-5
 age_at_epoch_s = 0x43703b4b1b72c9c7  # 7.310069434342514e16
-locking_age_s = 0x41cb81987832269b  # 922956016.3918031
+locking_age_s = 0x42c581adbe2b684f  # 47293419771600.62
 clock_period_s = 0x4113371cbbb90bb0  # 314823.18332308065
 clock_mean_anomaly_at_epoch_rad = 0x4000b8854f7fcb8b  # 2.090098019683358
-sub_primary_angle_rad = 0x3fb173291c3389de  # 0.06816346109875535
+sub_primary_angle_rad = 0x3fb1731688d4e5aa  # 0.0681623539029689
 phase_at_epoch_rad = 0x3fef3a3dd7cc210e  # 0.9758595671455923
 capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x401007f4f278eb03  # 4.007770336752176
-w_epoch_rad = 0x3fac4ca3b6292f80  # 0.055272212969241785
-w_end_rad = 0x40031671e147cdac  # 2.3859593963658963
+w_start_rad = 0x401007f4a82b7073  # 4.0077692295563905
+w_epoch_rad = 0x3fac4c7e8f6be780  # 0.055271105773456064
+w_end_rad = 0x400316714cacd888  # 2.3859582891701088
 figure: Sphere, SolidSurface
 equatorial_radius_m = 0x40ce53038776ee61  # 15526.027571550747
 polar_radius_m = 0x40ce53038776ee61  # 15526.027571550747
 flattening = 0x0000000000000000  # 0.0
-figure_pole_x = 0x3fec29f8933ccbe5  # 0.8801234126789238
-figure_pole_y = 0x3fcd37f220bb7413  # 0.22826983068708326
-figure_pole_z = 0x3fdaa4117be450a6  # 0.41626393412412666
+figure_pole_x = 0x3fec29fc20a15bde  # 0.8801251065550522
+figure_pole_y = 0x3fcd37dd1802d673  # 0.22826732323089835
+figure_pole_z = 0x3fdaa4083ac5ee86  # 0.4162617277104136
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
 geometric_albedo_b = 0x3fdb851eb851eb85  # 0.43
@@ -3751,13 +3757,13 @@ lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x408493400d5f4d95  # 658.4062755055953
-equator_pole_contrast_k = 0x4059df9a1e96f7b0  # 103.49378170721934
-day_night_contrast_k = 0x4085282eba09b8bf  # 677.0228157767777
+mean_surface_temperature_k = 0x40830547c99d245b  # 608.6600525166244
+equator_pole_contrast_k = 0x4057eb15cbd8fac8  # 95.67320533933082
+day_night_contrast_k = 0x40834c13e0649965  # 617.5097053393662
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x408dc080027733ed  # 952.0625047028276
 continental_fraction = 0x0000000000000000  # 0.0
-heat_flow_w_m2 = 0x3f82f29712691ea0  # 0.009251766442630427
+heat_flow_w_m2 = 0x3f0adff916c5aa93  # 5.1259793368914644e-5
 surface_age_yr = 0x41e1423989b3dec8  # 2316422221.620945
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
@@ -3766,17 +3772,17 @@ body 0104 A b III: Moon(Captured) about Some(Body(BodyIndex(256))), Present
 mass_mearth = 0x3e2c17d28bd10018  # 3.2704622053320565e-9
 a_m = 0x41a2f132733cdb4f  # 158898489.6188607
 e = 0x3fde78d2c90b5eca  # 0.4761244738888136
-i_rad = 0x3ffc2affd343486d  # 1.7604978802160318
-node_rad = 0x4014b47f8ab9719e  # 5.17626778370723
-periapsis_rad = 0x40177a95c4071984  # 5.869711935933427
+i_rad = 0x3ffc2afe4cbe5d6a  # 1.7604964254186037
+node_rad = 0x4014b47f0bbc850a  # 5.176265891438797
+periapsis_rad = 0x40177a95e09b5091  # 5.869712361793192
 mean_anomaly_at_epoch_rad = 0x4014a3a8eae87a78  # 5.159824057044368
 period_s = 0x4106ca83c9c743c3  # 186704.4735245985
 mu_m3_s2 = 0x433024787768b71f  # 4543699445397279.0
 valid_until: None
 drift: none
-x_m = 0xc28a6a3eb2d3bf3d  # -3630452595319.905
-y_m = 0xc28a0224b1ab004e  # -3574563485024.038
-z_m = 0xc295c3ebd7d66e69  # -5982804899227.603
+x_m = 0xc28a6a3eb2cf669e  # -3630452595180.827
+y_m = 0xc28a0224b1a4aefa  # -3574563484821.872
+z_m = 0xc295c3ebd7d5c6cd  # -5982804899185.7
 radius_rearth = 0x3f61ffc3706f2e2d  # 0.002197152821713086
 density_kg_m3 = 0x409a900000000000  # 1700.0
 gravity_m_s2 = 0x3f7b4012c6783cc7  # 0.006652901974589293
@@ -3785,42 +3791,42 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe401055c23bb9a  # 0.6251246261216352
 water = 0x3fd7fdf547b888cd  # 0.37487537387836484
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x408493400d5f4d95  # 658.4062755055953
+t_eq_k = 0x40830547c99d245b  # 608.6600525166244
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
 hooks detail_seed = 0xb9e2b56332762d9b
-rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73100692445330848, nanos: 0 })
-pole_x = 0xbfec3db5433aeb89  # -0.8825327218140596
-pole_y = 0xbfd529df5f4dc53f  # -0.33068069750796164
-pole_z = 0xbfd565e6a3e535ca  # -0.33434453969388456
-equator_node_x = 0x3fdddf888a7c0e12  # 0.46676839374433243
-equator_node_y = 0xbfe679d291759390  # -0.7023709145547503
-equator_node_z = 0xbfe1326884d2afcf  # -0.5374033540915607
-equator_quarter_x = 0xbfad3f7bb997f88d  # -0.05712496414706534
-equator_quarter_y = 0xbfe42bb991150ee6  # -0.6303375085485328
-equator_quarter_z = 0x3fe8c661eb164845  # 0.7742166129630809
+rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -72981041785733920, nanos: 0 })
+pole_x = 0xbfec3db77cb57c55  # -0.8825337825509317
+pole_y = 0xbfd529d947d70c7d  # -0.33067924514416075
+pole_z = 0xbfd565e0ebe154a1  # -0.33434317622352167
+equator_node_x = 0x3fdddf8008a57a40  # 0.4667663654744594
+equator_node_y = 0xbfe679d527725a5a  # -0.7023721476023852
+equator_node_z = 0xbfe13268d56a6c46  # -0.5374035042071987
+equator_quarter_x = 0xbfad3f81f2b8091c  # -0.05712514961125434
+equator_quarter_y = 0xbfe42bb8487f47b3  # -0.6303368965111446
+equator_quarter_z = 0x3fe8c662ef42f01b  # 0.774217097575732
 obliquity_rad = 0x3fc750ca448d4356  # 0.18215301844841275
 initial_rate_rad_s = 0x3f21c5c2d54a364b  # 0.00013559344610707328
 locked_rate_rad_s = 0x3f0a7743d708d449  # 5.0479657947390617e-5
 age_at_epoch_s = 0x43703b4b1b72c9c7  # 7.310069434342514e16
-locking_age_s = 0x41dc48a7b4eeec0d  # 1898094291.7331574
+locking_age_s = 0x42db34b20ca653c7  # 119652557691215.11
 clock_period_s = 0x4116ca83c9c743c3  # 373408.947049197
 clock_mean_anomaly_at_epoch_rad = 0x4004a3a8eae87a78  # 2.579912028522184
-sub_primary_angle_rad = 0xc007d469ab534618  # -2.978717173079314
+sub_primary_angle_rad = 0xc007d469731015d9  # -2.978716753891359
 phase_at_epoch_rad = 0x40170e078ca4a074  # 5.763700673625966
 capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x3ff93d1c25d39d84  # 1.5774194219210083
-w_epoch_rad = 0x40130b488ab314a8  # 4.761018912487238
-w_end_rad = 0x3ffa953adeb45358  # 1.66143309587388
+w_start_rad = 0x3ff93d1c9659fe02  # 1.5774198411089633
+w_epoch_rad = 0x40130b48a6d4acc8  # 4.761019331675193
+w_end_rad = 0x3ffa953b4f3ab3d8  # 1.6614335150618356
 figure: Sphere, SolidSurface
 equatorial_radius_m = 0x40cb5707c2a1430b  # 13998.060627134071
 polar_radius_m = 0x40cb5707c2a1430b  # 13998.060627134071
 flattening = 0x0000000000000000  # 0.0
-figure_pole_x = 0xbfec3db5433aeb89  # -0.8825327218140596
-figure_pole_y = 0xbfd529df5f4dc53f  # -0.33068069750796164
-figure_pole_z = 0xbfd565e6a3e535ca  # -0.33434453969388456
+figure_pole_x = 0xbfec3db77cb57c55  # -0.8825337825509317
+figure_pole_y = 0xbfd529d947d70c7d  # -0.33067924514416075
+figure_pole_z = 0xbfd565e0ebe154a1  # -0.33434317622352167
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
 geometric_albedo_b = 0x3fdb851eb851eb85  # 0.43
@@ -3836,13 +3842,13 @@ lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x408493400d5f4d95  # 658.4062755055953
-equator_pole_contrast_k = 0x40596ad5c4850030  # 101.66929734218934
-day_night_contrast_k = 0x408558a8e9040195  # 683.0824756920798
+mean_surface_temperature_k = 0x40830547c99d245b  # 608.6600525166244
+equator_pole_contrast_k = 0x40577f2b45896d30  # 93.98701609058912
+day_night_contrast_k = 0x40837b56a78635af  # 623.4173117146619
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x408d744e41f088f0  # 942.5382117072859
 continental_fraction = 0x0000000000000000  # 0.0
-heat_flow_w_m2 = 0x3f65a5d0e845acc0  # 0.002642543813796999
+heat_flow_w_m2 = 0x3f083482d23af4f4  # 4.6167604776917436e-5
 surface_age_yr = 0x41e1423989b3dec8  # 2316422221.620945
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
@@ -3860,6 +3866,9 @@ ring: Dusty of Rock
 inner_m = 0x41722c74b158268f  # 19056459.084021147
 outer_m = 0x4182b4dc76657a7b  # 39230350.79955002
 optical_depth = 0x3ea15e8f94685208  # 5.176478133384096e-7
+normal_x = 0xbfe1b27e0441d0c8  # -0.5530386050363854
+normal_y = 0xbfdfc937ae413518  # -0.4966563417154517
+normal_z = 0xbfe567f4f255a0f5  # -0.6689400418372587
 surface: NotApplicable
 hooks: NotApplicable
 rotation: NotApplicable
@@ -3879,6 +3888,9 @@ ring: Massive of Rock
 inner_m = 0x41722c74b158268f  # 19056459.084021147
 outer_m = 0x4181af23dfcc411b  # 37086331.974733554
 optical_depth = 0x3fd5016afcd7c209  # 0.3282115430038464
+normal_x = 0xbfe1bed6899d7fc5  # -0.5545456588551977
+normal_y = 0xbfdfc39995f818ed  # -0.4963134731809891
+normal_z = 0xbfe55fd096692d24  # -0.6679461419784372
 surface: NotApplicable
 hooks: NotApplicable
 rotation: NotApplicable
@@ -4255,10 +4267,10 @@ mean_surface_temperature_k = 0x4060aa1dfbb956eb  # 133.31616007041097
 equator_pole_contrast_k = 0x400b2eb67d481180  # 3.397809008371212
 day_night_contrast_k = 0x3f6286a2c7950000  # 0.002261465004863794
 surface_pressure_pa = 0x410ce027c4093b23  # 236548.97072073174
-sigma_h_m = 0x408c202e5c93e043  # 900.0226375153364
+sigma_h_m = 0x408c20061efe9ac0  # 900.0029888049103
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fae9a710ebddfb4  # 0.05977204613640144
-surface_age_yr = 0x41700b9a8742327d  # 16824744.45366143
+surface_age_yr = 0x4140f324150e293b  # 2221640.164494661
 ocean_fraction = 0x3ff0000000000000  # 1.0
 ice_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
@@ -5442,10 +5454,10 @@ mean_surface_temperature_k = 0x406488b8e364d0f4  # 164.27256936731976
 equator_pole_contrast_k = 0x404c327bc86a0e0e  # 56.39440255335295
 day_night_contrast_k = 0x4050b77d60bd8088  # 66.8670274592024
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x408ef7ae4e887369  # 990.9601107273312
+sigma_h_m = 0x408c8c7e6a44fa27  # 913.561726130375
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3f896a3b3594f1a6  # 0.012409651348769323
-surface_age_yr = 0x41d83b089b2926b4  # 1626088044.6429873
+surface_age_yr = 0x41a998afa3d69528  # 214718417.91910672
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
 envelope: NotApplicable
@@ -5615,7 +5627,7 @@ surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x4093dd0d1a5c4bcf  # 1271.2627958699484
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3f76d08f21f0fc90  # 0.005569991218236883
-surface_age_yr = 0x41e1423989b3dec8  # 2316422221.620945
+surface_age_yr = 0x41e06e4f5e62a1e8  # 2205317875.082264
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3f84ad85f024db80  # 0.010096594229805467
 envelope: NotApplicable
@@ -6750,8 +6762,8 @@ body e581 BELT 5-1 I: Moon(GiantImpact) about Some(Body(BodyIndex(58625))), Pres
 mass_mearth = 0x3f168322f2405e75  # 8.587742610221569e-5
 a_m = 0x418eeb7f54bc0381  # 64843754.59180356
 e = 0x0000000000000000  # 0.0
-i_rad = 0x3fffe295c5ecec95  # 1.9928186160530335
-node_rad = 0x400c15681001d58c  # 3.5104523897704834
+i_rad = 0x3ff21dd9c9eb9648  # 1.1322877776632527
+node_rad = 0x3fd89639c0d7aaf4  # 0.38416904289503795
 periapsis_rad = 0x0000000000000000  # 0.0
 mean_anomaly_at_epoch_rad = 0x40021c7be342bbbf  # 2.2639081721058285
 period_s = 0x41490dc4fc135efe  # 3283849.969341158
@@ -6761,9 +6773,9 @@ drift_reference: UniverseTime { seconds: 31541166080, nanos: 0 }
 a_rate_m_s = 0x3de2c18bd992b581  # 1.3646815343269521e-10
 e_rate_s = 0x0000000000000000  # 0.0
 n_rate_rad_s2 = 0xbb1d355bd80be6c2  # -6.0401623084056924e-24
-x_m = 0x429095f4f336fe13  # 4559061437887.519
-y_m = 0x4291131fe3ca2dd2  # 4693459268235.455
-z_m = 0x429d1a07afee8a0e  # 7999408831394.514
+x_m = 0x429095ebe7815315  # 4559023497300.7705
+y_m = 0x4291131c8cdcd3e9  # 4693445261108.978
+z_m = 0x429d1a07960bb9de  # 7999408407278.467
 radius_rearth = 0x3fb170c166d0ac7c  # 0.06812676200995499
 density_kg_m3 = 0x409765b7b6789a0f  # 1497.429407009509
 gravity_m_s2 = 0x3fc742191693a349  # 0.18170465090158874
@@ -6778,21 +6790,21 @@ rings: NotApplicable
 population: NotApplicable
 surface: Ok
 hooks detail_seed = 0x3bf4066342b43ae6
-rotation: Synchronous, locks at Some(UniverseTime { seconds: -72703261197577472, nanos: 0 })
-pole_x = 0xbfd8ee680466c005  # -0.38955116681881946
-pole_y = 0x3fe71e750ea5df6d  # 0.722467926606425
-pole_z = 0xbfe2476aef2e0346  # -0.5712179824332473
-equator_node_x = 0xbfec714ccaf40c67  # -0.8888305629665297
-equator_node_y = 0xbfc0f2941cacc928  # -0.13240291023391504
-equator_node_z = 0x3fdc1382f7bda406  # 0.43869089311061804
-equator_quarter_x = 0x3fcee338171b66ae  # 0.24130917671464175
-equator_quarter_y = 0x3fe5b729473ad27c  # 0.6786085501867798
-equator_quarter_z = 0x3fe63307c05d12f8  # 0.6937292821026793
+rotation: Synchronous, locks at Some(UniverseTime { seconds: -39395551857924912, nanos: 0 })
+pole_x = 0x3fdd3a4fd92337dc  # 0.4566840763553708
+pole_y = 0xbfeb5e1ee190b81c  # -0.8552393346378753
+pole_z = 0x3fcf5ad846023cc4  # 0.24495986383815282
+equator_node_x = 0x3fe7903407090975  # 0.736352933636495
+equator_node_y = 0x3fe092ac6c725ba2  # 0.5179044836139506
+equator_node_z = 0x3fdbdd55376cff58  # 0.4353840867297456
+equator_quarter_x = 0xbfdff346bd27c333  # -0.49922340843390883
+equator_quarter_y = 0xbf92e62590e30619  # -0.018456065147580334
+equator_quarter_z = 0x3febb889f6baedbf  # 0.8662767237614658
 obliquity_rad = 0x3fcb97c30ea82a33  # 0.2155689069334855
 initial_rate_rad_s = 0x3f3495aa7c989bf0  # 0.00031409656785047393
 locked_rate_rad_s = 0x3ec00ce89361c76b  # 1.913359621013549e-6
 age_at_epoch_s = 0x43703b4b1b72c9c7  # 7.310069434342514e16
-locking_age_s = 0x42f69769d7aef68f  # 397433145847656.94
+locking_age_s = 0x435defa9813cf04f  # 3.370514248550022e16
 clock_period_s = 0x41490dc4d238fe18  # 3283849.6423642747
 clock_mean_anomaly_at_epoch_rad = 0x40021654a4aa2a79  # 2.260903631632854
 sub_primary_angle_rad = 0x400532ac59cdd078  # 2.6497427955565023
@@ -6805,9 +6817,9 @@ figure: RotationalAndTidal, SolidSurface
 equatorial_radius_m = 0x411a7ddb0d629575  # 434038.7630713799
 polar_radius_m = 0x411a7db51ada1ada  # 434029.2762226291
 flattening = 0x3ef6eb3ba85f3173  # 2.185714631490602e-5
-figure_pole_x = 0xbfd8ee680466c005  # -0.38955116681881946
-figure_pole_y = 0x3fe71e750ea5df6d  # 0.722467926606425
-figure_pole_z = 0xbfe2476aef2e0346  # -0.5712179824332473
+figure_pole_x = 0x3fdd3a4fd92337dc  # 0.4566840763553708
+figure_pole_y = 0xbfeb5e1ee190b81c  # -0.8552393346378753
+figure_pole_z = 0x3fcf5ad846023cc4  # 0.24495986383815282
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
 geometric_albedo_b = 0x3fdb851eb851eb85  # 0.43
@@ -6824,13 +6836,13 @@ bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
 surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x405ca73d02e2e935  # 114.61309883269571
-equator_pole_contrast_k = 0x40434c8a227ac6d6  # 38.59796553606945
-day_night_contrast_k = 0x4054d1c5b7d67205  # 83.27769275609906
+equator_pole_contrast_k = 0x4043a1e1da30ba46  # 39.26470496539382
+day_night_contrast_k = 0x4054af26631fbaba  # 82.73671796892714
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40a7e755c9ea6f65  # 3059.6675561200123
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3f4d34264c144819  # 0.0008912264821978626
 surface_age_yr = 0x41e1423989b3dec8  # 2316422221.620945
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x3fd02a274d17c394  # 0.25257284668537605
+ice_fraction = 0x3fd02c457812640a  # 0.2527021095825722
 envelope: NotApplicable

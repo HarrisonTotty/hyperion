@@ -2446,10 +2446,10 @@ fn the_resurfacing_exponent_is_fitted_on_mars() {
 }
 
 /// Io's surface at its measured elements is under 1 Myr old. Europa's measured bulk is ice-rich,
-/// and at the calibration's heat flow in force (version 22's 0.0386 W m⁻² below `MOONS_VERSION`,
-/// [`ICE_RESURFACING_HEAT_FLOW`] from it) its surface is 60 Myr ± 10% old: here its tide is set so
-/// that its whole heat flow is that; P14.T56.d's own tides refit the constant in
-/// `europa_s_surface_at_its_own_tides_is_its_calibration`. Under P14.T17.b's tide (22) its age is
+/// and at the calibration's heat flow ([`ICE_RESURFACING_HEAT_FLOW`]) its surface is 60 Myr ± 10%
+/// old: here its tide is set so that its whole heat flow is that; P14.T56.d's own tides refit the
+/// constant in `europa_s_surface_at_its_own_tides_is_its_calibration`. Under the generated dry
+/// Europa's tide, Io's response on the heated branch, scaled to its measured radius, its age is
 /// recorded.
 #[test]
 fn io_s_surface_is_young_and_europa_s_is_its_calibration() {
@@ -2463,7 +2463,8 @@ fn io_s_surface_is_young_and_europa_s_is_its_calibration() {
     assert!(io.surface_age().value() < 1e6);
     let (measured, ..) = measured_europa();
     eprintln!(
-        "the measured Europa at 22: F {:.1} mW m⁻², {:?}, S {:.3} Myr, R_b {:.3}",
+        "the measured Europa under the generated Europa's tide: F {:.1} mW m⁻², {:?}, S {:.3} Myr, \
+         R_b {:.3}",
         measured.heat_flow().value() * 1e3,
         measured.impactors().crust(),
         measured.surface_age().value() / 1e6,
@@ -2471,31 +2472,28 @@ fn io_s_surface_is_young_and_europa_s_is_its_calibration() {
     );
     assert_eq!(measured.impactors().crust(), Crust::IceRich);
     assert!(measured.surface_age().value() < 1e6);
-    // The calibration in force: version 22's below MOONS_VERSION.
-    let calibration = surface_age::ice_resurfacing_heat_flow(MoonTideRule::in_force());
-    let tide = calibration.value() - measured.non_tidal_heat_flow().value();
-    let (in_force, ..) = measured_europa_under(&europa(), WattsPerSquareMetre::new(tide));
+    let tide = ICE_RESURFACING_HEAT_FLOW.value() - measured.non_tidal_heat_flow().value();
+    let (calibrated, ..) = measured_europa_under(&europa(), WattsPerSquareMetre::new(tide));
     eprintln!(
-        "the measured Europa at the calibration in force: {:?}, S {:.2} Myr",
-        in_force.impactors().crust(),
-        in_force.surface_age().value() / 1e6
+        "the measured Europa at the calibration: {:?}, S {:.2} Myr",
+        calibrated.impactors().crust(),
+        calibrated.surface_age().value() / 1e6
     );
-    assert_eq!(in_force.impactors().crust(), Crust::IceRich);
-    assert!((in_force.surface_age().value() / 60e6 - 1.0).abs() <= 0.1);
+    assert_eq!(calibrated.impactors().crust(), Crust::IceRich);
+    assert!((calibrated.surface_age().value() / 60e6 - 1.0).abs() <= 0.1);
 }
 
 /// P14.T48.c's check, which P14.T56.d carries, and the calibration of
 /// [`ICE_RESURFACING_HEAT_FLOW`] (decision-p14-t56d-membrane §4.6 and §7.2): the measured Europa at
 /// its measured elements, at the tide its own tides give it on the ocean branch (`MoonTides`, at its
-/// rock's `F_nt` and its own bulk), is ice-rich, and from `MOONS_VERSION` its surface is Zahnle et
-/// al.'s 60 Myr ± 3%; its whole heat flow refits the constant to 10⁻⁶ W m⁻². Under decision-p14-moons
+/// rock's `F_nt` and its own bulk), is ice-rich, and its surface is Zahnle et al.'s 60 Myr ± 3%;
+/// its whole heat flow refits the constant to 10⁻⁶ W m⁻². Under decision-p14-moons
 /// F2's superseded membrane it took 0.0386 W m⁻², version 22's calibration; under Beuthe's,
 /// 0.01924. Jupiter's GM is JPL's (JUP365) and Europa's sidereal period NASA's Jovian satellite fact
 /// sheet's, 3.551181 d, read 2026-10-16.
 #[test]
 fn europa_s_surface_at_its_own_tides_is_its_calibration() {
     use crate::planetary::derive::rotation::moment_of_inertia_factor;
-    use crate::planetary::moons::regular::MoonTideRule;
     use crate::planetary::moons::tides::{
         MoonTides, TidalBranch, TidalMaterial, TideInputs, tidal_forcing,
     };
@@ -2551,22 +2549,19 @@ fn europa_s_surface_at_its_own_tides_is_its_calibration() {
     );
     assert!((f / tides.heat_flow().value() - 1.0).abs() < 1e-9, "{f}");
     assert_eq!(figures.impactors().crust(), Crust::IceRich);
-    let at_23 = surface_age::surface_age_under(
-        MoonTideRule::ByState,
-        &surface_age::SurfaceAgeInputs {
-            age: SOLAR_AGE,
-            molten_until: None,
-            last_giant_impact: None,
-            heat_flow: figures.heat_flow(),
-            crust: figures.impactors().crust(),
-        },
-    );
+    let age = surface_age::surface_age(&surface_age::SurfaceAgeInputs {
+        age: SOLAR_AGE,
+        molten_until: None,
+        last_giant_impact: None,
+        heat_flow: figures.heat_flow(),
+        crust: figures.impactors().crust(),
+    });
     eprintln!(
-        "its surface at 23: {:.3} Myr; the refit F₀ {f:.9} W m⁻² against {}",
-        at_23.value() / 1e6,
+        "its surface: {:.3} Myr; the refit F₀ {f:.9} W m⁻² against {}",
+        age.value() / 1e6,
         ICE_RESURFACING_HEAT_FLOW.value()
     );
-    assert!((at_23.value() / 60e6 - 1.0).abs() <= 0.03, "{at_23:?}");
+    assert!((age.value() / 60e6 - 1.0).abs() <= 0.03, "{age:?}");
     assert!((f - ICE_RESURFACING_HEAT_FLOW.value()).abs() < 1e-6, "{f}");
 }
 

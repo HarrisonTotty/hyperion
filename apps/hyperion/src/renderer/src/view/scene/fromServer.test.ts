@@ -21,6 +21,7 @@ import {
   FIXTURE_SYSTEM,
   populatedBodies,
   populatedBodiesWith,
+  withoutRingNormal,
   withRingNormal,
 } from "../../test/planetaryFixture";
 import {
@@ -410,7 +411,7 @@ describe("the server's scene as the view draws it", () => {
   });
 
   it("draws a ring an older server sends without a normal in its planet's orbital plane", () => {
-    const model = sceneModelOf(statePopulated());
+    const model = sceneModelOf(statePopulated(populatedBodiesWith(withoutRingNormal)));
     const planet = recordOf(model, `${FIXTURE_SYSTEM}.0100`);
     if (planet.orbit.state !== "ok") {
       throw new Error("the fixture's planet has an orbit");

@@ -117,9 +117,9 @@ export function populatedBodiesWith(
 }
 
 /**
- * A change, for {@link populatedBodiesWith}, that gives the populated answer's ring its plane's
- * normal, as a server from P14.T56.a's bump sends it (decision-p14-t56a §1); the shared fixture's
- * ring has none, as every server below generator version 23 sends it.
+ * A change, for {@link populatedBodiesWith}, that gives the populated answer's ring the plane's
+ * normal `normal` in place of the shared fixture's own, which every server from the 22 → 23
+ * batch sends (decision-p14-t56a §1).
  */
 export function withRingNormal(
   normal: readonly [number, number, number],
@@ -131,6 +131,19 @@ export function withRingNormal(
           population: { state: "ok", value: { ...body.population.value, normal: [...normal] } },
         }
       : body;
+}
+
+/**
+ * A change, for {@link populatedBodiesWith}, that leaves the populated answer's ring without its
+ * plane's normal, as a server before the 22 → 23 batch sends it, whose rings lie in their planet's
+ * orbital plane; the field stays optional on the wire (decision-p14-t56a §1).
+ */
+export function withoutRingNormal(body: BodySummaryDto): BodySummaryDto {
+  if (body.population.state !== "ok" || body.population.value.type !== "ring") {
+    return body;
+  }
+  const { normal: _sent, ...ring } = body.population.value;
+  return { ...body, population: { state: "ok", value: ring } };
 }
 
 /** A change, for an answer's builder, that gives the body `id` the rotation law `rotation`. */

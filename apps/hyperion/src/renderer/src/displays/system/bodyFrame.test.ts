@@ -1,4 +1,4 @@
-import type { BodySummaryDto, ResponseFor, UniverseTime } from "@hyperion/protocol";
+import type { ResponseFor, UniverseTime } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import { positionAt } from "../../lib/orbit";
@@ -14,6 +14,7 @@ import {
   populatedBodiesWith,
   tiltedPole,
   withBodyRotation,
+  withoutRingNormal,
   withRingNormal,
 } from "../../test/planetaryFixture";
 import {
@@ -81,9 +82,10 @@ interface TiltedPlanet {
 
 /**
  * The populated answer with its planet `A b` spinning about a pole `obliquityRad` from its orbit's
- * normal (`tiltedPole`), and, with `ring`, its ring given the plane's normal a server from
- * P14.T56.a's bump sends: the local Laplace pole on the spin's side, turned {@link ringTiltRad}
- * from the pole towards the end of the orbit normal's axis within 90° of it.
+ * normal (`tiltedPole`), and, with `ring`, its ring given the plane's normal a server from the
+ * 22 → 23 batch sends for it: the local Laplace pole on the spin's side, turned
+ * {@link ringTiltRad} from the pole towards the end of the orbit normal's axis within 90° of it;
+ * without, its ring's normal left out, as an older server sends it.
  */
 function tiltedPlanet({
   obliquityRad = OBLIQUITY_RAD,
@@ -98,7 +100,7 @@ function tiltedPlanet({
   const rotate = withBodyRotation(PLANET, tilted.rotation);
   const tiltRing =
     ringNormal === null
-      ? (each: BodySummaryDto) => each
+      ? withoutRingNormal
       : withRingNormal([ringNormal.x, ringNormal.y, ringNormal.z]);
   return {
     bodies: bodiesOf(populatedBodiesWith((each) => tiltRing(rotate(each)))),
@@ -321,10 +323,16 @@ describe("bodyScene", () => {
   });
 
   it("draws the ring on the reference plane without a pole or a ring normal, as before", () => {
-    const scene = sceneOf();
+    const scene = sceneOf(null, bodiesOf(populatedBodiesWith(withoutRingNormal)));
     const [ring] = scene.annuli ?? [];
 
     expect(dot(ring?.normal ?? vec3(0, 0, 0), scene.frame.north)).toBeCloseTo(1, 12);
+  });
+
+  it("draws the fixture's ring in the plane its normal gives, without a pole", () => {
+    const [ring] = sceneOf().annuli ?? [];
+
+    expect(ring?.normal).toEqual(vec3(0.5906558005684119, 0.7906802819028946, 0.1610913314391793));
   });
 
   it("draws a ring under a tilted pole in the plane its normal gives, not the equator's", () => {

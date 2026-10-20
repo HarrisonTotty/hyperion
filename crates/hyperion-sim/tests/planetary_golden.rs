@@ -1044,6 +1044,8 @@ fn write_population(w: &mut GoldenWriter, population: &BodyPopulation) {
                     gap.radius().value(),
                 );
             }
+            // P14.T56.a: the ring's plane on its planet's Laplace surface, after its older lines.
+            write_vector(w, "normal", ring.normal());
         }
         BodyPopulation::Belt(belt) => {
             w.line(&format!(

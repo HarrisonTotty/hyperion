@@ -140,27 +140,46 @@ fn every_giant_has_a_dusty_ring_and_regular_moons_only_orbit_giants() {
     assert!(giants > 20, "{giants} giants");
 }
 
+/// P14.T22.a: a moon's elements in its parent's body frame keep its shape on any plane, and about
+/// a parent with no Laplace frame, in its orbital plane, its tilt to that plane is its drawn
+/// inclination (on the Laplace surface,
+/// `system::tests::every_moon_lies_at_its_drawn_tilt_to_its_local_laplace_plane`).
 #[test]
 fn a_moon_in_its_parent_s_body_frame_keeps_its_shape_and_its_tilt_to_the_orbital_plane() {
-    for (_, system) in whole().iter().take(100) {
+    let mut flat = 0;
+    for (ctx, system) in whole().iter().take(100) {
         for found in system.satellites() {
             let Some(parent) = found.parent() else {
                 continue;
             };
             let normal = parent.orbit().orientation().normal();
-            for moon in found.moons() {
+            let unframed = satellites_of(
+                SEED,
+                found.parent_index(),
+                parent,
+                None,
+                None,
+                ctx.age_at_epoch(),
+                SatelliteFrame::OrbitalPlane,
+            );
+            for moon in found.moons().iter().chain(unframed.moons()) {
                 let local = moon.local_orbit_at(parent, Years::new(1e9));
                 let framed = moon.orbit_at(parent, Years::new(1e9));
                 assert_eq!(local.semi_major_axis(), framed.semi_major_axis());
                 assert_eq!(local.eccentricity(), framed.eccentricity());
+                if !matches!(moon.plane(), MoonPlane::OrbitalPlane) {
+                    continue;
+                }
                 let n = framed.orientation().normal();
                 let cos = n[0] * normal[0] + n[1] * normal[1] + n[2] * normal[2];
                 let tilt = crate::math::acos(cos.clamp(-1.0, 1.0));
                 // An arccosine near 1 keeps about √ε of its argument's precision.
                 assert!((tilt - local.inclination().value()).abs() < 1e-7);
+                flat += 1;
             }
         }
     }
+    assert!(flat > 100, "{flat} moons in their parents' orbital planes");
 }
 
 // P14.T56.a: the Laplace surface.
@@ -443,6 +462,45 @@ fn each_moon_draws_its_own_volatile_ranks_by_its_candidate() {
         moons > 100 && shifted > 20 && pairs > 50,
         "{moons} moons, {shifted} keyed apart from their index, {pairs} pairs"
     );
+}
+
+/// P14.T56.c's draws pinned to the bit (its determinism audit, with the 22 → 23 batch's bless): the
+/// six volatile ranks of the sample's first two moons of each origin, a capture and a giant-impact
+/// moon among them, so that a moved word or key moves a line.
+#[test]
+fn a_few_moons_volatile_ranks_are_pinned() {
+    use hyperion_testkit::golden;
+    use hyperion_testkit::golden::GoldenWriter;
+
+    let mut w = GoldenWriter::new();
+    w.header(crate::GENERATOR_VERSION.get());
+    let mut seen = [0_u32; 3];
+    'systems: for (_, system) in whole() {
+        for moon in system.satellites().iter().flat_map(Satellites::moons) {
+            let n = match moon.origin() {
+                MoonOrigin::Regular => 0,
+                MoonOrigin::GiantImpact => 1,
+                MoonOrigin::Captured => 2,
+            };
+            if seen[n] >= 2 {
+                continue;
+            }
+            seen[n] += 1;
+            let label = format!(
+                "{} {:?}",
+                moon.index().body_id(system.system()),
+                moon.origin()
+            );
+            for (name, rank) in ranks(moon.volatiles()) {
+                w.f64(&format!("{label} {name}"), rank.value());
+            }
+            if seen.iter().all(|&k| k >= 2) {
+                break 'systems;
+            }
+        }
+    }
+    assert_eq!(seen, [2, 2, 2]);
+    golden!("planetary/moon_volatiles", w.as_str());
 }
 
 /// P14.T56.c: a regular moon's volatiles formed in its planet's nursery, a captured or

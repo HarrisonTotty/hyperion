@@ -185,6 +185,25 @@ const MOONS: [Measured; 11] = [
     },
 ];
 
+/// Triton at its measured elements, a capture at its own bulk, which only the bit pin reads: GM
+/// and mean radius as [`MOONS`]'s (NEP097), JPL's mean elements' 354,759 km on its circular orbit
+/// (as `hooks::figures`'s tests read them), its 5.877 d sidereal period (NASA's Neptunian satellite
+/// fact sheet), the 38 K of its nitrogen ice (Tryka et al. 1993, Science 261, 751) and the 0.238
+/// of water its density holds at ruling 83.7's rock and ice. Its circular orbit raises no
+/// eccentricity tide, so Neptune's GM (NASA's Neptune fact sheet, 6.8365 × 10⁶ km³ s⁻²) moves
+/// nothing.
+const TRITON: Measured = Measured {
+    name: "Triton",
+    gm: 1_428.495_46,
+    radius_km: 1_352.6,
+    planet_gm: 6_836_500.0,
+    a_km: 354_759.0,
+    e: 0.0,
+    period_days: 5.877,
+    surface: 38.0,
+    water: 0.238,
+};
+
 /// The moon `name` of [`MOONS`].
 fn moon(name: &str) -> Measured {
     *MOONS.iter().find(|m| m.name == name).unwrap()
@@ -966,4 +985,31 @@ fn the_branches_part_where_the_rule_says() {
         TidalMaterial::of_water(0.1 * (1.0 - 1e-12)),
         TidalMaterial::Rock
     );
+}
+
+/// The measured moons' tides pinned to the bit (P14.T56.d's determinism audit, with the 22 → 23
+/// batch's bless): every moon of [`MOONS`] and [`TRITON`] at its measured elements, its branch,
+/// k₂, Q, loss and whole heat flow, with the `F_nt` it reads, so that a moved constant, root or
+/// quadrature moves a line where every other test of the tides holds a tolerance.
+#[test]
+fn the_measured_moons_tides_are_pinned() {
+    use hyperion_testkit::golden;
+    use hyperion_testkit::golden::GoldenWriter;
+
+    let mut w = GoldenWriter::new();
+    w.header(crate::GENERATOR_VERSION.get());
+    for moon in MOONS.iter().chain(core::iter::once(&TRITON)) {
+        let tides = moon.tides();
+        let name = moon.name.to_lowercase();
+        w.line(&format!("{name}_branch = {:?}", tides.branch()));
+        w.f64(
+            &format!("{name}_non_tidal_heat_flow"),
+            moon.non_tidal().value(),
+        );
+        w.f64(&format!("{name}_k2"), tides.k2());
+        w.f64(&format!("{name}_q"), tides.q());
+        w.f64(&format!("{name}_loss"), tides.loss());
+        w.f64(&format!("{name}_heat_flow"), tides.heat_flow().value());
+    }
+    golden!("planetary/moon_tides", w.as_str());
 }

@@ -31,6 +31,7 @@ import {
   populatedBodiesWith,
   sliceBodies,
   sliceBodiesWith,
+  withoutRingNormal,
   withRingNormal,
 } from "../../test/planetaryFixture";
 import { GOLDEN_SYSTEMS, GOLDEN_TIMES, goldenSystemBodies } from "../../test/inSystemGolden";
@@ -259,8 +260,11 @@ describe("toSystemBodiesModel", () => {
         : undefined;
     };
 
+    expect(ringNormal(populatedBodies())).toEqual(
+      vec3(0.5906558005684119, 0.7906802819028946, 0.1610913314391793),
+    );
     expect(ringNormal(populatedBodiesWith(withRingNormal(normal)))).toEqual(vec3(0, -0.6, 0.8));
-    expect(ringNormal(populatedBodies())).toBeNull();
+    expect(ringNormal(populatedBodiesWith(withoutRingNormal))).toBeNull();
   });
 
   it("refuses a ring normal that is not of unit length", () => {

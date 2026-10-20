@@ -63,10 +63,9 @@
 //! beyond it, and a ring that reaches into it is not made
 //! ([`satellites`](crate::planetary::satellites), [`rings`](crate::planetary::rings)).
 //!
-//! # The hold
-//!
-//! Every moon and ring lies on this surface from [`MOONS_VERSION`]; below it they keep version
-//! 22's planes, the parent's orbital plane, bit for bit ([`SatellitePlanes::in_force`]).
+//! Every moon and ring of a parent with a rotation law lies on this surface; a parent with none
+//! has no frame, and its satellites keep its orbital plane
+//! ([`satellites`](crate::planetary::satellites)).
 //!
 //! [`darwin_radau_flattening`]: crate::planetary::derive::figure::darwin_radau_flattening
 
@@ -74,12 +73,10 @@ use core::f64::consts::FRAC_PI_2;
 use std::error::Error;
 use std::fmt;
 
-use crate::GENERATOR_VERSION;
 use crate::math;
 use crate::orbit::KeplerElements;
 use crate::planetary::derive::figure::rotational_parameter;
 use crate::planetary::derive::rotation::{SpinOrbitResonance, SpinState};
-use crate::planetary::moons::MOONS_VERSION;
 use crate::planetary::params::SYNCHRONOUS_TIDAL_FACTOR;
 use crate::units::consts::RADIANS_PER_DEGREE;
 use crate::units::{Kilograms, Metres, Radians, Years};
@@ -102,29 +99,6 @@ const BAND_SCAN_STEPS: u32 = 450;
 /// The halvings by which [`eccentricity_band`] refines each edge from its scan: 40, to about
 /// 10⁻¹⁵ `r_L`.
 const BAND_BISECTIONS: u32 = 40;
-
-/// Which planes a generated system's satellites are referred to (P14.T56.a, held).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum SatellitePlanes {
-    /// Version 22's: every moon's elements and every ring about the parent's orbital plane.
-    OrbitalPlane,
-    /// Every moon and ring on its parent's classical Laplace surface (this module).
-    LaplaceSurface,
-}
-
-impl SatellitePlanes {
-    /// The planes the generator version in force takes: [`LaplaceSurface`](Self::LaplaceSurface)
-    /// from [`MOONS_VERSION`], and [`OrbitalPlane`](Self::OrbitalPlane) below it, so that every
-    /// value below it is version 22's, bit for bit.
-    #[must_use]
-    pub const fn in_force() -> Self {
-        if GENERATOR_VERSION.get() >= MOONS_VERSION.get() {
-            Self::LaplaceSurface
-        } else {
-            Self::OrbitalPlane
-        }
-    }
-}
 
 /// The fluid Love number `k_f` = (4 − ξ²) ÷ (1 + ξ²) of a body of moment of inertia `moment_factor`
 /// = C ÷ M a², with ξ = (5 ÷ 2)(1 − (3 ÷ 2) C ÷ M a²): the Darwin–Radau relation

@@ -303,6 +303,9 @@ describe("body_detail", () => {
     const [belt] = population("belt");
     const [halo] = population("cometary_halo");
     expect(ring?.type === "ring" && ring.inner_edge_m < ring.outer_edge_m).toBe(true);
+    // Its plane's normal, a unit vector, as every server from the 22 → 23 batch sends it.
+    const normal = ring?.type === "ring" ? ring.normal : undefined;
+    expect(normal && Math.hypot(...normal)).toBeCloseTo(1, 12);
     expect(belt?.type === "belt" && belt.members.state).toBe("ok");
     expect(halo?.type === "cometary_halo" && halo.comets).toBeGreaterThan(0);
     const planet = bodies.find((body) => body.kind.type === "planet");

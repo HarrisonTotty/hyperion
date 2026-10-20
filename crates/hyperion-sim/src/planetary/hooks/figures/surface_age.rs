@@ -18,8 +18,8 @@
 //! The crust ([`Crust::of`], the one mechanical predicate) picks τ₀ and F₀, since ice resurfaces at
 //! a heat flow that would leave rock untouched: a silicate crust takes Earth's ocean floor,
 //! [`SILICATE_RESURFACING_TIME`] at the generator's Earth's heat flow, and an ice-rich one
-//! Europa's surface, [`ICE_RESURFACING_TIME`] at [`ICE_RESURFACING_HEAT_FLOW`] (version 22's
-//! 0.0386 W m⁻² below `MOONS_VERSION`, P14.T56.d's hold). The one exponent
+//! Europa's surface, [`ICE_RESURFACING_TIME`] at [`ICE_RESURFACING_HEAT_FLOW`] (P14.T56.d's
+//! recalibration). The one exponent
 //! [`RESURFACING_EXPONENT`] is empirical, fitted on Mars's Noachian 3.9 Gyr across three regimes:
 //! a mobile lid's boundary-layer cooling alone would give n = 2, its heat flow falling as the
 //! floor's age to the −½ (Turcotte and Schubert 2002, Geodynamics, 2nd ed., §4-16 and §4-23),
@@ -45,7 +45,6 @@
 use super::Crust;
 use super::interior::GENERATED_EARTH_HEAT_FLOW;
 use crate::math;
-use crate::planetary::moons::regular::MoonTideRule;
 use crate::units::{WattsPerSquareMetre, Years};
 
 /// A silicate crust's resurfacing time at the generator's Earth's heat flow
@@ -68,31 +67,14 @@ pub const ICE_RESURFACING_TIME: Years = Years::new(60e6);
 /// built, so that its surface is Zahnle et al.'s 60 Myr (decision-p14-t56d-membrane §4.6 and §7.2).
 /// `Fitted`: `europa_s_surface_at_its_own_tides_is_its_calibration` refits it.
 ///
-/// It reads from `MOONS_VERSION` (23), with the moons' tides it is calibrated on. Below it every
-/// ice-rich crust reads version 22's 0.0386 (`ICE_RESURFACING_HEAT_FLOW_AT_22`, crate-private),
-/// Europa's under decision-p14-moons F2's membrane, which the ruling found was not Beuthe's
-/// (science-p14-t24b-laws §2.1's figure). At a given heat flow an ice-rich surface's resurfacing time
-/// shrinks by (F₀ ÷ 0.0386)^n, about 0.13, from 23.
+/// It is calibrated on the moons' own tides, which it takes effect with. It replaces T48.c's
+/// 0.0386, Europa's under decision-p14-moons F2's membrane, which the ruling found was not
+/// Beuthe's (science-p14-t24b-laws §2.1's figure): at a given heat flow an ice-rich surface's
+/// resurfacing time is (F₀ ÷ 0.0386)^n, about 0.13, of what that gave.
 pub const ICE_RESURFACING_HEAT_FLOW: WattsPerSquareMetre = WattsPerSquareMetre::new(ICE_FITTED);
 
 /// [`ICE_RESURFACING_HEAT_FLOW`]'s value, W m⁻², as its test refits it.
 const ICE_FITTED: f64 = 0.019_239_4;
-
-/// Version 22's [`ICE_RESURFACING_HEAT_FLOW`], W m⁻²: 0.0386, Europa's under decision-p14-moons F2's
-/// superseded membrane. Read below `MOONS_VERSION`; P14.T54.a deletes it with the hold.
-pub(crate) const ICE_RESURFACING_HEAT_FLOW_AT_22: WattsPerSquareMetre =
-    WattsPerSquareMetre::new(0.0386);
-
-/// The heat flow at which an ice-rich crust resurfaces in [`ICE_RESURFACING_TIME`] under the moons'
-/// tide rule `tides` (P14.T56.d's hold, decision-p14-t56d-membrane §4.6): version 22's below
-/// `MOONS_VERSION`, [`ICE_RESURFACING_HEAT_FLOW`] from it.
-#[must_use]
-pub(crate) const fn ice_resurfacing_heat_flow(tides: MoonTideRule) -> WattsPerSquareMetre {
-    match tides {
-        MoonTideRule::ClassPair => ICE_RESURFACING_HEAT_FLOW_AT_22,
-        MoonTideRule::ByState => ICE_RESURFACING_HEAT_FLOW,
-    }
-}
 
 /// The exponent n of the resurfacing time τ = τ₀ (F₀ ÷ F)^n: about 2.91, empirical, fitted so that
 /// the Solar System table's Mars gets 3.9 Gyr, the Noachian highlands' age R09's reference uses
@@ -106,8 +88,8 @@ pub const RESURFACING_EXPONENT: f64 = 2.907_695_194_384_198;
 /// The resurfacing time τ = τ₀ (F₀ ÷ F)^n of a crust `crust` at the present heat flow
 /// `heat_flow`, yr ([`RESURFACING_EXPONENT`]): from [`SILICATE_RESURFACING_TIME`] at the
 /// generator's Earth's heat flow for a silicate crust, and from [`ICE_RESURFACING_TIME`] at
-/// [`ICE_RESURFACING_HEAT_FLOW`] for an ice-rich one, version 22's 0.0386 W m⁻² below
-/// `MOONS_VERSION`. Infinite for a heat flow that is not positive, which resurfaces nothing.
+/// [`ICE_RESURFACING_HEAT_FLOW`] for an ice-rich one. Infinite for a heat flow that is not
+/// positive, which resurfaces nothing.
 ///
 /// # Examples
 ///
@@ -129,20 +111,9 @@ pub const RESURFACING_EXPONENT: f64 = 2.907_695_194_384_198;
 /// ```
 #[must_use]
 pub fn resurfacing_time(crust: Crust, heat_flow: WattsPerSquareMetre) -> Years {
-    resurfacing_time_under(MoonTideRule::in_force(), crust, heat_flow)
-}
-
-/// [`resurfacing_time`] under the moons' tide rule `tides`, which picks the ice-rich crust's
-/// calibration ([`ice_resurfacing_heat_flow`]).
-#[must_use]
-pub(crate) fn resurfacing_time_under(
-    tides: MoonTideRule,
-    crust: Crust,
-    heat_flow: WattsPerSquareMetre,
-) -> Years {
     let (time, flow) = match crust {
         Crust::Silicate => (SILICATE_RESURFACING_TIME, GENERATED_EARTH_HEAT_FLOW),
-        Crust::IceRich => (ICE_RESURFACING_TIME, ice_resurfacing_heat_flow(tides)),
+        Crust::IceRich => (ICE_RESURFACING_TIME, ICE_RESURFACING_HEAT_FLOW),
     };
     let f = heat_flow.value();
     if f > 0.0 {
@@ -200,17 +171,11 @@ pub struct SurfaceAgeInputs {
 /// ```
 #[must_use]
 pub fn surface_age(inputs: &SurfaceAgeInputs) -> Years {
-    surface_age_under(MoonTideRule::in_force(), inputs)
-}
-
-/// [`surface_age`] under the moons' tide rule `tides` ([`resurfacing_time_under`]).
-#[must_use]
-pub(crate) fn surface_age_under(tides: MoonTideRule, inputs: &SurfaceAgeInputs) -> Years {
     let age = inputs.age.value();
     let since = |event: Option<Years>| event.map_or(age, |at| age - at.value());
     let candidates = [
         since(inputs.molten_until),
-        resurfacing_time_under(tides, inputs.crust, inputs.heat_flow).value(),
+        resurfacing_time(inputs.crust, inputs.heat_flow).value(),
         since(inputs.last_giant_impact),
     ];
     // The least by comparison, so that neither end's sign of zero nor a NaN, which validated

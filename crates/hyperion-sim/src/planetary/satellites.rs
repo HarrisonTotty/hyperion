@@ -53,7 +53,7 @@
 //! frame with the galactic axes (plan 01's `coords`), where a moon's position is its planet's
 //! plus its own offset, by referring them to the moon's [`MoonPlane`]:
 //!
-//! - **On the Laplace surface** (P14.T56.a, from [`MOONS_VERSION`]): every moon, of every origin,
+//! - **On the Laplace surface** (P14.T56.a): every moon, of every origin,
 //!   to its parent's local Laplace plane at its semi-major axis ([`laplace`]), the plane its node
 //!   precesses about, so that its drawn inclination is its free inclination. The plane follows
 //!   from the parent's [`LaplaceFrame`], read once at the parent's time, and the moon's own
@@ -61,9 +61,11 @@
 //!   spin's side for regular and giant-impact moons, which form prograde about the spin, and on
 //!   the orbit normal's side for captures, whose sense is drawn about the orbit
 //!   ([`PoleSense`]). A giant-impact moon's plane follows its receding axis.
-//! - **Below it**, version 22's: every moon to its parent's orbital plane.
-//!
-//! [`MOONS_VERSION`]: crate::planetary::moons::MOONS_VERSION
+//! - **In its parent's orbital plane**, about a parent with no Laplace frame: one with no rotation
+//!   law, such as a planet of [`generate_planets`](crate::planetary::generate_planets) alone, and
+//!   in the generator's first pass, which finds every parent's satellites before its law, and so
+//!   its frame, is derived (`planetary::system`'s step 7: it fixes whether the parent had a giant
+//!   impact, which its law reads).
 
 use crate::Seed;
 use crate::orbit::KeplerElements;
@@ -105,7 +107,8 @@ pub enum SatelliteMoon {
 /// [module](self) documentation).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MoonPlane {
-    /// Version 22's: the parent's orbital plane, its [`MoonParent::orbit`]'s.
+    /// The parent's orbital plane, its [`MoonParent::orbit`]'s, about a parent with no Laplace
+    /// frame.
     OrbitalPlane,
     /// The parent's local Laplace plane at the moon's semi-major axis (P14.T56.a).
     Laplace(LocalLaplace),
@@ -114,14 +117,14 @@ pub enum MoonPlane {
 /// The planes [`satellites_of`] refers a parent's satellites to (P14.T56.a).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum SatelliteFrame<'f> {
-    /// Version 22's: the parent's orbital plane.
+    /// The parent's orbital plane, for a parent with no Laplace frame.
     OrbitalPlane,
     /// The parent's Laplace surface, of this frame.
     Laplace(&'f LaplaceFrame),
 }
 
 impl<'f> SatelliteFrame<'f> {
-    /// The Laplace surface of `frame` where a parent holds one, and version 22's planes where it
+    /// The Laplace surface of `frame` where a parent holds one, and its orbital plane where it
     /// does not.
     #[must_use]
     pub(crate) const fn of(frame: Option<&'f LaplaceFrame>) -> Self {
@@ -203,9 +206,8 @@ impl Satellite {
         }
     }
 
-    /// The volatiles it is derived with from
-    /// [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION): its own
-    /// [`volatiles`](Self::volatiles) at its [`volatile_site`](Self::volatile_site) (P14.T56.c).
+    /// The volatiles it is derived with: its own [`volatiles`](Self::volatiles) at its
+    /// [`volatile_site`](Self::volatile_site) (P14.T56.c).
     #[must_use]
     pub const fn own_volatiles(&self) -> MoonVolatiles {
         MoonVolatiles {
@@ -356,7 +358,7 @@ impl Satellites {
 /// nearest belt's mass passed in, which
 /// [`PlanetarySystem::nearest_belt`](crate::planetary::PlanetarySystem::nearest_belt) finds, and
 /// the planet's [`Body::laplace`] frame, which [`generate`](crate::planetary::generate) holds on
-/// the Laplace surface (P14.T56.a): with none, its satellites keep version 22's planes. A planet
+/// the Laplace surface (P14.T56.a): with none, its satellites keep its orbital plane. A planet
 /// with no moons and no rings has an empty set, and a body that is not a planet or a belt member
 /// none.
 ///
