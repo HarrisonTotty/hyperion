@@ -977,11 +977,16 @@ class GraphMode(unittest.TestCase):
     SLOW = ("    #[test]\n    #[ignore = \"slow: the long pass\"]\n    fn unit_slowly() { assert_eq!(super::unit(), 1); }\n"
             "    #[test]\n    #[ignore = \"cost: a large table\"]\n    fn other_slowly() { assert_eq!(super::other(), 2); }\n")
 
-    def slow_plan(self, path: str, old: str, new: str, all_tests: bool = False, explain: bool = False) -> Plan:
-        """A plan for `path` changed, with base's slow tests beside its fast ones, at the base too."""
+    def slow_plan(self, path: str, old: str, new: str, all_tests: bool = False, explain: bool = False,
+                  kit: bool = False) -> Plan:
+        """A plan for `path` changed, with base's slow tests beside its fast ones, at the base too;
+        with `kit`, a slow test of the testkit's, every native test of which a base change runs."""
         then = dict(self.SOURCES)
         base = "crates/hyperion-base/src/lib.rs"
         then[base] = then[base].replace("    #[test]\n    fn other_is_two()", self.SLOW + "    #[test]\n    fn other_is_two()")
+        if kit:
+            then["crates/hyperion-testkit/src/lib.rs"] = (
+                "#[cfg(test)]\nmod tests {\n    #[test]\n    #[ignore = \"slow: a chi-square\"]\n    fn chi_square() {}\n}\n")
         now = dict(then)
         if path in now:
             now[path] = now[path].replace(old, new)
@@ -1013,9 +1018,13 @@ class GraphMode(unittest.TestCase):
         self.assertIn("hyperion-sim: 1 of 2 tests", "\n".join(quiet.details))
         self.assertNotIn("slow tests reached", "\n".join(quiet.details))
         self.assertEqual(self.slow_plan(base, "{ 1 }", "{ 4 }", all_tests=True).details, [])
-        # A crate every test of which runs: every slow test of it.
+        # A crate every test of which runs: every slow test of it; and one every native test of
+        # which runs, as the testkit's do for a base change (RUST_READERS).
         data = self.slow_plan("crates/hyperion-base/data/table.bin", "", "")
         self.assertIn("  slow tests reached (run by name): every slow test of hyperion-base (2)", data.details)
+        kit = self.slow_plan(base, "{ 1 }", "{ 4 }", kit=True)
+        self.assertIn("  slow tests reached (run by name): every slow test of hyperion-testkit (1)", kit.details)
+        self.assertIn("package(hyperion-testkit)", args(kit, "_nextest-run")[1])
 
 
 class TheGuard(unittest.TestCase):
@@ -2470,6 +2479,22 @@ class RealWorkspace(unittest.TestCase):
         self.assertTrue(any(native.matches(graph.units[unit].crate, unit, name)
                             for unit, names in readers.items() for name in names))
         self.assertEqual(next(s for s in p.steps if s.recipe[0] == "_nextest-run").causes[0], smart_ci.SOURCE_READERS)
+
+    def test_the_real_readers_that_compute_their_directory_read_every_crate(self) -> None:
+        # The scope's motivating cases: the surface crate's tag check, whose `src` names its own file
+        # while it lists every crate from a directory it climbs to, and the testkit's ban on
+        # `target_feature`, which lists the crates it names under `crates/`. Any narrower scope holds
+        # its reader's own crate.
+        graph = real_graph()
+        readers, chains = graph.source_readers()
+        scopes = {(unit, name): graph.source_scope(unit, name, chains[f"{unit} {name}"][0])
+                  for unit, names in readers.items() for name in names}
+        every = {key for key, (crates, _) in scopes.items() if crates is None}
+        self.assertTrue(any(unit == SURFACE and name.startswith("tags::") for unit, name in every), scopes)
+        self.assertTrue(any(unit == f"{TESTKIT}::clippy_bans" for unit, _ in every), scopes)
+        for (unit, name), (crates, _) in scopes.items():
+            if crates is not None:
+                self.assertIn(graph.units[unit].crate, crates, (unit, name))
 
 
 # --------------------------------------------------------------------------------------------------
