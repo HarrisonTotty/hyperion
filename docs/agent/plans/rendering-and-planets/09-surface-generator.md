@@ -2883,7 +2883,9 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
       transport's pressure ramp below 0.2 bar.
   - _Batch 2, the water cycle_ (§3): the summer side of the Hadley share, and the sea's evaporation
     in Priestley and Taylor's yearly amount with the Penman split's monthly shape, reading batch 1's
-    ocean heat.
+    ocean heat. Built 2026-10-20 (lane r09-water; _Deviations in T13.i batch 2, as built_). With
+    it, E-P8's northern half is met and E-P11 is met as decision-r09-t13i §3.4 amends it. Its
+    remainder, the land store, is I1, which stands before R09.T15's s, w and f letters.
   - _Tests, batch 1_ (§2.5, as the follow-ups amend it), on T13.g's relief Earth with
     `synthetic_sea`'s floor at the reference Earth's mean ocean depth, 3,689 m:
     1. ERA-Interim (Siler et al.'s Fig. 2b): within 5 K from 58.75° S northward, within 7 K in the
@@ -11029,6 +11031,14 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       - Candidates: T13.i's gradient (no ocean transport, no cloud), β by column (E2), the storage
         clamp.
       - The measurement: decision-r09-t13e-revision §1.4.
+      - **Its northern half is met by R09.T13.i** (batches 1–2; decision-r09-t13i §3, _Deviations in
+        T13.i batch 2, as built_). On the ruled Earth:
+        - the sea's evaporation per sea area is 2.33 mm/day at 40–60° N (NCEP R1 1.98; T13.j 2.69)
+          and 4.23 at 15–35° N (4.69);
+        - E − P is −0.79 at 40–60° N (GPCP − NCEP −0.73, NCEP's own −0.83) and +1.30 at 15–35° N
+          (+1.43, +1.23).
+        - Its southern half is decision-r09-t13i's I5, recorded below: 40–60° S E − P −0.80 against
+          −1.41 (−1.50), and its sea 2.37 against 1.57.
     - E-P9 (decision-r09-t13e-revision §8.2, new). **The convergence is uniform in longitude, and
       there is no monsoon.**
       - Earth's storm tracks favour the oceans: GPCP's 40–60° N sea 3.42 against land 1.79 mm/day
@@ -11076,6 +11086,18 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
         most 6; T13.j's assertions still holding; the warm-half classes, the arid share GPCP-shaped
         against own and the monthly table printed). It must land before R09.T15 asserts any
         reference-Earth class.
+      - **Amended and partly met by R09.T13.i batch 2** (decision-r09-t13i §3.4, 5).
+        - Its item 1 ("JJA above DJF") is withdrawn, with the land store, which is deferred as I1
+          with E-P10. In its place, the 40–60° N all-land JJA mean must be at least 0.45 of its DJF
+          mean.
+        - Its items 2 and 3 are kept.
+        - Measured on the ruled Earth:
+          - the land's DJF 1.66 and JJA 0.94 mm/day, a ratio of 0.565 (GPCP 1.51 and 2.27);
+          - the sea's DJF ÷ JJA 4.61 (NCEP R1 3.75);
+          - the summer convergence 0.40 mm/day in JJA (NCEP's own 0.35).
+        - R09.T15 may assert the reference Earth's main groups. Its s, w and f letters, and the B
+          group's seasonal offset, stay printed until I1. The midlatitude land is still
+          winter-heavier than GPCP's.
 - **Deviations in T13.f, as built** (2026-10-20; lane r09-climate-2, on `5fa4b0e2`; built to
   decision-r09-t13f-cold-traps, all of it: §1's contract, §2's group, §4.2's frost points, §5's
   placement and §7.2–§7.3's tests, its interface text exact).
@@ -12057,6 +12079,193 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     the pressure factor (test 7); in `tests/hydrology.rs` the coarse Earth's probe (follow-up 9
     §2). The climate module, ignored tests included, on the final tree: 198 of 198 passed
     (`logs/climate-12.log`).
+- **Deviations in T13.i batch 2, as built** (2026-10-20; lane r09-water, from `8fb1bfa0`, merged
+  with `c1f38658`; built to decision-r09-t13i §1.2–§1.5 and §3, under the owner's FEATURES FIRST
+  rule of 2026-10-20). Batch 2 of 2, the water cycle (E-P8, E-P11).
+  - _Commits_, one per subtask:
+    - `441278f4`: §3.1 and the observed-temperature test;
+    - `73dcff0f`: §3.2;
+    - `af2f8627`: §3.4's ruled-Earth assertions and prints;
+    - the last: these records, on the gated tree.
+  - _Files._
+    - `steps/climate/{partition.rs,ocean.rs}` (§3.1);
+    - `steps/climate/{evaporation.rs,hydrology.rs,mod.rs,ebm.rs}` (§3.2);
+    - the tests in `partition.rs`, `evaporation.rs`, `tests/hydrology.rs`, the new
+      `tests/observed.rs` and the new test data `tests/ncep_air.rs`;
+    - `NOTICE`, one "Test data (not shipped)" entry.
+  - _No contract moved_ (decision-r09-t13i §4). `CoarseInputs`, the working state's and the field's
+    types, the header, the wire, the public mirror and every golden are as they were, and
+    `GENERATOR_VERSION` stays 22: no golden pins the climate (R09.T16's Earth will be the first),
+    and the serve gate is shut, so §4 rules no bump. `golden_diff.py --base 8fb1bfa0`: no golden
+    changed, nothing to reconcile. The climate cells' temperatures (through the Ekman cells'
+    share), precipitation and winds move on every energy-balance world with a sea, as §4 rules.
+  - _The summer side of the Hadley share_ (§3.1; `partition::hadley_share`, `summer_width`,
+    `Circulation::share`).
+    - As ruled: beyond the centre in its own hemisphere the Gaussian's width is σ_x max(0, 1 − |c|
+      ÷ x_H), and the share is zero at no width.
+    - The partition's budget and the Ekman cells read the one function, through
+      `Circulation::share`.
+    - At c = 0 it is the as-built function to the bit. A locked world's share at every inner edge
+      is as built to the bit (tested on the locked aquaplanet's own budget). `as_built_share` stays
+      test-only for these comparisons.
+  - _The sea's evaporation_ (§3.2; `evaporation::year_rates_kg_m2_s`, `OpenMonth`, `energy_w_m2`,
+    `Moisture::saturation_specific_humidity`).
+    - As ruled, over each sea cell's open months.
+    - `Q_O` is the kept run's `OceanRecord` convergence over the point's sea share, zero at a point
+      with no sea (`per_sea_area`), carried in `OwnRecords::ocean_w_m2`.
+    - G is the storage as built, with batch 1's r_l.
+    - A one-month year takes `rate_kg_m2_s` on β `S_abs` + `Q_O` to the bit, and is as built to the
+      bit where no ocean heat reaches it (tested).
+  - _Choices the ruling did not state_:
+    - ⟨·⟩ is the open months' share-weighted mean normalised by their shares, Σ s x ÷ Σ s. The
+      year's amount Σ s E is the same under the unnormalised reading.
+    - `q_s` is the saturation specific humidity at the surface pressure, its vapour pressure capped
+      at that pressure as `Moisture::specific_humidity` caps it (`q_s` 1 where the liquid boils).
+      `specific_humidity` is now `humidity_at(t, RELATIVE_HUMIDITY)`, the same arithmetic to the
+      bit. Where no open month holds any vapour (⟨`q_s`⟩ zero), the aerodynamic part is spread
+      evenly.
+    - The one-month year reads no saturation.
+    - §3.5 2's "with no storage and a constant temperature every open month is equal" and "`Q_O` = 0
+      and G = 0 give PT's rate in every month" hold as written only where the months' forcing is
+      uniform: the aerodynamic part is spread by `q_s`, not by the energy. Both are built as one
+      test on uniform months (constant coefficient, energy and saturation, with and without a frozen
+      month): every open month equal to the bit, and PT's rate to 10⁻¹². With a varying energy
+      the months differ from PT's month by month, and their year is PT's amount (the year test).
+    - The ruled Earth's test asserts the blocking bounds, DJF ÷ JJA ≤ 7.5 and JJA ÷ DJF ≥ 0.35. It
+      prints "REPORT to main" between them and the ruled 6 and 0.45. Neither printed on this tree.
+    - The observed-temperature data follow the ruling's prototype, its `obs_weighting.py` "zonal"
+      variant, exactly:
+      - cos φ weights of the T62 rows;
+      - the 2.5° grid's surface height at the nearest row and column (Python's ties to even);
+      - Γ 5.818 K km⁻¹, against the reference Earth's own 5.817883, which the test checks to
+        5 × 10⁻⁷ K m⁻¹.
+    - The test weights its annual mean by the calendar months' days (February 28.25), as the
+      prototype does, and its seasons by equal months.
+    - The latent transport it prints is the budget's E − P integrated from the south pole.
+    - From the review:
+      - A world locked 1:1 has no summer side: `Circulation::share` keeps Siler et al.'s width
+        there by construction (an edge at no finite sine), so that §3.1's "unchanged" holds
+        wherever a locked world's greatest h lies, not only at its substellar band. This is tested
+        about off-pole centres.
+      - The evaporation precomputes each point's energy A once a run (`Evaporation::energy_w_m2`)
+        rather than cloning the ocean table: the same arithmetic.
+    - The printed "observed" brackets are GPCP less NCEP R1's evaporation scaled by 0.944 to close
+      its global budget on GPCP's (decision-r09-t13e-revision §1.2), not NCEP's own P − E (−0.52 at
+      40–60° N). The labels say so.
+    - The 15–35° N GPCP − NCEP figure is the data's +1.42 (2.005 − 3.425), not the ruling's
+      +1.43.
+    - The sea's DJF ÷ JJA is the band-solid-angle window of `e_b`, as T13.j's 8.9 was measured. The
+      same weighted by each band's sea, as the stand-ins weight it, is printed beside it: 4.46.
+    - The sea's monthly storage G is not printed, since the ratio is under 6. A report in the 6–7.5
+      band would need it added.
+    - `NOTICE`'s new entry carries PSL's acknowledgment line. The older GPCP and NCEP entries do
+      not, which is recorded below.
+  - _Measured against §3 and its sources_ (ruled Earth at level 7 unless named):
+    - **The partition on observed temperatures** (NCEP R1 1991–2020):
+      - 40–60° N convergence by month 0.75, 0.76, 0.70, 0.55, 0.56, 0.96, 1.31, 1.01, 0.90, 0.88,
+        0.81, 0.77 mm/day, positive every month;
+      - JJA **1.09** (bound ≥ 0.6; the ruling's prototype 1.09, as built 0.18; observed 0.6–1.1,
+        NCEP's own 0.35);
+      - DJF 0.76 (0.76; observed 1.1–1.3);
+      - annual 40–60° N E − P **−0.83** (bound ≤ −0.6; −0.83; GPCP − NCEP −0.73, NCEP's own
+        −0.83);
+      - the latent transport at 40° N +2.22, 15° N −1.66, 15° S +0.52 and 40° S −2.15 PW (the
+        prototype's +2.22, −1.66, —, −2.15; Siler et al.'s ERA-Interim about +2.1 and −2.6, I5).
+    - **The sea**:
+      - 40–60° N DJF 3.74 and JJA 0.81 mm/day per sea area, **DJF ÷ JJA 4.61** (bound 6; NCEP R1
+        3.75; T13.j 8.9; the stand-ins 4.2–6.6);
+      - E-P8's windows: 2.33 at 40–60° N (NCEP 1.98; T13.j 2.69; the ruling's 2.36–2.50), 4.23 at
+        15–35° N (4.69), 2.37 at 40–60° S (1.57) and 4.29 at 15–35° S (4.38).
+    - **The land**: the 40–60° N all-land climate cells DJF 1.66 and JJA 0.94 mm/day, **JJA ÷ DJF
+      0.565** (bound 0.45; T13.j 0.32; the ruling's estimate 0.69 at n_c 6; GPCP 1.50).
+    - **The convergence**: the 40–60° N band window, JJA 0.40 and DJF 0.95 mm/day (the stand-in's
+      0.45 and 0.93; NCEP's own 0.35 and 0.84).
+    - **E − P**: −0.79 at 40–60° N (GPCP − NCEP −0.73, NCEP's own −0.83), +1.30 at 15–35° N
+      (+1.43, +1.23), −0.80 at 40–60° S (−1.41, −1.50; I5) and +1.43 at 15–35° S (+1.65, +1.44).
+    - **The 40–60° N months**, from January, mm/day:
+
+      |             | J     | F     | M     | A     | M     | J     | J     | A     | S     | O     | N     | D     |
+      | ----------- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
+      | e_b         | 3.92  | 2.88  | 1.91  | 1.12  | 0.65  | 0.56  | 0.65  | 1.22  | 2.61  | 3.82  | 4.42  | 4.42  |
+      | Ē           | 1.81  | 1.33  | 0.89  | 0.53  | 0.31  | 0.27  | 0.31  | 0.58  | 1.22  | 1.77  | 2.05  | 2.05  |
+      | E − P       | −0.89 | −0.98 | −1.15 | −1.14 | −0.74 | −0.48 | −0.33 | −0.40 | −0.62 | −0.85 | −0.98 | −0.97 |
+      | P_sea       | 4.81  | 3.87  | 3.06  | 2.26  | 1.40  | 1.05  | 0.98  | 1.61  | 3.23  | 4.67  | 5.40  | 5.39  |
+      | k           | 0.956 | 0.964 | 0.969 | 0.974 | 0.979 | 0.976 | 0.974 | 0.973 | 0.965 | 0.958 | 0.947 | 0.951 |
+      | frozen land | 0.417 | 0.437 | 0.430 | 0.385 | 0.238 | 0.137 | 0.100 | 0.101 | 0.107 | 0.128 | 0.277 | 0.361 |
+      | all-land P  | 1.57  | 1.38  | 1.35  | 1.32  | 1.38  | 0.97  | 0.80  | 1.05  | 2.02  | 2.72  | 2.52  | 2.03  |
+
+      s_b is 0.458 in every month, and C⁺ is −(E − P) in every month (all convergent).
+
+    - **The warm-half classes at 40–70° N**: summer-heavy 0.128, winter-heavy 0.037, neither 0.835
+      (GPCP 0.28, 0.02, 0.70). The arid share on the model's own months is 0.085, and with Peel's
+      summer offset everywhere 0.185 (the estimate 0.25).
+    - **T13.j's assertions hold**:
+      - the north **1.340** (at least 1.10; batch 1 1.250; GPCP 1.27), 2.32 against 1.73 mm/day;
+      - the south 1.414 (GPCP 1.39);
+      - the interior 0.663;
+      - the 40–70° N arid share 0.085;
+      - k 0.947–0.979 by month;
+      - the E − P signs and the rain band near the energy-flux equator.
+      - The coarse pass's north is 1.63 and its south 1.21.
+    - **Batch 1's tests hold** (the relief Earth unless named; batch 1's figures in brackets):
+      - ERA-Interim: from 58.75° S north outside the tiers, worst +4.45 K at 48.75° S (+4.62); the
+        ice edge's tier −2.02, −3.68, −5.07, −4.33 and −3.17 K (bound 7); the tropics −2.03 to +0.62
+        K (−2.19 to +0.57); 73.75–61.25° S at most +4.13 K (+4.42); 76.25° S +6.48 K (+6.77); the
+        relief effect at 76.25° S 2.92 K colder (2.83).
+      - The transports, PW: the totals' peaks +4.73 at 40° N and −4.39 at 37.5° S (+4.74, −4.40);
+        the ocean's tropical peaks +0.68 at 15° N and −0.70 at 17.5° S (+0.76, −0.83), at 47.5° N
+        +0.40 and at 47.5° S −0.11 (the same); the atmosphere's share at 35° N 0.905 and at 35° S
+        0.926 (0.888, 0.903). Every bound is met. The summer side's narrowing moves the Ekman
+        cells' share, as §3.1 foresaw.
+      - The deep aquaplanet's ocean peak +1.13 PW at 15° (1.20), its ψ 31.0 × 10⁹ kg s⁻¹ and ΔT_D
+        8.74 K (I6).
+      - Test 8: G2 287.977 K in 3 orbits, kept (287.981), T13.d's c +0.023 K.
+      - The coarse Earth: G1 7 orbits, d −0.415 K (within 0.05 of the converged G1's −0.438;
+        −0.447), G2 287.978 K in 3 orbits (287.979). Its restarts by month 9, 10, 10, 9, 9, 9, 9,
+        9, 9, 10, 9 and 8; the ruled Earth's 3–4.
+    - **E-L8's sample** (batch 1's probe, at load 4–7, beside a build part of the time;
+      `probe/el8-sample.log`). Every world meets the acceptance: at most 20 restarts a month and
+      converged, and every deep comparison within 1% (the worst cell 1.0 × 10⁻³).
+      - The restarts at most, by world: the four seeds 12, 10, 10 and 11; the land-heavy Earth 17
+        (T13.j's 13); the 60° Earth 9; the locked world 13 (8).
+      - The climate steps under that load: the seeds 28.8, 48.9, 85.2 and 42.9 s (the model 21.0,
+        39.7, 72.9 and 33.2 s); the land-heavy Earth 46.1 s (its water cycle 24.7 s); the 60° Earth
+        23.7 s; the locked world 2.2 s. T13.j's quiet figures were 13.1–23.6 s.
+      - Batch 1's own probe binary on seed 3, at the same load, gave 71.6 s (the model 64.3 s). So
+        the costlier worlds' time is batch 1's model's, its G runs' orbits on those worlds (I13,
+        "the costlier worlds' times once measured"), not this batch's.
+  - _Cost_ (the reference Earth's climate step at level 8, one thread; batch 1's probe, inserted,
+    built and deleted; `probe/step-time-quiet.log`):
+    - **31.83 and 31.89 s quiet**: two runs back to back under the heavy-test lock in a window main
+      cleared, at load 1.56–2.03 and `CPUQuota` 400%. Batch 1 measured 31.83 and 31.82 s.
+    - The model took 24.92 and 24.95 s, the rest 6.91 and 6.94 s, and the water cycle alone 6.81
+      and 6.58 s (batch 1: 6.73 and 6.74 s).
+    - The run is on `af2f8627`'s code. The final tree's review fix to the evaporation (one energy
+      table) is the same arithmetic with one lookup fewer.
+    - This lies within follow-up 10 §1's band (30–35 s quiet lands, recorded). The new
+      evaporation's saturation, one more exponential per open month of each sea cell, is inside
+      the runs' spread.
+  - _The tests_ (§3.4–§3.5):
+    - in `partition.rs`, `at_a_centre_on_the_equator_the_share_is_the_as_built_one_to_the_bit`,
+      `the_summer_side_narrows_with_the_centre_and_the_winter_side_is_as_built` and
+      `a_locked_world_s_share_is_as_built`, with the locked aquaplanet's own budget's share in
+      `a_locked_aquaplanet_s_winds_converge_on_its_substellar_point`;
+    - in `evaporation.rs`, `the_year_evaporates_priestley_and_taylor_s_amount_with_no_storage`,
+      `a_one_month_year_is_priestley_and_taylor_s_rate_to_the_bit`,
+      `uniform_months_with_no_storage_each_evaporate_priestley_and_taylor_s_rate` and
+      `a_month_whose_storage_takes_all_its_energy_still_evaporates_its_aerodynamic_share`;
+    - in `tests/observed.rs`,
+      `the_partition_on_observed_temperatures_converges_on_the_storm_tracks_every_month`;
+    - in `tests/hydrology.rs`, the ruled Earth's new assertions and `report_storm_track_months`.
+    - in `evaporation.rs` also `the_saturation_specific_humidity_is_the_air_s_at_saturation`; in
+      `partition.rs` also `a_rotating_world_s_circulation_narrows_its_summer_side`; in
+      `tests/hydrology.rs` also `the_ocean_s_heat_is_the_point_s_convergence_over_its_sea_share`
+      and `the_sea_s_evaporation_reads_the_ocean_s_heat` (on the zonal synthetic Earth at level 5:
+      no record and a record of zeros the same to the bit; 1,800 sea cells warmed by the ocean in
+      every month evaporate no less in their year, and 532 cooled every month no more), from the
+      review.
+    - The climate module, ignored tests included, on the final tree: 212 of 212 passed
+      (`logs/climate-2.log`).
 - **Deferred findings (2026-10-13 rule)** (R09.T13.i; decision-r09-t13i §6 and its follow-ups;
   recorded, not ruled; each for "main"'s list).
   - I1 (E-P11's remainder, with E-P10). The land's seasonal water: a store (snow, soil) replacing the
@@ -12085,7 +12294,17 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     Hadley mass flux at half Held's 60 × 10⁹ kg s⁻¹ from Peixoto and Oort: a candidate for the
     partition's own revision, not O1's.
   - I7 (E2). β by column, needing a surface net longwave (I3).
+    - After batch 2 it is the remainder of E-P8's sea excess: per sea area, 2.33 mm/day at 40–60° N
+      against NCEP R1's 1.98, and 2.37 at 40–60° S against 1.57.
+    - The subtropical deficit remains: 4.23 at 15–35° N against 4.69.
   - I8. The land's relative humidity, 80% over hot continents (with I1).
+    - After batch 2 the ruled Earth's 40–60° N band-window convergence is 0.40 mm/day in JJA,
+      against the observed-temperature partition's 1.09 and NCEP's own 0.35.
+  - I1, I5, after batch 2 (the ruled Earth):
+    - I1: the 40–60° N land's JJA ÷ DJF is 0.565 against GPCP's 1.50, and the 40–70° N
+      summer-heavy share 0.128 against 0.28;
+    - I5: the 40–60° S E − P is −0.80 against GPCP − NCEP's −1.41, and the observed-temperature
+      partition's latent transport at 40° S −2.15 PW, against Siler et al.'s about −2.6.
   - I9 (O2, for plan 14). Plan 14's D⊕ scaled by atmosphere-only laws; T13.i's ocean scalings are
     the reference for its next revision.
   - I10 (O3, for plan 14). Locked aquaplanets' ocean widening the open dayside.
@@ -12124,6 +12343,38 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       (Merlis and Khatiwala 2008), the time step, threads in R09.T17; and for the stop, r as the
       larger of its last two ratios, or four fresh orbits for the search's stop.
   - G3 and G4 stand as recorded; G2 is superseded by the §2.4 follow-up.
+  - _Batch 2's findings_ (lane r09-water, 2026-10-20; recorded, not ruled):
+    - **I13 amended (E-L8's sample, measured):** the generated worlds' climate steps are 28.8–85.2 s
+      at load 4–7, against the reference Earth's 31.8 s quiet.
+      - The four seeds: 28.8, 48.9, 85.2 and 42.9 s. The land-heavy Earth: 46.1 s, of which the
+        water cycle is 24.7 s.
+      - Seed 3's model takes 64–73 s, so its pass is near 80–95 s, beyond the brainstorm's "tens
+        of seconds".
+      - Batch 1's own binary gives seed 3 71.6 s, so this is the energy balance's G runs, not the
+        water cycle.
+      - It is for the route back under 30 s (RRE(2) or Newton on the G runs) and R09.T16's bench.
+    - **NCEP R1's sea evaporation runs high:** by 18–20 W m⁻², over 15%, against more than 100 flux
+      buoys (Yu 2007, p. 5378, as the science check read it). So the model's 40–60° N sea at 2.33
+      mm/day lies further above the real sea than above NCEP's 1.98 (I7).
+    - **The observed convergence ranges:** the upper ends of 0.6–1.1 (JJA) and 1.1–1.3 (DJF) rest
+      on a land evaporation from memory (decision-r09-t13e-revision §2). Only 0.60–0.70 and
+      1.10–1.19 reproduce from the data.
+    - **The ruling's figures:**
+      - decision-r09-t13i §3.1's 15–35° N GPCP − NCEP is +1.43, while its data give +1.42;
+      - its bracketed "NCEP's own" annual E − P figures are GPCP less 0.944 × NCEP's evaporation;
+        NCEP's own 40–60° N figure is −0.52;
+      - §3.2's reading of α − 1 as "the large-scale advection's term" sits against Priestley and
+        Taylor's α = 1.26 from advection-free data; it is the aerodynamic, vapour-deficit term of
+        their eq. 7a (the code's documentation reads it so);
+      - §3.5 2's bullets 3 and 6 hold only on uniform months: with a varying energy the ruled form's
+        months are not Priestley and Taylor's month by month. They were built on uniform months
+        (_Deviations in T13.i batch 2, as built_). For the ruling's annotation.
+    - **The vapour deficit's stand-in:** (1 − RH) `q_s`(T_w) peaks in summer, while NCEP's 40–60°
+      N sea's q_s − q_a peaks in winter (1.28 against 0.51 g/kg). The winter maximum comes from the
+      storage's release instead. For a surface-air revision with a wind and an air temperature.
+    - **`NOTICE`:** the earlier GPCP and NCEP R1 test-data entries lack PSL's acknowledgment line,
+      which the new entry carries. "In the public domain" is the ruling's reading, not found on
+      PSL's page.
 - **Deviations in T7.i, as built** (2026-10-20; lane `r09-craters`, from
   `origin/rendering-and-planets` at `8f307d16` with the plan text of `84c56ed5`, measured there and
   merged with `1870973b` before its goldens were blessed; main's rulings of 2026-10-19,

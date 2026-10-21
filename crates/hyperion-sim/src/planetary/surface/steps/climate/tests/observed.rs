@@ -26,11 +26,13 @@ const DJF: [usize; 3] = [11, 0, 1];
 const JJA: [usize; 3] = [5, 6, 7];
 
 /// The least JJA convergence over 40–60° N, mm/day: 0.6 (decision-r09-t13i §3.4, 1; the observed
-/// 0.6–1.1 of GPCP less NCEP's evaporation, or NCEP's own P − E 0.35).
+/// 0.6–1.1 of GPCP less NCEP's evaporation, whose upper end rests on a land evaporation from
+/// memory, decision-r09-t13e-revision §2; NCEP's own P − E 0.35).
 const LEAST_SUMMER_CONVERGENCE_MM_PER_DAY: f64 = 0.6;
 
 /// The greatest annual E − P over 40–60° N, mm/day: −0.6 (decision-r09-t13i §3.4, 1; GPCP − NCEP
-/// −0.73, NCEP's own −0.83).
+/// −0.73, and −0.83 with NCEP's evaporation scaled by 0.944 to close its global budget on GPCP's,
+/// decision-r09-t13e-revision §1.2).
 const GREATEST_ANNUAL_STORM_TRACK_BUDGET_MM_PER_DAY: f64 = -0.6;
 
 /// The solid-angle mean of `bands` over the bands whose centres lie within `low` to `high`
@@ -124,18 +126,18 @@ impl Observed {
         eprintln!(
             "  40–60° N: JJA {:.2} (ruled prototype 1.09, as built 0.18; observed 0.6–1.1, NCEP's \
              own 0.35), DJF {:.2} (0.76; observed 1.1–1.3, NCEP's own 0.84), annual E − P {:+.2} \
-             (−0.83, as built −0.38; GPCP − NCEP −0.73, NCEP's own −0.83)",
+             (−0.83, as built −0.38; GPCP − NCEP −0.73, GPCP − 0.944 NCEP −0.83)",
             self.season(JJA, 40.0, 60.0),
             self.season(DJF, 40.0, 60.0),
             window(grid, &self.annual, 40.0, 60.0) * DAY_S
         );
         for (low, high, observed) in [
-            (15.0, 35.0, "+1.43 (+1.23)"),
+            (15.0, 35.0, "+1.42 (+1.23)"),
             (-60.0, -40.0, "−1.41 (−1.50)"),
             (-35.0, -15.0, "+1.65 (+1.44)"),
         ] {
             eprintln!(
-                "  {low:+.0}° to {high:+.0}°: annual E − P {:+.2} (GPCP − NCEP, NCEP's own: \
+                "  {low:+.0}° to {high:+.0}°: annual E − P {:+.2} (GPCP − NCEP, GPCP − 0.944 NCEP: \
                  {observed}), JJA convergence {:.2}, DJF {:.2}",
                 window(grid, &self.annual, low, high) * DAY_S,
                 self.season(JJA, low, high),
@@ -183,7 +185,9 @@ impl Observed {
 /// 40–60° N convergence −(E − P) is positive in every month, its JJA mean is at least 0.6 mm/day,
 /// and its annual 40–60° N E − P, months weighted by their days, is at most −0.6 mm/day. The
 /// ruled form's prototype gave 1.09 and −0.83, as built 0.18 and −0.38; observed 0.35–1.1 and
-/// −0.73 (−0.83, NCEP's own).
+/// −0.73 (−0.83 with NCEP's evaporation scaled by 0.944). The prototype's figures printed beside
+/// the model are its `runs/obs_weighting3.txt` (the "zonal monthly narrow0.424" line, in
+/// `rm45-scratch/decision-r09-t13i/`), which the test reproduces to the printed digits.
 ///
 /// It prints the other windows (on observed temperatures the energy-flux equator stays north all
 /// year, so 15–35° N is no fair window), each month's energy-flux equator and centre, and the

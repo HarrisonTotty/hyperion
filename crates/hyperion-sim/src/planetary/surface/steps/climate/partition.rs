@@ -192,10 +192,19 @@ impl Circulation {
     }
 
     /// The Hadley cell's share w at sine latitude `x` about a centre of sine `centre`, under this
-    /// circulation's width and edge ([`hadley_share`]).
+    /// circulation's width and edge ([`hadley_share`]). A world locked 1:1 to its host has no
+    /// summer hemisphere: its centre is the substellar convergence, and its share keeps Siler et
+    /// al.'s width on both sides, as built (decision-r09-t13i §3.1: "a locked world's centre
+    /// stands at the substellar pole, so no x lies beyond it: unchanged"), by construction rather
+    /// than by where its greatest h lies.
     #[must_use]
     pub(super) fn share(&self, x: f64, centre: f64) -> f64 {
-        hadley_share(x, centre, self.width, self.edge_sine)
+        // An edge at no finite sine leaves the summer width at `σ_x` to the bit (1 − |c| ÷ ∞ = 1).
+        let edge_sine = match self.cap_sine {
+            Some(_) => self.edge_sine,
+            None => f64::INFINITY,
+        };
+        hadley_share(x, centre, self.width, edge_sine)
     }
 
     /// The ascending branch's latitude Φ₁ that caps the centre, degrees, or `None` on a locked
@@ -262,7 +271,7 @@ fn ascending_branch_deg(inputs: &CoarseInputs, rate: f64) -> f64 {
 /// `σ_s`)²) with the summer width `σ_s` ([`summer_width`]), and zero where `σ_s` is zero. At a
 /// centre on the equator it is their eq. 6 to the bit, `σ_s` being `σ_x` there.
 #[must_use]
-pub(super) fn hadley_share(x: f64, centre: f64, width: f64, edge_sine: f64) -> f64 {
+fn hadley_share(x: f64, centre: f64, width: f64, edge_sine: f64) -> f64 {
     let (low, high) = if centre < 0.0 {
         (centre, 0.0)
     } else {
@@ -305,7 +314,7 @@ pub(super) fn hadley_share(x: f64, centre: f64, width: f64, edge_sine: f64) -> f
 /// summer cell narrows as its ascending branch moves poleward and has no width once the centre
 /// reaches the cell's edge. It scales with rotation through `φ_H`. At c = 0 it is `σ_x` to the bit.
 #[must_use]
-pub(super) fn summer_width(centre: f64, width: f64, edge_sine: f64) -> f64 {
+fn summer_width(centre: f64, width: f64, edge_sine: f64) -> f64 {
     let narrowing = 1.0 - centre.abs() / edge_sine;
     // By comparison, so that a centre at or past the edge (and a NaN) gives no width.
     if narrowing > 0.0 {
@@ -601,10 +610,32 @@ mod tests {
         }
     }
 
+    /// A rotating world's circulation narrows its summer side ([`Circulation::share`] reads its
+    /// own edge): the reference Earth's share at 0.3 about a centre of 0.2 is the narrowed one's
+    /// to the bit, under the as-built tail's.
+    #[test]
+    fn a_rotating_world_s_circulation_narrows_its_summer_side() {
+        let earth = Circulation::for_inputs(
+            &crate::planetary::surface::reference::earth_like(),
+            Turning::Rotating,
+        );
+        assert!(earth.cap_deg().is_some());
+        for (x, centre) in [(0.3, 0.2), (-0.3, -0.2), (0.25, 0.1)] {
+            let narrowed = hadley_share(x, centre, earth.width(), earth.edge_sine());
+            assert_same_bits(earth.share(x, centre), narrowed);
+            assert!(
+                narrowed < as_built_share(x, centre, earth.width()),
+                "{x}, {centre}"
+            );
+        }
+    }
+
     /// decision-r09-t13i §3.5, 1: a world locked 1:1 to its host takes no cap, its centre the
-    /// energy-flux equator at its substellar pole (the north pole of its tidally locked frame), in
-    /// the pole's band, beyond which no inner edge lies: its share at every edge is the as-built one
-    /// to the bit, for a slow rotation's edge (79.4°, a 10-day rotation) and for Earth's.
+    /// energy-flux equator, at its substellar pole (the north pole of its tidally locked frame) in
+    /// the pole's band, beyond which no inner edge lies. Its share at every edge is the as-built one
+    /// to the bit, and so it is about a centre away from the pole (a greatest h off the substellar
+    /// band), the locked share keeping Siler et al.'s width on both sides by construction; for a
+    /// slow rotation's edge (79.4°, a 10-day rotation) and for Earth's.
     #[test]
     fn a_locked_world_s_share_is_as_built() {
         let grid = ModelGrid::locked();
@@ -623,14 +654,16 @@ mod tests {
                 cap_deg: None,
                 cap_sine: None,
             };
-            let centre = circulation.centre_sine(efe);
-            assert_same_bits(centre, efe);
-            for edge in 1..LATITUDE_BANDS {
-                let x = grid.edge_sine(edge);
-                assert_same_bits(
-                    circulation.share(x, centre),
-                    as_built_share(x, centre, circulation.width()),
-                );
+            assert_same_bits(circulation.centre_sine(efe), efe);
+            for centre in [efe, 0.5, 0.2, -0.3] {
+                assert_same_bits(circulation.centre_sine(centre), centre);
+                for edge in 1..LATITUDE_BANDS {
+                    let x = grid.edge_sine(edge);
+                    assert_same_bits(
+                        circulation.share(x, centre),
+                        as_built_share(x, centre, circulation.width()),
+                    );
+                }
             }
         }
     }

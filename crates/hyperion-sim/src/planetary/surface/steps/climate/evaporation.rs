@@ -10,10 +10,11 @@
 //! (R − G), α = 1.26 (their eq. 14), s the slope of the saturation specific humidity with the
 //! temperature and γ = `c_p` ÷ L (their text after eq. 3; α is eq. 5), R the net radiation and G
 //! the heat into the ground, here the sea's storage. α is the actual rate over the equilibrium
-//! rate s ÷ (s + γ) (R − G), and its excess α − 1 is the large-scale advection's term of Penman's
-//! combination equation, the aerodynamic part (Penman, H. L. 1948, "Natural Evaporation from Open
-//! Water, Bare Soil and Grass", Proc. R. Soc. Lond. A 193, 120–145, from memory, as
-//! decision-r09-t13i §3.2 reads it).
+//! rate s ÷ (s + γ) (R − G), 1.26 for saturated surfaces in advection-free data (their p. 91), and
+//! its excess α − 1 stands for the aerodynamic, vapour-deficit term of the combination equation,
+//! LE = s ÷ (s + γ) (R − G) + γ ÷ (s + γ) h (`q_s` − q) (their eq. 7a), the form of Penman, H. L.
+//! 1948, "Natural Evaporation from Open Water, Bare Soil and Grass", Proc. R. Soc. Lond. A 193,
+//! 120–145 (decision-r09-t13i §3.2; Penman from memory).
 //!
 //! # A sea cell's year (decision-r09-t13i §3.2)
 //!
@@ -42,10 +43,13 @@
 //! - G = `C_sea` dT/dt the storage, the sea's heat capacity times the month's centred change of its
 //!   temperature. It sets the months' shape and not the year's amount: the year's storage is zero.
 //!   The equilibrium part carries the winter maximum, where the sea releases its heat (G < 0) to
-//!   cold air; the aerodynamic part, spread by the vapour deficit (1 − RH) `q_s`, whose constant
-//!   relative humidity cancels, keeps a summer evaporation where the storage takes all the
+//!   cold air. The aerodynamic part keeps a summer evaporation where the storage takes all the
 //!   radiation (over NCEP/NCAR R1's 40–60° N sea in summer the air heats the sea, and the sea still
-//!   evaporates 22 W m⁻²; decision-r09-t13i §1.3).
+//!   evaporates 22 W m⁻²; decision-r09-t13i §1.3). It is spread by the ruling's stand-in for the
+//!   vapour deficit, (1 − RH) `q_s` with the air at the water's temperature, whose constant
+//!   relative humidity cancels. The observed deficit peaks in winter instead (NCEP R1's 40–60° N
+//!   sea: 1.28 g/kg in DJF against 0.51 in JJA, §1.3), so here the winter maximum comes from the
+//!   storage's release, not from the deficit.
 //! - the clamp at 1: a wet surface in equilibrium cannot spend more than its available energy on
 //!   evaporation; it binds above about 304 K for water and at Titan's 93.7 K for methane
 //!   (decision-r09-t13ge §2.6).
@@ -144,16 +148,17 @@ pub(super) fn energy_w_m2(absorbed_w_m2: f64, ocean_w_m2: f64) -> f64 {
 /// documentation](self)).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct OpenMonth {
-    /// The month's share of the year, `s_m`.
+    /// The month's share of the year, `s_m`, in (0, 1].
     pub(super) share: f64,
-    /// `c_PT` = min(1, α s ÷ (s + γ)) at the water's temperature ([`coefficient`]).
+    /// `c_PT` = min(1, α s ÷ (s + γ)) at the water's temperature ([`coefficient`]), in (0, 1].
     pub(super) coefficient: f64,
-    /// A = β `S_abs` + `Q_O`, W m⁻² ([`energy_w_m2`]).
+    /// A = β `S_abs` + `Q_O`, W m⁻² ([`energy_w_m2`]), of either sign.
     pub(super) energy_w_m2: f64,
-    /// G, the sea's storage, W m⁻².
+    /// G, the sea's storage, W m⁻², of either sign.
     pub(super) storage_w_m2: f64,
-    /// `q_s` at the water's temperature, the saturation specific humidity at the surface pressure.
-    pub(super) saturation: f64,
+    /// `q_s` at the water's temperature, the saturation specific humidity at the surface pressure,
+    /// kg kg⁻¹, in [0, 1].
+    pub(super) saturation_kg_per_kg: f64,
 }
 
 /// A sea cell's evaporation in each month of its year, kg m⁻² s⁻¹, into `rates` (one a month),
@@ -185,7 +190,7 @@ pub(super) fn year_rates_kg_m2_s(
         year += open.share * open.coefficient * open.energy_w_m2;
         equilibrium +=
             open.share * (open.coefficient / PRIESTLEY_TAYLOR_COEFFICIENT) * open.energy_w_m2;
-        saturation += open.share * open.saturation;
+        saturation += open.share * open.saturation_kg_per_kg;
     }
     // By comparison, so that no open month, no energy (and a NaN) evaporate nothing.
     let positive = |value: f64| value > 0.0;
@@ -214,7 +219,7 @@ pub(super) fn year_rates_kg_m2_s(
             / latent_heat_j_per_kg;
         // Where no open month holds any vapour the deficit is spread evenly.
         let deficit = if saturation > 0.0 {
-            open.saturation / saturation
+            open.saturation_kg_per_kg / saturation
         } else {
             1.0
         };
@@ -304,7 +309,7 @@ mod tests {
                     coefficient: 0.7 + 0.2 * summer,
                     energy_w_m2: 60.0 + 90.0 * summer,
                     storage_w_m2: 150.0 * crate::math::sin(phase),
-                    saturation: 0.008 + 0.004 * summer,
+                    saturation_kg_per_kg: 0.008 + 0.004 * summer,
                 })
             })
             .collect()
@@ -358,21 +363,28 @@ mod tests {
     /// frozen one evaporates nothing.
     #[test]
     fn a_one_month_year_is_priestley_and_taylor_s_rate_to_the_bit() {
-        for (absorbed, ocean) in [(240.0, 0.0), (240.0, 35.0), (80.0, -20.0), (10.0, -30.0)] {
+        // Each case's sunlight and ocean heat, W m⁻², `None` where no ocean heat reaches it.
+        for (absorbed, ocean) in [
+            (240.0, None),
+            (240.0, Some(35.0)),
+            (80.0, Some(-20.0)),
+            (10.0, Some(-30.0)),
+        ] {
+            let energy = energy_w_m2(absorbed, ocean.unwrap_or(0.0));
             let open = OpenMonth {
                 share: 1.0,
                 coefficient: 0.83,
-                energy_w_m2: energy_w_m2(absorbed, ocean),
+                energy_w_m2: energy,
                 storage_w_m2: 0.0,
-                saturation: 0.01,
+                saturation_kg_per_kg: 0.01,
             };
             let mut rate = [f64::NAN];
             year_rates_kg_m2_s(&[Some(open)], LATENT_J_PER_KG, &mut rate);
             hyperion_testkit::float::assert_same_bits(
                 rate[0],
-                rate_kg_m2_s(0.83, energy_w_m2(absorbed, ocean), LATENT_J_PER_KG),
+                rate_kg_m2_s(0.83, energy, LATENT_J_PER_KG),
             );
-            if ocean == 0.0 {
+            if ocean.is_none() {
                 // As built: the coefficient × max(0, β S_abs − G) ÷ L with no storage.
                 let as_built =
                     0.83 * (OCEAN_NET_RADIATION_SHARE * absorbed - 0.0) / LATENT_J_PER_KG;
@@ -401,7 +413,7 @@ mod tests {
                         coefficient: 0.8,
                         energy_w_m2: energy_w_m2(200.0, 0.0),
                         storage_w_m2: 0.0,
-                        saturation: 0.012,
+                        saturation_kg_per_kg: 0.012,
                     })
                 })
                 .collect();
@@ -441,5 +453,26 @@ mod tests {
         let mut equal = [0.0; 12];
         year_rates_kg_m2_s(&at, LATENT_J_PER_KG, &mut equal);
         hyperion_testkit::float::assert_same_bits(rates[5], equal[5]);
+    }
+
+    /// The saturation specific humidity the aerodynamic part is spread by: on the reference
+    /// Earth's air, ε `e_s` ÷ (p − (1 − ε) `e_s`) at the registry's saturation pressure to the bit,
+    /// above the specific humidity at the model's relative humidity, and 1 (to 10⁻¹²) where the water
+    /// boils at the surface pressure.
+    #[test]
+    fn the_saturation_specific_humidity_is_the_air_s_at_saturation() {
+        let model = EnergyBalance::for_inputs(&reference::earth_like());
+        let moisture = model.moisture.expect("the reference Earth is wet");
+        let (p, epsilon) = (moisture.surface_pressure_pa, moisture.mass_ratio);
+        for t in [260.0, 288.0, 300.0] {
+            let e = saturation_pressure(moisture.condensable, Kelvin::new(t))
+                .unwrap()
+                .value();
+            let q_s = moisture.saturation_specific_humidity(t);
+            hyperion_testkit::float::assert_same_bits(q_s, epsilon * e / (p - (1.0 - epsilon) * e));
+            assert!(q_s > moisture.specific_humidity(t), "{t} K");
+        }
+        let boiling = moisture.saturation_specific_humidity(400.0);
+        assert!((boiling - 1.0).abs() < 1e-12, "{boiling}");
     }
 }

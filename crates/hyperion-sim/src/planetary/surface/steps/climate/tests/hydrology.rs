@@ -1285,7 +1285,10 @@ fn report_seasons(run: &Run) -> (f64, f64) {
 
 /// The NCEP/NCAR R1 1991–2020 sea's evaporation per unit of the sea's area over the four windows
 /// 40–60° N, 15–35° N, 40–60° S and 15–35° S, mm/day (decision-r09-t13i §3.4, 3, E-P8's windows,
-/// as decision-r09-t13e-revision's `ncep_evap.txt` gives them): 1.98, 4.69, 1.57 and 4.38.
+/// as decision-r09-t13e-revision's `ncep_evap.txt` gives them): 1.98, 4.69, 1.57 and 4.38. NCEP
+/// R1's ocean latent heat flux runs high, by 18–20 W m⁻² (over 15%) against more than 100 flux
+/// buoys (Yu, L. 2007, J. Climate 20, 5376, p. 5378, as the lane's science check read it), so the
+/// real sea's rates lie lower still.
 const NCEP_SEA_EVAPORATION_MM_PER_DAY: [((f64, f64), f64); 4] = [
     ((40.0, 60.0), 1.98),
     ((15.0, 35.0), 4.69),
@@ -1294,10 +1297,12 @@ const NCEP_SEA_EVAPORATION_MM_PER_DAY: [((f64, f64), f64); 4] = [
 ];
 
 /// The observed annual E − P over the same four windows, mm/day, GPCP v2.3 less NCEP/NCAR R1's
-/// evaporation and, in brackets, NCEP's own P − E (decision-r09-t13i §3.1's table): −0.73 (−0.83),
-/// +1.43 (+1.23), −1.41 (−1.50) and +1.65 (+1.44).
+/// evaporation and, in brackets, GPCP less NCEP's evaporation scaled by 0.944 to close its global
+/// budget on GPCP's (decision-r09-t13i §3.1's table; decision-r09-t13e-revision §1.2): −0.73
+/// (−0.83), +1.42 (+1.23), −1.41 (−1.50) and +1.65 (+1.44). The 15–35° N +1.42 is GPCP's 2.005
+/// less NCEP's 3.425 (the ruling's `gpcp.windows.txt` and `ncep_evap.txt`; its text prints +1.43).
 const OBSERVED_E_MINUS_P_MM_PER_DAY: [(f64, f64); 4] =
-    [(-0.73, -0.83), (1.43, 1.23), (-1.41, -1.50), (1.65, 1.44)];
+    [(-0.73, -0.83), (1.42, 1.23), (-1.41, -1.50), (1.65, 1.44)];
 
 /// The greatest 40–60° N sea's DJF ÷ JJA evaporation per sea area of the ruled Earth
 /// (decision-r09-t13i §3.4, 2; NCEP R1 3.75, T13.j 8.9, the ruling's stand-ins 4.2–6.6): 6, a
@@ -1334,7 +1339,9 @@ fn season_window(
 }
 
 /// Prints the 40–60° N water cycle's months (decision-r09-t13i §3.4, 3) and returns its sea's DJF
-/// ÷ JJA evaporation per sea area (§3.4, 2): each month's band windows over 40–60° N of the
+/// ÷ JJA evaporation per sea area (§3.4, 2), the band-solid-angle window of `e_b` as T13.j's 8.9
+/// was measured (decision-r09-t13e-revision §2), printed beside the same weighted by each band's
+/// sea as the ruling's stand-ins weight it: each month's band windows over 40–60° N of the
 /// sea's evaporation per sea area `e_b`, the bands' mean evaporation Ē, the sea share `s_b`, the
 /// zonal budget's E − P, its convergence C⁺ = max(0, C), the sea's rate `P_sea` before the balance,
 /// the balance's k, the land's frozen share and the all-land climate cells' P (as
@@ -1389,12 +1396,29 @@ fn report_storm_track_months(run: &Run) -> f64 {
         season_window(run, JJA_MONTHS, 40.0, 60.0, sea),
     );
     let ratio = winter_sea / summer_sea;
+    // The same weighted by each band's sea, Σ w s e ÷ Σ w s, as the ruling's stand-ins weight it.
+    let by_sea = |months: [usize; 3]| {
+        let grid = ModelGrid::zonal();
+        months.iter().fold(0.0, |sum, &m| {
+            let sea = &water.months[m].sea;
+            let (mut evaporated, mut area) = (0.0, 0.0);
+            for band in 0..LATITUDE_BANDS {
+                if (40.0..=60.0).contains(&degrees(grid.centre_sine(band))) {
+                    let w = grid.weight(band) * sea.sea_shares[band];
+                    evaporated += w * sea.evaporation_kg_m2_s[band];
+                    area += w;
+                }
+            }
+            sum + evaporated / area
+        }) / 3.0
+    };
     eprintln!(
         "  the 40–60° N sea's evaporation per sea area: DJF {:.2} mm/day, JJA {:.2}, DJF ÷ JJA \
          {ratio:.2} (at most {SEA_SEASON_RATIO_BOUND}, reported to {SEA_SEASON_RATIO_BLOCK}; NCEP \
-         R1 3.75, T13.j 8.9, the ruling's stand-ins 4.2–6.6)",
+         R1 3.75, T13.j 8.9, the ruling's stand-ins 4.2–6.6); weighted by each band's sea {:.2}",
         winter_sea * DAY_S,
-        summer_sea * DAY_S
+        summer_sea * DAY_S,
+        by_sea(DJF_MONTHS) / by_sea(JJA_MONTHS)
     );
     eprintln!(
         "  the 40–60° N band-window convergence: JJA {:.2} mm/day, DJF {:.2} (the ruling's stand-in \
@@ -1404,14 +1428,14 @@ fn report_storm_track_months(run: &Run) -> f64 {
     );
     let sea_evaporation = annual_bands(run, |c, k| c.sea.evaporation_kg_m2_s[k]);
     let annual = annual_budget(run);
-    for (((low, high), ncep), (gpcp_ncep, ncep_own)) in NCEP_SEA_EVAPORATION_MM_PER_DAY
+    for (((low, high), ncep), (gpcp_ncep, scaled)) in NCEP_SEA_EVAPORATION_MM_PER_DAY
         .iter()
         .zip(OBSERVED_E_MINUS_P_MM_PER_DAY)
     {
         eprintln!(
             "  E-P8, {low:+.0}° to {high:+.0}°: the sea's evaporation per sea area {:.2} mm/day \
-             (NCEP R1 {ncep:.2}); E − P {:+.2} (GPCP − NCEP {gpcp_ncep:+.2}, NCEP's own \
-             {ncep_own:+.2})",
+             (NCEP R1 {ncep:.2}); E − P {:+.2} (GPCP − NCEP {gpcp_ncep:+.2}, GPCP − 0.944 NCEP \
+             {scaled:+.2})",
             band_window(&sea_evaporation, *low, *high) * DAY_S,
             band_window(&annual, *low, *high) * DAY_S
         );
@@ -2131,6 +2155,97 @@ fn a_titan_like_world_evaporates_only_over_its_methane_seas_and_rains_what_it_ev
     );
     assert!(evaporated > 0.0);
     assert!((cycle.precipitation_kg_m2_s / evaporated - 1.0).abs() < 0.01);
+}
+
+/// decision-r09-t13i §3.2's `Q_O`, "the point's over its sea share": the convergence of a point
+/// with no sea is none, of a half-sea point twice its own, of an all-sea point itself, each to the
+/// bit, month by month.
+#[test]
+fn the_ocean_s_heat_is_the_point_s_convergence_over_its_sea_share() {
+    let convergence = vec![vec![2.0, 3.0, -4.0], vec![-1.0, 0.25, 7.0]];
+    let per_sea = super::super::per_sea_area(&convergence, &[0.0, 0.5, 1.0]);
+    for (month, expected) in per_sea.iter().zip([[0.0, 6.0, -4.0], [0.0, 0.5, 7.0]]) {
+        for (&q, e) in month.iter().zip(expected) {
+            assert_same_bits(q, e);
+        }
+    }
+}
+
+/// decision-r09-t13i §3.2: the sea's evaporation reads the ocean's heat, `Q_O`, in its energy. On
+/// the reference Earth's synthetic sea at level 5 (the zonal model, whose kept run records its
+/// ocean): with no record, and with a record of zeros, every field cell's rates are the same to the
+/// bit; and with the record, each sea cell whose point the ocean warms in every month evaporates
+/// at least as much in its year as without it, and each it cools in every month at most as much.
+#[test]
+fn the_sea_s_evaporation_reads_the_ocean_s_heat() {
+    let inputs = reference::earth_like();
+    let (field, climate_grid) = grids(5);
+    let pass = Pass::new(reference::SEED, &inputs, &field, &climate_grid);
+    let mut working = Working::initial(&pass);
+    synthetic_earth(&pass, &mut working);
+    let model = energy_balance(&pass, &working, ModelGrid::zonal(), Coordinates::Geographic);
+    let own = model
+        .water
+        .clone()
+        .expect("the Earth keeps its own records");
+    let ocean = own
+        .ocean_w_m2
+        .clone()
+        .expect("the synthetic sea carries the ocean's heat");
+    let (grid, coordinates) = (model.grid.clone(), model.coordinates);
+    let _ = finish(&pass, &mut working, model);
+    let ebm = EnergyBalance::for_inputs(&inputs);
+    let evaporation = |records: &hydrology::OwnRecords| {
+        Evaporation::new(&pass, &working, &ebm, records).expect("the Earth evaporates")
+    };
+    let with = evaporation(&own);
+    let without = evaporation(&hydrology::OwnRecords {
+        ocean_w_m2: None,
+        ..own.clone()
+    });
+    let zeroed = evaporation(&hydrology::OwnRecords {
+        ocean_w_m2: Some(vec![vec![0.0; ocean[0].len()]; ocean.len()]),
+        ..own.clone()
+    });
+    let shares = month_shares(&pass, 12);
+    let year = |rates: &[f64]| -> f64 { rates.iter().zip(&shares).map(|(e, s)| s * e).sum() };
+    let (mut warmed, mut cooled) = (0_u32, 0_u32);
+    let (mut a, mut b, mut c) = ([0.0; 12], [0.0; 12], [0.0; 12]);
+    for n in 0..u32::try_from(working.cells.len()).expect("the cells fit a u32") {
+        let open = with.rates(&pass, &working, &grid, coordinates, n, &mut a);
+        without.rates(&pass, &working, &grid, coordinates, n, &mut b);
+        zeroed.rates(&pass, &working, &grid, coordinates, n, &mut c);
+        for (&no, &zero) in b.iter().zip(&c) {
+            assert_same_bits(no, zero);
+        }
+        if !open {
+            continue;
+        }
+        let point = grid.point_of(coordinates.to_model(field.centre(n)));
+        let heat: Vec<f64> = ocean.iter().map(|month| month[point]).collect();
+        if heat.iter().all(|&q| q > 0.0) {
+            assert!(
+                year(&a) >= year(&b),
+                "cell {n}: {} against {}",
+                year(&a),
+                year(&b)
+            );
+            warmed += 1;
+        } else if heat.iter().all(|&q| q < 0.0) {
+            assert!(
+                year(&a) <= year(&b),
+                "cell {n}: {} against {}",
+                year(&a),
+                year(&b)
+            );
+            cooled += 1;
+        }
+    }
+    eprintln!("sea cells warmed by the ocean every month {warmed}, cooled every month {cooled}");
+    assert!(
+        warmed + cooled > 0,
+        "no sea cell's point is warmed or cooled every month"
+    );
 }
 
 /// The ruled dry world (decision-r09-t13ge §2.13, §2.12): a dry world under the energy-balance

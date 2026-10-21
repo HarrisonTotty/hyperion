@@ -427,8 +427,7 @@ fn at_edges(grid: &ModelGrid, edges: &[f64], x: f64) -> f64 {
 
 /// What a run's evaporation reads (the [module documentation](self)'s stage 2): the climate
 /// condensable, its liquid's palette entry and the model's freezing point, each grid point's
-/// absorbed sunlight at its water surface and its ocean heat each month, and each month's share
-/// and centred span of time.
+/// energy at its water surface each month, and each month's share and centred span of time.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Evaporation {
     /// The model, whose heat capacity and air the rate reads.
@@ -439,17 +438,16 @@ pub(super) struct Evaporation {
     entry: u8,
     /// The freezing point below which the liquid gives nothing, K; `None` where no ice forms.
     freezing_k: Option<f64>,
-    /// Each month's absorbed sunlight at each grid point's water surface, W m⁻²: the month's
-    /// insolation × (1 − α(T − Γ `z̄_w`)) at the model's own record T.
-    absorbed_w_m2: Vec<Vec<f64>>,
+    /// Each month's energy at each grid point's water surface, W m⁻², A = β `S_abs` + `Q_O`
+    /// ([`energy_w_m2`](super::evaporation::energy_w_m2)): `S_abs` the month's insolation ×
+    /// (1 − α(T − Γ `z̄_w`)) at the model's own record T, and `Q_O` the point's ocean heat per
+    /// unit of its sea ([`OwnRecords::ocean_w_m2`]), none where no sea carries the term.
+    energy_w_m2: Vec<Vec<f64>>,
     /// Each month's span from the previous month's middle to the next's, s: (½ s₋ + s + ½ s₊) P of
     /// the shares s; none in a one-month year.
     spans_s: Vec<f64>,
     /// Each month's share of the year.
     shares: Vec<f64>,
-    /// Each month's ocean heat convergence at each grid point per unit of its sea, W m⁻²
-    /// ([`OwnRecords::ocean_w_m2`]); `None` where no sea carries the term.
-    ocean_w_m2: Option<Vec<Vec<f64>>>,
 }
 
 impl Evaporation {
@@ -470,15 +468,21 @@ impl Evaporation {
             .condensable
             .and_then(|key| inputs.palette().find(PaletteRole::Liquid, key))?;
         let lapse = working.lapse_rate_k_per_m;
-        let absorbed_w_m2 = own
+        let energy_w_m2 = own
             .months_k
             .iter()
             .zip(&own.insolation_w_m2)
-            .map(|(t_k, insolation)| {
+            .enumerate()
+            .map(|(m, (t_k, insolation))| {
                 t_k.iter()
                     .zip(insolation)
                     .zip(&own.water_m)
-                    .map(|((&t, &q), &z)| q * (1.0 - model.albedo_at(t - lapse * z)))
+                    .enumerate()
+                    .map(|(p, ((&t, &q), &z))| {
+                        let absorbed = q * (1.0 - model.albedo_at(t - lapse * z));
+                        let ocean = own.ocean_w_m2.as_ref().map_or(0.0, |ocean| ocean[m][p]);
+                        super::evaporation::energy_w_m2(absorbed, ocean)
+                    })
                     .collect()
             })
             .collect();
@@ -501,10 +505,9 @@ impl Evaporation {
                 Freezing::At { point_k } => Some(point_k),
                 Freezing::Never { .. } => None,
             },
-            absorbed_w_m2,
+            energy_w_m2,
             spans_s,
             shares,
-            ocean_w_m2: own.ocean_w_m2.clone(),
         })
     }
 
@@ -566,7 +569,7 @@ impl Evaporation {
             );
             // A one-month year has no storage, and takes Priestley and Taylor's rate on its
             // energy, which reads no saturation.
-            let (storage, saturation) = if twelve {
+            let (storage, saturation_kg_per_kg) = if twelve {
                 let (before, after) = ((m + 11) % 12, (m + 1) % 12);
                 (
                     self.model.heat_capacity(t_w, 1.0) * (anomaly(after) - anomaly(before))
@@ -576,16 +579,12 @@ impl Evaporation {
             } else {
                 (0.0, 0.0)
             };
-            let ocean = self
-                .ocean_w_m2
-                .as_ref()
-                .map_or(0.0, |ocean| ocean[m][point]);
             *month = Some(OpenMonth {
                 share: self.shares[m],
                 coefficient,
-                energy_w_m2: super::evaporation::energy_w_m2(self.absorbed_w_m2[m][point], ocean),
+                energy_w_m2: self.energy_w_m2[m][point],
                 storage_w_m2: storage,
-                saturation,
+                saturation_kg_per_kg,
             });
         }
         super::evaporation::year_rates_kg_m2_s(&months[..rates.len()], latent, rates);
