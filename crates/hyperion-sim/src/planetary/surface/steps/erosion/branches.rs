@@ -21,8 +21,9 @@
 //!   sticky ("T14.c follow-up 2" §1 and §3), no link rising more than the debris-flow slope times
 //!   its length (the "T14.c follow-up" item 2), the climate's annual runoff the source, ice cells
 //!   shedding it as it is (Q5), the sea's cells the bounds, and every closed depression a dry playa
-//!   until R09.T14.d's water balance (Q3); its heights above base then remapped in order onto its
-//!   construction's ([`remap_onto_construction`], "T14.c follow-up 2" §2).
+//!   until R09.T14.d's water balance (Q3); its absolute heights then remapped in order onto its
+//!   construction's, each cell no lower than its receiver and no link steeper than the threshold
+//!   ([`remap_onto_construction`], "T14.c follow-up 2" §2 and "T14.c follow-up 3" item 3).
 //!
 //! Each choice is one function whose documentation cites the ruling's question.
 
@@ -556,7 +557,7 @@ pub(crate) fn erode_wet_now_with(
     )
 }
 
-/// A world wet now's field remapped onto its construction's hypsometry
+/// A world wet now's field remapped onto its construction's absolute hypsometry
 /// ([`remap_onto_construction`]).
 #[cfg_attr(
     not(test),
@@ -567,55 +568,65 @@ pub(crate) fn erode_wet_now_with(
 )]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Remapped {
-    /// Each cell's elevation, metres: a remapped cell's base plus its construction's height above
-    /// base at its rank, re-capped; any other cell's the solve's, its ground.
+    /// Each cell's elevation, metres: a remapped cell's construction elevation at its rank, lifted
+    /// to its receiver's surface or held to the threshold above it; any other cell's the solve's,
+    /// its ground for a bound, a cell of zero equivalent area or a held cell.
     pub(crate) elevation_m: Vec<f64>,
-    /// The cells the solver moved, which the remap maps: not bound and of equivalent area above
-    /// zero.
+    /// The cells the remap maps: the unbound cells the solve moved, not bound, of equivalent area
+    /// above zero and not held ([`held`](Self::held)).
     pub(crate) moved: Vec<bool>,
-    /// The links the threshold re-capped after the remap.
-    pub(crate) recapped: usize,
-    /// The largest lowering of a re-capped cell, metres; zero where none is.
-    pub(crate) largest_recap_m: f64,
+    /// The held cells: unbound, of equivalent area above zero, with no uplift, at their
+    /// construction to the bit below their receiver on the solve, closed depressions that the
+    /// lakes on the final field take (decision-r09-t14-choices, "T14.c follow-up 3" item 1).
+    pub(crate) held: Vec<bool>,
+    /// The remapped cells the pass lifted to their receiver's surface.
+    pub(crate) lifted: usize,
+    /// The largest lift, metres; zero where none is.
+    pub(crate) largest_lift_m: f64,
+    /// The remapped cells the pass lowered to the threshold above their receiver.
+    pub(crate) lowered: usize,
+    /// The largest lowering, metres; zero where none is.
+    pub(crate) largest_lowering_m: f64,
 }
 
 /// A world wet now's solve `s_m` on `outcome`'s last routing remapped onto its construction
-/// `z0_m`'s area-weighted heights above base (decision-r09-t14-choices, "T14.c follow-up 2" §2).
+/// `z0_m`'s area-weighted absolute heights (decision-r09-t14-choices, "T14.c follow-up 2" §2 as
+/// its "T14.c follow-up 3" item 3 overrules its frame).
 ///
-/// 1. **Heights above base.** Every cell not bound and of equivalent area above zero (the sea's
-///    cells, lake beds and cells of zero equivalent area keep their ground) takes h = s − the
-///    base of its own root on the routing.
-/// 2. **The order.** Those cells sorted by h, each asserted finite, ties broken by the routing's
-///    preorder (each receiver before its donors), with their cumulative area, each takes the
-///    construction's height above base at its own cumulative midpoint: the construction's heights
-///    z0 − `ℓ_b` over the same cells, sorted by (value, cell index) with their cumulative area, the
-///    value of the construction cell whose interval holds the midpoint, with no interpolation,
-///    clamped at zero or above. Its elevation is its base plus that value. The ruling's tie-break
-///    is the cell index; the preorder is the lane's, since a link of no rise (a cell without
-///    uplift, level with its receiver) would otherwise put a donor of lower index below its
-///    receiver (12 cells on the reference Earth).
-/// 3. **The threshold again.** In the routing's preorder, any such cell more than
-///    [`DEBRIS_FLOW_SLOPE`] times its link above its receiver (the water's surface over a bound) is
-///    lowered to its receiver plus that, undoing the remap's local stretching.
+/// 1. **The set.** The unbound cells the solve moved: every cell not bound (the sea's cells and
+///    lake beds keep their ground), of equivalent area above zero, and not held, a cell with no
+///    uplift kept at its construction to the bit below its receiver on the solve (a closed
+///    depression that the lakes on the final field take; the follow-up's item 1). The same set on
+///    both sides.
+/// 2. **The map.** The set sorted by (s, the routing's preorder position), each asserted finite,
+///    with its cumulative area; each cell takes the construction's elevation z0 at its own
+///    cumulative midpoint, the construction's set sorted by (z0, cell index) with its cumulative
+///    area, the value of the construction cell whose interval holds the midpoint, with no
+///    interpolation. The preorder tie-break gives a receiver its value before its donors at a tie
+///    (a flat or a capped link; the follow-up's item 2, ratified).
+/// 3. **The pass.** In the routing's preorder, each remapped cell with a receiver becomes min(max(z′,
+///    `w_r`), `w_r` + `s_c` δ), `w_r` its receiver's final surface (a bound's water surface or
+///    ground, otherwise the receiver's own final height), `s_c` [`DEBRIS_FLOW_SLOPE`] and δ the
+///    link: the max lifts a cell the map put below its receiver's surface up to it, a flat shore
+///    below a high lake; the min holds the threshold, undoing the map's local stretching. Held
+///    cells are skipped.
 ///
-/// The map is monotone in the height above base and a path shares one base, so the drainage is
-/// the solve's. Labelled: the coarse land's hypsometry on a world wet now is its construction's,
-/// to the re-cap and the cells' sizes. T12's construction is calibrated on an eroded planet's
-/// hypsometry (Earth2014's), so the steady state's own reshaping of it, a concave profile that
-/// keeps each basin's mean and so lengthens its upper tail, would count erosion twice; the
-/// steady state organises the drainage, not the distribution. Basin means move by the global map,
-/// and `k_s` is the final field's S A^θ, no longer u ÷ K exactly.
-///
-/// Recorded: the heights are taken above the final routing's bases and given back from the
-/// construction's own, so a cell whose root has moved (a captured basin) moves with its base. On
-/// the reference Earth the heights above base are the construction's to the re-cap (their highest
-/// 8,299 m), but above the sea the land's median falls from 550 to 490 m and its highest rises
-/// from 8,594 to 10,696 m, a cell draining to a closed basin of high base.
+/// Any one monotone map of absolute height keeps the order along every path, whatever its base,
+/// and the pass leaves every remapped cell at or above its receiver with no link steeper than the
+/// threshold, so the drainage is the solve's. The land's highest point above the sea is at most
+/// the construction's: the map's values are the construction's, and the pass only lowers a cell
+/// or lifts it to a surface no higher. Labelled: the coarse land's hypsometry on a world wet now
+/// is its construction's above the sea, to the lifts, the lowerings and the cells' sizes, in the
+/// frame Earth2014, T12.a's bands and plan 14's hypsometry are calibrated in. T12's construction
+/// is calibrated on an eroded planet's hypsometry, so the steady state's own reshaping of it, a
+/// concave profile that keeps each basin's mean and so lengthens its upper tail, would count
+/// erosion twice; the steady state organises the drainage, not the distribution. Basin means move
+/// by the global map, and `k_s` is the final field's S A^θ, no longer u ÷ K exactly. The solver's
+/// uplift still reads heights above each basin's base level (Q1).
 ///
 /// # Panics
 ///
-/// If an input is not one a cell of `outcome`, the outcome carries no construction base levels
-/// (it is not a world wet now's), or a height is not finite.
+/// If an input is not one a cell of `outcome`, or a height is not finite.
 #[cfg_attr(
     not(test),
     expect(
@@ -629,30 +640,40 @@ pub(crate) fn remap_onto_construction(outcome: &Outcome, z0_m: &[f64], s_m: &[f6
     for (what, len) in [
         ("construction", z0_m.len()),
         ("bound", outcome.bounds.len()),
-        ("construction base", outcome.construction_base_m.len()),
+        ("uplift", outcome.uplift_m_per_year.len()),
     ] {
         assert_eq!(len, n, "one {what} a cell");
     }
     let routing = &outcome.routing;
     let area = outcome.mesh.areas_m2();
-    let moved: Vec<bool> = (0..n)
+    let unbound: Vec<bool> = (0..n)
         .map(|c| outcome.bounds[c].is_none() && outcome.equivalent_area_m2[c] > 0.0)
         .collect();
-    let base = |c: usize| routing.base_level_m(cell_of(c));
+    let held: Vec<bool> = (0..n)
+        .map(|c| {
+            unbound[c]
+                && outcome.uplift_m_per_year[c] <= 0.0
+                && s_m[c].total_cmp(&z0_m[c]).is_eq()
+                && routing
+                    .receiver(cell_of(c))
+                    .is_some_and(|link| s_m[c].total_cmp(&s_m[slot(link.cell)]).is_lt())
+        })
+        .collect();
+    let moved: Vec<bool> = (0..n).map(|c| unbound[c] && !held[c]).collect();
     let mut order = vec![0; n];
     for (rank, &cell) in routing.preorder().iter().enumerate() {
         order[slot(cell)] = rank;
     }
-    let ranked = |height: &dyn Fn(usize) -> f64, tie: &dyn Fn(usize) -> usize| {
+    let ranked = |height: &[f64], tie: &dyn Fn(usize) -> usize| {
         let mut cells: Vec<(f64, usize)> = (0..n)
             .filter(|&c| moved[c])
-            .map(|c| (num::assert_finite(height(c)), c))
+            .map(|c| (num::assert_finite(height[c]), c))
             .collect();
         cells.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(tie(a.1).cmp(&tie(b.1))));
         cells
     };
-    let solved = ranked(&|c| s_m[c] - base(c), &|c| order[c]);
-    let built = ranked(&|c| z0_m[c] - outcome.construction_base_m[c], &|c| c);
+    let solved = ranked(s_m, &|c| order[c]);
+    let built = ranked(z0_m, &|c| c);
     let mut elevation_m = s_m.to_vec();
     let (mut below, mut j) = (0.0, 0);
     let mut upto = built.first().map_or(0.0, |&(_, c)| area[c]);
@@ -663,27 +684,37 @@ pub(crate) fn remap_onto_construction(outcome: &Outcome, z0_m: &[f64], s_m: &[f6
             j += 1;
             upto += area[built[j].1];
         }
-        elevation_m[c] = base(c) + num::max(0.0, built[j].0);
+        elevation_m[c] = built[j].0;
     }
-    let (mut recapped, mut largest_recap_m) = (0, 0.0);
+    let (mut lifted, mut largest_lift_m) = (0, 0.0);
+    let (mut lowered, mut largest_lowering_m) = (0, 0.0);
     for &cell in routing.preorder() {
         let c = slot(cell);
         let Some(link) = routing.receiver(cell).filter(|_| moved[c]) else {
             continue;
         };
         let r = slot(link.cell);
-        let top = outcome.bounds[r].unwrap_or(elevation_m[r]) + DEBRIS_FLOW_SLOPE * link.length_m;
-        if elevation_m[c] > top {
-            largest_recap_m = num::max(largest_recap_m, elevation_m[c] - top);
+        let surface = outcome.bounds[r].unwrap_or(elevation_m[r]);
+        let top = surface + DEBRIS_FLOW_SLOPE * link.length_m;
+        let height = elevation_m[c];
+        if height < surface {
+            largest_lift_m = num::max(largest_lift_m, surface - height);
+            elevation_m[c] = surface;
+            lifted += 1;
+        } else if height > top {
+            largest_lowering_m = num::max(largest_lowering_m, height - top);
             elevation_m[c] = top;
-            recapped += 1;
+            lowered += 1;
         }
     }
     Remapped {
         elevation_m,
         moved,
-        recapped,
-        largest_recap_m,
+        held,
+        lifted,
+        largest_lift_m,
+        lowered,
+        largest_lowering_m,
     }
 }
 

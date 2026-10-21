@@ -186,9 +186,11 @@ fn land_mean(outcome: &Outcome, sea: &[bool], z: &[f64]) -> f64 {
 ///   apart (4 on the smooth world, 14 on the rough; [`assert_above_receivers`]), and
 ///   no link rises more than the threshold slope times its length (decision-r09-t14-choices,
 ///   "T14.c follow-up" items 2–3);
-/// - after the branch's remap ([`remap_onto_construction`]) every cell stays at or above its
-///   receiver with no link steeper than the threshold, and (ii) the highest cell above its base is
-///   the construction's, to the re-cap ("T14.c follow-up 2" §2 and §4);
+/// - after the branch's remap ([`remap_onto_construction`]) of absolute heights, its held cells
+///   the pits, every remapped cell stays at or above its receiver with no link steeper than the
+///   threshold, and (ii) the remapped set's highest cell is the construction's, to the pass's
+///   lowering, with no land cell above the construction's highest ("T14.c follow-up 2" §2 and §4,
+///   as its "T14.c follow-up 3" items 1 and 3 restate them);
 /// - the sea's cells keep their ground.
 ///
 /// Printed: each level's first and last residual, largest change, changed receivers and basin
@@ -254,7 +256,7 @@ fn the_residual_falls_over_each_level_s_iterations() {
         );
         let remapped = remap_onto_construction(&outcome, &world.z0, &outcome.z_m);
         assert_remap_keeps_the_drainage(&what, &outcome, &world.z0, &remapped);
-        assert_peak_is_the_construction_s(&what, &outcome, &world.z0, &remapped);
+        assert_peak_is_the_construction_s(&what, &world.z0, (&world.sea, SEA_LEVEL_M), &remapped);
         for (c, &wet) in world.sea.iter().enumerate() {
             if wet {
                 assert_same_bits(outcome.z_m[c], world.z0[c]);

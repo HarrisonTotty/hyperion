@@ -30,6 +30,7 @@ use core::cmp::Ordering;
 
 use hyperion_surface::field::{CoarseLevel, coarse_level};
 use hyperion_surface::synth::channels::DEBRIS_FLOW_SLOPE;
+use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::lcg::Lcg;
 
 use super::super::{Pass, Working, climate, craters, plates, relief};
@@ -261,22 +262,37 @@ fn steeper_than(outcome: &Outcome, z: &[f64], slope: f64) -> (Vec<u32>, f64) {
 }
 
 /// The remapped field `remapped` of `outcome` keeps (iii) and the threshold
-/// (decision-r09-t14-choices, "T14.c follow-up 2" §2 and §4): every cell remapped lies at or above
-/// its receiver on the last routing (the water's surface over a bound), the solve's pits apart
-/// ([`not_above_receivers`], `z0` the construction), and no link rises more than
-/// [`DEBRIS_FLOW_SLOPE`] times its length; the counts and the re-capped links are printed under
-/// `what`.
+/// (decision-r09-t14-choices, "T14.c follow-up 2" §2 and §4, as its "T14.c follow-up 3" restates
+/// them): the remap's held cells are the solve's pits ([`not_above_receivers`], `z0` the
+/// construction), each kept at its solve; every cell remapped lies at or above its receiver on the
+/// last routing (the water's surface over a bound); and no link rises more than
+/// [`DEBRIS_FLOW_SLOPE`] times its length. The counts, the held cells and the pass's lifts and
+/// lowerings are printed under `what`.
 ///
 /// # Panics
 ///
-/// If a remapped cell other than a pit lies below its receiver, or a link is steeper.
+/// If the held cells are not the pits, a remapped cell lies below its receiver, or a link is
+/// steeper.
 fn assert_remap_keeps_the_drainage(what: &str, outcome: &Outcome, z0: &[f64], remapped: &Remapped) {
     let z = &remapped.elevation_m;
     let (_, _, pits) = not_above_receivers(outcome, z0);
+    let held: Vec<u32> = (0..outcome.routing.len())
+        .filter(|&c| remapped.held[slot(c)])
+        .collect();
+    assert_eq!(
+        held, pits,
+        "{what}: the remap's held cells are the solve's pits"
+    );
+    for &c in &held {
+        assert!(
+            !remapped.moved[slot(c)],
+            "{what}: held cell {c} is not remapped"
+        );
+        assert_same_bits(z[slot(c)], outcome.z_m[slot(c)]);
+    }
     let below: Vec<u32> = (0..outcome.routing.len())
         .filter(|&c| {
             remapped.moved[slot(c)]
-                && pits.binary_search(&c).is_err()
                 && outcome.routing.receiver(c).is_some_and(|link| {
                     let r = slot(link.cell);
                     z[slot(c)] < outcome.bounds[r].unwrap_or(z[r])
@@ -285,11 +301,16 @@ fn assert_remap_keeps_the_drainage(what: &str, outcome: &Outcome, z0: &[f64], re
         .collect();
     let (steeper, steepest) = steeper_than(outcome, z, DEBRIS_FLOW_SLOPE);
     eprintln!(
-        "{what}: the remap: {} cells below their receiver, the steepest link {steepest:.4}, {} \
-         links re-capped, the largest lowering {:.1} m",
+        "{what}: the remap over {} cells, {} held apart: {} cells below their receiver, the \
+         steepest link {steepest:.4}; {} cells lifted to their receiver's surface (the largest \
+         {:.1} m), {} lowered to the threshold (the largest {:.1} m)",
+        remapped.moved.iter().filter(|&&m| m).count(),
+        held.len(),
         below.len(),
-        remapped.recapped,
-        remapped.largest_recap_m
+        remapped.lifted,
+        remapped.largest_lift_m,
+        remapped.lowered,
+        remapped.largest_lowering_m
     );
     assert!(
         below.is_empty() && steeper.is_empty(),
@@ -302,42 +323,105 @@ fn assert_remap_keeps_the_drainage(what: &str, outcome: &Outcome, z0: &[f64], re
     );
 }
 
-/// The highest remapped cell of `remapped` above its base on `outcome`'s last routing and the
-/// highest construction cell `z0` above its construction basin's base over the same cells, metres
-/// (decision-r09-t14-choices, "T14.c follow-up 2" §4's (ii)).
-fn peaks_above_base(outcome: &Outcome, z0: &[f64], remapped: &Remapped) -> (f64, f64) {
+/// The highest remapped cell of `remapped` and the highest construction cell `z0` over the same
+/// cells, metres (decision-r09-t14-choices, "T14.c follow-up 3" item 3's (ii)).
+fn set_peaks(z0: &[f64], remapped: &Remapped) -> (f64, f64) {
     let (mut after, mut before) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
     for (c, &moved) in remapped.moved.iter().enumerate() {
         if moved {
-            let base = outcome.routing.base_level_m(cell_of(c));
-            after = after.max(remapped.elevation_m[c] - base);
-            before = before.max(z0[c] - outcome.construction_base_m[c]);
+            after = after.max(remapped.elevation_m[c]);
+            before = before.max(z0[c]);
         }
     }
     (after, before)
 }
 
-/// (ii) after the remap (decision-r09-t14-choices, "T14.c follow-up 2" §4): the highest remapped
-/// cell above its base equals the construction's highest above its base, to the re-cap's largest
-/// lowering and 1 µm of rounding; printed under `what`.
+/// (ii) after the remap (decision-r09-t14-choices, "T14.c follow-up 3" item 3): the highest
+/// remapped cell equals the construction's highest over the same cells, to the pass's largest
+/// lowering and 1 µm of rounding, and no land cell (off `sea`) stands above the construction's
+/// highest land cell; printed under `what`, above `sea_level_m`.
 ///
 /// # Panics
 ///
-/// If it does not.
+/// If either does not hold.
 fn assert_peak_is_the_construction_s(
     what: &str,
-    outcome: &Outcome,
     z0: &[f64],
+    (sea, sea_level_m): (&[bool], f64),
     remapped: &Remapped,
 ) {
-    let (after, before) = peaks_above_base(outcome, z0, remapped);
+    let (after, before) = set_peaks(z0, remapped);
+    let (land, land0, _) = land_peaks(&remapped.elevation_m, z0, sea, sea_level_m);
     eprintln!(
-        "{what}: (ii) the highest cell above its base {after:.3} m after the remap against the \
-         construction's {before:.3} m"
+        "{what}: (ii) the remapped set's highest {:.3} m above the sea against the construction's \
+         {:.3} m over the same cells; the land's highest {land:.3} m against the construction's \
+         {land0:.3} m",
+        after - sea_level_m,
+        before - sea_level_m
     );
     assert!(
-        after <= before + 1.0e-6 && after >= before - remapped.largest_recap_m - 1.0e-6,
-        "{what}: the highest cell above its base is {after} m against the construction's {before} m"
+        after <= before + 1.0e-6 && after >= before - remapped.largest_lowering_m - 1.0e-6,
+        "{what}: the remapped set's highest is {after} m against the construction's {before} m"
+    );
+    assert!(
+        land <= land0 + 1.0e-6,
+        "{what}: the land's highest is {land} m above the sea against the construction's {land0} m"
+    );
+}
+
+/// T12.a's bands on `working`'s field relative to its sea level, on `pass`'s grid
+/// (`decision-r09-t12-coarse.md` item 1, as `relief::tests::sigma_h` checks them on the reference
+/// Earth): the land mode within 300 m of +125 m, the ocean's modal 250 m bin among the centres
+/// −5,125 to −4,125 m, and the mean below −2 km from −4,731 to −3,981 m; printed under `what`
+/// (decision-r09-t14-choices, "T14.c follow-up 3" item 3, on the final field).
+///
+/// # Panics
+///
+/// If a band does not hold.
+fn assert_earth_bands(what: &str, pass: &Pass<'_>, working: &Working) {
+    let sea = working.sea_level.value();
+    let omega = pass.grid().solid_angles_sr();
+    let mut bins = std::collections::BTreeMap::new();
+    let (mut area, mut sum) = (0.0, 0.0);
+    for (cell, &w) in working.cells.iter().zip(omega) {
+        let e = cell.elevation.value() - sea;
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "a coarse elevation's 250 m bin is within an i64"
+        )]
+        let k = (e / 250.0).floor() as i64;
+        *bins.entry(k).or_insert(0.0) += w;
+        if e < -2_000.0 {
+            area += w;
+            sum += e * w;
+        }
+    }
+    let modal = |keep: &dyn Fn(i64) -> bool| {
+        let (k, _) = bins.iter().filter(|(k, _)| keep(**k)).fold(
+            (0_i64, f64::NEG_INFINITY),
+            |best, (&k, &w)| {
+                if w > best.1 { (k, w) } else { best }
+            },
+        );
+        #[expect(clippy::cast_precision_loss, reason = "a bin index is small")]
+        let centre = (k as f64 + 0.5) * 250.0;
+        centre
+    };
+    let land = modal(&|k| k >= -8);
+    let ocean = modal(&|k| k < -8);
+    let deep_mean = sum / area;
+    eprintln!(
+        "{what}: T12.a's bands: land mode {land} m, ocean modal bin {ocean} m, mean below −2 km \
+         {deep_mean:.0} m"
+    );
+    assert!((land - 125.0).abs() <= 300.0, "{what}: land mode {land} m");
+    assert!(
+        (-5_125.0..=-4_125.0).contains(&ocean),
+        "{what}: ocean mode {ocean} m"
+    );
+    assert!(
+        (-4_731.0..=-3_981.0).contains(&deep_mean),
+        "{what}: {deep_mean} m"
     );
 }
 

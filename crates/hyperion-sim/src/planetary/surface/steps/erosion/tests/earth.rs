@@ -1,9 +1,9 @@
 //! The reference Earth's erosion, wet now (R09.T14.c; the lane's design §4.5 test 6,
 //! decision-r09-t14-choices Q1, the "T14.b follow-up" item 5, the "T14.c follow-up" items 1–3 and
-//! the "T14.c follow-up 2"): the plan's restated fixed-point test on the reference Earth at level
-//! 8, with the uplift as a field held by the additive refit, the threshold slope, sticky
-//! receivers, the remap onto the construction's hypsometry, the assertions on the final field,
-//! its records and the ruling's triggers, slow.
+//! the "T14.c follow-up 2" and 3): the plan's restated fixed-point test on the reference Earth at
+//! level 8, with the uplift as a field held by the additive refit, the threshold slope, sticky
+//! receivers, the remap onto the construction's absolute hypsometry, the assertions on the final
+//! field, its records and the ruling's triggers, slow.
 
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -25,10 +25,15 @@ use super::*;
 /// Earth's `σ_h` of 2.51 km (decision-r09-t14-choices, "T14.b follow-up" item 5).
 const RESIDUAL_TRIGGER_M: f64 = 125.0;
 
-/// The ruling's trigger on the largest change, m: 1 km, a cliff of 2.6% across a cell, measured
-/// on the final remapped field against the previous iterate's remap (decision-r09-t14-choices,
-/// "T14.c follow-up 2" §3).
-const LARGEST_CHANGE_TRIGGER_M: f64 = 1_000.0;
+/// The steepest gradient between two land neighbours of the final field above which the edge is
+/// counted: 0.1, the threshold slope, which bounds the links but not the edges across a divide
+/// (decision-r09-t14-choices, "T14.c follow-up 3" item T; it replaces the largest change's 1 km
+/// as the trigger, the largest change still recorded).
+const EDGE_GRADIENT_COUNTED: f64 = DEBRIS_FLOW_SLOPE;
+
+/// The steepest gradient between two land neighbours of the final field above which it is a
+/// finding to main: 0.2, twice the threshold, about 7 km across one cell (the follow-up's item T).
+const EDGE_GRADIENT_FINDING: f64 = 0.2;
 
 /// The land's mode above the sea, m: T12.a's +125 m, Earth2014's, a finding outside 300 m of it
 /// (decision-r09-t12-coarse item 1; decision-r09-t14-choices Q1's records).
@@ -78,11 +83,40 @@ fn remapped_largest_change_m(outcome: &Outcome, z0: &[f64], remapped: &Remapped)
         })
 }
 
-/// The ruling's triggers (decision-r09-t14-choices, "T14.c follow-up 2" §3), findings and not
-/// blockers: the solve's final RMS residual above 125 m, the remapped field's largest change
-/// above 1 km ([`remapped_largest_change_m`]) and a level failing the within-level fall; each
-/// tripped, as text.
-fn triggers(outcome: &Outcome, remapped_change_m: f64) -> Vec<String> {
+/// The steepest gradient between two edge neighbours that are both land (off `sea`) on `working`'s
+/// field of `pass`, each pair once: the gradient, the pair, and the count of pairs steeper than
+/// [`EDGE_GRADIENT_COUNTED`] (decision-r09-t14-choices, "T14.c follow-up 3" item T).
+fn steepest_edge(pass: &Pass<'_>, working: &Working, sea: &[bool]) -> (f64, (u32, u32), usize) {
+    let grid = pass.grid();
+    let r = pass.inputs().radius().value();
+    let (mut steepest, mut pair, mut counted) = (0.0_f64, (0, 0), 0_usize);
+    for c in 0..grid.len() {
+        if sea[slot(c)] {
+            continue;
+        }
+        for m in grid.edge_neighbours(c) {
+            if m <= c || sea[slot(m)] {
+                continue;
+            }
+            let rise = (working.cells[slot(c)].elevation.value()
+                - working.cells[slot(m)].elevation.value())
+            .abs();
+            let gradient = rise / (grid.arc(c, m).value() * r);
+            counted += usize::from(gradient > EDGE_GRADIENT_COUNTED);
+            if gradient > steepest {
+                (steepest, pair) = (gradient, (c, m));
+            }
+        }
+    }
+    (steepest, pair, counted)
+}
+
+/// The ruling's triggers (decision-r09-t14-choices, "T14.c follow-up 2" §3 as its "T14.c
+/// follow-up 3" item T restates them), findings and not blockers: the solve's final RMS residual
+/// above 125 m, the final field's steepest edge between land neighbours above 0.2
+/// ([`steepest_edge`]; the largest change is recorded, no longer a trigger) and a level failing
+/// the within-level fall; each tripped, as text.
+fn triggers(outcome: &Outcome, steepest_edge: f64) -> Vec<String> {
     let residuals = &outcome.diagnostics.residuals;
     let finest = residuals.last().expect("a level");
     let mut findings = Vec::new();
@@ -92,9 +126,9 @@ fn triggers(outcome: &Outcome, remapped_change_m: f64) -> Vec<String> {
             finest.last_m()
         ));
     }
-    if remapped_change_m > LARGEST_CHANGE_TRIGGER_M {
+    if steepest_edge > EDGE_GRADIENT_FINDING {
         findings.push(format!(
-            "the remapped field's largest change {remapped_change_m:.1} m above 1 km"
+            "the final field's steepest edge between land neighbours {steepest_edge:.4} above 0.2"
         ));
     }
     for r in residuals {
@@ -112,9 +146,9 @@ fn triggers(outcome: &Outcome, remapped_change_m: f64) -> Vec<String> {
 
 /// Prints `outcome`'s records under `what` (the reference Earth's steady state, `staged` its
 /// construction, `working` the state the step left with the remap `remapped`): each level's, the
-/// triggers, the raw solve's largest change beside the remapped field's, the implied denudation,
-/// the land's mode and heights against the construction's, the remap's ([`remap_records`]) and
-/// [`print_raised`]'s.
+/// triggers, the final field's steepest edge between land neighbours and the edges above 0.1, the
+/// raw solve's largest change beside the remapped field's, the implied denudation, the land's mode
+/// and heights against the construction's, the remap's ([`remap_records`]) and [`print_raised`]'s.
 fn record(what: &str, staged: &Staged, working: &Working, outcome: &Outcome, remapped: &Remapped) {
     report(what, outcome);
     let z0: Vec<f64> = staged
@@ -124,7 +158,18 @@ fn record(what: &str, staged: &Staged, working: &Working, outcome: &Outcome, rem
         .map(|c| c.elevation.value())
         .collect();
     let remapped_change_m = remapped_largest_change_m(outcome, &z0, remapped);
-    let findings = triggers(outcome, remapped_change_m);
+    let (edge, (a, b), steep_edges) =
+        steepest_edge(&staged.pass(), working, &sea_cells(&staged.working));
+    eprintln!(
+        "{what}: {}the final field's steepest edge between land neighbours {edge:.4}, cells {a} \
+         and {b}; {steep_edges} edges steeper than 0.1",
+        if edge > EDGE_GRADIENT_FINDING {
+            "FINDING, above 0.2: "
+        } else {
+            ""
+        }
+    );
+    let findings = triggers(outcome, edge);
     eprintln!(
         "{what}: triggers: {}",
         if findings.is_empty() {
@@ -179,24 +224,27 @@ fn record(what: &str, staged: &Staged, working: &Working, outcome: &Outcome, rem
     );
     print_land_quantiles(&after, &format!("{what}, after the remap"));
     print_land_quantiles(&before, &format!("{what}, the construction"));
-    remap_records(what, outcome, &z0, remapped);
+    remap_records(what, outcome, (&z0, sea_level_m), remapped);
     print_raised(what, staged, working, outcome);
 }
 
-/// Prints the remap's records under `what` (decision-r09-t14-choices, "T14.c follow-up 2"): the
-/// remapped cells' area quantiles of height above base against the construction's over the same
-/// cells, the construction basins' mean drift after the remap, and the re-capped links.
-fn remap_records(what: &str, outcome: &Outcome, z0: &[f64], remapped: &Remapped) {
+/// Prints the remap's records under `what` (decision-r09-t14-choices, "T14.c follow-up 2" and 3),
+/// `sea_level_m` the sea's level: the remapped cells' area quantiles of height above the sea
+/// against the construction's over the same cells, the construction basins' mean drift after the
+/// remap, the held cells, and the pass's lifts and lowerings.
+fn remap_records(
+    what: &str,
+    outcome: &Outcome,
+    (z0, sea_level_m): (&[f64], f64),
+    remapped: &Remapped,
+) {
     let cells: Vec<usize> = (0..z0.len()).filter(|&c| remapped.moved[c]).collect();
     let weights: Vec<f64> = cells.iter().map(|&c| outcome.mesh.areas_m2()[c]).collect();
     let after: Vec<f64> = cells
         .iter()
-        .map(|&c| remapped.elevation_m[c] - outcome.routing.base_level_m(cell_of(c)))
+        .map(|&c| remapped.elevation_m[c] - sea_level_m)
         .collect();
-    let before: Vec<f64> = cells
-        .iter()
-        .map(|&c| z0[c] - outcome.construction_base_m[c])
-        .collect();
+    let before: Vec<f64> = cells.iter().map(|&c| z0[c] - sea_level_m).collect();
     let row = |values: &[f64]| -> String {
         [0.1, 0.5, 0.9, 0.99, 1.0]
             .iter()
@@ -205,8 +253,8 @@ fn remap_records(what: &str, outcome: &Outcome, z0: &[f64], remapped: &Remapped)
             .join(" / ")
     };
     eprintln!(
-        "{what}: the remap over {} cells, height above base by area p10 / p50 / p90 / p99 / max: \
-         {} m after against {} m in the construction",
+        "{what}: the remap over {} cells, height above the sea by area p10 / p50 / p90 / p99 / \
+         max: {} m after against {} m in the construction",
         cells.len(),
         row(&after),
         row(&before)
@@ -229,8 +277,13 @@ fn remap_records(what: &str, outcome: &Outcome, z0: &[f64], remapped: &Remapped)
         );
     }
     eprintln!(
-        "{what}: {} links re-capped after the remap, the largest lowering {:.1} m",
-        remapped.recapped, remapped.largest_recap_m
+        "{what}: {} cells held apart; the pass lifted {} cells to their receiver's surface (the \
+         largest {:.1} m) and lowered {} to the threshold (the largest {:.1} m)",
+        remapped.held.iter().filter(|&&h| h).count(),
+        remapped.lifted,
+        remapped.largest_lift_m,
+        remapped.lowered,
+        remapped.largest_lowering_m
     );
 }
 
@@ -320,26 +373,33 @@ fn print_raised(what: &str, staged: &Staged, working: &Working, outcome: &Outcom
 ///
 /// - (iii) the solve is that of a non-negative uplift field on its last routing, every cell not
 ///   bound at or above its receiver on it, strictly where its uplift is positive, the pits held at
-///   their construction apart (44 cells; [`assert_above_receivers`]), and no link rises more than
-///   `DEBRIS_FLOW_SLOPE` times its length;
-/// - the remap ([`remap_onto_construction`]) keeps every cell at or above its receiver with no link
-///   steeper than the threshold ([`assert_remap_keeps_the_drainage`]), and (ii) its highest cell
-///   above its base is the construction's, to the re-cap ([`assert_peak_is_the_construction_s`]);
+///   their construction counted and recorded apart ([`assert_above_receivers`]; the "T14.c
+///   follow-up 3" item 1), and no link rises more than `DEBRIS_FLOW_SLOPE` times its length;
+/// - the remap of absolute heights ([`remap_onto_construction`]) holds the pits apart and keeps
+///   every remapped cell at or above its receiver with no link steeper than the threshold
+///   ([`assert_remap_keeps_the_drainage`]), and (ii) the remapped set's highest cell is the
+///   construction's, to the pass's lowering, with no land cell above the construction's highest
+///   ([`assert_peak_is_the_construction_s`]; the "T14.c follow-up 3" item 3);
+/// - T12.a's bands hold on the final field, after the whole pass ([`assert_earth_bands`]; the
+///   "T14.c follow-up 3" item 3);
 /// - (i) the final field's realised relief, after the whole pass, lies within R09.T12.e's 6–16
 ///   `σ_h` ([`assert_final_relief`]);
 /// - the fixed point's residual falls within each multigrid level, its last iteration's below
 ///   half its first.
 ///
 /// Recorded ([`record`]): each level's first and last residual, largest change, changed receivers
-/// and basin misfits, against the ruling's triggers ([`triggers`]); the raw solve's largest change
-/// beside the remapped field's; `λ_b`'s distribution, the basins of `S_b` zero and the cells held
-/// at the threshold; the implied mean denudation over the land against Earth's 0.05–0.1 mm a⁻¹
-/// (Milliman and Meade 1983, from memory), a deferred finding on K⊕'s absolute value at the coarse
-/// cell, not tuned (the "T14.c follow-up" item 2: K cancels per basin, so no elevation moves with
-/// it); the land's hypsometry after the remap against the construction's, the basins' mean drift
-/// and the re-capped links ([`remap_records`]); and the land's mode, +125 m within 300 m. Each is
-/// measured with sticky and with fresh receivers, the step's and T14.b's, with one row of a table
-/// each ([`summarise`]). The triggers and the records are printed before any assertion.
+/// and basin misfits, against the ruling's triggers ([`triggers`]); the final field's steepest edge
+/// between land neighbours and the edges steeper than 0.1 ([`steepest_edge`]; above 0.2 a
+/// finding); the raw solve's largest change beside the remapped field's, recorded, no longer a
+/// trigger; `λ_b`'s distribution, the basins of `S_b` zero and the cells held at the threshold;
+/// the implied mean denudation over the land against Earth's 0.05–0.1 mm a⁻¹ (Milliman and Meade
+/// 1983, from memory), a deferred finding on K⊕'s absolute value at the coarse cell, not tuned
+/// (the "T14.c follow-up" item 2: K cancels per basin, so no elevation moves with it); the land's
+/// hypsometry above the sea after the remap against the construction's, the basins' mean drift,
+/// the held cells and the pass's lifts and lowerings ([`remap_records`]); and the land's mode,
+/// +125 m within 300 m. Each is measured with sticky and with fresh receivers, the step's and
+/// T14.b's, with one row of a table each ([`summarise`]). The triggers and the records are printed
+/// before any assertion.
 #[test]
 #[ignore = "slow: the reference Earth's steady state at level 8, R09.T14.c"]
 fn the_reference_earth_s_steady_state_falls_within_each_level() {
@@ -412,16 +472,21 @@ fn the_reference_earth_s_steady_state_falls_within_each_level() {
     }
     let (outcome, remapped, finished) =
         step.expect("the step's own options are among those measured");
-    assert_final_field(pass.inputs(), &z0, (&outcome, &remapped), &finished);
+    assert_final_field(
+        &pass,
+        (&z0, &sea, sea_level_m),
+        (&outcome, &remapped),
+        &finished,
+    );
 }
 
 /// The slow test's assertions on the reference Earth's `outcome` and its remap `remapped` under
-/// the step's own options, `z0` the construction and `finished` the state after the whole pass:
-/// (iii) and the threshold on the solve, the remap's drainage, (ii), (i) and the fall within each
-/// level, in that order.
+/// the step's own options on `pass`, `z0` the construction with its sea `sea` at `sea_level_m`,
+/// and `finished` the state after the whole pass: (iii) and the threshold on the solve, the
+/// remap's drainage, (ii), T12.a's bands, (i) and the fall within each level, in that order.
 fn assert_final_field(
-    inputs: &CoarseInputs,
-    z0: &[f64],
+    pass: &Pass<'_>,
+    (z0, sea, sea_level_m): (&[f64], &[bool], f64),
     (outcome, remapped): (&Outcome, &Remapped),
     finished: &Working,
 ) {
@@ -438,8 +503,9 @@ fn assert_final_field(
         &steeper[..steeper.len().min(8)]
     );
     assert_remap_keeps_the_drainage("reference Earth", outcome, z0, remapped);
-    assert_peak_is_the_construction_s("reference Earth", outcome, z0, remapped);
-    assert_final_relief("reference Earth", inputs, finished);
+    assert_peak_is_the_construction_s("reference Earth", z0, (sea, sea_level_m), remapped);
+    assert_earth_bands("reference Earth, the final field", pass, finished);
+    assert_final_relief("reference Earth", pass.inputs(), finished);
     for r in &outcome.diagnostics.residuals {
         assert!(
             r.last_m() < WITHIN_LEVEL_FALL * r.first_m(),
@@ -555,17 +621,19 @@ fn summarise(
     let lambda = outcome.diagnostics.lambda.expect("a fitted basin");
     eprintln!(
         "TABLE {what}: {}; (iii) {} below, {} level under uplift; steepest link {steepest:.4}, \
-         {} pits, {} cells held at the threshold, {} basins of S_b zero; {} links re-capped; land p99 \
-         {:.0} m, p999 {:.0} m, max {peak:.0} m against the construction's {peak0:.0} m and the \
-         solve's {solved:.0} m, mode {:.0} m; (i) relief {relief:.0} m, {relief_ratio:.2} σ_h; λ_b \
-         median {:.3e}, max {:.3e} a⁻¹; denudation {:.4} mm a⁻¹; {solve_s:.2} s",
+         {} pits, {} cells held at the threshold, {} basins of S_b zero; {} cells lifted, {} \
+         lowered; land p99 {:.0} m, p999 {:.0} m, max {peak:.0} m against the construction's \
+         {peak0:.0} m and the solve's {solved:.0} m, mode {:.0} m; (i) relief {relief:.0} m, \
+         {relief_ratio:.2} σ_h; λ_b median {:.3e}, max {:.3e} a⁻¹; denudation {:.4} mm a⁻¹; \
+         {solve_s:.2} s",
         levels.join("; "),
         below.len(),
         level.len(),
         pits.len(),
         outcome.diagnostics.held_at_threshold,
         outcome.diagnostics.insensitive_basins,
-        remapped.recapped,
+        remapped.lifted,
+        remapped.lowered,
         area_quantile(&heights, &weights, 0.99),
         area_quantile(&heights, &weights, 0.999),
         land_mode(&heights, &weights),
