@@ -2109,9 +2109,17 @@ body {
   white-space: nowrap;
 }
 
-/* An entry whose words may outrun the legend's row, such as a shape naming six kinds of star. */
+/* An entry whose words may outrun the legend's row, such as a shape naming seven kinds of star. */
 .symbol-legend__item--wraps {
   white-space: normal;
+}
+
+/*
+ * One kind of such an entry, kept whole wherever the entry wraps, so that the HR diagram's legend
+ * breaks the circle's kinds only after a comma, never inside `STRIPPED HELIUM STAR` (P06.T24.c).
+ */
+.symbol-legend__kind {
+  white-space: nowrap;
 }
 
 /*

@@ -17,11 +17,12 @@
 //! [`classify`] joins them into a [`Classification`], whose `Display` is the class as an
 //! astronomer writes it: `G2V`, `M5III`, `K1.5IV`, `B8Ia`, `sdM3`, `T6`, `DA4.2`, `NS`. The classes
 //! beyond the MK grid are [`PeculiarClass`]es: P06.T25's Be, Ap, Bp and Am stars follow from the
-//! star's rotation and magnetism draws ([`rotation`]); P06.T24.a's
-//! Wolf-Rayet stars (`WN6`, `WN7h`, `WC5`, `WO2`), hot subdwarfs (`sdB0`, `sdO5`) and luminous
-//! blue variables (`B2Ia+ LBV`), and T24.c's stripped helium stars (`He-sdO3`), follow from the
-//! state (`peculiar`), and P06.T24.b's carbon and S stars and young stars are still to come. What only a star's history knows, a neutron star's
-//! pulsar class and a helium star's surface, arrives through [`ClassExtras`].
+//! star's rotation and magnetism draws ([`rotation`]); P06.T24.a's Wolf-Rayet stars (`WN6`,
+//! `WN7h`, `WC5`, `WO2`), hot subdwarfs (`sdB0`, `sdO5`) and luminous blue variables
+//! (`B2Ia+ LBV`), and T24.c's stripped helium stars (`He-sdO3`), follow from the state
+//! (`peculiar`), and P06.T24.b's carbon and S stars and young stars are still to come. What only a
+//! star's history knows, a neutron star's pulsar class and a helium star's surface, arrives
+//! through [`ClassExtras`].
 
 mod luminosity;
 mod peculiar;

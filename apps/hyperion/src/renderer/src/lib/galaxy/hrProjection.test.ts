@@ -76,7 +76,7 @@ describe("projectHr", () => {
     expect(sun?.status).toBe("available");
   });
 
-  it("plots a stripped helium star as a circle, hot and between the dwarfs and the giants", () => {
+  it("plots a stripped helium star as a circle where its temperature and luminosity put it", () => {
     const projection = projectHr(
       systemsOf([{ stellar: brief("stripped_helium_star", 65_000, 3.7) }]),
       AREA,

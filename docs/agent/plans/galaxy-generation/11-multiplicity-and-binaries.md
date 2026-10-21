@@ -1502,6 +1502,25 @@ _As built (round 9c, `bin5b`; output moves, its bump batched into version 16): s
     cold at most 300 ms on one thread (ceiling 500 ms), warm at most 1.5 µs a row; the commands
     are in the as-built.
   - _As built: see Risks, "P11.T11.a as built"._
+- **P11.T11.b A paired helium star's surface** (`decision-stripped-star-class.md` §3,
+  2026-10-21; a wrong class, so a blocker). `PairedStar::class_extras` gave a helium star its
+  pair had made no `HeliumSurface`, so every paired Wolf-Rayet helium star read WN for life, where
+  a single one turns WC once it has lost, as a helium star, more than f of its entry mass
+  (P06.T24.a). Binary-stripped helium stars do turn WC from about 9–11 M☉ of initial helium mass
+  (Woosley 2019, ApJ 878, 49, §4.1; Yoon 2017, MNRAS 470, 3970, §3.2).
+  - Build: `PairedStar` carries the star's helium-star entry mass, its mass when its pair's
+    timeline made it a naked helium star in its current, unbroken helium-star life (HeMS, HeHG or
+    HeGB): a helium star's track's `helium_star_entry_mass` where the member is on one, otherwise
+    the start of the earliest segment in that life. Mass lost by case BB transfer counts as lost.
+    For those phases `class_extras` returns
+    `ClassExtras::helium_star(HeliumSurface::of(entry, M))`; the neutron star's branch is
+    unchanged. No draw, stream or tag changes.
+  - Tests (failing before the fix): a paired stripped primary above the floor, of about 30 M☉ or
+    more, is WN early and WC once entry − M > f × entry, and its class is `classify`'s with
+    `HeliumSurface::of` on the same state; a single helium star of the same entry mass turns WC
+    at the same mass.
+  - _As built (lane `stripped-class`, 2026-10-21; at version 22, no bump): see Risks,
+    "Deviations in P11.T11.b, as built"._
 
 ### P11.T12 Statistical suite
 
@@ -5461,3 +5480,80 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     pair is a hot subdwarf by kind with no pair class. That names nothing wrongly. Aligning the two
     would move pair classes and the `binary_classes` census: a candidate rider for version 25 (S1),
     if main wants it.
+- **Deviations in P11.T11.b, as built (lane `stripped-class`, 2026-10-21; at version 22, no
+  bump).** The ruling is `decision-stripped-star-class.md` §3.
+  - _API._ `BinaryTimeline::helium_star_entry_mass(component, age)` (crate): the mass the member
+    had when it became a naked helium star in the unbroken helium-star life it is in at `age`, or
+    `None` outside one. `PairedStar` gains `helium_entry`, which `SystemStars::paired_state` fills
+    from the pair's timeline; `PairedStar::class_extras` matches the phase exhaustively, as
+    `StarModel::class_extras_at` does, and gives a helium star
+    `ClassExtras::helium_star(HeliumSurface::of(entry, M))`. So the summary's star and the
+    system's one brief, `SystemStars::brief_at` (P11.T11.a), which the now and observed rows
+    read, all take the paired surface.
+  - _The entry mass, as built._ The member is walked back over the segments its helium-star life
+    spans, to the earliest, and its mass at that segment's start is taken: there its pair made it
+    a helium star (the engine places a star its companion strips on a helium star's track built
+    from its mass then, `Track::remains_at`, so this is the track's `helium_star_entry_mass`).
+    The walk asks whether the member was a helium star at the end of the segment before, or at its
+    start where the star's own state at the boundary is past its life (a bare core held as
+    `Member::Frozen` after its track died), so a hold keeps its life's entry. A rise of the mass
+    across a boundary by more than 10⁻⁶ of it marks a merger's new star, whose life starts there.
+    A member that becomes a helium star inside a segment takes its own track's entry mass
+    (`Member::Track`, the single star's rule), or, where the binary sets its mass on that track,
+    its mass where the track's phase turns, found by bisection (64 halvings).
+  - _Deviation: the walk comes first._ The ruling takes "the track's `helium_star_entry_mass`
+    where the member is a helium-star track". The engine also builds a helium star's track from
+    the star's mass at the end of a carried helium main sequence, after case BA or BB transfer
+    (`after_boundary`), whose entry would be the star's mass after that transfer; the walk keeps
+    the mass at its stripping, so that the transfer's loss counts as lost, as the ruling asks.
+    Where the member's first segment is a helium star's track placed at its stripping, both give
+    the same mass.
+  - _Deviation: a merger's product._ A member whose mass the binary sets on a hydrogen star's own
+    track (`Member::Shaped`, a merger's product) becomes a helium star inside a segment.
+    "The start of the earliest segment in that life" would there be its giant's mass, and that
+    track's own entry mass the unshaped star's (9.80 against the product's 11.17 M☉ for reference
+    system 44's 30 M☉ product), with which it could never turn WC; so the entry is its mass where
+    the track's phase turns.
+  - _Measured (reference systems 40–63, `record_of`'s young thin disc, 2.0 × 10⁷ yr)._ Of the 14
+    60 M☉ primaries that become helium stars, 11 of them made so by their pair, 12 turn WC before
+    their pinned collapse (9 of the 11), at entry masses of 15.7–27.6 M☉ (f = 0.22–0.31); those of
+    12.8 and 15.3 M☉ do not. No 25, 30 or 40 M☉ primary does (entries 4.3–14.9 M☉): 40 M☉ system
+    41's 11.41 M☉ helium star ends at 7.24 M☉ at its pinned collapse, against the 7.12 M☉ at
+    which its carbon would show (Woosley 2019's 11 M☉ helium star ends at 7 M☉).
+  - _Tests._ `stellar::system`'s `a_paired_helium_star_turns_wc_as_a_single_one_does`: among the
+    60 M☉ primaries of reference systems 40–63, each one its pair has changed into a helium star is
+    classified in its summary as `classify` gives its state with `HeliumSurface::of` its entry
+    mass, one entry for its life; one at least is WN and then WC, at the mass at which a single
+    helium star of the same entry mass on its own track turns WC. It fails before the fix (paired
+    helium stars read WN). `a_merger_products_helium_entry_is_its_mass_where_its_track_strips_it`:
+    a 30 or 60 M☉ merger's product's entry is its mass at the turn, to ten years, and holds to its
+    collapse, its hold included; none before.
+  - _Files._ Also `stellar/binary/timeline.rs` (`helium_star_entry_mass`, the private
+    `is_helium_star`, `HELIUM_ONSET_STEPS`, `MERGER_MASS_RISE`); its tests are in
+    `stellar::system`, which T11's acceptance selects.
+  - _Cost._ `SystemStars::paired_state` walks back for every paired naked helium star, its
+    `state_at` callers included, which discard the entry: a few member states per segment, and
+    64 more for a merger's product. Only helium stars pay; not benched.
+  - _Declined: a golden of the entry mass._ The determinism audit asked for a golden pinning a
+    paired helium star's entry mass as bits and its class, and for `classify.golden` rows of a
+    stripped helium star and a hot subdwarf. Main asked for no golden to move at 22, and a new one
+    would need version 23's bless to carry it; the tests pin the rule (the class against
+    `HeliumSurface::of` and a single star's onset) and the merger's entry against its masses either
+    side of the turn. Recorded for the 23 bless (S1), if main wants it.
+  - _No golden moved._ No golden pins a paired Wolf-Rayet star's class; the bless of every golden
+    that reads a class or a kind left every file as it was (`golden_diff.py`).
+  - _Deferred finding (2026-10-20 rule)._ No 40 M☉ primary's helium star turns WC before its
+    pinned collapse, where Woosley (2019, §4.1) and Yoon (2017, §3.2) have binary-stripped helium
+    stars from about 9–11 M☉ turn WC. Two causes, the science check's: the pin's early collapse
+    costs about 0.1 M☉ (11.41 → 7.24 M☉, against about 7.14 M☉ interpolated in Woosley's table 4;
+    plan 12's Risks, finding 5, ruled not a blocker in `decision-observed-class-findings.md`
+    §B.1), and `carbon_shows_after`'s f sits 0.02–0.03 above the loss at which carbon shows in
+    Woosley's table 4 (≤ 0.359 at 11 M☉) and Yoon's table 1 (≤ 0.334 at 12 M☉, f_WR = 1), so the
+    fit reads even Woosley's star as WN. At 40 M☉ the entries are 0–19% below Woosley's eq. 5
+    (14.1 M☉), so the low stripped masses (R1 above) are not what keeps it WN. Not a blocker: the
+    rule is right, and a figure is short.
+  - _The merger's convention._ A merger's product (HeMS + HeMS, HeWD + HeMS) re-forms its
+    convective core at the merged mass, so its life's entry is that mass: sound to first order
+    (the science check). The CO or ONe white dwarf + HeMS → HeGB row is the exception, whose only
+    carbon is the white dwarf's core, and which would turn WC too early; it needs a white dwarf
+    beside a helium star in the Wolf-Rayet range, which is rare. Recorded, not a blocker.

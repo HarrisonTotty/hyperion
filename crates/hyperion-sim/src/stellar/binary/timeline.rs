@@ -19,7 +19,7 @@ use crate::orbit::{Eccentricity, KeplerElements, Orientation};
 use crate::stellar::draws::StarDraws;
 use crate::stellar::remnant::{CompactRemnant, NatalKick};
 use crate::stellar::sse::{self, ZCoeffs};
-use crate::stellar::{Composition, StarState, substellar};
+use crate::stellar::{Composition, Phase, StarState, substellar};
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{
     GravitationalParameter, Metres, Radians, SolarMasses, SolarMassesPerYear, Years,
@@ -708,6 +708,101 @@ impl BinaryTimeline {
         &self.supernovae
     }
 
+    /// The mass, M☉, that `component` had when it became a naked helium star in the unbroken
+    /// helium-star life (helium main sequence, Hertzsprung gap or giant branch) it is in at `age`,
+    /// or `None` if it is no naked helium star then (plan 11, P11.T11.b): what tells a helium
+    /// star's WC surface from its WN one
+    /// ([`HeliumSurface::of`](crate::stellar::classify::HeliumSurface::of)), as a single star's
+    /// track tells it.
+    ///
+    /// It walks back over the segments the life spans to the earliest, and takes the member's mass
+    /// at that segment's start: there the pair made it a helium star (a star its companion strips
+    /// is placed on a helium star's track built from its mass then,
+    /// [`Track::remains_at`](crate::stellar::sse::Track::remains_at)), or a merger made a new one,
+    /// which the mass's rise across the boundary marks. A member that becomes one inside a segment
+    /// takes its own track's entry mass, as a single star does
+    /// ([`Track::helium_star_entry_mass`](crate::stellar::sse::Track::helium_star_entry_mass)), or,
+    /// where the binary sets its mass on that track (a merger's product), its mass where the
+    /// track's phase turns, by bisection.
+    ///
+    /// Mass lost since, to its wind or to a companion (case BB transfer, and the helium star's
+    /// track the engine builds from its mass after it), counts as lost: Langer's (1989b, A&A 220,
+    /// 135) criterion is set in mass, so a companion's share counts as the wind's does. It reads
+    /// the timeline and draws nothing.
+    #[must_use]
+    pub(crate) fn helium_star_entry_mass(
+        &self,
+        component: Component,
+        age: Years,
+    ) -> Option<SolarMasses> {
+        let slot = component.index();
+        let state = |index: usize, at: f64| {
+            self.segments[index].members[slot].state_at(&self.context, slot, at)
+        };
+        let age = age.value();
+        let age = if age > 0.0 { age.min(self.until) } else { 0.0 };
+        let mut index = self
+            .segments
+            .partition_point(|s| s.start <= age)
+            .saturating_sub(1);
+        if !is_helium_star(&state(index, age)) {
+            return None;
+        }
+        // An age in segment `index` at which the member is a naked helium star.
+        let mut at = age;
+        loop {
+            let segment = &self.segments[index];
+            let first = state(index, segment.start);
+            if !is_helium_star(&first) {
+                // It became one inside the segment, where its track's phase turns.
+                return match &segment.members[slot] {
+                    Member::Track { track, .. } => track.helium_star_entry_mass(),
+                    Member::Shaped { .. }
+                    | Member::MainSequence { .. }
+                    | Member::Cooling { .. }
+                    | Member::Frozen { .. }
+                    | Member::Remnant { .. }
+                    | Member::Gone => {
+                        let (mut before, mut after) = (segment.start, at);
+                        for _ in 0..HELIUM_ONSET_STEPS {
+                            let mid = f64::midpoint(before, after);
+                            if mid <= before || mid >= after {
+                                break;
+                            }
+                            if is_helium_star(&state(index, mid)) {
+                                after = mid;
+                            } else {
+                                before = mid;
+                            }
+                        }
+                        Some(state(index, after).mass())
+                    }
+                };
+            }
+            // A helium star from the segment's start: was it the same one at the end of the
+            // segment before?
+            let Some(previous) = index.checked_sub(1) else {
+                return Some(first.mass());
+            };
+            let (from, to) = (self.segments[previous].start, self.segments[previous].end);
+            let end = state(previous, to);
+            let (was, then) = if is_helium_star(&end) {
+                (end, to)
+            } else {
+                // A held or dying star, whose own state at the boundary is past its life.
+                let start = state(previous, from);
+                if !is_helium_star(&start) {
+                    return Some(first.mass());
+                }
+                (start, from)
+            };
+            if first.mass().value() > was.mass().value() * (1.0 + MERGER_MASS_RISE) {
+                return Some(first.mass());
+            }
+            (index, at) = (previous, then);
+        }
+    }
+
     /// The pair's total recoil after its supernovae, the sum of each one's (their equation A14),
     /// if the pair had a supernova and is still bound.
     #[must_use]
@@ -751,6 +846,27 @@ impl BinaryTimeline {
             + self.segments.iter().map(Segment::heap_bytes).sum::<usize>()
             + self.supernovae.capacity() * size_of::<SupernovaRecord>()
     }
+}
+
+/// The bisections of [`BinaryTimeline::helium_star_entry_mass`] for the age at which a star
+/// becomes a naked helium star inside a segment: 64 halvings, past the resolution of an `f64`
+/// age, at which the loop stops.
+const HELIUM_ONSET_STEPS: u32 = 64;
+
+/// The relative rise of a helium star's mass across a segment's start from which
+/// [`BinaryTimeline::helium_star_entry_mass`] takes it for a merger's new star: 10⁻⁶, far above the
+/// rounding of a mass the engine carries across a boundary and far below what a merger adds (the
+/// lane's choice).
+const MERGER_MASS_RISE: f64 = 1e-6;
+
+/// Whether `state` is a naked helium star's: on the helium main sequence, Hertzsprung gap or
+/// giant branch.
+#[must_use]
+fn is_helium_star(state: &StarState) -> bool {
+    matches!(
+        state.phase(),
+        Phase::HeliumMainSequence | Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch
+    )
 }
 
 /// The value of a piecewise-constant path at `age`: the value recorded at the end of the step

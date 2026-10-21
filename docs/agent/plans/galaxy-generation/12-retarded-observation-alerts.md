@@ -1496,8 +1496,9 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     and Drout et al. (2023, Science 382, 1287) put the 2–8 M☉ stripped stars between the subdwarfs
     and the Wolf-Rayet stars. Hot subdwarfs now end at 1.7 M☉, and the heavier helium stars below
     the Wolf-Rayet floor are `STRIPPED HELIUM STAR`s (`He-sdO3` here, in the observed and the now
-    summary alike). That a paired helium star is classified without the helium surface
-    (`ClassExtras::NONE`) a single one gets is plan 11's P11.T11.b.
+    summary alike). Plan 11's P11.T11.b (the same lane) closes the other half: a paired helium
+    star now carries its helium-star entry mass, so its surface follows the single star's rule and
+    a paired Wolf-Rayet star turns WC as a single one does.
     (5) The pin collapses the helium star at about 0.7 of its helium main sequence (Hurley et al.
     2000, eq. 79, gives 3.71 and 3.38 Myr at 2.25 and 2.37 M☉, against the 2.53 Myr to the pin),
     not after core-helium depletion; ruled not a blocker (`decision-observed-class-findings.md`

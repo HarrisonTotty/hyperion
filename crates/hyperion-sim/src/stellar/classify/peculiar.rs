@@ -20,7 +20,7 @@
 //! - **Stripped helium stars** are the heavier naked helium stars between the hot subdwarfs and the
 //!   Wolf-Rayet floor (P06.T24.c), Drout et al.'s (2023, Science 382, 1287) "intermediate-mass
 //!   helium stars": `He-sdO` and `He-sdB` on the hot subdwarfs' letter rule (Götberg et al. 2018,
-//!   A&A 615, A78, section 4.2).
+//!   A&A 615, A78, sections 4 and 4.2; Heber 2016, section 2).
 //! - **Luminous blue variables** lie beyond the Humphreys–Davidson limit as Hurley, Pols and Tout
 //!   (2000, section 7.1) write it, and are hotter than 8,000 K ([`is_luminous_blue_variable`]);
 //!   [`Track::window_where`](crate::stellar::sse::Track::window_where) gives the ages at which a
@@ -113,11 +113,11 @@ const WNH_EDDINGTON: f64 = 0.5;
 const HOT_SUBDWARF_MIN_TEFF: f64 = 20_000.0;
 
 /// The heaviest hot subdwarf, 1.7 M☉ (P06.T24.c): a heavier naked helium star below the Wolf-Rayet
-/// floor is a stripped helium star (`stripped_helium_star`, P06.T24.c).
+/// floor is a stripped helium star (`stripped_helium_star`).
 ///
 /// Götberg et al. (2018, A&A 615, A78, abstract and section 7, item 4) find stripped stars'
 /// spectra "undistinguishable from subdwarfs" only up to 1.7 M☉ (log L ≤ 3.2), and Drout et al.
-/// (2023, Science 382, 1287) bracket it from below, with the subdwarfs at ≲ 1.5 M☉ and their
+/// (2023, Science 382, 1287) bracket it, with the subdwarfs at ≲ 1.5 M☉ and their
 /// "intermediate-mass helium stars" at 2–8 M☉.
 ///
 /// **Provisional at every Z:** Götberg's grid behind it is at Z = 0.014. It is an edge in mass,
@@ -395,19 +395,27 @@ pub(crate) fn hot_subdwarf(state: &StarState, composition: &Composition) -> Opti
 /// (P06.T24.c): the hot subdwarf's letter rule after a `He-` prefix, `He-sdO` from 40,000 K and
 /// `He-sdB` below.
 ///
-/// - **The class** is Götberg et al.'s (2018, A&A 615, A78, section 4.2) He-sdO, the prefix for
-///   their super-solar helium (after Stroeer et al. 2007): the `sd` stays, since the high gravity
-///   makes the linear Stark broadening of the H I and He II lines severe, as in a subdwarf.
-/// - **No `f`:** the stripped stars observed so far lose ≲ 10⁻⁹ M☉ yr⁻¹ (Götberg et al. 2023, ApJ
-///   959, 125), too little wind for the He II 4686 emission an `f` marks (Götberg et al. 2018,
-///   section 4.2).
-/// - **Neither `WN3/O3` nor a bare O type:** such stars are "about an order of magnitude fainter
-///   than an O3-type star" (Götberg et al. 2018, section 4.2).
+/// - **The class** is Götberg et al.'s (2018, A&A 615, A78) He-sdO: the `He-` prefix marks their
+///   models' super-solar helium (section 4's classification scheme, after Stroeer et al. 2007,
+///   A&A 462, 269), and the `sd` stays, since the high gravity makes the linear Stark broadening
+///   of the H I and He II lines severe, as in a subdwarf (section 4.2). `He-sdB` is the
+///   helium-rich subdwarfs' class where He I lines dominate (Heber 2016, section 2), here below
+///   the letter rule's 40,000 K.
+/// - **HYPERION's convention:** the literature also writes `He-sdO` and `He-sdB` for helium-rich
+///   subdwarfs below the edge (Götberg et al. find them from 0.75 M☉, section 4.3), which read
+///   `sdO` and `sdB` here; the prefix marks the stripped helium stars' class above it.
+/// - **No `f`:** most of the stripped stars observed so far lose ≲ 10⁻⁹ M☉ yr⁻¹ (Götberg et al.
+///   2023, ApJ 959, 125), too little wind for the He II 4686 emission an `f` marks (Götberg et al.
+///   2018, section 4.2).
+/// - **Neither `WN3/O3` nor a bare O type:** the LMC's WN3/O3 stars, to which Götberg et al.
+///   (2018, section 4.2) liken their stripped stars with wind emission, are "about an order of
+///   magnitude fainter than an O3-type star" (their discoverers' argument), and these show no
+///   emission (no `f`).
 ///
 /// Its upper end is the Wolf-Rayet floor ([`wolf_rayet_floor`]), whose 10⁴·⁹ L☉ falls at
 /// 5.9–7.7 M☉ across the helium main sequence on Hurley, Pols and Tout's (2000) fits and at
-/// 6.72 M☉ in Götberg et al.'s (2018) grid, against Shenar et al.'s (2020) 7.5 M☉ and Drout et
-/// al.'s (2023) ~8 M☉.
+/// 6.72 M☉ in Götberg et al.'s (2018) grid, against Shenar et al.'s (2020, A&A 634, A79) 7.5 M☉
+/// and Drout et al.'s (2023) ~8 M☉.
 #[must_use]
 pub(crate) fn stripped_helium_star(
     state: &StarState,

@@ -51,8 +51,9 @@ const PLANET_SHAPE: StarShapeEntry = {
 /**
  * A shape's kinds, as the entry's words: for several kinds one span, the entry's text as it was,
  * with each kind in a span of its own between the commas, so that a layout that lets the entry
- * break can keep each kind whole. The compact local chart breaks such an entry only after a comma,
- * never inside `HOT SUBDWARF` or after a hyphen of `PRE-MAIN-SEQUENCE` (look-72's ruling). One
+ * break keeps each kind whole: every legend breaks such an entry only after a comma, never inside
+ * `STRIPPED HELIUM STAR` or after a hyphen of `PRE-MAIN-SEQUENCE` (look-72's ruling, and
+ * P06.T24.c's for the HR diagram's legend), and the compact local chart runs it inline. One
  * span, so that the entry's flex row still holds two items, the mark and its words, and lays out as
  * before; a single kind stays the plain text it was.
  */

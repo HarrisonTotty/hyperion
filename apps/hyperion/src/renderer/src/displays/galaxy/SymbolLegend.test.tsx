@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { PLANET_SYMBOL, starSymbol } from "../../lib/galaxy/starSymbols";
 import { aCensus } from "../../test/galaxyFixtures";
+import { stylesheetRule } from "../../test/stylesheet";
 import { layerBands } from "./chartModel";
 import { SymbolLegend } from "./SymbolLegend";
 
@@ -76,6 +77,15 @@ describe("SymbolLegend", () => {
     render(<SymbolLegend bands={null} />);
 
     expect(within(legend()).getByText("NO REMNANT, NOT YET FORMED: LIST ONLY")).toBeInTheDocument();
+  });
+
+  it("keeps each of an entry's kinds whole wherever the entry wraps, as the HR diagram's does", () => {
+    // jsdom lays nothing out, so the stylesheet's rule is what is held (P06.T24.c): without it the
+    // HR diagram's legend broke `STRIPPED HELIUM STAR` across two lines at 1280 x 720.
+    expect(stylesheetRule(".symbol-legend__kind")).toMatch(/white-space: nowrap;/u);
+    render(<SymbolLegend bands={null} />);
+
+    expect(screen.getByText("STRIPPED HELIUM STAR")).toHaveClass("symbol-legend__kind");
   });
 
   it("draws the ringed circle's disc filled inside an open ring", () => {

@@ -188,14 +188,31 @@ fn look72_stripped_primary_is_the_stripped_star_in_the_row_and_the_summary() {
         brief.is_some_and(|b| b.kind() != ObjectKind::Supergiant),
         "{brief:?}"
     );
-    // A stripped helium star, not a hot subdwarf (P06.T24.c), observed and now alike.
+    // A stripped helium star of 2.25 M☉, not a hot subdwarf (P06.T24.c), observed and in the now
+    // summary at the same instant alike (at the epoch it is a neutron star in both modes).
+    assert!((mass - 2.25).abs() < 0.01, "{mass} M☉");
     assert_eq!(primary.kind(), ObjectKind::StrippedHeliumStar);
-    let class = primary.classification().to_string();
-    assert!(class.starts_with("He-sdO"), "{class}");
+    assert_eq!(primary.classification().to_string(), "He-sdO3");
     let now = stars.summary_at(emitted);
     let now_primary = now.stars().first().expect("the system was born then");
     assert_eq!(now_primary.kind(), ObjectKind::StrippedHeliumStar);
-    assert_eq!(now_primary.classification().to_string(), class);
+    assert_eq!(now_primary.classification().to_string(), "He-sdO3");
+    // And so does the system's one brief, which the now row reads (P11.T11.a).
+    assert_eq!(
+        stars
+            .brief_at(emitted)
+            .map(|b| (b.kind(), b.class().to_string())),
+        Some((ObjectKind::StrippedHeliumStar, "He-sdO3".to_owned()))
+    );
+    // Just after the common envelope that strips it, the 2.37 M☉ helium star is one too.
+    let (_, stripped) = stripping(&stars).expect("its companion strips it");
+    let age = record.age_at_epoch();
+    let just_after = stars.summary_at(clock_at(age, Years::new(stripped.value() + 100.0)));
+    let fresh = just_after.stars().first().expect("born then");
+    assert_eq!(fresh.state().phase(), Phase::HeliumMainSequence);
+    let fresh_mass = fresh.state().mass().value();
+    assert!((fresh_mass - 2.37).abs() < 0.01, "{fresh_mass} M☉");
+    assert_eq!(fresh.kind(), ObjectKind::StrippedHeliumStar);
     // Its single-star track is a red supergiant then, which the row read before the fix.
     let own = stars.primary().state_at(emitted).expect("formed");
     assert_eq!(own.phase(), Phase::EarlyAgb);

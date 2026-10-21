@@ -1821,6 +1821,13 @@ impl SystemStars {
                     .map(|p| *p.state())
             })
             .flatten();
+        // Only a naked helium star has one, and only it pays for the walk.
+        let helium_entry = matches!(
+            own.phase(),
+            Phase::HeliumMainSequence | Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch
+        )
+        .then(|| pair.timeline.helium_star_entry_mass(component, state.age()))
+        .flatten();
         let model = &self.stars[usize::from(index)];
         let own_death = model.remnant.is_some_and(|stage| {
             let at = stage.death.age().value();
@@ -1833,6 +1840,7 @@ impl SystemStars {
             state: own,
             class: if gone { BinaryClass::None } else { class },
             pulsar,
+            helium_entry,
             own_death,
         })
     }
@@ -1891,13 +1899,16 @@ pub(crate) fn first_attempt_models(galaxy: &Galaxy, record: &SystemRecord) -> Ve
     .1
 }
 
-/// What a star's pair says of it at one time: its state, its pair's class, and a neutron star's
-/// pulsar, recycled by what it accreted.
+/// What a star's pair says of it at one time: its state, its pair's class, a neutron star's
+/// pulsar, recycled by what it accreted, and a naked helium star's mass when it became one.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct PairedStar {
     state: StarState,
     class: BinaryClass,
     pulsar: Option<PulsarState>,
+    /// The star's mass, M☉, when its pair's history made it a naked helium star in the helium-star
+    /// life it is in, if it is in one ([`BinaryTimeline::helium_star_entry_mass`], P11.T11.b).
+    helium_entry: Option<SolarMasses>,
     /// Whether the pair's timeline explodes the star at its own model's death age, as design note
     /// 16 pins a massive primary's death, so that the model's death stands.
     own_death: bool,
@@ -1905,14 +1916,35 @@ struct PairedStar {
 
 impl PairedStar {
     /// The class extras its pair's history gives it: a neutron star's recycled pulsar's class, and
-    /// nothing else, so a helium star its pair has made is classified with no helium surface.
+    /// a naked helium star's surface from the mass it has lost since it became one, as a single
+    /// star's track gives it ([`StarModel::class_extras_at`]; P11.T11.b), so that a helium star
+    /// its pair has stripped turns WC as a single one does.
     #[must_use]
     fn class_extras(&self) -> ClassExtras {
-        match self.pulsar {
-            Some(pulsar) if self.state.phase() == Phase::NeutronStar => {
+        match self.state.phase() {
+            Phase::NeutronStar => self.pulsar.map_or(ClassExtras::NONE, |pulsar| {
                 ClassExtras::neutron_star(pulsar.class())
+            }),
+            Phase::HeliumMainSequence | Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch => {
+                self.helium_entry.map_or(ClassExtras::NONE, |entry| {
+                    ClassExtras::helium_star(HeliumSurface::of(entry, self.state.mass()))
+                })
             }
-            Some(_) | None => ClassExtras::NONE,
+            Phase::Protostar
+            | Phase::PreMainSequence
+            | Phase::MainSequence
+            | Phase::HertzsprungGap
+            | Phase::FirstGiantBranch
+            | Phase::CoreHeliumBurning
+            | Phase::EarlyAgb
+            | Phase::ThermallyPulsingAgb
+            | Phase::PostAgb
+            | Phase::HeliumWhiteDwarf
+            | Phase::CarbonOxygenWhiteDwarf
+            | Phase::OxygenNeonWhiteDwarf
+            | Phase::BlackHole
+            | Phase::NoRemnant
+            | Phase::Substellar => ClassExtras::NONE,
         }
     }
 }
@@ -3037,6 +3069,7 @@ mod tests {
     // P11.T11: the binary engine in the system stage.
 
     use crate::stellar::binary::{SegmentKind, evolve};
+    use crate::stellar::classify::{WolfRayetSequence, carbon_shows_after};
 
     /// A grid record of the young thin disc at the Sun-like point, candidate `index`, with a
     /// primary of `mass` M☉ formed `age` years ago.
@@ -3161,6 +3194,220 @@ mod tests {
             }
         }
         assert!(run > 4, "{run} massive pairs run");
+    }
+
+    fn is_helium_star(phase: Phase) -> bool {
+        matches!(
+            phase,
+            Phase::HeliumMainSequence | Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch
+        )
+    }
+
+    /// The time at which `stars`' stars are `age` years old.
+    fn time_at_age(stars: &SystemStars, age: f64) -> UniverseTime {
+        let since = (age - stars.primary().age_at_epoch().value())
+            * crate::units::consts::SECONDS_PER_JULIAN_YEAR;
+        UniverseTime::EPOCH
+            .checked_add(Span::from_seconds_f64(since).expect("a finite span"))
+            .expect("on the clock")
+    }
+
+    /// The ages, years, from the first to the last of 4,000 samples of `timeline` at which its
+    /// primary is a naked helium star, or `None` if it never is one.
+    fn helium_life(timeline: &BinaryTimeline) -> Option<(f64, f64)> {
+        let until = timeline.until().value();
+        let mut ages = (0..4_000).map(|k| until * (f64::from(k) + 0.5) / 4_000.0);
+        let helium =
+            |age: &f64| is_helium_star(timeline.state_at(Years::new(*age)).stars()[0].phase());
+        Some((ages.find(helium)?, ages.rfind(helium)?))
+    }
+
+    /// The Wolf-Rayet sequences and masses of `seen`, in age order: WN while the mass is above
+    /// `onset`, the mass at which the carbon shows, and WC below it (WO aside).
+    fn assert_carbon_shows_at(seen: &[(WolfRayetSequence, f64)], onset: f64, what: &str) {
+        for &(sequence, mass) in seen {
+            match sequence {
+                WolfRayetSequence::Nitrogen => assert!(mass >= onset, "{what}: WN at {mass} M☉"),
+                WolfRayetSequence::Carbon => assert!(mass < onset, "{what}: WC at {mass} M☉"),
+                WolfRayetSequence::Oxygen => {}
+            }
+        }
+    }
+
+    /// P11.T11.b: a naked helium star its pair has stripped carries the mass it had then, so its
+    /// surface follows the single star's rule. Among the 60 M☉ primaries of reference systems
+    /// 40–63, each one its pair has changed into a helium star is classified, in its summary, as
+    /// `classify` gives its state with `HeliumSurface::of` its entry mass, which holds through its
+    /// helium-star life; and one at least is WN early and WC once it has lost the share
+    /// `carbon_shows_after` gives, at the mass at which a single helium star of the same entry mass
+    /// on its own track turns WC too (Woosley 2019, ApJ 878, 49: stripped helium stars from about
+    /// 9–11 M☉ turn WC). Before T11.b a paired helium star read WN for life.
+    #[test]
+    fn a_paired_helium_star_turns_wc_as_a_single_one_does() {
+        let galaxy = galaxy();
+        let (mut candidates, mut both) = (0, 0);
+        for i in 0..24 {
+            let stars = SystemStars::generate(&galaxy, &record_of(&galaxy, 40 + i, 60.0, 2.0e7));
+            let Some(pair) = stars
+                .pairs()
+                .iter()
+                .find(|p| p.stars()[0] == StarIndex::PRIMARY)
+            else {
+                continue;
+            };
+            let Some((first, last)) = helium_life(pair.timeline()) else {
+                continue;
+            };
+            let primary = stars.primary();
+            let (composition, draws) = (primary.composition(), primary.draws());
+            let mut entry = None;
+            let mut seen = Vec::new();
+            for k in 0..400 {
+                let t = time_at_age(&stars, first + (last - first) * f64::from(k) / 399.0);
+                let paired = stars
+                    .paired_state(0, t)
+                    .expect("inside the pair's timeline");
+                if !is_helium_star(paired.state.phase())
+                    || primary.state_at(t) == Some(paired.state)
+                {
+                    continue;
+                }
+                let at_entry = paired
+                    .helium_entry
+                    .expect("a helium star its pair made carries its entry mass");
+                assert_eq!(
+                    *entry.get_or_insert(at_entry),
+                    at_entry,
+                    "one life, one entry"
+                );
+                let state = paired.state;
+                let surface = HeliumSurface::of(at_entry, state.mass());
+                let expected = classify(
+                    &state,
+                    composition,
+                    draws,
+                    &ClassExtras::helium_star(surface),
+                );
+                let summary = stars.summary_at(t);
+                assert_eq!(
+                    summary.stars()[0].classification(),
+                    expected,
+                    "{i} at {t:?}"
+                );
+                if let SpectralType::WolfRayet(wr) = expected.spectral_type() {
+                    seen.push((wr.sequence(), state.mass().value()));
+                }
+            }
+            let Some(entry) = entry else {
+                continue;
+            };
+            candidates += 1;
+            let onset = (1.0 - carbon_shows_after(entry)) * entry.value();
+            assert_carbon_shows_at(&seen, onset, "paired");
+            let has = |sequence| seen.iter().any(|&(s, _)| s == sequence);
+            if !(has(WolfRayetSequence::Nitrogen) && has(WolfRayetSequence::Carbon)) {
+                continue;
+            }
+            both += 1;
+            // A single helium star of the same entry mass turns WC at the same mass.
+            let single = Track::helium_star_full(entry, composition, draws);
+            let death = single.lifetime().expect("dies").value();
+            let mut alone = Vec::new();
+            for k in 0..2_000 {
+                let state = single.state_at(Years::new(death * (f64::from(k) + 0.5) / 2_000.0));
+                if !is_helium_star(state.phase()) {
+                    continue;
+                }
+                let surface = HeliumSurface::of(entry, state.mass());
+                let class = classify(
+                    &state,
+                    composition,
+                    draws,
+                    &ClassExtras::helium_star(surface),
+                );
+                if let SpectralType::WolfRayet(wr) = class.spectral_type() {
+                    alone.push((wr.sequence(), state.mass().value()));
+                }
+            }
+            assert!(
+                alone.iter().any(|&(s, _)| s == WolfRayetSequence::Carbon),
+                "{alone:?}"
+            );
+            assert_carbon_shows_at(&alone, onset, "single");
+        }
+        assert!(
+            candidates > 3 && both > 0,
+            "{candidates} stripped, {both} WN then WC"
+        );
+    }
+
+    /// P11.T11.b: a merger's product, whose mass the binary sets on its own track, becomes a naked
+    /// helium star where that track strips it, inside a segment: its entry mass is its mass there,
+    /// found by bisection, and it holds over the segments that follow, the hold before a pinned
+    /// collapse among them (reference systems 40–63 of 30 and 60 M☉). Before it, no entry.
+    #[test]
+    fn a_merger_products_helium_entry_is_its_mass_where_its_track_strips_it() {
+        let galaxy = galaxy();
+        let (mut found, mut held) = (0, 0);
+        for (mass, i) in (0..24).flat_map(|i| [(30.0, i), (60.0, i)]) {
+            let stars = SystemStars::generate(&galaxy, &record_of(&galaxy, 40 + i, mass, 2.0e7));
+            let Some(pair) = stars
+                .pairs()
+                .iter()
+                .find(|p| p.stars()[0] == StarIndex::PRIMARY)
+            else {
+                continue;
+            };
+            let timeline = pair.timeline();
+            let Some((first, last)) = helium_life(timeline) else {
+                continue;
+            };
+            let star_at = |age: f64| timeline.state_at(Years::new(age)).stars()[0];
+            // The onset to ten years: the first sample, walked back while it is a helium star.
+            let mut onset = first;
+            while is_helium_star(star_at(onset - 10.0).phase()) {
+                onset -= 10.0;
+            }
+            let segment_of = |age: f64| {
+                timeline
+                    .segments()
+                    .iter()
+                    .rev()
+                    .find(|s| s.start().value() <= age)
+                    .expect("a segment from zero age")
+            };
+            let member = &segment_of(onset).members()[0];
+            // A star whose mass the binary sets on a track not a helium star's at its start.
+            let reshaped = member.form().starts_with("shaped")
+                && member.track().is_some_and(|(track, _)| {
+                    !is_helium_star(track.state_at(track.built_from()).phase())
+                });
+            if !reshaped {
+                continue;
+            }
+            let entry_at =
+                |age: f64| timeline.helium_star_entry_mass(PairComponent::Primary, Years::new(age));
+            assert_eq!(entry_at(onset - 10.0), None, "{mass} M☉, {i}");
+            let entry = entry_at(onset).expect("a helium star has an entry mass");
+            let (after, before) = (
+                star_at(onset).mass().value(),
+                star_at(onset - 10.0).mass().value(),
+            );
+            assert!(
+                (after..=before).contains(&entry.value()),
+                "{mass} M☉, {i}: entry {entry:?} outside {after}–{before}"
+            );
+            for k in 0..200 {
+                let age = onset + (last - onset) * f64::from(k) / 199.0;
+                assert_eq!(entry_at(age), Some(entry), "{mass} M☉, {i} at {age}");
+                held += usize::from(segment_of(age).members()[0].form() == "frozen");
+            }
+            found += 1;
+        }
+        assert!(
+            found > 0 && held > 0,
+            "{found} merger products, {held} held samples"
+        );
     }
 
     /// `state_at` reads a paired star from its pair's timeline and any other from its own model,
