@@ -1239,8 +1239,9 @@ plan, then R09's server and coarse pass):
   draws the atmosphere through R07's stubs until R08.T9.b lands, and the ground's thermal emission
   waits on R08.T18.
 - **T16** after T10.c–f land, then T11 and T12 on its session; T14.c, then T14.b, after it, T14.a
-  free, T14.e after T14.a, and T14.d and T14.e before T14.b's measurements; T15 after the serve
-  gate opens (decision-bump-plan-after-22 §1.4).
+  free, T14.e after T14.a, and T14.d and T14.e before T14.b's measurements; T15.a free
+  (decision-r10-t15a-scope), and T15.b after the serve gate opens (decision-bump-plan-after-22
+  §1.4).
 
 Rust files are under `crates/hyperion-surface/src/` and client files under
 `apps/hyperion/src/renderer/src/view/terrain/` unless a path says otherwise. Every test in
@@ -3606,26 +3607,41 @@ RESOLUTION       410 m
 
 ### R10.T15 Verification pass
 
-The collision-agrees test end to end: a TypeScript test that forms the finest patch's vertices with
-R05's vertex formation in `Math.fround` (`gpu/vertexEmulation.ts`), from a bake of a real patch
-committed as a fixture, and
-interpolates on R05's diagonal, agrees with `ground_at` from the same fixture to 2 mm plus the
-formation's stated error (the height texture's `f32` step at ±20 km is 2⁻⁹ m, 1.95 mm: the
-brainstorm's "about 2 mm", under The geometry); R05's descent run on a served generated world at
-both settings, through T14.c's body source, once the serve gate opens
-(decision-bump-plan-after-22 §1.4), with T10.e's brightness check on a fully surveyed served world
-and R03.T15's 61-chunk check in the Electron renderer (R09.T19.c's pending item), which T16's
-session now asks for, with its metrics harness and the horizon map on (T8.b), recording the map's share of the
-workers' bake time and `bake/horizon`'s WebAssembly figure (main's ruling for R10.T8.a, 2026-10-15),
-patches a second sustained against the brainstorm's demand of (200 · v + 290 · |ḣ|) ÷ h, the level
-bound per level from T4.a, and pops or cracks seen; every golden of this plan asserted on the three
-targets. Acceptance: the lane's `just smart-ci` and `just test-wasm-fast`, this plan's slow binaries
-by name (`just test-slow -E 'binary(…)'`) and `just bench -- bake/` complete, and the descent's
-figures are recorded; `just ci` and the slow pass are the orchestrator's.
+Split at the scoping of 2026-10-21 (decision-r10-t15a-scope): T15.a needs nothing of the serve
+gate, since `ground_at` and the bake are the same functions on any field; T15.b is the served-world
+pass.
+
+- **R10.T15.a Collision agrees with what is drawn, end to end.** The collision-agrees test end to
+  end: a TypeScript test that forms the finest patch's vertices with R05's vertex formation in
+  `Math.fround` (`gpu/vertexEmulation.ts`), from a bake of a real patch committed as a fixture, and
+  interpolates on R05's diagonal, agrees with `ground_at` from the same fixture to 2 mm plus the
+  formation's stated error (the height texture's `f32` step at ±20 km is 2⁻⁹ m, 1.95 mm: the
+  brainstorm's "about 2 mm", under The geometry), on both vertex paths, `FaceDifferences` over the
+  client's own `patchTerms` and `BakedOffsets`' q₀; R05.T4.b's formation error is under 1 mm, so
+  the bound is 3 mm. The fixture's files are `tests/golden/drawn_ground/<world>.golden` (Earth-like
+  and Moon-like, three finest-level patches each, inside a face, on a face edge and at a cube
+  corner), asserted on native, `wasm32-wasip1` and `wasm32-unknown-unknown`. Acceptance:
+  `cargo test -p hyperion-surface --lib bake::drawn_ground`, blessed once with `HYPERION_BLESS=1`
+  at the version in force and then passing without it; `just test-wasm-fast`; and
+  `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain/gpu`: every sample on both
+  paths within 3 mm, the half check passing, the frames' check passing, and the control failing as
+  expected.
+- **R10.T15.b The served-world pass** (after the serve gate opens, decision-bump-plan-after-22
+  §1.4, and after T4.a). R05's descent run on a served generated world at both settings, through
+  T14.c's body source, once the serve gate opens (decision-bump-plan-after-22 §1.4), with T10.e's
+  brightness check on a fully surveyed served world and R03.T15's 61-chunk check in the Electron
+  renderer (R09.T19.c's pending item), which T16's session now asks for, with its metrics harness
+  and the horizon map on (T8.b), recording the map's share of the workers' bake time and
+  `bake/horizon`'s WebAssembly figure (main's ruling for R10.T8.a, 2026-10-15), patches a second
+  sustained against the brainstorm's demand of (200 · v + 290 · |ḣ|) ÷ h, the level bound per level
+  from T4.a, and pops or cracks seen; every golden of this plan asserted on the three targets.
+  Acceptance: the lane's `just smart-ci` and `just test-wasm-fast`, this plan's slow binaries by
+  name (`just test-slow -E 'binary(…)'`) and `just bench -- bake/` complete, and the descent's
+  figures are recorded; `just ci` and the slow pass are the orchestrator's.
 
 ## Verification
 
-- **Collision agrees with what is drawn:** the finest mesh and `ground_at` to 2 mm (T3, T15).
+- **Collision agrees with what is drawn:** the finest mesh and `ground_at` to 2 mm (T3, T15.a).
 - **Level-of-detail consistency:** every coarser level inside R09's bound on generated worlds, both
   ratios recorded (T4.a); selection by that bound, history-independent (T4.b).
 - **The ground drawn and the ground quoted agree:** the largest weight is the authoritative class at
@@ -4163,6 +4179,112 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
     between contacts.
   - _A vertex's reads._ At a vertex `mesh_point` reads three vertices where `mesh_height` reads
     one, so near a survey margin's edge the ground can refuse where the height answers (above).
+- **Deviations in T15.a, as built** (2026-10-21; lane `lane/69-r10-t15a-drawn-ground`; base
+  `dc029510`).
+  - _Files._ `crates/hyperion-surface/src/bake/drawn_ground.rs`, a new `cfg(test)` module declared
+    in `bake/mod.rs` beside `golden` and `tests`; its goldens
+    `crates/hyperion-surface/tests/golden/drawn_ground/{earth_like,moon_like}.golden`, blessed at
+    `GENERATOR_VERSION` 22; and the client's `view/terrain/gpu/drawnGround.test.ts`. The module
+    reuses `bake/tests.rs`'s `client`, `cells_under`, `code` and `patch_in` as they were, widening
+    none. `vertexEmulation.ts` gains nothing: the test reads its slot record back itself, as
+    `smoothMesh.test.ts` does. No other golden moves, and nothing is bumped: the goldens are new
+    and read only heights that R09's goldens pin, as T3's do.
+  - _The golden's format_ (the module's documentation). Every `f32` is `0x` and 8 hexadecimal
+    digits of its IEEE 754 bits, and every `f64` 16.
+    - `figure <a> <c>`: the datum's radii.
+    - Per patch, `patch <case> <face> <level> <i> <j>`, then `origin <x> <y> <z> <h0>` (the bake's
+      origin and its height) and `range <lowest> <highest>` (the bake's, over both channels).
+    - `vertex <x> <y> <h> <q0.x> <q0.y> <q0.z>` for each vertex a sample's triangle uses, once each,
+      in row order: its `f32` own height and own offset.
+    - Per sample, a line
+      `sample <kind> <x> <y> <half> <fa> <fb> <h_g> <Md.x> <Md.y> <Md.z> <nu.x> <nu.y> <nu.z>`,
+      its kind `random`, `vertex`, `diagonal`, `quad_edge`, `patch_edge` or `far_quad`.
+  - _Beside §2.3 of the ruling_ (additions only; its items hold as written):
+    - _A sixth kind of sample, 69 a patch:_ the 64 random points, the vertex (17, 43), a point on
+      quad (40, 21)'s diagonal, one on the lattice line x = 9 and one on the patch's v-min edge,
+      then `far_quad`, a point in quad (63, 63), which on the edge patch touches the face edge and
+      on the corner patch has the cube corner among its vertices.
+    - _The diagonal's point_ is on quad (40, 21)'s diagonal before its direction's round trip.
+      Its weights come back equal on Moon-like's inside and edge patches, where R05 gives the tie
+      to the lower half, and elsewhere within 0.9 to 3.7 × 10⁻⁹ of a quad of it: upper on
+      Earth-like's inside and Moon-like's corner patches, lower on Earth-like's edge and corner
+      ones. Both halves give the same height there, to nanometres.
+    - _The patches._ Inside: T6.a's `patch_in` of the world's first listed crater's rim cell, at
+      the finest level. The edge: face −y's (⌊last ÷ 3⌋, last), on its v-max edge, whose vertices
+      are evaluated on face +x, their canonical face. The corner: face −z's (last, last), at the
+      corner of +x, +y and −z, evaluated on +x. At both seams `PatchKey::vertex_dir` evaluates the
+      vertex on another face, while the client forms it from its own face's (u, v).
+    - _The patch-edge sample_ is on the v-min edge, inside the face: R05's split gives a point on a
+      patch's u-max or v-max edge to the next patch's quads, and a point on a face edge to the face
+      `xyz_to_face_uv` picks.
+    - _One bake a patch,_ on the `BakedOffsets` path with the mesh's normals and neither weights
+      nor horizon map: the own heights do not depend on the path, so one bake carries both paths'
+      inputs.
+    - _The writer's checks,_ before a sample is written: the ground's triangle is in the patch and
+      its quad is `quad_of`'s at the foot; the weights are in [0, 1]; the half is the upper exactly
+      where fa < fb; and `Quad::interpolate` at the weights is `ground_at`'s height bit for bit.
+      The weights are formed in R05's operations, with `collision.rs`'s private `SNAP_QUADS`
+      (10⁻⁶ of a quad) copied, so a sample the two would snap differently fails the last check.
+    - _Two `native_only` tests:_ the goldens' header and count, as `ground/` and `terrain_bake/`
+      have, and their 200 kB budget.
+    - _The frames' check_ holds P₀ = M d₀ + h₀ ν₀, from the client's own `f64` terms, to the bake's
+      origin within 1 nm, an ulp of a coordinate at an Earth's radius (2⁻³⁰ m): the two are the
+      same operations, and agree bit for bit at all six patches.
+    - _The control_ moves the `vertex` sample's vertex 5 mm along ν (its height on
+      `FaceDifferences` and its q₀ on `BakedOffsets`, each narrowed again): the gap is then 4.83 to
+      5.09 mm on `FaceDifferences` and 5.000 mm on `BakedOffsets`, over the bound at every patch.
+  - _Figures,_ from a scratch run of the test's own arithmetic, 69 samples a patch. The height
+    range is the bake's over both channels, and the `f32` step is the spacing of `f32` values at
+    its largest |h|. The bound is 3 mm.
+
+    | World      | Patch  | Height range (m)       | `f32` step | Path              | Largest gap | Share of the bound | At sample |
+    | ---------- | ------ | ---------------------- | ---------- | ----------------- | ----------- | ------------------ | --------- |
+    | Earth-like | inside | 1,256.222, 1,258.291   | 2⁻¹³ m     | `FaceDifferences` | 62.1 µm     | 0.021              | random 40 |
+    | Earth-like | inside | 1,256.222, 1,258.291   | 2⁻¹³ m     | `BakedOffsets`    | 0.23 µm     | 7.6 × 10⁻⁵         | random 32 |
+    | Earth-like | edge   | −3,717.927, −3,717.200 | 2⁻¹² m     | `FaceDifferences` | 146.7 µm    | 0.049              | random 46 |
+    | Earth-like | edge   | −3,717.927, −3,717.200 | 2⁻¹² m     | `BakedOffsets`    | 0.14 µm     | 4.7 × 10⁻⁵         | random 1  |
+    | Earth-like | corner | 1,764.835, 1,770.873   | 2⁻¹³ m     | `FaceDifferences` | 57.6 µm     | 0.019              | random 46 |
+    | Earth-like | corner | 1,764.835, 1,770.873   | 2⁻¹³ m     | `BakedOffsets`    | 0.18 µm     | 6.1 × 10⁻⁵         | random 41 |
+    | Moon-like  | inside | −335.545, −333.839     | 2⁻¹⁵ m     | `FaceDifferences` | 27.4 µm     | 0.0092             | random 14 |
+    | Moon-like  | inside | −335.545, −333.839     | 2⁻¹⁵ m     | `BakedOffsets`    | 0.17 µm     | 5.6 × 10⁻⁵         | far_quad  |
+    | Moon-like  | edge   | −1,220.794, −1,220.538 | 2⁻¹³ m     | `FaceDifferences` | 105.6 µm    | 0.035              | random 16 |
+    | Moon-like  | edge   | −1,220.794, −1,220.538 | 2⁻¹³ m     | `BakedOffsets`    | 0.16 µm     | 5.2 × 10⁻⁵         | random 54 |
+    | Moon-like  | corner | −914.073, −912.396     | 2⁻¹⁴ m     | `FaceDifferences` | 53.5 µm     | 0.018              | random 53 |
+    | Moon-like  | corner | −914.073, −912.396     | 2⁻¹⁴ m     | `BakedOffsets`    | 0.16 µm     | 5.3 × 10⁻⁵         | random 33 |
+    - _What they show._ `BakedOffsets` forms q₀ from the `f64` height, so only the offsets' own
+      narrowing enters, about 0.2 µm. `FaceDifferences` carries the height's narrowing, at most
+      half its step, and the slot record's narrowing of h₀, which moves the whole patch along ν₀
+      by up to half h₀'s step (0.2 to 50.9 µm at these six origins). So on Moon-like's inside
+      patch the gap of 27.4 µm passes half the 30.5 µm step, inside the two halves together. Both
+      are part of R05.T4.b's measured formation error.
+    - _The frames' check:_ P₀ against the bake's origin, 0 m at all six patches.
+    - _The goldens' sizes:_ 75,206 B and 75,147 B, 150,353 B together.
+    - _Times_ (the laptop, 8 threads, a 1-minute load of 4.5 to 5.2 with #65's trace on 4 threads
+      beside it: provisional): `cargo test -p hyperion-surface --lib bake::drawn_ground` 2.2 to
+      3.1 s at the dev profile; the Vitest file 340 ms, its tests 14 ms (660 ms at a load of 9 to
+      12, beside `just test-wasm-fast`).
+- **Deferred findings (2026-10-13 rule)** (R10.T15.a; recorded, not ruled).
+  - _A served-world re-run_ of this test is not required: the chain does not depend on the field,
+    and T15.b's descent looks at served worlds.
+  - _The GPU's own last bits_ are not emulated: WGSL allows FMA contraction, 2.5-ULP division and
+    `inverseSqrt`'s accuracy for `sqrt`; R05.T4.b's analysis (every inexact quotient is small)
+    covers them, and T15.b's descent would show a crack.
+  - _The golden at 23_ is re-headed by `HYPERION_BLESS=1`, header only, when P14.T54.a lands.
+  - _Heights far from ±20 km:_ the six patches lie between −3,718 m and 1,771 m, so the largest
+    height step sampled is 2⁻¹² m, not the bound's 2⁻⁹ m; the bound's narrowing share rests on
+    the half-step analysis above, and a patch near ±20 km, on a served world, would sample it.
+  - _The instance's origin_ (the bake's origin less the camera, `Instance.originM`, narrowed once
+    from `f64`) is outside the test's frame, which the ruling makes origin-relative. Its narrowing
+    is at most half the `f32` step at the camera's distance (about 0.5 mm at 8 to 16 km, micrometres
+    beside a grounded craft), and the craft's own drawn position carries the same narrowing;
+    T15.b's descent would show it if it mattered.
+- **Questions for main (R10.T15.a).**
+  - _The plan's other "T15"s._ This lane writes only where the ruling lets it, so the Tasks
+    preamble's order ("T15 closes"; "T14.b and T15, which measure on it"), the entries that say
+    "before T15" or wait on "T15's descent", Verification's "to 2 mm" beside T15.a's 3 mm, and R11's
+    Consumes and R11.T4.c, which cite "R10.T15" for the collision test, still name the whole task.
+    Lean: main points each at T15.a (the collision test) or T15.b (the descent and served worlds)
+    in a docs pass; nothing here waits on it.
 - **Deviations in T1.a, as built** (2026-10-13, lane r10-classes). Files:
   `crates/hyperion-surface/src/material/{mod,class,properties,bearing}.rs`, `lib.rs`'s
   `pub mod material`, and the crate's `clippy.toml`, which gains `McEwen` among its doc idents.
