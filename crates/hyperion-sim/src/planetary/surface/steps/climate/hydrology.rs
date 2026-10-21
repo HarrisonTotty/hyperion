@@ -15,13 +15,15 @@
 //!    (locked ones), Siler et al.'s partition and each band's E − P.
 //! 2. **Evaporation** ([`evaporation`](super::evaporation)) over each field cell under the climate
 //!    condensable's own liquid (its `liquid_entry` the palette's `Liquid` entry of the condensable),
-//!    at or above the model's freezing point at its water surface: min(1, α s ÷ (s + γ)) ×
-//!    max(0, β `S_abs` − `C_sea` dT/dt) ÷ L, times 1 − its ice fraction. Its temperature is the
+//!    over its open months, those at or above the model's freezing point at its water surface:
+//!    Priestley and Taylor's year with no storage on β `S_abs` + `Q_O`, its months the Penman
+//!    split's shape (decision-r09-t13i §3.2), times 1 − its ice fraction. Its temperature is the
 //!    normalised field's, its climate cell's month at its water surface; `S_abs` its grid point's
 //!    month insolation times one minus the albedo at the model's own record at the point's water
 //!    surface, T − Γ `z̄_w` (decision-r09-t13ge §2.11), the point the cell's centre lies in, as the
-//!    sea shares bin it; the storage the sea's heat capacity times the centred change of the
-//!    cell's record over the neighbouring months' mid-times, none in a one-month year.
+//!    sea shares bin it; `Q_O` that point's ocean heat convergence per unit of its sea; the
+//!    storage the sea's heat capacity times the centred change of the cell's record over the
+//!    neighbouring months' mid-times, none in a one-month year.
 //! 3. **The sea's rate and the land's source** ([`SeaBands`]; decision-r09-t13e-revision §4.1,
 //!    §4.2). Each band's evaporation per unit of its sea's solid angle, `e_b` = Σ Ω E over its
 //!    cells ÷ Σ Ω over its sea cells (`seas::under_sea`'s, every liquid), and its sea share `s_b`,
@@ -70,6 +72,7 @@ use hyperion_surface::field::{PaletteRole, Wind};
 
 use super::coordinates::Coordinates;
 use super::ebm::{EnergyBalance, Freezing, Moisture};
+use super::evaporation::OpenMonth;
 use super::grid::{BandStencil, LATITUDE_BANDS, ModelGrid};
 use super::lfpm::{self, CellWind, Cover, GroundState, Mesh, Month, Parameters};
 use super::partition::{self, Bands, Budget, Circulation, DEGREE_RAD, Turning};
@@ -93,6 +96,13 @@ pub(super) struct OwnRecords {
     /// Each grid point's `z̄_w`, its flooded cells' mean water-surface height above the sea level,
     /// m; zero where it has none.
     pub(super) water_m: Vec<f64>,
+    /// Each month's ocean heat convergence at each grid point per unit of its sea's area, W m⁻²
+    /// (R09.T13.i; decision-r09-t13i §3.2's `Q_O`): the kept run's record of its Ekman cells and
+    /// gyres ([`OceanRecord`]) over the point's sea share, zero at a point with no sea; `None`
+    /// where no sea carries the term.
+    ///
+    /// [`OceanRecord`]: super::ebm::OceanRecord
+    pub(super) ocean_w_m2: Option<Vec<Vec<f64>>>,
 }
 
 /// What one month's water cycle did that is no output.
@@ -417,7 +427,8 @@ fn at_edges(grid: &ModelGrid, edges: &[f64], x: f64) -> f64 {
 
 /// What a run's evaporation reads (the [module documentation](self)'s stage 2): the climate
 /// condensable, its liquid's palette entry and the model's freezing point, each grid point's
-/// absorbed sunlight at its water surface each month, and each month's centred span of time.
+/// absorbed sunlight at its water surface and its ocean heat each month, and each month's share
+/// and centred span of time.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Evaporation {
     /// The model, whose heat capacity and air the rate reads.
@@ -434,6 +445,11 @@ pub(super) struct Evaporation {
     /// Each month's span from the previous month's middle to the next's, s: (½ s₋ + s + ½ s₊) P of
     /// the shares s; none in a one-month year.
     spans_s: Vec<f64>,
+    /// Each month's share of the year.
+    shares: Vec<f64>,
+    /// Each month's ocean heat convergence at each grid point per unit of its sea, W m⁻²
+    /// ([`OwnRecords::ocean_w_m2`]); `None` where no sea carries the term.
+    ocean_w_m2: Option<Vec<Vec<f64>>>,
 }
 
 impl Evaporation {
@@ -487,14 +503,19 @@ impl Evaporation {
             },
             absorbed_w_m2,
             spans_s,
+            shares,
+            ocean_w_m2: own.ocean_w_m2.clone(),
         })
     }
 
     /// Field cell `cell`'s evaporation rate each month, kg m⁻² s⁻¹, into `rates` (one a month),
     /// on `grid` in `coordinates`: whether it is under the condensable's own liquid, the rates zero
     /// where not. A month is zero where the liquid's temperature, its climate cell's month at its
-    /// water surface, lies below the freezing point; else min(1, α s ÷ (s + γ)) × max(0, β `S_abs` −
-    /// `C_sea` dT/dt) ÷ L × (1 − its ice fraction), `S_abs` its grid point's.
+    /// water surface, lies below the freezing point; the open months take the year of
+    /// [`year_rates_kg_m2_s`](super::evaporation::year_rates_kg_m2_s) on β `S_abs` + `Q_O`, the
+    /// coefficient min(1, α s ÷ (s + γ)), the storage `C_sea` dT/dt and the saturation specific
+    /// humidity at that temperature, times (1 − its ice fraction); `S_abs` and `Q_O` its grid
+    /// point's.
     ///
     /// # Panics
     ///
@@ -532,7 +553,8 @@ impl Evaporation {
         };
         let open = 1.0 - field_cell.ice_fraction;
         let latent = self.moisture.latent_heat_j_per_kg;
-        for (m, rate) in rates.iter_mut().enumerate() {
+        let mut months: [Option<OpenMonth>; 12] = [None; 12];
+        for (m, month) in months.iter_mut().enumerate().take(rates.len()) {
             let t_w = surface_temperature_k(working, cell, m);
             if self.freezing_k.is_some_and(|f| t_w < f) {
                 continue;
@@ -542,20 +564,33 @@ impl Evaporation {
                 self.model.specific_heat_j_per_kg_k,
                 t_w,
             );
-            let storage = if twelve {
+            // A one-month year has no storage, and takes Priestley and Taylor's rate on its
+            // energy, which reads no saturation.
+            let (storage, saturation) = if twelve {
                 let (before, after) = ((m + 11) % 12, (m + 1) % 12);
-                self.model.heat_capacity(t_w, 1.0) * (anomaly(after) - anomaly(before))
-                    / self.spans_s[m]
+                (
+                    self.model.heat_capacity(t_w, 1.0) * (anomaly(after) - anomaly(before))
+                        / self.spans_s[m],
+                    self.moisture.saturation_specific_humidity(t_w),
+                )
             } else {
-                0.0
+                (0.0, 0.0)
             };
-            *rate = open
-                * super::evaporation::rate_kg_m2_s(
-                    coefficient,
-                    self.absorbed_w_m2[m][point],
-                    storage,
-                    latent,
-                );
+            let ocean = self
+                .ocean_w_m2
+                .as_ref()
+                .map_or(0.0, |ocean| ocean[m][point]);
+            *month = Some(OpenMonth {
+                share: self.shares[m],
+                coefficient,
+                energy_w_m2: super::evaporation::energy_w_m2(self.absorbed_w_m2[m][point], ocean),
+                storage_w_m2: storage,
+                saturation,
+            });
+        }
+        super::evaporation::year_rates_kg_m2_s(&months[..rates.len()], latent, rates);
+        for rate in rates.iter_mut() {
+            *rate *= open;
         }
         true
     }

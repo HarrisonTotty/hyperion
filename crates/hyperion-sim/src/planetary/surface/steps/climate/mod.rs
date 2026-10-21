@@ -377,13 +377,17 @@ fn energy_balance(
             ebm::solve_locked(inputs, &grid, &sea_share, NOMINAL_STEP, ground, ocean)
         }
     };
+    let (transports, ocean_w_m2) = solution.ocean.map_or((None, None), |record| {
+        let per_sea = per_sea_area(&record.convergence_w_m2, &sea_share);
+        (Some((record.annual, record.months)), Some(per_sea))
+    });
     let surface_means = SurfaceMeans {
         steady_k: solution.steady_surface_mean_k,
         seasonal_k: on_grid.surface_mean_k(&grid, &solution.climate.annual_k),
         optical_depth: solution.optical_depth,
         correction: solution.correction,
         orbits: solution.climate.orbits,
-        transports: solution.ocean.map(|record| (record.annual, record.months)),
+        transports,
     };
     let own = hydrology::OwnRecords {
         months_k: solution.climate.months_k.clone(),
@@ -394,11 +398,30 @@ fn energy_balance(
             .iter()
             .map(|point| point.water_m)
             .collect(),
+        ocean_w_m2,
     };
     let mut model = arithmetic(pass, grid, coordinates, solution.climate);
     model.surface_means = Some(surface_means);
     model.water = Some(own);
     model
+}
+
+/// Each month's ocean heat convergence `convergence_w_m2` (one a month, each one a grid point, W m⁻²
+/// of the point's area) per unit of each point's sea, `sea_share` (one a point): the convergence
+/// over the share, and zero at a point with no sea, whose edges carry no current
+/// (decision-r09-t13i §3.2's `Q_O`, "the point's over its sea share").
+#[must_use]
+fn per_sea_area(convergence_w_m2: &[Vec<f64>], sea_share: &[f64]) -> Vec<Vec<f64>> {
+    convergence_w_m2
+        .iter()
+        .map(|month| {
+            month
+                .iter()
+                .zip(sea_share)
+                .map(|(&q, &s)| if s > 0.0 { q / s } else { 0.0 })
+                .collect()
+        })
+        .collect()
 }
 
 /// The sea's heat transport over `working`'s field (R09.T13.i, decision-r09-t13i §2.3.3): the

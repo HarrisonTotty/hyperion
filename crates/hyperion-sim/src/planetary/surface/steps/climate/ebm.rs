@@ -1094,9 +1094,25 @@ impl Moisture {
     /// pressure but at most the surface pressure, where q is 1.
     #[must_use]
     pub(super) fn specific_humidity(&self, t_k: f64) -> f64 {
+        self.humidity_at(t_k, RELATIVE_HUMIDITY)
+    }
+
+    /// The saturation specific humidity `q_s` at the temperature `t_k`, K: q at a relative
+    /// humidity of 1, the vapour pressure the saturation pressure but at most the surface pressure,
+    /// where `q_s` is 1. The sea's evaporation spreads its aerodynamic part by it
+    /// (decision-r09-t13i §3.2).
+    #[must_use]
+    pub(super) fn saturation_specific_humidity(&self, t_k: f64) -> f64 {
+        self.humidity_at(t_k, 1.0)
+    }
+
+    /// q = ε e ÷ (p − (1 − ε) e) at the temperature `t_k`, K, e the relative humidity
+    /// `relative_humidity` of the saturation pressure but at most the surface pressure.
+    #[must_use]
+    fn humidity_at(&self, t_k: f64, relative_humidity: f64) -> f64 {
         let saturation = saturation_pressure(self.condensable, Kelvin::new(t_k))
             .map_or(0.0, crate::units::Pascals::value);
-        let wanted = RELATIVE_HUMIDITY * saturation;
+        let wanted = relative_humidity * saturation;
         let p = self.surface_pressure_pa;
         let e = if wanted < p { wanted } else { p };
         let epsilon = self.mass_ratio;
