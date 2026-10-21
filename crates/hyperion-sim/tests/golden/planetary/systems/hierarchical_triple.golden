@@ -1568,6 +1568,10 @@ heat_flow_w_m2 = 0x3f3ac5d155da7d62  # 0.0004085193703335569
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x418c2df964e2ce24  # 59096876.610744745
+reservoir_gel_m = 0x40eeeab9f6810ed3  # 63317.81134083648
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1102 C h II: Moon(Regular) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3f1dc97b8b4e63e5  # 0.00011362854531994612
@@ -1653,6 +1657,10 @@ heat_flow_w_m2 = 0x3f40a4d3e83f369f  # 0.0005079302504726496
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x419b0243b459dbff  # 113283309.08775328
+reservoir_gel_m = 0x40fda1e747d2802c  # 121374.45503473346
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1103 C h III: Moon(Captured) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3ed08a612ac5145f  # 3.943573272662236e-6
@@ -1738,6 +1746,10 @@ heat_flow_w_m2 = 0x3f31d108e58e2384  # 0.0002718588562449708
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x417e2f179a1f2b6d  # 31650169.632609773
+reservoir_gel_m = 0x40e08ed8087ae80a  # 33910.75103516884
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1104 C h VI: Moon(Captured) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3ea91b48ecb16c92  # 7.48234435642315e-7
@@ -1823,6 +1835,10 @@ heat_flow_w_m2 = 0x3f24716110b3dca7  # 0.00015596685293648335
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x4171582922309106  # 18186898.136857055
+reservoir_gel_m = 0x40d307784108ba3c  # 19485.87896936595
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1105 C h IV: Moon(Captured) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3ea7e3761b32e82b  # 7.119334014739833e-7
@@ -1908,6 +1924,10 @@ heat_flow_w_m2 = 0x3f241b3508a7c68f  # 0.00015339872727753278
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x41710f29535aa788  # 17887893.209632427
+reservoir_gel_m = 0x40d2b761258e184c  # 19165.517917178848
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1106 C h V: Moon(Captured) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3e9bab183890025a  # 4.12290369455924e-7
@@ -1993,6 +2013,10 @@ heat_flow_w_m2 = 0x3f20c15bd5619cad  # 0.00012783285154969096
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x416c70521e470dc0  # 14910096.946173549
+reservoir_gel_m = 0x40cf33848d53017b  # 15975.035562873576
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1180 C h RING 1: Ring about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3c99271819454659  # 8.726599813318648e-17
@@ -2174,6 +2198,10 @@ heat_flow_w_m2 = 0x3fa1dd62ced28377  # 0.03489216589628701
 surface_age_yr = 0x416444e942f0cf0f  # 10626890.091895608
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x419949568f7dd114  # 106059171.87286788
+reservoir_gel_m = 0x40fbbb1ca8c33b3a  # 113585.79120181213
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1202 C i II: Moon(Regular) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3f52849d399d1b84  # 0.0011302504921830445
@@ -2259,6 +2287,10 @@ heat_flow_w_m2 = 0x3f55069615f35c40  # 0.0012833085709667152
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x41ab343462a41ec5  # 228203057.32054725
+reservoir_gel_m = 0x410dd56e23ae8010  # 244397.76742267655
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1203 C i III: Moon(Regular) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3f4a2f74790239f5  # 0.0007991141046817517
@@ -2344,6 +2376,10 @@ heat_flow_w_m2 = 0x3f51d6a3a845d358  # 0.0010887716499301172
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x41a799fd9fc17f04  # 197983951.87792218
+reservoir_gel_m = 0x4109e211022ebbad  # 212034.12606569883
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1204 C i V: Moon(Captured) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3ec9552d7d23e339  # 3.019896191888349e-6
@@ -2429,6 +2465,10 @@ heat_flow_w_m2 = 0x3f304b3459d330d0  # 0.00024862316224695275
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x417b9d6a2bfeb4f7  # 28956322.7496843
+reservoir_gel_m = 0x40de48cf996fe390  # 31011.243740055303
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1205 C i VII: Moon(Captured) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3e64e5524107d4db  # 3.8921435078286456e-8
@@ -2514,6 +2554,10 @@ heat_flow_w_m2 = 0x3f0e8113e752a634  # 5.818216315252e-5
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x4159e5ee8b9e4e80  # 6789050.181537271
+reservoir_gel_m = 0x40bc66d7ed1d4605  # 7270.843461827845
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1206 C i VI: Moon(Captured) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3e5af2a0089532f5  # 2.5097052024514665e-8
@@ -2599,6 +2643,10 @@ heat_flow_w_m2 = 0x3f0a5a4cfbf92f0c  # 5.026385724401895e-5
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x41565fca01793058  # 5865256.02302178
+reservoir_gel_m = 0x40b8897db9d4e0d5  # 6281.491116814509
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1207 C i IV: Moon(Captured) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3e4724f8aa2b9baa  # 1.0777460095766189e-8
@@ -2684,6 +2732,10 @@ heat_flow_w_m2 = 0x3f03e193ca349889  # 3.7920305908920966e-5
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x4150e156932c2d2b  # 4425050.299571316
+reservoir_gel_m = 0x40b283145546d8b9  # 4739.079426219855
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1280 C i RING 1: Ring about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3c6c73332a9baf41  # 1.233822050079074e-17
@@ -3269,6 +3321,10 @@ heat_flow_w_m2 = 0x3faadf5bff2bc70a  # 0.0524853466976208
 surface_age_yr = 0x4148bc757bd74263  # 3242218.967506693
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal false
+reservoir_kg_m2 = 0x41de268aa47b4e2b  # 2023369361.926646
+reservoir_gel_m = 0x4140881896cb4620  # 2166833.178078428
+area_fraction = 0x3ff0000000000000  # 1.0
 condensate: CH4, Solid, seasonal true
 reservoir_kg_m2 = 0x418964c3b8cdb6fa  # 53254263.10044666
 reservoir_gel_m = 0x40f85b2ffb3dd237  # 99762.99883825412
@@ -3469,6 +3525,10 @@ heat_flow_w_m2 = 0x3fa6c54689a883e3  # 0.04447384291075431
 surface_age_yr = 0x4154051b0cc7bcc3  # 5248108.199691
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal false
+reservoir_kg_m2 = 0x41e07a54c70097a6  # 2211620408.018512
+reservoir_gel_m = 0x414211d8b51ec4ce  # 2368433.4150014883
+area_fraction = 0x3ff0000000000000  # 1.0
 condensate: CH4, Solid, seasonal true
 reservoir_kg_m2 = 0x417ed9f3e3498cf4  # 32350014.20545669
 reservoir_gel_m = 0x40ed9775fe3bbc25  # 60603.687284343214
@@ -3892,6 +3952,10 @@ heat_flow_w_m2 = 0x3f5c5140995c3ebe  # 0.001728356442473641
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x41914fec58511d5a  # 72612630.07921353
+reservoir_gel_m = 0x40f2fe434d4ff780  # 77796.2063750904
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body e203 BELT 2-3: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f36abf4fddd8f50  # 0.0003459427951979415
@@ -3977,6 +4041,10 @@ heat_flow_w_m2 = 0x3f47191783643848  # 0.0007048954783230943
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x419c7d98c5bb9393  # 119498289.43318014
+reservoir_gel_m = 0x40ff3ec74536b2ce  # 127980.45439786764
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body e204 BELT 2-4: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f2c129766c6fe07  # 0.0002141771141292855
@@ -4147,6 +4215,10 @@ heat_flow_w_m2 = 0x3f3e26921c7745ca  # 0.0004600626675400314
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fdd0ee2562bae1e  # 0.4540334550390258
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x4194eafc46de84d4  # 87736081.71730357
+reservoir_gel_m = 0x40f6f6bba9ef83a2  # 94059.72898818416
+area_fraction = 0x3fdd0ee2562bae1e  # 0.4540334550390258
 envelope: NotApplicable
 body e206 BELT 2-6: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f1c9087107ca9cb  # 0.0001089651524323394
@@ -4232,6 +4304,10 @@ heat_flow_w_m2 = 0x3f35f9cba24ad33a  # 0.00033532353908620786
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x41949df3428c5be3  # 86473936.63706927
+reservoir_gel_m = 0x40f69c907aa694fd  # 92617.02994402121
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body e207 BELT 2-7: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f1617bdc51cfcca  # 8.427711261748124e-5
@@ -4509,6 +4585,10 @@ heat_flow_w_m2 = 0x3f43d8d10189a203  # 0.0006056805169239457
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x4199d548aa75f1c0  # 108352042.61518002
+reservoir_gel_m = 0x40fc545184b9ebd5  # 116037.09490387079
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body e302 BELT 3-2: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3effad940d5c1938  # 3.0210533473095882e-5
@@ -4594,6 +4674,10 @@ heat_flow_w_m2 = 0x3f42044b6a4fd735  # 0.0005498283613849299
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x418d57fed04e087e  # 61538266.038102135
+reservoir_gel_m = 0x40f016ebf64c7f44  # 65902.7476315471
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body e303 BELT 3-3: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3ef01dd82818fa38  # 1.5369967974127578e-5
@@ -4618,7 +4702,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe078dc6fdb88ee  # 0.5147535500257427
 water = 0x3fdf0e472048ee25  # 0.4852464499742573
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x402e9d6f0c25ceaa  # 15.307487849822184
+t_eq_k = 0x402d5fab1fb7cba5  # 14.686852446733448
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -4656,9 +4740,9 @@ figure_pole_y = 0xbfe1e74b57516737  # -0.5594841676167793
 figure_pole_z = 0x3fea7f8462cc9298  # 0.8280660562200692
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd69403659b3cfc  # 0.3527840130090707
-geometric_albedo_v = 0x3fd69403659b3cfc  # 0.3527840130090707
-geometric_albedo_r = 0x3fd69403659b3cfc  # 0.3527840130090707
+geometric_albedo_b = 0x3fd82e07ca358068  # 0.3778094744393514
+geometric_albedo_v = 0x3fd82e07ca358068  # 0.3778094744393514
+geometric_albedo_r = 0x3fd82e07ca358068  # 0.3778094744393514
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -4666,11 +4750,11 @@ phase_integral_b = 0x3fe999999999999a  # 0.8
 phase_integral_v = 0x3fe999999999999a  # 0.8
 phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fe5d81cf7d0f43d  # 0.6826310005341224
-bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
+bond_albedo = 0x3fe764cd1db4097b  # 0.7310548381940828
+bond_ratio = 0x3fda75ce943cd76c  # 0.413440365565626
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x402e9d6f0c25ceaa  # 15.307487849822184
-equator_pole_contrast_k = 0x40095f0604234fa8  # 3.171398193671809
+mean_surface_temperature_k = 0x402d5fab1fb7cba5  # 14.686852446733448
+equator_pole_contrast_k = 0x400857af84473484  # 3.0428152403097233
 day_night_contrast_k = 0x0000000000000000  # 0.0
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40a61213b1899da6  # 2825.038463879103
@@ -4679,6 +4763,18 @@ heat_flow_w_m2 = 0x3f352ec1754b49f8  # 0.0003232214269647533
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal false
+reservoir_kg_m2 = 0x418c206077268b01  # 58985486.89381982
+reservoir_gel_m = 0x40eed7f84835385b  # 63167.75881443984
+area_fraction = 0x3ff0000000000000  # 1.0
+condensate: CH4, Solid, seasonal false
+reservoir_kg_m2 = 0x41107f8a93146d80  # 270306.6436326131
+reservoir_gel_m = 0x407fa64430f91ecd  # 506.3916482669127
+area_fraction = 0x3fd0cad1ad378226  # 0.262379092366276
+condensate: N2, Solid, seasonal true
+reservoir_kg_m2 = 0x40bedd411faeaf96  # 7901.254389684551
+reservoir_gel_m = 0x401e83699708aa0c  # 7.628332481292556
+area_fraction = 0x3f7030802e2d736c  # 0.003952503876317386
 envelope: NotApplicable
 body e400 BELT 4: Belt(Kuiper) about Some(Star(3)), Present
 mass_mearth = 0x3eef1c6d576cb85e  # 1.4834901532614373e-5
@@ -6231,6 +6327,10 @@ heat_flow_w_m2 = 0x3f3ac5d133c0e747  # 0.00040851933931983605
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x418c2df964e2ce24  # 59096876.610744745
+reservoir_gel_m = 0x40eeeab9f681965b  # 63317.81134108893
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1102 C h II: Moon(Regular) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3f1dc97b8b4e63e5  # 0.00011362854531994612
@@ -6316,6 +6416,10 @@ heat_flow_w_m2 = 0x3f40a4d3cd7a7033  # 0.0005079302017807541
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x419b0243b459dbff  # 113283309.08775328
+reservoir_gel_m = 0x40fda1e747d30212  # 121374.45503521737
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1103 C h III: Moon(Captured) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3ed08a612ac5145f  # 3.943573272662236e-6
@@ -6401,6 +6505,10 @@ heat_flow_w_m2 = 0x3f31d108c5683def  # 0.00027185882700650384
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x417e2f179a1f2b6d  # 31650169.632609773
+reservoir_gel_m = 0x40e08ed8087b30a0  # 33910.75103530404
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1104 C h VI: Moon(Captured) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3ea91b48ecb16c92  # 7.48234435642315e-7
@@ -6486,6 +6594,10 @@ heat_flow_w_m2 = 0x3f247160ebdef41e  # 0.00015596683618737754
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x4171582922309106  # 18186898.136857055
+reservoir_gel_m = 0x40d3077841090da8  # 19485.878969443642
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1105 C h IV: Moon(Captured) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3ea7e3761b32e82b  # 7.119334014739833e-7
@@ -6571,6 +6683,10 @@ heat_flow_w_m2 = 0x3f241b34e46e5802  # 0.0001533987108046087
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x41710f29535aa788  # 17887893.209632427
+reservoir_gel_m = 0x40d2b761258e6a58  # 19165.51791725526
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1106 C h V: Moon(Captured) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3e9bab183890025a  # 4.12290369455924e-7
@@ -6656,6 +6772,10 @@ heat_flow_w_m2 = 0x3f20c15bb73362de  # 0.00012783283782515689
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x416c70521e470dc0  # 14910096.946173549
+reservoir_gel_m = 0x40cf33848d538a42  # 15975.035562937268
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1180 C h RING 1: Ring about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3c99271819454659  # 8.726599813318648e-17
@@ -6837,6 +6957,10 @@ heat_flow_w_m2 = 0x3fa1dd62cf124418  # 0.03489216592527827
 surface_age_yr = 0x416444e9421e7cb3  # 10626890.06622157
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x419949568f7dd114  # 106059171.87286788
+reservoir_gel_m = 0x40fbbb1ca8c34cbf  # 113585.7912018774
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1202 C i II: Moon(Regular) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3f52849d399d1b84  # 0.0011302504921830445
@@ -6922,6 +7046,10 @@ heat_flow_w_m2 = 0x3f550695eba24b49  # 0.0012833084170195844
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x41ab343462a41ec5  # 228203057.32054725
+reservoir_gel_m = 0x410dd56e23ae92e9  # 244397.76742281698
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1203 C i III: Moon(Regular) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3f4a2f74790239f5  # 0.0007991141046817517
@@ -7007,6 +7135,10 @@ heat_flow_w_m2 = 0x3f51d6a3838888ae  # 0.001088771516272884
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x41a799fd9fc17f04  # 197983951.87792218
+reservoir_gel_m = 0x4109e211022ecc07  # 212034.12606582066
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1204 C i V: Moon(Captured) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3ec9552d7d23e339  # 3.019896191888349e-6
@@ -7092,6 +7224,10 @@ heat_flow_w_m2 = 0x3f304b343c6f780f  # 0.00024862313551732377
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x417b9d6a2bfeb4f7  # 28956322.7496843
+reservoir_gel_m = 0x40de48cf996ff6b1  # 31011.243740073118
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1205 C i VII: Moon(Captured) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3e64e5524107d4db  # 3.8921435078286456e-8
@@ -7177,6 +7313,10 @@ heat_flow_w_m2 = 0x3f0e8113b065f968  # 5.818215690832595e-5
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x4159e5ee8b9e4e80  # 6789050.181537271
+reservoir_gel_m = 0x40bc66d7ed1d57f6  # 7270.8434618320225
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1206 C i VI: Moon(Captured) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3e5af2a0089532f5  # 2.5097052024514665e-8
@@ -7262,6 +7402,10 @@ heat_flow_w_m2 = 0x3f0a5a4ccc8668d0  # 5.0263851849767526e-5
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x41565fca01793058  # 5865256.02302178
+reservoir_gel_m = 0x40b8897db9d4f056  # 6281.491116818119
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1207 C i IV: Moon(Captured) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3e4724f8aa2b9baa  # 1.0777460095766189e-8
@@ -7347,6 +7491,10 @@ heat_flow_w_m2 = 0x3f03e193a66910a3  # 3.792030183949579e-5
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x4150e156932c2d2b  # 4425050.299571316
+reservoir_gel_m = 0x40b283145546e46a  # 4739.079426222577
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 1280 C i RING 1: Ring about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3c6c73332a9baf41  # 1.233822050079074e-17
@@ -7931,7 +8079,11 @@ continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3faadf5bceca5d8f  # 0.052485341065387485
 surface_age_yr = 0x4148bc75fd5547df  # 3242219.979165062
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x3ff0000000000000  # 1.0
+ice_fraction = 0x3fefffffffffffff  # 0.9999999999999999
+condensate: H2O, Solid, seasonal false
+reservoir_kg_m2 = 0x41de268aa47b4e2b  # 2023369361.926646
+reservoir_gel_m = 0x4140881896cb4725  # 2166833.1780785494
+area_fraction = 0x3ff0000000000000  # 1.0
 condensate: CH4, Solid, seasonal true
 reservoir_kg_m2 = 0x418964c3b8cdb6fa  # 53254263.10044666
 reservoir_gel_m = 0x40f85b2ffb32aa70  # 99762.99882761552
@@ -8131,7 +8283,11 @@ continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fa6c54660a9a546  # 0.04447383813824017
 surface_age_yr = 0x4154051b75955745  # 5248109.837240045
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x3fefffffffffffff  # 0.9999999999999999
+ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal false
+reservoir_kg_m2 = 0x41e07a54c70097a6  # 2211620408.018512
+reservoir_gel_m = 0x414211d8b51ec4f3  # 2368433.4150015055
+area_fraction = 0x3ff0000000000000  # 1.0
 condensate: CH4, Solid, seasonal true
 reservoir_kg_m2 = 0x417ed9f3e3498cf4  # 32350014.20545669
 reservoir_gel_m = 0x40ed9775fe3d019c  # 60603.68728494944
@@ -8555,6 +8711,10 @@ heat_flow_w_m2 = 0x3f5c51405d8b95ec  # 0.0017283562248676622
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x41914fec58511d5a  # 72612630.07921353
+reservoir_gel_m = 0x40f2fe434d50085f  # 77796.20637515326
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body e203 BELT 2-3: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f36abf4fddd8f50  # 0.0003459427951979415
@@ -8640,6 +8800,10 @@ heat_flow_w_m2 = 0x3f471917572690f3  # 0.0007048953978494851
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x419c7d98c5bb9393  # 119498289.43318014
+reservoir_gel_m = 0x40ff3ec74536ba69  # 127980.45439789597
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body e204 BELT 2-4: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f2c129766c6fe07  # 0.0002141771141292855
@@ -8810,6 +8974,10 @@ heat_flow_w_m2 = 0x3f3e2691e49f0308  # 0.0004600626167495102
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fdd0ee253ad510a  # 0.4540334527166726
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x4194eafc46de7c0c  # 87736081.71727008
+reservoir_gel_m = 0x40f6f6bba9efa528  # 94059.72898830904
+area_fraction = 0x3fdd0ee253ad510a  # 0.4540334527166726
 envelope: NotApplicable
 body e206 BELT 2-6: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f1c9087107ca9cb  # 0.0001089651524323394
@@ -8895,6 +9063,10 @@ heat_flow_w_m2 = 0x3f35f9cb79eb38b2  # 0.00033532350236676744
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x41949df3428c5be3  # 86473936.63706927
+reservoir_gel_m = 0x40f69c907aa69cc5  # 92617.0299440502
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body e207 BELT 2-7: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f1617bdc51cfcca  # 8.427711261748124e-5
@@ -9172,6 +9344,10 @@ heat_flow_w_m2 = 0x3f43d8d0dd26280d  # 0.0006056804507335048
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x4199d548aa75f1c0  # 108352042.61518002
+reservoir_gel_m = 0x40fc545184b9f347  # 116037.09490389853
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body e302 BELT 3-2: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3effad940d5c1938  # 3.0210533473095882e-5
@@ -9257,6 +9433,10 @@ heat_flow_w_m2 = 0x3f42044b4993de54  # 0.0005498283018416463
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal true
+reservoir_kg_m2 = 0x418d57fed04e087e  # 61538266.038102135
+reservoir_gel_m = 0x40f016ebf64c82eb  # 65902.7476315607
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body e303 BELT 3-3: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3ef01dd82818fa38  # 1.5369967974127578e-5
@@ -9281,7 +9461,7 @@ iron = 0x0000000000000000  # 0.0
 rock = 0x3fe078dc6fdb88ee  # 0.5147535500257427
 water = 0x3fdf0e472048ee25  # 0.4852464499742573
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x402e9d6f0d4985c9  # 15.307487883782317
+t_eq_k = 0x402d5fab20cf8b70  # 14.68685247930054
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -9319,9 +9499,9 @@ figure_pole_y = 0xbfe1e74b57516737  # -0.5594841676167793
 figure_pole_z = 0x3fea7f8462cc9298  # 0.8280660562200692
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd6940365fc2355  # 0.3527840133615901
-geometric_albedo_v = 0x3fd6940365fc2355  # 0.3527840133615901
-geometric_albedo_r = 0x3fd6940365fc2355  # 0.3527840133615901
+geometric_albedo_b = 0x3fd82e07ca87c8d2  # 0.37780947473869475
+geometric_albedo_v = 0x3fd82e07ca87c8d2  # 0.37780947473869475
+geometric_albedo_r = 0x3fd82e07ca87c8d2  # 0.37780947473869475
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -9329,11 +9509,11 @@ phase_integral_b = 0x3fe999999999999a  # 0.8
 phase_integral_v = 0x3fe999999999999a  # 0.8
 phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fe5d81cf82eb42a  # 0.6826310012162413
-bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
+bond_albedo = 0x3fe764cd1e03a51f  # 0.731054838773307
+bond_ratio = 0x3fda75ce943cd76c  # 0.413440365565626
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x402e9d6f0d4985c9  # 15.307487883782317
-equator_pole_contrast_k = 0x40095f0605150fa0  # 3.1713982007076567
+mean_surface_temperature_k = 0x402d5fab20cf8b70  # 14.68685247930054
+equator_pole_contrast_k = 0x400857af852f09d4  # 3.042815247056959
 day_night_contrast_k = 0x0000000000000000  # 0.0
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40a61213b19562e8  # 2825.0384642298923
@@ -9342,6 +9522,18 @@ heat_flow_w_m2 = 0x3f352ec14ef7fdf4  # 0.0003232213921080245
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal false
+reservoir_kg_m2 = 0x418c206077268b01  # 58985486.89381982
+reservoir_gel_m = 0x40eed7f848353842  # 63167.75881443966
+area_fraction = 0x3ff0000000000000  # 1.0
+condensate: CH4, Solid, seasonal false
+reservoir_kg_m2 = 0x41107f8a93146d80  # 270306.6436326131
+reservoir_gel_m = 0x407fa64430f9f50f  # 506.39164827003054
+area_fraction = 0x3fd0cad1ad37f3d4  # 0.2623790923678915
+condensate: N2, Solid, seasonal true
+reservoir_kg_m2 = 0x40bedd411faead35  # 7901.254389683997
+reservoir_gel_m = 0x401e836997097114  # 7.628332481337811
+area_fraction = 0x3f7030802e2ddd06  # 0.0039525038763408345
 envelope: NotApplicable
 body e400 BELT 4: Belt(Kuiper) about Some(Star(3)), Present
 mass_mearth = 0x3eef1c6d576bf0c5  # 1.4834901532527812e-5

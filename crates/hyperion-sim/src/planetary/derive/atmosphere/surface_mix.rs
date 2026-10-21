@@ -129,6 +129,8 @@ pub(crate) fn linear_cold_area(span: &ClimateSpan, t: Kelvin) -> f64 {
 /// - The ice is the cold area below T24.b's threshold ([`cover::ice_threshold`]), a `Snowball`'s
 ///   and an icy crust's uncapped, a silicate crust's capped by its surface water at
 ///   [`cover::ICE_SHEET_THICKNESS`] of ice Ih at the mean ([`cover::ice_fraction`]'s rule).
+/// - No crust is listed ([`WaterCover::crust_water`]): the area mix reads an ice bulk's crust as
+///   its regolith.
 #[must_use]
 fn pass_water_cover(
     solved: &Partition,
@@ -166,6 +168,9 @@ fn pass_water_cover(
         potential_ocean: surface.basins.area_filled(layer),
         ice_fraction,
         ice_density,
+        // The area mix reads an ice bulk's crust as its regolith (`Regolith::of_material`), so the
+        // pass lists no crust beside it (decision-p14-t54a-ganymede, C1 follow-up §C1.4).
+        crust_water: false,
     }
 }
 

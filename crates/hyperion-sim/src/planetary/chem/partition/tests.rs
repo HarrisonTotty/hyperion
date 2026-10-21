@@ -1060,6 +1060,7 @@ fn water_cover(p: &Partition, profile: &dyn Fn(Kelvin) -> f64, share: f64) -> Wa
         ),
         ice_fraction: if cold < cap { cold } else { cap },
         ice_density: rho,
+        crust_water: false,
     }
 }
 
@@ -1370,6 +1371,7 @@ fn earth_with_water(profile: &dyn Fn(Kelvin) -> f64, sigma: f64) -> (Condensates
         ),
         ice_fraction: if cold < cap { cold } else { cap },
         ice_density: rho,
+        crust_water: false,
     };
     let published = earth.publish(&Cover {
         cold_area: profile,

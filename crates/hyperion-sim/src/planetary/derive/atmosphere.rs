@@ -19,7 +19,10 @@
 //!   a stated multiple of the zero-albedo irradiation temperature at the hosts' largest past
 //!   luminosity, raised by the X-ray and ultraviolet energy the body has received beyond Earth's
 //!   ([`exobase_temperature`]). A hydrogen envelope, far too massive for Jeans escape to remove, is
-//!   judged by energy-limited escape instead ([`energy_limited_loss`]; Owen and Wu 2017).
+//!   judged by energy-limited escape instead ([`energy_limited_loss`]; Owen and Wu 2017). On an ice
+//!   crust the water and nitrogen whose ice's vapour cannot make a bulk air are held by their ice,
+//!   less that vapour's own escape over the age (Schaller and Brown 2007's criterion; P14.T54.a's
+//!   23 stand-in for P14.T53.c).
 //! - **Greenhouse and surface state** (P14.T13.c). The retained gases, less what the climate
 //!   stores (carbon in rocks where oceans weather it, water lost in a runaway greenhouse) and what
 //!   condenses at the surface temperature, give the partial pressures from the body's gravity; a
@@ -281,7 +284,8 @@ pub fn exobase_temperature(irradiation: Kelvin, fluence: JoulesPerSquareMetre) -
 }
 
 /// Which species a body retains over its system's age: those whose Jeans parameter at its
-/// exobase is at least [`JEANS_RETENTION_THRESHOLD`] (P14.T13.b).
+/// exobase is at least [`JEANS_RETENTION_THRESHOLD`] (P14.T13.b) and, on a body's report
+/// ([`Atmosphere::retention`]), the water and nitrogen an ice crust holds as ice.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Retention(u16);
 
@@ -317,6 +321,13 @@ impl Retention {
         } else {
             Self(self.0 & !methane)
         }
+    }
+
+    /// This retention with the species `held` retains set too: the ice-held gases of an ice
+    /// crust ([`ice_vapour_escape`]) beside those Jeans's test keeps.
+    #[must_use]
+    pub(crate) const fn with(self, held: Self) -> Self {
+        Self(self.0 | held.0)
     }
 }
 
@@ -1174,6 +1185,58 @@ pub fn runaway_oxygen(
 /// give it by the per-mass rule of [`volatile_inventory`] are not.
 pub const AIRLESS_PRESSURE: Pascals = Pascals::new(100.0);
 
+/// The mass of `gas` a body of mass `mass` and radius `radius` loses over `age` as the saturated
+/// vapour of its own ice at `temperature`, with the exobase at the surface: P14.T54.a's 23
+/// stand-in for P14.T53.c's ice-held retention (decision-p14-t54a-ganymede, C0 follow-up, rule
+/// (b)).
+///
+/// L = 4πR² · m · t · n v₀ (1 + λ) e^(−λ) ÷ 2√π, with n = `p_sat`(T) ÷ kT, v₀ = √(2kT ÷ m) and
+/// λ = G M m ÷ (k T R) at T ([`jeans_parameter`]). It is Jeans's escape flux, n v₀ (1 + λ) e^(−λ)
+/// ÷ 2√π (Chamberlain and Hunten 1987, _Theory of Planetary Atmospheres_, 2nd ed.; Hunten
+/// 1973, J. Atmos. Sci. 30, 1481), at the number density of the ice's saturated vapour, over the
+/// whole surface and the age: Schaller and Brown 2007's criterion for the volatile ices a
+/// Kuiper-belt body keeps (ApJ 659, L61), its exobase at the surface. `p_sat` is the registry's
+/// solid branch (P14.T49.b): ice Ih's IAPWS R14-08 sublimation equation for water (Wagner,
+/// Riethmann, Feistel and Harvey 2011, JPCRD 40, 043103) and Fray and Schmitt 2009's α and β
+/// polynomials for nitrogen (Planet. Space Sci. 57, 2053). P14.T53.c replaces it with the ice's
+/// controlling temperature, its emissivity and the cold upper atmosphere's escape.
+///
+/// `None` where the ice does not hold the gas: where its row has no phase diagram, where its
+/// saturation pressure at `temperature` is not below [`AIRLESS_PRESSURE`], so that its vapour
+/// would make a bulk air (above its critical temperature the pressure is infinite), and at a
+/// temperature that is not positive or not a number. A flux that underflows, of a gas bound too
+/// tightly for e^(−λ) to be represented, loses nothing.
+#[must_use]
+pub(crate) fn ice_vapour_escape(
+    mass: Kilograms,
+    radius: Metres,
+    gas: Gas,
+    temperature: Kelvin,
+    age: Years,
+) -> Option<Kilograms> {
+    let t = temperature.value();
+    if !(t.is_finite() && t > 0.0) {
+        return None;
+    }
+    let vapour = crate::substance::saturation_pressure(gas.substance(), temperature)?;
+    if vapour.value().is_nan() || vapour >= AIRLESS_PRESSURE {
+        return None;
+    }
+    let m = gas.molecular_mass().value();
+    let kt = BOLTZMANN_CONSTANT * t;
+    let density = vapour.value() / kt;
+    let speed = (2.0 * kt / m).sqrt();
+    let lambda = jeans_parameter(mass, radius, gas, temperature);
+    // 1 ÷ 2√π is (2 ÷ √π) ÷ 4.
+    let flux =
+        density * speed * (1.0 + lambda) * math::exp(-lambda) * core::f64::consts::FRAC_2_SQRT_PI
+            / 4.0;
+    let r = radius.value();
+    let seconds = age.value() * SECONDS_PER_JULIAN_YEAR;
+    let loss = 4.0 * core::f64::consts::PI * r * r * m * seconds * flux;
+    Some(Kilograms::new(if loss > 0.0 { loss } else { 0.0 }))
+}
+
 /// The solidus of dry peridotite at the surface, K: 1,394 (Hirschmann 2000, G³ 1, 1042, whose fit
 /// gives 1,120.7 °C at zero pressure). A surface hotter than this is a magma ocean.
 pub const SILICATE_SOLIDUS: Kelvin = Kelvin::new(1_394.0);
@@ -1322,7 +1385,9 @@ pub struct AtmosphereInputs {
     /// or for a captured or giant-impact moon its parent's zone of the star's disc (P14.T56.c,
     /// [`FormationZone`](crate::planetary::derive::FormationZone)).
     pub formed: SnowLineSide,
-    /// Its equilibrium temperature from its hosts' light at the time, at the albedo in use.
+    /// Its equilibrium temperature from its hosts' light at the time, at the albedo in use: the
+    /// temperature at which an ice crust's ice holds its water and nitrogen
+    /// ([`Atmosphere::retention`]).
     pub equilibrium: Kelvin,
     /// Its irradiation temperature, which its exobase reads ([`exobase_temperature`]): its
     /// equilibrium temperature at zero albedo, (F ÷ 4σ)^¼, at its hosts' largest past luminosity,
@@ -1359,6 +1424,7 @@ pub struct Atmosphere {
     surface_pressure: Option<Pascals>,
     partials: PartialPressures,
     retention: Retention,
+    ice_held: Retention,
     exobase_temperature: Kelvin,
     optical_depth: f64,
     albedo: BondAlbedo,
@@ -1402,10 +1468,31 @@ impl Atmosphere {
     }
 
     /// Which species the body retains: those that pass Jeans's test at the exobase
-    /// ([`Retention::of`], P14.T13.b), with methane kept where nitrogen is (P14.T24.f).
+    /// ([`Retention::of`], P14.T13.b), and on an ice crust the water and nitrogen its ice holds
+    /// that fail it (decision-p14-t54a-ganymede, C0 follow-up, rule (b): those whose ice's vapour
+    /// at the surface's mean temperature is under [`AIRLESS_PRESSURE`] keep their inventory less
+    /// that vapour's escape over the age, Schaller and Brown 2007's criterion), with methane kept
+    /// where nitrogen is (P14.T24.f).
     #[must_use]
     pub const fn retention(&self) -> Retention {
         self.retention
+    }
+
+    /// The species of [`retention`](Self::retention) that the body's ice holds, not Jeans's test:
+    /// water and nitrogen on an ice crust (rule (b)), none elsewhere.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn ice_held(&self) -> Retention {
+        self.ice_held
+    }
+
+    /// Whether `gas` passes the bulk-air test, Jeans's at the exobase ([`Retention::of`]), as
+    /// P14.T24.b's laws read "retained": not by its ice alone. An ice crust's ice-held water is
+    /// the crust, which T24.b's cover takes as its own (`Crust::IceRich`), not a hydrosphere over
+    /// it whose surface water fills basins, weighs the climate's ocean and opens a wet epoch.
+    #[must_use]
+    pub(crate) const fn retains_against_escape(&self, gas: Gas) -> bool {
+        self.retention.retains(gas) && !self.ice_held.retains(gas)
     }
 
     /// The exobase temperature the retention was judged at.
@@ -1519,6 +1606,67 @@ impl From<CarbonCarrier> for Gas {
     }
 }
 
+/// The volatiles an ice crust holds as ice (decision-p14-t54a-ganymede, C0 follow-up, rule (b)):
+/// on a body whose bulk is ice ([`SurfaceMaterial::Ice`]) with a solid crust and no envelope, the
+/// water and nitrogen that fail Jeans's test at the exobase but whose ice's saturated vapour at the
+/// pass's equilibrium temperature, the airless surface's mean, cannot make a bulk air keep their
+/// inventory less that vapour's own escape over the age ([`ice_vapour_escape`]).
+///
+/// The bulk-air test does not judge them: a crust is not lost by the thermal, non-thermal and
+/// impact escape of an air it cannot form. It reads the pass's temperature, as a volatile ice's
+/// vapour does, so its verdict can change between passes. Methane follows nitrogen
+/// ([`Retention::with_methane_as_nitrogen`], applied after it); carbon dioxide and argon, and the
+/// rock bulks, keep T13.b's verdicts until P14.T53.c.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct IceHeld {
+    /// The water the ice holds, kg, where some is held.
+    water: Option<f64>,
+    /// The nitrogen the ice holds, kg, where some is held.
+    nitrogen: Option<f64>,
+}
+
+impl IceHeld {
+    /// The ice-held volatiles of the body `inputs` describe, whose bulk-air retention is `jeans`.
+    #[must_use]
+    fn of(inputs: &AtmosphereInputs, jeans: Retention) -> Self {
+        let crusted = match (inputs.material, inputs.crust) {
+            (SurfaceMaterial::Ice, Crust::Solid) => {
+                inputs.envelope_fraction < THIN_ENVELOPE_FRACTION
+            }
+            (SurfaceMaterial::Rock, _) | (SurfaceMaterial::Ice, Crust::Molten) => false,
+        };
+        if !crusted {
+            return Self::default();
+        }
+        let held = |gas: Gas, inventory: Kilograms| {
+            if jeans.retains(gas) {
+                return None;
+            }
+            let loss = ice_vapour_escape(
+                inputs.mass,
+                inputs.radius,
+                gas,
+                inputs.equilibrium,
+                inputs.age,
+            )?;
+            let kept = inventory.value() - loss.value();
+            // By comparison, so that a NaN keeps none.
+            (kept > 0.0).then_some(kept)
+        };
+        Self {
+            water: held(Gas::Water, inputs.inventory.water()),
+            nitrogen: held(Gas::Nitrogen, inputs.inventory.nitrogen()),
+        }
+    }
+
+    /// The species held, as a retention's bits.
+    #[must_use]
+    fn retention(self) -> Retention {
+        let bit = |gas: Gas, held: Option<f64>| held.map_or(0, |_| 1_u16 << gas.index());
+        Retention(bit(Gas::Water, self.water) | bit(Gas::Nitrogen, self.nitrogen))
+    }
+}
+
 /// The masses of each gas a body's climate leaves free to fill its air, before condensation.
 #[derive(Debug, Clone, Copy)]
 struct Airborne {
@@ -1537,9 +1685,10 @@ struct Airborne {
 
 impl Airborne {
     /// What escape leaves of the inventory of the body `inputs` describe, whose retention is
-    /// `retention` ([`atmosphere`]'s step 2).
+    /// `retention` and whose ice holds `held` ([`atmosphere`]'s step 2): an ice-held gas its
+    /// inventory less its vapour's escape, any other retained gas its whole inventory.
     #[must_use]
-    fn kept(inputs: &AtmosphereInputs, retention: Retention) -> Self {
+    fn kept(inputs: &AtmosphereInputs, retention: Retention, held: IceHeld) -> Self {
         let kept = |gas: Gas, mass: Kilograms| {
             if retention.retains(gas) {
                 mass.value()
@@ -1562,10 +1711,14 @@ impl Airborne {
             CarbonCarrier::Methane | CarbonCarrier::CarbonDioxide => 0.0,
         };
         Self {
-            water: kept(Gas::Water, inventory.water()),
+            water: held
+                .water
+                .unwrap_or_else(|| kept(Gas::Water, inventory.water())),
             carbon_dioxide: kept(Gas::CarbonDioxide, inventory.carbon_dioxide()),
             methane,
-            nitrogen: kept(Gas::Nitrogen, inventory.nitrogen()),
+            nitrogen: held
+                .nitrogen
+                .unwrap_or_else(|| kept(Gas::Nitrogen, inventory.nitrogen())),
             argon: kept(Gas::Argon, inventory.argon()),
             oxygen: 0.0,
             carrier,
@@ -1584,9 +1737,13 @@ impl Airborne {
                 SurfaceState::MagmaOcean
             }
             // Every drawn inventory holds water, so a body inside the runaway limit has lost an
-            // ocean; a dry one given by a caller keeps its carbon airborne in the same state.
+            // ocean; a dry one given by a caller keeps its carbon airborne in the same state. A
+            // runaway world loses its water by photolysis and hydrogen escape (Luger and Barnes
+            // 2015), not by H₂O's molecular Jeans test: the water that fails that test still frees
+            // its oxygen, which O₂'s own test then judges (decision-p14-t54a-ganymede, C0
+            // follow-up, rule (a)).
             (Crust::Solid, Insolation::InsideRunaway) => {
-                let lost = self.water;
+                let lost = inputs.inventory.water().value();
                 self.water = 0.0;
                 if retention.retains(Gas::Oxygen) {
                     self.oxygen = runaway_oxygen(
@@ -1748,7 +1905,13 @@ fn partitioned_greenhouse(
 /// 1. A body with a hydrogen and helium envelope of at least 0.1% of its mass is a
 ///    [`SurfaceState::GasEnvelope`] radiating at its heated temperature.
 /// 2. Otherwise each inventoried gas is kept if it is retained against Jeans escape at the exobase
-///    temperature ([`exobase_temperature`], [`Retention`]). The carbon of a body formed beyond the
+///    temperature ([`exobase_temperature`], [`Retention`]). On a body whose bulk is ice
+///    ([`SurfaceMaterial::Ice`]) with a solid crust, water and nitrogen that fail that test but
+///    whose ice's saturated vapour at the equilibrium temperature, the airless surface's mean, is
+///    under [`AIRLESS_PRESSURE`] are held by their ice: each keeps its inventory less its vapour's
+///    own Jeans escape over the age with the exobase at the surface, where that leaves any
+///    (Schaller and Brown 2007, ApJ 659, L61; decision-p14-t54a-ganymede, C0 follow-up, rule (b),
+///    a 23 stand-in for P14.T53.c's ice-held retention). The carbon of a body formed beyond the
 ///    snow line may become methane (step 4), which lies in the air of its surface reservoir and is
 ///    kept where nitrogen, the cold worlds' bulk gas, is (P14.T24.f), and the reported
 ///    [`Atmosphere::retention`] says so. Kept where nitrogen is, methane passes its own Jeans test
@@ -1773,10 +1936,13 @@ fn partitioned_greenhouse(
 ///    resupplied.
 /// 3. The climate divides what is kept: inside the runaway limit the oceans are lost and all the
 ///    carbon is airborne, and the oxygen of the water lost stays, less its sinks
-///    ([`runaway_oxygen`], P14.T24.f, if oxygen is retained); in the habitable zone a world with
-///    water stores all but [`TEMPERATE_AIRBORNE_CARBON`] of its carbon in rock; beyond the
-///    maximum-greenhouse limit the carbon is airborne, since no ocean weathers it. A molten crust
-///    holds nothing back.
+///    ([`runaway_oxygen`], P14.T24.f, if oxygen is retained). That water is the whole drawn
+///    inventory's, whatever water's own Jeans test says: a runaway world loses it by photolysis
+///    and hydrogen escape (Luger and Barnes 2015), and the water that fails that test still frees
+///    its oxygen (decision-p14-t54a-ganymede, C0 follow-up, rule (a)). In the habitable zone a
+///    world with water stores all but [`TEMPERATE_AIRBORNE_CARBON`] of its carbon in rock; beyond
+///    the maximum-greenhouse limit the carbon is airborne, since no ocean weathers it. A molten
+///    crust holds nothing back.
 /// 4. The partial pressures are each airborne mass's weight over the surface, M g ÷ 4πR², less
 ///    what condenses: each gas whose row of the substance registry has a phase diagram is held at
 ///    its cap as P14.T51.a's
@@ -1886,6 +2052,23 @@ pub(crate) fn atmosphere_under(inputs: &AtmosphereInputs, surface: &PassSurface<
     surface_mix::area_mixed(air, inputs, surface)
 }
 
+/// The retention of the body `inputs` describe at the exobase temperature `exobase` and what its
+/// ice holds ([`atmosphere`]'s step 2): Jeans's test with the ice-held water and nitrogen beside
+/// it, methane following nitrogen; none for a body of no mass or radius.
+#[must_use]
+fn retained(inputs: &AtmosphereInputs, exobase: Kelvin) -> (Retention, IceHeld) {
+    let (m, r) = (inputs.mass.value(), inputs.radius.value());
+    if !(m.is_finite() && m > 0.0 && r.is_finite() && r > 0.0) {
+        return (Retention::default(), IceHeld::default());
+    }
+    let jeans = Retention::of(inputs.mass, inputs.radius, exobase);
+    let held = IceHeld::of(inputs, jeans);
+    (
+        jeans.with(held.retention()).with_methane_as_nitrogen(),
+        held,
+    )
+}
+
 /// Steps 1 to 5 of [`atmosphere_under`] over the surface `surface`: the state, the greenhouse and
 /// the partial pressures, with T13.c's table's Bond albedo and cloud fraction of the state, which
 /// the area mix then replaces.
@@ -1896,18 +2079,15 @@ fn state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) ->
     let exobase = exobase_temperature(inputs.irradiation_temperature, inputs.xuv_fluence);
     let (m, r) = (inputs.mass.value(), inputs.radius.value());
     let valid = m.is_finite() && m > 0.0 && r.is_finite() && r > 0.0;
-    let retention = if valid {
-        Retention::of(inputs.mass, inputs.radius, exobase)
-    } else {
-        Retention::default()
-    }
-    .with_methane_as_nitrogen();
+    let (retention, held) = retained(inputs, exobase);
+    let ice_held = held.retention();
     let airless = |state: SurfaceState, partials: PartialPressures, t: f64, carrier| Atmosphere {
         state,
         surface_temperature: saturate(t),
         surface_pressure: Some(partials.total()),
         partials,
         retention,
+        ice_held,
         exobase_temperature: exobase,
         optical_depth: 0.0,
         albedo: state.albedo(inputs.material),
@@ -1937,7 +2117,7 @@ fn state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) ->
     }
 
     // Steps 2 and 3: what escape leaves, and how the climate divides it.
-    let mut airborne = Airborne::kept(inputs, retention);
+    let mut airborne = Airborne::kept(inputs, retention, held);
     let climate = airborne.divide(inputs, retention);
 
     // Step 4: the partial pressures and the greenhouse they hold.
@@ -1991,6 +2171,7 @@ fn state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) ->
         surface_pressure: Some(total),
         partials,
         retention,
+        ice_held,
         exobase_temperature: exobase,
         optical_depth: tau,
         albedo: state.albedo(inputs.material),

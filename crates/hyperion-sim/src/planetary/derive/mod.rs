@@ -3390,7 +3390,10 @@ mod tests {
         let air = given.atmosphere();
         let mass = Kilograms::from(own.mass());
         let escape = Retention::of(mass, radius, air.exobase_temperature());
-        assert_eq!(air.retention(), escape.with_methane_as_nitrogen());
+        assert_eq!(
+            air.retention(),
+            escape.with(air.ice_held()).with_methane_as_nitrogen()
+        );
         assert!(air.retention().retains(Gas::Nitrogen), "{air:?}");
         let nitrogen = air.partial_pressures().of(Gas::Nitrogen).value();
         let weighed_at = crate::math::powf(

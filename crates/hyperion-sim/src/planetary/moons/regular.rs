@@ -2697,14 +2697,18 @@ mod tests {
     ///   Ganymede's and Callisto's are radiogenic argon, 1.2–17 Pa and up to 12 Pa across the ranks
     ///   (Callisto's argon sits at λ ≈ 25 and is lost at two of them), where Ganymede's measured
     ///   air is an O₂ and H₂O exosphere under 1 µPa (Hall et al. 1998, ApJ 499, 475; Roth et al.
-    ///   2021, Nat. Astron. 5, 1043); Europa's and Triton's hold nothing. Triton's measured N₂ is some 14 µbar (1.4 Pa): Voyager 2's radio occultation
-    ///   as Gurrola 1995 (doctoral thesis, Stanford University) re-analysed it, 14 ± 2 µbar as
-    ///   Marques Oliveira et al. 2022 (A&A 659, A136, §1) quote it, where Tyler et al. 1989
-    ///   (Science 246, 1466) gave a preliminary 1.6 ± 0.3 Pa. That is thin and under the line
-    ///   too. The model holds none: at its own radius and the 228 K exobase of
+    ///   2021, Nat. Astron. 5, 1043); Europa's holds nothing. Triton's measured N₂ is some 14 µbar
+    ///   (1.4 Pa): Voyager 2's radio occultation as Gurrola 1995 (doctoral thesis, Stanford
+    ///   University) re-analysed it, 14 ± 2 µbar as Marques Oliveira et al. 2022 (A&A 659, A136,
+    ///   §1) quote it, where Tyler et al. 1989 (Science 246, 1466) gave a preliminary 1.6 ± 0.3 Pa.
+    ///   That is thin and under the line too. At its own radius and the 228 K exobase of
     ///   [`EXOBASE_MULTIPLE`](crate::planetary::derive::atmosphere::EXOBASE_MULTIPLE), Triton's
-    ///   N₂ is at λ ≈ 15.6. Its thin air is P14.T53.c's (the plan's recorded limitation, "Pluto
-    ///   and Triton are `Airless` until T53.c"), which replaces this pin.
+    ///   N₂ fails Jeans's test at λ ≈ 15.6, but its ice holds it (decision-p14-t54a-ganymede, C0
+    ///   follow-up, rule (b)): the ice's vapour at its equilibrium temperature, under a pascal, is
+    ///   its N₂'s partial pressure. Its thin air is P14.T53.c's (the plan's recorded limitation,
+    ///   "Pluto and Triton are `Airless` until T53.c").
+    /// - The ice holds an ice crust's water and nitrogen where Jeans's test fails them, and no rock
+    ///   bulk's: an Io keeps no water.
     /// - Titan keeps more than a bar of N₂ at every rank, and its air lies within 15% of
     ///   Huygens's 1,467 hPa and 2 K of its 93.65 K at the surface (HASI, Fulchignoni et al. 2005,
     ///   Nature 438, 785): 1,438 hPa at the median rank, of which N₂ weighs 1,387 and CH₄ 51
@@ -2715,6 +2719,7 @@ mod tests {
         use crate::planetary::derive::atmosphere::{
             AIRLESS_PRESSURE, Gas, Retention, SurfaceState,
         };
+        use crate::planetary::params::ICY_WATER_FRACTION;
         use crate::units::Pascals;
         let jupiter = table_giant("Jupiter", 5, None);
         let saturn = table_giant("Saturn", 6, None);
@@ -2751,7 +2756,23 @@ mod tests {
                 let placed =
                     Kilograms::from(EarthMasses::new(kg / crate::units::consts::EARTH_MASS_KG));
                 let escape = Retention::of(placed, radius, air.exobase_temperature());
-                assert_eq!(air.retention(), escape.with_methane_as_nitrogen(), "{at}");
+                let held = air.ice_held();
+                assert_eq!(
+                    air.retention(),
+                    escape.with(held).with_methane_as_nitrogen(),
+                    "{at}"
+                );
+                // The ice holds an ice crust's water and nitrogen alone, where Jeans's test fails
+                // them, and nothing of a rock bulk's (decision-p14-t54a-ganymede, C0 follow-up).
+                for gas in Gas::ALL {
+                    if held.retains(gas) {
+                        assert!(matches!(gas, Gas::Water | Gas::Nitrogen), "{at}");
+                        assert!(!escape.retains(gas), "{at}");
+                    }
+                }
+                if ice < ICY_WATER_FRACTION {
+                    assert_eq!(held, Retention::default(), "{at}");
+                }
                 let water = derived.inventory().water().value();
                 assert!(
                     water >= ice * kg * (1.0 - 1e-12),
@@ -2771,9 +2792,267 @@ mod tests {
                     assert_eq!(air.state(), SurfaceState::Airless, "{at}");
                     assert!(pressure < AIRLESS_PRESSURE, "{at}");
                 }
-                if captured {
-                    assert_eq!(air.partial_pressures().of(Gas::Nitrogen), Pascals::ZERO);
+                // An Io keeps no water: its bulk is rock, which the ice-held rule does not reach,
+                // and its water fails Jeans's test.
+                if name == "Io" {
+                    assert!(water > 0.0, "{at}");
+                    assert!(!air.retention().retains(Gas::Water), "{at}");
+                    assert_same_bits(air.inventory_weights().of(Gas::Water).value(), 0.0);
                 }
+                // Triton's ice holds its N₂, whose vapour stays far under the airless line.
+                if captured {
+                    assert!(held.retains(Gas::Nitrogen), "{at}");
+                    let nitrogen = air.partial_pressures().of(Gas::Nitrogen);
+                    assert!(
+                        nitrogen > Pascals::ZERO && nitrogen < AIRLESS_PRESSURE,
+                        "{at}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The condensate partition of the moon `derived`'s air over the passes' stand-in surface: an
+    /// isothermal climate at its surface temperature, on basins not known, its condensed water all
+    /// at the surface.
+    fn passes_partition(derived: &DerivedMoon) -> crate::planetary::chem::partition::Partition {
+        use crate::planetary::chem::partition::{Basins, ClimateSpan, Ground, partition};
+        let air = derived.atmosphere();
+        let climate = ClimateSpan::isothermal(air.surface_temperature());
+        let ground = Ground::new(derived.body().surface_gravity(), Basins::UNKNOWN, 1.0);
+        partition(&climate, &ground, &air.column_inventory())
+    }
+
+    /// Decision-p14-t54a-ganymede, C0 follow-up, rule (b): at every radius rank the measured
+    /// Ganymede, Callisto and Titan, ice crusts whose water fails Jeans's test at the exobase
+    /// (λ(H₂O) = 0.643 λ(N₂), under 20 on all three), hold their water as ice: their ice's vapour
+    /// at their equilibrium temperatures, 74.2–78.2 K, is some 10⁻²⁴–10⁻²² Pa, so it loses under
+    /// 10⁻²⁴ kg over the age, the air's column holds the whole inventory and the partition lists it
+    /// as a solid. Ganymede's and Callisto's N₂ stays lost: its saturated vapour at their 78.2 K is
+    /// 1.1 bar (N₂ boils at 77.36 K under one atmosphere, Span et al. 2000), a bulk air, which
+    /// Jeans's test judges and loses (§1.4 of the ruling stands), where Titan keeps its own by that
+    /// test.
+    #[test]
+    fn the_measured_icy_moons_hold_their_water_ice_and_ganymede_s_nitrogen_stays_lost() {
+        use crate::planetary::chem::partition::CondensatePhase;
+        use crate::planetary::derive::atmosphere::{
+            AIRLESS_PRESSURE, Gas, Retention, ice_vapour_escape,
+        };
+        use crate::substance::saturation_pressure;
+        let jupiter = table_giant("Jupiter", 5, None);
+        let saturn = table_giant("Saturn", 6, None);
+        for (name, moon, giant) in [
+            ("Ganymede", GANYMEDE, &jupiter),
+            ("Callisto", CALLISTO, &jupiter),
+            ("Titan", TITAN, &saturn),
+        ] {
+            let ((kg, keep), orbit) = table_moon(moon, giant);
+            for rank in every_rank(keep) {
+                let shared = &MoonVolatiles::SHARED;
+                let derived = own_moon((kg, rank), &orbit, giant, shared, MoonBulk::Derived);
+                let air = derived.atmosphere();
+                let t = derived.equilibrium_temperature();
+                let placed =
+                    Kilograms::from(EarthMasses::new(kg / crate::units::consts::EARTH_MASS_KG));
+                let escape = Retention::of(placed, derived.radius(), air.exobase_temperature());
+                let water = derived.inventory().water();
+                let loss = ice_vapour_escape(placed, derived.radius(), Gas::Water, t, SOLAR_AGE)
+                    .expect("water ice's vapour at an icy moon's temperature is no air");
+                let partition = passes_partition(&derived);
+                let ice = partition.condensate(Gas::Water.substance());
+                let nitrogen = saturation_pressure(Gas::Nitrogen.substance(), t).unwrap();
+                let at = format!(
+                    "{name} at {rank:?}, T_eq {:.2} K: water's loss {:.3e} of {:.3e} kg, N₂'s \
+                     vapour {:.3e} Pa, water {ice:?}",
+                    t.value(),
+                    loss.value(),
+                    water.value(),
+                    nitrogen.value()
+                );
+                eprintln!("{at}");
+                assert!(!escape.retains(Gas::Water), "{at}");
+                assert!(air.ice_held().retains(Gas::Water), "{at}");
+                assert!(air.retention().retains(Gas::Water), "{at}");
+                assert!(loss.value() < 1e-12 * water.value(), "{at}");
+                assert!(air.inventory_weights().of(Gas::Water).value() > 0.0, "{at}");
+                let ice = ice.unwrap_or_else(|| panic!("{at}: no water condensate"));
+                assert_eq!(ice.phase(), CondensatePhase::Solid, "{at}");
+                if name == "Titan" {
+                    assert!(escape.retains(Gas::Nitrogen), "{at}");
+                    assert!(!air.ice_held().retains(Gas::Nitrogen), "{at}");
+                } else {
+                    assert!(nitrogen > AIRLESS_PRESSURE, "{at}");
+                    assert!(!air.retention().retains(Gas::Nitrogen), "{at}");
+                    assert_same_bits(air.inventory_weights().of(Gas::Nitrogen).value(), 0.0);
+                    assert_same_bits(air.partial_pressures().of(Gas::Nitrogen).value(), 0.0);
+                }
+            }
+        }
+    }
+
+    /// The figures of the moon `derived` of `kg`, under its spin `spin`, at its own bulk (its
+    /// radius, gravity, class, fractions and water, as its record reads them), about the present
+    /// Sun at its age with no tide; its crater contract a planet's on a circular orbit at 1 au
+    /// under the Solar System's sources, as `table_figures` gives the table's bodies theirs.
+    fn own_figures(
+        derived: &DerivedMoon,
+        kg: f64,
+        spin: &crate::planetary::hooks::surface::SeasonalSpin,
+    ) -> crate::planetary::hooks::figures::GlobalFigures {
+        use crate::planetary::hooks::figures::relief::EARTH_CONTINENTAL_FRACTION;
+        use crate::planetary::hooks::figures::tests::solar_sources;
+        use crate::planetary::hooks::figures::{
+            Continents, CraterInputs, FiguresInputs, GlobalFigures, HostOrbit, HostOrbiter,
+            ImpactorOrbit,
+        };
+        let r = derived.radius().value();
+        let mass = EarthMasses::new(kg / crate::units::consts::EARTH_MASS_KG);
+        GlobalFigures::derive(&FiguresInputs {
+            atmosphere: derived.atmosphere(),
+            mass,
+            radius: derived.radius(),
+            surface_gravity: MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * kg / (r * r)),
+            class: derived.class(),
+            fractions: derived.fractions(),
+            inventory_water: derived.inventory().water(),
+            rotation_period: spin.rotation_period,
+            fe_h: Dex::new(0.0),
+            age: SOLAR_AGE,
+            tidal_heat_flow: WattsPerSquareMetre::new(0.0),
+            subsurface_ocean: Subsurface::NotComputed,
+            craters: CraterInputs {
+                orbit: ImpactorOrbit::Host(HostOrbiter {
+                    orbit: HostOrbit {
+                        semi_major_axis: Metres::new(crate::units::consts::METRES_PER_AU),
+                        eccentricity: 0.0,
+                        inclination: Radians::ZERO,
+                    },
+                    mass,
+                    belt: None,
+                }),
+                density: derived.density(),
+                sources: solar_sources(),
+                molten_until: None,
+                last_giant_impact: None,
+            },
+            continents: Continents::Given(EARTH_CONTINENTAL_FRACTION),
+        })
+        .expect("the measured moons are in range")
+        .expect("an icy moon has a surface")
+    }
+
+    /// Decision-p14-t54a-ganymede, C1 follow-up §C1.4, the record's side of rule (b): on the
+    /// record's path (the moon's figures and conditions at its own bulk, and `condensates_under`),
+    /// the measured Ganymede, Callisto and Titan, at every radius rank, ice bulks whose ice holds
+    /// the water Jeans's test fails, publish an `H2O` solid entry that is the partition's whole
+    /// frozen water, its layer at ice Ih's density at the mean surface temperature, over the
+    /// figures' T24.b ice area to the bit, which the figures' ices list as it. Their surface water,
+    /// the water free to pool, stays on water's Jeans verdict (P14.T13.b): none, so that Titan's
+    /// surface water, potential ocean and ocean weight are C0's (7015ccf8), zero to the bit, and no
+    /// water sea is listed. Titan's crust is not a sea.
+    #[test]
+    fn the_measured_icy_moons_publish_their_crust_s_water_at_the_figures_ice_area() {
+        use crate::planetary::chem::partition::CondensatePhase;
+        use crate::planetary::derive::atmosphere::{Gas, SurfaceMaterial};
+        use crate::planetary::hooks::cold_traps::{ColdTrapRules, RecordColdTraps, lunar_sky};
+        use crate::planetary::hooks::figures::{VolatileHistory, cover};
+        use crate::planetary::hooks::surface::tests::spin_of;
+        use crate::planetary::hooks::surface::{SurfaceConditions, SurfaceInputs};
+        let water = Gas::Water.substance();
+        let sky = lunar_sky();
+        let jupiter = table_giant("Jupiter", 5, None);
+        let saturn = table_giant("Saturn", 6, None);
+        for (name, moon, giant) in [
+            ("Ganymede", GANYMEDE, &jupiter),
+            ("Callisto", CALLISTO, &jupiter),
+            ("Titan", TITAN, &saturn),
+        ] {
+            let ((kg, keep), orbit) = table_moon(moon, giant);
+            let spin = spin_of(name);
+            for rank in every_rank(keep) {
+                let shared = &MoonVolatiles::SHARED;
+                let derived = own_moon((kg, rank), &orbit, giant, shared, MoonBulk::Derived);
+                let air = derived.atmosphere();
+                let figures = own_figures(&derived, kg, &spin);
+                let r = derived.radius().value();
+                let gravity = MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * kg / (r * r));
+                let inputs = SurfaceInputs {
+                    atmosphere: air,
+                    equilibrium_temperature: derived.equilibrium_temperature(),
+                    surface_gravity: gravity,
+                    radius: derived.radius(),
+                    material: SurfaceMaterial::of(&derived.fractions()),
+                    stellar_flux: WattsPerSquareMetre::from(derived.flux()),
+                    xuv_flux: derived.xuv_flux(),
+                    spin,
+                    heat_flow: figures.heat_flow(),
+                    ocean_weight: figures.ocean_weight(),
+                };
+                assert_eq!(inputs.material, SurfaceMaterial::Ice, "{name} at {rank:?}");
+                let conditions = SurfaceConditions::derive(&inputs).expect("it has a surface");
+                let table = conditions.zonal_insolation();
+                let traps = RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, air);
+                let (partition, published) =
+                    figures.condensates_under(air, &conditions, gravity, &traps, &table);
+                let ice = cover::ice_fraction(&cover::IceInputs {
+                    conditions: &conditions,
+                    state: air.state(),
+                    crust: figures.impactors().crust(),
+                    surface_water: figures.surface_water(),
+                });
+                let at = format!(
+                    "{name} at {rank:?}, a {:?} at {:.2} K: T24.b's ice {ice}, {:?}",
+                    air.state(),
+                    conditions.mean_surface_temperature().value(),
+                    published.entries()
+                );
+                eprintln!("{at}");
+                // The ice holds the water Jeans's test fails.
+                assert!(air.retention().retains(Gas::Water), "{at}");
+                assert!(!air.retains_against_escape(Gas::Water), "{at}");
+                let frozen = partition
+                    .condensate(water)
+                    .unwrap_or_else(|| panic!("{at}: the partition holds the crust's water"));
+                assert_eq!(frozen.phase(), CondensatePhase::Solid, "{at}");
+                let entry = published
+                    .entry(water, CondensatePhase::Solid)
+                    .unwrap_or_else(|| panic!("{at}: no H2O solid entry"));
+                assert_same_bits(entry.area_fraction(), ice);
+                assert_same_bits(entry.reservoir().value(), frozen.reservoir().value());
+                let rho = crate::substance::ice_ih_density(conditions.mean_surface_temperature());
+                let layer = entry.reservoir_gel().expect("ice Ih's density is read");
+                assert_same_bits(layer.value(), frozen.reservoir().value() / rho.value());
+                assert!(
+                    published.entry(water, CondensatePhase::Liquid).is_none(),
+                    "{at}"
+                );
+                // T24.b's surface water stays on water's Jeans verdict: C0's none.
+                assert_same_bits(figures.surface_water().value(), 0.0);
+                assert_same_bits(figures.potential_ocean(), 0.0);
+                assert_same_bits(figures.ocean_weight().get(), 0.0);
+                // The figures' ices list it as the cover's ice, divided with the others where they
+                // exceed the surface (W2).
+                let total = published
+                    .surface_ices()
+                    .iter()
+                    .fold(0.0, |sum, &(_, f)| sum + f);
+                let second = figures.with_surface_under(
+                    &conditions,
+                    VolatileHistory::NONE,
+                    Some(&published),
+                    &table,
+                );
+                let &(_, listed) = second
+                    .surface_ices()
+                    .iter()
+                    .find(|&&(id, _)| id == water)
+                    .unwrap_or_else(|| panic!("{at}: its ices list its water"));
+                assert_same_bits(listed, if total > 1.0 { ice / total } else { ice });
+                assert!(
+                    second.surface_liquids().iter().all(|&(id, _)| id != water),
+                    "{at}: {:?}",
+                    second.surface_liquids()
+                );
             }
         }
     }
@@ -3490,12 +3769,17 @@ mod tests {
         );
     }
 
-    /// The table's Triton at its own inventory, about the table's Neptune: airless with no N₂ until
-    /// P14.T53.c, recorded, not asserted (decision-triton-and-e101 §1.6). Its cheap invariants are:
-    /// the airless state, a finite albedo in [0, 1), and passes that converge within the plain
-    /// passes (`Converged`, P14.T51.h).
+    /// The table's Triton at its own inventory, about the table's Neptune, N₂-covered: its N₂ fails
+    /// Jeans's test at the exobase (λ ≈ 15.6) but its ice holds it (decision-p14-t54a-ganymede, C0
+    /// follow-up, rule (b): its vapour at Triton's equilibrium temperature is a few hundredths of a
+    /// pascal at λ ≈ 110 at the surface), so its partition lists N₂ ice, with the methane that
+    /// follows it, and it stays airless, its thin air P14.T53.c's. Its Bond albedo lies in E2's
+    /// band, 0.72–0.92 (Hillier et al. 1990, Science 250, 419: 0.82 ± 0.05; decision-p14-t51-batch
+    /// E2), and its passes converge within the plain passes (`Converged`, P14.T51.h).
     #[test]
-    fn the_table_s_triton_at_its_own_inventory_is_recorded() {
+    fn the_table_s_triton_holds_its_nitrogen_ice_and_stays_airless() {
+        use crate::planetary::chem::partition::CondensatePhase;
+        use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
         let volatiles = MoonVolatiles {
             draws: VolatileDraws::MEDIAN,
             site: VolatileSite::ParentZone,
@@ -3504,32 +3788,34 @@ mod tests {
         let ((kg, rank), orbit) = table_moon(TRITON, &neptune);
         let (own, _) = captured_bulk(kg, TRITON.1);
         let triton = own_moon((kg, rank), &orbit, &neptune, &volatiles, own);
-        assert_eq!(
-            triton.atmosphere().state(),
-            crate::planetary::derive::atmosphere::SurfaceState::Airless
-        );
+        let air = triton.atmosphere();
+        let partition = passes_partition(&triton);
+        let listed: Vec<_> = partition
+            .condensates()
+            .iter()
+            .map(|c| (c.substance().substance().key(), c.phase()))
+            .collect();
         let albedo = triton.albedo().value();
-        assert!(
-            albedo.is_finite() && (0.0..1.0).contains(&albedo),
-            "{albedo}"
+        eprintln!(
+            "the table's Triton at its own inventory: {:?}, Bond albedo {albedo:.5}, T_eq {:.2} \
+             K, N2 {:.3e} Pa, its condensates {listed:?}",
+            air.state(),
+            triton.equilibrium_temperature().value(),
+            air.partial_pressures().of(Gas::Nitrogen).value(),
         );
+        assert_eq!(air.state(), SurfaceState::Airless);
+        assert!(air.ice_held().retains(Gas::Nitrogen), "{air:?}");
+        assert!(air.retention().retains(Gas::Methane), "{air:?}");
+        let nitrogen = partition
+            .condensate(Gas::Nitrogen.substance())
+            .expect("Triton's ice holds its nitrogen");
+        assert_eq!(nitrogen.phase(), CondensatePhase::Solid);
+        assert!((0.72..=0.92).contains(&albedo), "{albedo}");
         assert_eq!(
             triton.convergence(),
             crate::planetary::derive::passes::Convergence::Converged,
             "{} passes",
             triton.atmosphere_passes()
-        );
-        eprintln!(
-            "the table's Triton at its own inventory: {:?}, Bond albedo {:.5}, T_eq {:.2} K, N2 \
-             {:.3e} Pa",
-            triton.atmosphere().state(),
-            triton.albedo().value(),
-            triton.equilibrium_temperature().value(),
-            triton
-                .atmosphere()
-                .partial_pressures()
-                .of(crate::planetary::derive::atmosphere::Gas::Nitrogen)
-                .value()
         );
     }
 

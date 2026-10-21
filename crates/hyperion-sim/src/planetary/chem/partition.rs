@@ -1534,6 +1534,16 @@ pub struct WaterCover {
     /// The density of its ice, ice Ih's at the mean surface temperature
     /// ([`ice_ih_density`](crate::substance::ice_ih_density)), at which T24.b caps the ice.
     pub ice_density: KilogramsPerCubicMetre,
+    /// Whether the solid entry holds the crust's frozen water where the surface water holds none:
+    /// the record's, on a body whose bulk is ice ([`SurfaceMaterial::Ice`]), whose crust is its
+    /// water (decision-p14-t54a-ganymede, C1 follow-up §C1.4). Its entry is then the partition's
+    /// whole frozen water, the crust's ice-held water, shell and deeper ice, at
+    /// [`ice_fraction`](Self::ice_fraction), until P14.T53.c divides it; the surface water, the
+    /// water free to pool, stays P14.T13.b's, on water's Jeans verdict. False off an ice bulk, and
+    /// in T13.c's passes, whose area mix reads an ice bulk's crust as its regolith.
+    ///
+    /// [`SurfaceMaterial::Ice`]: crate::planetary::derive::atmosphere::SurfaceMaterial::Ice
+    pub crust_water: bool,
 }
 
 /// The net sublimation rate at which an airless surface keeps a solid over the Solar System's age:
@@ -1711,6 +1721,11 @@ fn ice_line(
 /// One published condensate (P14.T51.a): a substance in one phase at a body's surface, with its
 /// share of the substance's reservoir, its global equivalent layer, the area it covers and whether
 /// it is seasonal ([`Partition::publish`]).
+///
+/// On an ice-bulk body the `H2O` solid entry is the crust's ice-held frozen water, all of it
+/// (shell and deeper ice), at the cover's ice area, until P14.T53.c divides it; T24.b's surface
+/// water, the water free to pool, is T13.b's (decision-p14-t54a-ganymede, C1 follow-up §C1.4;
+/// [`WaterCover::crust_water`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CondensateEntry {
     substance: SubstanceId,
@@ -1969,7 +1984,9 @@ impl Partition {
     ///   `σ_s`, its ice T24.b's perennial ice at its sheet of [`ICE_SHEET_THICKNESS`], the whole
     ///   where T24.b's cap binds, and its liquid, where it lies as one, the rest, over the share of
     ///   the basins its own layer fills, none where the ice holds the whole
-    ///   (decision-p14-t54a-water-consistency §1.4).
+    ///   (decision-p14-t54a-water-consistency §1.4). Where `σ_s` is none, a body whose bulk is ice
+    ///   ([`WaterCover::crust_water`]) lists its crust instead, as a solid alone: the partition's
+    ///   whole frozen water at T24.b's ice area (decision-p14-t54a-ganymede, C1 follow-up §C1.4).
     /// - **Any other solid** covers its climate's cold area below its edge (r × its first melt under
     ///   air, r = 263.15 ÷ 273.16; airless, blended by its dominance with its net Hertz–Knudsen edge
     ///   at its own partial pressure; decision-p14-t51a-part2 §3.2–3.3), at most the area its
@@ -2019,6 +2036,7 @@ impl Partition {
     ///     potential_ocean: 0.0,
     ///     ice_fraction: 0.0,
     ///     ice_density: KilogramsPerCubicMetre::new(917.0),
+    ///     crust_water: false,
     /// };
     /// let published = mars.publish(&Cover { cold_area: &cold_area, state: SurfaceState::Temperate, water });
     /// let caps = published.entry(co2, CondensatePhase::Solid).expect("its caps");
@@ -2111,6 +2129,9 @@ impl Partition {
 /// leaves no sea of an ulp on either path. The sea's area is the share of the basins its own
 /// layer fills ([`Basins::area_filled`]), as every other liquid's is, with no minimum depth: the
 /// fill bounds it by its volume, continuously.
+///
+/// Where the surface water holds none, an ice bulk's crust gives the solid alone
+/// ([`crust_ice`]).
 #[must_use]
 fn water_parts(
     c: &Condensate,
@@ -2121,7 +2142,7 @@ fn water_parts(
     let reservoir = water.surface_water.value();
     // A NaN holds none.
     if reservoir.is_nan() || reservoir <= 0.0 {
-        return [None, None];
+        return [crust_ice(c, water), None];
     }
     let lies_as_liquid = c.phase == CondensatePhase::Liquid;
     let rho = water.ice_density.value();
@@ -2161,6 +2182,30 @@ fn water_parts(
         }
     });
     [solid, liquid]
+}
+
+/// The solid of an ice bulk's crust, water's condensate `c` under its cover `water` where the
+/// surface water holds none ([`WaterCover::crust_water`]; decision-p14-t54a-ganymede, C1 follow-up
+/// §C1.4): the partition's whole frozen water, the crust's ice-held water, at T24.b's ice area,
+/// its layer at the cover's ice density. None off an ice bulk, and none for water that does not
+/// lie as ice: a sea is T24.b's surface water, on water's Jeans verdict. Its seasonal flag is its
+/// solid's.
+#[must_use]
+fn crust_ice(c: &Condensate, water: &WaterCover) -> Option<Part> {
+    let mass = c.reservoir.value();
+    // By comparison, so that a NaN reservoir holds none.
+    if !(water.crust_water && c.phase == CondensatePhase::Solid && mass > 0.0) {
+        return None;
+    }
+    let rho = water.ice_density.value();
+    Some(Part {
+        substance: c.substance,
+        phase: CondensatePhase::Solid,
+        mass_kg_per_m2: mass,
+        density_kg_per_m3: (rho > 0.0).then_some(rho),
+        area: water.ice_fraction,
+        seasonal: c.is_seasonal_as(CondensatePhase::Solid),
+    })
 }
 
 /// The grain density, kg m⁻³, of the liquid row of the condensate `c` of `diagram` at the

@@ -691,6 +691,7 @@ fn a_solution_takes_its_own_record_or_its_solvent_s_and_an_unrecorded_liquid_nit
         potential_ocean: 0.0,
         ice_fraction: 0.0,
         ice_density: KilogramsPerCubicMetre::new(917.0),
+        crust_water: false,
     };
     let cover = Cover {
         cold_area: &profile,

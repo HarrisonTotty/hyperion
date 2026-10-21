@@ -2036,8 +2036,10 @@ fn earth_inputs(equilibrium: f64, insolation: Insolation) -> AtmosphereInputs {
 fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) -> ClimateSpan {
     let (m, r) = (inputs.mass.value(), inputs.radius.value());
     let exobase = exobase_temperature(inputs.irradiation_temperature, inputs.xuv_fluence);
-    let retention = Retention::of(inputs.mass, inputs.radius, exobase).with_methane_as_nitrogen();
-    let mut airborne = Airborne::kept(inputs, retention);
+    let jeans = Retention::of(inputs.mass, inputs.radius, exobase);
+    let held = IceHeld::of(inputs, jeans);
+    let retention = jeans.with(held.retention()).with_methane_as_nitrogen();
+    let mut airborne = Airborne::kept(inputs, retention, held);
     airborne.divide(inputs, retention);
     let weight = GRAVITATIONAL_CONSTANT * m / (r * r) / (4.0 * core::f64::consts::PI * r * r);
     let body = ClimateBody {
@@ -2165,7 +2167,7 @@ fn a_dry_earth_beyond_the_maximum_greenhouse_still_runs_away_past_its_cold_trap(
     // No state below freezing holds itself: at each, with its column held by the partition over
     // its own climate, the greenhouse warms the surface above it.
     let retention = air.retention();
-    let mut airborne = Airborne::kept(&earth, retention);
+    let mut airborne = Airborne::kept(&earth, retention, IceHeld::of(&earth, retention));
     assert_eq!(airborne.divide(&earth, retention), SurfaceState::Snowball);
     let (m, r) = (earth.mass.value(), earth.radius.value());
     let weight_gravity = GRAVITATIONAL_CONSTANT * m / (r * r);
@@ -2297,14 +2299,23 @@ fn the_exobase_multiple_loses_ganymede_s_nitrogen_and_keeps_titan_s() {
     assert!(lower < EXOBASE_MULTIPLE && EXOBASE_MULTIPLE < upper);
 }
 
-/// Decision-p14-t54a-ganymede §1.4: a body's exobase and retention are the same bits at every albedo
-/// a pass reads, its passes' published ones included, and its exobase is [`exobase_temperature`]
-/// of its zero-albedo irradiation temperature: every body of the table, Jupiter, an icy belt
-/// member as recorded and as placed, each through one pass at albedos from 0 to 0.95, while the
-/// equilibrium temperature each pass reads moves with its albedo.
+/// Decision-p14-t54a-ganymede §1.4: a body's exobase and its bulk-air retention, Jeans's test's
+/// verdict, are the same bits at every albedo a pass reads, its passes' published ones included,
+/// and its exobase is [`exobase_temperature`] of its zero-albedo irradiation temperature: every
+/// body of the table, Jupiter, an icy belt member as recorded and as placed, each through one
+/// pass at albedos from 0 to 0.95, while the equilibrium temperature each pass reads moves with
+/// its albedo. The ice-held water and nitrogen of an ice crust read that temperature, as a
+/// volatile ice's vapour does (the ruling's C0 follow-up, rule (b)), so they alone may differ
+/// between passes: the icy member as recorded, 10²¹ kg at 43 au, holds its N₂ at 0.95, at 20 K,
+/// and not at 0.832, at 27 K.
 #[test]
 fn retention_is_independent_of_the_albedo_a_pass_reads() {
     use crate::planetary::derive::{PassDriver, derive_body_driven};
+
+    // The retention less what the ice holds, with methane following nitrogen's own verdict.
+    let bulk_air = |air: &Atmosphere| {
+        Retention(air.retention().0 & !air.ice_held().0).with_methane_as_nitrogen()
+    };
 
     let disc = solar_disc();
     let lights = [historic_sun()];
@@ -2351,7 +2362,14 @@ fn retention_is_independent_of_the_albedo_a_pass_reads() {
                 at.exobase_temperature().value(),
                 air.exobase_temperature().value(),
             );
-            assert_eq!(at.retention(), air.retention(), "{name} at {albedo}");
+            assert_eq!(bulk_air(at), bulk_air(air), "{name} at {albedo}");
+            if at.ice_held() != air.ice_held() {
+                eprintln!(
+                    "{name} at {albedo}: ice-held {:?} against the solved pass's {:?}",
+                    at.ice_held(),
+                    air.ice_held()
+                );
+            }
             equilibria.push(once.equilibrium_temperature().value());
         }
         assert_same_bits(equilibria[0], irradiation.value());
@@ -2880,4 +2898,194 @@ fn under_the_batch_titan_is_94_k() {
         (t - TITAN_SURFACE_TEMPERATURE).abs() < 3.0,
         "Titan at {t} K"
     );
+}
+
+// Decision-p14-t54a-ganymede, C0 follow-up: the runaway's water (rule (a)) and the ice-held
+// volatiles (rule (b)).
+
+/// Rule (a): a runaway world loses its whole water by photolysis and hydrogen escape, not by H₂O's
+/// molecular Jeans test. A Mars-sized world inside the runaway limit at an irradiation of 305 K,
+/// whose exobase of 1,369 K fails its water (λ ≈ 20) and passes its O₂ (λ ≈ 35.5), keeps
+/// [`runaway_oxygen`]'s O₂ of its whole drawn water, less its sinks, in its air.
+#[test]
+fn a_runaway_world_whose_water_fails_its_jeans_test_keeps_the_oxygen_it_freed() {
+    let (mass, radius) = (Kilograms::new(6.417e23), Metres::new(3.389_5e6));
+    let (water, age, xuv) = (1e21, 1e8, 1.0);
+    let air = atmosphere(&AtmosphereInputs {
+        mass,
+        radius,
+        material: SurfaceMaterial::Rock,
+        envelope_fraction: 0.0,
+        class: PlanetClass::Rocky,
+        inventory: VolatileInventory::new(
+            Kilograms::new(water),
+            Kilograms::new(1e19),
+            Kilograms::new(1e17),
+            Kilograms::new(1e16),
+        ),
+        formed: SnowLineSide::Inside,
+        equilibrium: Kelvin::new(250.0),
+        irradiation_temperature: Kelvin::new(305.0),
+        heated: Kelvin::new(250.0),
+        xuv_fluence: earth_xuv_fluence(),
+        saturated_xuv_flux: WattsPerSquareMetre::new(xuv),
+        insolation: Insolation::InsideRunaway,
+        crust: Crust::Solid,
+        molten_for: Years::ZERO,
+        age: Years::new(age),
+        hottest_host: Kelvin::new(5_772.0),
+    });
+    let exobase = air.exobase_temperature();
+    let lambda = |gas: Gas| jeans_parameter(mass, radius, gas, exobase);
+    eprintln!(
+        "a runaway Mars at a {:.1} K exobase: λ(H₂O) {:.3}, λ(O₂) {:.3}",
+        exobase.value(),
+        lambda(Gas::Water),
+        lambda(Gas::Oxygen)
+    );
+    assert!(lambda(Gas::Water) < JEANS_RETENTION_THRESHOLD);
+    assert!(lambda(Gas::Oxygen) >= JEANS_RETENTION_THRESHOLD);
+    assert!(!air.retention().retains(Gas::Water));
+    assert!(air.retention().retains(Gas::Oxygen));
+    assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
+    let kept = runaway_oxygen(
+        Kilograms::new(water),
+        mass,
+        radius,
+        WattsPerSquareMetre::new(xuv),
+        Years::ZERO,
+        Years::new(age),
+    );
+    assert!(kept > Kilograms::ZERO, "{kept:?}");
+    let g = GRAVITATIONAL_CONSTANT * mass.value() / math::powi(radius.value(), 2);
+    let weight = g / (4.0 * core::f64::consts::PI * math::powi(radius.value(), 2));
+    let o2 = air.partial_pressures().of(Gas::Oxygen).value();
+    eprintln!("its O₂: {:.3} bar", o2 / PASCALS_PER_BAR);
+    assert!(
+        (o2 / (kept.value() * weight) - 1.0).abs() < 1e-12,
+        "{o2} Pa"
+    );
+    assert_same_bits(air.partial_pressures().of(Gas::Water).value(), 0.0);
+}
+
+/// Rule (b)'s escape, [`ice_vapour_escape`], is Jeans's flux at the ice's saturated vapour over the
+/// whole surface and the age (Schaller and Brown 2007's criterion, the exobase at the surface):
+///
+/// - at Triton (JPL's GM, 1,428.5 km³ s⁻², and mean radius, 1,352.6 km) and 32.5 K its N₂ ice's
+///   vapour is some 0.02 Pa and λ about 109.5 (the ruling's figures), and the loss is the closed
+///   form to 10⁻¹², a negligible share of any inventory;
+/// - it holds nothing where the vapour would be a bulk air: N₂ at 70 K, above its triple point,
+///   and at 130 K, above its critical point, and water at 300 K; nor at a temperature that is not
+///   positive;
+/// - a flux that underflows, of N₂ on an Earth at 30 K (λ ≈ 7,000), loses nothing.
+#[test]
+fn the_ice_s_vapour_escapes_by_jeans_s_flux_with_the_exobase_at_the_surface() {
+    let (mass, radius) = (
+        Kilograms::new(1_428.495e9 / GRAVITATIONAL_CONSTANT),
+        Metres::new(1_352.6e3),
+    );
+    let t = Kelvin::new(32.5);
+    let vapour = saturation_pressure(Gas::Nitrogen.substance(), t)
+        .unwrap()
+        .value();
+    let lambda = jeans_parameter(mass, radius, Gas::Nitrogen, t);
+    let loss = ice_vapour_escape(mass, radius, Gas::Nitrogen, t, SOLAR_AGE)
+        .unwrap()
+        .value();
+    let m = Gas::Nitrogen.molecular_mass().value();
+    let kt = BOLTZMANN_CONSTANT * t.value();
+    let flux = vapour / kt * (2.0 * kt / m).sqrt() * (1.0 + lambda) * math::exp(-lambda)
+        / (2.0 * core::f64::consts::PI.sqrt());
+    let by_hand = 4.0
+        * core::f64::consts::PI
+        * math::powi(radius.value(), 2)
+        * m
+        * SOLAR_AGE.value()
+        * SECONDS_PER_JULIAN_YEAR
+        * flux;
+    eprintln!(
+        "Triton at 32.5 K: N₂'s vapour {vapour:.4} Pa, λ {lambda:.2}, loss {loss:.3e} kg over \
+         the age"
+    );
+    assert!((0.01..0.1).contains(&vapour), "{vapour} Pa");
+    assert!((lambda - 109.5).abs() < 0.5, "{lambda}");
+    assert!(
+        (loss / by_hand - 1.0).abs() < 1e-12,
+        "{loss} against {by_hand}"
+    );
+    assert!(loss < 1e-20 * mass.value(), "{loss}");
+    for (gas, k) in [
+        (Gas::Nitrogen, 70.0),
+        (Gas::Nitrogen, 130.0),
+        (Gas::Water, 300.0),
+        (Gas::Nitrogen, 0.0),
+        (Gas::Nitrogen, f64::NAN),
+    ] {
+        let held = ice_vapour_escape(mass, radius, gas, Kelvin::new(k), SOLAR_AGE);
+        assert_eq!(held, None, "{gas:?} at {k} K");
+    }
+    let earth = ice_vapour_escape(
+        Kilograms::new(EARTH_MASS_KG),
+        Metres::new(crate::units::consts::EARTH_RADIUS_M),
+        Gas::Nitrogen,
+        Kelvin::new(30.0),
+        SOLAR_AGE,
+    );
+    assert_same_bits(earth.unwrap().value(), 0.0);
+}
+
+/// Rule (b) leaves small bodies their loss (Schaller and Brown 2007, Fig. 1): a Kuiper-belt body
+/// 500 km in radius at 1,900 kg m⁻³, an ice crust at 40 K, has λ(N₂) about 11 at its surface,
+/// so its N₂ ice's vapour, some pascals, escapes many times its whole inventory over the age, and
+/// it keeps no N₂, nor the methane that follows it. Its water ice, whose vapour at 40 K is nil,
+/// stays.
+#[test]
+fn a_500_km_body_at_40_k_keeps_no_nitrogen() {
+    let r = 5e5;
+    let kg = 4.0 / 3.0 * core::f64::consts::PI * r * r * r * 1_900.0;
+    let (mass, radius) = (Kilograms::new(kg), Metres::new(r));
+    let t = Kelvin::new(40.0);
+    let nitrogen = Kilograms::new(100.0 * EARTH_NITROGEN_PER_MASS * kg);
+    let air = atmosphere(&AtmosphereInputs {
+        mass,
+        radius,
+        material: SurfaceMaterial::Ice,
+        envelope_fraction: 0.0,
+        class: PlanetClass::Icy,
+        inventory: VolatileInventory::new(
+            Kilograms::new(0.4 * kg),
+            Kilograms::new(100.0 * EARTH_CARBON_DIOXIDE_PER_MASS * kg),
+            nitrogen,
+            Kilograms::ZERO,
+        ),
+        formed: SnowLineSide::Beyond,
+        equilibrium: t,
+        irradiation_temperature: Kelvin::new(42.0),
+        heated: t,
+        xuv_fluence: JoulesPerSquareMetre::ZERO,
+        saturated_xuv_flux: WattsPerSquareMetre::ZERO,
+        insolation: Insolation::BeyondMaximumGreenhouse,
+        crust: Crust::Solid,
+        molten_for: Years::ZERO,
+        age: SOLAR_AGE,
+        hottest_host: Kelvin::new(5_772.0),
+    });
+    let loss = ice_vapour_escape(mass, radius, Gas::Nitrogen, t, SOLAR_AGE).unwrap();
+    let vapour = saturation_pressure(Gas::Nitrogen.substance(), t).unwrap();
+    let lambda = jeans_parameter(mass, radius, Gas::Nitrogen, t);
+    eprintln!(
+        "a 500 km body at 40 K: N₂'s vapour {:.3} Pa, λ {lambda:.2}, loss {:.3e} of {:.3e} kg",
+        vapour.value(),
+        loss.value(),
+        nitrogen.value()
+    );
+    assert!((10.0..13.0).contains(&lambda), "{lambda}");
+    assert!(loss.value() > 1e3 * nitrogen.value(), "{loss:?}");
+    assert!(!air.retention().retains(Gas::Nitrogen));
+    assert!(!air.ice_held().retains(Gas::Nitrogen));
+    assert!(!air.retention().retains(Gas::Methane));
+    assert_same_bits(air.inventory_weights().of(Gas::Nitrogen).value(), 0.0);
+    assert_same_bits(air.inventory_weights().of(Gas::Methane).value(), 0.0);
+    assert!(air.ice_held().retains(Gas::Water));
+    assert_eq!(air.state(), SurfaceState::Airless);
 }

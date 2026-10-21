@@ -535,6 +535,10 @@ pub struct AerosolInventoryDto {
 /// its share of the substance's reservoir at the surface, as a mass and as a layer, the area it
 /// covers, the part of that area in cold traps and whether it is seasonal. Sent from P14.T54.a's
 /// batch (decision-p14-t54a-water-consistency §5).
+///
+/// On an ice-bulk body the `H2O` solid entry is the crust's ice-held frozen water, all of it
+/// (shell and deeper ice), at the cover's ice area, until P14.T53.c divides it; P14.T24.b's surface
+/// water, the water free to pool, is P14.T13.b's (decision-p14-t54a-ganymede, C1 follow-up §C1.4).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SurfaceCondensateDto {
@@ -726,20 +730,22 @@ pub struct BodySurfaceDto {
     /// The climate regime (P14.T48.d).
     pub climate_regime: ClimateRegimeDto,
     /// The ocean fraction, the share of the surface under liquid, in `[0, 1]`: the sum of
-    /// `surface_liquids`, the cover by substance, from `condensates` by its rule. With
+    /// `surface_liquids`, the cover by substance, from `condensates` by its rule, held at 1. With
     /// `ice_fraction` it may exceed 1, since an ice may lie over an ocean.
     pub ocean_fraction: f64,
     /// The ice fraction, the share of the surface under perennial ice, in `[0, 1]`: the sum of
-    /// `surface_ices`, the cover by substance, from `condensates` by its rule. An ice may lie over
-    /// an ocean.
+    /// `surface_ices`, the cover by substance, from `condensates` by its rule, held at 1. An ice
+    /// may lie over an ocean.
     pub ice_fraction: f64,
     /// The cloud fraction, in `[0, 1]`.
     pub cloud_fraction: f64,
     /// The liquids at the surface by substance: the cover by substance, from `condensates` by its
-    /// rule, summing to at most 1.
+    /// rule, summing to at most 1 but for rounding: a list divided by its total to fit the
+    /// surface may sum back to an ulp over it, where `ocean_fraction` is 1.
     pub surface_liquids: Vec<SubstanceAreaDto>,
     /// The ices at the surface by substance: the cover by substance, from `condensates` by its
-    /// rule, summing to at most 1.
+    /// rule, summing to at most 1 but for rounding: a list divided by its total to fit the surface
+    /// may sum back to an ulp over it, where `ice_fraction` is 1.
     pub surface_ices: Vec<SubstanceAreaDto>,
     /// The hypsometric standard deviation `σ_h`, m, not negative, relative to the reference
     /// equipotential (P14.T48.a).

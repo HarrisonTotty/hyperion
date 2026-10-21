@@ -26,14 +26,16 @@ use crate::units::{Degrees, EarthMasses, GravitationalParameter, Years};
 /// its equator's tilt to the ecliptic (Cassini's laws; the fact sheet gives 6.68° to its orbit;
 /// not re-read); a moon's obliquity is its planet's, since its spin follows its orbit in its
 /// planet's equator, and its seasonal orbit is its planet's; Ceres's 4.03° and 9.074 17 h are
-/// Park et al. 2016's (Nature 537, 515).
-const SPINS: [(&str, f64, f64, f64); 8] = [
+/// Park et al. 2016's (Nature 537, 515). Callisto, which the table does not hold, spins for the
+/// moons' tests (its synchronous 16.689 d, the Jovian satellite fact sheet's, not re-read).
+const SPINS: [(&str, f64, f64, f64); 9] = [
     ("Mercury", 0.034, 58.646, 87.969),
     ("Venus", 177.36, 243.025, 224.701),
     ("Earth", 23.44, 0.997_27, 365.256),
     ("Mars", 25.19, 1.025_96, 686.980),
     ("Moon", 1.542_4, 27.321_7, 365.256),
     ("Ganymede", 3.13, 7.154_6, 4_332.59),
+    ("Callisto", 3.13, 16.689, 4_332.59),
     ("Titan", 26.73, 15.945, 10_759.22),
     ("Ceres", 4.03, 9.074_17 / 24.0, 1_680.0),
 ];
@@ -3100,9 +3102,9 @@ fn the_batch_publishes_the_table_s_condensates() {
         if body.atmosphere().state() == SurfaceState::Airless {
             assert_same_bits(batch.surface_water().value(), 0.0);
         }
-        // Water's ice where the partition holds none is T24.b's, appended to the partition's ices
-        // and divided with them by their total where it exceeds the surface (W2): the airless
-        // table Ganymede's whole surface lies under 110 K beside its argon frost.
+        assert_an_ice_bulk_lists_its_crust(name, &body, &partition, &published);
+        // Water's ice where the condensates hold none is T24.b's, appended to the partition's ices
+        // and divided with them by their total where it exceeds the surface (W2).
         if published.entry(water, CondensatePhase::Solid).is_none() {
             let figures = second(batch.clone());
             let t24b = cover::ice_fraction(&cover::IceInputs {
@@ -3154,6 +3156,35 @@ fn the_batch_publishes_the_table_s_condensates() {
     let ice = earth_ice.unwrap_or(0.0);
     eprintln!("the generated Earth's ice: {ice}");
     assert!((0.01..=0.07).contains(&ice), "Earth's ice {ice}");
+}
+
+/// Decision-p14-t54a-ganymede, C1 follow-up §C1.4: the table's body `name`, derived as `body`,
+/// whose partition is `partition`, lists its crust's frozen water itself among its published
+/// condensates `published` (at T24.b's area, which its caller holds to the bit) where its bulk is
+/// ice and its partition holds frozen water, as the airless table Ganymede and the table Titan do,
+/// whose ice holds the water Jeans's test fails.
+fn assert_an_ice_bulk_lists_its_crust(
+    name: &str,
+    body: &DerivedBody,
+    partition: &crate::planetary::chem::partition::Partition,
+    published: &crate::planetary::chem::partition::Condensates,
+) {
+    use crate::planetary::chem::partition::CondensatePhase;
+    use crate::planetary::derive::atmosphere::SurfaceMaterial;
+    let water = Gas::Water.substance();
+    let ice_bulk = SurfaceMaterial::of(&body.fractions()) == SurfaceMaterial::Ice;
+    let frozen = partition
+        .condensate(water)
+        .is_some_and(|c| c.phase() == CondensatePhase::Solid);
+    if ice_bulk && frozen {
+        assert!(
+            published.entry(water, CondensatePhase::Solid).is_some(),
+            "{name}: {published:?}"
+        );
+    }
+    if matches!(name, "Ganymede" | "Titan") {
+        assert!(ice_bulk && frozen, "{name}: {partition:?}");
+    }
 }
 
 /// The ocean fraction the published condensates `published` give: their liquids' areas summed.

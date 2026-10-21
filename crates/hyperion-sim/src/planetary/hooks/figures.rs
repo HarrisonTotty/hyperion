@@ -130,7 +130,7 @@ use crate::planetary::chem::partition::{
     Basins, ClimateSpan, CondensatePhase, Condensates, Cover, Ground, Partition, WaterCover,
     partition,
 };
-use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceState};
+use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
 use crate::planetary::hooks::cold_traps::{self, ColdTrapBody, ColdTrapRules, RecordColdTraps};
 use crate::planetary::hooks::surface::{
@@ -684,8 +684,7 @@ impl Crust {
     /// It is ice-rich when the body lies under [`ICE_RICH_TEMPERATURE`] and either formed icy or
     /// holds a global water layer of at least [`ICE_RICH_LAYER_DEPTH`] ([`ice_layer_depth`]). It
     /// is the one predicate of the crust's mechanical factors: `k_target`, the ice target's
-    /// density, and P14.T48.a's `k_comp` and ice lithosphere.
-    /// [`SurfaceMaterial`](crate::planetary::derive::atmosphere::SurfaceMaterial) classes the
+    /// density, and P14.T48.a's `k_comp` and ice lithosphere. [`SurfaceMaterial`] classes the
     /// surface's albedo instead (science-r09-craters.md F5.4).
     #[must_use]
     pub fn of(
@@ -1867,6 +1866,8 @@ const YEARS_PER_GIGAYEAR: f64 = 1e9;
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlobalFigures {
     state: SurfaceState,
+    /// The material of the body's bulk, whose ice is an ice bulk's crust ([`WaterCover`]).
+    material: SurfaceMaterial,
     radiogenic_heat_flow: WattsPerSquareMetre,
     non_tidal_heat_flow: WattsPerSquareMetre,
     heat_flow: WattsPerSquareMetre,
@@ -2080,6 +2081,7 @@ impl GlobalFigures {
         let potential_ocean = cover::potential_ocean(relief.hypsometry(), surface_water);
         Ok(Some(Self {
             state: air.state(),
+            material: SurfaceMaterial::of(&inputs.fractions),
             radiogenic_heat_flow: heat.radiogenic,
             non_tidal_heat_flow: heat.non_tidal,
             heat_flow: heat.heat_flow,
@@ -2255,9 +2257,11 @@ impl GlobalFigures {
     ///   potential ocean appended where they hold no liquid water, its water inside the `H2O`
     ///   solid (W3 (b)).
     /// - The ices are the condensates' ([`Condensates::surface_ices`]), in the entries' order, with
-    ///   T24.b's water ice ([`cover::ice_fraction`]) appended where they hold none, as an icy
-    ///   body's crust is, or a `Snowball`'s cover, whose water the partition does not hold
-    ///   (decision-p14-t51a-partition §2; W3 (a)).
+    ///   T24.b's water ice ([`cover::ice_fraction`]) appended where they hold none, as a
+    ///   `Snowball`'s cover is, whose water the partition does not hold, or an ice-rich crust whose
+    ///   bulk is not ice (decision-p14-t51a-partition §2; W3 (a)). An ice bulk's crust is its
+    ///   condensates' own `H2O` solid at that area ([`WaterCover::crust_water`]), wherever its
+    ///   partition holds frozen water.
     /// - Each list is divided by its total, its appended item included, where that total exceeds
     ///   the whole surface (W2): ices of several substances compete for the same cold zones.
     ///
@@ -2339,9 +2343,11 @@ impl GlobalFigures {
     /// condensates are published over these figures' cover ([`Cover`]): the conditions' cold
     /// area, the state, the crust and the water's surface share, all of it while the volcanic
     /// greenhouse runs and [`cover::DRY_SURFACE_WATER_SHARE`] of it after
-    /// ([`cover::surface_water`]). Under [`ColdTrapRules::Held`] they are P14.T51.a's; under
-    /// [`ColdTrapRules::Batch`] a body with no collisional atmosphere that is not locked to its
-    /// star takes the cold traps' airless branch and their ices ([`cold_traps::publish`]).
+    /// ([`cover::surface_water`]), and on a body whose bulk is ice its crust's frozen water where
+    /// that share holds none ([`water_cover`](Self::water_cover)). Under [`ColdTrapRules::Held`]
+    /// they are P14.T51.a's; under [`ColdTrapRules::Batch`] a body with no collisional atmosphere
+    /// that is not locked to its star takes the cold traps' airless branch and their ices
+    /// ([`cold_traps::publish`]).
     #[must_use]
     pub(crate) fn condensates_under(
         &self,
@@ -2389,7 +2395,10 @@ impl GlobalFigures {
 
     /// Water's cover under the conditions `conditions`, whose cold profile is `profile`: P14.T24.b's
     /// surface water, potential ocean and ice, the ice's area read off the profile at its edge, and
-    /// ice Ih's density at the mean surface temperature ([`WaterCover`]).
+    /// ice Ih's density at the mean surface temperature ([`WaterCover`]). On a body whose bulk is
+    /// ice its crust is listed where the surface water holds none ([`WaterCover::crust_water`]):
+    /// the partition's whole frozen water at that ice's area (decision-p14-t54a-ganymede, C1
+    /// follow-up §C1.4), while the surface water stays T24.b's, on water's Jeans verdict.
     #[must_use]
     pub(crate) fn water_cover(
         &self,
@@ -2410,6 +2419,7 @@ impl GlobalFigures {
             potential_ocean: self.potential_ocean,
             ice_fraction: ice,
             ice_density: substance::ice_ih_density(conditions.mean_surface_temperature()),
+            crust_water: self.material == SurfaceMaterial::Ice,
         }
     }
 
@@ -2570,13 +2580,12 @@ impl GlobalFigures {
     }
 
     /// The ocean fraction `f_o`, 0 to 1: the sum of [`surface_liquids`](Self::surface_liquids),
-    /// the cover by substance, from the condensates by their rule on the record; zero before the
-    /// second stage. With [`ice_fraction`](Self::ice_fraction) it may exceed 1.
+    /// the cover by substance, from the condensates by their rule on the record, held at 1, which
+    /// a list scaled to the surface sums back to only to rounding; zero before the second stage.
+    /// With [`ice_fraction`](Self::ice_fraction) it may exceed 1.
     #[must_use]
     pub fn ocean_fraction(&self) -> f64 {
-        self.surface_liquids
-            .iter()
-            .fold(0.0, |sum, &(_, f)| sum + f)
+        covered(&self.surface_liquids)
     }
 
     /// The liquids at the surface as `(SubstanceId, area fraction)` (P14.T24.b): on the record the
@@ -2590,10 +2599,11 @@ impl GlobalFigures {
     }
 
     /// The ice fraction, 0 to 1: the sum of [`surface_ices`](Self::surface_ices), the cover by
-    /// substance, from the condensates by their rule on the record; zero before the second stage.
+    /// substance, from the condensates by their rule on the record, held at 1, which a list scaled
+    /// to the surface sums back to only to rounding; zero before the second stage.
     #[must_use]
     pub fn ice_fraction(&self) -> f64 {
-        self.surface_ices.iter().fold(0.0, |sum, &(_, f)| sum + f)
+        covered(&self.surface_ices)
     }
 
     /// The temperature below which the climate holds the ice cover, by the body's own state
@@ -2678,6 +2688,16 @@ fn within_the_surface(mut shares: Vec<(SubstanceId, f64)>) -> Vec<(SubstanceId, 
         }
     }
     shares
+}
+
+/// The share of the surface the area shares `shares` cover together, their sum in their order,
+/// held at 1: a list [`within_the_surface`] divides by its total sums back to 1 only to rounding,
+/// and may come to an ulp over it, 1.000 000 000 000 000 2, which no fraction of the surface can
+/// be. A NaN sum stays NaN; the record gives no NaN share.
+#[must_use]
+fn covered(shares: &[(SubstanceId, f64)]) -> f64 {
+    let sum = shares.iter().fold(0.0, |sum, &(_, f)| sum + f);
+    if sum > 1.0 { 1.0 } else { sum }
 }
 
 /// How a body's interior loses its heat, with its rock's radius ([`Interior::of`]); `None` for a

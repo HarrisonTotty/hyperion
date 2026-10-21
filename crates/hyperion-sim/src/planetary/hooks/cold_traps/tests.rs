@@ -572,6 +572,7 @@ fn a_body_colder_than_its_threshold_everywhere_lays_a_whole_cover() {
                     potential_ocean: 0.0,
                     ice_fraction: 0.0,
                     ice_density: KilogramsPerCubicMetre::new(917.0),
+                    crust_water: false,
                 },
             },
             SolidEdges::Exosphere {
@@ -633,6 +634,7 @@ fn the_merge_keeps_t51a_s_order() {
             potential_ocean: 0.0,
             ice_fraction: 0.0,
             ice_density: KilogramsPerCubicMetre::new(917.0),
+            crust_water: false,
         },
     });
     let caps = *published.entry(co2, CondensatePhase::Solid).unwrap();

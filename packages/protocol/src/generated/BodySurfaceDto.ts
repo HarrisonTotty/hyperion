@@ -98,14 +98,14 @@ liquid_water: boolean,
 climate_regime: ClimateRegimeDto, 
 /**
  * The ocean fraction, the share of the surface under liquid, in `[0, 1]`: the sum of
- * `surface_liquids`, the cover by substance, from `condensates` by its rule. With
+ * `surface_liquids`, the cover by substance, from `condensates` by its rule, held at 1. With
  * `ice_fraction` it may exceed 1, since an ice may lie over an ocean.
  */
 ocean_fraction: number, 
 /**
  * The ice fraction, the share of the surface under perennial ice, in `[0, 1]`: the sum of
- * `surface_ices`, the cover by substance, from `condensates` by its rule. An ice may lie over
- * an ocean.
+ * `surface_ices`, the cover by substance, from `condensates` by its rule, held at 1. An ice
+ * may lie over an ocean.
  */
 ice_fraction: number, 
 /**
@@ -114,12 +114,14 @@ ice_fraction: number,
 cloud_fraction: number, 
 /**
  * The liquids at the surface by substance: the cover by substance, from `condensates` by its
- * rule, summing to at most 1.
+ * rule, summing to at most 1 but for rounding: a list divided by its total to fit the
+ * surface may sum back to an ulp over it, where `ocean_fraction` is 1.
  */
 surface_liquids: Array<SubstanceAreaDto>, 
 /**
  * The ices at the surface by substance: the cover by substance, from `condensates` by its
- * rule, summing to at most 1.
+ * rule, summing to at most 1 but for rounding: a list divided by its total to fit the surface
+ * may sum back to an ulp over it, where `ice_fraction` is 1.
  */
 surface_ices: Array<SubstanceAreaDto>, 
 /**

@@ -665,6 +665,7 @@ fn the_record_s_surface_holds_its_published_condensates() {
     let (mut surfaces, mut entries, mut earths) = (0_u32, 0_usize, 0_u32);
     let mut tally = CondensateTally::default();
     let mut cover = CoverRuleTally::default();
+    let mut ice_bulks = IceBulkTally::default();
     let mut dry = false;
     for (ctx, system) in whole().iter().take(60) {
         let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
@@ -675,6 +676,7 @@ fn the_record_s_surface_holds_its_published_condensates() {
             let id = record.identity().id();
             let condensates = check_record_condensates(id, surface, &mut tally);
             check_cover_rule(id, surface, &mut cover);
+            check_ice_bulk(id, surface, &mut ice_bulks);
             if let Some(sea) = condensates.entry(water, CondensatePhase::Liquid) {
                 eprintln!(
                     "{id}: water's sea {:.6} (the whole water's potential ocean {:.6}), {:?} m, a \
@@ -737,11 +739,85 @@ fn the_record_s_surface_holds_its_published_condensates() {
          lists {}",
         tally.supercritical, tally.unlayered, cover.crust_ice, cover.under_ice, cover.scaled
     );
+    eprintln!(
+        "ice bulks: {} surfaces, {} listing their crust's frozen water as H2O solid, {} T24.b's \
+         surface water, none listed {:?}",
+        ice_bulks.surfaces, ice_bulks.crust, ice_bulks.surface_water, ice_bulks.dry
+    );
     assert!(
         surfaces > 100 && entries > 100 && earths > 0,
         "{surfaces} {entries} {earths}"
     );
+    assert!(ice_bulks.crust > 100, "{ice_bulks:?}");
     assert!(dry, "01ffeb2ce0000000.0300 is in the sample");
+}
+
+/// What [`check_ice_bulk`] counts for the bless note: the surfaces whose bulk is ice, those whose
+/// `H2O` solid entry is their crust's frozen water, those whose entry is T24.b's surface water,
+/// and those that list no water ice, by state.
+#[derive(Debug, Default)]
+struct IceBulkTally {
+    surfaces: u32,
+    crust: u32,
+    surface_water: u32,
+    dry: std::collections::BTreeMap<String, u32>,
+}
+
+/// Decision-p14-t54a-ganymede, C1 follow-up §C1.4: on `surface`, the record of `id`, whose bulk is
+/// ice and whose surface water holds none (T24.b's, on water's Jeans verdict), an `H2O` solid
+/// entry is the crust's frozen water: its area T24.b's ice area and its layer its mass over ice
+/// Ih's density at the mean surface temperature, to the bit while the cold traps are held (until
+/// P14.T54.b), and no water sea is listed beside it. An ice bulk that lists no water ice is
+/// printed, with its state and mean temperature.
+fn check_ice_bulk(id: crate::id::BodyId, surface: &Surface, tally: &mut IceBulkTally) {
+    use crate::planetary::chem::partition::CondensatePhase;
+    use crate::planetary::derive::atmosphere::SurfaceMaterial;
+    use crate::planetary::hooks::figures::cover;
+    if surface.material() != SurfaceMaterial::Ice {
+        return;
+    }
+    tally.surfaces += 1;
+    let water = Gas::Water.substance();
+    let (figures, conditions) = (surface.figures(), surface.conditions());
+    let mean = conditions.mean_surface_temperature();
+    let Some(entry) = surface.condensates().entry(water, CondensatePhase::Solid) else {
+        eprintln!(
+            "{id}: an ice bulk, a {:?} at {:.2} K, lists no water ice",
+            surface.state(),
+            mean.value()
+        );
+        *tally
+            .dry
+            .entry(format!("{:?}", surface.state()))
+            .or_insert(0) += 1;
+        return;
+    };
+    if figures.surface_water().value() > 0.0 {
+        tally.surface_water += 1;
+        return;
+    }
+    tally.crust += 1;
+    assert!(
+        surface
+            .condensates()
+            .entry(water, CondensatePhase::Liquid)
+            .is_none(),
+        "{id}: {:?}",
+        surface.condensates()
+    );
+    if entry.trapped_area_fraction() > 0.0 {
+        return;
+    }
+    let ice = cover::ice_fraction(&cover::IceInputs {
+        conditions,
+        state: surface.state(),
+        crust: figures.impactors().crust(),
+        surface_water: figures.surface_water(),
+    });
+    assert_same_bits(entry.area_fraction(), ice);
+    let rho = crate::substance::ice_ih_density(mean);
+    let layer = entry.reservoir_gel().expect("ice Ih's density is read");
+    assert_same_bits(layer.value(), entry.reservoir().value() / rho.value());
 }
 
 /// What [`check_cover_rule`] counts for the bless note: the surfaces whose ices take T24.b's water
@@ -813,6 +889,11 @@ fn check_cover_rule(id: crate::id::BodyId, surface: &Surface, tally: &mut CoverR
         tally.scaled += u32::from(total > 1.0);
         let sum = listed.iter().fold(0.0, |sum, &(_, f)| sum + f);
         assert!(sum <= 1.0 + 1e-12, "{id}: {listed:?}");
+    }
+    // The fractions are shares of the surface, held at 1 though a scaled list's sum may round an
+    // ulp over it (as `filler_b`'s did at C0, 1.000 000 000 000 000 2).
+    for fraction in [figures.ocean_fraction(), figures.ice_fraction()] {
+        assert!((0.0..=1.0).contains(&fraction), "{id}: {fraction}");
     }
     let basins = Basins::of(figures.relief().hypsometry());
     let (mut others, mut other_area) = (0.0, 0.0);
@@ -2876,7 +2957,8 @@ fn check_published_cover(
     );
     assert!(figures.sigma_h().value() > 0.0, "{index:?}");
     // The record's liquids and ices are P14.T51.a's published condensates: each substance listed
-    // once, the lists within the whole surface.
+    // once, the lists within the whole surface to rounding, and each fraction its list's sum held
+    // at 1, which a list divided by its total sums back to only to rounding.
     for (fraction, list) in [
         (figures.ocean_fraction(), figures.surface_liquids()),
         (figures.ice_fraction(), figures.surface_ices()),
@@ -2884,11 +2966,10 @@ fn check_published_cover(
         for (k, &(id, _)) in list.iter().enumerate() {
             assert!(list[..k].iter().all(|&(other, _)| other != id), "{index:?}");
         }
-        assert!(
-            (0.0..=1.0 + 1e-12).contains(&fraction),
-            "{index:?}: {fraction}"
-        );
-        assert_same_bits(list.iter().fold(0.0, |sum, &(_, f)| sum + f), fraction);
+        assert!((0.0..=1.0).contains(&fraction), "{index:?}: {fraction}");
+        let sum = list.iter().fold(0.0, |sum, &(_, f)| sum + f);
+        assert!(sum <= 1.0 + 1e-12, "{index:?}: {list:?}");
+        assert_same_bits(if sum > 1.0 { 1.0 } else { sum }, fraction);
     }
     assert!(
         (0.0..=1.0).contains(&figures.potential_ocean()),
@@ -4338,11 +4419,14 @@ fn every_moon_s_inventory_is_its_own_ranks_at_its_own_bulk() {
             let record = PlanetarySystem::moon_bulk_of(part, &derived, &now);
             assert_same_bits(EarthRadii::from(radius).value(), record.radius().value());
             let air = derived.atmosphere();
+            // With what an ice crust holds as ice beside it (decision-p14-t54a-ganymede, C0
+            // follow-up, rule (b)).
             let escape = Retention::of(
                 Kilograms::from(satellite.mass()),
                 radius,
                 air.exobase_temperature(),
             )
+            .with(air.ice_held())
             .with_methane_as_nitrogen();
             assert_eq!(air.retention(), escape, "{index:?}");
             moons += 1;

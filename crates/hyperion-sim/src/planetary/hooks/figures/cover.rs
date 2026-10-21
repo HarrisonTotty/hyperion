@@ -151,10 +151,12 @@ pub fn liquid_water_density() -> KilogramsPerCubicMetre {
 /// vapour at least its saturation pressure, would read as no reservoir on every wet world. It is
 /// the one water that the potential ocean, its weight θ, the ice, the ocean under a `Snowball`'s
 /// ice, the own sea's weight in the partition and the published water entries all read. None too
-/// for a surface that holds no water: a body that keeps no atmosphere or no H₂O
-/// (P14.T13.b), a runaway greenhouse, which has lost its oceans (P14.T13.c), and a molten or
-/// enveloped one, which has no solid surface (the lane's readings of "T13.a's water", plan 14's
-/// Risks). It reads O and T13.c's state, not the climate, so the order has no loop.
+/// for a surface that holds no water: a body that keeps no atmosphere or no H₂O against escape
+/// (P14.T13.b; an ice crust's ice-held water is its crust, not surface water,
+/// decision-p14-t54a-ganymede's C0 follow-up), a runaway greenhouse, which has lost its oceans
+/// (P14.T13.c), and a molten or enveloped one, which has no solid surface (the lane's readings of
+/// "T13.a's water", plan 14's Risks). It reads O and T13.c's state, not the climate, so the order
+/// has no loop.
 ///
 /// # Examples
 ///
@@ -213,7 +215,7 @@ pub fn surface_water(
     };
     let (kg, r, g) = (water.value(), radius.value(), surface_gravity.value());
     // By comparison, so that a NaN water, radius or gravity holds none.
-    if !(holds && atmosphere.retention().retains(Gas::Water) && kg > 0.0 && r > 0.0 && g > 0.0) {
+    if !(holds && atmosphere.retains_against_escape(Gas::Water) && kg > 0.0 && r > 0.0 && g > 0.0) {
         return KilogramsPerSquareMetre::ZERO;
     }
     let vapour = atmosphere.partial_pressures().of(Gas::Water);

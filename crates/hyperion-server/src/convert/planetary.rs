@@ -1610,8 +1610,10 @@ mod tests {
     /// list's leading items are that phase's condensates, in their order, at their areas: to the
     /// bit where the list is not scaled, and each divided by one total where it is, to the bit
     /// where nothing is appended. At most one `H2O` item follows them, only where no `H2O`
-    /// condensate of the phase is sent. Each list sums to at most 1 (W5), and `ocean_fraction` and
-    /// `ice_fraction` are their lists' sums to the bit.
+    /// condensate of the phase is sent. Each list sums to at most 1 (W5), to 10⁻¹², and
+    /// `ocean_fraction` and `ice_fraction` are their lists' sums held at 1, to the bit: a list
+    /// divided by its total sums back to 1 only to rounding, as `2200165980000000.e201`'s ices
+    /// come to 1.000 000 000 000 000 2.
     #[test]
     fn the_wire_s_cover_is_its_condensates_by_their_rule() {
         let (mut surfaces, mut scaled) = (0, 0);
@@ -1689,12 +1691,8 @@ mod tests {
                     }
                 }
                 assert!(listed <= 1.0 + 1e-12, "{}: {list:?}", wire.id);
-                assert_eq!(
-                    fraction.to_bits(),
-                    listed.to_bits(),
-                    "{}: {phase:?}",
-                    wire.id
-                );
+                let held = if listed > 1.0 { 1.0 } else { listed };
+                assert_eq!(fraction.to_bits(), held.to_bits(), "{}: {phase:?}", wire.id);
             }
             surfaces += 1;
         }

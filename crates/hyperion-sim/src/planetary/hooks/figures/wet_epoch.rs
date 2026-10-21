@@ -553,9 +553,9 @@ fn history_span(molten_until: Option<Years>, age: Years) -> Option<(Years, Years
 }
 
 /// Whether a body of atmosphere `air` holding `water` over a radius `radius` can hold surface
-/// water at all: a solid surface, an atmosphere kept, water, and H₂O retained
-/// (science-p14-t24b-laws §3.3's first three conditions), over a radius its paleo-inventory can be
-/// spread on.
+/// water at all: a solid surface, an atmosphere kept, water, and H₂O retained against escape, not
+/// by an ice crust's ice alone (science-p14-t24b-laws §3.3's first three conditions), over a
+/// radius its paleo-inventory can be spread on.
 #[must_use]
 fn holds_water(air: &Atmosphere, water: Kilograms, radius: Metres) -> bool {
     let solid = match air.state() {
@@ -570,7 +570,7 @@ fn holds_water(air: &Atmosphere, water: Kilograms, radius: Metres) -> bool {
         && air.keeps_atmosphere()
         && water.is_finite()
         && water > 0.0
-        && air.retention().retains(Gas::Water)
+        && air.retains_against_escape(Gas::Water)
         && r.is_finite()
         && r > 0.0
 }
