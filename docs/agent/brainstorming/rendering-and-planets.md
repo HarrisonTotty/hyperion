@@ -1109,8 +1109,12 @@ What the pass does, in order:
    documented monthly heuristic, labelled as a heuristic wherever a console shows it: an equatorial
    rain band centred each month on the model's energy-flux equator, dry belts and a storm-track band
    beyond it, amplitudes scaled so that global precipitation balances evaporation from the energy
-   budget (after Siler, Roe and Armour 2018), and an orographic correction with rain shadows from the
-   coarse elevation under the month's prevailing wind (Roe 2005). No published precedent for it in
+   budget (after Siler, Roe and Armour 2018), and, onto the land, Hergarten and Robl 2022's linear
+   feedback precipitation model, which carries the sea's air along the model's bands, by the month's
+   prevailing wind's component along them, for orography, rain shadows and inland decay, while the
+   zonal budget carries the meridional transport, Hadley and eddy, each land cell taking its
+   convergence as a vapour source as the sea does. _Corrected 2026-10-20
+   (decision-r09-t13e-revision; R09 Design note 8)._ No published precedent for it in
    procedural world-building was found, so it is checked offline against a fast general circulation
    model, ExoPlaSim, which needs hours to reach equilibrium and so is never run on arrival. Both
    monthly fields are interpolated from the model's grid to the coarse cells, and the lapse-rate term
@@ -1126,7 +1130,8 @@ What the pass does, in order:
    needs a receiver for every cell, a sort from ridges down to the outlets to accumulate drainage
    area, a pass back upstream, and iteration to a fixed point sped by multigrid, which is exactly why
    it runs here, on the coarse grid on the server, and never per point. On a world wet now it runs to
-   steady state, with the sea as base level and uplift from the plates. On a world dry now it runs
+   steady state, with the sea as base level and uplift from the plates, proportional in each basin
+   to the construction's height above its base level. On a world dry now it runs
    for plan 14's wet epoch in Earth-equivalent years, the time its channel-forming flows ran at a
    point divided by the 5% of the time an Earth river's do, at the runoff it held, since the
    erodibility is a terrestrial calibration that already holds Earth's intermittency, and only where
@@ -1143,9 +1148,10 @@ What the pass does, in order:
    valleys narrower than a coarse cell, so the coarse field alone cannot be checked against it: the
    check counts the channels the local synthesis cuts too, or bounds the coarse share from valley
    cross-sections. The base level then comes from a depression-filling pass. A past inventory above
-   the basin capacity places a sea at the paleo-ocean fraction, by the same logistic of inventory
-   over capacity that plan 14 uses for the present ocean; a smaller one fills and spills closed
-   basins, as Mars's crater lakes did, and those that stay closed are terminal outlets. On a
+   the basin capacity places a sea at the paleo-ocean fraction, by the same volume fill that plan 14
+   uses for the present ocean; a smaller one fills and spills closed basins, as Mars's crater lakes
+   did, and those that stay closed are terminal outlets. _Corrected 2026-10-20
+   (decision-r09-t14-choices Q1 and Q2)._ On a
    stagnant lid the uplift is volcanic construction: each load sinks on its flexural root, the
    trough about it is filled with the province's own material and the bulge beyond is planed, both
    to the surface's level before the loads, so that the construction alone stands in the

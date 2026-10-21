@@ -963,15 +963,42 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    from a per-cell uniform on `surface.coarse.erosion`, with their slope correction on the
    face-local axes; ties by (elevation, cell index). The linear-time recursion marches up each river
    tree depth first; the fixed point iterates routing and solution with a moving-average weight of ½
-   (recorded; the paper gives none); multigrid runs on the quadtree's own parents
-   (solid-angle-weighted means) down to level 4, six iterations a level, the upsample through the
-   synthesis's interpolant at child centres jittered on the same tag. The base level is the sea, or
-   on a world dry now the terminal outlets left by priority flood (flat directions taken from the
-   pop order, so no ε-raising is needed) and Fill–Spill–Merge, which spreads the paleo-inventory
-   through the depression hierarchy after the paleo-sea is placed by plan 14's own logistic. A world
-   wet now runs to steady state; one dry now runs for t = `effective_flow`, with the drainage area
-   weighted by the epoch's `runoff`, uniform over the cells since no past climate is modelled,
-   only where the surface is older than the epoch's end; one with no wet epoch skips the step.
+   (recorded; the paper gives none); the fixed point does not converge exactly, its receivers
+   flipping on a floor that grows with the level, and the field takes the last solve on its own
+   routing (decision-r09-t14-choices, T14.b follow-up); on a world wet now the uplift is a field
+   fixed in space, each cell's own basin's λ in the path integral, refitted each iteration against
+   the construction basin's mean elevation by an additive step, and no link of the steady state
+   rises more than `DEBRIS_FLOW_SLOPE` times its length (Tzathas et al.'s §6.2 threshold in its hard
+   limit, at Stock and Dietrich 2003's debris-flow slope; T14.c follow-ups 1 and 2), its receivers
+   sticky from each level's third iteration, a cell keeping its previous receiver while that stays
+   strictly lower on the filled surface (T14.c follow-up 2); multigrid runs on the quadtree's own
+   parents (solid-angle-weighted means) down to level 4, six iterations a level, the upsample of
+   each level's change from its construction through the synthesis's interpolant at child centres
+   jittered on the same tag, added to the finer level's construction (multigrid's full
+   approximation scheme; T14.b follow-up). The base level is the sea, or on a world dry now the
+   terminal outlets left by priority flood (flat directions taken from the pop order, so no
+   ε-raising is needed) and Fill–Spill–Merge, which spreads the paleo-inventory through the
+   depression hierarchy, a uniform depth of the paleo-inventory by the epoch's liquid's density
+   routed by Fill–Spill–Merge, the sphere's root filled to the level its volume reaches (plan 14's
+   own ocean a volume fill since P14.T24.b; decision-r09-t14-choices Q2). On a world wet now the
+   depressions hold lakes by their water balance, the catchment's runoff against the lake's
+   evaporation less its precipitation (Q3). A world wet now runs to steady state, its rock uplift
+   fixed in space at u = λ_b max(0, z0 − ℓ_b), z0 the elevation entering the step, b the cell's
+   basin on the construction's own routing, ℓ_b its base level (the sea, or a closed basin's lake
+   or dry floor), and λ_b fitted in every iteration so that each such basin keeps its
+   construction's mean height above ℓ_b (Pinet and Souriau 1988's denudation in proportion to a
+   basin's mean elevation, its time constant basin by basin; decision-r09-t14-choices Q1; a
+   labelled closure, medium-low confidence), its heights then remapped in order onto its
+   construction's absolute hypsometry, each cell no lower than its receiver and no link steeper
+   than the threshold (T14.c follow-up 3); one dry now runs for t = `effective_flow`, with the
+   drainage area weighted by the epoch's `runoff`, uniform over the cells since no past climate is
+   modelled, only where the surface is older than the epoch's end; each cell's surface by its own
+   age, a volcanic province's being plan 14's `volcanic_surface_age`, the time since its heat flow
+   last stood at or above F_c, renewed to its construction after the solve where it is no older
+   than the epoch's end; the coarse cell lowered by its valleys' void, d (w_bf + 5d) ÷ the cell's
+   width at most d, the valley's floor its bankfull channel and its walls of mean gradient 0.2
+   (width about ten times depth: Luo, Cang and Howard 2017 after Williams and Phillips 2001), the
+   channel solved at full K (decision-r09-t14-mars-ceiling); one with no wet epoch skips the step.
    m = θ = 0.45 (Kirby and Whipple 2012, from memory), with the drainage area replaced by Hergarten
    2021's runoff-weighted equivalent area from the climate step (on a world dry now, the epoch's
    `runoff`), normalised by a reference runoff of 1 m a⁻¹, which is the only place runoff enters
@@ -1384,9 +1411,10 @@ beside T1.a. T4–T9 build the synthesis on T2 (T5, T6 and T7.b open their strea
 `DetailSeed`); T10–T16, the coarse pass, need T1.a and T2 and may run beside the synthesis only up
 to the points where they read it: T12.d (coarse craters) needs T7.a's density and T7.e's target;
 T12.e (σ_h on the reconstructed field) needs T4's interpolant and T5's `local_variance`; T14.b (the
-multigrid's upsample) needs T4; and T14.c (the Mars volume check) needs T6.b's closed-form
-incision. T17–T19 are the server: T17 needs T3 and T10, T18 needs T2 (P12.T7 is built), and T19
-needs T8, T17 and T18.
+multigrid's upsample) needs T4; and T14.c (the Mars volume check) needs T6.b's closed-form incision.
+T6.c (valleys of a short wet epoch) runs the other way: it follows T14, whose T14.d keeps the
+solver's channel incision, and lands before the serve gate. T17–T19 are the server: T17 needs T3 and
+T10, T18 needs T2 (P12.T7 is built), and T19 needs T8, T17 and T18.
 T7.d (the cold-trap fraction, a pure closed form) needs nothing and is built early, since T13.f
 and galaxy plan 14's P14.T51.f both call it. T20 closes. T0.b's research items gate T7.a, T12.c,
 T13.a and T14.b. Every task ends with `just ci` green, which the orchestrator runs on
@@ -1767,6 +1795,63 @@ and T9).
   µs a point in wasm (Design note 14), in a new `crates/hyperion-surface/benches/synth.rs`
   (`[[bench]]`, `harness = false`, Criterion off the browser target as `test_planet.rs` is), which
   T8 extends.
+- **R09.T6.c Valleys of a short wet epoch** (after R09.T14, whose T14.d keeps the solver's channel
+  incision; before the serve gate, and before R09.T16 if it can, so that T16's goldens pin it once,
+  otherwise they re-bless at the version in force; decision-r09-t14-choices F2 with its T14.c and
+  T14.d follow-ups, and decision-r09-t14-mars-ceiling §2 and §5, which bind). T6.b's valleys are
+  the steady state's on every world, so a world dry now is dissected as a steady-state Earth: on
+  the reference Mars up to about 2.3 times the 50–350 m of trunk incision (Howard, Moore and Irwin
+  2005, as Black et al. 2017 quote it), about four times the networks' 10 km widths, and a void
+  100–300 times Luo, Cang and Howard 2017's (F2). On a world dry now (worlds wet now keep T6.b's
+  steady state as built):
+  - each segment's valley depth G is the lesser of T6.b's steady-state depth (`valley_depth`) and
+    the epoch's incision at the segment; a tributary's incision follows from its cell's at the
+    same K t in the short-time regime, ∝ (r_t A_t)^m S_t ÷ (r̄ A)^m S;
+  - its cross-section is mars-ceiling §5's: the floor its bankfull channel, half T6.b's
+    `bankfull_width` either side, and each wall rising over W_w = 5 G as T6.b's 1 − smoothstep,
+    so a top width of w_bf + 10 G, a void of G (w_bf + 5 G) per unit length and a steepest wall
+    of 0.3, under `VALLEY_WALL_GRADIENT`'s 0.6 (width about ten times depth: Luo, Cang and Howard
+    2017 after Williams and Phillips 2001, whose top width is linear in depth below 125 m and whose
+    width-to-depth ratio falls as depth grows, which the floor term gives; medium-low confidence);
+    the upland between valleys stays undissected, and no valley link is steeper than
+    `DEBRIS_FLOW_SLOPE`;
+  - segments whose incision falls below the level cut are not drawn, which lowers a short epoch's
+    drainage density as Mars's immature networks show, and a cell carries a valley, and T14's
+    closure, only where its drainage exceeds the epoch's channel-initiation area, so that the
+    valleys' volume does not grow with the level (on the reference Mars at level 8, T14.c's (B)
+    p99 is 1.94 times its bound and (A2) 5.64 m);
+  - `has_channels` also needs a catchment runoff above `LogRunoff::NONE`, so that a headwater cell
+    inside a late crater's rim, with no water of its own or from upstream, carries no trunk
+    (decision-r09-t14-choices, T14.d follow-up C);
+  - a surface the epoch did not see carries no epoch valleys: `channel_incision` is zero on the
+    reference Mars's renewed provinces (mars-ceiling §2.1).
+  - _The input._ T14.d writes `CellState::channel_incision`, an `f64`: the solver's unscaled
+    channel incision on the dry-now branch, zero elsewhere, unquantised. T6.c wires it into the
+    field with no change to T14's solver. Lean: a per-cell code of it, none on worlds wet now or
+    never wet, +1 B a cell (0.39 MB on an Earth at level 8, against the 0.98 MB margin of Risks'
+    "Field size", so R03's 15 MiB check is re-run first); the alternative is one header member,
+    the epoch's K t (r ÷ 1 m a⁻¹)^m, which needs B by substrate on the client. T6.c's
+    re-validation settles the encoding; either is a `FieldHeader` or payload-layout change, so it
+    lands before the gate freezes them (Generator version). The owner is the synthesis:
+    `hyperion-surface`'s `synth/channels/incision.rs` changes, a shared-terrain change with a
+    WebAssembly determinism review.
+  - _The closure._ T14.c's width closure, the lowering min(d, d (w_bf + 5d) ÷ w) on each eroded
+    dry-now cell (Design note 9; `WALL_RUN_PER_DEPTH`), is edited in T6.c's commit to count
+    exactly the valleys T6.c draws in the cell, its trunk and tributaries, none where the incision
+    is below the level cut, so that the coarse lowering stays the drawn valleys' void and the
+    upland stays at z0 (mars-ceiling §2.2).
+  - _Tests._ On the reference Mars: (A2), the coarse volume, at least 1.2 m of global equivalent
+    layer (Luo, Cang and Howard 2017), and above 6.1 m (three times their combined 2.04 m) a
+    finding to main; the drawn valleys' density over the eroded `Lid` cells recorded against
+    Hynek, Beach and Hoke 2010's 0.0115 km⁻¹ for Noachian units (one trunk per 38 km cell is
+    already 0.026 km⁻¹); the trunks' incision by drainage class recorded, the share deeper than
+    350 m, the p90 and the maximum (T14's 18.2%, 30.8% and 35.7% at 10⁴–10⁵, 10⁵–10⁶ and above
+    10⁶ km²), and if the drawn valleys show that tail, a depth relation by drainage belongs here,
+    not in K t (Williams and Phillips 2001's walls steepening with depth the candidate); every
+    valley link at most `DEBRIS_FLOW_SLOPE`; `has_channels`' runoff condition; and a world wet now
+    synthesised as T6.b builds it, to the bit. Acceptance:
+    `cargo test -p hyperion-surface synth::channels` and
+    `cargo test -p hyperion-sim planetary::surface::steps::erosion`.
 
 Acceptance: `cargo test -p hyperion-surface synth::channels`.
 
@@ -2957,8 +3042,14 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     −0.6); on the ruled Earth the 40–60° N sea's DJF ÷ JJA evaporation at most 6 (6–7.5 reported,
     above it blocks) and its all-land JJA at least 0.45 of its DJF (0.35–0.45 reported, below it
     blocks), with §3.4's prints; T13.j's assertions, batch 1's ERA and transport tests, E-L8's
-    sample and the slow coarse-pass test re-run; the Hadley share's and the evaporation's unit
-    tests (§3.5).
+    sample and the slow coarse-pass test re-run; the Hadley share's and the evaporation's unit tests
+    (§3.5). §3.5 2's third and sixth bullets, "with no storage and a constant temperature every open
+    month is equal" and "`Q_O` = 0 and G = 0 give PT's rate in every month", hold as written only
+    where the months' forcing is uniform, since the ruled form spreads the aerodynamic part by
+    `q_s`, not by the energy: both are built as one test on uniform months (_Deviations in T13.i
+    batch 2, as built_). decision-r09-t13i's 15–35° N GPCP − NCEP +1.43 is the data's +1.42, and its
+    bracketed "NCEP's own" annual E − P figures are GPCP less 0.944 × NCEP R1's evaporation; NCEP's
+    own 40–60° N figure is −0.52.
   - _Acceptance:_ T13.j's ruled Earth assertions holding (batch 1 lands alone if its northern ratio
     stays at least 1.10); the reference Earth's climate step at level 8 at most 30 s on a quiet
     machine (load ≤ 2), one thread; 30–35 s lands with its figure and each lever's saving recorded,
@@ -2986,17 +3077,34 @@ of the same inputs, with the differences written into this plan. Acceptance:
   erodibility: K⊕ converted from Tzathas et al.'s m = 0.4, linear in g and ρ_f, the bed factor B,
   runoff once). t is `effective_flow`, in Earth-equivalent years at the reference intermittency of
   5% (Design note 9), and K carries no intermittency factor of its own. Tests: a ridge-to-sea
-  profile matches the closed-form steady state; over a step short enough that slopes barely
-  change, a profile's lowering far from base level is linear in t and in runoff^0.45 (to 1%), and
-  the saturated-regolith K at a uniform 0.1 m a⁻¹ for 2.2 × 10⁵ yr gives K (runoff ÷ 1 m a⁻¹)^0.45
-  t = 1.9 m^0.1 to 2%; the fixed point's residual falls monotonically over the multigrid levels
-  on the reference Earth; K is 6.3 × 10⁻⁶, 2.4 × 10⁻⁵ and 3.1 × 10⁻⁶ m^0.1 a⁻¹ (to 2%) for an
-  Earth's rock under water, a saturated Mars's regolith and a Titan's ice under methane. K's bed
-  factor B comes from a (substrate, fluid) table over the registry's rows, and ρ_f is the
-  liquid's density. The three calibrated cases (rock, saturated regolith, ice under methane) stay
-  its tests (decision-composition). The equivalent area, ∫ r dA ÷ (1 m a⁻¹) (Hergarten 2021, eq. 16
-  and its accumulation, eq. 20), is the solver's working state only; T14.d writes the geometric
-  area and the two runoffs (science-r09-drainage.md §1).
+  profile matches the closed-form steady state, every link below the threshold slope equal to the
+  uncapped sum to the bit and every link at it rising exactly s_c δ, the profile within 1% of the
+  closed form wherever x ≤ 0.9 L (decision-r09-t14-choices, T14.c follow-up 2 §5); over a step short
+  enough that slopes barely change, a profile's lowering far from base level is linear in t and in
+  runoff^0.45 (to 1%), and the saturated-regolith K at a uniform 0.1 m a⁻¹ for 2.2 × 10⁵ yr gives K
+  (runoff ÷ 1 m a⁻¹)^0.45 t = 1.9 m^0.1 to 2%; K is 6.3 × 10⁻⁶, 2.4 × 10⁻⁵ and 3.1 × 10⁻⁶ m^0.1 a⁻¹
+  (to 2%) for an Earth's rock under water, a saturated Mars's regolith and a Titan's ice under
+  methane. K's bed factor B comes from a (substrate, fluid) table over the registry's rows, and ρ_f
+  is the liquid's density. The three calibrated cases (rock, saturated regolith, ice under methane)
+  stay its tests (decision-composition). The equivalent area, ∫ r dA ÷ (1 m a⁻¹) (Hergarten 2021,
+  eq. 16 and its accumulation, eq. 20), is the solver's working state only; T14.d writes the
+  geometric area and the two runoffs (science-r09-drainage.md §1).
+  The multigrid's test (decision-r09-t14-choices, T14.b follow-up, with the half and the held cells
+  of its T14.c follow-ups 2 §3 and 3 §1): on the reference Earth (slow; and the synthetic worlds)
+  the fixed point's residual falls within each multigrid level, its last iteration's below half
+  its first, and the final elevation is the solver's solution on its last routing, every unbound
+  cell with positive uplift at or above its receiver on it and each cell held at its construction
+  below its receiver counted apart; each level's first and last residual (the root mean square by
+  area over the cells not bound), its largest change and the receivers that changed between its
+  last two routings are recorded. The residual is not monotone over the levels: a fixed point of
+  random receivers settles on a floor where receivers flip, which grows with the level. Findings
+  to main, recorded in the slow tests and not asserted: on the reference Earth at level 8, a final
+  RMS residual on the solve above 125 m, a level failing the within-level test, or a gradient
+  above 0.2 between land neighbours on the final field (its largest change recorded, no longer a
+  trigger); on the reference Mars, a final RMS residual above half the RMS of the solver's
+  unscaled channel incision over the cells at full exposure, which then takes the pre-ruled single
+  solve on the construction's routing (T14.b follow-up §5; T14.c follow-ups 2 §3 and 3 §T;
+  decision-r09-t14-mars-ceiling §4.2).
   _Built 2026-10-20_ (Risks, "Deviations in T14, as built", _T14.b_ and _The fixes after T14.c_):
   `fc121acb`, its level start and receivers revised in `320fe222`, its uplift and threshold in the
   fix `7347836a` and its remap's frame in the fix `a8a25ee0` (lane r09-erosion;
@@ -3006,44 +3114,86 @@ of the same inputs, with the differences written into this plan. Acceptance:
   after T6.b. On the dry-now branch the drainage area is weighted by the epoch's `runoff`,
   uniform over the cells.
   - _Tests:_
-    - The dry-now branch leaves surfaces younger than the epoch's end untouched.
+    - Q4's test of the surfaces younger than the epoch's end, in four parts
+      (decision-r09-t14-choices Q4 and its T14.d follow-up A; decision-r09-t14-mars-ceiling §4.1):
+      1. a surface no older than the epoch's end throughout leaves the elevation unchanged to the
+         bit, with no runoff;
+      2. the waiting craters are placed untouched and are not the solver's bounds: (2a) each
+         waiting crater's byte after T14.d is the erosion-off run's under the second match's rule,
+         `byte_of(s*₂ × kept_relief(byte₁))` under `Rule::Whole`, otherwise unchanged; (2b) the
+         final elevation equals, bit for bit, the state before `craters::run_after_erosion` plus
+         each waiting crater's `each_lift` at its final byte, added in draw order; (2c) on the
+         solver's own output, before T14.d's re-match, at least one cell inside a waiting crater's
+         rim lies below the elevation that entered the step, the rim cells' mean lowering recorded
+         beside every eroded cell's;
+      3. no cell inside a waiting crater's rim has runoff of its own;
+      4. every `Province` cell of the reference Mars equals its elevation entering the step, bit
+         for bit, with no runoff of its own; and a builder world with `province_surface_age` at or
+         above its epoch's start erodes its provinces (some `Province` cell lowered), their bed
+         from their own crater density, and they meet (B) as every eroded cell does (printed, not
+         asserted, as built: Risks, "Deferred findings (2026-10-13 rule) (R09.T14)").
     - A never-wet world's elevation is unchanged by the step.
     - The reference Mars's wet epoch is `effective_flow` 2.2 × 10⁵ yr at `runoff` 0.1 m a⁻¹ (K t =
       1.9 m^0.1, Black et al. 2017's; the foot of Hoke, Hynek and Tucker 2011's 10⁵–10⁸ yr, Design
       note 9).
-    - On it the coarse erosion volume **plus** the synthesis's expected sub-cell channel incision
-      volume (closed-form per cell from k_s, the cell's two runoffs, Hack's law and the network's
-      widths from discharge, as T6.b computes them) is at least
-      1.2 m of global equivalent layer (Luo, Cang and Howard 2017's (1.74 ± 0.8) × 10¹⁴ m³ over
-      1.444 × 10¹⁴ m²), since valley networks 1–10 km wide live mostly below a 38 km cell.
-    - The coarse lowering is bounded above by the valleys' cross-sections (incision × valley
-      width ÷ cell width, with Black et al.'s 50–350 m of trunk incision and the network's widths;
-      at most about 92 m on a 38 km cell holding a 10 km trunk). Over Hoke et al.'s three decades
-      a floor alone would pass any over-erosion.
+    - On it the floor is three items (decision-r09-t14-choices F1; decision-r09-t14-mars-ceiling
+      §4.1 and §4.2):
+      - (A0), recorded as the plan's figure, not the solver's test: the coarse erosion volume plus
+        the synthesis's expected sub-cell channel incision volume (closed-form per cell from k_s,
+        the cell's two runoffs, Hack's law and the network's widths from discharge, as T6.b
+        computes them);
+      - (A1), asserted: the median channel incision over the eroded cells (not bound, their
+        equivalent area and exposure above zero) draining at least 10⁴ km², the trunk reaches,
+        lies within Black et al. 2017's 50–350 m, its distribution recorded (the trunks' p90 and
+        the share deeper than 350 m); a miss is a finding with its figure, not a loosening;
+      - (A2), recorded now and asserted after R09.T6.c: the coarse volume alone against Luo, Cang
+        and Howard 2017's 1.2 m of global equivalent layer ((1.74 ± 0.8) × 10¹⁴ m³ over 1.444 ×
+        10¹⁴ m²), at least 1.2 m once T6.c's valleys are the epoch's and the closure lowers each
+        cell by their share; above 6.1 m (three times their combined 2.04 m) a finding to main.
+    - (B): the coarse lowering is bounded above by the valleys' cross-sections, the 99th
+      percentile by area of the eroded cells' coarse lowering at most 91.3 m, the maximum and every
+      cell above recorded (incision × valley width ÷ cell width at Black et al.'s 350 m of trunk
+      incision and the 10 km upper end of the networks' 1–10 km widths: 91.3 m on the reference
+      Mars's 38.32 km cells; decision-r09-t14-choices F3, decision-r09-t14-mars-ceiling §4.1).
+      Over Hoke et al.'s three decades a floor alone would pass any over-erosion.
     - A slow test records the final residual, the cell-mean lowering against a fine-grid run of
       one basin, and the volume at the window's extremes, 10⁵ yr at 0.073 m a⁻¹ and 10⁸ yr at
       1.10 m a⁻¹.
+    - On the final field: (i) every reference world's realised relief, the cells' range after the
+      whole pass, lies within T12.e's 6–16 σ_h; (ii) on every world wet now the remapped set's
+      highest cell above the sea is the construction's highest over the same set, to the pass's
+      lowering, no land cell lies above the construction's land maximum, and T12.a's land bands
+      hold; (iii) every unbound cell with positive uplift lies at or above its receiver on the
+      solve's last routing, and each cell held at its construction below its receiver is counted
+      and recorded apart as a closed depression (decision-r09-t14-choices, T14.c follow-ups 1–3).
   - _Built 2026-10-20_ (Risks, "Deviations in T14, as built", _T14.c_): `a6c551b4` (the wet
     epoch's runoff and liquid, landed) and `320fe222`, with the fixes `7347836a` and `a8a25ee0`
     (lane r09-erosion; decision-r09-t14-choices Q2, Q4–Q6a, F1–F3 and the T14.c follow-ups 1–3;
     decision-r09-t14-mars-ceiling): the floor restated as (A0)–(A2), (B) asserted as the area p99
     at 91.3 m, Q4's test in four parts; on the reference Mars (A1) 187.8 m, (B) 88.28 m, (A2)
     2.226 m.
-- **R09.T14.d Rescale and outputs.** σ_h re-matched on the reconstructed field, lapse and mean
-  re-applied; flow directions, the geometric drainage area (T14.a's), k_s = S A^θ on it, each
-  cell's `runoff` (the source term the solver took: the climate's annual runoff on a world wet
-  now, the epoch's `runoff` where the surface is older than the epoch's end on one dry now, none
-  elsewhere) and its `catchment_runoff` (the solver's equivalent area over the geometric, times
-  1 m a⁻¹), and water surfaces (science-r09-drainage.md §1).
+- **R09.T14.d Rescale and outputs.** In decision-r09-t14-choices Q7's order: σ_h re-matched on the
+  reconstructed field, counting the waiting craters and folding their bytes, never stretching them;
+  the sea placed again at the same ocean fraction; on a world wet now the lakes by their water
+  balance outside the ocean (Q3); the lapse and mean re-applied to the final water surfaces and ℓ,
+  with the ices and liquids placed again; then the outputs: flow directions, the geometric drainage
+  area (T14.a's), k_s = S A^θ on it, each cell's `runoff` (the source term the solver took: the
+  climate's annual runoff on a world wet now, the epoch's `runoff` where the surface is older than
+  the epoch's end on one dry now, none elsewhere) and its `catchment_runoff` (the equivalent area
+  accumulated over the field's final routing, over the geometric, times 1 m a⁻¹), and water surfaces
+  (science-r09-drainage.md §1).
   - _Tests:_
     - σ_h and the mean temperature again match;
     - lakes are level;
-    - the quantised catchment runoff times the drainage area equals the solver's equivalent area
-      times 1 m a⁻¹ to the two codes' steps;
+    - the quantised catchment runoff times the drainage area equals the equivalent area over the
+      field's final routing times 1 m a⁻¹ to the two codes' steps;
     - k_s × drainage^−θ is the slope to the receiver to the steepness code's step;
     - on the reference Mars every eroded cell's own runoff is its epoch's 0.1 m a⁻¹, and its
       catchment runoff equals it wherever its whole catchment is older than the epoch's end;
-    - every cell younger than the epoch's end has no runoff of its own;
+    - every cell younger than the epoch's end (every cell whose centre lies inside a waiting
+      crater's rim, or every cell where the surface age is at most the epoch's end, or every
+      `Province` cell where the provinces' surface age is at most the epoch's end) has no runoff of
+      its own;
     - on the reference Earth some cell's catchment runoff is at least three times its own.
   - _R09.T8.d's certificate:_ on a body of surface pressure exactly 0 Pa every cell keeps its
     runoff and catchment runoff none, ice cells included, which `CoarseField::new` enforces
@@ -3105,13 +3255,17 @@ testing --example surface_map` writing its three images.
 
 ### R09.T16 Coarse goldens and benches
 
-After R09.T7.j, whose wear moves the fields it pins.
+After R09.T7.j, whose wear moves the fields it pins. After R09.T6.c too if it can, so that its
+goldens pin T6.c's valleys once; otherwise they re-bless at the version in force, as the rule before
+the serve gate allows (decision-r09-t14-choices F2).
 `crates/hyperion-sim/tests/surface_coarse_golden.rs`, over a shared
 `crates/hyperion-sim/tests/common/surface_worlds.rs` that runs `reference::*` through the pass once
 per binary and that R10's world tests reuse: the quantised fields of the reference Ceres
 and Moon (fast, so they run on native and wasip1 under R04's recipes) and of the reference Earth
-and Mars (slow). The coarse goldens pin each reference world's palette. Bench `coarse/pass` per
-level 5–8, beside T14's `coarse/erosion_l8` in
+and Mars (slow). The coarse goldens pin each reference world's palette. On a world wet now the
+coarse land hypsometry is its construction's by rule (decision-r09-t14-choices, T14.c follow-up 2
+§2), so a golden or check of land hypsometry after erosion reads T12.a's bands. Bench `coarse/pass`
+per level 5–8, beside T14's `coarse/erosion_l8` in
 `crates/hyperion-sim/benches/surface.rs`. Bump `GENERATOR_VERSION` if T9 has not already
 (whichever of the two lands first bumps, through the orchestrator; T1.b rides galaxy plan 14's
 21 → 22 batch and its one bump instead), or again if the first bump has been released to a save.
@@ -3288,8 +3442,9 @@ record's own), `LIQUID_BINS`' fifteen bake bins, `LiquidBasis`'s codes 0–2, an
 `maturity` and `organic_cover`, dimensionless in [0, 1] and absent until P14.T54.b
 (decision-r11-palette-liquids §1 and §2); and T2's follow-up F's palette `feo_mass_fraction`, in
 [+0, 1], and the header's `weathering_rate`, finite and ≥ +0 and present exactly when `maturity`
-is (decision-p14-t51d-weathering §1.6 and §2.3). The gate does not open before R09.T2.f lands.
-R10.T10.a fills
+is (decision-p14-t51d-weathering §1.6 and §2.3). The gate does not open before R09.T2.f lands. Nor
+does it open before R09.T6.c lands, since T6.c's input is a field or header member and the layout
+freezes at the gate (decision-r09-t14-choices F2). R10.T10.a fills
 `FieldHeader.albedo_scale` and bumps `GENERATOR_VERSION`,
 re-blessing this plan's payload and coarse goldens in that commit. _As built (main's ruling for
 R10.T10.a, 2026-10-14): no bump. The first send above has not happened, since no generated body is
@@ -3431,7 +3586,14 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
     on a 38 km cell), and records the cell-mean lowering against a fine-grid run of one basin; the
     estimate of about 100 m a cell at the calibrated K t sits at that ceiling, so the check may
     fail and is meant to. Howard 2007, Hergarten 2021 and Burr et al. 2006 were not read in full;
-    Barnhart et al. 2009 stand in for Howard's constants.
+    Barnhart et al. 2009 stand in for Howard's constants. Measured 2026-10-20: provinces younger
+    than the epoch held 82% of the uncorrected volume; ruled by their surface age and the width
+    closure (decision-r09-t14-mars-ceiling).
+  - _The paleo-lakes._ The dry-now paleo-lakes fill without loss, about 1.5–3 times the highland
+    standing water of Matsubara et al. 2011's X of 3–7; lakes by the balance at X = 5 enter with
+    closed-basin deposition, one later item (decision-r09-t14-mars-ceiling §3).
+  - _The provinces' one age._ One age for all provinces; Mars's dissected old volcanoes come out
+    undissected (decision-r09-t14-mars-ceiling §2.1).
   - _Plan 14's wet epoch._ P14.T48.b's "10⁵ to 10⁷ years … against 200–5,000 yr of continuous
     flow" and its "arid-to-semiarid Earth's" reference misdescribed Hoke, Hynek and Tucker 2011,
     whose times assume storms flowing 5% of the time, "as is typical for Earth", and whose
@@ -12420,7 +12582,7 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       storage's release instead. For a surface-air revision with a wind and an air temperature.
     - **`NOTICE`:** the earlier GPCP and NCEP R1 test-data entries lack PSL's acknowledgment line,
       which the new entry carries. "In the public domain" is the ruling's reading, not found on
-      PSL's page.
+      PSL's page. _Done: both entries now carry PSL's acknowledgment line._
 - **Deviations in T7.i, as built** (2026-10-20; lane `r09-craters`, from
   `origin/rendering-and-planets` at `8f307d16` with the plan text of `84c56ed5`, measured there and
   merged with `1870973b` before its goldens were blessed; main's rulings of 2026-10-19,
@@ -13392,7 +13554,7 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     R09.T16's performance list.
   - _F2 and `has_channels`._ T6.b's steady-state valleys over-dissect every dry-now world: ruled to
     a new R09.T6.c before the gate, and `has_channels` to need a catchment runoff above NONE (F2;
-    T14.d follow-up C). Main's, for the plan and T6.c's brief.
+    T14.d follow-up C). Main's, for the plan and T6.c's brief. _Entered as R09.T6.c, under R09.T6._
   - _The balance lakes' extent._ Q3's lakes on the reference Earth's final field covered 14.1% of
     its land off the ocean (the small Earth 11.9%), against Earth's about 2–4% (from memory;
     Verpoorter et al. 2014's about 3.7%). Sent to main for a quick ruling and ruled a blocker
