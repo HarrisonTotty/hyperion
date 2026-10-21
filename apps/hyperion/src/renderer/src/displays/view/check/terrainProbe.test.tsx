@@ -27,6 +27,8 @@ import { SCENE_OPTIONS } from "../viewRun";
 import {
   bakesInFlight,
   countedWorker,
+  longestGapOutside,
+  longestGapThrough,
   missedAtCadence,
   nonFiniteTexels,
   TERRAIN_LIT_PREFIX,
@@ -117,6 +119,8 @@ function watchedSession(
     workerCount: 3,
     terrainFaults: new Map(),
     subscribeFaults: () => () => undefined,
+    compiled: Promise.resolve(3),
+    compileStartedAtMs: 0,
   };
 }
 
@@ -225,6 +229,137 @@ describe("the frames a view missed at its own cadence", () => {
     expect(missedAtCadence([0, 10, 20, 50, 60, 70], index(8), null)).toBe(2);
     expect(missedAtCadence([0, 20, 40, 100, 120, 140], index(15), null)).toBe(2);
     expect(missedAtCadence([0, 10, 20, 50, 60, 70], index(8), { fromMs: 25, toMs: 45 })).toBe(0);
+  });
+});
+
+describe("the longest time between frames over the judged span (R10.T14.d)", () => {
+  it("counts from the span's start to its end, and gives where the longest ended", () => {
+    expect(longestGapOutside([10, 20, 400, 410], 0, 500, [])).toEqual({
+      gapMs: 380,
+      endMs: 400,
+    });
+  });
+
+  it("leaves out a gap that crosses a quiet span", () => {
+    expect(
+      longestGapOutside([10, 20, 400, 410], 0, 500, [
+        { fromMs: 100, toMs: 300 },
+        { fromMs: 450, toMs: 460 },
+      ]),
+    ).toEqual({ gapMs: 10, endMs: 10 });
+  });
+
+  it("reads no frame outside the span", () => {
+    expect(longestGapOutside([0, 5, 2_000], 100, 200, [])).toEqual({ gapMs: 100, endMs: 200 });
+  });
+});
+
+describe("the longest time between frames through a compile (R10.T14.d)", () => {
+  it("counts from the start, through the first frame after the compile's end", () => {
+    expect(longestGapThrough([5, 20, 30, 400, 410, 900], 0, 300)).toBe(370);
+  });
+
+  it("counts no frame before the start and none after the first past the compile", () => {
+    expect(longestGapThrough([0, 100, 116, 133, 800], 100, 120)).toBe(17);
+  });
+
+  it("gives none where no frame follows the compile's end", () => {
+    expect(longestGapThrough([10, 20], 0, 300)).toBeNull();
+  });
+});
+
+/** A probe over a views probe whose animation frames the test runs by hand on `page`'s clock. */
+async function probedPage(page: FakePage): Promise<{
+  readonly probe: TerrainProbe;
+  readonly primary: ReturnType<RenderEngine["createView"]>;
+  readonly stop: () => void;
+}> {
+  const timed = timedEngineSource();
+  const views = new ViewsProbe(timed.source, () => page.nowMs);
+  const probe = new TerrainProbe(views, { paceMs: 0, readBackMs: 1_000, nowMs: () => page.nowMs });
+  const outcome = await probe.source.requestAdapter();
+  if (outcome.kind !== "adapter") {
+    throw new Error("the fake gave no adapter");
+  }
+  const engine: RenderEngine = await probe.source.load(outcome, STORE());
+  views.installFrameClock(page);
+  const stop = probe.start();
+  const primary = engine.createView(document.createElement("canvas"), "view");
+  return { probe, primary, stop };
+}
+
+describe("the terrain probe's longest gap and its session's compile (R10.T14.d)", () => {
+  it("gives the script's time at the end of a view's longest gap", async () => {
+    const page = new FakePage();
+    const { probe, primary, stop } = await probedPage(page);
+    probe.watchTerrain(watchedSession(new Set(), { count: 0 }));
+    const start = probe.mark();
+    probe.fixture.notePlayed?.(10);
+    page.frame(10, () => {
+      primary.render(frame("tonemap"));
+    });
+    page.frame(26, () => {
+      primary.render(frame("tonemap"));
+    });
+    probe.fixture.notePlayed?.(11);
+    page.frame(310, () => {
+      primary.render(frame("tonemap"));
+    });
+    page.nowMs = 320;
+    const record = probe.phase(
+      "terrain-alone",
+      start,
+      probe.mark(),
+      [{ name: "view", style: "photorealistic" }],
+      null,
+    );
+    stop();
+    expect(record.views[0]).toMatchObject({ longestGapMs: 284, longestGapEndScriptS: 11 });
+    // A frame's script time as it drew, and none for a moment no frame was submitted at.
+    expect([probe.scriptSAt(310), probe.scriptSAt(200)]).toEqual([11, null]);
+  });
+
+  it("follows a session's compile from its making, with the longest time between frames", async () => {
+    const page = new FakePage();
+    const { probe, primary, stop } = await probedPage(page);
+    const settles: Array<(compiled: number) => void> = [];
+    const compiled = new Promise<number>((resolve) => {
+      settles.push(resolve);
+    });
+    const finish = (count: number): void => {
+      for (const settle of settles) {
+        settle(count);
+      }
+    };
+    page.nowMs = 60;
+    // Made at 50 ms, a commit before its watch.
+    probe.watchTerrain({
+      ...watchedSession(new Set(), { count: 0 }),
+      compiled,
+      compileStartedAtMs: 50,
+    });
+    page.frame(100, () => {
+      primary.render(frame("tonemap"));
+    });
+    const before = probe.compiled;
+    page.nowMs = 300;
+    finish(3);
+    await compiled;
+    await Promise.resolve();
+    page.frame(450, () => {
+      primary.render(frame("tonemap"));
+    });
+    stop();
+    expect([before, probe.compiled, probe.sessions()]).toEqual([
+      false,
+      true,
+      [
+        {
+          madeAtMs: 50,
+          compile: { kind: "ended", compileMs: 250, compiled: 3, longestFrameGapMs: 350 },
+        },
+      ],
+    ]);
   });
 });
 
@@ -341,6 +476,7 @@ describe("the terrain probe (R10.T16.d)", () => {
       terrainGapSpansS: [[0, 0]],
       firstHandoverMs: 116,
       firstTerrainMs: 133,
+      terrainHandoverMs: 116,
       missedFrames: 0,
     });
     expect(record.patchesDrawn).toEqual([0, 12, 12, 15, 15, 15]);
@@ -356,6 +492,47 @@ describe("the terrain probe (R10.T16.d)", () => {
       sessionGpuBytes: 24_576,
     });
     stop();
+  });
+
+  it("times the terrain from the hand-over it was first drawn in, past a lone handed-over draw (R10.T14.d)", async () => {
+    const page = new FakePage();
+    const { probe, primary, stop } = await probedPage(page);
+    const handing = new Set<string>();
+    probe.watchTerrain(watchedSession(handing, { count: 12 }));
+    const draw = (terrain: boolean): void => {
+      primary.render(frame("tonemap", terrain ? [`${TERRAIN_LIT_PREFIX}baked-offsets`] : []));
+    };
+    const start = probe.mark();
+    // The frame the script's loop moves the camera in: the pass still holds the view.
+    handing.add("view");
+    page.frame(100, () => {
+      draw(false);
+    });
+    handing.delete("view");
+    page.frame(116, () => {
+      draw(false);
+    });
+    handing.add("view");
+    page.frame(133, () => {
+      draw(false);
+    });
+    page.frame(150, () => {
+      draw(true);
+    });
+    page.nowMs = 160;
+    const record = probe.phase(
+      "terrain-alone",
+      start,
+      probe.mark(),
+      [{ name: "view", style: "photorealistic" }],
+      null,
+    );
+    stop();
+    expect(record.views[0]).toMatchObject({
+      firstHandoverMs: 100,
+      firstTerrainMs: 150,
+      terrainHandoverMs: 133,
+    });
   });
 
   describe("a wireframe view's terrain (R10.T11)", () => {

@@ -23,7 +23,9 @@
  * - **The session** ({@link TerrainProbe.watchTerrain}): held while `VIEW` holds it, for its pass,
  *   its masks, its survey and its memory report, and followed for its terrain's fault: each time its
  *   `terrainFaults` holds a view or changes while it does, recorded with the time
- *   ({@link TerrainProbe.terrainFaults}; R10.T16.e), which fails the run.
+ *   ({@link TerrainProbe.terrainFaults}; R10.T16.e), which fails the run; and the compile of its
+ *   materials, which it starts as it is made, timed from its making with the longest time between
+ *   animation frames meanwhile ({@link TerrainProbe.sessions}; R10.T14.d).
  * - **The submissions** (through the views probe's watch): each view's draws while it hands
  *   `TEST MOON` over (its pass drew for the view), and whether they held a draw of the terrain's
  *   lit material; and each photorealistic view's scene target read back every
@@ -38,6 +40,7 @@ import type {
   TerrainCheckPhaseName,
   TerrainCheckPhaseRecord,
   TerrainCheckSessionFault,
+  TerrainCheckSessionRecord,
   TerrainCheckTeardownRecord,
   TerrainCheckViewRecord,
 } from "../../../../../preload/api";
@@ -119,6 +122,19 @@ export interface WatchedSession {
   readonly terrainFaults: ReadonlyMap<ViewId, TerrainFault>;
   /** Listens for a change of `terrainFaults`; returns the unsubscribe. */
   subscribeFaults(listener: () => void): () => void;
+  /**
+   * Settles once its materials, compiled as it is made, have compiled or failed to, with how many
+   * compiled (`TerrainSession.compiled`, R10.T14.d).
+   */
+  readonly compiled: Promise<number>;
+  /** When that compile began, as it was made, `performance.now()` ms (`TerrainSession`'s). */
+  readonly compileStartedAtMs: number;
+}
+
+/** A session the probe saw made, and its materials' compile's end, once it has ended. */
+interface WatchedMaking {
+  readonly madeAtMs: number;
+  ended: { readonly atMs: number; readonly compiled: number } | null;
 }
 
 /** The height workers' traffic, over every worker the probe made. */
@@ -379,6 +395,8 @@ export class TerrainProbe {
   readonly #readBacks: ReadBack[] = [];
   /** Each time a session's `terrainFaults` held a view or changed while it did (R10.T16.e). */
   readonly #terrainFaults: TerrainCheckSessionFault[] = [];
+  /** Each session made, in order, and its materials' compile (R10.T14.d). */
+  readonly #makings: WatchedMaking[] = [];
   readonly #readBackAt = new Map<string, number>();
   readonly #reading = new Set<string>();
   #engine: RenderEngine | null = null;
@@ -469,6 +487,17 @@ export class TerrainProbe {
     this.#session = session;
     this.#lastSession = session;
     this.#sessionsMade += 1;
+    // Timed from the session's own making: the watch comes a commit after it.
+    const making: WatchedMaking = { madeAtMs: session.compileStartedAtMs, ended: null };
+    this.#makings.push(making);
+    void session.compiled
+      .then((compiled) => {
+        making.ended = { atMs: this.#nowMs(), compiled };
+        return undefined;
+      })
+      .catch((error: unknown) => {
+        console.error("views check: the terrain session's compile could not be followed:", error);
+      });
     const unsubscribe = session.subscribeFaults(() => {
       this.#takeFaults(session);
     });
@@ -495,6 +524,39 @@ export class TerrainProbe {
     return this.#session;
   }
 
+  /**
+   * Whether the session `VIEW` holds has ended its materials' compile, which it starts as it is made
+   * (R10.T14.d): the run starts a phase on a session only after it.
+   */
+  get compiled(): boolean {
+    // Sessions are made one at a time: the last making is the held session's.
+    const making = this.#makings.at(-1);
+    return this.#session !== null && making !== undefined && making.ended !== null;
+  }
+
+  /**
+   * Each session made so far and its materials' compile, with the longest time between animation
+   * frames from its making to the first frame after the compile ended (R10.T14.d).
+   */
+  sessions(): TerrainCheckSessionRecord[] {
+    return this.#makings.map(({ madeAtMs, ended }) => ({
+      madeAtMs,
+      compile:
+        ended === null
+          ? { kind: "pending" }
+          : {
+              kind: "ended",
+              compileMs: ended.atMs - madeAtMs,
+              compiled: ended.compiled,
+              longestFrameGapMs: longestGapThrough(
+                this.#views.frameTimes(madeAtMs, Infinity),
+                madeAtMs,
+                ended.atMs,
+              ),
+            },
+    }));
+  }
+
   /** `TEST MOON`, the body the run watches. */
   get moon(): BodyIdHex {
     return this.#moon;
@@ -503,6 +565,14 @@ export class TerrainProbe {
   /** The script's time the stage last told the fixture, s, or `null` before any. */
   get scriptS(): number | null {
     return this.#scriptS;
+  }
+
+  /**
+   * The script's time as the animation frame at `atMs` drew, s; `null` for a frame of no
+   * submission, or before any script time was told (R10.T14.d).
+   */
+  scriptSAt(atMs: number): number | null {
+    return this.#frames.get(atMs)?.scriptS ?? null;
   }
 
   /** The height workers' traffic so far. */
@@ -634,12 +704,15 @@ export class TerrainProbe {
       const missedFrames = missedAtCadence(draws, frameIndex, quiet);
       const moments = [start.atMs, ...draws, end.atMs];
       let longestGapMs = 0;
+      let longestGapEndScriptS: number | null = null;
       for (let i = 1; i < moments.length; i += 1) {
         const from = moments[i - 1] ?? 0;
         const to = moments[i] ?? 0;
         const crossesQuiet = quiet !== null && from <= quiet.toMs && to >= quiet.fromMs;
-        if (!crossesQuiet) {
-          longestGapMs = Math.max(longestGapMs, to - from);
+        if (!crossesQuiet && to - from > longestGapMs) {
+          longestGapMs = to - from;
+          longestGapEndScriptS =
+            i === moments.length - 1 ? end.scriptS : (this.#frames.get(to)?.scriptS ?? null);
         }
       }
       let handedOverDraws = 0;
@@ -651,14 +724,20 @@ export class TerrainProbe {
       let firstHandoverMs: number | null = null;
       let firstHandoverScriptS: number | null = null;
       let firstTerrainMs: number | null = null;
+      // The first of the handed-over draws running unbroken to the one being read, and that run's
+      // first at the first terrain draw: the hand-over the terrain was first drawn in (R10.T14.d).
+      let runStartMs: number | null = null;
+      let terrainHandoverMs: number | null = null;
       for (const atMs of draws) {
         const frame = this.#frames.get(atMs);
         const seen = frame?.views.get(figures.name);
         if (seen === undefined) {
           continue;
         }
+        runStartMs = seen.handedOver ? (runStartMs ?? atMs) : null;
         if (seen.terrain && firstTerrainMs === null) {
           firstTerrainMs = atMs;
+          terrainHandoverMs = runStartMs ?? atMs;
         }
         if (seen.offSurvey && !seen.handedOver) {
           offSurveyDraws += 1;
@@ -699,6 +778,7 @@ export class TerrainProbe {
         submitMs: figures.submitMs,
         missedFrames,
         longestGapMs,
+        longestGapEndScriptS,
         handedOverDraws,
         offSurveyDraws,
         terrainDraws,
@@ -707,6 +787,7 @@ export class TerrainProbe {
         firstHandoverMs,
         firstHandoverScriptS,
         firstTerrainMs,
+        terrainHandoverMs,
         readBacks: readBacks.length,
         nonFiniteTexels: readBacks.reduce((sum, each) => sum + each.nonFinite, 0),
       };
@@ -855,6 +936,55 @@ export class TerrainProbe {
       this.#readBacks.push({ view, atMs, nonFinite });
     }
   }
+}
+
+/**
+ * The longest time between two moments of `fromMs`, `frames` (in order, ms) from it and before
+ * `toMs`, and `toMs`, leaving out a gap that crosses any of `quiet` (the forced loss's restore, and
+ * the run's own computations), with the moment it ended, ms (R10.T14.d's judged span); a gap of 0
+ * ending at `fromMs` where every gap crosses one.
+ */
+export function longestGapOutside(
+  frames: ReadonlyArray<number>,
+  fromMs: number,
+  toMs: number,
+  quiet: ReadonlyArray<QuietSpan>,
+): { readonly gapMs: number; readonly endMs: number } {
+  const moments = [fromMs, ...frames.filter((atMs) => atMs >= fromMs && atMs < toMs), toMs];
+  let longest = { gapMs: 0, endMs: fromMs };
+  for (let i = 1; i < moments.length; i += 1) {
+    const from = moments[i - 1] ?? fromMs;
+    const to = moments[i] ?? toMs;
+    const crossesQuiet = quiet.some((span) => from <= span.toMs && to >= span.fromMs);
+    if (!crossesQuiet && to - from > longest.gapMs) {
+      longest = { gapMs: to - from, endMs: to };
+    }
+  }
+  return longest;
+}
+
+/**
+ * The longest time between two of `frames` (in order, ms) from `fromMs`, which counts as a frame, to
+ * the first frame after `throughMs`, ms; `null` where no frame follows `throughMs`.
+ */
+export function longestGapThrough(
+  frames: ReadonlyArray<number>,
+  fromMs: number,
+  throughMs: number,
+): number | null {
+  let last = fromMs;
+  let longest = 0;
+  for (const atMs of frames) {
+    if (atMs < fromMs) {
+      continue;
+    }
+    longest = Math.max(longest, atMs - last);
+    last = atMs;
+    if (atMs > throughMs) {
+      return longest;
+    }
+  }
+  return null;
 }
 
 /**

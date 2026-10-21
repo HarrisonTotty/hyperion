@@ -44,6 +44,7 @@ import {
   planLitBodies,
   pointFlux,
   SMOOTH_MESH_MATERIAL,
+  BODY_DISC_MATERIALS,
 } from "./draw";
 import { bindingStages } from "../../test/wgslStages";
 import { rotation3FromRows } from "../coords/rotation";
@@ -1659,6 +1660,22 @@ describe("mesh bodies (T9)", () => {
     const writes = engine.writes.length;
     renderer.draws(plan);
     expect(engine.writes.length).toBe(writes);
+    renderer.dispose();
+  });
+
+  it("prepares its three regime materials for the scene target as it is made, and after a restore (R10.T14.d)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const made = [...engine.prepares];
+    engine.loseDevice();
+    engine.restore();
+    const targets = [{ colour: "rgba16float", depth: true }];
+    const prepared = [
+      { name: SMOOTH_MESH_MATERIAL.name, targets, meshes: ["bodies:smooth patch"] },
+      { name: BODY_DISC_MATERIALS.interior.name, targets, meshes: ["bodies:quad"] },
+      { name: BODY_DISC_MATERIALS.limb.name, targets, meshes: ["bodies:quad"] },
+    ];
+    expect([made, engine.prepares]).toEqual([prepared, [...prepared, ...prepared]]);
     renderer.dispose();
   });
 });

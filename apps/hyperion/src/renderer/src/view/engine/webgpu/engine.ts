@@ -43,6 +43,7 @@ import type {
   PointSplatHandle,
   PointSplatSpec,
   PostProcessHandle,
+  PreparedTarget,
   RenderEngine,
   RenderTarget,
   RenderTargetFormat,
@@ -108,12 +109,16 @@ import { srgbViewFormat, WebGpuView } from "./view";
 
 /**
  * The colour formats, with or without depth, a material's pipelines are made for ahead of its
- * draws, for one of `createMaterialAsync`'s targets.
+ * draws, for one of `createMaterialAsync`'s targets or `prepareMaterial`'s (a colour format with
+ * its depth or without it alone, R10.T14.d).
  */
 export function pipelineOutputs(
-  target: RenderTargetFormat,
+  target: PreparedTarget,
   preferredCanvas: GPUTextureFormat,
 ): Array<readonly [GPUTextureFormat, boolean]> {
+  if (typeof target === "object") {
+    return [[target.colour, target.depth]];
+  }
   if (target === "canvas") {
     return [[srgbViewFormat(preferredCanvas), true]];
   }
@@ -149,6 +154,11 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   readonly #status: GraphicsStatusStore;
   readonly #meshes = new WeakMap<MeshHandle, MeshRecord>();
   readonly #materials = new WeakMap<MaterialHandle, MaterialRecord>();
+  /**
+   * The compile check of each material of `createMaterial`, which a preparation waits on so that a
+   * broken one is not prepared (R10.T14.d).
+   */
+  readonly #compileChecks = new WeakMap<MaterialRecord, Promise<void>>();
   /** The meshes and materials released, so that a later use names the release (R10.T16.b). */
   readonly #released = new WeakSet<MeshHandle | MaterialHandle>();
   readonly #postProcesses = new WeakMap<PostProcessHandle, PostProcessRecord>();
@@ -379,7 +389,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
 
   createMaterial(spec: WgslMaterialSpec): MaterialHandle {
     const { handle, record } = this.#makeMaterial(spec, false);
-    void compilationErrorsOf(record.modules)
+    const checked = compilationErrorsOf(record.modules)
       .then((errors): void => {
         if (errors.length > 0) {
           record.broken = true;
@@ -390,6 +400,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       .catch((error: unknown) => {
         this.#reportCompileCheckFailure(`material ${spec.name}`, error);
       });
+    this.#compileChecks.set(record, checked);
     return handle;
   }
 
@@ -424,6 +435,30 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       ),
     );
     return handle;
+  }
+
+  async prepareMaterial(
+    material: MaterialHandle,
+    targets: ReadonlyArray<PreparedTarget>,
+    meshes: ReadonlyArray<MeshHandle>,
+  ): Promise<void> {
+    this.#assertLive();
+    const record = this.materialOf(material);
+    const records = meshes.map((mesh) => this.meshOf(mesh));
+    // A material whose shaders failed is reported once, by its check, and drawn by none.
+    await this.#compileChecks.get(record);
+    if (record.broken) {
+      return;
+    }
+    const preferred = navigator.gpu.getPreferredCanvasFormat();
+    const outputs = targets.flatMap((target) => pipelineOutputs(target, preferred));
+    await Promise.all(
+      records.flatMap((mesh) =>
+        outputs.map(([format, hasDepth]) =>
+          this.#drawing.preparePipeline(record, mesh, format, hasDepth),
+        ),
+      ),
+    );
   }
 
   createPostProcess(spec: WgslPostProcessSpec): PostProcessHandle {

@@ -6,6 +6,7 @@ import { measured, type ResultsFiles } from "./results";
 import {
   buildTerrainCheckResults,
   TERRAIN_DELAY_LIMIT_MS,
+  TERRAIN_GAP_LIMIT_MS,
   TERRAIN_PHASES,
   type TerrainCheckInput,
   terrainCheckMarkdown,
@@ -111,6 +112,122 @@ describe("the terrain run's results", () => {
     expect(results.overall).toBe("fail");
   });
 
+  describe("no view stopped (R10.T14.d; decision-r10-t16-leans §2)", () => {
+    /** The record with the first phase's primary's longest gap `gapMs`, ending at 68.1 s. */
+    function gapOf(gapMs: number): TerrainCheckInput {
+      const [alone, ...rest] = TERRAIN_RECORD.phases;
+      if (alone === undefined) {
+        throw new Error("the fixture has no first phase");
+      }
+      const views = alone.views.map((view) =>
+        Object.assign({}, view, { longestGapMs: gapMs, longestGapEndScriptS: 68.1 }),
+      );
+      return changed({ phases: [{ ...alone, views }, ...rest] });
+    }
+
+    it("passes a view whose longest gap is the limit", () => {
+      expect(buildTerrainCheckResults(gapOf(TERRAIN_GAP_LIMIT_MS)).findings.noStall).toEqual({
+        verdict: "pass",
+        reasons: [],
+        limitMs: TERRAIN_GAP_LIMIT_MS,
+      });
+    });
+
+    it("fails a view whose longest gap is over the limit, saying where it ended", () => {
+      const results = buildTerrainCheckResults(gapOf(1_317));
+      expect([results.findings.noStall.reasons, results.overall]).toEqual([
+        [
+          `terrain-alone: PRIMARY drew nothing for 1317 ms to 68.1 s of the script, over ${String(TERRAIN_GAP_LIMIT_MS)} ms`,
+        ],
+        "fail",
+      ]);
+    });
+
+    it("tells a stall from a missed frame: a stall misses none", () => {
+      const results = buildTerrainCheckResults(gapOf(1_317));
+      expect([results.findings.framesDrawn.verdict, results.findings.noStall.verdict]).toEqual([
+        "pass",
+        "fail",
+      ]);
+    });
+
+    it("fails a run whose page drew no frame for longer than the limit between its phases", () => {
+      const results = buildTerrainCheckResults(
+        changed({
+          span: {
+            ...TERRAIN_RECORD.span,
+            longestFrameGapMs: 1_128,
+            longestGapEndMs: 275_000,
+            longestGapEndScriptS: 3.1,
+          },
+        }),
+      );
+      expect([results.findings.noStall.reasons, results.overall]).toEqual([
+        [
+          `the page drew no animation frame for 1128 ms between the phases, to 3.1 s of the script, over ${String(TERRAIN_GAP_LIMIT_MS)} ms`,
+        ],
+        "fail",
+      ]);
+    });
+
+    it("places the page's longest gap in the phase whose window holds it", () => {
+      const results = buildTerrainCheckResults(
+        changed({
+          span: { ...TERRAIN_RECORD.span, longestFrameGapMs: 650, longestGapEndScriptS: null },
+        }),
+      );
+      expect(results.findings.noStall.reasons).toEqual([
+        `the page drew no animation frame for 650 ms in terrain-photoreal-wireframe, over ${String(TERRAIN_GAP_LIMIT_MS)} ms`,
+      ]);
+    });
+
+    it("judges nothing of a session whose compile had not ended", () => {
+      const results = buildTerrainCheckResults(
+        changed({ sessions: [{ madeAtMs: 10, compile: { kind: "pending" } }] }),
+      );
+      expect(results.findings.noStall.verdict).toBe("pass");
+      expect(terrainCheckMarkdown(results)).toContain(
+        "(judged by the same limit): session 1 not compiled by the run's end.",
+      );
+    });
+
+    it("records VIEW's opening, judging nothing by it", () => {
+      const results = buildTerrainCheckResults(input());
+      expect([results.opening, results.findings.noStall.verdict]).toEqual([
+        { preparedMs: 900, preparations: 3, longestFrameGapMs: 1_100 },
+        "pass",
+      ]);
+      expect(terrainCheckMarkdown(results)).toContain(
+        "VIEW's opening (recorded, not judged): its views' 3 preparations settled 900 ms after the run's start, the longest time between animation frames meanwhile 1100 ms.",
+      );
+    });
+
+    it("states the limit, the page's longest gap and each view's in the summary", () => {
+      const text = terrainCheckMarkdown(buildTerrainCheckResults(gapOf(1_317)));
+      expect(text).toContain(
+        `| No view stopped (no time without a frame or a view's draw over ${String(TERRAIN_GAP_LIMIT_MS)} ms from VIEW's opening to the teardown, outside the restore) | fail | the page's longest time between animation frames 67 ms (in terrain-photoreal-wireframe); the longest time between draws: terrain-alone PRIMARY 1317 ms to 68.1 s of the script;`,
+      );
+    });
+
+    it("fails a session whose compile window held no frame for longer than the limit", () => {
+      const stalled = {
+        madeAtMs: 10,
+        compile: { kind: "ended", compileMs: 1_450, compiled: 3, longestFrameGapMs: 1_317 },
+      } as const;
+      const results = buildTerrainCheckResults(changed({ sessions: [stalled] }));
+      expect([results.findings.noStall.reasons, results.sessions, results.overall]).toEqual([
+        [
+          `session 1: no animation frame for 1317 ms while its materials compiled, over ${String(TERRAIN_GAP_LIMIT_MS)} ms`,
+        ],
+        [stalled],
+        "fail",
+      ]);
+      expect(terrainCheckMarkdown(results)).toContain(
+        "The sessions' materials, compiled as each is made, before its phases (judged by the same limit): session 1 3 compiled in 1450 ms, the longest time between animation frames meanwhile 1317 ms.",
+      );
+    });
+  });
+
   it("fail a texel that is not finite, and a photorealistic view never read back", () => {
     const [alone, instruments, loss] = TERRAIN_RECORD.phases;
     if (alone === undefined || instruments === undefined || loss === undefined) {
@@ -136,6 +253,25 @@ describe("the terrain run's results", () => {
       "terrain-photoreal-wireframe: PRIMARY's scene target was never read back",
       "terrain-photoreal-wireframe: INSTRUMENT 1's scene target was never read back",
     ]);
+  });
+
+  it("times the terrain from the hand-over it was first drawn in (R10.T14.d)", () => {
+    const [alone, ...rest] = TERRAIN_RECORD.phases;
+    if (alone === undefined) {
+      throw new Error("the fixture has no first phase");
+    }
+    // A lone handed-over draw 50 s before the hand-over the terrain was drawn in.
+    const views = alone.views.map((view) =>
+      Object.assign({}, view, {
+        firstHandoverMs: (view.firstTerrainMs ?? 0) - 50_000,
+        terrainHandoverMs: (view.firstTerrainMs ?? 0) - 100,
+      }),
+    );
+    const results = buildTerrainCheckResults(changed({ phases: [{ ...alone, views }, ...rest] }));
+    expect([
+      results.phases[0]?.views[0]?.terrainDelayMs,
+      results.findings.terrainDrawn.verdict,
+    ]).toEqual([100, "pass"]);
   });
 
   it("fail a first phase whose primary never handed over", () => {
@@ -463,7 +599,7 @@ describe("the terrain run's summary and its files", () => {
     expect(smoke.markdown).toBe("/out/2026-10-19-effect-high-terrain-smoke.md");
     expect(JSON.parse(written.get(first.json) ?? "null")).toMatchObject({
       schema: "hyperion.views-check.terrain-results",
-      version: 2,
+      version: 3,
       overall: "pass",
       findings: { terrainFaults: { verdict: "pass", reasons: [], record: [] } },
     });

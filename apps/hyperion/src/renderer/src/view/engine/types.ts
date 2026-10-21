@@ -72,6 +72,15 @@ export interface TextureHandle {
  */
 export type RenderTargetFormat = ColourTargetFormat | "canvas" | "canvas-in-pass";
 
+/**
+ * What a material's pipelines are prepared for ({@link RenderEngine.prepareMaterial}; plan R10,
+ * R10.T14.d): a {@link RenderTargetFormat} as `createMaterialAsync` takes it, a colour format both
+ * with and without depth, or a colour format with depth or without it alone, as a pass that always
+ * draws one way into it needs.
+ */
+export type PreparedTarget =
+  RenderTargetFormat | { readonly colour: ColourTargetFormat; readonly depth: boolean };
+
 /** An offscreen colour target to create. */
 export interface RenderTargetSpec {
   readonly name: string;
@@ -460,6 +469,28 @@ export interface RenderEngine {
     targets: ReadonlyArray<RenderTargetFormat>,
     meshes?: ReadonlyArray<MeshHandle>,
   ): Promise<MaterialHandle>;
+  /**
+   * Makes a material's pipelines for `meshes` into `targets` ahead of their first draws, by
+   * `createRenderPipelineAsync`, and resolves once they are made (plan R10, R10.T14.d).
+   *
+   * @remarks
+   * A material of {@link RenderEngine.createMaterial} makes a missing pipeline synchronously at the
+   * draw that needs it, on the GPU process's main thread, which stops every view of the page for
+   * as long as the driver compiles it (R07's smooth mesh 1.5 s on a cold shader cache, at a body's
+   * hand-over to the terrain). Prepared, its draws find their pipelines made. A draw before one is
+   * made still makes it synchronously, as without the preparation, so that nothing is left
+   * undrawn, and a pipeline already made is kept. For a material of `createMaterialAsync`, whose
+   * draws wait for their pipelines, it makes them as that does. A material whose shaders failed to
+   * compile, already reported, is not prepared.
+   *
+   * @throws Error, as a rejection, where a pipeline could not be made, or the material or a mesh
+   *   was released; a draw then makes the pipeline itself.
+   */
+  prepareMaterial(
+    material: MaterialHandle,
+    targets: ReadonlyArray<PreparedTarget>,
+    meshes: ReadonlyArray<MeshHandle>,
+  ): Promise<void>;
   createPostProcess(spec: WgslPostProcessSpec): PostProcessHandle;
   /** The variant is chosen by `selectKernel` against {@link RenderEngine.capabilities}. */
   createCompute(pair: KernelPair): ComputeHandle;
@@ -619,7 +650,9 @@ export interface RenderEngine {
    * @remarks
    * Views survive a rebuild, re-created at their sizes; every other handle belonged to the lost
    * device and is made again by the caller here. Only the engine `loadRenderEngine` returns fires
-   * it. Between the loss and the restore, a creation throws `EngineUnavailable`
+   * it, calling its listeners in the order they were added, each once a restore: so an owner of
+   * handles others take from it (the terrain session's materials, R10.T14.d) makes them again before
+   * any of those added after it asks. Between the loss and the restore, a creation throws `EngineUnavailable`
    * (`resilientEngine.ts`), a view draws nothing, and writes and dispatches are dropped.
    */
   onRestored(listener: () => void): () => void;

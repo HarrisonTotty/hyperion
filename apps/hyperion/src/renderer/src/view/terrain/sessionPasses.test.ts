@@ -47,7 +47,11 @@ import type { MemoryCategory } from "../engine/memory";
 import { DISC_ANNULI_HIGH } from "../lighting/annuli";
 import { sunLikeHostDisc } from "../lighting/hostDisc";
 import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
-import { WIREFRAME_TERRAIN_SLOTS, WIREFRAME_TERRAIN_TAU_PX } from "../quality/qualitySetting";
+import {
+  type QualitySetting,
+  WIREFRAME_TERRAIN_SLOTS,
+  WIREFRAME_TERRAIN_TAU_PX,
+} from "../quality/qualitySetting";
 import { AU_M } from "../scenes/kept";
 import type { ViewBody, ViewScene } from "../scene/model";
 import { stepTerrainSession } from "../../displays/view/useTerrainSession";
@@ -150,7 +154,7 @@ interface Harness {
   readonly tally: ReturnType<typeof allocationTally>;
 }
 
-async function harness(): Promise<Harness> {
+async function harness(setting: QualitySetting = "high"): Promise<Harness> {
   const hook = renderHook(() => useServerLink(), { wrapper: ServerLinkHarness });
   act(() => {
     FakeWebSocket.latest().serverWelcomes();
@@ -163,6 +167,7 @@ async function harness(): Promise<Harness> {
     universe: UNIVERSE,
     requests: hook.result.current.requests,
     linkUp: true,
+    setting,
     createWorker: () => {
       const worker = new ScriptedHeightWorker();
       workers.push(worker);
@@ -528,7 +533,8 @@ describe("the terrain session's passes (R10.T16.b; decision-r10-live-path, D3 an
     const before = h.engine.live;
     await handedOver(h);
     h.session.dispose();
-    expect(h.engine.live).toEqual(before);
+    // The session's own materials, compiled at its making (R10.T14.d), go with it.
+    expect(h.engine.live).toEqual({ ...before, materials: 0 });
     expect(h.session.passBodies.size).toBe(0);
   });
 });
@@ -1410,11 +1416,106 @@ describe("a body handed over in both styles at once (R10.T11)", () => {
     const before = h.engine.live;
     await handedOverBy(h, BOTH);
     h.session.dispose();
+    // The session's own materials, compiled at its making (R10.T14.d), go with it.
     expect([h.engine.live, h.session.passBodies.size, h.session.wirePassBodies.size]).toEqual([
-      before,
+      { ...before, materials: 0 },
       0,
       0,
     ]);
+  });
+});
+
+/** The materials asked of the engine from the `from`-th, by name (R10.T14.d). */
+function compiled(h: Harness, from = 0): string[] {
+  return h.engine.compiles.slice(from).map(({ name }) => name);
+}
+
+/** What each pass of the moon draws with: the lit, its depth and the wireframe's, by name. */
+function drawnWith(h: Harness): ReadonlyArray<string | null> {
+  return [
+    material(h.session.drawTerrain(PRIMARY, MOON, frameAt(16))),
+    h.session.pass(MOON)?.symbologyDepthMaterial?.name ?? null,
+    material(h.session.drawWireTerrain(INSTRUMENT, MOON, wireFrameAt(16))),
+  ];
+}
+
+describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", () => {
+  /** The views of both styles by the moon's pole, the primary photorealistic. */
+  const BOTH: ReadonlyArray<readonly [ViewId, TerrainViewReport]> = [
+    [PRIMARY, handing(5e6)],
+    [INSTRUMENT, wireAt(5e6, { streamPriority: "secondary" })],
+  ];
+
+  const HIGH = [
+    "terrain-lit-baked-offsets",
+    "terrain-depth-baked-offsets",
+    "terrain-wire-baked-offsets",
+  ];
+
+  it("compiles its setting's lit, depth and wireframe materials as it is made", async () => {
+    const h = await harness();
+    expect([await h.session.compiled, compiled(h)]).toEqual([3, HIGH]);
+  });
+
+  it("compiles the low setting's on face differences", async () => {
+    const h = await harness("low");
+    await h.session.compiled;
+    expect(compiled(h)).toEqual([
+      "terrain-lit-face-differences",
+      "terrain-depth-face-differences",
+      "terrain-wire-face-differences",
+    ]);
+  });
+
+  it("compiles nothing at a hand-over in either style, its passes drawing its materials", async () => {
+    const h = await harness();
+    await h.session.compiled;
+    await handedOverBy(h, BOTH);
+    await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
+    expect([compiled(h, 3), drawnWith(h), h.engine.live.materials]).toEqual([[], HIGH, 3]);
+  });
+
+  it("compiles nothing at a hand-over on the low setting either", async () => {
+    const h = await harness("low");
+    await h.session.compiled;
+    await handedOverBy(h, [
+      [PRIMARY, handing(5e6, { setting: "low" })],
+      [INSTRUMENT, wireAt(5e6, { streamPriority: "secondary", setting: "low" })],
+    ]);
+    await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
+    expect([compiled(h, 3), drawnWith(h), h.engine.live.materials]).toEqual([
+      [],
+      [
+        "terrain-lit-face-differences",
+        "terrain-depth-face-differences",
+        "terrain-wire-face-differences",
+      ],
+      3,
+    ]);
+  });
+
+  it("compiles its materials once again after a device loss, and its passes none", async () => {
+    const h = await harness();
+    await h.session.compiled;
+    await handedOverBy(h, BOTH);
+    await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
+    h.engine.loseDevice();
+    h.engine.restore();
+    await settle();
+    await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
+    expect([compiled(h, 3), drawnWith(h), h.engine.live.materials]).toEqual([HIGH, HIGH, 3]);
+  });
+
+  it("releases its materials only at its teardown, not with a pass", async () => {
+    const h = await harness();
+    await h.session.compiled;
+    await handedOverBy(h, BOTH);
+    h.session.noteView(PRIMARY, notHanding(7e7));
+    h.session.noteView(INSTRUMENT, wireAt(7e7, { streamPriority: "secondary" }));
+    h.session.step();
+    const kept = [h.session.passBodies.size, h.engine.live.materials];
+    h.session.dispose();
+    expect([kept, h.engine.live.materials]).toEqual([[0, 3], 0]);
   });
 });
 

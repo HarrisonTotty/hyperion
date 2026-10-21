@@ -22,6 +22,16 @@ const RECORD: TerrainCheckRecord = {
   phases: [],
   faults: [],
   terrainFaults: [],
+  sessions: [],
+  opening: { preparedMs: 0, preparations: 0, longestFrameGapMs: null },
+  span: {
+    fromMs: 0,
+    toMs: 0,
+    longestFrameGapMs: 0,
+    longestGapEndMs: 0,
+    longestGapEndScriptS: null,
+    harnessMs: 0,
+  },
   restoresAtMs: [],
   loss: {
     destroyedAtMs: null,

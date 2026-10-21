@@ -298,6 +298,48 @@ export class Drawing {
   }
 
   /**
+   * Makes the pipeline of `record` for `mesh` into an output ahead of its first draw (R10.T14.d):
+   * for a synchronous material without marking it pending, so that a draw meanwhile makes its own,
+   * which is kept; an asynchronous one's as {@link Drawing.prepareMaterialPipeline} does.
+   */
+  async preparePipeline(
+    record: MaterialRecord,
+    mesh: MeshRecord,
+    colourFormat: GPUTextureFormat,
+    hasDepth: boolean,
+  ): Promise<void> {
+    if (record.asyncPipelines) {
+      await this.prepareMaterialPipeline(record, mesh, colourFormat, hasDepth);
+      return;
+    }
+    const key = pipelineKey(mesh.layoutKey, colourFormat, hasDepth);
+    if (record.pipelines.has(key)) {
+      return;
+    }
+    let pipeline: GPURenderPipeline;
+    try {
+      pipeline = await this.#host.device.createRenderPipelineAsync(
+        materialPipelineDescriptor(
+          record.spec,
+          record.modules,
+          record.layout,
+          mesh.layouts,
+          mesh.spec.topology,
+          colourFormat,
+          hasDepth,
+        ),
+      );
+    } catch (error: unknown) {
+      throw new Error(`the pipeline of material ${record.spec.name} could not be prepared`, {
+        cause: error,
+      });
+    }
+    if (!record.pipelines.has(key)) {
+      record.pipelines.set(key, pipeline);
+    }
+  }
+
+  /**
    * Encodes `frame` into `output`: the draws' pass, then each post-process's.
    *
    * @remarks

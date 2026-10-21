@@ -35,6 +35,7 @@ import { allocationTally } from "./allocationTally";
 import {
   atlasTile,
   DEFAULT_TERRAIN_VIEW,
+  fittedTerrainLayout,
   GRID_INDICES,
   GRID_VERTICES,
   INDIRECT_ARGS_BYTES,
@@ -532,6 +533,15 @@ describe("a terrain layout", () => {
     expect(layout.slots.slotCount * HEIGHTS_BYTES).toBeLessThanOrEqual(
       DEFAULT_LIMITS.maxStorageBufferBindingSize,
     );
+  });
+
+  it("gives no fitted layout where the atlas cannot hold one tile, which terrainLayout throws for (R10.T14.d)", () => {
+    const tiny = { ...RAISED_LIMITS, maxTextureDimension2D: 64 };
+    expect([
+      fittedTerrainLayout(HIGH, tiny, "lit"),
+      fittedTerrainLayout(HIGH, tiny, "wire")?.vertexPath,
+    ]).toEqual([null, "baked-offsets"]);
+    expect(() => terrainLayout(HIGH, tiny, "lit")).toThrow(/do not fit/);
   });
 
   it("takes the low setting's slot count from its layout, with no fallback", () => {

@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FakeAdapter, type FakeDevice, FakeGpu, INTEL_UHD_620_INFO } from "../../../test/fakeGpu";
+import {
+  FakeAdapter,
+  FakeCommandBuffer,
+  type FakeDevice,
+  FakeGpu,
+  INTEL_UHD_620_INFO,
+} from "../../../test/fakeGpu";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../gpuFlags";
 import type { KernelPair } from "../kernels";
 import type { AllocationEvent, TextureSpec } from "../memory";
@@ -13,6 +19,7 @@ import {
   PresentationOnlyReadback,
   type RenderTarget,
   type TextureHandle,
+  type WgslMaterialSpec,
 } from "../types";
 import { WebGpuRenderEngine } from "./engine";
 
@@ -665,5 +672,196 @@ describe("mesh and material releases (R10.T16.b)", () => {
     // Every cached group is gone, the released material's among them: the kept one's is made again.
     drawEach(target, mesh, [kept], tiles);
     expect(gpu.bindGroups.length).toBeGreaterThan(made);
+  });
+});
+
+/** A material of `createMaterial` reading one sampled texture, `tiles`. */
+const SYNC_TILED: WgslMaterialSpec = {
+  name: "prepared",
+  displayName: "PREPARED",
+  vertexWgsl: "",
+  fragmentWgsl: "",
+  uniforms: [],
+  samplers: [],
+  textures: [{ name: "tiles", binding: 0 }],
+  cullMode: "none",
+  depthWrite: false,
+  colourWrites: true,
+  blend: "none",
+};
+
+/** Every pipeline a frame's passes set, in the order the queue took them. */
+function pipelinesSet(gpu: FakeDevice): unknown[] {
+  return gpu.queue.submitted.flatMap((buffer) =>
+    buffer instanceof FakeCommandBuffer
+      ? buffer.commands.filter(({ op }) => op === "setPipeline").map(({ args }) => args[0])
+      : [],
+  );
+}
+
+describe("prepareMaterial (R10.T14.d)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  it("makes a synchronous material's pipelines asynchronously, its first draw making none", async () => {
+    const { engine, gpu } = await engineOn();
+    const asked: string[] = [];
+    const make = gpu.createRenderPipelineAsync.bind(gpu);
+    gpu.createRenderPipelineAsync = (descriptor) => {
+      asked.push(descriptor.label ?? "");
+      return make(descriptor);
+    };
+    const mesh = indexedTriangle(engine);
+    const material = engine.createMaterial(SYNC_TILED);
+    await engine.prepareMaterial(material, ["rgba16float"], [mesh]);
+    const made = gpu.renderPipelines.length;
+    drawEach(outTarget(engine), mesh, [material], engine.createTexture(sampled("tiles", 1)));
+    expect([asked, gpu.renderPipelines.length - made]).toEqual([["prepared", "prepared"], 0]);
+  });
+
+  it("lets a draw before the pipelines are made make its own, and keeps it once they are", async () => {
+    const { engine, gpu } = await engineOn();
+    const landings: Array<() => void> = [];
+    gpu.createRenderPipelineAsync = (descriptor) =>
+      new Promise((resolve) => {
+        landings.push(() => {
+          resolve(gpu.createRenderPipeline(descriptor));
+        });
+      });
+    const mesh = indexedTriangle(engine);
+    const material = engine.createMaterial(SYNC_TILED);
+    const tiles = engine.createTexture(sampled("tiles", 1));
+    const target = outTarget(engine);
+    // The draw's own output, its preparation asked for once the compile check has answered.
+    const prepared = engine.prepareMaterial(
+      material,
+      [{ colour: "rgba16float", depth: false }],
+      [mesh],
+    );
+    await vi.waitFor(() => {
+      expect(landings).toHaveLength(1);
+    });
+    drawEach(target, mesh, [material], tiles);
+    for (const land of landings) {
+      land();
+    }
+    await prepared;
+    drawEach(target, mesh, [material], tiles);
+    const [first, second] = pipelinesSet(gpu);
+    expect([first !== undefined, second]).toEqual([true, first]);
+  });
+
+  it("leaves none of a prepared material's draws out, before or after its pipelines are made", async () => {
+    const { engine, gpu } = await engineOn();
+    const landings: Array<() => void> = [];
+    gpu.createRenderPipelineAsync = (descriptor) =>
+      new Promise((resolve) => {
+        landings.push(() => {
+          resolve(gpu.createRenderPipeline(descriptor));
+        });
+      });
+    const mesh = indexedTriangle(engine);
+    const material = engine.createMaterial(SYNC_TILED);
+    const tiles = engine.createTexture(sampled("tiles", 1));
+    const target = outTarget(engine);
+    const prepared = engine.prepareMaterial(material, ["rgba16float"], [mesh]);
+    drawEach(target, mesh, [material], tiles);
+    // The preparation asks once the material's compile check has answered, for the one pipeline
+    // the draw did not make: the target's with depth.
+    await vi.waitFor(() => {
+      expect(landings).toHaveLength(1);
+    });
+    for (const land of landings) {
+      land();
+    }
+    await prepared;
+    drawEach(target, mesh, [material], tiles);
+    const draws = gpu.queue.submitted.flatMap((buffer) =>
+      buffer instanceof FakeCommandBuffer
+        ? buffer.commands.filter(({ op }) => op === "drawIndexed")
+        : [],
+    );
+    expect(draws).toHaveLength(2);
+  });
+
+  it("prepares only the outputs asked for, a colour format with depth alone", async () => {
+    const { engine, gpu } = await engineOn();
+    const depths: boolean[] = [];
+    const make = gpu.createRenderPipelineAsync.bind(gpu);
+    gpu.createRenderPipelineAsync = (descriptor) => {
+      depths.push(descriptor.depthStencil !== undefined);
+      return make(descriptor);
+    };
+    const material = engine.createMaterial(SYNC_TILED);
+    await engine.prepareMaterial(
+      material,
+      [{ colour: "rgba16float", depth: true }],
+      [indexedTriangle(engine)],
+    );
+    expect(depths).toEqual([true]);
+  });
+
+  it("prepares nothing of a material whose shaders failed, which its check reports once", async () => {
+    const { engine, gpu } = await engineOn();
+    gpu.shaderErrors = (code) => (code.includes("oops") ? ["unresolved value 'oops'"] : []);
+    const asked: string[] = [];
+    const make = gpu.createRenderPipelineAsync.bind(gpu);
+    gpu.createRenderPipelineAsync = (descriptor) => {
+      asked.push(descriptor.label ?? "");
+      return make(descriptor);
+    };
+    const broken = engine.createMaterial({ ...SYNC_TILED, name: "broken", vertexWgsl: "oops" });
+    await engine.prepareMaterial(broken, ["rgba16float"], [indexedTriangle(engine)]);
+    expect(asked).toEqual([]);
+  });
+
+  it("rejects for a released material", async () => {
+    const { engine } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const material = engine.createMaterial(SYNC_TILED);
+    engine.releaseMaterial(material);
+    await expect(engine.prepareMaterial(material, ["rgba16float"], [mesh])).rejects.toThrow(
+      /material prepared was released/u,
+    );
+  });
+});
+
+describe("a material's pipelines by its mesh's layout (R10.T14.d)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  /** A material compiled for a mesh of the triangle's layout, that mesh released after. */
+  async function compiledOnAnother(engine: WebGpuRenderEngine): Promise<MaterialHandle> {
+    const compiledFor = indexedTriangle(engine);
+    const material = await tiledMaterial(engine, "shared", [compiledFor]);
+    engine.releaseMesh(compiledFor);
+    return material;
+  }
+
+  it("draw any mesh of the layout they were compiled for, making no pipeline", async () => {
+    const { engine, gpu } = await engineOn();
+    const material = await compiledOnAnother(engine);
+    const tiles = engine.createTexture(sampled("tiles", 1));
+    const made = gpu.renderPipelines.length;
+    drawEach(outTarget(engine), indexedTriangle(engine), [material], tiles);
+    expect(gpu.renderPipelines).toHaveLength(made);
+  });
+
+  it("make one for a mesh of another layout", async () => {
+    const { engine, gpu } = await engineOn();
+    const material = await compiledOnAnother(engine);
+    const tiles = engine.createTexture(sampled("tiles", 1));
+    const made = gpu.renderPipelines.length;
+    const coloured = engine.createMesh({
+      name: "coloured",
+      positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+      indices: null,
+      topology: "triangle-list",
+      attributes: { colour: { data: new Float32Array(9), size: 3 } },
+    });
+    drawEach(outTarget(engine), coloured, [material], tiles);
+    expect(gpu.renderPipelines).toHaveLength(made + 1);
   });
 });

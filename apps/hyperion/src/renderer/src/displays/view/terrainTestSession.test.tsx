@@ -56,6 +56,7 @@ function renderTerrainSession(engine: RenderEngine) {
         source: terrainSessionSource({ kind: "kept", option }),
         createWorker,
         workers: 2,
+        setting: "high",
       }),
     { wrapper: ServerLinkHarness },
   );

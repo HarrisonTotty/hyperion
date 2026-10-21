@@ -13,6 +13,10 @@ import type {
   TerrainCheckPhaseRecord,
   TerrainCheckRecord,
   TerrainCheckSessionFault,
+  TerrainCheckOpeningRecord,
+  TerrainCheckSessionCompile,
+  TerrainCheckSessionRecord,
+  TerrainCheckSpanRecord,
   TerrainCheckTeardownRecord,
   TerrainCheckViewRecord,
   ViewsCheckCanvas,
@@ -289,6 +293,8 @@ function terrainView(value: unknown): TerrainCheckViewRecord | null {
   const firstHandoverMs = finiteOrNull(value["firstHandoverMs"]);
   const firstHandoverScriptS = finiteOrNull(value["firstHandoverScriptS"]);
   const firstTerrainMs = finiteOrNull(value["firstTerrainMs"]);
+  const terrainHandoverMs = finiteOrNull(value["terrainHandoverMs"]);
+  const longestGapEndScriptS = finiteOrNull(value["longestGapEndScriptS"]);
   const { draws, missedFrames, longestGapMs, handedOverDraws, offSurveyDraws } = value;
   const { terrainDraws, terrainGaps } = value;
   const terrainGapSpansS = listOf(value["terrainGapSpansS"], (span) =>
@@ -306,6 +312,8 @@ function terrainView(value: unknown): TerrainCheckViewRecord | null {
     firstHandoverMs === undefined ||
     firstHandoverScriptS === undefined ||
     firstTerrainMs === undefined ||
+    terrainHandoverMs === undefined ||
+    longestGapEndScriptS === undefined ||
     !isCount(draws) ||
     !isCount(missedFrames) ||
     !isFiniteNumber(longestGapMs) ||
@@ -329,6 +337,7 @@ function terrainView(value: unknown): TerrainCheckViewRecord | null {
     submitMs,
     missedFrames,
     longestGapMs,
+    longestGapEndScriptS,
     handedOverDraws,
     offSurveyDraws,
     terrainDraws,
@@ -337,6 +346,7 @@ function terrainView(value: unknown): TerrainCheckViewRecord | null {
     firstHandoverMs,
     firstHandoverScriptS,
     firstTerrainMs,
+    terrainHandoverMs,
     readBacks,
     nonFiniteTexels,
   };
@@ -502,6 +512,72 @@ function teardown(value: unknown): TerrainCheckTeardownRecord | null {
     : null;
 }
 
+/** A session the terrain run saw made, and its materials' compile (R10.T14.d). */
+function sessionMade(value: unknown): TerrainCheckSessionRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { madeAtMs } = value;
+  const compile = sessionCompile(value["compile"]);
+  return isFiniteNumber(madeAtMs) && compile !== null ? { madeAtMs, compile } : null;
+}
+
+/** A session's materials' compile, pending or ended (R10.T14.d). */
+function sessionCompile(value: unknown): TerrainCheckSessionCompile | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  if (value["kind"] === "pending") {
+    return { kind: "pending" };
+  }
+  const { compileMs, compiled } = value;
+  const longestFrameGapMs = finiteOrNull(value["longestFrameGapMs"]);
+  return value["kind"] === "ended" &&
+    isFiniteNumber(compileMs) &&
+    compileMs >= 0 &&
+    isCount(compiled) &&
+    longestFrameGapMs !== undefined &&
+    (longestFrameGapMs === null || longestFrameGapMs >= 0)
+    ? { kind: "ended", compileMs, compiled, longestFrameGapMs }
+    : null;
+}
+
+/** The terrain run's judged span (R10.T14.d). */
+function spanOf(value: unknown): TerrainCheckSpanRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { fromMs, toMs, longestFrameGapMs, longestGapEndMs, harnessMs } = value;
+  const longestGapEndScriptS = finiteOrNull(value["longestGapEndScriptS"]);
+  return isFiniteNumber(fromMs) &&
+    isFiniteNumber(toMs) &&
+    toMs >= fromMs &&
+    isFiniteNumber(longestFrameGapMs) &&
+    longestFrameGapMs >= 0 &&
+    isFiniteNumber(longestGapEndMs) &&
+    longestGapEndScriptS !== undefined &&
+    isFiniteNumber(harnessMs) &&
+    harnessMs >= 0
+    ? { fromMs, toMs, longestFrameGapMs, longestGapEndMs, longestGapEndScriptS, harnessMs }
+    : null;
+}
+
+/** VIEW's opening as the terrain run saw it (R10.T14.d). */
+function openingOf(value: unknown): TerrainCheckOpeningRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { preparedMs, preparations } = value;
+  const longestFrameGapMs = finiteOrNull(value["longestFrameGapMs"]);
+  return isFiniteNumber(preparedMs) &&
+    preparedMs >= 0 &&
+    isCount(preparations) &&
+    longestFrameGapMs !== undefined &&
+    (longestFrameGapMs === null || longestFrameGapMs >= 0)
+    ? { preparedMs, preparations, longestFrameGapMs }
+    : null;
+}
+
 /** `value` as the terrain run's record (R10.T16.d), or `null` if it is not one. */
 export function readTerrainCheckRecord(value: unknown): TerrainCheckRecord | null {
   if (!isRecord(value)) {
@@ -511,6 +587,9 @@ export function readTerrainCheckRecord(value: unknown): TerrainCheckRecord | nul
   const phases = listOf(value["phases"], terrainPhase);
   const faults = listOf(value["faults"], fault);
   const terrainFaults = listOf(value["terrainFaults"], sessionFault);
+  const sessions = listOf(value["sessions"], sessionMade);
+  const opening = openingOf(value["opening"]);
+  const span = spanOf(value["span"]);
   const restoresAtMs = numbers(value["restoresAtMs"]);
   const lost = loss(value["loss"]);
   const torn = teardown(value["teardown"]);
@@ -531,6 +610,9 @@ export function readTerrainCheckRecord(value: unknown): TerrainCheckRecord | nul
     phases === null ||
     faults === null ||
     terrainFaults === null ||
+    sessions === null ||
+    opening === null ||
+    span === null ||
     restoresAtMs === null ||
     lost === null ||
     torn === null ||
@@ -544,6 +626,9 @@ export function readTerrainCheckRecord(value: unknown): TerrainCheckRecord | nul
     phases,
     faults,
     terrainFaults,
+    sessions,
+    opening,
+    span,
     restoresAtMs,
     loss: lost,
     teardown: torn,

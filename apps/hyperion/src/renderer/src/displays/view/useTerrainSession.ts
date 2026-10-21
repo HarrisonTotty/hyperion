@@ -18,6 +18,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import type { ServerLink } from "../../lib/serverLink";
 import type { SceneSurfaceEvent, SceneView } from "../../lib/scene/useScene";
 import type { ViewId } from "../../view/camera/state";
+import type { QualitySetting } from "../../view/quality/qualitySetting";
 import type { TerrainFault } from "../../view/terrain/annunciation";
 import type { TerrainFailureGuard } from "../../view/terrain/failureGuard";
 import { TerrainSession, type TerrainRequests } from "../../view/terrain/session";
@@ -129,6 +130,11 @@ export interface TerrainSessionInput {
   readonly createWorker: () => WorkerLike;
   /** The workers' count; Design note 11's default where absent (`TerrainSessionOptions.workers`). */
   readonly workers?: number | undefined;
+  /**
+   * The quality setting `VIEW` draws at, the launch's, on which the session compiles its passes'
+   * materials as it is made (`TerrainSessionOptions.setting`, R10.T14.d): a change makes it anew.
+   */
+  readonly setting: QualitySetting;
 }
 
 /** The session the hook holds, outside React, so that its making is an effect's and renders it. */
@@ -171,11 +177,11 @@ function takeSurface(session: TerrainSession, event: SceneSurfaceEvent): void {
 /**
  * `VIEW`'s terrain session for its stage's source, or `null` with none (no source, or no engine
  * ready): made in an effect, kept while the engine, the source's universe and request client (or
- * fixture), the worker factory and count stay, and disposed when any changes or the caller
- * unmounts.
+ * fixture), the worker factory and count and the setting stay, and disposed when any changes or the
+ * caller unmounts.
  */
 export function useTerrainSession(input: TerrainSessionInput): TerrainSession | null {
-  const { engineState, source, createWorker, workers } = input;
+  const { engineState, source, createWorker, workers, setting } = input;
   const engine = engineState.kind === "ready" ? engineState.engine : null;
   const universe = source?.kind === "server" ? source.universe : null;
   const requests = source?.kind === "server" ? source.requests : null;
@@ -203,6 +209,7 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
         requests,
         linkUp: linkUpRef.current,
         createWorker,
+        setting,
         ...counted,
       });
       holder.set(made);
@@ -221,6 +228,7 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
       requests: link.requests,
       linkUp: true,
       createWorker,
+      setting,
       ...counted,
     });
     const unsubscribe = link.onSurface((event) => {
@@ -233,7 +241,7 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
       made.dispose();
       link.close();
     };
-  }, [engine, universe, requests, fixture, createWorker, workers, holder]);
+  }, [engine, universe, requests, fixture, createWorker, workers, setting, holder]);
 
   useEffect(() => {
     if (session !== null && fixture === null) {

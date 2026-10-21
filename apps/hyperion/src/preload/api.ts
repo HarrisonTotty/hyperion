@@ -489,9 +489,15 @@ export interface TerrainCheckViewRecord {
   readonly missedFrames: number;
   /**
    * The longest time between two of its draws, ms, outside the loss's restore: a stall of the
-   * whole page shows here and not among the missed frames, since no animation frame ran.
+   * whole page shows here and not among the missed frames, since no animation frame ran. The run
+   * fails on one over its limit (plan R10, R10.T14.d; `TERRAIN_GAP_LIMIT_MS`).
    */
   readonly longestGapMs: number;
+  /**
+   * The script's time at that gap's end, s: its draw after the gap, or the phase's end; `null`
+   * where the stage had told no script time by then (R10.T14.d).
+   */
+  readonly longestGapEndScriptS: number | null;
   /**
    * Its draws while `TEST MOON` was handed over to its terrain with a drawn patch in its view (the
    * pass took the view, and some patch of its draw set lies in the view's).
@@ -516,6 +522,13 @@ export interface TerrainCheckViewRecord {
   readonly firstHandoverScriptS: number | null;
   /** When it first drew the terrain in the phase, ms; `null` for never. */
   readonly firstTerrainMs: number | null;
+  /**
+   * When the hand-over it first drew the terrain in began, ms: the first of the handed-over draws
+   * that ran unbroken to that draw (R10.T14.d), so that a lone handed-over draw before it, such as
+   * the frame the script's loop moves the camera in, before the pass has let the view go, is not
+   * taken for its hand-over; `null` for never.
+   */
+  readonly terrainHandoverMs: number | null;
   /** Its scene target's read-backs over the phase. */
   readonly readBacks: number;
   /** Texels of those read-backs not finite in any channel. */
@@ -641,6 +654,76 @@ export interface TerrainCheckTeardownRecord {
   readonly liveBytes: ReadonlyArray<TerrainCheckBytes>;
 }
 
+/**
+ * A terrain session the run saw `VIEW` make, and the compile of its materials, which it starts as
+ * it is made, before any hand-over (plan R10, R10.T14.d): a stall a compile cost the page would
+ * fall here, outside every phase, which starts once the compile has ended, and is judged by the
+ * same limit as a phase's gaps.
+ */
+export interface TerrainCheckSessionRecord {
+  /** When it was made, its materials' compile beginning, `performance.now()` ms. */
+  readonly madeAtMs: number;
+  readonly compile: TerrainCheckSessionCompile;
+}
+
+/** A session's materials' compile: still running at the run's end, or ended (R10.T14.d). */
+export type TerrainCheckSessionCompile =
+  | { readonly kind: "pending" }
+  | {
+      readonly kind: "ended";
+      /** From the session's making to its materials' compile ended, ms. */
+      readonly compileMs: number;
+      /** How many of its setting's materials compiled. */
+      readonly compiled: number;
+      /**
+       * The longest time between two animation frames from its making to the first frame after
+       * the compile ended, ms, a stall of the page showing here; `null` where no frame followed.
+       */
+      readonly longestFrameGapMs: number | null;
+    };
+
+/**
+ * VIEW's opening as the terrain run saw it (plan R10, R10.T14.d): from the run's start until the
+ * materials' preparations its views made as they opened had settled. A disc drawn in its first
+ * frames compiles before any preparation can land, so its longest gap is recorded, not judged.
+ */
+export interface TerrainCheckOpeningRecord {
+  /** From the run's start to its views' preparations settled, ms. */
+  readonly preparedMs: number;
+  /** How many preparations its views made. */
+  readonly preparations: number;
+  /**
+   * The longest time between two animation frames from the run's start to the first frame after the
+   * preparations settled, ms; `null` where no frame followed.
+   */
+  readonly longestFrameGapMs: number | null;
+}
+
+/**
+ * The terrain run's judged span (plan R10, R10.T14.d; decision-r10-t14d-stall §3): from the end of
+ * VIEW's opening to the teardown's choice of `PHASE TEST`, every phase, each session's making and
+ * compile, and the scene choices and configurations between them, outside the forced loss's
+ * restore and the run's own computations.
+ */
+export interface TerrainCheckSpanRecord {
+  /** Its ends, `performance.now()` ms. */
+  readonly fromMs: number;
+  readonly toMs: number;
+  /**
+   * The page's longest time between two animation frames over it, outside the restore and the
+   * run's own computations, ms.
+   */
+  readonly longestFrameGapMs: number;
+  /** When that gap ended, ms, and the script's time then, s (`null` where none was told). */
+  readonly longestGapEndMs: number;
+  readonly longestGapEndScriptS: number | null;
+  /**
+   * The time the run's own computations held the page's main thread, its phases' records made at
+   * their ends, ms: the gaps they made are left out, as the restore is.
+   */
+  readonly harnessMs: number;
+}
+
 /** What the terrain run's renderer reports at the end of a run, for its results file. */
 export interface TerrainCheckRecord {
   /** The pass timer's kind, as its reports gave it (`absent` when none arrived). */
@@ -654,6 +737,12 @@ export interface TerrainCheckRecord {
    * (R10.T16.e): the run fails on any, of either cause.
    */
   readonly terrainFaults: ReadonlyArray<TerrainCheckSessionFault>;
+  /** Each terrain session `VIEW` made over the run, in order, and its materials' compile (R10.T14.d). */
+  readonly sessions: ReadonlyArray<TerrainCheckSessionRecord>;
+  /** VIEW's opening, until its views' preparations settled (R10.T14.d); recorded, not judged. */
+  readonly opening: TerrainCheckOpeningRecord;
+  /** The judged span's page-wide longest gap (R10.T14.d). */
+  readonly span: TerrainCheckSpanRecord;
   /** Every restore of the engine after a loss, `performance.now()` ms. */
   readonly restoresAtMs: ReadonlyArray<number>;
   readonly loss: TerrainCheckLossRecord;

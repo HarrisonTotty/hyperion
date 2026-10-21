@@ -2074,6 +2074,7 @@ function ViewPanels({
         : { kind: "server", universe, link, onSurface: scene.onSurface },
     ),
     createWorker: heightWorkers,
+    setting,
   });
   // The views check's terrain run watches the session (R10.T16.d); no other launch gives a watch.
   useEffect(

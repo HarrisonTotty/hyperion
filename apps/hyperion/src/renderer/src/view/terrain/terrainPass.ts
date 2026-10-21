@@ -67,11 +67,9 @@ import { type Rotation3, rotateToBodyFixed } from "../coords/rotation";
 import type {
   DrawItem,
   MaterialHandle,
-  RenderTargetFormat,
   RenderEngine,
   TextureHandle,
   ViewSize,
-  WgslMaterialSpec,
 } from "../engine/types";
 import type { BufferHandle } from "../engine/types";
 import {
@@ -126,18 +124,9 @@ import {
 import { RESELECT_MOVE_FRACTION, selectionTolerancePx } from "./selectionTolerance";
 import { TERRAIN_SHADING_TRAITS, type TerrainShading } from "./slotLayout";
 import { ResidentHeights, type ResidentHeightsView } from "./residentHeights";
-import {
-  terrainDepthMaterialSpec,
-  type TerrainLighting,
-  terrainLitMaterialSpec,
-} from "./terrainMaterial";
-import {
-  CONTOUR_PX,
-  contourPhase,
-  type GraticulePatch,
-  graticulePatch,
-  terrainWireMaterialSpec,
-} from "./terrainWire";
+import { type TerrainMaterialSource, terrainMaterialOf } from "./materialSet";
+import type { TerrainLighting } from "./terrainMaterial";
+import { CONTOUR_PX, contourPhase, type GraticulePatch, graticulePatch } from "./terrainWire";
 import type {
   BakedPatch,
   BakeSettings,
@@ -446,6 +435,13 @@ export interface TerrainPassOptions {
    * `terrain.select` span, for the spike's second, calibrated pass (T13.c). Unset, it costs nothing.
    */
   readonly onSelect?: (input: SelectionInput, selection: Selection) => void;
+  /**
+   * The terrain session's materials, compiled when the session was made (plan R10, R10.T14.d;
+   * `materialSet.ts`): a lit pass and the wireframe's draw with these, compile none of their own
+   * and release none. Absent, as for R05's spike, whose shading never takes them, the pass compiles
+   * its own in {@link TerrainPass.ready} and releases them.
+   */
+  readonly materials?: TerrainMaterialSource;
 }
 
 /** The `performance.measure` name of one selection, when the pass measures it. */
@@ -739,6 +735,8 @@ export class TerrainPass {
   readonly #frustumMargin: TerrainFrustumMargin;
   readonly #offRestored: () => void;
   readonly #shading: TerrainShading;
+  /** The session's materials, which it draws with and never releases; `null` to compile its own. */
+  readonly #materials: TerrainMaterialSource | null;
   /** Each view's own frame state, by its name. */
   readonly #views = new Map<TerrainViewId, ViewState>();
   /** Each view's camera at the last step, for its motion ({@link frustumMarginRad}). */
@@ -767,6 +765,7 @@ export class TerrainPass {
     this.#planet = options.planet;
     this.#source = options.source;
     this.#shading = terrainShadingOf(options.source);
+    this.#materials = this.#shading === "spike" ? null : (options.materials ?? null);
     this.#createPool = options.createPool;
     this.#survey = options.survey ?? null;
     this.#measureSelection = options.measureSelection ?? false;
@@ -858,9 +857,10 @@ export class TerrainPass {
 
   /**
    * Compiles the material ahead of the first frame, and beside it a lit pass's depth material for
-   * the symbology's pass; frames draw nothing until the first resolves, and give no depth until
-   * the second does. A depth material that cannot be made is reported, and the pass draws on
-   * without it.
+   * the symbology's pass, or takes the session's, compiled when the session was made
+   * ({@link TerrainPassOptions.materials}; R10.T14.d); frames draw nothing until the first
+   * resolves, and give no depth until the second does. A depth material that cannot be made is
+   * reported, and the pass draws on without it.
    */
   async ready(): Promise<void> {
     const device = this.#device;
@@ -868,9 +868,7 @@ export class TerrainPass {
     const depth = this.#shading === "lit" ? this.#readyDepth(device, path) : Promise.resolve();
     let material: MaterialHandle;
     try {
-      material = await this.#engine.createMaterialAsync(...this.#materialFor(path), [
-        device.resources.mesh,
-      ]);
+      material = await this.#materialOf(this.#shading, device, path);
     } catch (error: unknown) {
       // Refused for a device a restore replaced, during a loss (whose restore compiles it again),
       // or for a pass let go meanwhile: not a failure of the material (the batch review's C9).
@@ -885,46 +883,51 @@ export class TerrainPass {
     } else {
       // Made for a device a restore replaced, a pass let go meanwhile, or a second call: no frame
       // ever drew it.
-      this.#engine.releaseMaterial(material);
+      this.#releaseOwn(material);
     }
     await depth;
   }
 
   /**
-   * The pass's material and the target it is compiled for: R10's lit material and R05's spike
-   * shading into the scene target (`rgba16float`), and the wireframe's into the canvas, which the
-   * wireframe's frame draws into (R10.T11).
+   * `kind`'s material on `path` for `device`: the session's where it gives its materials (a lit
+   * pass's material and depth material, and the wireframe's), else compiled for the pass's own mesh
+   * as `terrainMaterialOf` says (R10's lit material into the scene target, its depth material and
+   * the wireframe's into the canvas), and R05's spike shading into the scene target (`rgba16float`).
    */
-  #materialFor(
+  #materialOf(
+    kind: TerrainShading | "depth",
+    device: Device,
     path: TerrainLayout["vertexPath"],
-  ): readonly [WgslMaterialSpec, ReadonlyArray<RenderTargetFormat>] {
-    let made: readonly [WgslMaterialSpec, ReadonlyArray<RenderTargetFormat>];
-    switch (this.#shading) {
-      case "lit":
-        made = [terrainLitMaterialSpec(path), ["rgba16float"]];
-        break;
-      case "wire":
-        made = [terrainWireMaterialSpec(path), ["canvas"]];
-        break;
-      case "spike":
-        made = [terrainMaterialSpec(path), ["rgba16float"]];
-        break;
-    }
-    return made;
-  }
-
-  /** Compiles `device`'s depth material for the canvas (R10.T16.c); never rejects. */
-  async #readyDepth(device: Device, path: TerrainLayout["vertexPath"]): Promise<void> {
-    try {
-      const depth = await this.#engine.createMaterialAsync(
-        terrainDepthMaterialSpec(path),
-        ["canvas"],
+  ): Promise<MaterialHandle> {
+    if (kind === "spike") {
+      return this.#engine.createMaterialAsync(
+        terrainMaterialSpec(path),
+        ["rgba16float"],
         [device.resources.mesh],
       );
+    }
+    if (this.#materials !== null) {
+      return this.#materials.material(kind, path);
+    }
+    const { spec, targets } = terrainMaterialOf(kind, path);
+    return this.#engine.createMaterialAsync(spec, targets, [device.resources.mesh]);
+  }
+
+  /** Releases a material the pass compiled itself; the session's are the session's to release. */
+  #releaseOwn(material: MaterialHandle): void {
+    if (this.#materials === null) {
+      this.#engine.releaseMaterial(material);
+    }
+  }
+
+  /** Compiles, or takes, `device`'s depth material for the canvas (R10.T16.c); never rejects. */
+  async #readyDepth(device: Device, path: TerrainLayout["vertexPath"]): Promise<void> {
+    try {
+      const depth = await this.#materialOf("depth", device, path);
       if (device === this.#device && !this.#disposed && device.depthMaterial === null) {
         device.depthMaterial = depth;
       } else {
-        this.#engine.releaseMaterial(depth);
+        this.#releaseOwn(depth);
       }
     } catch (error: unknown) {
       // A device replaced, a loss or a pass let go meanwhile is no failure (C9); otherwise the
@@ -1233,8 +1236,9 @@ export class TerrainPass {
   /**
    * Stops the pool and following restores, tells every block still waiting for its rebakes, and
    * releases every handle the pass made on the current device: its resources and every view's, its
-   * mesh, its material and its tables of no air (decision-r10-t16-contracts §1). A caller never
-   * disposes of a pass a frame not yet submitted draws.
+   * mesh, the materials it compiled itself (not the session's, R10.T14.d) and its tables of no air
+   * (decision-r10-t16-contracts §1). A caller never disposes of a pass a frame not yet submitted
+   * draws.
    */
   dispose(): void {
     if (this.#disposed) {
@@ -1261,14 +1265,14 @@ export class TerrainPass {
     }
   }
 
-  /** The materials and the tables of no air of `device`. */
+  /** The materials the pass compiled itself and the tables of no air of `device`. */
   #releaseDevice(device: Device): void {
     if (device.material !== null) {
-      this.#engine.releaseMaterial(device.material);
+      this.#releaseOwn(device.material);
       device.material = null;
     }
     if (device.depthMaterial !== null) {
-      this.#engine.releaseMaterial(device.depthMaterial);
+      this.#releaseOwn(device.depthMaterial);
       device.depthMaterial = null;
     }
     if (device.airless !== null) {

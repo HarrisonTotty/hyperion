@@ -70,6 +70,8 @@ export class FakeRenderEngine implements RenderEngine {
   readonly views: FakeView[] = [];
   /** The buffers, textures, meshes and materials released, in order. */
   readonly released: Array<BufferHandle | TextureHandle | MeshHandle | MaterialHandle> = [];
+  /** The materials asked of `prepareMaterial`, in order (R10.T14.d). */
+  readonly prepared: MaterialHandle[] = [];
   disposed = false;
   readonly #faultListeners = new Set<(fault: GraphicsFault) => void>();
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
@@ -172,6 +174,11 @@ export class FakeRenderEngine implements RenderEngine {
   /** {@link FakeRenderEngine.createMaterial}'s handle, at once. */
   createMaterialAsync(spec: WgslMaterialSpec): Promise<MaterialHandle> {
     return Promise.resolve(this.createMaterial(spec));
+  }
+  /** Nothing to make: records the material and resolves at once (R10.T14.d). */
+  prepareMaterial(material: MaterialHandle): Promise<void> {
+    this.prepared.push(material);
+    return Promise.resolve();
   }
   createPostProcess(): never {
     throw notFaked("createPostProcess");

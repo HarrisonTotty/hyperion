@@ -3461,16 +3461,44 @@ RESOLUTION       410 m
   constants updated, with `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`
   passing.
 - **R10.T14.d The hand-over's compile stall** (new, decision-r10-t14a §1, from
-  decision-r10-t16-leans §2). The lit material, its depth material and the wireframe's are compiled
-  when the terrain session is made, before any hand-over, so that a hand-over never stalls the page
-  (1,317 ms with no animation frame on low, a defect under the guide's Motion rule that a view never
-  stops); then the terrain run gains a limit on the longest gap outside the restore, set from
-  quiet-machine runs (the worst gaps today 117 ms on high alone and 300 ms as the instruments open).
-  Desktop: the engine's pipeline compilation and the session, so `just test-render` and the hidden
-  `just views-check --terrain` on both settings. Free now T16 has landed; before T14.b's quiet runs.
-  Tests: the session compiles its materials at creation, and a hand-over then compiles none; the
-  terrain run fails on a gap over the limit outside the restore. Acceptance: the lane's
-  `just smart-ci`, `just test-render` and the hidden terrain run, with the gaps recorded.
+  decision-r10-t16-leans §2; amended by decision-r10-t14d-stall, 2026-10-20). A hand-over stopped
+  the page for 1,317 ms with no animation frame on low, a defect under the guide's Motion rule that
+  a view never stops. The stall is R07's mesh-regime material `bodies:smoothMesh`, a
+  `createMaterial` material whose pipeline is made synchronously on the GPU process's main thread at
+  its first draw, the body's first frame in T10.e's `terrain` regime (1,547 ms on a cold driver
+  cache); the terrain's own materials, asynchronous, only delayed its first draw (2,483 ms cold).
+  Two levers:
+  - the terrain's: its lit material, its depth material and the wireframe's are compiled when the
+    terrain session is made, before any hand-over, so that the terrain draws on the hand-over's
+    frame;
+  - the bodies': R01's `RenderEngine` gains `prepareMaterial(material, targets, meshes)`, which
+    makes a material's pipelines ahead of their first draws with `createRenderPipelineAsync` and
+    keeps them in the material's own pipelines; for a `createMaterial` material it marks none
+    pending, so that a draw before one is made makes it synchronously, as before, and draws on its
+    first frame. `LitBodyRenderer` prepares `bodies:smoothMesh` on its patch mesh and
+    `bodies:disc` and `bodies:discLimb` on its quad, for the scene target, as it makes its
+    resources (as a view's renderer is made, and at each restore), so that a regime's first draw in
+    a running view (the hand-over, and a body's first disc past the 3.3 px switch) compiles
+    nothing. VIEW's opening, a disc drawn before the preparation lands, is R01's (deferred below).
+
+  Then the terrain run gains a limit on each view's longest time between two of its draws, from
+  the end of VIEW's opening (its views' preparations settled) to the teardown, every phase and each
+  session's making and compile, outside the forced loss's restore; VIEW's opening is recorded, not
+  judged. The limit is judged on every run, whatever the shader caches hold, and set from one cold
+  launch a setting (the driver's cache and Dawn's blob cache both empty), under the heavy lock on a
+  quiet machine: 1.5 times the worst judged gap, rounded up to 50 ms, held within 200 to 500 ms; a
+  gap that would need more is a defect finding, not a higher limit (250 ms provisional until then;
+  the worst gaps at T16 117 ms on high alone and 283 ms as the instruments open). Desktop: R01's
+  engine (`view/engine/`), R07's `bodies/draw.ts` and the session, so `just test-render` and the
+  hidden `just views-check --terrain` on both settings. Free now T16 has landed; before T14.b's
+  quiet runs. Tests: the session compiles its materials at creation, and a hand-over then compiles
+  none; a prepared `createMaterial` material's first draw makes no pipeline, a draw before its
+  preparation lands makes its own, which is kept, and none of its draws is left out; a lost
+  engine's material is refused; `LitBodyRenderer` prepares its three regime materials as it is made
+  and after a restore; the terrain run fails on a gap over the limit in its judged span.
+  Acceptance: the lane's `just smart-ci`, `just test-render` and the two cold hidden terrain runs,
+  with the gaps, the load and each cache's state recorded.
+
 - **R10.T14.e The patch boxes' margin along the normal** (new, decision-r10-t14a's #56 follow-up).
   R05's `packPatchBounds` (`bounds.ts`) adds its margin, the largest chord between neighbouring
   ring samples (a sixteenth of the patch's edge), to all three half-extents. Along the centre's
@@ -3496,6 +3524,9 @@ RESOLUTION       410 m
     defect under the guide's Motion rule that a view never stops). Once it lands, the terrain run
     gains a limit on the longest gap outside the restore, which T14 sets from the quiet-machine
     runs (the worst gaps today 117 ms on high alone and 300 ms as the instruments open).
+    _Amended by decision-r10-t14d-stall: the stall is R07's `bodies:smoothMesh`, compiled
+    synchronously at the hand-over; the terrain's materials only delayed its first draw. T14.d
+    builds both levers._
   - _Eviction in place of rebakes_ (§13, T16.b's second question): an undrawn resident patch the
     rebake rule names may be evicted instead of baked again, weighed beside the deferred
     "Undrawn rebakes cost worker time".
@@ -9266,6 +9297,14 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     stalled 1.32 s at its hand-over (its own pipelines, presumably). For T14 (and R01's pipeline
     cache): the lever is compiling the lit material and its depth material when the session is
     made, before any hand-over.
+    _Attribution corrected by R10.T14.d's trace (decision-r10-t14d-stall, 2026-10-20): the stall
+    was not the terrain's pipelines, which are asynchronous and only delayed its first draw
+    (2,483 ms on a cold driver cache, low), but R07's mesh-regime material `bodies:smoothMesh`, a
+    `createMaterial` material whose pipeline is made synchronously on the GPU process's main thread
+    at its first draw, the body's first frame in T10.e's `terrain` regime
+    (`DeviceBase::APICreateRenderPipeline`, 1,547 ms); high's 1.45 s is the same switch, not
+    traced. VIEW's opening stalls the same way for `bodies:disc` (1,128 ms) and `bodies:discLimb`
+    (1,093 ms). The levers are T14.d's, as amended._
   - _The low setting's GPU time._ Each frame's timed GPU time on low, p50 9.0 ms on 822 × 544 px,
     is about twice high's, 4.4 ms on 1126 × 906, on the RTX 3080 (hidden; the terrain's and every
     other pass). Unexplained here; for T14 and R12 (the setting's passes). One candidate (the
@@ -10495,6 +10534,152 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     behind drawn surface.
   - _The box bounds the `f64` surface, not the GPU's `f32` vertices,_ which can sit a few parts in
     10⁸ of their distance from the camera outside it: far under a pixel, and culling only.
+- **Deviations in T14.d, as built** (2026-10-20; lane `r10-compile`, on `rendering-and-planets` at
+  `b9515f03`; decision-r10-t14a §1, decision-r10-t16-leans §2, decision-r10-t14d-stall).
+  - _Files._ New: `view/terrain/materialSet.ts` with `materialSet.test.ts`. Changed: R01's
+    `view/engine/{types,resilientEngine}.ts` and `webgpu/{engine,drawing}.ts`, with their tests;
+    R07's `view/bodies/draw.ts` and `draw.test.ts`; `view/terrain/{session,terrainPass}.ts`,
+    `gpu/resources.ts` with its test, and the session's two; `displays/view/ViewDisplay.tsx`,
+    `useTerrainSession.ts` and two hook tests; the views check's `probedEngine.ts`,
+    `viewsProbe.ts`, `terrainProbe.ts` and `terrainCheckRun.ts`, with their tests;
+    `main/{terrainCheckResults,viewsCheckRecord}.ts`, `fixtures/terrainRecord.ts` and their tests;
+    `preload/api.ts`; the shared fakes `test/{countingRenderEngine,fakeRenderEngine}.ts` (new
+    members only). T16.d's `docs/measurements/terrain-check/2026-10-20-effect-{high,low}-terrain`
+    files are replaced by this task's cold runs. No golden file, generator version, wire or
+    protocol change.
+  - _What the trace found_ (hidden smoke, low, the NVIDIA driver's shader cache cold through a
+    fresh `__GL_SHADER_DISK_CACHE_PATH`, a Chromium startup trace). At `b9515f03` the first phase's
+    primary stopped for 1,250 ms at the hand-over and drew the terrain 2,483 ms after it. With the
+    terrain lever alone the session's compile took 1,744 ms with a longest frame gap of 110 ms (the
+    trace: `CreatePipelineAsyncEvent::InitializeImpl` on Dawn's workers, its
+    `terrain-lit-face-differences` 1,581 ms), the terrain drew 0 ms after the hand-over, and the
+    page still stopped 1,467–1,567 ms just before it: `DeviceBase::APICreateRenderPipeline` of
+    `bodies:smoothMesh`, 1,547 ms on the GPU process's main thread. With both levers the same
+    smoke's hand-over gap was 83 ms. The plan's text above carries the corrected attribution.
+  - _The terrain lever._ `TerrainMaterialSet` (`TerrainMaterialSource`, `TerrainMaterialKind` `lit`,
+    `depth` or `wire`, `terrainMaterialOf`, `sessionMaterials(setting, limits)`), made last in
+    `TerrainSession`'s constructor (nothing after it can throw and leave it compiling, and it is
+    before any pass). It compiles each material through `createMaterialAsync` against a mesh of the
+    patches' own layout (`terrainMeshSpec`, named `terrain compile`, released after the compile),
+    since the engine keys a material's pipelines by the mesh's layout, its target's format and its
+    depth (pinned by the engine test "a material's pipelines by its mesh's layout"). A pass takes it
+    as `TerrainPassOptions.materials`, draws with its handles and releases none; R05's spike shading
+    keeps compiling its own. A path not compiled at the making is compiled at its first ask and
+    kept; a refused compile is forgotten, so the next ask tries again; a compile a restore or the
+    set's disposal overtook is released and rejects. At a restore it forgets the lost device's
+    handles and compiles its setting again, its entries in place before a pass's resources rebuild,
+    by R01's restore order, now stated in `RenderEngine.onRestored`'s contract (listeners in the
+    order added) and held by a test. `TerrainSessionOptions.setting` is new and required (the
+    launch's, through `useTerrainSession` and `ViewDisplay`; a change makes the session anew);
+    `TerrainSession.compiled` and `compileStartedAtMs` are new. `gpu/resources.ts` gains
+    `fittedTerrainLayout` (`null` where the device holds no layout, `terrainLayout` throwing as
+    before) and `terrainMeshSpec`.
+  - _The bodies' lever._ `RenderEngine.prepareMaterial(material, targets, meshes)` takes
+    `PreparedTarget`s: a `RenderTargetFormat`, or `{ colour, depth }` for one output alone.
+    `Drawing.preparePipeline` keeps the first pipeline made for a key, marks none pending for a
+    `createMaterial` material, and leaves an asynchronous material's to `prepareMaterialPipeline`;
+    the engine waits on a `createMaterial` material's compile check and prepares nothing of a broken
+    one (call 2). `ResilientEngine` refuses a lost engine's material with `EngineUnavailable` and a
+    released or foreign one with an `Error`. `LitBodyRenderer.#prepareRegimes` prepares
+    `bodies:smoothMesh` on its patch and `bodies:disc` and `bodies:discLimb` on its quad for
+    `{ colour: rgba16float, depth: true }` alone, the `bodies` and `discs` passes' output (call 1),
+    as it makes its resources and at each restore (call 3: at `#create`, the opening's duplicate
+    worker compile accepted); a failure other than `EngineUnavailable` is logged. R05's
+    `pipelineShim` is not used (optional).
+  - _The fakes, additive._ `CountingRenderEngine.compiles` (`RecordedCompile`) and `.prepares`
+    (`RecordedPrepare`), refused asks too; its `createMaterialAsync` takes its targets and meshes;
+    its `prepareMaterial` rejects with `EngineUnavailable` in a modelled loss and for a material
+    not live. `FakeRenderEngine.prepared`. `EngineProbe.preparing`, and `ViewsProbe.preparations()`
+    (`{ seen, inFlight, lastSettledAtMs }`), which `ProbedEngine.prepareMaterial` feeds.
+  - _The run._ VIEW's opening runs from the run's start until the preparations its views made as
+    they opened have settled (every view's drawer makes a `PhotorealRenderer`, so there are always
+    some), recorded as `TerrainCheckRecord.opening` and not judged. The judged span runs from then
+    to the teardown's choice of `PHASE TEST`: `TerrainCheckRecord.span`, the page's longest time
+    between animation frames over it (`longestGapOutside`), outside the forced loss's restore and
+    outside the run's own computation of each phase's record at its end, which held the main thread
+    up to 558 ms in a diagnostic run (`harnessMs`, the time left out). Each session's phases start
+    after `TerrainProbe.compiled`; each of `TerrainCheckRecord.sessions` holds its `madeAtMs` and
+    its `compile`, `pending` or `ended` with its `compileMs`, `compiled` and `longestFrameGapMs`,
+    timed from the session's own `compileStartedAtMs`, its window measured on the page's animation
+    frames. `noStall` judges the span, each view's longest gap in each phase
+    (`longestGapEndScriptS` new) and each session's compile window by `TERRAIN_GAP_LIMIT_MS`,
+    saying which window a stall fell in; `framesDrawn` keeps the missed
+    frames alone. `TERRAIN_CHECK_VERSION` 3 (also `phaseWindows`). The loss phase counts the fresh
+    session's blocks from the mark taken before its `TERRAIN TEST` choice, since some can arrive
+    during its compile.
+  - _A check flake fixed._ "The terrain drawn once handed over" timed a view's delay from its first
+    handed-over draw in the phase. In the instruments' phase the frame the script's loop moves the
+    camera in still counts as handed over, the pass not yet having let the view go, so both
+    round-1 runs failed it (49,981 and 66,897 ms; 12,252 of 12,253 handed-over draws drew the
+    terrain). The probe now records `terrainHandoverMs`, the first of the handed-over draws running
+    unbroken to the first terrain draw, and the delay is timed from it.
+  - _The cold runs._ RTX 3080, hidden, under the heavy lock (`just _locked`, CPU quota 1200 %) and
+    the GPU lock, every other lane held by main. Each launch had an empty NVIDIA shader cache (a
+    fresh `__GL_SHADER_DISK_CACHE_PATH`, 0 files before) and an empty Dawn blob cache (the views
+    check's fresh `--user-data-dir`, its `DawnWebGPUCache` 3.1 MB 60 s in;
+    `~/.config/hyperion/DawnWebGPUCache` untouched since 2026-10-02).
+    - Round 1 (the limit's): high from 17:49:55 at a load of 0.39 (0.39, 3.13, 4.36) to 18:01:57
+      (3.92); the judged worst 316.7 ms, the page's in the loss phase's fresh session's making
+      window (its compile 549 ms, the caches warm by then); each view's longest gap in a phase at
+      most 133 ms for the primary and 167 ms for the instruments at 30 Hz; the first session's
+      window 66.6 ms; VIEW's opening 672 ms. Low from 18:01:57 at 3.92 (the high launch's own tail,
+      nothing else running) to 18:13:43 (2.09); the judged worst 150 ms, the page's between VIEW's
+      opening and the first phase; each phase at most 50 ms; the sessions' windows 50 and 33 ms; the
+      opening 591 ms. Both failed at the provisional 250 ms (high's 316.7 ms) and on the check flake
+      above; their files are kept in the lane's scratch, not committed.
+    - Round 2 (the committed results): high from 18:22:48 at 0.49 (0.49, 1.09, 2.25) to 18:34:48
+      (3.18): pass; the judged worst 250.1 ms, the page's between VIEW's opening and the first phase
+      (1.7 s of the script, the first phase's configuration); each view's longest gap in a phase
+      117, 133 and 100 ms for the primary, 150 ms for the instruments; the sessions' windows 50 and
+      50 ms (compiles 1,446 and 108 ms); the opening 423 ms; 14,884 ms of the run's own computation
+      left out; the terrain 0 ms after each hand-over. Low from 18:35:18 at 1.93 (1.93, 3.16, 3.04)
+      to 18:47:04 (2.08): pass; the judged worst 199.9 ms, in the same place; each phase at most
+      50 ms; the sessions' windows 67 and 41 ms (compiles 1,455 and 81 ms); the opening 539 ms;
+      1,767 ms left out. NVIDIA caches 1.5 MB after each launch. After round 2 only tests, doc
+      comments and a type's name changed (the batch review's), and the run first waits for VIEW's
+      primary view to show before its opening's preparations, so that a launch that cannot draw
+      VIEW fails for that reason, as `App.test.tsx` holds: nothing a drawn run measures.
+  - _The limit._ decision-r10-t14d-stall §3's rule on round 1's two launches: the worst judged gap
+    316.7 ms; 1.5 × 316.7 = 475.1, rounded up to 500 ms, within [200, 500]: so
+    `TERRAIN_GAP_LIMIT_MS` is 500. Round 2's worst, 250.1 ms, is half of it.
+- **Deferred findings (2026-10-13 rule) (R10.T14.d)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _VIEW's opening's first compiles_ (decision-r10-t14d-stall §2). A disc in VIEW's first frames
+    compiles `bodies:disc` and `bodies:discLimb` synchronously before any preparation can land
+    (1,128 and 1,093 ms on a cold cache, RTX 3080), stopping the whole page: a display switch, not a
+    running view, on a cold cache only, so outside the terrain run's judged span. For R01: a warm-up
+    of the sync materials the views draw first, through `prepareMaterial`, at the engine's load
+    before any view is shown (R07 names the bodies' materials). The traces' synchronous pipelines
+    over 100 ms: `bodies:disc` 1,128.5 ms at 3.86 s of the trace (VIEW's opening), `bodies:discLimb`
+    1,093.2 ms at 4.99 s (VIEW's opening), `bodies:smoothMesh` 1,547.2 ms at 69.56 s (the hand-over,
+    before the bodies' lever); the trace was read at 200 ms and over and is deleted, so a pipeline
+    of 100 to 200 ms is not listed. The cold runs' openings: 423 and 539 ms in round 2, 672 and
+    591 ms in round 1 (high, low).
+  - _The worst judged gap's cause is not traced._ 316.7 ms on high, in the loss phase's fresh
+    session's making (after `PHASE TEST` → `TERRAIN TEST`, the shader caches warm by then, its
+    compile 549 ms against 67–90 ms in the smokes); low's same window 33 ms. Under 500 ms, so the
+    ruling asks no trace. Lean: the scene switch's rebuild of the views' renderers, whose first
+    draws compile their materials again once the old ones are released (Dawn's cache holds weak
+    references), which R01's warm-up would also remove.
+  - _High's lit layout has no working fallback._ Where the high lit cache's offsets (1,286 slots ×
+    101,400 B = 130,400,400 B) exceed a binding, `terrainLayout` falls back to `face-differences`,
+    whose 1,908 slots' horizon map is 131,453,568 B, more than the offsets it replaces; so a device
+    that cannot bind the offsets cannot bind the fallback either, and `terrainLayout` throws. Every
+    adapter at WebGPU's default 134,217,728 B binds the offsets. The wireframe's 520 slots behave
+    the same way (52.7 MB of offsets, 64.5 MB of heights on the fallback). For T14.b, which sizes
+    the caches and the binding ceiling.
+  - _Round 2's worst gaps sit at the first phase's configuration_ (high 250.1 ms, low 199.9 ms,
+    between VIEW's opening and the first phase, where the primary first draws in the
+    photorealistic style): not traced. Lean: the photorealistic renderer's other `createMaterial`
+    materials (its sky's, its atmosphere's composite) drawing for the first time, R01's warm-up's
+    to remove with VIEW's opening's.
+  - _The run's own computation of its phases' records_ holds the page's main thread 14.9 s over a
+    high run (1.8 s on low; the views probe's per-view filters over every frame of the run), left
+    out of the judged span. For T14.b's runs, which time phases.
+  - _Diagnostic smokes under a lane's 400 % CPU cap at a load near 4.5_ showed intermittent
+    350–900 ms gaps whose main-thread frame time matched them (renderer JavaScript, not a
+    compile), in no traced smoke and in neither cold run. Lean: the whole Electron tree, its six
+    height workers included, throttled under the cap on a shared machine.
 - **Deviations in T12's back end, as built** (2026-10-20; lane r10-readouts, branch
   `r10-readouts-land`, after R10.T16.e's commit, on `rendering-and-planets` at `6fa6a405`;
   decision-r10-t12-leans, decision-r10-t16-leans §12, decision-r10-view-block-room §2–§4).

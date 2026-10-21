@@ -6,6 +6,7 @@ import type {
   TerrainCheckPhaseName,
   TerrainCheckPhaseRecord,
   TerrainCheckSessionFault,
+  TerrainCheckSessionRecord,
   ViewsCheckStyle,
 } from "../../../../../preload/api";
 import type { TextureHandle } from "../../../view/engine/types";
@@ -50,6 +51,8 @@ class FakeView {
   scene = "SERVER";
   /** When the scene was last chosen, ms of the test's clock. */
   chosenAtMs = 0;
+  /** Every scene chosen, with when, ms of the test's clock. */
+  readonly choices: Array<{ readonly scene: string; readonly atMs: number }> = [];
   readonly styles = new Map<string, ViewsCheckStyle>([["PRIMARY", "wireframe"]]);
   operated = "PRIMARY";
   auto = false;
@@ -126,6 +129,7 @@ class FakeView {
     if (legend === "Scene") {
       this.scene = label;
       this.chosenAtMs = this.#clock();
+      this.choices.push({ scene: label, atMs: this.chosenAtMs });
       for (const each of button.parentElement?.querySelectorAll("button") ?? []) {
         each.setAttribute("aria-pressed", String(each === button));
       }
@@ -161,6 +165,20 @@ const SESSION_FAULTS: ReadonlyArray<TerrainCheckSessionFault> = [
   { atMs: 50_000, text: TERRAIN_COMPUTATION_FAILED, views: ["view"] },
 ];
 
+/** How long after each choice of `TERRAIN TEST` the fake session's materials compile, ms. */
+const COMPILE_MS = 2_000;
+
+/** When VIEW's preparations have settled on the test's clock, ms: its opening's end (R10.T14.d). */
+const OPENED_MS = 700;
+
+/** The sessions the fake probe saw made (R10.T14.d). */
+const SESSIONS: ReadonlyArray<TerrainCheckSessionRecord> = [
+  {
+    madeAtMs: 10,
+    compile: { kind: "ended", compileMs: COMPILE_MS, compiled: 3, longestFrameGapMs: 120 },
+  },
+];
+
 /** What the fake probe saw the run do. */
 interface Seen {
   readonly phases: Array<{
@@ -168,7 +186,12 @@ interface Seen {
     readonly quiet: QuietSpan | null;
   }>;
   destroyedAtMs: number | null;
+  /** Each phase record's making, which holds the page's main thread with no frame drawn. */
+  readonly records: QuietSpan[];
 }
+
+/** How long the fake probe takes to make a phase's record, ms of the test's clock (R10.T14.d). */
+const RECORD_COST_MS = 600;
 
 /**
  * The terrain probe's members the run reads, over `view`: a session while `TERRAIN TEST` is
@@ -177,7 +200,12 @@ interface Seen {
  * a destruction restored 300 ms later, the terrain drawn from 40 s and again 100 ms after the
  * restore, and the mask's cells by the blocks sent.
  */
-function fakeProbe(view: FakeView, clock: () => number, seen: Seen): TerrainCheckDeps["terrain"] {
+function fakeProbe(
+  view: FakeView,
+  clock: () => number,
+  seen: Seen,
+  advance: (ms: number) => void,
+): TerrainCheckDeps["terrain"] {
   const session: WatchedSession = {
     pass: () => null,
     wirePass: () => null,
@@ -187,6 +215,8 @@ function fakeProbe(view: FakeView, clock: () => number, seen: Seen): TerrainChec
     workerCount: 3,
     terrainFaults: new Map(),
     subscribeFaults: () => () => undefined,
+    compiled: Promise.resolve(3),
+    compileStartedAtMs: 0,
   };
   const terrain = (): boolean => view.scene === TERRAIN_SCENE_NAME;
   const scriptS = (): number | null => (terrain() ? (clock() - view.chosenAtMs) / 1000 : null);
@@ -210,6 +240,11 @@ function fakeProbe(view: FakeView, clock: () => number, seen: Seen): TerrainChec
     get scriptS() {
       return scriptS();
     },
+    get compiled() {
+      return terrain() && clock() >= view.chosenAtMs + COMPILE_MS;
+    },
+    sessions: () => [...SESSIONS],
+    scriptSAt: () => 12.5,
     workers: () => ({
       made: 0,
       live: 0,
@@ -288,6 +323,10 @@ function fakeProbe(view: FakeView, clock: () => number, seen: Seen): TerrainChec
       quiet: QuietSpan | null,
     ): TerrainCheckPhaseRecord => {
       seen.phases.push({ name, quiet });
+      // The record's making holds the main thread, as the probe's does over a long phase.
+      const fromMs = clock();
+      advance(RECORD_COST_MS);
+      seen.records.push({ fromMs, toMs: clock() });
       return {
         name,
         startMs: start.atMs,
@@ -303,6 +342,7 @@ function fakeProbe(view: FakeView, clock: () => number, seen: Seen): TerrainChec
           submitMs: [],
           missedFrames: 0,
           longestGapMs: 0,
+          longestGapEndScriptS: null,
           handedOverDraws: 0,
           offSurveyDraws: 0,
           terrainDraws: 0,
@@ -311,6 +351,7 @@ function fakeProbe(view: FakeView, clock: () => number, seen: Seen): TerrainChec
           firstHandoverMs: null,
           firstHandoverScriptS: null,
           firstTerrainMs: null,
+          terrainHandoverMs: null,
           readBacks: 0,
           nonFiniteTexels: 0,
         })),
@@ -338,9 +379,11 @@ async function run(): Promise<{
   let now = 0;
   const clock = (): number => now;
   const view = new FakeView(clock);
-  const seen: Seen = { phases: [], destroyedAtMs: null };
+  const seen: Seen = { phases: [], destroyedAtMs: null, records: [] };
   const calls: string[] = [];
-  const terrain = fakeProbe(view, clock, seen);
+  const terrain = fakeProbe(view, clock, seen, (ms) => {
+    now += ms;
+  });
   const record = await runTerrainCheck({
     api: {
       startPhase: (name: CheckPhaseName) => {
@@ -359,6 +402,24 @@ async function run(): Promise<{
     views: {
       canvasOf: () => ({ widthPx: 1126, heightPx: 906 }),
       timer: () => "full",
+      // VIEW's three preparations, the last settling at OPENED_MS.
+      preparations: () => ({
+        seen: 3,
+        inFlight: now >= OPENED_MS ? 0 : 1,
+        lastSettledAtMs: now >= OPENED_MS ? OPENED_MS : null,
+      }),
+      // An animation frame every 50 ms, none in the forced loss's restore.
+      frameTimes: (startMs: number, endMs: number) =>
+        Array.from(
+          { length: Math.max(0, Math.ceil((Math.min(endMs, now) - startMs) / 50)) },
+          (_, i) => startMs + i * 50,
+        ).filter(
+          (atMs) =>
+            (seen.destroyedAtMs === null ||
+              atMs < seen.destroyedAtMs ||
+              atMs > seen.destroyedAtMs + 400) &&
+            seen.records.every((busy) => atMs < busy.fromMs || atMs > busy.toMs),
+        ),
       restoresAtMs: () =>
         seen.destroyedAtMs !== null && now >= seen.destroyedAtMs + 300
           ? [seen.destroyedAtMs + 300]
@@ -443,5 +504,50 @@ describe("the terrain run's script (R10.T16.d)", () => {
   it("records the terrain session's faults as the probe saw them (R10.T16.e)", async () => {
     const { record } = await run();
     expect(record.terrainFaults).toEqual(SESSION_FAULTS);
+  });
+
+  it("starts each session's first phase once its materials have compiled (R10.T14.d)", async () => {
+    const { record, view } = await run();
+    const made = view.choices.filter((choice) => choice.scene === TERRAIN_SCENE_NAME);
+    const first = ["terrain-alone", "terrain-loss"].map(
+      (name) => record.phases.find((phase) => phase.name === name)?.startMs ?? -1,
+    );
+    expect(first.map((startMs, n) => startMs >= (made[n]?.atMs ?? Infinity) + COMPILE_MS)).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("records each session the probe saw made, with its compile (R10.T14.d)", async () => {
+    const { record } = await run();
+    expect(record.sessions).toEqual(SESSIONS);
+  });
+
+  it("records the page's longest gap from VIEW's opening to the teardown, leaving the restore out (R10.T14.d)", async () => {
+    const { record } = await run();
+    expect([
+      record.span.fromMs,
+      record.span.toMs > OPENED_MS,
+      record.span.longestFrameGapMs,
+      record.span.longestGapEndScriptS,
+    ]).toEqual([OPENED_MS, true, 50, 12.5]);
+  });
+
+  it("leaves out of the span the time its own phase records held the page, and records it (R10.T14.d)", async () => {
+    const { record, seen } = await run();
+    expect([seen.records.length, record.span.harnessMs, record.span.longestFrameGapMs]).toEqual([
+      3,
+      3 * RECORD_COST_MS,
+      50,
+    ]);
+  });
+
+  it("chooses TERRAIN TEST only once VIEW's opening has ended, and records it (R10.T14.d)", async () => {
+    const { record, view } = await run();
+    const first = view.choices.find((choice) => choice.scene === TERRAIN_SCENE_NAME);
+    expect([(first?.atMs ?? -1) >= OPENED_MS, record.opening]).toEqual([
+      true,
+      { preparedMs: OPENED_MS, preparations: 3, longestFrameGapMs: 50 },
+    ]);
   });
 });

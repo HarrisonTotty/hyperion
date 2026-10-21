@@ -59,6 +59,7 @@ import { limbShareAt, PHASE_TABLE_SAMPLES, type PhotometricLaw } from "../appear
 import { packPhaseFactorRows } from "../appearance/litBodyProbe";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
 import type { KernelPair } from "../engine/kernels";
+import { EngineUnavailable } from "../engine/resilientEngine";
 import type {
   BufferHandle,
   ComputeHandle,
@@ -93,7 +94,7 @@ import {
 } from "../lighting/planetshine";
 import { PSF_QUAD_PX } from "../photometry/magnitude";
 import { type SpriteRecord, spriteRecord } from "../wireframe/drawList";
-import type { Rgb } from "../photometry/toneCurve";
+import { HDR_COLOUR_FORMAT, type Rgb } from "../photometry/toneCurve";
 import frameWgsl from "../shaders/frame.wgsl?raw";
 import litBodyWgsl from "../shaders/litBody.wgsl?raw";
 import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
@@ -860,6 +861,7 @@ export type LitBodyEngine = Pick<
   | "dispatch"
   | "onRestored"
   | "capabilities"
+  | "prepareMaterial"
 >;
 
 interface DeviceResources {
@@ -925,11 +927,39 @@ export class LitBodyRenderer {
     this.#engine = engine;
     this.#spriteMaterial = spriteMaterial;
     this.#resources = this.#create();
+    this.#prepareRegimes(this.#resources);
     this.#unsubscribe = engine.onRestored(() => {
       this.#resources = this.#create();
+      this.#prepareRegimes(this.#resources);
       this.#tableLaws = [];
       this.#written = null;
     });
+  }
+
+  /**
+   * Makes the regimes' pipelines for the scene target, with its depth, ahead of their first draws
+   * in a running view (plan R10, R10.T14.d; decision-r10-t14d-stall §1 and §2): the mesh regime's
+   * on the patch, whose first draw is a body's hand-over to the terrain (its synchronous compile
+   * stopped the page for 1,547 ms on a cold shader cache), and the disc's interior and limb on the
+   * quad, whose first draw is a body's first disc past the 3.3 px switch (1,128 and 1,093 ms). A
+   * draw before they are made makes its own, as before: a disc in VIEW's first frames does (R01's,
+   * deferred). The point sprites draw from the first frame, with the stars, and are not prepared.
+   */
+  #prepareRegimes(resources: DeviceResources): void {
+    const scene = [{ colour: HDR_COLOUR_FORMAT, depth: true }] as const;
+    const prepared: ReadonlyArray<readonly [MaterialHandle, MeshHandle]> = [
+      [resources.mesh, resources.patch],
+      [resources.interior, resources.quad],
+      [resources.limb, resources.quad],
+    ];
+    for (const [material, mesh] of prepared) {
+      void this.#engine.prepareMaterial(material, scene, [mesh]).catch((error: unknown) => {
+        // A loss meanwhile is no failure: the restore makes and prepares them again.
+        if (!(error instanceof EngineUnavailable)) {
+          console.error(`the pipelines of ${material.name} could not be prepared:`, error);
+        }
+      });
+    }
   }
 
   #create(): DeviceResources {

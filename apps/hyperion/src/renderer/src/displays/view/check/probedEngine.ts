@@ -32,6 +32,7 @@ import type {
   PointSplatHandle,
   PointSplatSpec,
   PostProcessHandle,
+  PreparedTarget,
   RenderEngine,
   RenderTarget,
   RenderTargetFormat,
@@ -61,6 +62,8 @@ export interface EngineProbe {
   submitted(owner: string, frame: FrameSubmission): void;
   /** A target was made of `spec`; its attachments are read through it, as a resize replaces them. */
   madeTarget(spec: RenderTargetSpec, target: RenderTarget): void;
+  /** A material's preparation began, which settles with `prepared` (plan R10, R10.T14.d). */
+  preparing(prepared: Promise<void>): void;
 }
 
 /** A view that reports its renders and sizes. */
@@ -186,6 +189,20 @@ export class ProbedEngine implements RenderEngine {
 
   createMaterial(spec: WgslMaterialSpec): MaterialHandle {
     return this.#inner.createMaterial(spec);
+  }
+
+  /**
+   * Prepares through the inner engine, the probe counting each preparation in flight until it
+   * settles (R10.T14.d): VIEW's opening ends once those its views made have.
+   */
+  prepareMaterial(
+    material: MaterialHandle,
+    targets: ReadonlyArray<PreparedTarget>,
+    meshes: ReadonlyArray<MeshHandle>,
+  ): Promise<void> {
+    const prepared = this.#inner.prepareMaterial(material, targets, meshes);
+    this.#probe.preparing(prepared);
+    return prepared;
   }
 
   createMaterialAsync(

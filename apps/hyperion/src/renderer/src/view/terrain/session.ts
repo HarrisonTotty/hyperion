@@ -30,6 +30,11 @@
  * - **Memory.** The masks and maps are under `coarse-field-gpu` (R12 Design note 6); the
  *   session's report ({@link TerrainSession.memory}) gives the workers' copies of the fields, the
  *   pool's kept blocks and the session's own GPU bytes by category.
+ * - **The materials (R10.T14.d; decision-r10-t14a §1, decision-r10-t14d-stall).** The lit
+ *   material, its depth material and the wireframe's, on the vertex paths of the setting it is
+ *   made for, are compiled as it is made and after each restore ({@link TerrainMaterialSet}),
+ *   before any hand-over, so that a body's hand-over compiles nothing and the terrain draws on its
+ *   frame; every pass draws with those handles, and the session releases them at its teardown.
  * - **The passes (R10.T16.b; decision-r10-live-path, D3 and D4).** One {@link TerrainPass} a body,
  *   lit, shared by every view that hands the body over (T10.e's `terrain` regime in a
  *   photorealistic view's last plan), made at the body's first hand-over in any view, on its field
@@ -137,6 +142,7 @@ import {
   pixelAngleRad,
   storeReliefSource,
 } from "./handover";
+import { TerrainMaterialSet } from "./materialSet";
 import { unreachable } from "./patchKey";
 import { type BodyFigure, type BodyFixedVec3, planetGeometry } from "./planet";
 import { PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
@@ -173,6 +179,11 @@ export interface TerrainSessionOptions {
   readonly universe: UniverseIdHex;
   /** Its request client. */
   readonly requests: TerrainRequests;
+  /**
+   * The quality setting its views draw at, the launch's (R07.T17), on whose vertex paths the
+   * materials of its passes are compiled as it is made (R10.T14.d; `materialSet.ts`).
+   */
+  readonly setting: QualitySetting;
   /** Whether the link is up as it starts; {@link TerrainSession.setLinkUp} follows it. */
   readonly linkUp: boolean;
   /**
@@ -676,6 +687,8 @@ export class TerrainSession {
   readonly #classMaps: ClassMapStore;
   readonly #reliefs: HandoverReliefSource;
   readonly #engine: RenderEngine;
+  /** The materials every pass draws with, compiled at its making on its setting (R10.T14.d). */
+  readonly #materials: TerrainMaterialSet;
   readonly #bodies = new Map<BodyIdHex, SessionBody>();
   readonly #reports = new Map<ViewId, TerrainViewReport>();
   /** Each handed-over body's pass (R10.T16.b), from its first hand-over to its field's release. */
@@ -745,6 +758,9 @@ export class TerrainSession {
         this.#restored();
       }),
     ];
+    // Last, so that nothing before it can throw and leave it compiling, and before any pass, so that
+    // its restore listener runs before any pass's resources' (`materialSet.ts`).
+    this.#materials = new TerrainMaterialSet(options.engine, options.setting);
   }
 
   /**
@@ -771,6 +787,20 @@ export class TerrainSession {
   /** How many height workers its one pool runs (Design note 11's count by default). */
   get workerCount(): number {
     return this.#workerCount;
+  }
+
+  /**
+   * Settles once the materials its passes draw with on its setting have compiled on the device it
+   * was made on, or failed to, with how many compiled (R10.T14.d; `TerrainMaterialSet.compiled`):
+   * the views check's terrain run starts its phases after it.
+   */
+  get compiled(): Promise<number> {
+    return this.#materials.compiled;
+  }
+
+  /** When its materials' compile began, as it was made, `performance.now()` ms (R10.T14.d). */
+  get compileStartedAtMs(): number {
+    return this.#materials.startedAtMs;
   }
 
   /** The bodies with a terrain pass: each handed over since its field was last taken (R10.T16.b). */
@@ -1090,10 +1120,11 @@ export class TerrainSession {
   }
 
   /**
-   * Tears the session down, in order: its passes (their resources, meshes and materials released,
-   * their lanes ended), the class-map store, the masks (with the detail seeds' requests and the
-   * session's listeners), the store (its requests cancelled and its fields released) and the pool
-   * (its workers terminated). Nothing is left: no worker, request, timer, listener or GPU handle.
+   * Tears the session down, in order: its passes (their resources and meshes released, their lanes
+   * ended), the terrain's materials (R10.T14.d), the class-map store, the masks (with the detail
+   * seeds' requests and the session's listeners), the store (its requests cancelled and its fields
+   * released) and the pool (its workers terminated). Nothing is left: no worker, request, timer,
+   * listener or GPU handle.
    */
   dispose(): void {
     if (this.#disposed) {
@@ -1105,6 +1136,7 @@ export class TerrainSession {
     }
     this.#passes.clear();
     this.#wirePasses.clear();
+    this.#materials.dispose();
     this.#wireHanded.clear();
     this.#faultListeners.clear();
     this.#classMaps.dispose();
@@ -1445,6 +1477,8 @@ export class TerrainSession {
         source: { kind: "body", body, detailSeed, weights },
         createPool: (bake) => this.#pool.lane(bake),
         survey: held.survey,
+        // Compiled when the session was made, so that the hand-over compiles none (R10.T14.d).
+        materials: this.#materials,
         // Each view's selection opened by its motion, so that no strip at its leading edge is
         // left unselected while its mask discards the reference surface there (S6).
         frustumMargin: "motion",

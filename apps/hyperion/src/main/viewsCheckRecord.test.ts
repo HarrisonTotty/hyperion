@@ -126,6 +126,14 @@ describe("the terrain run's record (R10.T16.d)", () => {
     expect(readTerrainCheckRecord(structuredClone(record))).toEqual(record);
   });
 
+  it("is read back with a session whose compile did not end (R10.T14.d)", () => {
+    const record = {
+      ...TERRAIN_RECORD,
+      sessions: [{ madeAtMs: 5, compile: { kind: "pending" } }],
+    };
+    expect(readTerrainCheckRecord(structuredClone(record))).toEqual(record);
+  });
+
   it("is read back with no hand-over range and an undestroyed device", () => {
     const record = {
       ...TERRAIN_RECORD,
@@ -155,6 +163,24 @@ describe("the terrain run's record (R10.T16.d)", () => {
     [["loss", "masks", "beforeKept"], "yes"],
     [["teardown", "workersLive"], -1],
     [["handover", "rangeM"], 0],
+    [["phases", 0, "views", 0, "longestGapEndScriptS"], "late"],
+    [["sessions"], null],
+    [["sessions", 0, "madeAtMs"], null],
+    [["sessions", 0, "compile"], null],
+    [["sessions", 0, "compile", "kind"], "done"],
+    [["sessions", 0, "compile", "compileMs"], -1],
+    [["sessions", 0, "compile", "compiled"], 1.5],
+    [["sessions", 0, "compile", "compiled"], null],
+    [["sessions", 0, "compile", "longestFrameGapMs"], "long"],
+    [["opening"], null],
+    [["span"], null],
+    [["span", "toMs"], 0],
+    [["span", "longestFrameGapMs"], -1],
+    [["span", "longestGapEndScriptS"], "late"],
+    [["span", "harnessMs"], -1],
+    [["opening", "preparedMs"], -1],
+    [["opening", "preparations"], 0.5],
+    [["opening", "longestFrameGapMs"], "long"],
   ])("refuses a record whose %j is %j", (path, value) => {
     expect(readTerrainCheckRecord(withTerrainField(path, value))).toBeNull();
   });

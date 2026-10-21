@@ -108,6 +108,16 @@ export interface TimedAllocation {
   readonly name: string;
 }
 
+/**
+ * The materials' preparations the views' renderers made (R10.T14.d): how many, how many have not
+ * settled, and when the last settled, ms.
+ */
+export interface PreparationCount {
+  seen: number;
+  inFlight: number;
+  lastSettledAtMs: number | null;
+}
+
 /** Records `VIEW`'s frames, resolves, sizes, allocations and faults for the several-views check. */
 export class ViewsProbe implements EngineProbe {
   /** The engine source `VIEW` is given: `inner`'s engines, each wrapped in a {@link ProbedEngine}. */
@@ -128,6 +138,8 @@ export class ViewsProbe implements EngineProbe {
   #timer: GpuTimer | null = null;
   /** Bumped for each engine and restore, since each numbers its resolves from 1 again. */
   #generation = 0;
+  /** The materials' preparations seen, those not yet settled, and when the last settled (R10.T14.d). */
+  readonly #preparations: PreparationCount = { seen: 0, inFlight: 0, lastSettledAtMs: null };
 
   /**
    * @param inner - Where the engines come from: R01's by default.
@@ -190,6 +202,27 @@ export class ViewsProbe implements EngineProbe {
     for (const watcher of this.#watchers) {
       watcher.submitted(owner, frame, this.#frameMs);
     }
+  }
+
+  preparing(prepared: Promise<void>): void {
+    const preparations = this.#preparations;
+    preparations.seen += 1;
+    preparations.inFlight += 1;
+    // Its caller handles its failure; here it only settles.
+    const settle = (): void => {
+      preparations.inFlight -= 1;
+      preparations.lastSettledAtMs = this.#nowMs();
+    };
+    void prepared.then(settle, settle);
+  }
+
+  /**
+   * The materials' preparations so far (plan R10, R10.T14.d): how many the views' renderers made,
+   * how many have not settled, and when the last settled, ms; VIEW's opening ends once those its
+   * views made as they opened have settled.
+   */
+  preparations(): Readonly<PreparationCount> {
+    return { ...this.#preparations };
   }
 
   madeTarget(spec: RenderTargetSpec, target: RenderTarget): void {

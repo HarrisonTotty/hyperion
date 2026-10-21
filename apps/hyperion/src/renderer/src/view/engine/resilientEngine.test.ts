@@ -427,6 +427,43 @@ describe("a device loss", () => {
     expect(nth(module, 1).released).toEqual([remade, recompiled]);
   });
 
+  it("prepares a material the current engine made, and refuses one a lost engine made (R10.T14.d)", async () => {
+    const { engine, module } = await load([adapter(), adapter()]);
+    const mesh = engine.createMesh(MESH);
+    const material = engine.createMaterial(MATERIAL);
+    await engine.prepareMaterial(material, ["rgba16float"], [mesh]);
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(module.engines).toHaveLength(2);
+    });
+    await expect(engine.prepareMaterial(material, ["rgba16float"], [mesh])).rejects.toBeInstanceOf(
+      EngineUnavailable,
+    );
+    expect([nth(module, 0).prepared, nth(module, 1).prepared]).toEqual([[material], []]);
+  });
+
+  it("refuses to prepare a material it never made, or one released (R10.T14.d)", async () => {
+    const { engine } = await load([adapter()]);
+    const material = engine.createMaterial(MATERIAL);
+    engine.releaseMaterial(material);
+    await expect(engine.prepareMaterial(material, ["rgba16float"], [])).rejects.toThrow(
+      /material .* was not made through this engine, or was released/u,
+    );
+  });
+
+  it("tells its restored listeners in the order they were added (R10.T14.d)", async () => {
+    const { engine, module } = await load([adapter(), adapter()]);
+    const told: string[] = [];
+    engine.onRestored(() => told.push("first"));
+    engine.onRestored(() => told.push("second"));
+    engine.onRestored(() => told.push("third"));
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(told).toHaveLength(3);
+    });
+    expect(told).toEqual(["first", "second", "third"]);
+  });
+
   it("drops writes and refuses creations while there is no device", async () => {
     const gpu = new HeldGpu([adapter()]);
     const { engine, module } = await load([], {}, gpu);

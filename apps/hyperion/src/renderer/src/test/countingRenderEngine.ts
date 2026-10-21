@@ -50,8 +50,10 @@ import type {
   PassTimes,
   PointSplatHandle,
   PostProcessHandle,
+  PreparedTarget,
   RenderEngine,
   RenderTarget,
+  RenderTargetFormat,
   RenderTargetSpec,
   RenderView,
   TextureHandle,
@@ -106,6 +108,23 @@ export interface RecordedTextureWrite {
   readonly size: GPUExtent3D;
   /** A copy of the data written, as bytes. */
   readonly data: Uint8Array;
+}
+
+/**
+ * One material asked of `createMaterialAsync`, with the targets and the meshes' names it was asked
+ * to compile for (R10.T14.d), whether or not it compiled.
+ */
+export interface RecordedCompile {
+  readonly name: string;
+  readonly targets: ReadonlyArray<RenderTargetFormat>;
+  readonly meshes: ReadonlyArray<string>;
+}
+
+/** One material asked of `prepareMaterial`, with its targets and meshes' names (R10.T14.d). */
+export interface RecordedPrepare {
+  readonly name: string;
+  readonly targets: ReadonlyArray<PreparedTarget>;
+  readonly meshes: ReadonlyArray<string>;
 }
 
 /** How many of each kind of handle are live: made and neither released nor lost (R10.T16.b). */
@@ -166,6 +185,10 @@ export class CountingRenderEngine implements RenderEngine {
   readonly textureSpecs: TextureSpec[] = [];
   /** Every frame submitted to a render target, first first (views record their own). */
   readonly targetFrames: FrameSubmission[] = [];
+  /** Every material asked of `createMaterialAsync`, first first, refused ones too (R10.T14.d). */
+  readonly compiles: RecordedCompile[] = [];
+  /** Every material asked of `prepareMaterial`, first first, refused ones too (R10.T14.d). */
+  readonly prepares: RecordedPrepare[] = [];
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
   readonly #restoredListeners = new Set<() => void>();
   /** What each buffer and texture was made with, so that a release raises its bytes (R06.T13.h). */
@@ -384,7 +407,12 @@ export class CountingRenderEngine implements RenderEngine {
     return material;
   }
 
-  createMaterialAsync(spec: WgslMaterialSpec): Promise<MaterialHandle> {
+  createMaterialAsync(
+    spec: WgslMaterialSpec,
+    targets: ReadonlyArray<RenderTargetFormat> = [],
+    meshes: ReadonlyArray<MeshHandle> = [],
+  ): Promise<MaterialHandle> {
+    this.compiles.push({ name: spec.name, targets, meshes: meshes.map((mesh) => mesh.name) });
     if (this.#unavailable) {
       return Promise.reject(new EngineUnavailable("createMaterialAsync"));
     }
@@ -392,6 +420,27 @@ export class CountingRenderEngine implements RenderEngine {
       return Promise.reject(new Error(`material ${spec.name} could not be compiled`));
     }
     return Promise.resolve(this.createMaterial(spec));
+  }
+
+  /**
+   * Records the preparation and resolves, as the engine's pipelines made (R10.T14.d); rejects with
+   * `EngineUnavailable` inside a modelled loss's window, and for a material not live.
+   */
+  prepareMaterial(
+    material: MaterialHandle,
+    targets: ReadonlyArray<PreparedTarget>,
+    meshes: ReadonlyArray<MeshHandle>,
+  ): Promise<void> {
+    this.prepares.push({ name: material.name, targets, meshes: meshes.map((mesh) => mesh.name) });
+    if (this.#unavailable) {
+      return Promise.reject(new EngineUnavailable("prepareMaterial"));
+    }
+    if (!this.#materials.has(material)) {
+      return Promise.reject(
+        new Error(`material ${material.name} was not made by this engine, or was released`),
+      );
+    }
+    return Promise.resolve();
   }
 
   createPostProcess(spec: WgslPostProcessSpec): PostProcessHandle {

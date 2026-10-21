@@ -38,7 +38,13 @@ import { PHASE_TABLE_SAMPLES } from "../../appearance/law";
 import { packPhaseFactorRows } from "../../appearance/litBodyProbe";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../../engine/gpuFlags";
 import { type GpuCapabilities, MAX_TEXTURE_ARRAY_LAYERS } from "../../engine/platform";
-import type { BufferHandle, MeshHandle, RenderEngine, TextureHandle } from "../../engine/types";
+import type {
+  BufferHandle,
+  MeshHandle,
+  MeshSpec,
+  RenderEngine,
+  TextureHandle,
+} from "../../engine/types";
 import type { TerrainSettings, TerrainVertexPath } from "../../quality/qualitySetting";
 import type { SpheroidFigure } from "../../atmosphere/hillaire";
 import type { PatchKey } from "../patchKey";
@@ -192,15 +198,13 @@ export function normalsAtlasLayout(
   maxDimensionTexels: number,
   maxLayers: number,
 ): NormalsAtlasLayout {
+  const refusal = atlasRefusal(samplesPerSide, slots, maxDimensionTexels, maxLayers);
+  if (refusal !== null) {
+    throw new Error(refusal);
+  }
   const tileTexels = samplesPerSide + 2 * NORMALS_GUTTER_TEXELS;
   const perSide = Math.floor(maxDimensionTexels / tileTexels);
-  const perLayer = perSide * perSide;
-  const layers = Math.ceil(slots / perLayer);
-  if (perSide < 1 || layers > maxLayers) {
-    throw new Error(
-      `${slots} normal tiles of ${tileTexels}² texels do not fit ${maxLayers} layers of ${maxDimensionTexels}²`,
-    );
-  }
+  const layers = Math.ceil(slots / (perSide * perSide));
   const tilesPerLayer = Math.ceil(slots / layers);
   const columns = Math.min(perSide, tilesPerLayer);
   const rows = Math.ceil(tilesPerLayer / columns);
@@ -214,6 +218,21 @@ export function normalsAtlasLayout(
     widthTexels: columns * tileTexels,
     heightTexels: rows * tileTexels,
   };
+}
+
+/** Why {@link normalsAtlasLayout} cannot place its tiles, or `null` where it can. */
+function atlasRefusal(
+  samplesPerSide: number,
+  slots: number,
+  maxDimensionTexels: number,
+  maxLayers: number,
+): string | null {
+  const tileTexels = samplesPerSide + 2 * NORMALS_GUTTER_TEXELS;
+  const perSide = Math.floor(maxDimensionTexels / tileTexels);
+  const layers = Math.ceil(slots / (perSide * perSide));
+  return perSide < 1 || layers > maxLayers
+    ? `${slots} normal tiles of ${tileTexels}² texels do not fit ${maxLayers} layers of ${maxDimensionTexels}²`
+    : null;
 }
 
 /** The stored corner of `slot`'s tile in `atlas`. */
@@ -300,6 +319,32 @@ export function terrainLayout(
   limits: TerrainLimits,
   shading: TerrainShading = "spike",
 ): TerrainLayout {
+  const fitted = fitLayout(terrain, limits, shading);
+  if (typeof fitted === "string") {
+    throw new Error(fitted);
+  }
+  return fitted;
+}
+
+/**
+ * {@link terrainLayout}, or `null` where the device holds no layout of `terrain`, which is then
+ * refused (R10.T14.d: the session compiles no material of a layout no pass can be made on).
+ */
+export function fittedTerrainLayout(
+  terrain: TerrainSettings,
+  limits: TerrainLimits,
+  shading: TerrainShading = "spike",
+): TerrainLayout | null {
+  const fitted = fitLayout(terrain, limits, shading);
+  return typeof fitted === "string" ? null : fitted;
+}
+
+/** {@link terrainLayout}'s layout, or why the device refuses it. */
+function fitLayout(
+  terrain: TerrainSettings,
+  limits: TerrainLimits,
+  shading: TerrainShading,
+): TerrainLayout | string {
   let slots = terrainSlotLayout(terrain, shading);
   let vertexPath = terrain.vertexPath;
   let fallback: TerrainLayout["fallback"] = "none";
@@ -309,9 +354,7 @@ export function terrainLayout(
     slots = terrainSlotLayout({ ...terrain, vertexPath }, shading);
   }
   if (!storageFits(slots, limits)) {
-    throw new Error(
-      `the terrain's ${slots.slotCount} slots exceed the device's storage binding of ${limits.maxStorageBufferBindingSize} B`,
-    );
+    return `the terrain's ${slots.slotCount} slots exceed the device's storage binding of ${limits.maxStorageBufferBindingSize} B`;
   }
   if (shading === "wire") {
     return { shading, vertexPath, fallback, slots, atlas: null };
@@ -324,6 +367,15 @@ export function terrainLayout(
     case "mesh":
       samplesPerSide = PATCH_VERTICES_PER_SIDE;
       break;
+  }
+  const refusal = atlasRefusal(
+    samplesPerSide,
+    slots.slotCount,
+    limits.maxTextureDimension2D,
+    MAX_TEXTURE_ARRAY_LAYERS,
+  );
+  if (refusal !== null) {
+    return refusal;
   }
   const atlas = normalsAtlasLayout(
     samplesPerSide,
@@ -502,6 +554,28 @@ export function litPatchMeshData(): {
     });
   }
   return { positions, indices };
+}
+
+/**
+ * The mesh a pass of `shading` draws every patch with: R05's shared one ({@link patchMeshData})
+ * for the spike's shading, and the lit mesh ({@link litPatchMeshData}) for R10's lit material and
+ * the wireframe's (R10.T10.c, R10.T11).
+ *
+ * @remarks
+ * Its vertex layout, one `position` of three floats a vertex in a triangle list, is what the
+ * engine keys a material's pipelines by beside the target, so the terrain session compiles its
+ * materials against a mesh of this one's layout (plan R10, R10.T14.d; `materialSet.ts`).
+ */
+export function terrainMeshSpec(shading: TerrainShading): MeshSpec {
+  const lit = TERRAIN_SHADING_TRAITS[shading].litMesh;
+  const { positions, indices } = lit ? litPatchMeshData() : patchMeshData();
+  return {
+    name: lit ? "terrain lit patch" : "terrain patch",
+    positions,
+    indices,
+    topology: "triangle-list",
+    attributes: {},
+  };
 }
 
 /**
@@ -1317,14 +1391,7 @@ export class TerrainResources {
     });
     const traits = TERRAIN_SHADING_TRAITS[layout.shading];
     const rest = (): MadeFields => {
-      const { positions, indices } = traits.litMesh ? litPatchMeshData() : patchMeshData();
-      const mesh = engine.createMesh({
-        name: traits.litMesh ? "terrain lit patch" : "terrain patch",
-        positions,
-        indices,
-        topology: "triangle-list",
-        attributes: {},
-      });
+      const mesh = engine.createMesh(terrainMeshSpec(layout.shading));
       // Every view's buffers, the default view's included, are made at its first frame.
       const views = new Map<string, TerrainViewBuffers>();
       return { lit: traits.lit ? this.#makeLit() : null, fields, slotRecords, mesh, views };

@@ -27,6 +27,17 @@
  *
  * Then `VIEW` is taken to `PHASE TEST`, which has no terrain, and the session's teardown is read:
  * no worker left, no GPU bytes of the terrain's.
+ *
+ * Each session's phases start once its materials have compiled, which it starts as it is made
+ * (R10.T14.d): the run's first and the loss phase's fresh one. The compile's time and the longest
+ * time between animation frames over it are recorded for each session made
+ * (`TerrainCheckRecord.sessions`), and judged as the phases' gaps are. Before its first choice of
+ * `TERRAIN TEST` the run waits for VIEW's opening to end, the materials' preparations its views made
+ * as they opened settled (`TerrainCheckRecord.opening`, recorded and not judged). From then to the
+ * teardown's choice of `PHASE TEST` is the judged span (decision-r10-t14d-stall §3): the page's
+ * longest time between animation frames over it, outside the forced loss's restore, is recorded
+ * and judged (`TerrainCheckRecord.span`), the scene choices and each phase's configuration between
+ * the phases among it.
  */
 
 import { norm } from "../../../geometry/vec3";
@@ -36,6 +47,7 @@ import type {
   TerrainCheckPhaseName,
   TerrainCheckPhaseRecord,
   TerrainCheckRecord,
+  TerrainCheckSpanRecord,
   ViewsCheckApi,
   ViewsCheckStyle,
   ViewsCheckWindow,
@@ -55,10 +67,12 @@ import {
   limbDistanceM,
   pixelAngleRad,
 } from "../../../view/terrain/handover";
-import { PRIMARY_VIEW_NAME } from "../viewNames";
+import { PRIMARY_NAME, PRIMARY_VIEW_NAME } from "../viewNames";
 import {
   type QuietSpan,
   bakesInFlight,
+  longestGapOutside,
+  longestGapThrough,
   type MaskReading,
   type TerrainMark,
   type TerrainProbe,
@@ -209,7 +223,10 @@ export function terrainProbeOptions(smoke: boolean): TerrainProbeOptions {
 /** What the terrain run drives and reads. */
 export interface TerrainCheckDeps {
   readonly api: Pick<ViewsCheckApi, "startPhase" | "endPhase" | "capture">;
-  readonly views: Pick<ViewsProbe, "canvasOf" | "timer" | "restoresAtMs">;
+  readonly views: Pick<
+    ViewsProbe,
+    "canvasOf" | "timer" | "restoresAtMs" | "preparations" | "frameTimes"
+  >;
   readonly terrain: Pick<
     TerrainProbe,
     | "session"
@@ -226,6 +243,9 @@ export interface TerrainCheckDeps {
     | "terrainFaults"
     | "teardown"
     | "phase"
+    | "compiled"
+    | "sessions"
+    | "scriptSAt"
   >;
   readonly setting: QualitySettingName;
   readonly document: Document;
@@ -302,6 +322,13 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
   const { stopped, wait, until } = driver;
   const plans = TERRAIN_CHECK_PLAN[deps.setting];
   const phases: TerrainCheckPhaseRecord[] = [];
+  /** The forced loss's restore, which the judged span leaves out as the loss phase does. */
+  let restore: QuietSpan | null = null;
+  /**
+   * The run's own computations on the page's main thread, each phase's record made at its end:
+   * the judged span leaves out the gaps they make (R10.T14.d).
+   */
+  const harness: QuietSpan[] = [];
   /** Waits until `test` holds or `limit` does, looking every poll; returns whether `test` held. */
   const watch = async (test: () => boolean, limit: () => boolean): Promise<boolean> => {
     stopped();
@@ -337,14 +364,31 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
     deps.markWindow(window);
     stopped();
     await deps.api.endPhase(name, window);
+    const fromMs = deps.nowMs();
     phases.push(terrain.phase(name, start, end, driver.shownViews(), quiet));
+    harness.push({ fromMs, toMs: deps.nowMs() });
   };
-  /** Takes `VIEW` off `TERRAIN TEST` and back: a fresh session, the script from its start. */
-  const freshSession = async (): Promise<void> => {
+  /**
+   * Waits for `VIEW`'s session on `TERRAIN TEST` and for its materials' compile, which it starts as
+   * it is made (R10.T14.d): a phase starts after it, so that a cold compile's stall of the page is
+   * the session's making's (`TerrainCheckRecord.sessions`), not the phase's.
+   */
+  const sessionCompiled = async (): Promise<void> => {
+    await until("no terrain session was made", () => terrain.session !== null);
+    await until("the terrain session's materials did not compile", () => terrain.compiled);
+  };
+  /**
+   * Takes `VIEW` off `TERRAIN TEST` and back: a fresh session, the script from its start, compiled;
+   * returns the counters as `TERRAIN TEST` is chosen again, before the session asks for anything.
+   */
+  const freshSession = async (): Promise<TerrainMark> => {
     await driver.chooseScene(PHASE_SCENE_NAME);
     await until("the terrain session was not let go", () => terrain.session === null);
+    // Before the choice, so that no block the new session asks for is counted before it.
+    const chosen = terrain.mark();
     await driver.chooseScene(TERRAIN_SCENE_NAME);
-    await until("no terrain session was made", () => terrain.session !== null);
+    await sessionCompiled();
+    return chosen;
   };
 
   /**
@@ -442,15 +486,16 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
   /** The last phase: a fresh session, its device destroyed mid-stream, and its restore. */
   const lossPhase = async (plan: TerrainCheckPhasePlan): Promise<TerrainCheckLossRecord> => {
     await driver.configure(plan);
-    await freshSession();
+    const chosen = await freshSession();
     await driver.configure(plan);
     const start = await begin(plan.name);
     const firstBlocks = terrainTestGolden().payloads[0]?.blocksHex.length ?? 0;
+    // The fresh session's blocks, from the choice, since some may come during its compile.
     const midStream = (): boolean => {
       const mark = terrain.mark();
       return (
         script() >= TERRAIN_TEST_SCRIPT.deltaAtS &&
-        mark.fixture.blocksSent - start.fixture.blocksSent > firstBlocks &&
+        mark.fixture.blocksSent - chosen.fixture.blocksSent > firstBlocks &&
         mark.fixture.blocksToCome > 0 &&
         bakesInFlight(mark.workers) > 0
       );
@@ -491,11 +536,9 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
     const end = destroyedAtMs === null ? null : await terrain.readMask();
     const expected = terrain.coverageCells();
     const after = terrain.mark();
-    await finish(
-      plan.name,
-      start,
-      quiet ?? (destroyedAtMs === null ? null : { fromMs: destroyedAtMs, toMs: after.atMs }),
-    );
+    restore =
+      quiet ?? (destroyedAtMs === null ? null : { fromMs: destroyedAtMs, toMs: after.atMs });
+    await finish(plan.name, start, restore);
     return {
       destroyedAtMs,
       destroyedAtScriptS: destroyed ? (atDestroy.scriptS ?? null) : null,
@@ -518,6 +561,28 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
         beforeKept: before !== null && afterRestore !== null && kept(before, afterRestore),
         endAsExpected: end !== null && sameCells(end.cells, expected),
       },
+    };
+  };
+
+  /**
+   * The judged span from `fromMs` to `toMs` (R10.T14.d; decision-r10-t14d-stall §3): the page's
+   * longest time between animation frames over it, outside the restore and the run's own
+   * computations, and where it ended.
+   */
+  const spanRecord = (fromMs: number, toMs: number): TerrainCheckSpanRecord => {
+    const { gapMs, endMs } = longestGapOutside(
+      deps.views.frameTimes(fromMs, toMs),
+      fromMs,
+      toMs,
+      restore === null ? harness : [restore, ...harness],
+    );
+    return {
+      fromMs,
+      toMs,
+      longestFrameGapMs: gapMs,
+      longestGapEndMs: endMs,
+      longestGapEndScriptS: terrain.scriptSAt(endMs),
+      harnessMs: harness.reduce((sum, span) => sum + span.toMs - span.fromMs, 0),
     };
   };
 
@@ -562,12 +627,28 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
     return (await runFrom(index + 1)) ?? loss;
   };
 
+  // VIEW's opening: until the preparations its views made as they opened have settled (R10.T14.d),
+  // so that no first draw of a prepared material races its preparation in what is judged.
+  const openedFromMs = deps.nowMs();
+  // VIEW drawn at all first, as a scene's choice waits for it, so that a launch that cannot draw
+  // VIEW fails for that reason.
+  await until(
+    "VIEW did not show its primary view",
+    () => driver.controls.styleOf(PRIMARY_NAME) !== null,
+  );
+  await until("VIEW's views made no preparation", () => deps.views.preparations().seen > 0);
+  await until("VIEW's preparations did not settle", () => deps.views.preparations().inFlight === 0);
+  const openedAtMs = deps.nowMs();
+  const preparations = deps.views.preparations().seen;
   await driver.chooseScene(TERRAIN_SCENE_NAME);
+  await sessionCompiled();
   const loss = await runFrom(0);
   if (loss === null) {
     throw new Error(`views check: the ${deps.setting} plan has no loss phase`);
   }
-  // The teardown: VIEW on a kept scene with no terrain, the session let go.
+  // The judged span ends at the teardown's choice: VIEW on a kept scene with no terrain, the
+  // session let go.
+  const judgedToMs = deps.nowMs();
   await driver.chooseScene(PHASE_SCENE_NAME);
   await until("the terrain session was not let go", () => terrain.session === null);
   await wait(timing.settleMs);
@@ -577,6 +658,17 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
     phases,
     faults: terrain.faults(),
     terrainFaults: terrain.terrainFaults(),
+    sessions: terrain.sessions(),
+    span: spanRecord(openedAtMs, judgedToMs),
+    opening: {
+      preparedMs: openedAtMs - openedFromMs,
+      preparations,
+      longestFrameGapMs: longestGapThrough(
+        deps.views.frameTimes(openedFromMs, Infinity),
+        openedFromMs,
+        openedAtMs,
+      ),
+    },
     restoresAtMs: deps.views.restoresAtMs(),
     loss,
     teardown: terrain.teardown(),

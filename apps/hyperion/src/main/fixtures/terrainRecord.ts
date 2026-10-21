@@ -23,6 +23,7 @@ function photoreal(
     submitMs: [0.8, 0.9],
     missedFrames: 0,
     longestGapMs: 34,
+    longestGapEndScriptS: 120.5,
     handedOverDraws: 60,
     offSurveyDraws: 12,
     terrainDraws: 60,
@@ -31,6 +32,7 @@ function photoreal(
     firstHandoverMs: phaseStartMs + 1_200,
     firstHandoverScriptS: 38.5,
     firstTerrainMs: phaseStartMs + 1_300,
+    terrainHandoverMs: phaseStartMs + 1_200,
     readBacks: 4,
     nonFiniteTexels: 0,
   };
@@ -53,6 +55,7 @@ function wireframe(
     submitMs: [0.3],
     missedFrames: 0,
     longestGapMs: 40,
+    longestGapEndScriptS: 271,
     handedOverDraws: 30,
     offSurveyDraws: 6,
     terrainDraws: 30,
@@ -61,6 +64,7 @@ function wireframe(
     firstHandoverMs: phaseStartMs + 1_500,
     firstHandoverScriptS: 270.2,
     firstTerrainMs: phaseStartMs + 1_700,
+    terrainHandoverMs: phaseStartMs + 1_500,
     readBacks: 0,
     nonFiniteTexels: 0,
   };
@@ -134,6 +138,25 @@ export const TERRAIN_RECORD: TerrainCheckRecord = {
     },
   ],
   terrainFaults: [],
+  sessions: [
+    {
+      madeAtMs: 1_000,
+      compile: { kind: "ended", compileMs: 180, compiled: 3, longestFrameGapMs: 50 },
+    },
+    {
+      madeAtMs: 590_000,
+      compile: { kind: "ended", compileMs: 25, compiled: 3, longestFrameGapMs: 17 },
+    },
+  ],
+  opening: { preparedMs: 900, preparations: 3, longestFrameGapMs: 1_100 },
+  span: {
+    fromMs: 950,
+    toMs: 762_000,
+    longestFrameGapMs: 67,
+    longestGapEndMs: 300_000,
+    longestGapEndScriptS: 40.2,
+    harnessMs: 120,
+  },
   restoresAtMs: [DESTROYED_AT_MS + 400],
   loss: {
     destroyedAtMs: DESTROYED_AT_MS,

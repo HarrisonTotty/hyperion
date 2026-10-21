@@ -145,6 +145,7 @@ function useUnderTest(
     source: terrainSessionSource(choice.kind === "server" ? { ...choice, link } : choice),
     createWorker,
     workers: 2,
+    setting: "high",
   });
 }
 

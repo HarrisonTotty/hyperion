@@ -8,8 +8,17 @@
  *
  * - **The phases**: every phase of the launch's setting ran, in order, and held its views' styles.
  * - **Every frame drawn**: no view missed an animation frame it was due at its own cadence, in any
- *   phase, outside the forced loss's restore; the longest time between two of its draws is
- *   recorded beside it, provisional (a stall of the whole page, when no animation frame runs).
+ *   phase, outside the forced loss's restore.
+ * - **No view stopped** (plan R10, R10.T14.d; decision-r10-t16-leans §2,
+ *   decision-r10-t14d-stall §3): over the judged span, from the end of VIEW's opening to the
+ *   teardown's choice of `PHASE TEST`, outside the forced loss's restore, nothing is over
+ *   {@link TERRAIN_GAP_LIMIT_MS}: not the page's longest time between two animation frames over the
+ *   whole span (the scene choices and the configurations between the phases among it), no view's
+ *   longest time between two of its draws in any phase, and no longest time between two animation
+ *   frames while a session made and compiled its materials (each session's phases start after that
+ *   compile), which says which window a stall fell in. A stall of the whole page, when no animation
+ *   frame runs, is no missed frame and shows here alone, so that the run tells the two apart.
+ *   VIEW's opening, until its views' preparations settled, is recorded and not judged.
  * - **Every frame finite**: every read-back of a photorealistic view's scene target was finite.
  * - **The terrain drawn once handed over**: the primary handed `TEST MOON` over in the first phase,
  *   and every view that handed it over with a drawn patch in its view, a photorealistic one to its
@@ -45,7 +54,10 @@ import type {
   TerrainCheckPhaseName,
   TerrainCheckPhaseRecord,
   TerrainCheckRecord,
+  TerrainCheckOpeningRecord,
   TerrainCheckSessionFault,
+  TerrainCheckSessionRecord,
+  TerrainCheckSpanRecord,
   ViewsCheckStyle,
   ViewsCheckViewName,
 } from "../preload/api";
@@ -67,8 +79,12 @@ import { join } from "node:path";
 /** The file's schema name. */
 export const TERRAIN_CHECK_SCHEMA = "hyperion.views-check.terrain-results";
 
-/** The schema's version; bumped with any change to the file's shape (2: R10.T16.e's `terrainFaults`). */
-export const TERRAIN_CHECK_VERSION = 2;
+/**
+ * The schema's version; bumped with any change to the file's shape (2: R10.T16.e's
+ * `terrainFaults`; 3: R10.T14.d's `noStall`, each view's `longestGapEndScriptS`, the `sessions`,
+ * the `opening`, the `span` and the `phaseWindows`).
+ */
+export const TERRAIN_CHECK_VERSION = 3;
 
 /**
  * The longest from a view's hand-over to its first terrain draw, ms: the lit material compiles and
@@ -76,6 +92,24 @@ export const TERRAIN_CHECK_VERSION = 2;
  * (2026-10-20, hidden, high), the second 0.13 s; the limit catches a terrain that never draws.
  */
 export const TERRAIN_DELAY_LIMIT_MS = 15_000;
+
+/**
+ * The longest the page may go without an animation frame, and a view between two of its draws,
+ * over the terrain run's judged span outside the forced loss's restore, ms (plan R10, R10.T14.d;
+ * decision-r10-t16-leans §2, decision-r10-t14d-stall §3): the guide's Motion rule that a view never
+ * stops.
+ *
+ * @remarks
+ * Set by decision-r10-t14d-stall §3's rule, from one cold launch a setting (the driver's shader
+ * cache and Dawn's blob cache both empty), under the heavy lock on a quiet machine: 1.5 times the
+ * worst judged gap of the two, rounded up to 50 ms, held within 200 to 500 ms; a gap that would
+ * need more is a defect finding, not a higher limit. One limit for both settings, every view and
+ * every machine; judged on every run, warm or cold. The cold launches of 2026-10-20 (RTX 3080,
+ * hidden, plan 10's T14.d record): the worst judged gap 316.7 ms, high, the page's in the loss
+ * phase's fresh session's making (low's worst 150 ms); 1.5 × 316.7 = 475.1, rounded up to 500,
+ * within the cap. T14.b's quiet session and the owner's UHD 620 run re-read it by the same rule.
+ */
+export const TERRAIN_GAP_LIMIT_MS = 500;
 
 /** One phase a launch runs, and the styles it shows: the primary's, then each open instrument's. */
 export interface TerrainPhasePlan {
@@ -163,13 +197,18 @@ export interface TerrainViewFigures {
   readonly submitMs: DurationStats | null;
   readonly missedFrames: number;
   readonly longestGapMs: number;
+  /** The script's time at its longest gap's end, s, or `null` before any was told. */
+  readonly longestGapEndScriptS: number | null;
   readonly handedOverDraws: number;
   readonly offSurveyDraws: number;
   readonly terrainDraws: number;
   readonly terrainGaps: number;
   readonly terrainGapSpansS: ReadonlyArray<readonly [number, number]>;
   readonly firstHandoverScriptS: number | null;
-  /** From its first hand-over to its first terrain draw, ms; `null` where either is missing. */
+  /**
+   * From the hand-over it first drew the terrain in to that draw, ms (`terrainHandoverMs`); `null`
+   * where it never drew the terrain.
+   */
   readonly terrainDelayMs: number | null;
   readonly readBacks: number;
   readonly nonFiniteTexels: number;
@@ -246,6 +285,11 @@ export interface TerrainCheckResults {
   readonly findings: {
     readonly phases: TerrainFinding;
     readonly framesDrawn: TerrainFinding;
+    /**
+     * No view stopped (R10.T14.d): neither the page over the judged span, nor a view in a phase,
+     * nor the page in a session's compile window, over {@link TERRAIN_GAP_LIMIT_MS}.
+     */
+    readonly noStall: TerrainFinding & { readonly limitMs: number };
     readonly framesFinite: TerrainFinding & { readonly readBacks: number };
     readonly terrainDrawn: TerrainFinding;
     readonly faults: TerrainFaultsFinding;
@@ -264,6 +308,18 @@ export interface TerrainCheckResults {
     };
     readonly consoleErrors: { readonly count: number; readonly first: ReadonlyArray<string> };
   };
+  /**
+   * Each terrain session made over the run and its materials' compile, provisional; its longest
+   * time between animation frames is judged in {@link TerrainCheckResults.findings}' `noStall`
+   * (R10.T14.d).
+   */
+  readonly sessions: ReadonlyArray<TerrainCheckSessionRecord>;
+  /** VIEW's opening, until its views' preparations settled: recorded, not judged (R10.T14.d). */
+  readonly opening: TerrainCheckOpeningRecord;
+  /** The judged span's page-wide longest gap, judged in `noStall` (R10.T14.d). */
+  readonly span: TerrainCheckSpanRecord;
+  /** Each phase's window, `performance.now()` ms, to place the span's longest gap by. */
+  readonly phaseWindows: ReadonlyArray<Pick<TerrainCheckPhaseRecord, "name" | "startMs" | "endMs">>;
   /** Every finding's verdict together: `pass` only if each passes. */
   readonly overall: Verdict;
 }
@@ -309,16 +365,19 @@ function phaseFigures(record: TerrainCheckPhaseRecord, setting: SpikeSetting): T
       submitMs: durationStats(view.submitMs),
       missedFrames: view.missedFrames,
       longestGapMs: view.longestGapMs,
+      longestGapEndScriptS: view.longestGapEndScriptS,
       handedOverDraws: view.handedOverDraws,
       offSurveyDraws: view.offSurveyDraws,
       terrainDraws: view.terrainDraws,
       terrainGaps: view.terrainGaps,
       terrainGapSpansS: view.terrainGapSpansS,
       firstHandoverScriptS: view.firstHandoverScriptS,
+      // From the hand-over it first drew the terrain in, not a lone handed-over draw before it
+      // (R10.T14.d).
       terrainDelayMs:
-        view.firstHandoverMs === null || view.firstTerrainMs === null
+        view.terrainHandoverMs === null || view.firstTerrainMs === null
           ? null
-          : view.firstTerrainMs - view.firstHandoverMs,
+          : view.firstTerrainMs - view.terrainHandoverMs,
       readBacks: view.readBacks,
       nonFiniteTexels: view.nonFiniteTexels,
     })),
@@ -447,6 +506,61 @@ function framesDrawnFinding(phases: ReadonlyArray<TerrainPhaseFigures>): Terrain
     ),
   );
   return finding(reasons);
+}
+
+/** Where a view's longest gap ended, in the script's time, for a reason or a reading. */
+function gapEnd(view: TerrainViewFigures): string {
+  return view.longestGapEndScriptS === null
+    ? ""
+    : ` to ${view.longestGapEndScriptS.toFixed(1)} s of the script`;
+}
+
+/** The phase whose window holds `atMs`, or that it fell between phases. */
+function windowOf(
+  phases: ReadonlyArray<Pick<TerrainCheckPhaseRecord, "name" | "startMs" | "endMs">>,
+  atMs: number,
+): string {
+  const phase = phases.find((each) => atMs >= each.startMs && atMs <= each.endMs);
+  return phase === undefined ? "between the phases" : `in ${phase.name}`;
+}
+
+/**
+ * No view stopped: not the page's longest time between animation frames over the judged span, no
+ * view's longest time between draws in a phase, and no session's longest time between animation
+ * frames while it compiled, over the limit (R10.T14.d).
+ */
+function noStallFinding(
+  phases: ReadonlyArray<TerrainPhaseFigures>,
+  record: Pick<TerrainCheckRecord, "phases" | "sessions" | "span">,
+): TerrainFinding & { readonly limitMs: number } {
+  const limit = String(TERRAIN_GAP_LIMIT_MS);
+  const { sessions, span } = record;
+  const reasons = [
+    ...(span.longestFrameGapMs > TERRAIN_GAP_LIMIT_MS
+      ? [
+          `the page drew no animation frame for ${span.longestFrameGapMs.toFixed(0)} ms ${windowOf(record.phases, span.longestGapEndMs)}${span.longestGapEndScriptS === null ? "" : `, to ${span.longestGapEndScriptS.toFixed(1)} s of the script`}, over ${limit} ms`,
+        ]
+      : []),
+    ...phases.flatMap((phase) =>
+      phase.views.flatMap((view) =>
+        view.longestGapMs > TERRAIN_GAP_LIMIT_MS
+          ? [
+              `${phase.name}: ${view.slot} drew nothing for ${view.longestGapMs.toFixed(0)} ms${gapEnd(view)}, over ${limit} ms`,
+            ]
+          : [],
+      ),
+    ),
+    ...sessions.flatMap(({ compile }, n) =>
+      compile.kind === "ended" &&
+      compile.longestFrameGapMs !== null &&
+      compile.longestFrameGapMs > TERRAIN_GAP_LIMIT_MS
+        ? [
+            `session ${String(n + 1)}: no animation frame for ${compile.longestFrameGapMs.toFixed(0)} ms while its materials compiled, over ${limit} ms`,
+          ]
+        : [],
+    ),
+  ];
+  return { ...finding(reasons), limitMs: TERRAIN_GAP_LIMIT_MS };
 }
 
 function framesFiniteFinding(
@@ -584,6 +698,7 @@ export function buildTerrainCheckResults(input: TerrainCheckInput): TerrainCheck
   const findings: TerrainCheckResults["findings"] = {
     phases: phasesFinding(phases, run.setting),
     framesDrawn: framesDrawnFinding(phases),
+    noStall: noStallFinding(phases, record),
     framesFinite: framesFiniteFinding(phases),
     terrainDrawn: terrainDrawnFinding(phases),
     faults,
@@ -603,6 +718,7 @@ export function buildTerrainCheckResults(input: TerrainCheckInput): TerrainCheck
   const verdicts = [
     findings.phases,
     findings.framesDrawn,
+    findings.noStall,
     findings.framesFinite,
     findings.terrainDrawn,
     findings.faults,
@@ -641,6 +757,10 @@ export function buildTerrainCheckResults(input: TerrainCheckInput): TerrainCheck
     },
     phases,
     findings,
+    sessions: record.sessions,
+    opening: record.opening,
+    span: record.span,
+    phaseWindows: record.phases.map(({ name, startMs, endMs }) => ({ name, startMs, endMs })),
     overall: verdicts.every((verdict) => verdict === "pass") ? "pass" : "fail",
   };
 }
@@ -651,6 +771,7 @@ export function terrainFailures(results: TerrainCheckResults): string {
   return [
     findings.phases,
     findings.framesDrawn,
+    findings.noStall,
     findings.framesFinite,
     findings.terrainDrawn,
     findings.faults,
@@ -710,7 +831,8 @@ export function terrainCheckMarkdown(results: TerrainCheckResults): string {
     "| Check | Verdict | Reading |",
     "| --- | --- | --- |",
     `| The setting's phases ran and held their views | ${findings.phases.verdict} | ${phases.map((phase) => `${phase.name}${phase.held ? "" : " (NOT held)"}`).join(", ")}${reasonsText(findings.phases)} |`,
-    `| Every frame drawn (no frame a view was due missed, outside the restore) | ${findings.framesDrawn.verdict} | missed frames, and the longest time between draws (provisional): ${phases.map((phase) => `${phase.name} ${phase.views.map((view) => `${view.slot} ${String(view.missedFrames)}, ${view.longestGapMs.toFixed(0)} ms`).join(", ")}`).join("; ")}${reasonsText(findings.framesDrawn)} |`,
+    `| Every frame drawn (no frame a view was due missed, outside the restore) | ${findings.framesDrawn.verdict} | missed frames: ${phases.map((phase) => `${phase.name} ${phase.views.map((view) => `${view.slot} ${String(view.missedFrames)}`).join(", ")}`).join("; ")}${reasonsText(findings.framesDrawn)} |`,
+    `| No view stopped (no time without a frame or a view's draw over ${String(findings.noStall.limitMs)} ms from VIEW's opening to the teardown, outside the restore) | ${findings.noStall.verdict} | the page's longest time between animation frames ${results.span.longestFrameGapMs.toFixed(0)} ms (${windowOf(results.phaseWindows, results.span.longestGapEndMs)}); the longest time between draws: ${phases.map((phase) => `${phase.name} ${phase.views.map((view) => `${view.slot} ${view.longestGapMs.toFixed(0)} ms${gapEnd(view)}`).join(", ")}`).join("; ")}${reasonsText(findings.noStall)} |`,
     `| Every frame finite (the photorealistic scene targets read back) | ${findings.framesFinite.verdict} | ${String(findings.framesFinite.readBacks)} read-backs${reasonsText(findings.framesFinite)} |`,
     `| The terrain drawn once handed over | ${findings.terrainDrawn.verdict} | ${phases.map((phase) => `${phase.name} ${phase.views.map((view) => `${view.slot} ${String(view.terrainDraws)} of ${String(view.handedOverDraws)} handed-over draws with a patch in view (${String(view.offSurveyDraws)} with none)${view.terrainDelayMs === null ? "" : `, first ${view.terrainDelayMs.toFixed(0)} ms after the hand-over`}`).join(", ")}`).join("; ")}${reasonsText(findings.terrainDrawn)} |`,
     `| One forced loss, then one restore, and no other fault | ${findings.faults.verdict} | ${findings.faults.expected === null ? "no forced loss excluded" : `excluded: ${findings.faults.expected.line}`}; ${String(findings.faults.restores)} restores; ${String(findings.faults.others.length)} other faults; ${String(findings.faults.gpuProcessExits)} GPU-process exits${reasonsText(findings.faults)} |`,
@@ -718,6 +840,10 @@ export function terrainCheckMarkdown(results: TerrainCheckResults): string {
     `| The loss mid-stream, and after it no field asked again | ${findings.loss.verdict} | ${loss.destroyedAtScriptS === null ? "not destroyed" : `destroyed at ${loss.destroyedAtScriptS.toFixed(1)} s of the script, ${String(loss.blocksToCome)} blocks to come, ${String(loss.bakesInFlight)} bakes in flight`}; after: ${String(loss.after.fieldAsks)} asks, ${String(loss.after.fieldInits)} inits, ${String(loss.after.fieldChunks)} chunks for ${String(loss.after.blocksSent)} blocks to ${String(loss.workers)} workers; the mask ${String(loss.masks.before ?? "—")} cells before, ${String(loss.masks.afterRestore ?? "—")} after the restore, ${String(loss.masks.end ?? "—")} at the end of ${String(loss.masks.expected)}${reasonsText(findings.loss)} |`,
     `| The session torn down | ${findings.teardown.verdict} | ${teardown.disposed ? "disposed" : "NOT disposed"}; ${String(teardown.workersLive)} of ${String(teardown.workersMade)} workers left; the session's textures ${String(teardown.sessionGpuBytes)} B; the terrain's GPU bytes left: ${bytesText(teardown.liveBytes)}${reasonsText(findings.teardown)} |`,
     `| No pixel drawn by both surfaces on the datum | — | ${findings.bothSurfaces} |`,
+    "",
+    `VIEW's opening (recorded, not judged): its views' ${String(results.opening.preparations)} preparations settled ${results.opening.preparedMs.toFixed(0)} ms after the run's start, the longest time between animation frames meanwhile ${results.opening.longestFrameGapMs === null ? "—" : `${results.opening.longestFrameGapMs.toFixed(0)} ms`}.`,
+    "",
+    `The sessions' materials, compiled as each is made, before its phases (judged by the same limit): ${results.sessions.length === 0 ? "no session made" : results.sessions.map(({ compile }, n) => `session ${String(n + 1)} ${compile.kind === "pending" ? "not compiled by the run's end" : `${String(compile.compiled)} compiled in ${compile.compileMs.toFixed(0)} ms, the longest time between animation frames meanwhile ${compile.longestFrameGapMs === null ? "—" : `${compile.longestFrameGapMs.toFixed(0)} ms`}`}`).join("; ")}.`,
     "",
     `The hand-over: ${handover.rangeM === null ? "no range" : `range ${(handover.rangeM / 1000).toFixed(0)} km, crossed at ${handover.expectedScriptS?.toFixed(1) ?? "—"} s of the script`}; the primary handed over at ${handover.observedScriptS?.toFixed(1) ?? "—"} s. Console errors: ${String(findings.consoleErrors.count)}${findings.consoleErrors.first.length === 0 ? "" : ` (${findings.consoleErrors.first.join(" | ")})`}.`,
     "",

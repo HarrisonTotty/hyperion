@@ -98,6 +98,7 @@ async function harness(options: { readonly workers?: number | "default" } = {}):
     universe: UNIVERSE,
     requests: hook.result.current.requests,
     linkUp: true,
+    setting: "high",
     createWorker: () => {
       const worker = new ScriptedHeightWorker();
       workers.push(worker);

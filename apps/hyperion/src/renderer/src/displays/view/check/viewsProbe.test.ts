@@ -289,6 +289,57 @@ describe("the views probe", () => {
     expect([record.droppedResolves, record.unattributedGpuMs]).toEqual([200_000, 0]);
   });
 
+  it("counts each preparation until it settles, failed or not (R10.T14.d)", async () => {
+    const { probe, page } = await probed();
+    const settles: Array<() => void> = [];
+    probe.preparing(
+      new Promise<void>((resolve) => {
+        settles.push(resolve);
+      }),
+    );
+    probe.preparing(
+      new Promise<void>((_, reject) => {
+        settles.push(() => {
+          reject(new Error("refused"));
+        });
+      }),
+    );
+    const before = probe.preparations();
+    page.nowMs = 40;
+    for (const settle of settles) {
+      settle();
+    }
+    await Promise.resolve();
+    await Promise.resolve();
+    expect([before, probe.preparations()]).toEqual([
+      { seen: 2, inFlight: 2, lastSettledAtMs: null },
+      { seen: 2, inFlight: 0, lastSettledAtMs: 40 },
+    ]);
+  });
+
+  it("is told of each preparation its probed engine passes on (R10.T14.d)", async () => {
+    const { probe, engine } = await probed();
+    const material = engine.createMaterial({
+      name: "prepared",
+      displayName: "PREPARED",
+      vertexWgsl: "",
+      fragmentWgsl: "",
+      uniforms: [],
+      samplers: [],
+      cullMode: "none",
+      depthWrite: false,
+      colourWrites: true,
+      blend: "none",
+    });
+    const prepared = engine.prepareMaterial(material, ["rgba16float"], []);
+    const during = probe.preparations();
+    await prepared;
+    expect([during.inFlight, probe.preparations()]).toEqual([
+      1,
+      { seen: 1, inFlight: 0, lastSettledAtMs: 0 },
+    ]);
+  });
+
   it("gives the page's own requestAnimationFrame back", () => {
     const probe = new ViewsProbe();
     const page = new FakePage();

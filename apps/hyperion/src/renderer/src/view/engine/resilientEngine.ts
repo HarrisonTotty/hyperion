@@ -34,6 +34,7 @@ import type {
   PointSplatHandle,
   PointSplatSpec,
   PostProcessHandle,
+  PreparedTarget,
   RenderEngine,
   RenderTarget,
   RenderTargetFormat,
@@ -221,6 +222,31 @@ export class ResilientEngine implements RenderEngine {
       // The engine asked, which a loss during the compile has left behind: its release is dropped.
       this.#makers.set(material, inner);
       return material;
+    });
+  }
+
+  /**
+   * Prepares a material the current engine made (R10.T14.d); one a lost engine made rejects with
+   * {@link EngineUnavailable}, since its owner makes it again, and prepares it again, at the
+   * restore.
+   *
+   * @throws Error, as a rejection, for a material no engine of this one made, or one released.
+   */
+  prepareMaterial(
+    material: MaterialHandle,
+    targets: ReadonlyArray<PreparedTarget>,
+    meshes: ReadonlyArray<MeshHandle>,
+  ): Promise<void> {
+    return this.#currentAsync("prepareMaterial", (inner) => {
+      const maker = this.#makers.get(material);
+      if (maker === undefined) {
+        return Promise.reject(
+          new Error(`material ${material.name} was not made through this engine, or was released`),
+        );
+      }
+      return maker === inner
+        ? inner.prepareMaterial(material, targets, meshes)
+        : Promise.reject(new EngineUnavailable("prepareMaterial"));
     });
   }
 
