@@ -157,6 +157,17 @@ const PEAK_RELIEF: (f64, f64) = (0.0238, 0.900);
 /// `D_t`; science-r09-craters.md F2).
 const PEAK_BASE: (f64, f64) = (0.259, 0.132);
 
+/// A bound on every crater's central-peak base over its rim radius (`CraterShape::peak_fraction`):
+/// [`PEAK_BASE`]'s slope, 0.259. The generator's law draws the cone's base as
+/// min(0.259 − 0.132 ÷ x, floor) with x = D ÷ `D_t` > 0, and none where no peak is drawn, so it is
+/// below 0.259 at every diameter on every body, whatever the data's scatter: a bound on the law, not
+/// a lunar datum. The law is Hale and Head 1979's lunar central-peak base, 0.259 D − 2.5 km (W. S.
+/// Hale and J. W. Head, "Central peaks in lunar craters: Morphology and morphometry", Proc. Lunar
+/// Planet. Sci. Conf. 10th, 2623–2633; science-r09-craters.md F2). The level bound's coarse rims
+/// read it, to tell where a fillet may reach into the cone (R09.T8.d), and defining it from
+/// [`PEAK_BASE`] keeps the two together.
+pub(crate) const WIDEST_PEAK_FRACTION: f64 = PEAK_BASE.0;
+
 /// A fresh crater: its morphology, its relief and the width of its ejecta, from which its profile
 /// follows ([`relief`](Self::relief)). Built by [`crater_shape`].
 #[derive(Debug, Clone, Copy, PartialEq)]

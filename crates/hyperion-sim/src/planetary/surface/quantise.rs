@@ -425,7 +425,11 @@ mod tests {
     use hyperion_testkit::float::assert_same_bits;
 
     fn moon_working() -> (CoarseInputs, CellGraph, CellGraph) {
-        let inputs = reference::moon_like();
+        working_of(reference::moon_like())
+    }
+
+    /// The pass's inputs `inputs` with the cell graphs of its field and its climate layer.
+    fn working_of(inputs: CoarseInputs) -> (CoarseInputs, CellGraph, CellGraph) {
         let level = hyperion_surface::field::coarse_level(inputs.radius());
         (
             inputs,
@@ -469,8 +473,6 @@ mod tests {
         working.cells[7].elevation = Metres::new(1_234.567_4);
         working.cells[7].water_surface = Metres::new(1_234.567_4);
         working.cells[7].drainage = SquareMetres::new(1e9);
-        working.cells[7].runoff_m_per_year = 0.1;
-        working.cells[7].catchment_runoff_m_per_year = 0.3;
         working.climate[3].sea_level_temperature =
             Kelvin::new(inputs.mean_surface_temperature().value() + 400.0);
         working.climate[3].month_anomaly_k[5] = -20.0;
@@ -483,10 +485,29 @@ mod tests {
             field.synthesis()[7].drainage,
             LogArea::from_area(SquareMetres::new(1e9)).unwrap()
         );
+        // The runoffs reach their codes on a body that keeps an atmosphere, Mars's: an airless
+        // body's field carries none (R09.T8.d), so the Moon's working refuses them.
+        let (mars, mars_grid, mars_climate) = working_of(reference::mars_like());
+        let mars_pass = Pass::new(SurfaceSeed::new(1), &mars, &mars_grid, &mars_climate);
+        let mut wet = Working::initial(&mars_pass);
+        wet.cells[7].runoff_m_per_year = 0.1;
+        wet.cells[7].catchment_runoff_m_per_year = 0.3;
+        let wet_field = quantise(&mars, wet).unwrap();
         // Mars's epoch and Earth's mean land runoff (science-r09-drainage.md §1.3).
-        assert_eq!(field.synthesis()[7].runoff, LogRunoff::new(121));
-        assert_eq!(field.synthesis()[7].catchment_runoff, LogRunoff::new(140));
-        assert_eq!(field.synthesis()[8].runoff, LogRunoff::NONE);
+        assert_eq!(wet_field.synthesis()[7].runoff, LogRunoff::new(121));
+        assert_eq!(
+            wet_field.synthesis()[7].catchment_runoff,
+            LogRunoff::new(140)
+        );
+        assert_eq!(wet_field.synthesis()[8].runoff, LogRunoff::NONE);
+        let mut airless = working.clone();
+        airless.cells[7].runoff_m_per_year = 0.1;
+        assert_eq!(
+            quantise(&inputs, airless),
+            Err(QuantiseFieldError::Field(
+                BuildFieldError::RunoffWithoutAir { cell: 7 }
+            ))
+        );
         // 400 K needs the step 0.01 K × 2 to fit an i16, and 20 K the anomaly step 0.25 K.
         assert_eq!(field.header().temperature_step(), 1);
         assert_eq!(field.header().anomaly_step(), 0);

@@ -426,6 +426,14 @@ pub enum BuildFieldError {
         /// The cell's index.
         cell: u32,
     },
+    /// A cell sheds runoff, or its catchment does, on an airless body, whose header's surface
+    /// pressure is exactly 0 Pa (`FieldHeader::is_airless`): such a body has no wet epoch in this
+    /// generator, so its coarse pass runs no fluvial step, and the level bound counts no channels
+    /// there (R09.T8.d).
+    RunoffWithoutAir {
+        /// The cell's index.
+        cell: u32,
+    },
     /// A climate record carries a month past the header's year (an anomaly, a precipitation or a
     /// wind that is not calm), or an anomaly in a one-month year.
     MonthOutsideYear {
@@ -499,6 +507,11 @@ impl std::fmt::Display for BuildFieldError {
             Self::LiquidWithoutEntry { cell } => {
                 write!(f, "cell {cell} is under water but names no liquid entry")
             }
+            Self::RunoffWithoutAir { cell } => write!(
+                f,
+                "cell {cell} or its catchment sheds runoff on an airless body, of surface pressure 0 \
+                 Pa"
+            ),
             Self::MonthOutsideYear { cell } => {
                 write!(f, "climate cell {cell} carries a month outside the year")
             }
@@ -546,8 +559,9 @@ impl CoarseField {
     /// [`BuildFieldError`] if the records are not one per cell, a record breaks a rule of its type
     /// (water below the ground, a boundary without a distance, a sea floor byte with no hill
     /// relief on oceanic crust or any sea floor on another crust, a month outside the year, or a
-    /// one-month year with an anomaly) or of the header's palette (a substance past it or of
-    /// another role, an ice share without an ice entry, water without a liquid entry), a crater is
+    /// one-month year with an anomaly), of the header's palette (a substance past it or of
+    /// another role, an ice share without an ice entry, water without a liquid entry) or of its
+    /// air (runoff on an airless body), a crater is
     /// not a valid coarse crater of this field or is not after its predecessor, or the reaches are
     /// too many to index. The palette's own rules (at most 15 entries, sorted, a crust's entry of a
     /// role a [`Crust`] variant may take) are the header's ([`FieldHeader::new`],
@@ -576,6 +590,7 @@ impl CoarseField {
         for (cell, record) in (0_u32..).zip(&synthesis) {
             check_synthesis_cell(cell, record)?;
             check_substances(cell, record, header.palette())?;
+            check_runoff(cell, record, &header)?;
         }
         for (cell, record) in (0_u32..).zip(&climate) {
             check_climate_cell(cell, record, header.months())?;
@@ -756,6 +771,26 @@ pub(crate) fn check_substances(
     }
     if record.is_under_water() && liquid.is_none() {
         return Err(BuildFieldError::LiquidWithoutEntry { cell });
+    }
+    Ok(())
+}
+
+/// Checks the runoffs of the synthesis record of cell `cell` against `header`: on an airless body
+/// ([`FieldHeader::is_airless`]) a cell sheds none, and nor does its catchment, so that no channel
+/// cuts its ground (R09.T8.d).
+///
+/// # Errors
+///
+/// [`BuildFieldError::RunoffWithoutAir`] if the body is airless and either runoff is not
+/// [`LogRunoff::NONE`].
+pub(crate) fn check_runoff(
+    cell: u32,
+    record: &SynthesisCell,
+    header: &FieldHeader,
+) -> Result<(), BuildFieldError> {
+    let sheds = record.runoff != LogRunoff::NONE || record.catchment_runoff != LogRunoff::NONE;
+    if header.is_airless() && sheds {
+        return Err(BuildFieldError::RunoffWithoutAir { cell });
     }
     Ok(())
 }
@@ -947,7 +982,7 @@ mod tests {
     use crate::substance_key::SubstanceKey;
     use crate::testing::{FieldBuilder, SyntheticWorld, synthetic_field};
     use hyperion_base::math;
-    use hyperion_base::units::Gigayears;
+    use hyperion_base::units::{Gigayears, Pascals};
     use hyperion_testkit::float::assert_same_bits;
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
@@ -1430,6 +1465,77 @@ mod tests {
             build(&|c| c.water_surface_mm = c.elevation_mm + 1_000),
             Err(BuildFieldError::LiquidWithoutEntry { cell })
         );
+    }
+
+    /// An airless body's cells shed no runoff, nor do their catchments, which the level bound's
+    /// zero channel terms count on (R09.T8.d); a body with air may carry either.
+    #[test]
+    fn an_airless_field_refuses_runoff() {
+        for world in [SyntheticWorld::MoonLike, SyntheticWorld::MarsLike] {
+            let field = synthetic_field(world);
+            let header = field.header().clone();
+            assert_eq!(header.is_airless(), world == SyntheticWorld::MoonLike);
+            let build = |edit: &dyn Fn(&mut SynthesisCell)| {
+                let mut synthesis = field.synthesis().to_vec();
+                edit(&mut synthesis[11]);
+                CoarseField::new(
+                    header.clone(),
+                    synthesis,
+                    field.climate_layer().to_vec(),
+                    field.craters().to_vec(),
+                )
+            };
+            let refused = |edit: &dyn Fn(&mut SynthesisCell)| match build(edit) {
+                Ok(_) => false,
+                Err(error) => {
+                    assert_eq!(error, BuildFieldError::RunoffWithoutAir { cell: 11 });
+                    assert_eq!(
+                        error.to_string(),
+                        "cell 11 or its catchment sheds runoff on an airless body, of surface \
+                         pressure 0 Pa"
+                    );
+                    true
+                }
+            };
+            let airless = header.is_airless();
+            assert_eq!(refused(&|c| c.runoff = LogRunoff::new(121)), airless);
+            assert_eq!(
+                refused(&|c| c.catchment_runoff = LogRunoff::new(140)),
+                airless
+            );
+            assert!(!refused(&|c| c.runoff = LogRunoff::NONE));
+        }
+        // A tenuous body keeps an atmosphere and may have had a wet epoch: 1 Pa carries runoff.
+        let moon = synthetic_field(SyntheticWorld::MoonLike);
+        let mut parts = moon.header().parts().clone();
+        parts.surface_pressure = Pascals::new(1.0);
+        let tenuous = FieldHeader::new(parts).unwrap();
+        assert!(!tenuous.is_airless());
+        let mut synthesis = moon.synthesis().to_vec();
+        synthesis[11].runoff = LogRunoff::new(121);
+        synthesis[11].catchment_runoff = LogRunoff::new(140);
+        assert!(
+            CoarseField::new(
+                tenuous,
+                synthesis,
+                moon.climate_layer().to_vec(),
+                moon.craters().to_vec(),
+            )
+            .is_ok()
+        );
+        // Every airless synthetic world is built under the rule.
+        for &world in SyntheticWorld::ALL {
+            let field = synthetic_field(world);
+            if field.header().is_airless() {
+                assert!(
+                    field
+                        .synthesis()
+                        .iter()
+                        .all(|c| c.runoff == LogRunoff::NONE
+                            && c.catchment_runoff == LogRunoff::NONE)
+                );
+            }
+        }
     }
 
     /// A dry cell may name the liquid of its palette, holding none of it, as a cell may name an

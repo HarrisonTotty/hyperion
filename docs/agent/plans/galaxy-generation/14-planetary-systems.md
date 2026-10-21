@@ -12361,6 +12361,14 @@ with_volatile_history}`. `derive`'s interior is factored into `interior_of` and 
       `WET_WORLD_RUNOFF_M_PER_YEAR`), the R09 code's convention, since `hyperion-base` has no unit
       of m a⁻¹. `MARS_EFFECTIVE_FLOW` (2.2 × 10⁵ yr) is added, and `REFERENCE_FLOOD_INTERMITTENCY`
       (0.05) is defined here, since nothing held it.
+  - _Not modelled, and what reads it_ (R09.T8.d, 2026-10-20; decision-r09-t8d-reach §2): the
+    atmosphere's own history ("T13's air is the present one"). `holds_water` reads the present
+    state's `keeps_atmosphere()`, so no body airless now has an epoch, and an airless body's
+    coarse field carries no runoff. R09.T8.d's level bound counts on that: its channel terms are
+    zero on a header of surface pressure exactly 0, which the field enforces
+    (`BuildFieldError::RunoffWithoutAir` in `hyperion_surface::field`). A model that lets such a
+    body carry runoff (an atmosphere lost since a wet epoch, or lava channels on an airless
+    surface) must replace that certificate with a header figure, in the same task.
   - _Fitted on the generator's own Mars_ (the table's, under plan 06's Sun at median draws):
     `VOLCANIC_GREENHOUSE_OUTGASSING` = 0.634 741 900 903 (`Fitted`), Mars's O at 3.60 Ga (the
     ruling's replica 0.612, ruled as 0.61); `PAST_EPOCH_FLOW_FRACTION` = 6.564 × 10⁻⁴ (`Fitted`),

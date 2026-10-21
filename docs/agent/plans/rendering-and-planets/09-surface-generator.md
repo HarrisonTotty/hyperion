@@ -2238,6 +2238,34 @@ finding for open question 5, and the hash levers of Design note 14 are tried onl
 every bench binary, so it selects the `surface/…` IDs; on a quiet machine, under the heavy lock, or
 recorded provisional).
 
+- **R09.T8.d The reach's two loose terms** (a follow-up of T8, high priority: before R10.T14.b's
+  measured sizes and T15; decision-r10-t14c-leans F4, ruled in decision-r09-t8d-reach). The
+  table's reach, about ±155–160 km on every generated world against a realised relief of 15.8 km
+  on the fixture, weakens R05's horizon culling and inflates T14.b's peaks. Two terms make most of
+  it. Tighten both and keep every bound sound.
+  - **(a) The coarse rims' count**, in both `contribution_range_m` and `level_bound_m`: count each
+    octave's craters over the area where a crater's sharpening is non-zero, not over the reach
+    disc. That area is the fillet's span about the rim at the octave's widest w, plus the
+    central cone the fillet reaches. The bound stays a 1 − 10⁻⁹ quantile.
+  - **(b) The channels' reach and omitted terms, conditioned on the body.** They are zero where no
+    coarse cell can carry a network, if the header or the coarse pass can certify that; otherwise
+    they are held to the body's largest valley depth rather than the geometric cap.
+  - **(c) Tests:** each synthetic world's dense samples of h − base within the reach at every
+    level; the reach within a stated factor of the realised relief (set from the worlds); every
+    existing bound test passing.
+  - **(d) Goldens:** no generated height moves. The worker goldens' `level` lines and any pinned
+    bound values are re-blessed at the version in force, with every move stated. The bump is the
+    sim-determinism skill's call.
+  - **(e)** The client's `lowestHeightM`, selection and T14.c's ceiling read the tightened table
+    unchanged. Report the new table's highest and lowest on the fixture and on the reference
+    Moon, Mars and Earth.
+  - Acceptance: `cargo test -p hyperion-surface --features testing` (the bound, the reach, the
+    field's and the wire's refusals among it), `cargo test -p hyperion-sim --features testing --lib
+planetary::surface::quantise`, the slow
+    `synth::levels::tests::the_level_bound_and_the_reach_hold_at_every_level_at_ten_thousand_points`
+    by name, `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`, and the
+    gate.
+
 ### R09.T9 Golden heights across targets
 
 `crates/hyperion-surface/tests/height_golden.rs`, goldens in
@@ -2995,6 +3023,11 @@ of the same inputs, with the differences written into this plan. Acceptance:
       catchment runoff equals it wherever its whole catchment is older than the epoch's end;
     - every cell younger than the epoch's end has no runoff of its own;
     - on the reference Earth some cell's catchment runoff is at least three times its own.
+  - _R09.T8.d's certificate:_ on a body of surface pressure exactly 0 Pa every cell keeps its
+    runoff and catchment runoff none, ice cells included, which `CoarseField::new` enforces
+    (`BuildFieldError::RunoffWithoutAir`) and the level bound's zero channel terms count on. A
+    change that lets such a body carry runoff (an atmosphere lost since a wet epoch, lava
+    channels) replaces that certificate with a header figure in the same task.
 
 Bench `coarse/erosion_l8`: the brainstorm's "a few seconds at level 8" (Tzathas et al.'s Table 2,
 1.79 s at 512² and 8.18 s at 1,024² in Python with numba), recorded, in a new
@@ -7098,6 +7131,172 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
   - _The heavy cost of a coarse patch's range_: `height_range_m` of a level-0 patch walks the
     65,536 coarse cells under it and the margin about the face (the rings now grow from the
     block's border only).
+- **Deviations in T8.d, as built** (2026-10-20; lane r09-reach; decision-r09-t8d-reach and its
+  follow-up 1, which rule the design).
+  - _What made the reach._ The harness (`synth::levels::tests::measure_the_reach_s_terms`, run by
+    hand) splits each level's reach and bound by term. On the Moon-like world, the fixture's
+    (`TERRAIN TEST`), the fine levels' reach was [−150.1, +158.0] km: relief 3.6, channels
+    −63.1/+70.9 and the craters' Chernoff sum 83.5 km (small craters alone 39.0, rims alone 75.8).
+    F4's "rims about 77 km, the rest about 12" mis-split that sum, which is sub-additive. Level 0's
+    ±151.5 km was the rims' alone. Sampled h − base over 1,100 points a level stayed within
+    [−3.3, +2.1] km, against a realised relief of 15.8 km.
+  - _(a) The rims' count_ (`synth/craters/bound.rs`, `filleted_area_m2`). Each coarse octave
+    [D, 2D] counts its craters over where a fillet of band w changes their fresh profile:
+    - the annulus 4π R_up min(w, R_up), with R_up = D the octave's widest rim radius, since the
+      fillet's half-width in metres is at most min(w, R);
+    - or the disc π (R_up + min(w, R_up))², where the octave's widest held fillet,
+      min(w ÷ R_lo, 1), can reach the central cone: 1 − that below `WIDEST_PEAK_FRACTION`, 0.259,
+      which bounds every cone base the generator's law draws (min(0.259 − 0.132 ÷ x, floor), Hale
+      and Head 1979's lunar base; a sweep of 12,000 diameters from half the transition diameter to
+      π R on two contracts, at least 10⁴ of them from the transition on, tests it);
+    - never more than the old reach disc.
+
+    The heights count at the coarse band's area; the change from level n counts at level n's,
+    since a narrower band's change lies inside a wider one's. A level whose band is at or beyond
+    the coarse band adds no rim height: `CoarseRims::at` reads no crater there, so the zero is
+    exact, and level 0's doubled δ(`w_c`) goes.
+
+  - _(i) The rims' shares sampled directly_ (ruled in): sup |F(w′) − F(`w_c`)| for the reach and the
+    maximum over every finer level m of sup |F(w′_n) − F(w′_m)| for ε (`profile_gap`), in place of
+    δ(w′) + δ(`w_c`) through the fresh profile. Samples: every breakpoint of both profiles, the
+    existing 33 steps across the wider span, the 1.1 margin. A test holds them over a ten times
+    denser sampling on every world (the Moon-like alone on the browser target). It took the
+    Moon-like world's level-1 row of the reach, the rims' alone, from 76.0 to 47.2 km (ε at level 1
+    is 61.7 km). The exact supremum on each polynomial piece, the ruling's option, was not taken.
+  - _The spheroid allowance_ (a condition of the ruling; found and closed in T8.d, its form ruled in
+    follow-up 2 after the review). The areas are discs and annuli in the chord the synthesis
+    measures, which hold their planar ground only on a sphere: π c² within a chord c, Archimedes'
+    (On the Sphere and Cylinder I, props. 42–43). Every count, the small craters' reach discs too,
+    takes `chord_area_allowance` k = (a ÷ c)² from the header's figure.
+    - The proof: the spheroid is the image of the sphere of radius a under M = diag(1, 1, c ÷ a),
+      which enlarges no area and shortens no chord by more than c ÷ a. So a disc of chord r holds
+      at most k π r², and an annulus from r₁ to r₂ at most π (k r₂² − r₁²); `filleted_area_m2`
+      takes π ((R_up + h)² k − (R_up − h)²), and k on its reach cap.
+    - The worst disc is the whole body seen from a pole: 1.071, 1.153, 1.359 and 1.647 times π r²
+      at f = 0.05, 0.1, 0.2 and 0.3, an excess of 4f ÷ 3 at small f, against k's 1.108, 1.235,
+      1.563 and 2.041. `chord_discs_and_annuli_hold_within_the_allowance` checks discs and thin
+      rings by quadrature at f ∈ {0, 0.1, 0.2, 0.3}, the worst chord included, the sphere's own
+      quadrature error taken off (1.6446 found at f = 0.3).
+    - The ruling's first form, 1 + 2f, held only to f ≈ 0.26 (its sweep sampled r = 1.4 = 2c at
+      f = 0.3 and missed the worst, 1.6468 at r = 1.40029 a) and for discs alone: a thin ring
+      near the pole's chord 2c holds up to a² ÷ (2c² − a²) times its planar area, 1.61 at f = 0.1.
+      The generator caps flattening at 0.2 (hyperion-sim's `FLATTENING_CAP`), so no generated body
+      was affected. The reach discs before T8.d had the same gap, masked by their overcount.
+  - _(b1) Zero channels on an airless body_ (form 1, the invariant). A header whose surface pressure
+    is exactly 0 Pa (`FieldHeader::is_airless`) zeroes `ChannelCaps`. `CoarseField::new` and
+    `PartialField::insert` refuse such a header with a cell whose runoff or catchment runoff is not
+    NONE (`BuildFieldError::RunoffWithoutAir`, naming the cell). The certificate is true as built:
+    - a cell's runoff is a wet world's or a wet epoch's, and none elsewhere (`steps/mod.rs`);
+    - a wet epoch needs `holds_water`, a solid surface and `keeps_atmosphere()` of the _present_
+      state, since the atmosphere's history is not modelled (P14.T48.b);
+    - the pass writes exactly 0 Pa for an `Airless` state alone (`surface_pressure_of`), and a melt
+      surface is no solid one.
+
+    With no runoff, no trunk has a valley or a bankfull channel and no cell carries tributaries,
+    so the incision is zero at every level. A tenuous body (1 Pa) carries runoff and keeps its
+    caps (tested). The coupling is recorded in plan 14's P14.T48.b record and in R09.T14.d: a model
+    that lets a pressure-0 body carry runoff (paleo air, lava channels) replaces this certificate
+    with a header figure in the same task. hyperion-sim's
+    `values_reach_their_codes_and_a_value_no_code_holds_is_named` now puts its runoff codes on
+    the reference Mars's working, and holds the Moon's to the new refusal.
+
+  - _The figures_ (contributions only, the extremes over every level, before → after):
+
+    | World            | Reach (km)                        | ε at level 0 (km) | Reach ÷ realised relief |
+    | ---------------- | --------------------------------- | ----------------- | ----------------------- |
+    | Moon-like        | [−151.5, +158.0] → [−61.5, +61.5] | 205.3 → 75.4      | 10.0 → 3.9              |
+    | Earth-like       | [−90.0, +97.1] → [−81.7, +88.9]   | 117.9 → 88.9      | 7.3 → 6.7               |
+    | Mars-like        | [−106.7, +114.3] → [−90.6, +98.2] | 155.7 → 99.5      | 5.1 → 4.4               |
+    | Ceres-like       | [−85.2, +89.4] → [−35.6, +35.6]   | 81.7 → 22.4       | 9.5 → 3.8               |
+    | Flat, one-crater | [−151.5, +151.5] → [−47.9, +47.9] | 190.6 → 47.9      | (no relief)             |
+
+    The rims alone at fine levels: Moon-like 75.8 → 48.0 km, Earth-like 20.7 → 12.4, Mars-like
+    41.3 → 25.1, Ceres-like 48.1 → 32.4. On the fixture (the worker's table over the whole
+    revision-2 payload) the highest row is 160,514.5 → 64,023.9 m, the lowest −156,628 (from the
+    held cells' range) → −66,604.0 m (now row 13; the occluder's depth), and T14.c's ceiling
+    176,327.7 → 79,837.1 m.
+    On the reference worlds (hyperion-sim's `reference`, one coarse pass each; the table over the
+    whole field, before → after):
+
+    | World         | Relief (km) | Reach (km)                         | Lowest, highest row (km)        | T14.c's ceiling (km) |
+    | ------------- | ----------- | ---------------------------------- | ------------------------------- | -------------------- |
+    | Moon (0 Pa)   | 15.5        | [−156.8, +164.7] → [−69.5, +69.5]  | −165.6, +171.4 → −78.3, +76.2   | 186.9 → 91.7         |
+    | Mars (636 Pa) | 29.0        | [−109.2, +116.8] → [−94.0, +101.7] | −115.6, +139.3 → −100.5, +124.2 | 168.3 → 153.1        |
+    | Earth         | 18.6        | [−90.0, +97.1] → [−81.7, +88.9]    | −100.1, +105.6 → −91.9, +97.3   | 124.2 → 115.9        |
+
+    ε at level 0 falls 213.6 → 87.5 km on the Moon, 159.2 → 110.0 on Mars and 117.8 → 88.9 on the
+    Earth; at L + 4, 890 → 721 m, 957 → 940 m and 490 → 479 m.
+    `LevelBounds::new` costs 9–25 ms a body in release (the six synthetic worlds; the rims'
+    pairwise sampling is most of the rise).
+
+  - _Deviations from the ruling's wording._ The refusal names the cell alone, the pressure being
+    exactly 0 Pa by its definition, which its message states. The subtree union lives in R10's
+    `planet.ts` (`subtreeHeightRangeM`), which selection's `tablesOf` and `inheritedHeightRangeM`
+    and the count model read alike, not inside `tablesOf`. The bakes' skirt test covers levels 0
+    to 5 where §7 asked 0 to 3.
+  - _The remainder_ (decision-r09-t8d-reach §5, accepted for T14.b's sizing): 4–7 times the
+    realised relief, the craters' quantiles at saturation of fresh profiles, and on a world with
+    air the channels' geometric caps. The Moon-like occluder at about −61.5 km keeps surface out to
+    about 920 km at 100 m (471 km at a relief-scale −16 km). T14.c's ceiling stays about 80 km on
+    the fixture, so its flare still plunges about 80 km, recorded and not a flight:
+    decision-r10-t14c-leans F1's expectation of a flare "near the relief plus C" is corrected
+    there (§5), F1's ruling standing.
+  - _Tests added_: in `synth::levels::tests`, every contribution of every level held to its own
+    term and their sum to the reach on dense samples of every world, inside the bound's fast and
+    slow tests (renamed `the_level_bound_and_the_reach_hold_at_every_level{,_at_ten_thousand_points}`);
+    the reach within `REACH_OVER_RELIEF`, 7, of the realised relief on the four planetary worlds;
+    an airless body's zero channel terms; a level at the coarse band reaching no rim. In
+    `craters::bound::tests`: the rims' counts and sampled shares against a crater between the
+    samples, the denser sampling, the cone sweep, the count area holding every crater's changed
+    ground, the area's monotonicity, the chord-disc quadrature. In `field` and `wire`: the
+    refusals in both constructors and the tenuous case. The slow test passes by name in 155 s
+    (release), the worst |h(n) − h(m)| ÷ ε now 0.025–0.073 Earth-like, 0.001–0.088 Mars-like,
+    0.002–0.100 Moon-like, 0.007–0.136 Ceres-like and 0–0.101 on the one-crater world (T8's 0.016–
+    0.063, 0.002–0.064, 0.005–0.066, 0.006–0.058 and 0–0.014): a tighter bound, still far above
+    what the samples reach. `cargo test -p hyperion-surface --features testing` passes whole (695
+    library tests, 33 ignored).
+  - _Items._ Public: `BuildFieldError::RunoffWithoutAir`. Crate-private: `FieldHeader::is_airless`,
+    `field::check_runoff`, `craters::shape::WIDEST_PEAK_FRACTION`, and in `synth::craters::bound`
+    `chord_area_allowance`, `filleted_area_m2`, `profile_gap`, `RimSampling`,
+    `coarse_marks_sampled` and `RimMarks::{expected_at, height_m, change_m}` in place of
+    `coarse_m` and `fillet_m`. `octave_marks` and `coarse_marks` take the allowance. In
+    `synth::levels`, `LevelBounds::of` is built from `BodyTerms` and `CraterTerms`, the split the
+    harness reads, with every value as before but the terms above. In the client, `planet.ts`'
+    `subtreeHeightRangeM`.
+  - _The worker's rows_ stay what a patch of the level can bake (follow-up 1). Selection boxes a
+    node that prunes its subtree over the rows from its parent's to the deepest, skirts included
+    (R10's `subtreeHeightRangeM`, in T8.d's client commit): the no-ancestor box and the baked
+    clamp both bounded only the node's own level before, a gap the old ±150 km rows hid at every
+    level but 0, where the skirt (ε₀ 205 km) already hung below the row (−151.5 km). Plan 05's T7
+    record holds the same gap on the test planet, closed by the same change.
+  - _Goldens_: a presentation re-bless at the version in force with no bump (decision-r09-t8d-reach
+    §6): `height/levels.golden` (bound and range), `worker/moon_like.golden` (its `level` lines and
+    its bakes' `bound`, `skirt_depth` and `bounding_radius`) and `terrain_bake/{moon_like,earth_like}`
+    (radius, skirt, bound). No height, cell, header field, class, weight, mask, horizon map or
+    material moves; `worker/terrain_test.golden` holds no `level` lines and does not move.
+- **Deferred findings (2026-10-13 rule)** (R09.T8.d; owner R09, each with its trigger).
+  - _(b2) The body's largest valley depth_ (ruled deferred). It needs a header figure the coarse
+    pass writes, a block-0 layout change and so a bump, for about 15 km on a wet world (Earth-like
+    −57.8/+65.0 → −43.2/+50.3 km at its 3.96 km largest valley; Mars-like → −46.2/+53.8 at 4.27
+    km), because each level's mean correction carries (1 + 1 ÷ B) = 4.52 summed over the levels.
+    The lever is the correction's structure: a joint bound on the levels' corrections. Trigger:
+    T14.b's A/B or T15's served wet worlds showing the channel term's pass-through above
+    decision-r09-t8d-reach §5's threshold.
+  - _(ii) Campbell's theorem for the crater terms_ (ruled deferred): Chernoff's bound from each
+    octave's radial envelope, log E e^{θS} = λ ∫ (e^{θh} − 1) dA, rather than one largest share a
+    crater over its whole area. A scratch estimate at the finest level took the Moon-like crater
+    reach from 57.9 to 31.0 km (small craters 39.0 → 24.5, rims 47.9 → 24.4), the Earth-like to
+    7.1, the Mars-like to 14.5 and the Ceres-like to 15.6 km. It needs upper and lower envelopes of
+    their own, an envelope dominating every diameter's |h| at each absolute distance, and tens of
+    milliseconds a body. Trigger: T14.b's A/B pricing the remaining pass-through above 10% of a
+    setting's all-round peak, or T15's flare-demand figures being unusable.
+  - _The small craters' fillet changes_ still count over their whole reach (F4 scoped the rims
+    alone); the same span count would lower ε at the fine levels, where they dominate it.
+  - _The annulus allowance's looseness_ (decision-r09-t8d-reach follow-up 2): π (k r₂² − r₁²) is
+    far above a thin ring's ground, which the quadrature puts at a small excess on the generated
+    figures (under 1.06 for outer chords to about a at f = 0.2). A tighter, chord-dependent factor,
+    proven or checked by quadrature, would lower the rims' counts on the most flattened bodies.
+    Trigger: a flattened served world whose rims dominate its reach.
 - **Deviations in T9, as built** (2026-10-13; lane r09-assembly, after T8; main's ruling of that
   day on the bump).
   - _Where the goldens are written._ A module of the crate, `src/synth/height_golden.rs`

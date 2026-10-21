@@ -1119,6 +1119,14 @@ fn a_wire_partial_field_refuses_blocks_that_are_not_its_fields() {
         refuse(&icy),
         InsertBlockError::Record(BuildFieldError::IceWithoutEntry { cell })
     );
+    // The one-crater world is airless, so no cell of it sheds runoff (R09.T8.d).
+    let mut wet = blocks[0].clone();
+    wet.cells[4].runoff = LogRunoff::new(121);
+    let cell = wet.cover.cells().nth(4).unwrap();
+    assert_eq!(
+        refuse(&wet),
+        InsertBlockError::Record(BuildFieldError::RunoffWithoutAir { cell })
+    );
     let mut moved = blocks[0].clone();
     moved.cells[10].plate = 7;
     let cell = moved.cover.cells().nth(10).unwrap();

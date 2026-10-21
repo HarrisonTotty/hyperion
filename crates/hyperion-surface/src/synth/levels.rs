@@ -48,18 +48,35 @@
 //!   less the bilinear part's over the bubble's mean, within ±`G_j` ÷ `BUBBLE_MEAN_FLOOR`. The
 //!   raw part and the bilinear part take opposite signs, and `G_k` is one of the `G_j`, so the
 //!   omitted levels from k to the deepest a body's channels can reach
-//!   (`deepest_possible_level`) change a height by at most (1 + 1 ÷ B) Σ `G_j`;
+//!   (`deepest_possible_level`) change a height by at most (1 + 1 ÷ B) Σ `G_j`. On an airless body,
+//!   a surface pressure of exactly 0 Pa, the term is zero (R09.T8.d): no cell of its field sheds
+//!   runoff, nor does its catchment, so no trunk has a valley or a bankfull channel, no cell
+//!   carries tributaries and no groove cuts anything. The field holds its records to that
+//!   ([`BuildFieldError::RunoffWithoutAir`](crate::field::BuildFieldError::RunoffWithoutAir)),
+//!   and the coarse pass meets it: a cell's runoff is a wet epoch's or a wet world's, a wet epoch
+//!   needs plan 14's `holds_water`, which needs a solid surface and the *present* state to keep an
+//!   atmosphere (the atmosphere's history is not modelled), and the pass writes exactly 0 Pa for
+//!   an airless state alone, a melt surface being no solid one (the header's `is_airless`);
 //! - **the craters**: per octave, one crater's largest share, its fresh height and its fillet's
 //!   change where the octave is new to the finer level, its fillet's change between the two bands
 //!   where both evaluate it, with the octave's expected count of craters reaching a point, summed
 //!   by Chernoff's bound to the tail (`poisson_tail_bound`). Where the two levels' bands are the
 //!   same, an octave both evaluate adds nothing. The coarse craters' rims (R09.T7.c) join the same
-//!   sum: every level sharpens them, so each octave of diameters from `D_b` up adds its fillet's
-//!   change between the two bands, held to the coarse band, at the count Trask's saturation
-//!   allows, which bounds the coarse pass's draw whatever the production (`coarse_marks`).
+//!   sum: every level finer than the coarse band sharpens them, so each octave of diameters from
+//!   `D_b` up adds the largest gap between its craters' profiles at the two bands, held to the
+//!   coarse band, at the density Trask's saturation allows, which bounds the coarse pass's draw
+//!   whatever the production (`coarse_marks`). Its craters are counted over the area where the
+//!   coarser band's fillet changes their fresh profile, the fillet's span about the rim and the
+//!   central cone it reaches, since the sharpening and its change are nothing elsewhere, not over
+//!   their whole reach (R09.T8.d). Every count, the small craters' too, carries the figure's
+//!   allowance for the ground a chord disc or annulus holds on a flattened body
+//!   (`chord_area_allowance`).
 //!
 //! The same terms bound the heights a level can reach about the base elevation, for culling
-//! ([`LevelBounds::contribution_range_m`]).
+//! ([`LevelBounds::contribution_range_m`]): the coarse rims at their largest sharpening, the gap
+//! between the level's profile and the coarse band's, counted where the coarse band's fillet
+//! changes their profiles, and nothing at a level whose band is at or beyond the coarse band, which
+//! sharpens no rim (R09.T8.d).
 //!
 //! [`octave_spacing`]: super::relief::octave_spacing
 //! [`band_half_width`]: super::craters::band_half_width
@@ -71,7 +88,9 @@ use hyperion_base::units::Metres;
 use super::channels::incision::{
     BUBBLE_MEAN_FLOOR, deepest_possible_level, groove_cap_m, mean_cell_width,
 };
-use super::craters::bound::{coarse_marks, octave_marks, poisson_tail_bound};
+use super::craters::bound::{
+    OctaveMarks, RimMarks, chord_area_allowance, coarse_marks, octave_marks, poisson_tail_bound,
+};
 use super::craters::rims::coarse_band_half_width;
 use super::craters::{CraterOctaves, band_half_width};
 use super::relief::{finest_octave, first_octave, nyquist_degree, octave_bound, octave_spacing};
@@ -264,81 +283,30 @@ impl LevelBounds {
     /// The bounds of the body of `header`, whose small craters' octaves are `octaves`.
     #[must_use]
     pub(crate) fn of(header: &FieldHeader, octaves: &CraterOctaves) -> Self {
-        let figure = header.figure();
-        let sets: [LevelSet; BAND_LEVELS] =
-            core::array::from_fn(|n| LevelSet::of(header, octaves, band(n)));
-        let bands: [f64; BAND_LEVELS] =
-            core::array::from_fn(|n| band_half_width(&figure, band(n)).value());
-        let relief = Octaves::of(header);
-        let channels = ChannelCaps::of(header);
-        let marks = octave_marks(octaves, &bands);
-        let rims = coarse_marks(
-            header.craters(),
-            coarse_band_half_width(&figure, header.level()).value(),
-            header.boundary_diameter().value(),
-            header.radius().value(),
-            &bands,
-        );
-        // Each octave's largest fillet change at any level from n on: δ*(n) = max over m ≥ n.
-        let later: Vec<[f64; BAND_LEVELS + 1]> =
-            marks.iter().map(|o| suffix_max(&o.fillet_m)).collect();
-        let rims_later: Vec<[f64; BAND_LEVELS + 1]> =
-            rims.iter().map(|o| suffix_max(&o.fillet_m)).collect();
+        let terms = BodyTerms::of(header, octaves);
         let ln_tail = -math::ln(CRATER_BOUND_TAIL);
         let mut bound_m = [0.0; BAND_LEVELS];
         let mut low_m = [0.0; BAND_LEVELS];
         let mut high_m = [0.0; BAND_LEVELS];
-        let mut changes = Vec::with_capacity(marks.len() + rims.len());
-        let mut heights = Vec::with_capacity(marks.len() + rims.len());
+        let mut craters = CraterTerms::with_capacity(terms.marks.len() + terms.rims.len());
         for n in 0..BAND_LEVELS {
-            let set = &sets[n];
-            // Whether some finer level fillets with another band than n's: the bands narrow with
-            // the level until they reach the band limit's.
-            let narrows = bands[n + 1..]
-                .iter()
-                .any(|b| b.total_cmp(&bands[n]).is_ne());
-            changes.clear();
-            heights.clear();
-            for (k, (octave, later)) in marks.iter().zip(&later).enumerate() {
-                let evaluated = set.craters.is_some_and(|last| usize::from(last) >= k);
-                let finer = later[n + 1];
-                let change = if evaluated {
-                    if narrows {
-                        octave.fillet_m[n] + finer
-                    } else {
-                        0.0
-                    }
-                } else {
-                    octave.fresh_m + finer
-                };
-                changes.push((octave.expected, change));
-                if evaluated {
-                    heights.push((octave.expected, octave.fresh_m + octave.fillet_m[n]));
-                }
-            }
-            // The coarse craters' rims sharpen at every level, from the coarse band down.
-            for (octave, later) in rims.iter().zip(&rims_later) {
-                let change = if narrows {
-                    octave.fillet_m[n] + later[n + 1]
-                } else {
-                    0.0
-                };
-                changes.push((octave.expected, change));
-                heights.push((octave.expected, octave.fillet_m[n] + octave.coarse_m));
-            }
+            let set = &terms.sets[n];
+            terms.crater_terms(n, &mut craters);
             bound_m[n] = num::assert_finite(
-                relief.omitted_m(set.relief)
-                    + channels.omitted_m(set.channels)
-                    + poisson_tail_bound(&changes, ln_tail),
+                terms.relief.omitted_m(set.relief)
+                    + terms.channels.omitted_m(set.channels)
+                    + poisson_tail_bound(&craters.changes, ln_tail),
             );
-            let (relief_reach, (channels_low, channels_high)) =
-                (relief.reach_m(set.relief), channels.reach_m(set.channels));
-            let craters_reach = poisson_tail_bound(&heights, ln_tail);
+            let (relief_reach, (channels_low, channels_high)) = (
+                terms.relief.reach_m(set.relief),
+                terms.channels.reach_m(set.channels),
+            );
+            let craters_reach = poisson_tail_bound(&craters.heights, ln_tail);
             low_m[n] = num::assert_finite(-(relief_reach + channels_low + craters_reach));
             high_m[n] = num::assert_finite(relief_reach + channels_high + craters_reach);
         }
         Self {
-            sets,
+            sets: terms.sets,
             bound_m,
             low_m,
             high_m,
@@ -364,6 +332,115 @@ impl LevelBounds {
     pub fn contribution_range_m(&self, level: BandLevel) -> (f64, f64) {
         let n = usize::from(level.get());
         (self.low_m[n], self.high_m[n])
+    }
+}
+
+/// What a body's level bounds are built from, from its field's header: each level's set and band,
+/// the structural octaves' and the channels' bounds, and the small craters' and the coarse rims'
+/// marks with each octave's largest fillet change from every level on.
+struct BodyTerms {
+    sets: [LevelSet; BAND_LEVELS],
+    /// Each level's fillet half-width, metres ([`band_half_width`]).
+    bands_m: [f64; BAND_LEVELS],
+    /// The coarse band, metres ([`coarse_band_half_width`]).
+    coarse_band_m: f64,
+    relief: Octaves,
+    channels: ChannelCaps,
+    marks: Vec<OctaveMarks>,
+    rims: Vec<RimMarks>,
+    /// Each small-crater octave's δ*(n) = max over m ≥ n of its fillet change.
+    later: Vec<[f64; BAND_LEVELS + 1]>,
+}
+
+/// One level's crater terms, each (μ, share) for Chernoff's bound ([`poisson_tail_bound`]): the
+/// changes for the level bound and the heights for the range, the small craters' first and the
+/// coarse rims' after them, one of each a coarse octave.
+struct CraterTerms {
+    changes: Vec<(f64, f64)>,
+    heights: Vec<(f64, f64)>,
+}
+
+impl CraterTerms {
+    #[must_use]
+    fn with_capacity(terms: usize) -> Self {
+        Self {
+            changes: Vec::with_capacity(terms),
+            heights: Vec::with_capacity(terms),
+        }
+    }
+}
+
+impl BodyTerms {
+    #[must_use]
+    fn of(header: &FieldHeader, octaves: &CraterOctaves) -> Self {
+        let figure = header.figure();
+        let sets: [LevelSet; BAND_LEVELS] =
+            core::array::from_fn(|n| LevelSet::of(header, octaves, band(n)));
+        let bands_m: [f64; BAND_LEVELS] =
+            core::array::from_fn(|n| band_half_width(&figure, band(n)).value());
+        let allowance = chord_area_allowance(&figure);
+        let marks = octave_marks(octaves, &bands_m, allowance);
+        let coarse_band_m = coarse_band_half_width(&figure, header.level()).value();
+        let rims = coarse_marks(
+            header.craters(),
+            coarse_band_m,
+            header.boundary_diameter().value(),
+            header.radius().value(),
+            &bands_m,
+            allowance,
+        );
+        // Each octave's largest fillet change at any level from n on: δ*(n) = max over m ≥ n.
+        let later = marks.iter().map(|o| suffix_max(&o.fillet_m)).collect();
+        Self {
+            sets,
+            bands_m,
+            coarse_band_m,
+            relief: Octaves::of(header),
+            channels: ChannelCaps::of(header),
+            marks,
+            rims,
+            later,
+        }
+    }
+
+    /// Level `n`'s crater terms, into `out` (the [module documentation](self), "The bound").
+    fn crater_terms(&self, n: usize, out: &mut CraterTerms) {
+        let set = &self.sets[n];
+        let bands = &self.bands_m;
+        // Whether some finer level fillets with another band than n's: the bands narrow with the
+        // level until they reach the band limit's.
+        let narrows = bands[n + 1..]
+            .iter()
+            .any(|b| b.total_cmp(&bands[n]).is_ne());
+        out.changes.clear();
+        out.heights.clear();
+        for (k, (octave, later)) in self.marks.iter().zip(&self.later).enumerate() {
+            let evaluated = set.craters.is_some_and(|last| usize::from(last) >= k);
+            let finer = later[n + 1];
+            let change = if evaluated {
+                if narrows {
+                    octave.fillet_m[n] + finer
+                } else {
+                    0.0
+                }
+            } else {
+                octave.fresh_m + finer
+            };
+            out.changes.push((octave.expected, change));
+            if evaluated {
+                out.heights
+                    .push((octave.expected, octave.fresh_m + octave.fillet_m[n]));
+            }
+        }
+        // The coarse craters' rims sharpen at every level finer than the coarse band, and a level
+        // at or beyond it adds nothing, to the bit (`CoarseRims::at`).
+        let sharpens = bands[n] < self.coarse_band_m;
+        for octave in &self.rims {
+            let change = if narrows { octave.change_m[n] } else { 0.0 };
+            out.changes.push((octave.expected_at[n], change));
+            let height = if sharpens { octave.height_m[n] } else { 0.0 };
+            out.heights.push((octave.expected, height));
+        }
     }
 }
 
@@ -432,7 +509,7 @@ impl Octaves {
 }
 
 /// The channels' bounds on a body: each level's groove cap `G_k` from the coarse level to the
-/// deepest any of its cells can evaluate.
+/// deepest any of its cells can evaluate, or none on an airless body, whose network cuts nothing.
 struct ChannelCaps {
     first: u8,
     deepest: u8,
@@ -446,8 +523,13 @@ impl ChannelCaps {
         let first = header.level().get();
         let deepest = deepest_possible_level(radius_m, first);
         let mut cap_m = [0.0; BAND_LEVELS];
-        for k in first..=deepest {
-            cap_m[usize::from(k)] = groove_cap_m(radius_m, k);
+        // An airless body's cells shed no runoff, nor do their catchments (the field's rule,
+        // `BuildFieldError::RunoffWithoutAir`), so no trunk has a valley or a channel, no cell
+        // carries tributaries, and every level's incision is zero: its caps are zero too.
+        if !header.is_airless() {
+            for k in first..=deepest {
+                cap_m[usize::from(k)] = groove_cap_m(radius_m, k);
+            }
         }
         Self {
             first,
@@ -517,7 +599,11 @@ pub(crate) fn marks_of(header: &FieldHeader) -> Vec<super::craters::bound::Octav
     let figure = header.figure();
     let bands: [f64; BAND_LEVELS] =
         core::array::from_fn(|n| band_half_width(&figure, band(n)).value());
-    octave_marks(&CraterOctaves::new(header), &bands)
+    octave_marks(
+        &CraterOctaves::new(header),
+        &bands,
+        chord_area_allowance(&figure),
+    )
 }
 
 #[cfg(test)]

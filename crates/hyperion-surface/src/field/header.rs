@@ -705,6 +705,26 @@ impl FieldHeader {
         self.parts.surface_pressure
     }
 
+    /// Whether the body is airless: a surface pressure of exactly 0 Pa, an airless surface state or
+    /// a melt surface whose volatiles are gone ([`FieldHeaderParts::surface_pressure`]); a tenuous
+    /// body, above 0 and below 100 Pa, is not.
+    ///
+    /// Such a body has had no wet epoch in this generator, so no cell of its field sheds runoff and
+    /// its channel network cuts nothing (R09.T8.d; decision-r09-t8d-reach §2). The chain, in
+    /// hyperion-sim: a cell's runoff is its climate's on a world wet now and its wet epoch's on one
+    /// dry now, and none elsewhere (the coarse pass's cell state, `steps/mod.rs`); a wet epoch needs
+    /// `holds_water`, a solid surface and `keeps_atmosphere()` (plan 14, P14.T48.b,
+    /// `hooks/figures/wet_epoch.rs`), which is the *present* state's, not `Airless`, since "the
+    /// atmosphere's own history" is not modelled; and the pass writes a pressure of exactly 0 for an
+    /// `Airless` state (`surface_pressure_of`), while a melt surface is no solid one. The field's
+    /// records are held to it ([`BuildFieldError::RunoffWithoutAir`](super::BuildFieldError::RunoffWithoutAir)) and
+    /// the level bound counts on it. A model that lets such a body carry runoff (an atmosphere lost
+    /// since a wet epoch, lava channels) must replace this certificate with a header figure.
+    #[must_use]
+    pub(crate) fn is_airless(&self) -> bool {
+        self.parts.surface_pressure.value() <= 0.0
+    }
+
     /// R10's albedo scale on the class albedos, `None` for none, the palette's albedos unscaled
     /// ([`FieldHeaderParts::albedo_scale`]).
     #[must_use]
