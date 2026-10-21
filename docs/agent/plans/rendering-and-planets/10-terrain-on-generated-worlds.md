@@ -12031,9 +12031,31 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
     Generator version; as T8.a and T8.b re-blessed theirs): `horizon/blend.golden` (126 of 167
     `near` lines and 66 of 835 `elevation` lines, every moved code a rise, 157 of them −90° at an
     edge looking out; no `far` line) and `worker/moon_like.golden` (the two lit bakes' `near`
-    digests; their `far` digests, completeness and refused cells unchanged). The bench
-    `bake/horizon` is pending main's quiet window (the study's estimate: +0.7–1.0 ms warm on 7.7–16.1
-    ms, +11–18 ms cold on 37–70 ms, from the margin's 2,336 heights).
+    digests; their `far` digests, completeness and refused cells unchanged).
+  - _The bench_, `bake/horizon` with the margin (2026-10-21 at 03:16–03:22, main's quiet window, on
+    the development machine, a Ryzen 7 3700X: the bench profile, one thread, under the heavy lock
+    with `HEAVY_CPU_QUOTA=1200%`, schedutil; load 1.95, 1.68 and 2.86 at the start and 1.33, 1.51
+    and 2.43 at the end, so quiet; one run of the recipe's own command less the rest of the
+    workspace, `cargo bench -p hyperion-surface --features testing --bench bake -- bake/horizon`). Each
+    patch at the low setting with the weights, as T8.a's; the map's cost is the bake with it less
+    the bake without it:
+
+    | Patch                     | Without | Warm    | Beside 8 baked | Cold, without | Cold     |
+    | ------------------------- | ------- | ------- | -------------- | ------------- | -------- |
+    | Earth-like, L + 4 (12)    | 60.9 ms | 69.1 ms | 69.9 ms        | 67.0 ms       | 116.4 ms |
+    | Earth-like, 19            | 64.7 ms | 76.8 ms | 77.7 ms        | 69.7 ms       | 148.7 ms |
+    | Moon-like rim, L + 4 (10) | 52.6 ms | 60.1 ms | 60.5 ms        | 54.1 ms       | 88.7 ms  |
+    - The map: warm 8.3, 12.1 and 7.4 ms; beside its eight neighbours baked 9.0, 13.0 and 7.9 ms;
+      cold 49.4, 78.9 and 34.7 ms. Against the plan's quarter of the patch's 40 ms, 10 ms: the
+      L + 4 patches, warm or beside their neighbours, are under it, the finest level's 1.2 to 1.3
+      times it, and a cold patch 3.5 to 7.9 times it.
+    - Against T8.a's figures without the margin (taken at a load of 10 to 22, provisional: warm
+      8.4, 16.1 and 7.7 ms, beside its neighbours at most 10.9, 13.5 and 8.0 ms, cold 44.5, 69.6 and
+      37.3 ms), the margin's cost is not separable from that run's load: its warm and neighbour
+      figures are no higher here, and the Earth-like cold maps 5 and 9 ms higher, within the
+      study's +11–18 ms estimate. A finding, not a hold (main's features-first rule): a cold map
+      was already four to seven times the quarter (T8.a's deferred "The bake's budget").
+
   - _Low's instrument._ QUALITY LOW allows one photorealistic view (`viewBudget.ts`'s
     `ONE_PHOTOREALISTIC_VIEW`), so low's second loop took a wireframe instrument, which T11's own
     pass draws: the lit pass then selects for the primary alone, and "with a photorealistic
