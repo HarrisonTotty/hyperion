@@ -18,6 +18,8 @@
 //! `toolchain.rs` already checks every committed table's declared items and runs `fit-check`
 //! without reruns, so neither is repeated here for the committed file.
 
+mod common;
+
 use std::fs;
 use std::num::NonZeroUsize;
 
@@ -47,20 +49,12 @@ fn assert_block_reproduced(name: &str) {
     )
     .expect("the task runs on its committed manifest");
     if planned.text != COMMITTED {
-        let at = COMMITTED
-            .lines()
-            .zip(planned.text.lines())
-            .enumerate()
-            .find(|(_, (committed, rendered))| committed != rendered)
-            .map_or_else(
-                || "the length".to_owned(),
-                |(n, (committed, rendered))| {
-                    format!(
-                        "line {}: committed `{committed}`, rerendered `{rendered}`",
-                        n + 1
-                    )
-                },
-            );
+        let at = common::first_difference(COMMITTED, &planned.text).map_or_else(
+            || "the length".to_owned(),
+            |(n, committed, rendered)| {
+                format!("line {n}: committed `{committed}`, rerendered `{rendered}`")
+            },
+        );
         panic!(
             "crates/hyperion-sim/src/tables/cluster_dynamics.rs differs from the {name} fit at \
              {at}: run `just fit {name}`"
@@ -137,18 +131,6 @@ fn the_committed_blocks_hold_plan_nines_scratch_values() {
     }
 }
 
-/// The declared items of a table, in order: every `pub const` or `pub static` of its body.
-fn declared(body: &str) -> Vec<String> {
-    body.lines()
-        .filter_map(|l| {
-            l.strip_prefix("pub const ")
-                .or_else(|| l.strip_prefix("pub static "))
-        })
-        .filter_map(|l| l.split(':').next())
-        .map(str::to_owned)
-        .collect()
-}
-
 /// The equipartition smoke run goes end to end through the command line on one thread and on
 /// four, into a temporary directory, and writes the same block both times, in the header grammar,
 /// declaring the task's items (Design notes 2 and 11).
@@ -205,7 +187,7 @@ fn the_equipartition_smoke_run_passes_the_header_grammar_and_is_the_same_on_any_
         })
     );
     assert_eq!(
-        declared(&block.body),
+        common::declared(&block.body),
         find("equipartition").unwrap().items()
     );
 }

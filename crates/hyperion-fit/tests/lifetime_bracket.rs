@@ -4,6 +4,8 @@
 //! CI runs this, so a table that is stale, or edited by hand, fails it. The sim's
 //! `the_shared_bracket_is_new_bit_for_bit` holds the table to a fresh `LifetimeBracket::new()`.
 
+mod common;
+
 use std::num::NonZeroUsize;
 
 use hyperion_fit::emit::Workspace;
@@ -24,16 +26,10 @@ fn lifetime_bracket_table_is_reproduced() {
         GENERATOR_VERSION.get(),
     )
     .expect("the lifetime_bracket task runs");
-    let rendered = planned.text;
-    if rendered != COMMITTED {
-        let line = rendered
-            .lines()
-            .zip(COMMITTED.lines())
-            .position(|(a, b)| a != b)
-            .map_or_else(|| "the length".to_owned(), |n| format!("line {}", n + 1));
-        panic!(
-            "crates/hyperion-sim/src/tables/lifetime_bracket.rs differs from the fit at {line}: run \
-             `just fit lifetime_bracket`"
-        );
-    }
+    common::assert_reproduced(
+        "crates/hyperion-sim/src/tables/lifetime_bracket.rs",
+        "lifetime_bracket",
+        COMMITTED,
+        &planned.text,
+    );
 }

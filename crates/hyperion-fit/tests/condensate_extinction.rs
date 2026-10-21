@@ -5,6 +5,8 @@
 //! CI runs this, so a material file whose n or k changed without a rerun, or a table edited by
 //! hand, fails it.
 
+mod common;
+
 use std::num::NonZeroUsize;
 
 use hyperion_fit::emit::Workspace;
@@ -54,18 +56,12 @@ fn assert_reproduced(task: &str, text: &str) {
         GENERATOR_VERSION.get(),
     )
     .expect("the task runs");
-    if planned.text != text {
-        let line = planned
-            .text
-            .lines()
-            .zip(text.lines())
-            .position(|(a, b)| a != b)
-            .map_or_else(|| "the length".to_owned(), |n| format!("line {}", n + 1));
-        panic!(
-            "crates/hyperion-sim/src/tables/{task}.rs differs from the fit at {line}: run `just fit \
-             {task}`"
-        );
-    }
+    common::assert_reproduced(
+        &format!("crates/hyperion-sim/src/tables/{task}.rs"),
+        task,
+        text,
+        &planned.text,
+    );
     assert!(!planned.body_changed, "{task}");
 }
 
