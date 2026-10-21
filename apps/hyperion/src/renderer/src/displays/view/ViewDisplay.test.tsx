@@ -263,9 +263,12 @@ function lineDraws(frame: FrameSubmission | undefined): number {
   return frame?.draws.filter((draw) => draw.material.name === "wireframe:lines").length ?? 0;
 }
 
-/** The style panel's buttons: each one's name, whether it is held back and whether it is pressed. */
+/**
+ * The style panel's style buttons, its `4 STYLE` group's: each one's name, whether it is held back
+ * and whether it is pressed.
+ */
 function styleButtons(): Array<[string, string | null, string | null]> {
-  return within(screen.getByRole("region", { name: "Style PRIMARY" }))
+  return within(styleGroup())
     .getAllByRole("button")
     .map((button) => [
       button.textContent,
@@ -315,9 +318,19 @@ const HELD_BACK = [
   ["PHOTOREALISTIC", "true", "false"],
 ];
 
+/**
+ * The primary's style panel's `4 STYLE` group, its style buttons apart from the `BASELINE` row
+ * (R10.T12.a).
+ */
+function styleGroup(): HTMLElement {
+  return within(screen.getByRole("region", { name: "Style PRIMARY" })).getByRole("group", {
+    name: "4 STYLE",
+  });
+}
+
 /** Whether both style buttons are described by why no view is drawn. */
 function bothHeldBackByNoView(): boolean {
-  return within(screen.getByRole("region", { name: "Style PRIMARY" }))
+  return within(styleGroup())
     .getAllByRole("button")
     .every((button) => {
       const ids = button.getAttribute("aria-describedby")?.split(" ") ?? [];
@@ -329,6 +342,28 @@ describe("VIEW's style panel while no view is drawn (R07.T19.b's follow-up)", ()
   it("stands while the engine is made, the camera's style pressed and both held back", () => {
     setup();
     expect([styleButtons(), bothHeldBackByNoView()]).toEqual([HELD_BACK, true]);
+  });
+
+  it("offers the BASELINE row while no view is drawn, its buttons not held back, 2 m pressed (R10.T12.a)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    setup({ source: refusingViewSource() });
+    await settle();
+    const row = within(screen.getByRole("region", { name: "Style PRIMARY" })).getByRole("group", {
+      name: "BASELINE",
+    });
+    expect(
+      within(row)
+        .getAllByRole("button")
+        .map((button) => [
+          button.textContent,
+          button.getAttribute("aria-disabled"),
+          button.getAttribute("aria-pressed"),
+        ]),
+    ).toEqual([
+      ["2 m", null, "true"],
+      ["5 m", null, "false"],
+      ["100 m", null, "false"],
+    ]);
   });
 
   it("stands where the views could not be made, held back with no view drawn", async () => {

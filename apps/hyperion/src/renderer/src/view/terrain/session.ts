@@ -302,7 +302,10 @@ export interface GroundSight {
 
 /** A terrain readout's settings (R10.T12). */
 export interface GroundReadoutOptions {
-  /** The baseline `SLOPE` is read over, metres (the guide's `BASELINE`), 2 for now. */
+  /**
+   * The baseline `SLOPE` is read over, metres (the guide's `BASELINE`): the one the `STYLE` panel's
+   * `BASELINE` row sets for the `PRIMARY` view's readout, 2 as the display mounts (R10.T12.a).
+   */
   readonly slopeBaselineM: SlopeBaselineM;
   /** The width of the pad the bearing capacity is taken under, metres: the reference pad's 1.0. */
   readonly padWidthM: number;

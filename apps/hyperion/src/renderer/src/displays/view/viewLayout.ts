@@ -32,24 +32,36 @@ export const FULL_MIN_WIDTH_REM = 99;
 /**
  * The least height of the `.view` box for the full layout, rem: the taller column's tallest state
  * with the list at two rows, rounded up to the next 0.25 rem, as measured at 1920 × 1080
- * (P05.T13's hidden runs, after R07.T19.d's, 16 px to the rem, the side column's line box 1.25).
+ * (P05.T13's hidden runs, after R07.T19.d's, 16 px to the rem, the side column's line box 1.25),
+ * with the `STYLE` panel's `BASELINE` row added by arithmetic (plan R10, R10.T12.a;
+ * decision-r10-t12a-scope §3.3).
  *
  * @remarks
  * The first column's tallest, 730.5 px: `Instruments` 202.5 px with both closed, `Targets` 173 px
  * at two rows under its two-line `RANGE FROM CAMERA` head, `Camera` 339 px with `NO OWN SHIP`, both
- * limit reasons and reduced motion, and two 0.5 rem gaps. The second's, 752 px: `Style` 99.5 px
- * with a two-line refusal added at 17.5 px a line and its 0.5 rem margin, 43 px (`QUALITY LOW`'s on
- * an instrument, or the software adapter's, which this machine cannot raise); the exposure
- * `INHIBITED · OPERATOR` with nothing metered and a refused entry, 425.5 px, its
- * `AUTO NOT AVAILABLE: NO LIT SIDE` (or `NO DARK SIDE`, or `STAR DISC ONLY`) on two lines and
- * `INHIBIT` held back beside its three-line reason, since P05.T13 tracks their states; the meter
- * with its status in the reading's place, 168 px; and two gaps. 752 px is 47 rem; it was 731.5 px
- * (45.75 rem) before P05.T13, the exposure then 365 px beside a two-line reason with the meter's
- * `METERED`, which that state now reaches at 749 px. It must never pass 52.5 rem, so that a
- * maximised 1920 × 1080 window (a box of about 53.5 rem) is full (decision-r07-t19b-exposure-fit,
- * item 2): a task that adds to a side panel re-measures, and asks for a ruling rather than pass it.
+ * limit reasons and reduced motion, and two 0.5 rem gaps. The second's, 792 px: `Style` 99.5 px
+ * with a two-line refusal added at 17.5 px a line and its 0.5 rem margin, 43 px (the software
+ * adapter's, which this machine cannot raise), and the `BASELINE` row, 32 px under its 0.5 rem
+ * margin, 8 px; the exposure `INHIBITED · OPERATOR` with nothing metered and a refused entry,
+ * 425.5 px, its `AUTO NOT AVAILABLE: NO LIT SIDE` (or `NO DARK SIDE`, or `STAR DISC ONLY`) on two
+ * lines and `INHIBIT` held back beside its three-line reason, since P05.T13 tracks their states;
+ * the meter with its status in the reading's place, 168 px; and two gaps. 792 px is 49.5 rem.
+ * - **The `BASELINE` row** (R10.T12.a) stands while the `PRIMARY` view is the `CONTROLS` view, so
+ *   that with an instrument there, whose `QUALITY LOW` refusal is the other two-line one, the
+ *   column is 752 px, 47 rem, as it was before the row. The row is 17.42 rem wide against the
+ *   panel's 18.375 rem of content (B612's shipped metrics, no kerning, so it errs wide); were its
+ *   buttons ever to wrap under its legend, the column would be 824 px, 51.5 rem, still within the
+ *   bound.
+ * - **Before.** 752 px, 47 rem, before R10.T12.a; 731.5 px (45.75 rem) before P05.T13, the
+ *   exposure then 365 px beside a two-line reason with the meter's `METERED`, which that state now
+ *   reaches at 749 px.
+ * - **The bound.** It must never pass 52.5 rem ({@link FULL_MIN_HEIGHT_BOUND_REM}), so that a
+ *   maximised 1920 × 1080 window (a box of about 53.5 rem) is full (decision-r07-t19b-exposure-fit,
+ *   item 2): a task that adds to a side panel re-measures, and asks for a ruling rather than pass
+ *   it. The row held back with a reason, its draft form, would have passed it at 852.5 px with a
+ *   two-line reason, and a panel of its own would have stood at it, 839.5 px.
  */
-export const FULL_MIN_HEIGHT_REM = 47;
+export const FULL_MIN_HEIGHT_REM = 49.5;
 
 /**
  * The bound on {@link FULL_MIN_HEIGHT_REM}, rem: a maximised 1920 × 1080 window's box, about

@@ -28,7 +28,7 @@ import {
 } from "../../view/terrain/annunciation";
 import type { FieldStatus } from "../../view/terrain/coarseFieldStore";
 import { CoverageView } from "../../view/terrain/coverage";
-import { lineOfSightOf } from "../../view/terrain/readouts";
+import { lineOfSightOf, MAX_SIGHT_M, type SightGap } from "../../view/terrain/readouts";
 import type {
   GroundReadoutOptions,
   GroundSight,
@@ -701,5 +701,157 @@ describe("the primary's terrain readout at each publish (R10.T12; decision-r10-t
     fake.terrainFault = TERRAIN_COMPUTATION_FAILED;
     const snapshot = new GroundReadouts(PRIMARY_VIEW_ID).publish(asSession(fake), terrainRun(), 0);
     expect(snapshot?.sessionFault).toBe(TERRAIN_COMPUTATION_FAILED);
+  });
+
+  describe("at the STYLE panel's BASELINE (R10.T12.a; decision-r10-t12a-scope §3.1)", () => {
+    it("asks at the baseline each publish gives from its next ask, under the same reference pad", async () => {
+      const fake = holdingMoon();
+      const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
+      const run = terrainRun();
+      readouts.publish(asSession(fake), run, 0);
+      // A choice while the first is out waits for the next ask.
+      readouts.publish(asSession(fake), run, 16, 5);
+      askAt(fake, 0).answer(NOT_SURVEYED);
+      await settle();
+      readouts.publish(asSession(fake), run, 33, 5);
+      askAt(fake, 1).answer(NOT_SURVEYED);
+      await settle();
+      readouts.publish(asSession(fake), run, 50, 100);
+      expect(fake.asks.map((ask) => ask.options)).toEqual([
+        { slopeBaselineM: 2, padWidthM: 1 },
+        { slopeBaselineM: 5, padWidthM: 1 },
+        { slopeBaselineM: 100, padWidthM: 1 },
+      ]);
+    });
+
+    it("takes an answer asked at the baseline before a choice as it came", async () => {
+      const fake = holdingMoon();
+      const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
+      const run = terrainRun();
+      readouts.publish(asSession(fake), run, 0, 2);
+      askAt(fake, 0).answer(ON_GROUND);
+      await settle();
+      const taken = readouts.publish(asSession(fake), run, 16, 100);
+      expect({
+        readout: taken?.readout,
+        asked: fake.asks.map((ask) => ask.options.slopeBaselineM),
+      }).toEqual({ readout: ON_GROUND, asked: [2, 100] });
+    });
+  });
+
+  describe("where no line of sight forms (R10.T12.a; decision-r10-t12a-scope §3.2)", () => {
+    /** `run` with `TEST MOON`'s rotation not known. */
+    function stillMoon(run: ViewRun): ViewRun {
+      return withBodies(run, (bodies) =>
+        bodies.map((body) => (body.id === terrainMoon() ? { ...body, rotation: null } : body)),
+      );
+    }
+
+    /** Each cause, and `TERRAIN TEST` posed to bring it about. */
+    const GAPS: ReadonlyArray<readonly [SightGap, () => ViewRun]> = [
+      ["rotation", () => stillMoon(terrainRun())],
+      ["far", () => framedOn(terrainRun(), terrainMoon(), vec3(0, 0, 2 * MAX_SIGHT_M))],
+      ["centre", () => framedOn(terrainRun(), terrainMoon(), vec3(0, 0, 0.5))],
+    ];
+
+    it.each(GAPS)("carries the cause, %s, at each publish and asks nothing", (gap, run) => {
+      const fake = holdingMoon();
+      const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
+      const snapshots = [0, 16].map((atMs) => readouts.publish(asSession(fake), run(), atMs));
+      expect({
+        gaps: snapshots.map((snapshot) => snapshot?.sightGap),
+        readouts: snapshots.map((snapshot) => snapshot?.readout),
+        asks: fake.asks.length,
+      }).toEqual({ gaps: [gap, gap], readouts: [null, null], asks: 0 });
+    });
+
+    it.each(GAPS)("lets the answer held go once the cause, %s, arises", async (gap, run) => {
+      const { fake, readouts } = await withAnswerHeld();
+      askAt(fake, 1).answer(ON_GROUND);
+      await settle();
+      const snapshot = readouts.publish(asSession(fake), run(), 33);
+      expect({
+        readout: snapshot?.readout,
+        gap: snapshot?.sightGap,
+        asks: fake.asks.length,
+      }).toEqual({ readout: null, gap, asks: 2 });
+    });
+
+    it("clears the cause once a sight forms, and asks along it", () => {
+      const fake = holdingMoon();
+      const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
+      const gapped = readouts.publish(asSession(fake), stillMoon(terrainRun()), 0);
+      const formed = readouts.publish(asSession(fake), terrainRun(), 16);
+      expect([gapped?.sightGap, formed?.sightGap, fake.asks.length]).toEqual([
+        "rotation",
+        undefined,
+        1,
+      ]);
+    });
+
+    it("clears the cause for another body framed, whose sight forms", () => {
+      const fake = holdingMoon();
+      fake.surveys.set(OTHER_MOON, aSurvey({ header: moonLikeHeader(OTHER_MOON) }));
+      const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
+      const run = stillMoon(twoMoonRun());
+      const gapped = readouts.publish(asSession(fake), run, 0);
+      const other = readouts.publish(
+        asSession(fake),
+        framedOn(run, OTHER_MOON, vec3(0, 0, 1e7)),
+        16,
+      );
+      expect([gapped?.sightGap, other?.body, other?.sightGap]).toEqual([
+        "rotation",
+        OTHER_MOON,
+        undefined,
+      ]);
+    });
+
+    it.each(WITHHELD)("clears the cause while %s", (_, raise) => {
+      const fake = holdingMoon();
+      const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
+      const run = stillMoon(terrainRun());
+      const gapped = readouts.publish(asSession(fake), run, 0);
+      raise(fake);
+      const withheld = readouts.publish(asSession(fake), run, 16);
+      expect([gapped?.sightGap, withheld?.sightGap]).toEqual(["rotation", undefined]);
+    });
+
+    it("clears the cause for a session let go", () => {
+      const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
+      const run = stillMoon(terrainRun());
+      const gapped = readouts.publish(asSession(holdingMoon()), run, 0);
+      expect([gapped?.sightGap, readouts.publish(null, run, 16)]).toEqual(["rotation", null]);
+    });
+
+    it("lets the cause go where the next ask finds a distance that is not finite", () => {
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const fake = holdingMoon();
+      const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
+      const far = framedOn(terrainRun(), terrainMoon(), vec3(0, 0, 2 * MAX_SIGHT_M));
+      const broken = framedOn(terrainRun(), terrainMoon(), vec3(Number.NaN, 0, 0));
+      const snapshots = [
+        readouts.publish(asSession(fake), far, 0),
+        readouts.publish(asSession(fake), broken, 16),
+      ];
+      expect(snapshots.map((snapshot) => snapshot?.sightGap)).toEqual(["far", undefined]);
+    });
+
+    it("guards a camera at a distance that is not finite, saying so once, with no cause", () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const fake = holdingMoon();
+      const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
+      const run = framedOn(terrainRun(), terrainMoon(), vec3(Number.NaN, 0, 0));
+      const snapshots = [0, 16].map((atMs) => readouts.publish(asSession(fake), run, atMs));
+      expect({
+        gaps: snapshots.map((snapshot) => snapshot?.sightGap),
+        asks: fake.asks.length,
+        said: error.mock.calls.map(([words]: unknown[]) => words),
+      }).toEqual({
+        gaps: [undefined, undefined],
+        asks: 0,
+        said: ["the terrain readout could not be asked:"],
+      });
+    });
   });
 });

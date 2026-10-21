@@ -1,4 +1,10 @@
-import type { ResponseBody, ResponseFor, SurfaceHeaderDto } from "@hyperion/protocol";
+import type {
+  BodySummaryDto,
+  ResponseBody,
+  ResponseFor,
+  SceneSystemDto,
+  SurfaceHeaderDto,
+} from "@hyperion/protocol";
 import { act, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -20,7 +26,12 @@ import {
   TERRAIN_NOT_AVAILABLE,
 } from "../../view/terrain/annunciation";
 import { PALETTE_NONE, type SurfaceGroundReadout } from "../../view/terrain/workers/messages";
-import { NO_BREAK_SPACE, SURVEY_PENDING, TERRAIN_NOT_MODELLED } from "../../view/terrain/readouts";
+import {
+  NO_BREAK_SPACE,
+  NO_SIGHT_ROTATION,
+  SURVEY_PENDING,
+  TERRAIN_NOT_MODELLED,
+} from "../../view/terrain/readouts";
 import { MAX_CONSECUTIVE_WORKER_FAILURES } from "../../view/terrain/workers/pool";
 
 import {
@@ -387,7 +398,11 @@ const EARTH_RADIUS_M = 6_378_137;
  * Answers the scene subscription with the ship `heightM` (2,000 km by default) over the slice's
  * Earth, in its frame.
  */
-async function shipOverEarthArrives(view: ViewDisplayHarness, heightM = 2e6): Promise<void> {
+async function shipOverEarthArrives(
+  view: ViewDisplayHarness,
+  heightM = 2e6,
+  system: SceneSystemDto = sliceSceneSystem(),
+): Promise<void> {
   const answer: ResponseBody = {
     kind: "subscribe",
     subscription: 5,
@@ -404,7 +419,7 @@ async function shipOverEarthArrives(view: ViewDisplayHarness, heightM = 2e6): Pr
         velocity_m_s: [0, 0, 0],
         time: { seconds: 3_000, nanos: 0 },
       },
-      system: sliceSceneSystem(),
+      system,
       tidal_radius_m: SCENE_TIDAL_RADIUS_M,
       craft: [],
     },
@@ -612,7 +627,10 @@ const LOW_OVER_EARTH_M = 5e5;
  * Earth's field (surveyed whole) and seed answered, its bakes held back by the scripted workers,
  * with the session `VIEW` made given to `sessions`.
  */
-async function earthInWireframe(sessions: TerrainSession[]): Promise<ViewDisplayHarness> {
+async function earthInWireframe(
+  sessions: TerrainSession[],
+  system: SceneSystemDto = sliceSceneSystem(),
+): Promise<ViewDisplayHarness> {
   const fake = timedEngineSource();
   const view = renderViewDisplay({
     store: await nominalStore(),
@@ -626,7 +644,7 @@ async function earthInWireframe(sessions: TerrainSession[]): Promise<ViewDisplay
   await settle();
   view.advance(100);
   await openUniverse(view);
-  await shipOverEarthArrives(view, LOW_OVER_EARTH_M);
+  await shipOverEarthArrives(view, LOW_OVER_EARTH_M, system);
   await settle();
   view.advance(300);
   await settle();
@@ -1113,6 +1131,157 @@ describe("the primary's terrain lines on its lower plate (R10.T12; decision-r10-
       before === undefined || after === undefined,
       JSON.stringify(after?.direction) === JSON.stringify(before?.direction),
     ]).toEqual([false, false]);
+  });
+});
+
+/**
+ * Answers every terrain-readout query the height workers hold with {@link GROUND_READOUT} read
+ * over the query's own baseline, as the module reads it; returns the baselines asked, m.
+ */
+function answerAtAskedBaselines(view: ViewDisplayHarness): number[] {
+  const ground = GROUND_READOUT;
+  if (ground.kind !== "ground") {
+    throw new Error("GROUND_READOUT meets no ground");
+  }
+  const asked: number[] = [];
+  for (const worker of view.heightWorkers) {
+    for (const query of worker.pendingGroundReadouts) {
+      const reading = { ...ground.reading, slopeBaselineM: query.slopeBaselineM };
+      worker.reply({
+        kind: "ground-readout",
+        id: query.id,
+        body: query.body,
+        readout: { ...ground, reading },
+      });
+      asked.push(query.slopeBaselineM);
+    }
+  }
+  return asked;
+}
+
+/** Plays `steps` × 250 ms, answering each query at its own baseline; returns the baselines asked. */
+async function readAtBaselinesFor(view: ViewDisplayHarness, steps: number): Promise<number[]> {
+  const asked: number[] = [];
+  for (let step = 0; step < steps; step += 1) {
+    view.advance(250);
+    asked.push(...answerAtAskedBaselines(view));
+    // Each step answers what the one before asked.
+    // oxlint-disable-next-line no-await-in-loop
+    await settle();
+  }
+  return asked;
+}
+
+/** The `Style` panel's `BASELINE` row, or `null` where it is left out. */
+function baselineRow(): HTMLElement | null {
+  return screen.queryByRole("group", { name: "BASELINE" });
+}
+
+/** The pressed button of the `BASELINE` row, by its name. */
+function pressedBaseline(): string | null {
+  const row = baselineRow();
+  return row === null
+    ? null
+    : (within(row)
+        .getAllByRole("button")
+        .find((button) => button.getAttribute("aria-pressed") === "true")?.textContent ?? null);
+}
+
+/** `body`, its rotation not modelled where it is the slice's Earth. */
+function withStillEarth(body: BodySummaryDto): BodySummaryDto {
+  return body.id === FIXTURE_EARTH ? { ...body, rotation: { state: "not_modelled" } } : body;
+}
+
+/** The `INSTRUMENTS` panel's `CONTROLS` row. */
+function controlsRow(): HTMLElement {
+  return screen.getByRole("group", { name: "CONTROLS" });
+}
+
+/** The slice's system as the scene carries it, the Earth's rotation not modelled. */
+function sliceSystemWithStillEarth(): SceneSystemDto {
+  const scene = sliceSceneSystem();
+  return {
+    ...scene,
+    system: { ...scene.system, bodies: scene.system.bodies.map(withStillEarth) },
+  };
+}
+
+describe("the primary's readout's BASELINE on the STYLE panel (R10.T12.a; decision-r10-t12a-scope §3.1)", () => {
+  it("reads SLOPE over 5 m from the next answer once 5 m is chosen on the Style PRIMARY panel", async () => {
+    const view = await terrainTestReading();
+    const before = await readAtBaselinesFor(view, 4);
+    const style = screen.getByRole("region", { name: "Style PRIMARY" });
+    await view.user.click(within(style).getByRole("button", { name: "5 m" }));
+    const after = await readAtBaselinesFor(view, 4);
+    // The first answered after the choice may have been asked before it, at 2 m.
+    expect({
+      before: [...new Set(before)],
+      after: [...new Set(after.slice(1))],
+      slope: readingIn(plate(), "SLOPE")?.trim(),
+      pressed: pressedBaseline(),
+    }).toEqual({
+      before: [2],
+      after: [5],
+      slope: `~12°${NO_BREAK_SPACE}±${NO_BREAK_SPACE}4° · BASELINE 5 m`,
+      pressed: "5 m",
+    });
+  });
+
+  it("leaves the row out with INSTRUMENT 1 as the CONTROLS view, and stands it again with its choice kept", async () => {
+    const view = await terrainTestReading();
+    const style = screen.getByRole("region", { name: "Style PRIMARY" });
+    await view.user.click(within(style).getByRole("button", { name: "100 m" }));
+    await openInstrument(view, "INSTRUMENT 1");
+    await view.user.click(within(controlsRow()).getByRole("button", { name: "INSTRUMENT 1" }));
+    view.advance(300);
+    const onInstrument = {
+      style: screen.queryByRole("region", { name: "Style INSTRUMENT 1" }) !== null,
+      row: baselineRow(),
+    };
+    await view.user.click(within(controlsRow()).getByRole("button", { name: "PRIMARY" }));
+    view.advance(300);
+    expect({
+      onInstrument,
+      back: pressedBaseline(),
+    }).toEqual({ onInstrument: { style: true, row: null }, back: "100 m" });
+  });
+});
+
+describe("the BASELINE row through a change of scene (R10.T12.a; decision-r10-t12a-scope §3.1)", () => {
+  it("keeps its choice when another scene is chosen, as the exposure is kept", async () => {
+    const view = await terrainTestReading();
+    const style = screen.getByRole("region", { name: "Style PRIMARY" });
+    await view.user.click(within(style).getByRole("button", { name: "100 m" }));
+    await view.user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    view.advance(300);
+    await settle();
+    expect(pressedBaseline()).toBe("100 m");
+  });
+});
+
+describe("the primary's readout where no line of sight forms (R10.T12.a; decision-r10-t12a-scope §3.2)", () => {
+  it("reads NOT AVAILABLE: ROTATION not yet modelled under its heading, with DATUM, no tripod and no note, over a body with no rotation", async () => {
+    // The server's scene, its FREE camera in the Earth's frame, the Earth's rotation not modelled.
+    const view = await earthInWireframe([], sliceSystemWithStillEarth());
+    await view.user.keyboard("3");
+    const answered = await readFor(view, 4);
+    const sights = sightsOver(view, 200);
+    const heading = within(plate()).getByRole("heading", { name: "GROUND AT LINE OF SIGHT" });
+    expect({
+      answered,
+      line: heading.nextElementSibling?.textContent,
+      datum: readingIn(plate(), "DATUM"),
+      elevation: readingIn(plate(), "ELEVATION"),
+      point: [...new Set(sights.primary)],
+      note: screen.queryByRole("note", { name: GROUND_NOTE_NAME }),
+    }).toEqual({
+      answered: 0,
+      line: NO_SIGHT_ROTATION,
+      datum: expect.stringMatching(/^REFERENCE SPHEROID 6378\.1 km × 6356\.8 km/u),
+      elevation: null,
+      point: [undefined],
+      note: null,
+    });
   });
 });
 

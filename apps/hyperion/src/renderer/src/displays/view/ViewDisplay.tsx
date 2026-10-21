@@ -157,6 +157,7 @@ import { styleName } from "../../view/photoreal/style";
 import { isTerrainFault, type TerrainAnnunciation } from "../../view/terrain/annunciation";
 import { TerrainFailureGuard } from "../../view/terrain/failureGuard";
 import type { TerrainSession } from "../../view/terrain/session";
+import type { SlopeBaselineM } from "../../view/terrain/workers/messages";
 import type { WorkerLike } from "../../view/terrain/workers/pool";
 import { useServerLink } from "../../lib/serverLink";
 import { faultsFor } from "./viewFaults";
@@ -169,6 +170,7 @@ import {
 } from "./useTerrainSession";
 import { ViewMarkList } from "./ViewMarkList";
 import {
+  GROUND_READOUT_OPTIONS,
   GroundReadouts,
   type GroundSnapshot,
   lineOfSightPointOf,
@@ -365,6 +367,13 @@ interface ViewStageProps {
   readonly onMeterChange: (meter: MeterMode) => void;
   readonly easedMoves: boolean;
   readonly onEasedMovesChange: (easedMoves: boolean) => void;
+  /**
+   * The baseline the primary's terrain readout reads `SLOPE` over, m, the `STYLE` panel's
+   * `BASELINE` row's (plan R10, R10.T12.a; decision-r10-t12a-scope §3.1): held above the stage as
+   * the exposure is, so that a new scene keeps it.
+   */
+  readonly slopeBaselineM: SlopeBaselineM;
+  readonly onSlopeBaselineChange: (baselineM: SlopeBaselineM) => void;
   /** The interim stars (R02.T16) and their count line, or `null` before an answer. */
   readonly stars: ReadonlyArray<ViewStar>;
   readonly countLine: string | null;
@@ -466,6 +475,12 @@ interface LoopInputs {
    * disagree.
    */
   readonly lineOfSightPoint: LineOfSightPoint | undefined;
+  /**
+   * The baseline the primary's terrain readout asks `SLOPE` over, m: the `STYLE` panel's
+   * `BASELINE` row's (plan R10, R10.T12.a), read at each publish, so that a choice reaches the next
+   * ask without the loop's effect running again.
+   */
+  readonly slopeBaselineM: SlopeBaselineM;
 }
 
 /** What the loop publishes for the DOM, at most every {@link READOUT_INTERVAL_MS}. */
@@ -679,6 +694,8 @@ function ViewStage({
   onMeterChange,
   easedMoves,
   onEasedMovesChange,
+  slopeBaselineM,
+  onSlopeBaselineChange,
   stars,
   countLine,
   universe,
@@ -738,6 +755,7 @@ function ViewStage({
     terrain,
     notePlayed,
     lineOfSightPoint: undefined,
+    slopeBaselineM,
   });
 
   // The sky replaces the interim field once it arrives, asked on the published run (R06.T13.c).
@@ -890,6 +908,7 @@ function ViewStage({
       terrain,
       notePlayed,
       lineOfSightPoint: hasPoint === undefined ? undefined : { hasPoint, rangeM: pointRangeM },
+      slopeBaselineM,
     };
   }, [
     exposure,
@@ -906,6 +925,7 @@ function ViewStage({
     notePlayed,
     hasPoint,
     pointRangeM,
+    slopeBaselineM,
   ]);
 
   // The drawing loop reads the server's scene, as the latest render holds it, through a ref.
@@ -1228,7 +1248,7 @@ function ViewStage({
           terrain: terrainAnnunciation,
           surveyEdges,
           contourIntervalM,
-          ground: grounds.publish(session, run, nowMs),
+          ground: grounds.publish(session, run, nowMs, inputs.slopeBaselineM),
         });
       }
       frame = requestAnimationFrame(tick);
@@ -1888,6 +1908,13 @@ function ViewStage({
             designator={operatedView === null ? PRIMARY_NAME : operatedView.slot.name}
             id={foldIds.style}
             hidden={folded("style")}
+            // The BASELINE row acts on the CONTROLS view's readout, which only the PRIMARY view
+            // states: left out with an instrument there (decision-r10-t12a-scope §3.1).
+            baseline={
+              operatedView === null
+                ? { chosen: slopeBaselineM, onBaseline: onSlopeBaselineChange }
+                : undefined
+            }
           />
           <ExposurePanel
             exposure={exposure}
@@ -2026,6 +2053,11 @@ function ViewPanels({
   const [exposure, setExposure] = useState<ExposureControl>(DEFAULT_EXPOSURE);
   const [meter, setMeter] = useState<MeterMode>("average");
   const [easedMoves, setEasedMoves] = useState(false);
+  // The primary's readout's BASELINE (R10.T12.a; decision-r10-t12a-scope §3.1): the console's own
+  // setting, 2 m as the display mounts, kept while it stays mounted, through every scene.
+  const [slopeBaselineM, setSlopeBaselineM] = useState<SlopeBaselineM>(
+    GROUND_READOUT_OPTIONS.slopeBaselineM,
+  );
   const universe = useUniverse().open?.id ?? null;
   const standing = serverSceneStanding(scene);
   // The server's scene is chosen by default; a kept scene stands in while it cannot be drawn.
@@ -2132,6 +2164,8 @@ function ViewPanels({
         onMeterChange={setMeter}
         easedMoves={easedMoves}
         onEasedMovesChange={setEasedMoves}
+        slopeBaselineM={slopeBaselineM}
+        onSlopeBaselineChange={setSlopeBaselineM}
         stars={interim.field?.stars ?? NO_STARS}
         countLine={interim.countLine}
         universe={universe}

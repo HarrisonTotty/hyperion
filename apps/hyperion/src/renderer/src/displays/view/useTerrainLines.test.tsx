@@ -6,7 +6,7 @@ import { FIXTURE_MOON, FIXTURE_PLANET } from "../../test/viewFixtures";
 import { TERRAIN_COMPUTATION_FAILED } from "../../view/terrain/annunciation";
 import type { FieldStatus } from "../../view/terrain/coarseFieldStore";
 import { CoverageView } from "../../view/terrain/coverage";
-import { readoutLineText } from "../../view/terrain/readouts";
+import { NO_SIGHT_FAR, NO_SIGHT_ROTATION, readoutLineText } from "../../view/terrain/readouts";
 import type { TerrainSurvey } from "../../view/terrain/session";
 import type { SurfaceGroundReadout } from "../../view/terrain/workers/messages";
 import type { GroundSnapshot } from "./groundReadout";
@@ -163,5 +163,53 @@ describe("the readout the plate states, which its tripod and note follow (decisi
 
   it("is none with no lines", () => {
     expect(standingReadout(null, "stands")).toBeNull();
+  });
+
+  it("is none where no line of sight forms, so that no tripod or note stands (R10.T12.a)", () => {
+    const { result } = renderLines(snapshotOf({ sightGap: "far" }));
+    expect(standingReadout(result.current, "stands")).toBeNull();
+  });
+});
+
+describe("useTerrainLines where no line of sight forms (R10.T12.a; decision-r10-t12a-scope §3.2)", () => {
+  it("passes the snapshot's cause on: the heading and its NOT AVAILABLE line, with DATUM", () => {
+    const { result } = renderLines(snapshotOf({ sightGap: "rotation" }));
+    expect({
+      readout: result.current?.model.readout.map(readoutLineText),
+      datum: result.current?.model.datum === null ? null : "DATUM",
+      answer: result.current?.readout,
+    }).toEqual({
+      readout: ["GROUND AT LINE OF SIGHT", NO_SIGHT_ROTATION],
+      datum: "DATUM",
+      answer: null,
+    });
+  });
+
+  it("follows the cause from one snapshot to the next", () => {
+    const hook = renderLines(snapshotOf({ sightGap: "rotation" }));
+    hook.rerender({ snapshot: snapshotOf({ sightGap: "far" }) });
+    expect(hook.result.current?.model.readout.map(readoutLineText)).toEqual([
+      "GROUND AT LINE OF SIGHT",
+      NO_SIGHT_FAR,
+    ]);
+  });
+
+  it("gives the lines it gave before for a snapshot made without the cause, as the descent spike's", () => {
+    // The spike's survey snapshot (`surveySnapshotOf`) carries no `sightGap` key at all.
+    const spike: GroundSnapshot = {
+      body: FIXTURE_MOON,
+      surfaceUnset: false,
+      survey: aSurvey(),
+      readout: null,
+      sessionFault: null,
+      slantFromCamera: false,
+    };
+    const { result } = renderLines(spike);
+    expect({
+      survey: result.current?.model.survey.length,
+      datum: result.current?.model.datum,
+      readout: result.current?.model.readout,
+      answer: result.current?.readout,
+    }).toEqual({ survey: 1, datum: null, readout: [], answer: null });
   });
 });

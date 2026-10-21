@@ -197,6 +197,20 @@ describe("the survey line on the lower plate (R10.T12; the guide's survey line)"
   });
 });
 
+describe("the survey's lines' labels kept whole (R10.T12.a; decision-r10-t12a-scope §4.3)", () => {
+  it.each<readonly [string, ReadoutLine]>([
+    ["the survey line", surveyLineOf(aSurvey())],
+    ["DATUM", datumLine(SEA_HEADER, true)],
+    ["the tallest survey line", tallestTerrainLines(HEADER, 1).survey],
+    ["the tallest DATUM", tallestTerrainLines(HEADER, 1).datum],
+  ])("sets %s's line with the whole-label class", (_, line) => {
+    renderLine(line);
+    expect(screen.getByRole("term").parentElement?.className).toBe(
+      "field view-label__line view-label__line--whole",
+    );
+  });
+});
+
 describe("the DATUM line on the lower plate (R10.T12; the guide's DATUM)", () => {
   it("sets DATUM as a reading in a list of the label block's lines", () => {
     renderLine(datumLine(SEA_HEADER, false));
@@ -220,7 +234,8 @@ describe("the DATUM line on the lower plate (R10.T12; the guide's DATUM)", () =>
     expect(
       screen.getAllByRole("status").map((output) => [output.textContent, output.style.minWidth]),
     ).toEqual([
-      ["6378.1 km × 6356.8 km", ""],
+      ["6378.1 km ×", ""],
+      ["6356.8 km", ""],
       ["-2.4 m", ""],
     ]);
   });
@@ -232,7 +247,29 @@ describe("the DATUM line on the lower plate (R10.T12; the guide's DATUM)", () =>
       words: within(parts())
         .getAllByText(/^(?:REFERENCE SPHEROID|SEA LEVEL)/u)
         .map((part) => part.closest(".stale")),
-    }).toEqual({ muted: [true, true], words: [null, null] });
+    }).toEqual({ muted: [true, true, true], words: [null, null] });
+  });
+
+  it("sets a spheroid's two radii as two runs, a space between them, its one S after the second (R10.T12.a)", () => {
+    renderLine(datumLine(SEA_HEADER, true));
+    const [figure] = parts().querySelectorAll(".view-label__part");
+    const shown = [...(figure?.childNodes ?? [])].map((node) =>
+      node instanceof HTMLElement ? `${node.className}: ${visibleText(node)}` : node.textContent,
+    );
+    expect(shown).toEqual([
+      "REFERENCE SPHEROID ",
+      "view-label__run: 6378.1 km ×",
+      " ",
+      "view-label__run: 6356.8 km S",
+    ]);
+  });
+
+  it("sets a sphere's one radius as one run (R10.T12.a)", () => {
+    const sphere = { ...HEADER, equatorial_radius_m: 1_737_400, polar_radius_m: 1_737_400 };
+    renderLine(datumLine(sphere, false));
+    expect(
+      [...parts().querySelectorAll(".view-label__run")].map((run) => visibleText(run).trim()),
+    ).toEqual(["1737.4 km"]);
   });
 
   it("carries no id in its tallest form, since that stands in the hidden sizer", () => {

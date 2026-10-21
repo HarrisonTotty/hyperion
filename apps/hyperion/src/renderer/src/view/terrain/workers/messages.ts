@@ -308,8 +308,9 @@ export interface GroundReadoutQuery {
   /** How far along it the ground is looked for, metres; past the body's far side for `NO GROUND`. */
   readonly maxM: number;
   /**
-   * The baseline `SLOPE` is read over, metres (the guide's `BASELINE`), 2 until its selector is
-   * built (R10.T12.a); the capacity takes 2 m whatever this is.
+   * The baseline `SLOPE` is read over, metres (the guide's `BASELINE`), as the `STYLE` panel's
+   * `BASELINE` row sets it (R10.T12.a), 2 as the display mounts; the capacity takes 2 m whatever
+   * this is.
    */
   readonly slopeBaselineM: SlopeBaselineM;
   /** The width of the pad the bearing capacity is taken under, metres: the reference pad's 1.0. */

@@ -10,9 +10,11 @@
  * - **The ask.** At each publish, the `FRAME` body (`frameBody`) where it is a lit body with a
  *   surface, its survey (`TerrainSession.survey`), the line of sight through the picture's centre
  *   (`lineOfSightOf`) and `TerrainSession.groundReadout` at the instant the view lights the body
- *   at, the scene's time less the body's light time (§6 (c)), with the 2 m baseline and the
- *   reference pad. One query is in flight at a time: a publish while one is out asks nothing, and
- *   the next asks afresh, so that the newest pose is the one asked.
+ *   at, the scene's time less the body's light time (§6 (c)), with the baseline the publish gives
+ *   (the `STYLE` panel's `BASELINE`, 2 m as the display mounts; R10.T12.a) and the reference pad.
+ *   One query is in flight at a time: a publish while one is out asks nothing, and the next asks
+ *   afresh, so that the newest pose and baseline are the ones asked; an answer asked at a baseline
+ *   since changed is taken as it came, its `SLOPE` stating the baseline it was read over.
  * - **The answer** is taken at the next publish, so that its readings change with the loop's
  *   readouts, and only where it is still the session's and the body's it was asked of; one for a
  *   session let go or a body no longer framed is dropped. Nothing stands before the first answer
@@ -25,6 +27,12 @@
  * - **Nothing is asked** while no survey of the body is held, the body is not modelled, or the
  *   session's terrain is faulted (§5, §7): the readout does not stand then, and its answer is let
  *   go, so that it returns with a new first answer, as a cut.
+ * - **No line of sight** (R10.T12.a; decision-r10-t12a-scope §3.2). Where the ask finds none
+ *   (`lineOfSightOf`), nothing is asked, the answer held is let go, and the snapshot carries the
+ *   cause (`sightGapOf`), so that the readout says why in its readings' place; the cause clears once
+ *   a sight forms again, or the body, the session or the survey's standing changes. A camera whose
+ *   distance from the body is not finite is no cause but a broken invariant, thrown under the ask's
+ *   guard.
  * - **A kept scene's body with no terrain** (decision-r10-t12-commit3 §5), a planet, dwarf planet or
  *   moon it gives no detail seed, reads `TERRAIN: NOT YET MODELLED` in the survey line's place,
  *   with or without a session, and nothing is asked of it; a giant (`ViewBody.surfaceless`) and a
@@ -39,21 +47,26 @@ import { isLitBody } from "../../view/lighting/retarded";
 import type { ViewBody } from "../../view/scene/model";
 import type { TerrainFault } from "../../view/terrain/annunciation";
 import { TerrainFailureGuard } from "../../view/terrain/failureGuard";
-import { lineOfSightOf } from "../../view/terrain/readouts";
+import { lineOfSightOf, type SightGap, sightGapOf } from "../../view/terrain/readouts";
 import type {
   GroundReadoutOptions,
   GroundSight,
   TerrainSession,
   TerrainSurvey,
 } from "../../view/terrain/session";
-import type { SurfaceGroundReadout } from "../../view/terrain/workers/messages";
+import type { SlopeBaselineM, SurfaceGroundReadout } from "../../view/terrain/workers/messages";
 import type { LineOfSightPoint } from "../../view/wireframe/drawList";
 import { frameBody, runPose, slantRangeFromCamera, type ViewRun } from "./viewRun";
 
 /**
- * The readout's settings (decision-r10-t12-leans §1): `SLOPE` over the 2 m `BASELINE` until
- * R10.T12.a's selector, and the capacity under the reference pad, 1.0 m wide until the own ship's
- * hull defines its pads (the guide's `PAD WIDTH`).
+ * The readout's settings (decision-r10-t12-leans §1): `SLOPE` over the 2 m `BASELINE` as the
+ * display mounts, and the capacity under the reference pad, 1.0 m wide until the own ship's hull
+ * defines its pads (the guide's `PAD WIDTH`).
+ *
+ * @remarks
+ * The baseline is the `STYLE` panel's `BASELINE` row's since R10.T12.a (decision-r10-t12a-scope
+ * §3.1): `GroundReadouts.publish` asks at the one it is given, this one's 2 m by default; the
+ * capacity takes 2 m whatever it is.
  */
 export const GROUND_READOUT_OPTIONS: GroundReadoutOptions = { slopeBaselineM: 2, padWidthM: 1.0 };
 
@@ -74,6 +87,13 @@ export interface GroundSnapshot {
   readonly sessionFault: TerrainFault | null;
   /** Whether the slant range is the camera's off the hull (`slantRangeFromCamera`). */
   readonly slantFromCamera: boolean;
+  /**
+   * Why the view's line of sight cannot be formed while the readout could otherwise stand
+   * (`sightGapOf`; plan R10, R10.T12.a, decision-r10-t12a-scope §3.2), so that the readout reads
+   * its `NOT AVAILABLE` line; absent where a sight formed or none was sought, as a snapshot made
+   * before R10.T12.a (the descent spike's) leaves it.
+   */
+  readonly sightGap?: SightGap | undefined;
 }
 
 /**
@@ -165,6 +185,8 @@ export class GroundReadouts {
   #session: TerrainSession | null = null;
   #body: BodyIdHex | null = null;
   #readout: SurfaceGroundReadout | null = null;
+  /** Why the last ask found no line of sight, `null` where it found one or none was made. */
+  #sightGap: SightGap | null = null;
   #inFlight: Asked | null = null;
   #settled: Settled | null = null;
 
@@ -180,8 +202,16 @@ export class GroundReadouts {
    * does not leave unset.
    *
    * @param nowMs - The frame's monotonic time, ms, by which the guards count a run of failures.
+   * @param slopeBaselineM - The baseline the next query asks `SLOPE` over, m: the `STYLE` panel's
+   *   `BASELINE` (R10.T12.a); `GROUND_READOUT_OPTIONS`' 2 m unless given. A query already in
+   *   flight keeps its own.
    */
-  publish(session: TerrainSession | null, run: ViewRun, nowMs: number): GroundSnapshot | null {
+  publish(
+    session: TerrainSession | null,
+    run: ViewRun,
+    nowMs: number,
+    slopeBaselineM: SlopeBaselineM = GROUND_READOUT_OPTIONS.slopeBaselineM,
+  ): GroundSnapshot | null {
     if (session !== this.#session) {
       this.#session = session;
       this.#answers = new TerrainFailureGuard();
@@ -222,12 +252,13 @@ export class GroundReadouts {
       // No readout may stand: what is held or still to come is let go, so that it returns with a
       // first answer of its own.
       this.#readout = null;
+      this.#sightGap = null;
       this.#settled = null;
       this.#inFlight = null;
     } else if (this.#inFlight === null) {
       this.#asks.run(
         () => {
-          this.#ask(session, run, body, header);
+          this.#ask(session, run, body, header, slopeBaselineM);
         },
         undefined,
         nowMs,
@@ -246,13 +277,15 @@ export class GroundReadouts {
       readout: this.#readout,
       sessionFault,
       slantFromCamera,
+      sightGap: this.#sightGap ?? undefined,
     };
   }
 
-  /** Lets the answer held go, and any answer still to come with it. */
+  /** Lets the answer held go, and any answer still to come with it, and any gap found. */
   #forget(): void {
     this.#body = null;
     this.#readout = null;
+    this.#sightGap = null;
     this.#settled = null;
     this.#inFlight = null;
   }
@@ -280,22 +313,35 @@ export class GroundReadouts {
     }
   }
 
-  /** Asks the readout along the view's line of sight now, its outcome held for the next publish. */
+  /**
+   * Asks the readout along the view's line of sight now, its outcome held for the next publish;
+   * where none can be formed, asks nothing, lets the answer held go and holds why.
+   *
+   * @throws Error where the camera's distance from the body is not finite (`sightGapOf`), which
+   *   the publish's guard takes.
+   */
   #ask(
     session: TerrainSession,
     run: ViewRun,
     body: ViewBody,
     header: NonNullable<TerrainSurvey["header"]>,
+    slopeBaselineM: SlopeBaselineM,
   ): void {
-    const sight = lineOfSightOf(runPose(run), run.scene, body, header);
+    const pose = runPose(run);
+    const sight = lineOfSightOf(pose, run.scene, body, header);
     if (sight === null) {
-      // No line of sight to ask along (the body's rotation not known): no readout can stand.
+      // No line of sight to ask along: no answer can stand, and the readout says why. The cause
+      // is let go first, so that a broken invariant, which throws, states none.
       this.#readout = null;
+      this.#sightGap = null;
+      this.#sightGap = sightGapOf(pose, run.scene, body);
       return;
     }
+    this.#sightGap = null;
     const asked: Asked = { session, body: body.id };
     this.#inFlight = asked;
-    void this.#query(asked, sight, litTimeOf(run, body)).catch((error: unknown) => {
+    const options: GroundReadoutOptions = { ...GROUND_READOUT_OPTIONS, slopeBaselineM };
+    void this.#query(asked, sight, litTimeOf(run, body), options).catch((error: unknown) => {
       console.error("the terrain readout's answer could not be taken:", error);
     });
   }
@@ -304,7 +350,12 @@ export class GroundReadouts {
    * The query `asked`, its outcome held for the next publish, its refusal among them, which that
    * publish takes through the guard; an outcome of a query let go meanwhile is dropped.
    */
-  async #query(asked: Asked, sight: GroundSight, time: UniverseTime): Promise<void> {
+  async #query(
+    asked: Asked,
+    sight: GroundSight,
+    time: UniverseTime,
+    options: GroundReadoutOptions,
+  ): Promise<void> {
     let settled: Settled;
     try {
       const readout = await asked.session.groundReadout(
@@ -312,7 +363,7 @@ export class GroundReadouts {
         asked.body,
         sight,
         time,
-        GROUND_READOUT_OPTIONS,
+        options,
       );
       settled = { ...asked, kind: "answered", readout };
     } catch (error: unknown) {

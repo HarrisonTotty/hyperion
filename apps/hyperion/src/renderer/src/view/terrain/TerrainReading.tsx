@@ -161,10 +161,17 @@ function Segments({ segments }: SegmentsProps) {
  * with its `S` (`StaleMark`), the em dash muted as Missing; the console's own text and a status
  * within a reading (`GRAZING`) are neither. No value is announced as it changes (`aria-live`
  * off), since the readout changes at 4 Hz.
+ *
+ * Its label stands whole (`.view-label__line--whole`; plan R10, R10.T12.a,
+ * decision-r10-t12a-scope §4.3): the value stands beside it where the label and the value's widest
+ * unbroken run share a line, and otherwise wraps under it, from the plate's left edge, so that a
+ * narrow plate breaks the value rather than the label; the label breaks only where it alone is
+ * wider than the plate. The class rides on the line itself, so that the room's sizer copies of the
+ * plate's parts carry it.
  */
 export function TerrainReading({ line }: TerrainReadingProps) {
   return (
-    <div className="field view-label__line">
+    <div className="field view-label__line view-label__line--whole">
       <dt className="field__label">{line.label}</dt>
       <dd>
         <Segments segments={line.segments} />
