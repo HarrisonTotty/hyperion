@@ -14,6 +14,12 @@
  * so that R10.T10.c's discard keeps all of it. A buffer or texture beyond the
  * device's limits, or a write outside one, raises an uncaptured validation error, which the
  * harness's main process counts against the run.
+ *
+ * Then the morph's end (R10.T8.c): the block at k = 1 lies on its parents' surface, with its
+ * horizon and its shading normal blended wholly to theirs, so it must draw the parents' own image
+ * (drawn alone, at k = 0) wherever both draw, to within the rounding of two meshes over one
+ * surface; drawn at k = 1 with no parent to blend to, its own finer normals and maps must not, so
+ * that the check can fail.
  */
 
 import { withTemplateCurve } from "../view/appearance/phase";
@@ -33,11 +39,13 @@ import type {
   TextureHandle,
 } from "../view/engine/types";
 import { annulusEdges } from "../view/lighting/annuli";
+import { METER_CLASS } from "../view/post/meter";
 import { TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
 import { normalsAtlasOf, TerrainResources } from "../view/terrain/gpu/resources";
 import {
   ContactRecords,
   InstanceRecords,
+  NO_PARENT_SLOT,
   parentQuadrant,
   patchTerms,
 } from "../view/terrain/gpu/uniforms";
@@ -112,6 +120,9 @@ function parentsOf(children: ReadonlyArray<PatchKey>): PatchKey[] {
  * parents' maps (R10.T8.b).
  */
 const MORPH_M = [0, 120_000] as const;
+
+/** A morph band that puts every vertex of the block, 30 km and more away, at k = 1, metres. */
+const MORPH_DONE_M = [0, 1] as const;
 
 /** Posts the fixture's field to a fresh height worker and bakes `wanted` over it. */
 async function bakeOverField(
@@ -212,6 +223,12 @@ interface LitFrame {
   readonly detail: string;
 }
 
+/** What a setting's frames found: the blended frame's check and the morph's end's (R10.T8.c). */
+interface LitFrames {
+  readonly lit: LitFrame;
+  readonly morph: LitFrame;
+}
+
 /**
  * Draws the field's block with `setting`'s path and reads it back, releasing what it made whether
  * or not a step throws.
@@ -220,7 +237,7 @@ async function drawLit(
   engine: RenderEngine,
   setting: "high" | "low",
   field: WorkerFixture,
-): Promise<LitFrame> {
+): Promise<LitFrames> {
   const settings = { ...TERRAIN_SETTINGS[setting], cacheBytes: CACHE_BYTES };
   const resources = new TerrainResources(engine, settings, MOON_LIKE, "lit");
   const air = createAirlessTables(engine, "lit terrain smoke: no air");
@@ -239,7 +256,7 @@ async function drawInto(
   field: WorkerFixture,
   resources: TerrainResources,
   air: SurfaceLightingTables,
-): Promise<LitFrame> {
+): Promise<LitFrames> {
   const settings = TERRAIN_SETTINGS[setting];
   const { layout } = resources;
   const children = keys();
@@ -284,23 +301,49 @@ async function drawInto(
     { x: right.z, y: upUnit.z, z: -forward.z },
   ]);
   const instances = new InstanceRecords(layout.slots.slotCount);
-  bakes.forEach((bake, slot) => {
-    const parent = parentKey(bake.key);
-    const index = parents.findIndex((p) => p.i === parent?.i && p.j === parent.j);
-    if (index < 0) {
-      throw new Error(`no parent of slot ${String(slot)} was baked`);
-    }
-    const parentSlot = children.length + index;
-    instances.push(
-      slot,
-      { x: bake.originM.x - camera.x, y: bake.originM.y - camera.y, z: bake.originM.z - camera.z },
-      MORPH_M[0],
-      MORPH_M[1],
-      parentSlot,
-      parentQuadrant(bake.key),
-    );
-  });
-  resources.writeFrame(instances, new ContactRecords());
+  // The block's instances at the morph band `morphBandM`, each blending to its parent's slot, or
+  // to none.
+  const writeBlock = (morphBandM: readonly [number, number], blend: boolean): void => {
+    instances.clear();
+    bakes.forEach((bake, slot) => {
+      const parent = parentKey(bake.key);
+      const index = parents.findIndex((p) => p.i === parent?.i && p.j === parent.j);
+      if (index < 0) {
+        throw new Error(`no parent of slot ${String(slot)} was baked`);
+      }
+      instances.push(
+        slot,
+        {
+          x: bake.originM.x - camera.x,
+          y: bake.originM.y - camera.y,
+          z: bake.originM.z - camera.z,
+        },
+        morphBandM[0],
+        morphBandM[1],
+        blend ? children.length + index : NO_PARENT_SLOT,
+        parentQuadrant(bake.key),
+      );
+    });
+    resources.writeFrame(instances, new ContactRecords());
+  };
+  // The parents alone, at k = 0 (a band of no span), with no parent of their own to blend to.
+  const writeParents = (): void => {
+    instances.clear();
+    baked.slice(children.length).forEach((bake, index) => {
+      instances.push(
+        children.length + index,
+        {
+          x: bake.originM.x - camera.x,
+          y: bake.originM.y - camera.y,
+          z: bake.originM.z - camera.z,
+        },
+        0,
+        0,
+      );
+    });
+    resources.writeFrame(instances, new ContactRecords());
+  };
+  writeBlock(MORPH_M, true);
   // A Sun-like star 40° from the zenith towards the east, at 1 au (IAU 2012 B2's 1.495978707 ×
   // 10¹¹ m) with the Sun's nominal radius (IAU 2015 B3's 6.957 × 10⁸ m) and about the Sun's
   // illuminance at 1 au, and an Earth-like neighbour's planetshine from the west, low, at the Moon's
@@ -371,18 +414,27 @@ async function drawInto(
     depth: true,
     category: "render-targets",
   });
+  const draw: LitDraw = {
+    resources,
+    material,
+    air,
+    lit,
+    storageBuffers,
+    orientation,
+    camera,
+    inverseRadius: 1 / a,
+    patches: bakes.length,
+  };
   try {
-    return await renderInto(engine, target, {
-      resources,
-      material,
-      air,
-      lit,
-      storageBuffers,
-      orientation,
-      camera,
-      inverseRadius: 1 / a,
-      patches: bakes.length,
-    });
+    const blended = litFrameOf(layout.vertexPath, draw, await renderInto(engine, target, draw));
+    // The morph's end's frames run in order, each read back before the next is written.
+    writeBlock(MORPH_DONE_M, true);
+    const done = await renderInto(engine, target, draw);
+    writeParents();
+    const coarse = await renderInto(engine, target, draw);
+    writeBlock(MORPH_DONE_M, false);
+    const unblended = await renderInto(engine, target, draw);
+    return { lit: blended, morph: morphFrameOf(done, coarse, unblended) };
   } finally {
     target.dispose();
   }
@@ -402,12 +454,12 @@ interface LitDraw {
   readonly patches: number;
 }
 
-/** Renders `draw` into `target` and reads it back. */
+/** Renders `draw` into `target` and reads it back, four channels a texel. */
 async function renderInto(
   engine: RenderEngine,
   target: RenderTarget,
   draw: LitDraw,
-): Promise<LitFrame> {
+): Promise<Float32Array> {
   const { resources, material, air, lit, storageBuffers, orientation, camera } = draw;
   const { layout } = resources;
   const atlas = normalsAtlasOf(layout);
@@ -441,16 +493,25 @@ async function renderInto(
     ],
     postProcesses: [],
   });
-  const texels = halfTexels(await engine.readTexture(target.colour));
+  return halfTexels(await engine.readTexture(target.colour));
+}
+
+/** Whether texel `p` of a frame is terrain: its meter class lit by a star, or unlit. */
+function isTerrain(texels: Float32Array, p: number): boolean {
+  const meter = texels[4 * p + 3];
+  return meter === METER_CLASS.litBody || meter === METER_CLASS.unlitBody;
+}
+
+/** The blended frame's check: finite at every texel, mostly terrain, and lit. */
+function litFrameOf(path: string, draw: LitDraw, texels: Float32Array): LitFrame {
+  const { resources } = draw;
   let terrain = 0;
   let litPixels = 0;
   for (let p = 0; p < FRAME.widthPx * FRAME.heightPx; p += 1) {
-    // The meter class: 2 lit by a star, 3 unlit (R07's `METER_CLASS`).
-    const meter = texels[4 * p + 3];
-    if (meter === 2 || meter === 3) {
+    if (isTerrain(texels, p)) {
       terrain += 1;
     }
-    if (meter === 2 && (texels[4 * p + 1] ?? 0) > 0) {
+    if (texels[4 * p + 3] === METER_CLASS.litBody && (texels[4 * p + 1] ?? 0) > 0) {
       litPixels += 1;
     }
   }
@@ -458,7 +519,80 @@ async function renderInto(
   const finite = texels.every(Number.isFinite);
   return {
     pass: finite && cover >= 0.5 && litPixels > 0,
-    detail: `${layout.vertexPath}: ${String(draw.patches)} patches, ${String(resources.phaseRows.laws.length)} phase rows, terrain ${(100 * cover).toFixed(1)}% of the frame, ${String(litPixels)} lit pixels, finite ${String(finite)}`,
+    detail: `${path}: ${String(draw.patches)} patches, ${String(resources.phaseRows.laws.length)} phase rows, terrain ${(100 * cover).toFixed(1)}% of the frame, ${String(litPixels)} lit pixels, finite ${String(finite)}`,
+  };
+}
+
+/**
+ * The share of the texels drawn as terrain in both `a` and `b` whose colour in `a` lies within
+ * `tolerance` of `b`'s, relative, every channel, a channel under `floor` taken at `floor`; how many
+ * texels both draw; and the worst relative difference among them.
+ */
+function agreement(
+  a: Float32Array,
+  b: Float32Array,
+  tolerance: number,
+  floor: number,
+): { readonly share: number; readonly both: number; readonly worst: number } {
+  let both = 0;
+  let within = 0;
+  let worst = 0;
+  for (let p = 0; p < FRAME.widthPx * FRAME.heightPx; p += 1) {
+    if (!isTerrain(a, p) || !isTerrain(b, p)) {
+      continue;
+    }
+    both += 1;
+    let off = 0;
+    for (let c = 0; c < 3; c += 1) {
+      const x = a[4 * p + c] ?? NaN;
+      const y = b[4 * p + c] ?? NaN;
+      off = Math.max(off, Math.abs(x - y) / Math.max(Math.abs(y), floor));
+    }
+    worst = Math.max(worst, off);
+    if (off <= tolerance) {
+      within += 1;
+    }
+  }
+  return { share: both > 0 ? within / both : 0, both, worst };
+}
+
+/** A share as a percentage to two places. */
+function percent(x: number): string {
+  return `${(100 * x).toFixed(2)}%`;
+}
+
+/** The relative tolerance of a texel at the morph's end against the parents' image. */
+const MORPH_TOLERANCE = 0.01;
+
+/** The share of the texels both draw that must agree, which the unblended frame must not reach. */
+const MORPH_AGREEING = 0.98;
+
+/**
+ * The morph's end's check (R10.T8.c): the block at k = 1 (`done`) draws its parents' image
+ * (`coarse`) where both draw, and without its parents' tiles and maps (`unblended`) it does not, so
+ * that the check can fail; every frame finite, and the comparison over a quarter of the frame or
+ * more.
+ */
+function morphFrameOf(done: Float32Array, coarse: Float32Array, unblended: Float32Array): LitFrame {
+  let brightest = 0;
+  for (let p = 0; p < FRAME.widthPx * FRAME.heightPx; p += 1) {
+    if (isTerrain(coarse, p)) {
+      brightest = Math.max(brightest, coarse[4 * p + 1] ?? 0);
+    }
+  }
+  // A channel under a thousandth of the frame's brightest is compared as that thousandth.
+  const floor = Math.max(1e-3 * brightest, Number.MIN_VALUE);
+  const morphed = agreement(done, coarse, MORPH_TOLERANCE, floor);
+  const own = agreement(unblended, coarse, MORPH_TOLERANCE, floor);
+  const finite = [done, coarse, unblended].every((texels) => texels.every(Number.isFinite));
+  const enough = morphed.both >= 0.25 * FRAME.widthPx * FRAME.heightPx;
+  return {
+    pass: finite && enough && morphed.share >= MORPH_AGREEING && own.share < MORPH_AGREEING,
+    detail:
+      `at k = 1, ${percent(morphed.share)} of ${String(morphed.both)} texels within ` +
+      `${percent(MORPH_TOLERANCE)} of the parents' (worst ${morphed.worst.toExponential(2)}); ` +
+      `with no parent's tiles and maps, ${percent(own.share)} (worst ${own.worst.toExponential(2)}); ` +
+      `finite ${String(finite)}`,
   };
 }
 
@@ -468,11 +602,16 @@ export async function checkLitTerrain(engine: RenderEngine, checks: Checks): Pro
   for (const setting of ["high", "low"] as const) {
     // The frames run in order: each bakes, draws and reads back before the next allocates.
     // oxlint-disable-next-line no-await-in-loop
-    const { pass, detail } = await drawLit(engine, setting, field);
+    const { lit, morph } = await drawLit(engine, setting, field);
     checks.check(
       `R10.T10.b the lit terrain of a generated world (${setting}) is finite, drawn and lit`,
-      pass,
-      detail,
+      lit.pass,
+      lit.detail,
+    );
+    checks.check(
+      `R10.T8.c a fine patch at k = 1 shades as its parents, normals and horizon (${setting})`,
+      morph.pass,
+      morph.detail,
     );
   }
 }

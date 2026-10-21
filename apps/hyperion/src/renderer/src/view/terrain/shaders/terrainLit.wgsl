@@ -2,11 +2,13 @@
 // note 17): each texel of a body's patch reflects its palette's classes' `body_brdf` radiances
 // summed by its class weights, each class through its own `LunarLambert` and its own row of the
 // phase table, never one law of weighted parameters (decision-r07-t8b), lit as R07's disc lights
-// a body (`bodyDisc.wgsl`'s `shade`): each star through the horizon term on the terrain's own
-// normal, the eclipse term of up to two occluders and R08's `atmosphere_sun_transmittance`, the
-// sky through `atmosphere_sky_irradiance`, and up to two lit neighbours' planetshine through
-// `atmosphere_source_transmittance`. The aerial perspective is no part of this shader: the lit
-// terrain is drawn into the `AtmosphereScene` that `HillaireAtmosphere.drawFrame` composites.
+// a body (`bodyDisc.wgsl`'s `shade`): each star through the horizon term on the terrain's shading
+// normal (its own tile's, morphed to its parent's by k as its height is: `terrainPatch.wgsl`'s
+// `shadingNormalAt`, R10.T8.c), the eclipse term of up to two occluders and R08's
+// `atmosphere_sun_transmittance`, the sky through `atmosphere_sky_irradiance`, and up to two lit
+// neighbours' planetshine through `atmosphere_source_transmittance`. The aerial perspective is no
+// part of this shader: the lit terrain is drawn into the `AtmosphereScene` that
+// `HillaireAtmosphere.drawFrame` composites.
 // The TypeScript twin of the blend is `terrainMaterial.ts`' `terrainReflectance`.
 //
 // Composed after frame.wgsl, patchVertex.wgsl, R08's surface lighting (`SURFACE_LIGHTING_WGSL`:
@@ -45,7 +47,12 @@
 // terrain's or the reference surface's, never both. Where the two surfaces meet at different
 // heights, the lit mesh's skirts and fins join them in the reference surface's appearance: the
 // body's uniform law (law 0) under the datum's normal, without the horizon map's shadows, as R07's
-// disc draws the reference surface.
+// disc draws the reference surface. Every patch's edge has its skirt's foot strip, which inside
+// the survey fills the cracks between patches; seen through one, it stands in for the terrain, so
+// its lip, the strip within `skirt_lip_m` of its edge, shades as the grid at its edge vertex: its
+// shading normal, its class weights and its horizon map (R10.T8.c). A crack's depth is under the
+// lip (a T-junction's sagitta, a rounding), so a skirt seen through one is never lit inside the
+// terrain's shadow; the survey edge's wall below the lip keeps the reference surface's appearance.
 
 // Each slot's class layers, CLASS_LAYER_WORDS words (`slotLayout.ts`' `class-layers` field): first
 // each vertex's eight class-weight bytes over its patch's palette, two words a vertex (the bake's
@@ -173,13 +180,37 @@ struct LitVertexOut {
   @location(4) heightM : f32,
   // The vertex's cell coordinates (s, t) on its patch's face, for the star's grid azimuth.
   @location(5) horizonSt : vec2f,
-  // The vertex's morph factor, which blends the horizon to the parent's map as it mixes the heights.
+  // The vertex's morph factor, which blends the horizon and the shading normal to the parent's map
+  // and tile as it mixes the heights.
   @location(6) morph : f32,
   @location(7) @interpolate(flat) horizonFace : u32,
-  // The parent's slot (`HORIZON_NO_PARENT` for none) and the patch's quadrant in it.
+  // The parent's slot (`NO_PARENT_SLOT` for none) and the patch's quadrant in it.
   @location(8) @interpolate(flat) parent : vec2u,
   // The triangle's part of the lit mesh, its first vertex's code (LIT_GRID to LIT_ROW_FIN).
   @location(9) @interpolate(flat) kind : u32,
+  // The grid vertex's own height above the datum, metres (a skirt's or a fin's edge vertex's), from
+  // which a skirt's depth is taken (R10.T8.c).
+  @location(10) gridHeightM : f32,
+  // The depth below its edge to which a skirt's foot strip shades as the grid, metres
+  // (`skirt_lip_m`).
+  @location(11) @interpolate(flat) lipM : f32,
+}
+
+// The depth below its edge to which a skirt's foot strip of the patch of slot record `rec` stands
+// in for the terrain, metres: 1 m, or twice the sagitta of the parent's quad where that is more, so
+// that every crack between patches, a T-junction's sagitta at most once the coarse–fine holds have
+// closed the morph's, lies above it. A quad spans at most (8 ÷ 3) a step, a the body's equatorial
+// radius and step `rec.step` in s (the warp's du/ds is at most 8 ÷ 3, and a face's angle per unit
+// of u at most 1), so the parent's, twice as long, has a sagitta ℓ² ÷ 8a of at most (32 ÷ 9) a
+// step² (`skirtLip.ts`' `skirtLipM`).
+fn skirt_lip_m(rec : SlotRecord) -> f32 {
+  return max(1.0, (64.0 / 9.0) * rec.scale.x * rec.step * rec.step);
+}
+
+// Whether the fragment `in` of a skirt's foot strip lies within its lip, where it shades as the
+// grid at its edge vertex (`skirtLip.ts`' `shadesAsGrid`).
+fn skirt_lip(in : LitVertexOut) -> bool {
+  return in.kind == LIT_SKIRT_FOOT && in.gridHeightM - in.heightM <= in.lipM;
 }
 
 // Whether the fragment `in` is drawn at the survey's edge (`terrainSurvey.wgsl`'s `survey_kept_at`).
@@ -207,8 +238,11 @@ fn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32
   out.horizonSt = horizon_face_st(rec, u32(grid.x), u32(grid.y));
   out.morph = v.morph;
   out.horizonFace = horizon_face_of(rec);
-  out.parent = vec2u(inst.parentSlot, inst.parentQuadrant);
+  // The quadrant alone, without the morph holds above its two bits (`terrainPatch.wgsl`'s `Instance`).
+  out.parent = vec2u(inst.parentSlot, inst.parentQuadrant & 3u);
   out.kind = placed.kind;
+  out.gridHeightM = v.heightM;
+  out.lipM = skirt_lip_m(rec);
   return out;
 }
 
@@ -337,6 +371,7 @@ struct TerrainShaded {
 // The radiance of the texel `in` with the terrain's normal `terrain_normal`, both body-fixed; with
 // `reference`, a skirt's or a fin's in the reference surface's appearance (R10.T10.c): law 0 alone
 // under `terrain_normal`, the datum's, seen from either side, with no decoration and no horizon map.
+// A skirt's lip (`skirt_lip`) is shaded as the grid, with `reference` false.
 fn shade_terrain(in : LitVertexOut, terrain_normal : vec3f, reference : bool) -> TerrainShaded {
   var out : TerrainShaded;
   out.radiance = vec3f(0.0);

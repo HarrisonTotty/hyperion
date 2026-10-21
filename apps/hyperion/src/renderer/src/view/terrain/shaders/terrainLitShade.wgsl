@@ -22,8 +22,14 @@ fn fragmentMain(in : LitVertexOut) -> @location(0) vec4f {
     discard;
   }
   // One call of the shading: a compiler that inlines every call (SwiftShader's) takes one copy.
-  let reference = in.kind != LIT_GRID;
-  let normal = select(patchNormalAt(in.slot, in.patchUv), normalize(in.datumNormal), reference);
+  // The grid's normal morphs with its height, to the parent's tile by k, and a skirt's lip shades
+  // as the grid at its edge vertex (R10.T8.c).
+  let reference = in.kind != LIT_GRID && !skirt_lip(in);
+  // A branch, not a `select`, so that a skirt's or a fin's fragment reads no tile.
+  var normal = normalize(in.datumNormal);
+  if (!reference) {
+    normal = shadingNormalAt(in.slot, in.parent, in.patchUv, in.morph);
+  }
   let shaded = shade_terrain(in, normal, reference);
   var meter = METER_OTHER;
   if (u32(terrain_row(0u).x) > 0u) {

@@ -16,6 +16,7 @@
 
 import type { Vec3 } from "../../../geometry/vec3";
 import type { SpheroidFigure } from "../../atmosphere/hillaire";
+import { MAX_MORPH_HOLDS } from "../coarseFineHolds";
 import type { Face, PatchKey } from "../patchKey";
 import type { GraticulePatch } from "../terrainWire";
 
@@ -49,18 +50,21 @@ export const SLOT_RECORD_BYTES = 112;
  *   slot : u32,             // the cache slot whose heights, offsets, normals and record it reads
  *   morphStartM : f32,      // the distance at which the morph to the parent begins, metres
  *   morphEndM : f32,        // the distance at which it is complete, metres
- *   parentSlot : u32,       // the parent's slot, whose horizon map the patch's blends to, or
- *                           // NO_PARENT_SLOT (R10.T8.b; decision-r10-t8a §1)
- *   parentQuadrant : u32,   // the patch's quadrant in its parent: bit 0 i & 1, bit 1 j & 1
+ *   parentSlot : u32,       // the parent's slot, whose horizon map and normals the patch's blend
+ *                           // to, or NO_PARENT_SLOT (R10.T8.b, T8.c; decision-r10-t8a §1)
+ *   parentQuadrant : u32,   // bits 0 and 1 the patch's quadrant in its parent (i & 1, j & 1);
+ *                           // bits 2 to 17 its morph holds at its coarse–fine edges and corners
+ *                           // (`coarseFineHolds.ts`; R10.T8.c)
  * }
  * ```
  */
 export const INSTANCE_RECORD_BYTES = 32;
 
 /**
- * The instance record's parent slot where the patch has no parent's horizon map to blend to: a
- * root, a parent not resident, or one whose slot holds no map (R10.T8.b; `shadows/horizon.wgsl`'s
- * `HORIZON_NO_PARENT`).
+ * The instance record's parent slot where the patch has no parent's horizon map and normals to
+ * blend to: a root, a parent not resident, or one whose slot holds no map (R10.T8.b, T8.c;
+ * `shadows/horizon.wgsl`'s `HORIZON_NO_PARENT`, `shaders/terrainPatch.wgsl`'s `NO_PARENT_SLOT`).
+ * On the lit layout every bake holds both its normals and its map.
  */
 export const NO_PARENT_SLOT = 0xffff_ffff;
 
@@ -68,6 +72,9 @@ export const NO_PARENT_SLOT = 0xffff_ffff;
 export function parentQuadrant(key: PatchKey): number {
   return (key.i & 1) | ((key.j & 1) << 1);
 }
+
+/** The bits of the instance record's quadrant word below its morph holds. */
+const QUADRANT_BITS = 2;
 
 /**
  * Bytes of the contacts buffer's header, `count : u32` and three words of padding:
@@ -306,11 +313,13 @@ export class InstanceRecords {
    * @param originMinusCameraM - The patch origin less the camera, metres, differenced in `f64`
    * (R02's `originMinusCamera`, the body-fixed origin rotated into the body's frame first); it is
    * narrowed here, once.
-   * @param parentSlot - The slot of the parent whose horizon map the patch's blends to, or
-   * {@link NO_PARENT_SLOT} (R10.T8.b).
+   * @param parentSlot - The slot of the parent whose horizon map and normals the patch's blend
+   * to, or {@link NO_PARENT_SLOT} (R10.T8.b, T8.c).
    * @param quadrant - The patch's quadrant in that parent ({@link parentQuadrant}), 0 to 3.
-   * @throws RangeError past {@link capacity}, or for a slot, parent slot or quadrant that is not a
-   * whole number in its range.
+   * @param holds - The patch's morph holds at its coarse–fine edges and corners
+   * (`CoarseFineHolds`; R10.T8.c), 0 to {@link MAX_MORPH_HOLDS}, packed above the quadrant.
+   * @throws RangeError past {@link capacity}, or for a slot, parent slot, quadrant or holds that is
+   * not a whole number in its range.
    */
   push(
     slot: number,
@@ -319,6 +328,7 @@ export class InstanceRecords {
     morphEndM: number,
     parentSlot = NO_PARENT_SLOT,
     quadrant = 0,
+    holds = 0,
   ): void {
     this.pushXyz(
       slot,
@@ -329,6 +339,7 @@ export class InstanceRecords {
       morphEndM,
       parentSlot,
       quadrant,
+      holds,
     );
   }
 
@@ -342,6 +353,7 @@ export class InstanceRecords {
     morphEndM: number,
     parentSlot = NO_PARENT_SLOT,
     quadrant = 0,
+    holds = 0,
   ): void {
     if (this.#count >= this.capacity) {
       throw new RangeError(`more than ${this.capacity} instances in a frame`);
@@ -355,6 +367,9 @@ export class InstanceRecords {
     if (!Number.isInteger(quadrant) || quadrant < 0 || quadrant > 3) {
       throw new RangeError(`quadrant ${quadrant} is not 0 to 3`);
     }
+    if (!Number.isInteger(holds) || holds < 0 || holds > MAX_MORPH_HOLDS) {
+      throw new RangeError(`morph holds ${holds} are not 0 to ${MAX_MORPH_HOLDS}`);
+    }
     const base = this.#count * F32_WORDS_PER_INSTANCE;
     this.#f32[base] = xM;
     this.#f32[base + 1] = yM;
@@ -363,7 +378,7 @@ export class InstanceRecords {
     this.#f32[base + 4] = morphStartM;
     this.#f32[base + 5] = morphEndM;
     this.#u32[base + 6] = parentSlot;
-    this.#u32[base + 7] = quadrant;
+    this.#u32[base + 7] = quadrant | (holds << QUADRANT_BITS);
     this.#count += 1;
   }
 

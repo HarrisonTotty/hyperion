@@ -317,8 +317,9 @@ export function contactHold(distanceM: number, heldM: number, rampM: number): nu
 /**
  * The morph hold at a vertex's unmorphed position (Design note 6): the least over the contacts of
  * {@link contactHold} with the contact's held radius ({@link heldRadiusM}) and ramp
- * ({@link morphRampM}), 1 with no contact. The morph factor is min(k_CDLOD, morphHold), a function
- * of position alone, so the patches sharing a vertex agree.
+ * ({@link morphRampM}), 1 with no contact. The morph factor is min(k_CDLOD, morphHold), k_CDLOD
+ * as the coarse–fine holds leave it (R10.T8.c, `coarseFineHolds.ts`); the hold is a function of
+ * position alone, so the patches sharing a vertex agree on it.
  *
  * @param v - The vertex's unmorphed position, body-fixed metres.
  * @param patchSizeM - {@link finestPatchSizeM} of the planet.
