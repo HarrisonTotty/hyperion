@@ -2480,6 +2480,49 @@ survey of the view's `FRAME` body (the store's status, coverage and header, stal
 down), with the refused field's state as signed off (decision-r10-t16-leans §12). Its by-hand checks
 may take T16.d's `TERRAIN TEST`._
 
+- **R10.T12.a The readout's `BASELINE` selector, its line where no line of sight forms, and its
+  labels kept whole** (new; decision-r10-t12-leans §1, decision-r10-t12a-scope). Three of R10.T12's
+  follow-ups, client-only:
+  - _The selector_ (`StyleControl.tsx`, `ViewDisplay.tsx`, `groundReadout.ts`, `viewLayout.ts`): a
+    row on the `STYLE` panel after the style's buttons, `BASELINE` on the left of `2 m`, `5 m` and
+    `100 m` (`SLOPE_BASELINES`), the chosen one pressed and underlined as the presets are; a
+    display control acting at once on the `CONTROLS` view's readout, so standing while that view is
+    the `PRIMARY` view, whatever its readout's state, and left out with an instrument as the
+    `CONTROLS` view, which states none in its slot; `2 m` as the display mounts, kept as the view's
+    style is, never stale; no key. The primary's readout is asked at the chosen baseline from the
+    next ask, `SLOPE`'s `· BASELINE` stays the answer's, and `ULTIMATE BEARING CAPACITY` keeps its
+    2 m (signoff-10's (h)). `FULL_MIN_HEIGHT_REM` takes the row: 49.5 rem, within its 52.5 rem
+    bound.
+  - _The line where no line of sight forms_ (`readouts.ts`, `groundReadout.ts`,
+    `useTerrainLines.ts`): where the readout could stand but `lineOfSightOf` forms none, the
+    readout's heading and, once in place of the readings, `NOT AVAILABLE: ROTATION not yet
+modelled`, `NOT AVAILABLE: camera more than 6.68 AU from the body` (`MAX_SIGHT_M` in the view's
+    range form) or `NOT AVAILABLE: camera at the body's centre` (`MIN_SIGHT_ORIGIN_M`), by its
+    cause; `DATUM` with it, no tripod, no list note, no `S`, nothing asked; the plate's readout
+    part, reckoned at the readout's tallest form.
+  - _The labels kept whole_ (`TerrainReading.tsx`, `readouts.ts`, `styles.css`): on the lower plate
+    a reading's label never shrinks; its value stands beside it where the label and the value's
+    widest unbroken run share a line, breaking at its middle dots, and otherwise under it; a label
+    breaks only where it alone is wider than the plate; `DATUM`'s figure breaks after its `×`. The
+    upper plate and the instruments' blocks are unchanged.
+  - _The guide_, in the commit: decision-r10-t12a-scope's U1 to U4.
+
+  Tests (Vitest and Testing Library): the row's three buttons and its pressed state, its choice
+  kept across `CONTROLS` changes, the row left out with an instrument as the `CONTROLS` view and
+  standing while no view is drawn; the ask at the chosen baseline from the next publish, `SLOPE`'s
+  `· BASELINE` the answer's and the capacity's line unchanged; the full layout's least height and
+  its bound; the no-sight cause for each of `lineOfSightOf`'s `null`s and none wherever it forms a
+  sight; each no-sight line under its heading with `DATUM`, no tripod, no note, no `S` on loss of
+  the link, and none under the terrain fault or with no survey held; the readout part's tallest form
+  in each no-sight state; the 6.68 AU figure from `MAX_SIGHT_M`; `DATUM`'s two runs; the readings'
+  class and the stylesheet's rule; the console-ux checks. By arithmetic, in the record: the row's
+  width, column B's tallest state, and each reading's width beside its label against the plates at
+  1920 × 1080 at 100%, 125% and 150% and at 1280 × 720 at 100%, alone and beside the slots. By hand,
+  hidden, at landing (main's, on the desktop): decision-r10-t12a-scope §9. Acceptance:
+  `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view
+src/renderer/src/view/terrain`, the console-ux checks, `just smart-ci origin/rendering-and-planets`.
+  Priority: medium; after R10.T12, before T15.
+
 - **R10.T12.b `VIEW`'s room** (new, decision-r10-view-block-room). The `PRIMARY` view's label block
   as two plates and the order in which its parts give way, the instrument slots held where the
   stage cannot hold them, and the wireframe instrument's `CONTOUR INTERVAL`, before R10.T12's
@@ -10959,6 +11002,198 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
   - _The terrain readout is not run on the spike_ (decision-r10-t14c-guide, Q1): `VIEW`'s primary
     runs it at 4 Hz on the height workers, so T14.b's worker-time figures state that they exclude
     it, or T14.b adds it.
+- **Deviations in R10.T12.a, as built** (2026-10-20; lane `lane/64-r10-t12a-readouts`, on
+  `rendering-and-planets` at `adf8848f`; decision-r10-t12a-scope).
+  - _Files._ The entry's, with their tests, and `view/terrain/session.ts` and
+    `view/terrain/workers/messages.ts`, whose doc comments now say what sets `slopeBaselineM`;
+    `styles.css` holds the row's rules and the whole label's. Nothing under `view/engine/`, the
+    shaders, `smoke/`, `test/`, `crates/` or `packages/`. `terrainPlate.tsx`, `viewRoom.ts`,
+    `plateMeasures.ts` and `ViewLowerPlate.tsx` are unchanged: `terrainLowerParts` already made the
+    no-sight lines the readout part, reckoned at the full readout's tallest form.
+  - _Names._ `readouts.ts`: `SLOPE_BASELINES_M` (the crate's `SLOPE_BASELINES`, with the unit in
+    the client's name), `LONGEST_BASELINE_M` exported (the list's longest, a number),
+    `SightGap`, `sightGapOf`, `sightGapLine`, `NO_SIGHT_ROTATION`, `NO_SIGHT_FAR`,
+    `NO_SIGHT_CENTRE` and `TerrainLabelInput.sightGap`; `StyleControl.tsx`: `StyleBaseline` and
+    `StyleControlProps.baseline`, the row an unexported `BaselineRow`; `groundReadout.ts`:
+    `GroundSnapshot.sightGap` and `GroundReadouts.publish`'s trailing `slopeBaselineM`;
+    `ViewDisplay.tsx`: `ViewStageProps.slopeBaselineM` and `onSlopeBaselineChange`, and
+    `LoopInputs.slopeBaselineM`.
+  - _The selector's state_ is `ViewPanels`' (in `ViewDisplay.tsx`), beside the exposure, the meter
+    and the eased moves, above the stage, which is keyed by its scene: so a choice is kept through
+    a change of scene as well as while the display is hidden, the ruling's "kept while the console
+    runs". In the stage it would have gone back to 2 m with every scene, as the view's style
+    does.
+  - _Backward compatible for the descent spike._ Every input added is optional and defaults to
+    the earlier behaviour: `publish`'s baseline to `GROUND_READOUT_OPTIONS`' 2 m,
+    `GroundSnapshot.sightGap` and `TerrainLabelInput.sightGap` to none (`surveySnapshotOf`'s
+    snapshot, which has no such key, gives the lines it gave), and `StyleControl`'s `baseline` to
+    no row. `datumLine` and `tallestTerrainLines` keep their signatures and texts. The spike's
+    lower plate takes the whole-label rule with `VIEW`'s, by design.
+  - _The row's markup_ (§3.1): `fieldset.preset-buttons.view-style__baseline`, 0.5 rem under the
+    style's buttons or their reason, its legend floated at its own width with 0.25 rem after it,
+    so 0.5 rem before the first button with the row's 0.25 rem gap, and its buttons the presets'
+    0.25 rem apart. The `INSTRUMENTS` rows' legend is 9 rem wide and their buttons 0.5 rem apart;
+    the ruling's 17.42 rem takes the legend at its own width and the presets' gap, so the row
+    follows the ruling's arithmetic. Each button keeps its figure and unit on one line
+    (`white-space: nowrap`), and the row may wrap its buttons under its legend (§3.3's 824 px
+    case, with no gap between its rows, as the `INSTRUMENTS` rows have none). Its state reaches the
+    loop through `inputsRef`, so the loop's effect is not re-run.
+  - _The whole label's rule_ (§4.3) is the brief's suggestion, with `gap: 0 0.5rem` in place of
+    `column-gap: 0.5rem` alone: the shared `.view-label__line` rule's `gap: 0.5rem` would otherwise
+    put 0.5 rem between a label and the value wrapped under it.
+  - _`DATUM`'s two runs_ are joined by a space of the console's own text, so that the readout's
+    `Pieces` set each radius as a run of its own and the plate may break between them.
+  - _The ask where no sight forms._ `#ask` lets the held answer and the cause go before it seeks
+    the cause, so that a camera whose distance from the body is not finite (`sightGapOf` throws,
+    under the ask's guard, said once for a run) leaves neither standing. The cause is also cleared
+    where the survey's standing withholds the readout, the body changes, or the session is let go.
+    `lineOfSightOf` and `sightGapOf` read one internal `sightStartOf`, so that they agree by
+    construction; `lineOfSightOf`'s signature and answers are unchanged.
+  - _`NO_SIGHT_FAR`'s figure and unit_ are joined by a no-break space, as every quantity on a
+    label block is kept whole, so that a narrow plate never breaks `6.68` from `AU`; the line
+    reads as the ruling writes it.
+  - _A test beyond the entry's files_ (main's answer on the issue, 2026-10-21): the step count of
+    `ViewDisplayLayout.test.tsx`'s compact tab-order test follows the tab stops, 24 to 27 for the
+    row's three.
+  - _The room_ (§3.3, by arithmetic: 16 px to the rem, the side column's 1.25 line box, B612's
+    shipped metrics with no kerning, so it errs wide).
+
+    | The row                                                    |    rem |
+    | ---------------------------------------------------------- | -----: |
+    | `BASELINE`, the legend, at 1 rem with 0.15 em              |   5.85 |
+    | after the legend                                           |   0.50 |
+    | `2 m`, at 0.875 rem with 0.15 em and 0.5 rem padding each  |   3.06 |
+    | the gap                                                    |   0.25 |
+    | `5 m`                                                      |   3.06 |
+    | the gap                                                    |   0.25 |
+    | `100 m`                                                    |   4.46 |
+    | **the row**                                                |  17.42 |
+    | the panel's content, full (20 rem less 1.5 rem and border) | 18.375 |
+    | the panel's content, compact                               | 24.375 |
+
+    | Column B's tallest state                                                          |    px |   rem |
+    | --------------------------------------------------------------------------------- | ----: | ----: |
+    | before: `Style` 99.5 + a two-line refusal 43, exposure 425.5, meter 168, two gaps |   752 |    47 |
+    | with the row: + 8 (its margin) + 32                                               |   792 |  49.5 |
+    | the row's buttons wrapped under its legend                                        |   824 |  51.5 |
+    | an instrument as the `CONTROLS` view (`QUALITY LOW`), no row                      |   752 |    47 |
+    | the draft's held-back row, with a one-line reason                                 | 817.5 | 51.09 |
+    | the draft's held-back row, with a two-line reason                                 | 852.5 | 53.28 |
+    | a panel of its own                                                                | 839.5 | 52.47 |
+    | the bound (`FULL_MIN_HEIGHT_BOUND_REM`)                                           |   840 |  52.5 |
+
+    So `FULL_MIN_HEIGHT_REM` is 49.5 rem. Column A's tallest is unchanged (730.5 px). The named
+    boxes keep their layouts: 1920 × 1080 at 100% (923 px) and maximised (856 px, 53.5 rem) full;
+    1600 × 900 (742 px) and 1280 × 720 compact. The compact column's `STYLE` panel open at its
+    tallest is 99.5 + 43 + 40 = 182.5 px, under the exposure panel's 425.5 px and the camera
+    panel's 339 px, so its worst state is unchanged.
+
+  - _The labels_ (§4.5, by arithmetic: rem at the plate's 0.875 rem, labels in B612 at 0.15 em,
+    values in B612 Mono at 0.569 rem a `ch`; the tallest forms, `DATUM` for a 12,742 km world
+    with a sea).
+
+    | Reading                     | Label | Whole line |                   Widest unbroken run | Beside its label from |
+    | --------------------------- | ----: | ---------: | ------------------------------------: | --------------------: |
+    | `SURVEY COVERAGE`           | 10.11 |      30.51 |                                  7.96 |                 18.57 |
+    | `DATUM`                     |  3.72 |      45.17 | 15.36 (both radii); 7.39 (one, split) |          19.58; 11.61 |
+    | `ELEVATION`                 |  5.99 |      21.28 |                                 14.79 |                 21.28 |
+    | `SLOPE`                     |  3.37 |      20.36 |                                  6.26 |                 10.12 |
+    | `SLANT RANGE FROM CAMERA`   | 15.62 |      35.46 |                                 13.65 |                 29.77 |
+    | `MATERIAL`                  |  5.34 |      28.59 |                                 10.81 |                 16.64 |
+    | `ULTIMATE BEARING CAPACITY` | 15.92 |      32.92 |                                  6.26 |                 22.68 |
+    | `PAD FRICTION`              |  7.53 |      19.40 |                                  3.98 |                 12.01 |
+    | `RESOLUTION`                |  6.83 |      13.58 |                                  6.26 |                 13.58 |
+
+    The plates' content widths are estimates: the stage is the window less the side column
+    (about 28.6 rem compact and 49.6 rem full), a plate alone the stage less 1 rem, a plate beside
+    the slots the stage less 36.5 rem, each less 1.5 rem of padding.
+
+    | Size                                 | Alone | Beside the slots | Values under their labels                            |
+    | ------------------------------------ | ----: | ---------------: | ---------------------------------------------------- |
+    | 1920 × 1080, 100% (full)             |  67.9 |             32.4 | none                                                 |
+    | 1920 × 1080, 125%                    |  64.9 |             29.4 | beside the slots: `SLANT RANGE FROM CAMERA`          |
+    | 1920 × 1080, 150% (the floor's room) |  48.9 |             13.4 | beside the slots: all but `SLOPE` and `PAD FRICTION` |
+    | 1280 × 720, 100% (the floor)         |  48.9 |             13.4 | the same                                             |
+
+    At the floor alone nothing moves: every tallest line stands on one row, the widest (`DATUM`,
+    45.17) within 48.9. Where T12's look had the readout standing (1920 × 1080 at 100% and 125%)
+    the rule changes which line breaks, not how many rows: at 125% beside the slots
+    `SLANT RANGE FROM CAMERA` takes two rows either way, its label whole and its value under it.
+    At the floor beside a slot the readout never stands by height (the lower plate whole is about
+    30.4–31.5 rem against 33.0–34.3 rem of room less a 26–28 rem upper plate); the survey line and
+    `DATUM` can stand there, and the rule ends `DATUM`'s run past the plate (before it, the label,
+    its 0.5 rem and the figure's 13.08 rem unbroken run, `1738.1 km × 1736.0 km S`, passed the
+    13.4 rem plate by about 3.9 rem); they may take a row more, which the room's sizers measure, so
+    nothing is cut. Below the floor the slots are held
+    whole and the plates take the stage (32.9 rem at 1280 × 720 at 125%, 22.2 rem at 150%); at 150%
+    the values of `SLANT RANGE FROM CAMERA` and `ULTIMATE BEARING CAPACITY` move under their
+    labels, and no label breaks.
+
+  - _Tests_ (Vitest and Testing Library), 84 added, by file (added of the file's total):
+    `readouts.test.ts` 34 of 179 (the baselines held to the crate's `reading.rs`, the cause over a
+    grid of poses with the rotation on and off either side of 1 m and 10¹² m, the throw, each
+    no-sight state's lines live and stale, none under the fault, with no survey, before a header,
+    not modelled or with the surface unset, the 6.68 AU figure, `SLOPE`'s baseline the answer's
+    at 2, 5 and 100 m and the capacity's line the same, `DATUM`'s two runs, a sphere's one, the
+    tallest likewise); `groundReadout.test.ts` 16 of 60 (the ask at each publish's baseline under
+    the same pad, an old-baseline answer taken as it came, each cause carried with nothing asked,
+    the held answer let go, the cause cleared by a sight, another body, the withheld survey, a
+    session let go and a distance not finite, and the guard's one report); `TerrainReadout.test.tsx`
+    9 of 41; `SurveyLine.test.tsx` 6 of 23; `StyleControl.test.tsx` 5 of 11 (the buttons, the
+    pressed one, the metres called back, the presets' classes and no key, no row without its
+    state, the tab order after the style's buttons and reason); `useTerrainLines.test.tsx` 4 of
+    13; `ViewDisplayTerrain.test.tsx` 4 of 48 (5 m from the next answer, the row left out with
+    `INSTRUMENT 1` as the `CONTROLS` view and back with its choice, kept through a change of
+    scene, and the server's scene with the slice's Earth's rotation not modelled, framed by the
+    `FREE` camera and its survey held, through the harness with no change to `test/`: the heading,
+    `NOT AVAILABLE: ROTATION not yet modelled` and `DATUM`, no query, no tripod's point, no note);
+    `terrainPlate.test.tsx` 3 of 14; `viewLayout.test.ts` 2 of 13; `ViewDisplay.test.tsx` 1 of 83
+    (the row offered while no view is drawn). Changed: `styleButtons` and `bothHeldBackByNoView`
+    narrowed to the `4 STYLE` group; `SurveyLine.test.tsx`'s `DATUM` widths and muting for the two
+    runs; `readouts.test.ts`' `valuesWithoutS`, which takes a segment's one `S` for every value
+    before it; `ViewDisplayLayout.test.tsx`'s tab pass, 24 to 27.
+  - _Acceptance as run._ `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view
+src/renderer/src/view/terrain` under a 6 GB cap with four workers: 103 files, 2,822 tests
+    passed (83.5 s on a shared machine, provisional). The console-ux checks: `ux_lint.py` on the
+    changed renderer files, 0 errors and 12 checks, every check on a line this task leaves as it
+    was; `glyphs.py "· × ' —"`, each in both faces. oxlint and tsc clean. Then
+    `just smart-ci origin/rendering-and-planets` (its plan: the surface module, Prettier, tsc,
+    oxlint and Vitest over 165 files; no `test-render` and no Rust step).
+  - _Generator version._ Untouched (22): presentation alone, no golden.
+- **Deferred findings (2026-10-13 rule) (R10.T12.a)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _The instruments' ground readings_ (decision-r10-t12a-scope §7, 1): where an instrument's
+    survey line, `DATUM`, readout, tripod and note stand, an instrument whose `FRAME` body is not
+    the primary's, and the plates of an instrument in a window of its own each need a measured
+    layout on the desktop; the readout cannot fit an instrument's 18 rem block at 17 lines or more.
+    Owner: a later desktop task, which main names; when it lands, the `BASELINE` row follows the
+    `CONTROLS` view onto an instrument.
+  - _The readout standing at the floor alone in its tallest state, and the picture's centre clear
+    of the upper plate there_ (§7, 2): a row or two more, a guide change judged by looks; the yield
+    is stated and nothing is cut. Owner: that desktop pass.
+  - _A nearer body on the line of sight_ (§7, 3), which the readout reads past: a definition
+    question. Owner: a later ruling.
+  - _A run wider than a narrow plate in a tall window_ (§7, 4): `ELEVATION`'s 14.79 rem and
+    `SLANT RANGE`'s 13.65 rem runs pass a plate under them, beside the slots on a stage under about
+    52.8 rem wide that is tall enough for the readout (1280 × 1200 at 100%), never at the floor.
+    Lean: the room gains a width test. Owner: that desktop pass.
+  - _The upper plate's and the instruments' labels_ (§7, 5) can shrink the same way; they are
+    untouched, since the slots' room is measured with them. Owner: that desktop pass.
+  - _`ROTATION: NOT YET MODELLED` conflates `NOT RESOLVED`_ (§7, 6): `fromServer.ts`' `rotationAt`
+    maps every rotation section not `ok` to `null`, and the no-sight line inherits it. Owner:
+    R02/R03's view scene.
+  - _A body with no rotation draws no terrain_ (§7, 7) while its survey line states its coverage.
+    Owner: as the item before.
+  - _U4's "see Layout"_ (this lane's UX review): the label block's room's new sentence sends a
+    value wrapped under its label to "Layout", whose rule has labels "to the left of their value,
+    or above it in columns"; a single wrapped reading is not a column. Adopted verbatim (§3.4), so
+    the wording is main's: extend the Layout bullet to a value wrapped under its label on a narrow
+    plate, or drop the reference. Owner: main, at the next guide pass.
+  - _`SlopeBaselineM` and `SLOPE_BASELINES_M` are two lists_ (this lane's TypeScript review): a
+    baseline added to the type alone would have no button, unflagged by the compiler. The test
+    holds the client's list to the crate's `SLOPE_BASELINES`, which the module refuses outside;
+    deriving the type from the list would move it out of `workers/messages.ts`, whose change here
+    is its doc alone. Owner: the next task that changes the baselines.
 - **Deviations in T12's back end, as built** (2026-10-20; lane r10-readouts, branch
   `r10-readouts-land`, after R10.T16.e's commit, on `rendering-and-planets` at `6fa6a405`;
   decision-r10-t12-leans, decision-r10-t16-leans §12, decision-r10-view-block-room §2–§4).
@@ -11293,7 +11528,8 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
     and the readout in its tallest form, the lower plate did not stand whole at the floor in any
     measured state, with no instrument open too: the readout gave way there. T12's look measures it
     with its own lines; a measured layout that keeps the readout there is R10.T12.a's
-    (decision-r10-view-block-room, "Seen" item 1).
+    (decision-r10-view-block-room, "Seen" item 1). _Deferred by R10.T12.a (decision-r10-t12a-scope
+    §7): a later desktop pass; the label rule moves nothing at the floor alone._
   - _The compact column at 1280 × 720 at 125%_ clips 3 to 33 px at its foot (below the floor, as
     G-B allows); a selector that holds one row, or a tighter fold, is R07's (Seen items 4 and 5).
 - **Deviations in T12's label-block commit (commit 3), as built** (2026-10-20; lane r10-readouts-3,
@@ -11498,7 +11734,8 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
   - _A nearer body on the line of sight_ (decision-r10-t12-commit3, "Seen" item 1): a moon crossing
     the picture's centre in front of the `FRAME` body's point is the ground the line of sight first
     meets, yet the readout reads the `FRAME` body behind it and the tripod stands over the moon's
-    disc. For R10.T12.a or a later pass.
+    disc. For R10.T12.a or a later pass. _Deferred by R10.T12.a (decision-r10-t12a-scope §7): a
+    definition question for a later ruling._
   - _The open centre at a ratio of 0.78125 and 80%_ ("Seen" item 3): 0.08 px to spare, its ends
     about 1 px apart; this machine renders no such ratio.
   - _Hidden hull parts count_ ("Seen" item 2), erring to leave the tripod out; the note stands.
@@ -11510,10 +11747,12 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
     shows.
   - _A stated line where no line of sight can be formed_ (the body's rotation not known, or the
     camera beyond the binding's 10¹² m): the plate states the survey line alone there (above); a
-    line of its own is R10.T12.a's, for a later UX pass (main, 2026-10-20).
+    line of its own is R10.T12.a's, for a later UX pass (main, 2026-10-20). _Built by R10.T12.a:
+    `NOT AVAILABLE` with its cause in place of the readings._
   - _The labels wrap in a narrow plate_ (`SLANT RANGE FROM` | `CAMERA`, `ULTIMATE BEARING` |
-    `CAPACITY`), as the label block's line markup sets a long label beside its value; a layout
-    that keeps them whole is R10.T12.a's to weigh with its measurements.
+    `CAPACITY`), as the label block's line markup sets a long label beside its value; a layout that
+    keeps them whole is R10.T12.a's to weigh with its measurements. _Built by R10.T12.a: the label
+    whole, its value under it where the two cannot share a line._
 - **Beyond T12's files (decision-r10-ship-frame; commit 4)** (2026-10-20; lane r10-readouts-3).
   - _The own ship's `FRAME` in a served system._ R02.T17's view scene held the server's ship
     stand-in in the system frame, so that `frameBody` named no body from `SEAT` or `CHASE` and T12's

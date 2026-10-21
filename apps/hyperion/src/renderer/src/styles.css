@@ -4011,6 +4011,35 @@ body {
 }
 
 /*
+ * The style panel's BASELINE row (plan R10, R10.T12.a; decision-r10-t12a-scope §3.1): one 2rem row
+ * in the instruments panel's row form, 0.5rem under the style's buttons or their reason, its
+ * buttons the presets', 0.25rem apart, which may wrap under the legend with no gap between rows,
+ * as the instruments panel's rows do.
+ */
+.view-style__baseline {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.25rem;
+  margin-top: 0.5rem;
+}
+
+/*
+ * Floated, so that the legend sits on the left of its buttons, as a form's choice does, 0.5rem
+ * before the first; at its own width, since no other row of the panel lines up with it.
+ */
+.view-style__baseline-label {
+  float: left;
+  margin-inline-end: 0.25rem;
+  padding: 0;
+  line-height: 2rem;
+}
+
+/* A baseline's figure and its unit stay on one line. */
+.view-style__baseline-button {
+  white-space: nowrap;
+}
+
+/*
  * A panel's system designator on its title row (the guide's "Layout"): the view a VIEW panel acts
  * on, PRIMARY or INSTRUMENT 1 (R07.T19), at the row's end.
  */
@@ -4049,6 +4078,28 @@ body {
 .view-label__field {
   display: inline-block;
   text-align: right;
+}
+
+/*
+ * A lower plate's reading, its label kept whole (plan R10, R10.T12.a; decision-r10-t12a-scope §4.3):
+ * the label never shrinks, and breaks only where it alone is wider than the plate; the value stands
+ * beside it, taking the rest of the line and breaking at its middle dots, then its spaces, wherever
+ * the label and the value's widest unbroken run share a line, and otherwise wraps under the label
+ * from the plate's left edge. The upper plate's and the instruments' lines keep the shared rule.
+ */
+.view-label__line--whole {
+  flex-wrap: wrap;
+  gap: 0 0.5rem;
+}
+
+.view-label__line--whole > dt {
+  flex: none;
+  max-width: 100%;
+}
+
+.view-label__line--whole > dd {
+  flex: 1 1 0;
+  min-width: min-content;
 }
 
 /*

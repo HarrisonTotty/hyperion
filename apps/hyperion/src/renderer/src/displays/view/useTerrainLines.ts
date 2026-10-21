@@ -61,7 +61,10 @@ const NOTHING_HELD: HeldUnits = {
  * The units of `FINEST`, `RESOLUTION`, `SLANT RANGE` and the capacity keep their hysteresis from
  * one publish to the next, adjusted during render as each publish arrives, and start afresh when
  * the `FRAME` body changes. The readout stands only while no terrain fault stands, the view's own
- * (`faults`) or the session's (`GroundSnapshot.sessionFault`; decision-r10-t12-leans §5).
+ * (`faults`) or the session's (`GroundSnapshot.sessionFault`; decision-r10-t12-leans §5). Where
+ * no line of sight can be formed (`GroundSnapshot.sightGap`; R10.T12.a) the readout reads its
+ * `NOT AVAILABLE` line with `DATUM`, and its answer, for the tripod and the note, is none; a
+ * snapshot without the cause, as the descent spike's, gives the lines it gave before.
  *
  * @param faults - The view's fault lines, the terrain's among them.
  * @param remedy - What the survey line's two failed states end with (`TerrainLabelInput.remedy`):
@@ -94,6 +97,7 @@ export function useTerrainLines(
       padWidthM: GROUND_READOUT_OPTIONS.padWidthM,
       surfaceUnset: snapshot.surfaceUnset,
       remedy,
+      sightGap: snapshot.sightGap,
     },
     before,
   );

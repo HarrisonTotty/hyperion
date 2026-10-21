@@ -398,7 +398,8 @@ describe("VIEW's compact layout (R07.T19.b)", () => {
       "EASED CAMERA MOVES",
     ];
     const full = await setup();
-    const fullOrder = (await tabOrder(full, 24)).filter((name) => shared.includes(name));
+    // 27: the STYLE panel's BASELINE row (R10.T12.a) adds three stops ahead of EXPOSURE.
+    const fullOrder = (await tabOrder(full, 27)).filter((name) => shared.includes(name));
     full.resizeView(COMPACT_VIEW_PX);
     const compactOrder = (await tabOrder(full, 24)).filter((name) => shared.includes(name));
     expect([fullOrder, compactOrder]).toEqual([shared, shared]);

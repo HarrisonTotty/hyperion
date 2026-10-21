@@ -39,6 +39,7 @@ import { norm, scale, vec3 } from "../../geometry/vec3";
 import {
   DISTANCE_HYSTERESIS,
   formatBearingCapacity,
+  formatBodyDistance,
   formatNumber,
   formatSci,
   formatSignificant,
@@ -870,6 +871,30 @@ function radiusKm(radiusM: number): string {
 }
 
 /**
+ * A reference spheroid's figure in `DATUM`, `REFERENCE SPHEROID 6378.1 km × 6356.8 km`, its
+ * equatorial and polar radii as two runs, `6378.1 km ×` and `6356.8 km`, with the figure's one `S`
+ * after the second (plan R10, R10.T12.a; decision-r10-t12a-scope §4.3).
+ *
+ * @remarks
+ * The space between the two runs is the console's own, so that a narrow plate breaks the figure
+ * after its `×` and each radius stands whole, never running past the plate; its text, and so its
+ * {@link readoutLineText}, are the single run's they replace.
+ *
+ * @param equatorialM - The equatorial radius, m.
+ * @param polarM - The polar radius, m.
+ */
+function spheroidFigure(equatorialM: number, polarM: number, stale: boolean): ReadoutSegment {
+  const tone = toneOf(stale);
+  return [
+    consoleText("REFERENCE SPHEROID "),
+    field(`${radiusKm(equatorialM)} km ×`, 0, tone),
+    consoleText(" "),
+    field(`${radiusKm(polarM)} km`, 0, tone),
+    mark(stale),
+  ];
+}
+
+/**
  * The `DATUM` line (the guide's row): the body's reference spheroid, its equatorial and polar radii
  * to 0.1 km with the unit on both, `DATUM REFERENCE SPHEROID 6378.1 km × 6356.8 km`, or, where the
  * two are equal, a sphere, `DATUM REFERENCE SPHERE 1737.4 km`; then, on a world with a sea (a main
@@ -879,7 +904,9 @@ function radiusKm(radiusM: number): string {
  * @remarks
  * Stale, the figure takes one `S` after its second radius and the sea level its own
  * (decision-r10-t12-leans §4). Both are the body's constants, so each keeps its own width; the
- * figure's `S` has its place kept, so that the sea level never moves.
+ * figure's `S` has its place kept, so that the sea level never moves. A spheroid's two radii are
+ * two runs ({@link spheroidFigure}; R10.T12.a), which may break after the `×`; a sphere's one
+ * radius is one run.
  */
 export function datumLine(header: SurfaceHeaderDto, stale: boolean): ReadoutLine {
   const tone = toneOf(stale);
@@ -888,11 +915,7 @@ export function datumLine(header: SurfaceHeaderDto, stale: boolean): ReadoutLine
   const figure: ReadoutSegment =
     a === c
       ? [consoleText("REFERENCE SPHERE "), field(`${radiusKm(a)} km`, 0, tone), mark(stale)]
-      : [
-          consoleText("REFERENCE SPHEROID "),
-          field(`${radiusKm(a)} km × ${radiusKm(c)} km`, 0, tone),
-          mark(stale),
-        ];
+      : spheroidFigure(a, c, stale);
   if (header.main_liquid === null) {
     return reading("DATUM", [figure]);
   }
@@ -1113,6 +1136,11 @@ export function groundReadoutLines(
  * answer held, so that nothing stands before it. Whether the view is the `PRIMARY` one is the
  * caller's (§3).
  *
+ * @remarks
+ * Where no line of sight can be formed no answer is held, yet `DATUM` and the readout's
+ * `NOT AVAILABLE` line stand (`TerrainLabelInput.sightGap`; R10.T12.a), with no tripod:
+ * {@link terrainLabelModel} states them, and this answers for the answer's readout alone.
+ *
  * @param faults - The view's fault lines.
  * @param readout - The readout's latest answer for the view, `null` before its first.
  */
@@ -1121,12 +1149,19 @@ export function terrainReadoutStands(
   faults: ReadonlyArray<string>,
   readout: SurfaceGroundReadout | null,
 ): boolean {
+  return readoutMayStand(survey, faults) && readout !== null;
+}
+
+/**
+ * Whether a view's terrain readout could stand but for its answer ({@link terrainReadoutStands}'s
+ * rule less the answer): a survey of the `FRAME` body held, the body modelled, no terrain fault.
+ */
+function readoutMayStand(survey: TerrainSurvey | null, faults: ReadonlyArray<string>): boolean {
   return (
     survey !== null &&
     survey.header !== null &&
     survey.status.notModelled === null &&
-    !faults.some(isTerrainFault) &&
-    readout !== null
+    !faults.some(isTerrainFault)
   );
 }
 
@@ -1153,6 +1188,13 @@ export interface TerrainLabelInput {
    * `reopen VIEW to retry` unless given.
    */
   readonly remedy?: string | undefined;
+  /**
+   * Why the view's line of sight cannot be formed ({@link sightGapOf}; plan R10, R10.T12.a,
+   * decision-r10-t12a-scope §3.2), while no answer is held: the readout then reads its
+   * `NOT AVAILABLE` line by its cause ({@link sightGapLine}); none, a sight formed or not yet
+   * asked, by default.
+   */
+  readonly sightGap?: SightGap | undefined;
 }
 
 /** A view's terrain lines, in the label block's order, and the units they kept. */
@@ -1173,6 +1215,13 @@ export interface TerrainLabelModel {
  * `DATUM` line ({@link datumLine}) and the readout ({@link groundReadoutLines}), stale as the
  * survey is.
  *
+ * @remarks
+ * Where the readout could stand but its line of sight cannot be formed, no answer being held
+ * (`TerrainLabelInput.sightGap`; plan R10, R10.T12.a, decision-r10-t12a-scope §3.2), the readout
+ * is its heading and one `NOT AVAILABLE` status by the cause ({@link sightGapLine}), in `--text`,
+ * steady, with no `S` on loss of the link, since it is a status; `DATUM` stands with it, as with
+ * `NO GROUND`. There is no point, so the readout gives no answer for a tripod or a note.
+ *
  * @param units - The units the view's last publish kept.
  */
 export function terrainLabelModel(
@@ -1189,15 +1238,26 @@ export function terrainLabelModel(
   }
   const survey = surveyLines(input.survey, units, input.remedy);
   const header = input.survey?.header ?? null;
-  const { readout } = input;
-  if (
-    header === null ||
-    readout === null ||
-    !terrainReadoutStands(input.survey, input.faults, readout)
-  ) {
+  const { readout, sightGap } = input;
+  if (header === null || !readoutMayStand(input.survey, input.faults)) {
     return { survey: survey.lines, datum: null, readout: [], units: survey.units };
   }
   const stale = input.survey?.stale ?? false;
+  if (readout === null) {
+    // Nothing stands before the first answer; where no line of sight can be formed, nothing is
+    // asked, and the readout says why in the readings' place (R10.T12.a).
+    return sightGap === undefined
+      ? { survey: survey.lines, datum: null, readout: [], units: survey.units }
+      : {
+          survey: survey.lines,
+          datum: datumLine(header, stale),
+          readout: [
+            { kind: "heading", key: "ground-heading", text: GROUND_HEADING },
+            status("ground-status", sightGapLine(sightGap), "text"),
+          ],
+          units: survey.units,
+        };
+  }
   const ground = groundReadoutLines(
     readout,
     header,
@@ -1215,10 +1275,18 @@ export function terrainLabelModel(
 // --- The tallest forms --------------------------------------------------------------------------
 
 /**
- * The longest `BASELINE` the guide offers, m (the crate's `SLOPE_BASELINES`): the tallest `SLOPE`
- * line is reckoned at it, so that its room holds whichever R10.T12.a's selector sets.
+ * The baselines a terrain readout's `SLOPE` may be read over, m, shortest first: the guide's
+ * `BASELINE` choices, the crate's `SLOPE_BASELINES` (`reading.rs`), and the buttons of the `STYLE`
+ * panel's `BASELINE` row in their order (plan R10, R10.T12.a; decision-r10-t12a-scope §3.1).
  */
-const LONGEST_BASELINE_M: SlopeBaselineM = 100;
+export const SLOPE_BASELINES_M: ReadonlyArray<SlopeBaselineM> = [2, 5, 100];
+
+/**
+ * The longest `BASELINE` the guide offers, m, taken from {@link SLOPE_BASELINES_M}: the tallest
+ * `SLOPE` line is reckoned at it, so that its room holds whichever the `STYLE` panel's selector
+ * sets (R10.T12.a).
+ */
+export const LONGEST_BASELINE_M: number = Math.max(...SLOPE_BASELINES_M);
 
 /** The longest of a list of names, the first where two are as long; `null` for none. */
 function longestOf(names: ReadonlyArray<string>): string | null {
@@ -1248,14 +1316,15 @@ export interface TallestTerrainLines {
  *   `ABOVE 99.9 %` and `FINEST 36,000 km`; the readout's Estimated `ELEVATION`, `SLOPE` and
  *   `SLANT RANGE` with their widest uncertainties, the capacity's `~0.95 MPa`, the friction's
  *   `~0.71` with its `· AT 272 K`, and `RESOLUTION 36,000 km`.
- * - `DATUM` is the header's spheroid with both radii and its `SEA LEVEL`, whether or not the body
- *   has a sea or is a sphere.
+ * - `DATUM` is the header's spheroid with both radii, as two runs ({@link spheroidFigure}), and its
+ *   `SEA LEVEL`, whether or not the body has a sea or is a sphere.
  * - `SLANT RANGE` takes the longer label, `SLANT RANGE FROM CAMERA`, and both of its forms at once:
  *   its widest Estimated value and uncertainty, and the `· GRAZING` part that stands in the
  *   uncertainty's place where it grazes, so that it is as tall as either at any width.
  * - `MATERIAL` takes the longest form's name and the longest substance the header's palette names
  *   (or `UNLISTED MATERIAL` where that is longer), each stale.
- * - `SLOPE` takes the longest `BASELINE`, 100 m.
+ * - `SLOPE` takes the longest `BASELINE`, 100 m ({@link LONGEST_BASELINE_M}), so that the room
+ *   holds whichever the `STYLE` panel's selector sets (R10.T12.a).
  *
  * @param padWidthM - The width of the pad the capacity is asked under, m (`ReadoutContext`).
  */
@@ -1269,9 +1338,8 @@ export function tallestTerrainLines(
     [field("ABOVE 99.9 %", COVERAGE_FIELD_CH, tone), mark(stale)],
     [consoleText("FINEST "), field("36,000 km", RESOLUTION_FIELD_CH, tone), mark(stale)],
   ]);
-  const radii = `${radiusKm(header.equatorial_radius_m)} km × ${radiusKm(header.polar_radius_m)} km`;
   const datum = reading("DATUM", [
-    [consoleText("REFERENCE SPHEROID "), field(radii, 0, tone), mark(stale)],
+    spheroidFigure(header.equatorial_radius_m, header.polar_radius_m, stale),
     [
       consoleText("SEA LEVEL "),
       field(`${formatNumber(header.sea_level_m, 1)} m`, 0, tone),
@@ -1351,7 +1419,8 @@ export const MAX_SIGHT_M = 1e12;
  *   radius and the field's realised relief, so that a line that misses reads `NO GROUND`; held to
  *   the binding's {@link MAX_SIGHT_M}, which the ground's near side is always within.
  * - `null` where the body's rotation is not known, or the origin lies outside the binding's limits
- *   ({@link MIN_SIGHT_ORIGIN_M} to {@link MAX_SIGHT_M} from the centre).
+ *   ({@link MIN_SIGHT_ORIGIN_M} to {@link MAX_SIGHT_M} from the centre), or its distance from the
+ *   centre is not finite; {@link sightGapOf} says which (R10.T12.a).
  *
  * @param pose - The pose the view draws from (`runPose`).
  */
@@ -1361,9 +1430,51 @@ export function lineOfSightOf(
   body: ViewBody,
   header: SurfaceHeaderDto,
 ): GroundSight | null {
+  const start = sightStartOf(pose, scene, body);
+  if (start.kind !== "start") {
+    return null;
+  }
+  const { rotation, originM, fromCentreM } = start;
+  const [r0, r1, r2] = rotationRows(pose.orientation);
+  const direction = rotateToBodyFixed(rotation, vec3(-r0.z, -r1.z, -r2.z));
+  const reachM = fromCentreM + header.equatorial_radius_m + Math.max(0, header.realised_relief_m);
+  return { originM, direction, maxM: Math.min(MAX_SIGHT_M, reachM) };
+}
+
+/**
+ * Why a view's line of sight cannot be formed, by {@link lineOfSightOf}'s three `null`s in its
+ * order (plan R10, R10.T12.a; decision-r10-t12a-scope §3.2): the body's rotation not known
+ * (`rotation`), the camera more than {@link MAX_SIGHT_M} from its centre (`far`), or within
+ * {@link MIN_SIGHT_ORIGIN_M} of it (`centre`).
+ */
+export type SightGap = "rotation" | "far" | "centre";
+
+/**
+ * Where a view's line of sight starts, as {@link lineOfSightOf} and {@link sightGapOf} both read
+ * it (R10.T12.a), so that the two agree by construction: the camera from the body's centre in its
+ * body-fixed axes, m, within the binding's limits; or why none can start; or a distance that is
+ * not finite, a broken invariant.
+ */
+type SightStart =
+  | {
+      readonly kind: "start";
+      readonly rotation: NonNullable<ViewBody["rotation"]>;
+      readonly originM: GroundSight["originM"];
+      readonly fromCentreM: number;
+    }
+  | { readonly kind: "gap"; readonly gap: SightGap }
+  | { readonly kind: "broken"; readonly fromCentreM: number };
+
+/**
+ * The start of `pose`'s line of sight to `body` ({@link SightStart}): its origin is
+ * `relativeToCamera` of the body's frame origin negated, rotated into the body-fixed axes
+ * (`rotateToBodyFixed`), tested against the binding's limits ({@link MIN_SIGHT_ORIGIN_M} to
+ * {@link MAX_SIGHT_M}).
+ */
+function sightStartOf(pose: CameraPose, scene: ViewScene, body: ViewBody): SightStart {
   const rotation = body.rotation;
   if (rotation === null) {
-    return null;
+    return { kind: "gap", gap: "rotation" };
   }
   const centreM = relativeToCamera(
     { kind: "body", body: body.id, m: vec3(0, 0, 0) },
@@ -1372,11 +1483,87 @@ export function lineOfSightOf(
   );
   const originM = rotateToBodyFixed(rotation, scale(centreM, -1));
   const fromCentreM = norm(originM);
-  if (!(fromCentreM >= MIN_SIGHT_ORIGIN_M && fromCentreM <= MAX_SIGHT_M)) {
-    return null;
+  let start: SightStart;
+  if (!Number.isFinite(fromCentreM)) {
+    start = { kind: "broken", fromCentreM };
+  } else if (fromCentreM > MAX_SIGHT_M) {
+    start = { kind: "gap", gap: "far" };
+  } else if (fromCentreM < MIN_SIGHT_ORIGIN_M) {
+    start = { kind: "gap", gap: "centre" };
+  } else {
+    start = { kind: "start", rotation, originM, fromCentreM };
   }
-  const [r0, r1, r2] = rotationRows(pose.orientation);
-  const direction = rotateToBodyFixed(rotation, vec3(-r0.z, -r1.z, -r2.z));
-  const reachM = fromCentreM + header.equatorial_radius_m + Math.max(0, header.realised_relief_m);
-  return { originM, direction, maxM: Math.min(MAX_SIGHT_M, reachM) };
+  return start;
+}
+
+/**
+ * Why {@link lineOfSightOf} forms no line of sight for the same pose and body (plan R10,
+ * R10.T12.a; decision-r10-t12a-scope §3.2): its {@link SightGap}, tested in `lineOfSightOf`'s
+ * order, the camera's distance from the body's centre reckoned as it reckons it; `null` exactly
+ * where it forms one.
+ *
+ * @throws Error where that distance is not finite: no cause, but a broken invariant of the scene
+ *   and the pose, which the readout's ask guards.
+ */
+export function sightGapOf(pose: CameraPose, scene: ViewScene, body: ViewBody): SightGap | null {
+  const start = sightStartOf(pose, scene, body);
+  let gap: SightGap | null;
+  switch (start.kind) {
+    case "start":
+      gap = null;
+      break;
+    case "gap":
+      gap = start.gap;
+      break;
+    case "broken":
+      throw new Error(
+        `the camera's distance from ${body.id}'s centre is not finite (${String(start.fromCentreM)} m)`,
+      );
+  }
+  return gap;
+}
+
+/**
+ * The readout's line where the body's rotation is not known, in whose axes it reads the ground:
+ * the upper plate's `ROTATION: NOT YET MODELLED` as a cause (R10.T12.a; decision-r10-t12a-scope
+ * §3.2).
+ */
+export const NO_SIGHT_ROTATION = "NOT AVAILABLE: ROTATION not yet modelled";
+
+/** {@link MAX_SIGHT_M} in the view's range form, `6.68 AU` (10¹² m is 6.6846 AU). */
+const FARTHEST_SIGHT = formatBodyDistance(MAX_SIGHT_M / 1_000, null);
+
+/**
+ * The readout's line where the camera is more than {@link MAX_SIGHT_M} from the body's centre,
+ * beyond the readout's reach, its figure formatted from the constant (R10.T12.a;
+ * decision-r10-t12a-scope §3.2).
+ *
+ * @remarks
+ * The figure and its unit are joined by a no-break space, as every quantity on a label block is
+ * kept whole (`.view-label__run`; decision-r07-t19-layout, 2), so that a narrow plate never breaks
+ * `6.68` from `AU`.
+ */
+export const NO_SIGHT_FAR = `NOT AVAILABLE: camera more than ${FARTHEST_SIGHT.value}${NO_BREAK_SPACE}${FARTHEST_SIGHT.unit} from the body`;
+
+/**
+ * The readout's line where the camera is within {@link MIN_SIGHT_ORIGIN_M} of the body's centre
+ * (R10.T12.a; decision-r10-t12a-scope §3.2).
+ */
+export const NO_SIGHT_CENTRE = "NOT AVAILABLE: camera at the body's centre";
+
+/** The readout's `NOT AVAILABLE` line for a {@link SightGap}, in place of its readings. */
+export function sightGapLine(gap: SightGap): string {
+  let line: string;
+  switch (gap) {
+    case "rotation":
+      line = NO_SIGHT_ROTATION;
+      break;
+    case "far":
+      line = NO_SIGHT_FAR;
+      break;
+    case "centre":
+      line = NO_SIGHT_CENTRE;
+      break;
+  }
+  return line;
 }

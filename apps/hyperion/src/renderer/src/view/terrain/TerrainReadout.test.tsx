@@ -5,18 +5,24 @@ import { describe, expect, it } from "vitest";
 import { moonLikeHeader } from "../../test/coarseFieldFixtures";
 import { stylesheetRule } from "../../test/stylesheet";
 import { FIXTURE_MOON } from "../../test/viewFixtures";
+import { CoverageView } from "./coverage";
 import {
   ELEVATION_FIELD_CH,
   ELEVATION_UNCERTAINTY_CH,
   groundReadoutLines,
   NO_BREAK_SPACE,
   NO_READOUT_UNITS,
+  NO_SIGHT_CENTRE,
+  NO_SIGHT_FAR,
+  NO_SIGHT_ROTATION,
   type ReadoutContext,
   type ReadoutField,
   type ReadoutLine,
   readoutLineText,
+  type SightGap,
   STALE_MARK_CH,
   tallestTerrainLines,
+  terrainLabelModel,
 } from "./readouts";
 import { TerrainReadout } from "./TerrainReadout";
 import type {
@@ -469,4 +475,92 @@ describe("the terrain readout's breaks (R10.T12; the guide's ± row)", () => {
       blank instanceof HTMLElement ? blank.style.minWidth : null,
     ]).toEqual([1, "", "12ch"]);
   });
+});
+
+describe("the readings' labels kept whole (R10.T12.a; decision-r10-t12a-scope §4.3)", () => {
+  it.each<readonly [string, ReadonlyArray<ReadoutLine>]>([
+    ["Estimated", linesOf(groundAt())],
+    ["stale, from the camera", linesOf(groundAt(), { stale: true, slantFromCamera: true })],
+    ["in its tallest form", tallestTerrainLines(HEADER, 1).readout],
+  ])("sets each reading %s on a line with the whole-label class", (_, lines) => {
+    render(<TerrainReadout lines={lines} />);
+    const terms = screen.getAllByRole("term");
+    expect({
+      readings: terms.length,
+      classes: [...new Set(terms.map((term) => term.parentElement?.className))],
+    }).toEqual({
+      readings: 7,
+      classes: ["field view-label__line view-label__line--whole"],
+    });
+  });
+
+  it("wraps the line, its label never shrinking and breaking only where it alone is wider than the plate", () => {
+    const line = stylesheetRule(".view-label__line--whole");
+    const label = stylesheetRule(".view-label__line--whole > dt");
+    expect([
+      /flex-wrap: wrap;/u.test(line),
+      /gap: 0 0\.5rem;/u.test(line),
+      /flex: none;/u.test(label),
+      /max-width: 100%;/u.test(label),
+    ]).toEqual([true, true, true, true]);
+  });
+
+  it("sets the value beside the label where its widest run fits after it, and under it otherwise", () => {
+    const value = stylesheetRule(".view-label__line--whole > dd");
+    expect([/flex: 1 1 0;/u.test(value), /min-width: min-content;/u.test(value)]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("leaves the shared line rule, which the upper plate and the instruments' blocks take, as it was", () => {
+    const shared = stylesheetRule(".view-label__line");
+    expect([/flex-wrap/u.test(shared), /display: flex;/u.test(shared)]).toEqual([false, true]);
+  });
+});
+
+describe("the readout where no line of sight forms (R10.T12.a; decision-r10-t12a-scope §3.2)", () => {
+  /** The readout's lines of a held survey of the moon, no answer held, for the cause `gap`. */
+  function noSightLines(gap: SightGap, stale = false): ReadonlyArray<ReadoutLine> {
+    return terrainLabelModel(
+      {
+        survey: {
+          status: { reason: "local-body", pending: false, notModelled: null, failure: null },
+          coverage: CoverageView.empty(5),
+          header: HEADER,
+          stale,
+        },
+        readout: null,
+        faults: [],
+        slantFromCamera: false,
+        padWidthM: 1,
+        sightGap: gap,
+      },
+      NO_READOUT_UNITS,
+    ).readout;
+  }
+
+  it.each<readonly [SightGap, string]>([
+    ["rotation", NO_SIGHT_ROTATION],
+    ["far", NO_SIGHT_FAR],
+    ["centre", NO_SIGHT_CENTRE],
+  ])(
+    "states %s's NOT AVAILABLE line under its heading, stale or not, as a statement",
+    (gap, text) => {
+      const shown = [false, true].map((stale) => {
+        const { container, unmount } = render(<TerrainReadout lines={noSightLines(gap, stale)} />);
+        const lines = [...container.children].map(
+          (child) => `${child.className}: ${visibleText(child)}`,
+        );
+        const values = screen.queryAllByRole("status").length;
+        unmount();
+        return { lines, values };
+      });
+      const expected = {
+        lines: ["view-label__heading: GROUND AT LINE OF SIGHT", `view-label__statement: ${text}`],
+        values: 0,
+      };
+      expect(shown).toEqual([expected, expected]);
+    },
+  );
 });

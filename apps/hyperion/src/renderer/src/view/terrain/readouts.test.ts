@@ -2,6 +2,7 @@ import type { PaletteEntryDto, SurfaceHeaderDto } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import classSource from "../../../../../../../crates/hyperion-surface/src/material/class.rs?raw";
+import readingSource from "../../../../../../../crates/hyperion-surface/src/reading.rs?raw";
 import wasmSource from "../../../../../../../crates/hyperion-surface/src/wasm.rs?raw";
 import { add, norm, scale, sub, vec3, type Vec3 } from "../../geometry/vec3";
 import { substanceName } from "../../lib/substances";
@@ -31,25 +32,34 @@ import {
   FRICTION_FIELD_CH,
   groundReadoutLines,
   lineOfSightOf,
+  LONGEST_BASELINE_M,
   materialFormName,
   MAX_SIGHT_M,
   MIN_SIGHT_ORIGIN_M,
   NO_BREAK_SPACE,
   NO_READOUT_UNITS,
+  NO_SIGHT_CENTRE,
+  NO_SIGHT_FAR,
+  NO_SIGHT_ROTATION,
   type ReadoutContext,
   type ReadoutLine,
   readoutLineText,
   type ReadoutSegment,
   type ReadoutUnits,
   RESOLUTION_FIELD_CH,
+  type SightGap,
+  sightGapLine,
+  sightGapOf,
   SLANT_RANGE_FIELD_CH,
   SLANT_RANGE_UNCERTAINTY_CH,
+  SLOPE_BASELINES_M,
   SLOPE_FIELD_CH,
   SLOPE_UNCERTAINTY_CH,
   STALE_MARK_CH,
   surveyLines,
   tallestTerrainLines,
   TEMPERATURE_FIELD_CH,
+  type TerrainLabelInput,
   terrainLabelModel,
   terrainReadoutStands,
 } from "./readouts";
@@ -652,6 +662,15 @@ describe("the survey line (decision-r10-t16-leans §12)", () => {
   });
 });
 
+/** A `DATUM` line's figure: its first segment. */
+function figureOf(line: ReadoutLine): ReadoutSegment {
+  const figure = line.kind === "reading" ? line.segments[0] : undefined;
+  if (figure === undefined) {
+    throw new Error("the line has no figure");
+  }
+  return figure;
+}
+
 describe("the DATUM line", () => {
   it("reads the reference spheroid's two radii to 0.1 km, the unit on both", () => {
     expect(readoutLineText(datumLine(HEADER, false))).toBe(
@@ -678,6 +697,57 @@ describe("the DATUM line", () => {
     expect(readoutLineText(datumLine(SEA_HEADER, true))).toBe(
       "DATUM REFERENCE SPHEROID 6378.1 km × 6356.8 km S · SEA LEVEL -2.4 m S",
     );
+  });
+
+  it("sets a spheroid's figure as two runs, breakable after its ×, with the figure's one S after the second (R10.T12.a)", () => {
+    expect(figureOf(datumLine(SEA_HEADER, true))).toEqual([
+      { kind: "text", text: "REFERENCE SPHEROID " },
+      {
+        kind: "field",
+        text: "6378.1 km ×",
+        widthCh: 0,
+        align: "end",
+        tone: "stale",
+        staleMark: false,
+      },
+      { kind: "text", text: " " },
+      {
+        kind: "field",
+        text: "6356.8 km",
+        widthCh: 0,
+        align: "end",
+        tone: "stale",
+        staleMark: false,
+      },
+      { kind: "mark", stale: true },
+    ]);
+  });
+
+  it("sets a sphere's one radius as one run, as before (R10.T12.a)", () => {
+    const sphere = { ...HEADER, equatorial_radius_m: 1_737_400, polar_radius_m: 1_737_400 };
+    expect(figureOf(datumLine(sphere, true))).toEqual([
+      { kind: "text", text: "REFERENCE SPHERE " },
+      {
+        kind: "field",
+        text: "1737.4 km",
+        widthCh: 0,
+        align: "end",
+        tone: "stale",
+        staleMark: false,
+      },
+      { kind: "mark", stale: true },
+    ]);
+  });
+
+  it("sets the tallest DATUM's figure as the same two runs, its text unchanged (R10.T12.a)", () => {
+    const tallest = tallestTerrainLines(SEA_HEADER, 1).datum;
+    expect({
+      figure: figureOf(tallest),
+      text: readoutLineText(tallest),
+    }).toEqual({
+      figure: figureOf(datumLine(SEA_HEADER, true)),
+      text: "DATUM REFERENCE SPHEROID 6378.1 km × 6356.8 km S · SEA LEVEL -2.4 m S",
+    });
   });
 });
 
@@ -874,6 +944,43 @@ describe("the terrain readout", () => {
       }
     }
   });
+});
+
+describe("the readout's BASELINE (R10.T12.a; decision-r10-t12a-scope §3.1)", () => {
+  it("offers the crate's three baselines, 2 m, 5 m and 100 m, shortest first", () => {
+    const line = readingSource
+      .split("\n")
+      .find((each) => each.startsWith("pub const SLOPE_BASELINES"));
+    const crate = [...(line ?? "").matchAll(/Metres::new\(([\d.]+)\)/gu)].map((found) =>
+      Number(found[1]),
+    );
+    expect([SLOPE_BASELINES_M, crate]).toEqual([
+      [2, 5, 100],
+      [2, 5, 100],
+    ]);
+  });
+
+  it("reckons the tallest SLOPE at the longest baseline, 100 m", () => {
+    const slope = lineOf(tallestTerrainLines(HEADER, 1).readout, "SLOPE");
+    expect([LONGEST_BASELINE_M, readoutLineText(slope).endsWith("· BASELINE 100 m")]).toEqual([
+      100,
+      true,
+    ]);
+  });
+
+  it.each(SLOPE_BASELINES_M)(
+    "states the answer's own baseline, %d m, on SLOPE, the capacity's line the same at each",
+    (baselineM) => {
+      const readout = groundAt({ reading: { slopeBaselineM: baselineM } });
+      expect({
+        slope: textOfLine(readout, "SLOPE"),
+        capacity: textOfLine(readout, "ULTIMATE BEARING CAPACITY"),
+      }).toEqual({
+        slope: `SLOPE ~12°${PM}4° · BASELINE ${String(baselineM)} m`,
+        capacity: textOfLine(groundAt(), "ULTIMATE BEARING CAPACITY"),
+      });
+    },
+  );
 });
 
 describe("the readout's fixed fields", () => {
@@ -1107,6 +1214,100 @@ describe("whether the readout stands (decision-r10-t12-leans §5 and §7)", () =
   });
 });
 
+describe("the readout where no line of sight forms (R10.T12.a; decision-r10-t12a-scope §3.2)", () => {
+  /** The terrain lines of a held survey with no answer and the cause `sightGap`. */
+  function gapModel(sightGap: SightGap, input: Partial<TerrainLabelInput> = {}) {
+    return terrainLabelModel(
+      {
+        survey: aSurvey(),
+        readout: null,
+        faults: [],
+        slantFromCamera: false,
+        padWidthM: 1,
+        sightGap,
+        ...input,
+      },
+      NO_READOUT_UNITS,
+    );
+  }
+
+  it.each<readonly [SightGap, string]>([
+    ["rotation", "NOT AVAILABLE: ROTATION not yet modelled"],
+    ["far", `NOT AVAILABLE: camera more than 6.68${NO_BREAK_SPACE}AU from the body`],
+    ["centre", "NOT AVAILABLE: camera at the body's centre"],
+  ])("reads the heading, then %s's NOT AVAILABLE line in --text, with DATUM", (gap, line) => {
+    const model = gapModel(gap);
+    expect({
+      readout: model.readout.map((each) => [
+        each.kind,
+        readoutLineText(each),
+        each.kind === "status" ? each.colour : null,
+      ]),
+      datum: model.datum === null ? null : readoutLineText(model.datum),
+      survey: model.survey.map(readoutLineText),
+    }).toEqual({
+      readout: [
+        ["heading", "GROUND AT LINE OF SIGHT", null],
+        ["status", line, "text"],
+      ],
+      datum: "DATUM REFERENCE SPHEROID 1738.1 km × 1736.0 km",
+      survey: [expect.stringMatching(/^SURVEY COVERAGE /u)],
+    });
+  });
+
+  it.each<SightGap>(["rotation", "far", "centre"])(
+    "keeps %s's line unchanged with no S on loss of the link, DATUM taking its S",
+    (gap) => {
+      const stale = gapModel(gap, { survey: aSurvey({ stale: true }) });
+      expect({
+        readout: stale.readout.map(readoutLineText),
+        datum: stale.datum === null ? null : readoutLineText(stale.datum),
+      }).toEqual({
+        readout: gapModel(gap).readout.map(readoutLineText),
+        datum: "DATUM REFERENCE SPHEROID 1738.1 km × 1736.0 km S",
+      });
+    },
+  );
+
+  it.each<readonly [string, Partial<TerrainLabelInput>]>([
+    ["under the terrain's fault", { faults: [TERRAIN_COMPUTATION_FAILED] }],
+    ["with no survey held", { survey: null }],
+    ["before a header is held", { survey: aSurvey({ header: null, coverage: null }) }],
+    [
+      "for a body not modelled",
+      { survey: aSurvey({ status: standing({ notModelled: "surface" }) }) },
+    ],
+    ["where a kept scene leaves the surface unset", { surfaceUnset: true }],
+  ])("states no readout or DATUM %s", (_, input) => {
+    const model = gapModel("rotation", input);
+    expect([model.datum, model.readout]).toEqual([null, []]);
+  });
+
+  it("states the survey line alone with no cause, before the first answer", () => {
+    const model = terrainLabelModel(
+      { survey: aSurvey(), readout: null, faults: [], slantFromCamera: false, padWidthM: 1 },
+      NO_READOUT_UNITS,
+    );
+    expect([model.survey.length, model.datum, model.readout]).toEqual([1, null, []]);
+  });
+
+  it("formats the far line's figure from MAX_SIGHT_M, 10¹² m in AU to three figures, kept whole with its unit", () => {
+    const au = (MAX_SIGHT_M / 149_597_870_700).toPrecision(3);
+    expect([au, NO_SIGHT_FAR]).toEqual([
+      "6.68",
+      `NOT AVAILABLE: camera more than ${au}${NO_BREAK_SPACE}AU from the body`,
+    ]);
+  });
+
+  it("names each cause's line", () => {
+    expect([sightGapLine("rotation"), sightGapLine("far"), sightGapLine("centre")]).toEqual([
+      NO_SIGHT_ROTATION,
+      NO_SIGHT_FAR,
+      NO_SIGHT_CENTRE,
+    ]);
+  });
+});
+
 /**
  * A segment's set width, ch of B612 Mono: a field its fixed width, or its text and any `S` it holds
  * where that is longer; a kept place 2 ch; the console's text and a status their length.
@@ -1181,8 +1382,9 @@ function readoutWiderThan(
 
 /**
  * The values of a line that stand without their `S`: each field not stale, or with no `S` after
- * it, a `±` reading's one `S` after its uncertainty serving its value too (decision-r10-t12-leans
- * §4).
+ * it in its segment, a `±` reading's one `S` after its uncertainty serving its value too
+ * (decision-r10-t12-leans §4), and a spheroid's one `S` after its second radius its first
+ * (R10.T12.a).
  */
 function valuesWithoutS(line: ReadoutLine): string[] {
   if (line.kind !== "reading") {
@@ -1193,11 +1395,12 @@ function valuesWithoutS(line: ReadoutLine): string[] {
       if (piece.kind !== "field") {
         return [];
       }
-      const next = segment[i + 1];
-      const marked =
-        piece.staleMark ||
-        (next?.kind === "mark" && next.stale) ||
-        (next?.kind === "field" && next.staleMark);
+      const marked = segment
+        .slice(i)
+        .some(
+          (after) =>
+            (after.kind === "field" && after.staleMark) || (after.kind === "mark" && after.stale),
+        );
       return piece.tone === "stale" && marked ? [] : [piece.text];
     }),
   );
@@ -1505,4 +1708,84 @@ describe("lineOfSightOf", () => {
     const sight = lineOfSightOf(poseOffBody(vec3(MAX_SIGHT_M - 1e5, 0, 0)), SCENE, BODY, HEADER);
     expect(sight?.maxM).toBe(MAX_SIGHT_M);
   });
+});
+
+/** A camera `offsetM` from the planet's centre, looking along a fixed direction off its axes. */
+function poseAt(offsetM: Vec3): CameraPose {
+  return {
+    frame: { kind: "body", body: FIXTURE_PLANET },
+    positionM: offsetM,
+    orientation: lookAlong(vec3(-0.8, 0.3, 0.52), vec3(0, 0, 1)),
+  };
+}
+
+describe("sightGapOf (R10.T12.a; decision-r10-t12a-scope §3.2)", () => {
+  const AXIS = vec3(0.3, -0.5, 0.81);
+  const ROTATION = rotation3FromRows(
+    rotationRows(quaternionFromAxisAngle(scale(AXIS, 1 / norm(AXIS)), 0.7)),
+  );
+  const TURNING = aBody({ rotation: ROTATION, radiusM: HEADER.equatorial_radius_m });
+  const STILL = aBody({ rotation: null, radiusM: HEADER.equatorial_radius_m });
+
+  /** Distances from the centre either side of the reach's two limits, m, along a fixed axis. */
+  const DISTANCES_M = [
+    0,
+    0.25,
+    0.999_999,
+    1,
+    1.000_001,
+    2,
+    1.738e6,
+    2e7,
+    MAX_SIGHT_M * (1 - 1e-9),
+    MAX_SIGHT_M,
+    MAX_SIGHT_M * (1 + 1e-9),
+    3 * MAX_SIGHT_M,
+  ];
+  const DIRECTION = scale(vec3(0.6, -0.48, 0.64), 1 / norm(vec3(0.6, -0.48, 0.64)));
+
+  it("gives a cause exactly where lineOfSightOf forms no sight, over a grid of poses", () => {
+    const disagree = [TURNING, STILL].flatMap((body) =>
+      DISTANCES_M.flatMap((distanceM) => {
+        const pose = poseAt(scale(DIRECTION, distanceM));
+        const scene = aViewScene({ bodies: [body] });
+        const formed = lineOfSightOf(pose, scene, body, HEADER) !== null;
+        const gap = sightGapOf(pose, scene, body);
+        return formed === (gap === null) ? [] : [`${String(distanceM)} m: ${String(gap)}`];
+      }),
+    );
+    expect(disagree).toEqual([]);
+  });
+
+  it("names the body's rotation first, at every distance", () => {
+    const scene = aViewScene({ bodies: [STILL] });
+    const gaps = DISTANCES_M.map((distanceM) =>
+      sightGapOf(poseAt(scale(DIRECTION, distanceM)), scene, STILL),
+    );
+    expect(new Set(gaps)).toEqual(new Set(["rotation"]));
+  });
+
+  it.each<readonly [SightGap | null, string, number]>([
+    ["centre", "at the body's centre", 0],
+    ["centre", "0.25 m from it", 0.25],
+    ["centre", "just inside 1 m of it", 0.999_999],
+    [null, "just past 1 m from it", 1.000_001],
+    [null, "20,000 km from it", 2e7],
+    [null, "just inside 10¹² m of it", MAX_SIGHT_M * (1 - 1e-9)],
+    ["far", "just past 10¹² m from it", MAX_SIGHT_M * (1 + 1e-9)],
+    ["far", "three times 10¹² m from it", 3 * MAX_SIGHT_M],
+  ])("gives %s for a camera %s", (gap, _, distanceM) => {
+    const scene = aViewScene({ bodies: [TURNING] });
+    expect(sightGapOf(poseAt(scale(DIRECTION, distanceM)), scene, TURNING)).toBe(gap);
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY])(
+    "throws on a camera at a distance that is not finite, %d m, naming it",
+    (distanceM) => {
+      const scene = aViewScene({ bodies: [TURNING] });
+      expect(() => sightGapOf(poseAt(vec3(distanceM, 0, 0)), scene, TURNING)).toThrow(
+        /distance from .* centre is not finite/u,
+      );
+    },
+  );
 });

@@ -7,6 +7,9 @@ import type { FieldFailure, FieldStatus } from "../../view/terrain/coarseFieldSt
 import { CoverageView } from "../../view/terrain/coverage";
 import {
   NO_READOUT_UNITS,
+  type SightGap,
+  sightGapLine,
+  tallestTerrainLines,
   type TerrainLabelInput,
   terrainLabelModel,
 } from "../../view/terrain/readouts";
@@ -154,4 +157,30 @@ describe("the lower plate's terrain parts (R10.T12; decision-r10-view-block-room
   it("gives no parts where the view states no terrain lines", () => {
     expect(terrainLowerParts(null)).toEqual([]);
   });
+
+  it.each<SightGap>(["rotation", "far", "centre"])(
+    "gives the readout part where no line of sight forms (%s), reckoned at the full readout's tallest form (R10.T12.a)",
+    (gap) => {
+      const parts = terrainLowerParts(linesOf({ sightGap: gap }));
+      const readout = parts.find((part) => part.kind === "readout");
+      if (readout === undefined || readout.kind === "state") {
+        throw new Error("no readout part was made");
+      }
+      const asItStands = render(<>{readout.node}</>);
+      const tallest = render(<>{readout.tallest}</>);
+      expect({
+        kinds: parts.map((part) => part.kind),
+        reads: asItStands.container.textContent,
+        tallest: within(tallest.container)
+          .getAllByRole("term")
+          .map((term) => term.textContent),
+      }).toEqual({
+        kinds: ["survey", "datum", "readout"],
+        reads: `GROUND AT LINE OF SIGHT${sightGapLine(gap)}`,
+        tallest: tallestTerrainLines(moonLikeHeader(FIXTURE_MOON), 1).readout.flatMap((line) =>
+          line.kind === "reading" ? [line.label] : [],
+        ),
+      });
+    },
+  );
 });
