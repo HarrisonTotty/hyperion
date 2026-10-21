@@ -1575,14 +1575,24 @@ body {
 
 /*
  * A page too short to stack them (the orchestrator's rulings 134.9 and 149.1, at 1280 x 720): the
- * preset views across the page; the chart, with the camera's angles and keys and what the chart is
- * asked for in a column beside it; then, across the page, the chart's frame, centre, time and
- * scale, the census line and its toggle, the census's hint, and the legend, which is on show in
- * every state.
+ * preset views across the page; the chart, with the camera's angles and keys on one row and what
+ * the chart is asked for in a column beside it; then, across the page, the chart's frame, centre,
+ * time and scale, the census line and its toggle, the census's hint, and the legend, which is on
+ * show in every state.
  * Shown, the census table takes the place of the query controls in the column, which keeps one
  * width, the table's, so that nothing but the two moves when the toggle is pressed. The spatial
  * view, its row of controls and the census are no boxes of their own here, so that their parts take
  * the page's grid; the parts keep their order, and so the tab order, of the stacked page.
+ *
+ * The column must end above the stage's foot, or its last rows are drawn over the furniture. Plan
+ * 12's mode row (P12.T11) made it 2rem taller, and observed mode puts the observer in the furniture
+ * and two entries in the legend under the stage. So the angles and keys share a row, the column's
+ * choices drop their bottom margin, the link's reason stands beside QUERY RADIUS, the readings sit
+ * closer so that `UT` ends the first furniture line and the observer takes the line `UT` left, and
+ * the legend runs on as one text (look-72's ruling). Measured hidden at 1280 x 720, 100%: in `NOW`
+ * the stage is 258 px tall and the column ends 26 px above its foot; in `OBSERVED` the stage is
+ * 240 px, ruling 134.9's 15rem, and the column ends 8 px above its foot. A refused entry's line in
+ * `OBSERVED` still overruns it, by 14 px, recorded for a later task.
  */
 .local-chart--compact {
   /*
@@ -1605,14 +1615,13 @@ body {
     "note    note"
     "presets presets"
     "stage   angles"
-    "stage   keys"
     "stage   controls"
     "furn    furn"
     "census  census"
     "hint    hint"
     "legend  legend";
   grid-template-columns: minmax(0, 1fr) max(24rem, var(--census-table-width));
-  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto auto auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto auto auto auto;
   gap: 0 1rem;
 }
 
@@ -1631,13 +1640,20 @@ body {
   margin-bottom: 0.25rem;
 }
 
+/*
+ * The camera's angles at the start of the column's first row and its keys at the end, in their
+ * order: `AZM 030° ELV +30°` and `ARROWS ROTATE +/- ZOOM Z FIT` measure 174 px and 323 px of the
+ * column's 526 at 1280 x 720, in rem and ch, so they share the row at every scale.
+ */
 .local-chart--compact .spatial-view__angles {
   grid-area: angles;
+  justify-self: start;
   margin-bottom: 0.25rem;
 }
 
 .local-chart--compact .spatial-view__keys {
-  grid-area: keys;
+  grid-area: angles;
+  justify-self: end;
   margin-bottom: 0.25rem;
 }
 
@@ -1657,9 +1673,19 @@ body {
   display: inline;
 }
 
+/*
+ * 0.75rem apart, so that `UT` ends the first line after the frame and the centre's fixed slots (it
+ * reaches 823 px of the page's 831 at 1280 x 720, where 1rem wrapped it), and observed mode's
+ * `MODE OBSERVED FROM` and the observer take its line rather than add one.
+ */
 .local-chart--compact .spatial-view__readings > .spatial-reading {
   display: inline-flex;
-  margin-right: 1.25rem;
+  margin-right: 0.75rem;
+}
+
+.local-chart--compact .spatial-view__observer {
+  gap: 0 0.75rem;
+  margin-left: 0.75rem;
 }
 
 .local-chart--compact .spatial-view__furniture > .scale-bar {
@@ -1673,6 +1699,20 @@ body {
   min-height: 0;
 }
 
+/* The fields carry no bottom margin, and here neither do the choices, MIN MASS and STARS. */
+.local-chart--compact .chart-controls > .form-choice {
+  margin-bottom: 0;
+}
+
+/*
+ * The link's reason, while it holds the controls back, beside QUERY RADIUS, which leaves it some
+ * 274 px of the column, rather than on a row of its own that the column has no room for.
+ */
+.local-chart--compact .chart-controls > .panel__inhibit {
+  flex-basis: auto;
+  align-self: center;
+}
+
 /* The mass floors' legend over its seven steps, so that they take one line of the column. */
 .local-chart--compact .chart-controls__floors > legend {
   float: none;
@@ -1684,9 +1724,10 @@ body {
   display: none;
 }
 
+/* No margin above: its toggle's 2rem target already leaves room about its text. */
 .local-chart--compact .census-readout__row {
   grid-area: census;
-  margin-top: 0.25rem;
+  margin-top: 0;
 }
 
 .local-chart--compact .census-readout__hint {
@@ -1729,9 +1770,40 @@ body {
   letter-spacing: 0.1em;
 }
 
+/*
+ * The legend runs on as one text, as the furniture does, its lines 1.125rem apart, the furniture's
+ * own, which hold its 1rem marks (the bracket's 1.5rem line stands taller): six lines in both modes
+ * at 1280 x 720. Each entry stays whole but one of several kinds (the circle's, the ringed
+ * circle's), which breaks only after a comma, never after its mark, each kind kept whole.
+ */
 .local-chart--compact > .symbol-legend {
+  display: block;
   grid-area: legend;
-  margin-top: 0.25rem;
+  margin-top: 0;
+  line-height: 1.125rem;
+}
+
+.local-chart--compact .symbol-legend__item {
+  margin-right: 1rem;
+  vertical-align: top;
+}
+
+.local-chart--compact .symbol-legend__item--kinds {
+  display: inline;
+  white-space: nowrap;
+}
+
+.local-chart--compact .symbol-legend__kinds {
+  white-space: normal;
+}
+
+.local-chart--compact .symbol-legend__item--kinds > .symbol-legend__mark {
+  margin-right: 0.25rem;
+  vertical-align: top;
+}
+
+.local-chart--compact .symbol-legend__kind {
+  white-space: nowrap;
 }
 
 /*
