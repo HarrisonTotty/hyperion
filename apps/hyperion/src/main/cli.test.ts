@@ -219,6 +219,27 @@ describe("the descent spike's options", () => {
     });
   });
 
+  it("measures the terrain world's sizes with --sizes on", () => {
+    expect(
+      parse(["--descent-spike", "--world", "terrain-test", "--smoke", "--sizes", "on"]).spike,
+    ).toMatchObject({ world: "terrain-test", sizes: "on" });
+  });
+
+  it.each([[[]], [["--sizes", "off"]]] as const)(
+    "holds no sizes in the launch with %j, so that it is as before the option",
+    (sizes) => {
+      expect(
+        parse(["--descent-spike", "--world", "terrain-test", "--smoke", ...sizes]).spike,
+      ).not.toHaveProperty("sizes");
+    },
+  );
+
+  it("takes --sizes off over the test planet, which measures nothing", () => {
+    const { spike } = parse(["--descent-spike", "--sizes", "off"]);
+    expect(spike).toMatchObject({ world: "test-planet" });
+    expect(spike).not.toHaveProperty("sizes");
+  });
+
   it.each([
     [[], "photorealistic"],
     [["--style", "photorealistic"], "photorealistic"],
@@ -245,6 +266,8 @@ describe("the descent spike's options", () => {
       "--vertex-path does not fit",
     ],
     [["--world", "terrain-test", "--normals", "mesh"], "--normals does not fit"],
+    [["--sizes", "on"], "--sizes on is an option of --world terrain-test"],
+    [["--world", "test-planet", "--sizes", "on"], "the terrain session's caches"],
   ])("refuses %j on its world", (args, reason) => {
     const error = refusal(["--descent-spike", ...args]);
     expect(error.exitCode).toBe(1);
@@ -265,6 +288,7 @@ describe("the descent spike's options", () => {
     ["--trace-profile", "yes"],
     ["--world", "earth"],
     ["--style", "lit"],
+    ["--sizes", "yes"],
   ])("refuses %s %s", (name, value) => {
     expect(refusal(["--descent-spike", name, value]).exitCode).toBe(1);
   });
@@ -294,6 +318,7 @@ describe("the descent spike's options", () => {
     ["--trace-profile", "on"],
     ["--world", "terrain-test"],
     ["--style", "wireframe"],
+    ["--sizes", "on"],
   ])("refuses %s without --descent-spike", (...option) => {
     const error = refusal(option);
     expect(error.exitCode).toBe(1);
@@ -355,6 +380,7 @@ describe("the several-views check's options", () => {
     ["--capture", "/data/capture"],
     ["--world", "terrain-test"],
     ["--style", "wireframe"],
+    ["--sizes", "on"],
   ])("refuses the spike's %s", (...option) => {
     const error = refusal(["--views-check", ...option]);
     expect(error.exitCode).toBe(1);

@@ -3530,6 +3530,13 @@ RESOLUTION       410 m
   machine's RTX 3080 and, by the owner, on the UHD 620. Acceptance: the figures recorded and the
   constants updated, with `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`
   passing.
+  _Ruled (decision-r10-t14b-measure, 2026-10-21): sized on the as-built selection's measured
+  peaks (the boxes), counted once a second of script time by unbudgeted re-selections of the
+  pass's own inputs, all-round by a horizon-only view, the forced region once; the A/B's
+  diagnostic occluder counted in the same flight; the second view the spike's craft instrument
+  as a session view; no views-check run, since TERRAIN TEST's track is a body-fixed function of
+  script time and its clock reaches selection through nothing; eviction in place of rebakes
+  deferred; the constants set by a second ruling on the figures._
 - **R10.T14.d The hand-over's compile stall** (new, decision-r10-t14a §1, from
   decision-r10-t16-leans §2; amended by decision-r10-t14d-stall, 2026-10-20). A hand-over stopped
   the page for 1,317 ms with no animation frame on low, a defect under the guide's Motion rule that

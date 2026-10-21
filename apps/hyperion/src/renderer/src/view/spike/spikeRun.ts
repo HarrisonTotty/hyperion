@@ -19,12 +19,20 @@
  * (`spikeSessionView.ts`), stepped as `VIEW`'s primary steps it, and there is no atmosphere: the
  * body is airless. Its terrain work, the `terrain.frame` span, is the session's step; the session's
  * passes record no `terrain.select` spans. The instruments are the same on either world.
+ *
+ * Under `--sizes on` over a generated world (plan R10, R10.T14.b; decision-r10-t14b-measure §4;
+ * {@link SpikeSizesRun}) the craft instrument is a second session view instead, at its chase pose
+ * under `instrumentViewId(1)`, reporting as an instrument: noted with the session after the main
+ * view and before the step, and drawn after the main view, in the style `secondViewStyle` gives.
+ * The measured sizes are told the frame's moment before the step and read the passes after the
+ * draws. The orbit instrument stays R02's.
  */
 
 import type { BodyIdHex } from "@hyperion/protocol";
 
 import { PHOTOREAL_NOT_CREATED } from "../../displays/view/styleRefusals";
 import { browserHeightWorker, stepTerrainSession } from "../../displays/view/useTerrainSession";
+import { presentedViewport } from "../../displays/view/viewFrameDrawer";
 import type { ViewRun } from "../../displays/view/viewRun";
 import type { Vec3 } from "../../geometry/vec3";
 import type { ElementSize } from "../../lib/useElementSize";
@@ -109,6 +117,13 @@ import {
   TEST_PLANET_FIGURE,
 } from "./spikeScene";
 import { SpikeSessionView, type SpikeViewSession } from "./spikeSessionView";
+import {
+  SECOND_VIEW_ID,
+  type SpikeSizes,
+  type SpikeSizesFrame,
+  type SpikeSizesSession,
+  touchedDown,
+} from "./spikeSizes";
 import { type SpikeWorld, TEST_PLANET_WORLD } from "./spikeWorld";
 import type { SurfaceQuery, SurfaceQueryWorker } from "./surfaceQuery";
 import { defaultHeightWorkers, HeightWorkerPool } from "../terrain/workers/pool";
@@ -387,6 +402,12 @@ export interface SpikeFrameInput {
    * drawer draws nothing.
    */
   readonly mainStage?: ElementSize;
+  /**
+   * The craft instrument's stage as laid out, which the second view presents its frames at under
+   * `--sizes on` (R10.T14.b); R02's craft instrument takes `sizes.craft` and ignores it. Absent, the
+   * second view draws nothing.
+   */
+  readonly craftStage?: ElementSize;
 }
 
 /**
@@ -479,6 +500,25 @@ export interface SpikeBodyOptions {
   readonly world: SpikeWorld;
   readonly session: SpikeTerrainSession;
   readonly style: RenderStyle;
+  /** The measured sizes (`--sizes on`, R10.T14.b); absent, the run is T14.c's, bit for bit. */
+  readonly sizes?: SpikeSizesRun;
+}
+
+/**
+ * The measured sizes' part in a run over a generated world (plan R10, R10.T14.b): the measurement,
+ * and the run's session as it reads it, the same object as {@link SpikeBodyOptions.session}.
+ */
+export interface SpikeSizesRun {
+  readonly measure: SpikeSizes;
+  readonly session: SpikeSizesSession;
+}
+
+/** The second view of a `--sizes on` run (§4): the craft instrument as a session view. */
+interface SecondView {
+  readonly view: SpikeSessionView;
+  /** The style asked of it (`secondViewStyle`). */
+  readonly style: RenderStyle;
+  readonly sizes: SpikeSizesRun;
 }
 
 /** The test planet's main view: R05's terrain pass, its lit view and its atmosphere, sunlit. */
@@ -503,6 +543,8 @@ interface BodyMain {
   readonly passes: PassFollower;
   /** The instruments' EV100: the spike's fixed day exposure's. */
   readonly ev100: number;
+  /** The second view under `--sizes on`, or `null`. */
+  readonly second: SecondView | null;
 }
 
 /**
@@ -633,6 +675,14 @@ function passContact(scene: ViewScene, body: BodyIdHex, pass: SpikeTerrainPass |
   return sceneContacts(scene, seen, ground, finestPatchSizeM(pass.planet)).length > 0;
 }
 
+/**
+ * Whether a session view drawing in `style` is refused it: the photorealistic style, whose
+ * pipelines could not be made.
+ */
+function styleRefused(view: SpikeSessionView, style: RenderStyle): boolean {
+  return style === "photorealistic" && view.photorealStatus === "failed";
+}
+
 /** The spike's drawing, on one engine, into its three views. */
 export class SpikeRun {
   readonly #prepared: PreparedDescent;
@@ -648,7 +698,13 @@ export class SpikeRun {
   };
   /** The main view's own: the test planet's lit view, or `VIEW`'s drawer over a generated world. */
   readonly #main: TestPlanetMain | BodyMain;
-  readonly #instruments: Readonly<Record<"orbit" | "craft", WireframeRenderer>>;
+  /** R02's instruments; the craft's `null` where the second view draws on its canvas. */
+  readonly #instruments: {
+    readonly orbit: WireframeRenderer;
+    readonly craft: WireframeRenderer | null;
+  };
+  /** Whether the craft's first contact has been told to the measured sizes. */
+  #contacted = false;
   #startMs: number | null = null;
   #segment: { readonly name: string; readonly startMs: number } | null = null;
   /** Whether the script has reached its end, whose last segment's span is then closed. */
@@ -685,21 +741,24 @@ export class SpikeRun {
     this.#listeners = listeners;
     // What is made is released again, in reverse, if a later part cannot be made.
     const undo: (() => void)[] = [];
-    // The main view's release: its own, until a drawer that disposes of it with itself is made.
+    // The main view's and the craft's releases: their own, until a drawer that disposes of the view
+    // with itself is made.
     const mainRelease = { current: (): void => undefined };
+    const craftRelease = { current: (): void => undefined };
     try {
       const view = (key: keyof typeof SPIKE_VIEW_NAMES): RenderView => {
         const made = engine.createView(canvases[key], SPIKE_VIEW_NAMES[key]);
         const release = (): void => {
           made.dispose();
         };
-        if (key === "main") {
-          mainRelease.current = release;
-          undo.push(() => {
-            mainRelease.current();
-          });
-        } else {
+        if (key === "orbit") {
           undo.push(release);
+        } else {
+          const held = key === "main" ? mainRelease : craftRelease;
+          held.current = release;
+          undo.push(() => {
+            held.current();
+          });
         }
         return made;
       };
@@ -711,13 +770,22 @@ export class SpikeRun {
         mainRelease.current = () => {
           main.view.dispose();
         };
-        this.#main = main;
+        const sizes = body.sizes;
+        const second =
+          sizes === undefined ? null : SpikeRun.#secondView(engine, this.#views.craft, sizes);
+        if (second !== null) {
+          craftRelease.current = () => {
+            second.view.dispose();
+          };
+        }
+        this.#main = { ...main, second };
       }
       const orbit = new WireframeRenderer(engine);
       undo.push(() => {
         orbit.dispose();
       });
-      this.#instruments = { orbit, craft: new WireframeRenderer(engine) };
+      const drawsCraft = this.#main.kind === "body" && this.#main.second !== null;
+      this.#instruments = { orbit, craft: drawsCraft ? null : new WireframeRenderer(engine) };
     } catch (error: unknown) {
       for (const release of undo.toReversed()) {
         release();
@@ -790,7 +858,7 @@ export class SpikeRun {
     body: SpikeBodyOptions,
     setting: QualitySetting,
     listeners: SpikeListeners,
-  ): BodyMain {
+  ): Omit<BodyMain, "second"> {
     const view = new SpikeSessionView(engine, mainView, {
       id: SPIKE_MAIN_VIEW_ID,
       name: SPIKE_VIEW_NAMES.main,
@@ -808,6 +876,26 @@ export class SpikeRun {
       passes: new PassFollower(listeners),
       ev100: controlEv100(spikeExposure()),
     };
+  }
+
+  /**
+   * The second view of a `--sizes on` run (R10.T14.b; decision-r10-t14b-measure §4): `VIEW`'s
+   * frame drawer on the craft instrument's view, which disposes of the view with itself, reporting
+   * to the session as an instrument does (the `secondary` streaming priority, weight 0.25) under
+   * `instrumentViewId(1)`, with no readout body: it is a measurement view, with no readout.
+   */
+  static #secondView(
+    engine: RenderEngine,
+    craftView: RenderView,
+    sizes: SpikeSizesRun,
+  ): SecondView {
+    const view = new SpikeSessionView(engine, craftView, {
+      id: SECOND_VIEW_ID,
+      name: SPIKE_VIEW_NAMES.craft,
+      streamPriority: "secondary",
+      readoutBody: null,
+    });
+    return { view, style: sizes.measure.secondStyle, sizes };
   }
 
   /**
@@ -958,6 +1046,13 @@ export class SpikeRun {
    * session, the session stepped once under its guard (the frame's terrain work), and the main view
    * drawn by `VIEW`'s drawer; then the instruments, as over the test planet. The terrain's reading,
    * the contact and the metrics' sample are the session's pass's in the style drawn.
+   *
+   * Under `--sizes on` the second view is noted after the main view, the measured sizes are told
+   * the frame's moment before the step, with whether its pose has reached the ground
+   * (`touchedDown`), the second view draws after the main view in place of R02's craft instrument,
+   * and the measured sizes read the passes after the draws, with the craft's first contact by the
+   * session's rule. The pass read is then the one of the main view's asked style, not of the style
+   * it drew in, which while its photorealistic pipelines compile is the second view's wireframe.
    */
   #bodyFrame(input: SpikeFrameInput, main: BodyMain): SpikeFrame {
     const started = performance.now();
@@ -965,10 +1060,10 @@ export class SpikeRun {
     const startMs = this.#startMs ?? input.nowMs;
     this.#startMs = startMs;
     const { profile } = this.#prepared;
-    const { world, session } = main;
+    const { world, session, second } = main;
     const tS = Math.min(Math.max((input.nowMs - startMs) / 1000, 0), profile.durationS);
-    // The drawer sizes the main view itself, from its stage.
-    this.#resize(input.sizes, ["orbit", "craft"]);
+    // The drawers size their views themselves, from their stages.
+    this.#resize(input.sizes, second === null ? ["orbit", "craft"] : ["orbit"]);
     const pose = profile.poseAt(tS);
     this.#segmentSpan(tS < profile.durationS ? pose.segment : null, input.nowMs);
     const camera = spikeCameraAt(profile, tS, world);
@@ -980,7 +1075,10 @@ export class SpikeRun {
       scene,
       camera: { ...cameras.main, style: main.style },
     };
-    if (main.style === "photorealistic" && main.view.photorealStatus === "failed") {
+    if (
+      styleRefused(main.view, main.style) ||
+      (second !== null && styleRefused(second.view, second.style))
+    ) {
       // The style's refusal is the run's end, which its holder states; nothing more is drawn.
       return {
         tS,
@@ -1006,16 +1104,75 @@ export class SpikeRun {
     });
     // What it draws now, in the style it last drew in (S8), for the step below.
     main.view.note(session, inputs);
+    const secondInputs =
+      second === null
+        ? null
+        : second.view.inputs(session, {
+            run: {
+              source: { kind: "kept", kept: this.#kept },
+              tS,
+              scene,
+              camera: { ...cameras.craft, style: second.style },
+            },
+            stage: input.craftStage ?? null,
+            tokens: input.tokens,
+            selection: input.selection,
+            setting: main.setting,
+            nowMs: input.nowMs,
+          });
+    if (second !== null && secondInputs !== null) {
+      second.view.note(session, secondInputs);
+    }
+    const sizesFrame: SpikeSizesFrame | null =
+      second === null
+        ? null
+        : {
+            session: second.sizes.session,
+            body: world.body,
+            nowMs: input.nowMs,
+            tS,
+            pose,
+            underWay: tS < profile.durationS,
+            touchedDown: touchedDown(profile, pose),
+            mainViewport: input.mainStage === undefined ? null : presentedViewport(input.mainStage),
+            secondViewport:
+              input.craftStage === undefined ? null : presentedViewport(input.craftStage),
+          };
+    if (second !== null && sizesFrame !== null) {
+      second.sizes.measure.beforeStep(sizesFrame);
+    }
     const terrainStart = performance.now();
     // Guarded: no throw of the step stops the run, and one that lasts faults the terrain.
     stepTerrainSession(session, main.guard, input.nowMs);
     performance.measure(TERRAIN_FRAME_MEASURE, { start: terrainStart, end: performance.now() });
     const drawn = main.view.draw(inputs);
     const drawnStyle = main.view.drawnStyle;
-    this.#drawInstruments(input, scene, cameras, main.ev100);
+    if (second !== null && secondInputs !== null) {
+      second.view.draw(secondInputs);
+    }
+    this.#drawInstruments(
+      input,
+      scene,
+      cameras,
+      main.ev100,
+      second === null ? ["orbit", "craft"] : ["orbit"],
+    );
+    // Under `--sizes on` the main view's asked style's pass: on low's photorealistic run the main
+    // view draws the wireframe while its pipelines compile, and that pass is then the second view's.
+    const followed = second === null ? drawnStyle : main.style;
     const pass =
-      drawnStyle === "photorealistic" ? session.pass(world.body) : session.wirePass(world.body);
+      followed === "photorealistic" ? session.pass(world.body) : session.wirePass(world.body);
     main.passes.follow(pass);
+    // The measured sizes read the passes within the frame's span, so that their cost is its own.
+    let sizedContact: boolean | null = null;
+    if (second !== null && sizesFrame !== null) {
+      second.sizes.measure.afterStep(sizesFrame);
+      sizedContact = passContact(scene, world.body, pass);
+      if (sizedContact && !this.#contacted) {
+        this.#contacted = true;
+        second.sizes.measure.markContact();
+      }
+    }
     const step = pass?.lastStep ?? null;
     const annunciation = drawn?.terrain ?? null;
     const terrain: SpikeTerrainReading = {
@@ -1043,9 +1200,15 @@ export class SpikeRun {
     return {
       tS,
       pose,
-      contact: passContact(scene, world.body, pass),
+      contact: sizedContact ?? passContact(scene, world.body, pass),
       scene,
-      cameras: { ...cameras, main: run.camera },
+      cameras: {
+        ...cameras,
+        main: run.camera,
+        // The second view's camera in the style it drew in, as its label block and name read it.
+        craft:
+          second === null ? cameras.craft : { ...cameras.craft, style: second.view.drawnStyle },
+      },
       terrain,
       ev100: main.ev100,
       drawnStyle,
@@ -1055,14 +1218,22 @@ export class SpikeRun {
     };
   }
 
-  /** Draws the two instruments' wireframes of `scene` from `cameras` at `ev100`. */
+  /**
+   * Draws R02's instruments' wireframes of `scene` from `cameras` at `ev100`: `keys`', both unless
+   * the second view draws on the craft's canvas.
+   */
   #drawInstruments(
     input: SpikeFrameInput,
     scene: ViewScene,
     cameras: Readonly<Record<keyof typeof SPIKE_VIEW_NAMES, CameraState>>,
     ev100: number,
+    keys: ReadonlyArray<"orbit" | "craft"> = ["orbit", "craft"],
   ): void {
-    for (const key of ["orbit", "craft"] as const) {
+    for (const key of keys) {
+      const renderer = this.#instruments[key];
+      if (renderer === null) {
+        continue;
+      }
       const size = input.sizes[key];
       const drawCamera = { pose: cameras[key].pose, fovXRad: INSTRUMENT_FOV_X_RAD };
       // The orbit instrument draws the craft as a target, its mark at a fixed size: as the own
@@ -1081,7 +1252,7 @@ export class SpikeRun {
         remPx: input.remPx,
         ...input.strokes,
       });
-      this.#instruments[key].render(this.#views[key], list, drawCamera, size);
+      renderer.render(this.#views[key], list, drawCamera, size);
     }
   }
 
@@ -1096,7 +1267,8 @@ export class SpikeRun {
   /**
    * Disposes the passes and the views; the engine frees the GPU objects with itself. Over a
    * generated world, the drawer with the main view, which the session forgets; the session itself
-   * is its holder's.
+   * is its holder's. Under `--sizes on`, the second view's drawer with the craft's view, which the
+   * session forgets too, and the measured sizes stop observing the passes, keeping their counts.
    */
   dispose(): void {
     if (this.#lastNowMs !== null) {
@@ -1112,13 +1284,18 @@ export class SpikeRun {
       case "body":
         main.passes.dispose();
         main.view.dispose();
+        main.second?.view.dispose();
+        main.second?.sizes.measure.detach();
         break;
     }
     this.#instruments.orbit.dispose();
-    this.#instruments.craft.dispose();
+    this.#instruments.craft?.dispose();
     for (const key of ["main", "orbit", "craft"] as const) {
-      // The drawer has disposed of the main view with itself.
-      if (key !== "main" || main.kind === "test-planet") {
+      // A drawer has disposed of its view with itself: the main view's over a generated world, and
+      // the craft's under `--sizes on`.
+      const drawn =
+        main.kind === "body" && (key === "main" || (key === "craft" && main.second !== null));
+      if (!drawn) {
         this.#views[key].dispose();
       }
     }

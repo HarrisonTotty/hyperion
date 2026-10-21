@@ -9,7 +9,9 @@
 # --out <dir>, --workers <n>, --vertex-path baked-offsets|face-differences, --normals double|mesh,
 # --ridged on|off, --dawn-safety on|off, --capture <dir>, --trace-profile on|off (V8's CPU profiler
 # and `gpu` in the trace, off by default: a profiled run is a diagnostic, never judged; R05.T14.e),
-# --world test-planet|terrain-test and --style photorealistic|wireframe (R10.T14.c).
+# --world test-planet|terrain-test and --style photorealistic|wireframe (R10.T14.c), and
+# --sizes on|off (R10.T14.b: the terrain world's cache sizes measured, off by default; refused on
+# the test planet).
 #
 # --world test-planet, the default, flies R05's test planet. --world terrain-test flies TERRAIN
 # TEST's moon over a generated world's terrain: its field is served in the page by TERRAIN TEST's

@@ -19,6 +19,11 @@
  * before, so that the balance is the same, but counts against no budget and is left out of the
  * result. Without a lookup, and with one that calls every patch surveyed, the selection is R05's,
  * bit for bit.
+ *
+ * Two options are for counting alone, by R10.T14.b's measurement harness, and are never set by the
+ * terrain pass: an all-round view, culled by its horizon alone ({@link ViewSelectionInput.allRound}),
+ * and a diagnostic occluder's height ({@link SelectionInput.occluderHeightM}). With neither, the
+ * selection is as above, bit for bit.
  */
 
 import type { Quaternion } from "../camera/pose";
@@ -33,7 +38,7 @@ import {
   unpackPatchBounds,
 } from "./bounds";
 import { vertexSpacing } from "./cube";
-import { frustumOf, horizonCone } from "./cull";
+import { type Frustum, frustumOf, horizonCone } from "./cull";
 import {
   type CellOut,
   childKeys,
@@ -213,6 +218,21 @@ export interface ViewSelectionInput {
    * are the view's own whatever the margin.
    */
   readonly frustumMarginRad?: number;
+  /**
+   * Whether the view culls by its horizon alone, with no frustum (plan R10, R10.T14.b; R10 Design
+   * note 15's all-round count): it sees every patch above its horizon over a full turn of the
+   * camera. Absent or `false`, its frustum culls too, as before, bit for bit.
+   *
+   * @remarks
+   * For counting only, by R10.T14.b's measurement harness, in its unbudgeted re-selections of the
+   * terrain pass's own inputs: never set by the terrain pass, and never given for a selection that
+   * is drawn or demanded. The view has no side planes and no near plane, so
+   * {@link ViewSelectionInput.frustumMarginRad} is ignored. Its horizon, its error and refinement
+   * (ρ by distance, floored at the near plane's distance as ever), its weight and its tolerance are
+   * the view's own, and its bit in `SelectedPatch.views` marks the patches above its horizon. A
+   * camera at or below the occluder's radius has no horizon test, so such a view sees every patch.
+   */
+  readonly allRound?: boolean;
 }
 
 /** Everything selection reads. */
@@ -244,7 +264,31 @@ export interface SelectionInput {
    * Selection stays a pure function of its inputs: the lookup is one of them.
    */
   readonly survey?: SurveyLookup;
+  /**
+   * A diagnostic horizon occluder's height above the datum, metres, finite and above minus the
+   * spheroid's polar radius c (plan R10, R10.T14.b's A/B; decision-r09-t8d-reach §5): the sampled
+   * extreme depth, in place of `lowestHeightM` in every view's horizon, whose occluder is then the
+   * sphere of radius c + `occluderHeightM`. Absent, each view's horizon is `horizonCone`'s, bit for
+   * bit, as it is given `lowestHeightM(planet)` itself.
+   *
+   * @remarks
+   * For counting only, by R10.T14.b's measurement harness: never set by the terrain pass, never
+   * shipped and never drawn. Only the horizon's sphere moves, for every view and wherever selection
+   * tests the horizon (the patches' visibility and the demand's priorities). The boxes, built from
+   * the level table's subtree ranges and the baked ranges, and the level table itself are
+   * untouched, as are the frustums, the error and the forced region. While a camera is above both,
+   * a higher occluder (shallower ground) culls at least as much as a deeper one. An occluder above
+   * the lowest ground makes the horizon test no longer conservative: that looseness is what the A/B
+   * prices.
+   */
+  readonly occluderHeightM?: number;
 }
+
+/**
+ * The frustum of an all-round view ({@link ViewSelectionInput.allRound}): no planes, so that its
+ * horizon alone culls.
+ */
+const ALL_ROUND: Frustum = { planes: [] };
 
 /**
  * The screen-space error ρ, pixels, of an error `boundM` metres at `distanceM` metres in `view`:
@@ -999,7 +1043,8 @@ class CandidateHeap {
  * split's weighted excess as `limitExcess`. Forced splits are never refused, and a forced region is
  * selected whether or not a view sees it.
  *
- * @throws RangeError for more than {@link MAX_SELECTION_VIEWS} views.
+ * @throws RangeError for more than {@link MAX_SELECTION_VIEWS} views, or for an
+ *   `occluderHeightM` that is not finite or puts the occluder's radius at or below 0.
  */
 export function selectPatches(input: SelectionInput): Selection {
   const { planet } = input;
@@ -1008,6 +1053,7 @@ export function selectPatches(input: SelectionInput): Selection {
       `selection takes at most ${MAX_SELECTION_VIEWS} views, got ${input.views.length}`,
     );
   }
+  const occluderRadiusM = diagnosticOccluderRadiusM(planet, input.occluderHeightM);
   const tables = tablesOf(planet);
   const memo = tables.memo;
   if (memo.cells > memo.limit) {
@@ -1019,12 +1065,14 @@ export function selectPatches(input: SelectionInput): Selection {
     views: input.views.map((v) => ({
       input: v,
       geometry: viewGeometry(
-        frustumOf(
-          { orientation: v.camera.orientation, fovXRad: v.fovXRad, viewport: v.viewport },
-          v.frustumMarginRad ?? 0,
-        ),
+        v.allRound === true
+          ? ALL_ROUND
+          : frustumOf(
+              { orientation: v.camera.orientation, fovXRad: v.fovXRad, viewport: v.viewport },
+              v.frustumMarginRad ?? 0,
+            ),
         v.camera.positionM,
-        horizonCone(planet, v.camera.positionM).occluderRadiusM,
+        occluderRadiusM ?? horizonCone(planet, v.camera.positionM).occluderRadiusM,
         v.viewport.widthPx / (2 * Math.tan(v.fovXRad / 2) * v.tauPx),
       ),
     })),
@@ -1113,6 +1161,30 @@ export function selectPatches(input: SelectionInput): Selection {
     nearestSurveyM: Math.min(Number.POSITIVE_INFINITY, ...nearestSurveyByView),
     nearestSurveyByViewM: nearestSurveyByView,
   };
+}
+
+/**
+ * The radius, metres, of the diagnostic occluder at `heightM` above the datum
+ * ({@link SelectionInput.occluderHeightM}): `horizonCone`'s c + h with `heightM` for h, the same
+ * sum in the same order, so that `lowestHeightM(planet)` gives its radius bit for bit; `null` with
+ * no height given.
+ *
+ * @throws RangeError for a height that is not finite or puts the radius at or below 0.
+ */
+function diagnosticOccluderRadiusM(
+  planet: PlanetGeometry,
+  heightM: number | undefined,
+): number | null {
+  if (heightM === undefined) {
+    return null;
+  }
+  const radiusM = planet.figure.polarRadiusM + heightM;
+  if (!(Number.isFinite(heightM) && radiusM > 0)) {
+    throw new RangeError(
+      `selection's occluderHeightM must be finite and above minus the polar radius, got ${heightM}`,
+    );
+  }
+  return radiusM;
 }
 
 /**

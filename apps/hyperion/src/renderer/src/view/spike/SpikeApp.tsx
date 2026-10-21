@@ -1,14 +1,23 @@
 import { useEffect, useState } from "react";
 
 import type { GraphicsApi, SpikeApi } from "../../../../preload/api";
+import type { ViewEngineSource } from "../../displays/view/useViewEngine";
 import { GraphicsStatusProvider } from "../engine/GraphicsStatusProvider";
 import { navigatorGpu } from "../engine/status";
 import type { TerrainVariant } from "../quality/qualitySetting";
+import type { MeasureDescent } from "./bodyDescent";
 import { GpuCapture } from "./capture";
 import { DescentSpike, MAIN_CANVAS_SELECTOR } from "./DescentSpike";
 import { SpikeController, variantOf } from "./spikeController";
 import { SPIKE_PASS_ROWS, spikeGpu } from "./spikeHarness";
-import { defaultSpikeWorkers, type SpikeListeners, type SpikeWorkers } from "./spikeRun";
+import {
+  defaultSpikeWorkers,
+  SPIKE_MAIN_VIEW_ID,
+  SPIKE_VIEW_NAMES,
+  type SpikeListeners,
+  type SpikeWorkers,
+} from "./spikeRun";
+import { SpikeSizes } from "./spikeSizes";
 
 /** Props of {@link SpikeApp}. */
 export interface SpikeAppProps {
@@ -18,6 +27,13 @@ export interface SpikeAppProps {
   readonly graphics: GraphicsApi;
   /** The spike's workers: the browser's by default, fakes in a test. */
   readonly spikeWorkers?: SpikeWorkers | undefined;
+  /**
+   * Makes the engine on the adapter the spike's measured source found: R01's WebGPU engine on the
+   * measured device by default (`spikeGpu`), a fake engine in a test. Read at the first render.
+   */
+  readonly loadEngine?: ViewEngineSource["load"] | undefined;
+  /** How the terrain world's descent is measured (`DescentSpike`'s `measure`): a fake in a test. */
+  readonly measure?: MeasureDescent | undefined;
 }
 
 /** The run's measured engine, its control and its listeners, made once. */
@@ -27,11 +43,24 @@ interface Harness {
   readonly controller: SpikeController;
   readonly listeners: SpikeListeners;
   readonly variant: TerrainVariant;
+  /** The measured sizes of `--sizes on` over the terrain world (R10.T14.b), or `null`. */
+  readonly sizes: SpikeSizes | null;
 }
 
-function makeHarness(spike: SpikeApi): Harness {
+function makeHarness(spike: SpikeApi, loadEngine: ViewEngineSource["load"] | undefined): Harness {
   const { launch } = spike;
   const clock = { scriptTimeS: 0 };
+  // The command line refuses `--sizes on` over the test planet; the measurement is the terrain
+  // session's.
+  const sizes =
+    launch.sizes === "on" && launch.world === "terrain-test"
+      ? new SpikeSizes({
+          setting: launch.setting,
+          style: launch.style ?? "photorealistic",
+          mainViewId: SPIKE_MAIN_VIEW_ID,
+          secondViewName: SPIKE_VIEW_NAMES.craft,
+        })
+      : null;
   const capture =
     launch.capture === null
       ? null
@@ -53,14 +82,17 @@ function makeHarness(spike: SpikeApi): Harness {
     log: (message, error) => {
       console.error(`descent spike: ${message}`, error);
     },
+    ...(sizes === null ? {} : { sizes }),
   });
-  const load = gpu.source.load;
+  const load = loadEngine ?? gpu.source.load;
   return {
+    sizes,
     gpu: {
       ...gpu,
       source: {
         requestAdapter: async () => {
           const outcome = await gpu.source.requestAdapter();
+          sizes?.noteAdapter(outcome);
           if (outcome.kind !== "adapter") {
             controller.fail(`no GPU adapter (${outcome.kind})`);
           }
@@ -70,6 +102,7 @@ function makeHarness(spike: SpikeApi): Harness {
           try {
             const engine = await load(outcome, status);
             controller.engine(engine);
+            sizes?.noteDevice(engine.capabilities);
             return engine;
           } catch (error: unknown) {
             controller.fail("the engine could not be made", error);
@@ -111,9 +144,16 @@ function makeHarness(spike: SpikeApi): Harness {
  * measured engine, with T14.a's metrics fed from its listeners, the main process measuring
  * between the descent's start and end, and the run ended with its results file or, for `--smoke`,
  * its status.
+ *
+ * @remarks
+ * With `--sizes on` over the terrain world (plan R10, R10.T14.b) it makes the measured sizes
+ * (`SpikeSizes`) once and hands them to `DescentSpike`, which starts the session's height workers
+ * on their bake clock; the adapter's and the device's storage-binding limits are noted as the
+ * engine is made, and the report's `sizes` block is taken at the run's end.
  */
-export function SpikeApp({ spike, graphics, spikeWorkers }: SpikeAppProps) {
-  const [harness] = useState(() => makeHarness(spike));
+export function SpikeApp({ spike, graphics, spikeWorkers, loadEngine, measure }: SpikeAppProps) {
+  // Made once, with the engine's loader given at the first render: the run's is its launch's.
+  const [harness] = useState(() => makeHarness(spike, loadEngine));
   const { launch } = spike;
   // A launch that can have no view asks for no adapter (`useViewEngine`), so nothing else would
   // end its run: the safe mode and a renderer without WebGPU end it as failed at once.
@@ -139,7 +179,9 @@ export function SpikeApp({ spike, graphics, spikeWorkers }: SpikeAppProps) {
         style={launch.style ?? undefined}
         engineSource={harness.gpu.source}
         spikeWorkers={spikeWorkers}
+        measure={measure}
         listeners={harness.listeners}
+        sizes={harness.sizes ?? undefined}
       />
     </GraphicsStatusProvider>
   );

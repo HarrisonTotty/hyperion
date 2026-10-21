@@ -13,6 +13,9 @@ import {
   windowFile,
   windowTrace,
 } from "./fixtures/traces";
+import { parseClientArgs } from "./cli";
+import { type SizesFixtureOptions, sizesReportOf } from "./fixtures/sizesReport";
+import { SIZES_BLOCK_BUDGET_BYTES } from "./sizesResults";
 import type { GpuClockSample } from "./gpuClocks";
 import type { Measured } from "./measured";
 import { type TraceFigures, TraceReducer } from "./reduceTrace";
@@ -43,6 +46,7 @@ import {
   RESULTS_SCHEMA,
   RESULTS_VERSION,
   row,
+  runOptionsOf,
   type ResultsFiles,
   type RunDescription,
   sampleMemory,
@@ -1393,6 +1397,159 @@ describe("a results file's world and style (R10.T14.c)", () => {
       ].map((each) => validateResults({ ...parsed, run: each })),
     ).toEqual([[refusal], [refusal], [refusal]]);
     expect(worldOfRun({ ...run, style: "lit" })).toBeNull();
+  });
+});
+
+describe("a results file's measured sizes (R10.T14.b)", () => {
+  /** A `--sizes on` run's results over the terrain world, `sizes` its report's block. */
+  function sizedResults(
+    sizes: NonNullable<DescentSpikeReport["sizes"]> = sizesReportOf(),
+    memory: ReadonlyArray<MemorySample> = MEMORY,
+  ): DescentResults {
+    return buildResults({
+      run: runOf({
+        world: "terrain-test",
+        style: "photorealistic",
+        options: { setting: "low", seed: "18446744073709551615", workers: 3, sizes: "on" },
+      }),
+      report: reportOf({ sizes }),
+      trace: traceOf(),
+      memory,
+      load: measured([
+        { tS: 0, oneMinute: 0.52 },
+        { tS: 60, oneMinute: 0.61 },
+      ]),
+    });
+  }
+
+  it("writes the report's block with the load and the driver's figures, and checks it", () => {
+    const results = sizedResults();
+    const parsed: unknown = JSON.parse(JSON.stringify(results));
+    expect(results.sizes?.load.value).toEqual([
+      { tS: 0, oneMinute: 0.52 },
+      { tS: 60, oneMinute: 0.61 },
+    ]);
+    // The device's peak, 700 MiB, less the 168 MiB baseline.
+    expect(results.sizes?.driver.peakLessBaselineBytes).toEqual(measured(532 * MIB));
+    expect(results.sizes?.driver.endDeviceBytes).toEqual(measured(650 * MIB));
+    expect(validateResults(parsed)).toEqual([]);
+  });
+
+  it("writes no block for any other run, whose file reads as before", () => {
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    expect("sizes" in results).toBe(false);
+    expect(summaryMarkdown(results)).not.toContain("## Sizes");
+    expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
+  });
+
+  it("refuses a file whose block is malformed", () => {
+    const parsed = fieldsOf(JSON.parse(JSON.stringify(sizedResults())));
+    const sizes = fieldsOf(parsed["sizes"]);
+    expect(
+      validateResults({ ...parsed, sizes: { ...sizes, readouts: { publishes: 1 } } }),
+    ).toContain("sizes.readouts.intervalMs is missing");
+    const { driver: _driver, ...noDriver } = sizes;
+    expect(validateResults({ ...parsed, sizes: noDriver })).toContain(
+      "sizes.driver is not an object",
+    );
+  });
+
+  it("states the option on the summary's launch line, and summarises the block in its own section", () => {
+    const summary = summaryMarkdown(sizedResults());
+    expect(summary).toContain("world terrain-test, style photorealistic, sizes on, window");
+    expect(summary).toContain("## Sizes (R10.T14.b)");
+    expect(summary).toContain("### The lit cache: spike (photorealistic, weight 1)");
+  });
+
+  /** The CLI's launch over the terrain world with `sizes`' arguments, and its run's results. */
+  function launchedWith(sizes: ReadonlyArray<string>): {
+    readonly options: RunDescription["options"];
+    readonly summary: string;
+  } {
+    const launch = parseClientArgs(
+      ["--descent-spike", "--world", "terrain-test", "--setting", "low", ...sizes],
+      "0.1.0",
+    ).spike;
+    if (launch === undefined) {
+      throw new Error("the command line gave a spike launch");
+    }
+    const options = runOptionsOf(launch);
+    const results = buildResults({
+      run: runOf({ world: "terrain-test", style: "photorealistic", options }),
+      report: reportOf(),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    return { options, summary: summaryMarkdown(results) };
+  }
+
+  it.each([[[]], [["--sizes", "off"]]])(
+    "records an unmeasured launch's options and launch line as before the option, with %j",
+    (sizes) => {
+      const { options, summary } = launchedWith(sizes);
+      const launchLine = summary.split("\n").find((line) => line.startsWith("- **Launch:**"));
+      expect(["sizes" in options, launchLine?.includes("sizes")]).toEqual([false, false]);
+    },
+  );
+
+  it("records a measured launch's sizes in its options and its launch line", () => {
+    const { options, summary } = launchedWith(["--sizes", "on"]);
+    const launchLine = summary.split("\n").find((line) => line.startsWith("- **Launch:**"));
+    expect([options["sizes"], launchLine?.includes(", sizes on, ")]).toEqual(["on", true]);
+  });
+
+  /** The bytes `sizes` adds to a 1,230-second run's results file once Prettier formats it. */
+  async function blockBytes(passes: SizesFixtureOptions["passes"]): Promise<{
+    readonly block: number;
+    readonly file: number;
+  }> {
+    const results = sizedResults(sizesReportOf({ samples: 1230, passes }), longRun(1230));
+    const { sizes: _sizes, ...without } = results;
+    const text = `${JSON.stringify(results, null, 2)}\n`;
+    const formatted = await prettier(text);
+    // The writer's own measure of it, which warns of a file over the limit, agrees.
+    expect(formatAsPrettier(text)).toBe(formatted);
+    const file = Buffer.byteLength(formatted, "utf8");
+    const bare = Buffer.byteLength(await prettier(`${JSON.stringify(without, null, 2)}\n`), "utf8");
+    return { block: file - bare, file };
+  }
+
+  it.each([
+    [
+      "two passes of one view each, low's photorealistic run",
+      [
+        { cache: "lit", views: 1 },
+        { cache: "wireframe", views: 1 },
+      ],
+    ],
+    [
+      "one pass of two views and its stand-in, high's photorealistic run",
+      [
+        { cache: "lit", views: 2 },
+        { cache: "wireframe", views: 0 },
+      ],
+    ],
+  ] as const)(
+    "keeps a 1,230-second run's block within its budget once Prettier formats it, with %s",
+    async (_, passes) => {
+      // 241.6 kB with two passes, the worst case, and 235.1 kB with one of two views and its
+      // stand-in (2026-10-21): each view's five count columns are most of a pass's.
+      expect((await blockBytes(passes)).block).toBeLessThan(SIZES_BLOCK_BUDGET_BYTES);
+    },
+  );
+
+  it("keeps the worst case's whole file under the repository's added-file limit", async () => {
+    // 357.5 kB here, its run's own part 115.9 kB against some 150–165 kB for a terrain run's.
+    const { file } = await blockBytes([
+      { cache: "lit", views: 1 },
+      { cache: "wireframe", views: 1 },
+    ]);
+    expect(file).toBeLessThan(ADDED_FILE_LIMIT_BYTES);
   });
 });
 

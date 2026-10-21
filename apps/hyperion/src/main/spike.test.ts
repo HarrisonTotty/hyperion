@@ -26,6 +26,7 @@ import {
   type TraceWindowStop,
   traceSettingsOf,
 } from "./spike";
+import { sizesReportOf } from "./fixtures/sizesReport";
 import { smallReport } from "./fixtures/spikeReport";
 
 const PLATFORMS: ReadonlyArray<NodeJS.Platform> = ["linux", "win32", "darwin"];
@@ -530,5 +531,23 @@ describe("the spike's IPC handlers", () => {
     expect(deps.rendererMemory).toHaveBeenCalledWith(4096);
     expect(deps.writeResults).toHaveBeenCalledWith(smallReport());
     expect(deps.end).toHaveBeenCalledWith(1, "no bake");
+  });
+
+  it("writes the results without a malformed sizes block, handing the block on with its problems (R10.T14.b)", async () => {
+    const { call, deps } = setUp();
+    const sizes = sizesReportOf();
+    const block = { ...sizes, readouts: { ...sizes.readouts, publishes: -1 } };
+    await call(SPIKE_CHANNELS.writeResults, OWN, { ...smallReport(), sizes: block });
+    expect(deps.writeResults).toHaveBeenCalledExactlyOnceWith(smallReport(), {
+      block,
+      problems: ["sizes.readouts.publishes is not a whole count"],
+    });
+  });
+
+  it("hands a well-formed sizes block on within the report", async () => {
+    const { call, deps } = setUp();
+    const report = { ...smallReport(), sizes: sizesReportOf() };
+    await call(SPIKE_CHANNELS.writeResults, OWN, report);
+    expect(deps.writeResults).toHaveBeenCalledExactlyOnceWith(report);
   });
 });

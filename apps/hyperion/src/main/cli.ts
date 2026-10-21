@@ -30,6 +30,13 @@
  * `--normals` with the terrain world, whose session's passes take the setting's own terrain, until
  * a later task gives them the variants.
  *
+ * `--sizes on|off` measures the terrain caches' sizes (plan R10, R10.T14.b;
+ * decision-r10-t14b-measure), off by default: over the terrain world, a second view, each pass
+ * counted, the height workers' bakes timed and `VIEW`'s readout asked at 4 Hz, the results file
+ * gaining a `sizes` block. `--sizes on` is refused with the test planet, as `--style` is: the
+ * measurement is the terrain session's. Off, the launch holds no `sizes` at all, so that the run's
+ * options and its results file are as they were before the option.
+ *
  * `--views-check` runs the several-views check in the consoles' `VIEW` (plan R07, T20), with the
  * spike's `--setting`, `--smoke` and `--out`; the spike's other options are refused with it, and
  * so is `--descent-spike`. With `--terrain` (plan R10, R10.T16.d; decision-r10-t16-contracts §6)
@@ -92,6 +99,7 @@ const SPIKE_OPTIONS = [
   "traceProfile",
   "world",
   "style",
+  "sizes",
 ] as const;
 
 /** The spike's options that `--views-check` takes too. */
@@ -244,6 +252,12 @@ export function buildCommand(version: string): Command {
         "the style the terrain world's main view draws in (default photorealistic)",
       ).choices(["photorealistic", "wireframe"]),
     )
+    .addOption(
+      new Option("--sizes <ON>", "measure the terrain world's cache sizes (default off)").choices([
+        "on",
+        "off",
+      ]),
+    )
     .exitOverride();
 }
 
@@ -310,9 +324,9 @@ function settingOf(options: Readonly<Record<string, unknown>>): QualitySettingNa
 }
 
 /**
- * Why the spike's options cannot fly together on their world (R10.T14.c), or `null` where they
- * can: `--style` with the test planet, `--ridged on` with the terrain world, or the terrain
- * variants with it.
+ * Why the spike's options cannot fly together on their world (R10.T14.c, R10.T14.b), or `null`
+ * where they can: `--style` or `--sizes on` with the test planet, `--ridged on` with the terrain
+ * world, or the terrain variants with it.
  */
 function worldRefusal(
   options: Readonly<Record<string, unknown>>,
@@ -322,9 +336,11 @@ function worldRefusal(
   switch (spike.world) {
     case "test-planet":
       refusal =
-        options["style"] === undefined
-          ? null
-          : "--style is an option of --world terrain-test: the test planet's main view is the spike's own lit view, SPIKE LIT";
+        options["style"] !== undefined
+          ? "--style is an option of --world terrain-test: the test planet's main view is the spike's own lit view, SPIKE LIT"
+          : spike.sizes === "on"
+            ? "--sizes on is an option of --world terrain-test: the measured sizes are the terrain session's caches"
+            : null;
       break;
     case "terrain-test": {
       const variant = spike.vertexPath !== null ? "--vertex-path" : "--normals";
@@ -387,6 +403,8 @@ function spikeLaunchOf(options: Readonly<Record<string, unknown>>): SpikeLaunch 
         : text("style") === "wireframe"
           ? "wireframe"
           : "photorealistic",
+    // Absent when off, so that an unmeasured launch's options, and its results file's, are as before.
+    ...(text("sizes") === "on" ? { sizes: "on" as const } : {}),
   };
 }
 

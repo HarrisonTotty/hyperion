@@ -21,7 +21,12 @@ import {
   LIST_SWITCHES,
   mergeSwitchValue,
 } from "./graphics/switches";
-import { readDescentSpikeReport, readSpikeCapture, type SpikeCaptureFiles } from "./spikeReport";
+import {
+  type RejectedSizes,
+  readSpikeCapture,
+  readSpikeReport,
+  type SpikeCaptureFiles,
+} from "./spikeReport";
 import type { TraceFormat, TraceSettings } from "./traceWindows";
 
 /** Whether Dawn's safety checks stay on for a spike run (`--dawn-safety`, T13.c). */
@@ -392,9 +397,14 @@ export interface SpikeHandlerDeps<E = IpcMainInvokeEvent> {
   readonly rendererMemory: (bytes: number) => void;
   /**
    * Builds and writes the results file from a checked report, or, for a smoke, checks the trace's
-   * windows against it and writes nothing.
+   * windows against it and writes nothing; with `rejectedSizes`, the report's `sizes` block that
+   * its check refused (R10.T14.b), left out of `report`, whose problems are logged and which is
+   * written beside the results.
    */
-  readonly writeResults: (report: DescentSpikeReport) => Promise<SpikeResultsAnswer>;
+  readonly writeResults: (
+    report: DescentSpikeReport,
+    rejectedSizes?: RejectedSizes,
+  ) => Promise<SpikeResultsAnswer>;
   /** Writes a checked capture, returning its directory. */
   readonly writeCapture: (capture: SpikeCaptureFiles) => Promise<string>;
   /** Ends the run with an exit status, and a reason for a failure. */
@@ -443,11 +453,16 @@ export function registerSpikeHandlers<E>(deps: SpikeHandlerDeps<E>): void {
     deps.rendererMemory(bytes);
   });
   guarded(SPIKE_CHANNELS.writeResults, async ([value]) => {
-    const report = readDescentSpikeReport(value);
-    if (report === null) {
+    const reading = readSpikeReport(value);
+    if (reading === null) {
       throw new SpikeCallRefused(`${SPIKE_CHANNELS.writeResults} refused: not a spike report`);
     }
-    return deps.writeResults(report);
+    // A malformed `sizes` block (R10.T14.b) alone loses the run nothing: the results go without it,
+    // and it goes beside them with its problems.
+    const { report, rejectedSizes } = reading;
+    return rejectedSizes === null
+      ? deps.writeResults(report)
+      : deps.writeResults(report, rejectedSizes);
   });
   guarded(SPIKE_CHANNELS.writeCapture, async ([value]) => {
     const capture = readSpikeCapture(value);

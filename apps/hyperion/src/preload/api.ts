@@ -85,6 +85,14 @@ export interface SpikeLaunch {
    * own lit view (`SPIKE LIT`).
    */
   readonly style: SpikeStyleName | null;
+  /**
+   * `on` where the run measures the terrain caches' sizes (`--sizes on`, plan R10, R10.T14.b;
+   * decision-r10-t14b-measure): over the terrain world, a second view, the counting of each pass,
+   * the bake clock and the 4 Hz readout, with a `sizes` block in the report. Refused over the test
+   * planet. Absent is off, the default, so that an unmeasured launch, and the options its results
+   * file records, are as they were before the option.
+   */
+  readonly sizes?: "on";
 }
 
 /** Where a spike run's results file and its summary were written. */
@@ -270,6 +278,540 @@ export interface SpikeTraceWindow {
 }
 
 /**
+ * A figure of the measured sizes (plan R10, R10.T14.b): a value, or `null` with the reason it is
+ * missing, the results file's own `Measured` form.
+ */
+export type SpikeFigure<T> =
+  { readonly value: T; readonly reason: null } | { readonly value: null; readonly reason: string };
+
+/** Which terrain cache a pass is: the lit one (photorealistic views) or the wireframe's. */
+export type SpikeSizesCache = "lit" | "wireframe";
+
+/** Where in the script a sample or a peak fell. */
+export interface SpikeSizesMoment {
+  /** Script time, s. */
+  readonly scriptTimeS: number;
+  /** The segment under way, or `null` past the script's end. */
+  readonly segment: string | null;
+  /**
+   * The main view's camera above the ground, m: the craft's own pose, which the main view's
+   * selection sees, above the floor of the stretch under way (`DescentPose.heightAboveFloorM`, the
+   * highest ground the measurement found under the stretch), so at most its height above the
+   * ground beneath it; `null` where none is known.
+   */
+  readonly heightAboveGroundM: number | null;
+}
+
+/** A count's peak over the run: the most patches at a sample, and the first sample it fell at. */
+export interface SpikeSizesPeak {
+  /** Patches; 0 where no sample counted it. */
+  readonly patches: number;
+  /** `null` where no sample counted it. */
+  readonly at: SpikeSizesMoment | null;
+}
+
+/** One count's peaks: each described view's, and the union's (the leaves any view sees). */
+export interface SpikeSizesCountPeaks {
+  readonly views: ReadonlyArray<SpikeSizesPeak>;
+  readonly union: SpikeSizesPeak;
+}
+
+/** The forced region's peak, counted once, and how many of it some view saw then. */
+export interface SpikeSizesForcedPeak {
+  readonly patches: number;
+  readonly at: SpikeSizesMoment | null;
+  readonly seen: number;
+}
+
+/** A share's peak over the run, 0 to 1, and where it fell; `null` where no sample gave one. */
+export interface SpikeSizesShare {
+  readonly share: number | null;
+  readonly at: SpikeSizesMoment | null;
+}
+
+/** A sizing figure in slots (unrounded, as `cacheBudget.ts`' rules give them) and bytes (whole slots). */
+export interface SpikeSizesRuleFigure {
+  readonly slots: number;
+  readonly bytes: number;
+}
+
+/**
+ * The sizing rule's four forms (decision-r10-t14b-measure §2): the ruled Σ_views max(1.3 AR_peak,
+ * 3 F_peak) + forced, (a) its largest same-sample value, (b) the union form, (c) the frustum rule.
+ */
+export interface SpikeSizesRule {
+  readonly ruled: SpikeSizesRuleFigure;
+  readonly sameSample: SpikeSizesRuleFigure;
+  readonly union: SpikeSizesRuleFigure;
+  readonly frustum: SpikeSizesRuleFigure;
+}
+
+/**
+ * The diagnostic occluder's price on a view or the union (§5), in the rule's slots: each term's
+ * difference at the peaks as the rule weighs it, and its share of the sized all-round peak.
+ */
+export interface SpikeSizesPriceTerm {
+  /** AR_peak − AR′_peak, patches. */
+  readonly allRoundPatches: number;
+  /** F_peak − F′_peak, patches. */
+  readonly frustumPatches: number;
+  /** The all-round term's price, 1.3 (AR_peak − AR′_peak), slots. */
+  readonly allRoundSlots: number;
+  /** The frustum term's price, 3 (F_peak − F′_peak), slots. */
+  readonly frustumSlots: number;
+  /**
+   * Each slots ÷ the sized all-round peak, the ruled sum's all-round term Σ_views 1.3 AR_peak
+   * ({@link SpikeSizesPrice.sizedAllRoundSlots}), so that a view's all-round share is
+   * (AR − AR′) ÷ AR_peak where it is the only view; `null` where that peak is 0.
+   */
+  readonly allRoundShare: number | null;
+  readonly frustumShare: number | null;
+}
+
+/** The A/B's price (§5), over the samples that made both the plain and the diagnostic counts. */
+export interface SpikeSizesPrice {
+  readonly views: ReadonlyArray<SpikeSizesPriceTerm>;
+  readonly union: SpikeSizesPriceTerm;
+  /** The sized all-round peak, the ruled sum's all-round term Σ_views 1.3 AR_peak, slots. */
+  readonly sizedAllRoundSlots: number;
+  /** The rule's own difference, the ruled figure less its diagnostic one (rule − rule′), slots. */
+  readonly ruledSlots: number;
+  /**
+   * That ÷ the sized all-round peak; `null` at 0. The reading §5's 10% test takes: over 0.1 is a
+   * finding for main.
+   */
+  readonly ruledShare: number | null;
+}
+
+/** One level's bound ratio k_n = ε_n P₀ ÷ e_n (T14.a's k₀). */
+export interface SpikeSizesBoundRatio {
+  readonly level: number;
+  /** ε_n, m. */
+  readonly boundM: number;
+  /** ε_n plus the chord's sagitta, the error selection charges, m. */
+  readonly chargedM: number;
+  /** e_n, the level's mean patch edge, m. */
+  readonly edgeM: number;
+  readonly ratio: number;
+  readonly chargedRatio: number;
+}
+
+/** The bound ratios of one level table the pass selected over. */
+export interface SpikeSizesBoundTable {
+  /** The table's number, from 0 in the order the pass met them. */
+  readonly version: number;
+  /** The script time of its first selection, s. */
+  readonly firstSeenS: number;
+  readonly levels: ReadonlyArray<SpikeSizesBoundRatio>;
+}
+
+/** One level's box heights: the frustum count's seen leaves' extents along their normals, m. */
+export interface SpikeSizesBoxHeights {
+  readonly level: number;
+  readonly maxM: number;
+  /** The median at F∪'s peak sample, or `null` where none of the level was seen there. */
+  readonly medianAtFrustumPeakM: number | null;
+}
+
+/** A moment of the forced region's residency: when, and the pass's forced patches then. */
+export interface SpikeSizesForcedMark {
+  /** Script time, s. */
+  readonly atS: number;
+  /** The forced patches of the pass's last selection, and those of them resident. */
+  readonly forced: number;
+  readonly forcedResident: number;
+}
+
+/** The forced region's lead before contact and its residency at contact (T14.c's finding 3). */
+export interface SpikeSizesContact {
+  /** The pass's first selection holding a forced patch, script s, or `null`. */
+  readonly firstForcedS: number | null;
+  /** The first sample whose forced patches were every one resident, script s, or `null`. */
+  readonly allResidentS: number | null;
+  /** Whether every later sample's were all resident too; `null` where no sample's ever were. */
+  readonly allResidentHeld: boolean | null;
+  /**
+   * Touchdown: the first frame whose pose had reached the ground, its camera down to its rest over
+   * the site (`touchedDown`), with the forced patches then; `null` where the run ended before it.
+   */
+  readonly touchdown: SpikeSizesForcedMark | null;
+  /** The forced region's lead before contact, touchdown − all resident, s; `null` where either is. */
+  readonly leadS: number | null;
+  /**
+   * The contact by the session's rule: the first frame whose pass's selection held a contact
+   * (`passContact`), which fires in the step that first selects the forced patches.
+   */
+  readonly sessionContact: SpikeSizesForcedMark | null;
+}
+
+/** The 50th and 95th percentiles (nearest rank) and the largest of some times, ms; `null` with none. */
+export interface SpikeSizesSpread {
+  readonly p50: number | null;
+  readonly p95: number | null;
+  readonly max: number | null;
+}
+
+/** A figure's mean and largest over a segment's frames. */
+export interface SpikeSizesMeanMax {
+  readonly mean: number;
+  readonly max: number;
+}
+
+/** One of a pass's described views: the cache's views in its style (§4's table). */
+export interface SpikeSizesView {
+  /** Its ID in the terrain session: the main view's `spike`, the second view's `instrument-1`. */
+  readonly id: string;
+  readonly style: SpikeStyleName;
+  /** Its streaming weight, by which it is matched in the pass's selection input: 1 or 0.25. */
+  readonly weight: number;
+}
+
+/**
+ * One whole-number column of a pass's 1 Hz samples, in the results' memory-series form: a reading
+ * a sample, -1 within one of the gaps, each gap a stretch of samples with its reason.
+ */
+export interface SpikeSizesColumn {
+  readonly samples: ReadonlyArray<number>;
+  readonly gaps: ReadonlyArray<{
+    /** The first sample's index, and the last's, inclusive. */
+    readonly from: number;
+    readonly to: number;
+    readonly reason: string;
+  }>;
+}
+
+/** The five counts at each sample (§2): F, F₀, AR, F′ and AR′, patches. */
+export interface SpikeSizesCountColumns {
+  readonly frustum: SpikeSizesColumn;
+  readonly frustumNoMargin: SpikeSizesColumn;
+  readonly allRound: SpikeSizesColumn;
+  readonly frustumDiagnostic: SpikeSizesColumn;
+  readonly allRoundDiagnostic: SpikeSizesColumn;
+}
+
+/**
+ * A pass's samples, once a second of script time, in column form: one entry a sample in each.
+ *
+ * @remarks
+ * The columns are those the record reads at 1 Hz: the moment, each view's five counts, the forced
+ * region and its residency, the slots in use and §3's shares' numerators. The pass's own counts
+ * beside them (its selection, its budget, its resident patches and its pins) are kept by segment
+ * instead ({@link SpikeSizesPass.logged}), and the seconds and the segments are written compactly,
+ * so that the block stays within its budget, `SIZES_BLOCK_BUDGET_BYTES` formatted, on the longest
+ * run.
+ */
+export interface SpikeSizesSeries {
+  /**
+   * The whole second of script time each sample was the first selection in, s, compactly: from
+   * `first`, one a second but for the `skipped` seconds, which no selection fell in, so that
+   * sample i is the i-th second from `first` that is not skipped.
+   */
+  readonly seconds: { readonly first: number; readonly skipped: ReadonlyArray<number> };
+  /**
+   * Each sample's segment, compactly, as runs of samples: each run's segment, its index in
+   * {@link SpikeSizesReport.segments} or -1 past the script's end, from the run's first sample's
+   * index to the next run's.
+   */
+  readonly segmentRuns: ReadonlyArray<{ readonly segment: number; readonly from: number }>;
+  /** {@link SpikeSizesMoment.heightAboveGroundM} at each sample, whole m. */
+  readonly heightAboveGroundM: ReadonlyArray<number | null>;
+  /** Per described view, in the pass's `views` order. */
+  readonly views: ReadonlyArray<SpikeSizesCountColumns>;
+  /**
+   * The unions; `null` for a pass of one described view, whose own columns stand for them except
+   * at the samples {@link SpikeSizesSeries.unionDiffers} counts, where a view it does not describe
+   * (the main view's wireframe stand-in) was in its input too. Left out so that the file stays
+   * within the repository's added-file limit.
+   */
+  readonly union: SpikeSizesCountColumns | null;
+  /** Samples at which a union count differed from the one described view's; 0 with the unions given. */
+  readonly unionDiffers: number;
+  /** The forced leaves, seen or not. */
+  readonly forced: ReadonlyArray<number>;
+  /**
+   * The pass's own selection's forced patches resident: the same patches as the counts' forced
+   * leaves, since selection never refuses a forced split.
+   */
+  readonly forcedResident: SpikeSizesColumn;
+  /** |AR∪ ∩ resident|, §3's resident share's numerator over AR∪. */
+  readonly allRoundResident: SpikeSizesColumn;
+  /** |AR∪ ∩ every key the pass has selected so far|, the swept share's numerator. */
+  readonly allRoundSwept: ReadonlyArray<number>;
+  /** The cache's slots in use, as the last retain left them. */
+  readonly usedSlots: SpikeSizesColumn;
+}
+
+/**
+ * A pass's own counts in one segment, each at its largest over the segment's samples (§2, "Logged
+ * beside"), which the samples' columns leave out.
+ */
+export interface SpikeSizesLoggedSegment {
+  readonly segment: string | null;
+  readonly samples: number;
+  /** The pass's own budgeted selection's patches, and the samples whose budget limited it. */
+  readonly selectedMax: number;
+  readonly limitedSamples: number;
+  /** Its selected patches resident; `null` where its input held no ranges. */
+  readonly selectedResidentMax: number | null;
+  /**
+   * The cache's slots in use and its pins, forced and drawn outside the forced region, as the last
+   * retain set them; `null` where the pass's ranges were no patch cache.
+   */
+  readonly usedSlotsMax: number | null;
+  readonly pinnedForcedMax: number | null;
+  readonly pinnedDrawnMax: number | null;
+}
+
+/** A pass's streaming in one segment, from its last step after each frame's step (§6(d), §6(e)). */
+export interface SpikeSizesStreaming {
+  readonly segment: string | null;
+  /** Frames read: those with a last step. */
+  readonly frames: number;
+  /** Patches drawn, standing in (drawn by a coarser resident ancestor) and missing. */
+  readonly drawn: SpikeSizesMeanMax;
+  readonly standingIn: SpikeSizesMeanMax;
+  readonly missing: SpikeSizesMeanMax;
+  /** Standing in ÷ selected, 0 to 1, over the frames with a selection. */
+  readonly standInShare: SpikeSizesMeanMax;
+  /** Frames whose selection the budget limited. */
+  readonly limitedFrames: number;
+  /** Patches the pass made resident, and a second over the segment's frames' script time. */
+  readonly residents: number;
+  readonly residentsPerS: number | null;
+}
+
+/** Bakes posted and answered at the workers, and their times (`BakeClock`). */
+export interface SpikeSizesBakeTimes {
+  readonly posted: number;
+  readonly baked: number;
+  readonly failed: number;
+  readonly unsurveyed: number;
+  /** Post to reply, ms. */
+  readonly postToReplyMs: SpikeSizesSpread;
+  /** The estimated worker time, reply − max(post, the worker's previous reply), ms. */
+  readonly computeMs: SpikeSizesSpread;
+}
+
+/** The flight's bakes, or a segment's, with their rate and the residents. */
+export interface SpikeSizesBakeWindow extends SpikeSizesBakeTimes {
+  readonly residents: number;
+  /** Baked − residents (§6(c)): below 0 where earlier bakes became resident in it. */
+  readonly bakedNeverResident: number;
+  readonly spanMs: number;
+  readonly bakesPerSecond: number | null;
+}
+
+/** One segment's figures beside the passes': the workers' bakes, and the profile's ground speed. */
+export interface SpikeSizesSegment {
+  readonly segment: string | null;
+  readonly bakes: SpikeSizesBakeWindow;
+  /** The ground speed ÷ the height above the floor over the segment's frames, s⁻¹. */
+  readonly groundSpeedPerHeight: SpikeSizesMeanMax | null;
+}
+
+/** A count of messages of one kind. */
+export interface SpikeSizesMessageCount {
+  readonly kind: string;
+  readonly count: number;
+}
+
+/** The bake clock's figures at the spike's worker boundary (§6(c)). */
+export interface SpikeSizesBakes {
+  /** The workers wrapped, restarts included. */
+  readonly workersMade: number;
+  readonly total: SpikeSizesBakeWindow;
+  readonly byWorker: ReadonlyArray<SpikeSizesBakeTimes & { readonly worker: number }>;
+  readonly requests: ReadonlyArray<SpikeSizesMessageCount>;
+  readonly replies: ReadonlyArray<SpikeSizesMessageCount>;
+  readonly inFlight: number;
+  readonly abandoned: number;
+}
+
+/** A pass's counted sizes over the run (§2, §3, §5), with its streaming and its samples. */
+export interface SpikeSizesPass {
+  readonly cache: SpikeSizesCache;
+  /** Its described views, the cache's style's; another view in its input counts in the unions. */
+  readonly views: ReadonlyArray<SpikeSizesView>;
+  /**
+   * "stand-in only, not sized" and why, for a pass with no described view: one that only stood
+   * in, as the wireframe pass a high photorealistic run's views draw while their pipelines
+   * compile. It is no sized cache: its rule's figures are `null` and its samples are left out of
+   * the file. `null` for a sized pass.
+   */
+  readonly notSized: string | null;
+  /** B, the first pass's of the cache. */
+  readonly bytesPerSlot: number;
+  readonly slots: number | null;
+  /**
+   * The times its counter was attached to the session's pass of the cache: one, or more where the
+   * session made the pass anew, or let it go and took it again.
+   */
+  readonly attachments: number;
+  readonly samples: number;
+  readonly failedSamples: number;
+  readonly firstFailure: string | null;
+  readonly counts: {
+    readonly frustum: SpikeSizesCountPeaks;
+    readonly frustumNoMargin: SpikeSizesCountPeaks;
+    readonly allRound: SpikeSizesCountPeaks;
+    readonly frustumDiagnostic: SpikeSizesCountPeaks;
+    readonly allRoundDiagnostic: SpikeSizesCountPeaks;
+  };
+  readonly forced: SpikeSizesForcedPeak;
+  readonly residentShare: SpikeSizesShare;
+  readonly sweptShare: SpikeSizesShare;
+  /** Whether the resident share reached 100% at some sample (§3's criterion). */
+  readonly allRoundEverResident: boolean;
+  /** Slots ÷ |AR∪| at AR∪'s peak. */
+  readonly capAtAllRoundPeak: number | null;
+  /** The deepest diagnostic occluder the primed counts used, m above the datum. */
+  readonly deepestOccluderM: SpikeFigure<number>;
+  /** The as-built occluder, `lowestHeightM` of the pass's last level table, m above the datum. */
+  readonly asBuiltOccluderM: number;
+  readonly boundRatios: ReadonlyArray<SpikeSizesBoundTable>;
+  readonly boxHeights: ReadonlyArray<SpikeSizesBoxHeights>;
+  /** The five counts' CPU time a sample, ms. */
+  readonly countingMs: SpikeSizesSpread;
+  /** The rule's forms on the plain counts; `null` for a pass {@link SpikeSizesPass.notSized}. */
+  readonly rule: SpikeSizesRule | null;
+  /** The same on the diagnostic counts; `null` where none was made, or the pass is not sized. */
+  readonly ruleDiagnostic: SpikeSizesRule | null;
+  readonly occluderPrice: SpikeSizesPrice | null;
+  readonly contact: SpikeSizesContact;
+  readonly streaming: ReadonlyArray<SpikeSizesStreaming>;
+  /** The pass's own counts by segment, in the order the samples met them. */
+  readonly logged: ReadonlyArray<SpikeSizesLoggedSegment>;
+  /** Its 1 Hz samples; `null` for a pass {@link SpikeSizesPass.notSized}, whose are left out. */
+  readonly series: SpikeSizesSeries | null;
+}
+
+/** A peak of the session's memory at 1 Hz: its bytes, and when it was first read, script s. */
+export interface SpikeSizesBytePeak {
+  readonly bytes: number;
+  readonly atS: number;
+}
+
+/** The resident total's parts the renderer computes (§6(d)). */
+export interface SpikeSizesMemory {
+  /** `TerrainSession.memory()` samples, at 1 Hz. */
+  readonly samples: number;
+  /** The height workers' copies of the fields together, and the pool's own copy, at their peaks. */
+  readonly workerFieldBytes: SpikeSizesBytePeak;
+  readonly keptFieldBytes: SpikeSizesBytePeak;
+  /** The session's textures (masks and class maps) by memory category, each at its peak. */
+  readonly sessionGpu: ReadonlyArray<SpikeSizesBytePeak & { readonly category: string }>;
+  /** Each cache's allocation, slot count × bytes a slot, at its largest. */
+  readonly caches: ReadonlyArray<{
+    readonly cache: SpikeSizesCache;
+    readonly slotCount: number;
+    readonly bytesPerSlot: number;
+    readonly allocationBytes: number;
+  }>;
+  /**
+   * The shadow cascades: the session's `shadows` category where it reports one, else
+   * `CASCADE_BYTES` (67,108,864 B, T9.a's spec), computed.
+   */
+  readonly cascades: { readonly bytes: number; readonly source: "session" | "computed" };
+  /** The caches, the session's textures and the cascades, B. */
+  readonly computedGpuBytes: number;
+  /** That and the workers' field copies, the plan's resident total, B. */
+  readonly computedTotalBytes: number;
+  /** The height workers the session started, and the workers the bake clock wrapped. */
+  readonly workersStarted: number;
+}
+
+/** The storage binding the caches are held in (§6(g)). */
+export interface SpikeSizesBinding {
+  /** The adapter's reported `maxStorageBufferBindingSize`, B. */
+  readonly adapterBytes: SpikeFigure<number>;
+  /** The limit the engine requested of the device (`requiredLimits`), B. */
+  readonly requestedBytes: SpikeFigure<number>;
+  /** The device's own (`RenderEngine.capabilities`), B. */
+  readonly deviceBytes: SpikeFigure<number>;
+  /**
+   * Each cache's binding ceiling, the most slots whose storage fields fit one binding
+   * (`bindingCeilingSlots`), at the requested binding and at WebGPU's default 128 MiB; `null` where
+   * no storage field has bytes.
+   */
+  readonly caches: ReadonlyArray<{
+    readonly cache: SpikeSizesCache;
+    readonly slotCount: number;
+    readonly ceilingAtRequestedSlots: number | null;
+    readonly ceilingAtDefaultSlots: number | null;
+  }>;
+}
+
+/** The second view (§4): the craft instrument at its chase pose as a session view. */
+export interface SpikeSizesSecondView {
+  /** Its ID in the session (`instrumentViewId(1)`) and its engine view's name. */
+  readonly id: string;
+  readonly engineName: string;
+  /** The style asked of it: the main view's on high, the wireframe on low. */
+  readonly style: SpikeStyleName;
+  readonly weight: number;
+  /** Its presented viewport, device px, each time it changed, from script s. */
+  readonly viewports: ReadonlyArray<{
+    readonly widthPx: number;
+    readonly heightPx: number;
+    readonly fromS: number;
+  }>;
+}
+
+/** `VIEW`'s terrain readout asked on the main view at 4 Hz, its answers not shown (§6(f)). */
+export interface SpikeSizesReadouts {
+  /** ms between publishes. */
+  readonly intervalMs: number;
+  readonly publishes: number;
+  /** Publishes whose snapshot held an answer. */
+  readonly answeredPublishes: number;
+  /** Queries posted to the height workers in the flight, and their answers and refusals. */
+  readonly asked: number;
+  readonly answered: number;
+  readonly failed: number;
+  /**
+   * The times the readout's guards asked to fail the session's computation (after 250 ms of
+   * refusals): counted and logged, and never passed to the session, so that the measurement's
+   * readout cannot end the run.
+   */
+  readonly failComputationCalls: number;
+}
+
+/** How often the lit and wireframe passes' forced key sets differed (T14.c's finding 4). */
+export interface SpikeSizesForcedSets {
+  /** Frames after the step at which both passes had a last step, and at which their sets differed. */
+  readonly comparedFrames: number;
+  readonly differingFrames: number;
+  /** The first such frame, script s. */
+  readonly firstDifferingS: number | null;
+  /** The largest symmetric difference, patches. */
+  readonly largestDifference: number;
+}
+
+/**
+ * The measured sizes of a `--sizes on` run (plan R10, R10.T14.b; decision-r10-t14b-measure): each
+ * pass's counted peaks, rules, shares and samples, the streaming, the bakes, the memory computed,
+ * the binding and the readout.
+ */
+export interface SpikeSizesReport {
+  /** The segments in the order the script met them, which the series' `segment` indexes. */
+  readonly segments: ReadonlyArray<string>;
+  readonly secondView: SpikeSizesSecondView;
+  /**
+   * The field header's lowest sampled height, the last read, m above the datum: its sea level on a
+   * body with no main liquid, where the header defines it as the lowest cell's elevation.
+   */
+  readonly sampledLowestM: SpikeFigure<number>;
+  readonly passes: ReadonlyArray<SpikeSizesPass>;
+  /** Missing where the two passes never had a last step in the same frame. */
+  readonly forcedSets: SpikeFigure<SpikeSizesForcedSets>;
+  readonly segmentFigures: ReadonlyArray<SpikeSizesSegment>;
+  readonly bakes: SpikeSizesBakes;
+  readonly memory: SpikeSizesMemory;
+  readonly binding: SpikeSizesBinding;
+  readonly readouts: SpikeSizesReadouts;
+}
+
+/**
  * What the descent spike's renderer reports at the end of a run, for the results file (R05.T14.c);
  * T14.a gathers it.
  */
@@ -314,6 +856,11 @@ export interface DescentSpikeReport {
    * `--vertex-path` and `--normals` chose (T13.c).
    */
   readonly terrain?: { readonly vertexPath: SpikeVertexPath; readonly normals: SpikeNormals };
+  /**
+   * The measured sizes of a `--sizes on` run (plan R10, R10.T14.b); absent on every other run,
+   * whose report is as before.
+   */
+  readonly sizes?: SpikeSizesReport;
 }
 
 /** The several-views check's options as the command line gave them (plan R07, T20). */

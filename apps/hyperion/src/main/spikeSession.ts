@@ -16,6 +16,11 @@
  * check included, each window's verdict is logged, and the call answers the first failed window's
  * reason, with which the renderer fails the smoke. A smoke builds and writes no results file.
  *
+ * A `--sizes on` run's `sizes` block that its check refused (R10.T14.b) loses the run nothing: its
+ * problems are logged, the results are written without it, and the block as the renderer sent it
+ * goes beside them with its problems, as `<results-name>-sizes-rejected.json`
+ * ({@link rejectedSizesPath}).
+ *
  * Electron is reached only through {@link SpikeSessionDeps}, so that `index.ts` wires it and the
  * logic is testable; the IPC handlers (`registerSpikeHandlers`) call into the session.
  */
@@ -36,8 +41,9 @@ import {
   type RunDescription,
   writeResults,
 } from "./results";
+import type { LoadReading } from "./sizesResults";
 import type { SpikeHandlerDeps, SpikeTraceState, TraceWindowStop } from "./spike";
-import type { SpikeCaptureFiles } from "./spikeReport";
+import type { RejectedSizes, SpikeCaptureFiles } from "./spikeReport";
 import {
   mergeTraceWindows,
   type TraceRecording,
@@ -79,6 +85,12 @@ export interface SpikeSessionDeps {
    */
   readonly reduce: (path: string, categories: ReadonlyArray<string>) => Promise<TraceFigures>;
   readonly memory: { start(): void; stop(): Promise<ReadonlyArray<MemorySample>> };
+  /**
+   * The machine's 1-minute load, read at the start, each minute and the end of a `--sizes on` run
+   * (plan R10, R10.T14.b; `LoadSampler`), beside the memory sampler, for the `sizes` block; absent,
+   * none is read.
+   */
+  readonly load?: { start(): void; stop(): Measured<ReadonlyArray<LoadReading>> };
   /** The results file's directory (`--out`, or `docs/measurements/descent-spike/`). */
   readonly outDir: string;
   readonly exit: (code: number) => void;
@@ -96,6 +108,14 @@ export interface SpikeFiles {
   size(path: string): Promise<number>;
   /** For the results file (`writeResults`'s). */
   readonly results?: ResultsFiles;
+}
+
+/**
+ * Where a refused `sizes` block goes (R10.T14.b): beside the results file `resultsPath`, as
+ * `<results-name>-sizes-rejected.json`.
+ */
+export function rejectedSizesPath(resultsPath: string): string {
+  return `${resultsPath.replace(/\.json$/u, "")}-sizes-rejected.json`;
 }
 
 function messageOf(error: unknown): string {
@@ -153,6 +173,8 @@ export class SpikeSession {
   #windows: WrittenWindow[] = [];
   #trace: Measured<TraceRecording> = missing("the trace was not recorded");
   #memory: ReadonlyArray<MemorySample> = [];
+  /** The load's readings of a `--sizes on` run, or `null` where none were read. */
+  #load: Measured<ReadonlyArray<LoadReading>> | null = null;
   /** The renderer's last private-memory reading, bytes. */
   #rendererBytes: number | null = null;
   #ended = false;
@@ -183,7 +205,7 @@ export class SpikeSession {
       rendererMemory: (bytes) => {
         this.#rendererBytes = bytes;
       },
-      writeResults: (report) => this.#writeResults(report),
+      writeResults: (report, rejectedSizes) => this.#writeResults(report, rejectedSizes ?? null),
       writeCapture: (capture) => this.#writeCapture(capture),
       end: (code, reason) => {
         this.#ended = true;
@@ -204,6 +226,7 @@ export class SpikeSession {
     this.#windows = [];
     await this.#deps.trace.start();
     this.#deps.memory.start();
+    this.#deps.load?.start();
     this.#measuring = true;
   }
 
@@ -259,6 +282,7 @@ export class SpikeSession {
     this.#refuseWhileBusy();
     this.#measuring = false;
     this.#memory = await this.#deps.memory.stop();
+    this.#load = this.#deps.load?.stop() ?? null;
     try {
       // A trace a failed cycle ended has no last window to stop.
       if (this.#deps.trace.state === "recording") {
@@ -362,9 +386,17 @@ export class SpikeSession {
     return merged.figures.reason;
   }
 
-  async #writeResults(report: DescentSpikeReport): Promise<SpikeResultsAnswer> {
+  async #writeResults(
+    report: DescentSpikeReport,
+    rejectedSizes: RejectedSizes | null,
+  ): Promise<SpikeResultsAnswer> {
     if (this.#run === null) {
       throw new Error("the spike wrote results before it started measuring");
+    }
+    if (rejectedSizes !== null) {
+      this.#deps.log(
+        `descent spike: the sizes block was refused, the results are written without it: ${rejectedSizes.problems.join("; ")}`,
+      );
     }
     if (this.#deps.launch.smoke) {
       // A smoke's 10 s are all warm-up and it writes no file: its log holds every clock sample.
@@ -386,13 +418,28 @@ export class SpikeSession {
               terrainNormals: report.terrain.normals,
             },
           };
-    const results = buildResults({ run, report, trace: this.#trace, memory: this.#memory });
+    const load = this.#load;
+    const results = buildResults({
+      run,
+      report,
+      trace: this.#trace,
+      memory: this.#memory,
+      ...(load === null ? {} : { load }),
+    });
     const { clocks } = results.gpu;
     this.#deps.log(
       `descent spike: GPU clocks ${clocks.value === null ? `— (${clocks.reason})` : describeClocks(clocks.value, results.memory.series.tMs, report.warmupS)}`,
     );
     const paths = await writeResults(this.#deps.outDir, results, this.#files.results);
     this.#deps.log(`descent spike: results in ${paths.json}`);
+    if (rejectedSizes !== null) {
+      const rejected = rejectedSizesPath(paths.json);
+      await this.#files.writeFile(
+        rejected,
+        `${JSON.stringify({ problems: rejectedSizes.problems, sizes: rejectedSizes.block }, null, 2)}\n`,
+      );
+      this.#deps.log(`descent spike: the refused sizes block and its problems in ${rejected}`);
+    }
     return { kind: "written", paths };
   }
 

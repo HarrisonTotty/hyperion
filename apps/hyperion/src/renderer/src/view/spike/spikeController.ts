@@ -38,6 +38,7 @@ import {
 import type { SelectionInput } from "../terrain/select";
 import type { GpuCapture } from "./capture";
 import type { PipelineTally } from "./pipelineShim";
+import type { SpikeSizes } from "./spikeSizes";
 import {
   type RecordedDescent,
   type ResolveCounter,
@@ -105,6 +106,11 @@ export interface SpikeControllerDeps {
   /** `performance.now()`, ms: the clock the trace's window times are read on. */
   readonly nowMs: () => number;
   readonly log: (message: string, error?: unknown) => void;
+  /**
+   * The measured sizes of `--sizes on` (plan R10, R10.T14.b), whose block the report carries;
+   * absent, the report is as before.
+   */
+  readonly sizes?: Pick<SpikeSizes, "report">;
 }
 
 /** The terrain variant `launch`'s `--vertex-path` and `--normals` ask for (nulls left out). */
@@ -418,6 +424,7 @@ export class SpikeController {
         failure: window.failure,
       }));
       const terrain = this.#terrain;
+      const sizes = this.#deps.sizes;
       const answer = await spike.writeResults({
         ...recorder.report(this.#deps.canvas()),
         scriptStartMs,
@@ -426,6 +433,7 @@ export class SpikeController {
         ...(terrain === null
           ? {}
           : { terrain: { vertexPath: terrain.vertexPath, normals: terrain.normals } }),
+        ...(sizes === undefined ? {} : { sizes: sizes.report() }),
       });
       if (this.#launch.smoke) {
         // A trace that ended early has a failed last window, which the check names first.

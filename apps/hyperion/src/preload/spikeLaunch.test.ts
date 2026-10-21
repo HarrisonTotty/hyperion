@@ -29,6 +29,11 @@ describe("the spike's switch", () => {
     expect(spikeLaunchFromArgv(["--type=renderer", spikeSwitch(LAUNCH), "--x"])).toEqual(LAUNCH);
   });
 
+  it("carries the measured sizes on to the preload", () => {
+    const measured: SpikeLaunch = { ...LAUNCH, sizes: "on" };
+    expect(spikeLaunchFromArgv([spikeSwitch(measured)])).toEqual(measured);
+  });
+
   it("is absent on an ordinary launch", () => {
     expect(spikeLaunchFromArgv(["--type=renderer", "--hyperion-server-url=ws://a/ws"])).toBeNull();
   });
@@ -66,6 +71,8 @@ describe("readSpikeLaunch", () => {
     ["world", null],
     ["style", "lit"],
     ["style", null],
+    ["sizes", "yes"],
+    ["sizes", null],
   ])("refuses %s = %j", (field, value) => {
     expect(readSpikeLaunch({ ...LAUNCH, [field]: value })).toBeNull();
   });
@@ -91,6 +98,21 @@ describe("readSpikeLaunch", () => {
       expect(readSpikeLaunch({ ...LAUNCH, world: "test-planet", style })).toBeNull();
     },
   );
+
+  it("reads the measured sizes on over the terrain world", () => {
+    expect(readSpikeLaunch({ ...LAUNCH, sizes: "on" })).toEqual({ ...LAUNCH, sizes: "on" });
+  });
+
+  it("reads the measured sizes off as absent, the launch as it was before the option", () => {
+    expect(readSpikeLaunch({ ...LAUNCH, sizes: "off" })).toEqual(LAUNCH);
+    expect(readSpikeLaunch({ ...LAUNCH, sizes: "off" })).not.toHaveProperty("sizes");
+  });
+
+  it("refuses the measured sizes over the test planet, whose terrain is no session's", () => {
+    expect(
+      readSpikeLaunch({ ...LAUNCH, world: "test-planet", style: null, sizes: "on" }),
+    ).toBeNull();
+  });
 
   it("refuses options with a field missing", () => {
     const { traceProfile: _, ...partial } = LAUNCH;

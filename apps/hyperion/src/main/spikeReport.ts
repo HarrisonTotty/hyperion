@@ -12,6 +12,7 @@ import type {
   SpikeStreamingSegment,
   SpikeTraceWindow,
 } from "../preload/api";
+import { isSpikeSizesReport, sizesReportProblems } from "./sizesSchema";
 
 type Rec = Readonly<Record<string, unknown>>;
 
@@ -160,10 +161,45 @@ function latePipeline(value: unknown): SpikeLatePipeline | null {
     : null;
 }
 
+/** A `sizes` block the check refused (R10.T14.b): as the renderer sent it, and its problems. */
+export interface RejectedSizes {
+  readonly block: unknown;
+  readonly problems: ReadonlyArray<string>;
+}
+
+/** The renderer's report as read: the report, and its `sizes` block where that alone was refused. */
+export interface SpikeReportReading {
+  readonly report: DescentSpikeReport;
+  /** The malformed `sizes` block left out of {@link SpikeReportReading.report}, or `null`. */
+  readonly rejectedSizes: RejectedSizes | null;
+}
+
+/**
+ * `value` as the renderer's report ({@link readDescentSpikeReport}), with a malformed `sizes` block
+ * (R10.T14.b) left out of it and given beside it with its problems, so that a measured run whose
+ * block alone is wrong keeps its results.
+ */
+export function readSpikeReport(value: unknown): SpikeReportReading | null {
+  const report = readDescentSpikeReport(value);
+  if (report === null || !isRecord(value)) {
+    return null;
+  }
+  const given = value["sizes"];
+  const problems =
+    given === undefined || report.sizes !== undefined ? [] : sizesReportProblems(given);
+  return {
+    report,
+    rejectedSizes: problems.length === 0 ? null : { block: given, problems },
+  };
+}
+
 /**
  * `value` as the renderer's report, or `null` if any part of it is missing or of the wrong type:
  * every series as long as the frames', every figure finite, each frame's missing resolves a whole
  * count and those still being read at the report no more than them, the trace's windows in order.
+ * The measured sizes, where given (R10.T14.b), are kept only well formed to the last field
+ * (`sizesReportProblems`): a malformed block is left out, and refuses nothing else
+ * ({@link readSpikeReport} gives it with its problems).
  */
 export function readDescentSpikeReport(value: unknown): DescentSpikeReport | null {
   if (!isRecord(value)) {
@@ -210,6 +246,10 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
   const windows = traceWindows(value["traceWindows"]);
   const canvas = value["canvas"];
   const terrain = value["terrain"];
+  const given = value["sizes"];
+  // The measured sizes (R10.T14.b) are checked whole and strictly: an object with exactly its
+  // fields, every figure of its kind; a malformed block is left out.
+  const sizes = given !== undefined && isSpikeSizesReport(given) ? given : undefined;
   const terrainOk =
     terrain === undefined ||
     (isRecord(terrain) &&
@@ -274,6 +314,7 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
     (terrain["normals"] === "double" || terrain["normals"] === "mesh")
       ? { terrain: { vertexPath: terrain["vertexPath"], normals: terrain["normals"] } }
       : {}),
+    ...(sizes === undefined ? {} : { sizes }),
   };
 }
 

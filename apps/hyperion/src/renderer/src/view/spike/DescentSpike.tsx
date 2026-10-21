@@ -66,6 +66,7 @@ import {
 import { SPIKE_RETRY, spikeFaultLine } from "./spikeFaults";
 import { cameraElevationDeg, spikeScene } from "./spikeScene";
 import { surveySnapshotOf } from "./spikeSessionView";
+import { SIZES_READOUT_INTERVAL_MS, type SpikeSizes } from "./spikeSizes";
 import { type SpikeWorldName, spikeWorldNamed } from "./spikeWorld";
 import { SurfaceQuery } from "./surfaceQuery";
 
@@ -140,6 +141,13 @@ export interface DescentSpikeProps {
    * object does not restart the run.
    */
   readonly listeners?: SpikeListeners | undefined;
+  /**
+   * The measured sizes over the terrain world (`--sizes on`, plan R10, R10.T14.b): the craft
+   * instrument drawn as a second session view, the passes counted, the session's height workers
+   * (`spikeWorkers.height`) wrapped by its bake clock, and the main view's terrain readout asked at
+   * 4 Hz, its answers not shown. Absent, the spike is T14.c's.
+   */
+  readonly sizes?: SpikeSizes | undefined;
 }
 
 type Preparation =
@@ -340,11 +348,15 @@ interface InstrumentProps {
  */
 const INSTRUMENT_LINES: ReadonlySet<string> = new Set(["FRAME", "TIME", "STYLE", "CAMERA", "FOV"]);
 
-/** A wireframe instrument: its canvas and its label block beside it. */
+/**
+ * An instrument: its canvas and its label block beside it, named in its camera's style, R02's
+ * wireframe but for the second view of `--sizes on` (R10.T14.b), which draws in its own.
+ */
 function Instrument({ title, canvasRef, stageRef, run, listId, cameraLabel }: InstrumentProps) {
   const id = useId();
   const camera = cameraLabel ?? (run === null ? null : PRESET_NAMES[run.camera.preset]);
   const preset = camera === null ? "" : `, ${camera}`;
+  const style = styleName(run?.camera.style ?? "wireframe");
   const lines =
     run === null
       ? []
@@ -370,7 +382,7 @@ function Instrument({ title, canvasRef, stageRef, run, listId, cameraLabel }: In
             // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
             role="img"
             tabIndex={0}
-            aria-label={`VIEW, WIREFRAME, ${title.toUpperCase()}${preset}`}
+            aria-label={`VIEW, ${style}, ${title.toUpperCase()}${preset}`}
             aria-details={listId}
           />
         </div>
@@ -422,6 +434,12 @@ function Instrument({ title, canvasRef, stageRef, run, listId, cameraLabel }: In
  * `VIEW` to reopen. A terrain fault in flight ends the run as failed, as does a photorealistic style
  * whose pipelines could not be made (`GRAPHICS STYLE REFUSED`): each stands on the main view's
  * fault lines, and the loop draws no more.
+ *
+ * With `sizes` over the terrain world (`--sizes on`, plan R10, R10.T14.b) the craft instrument's
+ * canvas is the run's second session view, named and labelled in the style it drew in, the
+ * session's height workers are started on the measurement's bake clock, and at `VIEW`'s 4 Hz
+ * (`SIZES_READOUT_INTERVAL_MS`) the loop asks `VIEW`'s terrain readout of the main view
+ * (`GroundReadouts`), whose answers are counted and never shown: nothing else on the page changes.
  */
 export function DescentSpike({
   seed,
@@ -436,6 +454,7 @@ export function DescentSpike({
   prepare = prepareDescent,
   measure = measureWorldDescent,
   listeners,
+  sizes: measured,
 }: DescentSpikeProps) {
   const id = useId();
   // The variant by its fields, so that a new object of the same variant does not restart the run.
@@ -451,7 +470,9 @@ export function DescentSpike({
   const session = useTerrainSession({
     engineState,
     source: world === "terrain-test" ? { kind: "fixture", fixture } : null,
-    createWorker: spikeWorkers.height,
+    // Under the measured sizes, each height worker on the bake clock: the same wrapper for the
+    // same factory, so that the session is made once.
+    createWorker: measured?.heightWorkers(spikeWorkers.height) ?? spikeWorkers.height,
     workers,
     // The session compiles its passes' materials at this setting as it is made (R10.T14.d).
     setting,
@@ -613,7 +634,14 @@ export function DescentSpike({
             ...(normals === undefined ? {} : { normals }),
           },
           ...(world === "terrain-test" && session !== null
-            ? { body: { world: spikeWorld, session, style } }
+            ? {
+                body: {
+                  world: spikeWorld,
+                  session,
+                  style,
+                  ...(measured === undefined ? {} : { sizes: { measure: measured, session } }),
+                },
+              }
             : {}),
         },
         { main: mainCanvas, orbit: orbitCanvas, craft: craftCanvas },
@@ -662,6 +690,7 @@ export function DescentSpike({
     });
     let frame = 0;
     let publishedMs = Number.NEGATIVE_INFINITY;
+    let readoutMs = Number.NEGATIVE_INFINITY;
     const tick = (nowMs: number): void => {
       if (life.failed) {
         return;
@@ -697,6 +726,9 @@ export function DescentSpike({
             strokes: viewStrokesAt(inputs.main.devicePixelRatio),
             selection: inputs.selection,
             mainStage: inputs.main,
+            ...(measured === undefined || inputs.craft === null
+              ? {}
+              : { craftStage: inputs.craft }),
           });
         } catch (error: unknown) {
           // A frame the engine refused: the run stops and says so, rather than freezing silently.
@@ -708,6 +740,16 @@ export function DescentSpike({
           // The photorealistic renderer logged why its pipelines could not be made.
           stop(drawn.refusal, drawn.refusal);
           return;
+        }
+        if (
+          measured !== undefined &&
+          world === "terrain-test" &&
+          nowMs - readoutMs >= SIZES_READOUT_INTERVAL_MS
+        ) {
+          readoutMs = nowMs;
+          // `VIEW`'s readout at its 4 Hz, so that the workers' figures include its queries; its
+          // answers are counted and never shown (decision-r10-t14b-measure §6(f)).
+          measured.publishReadout(session, mainRunOf(drawn), nowMs);
         }
         if (nowMs - publishedMs >= READOUT_INTERVAL_MS) {
           publishedMs = nowMs;
@@ -746,6 +788,7 @@ export function DescentSpike({
     session,
     spikeWorld,
     style,
+    measured,
   ]);
 
   // The runs the label blocks and the list read: the published frame's, or the script's start.

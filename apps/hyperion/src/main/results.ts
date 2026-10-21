@@ -32,6 +32,9 @@
  * - The rest of the frame (decision-r05-high-atmosphere.md): terrain and atmosphere are judged as
  *   one row, each frame's passes of both summed, against their estimates' sum. Each pass row's own
  *   percentiles are recorded against its estimate in `gpu.rows`, a finding that enters no verdict.
+ * - The measured sizes (plan R10, R10.T14.b; decision-r10-t14b-measure §6(g)): a `--sizes on`
+ *   run's file carries an optional `sizes` block (`sizesResults.ts`), and its summary a "Sizes"
+ *   section; the version stays 6, and a file without the block reads as before.
  */
 
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
@@ -43,6 +46,7 @@ import type { ProcessMetric } from "electron";
 import type {
   DescentSpikeReport,
   GraphicsLaunchMode,
+  SpikeLaunch,
   SpikePassRow,
   SpikePassTimer,
   SpikeStyleName,
@@ -61,6 +65,13 @@ import {
 } from "./machineLoad";
 import { type Measured, measured, missing } from "./measured";
 import { GPU_PROCESS_SLICES, type GpuProcessFigures, recordedGpuSlices } from "./reduceTrace";
+import {
+  buildSizesResults,
+  type LoadReading,
+  type SizesResults,
+  sizesResultsProblems,
+  sizesSummaryLines,
+} from "./sizesResults";
 import {
   type EngineFigures,
   FULL_BUFFER_PERCENT,
@@ -298,6 +309,19 @@ export interface RunDescription {
   readonly displayHz: number | null;
   /** `nvidia-smi`'s device memory used before the launch, bytes, or `null` off NVIDIA. */
   readonly nvidiaBaselineBytes: number | null;
+}
+
+/**
+ * A launch's options as its run records them ({@link RunDescription.options}): every option it
+ * holds, those it holds as `null` left out. An unmeasured launch holds no `sizes` (R10.T14.b), so
+ * that its options are as they were before the option, and a `--sizes on` launch's say `on`.
+ */
+export function runOptionsOf(launch: SpikeLaunch): RunDescription["options"] {
+  return Object.fromEntries(
+    Object.entries(launch).filter(
+      (entry): entry is [string, string | number | boolean] => entry[1] !== null,
+    ),
+  );
 }
 
 /** Memory at one instant of a run (Design note 18). */
@@ -968,6 +992,11 @@ export interface DescentResults {
     /** `fail` if any row fails, else `not-measured` if any is, else `marginal` if any is. */
     readonly overall: Verdict;
   };
+  /**
+   * The measured sizes of a `--sizes on` run (plan R10, R10.T14.b; `sizesResults.ts`): absent from
+   * every other run's file, which reads as before; the schema's version stays 6.
+   */
+  readonly sizes?: SizesResults;
 }
 
 /** Everything a results file is built from. */
@@ -977,6 +1006,11 @@ export interface ResultsInput {
   /** The trace's windows, each reduced, or why there is no trace. */
   readonly trace: Measured<TraceRecording>;
   readonly memory: ReadonlyArray<MemorySample>;
+  /**
+   * The machine's 1-minute load at the start, each minute and the end of a `--sizes on` run
+   * (R10.T14.b; `LoadSampler`), for its `sizes` block; absent, its block says none was read.
+   */
+  readonly load?: Measured<ReadonlyArray<LoadReading>>;
 }
 
 /**
@@ -1517,6 +1551,23 @@ export function buildResults(input: ResultsInput): DescentResults {
         ? measured({ bytes: drmResidentPeakBytes.value, source: "drm-fdinfo" })
         : measured({ bytes: report.adapterPeakBytes, source: "adapter-tally" });
 
+  const lastSample = memory.at(-1) ?? null;
+  const sizes =
+    report.sizes === undefined
+      ? undefined
+      : buildSizesResults(report.sizes, input.load ?? missing("the run read no load average"), {
+          nvidiaBaselineBytes: run.nvidiaBaselineBytes,
+          peakLessBaselineBytes: nvidiaLessBaseline,
+          gpuProcessPeakBytes: columnPeakBytes(series.nvidiaGpuProcessKiB),
+          last:
+            lastSample === null
+              ? null
+              : {
+                  deviceBytes: lastSample.nvidiaDeviceBytes,
+                  gpuProcessBytes: lastSample.nvidiaGpuProcessBytes,
+                },
+        });
+
   const criterionStats = source === "presentation" ? presentationWhole : rafWhole;
   const headroomLimit = ofPeriod(periodMs, (period) => 0.8 * period);
   const memoryValue: Measured<number> =
@@ -1648,6 +1699,7 @@ export function buildResults(input: ResultsInput): DescentResults {
       adapterPeakBytes: report.adapterPeakBytes,
     },
     criteria: { whole, segments: segmentCriteria, overall },
+    ...(sizes === undefined ? {} : { sizes }),
   };
 }
 
@@ -1775,7 +1827,9 @@ const VERDICTS: ReadonlySet<string> = new Set(["pass", "fail", "marginal", "not-
  * impossible; each clock column must be as long as the times; and terrain and atmosphere must be
  * one criterion row, whose limit is their estimates' sum, with each one's figures in `gpu.rows`,
  * percentiles in order and `overEstimate` true exactly when its 95th percentile is above its
- * estimate.
+ * estimate. A `sizes` block, where there is one (R10.T14.b), holds exactly its fields, each of its
+ * kind, and its samples' columns are whole (`sizesResultsProblems`); a file without one, written
+ * before it or by any other run, is checked as before.
  */
 export function validateResults(value: unknown): string[] {
   const problems: string[] = [];
@@ -1841,6 +1895,10 @@ export function validateResults(value: unknown): string[] {
   checkClocks(value, problems);
   checkUntimedPasses(value, problems);
   checkRestOfFrame(value, problems);
+  // The measured sizes (R10.T14.b), where a `--sizes on` run wrote them: every other file has none.
+  if (value["sizes"] !== undefined) {
+    problems.push(...sizesResultsProblems(value["sizes"]));
+  }
   // A whole-run null column without a reason is found by both checks.
   return [...new Set(problems)];
 }
@@ -2860,7 +2918,7 @@ export function summaryMarkdown(results: DescentResults): string {
     `- **Overall:** ${criteria.overall}${run.quiet.provisional ? (load.value === null ? ` (provisional: ${load.reason})` : " (provisional: not a quiet machine)") : ""}`,
     `- **Machine:** ${run.machine.cpu}, ${run.machine.logicalCores} threads; GPU ${textOr(run.machine.gpu, (gpu) => gpu.description ?? `${gpu.vendorId}:${gpu.deviceId}`)}; governor ${textOr(run.machine.governor, (governor) => governor)}; load average ${load.value === null ? `none (${load.reason})` : load.value.map((average) => average.toFixed(2)).join(", ")}`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
-    `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, seed ${run.seed}, world ${run.world}${run.style === null ? "" : `, style ${run.style}`}, window ${run.shown ? "shown" : "hidden"}, canvas ${run.canvas.widthPx} × ${run.canvas.heightPx} px`,
+    `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, seed ${run.seed}, world ${run.world}${run.style === null ? "" : `, style ${run.style}`}${typeof run.options["sizes"] === "string" ? `, sizes ${run.options["sizes"]}` : ""}, window ${run.shown ? "shown" : "hidden"}, canvas ${run.canvas.widthPx} × ${run.canvas.heightPx} px`,
     `- **T:** ${textOr(run.periodMs, (period) => `${formatMs(period)} ms`)}; warm-up ${run.warmupS} s`,
     `- **Trace:** ${textOr(run.trace, describeTrace)}`,
     `- **Incomplete pass times:** ${textOr(results.gpu.incompleteFrames, describeIncomplete)}`,
@@ -2921,6 +2979,7 @@ export function summaryMarkdown(results: DescentResults): string {
     "",
     `Uploads ${mib(results.uploads.bytes)}; ${results.pipelines.late.length} pipelines created after warm-up; ${untimedPassesText(results.gpu.untimedPasses)}.`,
     "",
+    ...(results.sizes === undefined ? [] : sizesSummaryLines(results.sizes, run.setting)),
   ].join("\n");
 }
 

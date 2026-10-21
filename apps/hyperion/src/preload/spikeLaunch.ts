@@ -47,7 +47,8 @@ function stringOrNull(value: unknown): value is string | null {
  * `value` as spike options, or `null` if it is not one: every field present and of its type, the
  * seed a u64, the worker count a whole number from 1 to 64, the world among `--world`'s choices,
  * and the style among `--style`'s over the terrain world and `null` over the test planet, which
- * takes none.
+ * takes none; `sizes` (R10.T14.b) absent, or `on` over the terrain world alone. An `off` is read
+ * as absent, which is off, so that an unmeasured launch is as it was before the option.
  */
 export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
   if (!isRecord(value)) {
@@ -67,6 +68,7 @@ export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
     traceProfile,
     world,
     style,
+    sizes,
   } = value;
   if (
     !oneOf(setting, ["high", "low"] as const) ||
@@ -89,7 +91,11 @@ export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
     return null;
   }
   const worldStyle = styleOf(world, style);
-  if (worldStyle === undefined) {
+  if (
+    worldStyle === undefined ||
+    !(sizes === undefined || oneOf(sizes, ["on", "off"] as const)) ||
+    (sizes === "on" && world !== "terrain-test")
+  ) {
     return null;
   }
   return {
@@ -106,6 +112,7 @@ export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
     traceProfile,
     world,
     style: worldStyle,
+    ...(sizes === "on" ? { sizes } : {}),
   };
 }
 

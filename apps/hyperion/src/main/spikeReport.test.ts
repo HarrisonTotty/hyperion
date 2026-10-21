@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { DescentSpikeReport } from "../preload/api";
+import { sizesReportOf } from "./fixtures/sizesReport";
 import { smallReport } from "./fixtures/spikeReport";
-import { readDescentSpikeReport, readSpikeCapture } from "./spikeReport";
+import { readDescentSpikeReport, readSpikeCapture, readSpikeReport } from "./spikeReport";
 
 describe("the spike report's check", () => {
   it("passes a valid report through unchanged", () => {
@@ -135,6 +136,43 @@ describe("the spike report's check", () => {
     ["a guard that is not finite", (r) => ({ ...r, traceGuardS: Number.NaN })],
   ])("refuses %s", (_, broken) => {
     expect(readDescentSpikeReport(broken(smallReport()))).toBeNull();
+  });
+
+  it("passes a report with well-formed measured sizes through unchanged (R10.T14.b)", () => {
+    const report: DescentSpikeReport = { ...smallReport(), sizes: sizesReportOf() };
+    expect(readDescentSpikeReport(report)).toEqual(report);
+  });
+
+  it("reads a report whose measured sizes alone are malformed without them", () => {
+    const sizes = sizesReportOf();
+    expect(
+      readDescentSpikeReport({
+        ...smallReport(),
+        sizes: { ...sizes, readouts: { ...sizes.readouts, publishes: -1 } },
+      }),
+    ).toEqual(smallReport());
+    expect(readDescentSpikeReport({ ...smallReport(), sizes: null })).toEqual(smallReport());
+  });
+
+  it("gives a malformed sizes block beside the report, with its problems", () => {
+    const sizes = sizesReportOf();
+    const block = { ...sizes, readouts: { ...sizes.readouts, publishes: -1 } };
+    expect(readSpikeReport({ ...smallReport(), sizes: block })).toEqual({
+      report: smallReport(),
+      rejectedSizes: { block, problems: ["sizes.readouts.publishes is not a whole count"] },
+    });
+  });
+
+  it("gives no rejected block where the sizes are well formed or absent", () => {
+    const report: DescentSpikeReport = { ...smallReport(), sizes: sizesReportOf() };
+    expect([readSpikeReport(report), readSpikeReport(smallReport())]).toEqual([
+      { report, rejectedSizes: null },
+      { report: smallReport(), rejectedSizes: null },
+    ]);
+  });
+
+  it("still refuses a report whose other parts are malformed, whatever its sizes", () => {
+    expect(readSpikeReport({ ...smallReport(), uploadBytes: -1, sizes: null })).toBeNull();
   });
 });
 

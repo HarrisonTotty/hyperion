@@ -12,7 +12,13 @@ import { FakeDebugger, memoryWriter } from "./fixtures/debugger";
 import { measured, type MemorySample, type RunDescription, validateResults } from "./results";
 import type { TraceFigures } from "./reduceTrace";
 import { SpikeTrace, type TraceWindowStop } from "./spike";
-import { SpikeSession, type SpikeSessionDeps, traceWindowFileName } from "./spikeSession";
+import {
+  rejectedSizesPath,
+  SpikeSession,
+  type SpikeSessionDeps,
+  traceWindowFileName,
+} from "./spikeSession";
+import { sizesReportOf } from "./fixtures/sizesReport";
 import { smallReport } from "./fixtures/spikeReport";
 import { callbackStartsOf, PROFILED, UNPROFILED, windowTrace } from "./fixtures/traces";
 import { LOST_DATA_REASON, type TraceSettings } from "./traceWindows";
@@ -705,5 +711,76 @@ describe("a spike run's session", () => {
     session.operations().end(0, null);
     expect(exits).toEqual([1, 0]);
     expect(session.ended).toBe(true);
+  });
+});
+
+describe("a measured run's load (R10.T14.b)", () => {
+  it("reads the load from the measuring's start to its stop, into the file's sizes block", async () => {
+    const trace = fakeTrace();
+    const { deps, written } = depsOf(
+      trace,
+      () => Promise.resolve(goodTrace()),
+      () => Promise.resolve(4096),
+      { ...LAUNCH, world: "terrain-test", style: "wireframe", sizes: "on" },
+    );
+    const calls: string[] = [];
+    const readings = [
+      { tS: 0, oneMinute: 0.4 },
+      { tS: 60, oneMinute: 0.5 },
+    ];
+    const session = new SpikeSession({
+      ...deps,
+      load: {
+        start: () => {
+          calls.push("start");
+        },
+        stop: () => {
+          calls.push("stop");
+          return measured(readings);
+        },
+      },
+    });
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.stopMeasuring();
+    const paths = pathsOf(await ops.writeResults({ ...smallReport(), sizes: sizesReportOf() }));
+    const results: unknown = JSON.parse(String(written.get(paths.json)));
+    expect([calls, validateResults(results)]).toEqual([["start", "stop"], []]);
+    expect(results).toMatchObject({ sizes: { load: { value: readings, reason: null } } });
+  });
+
+  it("writes the results without a refused sizes block, and the block with its problems beside them", async () => {
+    const trace = fakeTrace();
+    const { deps, written, logs } = depsOf(
+      trace,
+      () => Promise.resolve(goodTrace()),
+      () => Promise.resolve(4096),
+      { ...LAUNCH, world: "terrain-test", style: "wireframe", sizes: "on" },
+    );
+    const ops = new SpikeSession(deps).operations();
+    await ops.startMeasuring();
+    await ops.stopMeasuring();
+    const rejected = { block: { readouts: 1 }, problems: ["sizes.segments is missing"] };
+    const paths = pathsOf(await ops.writeResults(smallReport(), rejected));
+    const results: unknown = JSON.parse(String(written.get(paths.json)));
+    const beside = rejectedSizesPath(paths.json);
+    expect([validateResults(results), String(written.get(paths.json)).includes('"sizes"')]).toEqual(
+      [[], false],
+    );
+    expect(beside).toBe(paths.json.replace(/\.json$/u, "-sizes-rejected.json"));
+    expect(JSON.parse(String(written.get(beside)))).toEqual({
+      problems: rejected.problems,
+      sizes: rejected.block,
+    });
+    expect(logs.some((line) => line.includes("sizes.segments is missing"))).toBe(true);
+  });
+
+  it("reads no load where the run measures no sizes", async () => {
+    const { session, written } = sessionOf(() => Promise.resolve(goodTrace()));
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.stopMeasuring();
+    const paths = pathsOf(await ops.writeResults(smallReport()));
+    expect(String(written.get(paths.json))).not.toContain('"sizes"');
   });
 });

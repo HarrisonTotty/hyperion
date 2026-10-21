@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import { loadavg } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -35,7 +36,14 @@ import {
 } from "./graphics/switches";
 import { isOwnPage } from "./ipcSender";
 import { reduceTraceFile } from "./reduceTrace";
-import { activeGpu, describeMachine, MemorySampler, nodeMachineSources } from "./results";
+import {
+  activeGpu,
+  describeMachine,
+  MemorySampler,
+  nodeMachineSources,
+  runOptionsOf,
+} from "./results";
+import { LoadSampler } from "./sizesResults";
 import { launchSwitches, registerSpikeHandlers, SpikeTrace } from "./spike";
 import { SpikeSession } from "./spikeSession";
 import { reduceWindowFile, registerViewsCheckHandlers, ViewsCheckSession } from "./viewsCheck";
@@ -310,11 +318,7 @@ function startSpikeSession(
       seed: launch.seed,
       world: launch.world,
       style: launch.style,
-      options: Object.fromEntries(
-        Object.entries(launch).filter(
-          (entry): entry is [string, string | number | boolean] => entry[1] !== null,
-        ),
-      ),
+      options: runOptionsOf(launch),
       switches: switches.map(({ name, value }) =>
         value === undefined ? `--${name}` : `--${name}=${value}`,
       ),
@@ -326,6 +330,16 @@ function startSpikeSession(
     traceDir: app.getPath("userData"),
     reduce: (path, categories) => reduceTraceFile(path, { categories }),
     memory,
+    // The measured sizes' 1-minute load at the start, each minute and the end (R10.T14.b).
+    ...(launch.sizes === "on"
+      ? {
+          load: new LoadSampler({
+            platform: process.platform,
+            loadavg,
+            nowMs: () => performance.now(),
+          }),
+        }
+      : {}),
     outDir: launch.out ?? resolve(process.cwd(), "docs/measurements/descent-spike"),
     exit: (code) => {
       app.exit(code);
