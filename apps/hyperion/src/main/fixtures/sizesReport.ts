@@ -338,6 +338,7 @@ export function sizesReportOf(
       caches: options.passes.map((pass) => ({
         cache: pass.cache,
         slotCount: 1_286,
+        layout: { requestedSlotCount: 1_286, fallback: "none" },
         ceilingAtRequestedSlots: 3_464,
         ceilingAtDefaultSlots: 433,
       })),

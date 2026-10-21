@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { SpikeSizesMemory } from "../preload/api";
+import type { SpikeSizesBinding, SpikeSizesMemory } from "../preload/api";
 import { type SizesFixtureOptions, sizesReportOf } from "./fixtures/sizesReport";
 import { NO_WINDOWS_LOAD_AVERAGE } from "./machineLoad";
 import { measured, missing } from "./measured";
@@ -264,6 +264,53 @@ describe("the measured sizes in the results (R10.T14.b)", () => {
       }),
     ).toContain(
       "each category at its own peak: height-cache 1.0 MiB (3.0 s); 2 destructions of allocations made before the run's control listened, left out",
+    );
+  });
+
+  it("states each cache's slots, the slots it asked and its fallback at the binding", () => {
+    expect(summaryOf([{ cache: "lit", views: 1 }])).toContain(
+      "- The lit cache's 1,286 slots of 1,286 requested, on its own path, no fallback: its ceiling 3,464 slots at the requested binding, 433 slots at WebGPU's default 128 MiB",
+    );
+  });
+
+  /** The summary's lines of `sizes`' block of one lit pass, its binding's caches `caches`. */
+  function bindingSummary(caches: SpikeSizesBinding["caches"]): string {
+    const sizes = sizesReportOf({ samples: 3, passes: [{ cache: "lit", views: 1 }] });
+    const results = buildSizesResults({ ...sizes, binding: { ...sizes.binding, caches } }, load, {
+      nvidiaBaselineBytes: null,
+      peakLessBaselineBytes: missing("off NVIDIA"),
+      gpuProcessPeakBytes: missing("off NVIDIA"),
+      last: null,
+    });
+    return sizesSummaryLines(results, "high").join("\n");
+  }
+
+  it("states a cache past the binding on its fallback, its slots clamped", () => {
+    expect(
+      bindingSummary([
+        {
+          cache: "lit",
+          slotCount: 1_948,
+          layout: { requestedSlotCount: 2_000, fallback: "binding-limit" },
+          ceilingAtRequestedSlots: 3_464,
+          ceilingAtDefaultSlots: 433,
+        },
+      ]),
+    ).toContain("- The lit cache's 1,948 slots of 2,000 requested, on the binding-limit fallback:");
+  });
+
+  it("states a block written before the clamp's caches as before, with no requested slots", () => {
+    expect(
+      bindingSummary([
+        {
+          cache: "lit",
+          slotCount: 1_286,
+          ceilingAtRequestedSlots: 3_464,
+          ceilingAtDefaultSlots: 433,
+        },
+      ]),
+    ).toContain(
+      "- The lit cache's 1,286 slots: its ceiling 3,464 slots at the requested binding, 433 slots at WebGPU's default 128 MiB",
     );
   });
 

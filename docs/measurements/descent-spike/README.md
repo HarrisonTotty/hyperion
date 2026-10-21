@@ -123,10 +123,12 @@ How the figures are read:
 
 ## The measured sizes (R10.T14.b)
 
-Plan R10's T14.b sized the terrain caches from four hidden runs on the development machine's
-RTX 3080 on 2026-10-21, each `--world terrain-test --sizes on` (seed 7, `TERRAIN TEST`'s moon
-through the terrain session, the craft instrument as a second session view), the figures and the
-constants in the plan's T14.b record ("Deviations in T14.b, as built"):
+Plan R10's T14.b measured the terrain caches' sizes from four hidden runs on the development
+machine's RTX 3080 on 2026-10-21, each `--world terrain-test --sizes on` (seed 7, `TERRAIN TEST`'s
+moon through the terrain session, the craft instrument as a second session view). On the hard bound
+the rule asks about seven times the provisional caches, which are held until R10.T4.b
+(decision-r10-t14b-constants); the figures and the ruling are in the plan's T14.b record
+("Deviations in T14.b, as built"):
 
 - `2026-10-21-effect-high-2`: high, photorealistic, in a quiet window (the horizon A/B's run A);
 - `2026-10-21-effect-high`: high, wireframe;
@@ -138,12 +140,15 @@ bake times are provisional, each with its load in the file. The A/B's run B, wit
 horizon lookup patched out of a scratch build, is not kept here: its figures and the patch are in
 the record.
 
-The owner's UHD 620 runs (pending, by hand on the laptop, on a quiet machine), from which the low
-setting's budget is settled:
+The owner's UHD 620 runs (pending, by hand on the laptop, on a quiet machine: the load under 1 and
+the local LLM stopped; decision-r10-t14b-constants), hidden to match the RTX 3080's canvases, the
+four files they write sent back from this directory. The low setting's and the wireframe's slots
+are re-sized from them once R10.T4.b's statistical bound is in selection, or R09's (ii), whichever
+comes first, by the ruled form and caps:
 
 ```sh
-just descent-spike --world terrain-test --setting low --sizes on
-just descent-spike --world terrain-test --setting low --style wireframe --sizes on
+just descent-spike --setting low --world terrain-test --style photorealistic --sizes on --seed 7 --hidden
+just descent-spike --setting low --world terrain-test --style wireframe --sizes on --seed 7 --hidden
 ```
 
 ## The gate's verdict

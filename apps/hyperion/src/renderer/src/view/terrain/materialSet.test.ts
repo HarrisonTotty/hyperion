@@ -51,10 +51,17 @@ const HIGH = [
 ];
 
 /**
- * A binding under the high lit cache's offsets (1,286 slots × 101,400 B) and its fallback's horizon
- * map (1,908 slots), and over the wireframe's offsets (520 slots).
+ * A binding under the high lit cache's offsets (1,286 slots × 101,400 B), and over its fallback's
+ * horizon map at the same 1,286 slots (decision-r10-t14b-constants §4) and the wireframe's offsets
+ * (520 slots).
  */
 const NARROW: CountingLimits = { maxStorageBufferBindingSize: 1e8, maxBufferSize: 1e8 };
+
+/**
+ * A binding for four lit slots on `face-differences` (68,896 B of horizon map each), fewer than the
+ * six roots', and eight of the wireframe's (33,800 B of heights each).
+ */
+const TINY: CountingLimits = { maxStorageBufferBindingSize: 3e5, maxBufferSize: 3e5 };
 
 /** What a mesh's layout and size are made of, to compare two meshes by. */
 function layout(spec: MeshSpec): unknown {
@@ -99,17 +106,28 @@ describe("sessionMaterials (R10.T14.d)", () => {
     ).toEqual(["lit face-differences", "depth face-differences", "wire face-differences"]);
   });
 
-  it("gives only the wireframe's where the device's binding holds the wireframe's layout alone", async () => {
+  it("gives the lit layout's on face differences where the device's binding holds the wireframe's offsets alone", async () => {
     const engine = await countingRenderEngine(NARROW);
     expect(sessionMaterials("high", engine.capabilities)).toEqual([
+      { kind: "lit", path: "face-differences" },
+      { kind: "depth", path: "face-differences" },
+      { kind: "shadow", path: "face-differences" },
       { kind: "wire", path: "baked-offsets" },
     ]);
   });
 
+  it("gives only the wireframe's where the device's binding holds the wireframe's layout alone", async () => {
+    const engine = await countingRenderEngine(TINY);
+    expect(sessionMaterials("high", engine.capabilities)).toEqual([
+      { kind: "wire", path: "face-differences" },
+    ]);
+  });
+
   it("gives none where the device holds no layout of the setting", async () => {
+    // Under six of the wireframe's 33,800 B of heights.
     const engine = await countingRenderEngine({
-      maxStorageBufferBindingSize: 1e6,
-      maxBufferSize: 1e6,
+      maxStorageBufferBindingSize: 2e5,
+      maxBufferSize: 2e5,
     });
     expect(sessionMaterials("high", engine.capabilities)).toEqual([]);
   });

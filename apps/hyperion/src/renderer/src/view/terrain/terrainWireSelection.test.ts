@@ -7,8 +7,11 @@
  * that the counts are the tolerances' alone.
  *
  * @remarks
- * Deviation: `patchCountModel` is R10.T14.a's and not built; Design note 15's table stands for it.
- * Its frustum counts, the high setting's 1 px at 1080p against the wireframe's 4 px at 1080p, give
+ * Deviation: the bracket was ruled on Design note 15's table (decision-r10-view-block-room §9),
+ * which stands for `patchCountModel` here, and it stays on it now the model is built (R10.T14.a's
+ * `cacheBudget.ts`; decision-r10-t14a §4, decision-r10-t14b-measure §6(a)): the model's ratios and
+ * the measured ones are R10.T14.a's and R10.T14.b's records'. The table's frustum counts, the high
+ * setting's 1 px at 1080p against the wireframe's 4 px at 1080p, give
  * the ratio r of their middles at each height, and the wireframe's selection must lie in
  * [r ÷ 2, 2 r]. It is taken on two planets of WGS 84's figure: one built on the count model's own
  * premise, a patch accepted at k = 5 times its level's edge at 1 px (a flat level table whose bound

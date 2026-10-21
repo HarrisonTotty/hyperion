@@ -5,8 +5,10 @@
  *
  * @remarks
  * Pure: no GPU, no module state. Nothing here feeds `SETTINGS`: the budgets in
- * `quality/qualitySetting.ts` stay provisional until R10.T14.b measures them on the desktop, and
- * this module's figures are recorded beside them (decision-r10-t14a, R2).
+ * `quality/qualitySetting.ts` are held by R10.T14.b (decision-r10-t14b-constants) on the hard
+ * bound, re-sized after R10.T4.b, and this module's figures are recorded beside them
+ * (decision-r10-t14a, R2). {@link bindingCeilingSlots} is also the ceiling `gpu/resources.ts`'
+ * layout clamps its slots to past a device's binding (decision-r10-t14b-constants §4).
  *
  * The count model is built on selection's own metric (decision-r10-t14a, R7): R05's box distance
  * (`bounds.ts`' {@link patchBounds}, {@link relativeBounds} and {@link distanceToBoxM}) at Design

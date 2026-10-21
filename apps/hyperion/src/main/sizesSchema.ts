@@ -7,19 +7,22 @@
  * A block's shape is written once as a schema whose type the compiler derives from the block's own
  * type ({@link Schema}), so that every field of the type has its check, of its kind, and a field
  * added to the type without one is a compile error. The check walks the schema: every object holds
- * exactly its schema's keys, every number is finite (whole and at least 0 for a count), every
- * choice is one of its choices, and every figure is a value with no reason or `null` with one. A
- * list's first malformed item alone is named. A pass that describes no view must be marked not
- * sized, with no rule and no samples, and a sized pass must have both. The columns of each sized
- * pass's samples are then checked as the memory series' are: each as long as the samples, -1 at
- * its gaps' samples and nowhere else. The memory's cascades must be the engine's `shadows` peak,
+ * exactly its schema's keys, but an optional key that a block written before it lacks (a binding
+ * cache's layout, R10.T14.b's clamp), every number is finite (whole and at least 0 for a count),
+ * every choice is one of its choices, and every figure is a value with no reason or `null` with
+ * one. A list's first malformed item alone is named. A pass that describes no view must be marked
+ * not sized, with no rule and no samples, and a sized pass must have both. The columns of each
+ * sized pass's samples are then checked as the memory series' are: each as long as the samples, -1
+ * at its gaps' samples and nowhere else. The memory's cascades must be the engine's `shadows` peak,
  * with a reason exactly where none was allocated, and the engine's whole peak must lie between its
- * largest category's and their sum.
+ * largest category's and their sum. A binding cache that states its layout holds the requested
+ * slots with no fallback, and at most them on one.
  */
 
 import type {
   SpikeSizesBakeTimes,
   SpikeSizesBakeWindow,
+  SpikeSizesBinding,
   SpikeSizesColumn,
   SpikeSizesCountColumns,
   SpikeSizesCountPeaks,
@@ -50,7 +53,7 @@ export type NumberSchema = "number" | "nonNegative" | "count" | "index";
  * The schema of a value of type `T`: a check for each of its kinds, derived from the type so that
  * the compiler holds the schema to it. `null` in a type is `nullable`; a string-literal union lists
  * its choices; a list its items' schema; a figure (`{ value, reason }`) its value's; an object every
- * one of its keys'.
+ * one of its keys' ({@link FieldSchema}).
  */
 export type Schema<T> = null extends T
   ? { readonly nullable: Schema<Exclude<T, null>> }
@@ -67,8 +70,18 @@ export type Schema<T> = null extends T
           : [T] extends [{ readonly value: unknown; readonly reason: string | null }]
             ? { readonly figure: Schema<Exclude<T["value"], null>> }
             : [T] extends [object]
-              ? { readonly fields: { readonly [K in keyof T]-?: Schema<T[K]> } }
+              ? { readonly fields: { readonly [K in keyof T]-?: FieldSchema<T, K> } }
               : never;
+
+/**
+ * The schema of an object's key `K` of `T`: its value's, or for an optional key `optional` with its
+ * value's, which passes where the key is absent, a field older blocks were written without, and
+ * where present checks its value, `undefined` refused.
+ */
+export type FieldSchema<T, K extends keyof T> =
+  Partial<Pick<T, K>> extends Pick<T, K>
+    ? { readonly optional: Schema<Exclude<T[K], undefined>> }
+    : Schema<T[K]>;
 
 /** Any schema, as the check walks it. */
 export type AnySchema =
@@ -76,6 +89,7 @@ export type AnySchema =
   | "string"
   | "boolean"
   | { readonly nullable: AnySchema }
+  | { readonly optional: AnySchema }
   | { readonly oneOf: ReadonlyArray<string> }
   | { readonly list: AnySchema }
   | { readonly figure: AnySchema }
@@ -154,6 +168,10 @@ export function checkSchema(
   if ("nullable" in schema) {
     return value === null || checkSchema(value, schema.nullable, path, problems);
   }
+  if ("optional" in schema) {
+    // The fields loop passes an absent key; a present one holds its value, so `undefined` fails.
+    return checkSchema(value, schema.optional, path, problems);
+  }
   if ("oneOf" in schema) {
     if (!schema.oneOf.some((choice) => choice === value)) {
       problems.push(`${path} is not one of ${schema.oneOf.join(", ")}`);
@@ -204,7 +222,9 @@ export function checkSchema(
       continue;
     }
     if (!(key in value)) {
-      problems.push(`${path}.${key} is missing`);
+      if (typeof field === "string" || !("optional" in field)) {
+        problems.push(`${path}.${key} is missing`);
+      }
       continue;
     }
     checkSchema(value[key], field, `${path}.${key}`, problems);
@@ -534,6 +554,14 @@ export const SIZES_REPORT_SCHEMA: Schema<SpikeSizesReport> = {
             fields: {
               cache: CACHE,
               slotCount: "count",
+              layout: {
+                optional: {
+                  fields: {
+                    requestedSlotCount: "count",
+                    fallback: { oneOf: ["none", "binding-limit"] },
+                  },
+                },
+              },
               ceilingAtRequestedSlots: { nullable: "count" },
               ceilingAtDefaultSlots: { nullable: "count" },
             },
@@ -745,6 +773,33 @@ function memoryProblems(memory: SpikeSizesMemory, path: string, problems: string
 }
 
 /**
+ * The binding's problems beyond its shape: a cache that states its layout (R10.T14.b's clamp,
+ * decision-r10-t14b-constants §4) holds the requested slots on its own path, and at most them on a
+ * fallback; one written before the clamp, without it, has nothing more to check.
+ */
+function bindingProblems(binding: SpikeSizesBinding, path: string, problems: string[]): void {
+  for (const [k, { slotCount, layout }] of binding.caches.entries()) {
+    if (layout === undefined) {
+      continue;
+    }
+    let held: boolean;
+    switch (layout.fallback) {
+      case "none":
+        held = slotCount === layout.requestedSlotCount;
+        break;
+      case "binding-limit":
+        held = slotCount <= layout.requestedSlotCount;
+        break;
+    }
+    if (!held) {
+      problems.push(
+        `${path}.caches[${k}].slotCount is its layout's requestedSlotCount with no fallback, and at most it on one`,
+      );
+    }
+  }
+}
+
+/**
  * Whether `value` is a well-formed `sizes` block: its {@link SIZES_REPORT_SCHEMA} shape, the
  * structural check whose problems `problems` takes.
  */
@@ -754,8 +809,8 @@ function conforms(value: unknown, problems: string[]): value is SpikeSizesReport
 
 /**
  * The problems of `value` as the renderer's `sizes` block, each named from `sizes`: its shape, then
- * each pass's samples' columns, then the memory's cascades and engine tally; empty for a
- * well-formed block.
+ * each pass's samples' columns, then the memory's cascades and engine tally, then the binding's
+ * caches; empty for a well-formed block.
  */
 export function sizesReportProblems(value: unknown): string[] {
   const problems: string[] = [];
@@ -766,6 +821,7 @@ export function sizesReportProblems(value: unknown): string[] {
     passProblems(pass, value.segments.length, `sizes.passes[${k}]`, problems);
   }
   memoryProblems(value.memory, "sizes.memory", problems);
+  bindingProblems(value.binding, "sizes.binding", problems);
   return problems;
 }
 

@@ -59,7 +59,7 @@ export interface TerrainSettings {
   readonly vertexPath: TerrainVertexPath;
   /**
    * The patch cache's byte budget, from which its fixed slot count follows (R05 Design note 10),
-   * provisional until R10.T14.b sizes it.
+   * held by R10.T14.b (decision-r10-t14b-constants) on the hard bound, re-sized after R10.T4.b.
    */
   readonly cacheBytes: number;
 }
@@ -138,17 +138,22 @@ export interface ViewBudgetSettings {
 const MIB = 1024 * 1024;
 
 /**
- * The high setting's patch cache budget, 400,000,000 B, provisional until R10.T14.b: R10 Design
- * note 15's research figure, 1.3 × the all-round peak at 100 m (about 1,900 slots, 390 MB at its
- * 206 kB a slot). As built it holds 1,286 lit slots of 311,024 B (`cacheBudget.ts`' `bytesPerPatch`,
- * R10.T14.a, whose count model's figures plan 10 records beside it).
+ * The high setting's patch cache budget, 400,000,000 B, held by R10.T14.b
+ * (decision-r10-t14b-constants) on the hard bound, re-sized after R10.T4.b (the rule in its union
+ * form asked 8,666 high lit slots, 2,996 low lit and 3,764 wireframe on TERRAIN TEST's moon, about
+ * seven times the held 1,286, 422 and 520): R10 Design note 15's research figure, 1.3 × the
+ * all-round peak at 100 m (about 1,900 slots, 390 MB at its 206 kB a slot). As built it holds 1,286
+ * lit slots of 311,024 B (`cacheBudget.ts`' `bytesPerPatch`, R10.T14.a, whose count model's figures
+ * plan 10 records beside it).
  */
 const HIGH_CACHE_BYTES = 400_000_000;
 
 /**
- * The low setting's patch cache budget, 64 MiB, provisional until R10.T14.b, which sizes it after
- * the owner's UHD 620 run: 1,296 slots of R05's spike layout; as built, 422 lit slots of 158,936 B
- * (R10.T14.a).
+ * The low setting's patch cache budget, 64 MiB, held by R10.T14.b (decision-r10-t14b-constants) on
+ * the hard bound, re-sized after R10.T4.b and the owner's UHD 620 run (the rule in its union form
+ * asked 8,666 high lit slots, 2,996 low lit and 3,764 wireframe on TERRAIN TEST's moon, about seven
+ * times the held 1,286, 422 and 520): 1,296 slots of R05's spike layout; as built, 422 lit slots of
+ * 158,936 B (R10.T14.a).
  */
 const LOW_CACHE_BYTES = 64 * MIB;
 
@@ -226,15 +231,17 @@ export const TERRAIN_SETTINGS: Readonly<Record<QualitySetting, TerrainSettings>>
 export const WIREFRAME_TERRAIN_TAU_PX = 4;
 
 /**
- * The slots of the wireframe's terrain cache on either setting (plan R10, R10.T11), provisional
- * until R10.T14.b measures it: Design note 15's sizing rule over its wireframe column (4 px at 1080p),
- * max(1.3 × the all-round peak, 3 × the frustum peak) = max(1.3 × 284, 3 × 76) ≈ 370 at 100 m, and
- * the 20–40% the count model leaves out for relief, the 2:1 rule and the forced region at its
- * upper end, about 520. Sized by its slots, not by the setting's bytes: a wireframe slot holds its
- * heights, offsets on their path and survey mask alone (139,428 B on `baked-offsets`, 45% of a lit
- * slot; 38,028 B on `face-differences`, a quarter), so the high setting's 400 MB would give it
- * 2,868 slots, whose offsets pass a default 128 MiB storage binding, and on that path's fallback
- * 10,518, whose heights pass it too.
+ * The slots of the wireframe's terrain cache on either setting (plan R10, R10.T11), held by
+ * R10.T14.b (decision-r10-t14b-constants) on the hard bound, re-sized after R10.T4.b and the
+ * owner's UHD 620 run (the rule in its union form asked 8,666 high lit slots, 2,996 low lit and
+ * 3,764 wireframe on TERRAIN TEST's moon, about seven times the held 1,286, 422 and 520): Design
+ * note 15's sizing rule over its wireframe column (4 px at 1080p), max(1.3 × the all-round peak,
+ * 3 × the frustum peak) = max(1.3 × 284, 3 × 76) ≈ 370 at 100 m, and the 20–40% the count model
+ * leaves out for relief, the 2:1 rule and the forced region at its upper end, about 520. Sized by
+ * its slots, not by the setting's bytes: a wireframe slot holds its heights, offsets on their path
+ * and survey mask alone (139,428 B on `baked-offsets`, 45% of a lit slot; 38,028 B on
+ * `face-differences`, a quarter), so the high setting's 400 MB would give it 2,868 slots, whose
+ * offsets pass a default 128 MiB storage binding.
  */
 export const WIREFRAME_TERRAIN_SLOTS = 520;
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { SpikeSizesPass, SpikeSizesReport } from "../preload/api";
+import type { SpikeSizesBinding, SpikeSizesPass, SpikeSizesReport } from "../preload/api";
 import { sizesReportOf } from "./fixtures/sizesReport";
 import { checkSchema, isSpikeSizesReport, sizesReportProblems } from "./sizesSchema";
 
@@ -103,6 +103,25 @@ describe("the measured sizes' check (R10.T14.b)", () => {
       "a choice that is not one",
       (b) => ({ ...b, secondView: { ...b.secondView, style: "lit" } }),
       "sizes.secondView.style is not one of photorealistic, wireframe",
+    ],
+    [
+      "a cache's fallback that is not one",
+      (b) =>
+        withBindingCache(b, (cache) => ({
+          ...cache,
+          layout: { requestedSlotCount: 1_286, fallback: "clamped" },
+        })),
+      "sizes.binding.caches[0].layout.fallback is not one of none, binding-limit",
+    ],
+    [
+      "a cache's layout present but undefined",
+      (b) => withBindingCache(b, (cache) => ({ ...cache, layout: undefined })),
+      "sizes.binding.caches[0].layout is not an object",
+    ],
+    [
+      "a cache's requested slots without their fallback",
+      (b) => withBindingCache(b, (cache) => ({ ...cache, layout: { requestedSlotCount: 1_286 } })),
+      "sizes.binding.caches[0].layout.fallback is missing",
     ],
     [
       "a figure with both a value and a reason",
@@ -221,10 +240,45 @@ describe("the measured sizes' check (R10.T14.b)", () => {
         })),
       "sizes.passes[0].counts.allRound has 0 views' peaks, not 2",
     ],
+    [
+      "a cache's slots unlike its requested ones with no fallback",
+      (b) => withBindingCache(b, (cache) => ({ ...cache, slotCount: 1_285 })),
+      "sizes.binding.caches[0].slotCount is its layout's requestedSlotCount with no fallback, and at most it on one",
+    ],
+    [
+      "a cache's slots past its requested ones on a fallback",
+      (b) =>
+        withBindingCache(b, (cache) => ({
+          ...cache,
+          slotCount: 1_287,
+          layout: { requestedSlotCount: 1_286, fallback: "binding-limit" },
+        })),
+      "sizes.binding.caches[0].slotCount is its layout's requestedSlotCount with no fallback, and at most it on one",
+    ],
   ])("refuses %s", (_, change, problem) => {
     const value = changed(change);
     expect(sizesReportProblems(value)).toContain(problem);
     expect(isSpikeSizesReport(value)).toBe(false);
+  });
+
+  it("passes a binding written before the clamp", () => {
+    expect(
+      sizesReportProblems(
+        withBindingCache(sizesReportOf(), ({ layout: _layout, ...cache }) => cache),
+      ),
+    ).toEqual([]);
+  });
+
+  it("passes a cache clamped on its fallback", () => {
+    expect(
+      sizesReportProblems(
+        withBindingCache(sizesReportOf(), (cache) => ({
+          ...cache,
+          slotCount: 1_200,
+          layout: { requestedSlotCount: 1_286, fallback: "binding-limit" },
+        })),
+      ),
+    ).toEqual([]);
   });
 
   it("names a long list's first malformed item alone", () => {
@@ -258,6 +312,17 @@ function noCascades(block: SpikeSizesReport, reason: string | null): SpikeSizesR
       },
     },
   };
+}
+
+/** `block` with its binding's first cache changed by `change`. */
+function withBindingCache(
+  block: SpikeSizesReport,
+  change: (cache: SpikeSizesBinding["caches"][number]) => unknown,
+): unknown {
+  const [first, ...rest] = block.binding.caches;
+  return first === undefined
+    ? block
+    : { ...block, binding: { ...block.binding, caches: [change(first), ...rest] } };
 }
 
 /** `block` with its first pass changed by `change`. */

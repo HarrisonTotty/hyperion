@@ -622,7 +622,7 @@ describe("the sizing rule (Design note 15)", () => {
   /**
    * The model at τ_sel = τ ÷ 1.1 and 100 m, each column's peak over Design note 15's heights, on
    * the boxes' horizon and then the exact one: the sizing rule's inputs, whose slots and bytes plan
-   * 10 records beside the provisional constants (not asserted against them). Re-pinned for
+   * 10 records beside the held constants (not asserted against them). Re-pinned for
    * R10.T14.e's normal margin (2026-10-20): high's boxes from 3,498 / 637–646.
    */
   const AT_SELECTION_TAU: Readonly<Record<Column["name"], readonly [box: Cell, exact: Cell]>> = {

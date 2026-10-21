@@ -51,11 +51,11 @@ describe("the quality settings", () => {
     expect(SETTINGS.high.terrain.cacheBytes).toBeGreaterThan(SETTINGS.low.terrain.cacheBytes);
   });
 
-  it("gives the high setting's cache 400,000,000 B, provisional until R10.T14.b", () => {
+  it("gives the high setting's cache 400,000,000 B, held by R10.T14.b until R10.T4.b", () => {
     expect(SETTINGS.high.terrain.cacheBytes).toBe(400_000_000);
   });
 
-  it("gives the wireframe's cache 520 slots on either setting, provisional until R10.T14.b", () => {
+  it("gives the wireframe's cache 520 slots on either setting, held by R10.T14.b until R10.T4.b", () => {
     expect(WIREFRAME_TERRAIN_SLOTS).toBe(520);
   });
 

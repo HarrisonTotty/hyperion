@@ -28,6 +28,7 @@
  */
 
 import type {
+  SpikeSizesCacheLayout,
   SpikeSizesCascades,
   SpikeSizesEngineTally,
   SpikeSizesForcedMark,
@@ -429,6 +430,27 @@ function peakTimeText(atS: number | null): string {
   return atS === null ? "before the flight" : `${num(atS, 1)} s`;
 }
 
+/**
+ * A cache's requested slots and its fallback past the binding, as its line states them
+ * (decision-r10-t14b-constants §4); nothing for a block written before the clamp, without its
+ * layout.
+ */
+function requestedText(layout: SpikeSizesCacheLayout | undefined): string {
+  if (layout === undefined) {
+    return "";
+  }
+  let path: string;
+  switch (layout.fallback) {
+    case "none":
+      path = "on its own path, no fallback";
+      break;
+    case "binding-limit":
+      path = "on the binding-limit fallback";
+      break;
+  }
+  return ` of ${num(layout.requestedSlotCount)} requested, ${path}`;
+}
+
 /** The cascades' line: as the engine allocated them against T9.a's spec, or none and why. */
 function cascadesText(cascades: SpikeSizesCascades): string {
   const spec = `T9.a's spec ${mib(cascades.specBytes)}`;
@@ -512,7 +534,7 @@ export function sizesSummaryLines(sizes: SizesResults, setting: SpikeSetting): s
     `- maxStorageBufferBindingSize: the adapter's ${figureText(binding.adapterBytes, (b) => `${num(b)} B`)}, requested ${figureText(binding.requestedBytes, (b) => `${num(b)} B`)}, the device's ${figureText(binding.deviceBytes, (b) => `${num(b)} B`)}`,
     ...binding.caches.map(
       (cache) =>
-        `- The ${cache.cache} cache's ${num(cache.slotCount)} slots: its ceiling ${cache.ceilingAtRequestedSlots === null ? "unbounded" : `${num(cache.ceilingAtRequestedSlots)} slots`} at the requested binding, ${cache.ceilingAtDefaultSlots === null ? "unbounded" : `${num(cache.ceilingAtDefaultSlots)} slots`} at WebGPU's default 128 MiB`,
+        `- The ${cache.cache} cache's ${num(cache.slotCount)} slots${requestedText(cache.layout)}: its ceiling ${cache.ceilingAtRequestedSlots === null ? "unbounded" : `${num(cache.ceilingAtRequestedSlots)} slots`} at the requested binding, ${cache.ceilingAtDefaultSlots === null ? "unbounded" : `${num(cache.ceilingAtDefaultSlots)} slots`} at WebGPU's default 128 MiB`,
     ),
     "",
     "### The readout and the load",

@@ -463,7 +463,7 @@ describe("the measured sizes of a run (decision-r10-t14b-measure §2–§6)", ()
     });
   });
 
-  it("states the adapter's, the request's and the device's storage binding, and each cache's ceiling", async () => {
+  it("states the adapter's, the request's and the device's storage binding, and each cache's slots, fallback and ceiling", async () => {
     const engine = await countingRenderEngine();
     const session = new SizedSession();
     const sizes = sizesOf("high", "photorealistic");
@@ -491,7 +491,10 @@ describe("the measured sizes of a run (decision-r10-t14b-measure §2–§6)", ()
       caches: [
         {
           cache: "lit",
-          slotCount: pass.layout.slots.slotCount,
+          // The test planet's high setting on the counting engine's default 128 MiB binding: its
+          // offsets do not bind, so it keeps its 1,962 slots on face-differences.
+          slotCount: 1_962,
+          layout: { requestedSlotCount: 1_962, fallback: "binding-limit" },
           ceilingAtRequestedSlots: bindingCeilingSlots(fields, MAX_REQUESTED_BUFFER_BYTES),
           ceilingAtDefaultSlots: bindingCeilingSlots(fields, WEBGPU_DEFAULT_STORAGE_BINDING_BYTES),
         },

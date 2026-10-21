@@ -8,8 +8,8 @@ import {
 } from "../../../test/countingRenderEngine";
 import { BUFFER_USAGE } from "../../engine/gpuFlags";
 import { EngineUnavailable } from "../../engine/resilientEngine";
-import { MAX_REQUESTED_BUFFER_BYTES } from "../../engine/platform";
-import { TERRAIN_SETTINGS } from "../../quality/qualitySetting";
+import { MAX_REQUESTED_BUFFER_BYTES, MAX_TEXTURE_ARRAY_LAYERS } from "../../engine/platform";
+import { TERRAIN_SETTINGS, type TerrainSettings } from "../../quality/qualitySetting";
 import { PHASE_TABLE_SAMPLES } from "../../appearance/law";
 import { lawFor } from "../../appearance/phase";
 import {
@@ -23,12 +23,13 @@ import {
   type SlotFieldName,
   SURVEY_CELL_CODE_BYTE,
   SURVEY_MASK_BYTES,
+  type TerrainShading,
   terrainSlotLayout,
 } from "../slotLayout";
 import { bindingStages } from "../../../test/wgslStages";
 import { materialBindings, storageBuffersPerStage } from "../../engine/webgpu/materials";
 import { terrainLitMaterialSpec } from "../terrainMaterial";
-import { terrainWireMaterialSpec } from "../terrainWire";
+import { terrainWireMaterialSpec, wireframeTerrainSettings } from "../terrainWire";
 import { terrainMaterialSpec } from "./material";
 import type { TerrainLayers } from "../workers/messages";
 import { allocationTally } from "./allocationTally";
@@ -53,6 +54,8 @@ import {
   SURVEY_FIN_LINES,
   surveyCellCode,
   surveyedAt,
+  type TerrainLayout,
+  type TerrainLimits,
   TerrainResources,
   terrainLayout,
 } from "./resources";
@@ -489,14 +492,14 @@ describe("the terrain materials' storage by stage (R10.T10.c; decision-r10-t10b-
 });
 
 describe("the normals atlas", () => {
-  it("holds the high setting's tiles in one layer and its fallback's in two, under 8,192 texels", () => {
+  it("holds the high setting's 1,962 spike tiles in one layer and 3,904 in two, under 8,192 texels", () => {
     const high = normalsAtlasLayout(129, 1962, 8192, 256);
     expect([high.layers, high.columns, high.rows]).toEqual([1, 62, 32]);
-    const fallback = normalsAtlasLayout(129, 3904, 8192, 256);
-    expect(fallback.layers).toBe(2);
-    expect(fallback.widthTexels).toBeLessThanOrEqual(8192);
-    expect(fallback.heightTexels).toBeLessThanOrEqual(8192);
-    expect(fallback.tilesPerLayer * fallback.layers).toBeGreaterThanOrEqual(3904);
+    const twoLayers = normalsAtlasLayout(129, 3904, 8192, 256);
+    expect(twoLayers.layers).toBe(2);
+    expect(twoLayers.widthTexels).toBeLessThanOrEqual(8192);
+    expect(twoLayers.heightTexels).toBeLessThanOrEqual(8192);
+    expect(twoLayers.tilesPerLayer * twoLayers.layers).toBeGreaterThanOrEqual(3904);
   });
 
   it("gives every slot its own tile", () => {
@@ -525,14 +528,18 @@ describe("a terrain layout", () => {
     expect(layout.slots).toEqual(terrainSlotLayout(HIGH));
   });
 
-  it("falls back to FaceDifferences on the high setting under WebGPU's default limits", () => {
+  it("falls back to FaceDifferences on the high setting under WebGPU's default limits, keeping its slot count", () => {
     const layout = terrainLayout(HIGH, DEFAULT_LIMITS);
     expect(layout.vertexPath).toBe("face-differences");
     expect(layout.fallback).toBe("binding-limit");
-    expect(layout.slots).toEqual(terrainSlotLayout({ ...HIGH, vertexPath: "face-differences" }));
+    expect([layout.requestedSlotCount, layout.slots.slotCount]).toEqual([1_962, 1_962]);
+    expect(layout.slots.fields).toEqual(
+      terrainSlotLayout({ ...HIGH, vertexPath: "face-differences" }).fields,
+    );
     expect(layout.slots.slotCount * HEIGHTS_BYTES).toBeLessThanOrEqual(
       DEFAULT_LIMITS.maxStorageBufferBindingSize,
     );
+    expect(normalsAtlasOf(layout).layers).toBe(1);
   });
 
   it("gives no fitted layout where the atlas cannot hold one tile, which terrainLayout throws for (R10.T14.d)", () => {
@@ -549,6 +556,165 @@ describe("a terrain layout", () => {
     expect(layout.fallback).toBe("none");
     expect(layout.slots.slotCount).toBe(terrainSlotLayout(LOW).slotCount);
     expect(normalsAtlasOf(layout).layers).toBe(1);
+  });
+});
+
+/** `terrain` with a cache of `slots` slots of its own layout in `shading`. */
+function withSlots(
+  terrain: TerrainSettings,
+  shading: TerrainShading,
+  slots: number,
+): TerrainSettings {
+  return { ...terrain, cacheBytes: slots * terrainSlotLayout(terrain, shading).bytesPerSlot };
+}
+
+/** WebGPU's default limits with a storage binding of `bytes`. */
+function bindingOf(bytes: number): TerrainLimits {
+  return { ...DEFAULT_LIMITS, maxStorageBufferBindingSize: bytes };
+}
+
+/** Whether every storage buffer of `layout`, over all its slots, fits a binding of `bytes`. */
+function bindsWithin(layout: TerrainLayout, bytes: number): boolean {
+  return layout.slots.fields.every(
+    (field) => field.storage !== "storage-buffer" || field.bytes * layout.slots.slotCount <= bytes,
+  );
+}
+
+/** A layout's path, fallback, requested slots and slots. */
+function fitOf(layout: TerrainLayout): unknown {
+  return [layout.vertexPath, layout.fallback, layout.requestedSlotCount, layout.slots.slotCount];
+}
+
+describe("a terrain layout past the device's storage binding (decision-r10-t14b-constants §4)", () => {
+  /** The held constants' caches: their settings, shadings and slots. */
+  const HELD: ReadonlyArray<{
+    readonly cache: string;
+    readonly terrain: TerrainSettings;
+    readonly shading: TerrainShading;
+    readonly slots: number;
+  }> = [
+    { cache: "low lit", terrain: LOW, shading: "lit", slots: 422 },
+    { cache: "high lit", terrain: HIGH, shading: "lit", slots: 1_286 },
+    {
+      cache: "low wireframe",
+      terrain: wireframeTerrainSettings("low"),
+      shading: "wire",
+      slots: 520,
+    },
+    {
+      cache: "high wireframe",
+      terrain: wireframeTerrainSettings("high"),
+      shading: "wire",
+      slots: 520,
+    },
+  ];
+  const LIMITS = [
+    { limitsName: "WebGPU's default limits", limits: DEFAULT_LIMITS },
+    { limitsName: "a raised 1 GiB binding", limits: RAISED_LIMITS },
+  ];
+
+  it.each(
+    LIMITS.flatMap(({ limitsName, limits }) =>
+      HELD.map(({ cache, terrain, shading, slots }) => ({
+        limitsName,
+        limits,
+        cache,
+        terrain,
+        shading,
+        slots,
+      })),
+    ),
+  )(
+    "lays the held $cache cache out as before at $limitsName, on its own path and slots",
+    ({ limits, terrain, shading, slots }) => {
+      const own = terrainSlotLayout(terrain, shading);
+      expect(own.slotCount).toBe(slots);
+      expect(terrainLayout(terrain, limits, shading)).toEqual({
+        shading,
+        vertexPath: terrain.vertexPath,
+        fallback: "none",
+        requestedSlotCount: slots,
+        slots: own,
+        atlas:
+          shading === "wire"
+            ? null
+            : normalsAtlasLayout(
+                terrain.normals === "double" ? 129 : 65,
+                slots,
+                limits.maxTextureDimension2D,
+                MAX_TEXTURE_ARRAY_LAYERS,
+              ),
+      });
+    },
+  );
+
+  it("keeps 2,000 high lit slots on face-differences at a 128 MiB binding, clamped to its 1,948", () => {
+    const layout = terrainLayout(withSlots(HIGH, "lit", 2_000), DEFAULT_LIMITS, "lit");
+    expect(fitOf(layout)).toEqual(["face-differences", "binding-limit", 2_000, 1_948]);
+    expect(layout.slots.fields).toEqual(
+      terrainSlotLayout({ ...HIGH, vertexPath: "face-differences" }, "lit").fields,
+    );
+    expect(bindsWithin(layout, DEFAULT_LIMITS.maxStorageBufferBindingSize)).toBe(true);
+    // The horizon map binds first: one slot more would not fit.
+    expect((layout.slots.slotCount + 1) * HORIZON_MAP_BYTES).toBeGreaterThan(
+      DEFAULT_LIMITS.maxStorageBufferBindingSize,
+    );
+  });
+
+  it("keeps the high wireframe's 3,764 slots on face-differences at a 128 MiB binding, where they bind", () => {
+    const wire = wireframeTerrainSettings("high");
+    expect(terrainSlotLayout(wire, "wire").bytesPerSlot).toBe(139_428);
+    const layout = terrainLayout(withSlots(wire, "wire", 3_764), DEFAULT_LIMITS, "wire");
+    expect(fitOf(layout)).toEqual(["face-differences", "binding-limit", 3_764, 3_764]);
+    expect(bindsWithin(layout, DEFAULT_LIMITS.maxStorageBufferBindingSize)).toBe(true);
+  });
+
+  it("lays high lit's own 1,286 slots out on face-differences under a binding below their offsets, which it refused before", () => {
+    const bindingBytes = 128_000_000;
+    // The offsets, 130,400,400 B, pass the binding; so did the horizon map of the fallback's count
+    // as its bytes gave it, 1,908 slots.
+    expect(1_286 * OFFSETS_BYTES).toBeGreaterThan(bindingBytes);
+    expect(
+      terrainSlotLayout({ ...HIGH, vertexPath: "face-differences" }, "lit").slotCount *
+        HORIZON_MAP_BYTES,
+    ).toBeGreaterThan(bindingBytes);
+    const layout = terrainLayout(HIGH, bindingOf(bindingBytes), "lit");
+    expect(fitOf(layout)).toEqual(["face-differences", "binding-limit", 1_286, 1_286]);
+    expect(bindsWithin(layout, bindingBytes)).toBe(true);
+  });
+
+  it("clamps a setting already on face-differences to that path's ceiling", () => {
+    // ⌊20,000,000 ÷ 68,896⌋: the horizon map binds first.
+    const layout = terrainLayout(LOW, bindingOf(20_000_000), "lit");
+    expect(fitOf(layout)).toEqual(["face-differences", "binding-limit", 422, 290]);
+    expect(normalsAtlasOf(layout)).toEqual(
+      normalsAtlasLayout(65, 290, DEFAULT_LIMITS.maxTextureDimension2D, MAX_TEXTURE_ARRAY_LAYERS),
+    );
+  });
+
+  it("binds within the device's buffer limit where it is below its storage binding", () => {
+    const limits = { ...RAISED_LIMITS, maxBufferSize: DEFAULT_LIMITS.maxStorageBufferBindingSize };
+    const layout = terrainLayout(withSlots(HIGH, "lit", 2_000), limits, "lit");
+    expect(fitOf(layout)).toEqual(["face-differences", "binding-limit", 2_000, 1_948]);
+  });
+
+  it("refuses a binding too small for one slot", () => {
+    const limits = bindingOf(HEIGHTS_BYTES - 1);
+    expect([
+      fittedTerrainLayout(HIGH, limits, "lit"),
+      fittedTerrainLayout(wireframeTerrainSettings("high"), limits, "wire"),
+    ]).toEqual([null, null]);
+    expect(() => terrainLayout(HIGH, limits, "lit")).toThrow(
+      `the lesser of the device's storage-binding and buffer limits, ${HEIGHTS_BYTES - 1} B, holds 0 of the terrain's slots`,
+    );
+  });
+
+  it("refuses a binding for fewer than the six roots' slots, and holds six", () => {
+    const wire = wireframeTerrainSettings("high");
+    expect(fittedTerrainLayout(wire, bindingOf(6 * HEIGHTS_BYTES - 1), "wire")).toBeNull();
+    expect(fittedTerrainLayout(wire, bindingOf(6 * HEIGHTS_BYTES), "wire")?.slots.slotCount).toBe(
+      6,
+    );
   });
 });
 
@@ -711,6 +877,47 @@ describe("the terrain's resources", () => {
     }).not.toThrow();
     expect(rebuilt).toEqual(["face-differences"]);
     expect(resources.layout.fallback).toBe("binding-limit");
+    expect(resources.field("offsets")).toBeNull();
+    expect(resources.layout.slots.slotCount).toBe(terrainSlotLayout(HIGH).slotCount);
+    resources.dispose();
+  });
+
+  it("rebuild the held high lit layout onto a binding below its offsets at its own slots, on face-differences", async () => {
+    const engine = await countingRenderEngine({
+      maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
+      maxBufferSize: MAX_REQUESTED_BUFFER_BYTES,
+    });
+    const resources = new TerrainResources(engine, HIGH, WGS84, "lit");
+    expect(resources.layout.vertexPath).toBe("baked-offsets");
+    // Below the offsets' 130,400,400 B, where the layout threw before (R10.T14.d's finding).
+    const lesser = await fakeDevice({
+      maxStorageBufferBindingSize: 128_000_000,
+      maxBufferSize: 2 ** 28,
+    });
+    expect(() => {
+      engine.restore(lesser);
+    }).not.toThrow();
+    expect(fitOf(resources.layout)).toEqual(["face-differences", "binding-limit", 1_286, 1_286]);
+    expect(resources.field("horizon-map")?.bytes).toBe(1_286 * HORIZON_MAP_BYTES);
+    resources.dispose();
+  });
+
+  it("rebuild a 2,000-slot high lit layout onto a 128 MiB adapter, clamped to 1,948 slots within its limits", async () => {
+    const engine = await countingRenderEngine({
+      maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
+      maxBufferSize: MAX_REQUESTED_BUFFER_BYTES,
+    });
+    const resources = new TerrainResources(engine, withSlots(HIGH, "lit", 2_000), WGS84, "lit");
+    expect(fitOf(resources.layout)).toEqual(["baked-offsets", "none", 2_000, 2_000]);
+    // The counting engine refuses any buffer or texture past the device's limits.
+    const lesser = await fakeDevice({
+      maxStorageBufferBindingSize: 2 ** 27,
+      maxBufferSize: 2 ** 28,
+    });
+    expect(() => {
+      engine.restore(lesser);
+    }).not.toThrow();
+    expect(fitOf(resources.layout)).toEqual(["face-differences", "binding-limit", 2_000, 1_948]);
     expect(resources.field("offsets")).toBeNull();
     resources.dispose();
   });

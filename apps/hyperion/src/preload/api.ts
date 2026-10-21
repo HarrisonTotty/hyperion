@@ -776,16 +776,40 @@ export interface SpikeSizesBinding {
   /** The device's own (`RenderEngine.capabilities`), B. */
   readonly deviceBytes: SpikeFigure<number>;
   /**
-   * Each cache's binding ceiling, the most slots whose storage fields fit one binding
-   * (`bindingCeilingSlots`), at the requested binding and at WebGPU's default 128 MiB; `null` where
-   * no storage field has bytes.
+   * Each cache's slots as last read, how its layout met the device's binding, and its binding
+   * ceiling, the most slots whose storage fields fit one binding (`bindingCeilingSlots`), at the
+   * requested binding and at WebGPU's default 128 MiB; `null` where no storage field has bytes.
    */
   readonly caches: ReadonlyArray<{
     readonly cache: SpikeSizesCache;
     readonly slotCount: number;
+    /**
+     * The slots the layout was asked for and its fallback past the binding; absent from a block
+     * written before R10.T14.b's clamp, which reads as before.
+     */
+    readonly layout?: SpikeSizesCacheLayout;
     readonly ceilingAtRequestedSlots: number | null;
     readonly ceilingAtDefaultSlots: number | null;
   }>;
+}
+
+/**
+ * How a cache's layout met the device's storage binding (`TerrainLayout`'s,
+ * decision-r10-t14b-constants §4): the slots the setting asked for and the fallback that kept or
+ * clamped them.
+ *
+ * @remarks
+ * The cache's `slotCount` is `requestedSlotCount` where the fallback is `none`, and at most it on
+ * `binding-limit`.
+ */
+export interface SpikeSizesCacheLayout {
+  /** The setting's own slot count, over its cache budget on its own path, before any fallback. */
+  readonly requestedSlotCount: number;
+  /**
+   * `binding-limit` where the layout changed path to `face-differences` or clamped its slots to
+   * the device's binding, else `none`.
+   */
+  readonly fallback: "none" | "binding-limit";
 }
 
 /** The second view (§4): the craft instrument at its chase pose as a session view. */

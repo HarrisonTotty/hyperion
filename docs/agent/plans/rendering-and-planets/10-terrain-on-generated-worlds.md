@@ -1160,6 +1160,13 @@ targets at header 21 (below).
     _As amended by R10.T14.e: on the boxes' horizon the columns are now ×1.60–1.92, ×1.06–1.38 and
     ×1.05–1.72 the note's; on the exact one ×1.51–1.82, ×0.98–1.25 and ×0.89–1.33 (T14.e's
     record)._
+    _As measured by R10.T14.b (TERRAIN TEST's moon on the RTX 3080, at the spike's 1,398 × 793 and
+    806 × 431 canvases; decision-r10-t14b-constants): on the hard bound, whose k_n is 270–540 at
+    L4–L16 against this note's 5, the rule in its union form asks 8,666 high lit slots (2.70 GB),
+    2,996 low lit (455 MiB) and 3,764 wireframe, the frustum term governing everywhere and the high
+    setting's all-round set never resident (11% at most), so its rule is the frustum rule; the
+    constants are held at 400,000,000 B, 64 MiB and 520 slots until R10.T4.b's statistical bound
+    and, for the low setting, the UHD 620 run._
 
 16. **The client fetches what the camera can resolve, and nothing more.** A body's field is wanted
     once it is the camera's local body or within the hand-over range of Design note 13 of any view's
@@ -3538,6 +3545,16 @@ RESOLUTION       410 m
   as a session view; no views-check run, since TERRAIN TEST's track is a body-fixed function of
   script time and its clock reaches selection through nothing; eviction in place of rebakes
   deferred; the constants set by a second ruling on the figures._
+  _Ruled (decision-r10-t14b-constants, 2026-10-21): the rule is read in its union form over the
+  whole run, max(1.3 AR∪, 3 F∪) plus the forced region once, and on the high setting as the
+  frustum rule, its all-round set never resident; on the hard bound, at the spike's canvases, it
+  asks 8,666 high lit slots, 2,996 low lit and 3,764 wireframe, about seven times the provisional
+  constants, which are held at 400,000,000 B, 64 MiB and 520 slots, since half the slots are the
+  selection's draw budget, the high figure passes the brainstorm's 3 GB failure line and the low
+  setting waits on the owner's UHD 620 run; they are re-sized once by this rule, within the
+  resident ceilings and a timed run's GPU rows, after R10.T4.b's statistical bound; a layout past
+  the device's storage binding keeps its slot count on `face-differences`, clamped to the
+  binding's ceiling._
 - **R10.T14.d The hand-over's compile stall** (new, decision-r10-t14a §1, from
   decision-r10-t16-leans §2; amended by decision-r10-t14d-stall, 2026-10-20). A hand-over stopped
   the page for 1,317 ms with no animation frame on low, a defect under the guide's Motion rule that
@@ -3718,7 +3735,8 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   about 935 at τ_sel on the boxes' horizon, what the cache holds today, and about 676 on the exact
   one, the estimate after R10.T14.e, each with the descent's 71 forced patches (T14.a's record).
   T14.b decides after the UHD 620 run._ _After R10.T14.e: about 708 at τ_sel on the boxes' horizon
-  (T14.e's record)._
+  (T14.e's record)._ _After R10.T14.b: 2,996 slots (455 MiB) measured on the hard bound, ×7.1 the
+  422; held at 64 MiB until the UHD 620 run and R10.T4.b (decision-r10-t14b-constants)._
 - **Coarse weights assume Gaussian slopes.** The slope-exceedance probability of Design note 3
   treats the unresolved slope as Gaussian; ridged and cratered terrain is not. The ten-point test is
   the guard; if it fails on a class of world, the fallback is counting a sparse sample of finest
@@ -11143,6 +11161,362 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
   - _The terrain readout is not run on the spike_ (decision-r10-t14c-guide, Q1): `VIEW`'s primary
     runs it at 4 Hz on the height workers, so T14.b's worker-time figures state that they exclude
     it, or T14.b adds it.
+- **Deviations in T14.b, as built** (2026-10-21; lane r10-sizes, on `rendering-and-planets` at
+  `b1398bb4`; decision-r10-t14b-measure and decision-r10-t14b-constants).
+  - _Files._ New: `view/spike/sizeCount.ts` (`PassSizeCounter`), `view/spike/bakeClock.ts`
+    (`BakeClock`), `view/spike/spikeSizes.ts` (`SpikeSizes`, the option's measurement),
+    `main/sizesSchema.ts` and `main/sizesResults.ts`, with their tests,
+    `main/fixtures/sizesReport.ts`, `selectCounting.test.ts`, `DescentSpikeSizes.test.tsx`,
+    `SpikeAppSizes.test.tsx`, `spikeControllerSizes.test.ts` and `spikeRunSizes.test.ts`. Changed:
+    `select.ts` (two counting options), the spike's `spikeRun.ts`, `DescentSpike.tsx`, `SpikeApp.tsx` and `spikeController.ts`,
+    `preload/{api,spikeLaunch}.ts`, `main/{cli,index,results,spike,spikeReport,spikeSession}.ts`,
+    `vitest.config.mts` (the new DOM tests), `scripts/descentSpike.sh` (a comment); in batch 2
+    `gpu/resources.ts` (the binding's clamp) with its tests, the constants' doc comments alone in
+    `qualitySetting.ts`, `cacheBudget.ts` and `slotLayout.ts`, `terrainWireSelection.test.ts`'
+    stale module remark (ruling 6(a)), and the measurements' README. The four results files under
+    `docs/measurements/descent-spike/`. No wire, protocol, DTO, golden, generator version or Rust
+    change. Main's two test fixes
+    (`DescentSpike.test.tsx`'s missing site elevation waits for the measuring line to go;
+    `bodyDescent.test.ts`' refusal over every candidate takes the harness's patience) ride in the
+    harness's second commit.
+  - _The option._ `--sizes on|off`, off by default and absent from the launch, the run's options and
+    the summary when off, so that every other run and file is as before (T14.c's tests unedited);
+    refused with `--world test-planet`. On, over a generated world:
+    - _The counts_ (`PassSizeCounter`, ruling §2): at each pass's first selection in each whole
+      second of script time, five unbudgeted re-selections of the pass's own input
+      (`TerrainPass.observe`'s `onSelect`), over the counter's own shallow copy of the planet, so
+      that `select.ts`' memo and the pass's selection are untouched (tested frame for frame on two
+      real passes): F at the pass's margins; F₀ at none; AR with every view `allRound`; F′ and AR′
+      with `occluderHeightM` at the diagnostic depth. A view's count is the leaves its bit marks,
+      forced leaves left out; the forced region is counted once.
+    - _`select.ts`' options_, counting only, never set by the pass: `ViewSelectionInput.allRound`
+      (no frustum planes, its horizon alone culling) and `SelectionInput.occluderHeightM` (in place
+      of `lowestHeightM` in every view's horizon, the boxes untouched). Absent, every selection is as
+      before, bit for bit (`select.test.ts`' digests unedited). On the count model's premise planet
+      an all-round view counts 1.000–1.016 times `patchCountModel`'s `allRound` on the boxes (low at
+      100 km 196 against 193, held to [0.99, 1.02]).
+    - _The second view_ (§4): the craft instrument at its chase pose is a `SpikeSessionView` under
+      `instrumentViewId(1)` (`InstrumentSlot` is 1 or 2, so not the ruling's 0), `secondary` (weight
+      0.25), in the main view's style on high and the wireframe on low's photorealistic run; the
+      orbit instrument stays R02's. Its viewport is the craft stage's: 376 × 140 px on high and
+      80 × 140 px on low (571 and 275 px wide for its first frame). The views are found in a
+      selection's input by weight, then viewport.
+    - _The bake clock_ (§6(c)): each bake's post to reply and an estimate of the worker's own time
+      (the reply less the later of its post and the worker's previous reply of any kind), from the
+      flight's first frame; baked less resident is "never resident".
+    - _The readout_ (§6(f)): `VIEW`'s `GroundReadouts` on the main view at 250 ms, its answers not
+      shown, its guards' `failComputation` counted and never passed on, so that the measurement's
+      readout cannot end a run (none was called in the four runs).
+    - _Memory and the binding_ (§6(d), §6(g)): the session's `memory()` at 1 Hz; each cache's
+      allocation; the engine's allocations by category (`RenderEngine.onAllocation`), the cascades
+      as built from its `shadows` peak (R10.T9.b landed before the runs); the adapter's reported,
+      the engine's requested and the device's `maxStorageBufferBindingSize` and each cache's binding
+      ceiling there and at WebGPU's default; the 1-minute load at the start, each minute and the
+      end. These sit in the `sizes` block, not the run block, so that no other run's file gains a
+      field (a deviation from the ruling's "run block adds").
+    - _The results_ (§6(g)): an optional `sizes` block (`RESULTS_VERSION` stays 6; files without it
+      read as before) and a "Sizes" section in the summary. A malformed block is written beside the
+      results as `<name>-sizes-rejected.json` rather than losing the run (none was). The 1 Hz
+      columns keep the moment, each view's five counts, the forced region and its residency, the
+      slots in use and the shares' numerators; the pass's own counts are kept by segment. Formatted,
+      the four files are 271–323 kB.
+  - _Deviations from the ruling's wording._ The diagnostic depth's resident term walks the resident
+    patches over the leaves of F, AR and the pass's own selection (`PatchCache` has no public walk
+    of its patches), not every resident bake; a resident patch over none of them is not read. The
+    peaks' height is the craft's over its stretch's floor (`DescentPose.heightAboveFloorM`), a lower
+    bound of its height above the ground beneath. The forced region's lead is timed to touchdown
+    (the first frame down to the last segment's end), the session's contact rule firing in the very
+    step that first selects the forced patches; that first frame is recorded beside it. The
+    stand-in share is standing in ÷ selected. Per-segment figures are taken on every run. The
+    horizon A/B is by the whole run, not per segment (rulings 6(b) and the constants' item 8): the
+    results keep each pass's percentiles by label for the whole run.
+  - _The runs_ (RTX 3080, hidden, `--world terrain-test --sizes on`, seed 7, 1,230 s of script; T
+    and the frame rows null, "no window shown"):
+
+    | File                       | Setting, style       | Lock                          | Start–end (CDT)   | 1-min load: before launch; the client's start; over the run |
+    | -------------------------- | -------------------- | ----------------------------- | ----------------- | ----------------------------------------------------------- |
+    | `2026-10-21-effect-high-2` | high, photorealistic | quiet window 7, heavy and GPU | 08:50:55–09:14:27 | 0.31; 3.91; 3.4–6.7                                         |
+    | `2026-10-21-effect-high`   | high, wireframe      | heavy and GPU                 | 07:28:39–07:50:37 | 4.05; 6.03; 4.0–14.4                                        |
+    | `2026-10-21-effect-low`    | low, photorealistic  | heavy and GPU (565 s waited)  | 08:00–08:22:38    | —; 6.48; 2.4–7.9                                            |
+    | `2026-10-21-effect-low-2`  | low, wireframe       | heavy and GPU                 | 08:22:38–08:44:28 | 3.15; 3.08; 1.3–7.4                                         |
+
+    The run's own load (Electron, three height workers, the two-worker server) is 2.5–7 on a quiet
+    machine. The horizon A/B's run B (09:14:29–09:38:03, in the same window) is kept in the lane's
+    scratch, not here.
+
+  - _The world as flown._ The occluder as built is the level table's lowest row, its row 13,
+    −66,604.0 m after R09.T8.d, and T14.c's ceiling 79,837.1 m, so the arc holds near 80 km and the
+    flare plunges about 80 km in about 90 s: the flare's demand figures come from that plunge,
+    labelled, and are no T15 baseline (decision-r09-t8d-reach §5). R05's high segments are Earth's:
+    the orbit coast at 7.67 km/s at 400 km is 5.1 times the moon's circular speed there (T14.c's
+    finding 5).
+    The header's lowest sampled height, the diagnostic occluder, is −9,538.1 m.
+  - _The peaks_ (at τ_sel, unbudgeted; F per view, then the unions F∪ and AR∪, each whole run, then
+    below 4 km over the floor; forced once):
+
+    | Run, cache                    | Views                        | F                             | F∪                     | AR∪                     | Forced |
+    | ----------------------------- | ---------------------------- | ----------------------------- | ---------------------- | ----------------------- | ------ |
+    | High photorealistic, lit      | main 1 px 1080p, second 1 px | 2,841 / 2,613 (2,039 / 2,081) | 2,853 at 22 km (2,274) | 3,993 at 14 km (3,959)  | 107    |
+    | High wireframe, wireframe     | main and second, 4 px        | 1,219 / 1,219 (817 / 817)     | 1,219 at 140 km (884)  | 1,759 at 14 km (1,751)  | 107    |
+    | Low photorealistic, lit       | main 2 px 720p               | 963 (721)                     | 963 at 155 km (721)    | 1,483 at 7.5 km (1,417) | 107    |
+    | Low photorealistic, wireframe | second, 4 px                 | 421 (409)                     | 421 at 7.5 km (409)    | 709 at 2 m (709)        | 106    |
+    | Low wireframe, wireframe      | main and second, 4 px        | 1,172 / 962 (899 / 607)       | 1,172 at 36 km (899)   | 1,754 at 18 km (1,388)  | 107    |
+
+    The main views' F peaks fall in the descent arc, 22–156 km up, and their AR peaks in the flare's
+    plunge, 7–18 km up; low's instrument cache peaks lower (F 421 at 7.5 km in the flare, AR 709 at
+    2 m in the hover), and low wireframe's second view's F 962 at 16 km in the flare. Below 4 km the
+    peaks are 63–100% of the whole run's. The per-view counts are bit counts of one
+    selection tree, so the chase camera, riding with the craft, counts the main view's leaves again.
+
+  - _The sizing rule's forms_ (slots, then bytes at the as-built slot):
+
+    | Run, cache                               | Per-view sum Σ_v max(1.3 AR, 3 F) + forced | (a) same sample | (b) union              | (c) frustum | As built             |
+    | ---------------------------------------- | ------------------------------------------ | --------------- | ---------------------- | ----------- | -------------------- |
+    | High photorealistic, lit (311,024 B)     | 16,469; 5,122,254,256 B                    | 15,678          | 8,666; 2,695,333,984 B | 16,469      | 1,286; 400,000,000 B |
+    | High wireframe (139,428 B)               | 7,421; 1,034,695,188 B                     | 7,314           | 3,764; 524,806,992 B   | 7,421       | 520; 72,502,560 B    |
+    | Low photorealistic, lit (158,936 B)      | 2,996; 476,172,256 B                       | 2,889           | 2,996                  | 2,996       | 422; 64 MiB          |
+    | Low photorealistic, wireframe (38,028 B) | 1,369; 52,060,332 B                        | 1,362           | 1,369                  | 1,369       | 520; 19,774,560 B    |
+    | Low wireframe (38,028 B)                 | 6,509; 247,524,252 B                       | 5,498           | 3,623; 137,775,444 B   | 6,509       | 520; 19,774,560 B    |
+
+    The frustum term governs in every case (3 F∪ against 1.3 AR∪: 8,559 against 5,191 on high
+    photorealistic). Against T14.e's model at τ_sel at 100 m on an Earth (high 2,790 / 500–506,
+    low 490 / 92–105, wireframe 352 / 88–91, the boxes; 2,741, 462 and 319 all round on the exact
+    horizon), the measured counts below 4 km are AR ×1.4 and F ×4.5 on high, AR ×2.9 and F ×6.9 on
+    low, AR ×5.0 and F ×9.7 for the wireframe: a different premise (a Moon-like world of R09's
+    relief, not an Earth at k₀ = 5).
+
+  - _The split of T11's "twenty times"_ (ruling 6(a); decision-r10-t14a §3). TERRAIN TEST's ship
+    pose, ground point and seat attitude are functions of script time in body-fixed axes
+    (`terrainShipBodyFixedM`, `terrainShipGround`, `shipAttitude`), and its `sceneS = 60 tS` only
+    turns the moon, moves the sun and sets the clock, so the scene's clock never reaches selection:
+    a 1 s/s scene flies the same track and selects the same patches, and T11's attribution of the
+    factor to the clock is corrected. The spike's 1 s/s logs split it instead:
+    - the motion margin: F ÷ F₀ at 1.00–1.03 at the peaks (1.15 at most, low's second view);
+    - the bound ratio: the moon's level table has k_n = ε_n P₀ ÷ e_n of 49 at L0, 270–540 at
+      L4–L16 (the hard bound: the workers' table carries no σ_n, so `omittedSigmaM` is +∞), against
+      the count model's k₀ = 5 and R05's golden table's about 15;
+    - the boxes: at F's peak the seen leaves' boxes stand (median) 44 km at L7, 26 km at L8, 15 km
+      at L9 and 7.2 km at L10, R09's remaining reach (T8.d's 3.9 times the realised relief); the
+      largest at L13–L17 are 1.6–11.4 km over the runs, and low's starved instrument's 130–168 km at
+      every level from L4, with nothing resident to tighten them;
+    - the diagnostic occluder: below;
+    - T14.a's factors beside them: the margin's cap ×1.15–1.22, k₀ = 15 ×3.5–6.7 and the relief
+      ×4.7–9.5.
+
+    So the margin is a few per cent, and the bound and the boxes are the rest.
+
+  - _The diagnostic occluder's A/B_ (paired in the same flight, §5; the ruling replaces "the same
+    descent once more"). The occluder at −9,538.1 m against −66,604.0 m as built moves no AR peak
+    on any run (AR′ = AR: the tall boxes, not the occluder, keep the far patches). On the adopted
+    union form (b) it prices 0 slots on every run, under the 10% line. On the per-view sum it prices
+    705 slots on high photorealistic (6.8% of the sized all-round peak, Σ 1.3 AR, 10,382 slots) and
+    609 slots on high wireframe (13.3% of 4,573), both from the second view's F peak (2,613 →
+    2,378; 1,219 → 1,016), and 0 on both low runs; high wireframe's 13.3% on that sum was told to
+    main, a deferred finding (below).
+  - _The all-round set's residency_ (§3). On high photorealistic the resident share of AR∪ peaked
+    at 11.1% (433 s, 189 km up), never resident; the swept share reached 100% (263 s), and the cap,
+    slots ÷ AR∪ at its peak, is 0.32. The other runs' resident share reached 100% at about 190 km
+    up, where AR∪ is a few coarse patches, which says nothing near the ground; their caps at AR∪'s
+    peak are 0.28–0.30, and low's wireframe second view's resident share peaked at 2.7%. The descent
+    never turns, its views look along the track, and `VIEW`'s LOOK turns are not flown: a "never"
+    is the descent's.
+  - _The streaming on the provisional caches_ (per segment; T8.c's north look not flown again,
+    §6(e)). The lit caches and the main views' wireframe caches are full from the descent arc on,
+    and their selections budget-limited in nearly every frame of the flare and the low fast pass
+    (all but 228 of high photorealistic's 6,622 in the flare) and of the slowdown but on high
+    photorealistic (124 of 3,475 there); low's instrument cache, starved (below), held 0–9 slots
+    through them. The stand-in share (standing in ÷ selected) in the low pass and
+    the slowdown: high photorealistic 0.61 and 0.99 (drawn 20 of up to 283 in the slowdown), high
+    wireframe 0.84 and 0.90, low photorealistic 0.86 and 0.91, low wireframe 0.86 and 0.90. The
+    height workers bake 7–9 a second there on high and 15–29 on low; post to reply p50 650–850 ms
+    on high and 200–410 ms on low; the worker's own time p50 100–420 ms a bake, rising with the
+    load, against T14.c's 64–83 ms in-process; these figures include the 4 Hz readout's 4,583–4,947
+    queries a run on the same workers. Of the flight's bakes 20% (high photorealistic, 731 of
+    3,653), 34% (high wireframe), 20% (low photorealistic) and 6% (low wireframe) never became
+    resident, mostly in the flare and the low pass: T8.c's first lever (a bake landing after its key
+    left the request list is dropped). T8.c's figures beside them: 9–11 bakes a second, 150–175 of
+    200–250 drawn patches standing in, at 1.8–2.3 km/s and 4 km, in the views check's north look.
+  - _The forced region_ (T14.c's findings 3 and 4). It is first selected at 990.8 s (the session's
+    contact rule, then 105 forced, none resident), every forced patch resident from 1,168–1,177 s,
+    touchdown at 1,199.9 s with all 99 resident: a lead of 22.9 s (high photorealistic), 25.9 s
+    (high wireframe), 30.9 s (low photorealistic) and 31.9 s (low wireframe). On low photorealistic,
+    where both passes stream, the lit and wireframe passes' forced key sets differed in 6,517 of
+    14,896 frames (from 1,050 s, by up to 105 patches: one pass's region before the other's). At
+    the forced peak no view saw a forced patch (0 seen), but on low's instrument cache, 106 of 106.
+  - _Memory_ (the plan's resident total: the caches, the coverage mask, the class map, the cascades
+    and the workers' field copies; then the engine's own tally and the driver's figure, nvidia-smi's
+    peak less its pre-launch baseline):
+
+    | Run                 | Itemized total | Engine's tally | Driver        | GPU process   | The rest of the card's drift |
+    | ------------------- | -------------- | -------------- | ------------- | ------------- | ---------------------------- |
+    | High photorealistic | 470,717,556 B  | 495,196,692 B  | 837,812,224 B | 781,189,120 B | +56.6 MB                     |
+    | High wireframe      | 76,134,372 B   | 78,647,004 B   | 352,321,536 B | 295,698,432 B | +56.6 MB                     |
+    | Low photorealistic  | 90,477,380 B   | 97,156,208 B   | 349,175,808 B | 298,844,160 B | +50.3 MB                     |
+    | Low wireframe       | 23,406,372 B   | 22,493,420 B   | 236,978,176 B | 186,646,528 B | +50.3 MB                     |
+
+    The itemized parts: the caches' allocations (the provisional constants); the coverage mask and
+    class map 129,120 B; the cascades 67,108,864 B on high photorealistic only, as the engine
+    allocated them (T9.a's spec, no difference), none on low or in the wireframe alone; the three
+    workers' field copies 3,502,692 B and the pool's own 23,604 B. The driver sees 214–343 MB more
+    than the engine's own tally (214–367 MB more than the itemized total): Chromium's and Dawn's own
+    memory, which no item names. All four are under the ceilings of 1 GB low and 2–3 GB discrete,
+    at the constants as held (below). The two-body sums at the held constants (computed, T14.a's
+    test 8): one lit pass 67,070,992 B low and 399,976,864 B high; two lit passes (a moon over its
+    planet) 134,141,984 and 799,953,728 B; one body in both styles 86,845,552 and 472,479,424 B; two
+    bodies in both styles 173,691,104 and 944,958,848 B, each under its ceiling.
+
+  - _Low against high GPU time_ (T16.d part 2's "the low setting's doubled GPU time", with the
+    clocks the driver chose): the frame's GPU pass sum at p95 is 9.48 ms on high photorealistic at a
+    median graphics clock of 1,965 MHz and 6.41 ms on low photorealistic at 1,110 MHz; 3.76 ms on
+    high wireframe at 420 MHz and 4.01 ms on low wireframe at 225 MHz. The clocks differ by up to
+    ninefold, so the sums are not the same work's; recorded, not compared.
+
+  - _The binding_ (for this machine). The RTX 3080's adapter reports a `maxStorageBufferBindingSize`
+    of 2,147,483,644 B; the engine requests 1 GiB, which the device grants. The binding ceiling at
+    1 GiB is 10,589 slots for high's lit cache and the wireframe on high (`baked-offsets`, the
+    offsets binding first), 15,584 for low's lit and 31,767 for the wireframe on low; at WebGPU's
+    default 128 MiB, 1,323, 1,948 and 3,970.
+  - _The horizon's GPU time_ (§6(b); the A/B pair in quiet window 7). Run B is run A's build with
+    the terrain's horizon lookup removed (`terrainLit.wgsl`, a scratch patch, never committed):
+
+    ```diff
+         let phi = angle_between(normal, towards);
+    +    // R10.T14.b's horizon A/B, run B (a scratch patch, never committed): no horizon lookup.
+         var local_horizon = 0.0;
+    -    if (!reference) {
+    -      local_horizon = terrain_horizon(
+    -        in.slot, in.parent, in.horizonFace, in.horizonSt, in.patchUv, in.morph, nu, towards, phi
+    -      );
+    -    }
+    ```
+
+    The terrain's lit draws are in the `bodies` pass, both views' together (the results give the
+    whole run's percentiles by pass label, not per segment): A 2.086 / 4.300 / 4.936 ms (p50 / p95 /
+    p99), B 2.034 / 2.817 / 2.975 ms, so the lookup costs +0.05 ms at p50 and +1.48 ms at p95,
+    against the Shadows row's 0.3–0.5 ms. The timer is `full` (no quantisation); the clocks the
+    driver chose differed, graphics median 1,965 MHz in A and 1,800 MHz in B (never pinned). Every
+    other pass is within ±0.05 ms but `discs`, +0.29 ms, which draws no terrain. B's own counts
+    matched A's within 1.1% (F∪ 2,884, AR∪ 3,993).
+
+  - _The counting's cost_: p50 4–17 ms and at most 50 ms a sample on the main thread, once a second
+    (high photorealistic the most).
+  - _UHD 620_: pending, the owner's run (the measurements' README has the commands); the low
+    setting is sized provisionally from the RTX 3080, so labelled.
+  - _Deviation: the constants held_ (decision-r10-t14b-constants §1–§3). The rule is read in its
+    union form, max(1.3 AR∪, 3 F∪) + the forced peak once, over the whole run (a leaf takes one
+    slot however many views see it, and the descent arc's F∪ peak is flown), and on the high setting
+    as the frustum rule, its all-round set never resident: 3 × 2,853 + 107 = 8,666 high lit slots,
+    2,996 low lit and 3,764 wireframe (the larger of high's 3,764 and low's two views' 3,623),
+    about seven times the provisional constants. They are held at 400,000,000 B (1,286 lit slots),
+    64 MiB (422) and 520 slots, values and pins unchanged, the acceptance's "constants updated"
+    met by the hold, recorded here:
+    - half the slots are each frame's draw budget (⌊slots ÷ 2⌋; the drawn maxima are exactly 643,
+      211 and 260), so 8,666 slots would let high draw about F∪, 2,853, 4.4 times its 643, where
+      its GPU sum is already at p95 9.48 ms and its flare's frame intervals at p95 33.3 ms;
+    - high in both styles at the rule's figures is 3.31 GB itemized (2.70 + 0.52 wireframe + 0.07
+      cascades + 0.03 GB) and about 3.65 GB on the driver, past the brainstorm's 3 GB failure line
+      (at the ≤4 km union the lit cache alone is 2.15 GB, about 2.77 GB itemized in both styles
+      with the whole run's wireframe and about 3.1 GB on the driver);
+    - the low setting, and the wireframe's slots that serve both settings, wait on the owner's
+      UHD 620 run;
+    - the demand is the hard bound's, which R10.T4.b's min(hard, 4σ) cuts two to three times;
+    - slots alone don't bound the streaming: high's slowdown stood in 0.99 while its budget bound
+      in 124 of 3,475 frames.
+
+    As held, high in both styles is about 0.55 GB itemized and 0.91 GB on the driver, low
+    photorealistic 90.5 MB and 349 MB. The re-size is pre-ruled: one `--sizes on` run a setting
+    after R10.T4.b's statistical bound in selection or R09's (ii), whichever comes first (low and
+    the wireframe after the UHD 620 run too), in the union form over the whole run, the frustum rule
+    on high while its all-round set is never resident, capped at 2 GB on the RTX 3080's driver
+    figure for high in both styles and 1 GB on the UHD 620's for low, the timed run passing the GPU
+    rows with the lit draws counted; where a cap binds, the cap's figure, the excess recorded; in
+    whole MiB and wireframe slots.
+
+  - _`BakedOffsets` on the high setting holds_ (§5): at 1,286 slots its offsets, 130,400,400 B,
+    bind in every default binding (134,217,728 B); at 8,666 slots they would bind only at a raised
+    limit such as the RTX 3080's 1 GiB (878,732,400 B), the clamp below covering the rest.
+  - _The binding's clamp_ (§4; T14.d's "High's lit layout has no working fallback"). `fitLayout`
+    (`gpu/resources.ts`) keeps the layout as before where every storage field binds at the
+    setting's own path and slot count
+    (within min(`maxStorageBufferBindingSize`, `maxBufferSize`), by `cacheBudget.ts`'
+    `bindingCeilingSlots`); otherwise it takes `face-differences` at the same slot count
+    (decisions-r06-r07 item 7's "keeping the slot budget": as built it re-derived the count from
+    the bytes, taking high lit from 1,286 to 1,908 slots on a lesser device, and the draw budget
+    with it) and clamps the count to that path's binding ceiling, `fallback: "binding-limit"` and
+    the new `requestedSlotCount` recording it. It refuses only where fewer than six slots (the
+    roots, `MIN_SLOTS`) bind on `face-differences`, or the atlas refuses. As held, the clamp never
+    engages at the RTX 3080's limits or at WebGPU's defaults (1,286 ≤ 1,323, 520 ≤ 1,323,
+    422 ≤ 1,948): it makes T14.d's dead fallback work (high lit at its 1,286 slots on a
+    128,000,000 B binding keeps them on `face-differences`, where it threw) and the re-size a
+    constants-only change. One move: R05's spike shading on high at WebGPU's default limits keeps
+    its 1,962 slots on `face-differences`, where it took 3,904. `materialSet.test.ts`' bindings for
+    each refused path are re-chosen (at 10⁸ B high's lit, depth and shadow materials now take
+    `face-differences` and the wireframe `baked-offsets`). The spike's binding block carries each
+    cache's `slotCount` and an optional `layout` holding its `requestedSlotCount` and `fallback`,
+    optional so that the four results files read unedited.
+  - _The forms beside the adopted one_ (§1): the per-view sum 16,469, 7,421, 2,996, 1,369 and 6,509
+    slots, which stays the bound for views at different poses (none flown); the ≤4 km union, high
+    lit 6,925 and the wireframe 2,755; run B's same-flight union 8,759 (+1.1%, from the samples'
+    instants).
+- **Deferred findings (2026-10-13 rule) (R10.T14.b)** (recorded, not ruled unless marked; each
+  leaves the algorithm and the contracts as built).
+  - _The caches hold a seventh of the hard bound's demand_ (decision-r10-t14b-constants §6). Low
+    lit 2,996 slots measured against 422 held (×7.1), high lit 8,666 against 1,286 (×6.7), the
+    wireframe 3,764 and low's two views 3,623 against 520 (×7.2, ×7.0): neither 64 MiB nor about
+    400 MB holds the as-built selection's demand on a generated world. Levers: R10.T4.b's
+    min(hard, 4σ) (×2–3); R09's (ii) and decision-r09-t8d-reach §5's per-view occluder, for the tall
+    boxes; a draw budget apart from the slots; the pool's per-pass share (below); bake throughput
+    (below). The re-size above is pre-ruled.
+  - _The A/B's price on the per-view sum_ (§8 (a)): 6.8% (high photorealistic) and 13.3% (high
+    wireframe, told to main), all of it the second view's frustum peak; 0% on the adopted union
+    form, which the 10% line reads, and AR′ = AR everywhere, so the remaining looseness is the
+    boxes'. Lever: decision-r09-t8d-reach §5's (ii); a per-view occluder from the resident bakes'
+    lows.
+  - _"Ever resident" is met only at 190 km_ (§8 (b)), where AR∪ is a few coarse patches. Read at
+    AR∪'s peak the cap is 0.28–0.32 and high's peak share 11%: the set was never resident in the
+    flare on any run. The harness reports both; no code change.
+  - _The canvases are smaller than the setting's rows_ (§8 (c)): the main view's hidden canvas is
+    the stage beside the instruments, 1,398 × 793 px on high and 806 × 431 on low, not 1,080 and
+    720 rows, so a τ-limited count could rise by up to (1080 ÷ 793)² ≈ 1.9 and (720 ÷ 431)² ≈ 2.8
+    on a full-height view: the rule's figures and the measured ÷ model ratios are lower bounds. The
+    re-size takes the nominal rows.
+  - _The wireframe's share_ (§8 (d)): r, wireframe ÷ high lit, is 0.43 in F∪ and 0.44 in AR∪ (high
+    wireframe against high photorealistic), far above the model's 0.13–0.19 and τ⁻² = 0.0625: on
+    this world the boxes and the horizon govern, not τ. The brainstorm's "about a fifth" is not
+    edited; it waits on R10.T4.b. `terrainWireSelection.test.ts` keeps its bracket.
+  - _Low's instrument starved on the shared pool_ (§8 (e)). On low photorealistic the second view's
+    wireframe pass attached at about 1,050 s with nothing resident, drew nothing through the
+    approach and flare (432.5 patches missing on average) and almost nothing until the vertical
+    descent, while the lit pass saturated the pool; its selection fell to 2 patches in the low fast
+    pass (the cause not traced: its boxes stand 130–168 km tall at every level from L4, nothing
+    resident tightening them); the two passes' forced sets differed in 6,517 of 14,896 frames
+    (T14.c's finding 4). Not a blocker: the instrument's own `TERRAIN: STREAMING` annunciates it
+    (R10.T16.c). Lever: a per-pass share of the pool, an empty pass's coarsest levels served first.
+  - _The terrain row reads `terrain shadows` alone_ (§8 (f)): high's terrain "pass" is 3.24 ms at
+    p95 while the lit draws sit in `bodies` (4.30 ms), and low shows "no timed terrain pass", so the
+    spike's terrain row misses the terrain's own draws over a generated world. Lever: time the
+    terrain's draws in `bodies` apart.
+  - _Bakes under load_ (§8 (g)): 7–29 a second, post to reply p50 200–850 ms, the worker's own time
+    p50 100–420 ms, 6–34% never resident, at a run's load of 2.5–14. Levers: R09's fused interpolant
+    (T6.a's 40 ms), the worker count, decision-r10-t14b-measure 6(c)'s eviction in place of rebakes.
+  - _The forced region_ (§8 (h)): its lead before touchdown was 23–32 s with every forced patch
+    resident at touchdown, though low's "all resident" lapsed after 1,168–1,169 s as new forced
+    patches entered. No forced insert can have been refused: the forced pins peaked at 108 against
+    422–1,286 slots, and the cache evicts any unforced patch before refusing one.
+    `FORCED_REGION_RESIDENCY_S` stays as it is.
+  - _A turn's restream on the hard bound_ (§2): 2,853 ÷ 2.2–9.3 bakes a second is 5–22 min for the
+    high setting's frustum set. No cache size makes a turn cheap; only the bound does.
+  - _The horizon's +1.48 ms at p95_ (§7), against the Shadows row's 0.3–0.5 ms, A at the faster
+    clock; the p50's +0.05 ms is noise (`discs`, untouched by the patch, moved +0.29 ms). No change:
+    the map is the low setting's only terrain shadow (DN11). With the UHD 620 pending.
+  - _Eviction in place of rebakes_ (decision-r10-t14b-measure 6(c)): neither measured nor built, the
+    spike naming no rebake since its blocks all arrive before the flight. Trigger: a served world's
+    revision rise (T15, or the live path's runs) with a delayed settle.
+  - _Not measured in T14.b_ (6(d)), each for the plan that next streams it: the re-show's fetches; a
+    session outliving `VIEW`; two bodies sharing a budget or holding a cache each; the hand-over's
+    shared material or cache; the field's release hysteresis and the view's field of view; F2's
+    join; T16.c's depth raster and survey edge; T10.c's skirt overdraw; T10.b's class edges; and the
+    views check's wireframe-only counts.
 - **Deviations in R10.T12.a, as built** (2026-10-20; lane `lane/64-r10-t12a-readouts`, on
   `rendering-and-planets` at `adf8848f`; decision-r10-t12a-scope).
   - _Files._ The entry's, with their tests, and `view/terrain/session.ts` and

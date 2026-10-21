@@ -9,7 +9,8 @@
  * buffers indexed by slot and vertex; normals, which want filtering, live in a 2D atlas (T11.a).
  * The slot count is fixed when the cache is made. R10's tasks sized their fields (T8.b, T10.b,
  * T10.c, T11); `cacheBudget.ts` (R10.T14.a) sums a slot's bytes and sets them beside Design note
- * 15's count model, and R10.T14.b settles the budgets from measurement.
+ * 15's count model, and R10.T14.b holds the budgets on the hard bound
+ * (decision-r10-t14b-constants), re-sized after R10.T4.b.
  */
 
 import type { TerrainSettings } from "../quality/qualitySetting";
@@ -108,7 +109,7 @@ export const SURVEY_CELL_CODE_BYTE = VERTICES;
  * @remarks
  * R10 adds its own fields to this union (the class layers, R10.T10.b; the survey mask, R10.T10.c)
  * and sizes `horizon-map` (R10.T8.b); `cacheBudget.ts`' `bytesPerPatch` sums them (R10.T14.a),
- * and R10.T14.b settles the budgets.
+ * and R10.T14.b holds the budgets (decision-r10-t14b-constants), re-sized after R10.T4.b.
  */
 export type SlotFieldName =
   "heights" | "offsets" | "normals" | "horizon-map" | "class-layers" | "survey-mask";

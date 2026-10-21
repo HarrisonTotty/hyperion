@@ -4,11 +4,13 @@
  * per-frame instance, contact and indirect buffers, all made through R01's adapter.
  *
  * @remarks
- * The slot count and every field's bytes come from T8's {@link SlotLayout}, never recomputed here.
- * What the device can hold is read from `engine.capabilities`, the device's own limits
- * (decisions-r06-r07.md item 7): where the `BakedOffsets` offsets at the layout's slot count do not
- * fit one storage binding, the layout falls back to `FaceDifferences` over the same byte budget,
- * and {@link TerrainLayout.fallback} says so, for the results file and the label. After a device
+ * The slot count and every field's bytes come from T8's {@link SlotLayout}, never recomputed here
+ * but for the count's clamp past a binding, below. What the device can hold is read from
+ * `engine.capabilities`, the device's own limits
+ * (decisions-r06-r07.md item 7): where a storage field of the setting's path at its own slot count
+ * does not fit one storage binding, the layout keeps that slot count on `FaceDifferences`, clamped
+ * to the binding's ceiling where it still does not fit (decision-r10-t14b-constants §4), and
+ * {@link TerrainLayout.fallback} says so, for the results file and the label. After a device
  * loss the engine's restore makes every handle anew, so the layout is derived again from the
  * rebuilt device's limits and every slot's contents are gone; {@link TerrainResources.onRebuilt}
  * tells the owner of the cache to start again.
@@ -50,6 +52,7 @@ import type {
 } from "../../engine/types";
 import type { TerrainSettings, TerrainVertexPath } from "../../quality/qualitySetting";
 import type { SpheroidFigure } from "../../atmosphere/hillaire";
+import { bindingCeilingSlots } from "../cacheBudget";
 import type { PatchKey } from "../patchKey";
 import type { CascadeIndex } from "../shadows/cascadeShadow";
 import {
@@ -58,9 +61,11 @@ import {
   HORIZON_FAR_SIDE,
   HORIZON_MAP_BYTES,
   HORIZON_WORDS_PER_TEXEL,
+  MIN_SLOTS,
   PATCH_VERTICES_PER_SIDE,
   type SlotFieldName,
   type SlotLayout,
+  slotLayout,
   SURVEY_CELL_CODE_BYTE,
   SURVEY_MASK_BYTES,
   TERRAIN_SHADING_TRAITS,
@@ -191,8 +196,9 @@ export interface AtlasTile {
  * @remarks
  * Layers are made only when one layer cannot hold every tile, and the tiles are spread evenly over
  * them, so that the texels beyond the tiles' own bytes (the last row's spare tiles) stay under one
- * row a layer. The high setting's 1,962 slots of 131² fit one layer of 8,122 × 4,192; its
- * `FaceDifferences` fallback, 3,904 slots, takes two layers under WebGPU's default 8,192.
+ * row a layer. The high setting's 1,962 spike slots of 131² fit one layer of 8,122 × 4,192, on
+ * its `FaceDifferences` fallback too, which keeps their count; 3,904 tiles take two layers under
+ * WebGPU's default 8,192.
  *
  * @throws Error if the tiles do not fit `maxLayers` layers.
  */
@@ -259,11 +265,24 @@ export interface TerrainLayoutFields {
   /** The vertex path the device can hold: the setting's, or `face-differences` on a fallback. */
   readonly vertexPath: TerrainVertexPath;
   /**
-   * `binding-limit` when the setting asked for `baked-offsets` and the offsets at its slot count
-   * exceed the device's storage-binding or buffer limit (decisions-r06-r07.md item 7); else `none`.
+   * `binding-limit` when a storage field of the setting's path at its own slot count exceeds the
+   * device's storage-binding or buffer limit (decisions-r06-r07.md item 7), so that the layout
+   * changed path to `face-differences`, clamped its slot count to the binding's ceiling, or both
+   * (decision-r10-t14b-constants §4); else `none`.
    */
   readonly fallback: "none" | "binding-limit";
-  /** T8's layout for {@link TerrainLayoutFields.vertexPath} over the setting's cache budget. */
+  /**
+   * The setting's own slot count, over its cache budget on its own path, before any fallback:
+   * {@link TerrainLayoutFields.slots}' count wherever the fallback is `none`, and at least it on a
+   * fallback.
+   */
+  readonly requestedSlotCount: number;
+  /**
+   * T8's layout for {@link TerrainLayoutFields.vertexPath}: over the setting's cache budget, or on
+   * a fallback over the bytes of the slots it keeps, the setting's own count or the binding's
+   * ceiling, the fewer. Every reader of the layout's slots (the cache, the selection's budget, the
+   * normals atlas, the per-slot and per-frame buffers) takes its count.
+   */
   readonly slots: SlotLayout;
 }
 
@@ -304,19 +323,26 @@ function fieldBufferBytes(layout: SlotLayout, bytesPerSlot: number): number {
   return bytesPerSlot * layout.slotCount;
 }
 
-/** Whether every storage buffer of `layout` fits one binding and one buffer of the device. */
-function storageFits(layout: SlotLayout, limits: TerrainLimits): boolean {
-  const limit = Math.min(limits.maxStorageBufferBindingSize, limits.maxBufferSize);
-  return layout.fields.every(
-    (field) => field.storage !== "storage-buffer" || fieldBufferBytes(layout, field.bytes) <= limit,
-  );
+/**
+ * The bytes one storage buffer may take on the device, bound whole: the lesser of its
+ * storage-binding and buffer limits.
+ */
+function storageBindingBytes(limits: TerrainLimits): number {
+  return Math.min(limits.maxStorageBufferBindingSize, limits.maxBufferSize);
 }
 
 /**
  * The terrain layout of `terrain` on a device with `limits`.
  *
- * @throws Error if even the `face-differences` layout's buffers or the atlas do not fit the
- * device, which no adapter meeting WebGPU's default limits does at either setting's budget.
+ * @remarks
+ * The setting's path at its own slot count wherever every storage field binds; else
+ * `face-differences` at that count, clamped to the binding's ceiling where a field still does not
+ * bind (decision-r10-t14b-constants §4): {@link TerrainLayout.fallback} and
+ * {@link TerrainLayout.requestedSlotCount} record it.
+ *
+ * @throws Error if fewer than {@link MIN_SLOTS} slots bind on `face-differences`, or the atlas
+ * does not fit the device, which no adapter meeting WebGPU's default limits does at either
+ * setting's budget.
  */
 export function terrainLayout(
   terrain: TerrainSettings,
@@ -343,25 +369,36 @@ export function fittedTerrainLayout(
   return typeof fitted === "string" ? null : fitted;
 }
 
-/** {@link terrainLayout}'s layout, or why the device refuses it. */
+/**
+ * {@link terrainLayout}'s layout, or why the device refuses it: decision-r10-t14b-constants §4's
+ * fit, the setting's path at its own slot count where it binds, else `face-differences` at that
+ * count, clamped to that path's binding ceiling (`cacheBudget.ts`' {@link bindingCeilingSlots}).
+ */
 function fitLayout(
   terrain: TerrainSettings,
   limits: TerrainLimits,
   shading: TerrainShading,
 ): TerrainLayout | string {
-  let slots = terrainSlotLayout(terrain, shading);
+  const own = terrainSlotLayout(terrain, shading);
+  const requestedSlotCount = own.slotCount;
+  const bindingBytes = storageBindingBytes(limits);
+  let slots = own;
   let vertexPath = terrain.vertexPath;
   let fallback: TerrainLayout["fallback"] = "none";
-  if (!storageFits(slots, limits) && vertexPath === "baked-offsets") {
+  if (requestedSlotCount > bindingCeilingSlots(own.fields, bindingBytes)) {
+    // Item 7's "keeping the slot budget": the fallback holds the setting's slots, and so its draw
+    // budget, rather than as many as its bytes would give.
     vertexPath = "face-differences";
     fallback = "binding-limit";
-    slots = terrainSlotLayout({ ...terrain, vertexPath }, shading);
-  }
-  if (!storageFits(slots, limits)) {
-    return `the terrain's ${slots.slotCount} slots exceed the device's storage binding of ${limits.maxStorageBufferBindingSize} B`;
+    const path = terrainSlotLayout({ ...terrain, vertexPath }, shading);
+    const slotCount = Math.min(requestedSlotCount, bindingCeilingSlots(path.fields, bindingBytes));
+    if (slotCount < MIN_SLOTS) {
+      return `the lesser of the device's storage-binding and buffer limits, ${bindingBytes} B, holds ${slotCount} of the terrain's slots on ${vertexPath}, fewer than ${MIN_SLOTS}`;
+    }
+    slots = slotLayout(path.fields, slotCount * path.bytesPerSlot);
   }
   if (shading === "wire") {
-    return { shading, vertexPath, fallback, slots, atlas: null };
+    return { shading, vertexPath, fallback, requestedSlotCount, slots, atlas: null };
   }
   let samplesPerSide: number;
   switch (terrain.normals) {
@@ -387,7 +424,7 @@ function fitLayout(
     limits.maxTextureDimension2D,
     MAX_TEXTURE_ARRAY_LAYERS,
   );
-  return { shading, vertexPath, fallback, slots, atlas };
+  return { shading, vertexPath, fallback, requestedSlotCount, slots, atlas };
 }
 
 /** A patch edge, anticlockwise from y = 0: 0 is y = 0, 1 is x = 64, 2 is y = 64, 3 is x = 0. */

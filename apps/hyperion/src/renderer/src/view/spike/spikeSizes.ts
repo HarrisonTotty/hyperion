@@ -56,6 +56,7 @@ import { type AdapterOutcome, type GpuCapabilities, requiredLimits } from "../en
 import type { ViewSize } from "../engine/types";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { bindingCeilingSlots } from "../terrain/cacheBudget";
+import type { TerrainLayout } from "../terrain/gpu/resources";
 import { lowestHeightM } from "../terrain/planet";
 import { PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "../terrain/priority";
 import type { Selection, ViewSelectionInput } from "../terrain/select";
@@ -346,11 +347,13 @@ const NO_RANGES = "the pass's input held no baked ranges";
 /** Why a count of the cache's slots is missing. */
 const NOT_A_CACHE = "the pass's ranges were not a patch cache";
 
-/** A cache's slots as last read from its pass's layout. */
+/** A cache's slots as last read from its pass's layout, with the slots asked and the fallback. */
 interface CacheLayout {
   readonly slotCount: number;
   readonly bytesPerSlot: number;
   readonly fields: ReadonlyArray<SlotField>;
+  readonly requestedSlotCount: number;
+  readonly fallback: TerrainLayout["fallback"];
 }
 
 /** A cache's allocation: slot count × bytes a slot. */
@@ -430,11 +433,13 @@ class CacheFollower {
     if (pass === null) {
       return;
     }
-    const slots = pass.layout.slots;
+    const { slots, requestedSlotCount, fallback } = pass.layout;
     this.#layout = {
       slotCount: slots.slotCount,
       bytesPerSlot: slots.bytesPerSlot,
       fields: slots.fields,
+      requestedSlotCount,
+      fallback,
     };
     const allocation = this.#allocation;
     if (
@@ -1363,6 +1368,10 @@ export class SpikeSizes {
               {
                 cache: follower.cache,
                 slotCount: layout.slotCount,
+                layout: {
+                  requestedSlotCount: layout.requestedSlotCount,
+                  fallback: layout.fallback,
+                },
                 ceilingAtRequestedSlots:
                   requested === null
                     ? null
