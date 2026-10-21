@@ -270,6 +270,7 @@ impl ClimateRegime {
     /// #     surface_gravity: derived.surface_gravity(),
     /// #     radius: Metres::from(derived.radius()),
     /// #     material: SurfaceMaterial::of(&derived.fractions()),
+    /// #     lid: None,
     /// #     stellar_flux: WattsPerSquareMetre::from(derived.flux()),
     /// #     xuv_flux: derived.xuv_flux(),
     /// #     spin: SeasonalSpin {

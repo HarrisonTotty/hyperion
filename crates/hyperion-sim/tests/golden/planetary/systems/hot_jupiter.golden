@@ -227,6 +227,9 @@ condensate: N2, Solid, seasonal true
 reservoir_kg_m2 = 0x40e73a096524e6f7  # 47568.293596697906
 reservoir_gel_m = 0x404704b5638590aa  # 46.036785545556384
 area_fraction = 0x3f986cfcf6bcf3b5  # 0.02385325675935564
+crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x40abbfcff8541747  # 3551.9061914709487
 envelope: NotApplicable
 body e102 BELT 1-2: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f4be35485ddfb13  # 0.00085107447715402
@@ -324,6 +327,9 @@ condensate: N2, Solid, seasonal true
 reservoir_kg_m2 = 0x40df9d46c6f1b7bb  # 32373.105892590927
 reservoir_gel_m = 0x403f50e906256e63  # 31.31605566419456
 area_fraction = 0x3f909d881a9b27bc  # 0.016225935577302883
+crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x40b5d7df3ea48915  # 5591.8720496020005
 envelope: NotApplicable
 body e103 BELT 1-3: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f3c60702af95fea  # 0.000432994255765261
@@ -421,6 +427,9 @@ condensate: N2, Solid, seasonal true
 reservoir_kg_m2 = 0x40d7a66c64001273  # 24217.693603532807
 reservoir_gel_m = 0x403768eaea5585dd  # 23.409834524039855
 area_fraction = 0x3f88d752f1c38a11  # 0.012129447939917022
+crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x40a375b85c42b659  # 2490.860078892478
 envelope: NotApplicable
 body e104 BELT 1-4: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f31917f05aa2748  # 0.00026807166219865565
@@ -518,6 +527,9 @@ condensate: N2, Solid, seasonal true
 reservoir_kg_m2 = 0x40d550d696d6db9c  # 21827.35295649954
 reservoir_gel_m = 0x40351988a27e8564  # 21.099741130722933
 area_fraction = 0x3f8663c86ee20b8e  # 0.01093250835788753
+crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x40b6fe2d4623b0bf  # 5886.176851492549
 envelope: NotApplicable
 body e105 BELT 1-5: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f283951cdb1826d  # 0.00018481372430569372
@@ -615,6 +627,9 @@ condensate: N2, Solid, seasonal true
 reservoir_kg_m2 = 0x40d1f49bdeb9177c  # 18386.435468933996
 reservoir_gel_m = 0x4031c40da6c37fdb  # 17.765833304147105
 area_fraction = 0x3f82da1eef0948cc  # 0.009205094976242022
+crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x409a399538ca37f5  # 1678.3957244488386
 envelope: NotApplicable
 body e106 BELT 1-6: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f21e04f2c954487  # 0.0001363846443305542
@@ -704,6 +719,9 @@ condensate: H2O, Solid, seasonal true
 reservoir_kg_m2 = 0x419c95fccf07bc0c  # 119897907.75755328
 reservoir_gel_m = 0x40ff58f12ebbda29  # 128399.07390961856
 area_fraction = 0x3ff0000000000000  # 1.0
+crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x40b35185480f0959  # 4945.520630779059
 envelope: NotApplicable
 body e107 BELT 1-7: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f1ba6ed167072d1  # 0.0001054842192477854
@@ -793,6 +811,9 @@ condensate: H2O, Solid, seasonal true
 reservoir_kg_m2 = 0x41975c11d9b01371  # 97977462.42194916
 reservoir_gel_m = 0x40f99dc67bd051f7  # 104924.40522796648
 area_fraction = 0x3ff0000000000000  # 1.0
+crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x40b0211da98630fe  # 4129.115867983781
 envelope: NotApplicable
 body e108 BELT 1-8: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f16227d77cc8c94  # 8.443728252109851e-5
@@ -882,6 +903,9 @@ condensate: H2O, Solid, seasonal true
 reservoir_kg_m2 = 0x4197f45aeed9e1bc  # 100472507.71277517
 reservoir_gel_m = 0x40fa44c56678e3a2  # 107596.33751763267
 area_fraction = 0x3ff0000000000000  # 1.0
+crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x409972d46d7486ea  # 1628.7074487883897
 envelope: NotApplicable
 
 +H: 11 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
@@ -1102,6 +1126,9 @@ condensate: N2, Solid, seasonal true
 reservoir_kg_m2 = 0x40e73a096524e6f7  # 47568.293596697906
 reservoir_gel_m = 0x404704b5636bb9eb  # 46.03678553352423
 area_fraction = 0x3f986cfcf6a18889  # 0.023853256753121364
+crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x40abbfd058cd7924  # 3551.9069275102975
 envelope: NotApplicable
 body e102 BELT 1-2: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f4be35485ddfb13  # 0.00085107447715402
@@ -1199,6 +1226,9 @@ condensate: N2, Solid, seasonal true
 reservoir_kg_m2 = 0x40df9d46c6f1b7bb  # 32373.105892590927
 reservoir_gel_m = 0x403f50e905ebc1cf  # 31.316055650766256
 area_fraction = 0x3f909d881a7c8e17  # 0.01622593557034521
+crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x40b5d7df3eb12ff7  # 5591.872050356112
 envelope: NotApplicable
 body e103 BELT 1-3: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f3c60702af95fea  # 0.000432994255765261
@@ -1296,6 +1326,9 @@ condensate: N2, Solid, seasonal true
 reservoir_kg_m2 = 0x40d7a66c64001273  # 24217.693603532807
 reservoir_gel_m = 0x403768eaea257fae  # 23.40983451285836
 area_fraction = 0x3f88d752f1909438  # 0.012129447934123502
+crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x40a375b85c4c74be  # 2490.860079182864
 envelope: NotApplicable
 body e104 BELT 1-4: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f31917f05aa2748  # 0.00026807166219865565
@@ -1393,6 +1426,9 @@ condensate: N2, Solid, seasonal true
 reservoir_kg_m2 = 0x40d550d696d6d155  # 21827.35295648997
 reservoir_gel_m = 0x40351988a24d35f4  # 21.099741119241983
 area_fraction = 0x3f8663c86eadb853  # 0.010932508351938852
+crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x40b6fe2d4626f6cd  # 5886.176851687674
 envelope: NotApplicable
 body e105 BELT 1-5: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f283951cdb1826d  # 0.00018481372430569372
@@ -1490,6 +1526,9 @@ condensate: N2, Solid, seasonal true
 reservoir_kg_m2 = 0x40d1f49bdeb82b71  # 18386.435468714164
 reservoir_gel_m = 0x4031c40da69e4357  # 17.765833295477332
 area_fraction = 0x3f82da1eeee1c577  # 0.009205094971749912
+crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x409a399538e453ee  # 1678.395724837897
 envelope: NotApplicable
 body e106 BELT 1-6: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f21e04f2c954487  # 0.0001363846443305542
@@ -1579,6 +1618,9 @@ condensate: H2O, Solid, seasonal true
 reservoir_kg_m2 = 0x419c95fccf07bc0c  # 119897907.75755328
 reservoir_gel_m = 0x40ff58f12ebbdc49  # 128399.07390962647
 area_fraction = 0x3ff0000000000000  # 1.0
+crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x40b35185481c3bbd  # 4945.5206315656515
 envelope: NotApplicable
 body e107 BELT 1-7: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f1ba6ed167072d1  # 0.0001054842192477854
@@ -1668,6 +1710,9 @@ condensate: H2O, Solid, seasonal true
 reservoir_kg_m2 = 0x41975c11d9b01371  # 97977462.42194916
 reservoir_gel_m = 0x40f99dc67bd05409  # 104924.40522797419
 area_fraction = 0x3ff0000000000000  # 1.0
+crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x40b0211da9978dc4  # 4129.11586901866
 envelope: NotApplicable
 body e108 BELT 1-8: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3f16227d77cc8c94  # 8.443728252109851e-5
@@ -1757,4 +1802,7 @@ condensate: H2O, Solid, seasonal true
 reservoir_kg_m2 = 0x4197f45aeed9e1bc  # 100472507.71277517
 reservoir_gel_m = 0x40fa44c56678e511  # 107596.337517638
 area_fraction = 0x3ff0000000000000  # 1.0
+crust: lid Primary; primary H2O, secondary komatiite, tertiary none, bulk none; provinces H2O; Oxidised, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x409972d46d9dae3e  # 1628.7074494016265
 envelope: NotApplicable

@@ -711,10 +711,10 @@ mod tests {
     /// Nothing on the record reads the formation constants before P14.T52.a, their first reader,
     /// or P14.T54.b, which restamps their table (the module's remarks; decision-bump-plan-after-22
     /// §1.3): no code of the crate's `src/` outside this module and its table names
-    /// [`API_PATTERNS`], every file read in sorted order by `substance::thermal`'s tripwire's walk,
-    /// but each inline test module, every file an out-of-line test module declares,
-    /// [`DECLARATIONS`] and [`HELD`]'s files (none). **P14.T52.a or P14.T54.b deletes this
-    /// tripwire** when the speciation first reads them.
+    /// [`API_PATTERNS`], every file read in sorted order by the substance tripwires' walk
+    /// (`substance::thermal`'s tests'), but each inline test module, every file an out-of-line
+    /// test module declares, [`DECLARATIONS`] and [`HELD`]'s files (none). **P14.T52.a or
+    /// P14.T54.b deletes this tripwire** when the speciation first reads them.
     #[test]
     fn substance_formation_nothing_on_the_record_reads_the_constants_yet() {
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");

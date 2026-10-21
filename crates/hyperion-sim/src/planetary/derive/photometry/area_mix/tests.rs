@@ -643,6 +643,79 @@ fn the_space_weathering_stand_in_never_brightens_an_airless_silicate_body() {
     );
 }
 
+/// The space-weathering cap is keyed on the lid's row's family (P14.T54.a; decision-p14-t54a-passes
+/// §3.4, the six points' item 4): on an airless body every lid T51.c names whose row is `Silicate`
+/// takes at most the Moon's 0.11, whatever the bulk's material (Ceres's `phyllosilicate` on an icy
+/// bulk, Mercury's `basalt_reduced`, a Vesta-like `basalt_fe`); an airless water-ice lid keeps its
+/// frost on a rocky bulk (Europa's, a Rocky class at 8% water) and an `Organic` lid its own row (a
+/// comet's `cometary`); under air every lid its row as it is. The fresh rows' Bond albedos about a
+/// Sun are printed for the bless note's capped rows.
+#[test]
+fn the_airless_cap_is_keyed_on_the_lid_s_row() {
+    use crate::planetary::hooks::crust::CrustLithology;
+
+    let sun = sun_bands();
+    let moon = SurfaceState::Airless.albedo(SurfaceMaterial::Rock).value();
+    let mut capped = Vec::new();
+    for lithology in CrustLithology::ALL {
+        let row = lithology.substance();
+        let fresh = solid_bond(row, &sun).bond;
+        let silicate = row
+            .substance()
+            .condensed()
+            .is_some_and(|c| c.mechanics() == MechanicsFamily::Silicate);
+        for material in [SurfaceMaterial::Rock, SurfaceMaterial::Ice] {
+            let lid = Regolith::with_lid(row, material);
+            let airless = lid.bond(SurfaceState::Airless, &sun);
+            assert_eq!(capped_lid(row, SurfaceState::Airless), silicate);
+            if silicate {
+                assert_eq!(
+                    airless.stand_in,
+                    Some(StandIn::SpaceWeathering),
+                    "{lithology:?}"
+                );
+                assert_same_bits(airless.bond, airless_silicate_stand_in(fresh));
+            } else {
+                assert_eq!(airless.stand_in, None, "{lithology:?}");
+                assert_same_bits(airless.bond, fresh);
+            }
+            for state in [SurfaceState::Temperate, SurfaceState::Snowball] {
+                assert!(!capped_lid(row, state));
+                assert_same_bits(lid.bond(state, &sun).bond, fresh);
+            }
+        }
+        if silicate {
+            capped.push(format!(
+                "{} {fresh:.4} → {:.4}",
+                lithology.key(),
+                airless_silicate_stand_in(fresh)
+            ));
+        }
+    }
+    let at = |lithology: CrustLithology, material: SurfaceMaterial| {
+        Regolith::with_lid(lithology.substance(), material)
+            .bond(SurfaceState::Airless, &sun)
+            .bond
+    };
+    // Mercury, Ceres and a Vesta-like basaltic body are held at the Moon's 0.11.
+    for (lithology, material) in [
+        (CrustLithology::ReducedBasalt, SurfaceMaterial::Rock),
+        (CrustLithology::Phyllosilicate, SurfaceMaterial::Ice),
+        (CrustLithology::IronRichBasalt, SurfaceMaterial::Rock),
+    ] {
+        assert_same_bits(at(lithology, material), moon);
+    }
+    // Europa's water ice on a rocky bulk keeps its frost, and a comet's dust its darkness.
+    assert!(at(CrustLithology::Water, SurfaceMaterial::Rock) > 0.5);
+    assert!(at(CrustLithology::Cometary, SurfaceMaterial::Ice) < 0.11);
+    eprintln!(
+        "the airless cap, fresh → capped, about a Sun: {}; H2O {:.4}, cometary {:.4} uncapped",
+        capped.join(", "),
+        at(CrustLithology::Water, SurfaceMaterial::Rock),
+        at(CrustLithology::Cometary, SurfaceMaterial::Ice),
+    );
+}
+
 /// The column weights of an air of `fractions` by mole at a surface pressure `pressure` (the
 /// partition tests' rule): each x μ ÷ μ̄ of it.
 fn weights_of(pressure: f64, fractions: &[(&str, f64)]) -> Vec<(SubstanceId, Pascals)> {

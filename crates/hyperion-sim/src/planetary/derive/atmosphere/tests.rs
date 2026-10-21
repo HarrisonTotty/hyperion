@@ -1994,7 +1994,9 @@ fn the_ammonia_line_is_a_step_in_formation_distance_only() {
 // P14.T51.a: the condensate partition in T13.c's passes, held at 22 by the lane's hold.
 
 use crate::planetary::chem::partition::{ClimateSpan, Ground};
-use crate::planetary::hooks::surface::{ClimateBody, OceanWeight, SeasonalSpin, step_climate};
+use crate::planetary::hooks::surface::{
+    ClimateBody, GroundInertia, OceanWeight, SeasonalSpin, step_climate,
+};
 use crate::units::{Degrees, MetresPerSecondSquared, Radians, Seconds};
 
 /// An Earth's inputs, with its median inventory at its median ranks (the planets' own,
@@ -2046,7 +2048,7 @@ fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) 
         equilibrium_temperature: inputs.equilibrium,
         surface_gravity: MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r)),
         radius: inputs.radius,
-        material: inputs.material,
+        ground: GroundInertia::of_material(inputs.material),
         spin: SeasonalSpin {
             obliquity: Radians::from(Degrees::new(23.44)),
             rotation_period: Seconds::new(86_164.1),
@@ -3252,6 +3254,7 @@ fn remnant_record(inputs: &AtmosphereInputs, air: &Atmosphere) -> RemnantRecord 
         surface_gravity: gravity,
         radius: inputs.radius,
         material: SurfaceMaterial::Ice,
+        lid: None,
         stellar_flux: WattsPerSquareMetre::new(flux),
         xuv_flux: WattsPerSquareMetre::ZERO,
         spin,

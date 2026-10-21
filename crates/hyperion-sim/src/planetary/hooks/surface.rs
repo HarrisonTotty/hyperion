@@ -78,7 +78,10 @@
 //!     X = `τ_LW`^⅓ (`p_s` ÷ 1 bar)^⅔ (`T_eq` ÷ 600 K)^−4/3 at `τ_LW` = (3/2)τ
 //!     ([`FLUX_OPTICAL_DEPTH_PER_GREY`]) and k the body's own, by his eq. 9's definition;
 //!   - the ground's, its regolith's diurnal storage, x ÷ (1 + x) with x = 0.635 Θ^0.905
-//!     ([`REGOLITH_REDISTRIBUTION_FIT`]), Θ the thermal parameter at its material's inertia;
+//!     ([`REGOLITH_REDISTRIBUTION_FIT`]), Θ the thermal parameter at its ground's inertia Γ:
+//!     P14.T49.j's law at its crust's lid ([`SurfaceInputs::lid`], from P14.T54.a), a vacuum
+//!     lower bound under air with no pore gas, or where the lid has no law P14.T24.a's constant of
+//!     its material;
 //!   - the two in series, 1 − ε = (1 − `ε_air`)(1 − `ε_ground`), to which the floor adds
 //!     (`T_floor` ÷ `T_eq`)⁴, with ε capped at 1.
 //!
@@ -103,9 +106,10 @@
 //!
 //! An airless body's equator–pole contrast is the radiative one. Its night is its regolith's: the
 //! diurnal storage enters Cowan and Agol's ε as x ÷ (1 + x), x = 0.635 Θ^0.905, Θ the thermal
-//! parameter at the material's inertia, above a floor set by the internal heat and the cosmic
-//! background (science-p14-t24a-climate §2). The Moon's night is 106 K (Diviner, ~95 K before dawn)
-//! and Mercury's 102 K (Mariner 10, 100–130 K). The floor is [`night_floor`]: the cosmic
+//! parameter at the ground's inertia, above a floor set by the internal heat and the cosmic
+//! background (science-p14-t24a-climate §2). At the rock constant's 55 the Moon's night is 106 K
+//! (Diviner, ~95 K before dawn) and Mercury's 102 K (Mariner 10, 100–130 K); from P14.T54.a the
+//! inertia is its lid's (P14.T49.j). The floor is [`night_floor`]: the cosmic
 //! background's [`COSMIC_BACKGROUND_TEMPERATURE`], raised by the body's internal heat flow
 //! (P14.T24.b's, [`SurfaceInputs::heat_flow`]) to about 21 K on a Mercury, 22 K on a Moon and 36 K
 //! on an Earth.
@@ -127,6 +131,8 @@
 use core::fmt;
 use std::error::Error;
 
+use hyperion_surface::field::MechanicsFamily;
+
 use crate::math;
 use crate::orbit::KeplerElements;
 use crate::planetary::chem::partition::{ClimateSpan, CondensatePhase, Condensates};
@@ -138,10 +144,12 @@ use crate::planetary::derive::atmosphere::{
 };
 use crate::planetary::derive::rotation::{SpinOrbitResonance, SpinState};
 use crate::planetary::frames::BodyFixedFrame;
+use crate::planetary::hooks::crust::CrustLithology;
 #[cfg(doc)]
 use crate::planetary::hooks::figures::GlobalFigures;
 #[cfg(doc)]
 use crate::substance::PhaseDiagram;
+use crate::substance::thermal::{EvaluateRegolithInertiaError, reference_regolith_thermal_inertia};
 use crate::substance::{
     Phase, SubstanceId, mean_molar_mass_g_per_mol, mixture_heat_capacity_over_r_at, phase_at,
 };
@@ -487,17 +495,208 @@ pub const REGOLITH_EMISSIVITY: f64 = 0.95;
 ///
 /// Hayne et al. give "55 ± 2" over the Moon's top 4–7 cm. Mercury's is of the same order: under
 /// 50 over most of Mariner 10's transect, 19 at the surface and 71 at depth (Bandfield, Osterloo
-/// and Holsclaw 2019, LPSC 50, abstract 2653, read). Provisional, until P14.T49.c's inertia by
-/// layer (22 → 23). A body with air takes the same vacuum regolith's, though pore gas raises a
-/// real one's (Mars's some 250, not re-read), so its ground's storage is under-read
-/// (science-p14-t24a-climate.md §2).
+/// and Holsclaw 2019, LPSC 50, abstract 2653, read). A vacuum value: pore gas raises a real
+/// regolith's under air (Mars's some 250, not re-read; science-p14-t24a-climate.md §2).
+///
+/// From P14.T54.a it is a fallback alone (decision-pre-23-review item 7): a ground's inertia is
+/// P14.T49.j's law at its crust's lid, and this constant stands only where that lid is not known
+/// on a rocky bulk, where the lid's row has no thermal columns (`graphite`), and where a lid of
+/// another family than water ice has no solid at the temperature.
 pub const ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S: f64 = 55.0;
 
 /// The thermal inertia of a regolith of ice, J m⁻² K⁻¹ s^−½: 20 (provisional,
 /// science-p14-t24a-climate.md §2), within the 5–70 of the Saturnian icy moons, Pluto and
 /// Europa (Howett et al. 2010, Icarus 206, 573; Lellouch et al. 2011, Icarus 214, 701; Rathbun et
 /// al. 2010, Icarus 210, 763, Europa's 70; none re-read).
+///
+/// From P14.T54.a it is a fallback alone (decision-pre-23-review item 7): it stands only where a
+/// ground's lid is not known on an icy bulk, where the lid's family has no regolith form (the
+/// `Organic` lids, `cometary` and `carbonaceous`, until an organic form is ruled), and where a
+/// water-ice lid has no solid at the temperature.
 pub const ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S: f64 = 20.0;
+
+/// Where a ground's thermal inertia Γ comes from (P14.T54.a; decision-pre-23-review item 7;
+/// decision-p14-t54a-passes §3.5): P14.T49.j's law at its crust's lid, or one of P14.T24.a's two
+/// constants as its fallback, rock's [`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`] and ice's
+/// [`ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum InertiaSource {
+    /// The law at the lid's row, at the temperature
+    /// ([`reference_regolith_thermal_inertia`]).
+    Law,
+    /// No lid known (the passes' first context, the passes' stand-in, a body with no crust): the
+    /// bulk material's constant.
+    NoLid,
+    /// The lid's row has no thermal columns (`graphite`): rock's constant.
+    NoThermalColumns,
+    /// The lid's row's family has no regolith form (`Organic`: `cometary`, `carbonaceous`): ice's
+    /// constant.
+    NoRegolithForm,
+    /// The lid's row has no solid at the temperature: its family's constant, ice's for `WaterIce`
+    /// and rock's otherwise.
+    NoSolid,
+    /// A column under no light, whose equilibrium temperature is not positive: nothing it stores
+    /// by day, and the bulk material's constant, which its climate does not read
+    /// ([`GroundInertia::at_equilibrium`]).
+    Unlit,
+    /// What a lid's row at a positive, finite temperature never gives (a temperature that is not
+    /// one; a row with no condensed columns, or a form of another family than its row's, which no
+    /// [`CrustLithology`] has): the bulk material's constant, and a failed `debug_assert` in a
+    /// debug build.
+    Unreachable,
+}
+
+/// A ground's thermal inertia Γ with where it comes from (P14.T54.a; [`ground_inertia`]): what
+/// carries the day's heat into the night ([`ground_redistribution`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct GroundInertia {
+    gamma: f64,
+    source: InertiaSource,
+}
+
+impl GroundInertia {
+    /// The ground of a bulk of `material` whose lid is not known: P14.T24.a's constant of the
+    /// material, to the bit ([`InertiaSource::NoLid`]).
+    #[must_use]
+    pub(crate) const fn of_material(material: SurfaceMaterial) -> Self {
+        Self {
+            gamma: material_inertia(material),
+            source: InertiaSource::NoLid,
+        }
+    }
+
+    /// The ground of a column at the equilibrium temperature `equilibrium` whose crust's lid is
+    /// `lid` and whose bulk is of `material`: [`ground_inertia`] at that temperature where it is
+    /// positive and finite, and otherwise, a column under no light, the material's constant
+    /// ([`InertiaSource::Unlit`]), which its climate never reads: with no light absorbed, nothing
+    /// is stored by day ([`ground_redistribution`]).
+    #[must_use]
+    pub(crate) fn at_equilibrium(
+        lid: Option<CrustLithology>,
+        material: SurfaceMaterial,
+        equilibrium: Kelvin,
+    ) -> Self {
+        let t = equilibrium.value();
+        if t.is_finite() && t > 0.0 {
+            ground_inertia(lid, material, equilibrium)
+        } else {
+            Self {
+                gamma: material_inertia(material),
+                source: InertiaSource::Unlit,
+            }
+        }
+    }
+
+    /// The thermal inertia Γ, J m⁻² K⁻¹ s^−½, positive.
+    #[must_use]
+    pub(crate) const fn inertia_j_per_m2_k_sqrt_s(&self) -> f64 {
+        self.gamma
+    }
+
+    /// Where it comes from.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the inertia's tests read it"))]
+    #[must_use]
+    pub(crate) const fn source(&self) -> InertiaSource {
+        self.source
+    }
+}
+
+/// P14.T24.a's constant of a regolith of `material`: rock's or ice's, the fallback alone
+/// ([`GroundInertia`]).
+#[must_use]
+const fn material_inertia(material: SurfaceMaterial) -> f64 {
+    match material {
+        SurfaceMaterial::Rock => ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+        SurfaceMaterial::Ice => ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+    }
+}
+
+/// The thermal inertia of the ground of a body whose crust's lid is `lid` and whose bulk is of
+/// `material`, at `temperature` (P14.T54.a; decision-pre-23-review item 7;
+/// decision-p14-t54a-passes §3.5): P14.T49.j's law at the lid's row
+/// ([`reference_regolith_thermal_inertia`], a dry regolith in vacuum of its family's reference
+/// form), and otherwise P14.T24.a's constants, [`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`]
+/// and [`ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`], as its fallback ([`InertiaSource`]):
+///
+/// - no lid: the bulk material's constant, as P14.T24.a read it before the lid, to the bit;
+/// - a row with no thermal columns (`graphite`): rock's, 55;
+/// - a family with no regolith form (the `Organic` lids): ice's, 20;
+/// - no solid at the temperature: the lid's family's, 20 for `WaterIce` and 55 otherwise;
+/// - the law's other refusals, which a lid's row at a positive, finite temperature never gives:
+///   the bulk material's constant, with a `debug_assert`.
+///
+/// Under air the law is a vacuum lower bound, with no pore gas: gas in the pores raises a
+/// regolith's conductivity well above the vacuum's (Mars's measured 180–250 against its
+/// `basalt_fe` lid's 48 here; Titan's sand about 236 against its ice's 57;
+/// decision-pre-23-review item 7), which P14.T49.l's pore-gas conductivity adds.
+///
+/// The lid is a [`CrustLithology`], T51.c's closed set, every row of which has condensed columns
+/// and takes its own family's form: so the law's refusal of a row with none, or of a form of
+/// another family, cannot be reached by type.
+///
+/// `temperature` is the ground's, K, positive and finite: P14.T24.a's column's equilibrium
+/// temperature, or R09.T13.c's mean surface temperature. Each row's thermal columns hold their
+/// end values beyond their own valid range (P14.T49.j), and above the lid row's transition the
+/// row has no solid ([`InertiaSource::NoSolid`]).
+///
+/// # Panics
+///
+/// In a debug build, where `temperature` is not positive and finite, or where the lid's row has no
+/// condensed columns, which no [`CrustLithology`] lacks (the inertia's tests hold every one): the
+/// fallback's [`InertiaSource::Unreachable`], whose Γ is the bulk material's constant in every
+/// build.
+#[must_use]
+pub(crate) fn ground_inertia(
+    lid: Option<CrustLithology>,
+    material: SurfaceMaterial,
+    temperature: Kelvin,
+) -> GroundInertia {
+    let Some(lid) = lid else {
+        return GroundInertia::of_material(material);
+    };
+    let error = match reference_regolith_thermal_inertia(lid.substance(), temperature) {
+        Ok(inertia) => {
+            return GroundInertia {
+                gamma: inertia.inertia_j_per_m2_k_sqrt_s(),
+                source: InertiaSource::Law,
+            };
+        }
+        Err(error) => error,
+    };
+    let (gamma, source) = match error {
+        EvaluateRegolithInertiaError::NoThermalColumns { .. } => (
+            ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+            InertiaSource::NoThermalColumns,
+        ),
+        EvaluateRegolithInertiaError::NoRegolithForm { .. } => (
+            ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+            InertiaSource::NoRegolithForm,
+        ),
+        EvaluateRegolithInertiaError::NoSolid { id, .. } => {
+            let ice = id
+                .substance()
+                .condensed()
+                .is_some_and(|row| row.mechanics() == MechanicsFamily::WaterIce);
+            let gamma = if ice {
+                ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S
+            } else {
+                ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S
+            };
+            (gamma, InertiaSource::NoSolid)
+        }
+        EvaluateRegolithInertiaError::Temperature { .. }
+        | EvaluateRegolithInertiaError::NotCondensed { .. }
+        | EvaluateRegolithInertiaError::FamilyMismatch { .. } => {
+            (material_inertia(material), InertiaSource::Unreachable)
+        }
+    };
+    debug_assert_ne!(
+        source,
+        InertiaSource::Unreachable,
+        "{error}: a lid's row at a positive, finite temperature never gives it"
+    );
+    GroundInertia { gamma, source }
+}
 
 /// The fit (a, n) of a regolith's redistribution ε = x ÷ (1 + x), x = a Θ^n: (0.635, 0.905),
 /// science-p14-t24a-climate.md §2's.
@@ -582,6 +781,13 @@ pub struct SurfaceInputs<'a> {
     /// differ, by up to 8.2% in the equilibrium temperature, until P14.T51.b's passes read the
     /// record's composition (science-p14-t24a-climate.md §6, item 3).
     pub material: SurfaceMaterial,
+    /// The lithology of its crust's lid (P14.T51.c, from P14.T54.a): its regolith's thermal
+    /// inertia is P14.T49.j's law at that row at the equilibrium temperature, a vacuum lower bound
+    /// under air, with no pore gas (P14.T49.l's). `None` where the lid is not known, as over the
+    /// passes' stand-in: the material's constant then stands in, P14.T24.a's
+    /// ([`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`],
+    /// [`ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`]), as it does for a lid with no law.
+    pub lid: Option<CrustLithology>,
     /// The flux of its hosts' light at it, orbit-averaged, at the time.
     pub stellar_flux: WattsPerSquareMetre,
     /// The X-ray and extreme-ultraviolet flux of its hosts at it, orbit-averaged, at the time
@@ -801,6 +1007,7 @@ pub struct SurfaceConditions {
     stellar_flux: WattsPerSquareMetre,
     radiation: RadiationClass,
     liquid_water: bool,
+    ground: GroundInertia,
 }
 
 impl SurfaceConditions {
@@ -851,6 +1058,7 @@ impl SurfaceConditions {
     ///     surface_gravity: derived.surface_gravity(),
     ///     radius: Metres::from(derived.radius()),
     ///     material: SurfaceMaterial::of(&derived.fractions()),
+    ///     lid: None,
     ///     stellar_flux: WattsPerSquareMetre::from(derived.flux()),
     ///     xuv_flux: derived.xuv_flux(),
     ///     spin: SeasonalSpin {
@@ -881,18 +1089,18 @@ impl SurfaceConditions {
             heat_capacity_over_r,
         } = Surface::of(inputs)?;
         let floor = night_floor(inputs.heat_flow);
+        // The ground's inertia, once: at its lid's row at the column's equilibrium temperature.
+        let ground = GroundInertia::at_equilibrium(
+            inputs.lid,
+            inputs.material,
+            inputs.equilibrium_temperature,
+        );
         let ColumnClimate {
             zonal,
             response,
             day_and_night: (day, night),
             range,
-        } = climate_of(
-            &column,
-            &inputs.spin,
-            inputs.ocean_weight,
-            inputs.material,
-            floor,
-        );
+        } = climate_of(&column, &inputs.spin, inputs.ocean_weight, ground, floor);
         let equator_pole = zonal.ends.0 - zonal.ends.1;
         let air = AirTransport {
             redistribution: heat_redistribution(&column),
@@ -921,7 +1129,19 @@ impl SurfaceConditions {
             stellar_flux: inputs.stellar_flux,
             radiation: RadiationClass::of(inputs.xuv_flux),
             liquid_water: liquid_water(range, column.surface_pressure),
+            ground,
         })
+    }
+
+    /// The ground's thermal inertia its night read (P14.T54.a): P14.T49.j's law at its lid, or
+    /// P14.T24.a's constant as its fallback ([`SurfaceInputs::lid`]).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the tests hold R09's airless inertia to it")
+    )]
+    #[must_use]
+    pub(crate) const fn ground(&self) -> GroundInertia {
+        self.ground
     }
 
     /// The mean surface temperature (P14.T13.c), which rendering plan R08's profile starts from:
@@ -1136,6 +1356,7 @@ impl SurfaceConditions {
     /// #     surface_gravity: derived.surface_gravity(),
     /// #     radius: Metres::from(derived.radius()),
     /// #     material: SurfaceMaterial::of(&derived.fractions()),
+    /// #     lid: None,
     /// #     stellar_flux: WattsPerSquareMetre::from(derived.flux()),
     /// #     xuv_flux: derived.xuv_flux(),
     /// #     spin: SeasonalSpin {
@@ -1709,20 +1930,20 @@ struct ColumnClimate {
 }
 
 /// The climate of the column `column` under the spin `spin` at the ocean weight `weight`, its
-/// ground of the material `material`, over a night floored at `floor`, its zonal points solved by
-/// the safeguarded Newton steps ([`zonal_point_newton`]): P14.T24.a's range and what it is made of,
-/// the one computation [`SurfaceConditions::derive`] publishes and T13.c's passes read
+/// ground of the thermal inertia `ground`, over a night floored at `floor`, its zonal points solved
+/// by the safeguarded Newton steps ([`zonal_point_newton`]): P14.T24.a's range and what it is made
+/// of, the one computation [`SurfaceConditions::derive`] publishes and T13.c's passes read
 /// ([`step_climate`]; decision-p14-t51a-partition §6, condition 1).
 #[must_use]
 fn climate_of(
     column: &Column,
     spin: &SeasonalSpin,
     weight: OceanWeight,
-    material: SurfaceMaterial,
+    ground: GroundInertia,
     floor: Kelvin,
 ) -> ColumnClimate {
     let zonal = ZonalProfile::of(column, spin, weight);
-    let response = diurnal_response(column, spin, material, floor);
+    let response = diurnal_response(column, spin, ground, floor);
     let (day, night) = day_and_night_of(column, response);
     let range = climate_range(column.surface_temperature, zonal.ends, day, night, floor);
     ColumnClimate {
@@ -1739,9 +1960,10 @@ fn climate_of(
 ///
 /// P14.T54.a derives the spin before the passes (its rotation law reads nothing they give), and
 /// takes the heat flow, an input the figures give after them, from the context the pass reads,
-/// the previous pass's figures ([`SpunClimate`](crate::planetary::derive::atmosphere::SpunClimate)).
-/// Its surface gravity, radius and material are the record's bulk's, at which the record's
-/// conditions are derived.
+/// the previous pass's figures ([`SpunClimate`](crate::planetary::derive::atmosphere::SpunClimate)),
+/// and its ground's inertia from that context's lid, the previous pass's own, at the pass's
+/// equilibrium temperature, once a pass. Its surface gravity, radius and material are the record's
+/// bulk's, at which the record's conditions are derived.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ClimateBody {
     /// The equilibrium temperature from the hosts' light at the albedo in use.
@@ -1750,8 +1972,9 @@ pub(crate) struct ClimateBody {
     pub(crate) surface_gravity: MetresPerSecondSquared,
     /// The mean radius.
     pub(crate) radius: Metres,
-    /// The surface's material, whose regolith carries the day's heat into the night.
-    pub(crate) material: SurfaceMaterial,
+    /// The thermal inertia of its ground, whose regolith carries the day's heat into the night
+    /// ([`GroundInertia::at_equilibrium`]).
+    pub(crate) ground: GroundInertia,
     /// How it turns under its seasonal host.
     pub(crate) spin: SeasonalSpin,
     /// Its internal heat flow at the surface, which raises the night's floor.
@@ -1800,7 +2023,7 @@ pub(crate) fn step_climate(
         return ClimateSpan::isothermal(surface_temperature);
     };
     let floor = night_floor(body.heat_flow);
-    let climate = climate_of(&column, &body.spin, ocean_weight, body.material, floor);
+    let climate = climate_of(&column, &body.spin, ocean_weight, body.ground, floor);
     ClimateSpan::about(climate.range, surface_temperature)
 }
 
@@ -2999,11 +3222,14 @@ pub(crate) fn heat_redistribution(column: &Column) -> f64 {
 }
 
 /// The regolith's redistribution efficiency ε of the ground of the column `column` under the spin
-/// `spin`, of the material `material`: x ÷ (1 + x) with x = 0.635 Θ^0.905
+/// `spin`, of the thermal inertia `ground`: x ÷ (1 + x) with x = 0.635 Θ^0.905
 /// ([`REGOLITH_REDISTRIBUTION_FIT`]), Θ = Γ √ω ÷ (`ε_r` σ `T_ss`³) the thermal parameter at the
-/// material's inertia Γ ([`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`],
-/// [`ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`]), ω = 2π over the solar day, and `T_ss` = `T_eq` (4 ÷ `ε_r`)^¼ the subsolar point's temperature
-/// ([`REGOLITH_EMISSIVITY`]; science-p14-t24a-climate.md §2).
+/// ground's inertia Γ (P14.T49.j's law at its lid, or P14.T24.a's constant of its material as the
+/// fallback, [`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`],
+/// [`ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`]; [`GroundInertia`]), ω = 2π over the solar
+/// day, and `T_ss` = `T_eq` (4 ÷ `ε_r`)^¼ the subsolar point's temperature
+/// ([`REGOLITH_EMISSIVITY`]; science-p14-t24a-climate.md §2). Under air the law's Γ is a vacuum
+/// lower bound, with no pore gas (P14.T49.l's).
 ///
 /// What the regolith stores by day it gives back by night, so its diurnal storage is a
 /// redistribution. Zero for a world locked 1:1 to its seasonal host, which has no solar day, and
@@ -3012,7 +3238,7 @@ pub(crate) fn heat_redistribution(column: &Column) -> f64 {
 pub(crate) fn ground_redistribution(
     column: &Column,
     spin: &SeasonalSpin,
-    material: SurfaceMaterial,
+    ground: GroundInertia,
 ) -> f64 {
     let Some(day) = spin.solar_day else {
         return 0.0;
@@ -3023,10 +3249,7 @@ pub(crate) fn ground_redistribution(
     if !(d > 0.0 && subsolar > 0.0) {
         return 0.0;
     }
-    let inertia = match material {
-        SurfaceMaterial::Rock => ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
-        SurfaceMaterial::Ice => ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
-    };
+    let inertia = ground.inertia_j_per_m2_k_sqrt_s();
     let theta = inertia * (core::f64::consts::TAU / d).sqrt()
         / (REGOLITH_EMISSIVITY * STEFAN_BOLTZMANN * math::powi(subsolar, 3));
     regolith_redistribution(theta)
@@ -3042,8 +3265,8 @@ fn regolith_redistribution(thermal_parameter: f64) -> f64 {
 }
 
 /// The dayside's and the nightside's surface temperatures of the column `column` under the spin
-/// `spin`, its ground of the material `material`, over a night floored at `floor` (the module's
-/// model; science-p14-t24a-climate.md §2 and §4).
+/// `spin`, its ground of the thermal inertia `ground`, over a night floored at `floor` (the
+/// module's model; science-p14-t24a-climate.md §2 and §4).
 ///
 /// At a redistribution ε they are Cowan and Agol's (2011, eqs. 4–5), `T_s` (8/3 − 5ε/3)^¼ and
 /// `T_s` ε^¼, where:
@@ -3067,10 +3290,10 @@ fn regolith_redistribution(thermal_parameter: f64) -> f64 {
 pub(crate) fn day_and_night(
     column: &Column,
     spin: &SeasonalSpin,
-    material: SurfaceMaterial,
+    ground: GroundInertia,
     floor: Kelvin,
 ) -> (Kelvin, Kelvin) {
-    day_and_night_of(column, diurnal_response(column, spin, material, floor))
+    day_and_night_of(column, diurnal_response(column, spin, ground, floor))
 }
 
 /// How the column's day and night respond to its redistribution and its rotation
@@ -3085,13 +3308,13 @@ pub(crate) struct DiurnalResponse {
 }
 
 /// The redistribution and the diurnal storage of the column `column` under the spin `spin`, its
-/// ground of the material `material`, over a night floored at `floor` ([`day_and_night`]): `None`
-/// where no light is absorbed, or where nothing restores the column.
+/// ground of the thermal inertia `ground`, over a night floored at `floor` ([`day_and_night`]):
+/// `None` where no light is absorbed, or where nothing restores the column.
 #[must_use]
 pub(crate) fn diurnal_response(
     column: &Column,
     spin: &SeasonalSpin,
-    material: SurfaceMaterial,
+    ground: GroundInertia,
     floor: Kelvin,
 ) -> Option<DiurnalResponse> {
     let t_s = column.surface_temperature.value();
@@ -3100,7 +3323,7 @@ pub(crate) fn diurnal_response(
         return None;
     }
     let through =
-        (1.0 - heat_redistribution(column)) * (1.0 - ground_redistribution(column, spin, material));
+        (1.0 - heat_redistribution(column)) * (1.0 - ground_redistribution(column, spin, ground));
     let floor_share = math::powi(floor.value() / column.equilibrium_temperature.value(), 4);
     let epsilon = (1.0 - through + floor_share).min(1.0);
     // A solar day that is not positive is no solar day, as `ground_redistribution` takes it.

@@ -47,7 +47,7 @@ use hyperion_sim::planetary::placement::{
     satisfies_floor, spacing_floor,
 };
 use hyperion_sim::planetary::record::{
-    BodyKind, BodyRecord, DetailLevel, Population as BodyPopulation, Section, Surface,
+    BodyKind, BodyRecord, DetailLevel, Modelled, Population as BodyPopulation, Section, Surface,
     SystemSnapshot,
 };
 use hyperion_sim::planetary::{self, Body, BodyIndex, PlanetarySystem, SystemContext};
@@ -1177,8 +1177,10 @@ fn write_record(w: &mut GoldenWriter, record: &BodyRecord) {
 }
 
 /// A body's surface section, in summary (P14.T48.e): its state, material and climate regime, the
-/// figures R09's coarse pass reads first, and its published condensates (P14.T51.a, on the record
-/// from P14.T54.a), each entry's substance, phase and seasonal flag, reservoir, layer and area.
+/// figures R09's coarse pass reads first, its published condensates (P14.T51.a, on the record
+/// from P14.T54.a), each entry's substance, phase and seasonal flag, reservoir, layer and area, and
+/// its crust (P14.T51.c, on the record from P14.T54.a's C3): its lid and crusts by key, its
+/// provinces, redox and thermal history, its melt area and its peak central temperature.
 /// `planetary/surface_conditions_published` pins the conditions and figures whole on a sample.
 fn write_surface(w: &mut GoldenWriter, surface: &Surface) {
     let regime = surface.climate_regime();
@@ -1223,6 +1225,29 @@ fn write_surface(w: &mut GoldenWriter, surface: &Surface) {
             None => w.line("reservoir_gel_m: none"),
         }
         w.f64("area_fraction", entry.area_fraction());
+    }
+    let Modelled::Ok(crust) = surface.crust() else {
+        w.line("crust: not modelled");
+        return;
+    };
+    let key = |id: Option<hyperion_sim::substance::SubstanceId>| {
+        id.map_or_else(|| "none".to_owned(), |id| id.substance().key().to_string())
+    };
+    w.line(&format!(
+        "crust: lid {:?}; primary {}, secondary {}, tertiary {}, bulk {}; provinces {}; {:?}, {:?}",
+        crust.lid(),
+        key(crust.primary()),
+        key(crust.secondary()),
+        key(crust.tertiary()),
+        key(crust.bulk()),
+        key(Some(crust.provinces())),
+        crust.redox(),
+        crust.thermal_history(),
+    ));
+    w.f64("melt_area_fraction", crust.melt_area_fraction());
+    match crust.peak_central_temperature() {
+        Some(peak) => w.f64("peak_central_temperature_k", peak.value()),
+        None => w.line("peak_central_temperature_k: none"),
     }
 }
 

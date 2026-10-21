@@ -12,8 +12,8 @@ use crate::planetary::hooks::figures::cover::PERENNIAL_ICE_TEMPERATURE;
 use crate::planetary::hooks::figures::{VolatileHistory, table_figures};
 use crate::planetary::hooks::surface::tests::{conditions_of, inputs_of, spin_of, table};
 use crate::planetary::hooks::surface::{
-    Column, OceanWeight, SeasonalSpin, SurfaceInputs, ZonalProfile, climate_range, day_and_night,
-    diurnal_response, heat_redistribution, night_floor, specific_heat_j_per_kg_k,
+    Column, GroundInertia, OceanWeight, SeasonalSpin, SurfaceInputs, ZonalProfile, climate_range,
+    day_and_night, diurnal_response, heat_redistribution, night_floor, specific_heat_j_per_kg_k,
 };
 use crate::substance::mixture_heat_capacity_over_r_at;
 use crate::units::consts::{SECONDS_PER_DAY, SOLAR_CONSTANT_W_PER_M2, STEFAN_BOLTZMANN};
@@ -314,7 +314,12 @@ fn a_mars_given_its_measured_air_by_hand_takes_carbon_dioxide_not_water() {
     let spin = spin_of("Mars");
     let floor = night_floor(WattsPerSquareMetre::new(0.019));
     let zonal = ZonalProfile::of(&mars, &spin, OceanWeight::NONE);
-    let (day, night) = day_and_night(&mars, &spin, SurfaceMaterial::Rock, floor);
+    let (day, night) = day_and_night(
+        &mars,
+        &spin,
+        GroundInertia::of_material(SurfaceMaterial::Rock),
+        floor,
+    );
     let range = climate_range(mars.surface_temperature, zonal.ends, day, night, floor);
     eprintln!(
         "the measured Mars's range: [{:.1}, {:.1}] K",
@@ -346,7 +351,12 @@ fn a_mars_given_its_measured_air_by_hand_takes_carbon_dioxide_not_water() {
     );
     // It is a thin air: transitional, its meridional transport under its restoring, so in
     // radiative equilibrium, as rendering plan R09's reference Mars takes it.
-    let response = diurnal_response(&mars, &spin, SurfaceMaterial::Rock, floor);
+    let response = diurnal_response(
+        &mars,
+        &spin,
+        GroundInertia::of_material(SurfaceMaterial::Rock),
+        floor,
+    );
     let air = AirTransport {
         redistribution: heat_redistribution(&mars),
         diurnal_storage: response.and_then(|r| r.storage),

@@ -301,8 +301,9 @@ impl TemplateRow {
     ///   warmest: 124.4 ± 0.3 K, Hanel et al. 1981, as Guillot 2005, Annu. Rev. Earth Planet. Sci.
     ///   33, 493, Table 2, lists it; 125.57 ± 0.07 K, Li et al. 2012);
     /// - airless ice's, `H2O`'s fresh frost;
-    /// - the airless rock analogues' (the Moon's and Mercury's), an airless rocky body's whose lid
-    ///   the passes do not know, the Moon's 0.11, until P14.T54.a passes T51.c's lid;
+    /// - the airless rock analogues' (the Moon's and Mercury's), the Moon's 0.11: an airless
+    ///   rocky body's whose lid the passes do not know, and from P14.T54.a the cap of an airless
+    ///   silicate lid's, which the Moon's `feldspathic` and Mercury's `basalt_reduced` take;
     /// - Earth's and the other temperate references', their calibrated 0.294, and Venus's 0.76,
     ///   which the area mix's cloud calibration and its runaway deck give exactly, and the thin
     ///   magma ocean's, the airless rock's 0.11, since a melt keeps T13.c's 0.10: each

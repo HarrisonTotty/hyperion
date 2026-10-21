@@ -147,13 +147,20 @@
 //! - **an eruption temperature**: no rule states one, and the melt area reads starlight alone, so
 //!   Io's internally heated lava gives it none.
 //!
-//! # Not on the record yet
+//! # On the record
 //!
-//! Nothing on the record calls this module at generator version 22 (decision-bump-plan-after-22):
-//! P14.T54.a, the 22 → 23 bump, puts [`CrustComposition`] in the record's surface section
-//! ([`record::Surface::crust`](crate::planetary::record::Surface::crust)) and deletes the
-//! tripwire test that holds the line until then. The regolith's thermal inertia at the lid is
-//! P14.T49.j's law, which T54.a applies.
+//! P14.T54.a puts the crust on the record (decision-bump-plan-after-22; decision-pre-23-review
+//! item 17): a body derived over its record takes its basis once before its passes, at the first
+//! pass's own equilibrium temperature, at the albedo it reads (0.3), held at the cosmic
+//! background's 2.725 K for a body no host lights, the formation temperature's stand-in; each pass
+//! takes its lid at its own climate, under the surface age and tide of the
+//! context it reads, and reads that lid's row as its regolith; and the record's surface section
+//! holds the crust of the published pass's lid (`CrustComposition::of`)
+//! ([`record::Surface::crust`](crate::planetary::record::Surface::crust)), so that its lid is the
+//! row its last pass read, to the bit. The regolith's thermal inertia at the lid is P14.T49.j's
+//! law, which the next pass's ground reads. The tripwire that held the module off the record at
+//! generator version 22 is deleted, and [`tags::BODY_FORMATION`]'s word 0 is first read on the
+//! record, once a derivation.
 //!
 //! # Determinism
 //!
@@ -323,6 +330,23 @@ impl CrustLithology {
     #[must_use]
     pub fn transition(self) -> Kelvin {
         first_melt(self.substance())
+    }
+
+    /// The lithology whose registry key is `key`; `None` for a key outside the closed set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::planetary::hooks::crust::CrustLithology;
+    ///
+    /// assert_eq!(CrustLithology::of_key("basalt_fe"), Some(CrustLithology::IronRichBasalt));
+    /// assert_eq!(CrustLithology::of_key("mars_dust"), None);
+    /// ```
+    #[must_use]
+    pub fn of_key(key: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|lithology| lithology.key() == key)
     }
 
     /// Whether it is an ice, whose liquid is a condensate and not a melt of the crust
@@ -1179,6 +1203,7 @@ impl CrustComposition {
     /// #     surface_gravity: derived.surface_gravity(),
     /// #     radius: Metres::from(derived.radius()),
     /// #     material: SurfaceMaterial::of(&derived.fractions()),
+    /// #     lid: None,
     /// #     stellar_flux: WattsPerSquareMetre::from(derived.flux()),
     /// #     xuv_flux: derived.xuv_flux(),
     /// #     spin: SeasonalSpin {
@@ -1507,6 +1532,31 @@ impl LidClimate {
             tidal: inputs.tidal,
         }
     }
+
+    /// The climate but for its warmest temperature ([`LidAt`]).
+    #[must_use]
+    const fn at(&self) -> LidAt {
+        LidAt {
+            state: self.state,
+            mean_surface_temperature: self.mean_surface_temperature,
+            surface_age: self.surface_age,
+            tidal: self.tidal,
+        }
+    }
+}
+
+/// A pass's climate as its lid reads it beside its warmest temperature (P14.T54.a;
+/// [`CrustBasis::lid_at`]): its state, its mean surface temperature, its surface age and its tide.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LidAt {
+    /// Its surface state, which is not the gas-envelope state.
+    pub(crate) state: SurfaceState,
+    /// Its mean surface temperature, the craters' ice-rich test's.
+    pub(crate) mean_surface_temperature: Kelvin,
+    /// Its surface age, in [0, the age].
+    pub(crate) surface_age: Years,
+    /// Whether its tides make it volcanic.
+    pub(crate) tidal: TidalVolcanism,
 }
 
 /// What only the record reads of a body's crust (P14.T54.a; the [module](self)'s "In stages"):
@@ -1594,8 +1644,25 @@ impl CrustBasis {
     /// A [`DeriveCrustError`] for a body in the gas-envelope state, or a surface age that is not
     /// finite or lies outside [0, the age], in [`CrustComposition::derive`]'s order.
     pub(crate) fn lid(&self, climate: &LidClimate) -> Result<CrustLid, DeriveCrustError> {
-        validate_climate(climate, self.inputs.age)?;
-        let (thermal_history, peak) = match (self.melting, climate.tidal) {
+        self.lid_at(&climate.at(), || climate.warmest)
+    }
+
+    /// [`lid`](Self::lid) at the climate `at` with its warmest temperature `warmest`, which is read
+    /// only where the cometary test needs it: a body whose ice melted and whose ocean did not
+    /// freeze into a shell (the [module](self)'s class 2). So a pass whose column holds nothing
+    /// that condenses, and builds no climate's range of its own, builds one only for such a body
+    /// (P14.T54.a). The same lid, to the bit, as [`lid`](Self::lid) at that warmest temperature.
+    ///
+    /// # Errors
+    ///
+    /// As [`lid`](Self::lid).
+    pub(crate) fn lid_at(
+        &self,
+        at: &LidAt,
+        warmest: impl FnOnce() -> Kelvin,
+    ) -> Result<CrustLid, DeriveCrustError> {
+        validate_climate(at, self.inputs.age)?;
+        let (thermal_history, peak) = match (self.melting, at.tidal) {
             (Melting::ByRule(cause), _) => (ThermalHistory::RockMelted(cause), None),
             (Melting::ByHeat { .. }, TidalVolcanism::Volcanic) => {
                 (ThermalHistory::RockMelted(MeltCause::Tides), None)
@@ -1603,11 +1670,11 @@ impl CrustBasis {
             (Melting::ByHeat { peak, quiet }, TidalVolcanism::Quiet) => (quiet, Some(peak)),
         };
         let crusts = match thermal_history {
-            ThermalHistory::RockMelted(cause) => melted_crusts(self, cause, climate),
-            ThermalHistory::IceMelted(_) => ice_melted(&self.inputs, climate, peak),
+            ThermalHistory::RockMelted(cause) => melted_crusts(self, cause, at),
+            ThermalHistory::IceMelted(_) => ice_melted(&self.inputs, at, warmest, peak),
             ThermalHistory::Unmelted => Crusts::Bulk(unmelted_bulk(&self.inputs, self.redox)),
         };
-        let (lid, lithology) = lid_of(&self.inputs, climate.surface_age, crusts);
+        let (lid, lithology) = lid_of(&self.inputs, at.surface_age, crusts);
         Ok(CrustLid {
             crusts,
             lid,
@@ -1615,8 +1682,18 @@ impl CrustBasis {
             redox: self.redox,
             thermal_history,
             peak,
-            state: climate.state,
+            state: at.state,
         })
+    }
+
+    /// `lid_of`'s unresurfaced test at the surface age `surface_age`: whether nothing has
+    /// resurfaced the body since its primary crust formed (its surface age at least the time
+    /// since its magma ocean's end, or its age where it had none, within the subtraction's
+    /// rounding). The passes' context holds it as a key member, since it chooses the next pass's
+    /// lid (decision-p14-t54a-passes §1.5).
+    #[must_use]
+    pub(crate) fn unresurfaced(&self, surface_age: Years) -> bool {
+        unresurfaced(&self.inputs, surface_age)
     }
 }
 
@@ -1637,13 +1714,21 @@ pub(crate) struct CrustLid {
 impl CrustLid {
     /// The registry row at the surface, the lid's lithology's: the row the regolith and the
     /// ground's thermal inertia read.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P14.T54.a's C3 wires the lid into the passes")
-    )]
     #[must_use]
     pub(crate) fn row(&self) -> SubstanceId {
         self.lithology.substance()
+    }
+
+    /// The lithology at the surface.
+    #[must_use]
+    pub(crate) const fn lithology(&self) -> CrustLithology {
+        self.lithology
+    }
+
+    /// Which crust, or the bulk material, lies at the surface.
+    #[must_use]
+    pub(crate) const fn crust(&self) -> LidCrust {
+        self.lid
     }
 }
 
@@ -1700,7 +1785,7 @@ fn validate_basis(inputs: &CrustBasisInputs) -> Result<(), DeriveCrustError> {
 
 /// Refuses a climate out of range for a body of age `age` ([`CrustBasis::lid`]), in
 /// [`CrustComposition::derive`]'s order.
-fn validate_climate(climate: &LidClimate, age: Years) -> Result<(), DeriveCrustError> {
+fn validate_climate(climate: &LidAt, age: Years) -> Result<(), DeriveCrustError> {
     if climate.state == SurfaceState::GasEnvelope {
         return Err(DeriveCrustError::NoSolidSurface);
     }
@@ -1821,7 +1906,7 @@ fn ocean_froze(inputs: &CrustBasisInputs, mean_surface_temperature: Kelvin) -> b
 /// The crusts of the body of basis `basis` whose rock melted, by `cause`, at the climate
 /// `climate` ([module](self)'s "The crusts of a body whose rock melted").
 #[must_use]
-fn melted_crusts(basis: &CrustBasis, cause: MeltCause, climate: &LidClimate) -> Crusts {
+fn melted_crusts(basis: &CrustBasis, cause: MeltCause, climate: &LidAt) -> Crusts {
     let inputs = &basis.inputs;
     let reduced = basis.redox == RedoxClass::Reduced;
     let magma_ocean = match cause {
@@ -1865,9 +1950,15 @@ fn melted_crusts(basis: &CrustBasis, cause: MeltCause, climate: &LidClimate) -> 
 }
 
 /// The crust at the climate `climate` of a body whose ice melted and whose rock did not, whose
-/// peak central temperature is `peak` ([module](self)'s class 2).
+/// peak central temperature is `peak` ([module](self)'s class 2), its warmest temperature
+/// `warmest` read only for the cometary test of a body whose ocean did not freeze into a shell.
 #[must_use]
-fn ice_melted(inputs: &CrustBasisInputs, climate: &LidClimate, peak: Option<Kelvin>) -> Crusts {
+fn ice_melted(
+    inputs: &CrustBasisInputs,
+    climate: &LidAt,
+    warmest: impl FnOnce() -> Kelvin,
+    peak: Option<Kelvin>,
+) -> Crusts {
     let water = inputs.fractions.water();
     if inputs.radius >= OCEAN_SEPARATION_RADIUS
         && ocean_froze(inputs, climate.mean_surface_temperature)
@@ -1880,7 +1971,7 @@ fn ice_melted(inputs: &CrustBasisInputs, climate: &LidClimate, peak: Option<Kelv
         return Crusts::Shell(shell);
     }
     let rock = inputs.fractions.iron() + inputs.fractions.rock();
-    let bulk = if climate.warmest < WATER_ICE_RETENTION_TEMPERATURE {
+    let bulk = if warmest() < WATER_ICE_RETENTION_TEMPERATURE {
         CrustLithology::Cometary
     } else if peak.is_some_and(|t| t >= DEHYDRATION_TEMPERATURE) {
         CrustLithology::ChondriteCv
@@ -1907,6 +1998,17 @@ fn unmelted_bulk(inputs: &CrustBasisInputs, redox: RedoxClass) -> CrustLithology
 /// counts as unresurfaced: the two are one subtraction apart on the record.
 const SURFACE_AGE_ROUNDING: f64 = 1e-9;
 
+/// Whether nothing has resurfaced the body `inputs` describe by the surface age `surface_age`
+/// (`lid_of`'s test): that age at least the time since its magma ocean's end, or its age where it
+/// had none, within [`SURFACE_AGE_ROUNDING`].
+#[must_use]
+fn unresurfaced(inputs: &CrustBasisInputs, surface_age: Years) -> bool {
+    let since_melt = inputs
+        .molten_until
+        .map_or(inputs.age.value(), |end| inputs.age.value() - end.value());
+    surface_age.value() >= since_melt * (1.0 - SURFACE_AGE_ROUNDING)
+}
+
 /// The body's lid under the surface age `surface_age` ([module](self)'s "The lid and the
 /// provinces"), and the lithology it names: a `graphite` primary crust is never the lid, since a
 /// melted body's secondary crust buries it.
@@ -1916,10 +2018,7 @@ fn lid_of(
     surface_age: Years,
     crusts: Crusts,
 ) -> (LidCrust, CrustLithology) {
-    let since_melt = inputs
-        .molten_until
-        .map_or(inputs.age.value(), |end| inputs.age.value() - end.value());
-    let unresurfaced = surface_age.value() >= since_melt * (1.0 - SURFACE_AGE_ROUNDING);
+    let unresurfaced = unresurfaced(inputs, surface_age);
     match crusts {
         Crusts::Bulk(bulk) => (LidCrust::Bulk, bulk),
         Crusts::Shell(shell) => (LidCrust::Primary, shell),

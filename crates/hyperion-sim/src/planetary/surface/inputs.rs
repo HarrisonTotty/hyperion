@@ -601,11 +601,12 @@ impl CoarseInputs {
     /// (the spheroid), `rotation` (the spin) and `orbit` sections, a moon's planet's `orbit`,
     /// and the hosts' light, at [`RECORD_TIME`], as [`from_record`](Self::from_record) reads them
     /// (R09.T10.e), and the palette's entries from the registry's rows of the substances the
-    /// section names (P14.T49.b–c). The section's crust and condensates (P14.T51.a, T51.c) are
-    /// declared but not modelled until P14.T54.a, which connects them and the palette's
-    /// resolution to that reading and settles the record's time (decision-bump-plan-after-22
-    /// §1.2 and §1.5). Until then an `Ok` section answers
-    /// [`SurfaceInputsError::NotModelled`] from its crust, once the planet is checked.
+    /// section names (P14.T49.b–c). The section's crust (P14.T51.c) is on the record from
+    /// P14.T54.a's C3, and its condensates (P14.T51.a) from its B4; their reading into the pass's
+    /// inputs, with the palette's resolution, is P14.T54.a's wire subtask's, which settles the
+    /// record's time (decision-bump-plan-after-22 §1.2 and §1.5). Until it lands an `Ok` section
+    /// answers [`SurfaceInputsError::NotModelled`] once the planet is checked, its crust modelled
+    /// or not.
     ///
     /// # Errors
     ///
@@ -668,8 +669,8 @@ impl CoarseInputs {
     /// let planet = CoarseInputs::planet_of(&moon)
     ///     .map(|index| system.body_at(&ctx, index, RECORD_TIME))
     ///     .transpose()?;
-    /// // With it, the reading stops at the crust, which is not modelled until P14.T54.a; without
-    /// // it, the moon's seasons, its planet's orbit's, cannot be read.
+    /// // With it, the reading stops at the crust, which it does not read until P14.T54.a's wire
+    /// // subtask; without it, the moon's seasons, its planet's orbit's, cannot be read.
     /// assert_eq!(
     ///     CoarseInputs::for_body(&moon, planet.as_ref(), &ctx),
     ///     Err(ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(
@@ -695,12 +696,13 @@ impl CoarseInputs {
                 return Err(SurfaceInputsError::NotModelled(RecordSection::Surface).into());
             }
         };
-        // P14.T54.a turns the record's crust and condensates into the pass's, resolves the
-        // palette, and passes them with `seasons` to `from_record`; until then the crust is
-        // uninhabited and nothing reaches the reading. `from_record` takes the hosts' light from
-        // the record's conditions, so the context is not read.
-        let _ = (seasons, ctx);
-        match *crust {}
+        // The record holds its crust from P14.T54.a's C3; its reading into the pass's crust and
+        // condensates, with the palette's resolution, passed with `seasons` to `from_record`, is
+        // P14.T54.a's wire subtask's. Until it lands a modelled crust is not read, and the section
+        // answers not modelled. `from_record` takes the hosts' light from the record's
+        // conditions, so the context is not read.
+        let _ = (seasons, ctx, crust);
+        Err(SurfaceInputsError::NotModelled(RecordSection::Surface).into())
     }
 
     /// The planet whose record [`for_body`](Self::for_body) takes with this body's, in the body's
@@ -877,8 +879,8 @@ impl CoarseInputs {
     /// let bulk = rocky.bulk().ok().ok_or("a rocky planet has a bulk section")?;
     /// assert_eq!(inputs.gravity(), bulk.surface_gravity());
     /// assert!(inputs.seasonal_orbit().is_some());
-    /// // `for_body` still stops at the record's crust, which is not modelled; a planet takes no
-    /// // planet's record (`CoarseInputs::planet_of` is `None`).
+    /// // `for_body` still stops at the record's crust, which it does not read yet; a planet takes
+    /// // no planet's record (`CoarseInputs::planet_of` is `None`).
     /// assert_eq!(CoarseInputs::planet_of(&rocky), None);
     /// assert_eq!(
     ///     CoarseInputs::for_body(&rocky, None, &ctx),
@@ -3820,15 +3822,20 @@ mod tests {
             (giant_ctx, giant),
             (sub_ctx, sub_neptune),
         ] = rocky_giant_and_sub_neptune();
-        // The rocky planet's section carries its conditions and figures (P14.T48.e), but its
-        // crust and condensates are not modelled until P14.T54.a.
+        // The rocky planet's section carries its conditions and figures (P14.T48.e), and from
+        // P14.T54.a's C3 its crust, which the reading does not read until P14.T54.a's wire
+        // subtask: the section still answers not modelled.
         let Section::Ok(surface) = rocky.surface() else {
             panic!(
                 "a generated rocky planet's surface is {:?}",
                 rocky.surface()
             );
         };
-        assert_eq!(surface.crust(), Modelled::NotModelled);
+        assert!(
+            matches!(surface.crust(), Modelled::Ok(_)),
+            "{:?}",
+            surface.crust()
+        );
         assert_eq!(
             CoarseInputs::for_body(&rocky, None, &rocky_ctx),
             Err(ReadCoarseInputsError::Section(

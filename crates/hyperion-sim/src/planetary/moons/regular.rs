@@ -92,7 +92,7 @@ use crate::planetary::derive::atmosphere::{Atmosphere, SurfaceState, VolatileDra
 #[cfg(doc)]
 use crate::planetary::derive::derive_body;
 use crate::planetary::derive::pass_record::{
-    PassBulk, PassContext, PassRecord, PassRecordOf, PassTide, RecordSpin,
+    PassBulk, PassContext, PassRecord, PassRecordOf, PassTide, RecordCrust, RecordSpin,
 };
 use crate::planetary::derive::photometry::area_mix::ShadeBook;
 use crate::planetary::derive::rotation::{
@@ -1115,6 +1115,13 @@ impl DerivedMoon {
         self.body.spun()
     }
 
+    /// Its published pass's lid, whose row its regolith read and from which its record's crust is
+    /// built (P14.T54.a; [`DerivedBody::crust_lid`]).
+    #[must_use]
+    pub(crate) const fn crust_lid(&self) -> Option<&crate::planetary::hooks::crust::CrustLid> {
+        self.body.crust_lid()
+    }
+
     /// How many passes its derivation took (P14.T51.b; [`DerivedBody::atmosphere_passes`]).
     #[cfg(test)]
     #[must_use]
@@ -1635,6 +1642,12 @@ pub(crate) trait MoonRecordOf {
         air: &Atmosphere,
         tide: &MoonTideAt,
     ) -> Option<PassFigures>;
+
+    /// What the moon's record gives its crust's basis (P14.T51.c; [`RecordCrust`]), for its shape
+    /// `shape` and its bulk before its passes `bulk`, once a moon before its passes: `None` where
+    /// this version computes no crust for it.
+    #[must_use]
+    fn crust(&self, shape: &MoonShape, bulk: &PassBulk) -> Option<RecordCrust>;
 }
 
 /// The shape a moon's derivation gives it before its passes, which no pass moves: its ice
@@ -1875,6 +1888,10 @@ struct MoonPassRecord<'a> {
 impl PassRecordOf for MoonPassRecord<'_> {
     fn spin(&self, bulk: &PassBulk) -> RecordSpin<'_> {
         self.record.spin(&self.shape, bulk)
+    }
+
+    fn crust(&self, bulk: &PassBulk) -> Option<RecordCrust> {
+        self.record.crust(&self.shape, bulk)
     }
 
     fn context(&self, bulk: &PassBulk, air: &Atmosphere, equilibrium: Kelvin) -> PassContext {
@@ -3255,6 +3272,11 @@ mod tests {
     /// surface water, potential ocean and ocean weight are C0's (7015ccf8), zero to the bit, and no
     /// water sea is listed. Titan's crust is not a sea.
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "three measured moons at every rank, each record checked against its partition, \
+                  its cover and its figures"
+    )]
     fn the_measured_icy_moons_publish_their_crust_s_water_at_the_figures_ice_area() {
         use crate::planetary::chem::partition::CondensatePhase;
         use crate::planetary::derive::atmosphere::{Gas, SurfaceMaterial};
@@ -3286,6 +3308,7 @@ mod tests {
                     surface_gravity: gravity,
                     radius: derived.radius(),
                     material: SurfaceMaterial::of(&derived.fractions()),
+                    lid: None,
                     stellar_flux: WattsPerSquareMetre::from(derived.flux()),
                     xuv_flux: derived.xuv_flux(),
                     spin,

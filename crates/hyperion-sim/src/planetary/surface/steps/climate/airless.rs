@@ -17,9 +17,11 @@
 //! times its share of skin depths and a pair's conductance Γ √(π ÷ P) over their spacing, so the
 //! column needs no density or heat capacity of its own (research-c §2.2).
 //!
-//! Γ is plan 14's for the body's surface material, ε plan 14's regolith's
-//! ([`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`],
-//! [`ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`], [`REGOLITH_EMISSIVITY`]), so that the
+//! Γ is plan 14's ground's, P14.T49.j's law at the body's crust's lid at its mean surface
+//! temperature, with P14.T24.a's constants ([`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`],
+//! [`ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`]) as its fallback alone (P14.T54.a;
+//! [`regolith_inertia`]; under a thin air a vacuum lower bound, with no pore gas), ε plan 14's
+//! regolith's ([`REGOLITH_EMISSIVITY`]), so that the
 //! climate's nights are plan 14's, and A plan 14's Bond albedo of the body's surface state on its
 //! material ([`SurfaceState::albedo`]), the one its mean temperature is computed with. The nodes
 //! lie on Hayne et al.'s geometric grid (eqs. A32–A33), the first spacing a fifth of the skin depth
@@ -114,14 +116,18 @@ use super::sun::{Daylight, HostTrack, orbit_at, reduced};
 use crate::math;
 use crate::orbit::Eccentricity;
 use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
+use crate::planetary::hooks::crust::CrustLithology;
 use crate::planetary::hooks::surface::{
-    COSMIC_BACKGROUND_TEMPERATURE, ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
-    REGOLITH_EMISSIVITY, ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S, night_floor,
+    COSMIC_BACKGROUND_TEMPERATURE, GroundInertia, REGOLITH_EMISSIVITY, night_floor,
 };
-use crate::planetary::surface::inputs::{CoarseInputs, Forcing};
+#[cfg(doc)]
+use crate::planetary::hooks::surface::{
+    ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S, ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+};
+use crate::planetary::surface::inputs::{CoarseInputs, CrustInputs, Forcing, LidCrust};
 use crate::substance::by_key;
 use crate::units::consts::STEFAN_BOLTZMANN;
-use crate::units::{Pascals, Radians};
+use crate::units::{Kelvin, Pascals, Radians};
 
 /// The steps of a solar day: 48 (`Adopted`; research-c §2.2, its `runs/e2b_steps.py`). With the
 /// surface solved exactly each step, the lunar equator's noon, predawn and mean at 48 steps lie
@@ -232,20 +238,20 @@ pub(super) struct Regolith {
 }
 
 impl Regolith {
-    /// The regolith of the body of `inputs`: plan 14's emissivity, its inertia for the body's
-    /// surface material, its Bond albedo for the surface state on that material, and the heat
-    /// flow, a heat flow that is not positive taken as none, as [`night_floor`] takes it.
+    /// The regolith of the body of `inputs`: plan 14's emissivity, its inertia at its crust's lid
+    /// ([`regolith_inertia`]), its Bond albedo for the surface state on its material, and the
+    /// heat flow, a heat flow that is not positive taken as none, as [`night_floor`] takes it.
     #[must_use]
     pub(super) fn of(inputs: &CoarseInputs) -> Self {
         let material = inputs.surface_material();
-        let inertia = match material {
-            SurfaceMaterial::Rock => ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
-            SurfaceMaterial::Ice => ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
-        };
         let heat = inputs.heat_flow().value();
         Self {
             emissivity: REGOLITH_EMISSIVITY,
-            inertia_j_per_m2_k_sqrt_s: inertia,
+            inertia_j_per_m2_k_sqrt_s: regolith_inertia(
+                lid_lithology(inputs.crust()),
+                material,
+                inputs.mean_surface_temperature(),
+            ),
             albedo: albedo_of(inputs.surface_state(), material),
             heat_flow_w_m2: if heat > 0.0 { heat } else { 0.0 },
         }
@@ -284,6 +290,37 @@ impl Regolith {
     fn input(&self, absorbed_w_m2: f64, down_w_m2: f64) -> f64 {
         absorbed_w_m2 + self.background_w_m2() + self.emissivity * down_w_m2
     }
+}
+
+/// The thermal inertia Γ of a regolith whose crust's lid is `lid` on a bulk of `material`, at the
+/// body's mean surface temperature `mean_surface_temperature`, J m⁻² K⁻¹ s^−½ (P14.T54.a;
+/// decision-pre-23-review item 7): plan 14's ground's, P14.T49.j's law at the lid's row with
+/// P14.T24.a's constants as the fallback alone, the one the record's conditions read
+/// (`GroundInertia`), so that this model's nights are plan 14's. On an airless body the record's
+/// mean surface temperature is its equilibrium temperature (decision-p14-t54a-passes §3.5, which
+/// the sample's tests hold to the bit), at which plan 14 takes its ground's. Under a thin air the
+/// law is a vacuum lower bound, with no pore gas (P14.T49.l's). A lid outside T51.c's closed set,
+/// or a temperature that is not positive, takes the material's constant.
+#[must_use]
+pub(crate) fn regolith_inertia(
+    lid: Option<CrustLithology>,
+    material: SurfaceMaterial,
+    mean_surface_temperature: Kelvin,
+) -> f64 {
+    GroundInertia::at_equilibrium(lid, material, mean_surface_temperature)
+        .inertia_j_per_m2_k_sqrt_s()
+}
+
+/// The lithology of the crust or bulk material `crust`'s lid names ([`CrustInputs::lid`]):
+/// `None` where it names none or a row outside T51.c's closed set ([`CrustLithology`]).
+#[must_use]
+fn lid_lithology(crust: &CrustInputs) -> Option<CrustLithology> {
+    let key = match crust.lid {
+        LidCrust::Primary => crust.primary,
+        LidCrust::Secondary => crust.secondary,
+        LidCrust::Bulk => crust.bulk,
+    }?;
+    CrustLithology::of_key(key.as_str())
 }
 
 /// Whether `x` is finite and positive.
@@ -2294,10 +2331,22 @@ mod tests {
 
     /// The lunar equator's diurnal cycle under a constant sun converges to a periodic one, in
     /// energy balance, and reproduces research-c's prototype of the same column (its §2.2, at 96
-    /// steps a day: noon 386.3 K, predawn 96.1 K, mean 220.5 K) to 1 K at 48.
+    /// steps a day: noon 386.3 K, predawn 96.1 K, mean 220.5 K) to 1 K at 48. The prototype's
+    /// column is plan 14's rock constant's, Γ 55, which the reference Moon took before P14.T54.a
+    /// gave it its `feldspathic` lid's law: the check is of the scheme, at the prototype's inertia.
     #[test]
     fn a_diurnal_cycle_converges_to_its_period() {
-        let regolith = lunar_regolith();
+        use crate::planetary::hooks::surface::ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S;
+
+        let regolith = Regolith {
+            inertia_j_per_m2_k_sqrt_s: ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+            ..lunar_regolith()
+        };
+        eprintln!(
+            "the reference Moon's lid's Γ {:.3} J m⁻² K⁻¹ s^−½, the prototype's {}",
+            lunar_regolith().inertia_j_per_m2_k_sqrt_s,
+            regolith.inertia_j_per_m2_k_sqrt_s
+        );
         let model = Model {
             regolith,
             air: ThinAir::NONE,

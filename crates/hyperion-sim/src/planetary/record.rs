@@ -48,6 +48,8 @@ use crate::planetary::fate::BodyState;
 use crate::planetary::frames::BodyFixedFrame;
 use crate::planetary::hooks::DetailSeed;
 use crate::planetary::hooks::cold_traps::ColdTrapRules;
+pub use crate::planetary::hooks::crust::CrustComposition;
+use crate::planetary::hooks::crust::CrustLithology;
 use crate::planetary::hooks::figures::{GlobalFigures, PartitionGround};
 use crate::planetary::hooks::surface::{ClimateRegime, OceanWeight, SurfaceConditions};
 use crate::planetary::index::{BodyIndex, BodySub};
@@ -589,9 +591,10 @@ impl BulkProperties {
 
 /// The contents of a surface section (design note 16, P14.T48.e): a body's surface state and
 /// material, its surface conditions with their climate regime (P14.T24.a, T48.d), its global
-/// figures (P14.T24.b, T48.a–c) and its condensates (P14.T51.a, from P14.T54.a), every substance in
-/// them a [`SubstanceId`](crate::substance::SubstanceId), and the members whose tasks land later,
-/// each [`Modelled::NotModelled`] until they do (decision-composition §1.10).
+/// figures (P14.T24.b, T48.a–c), its condensates (P14.T51.a, from P14.T54.a) and its crust
+/// (P14.T51.c, from P14.T54.a, not modelled for a body whose passes took no lid), every substance
+/// in them a [`SubstanceId`](crate::substance::SubstanceId), and the members whose tasks land
+/// later, each [`Modelled::NotModelled`] until they do (decision-composition §1.10).
 ///
 /// It is the one section rendering plan R09's coarse pass reads
 /// ([`CoarseInputs::for_body`](crate::planetary::surface::CoarseInputs::for_body)). A record's
@@ -632,6 +635,9 @@ pub(crate) struct SurfaceBasis {
     pub(crate) heat_flow: WattsPerSquareMetre,
     /// θ, the ocean weight its conditions read.
     pub(crate) ocean_weight: OceanWeight,
+    /// The lid its conditions' ground's inertia read (P14.T54.a): its published pass's context's,
+    /// the pass before's own lid; `None` where it read none (the material's constant).
+    pub(crate) lid: Option<CrustLithology>,
 }
 
 impl Surface {
@@ -673,6 +679,16 @@ impl Surface {
     pub(crate) fn with_basis(self, basis: SurfaceBasis) -> Self {
         Self {
             basis: Some(basis),
+            ..self
+        }
+    }
+
+    /// The surface with its crust `crust` (P14.T54.a), the published pass's lid's; not modelled
+    /// for `None`, a body whose passes took no lid.
+    #[must_use]
+    pub(crate) fn with_crust(self, crust: Option<CrustComposition>) -> Self {
+        Self {
+            crust: crust.map_or(Modelled::NotModelled, Modelled::Ok),
             ..self
         }
     }
@@ -764,7 +780,13 @@ impl Surface {
         }
     }
 
-    /// The crust by substance (P14.T51.c), not modelled until it lands.
+    /// The crust by substance (P14.T51.c, on the record from P14.T54.a): its primary, secondary
+    /// and tertiary crusts or its bulk material, which of them lies at the surface (its lid) and
+    /// its provinces' lithology, its mantle's redox class, its melt area and the thermal history
+    /// that decided them. Its lid is the one its last pass took at its own climate, whose row its
+    /// regolith read, to the bit (decision-pre-23-review item 17). Not modelled for a body whose
+    /// passes took no lid: one derived over the passes' stand-in, with no rotation law, or one
+    /// with no crust's basis (one seen before its formation window ends).
     #[must_use]
     pub const fn crust(&self) -> Modelled<&CrustComposition> {
         self.crust.as_ref()
@@ -831,11 +853,6 @@ pub enum VerticalStructure {}
 /// which no task builds yet, so the type has no value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum AerosolInventory {}
-
-/// A body's crust by substance (P14.T51.c: its primary, secondary and tertiary crusts or bulk
-/// material, its lid, provinces and redox), which no task builds yet, so the type has no value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum CrustComposition {}
 
 /// A surface's modifiers (P14.T51.d: its maturity, organic cover and resurfacing), which no task
 /// builds yet, so the type has no value.

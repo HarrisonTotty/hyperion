@@ -615,7 +615,7 @@ fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
                 surface.conditions().climate_regime().as_ref(),
                 Some(surface.climate_regime())
             );
-            // With the basis its record built it on (rule (f)).
+            // With the basis its record built it on (rule (f)), and its crust (P14.T54.a's C3).
             let rebuilt = Surface::new(
                 state,
                 material,
@@ -623,7 +623,8 @@ fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
                 figures.clone(),
                 condensates.clone(),
             )
-            .map(|rebuilt| rebuilt.with_basis(*surface.basis().unwrap()));
+            .map(|rebuilt| rebuilt.with_basis(*surface.basis().unwrap()))
+            .map(|rebuilt| rebuilt.with_crust(surface.crust().ok().map(|crust| **crust)));
             assert_eq!(rebuilt.as_ref(), Some(surface));
             assert_eq!(
                 Surface::new(
@@ -3355,6 +3356,7 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
                 surface_gravity: bulk.surface_gravity(),
                 radius: Metres::from(bulk.radius()),
                 material: SurfaceMaterial::of(&bulk.fractions()),
+                lid: basis.lid,
                 stellar_flux: WattsPerSquareMetre::from(derived.flux()),
                 xuv_flux: derived.xuv_flux(),
                 spin,
@@ -4703,6 +4705,16 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
 ///   same.
 /// - **The limits** (over all bodies, item 5): at most 3% bracketed and 1% jumping, and planets
 ///   jumping at most 2%. Reported by kind with each kind's pass histogram.
+/// - **The lid** (P14.T54.a's C3; the first relay's sample test 11, item 17's constraint 1): every
+///   body's published lid, `crust_lid`, is the lid the published pass took again at its published
+///   albedo and context, whose row its regolith read, and its record's crust's lid row, to the
+///   bit. Every body whose lid changed between its passes after its first (under C₀, which takes
+///   none) is listed, settled or bracketed (§1.8: a lid flip).
+/// - **The airless ground** (the six points' item 5): every airless body's record's mean surface
+///   temperature is its equilibrium temperature to the bit, and R09's airless model's regolith
+///   inertia at its record's crust's lid and mean surface temperature is its record's conditions'
+///   ground's, to the bit, for every converged body; a bracketed body whose context's lid is not
+///   its own is listed.
 #[test]
 #[expect(
     clippy::too_many_lines,
@@ -4717,7 +4729,21 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
         Context, ContextFit, Convergence, JUMP_RESIDUAL, MOST_PASSES, floats_agree,
     };
     use crate::planetary::derive::{DerivedBody, Under, equilibrium_temperature};
+    use crate::planetary::hooks::crust::{CrustLid, CrustLithology, LidCrust};
     use crate::planetary::hooks::figures::cover::water_surface_share;
+    use crate::planetary::surface::steps::climate::regolith_inertia;
+
+    /// The lithologies a body's passes took, in order, each change kept once: its lid flips.
+    fn lid_changes(lids: &[Option<CrustLid>]) -> Vec<Option<CrustLithology>> {
+        let mut seen: Vec<Option<CrustLithology>> = Vec::new();
+        for lid in lids.iter().skip_while(|lid| lid.is_none()) {
+            let lithology = lid.map(|lid| lid.lithology());
+            if seen.last() != Some(&lithology) {
+                seen.push(lithology);
+            }
+        }
+        seen
+    }
 
     /// The classes of a bracketed body (decision-p14-t51-batch §4, decision-p14-t54a-passes
     /// §1.8).
@@ -4805,6 +4831,11 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     let mut tallies: BTreeMap<&str, Tally> = BTreeMap::new();
     let (mut icy, mut crusts, mut climates_unread) = (0_u32, 0_u32, 0_u32);
     let mut differing_figures: Vec<String> = Vec::new();
+    // The lid (C3): bodies with a lid, their lid flips settled and bracketed, the airless bodies
+    // checked, and those whose R09 inertia is not their record's (bracketed only).
+    let (mut lids, mut airless) = (0_u32, 0_u32);
+    let (mut settled_flips, mut bracketed_flips) = (Vec::<String>::new(), Vec::<String>::new());
+    let mut airless_apart: Vec<String> = Vec::new();
     // Tallies a derivation of the kind `kind`, re-run once at its published albedo and context as
     // `again` re-runs it, its record's surface `surface`.
     let mut tally =
@@ -4839,6 +4870,52 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
                 climates_unread += u32::from(read.conditions.is_none());
                 if !figures_agree(surface.figures(), spun.context()) {
                     differing_figures.push(format!("{what}: {:?}", derived.convergence()));
+                }
+            }
+            // Test 11: the published lid is the one its pass took again, whose row its regolith
+            // read, and its record's crust's lid row, to the bit.
+            let lid = derived.crust_lid().copied();
+            assert_eq!(once.crust_lid().copied(), lid, "{what}");
+            if let Some(read) = &read {
+                assert_eq!(read.lids.last().copied().flatten(), lid, "{what}");
+                let changes = lid_changes(&read.lids);
+                if changes.len() > 1 {
+                    let listed = format!("{what}: {changes:?}, {:?}", derived.convergence());
+                    match derived.convergence() {
+                        Convergence::Converged => settled_flips.push(listed),
+                        Convergence::Bracketed { .. } => bracketed_flips.push(listed),
+                    }
+                }
+            }
+            if let Some(surface) = surface {
+                let record_lid = surface.crust().ok().map(|crust| {
+                    match crust.lid() {
+                        LidCrust::Primary => crust.primary(),
+                        LidCrust::Secondary => crust.secondary(),
+                        LidCrust::Bulk => crust.bulk(),
+                    }
+                    .expect("a crust's lid names a crust it has")
+                });
+                assert_eq!(record_lid, lid.map(|lid| lid.row()), "{what}");
+                lids += u32::from(lid.is_some());
+                // The six points' item 5: an airless body's record's mean T_s is its T_eq, and
+                // R09's inertia at its record's lid and mean T_s its record's ground's.
+                if surface.state() == SurfaceState::Airless {
+                    let conditions = surface.conditions();
+                    let mean = conditions.mean_surface_temperature();
+                    assert_same_bits(mean.value(), derived.equilibrium_temperature().value());
+                    let r09 =
+                        regolith_inertia(lid.map(|lid| lid.lithology()), surface.material(), mean);
+                    let record = conditions.ground().inertia_j_per_m2_k_sqrt_s();
+                    if r09.total_cmp(&record).is_ne() {
+                        assert_ne!(
+                            derived.convergence(),
+                            Convergence::Converged,
+                            "{what}: R09's Γ {r09} against the record's {record}"
+                        );
+                        airless_apart.push(format!("{what}: R09's Γ {r09:.3} against {record:.3}"));
+                    }
+                    airless += 1;
                 }
             }
             match derived.convergence() {
@@ -5032,22 +5109,32 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
         differing_figures.len(),
         differing_figures.join("\n  ")
     );
+    eprintln!(
+        "lids: {lids} bodies with a lid on their record; lid flips during the passes, settled {} \
+         (listed, not counted):\n  {}\nbracketed {}:\n  {}\n{airless} airless bodies, their mean \
+         T_s their T_eq to the bit; {} whose R09 inertia is not their record's (bracketed):\n  {}",
+        settled_flips.len(),
+        settled_flips.join("\n  "),
+        bracketed_flips.len(),
+        bracketed_flips.join("\n  "),
+        airless_apart.len(),
+        airless_apart.join("\n  "),
+    );
     // The ruling's measures, over all bodies (decision-p14-t54a-passes §1.8 and item 5): at most
-    // 1% jumping, a diagonal or a context jump, at most 3% bracketed, and planets jumping at most
-    // 2%. Above any goes to main.
+    // 1% jumping, a diagonal or a context jump, at most 3% bracketed. Above either goes to main.
     assert!(100 * jumps <= total, "{jumps} of {total} jump");
     assert!(100 * held <= 3 * total, "{held} of {total} bracketed");
     let planets = &tallies["planets"];
     let planet_jumps = count(planets, Class::Jump) + count(planets, Class::ContextJump);
-    // The planets' guard trips by one body at C2: 5 of the 226 planets jump (2.2%), all across
-    // the diagonal, cold worlds at a state or cover edge (two of them jumping at the stand-in
-    // too). Escalated to main (P14.T54.a's C2 record); pinned as it stands meanwhile (FEATURES
-    // FIRST).
+    // The planets' 2% guard is over the 400 systems' planets (main, on C2's escalation:
+    // `the_passes_endings_over_the_whole_sample_are_recorded`), not this sample's 226: pinned here
+    // at its measured value, C2's 5 and C3's 5, all across the diagonal.
     assert!(
         planet_jumps <= 5,
         "{planet_jumps} of {} planets jump",
         planets.bodies
     );
+    assert!(lids > 100 && airless > 100, "{lids} {airless}");
     assert!(
         tallies["planets"].bodies + tallies["members"].bodies > 100
             && tallies["moons"].bodies > 10
@@ -5086,7 +5173,7 @@ fn a_moon_s_law_is_held_after_at_most_two_rounds() {
     let (mut moons, mut first, mut regular, mut repeated) = (0_usize, 0_usize, 0_usize, 0_usize);
     let mut states: BTreeMap<String, usize> = BTreeMap::new();
     let mut second: Vec<String> = Vec::new();
-    let mut regular_second = 0_usize;
+    let (mut regular_second, mut flips_or_oscillations) = (0_usize, 0_usize);
     for (ctx, system) in whole().iter().take(150) {
         let t = parent_time(ctx);
         let epoch = Epoch::new(system, ctx, t).with_shades();
@@ -5161,6 +5248,9 @@ fn a_moon_s_law_is_held_after_at_most_two_rounds() {
                     repeated += usize::from(*law == held.law);
                     let oscillates = matches!(state(&held.law), SpinState::Locked(_))
                         || state(&record_law) != state(&held.law);
+                    // A flip: round 2's law in another state than round 1's.
+                    let flips = state(&law) != state(&held.law);
+                    flips_or_oscillations += usize::from(flips || oscillates);
                     second.push(format!(
                         "{:?} {index:?}: round 1 {:?} τ {:.4e} s, round 2 {:?} τ {:.4e} s; the \
                          record's tides' law {:?} τ {:.4e} s ({:+.3e} of the held τ), its \
@@ -5182,20 +5272,26 @@ fn a_moon_s_law_is_held_after_at_most_two_rounds() {
     }
     eprintln!(
         "{moons} moons ({regular} regular): {first} held after round 1, {} after round 2 \
-         ({regular_second} regular; {repeated} whose round 2 gave round 1's law to the bit); by \
-         origin, round and state {states:?}\n  {}",
+         ({regular_second} regular; {repeated} whose round 2 gave round 1's law to the bit; \
+         {flips_or_oscillations} flipping or oscillating); by origin, round and state {states:?}\n  \
+         {}",
         second.len(),
         second.join("\n  ")
     );
     assert!(moons > 300 && regular > 50, "{moons} {regular}");
-    // The ruling's guard (§2.5, test 3), at most 1% of moons in round 2, trips at 23's rules: 151
-    // of 426 moons (35%), every one a captured or giant-impact moon unlocked in both rounds, with
-    // no oscillation, whose round 2 gives round 1's law to the bit. Over the regular moons, the
-    // population T56.d's 3 of 2,025 unlocked was measured on, none takes it. Escalated to main
-    // (P14.T54.a's C2 record); pinned as it stands meanwhile (FEATURES FIRST).
+    // The ruling's guard (§2.5, test 3), at most 1% of moons in round 2, tripped at 23's rules:
+    // 151 of 426 moons (35%), every one a captured or giant-impact moon unlocked in both rounds,
+    // with no oscillation, whose round 2 gives round 1's law to the bit. Main accepted round 2 as
+    // built and re-based the guard (on C2's escalation): the flips and oscillations at most 1% of
+    // the moons, and the regular moons taking round 2 at most 1% of the regular moons. The 151 is
+    // pinned at its measured value.
     assert!(
         100 * regular_second <= regular,
         "{regular_second} of {regular} regular moons"
+    );
+    assert!(
+        100 * flips_or_oscillations <= moons,
+        "{flips_or_oscillations} of {moons} moons flip or oscillate"
     );
     assert!(
         second.len() <= 151 && repeated == second.len(),
@@ -5455,7 +5551,8 @@ fn reusing_a_bracket_s_ends_moves_no_bit_of_the_sample() {
 /// (after Batch B)", item 5): how the passes end for every present planet, member and moon of all
 /// 400 whole systems at the epoch, by kind, the population the ruling's planets' 1.53% (24 of
 /// 1,568, at Batch B's stand-ins) was measured on: bodies, bracketed, jumping (across the diagonal
-/// or a context jump) and the pass histogram. It asserts nothing.
+/// or a context jump) and the pass histogram. It asserts the planets' guard alone, at most 2% of
+/// them jumping, which main ruled is over this population (on C2's escalation).
 #[test]
 #[ignore = "a measurement, run by name"]
 fn the_passes_endings_over_the_whole_sample_are_recorded() {
@@ -5513,6 +5610,208 @@ fn the_passes_endings_over_the_whole_sample_are_recorded() {
             100.0 * f64::from(*jumping) / f64::from(*bodies),
         );
     }
+    let (planets, _, planets_jumping, _) = &kinds["planets"];
+    assert!(
+        50 * planets_jumping <= *planets,
+        "{planets_jumping} of {planets} planets jump"
+    );
+}
+
+/// A measurement for the bless note, run by name (decision-pre-23-review items 7, 16 and 17;
+/// P14.T54.a's C3): over every present planet, member and moon of the first 60 whole systems at
+/// the epoch, each record derived with its lid and without it (`without_crust`, the derivation
+/// before C3: its material's regolith and inertia), by lid lithology:
+///
+/// - the bodies whose regolith row changed from the stand-in (an airless body's by its bare
+///   regolith's Bond albedo, which the space-weathering cap may leave the Moon's 0.11; any other's
+///   by its row against the material's, `basalt` or `H2O`), with their equilibrium temperatures'
+///   moves;
+/// - the airless bodies, how many take the cap (a `Silicate` lid), and the nights the ground's
+///   inertia at the lid moves (the coldest of the climate's range);
+/// - the ice bulks whose lid is not `H2O`, whose record lists the crust's water as its `H2O` solid
+///   (decision-p14-t54a-ganymede, C1 follow-up §C1.4) beside a regolith of another row.
+///
+/// It asserts only that the walk found the sample's surfaces.
+#[test]
+#[ignore = "a measurement for the bless note, run by name"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of the sample's bodies with and without the lid, tallied by lithology"
+)]
+fn the_lid_s_moves_from_the_stand_in_are_recorded() {
+    use std::collections::BTreeMap;
+
+    use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
+    use crate::planetary::derive::photometry::area_mix::{Regolith, capped_lid};
+    use crate::planetary::derive::without_crust;
+    use crate::planetary::hooks::crust::CrustLithology;
+
+    /// One lithology's tally: bodies, rows changed, the moves of `T_eq` of the changed (least,
+    /// greatest, sum), airless, capped, airless nights moved (least, greatest), and of them those
+    /// whose `T_eq` held to the bit, which the ground's inertia alone moved.
+    #[derive(Debug, Default)]
+    struct Moves {
+        bodies: u32,
+        changed: u32,
+        t_eq: Option<(f64, f64)>,
+        t_eq_sum: f64,
+        airless: u32,
+        capped: u32,
+        nights_moved: u32,
+        nights: Option<(f64, f64)>,
+        inertia_nights: u32,
+        inertia: Option<(f64, f64)>,
+    }
+
+    let widen = |range: &mut Option<(f64, f64)>, x: f64| {
+        *range = Some(range.map_or((x, x), |(lo, hi)| (lo.min(x), hi.max(x))));
+    };
+    let t = UniverseTime::EPOCH;
+    let mut moves: BTreeMap<String, Moves> = BTreeMap::new();
+    let (mut bodies, mut unchanged_lidless, mut ice_bulks_apart) = (0_u32, 0_u32, Vec::new());
+    let mut record = |what: String,
+                      with: (&BodyRecord, &DerivedBody),
+                      without: (&BodyRecord, &DerivedBody)| {
+        let (Section::Ok(surface), Section::Ok(before)) = (with.0.surface(), without.0.surface())
+        else {
+            return;
+        };
+        bodies += 1;
+        let Some(lid) = with.1.crust_lid() else {
+            unchanged_lidless += 1;
+            return;
+        };
+        let lithology = lid.lithology();
+        let tally = moves.entry(lithology.key().to_owned()).or_default();
+        tally.bodies += 1;
+        let state = surface.state();
+        let material = surface.material();
+        let changed = if state == SurfaceState::Airless {
+            with.1
+                .regolith_albedo()
+                .total_cmp(&without.1.regolith_albedo())
+                .is_ne()
+        } else {
+            lid.row() != Regolith::stand_in_row(material)
+        };
+        if changed {
+            tally.changed += 1;
+            let dt = with.1.equilibrium_temperature().value()
+                - without.1.equilibrium_temperature().value();
+            widen(&mut tally.t_eq, dt);
+            tally.t_eq_sum += dt;
+        }
+        if state == SurfaceState::Airless {
+            tally.airless += 1;
+            tally.capped += u32::from(capped_lid(lid.row(), state));
+            if before.state() == SurfaceState::Airless {
+                let night = surface.conditions().climate_range().0.value();
+                let night_before = before.conditions().climate_range().0.value();
+                if night.total_cmp(&night_before).is_ne() {
+                    tally.nights_moved += 1;
+                    widen(&mut tally.nights, night - night_before);
+                    let held = with
+                        .1
+                        .equilibrium_temperature()
+                        .value()
+                        .total_cmp(&without.1.equilibrium_temperature().value());
+                    if held.is_eq() {
+                        tally.inertia_nights += 1;
+                        widen(&mut tally.inertia, night - night_before);
+                    }
+                }
+            }
+        }
+        if material == SurfaceMaterial::Ice && lithology != CrustLithology::Water {
+            let ice = surface
+                .condensates()
+                .entry(Gas::Water.substance(), CondensatePhase::Solid)
+                .map_or(0.0, CondensateEntry::area_fraction);
+            ice_bulks_apart.push(format!(
+                "{what}: {}, {state:?}, its H2O solid entry over {ice:.3}",
+                lithology.key()
+            ));
+        }
+    };
+    for (ctx, system) in whole().iter().take(60) {
+        if ctx.age_at_epoch().value() <= 0.0 {
+            continue;
+        }
+        let epoch = Epoch::new(system, ctx, t).with_shades();
+        let cosines = HourCosines::new();
+        for body in system.bodies() {
+            if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+                continue;
+            }
+            let host = fate_host(ctx, system.zone_of(body));
+            let fate = system.fate_of(body, &host);
+            let label = label::label(system, body.index).unwrap();
+            let (with, now) = system.primary_record(&epoch, &cosines, body, label.clone(), &fate);
+            let (without, before) = without_crust(|| {
+                system.primary_record(&epoch, &cosines, body, label.clone(), &fate)
+            });
+            let (Some(derived), Some(prior)) = (now.derived, before.derived) else {
+                continue;
+            };
+            record(
+                format!("{:?} {:?}", ctx.id(), body.index),
+                (&with, &derived),
+                (&without, &prior),
+            );
+            for child in system.children(body.index) {
+                if !matches!(child.part, Part::Moon(_)) {
+                    continue;
+                }
+                let label = label::label(system, child.index).unwrap();
+                let with =
+                    system.satellite_record(&epoch, &cosines, child, label.clone(), &now, &fate);
+                let without = without_crust(|| {
+                    system.satellite_record(&epoch, &cosines, child, label, &before, &fate)
+                });
+                let (Some(derived), Some(prior)) = (
+                    system.record_moon(&epoch, child, (&now, &fate)),
+                    without_crust(|| system.record_moon(&epoch, child, (&before, &fate))),
+                ) else {
+                    continue;
+                };
+                record(
+                    format!("{:?} {:?} (moon)", ctx.id(), child.index),
+                    (&with, derived.body()),
+                    (&without, prior.body()),
+                );
+            }
+        }
+    }
+    let listed = moves
+        .iter()
+        .map(|(key, m)| {
+            let range = |range: Option<(f64, f64)>| {
+                range.map_or_else(|| "none".to_owned(), |(lo, hi)| format!("{lo:+.3} to {hi:+.3} K"))
+            };
+            format!(
+                "{key}: {} bodies, {} rows changed, ΔT_eq {} (mean {:+.3} K); {} airless, {} capped, \
+                 {} nights moved {}, {} of them by the inertia alone {}",
+                m.bodies,
+                m.changed,
+                range(m.t_eq),
+                if m.changed > 0 { m.t_eq_sum / f64::from(m.changed) } else { 0.0 },
+                m.airless,
+                m.capped,
+                m.nights_moved,
+                range(m.nights),
+                m.inertia_nights,
+                range(m.inertia),
+            )
+        })
+        .collect::<Vec<_>>();
+    eprintln!(
+        "{bodies} surfaces, {unchanged_lidless} with no lid; by lid lithology:\n  {}\n{} ice bulks \
+         whose lid is not H2O:\n  {}",
+        listed.join("\n  "),
+        ice_bulks_apart.len(),
+        ice_bulks_apart.join("\n  ")
+    );
+    assert!(bodies > 500, "{bodies}");
 }
 
 /// Rule (f)'s reuse (decision-p14-t54a-passes, "Cost escalation (after Batch B)" §C.3): a record's

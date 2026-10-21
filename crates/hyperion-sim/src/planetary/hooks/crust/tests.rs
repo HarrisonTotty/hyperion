@@ -1,5 +1,3 @@
-use std::path::{Path, PathBuf};
-
 use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
@@ -1325,101 +1323,6 @@ fn the_formation_time_is_deterministic_in_its_window_and_reads_word_0() {
     hyperion_testkit::order::assert_order_independent(&keys, |&(seed, index)| {
         formation_time(Seed::new(seed), BodyId::new(system, index), window)
     });
-}
-
-/// The source files under the crate's `src/`, in sorted order.
-fn source_files(dir: &Path, found: &mut Vec<PathBuf>) {
-    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .collect();
-    entries.sort();
-    for path in entries {
-        if path.is_dir() {
-            source_files(&path, found);
-        } else if path.extension().is_some_and(|e| e == "rs") {
-            found.push(path);
-        }
-    }
-}
-
-/// The code of a source file as the tripwire scans it: its lines up to its inline test module,
-/// the first `#[cfg(test)]` whose next line opens `mod tests {`, its comment lines left out (a doc
-/// may name the module).
-fn scanned_code(text: &str) -> String {
-    let lines: Vec<&str> = text.lines().collect();
-    let end = lines
-        .windows(2)
-        .position(|pair| {
-            pair[0].trim() == "#[cfg(test)]" && pair[1].trim_start().starts_with("mod tests {")
-        })
-        .unwrap_or(lines.len());
-    lines[..end]
-        .iter()
-        .filter(|line| !line.trim_start().starts_with("//"))
-        .copied()
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// Nothing on the record calls the crust's derivation, its draw or its thermal history at
-/// generator version 22 (P14.T49.c's tripwire, as its ruling narrows it). P14.T54.a, the 22 → 23
-/// bump, wires the module onto the record and deletes this test.
-///
-/// It walks the crate's `src/` outside `planetary/hooks/crust*`, in sorted order, and fails on an
-/// unambiguous call form or path in each file's code: the file less its comment lines and less
-/// its inline test module, from the first `#[cfg(test)]` that opens a `mod tests {` (a
-/// `#[cfg(test)]` on a single item, or on a `mod tests;` declaration near the top, ends nothing,
-/// so that the scan reaches the code after it). `hooks/mod.rs`'s `pub mod crust;` and its one
-/// `pub use crust::{…};` are allowed. Bare names such as `CrustComposition` are not matched:
-/// `record.rs` has its own uninhabited type of that name.
-#[test]
-fn crust_nothing_on_the_record_reads_the_crust_yet() {
-    const PATTERNS: [&str; 6] = [
-        "CrustComposition::derive(",
-        "formation_time(",
-        "peak_central_temperature(",
-        "chondritic_sources(",
-        "hooks::crust::",
-        "crust::{",
-    ];
-    // (file, hold): files allowed to match while a named hold stands; none yet.
-    const HELD: [(&str, &str); 0] = [];
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut files = Vec::new();
-    source_files(&src, &mut files);
-    let mut readers = Vec::new();
-    for path in files {
-        let relative = path
-            .strip_prefix(&src)
-            .unwrap()
-            .to_string_lossy()
-            .replace('\\', "/");
-        if relative.starts_with("planetary/hooks/crust") {
-            continue;
-        }
-        let text = std::fs::read_to_string(&path).unwrap();
-        let code = scanned_code(&text);
-        if relative == "planetary/system.rs" {
-            // The record's builders are scanned, not cut off by an earlier test-only item.
-            assert!(code.contains("fn primary_record") && code.contains("fn satellite_record"));
-        }
-        for pattern in PATTERNS {
-            let allowed = relative == "planetary/hooks/mod.rs" && pattern == "crust::{";
-            let held = HELD.iter().any(|(file, _)| *file == relative);
-            if code.contains(pattern) && !allowed && !held {
-                readers.push(format!("{relative}: {pattern}"));
-            }
-        }
-    }
-    assert!(
-        readers.is_empty(),
-        "the crust is read on the record: {readers:?}"
-    );
-    // The one allowed re-export is there, once.
-    let hooks = std::fs::read_to_string(src.join("planetary/hooks/mod.rs")).unwrap();
-    assert_eq!(hooks.matches("pub use crust::{").count(), 1);
-    assert_eq!(hooks.matches("pub mod crust;").count(), 1);
 }
 
 /// The golden's anchor bodies, by name, on the table's surfaces of the Moon, Mercury, Earth,

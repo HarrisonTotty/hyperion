@@ -107,6 +107,9 @@ condensate: CO2, Supercritical, seasonal false
 reservoir_kg_m2 = 0x0000000000000000  # 0.0
 reservoir_gel_m = 0x0000000000000000  # 0.0
 area_fraction = 0x0000000000000000  # 0.0
+crust: lid Primary; primary ultramafic, secondary basalt, tertiary none, bulk none; provinces ultramafic; Intermediate, RockMelted(MagmaOcean)
+melt_area_fraction = 0x3ff0000000000000  # 1.0
+peak_central_temperature_k: none
 envelope: NotApplicable
 body 0200 A c: Planet about Some(Star(0)), Present
 mass_mearth = 0x3ff8a2933da0bd48  # 1.5396912009562858
@@ -199,6 +202,9 @@ condensate: CO2, Supercritical, seasonal false
 reservoir_kg_m2 = 0x0000000000000000  # 0.0
 reservoir_gel_m = 0x0000000000000000  # 0.0
 area_fraction = 0x0000000000000000  # 0.0
+crust: lid Primary; primary ultramafic, secondary basalt, tertiary none, bulk none; provinces ultramafic; Intermediate, RockMelted(MagmaOcean)
+melt_area_fraction = 0x3ff0000000000000  # 1.0
+peak_central_temperature_k: none
 envelope: NotApplicable
 body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3dd7d4ffa6229b0a  # 8.670040513112042e-11
@@ -321,6 +327,9 @@ condensate: CO2, Supercritical, seasonal false
 reservoir_kg_m2 = 0x0000000000000000  # 0.0
 reservoir_gel_m = 0x0000000000000000  # 0.0
 area_fraction = 0x0000000000000000  # 0.0
+crust: lid Primary; primary ultramafic, secondary basalt, tertiary none, bulk none; provinces ultramafic; Intermediate, RockMelted(MagmaOcean)
+melt_area_fraction = 0x3ff0000000000000  # 1.0
+peak_central_temperature_k: none
 envelope: NotApplicable
 body 0200 A c: Planet about Some(Star(0)), Present
 mass_mearth = 0x3ff8a2933da0bd48  # 1.5396912009562858
@@ -413,6 +422,9 @@ condensate: CO2, Supercritical, seasonal false
 reservoir_kg_m2 = 0x0000000000000000  # 0.0
 reservoir_gel_m = 0x0000000000000000  # 0.0
 area_fraction = 0x0000000000000000  # 0.0
+crust: lid Primary; primary ultramafic, secondary basalt, tertiary none, bulk none; provinces ultramafic; Intermediate, RockMelted(MagmaOcean)
+melt_area_fraction = 0x3ff0000000000000  # 1.0
+peak_central_temperature_k: none
 envelope: NotApplicable
 body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3dd7d4ff8400ee60  # 8.670039773002226e-11

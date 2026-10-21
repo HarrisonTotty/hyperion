@@ -488,29 +488,12 @@ fn substance_thermal_columns_name_their_sources() {
     }
 }
 
-/// The files whose calls of this module sit behind a named hold, each with its hold. R09.T12.c's
-/// ice lid takes its elastic thickness from the `H2O` row's conductivity column, ∫ k dT ÷ F with
-/// k = 567 ÷ T, as `decision-r09-t12-coarse.md` item 4 rules ("Read the row; do not restate it").
-/// That read moves only R09's coarse field, which reaches no record before the serve gate.
-const HELD: &[(&str, &str)] = &[(
-    "planetary/surface/steps/relief/provinces.rs",
-    "R09.T12.c's ice-lid T_e reads the H2O conductivity row (decision-r09-t12-coarse item 4); \
-     the coarse field is on no record before the serve gate",
-)];
-
-/// The constants of this module that another module shares, each with the file that reads it and
-/// the path by which it does: P14.T49.c's condensed optics take their regolith's grains from
-/// [`super::LUNAR_SOIL_GRAIN_DIAMETER`], the one 70 µm grain of both (main, 2026-10-16: "share
-/// one, don't duplicate it"). The tripwire passes that path on that file's lines, and nothing
-/// else there.
-const SHARED: [(&str, &str); 1] = [(
-    "substance/optics.rs",
-    "super::thermal::LUNAR_SOIL_GRAIN_DIAMETER",
-)];
-
 /// Whether `line` names `pattern` as a whole name: at the start of the line, or after a character
 /// that cannot continue an identifier. So `isothermal::` (R09.T13's isothermal climate model) does
-/// not read as `thermal::`. `substance::aerosol`'s tripwire reads by it too.
+/// not read as `thermal::`. The substance module's tripwires read by it: `substance::aerosol`'s
+/// and `substance::formation`'s, which hold to 24. This module's own, which held its inertia off
+/// the record, P14.T54.a deleted when it wired the inertia at the lid; its walk
+/// ([`rust_files`], [`out_of_line_test_modules`], [`before_inline_tests`]) stays theirs.
 pub(in crate::substance) fn names(line: &str, pattern: &str) -> bool {
     line.match_indices(pattern).any(|(at, _)| {
         line[..at]
@@ -534,20 +517,6 @@ fn the_tripwire_reads_whole_names_only() {
     ));
     assert!(!names("geothermal::flux()", "thermal::"));
 }
-
-/// The forms by which other code would name this module's API: its unambiguous calls and its
-/// paths (decision-p14-t49c-split §8.2: never bare words such as `.thermal()`).
-const API_PATTERNS: [&str; 5] = [
-    "thermal_columns(",
-    "regolith_thermal_inertia(",
-    "RegolithForm::",
-    "substance::thermal",
-    "thermal::",
-];
-
-/// The lines of `substance/mod.rs` that declare this module and re-export it, its only mentions
-/// there (main's brief: two lines).
-const DECLARATIONS: [&str; 2] = ["pub mod thermal;", "pub use thermal::"];
 
 /// The module the item after the `#[cfg(test)]` at `lines[index]` declares, on its line or as the
 /// next item: its name, and whether it is inline (`mod name {`) or out of line (`mod name;`).
@@ -628,87 +597,6 @@ pub(in crate::substance) fn rust_files(
             found.push((relative.join("/"), path));
         }
     }
-}
-
-/// Nothing on the record reads this module before P14.T54.a, which deletes this tripwire when it
-/// wires the inertia at P14.T51.c's lid into P14.T24.a.
-///
-/// No code of the crate outside this module names its API ([`API_PATTERNS`]). Every file of
-/// `src/` is read, in sorted order, but this module's own, the declaring lines of
-/// `substance/mod.rs` ([`DECLARATIONS`]), comment lines, each inline test module (from its
-/// `#[cfg(test)]`), every file an out-of-line test module declares, the files held behind a named
-/// hold ([`HELD`]) and, in its one file, a shared constant's path ([`SHARED`]).
-/// `hyperion-fit` and `hyperion-server`, which depend on the sim, are left to review: a fitted
-/// table would hold this module's numbers, not its calls.
-#[test]
-fn substance_thermal_nothing_on_the_record_reads_the_inertia_yet() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut files = Vec::new();
-    rust_files(&root, &root, &mut files);
-    assert!(files.len() > 100, "the walk found the crate's sources");
-    for (held, hold) in HELD {
-        assert!(!hold.is_empty(), "{held} names its hold");
-        assert!(
-            files.iter().any(|(relative, _)| relative == held),
-            "{held} is a source file"
-        );
-    }
-    let read = |path: &Path| {
-        std::fs::read_to_string(path)
-            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
-    };
-    for (file, path) in SHARED {
-        assert!(
-            files
-                .iter()
-                .any(|(relative, source)| relative == file && read(source).contains(path)),
-            "{file} reads {path}"
-        );
-    }
-    let mut tests = Vec::new();
-    for (relative, path) in &files {
-        tests.extend(out_of_line_test_modules(relative, &read(path)));
-    }
-    assert!(
-        tests
-            .iter()
-            .any(|t| t == "planetary/hooks/structure/tests.rs"),
-        "the walk finds the out-of-line test modules"
-    );
-    let mut readers = Vec::new();
-    for (relative, path) in &files {
-        let test_file = tests
-            .iter()
-            .any(|t| relative == t || (t.ends_with('/') && relative.starts_with(t.as_str())));
-        if relative.starts_with("substance/thermal")
-            || test_file
-            || HELD.iter().any(|(held, _)| held == relative)
-        {
-            continue;
-        }
-        let text = read(path);
-        for (n, line) in before_inline_tests(&text).iter().enumerate() {
-            let code = line.trim_start();
-            let declaration =
-                relative == "substance/mod.rs" && DECLARATIONS.iter().any(|d| code.starts_with(d));
-            if code.starts_with("//") || declaration {
-                continue;
-            }
-            let line = SHARED
-                .iter()
-                .filter(|(file, _)| file == relative)
-                .fold((*line).to_owned(), |line, (_, path)| line.replace(path, ""));
-            for pattern in API_PATTERNS {
-                if names(&line, pattern) {
-                    readers.push(format!("{relative}:{}: {pattern}", n + 1));
-                }
-            }
-        }
-    }
-    assert!(
-        readers.is_empty(),
-        "nothing on the record reads substance::thermal before P14.T54.a: {readers:?}"
-    );
 }
 
 /// The rows P14.T49.j requires (its brief, as plan 14's record "Deviations in P14.T49.j, as
@@ -1179,90 +1067,4 @@ fn substance_thermal_reduced_conductivities_are_their_arithmetic() {
     assert!((k("chondrite_e", 200.0) - 5.51).abs() < 5e-3);
     assert!((k("chondrite_cm", 200.0) - 1.61).abs() < 1e-12);
     assert!((k("chondrite_h", 200.0) - 2.18).abs() < 1e-12);
-}
-
-/// The ground's inertia is P14.T49.j's law at its lid, with its fallbacks (P14.T54.a;
-/// decision-pre-23-review item 7; decision-p14-t54a-passes §3.5): Mars's `basalt_fe` at 214 K
-/// takes the law, about 48.1, the reference form's to the bit; `graphite` and `ca_al_residue`, with
-/// no thermal columns, rock's 55; `cometary`, of the `Organic` family, which has no form, ice's 20;
-/// `H2O` above its 273.16 K triple point, with no solid, its family's 20, and `basalt` above its
-/// solidus rock's 55, whatever the bulk material; and no lid the bulk material's constant, as
-/// P14.T24.a reads it, to the bit.
-#[test]
-fn the_ground_s_inertia_is_the_law_at_its_lid_with_its_fallbacks() {
-    let at = |key: &str, material: SurfaceMaterial, t: f64| {
-        ground_inertia(Some(row(key)), material, Kelvin::new(t))
-    };
-    let assert_ground = |ground: GroundInertia, source: InertiaSource, gamma: f64| {
-        assert_eq!(ground.source(), source, "{ground:?}");
-        assert_same_bits(ground.inertia_j_per_m2_k_sqrt_s(), gamma);
-    };
-    let mars = at("basalt_fe", SurfaceMaterial::Rock, 214.0);
-    assert_ground(
-        mars,
-        InertiaSource::Law,
-        reference("basalt_fe", 214.0).inertia_j_per_m2_k_sqrt_s(),
-    );
-    assert!(
-        (mars.inertia_j_per_m2_k_sqrt_s() - 48.1).abs() < 0.05,
-        "{mars:?}"
-    );
-    let (rock, ice) = (
-        ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
-        ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
-    );
-    for material in [SurfaceMaterial::Rock, SurfaceMaterial::Ice] {
-        for key in ["graphite", "ca_al_residue"] {
-            assert_ground(
-                at(key, material, 214.0),
-                InertiaSource::NoThermalColumns,
-                rock,
-            );
-        }
-        assert_ground(
-            at("cometary", material, 40.0),
-            InertiaSource::NoRegolithForm,
-            ice,
-        );
-        assert_ground(at("H2O", material, 280.0), InertiaSource::NoSolid, ice);
-        assert_ground(
-            at("basalt", material, 2_000.0),
-            InertiaSource::NoSolid,
-            rock,
-        );
-    }
-    for (material, gamma) in [(SurfaceMaterial::Rock, rock), (SurfaceMaterial::Ice, ice)] {
-        assert_ground(
-            ground_inertia(None, material, Kelvin::new(214.0)),
-            InertiaSource::NoLid,
-            gamma,
-        );
-    }
-    // Below its triple point, water ice takes the law.
-    let europa = at("H2O", SurfaceMaterial::Ice, 102.0);
-    assert_ground(
-        europa,
-        InertiaSource::Law,
-        reference("H2O", 102.0).inertia_j_per_m2_k_sqrt_s(),
-    );
-    eprintln!(
-        "Γ: basalt_fe at 214 K {:.2}, H2O at 102 K {:.2}",
-        mars.inertia_j_per_m2_k_sqrt_s(),
-        europa.inertia_j_per_m2_k_sqrt_s()
-    );
-}
-
-/// What a lid's row at a positive, finite temperature never gives, a temperature that is not one,
-/// fails the fallback's debug assertion: a bug, which a release build reads as the bulk material's
-/// constant.
-#[cfg(debug_assertions)]
-#[test]
-#[should_panic(expected = "a lid's row at a positive, finite temperature never gives it")]
-fn an_unreachable_inertia_fails_its_debug_assertion() {
-    let ground = ground_inertia(
-        Some(row("basalt")),
-        SurfaceMaterial::Rock,
-        Kelvin::new(f64::NAN),
-    );
-    assert_eq!(ground.source(), InertiaSource::Unreachable);
 }

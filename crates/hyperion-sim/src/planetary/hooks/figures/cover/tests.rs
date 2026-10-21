@@ -303,6 +303,7 @@ fn the_table_s_ices_are_the_ruling_s() {
         surface_gravity: MetresPerSecondSquared::new(1.315),
         radius: Metres::new(1.560_8e6),
         material: SurfaceMaterial::of(&MassFractions::solid(0.1, 0.82, 0.08)),
+        lid: None,
         stellar_flux: WattsPerSquareMetre::from(derived.flux()),
         xuv_flux: derived.xuv_flux(),
         spin,

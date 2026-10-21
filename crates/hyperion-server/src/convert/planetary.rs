@@ -1022,7 +1022,9 @@ fn surface(surface: &Surface) -> BodySurfaceDto {
         ),
         aerosols: later(surface.aerosols(), |aerosols| match *aerosols {}),
         condensates: Modelled::Value(condensates(surface.condensates())),
-        crust: later(surface.crust(), |crust| match *crust {}),
+        // On the sim's record from P14.T54.a's C3; its conversion is that task's wire subtask's,
+        // so it is sent absent until then.
+        crust: Modelled::NotModelled,
         modifiers: later(surface.modifiers(), |modifiers| match *modifiers {}),
         biosphere: later(surface.biosphere(), |biosphere| match *biosphere {}),
         // P14.T55.b's: the record holds no such member, so every server sends it absent until

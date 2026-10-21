@@ -69,6 +69,7 @@ pub(crate) fn inputs_of(body: &DerivedBody, spin: SeasonalSpin) -> SurfaceInputs
         surface_gravity: body.surface_gravity(),
         radius: Metres::from(body.radius()),
         material: SurfaceMaterial::of(&body.fractions()),
+        lid: None,
         stellar_flux: WattsPerSquareMetre::from(body.flux()),
         xuv_flux: body.xuv_flux(),
         spin,
@@ -109,7 +110,7 @@ fn day_and_night_of(body: &DerivedBody, spin: SeasonalSpin) -> (Kelvin, Kelvin) 
     day_and_night(
         &column,
         &spin,
-        SurfaceMaterial::of(&body.fractions()),
+        GroundInertia::of_material(SurfaceMaterial::of(&body.fractions())),
         night_floor(heat_flow_of(body)),
     )
 }
@@ -1683,7 +1684,7 @@ fn a_rotating_column_damps_the_day_night_contrast() {
                 solar_day: days.map(|d| Seconds::new(d * SECONDS_PER_DAY)),
                 ..spin
             },
-            SurfaceMaterial::Rock,
+            GroundInertia::of_material(SurfaceMaterial::Rock),
             floor,
         );
         day.value() - night.value()
@@ -1706,7 +1707,11 @@ fn a_rotating_column_damps_the_day_night_contrast() {
         solar_day: rotating,
         ..spin
     };
-    let ground = ground_redistribution(&earth, &daily, SurfaceMaterial::Rock);
+    let ground = ground_redistribution(
+        &earth,
+        &daily,
+        GroundInertia::of_material(SurfaceMaterial::Rock),
+    );
     let series = 1.0 - (1.0 - heat_redistribution(&earth)) * (1.0 - ground)
         + math::powi(floor.value() / earth.equilibrium_temperature.value(), 4);
     let omega_tau = core::f64::consts::TAU / SECONDS_PER_DAY
@@ -1772,8 +1777,11 @@ fn an_airless_night_is_its_regolith_s() {
     eprintln!("the Moon's Θ {theta}");
     assert!((theta - 0.028).abs() < 0.002, "{theta}");
     assert!(
-        (ground_redistribution(&column, &spin, SurfaceMaterial::Rock)
-            - regolith_redistribution(theta))
+        (ground_redistribution(
+            &column,
+            &spin,
+            GroundInertia::of_material(SurfaceMaterial::Rock)
+        ) - regolith_redistribution(theta))
         .abs()
             < 1e-15
     );
@@ -1786,8 +1794,18 @@ fn an_airless_night_is_its_regolith_s() {
         assert!((low..high).contains(&night.value()), "{name}: {night:?}");
     }
     // An icy body stores less at its lower inertia.
-    let ice = ground_redistribution(&column, &spin, SurfaceMaterial::Ice);
-    assert!(ice < ground_redistribution(&column, &spin, SurfaceMaterial::Rock));
+    let ice = ground_redistribution(
+        &column,
+        &spin,
+        GroundInertia::of_material(SurfaceMaterial::Ice),
+    );
+    assert!(
+        ice < ground_redistribution(
+            &column,
+            &spin,
+            GroundInertia::of_material(SurfaceMaterial::Rock)
+        )
+    );
     assert!((ice - regolith_redistribution(theta * 20.0 / 55.0)).abs() < 1e-15);
 }
 
@@ -1801,7 +1819,11 @@ fn a_locked_airless_body_s_night_is_its_floor() {
     };
     let (column, _) = column_of(mercury, locked);
     assert_same_bits(
-        ground_redistribution(&column, &locked, SurfaceMaterial::Rock),
+        ground_redistribution(
+            &column,
+            &locked,
+            GroundInertia::of_material(SurfaceMaterial::Rock),
+        ),
         0.0,
     );
     // Its night is its heat flow's floor (P14.T24.b; science-p14-t24b-laws §1.5): about 21 K at
@@ -1816,7 +1838,12 @@ fn a_locked_airless_body_s_night_is_its_floor() {
     );
     // With no internal heat it is the cosmic background's, and a warmer floor is its night too.
     for floor in [COSMIC_BACKGROUND_TEMPERATURE, Kelvin::new(30.0)] {
-        let (_, dark) = day_and_night(&column, &locked, SurfaceMaterial::Rock, floor);
+        let (_, dark) = day_and_night(
+            &column,
+            &locked,
+            GroundInertia::of_material(SurfaceMaterial::Rock),
+            floor,
+        );
         assert!(
             (dark.value() / floor.value() - 1.0).abs() < 1e-12,
             "{dark:?}"
@@ -1883,10 +1910,20 @@ fn the_night_is_continuous_across_the_airless_threshold() {
         air_mass_kg_per_m2: earth.air_mass_kg_per_m2 * scale,
         ..earth
     };
-    let (bare_day, bare_night) = day_and_night(&thinned(0.0), &spin, SurfaceMaterial::Rock, floor);
+    let (bare_day, bare_night) = day_and_night(
+        &thinned(0.0),
+        &spin,
+        GroundInertia::of_material(SurfaceMaterial::Rock),
+        floor,
+    );
     let mut last = f64::INFINITY;
     for scale in [1e-2, 1e-4, 1e-6, 1e-8, 1e-10] {
-        let (day, night) = day_and_night(&thinned(scale), &spin, SurfaceMaterial::Rock, floor);
+        let (day, night) = day_and_night(
+            &thinned(scale),
+            &spin,
+            GroundInertia::of_material(SurfaceMaterial::Rock),
+            floor,
+        );
         let apart =
             (day.value() - bare_day.value()).abs() + (night.value() - bare_night.value()).abs();
         assert!(apart < last, "{scale}: {apart} K");
@@ -1976,7 +2013,7 @@ fn no_light_gives_no_contrast() {
     let (day, night) = day_and_night(
         &dark,
         &spin,
-        SurfaceMaterial::Rock,
+        GroundInertia::of_material(SurfaceMaterial::Rock),
         COSMIC_BACKGROUND_TEMPERATURE,
     );
     assert_eq!(
@@ -1985,7 +2022,11 @@ fn no_light_gives_no_contrast() {
     );
     assert_same_bits(heat_redistribution(&dark), 0.0);
     assert_same_bits(
-        ground_redistribution(&dark, &spin, SurfaceMaterial::Rock),
+        ground_redistribution(
+            &dark,
+            &spin,
+            GroundInertia::of_material(SurfaceMaterial::Rock),
+        ),
         0.0,
     );
     assert_same_bits(weak_gradient_transport(&dark, &spin), 0.0);
@@ -2623,7 +2664,7 @@ fn climate_body(body: &DerivedBody, spin: SeasonalSpin) -> ClimateBody {
         equilibrium_temperature: body.equilibrium_temperature(),
         surface_gravity: body.surface_gravity(),
         radius: Metres::from(body.radius()),
-        material: SurfaceMaterial::of(&body.fractions()),
+        ground: GroundInertia::of_material(SurfaceMaterial::of(&body.fractions())),
         spin,
         heat_flow: heat_flow_of(body),
         inventory: *body.atmosphere().inventory_weights(),
@@ -3301,4 +3342,163 @@ fn the_record_s_second_stage_reads_its_partition_s_ice_to_the_bit() {
     eprintln!("{surfaces} surfaces, {read} of them reading T24.b's ice, {checked} checked");
     assert_eq!(read, checked);
     assert!(surfaces >= 10 && read >= 4, "{surfaces} {read}");
+}
+
+/// The ground's inertia is P14.T49.j's law at its lid, with its fallbacks (P14.T54.a;
+/// decision-pre-23-review item 7; decision-p14-t54a-passes §3.5): Mars's `basalt_fe` at 214 K
+/// takes the law, about 48.1, the reference form's to the bit; `graphite`, with no thermal columns,
+/// rock's 55; `cometary`, of the `Organic` family, which has no form, ice's 20; `H2O` above its
+/// 273.16 K triple point, with no solid, its family's 20, and `basalt` above its solidus rock's 55,
+/// whatever the bulk material; and no lid the bulk material's constant, as P14.T24.a reads it, to
+/// the bit. Mars's and Titan's figures at the table's equilibrium temperatures are printed for the
+/// bless note, against their measured 180–250 and about 236, which pore gas gives
+/// (decision-pre-23-review item 7; P14.T49.l).
+#[test]
+fn the_ground_s_inertia_is_the_law_at_its_lid_with_its_fallbacks() {
+    let at = |lid: CrustLithology, material: SurfaceMaterial, t: f64| {
+        ground_inertia(Some(lid), material, Kelvin::new(t))
+    };
+    let law = |lid: CrustLithology, t: f64| {
+        reference_regolith_thermal_inertia(lid.substance(), Kelvin::new(t))
+            .unwrap_or_else(|e| panic!("{lid:?} at {t} K: {e}"))
+            .inertia_j_per_m2_k_sqrt_s()
+    };
+    let assert_ground = |ground: GroundInertia, source: InertiaSource, gamma: f64| {
+        assert_eq!(ground.source(), source, "{ground:?}");
+        assert_same_bits(ground.inertia_j_per_m2_k_sqrt_s(), gamma);
+    };
+    let mars = at(CrustLithology::IronRichBasalt, SurfaceMaterial::Rock, 214.0);
+    assert_ground(
+        mars,
+        InertiaSource::Law,
+        law(CrustLithology::IronRichBasalt, 214.0),
+    );
+    assert!(
+        (mars.inertia_j_per_m2_k_sqrt_s() - 48.1).abs() < 0.05,
+        "{mars:?}"
+    );
+    let (rock, ice) = (
+        ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+        ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+    );
+    for material in [SurfaceMaterial::Rock, SurfaceMaterial::Ice] {
+        assert_ground(
+            at(CrustLithology::Graphite, material, 214.0),
+            InertiaSource::NoThermalColumns,
+            rock,
+        );
+        assert_ground(
+            at(CrustLithology::Cometary, material, 40.0),
+            InertiaSource::NoRegolithForm,
+            ice,
+        );
+        assert_ground(
+            at(CrustLithology::Water, material, 280.0),
+            InertiaSource::NoSolid,
+            ice,
+        );
+        assert_ground(
+            at(CrustLithology::Basalt, material, 2_000.0),
+            InertiaSource::NoSolid,
+            rock,
+        );
+    }
+    for (material, gamma) in [(SurfaceMaterial::Rock, rock), (SurfaceMaterial::Ice, ice)] {
+        let none = ground_inertia(None, material, Kelvin::new(214.0));
+        assert_ground(none, InertiaSource::NoLid, gamma);
+        assert_eq!(none, GroundInertia::of_material(material));
+    }
+    // Below its triple point, water ice takes the law.
+    let europa = at(CrustLithology::Water, SurfaceMaterial::Ice, 102.0);
+    assert_ground(
+        europa,
+        InertiaSource::Law,
+        law(CrustLithology::Water, 102.0),
+    );
+    let table = table();
+    let t_eq = |name: &str| found(&table, name).1.equilibrium_temperature().value();
+    let (mars_t, titan_t) = (t_eq("Mars"), t_eq("Titan"));
+    eprintln!(
+        "Γ: basalt_fe at 214 K {:.2}, at Mars's table T_eq {mars_t:.2} K {:.2}; H2O at 102 K {:.2}, \
+         at Titan's table T_eq {titan_t:.2} K {:.2}, at its 94 K surface {:.2}",
+        mars.inertia_j_per_m2_k_sqrt_s(),
+        law(CrustLithology::IronRichBasalt, mars_t),
+        europa.inertia_j_per_m2_k_sqrt_s(),
+        law(CrustLithology::Water, titan_t),
+        law(CrustLithology::Water, 94.0),
+    );
+}
+
+/// Every lid T51.c can name takes the law or a named fallback at any positive temperature, never
+/// the unreachable one: each row has condensed columns, which `ground_inertia`'s type rests on
+/// (P14.T54.a; the C1 review's RC1-b and RC1-c).
+#[test]
+fn every_lid_takes_the_law_or_a_named_fallback() {
+    for lid in CrustLithology::ALL {
+        assert!(
+            lid.substance().substance().condensed().is_some(),
+            "{lid:?} has condensed columns"
+        );
+        for t in [20.0, 40.0, 100.0, 214.0, 300.0, 1_000.0, 3_000.0] {
+            for material in [SurfaceMaterial::Rock, SurfaceMaterial::Ice] {
+                let ground = ground_inertia(Some(lid), material, Kelvin::new(t));
+                assert_ne!(
+                    ground.source(),
+                    InertiaSource::Unreachable,
+                    "{lid:?} at {t} K"
+                );
+                let gamma = ground.inertia_j_per_m2_k_sqrt_s();
+                assert!(
+                    gamma.is_finite() && gamma > 0.0,
+                    "{lid:?} at {t} K: {gamma}"
+                );
+            }
+        }
+    }
+}
+
+/// A column under no light, its equilibrium temperature not positive, stores nothing by day: its
+/// ground takes its material's constant, labelled, and never reaches the law's debug assertion.
+#[test]
+fn an_unlit_ground_takes_its_material_s_constant() {
+    for t in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let ground = GroundInertia::at_equilibrium(
+            Some(CrustLithology::Basalt),
+            SurfaceMaterial::Rock,
+            Kelvin::new(t),
+        );
+        assert_eq!(ground.source(), InertiaSource::Unlit, "{t}");
+        assert_same_bits(
+            ground.inertia_j_per_m2_k_sqrt_s(),
+            ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+        );
+    }
+    let lit = GroundInertia::at_equilibrium(
+        Some(CrustLithology::Basalt),
+        SurfaceMaterial::Rock,
+        Kelvin::new(214.0),
+    );
+    assert_eq!(
+        lit,
+        ground_inertia(
+            Some(CrustLithology::Basalt),
+            SurfaceMaterial::Rock,
+            Kelvin::new(214.0)
+        )
+    );
+}
+
+/// What a lid's row at a positive, finite temperature never gives, a temperature that is not one,
+/// fails the fallback's debug assertion: a bug, which a release build reads as the bulk material's
+/// constant.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "a lid's row at a positive, finite temperature never gives it")]
+fn an_unreachable_inertia_fails_its_debug_assertion() {
+    let ground = ground_inertia(
+        Some(CrustLithology::Basalt),
+        SurfaceMaterial::Rock,
+        Kelvin::new(f64::NAN),
+    );
+    assert_eq!(ground.source(), InertiaSource::Unreachable);
 }

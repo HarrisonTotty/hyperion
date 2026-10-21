@@ -17,7 +17,15 @@
 //!   ([`linear_cold_area`]), and its water's cover from the pass's own water
 //!   ([`pass_water_cover`]); the tests give it T24.a's spans.
 //!
-//! Either way the regolith's lid is not known until P14.T54.a's C3 ([`Regolith::of_material`]): an
+//! **The regolith** is the pass's own lid's row, under the body's own climate (P14.T54.a;
+//! decision-pre-23-review item 17): each pass takes its crust's lid (P14.T51.c's
+//! `CrustBasis::lid_at`, the basis built once a body) at its own state, mean surface temperature
+//! (the record's mean `T_s` to the bit) and the warmest of its unwidened range, under the surface
+//! age and tide of the context it reads, and its area mix reads that lid's row
+//! ([`Regolith::with_lid`]); the pass gives its lid with its atmosphere, which the next pass's
+//! ground reads ([`PassContext::lid`]), and the published pass's is the record's crust. Where no
+//! lid is known (a first pass, under C₀, which holds no surface age; a body with no crust; the
+//! passes' stand-in, a climate given) the material's rule stands ([`Regolith::of_material`]): an
 //! airless rocky body takes the Moon's 0.11, any other a row by the material of the bulk its air
 //! reads. Its light is the body's hosts', built once per body before its passes, or for a single
 //! pass a host at the hottest host's temperature ([`PassLight`]).
@@ -31,7 +39,8 @@ use crate::planetary::chem::partition::{
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::derive::pass_record::{PassContext, RecordSpin, WaterGate};
 use crate::planetary::derive::photometry::area_mix::{self, HostShade, Regolith};
-use crate::planetary::hooks::figures::{PartitionOver, cover, partition_over};
+use crate::planetary::hooks::crust::{CrustBasis, CrustLid, LidAt};
+use crate::planetary::hooks::figures::{PartitionGround, PartitionOver, cover, partition_over};
 use crate::planetary::hooks::surface::{OceanWeight, SurfaceConditions, SurfaceInputs};
 use crate::substance::ice_ih_density;
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
@@ -74,10 +83,10 @@ pub(crate) struct PassSurface<'a> {
     pub(crate) water_at_surface: f64,
     /// The light of the body's hosts.
     pub(crate) light: PassLight<'a>,
-    /// The pass's regolith provider, on the material of the bulk its air reads: its lid not known
-    /// ([`Regolith::of_material`], which takes the stand-ins of [`Regolith::bond`]) until P14.T54.a's
-    /// C3 gives T51.c's lid ([`Regolith::with_lid`]) and P14.T54.b weathers it
-    /// ([`Regolith::weathered`]).
+    /// The pass's regolith provider where its lid is not known, on the material of the bulk its
+    /// air reads ([`Regolith::of_material`], which takes the stand-ins of [`Regolith::bond`]): a
+    /// pass under the body's own climate that takes a lid reads its row instead
+    /// ([`Regolith::with_lid`]), until P14.T54.b weathers it ([`Regolith::weathered`]).
     pub(crate) regolith: &'a RegolithOf<'a>,
 }
 
@@ -108,12 +117,15 @@ pub(crate) enum PassClimate<'a> {
 ///   inventory. The body is fixed within the pass, so a step's climate is a function of the step's
 ///   temperature and partial pressures alone, which the greenhouse's bit-exact exit needs.
 /// - **The published partition and condensates** are the record's computation: the conditions of
-///   the pass's air under that spin, at the context's heat flow and the θ of its air
-///   ([`SurfaceConditions::derive`]), the partition over their climate on the context's ground and
-///   their one cold profile ([`partition_over`]), with no ice bulk's crust listed
-///   ([`CrustWater::Unlisted`]: the area mix reads it as the regolith). A column with nothing that
-///   condenses reads no climate there (lever (p), L2): its partition is solved over the mean's
-///   isothermal span, which no part of it reads, and nothing of the cover is read.
+///   the pass's air under that spin, at the context's heat flow and the θ of its air, its ground's
+///   inertia at the context's lid ([`SurfaceConditions::derive`]), the partition over their
+///   climate on the context's ground and their one cold profile ([`partition_over`]), with no ice
+///   bulk's crust listed ([`CrustWater::Unlisted`]: the area mix reads it as the regolith). A
+///   column with nothing that condenses reads no climate there (lever (p), L2): its partition is
+///   solved over the mean's isothermal span, which no part of it reads, and nothing of the cover
+///   is read.
+/// - **The pass's lid** is its crust's basis's at the pass's climate ([`spun_lid`]): its regolith
+///   is that lid's row.
 ///
 /// [`step_climate`]: crate::planetary::hooks::surface::step_climate
 #[derive(Clone, Copy)]
@@ -128,6 +140,9 @@ pub(crate) struct SpunClimate<'a> {
     pub(crate) context: PassContext,
     /// Its volatile inventory's water (P14.T13.a), which its surface water reads.
     pub(crate) inventory_water: Kilograms,
+    /// Its crust's basis (P14.T51.c's first stage), once a body before its passes: `None` for a
+    /// body with no crust, whose passes take no lid.
+    pub(crate) basis: Option<CrustBasis>,
 }
 
 impl<'a> PassSurface<'a> {
@@ -149,8 +164,8 @@ impl<'a> PassSurface<'a> {
     }
 
     /// The surface of a pass under the context `spun` holds (P14.T54.a): the body's own climate,
-    /// the context's basins and water share, under the light `light`, the regolith's lid not known
-    /// until C3.
+    /// the context's basins and water share, under the light `light`, its regolith its own lid's
+    /// row where it takes one ([`spun_lid`]) and its material's rule where it takes none.
     #[must_use]
     pub(crate) fn spun(spun: &'a SpunClimate<'a>, light: PassLight<'a>) -> Self {
         Self {
@@ -250,30 +265,24 @@ fn pass_water_cover(
     }
 }
 
-/// The partition of the atmosphere `air` of the body `inputs` describe, solved once more at the
-/// pass's final climate, and its condensates published over the pass's cover; `None` for a body of
-/// no mass or radius, which holds nothing.
-///
-/// - **A climate given** ([`PassClimate::Given`]): the climate at the air's surface temperature
-///   and partial pressures, as
-///   [`GlobalFigures::condensates_and_ice_over`](crate::planetary::hooks::figures::GlobalFigures::condensates_and_ice_over)
-///   solves the record's, published over the stand-in's cover ([`pass_water_cover`]).
-/// - **The body's own** ([`PassClimate::Spun`]): the record's computation ([`spun_partition`]).
+/// What a pass's partition gives its area mix (P14.T51.a): its partition solved once more at the
+/// pass's final climate, its condensates published over the pass's cover, and under the body's
+/// own climate the record's conditions it was solved over, `None` where it read none (a climate
+/// given, or a column with nothing that condenses).
+type PassPartition = (Partition, Condensates, Option<SurfaceConditions>);
+
+/// The partition of the atmosphere `air` of the body `inputs` describe under a climate given
+/// `climate_of` ([`PassClimate::Given`]), on the surface `surface`, its body of gravity `gravity`:
+/// the climate at the air's surface temperature and partial pressures, as
+/// [`GlobalFigures::condensates_and_ice_over`](crate::planetary::hooks::figures::GlobalFigures::condensates_and_ice_over)
+/// solves the record's, published over the stand-in's cover ([`pass_water_cover`]).
 #[must_use]
-fn pass_condensates(
+fn given_partition(
     air: &Atmosphere,
     inputs: &AtmosphereInputs,
     surface: &PassSurface<'_>,
-) -> Option<(Partition, Condensates)> {
-    let (m, r) = (inputs.mass.value(), inputs.radius.value());
-    if !(m.is_finite() && m > 0.0 && r.is_finite() && r > 0.0) {
-        return None;
-    }
-    let climate_of = match surface.climate {
-        PassClimate::Given(climate_of) => climate_of,
-        PassClimate::Spun(spun) => return Some(spun_partition(air, inputs, spun)),
-    };
-    let gravity = MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r));
+    (climate_of, gravity): (&ClimateOf<'_>, MetresPerSecondSquared),
+) -> PassPartition {
     let climate = climate_of(air.surface_temperature, &air.partials);
     let ground = Ground::new(gravity, surface.basins, surface.water_at_surface);
     let solved = partition(&climate, &ground, &air.column_inventory());
@@ -284,48 +293,69 @@ fn pass_condensates(
         state: air.state,
         water,
     });
-    Some((solved, published))
+    (solved, published, None)
+}
+
+/// The partition's ground of the atmosphere `air` under the body's own climate `spun`: the
+/// context's ([`PassContext::partition_ground`]), its basins and water share, the surface water
+/// and potential ocean of the air's own vapour, gated by its own state and retention, and the
+/// crust its craters give, with no ice bulk's crust listed.
+#[must_use]
+fn spun_ground(air: &Atmosphere, spun: &SpunClimate<'_>) -> PartitionGround {
+    let record = &spun.record;
+    let water = WaterGate::of_air(air, spun.inventory_water, record);
+    spun.context
+        .partition_ground(air, &water, record.material, CrustWater::Unlisted)
+}
+
+/// The record's conditions of the atmosphere `air` of the body `inputs` describe under its own
+/// climate `spun`, on the partition's ground `ground` (rule (f)): the air under the record's spin,
+/// gravity, radius and material, at the context's heat flow, the θ of the ground's potential
+/// ocean, and its ground's inertia at the context's lid ([`SurfaceInputs::lid`]); `None` in the
+/// gas-envelope state, which has no surface.
+#[must_use]
+fn spun_conditions(
+    air: &Atmosphere,
+    inputs: &AtmosphereInputs,
+    spun: &SpunClimate<'_>,
+    ground: &PartitionGround,
+) -> Option<SurfaceConditions> {
+    let record = &spun.record;
+    SurfaceConditions::derive(&SurfaceInputs {
+        atmosphere: air,
+        equilibrium_temperature: inputs.equilibrium,
+        surface_gravity: record.surface_gravity,
+        radius: record.radius,
+        material: record.material,
+        lid: spun.context.lid().map(|lid| lid.lithology),
+        stellar_flux: spun.stellar_flux,
+        xuv_flux: spun.xuv_flux,
+        spin: record.spin,
+        heat_flow: spun.context.heat_flow(),
+        ocean_weight: OceanWeight::of_potential_ocean(ground.potential_ocean),
+    })
 }
 
 /// What a pass under its body's own climate `spun` publishes of the atmosphere `air` of the body
 /// `inputs` describe (P14.T54.a; rule (f)): the record's computation of its condensates, to the
-/// bit ([`SpunClimate`]).
+/// bit ([`SpunClimate`]), with the conditions it read.
 ///
-/// The ground is the context's ([`PassContext::partition_ground`]): its basins and water share,
-/// the surface water and potential ocean of the air's own vapour, gated by its own state and
-/// retention, and the crust its craters give, with no ice bulk's crust listed. The conditions are
-/// the record's of the air at the context's heat flow and that potential ocean's θ, and the
-/// partition and its cover are [`partition_over`]'s. A column with nothing that condenses is
-/// solved over the mean's isothermal span instead, which its partition does not read, and no part
-/// of its cover is read: it publishes nothing.
+/// The ground is the context's ([`spun_ground`]). The conditions are the record's of the air
+/// ([`spun_conditions`]), and the partition and its cover are [`partition_over`]'s. A column with
+/// nothing that condenses is solved over the mean's isothermal span instead, which its partition
+/// does not read, and no part of its cover is read: it publishes nothing, and reads no
+/// conditions.
 #[must_use]
 fn spun_partition(
     air: &Atmosphere,
     inputs: &AtmosphereInputs,
     spun: &SpunClimate<'_>,
-) -> (Partition, Condensates) {
-    let record = &spun.record;
-    let water = WaterGate::of_air(air, spun.inventory_water, record);
-    let ground = spun
-        .context
-        .partition_ground(air, &water, record.material, CrustWater::Unlisted);
+) -> PassPartition {
+    let ground = spun_ground(air, spun);
     let inventory = air.column_inventory();
     let conditions = inventory
         .condenses()
-        .then(|| {
-            SurfaceConditions::derive(&SurfaceInputs {
-                atmosphere: air,
-                equilibrium_temperature: inputs.equilibrium,
-                surface_gravity: record.surface_gravity,
-                radius: record.radius,
-                material: record.material,
-                stellar_flux: spun.stellar_flux,
-                xuv_flux: spun.xuv_flux,
-                spin: record.spin,
-                heat_flow: spun.context.heat_flow(),
-                ocean_weight: OceanWeight::of_potential_ocean(ground.potential_ocean),
-            })
-        })
+        .then(|| spun_conditions(air, inputs, spun, &ground))
         .flatten();
     let Some(conditions) = conditions else {
         // Nothing condenses (L2): no climate is read, and the mean's isothermal span stands in.
@@ -343,24 +373,62 @@ fn spun_partition(
                 crust_water: ground.crust_water,
             },
         });
-        #[cfg(test)]
-        spun_read::record(None, &solved, &published);
-        return (solved, published);
+        return (solved, published, None);
     };
     let PartitionOver {
         partition: solved,
         profile,
         water,
-    } = partition_over(air, &conditions, &ground, record.table);
+    } = partition_over(air, &conditions, &ground, spun.record.table);
     let cold_area = |t: Kelvin| profile.area_below(t);
     let published = solved.publish(&Cover {
         cold_area: &cold_area,
         state: air.state,
         water,
     });
-    #[cfg(test)]
-    spun_read::record(Some(&conditions), &solved, &published);
-    (solved, published)
+    (solved, published, Some(conditions))
+}
+
+/// The lid a pass under its body's own climate `spun` takes (P14.T54.a; decision-pre-23-review
+/// item 17): its crust's basis's ([`CrustBasis::lid_at`]) at the pass's state and final mean
+/// surface temperature, the record's mean `T_s` to the bit, under the surface age and the tide of
+/// the context it reads, the cometary test reading the warmest of its unwidened range,
+/// `conditions`' where the pass read them and otherwise its record's conditions, built only where
+/// that test is read ([`spun_conditions`]). `None` where the body has no basis, or the context no
+/// surface age (C₀, a body with no figures): the material's rule then stands.
+///
+/// A lid is a function of the pass's albedo and context alone, as the pass is: so a lid that
+/// changes between passes is a jump across the diagonal for T51.h's bracket, and the solver's
+/// re-check lists it.
+#[must_use]
+fn spun_lid(
+    air: &Atmosphere,
+    inputs: &AtmosphereInputs,
+    spun: &SpunClimate<'_>,
+    conditions: Option<&SurfaceConditions>,
+) -> Option<CrustLid> {
+    let basis = spun.basis.as_ref()?;
+    let surface_age = spun.context.surface_age()?;
+    let at = LidAt {
+        state: air.state,
+        mean_surface_temperature: air.surface_temperature,
+        surface_age,
+        tidal: spun.context.tidal(),
+    };
+    let warmest = || match conditions {
+        Some(conditions) => conditions.climate_range().1,
+        None => {
+            spun_conditions(air, inputs, spun, &spun_ground(air, spun))
+                .expect("the lid refuses the gas-envelope state before it reads its range")
+                .climate_range()
+                .1
+        }
+    };
+    let lid = basis.lid_at(&at, warmest);
+    // The figures' surface age lies in [0, the age], and the area mix asks no gas envelope's lid:
+    // a refusal is a bug, which the debug builds catch; the pass then takes the material's rule.
+    debug_assert!(lid.is_ok(), "{lid:?}");
+    lid.ok()
 }
 
 /// The largest Bond albedo the type holds, the largest `f64` below 1: a lossless frost's Bond
@@ -386,20 +454,21 @@ fn bond_albedo(value: f64, state: SurfaceState, material: SurfaceMaterial) -> Bo
 
 /// [`atmosphere_under`]'s batch arm (P14.T51.b): the atmosphere `air` of the body `inputs`
 /// describe, whose state and greenhouse the batch's rules gave, with its Bond albedo and cloud
-/// fraction from the area mix over the surface `surface` in place of T13.c's table:
+/// fraction from the area mix over the surface `surface` in place of T13.c's table, and under the
+/// body's own climate the lid the pass takes ([`spun_lid`], P14.T54.a):
 ///
 /// - a gas envelope its class's ([`area_mix::giant_bond`]) at its heated temperature and for its
-///   planet class, under a full cover, which its class's albedo includes;
-/// - a magma ocean the melt's 0.10 ([`area_mix::melt_bond`]), cloudless;
-/// - every other state the area mix over the condensates its pass publishes and its regolith, with
-///   the cloud fraction of its state and condensable at its cloud's albedo
-///   ([`area_mix::under_cloud`]).
+///   planet class, under a full cover, which its class's albedo includes; it has no lid;
+/// - a magma ocean the melt's 0.10 ([`area_mix::melt_bond`]), cloudless, whatever its lid;
+/// - every other state the area mix over the condensates its pass publishes and its regolith, its
+///   lid's row where it takes one, with the cloud fraction of its state and condensable at its
+///   cloud's albedo ([`area_mix::under_cloud`]).
 #[must_use]
 pub(super) fn area_mixed(
     air: Atmosphere,
     inputs: &AtmosphereInputs,
     surface: &PassSurface<'_>,
-) -> Atmosphere {
+) -> (Atmosphere, Option<CrustLid>) {
     let hottest;
     let shade = match surface.light {
         PassLight::Shade(shade) => shade,
@@ -408,53 +477,94 @@ pub(super) fn area_mixed(
             &hottest
         }
     };
-    let (albedo, cloud_fraction) = match air.state {
+    let (albedo, cloud_fraction, lid) = match air.state {
         SurfaceState::GasEnvelope => (
             area_mix::giant_bond(shade, inputs.heated, inputs.class),
             area_mix::cloud_share_of_state(SurfaceState::GasEnvelope),
+            None,
         ),
-        SurfaceState::MagmaOcean => (area_mix::melt_bond(), 0.0),
+        SurfaceState::MagmaOcean => {
+            let lid = match surface.climate {
+                PassClimate::Spun(spun) => spun_lid(&air, inputs, spun, None),
+                PassClimate::Given(_) => None,
+            };
+            (area_mix::melt_bond(), 0.0, lid)
+        }
         SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
         | SurfaceState::Snowball => surface_and_cloud(&air, inputs, surface, shade),
     };
-    Atmosphere {
+    #[cfg(test)]
+    if let PassClimate::Spun(_) = surface.climate {
+        spun_read::trace(lid.as_ref());
+    }
+    let air = Atmosphere {
         albedo: bond_albedo(albedo, air.state, inputs.material),
         cloud_fraction,
         ..air
-    }
+    };
+    (air, lid)
 }
 
 /// The area-mix Bond albedo and cloud fraction of a body with a surface, the atmosphere `air` of
-/// the body `inputs` describe on the surface `surface` under the light `shade` ([`area_mixed`]).
+/// the body `inputs` describe on the surface `surface` under the light `shade` ([`area_mixed`]),
+/// and the lid its pass takes under the body's own climate, whose row its regolith is.
 #[must_use]
 fn surface_and_cloud(
     air: &Atmosphere,
     inputs: &AtmosphereInputs,
     surface: &PassSurface<'_>,
     shade: &HostShade,
-) -> (f64, f64) {
-    let regolith = (surface.regolith)(inputs.material)
+) -> (f64, f64, Option<CrustLid>) {
+    let regolith_of = |lid: Option<&CrustLid>| {
+        lid.map_or_else(
+            || (surface.regolith)(inputs.material),
+            |lid| Regolith::with_lid(lid.row(), inputs.material),
+        )
         .bond(air.state, shade.bands())
-        .bond;
-    let Some((solved, published)) = pass_condensates(air, inputs, surface) else {
-        return (regolith, 0.0);
+        .bond
     };
+    let (m, r) = (inputs.mass.value(), inputs.radius.value());
+    if !(m.is_finite() && m > 0.0 && r.is_finite() && r > 0.0) {
+        // A body of no mass or radius holds nothing, and takes no lid.
+        return (regolith_of(None), 0.0, None);
+    }
+    let gravity = MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r));
+    let ((solved, published, _), lid) = match surface.climate {
+        PassClimate::Given(climate_of) => (
+            given_partition(air, inputs, surface, (climate_of, gravity)),
+            None,
+        ),
+        PassClimate::Spun(spun) => {
+            let partition = spun_partition(air, inputs, spun);
+            let lid = spun_lid(air, inputs, spun, partition.2.as_ref());
+            #[cfg(test)]
+            spun_read::record(
+                partition.2.as_ref(),
+                &partition.0,
+                &partition.1,
+                lid.as_ref(),
+            );
+            (partition, lid)
+        }
+    };
+    let regolith = regolith_of(lid.as_ref());
     let ground = area_mix::surface_bond(&published, &solved, regolith, shade);
     let cloud = area_mix::cloud_fraction(air.state, &solved, shade);
     let albedo = area_mix::under_cloud(ground, cloud, area_mix::cloud_albedo(air.state, shade));
-    (albedo, cloud)
+    (albedo, cloud, lid)
 }
 
 /// What the last spun pass on a thread published (P14.T54.a's rule (f) tests): its conditions, if
-/// it read any, its partition and its condensates, kept only while a test asks for them
-/// ([`spun_read::capture`]).
+/// it read any, its partition, its condensates and the lid whose row its regolith was, kept only
+/// while a test asks for them ([`spun_read::capture`]).
 #[cfg(test)]
 pub(crate) mod spun_read {
     use core::cell::{Cell, RefCell};
 
     use crate::planetary::chem::partition::{Condensates, Partition};
+    use crate::planetary::hooks::crust::CrustLid;
     use crate::planetary::hooks::surface::SurfaceConditions;
 
     /// What one spun pass published.
@@ -466,6 +576,11 @@ pub(crate) mod spun_read {
         pub(crate) partition: Partition,
         /// Its condensates.
         pub(crate) condensates: Condensates,
+        /// The lid it took, whose row its regolith read; `None` where it took none.
+        pub(crate) lid: Option<CrustLid>,
+        /// The lid every spun pass of the capture took, in order, a magma ocean's among them,
+        /// which publishes no partition: the re-check's lid flips (decision-p14-t54a-passes §1.8).
+        pub(crate) lids: Vec<Option<CrustLid>>,
     }
 
     thread_local! {
@@ -473,6 +588,15 @@ pub(crate) mod spun_read {
         static ON: Cell<bool> = const { Cell::new(false) };
         /// The last spun pass's on this thread, a test's own.
         static LAST: RefCell<Option<SpunRead>> = const { RefCell::new(None) };
+        /// The lids of the spun passes since the capture began, a test's own.
+        static LIDS: RefCell<Vec<Option<CrustLid>>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// Records the lid a spun pass took, where a test asks for it.
+    pub(crate) fn trace(lid: Option<&CrustLid>) {
+        if ON.with(Cell::get) {
+            LIDS.with(|lids| lids.borrow_mut().push(lid.copied()));
+        }
     }
 
     /// Records a spun pass's publication as the thread's last, where a test asks for it.
@@ -480,6 +604,7 @@ pub(crate) mod spun_read {
         conditions: Option<&SurfaceConditions>,
         partition: &Partition,
         condensates: &Condensates,
+        lid: Option<&CrustLid>,
     ) {
         if !ON.with(Cell::get) {
             return;
@@ -489,17 +614,23 @@ pub(crate) mod spun_read {
                 conditions: conditions.cloned(),
                 partition: partition.clone(),
                 condensates: condensates.clone(),
+                lid: lid.copied(),
+                lids: Vec::new(),
             });
         });
     }
 
-    /// `run`'s result and the last spun pass it published, if any. The switch is set back after.
+    /// `run`'s result and the last spun pass it published, if any, with the lids of every spun
+    /// pass it ran. The switch is set back after.
     #[must_use]
     pub(crate) fn capture<R>(run: impl FnOnce() -> R) -> (R, Option<SpunRead>) {
         let before = ON.with(|on| on.replace(true));
         LAST.with(|last| last.borrow_mut().take());
+        LIDS.with(|lids| lids.borrow_mut().clear());
         let result = run();
         ON.with(|on| on.set(before));
-        (result, LAST.with(|last| last.borrow_mut().take()))
+        let lids = LIDS.with(|lids| core::mem::take(&mut *lids.borrow_mut()));
+        let read = LAST.with(|last| last.borrow_mut().take());
+        (result, read.map(|read| SpunRead { lids, ..read }))
     }
 }

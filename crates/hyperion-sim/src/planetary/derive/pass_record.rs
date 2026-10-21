@@ -16,14 +16,19 @@
 //!   crust class, and a moon's tide branch, ocean flag and tidal heat. The first pass reads
 //!   [`PassContext::NONE`], C₀, the context K gives a body with no figures, labelled.
 //!
+//! - **The crust** ([`PassRecordOf::crust`], P14.T51.c's in stages): what its record gives its
+//!   crust's basis, once a body before the passes (its origin, its formation time, a moon's side
+//!   of its parent's ice line, its host's Mg/Si and its record's bulk), beside what the
+//!   derivation gives (its age, its magma ocean, its ΔIW, its ammonia and the formation stand-in's
+//!   temperature, the first pass's equilibrium temperature). Each pass takes its lid at its own
+//!   climate under the surface age and tide of the context it reads, so that its regolith is its
+//!   lid's row; the next pass's ground reads that lid's inertia ([`InertiaLid`]).
+//!
 //! A body with no rotation law (the public `derive_body` and `atmosphere`, a `generate_planets`
 //! system's bodies, `generate`'s parents at its step 7, and a body present at a time but not at
 //! its law's) keeps the stand-in ([`PassRecord::StandIn`]): "the passes' stand-in: no rotation
 //! law, no basins, the bulk material's regolith; a system's record derives the body under its
 //! law, its basins and its lid (P14.T54.a)".
-//!
-//! The inertia lid of the context is P14.T54.a's C3's, with the lid in the passes: until it lands
-//! the context holds none, and every pass's ground takes its bulk material's inertia.
 
 use core::cmp::Ordering;
 use core::fmt;
@@ -31,14 +36,18 @@ use core::fmt;
 use crate::planetary::chem::partition::{Basins, CrustWater, Ground};
 use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::passes::{Context, floats_agree};
-use crate::planetary::derive::{MassFractions, PlanetClass};
+use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
+use crate::planetary::hooks::crust::{
+    CrustLid, CrustLithology, CrustOrigin, LidCrust, TidalVolcanism,
+};
 use crate::planetary::hooks::figures::cover::{self, SurfaceWaterInputs};
 use crate::planetary::hooks::figures::{Crust, PartitionGround, PassFigures, TectonicRegime};
 use crate::planetary::hooks::surface::{OceanWeight, SeasonalSpin, ZonalInsolation};
 use crate::planetary::moons::tides::TidalBranch;
 use crate::units::{
-    EarthMasses, EarthRadii, Kelvin, Kilograms, KilogramsPerCubicMetre, KilogramsPerSquareMetre,
-    Metres, MetresPerSecondSquared, Pascals, WattsPerSquareMetre, Years,
+    Dex, EarthMasses, EarthRadii, Kelvin, Kilograms, KilogramsPerCubicMetre,
+    KilogramsPerSquareMetre, Megayears, Metres, MetresPerSecondSquared, Pascals,
+    WattsPerSquareMetre, Years,
 };
 
 /// A body's bulk before its passes, which no pass moves (lever (e)): its mass, radius, density,
@@ -90,9 +99,69 @@ pub(crate) trait PassRecordOf {
 
     /// K(P): the context the next pass reads of a pass whose atmosphere is `air` at the
     /// equilibrium temperature `equilibrium`, its bulk before its passes `bulk` (decision-p14-t54a-
-    /// passes §1.1): the figures' first stage of its own air, with a moon's tide at that pass.
+    /// passes §1.1): the figures' first stage of its own air, with a moon's tide at that pass. The
+    /// pass's own lid joins it after ([`PassContext::with_lid`]).
     #[must_use]
     fn context(&self, bulk: &PassBulk, air: &Atmosphere, equilibrium: Kelvin) -> PassContext;
+
+    /// What the body's record gives its crust's basis (P14.T51.c; [`RecordCrust`]), its bulk
+    /// before its passes `bulk`, once a body before the passes: `None` where this version computes
+    /// no crust for it (an origin with no formation window, a parent with no formation time).
+    #[must_use]
+    fn crust(&self, bulk: &PassBulk) -> Option<RecordCrust>;
+}
+
+/// What a body's record gives its crust's basis (P14.T54.a; P14.T51.c's `CrustBasisInputs`), the
+/// rest coming from its derivation: how it came to be, when it formed, a moon's side of its
+/// parent's ice line, its host's Mg/Si, \[α/Fe\] and \[Fe/H\], and its record's bulk.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RecordCrust {
+    /// How it came to be.
+    pub(crate) origin: CrustOrigin,
+    /// Its formation time `t_f`, Myr after its host's onset of collapse: a planet's P14.T28.a's
+    /// `formed_at`, a giant-impact moon's its parent's, and every other body's word 0 of its
+    /// `body.formation` stream in its window ([`formation_time`](crate::planetary::hooks::crust::formation_time)),
+    /// drawn once a derivation.
+    pub(crate) formation: Megayears,
+    /// A moon's side of its parent's ice line (P14.T48.f's `MoonBirth::formed`); `None` for a host
+    /// orbiter, which takes its derivation's own.
+    pub(crate) snow_line_side: Option<SnowLineSide>,
+    /// Its host's Mg/Si by number, its system's `system.abundances` words 0–1 at its \[Fe/H\]
+    /// (P14.T50.a's `HostAbundances`), positive.
+    pub(crate) host_magnesium_to_silicon: f64,
+    /// Its system's \[α/Fe\], dex (0 for none).
+    pub(crate) alpha_fe: Dex,
+    /// Its host's \[Fe/H\], dex.
+    pub(crate) fe_h: Dex,
+    /// Its record's bulk's mean radius.
+    pub(crate) radius: Metres,
+    /// Its mass at the time, its record's bulk's.
+    pub(crate) mass: EarthMasses,
+    /// Its record's bulk's mass fractions.
+    pub(crate) fractions: MassFractions,
+}
+
+/// The lid a pass's ground reads for its thermal inertia (P14.T54.a; decision-p14-t54a-passes
+/// §1.1, "inertia lid"): the previous pass's own lid, which crust lies at its surface and the
+/// lithology it names. A key member of the context, so that a settled pass's ground read the lid
+/// its own climate gives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct InertiaLid {
+    /// Which crust, or the bulk material, lies at the surface.
+    pub(crate) crust: LidCrust,
+    /// The lithology it names, whose row the ground's inertia reads.
+    pub(crate) lithology: CrustLithology,
+}
+
+impl InertiaLid {
+    /// The inertia lid of the pass's lid `lid`.
+    #[must_use]
+    pub(crate) fn of(lid: &CrustLid) -> Self {
+        Self {
+            crust: lid.crust(),
+            lithology: lid.lithology(),
+        }
+    }
 }
 
 /// How a body's passes take their climate (P14.T54.a; decision-p14-t54a-passes §3.2).
@@ -145,16 +214,22 @@ pub(crate) struct PassTide {
 /// | regime | the first stage's | key |
 /// | craters' crust class | the impactors' ([`Crust`]) | key |
 /// | tide | a moon's branch and ocean flag, and its tidal heat | key; float |
+/// | inertia lid | the pass's own lid ([`InertiaLid`]), whose row the next pass's ground reads | key |
+/// | `lid_of`'s unresurfaced test | the surface age against the time since the magma ocean, which the next pass's lid takes | key |
 ///
-/// The inertia lid is C3's (the six points' item 5), not held here until then.
-///
-/// The rest of the first stage rides along unread by any pass, so that the record's figures reuse
-/// the published pass's own K(P*) ([`GlobalFigures::of_first_stage`](crate::planetary::hooks::figures::GlobalFigures::of_first_stage)).
+/// Every member a pass reads is ranked: the lid a pass takes reads the surface age (a float), the
+/// tide's branch, the unresurfaced test and the basis, which no pass moves; its ground reads the
+/// inertia lid. The rest of the first stage rides along unread by any pass, so that the record's
+/// figures reuse the published pass's own K(P*)
+/// ([`GlobalFigures::of_first_stage`](crate::planetary::hooks::figures::GlobalFigures::of_first_stage)):
+/// the record reads the whole stage only through K(P*), never through the context a pass read.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PassContext {
     figures: Option<PassFigures>,
     basins: Basins,
     tide: Option<PassTide>,
+    lid: Option<InertiaLid>,
+    unresurfaced: Option<bool>,
 }
 
 /// How many float members a context holds at most: two populations' weight, mean and width, the
@@ -188,20 +263,29 @@ pub(crate) struct PassContextKey {
     pub(crate) crust: Option<Crust>,
     /// A moon's tide branch and ocean flag.
     pub(crate) tide: Option<(TidalBranch, bool)>,
+    /// The inertia lid.
+    pub(crate) lid: Option<InertiaLid>,
+    /// `lid_of`'s unresurfaced test on its surface age, where the body has a crust's basis and
+    /// the context a surface age.
+    pub(crate) unresurfaced: Option<bool>,
 }
 
 impl PassContext {
     /// C₀, the first pass's stand-in context (decision-p14-t54a-passes §1.2), labelled: the
     /// context K gives a body with no figures, member for member. No basins known, all the
     /// condensed water at the surface, no heat flow (the cosmic background's floor), no surface
-    /// age, no tide (a quiet one) and no lid.
+    /// age, no tide (a quiet one) and no lid: its pass takes no lid of its own, and its ground
+    /// takes its bulk material's inertia.
     pub(crate) const NONE: Self = Self {
         figures: None,
         basins: Basins::UNKNOWN,
         tide: None,
+        lid: None,
+        unresurfaced: None,
     };
 
-    /// The context of the first stage `figures` and a moon's tide `tide` (K(P)).
+    /// The context of the first stage `figures` and a moon's tide `tide` (K(P)), with no lid yet
+    /// ([`with_lid`](Self::with_lid)).
     ///
     /// # Panics
     ///
@@ -214,6 +298,8 @@ impl PassContext {
             basins: figures.map_or(Basins::UNKNOWN, PassFigures::basins),
             figures: figures.copied(),
             tide,
+            lid: None,
+            unresurfaced: None,
         };
         debug_assert!(
             {
@@ -231,14 +317,50 @@ impl PassContext {
         self.figures.as_ref()
     }
 
+    /// The context with the pass's own lid `lid` (the next pass's ground's) and `lid_of`'s
+    /// unresurfaced test on its own surface age, `unresurfaced`, which the next pass's lid takes:
+    /// K(P) whole (decision-p14-t54a-passes §1.1).
+    #[must_use]
+    pub(crate) const fn with_lid(
+        self,
+        lid: Option<InertiaLid>,
+        unresurfaced: Option<bool>,
+    ) -> Self {
+        Self {
+            lid,
+            unresurfaced,
+            ..self
+        }
+    }
+
     /// A moon's tide at the pass it is of.
     #[cfg_attr(
         not(test),
-        expect(dead_code, reason = "P14.T54.a's C3 reads its branch for the lid")
+        expect(
+            dead_code,
+            reason = "a pass's lid reads its branch through `tidal`; the tests read it whole"
+        )
     )]
     #[must_use]
     pub(crate) const fn tide(&self) -> Option<PassTide> {
         self.tide
+    }
+
+    /// Whether the tide makes the body volcanic, its lid's (P14.T51.c): a moon on P14.T56.d's
+    /// heated branch is; every other moon, and a body with no tide, is not.
+    #[must_use]
+    pub(crate) fn tidal(&self) -> TidalVolcanism {
+        match self.tide.map(|tide| tide.branch) {
+            Some(TidalBranch::Heated) => TidalVolcanism::Volcanic,
+            Some(TidalBranch::Cold | TidalBranch::Ocean) | None => TidalVolcanism::Quiet,
+        }
+    }
+
+    /// The inertia lid the pass's ground reads: the previous pass's own lid, `None` for none (C₀,
+    /// a body with no crust), whose ground takes its bulk material's constant.
+    #[must_use]
+    pub(crate) const fn lid(&self) -> Option<InertiaLid> {
+        self.lid
     }
 
     /// The basins the liquids fill: the relief's hypsometry, or none known.
@@ -385,6 +507,8 @@ impl Context for PassContext {
             regime: figures.map(PassFigures::tectonic_regime),
             crust: figures.map(PassFigures::crust),
             tide: self.tide.map(|tide| (tide.branch, tide.ocean)),
+            lid: self.lid,
+            unresurfaced: self.unresurfaced,
         }
     }
 

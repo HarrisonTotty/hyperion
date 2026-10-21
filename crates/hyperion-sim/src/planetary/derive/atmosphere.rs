@@ -74,7 +74,8 @@ use crate::planetary::derive::PlanetClass;
 use crate::planetary::derive::composition::{MassFractions, SnowLineSide};
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::derive::pass_record::{PassContext, WaterGate};
-use crate::planetary::hooks::surface::{ClimateBody, step_climate};
+use crate::planetary::hooks::crust::CrustLid;
+use crate::planetary::hooks::surface::{ClimateBody, GroundInertia, step_climate};
 use crate::planetary::params::{ICY_WATER_FRACTION, THIN_ENVELOPE_FRACTION};
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::draws::UnitUniform;
@@ -2064,7 +2065,13 @@ impl<'a> StepClimate<'a> {
                     equilibrium_temperature: inputs.equilibrium,
                     surface_gravity: spun.record.surface_gravity,
                     radius: spun.record.radius,
-                    material: spun.record.material,
+                    // Once a pass: the ground's inertia at the context's lid, the previous pass's
+                    // own, at this pass's equilibrium temperature.
+                    ground: GroundInertia::at_equilibrium(
+                        spun.context.lid().map(|lid| lid.lithology),
+                        spun.record.material,
+                        inputs.equilibrium,
+                    ),
                     spin: spun.record.spin,
                     heat_flow: spun.context.heat_flow(),
                     inventory: column,
@@ -2255,6 +2262,16 @@ pub fn atmosphere(inputs: &AtmosphereInputs) -> Atmosphere {
 ///   (`surface_mix::area_mixed`).
 #[must_use]
 pub(crate) fn atmosphere_under(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) -> Atmosphere {
+    atmosphere_and_lid(inputs, surface).0
+}
+
+/// [`atmosphere_under`] with the lid its pass takes under the body's own climate (P14.T54.a;
+/// [`SpunClimate`]): `None` over a climate given, which takes none, and where no lid is known.
+#[must_use]
+pub(crate) fn atmosphere_and_lid(
+    inputs: &AtmosphereInputs,
+    surface: &PassSurface<'_>,
+) -> (Atmosphere, Option<CrustLid>) {
     let air = state_and_greenhouse(inputs, surface);
     surface_mix::area_mixed(air, inputs, surface)
 }

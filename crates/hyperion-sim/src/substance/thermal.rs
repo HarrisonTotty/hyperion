@@ -61,17 +61,17 @@
 //! 102, 6535; Piqueux and Christensen 2009, JGR 114, E09005; neither re-read), so the law
 //! under-reads a regolith under air, Mars's among them. The temperature is the caller's.
 //!
-//! # Held at generator version 22
+//! # On the record from generator version 23
 //!
-//! Nothing on the record calls this module until P14.T54.a, which passes the inertia at P14.T51.c's
-//! lid to P14.T24.a in place of its two provisional constants, the
+//! P14.T54.a passes the inertia at P14.T51.c's lid ([`reference_regolith_thermal_inertia`]) to
+//! P14.T24.a's climate and to rendering plan R09's airless model (R09.T13.c), through the ground's
+//! inertia of [`hooks::surface`](crate::planetary::hooks::surface), whose two constants,
 //! `ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S` and
-//! `ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S` of
-//! [`hooks::surface`](crate::planetary::hooks::surface). So generator version 22 publishes none
-//! of it, and a change to it re-blesses
-//! `tests/golden/substance/thermal.golden` at the version in force. A test,
-//! `substance_thermal_nothing_on_the_record_reads_the_inertia_yet`, holds that, and P14.T54.a
-//! deletes it. Rendering plan R09's R09.T13.c reuses the same law for its airless model.
+//! `ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`, stay as its fallback alone: a lid not known,
+//! a row with no thermal columns or no regolith form, and a lid above its transition
+//! (decision-pre-23-review item 7). Under air the law is a vacuum lower bound, with no pore gas,
+//! which P14.T49.l adds. A change here moves the record at the version it lands in, and
+//! re-blesses `tests/golden/substance/thermal.golden` with it.
 //!
 //! Everything here is a pure function of the registry and its arguments: no draws, no state, no
 //! caches, loops in registry order and sums in a fixed order, with the crate's deterministic
@@ -87,11 +87,7 @@ use hyperion_surface::material::{MaterialClass, ShearLayer, form_row};
 use super::condensed::CondensedPhase;
 use super::{Basis, Source, Substance, SubstanceId, ids};
 use crate::math;
-use crate::planetary::derive::atmosphere::SurfaceMaterial;
-use crate::planetary::hooks::surface::{
-    ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S, REGOLITH_EMISSIVITY,
-    ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
-};
+use crate::planetary::hooks::surface::REGOLITH_EMISSIVITY;
 use crate::units::consts::STEFAN_BOLTZMANN;
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Metres, Pascals};
 
@@ -1226,136 +1222,6 @@ pub fn reference_regolith_thermal_inertia(
     let form = RegolithForm::reference(family)
         .ok_or(EvaluateRegolithInertiaError::NoRegolithForm { family })?;
     regolith_thermal_inertia(id, &form, temperature)
-}
-
-/// Where a ground's thermal inertia comes from (P14.T54.a; decision-pre-23-review item 7;
-/// decision-p14-t54a-passes §3.5): P14.T49.j's law at the lid's row, or one of P14.T24.a's two
-/// provisional constants as its fallback, rock's 55 and ice's 20.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum InertiaSource {
-    /// The law at the lid's row, at the temperature ([`reference_regolith_thermal_inertia`]).
-    Law,
-    /// No lid known (the passes' first context, or a body with no crust): the bulk material's
-    /// constant.
-    NoLid,
-    /// The lid's row has no thermal columns (`graphite`, `ca_al_residue`): rock's constant.
-    NoThermalColumns,
-    /// The lid's row's family has no regolith form (`Organic`, as `cometary`'s): ice's constant.
-    NoRegolithForm,
-    /// The lid's row has no solid at the temperature: its family's constant, ice's for
-    /// `WaterIce` and rock's otherwise.
-    NoSolid,
-    /// What a lid's row at a positive, finite temperature never gives (a temperature that is not,
-    /// a row with no condensed columns, a form of another family than its row's): the bulk
-    /// material's constant, and a failed `debug_assert` in a debug build.
-    Unreachable,
-}
-
-/// A ground's thermal inertia Γ with where it comes from (P14.T54.a; [`ground_inertia`]).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct GroundInertia {
-    gamma: f64,
-    source: InertiaSource,
-}
-
-impl GroundInertia {
-    /// The thermal inertia Γ, J m⁻² K⁻¹ s^−½, positive.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P14.T54.a's C3 wires the inertia at the lid")
-    )]
-    #[must_use]
-    pub(crate) const fn inertia_j_per_m2_k_sqrt_s(&self) -> f64 {
-        self.gamma
-    }
-
-    /// Where it comes from.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P14.T54.a's C3 wires the inertia at the lid")
-    )]
-    #[must_use]
-    pub(crate) const fn source(&self) -> InertiaSource {
-        self.source
-    }
-}
-
-/// The thermal inertia of the ground of a body whose crust's lid is the row `lid` and whose bulk is
-/// of `material`, at `temperature`, the column's equilibrium temperature (P14.T54.a;
-/// decision-pre-23-review item 7; decision-p14-t54a-passes §3.5): P14.T49.j's law at the lid
-/// ([`reference_regolith_thermal_inertia`], a dry regolith in vacuum, which under air is a lower
-/// bound, with no pore gas), and otherwise P14.T24.a's constants
-/// (`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`, `ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`)
-/// as their fallback ([`InertiaSource`]):
-///
-/// - no lid: the bulk material's constant, as P14.T24.a reads it today, to the bit;
-/// - a row with no thermal columns: rock's, 55;
-/// - a family with no regolith form: ice's, 20;
-/// - no solid at the temperature: the lid's family's, 20 for `WaterIce` and 55 otherwise;
-/// - the law's other refusals, which a lid's row at a positive, finite temperature never gives:
-///   the bulk material's constant, with a `debug_assert`.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P14.T54.a's C3 wires the inertia at the lid")
-)]
-#[must_use]
-pub(crate) fn ground_inertia(
-    lid: Option<SubstanceId>,
-    material: SurfaceMaterial,
-    temperature: Kelvin,
-) -> GroundInertia {
-    let of_material = match material {
-        SurfaceMaterial::Rock => ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
-        SurfaceMaterial::Ice => ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
-    };
-    let Some(id) = lid else {
-        return GroundInertia {
-            gamma: of_material,
-            source: InertiaSource::NoLid,
-        };
-    };
-    let error = match reference_regolith_thermal_inertia(id, temperature) {
-        Ok(inertia) => {
-            return GroundInertia {
-                gamma: inertia.inertia_j_per_m2_k_sqrt_s(),
-                source: InertiaSource::Law,
-            };
-        }
-        Err(error) => error,
-    };
-    let (gamma, source) = match error {
-        EvaluateRegolithInertiaError::NoThermalColumns { .. } => (
-            ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
-            InertiaSource::NoThermalColumns,
-        ),
-        EvaluateRegolithInertiaError::NoRegolithForm { .. } => (
-            ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
-            InertiaSource::NoRegolithForm,
-        ),
-        EvaluateRegolithInertiaError::NoSolid { id, .. } => {
-            let ice = id
-                .substance()
-                .condensed()
-                .is_some_and(|row| row.mechanics() == MechanicsFamily::WaterIce);
-            let gamma = if ice {
-                ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S
-            } else {
-                ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S
-            };
-            (gamma, InertiaSource::NoSolid)
-        }
-        EvaluateRegolithInertiaError::Temperature { .. }
-        | EvaluateRegolithInertiaError::NotCondensed { .. }
-        | EvaluateRegolithInertiaError::FamilyMismatch { .. } => {
-            (of_material, InertiaSource::Unreachable)
-        }
-    };
-    debug_assert_ne!(
-        source,
-        InertiaSource::Unreachable,
-        "{error}: a lid's row at a positive, finite temperature never gives it"
-    );
-    GroundInertia { gamma, source }
 }
 
 /// A source of the values `covers` names, for the rows' and the forms' tables.

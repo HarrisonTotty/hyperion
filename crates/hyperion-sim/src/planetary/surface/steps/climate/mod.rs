@@ -138,6 +138,11 @@ pub(crate) mod seas;
 mod sun;
 #[cfg(test)]
 mod tests;
+
+/// The airless model's regolith inertia (P14.T54.a), which the sample's tests hold to the
+/// record's conditions' to the bit.
+#[cfg(test)]
+pub(crate) use airless::regolith_inertia;
 mod transport;
 mod wind;
 

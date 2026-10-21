@@ -105,12 +105,13 @@ use crate::planetary::belts::{
 };
 use crate::planetary::chem::inventory::ElementInventory;
 use crate::planetary::chem::partition::{Condensates, CrustWater, Partition};
+use crate::planetary::chem::{AbundanceDraws, HostAbundances};
 use crate::planetary::context::{SystemContext, XuvHistory};
 use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceMaterial, VolatileDraws};
 use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
 use crate::planetary::derive::irradiation::{BondAlbedo, luminosity_flux};
 use crate::planetary::derive::pass_record::{
-    PassBulk, PassContext, PassRecord, PassRecordOf, RecordSpin, WaterGate,
+    PassBulk, PassContext, PassRecord, PassRecordOf, RecordCrust, RecordSpin, WaterGate,
 };
 use crate::planetary::derive::photometry::area_mix::ShadeBook;
 use crate::planetary::derive::photometry::{BodyPhotometry, PhotometryInputs};
@@ -119,8 +120,8 @@ use crate::planetary::derive::rotation::{
 };
 use crate::planetary::derive::{
     BodyHosts, DerivedBody, DerivedBulk, GivenBulk, GivenFractions, HabitableZone, HostLight,
-    Illumination, MassFractions, PassDriver, PlacedBody, PlanetClass, SpunPasses, derive_body,
-    derive_body_driven, derive_bulk, habitable_zone_of, radius_chen_kipping,
+    Illumination, MassFractions, PassDriver, PlacedBody, PlanetClass, SnowLineSide, SpunPasses,
+    derive_body, derive_body_driven, derive_bulk, habitable_zone_of, radius_chen_kipping,
 };
 use crate::planetary::disc::{self, Disc, DiscProfile, Truncation};
 use crate::planetary::drift::{DriftingOrbit, drift_cell};
@@ -131,6 +132,10 @@ use crate::planetary::halo::{
     ADIABATIC_INDEX_LIMIT, CometaryHalo, HaloBounds, HaloHost, RUNAWAY_INDEX, Scatterer, halo,
 };
 use crate::planetary::hooks::cold_traps::{self, ColdTrapRules, ColdTrapSky, RecordColdTraps};
+use crate::planetary::hooks::crust::{
+    CrustComposition, CrustLid, CrustOrigin, CrustRecord, FormationWindow, ParentSurface,
+    formation_time,
+};
 use crate::planetary::hooks::figures::{
     BeltMembership, Continents, CraterInputs, FiguresInputs, HostOrbit, HostOrbiter, ImpactorOrbit,
     ImpactorSources, MoonBirth, PartitionGround, PassFigures, SourceBelt, VolatileHistory,
@@ -3068,6 +3073,133 @@ impl PlanetarySystem {
         })
     }
 
+    /// The lifetime of the disc `body`'s host formed its bodies in (P14.T28.a), the end of every
+    /// body's formation window but a planet's and a giant-impact moon's ([`FormationWindow`]):
+    /// `None` for a host with no disc.
+    #[must_use]
+    fn disc_lifetime(&self, body: &Body) -> Option<Megayears> {
+        Some(
+            self.host(self.zone_of(body).host())?
+                .disc
+                .profile()?
+                .lifetime(),
+        )
+    }
+
+    /// The formation time `t_f` of the host orbiter `body` as its crust reads it (P14.T51.c's
+    /// `CrustCompositionInputs::formation`): a planet's P14.T28.a's `formed_at`, and a member's word
+    /// 0 of its `body.formation` stream over its disc's window ([`formation_time`]). `None` for a
+    /// moon or a ring, and for a member whose host has no disc.
+    #[must_use]
+    fn crust_formation(&self, body: &Body) -> Option<Megayears> {
+        match &body.part {
+            Part::Planet(planet) => Some(planet.fate.formation().formed_at()),
+            Part::Member(_) => {
+                let window = FormationWindow::disc(self.disc_lifetime(body)?).ok()?;
+                Some(formation_time(
+                    self.seed,
+                    body.index.body_id(self.system),
+                    window,
+                ))
+            }
+            Part::Moon(_) | Part::Ring(_) => None,
+        }
+    }
+
+    /// What the host of the system of `ctx` gives every body's crust's basis (P14.T51.c): its
+    /// Mg/Si by number, its system's `system.abundances` words 0–1 at its \[Fe/H\] (P14.T50.a's
+    /// [`HostAbundances`], first read on the record from 23, P14.T54.a), its \[α/Fe\] (0 for none)
+    /// and its \[Fe/H\].
+    #[must_use]
+    fn crust_host(&self, ctx: &SystemContext) -> CrustHost {
+        let abundances = HostAbundances::of(
+            ctx.fe_h(),
+            &AbundanceDraws::for_system(self.seed, self.system),
+        );
+        CrustHost {
+            host_magnesium_to_silicon: abundances.magnesium_to_silicon(),
+            alpha_fe: ctx.alpha_fe().unwrap_or(Dex::ZERO),
+            fe_h: ctx.fe_h(),
+        }
+    }
+
+    /// What the record gives the crust's basis of the planet or member `body` beyond its bulk
+    /// (P14.T54.a; [`RecordCrust`]): its origin, its formation time and its host's
+    /// ([`crust_host`](Self::crust_host)); its side of the snow line is its derivation's. `None`
+    /// for a moon or a ring, and for a member whose host has no disc.
+    #[must_use]
+    fn primary_crust(&self, ctx: &SystemContext, body: &Body) -> Option<CrustOf> {
+        let origin = match &body.part {
+            Part::Planet(_) => CrustOrigin::Planet,
+            Part::Member(_) => CrustOrigin::BeltMember,
+            Part::Moon(_) | Part::Ring(_) => return None,
+        };
+        Some(CrustOf {
+            origin,
+            formation: self.crust_formation(body)?,
+            snow_line_side: None,
+            host: self.crust_host(ctx),
+        })
+    }
+
+    /// What the record gives the crust's basis of the moon `moon` of `primary` beyond its bulk, of
+    /// ice fraction `ice_fraction` on `orbit` (P14.T54.a; [`RecordCrust`]):
+    ///
+    /// - its side of its parent's ice line, its craters' birthplace ([`MoonBirth::formed`]);
+    /// - its origin: a regular moon, a giant-impact moon on a parent rocky or icy by that side
+    ///   (an icy belt's member's moon formed beyond, as Charon), or a capture;
+    /// - its formation time: a regular moon's word 0 of its `body.formation` stream from its
+    ///   giant's formation to the disc's lifetime, a capture's over the disc's window, and a
+    ///   giant-impact moon's its parent's ([`crust_formation`](Self::crust_formation));
+    /// - its host's ([`CrustHost`]).
+    ///
+    /// `None` where its craters are not computed, its host has no disc, or a regular moon's window
+    /// is refused (its giant formed after its disc).
+    #[must_use]
+    fn moon_crust(
+        &self,
+        (primary, body, moon): (&Body, &Body, &MoonPart),
+        ice_fraction: f64,
+        orbit: &KeplerElements,
+        host: CrustHost,
+    ) -> Option<CrustOf> {
+        let craters = self.moon_craters(primary, moon, ice_fraction, orbit)?;
+        let ImpactorOrbit::Moon { formed, .. } = craters.orbit else {
+            return None;
+        };
+        let lifetime = self.disc_lifetime(primary)?;
+        let drawn = |window: FormationWindow| {
+            formation_time(self.seed, body.index.body_id(self.system), window)
+        };
+        let (origin, formation) = match moon.satellite.moon() {
+            SatelliteMoon::Regular(_) => {
+                let formed_at = primary.formation()?.formed_at();
+                let window = FormationWindow::new(formed_at, lifetime).ok()?;
+                (CrustOrigin::RegularMoon, drawn(window))
+            }
+            SatelliteMoon::GiantImpact(_) => {
+                let parent = match formed {
+                    SnowLineSide::Beyond => ParentSurface::Icy,
+                    SnowLineSide::Inside => ParentSurface::Rocky,
+                };
+                (
+                    CrustOrigin::ImpactMoon(parent),
+                    self.crust_formation(primary)?,
+                )
+            }
+            SatelliteMoon::Captured(_) => (
+                CrustOrigin::CapturedMoon,
+                drawn(FormationWindow::disc(lifetime).ok()?),
+            ),
+        };
+        Some(CrustOf {
+            origin,
+            formation,
+            snow_line_side: Some(formed),
+            host,
+        })
+    }
+
     /// The zone of `body`'s host: a planet's or a member's own, a satellite's parent's.
     #[must_use]
     fn zone_of(&self, body: &Body) -> &OrbitZone {
@@ -3306,6 +3438,7 @@ impl PlanetarySystem {
             table: &table,
             body,
             craters: self.body_craters(body),
+            crust: self.primary_crust(epoch.ctx, body),
         };
         let (derived, sky) = self.derive(
             epoch,
@@ -3579,6 +3712,7 @@ impl PlanetarySystem {
                     spin,
                     table: &table,
                     now,
+                    host: self.crust_host(epoch.ctx),
                 };
                 Some(&passes)
             }
@@ -4176,20 +4310,64 @@ impl FiguresOf<'_> {
     }
 }
 
+/// What a system's host gives every body's crust's basis (P14.T51.c; [`RecordCrust`]): its Mg/Si
+/// by number, its \[α/Fe\] and its \[Fe/H\].
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CrustHost {
+    host_magnesium_to_silicon: f64,
+    alpha_fe: Dex,
+    fe_h: Dex,
+}
+
+/// What a body's record gives its crust's basis beyond its bulk (P14.T54.a; [`RecordCrust`]): its
+/// origin, its formation time, a moon's side of its parent's ice line, and its host's.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CrustOf {
+    origin: CrustOrigin,
+    formation: Megayears,
+    snow_line_side: Option<SnowLineSide>,
+    host: CrustHost,
+}
+
+impl CrustOf {
+    /// The record's crust inputs with the record's bulk `bulk` at the mass `mass`.
+    #[must_use]
+    fn with_bulk(&self, bulk: &FigureBulk, mass: EarthMasses) -> RecordCrust {
+        RecordCrust {
+            origin: self.origin,
+            formation: self.formation,
+            snow_line_side: self.snow_line_side,
+            host_magnesium_to_silicon: self.host.host_magnesium_to_silicon,
+            alpha_fe: self.host.alpha_fe,
+            fe_h: self.host.fe_h,
+            radius: Metres::from(bulk.radius),
+            mass,
+            fractions: bulk.fractions,
+        }
+    }
+}
+
 /// A planet's or member's passes over its record (P14.T54.a; [`PassRecordOf`]): its spin under its
-/// held law and its own orbit then, its insolation table, its record's bulk rule and what its
-/// figures read beyond its air, so that each pass's context is K of the pass before.
+/// held law and its own orbit then, its insolation table, its record's bulk rule, what its figures
+/// read beyond its air, so that each pass's context is K of the pass before, and what its crust's
+/// basis reads beyond its bulk.
 struct PrimaryPasses<'a> {
     frame: &'a SurfaceFrame<'a>,
     spin: SeasonalSpin,
     table: &'a ZonalInsolation,
     body: &'a Body,
     craters: Option<SurfaceCraters>,
+    crust: Option<CrustOf>,
 }
 
 impl PassRecordOf for PrimaryPasses<'_> {
     fn spin(&self, bulk: &PassBulk) -> RecordSpin<'_> {
         FigureBulk::of_primary(self.body, bulk).record_spin(self.spin, self.table)
+    }
+
+    fn crust(&self, bulk: &PassBulk) -> Option<RecordCrust> {
+        let crust = self.crust?;
+        Some(crust.with_bulk(&FigureBulk::of_primary(self.body, bulk), bulk.mass))
     }
 
     fn context(&self, bulk: &PassBulk, air: &Atmosphere, _: Kelvin) -> PassContext {
@@ -4226,13 +4404,15 @@ struct MoonNow<'a> {
 }
 
 /// A moon's passes over its record (P14.T54.a; [`MoonRecordOf`]): its spin, its insolation table,
-/// its record's bulk rule and what its figures read beyond its air and its tide.
+/// its record's bulk rule, what its figures read beyond its air and its tide, and what its crust's
+/// basis reads of its host.
 struct SatellitePasses<'a> {
     system: &'a PlanetarySystem,
     frame: &'a SurfaceFrame<'a>,
     spin: SeasonalSpin,
     table: &'a ZonalInsolation,
     now: &'a MoonNow<'a>,
+    host: CrustHost,
 }
 
 impl MoonRecordOf for SatellitePasses<'_> {
@@ -4244,6 +4424,24 @@ impl MoonRecordOf for SatellitePasses<'_> {
             self.now.parent,
         )
         .record_spin(self.spin, self.table)
+    }
+
+    fn crust(&self, shape: &MoonShape, bulk: &PassBulk) -> Option<RecordCrust> {
+        let MoonNow {
+            body,
+            moon,
+            parent,
+            orbit,
+            ..
+        } = *self.now;
+        let crust = self.system.moon_crust(
+            (self.frame.primary, body, moon),
+            shape.ice_fraction,
+            &orbit,
+            self.host,
+        )?;
+        let figure = PlanetarySystem::moon_figure_of_shape(moon, shape, &bulk.fractions, parent);
+        Some(crust.with_bulk(&figure, moon.satellite.mass()))
     }
 
     fn figures(
@@ -4482,6 +4680,9 @@ struct SurfaceSky<'a> {
     /// What its passes over its record leave for it (P14.T54.a, rule (f)), `None` over the
     /// stand-in.
     spun: Option<&'a SpunPasses>,
+    /// Its published pass's lid, whose row its regolith read (P14.T54.a), from which its record's
+    /// crust is built; `None` where its passes took none.
+    crust_lid: Option<&'a CrustLid>,
 }
 
 /// What a body's global figures read at a time beyond its bulk section, its sky and its spin
@@ -4506,6 +4707,7 @@ impl SurfaceSky<'_> {
             xuv_flux: derived.xuv_flux(),
             regolith_albedo: derived.regolith_albedo(),
             spun: derived.spun(),
+            crust_lid: derived.crust_lid(),
         }
     }
 
@@ -4519,6 +4721,7 @@ impl SurfaceSky<'_> {
             xuv_flux: derived.xuv_flux(),
             regolith_albedo: derived.regolith_albedo(),
             spun: derived.spun(),
+            crust_lid: derived.crust_lid(),
         }
     }
 }
@@ -4736,6 +4939,13 @@ struct SurfaceCraters {
 /// The conditions' zonal profile is read off the body's insolation table, built once from its
 /// spin's obliquity over the call chain's hour angles' cosines (the time's), and read by the
 /// partition's cold profile and T24.b's ice alike (decision-p14-t54a-passes §C.3, lever (h)).
+///
+/// **The crust** (P14.T51.c, on the record from P14.T54.a; decision-pre-23-review item 17): the
+/// published pass's lid with what only the record reads, the figures' volcanism and continental
+/// fraction and the conditions' melt area (`CrustComposition::of`), so that the record's lid is
+/// the row its last pass read, to the bit; the conditions' ground's inertia reads the lid the
+/// published pass's context holds, as that pass's climate did. Not modelled over the passes'
+/// stand-in and for a body whose passes took no lid.
 #[must_use]
 fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<Surface> {
     let Some(seasonal) = time.seasonal else {
@@ -4784,22 +4994,19 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         Err(_) => return Section::NotModelled,
     };
     let material = SurfaceMaterial::of(&bulk.fractions());
-    let SurfaceBasis {
-        ground,
-        heat_flow,
-        ocean_weight,
-    } = surface_basis(case, &figures, material);
+    let basis = surface_basis(case, &figures, material);
     let inputs = SurfaceInputs {
         atmosphere: air,
         equilibrium_temperature: sky.equilibrium_temperature,
         surface_gravity: bulk.surface_gravity(),
         radius: Metres::from(bulk.radius()),
         material,
+        lid: basis.lid,
         stellar_flux: WattsPerSquareMetre::from(sky.flux),
         xuv_flux: sky.xuv_flux,
         spin,
-        heat_flow,
-        ocean_weight,
+        heat_flow: basis.heat_flow,
+        ocean_weight: basis.ocean_weight,
     };
     let Some(conditions) = SurfaceConditions::derive(&inputs) else {
         return Section::NotApplicable;
@@ -4810,7 +5017,7 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         case,
         (&spin, seasonal),
         conditions,
-        (&table, &ground),
+        (&table, &basis.ground),
     );
     // The second stage: the volatile history reads the conditions' liquid-water flag, the hosts'
     // light over the body's past and its outgassing then (P14.T48.b), and the ocean and the ice
@@ -4838,18 +5045,40 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         ice_fraction: figures.ice_fraction(),
         ice_threshold: figures.ice_threshold(),
     });
+    let crust = record_crust(sky.crust_lid, &figures, &conditions);
     Section::Ok(
         Surface::new(air.state(), material, conditions, figures, published)
             .expect(
                 "conditions exist only off the gas-envelope state, and `with_climate` gives their \
                  regime",
             )
-            .with_basis(SurfaceBasis {
-                ground,
-                heat_flow,
-                ocean_weight,
-            }),
+            .with_basis(basis)
+            .with_crust(crust),
     )
+}
+
+/// The record's crust of a body whose published pass took the lid `lid`, of figures `figures`
+/// and conditions `conditions` (P14.T51.c, on the record from P14.T54.a; item 17's constraint 1):
+/// that lid with what only the record reads, the figures' volcanism and continental fraction and
+/// the conditions' melt area (`CrustComposition::of`); `None` where the pass took no lid.
+#[must_use]
+fn record_crust(
+    lid: Option<&CrustLid>,
+    figures: &GlobalFigures,
+    conditions: &SurfaceConditions,
+) -> Option<CrustComposition> {
+    let crust = CrustComposition::of(
+        lid?,
+        &CrustRecord {
+            volcanism: figures.volcanism(),
+            continental_fraction: figures.continental_fraction(),
+            surface: conditions,
+        },
+    );
+    // The figures' volcanism and continental fraction lie in range: a refusal is a bug, which the
+    // tests' debug builds catch, and the crust is then not modelled.
+    debug_assert!(crust.is_ok(), "{crust:?}");
+    crust.ok()
 }
 
 /// What the conditions and condensates of the body `case` describes, of figures `figures` and bulk
@@ -4869,6 +5098,7 @@ fn surface_basis(
             ground: figures.partition_ground(bulk.surface_gravity()),
             heat_flow: figures.heat_flow(),
             ocean_weight: figures.ocean_weight(),
+            lid: None,
         };
     };
     let air = sky.atmosphere;
@@ -4895,6 +5125,7 @@ fn surface_basis(
         ground,
         heat_flow: context.heat_flow(),
         ocean_weight: spun.ocean_weight(),
+        lid: context.lid().map(|lid| lid.lithology),
     }
 }
 

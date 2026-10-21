@@ -74,7 +74,7 @@
 //! regolith at most 0.11, any other lid not known a row by its material; a body with no luminous
 //! host a Sun's light.
 
-use hyperion_surface::field::{LIQUID_BINS, LiquidProperties};
+use hyperion_surface::field::{LIQUID_BINS, LiquidProperties, MechanicsFamily};
 
 use crate::math;
 use crate::planetary::chem::partition::{
@@ -858,15 +858,16 @@ pub(crate) enum StandIn {
     /// ([`liquid_record`]). A solution's solvent read so keeps the solvent's label
     /// ([`StandIn::SolventForASolution`]).
     RecordAtItsFirstMelt,
-    /// An airless silicate regolith of a known lid takes at most the Moon's 0.11: space
-    /// weathering's stand-in until P14.T54.b weathers the area mix ([`airless_silicate_stand_in`]).
+    /// An airless regolith of a known lid whose row is of the `Silicate` family takes at most the
+    /// Moon's 0.11: space weathering's stand-in until P14.T54.b weathers the area mix
+    /// ([`airless_silicate_stand_in`], [`capped_lid`]).
     SpaceWeathering,
-    /// An airless rocky body whose lid is not known takes the Moon's 0.11 exactly (NASA's fact
-    /// sheet, T13.c's present value), until P14.T54.a passes T51.c's lid ([`Regolith::bond`]).
+    /// An airless rocky body whose lid is not known (the passes' first pass, the passes' stand-in
+    /// with no rotation law, a body with no crust) takes the Moon's 0.11 exactly (NASA's fact
+    /// sheet, T13.c's present value; [`Regolith::bond`]).
     MoonForAnUnknownAirlessLid,
     /// Any other regolith whose lid is not known takes a row by its bulk's material, T49.c's
-    /// `basalt` for rock and `H2O`'s fresh frost for ice, until P14.T54.a passes T51.c's lid
-    /// ([`Regolith::stand_in_row`]).
+    /// `basalt` for rock and `H2O`'s fresh frost for ice ([`Regolith::stand_in_row`]).
     RowByMaterial,
 }
 
@@ -899,16 +900,16 @@ impl StandIn {
                  range with no critical point) takes its own record at its first melt"
             }
             Self::SpaceWeathering => {
-                "an airless silicate regolith takes at most the Moon's 0.11, space weathering's \
-                 stand-in until P14.T54.b weathers the area mix"
+                "an airless regolith whose lid's row is silicate takes at most the Moon's 0.11, \
+                 space weathering's stand-in until P14.T54.b weathers the area mix"
             }
             Self::MoonForAnUnknownAirlessLid => {
-                "an airless rocky body whose lid is not known takes the Moon's 0.11, until \
-                 P14.T54.a passes T51.c's lid"
+                "an airless rocky body whose lid is not known (a first pass, a stand-in with no \
+                 rotation law, a body with no crust) takes the Moon's 0.11"
             }
             Self::RowByMaterial => {
-                "a regolith whose lid is not known takes basalt for rock and water frost for ice, \
-                 until P14.T54.a passes T51.c's lid"
+                "a regolith whose lid is not known (a first pass, a stand-in with no rotation \
+                 law, a body with no crust) takes basalt for rock and water frost for ice"
             }
         }
     }
@@ -1131,8 +1132,8 @@ fn moon_bond() -> f64 {
 }
 
 /// The space-weathering stand-in (decision-p14-t49c-split §1.5; plan 14, P14.T51.b): an airless
-/// body's silicate regolith of a known lid takes the smaller of its row's Bond albedo `row` and the
-/// Moon's 0.11
+/// body's regolith of a known lid whose row is of the `Silicate` family ([`capped_lid`]) takes the
+/// smaller of its row's Bond albedo `row` and the Moon's 0.11
 /// (NASA's fact sheet; T13.c's present value). A reference form is a fresh surface, and a fresh
 /// lithology would make an airless rocky body far too bright; so it never brightens an airless
 /// silicate body against today's value, and it lets an intrinsically dark row go darker. Labelled
@@ -1149,11 +1150,12 @@ pub(crate) fn airless_silicate_stand_in(row: f64) -> f64 {
 /// decision-p14-t51d-weathering).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum RegolithWeathering {
-    /// As the passes take it until P14.T54.b: an airless silicate regolith of a known lid takes the
-    /// space-weathering stand-in, the smaller of its row's Bond albedo and the Moon's 0.11
-    /// ([`airless_silicate_stand_in`], labelled), and of a lid not known the Moon's 0.11 exactly; an
-    /// icy regolith, or one under air, its row as it is ([`Regolith::bond`]). P14.T54.b deletes this
-    /// arm when it weathers the area mix with R10.T1.d's law.
+    /// As the passes take it until P14.T54.b: an airless regolith of a known lid whose row is
+    /// silicate takes the space-weathering stand-in, the smaller of its row's Bond albedo and the
+    /// Moon's 0.11 ([`airless_silicate_stand_in`], labelled), and an airless rocky body's of a lid
+    /// not known the Moon's 0.11 exactly; any other lid's row, or one under air, as it is
+    /// ([`Regolith::bond`]). P14.T54.b deletes this arm when it weathers the area mix with
+    /// R10.T1.d's law.
     StandIn,
     /// Weathered: its spherical albedos by bin, `spherical_bins`, which P14.T54.b computes from the
     /// row by R10.T1.d's law at P14.T51.d's maturity and rate, and which weigh by the host's bins
@@ -1174,25 +1176,27 @@ pub(crate) enum RegolithWeathering {
 
 /// The regolith on the surface a body's condensates leave (P14.T51.b): "the crust's regolith".
 ///
-/// Its row is an input of the area mix, a seam that P14.T54.a fills from T51.c's lid; until then
-/// the lid is not known and the passes take a stand-in by the material of the bulk their air reads
-/// ([`Regolith::of_material`], [`Regolith::bond`]). Its fields are private and its constructors
-/// name each case, so that a lid's row never sits unread under a weathered surface.
+/// Its row is an input of the area mix, a seam that P14.T54.a fills from T51.c's lid
+/// ([`Regolith::with_lid`]), which each pass over a record takes at its own climate; where the lid
+/// is not known (a first pass, the passes' stand-in, a body with no crust) the passes take a
+/// stand-in by the material of the bulk their air reads ([`Regolith::of_material`],
+/// [`Regolith::bond`]). Its fields are private and its constructors name each case, so that a
+/// lid's row never sits unread under a weathered surface.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Regolith {
     /// Its lid's row, T51.c's from P14.T54.a; `None` where the lid is not known, and on a weathered
     /// regolith, whose band albedos carry its row.
     row: Option<SubstanceId>,
-    /// The material of the body's bulk: rock is silicate, which the space-weathering stand-in
-    /// takes on an airless body.
+    /// The material of the body's bulk, which a lid not known reads: an airless rocky one takes
+    /// the Moon's 0.11, and the rest a row by it.
     material: SurfaceMaterial,
     /// How it is weathered.
     weathering: RegolithWeathering,
 }
 
 impl Regolith {
-    /// The passes' regolith of a body of `material` whose lid is not known, until P14.T54.a gives
-    /// them T51.c's, weathered by the stand-in.
+    /// The passes' regolith of a body of `material` whose lid is not known (a first pass, the
+    /// passes' stand-in, a body with no crust), weathered by the stand-in.
     #[must_use]
     pub(crate) const fn of_material(material: SurfaceMaterial) -> Self {
         Self {
@@ -1203,14 +1207,7 @@ impl Regolith {
     }
 
     /// The regolith of a known lid's row `row` on a body of `material`, weathered by the stand-in:
-    /// P14.T54.a's, from T51.c's lid.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "P14.T54.a passes T51.c's lid through it; the tests reach it now"
-        )
-    )]
+    /// P14.T54.a's, from T51.c's lid, which each pass over a record takes at its own climate.
     #[must_use]
     pub(crate) const fn with_lid(row: SubstanceId, material: SurfaceMaterial) -> Self {
         Self {
@@ -1261,12 +1258,19 @@ impl Regolith {
     /// Its Bond albedo on a body in the state `state` under the light `bands`, by its weathering:
     ///
     /// - weathered, its albedos by bin weighted by the light;
-    /// - under the stand-in, on an airless rocky body the smaller of its known lid's row's albedo
-    ///   and the Moon's 0.11 ([`airless_silicate_stand_in`]), or the Moon's 0.11 exactly where its
-    ///   lid is not known, so that the stand-in neither brightens nor darkens a body whose lid the
-    ///   passes do not know (decision-p14-t49c-split §1.5); on any other body its lid's row as it
-    ///   is, or where the lid is not known the row by its material ([`Regolith::stand_in_row`]),
-    ///   each labelled.
+    /// - under the stand-in, of a known lid: on an airless body whose lid's row is of the
+    ///   `Silicate` family ([`capped_lid`]) the smaller of its row's albedo and the Moon's 0.11
+    ///   ([`airless_silicate_stand_in`]), and otherwise its row as it is, so that an airless
+    ///   water-ice lid (Europa's, on a rocky bulk) keeps its frost and an `Organic` one (a comet's)
+    ///   its darkness, while Ceres's `phyllosilicate` and Mercury's `basalt_reduced` take the cap
+    ///   (decision-p14-t54a-passes §3.4; decision-pre-23-review item 16);
+    /// - under the stand-in, of a lid not known (the passes' first pass, the passes' stand-in, a
+    ///   body with no crust): on an airless rocky body the Moon's 0.11 exactly, so that the
+    ///   stand-in neither brightens nor darkens a body whose lid the passes do not know
+    ///   (decision-p14-t49c-split §1.5), and on any other the row by its material
+    ///   ([`Regolith::stand_in_row`]), each labelled.
+    ///
+    /// The one predicate the passes, the record and P14.T51.i's cold traps' bare regolith read.
     #[must_use]
     pub(crate) fn bond(&self, state: SurfaceState, bands: &[f64; OPTICS_BANDS]) -> Component {
         if let RegolithWeathering::Weathered { spherical_bins } = self.weathering {
@@ -1275,23 +1279,37 @@ impl Regolith {
                 stand_in: None,
             };
         }
-        let airless_rock = state == SurfaceState::Airless && self.material == SurfaceMaterial::Rock;
-        match (self.row, airless_rock) {
-            (Some(row), true) => Component {
+        let airless = state == SurfaceState::Airless;
+        match self.row {
+            Some(row) if capped_lid(row, state) => Component {
                 bond: airless_silicate_stand_in(solid_bond(row, bands).bond),
                 stand_in: Some(StandIn::SpaceWeathering),
             },
-            (Some(row), false) => solid_bond(row, bands),
-            (None, true) => Component {
+            Some(row) => solid_bond(row, bands),
+            None if airless && self.material == SurfaceMaterial::Rock => Component {
                 bond: moon_bond(),
                 stand_in: Some(StandIn::MoonForAnUnknownAirlessLid),
             },
-            (None, false) => Component {
+            None => Component {
                 bond: solid_bond(Self::stand_in_row(self.material), bands).bond,
                 stand_in: Some(StandIn::RowByMaterial),
             },
         }
     }
+}
+
+/// Whether a known lid's row `row` on a body in the state `state` takes the space-weathering
+/// stand-in's cap ([`airless_silicate_stand_in`]): an airless body whose lid's row is of the
+/// `Silicate` mechanics family (decision-p14-t54a-passes §3.4, the six points' item 4). Keyed on
+/// the lid's row, not the bulk's material, so that an airless water-ice lid on a rocky bulk
+/// (Europa's) keeps its frost, and a `phyllosilicate` lid on an icy bulk (Ceres's) takes the cap.
+#[must_use]
+pub(crate) fn capped_lid(row: SubstanceId, state: SurfaceState) -> bool {
+    state == SurfaceState::Airless
+        && row
+            .substance()
+            .condensed()
+            .is_some_and(|condensed| condensed.mechanics() == MechanicsFamily::Silicate)
 }
 
 /// The surface's Bond albedo, beneath any cloud: Σ over the published condensates `condensates`

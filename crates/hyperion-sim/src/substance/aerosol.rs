@@ -968,8 +968,8 @@ mod tests {
 
     /// Nothing on the record reads the aerosol extinction before P14.T54.b, its bump
     /// (decision-bump-plan-after-22 §1.3): no code of the crate's `src/` outside this module and
-    /// its seven tables names [`API_PATTERNS`], every file read in sorted order by
-    /// `substance::thermal`'s tripwire's walk, but each inline test module, every file an
+    /// its seven tables names [`API_PATTERNS`], every file read in sorted order by the substance
+    /// tripwires' walk (`substance::thermal`'s tests'), but each inline test module, every file an
     /// out-of-line test module declares, [`DECLARATIONS`] and [`HELD`]'s files (none). **P14.T54.b
     /// deletes this tripwire** when P14.T52.c and T24.c first read it.
     #[test]

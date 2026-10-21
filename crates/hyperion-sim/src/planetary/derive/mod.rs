@@ -119,8 +119,8 @@ use crate::orbit::KeplerElements;
 use crate::planetary::chem::inventory::{ElementInventory, InventoryInputs, element_inventory};
 use crate::planetary::derive::atmosphere::{
     AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Gas, Insolation, PassLight, PassSurface,
-    SpunClimate, SurfaceMaterial, VolatileDraws, VolatileInventory, atmosphere_under,
-    energy_limited_loss, formation_temperature,
+    SpunClimate, SurfaceMaterial, VolatileDraws, VolatileInventory, atmosphere_and_lid,
+    energy_limited_loss, formation_temperature, nitrogen_boosted,
 };
 use crate::planetary::derive::composition::{
     SolveCompositionError, dry_composition, formed_with_envelope,
@@ -130,13 +130,16 @@ use crate::planetary::derive::habitable_zone::HabitableLimit;
 use crate::planetary::derive::irradiation::luminosity_flux;
 use crate::planetary::derive::limits::TidalPlanet;
 use crate::planetary::derive::pass_record::{
-    PassBulk, PassContext, PassRecord, PassRecordOf, WaterGate,
+    InertiaLid, PassBulk, PassContext, PassRecord, PassRecordOf, RecordCrust, WaterGate,
 };
 use crate::planetary::derive::passes::Convergence;
-use crate::planetary::derive::photometry::area_mix::{self, HostShade, HostShadeSum, ShadeBook};
+use crate::planetary::derive::photometry::area_mix::{
+    self, HostShade, HostShadeSum, Regolith, ShadeBook,
+};
 use crate::planetary::derive::rotation::tides;
 use crate::planetary::disc::DiscProfile;
-use crate::planetary::hooks::surface::OceanWeight;
+use crate::planetary::hooks::crust::{AmmoniaIce, CrustBasis, CrustBasisInputs, CrustLid};
+use crate::planetary::hooks::surface::{COSMIC_BACKGROUND_TEMPERATURE, OceanWeight};
 use crate::planetary::params::{
     GAS_GIANT_ENVELOPE_FRACTION, ICE_GIANT_MASS, ICY_WATER_FRACTION, THIN_ENVELOPE_FRACTION,
 };
@@ -703,6 +706,7 @@ pub struct DerivedBody {
     atmosphere_passes: u32,
     convergence: Convergence,
     spun: Option<SpunPasses>,
+    crust_lid: Option<CrustLid>,
     regolith_albedo: f64,
     internal_luminosity: Watts,
     radius: EarthRadii,
@@ -859,13 +863,24 @@ impl DerivedBody {
     }
 
     /// The Bond albedo of the body's bare regolith about its hosts' bands, airless (P14.T51.i): the
-    /// passes' regolith row (T51.b's `Regolith`, its lid not known until P14.T54.a, weathered by the
-    /// stand-in until P14.T54.b) on an airless body, which its cold traps' flat ground and shadows
-    /// read, so that their field does not move with the area mix (decision-p14-t51-batch §6).
-    /// Dimensionless, 0 to 1.
+    /// published pass's regolith row (T51.b's `Regolith`, its lid's from P14.T54.a, or its
+    /// material's where no lid is known, weathered by the stand-in until P14.T54.b) on an airless
+    /// body, by the area mix's one predicate for the space-weathering cap (`capped_lid`), which its
+    /// cold traps' flat ground and shadows read, so that their field does not move with the area
+    /// mix (decision-p14-t51-batch §6). Dimensionless, 0 to 1.
     #[must_use]
     pub(crate) const fn regolith_albedo(&self) -> f64 {
         self.regolith_albedo
+    }
+
+    /// The published pass's lid (P14.T54.a; decision-pre-23-review item 17): its crust's lid at
+    /// its own climate, whose row its regolith read, and from which the record's crust is built
+    /// (`CrustComposition::of`), so that the record's lid is the row the last pass read, to the
+    /// bit. `None` over the passes' stand-in, for a body with no crust's basis, and where the
+    /// published pass took no lid (one under C₀, or a gas envelope).
+    #[must_use]
+    pub(crate) const fn crust_lid(&self) -> Option<&CrustLid> {
+        self.crust_lid.as_ref()
     }
 
     /// The body's atmosphere and surface at the time (P14.T13).
@@ -1328,6 +1343,7 @@ pub(crate) fn derive_body_driven(
         internal_luminosity,
         radius: Metres::new(r),
         age: age_now,
+        formed,
     }
     .passes(driver, record);
     let (passes, regolith_albedo) = passes;
@@ -1358,6 +1374,7 @@ pub(crate) fn derive_body_driven(
         atmosphere_passes: passes.count,
         convergence: passes.convergence,
         spun: passes.spun,
+        crust_lid: passes.crust_lid,
         regolith_albedo,
         internal_luminosity,
         radius,
@@ -1585,8 +1602,8 @@ pub(crate) const ATMOSPHERE_CONVERGENCE: f64 = 1e-9;
 
 /// What each of T12's and T13's passes reads of a body (P14.T13.c): its placement, its sky, the
 /// bulk its air reads, its bulk at the time (which its record's bulk rule reads, P14.T54.a), its
-/// class (which a gas envelope's albedo reads), its crust, its own luminosity and radius, and its
-/// age.
+/// class (which a gas envelope's albedo reads), its crust, its own luminosity and radius, its age,
+/// and the side of the snow line it formed on (which its crust's basis reads, P14.T54.a).
 #[derive(Debug, Clone, Copy)]
 struct PassBody<'a> {
     placed: &'a PlacedBody,
@@ -1598,11 +1615,13 @@ struct PassBody<'a> {
     internal_luminosity: Watts,
     radius: Metres,
     age: Years,
+    formed: SnowLineSide,
 }
 
 /// What the passes leave (P14.T13.c, P14.T51.b, P14.T51.h): the albedo the published pass read,
 /// its equilibrium and heated temperatures and its atmosphere, how many passes were taken and how
-/// they ended, and over a record what its record reads of them (P14.T54.a).
+/// they ended, and over a record what its record reads of them and the published pass's lid
+/// (P14.T54.a).
 #[derive(Debug, Clone, Copy)]
 struct Passes {
     albedo: BondAlbedo,
@@ -1612,6 +1631,7 @@ struct Passes {
     count: u32,
     convergence: Convergence,
     spun: Option<SpunPasses>,
+    crust_lid: Option<CrustLid>,
 }
 
 /// What a body's passes over its record leave for its record (P14.T54.a; decision-p14-t54a-passes,
@@ -1652,14 +1672,16 @@ impl SpunPasses {
     }
 }
 
-/// One pass's output: its equilibrium and heated temperatures and its atmosphere.
-type PassOut = (Kelvin, Kelvin, Atmosphere);
+/// One pass's output: its equilibrium and heated temperatures, its atmosphere, and the lid it took
+/// under the body's own climate (P14.T54.a), `None` where it took none.
+type PassOut = (Kelvin, Kelvin, Atmosphere, Option<CrustLid>);
 
 impl PassBody<'_> {
     /// One pass at the albedo `albedo` over the surface `surface`: the equilibrium temperature it
-    /// gives, the temperature with the body's own heat, and the atmosphere they hold.
+    /// gives, the temperature with the body's own heat, the atmosphere they hold, and under the
+    /// body's own climate the lid it takes, whose row its regolith read.
     #[must_use]
-    fn pass(&self, surface: &PassSurface<'_>, albedo: BondAlbedo) -> (Kelvin, Kelvin, Atmosphere) {
+    fn pass(&self, surface: &PassSurface<'_>, albedo: BondAlbedo) -> PassOut {
         let (sky, bulk) = (self.sky, self.bulk);
         let irradiated = equilibrium_temperature(sky.flux, albedo);
         let heated = if self.internal_luminosity > Watts::ZERO {
@@ -1686,8 +1708,45 @@ impl PassBody<'_> {
             age: self.age,
             hottest_host: sky.hottest,
         };
-        let air = atmosphere_under(&inputs, surface);
-        (irradiated, heated, air)
+        let (air, lid) = atmosphere_and_lid(&inputs, surface);
+        (irradiated, heated, air, lid)
+    }
+
+    /// The body's crust's basis (P14.T51.c's first stage; decision-p14-t54a-passes §3.3), once a
+    /// body before any pass, from what its record gives (`record`) and what its derivation does:
+    /// its age, its magma ocean's end, its formation's side of the snow line (a host orbiter's; a
+    /// moon's comes from its record), its ice's ammonia, its mantle's ΔIW, and the thermal
+    /// history's surface temperature, the formation temperature's stand-in: the first pass's own
+    /// equilibrium temperature, at the albedo it reads ([`BondAlbedo::BEFORE_ATMOSPHERES`], 0.3), a
+    /// pure function of the sky, whatever the tide, held at the cosmic background's 2.725 K
+    /// ([`COSMIC_BACKGROUND_TEMPERATURE`]), below which no surface lies: only a body no host
+    /// lights (a remnant's system) reaches it. `None` for a basis refused: a formation time after
+    /// its age (a body seen before its own window ends), which takes no crust.
+    #[must_use]
+    fn crust_basis(&self, record: &RecordCrust) -> Option<CrustBasis> {
+        let stand_in = equilibrium_temperature(self.sky.flux, BondAlbedo::BEFORE_ATMOSPHERES);
+        let formation_temperature = if stand_in < COSMIC_BACKGROUND_TEMPERATURE {
+            COSMIC_BACKGROUND_TEMPERATURE
+        } else {
+            stand_in
+        };
+        let inputs = CrustBasisInputs {
+            origin: record.origin,
+            formation: record.formation,
+            age: self.age,
+            molten_until: self.placed.molten_until,
+            radius: record.radius,
+            mass: record.mass,
+            fractions: record.fractions,
+            snow_line_side: record.snow_line_side.unwrap_or(self.formed),
+            ammonia: self.bulk.ammonia,
+            delta_iw: self.bulk.elements.mantle_delta_iw(),
+            host_magnesium_to_silicon: record.host_magnesium_to_silicon,
+            alpha_fe: record.alpha_fe,
+            fe_h: record.fe_h,
+            formation_temperature,
+        };
+        CrustBasis::derive(&inputs).ok()
     }
 
     /// The passes, from the 0.3 of [`BondAlbedo::BEFORE_ATMOSPHERES`], each taking the albedo the
@@ -1705,21 +1764,25 @@ impl PassBody<'_> {
     ///   labelled C₀ ([`PassContext::NONE`]), so a pass is a function of the albedo and the context
     ///   it reads ([`passes::solve_in_context`]).
     ///
-    /// Beside them, the bare regolith's Bond albedo the cold traps read (P14.T51.i): the passes'
-    /// regolith provider on the airless state under the hosts' light.
+    /// Beside them, the bare regolith's Bond albedo the cold traps read (P14.T51.i): the published
+    /// pass's regolith on the airless state under the hosts' light, its lid's row where it took
+    /// one and the passes' regolith provider's otherwise.
     #[must_use]
     fn passes(&self, driver: PassDriver, record: PassRecord<'_>) -> (Passes, f64) {
         let shade = &self.sky.shade;
         let surface = PassSurface::stand_in(PassLight::Shade(shade));
-        // The bare regolith the cold traps read (P14.T51.i): the passes' row on an airless body,
-        // under the hosts' light.
-        let regolith_albedo = (surface.regolith)(SurfaceMaterial::of(&self.bulk.fractions))
-            .bond(SurfaceState::Airless, shade.bands())
-            .bond;
         let ended = match record {
             PassRecord::StandIn => self.stand_in_passes(driver, &surface),
             PassRecord::Record(of) => self.record_passes(driver, of),
         };
+        // The bare regolith the cold traps read (P14.T51.i): the published pass's row on an
+        // airless body, under the hosts' light, by the area mix's one predicate.
+        let material = SurfaceMaterial::of(&self.bulk.fractions);
+        let regolith = ended.crust_lid.map_or_else(
+            || (surface.regolith)(material),
+            |lid| Regolith::with_lid(lid.row(), material),
+        );
+        let regolith_albedo = regolith.bond(SurfaceState::Airless, shade.bands()).bond;
         (ended, regolith_albedo)
     }
 
@@ -1731,10 +1794,10 @@ impl PassBody<'_> {
                 let solved = passes::solve(
                     BondAlbedo::BEFORE_ATMOSPHERES,
                     |albedo| self.pass(surface, albedo),
-                    |&(_, _, air): &PassOut| air.albedo(),
+                    |&(_, _, air, _): &PassOut| air.albedo(),
                     settled,
                 );
-                let (irradiated, heated, air) = solved.pass;
+                let (irradiated, heated, air, crust_lid) = solved.pass;
                 Passes {
                     albedo: solved.albedo,
                     irradiated,
@@ -1743,13 +1806,14 @@ impl PassBody<'_> {
                     count: solved.count,
                     convergence: solved.convergence,
                     spun: None,
+                    crust_lid,
                 }
             }
             #[cfg(test)]
             PassDriver::T51b => self.t51b_passes(surface),
             #[cfg(test)]
             PassDriver::Once(albedo) => {
-                let (irradiated, heated, air) = self.pass(surface, albedo);
+                let (irradiated, heated, air, crust_lid) = self.pass(surface, albedo);
                 Passes {
                     albedo,
                     irradiated,
@@ -1758,17 +1822,19 @@ impl PassBody<'_> {
                     count: 1,
                     convergence: Convergence::Converged,
                     spun: None,
+                    crust_lid,
                 }
             }
             #[cfg(test)]
             PassDriver::Again(_) => {
                 let solved = self.stand_in_passes(PassDriver::Solve, surface);
-                let (irradiated, heated, air) = self.pass(surface, solved.albedo);
+                let (irradiated, heated, air, crust_lid) = self.pass(surface, solved.albedo);
                 Passes {
                     irradiated,
                     heated,
                     air,
                     count: solved.count + 1,
+                    crust_lid,
                     ..solved
                 }
             }
@@ -1777,8 +1843,11 @@ impl PassBody<'_> {
 
     /// The passes over the record `of`, as `driver` drives them ([`passes`](Self::passes)): each
     /// pass's surface the body's own climate under its record's spin over the context it reads,
-    /// the context the next reads that pass's air's K(P) (`of`'s [`PassRecordOf::context`]), and
-    /// what the record reads of them ([`SpunPasses`]).
+    /// with its lid at its own climate from the body's crust's basis, built once here before any
+    /// pass ([`crust_basis`](Self::crust_basis)); the context the next reads that pass's air's K(P)
+    /// (`of`'s [`PassRecordOf::context`]) with that pass's own lid and `lid_of`'s unresurfaced test
+    /// on its own surface age ([`PassContext::with_lid`]); and what the record reads of them
+    /// ([`SpunPasses`], and the published pass's lid).
     ///
     /// # Panics
     ///
@@ -1788,24 +1857,39 @@ impl PassBody<'_> {
     fn record_passes(&self, driver: PassDriver, of: &dyn PassRecordOf) -> Passes {
         let record = of.spin(self.pass_bulk);
         let shade = &self.sky.shade;
+        // The crust's basis, once a body before any pass, whatever the tide (item 17's
+        // constraint 2): `body.formation`'s word 0 is read here, once a derivation.
+        let basis = of
+            .crust(self.pass_bulk)
+            .and_then(|crust| self.crust_basis(&crust));
+        #[cfg(test)]
+        let basis = basis.filter(|_| !NO_CRUST.with(core::cell::Cell::get));
         let surface = |context: &PassContext| SpunClimate {
             record,
             stellar_flux: WattsPerSquareMetre::from(self.sky.flux),
             xuv_flux: self.sky.xuv_flux,
             context: *context,
             inventory_water: self.pass_bulk.inventory_water,
+            basis,
         };
         let pass = |albedo: BondAlbedo, context: &PassContext| {
             let spun = surface(context);
             self.pass(&PassSurface::spun(&spun, PassLight::Shade(shade)), albedo)
         };
-        let next = |&(irradiated, _, air): &PassOut| of.context(self.pass_bulk, &air, irradiated);
+        let next = |&(irradiated, _, air, lid): &PassOut| {
+            let context = of.context(self.pass_bulk, &air, irradiated);
+            let unresurfaced = basis
+                .as_ref()
+                .zip(context.surface_age())
+                .map(|(basis, age)| basis.unresurfaced(age));
+            context.with_lid(lid.as_ref().map(InertiaLid::of), unresurfaced)
+        };
         let solve = || {
             let solved = passes::solve_in_context(
                 BondAlbedo::BEFORE_ATMOSPHERES,
                 PassContext::NONE,
                 pass,
-                |&(_, _, air): &PassOut| air.albedo(),
+                |&(_, _, air, _): &PassOut| air.albedo(),
                 next,
                 settled,
             );
@@ -1818,33 +1902,34 @@ impl PassBody<'_> {
                 solved.convergence,
             )
         };
-        let (albedo, (irradiated, heated, air), context, next, count, convergence) = match driver {
-            PassDriver::Solve => solve(),
-            #[cfg(test)]
-            PassDriver::T51b => unreachable!("P14.T51.b's loop is the stand-in's"),
-            #[cfg(test)]
-            PassDriver::Once(albedo) => {
-                let out = pass(albedo, &PassContext::NONE);
-                (
-                    albedo,
-                    out,
-                    PassContext::NONE,
-                    next(&out),
-                    1,
-                    Convergence::Converged,
-                )
-            }
-            #[cfg(test)]
-            PassDriver::Again(under) => {
-                let (albedo, _, read, given, count, convergence) = solve();
-                let context = match under {
-                    Under::Read => read,
-                    Under::Next => given,
-                };
-                let out = pass(albedo, &context);
-                (albedo, out, context, next(&out), count + 1, convergence)
-            }
-        };
+        let (albedo, (irradiated, heated, air, crust_lid), context, next, count, convergence) =
+            match driver {
+                PassDriver::Solve => solve(),
+                #[cfg(test)]
+                PassDriver::T51b => unreachable!("P14.T51.b's loop is the stand-in's"),
+                #[cfg(test)]
+                PassDriver::Once(albedo) => {
+                    let out = pass(albedo, &PassContext::NONE);
+                    (
+                        albedo,
+                        out,
+                        PassContext::NONE,
+                        next(&out),
+                        1,
+                        Convergence::Converged,
+                    )
+                }
+                #[cfg(test)]
+                PassDriver::Again(under) => {
+                    let (albedo, _, read, given, count, convergence) = solve();
+                    let context = match under {
+                        Under::Read => read,
+                        Under::Next => given,
+                    };
+                    let out = pass(albedo, &context);
+                    (albedo, out, context, next(&out), count + 1, convergence)
+                }
+            };
         let water = WaterGate::of_air(&air, self.pass_bulk.inventory_water, &record);
         let ocean_weight = context.ocean_weight(&water, air.partial_pressures().of(Gas::Water));
         Passes {
@@ -1859,6 +1944,7 @@ impl PassBody<'_> {
                 next,
                 ocean_weight,
             }),
+            crust_lid,
         }
     }
 
@@ -1869,15 +1955,15 @@ impl PassBody<'_> {
     #[must_use]
     fn t51b_passes(&self, surface: &PassSurface<'_>) -> Passes {
         let mut albedo = BondAlbedo::BEFORE_ATMOSPHERES;
-        let (mut irradiated, mut heated, mut air) = self.pass(surface, albedo);
+        let (mut irradiated, mut heated, mut air, mut crust_lid) = self.pass(surface, albedo);
         let mut count = 1;
         while count < 64 {
             let next = air.albedo();
-            let (now, warmed, held) = self.pass(surface, next);
+            let (now, warmed, held, lid) = self.pass(surface, next);
             count += 1;
             let change = (now.value() - irradiated.value()).abs();
             let settled = change <= ATMOSPHERE_CONVERGENCE * now.value();
-            (albedo, irradiated, heated, air) = (next, now, warmed, held);
+            (albedo, irradiated, heated, air, crust_lid) = (next, now, warmed, held, lid);
             if settled {
                 break;
             }
@@ -1890,8 +1976,28 @@ impl PassBody<'_> {
             count,
             convergence: Convergence::Converged,
             spun: None,
+            crust_lid,
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Whether the passes over a record take no crust's basis on this thread, so no lid: the
+    /// derivation before P14.T54.a's C3 wired the lid, its material's regolith and inertia (the
+    /// tests' measure of the lid's moves).
+    static NO_CRUST: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// `run`'s result with the passes over every record taking no lid, as before P14.T54.a's C3 (a
+/// test-only switch, set back after).
+#[cfg(test)]
+#[must_use]
+pub(crate) fn without_crust<R>(run: impl FnOnce() -> R) -> R {
+    let before = NO_CRUST.with(|cell| cell.replace(true));
+    let result = run();
+    NO_CRUST.with(|cell| cell.set(before));
+    result
 }
 
 /// Whether the pass `now` has settled against the pass `last` before it, by P14.T51.b's test: its
@@ -2134,6 +2240,10 @@ struct AirBulk {
     side: SnowLineSide,
     /// Its element inventory, whose carriers its atmosphere reads.
     elements: ElementInventory,
+    /// Whether its ice carries ammonia, as its crust's first melt reads it (P14.T51.c): P14.T50.c's
+    /// `nitrogen_boosted` at the formation temperature its volatiles formed at, the one its
+    /// nitrogen's boost reads.
+    ammonia: AmmoniaIce,
 }
 
 impl PlacedBody {
@@ -2177,12 +2287,18 @@ impl PlacedBody {
             draws: self.volatiles,
             age,
         });
+        let ammonia = if nitrogen_boosted(formation_temperature(formation_distance, snow_line)) {
+            AmmoniaIce::Carried
+        } else {
+            AmmoniaIce::Absent
+        };
         AirBulk {
             mass: Kilograms::from(mass),
             radius,
             fractions,
             side,
             elements,
+            ammonia,
         }
     }
 }

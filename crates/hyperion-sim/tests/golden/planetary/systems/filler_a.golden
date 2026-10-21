@@ -103,6 +103,9 @@ condensate: CO2, Supercritical, seasonal false
 reservoir_kg_m2 = 0x0000000000000000  # 0.0
 reservoir_gel_m = 0x0000000000000000  # 0.0
 area_fraction = 0x0000000000000000  # 0.0
+crust: lid Secondary; primary ultramafic, secondary komatiite, tertiary none, bulk none; provinces komatiite; Intermediate, RockMelted(MagmaOcean)
+melt_area_fraction = 0x3ff0000000000000  # 1.0
+peak_central_temperature_k: none
 envelope: NotApplicable
 body 0101 A b I: Moon(GiantImpact) about Some(Body(BodyIndex(256))), Unbound { at: UniverseTime { seconds: -56792117131135768, nanos: 0 } }
 mass_mearth = 0x3f61a851be737767  # 0.0021554562150489123
@@ -216,7 +219,7 @@ bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x4077f62606dabe23  # 383.38428388067604
 equator_pole_contrast_k = 0x4062f57e57a3cbaf  # 151.67167264930092
-day_night_contrast_k = 0x4076c37be7b7f50f  # 364.2177502809363
+day_night_contrast_k = 0x40764ee66ffe17d4  # 356.9312591481696
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40c00184e0223e1e  # 8195.038090019541
 continental_fraction = 0x0000000000000000  # 0.0
@@ -224,6 +227,9 @@ heat_flow_w_m2 = 0x3f652fe729fd04d9  # 0.002586318485470512
 surface_age_yr = 0x41dad10eaeb2f274  # 1799633594.7960482
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+crust: lid Secondary; primary none, secondary basalt_reduced, tertiary none, bulk none; provinces basalt_reduced; Reduced, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x40b47df9b46b288d  # 5245.97540921917
 envelope: NotApplicable
 body e102 BELT 1-2: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3ef797dde9ae9d0b  # 2.2500257368965537e-5
@@ -309,6 +315,9 @@ heat_flow_w_m2 = 0x3f58c79dd9e80232  # 0.0015124360576238669
 surface_age_yr = 0x41dad10eaeb2f274  # 1799633594.7960482
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+crust: lid Secondary; primary none, secondary basalt_reduced, tertiary none, bulk none; provinces basalt_reduced; Reduced, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x40bae52d955bcc35  # 6885.178060281139
 envelope: NotApplicable
 
 +H: 5 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
@@ -405,6 +414,9 @@ condensate: CO2, Supercritical, seasonal false
 reservoir_kg_m2 = 0x0000000000000000  # 0.0
 reservoir_gel_m = 0x0000000000000000  # 0.0
 area_fraction = 0x0000000000000000  # 0.0
+crust: lid Secondary; primary ultramafic, secondary komatiite, tertiary none, bulk none; provinces komatiite; Intermediate, RockMelted(MagmaOcean)
+melt_area_fraction = 0x3ff0000000000000  # 1.0
+peak_central_temperature_k: none
 envelope: NotApplicable
 body 0101 A b I: Moon(GiantImpact) about Some(Body(BodyIndex(256))), Unbound { at: UniverseTime { seconds: -56792117131135768, nanos: 0 } }
 mass_mearth = 0x3f61a851be737767  # 0.0021554562150489123
@@ -518,7 +530,7 @@ bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x4077f62606f59754  # 383.38428398069414
 equator_pole_contrast_k = 0x4062f57e57b909ed  # 151.67167268886934
-day_night_contrast_k = 0x4076c37be7d82331  # 364.2177504008169
+day_night_contrast_k = 0x40764ee6701ccb92  # 356.9312592625439
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40c00184e0223e1e  # 8195.038090019541
 continental_fraction = 0x0000000000000000  # 0.0
@@ -526,6 +538,9 @@ heat_flow_w_m2 = 0x3f652fe6a396051c  # 0.0025863175075647848
 surface_age_yr = 0x41dad10fa8b2f274  # 1799634594.7960482
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+crust: lid Secondary; primary none, secondary basalt_reduced, tertiary none, bulk none; provinces basalt_reduced; Reduced, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x40b47df9b472aca4  # 5245.975409667157
 envelope: NotApplicable
 body e102 BELT 1-2: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3ef797dde9ae9d0b  # 2.2500257368965537e-5
@@ -611,4 +626,7 @@ heat_flow_w_m2 = 0x3f58c79d3cb6b9f9  # 0.001512435485760853
 surface_age_yr = 0x41dad10fa8b2f274  # 1799634594.7960482
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+crust: lid Secondary; primary none, secondary basalt_reduced, tertiary none, bulk none; provinces basalt_reduced; Reduced, RockMelted(Radiogenic)
+melt_area_fraction = 0x0000000000000000  # 0.0
+peak_central_temperature_k = 0x40bae52d955bd4ad  # 6885.17806028311
 envelope: NotApplicable
