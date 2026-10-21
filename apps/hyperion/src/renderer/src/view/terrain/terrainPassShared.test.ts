@@ -19,13 +19,25 @@ import type { MemoryCategory } from "../engine/memory";
 import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
 import { TERRAIN_SETTINGS } from "../quality/qualitySetting";
 import { TERRAIN_COMPUTATION_FAILED, TERRAIN_NOT_AVAILABLE } from "./annunciation";
+import { coarseFineMorph } from "./coarseFineHolds";
 import { uvToSt, vertexDir, xyzToFaceUv } from "./cube";
 import { allocationTally } from "./gpu/allocationTally";
 import { normalsAtlasOf } from "./gpu/resources";
 import { INSTANCE_RECORD_BYTES, NO_PARENT_SLOT } from "./gpu/uniforms";
 import { craftContact, datumGroundUnder, finestPatchSizeM } from "./grounded";
-import { MAX_LEVEL, patchKeyString, type PatchKey } from "./patchKey";
-import { type PlanetGeometry, planetGeometry } from "./planet";
+import {
+  cornerNeighbours,
+  type Edge,
+  EDGES,
+  edgeNeighbour,
+  faceCoords,
+  facePoint,
+  MAX_LEVEL,
+  parentKey,
+  patchKeyString,
+  type PatchKey,
+} from "./patchKey";
+import { type PlanetGeometry, planetGeometry, surfacePoint } from "./planet";
 import { PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
 import { type PatchRequest, type Selection, type SelectionInput, selectPatches } from "./select";
 import { RESELECT_MOVE_FRACTION } from "./selectionTolerance";
@@ -1572,6 +1584,416 @@ describe("each view's own annunciation in one pass (the batch review's M2; decis
 
     it("leaves its view's annunciation clear", async () => {
       expect((await stepped()).frame.annunciation).toBeNull();
+    });
+  });
+});
+
+/** The 65 vertices along `edge` of a patch's grid: column x = 0 or 64, or row y = 0 or 64. */
+function edgeVertices(edge: Edge): Array<readonly [number, number]> {
+  const fixed = edge === "UMin" || edge === "VMin" ? 0 : 64;
+  const column = edge === "UMin" || edge === "UMax";
+  return Array.from({ length: 65 }, (_, n): readonly [number, number] =>
+    column ? [fixed, n] : [n, fixed],
+  );
+}
+
+/**
+ * A patch's corner vertices, in `cornerNeighbours`' order: towards (i − 1, j − 1), (i + 1, j − 1),
+ * (i + 1, j + 1) and (i − 1, j + 1).
+ */
+const CORNER_VERTICES: ReadonlyArray<readonly [number, number]> = [
+  [0, 0],
+  [64, 0],
+  [64, 64],
+  [0, 64],
+];
+
+/** The shader's CDLOD factor with no contact: clamp((d − start) ÷ (end − start), 0, 1). */
+function cdlodFactor([startM, endM]: readonly [number, number], distanceM: number): number {
+  const span = endM - startM;
+  return span > 0 ? Math.min(Math.max((distanceM - startM) / span, 0), 1) : 0;
+}
+
+/**
+ * The vertex of `to` at vertex (`x`, `y`) of `from`, `to` a patch of `from`'s level or coarser
+ * whose boundary or grid holds that place; throws where it is no vertex of `to`. By the integer
+ * lattice `sampleDir` builds its directions on, checked against them.
+ */
+function vertexOf(from: PatchKey, x: number, y: number, to: PatchKey): readonly [number, number] {
+  const quads = 64 * 2 ** from.level;
+  const p = facePoint(
+    from.face,
+    2 * (64 * from.i + x) - quads,
+    2 * (64 * from.j + y) - quads,
+    quads,
+  );
+  const toScale = 2 ** (to.level - from.level);
+  const [u, v] = faceCoords(to.face, [p[0] * toScale, p[1] * toScale, p[2] * toScale]);
+  const toQuads = 64 * 2 ** to.level;
+  const xt = (u + toQuads) / 2 - 64 * to.i;
+  const yt = (v + toQuads) / 2 - 64 * to.j;
+  const within = [xt, yt].every((c) => Number.isInteger(c) && c >= 0 && c <= 64);
+  if (!within || vertexDir(from, x, y).join() !== vertexDir(to, xt, yt).join()) {
+    throw new Error(
+      `(${x}, ${y}) of ${patchKeyString(from)} is no vertex of ${patchKeyString(to)}`,
+    );
+  }
+  return [xt, yt];
+}
+
+/** A drawn patch as a view's instance record gives it: its band and its morph holds. */
+interface DrawnRecord {
+  readonly key: PatchKey;
+  readonly keyString: string;
+  readonly bandM: readonly [number, number];
+  readonly holds: number;
+}
+
+/** The drawn patches view `id` (bit `bit` of the masks) drew at its last frame, by key string. */
+function drawnRecords(made: Made, id: ViewId, bit: number): Map<string, DrawnRecord> {
+  const drawSet = made.pass.lastStep?.drawSet;
+  if (drawSet === undefined) {
+    throw new Error("the pass did not select");
+  }
+  const bytes = recordBytes(made.engine, `terrain instances (${id})`).slice().buffer;
+  const u = new Uint32Array(bytes);
+  const f = new Float32Array(bytes);
+  const words = INSTANCE_RECORD_BYTES / 4;
+  const out = new Map<string, DrawnRecord>();
+  let n = 0;
+  drawSet.patches.forEach(({ keyString, patch }, index) => {
+    if (((drawSet.views[index] ?? 0) & (1 << bit)) === 0) {
+      return;
+    }
+    const at = n * words;
+    if (u[at + 3] !== patch.slot) {
+      throw new Error(`record ${n} of ${id} is not ${keyString}'s`);
+    }
+    n += 1;
+    out.set(keyString, {
+      key: patch.key,
+      keyString,
+      bandM: [f[at + 4] ?? Number.NaN, f[at + 5] ?? Number.NaN],
+      // The quadrant word's bits above its two.
+      holds: (u[at + 7] ?? 0) >>> 2,
+    });
+  });
+  if (n * words !== u.length) {
+    throw new Error(`${id} wrote ${u.length / words} records for ${n} drawn patches`);
+  }
+  return out;
+}
+
+/** What {@link morphSeams} found in one view. */
+interface MorphSeams {
+  /** Edges between a drawn patch and a drawn one a level coarser, counted from the fine side. */
+  readonly edges: number;
+  /** The coarse sides of those edges and of the corners below, by key string. */
+  readonly coarseSides: ReadonlySet<string>;
+  /** Each coarse–fine edge or corner whose fine side is not at k = 1 or coarse side not at 0. */
+  readonly breaches: string[];
+  /** Each vertex two drawn patches of one level share at which their morph factors differ. */
+  readonly parted: string[];
+}
+
+/**
+ * The seams between the drawn patches in view `id` (bit `bit`, camera `view`) at its last frame,
+ * by the shader's morph factor at the flat bakes' vertices (height 0), the holds its records carry
+ * applied (`coarseFineMorph`). At each edge and corner a drawn patch shares with one a level
+ * coarser, the fine side's vertices must be at k = 1, and the coarse side's at the fine side's even
+ * ones at k = 0, so that both lie on the coarse level's surface; and two drawn patches of one level
+ * must agree at every vertex they share.
+ */
+function morphSeams(
+  made: Made,
+  id: ViewId,
+  bit: number,
+  view: TerrainView,
+  holds: "held" | "bands alone" = "held",
+): MorphSeams {
+  const drawn = drawnRecords(made, id, bit);
+  const camera = view.cameraM;
+  const kAt = (record: DrawnRecord, x: number, y: number): number => {
+    const [px, py, pz] = surfacePoint(PLANET.figure, vertexDir(record.key, x, y), 0);
+    const distanceM = Math.hypot(px - camera.x, py - camera.y, pz - camera.z);
+    const k = cdlodFactor(record.bandM, distanceM);
+    return holds === "held" ? coarseFineMorph(record.holds, x, y, k) : k;
+  };
+  const drawnAt = (key: PatchKey | null): DrawnRecord | undefined =>
+    key === null ? undefined : drawn.get(patchKeyString(key));
+  // The fine side's least k and the coarse side's greatest over `vertices` of `fine`, or null where
+  // both hold.
+  const breachOf = (
+    fine: DrawnRecord,
+    coarse: DrawnRecord,
+    vertices: ReadonlyArray<readonly [number, number]>,
+  ): string | null => {
+    let fineMin = 1;
+    let coarseMax = 0;
+    for (const [x, y] of vertices) {
+      fineMin = Math.min(fineMin, kAt(fine, x, y));
+      if (x % 2 === 0 && y % 2 === 0) {
+        const [xc, yc] = vertexOf(fine.key, x, y, coarse.key);
+        coarseMax = Math.max(coarseMax, kAt(coarse, xc, yc));
+      }
+    }
+    return fineMin === 1 && coarseMax === 0
+      ? null
+      : `${fine.keyString} beside ${coarse.keyString}: fine k ≥ ${fineMin.toFixed(3)}, coarse k ≤ ${coarseMax.toFixed(3)}`;
+  };
+  // The vertices of `vertices` of `a` at which `b`, of its level, has another morph factor.
+  const partedAt = (
+    a: DrawnRecord,
+    b: DrawnRecord,
+    vertices: ReadonlyArray<readonly [number, number]>,
+  ): string[] =>
+    vertices.flatMap(([x, y]) => {
+      const [xb, yb] = vertexOf(a.key, x, y, b.key);
+      const [ka, kb] = [kAt(a, x, y), kAt(b, xb, yb)];
+      return ka === kb
+        ? []
+        : [`${a.keyString} (${x}, ${y}) at ${ka} beside ${b.keyString} at ${kb}`];
+    });
+  let edges = 0;
+  const coarseSides = new Set<string>();
+  const breaches: string[] = [];
+  const parted: string[] = [];
+  for (const fine of drawn.values()) {
+    const across = new Set<string>();
+    for (const edge of EDGES) {
+      const neighbour = edgeNeighbour(fine.key, edge);
+      const same = drawnAt(neighbour);
+      if (same !== undefined) {
+        parted.push(...partedAt(fine, same, edgeVertices(edge)));
+      }
+      const coarse = drawnAt(parentKey(neighbour));
+      if (coarse === undefined) {
+        continue;
+      }
+      edges += 1;
+      across.add(coarse.keyString);
+      coarseSides.add(coarse.keyString);
+      const breach = breachOf(fine, coarse, edgeVertices(edge));
+      if (breach !== null) {
+        breaches.push(`${breach} (${edge})`);
+      }
+    }
+    cornerNeighbours(fine.key).forEach((diagonal, c) => {
+      const vertex = CORNER_VERTICES[c];
+      if (diagonal === null || vertex === undefined) {
+        return;
+      }
+      const same = drawnAt(diagonal);
+      if (same !== undefined) {
+        parted.push(...partedAt(fine, same, [vertex]));
+      }
+      const coarse = drawnAt(parentKey(diagonal));
+      if (coarse === undefined || across.has(coarse.keyString)) {
+        return;
+      }
+      coarseSides.add(coarse.keyString);
+      const breach = breachOf(fine, coarse, [vertex]);
+      if (breach !== null) {
+        breaches.push(`${breach} (corner ${vertex.join(", ")})`);
+      }
+    });
+  }
+  return { edges, coarseSides, breaches, parted };
+}
+
+/** The draw set's conditions and each view's seams. */
+function seamsOf(made: Made, views: ReadonlyArray<TerrainPassView>): unknown {
+  const step = made.pass.lastStep;
+  return {
+    limited: step?.selection.limited,
+    missing: step?.drawSet.missing,
+    views: views.map(({ id, view }, bit) => {
+      const found = morphSeams(made, id, bit, view);
+      return { id, edged: found.edges > 0, breaches: found.breaches, parted: found.parted };
+    }),
+  };
+}
+
+/** {@link seamsOf}'s outcome where every seam holds. */
+function shut(views: ReadonlyArray<TerrainPassView>): unknown {
+  return {
+    limited: false,
+    missing: 0,
+    views: views.map(({ id }) => ({ id, edged: true, breaches: [], parted: [] })),
+  };
+}
+
+/** The stepped seams' outcome (`settledSeams`) where every seam holds and nothing stands in. */
+function settledShut(views: ReadonlyArray<TerrainPassView>): unknown {
+  return { standingIn: 0, seams: shut(views) };
+}
+
+describe("the morph at every coarse–fine edge in each view of a shared pass (R10.T8.c; decision-r10-t16-leans §9)", () => {
+  /** A camera `heightM` above the north pole, `tiltRad` from straight down, `widthPx` wide at 16:9. */
+  function tilted(heightM: number, tiltRad: number, widthPx = 640): TerrainView {
+    return {
+      ...northPole(heightM),
+      orientation: lookAlong(
+        { x: Math.sin(tiltRad), y: 0, z: -Math.cos(tiltRad) },
+        { x: Math.cos(tiltRad), y: 0, z: Math.sin(tiltRad) },
+      ),
+      viewport: { widthPx, heightPx: (widthPx * 9) / 16 },
+    };
+  }
+
+  // 20 km up, about 29° from straight down: the primary alone draws coarse–fine edges, each of
+  // whose coarse sides its own bands leave at k = 0.
+  const pose = tilted(20_000, 0.5);
+  /** The pose at a quarter of its width: its bands a quarter as far, as at τ × 4. */
+  const narrow = tilted(20_000, 0.5, 160);
+  /** Four times as high on the same line of sight from the pole. */
+  const higher = tilted(80_000, 0.5);
+
+  /** Steps `made` over `views` and bakes its demand but `withheld`, until it asks for no more. */
+  function settledWithout(
+    made: Made,
+    views: ReadonlyArray<TerrainPassView>,
+    withheld: string | null,
+  ): void {
+    for (let n = 0; n < 60; n += 1) {
+      made.pass.step({ views, grounded: [] });
+      const due = made.lane().demand.filter((r) => patchKeyString(r.key) !== withheld);
+      for (const request of due) {
+        made.lane().deliver(made.pass, request.key);
+      }
+      if (due.length === 0) {
+        break;
+      }
+    }
+    made.pass.step({ views, grounded: [] });
+    for (const { id, view } of views) {
+      made.pass.drawFor(id, frameOf(view));
+    }
+  }
+
+  /** A pass settled over `views` and drawn, its lane baking all but `withheld`, and its inputs. */
+  async function settledDrawn(
+    views: ReadonlyArray<TerrainPassView>,
+    withheld: string | null = null,
+  ): Promise<{ readonly made: Made; readonly input: SelectionInput }> {
+    const inputs: SelectionInput[] = [];
+    const made = await sharedPass("high", { onSelect: (input) => inputs.push(input) });
+    settledWithout(made, views, withheld);
+    const input = inputs.at(-1);
+    if (input === undefined) {
+      throw new Error("the pass did not select");
+    }
+    return { made, input };
+  }
+
+  /**
+   * The coarse–fine edges and corners of a pass settled over `views` whose seam the views' bands
+   * alone would break, view by view (the holds' control: without it, the cases would not test them).
+   */
+  async function unheldBreaches(
+    views: ReadonlyArray<TerrainPassView>,
+    withheld: string | null = null,
+  ): Promise<number[]> {
+    const { made } = await settledDrawn(views, withheld);
+    return views.map(
+      ({ id, view }, bit) => morphSeams(made, id, bit, view, "bands alone").breaches.length,
+    );
+  }
+
+  /** {@link seamsOf} of a pass settled over `views` with nothing standing in. */
+  async function settledSeams(views: ReadonlyArray<TerrainPassView>): Promise<unknown> {
+    const { made } = await settledDrawn(views);
+    return { standingIn: made.pass.lastStep?.drawSet.standingIn, seams: seamsOf(made, views) };
+  }
+
+  it("draws in an instrument at the primary's pose, a quarter as wide, patches its own selection would not select", async () => {
+    const views = [passView(PRIMARY, pose), passView(INSTRUMENT, narrow, SECONDARY_VIEW_WEIGHT)];
+    const { made, input } = await settledDrawn(views);
+    const instrument = input.views[1];
+    if (instrument === undefined) {
+      throw new Error("the instrument was not selected for");
+    }
+    const alone = selectPatches({ ...input, views: [instrument] });
+    const unwanted = [...drawnRecords(made, INSTRUMENT, 1).keys()].filter(
+      (keyString) => !alone.patches.has(keyString),
+    );
+    expect(unwanted.length).toBeGreaterThan(0);
+  });
+
+  it("keeps the fine side at k = 1 and the coarse side at k = 0 in both views, with an instrument at the primary's pose a quarter as wide", async () => {
+    const views = [passView(PRIMARY, pose), passView(INSTRUMENT, narrow, SECONDARY_VIEW_WEIGHT)];
+    expect(await settledSeams(views)).toEqual(settledShut(views));
+  });
+
+  it("leaves the coarse sides above k = 0 in an instrument a quarter as wide by the bands alone", async () => {
+    const views = [passView(PRIMARY, pose), passView(INSTRUMENT, narrow, SECONDARY_VIEW_WEIGHT)];
+    const [primary, instrument] = await unheldBreaches(views);
+    expect({ primary, instrumentBreaks: (instrument ?? 0) > 0 }).toEqual({
+      primary: 0,
+      instrumentBreaks: true,
+    });
+  });
+
+  it("keeps the fine side at k = 1 and the coarse side at k = 0 in both views, with an instrument four times as high", async () => {
+    const views = [passView(PRIMARY, pose), passView(INSTRUMENT, higher, SECONDARY_VIEW_WEIGHT)];
+    expect(await settledSeams(views)).toEqual(settledShut(views));
+  });
+
+  it("keeps the fine side at k = 1 and the coarse side at k = 0 in both views, with the primary four times as high as an instrument that refines its ground", async () => {
+    const views = [passView(PRIMARY, higher), passView(INSTRUMENT, pose, SECONDARY_VIEW_WEIGHT)];
+    expect(await settledSeams(views)).toEqual(settledShut(views));
+  });
+
+  it("keeps the fine side at k = 1 and the coarse side at k = 0 for the primary alone", async () => {
+    const views = [passView(PRIMARY, pose)];
+    expect(await settledSeams(views)).toEqual(settledShut(views));
+  });
+
+  it("keeps the fine side at k = 1 and the coarse side at k = 0 for the primary alone 1,000 km straight over the pole, where its own bands do not", async () => {
+    const views = [passView(PRIMARY, northPole(1_000_000))];
+    expect(await settledSeams(views)).toEqual(settledShut(views));
+  });
+
+  it("leaves the coarse sides above k = 0 for the primary alone 1,000 km over the pole by its bands alone", async () => {
+    const [primary] = await unheldBreaches([passView(PRIMARY, northPole(1_000_000))]);
+    expect(primary).toBeGreaterThan(0);
+  });
+
+  it("keeps the fine side at k = 1 and the coarse side at k = 0 beside a parent standing in for a patch not baked, for the primary alone", async () => {
+    const views = [passView(PRIMARY, pose)];
+    // The drawn patch nearest the camera, not baked, so that its parent stands in beside its
+    // neighbours, which are short of their bands' end there (k 0.23 to 0.36 at the shared edges).
+    const reference = (await settledDrawn(views)).made.pass.lastStep?.drawSet.patches ?? [];
+    const centreDistanceM = (key: PatchKey): number => {
+      const [px, py, pz] = surfacePoint(PLANET.figure, vertexDir(key, 32, 32), 0);
+      return Math.hypot(px - pose.cameraM.x, py - pose.cameraM.y, pz - pose.cameraM.z);
+    };
+    const withheld = reference
+      .map(({ patch }) => patch.key)
+      .toSorted((a, b) => centreDistanceM(a) - centreDistanceM(b))[0];
+    const standIn = withheld === undefined ? null : parentKey(withheld);
+    if (withheld === undefined || standIn === null) {
+      throw new Error("the pose draws no patch below a root");
+    }
+    const { made } = await settledDrawn(views, patchKeyString(withheld));
+    const drawn = made.pass.lastStep?.drawSet;
+    expect({
+      standingIn: (drawn?.standingIn ?? 0) > 0,
+      drawsTheStandIn: drawn?.patches.some(
+        ({ keyString }) => keyString === patchKeyString(standIn),
+      ),
+      standInIsCoarseSide: morphSeams(made, PRIMARY, 0, pose).coarseSides.has(
+        patchKeyString(standIn),
+      ),
+      // The control: the bands alone leave the fine side short of k = 1 beside the stand-in.
+      breaksByBandsAlone: morphSeams(made, PRIMARY, 0, pose, "bands alone").breaches.length > 0,
+      seams: seamsOf(made, views),
+    }).toEqual({
+      standingIn: true,
+      drawsTheStandIn: true,
+      standInIsCoarseSide: true,
+      breaksByBandsAlone: true,
+      seams: shut(views),
     });
   });
 });

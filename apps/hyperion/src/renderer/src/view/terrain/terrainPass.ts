@@ -24,8 +24,9 @@
  * {@link TerrainPassOptions.frustumMargin}'s `motion`, the terrain session's, each view's frustum
  * is opened for selection by its motion ({@link frustumMarginRad}). The morph bands are computed at
  * τ, raised where the budget binds ({@link effectiveTauPx}). The draw set is resolved when
- * selection runs, in place by one `DrawSetResolver` per cache, and each view's instance and contact
- * records are written every frame into buffers made once.
+ * selection runs, in place by one `DrawSetResolver` per cache, with its morph holds at its
+ * coarse–fine edges and corners (`CoarseFineHolds`, R10.T8.c), the same for every view, and each
+ * view's instance and contact records are written every frame into buffers made once.
  *
  * A body's pass follows its field as it grows (R10 Design note 16, as T6.b and T8.b built the
  * rebake rule): {@link TerrainPass.setLevels} takes each block's level table, and
@@ -92,6 +93,7 @@ import {
 } from "./annunciation";
 import { distanceToBoxM, relativeBounds } from "./bounds";
 import { type DrawSet, DrawSetResolver, PatchCache } from "./cache";
+import { CoarseFineHolds } from "./coarseFineHolds";
 import { terrainMaterialSpec } from "./gpu/material";
 import {
   DEFAULT_TERRAIN_VIEW,
@@ -499,6 +501,13 @@ interface Device {
   readonly cache: PatchCache;
   /** Resolves the cache's draw set in place, allocating nothing after warm-up (one per cache). */
   readonly resolver: DrawSetResolver;
+  /**
+   * The draw set's morph holds at its coarse–fine edges and corners, by drawn index, made with each
+   * selection's draw set (R10.T8.c).
+   */
+  readonly holds: CoarseFineHolds;
+  /** The drawn patches' keys the holds are made from, reused from selection to selection. */
+  readonly drawnKeys: PatchKey[];
   readonly pool: TerrainPool;
   readonly offBaked: () => void;
   readonly offFailed: () => void;
@@ -1329,6 +1338,8 @@ export class TerrainPass {
       resources: made,
       cache,
       resolver: new DrawSetResolver(cache),
+      holds: new CoarseFineHolds(layout.slots.slotCount),
+      drawnKeys: [],
       pool,
       offBaked: pool.onBaked((bake) => {
         this.#store(device, bake);
@@ -1739,6 +1750,15 @@ export class TerrainPass {
     // `retain` but not drawn.
     const drawSet = device.resolver.resolve(selection);
     device.cache.retain(selection, drawSet);
+    // The holds at the drawn set's coarse–fine edges, stand-ins included, the same for every view:
+    // each view's bands are its own, and need not leave the coarse side at k = 0 there, nor the
+    // fine side at 1 (decision-r10-t16-leans §9).
+    const keys = device.drawnKeys;
+    keys.length = 0;
+    for (const { patch } of drawSet.patches) {
+      keys.push(patch.key);
+    }
+    device.holds.update(keys);
     const grounded = input.grounded.map((c) => ({
       positionM: { ...c.positionM },
       radiusM: c.radiusM,
@@ -1798,10 +1818,12 @@ export class TerrainPass {
     const [r0, r1, r2] = input.view.rotation.rows;
     const drawSet = this.#selected?.drawSet;
     const wire = input.wire;
+    const { holds } = device.holds;
     instances.clear();
     phases?.clear();
     if (drawSet !== undefined) {
-      // `patches` holds exactly the `count` drawn patches (`DrawSetResolver`).
+      // `patches` holds exactly the `count` drawn patches (`DrawSetResolver`), and `holds` their
+      // morph holds in the same order (`#select`).
       for (let n = 0; n < drawSet.count; n += 1) {
         const drawn = drawSet.patches[n];
         if (drawn === undefined || ((drawSet.views[n] ?? 0) & mask) === 0) {
@@ -1820,6 +1842,7 @@ export class TerrainPass {
           morph[2 * level + 1] ?? 0,
           this.#parentSlotOf(device, patch.key),
           parentQuadrant(patch.key),
+          holds[n] ?? 0,
         );
         if (phases !== null && wire !== undefined) {
           this.#pushPhase(device, phases, drawn.keyString, patch.originM, wire);
@@ -1889,11 +1912,13 @@ export class TerrainPass {
   }
 
   /**
-   * The slot of `key`'s parent whose horizon map the patch's blends to by its morph factor
-   * (R10.T8.b; decision-r10-t8a §1), or {@link NO_PARENT_SLOT} where there is none to blend to: a
-   * root, a parent not resident, or one whose slot holds no map. R05's streaming gate splits only
-   * baked patches and `PatchCache.retain` pins the drawn patches' ancestors, so outside a forced
-   * region the parent is nearly always resident; inside one the grounded hold keeps the morph at 0.
+   * The slot of `key`'s parent whose horizon map and normals the patch's blend to by its morph
+   * factor (R10.T8.b, T8.c; decision-r10-t8a §1), or {@link NO_PARENT_SLOT} where there is none to
+   * blend to: a root, a parent not resident, or one whose slot holds no map (on the lit layout
+   * every bake holds its normals and its map, so the map stands for both). R05's streaming gate
+   * splits only baked patches and `PatchCache.retain` pins the drawn patches' ancestors, so outside
+   * a forced region the parent is nearly always resident; inside one the grounded hold keeps the
+   * morph at 0.
    */
   #parentSlotOf(device: Device, key: PatchKey): number {
     if (key.level === 0) {

@@ -692,7 +692,9 @@ re-checked against the cited source in that task, as the galaxy README's Figures
    agree. The forced-finest region (Design note 9) extends at least one finest patch beyond the
    ramp's end, so that wherever a finest patch meets a coarser neighbour the morph is already 1, as
    CDLOD's crack-freedom requires (researched 2026-09-29; no published precedent for the hold was
-   found, and it adds one term to CDLOD's own mechanism). Neighbouring patches differ by at most
+   found, and it adds one term to CDLOD's own mechanism). _As built by R10.T8.c: k is also held
+   at 0 and at 1 on the edges and corners where drawn patches of two levels meet, from the draw set,
+   alike in every view (plan 10's Risks, "Deviations in T8.c, as built")._ Neighbouring patches differ by at most
    one level, enforced across face edges. `finest_surface_height` is the collision interpolant: the
    finest level's vertex heights, interpolated on the mesh's own triangle diagonal, which is
    exactly what is drawn wherever the morph is zero.

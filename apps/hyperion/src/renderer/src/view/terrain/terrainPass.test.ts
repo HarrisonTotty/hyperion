@@ -1011,13 +1011,17 @@ function bodyLayers(): TerrainLayers {
   };
 }
 
-/** The parent slots and quadrants of the instance records last written. */
+/**
+ * The parent slots and quadrants of the instance records last written, each quadrant without the
+ * morph holds above its two bits (R10.T8.c).
+ */
 function writtenParents(engine: CountingRenderEngine): Array<readonly [number, number]> {
   const write = engine.writes.findLast((w) => w.buffer === "terrain instances");
   const u = new Uint32Array(write?.data.slice().buffer ?? new ArrayBuffer(0));
   const parents: Array<readonly [number, number]> = [];
   for (let i = 0; i < u.length / (INSTANCE_RECORD_BYTES / 4); i += 1) {
-    parents.push([u[i * 8 + 6] ?? -1, u[i * 8 + 7] ?? -1]);
+    const quadrant = u[i * 8 + 7];
+    parents.push([u[i * 8 + 6] ?? -1, quadrant === undefined ? -1 : quadrant & 3]);
   }
   return parents;
 }

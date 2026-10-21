@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import vertexGolden from "../../../../../../../../crates/hyperion-surface/tests/golden/vertex_f32.golden?raw";
 import { vec3 } from "../../../geometry/vec3";
+import { MAX_MORPH_HOLDS } from "../coarseFineHolds";
 import type { Face, PatchKey } from "../patchKey";
 import {
   CONTACT_RECORD_BYTES,
@@ -141,6 +142,24 @@ describe("an instance record", () => {
   it("refuses a quadrant past 3", () => {
     expect(() => {
       new InstanceRecords(1).push(3, vec3(0, 0, 0), 0, 1, 9, 4);
+    }).toThrow(RangeError);
+  });
+
+  it("carries the patch's morph holds above its quadrant's two bits, the record's size unchanged", () => {
+    const records = new InstanceRecords(2);
+    records.push(1, vec3(0, 0, 0), 0, 1, 9, 3, MAX_MORPH_HOLDS);
+    records.pushXyz(2, 0, 0, 0, 0, 1, 9, 2, 0b1_0000_0001);
+    const u = new Uint32Array(records.buffer);
+    expect([u[7], u[8 + 7], records.bytes().byteLength]).toEqual([
+      0x3_ffff,
+      (0b1_0000_0001 << 2) | 2,
+      2 * INSTANCE_RECORD_BYTES,
+    ]);
+  });
+
+  it("refuses morph holds past 16 bits", () => {
+    expect(() => {
+      new InstanceRecords(1).push(3, vec3(0, 0, 0), 0, 1, 9, 0, MAX_MORPH_HOLDS + 1);
     }).toThrow(RangeError);
   });
 

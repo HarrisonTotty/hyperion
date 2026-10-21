@@ -1,4 +1,7 @@
+import { readFile } from "node:fs/promises";
+
 import react from "@vitejs/plugin-react";
+import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 
 import pkg from "./package.json" with { type: "json" };
@@ -35,10 +38,41 @@ const DOM_TESTS = [
 // table is only ever compared.
 const BLESSING = process.env["HYPERION_BLESS"] === "1" && process.env["CI"] === undefined;
 
+// A binary asset imported `?inline`: the surface module, or a line absorber's k-distribution part.
+const INLINE_BINARY = /^(?<file>.+\.(?<extension>bin|wasm))\?inline$/u;
+
+// Serves a binary asset imported `?inline` as Vite does, a module whose default export is the
+// file's data URL, but with no source map. Vite's own gives the module a map whose
+// `sourcesContent` is the data URL again, and vitest inlines that map, as base64 once more, into
+// the code it sends a worker, so a part's bytes came to 1.33 times their size in the module's
+// code and 1.78 times more in its map, in vitest's own process and in the worker. Since R08.T4.e
+// the line absorbers' tests load 173 parts, 71 MB: with the maps, vitest's own process reached
+// 1.46 GB serving them, the suite's scope peaked at 4.0 to 4.2 GB, and `atomicTables.test.ts`
+// alone took 2.5 GB; without them, 1.1 GB, 2.7 GB for the files that load them and the rest of
+// the logic files, and 1.8 GB (2026-10-21). A data URL's map maps nothing worth reading, and
+// `{ mappings: "" }` is how a Vite plugin gives none.
+const inlineBinaryWithoutMap: Plugin = {
+  name: "hyperion:inline-binary-without-map",
+  enforce: "pre",
+  async load(id) {
+    const match = INLINE_BINARY.exec(id);
+    const file = match?.groups?.["file"];
+    if (file === undefined) {
+      return null;
+    }
+    this.addWatchFile(file);
+    const mime =
+      match?.groups?.["extension"] === "wasm" ? "application/wasm" : "application/octet-stream";
+    const url = `data:${mime};base64,${(await readFile(file)).toString("base64")}`;
+    return { code: `export default ${JSON.stringify(url)};\n`, map: { mappings: "" } };
+  },
+};
+
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
+  plugins: [inlineBinaryWithoutMap],
   // The surface module's test reads the built `.wasm` as an inlined asset (`?inline`), and the
   // line absorbers' tests their binary k-distribution parts (R08.T4.d), since renderer code, tests
   // included, reads no files through `node:fs` (R04.T10.c).
@@ -59,13 +93,18 @@ export default defineConfig({
     // for CPU-bound work, which the desktop's loads did not stall, and over twice the desktop's,
     // rounded up to 30, 60, 120 or 300 s.
     testTimeout: 15_000,
-    // Workers are reused across files instead of one being spawned per file, which vitest costed
-    // at about 2.9 s of spawn and environment each. With the split above, the suite goes from
-    // about 30 s to about 14 s. It gives up the isolation of the module registry and of the jsdom,
-    // so the suite has to be order-independent, which is a rule it already keeps:
-    // `vitest run --sequence.shuffle` passes. The shared setup clears what would otherwise carry
-    // from one file to the next. The logic files run isolated all the same, for memory (below).
-    isolate: false,
+    // Every file runs in a fresh worker, vitest's default, set here because the suite once ran
+    // without it. Reusing workers across files, giving up the isolation of the module registry and
+    // of the jsdom, took the suite from about 30 s to about 14 s (2026-09), but a shared worker
+    // keeps the high-water mark of every file it has run, since V8 and the C allocator keep the
+    // memory they grew, and its registry keeps every module the files imported. By 2026-10-20 the
+    // four held 0.6 to 1.3 GB each by the suite's end, and with vitest's own 1.1 GB the suite's
+    // scope peaked at 4.6 to 5.1 GB, against `_vitest-run`'s cap of 5 GB, which killed CI-167's
+    // suite. The logic files went first, at no cost in time (267 s against 297 s shared, at 4
+    // workers on a quiet machine), and the DOM files' shared workers then set the peak, at 3.4 to
+    // 3.6 GB (2026-10-21). Isolated, the DOM files' part of the suite peaks near 2.1 GB, for
+    // about 30 s more, a jsdom being set up for each file.
+    isolate: true,
     // A stylesheet imported for its effect is empty in a test, as Vitest makes every CSS file, so
     // that jsdom applies no layout rules; one imported as text (`?raw`) keeps its text, so that a
     // test can read a rule the guide requires, such as a plate's `--surface-0` (R07.T16.a).
@@ -76,18 +115,6 @@ export default defineConfig({
         test: {
           name: "logic",
           environment: "node",
-          // Each logic file runs in a fresh worker. A shared worker keeps the high-water mark of
-          // every file it has run, since V8 and the C allocator keep the memory they grew, and its
-          // module registry keeps every module the files imported: with these files' four workers
-          // shared, they held 0.6 to 1.3 GB each by the suite's end, and with vitest's own 1.1 GB
-          // the suite's scope peaked at 4.6 to 5.1 GB, against `_vitest-run`'s cap of 5 GB, which
-          // killed CI-167's suite (2026-10-20). Isolated, these files' part of the suite peaked at
-          // 2.2 to 3.0 GB, when its heaviest files ran together, and a Node worker costs so little
-          // to start that the suite took no longer: 267 s against 297 s shared, at 4 workers on a
-          // quiet machine. The DOM files' shared workers now set the suite's peak, at 3.2 to 3.5
-          // GB. Isolating them as well took that part to 2.1 GB but the suite to 317 s, a jsdom
-          // being set up for each file.
-          isolate: true,
           include: ["src/**/*.test.ts"],
           exclude: DOM_TESTS,
         },
