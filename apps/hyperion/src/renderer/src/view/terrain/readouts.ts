@@ -1443,11 +1443,13 @@ export function lineOfSightOf(
 
 /**
  * Why a view's line of sight cannot be formed, by {@link lineOfSightOf}'s three `null`s in its
- * order (plan R10, R10.T12.a; decision-r10-t12a-scope §3.2): the body's rotation not known
- * (`rotation`), the camera more than {@link MAX_SIGHT_M} from its centre (`far`), or within
- * {@link MIN_SIGHT_ORIGIN_M} of it (`centre`).
+ * order (plan R10, R10.T12.a; decision-r10-t12a-scope §3.2): the body's rotation not known, in
+ * the state its section is in, not modelled (`rotationNotModelled`) or not resolved, withheld by
+ * the granted detail level (`rotationNotResolved`; `ViewBody.rotationNotResolved`,
+ * rotation-not-resolved); the camera more than {@link MAX_SIGHT_M} from its centre (`far`); or
+ * within {@link MIN_SIGHT_ORIGIN_M} of it (`centre`).
  */
-export type SightGap = "rotation" | "far" | "centre";
+export type SightGap = "rotationNotModelled" | "rotationNotResolved" | "far" | "centre";
 
 /**
  * Where a view's line of sight starts, as {@link lineOfSightOf} and {@link sightGapOf} both read
@@ -1474,7 +1476,10 @@ type SightStart =
 function sightStartOf(pose: CameraPose, scene: ViewScene, body: ViewBody): SightStart {
   const rotation = body.rotation;
   if (rotation === null) {
-    return { kind: "gap", gap: "rotation" };
+    return {
+      kind: "gap",
+      gap: body.rotationNotResolved === true ? "rotationNotResolved" : "rotationNotModelled",
+    };
   }
   const centreM = relativeToCamera(
     { kind: "body", body: body.id, m: vec3(0, 0, 0) },
@@ -1524,11 +1529,20 @@ export function sightGapOf(pose: CameraPose, scene: ViewScene, body: ViewBody): 
 }
 
 /**
- * The readout's line where the body's rotation is not known, in whose axes it reads the ground:
- * the upper plate's `ROTATION: NOT YET MODELLED` as a cause (R10.T12.a; decision-r10-t12a-scope
- * §3.2).
+ * The readout's line where the body's rotation is not modelled, in whose axes it reads the
+ * ground: the upper plate's `ROTATION: NOT YET MODELLED` as a cause (R10.T12.a;
+ * decision-r10-t12a-scope §3.2). Where the granted detail level withholds the rotation, the line is
+ * {@link NO_SIGHT_ROTATION_NOT_RESOLVED}.
  */
 export const NO_SIGHT_ROTATION = "NOT AVAILABLE: ROTATION not yet modelled";
+
+/**
+ * The readout's line where the detail level granted to the console withholds the body's rotation,
+ * in whose axes it reads the ground: the upper plate's `ROTATION: NOT RESOLVED` as a cause, never
+ * read as not modelled (rotation-not-resolved). Where the rotation is not modelled, the line is
+ * {@link NO_SIGHT_ROTATION}.
+ */
+export const NO_SIGHT_ROTATION_NOT_RESOLVED = "NOT AVAILABLE: ROTATION not resolved";
 
 /** {@link MAX_SIGHT_M} in the view's range form, `6.68 AU` (10¹² m is 6.6846 AU). */
 const FARTHEST_SIGHT = formatBodyDistance(MAX_SIGHT_M / 1_000, null);
@@ -1555,8 +1569,11 @@ export const NO_SIGHT_CENTRE = "NOT AVAILABLE: camera at the body's centre";
 export function sightGapLine(gap: SightGap): string {
   let line: string;
   switch (gap) {
-    case "rotation":
+    case "rotationNotModelled":
       line = NO_SIGHT_ROTATION;
+      break;
+    case "rotationNotResolved":
+      line = NO_SIGHT_ROTATION_NOT_RESOLVED;
       break;
     case "far":
       line = NO_SIGHT_FAR;

@@ -102,11 +102,19 @@ export interface ViewBody {
   readonly presentVelocityMPerS?: Vec3;
   /**
    * Its rotation from body-fixed to body axes at the time it is drawn at, or `null` where rotation
-   * is not modelled: a server body's from its rotation section (plan R07, T2.b), at the frame's
-   * time for the ship's local body, drawn at the present, and at its light's emission for every
-   * other, drawn where it is seen.
+   * is not modelled or not resolved (see {@link ViewBody.rotationNotResolved}): a server body's
+   * from its rotation section (plan R07, T2.b), at the frame's time for the ship's local body,
+   * drawn at the present, and at its light's emission for every other, drawn where it is seen.
    */
   readonly rotation: Rotation3 | null;
+  /**
+   * Whether the body's rotation is not resolved (rotation-not-resolved; the guide's "Data states"):
+   * `true` exactly where a served body's rotation section is `not_resolved`, the detail level
+   * granted to the console withholding it, when {@link ViewBody.rotation} is `null`; absent where
+   * the rotation is given or not modelled (a `not_modelled` section, an older server's absent
+   * section, a star, and every kept scene's body), so that a reader never infers the state.
+   */
+  readonly rotationNotResolved?: true;
   /**
    * How it is shaded where the photorealistic style lights it (plan R07, T2.b): a server body's
    * figure, photometry and labels from plan 14's sections (`heldAppearanceOf`), or `null`, as for
@@ -116,8 +124,8 @@ export interface ViewBody {
   readonly appearance: WireAppearance | null;
   /**
    * The unit normal of its orbit, along the galactic axes, which stands for its pole while its
-   * rotation is not modelled (Design note 14); `null` where it has no orbit drawn from elements,
-   * when the frame's +z stands in.
+   * rotation is not modelled or not resolved (Design note 14); `null` where it has no orbit drawn
+   * from elements, when the frame's +z stands in.
    */
   readonly orbitNormal: Vec3 | null;
   /** Its mark from the ship-wide symbol set, drawn below 3 px (`lib/system/bodySymbols.ts`). */

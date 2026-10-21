@@ -11194,8 +11194,47 @@ src/renderer/src/view/terrain` under a 6 GB cap with four workers: 103 files, 2,
   - _`ROTATION: NOT YET MODELLED` conflates `NOT RESOLVED`_ (§7, 6): `fromServer.ts`' `rotationAt`
     maps every rotation section not `ok` to `null`, and the no-sight line inherits it. Owner:
     R02/R03's view scene.
+    _Fixed by rotation-not-resolved (main's ruling, 2026-10-20): `ViewBody.rotationNotResolved`
+    carries the withheld section, the upper plate states `ROTATION: NOT RESOLVED` and the readout
+    `NOT AVAILABLE: ROTATION not resolved`. No server shows it today: the rotation is withheld with
+    the bulk, which leaves the body no radius._
+    - _As built, the display test's fixture_ (rotation-not-resolved): the slice sends its Jupiter
+      no rotation section beside its bulk, so every served slice scene states
+      `ROTATION: NOT YET MODELLED` of its own. The display test of a withheld Earth
+      (`ViewDisplayTerrain.test.tsx`) gives its Jupiter the slice Earth's law
+      (`sliceSystemWithWithheldEarth`), so that its block states `ROTATION: NOT RESOLVED` and not
+      `ROTATION: NOT YET MODELLED` as §4 asks; the two notes from two bodies are
+      `viewRun.test.ts`' case. The ruling's §3 is built as written.
   - _A body with no rotation draws no terrain_ (§7, 7) while its survey line states its coverage.
     Owner: as the item before.
+    _Not built (main's ruling, 2026-10-20): no generated body reaches it (a spin not computed leaves
+    the surface `not_modelled`, which reads `TERRAIN: NOT YET MODELLED`; a withheld rotation leaves
+    no radius; `TERRAIN TEST`'s moon turns), and where a fixture does, the upper plate's
+    `ROTATION: …` and the readout's `NOT AVAILABLE: ROTATION …` say why. Owner: the task that
+    makes it reachable._
+  - _Where a `NOT RESOLVED` note stands among the `NOT YET MODELLED` ones_ (rotation-not-resolved's
+    UX review): "Data states" puts a `NOT RESOLVED` note "after the `NOT YET MODELLED` note".
+    `ATMOSPHERE: NOT RESOLVED` reads that as after every such note, `ROTATION: NOT YET MODELLED`
+    included (`view/atmosphere/labels.ts`), and `ROTATION: NOT RESOLVED` as directly after its own
+    (the ruling's §3.2, which keeps it out of `photorealStatements`). On a photorealistic primary
+    block it therefore stands before `BODY PHOTOMETRY: NOT YET MODELLED` and the other
+    photorealistic notes, while `ATMOSPHERE: NOT RESOLVED` stands after them all. Built as ruled.
+    Lean: "Data states" names the matching note. Owner: main, at the next guide pass.
+  - _The new row's wording_ (the same review): `ROTATION: NOT RESOLVED`'s row reads "a body other
+    than a star with a radius to draw", without the not-modelled row's commas, so that read alone
+    it can parse as "other than [a star with a radius]" (its last sentence settles it); and the
+    readout's bullet still gives `NOT AVAILABLE: ROTATION not yet modelled` "while the body has no
+    rotation", which only the not-modelled row's new "instead" sentence keeps from covering a
+    withheld one. Adopted verbatim (§3.5). Owner: main, at the next guide pass.
+  - _`handover.wasm.test.ts`' bake hook beside its timeout_ (rotation-not-resolved's gate): the
+    R10.T10.e suite's `beforeAll`, its wasm bakes on the Moon-like world, ran past Vitest's 10 s
+    `hookTimeout` in this lane's first two gates on the laptop (11.4 s beside another lane's trace,
+    load 7.7; then on a quiet machine), the gate's four workers sharing its 400% CPU quota, while
+    the same 216 files on the base code passed once and the file alone passed in 10.0 s. No test
+    failed, and the change does not reach the bakes, so the hook stood at its limit whatever the
+    change. Merged with `5a7ba51e` (vitest-memory: the inlined binaries served without source
+    maps), the file alone passes in 5.6 s. Lean: nothing more, unless a later gate times it out
+    again; then the hook takes a timeout of its own. Owner: a later lane on that file.
   - _U4's "see Layout"_ (this lane's UX review): the label block's room's new sentence sends a
     value wrapped under its label to "Layout", whose rule has labels "to the left of their value,
     or above it in columns"; a single wrapped reading is not a column. Adopted verbatim (§3.4), so

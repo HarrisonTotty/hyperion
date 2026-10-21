@@ -7,7 +7,11 @@ import { IDENTITY_ROTATION } from "../../view/coords/rotation";
 import { sceneOrigins, type ViewBody, type ViewBodyKind } from "../../view/scene/model";
 import { KEPT_BARYCENTRE, type KeptScene } from "../../view/scenes/kept";
 import { eclipseScene } from "../../view/scenes/eclipseScene";
-import { FRAME_CHANGE_MOON, frameChangeScene } from "../../view/scenes/frameChange";
+import {
+  FRAME_CHANGE_MOON,
+  FRAME_CHANGE_PLANET,
+  frameChangeScene,
+} from "../../view/scenes/frameChange";
 import { precisionScene } from "../../view/scenes/precision";
 import { phaseScene } from "../../view/scenes/phaseScene";
 import type { SystemIdHex, UniverseTime } from "@hyperion/protocol";
@@ -47,6 +51,8 @@ import {
   labelStatements,
   markRows,
   rangesFromCamera,
+  ROTATION_NOT_MODELLED,
+  ROTATION_NOT_RESOLVED,
   SCENE_OPTIONS,
   sceneClockReading,
   slantRangeFromCamera,
@@ -93,6 +99,26 @@ function unrotated(kept: KeptScene): KeptScene {
 function turning(kept: KeptScene): KeptScene {
   return withBodies(kept, (body) =>
     body.kind === "star" ? body : { ...body, rotation: body.rotation ?? IDENTITY_ROTATION },
+  );
+}
+
+/**
+ * A kept scene whose moon's rotation the granted detail level withholds, its radius kept: a
+ * hand-built body, since no server sends a radius beside a withheld rotation today.
+ */
+function withheldMoon(kept: KeptScene): KeptScene {
+  return withBodies(kept, (body) =>
+    body.id === FRAME_CHANGE_MOON ? { ...body, rotation: null, rotationNotResolved: true } : body,
+  );
+}
+
+/**
+ * The frame-change scene with its planet's rotation not modelled and its moon's withheld
+ * ({@link withheldMoon}), each with its radius.
+ */
+function planetNotModelledMoonWithheld(): KeptScene {
+  return withBodies(withheldMoon(turning(frameChangeScene())), (body) =>
+    body.id === FRAME_CHANGE_PLANET ? { ...body, rotation: null } : body,
   );
 }
 
@@ -332,6 +358,44 @@ describe("the label block", () => {
       "TERRAIN: STREAMING",
     ]);
     expect(labelStatements(run, null)).toEqual(["ROTATION: NOT YET MODELLED"]);
+  });
+
+  // The not-resolved fixtures below are hand-built: no server sends a radius beside a withheld
+  // rotation today, since the rotation is withheld with the bulk (rotation-not-resolved).
+
+  it("names the two rotation notes as the guide's rows have them", () => {
+    expect([ROTATION_NOT_MODELLED, ROTATION_NOT_RESOLVED]).toEqual([
+      "ROTATION: NOT YET MODELLED",
+      "ROTATION: NOT RESOLVED",
+    ]);
+  });
+
+  it("says ROTATION: NOT RESOLVED while a moon with a radius has its rotation withheld", () => {
+    const run = startRun(withheldMoon(turning(frameChangeScene())));
+    expect(labelStatements(run)).toEqual(["ROTATION: NOT RESOLVED"]);
+  });
+
+  it("states ROTATION: NOT RESOLVED directly after ROTATION: NOT YET MODELLED, one body withheld and another not modelled", () => {
+    const run = startRun(planetNotModelledMoonWithheld());
+    expect(labelStatements(run)).toEqual(["ROTATION: NOT YET MODELLED", "ROTATION: NOT RESOLVED"]);
+  });
+
+  it("adds the terrain annunciation after both rotation notes", () => {
+    const run = startRun(planetNotModelledMoonWithheld());
+    expect(labelStatements(run, "TERRAIN: STREAMING")).toEqual([
+      "ROTATION: NOT YET MODELLED",
+      "ROTATION: NOT RESOLVED",
+      "TERRAIN: STREAMING",
+    ]);
+  });
+
+  it("states no rotation note for a withheld moon with no radius", () => {
+    const run = startRun(
+      withBodies(withheldMoon(turning(frameChangeScene())), (body) =>
+        body.id === FRAME_CHANGE_MOON ? { ...body, radiusM: 0 } : body,
+      ),
+    );
+    expect([unrotatedKinds(run), labelStatements(run)]).toEqual([["star", "moon"], []]);
   });
 
   it("names the system and galactic frames", () => {

@@ -41,6 +41,7 @@ import {
   NO_SIGHT_CENTRE,
   NO_SIGHT_FAR,
   NO_SIGHT_ROTATION,
+  NO_SIGHT_ROTATION_NOT_RESOLVED,
   type ReadoutContext,
   type ReadoutLine,
   readoutLineText,
@@ -1232,7 +1233,8 @@ describe("the readout where no line of sight forms (R10.T12.a; decision-r10-t12a
   }
 
   it.each<readonly [SightGap, string]>([
-    ["rotation", "NOT AVAILABLE: ROTATION not yet modelled"],
+    ["rotationNotModelled", "NOT AVAILABLE: ROTATION not yet modelled"],
+    ["rotationNotResolved", "NOT AVAILABLE: ROTATION not resolved"],
     ["far", `NOT AVAILABLE: camera more than 6.68${NO_BREAK_SPACE}AU from the body`],
     ["centre", "NOT AVAILABLE: camera at the body's centre"],
   ])("reads the heading, then %s's NOT AVAILABLE line in --text, with DATUM", (gap, line) => {
@@ -1255,7 +1257,7 @@ describe("the readout where no line of sight forms (R10.T12.a; decision-r10-t12a
     });
   });
 
-  it.each<SightGap>(["rotation", "far", "centre"])(
+  it.each<SightGap>(["rotationNotModelled", "rotationNotResolved", "far", "centre"])(
     "keeps %s's line unchanged with no S on loss of the link, DATUM taking its S",
     (gap) => {
       const stale = gapModel(gap, { survey: aSurvey({ stale: true }) });
@@ -1279,7 +1281,7 @@ describe("the readout where no line of sight forms (R10.T12.a; decision-r10-t12a
     ],
     ["where a kept scene leaves the surface unset", { surfaceUnset: true }],
   ])("states no readout or DATUM %s", (_, input) => {
-    const model = gapModel("rotation", input);
+    const model = gapModel("rotationNotModelled", input);
     expect([model.datum, model.readout]).toEqual([null, []]);
   });
 
@@ -1300,11 +1302,12 @@ describe("the readout where no line of sight forms (R10.T12.a; decision-r10-t12a
   });
 
   it("names each cause's line", () => {
-    expect([sightGapLine("rotation"), sightGapLine("far"), sightGapLine("centre")]).toEqual([
-      NO_SIGHT_ROTATION,
-      NO_SIGHT_FAR,
-      NO_SIGHT_CENTRE,
-    ]);
+    expect([
+      sightGapLine("rotationNotModelled"),
+      sightGapLine("rotationNotResolved"),
+      sightGapLine("far"),
+      sightGapLine("centre"),
+    ]).toEqual([NO_SIGHT_ROTATION, NO_SIGHT_ROTATION_NOT_RESOLVED, NO_SIGHT_FAR, NO_SIGHT_CENTRE]);
   });
 });
 
@@ -1726,6 +1729,13 @@ describe("sightGapOf (R10.T12.a; decision-r10-t12a-scope §3.2)", () => {
   );
   const TURNING = aBody({ rotation: ROTATION, radiusM: HEADER.equatorial_radius_m });
   const STILL = aBody({ rotation: null, radiusM: HEADER.equatorial_radius_m });
+  // A hand-built body: no server sends a radius beside a withheld rotation today, since the
+  // rotation is withheld with the bulk (rotation-not-resolved).
+  const WITHHELD = aBody({
+    rotation: null,
+    rotationNotResolved: true,
+    radiusM: HEADER.equatorial_radius_m,
+  });
 
   /** Distances from the centre either side of the reach's two limits, m, along a fixed axis. */
   const DISTANCES_M = [
@@ -1745,7 +1755,7 @@ describe("sightGapOf (R10.T12.a; decision-r10-t12a-scope §3.2)", () => {
   const DIRECTION = scale(vec3(0.6, -0.48, 0.64), 1 / norm(vec3(0.6, -0.48, 0.64)));
 
   it("gives a cause exactly where lineOfSightOf forms no sight, over a grid of poses", () => {
-    const disagree = [TURNING, STILL].flatMap((body) =>
+    const disagree = [TURNING, STILL, WITHHELD].flatMap((body) =>
       DISTANCES_M.flatMap((distanceM) => {
         const pose = poseAt(scale(DIRECTION, distanceM));
         const scene = aViewScene({ bodies: [body] });
@@ -1762,7 +1772,15 @@ describe("sightGapOf (R10.T12.a; decision-r10-t12a-scope §3.2)", () => {
     const gaps = DISTANCES_M.map((distanceM) =>
       sightGapOf(poseAt(scale(DIRECTION, distanceM)), scene, STILL),
     );
-    expect(new Set(gaps)).toEqual(new Set(["rotation"]));
+    expect(new Set(gaps)).toEqual(new Set(["rotationNotModelled"]));
+  });
+
+  it("names the body's rotation first where the granted detail level withholds it, at every distance", () => {
+    const scene = aViewScene({ bodies: [WITHHELD] });
+    const gaps = DISTANCES_M.map((distanceM) =>
+      sightGapOf(poseAt(scale(DIRECTION, distanceM)), scene, WITHHELD),
+    );
+    expect(new Set(gaps)).toEqual(new Set(["rotationNotResolved"]));
   });
 
   it.each<readonly [SightGap | null, string, number]>([

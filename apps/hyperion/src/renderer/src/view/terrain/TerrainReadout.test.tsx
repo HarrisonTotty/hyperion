@@ -15,6 +15,7 @@ import {
   NO_SIGHT_CENTRE,
   NO_SIGHT_FAR,
   NO_SIGHT_ROTATION,
+  NO_SIGHT_ROTATION_NOT_RESOLVED,
   type ReadoutContext,
   type ReadoutField,
   type ReadoutLine,
@@ -541,7 +542,8 @@ describe("the readout where no line of sight forms (R10.T12.a; decision-r10-t12a
   }
 
   it.each<readonly [SightGap, string]>([
-    ["rotation", NO_SIGHT_ROTATION],
+    ["rotationNotModelled", NO_SIGHT_ROTATION],
+    ["rotationNotResolved", NO_SIGHT_ROTATION_NOT_RESOLVED],
     ["far", NO_SIGHT_FAR],
     ["centre", NO_SIGHT_CENTRE],
   ])(
