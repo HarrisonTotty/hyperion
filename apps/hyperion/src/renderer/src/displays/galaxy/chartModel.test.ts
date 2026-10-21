@@ -415,6 +415,7 @@ describe("the STARS filter", () => {
     "supergiant",
     "wolf_rayet",
     "hot_subdwarf",
+    "stripped_helium_star",
     "white_dwarf",
     "neutron_star",
     "black_hole",
@@ -436,6 +437,7 @@ describe("the STARS filter", () => {
       "supergiant",
       "wolf_rayet",
       "hot_subdwarf",
+      "stripped_helium_star",
       "substellar",
     ]);
   });

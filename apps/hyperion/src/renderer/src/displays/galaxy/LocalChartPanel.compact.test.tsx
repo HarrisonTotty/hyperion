@@ -18,6 +18,7 @@ const CIRCLE_KINDS = [
   "DWARF",
   "SUBGIANT",
   "HOT SUBDWARF",
+  "STRIPPED HELIUM STAR",
   "BROWN DWARF",
 ];
 

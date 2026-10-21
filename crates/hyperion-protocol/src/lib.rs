@@ -165,7 +165,15 @@ pub use universe::{
 /// built before it is answered as before; a server built before it ignores the field and answers
 /// `now`, so a client reads an answer without `observed`, a row or a summary, as not observed,
 /// whatever it asked.
-pub const PROTOCOL_VERSION: u32 = 2;
+///
+/// Version 3 added `stripped_helium_star` to [`ObjectKindDto`] (galaxy plan 06, P06.T24.c): a
+/// naked helium star between the hot subdwarfs, which end at 1.7 M☉, and the Wolf-Rayet stars,
+/// which a version 2 server sent as `hot_subdwarf`. `ObjectKindDto` is closed, so the new string
+/// bumps the version (`decision-gg-port-d0.md` §1, `decision-stripped-star-class.md` §2.5): a
+/// version 2 client could not place it on its chart, its legend or its H-R diagram, and a version
+/// 2 and a version 3 build read each other as incompatible. The rulings above that left the
+/// version at 2 hold at 3 as they did at 2.
+pub const PROTOCOL_VERSION: u32 = 3;
 
 #[cfg(test)]
 mod tests {
@@ -200,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn protocol_version_is_two() {
-        assert_eq!(PROTOCOL_VERSION, 2);
+    fn protocol_version_is_three() {
+        assert_eq!(PROTOCOL_VERSION, 3);
     }
 }

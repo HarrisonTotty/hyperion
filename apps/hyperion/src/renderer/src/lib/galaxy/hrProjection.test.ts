@@ -76,6 +76,20 @@ describe("projectHr", () => {
     expect(sun?.status).toBe("available");
   });
 
+  it("plots a stripped helium star as a circle, hot and between the dwarfs and the giants", () => {
+    const projection = projectHr(
+      systemsOf([{ stellar: brief("stripped_helium_star", 65_000, 3.7) }]),
+      AREA,
+      50,
+    );
+
+    const [stripped] = projection.points;
+    expect(stripped?.shape).toBe("circle");
+    expect(stripped?.xPx).toBeCloseTo(hrXPx(65_000, AREA), 9);
+    expect(stripped?.yPx).toBeCloseTo(hrYPx(3.7, AREA), 9);
+    expect(projection.counts.plotted).toBe(1);
+  });
+
   it("marks a system beyond the drive range plain, as the chart does", () => {
     const projection = projectHr(
       systemsOf([{ relLy: [60, 0, 0], stellar: brief("dwarf", 5_772, 0) }]),

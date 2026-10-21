@@ -282,7 +282,7 @@ async fn a_client_that_asks_for_no_push_and_no_bulk_receives_only_known_text_fra
         matches!(
             welcome,
             ServerMessage::Welcome {
-                protocol_version: 2,
+                protocol_version: PROTOCOL_VERSION,
                 ..
             }
         ),

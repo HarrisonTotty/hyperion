@@ -1,5 +1,6 @@
-//! Classes beyond the MK grid that follow from a star's state and track (plan 06, P06.T24.a):
-//! Wolf-Rayet stars, hot subdwarfs and luminous blue variables, all derived and none rolled.
+//! Classes beyond the MK grid that follow from a star's state and track (plan 06, P06.T24.a and
+//! T24.c): Wolf-Rayet stars, hot subdwarfs, stripped helium stars and luminous blue variables, all
+//! derived and none rolled.
 //!
 //! - **Wolf-Rayet stars** are hot, luminous and nearly or fully stripped: above a luminosity floor
 //!   of 10⁴·⁹ L☉ × (Z ÷ 0.02)^−0.4 ([`wolf_rayet_floor`]) and at 30,000 K or more
@@ -12,9 +13,14 @@
 //!   helium Hertzsprung gap on above 10⁵ K. The subtype is read from the temperature on the
 //!   stellar temperatures T* of the Potsdam models ([`WN_SUBTYPES`], [`WC_SUBTYPES`],
 //!   [`WO_SUBTYPES`]).
-//! - **Hot subdwarfs** are the naked helium stars below the floor, from 20,000 K: `sdB` below
-//!   40,000 K and `sdO` above (Heber 2016, PASP 128, 082001, section 2). A single star reaches one
-//!   only by losing its envelope on the giant branch; plan 11's stripped stars are the rest.
+//! - **Hot subdwarfs** are the naked helium stars below the floor, from 20,000 K, of up to 1.7 M☉
+//!   ([`HOT_SUBDWARF_MAX_MASS`]): `sdB` below 40,000 K and `sdO` above (Heber 2016, PASP 128,
+//!   082001, section 2). A single star reaches one only by losing its envelope on the giant
+//!   branch; plan 11's stripped stars are the rest.
+//! - **Stripped helium stars** are the heavier naked helium stars between the hot subdwarfs and the
+//!   Wolf-Rayet floor (P06.T24.c), Drout et al.'s (2023, Science 382, 1287) "intermediate-mass
+//!   helium stars": `He-sdO` and `He-sdB` on the hot subdwarfs' letter rule (Götberg et al. 2018,
+//!   A&A 615, A78, section 4.2).
 //! - **Luminous blue variables** lie beyond the Humphreys–Davidson limit as Hurley, Pols and Tout
 //!   (2000, section 7.1) write it, and are hotter than 8,000 K ([`is_luminous_blue_variable`]);
 //!   [`Track::window_where`](crate::stellar::sse::Track::window_where) gives the ages at which a
@@ -103,12 +109,26 @@ const WNH_ENVELOPE_SHARE: f64 = 0.1;
 const WNH_EDDINGTON: f64 = 0.5;
 
 /// The coolest hot subdwarf, K: 20,000, the cool end of the extended horizontal branch that sdB
-/// stars populate (Heber 2016, section 2.2).
+/// stars populate (Heber 2016, section 2.2). The coolest stripped helium star too.
 const HOT_SUBDWARF_MIN_TEFF: f64 = 20_000.0;
 
-/// The temperature from which a hot subdwarf is an sdO star rather than an sdB, K: 40,000, where
-/// He II 4686 strengthens. The classes are spectroscopic (Heber 2016, section 2), so this is a
-/// convention consistent with Heber's figures 3–8, not a quoted value.
+/// The heaviest hot subdwarf, 1.7 M☉ (P06.T24.c): a heavier naked helium star below the Wolf-Rayet
+/// floor is a stripped helium star (`stripped_helium_star`, P06.T24.c).
+///
+/// Götberg et al. (2018, A&A 615, A78, abstract and section 7, item 4) find stripped stars'
+/// spectra "undistinguishable from subdwarfs" only up to 1.7 M☉ (log L ≤ 3.2), and Drout et al.
+/// (2023, Science 382, 1287) bracket it from below, with the subdwarfs at ≲ 1.5 M☉ and their
+/// "intermediate-mass helium stars" at 2–8 M☉.
+///
+/// **Provisional at every Z:** Götberg's grid behind it is at Z = 0.014. It is an edge in mass,
+/// not in luminosity: log L = 3.2 falls at 1.76, 1.58 and 1.37 M☉ across the helium main sequence
+/// (Hurley, Pols and Tout 2000, equations 77 and 80), so an edge in luminosity would relabel a
+/// star in the middle of its life.
+pub const HOT_SUBDWARF_MAX_MASS: SolarMasses = SolarMasses::new(1.7);
+
+/// The temperature from which a hot subdwarf or a stripped helium star is an sdO star rather than
+/// an sdB, K: 40,000, above which He II lines dominate over He I lines in stripped stars' spectra
+/// (Götberg et al. 2018, section 4.3), the letter of the subdwarf classes (Heber 2016, section 2).
 const SD_O_MIN_TEFF: f64 = 40_000.0;
 
 /// The helium Hertzsprung gap's or giant branch's temperature from which a Wolf-Rayet star is a
@@ -360,10 +380,53 @@ pub(crate) fn wolf_rayet(
 }
 
 /// The hot subdwarf's classification of a naked helium star in `state` of `composition` below the
-/// Wolf-Rayet floor and from 20,000 K, or `None`: `sd` and the dwarf scale's type, held to B0 and
-/// cooler below 40,000 K (an sdB star) and to O below it (an sdO star).
+/// Wolf-Rayet floor, from 20,000 K and of up to [`HOT_SUBDWARF_MAX_MASS`], or `None`: `sd` and the
+/// dwarf scale's type, held to B0 and cooler below 40,000 K (an sdB star) and to O above it (an
+/// sdO star).
 #[must_use]
 pub(crate) fn hot_subdwarf(state: &StarState, composition: &Composition) -> Option<Classification> {
+    (state.mass() <= HOT_SUBDWARF_MAX_MASS)
+        .then(|| helium_subdwarf(state, composition, PeculiarClass::HotSubdwarf))
+        .flatten()
+}
+
+/// The stripped helium star's classification of a naked helium star in `state` of `composition`
+/// below the Wolf-Rayet floor, from 20,000 K and heavier than [`HOT_SUBDWARF_MAX_MASS`], or `None`
+/// (P06.T24.c): the hot subdwarf's letter rule after a `He-` prefix, `He-sdO` from 40,000 K and
+/// `He-sdB` below.
+///
+/// - **The class** is Götberg et al.'s (2018, A&A 615, A78, section 4.2) He-sdO, the prefix for
+///   their super-solar helium (after Stroeer et al. 2007): the `sd` stays, since the high gravity
+///   makes the linear Stark broadening of the H I and He II lines severe, as in a subdwarf.
+/// - **No `f`:** the stripped stars observed so far lose ≲ 10⁻⁹ M☉ yr⁻¹ (Götberg et al. 2023, ApJ
+///   959, 125), too little wind for the He II 4686 emission an `f` marks (Götberg et al. 2018,
+///   section 4.2).
+/// - **Neither `WN3/O3` nor a bare O type:** such stars are "about an order of magnitude fainter
+///   than an O3-type star" (Götberg et al. 2018, section 4.2).
+///
+/// Its upper end is the Wolf-Rayet floor ([`wolf_rayet_floor`]), whose 10⁴·⁹ L☉ falls at
+/// 5.9–7.7 M☉ across the helium main sequence on Hurley, Pols and Tout's (2000) fits and at
+/// 6.72 M☉ in Götberg et al.'s (2018) grid, against Shenar et al.'s (2020) 7.5 M☉ and Drout et
+/// al.'s (2023) ~8 M☉.
+#[must_use]
+pub(crate) fn stripped_helium_star(
+    state: &StarState,
+    composition: &Composition,
+) -> Option<Classification> {
+    (state.mass() > HOT_SUBDWARF_MAX_MASS)
+        .then(|| helium_subdwarf(state, composition, PeculiarClass::StrippedHeliumStar))
+        .flatten()
+}
+
+/// The subdwarf classification of a naked helium star in `state` of `composition` below the
+/// Wolf-Rayet floor and from 20,000 K, as `peculiar`, or `None`: `sd` and the dwarf scale's type,
+/// held to B0 and cooler below 40,000 K (an sdB star) and to O above it (an sdO star).
+#[must_use]
+fn helium_subdwarf(
+    state: &StarState,
+    composition: &Composition,
+    peculiar: PeculiarClass,
+) -> Option<Classification> {
     let teff = state.effective_temperature().value();
     let helium_star = matches!(
         state.phase(),
@@ -384,7 +447,7 @@ pub(crate) fn hot_subdwarf(state: &StarState, composition: &Composition) -> Opti
     };
     let mut class =
         Classification::sequence(SpectralCode::new(code)?, Some(LuminosityClass::Subdwarf));
-    class.peculiar = Some(PeculiarClass::HotSubdwarf);
+    class.peculiar = Some(peculiar);
     Some(class)
 }
 
@@ -494,6 +557,114 @@ mod tests {
         assert!(class.to_string().starts_with("sdB"), "{class} at {state:?}");
     }
 
+    /// A living helium main-sequence state of mass `m` M☉, luminosity `l` L☉ and effective
+    /// temperature `teff` K.
+    fn helium_main_sequence(m: f64, l: f64, teff: f64) -> StarState {
+        let ratio = 5_772.0 / teff;
+        let r = ratio * ratio * l.sqrt();
+        StarState::new(crate::stellar::StarStateParts {
+            phase: Phase::HeliumMainSequence,
+            age: Years::new(1e6),
+            mass: SolarMasses::new(m),
+            core_mass: SolarMasses::ZERO,
+            luminosity: SolarLuminosities::new(l),
+            radius: crate::units::SolarRadii::new(r),
+            mass_loss_rate: crate::units::SolarMassesPerYear::ZERO,
+            phase_fraction: 0.5,
+        })
+    }
+
+    fn classify_bare(state: &StarState, composition: &Composition) -> Classification {
+        classify(state, composition, &StarDraws::median(), &ClassExtras::NONE)
+    }
+
+    /// P06.T24.c's edge: on the helium main sequence a 1.6 M☉ helium star is a hot subdwarf and a
+    /// 1.8 M☉ one a stripped helium star, each on its own track at mid-life, at the same letter.
+    #[test]
+    fn the_hot_subdwarfs_end_at_1_7_solar_masses() {
+        let class_at_mid_life = |m: f64| {
+            let track = Track::helium_star_full(
+                SolarMasses::new(m),
+                &Composition::SOLAR,
+                &StarDraws::median(),
+            );
+            let mid_life = track
+                .age_in_phase(Phase::HeliumMainSequence, 0.5)
+                .expect("a helium main sequence");
+            let (state, class) = class_on(&track, mid_life);
+            assert_eq!(state.phase(), Phase::HeliumMainSequence);
+            class
+        };
+        let light = class_at_mid_life(1.6);
+        assert_eq!(
+            light.peculiar_class(),
+            Some(PeculiarClass::HotSubdwarf),
+            "{light}"
+        );
+        assert!(light.to_string().starts_with("sdO"), "{light}");
+        let heavy = class_at_mid_life(1.8);
+        assert_eq!(
+            heavy.peculiar_class(),
+            Some(PeculiarClass::StrippedHeliumStar),
+            "{heavy}"
+        );
+        assert!(heavy.to_string().starts_with("He-sdO"), "{heavy}");
+        assert_eq!(heavy.luminosity_class(), Some(LuminosityClass::Subdwarf));
+        // The edge itself is a hot subdwarf's.
+        let edge = classify_bare(
+            &helium_main_sequence(1.7, 1_500.0, 50_000.0),
+            &Composition::SOLAR,
+        );
+        assert_eq!(edge.peculiar_class(), Some(PeculiarClass::HotSubdwarf));
+    }
+
+    /// A 2.3 M☉ helium star at about 65,000 K, look-72's stripped star (plan 12's Risks), is
+    /// `He-sdO3`, and below 40,000 K the same star is `He-sdB`.
+    #[test]
+    fn a_stripped_helium_star_is_written_he_sd() {
+        let hot = classify_bare(
+            &helium_main_sequence(2.3, 5_000.0, 65_000.0),
+            &Composition::SOLAR,
+        );
+        assert_eq!(hot.to_string(), "He-sdO3");
+        assert_eq!(
+            hot.peculiar_class(),
+            Some(PeculiarClass::StrippedHeliumStar)
+        );
+        assert_eq!(PeculiarClass::StrippedHeliumStar.name(), "He-sd");
+        let cool = classify_bare(
+            &helium_main_sequence(2.3, 5_000.0, 30_000.0),
+            &Composition::SOLAR,
+        );
+        assert!(cool.to_string().starts_with("He-sdB"), "{cool}");
+        // Below 20,000 K it is no subdwarf of either kind.
+        let cold = classify_bare(
+            &helium_main_sequence(2.3, 5_000.0, 15_000.0),
+            &Composition::SOLAR,
+        );
+        assert_eq!(cold.peculiar_class(), None, "{cold}");
+    }
+
+    /// Above the Wolf-Rayet floor a naked helium star is a Wolf-Rayet star whatever its mass, as
+    /// before T24.c: the floor, not the edge, ends the stripped helium stars.
+    #[test]
+    fn above_the_floor_a_helium_star_is_still_a_wolf_rayet_star() {
+        let luminous = classify_bare(
+            &helium_main_sequence(10.0, 1.0e5, 90_000.0),
+            &Composition::SOLAR,
+        );
+        assert_eq!(luminous.peculiar_class(), Some(PeculiarClass::WolfRayet));
+        assert_eq!(luminous.to_string(), "WN4");
+        let faint = classify_bare(
+            &helium_main_sequence(10.0, 6.0e4, 90_000.0),
+            &Composition::SOLAR,
+        );
+        assert_eq!(
+            faint.peculiar_class(),
+            Some(PeculiarClass::StrippedHeliumStar)
+        );
+    }
+
     /// `window_where(PhasePredicate::Lbv)` brackets exactly the ages at which the state passes
     /// the criterion, at 1,000 sampled ages across the star's life (P06.T24.a's test), for a
     /// 60 M☉ star at Z = 0.02; a 20 M☉ star has no window.
@@ -552,6 +723,11 @@ mod tests {
             ),
             Track::helium_star_full(
                 SolarMasses::new(0.6),
+                &Composition::SOLAR,
+                &StarDraws::median(),
+            ),
+            Track::helium_star_full(
+                SolarMasses::new(2.3),
                 &Composition::SOLAR,
                 &StarDraws::median(),
             ),

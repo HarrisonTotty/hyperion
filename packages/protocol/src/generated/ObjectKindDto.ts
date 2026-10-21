@@ -4,4 +4,4 @@
  * What an object is now, as the range query's rows and the chart's symbols read it: coarser than
  * its [`PhaseDto`], and decided from the phase and the classification (plan 06, design note 17).
  */
-export type ObjectKindDto = "protostar" | "pre_main_sequence" | "dwarf" | "subgiant" | "giant" | "supergiant" | "wolf_rayet" | "hot_subdwarf" | "white_dwarf" | "neutron_star" | "black_hole" | "no_remnant" | "substellar";
+export type ObjectKindDto = "protostar" | "pre_main_sequence" | "dwarf" | "subgiant" | "giant" | "supergiant" | "wolf_rayet" | "hot_subdwarf" | "stripped_helium_star" | "white_dwarf" | "neutron_star" | "black_hole" | "no_remnant" | "substellar";

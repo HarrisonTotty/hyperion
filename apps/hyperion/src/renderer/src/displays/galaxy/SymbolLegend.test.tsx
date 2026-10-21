@@ -17,6 +17,7 @@ const EVERY_KIND: ReadonlyArray<ObjectKindDto> = [
   "supergiant",
   "wolf_rayet",
   "hot_subdwarf",
+  "stripped_helium_star",
   "white_dwarf",
   "neutron_star",
   "black_hole",
@@ -38,7 +39,7 @@ describe("SymbolLegend", () => {
     render(<SymbolLegend bands={layerBands(aCensus().layers)} />);
 
     expect(meaningOf("Circle")).toBe(
-      "PROTOSTAR, PRE-MAIN-SEQUENCE STAR, DWARF, SUBGIANT, HOT SUBDWARF, BROWN DWARF",
+      "PROTOSTAR, PRE-MAIN-SEQUENCE STAR, DWARF, SUBGIANT, HOT SUBDWARF, STRIPPED HELIUM STAR, BROWN DWARF",
     );
     expect(meaningOf("Ringed circle")).toBe("GIANT, SUPERGIANT, WOLF-RAYET STAR");
     expect(meaningOf("Diamond")).toBe("WHITE DWARF");

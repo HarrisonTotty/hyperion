@@ -56,6 +56,10 @@ pub enum ObjectKindDto {
     WolfRayet,
     /// A hot subdwarf (sdB, sdO): a helium-burning core with almost no envelope.
     HotSubdwarf,
+    /// A stripped helium star (He-sdO, He-sdB): a naked helium star heavier than a hot subdwarf
+    /// and fainter than a Wolf-Rayet star (galaxy plan 06, P06.T24.c; new in
+    /// [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION) 3).
+    StrippedHeliumStar,
     /// A white dwarf of any composition.
     WhiteDwarf,
     /// A neutron star.
@@ -1239,6 +1243,7 @@ pub(crate) mod tests {
             (ObjectKindDto::Supergiant, "supergiant"),
             (ObjectKindDto::WolfRayet, "wolf_rayet"),
             (ObjectKindDto::HotSubdwarf, "hot_subdwarf"),
+            (ObjectKindDto::StrippedHeliumStar, "stripped_helium_star"),
             (ObjectKindDto::WhiteDwarf, "white_dwarf"),
             (ObjectKindDto::NeutronStar, "neutron_star"),
             (ObjectKindDto::BlackHole, "black_hole"),

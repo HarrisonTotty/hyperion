@@ -1077,9 +1077,10 @@ impl StellarBrief {
 ///   supergiants;
 /// - a star classified as a Wolf-Rayet star (P06.T24.a: hot, above the luminosity floor of
 ///   10⁴·⁹ L☉ × (Z ÷ 0.02)^−0.4, and a naked helium star or a nearly stripped or near-Eddington
-///   hydrogen-rich one, `WNh`) is a Wolf-Rayet star, and a hot subdwarf (a naked helium star below
-///   the floor, from 20,000 K) a hot subdwarf; any other naked helium star goes by its luminosity
-///   class;
+///   hydrogen-rich one, `WNh`) is a Wolf-Rayet star, a hot subdwarf (a naked helium star below
+///   the floor, from 20,000 K, of up to 1.7 M☉) a hot subdwarf, and a stripped helium star (one
+///   heavier than that, P06.T24.c) a stripped helium star; any other naked helium star goes by its
+///   luminosity class;
 /// - an object on P06.T13's cooling fits is substellar below the hydrogen-burning limit
 ///   ([`substellar::hydrogen_burning_limit`]) and a dwarf above it;
 /// - protostars, pre-main-sequence stars and the remnants are their phases, and a post-AGB star is
@@ -1104,6 +1105,9 @@ pub fn object_kind(
         }
         _ if classification.peculiar_class() == Some(PeculiarClass::HotSubdwarf) => {
             ObjectKind::HotSubdwarf
+        }
+        _ if classification.peculiar_class() == Some(PeculiarClass::StrippedHeliumStar) => {
+            ObjectKind::StrippedHeliumStar
         }
         Phase::Substellar if state.mass() < substellar::hydrogen_burning_limit(composition) => {
             ObjectKind::Substellar
@@ -2760,8 +2764,9 @@ mod tests {
     }
 
     /// The kind follows the phase and the luminosity class: the Sun is a dwarf, Arcturus a giant,
-    /// Betelgeuse a supergiant, a luminous naked helium star a Wolf-Rayet star and a faint one a
-    /// hot subdwarf, and a cooling-fit object a brown dwarf below the hydrogen-burning limit.
+    /// Betelgeuse a supergiant, a luminous naked helium star a Wolf-Rayet star, a fainter one a
+    /// stripped helium star and a faint one of up to 1.7 M☉ a hot subdwarf (P06.T24.c), and a
+    /// cooling-fit object a brown dwarf below the hydrogen-burning limit.
     #[test]
     fn the_kind_follows_the_phase_and_the_luminosity_class() {
         let solar = Composition::SOLAR;
@@ -2783,9 +2788,13 @@ mod tests {
         // The floor is 10^4.9 L☉ at Z = 0.02 and 10^4.9 × 10^0.4 at Z = 0.002.
         let hot = |l: f64| living(Phase::HeliumMainSequence, 10.0, l, 0.8);
         assert_eq!(kind_of(&hot(1.0e5), &solar), ObjectKind::WolfRayet);
-        assert_eq!(kind_of(&hot(6.0e4), &solar), ObjectKind::HotSubdwarf);
+        // A 10 M☉ helium star below the floor is no hot subdwarf (Götberg et al. 2018, A&A 615,
+        // A78: subdwarf-like spectra only to 1.7 M☉), and a 0.5 M☉ one of 20 L☉ at 25,000 K is.
+        assert_eq!(kind_of(&hot(6.0e4), &solar), ObjectKind::StrippedHeliumStar);
+        let subdwarf = living(Phase::HeliumMainSequence, 0.5, 20.0, 0.24);
+        assert_eq!(kind_of(&subdwarf, &solar), ObjectKind::HotSubdwarf);
         let poor = comp(-1.0);
-        assert_eq!(kind_of(&hot(1.5e5), &poor), ObjectKind::HotSubdwarf);
+        assert_eq!(kind_of(&hot(1.5e5), &poor), ObjectKind::StrippedHeliumStar);
         assert_eq!(kind_of(&hot(2.5e5), &poor), ObjectKind::WolfRayet);
         let cool = |m: f64| {
             substellar::cooling(SolarMasses::new(m), Years::new(5e9), &solar).expect("in the fits")

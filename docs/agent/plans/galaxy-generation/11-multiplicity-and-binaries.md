@@ -5448,3 +5448,16 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     - A main-sequence primary fed by its companion is rare in the engine: two of 4,000 layer-E
       systems near the solar circle, both after a case-A reversal; the primary's accretion is
       otherwise onto a remnant or a helium star.
+- **Recorded with galaxy plan 06's P06.T24.c (lane `stripped-class`, 2026-10-21;
+  `decision-stripped-star-class.md`, "Recorded, not blockers").** Neither moves a class, so both are
+  deferred under the 2026-10-20 rule.
+  - _R1: the stripped mass is some 30% low._ look-72's 10.96 M☉ primary (LOOK72's
+    `820E6EE00000008D`, plan 12's Risks) is stripped to 2.37 M☉, against 3.32 M☉ in Götberg et al.
+    (2018, A&A 615, A78, Table 1, 11.01 M☉) and 3.43 M☉ in Laplace et al. (2020, A&A 637, A6).
+    Hurley et al.'s M_c,BGB ≈ 0.098 M^1.35 (2000, eq. 44) gives 2.48 M☉: a model difference, not a
+    code error. Both masses are stripped helium stars since P06.T24.c, so no class depends on it.
+  - _R3: the pair window is narrower than the kind's edge._ `HOT_SUBDWARF_MASSES` (0.32–0.8 M☉) is
+    the ~0.5 M☉ channel, and P06.T24.c's kind edge is 1.7 M☉, so a 0.8–1.7 M☉ helium star in a
+    pair is a hot subdwarf by kind with no pair class. That names nothing wrongly. Aligning the two
+    would move pair classes and the `binary_classes` census: a candidate rider for version 25 (S1),
+    if main wants it.

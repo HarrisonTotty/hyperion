@@ -12,6 +12,7 @@ const SHAPES: ReadonlyArray<readonly [ObjectKindDto, SymbolShape | null]> = [
   ["dwarf", "circle"],
   ["subgiant", "circle"],
   ["hot_subdwarf", "circle"],
+  ["stripped_helium_star", "circle"],
   ["substellar", "circle"],
   ["giant", "ringed-circle"],
   ["supergiant", "ringed-circle"],

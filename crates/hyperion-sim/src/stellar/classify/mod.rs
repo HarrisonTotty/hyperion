@@ -19,8 +19,8 @@
 //! beyond the MK grid are [`PeculiarClass`]es: P06.T25's Be, Ap, Bp and Am stars follow from the
 //! star's rotation and magnetism draws ([`rotation`]); P06.T24.a's
 //! Wolf-Rayet stars (`WN6`, `WN7h`, `WC5`, `WO2`), hot subdwarfs (`sdB0`, `sdO5`) and luminous
-//! blue variables (`B2Ia+ LBV`) follow from the state (`peculiar`), and P06.T24.b's carbon and S
-//! stars and young stars are still to come. What only a star's history knows, a neutron star's
+//! blue variables (`B2Ia+ LBV`), and T24.c's stripped helium stars (`He-sdO3`), follow from the
+//! state (`peculiar`), and P06.T24.b's carbon and S stars and young stars are still to come. What only a star's history knows, a neutron star's
 //! pulsar class and a helium star's surface, arrives through [`ClassExtras`].
 
 mod luminosity;
@@ -39,8 +39,8 @@ use crate::units::Kelvin;
 
 pub use luminosity::LuminosityClass;
 pub use peculiar::{
-    HeliumSurface, LBV_MIN_LUMINOSITY, WOLF_RAYET_MIN_TEFF, WolfRayetSequence, WolfRayetType,
-    carbon_shows_after, is_luminous_blue_variable,
+    HOT_SUBDWARF_MAX_MASS, HeliumSurface, LBV_MIN_LUMINOSITY, WOLF_RAYET_MIN_TEFF,
+    WolfRayetSequence, WolfRayetType, carbon_shows_after, is_luminous_blue_variable,
 };
 
 /// A spectral class letter: the MK sequence O to M and its extension to the brown dwarfs, L, T
@@ -291,14 +291,16 @@ pub enum SpectralType {
 }
 
 /// A class beyond the MK grid: P06.T25's, from rotation and magnetism (the Be, Ap, Bp and Am
-/// stars), P06.T24.a's from the state and track (Wolf-Rayet stars, hot subdwarfs, luminous blue
-/// variables), and later P06.T24.b's (carbon and S stars, T Tauri and Herbig Ae/Be stars).
+/// stars), P06.T24.a's and T24.c's from the state and track (Wolf-Rayet stars, hot subdwarfs,
+/// stripped helium stars, luminous blue variables), and later P06.T24.b's (carbon and S stars,
+/// T Tauri and Herbig Ae/Be stars).
 ///
 /// P06.T25's are written after the luminosity class with the MK suffix of their kind: `e` for
 /// emission, `p` for peculiar abundances, `m` for metallic lines (`B3Ve`, `A0Vp`, `B8Vp`,
 /// `A2Vm`). A Wolf-Rayet star is written by its own type ([`SpectralType::WolfRayet`]), a hot
-/// subdwarf with the `sd` prefix (`sdB0`, `sdO5`), and a luminous blue variable with ` LBV` after
-/// its class (`B2Ia+ LBV`).
+/// subdwarf with the `sd` prefix (`sdB0`, `sdO5`), a stripped helium star with `He-` before it
+/// ([`prefix`](Self::prefix): `He-sdO3`, `He-sdB1`), and a luminous blue variable with ` LBV`
+/// after its class (`B2Ia+ LBV`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PeculiarClass {
     /// A Be star: a B-type main-sequence star spinning above 0.7 of its critical speed, whose
@@ -314,15 +316,19 @@ pub enum PeculiarClass {
     Am,
     /// A Wolf-Rayet star: hot, luminous and nearly or fully stripped (P06.T24.a).
     WolfRayet,
-    /// A hot subdwarf, sdB or sdO: a naked helium star below the Wolf-Rayet floor (P06.T24.a).
+    /// A hot subdwarf, sdB or sdO: a naked helium star below the Wolf-Rayet floor, of up to
+    /// 1.7 M☉ (P06.T24.a, with T24.c's edge, [`HOT_SUBDWARF_MAX_MASS`]).
     HotSubdwarf,
+    /// A stripped helium star, He-sdO or He-sdB: a naked helium star below the Wolf-Rayet floor
+    /// and heavier than a hot subdwarf (P06.T24.c).
+    StrippedHeliumStar,
     /// A luminous blue variable: beyond the Humphreys–Davidson limit and hotter than 8,000 K
     /// (P06.T24.a).
     LuminousBlueVariable,
 }
 
 impl PeculiarClass {
-    /// The class's name as astronomers say it: `Be`, `Ap`, `Bp`, `Am`, `WR`, `sd`, `LBV`.
+    /// The class's name as astronomers say it: `Be`, `Ap`, `Bp`, `Am`, `WR`, `sd`, `He-sd`, `LBV`.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -332,19 +338,37 @@ impl PeculiarClass {
             Self::Am => "Am",
             Self::WolfRayet => "WR",
             Self::HotSubdwarf => "sd",
+            Self::StrippedHeliumStar => "He-sd",
             Self::LuminousBlueVariable => "LBV",
         }
     }
 
+    /// What the class writes before the rest of the written class, the luminosity class's prefix
+    /// included: `He-` for a stripped helium star, nothing for any other.
+    #[must_use]
+    pub const fn prefix(self) -> &'static str {
+        match self {
+            Self::StrippedHeliumStar => "He-",
+            Self::Be
+            | Self::Ap
+            | Self::Bp
+            | Self::Am
+            | Self::WolfRayet
+            | Self::HotSubdwarf
+            | Self::LuminousBlueVariable => "",
+        }
+    }
+
     /// What the class adds after the rest of the written class: the MK suffix `e`, `p` or `m`,
-    /// ` LBV`, or nothing for a Wolf-Rayet star or hot subdwarf, whose type and prefix say it.
+    /// ` LBV`, or nothing for a Wolf-Rayet star, hot subdwarf or stripped helium star, whose type
+    /// and prefixes say it.
     #[must_use]
     pub const fn suffix(self) -> &'static str {
         match self {
             Self::Be => "e",
             Self::Ap | Self::Bp => "p",
             Self::Am => "m",
-            Self::WolfRayet | Self::HotSubdwarf => "",
+            Self::WolfRayet | Self::HotSubdwarf | Self::StrippedHeliumStar => "",
             Self::LuminousBlueVariable => " LBV",
         }
     }
@@ -396,10 +420,10 @@ impl ClassExtras {
 /// An object's classification: its spectral type, its luminosity class where it has one, and any
 /// peculiar class.
 ///
-/// Its `Display` is the class as written: the subdwarf prefix, then the type, then the
-/// luminosity class (`G2V`, `K3III`, `M2Iab`, `B1Ia+`, `sdM3`, `esdK7`); L, T and Y dwarfs,
-/// white dwarfs, neutron stars and black holes carry no luminosity class (`T6`, `DA4.2`, `NS`,
-/// `BH`).
+/// Its `Display` is the class as written: a peculiar class's prefix (`He-`), the subdwarf prefix,
+/// then the type, then the luminosity class (`G2V`, `K3III`, `M2Iab`, `B1Ia+`, `sdM3`, `esdK7`,
+/// `He-sdO3`); L, T and Y dwarfs, white dwarfs, neutron stars and black holes carry no luminosity
+/// class (`T6`, `DA4.2`, `NS`, `BH`).
 ///
 /// # Examples
 ///
@@ -478,6 +502,9 @@ impl Classification {
 
 impl fmt::Display for Classification {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(peculiar) = self.peculiar {
+            f.write_str(peculiar.prefix())?;
+        }
         match self.spectral {
             SpectralType::Sequence(code) => match self.luminosity {
                 Some(class) if class.is_prefix() => write!(f, "{}{code}", class.as_str())?,
@@ -535,8 +562,9 @@ pub fn subtype_from_teff(teff: Kelvin) -> Option<SpectralCode> {
 /// - A hot, luminous, nearly or fully stripped star is a Wolf-Rayet star (P06.T24.a): `WN`,
 ///   `WNh`, `WC` or `WO` with a subtype from its temperature, WC where `extras` say its helium
 ///   surface shows carbon. A naked helium star below the Wolf-Rayet floor, from 20,000 K, is a hot
-///   subdwarf (`sdB`, `sdO`), and a star beyond the Humphreys–Davidson limit and hotter than
-///   8,000 K a luminous blue variable (` LBV` after its class).
+///   subdwarf (`sdB`, `sdO`) of up to [`HOT_SUBDWARF_MAX_MASS`] and a stripped helium star
+///   (`He-sdB`, `He-sdO`, P06.T24.c) above it, and a star beyond the Humphreys–Davidson limit and
+///   hotter than 8,000 K a luminous blue variable (` LBV` after its class).
 /// - Any other main-sequence star may take a peculiar class from its rotation and magnetism draws
 ///   (P06.T25): `p` for a fossil field (Ap, Bp), `e` for a Be star, `m` for an Am star.
 /// - A neutron star is `NS`, or the `PSR` or `MAG` its `extras` give (P06.T21); a black hole is
@@ -585,6 +613,9 @@ pub fn classify(
             }
             if let Some(subdwarf) = peculiar::hot_subdwarf(state, composition) {
                 return subdwarf;
+            }
+            if let Some(stripped) = peculiar::stripped_helium_star(state, composition) {
+                return stripped;
             }
             let (code, class) = luminosity::classify_living(state, composition);
             let mut classification = Classification::sequence(code, Some(class));
@@ -1087,6 +1118,15 @@ pub(crate) mod tests {
         }
         if let Some(found) = parse_wolf_rayet(text) {
             return Some(found);
+        }
+        // A stripped helium star: `He-` before a subdwarf's class (P06.T24.c).
+        if let Some(subdwarf) = text.strip_prefix("He-") {
+            let mut class = parse_plain(subdwarf)?;
+            if class.luminosity_class() != Some(LuminosityClass::Subdwarf) {
+                return None;
+            }
+            class.peculiar = Some(PeculiarClass::StrippedHeliumStar);
+            return Some(class);
         }
         if let Some(found) = parse_plain(text) {
             return Some(found);

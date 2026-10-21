@@ -565,9 +565,9 @@ generation?)` with its exhaustive `ErrorCode` switch `settledState` in `lib/useS
     the midpoint-displacement idea of the research notes in a form that needs no recursion.
 17. **Symbols.** Size stays tied to the mass layer and fill to the side of the reference plane, as
     the brainstorm fixes, so shape is the only free channel. Five outlines, each readable filled or
-    open: circle (protostar, pre-main-sequence, dwarf, subgiant, hot subdwarf, substellar), circle
-    with an outer ring (giant, supergiant, Wolf-Rayet), diamond (white dwarf), triangle (neutron
-    star), square (black hole). Plan 05's D14 already defines the outlines of the last three in
+    open: circle (protostar, pre-main-sequence, dwarf, subgiant, hot subdwarf, stripped helium
+    star from P06.T24.c, substellar), circle with an outer ring (giant, supergiant, Wolf-Rayet),
+    diamond (white dwarf), triangle (neutron star), square (black hole). Plan 05's D14 already defines the outlines of the last three in
     `symbols.ts`; the ringed circle is a new `SymbolShape` value, `ringed-circle`, whose inner disc
     alone takes the fill so that it still reads filled or open. A system that left no remnant is
     listed but not drawn. The spectral class goes in the list and readout in words, so shape is
@@ -1443,7 +1443,7 @@ Runs before P06.T24.a, whose WNh class it feeds.
 #### P06.T24 Classes beyond the MK grid
 
 `PeculiarClass` and the rules, all derived from state and track, none rolled. T24.a covers the
-massive and stripped stars, T24.b the rest.
+massive and stripped stars, T24.b the rest, and T24.c corrects T24.a's hot subdwarfs.
 
 - **P06.T24.a Wolf-Rayet stars, hot subdwarfs and luminous blue variables.**
   - Wolf-Rayet: a star above a luminosity floor of 10⁴·⁹ L☉ × (Z ÷ 0.02)^(−0.4) (record the source)
@@ -1473,10 +1473,27 @@ massive and stripped stars, T24.b the rest.
   - Tests: carbon stars appear only inside the mass range and only after n_min pulses; the C/O of a
     fixed star is non-decreasing in time; a 1 M☉ star at 2 Myr is a T Tauri star, classical or not
     by its disc draw, and a 4 M☉ one at 0.3 Myr is `HerbigAeBe`; count checks in T31.
+- **P06.T24.c The stripped helium stars** (a technical correction to T24.a,
+  `decision-stripped-star-class.md` of 2026-10-21; the brainstorm sets no edge for subdwarfs).
+  - Hot subdwarfs end at 1.7 M☉ (`HOT_SUBDWARF_MAX_MASS`), an edge in mass: Götberg et al. (2018,
+    A&A 615, A78) find spectra "undistinguishable from subdwarfs" only up to 1.7 M☉, and Drout et
+    al. (2023, Science 382, 1287) put the subdwarfs at ≲ 1.5 M☉ and the "intermediate-mass helium
+    stars" at 2–8 M☉. Provisional at every Z: Götberg's grid is at Z = 0.014.
+  - A naked helium star above the edge, from 20,000 K and at or below the Wolf-Rayet floor, is a
+    stripped helium star: `He-sdO` from 40,000 K and `He-sdB` below, on the hot subdwarfs' letter
+    rule (Götberg et al. 2018, section 4.2), with no `f`. Its kind is `STRIPPED HELIUM STAR`, a
+    circle on the chart, sent as `stripped_helium_star` (`PROTOCOL_VERSION` 2 → 3, since
+    `ObjectKindDto` is closed). The Wolf-Rayet floor stays its upper end. The classifier tries
+    Wolf-Rayet, then hot subdwarf, then stripped helium star.
+  - Tests: 1.6 and 1.8 M☉ on the helium main sequence are a hot subdwarf and a stripped helium
+    star; a 2.3 M☉ helium star at about 65,000 K is `He-sdO3`; above the floor the Wolf-Rayet class
+    is unchanged; a 0.5 M☉ helium star is still `sdB`; look-72's `820E6EE00000008D` primary is a
+    stripped helium star in its observed and now summaries.
 - **Files:** `stellar/classify/peculiar.rs`.
 - **Accept:** `cargo test -p hyperion-sim stellar::classify::peculiar` passes after each subtask.
 - **T24.a done (round 9, `events06a`).** The deviations and findings are under Risks ("P06.T39,
-  T24.a, T26.d and T31, as built"). T24.b waits on T28.f.
+  T24.a, T26.d and T31, as built"). T24.b waits on T28.f. **T24.c done (lane `stripped-class`,
+  2026-10-21; at version 22, no bump):** see Risks, "Deviations in T24.c, as built".
 
 #### P06.T25 Rotation and magnetism
 
@@ -3364,7 +3381,8 @@ natal_kick, lbv_window}`, with `SystemSummary`, `StarSummary`, `StellarBrief`,
     tasks. `brief_at` is `None` before birth, and its log L is `None` where L = 0. `lbv_window` is
     `None` until T24.a. `death_time` is `BeyondClockRange` for T past `i64` seconds (the lightest
     dwarfs, whose lifetimes pass 2.9 × 10¹¹ years) and for objects below 0.1 M☉. `ObjectKind` for helium stars uses T24.a's floor of
-    10⁴·⁹ (Z ÷ 0.02)^−0.4 L☉: Wolf–Rayet above it, hot subdwarf below.
+    10⁴·⁹ (Z ÷ 0.02)^−0.4 L☉: Wolf–Rayet above it, hot subdwarf below (and, since T24.c, a
+    stripped helium star below it above 1.7 M☉).
   - _Tests._ 10⁵ random systems across the layers near the solar circle at random clock times hold
     the brainstorm's property (a slow test; 400 in the fast suite).
   - _Outside the owned files._ `remnant/mod.rs` gains `mod kick` beside the `class` lane's
@@ -3372,8 +3390,8 @@ natal_kick, lbv_window}`, with `SystemSummary`, `StarSummary`, `StellarBrief`,
     and its Risks bullet above). `sse/mod.rs` re-exports `fate_of`.
 - **P06.T35.b's registry, as built alone (round 7c, `ui`).** `lib/galaxy/starSymbols.ts` exports
   `starSymbol(kind: ObjectKindDto): SymbolShape | null`, an exhaustive `switch` over the wire's 13
-  kinds: circle for a protostar, pre-main-sequence star, dwarf, subgiant, hot subdwarf and
-  `substellar` (a brown dwarf), ringed circle for a giant, supergiant and Wolf-Rayet star, diamond
+  kinds (14 since P06.T24.c): circle for a protostar, pre-main-sequence star, dwarf, subgiant, hot
+  subdwarf, stripped helium star (T24.c) and `substellar` (a brown dwarf), ringed circle for a giant, supergiant and Wolf-Rayet star, diamond
   for a white dwarf, triangle for a neutron star, square for a black hole, and `null` for
   `no_remnant`, which is listed and not drawn (the owner's draft of the symbol set). `ObjectKind` is
   the wire's `ObjectKindDto`; no client alias was added. `starSizeClass(shape, layer)` gives the mass
@@ -5027,6 +5045,61 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
     same |ν̇| (§4.2, read: small glitches of 9.78 μHz in 2,083 years) is 0.149. The arXiv PDF and,
     by the review's reading, the journal's HTML print the same; the journal's PDF was not readable.
     The sanity checks above compare the model with both readings.
+
+- **Deviations in T24.c, as built (lane `stripped-class`, 2026-10-21; at version 22, no bump;
+  `PROTOCOL_VERSION` 2 → 3).** The ruling is `decision-stripped-star-class.md` (2026-10-21): a
+  technical correction to T24.a, made under the owner's standing delegation, since the brainstorm
+  sets no edge for subdwarfs.
+  - _The cause._ Look-72's E-141 (LOOK72's `820E6EE00000008D`), a 2.37 M☉ stripped star at
+    log L ≈ 3.7, read `sdO3 HOT SUBDWARF` (plan 12's Risks, "The observed brief reads the summary's
+    primary", finding 4). `hot_subdwarf` had no upper edge, so every naked helium star from
+    20,000 K below the Wolf-Rayet floor was a hot subdwarf: some 1.7–8 M☉ at solar Z and up to
+    about 10 M☉ at low Z, most of plan 11's stripped stars.
+  - _API._ `classify::HOT_SUBDWARF_MAX_MASS` (1.7 M☉, re-exported);
+    `PeculiarClass::StrippedHeliumStar` (name `He-sd`, no suffix) and `PeculiarClass::prefix`
+    (`He-` for it, nothing for the rest), which `Classification`'s `Display` writes before the
+    luminosity class's prefix; the crate's `peculiar::stripped_helium_star`, which shares `hot_subdwarf`'s letter rule
+    through a private `helium_subdwarf`; `ObjectKind::StrippedHeliumStar` after `HotSubdwarf`
+    (`ALL` now holds 14); `ObjectKindDto::StrippedHeliumStar`, `"stripped_helium_star"`. The test
+    parser reads `He-` before a subdwarf's class.
+  - _The protocol._ `PROTOCOL_VERSION` is 3. `ObjectKindDto` is a closed enum (plan 04's reserved
+    list names only `MassLayer`, `Population`, `LayerStatus`, `Unit` and `ErrorCode` as growing),
+    and a closed enum that gains a variant bumps (`decision-gg-port-d0.md` §1). A version 2 and a
+    version 3 build read each other LINK INCOMPATIBLE. The server's `websocket.rs` welcome test now
+    reads the constant.
+  - _The server and the client._ The server's conversion and `brief_absolute_v` (living), and the
+    kind maps of `tests/{observed,systems_in_range}.rs`. `objectKindLabel` gives
+    `STRIPPED HELIUM STAR`; `starSymbol` a circle, with the hot subdwarf (compact, with no wind); the chart's
+    `STARS` filter counts it living; the H-R diagram plots it; the legend's circle names it; the
+    UX guide's symbol row and kind words list it.
+  - _Unchanged._ The pair class's `HOT_SUBDWARF_MASSES` window (0.32–0.8 M☉), whose doc now cites
+    Heber (2016, §3.4.1 and figure 26) for its 0.8 M☉ merger tracks and points to the edge (plan
+    11's Risks, R3). The Wolf-Rayet floor, the stripped stars' upper end. Colour, magnitude and
+    variability, which read T_eff, the state, and Ap and Bp only. The 40,000 K letter split, whose
+    doc now cites Götberg et al. (2018, §4.3) in place of "a convention".
+  - _No golden moved._ The class and the kind are derived at read time: no record field, fitted
+    table or knowledge-log line holds them, and no golden pins a helium star below the floor
+    (`classify.golden`'s `helium_star`, 10 M☉ at 10⁵ L☉, is above it and stays `WN4`). A bless of
+    every golden that reads a class or a kind (`stellar_classify`, `stellar_system`,
+    `stellar_briefs`, `multiplicity_golden`, `observe_in_system_golden`, the server's
+    `systems_in_range` and `scene_fixture`) left every file as it was, and
+    `golden_diff.py --base origin/rendering-and-planets` reports "No golden files changed".
+  - _Tests._ `classify::peculiar`: `the_hot_subdwarfs_end_at_1_7_solar_masses` (1.6 and 1.8 M☉
+    helium stars at mid-life on their own tracks; 1.7 M☉ itself is a hot subdwarf),
+    `a_stripped_helium_star_is_written_he_sd` (2.3 M☉ at 65,000 K is `He-sdO3`, at 30,000 K
+    `He-sdB`, at 15,000 K neither), `above_the_floor_a_helium_star_is_still_a_wolf_rayet_star`
+    (10 M☉ at 10⁵ L☉ is `WN4`), and a 2.3 M☉ helium star's track in the round-trip test. The 0.5 M☉
+    `sdB` test is unchanged. `tests/observe_brief.rs`: look-72's primary is a stripped helium star,
+    `He-sdO`, in the observed and the now summary. The protocol's `object_kind_strings` and
+    `protocol_version_is_three`. On the client, the kind's words (`StarList`), symbol, filter,
+    H-R placement and legend.
+  - _Corrected test._ `stellar::system`'s `the_kind_follows_the_phase_and_the_luminosity_class`
+    pinned a 10 M☉ helium star at 6 × 10⁴ L☉, and at 1.5 × 10⁵ L☉ at [Fe/H] = −1, as hot
+    subdwarfs; both are stripped helium stars now, and a 0.5 M☉ helium star of 20 L☉ at about
+    25,000 K is its hot subdwarf.
+  - _Recorded (R4)._ The 1.7 M☉ edge comes from a Z = 0.014 grid and is held at every Z
+    (provisional). Götberg et al. find absorption-line spectra up to 2.3 M☉ at Z = 0.006 and 0.002
+    (§4.3), so at low Z the edge is likely higher; not a blocker (2026-10-20 rule).
 
 ### Asked by rendering plan R06
 

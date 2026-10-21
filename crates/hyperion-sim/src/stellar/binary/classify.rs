@@ -241,8 +241,11 @@ pub const SYMBIOTIC_MIN_LUMINOSITY: SolarLuminosities = SolarLuminosities::new(1
 /// The masses of a hot subdwarf, M☉: a helium main-sequence star of 0.32–0.8 M☉, about the
 /// canonical 0.47 of a degenerate ignition (Heber 2016, PASP 128, 082001, section 3). The lower
 /// edge is the least core that ignites helium, 0.319 M☉ from a 2.05 M☉ progenitor (Han et al.
-/// 2002, MNRAS 336, 449, table 1); the upper holds the merger channel's He-sdO stars (Heber 2016,
-/// section 8; above about 1 M☉ a helium star is a stripped star, not a subdwarf).
+/// 2002, MNRAS 336, 449, table 1); the upper holds the merger channel's He-sdO stars, whose
+/// tracks run to 0.8 M☉ (Heber 2016, section 3.4.1 and figure 26). The kind's edge is wider: a
+/// helium star of up to [`HOT_SUBDWARF_MAX_MASS`](crate::stellar::classify::HOT_SUBDWARF_MAX_MASS)
+/// is a hot subdwarf by kind, and a heavier one a stripped helium star (P06.T24.c), so a
+/// 0.8–1.7 M☉ helium star in a pair has the kind and no pair class (plan 11's Risks).
 pub const HOT_SUBDWARF_MASSES: (SolarMasses, SolarMasses) =
     (SolarMasses::new(0.32), SolarMasses::new(0.8));
 

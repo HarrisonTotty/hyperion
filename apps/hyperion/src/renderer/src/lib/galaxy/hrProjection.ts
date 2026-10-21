@@ -188,6 +188,7 @@ function placing(kind: ObjectKindDto): "plot" | "neutronStar" | "blackHole" | "n
     case "supergiant":
     case "wolf_rayet":
     case "hot_subdwarf":
+    case "stripped_helium_star":
     case "white_dwarf":
     case "substellar":
       place = "plot";

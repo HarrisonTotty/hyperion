@@ -167,6 +167,7 @@ function filterOf(kind: ObjectKindDto): "living" | "remnants" | null {
     case "supergiant":
     case "wolf_rayet":
     case "hot_subdwarf":
+    case "stripped_helium_star":
     case "substellar":
       filter = "living";
       break;

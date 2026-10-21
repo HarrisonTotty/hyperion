@@ -4,12 +4,13 @@
 //!
 //! The landing look of P12.T11 (look-72) found GDG 0E0V00 E-141 of the universe LOOK72 read as a
 //! single star's red supergiant in its observed range row and as the hot subdwarf its companion
-//! had stripped it to in its observed summary, at the same emitted time. The row read the
-//! primary's single-star track and the summary its pair's timeline (`SystemStars::summary_at`);
-//! the row now reads the summary's primary, `SystemStars::brief_at`, the one brief of a system
-//! (P11.T11.a), and the now-mode row's model (`BriefModel`) reads it wherever its pair can have
-//! changed the primary. These tests build the galaxy as the server does, with its full potential,
-//! so that each system moves on its own line.
+//! had stripped it to in its observed summary, at the same emitted time; a star of its mass is a
+//! stripped helium star, not a hot subdwarf (P06.T24.c). The row read the primary's single-star
+//! track and the summary its pair's timeline (`SystemStars::summary_at`); the row now reads the
+//! summary's primary, `SystemStars::brief_at`, the one brief of a system (P11.T11.a), and the
+//! now-mode row's model (`BriefModel`) reads it wherever its pair can have changed the primary.
+//! These tests build the galaxy as the server does, with its full potential, so that each system
+//! moves on its own line.
 
 use std::sync::OnceLock;
 
@@ -155,8 +156,9 @@ fn observer_of(record: &SystemRecord, emitted: UniverseTime) -> Observer {
 /// its companion stripped it in a common envelope, so both the row and the summary show the
 /// stripped helium star, of 2–4 M☉ as stripping leaves an 11 M☉ primary (Götberg et al. 2018, A&A
 /// 615, A78; Laplace et al. 2020, A&A 637, A6), where its single-star track is a red supergiant
-/// then. Which kind the stripped star is called is the classifier's, and the test leaves it to
-/// the row and the summary agreeing.
+/// then. Its kind is a stripped helium star, `He-sdO`, in the observed summary and in the now
+/// summary at that time alike, since Götberg et al. find subdwarf-like spectra only up to 1.7 M☉
+/// (P06.T24.c).
 ///
 /// Run on its one build of the galaxy by [`observed_rows_and_summaries_read_one_state`].
 fn look72_stripped_primary_is_the_stripped_star_in_the_row_and_the_summary() {
@@ -186,6 +188,14 @@ fn look72_stripped_primary_is_the_stripped_star_in_the_row_and_the_summary() {
         brief.is_some_and(|b| b.kind() != ObjectKind::Supergiant),
         "{brief:?}"
     );
+    // A stripped helium star, not a hot subdwarf (P06.T24.c), observed and now alike.
+    assert_eq!(primary.kind(), ObjectKind::StrippedHeliumStar);
+    let class = primary.classification().to_string();
+    assert!(class.starts_with("He-sdO"), "{class}");
+    let now = stars.summary_at(emitted);
+    let now_primary = now.stars().first().expect("the system was born then");
+    assert_eq!(now_primary.kind(), ObjectKind::StrippedHeliumStar);
+    assert_eq!(now_primary.classification().to_string(), class);
     // Its single-star track is a red supergiant then, which the row read before the fix.
     let own = stars.primary().state_at(emitted).expect("formed");
     assert_eq!(own.phase(), Phase::EarlyAgb);

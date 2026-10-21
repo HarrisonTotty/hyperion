@@ -158,6 +158,7 @@ fn wire_kind(kind: ObjectKind) -> ObjectKindDto {
         ObjectKind::Supergiant => ObjectKindDto::Supergiant,
         ObjectKind::WolfRayet => ObjectKindDto::WolfRayet,
         ObjectKind::HotSubdwarf => ObjectKindDto::HotSubdwarf,
+        ObjectKind::StrippedHeliumStar => ObjectKindDto::StrippedHeliumStar,
         ObjectKind::WhiteDwarf => ObjectKindDto::WhiteDwarf,
         ObjectKind::NeutronStar => ObjectKindDto::NeutronStar,
         ObjectKind::BlackHole => ObjectKindDto::BlackHole,

@@ -1490,14 +1490,18 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     `pinned_collapse`; with a decision agent through main). (3) The stripped mass, 2.37 M☉ for a
     10.96 M☉ primary, is some 30% under the detailed grids' 3.32 M☉ (Götberg et al. 2018, Table 1,
     Z = 0.014) and 3.43 M☉ (Laplace et al. 2020, Table A.2), likely the Hertzsprung-gap core mass
-    of Hurley et al.'s fits. (4) A 2.25 M☉ stripped star is classified `HOT SUBDWARF`, but Götberg
-    et al. (2018) find subdwarf-like spectra only up to about 1.7 M☉, and Drout et al. (2023,
-    Science 382, 1287) put the 2–8 M☉ stripped stars between the subdwarfs and the Wolf-Rayet
-    stars; `hot_subdwarf` (`classify/peculiar.rs`) has no upper edge in mass or luminosity. A
-    paired helium star is also classified without the helium surface (`ClassExtras::NONE`) that a
-    single one gets. (5) The pin collapses the helium star at about 0.7 of its helium main
-    sequence (Hurley et al. 2000, eq. 79, gives 3.4–3.6 Myr at 2.25–2.37 M☉, against the 2.53 Myr
-    to the pin), not after core-helium depletion.
+    of Hurley et al.'s fits. (4) **Closed** by galaxy plan 06's P06.T24.c (lane `stripped-class`,
+    2026-10-21; `decision-stripped-star-class.md`): a 2.25 M☉ stripped star was classified
+    `HOT SUBDWARF`, but Götberg et al. (2018) find subdwarf-like spectra only up to about 1.7 M☉,
+    and Drout et al. (2023, Science 382, 1287) put the 2–8 M☉ stripped stars between the subdwarfs
+    and the Wolf-Rayet stars. Hot subdwarfs now end at 1.7 M☉, and the heavier helium stars below
+    the Wolf-Rayet floor are `STRIPPED HELIUM STAR`s (`He-sdO3` here, in the observed and the now
+    summary alike). That a paired helium star is classified without the helium surface
+    (`ClassExtras::NONE`) a single one gets is plan 11's P11.T11.b.
+    (5) The pin collapses the helium star at about 0.7 of its helium main sequence (Hurley et al.
+    2000, eq. 79, gives 3.71 and 3.38 Myr at 2.25 and 2.37 M☉, against the 2.53 Myr to the pin),
+    not after core-helium depletion; ruled not a blocker (`decision-observed-class-findings.md`
+    §B.1).
 - **P12.T11.b as built (`lane/73-p12-t11b-hr-mode`, 2026-10-21, at `GENERATOR_VERSION` 22).**
   Client only: no Rust, protocol, binding, server, sim, GPU or golden change, nothing generated
   moves, and the guide is not edited. The `HR DIAGRAM` page names the mode and time of the answer

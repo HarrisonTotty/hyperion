@@ -25,7 +25,8 @@ const STAR_SHAPES: ReadonlyArray<StarShapeEntry> = [
   {
     shape: "circle",
     name: "Circle",
-    meaning: "PROTOSTAR, PRE-MAIN-SEQUENCE STAR, DWARF, SUBGIANT, HOT SUBDWARF, BROWN DWARF",
+    meaning:
+      "PROTOSTAR, PRE-MAIN-SEQUENCE STAR, DWARF, SUBGIANT, HOT SUBDWARF, STRIPPED HELIUM STAR, BROWN DWARF",
   },
   { shape: "ringed-circle", name: "Ringed circle", meaning: "GIANT, SUPERGIANT, WOLF-RAYET STAR" },
   { shape: "diamond", name: "Diamond", meaning: "WHITE DWARF" },
@@ -114,7 +115,7 @@ export function StarShapeLegend({ compactRemnants, planets = false }: StarShapeL
   return (
     <>
       {shown.map(({ shape, name, meaning }) => (
-        // The circle's six kinds are longer than a narrow column, so its words may wrap.
+        // The circle's seven kinds are longer than a narrow column, so its words may wrap.
         <p className={itemClass(meaning)} key={shape}>
           <LegendSymbol shape={shape} diameterRem={SIZE_CLASS_REM[4]} filled name={name} />
           {kindsOf(meaning)}

@@ -317,6 +317,7 @@ fn brief_absolute_v(brief: &StellarBrief) -> Option<Magnitudes> {
         | ObjectKind::Supergiant
         | ObjectKind::WolfRayet
         | ObjectKind::HotSubdwarf
+        | ObjectKind::StrippedHeliumStar
         | ObjectKind::Substellar => true,
         ObjectKind::WhiteDwarf
         | ObjectKind::NeutronStar
@@ -563,6 +564,7 @@ fn object_kind(kind: ObjectKind) -> ObjectKindDto {
         ObjectKind::Supergiant => ObjectKindDto::Supergiant,
         ObjectKind::WolfRayet => ObjectKindDto::WolfRayet,
         ObjectKind::HotSubdwarf => ObjectKindDto::HotSubdwarf,
+        ObjectKind::StrippedHeliumStar => ObjectKindDto::StrippedHeliumStar,
         ObjectKind::WhiteDwarf => ObjectKindDto::WhiteDwarf,
         ObjectKind::NeutronStar => ObjectKindDto::NeutronStar,
         ObjectKind::BlackHole => ObjectKindDto::BlackHole,

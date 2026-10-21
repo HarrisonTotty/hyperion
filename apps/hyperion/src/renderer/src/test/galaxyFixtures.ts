@@ -648,6 +648,7 @@ export function aStellarBrief(
     case "subgiant":
     case "wolf_rayet":
     case "hot_subdwarf":
+    case "stripped_helium_star":
       brief = { ...dwarf, kind };
       break;
   }

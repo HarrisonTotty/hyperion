@@ -46,6 +46,7 @@ export function starSymbol(kind: ObjectKindDto): SymbolShape | null {
     case "dwarf":
     case "subgiant":
     case "hot_subdwarf":
+    case "stripped_helium_star":
     case "substellar":
       shape = "circle";
       break;
