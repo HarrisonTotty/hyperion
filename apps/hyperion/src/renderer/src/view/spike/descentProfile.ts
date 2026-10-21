@@ -931,8 +931,14 @@ export function datumDirection(figure: BodyFigure, p: Vec3): Vec3 {
  * SplitMix64's step, as Vigna's `splitmix64.c` and JDK 8's `SplittableRandom` have it: the golden
  * gamma increment 0x9e3779b97f4a7c15 (Steele, Lea and Flood 2014, OOPSLA, Fig. 16) and Stafford's
  * Mix13 output mixer (the paper's `mix64variant13`): the next state and a 64-bit output.
+ *
+ * @remarks
+ * The spike's own draws, of its landing sites (here and R10.T14.c's `bodySiteOf`), which belong to
+ * no universe and so take none of the sim's streams.
+ *
+ * @param state - The generator's state, an unsigned 64-bit integer.
  */
-function splitMix64(state: bigint): readonly [bigint, bigint] {
+export function splitMix64(state: bigint): readonly [bigint, bigint] {
   const mask = (1n << 64n) - 1n;
   const next = (state + 0x9e37_79b9_7f4a_7c15n) & mask;
   let z = next;
@@ -941,8 +947,8 @@ function splitMix64(state: bigint): readonly [bigint, bigint] {
   return [next, z ^ (z >> 31n)];
 }
 
-/** The unit fraction of a 64-bit draw's top 53 bits, in [0, 1). */
-function unitOf(draw: bigint): number {
+/** The unit fraction of a 64-bit draw's top 53 bits, in [0, 1), exact in a double. */
+export function unitOf(draw: bigint): number {
   return Number(draw >> 11n) / 2 ** 53;
 }
 

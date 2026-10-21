@@ -78,7 +78,8 @@ export interface ControllerFrame {
   /** The callback's start, `performance.now()` ms: its `spike.frame` span's start. */
   readonly callbackStartMs: number;
   readonly callbackMs: number;
-  readonly passesSubmitted: number;
+  /** `null` over a generated world, whose frames count no passes (`SpikeFrameSample`'s). */
+  readonly passesSubmitted: number | null;
   readonly patchesHard: number;
   readonly streaming: boolean;
 }

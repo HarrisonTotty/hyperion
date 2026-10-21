@@ -23,6 +23,7 @@ const DOM_TESTS = [
   "src/renderer/src/view/spike/spikeRun.test.ts",
   "src/renderer/src/view/terrain/coarseFieldStore.test.ts",
   "src/renderer/src/view/terrain/session.test.ts",
+  "src/renderer/src/view/terrain/sessionContacts.test.ts",
   "src/renderer/src/view/terrain/sessionPasses.test.ts",
   "src/renderer/src/wasm/useSurfaceModuleCheck.test.ts",
 ];

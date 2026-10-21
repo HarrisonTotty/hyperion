@@ -45,6 +45,8 @@ import type {
   GraphicsLaunchMode,
   SpikePassRow,
   SpikePassTimer,
+  SpikeStyleName,
+  SpikeWorldName,
 } from "../preload/api";
 import type { DrmMemoryReading, NvidiaReading } from "./fdinfo";
 import type { GpuClockReadings, GpuClockSample, GpuClockSource } from "./gpuClocks";
@@ -141,6 +143,14 @@ const ESTIMATED_ROWS: ReadonlyArray<EstimatedRow> = Object.keys(ESTIMATE_OF).fil
 
 /** The finding a pass row over its estimate carries (decision-r05-high-atmosphere.md). */
 export const OVER_ESTIMATE_FINDING = "over its estimate: a finding for T19 and R12";
+
+/**
+ * Why a generated world's run states no untimed passes (plan R10, R10.T14.c): its main view's
+ * drawer submits its passes over many of the timer's resolves, and neither it nor the engine counts
+ * them as they are made (the renderer's `SpikeFrameSample.passesSubmitted` `null`), so that its
+ * report's count is of nothing, not a measurement of 0.
+ */
+export const UNTIMED_NOT_COUNTED = "no pass counted over a generated world";
 
 /** Frame intervals summarised as Design note 21 reads them. */
 export interface FrameStats {
@@ -271,6 +281,13 @@ export interface RunDescription {
   readonly setting: SpikeSetting;
   /** The spike's seed, a u64 in decimal. */
   readonly seed: string;
+  /** The world flown (`--world`, plan R10, R10.T14.c). */
+  readonly world: SpikeWorldName;
+  /**
+   * The style its main view was asked to draw in over a generated world (`--style`, R10.T14.c), or
+   * `null` over the test planet, which takes none: its main view is `SPIKE LIT`.
+   */
+  readonly style: SpikeStyleName | null;
   /** Every option of the spike flag as given (T13.c). */
   readonly options: Readonly<Record<string, string | number | boolean>>;
   /** The Chromium switches the launch applied, as `--name=value`. */
@@ -832,6 +849,13 @@ export interface DescentResults {
     readonly launchMode: GraphicsLaunchMode | "native-replay";
     readonly setting: SpikeSetting;
     readonly seed: string;
+    /**
+     * The world flown and its main view's style over a generated world (R10.T14.c), the style
+     * `null` over the test planet; a file without them, written before them, is the test planet's
+     * ({@link worldOfRun}).
+     */
+    readonly world: SpikeWorldName;
+    readonly style: SpikeStyleName | null;
     readonly options: RunDescription["options"];
     readonly switches: ReadonlyArray<string>;
     readonly timer: SpikePassTimer;
@@ -876,7 +900,12 @@ export interface DescentResults {
     readonly timer: SpikePassTimer;
     /** The tolerance of one pass's time, ms: the quantum on a `quantized` timer, else 0. */
     readonly tolerancePerPassMs: number;
-    readonly untimedPasses: number;
+    /**
+     * Passes beyond the timer's 64 a frame, untimed, over the run; missing over a generated world
+     * ({@link UNTIMED_NOT_COUNTED}), where none is counted. A file written before R10.T14.c, and a
+     * native replay's (`tools/gpu-replay`), holds the bare count, which is read as it is.
+     */
+    readonly untimedPasses: Measured<number>;
     /** Each pass's times over every frame they arrived for, complete or not. */
     readonly passes: Measured<ReadonlyArray<PassFigures>>;
     /** The sum of a frame's timed passes, at the 95th percentile, over the complete frames, ms. */
@@ -1554,6 +1583,8 @@ export function buildResults(input: ResultsInput): DescentResults {
       launchMode: run.launchMode,
       setting,
       seed: run.seed,
+      world: run.world,
+      style: run.style,
       options: run.options,
       switches: run.switches,
       timer: report.timer,
@@ -1576,7 +1607,10 @@ export function buildResults(input: ResultsInput): DescentResults {
     gpu: {
       timer: report.timer,
       tolerancePerPassMs,
-      untimedPasses: report.untimedPasses,
+      untimedPasses:
+        run.world === "terrain-test"
+          ? missing(UNTIMED_NOT_COUNTED)
+          : measured(report.untimedPasses),
       passes,
       sumP95Ms,
       rows,
@@ -1767,6 +1801,11 @@ export function validateResults(value: unknown): string[] {
     if (!["full", "quantized", "absent"].includes(String(run["timer"]))) {
       problems.push("run.timer is not full, quantized or absent");
     }
+    if (worldOfRun(run) === null) {
+      problems.push(
+        "run.world is not test-planet or terrain-test, or run.style not its world's: none on test-planet, photorealistic or wireframe on terrain-test",
+      );
+    }
     checkLoadAverage(run, problems);
     if (!Array.isArray(run["switches"])) {
       problems.push("run.switches is not a list");
@@ -1800,9 +1839,49 @@ export function validateResults(value: unknown): string[] {
   checkGpuSlices(value, trace, problems);
   checkIncompleteFrames(value, problems);
   checkClocks(value, problems);
+  checkUntimedPasses(value, problems);
   checkRestOfFrame(value, problems);
   // A whole-run null column without a reason is found by both checks.
   return [...new Set(problems)];
+}
+
+/**
+ * A results file's world and its main view's style (`run.world`, `run.style`; plan R10,
+ * R10.T14.c), or `null` where the world is not one of its choices or the style not its world's:
+ * none (`null`) over the test planet, whose main view is the spike's own lit view, and
+ * `photorealistic` or `wireframe` over the terrain world.
+ *
+ * @remarks
+ * A file with neither, written before them, is the test planet's with no style, as it was flown.
+ */
+export function worldOfRun(run: Readonly<Record<string, unknown>>): {
+  readonly world: SpikeWorldName;
+  readonly style: SpikeStyleName | null;
+} | null {
+  const world = run["world"] ?? "test-planet";
+  const style = run["style"] ?? null;
+  if (world === "test-planet") {
+    return style === null ? { world, style } : null;
+  }
+  return world === "terrain-test" && (style === "photorealistic" || style === "wireframe")
+    ? { world, style }
+    : null;
+}
+
+/**
+ * `gpu.untimedPasses`: a figure of a count, missing with its reason over a generated world
+ * ({@link UNTIMED_NOT_COUNTED}), or the bare count of a file written before R10.T14.c and of a
+ * native replay's, which stays valid as it is.
+ */
+function checkUntimedPasses(value: Readonly<Record<string, unknown>>, problems: string[]): void {
+  if (!isRecord(value["gpu"])) {
+    return;
+  }
+  const untimed = childAt(value, ["gpu", "untimedPasses"]);
+  const figure = isRecord(untimed) ? untimed["value"] : untimed;
+  if (!(isWhole(figure, 0) || (isRecord(untimed) && figure === null))) {
+    problems.push("gpu.untimedPasses is not a count");
+  }
 }
 
 /**
@@ -2608,6 +2687,13 @@ function textOr<T>(figure: Measured<T>, show: (value: T) => string): string {
   return figure.value === null ? `— (${figure.reason})` : show(figure.value);
 }
 
+/** The summary's untimed passes: `3 untimed passes`, or none claimed, with the reason. */
+function untimedPassesText(figure: Measured<number>): string {
+  return figure.value === null
+    ? `untimed passes — (${figure.reason})`
+    : `${figure.value} untimed passes`;
+}
+
 /** The intervals a file's criterion reads, and where they come from, in words. */
 function intervalsOf(frames: DescentResults["frames"]): {
   readonly source: string;
@@ -2774,7 +2860,7 @@ export function summaryMarkdown(results: DescentResults): string {
     `- **Overall:** ${criteria.overall}${run.quiet.provisional ? (load.value === null ? ` (provisional: ${load.reason})` : " (provisional: not a quiet machine)") : ""}`,
     `- **Machine:** ${run.machine.cpu}, ${run.machine.logicalCores} threads; GPU ${textOr(run.machine.gpu, (gpu) => gpu.description ?? `${gpu.vendorId}:${gpu.deviceId}`)}; governor ${textOr(run.machine.governor, (governor) => governor)}; load average ${load.value === null ? `none (${load.reason})` : load.value.map((average) => average.toFixed(2)).join(", ")}`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
-    `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, seed ${run.seed}, window ${run.shown ? "shown" : "hidden"}, canvas ${run.canvas.widthPx} × ${run.canvas.heightPx} px`,
+    `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, seed ${run.seed}, world ${run.world}${run.style === null ? "" : `, style ${run.style}`}, window ${run.shown ? "shown" : "hidden"}, canvas ${run.canvas.widthPx} × ${run.canvas.heightPx} px`,
     `- **T:** ${textOr(run.periodMs, (period) => `${formatMs(period)} ms`)}; warm-up ${run.warmupS} s`,
     `- **Trace:** ${textOr(run.trace, describeTrace)}`,
     `- **Incomplete pass times:** ${textOr(results.gpu.incompleteFrames, describeIncomplete)}`,
@@ -2833,7 +2919,7 @@ export function summaryMarkdown(results: DescentResults): string {
     `- nvidia-smi less its baseline: ${mibOr(memory.peakNvidiaDeviceLessBaselineBytes)}; the GPU process alone: ${mibOr(memory.peakNvidiaGpuProcessBytes)}`,
     `- Adapter tally: ${mib(memory.adapterPeakBytes)}`,
     "",
-    `Uploads ${mib(results.uploads.bytes)}; ${results.pipelines.late.length} pipelines created after warm-up; ${results.gpu.untimedPasses} untimed passes.`,
+    `Uploads ${mib(results.uploads.bytes)}; ${results.pipelines.late.length} pipelines created after warm-up; ${untimedPassesText(results.gpu.untimedPasses)}.`,
     "",
   ].join("\n");
 }

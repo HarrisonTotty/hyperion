@@ -93,6 +93,14 @@ export interface ViewBody {
    */
   readonly retarded: RetardedCentre | null;
   /**
+   * Its present velocity in the system frame, m/s from the barycentre along the galactic axes, for
+   * a body drawn at the present: the ship's local body in a served scene alone
+   * (`SceneFrame.localBodyVelocityMPerS`, which the own ship's velocity in its frame is held
+   * against), absent for every other body, whose velocity is its retarded one (plan R10, R10.T14.c;
+   * decision-r10-t14c-leans §5). The terrain session's contacts chain a craft's frame through it.
+   */
+  readonly presentVelocityMPerS?: Vec3;
+  /**
    * Its rotation from body-fixed to body axes at the time it is drawn at, or `null` where rotation
    * is not modelled: a server body's from its rotation section (plan R07, T2.b), at the frame's
    * time for the ship's local body, drawn at the present, and at its light's emission for every

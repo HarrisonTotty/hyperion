@@ -169,6 +169,15 @@ describe("the spike's metrics", () => {
     expect(metrics.report(EXTRA).untimedPasses).toBe(3);
   });
 
+  it("counts no untimed pass of a frame that counts none, and records the frame", () => {
+    const metrics = new SpikeMetrics(OPTIONS);
+    metrics.frame(sample(1, 0, { passesSubmitted: null }));
+    metrics.frame(sample(2, 0.1, { passesSubmitted: TIMED_PASSES_A_FRAME + 2 }));
+    const report = metrics.report(EXTRA);
+    expect(report.untimedPasses).toBe(2);
+    expect(report.frames.scriptTimesS).toEqual([0, 0.1]);
+  });
+
   it("keeps each segment's streaming figures to its own frames and events", () => {
     const metrics = new SpikeMetrics(OPTIONS);
     metrics.frame(sample(1, 0.0, { patchesHard: 100, patchesCalibrated: 40 }));

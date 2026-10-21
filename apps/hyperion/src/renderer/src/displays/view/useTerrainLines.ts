@@ -64,10 +64,14 @@ const NOTHING_HELD: HeldUnits = {
  * (`faults`) or the session's (`GroundSnapshot.sessionFault`; decision-r10-t12-leans §5).
  *
  * @param faults - The view's fault lines, the terrain's among them.
+ * @param remedy - What the survey line's two failed states end with (`TerrainLabelInput.remedy`):
+ *   `VIEW`'s `reopen VIEW to retry` unless given, the descent spike's `relaunch to retry` on the
+ *   spike (plan R10, R10.T14.c).
  */
 export function useTerrainLines(
   snapshot: GroundSnapshot | null,
   faults: ReadonlyArray<string>,
+  remedy?: string,
 ): TerrainLines | null {
   const [held, setHeld] = useState<HeldUnits>(NOTHING_HELD);
   if (snapshot === null) {
@@ -89,6 +93,7 @@ export function useTerrainLines(
       slantFromCamera: snapshot.slantFromCamera,
       padWidthM: GROUND_READOUT_OPTIONS.padWidthM,
       surfaceUnset: snapshot.surfaceUnset,
+      remedy,
     },
     before,
   );

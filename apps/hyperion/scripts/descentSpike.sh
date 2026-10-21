@@ -8,7 +8,18 @@
 # Spike options (the client's, `src/main/cli.ts`): --setting high|low, --seed <u64>, --smoke,
 # --out <dir>, --workers <n>, --vertex-path baked-offsets|face-differences, --normals double|mesh,
 # --ridged on|off, --dawn-safety on|off, --capture <dir>, --trace-profile on|off (V8's CPU profiler
-# and `gpu` in the trace, off by default: a profiled run is a diagnostic, never judged; R05.T14.e).
+# and `gpu` in the trace, off by default: a profiled run is a diagnostic, never judged; R05.T14.e),
+# --world test-planet|terrain-test and --style photorealistic|wireframe (R10.T14.c).
+#
+# --world test-planet, the default, flies R05's test planet. --world terrain-test flies TERRAIN
+# TEST's moon over a generated world's terrain: its field is served in the page by TERRAIN TEST's
+# fixture through VIEW's terrain session, not by the server, and its main view is VIEW's own frame
+# drawer in --style's style (photorealistic by default). The server this script starts still runs
+# on either world, as Design note 20's stand-in for the CPU a server takes. The terrain world
+# measures its descent through the session before it flies (about 1,600 bakes, some 40 s on three
+# workers), so its run is given 13 minutes more: the field's 2-minute hold and one site's 10 minutes
+# of bakes at their limits, and a minute's margin. The client refuses --style on the test planet,
+# and --ridged on, --vertex-path and --normals on the terrain world.
 #
 # --companion-load <threads> runs that many busy threads beside the run, standing in for the
 # server's arrival work (Design note 20). --cold-cache starts with an empty Chromium GPU shader
@@ -53,10 +64,16 @@ if ! [[ "$companion" =~ ^[0-9]+$ ]]; then
     exit 2
 fi
 smoke=0
+terrain=0
+previous=""
 for arg in ${spike_args[@]+"${spike_args[@]}"}; do
     if [[ "$arg" == --smoke ]]; then
         smoke=1
     fi
+    if [[ "$arg" == --world=terrain-test || ( "$previous" == --world && "$arg" == terrain-test ) ]]; then
+        terrain=1
+    fi
+    previous="$arg"
 done
 
 profile=""
@@ -75,7 +92,9 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-limit=$(( smoke == 1 ? 300 : 3600 ))
+# The client's watchdog ends a run first (status 3): 3 minutes for a smoke and 45 for a descent,
+# each 13 more on the terrain world (`spikeWatchdogMs`), so that this limit stays above it.
+limit=$(( (smoke == 1 ? 300 : 3600) + (terrain == 1 ? 780 : 0) ))
 setsid timeout --kill-after=10 "$(( limit + 60 ))" \
     cargo run --release --quiet --manifest-path "$repo/Cargo.toml" -p hyperion-server -- \
     --num-workers 2 --port "$port" >/dev/null 2>&1 &

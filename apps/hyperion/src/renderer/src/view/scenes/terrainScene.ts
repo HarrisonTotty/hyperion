@@ -215,8 +215,12 @@ export function terrainMoonRotationAt(sceneS: number): Rotation3 {
   return rotation3FromRows([vec3(c, -s, 0), vec3(ce * s, ce * c, -se), vec3(se * s, se * c, ce)]);
 }
 
-/** The pole, the body-fixed +z, along the galactic axes. */
-const POLE: Vec3 = vec3(0, -Math.sin(TERRAIN_OBLIQUITY_RAD), Math.cos(TERRAIN_OBLIQUITY_RAD));
+/** `TEST MOON`'s pole, the body-fixed +z, along the galactic axes. */
+export const TERRAIN_MOON_POLE: Vec3 = vec3(
+  0,
+  -Math.sin(TERRAIN_OBLIQUITY_RAD),
+  Math.cos(TERRAIN_OBLIQUITY_RAD),
+);
 
 /** The smoothstep 3u² − 2u³ of `u` clamped to [0, 1]. */
 function smoothstep(u: number): number {
@@ -283,7 +287,7 @@ function shipVelocityMPerS(tS: number, rotation: Rotation3): Vec3 {
     sub(terrainShipBodyFixedM(after), terrainShipBodyFixedM(before)),
     1 / sceneSpanS,
   );
-  const omega = scale(POLE, (2 * Math.PI) / TERRAIN_ROTATION_PERIOD_S);
+  const omega = scale(TERRAIN_MOON_POLE, (2 * Math.PI) / TERRAIN_ROTATION_PERIOD_S);
   return add(
     rotateToBody(rotation, fixed),
     cross(omega, rotateToBody(rotation, terrainShipBodyFixedM(tS))),
@@ -313,7 +317,7 @@ function shipAttitude(tS: number, rotation: Rotation3): Quaternion {
  * The scene's host disc, a Sun at the star, made once and held by every frame; frozen, since every
  * frame shares it.
  */
-const TERRAIN_HOST_DISCS: ReadonlyArray<HostDiscDto> = Object.freeze([
+export const TERRAIN_HOST_DISCS: ReadonlyArray<HostDiscDto> = Object.freeze([
   frozenHostDisc(sunLikeHostDisc({ star: 0 })),
 ]);
 
@@ -329,7 +333,7 @@ export function terrainSceneAt(tS: number): ViewScene {
     figure: {
       equatorialRadiusM: header.equatorial_radius_m,
       polarRadiusM: header.polar_radius_m,
-      pole: POLE,
+      pole: TERRAIN_MOON_POLE,
     },
     labels: [],
     bondRatioFinding: null,

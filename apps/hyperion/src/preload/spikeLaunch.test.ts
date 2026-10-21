@@ -20,6 +20,8 @@ const LAUNCH: SpikeLaunch = {
   dawnSafety: "off",
   capture: "/data/capture=1",
   traceProfile: "on",
+  world: "terrain-test",
+  style: "wireframe",
 };
 
 describe("the spike's switch", () => {
@@ -60,13 +62,43 @@ describe("readSpikeLaunch", () => {
     ["capture", 3],
     ["traceProfile", "yes"],
     ["traceProfile", null],
+    ["world", "earth"],
+    ["world", null],
+    ["style", "lit"],
+    ["style", null],
   ])("refuses %s = %j", (field, value) => {
     expect(readSpikeLaunch({ ...LAUNCH, [field]: value })).toBeNull();
   });
 
+  it("reads the terrain world in each style, and the test planet in none", () => {
+    for (const style of ["photorealistic", "wireframe"] as const) {
+      expect(readSpikeLaunch({ ...LAUNCH, world: "terrain-test", style })).toEqual({
+        ...LAUNCH,
+        world: "terrain-test",
+        style,
+      });
+    }
+    expect(readSpikeLaunch({ ...LAUNCH, world: "test-planet", style: null })).toEqual({
+      ...LAUNCH,
+      world: "test-planet",
+      style: null,
+    });
+  });
+
+  it.each(["photorealistic", "wireframe"] as const)(
+    "refuses the test planet with a style, %s: its main view is SPIKE LIT",
+    (style) => {
+      expect(readSpikeLaunch({ ...LAUNCH, world: "test-planet", style })).toBeNull();
+    },
+  );
+
   it("refuses options with a field missing", () => {
     const { traceProfile: _, ...partial } = LAUNCH;
     expect(readSpikeLaunch(partial)).toBeNull();
+    const { world: _world, ...worldless } = LAUNCH;
+    expect(readSpikeLaunch(worldless)).toBeNull();
+    const { style: _style, ...styleless } = LAUNCH;
+    expect(readSpikeLaunch(styleless)).toBeNull();
     expect(readSpikeLaunch(null)).toBeNull();
   });
 });

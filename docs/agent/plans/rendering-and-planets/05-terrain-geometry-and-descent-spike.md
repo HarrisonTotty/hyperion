@@ -754,6 +754,12 @@ re-checked against the cited source in that task, as the galaxy README's Figures
    the rule binds every setting and style over surveyed ground, and off the survey the reference
    surface stands and the forced region holds nothing._
 
+   _From R10.T14.c (decision-r10-t14c-leans §2): "above the spheroid under it" reads "above the
+   ground under it where the client holds it, the drawn ground of the resident bakes
+   (`heldGroundUnder`), and above the spheroid elsewhere"; its speed is along the spheroid's normal
+   there. A craft held in another body's frame is judged against the body it nears (§5 of that
+   ruling)._
+
 10. **The patch cache, and who owns its layout.** Patches are cached by patch, not by view, in one
     cache per body. R10 owns the cache's sizes, formats and slot layout per setting (its Design note
     15 and T14); this plan owns the cache's behaviour, the eviction rule, the pins and the draw-set

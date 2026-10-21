@@ -433,6 +433,10 @@ export function viewSceneFromServer(
     // the distance: 1.6 µrad for an Earth, 42 µrad for a Jupiter, under a pixel but in a field
     // narrower than about 4.6° across 1,920 px on a fast giant.
     let drawnAt: UniverseTime;
+    // The present velocity of the body drawn at the present, the local body alone, which the
+    // terrain session's contacts chain a craft's frame through (R10.T14.c;
+    // decision-r10-t14c-leans §5): the velocity the own ship's is held against below.
+    let presentVelocityMPerS: Vec3 | null = null;
     switch (seen.kind) {
       case "placed":
         // The local body is drawn at the present, but lit, like every body, at its retarded time:
@@ -441,6 +445,7 @@ export function viewSceneFromServer(
         centreM = seen.id === frame.localBody ? seen.geometricM : seen.apparentM;
         retarded = seenRetarded(seen);
         drawnAt = seen.id === frame.localBody ? frame.time : seen.emitted;
+        presentVelocityMPerS = seen.id === frame.localBody ? frame.localBodyVelocityMPerS : null;
         break;
       case "contact":
         centreM = seen.apparentM;
@@ -458,6 +463,7 @@ export function viewSceneFromServer(
       hillRadiusM: seen.kind === "placed" ? seen.hillRadiusM : null,
       centreM,
       retarded,
+      ...(presentVelocityMPerS === null ? {} : { presentVelocityMPerS }),
       rotation: rotationAt(record.rotation, drawnAt),
       appearance,
       orbitNormal: record.orbit.state === "ok" ? orbitNormal(record.orbit.value.orbit) : null,

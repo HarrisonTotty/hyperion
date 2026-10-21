@@ -35,6 +35,8 @@ export const TEST_SPIKE_LAUNCH: SpikeLaunch = {
   dawnSafety: "on",
   capture: null,
   traceProfile: "off",
+  world: "test-planet",
+  style: null,
 };
 
 /**

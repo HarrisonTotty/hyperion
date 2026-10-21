@@ -40,6 +40,18 @@ export type SpikeNormals = "double" | "mesh";
 /** An on/off option. */
 export type SpikeSwitch = "on" | "off";
 
+/**
+ * The world the spike flies (`--world`, plan R10, R10.T14.c): R05's test planet, or `TERRAIN TEST`'s
+ * moon through the terrain session; the renderer's `SpikeWorldName` is this type.
+ */
+export type SpikeWorldName = "test-planet" | "terrain-test";
+
+/**
+ * The style the spike's main view draws in over a generated world (`--style`, R10.T14.c), through
+ * `VIEW`'s frame drawer; the test planet's main view is the spike's own lit view.
+ */
+export type SpikeStyleName = "photorealistic" | "wireframe";
+
 /** The spike's options as the command line gave them (T13.c). */
 export interface SpikeLaunch {
   readonly setting: SpikeSettingName;
@@ -65,6 +77,14 @@ export interface SpikeLaunch {
    * diagnostic, never judged (decision-r05-trace-windows.md).
    */
   readonly traceProfile: SpikeSwitch;
+  /** The world flown (`--world`, R10.T14.c): the test planet unless given. */
+  readonly world: SpikeWorldName;
+  /**
+   * The main view's style over a generated world (`--style`, R10.T14.c): photorealistic unless
+   * given; `null` over the test planet, which takes no `--style`, its main view being the spike's
+   * own lit view (`SPIKE LIT`).
+   */
+  readonly style: SpikeStyleName | null;
 }
 
 /** Where a spike run's results file and its summary were written. */

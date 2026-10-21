@@ -20,6 +20,16 @@
  * in the trace, off by default; a profiled run is a diagnostic, never judged). Each of its own is
  * refused without the flag.
  *
+ * `--world test-planet|terrain-test` is the world it flies (plan R10, R10.T14.c): R05's test planet
+ * by default, or `TERRAIN TEST`'s moon, whose field the fixture serves through `VIEW`'s terrain
+ * session. `--style photorealistic|wireframe` is the style the terrain world's main view draws in
+ * through `VIEW`'s frame drawer, photorealistic by default; a test-planet run's launch records no
+ * style (`SpikeLaunch.style` `null`). Three pairings are refused: `--style`
+ * with the test planet, whose main view is the spike's own lit view (`SPIKE LIT`); `--ridged on`
+ * with the terrain world, since the ridges are the test planet's; and `--vertex-path` or
+ * `--normals` with the terrain world, whose session's passes take the setting's own terrain, until
+ * a later task gives them the variants.
+ *
  * `--views-check` runs the several-views check in the consoles' `VIEW` (plan R07, T20), with the
  * spike's `--setting`, `--smoke` and `--out`; the spike's other options are refused with it, and
  * so is `--descent-spike`. With `--terrain` (plan R10, R10.T16.d; decision-r10-t16-contracts §6)
@@ -80,6 +90,8 @@ const SPIKE_OPTIONS = [
   "dawnSafety",
   "capture",
   "traceProfile",
+  "world",
+  "style",
 ] as const;
 
 /** The spike's options that `--views-check` takes too. */
@@ -220,6 +232,18 @@ export function buildCommand(version: string): Command {
         "off",
       ]),
     )
+    .addOption(
+      new Option("--world <WORLD>", "the world the spike flies (default test-planet)").choices([
+        "test-planet",
+        "terrain-test",
+      ]),
+    )
+    .addOption(
+      new Option(
+        "--style <STYLE>",
+        "the style the terrain world's main view draws in (default photorealistic)",
+      ).choices(["photorealistic", "wireframe"]),
+    )
     .exitOverride();
 }
 
@@ -273,12 +297,47 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
     // The low setting's cache does not fit `BakedOffsets` (R05 Design note 4).
     command.error("error: --vertex-path baked-offsets does not fit the low setting's cache");
   }
+  const refusal = worldRefusal(options, spike);
+  if (refusal !== null) {
+    command.error(`error: ${refusal}`);
+  }
   return { address, port, setting: spike.setting, spike };
 }
 
 /** The `--setting` given, `high` without one (commander has checked its choices). */
 function settingOf(options: Readonly<Record<string, unknown>>): QualitySettingName {
   return options["setting"] === "low" ? "low" : "high";
+}
+
+/**
+ * Why the spike's options cannot fly together on their world (R10.T14.c), or `null` where they
+ * can: `--style` with the test planet, `--ridged on` with the terrain world, or the terrain
+ * variants with it.
+ */
+function worldRefusal(
+  options: Readonly<Record<string, unknown>>,
+  spike: SpikeLaunch,
+): string | null {
+  let refusal: string | null;
+  switch (spike.world) {
+    case "test-planet":
+      refusal =
+        options["style"] === undefined
+          ? null
+          : "--style is an option of --world terrain-test: the test planet's main view is the spike's own lit view, SPIKE LIT";
+      break;
+    case "terrain-test": {
+      const variant = spike.vertexPath !== null ? "--vertex-path" : "--normals";
+      refusal =
+        spike.ridged === "on"
+          ? "--ridged on does not fit --world terrain-test: the ridges are the test planet's"
+          : spike.vertexPath === null && spike.normals === null
+            ? null
+            : `${variant} does not fit --world terrain-test yet: its terrain session's passes take the setting's own terrain`;
+      break;
+    }
+  }
+  return refusal;
 }
 
 /** A commander attribute name as its option: `vertexPath` is `vertex-path`. */
@@ -306,6 +365,7 @@ function spikeLaunchOf(options: Readonly<Record<string, unknown>>): SpikeLaunch 
   const workers = options["workers"];
   const vertexPath = text("vertexPath");
   const normals = text("normals");
+  const world = text("world") === "terrain-test" ? "terrain-test" : "test-planet";
   return {
     setting: settingOf(options),
     seed: text("seed") ?? DEFAULT_SPIKE_SEED,
@@ -319,6 +379,14 @@ function spikeLaunchOf(options: Readonly<Record<string, unknown>>): SpikeLaunch 
     dawnSafety: text("dawnSafety") === "off" ? "off" : "on",
     capture: text("capture"),
     traceProfile: text("traceProfile") === "on" ? "on" : "off",
+    world,
+    // The test planet takes no `--style` (`worldRefusal`): its main view is `SPIKE LIT`.
+    style:
+      world === "test-planet"
+        ? null
+        : text("style") === "wireframe"
+          ? "wireframe"
+          : "photorealistic",
   };
 }
 

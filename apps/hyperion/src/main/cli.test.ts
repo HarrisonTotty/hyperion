@@ -171,6 +171,8 @@ describe("the descent spike's options", () => {
       dawnSafety: "on",
       capture: null,
       traceProfile: "off",
+      world: "test-planet",
+      style: null,
     });
   });
 
@@ -212,7 +214,41 @@ describe("the descent spike's options", () => {
       dawnSafety: "off",
       capture: "/data/capture",
       traceProfile: "on",
+      world: "test-planet",
+      style: null,
     });
+  });
+
+  it.each([
+    [[], "photorealistic"],
+    [["--style", "photorealistic"], "photorealistic"],
+    [["--style", "wireframe"], "wireframe"],
+  ] as const)("flies the terrain world with %j, in the style %s", (style, drawn) => {
+    expect(
+      parse(["--descent-spike", "--world", "terrain-test", "--ridged", "off", ...style]).spike,
+    ).toMatchObject({ world: "terrain-test", style: drawn, ridged: "off" });
+  });
+
+  it("takes the test planet by its name, recording no style for its SPIKE LIT main view", () => {
+    expect(parse(["--descent-spike", "--world", "test-planet"]).spike).toMatchObject({
+      world: "test-planet",
+      style: null,
+    });
+  });
+
+  it.each([
+    [["--style", "wireframe"], "--style is an option of --world terrain-test"],
+    [["--world", "test-planet", "--style", "photorealistic"], "SPIKE LIT"],
+    [["--world", "terrain-test", "--ridged", "on"], "the ridges are the test planet's"],
+    [
+      ["--world", "terrain-test", "--vertex-path", "face-differences"],
+      "--vertex-path does not fit",
+    ],
+    [["--world", "terrain-test", "--normals", "mesh"], "--normals does not fit"],
+  ])("refuses %j on its world", (args, reason) => {
+    const error = refusal(["--descent-spike", ...args]);
+    expect(error.exitCode).toBe(1);
+    expect(error.message).toContain(reason);
   });
 
   it.each([
@@ -227,6 +263,8 @@ describe("the descent spike's options", () => {
     ["--ridged", "yes"],
     ["--dawn-safety", "maybe"],
     ["--trace-profile", "yes"],
+    ["--world", "earth"],
+    ["--style", "lit"],
   ])("refuses %s %s", (name, value) => {
     expect(refusal(["--descent-spike", name, value]).exitCode).toBe(1);
   });
@@ -254,6 +292,8 @@ describe("the descent spike's options", () => {
     ["--dawn-safety", "off"],
     ["--capture", "/data/capture"],
     ["--trace-profile", "on"],
+    ["--world", "terrain-test"],
+    ["--style", "wireframe"],
   ])("refuses %s without --descent-spike", (...option) => {
     const error = refusal(option);
     expect(error.exitCode).toBe(1);
@@ -313,6 +353,8 @@ describe("the several-views check's options", () => {
     ["--ridged", "on"],
     ["--dawn-safety", "off"],
     ["--capture", "/data/capture"],
+    ["--world", "terrain-test"],
+    ["--style", "wireframe"],
   ])("refuses the spike's %s", (...option) => {
     const error = refusal(["--views-check", ...option]);
     expect(error.exitCode).toBe(1);

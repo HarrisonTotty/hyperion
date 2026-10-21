@@ -1,7 +1,9 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, getDefaultNormalizer, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { ViewEngineSource } from "../../displays/view/useViewEngine";
+import { ViewFrameDrawer } from "../../displays/view/viewFrameDrawer";
+import { vec3 } from "../../geometry/vec3";
 import {
   bakePatch,
   initSync,
@@ -19,8 +21,18 @@ import type { TerrainPool } from "../terrain/terrainPass";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { fakeFramesAndTimeouts } from "../../test/fakeFramesAndTimeouts";
 import { FakeAdapter, FakeGpu, SWIFTSHADER_INFO } from "../../test/fakeGpu";
+import { ScriptedHeightWorker } from "../../test/scriptedHeightWorker";
+import type { RenderStyle } from "../camera/state";
 import { requestAdapterOutcome } from "../engine/platform";
 import type { RenderView } from "../engine/types";
+import { terrainTestGolden } from "../scenes/terrainScene";
+import { CoverageView } from "../terrain/coverage";
+import { finestLevel } from "../terrain/cube";
+import { planetGeometry } from "../terrain/planet";
+import { NO_BREAK_SPACE, SURVEY_PENDING } from "../terrain/readouts";
+import { MAX_CONSECUTIVE_WORKER_FAILURES } from "../terrain/workers/pool";
+import { bodySiteOf, type MeasureDescent, NoLandingSite, siteCandidates } from "./bodyDescent";
+import { DescentProfile, landingSiteOf, trackStretches } from "./descentProfile";
 import {
   DESCENT_REFUSED,
   DescentSpike,
@@ -29,17 +41,22 @@ import {
   heightUnitFor,
   patchesReading,
   siteElevationReading,
+  siteSurveyReading,
   TEST_PLANET_STATEMENT,
   VIEWS_NOT_MADE,
 } from "./DescentSpike";
 import {
   DescentRefused,
+  type PreparedDescent,
   type prepareDescent,
+  type SiteReading,
   type SpikeListeners,
   type SpikeWorkers,
 } from "./spikeRun";
+import { contactRule } from "./spikeScene";
+import { spikeWorldNamed } from "./spikeWorld";
 import type { TerrainVariant } from "../quality/qualitySetting";
-import type { BakeSettings } from "../terrain/workers/messages";
+import { type BakeSettings, PALETTE_NONE } from "../terrain/workers/messages";
 import {
   answerSurfaceQuery,
   type SurfaceQueryModule,
@@ -111,6 +128,7 @@ const IDLE_POOL: TerrainPool = {
 const WORKERS: SpikeWorkers = {
   query: () => new InlineQueryWorker(),
   pool: () => () => IDLE_POOL,
+  height: () => new ScriptedHeightWorker(),
 };
 
 /** An engine source whose adapter never answers, so the spike stays acquiring its adapter. */
@@ -170,8 +188,14 @@ function stubLayout(): void {
   );
 }
 
-/** A ready counting engine, its views refusing every frame if asked, and the views it made. */
-function readyEngine(options: { readonly refuseFrames: boolean }): {
+/**
+ * A ready counting engine, its views refusing every frame if asked and every material failing if
+ * asked, and the views it made.
+ */
+function readyEngine(options: {
+  readonly refuseFrames: boolean;
+  readonly failMaterials?: boolean;
+}): {
   readonly source: ViewEngineSource;
   readonly views: () => ReadonlyArray<RenderView>;
 } {
@@ -185,6 +209,9 @@ function readyEngine(options: { readonly refuseFrames: boolean }): {
         ),
       load: async () => {
         const engine = await countingRenderEngine();
+        if (options.failMaterials === true) {
+          engine.failMaterials(() => true);
+        }
         const make = engine.createView.bind(engine);
         engine.createView = (canvas, name) => {
           const view = make(canvas, name);
@@ -412,6 +439,18 @@ describe("DescentSpike", () => {
     expect(bakes[0]).toMatchObject({ vertexPath: "face-differences", normals: "double" });
   }, 30_000);
 
+  it("states no survey line, and notes no survey edge, over the test planet", async () => {
+    fakeFramesAndTimeouts();
+    stubLayout();
+    renderSpike({ engine: readyEngine({ refuseFrames: false }).source });
+    await screen.findByText(/SELECTED/, undefined, { timeout: 20_000 });
+    expect([
+      screen.queryByText(/SURVEY COVERAGE/u),
+      screen.queryByText(/^TERRAIN: NOT YET MODELLED$/u),
+      screen.queryByRole("note"),
+    ]).toEqual([null, null, null]);
+  }, 30_000);
+
   it("names its readings as the nomenclature does", () => {
     renderSpike();
     for (const label of [
@@ -429,6 +468,572 @@ describe("DescentSpike", () => {
     ]) {
       expect(screen.getByText(label, { selector: "dt" })).toBeDefined();
     }
+  });
+});
+
+/** `TERRAIN TEST`'s world, and a descent over it at the bare datum, as a measurement would give. */
+const MOON = spikeWorldNamed("terrain-test");
+const MOON_PROFILE = new DescentProfile(MOON.figure, landingSiteOf(7n));
+const MOON_STRETCHES = trackStretches(MOON_PROFILE);
+const MOON_CONTACT = contactRule(MOON_PROFILE);
+
+/** The descent over `TERRAIN TEST`'s moon with `siteReading` at its site. */
+function moonDescent(siteReading: SiteReading | null): PreparedDescent {
+  return {
+    planet: planetGeometry(MOON.figure, null),
+    profile: MOON_PROFILE,
+    contact: MOON_CONTACT,
+    siteHeightM: 0,
+    stretches: MOON_STRETCHES,
+    stretchMaxHeightsM: MOON_STRETCHES.map(() => 0),
+    trackMaxHeightM: 0,
+    omittedSigmaM: new Float64Array(25).fill(Infinity),
+    siteReading,
+  };
+}
+
+/** The spike over `TERRAIN TEST`'s moon, its measurement `measure`, and its height workers. */
+interface MoonSpike {
+  readonly view: ReturnType<typeof render>;
+  /** The session's height workers, scripted, as it started them. */
+  readonly heightWorkers: ReadonlyArray<ScriptedHeightWorker>;
+}
+
+/**
+ * The spike over `TERRAIN TEST`'s moon, on a ready engine unless given another, its measurement
+ * `measure`.
+ */
+function renderMoon(
+  measure: MeasureDescent,
+  options: {
+    readonly style?: RenderStyle;
+    readonly listeners?: SpikeListeners;
+    readonly engine?: ViewEngineSource;
+  } = {},
+): MoonSpike {
+  const heightWorkers: ScriptedHeightWorker[] = [];
+  const spikeWorkers: SpikeWorkers = {
+    ...WORKERS,
+    height: () => {
+      const worker = new ScriptedHeightWorker();
+      heightWorkers.push(worker);
+      return worker;
+    },
+  };
+  const view = render(
+    <GraphicsStatusContext value={STORE}>
+      <DescentSpike
+        seed={7n}
+        setting="low"
+        ridges="off"
+        workers={1}
+        world="terrain-test"
+        style={options.style}
+        engineSource={options.engine ?? readyEngine({ refuseFrames: false }).source}
+        spikeWorkers={spikeWorkers}
+        measure={measure}
+        listeners={options.listeners}
+      />
+    </GraphicsStatusContext>,
+  );
+  return { view, heightWorkers };
+}
+
+/** Plays `steps` × 300 ms of frames, letting each step's work settle. */
+async function play(steps: number): Promise<void> {
+  for (let step = 0; step < steps; step += 1) {
+    // Each step waits on the last.
+    // oxlint-disable-next-line no-await-in-loop
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+  }
+}
+
+/** The main view's label block: the `VIEW` block on its stage, not an instrument's. */
+function mainLabelBlock(): HTMLElement {
+  const block = screen
+    .getAllByText("VIEW", { selector: "p" })
+    .map((title) => title.parentElement)
+    .find((each) => each !== null && each.closest(".spike-instrument") === null);
+  if (block === undefined || block === null) {
+    throw new Error("the spike shows no main label block");
+  }
+  return block;
+}
+
+/** A label block's or plate's reading of `label`: its value's text, or `null` where it has none. */
+function readingIn(block: HTMLElement, label: string): string | null {
+  return (
+    within(block).queryByText(label, { selector: "dt" })?.nextElementSibling?.textContent ?? null
+  );
+}
+
+/** The main view's statements, in order. */
+function statementsOf(block: HTMLElement): ReadonlyArray<string> {
+  return Array.from(block.querySelectorAll(".view-label__statement"), (each) => each.textContent);
+}
+
+/**
+ * The main view's fault lines, its status lines that stand in `--status-caution` (`StatusLine`'s
+ * fault), by their words.
+ */
+function cautionLines(): ReadonlyArray<string> {
+  return within(mainLabelBlock())
+    .queryAllByRole("status")
+    .filter((each) => each.classList.contains("request-status__text--fault"))
+    .map((each) => each.textContent);
+}
+
+/** An engine source whose adapter request finds none, as a machine with no adapter does. */
+const NO_ADAPTER_ENGINE: ViewEngineSource = {
+  requestAdapter: () => Promise.resolve({ kind: "no-adapter" }),
+  load: () => Promise.reject(new Error("never asked")),
+};
+
+/** The `Site Elevation` reading's text. */
+function siteElevationText(): string | null {
+  return (
+    screen.getByText("Site Elevation", { selector: "dt" }).nextElementSibling?.textContent ?? null
+  );
+}
+
+/** The measuring status's line. */
+const MEASURING_LINE = statusLine("MEASURING TERRAIN: landing site and ground track");
+
+describe("DescentSpike over a generated world (R10.T14.c)", () => {
+  it("says it is measuring the terrain until the session's measurement answers", async () => {
+    fakeFramesAndTimeouts();
+    const asked: Array<readonly [string, bigint]> = [];
+    renderMoon((_session, world, seed) => {
+      asked.push([world.bodyDesignation, seed]);
+      return new Promise(() => undefined);
+    });
+    await vi.waitFor(() => {
+      expect(asked).toEqual([["TEST MOON", 7n]]);
+    });
+    expect(screen.getByText(MEASURING_LINE)).toBeDefined();
+  });
+
+  it("stops the measurement when it goes before the answer", async () => {
+    fakeFramesAndTimeouts();
+    const asked: AbortSignal[] = [];
+    const view = renderMoon((_session, _world, _seed, signal) => {
+      asked.push(signal);
+      return new Promise(() => undefined);
+    });
+    await vi.waitFor(() => {
+      expect(asked).toHaveLength(1);
+    });
+    view.view.unmount();
+    expect(asked.map((signal) => signal.aborted)).toEqual([true]);
+  });
+
+  it("says it is acquiring its adapter, not measuring, while the engine is pending", () => {
+    renderMoon(() => Promise.resolve(moonDescent(null)), { engine: PENDING_ENGINE });
+    expect([
+      screen.queryByText(statusLine("GRAPHICS ACQUIRING ADAPTER")) !== null,
+      screen.queryByText(MEASURING_LINE),
+    ]).toEqual([true, null]);
+  });
+
+  it("says no adapter answered, not measuring, when the engine is unavailable", async () => {
+    renderMoon(() => Promise.resolve(moonDescent(null)), { engine: NO_ADAPTER_ENGINE });
+    expect(
+      await screen.findByText(
+        statusLine("GRAPHICS NO ADAPTER: views not available, relaunch to retry"),
+      ),
+    ).toBeDefined();
+    expect(screen.queryByText(MEASURING_LINE)).toBeNull();
+  });
+
+  it("states no test planet, and the survey's reading at the site, Estimated with its uncertainty", async () => {
+    fakeFramesAndTimeouts();
+    const reading: SiteReading = {
+      kind: "ground",
+      elevationM: -410.2,
+      sigmaM: 18,
+      resolved: false,
+    };
+    renderMoon(() => Promise.resolve(moonDescent(reading)));
+    const expected = `~-410 m${NO_BREAK_SPACE}±${NO_BREAK_SPACE}18 m`;
+    const site = await screen.findByText(expected, {
+      normalizer: getDefaultNormalizer({ trim: false, collapseWhitespace: false }),
+    });
+    expect(site.closest("dd")?.previousElementSibling?.textContent).toBe("Site Elevation");
+    expect(siteSurveyReading(reading)).toBe(expected);
+    expect(screen.queryByText(statusLine(TEST_PLANET_STATEMENT))).toBeNull();
+    expect(screen.queryByText(MEASURING_LINE)).toBeNull();
+  });
+
+  it("states the site's elevation resolved where the survey resolves it", async () => {
+    fakeFramesAndTimeouts();
+    renderMoon(() =>
+      Promise.resolve(
+        moonDescent({ kind: "ground", elevationM: -410.2, sigmaM: 0, resolved: true }),
+      ),
+    );
+    await vi.waitFor(() => {
+      expect(siteElevationText()).toBe("-410.2 m");
+    });
+  });
+
+  it.each([
+    ["not-surveyed", "NOT SURVEYED"],
+    ["no-ground", "NO GROUND"],
+  ] as const)(
+    "states the readout's own %s at the site where it met no surveyed ground: %s",
+    async (kind, words) => {
+      fakeFramesAndTimeouts();
+      renderMoon(() => Promise.resolve(moonDescent({ kind })));
+      await vi.waitFor(() => {
+        expect(siteElevationText()).toBe(words);
+      });
+    },
+  );
+
+  it("reads the site's elevation as missing while the survey gave no reading there", async () => {
+    fakeFramesAndTimeouts();
+    const prepared: number[] = [];
+    renderMoon(() => Promise.resolve(moonDescent(null)), {
+      listeners: { onPrepared: () => prepared.push(1) },
+    });
+    await vi.waitFor(() => {
+      expect(prepared).toEqual([1]);
+    });
+    expect(screen.queryByText(MEASURING_LINE)).toBeNull();
+    expect(siteElevationText()).toBe("—");
+  });
+
+  it("refuses to fly when the script cannot clear the world's terrain", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    fakeFramesAndTimeouts();
+    renderMoon(() =>
+      Promise.reject(new DescentRefused(7n, new RangeError("the descent cannot clear its floors"))),
+    );
+    expect(await screen.findByText(statusLine(DESCENT_REFUSED))).toBeDefined();
+  });
+
+  it("says the terrain was not measured where the survey holds no landing site", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    fakeFramesAndTimeouts();
+    const failed: string[] = [];
+    renderMoon(() => Promise.reject(new NoLandingSite(MOON.body, "nothing is surveyed")), {
+      listeners: { onFailed: (status) => failed.push(status) },
+    });
+    expect(
+      await screen.findByText(statusLine(/^TERRAIN NOT MEASURED: .*relaunch to retry$/)),
+    ).toBeDefined();
+    expect(failed).toEqual([expect.stringMatching(/^TERRAIN NOT MEASURED/)]);
+  });
+
+  it.each([
+    ["photorealistic, the default", undefined, "VIEW, PHOTOREALISTIC, SCRIPTED"],
+    ["wireframe, as asked", "wireframe", "VIEW, WIREFRAME, SCRIPTED"],
+  ] as const)("names its main view in its style, %s, before it draws", (_how, style, name) => {
+    render(
+      <GraphicsStatusContext value={STORE}>
+        <DescentSpike
+          seed={7n}
+          setting="low"
+          ridges="off"
+          workers={1}
+          world="terrain-test"
+          style={style}
+          engineSource={PENDING_ENGINE}
+          spikeWorkers={WORKERS}
+        />
+      </GraphicsStatusContext>,
+    );
+    expect(screen.getByRole("img", { name })).toBeDefined();
+    expect(screen.queryByRole("img", { name: /SPIKE LIT/ })).toBeNull();
+  });
+});
+
+/**
+ * The moon's descent at the bare datum to the site the measurement draws for seed 7 inside
+ * `TERRAIN TEST`'s larger survey (`bodySiteOf` of its third payload's coverage), its site's reading
+ * not asked.
+ */
+const SURVEYED_DESCENT: PreparedDescent = (() => {
+  const golden = terrainTestGolden();
+  const payload = golden.payloads[2];
+  if (payload === undefined) {
+    throw new Error("the terrain golden has its third payload");
+  }
+  const merged = CoverageView.empty(golden.header.level).merged(payload.coverage, payload.revision);
+  if (!merged.ok) {
+    throw new Error(merged.message);
+  }
+  const site = bodySiteOf(
+    siteCandidates(merged.coverage),
+    7n,
+    0,
+    finestLevel(MOON.figure.equatorialRadiusM),
+  );
+  if (site === null) {
+    throw new Error("the larger survey holds a site");
+  }
+  const profile = new DescentProfile(MOON.figure, site.site);
+  const stretches = trackStretches(profile);
+  return {
+    ...moonDescent(null),
+    profile,
+    contact: contactRule(profile),
+    stretches,
+    stretchMaxHeightsM: stretches.map(() => 0),
+  };
+})();
+
+/** The moon's descent into its survey, measured at once. */
+function measured(): Promise<PreparedDescent> {
+  return Promise.resolve(SURVEYED_DESCENT);
+}
+
+/** Answers each bake `worker` was asked for, flat at the datum and surveyed throughout. */
+function answerEveryBake(worker: ScriptedHeightWorker): void {
+  for (const request of worker.pendingBakes) {
+    const { key, settings } = request;
+    const n = settings.normals === "double" ? 129 : 65;
+    worker.reply({
+      kind: "baked",
+      id: request.id,
+      bake: {
+        key,
+        generation: request.generation,
+        originM: vec3(0, 0, MOON.figure.polarRadiusM),
+        heights: new Float32Array(65 * 65 * 2),
+        offsets: settings.vertexPath === "baked-offsets" ? new Float32Array(65 * 65 * 6) : null,
+        normals: new Float16Array(n * n * 2),
+        heightRangeM: [0, 0],
+        boundingRadiusM: 1,
+        originHeightM: 0,
+        skirtDepthM: 1,
+        layers: {
+          palette: new Uint8Array(16).fill(PALETTE_NONE),
+          weights: new Uint8Array(),
+          surveyMask: new Uint8Array(65 * 65).fill(255),
+          fieldLevel: 5,
+          boundM: 1,
+          sigmaM: 0,
+          complete: true,
+          unsurveyedCells: new Uint32Array(),
+          photometry: new Float32Array(40),
+          horizonNear: new Uint32Array(),
+          horizonFar: new Uint32Array(),
+          horizonComplete: true,
+          horizonRefusedCells: new Uint32Array(),
+        },
+      },
+    });
+  }
+}
+
+/** Plays frames 16 ms at a time until the first publish, the panel's script time standing. */
+async function untilFirstPublish(): Promise<void> {
+  for (let step = 0; step < 200; step += 1) {
+    const time = screen.getByText("Script Time", { selector: "dt" }).nextElementSibling;
+    if (time !== null && time.textContent !== "—") {
+      return;
+    }
+    // Each step waits on the last.
+    // oxlint-disable-next-line no-await-in-loop
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(16);
+    });
+  }
+  throw new Error("the spike published no frame");
+}
+
+/** A survey-edge note of `TEST MOON` by its accessible name, whatever its range. */
+const TEST_MOON_EDGE = /^TEST MOON, survey edge, range [\d.,]+ (?:m|km|Mm)$/u;
+
+describe("DescentSpike's main view over a generated world, drawn (R10.T14.c)", () => {
+  it("states SURVEY COVERAGE: PENDING on its lower plate until the fixture answers, then the line's values", async () => {
+    fakeFramesAndTimeouts();
+    stubLayout();
+    renderMoon(measured, { style: "wireframe" });
+    await untilFirstPublish();
+    const pending = screen.queryByText(SURVEY_PENDING) !== null;
+    await play(8);
+    expect([
+      pending,
+      screen.queryByText(SURVEY_PENDING),
+      screen.getByText("SURVEY COVERAGE", { selector: "dt" }).nextElementSibling?.textContent,
+    ]).toEqual([true, null, expect.stringMatching(/^[\d.]+ % · FINEST [\d.]+ k?m$/u)]);
+  });
+
+  it("states no DATUM and no GROUND AT LINE OF SIGHT", async () => {
+    fakeFramesAndTimeouts();
+    stubLayout();
+    renderMoon(measured);
+    await play(9);
+    expect([
+      screen.queryByText("SURVEY COVERAGE", { selector: "dt" }) !== null,
+      screen.queryByText("DATUM", { selector: "dt" }),
+      screen.queryByText("GROUND AT LINE OF SIGHT"),
+    ]).toEqual([true, null, null]);
+  });
+
+  it("asks the height workers no ground readout after its measurement", async () => {
+    fakeFramesAndTimeouts();
+    stubLayout();
+    const asks: number[] = [];
+    const spike = renderMoon((session) => {
+      vi.spyOn(session, "groundReadout").mockImplementation(() => {
+        asks.push(1);
+        return Promise.resolve(null);
+      });
+      return measured();
+    });
+    await play(9);
+    expect([
+      screen.queryByText("SURVEY COVERAGE", { selector: "dt" }) !== null,
+      asks,
+      spike.heightWorkers.flatMap((worker) =>
+        worker.received.filter((message) => message.kind === "ground-readout"),
+      ),
+    ]).toEqual([true, [], []]);
+  });
+
+  it("notes TEST MOON's survey edge in its list while the drawn frame marks it, and none after", async () => {
+    fakeFramesAndTimeouts();
+    stubLayout();
+    // The drawn frame marks the moon's edge 4.21 km off, wherever the script has the craft.
+    const edge = { marked: true };
+    // The drawer's own draw, kept before the spy takes its place and called with its own `this`.
+    // oxlint-disable-next-line typescript/unbound-method
+    const draw = ViewFrameDrawer.prototype.draw;
+    vi.spyOn(ViewFrameDrawer.prototype, "draw").mockImplementation(function (
+      this: ViewFrameDrawer,
+      inputs,
+    ) {
+      const drawn = draw.call(this, inputs);
+      return drawn === null || !edge.marked
+        ? drawn
+        : { ...drawn, surveyEdges: [{ body: MOON.body, nearestRangeM: 4_210 }] };
+    });
+    renderMoon(measured, { style: "wireframe" });
+    await play(2);
+    const note = screen.getByRole("note", { name: TEST_MOON_EDGE });
+    edge.marked = false;
+    await play(2);
+    // The spike's scene has its craft for the own ship, so that the range is the ship's, as the
+    // list's are, and not FROM CAMERA.
+    expect([note.textContent, screen.queryByRole("note")]).toEqual([
+      "SURVEY EDGE TEST MOON 4.21 km",
+      null,
+    ]);
+  });
+
+  it("reads the style drawn on its STYLE line, the photorealistic image's statements after the others", async () => {
+    fakeFramesAndTimeouts();
+    stubLayout();
+    renderMoon(measured, { style: "photorealistic" });
+    await untilFirstPublish();
+    const preparing = [readingIn(mainLabelBlock(), "STYLE"), statementsOf(mainLabelBlock())];
+    await play(8);
+    expect([
+      preparing,
+      readingIn(mainLabelBlock(), "STYLE"),
+      statementsOf(mainLabelBlock()),
+    ]).toEqual([
+      ["WIREFRAME", ["POSITIONS AS SEEN FROM SHIP", "PHOTOREALISTIC: PREPARING"]],
+      "PHOTOREALISTIC",
+      ["POSITIONS AS SEEN FROM SHIP", "TERRAIN: STREAMING", "CRAFT PHOTOMETRY: NOT YET MODELLED"],
+    ]);
+  });
+
+  it("states its CONTOUR INTERVAL in the wireframe once its terrain draws", async () => {
+    fakeFramesAndTimeouts();
+    stubLayout();
+    const spike = renderMoon(measured, { style: "wireframe" });
+    for (let step = 0; step < 12; step += 1) {
+      // Each step answers what the one before asked.
+      // oxlint-disable-next-line no-await-in-loop
+      await play(1);
+      for (const worker of spike.heightWorkers) {
+        worker.answerFields();
+        answerEveryBake(worker);
+      }
+    }
+    expect(readingIn(mainLabelBlock(), "CONTOUR INTERVAL")).toMatch(
+      /^[\d.]+ k?m · INDEX [\d.]+ k?m$/u,
+    );
+  });
+});
+
+describe("DescentSpike's photorealistic style refused over a generated world", () => {
+  it("ends the run once with GRAPHICS STYLE REFUSED on its fault line, and draws no more", async () => {
+    // The renderer says why its pipelines could not be made.
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    fakeFramesAndTimeouts();
+    stubLayout();
+    const failed: string[] = [];
+    const frames: number[] = [];
+    renderMoon(measured, {
+      style: "photorealistic",
+      engine: readyEngine({ refuseFrames: false, failMaterials: true }).source,
+      listeners: {
+        onFailed: (status) => failed.push(status),
+        onFrame: (sample) => frames.push(sample.scriptTimeS),
+      },
+    });
+    await play(4);
+    const drawnBefore = frames.length;
+    await play(2);
+    const refused = "GRAPHICS STYLE REFUSED: photorealistic style not created, relaunch to retry";
+    expect([cautionLines(), failed, frames.length]).toEqual([[refused], [refused], drawnBefore]);
+  });
+});
+
+describe("DescentSpike's terrain fault over a generated world (decision-r10-t14c-guide Q2)", () => {
+  it("ends the run once, in the spike's words, when every height worker is lost", async () => {
+    fakeFramesAndTimeouts();
+    stubLayout();
+    const failed: string[] = [];
+    const spike = renderMoon(measured, {
+      listeners: { onFailed: (status) => failed.push(status) },
+    });
+    await play(3);
+    const workers = spike.heightWorkers.length;
+    for (let round = 0; round < MAX_CONSECUTIVE_WORKER_FAILURES; round += 1) {
+      for (const worker of spike.heightWorkers.slice(-workers)) {
+        worker.fail();
+      }
+    }
+    await play(3);
+    const fault = "TERRAIN NOT AVAILABLE: height computation failed, relaunch to retry";
+    expect([
+      cautionLines(),
+      failed,
+      screen.queryByText(/reopen VIEW/u),
+      screen.queryByText("TERRAIN: STREAMING"),
+    ]).toEqual([[fault], [fault], null, null]);
+  });
+
+  it("ends the run once, in the spike's words, when its terrain computation keeps failing", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    fakeFramesAndTimeouts();
+    stubLayout();
+    const failed: string[] = [];
+    renderMoon(
+      (session) => {
+        vi.spyOn(session, "step").mockImplementation(() => {
+          throw new Error("a bug of the session's step");
+        });
+        return measured();
+      },
+      { listeners: { onFailed: (status) => failed.push(status) } },
+    );
+    await play(4);
+    const fault = "TERRAIN NOT AVAILABLE: terrain computation failed, relaunch to retry";
+    expect([
+      cautionLines(),
+      failed,
+      screen.queryByText(/reopen VIEW/u),
+      screen.queryByText("TERRAIN: STREAMING"),
+    ]).toEqual([[fault], [fault], null, null]);
   });
 });
 

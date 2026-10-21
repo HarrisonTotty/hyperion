@@ -14,6 +14,7 @@ import {
   finestPatchSizeM,
   forcedRadiusM,
   type GroundContact,
+  heldGroundUnder,
   heldRadiusM,
   inForcedRegion,
   isDescending,
@@ -311,6 +312,11 @@ describe("selection about a grounded body", () => {
   });
 });
 
+/** Resident heights whose drawn ground stands `heightM` above the datum everywhere. */
+function groundAt(heightM: number | null): { groundHeightAtM: () => number | null } {
+  return { groundHeightAtM: () => heightM };
+}
+
 describe("a craft as a contact (R10.T16.b)", () => {
   const SPHERE = { equatorialRadiusM: 1.7374e6, polarRadiusM: 1.7374e6 };
   const datum = datumGroundUnder(SPHERE);
@@ -360,5 +366,70 @@ describe("a craft as a contact (R10.T16.b)", () => {
     expect(
       craftContact(at(RADIUS_M + PATCH_EDGE_M + 1), null, RADIUS_M, datum, PATCH_EDGE_M),
     ).toBeNull();
+  });
+
+  describe("on the workers' ground where it is held (R10.T14.c)", () => {
+    const plateau = heldGroundUnder(SPHERE, groundAt(1_500));
+    /** Points over the sphere and the flattened body, the centre among them. */
+    const points: Vec3[] = [
+      at(900),
+      at(-50),
+      vec3(0, 0, 0),
+      vec3(
+        ...surfacePoint(WGS84_FIGURE, vertexDir({ face: 0, level: 6, i: 20, j: 40 }, 32, 32), 1e3),
+      ),
+    ];
+
+    it("is the datum's bit for bit with no resident heights, or with an answer of none or 0", () => {
+      for (const heights of [null, groundAt(null), groundAt(0)]) {
+        for (const figure of [SPHERE, WGS84_FIGURE]) {
+          const held = heldGroundUnder(figure, heights);
+          const under = datumGroundUnder(figure);
+          expect(points.map(held)).toStrictEqual(points.map(under));
+        }
+      }
+    });
+
+    it("asks the resident heights at the point's parametric direction", () => {
+      const asked: Vec3[] = [];
+      heldGroundUnder(SPHERE, {
+        groundHeightAtM: (direction) => {
+          asked.push(direction);
+          return 1_500;
+        },
+      })(at(2_300));
+      expect(asked).toHaveLength(1);
+      expect(Math.hypot(...Object.values(sub(asked[0] ?? vec3(0, 0, 0), UP)))).toBeLessThan(1e-15);
+    });
+
+    it("stands the ground point on a plateau and measures the height above it", () => {
+      const under = plateau(at(2_300));
+      expect(under.heightM).toBeCloseTo(800, 6);
+      const top = scale(UP, SPHERE.equatorialRadiusM + 1_500);
+      expect(Math.hypot(...Object.values(sub(under.groundPointM, top)))).toBeLessThan(1e-6);
+    });
+
+    it("takes a craft 800 m over a plateau 1.5 km high and closing as a contact, which the datum's rule does not", () => {
+      // 2,300 m over the datum is above its 1 km, and 460 s from it at 5 m/s is beyond its 30 s.
+      const closing = scale(UP, -5);
+      const onPlateau = craftContact(at(2_300), closing, RADIUS_M, plateau, PATCH_EDGE_M);
+      expect(craftContact(at(2_300), closing, RADIUS_M, datum, PATCH_EDGE_M)).toBeNull();
+      expect(
+        onPlateau === null ? Infinity : Math.hypot(...Object.values(onPlateau.positionM)),
+      ).toBeCloseTo(SPHERE.equatorialRadiusM + 1_500, 6);
+    });
+
+    it("measures a craft 50 m below the datum over a basin 2 km deep as 1,950 m above its ground", () => {
+      const basin = heldGroundUnder(SPHERE, groundAt(-2_000));
+      expect(basin(at(-50)).heightM).toBeCloseTo(1_950, 6);
+    });
+
+    it("keeps the datum's normal, on the flattened body too", () => {
+      for (const figure of [SPHERE, WGS84_FIGURE]) {
+        const held = heldGroundUnder(figure, groundAt(1_500));
+        const under = datumGroundUnder(figure);
+        expect(points.map((p) => held(p).normal)).toStrictEqual(points.map((p) => under(p).normal));
+      }
+    });
   });
 });

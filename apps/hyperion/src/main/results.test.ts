@@ -49,7 +49,9 @@ import {
   summaryMarkdown,
   TERRAIN_ATMOSPHERE_ROW,
   TIMESTAMP_QUANTUM_MS,
+  UNTIMED_NOT_COUNTED,
   validateResults,
+  worldOfRun,
   writeResults,
 } from "./results";
 import {
@@ -94,6 +96,8 @@ function runOf(overrides: Partial<RunDescription> = {}): RunDescription {
     launchMode: "vulkan",
     setting: "low",
     seed: "18446744073709551615",
+    world: "test-planet",
+    style: null,
     options: { setting: "low", seed: "18446744073709551615", workers: 3 },
     switches: ["--disable-dawn-features=timestamp_quantization"],
     shown: true,
@@ -1314,6 +1318,133 @@ describe("the memory series", () => {
     });
     await writeResults("/runs", results, memoryFiles());
     expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+/** `value`'s fields, which must be an object's. */
+function fieldsOf(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("expected an object");
+  }
+  return { ...value };
+}
+
+describe("a results file's world and style (R10.T14.c)", () => {
+  /** A run's results over `world` in `style`, as JSON reads them back. */
+  function parsedOver(
+    world: RunDescription["world"],
+    style: RunDescription["style"],
+  ): Record<string, unknown> {
+    const results = buildResults({
+      run: runOf({ world, style }),
+      report: reportOf(),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    return fieldsOf(JSON.parse(JSON.stringify(results)));
+  }
+
+  it("records them in the run block and on the summary's launch line", () => {
+    const results = buildResults({
+      run: runOf({ world: "terrain-test", style: "photorealistic" }),
+      report: reportOf(),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    expect(results.run).toMatchObject({ world: "terrain-test", style: "photorealistic" });
+    expect(summaryMarkdown(results)).toContain(
+      `seed ${results.run.seed}, world terrain-test, style photorealistic, window`,
+    );
+    expect(validateResults(parsedOver("terrain-test", "wireframe"))).toEqual([]);
+  });
+
+  it("records the test planet's run with no style, and its launch line states none", () => {
+    const results = buildResults({
+      run: runOf({ world: "test-planet", style: null }),
+      report: reportOf(),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    expect(results.run).toMatchObject({ world: "test-planet", style: null });
+    expect(summaryMarkdown(results)).toContain(
+      `seed ${results.run.seed}, world test-planet, window`,
+    );
+    expect(summaryMarkdown(results)).not.toContain(", style ");
+    expect(validateResults(parsedOver("test-planet", null))).toEqual([]);
+  });
+
+  it("reads a file without them as the test planet's, with no style", () => {
+    const parsed = parsedOver("test-planet", null);
+    const { world: _world, style: _style, ...older } = fieldsOf(parsed["run"]);
+    expect(worldOfRun(older)).toEqual({ world: "test-planet", style: null });
+    expect(validateResults({ ...parsed, run: older })).toEqual([]);
+  });
+
+  it("refuses a world that is not one of its choices, or a style that is not its world's", () => {
+    const parsed = parsedOver("terrain-test", "wireframe");
+    const run = fieldsOf(parsed["run"]);
+    const refusal =
+      "run.world is not test-planet or terrain-test, or run.style not its world's: none on test-planet, photorealistic or wireframe on terrain-test";
+    expect(
+      [
+        { ...run, world: "earth" },
+        { ...run, world: "test-planet" },
+        { ...run, style: null },
+      ].map((each) => validateResults({ ...parsed, run: each })),
+    ).toEqual([[refusal], [refusal], [refusal]]);
+    expect(worldOfRun({ ...run, style: "lit" })).toBeNull();
+  });
+});
+
+describe("a results file's untimed passes (R10.T14.c)", () => {
+  /** A run's results over `world`, its report counting `untimed` untimed passes. */
+  function resultsOver(world: RunDescription["world"], untimed: number): DescentResults {
+    return buildResults({
+      run: runOf(
+        world === "terrain-test" ? { world, style: "photorealistic" } : { world, style: null },
+      ),
+      report: reportOf({ untimedPasses: untimed }),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+  }
+
+  it("counts them over the test planet, in the file and the summary", () => {
+    const results = resultsOver("test-planet", 3);
+    expect([results.gpu.untimedPasses, summaryMarkdown(results)]).toEqual([
+      measured(3),
+      expect.stringContaining("pipelines created after warm-up; 3 untimed passes."),
+    ]);
+  });
+
+  it("claims none over a generated world, whose passes are not counted, saying why", () => {
+    const results = resultsOver("terrain-test", 0);
+    expect([
+      results.gpu.untimedPasses,
+      summaryMarkdown(results),
+      validateResults(JSON.parse(JSON.stringify(results))),
+    ]).toEqual([
+      missing(UNTIMED_NOT_COUNTED),
+      expect.stringContaining(
+        "pipelines created after warm-up; untimed passes — (no pass counted over a generated world).",
+      ),
+      [],
+    ]);
+  });
+
+  it("reads an older file's bare count, as a native replay writes it too, and refuses a count that is not one", () => {
+    const parsed = fieldsOf(JSON.parse(JSON.stringify(resultsOver("test-planet", 2))));
+    const gpu = fieldsOf(parsed["gpu"]);
+    expect(
+      [2, -1, "2", measured(1.5)].map((untimedPasses) =>
+        validateResults({ ...parsed, gpu: { ...gpu, untimedPasses } }),
+      ),
+    ).toEqual([
+      [],
+      ["gpu.untimedPasses is not a count"],
+      ["gpu.untimedPasses is not a count"],
+      ["gpu.untimedPasses is not a count"],
+    ]);
   });
 });
 

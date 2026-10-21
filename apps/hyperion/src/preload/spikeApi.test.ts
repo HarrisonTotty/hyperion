@@ -17,6 +17,8 @@ const LAUNCH: SpikeLaunch = {
   dawnSafety: "on",
   capture: null,
   traceProfile: "off",
+  world: "test-planet",
+  style: null,
 };
 
 /** A main process that answers every call with `answer`. */

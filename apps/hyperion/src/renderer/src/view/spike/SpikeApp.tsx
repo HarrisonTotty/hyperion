@@ -5,7 +5,7 @@ import { GraphicsStatusProvider } from "../engine/GraphicsStatusProvider";
 import { navigatorGpu } from "../engine/status";
 import type { TerrainVariant } from "../quality/qualitySetting";
 import { GpuCapture } from "./capture";
-import { DescentSpike, MAIN_VIEW_NAME } from "./DescentSpike";
+import { DescentSpike, MAIN_CANVAS_SELECTOR } from "./DescentSpike";
 import { SpikeController, variantOf } from "./spikeController";
 import { SPIKE_PASS_ROWS, spikeGpu } from "./spikeHarness";
 import { defaultSpikeWorkers, type SpikeListeners, type SpikeWorkers } from "./spikeRun";
@@ -46,9 +46,7 @@ function makeHarness(spike: SpikeApi): Harness {
     capture,
     // The main view's own canvas, whose drawing size the engine sets in device pixels.
     canvas: () => {
-      const main = document.querySelector<HTMLCanvasElement>(
-        `canvas[aria-label="${MAIN_VIEW_NAME}"]`,
-      );
+      const main = document.querySelector<HTMLCanvasElement>(MAIN_CANVAS_SELECTOR);
       return { widthPx: main?.width ?? 0, heightPx: main?.height ?? 0 };
     },
     nowMs: () => performance.now(),
@@ -136,6 +134,9 @@ export function SpikeApp({ spike, graphics, spikeWorkers }: SpikeAppProps) {
         ridges={launch.ridged}
         workers={launch.workers ?? defaultSpikeWorkers(navigator.hardwareConcurrency)}
         variant={harness.variant}
+        world={launch.world}
+        // The test planet's launch has no style: its main view is the spike's own lit view.
+        style={launch.style ?? undefined}
         engineSource={harness.gpu.source}
         spikeWorkers={spikeWorkers}
         listeners={harness.listeners}

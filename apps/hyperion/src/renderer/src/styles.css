@@ -3471,6 +3471,18 @@ body {
   text-align: right;
 }
 
+/*
+ * Over a generated world SITE ELEVATION holds its longest Estimated reading, `~-99,999.9 m` and
+ * ` ± 100,000 m`: the terrain readout's ELEVATION_FIELD_CH and ELEVATION_UNCERTAINTY_CH, 24 ch
+ * (plan R10, R10.T14.c). Beside its label that would run past the panel at 1280 × 720, where the
+ * longest label, FINEST TERRAIN HELD, leaves the values about 17.5 ch, so it stands under its label,
+ * the readout's whole width.
+ */
+.spike__panel .readout dd.spike__site-survey {
+  grid-column: 1 / -1;
+  min-width: 24ch;
+}
+
 .spike__targets {
   display: flex;
   flex: 1 1 auto;

@@ -8,7 +8,7 @@
  * sides of the hand-off use this module; it imports types only, so it is safe in either bundle.
  */
 
-import type { SpikeLaunch } from "./api";
+import type { SpikeLaunch, SpikeStyleName, SpikeWorldName } from "./api";
 
 export type { SpikeLaunch } from "./api";
 
@@ -45,7 +45,9 @@ function stringOrNull(value: unknown): value is string | null {
 
 /**
  * `value` as spike options, or `null` if it is not one: every field present and of its type, the
- * seed a u64 and the worker count a whole number from 1 to 64.
+ * seed a u64, the worker count a whole number from 1 to 64, the world among `--world`'s choices,
+ * and the style among `--style`'s over the terrain world and `null` over the test planet, which
+ * takes none.
  */
 export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
   if (!isRecord(value)) {
@@ -63,6 +65,8 @@ export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
     dawnSafety,
     capture,
     traceProfile,
+    world,
+    style,
   } = value;
   if (
     !oneOf(setting, ["high", "low"] as const) ||
@@ -79,8 +83,13 @@ export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
     !oneOf(ridged, ["on", "off"] as const) ||
     !oneOf(dawnSafety, ["on", "off"] as const) ||
     !stringOrNull(capture) ||
-    !oneOf(traceProfile, ["on", "off"] as const)
+    !oneOf(traceProfile, ["on", "off"] as const) ||
+    !oneOf(world, ["test-planet", "terrain-test"] as const)
   ) {
+    return null;
+  }
+  const worldStyle = styleOf(world, style);
+  if (worldStyle === undefined) {
     return null;
   }
   return {
@@ -95,7 +104,26 @@ export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
     dawnSafety,
     capture,
     traceProfile,
+    world,
+    style: worldStyle,
   };
+}
+
+/**
+ * The launch's style on `world`, or `undefined` where it is not one: `null` over the test planet,
+ * whose main view takes no `--style`, and one of `--style`'s choices over the terrain world.
+ */
+function styleOf(world: SpikeWorldName, style: unknown): SpikeStyleName | null | undefined {
+  let read: SpikeStyleName | null | undefined;
+  switch (world) {
+    case "test-planet":
+      read = style === null ? null : undefined;
+      break;
+    case "terrain-test":
+      read = oneOf(style, ["photorealistic", "wireframe"] as const) ? style : undefined;
+      break;
+  }
+  return read;
 }
 
 /**

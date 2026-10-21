@@ -1,48 +1,72 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { StatusLine } from "../../components/StatusLine";
+import type { GroundSnapshot } from "../../displays/view/groundReadout";
+import { litLabelsOf } from "../../displays/view/photorealFrame";
+import { terrainLowerParts } from "../../displays/view/terrainPlate";
+import { useTerrainLines } from "../../displays/view/useTerrainLines";
+import { useTerrainFaults, useTerrainSession } from "../../displays/view/useTerrainSession";
 import {
   DEFAULT_ENGINE_SOURCE,
   useViewEngine,
   type ViewEngineSource,
 } from "../../displays/view/useViewEngine";
+import { terrainStatementOf } from "../../displays/view/viewFaults";
 import { ViewLabelBlock } from "../../displays/view/ViewLabelBlock";
+import { ViewLowerPlate } from "../../displays/view/ViewLowerPlate";
 import { ViewMarkList } from "../../displays/view/ViewMarkList";
 import {
   type LabelLine,
   labelLines,
   labelStatements,
   markRows,
+  photorealStatements,
   rangesFromCamera,
   PRESET_NAMES,
+  type SurveyEdgeListNote,
+  surveyEdgeNotes,
   type ViewRun,
 } from "../../displays/view/viewRun";
 import { formatNumber, formatSigned, formatSignedDeg } from "../../lib/format";
 import { type ElementSize, useElementSize } from "../../lib/useElementSize";
 import { type ColourTokens, readTokens } from "../../spatial/paint";
-import { type CameraTarget, newCameraState } from "../camera/state";
+import { type CameraTarget, newCameraState, type RenderStyle } from "../camera/state";
 import type { ViewSize } from "../engine/types";
+import { hostLights, lightingState, sceneHostDiscs } from "../lighting/hostLights";
+import { styleName } from "../photoreal/style";
 import type { QualitySetting, TerrainVariant } from "../quality/qualitySetting";
-import { cameraSceneOf } from "../scene/model";
+import { cameraSceneOf, type ViewScene } from "../scene/model";
+import { TERRAIN_TEST_SCRIPT, terrainSceneFixture } from "../scenes/terrainScene";
 import type { PatchKey } from "../terrain/patchKey";
-import { formatElevationReading } from "../terrain/readouts";
+import {
+  formatElevationReading,
+  NO_BREAK_SPACE,
+  NO_GROUND,
+  NOT_SURVEYED,
+} from "../terrain/readouts";
 import type { Selection, SelectionInput } from "../terrain/select";
 import type { TestPlanetRidges } from "../terrain/workers/messages";
-import { viewStrokesAt } from "../wireframe/drawList";
+import { type DrawnSurveyEdge, viewStrokesAt } from "../wireframe/drawList";
+import { type MeasureDescent, measureWorldDescent } from "./bodyDescent";
 import { spikeExposure } from "./litView";
 import {
   DEFAULT_SPIKE_WORKERS,
   DescentRefused,
   type PreparedDescent,
   prepareDescent,
+  type SiteReading,
   type SpikeFrame,
   type SpikeFrameSample,
   type SpikeListeners,
   type SpikePatchEvent,
   SpikeRun,
+  SPIKE_MAIN_VIEW_ID,
   type SpikeWorkers,
 } from "./spikeRun";
+import { SPIKE_RETRY, spikeFaultLine } from "./spikeFaults";
 import { cameraElevationDeg, spikeScene } from "./spikeScene";
+import { surveySnapshotOf } from "./spikeSessionView";
+import { type SpikeWorldName, spikeWorldNamed } from "./spikeWorld";
 import { SurfaceQuery } from "./surfaceQuery";
 
 /** The shortest time between two changes of the readouts: 4 Hz, as the `VIEW`'s. */
@@ -51,11 +75,25 @@ const READOUT_INTERVAL_MS = 250;
 /** The label block's statement of what the terrain is (Design note 12). */
 export const TEST_PLANET_STATEMENT = "TEST PLANET: provisional, dry and hand-parameterised";
 
-/** The main view's accessible name: its class, its style and its camera. */
+/** The main view's accessible name over the test planet: its class, its style and its camera. */
 export const MAIN_VIEW_NAME = "VIEW, SPIKE LIT, SCRIPTED";
 
+/**
+ * The main view's accessible name over a generated world (R10.T14.c): its class, the style it was
+ * drawn in, as its `STYLE` line reads it, and its camera.
+ */
+export function bodyMainViewName(drawn: RenderStyle): string {
+  return `VIEW, ${styleName(drawn)}, SCRIPTED`;
+}
+
+/**
+ * The main view's canvas, on either world, for the harness, which reads its drawing size: its name
+ * changes with the style drawn over a generated world.
+ */
+export const MAIN_CANVAS_SELECTOR = 'canvas[data-spike-view="main"]';
+
 /** The status where the terrain could not be measured; the cause goes to the log. */
-const NOT_MEASURED = "TERRAIN NOT MEASURED: surface query failed, relaunch to retry";
+const NOT_MEASURED = `TERRAIN NOT MEASURED: surface query failed, ${SPIKE_RETRY}`;
 
 /** The status while the terrain is measured. */
 const MEASURING = "MEASURING TERRAIN: landing site and ground track";
@@ -80,11 +118,23 @@ export interface DescentSpikeProps {
   readonly workers: number;
   /** The terrain variant (`--vertex-path`, `--normals`; T13.c); the setting's own if absent. */
   readonly variant?: TerrainVariant | undefined;
+  /** The world flown (`--world`, R10.T14.c): the test planet unless given. */
+  readonly world?: SpikeWorldName | undefined;
+  /**
+   * The style the main view draws in over a generated world (`--style`, R10.T14.c):
+   * photorealistic unless given; the test planet's main view is the spike's own lit view.
+   */
+  readonly style?: RenderStyle | undefined;
   /** Where the engine comes from: R01's, or T13.c's measured one, or a fake in a test. */
   readonly engineSource?: ViewEngineSource | undefined;
   readonly spikeWorkers?: SpikeWorkers | undefined;
-  /** How the descent is measured before it flies: `prepareDescent`, or a test's. */
+  /** How the descent is measured before it flies over the test planet: `prepareDescent`, or a test's. */
   readonly prepare?: typeof prepareDescent | undefined;
+  /**
+   * How the descent is measured over a generated world, through the terrain session:
+   * `measureWorldDescent`, or a test's.
+   */
+  readonly measure?: MeasureDescent | undefined;
   /**
    * T13.c's metrics: each frame's sample and each patch's progress. Read at each call, so a new
    * object does not restart the run.
@@ -98,6 +148,38 @@ type Preparation =
   | { readonly kind: "failed" }
   /** The terrain was measured, but the script cannot clear it (`DescentRefused`). */
   | { readonly kind: "refused" };
+
+/** What the run's loop publishes for the DOM, at most every {@link READOUT_INTERVAL_MS}. */
+interface Published {
+  /** The frame it drew. */
+  readonly frame: SpikeFrame;
+  /**
+   * What the main view's survey line is made from over a generated world, its `FRAME` body's survey
+   * at the publish with no readout (`surveySnapshotOf`); `null` over the test planet, which has no
+   * survey.
+   */
+  readonly ground: GroundSnapshot | null;
+}
+
+/** No survey edge drawn. */
+const NO_SURVEY_EDGES: ReadonlyArray<DrawnSurveyEdge> = [];
+
+/** The survey-edge notes the main view's list last showed, and the edges they were made from. */
+interface ShownNotes {
+  readonly edges: ReadonlyArray<DrawnSurveyEdge>;
+  readonly notes: ReadonlyArray<SurveyEdgeListNote>;
+}
+
+/** No notes shown. */
+const NO_NOTES: ShownNotes = { edges: NO_SURVEY_EDGES, notes: [] };
+
+/**
+ * The lighting a scene's photorealistic statements read (`LIGHTING`), as `VIEW`'s are built: its
+ * kept scene's own star discs, with no sky asked, since the spike draws none.
+ */
+function spikeLightingOf(scene: ViewScene): ReturnType<typeof lightingState> {
+  return lightingState(hostLights(scene, sceneHostDiscs(scene, null)), false);
+}
 
 /** The canvas's drawing size, device pixels, from its stage's laid-out size. */
 function deviceSize(size: ElementSize | null): ViewSize | null {
@@ -150,6 +232,38 @@ export function siteElevationReading(elevationM: number): string {
   return formatElevationReading(elevationM, null).value;
 }
 
+/**
+ * The landing site's `SITE ELEVATION` over a generated world (plan R10, R10.T14.c; the guide's row,
+ * G1): the survey's reading at the site in `ELEVATION`'s form (`formatElevationReading`), Estimated
+ * with its uncertainty until the survey resolves the site (`~-410 m ± 18 m`), resolved once it does
+ * (`-410.2 m`), the uncertainty after the value by a no-break space, as `VIEW`'s readout joins it;
+ * or, where the readout met no surveyed ground there, its own state as `GROUND AT LINE OF SIGHT`
+ * words it, `NOT SURVEYED` or `NO GROUND`.
+ */
+export function siteSurveyReading(reading: SiteReading): string {
+  let text: string;
+  switch (reading.kind) {
+    case "ground": {
+      const shown = formatElevationReading(
+        reading.elevationM,
+        reading.resolved ? null : reading.sigmaM,
+      );
+      text =
+        shown.uncertainty === null
+          ? shown.value
+          : `${shown.value}${NO_BREAK_SPACE}${shown.uncertainty}`;
+      break;
+    }
+    case "not-surveyed":
+      text = NOT_SURVEYED;
+      break;
+    case "no-ground":
+      text = NO_GROUND;
+      break;
+  }
+  return text;
+}
+
 /** The ground speed: whole metres a second from 100 m/s, two decimals below. */
 export function groundSpeedReading(mps: number): string {
   return `${formatNumber(mps, mps >= 100 ? 0 : 2)} m/s`;
@@ -185,11 +299,21 @@ function seedReading(seed: bigint): string {
   return seed.toString(16).toUpperCase().padStart(16, "0");
 }
 
-/** The main view's label lines: R02's, its style the spike's lit one and its camera the script. */
-function mainLabelLines(run: ViewRun): ReadonlyArray<LabelLine> {
-  return labelLines(run, spikeExposure()).map((line) => {
+/**
+ * The main view's label lines: R02's, its camera the script, and its style the spike's lit one
+ * over the test planet (`drawn` `null`) or the style drawn over a generated world (G2), with the
+ * wireframe terrain's `CONTOUR INTERVAL` while it draws one.
+ *
+ * @param contourIntervalM - The interval its last frame drew its wireframe terrain at, m, or `null`.
+ */
+function mainLabelLines(
+  run: ViewRun,
+  drawn: RenderStyle | null,
+  contourIntervalM: number | null,
+): ReadonlyArray<LabelLine> {
+  return labelLines(run, spikeExposure(), false, contourIntervalM).map((line) => {
     if (line.label === "STYLE") {
-      return { label: line.label, value: "SPIKE LIT" };
+      return { label: line.label, value: drawn === null ? "SPIKE LIT" : styleName(drawn) };
     }
     if (line.label === "CAMERA") {
       return { label: line.label, value: "SCRIPTED" };
@@ -279,6 +403,25 @@ function Instrument({ title, canvasRef, stageRef, run, listId, cameraLabel }: In
  * which a mark is selected; the instruments draw its bracket reticle. The label block states the
  * test planet as provisional, dry and hand-parameterised, and carries the terrain's annunciation
  * (T9). Readings change at 4 Hz, and show `—` while no run draws.
+ *
+ * Over a generated world (`world` `terrain-test`; plan R10, R10.T14.c) it flies `TERRAIN TEST`'s
+ * star and moon instead: the fixture serves the moon's field in the page through `VIEW`'s terrain
+ * session (`useTerrainSession`), whose lifetime is `VIEW`'s, and the descent is measured through
+ * the session once it is made (`measureWorldDescent`), its field's revision raised before the
+ * session's first step. The main view is `VIEW`'s frame drawer in `style`, its `STYLE` line and name
+ * the style drawn, its label block without the test planet's statement, with the wireframe's
+ * `CONTOUR INTERVAL`, the photorealistic style's statements, and the session's terrain fault on its
+ * fault lines as `VIEW`'s. Its lower plate states the moon's survey line alone, and its list notes
+ * the survey's edge, as `VIEW`'s primary's do; it states no `DATUM` or terrain readout and draws no
+ * tripod (decision-r10-t14c-guide Q1), so that it asks the height workers nothing beside the
+ * measurement's bakes. `SITE ELEVATION` is the survey's reading at the site, Estimated with its
+ * uncertainty, or the readout's `NOT SURVEYED` or `NO GROUND` there, and missing until it is
+ * answered.
+ *
+ * Its remedies read `relaunch to retry` where `VIEW`'s read `reopen VIEW to retry` (Q2): it has no
+ * `VIEW` to reopen. A terrain fault in flight ends the run as failed, as does a photorealistic style
+ * whose pipelines could not be made (`GRAPHICS STYLE REFUSED`): each stands on the main view's
+ * fault lines, and the loop draws no more.
  */
 export function DescentSpike({
   seed,
@@ -286,9 +429,12 @@ export function DescentSpike({
   ridges,
   workers,
   variant,
+  world = "test-planet",
+  style = "photorealistic",
   engineSource = DEFAULT_ENGINE_SOURCE,
   spikeWorkers = DEFAULT_SPIKE_WORKERS,
   prepare = prepareDescent,
+  measure = measureWorldDescent,
   listeners,
 }: DescentSpikeProps) {
   const id = useId();
@@ -297,8 +443,22 @@ export function DescentSpike({
   const normals = variant?.normals;
   const listId = `${id}-targets`;
   const engineState = useViewEngine(engineSource);
+  const spikeWorld = spikeWorldNamed(world);
+  // `TERRAIN TEST`'s fixture, made once: its payloads are decoded only when a link first answers.
+  const [fixture] = useState(() => terrainSceneFixture());
+  // The generated world's terrain session, made and disposed as `VIEW`'s is, keyed on the fixture;
+  // none on the test planet.
+  const session = useTerrainSession({
+    engineState,
+    source: world === "terrain-test" ? { kind: "fixture", fixture } : null,
+    createWorker: spikeWorkers.height,
+    workers,
+    // The session compiles its passes' materials at this setting as it is made (R10.T14.d).
+    setting,
+  });
+  const terrainFaults = useTerrainFaults(session);
   const [preparation, setPreparation] = useState<Preparation>({ kind: "measuring" });
-  const [published, setPublished] = useState<SpikeFrame | null>(null);
+  const [published, setPublished] = useState<Published | null>(null);
   const [drawFault, setDrawFault] = useState<string | null>(null);
   const [selection, setSelection] = useState<CameraTarget | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -341,8 +501,12 @@ export function DescentSpike({
     },
   }));
 
-  // The terrain is measured once, in the surface query's worker, before the run starts.
+  // The test planet's terrain is measured once, in the surface query's worker, before the run
+  // starts.
   useEffect(() => {
+    if (world !== "test-planet") {
+      return undefined;
+    }
     const query = new SurfaceQuery(spikeWorkers.query(), ridges);
     const life = { ended: false };
     void prepare(query, seed)
@@ -374,18 +538,64 @@ export function DescentSpike({
       query.dispose();
       setPreparation({ kind: "measuring" });
     };
-  }, [spikeWorkers, ridges, seed, prepare]);
+  }, [world, spikeWorkers, ridges, seed, prepare]);
+
+  // A generated world's terrain is measured once, through the terrain session, once it is made:
+  // the fixture's revision is raised first, so that the session's first ask, at its first step, is
+  // answered with the larger survey. The poll stops when the spike goes or the session changes.
+  useEffect(() => {
+    if (world !== "terrain-test" || session === null) {
+      return undefined;
+    }
+    const life = { ended: false };
+    const abort = new AbortController();
+    fixture.notePlayed(TERRAIN_TEST_SCRIPT.deltaAtS);
+    void measure(session, spikeWorld, seed, abort.signal)
+      .then((prepared) => {
+        if (!life.ended) {
+          inputsRef.current.listeners?.onPrepared?.(prepared);
+          setPreparation({ kind: "ready", prepared });
+        }
+        return undefined;
+      })
+      .catch((error: unknown) => {
+        if (!life.ended) {
+          if (error instanceof DescentRefused) {
+            console.error("the descent spike refuses to fly:", error);
+            inputsRef.current.listeners?.onFailed?.(DESCENT_REFUSED);
+            setPreparation({ kind: "refused" });
+          } else {
+            console.error("the descent spike's terrain could not be measured:", error);
+            inputsRef.current.listeners?.onFailed?.(NOT_MEASURED);
+            setPreparation({ kind: "failed" });
+          }
+        }
+      });
+    return () => {
+      life.ended = true;
+      abort.abort(new Error("the descent spike's measurement was stopped"));
+      setPreparation({ kind: "measuring" });
+    };
+  }, [world, session, fixture, spikeWorld, seed, measure]);
 
   const prepared = preparation.kind === "ready" ? preparation.prepared : null;
+  // The script's kept scene, which the runs below and each publish's survey read.
+  const kept = useMemo(
+    () => (prepared === null ? null : spikeScene(prepared.profile, spikeWorld)),
+    [prepared, spikeWorld],
+  );
 
-  // The run draws every frame once the engine, the measurement and the three canvases are in.
+  // The run draws every frame once the engine, the measurement and the three canvases are in, and
+  // over a generated world its terrain session.
   useEffect(() => {
     if (
       engineState.kind !== "ready" ||
       prepared === null ||
+      kept === null ||
       mainCanvas === null ||
       orbitCanvas === null ||
-      craftCanvas === null
+      craftCanvas === null ||
+      (world === "terrain-test" && session === null)
     ) {
       return undefined;
     }
@@ -402,6 +612,9 @@ export function DescentSpike({
             ...(vertexPath === undefined ? {} : { vertexPath }),
             ...(normals === undefined ? {} : { normals }),
           },
+          ...(world === "terrain-test" && session !== null
+            ? { body: { world: spikeWorld, session, style } }
+            : {}),
         },
         { main: mainCanvas, orbit: orbitCanvas, craft: craftCanvas },
         forwarding,
@@ -417,23 +630,48 @@ export function DescentSpike({
       };
     }
     const life = { ended: false, failed: false };
-    // A failure stops the run: the loop draws no more, and the readings go to their missing value.
-    const fail = (what: string, error: unknown): void => {
-      console.error(`the descent spike's ${what} failed:`, error);
+    // A failure stops the run, once: the loop draws no more, the listeners are told `status`, the
+    // readings go to their missing value, and `shown`, where given, stands on the main view's fault
+    // lines (the terrain's fault stands there through the session's own faults).
+    const stop = (status: string, shown: string | null): void => {
+      if (life.failed) {
+        return;
+      }
       life.failed = true;
-      inputsRef.current.listeners?.onFailed?.(VIEWS_NOT_MADE);
+      inputsRef.current.listeners?.onFailed?.(status);
       if (!life.ended) {
-        setDrawFault(VIEWS_NOT_MADE);
+        if (shown !== null) {
+          setDrawFault(shown);
+        }
         setPublished(null);
       }
     };
+    const fail = (what: string, error: unknown): void => {
+      console.error(`the descent spike's ${what} failed:`, error);
+      stop(VIEWS_NOT_MADE, VIEWS_NOT_MADE);
+    };
     void run.ready().catch((error: unknown) => {
       fail("materials", error);
+    });
+    // Each publish's run of the main view, for its survey line's snapshot.
+    const mainRunOf = (drawn: SpikeFrame): ViewRun => ({
+      source: { kind: "kept", kept },
+      tS: drawn.tS,
+      scene: drawn.scene,
+      camera: drawn.cameras.main,
     });
     let frame = 0;
     let publishedMs = Number.NEGATIVE_INFINITY;
     const tick = (nowMs: number): void => {
       if (life.failed) {
+        return;
+      }
+      // A terrain fault ends the run as failed, in the spike's words: after it nothing of the
+      // terrain is drawn or baked, so that a passed run measured terrain throughout
+      // (decision-r10-t14c-guide Q2). The session logged its cause.
+      const terrainFault = session?.terrainFaults.get(SPIKE_MAIN_VIEW_ID);
+      if (terrainFault !== undefined) {
+        stop(spikeFaultLine(terrainFault), null);
         return;
       }
       const inputs = inputsRef.current;
@@ -458,15 +696,25 @@ export function DescentSpike({
             remPx: inputs.main.remPx * inputs.main.devicePixelRatio,
             strokes: viewStrokesAt(inputs.main.devicePixelRatio),
             selection: inputs.selection,
+            mainStage: inputs.main,
           });
         } catch (error: unknown) {
           // A frame the engine refused: the run stops and says so, rather than freezing silently.
           fail("frame", error);
           return;
         }
+        if (drawn.refusal !== null) {
+          // The style refused, the run's state rather than a throw: it stops, as the style's fault.
+          // The photorealistic renderer logged why its pipelines could not be made.
+          stop(drawn.refusal, drawn.refusal);
+          return;
+        }
         if (nowMs - publishedMs >= READOUT_INTERVAL_MS) {
           publishedMs = nowMs;
-          setPublished(drawn);
+          setPublished({
+            frame: drawn,
+            ground: world === "terrain-test" ? surveySnapshotOf(session, mainRunOf(drawn)) : null,
+          });
         }
       }
       frame = requestAnimationFrame(tick);
@@ -483,6 +731,7 @@ export function DescentSpike({
   }, [
     engineState,
     prepared,
+    kept,
     mainCanvas,
     orbitCanvas,
     craftCanvas,
@@ -493,31 +742,40 @@ export function DescentSpike({
     normals,
     spikeWorkers,
     forwarding,
+    world,
+    session,
+    spikeWorld,
+    style,
   ]);
 
   // The runs the label blocks and the list read: the published frame's, or the script's start.
-  const kept = useMemo(() => (prepared === null ? null : spikeScene(prepared.profile)), [prepared]);
+  const shownFrame = published?.frame ?? null;
   const runs = useMemo(() => {
     if (kept === null) {
       return null;
     }
-    const tS = published?.tS ?? 0;
-    const scene = published?.scene ?? kept.sceneAt(tS);
+    const tS = shownFrame?.tS ?? 0;
+    const scene = shownFrame?.scene ?? kept.sceneAt(tS);
     const of = (key: "main" | "orbit" | "craft"): ViewRun => ({
       source: { kind: "kept", kept },
       tS,
       scene,
-      camera: published?.cameras[key] ?? newCameraState(cameraSceneOf(scene), "camera"),
+      camera: shownFrame?.cameras[key] ?? newCameraState(cameraSceneOf(scene), "camera"),
     });
     return { main: of("main"), orbit: of("orbit"), craft: of("craft") };
-  }, [kept, published]);
+  }, [kept, shownFrame]);
 
+  // A generated world's measurement waits on the engine, through the session, which is made once
+  // the engine is ready and starts the measurement in the same commit's effects: while the adapter
+  // is still acquired the line says so, and with no adapter its fault stands in place of the wait.
+  const measuring =
+    preparation.kind === "measuring" && (world === "test-planet" || engineState.kind === "ready");
   const status: { readonly text: string; readonly standing: "waiting" | "fault" } | null =
     preparation.kind === "failed"
       ? { text: NOT_MEASURED, standing: "fault" }
       : preparation.kind === "refused"
         ? { text: DESCENT_REFUSED, standing: "fault" }
-        : preparation.kind === "measuring"
+        : measuring
           ? { text: MEASURING, standing: "waiting" }
           : engineState.kind === "unavailable"
             ? { text: NO_ADAPTER, standing: "fault" }
@@ -525,14 +783,73 @@ export function DescentSpike({
               ? { text: "GRAPHICS ACQUIRING ADAPTER", standing: "waiting" }
               : null;
 
-  const pose = published?.pose ?? null;
+  const pose = shownFrame?.pose ?? null;
   // The height's unit switches with hysteresis from the one last shown, adjusted during render.
   const [heightUnit, setHeightUnit] = useState<HeightUnit>("m");
   const nextUnit = pose === null ? heightUnit : heightUnitFor(pose.clearanceM, heightUnit);
   if (nextUnit !== heightUnit) {
     setHeightUnit(nextUnit);
   }
-  const terrain = published?.terrain ?? null;
+  const terrain = shownFrame?.terrain ?? null;
+  // The main view's style as its label reads it: the spike's lit view's over the test planet, the
+  // style drawn over a generated world, the style asked before its first frame, as `VIEW`'s.
+  const drawnStyle = world === "test-planet" ? null : (shownFrame?.drawnStyle ?? style);
+  // Its fault lines, as `VIEW`'s (`faultsFor`): its graphics fault, then the terrain's, in `VIEW`'s
+  // words for every test of them, and shown with the spike's remedy (`spikeFaultLine`).
+  const terrainFault = terrainFaults.get(SPIKE_MAIN_VIEW_ID);
+  const faults = [
+    ...(drawFault === null ? [] : [drawFault]),
+    ...(terrainFault === undefined ? [] : [terrainFault]),
+  ];
+  // The main view's survey line over a generated world, alone on its lower plate, its units held
+  // from one publish to the next as `VIEW`'s primary's are; none over the test planet.
+  const terrainLines = useTerrainLines(published?.ground ?? null, faults, SPIKE_RETRY);
+  const lowerParts = terrainLowerParts(terrainLines);
+  // Its list notes the survey edges its last frame drew, their units held from the notes last shown.
+  const [shownNotes, setShownNotes] = useState<ShownNotes>(NO_NOTES);
+  const edges = shownFrame?.surveyEdges ?? NO_SURVEY_EDGES;
+  let notes = shownNotes.notes;
+  if (shownNotes.edges !== edges) {
+    notes = runs === null ? [] : surveyEdgeNotes(runs.main.scene, edges, shownNotes.notes);
+    setShownNotes({ edges, notes });
+  }
+  // The photorealistic style's statements, as `VIEW`'s primary states them after its others:
+  // `PHOTOREALISTIC: PREPARING` while the wireframe stands in, then `LIGHTING` and the appearance
+  // notes; none in the wireframe, or before the first frame.
+  const photoreal =
+    runs === null || drawnStyle === null
+      ? []
+      : photorealStatements(
+          runs.main,
+          spikeLightingOf(runs.main.scene),
+          drawnStyle,
+          litLabelsOf(runs.main.scene),
+        );
+  // The test planet's statement stands from the first render; a generated world's terrain line gives
+  // way to the terrain's fault, as `VIEW`'s does (`terrainStatementOf`).
+  const statements =
+    world === "test-planet"
+      ? [
+          TEST_PLANET_STATEMENT,
+          ...(runs === null ? [] : labelStatements(runs.main, terrain?.annunciation ?? null)),
+        ]
+      : runs === null
+        ? []
+        : [
+            ...labelStatements(
+              runs.main,
+              terrainStatementOf(terrain?.annunciation ?? null, faults),
+            ),
+            ...photoreal,
+          ];
+  const siteElevation =
+    prepared === null
+      ? null
+      : world === "test-planet"
+        ? siteElevationReading(prepared.siteHeightM)
+        : prepared.siteReading === undefined || prepared.siteReading === null
+          ? null
+          : siteSurveyReading(prepared.siteReading);
   return (
     <div className="spike">
       <header className="console__header">
@@ -557,21 +874,31 @@ export function DescentSpike({
               // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
               role="img"
               tabIndex={0}
-              aria-label={MAIN_VIEW_NAME}
+              aria-label={drawnStyle === null ? MAIN_VIEW_NAME : bodyMainViewName(drawnStyle)}
               aria-details={listId}
+              data-spike-view="main"
             />
             <div className="view__overlay">
               <ViewLabelBlock
-                lines={runs === null ? [] : mainLabelLines(runs.main)}
-                statements={[
-                  TEST_PLANET_STATEMENT,
-                  ...(runs === null
+                lines={
+                  runs === null
                     ? []
-                    : labelStatements(runs.main, terrain?.annunciation ?? null)),
-                ]}
+                    : mainLabelLines(runs.main, drawnStyle, shownFrame?.contourIntervalM ?? null)
+                }
+                statements={statements}
                 countLine={null}
-                faults={drawFault === null ? [] : [drawFault]}
+                faults={faults.map(spikeFaultLine)}
               />
+              {lowerParts.length === 0 ? null : (
+                // The window is never smaller than its launch size, where both plates stand whole
+                // (decision-r10-t14c-guide Q1 (c)), so that nothing on it gives way.
+                <ViewLowerPlate
+                  id={`${id}-lower`}
+                  parts={lowerParts}
+                  readout="stands"
+                  survey="stands"
+                />
+              )}
             </div>
           </div>
           <div className="spike__instruments">
@@ -615,13 +942,21 @@ export function DescentSpike({
               <dt>Vertical Speed</dt>
               <Reading value={pose === null ? null : verticalSpeedReading(pose.verticalSpeedMps)} />
               <dt>Camera ELV</dt>
-              <Reading value={pose === null ? null : formatSignedDeg(cameraElevationDeg(pose))} />
-              <dt>Site Elevation</dt>
               <Reading
-                value={prepared === null ? null : siteElevationReading(prepared.siteHeightM)}
+                value={
+                  pose === null
+                    ? null
+                    : formatSignedDeg(cameraElevationDeg(pose, spikeWorld.figure))
+                }
+              />
+              <dt>Site Elevation</dt>
+              {/* Over a generated world its field holds an Estimated reading: under its label. */}
+              <Reading
+                value={siteElevation}
+                className={world === "test-planet" ? undefined : "spike__site-survey"}
               />
               <dt>Finest Terrain Held</dt>
-              <Reading value={published === null ? null : published.contact ? "YES" : "NO"} />
+              <Reading value={shownFrame === null ? null : shownFrame.contact ? "YES" : "NO"} />
               <dt>Patches</dt>
               <dd className="spike__patches">
                 {terrain === null ? (
@@ -646,6 +981,7 @@ export function DescentSpike({
             <div id={listId} className="spike__list">
               <ViewMarkList
                 rows={runs === null ? [] : markRows(runs.main)}
+                notes={notes}
                 fromCamera={runs !== null && rangesFromCamera(runs.main.scene)}
                 selectedKey={selectedKey}
                 onSelect={(row) => {
@@ -665,12 +1001,14 @@ export function DescentSpike({
 interface ReadingProps {
   /** The reading's text, or `null` while no run draws. */
   readonly value: string | null;
+  /** More class names for its value, or none. */
+  readonly className?: string | undefined;
 }
 
 /** A reading, or the missing value's `—` while no run draws. */
-function Reading({ value }: ReadingProps) {
+function Reading({ value, className }: ReadingProps) {
   return (
-    <dd>
+    <dd className={className}>
       {value === null ? (
         <span className="readout__missing">—</span>
       ) : (

@@ -1815,6 +1815,9 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
   has no local body or the scene draws none for it; its attitude stays the barycentric velocity's.
   `frameName`, `frameBody`, `POSITION`, the free camera's detach and the camera report follow
   unchanged. `fromServer.test.ts`'s pin of the system-held ship is re-pinned to the rule.
+- **Extended by R10.T14.c (2026-10-20; decision-r10-t14c-leans §5): the local body's present
+  velocity**, `ViewBody.presentVelocityMPerS`, set by `viewSceneFromServer` for the local body
+  alone, which the terrain session's contacts chain a craft's frame through.
 - **Fixed in RM1 validation (2026-10-02): R02.T7.b's transparent-layer order (M1).** The text and
   `transparentLayerOrder` drew a body's shells below the camera first and its shells above it last,
   so a high cloud deck and the air were composited over the nearer low deck. Along any ray that meets

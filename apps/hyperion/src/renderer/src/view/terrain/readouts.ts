@@ -98,7 +98,11 @@ export const NO_GROUND = "NO GROUND";
 /** The status after a `SLANT RANGE` in its uncertainty's place, where the line of sight grazes. */
 export const GRAZING = "GRAZING";
 
-/** What the survey line's two failed states end with: `VIEW` shown again asks the field afresh. */
+/**
+ * What the survey line's two failed states end with: `VIEW` shown again asks the field afresh. A
+ * host with no `VIEW` to reopen gives its own remedy (`surveyLines`' `remedy`; plan R10, R10.T14.c,
+ * decision-r10-t14c-guide Q2: the descent spike's `relaunch to retry`).
+ */
 const RETRY = "reopen VIEW to retry";
 
 // --- Field widths -------------------------------------------------------------------------------
@@ -756,13 +760,16 @@ export function formatCoverage(
 
 // --- The lines ----------------------------------------------------------------------------------
 
-/** The survey line's state for a failure (decision-r10-t16-leans §12), in its colour. */
-function failureLine(failure: FieldFailure): ReadoutLine {
+/**
+ * The survey line's state for a failure (decision-r10-t16-leans §12), in its colour, ending with
+ * `remedy`.
+ */
+function failureLine(failure: FieldFailure, remedy: string): ReadoutLine {
   let line: ReadoutLine;
   switch (failure.kind) {
     case "rejected": {
       const reason = failure.message.trim();
-      const words = reason.length > 0 ? `${reason}, ${RETRY}` : RETRY;
+      const words = reason.length > 0 ? `${reason}, ${remedy}` : remedy;
       line = status(
         "survey-state",
         `SURVEY COVERAGE REJECTED: ${words}`,
@@ -774,7 +781,7 @@ function failureLine(failure: FieldFailure): ReadoutLine {
     case "invalid":
       line = status(
         "survey-state",
-        `SURVEY DATA INVALID: ${failure.check}, ${RETRY}`,
+        `SURVEY DATA INVALID: ${failure.check}, ${remedy}`,
         "status-caution",
         "fault",
       );
@@ -806,8 +813,15 @@ export interface SurveyLines {
  *   the line's values, each stale with its `S` while the survey is (`TerrainSurvey.stale`: the link
  *   down, or a failure standing), `SURVEY COVERAGE NONE S` included; and any failure's state on a
  *   line of its own after it. A status takes no `S`.
+ *
+ * @param remedy - What the two failed states end with: `VIEW`'s `reopen VIEW to retry` unless
+ *   given.
  */
-export function surveyLines(survey: TerrainSurvey | null, units: ReadoutUnits): SurveyLines {
+export function surveyLines(
+  survey: TerrainSurvey | null,
+  units: ReadoutUnits,
+  remedy: string = RETRY,
+): SurveyLines {
   if (survey === null) {
     return { lines: [status("survey", SURVEY_PENDING, "text")], units };
   }
@@ -819,7 +833,7 @@ export function surveyLines(survey: TerrainSurvey | null, units: ReadoutUnits): 
     const line =
       standing.failure === null
         ? status("survey", SURVEY_PENDING, "text")
-        : failureLine(standing.failure);
+        : failureLine(standing.failure, remedy);
     return { lines: [line], units };
   }
   const { stale } = survey;
@@ -845,7 +859,7 @@ export function surveyLines(survey: TerrainSurvey | null, units: ReadoutUnits): 
   }
   const lines: ReadoutLine[] = [reading("SURVEY COVERAGE", segments)];
   if (standing.failure !== null) {
-    lines.push(failureLine(standing.failure));
+    lines.push(failureLine(standing.failure, remedy));
   }
   return { lines, units: { ...units, finest } };
 }
@@ -1134,6 +1148,11 @@ export interface TerrainLabelInput {
    * default.
    */
   readonly surfaceUnset?: boolean | undefined;
+  /**
+   * What the survey line's two failed states end with (`surveyLines`' `remedy`): `VIEW`'s
+   * `reopen VIEW to retry` unless given.
+   */
+  readonly remedy?: string | undefined;
 }
 
 /** A view's terrain lines, in the label block's order, and the units they kept. */
@@ -1168,7 +1187,7 @@ export function terrainLabelModel(
       units,
     };
   }
-  const survey = surveyLines(input.survey, units);
+  const survey = surveyLines(input.survey, units, input.remedy);
   const header = input.survey?.header ?? null;
   const { readout } = input;
   if (

@@ -43,7 +43,8 @@
  *   (`#fieldReleased`), not at a hand-back, and first at the teardown. Each step steps every pass
  *   once over the views that hand its body over, each at its own style's τ, presented size and
  *   weight (`ViewBudget.streamPriority`), with the scene's craft over it as its contacts
- *   ({@link sceneContacts}); each view draws its own through {@link TerrainSession.drawTerrain}.
+ *   ({@link sceneContacts}) on the ground its resident bakes hold; each view draws its own through
+ *   {@link TerrainSession.drawTerrain}.
  * - **The survey and the mask (D6 and D7).** Each wanted body's {@link SurveyedCells}, which its
  *   pass's selection reads, take every block's cells and the store's coverage at once. Its GPU
  *   mask takes a block's cells once the rebakes the block named have landed where a pass draws
@@ -89,7 +90,7 @@ import {
   type UniverseTime,
 } from "@hyperion/protocol";
 
-import { norm, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import { add, norm, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import { type KeplerOrbit, meanAnomalyAt } from "../../lib/orbit";
 import {
   bodyDetailSeed,
@@ -128,10 +129,10 @@ import { CoverageMask, type CoverageView } from "./coverage";
 import { MAX_CONTACTS } from "./gpu/uniforms";
 import {
   craftContact,
-  datumGroundUnder,
   finestPatchSizeM,
   type GroundContact,
   type GroundUnderFunction,
+  heldGroundUnder,
 } from "./grounded";
 import {
   handoverRangeRatio,
@@ -156,10 +157,11 @@ import {
 } from "./terrainPass";
 import { wireframeTerrainSettings } from "./terrainWire";
 import { hullBoundingRadiusM } from "../wireframe/hulls";
-import type { SlopeBaselineM, SurfaceGroundReadout } from "./workers/messages";
+import type { BakeSettings, SlopeBaselineM, SurfaceGroundReadout } from "./workers/messages";
 import {
   defaultHeightWorkers,
   type FieldChange,
+  type HeightWorkerLane,
   HeightWorkerPool,
   type WorkerLike,
 } from "./workers/pool";
@@ -457,11 +459,67 @@ function placeableAgainst(position: ViewPosition, body: ViewBody, scene: ViewSce
 }
 
 /**
- * A craft's velocity against `body`, m/s along the galactic axes: its own where its frame is the
- * body's, less the body's (its retarded centre's) where its frame is the system's; `null` where
- * neither holds, or none is known.
+ * A body's velocity at the epoch it is drawn at, m/s from the system's barycentre along the
+ * galactic axes (decision-r10-t14c-leans §5): its present one where the scene holds it, as for the
+ * ship's local body in a served scene (`ViewBody.presentVelocityMPerS`), and its retarded one
+ * (`ViewBody.retarded`) otherwise; `null` where neither is known.
  */
-function velocityAgainst(craft: ViewCraft, body: ViewBody): Vec3 | null {
+function drawnVelocityOf(body: ViewBody): Vec3 | null {
+  return body.presentVelocityMPerS ?? body.retarded?.velocityMPerS ?? null;
+}
+
+/**
+ * A craft's velocity against `body` M, m/s along the galactic axes, chained through the system's
+ * frame where the craft is held in another body's frame (plan R10, R10.T14.c; decision-r10-t16-leans
+ * §13, Q3; decision-r10-t14c-leans §5): what {@link sceneContacts} judges its descent by. `null`
+ * where it is not known or cannot be chained.
+ *
+ * @remarks
+ * - **The rule.** Each body's velocity is taken at the epoch it is drawn at, V^drawn: the present
+ *   one for the ship's local body, which a served scene draws at the present
+ *   (`ViewBody.presentVelocityMPerS`, the `SceneFrame.localBodyVelocityMPerS` that the own ship's
+ *   velocity in its frame is held against, decision-r10-ship-frame §2), and the retarded one for
+ *   every other body, drawn where it is seen. In a kept scene no body carries a present velocity
+ *   and every light time is 0, so the retarded velocity is the present one.
+ *   - In M's own frames (its `body` or `body_fixed`), v, the craft's own.
+ *   - In another body F's non-rotating frame, v + V_F^drawn − V_M^drawn: Galilean addition through
+ *     the system's frame, so that a craft in the band of a small moon's Hill sphere, still held in
+ *     its planet's frame, is judged against the moon. `null` where either body's is not known.
+ *   - In another body's fixed frame, `null`: its velocity is against a frame turning at a rate the
+ *     scene does not hold, so ω_F × r, 664.5 m/s at Phobos's distance from Mars, cannot be added
+ *     back. Such a craft is a contact only while grounded.
+ *   - In the system's frame, v − V_M^drawn; in the galactic frame, `null`.
+ * - **Its error.** The contact's position is differenced through the drawn centres (in a served
+ *   scene the local body's at the present, every other body's at its `apparentM`, which carries
+ *   light time and aberration), and its velocity is of the same epochs: for the own ship held in
+ *   its local body F's frame, v + V_F gives back its barycentric velocity, and the chain is exact
+ *   against the picture to first order in v ÷ c. Against the physical present, a body M drawn at
+ *   its emission errs by |a_M| τ_M to first order, a_M its acceleration in the system's frame and
+ *   τ_M its light time to the scene's observer, the own ship in a served scene and 0 in a kept one.
+ *   For a Phobos-like moon, GM_Mars ÷ a² = 0.4873 m/s² at a = 9,375 km:
+ *   - the own ship in the band of its Hill sphere, 15.5 km from its centre and still held in the
+ *     planet's frame: 0.4873 m/s² × 51.70 µs ≈ 2.5 × 10⁻⁵ m/s;
+ *   - another craft at the moon, seen from the planet: 0.4873 m/s² × 31.27 ms ≈ 0.0152 m/s.
+ *
+ *   Nearer the moon than 0.9 of its Hill radius, 14.68 km at pericentre, the own ship is held in
+ *   its frame: the moon is then the local body, drawn at the present, and τ_M is 0. F's retarded
+ *   velocity in place of its present one would add |a_F| τ_F, 8.0 × 10⁻⁵ m/s at Phobos but 1.4 m/s
+ *   for a moon 2.5 radii from a Jupiter-size planet 0.05 au from a Sun-like star.
+ * - **Deferred: craft at the present against bodies at their emission.** A craft other than the
+ *   own ship is placed at the scene's time, while every body but the local one is drawn where it is
+ *   seen, so a contact against a moon seen across light time τ stands off by about |V_M − V_obs| τ,
+ *   V_obs the observer's velocity: 66.8 m for a craft at a Phobos-like moon seen by an observer
+ *   co-moving with its Mars-like planet, 2,137 m/s over 31.27 ms, beyond the held radius. No scene
+ *   reaches it today: the server's craft source is `NoCraft`, and a kept scene has no light time
+ *   (decision-r10-t14c-leans, deferred finding 1).
+ * - This resolves decision-r10-ship-frame's finding 4 as it was worded: for the local body, which
+ *   is drawn at the present, the present velocity is the reference.
+ */
+export function craftVelocityAgainst(
+  craft: ViewCraft,
+  body: ViewBody,
+  scene: ViewScene,
+): Vec3 | null {
   const v = craft.velocityMPerS;
   if (v === null) {
     return null;
@@ -470,12 +528,26 @@ function velocityAgainst(craft: ViewCraft, body: ViewBody): Vec3 | null {
   let against: Vec3 | null;
   switch (position.kind) {
     case "body":
+      if (position.body === body.id) {
+        against = v;
+      } else {
+        const frame = scene.bodies.find((each) => each.id === position.body);
+        const frameVelocity = frame === undefined ? null : drawnVelocityOf(frame);
+        const bodyVelocity = drawnVelocityOf(body);
+        against =
+          frameVelocity === null || bodyVelocity === null
+            ? null
+            : add(v, sub(frameVelocity, bodyVelocity));
+      }
+      break;
     case "body_fixed":
       against = position.body === body.id ? v : null;
       break;
-    case "system":
-      against = body.retarded === null ? null : sub(v, body.retarded.velocityMPerS);
+    case "system": {
+      const bodyVelocity = drawnVelocityOf(body);
+      against = bodyVelocity === null ? null : sub(v, bodyVelocity);
       break;
+    }
     case "galactic":
       against = null;
       break;
@@ -488,10 +560,13 @@ function velocityAgainst(craft: ViewCraft, body: ViewBody): Vec3 | null {
  * each grounded or descending (`isDescending`) over the ground `ground` gives, at its hull's
  * bounding radius (`TEST HULL`'s until hulls are defined), passed at the ground beneath it
  * (`craftContact`), at most `MAX_CONTACTS` of them; none for a body whose rotation is not known. A
- * craft the scene cannot place against the body is passed over.
+ * craft the scene cannot place against the body is passed over; one held in another body's frame
+ * is judged against this one, its velocity chained through each body's at the epoch it is drawn at
+ * ({@link craftVelocityAgainst}, R10.T14.c).
  *
- * @param ground - The ground under a body-fixed point: the datum's (`datumGroundUnder`) until
- *   R10.T14.c gives it the workers' ground (decision-r10-t16-contracts §2).
+ * @param ground - The ground under a body-fixed point: the workers' where the pass holds it
+ *   (`heldGroundUnder` of its resident heights, R10.T14.c), the datum's elsewhere
+ *   (decision-r10-t16-contracts §2).
  * @param patchSizeM - The finest patch's edge on the body, metres (`finestPatchSizeM`).
  */
 export function sceneContacts(
@@ -516,7 +591,7 @@ export function sceneContacts(
       { kind: "body", body: body.id, m: vec3(0, 0, 0) },
       origins,
     );
-    const v = velocityAgainst(craft, body);
+    const v = craftVelocityAgainst(craft, body, scene);
     const contact = craftContact(
       rotateToBodyFixed(rotation, fromCentreM),
       v === null ? null : rotateToBodyFixed(rotation, v),
@@ -1065,6 +1140,44 @@ export class TerrainSession {
   }
 
   /**
+   * The level table of `body`'s field as the workers hold it, settled (R10.T14.c): 25 × 4, as
+   * `planetGeometry` takes it, the pool's `fieldLevels` once the workers have reported every block
+   * posted so far of the field.
+   *
+   * @remarks
+   * - It is `null` while a posted block is still unreported, so that a measurement made over it,
+   *   the descent spike's floors (R10.T14.c), reads every block posted; and `null` once disposed,
+   *   for a body whose field the pool does not keep (a body not wanted), and before any block's
+   *   report.
+   * - Its lowest and highest columns bound only the cells held, not the whole body: the held
+   *   cells' elevations plus the most the level's and its parent's contributions can add,
+   *   stretched to the datum, and exactly 0 and 0 before any cell
+   *   (`crates/hyperion-surface/src/worker.rs`' `level_table`).
+   *   Ground beyond the cells held is bounded by the body-wide ceiling instead (`reading.rs`'
+   *   `ceiling_m`; decision-r10-t14c-leans §4).
+   * - Its bound column is R09's `level_bound_m`, whatever is held.
+   */
+  levels(body: BodyIdHex): Float64Array | null {
+    if (this.#disposed) {
+      return null;
+    }
+    const blocks = this.#pool.fieldBlocks(body);
+    return blocks !== null && blocks.reported === blocks.posted
+      ? this.#pool.fieldLevels(body)
+      : null;
+  }
+
+  /**
+   * A lane of bakes of `bake`'s settings over the session's one pool (`HeightWorkerPool.lane`), its
+   * queue, workers and fields, for a one-off measurement such as the descent spike's floors
+   * (R10.T14.c); `null` once disposed. Its caller terminates it (`HeightWorkerLane.terminate`),
+   * and the session's teardown, which terminates the pool, ends it too.
+   */
+  lane(bake: BakeSettings): HeightWorkerLane | null {
+    return this.#disposed ? null : this.#pool.lane(bake);
+  }
+
+  /**
    * View `view`'s terrain readout of `body` where `sight` meets its ground (plan R10, T12;
    * decision-r10-live-path, D10): the slant range, the reading at its foot, the material there and
    * the ground's two properties, from one worker's query over the body's field
@@ -1348,7 +1461,7 @@ export class TerrainSession {
         : sceneContacts(
             seen.scene,
             seen.body,
-            datumGroundUnder(pass.planet.figure),
+            heldGroundUnder(pass.planet.figure, pass.heights),
             finestPatchSizeM(pass.planet),
           );
     pass.step({ views: passViews, grounded });

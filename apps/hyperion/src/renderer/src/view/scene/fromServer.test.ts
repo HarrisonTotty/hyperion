@@ -790,6 +790,49 @@ describe("the own ship held in its local body's frame (R10.T12; decision-r10-shi
   });
 });
 
+describe("the local body's present velocity (R10.T14.c; decision-r10-t14c-leans §5)", () => {
+  it("gives the local body the frame's present velocity, the one the own ship's is held against", () => {
+    const model = sceneModelOf(stateNearEarth());
+    const frame = shipFrameOf(model);
+    if (frame.localBody !== FIXTURE_EARTH || frame.localBodyVelocityMPerS === null) {
+      throw new Error("the fixture's ship near the Earth is in the Earth's frame");
+    }
+    expect(viewBodyOf(viewSceneOf(model, frame), FIXTURE_EARTH).presentVelocityMPerS).toEqual(
+      frame.localBodyVelocityMPerS,
+    );
+  });
+
+  it("gives every other body none, each drawn at its light's emission", () => {
+    const model = sceneModelOf(stateNearEarth());
+    const others = viewSceneOf(model, shipFrameOf(model)).bodies.filter(
+      (body) => body.id !== FIXTURE_EARTH,
+    );
+    expect([
+      others.length > 0,
+      others.filter((body) => "presentVelocityMPerS" in body).map((body) => body.id),
+    ]).toEqual([true, []]);
+  });
+
+  it("gives no body one where the frame has no local body", () => {
+    const model = sceneModelOf(stateInSystem());
+    const frame = shipFrameOf(model);
+    if (frame.localBody !== null) {
+      throw new Error("the fixture's ship 1 au out is in no body's Hill sphere");
+    }
+    expect(
+      viewSceneOf(model, frame)
+        .bodies.filter((body) => "presentVelocityMPerS" in body)
+        .map((body) => body.id),
+    ).toEqual([]);
+  });
+
+  it("gives the local body none where the frame holds no present velocity for it", () => {
+    const model = sceneModelOf(stateNearEarth());
+    const scene = viewSceneOf(model, { ...shipFrameOf(model), localBodyVelocityMPerS: null });
+    expect("presentVelocityMPerS" in viewBodyOf(scene, FIXTURE_EARTH)).toBe(false);
+  });
+});
+
 /** A record of the scene's system, by ID. */
 function recordOf(model: ReturnType<typeof sceneModelOf>, id: string): SystemBody {
   const record = model.system?.bodies.bodies.find((body) => body.id === id);

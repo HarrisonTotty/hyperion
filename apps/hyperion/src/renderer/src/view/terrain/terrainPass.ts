@@ -444,6 +444,21 @@ export interface TerrainPassOptions {
   readonly materials?: TerrainMaterialSource;
 }
 
+/**
+ * A listener of a pass's selections and residency beside its options' (plan R10, R10.T14.c): the
+ * descent spike's metrics over a terrain session's pass, which the session makes without them
+ * ({@link TerrainPass.observe}).
+ */
+export interface TerrainPassObserver {
+  /** Called with each selection, as {@link TerrainPassOptions.onSelect} is. */
+  readonly onSelect?: (input: SelectionInput, selection: Selection) => void;
+  /** Called with each patch made resident, as {@link TerrainPassOptions.onResident} is. */
+  readonly onResident?: (key: PatchKey) => void;
+}
+
+/** The pass's observers while it has none. */
+const NO_OBSERVERS: ReadonlyArray<TerrainPassObserver> = [];
+
 /** The `performance.measure` name of one selection, when the pass measures it. */
 export const SELECT_MEASURE = "terrain.select";
 
@@ -732,6 +747,8 @@ export class TerrainPass {
   readonly #measureSelection: boolean;
   readonly #onResident: ((key: PatchKey) => void) | null;
   readonly #onSelect: ((input: SelectionInput, selection: Selection) => void) | null;
+  /** The observers ({@link TerrainPass.observe}), replaced whole on each change. */
+  #observers = NO_OBSERVERS;
   readonly #frustumMargin: TerrainFrustumMargin;
   readonly #offRestored: () => void;
   readonly #shading: TerrainShading;
@@ -826,6 +843,23 @@ export class TerrainPass {
     return selected === null || this.#faulted
       ? null
       : { selection: selected.selection, drawSet: selected.drawSet };
+  }
+
+  /**
+   * Listens to the pass's selections and to the patches it makes resident, from the next of each
+   * on, called where its options' `onSelect` and `onResident` are (plan R10, R10.T14.c: the descent
+   * spike's metrics over a terrain session's pass, which the session makes without them).
+   *
+   * @remarks
+   * A pass with no observer calls none: its loops over them are empty.
+   *
+   * @returns The observer's removal, which takes effect at once.
+   */
+  observe(observer: TerrainPassObserver): () => void {
+    this.#observers = [...this.#observers, observer];
+    return () => {
+      this.#observers = this.#observers.filter((each) => each !== observer);
+    };
   }
 
   /**
@@ -1422,6 +1456,10 @@ export class TerrainPass {
     this.#rangesVersion += 1;
     this.#demandDirty = true;
     this.#onResident?.(bake.key);
+    const observers = this.#observers;
+    for (let n = 0; n < observers.length; n += 1) {
+      observers[n]?.onResident?.(bake.key);
+    }
   }
 
   /** A patch no longer resident: evicted, or refused by its slot. */
@@ -1654,6 +1692,10 @@ export class TerrainPass {
       performance.measure(SELECT_MEASURE, { start: startMs, end: performance.now() });
     }
     this.#onSelect?.(selectionInput, selection);
+    const observers = this.#observers;
+    for (let n = 0; n < observers.length; n += 1) {
+      observers[n]?.onSelect?.(selectionInput, selection);
+    }
     const patchM = finestPatchSizeM(planet);
     const selectedViews = views.map((view, n): SelectedView => {
       const mask = 1 << n;

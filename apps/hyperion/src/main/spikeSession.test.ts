@@ -29,6 +29,8 @@ const LAUNCH: SpikeLaunch = {
   dawnSafety: "on",
   capture: "/capture",
   traceProfile: "off",
+  world: "test-planet",
+  style: null,
 };
 
 const RUN: RunDescription = {
@@ -47,6 +49,8 @@ const RUN: RunDescription = {
   launchMode: "vulkan",
   setting: "low",
   seed: DEFAULT_SPIKE_SEED,
+  world: "test-planet",
+  style: null,
   options: { setting: "low", seed: DEFAULT_SPIKE_SEED },
   switches: [],
   shown: false,

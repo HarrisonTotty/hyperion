@@ -47,8 +47,11 @@ export interface FrameSample {
   readonly callbackStartMs: number;
   /** The main thread's time in the frame callback, engine submission included, ms. */
   readonly callbackMs: number;
-  /** Passes the frame submitted. */
-  readonly passesSubmitted: number;
+  /**
+   * Passes the frame submitted, or `null` where the frame counts none (`SpikeFrameSample`'s over a
+   * generated world, R10.T14.c), which then adds no untimed pass.
+   */
+  readonly passesSubmitted: number | null;
   /** Patches selected this frame under the hard bound and under min(hard, 4σ). */
   readonly patchesHard: number;
   readonly patchesCalibrated: number;
@@ -173,7 +176,9 @@ export class SpikeMetrics {
     for (const series of this.#passes.values()) {
       series.push(null);
     }
-    this.#untimedPasses += Math.max(0, sample.passesSubmitted - TIMED_PASSES_A_FRAME);
+    if (sample.passesSubmitted !== null) {
+      this.#untimedPasses += Math.max(0, sample.passesSubmitted - TIMED_PASSES_A_FRAME);
+    }
     const tally = this.#tallyAt(sample.scriptTimeS);
     if (tally !== undefined) {
       tally.frames += 1;

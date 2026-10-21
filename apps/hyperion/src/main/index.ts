@@ -215,11 +215,36 @@ function pageUrl(): string {
 }
 
 /**
+ * The renderer's two waits of a generated world's measurement before it flies (plan R10,
+ * R10.T14.c; `bodyDescent.ts`' constants of the same names, which this project cannot import): the
+ * field's hold, at most `FIELD_HOLD_TIMEOUT_MS`, then each site's bakes, at most
+ * `MEASURE_TIMEOUT_MS` an attempt.
+ */
+const FIELD_HOLD_TIMEOUT_MS = 120_000;
+const MEASURE_TIMEOUT_MS = 600_000;
+
+/** The room past those waits for the site's reading and the session's own start, ms. */
+const MEASUREMENT_MARGIN_MS = 60_000;
+
+/**
  * How long a spike run may take before the main process ends it with status 3: the smoke's 10 s
- * and the descent's 20.5 minutes, each with room for building the scene and writing the results.
+ * and the descent's 20.5 minutes, each with room for building the scene and writing the results;
+ * and over a generated world (R10.T14.c) 13 minutes more, its measurement's longest for one site:
+ * the field's hold at its 120 s limit, then the site's bakes at their 600 s limit, and a minute's
+ * margin, against some 40 s in a typical run on three workers.
+ *
+ * @remarks
+ * A site whose floors the profile refuses is measured afresh at the next candidate, each attempt's
+ * bakes within their own 600 s. Past one attempt at its limit this watchdog is the backstop: it ends
+ * the run, rather than the renderer's own timeouts. The spike's script (`descentSpike.sh`) keeps its
+ * limit above this one, so that the watchdog ends a run first.
  */
 function spikeWatchdogMs(launch: SpikeLaunch): number {
-  return launch.smoke ? 180_000 : 45 * 60_000;
+  const measurementMs =
+    launch.world === "terrain-test"
+      ? FIELD_HOLD_TIMEOUT_MS + MEASURE_TIMEOUT_MS + MEASUREMENT_MARGIN_MS
+      : 0;
+  return (launch.smoke ? 180_000 : 45 * 60_000) + measurementMs;
 }
 
 /** Writes one line of a spike run's log to stdout, where the recipe reads it. */
@@ -283,6 +308,8 @@ function startSpikeSession(
       launchMode: graphics.launchMode,
       setting: launch.setting,
       seed: launch.seed,
+      world: launch.world,
+      style: launch.style,
       options: Object.fromEntries(
         Object.entries(launch).filter(
           (entry): entry is [string, string | number | boolean] => entry[1] !== null,
