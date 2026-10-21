@@ -944,12 +944,12 @@ impl CoarseInputs {
             .surface_age(Gigayears::new(
                 figures.surface_age().value() / YEARS_PER_GIGAYEAR,
             ))
-            // Interim, labelled: 0, the provinces erupting to now, until plan 14's
-            // `GlobalFigures::volcanic_surface_age` lands (decision-r09-t14-mars-ceiling §2.1, a new
-            // P14.T48 sub-task). That is right for every wet epoch its outgassing clause ends, which
-            // leaves the volcanism running, and wrong only where a dimming host ended the epoch
-            // after the volcanism died. Tripwire: when `volcanic_surface_age` lands, read it here
-            // (in Gyr, as the surface age above) and delete this comment, before the gate.
+            // Interim, labelled: 0, the provinces erupting to now. That is right for every wet
+            // epoch its outgassing clause ends, which leaves the volcanism running, and wrong only
+            // where a dimming host ended the epoch after the volcanism died. Tripwire, for plan
+            // 14's `GlobalFigures::volcanic_surface_age` (decision-r09-t14-mars-ceiling §2.1, the
+            // P14.T48 sub-task main briefs): when it lands, read it here (in Gyr, as the surface
+            // age above) and delete this comment, before the gate.
             .province_surface_age(Gigayears::new(0.0))
             .craters(*figures.craters())
             .climate(ClimateRegime::from(surface.climate_regime()))
@@ -2133,8 +2133,10 @@ impl CoarseInputsBuilder {
     /// cold-trapped share above its ice's or of a substance with no ice share
     /// ([`BuildCoarseInputsError::ColdTrapExceedsIce`]) or with no cold-trap threshold
     /// ([`BuildCoarseInputsError::ColdTrapWithoutThreshold`]), cold-trap inputs out of range,
-    /// too many condensates, a wet epoch that ends before it starts, a crater
-    /// contract of another gravity or of a system younger than the surface
+    /// too many condensates, a wet epoch that ends before it starts, the provinces' surface age
+    /// not finite or outside zero to the surface age
+    /// ([`BuildCoarseInputsError::ProvinceSurfaceAge`]), a crater contract of another gravity or
+    /// of a system younger than the surface
     /// ([`BuildCoarseInputsError::SurfaceOlderThanSystem`]), a crust with neither a primary nor a
     /// secondary crust nor a bulk material ([`BuildCoarseInputsError::NoCrust`]), with a bulk
     /// material beside a crust ([`BuildCoarseInputsError::BulkBesideCrust`]) or with a lid naming

@@ -92,3 +92,9 @@ workspace = true
 [[bench]]
 name = "sky"
 harness = false
+
+[[bench]]
+name = "surface"
+harness = false
+# `planetary::surface::reference` builds the reference Earth.
+required-features = ["testing"]

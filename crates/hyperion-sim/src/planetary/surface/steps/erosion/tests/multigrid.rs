@@ -12,20 +12,24 @@
 //! R09.T14's lane agent, 2026-10-20). `the_residual_falls_over_each_level_s_iterations` prints
 //! the figures.
 
-use hyperion_testkit::float::assert_same_bits;
+use hyperion_testkit::float::{assert_same_bits, bits};
 
-use super::super::branches::{remap_onto_construction, wet_now_threshold};
+use super::super::branches::{
+    dry_now_full_bodies, remap_onto_construction, wet_now_full_bodies, wet_now_threshold,
+};
 use super::super::depressions::{WaterBodies, route_with_water};
-use super::super::drainage::{RECEIVER_INSTANCE, receiver_uniforms};
+use super::super::drainage::{RECEIVER_INSTANCE, receiver_marks};
 use super::super::erodibility::EARTH_ERODIBILITY_M0_1_PER_YEAR;
 use super::super::multigrid::{
-    ITERATIONS_PER_LEVEL, JITTER_INSTANCE, LEVEL_START, LevelResidual, MULTIGRID_FLOOR_LEVEL,
-    Options, Outcome, Problem, Start, Uplift, Water, erode, jitter_uniforms, upsample,
+    FullBodies, ITERATIONS_PER_LEVEL, JITTER_INSTANCE, LEVEL_START, LevelResidual,
+    MULTIGRID_FLOOR_LEVEL, Options, Outcome, Problem, Start, Uplift, Water, erode, jitter_uniforms,
+    upsample,
 };
 use super::super::solver::{Threshold, Time};
 use super::*;
 use crate::planetary::hooks::SurfaceSeed;
 use crate::planetary::surface::reference;
+use crate::rng::Mark;
 
 /// The synthetic worlds' uniform runoff, m a⁻¹: 0.5 (the ruling's prototype's,
 /// decision-r09-t14-choices Q1).
@@ -140,18 +144,24 @@ impl Synthetic {
                     Time::Steady => wet_now_threshold(),
                     Time::Years(_) => Threshold::None,
                 },
+                full_bodies: match time {
+                    Time::Steady => wet_now_full_bodies(),
+                    Time::Years(_) => dry_now_full_bodies(),
+                },
             },
             options,
         )
     }
 }
 
-/// The cells `outcome`'s bodies and `sea` hold as bounds, with their bases: the sea at
-/// [`SEA_LEVEL_M`], each body's flooded cells and each terminal body's pit at its level.
-fn bounds(sea: &[bool], bodies: &WaterBodies) -> Vec<Option<f64>> {
+/// The cells `outcome`'s bodies and `sea` hold as bounds under `full`, with their bases: the sea
+/// at [`SEA_LEVEL_M`], each terminal body's flooded cells and pit at its level, and each full
+/// body's flooded cells at its level only under [`FullBodies::Bounds`].
+fn bounds(sea: &[bool], bodies: &WaterBodies, full: FullBodies) -> Vec<Option<f64>> {
     let mut fixed: Vec<Option<f64>> = sea.iter().map(|&w| w.then_some(SEA_LEVEL_M)).collect();
     for body in bodies.bodies() {
-        for &c in &body.cells {
+        let held = full == FullBodies::Bounds || !body.full;
+        for &c in body.cells.iter().filter(|_| held) {
             fixed[slot(c)] = Some(body.level_m);
         }
         if let Some(level) = body.base_level_m() {
@@ -278,10 +288,12 @@ fn the_residual_falls_over_each_level_s_iterations() {
     }
 }
 
-/// A lake by its balance is a bound: the smooth world at level 6, wet now, its depressions holding
-/// the runoff of their catchments against a net loss of 1 m a⁻¹ over open water (Fill–Spill–Merge
-/// on fluxes, decision-r09-t14-choices Q3): some lake floods cells, and every flooded cell and the
-/// sea's keep their ground to the bit.
+/// A terminal lake by its balance is a bound, and a full one is routed through: the smooth world
+/// at level 6, wet now, its depressions holding the runoff of their catchments against a net loss
+/// of 1 m a⁻¹ over open water (Fill–Spill–Merge on fluxes, decision-r09-t14-choices Q3, as its
+/// "T14.d lakes" item 1 rules the full ones): some lake floods cells; the solve's bounds are the
+/// sea's cells, the terminal lakes' beds and pits, and no full lake's cell; every bound keeps its
+/// ground to the bit; and the solve moves some full lake's cell off its construction.
 #[test]
 fn a_lake_by_its_balance_is_a_bound() {
     let world = Synthetic::new(6, Roughness::Smooth, true);
@@ -302,17 +314,44 @@ fn a_lake_by_its_balance_is_a_bound() {
         Time::Steady,
     );
     report("wet now with lakes", &outcome);
-    let flooded: usize = outcome.bodies.bodies().iter().map(|b| b.cells.len()).sum();
+    let bodies = outcome.bodies.bodies();
+    let flooded: usize = bodies.iter().map(|b| b.cells.len()).sum();
+    let full: Vec<u32> = bodies
+        .iter()
+        .filter(|b| b.full)
+        .flat_map(|b| b.cells.iter().copied())
+        .collect();
+    let graded = full
+        .iter()
+        .filter(|&&c| outcome.z_m[slot(c)].total_cmp(&world.z0[slot(c)]).is_ne())
+        .count();
     eprintln!(
-        "{} bodies, {flooded} cells flooded",
-        outcome.bodies.bodies().len()
+        "{} bodies ({} full), {flooded} cells flooded, {} of them under full lakes, {graded} of \
+         those moved by the solve",
+        bodies.len(),
+        bodies.iter().filter(|b| b.full).count(),
+        full.len()
     );
     assert!(flooded > 0);
-    for (c, bound) in bounds(&world.sea, &outcome.bodies).iter().enumerate() {
+    let expected = bounds(&world.sea, &outcome.bodies, FullBodies::RoutedThrough);
+    for (c, bound) in expected.iter().enumerate() {
+        assert_eq!(
+            outcome.bounds[c].map(bits),
+            bound.map(bits),
+            "cell {c}'s bound"
+        );
         if bound.is_some() {
             assert_same_bits(outcome.z_m[c], world.z0[c]);
         }
     }
+    for &c in &full {
+        assert!(
+            outcome.bounds[slot(c)].is_none(),
+            "full lake cell {c} is no bound"
+        );
+    }
+    assert!(!full.is_empty(), "the world has a full lake");
+    assert!(graded > 0, "the solve grades some full lake's cell");
 }
 
 /// The drift, metres, to which each basin keeps its construction's mean elevation on the smooth
@@ -338,16 +377,16 @@ fn each_basin_keeps_its_construction_s_mean_height() {
     let world = Synthetic::new(6, Roughness::Smooth, true);
     let outcome = world.erode(Uplift::BasinFreeboard, Water::None, Time::Steady);
     let mesh = &outcome.mesh;
-    let uniforms = receiver_uniforms(reference::SEED, &world.graph);
+    let marks = receiver_marks(reference::SEED, &world.graph);
     let construction = route_with_water(
         mesh,
         &world.z0,
         &world.sea,
         SEA_LEVEL_M,
         &outcome.bodies,
-        &uniforms,
+        &marks,
     );
-    let fixed = bounds(&world.sea, &outcome.bodies);
+    let fixed = bounds(&world.sea, &outcome.bodies, wet_now_full_bodies());
     let n = world.z0.len();
     let (mut moved, mut freeboard, mut area) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
     for (c, bound) in fixed.iter().enumerate() {
@@ -440,15 +479,27 @@ fn the_same_problem_gives_the_same_bits() {
     assert_eq!(a, b);
 }
 
+/// The uniform in [0, 1) of mark `mark`, `mark` × 2⁻⁵³, exactly: the value `Stream::uniform`
+/// makes of the same word.
+fn uniform_of(mark: Mark) -> f64 {
+    let m = mark.get();
+    let high = u32::try_from(m >> 32).expect("a mark is below 2^53");
+    let low = u32::try_from(m & 0xffff_ffff).expect("the low word fits a u32");
+    (f64::from(high) * 4_294_967_296.0 + f64::from(low)) / 9_007_199_254_740_992.0
+}
+
 /// The jitter's and the receivers' draws are distinct: instances 1 and 0 of the tag differ, and at
-/// level 5 under the reference seed no cell's receiver uniform equals either of its jitter
-/// uniforms, nor its two jitter uniforms each other; the jitter is the same under the same seed and
-/// differs under another.
+/// level 5 under the reference seed no cell's receiver mark, as the uniform of its word, equals
+/// either of its jitter uniforms, nor its two jitter uniforms each other; the jitter is the same
+/// under the same seed and differs under another.
 #[test]
 fn the_jitter_and_the_receivers_are_distinct_draws() {
     assert_ne!(RECEIVER_INSTANCE, JITTER_INSTANCE);
     let graph = CellGraph::new(5).unwrap();
-    let receivers = receiver_uniforms(reference::SEED, &graph);
+    let receivers: Vec<f64> = receiver_marks(reference::SEED, &graph)
+        .into_iter()
+        .map(uniform_of)
+        .collect();
     let jitter = jitter_uniforms(reference::SEED, &graph);
     for (c, (&r, &[s, t])) in receivers.iter().zip(&jitter).enumerate() {
         assert!(

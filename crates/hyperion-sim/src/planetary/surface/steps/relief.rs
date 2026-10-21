@@ -221,12 +221,22 @@ pub fn run_after_craters(pass: &Pass<'_>, working: &mut Working) {
 
 /// What follows the craters that waited for the erosion step (R09.T12.d's
 /// [`craters::run_after_erosion`](super::craters::run_after_erosion)), in place of the interim
-/// figures: the ocean refloods against the sea level as placed, to which the climate is reduced,
-/// and the realised figures are the whole surface's with every crater in, its cells booked afresh
-/// (main's rulings R4 and R8, 2026-10-19).
+/// figures: the ocean refloods against the sea level as placed, to which the climate is reduced;
+/// where the erosion step routed the field, it is routed again as it stands, its flow, drainage,
+/// steepness and catchment runoffs on the final field, its own runoffs kept, so that no flow
+/// climbs a late crater's rim (decision-r09-t14-choices Q7's addition and its "T14.d follow-up"
+/// C); and the realised figures are the whole surface's with every crater in, its cells booked
+/// afresh (main's rulings R4 and R8, 2026-10-19). Where the step did not route (a world never
+/// wet, a surface no older than its wet epoch's end, a test without the erosion step), every cell
+/// stays terminal, and the channels' share is booked as zero. Labelled (Q7): a paleo-valley
+/// beheaded by a late crater takes the present drainage downstream, which is smaller than the
+/// drainage that cut it.
 pub(super) fn after_late_craters(pass: &Pass<'_>, working: &mut Working) {
     // As in `run_after_craters`, the reports are the tests'.
     let _ = sea::reflood(pass, working);
+    if working.routed {
+        super::erosion::route_final(pass, working);
+    }
     let booked = budget::book(pass, working, &budget::Body::of(pass, &working.spectrum));
     let _ = budget::figures(pass, working, Phase::AfterErosion, &booked);
 }

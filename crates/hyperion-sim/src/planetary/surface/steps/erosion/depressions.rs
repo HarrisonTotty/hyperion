@@ -1,21 +1,22 @@
 //! The depressions (R09.T14.a, Design note 9): the depression hierarchy, Fill–Spill–Merge, the
 //! water bodies, and the routing with water.
 //!
-//! - **The hierarchy** is Barnes, Callaghan and Wickert 2020's depression hierarchy (Earth Surf. Dynam. 8,
-//!   431), built here as the terrain's merge tree, the lane's equivalent construction: the sea's
-//!   cells are taken first, as one component, the ocean, whatever their height; then the land's,
-//!   sorted by (ground by `total_cmp`, cell index), each asserted finite, with a union-find. A cell
-//!   none of whose edge neighbours is taken is a pit and starts a leaf depression; one whose taken
-//!   neighbours lie in one component joins it; one whose taken neighbours lie in two or more is
-//!   their outlet. There the land components merge pairwise in ascending order of their top
-//!   node's index, each pair under a new node, both spilling at the outlet's ground; and if the
-//!   ocean is among them, the merged one is linked to the sea at the outlet, no new node, a tree
-//!   of the forest (the paper's oceanlink). On a world with no sea the last component is the
-//!   root, with no outlet and no bound. Each node keeps its pit (the lowest cell beneath it), the
-//!   level it starts from (its pit's ground, or the outlet where its children met), its spill, and
-//!   the area of its cells and Σ a (z − start) over its own, so that a node's volume to a level h
-//!   is V(h) = h Σa − Σa z over the cells below h (Barnes, Callaghan and Wickert 2021, Earth Surf. Dynam. 9,
-//!   105, eq. 3, with each cell's own area), heights held relative to the start for precision.
+//! - **The hierarchy** is Barnes, Callaghan and Wickert 2020's depression hierarchy (Earth Surf.
+//!   Dynam. 8, 431), built here as the terrain's merge tree, the lane's equivalent construction:
+//!   the sea's cells are taken first, as one component, the ocean, whatever their height; then the
+//!   land's, sorted by (ground by `total_cmp`, cell index), each asserted finite, with a
+//!   union-find. A cell none of whose edge neighbours is taken is a pit and starts a leaf
+//!   depression; one whose taken neighbours lie in one component joins it; one whose taken
+//!   neighbours lie in two or more is their outlet. There the land components merge pairwise in
+//!   ascending order of their top node's index, each pair under a new node, both spilling at the
+//!   outlet's ground; and if the ocean is among them, the merged one is linked to the sea at the
+//!   outlet, no new node, a tree of the forest (the paper's oceanlink). On a world with no sea the
+//!   last component is the root, with no outlet and no bound. Each node keeps its pit (the lowest
+//!   cell beneath it), the level it starts from (its pit's ground, or the outlet where its children
+//!   met), its spill, and the area of its cells and Σ a (z − start) over its own, so that a node's
+//!   volume to a level h is V(h) = h Σa − Σa z over the cells below h (Barnes, Callaghan and
+//!   Wickert 2021, Earth Surf. Dynam. 9, 105, eq. 3, with each cell's own area), heights held
+//!   relative to the start for precision.
 //! - **Where water goes.** Each land cell's descent pointer is its lowest taken neighbour in the
 //!   walk's order: no order of the walk has flats, so a cell with none is exactly a pit, and the
 //!   pointers end at a pit or the sea ("flow follows the path of steepest descent", Barnes et al.
@@ -57,9 +58,11 @@
 //!     comparison is ≤, not <; a depth is h − z).
 //!   - [`Measure::Balance`], cubic metres a year (lakes on a world wet now, R09.T14.d;
 //!     decision-r09-t14-choices Q3): the inflow is the catchment's runoff with what upstream
-//!     bodies spill, and a depression's capacity is its loss at its sill, Σ (E − P) a over the
-//!     cells below it, which may be negative where precipitation exceeds evaporation, so that a
-//!     full body spills its inflow less that loss, more than its inflow there; a terminal lake
+//!     bodies spill, and a depression's capacity is its loss at its sill, Σ ℓ a over the cells
+//!     below it, ℓ each cell's net loss rate ((E − P) plus the cell's own runoff, which a flooded
+//!     cell no longer sheds: `branches::WaterBalance`), which may be negative where the gain
+//!     exceeds the loss, so that a full body spills its inflow less that loss, more than its
+//!     inflow there; a terminal lake
 //!     takes its subtree's cells whole in their fill order, each while half its loss fits within
 //!     the inflow beside the cells taken (`climate::seas`' half-cell rule).
 //! - **The routing with water** ([`route_with_water`]), on the current ground with the water
@@ -78,6 +81,7 @@ use super::super::plates::{cell_of, slot};
 use super::super::relief::sea::code;
 use super::drainage::{self, Routing, Seed};
 use super::mesh::Mesh;
+use crate::rng::Mark;
 
 /// What the water is, with each cell's input in cell-index order: what a depression's capacity
 /// and a lake's level are measured in.
@@ -96,8 +100,10 @@ pub(crate) enum Measure<'a> {
         /// Each cell's own inflow, its runoff times its area, cubic metres a year, finite and
         /// non-negative.
         inflow_m3_per_year: &'a [f64],
-        /// Each cell's net loss rate over open liquid, its evaporation less its precipitation,
-        /// metres a year, finite and of either sign.
+        /// Each cell's net loss rate were the water to flood it, metres a year, finite and of
+        /// either sign: its evaporation less its precipitation over open liquid, plus its own
+        /// runoff, which a flooded cell no longer sheds into the inflow (`branches::WaterBalance`;
+        /// decision-r09-t14-choices Q3).
         net_loss_m_per_year: &'a [f64],
     },
 }
@@ -178,21 +184,21 @@ pub(crate) struct Node {
 
 impl Node {
     /// The lowest cell beneath the node.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) const fn pit(&self) -> u32 {
         self.pit
     }
 
     /// Where it spills; `None` for the root of a world with no sea.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) const fn spill(&self) -> Option<Spill> {
         self.spill
     }
 
     /// The node it merged into; `None` for a tree's root.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) const fn parent(&self) -> Option<u32> {
         self.parent
@@ -488,7 +494,7 @@ impl Hierarchy {
     /// # Panics
     ///
     /// If there is no node `k`.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn node(&self, k: u32) -> &Node {
         &self.nodes[slot(k)]
@@ -499,7 +505,7 @@ impl Hierarchy {
     /// # Panics
     ///
     /// If `cell` is not a cell of the field.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn holder(&self, cell: u32) -> Option<u32> {
         self.holder[slot(cell)]
@@ -525,6 +531,7 @@ impl Hierarchy {
 
     /// Each node's capacity to its spill in `measure`'s unit, +∞ for a root with no spill: its
     /// children's and its own cells', a merge's index being above its children's.
+    #[must_use]
     fn capacities(&self, mesh: &Mesh, measure: Measure<'_>) -> Vec<f64> {
         let m = self.nodes.len();
         let mut own = vec![0.0; m];
@@ -607,6 +614,7 @@ impl Hierarchy {
                 subtree[b].push(c);
             }
         }
+        #[cfg(test)]
         let mut water_level_m = vec![None; self.ground_m.len()];
         for (body, cells) in bodies.iter_mut().zip(&subtree) {
             let spill = self.nodes[slot(body.node)].spill;
@@ -629,6 +637,7 @@ impl Hierarchy {
                 .filter(|&c| code(self.ground_m[slot(c)]) < level_code)
                 .collect();
             body.cells.sort_unstable();
+            #[cfg(test)]
             for &c in &body.cells {
                 water_level_m[slot(c)] = Some(body.level_m);
             }
@@ -637,7 +646,9 @@ impl Hierarchy {
         bodies.reverse();
         WaterBodies {
             bodies,
+            #[cfg(test)]
             discharged: fsm.discharged,
+            #[cfg(test)]
             water_level_m,
         }
     }
@@ -645,6 +656,7 @@ impl Hierarchy {
     /// The level, metres, at which the cells `cells` of a body's subtree, in the walk's order (its
     /// pit first), hold the volume `amount`: over the cells below it, by Barnes et al. 2021's
     /// eq. 6, heights relative to the pit.
+    #[must_use]
     fn lake_level(&self, mesh: &Mesh, cells: &[u32], amount: f64) -> f64 {
         let pit_m = self.ground_m[slot(cells[0])];
         let (mut area_m2, mut rel_m3) = (0.0, 0.0);
@@ -673,6 +685,7 @@ impl Hierarchy {
     /// Lean, pending decision-r09-t14-choices Q3: the ruling's "the level is the last cell's
     /// filled level" would leave the last cell taken at the level, dry by the millimetre codes,
     /// and a lake of one cell a playa.
+    #[must_use]
     fn balance_level(
         &self,
         mesh: &Mesh,
@@ -713,11 +726,15 @@ struct Fsm<'a> {
     excess: Vec<f64>,
     /// Where the last pour through each full node came to rest.
     jump: Vec<Option<u32>>,
+    /// What passed to the sea, which only the erosion's tests read.
+    #[cfg(test)]
     discharged: f64,
     path: Vec<u32>,
 }
 
 impl<'a> Fsm<'a> {
+    /// Fill–Spill–Merge's state over `hierarchy` with each node's `capacity`, holding nothing.
+    #[must_use]
     fn new(hierarchy: &'a Hierarchy, capacity: Vec<f64>) -> Self {
         let m = hierarchy.nodes.len();
         Self {
@@ -728,6 +745,7 @@ impl<'a> Fsm<'a> {
             active: vec![false; m],
             excess: vec![0.0; m],
             jump: vec![None; m],
+            #[cfg(test)]
             discharged: 0.0,
             path: Vec::new(),
         }
@@ -743,7 +761,13 @@ impl<'a> Fsm<'a> {
             match (h.descent[slot(c)], h.leaf_of[slot(c)]) {
                 (Some(d), _) => carried[slot(d)] += w,
                 (None, Some(leaf)) => self.input[slot(leaf)] += w,
-                (None, None) => self.discharged += w,
+                (None, None) => {
+                    // The sea's, which only the erosion's tests count.
+                    #[cfg(test)]
+                    {
+                        self.discharged += w;
+                    }
+                }
             }
         }
     }
@@ -789,7 +813,13 @@ impl<'a> Fsm<'a> {
                         debug_assert!(position[slot(root_of[slot(leaf)])] < t);
                         self.input[slot(leaf)] += excess;
                     }
-                    Overflow::Sea(None) => self.discharged += excess,
+                    Overflow::Sea(None) => {
+                        // The sea's, which only the erosion's tests count.
+                        #[cfg(test)]
+                        {
+                            self.discharged += excess;
+                        }
+                    }
                     Overflow::Nowhere | Overflow::Sibling(_) => {
                         unreachable!("a root with no spill holds all it gets, and has no sibling")
                     }
@@ -908,7 +938,7 @@ pub(crate) struct Body {
 
 impl Body {
     /// Whether it is a dry playa: terminal, and under it no cell.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn is_playa(&self) -> bool {
         !self.full && self.cells.is_empty()
@@ -923,11 +953,14 @@ impl Body {
     }
 }
 
-/// The water bodies Fill–Spill–Merge leaves, and what it discharged to the sea.
+/// The water bodies Fill–Spill–Merge leaves, and, for the erosion's tests, what it discharged to
+/// the sea and each cell's water level.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WaterBodies {
     bodies: Vec<Body>,
+    #[cfg(test)]
     discharged: f64,
+    #[cfg(test)]
     water_level_m: Vec<Option<f64>>,
 }
 
@@ -939,7 +972,7 @@ impl WaterBodies {
     }
 
     /// What passed to the sea, in the measure's unit.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) const fn discharged(&self) -> f64 {
         self.discharged
@@ -950,7 +983,7 @@ impl WaterBodies {
     /// # Panics
     ///
     /// If `cell` is not a cell of the field.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn water_level_m(&self, cell: u32) -> Option<f64> {
         self.water_level_m[slot(cell)]
@@ -978,7 +1011,7 @@ pub(crate) fn water_bodies(
 /// The drainage of `mesh`'s current ground `z` with the water bodies `bodies`: [`drainage::route`]
 /// from every sea cell (`sea`) at `sea_level_m` and every terminal body's pit at its level, a
 /// lake's or a dry playa's floor, ascending by cell, or, with neither, from the lowest cell at its
-/// ground (by (ground, cell index)); each cell's receiver drawn with its uniform in `uniforms`. A
+/// ground (by (ground, cell index)); each cell's receiver drawn with its mark in `marks`. A
 /// full body whose cells now lie above its level is simply not filled.
 ///
 /// # Panics
@@ -993,9 +1026,9 @@ pub(crate) fn route_with_water(
     sea: &[bool],
     sea_level_m: f64,
     bodies: &WaterBodies,
-    uniforms: &[f64],
+    marks: &[Mark],
 ) -> Routing {
-    route_with_water_from(mesh, z, sea, sea_level_m, bodies, uniforms, None)
+    route_with_water_from(mesh, z, sea, sea_level_m, bodies, marks, None)
 }
 
 /// [`route_with_water`] with each cell keeping its receiver of `previous` while it stays strictly
@@ -1011,7 +1044,7 @@ pub(crate) fn route_with_water_from(
     sea: &[bool],
     sea_level_m: f64,
     bodies: &WaterBodies,
-    uniforms: &[f64],
+    marks: &[Mark],
     previous: Option<&Routing>,
 ) -> Routing {
     assert_eq!(sea.len(), slot(mesh.len()), "one sea flag a cell");
@@ -1042,5 +1075,5 @@ pub(crate) fn route_with_water_from(
             level_m: z[slot(lowest)],
         });
     }
-    drainage::route_from(mesh, z, &seeds, uniforms, previous)
+    drainage::route_from(mesh, z, &seeds, marks, previous)
 }

@@ -118,6 +118,7 @@
 //! by read plan 14's cold-trap threshold (`frost`). A world places liquids only on the cells the
 //! relief step floods (R09.T12.e's ocean, decision-r09-t12-coarse R8).
 
+pub(crate) mod after_erosion;
 mod airless;
 mod coordinates;
 mod ebm;
@@ -502,6 +503,13 @@ fn finish(pass: &Pass<'_>, working: &mut Working, mut model: Normalised) -> Diag
     );
     let liquids = seas::place_liquids(inputs, pass.grid(), &annual_k, &mut working.cells);
     let water = hydrology::run(pass, working, &model);
+    // Kept for R09.T14.d's re-application after the erosion (decision-r09-t14-choices Q6(b)),
+    // the diagnostics copying what they take from it: the surface means by a clone, a few runs'
+    // records and the transports at 73 edges a month.
+    let model = &working
+        .climate_records
+        .insert(after_erosion::ClimateRecords { model })
+        .model;
     Diagnostics {
         correction: model.correction,
         residuals_k: model.residuals_k,
@@ -513,7 +521,7 @@ fn finish(pass: &Pass<'_>, working: &mut Working, mut model: Normalised) -> Diag
         cold_traps: ices.traps,
         keys,
         liquids,
-        surface_means: model.surface_means,
+        surface_means: model.surface_means.clone(),
         water,
     }
 }
@@ -531,13 +539,6 @@ fn finish(pass: &Pass<'_>, working: &mut Working, mut model: Normalised) -> Diag
 ///
 /// If `cell` is not one of the field's cells, or the climate cell's rates are negative or not
 /// finite (a fault of the step).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "R09.T14's erosion reads the runoff the climate gives"
-    )
-)]
 #[must_use]
 pub(crate) fn annual_runoff_kg_m2_s(pass: &Pass<'_>, working: &Working, cell: u32) -> f64 {
     let state = &working.climate[usize::try_from(parent_index(cell)).expect("a cell fits a usize")];

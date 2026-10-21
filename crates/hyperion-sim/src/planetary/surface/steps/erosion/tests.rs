@@ -22,6 +22,11 @@
 //!   record of the steady state (`earth`); and decision-r09-t14-choices' "T14.c follow-up" item 3
 //!   on the final field, its realised relief on every reference world, the highest land on every
 //!   world wet now and each cell at or above its receiver.
+//! - R09.T14.d's of the final field (`outputs`): the mean surface temperature and the lakes after
+//!   the whole pass, the catchment runoff and the steepness index over the final routing against
+//!   the field's codes, the reference Mars's runoffs, Q4's (2a) and (2b) for the waiting craters,
+//!   the routing after the late craters, a world without the erosion step, and the reference
+//!   Earth's whole pass, slow.
 //!
 //! Each world the branches' tests stage ([`Staged`]) runs the pass's steps before the erosion in
 //! the pass's order, under the reference seed.
@@ -51,6 +56,7 @@ mod earth;
 mod erodibility;
 mod mars;
 mod multigrid;
+mod outputs;
 mod solver;
 
 /// A world's working state staged to the end of the climate step, under the reference seed: the

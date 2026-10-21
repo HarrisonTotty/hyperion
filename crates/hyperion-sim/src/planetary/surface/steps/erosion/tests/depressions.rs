@@ -1,14 +1,17 @@
 //! The depressions' tests: a finite inventory filling the lowest basins first and spilling, a full
 //! basin spilling to the sea through its outlet, a high basin spilling into the basin below it,
 //! Priority-Flood's fill against the merge tree's when every depression is full, a world with no
-//! sea storing all it is poured, and the water balance's lakes, playas and spills.
+//! sea storing all it is poured, and the water balance's lakes, playas and spills, a closed lake's
+//! balance the X ratio among them.
 
+use hyperion_surface::num;
 use hyperion_testkit::float::assert_same_bits;
 
+use super::super::branches::WaterBalance;
 use super::super::depressions::{
     Body, Hierarchy, Measure, WaterBodies, route_with_water, water_bodies,
 };
-use super::super::drainage::{Routing, receiver_uniforms};
+use super::super::drainage::{Routing, receiver_marks};
 use super::*;
 use crate::planetary::surface::reference;
 
@@ -138,16 +141,15 @@ fn assert_conserved_and_level(bodies: &WaterBodies, poured: f64, cells: usize) {
     assert_eq!(flooded, wet, "the flooded cells are the bodies'");
 }
 
-/// A finite inventory fills the lowest basins first and spills (Barnes, Callaghan and Wickert
-/// 2021, eqs. 3 and 6): poured into the upper basin A (floor 100 m) of two that share a sill at
-/// 1,000 m, on a world with no sea, half A's capacity makes one terminal lake on A at 100 m +
-/// V ÷ `Σa_A`, B a dry playa at its floor; A's capacity and 40% of B's fill A to the sill, full, and
-/// spill the rest into B, terminal at (V − `V_A`) ÷ `Σa_B`; and `V_A` + `V_B` + 250 m × the valley's area
-/// rises over the shared sill as one lake, at 1,000 m + (V − `V_A` − `V_B`) ÷ Σa of the valley. Each
-/// floor's pit lies under a node that spills at the sill; each level matches its closed form to
-/// 10⁻¹²,
-/// each lake's cells are exactly the cells below it, nothing is discharged, and the water is
-/// conserved and level.
+/// A finite inventory fills the lowest basins first and spills (Barnes, Callaghan and Wickert 2021,
+/// eqs. 3 and 6): poured into the upper basin A (floor 100 m) of two that share a sill at 1,000 m,
+/// on a world with no sea, half A's capacity makes one terminal lake on A at 100 m + V ÷ `Σa_A`, B
+/// a dry playa at its floor; A's capacity and 40% of B's fill A to the sill, full, and spill the
+/// rest into B, terminal at (V − `V_A`) ÷ `Σa_B`; and `V_A` + `V_B` + 250 m × the valley's area
+/// rises over the shared sill as one lake, at 1,000 m + (V − `V_A` − `V_B`) ÷ Σa of the valley.
+/// Each floor's pit lies under a node that spills at the sill; each level matches its closed form
+/// to 10⁻¹², each lake's cells are exactly the cells below it, nothing is discharged, and the water
+/// is conserved and level.
 #[test]
 fn a_finite_inventory_fills_the_lowest_basins_first_and_spills() {
     let basins = Basins::new(4);
@@ -258,7 +260,7 @@ fn a_full_basin_spills_its_excess_to_the_sea_through_its_outlet() {
     }
     z[slot(notch)] = 1_200.0;
     let sea: Vec<bool> = shore.iter().map(|&s| !s).collect();
-    let uniforms = receiver_uniforms(reference::SEED, graph);
+    let marks = receiver_marks(reference::SEED, graph);
     let capacity: f64 = basins
         .valley
         .iter()
@@ -271,7 +273,7 @@ fn a_full_basin_spills_its_excess_to_the_sea_through_its_outlet() {
     }
     let poured: f64 = water.iter().sum();
     let bodies = water_bodies(mesh, &z, &sea, Measure::Volume { water_m3: &water });
-    let routing = route_with_water(mesh, &z, &sea, SEA_LEVEL_M, &bodies, &uniforms);
+    let routing = route_with_water(mesh, &z, &sea, SEA_LEVEL_M, &bodies, &marks);
     assert_conserved_and_level(&bodies, poured, basins.cells());
     assert_eq!(bodies.bodies().len(), 1, "{:?}", bodies.bodies());
     let body = &bodies.bodies()[0];
@@ -293,7 +295,7 @@ fn a_full_basin_spills_its_excess_to_the_sea_through_its_outlet() {
     let volume = 0.5 * basins.capacity_a();
     let water = basins.poured(pit_a, volume);
     let bodies = water_bodies(mesh, &z, &sea, Measure::Volume { water_m3: &water });
-    let routing = route_with_water(mesh, &z, &sea, SEA_LEVEL_M, &bodies, &uniforms);
+    let routing = route_with_water(mesh, &z, &sea, SEA_LEVEL_M, &bodies, &marks);
     assert_conserved_and_level(&bodies, volume, basins.cells());
     let lake = body_at(&bodies, pit_a);
     assert!(!lake.full);
@@ -409,7 +411,7 @@ fn priority_flood_fills_as_the_merge_tree_when_every_depression_is_full() {
         &sea,
         SEA_LEVEL_M,
         &bodies,
-        &receiver_uniforms(reference::SEED, &graph),
+        &receiver_marks(reference::SEED, &graph),
     );
     assert_conserved_and_level(&bodies, water.iter().sum(), slot(graph.len()));
     let hierarchy = Hierarchy::build(&mesh, &z, &sea);
@@ -622,7 +624,7 @@ fn a_lake_that_cannot_take_half_its_pit_is_a_dry_playa() {
         &bowl.sea,
         SEA_LEVEL_M,
         &bodies,
-        &receiver_uniforms(reference::SEED, &bowl.graph),
+        &receiver_marks(reference::SEED, &bowl.graph),
     );
     assert!(routing.roots().binary_search(&pit).is_ok());
     for &c in &bowl.cells {
@@ -672,4 +674,55 @@ fn a_net_gain_over_a_lake_spills_more_than_its_inflow() {
     assert!(bodies.discharged() > inflow);
     assert_close(bodies.discharged(), inflow + 0.5 * area, "the spill");
     assert_eq!(lake.cells, bowl.cells);
+}
+
+/// A closed lake's balance is the X ratio of closed-basin hydrology (decision-r09-t14-choices Q3;
+/// Matsubara, Howard and Drummond 2011's X = (E − P) ÷ R, R the runoff from the land outside the
+/// lake): in the bowl, its cells shedding r = 0.2 m a⁻¹ of runoff and its open liquid losing
+/// E − P = 1 m a⁻¹, X = 5, Matsubara et al.'s modal value, the balance
+/// (`WaterBalance::from_rates`: each cell's net loss (E − P) + r) makes one terminal lake whose
+/// area `A_L` ÷ (`A_B` − `A_L`), `A_B` the bowl's, is r ÷ (E − P) to the half-cell rule: `A_L`
+/// lies within half the largest bowl cell's area of r `A_B` ÷ (E − P + r), and not within it of
+/// r `A_B` ÷ (E − P), the lake that counting a flooded cell's runoff as its inflow too would take.
+#[test]
+fn a_closed_lake_s_balance_is_the_x_ratio() {
+    let bowl = Bowl::new(1.0);
+    let n = slot(bowl.graph.len());
+    let (runoff, open_liquid) = (0.2, 1.0);
+    let mut runoffs = vec![0.0; n];
+    for &c in &bowl.cells {
+        runoffs[slot(c)] = runoff;
+    }
+    let balance = WaterBalance::from_rates(bowl.mesh.areas_m2(), &runoffs, &vec![open_liquid; n]);
+    let bodies = water_bodies(&bowl.mesh, &bowl.z, &bowl.sea, balance.measure());
+    assert_eq!(bodies.bodies().len(), 1, "{:?}", bodies.bodies());
+    let lake = body_at(&bodies, bowl.pit());
+    assert!(!lake.full && !lake.is_playa(), "{lake:?}");
+    let areas = bowl.mesh.areas_m2();
+    let basin = sum_over(areas, &bowl.cells);
+    let area = sum_over(areas, &lake.cells);
+    let largest = bowl
+        .cells
+        .iter()
+        .fold(0.0, |most, &c| num::max(most, bowl.mesh.area_m2(c)));
+    let expected = runoff * basin / (open_liquid + runoff);
+    let double_counted = runoff * basin / open_liquid;
+    eprintln!(
+        "the bowl's lake: {} of {} cells, A_L ÷ (A_B − A_L) = {:.4} against r ÷ (E − P) = {:.4}; \
+         A_L {area:.4e} m² against {expected:.4e} m² (the double count's {double_counted:.4e} m²), \
+         half the largest cell {:.4e} m²",
+        lake.cells.len(),
+        bowl.cells.len(),
+        area / (basin - area),
+        runoff / open_liquid,
+        0.5 * largest
+    );
+    assert!(
+        (area - expected).abs() <= 0.5 * largest,
+        "the lake's area {area} m² against r A_B ÷ (E − P + r) = {expected} m²"
+    );
+    assert!(
+        (area - double_counted).abs() > 0.5 * largest,
+        "the bowl tells the X ratio from the double count: {area} m² against {double_counted} m²"
+    );
 }

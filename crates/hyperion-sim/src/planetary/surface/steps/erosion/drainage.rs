@@ -12,7 +12,9 @@
 //! - **The receivers** are one of the four edge neighbours (Design note 9; Tzathas et al. 2024,
 //!   CGF 43(2), doi:10.1111/cgf.15033, §4.3). A cell with neighbours strictly below it on W draws
 //!   one of them with probability proportional to the drop per metre of great-circle distance,
-//!   from its own uniform on `surface.coarse.erosion` (instance [`RECEIVER_INSTANCE`]); one with
+//!   from its own mark on `surface.coarse.erosion` (instance [`RECEIVER_INSTANCE`]), one word
+//!   kept as a 53-bit integer and compared with the integer thresholds of the weights' running
+//!   sums ([`Mark::pick_weighted`]; the sim-determinism skill's "Streams and draws"); one with
 //!   none, a flat or a filled cell, drains to its parent, so that a flat drains along the flood's
 //!   breadth-first order towards its spill with no ε-raising (Design note 9's "flat directions
 //!   taken from the pop order"; the lane's extension of Algorithm 2, whose Algorithm 4 assigns
@@ -30,8 +32,8 @@
 //!   basin's base level is the root's seed level (decision-r09-t14-choices Q1's b and `ℓ_b`).
 //! - **The accumulation** ([`accumulate`]) sums weights down the receivers in reverse preorder:
 //!   the geometric drainage area (Hack 1957's planimetric area, by solid angle) of the cells'
-//!   areas, and the equivalent area (Hergarten 2021, Earth Surf. Dynam. 9, 937, eqs. 16 and 20) of their runoff
-//!   times their area.
+//!   areas, and the equivalent area (Hergarten 2021, Earth Surf. Dynam. 9, 937, eqs. 16 and 20)
+//!   of their runoff times their area.
 //!
 //! Implemented from the papers alone; no code is copied or paraphrased from Barnes's `RichDEM`,
 //! Tzathas et al.'s repository (Inria research-only licence) or Dendry (GPL-3.0).
@@ -49,10 +51,10 @@ use super::mesh::Mesh;
 use crate::math;
 use crate::planetary::hooks::SurfaceSeed;
 use crate::planetary::surface::grid::CellGraph;
-use crate::rng::ObjectKey;
+use crate::rng::{Mark, ObjectKey};
 
-/// The instance of each cell's receiver draw on `surface.coarse.erosion`: one uniform a cell a
-/// level, keyed by the cell's own face, level, i and j.
+/// The instance of each cell's receiver draw on `surface.coarse.erosion`: one mark, one word, a
+/// cell a level, keyed by the cell's own face, level, i and j.
 pub(crate) const RECEIVER_INSTANCE: u16 = 0;
 
 /// A cell the flood starts from, with its filled level: a root of the receivers' forest.
@@ -83,11 +85,16 @@ pub(crate) struct Routing {
     filled_m: Vec<f64>,
     receivers: Vec<Option<Link>>,
     correction: Vec<f64>,
+    /// The roots, which only the erosion's tests read.
+    #[cfg(test)]
     roots: Vec<u32>,
     root_of: Vec<u32>,
     preorder: Vec<u32>,
     depth: Vec<u32>,
+    /// Each cell's donors as compressed rows, which only the erosion's tests read.
+    #[cfg(test)]
     donor_start: Vec<u32>,
+    #[cfg(test)]
     donors: Vec<u32>,
 }
 
@@ -143,7 +150,7 @@ impl Routing {
     }
 
     /// The roots, the seeds' cells, ascending.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn roots(&self) -> &[u32] {
         &self.roots
@@ -194,7 +201,7 @@ impl Routing {
     /// # Panics
     ///
     /// If `cell` is not below [`len`](Self::len).
-    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn donors(&self, cell: u32) -> &[u32] {
         let c = slot(cell);
@@ -237,19 +244,21 @@ impl Eq for Entry {}
 /// `x` once asserted finite, with a negative zero made positive, so that `total_cmp` orders the
 /// field as `<` does and every strict drop is above zero.
 #[must_use]
-fn canonical(x: f64) -> f64 {
+pub(super) fn canonical(x: f64) -> f64 {
     num::assert_finite(x) + 0.0
 }
 
-/// One uniform in [0, 1) per cell of `graph`, in cell-index order, each from its own stream on
+/// One mark per cell of `graph`, in cell-index order, each the first word of its own stream on
 /// `surface.coarse.erosion`, keyed by its `surface_cell` (face, level, i, j) with instance
-/// [`RECEIVER_INSTANCE`]: the same seed gives the same receivers.
+/// [`RECEIVER_INSTANCE`]: the same seed gives the same receivers. A mark is the uniform the word
+/// makes kept as the integer it is, which the receiver's pick compares with integer thresholds
+/// (the sim-determinism skill's "Streams and draws").
 ///
 /// # Panics
 ///
 /// Never: every cell of a coarse level is a surface cell.
 #[must_use]
-pub(crate) fn receiver_uniforms(seed: SurfaceSeed, graph: &CellGraph) -> Vec<f64> {
+pub(crate) fn receiver_marks(seed: SurfaceSeed, graph: &CellGraph) -> Vec<Mark> {
     graph
         .cells()
         .iter()
@@ -265,28 +274,21 @@ pub(crate) fn receiver_uniforms(seed: SurfaceSeed, graph: &CellGraph) -> Vec<f64
                 )
                 .expect("a coarse cell is a surface cell"),
             )
-            .uniform()
+            .mark()
         })
         .collect()
 }
 
 /// The drainage of `mesh`'s ground `z` (metres, in cell-index order) from `seeds`, each cell's
-/// receiver drawn with its uniform in `uniforms` (see the module documentation).
+/// receiver drawn with its mark in `marks` (see the module documentation).
 ///
 /// # Panics
 ///
-/// If `z` or `uniforms` is not one a cell, a height or a seed's level is not finite, a seed's
-/// level is below its ground, or the seeds are empty or do not ascend strictly by cell.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the erosion's tests route without a previous routing"
-    )
-)]
+/// If `z` or `marks` is not one a cell, a height or a seed's level is not finite, a seed's level
+/// is below its ground, or the seeds are empty or do not ascend strictly by cell.
 #[must_use]
-pub(crate) fn route(mesh: &Mesh, z: &[f64], seeds: &[Seed], uniforms: &[f64]) -> Routing {
-    route_from(mesh, z, seeds, uniforms, None)
+pub(crate) fn route(mesh: &Mesh, z: &[f64], seeds: &[Seed], marks: &[Mark]) -> Routing {
+    route_from(mesh, z, seeds, marks, None)
 }
 
 /// [`route`], each cell that `previous` (a routing of the same mesh) gave a receiver keeping it
@@ -302,7 +304,7 @@ pub(crate) fn route_from(
     mesh: &Mesh,
     z: &[f64],
     seeds: &[Seed],
-    uniforms: &[f64],
+    marks: &[Mark],
     previous: Option<&Routing>,
 ) -> Routing {
     let n = slot(mesh.len());
@@ -314,7 +316,7 @@ pub(crate) fn route_from(
         );
     }
     assert_eq!(z.len(), n, "one height a cell");
-    assert_eq!(uniforms.len(), n, "one uniform a cell");
+    assert_eq!(marks.len(), n, "one mark a cell");
     assert!(!seeds.is_empty(), "a flood starts from at least one seed");
     assert!(
         seeds.windows(2).all(|w| w[0].cell < w[1].cell),
@@ -339,7 +341,7 @@ pub(crate) fn route_from(
                     .position(|&edge| edge == link.edge)
                     .expect("a link's edge is one of the four")
             });
-        let k = kept.unwrap_or_else(|| receiver_edge(mesh, &filled, cell, uniforms[c], parent[c]));
+        let k = kept.unwrap_or_else(|| receiver_edge(mesh, &filled, cell, marks[c], parent[c]));
         let neighbours = mesh.neighbours(cell);
         let length_m = mesh.link_m(cell, k);
         let gradient = math::hypot(
@@ -367,11 +369,14 @@ pub(crate) fn route_from(
         filled_m: filled,
         receivers,
         correction,
+        #[cfg(test)]
         roots,
         root_of,
         preorder,
         depth,
+        #[cfg(test)]
         donor_start,
+        #[cfg(test)]
         donors,
     }
 }
@@ -383,6 +388,7 @@ pub(crate) fn route_from(
 ///
 /// If a seed's level is not finite or is below its ground, or a cell is never reached, which a
 /// connected graph rules out.
+#[must_use]
 fn flood(mesh: &Mesh, ground: &[f64], seeds: &[Seed]) -> (Vec<f64>, Vec<Option<u32>>, Vec<bool>) {
     let n = ground.len();
     let mut filled = vec![0.0; n];
@@ -438,16 +444,22 @@ fn flood(mesh: &Mesh, ground: &[f64], seeds: &[Seed]) -> (Vec<f64>, Vec<Option<u
 }
 
 /// The edge (0–3) of the receiver of `cell`, not a seed, on the filled surface `filled`, with its
-/// uniform `u`: a neighbour strictly below it drawn with probability proportional to the drop per
-/// metre, in edge order, the first whose running sum of weights exceeds u times their total (the
-/// last with a weight above zero, should rounding leave none); or, with no weight above zero (a
-/// flat or a filled cell), its parent's.
+/// mark `mark`: a neighbour strictly below it drawn with probability proportional to the drop per
+/// metre, the first in edge order whose threshold, its running sum of the weights over their
+/// total, lies above the mark ([`Mark::pick_weighted`]); or, with no weight above zero (a flat or
+/// a filled cell), its parent's.
+///
+/// The pick's running sum is the total's own additions in the same order, a weight of zero adding
+/// nothing, so it reaches the total to the bit, whose threshold, 2⁵³, lies above every mark: the
+/// pick never misses, and needs no fallback. A weight of zero is never picked, since its
+/// threshold is the one before it.
 ///
 /// # Panics
 ///
 /// If `cell` has no weight above zero and its parent is not one of its edge neighbours, which the
 /// flood rules out.
-fn receiver_edge(mesh: &Mesh, filled: &[f64], cell: u32, u: f64, parent: Option<u32>) -> usize {
+#[must_use]
+fn receiver_edge(mesh: &Mesh, filled: &[f64], cell: u32, mark: Mark, parent: Option<u32>) -> usize {
     let level_m = filled[slot(cell)];
     let neighbours = mesh.neighbours(cell);
     let mut weights = [0.0; 4];
@@ -460,18 +472,9 @@ fn receiver_edge(mesh: &Mesh, filled: &[f64], cell: u32, u: f64, parent: Option<
         }
     }
     if total > 0.0 {
-        let target = u * total;
-        let (mut running, mut last) = (0.0, None);
-        for (k, &weight) in weights.iter().enumerate() {
-            if weight > 0.0 {
-                running += weight;
-                last = Some(k);
-                if running > target {
-                    return k;
-                }
-            }
-        }
-        return last.expect("a total above zero has a weight above zero");
+        return mark.pick_weighted(&weights, total).expect(
+            "the running sum reaches the total to the bit, whose threshold takes every mark",
+        );
     }
     let parent = parent.expect("a cell that is not a seed was closed by a neighbour");
     neighbours
@@ -483,6 +486,7 @@ fn receiver_edge(mesh: &Mesh, filled: &[f64], cell: u32, u: f64, parent: Option<
 /// The downstream slope of `cell` on `filled` along one of its face's axes, the axis's two edges
 /// `axis` (0 and 1 for u, 2 and 3 for v): its drop to the lower of the two (by `total_cmp`, ties to
 /// the lower edge) per metre of that link, or 0 if neither is below it.
+#[must_use]
 fn axis_slope(mesh: &Mesh, filled: &[f64], cell: u32, axis: [usize; 2]) -> f64 {
     let neighbours = mesh.neighbours(cell);
     let [low, high] = axis;
@@ -499,6 +503,7 @@ fn axis_slope(mesh: &Mesh, filled: &[f64], cell: u32, axis: [usize; 2]) -> f64 {
 
 /// Each cell's donors as compressed rows: `donors[start[c]..start[c + 1]]` are the cells whose
 /// receiver is c, ascending, by a counting sort over `receivers` in cell-index order.
+#[must_use]
 fn donor_lists(receivers: &[Option<Link>]) -> (Vec<u32>, Vec<u32>) {
     let mut start = vec![0_u32; receivers.len() + 1];
     for link in receivers.iter().flatten() {
@@ -525,6 +530,7 @@ fn donor_lists(receivers: &[Option<Link>]) -> (Vec<u32>, Vec<u32>) {
 /// # Panics
 ///
 /// If the order misses a cell: the receivers are not a forest over the roots.
+#[must_use]
 fn depth_first(roots: &[u32], start: &[u32], donors: &[u32], n: usize) -> (Vec<u32>, Vec<u32>) {
     let mut preorder = Vec::with_capacity(n);
     let mut depth = vec![0_u32; n];

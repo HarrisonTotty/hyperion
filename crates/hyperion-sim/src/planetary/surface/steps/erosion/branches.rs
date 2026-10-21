@@ -11,7 +11,8 @@
 //!   no uplift, the epoch's runoff on every cell, and the paleo-inventory spread over the cells
 //!   and routed by Fill–Spill–Merge, its bodies the bounds; a surface no older than the epoch's
 //!   end is left as it is (Q2 and Q4). The cells inside the rim of a crater younger than the
-//!   epoch's end erode with the rest, and shed no runoff of their own afterwards (Q4). The
+//!   epoch's end erode with the rest, and shed no runoff of their own afterwards (Q4); a crater
+//!   formed inside the epoch erodes for the whole t (labelled: no per-cell age is modelled). The
 //!   volcanic provinces take their own surface's exposure and bed, renewed after the solve where
 //!   they are younger than the epoch, and every eroded cell lowers by its valley's void, not its
 //!   channel's whole incision (decision-r09-t14-mars-ceiling §2.1–2.2).
@@ -20,10 +21,14 @@
 //!   it), each construction basin's mean elevation held by an additive refit and the receivers
 //!   sticky ("T14.c follow-up 2" §1 and §3), no link rising more than the debris-flow slope times
 //!   its length (the "T14.c follow-up" item 2), the climate's annual runoff the source, ice cells
-//!   shedding it as it is (Q5), the sea's cells the bounds, and every closed depression a dry playa
-//!   until R09.T14.d's water balance (Q3); its absolute heights then remapped in order onto its
-//!   construction's, each cell no lower than its receiver and no link steeper than the threshold
-//!   ([`remap_onto_construction`], "T14.c follow-up 2" §2 and "T14.c follow-up 3" item 3).
+//!   shedding it as it is (Q5), the sea's cells the bounds, and the construction's lakes by their
+//!   water balance, the runoff from the land outside the lake against the lake's evaporation less
+//!   its precipitation (Matsubara et al. 2011's X ratio), a terminal lake's bed a bound, a full
+//!   lake routed through and graded, and a lake smaller than
+//!   one cell a dry playa ([`WaterBalance`], Q3; [`wet_now_full_bodies`], "T14.d lakes"); its
+//!   absolute heights then remapped in order onto its construction's, each cell no lower than its
+//!   receiver and no link steeper than the threshold ([`remap_onto_construction`], "T14.c
+//!   follow-up 2" §2 and "T14.c follow-up 3" item 3).
 //!
 //! Each choice is one function whose documentation cites the ruling's question.
 
@@ -34,14 +39,19 @@ use hyperion_surface::synth::channels::{
     DEBRIS_FLOW_SLOPE, bankfull_width, channel_forming_discharge_m3_s, mean_discharge_m3_s,
 };
 
+use super::super::climate::after_erosion::NetLoss;
+use super::super::climate::annual_runoff_kg_m2_s;
 use super::super::climate::seas::under_sea;
 use super::super::craters::waits;
 use super::super::plates::{cell_of, slot};
 use super::super::{CellState, Pass, Working};
+use super::depressions::Measure;
+use super::drainage::canonical;
 use super::erodibility::{Erodibility, Fluid};
-use super::multigrid::{self, Options, Outcome, Problem, Uplift, Water};
+use super::multigrid::{self, FullBodies, Options, Outcome, Problem, Uplift, Water};
 use super::solver::{self, Cells, Threshold, Time};
 use crate::planetary::surface::inputs::{CoarseInputs, WetEpoch};
+use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 use crate::units::{Gigayears, MetresPerSecondSquared, SquareMetres};
 
 /// Which branch of the step a world takes, by its wet epoch.
@@ -94,6 +104,10 @@ pub(crate) fn epoch_share(epoch: &WetEpoch, surface_age: Gigayears) -> Option<f6
 /// (Design note 9, as R09.T0.b corrects it) times the share of the epoch the surface saw
 /// ([`epoch_share`]), or `None` where the surface is no older than the epoch's end
 /// (decision-r09-t14-choices Q4).
+///
+/// One t stands for the whole surface. Labelled (Q4): a crater formed inside the epoch erodes for
+/// the whole t, since no per-cell age is modelled, and lava plains younger than the epoch are not
+/// modelled either (the provinces aside, [`cell_exposure`]).
 #[must_use]
 pub(crate) fn dry_now_years(epoch: &WetEpoch, surface_age: Gigayears) -> Option<f64> {
     epoch_share(epoch, surface_age).map(|share| epoch.effective_flow.value() * share)
@@ -176,6 +190,17 @@ pub(crate) fn cell_exposure(
         .collect()
 }
 
+/// Each valley wall's horizontal run per metre of the valley's depth: 5, the walls' mean gradient
+/// of 0.2 inverted (decision-r09-t14-mars-ceiling §2.2 and §5).
+///
+/// A valley of depth d on its bankfull floor `w_bf` with 10:1 walls is `w_bf` + 10d wide at its
+/// top, each wall running 5d, so that its cross-section's mean width is `w_bf` + 5d and its void
+/// a unit length d (`w_bf` + 5d): the floor's d `w_bf` and the two walls' triangles, ½ d × 5d each.
+/// The width is "about ten times the depth" (Luo, Cang and Howard 2017, Nat. Commun. 8, 15766,
+/// Methods, after Williams and Phillips 2001, JGR 106, 23737), medium-low confidence; the 10:1
+/// walls are Mars's rock, and an ice or methane epoch is an extrapolation (labelled).
+pub(crate) const WALL_RUN_PER_DEPTH: f64 = 5.0;
+
 /// The coarse cell's lowering on a world dry now, metres: the void of one trunk valley cut into
 /// an upland that stays at its construction, over the cell, `L` = min(d, d (`w_bf` + 5d) ÷ w), for
 /// the channel's incision `incision_m` d at full K, the valley's floor `floor_m` `w_bf` (its
@@ -183,11 +208,9 @@ pub(crate) fn cell_exposure(
 /// (decision-r09-t14-mars-ceiling §2.2).
 ///
 /// The valley's walls rise at a mean gradient of 0.2 from its floor, so its top width is
-/// `w_bf` + 10d and its void d (`w_bf` + 5d) a unit length: the width "about ten times the
-/// depth" (Luo, Cang and Howard 2017, Nat. Commun. 8, 15766, Methods, after Williams and Phillips
-/// 2001, JGR 106, 23737), medium-low confidence. Capped at d, where the valley is as wide as its
-/// cell, the space-filling limit. The 10:1 walls are Mars's rock; an ice or methane epoch is an
-/// extrapolation (labelled). K, t and the runoff never move to pass the ceiling; the channel's
+/// `w_bf` + 10d and its void d (`w_bf` + 5d) a unit length ([`WALL_RUN_PER_DEPTH`]). Capped at d,
+/// where the valley is as wide as its
+/// cell, the space-filling limit. K, t and the runoff never move to pass the ceiling; the channel's
 /// incision is kept unscaled apart ([`CellState::channel_incision`]). R09.T6.c's valleys take the
 /// same cross-section, and that task's commit makes this count exactly the valleys it draws.
 ///
@@ -199,7 +222,7 @@ pub(crate) fn dry_now_lowering_m(incision_m: f64, floor_m: f64, cell_m: f64) -> 
     }
     num::min(
         incision_m,
-        incision_m * (floor_m + 5.0 * incision_m) / cell_m,
+        incision_m * (floor_m + WALL_RUN_PER_DEPTH * incision_m) / cell_m,
     )
 }
 
@@ -325,6 +348,7 @@ pub(crate) fn dry_now(pass: &Pass<'_>, working: &Working) -> Option<DryNow> {
 /// exposure's time, `effective_flow` × its exposure, on the outcome's last routing with the
 /// solve's own equivalent areas, erodibilities and bounds, one solve for each such exposure in
 /// ascending order (decision-r09-t14-mars-ceiling §2.1).
+#[must_use]
 fn renewed_channels(
     pass: &Pass<'_>,
     working: &Working,
@@ -382,7 +406,7 @@ fn renewed_channels(
 /// runoff on every cell ([`dry_now_runoff_m_per_year`]), K of each cell's crust under the epoch's
 /// liquid ([`Erodibility`]), the paleo-water ([`paleo_water_m3`]) as a volume, and the sea's
 /// cells ([`sea_cells`], none on the built worlds) and the paleo-sea's and paleo-lakes' beds the
-/// bounds.
+/// bounds, the full ones too ([`dry_now_full_bodies`]).
 ///
 /// # Panics
 ///
@@ -413,7 +437,12 @@ pub(crate) fn erode_dry_now_with(
         working,
         &runoff,
         Water::Volume { water_m3: &water },
-        (Uplift::None, Time::Years(years), dry_now_threshold()),
+        (
+            Uplift::None,
+            Time::Years(years),
+            dry_now_threshold(),
+            dry_now_full_bodies(),
+        ),
         options,
     ))
 }
@@ -424,6 +453,13 @@ pub(crate) fn erode_dry_now_with(
 #[must_use]
 pub(crate) const fn dry_now_threshold() -> Threshold {
     Threshold::None
+}
+
+/// A full paleo-lake on a world dry now: a bound of the transient, its ground untouched, its level
+/// its donors' base (decision-r09-t14-choices Q2, as built; its "T14.d lakes" leaves it so).
+#[must_use]
+pub(crate) const fn dry_now_full_bodies() -> FullBodies {
+    FullBodies::Bounds
 }
 
 /// The solver's time on a world wet now: the steady state (decision-r09-t14-choices Q1).
@@ -456,8 +492,10 @@ pub(crate) const fn wet_now_uplift() -> Uplift {
 /// 43(2), §2). This is their §6.2 threshold term (eqs. 27–29) in its hard limit, `k_t` → ∞:
 /// wherever the fluvial steady state would be steeper, the bed is held at the threshold. At the
 /// coarse cell the threshold is the channel's, the slope above which debris flows, not rivers,
-/// hold the bed: fluvial incision "rarely extends to slopes greater than ∼0.03 to 0.10" (Stock
-/// and Dietrich 2003, WRR 39(4), 1089, doi:10.1029/2001WR001057, abstract). Their hillslope term
+/// cut the valleys: the stream power law's steady state, channel slope as an inverse power of
+/// drainage area, holds only below it, "this inverse power law rarely extends to slopes greater
+/// than ∼0.03 to 0.10, values below which debris flows rarely travel" (Stock and Dietrich 2003,
+/// WRR 39(4), 1089, doi:10.1029/2001WR001057, abstract). Tzathas et al.'s hillslope term
 /// (§6.1) is negligible at the coarse cell, and their threshold of 0.57 (30°) is a hillslope's,
 /// above the channel's. Labelled: one threshold on every body; debris flows' threshold under
 /// another gravity or liquid is not modelled.
@@ -466,13 +504,167 @@ pub(crate) const fn wet_now_threshold() -> Threshold {
     Threshold::Slope(DEBRIS_FLOW_SLOPE)
 }
 
-/// The water on the land of a world wet now: none, every closed depression a dry playa whose
-/// floor is its basin's base level, until R09.T14.d brings the lakes' water balance, the
-/// catchment's runoff against the lake's evaporation less its precipitation
-/// (decision-r09-t14-choices Q3).
+/// The lakes' water balance on a world wet now (decision-r09-t14-choices Q3): each cell's own
+/// inflow and its net loss over open liquid, one a cell in cell-index order, which Fill–Spill–Merge
+/// spreads ([`Measure::Balance`]), on the construction in the solve ([`wet_now_water`]) and on the
+/// final field for its lakes (`outputs`).
+///
+/// - **The inflow** is the cell's own runoff r times its area, its solid angle times R², m³ a⁻¹:
+///   the catchment's runoff, with what upstream bodies spill, is Fill–Spill–Merge's to gather.
+/// - **The net loss** is (E − P) + r, metres of the main liquid a Julian year. E − P is the
+///   climate's ([`NetLoss::at`]): E the Priestley–Taylor evaporation of the climate condensable's
+///   own open liquid were it to stand at the cell's water surface (its ground where it is dry, the
+///   sea's level over the sea: the level the fill reaches is not known before it, so a lake's cell
+///   is taken at its ground, a labelled error of Γ times the lake's depth, under a kelvin on the
+///   coarse cells), none where it is frozen, and P its climate cell's precipitation. It may be
+///   negative, where the cell gains more than it loses.
+/// - **The cell's own runoff in the loss** takes back, from a cell the lake floods, the runoff the
+///   inflow counted on it, exactly when the lake floods it: a flooded cell sheds no runoff, its
+///   precipitation falling on the lake, where E − P counts it. So a lake's inflow is the runoff
+///   from the land outside it, and a terminal lake's area `A_L` in a closed basin of area `A_B`
+///   balances r (`A_B` − `A_L`) = (E − P) `A_L`, the X ratio of closed-basin hydrology,
+///   `A_L` ÷ (`A_B` − `A_L`) = r ÷ (E − P) (decision-r09-t14-choices Q3; Matsubara, Howard and
+///   Drummond 2011, JGR 116, E04001, abstract: X the "ratio of net evaporative loss from lakes to
+///   the surface runoff from uplands"). Without it a lake's precipitation would count twice,
+///   through the inflow and against its evaporation, and a terminal lake would take
+///   `A_L` ÷ `A_B` = r ÷ (E − P), 1 ÷ X, not 1 ÷ (1 + X).
+///
+/// A world with no main liquid has no lake, and its balance is none ([`WaterBalance::of`]).
+///
+/// [`NetLoss::at`]: super::super::climate::after_erosion::NetLoss::at
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct WaterBalance {
+    /// Each cell's own inflow, its runoff times its area, m³ a⁻¹, finite and non-negative.
+    pub(crate) inflow_m3_per_year: Vec<f64>,
+    /// Each cell's net loss were the lake to flood it, (E − P) + its own runoff, m a⁻¹, finite.
+    pub(crate) net_loss_m_per_year: Vec<f64>,
+}
+
+impl WaterBalance {
+    /// The balance of `working`'s cells on `pass`'s world with each cell's own runoff
+    /// `runoff_m_per_year` (m a⁻¹), or `None` on a world with no main liquid, which has no lake
+    /// (decision-r09-t14-choices Q3; the type's documentation): [`from_rates`](Self::from_rates)
+    /// of the cells' areas, Ω R², their runoffs and the climate's E − P at each cell's water
+    /// surface.
+    ///
+    /// # Panics
+    ///
+    /// If `runoff_m_per_year` is not one a cell, or as [`NetLoss::new`], [`NetLoss::at`] and
+    /// [`from_rates`](Self::from_rates).
+    ///
+    /// [`NetLoss::new`]: super::super::climate::after_erosion::NetLoss::new
+    /// [`NetLoss::at`]: super::super::climate::after_erosion::NetLoss::at
+    #[must_use]
+    pub(crate) fn of(
+        pass: &Pass<'_>,
+        working: &Working,
+        runoff_m_per_year: &[f64],
+    ) -> Option<Self> {
+        pass.inputs().main_liquid()?;
+        assert_eq!(
+            runoff_m_per_year.len(),
+            working.cells.len(),
+            "one runoff a cell"
+        );
+        let r = pass.inputs().radius().value();
+        let r2 = r * r;
+        let areas_m2: Vec<f64> = pass
+            .grid()
+            .solid_angles_sr()
+            .iter()
+            .map(|&w| w * r2)
+            .collect();
+        let net = NetLoss::new(pass, working);
+        let open_liquid_m_per_year: Vec<f64> = (0_u32..)
+            .zip(&working.cells)
+            .map(|(cell, state)| net.at(pass, working, cell, state.water_surface.value()))
+            .collect();
+        Some(Self::from_rates(
+            &areas_m2,
+            runoff_m_per_year,
+            &open_liquid_m_per_year,
+        ))
+    }
+
+    /// The balance of cells of areas `areas_m2` (m²), own runoffs `runoff_m_per_year` (m a⁻¹,
+    /// finite and non-negative) and open liquid's net loss `open_liquid_m_per_year` (E − P, m a⁻¹,
+    /// finite), one a cell in cell-index order: each cell's inflow r a, and its net loss (E − P) +
+    /// r, so that a flooded cell's own runoff leaves the balance exactly when the lake floods it
+    /// (decision-r09-t14-choices Q3; Matsubara, Howard and Drummond 2011's X ratio; the type's
+    /// documentation).
+    ///
+    /// # Panics
+    ///
+    /// If the inputs are not one a cell, or a value is not finite.
+    #[must_use]
+    pub(crate) fn from_rates(
+        areas_m2: &[f64],
+        runoff_m_per_year: &[f64],
+        open_liquid_m_per_year: &[f64],
+    ) -> Self {
+        let n = areas_m2.len();
+        for (what, len) in [
+            ("runoff", runoff_m_per_year.len()),
+            ("open liquid's net loss", open_liquid_m_per_year.len()),
+        ] {
+            assert_eq!(len, n, "one {what} a cell");
+        }
+        let inflow_m3_per_year = runoff_m_per_year
+            .iter()
+            .zip(areas_m2)
+            .map(|(&q, &a)| num::assert_finite(q * a))
+            .collect();
+        let net_loss_m_per_year = open_liquid_m_per_year
+            .iter()
+            .zip(runoff_m_per_year)
+            .map(|(&e_minus_p, &q)| num::assert_finite(e_minus_p + q))
+            .collect();
+        Self {
+            inflow_m3_per_year,
+            net_loss_m_per_year,
+        }
+    }
+
+    /// The balance as Fill–Spill–Merge's measure.
+    #[must_use]
+    pub(crate) fn measure(&self) -> Measure<'_> {
+        Measure::Balance {
+            inflow_m3_per_year: &self.inflow_m3_per_year,
+            net_loss_m_per_year: &self.net_loss_m_per_year,
+        }
+    }
+}
+
+/// The water on the land of a world wet now: the construction's lakes by `balance`, Q3's water
+/// balance ([`WaterBalance`]), so that the closed basins the solve holds, Q1's, are the ruled
+/// ones, each terminal lake's bed a bound and each terminal lake's or dry playa's level its
+/// basin's base level, a full lake routed through ([`wet_now_full_bodies`]); with no balance (no
+/// main liquid), none, every closed depression a dry playa whose floor is its basin's base level
+/// (decision-r09-t14-choices Q1 and Q3).
 #[must_use]
-pub(crate) const fn wet_now_water() -> Water<'static> {
-    Water::None
+pub(crate) fn wet_now_water(balance: Option<&WaterBalance>) -> Water<'_> {
+    balance.map_or(Water::None, |b| Water::Balance {
+        inflow_m3_per_year: &b.inflow_m3_per_year,
+        net_loss_m_per_year: &b.net_loss_m_per_year,
+    })
+}
+
+/// A full lake on a world wet now, one whose inflow meets its loss at its sill so that it spills:
+/// no bound, its cells routed through on the filled surface and solved like any other
+/// (decision-r09-t14-choices, "T14.d lakes" item 1). The sea, the terminal lakes' beds and the
+/// playas' pits are the only bounds and base levels.
+///
+/// In a fluvial steady state a lake with an outlet is transient: its overflow incises its sill
+/// and its basin fills with sediment, until the depression is part of the graded network; a
+/// steady state along a routing is monotone, so it holds no closed depression a river runs
+/// through. The steady state then grades through the old depression, its floor raised to the
+/// profile and its sill cut to it, with no process added. Only closed basins persist: the
+/// terminal lakes, whose inflow does not meet their loss at the sill, and the dry playas. Q3's
+/// placement on the final field then finds those. Lake basins that glacial erosion cuts are not
+/// modelled: glacial erosion is labelled later (Q5).
+#[must_use]
+pub(crate) const fn wet_now_full_bodies() -> FullBodies {
+    FullBodies::RoutedThrough
 }
 
 /// Each field cell's own runoff on a world wet now, m of liquid a Julian year, read for every
@@ -481,27 +673,27 @@ pub(crate) const fn wet_now_water() -> Water<'static> {
 /// density, the quotient taken once (decision-r09-t14-choices Q1 and Q5).
 ///
 /// Ice cells shed it as it is (Q5). On a steady ice sheet the accumulation leaves as ice flux, so
-/// the equivalent area accumulated through an ice cell is its balance ice flux, and eroding the
-/// bed at it makes the bed's erosion scale with the ice's discharge, as simple glacial-valley
-/// models do (Anderson, Molnar and Kessler 2006, JGR 111, F01004; from memory): long-term glacial
-/// and fluvial erosion rates are comparable (Koppes and Montgomery 2009, Nat. Geosci. 2, 644;
-/// bibliographic record checked, the paper not read). Not modelled, later: cold-based ice that
-/// protects its bed; overdeepening below the base level; the ice sheet's own surface (the
-/// field's elevation is the ground's, and ice thickness is not modelled); and meltwater's timing.
-///
-/// Read in the crate's own tests only until R09.T14.d, whose commit lifts the climate function's
-/// `expect(dead_code)` with the climate's re-application (the lane's design §0).
+/// the equivalent area accumulated through an ice cell is its balance ice flux, the flux's
+/// catchment-size equivalent `A_i` = `q_i` ÷ `p₀` (Hergarten 2021, Earth Surf. Dynam. 9, 937, eq.
+/// 17), and eroding the bed at it is Hergarten's glacial stream-power law in the fluvial law's
+/// form, E = `K_g` `A_i`^m S^n (his eqs. 18–19), at `K_g` = K: "Kg = K would mean that a glacier
+/// at a given ice flux and a given slope of the ice surface has the same erosion rate as a river
+/// at the same discharge and the same channel slope". That equality is the rule's choice, not a
+/// measured rate: Anderson, Molnar and Kessler 2006 (JGR 111, F01004, abstract) take a glacier's
+/// erosion in proportion to its ice discharge per unit valley width and assume that "glacial
+/// erosion rates far exceed fluvial erosion rates", and Koppes and Montgomery 2009 (Nat. Geosci.
+/// 2, 644), whom the ruling cites for comparable long-term rates, were not read (labelled). Not
+/// modelled, later: cold-based ice that protects its bed; overdeepening below the base level;
+/// the ice sheet's own surface (the field's elevation is the ground's, and ice thickness is not
+/// modelled); and meltwater's timing.
 ///
 /// [`SECONDS_PER_JULIAN_YEAR`]: crate::units::consts::SECONDS_PER_JULIAN_YEAR
-#[cfg(test)]
 #[must_use]
 pub(crate) fn wet_now_runoff_m_per_year(
     pass: &Pass<'_>,
     working: &Working,
     fluid: Fluid,
 ) -> Vec<f64> {
-    use super::super::climate::annual_runoff_kg_m2_s;
-    use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
     let scale = SECONDS_PER_JULIAN_YEAR / fluid.density_kg_m3;
     (0..pass.grid().len())
         .map(|cell| annual_runoff_kg_m2_s(pass, working, cell) * scale)
@@ -509,23 +701,17 @@ pub(crate) fn wet_now_runoff_m_per_year(
 }
 
 /// The erosion of a world wet now, on `working` as the climate step left it, with each cell's own
-/// runoff `runoff_m_per_year` (m a⁻¹, `wet_now_runoff_m_per_year`): the multigrid's steady state
+/// runoff `runoff_m_per_year` (m a⁻¹, [`wet_now_runoff_m_per_year`]): the multigrid's steady state
 /// ([`wet_now_time`]) under each basin's freeboard ([`wet_now_uplift`]) held to the threshold
 /// slope ([`wet_now_threshold`]), with sticky receivers ([`Options::WET_NOW`]), K of each cell's
 /// crust under the main liquid ([`Erodibility`]), the sea's cells ([`sea_cells`]) the bounds at the
-/// sea's level, and no water on the land ([`wet_now_water`]). The solve, before the remap
-/// ([`remap_onto_construction`]).
+/// sea's level, and the construction's lakes by their water balance ([`wet_now_water`] of
+/// [`WaterBalance::of`]), the terminal ones' beds bounds and the full ones routed through
+/// ([`wet_now_full_bodies`]). The solve, before the remap ([`remap_onto_construction`]).
 ///
 /// # Panics
 ///
-/// If `pass`'s world has no wet epoch, or as [`multigrid::erode`].
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "R09.T14.d calls it outside the tests, with the climate's runoff"
-    )
-)]
+/// If `pass`'s world has no wet epoch, or as [`multigrid::erode`] and [`WaterBalance::of`].
 #[must_use]
 pub(crate) fn erode_wet_now(
     pass: &Pass<'_>,
@@ -547,25 +733,24 @@ pub(crate) fn erode_wet_now_with(
     runoff_m_per_year: &[f64],
     options: Options,
 ) -> Outcome {
+    let balance = WaterBalance::of(pass, working, runoff_m_per_year);
     erode(
         pass,
         working,
         runoff_m_per_year,
-        wet_now_water(),
-        (wet_now_uplift(), wet_now_time(), wet_now_threshold()),
+        wet_now_water(balance.as_ref()),
+        (
+            wet_now_uplift(),
+            wet_now_time(),
+            wet_now_threshold(),
+            wet_now_full_bodies(),
+        ),
         options,
     )
 }
 
 /// A world wet now's field remapped onto its construction's absolute hypsometry
 /// ([`remap_onto_construction`]).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "R09.T14.d calls the wet-now branch outside the tests, with the climate's runoff"
-    )
-)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Remapped {
     /// Each cell's elevation, metres: a remapped cell's construction elevation at its rank, lifted
@@ -604,12 +789,12 @@ pub(crate) struct Remapped {
 ///    area, the value of the construction cell whose interval holds the midpoint, with no
 ///    interpolation. The preorder tie-break gives a receiver its value before its donors at a tie
 ///    (a flat or a capped link; the follow-up's item 2, ratified).
-/// 3. **The pass.** In the routing's preorder, each remapped cell with a receiver becomes min(max(z′,
-///    `w_r`), `w_r` + `s_c` δ), `w_r` its receiver's final surface (a bound's water surface or
-///    ground, otherwise the receiver's own final height), `s_c` [`DEBRIS_FLOW_SLOPE`] and δ the
-///    link: the max lifts a cell the map put below its receiver's surface up to it, a flat shore
-///    below a high lake; the min holds the threshold, undoing the map's local stretching. Held
-///    cells are skipped.
+/// 3. **The pass.** In the routing's preorder, each remapped cell with a receiver becomes
+///    min(max(z′, `w_r`), `w_r` + `s_c` δ), `w_r` its receiver's final surface (a bound's water
+///    surface or ground, otherwise the receiver's own final height), `s_c` [`DEBRIS_FLOW_SLOPE`]
+///    and δ the link: the max lifts a cell the map put below its receiver's surface up to it, a
+///    flat shore below a high lake; the min holds the threshold, undoing the map's local
+///    stretching. Held cells are skipped.
 ///
 /// Any one monotone map of absolute height keeps the order along every path, whatever its base,
 /// and the pass leaves every remapped cell at or above its receiver with no link steeper than the
@@ -627,13 +812,6 @@ pub(crate) struct Remapped {
 /// # Panics
 ///
 /// If an input is not one a cell of `outcome`, or a height is not finite.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "R09.T14.d calls the wet-now branch outside the tests, with the climate's runoff"
-    )
-)]
 #[must_use]
 pub(crate) fn remap_onto_construction(outcome: &Outcome, z0_m: &[f64], s_m: &[f64]) -> Remapped {
     let n = s_m.len();
@@ -651,12 +829,16 @@ pub(crate) fn remap_onto_construction(outcome: &Outcome, z0_m: &[f64], s_m: &[f6
         .collect();
     let held: Vec<bool> = (0..n)
         .map(|c| {
+            // Signed zeros made positive, as the drainage's are, so that a −0 against a +0 is
+            // held, and below is below by `<`.
             unbound[c]
                 && outcome.uplift_m_per_year[c] <= 0.0
-                && s_m[c].total_cmp(&z0_m[c]).is_eq()
-                && routing
-                    .receiver(cell_of(c))
-                    .is_some_and(|link| s_m[c].total_cmp(&s_m[slot(link.cell)]).is_lt())
+                && canonical(s_m[c]).total_cmp(&canonical(z0_m[c])).is_eq()
+                && routing.receiver(cell_of(c)).is_some_and(|link| {
+                    canonical(s_m[c])
+                        .total_cmp(&canonical(s_m[slot(link.cell)]))
+                        .is_lt()
+                })
         })
         .collect();
     let moved: Vec<bool> = (0..n).map(|c| unbound[c] && !held[c]).collect();
@@ -667,7 +849,7 @@ pub(crate) fn remap_onto_construction(outcome: &Outcome, z0_m: &[f64], s_m: &[f6
     let ranked = |height: &[f64], tie: &dyn Fn(usize) -> usize| {
         let mut cells: Vec<(f64, usize)> = (0..n)
             .filter(|&c| moved[c])
-            .map(|c| (num::assert_finite(height[c]), c))
+            .map(|c| (canonical(height[c]), c))
             .collect();
         cells.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(tie(a.1).cmp(&tie(b.1))));
         cells
@@ -726,7 +908,7 @@ fn erode(
     working: &Working,
     runoff: &[f64],
     water: Water<'_>,
-    (uplift, time, threshold): (Uplift, Time, Threshold),
+    (uplift, time, threshold, full_bodies): (Uplift, Time, Threshold, FullBodies),
     options: Options,
 ) -> Outcome {
     let inputs = pass.inputs();
@@ -754,6 +936,7 @@ fn erode(
             uplift,
             time,
             threshold,
+            full_bodies,
         },
         options,
     )

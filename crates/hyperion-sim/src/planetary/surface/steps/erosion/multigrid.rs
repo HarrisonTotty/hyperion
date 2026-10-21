@@ -17,10 +17,13 @@
 //! - **Once per level, on its construction z0** (decision-r09-t14-choices Q1–Q3): the water bodies
 //!   of the level's water, Fill–Spill–Merge's ([`depressions::water_bodies`]), every depression a
 //!   dry, terminal playa where there is none; the bounds, the sea's cells (base: the sea's level),
-//!   the bodies' flooded cells, lake beds (base: the body's level), and each terminal body's pit,
-//!   a root of every routing (base: its level, a playa's being its floor), their ground untouched;
-//!   and, for [`Uplift::BasinFreeboard`], the construction's own routing, which fixes each cell's
-//!   basin b, the root it drains to, and the basin's base level `ℓ_b`.
+//!   the terminal bodies' flooded cells, lake beds (base: the body's level), and each terminal
+//!   body's pit, a root of every routing (base: its level, a playa's being its floor), their
+//!   ground untouched, and a full body's flooded cells as the problem's [`FullBodies`] says:
+//!   bounds at the body's level, or routed through on the filled surface and solved like any
+//!   other cell; and, for [`Uplift::BasinFreeboard`], the construction's own routing, which fixes
+//!   each cell's basin b, the root it drains to, and the basin's base level `ℓ_b`, a full body
+//!   draining through its outlet to the base downstream of it.
 //! - **Each iteration**: the routing with water on the current z ([`route_with_water`]) with the
 //!   level's bodies; the equivalent area, the runoff times the cells' area accumulated and over
 //!   [`REFERENCE_RUNOFF_M_PER_YEAR`] (Hergarten 2021, eqs. 16 and 20); the solve; the residual,
@@ -73,12 +76,12 @@ use hyperion_surface::tags::SURFACE_COARSE_EROSION;
 
 use super::super::plates::{cell_of, slot};
 use super::depressions::{self, Measure, WaterBodies, route_with_water, route_with_water_from};
-use super::drainage::{self, Routing, receiver_uniforms};
+use super::drainage::{self, Routing, canonical, receiver_marks};
 use super::mesh::Mesh;
 use super::solver::{self, Cells, Threshold, Time};
 use crate::planetary::hooks::SurfaceSeed;
 use crate::planetary::surface::grid::CellGraph;
-use crate::rng::ObjectKey;
+use crate::rng::{Mark, ObjectKey};
 use crate::units::Metres;
 
 /// The coarsest level of the multigrid: 4, 1,536 cells (Design note 9).
@@ -108,17 +111,13 @@ pub(crate) const JITTER_INSTANCE: u16 = 1;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Start {
     /// R09.T14.b's as built: the upsample of the coarser level's last elevation, each bound at its
-    /// base, then each of the level's bounds at its ground.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the measurement of the starts runs it")
-    )]
+    /// base, then each of the level's bounds at its ground. Only the measurement of the starts, a
+    /// test, runs it.
+    #[cfg(test)]
     AsBuilt,
-    /// The level's own construction, discarding the coarser levels.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the measurement of the starts runs it")
-    )]
+    /// The level's own construction, discarding the coarser levels. Only the measurement of the
+    /// starts, a test, runs it.
+    #[cfg(test)]
     Construction,
     /// The level's own construction plus the upsample of the coarser level's change from its
     /// construction, each bound's change zero (multigrid's full approximation scheme).
@@ -136,8 +135,9 @@ pub(crate) const LEVEL_START: Start = Start::Correction;
 /// How each iteration draws its receivers (decision-r09-t14-choices, "T14.b follow-up" item 2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Receivers {
-    /// Afresh at every iteration from each cell's stored uniform (Tzathas et al. 2024, §4.3): the
-    /// step's.
+    /// Afresh at every iteration from each cell's stored mark, its uniform kept as an integer
+    /// (Tzathas et al. 2024, §4.3, "we precompute and store the random variable used by each
+    /// cell"): the step's.
     Fresh,
     /// Sticky at every level from its third iteration on: a cell keeps its previous receiver
     /// while that stays strictly lower on the filled surface, and draws afresh only when it does
@@ -196,7 +196,8 @@ pub(crate) enum Uplift {
 /// cell-index order.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Water<'a> {
-    /// None: every depression a dry, terminal playa (a world wet now until R09.T14.d's balance).
+    /// None: every depression a dry, terminal playa (a world wet now with no main liquid, which
+    /// has no lake).
     None,
     /// A volume, m³ a cell ([`Measure::Volume`]; a paleo-inventory, decision-r09-t14-choices Q2).
     Volume {
@@ -205,14 +206,10 @@ pub(crate) enum Water<'a> {
     },
     /// A water balance ([`Measure::Balance`]; lakes on a world wet now, decision-r09-t14-choices
     /// Q3).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "R09.T14.d's lakes on a world wet now build it")
-    )]
     Balance {
         /// Each cell's own inflow, m³ a⁻¹.
         inflow_m3_per_year: &'a [f64],
-        /// Each cell's net loss over open liquid, m a⁻¹.
+        /// Each cell's net loss were the water to flood it, m a⁻¹ ([`Measure::Balance`]'s).
         net_loss_m_per_year: &'a [f64],
     },
 }
@@ -247,6 +244,23 @@ pub(crate) struct Problem<'a> {
     pub(crate) time: Time,
     /// The steepest a link rises, at steady state only.
     pub(crate) threshold: Threshold,
+    /// What a full water body, one that spills, is to the solve.
+    pub(crate) full_bodies: FullBodies,
+}
+
+/// What a full water body, at its spill level and spilling through its outlet, is to the solve
+/// (decision-r09-t14-choices, "T14.d lakes"), which the caller's branch chooses. A terminal body's
+/// flooded cells and its pit are bounds either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FullBodies {
+    /// Its flooded cells are bounds at its level, their ground untouched (a transient: a world dry
+    /// now's paleo-lakes, Q2).
+    Bounds,
+    /// Its cells are no bounds: routed through on the priority flood's filled surface, the
+    /// pop-order flats of R09.T14.a, and solved like any other cell, so that the steady state
+    /// grades through the old depression, its floor raised to the profile and its sill cut to it
+    /// (a world wet now).
+    RoutedThrough,
 }
 
 /// One level's residuals: at each iteration, the root mean square by area of the iteration's
@@ -277,7 +291,7 @@ impl LevelResidual {
     /// # Panics
     ///
     /// Never: a level iterates [`ITERATIONS_PER_LEVEL`] times.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests print it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn first_m(&self) -> f64 {
         *self
@@ -291,7 +305,7 @@ impl LevelResidual {
     /// # Panics
     ///
     /// Never: a level iterates [`ITERATIONS_PER_LEVEL`] times.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests print it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn largest_change_m(&self) -> f64 {
         *self
@@ -305,7 +319,7 @@ impl LevelResidual {
     /// # Panics
     ///
     /// Never: a level iterates [`ITERATIONS_PER_LEVEL`] times.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests print it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn last_m(&self) -> f64 {
         *self
@@ -365,11 +379,12 @@ pub(crate) struct Outcome {
     /// The water bodies on the field's construction.
     pub(crate) bodies: WaterBodies,
     /// Each cell's bound on the field's level, its base, or `None` where it erodes: the sea's
-    /// cells, the bodies' flooded cells and each terminal body's pit.
+    /// cells, the terminal bodies' flooded cells and pits, and the full bodies' flooded cells
+    /// under [`FullBodies::Bounds`].
     pub(crate) bounds: Vec<Option<f64>>,
-    /// Each cell's receiver uniform on the field's level ([`receiver_uniforms`]), for a routing
-    /// of the final elevation.
-    pub(crate) uniforms: Vec<f64>,
+    /// Each cell's receiver mark on the field's level ([`receiver_marks`]), for a routing of the
+    /// final elevation.
+    pub(crate) marks: Vec<Mark>,
     /// Each cell's basin on the field's construction routing, its root, for
     /// [`Uplift::BasinFreeboard`]; empty without uplift.
     pub(crate) basins: Vec<u32>,
@@ -456,7 +471,9 @@ impl Level<'_> {
                         wet += w;
                     }
                 }
-                2.0 * wet >= all && ground.total_cmp(&sea_level_m).is_le()
+                // Signed zeros made positive, as the drainage's are (`drainage::canonical`), so
+                // that a parent at +0 m under a sea at −0 m is the sea's.
+                2.0 * wet >= all && canonical(ground).total_cmp(&canonical(sea_level_m)).is_le()
             })
             .collect();
         let water = match &self.water {
@@ -482,7 +499,8 @@ struct Setup {
     bodies: WaterBodies,
     /// Each cell's bound: its base, or `None` where it erodes.
     fixed: Vec<Option<f64>>,
-    uniforms: Vec<f64>,
+    /// Each cell's receiver mark ([`receiver_marks`]).
+    marks: Vec<Mark>,
     /// Each cell's uplift at λ = 1 a⁻¹: its freeboard above its basin's base level, metres, or 0.
     freeboard_m: Vec<f64>,
     /// Each cell's basin, its root on the construction's routing, for [`Uplift::BasinFreeboard`].
@@ -494,6 +512,7 @@ struct Setup {
 
 impl Setup {
     /// The setup of `level` for `problem` (see the module documentation).
+    #[must_use]
     fn of(level: &Level<'_>, problem: &Problem<'_>) -> Self {
         let n = slot(level.mesh.len());
         let zeros;
@@ -509,8 +528,13 @@ impl Setup {
             },
         };
         let bodies = depressions::water_bodies(&level.mesh, &level.z0_m, &level.sea, measure);
-        let fixed = bounds(&level.sea, problem.sea_level_m, &bodies);
-        let uniforms = receiver_uniforms(problem.seed, &level.graph);
+        let fixed = bounds(
+            &level.sea,
+            problem.sea_level_m,
+            &bodies,
+            problem.full_bodies,
+        );
+        let marks = receiver_marks(problem.seed, &level.graph);
         let (freeboard_m, basin, base_level_m) = match problem.uplift {
             Uplift::None => (vec![0.0; n], Vec::new(), Vec::new()),
             Uplift::BasinFreeboard => {
@@ -520,7 +544,7 @@ impl Setup {
                     &level.sea,
                     problem.sea_level_m,
                     &bodies,
-                    &uniforms,
+                    &marks,
                 );
                 basin_freeboard(&routing, &level.z0_m, &fixed)
             }
@@ -528,7 +552,7 @@ impl Setup {
         Self {
             bodies,
             fixed,
-            uniforms,
+            marks,
             freeboard_m,
             basin,
             base_level_m,
@@ -536,13 +560,27 @@ impl Setup {
     }
 }
 
-/// Each cell's bound: the sea's cells at `sea_level_m`, each body's flooded cells at its level,
-/// and each terminal body's pit at its level (a root of every routing with these bodies).
-fn bounds(sea: &[bool], sea_level_m: f64, bodies: &WaterBodies) -> Vec<Option<f64>> {
+/// Each cell's bound: the sea's cells at `sea_level_m`, each terminal body's flooded cells at its
+/// level, each full body's at its level under [`FullBodies::Bounds`] (none under
+/// [`FullBodies::RoutedThrough`]: they are solved), and each terminal body's pit at its level (a
+/// root of every routing with these bodies).
+#[must_use]
+fn bounds(
+    sea: &[bool],
+    sea_level_m: f64,
+    bodies: &WaterBodies,
+    full_bodies: FullBodies,
+) -> Vec<Option<f64>> {
     let mut fixed: Vec<Option<f64>> = sea.iter().map(|&wet| wet.then_some(sea_level_m)).collect();
     for body in bodies.bodies() {
-        for &c in &body.cells {
-            fixed[slot(c)] = Some(body.level_m);
+        let held = match full_bodies {
+            FullBodies::Bounds => true,
+            FullBodies::RoutedThrough => !body.full,
+        };
+        if held {
+            for &c in &body.cells {
+                fixed[slot(c)] = Some(body.level_m);
+            }
         }
         if let Some(level_m) = body.base_level_m() {
             fixed[slot(body.pit)] = Some(level_m);
@@ -555,6 +593,7 @@ fn bounds(sea: &[bool], sea_level_m: f64, bodies: &WaterBodies) -> Vec<Option<f6
 /// its basin, the root it drains to, and the basin's base level `ℓ_b` (decision-r09-t14-choices
 /// Q1's u = `λ_b` max(0, z0 − `ℓ_b`) at λ = 1 a⁻¹, b keyed by the root's cell): the uplift's
 /// pattern is fixed in space for the level's iterations.
+#[must_use]
 fn basin_freeboard(
     routing: &Routing,
     z0_m: &[f64],
@@ -697,6 +736,7 @@ fn counted(setup: &Setup, equivalent_area_m2: &[f64], c: usize) -> bool {
 /// above; a basin is fitted where its `Σ_b` Ω F is above zero, and one that is not keeps its
 /// construction. Exact only where every path stays in its basin (the "T14.c follow-up" item 1's
 /// erratum), it starts each level's [`refit`].
+#[must_use]
 fn closed_form(
     mesh: &Mesh,
     z0_m: &[f64],
@@ -726,6 +766,7 @@ fn closed_form(
 
 /// The uplift field of `lambdas` on `setup`, m a⁻¹: u(i) = `λ_b(i)` × freeboard(i) where i's basin
 /// is fitted, else zero.
+#[must_use]
 fn uplift_field(setup: &Setup, lambdas: &Lambdas) -> Vec<f64> {
     setup
         .freeboard_m
@@ -797,6 +838,7 @@ struct Refitted {
 /// - A fitted basin whose `S_b` is zero keeps its `λ_b`. No ratio can turn non-positive, so a basin
 ///   whose cells drain to a lower base, a perched playa captured by the sea's basins, keeps its
 ///   mean too.
+#[must_use]
 fn refit(
     mesh: &Mesh,
     (z0_m, setup, equivalent_area_m2): (&[f64], &Setup, &[f64]),
@@ -902,6 +944,7 @@ fn uplift_records(
 
 /// The distribution of `values`, each finite, or `None` if it is empty: the p-th percentile the
 /// value of rank round(p × (count − 1) ÷ 100) in ascending order (by `total_cmp`).
+#[must_use]
 fn spread(mut values: Vec<f64>) -> Option<LambdaSpread> {
     let last = values.len().checked_sub(1)?;
     for &v in &values {
@@ -924,6 +967,7 @@ fn spread(mut values: Vec<f64>) -> Option<LambdaSpread> {
 /// # Panics
 ///
 /// As [`erode`].
+#[must_use]
 fn levels<'a>(problem: &Problem<'a>) -> Vec<Level<'a>> {
     let finest = problem.grid.level();
     let n = slot(problem.grid.len());
@@ -1000,6 +1044,7 @@ struct Finished<'a> {
 /// ([`upsample`]), the level's construction, or the construction plus the upsample of the level
 /// below's change from its own, each of its bounds' change zero; and in every case each of the
 /// level's own bounds `bounds` at its ground.
+#[must_use]
 fn start(
     seed: SurfaceSeed,
     level: &Level<'_>,
@@ -1007,33 +1052,38 @@ fn start(
     below: Option<Finished<'_>>,
     how: Start,
 ) -> Vec<f64> {
-    let mut z = match (below, how) {
-        (None, _) | (Some(_), Start::Construction) => level.z0_m.clone(),
-        (Some(coarse), Start::AsBuilt) => {
-            let surface: Vec<f64> = coarse
-                .z_m
-                .iter()
-                .zip(coarse.fixed)
-                .map(|(&h, bound)| bound.unwrap_or(h))
-                .collect();
-            upsample(seed, coarse.graph, &surface, &level.graph)
-        }
-        (Some(coarse), Start::Correction) => {
-            let change: Vec<f64> = coarse
-                .z_m
-                .iter()
-                .zip(coarse.z0_m)
-                .zip(coarse.fixed)
-                .map(|((&h, &ground), bound)| if bound.is_some() { 0.0 } else { h - ground })
-                .collect();
-            let change = upsample(seed, coarse.graph, &change, &level.graph);
-            level
-                .z0_m
-                .iter()
-                .zip(change)
-                .map(|(&ground, d)| ground + d)
-                .collect()
-        }
+    let mut z = match below {
+        None => level.z0_m.clone(),
+        Some(coarse) => match how {
+            #[cfg(test)]
+            Start::Construction => level.z0_m.clone(),
+            #[cfg(test)]
+            Start::AsBuilt => {
+                let surface: Vec<f64> = coarse
+                    .z_m
+                    .iter()
+                    .zip(coarse.fixed)
+                    .map(|(&h, bound)| bound.unwrap_or(h))
+                    .collect();
+                upsample(seed, coarse.graph, &surface, &level.graph)
+            }
+            Start::Correction => {
+                let change: Vec<f64> = coarse
+                    .z_m
+                    .iter()
+                    .zip(coarse.z0_m)
+                    .zip(coarse.fixed)
+                    .map(|((&h, &ground), bound)| if bound.is_some() { 0.0 } else { h - ground })
+                    .collect();
+                let change = upsample(seed, coarse.graph, &change, &level.graph);
+                level
+                    .z0_m
+                    .iter()
+                    .zip(change)
+                    .map(|(&ground, d)| ground + d)
+                    .collect()
+            }
+        },
     };
     for (h, (bound, &ground)) in z.iter_mut().zip(bounds.iter().zip(&level.z0_m)) {
         if bound.is_some() {
@@ -1092,7 +1142,7 @@ pub(crate) fn erode(problem: &Problem<'_>, options: Options) -> Outcome {
         equivalent_area_m2: step.equivalent_area_m2,
         bodies: setup.bodies,
         bounds: setup.fixed,
-        uniforms: setup.uniforms,
+        marks: setup.marks,
         basins: setup.basin,
         construction_base_m: setup.base_level_m,
         uplift_m_per_year: step.uplift_m_per_year,
@@ -1231,7 +1281,7 @@ fn iterate(
         &level.sea,
         problem.sea_level_m,
         &setup.bodies,
-        &setup.uniforms,
+        &setup.marks,
         previous,
     );
     let discharge: Vec<f64> = level
@@ -1314,6 +1364,7 @@ struct Fit {
 }
 
 /// The cells of `solution` held at the threshold.
+#[must_use]
 fn count_held(solution: &solver::Solution) -> usize {
     solution
         .held_at_threshold()
@@ -1322,12 +1373,12 @@ fn count_held(solution: &solver::Solution) -> usize {
         .count()
 }
 
-/// [`Uplift::BasinFreeboard`]'s solve on `routing` with `cells`, their uplift the freeboard at
-/// unit λ, for `problem`: the basins' `λ_b` carried in `lambdas`, or Q1's closed form on a solve
-/// at unit λ with no threshold where the level starts ([`closed_form`]); the solve under their uplift
-/// field held to the problem's threshold ([`solve_field`]); the refit on it for the next
-/// iteration ([`refit`]); and, on the [`Turn::Final`] iteration, the solve again with the
-/// refitted `λ_b` (see the module documentation) and its own refit, for the records.
+/// [`Uplift::BasinFreeboard`]'s solve on `routing` with `cells`, their uplift the freeboard at unit
+/// λ, for `problem`: the basins' `λ_b` carried in `lambdas`, or Q1's closed form on a solve at unit
+/// λ with no threshold where the level starts ([`closed_form`]); the solve under their uplift field
+/// held to the problem's threshold ([`solve_field`]); the refit on it for the next iteration
+/// ([`refit`]); and, on the [`Turn::Final`] iteration, the solve again with the refitted `λ_b` (see
+/// the module documentation) and its own refit, for the records.
 fn basin_fit(
     level: &Level<'_>,
     setup: &Setup,

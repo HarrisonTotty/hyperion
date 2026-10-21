@@ -18,7 +18,9 @@ use hyperion_surface::synth::channels::{
     mean_discharge_m3_s, tributary_rise, tributary_steepness_m0_9, valley_depth,
 };
 
-use super::super::branches::{DryNow, dry_now, dry_now_years, erode_dry_now_with, paleo_water_m3};
+use super::super::branches::{
+    DryNow, WALL_RUN_PER_DEPTH, dry_now, dry_now_years, erode_dry_now_with, paleo_water_m3,
+};
 use super::super::erodibility::Erodibility;
 use super::super::multigrid::{Options, Outcome, Start};
 use super::super::run;
@@ -33,12 +35,17 @@ use crate::units::{MetresPerSecondSquared, SquareMetres, Years};
 /// F1's (A1)).
 const TRUNK_AREA_M2: f64 = 1.0e10;
 
-/// Black et al. 2017's trunk incision, m: 50 to 350 (Science 356, 727, Table S2; science-hoke §4;
-/// decision-r09-t14-choices F1's (A1)).
+/// The trunk incision Black et al. 2017 calibrate on, m: 50 to 350, "Trunk channels of Martian
+/// valley networks incised ~50 to 350 m into older terrains" (Howard, Moore and Irwin 2005, JGR
+/// 110, E12S14, as quoted in Black et al. 2017's supplementary Materials and Methods, Science 356,
+/// 727; science-hoke §4; decision-r09-t14-choices F1's (A1)).
 const TRUNK_INCISION_M: (f64, f64) = (50.0, 350.0);
 
-/// The networks' upper valley width, m: 10 km (science-hoke §4; decision-r09-t14-choices F3),
-/// which with Black et al.'s 350 m gives (B)'s cross-section, 350 m × 10 km.
+/// (B)'s valley width, m: 10 km, the ruling's choice and not a single sourced figure
+/// (decision-r09-t14-choices F3, after science-hoke §4): toward the upper end of Hynek, Beach and
+/// Hoke 2010's valleys "hundreds of meters to 20 km wide" (JGR 115, E09008, ¶10), against
+/// Williams and Phillips 2001's mean of 2,040 ± 1,548 m (JGR 106, 23737, abstract). With the 350 m
+/// of trunk incision it gives (B)'s cross-section, 350 m × 10 km.
 const CEILING_WIDTH_M: f64 = 10.0e3;
 
 /// (B)'s area quantile: the 99th percentile (decision-r09-t14-mars-ceiling §4.1).
@@ -52,8 +59,11 @@ const VALLEY_LAYER_M: f64 = 1.2;
 /// combined HRSC-scaled 2.04 m (decision-r09-t14-mars-ceiling §4.2).
 const VALLEY_LAYER_FINDING_M: f64 = 6.1;
 
-/// Williams and Phillips 2001's share of valleys deeper than 350 m, about 4.6%
-/// (decision-r09-t14-mars-ceiling's relay, (A1)'s record).
+/// The share of valleys deeper than 350 m, about 4.6%: a derived figure, not a measurement of
+/// trunks, the tail above 350 m of a log-normal fitted to Williams and Phillips 2001's abstract
+/// mean and standard deviation of depth, 109 ± 137 m, over all their valley cross-sections (JGR
+/// 106, 23737; decision-r09-t14-mars-ceiling's relay, (A1)'s record; the science check's fit gives
+/// 0.0460). The like-for-like comparison for trunks is [`TRUNK_INCISION_M`]'s range.
 const DEEP_VALLEY_SHARE: f64 = 0.046;
 
 /// The drainage classes by which (A1)'s deep tail is recorded, m², each from its lower bound to
@@ -153,9 +163,9 @@ impl<'a> Ceiling<'a> {
         TRUNK_INCISION_M.1 * CEILING_WIDTH_M / self.width(c)
     }
 
-    /// The closure's `f_w` at `c`, (`w_bf` + 5d) ÷ w, uncapped.
+    /// The closure's `f_w` at `c`, (`w_bf` + 5d) ÷ w, uncapped ([`WALL_RUN_PER_DEPTH`]).
     fn f_w(&self, c: usize) -> f64 {
-        (self.dry.floor_m[c] + 5.0 * self.incision(c)) / self.width(c)
+        (self.dry.floor_m[c] + WALL_RUN_PER_DEPTH * self.incision(c)) / self.width(c)
     }
 
     /// The trunk cells' channel incisions: the eroded cells draining at least 10⁴ km².
@@ -267,8 +277,9 @@ impl<'a> Ceiling<'a> {
             trunk.clone(),
         );
         eprintln!(
-            "{what}: (A1) trunk cells deeper than 350 m: {:.2}% against Williams and Phillips's \
-             about {:.1}% (a finding for the w_v check and R09.T6.c)",
+            "{what}: (A1) trunk cells deeper than 350 m: {:.2}% against about {:.1}% of all valleys \
+             in a log-normal of Williams and Phillips's depths (derived; a finding for the w_v \
+             check and R09.T6.c)",
             100.0 * deep_share(&trunk),
             100.0 * DEEP_VALLEY_SHARE
         );
@@ -637,9 +648,11 @@ fn rebuilt_variance(grooves: &[Groove], radius_m: f64, finer_than_m: f64) -> f64
 ///   area and exposure above zero) draining at least 10⁴ km² lies within Black et al. 2017's
 ///   50–350 m (187.8 m as built); its p90 and the share deeper than 350 m are recorded, whole and
 ///   by drainage class, 10⁴–10⁵, 10⁵–10⁶ and above 10⁶ km² ([`DRAINAGE_CLASSES_M2`]). The tail
-///   is a finding, not an assertion: 21.2% of the trunk cells lie deeper than 350 m against
-///   Williams and Phillips 2001's about 4.6% (JGR 106, 23737, a sample of valleys narrower than
-///   many of the model's trunks); it is the construction's own, the incision S₀ times the
+///   is a finding, not an assertion: 21.2% of the trunk cells lie deeper than 350 m against about
+///   4.6% of all valleys in a log-normal of Williams and Phillips 2001's abstract mean and standard
+///   deviation of depth (109 ± 137 m; JGR 106, 23737), a derived figure over every valley
+///   cross-section, not a trunk measurement, Howard et al.'s trunk range being the like-for-like
+///   comparison; the tail is the construction's own, the incision S₀ times the
 ///   knickpoint's travel, which grows as (r A)^0.45 K t, so that the steeper, larger trunks run
 ///   deep. It goes to the `w_v` science check and to R09.T6.c, which takes the solver's incision as
 ///   its valley depth: a depth relation by drainage belongs there, not in K t

@@ -172,7 +172,7 @@ impl Solution {
 
     /// Each cell's elevation at λ = 0, metres: its path's base, or z0(D), the construction where
     /// its characteristic left it.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the solver's tests read it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn base_m(&self) -> &[f64] {
         &self.base
@@ -323,6 +323,7 @@ pub(crate) fn solve_with<N: Network + ?Sized>(
 /// # Panics
 ///
 /// As [`solve_with`]'s inputs.
+#[must_use]
 fn checked_count<N: Network + ?Sized>(
     network: &N,
     cells: &Cells<'_>,
@@ -365,6 +366,7 @@ fn checked_count<N: Network + ?Sized>(
 
 /// A link's rise, metres, from its fluvial rise `fluvial` (u ℓ ÷ a) over its length `length_m`:
 /// held to `s_c` ℓ under a [`Threshold::Slope`] `s_c`, and whether it is held.
+#[must_use]
 fn link_rise(fluvial: f64, length_m: f64, threshold: Threshold) -> (f64, bool) {
     match threshold {
         Threshold::Slope(slope) if fluvial > slope * length_m => (slope * length_m, true),
@@ -376,6 +378,7 @@ fn link_rise(fluvial: f64, length_m: f64, threshold: Threshold) -> (f64, bool) {
 /// cell's τ above `t`) at time `t`: z0 and Σ at D, where τ is the cell's less t, interpolated
 /// linearly in τ inside the link that holds it, and the cell's Σ less Σ(D) (Tzathas et al.'s
 /// eq. 8).
+#[must_use]
 fn departure(path: &[Step], t: f64) -> (f64, f64) {
     let last = path.len() - 1;
     let cell = path[last];

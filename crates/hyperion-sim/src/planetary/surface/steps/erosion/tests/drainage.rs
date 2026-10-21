@@ -9,10 +9,11 @@ use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::stats::{ALPHA, assert_p_value, normal_cdf};
 
 use super::super::depressions::{Measure, WaterBodies, route_with_water, water_bodies};
-use super::super::drainage::{Routing, Seed, accumulate, receiver_uniforms, route};
+use super::super::drainage::{Routing, Seed, accumulate, receiver_marks, route};
 use super::*;
 use crate::planetary::hooks::SurfaceSeed;
 use crate::planetary::surface::reference;
+use crate::rng::Mark;
 
 /// The rough field at `level` (LCG seed `field`), rained on 0.3 m deep, routed with its water
 /// under `seed`'s receivers.
@@ -25,8 +26,8 @@ fn rough_drainage(
     let (z, sea) = rough_terrain(&graph, field);
     let water = rain(&mesh, 0.3);
     let bodies = water_bodies(&mesh, &z, &sea, Measure::Volume { water_m3: &water });
-    let uniforms = receiver_uniforms(seed, &graph);
-    let routing = route_with_water(&mesh, &z, &sea, SEA_LEVEL_M, &bodies, &uniforms);
+    let marks = receiver_marks(seed, &graph);
+    let routing = route_with_water(&mesh, &z, &sea, SEA_LEVEL_M, &bodies, &marks);
     (graph, mesh, z, routing, bodies)
 }
 
@@ -148,20 +149,20 @@ fn no_cell_drains_uphill_after_filling() {
     assert_eq!(donor_count, slot(n) - routing.roots().len());
 }
 
-/// The same seed gives the same receivers: one surface seed's receiver uniforms lie in [0, 1) and
-/// are the same bits twice, and so is the drainage drawn with them (receivers, link lengths, slope
-/// corrections, filled surface and order); another seed's uniforms send some cell to another
+/// The same seed gives the same receivers: one surface seed's receiver marks lie below 2⁵³ and
+/// are the same twice, and so is the drainage drawn with them (receivers, link lengths, slope
+/// corrections, filled surface and order); another seed's marks send some cell to another
 /// receiver.
 #[test]
 fn the_same_seed_gives_the_same_receivers() {
     let (graph, _) = world(4);
-    let (first_uniforms, second_uniforms) = (
-        receiver_uniforms(reference::SEED, &graph),
-        receiver_uniforms(reference::SEED, &graph),
+    let (first_marks, second_marks) = (
+        receiver_marks(reference::SEED, &graph),
+        receiver_marks(reference::SEED, &graph),
     );
-    for (a, b) in first_uniforms.iter().zip(&second_uniforms) {
-        assert!((0.0..1.0).contains(a));
-        assert_same_bits(*a, *b);
+    for (a, b) in first_marks.iter().zip(&second_marks) {
+        assert!(a.get() < 1 << 53);
+        assert_eq!(a, b);
     }
     let (_, _, _, first, _) = rough_drainage(4, 3, reference::SEED);
     let (_, _, _, second, _) = rough_drainage(4, 3, reference::SEED);
@@ -225,12 +226,7 @@ fn flats_drain_through_their_spill_without_epsilon() {
             level_m: z[slot(c)],
         })
         .collect();
-    let routing = route(
-        &mesh,
-        &z,
-        &seeds,
-        &receiver_uniforms(reference::SEED, &graph),
-    );
+    let routing = route(&mesh, &z, &seeds, &receiver_marks(reference::SEED, &graph));
     let w = routing.filled_m();
     for &c in &floor_cells {
         assert_same_bits(w[slot(c)], 300.0);
@@ -265,7 +261,7 @@ fn the_flood_is_the_minimax_level_from_the_seeds() {
             level_m: z[slot(c)] + 200.0 * lcg.next_f64(),
         })
         .collect();
-    let routing = route(&mesh, &z, &seeds, &vec![0.5; n]);
+    let routing = route(&mesh, &z, &seeds, &vec![Mark::from_word(1 << 63); n]);
     let mut oracle = vec![f64::INFINITY; n];
     let mut held = vec![false; n];
     for seed in &seeds {
@@ -296,13 +292,13 @@ fn the_flood_is_the_minimax_level_from_the_seeds() {
     }
 }
 
-/// The receiver's draw is proportional to the drop per metre: on every face's interior cells of
-/// one parity at level 6 (11,532 cells), whose four neighbours are seeds at their ground on a
-/// plane rising 1 m a cell in i and 2 m in j, each cell takes its u = 0 neighbour with probability
-/// (1 m ÷ `l_u`) ÷ (1 m ÷ `l_u` + 2 m ÷ `l_v`), l its links' lengths, and its v = 0 neighbour otherwise,
+/// The receiver's draw is proportional to the drop per metre: on every face's interior cells of one
+/// parity at level 6 (11,532 cells), whose four neighbours are seeds at their ground on a plane
+/// rising 1 m a cell in i and 2 m in j, each cell takes its u = 0 neighbour with probability (1 m ÷
+/// `l_u`) ÷ (1 m ÷ `l_u` + 2 m ÷ `l_v`), l its links' lengths, and its v = 0 neighbour otherwise,
 /// never an upper one. Under the reference seed the count of u = 0 draws matches the sum of those
-/// probabilities within its binomial spread (two-sided p ≥ 10⁻³), and each cell's slope
-/// correction is its drop per metre over the hypotenuse of the two axes' slopes, bit for bit.
+/// probabilities within its binomial spread (two-sided p ≥ 10⁻³), and each cell's slope correction
+/// is its drop per metre over the hypotenuse of the two axes' slopes, bit for bit.
 #[test]
 fn the_receiver_is_drawn_in_proportion_to_the_drop_per_metre() {
     let (graph, mesh) = world(6);
@@ -327,12 +323,7 @@ fn the_receiver_is_drawn_in_proportion_to_the_drop_per_metre() {
             level_m: z[slot(c)],
         })
         .collect();
-    let routing = route(
-        &mesh,
-        &z,
-        &seeds,
-        &receiver_uniforms(reference::SEED, &graph),
-    );
+    let routing = route(&mesh, &z, &seeds, &receiver_marks(reference::SEED, &graph));
     let (mut cells, mut u_draws, mut mean, mut variance) = (0_u32, 0_u32, 0.0, 0.0);
     for c in (0..graph.len()).filter(|&c| tested[slot(c)]) {
         cells += 1;

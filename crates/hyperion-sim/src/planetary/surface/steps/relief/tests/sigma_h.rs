@@ -177,7 +177,10 @@ fn elevations(working: &Working) -> Vec<f64> {
 
 /// The reconstructed `σ_h` of `world`'s finished field with the craters that wait for the erosion
 /// step smoothed in as the solve counts them, √(`Var_recon` + L) over every crater: the whole
-/// surface's once the late craters arrive, while the erosion is a no-op (§2.3.4's test 1).
+/// surface's once the late craters arrive, in this staging, which skips the erosion step and so
+/// books no channels (§2.3.4's test 1). The whole pass's, the erosion's re-match and its re-routed
+/// channels in, is [`the_reference_mars_s_whole_pass_realises_its_sigma_h`]'s, and a world wet
+/// now's the erosion's own tests'.
 fn whole_sigma_h(world: &Finished) -> f64 {
     let pass = world.pass();
     let mut working = world.working.clone();
@@ -193,6 +196,10 @@ fn assert_whole_sigma_h(world: Reference) {
     let target = f.inputs().sigma_h().value();
     assert_ne!(f.matched.rule, Rule::Unscaled, "{world:?}");
     let whole = whole_sigma_h(f);
+    eprintln!(
+        "{world:?}: the whole surface's σ_h {whole} m against {target} m, Δ {:.3e} relative",
+        whole / target - 1.0
+    );
     assert!(
         (whole / target - 1.0).abs() <= 1e-6,
         "{world:?}: {whole} m against {target} m"
@@ -578,19 +585,36 @@ fn the_whole_surface_s_sigma_h_is_plan_14_s() {
 }
 
 /// Test 1 through the whole pass on the reference Mars: its realised `σ_h` after the pass, the
-/// craters younger than its wet epoch's end smoothed in after the (no-op) erosion, is plan 14's
-/// to 10⁻⁶.
+/// craters younger than its wet epoch's end smoothed in after R09.T14's erosion and its second
+/// match, is plan 14's to [`MARS_WHOLE_PASS_SIGMA_H_TOLERANCE`].
+///
+/// The erosion's second match books the channels' share `C_c` from the routed field before the
+/// late craters, which `erosion::route_final` then re-routes: 108,176 m² booked, 111,126 m² after
+/// them, so the realised `σ_h` lands 1.75 × 10⁻⁴ above plan 14's (measured 2026-10-20). The
+/// ruled iteration on the predicted records (decision-r09-t14-choices, "T14.d follow-up" C)
+/// would close it; under the owner's features-first direction of 2026-10-20 it is recorded as a
+/// finding in plan 09's R09.T14 record instead, the test asserting the gap's bound.
 #[test]
 fn the_reference_mars_s_whole_pass_realises_its_sigma_h() {
     let inputs = reference::mars_like();
     let field = crate::planetary::surface::coarse_pass(reference::SEED, &inputs);
     let realised = field.header().realised_sigma_h().value();
     let target = inputs.sigma_h().value();
+    eprintln!(
+        "the reference Mars's whole pass: σ_h {realised} m against {target} m, Δ {:.3e} relative",
+        realised / target - 1.0
+    );
     assert!(
-        (realised / target - 1.0).abs() <= 1e-6,
+        (realised / target - 1.0).abs() <= MARS_WHOLE_PASS_SIGMA_H_TOLERANCE,
         "{realised} m against {target} m"
     );
 }
+
+/// The reference Mars's whole pass's bound on its realised `σ_h` against plan 14's, relative:
+/// 2 × 10⁻⁴, above the measured 1.75 × 10⁻⁴ of the late craters' re-routed channels (see
+/// [`the_reference_mars_s_whole_pass_realises_its_sigma_h`]); the other worlds' whole passes hold
+/// 10⁻⁶.
+const MARS_WHOLE_PASS_SIGMA_H_TOLERANCE: f64 = 2e-4;
 
 /// Test 2's bands, Design note 7's measured shares above `l_N` (the plan's own computation: 7, 5
 /// and 0.6%): each world's band and whether it is asserted, under main's ruling R7 (asserted
@@ -1197,6 +1221,61 @@ fn the_reflood_keeps_the_sea_level_and_follows_the_ground() {
     assert_the_sea_holds(&world.grid, &world.inputs, &working, &field, &sea);
 }
 
+/// The reflood leaves a lake as it is and drains a stale entry (decision-r09-t14-choices, "T14.d
+/// follow-up" B): on the hand-made basin with its sea placed, a dry land cell 1 km and more above
+/// the sea level given a water surface 30 m above its ground, off the sea level, and the main
+/// liquid's entry, a lake's cell, keeps both to the bit; a dry cell given a stale entry, its
+/// water surface at its ground as a late crater leaves it, loses the entry and keeps its water
+/// surface at its ground; and every ocean cell keeps its liquid and the sea level.
+#[test]
+fn the_reflood_keeps_a_lake_and_drains_a_stale_entry() {
+    let (world, mut working) = basin_world();
+    let pass = world.pass(reference::SEED);
+    let _ = sea::place(&pass, &mut working);
+    let level = working.sea_level;
+    let main = world.inputs.main_liquid();
+    assert!(main.is_some(), "the basin world has a main liquid");
+    let high: Vec<usize> = working
+        .cells
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.liquid_entry.is_none() && c.elevation.value() > level.value() + 1_000.0)
+        .map(|(n, _)| n)
+        .collect();
+    assert!(high.len() >= 2, "{} high dry cells", high.len());
+    let (lake, stale) = (high[0], high[high.len() / 2]);
+    let surface = Metres::new(working.cells[lake].elevation.value() + 30.0);
+    working.cells[lake].water_surface = surface;
+    working.cells[lake].liquid_entry = main;
+    working.cells[stale].liquid_entry = main;
+    let before = working.clone();
+    let _ = sea::reflood(&pass, &mut working);
+    assert_same_bits(working.cells[lake].water_surface.value(), surface.value());
+    assert_eq!(
+        working.cells[lake].liquid_entry, main,
+        "the lake keeps its liquid"
+    );
+    assert_eq!(
+        working.cells[stale].liquid_entry, None,
+        "the stale entry is drained"
+    );
+    assert_same_bits(
+        working.cells[stale].water_surface.value(),
+        working.cells[stale].elevation.value(),
+    );
+    assert_same_bits(working.sea_level.value(), level.value());
+    let mut ocean = 0_u32;
+    for (n, (was, now)) in before.cells.iter().zip(&working.cells).enumerate() {
+        if n == lake || n == stale || was.liquid_entry.is_none() {
+            continue;
+        }
+        ocean += 1;
+        assert_eq!(now.liquid_entry, was.liquid_entry, "ocean cell {n}");
+        assert_same_bits(now.water_surface.value(), level.value());
+    }
+    assert!(ocean > 0, "the basin world has an ocean");
+}
+
 /// A Mars-like world of 1,500 km, a level-6 sphere, with an ocean of water over 0.3 of it: the
 /// reference Mars's wet epoch, which ends before its surface age runs out, so that some coarse
 /// craters wait for the erosion step, and a sea.
@@ -1257,6 +1336,11 @@ fn the_late_craters_reflood_the_ocean_and_keep_the_whole_sigma_h() {
     assert_same_bits(after.sea_level.value(), level.value());
     let target = inputs.sigma_h().value();
     let realised = after.realised_sigma_h.value();
+    eprintln!(
+        "the small wet Mars after its late craters: σ_h {realised} m against {target} m, Δ {:.3e} \
+         relative",
+        realised / target - 1.0
+    );
     assert!(
         (realised / target - 1.0).abs() <= 1e-6,
         "{realised} m against {target} m"

@@ -374,7 +374,9 @@ fn print_raised(what: &str, staged: &Staged, working: &Working, outcome: &Outcom
 /// - (iii) the solve is that of a non-negative uplift field on its last routing, every cell not
 ///   bound at or above its receiver on it, strictly where its uplift is positive, the pits held at
 ///   their construction counted and recorded apart ([`assert_above_receivers`]; the "T14.c
-///   follow-up 3" item 1), and no link rises more than `DEBRIS_FLOW_SLOPE` times its length;
+///   follow-up 3" item 1), and no link rises more than `DEBRIS_FLOW_SLOPE` times its length, but
+///   a link into a held pit, measured against the pit's construction below the path's value there,
+///   counted apart with the pits (the remap's pass holds it on the final field);
 /// - the remap of absolute heights ([`remap_onto_construction`]) holds the pits apart and keeps
 ///   every remapped cell at or above its receiver with no link steeper than the threshold
 ///   ([`assert_remap_keeps_the_drainage`]), and (ii) the remapped set's highest cell is the
@@ -494,7 +496,24 @@ fn assert_final_field(
     let Threshold::Slope(slope) = wet_now_threshold() else {
         panic!("a world wet now has a threshold slope");
     };
+    // A link into a held pit is measured against the pit's construction, below the path's own
+    // value there, which the solver's threshold caps: such links are counted apart, as the pits
+    // are, and the remap's pass holds them on the final field (`assert_remap_keeps_the_drainage`).
+    let (_, _, pits) = not_above_receivers(outcome, z0);
     let (steeper, steepest) = steeper_than(outcome, &outcome.z_m, slope);
+    let (into_pits, steeper): (Vec<u32>, Vec<u32>) = steeper.into_iter().partition(|&c| {
+        outcome
+            .routing
+            .receiver(c)
+            .is_some_and(|link| pits.binary_search(&link.cell).is_ok())
+    });
+    eprintln!(
+        "reference Earth: {} links of the solve steeper than {slope} drain into held pits, the \
+         first {:?}; {} others (the steepest of all {steepest:.4})",
+        into_pits.len(),
+        &into_pits[..into_pits.len().min(8)],
+        steeper.len()
+    );
     assert!(
         steeper.is_empty(),
         "reference Earth: {} links of the solve steeper than {slope} (the steepest {steepest}), \

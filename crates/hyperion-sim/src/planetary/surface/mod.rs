@@ -75,11 +75,15 @@
 //! bulk gas's frost point aloft, its deficit falling as snow. R09.T14.a–c built the erosion: the
 //! drainage over the coarse cells, Tzathas et al.'s stream-power solver with its multigrid, to
 //! steady state under each basin's uplift on a world wet now and for its wet epoch's flow over the
-//! paleo-inventory's lakes on one dry now, and nothing on a world never wet; the wet-now branch
-//! reads the climate's runoff, which outside the crate's own tests it does from R09.T14.d. The
-//! classes are still a no-op: run on any inputs, the pass yields that eroded relief and sea, with
-//! their ices and liquids, under the climate its regime names, with the inputs' palette. The rest
-//! of R09.T13, R09.T14 and T15 fill the rest and R09.T16 pins the reference worlds' fields.
+//! paleo-inventory's lakes on one dry now, and nothing on a world never wet. R09.T14.d finished
+//! it: the wet-now branch reads the climate's runoff and holds its construction's lakes by their
+//! water balance; `σ_h` is matched again on the eroded field, the sea placed again, a world wet
+//! now's lakes placed on the final field by their balance, the climate's lapse term and mean
+//! re-applied with the ices and liquids, the final field routed, and routed again after the late
+//! craters. The classes are still a no-op: run on any inputs, the pass yields that eroded relief,
+//! sea and lakes, with their ices and liquids, under the climate its regime names, with the inputs'
+//! palette. The rest of R09.T13, R09.T14's iteration of `σ_h` and T15 fill the rest and R09.T16
+//! pins the reference worlds' fields.
 //!
 //! # Consumed items, by their paths in the code
 //!
@@ -261,20 +265,10 @@ mod tests {
     use hyperion_surface::field::{
         BoundaryKind, ClimateModelKind, Cover, CoverRange, FieldView, ResolutionCode, SynthesisCell,
     };
-    use hyperion_surface::spheroid::Spheroid;
     use hyperion_surface::wire::encode_payload;
     use hyperion_testkit::order::assert_order_independent;
 
-    /// The reference Earth's inputs on a 600 km sphere, at level 5: the pass runs every step that
-    /// only the Earth reaches among the reference worlds (the moving plates and their belts,
-    /// R09.T12.e's sea and reflood, the energy-balance model with its hypsometry, R09.T13.d's liquids
-    /// and R09.T13.e's hydrology) on 6,144 cells (decision-r09-t13-test-cost).
-    fn small_earth() -> CoarseInputs {
-        reference::builder_of(&reference::earth_like())
-            .figure(Spheroid::sphere(600.0e3))
-            .build()
-            .expect("the reference Earth's inputs hold on a smaller sphere")
-    }
+    use super::reference::small_earth;
 
     /// Each of `worlds` under two seeds, its pass computed forwards, backwards, permuted and alone,
     /// gives the same field ([`assert_order_independent`]).

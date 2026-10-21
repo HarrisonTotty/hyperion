@@ -18,6 +18,8 @@ use crate::units::Metres;
 /// One level's cells, in cell-index order, with their areas, edge neighbours and link lengths.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Mesh {
+    /// The quadtree level, which only the erosion's tests read.
+    #[cfg(test)]
     level: u8,
     area_m2: Vec<f64>,
     neighbours: Vec<[u32; 4]>,
@@ -47,6 +49,7 @@ impl Mesh {
             .map(|(edges, c)| edges.map(|n| graph.arc(c, n).value() * r))
             .collect();
         Self {
+            #[cfg(test)]
             level: graph.level(),
             area_m2,
             neighbours,
@@ -55,7 +58,7 @@ impl Mesh {
     }
 
     /// The quadtree level.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) const fn level(&self) -> u8 {
         self.level

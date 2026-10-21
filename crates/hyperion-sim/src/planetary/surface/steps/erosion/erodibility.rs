@@ -12,9 +12,9 @@
 //!   triple point (decision-r09-t14-choices Q6a: the present main liquid may be none, as on Mars).
 //! - **B**, the bed's factor, is a (substrate, fluid) table, [`BED_FACTORS`]: the bed's mechanics
 //!   (the crust's palette entry's [`MechanicsFamily`]) and whether the surface is a
-//!   crater-saturated regolith ([`Surface`], per world, [`crater_saturated`]), against the fluid by
-//!   its registry key. Any other pair takes 1, the rock-equivalent, **not modelled**: the table is
-//!   a closed set, for the composition audit (plan R09's Risks).
+//!   crater-saturated regolith ([`Surface`], by each crust's surface age, [`surface_at`]), against
+//!   the fluid by its registry key. Any other pair takes 1, the rock-equivalent, **not modelled**:
+//!   the table is a closed set, for the composition audit (plan R09's Risks).
 //!
 //! On a world wet now the steady state's elevation depends on K only through B's and the runoff's
 //! variation within a basin (decision-r09-t14-choices Q1), so its global value cancels there; on a
@@ -49,7 +49,7 @@ pub(crate) enum Surface {
     /// Bedrock, the calibration's own.
     Bedrock,
     /// A crater-saturated, impact-brecciated regolith, such as Mars's Noachian highlands
-    /// ([`crater_saturated`]).
+    /// ([`surface_at`]).
     SaturatedRegolith,
 }
 
@@ -253,8 +253,8 @@ impl Fluid {
 /// the surface age.
 ///
 /// The reference Mars's is about 0.050 km⁻², the reference Earth's about 8.4 × 10⁻⁵ (the research
-/// subagent's figures, R09.T14's lane design §3.1).
-#[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
+/// subagent's figures, R09.T14's lane design §3.1). Only the erosion's tests read it.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn effective_crater_density(inputs: &CoarseInputs) -> PerSquareKilometre {
     crater_density_seen(inputs, inputs.surface_age())
@@ -264,7 +264,7 @@ pub(crate) fn effective_crater_density(inputs: &CoarseInputs) -> PerSquareKilome
 /// surface age), per km²: N☾(>1 km) (C(`S_x`) − C(min(E, `S_x`))) ÷ C(S), `S_x` = `age`, the
 /// craters on it that formed before the wet epoch's end E (0 on a world never wet or wet now), C
 /// the lunar chronology in the body's system ([`lunar_chronology`]) and S the surface age, as
-/// [`effective_crater_density`] counts the whole surface's (decision-r09-t14-mars-ceiling §2.1).
+/// the whole surface's count at the surface age (decision-r09-t14-mars-ceiling §2.1).
 /// Zero where `age` is at most the epoch's end, and on a surface of age zero.
 #[must_use]
 pub(crate) fn crater_density_seen(inputs: &CoarseInputs, age: Gigayears) -> PerSquareKilometre {
@@ -303,9 +303,9 @@ pub(crate) fn surface_at(inputs: &CoarseInputs, age: Gigayears) -> Surface {
 }
 
 /// Whether `inputs`' surface is a crater-saturated regolith, per world: its
-/// [`effective_crater_density`] at or above [`BASIN_SATURATION_DENSITY`] ([`surface_at`] the
-/// surface age).
-#[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
+/// `effective_crater_density` at or above [`BASIN_SATURATION_DENSITY`] ([`surface_at`] the
+/// surface age). Only the erosion's tests read it.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn crater_saturated(inputs: &CoarseInputs) -> bool {
     surface_at(inputs, inputs.surface_age()) == Surface::SaturatedRegolith
@@ -361,7 +361,11 @@ pub(crate) fn erodibility_m0_1_per_year(
 /// K and the bed lookup are made.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Erodibility {
+    /// The fluid, which only the erosion's tests read.
+    #[cfg(test)]
     fluid: Fluid,
+    /// Each crust's surface, which only the erosion's tests read.
+    #[cfg(test)]
     surfaces: [Surface; 4],
     by_crust_m0_1_per_year: [f64; 4],
 }
@@ -392,21 +396,23 @@ impl Erodibility {
             erodibility_m0_1_per_year(inputs.gravity(), fluid.density_kg_m3, bed)
         });
         Some(Self {
+            #[cfg(test)]
             fluid,
+            #[cfg(test)]
             surfaces,
             by_crust_m0_1_per_year,
         })
     }
 
     /// The fluid.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) const fn fluid(&self) -> Fluid {
         self.fluid
     }
 
     /// The surface of crust `crust`'s ground, bedrock or a saturated regolith.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the erosion's tests read it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn surface(&self, crust: Crust) -> Surface {
         self.surfaces[usize::from(u8::from(crust))]

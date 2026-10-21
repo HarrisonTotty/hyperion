@@ -13,7 +13,7 @@ use super::super::branches::{
     Branch, dry_now, dry_now_years, epoch_share, erode_dry_now, inside_waiting_rims, paleo_water_m3,
 };
 use super::super::erodibility::Fluid;
-use super::super::run;
+use super::super::{provisional, run};
 use super::*;
 use crate::planetary::surface::inputs::WetEpoch;
 use crate::planetary::surface::reference::builder_of;
@@ -230,20 +230,22 @@ fn the_paleo_water_stored_is_the_inventory() {
     );
 }
 
-/// The step's outputs on the reference Mars (the lane's design §4.3): the field routed; every
-/// eroded cell at the branch's elevation, its construction less its valley's void, and every bound
-/// at its ground, to the bit; the water surface the elevation everywhere (dry now); each cell's
-/// channel incision the branch's, z0 less its solved channel, never negative and at least its
-/// lowering; every cell's drainage at least its own area and its catchment's runoff the
-/// accumulated own runoffs over it, at most the epoch's; a steepness index on every cell that
-/// drains, none at a root; and the state quantising.
+/// The step's provisional outputs on the reference Mars (the lane's design §4.3; Q7's step 1,
+/// before R09.T14.d's re-match): the field routed; every eroded cell at the branch's elevation,
+/// its construction less its valley's void, and every bound at its ground, to the bit; the water
+/// surface the elevation everywhere (dry now); each cell's channel incision the branch's, z0 less
+/// its solved channel, never negative and at least its lowering; every cell's drainage at least
+/// its own area and its catchment's runoff the accumulated own runoffs over it, at most the
+/// epoch's; a steepness index on every cell that drains, none at a root; and the state
+/// quantising.
 #[test]
 fn the_step_writes_the_reference_mars_s_outputs() {
     let staged = Staged::of(reference::mars_like());
     let pass = staged.pass();
     let dry = dry_now(&pass, &staged.working).unwrap();
     let mut working = staged.working.clone();
-    run(&pass, &mut working);
+    let provisional = provisional(&pass, &mut working).expect("the reference Mars is eroded");
+    assert_eq!(provisional.branch, Branch::DryNow);
     assert!(working.routed);
     let omega = pass.grid().solid_angles_sr();
     let r = pass.inputs().radius().value();
@@ -278,22 +280,30 @@ fn the_step_writes_the_reference_mars_s_outputs() {
 
 /// The provinces' own surface (decision-r09-t14-mars-ceiling §4.1, Q4's test (4)): on the
 /// reference Mars, whose provinces are younger than its epoch's end, every `Province` cell's
-/// elevation after the step is the elevation that entered it, to the bit, with no runoff of its
-/// own and no channel incision; and on a Mars whose provinces are as old as its surface, some
-/// `Province` cell is lowered, their bed is the lid's saturated regolith, and their lowering is
-/// printed against (B), the area p99 of 350 m × 10 km ÷ each cell's width (pending, reported to
-/// main before it is asserted).
+/// elevation from the solve (the step's provisional outputs, before R09.T14.d's re-match scales the
+/// whole field) is the elevation that entered it, to the bit, and after the whole step it has no
+/// runoff of its own and no channel incision; and on a Mars whose provinces are as old as its
+/// surface, some `Province` cell is lowered, their bed is the lid's saturated regolith, and their
+/// lowering is printed against (B), the area p99 of 350 m × 10 km ÷ each cell's width (pending,
+/// reported to main before it is asserted).
 #[test]
 fn the_provinces_erode_by_their_own_surface_s_age() {
     let staged = Staged::of(reference::mars_like());
     let pass = staged.pass();
     let mut working = staged.working.clone();
-    run(&pass, &mut working);
+    let provisional = provisional(&pass, &mut working).expect("the reference Mars is eroded");
+    let solved = working.clone();
+    let _record = super::super::outputs::finish(&pass, &mut working, provisional);
     let mut provinces = 0_usize;
-    for (cell, was) in working.cells.iter().zip(&staged.working.cells) {
+    for ((cell, was), solved) in working
+        .cells
+        .iter()
+        .zip(&staged.working.cells)
+        .zip(&solved.cells)
+    {
         if was.crust == Crust::Province {
             provinces += 1;
-            assert_same_bits(cell.elevation.value(), was.elevation.value());
+            assert_same_bits(solved.elevation.value(), was.elevation.value());
             assert_same_bits(cell.runoff_m_per_year, 0.0);
             assert_same_bits(cell.channel_incision.value(), 0.0);
         }

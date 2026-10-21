@@ -201,11 +201,12 @@ pub fn run(pass: &Pass<'_>, working: &mut Working) {
 }
 
 /// Smooths into the elevation the coarse craters that waited for the erosion step (Design note 5),
-/// in draw order, at the degradation bytes R09.T12.e set: none on a world with no wet epoch that
-/// ended before its surface age ran out. Where it smooths any in, it refloods the ocean against
-/// the sea level as placed, to which the climate is reduced, and recomputes the realised figures
-/// with every crater in (R09.T12.e; main's rulings R4 and R8, 2026-10-19), with no rescale: that
-/// is R09.T14.d's.
+/// in draw order, at the degradation bytes R09.T14.d's re-match of `σ_h` folded (R09.T12.e's
+/// where the erosion step did nothing): none on a world with no wet epoch that ended before its
+/// surface age ran out. Where it smooths any in, it refloods the ocean against the sea level as
+/// placed, to which the climate is reduced, routes the field again where the erosion step routed
+/// it (decision-r09-t14-choices Q7's addition), and recomputes the realised figures with every
+/// crater in (R09.T12.e; main's rulings R4 and R8, 2026-10-19), with no rescale.
 ///
 /// # Panics
 ///

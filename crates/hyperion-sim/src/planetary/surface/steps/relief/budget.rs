@@ -409,7 +409,7 @@ pub(crate) struct Match {
 ///
 /// If `kept` is not finite, which would otherwise saturate to a fresh crater's byte (a bug).
 #[must_use]
-fn byte_of(kept: f64) -> u8 {
+pub(crate) fn byte_of(kept: f64) -> u8 {
     let lost = (255.0 * (1.0 - num::assert_finite(kept)))
         .round()
         .clamp(0.0, 255.0);

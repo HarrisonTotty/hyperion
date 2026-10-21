@@ -59,8 +59,11 @@
 //! column's own emission, bounded at the frost point aloft with its snowfall. R09.T14.a–c filled
 //! [`erosion`]: the drainage, the stream-power solver and its multigrid, and the branches of a
 //! world wet now, dry now and never wet, writing each cell's elevation, flow, drainage, steepness,
-//! runoffs and, dry now, its channel incision (the wet-now branch outside the crate's own tests
-//! from R09.T14.d, which brings the climate's runoff to it). The classes are still a no-op.
+//! runoffs and, dry now, its channel incision. R09.T14.d added the rest of the step: the climate's
+//! runoff read live, the construction's lakes by their water balance, `σ_h` matched again, the sea
+//! placed again, the lakes on the final field, the climate's lapse term and mean re-applied with
+//! the ices and liquids, and the final routing; and, after the late craters, the field routed
+//! again as it stands. The classes are still a no-op.
 
 pub mod classes;
 pub mod climate;
@@ -195,7 +198,7 @@ pub struct CellState {
     /// elevation, before any width closure: what the wet epoch cut (R09.T14.c;
     /// decision-r09-t14-choices F2, for R09.T6.c's valleys of a short wet epoch). Zero on every
     /// other world and before the erosion. Unquantised: no field member carries it yet.
-    pub channel_incision: Metres,
+    pub(crate) channel_incision: Metres,
     /// The share of the cell under ice, 0 to 1.
     pub ice_fraction: f64,
     /// The palette entry of the cell's ice, an index into the inputs' palette
@@ -348,7 +351,13 @@ pub struct Working {
     /// wet epoch's end, and before the step, where every cell stays terminal with no drainage,
     /// steepness or runoff (decision-r09-t14-choices, "T14.d follow-up" C), so that R09.T14.d's
     /// re-routing after the late craters runs only where the step routed.
-    pub routed: bool,
+    pub(crate) routed: bool,
+    /// The climate step's own records, its normalised model on its grid, which R09.T14.d's
+    /// re-application of the lapse term and the mean after the erosion and its lakes' net loss
+    /// read (`climate::after_erosion`; decision-r09-t14-choices Q6(b) and Q3). Owned by the
+    /// climate step, which sets it, and no output: the quantiser does not read it. `None` before
+    /// the climate step.
+    pub(crate) climate_records: Option<climate::after_erosion::ClimateRecords>,
 }
 
 impl Working {
@@ -420,6 +429,7 @@ impl Working {
             realised_relief: Metres::ZERO,
             plates: Vec::new(),
             routed: false,
+            climate_records: None,
         }
     }
 }

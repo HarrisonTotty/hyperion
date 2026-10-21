@@ -44,6 +44,7 @@ use std::collections::BinaryHeap;
 use hyperion_surface::field::SynthesisCell;
 use hyperion_surface::num;
 
+use super::super::climate::seas::under_sea;
 use super::super::plates::slot;
 use super::super::{Pass, Working};
 use crate::planetary::surface::grid::CellGraph;
@@ -94,24 +95,36 @@ pub(crate) fn place(pass: &Pass<'_>, working: &mut Working) -> Sea {
 }
 
 /// Refloods the ocean on `working` against the sea level it holds, which the climate is reduced
-/// to, after the craters that waited for the erosion step (main's ruling R4): every cell under a
-/// liquid is drained, and the flood runs again from a fresh seed with the level kept.
+/// to, after the craters that waited for the erosion step (main's ruling R4): every cell with a
+/// liquid entry is drained but a lake's, and the flood runs again from a fresh seed with the level
+/// kept.
 ///
 /// The climate step has by then shared the flooded cells among the liquids by substance
-/// (R09.T13.d's `seas`), and every cell with a liquid entry is the ocean's until R09.T14's lakes.
-/// A cell flooded both before and after keeps the liquid it held; a cell the late craters newly
-/// flood takes the main liquid; and a cell they raise out of the sea is dry, with no liquid entry.
-/// Each liquid's share of the ocean then holds but for the cells the late craters moved
-/// (labelled; for R09.T14.d, whose re-match counts the late craters, ruling R4).
+/// (R09.T13.d's `seas`). A lake's cell, under liquid (its water surface above its ground,
+/// `seas::under_sea`) at a surface that is not the sea level to the bit, the sea's own write, is
+/// left as it is: R09.T14.d's lakes survive (decision-r09-t14-choices, "T14.d follow-up" B). Every
+/// other cell with a liquid entry is drained, the sea's and the dry cells a late crater touched,
+/// which hold a stale entry. A cell flooded both before and after keeps the liquid it held; a cell
+/// the late craters newly flood takes the main liquid; and a cell they raise out of the sea is
+/// dry, with no liquid entry. Each liquid's share of the ocean then holds but for the cells the
+/// late craters moved (labelled; for R09.T14.d, whose re-match counts the late craters, ruling
+/// R4). Labelled: a lake's cells a late crater reaches are dry afterwards, and the lake is not
+/// placed again; no reference world has both, since waiting craters need an epoch that ended and
+/// lakes a world wet now.
 ///
 /// # Panics
 ///
 /// As [`place`].
 pub(crate) fn reflood(pass: &Pass<'_>, working: &mut Working) -> Sea {
+    let level = working.sea_level.value();
     let held: Vec<Option<u8>> = working
         .cells
         .iter_mut()
         .map(|cell| {
+            let lake = under_sea(cell) && cell.water_surface.value().total_cmp(&level).is_ne();
+            if lake {
+                return cell.liquid_entry;
+            }
             let liquid = cell.liquid_entry.take();
             if liquid.is_some() {
                 cell.water_surface = cell.elevation;
