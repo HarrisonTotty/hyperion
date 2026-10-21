@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import type { PhotometricLaw } from "../appearance/law";
 import { lawFor } from "../appearance/phase";
+import { packNormalMap } from "../bodies/discNormals";
 import { classMapSide, classWeightsAt } from "../bodies/discSurface";
-import type { AllocationEvent } from "../engine/memory";
+import type { AllocationEvent, TextureSpec } from "../engine/memory";
+import { EngineUnavailable } from "../engine/resilientEngine";
 import {
   CLASS_MAP_FACE_TEXELS,
   CLASS_MAP_LEVEL,
@@ -12,6 +14,7 @@ import {
   ClassMapStore,
   classMapLawsOf,
   classMapTexelsOf,
+  normalMapTexelsOf,
 } from "./classMap";
 import { fieldCellIndex } from "./coverage";
 import { faceUvToXyz, stToUv } from "./cube";
@@ -49,23 +52,59 @@ const PHOTOMETRY = [
   [0, 0, 0, 0, 0],
 ] as const;
 
-/** A worker's answer of `texels` over {@link CLASSES}, in rising cell index. */
-function answerOf(texels: ReadonlyArray<TexelSpec>, complete = true): ClassMapAnswer {
+/** The synthetic answers' field level, at which their normal maps are. */
+const FIELD_LEVEL = 7;
+
+/** One cell of a synthetic answer's normal map, at {@link FIELD_LEVEL}, and its octahedral pair. */
+interface NormalSpec {
+  readonly face: Face;
+  readonly i: number;
+  readonly j: number;
+  readonly pair: readonly [number, number];
+}
+
+/** Three cells' normals, each pair exact in a half float. */
+const NORMALS: ReadonlyArray<NormalSpec> = [
+  { face: 2, i: 20, j: 22, pair: [0.125, -0.25] },
+  { face: 2, i: 21, j: 22, pair: [0, 0] },
+  { face: 5, i: 127, j: 0, pair: [0.0625, 0.875] },
+];
+
+/**
+ * A worker's answer of `texels` over {@link CLASSES}, in rising cell index, with the normals of
+ * `normals` (none by default), in rising cell index too.
+ */
+function answerOf(
+  texels: ReadonlyArray<TexelSpec>,
+  complete = true,
+  normals: ReadonlyArray<NormalSpec> = [],
+  normalsComplete = true,
+): ClassMapAnswer {
   const sorted = texels
     .map((t) => ({
       t,
       index: fieldCellIndex({ face: t.face, level: CLASS_MAP_LEVEL, i: t.i, j: t.j }),
     }))
     .toSorted((a, b) => a.index - b.index);
+  const cells = normals
+    .map((n) => ({
+      n,
+      index: fieldCellIndex({ face: n.face, level: FIELD_LEVEL, i: n.i, j: n.j }),
+    }))
+    .toSorted((a, b) => a.index - b.index);
   return {
     level: CLASS_MAP_LEVEL,
-    fieldLevel: 7,
+    fieldLevel: FIELD_LEVEL,
     classes: Uint8Array.from(CLASSES.flat()),
     photometry: Float32Array.from(PHOTOMETRY.flat()),
     texels: Uint32Array.from(sorted.map(({ index }) => index)),
     fractions: Float32Array.from(sorted.map(({ t }) => t.fraction)),
     weights: Uint8Array.from(sorted.flatMap(({ t }) => t.bytes)),
     complete,
+    normalLevel: FIELD_LEVEL,
+    normalCells: Uint32Array.from(cells.map(({ index }) => index)),
+    normalPairs: Float16Array.from(cells.flatMap(({ n }) => n.pair)),
+    normalsComplete,
   };
 }
 
@@ -128,6 +167,27 @@ class ScriptedPool implements ClassMapPool {
       });
     }
   }
+}
+
+/**
+ * Whether two arrays hold the same values, compared by a loop: a deep equality over a level-7
+ * normal map's 400 KB takes about a second.
+ */
+function sameValues(a: ArrayLike<number> | undefined, b: ArrayLike<number>): boolean {
+  if (a === undefined || a.length !== b.length) {
+    return false;
+  }
+  for (let k = 0; k < b.length; k += 1) {
+    if (!Object.is(a[k], b[k])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** The bytes of a typed array's view. */
+function bytesOf(view: ArrayBufferView): Uint8Array {
+  return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
 }
 
 /** Lets the store's answered promises run: a few turns of the microtask queue. */
@@ -210,6 +270,27 @@ describe("a class map from a worker's answer", () => {
     expect(() => classMapTexelsOf({ ...answerOf(TEXELS), ...change })).toThrow(message);
   });
 
+  it("packs its normal map at the field's level, each answered cell its pair", () => {
+    const answer = answerOf(TEXELS, true, NORMALS);
+    const normals = normalMapTexelsOf(answer);
+    const packed = packNormalMap(FIELD_LEVEL, answer.normalCells, answer.normalPairs);
+    expect([sameValues(normals?.data, packed.data), normals?.faceTexels]).toEqual([
+      true,
+      2 ** FIELD_LEVEL,
+    ]);
+  });
+
+  it("packs no normal map for an answer of no normal", () => {
+    expect(normalMapTexelsOf(answerOf(TEXELS))).toBeNull();
+  });
+
+  it("refuses a normal map whose pairs are not two a cell", () => {
+    const answer = answerOf(TEXELS, true, NORMALS);
+    expect(() =>
+      normalMapTexelsOf({ ...answer, normalPairs: answer.normalPairs.subarray(1) }),
+    ).toThrow(/3 cells has 5 pair values/u);
+  });
+
   it("refuses an answer of more classes than a texel packs", () => {
     expect(() => classMapTexelsOf({ ...answerOf([]), classes: new Uint8Array(2 * 17) })).toThrow(
       /at most 16 classes/u,
@@ -274,6 +355,8 @@ describe("the class-map store", () => {
     ]);
     const surface = store.classMapOf(MOON, ELSEWHERE);
     expect(surface?.kind).toBe("class-map");
+    // An answer of no normal makes no normal map: the datum's normal shades it.
+    expect(surface?.normals).toBeNull();
     expect(surface?.elsewhere).toBe(ELSEWHERE);
     // Its texels travel with it, the texture's CPU copy, which the point regime integrates (R10.T10.f).
     expect(surface?.texels).toEqual(classMapTexelsOf(answerOf(TEXELS)));
@@ -432,6 +515,138 @@ describe("the class-map store", () => {
     expect(() => {
       store.want(MOON, SEED);
     }).toThrow(/disposed/u);
+  });
+
+  /** A store holding the Moon's map with {@link NORMALS}, its engine's allocations and its pool. */
+  async function holdingNormals(normalsComplete = true): Promise<{
+    readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+    readonly events: AllocationEvent[];
+    readonly pool: ScriptedPool;
+    readonly store: ClassMapStore;
+  }> {
+    const engine = await countingRenderEngine();
+    const events: AllocationEvent[] = [];
+    engine.onAllocation((event) => events.push(event));
+    const pool = new ScriptedPool();
+    const store = new ClassMapStore(engine, pool);
+    store.want(MOON, SEED);
+    pool.asked[0]?.resolve(answerOf(TEXELS, true, NORMALS, normalsComplete));
+    await settle();
+    return { engine, events, pool, store };
+  }
+
+  it("files the normal map beside the class map, 130 × 130 texels a layer at the field's level 7, under coarse-field-gpu", async () => {
+    const { engine, events, store } = await holdingNormals();
+    const name = `class map normals ${MOON}`;
+    expect(engine.textureSpecs.map((s) => s.name)).toEqual([`class map ${MOON}`, name]);
+    expect(engine.textureSpecs.at(-1)).toMatchObject({
+      name,
+      size: { width: 130, height: 130, depthOrArrayLayers: 6 },
+      dimension: "2d",
+      format: "rg16float",
+      category: "coarse-field-gpu",
+    });
+    expect(events.filter((e) => e.kind === "created")).toEqual([
+      {
+        kind: "created",
+        name: `class map ${MOON}`,
+        bytes: 66 * 66 * 6 * 4,
+        category: "coarse-field-gpu",
+      },
+      { kind: "created", name, bytes: 130 * 130 * 6 * 4, category: "coarse-field-gpu" },
+    ]);
+    // The texels uploaded are the packed answer's, half floats as bytes.
+    const texels = normalMapTexelsOf(answerOf(TEXELS, true, NORMALS));
+    if (texels === null) {
+      throw new Error("the answer has normals");
+    }
+    const written = engine.textureWritten.at(-1);
+    expect(written?.texture).toBe(name);
+    expect(sameValues(written?.data, bytesOf(texels.data))).toBe(true);
+    // The surface hands both out together, the normals with their CPU copy.
+    const surface = store.classMapOf(MOON, ELSEWHERE);
+    expect(surface?.normals?.texture.name).toBe(name);
+    expect(surface?.normals?.texels.faceTexels).toBe(texels.faceTexels);
+    expect(sameValues(surface?.normals?.texels.data, texels.data)).toBe(true);
+    expect(store.classMapOf(MOON, ELSEWHERE)).toBe(surface);
+    store.dispose();
+  });
+
+  it("asks again while the normals are incomplete, at a block that brings cells", async () => {
+    const { pool, store } = await holdingNormals(false);
+    pool.change(MOON, 4, [], [90]);
+    expect(pool.asked).toHaveLength(2);
+    pool.asked[1]?.resolve(answerOf(TEXELS, true, NORMALS));
+    await settle();
+    // Complete in both: a block that surveys nothing asks nothing more.
+    pool.change(MOON, 5, [], [91]);
+    expect(pool.asked).toHaveLength(2);
+    store.dispose();
+  });
+
+  it("remakes both textures after a device loss, with the texels they held", async () => {
+    const { engine, store } = await holdingNormals();
+    const before = store.classMapOf(MOON, ELSEWHERE);
+    const firstWrites = engine.textureWritten.slice();
+    engine.restore();
+    const after = store.classMapOf(MOON, ELSEWHERE);
+    expect(after?.weights).not.toBe(before?.weights);
+    expect(after?.normals?.texture).not.toBe(before?.normals?.texture);
+    expect(after?.normals?.texels).toBe(before?.normals?.texels);
+    const again = engine.textureWritten.slice(firstWrites.length);
+    expect(again.map((w) => w.texture)).toEqual(firstWrites.map((w) => w.texture));
+    expect(again.every((w, k) => sameValues(w.data, firstWrites[k]?.data ?? []))).toBe(true);
+    store.dispose();
+  });
+
+  it("releases both textures with the body", async () => {
+    const released = await holdingNormals();
+    released.store.release(MOON);
+    expect([released.store.classMapOf(MOON, ELSEWHERE), kindsOf(released.events)]).toEqual([
+      null,
+      ["created", "created", "destroyed", "destroyed"],
+    ]);
+    released.store.dispose();
+  });
+
+  it("releases both textures at its disposal", async () => {
+    const disposed = await holdingNormals();
+    disposed.store.dispose();
+    expect(kindsOf(disposed.events)).toEqual(["created", "created", "destroyed", "destroyed"]);
+  });
+
+  it("makes both textures or neither: the class map's released where the normal map's is refused, both at the restore", async () => {
+    const engine = await countingRenderEngine();
+    const events: AllocationEvent[] = [];
+    engine.onAllocation((event) => events.push(event));
+    // The device lost between the two creations: the normal map's refused.
+    let refuse = true;
+    const refusing: ConstructorParameters<typeof ClassMapStore>[0] = {
+      createTexture: (spec: TextureSpec) => {
+        if (refuse && spec.format === "rg16float") {
+          throw new EngineUnavailable("createTexture");
+        }
+        return engine.createTexture(spec);
+      },
+      writeTexture: engine.writeTexture.bind(engine),
+      releaseTexture: engine.releaseTexture.bind(engine),
+      onRestored: engine.onRestored.bind(engine),
+    };
+    const pool = new ScriptedPool();
+    const store = new ClassMapStore(refusing, pool);
+    store.want(MOON, SEED);
+    pool.asked[0]?.resolve(answerOf(TEXELS, true, NORMALS));
+    await settle();
+    expect([store.classMapOf(MOON, ELSEWHERE), kindsOf(events)]).toEqual([
+      null,
+      ["created", "destroyed"],
+    ]);
+    refuse = false;
+    engine.restore();
+    expect(store.classMapOf(MOON, ELSEWHERE)?.normals?.texture.name).toBe(
+      `class map normals ${MOON}`,
+    );
+    store.dispose();
   });
 
   it("reports a refused query once, and asks again at the next block", async () => {

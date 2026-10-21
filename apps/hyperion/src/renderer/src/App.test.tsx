@@ -43,11 +43,12 @@ function standingModeBanner(): string | null {
 /** A views-check launch's functions, each a mock. */
 function viewsCheckApi(): ViewsCheckApi & { readonly end: Mock<ViewsCheckApi["end"]> } {
   return {
-    launch: { setting: "high", smoke: true, out: null, terrain: false },
+    launch: { setting: "high", smoke: true, out: null, run: "several-views" },
     startPhase: () => Promise.resolve(),
     endPhase: () => Promise.resolve(),
     askRightWayUp: () => Promise.resolve(),
     writeTerrainResults: () => Promise.resolve({ json: "a", markdown: "b" }),
+    writeHandoverResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     capture: () => Promise.resolve(),
     writeResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     end: vi.fn<ViewsCheckApi["end"]>(() => Promise.resolve()),
@@ -106,12 +107,12 @@ describe("App", () => {
   });
 
   it.each([
-    ["T20's", false],
-    ["the terrain run's", true],
-  ])(
+    ["T20's", "several-views"],
+    ["the terrain run's", "terrain"],
+  ] as const)(
     "shows MEASUREMENT on every display of %s views-check launch (R10.T16.e)",
-    async (_run, terrain) => {
-      const api = { ...viewsCheckApi(), launch: { ...viewsCheckApi().launch, terrain } };
+    async (_name, run) => {
+      const api = { ...viewsCheckApi(), launch: { ...viewsCheckApi().launch, run } };
       stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
       const user = userEvent.setup();
       render(<App />);
@@ -150,7 +151,10 @@ describe("App", () => {
   it("runs a terrain launch's terrain run (R10.T16.d), which ends as T20's does when VIEW cannot be drawn", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const api = { ...viewsCheckApi(), launch: { ...viewsCheckApi().launch, terrain: true } };
+    const api = {
+      ...viewsCheckApi(),
+      launch: { ...viewsCheckApi().launch, run: "terrain" as const },
+    };
     const writeTerrainResults = vi.spyOn(api, "writeTerrainResults");
     stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
     render(<App />);
@@ -163,6 +167,68 @@ describe("App", () => {
       reason: expect.stringContaining("VIEW did not show its primary view"),
     });
     expect(writeTerrainResults).not.toHaveBeenCalled();
+  });
+
+  describe("the hand-over check's looks (R10.T10.g)", () => {
+    it("draw a look chosen by hand before the run measures the primary, the console kept", async () => {
+      const api = {
+        ...viewsCheckApi(),
+        launch: { ...viewsCheckApi().launch, run: "handover" as const },
+      };
+      stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
+      const user = userEvent.setup();
+      render(<App />);
+      await user.click(screen.getByRole("button", { name: "HAND-OVER 30°" }));
+      expect(screen.getByRole("button", { name: "HAND-OVER 30°" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+
+    const LOOK_SCENES = ["HAND-OVER 30°", "HAND-OVER 90°", "HAND-OVER TERMINATOR"];
+
+    /** Each look's `SCENE` button, `null` where `VIEW` offers none, its kept scenes drawn. */
+    function lookButtons(): ReadonlyArray<HTMLElement | null> {
+      // The kept scenes stand, so that an absent look is one not offered, not a list not drawn.
+      screen.getByRole("button", { name: "TERRAIN TEST" });
+      return LOOK_SCENES.map((name) => screen.queryByRole("button", { name }));
+    }
+
+    it("are offered on no ordinary launch", async () => {
+      const user = userEvent.setup();
+      render(<App />);
+      await user.keyboard("{F4}");
+      expect(lookButtons()).toEqual([null, null, null]);
+    });
+
+    it("are offered on no terrain run's launch", () => {
+      const api = {
+        ...viewsCheckApi(),
+        launch: { ...viewsCheckApi().launch, run: "terrain" as const },
+      };
+      stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
+      render(<App />);
+      expect(lookButtons()).toEqual([null, null, null]);
+    });
+
+    it("are offered after the kept scenes on a hand-over launch", () => {
+      const api = {
+        ...viewsCheckApi(),
+        launch: { ...viewsCheckApi().launch, run: "handover" as const },
+      };
+      stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
+      render(<App />);
+      for (const name of LOOK_SCENES) {
+        screen.getByRole("button", { name });
+      }
+      const scenes = within(screen.getByRole("group", { name: "Scene" }))
+        .getAllByRole("button")
+        .map((button) => button.textContent);
+      expect(scenes.slice(scenes.indexOf("TERRAIN TEST"))).toEqual([
+        "TERRAIN TEST",
+        ...LOOK_SCENES,
+      ]);
+    });
   });
 
   it("shows a safe launch in the graphics panel and the header strip", () => {

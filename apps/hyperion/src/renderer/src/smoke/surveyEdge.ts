@@ -410,6 +410,7 @@ function referenceDraws(
   const options: BodyFrameOptions = {
     camera: pose.camera,
     viewport: VIEWPORT,
+    presentedPx: VIEWPORT,
     exposureScale: EXPOSURE,
     annuli: DISC_ANNULI_HIGH,
     planetshine: PLANETSHINE_SOURCES_HIGH,

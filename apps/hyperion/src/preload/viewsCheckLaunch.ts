@@ -9,9 +9,9 @@
  * bundle.
  */
 
-import type { ViewsCheckLaunch } from "./api";
+import type { ViewsCheckLaunch, ViewsCheckRunKind } from "./api";
 
-export type { ViewsCheckLaunch } from "./api";
+export type { ViewsCheckLaunch, ViewsCheckRunKind } from "./api";
 
 /** The switch carrying the options. */
 const VIEWS_CHECK_SWITCH = "--hyperion-views-check=";
@@ -25,21 +25,25 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** The runs a launch may make. */
+const RUN_KINDS: ReadonlyArray<ViewsCheckRunKind> = ["several-views", "terrain", "handover"];
+
 /** `value` as the check's options, or `null` if it is not one: every field present and of its type. */
 export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
   if (!isRecord(value)) {
     return null;
   }
-  const { setting, smoke, out, terrain } = value;
+  const { setting, smoke, out } = value;
+  const run = RUN_KINDS.find((each) => each === value["run"]) ?? null;
   if (
     (setting !== "high" && setting !== "low") ||
     typeof smoke !== "boolean" ||
     !(out === null || (typeof out === "string" && out.length > 0)) ||
-    typeof terrain !== "boolean"
+    run === null
   ) {
     return null;
   }
-  return { setting, smoke, out, terrain };
+  return { setting, smoke, out, run };
 }
 
 /**

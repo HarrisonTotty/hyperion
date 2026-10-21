@@ -56,6 +56,7 @@ const PX_PER_RAD = VIEWPORT.widthPx / (2 * Math.tan(CAMERA.fovXRad / 2));
 const OPTIONS = {
   camera: CAMERA,
   viewport: VIEWPORT,
+  presentedPx: VIEWPORT,
   exposureScale: EXPOSURE,
   annuli: 4,
   planetshine: PLANETSHINE_SOURCES_HIGH,
@@ -106,6 +107,7 @@ function classMap(
     texels: unreadTexels(laws.length),
     laws,
     elsewhere,
+    normals: null,
   };
 }
 

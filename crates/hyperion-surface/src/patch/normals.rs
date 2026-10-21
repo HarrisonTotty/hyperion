@@ -45,6 +45,18 @@ pub fn encode_octahedral(n: [f64; 3]) -> [f64; 2] {
     }
 }
 
+/// The octahedral pair of the unit vector `n` ([`encode_octahedral`]) narrowed to `f32`, as a
+/// bake stores its normals and the worker's normal map its pairs (R10.T10.g).
+#[must_use]
+pub(crate) fn encode_octahedral_f32(n: [f64; 3]) -> [f32; 2] {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "an octahedral coordinate in [-1, 1] narrows to f32 by design"
+    )]
+    let narrowed = encode_octahedral(n).map(|c| c as f32);
+    narrowed
+}
+
 /// The unit vector of the octahedral pair `e`.
 #[must_use]
 pub fn decode_octahedral(e: [f64; 2]) -> [f64; 3] {
@@ -131,13 +143,7 @@ pub(crate) fn bake_normals<S: HeightSource>(
                 assert_finite(sample.height_m),
                 sample.gradient.map(assert_finite),
             );
-            for c in encode_octahedral(n) {
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "an octahedral coordinate in [-1, 1] narrows to f32 by design"
-                )]
-                out.push(c as f32);
-            }
+            out.extend(encode_octahedral_f32(n));
         }
     }
     Ok(out)

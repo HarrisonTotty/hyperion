@@ -24,6 +24,7 @@ import { CLASS_MAP_LEVEL, classMapTexelsOf } from "../classMap";
 import { fieldCellAt } from "../coverage";
 import { faceUvToXyz, stToUv } from "../cube";
 import type { Face, PatchKey } from "../patchKey";
+import { decodeOctahedral } from "../shadingNormal";
 import { dominantSlot } from "../terrainMaterial";
 import { f32Digest, f64Digest } from "./f32Digest";
 import {
@@ -40,6 +41,7 @@ import {
 import {
   type BakedPatch,
   type BakeSettings,
+  type ClassMapAnswer,
   type FacePoint,
   type HeightSourceSetting,
   type HeightWorkerRequest,
@@ -209,6 +211,89 @@ function heldFields(): WorkerFields {
     }
   });
   return fields;
+}
+
+/** The worker's `class-map` answer over every block of the fixture, and what it transfers. */
+function fixtureClassMap(): {
+  readonly map: ClassMapAnswer;
+  readonly transfer: ReadonlyArray<Transferable>;
+} {
+  const { reply, transfer } = answerRequest(
+    module,
+    { kind: "class-map", id: 5, body: FIXTURE.body, detailSeed: FIXTURE.seed },
+    heldFields(),
+  );
+  if (reply.kind !== "class-map" || reply.map === null) {
+    throw new Error(`no class map: ${JSON.stringify(reply)}`);
+  }
+  return { map: reply.map, transfer };
+}
+
+/** The module's own `SurfaceFields` holding every block of the fixture, its body's arguments. */
+function directFields(): {
+  readonly direct: SurfaceFields;
+  readonly args: readonly [bigint, number];
+  readonly seed: bigint;
+} {
+  const direct = new SurfaceFields();
+  const [system, index] = FIXTURE.body.split(".");
+  const args = [BigInt(`0x${system ?? ""}`), Number.parseInt(index ?? "", 16)] as const;
+  FIXTURE.blocks.forEach((block, n) => {
+    const bytes = new Uint8Array(block);
+    const taken = n === 0 ? direct.fieldInit(...args, bytes) : direct.fieldChunk(...args, bytes);
+    taken.free();
+  });
+  return { direct, args, seed: BigInt(`0x${FIXTURE.seed}`) };
+}
+
+/** The module's own normal map of the fixture, read out and freed. */
+function moduleNormalMap(): {
+  readonly level: number;
+  readonly complete: boolean;
+  readonly cells: ReadonlyArray<number>;
+  readonly pairs: Float32Array;
+} {
+  const { direct, args, seed } = directFields();
+  const answer = direct.normalMap(...args, seed);
+  if (answer === undefined) {
+    direct.free();
+    throw new Error("the module answered no normal map of a field it holds");
+  }
+  const read = {
+    level: answer.level,
+    complete: answer.complete,
+    cells: [...answer.cells()],
+    pairs: answer.pairs(),
+  };
+  answer.free();
+  direct.free();
+  return read;
+}
+
+/** The doubled normals (129 a side) of the root patch of the fixture's `face`, read out and freed. */
+function rootDoubledNormals(face: Face): Float32Array {
+  const { direct, args, seed } = directFields();
+  const root = direct.bake(
+    ...args,
+    seed,
+    face,
+    0,
+    0,
+    0,
+    WASM_VERTEX_PATH["face-differences"],
+    WASM_NORMAL_SCALE.double,
+    WASM_WEIGHTS_LAYER.skipped,
+    WASM_HORIZON_LAYER.skipped,
+    0,
+  );
+  if (root === undefined) {
+    direct.free();
+    throw new Error("the root of the survey's face does not bake");
+  }
+  const normals = root.normals();
+  root.free();
+  direct.free();
+  return normals;
 }
 
 /** The runs of a block's answer, in the fixture's words. */
@@ -653,6 +738,72 @@ describe("the height worker's fields on the real module", () => {
     }
     expect(totals).toHaveLength(map.texels.length);
     expect(totals.filter((total) => Math.abs(total - 1) > 1e-12)).toEqual([]);
+  });
+
+  describe("the fixture's normal map beside its class map (R10.T10.g)", () => {
+    it("answers it at the field's level and complete, its arrays transferred", () => {
+      const { map, transfer } = fixtureClassMap();
+      expect([
+        map.normalLevel,
+        map.normalsComplete,
+        transfer.some((buffer) => buffer === map.normalCells.buffer),
+        transfer.some((buffer) => buffer === map.normalPairs.buffer),
+      ]).toEqual([6, true, true, true]);
+    });
+
+    it("holds the eight surveyed cells, rising: the class map's texels, the field at its level", () => {
+      const { map } = fixtureClassMap();
+      expect([[...map.normalCells], map.normalCells.length, map.normalPairs.length]).toEqual([
+        [...map.texels],
+        8,
+        16,
+      ]);
+    });
+
+    it("holds the module's own answer, its pairs narrowed to half floats as a bake's", () => {
+      const { map } = fixtureClassMap();
+      const direct = moduleNormalMap();
+      expect([direct.level, direct.complete, direct.cells]).toEqual([
+        6,
+        true,
+        [...map.normalCells],
+      ]);
+      expect([...map.normalPairs]).toEqual([...packNormals(direct.pairs)]);
+    });
+
+    it("holds each cell's root doubled normal at its centre, the odd–odd sample, to the bit", () => {
+      const { map } = fixtureClassMap();
+      const { pairs } = moduleNormalMap();
+      const faces = new Set([...map.normalCells].map((c) => fieldCellAt(6, c).face));
+      expect(faces.size).toBe(1);
+      const [face = 0] = faces;
+      const doubled = rootDoubledNormals(face);
+      const differing = [...map.normalCells].filter((c, k) => {
+        const cell = fieldCellAt(6, c);
+        const at = 2 * (129 * (2 * cell.j + 1) + (2 * cell.i + 1));
+        return pairs[2 * k] !== doubled[at] || pairs[2 * k + 1] !== doubled[at + 1];
+      });
+      expect(differing).toEqual([]);
+    });
+
+    it("decodes each pair to a unit normal facing out, within 60° of the radial at its cell's centre", () => {
+      const { map } = fixtureClassMap();
+      const off = [...map.normalCells].filter((c, k) => {
+        const cell = fieldCellAt(6, c);
+        const n = decodeOctahedral(
+          map.normalPairs[2 * k] ?? NaN,
+          map.normalPairs[2 * k + 1] ?? NaN,
+        );
+        const [x, y, z] = faceUvToXyz(
+          cell.face,
+          stToUv((cell.i + 0.5) / 64),
+          stToUv((cell.j + 0.5) / 64),
+        );
+        const outward = (n.x * x + n.y * y + n.z * z) / Math.hypot(x, y, z);
+        return Math.abs(Math.hypot(n.x, n.y, n.z) - 1) > 1e-14 || !(outward > 0.5);
+      });
+      expect(off).toEqual([]);
+    });
   });
 
   it("reads the fixture's points as the native readings do", () => {

@@ -8,10 +8,11 @@ import {
   type WasmClassMap,
   type WasmFieldBlock,
   type WasmGroundReadout,
+  type WasmNormalMap,
   type WasmSurfaceFields,
   WorkerFields,
 } from "./heightBake";
-import type { GroundReadoutRequest } from "./messages";
+import type { ClassMapAnswer, GroundReadoutRequest } from "./messages";
 
 const MOON = keptBody(1);
 const PLANET = keptBody(2);
@@ -27,8 +28,8 @@ function emptyBlock(): WasmFieldBlock {
   };
 }
 
-/** The fake module's class map: one texel of one class, wholly surveyed. */
-function oneTexelMap(): WasmClassMap {
+/** The fake module's class map: one texel of one class, wholly surveyed; `free` names it in `freed`. */
+function oneTexelMap(freed: string[]): WasmClassMap {
   return {
     level: 6,
     fieldLevel: 6,
@@ -38,7 +39,25 @@ function oneTexelMap(): WasmClassMap {
     fractions: () => Float32Array.from([1]),
     weights: () => Uint8Array.from([255]),
     complete: true,
-    free: () => {},
+    free: () => {
+      freed.push("class map");
+    },
+  };
+}
+
+/**
+ * The fake module's normal map: the same cell, its pair (0.25, −0.5) with a tail a half float
+ * rounds off, every surveyed cell answered; `free` names it in `freed`.
+ */
+function oneCellNormals(freed: string[]): WasmNormalMap {
+  return {
+    level: 6,
+    cells: () => Uint32Array.from([7]),
+    pairs: () => Float32Array.from([0.25 + 2 ** -20, -0.5]),
+    complete: true,
+    free: () => {
+      freed.push("normal map");
+    },
   };
 }
 
@@ -88,8 +107,14 @@ function bodyKey(system: bigint, body: number): string {
  * module refuses a block it cannot decode, and trap on a block whose first byte is 255; it bakes
  * nothing, the bake tests being `heightWasm.test.ts`'s and `fieldsWasm.test.ts`'s.
  */
-function fakeModule(): { module: HeightModule; held: Map<string, number> } {
+function fakeModule(): {
+  module: HeightModule;
+  held: Map<string, number>;
+  /** The module's class and normal maps freed, in order. */
+  freed: string[];
+} {
   const held = new Map<string, number>();
+  const freed: string[] = [];
   const key = bodyKey;
   const take = (
     system: bigint,
@@ -132,8 +157,11 @@ function fakeModule(): { module: HeightModule; held: Map<string, number> } {
       if (seed === 0xffffn) {
         throw new WebAssembly.RuntimeError("unreachable");
       }
-      return held.has(key(system, body)) ? oneTexelMap() : undefined;
+      return held.has(key(system, body)) ? oneTexelMap(freed) : undefined;
     },
+    // A held body's normal map of the class map's cell; seed 0xbeef, a broken module's, none.
+    normalMap: (system, body, seed) =>
+      held.has(key(system, body)) && seed !== 0xbeefn ? oneCellNormals(freed) : undefined,
     // A held body's readout on the ground at the season's anomaly as its temperature, kelvin, and
     // `not-surveyed` with none held; seed 0xdead the module's refusal, 0xffff a trap.
     groundReadout: (system, body, seed, ...rest) => {
@@ -156,7 +184,32 @@ function fakeModule(): { module: HeightModule; held: Map<string, number> } {
       createFields: () => fields,
     },
     held,
+    freed,
   };
+}
+
+/** A class-map query's answer from {@link fakeModule} holding a field, and what it freed. */
+function classMapAnswered(): {
+  readonly map: ClassMapAnswer;
+  readonly transfer: ReadonlyArray<Transferable>;
+  readonly freed: ReadonlyArray<string>;
+} {
+  const { module, freed } = fakeModule();
+  const fields = new WorkerFields(module);
+  answerRequest(
+    module,
+    { kind: "field-init", id: 1, body: MOON, block: new ArrayBuffer(8), form: "payload" },
+    fields,
+  );
+  const answer = answerRequest(
+    module,
+    { kind: "class-map", id: 2, body: MOON, detailSeed: "00000000000000a5" },
+    fields,
+  );
+  if (answer.reply.kind !== "class-map" || answer.reply.map === null) {
+    throw new Error(`no map: ${JSON.stringify(answer.reply)}`);
+  }
+  return { map: answer.reply.map, transfer: answer.transfer, freed };
 }
 
 describe("a height worker's stand-in fields", () => {
@@ -309,8 +362,52 @@ describe("a height worker's fields", () => {
     expect(fields.bodies).toEqual([]);
   });
 
-  it("answers a class-map query with the module's map, its arrays transferred (R10.T10.d)", () => {
-    const { module } = fakeModule();
+  describe("a class-map query (R10.T10.d, R10.T10.g)", () => {
+    it("answers with the module's class map and normal map, each at its level and complete", () => {
+      const { map } = classMapAnswered();
+      expect(map).toMatchObject({
+        level: 6,
+        fieldLevel: 6,
+        complete: true,
+        normalLevel: 6,
+        normalsComplete: true,
+      });
+    });
+
+    it("answers the class map's texels and weights as the module's", () => {
+      const { map } = classMapAnswered();
+      expect([...map.texels, ...map.weights]).toEqual([7, 255]);
+    });
+
+    it("answers the normal map's cells and pairs, the pairs as half floats, rounded as a bake's", () => {
+      const { map } = classMapAnswered();
+      expect([
+        map.normalPairs instanceof Float16Array,
+        ...map.normalCells,
+        ...map.normalPairs,
+      ]).toEqual([true, 7, 0.25, -0.5]);
+    });
+
+    it("transfers every array of both maps", () => {
+      const { map, transfer } = classMapAnswered();
+      expect(transfer).toEqual([
+        map.classes.buffer,
+        map.photometry.buffer,
+        map.texels.buffer,
+        map.fractions.buffer,
+        map.weights.buffer,
+        map.normalCells.buffer,
+        map.normalPairs.buffer,
+      ]);
+    });
+
+    it("frees both of the module's answers", () => {
+      expect(classMapAnswered().freed).toEqual(["class map", "normal map"]);
+    });
+  });
+
+  it("answers a module's class map without its normal map as class-map-failed, the class map freed", () => {
+    const { module, freed } = fakeModule();
     const fields = new WorkerFields(module);
     answerRequest(
       module,
@@ -319,22 +416,16 @@ describe("a height worker's fields", () => {
     );
     const answer = answerRequest(
       module,
-      { kind: "class-map", id: 2, body: MOON, detailSeed: "00000000000000a5" },
+      { kind: "class-map", id: 2, body: MOON, detailSeed: "000000000000beef" },
       fields,
     );
-    if (answer.reply.kind !== "class-map" || answer.reply.map === null) {
-      throw new Error(`no map: ${JSON.stringify(answer.reply)}`);
-    }
-    const { map } = answer.reply;
-    expect(map).toMatchObject({ level: 6, fieldLevel: 6, complete: true });
-    expect([...map.texels, ...map.weights]).toEqual([7, 255]);
-    expect(answer.transfer).toEqual([
-      map.classes.buffer,
-      map.photometry.buffer,
-      map.texels.buffer,
-      map.fractions.buffer,
-      map.weights.buffer,
-    ]);
+    expect(answer.reply).toEqual({
+      kind: "class-map-failed",
+      id: 2,
+      body: MOON,
+      message: `the module answered ${MOON}'s class map but no normal map`,
+    });
+    expect(freed).toEqual(["class map"]);
   });
 
   /** A class-map query of `body` by `detailSeed`, the worker holding `held`'s fields. */

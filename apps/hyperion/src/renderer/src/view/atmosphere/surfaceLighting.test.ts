@@ -560,13 +560,19 @@ describe("the surface lighting's WGSL (R08.T9.b)", () => {
 
   it("has the disc take each star's sky at its own μ₀ and slot, and planetshine through the three-node rule", () => {
     const code = bodyDiscWgsl.replaceAll(/\s+/gu, " ");
-    expect(code).toContain("atmosphere_sky_irradiance(0.0, mu0, local.latitude, j)");
+    // Against the datum's normal, as the terrain's lookups take them (plan R10, R10.T10.g), the
+    // sky by the shading normal's tilt.
     expect(code).toContain(
-      "atmosphere_sun_transmittance( 0.0, mu0, local.latitude, local_azimuth(local, towards), j )",
+      "atmosphere_sky_irradiance(0.0, mu0_datum, local.latitude, j) * sky_tilt",
     );
-    expect(code).toContain("atmosphere_sky_irradiance(0.0, mu0, local.latitude, 0u)");
     expect(code).toContain(
-      "atmosphere_source_transmittance( 0.0, mu0, local.latitude, local_azimuth(local, towards), source_radius, 0u )",
+      "atmosphere_sun_transmittance( 0.0, mu0_datum, local.latitude, local_azimuth(local, towards), j )",
+    );
+    expect(code).toContain(
+      "atmosphere_sky_irradiance(0.0, mu0_datum, local.latitude, 0u) * sky_tilt",
+    );
+    expect(code).toContain(
+      "atmosphere_source_transmittance( 0.0, mu0_datum, local.latitude, local_azimuth(local, towards), source_radius, 0u )",
     );
     expect(code).not.toContain("first_mu0");
     // Each sky term before the horizon's `continue`, a star's after its eclipse and under it.
@@ -575,9 +581,9 @@ describe("the surface lighting's WGSL (R08.T9.b)", () => {
     );
     expect(starSky).toBeGreaterThan(code.indexOf("visible = max(visible, vec3f(0.0));"));
     expect(starSky).toBeLessThan(code.indexOf("if (horizon <= 0.0) { continue; }"));
-    expect(code.indexOf("atmosphere_sky_irradiance(0.0, mu0, local.latitude, 0u)")).toBeLessThan(
-      code.indexOf("if (irradiance <= 0.0) { continue; }"),
-    );
+    expect(
+      code.indexOf("atmosphere_sky_irradiance(0.0, mu0_datum, local.latitude, 0u)"),
+    ).toBeLessThan(code.indexOf("if (irradiance <= 0.0) { continue; }"));
   });
 
   it("binds the body's tables to the disc materials and the mesh at group 2 bindings 6 to 12", () => {
@@ -588,10 +594,12 @@ describe("the surface lighting's WGSL (R08.T9.b)", () => {
       BODY_DISC_MATERIALS.limb,
       SMOOTH_MESH_MATERIAL,
     ]) {
-      // The mesh's coverage mask (plan R10, R10.T10.c) follows the tables, at binding 13.
+      // The class map's normal map (plan R10, R10.T10.g) follows the tables, at binding 14, and
+      // the mesh's coverage mask (R10.T10.c) it, at binding 13.
       expect(spec.textures?.slice(2, 9)).toEqual(expected);
+      expect(spec.textures?.[9]?.binding).toBe(14);
     }
-    expect(SMOOTH_MESH_MATERIAL.textures?.slice(9).map(({ binding }) => binding)).toEqual([13]);
+    expect(SMOOTH_MESH_MATERIAL.textures?.slice(9).map(({ binding }) => binding)).toEqual([14, 13]);
     for (const [i, name] of [
       "atmosphere_body",
       "atmosphere_transmittance",

@@ -90,6 +90,7 @@ function bodiesOf(diameters: ReadonlyArray<number>): {
 const OPTIONS = {
   camera: CAMERA,
   viewport: VIEWPORT,
+  presentedPx: VIEWPORT,
   exposureScale: 1e-3,
   annuli: 4,
   planetshine: PLANETSHINE_SOURCES_HIGH,
@@ -277,6 +278,7 @@ describe("the cell pass's jobs (R07.T8.d)", () => {
         texels: packClassMap(1, 1, () => [1]),
         laws: [law],
         elsewhere: law,
+        normals: null,
         rotation: IDENTITY_ROTATION,
       },
     };
@@ -343,6 +345,15 @@ describe("the cell pass's dispatch (R07.T8.d)", () => {
       buffers["cell_sums"]?.name,
       (buffers["cell_sums"]?.bytes ?? 0) >= 32 * discCellJobs(plan.discs).count,
     ]).toEqual(["bodies:discs", "bodies:disc cell jobs", "bodies:disc cell sums", true]);
+  });
+
+  it("binds the texel of no weight as the class map and normal map its kernel reaches, which no disc of the pass reads (R10.T10.g)", async () => {
+    const { engine } = await dispatchedFor([3.5, 13]);
+    const { sampled } = onlyDispatch(engine).bindings;
+    expect([sampled["class_weights"]?.name, sampled["surface_normals"]?.name]).toEqual([
+      "bodies:no class map",
+      "bodies:no class map",
+    ]);
   });
 
   it("writes the plan's jobs into the buffer it binds", async () => {

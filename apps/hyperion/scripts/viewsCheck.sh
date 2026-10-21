@@ -6,7 +6,7 @@
 # photorealistic and a wireframe instrument, and alone), then writes the results file and its
 # summary. No server is needed.
 #
-#   viewsCheck.sh [--hidden] [--setting high|low] [--smoke] [--out <dir>] [--terrain]
+#   viewsCheck.sh [--hidden] [--setting high|low] [--smoke] [--out <dir>] [--terrain [--handover]]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
 # --hidden never shows the window (offscreen rendering): no presentation times and no question,
@@ -22,6 +22,14 @@
 # 1 when one of its checks fails. A setting lasts the whole launch, so --terrain with no --setting
 # makes two launches, high then low, each with its own profile, watchdog and results file; the
 # script's exit is the first non-zero one.
+#
+# --terrain --handover runs the terrain run's check-only hand-over variant in its place (plan R10,
+# R10.T10.g; decision-r10-t16-leans §1): three looks at TERRAIN TEST's moon, its survey at 30° and
+# 90° of phase and near the terminator, the camera closing on the moon through its hand-over and
+# backing out through the hand-back; the frames either side of each switch are read back and each
+# surveyed cell's brightness compared. Both settings by default, as --terrain; it writes
+# <date>-<machine>-<setting>-handover.json and .md beside the terrain run's, and exits 1 unless
+# every judged cell is within 1/3 stop. --handover without --terrain is refused by the client.
 #
 # Each launch gets a fresh `--user-data-dir`, removed afterwards; Electron runs in a process group
 # of its own under `timeout`, killed when the launch ends or the script ends for any reason. The
@@ -44,6 +52,7 @@ while [[ $# -gt 0 ]]; do
         --hidden) hidden=1; shift ;;
         --smoke) smoke=1; check_args+=("$1"); shift ;;
         --terrain) terrain=1; check_args+=("$1"); shift ;;
+        --handover) check_args+=("$1"); shift ;;
         --setting)
             if [[ $# -lt 2 ]]; then
                 echo "views check: --setting needs high or low" >&2

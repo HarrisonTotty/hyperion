@@ -19,7 +19,10 @@
  * - **The kept scenes** ({@link TerrainProbe.sceneOptions}): `VIEW`'s own, `TERRAIN TEST`'s fixture
  *   replaced by one of the probe's, its blocks paced ({@link TerrainProbeOptions.paceMs}) so that
  *   blocks are still arriving when the device is destroyed, its traffic counted, and the script's
- *   time it is told read back.
+ *   time it is told read back; on a `--handover` launch the hand-over check's check-only looks
+ *   follow them ({@link TerrainProbeOptions.checkScenes}; plan R10, R10.T10.g), and on no other.
+ * - **The hand-over check's read-back** ({@link TerrainProbe.readSceneTarget}): a region of a scene
+ *   target's colour, the check's one way to the frames it compares; no engine member is exposed.
  * - **The session** ({@link TerrainProbe.watchTerrain}): held while `VIEW` holds it, for its pass,
  *   its masks, its survey and its memory report, and followed for its terrain's fault: each time its
  *   `terrainFaults` holds a view or changes while it does, recorded with the time
@@ -51,6 +54,7 @@ import type {
   RenderEngine,
   RenderTarget,
   RenderTargetSpec,
+  TexelRect,
   TextureHandle,
 } from "../../../view/engine/types";
 import type {
@@ -358,6 +362,11 @@ export interface TerrainProbeOptions {
   readonly createWorker?: () => WorkerLike;
   /** The page's clock, `performance.now()`, on which the views probe stamps frames. */
   readonly nowMs?: () => number;
+  /**
+   * Check-only kept scenes `VIEW` offers after its own on this launch alone: the hand-over check's
+   * looks on a `--handover` launch (plan R10, R10.T10.g), none otherwise.
+   */
+  readonly checkScenes?: ReadonlyArray<SceneOption>;
 }
 
 /** The terrain run's probe: see the module's remarks. */
@@ -424,11 +433,14 @@ export class TerrainProbe {
         inner.notePlayed(scriptS);
       },
     };
-    this.sceneOptions = SCENE_OPTIONS.map((option) =>
-      option.name === TERRAIN_SCENE_NAME
-        ? Object.assign({}, option, { terrain: this.fixture })
-        : option,
-    );
+    this.sceneOptions = [
+      ...SCENE_OPTIONS.map((option) =>
+        option.name === TERRAIN_SCENE_NAME
+          ? Object.assign({}, option, { terrain: this.fixture })
+          : option,
+      ),
+      ...(options.checkScenes ?? []),
+    ];
     const create = options.createWorker ?? browserHeightWorker;
     this.heightWorkers = () => countedWorker(create(), this.#workers);
     const devices = this.#devices;
@@ -636,10 +648,35 @@ export class TerrainProbe {
     }
   }
 
-  /** The cells `TEST MOON`'s store's coverage holds surveyed, as mask texel indices; empty with none. */
-  coverageCells(): ReadonlySet<number> {
-    const coverage = this.#session?.survey(this.#moon)?.coverage ?? null;
+  /**
+   * The cells a body's store's coverage holds surveyed, `TEST MOON`'s unless `body` is given (the
+   * hand-over check's world's, R10.T10.g), as mask texel indices; empty with none.
+   */
+  coverageCells(body: BodyIdHex = this.#moon): ReadonlySet<number> {
+    const coverage = this.#session?.survey(body)?.coverage ?? null;
     return coverage === null ? new Set() : surveyedCells(coverage.maskTexels());
+  }
+
+  /**
+   * Reads back a region of a scene target's colour (`<view>:hdr`, `rgba16float`), rows tightly
+   * packed: the hand-over check's narrow seam onto the frames it compares (plan R10, R10.T10.g),
+   * asked in the submission of the frame it reads, so that the copy follows that frame's draws.
+   *
+   * @throws Error where the probe holds no engine or no such target, or its format holds no halves;
+   *   and whatever the engine's read-back throws (a device lost, a region outside the target).
+   */
+  readSceneTarget(owner: string, rect: TexelRect): Promise<ArrayBuffer> {
+    const engine = this.#engine;
+    const made = this.#targets.get(owner);
+    if (engine === null || made === undefined || !SCENE_TARGET.test(owner)) {
+      return Promise.reject(new Error(`views check: no scene target ${owner} to read back`));
+    }
+    if (made.spec.format !== "rgba16float") {
+      return Promise.reject(
+        new Error(`views check: ${owner} is ${made.spec.format}, not rgba16float`),
+      );
+    }
+    return engine.readTexture(made.target.colour, 0, rect);
   }
 
   /** The session's memory report and the terrain's GPU bytes, or `null` with no session. */

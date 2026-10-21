@@ -888,6 +888,7 @@ function moonPlan(): { readonly plan: BodyFramePlan; readonly body: LitBodyInput
     {
       camera: FRAME_CAMERA,
       viewport: SESSION_PRESENTED,
+      presentedPx: SESSION_PRESENTED,
       exposureScale: 1e-5,
       annuli: DISC_ANNULI_HIGH,
       planetshine: PLANETSHINE_SOURCES_HIGH,

@@ -85,6 +85,7 @@ function eclipseFrame(
     run: { ...start, scene: eclipseSceneAt(sceneS), camera: { ...start.camera, pose, fovDeg } },
     pose,
     viewport,
+    presentedPx: viewport,
     setting: "high",
     exposureScale: preExposure,
     list: NO_LIST,
@@ -113,6 +114,7 @@ function planOf(
     {
       camera: frame.camera,
       viewport: frame.viewport,
+      presentedPx: frame.presentedPx,
       exposureScale: frame.exposureScale,
       annuli: DISC_ANNULI_HIGH,
       planetshine: PLANETSHINE_SOURCES_HIGH,

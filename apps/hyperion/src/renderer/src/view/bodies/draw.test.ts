@@ -47,10 +47,15 @@ import {
   BODY_DISC_MATERIALS,
 } from "./draw";
 import { bindingStages } from "../../test/wgslStages";
+import { datumNormalMap, UNREAD_TEXTURES, unreadNormalMap } from "../../test/normalMapFixtures";
+import type { DiscSurface } from "../appearance/bodyAppearance";
 import { rotation3FromRows } from "../coords/rotation";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import type { DrawItem, TextureHandle } from "../engine/types";
+import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
+import terrainPatchWgsl from "../terrain/shaders/terrainPatch.wgsl?raw";
+import { classMapSurface, packClassMap } from "./discSurface";
 import {
   surfaceLightingDrawTextures,
   type SurfaceLightingTables,
@@ -92,6 +97,7 @@ function scene(
 const OPTIONS = {
   camera: CAMERA,
   viewport: VIEWPORT,
+  presentedPx: VIEWPORT,
   exposureScale: EXPOSURE,
   annuli: 4,
   planetshine: PLANETSHINE_SOURCES_HIGH,
@@ -1720,6 +1726,32 @@ describe("the hand-over to terrain (R10.T10.e)", () => {
     expect(regimeOf(1.11, "high", "disc")).toBe("terrain");
   });
 
+  /** The frame's internal viewport at half the presented 1920 × 1080. */
+  const HALF: Viewport = { widthPx: 960, heightPx: 540 };
+
+  it("measures the relief in the presented pixels, whatever the frame's internal scale (R10.T10.g)", () => {
+    // 1.5 presented px on high, which the internal pixel alone would see as 0.75 px.
+    const { body, hosts } = bodyWithRelief(1.5);
+    const regime = (options: BodyFrameOptions): LitRegime | undefined =>
+      planLitBodies([body], hosts, options, new Map([[body.id, "disc"]])).regimes.get(body.id);
+    expect([
+      regime({ ...OPTIONS, viewport: HALF, presentedPx: VIEWPORT }),
+      regime(OPTIONS),
+      regime({ ...OPTIONS, viewport: HALF, presentedPx: HALF }),
+    ]).toEqual(["terrain", "terrain", "disc"]);
+  });
+
+  it("keeps R07's 3 px switch on the frame's own pixels (R10.T10.g)", () => {
+    // 4 presented px across, 2 of the internal pixels, in which the disc's flux meets the point's.
+    const { body, hosts } = scene(6.371e6 / Math.sin(2 / PX_PER_RAD), 30);
+    const regime = (options: BodyFrameOptions): LitRegime | undefined =>
+      planLitBodies([body], hosts, options, new Map([[body.id, "disc"]])).regimes.get(body.id);
+    expect([
+      regime({ ...OPTIONS, viewport: HALF, presentedPx: VIEWPORT }),
+      regime(OPTIONS),
+    ]).toEqual(["point", "disc"]);
+  });
+
   it("draws a body handed over as a mesh body, its limb in the sequence and its figure the reference surface", () => {
     const { body, hosts } = bodyWithRelief(4);
     const plan = planLitBodies([body], hosts, OPTIONS, new Map([[body.id, "disc"]]));
@@ -1751,3 +1783,119 @@ describe("the hand-over to terrain (R10.T10.e)", () => {
     expect(plan.meshes.map((m) => m.role)).toEqual([{ kind: "promoted" }]);
   });
 });
+
+/** A one-class map surveyed whole, with the field's normal map (R10.T10.g) or none. */
+function surfaceWith(normals: boolean): DiscSurface {
+  return classMapSurface(
+    UNREAD_TEXTURES,
+    normals ? "with normals" : "without",
+    packClassMap(64, 1, () => [1]),
+    [lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon")],
+    PROVISIONAL_PHOTOMETRY.law,
+    normals ? unreadNormalMap(datumNormalMap(5), "class map normals") : null,
+  );
+}
+
+describe("a class map's normal map in the draws (R10.T10.g)", () => {
+  /** Three discs abreast: a class map with normals (…0200), one without (…0201), and a uniform body. */
+  function planOfThree(): BodyFramePlan {
+    const { body, hosts } = scene(6.371e6 / Math.sin(20 / PX_PER_RAD), 30);
+    const rotation = rotation3FromRows([vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)]);
+    const surfaces = [surfaceWith(true), surfaceWith(false), undefined];
+    const bodies: LitBodyInput[] = [];
+    for (const [i, surface] of surfaces.entries()) {
+      const drawn: LitBodyInput = {
+        id: `0200080020000000.${(0x200 + i).toString(16).padStart(4, "0")}`,
+        centreM: vec3((i - 1) * 4e7, 0, body.centreM.z),
+        figure: body.figure,
+        photometry: body.photometry,
+        rotation,
+        lighting: undefined,
+      };
+      bodies.push(surface === undefined ? drawn : { ...drawn, surface });
+    }
+    return planLitBodies(
+      bodies,
+      hosts,
+      OPTIONS,
+      new Map(bodies.map((b) => [b.id, "disc" as const])),
+    );
+  }
+
+  /** The normal map each of the three discs' two draws binds, by the body's last four digits. */
+  async function boundNormals(): Promise<ReadonlyArray<readonly [string, string]>> {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const plan = planOfThree();
+    const draws = renderer.draws(plan).filter((d) => d.material.name.startsWith("bodies:disc"));
+    renderer.dispose();
+    return draws.map((d) => [
+      plan.discs[d.uniforms["disc"]?.[0] ?? -1]?.body.slice(-4) ?? "",
+      d.textures["surfaceNormals"]?.name ?? "",
+    ]);
+  }
+
+  it("binds a class map's normal map to both its draws", async () => {
+    const bound = await boundNormals();
+    expect(bound.filter(([body]) => body === "0200")).toEqual([
+      ["0200", "class map normals"],
+      ["0200", "class map normals"],
+    ]);
+  });
+
+  it("binds the texel of no weight where a disc carries no normal map, a class map's or a uniform one's", async () => {
+    const bound = await boundNormals();
+    expect(
+      bound.filter(([body]) => body !== "0200").toSorted(([a], [b]) => a.localeCompare(b)),
+    ).toEqual([
+      ["0201", "bodies:no class map"],
+      ["0201", "bodies:no class map"],
+      ["0202", "bodies:no class map"],
+      ["0202", "bodies:no class map"],
+    ]);
+  });
+
+  it("declares it at group 2 binding 14 in the disc's materials and the mesh's, read in their fragment stages alone", () => {
+    expect(bodyDiscWgsl).toMatch(
+      /@group\(2\) @binding\(14\) var surface_normals : texture_2d_array<f32>;/u,
+    );
+    for (const spec of [
+      BODY_DISC_MATERIALS.interior,
+      BODY_DISC_MATERIALS.limb,
+      SMOOTH_MESH_MATERIAL,
+    ]) {
+      expect(spec.textures?.find((t) => t.name === "surfaceNormals")).toEqual({
+        name: "surfaceNormals",
+        binding: 14,
+        viewDimension: "2d-array",
+      });
+      expect([...(bindingStages(spec.vertexWgsl).get(14) ?? [])]).toEqual(["fragment"]);
+    }
+  });
+
+  it("decodes the map's pairs by the terrain's own decode, operation for operation", () => {
+    expect(wgslBody(bodyDiscWgsl, "disc_sign_not_zero")).toBe(
+      wgslBody(terrainPatchWgsl, "signNotZero"),
+    );
+    expect(wgslBody(bodyDiscWgsl, "disc_decode_octahedral")).toBe(
+      wgslBody(terrainPatchWgsl, "decodeOctahedral").replace("signNotZero", "disc_sign_not_zero"),
+    );
+  });
+});
+
+/** A WGSL function's body, braces and all, its whitespace collapsed. */
+function wgslBody(source: string, name: string): string {
+  const start = source.indexOf(`fn ${name}(`);
+  if (start < 0) {
+    throw new Error(`no function ${name}`);
+  }
+  const open = source.indexOf("{", start);
+  let depth = 0;
+  for (let end = open; end < source.length; end += 1) {
+    depth += source[end] === "{" ? 1 : source[end] === "}" ? -1 : 0;
+    if (depth === 0) {
+      return source.slice(open, end + 1).replaceAll(/\s+/gu, " ");
+    }
+  }
+  throw new Error(`function ${name} is not closed`);
+}

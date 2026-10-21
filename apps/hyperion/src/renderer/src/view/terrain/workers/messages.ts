@@ -14,7 +14,8 @@
  * or a body, whose patches the worker bakes over the field it holds of it with the body's detail
  * seed. A worker answers each block of a payload with what it changed of the survey and the body's
  * level table after it, and a body's bake with R10's layers. A `class-map` query asks one worker for
- * a body's coarse class map over the field it holds (R10.T10.d), the disc's surface, and a
+ * a body's coarse class map over the field it holds (R10.T10.d), the disc's surface, with the field's
+ * normal map over the same survey (R10.T10.g), and a
  * `ground-readout` query a view's whole terrain readout where its line of sight meets the ground
  * (R10.T12), whose answer's types live here with the readings', the worker's wrappers of the
  * module answering in them (`heightBake.ts`).
@@ -190,7 +191,10 @@ export interface FieldBlockAnswer {
 /**
  * A body's coarse class map for R07's disc, as a worker answers it (plan R10, T10.d; `src/wasm.rs`'s
  * `ClassMapAnswer`, the crate's `WorkerFields::class_map`): each texel the survey touches, a cell
- * of {@link ClassMapAnswer.level}, with its surveyed share and its weights over the body's classes.
+ * of {@link ClassMapAnswer.level}, with its surveyed share and its weights over the body's classes;
+ * and the field's normal map over the same survey (R10.T10.g; `src/wasm.rs`'s `NormalMapAnswer`,
+ * the crate's `WorkerFields::normal_map`): each surveyed cell of the field's level with the shading
+ * normal the coarsest terrain gives its centre.
  */
 export interface ClassMapAnswer {
   /** The map's quadtree level, 6: 2^level texels along a face's side. */
@@ -218,6 +222,28 @@ export interface ClassMapAnswer {
   readonly weights: Uint8Array;
   /** Whether every texel the survey touches was answered; `false` where a read lacked a cell. */
   readonly complete: boolean;
+  /**
+   * The normal map's level, 5 to 8: the field's, 2^level cells along a face's side, at which
+   * {@link ClassMapAnswer.normalCells}' indices are.
+   */
+  readonly normalLevel: number;
+  /**
+   * The cell index at {@link ClassMapAnswer.normalLevel} (`fieldCellIndex`'s) of each surveyed cell
+   * whose normal was answered, rising.
+   */
+  readonly normalCells: Uint32Array;
+  /**
+   * Each of those cells' shading normal at its centre, two values a cell, cell c's at `2 c`: the
+   * octahedral pair of a unit vector in the body-fixed axes, each coordinate in [−1, 1], rounded to
+   * half floats from the module's `f32` as a bake's normals are (`packNormals`), so that the disc
+   * decodes the same pairs the terrain's coarsest patches do.
+   */
+  readonly normalPairs: Float16Array;
+  /**
+   * Whether every surveyed cell's normal was answered; `false` where a cell's height read a cell
+   * the field does not hold yet, which leaves that cell out until a later block.
+   */
+  readonly normalsComplete: boolean;
 }
 
 /** A point of a face, in the cube's face coordinates (`hyperion_surface::cube::FaceUv`). */
@@ -518,7 +544,7 @@ export function blockTransferables(block: FieldBlockAnswer | null): Transferable
     : [block.newlySurveyed.buffer, block.newlyHeld.buffer, block.levels.buffer];
 }
 
-/** The buffers a worker transfers with a class map. */
+/** The buffers a worker transfers with a class map and its normal map. */
 export function classMapTransferables(map: ClassMapAnswer | null): Transferable[] {
   return map === null
     ? []
@@ -528,5 +554,7 @@ export function classMapTransferables(map: ClassMapAnswer | null): Transferable[
         map.texels.buffer,
         map.fractions.buffer,
         map.weights.buffer,
+        map.normalCells.buffer,
+        map.normalPairs.buffer,
       ];
 }

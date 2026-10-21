@@ -93,6 +93,7 @@ async function drawnAt(
     run,
     pose,
     viewport,
+    presentedPx: viewport,
     setting: "high",
     exposureScale: EXPOSURE,
     list: NO_LIST,
@@ -110,6 +111,7 @@ async function drawnAt(
     {
       camera: frame.camera,
       viewport,
+      presentedPx: viewport,
       exposureScale: EXPOSURE,
       annuli,
       planetshine: PLANETSHINE_SOURCES_HIGH,
@@ -588,6 +590,7 @@ describe("the bodies before and behind the star (T10.c)", () => {
       {
         camera: drawn.camera,
         viewport: ZOOMED,
+        presentedPx: ZOOMED,
         exposureScale: EXPOSURE,
         annuli: DISC_ANNULI_HIGH,
         planetshine: PLANETSHINE_SOURCES_HIGH,

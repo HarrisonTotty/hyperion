@@ -15,21 +15,33 @@
  * presentation to read), each ends with a capture of the page, the run may capture named moments
  * between ({@link ViewsCheckSession.capture}), and its record goes through its own narrow writer,
  * judged here (`terrainCheckResults.ts`): a run whose checks fail ends with 1. Each handler refuses
- * a phase that is not of the launch's run.
+ * a phase that is not of the launch's run. A `--handover` launch (R10.T10.g) runs the terrain run's
+ * hand-over check in its place: no phases (a start or end of one refused), its captures named for
+ * its looks, and its record through
+ * a writer of its own (`handoverCheckResults.ts`), the terrain run's refused; it ends with 1 unless
+ * that record was written and its verdict passes.
  */
 
 import type { ContentTracing, IpcMainInvokeEvent, TraceConfig } from "electron";
 
 import type {
   CheckPhaseName,
+  HandoverCheckRecord,
   SpikeResultsPaths,
   TerrainCheckPhaseName,
   TerrainCheckRecord,
   ViewsCheckLaunch,
   ViewsCheckPhaseName,
   ViewsCheckRecord,
+  ViewsCheckRunKind,
   ViewsCheckWindow,
 } from "../preload/api";
+import {
+  buildHandoverCheckResults,
+  type HandoverCheckResults,
+  handoverFailures,
+  writeHandoverResults,
+} from "./handoverCheckResults";
 import { type Measured, measured, missing } from "./measured";
 import { readTraceEvents, recordedGpuSlices, TraceReducer, type TraceFigures } from "./reduceTrace";
 import { readSpikeEnd } from "./spike";
@@ -39,7 +51,11 @@ import {
   terrainFailures,
   writeTerrainResults,
 } from "./terrainCheckResults";
-import { readTerrainCheckRecord, readViewsCheckRecord } from "./viewsCheckRecord";
+import {
+  readHandoverCheckRecord,
+  readTerrainCheckRecord,
+  readViewsCheckRecord,
+} from "./viewsCheckRecord";
 import {
   buildViewsCheckResults,
   type NamedSlice,
@@ -57,6 +73,7 @@ export const VIEWS_CHECK_CHANNELS = {
   askRightWayUp: "hyperion:views-check:ask-right-way-up",
   writeResults: "hyperion:views-check:write-results",
   writeTerrainResults: "hyperion:views-check:write-terrain-results",
+  writeHandoverResults: "hyperion:views-check:write-handover-results",
   capture: "hyperion:views-check:capture",
   end: "hyperion:views-check:end",
 } as const;
@@ -301,6 +318,11 @@ export interface ViewsCheckSessionDeps {
     dir: string,
     results: TerrainCheckResults,
   ) => Promise<{ readonly json: string; readonly markdown: string }>;
+  /** Writes a hand-over check's results: {@link writeHandoverResults} by default (R10.T10.g). */
+  readonly writeHandover?: (
+    dir: string,
+    results: HandoverCheckResults,
+  ) => Promise<{ readonly json: string; readonly markdown: string }>;
   readonly exit: (code: number) => void;
   readonly log: (line: string) => void;
 }
@@ -336,6 +358,8 @@ export class ViewsCheckSession {
   #captured = false;
   /** A terrain run's results once written, judged. */
   #terrainResults: TerrainCheckResults | null = null;
+  /** A hand-over check's results once written, judged (R10.T10.g). */
+  #handoverResults: HandoverCheckResults | null = null;
   #rightWayUp: Measured<"yes" | "no">;
   #passTimerDrops = 0;
   #untimedPasses = 0;
@@ -493,6 +517,32 @@ export class ViewsCheckSession {
     return paths;
   }
 
+  /** Builds a hand-over check's results from its renderer's record (R10.T10.g), judges and writes them. */
+  async writeHandoverResults(record: HandoverCheckRecord): Promise<SpikeResultsPaths> {
+    const run = await this.#run;
+    const dir = this.#deps.capturesDir;
+    const results = buildHandoverCheckResults({
+      run: {
+        ...run,
+        window: this.#deps.windowSize(),
+        captures:
+          dir === null
+            ? missing("no capture directory")
+            : this.#captured
+              ? measured(this.#deps.capturesRecordedAs ?? dir)
+              : missing("no capture was saved"),
+      },
+      record,
+      gpuProcessExits: this.#gpuProcessExits,
+      consoleErrors: this.#consoleErrors,
+    });
+    const write = this.#deps.writeHandover ?? writeHandoverResults;
+    const paths = await write(this.#deps.outDir, results);
+    this.#handoverResults = results;
+    this.#deps.log(`views check: wrote ${paths.json} and ${paths.markdown}`);
+    return paths;
+  }
+
   /** Builds a terrain run's results from its renderer's record, judges and writes them. */
   async writeTerrainResults(record: TerrainCheckRecord): Promise<SpikeResultsPaths> {
     const run = await this.#run;
@@ -520,22 +570,43 @@ export class ViewsCheckSession {
   }
 
   /**
-   * Ends the run with an exit status, and a reason for a failure; a terrain run that would end
-   * with 0 ends with 1 unless its results were written and pass.
+   * Ends the run with an exit status, and a reason for a failure; a terrain run or a hand-over
+   * check that would end with 0 ends with 1 unless its results were written and pass.
    */
   end(code: number, reason: string | null): void {
-    if (code === 0 && this.#deps.launch.terrain) {
-      const results = this.#terrainResults;
-      if (results === null) {
-        this.#finish(1, "the terrain run ended with no results written");
-        return;
-      }
-      if (results.overall !== "pass") {
-        this.#finish(1, `the terrain run's checks failed: ${terrainFailures(results)}`);
-        return;
+    // Why a run that would end with 0 fails: no results written, or results that fail.
+    let failure: string | null = null;
+    if (code === 0) {
+      switch (this.#deps.launch.run) {
+        case "several-views":
+          break;
+        case "terrain": {
+          const results = this.#terrainResults;
+          failure =
+            results === null
+              ? "the terrain run ended with no results written"
+              : results.overall === "pass"
+                ? null
+                : `the terrain run's checks failed: ${terrainFailures(results)}`;
+          break;
+        }
+        case "handover": {
+          const results = this.#handoverResults;
+          failure =
+            results === null
+              ? "the hand-over check ended with no results written"
+              : results.overall === "pass"
+                ? null
+                : `the hand-over check's verdict failed: ${handoverFailures(results)}`;
+          break;
+        }
       }
     }
-    this.#finish(code, reason);
+    if (failure === null) {
+      this.#finish(code, reason);
+    } else {
+      this.#finish(1, failure);
+    }
   }
 
   #finish(code: number, reason: string | null): void {
@@ -566,14 +637,15 @@ export interface ViewsCheckHandlerDeps<E = IpcMainInvokeEvent> {
     | "askRightWayUp"
     | "writeResults"
     | "writeTerrainResults"
+    | "writeHandoverResults"
     | "capture"
     | "end"
   >;
   /**
-   * Whether the launch runs the terrain run (`ViewsCheckLaunch.terrain`): its handlers take the
-   * terrain run's phases alone, and T20's otherwise.
+   * The launch's run (`ViewsCheckLaunch.run`): its handlers take its phases, its record and, for
+   * the terrain run and its hand-over check, its captures alone, and refuse every other run's.
    */
-  readonly terrain: boolean;
+  readonly run: ViewsCheckRunKind;
 }
 
 const PHASE_NAMES: ReadonlyArray<ViewsCheckPhaseName> = [
@@ -584,11 +656,43 @@ const PHASE_NAMES: ReadonlyArray<ViewsCheckPhaseName> = [
   "wireframe-alone",
 ];
 
-/** `value` as a phase of the launch's run (the terrain run's, or T20's), or `null`. */
-function readPhaseName(value: unknown, terrain: boolean): CheckPhaseName | null {
-  return terrain
-    ? (TERRAIN_PHASE_NAMES.find((name) => name === value) ?? null)
-    : (PHASE_NAMES.find((name) => name === value) ?? null);
+/** The phases of each run: the hand-over check has none (R10.T10.g). */
+function phasesOf(run: ViewsCheckRunKind): ReadonlyArray<CheckPhaseName> {
+  let phases: ReadonlyArray<CheckPhaseName>;
+  switch (run) {
+    case "several-views":
+      phases = PHASE_NAMES;
+      break;
+    case "terrain":
+      phases = TERRAIN_PHASE_NAMES;
+      break;
+    case "handover":
+      phases = [];
+      break;
+  }
+  return phases;
+}
+
+/** A run as the handlers' refusals name it. */
+function runWords(run: ViewsCheckRunKind): string {
+  let words: string;
+  switch (run) {
+    case "several-views":
+      words = "T20's run";
+      break;
+    case "terrain":
+      words = "the terrain run";
+      break;
+    case "handover":
+      words = "the hand-over check";
+      break;
+  }
+  return words;
+}
+
+/** `value` as a phase of `run`, or `null`. */
+function readPhaseName(value: unknown, run: ViewsCheckRunKind): CheckPhaseName | null {
+  return phasesOf(run).find((name) => name === value) ?? null;
 }
 
 /** `value` as a measured window, or `null`: two finite times, the end not before the start. */
@@ -623,9 +727,9 @@ export function registerViewsCheckHandlers<E>(deps: ViewsCheckHandlerDeps<E>): v
       return run(args);
     });
   };
-  const run = deps.terrain ? "the terrain run" : "T20's run";
+  const run = runWords(deps.run);
   guarded(VIEWS_CHECK_CHANNELS.startPhase, async ([value]) => {
-    const name = readPhaseName(value, deps.terrain);
+    const name = readPhaseName(value, deps.run);
     if (name === null) {
       throw new ViewsCheckCallRefused(
         `${VIEWS_CHECK_CHANNELS.startPhase} refused: not a phase of ${run}`,
@@ -634,7 +738,7 @@ export function registerViewsCheckHandlers<E>(deps: ViewsCheckHandlerDeps<E>): v
     await deps.session.startPhase(name);
   });
   guarded(VIEWS_CHECK_CHANNELS.endPhase, async ([value, span]) => {
-    const name = readPhaseName(value, deps.terrain);
+    const name = readPhaseName(value, deps.run);
     const window = readWindow(span);
     if (name === null || window === null) {
       throw new ViewsCheckCallRefused(
@@ -644,9 +748,9 @@ export function registerViewsCheckHandlers<E>(deps: ViewsCheckHandlerDeps<E>): v
     await deps.session.endPhase(name, window);
   });
   guarded(VIEWS_CHECK_CHANNELS.askRightWayUp, () => deps.session.askRightWayUp());
+  // Each run writes its own record alone (the batch review's D-C).
   guarded(VIEWS_CHECK_CHANNELS.writeResults, async ([value]) => {
-    // A terrain launch writes its own results alone (the batch review's D-C).
-    const record = deps.terrain ? null : readViewsCheckRecord(value);
+    const record = deps.run === "several-views" ? readViewsCheckRecord(value) : null;
     if (record === null) {
       throw new ViewsCheckCallRefused(
         `${VIEWS_CHECK_CHANNELS.writeResults} refused: not the check's record`,
@@ -655,7 +759,7 @@ export function registerViewsCheckHandlers<E>(deps: ViewsCheckHandlerDeps<E>): v
     return deps.session.writeResults(record);
   });
   guarded(VIEWS_CHECK_CHANNELS.writeTerrainResults, async ([value]) => {
-    const record = deps.terrain ? readTerrainCheckRecord(value) : null;
+    const record = deps.run === "terrain" ? readTerrainCheckRecord(value) : null;
     if (record === null) {
       throw new ViewsCheckCallRefused(
         `${VIEWS_CHECK_CHANNELS.writeTerrainResults} refused: not the terrain run's record`,
@@ -663,8 +767,17 @@ export function registerViewsCheckHandlers<E>(deps: ViewsCheckHandlerDeps<E>): v
     }
     return deps.session.writeTerrainResults(record);
   });
+  guarded(VIEWS_CHECK_CHANNELS.writeHandoverResults, async ([value]) => {
+    const record = deps.run === "handover" ? readHandoverCheckRecord(value) : null;
+    if (record === null) {
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.writeHandoverResults} refused: not the hand-over check's record`,
+      );
+    }
+    return deps.session.writeHandoverResults(record);
+  });
   guarded(VIEWS_CHECK_CHANNELS.capture, async ([value]) => {
-    if (!deps.terrain || !isCaptureLabel(value)) {
+    if (deps.run === "several-views" || !isCaptureLabel(value)) {
       throw new ViewsCheckCallRefused(
         `${VIEWS_CHECK_CHANNELS.capture} refused: not a terrain run's capture label`,
       );

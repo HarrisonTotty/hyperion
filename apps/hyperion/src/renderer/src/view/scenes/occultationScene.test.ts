@@ -41,6 +41,7 @@ function plans(promoted: boolean): BodyFramePlan[] {
       {
         camera: CAMERA,
         viewport: VIEW,
+        presentedPx: VIEW,
         exposureScale: 1e-4,
         annuli: DISC_ANNULI_HIGH,
         planetshine: PLANETSHINE_SOURCES_HIGH,

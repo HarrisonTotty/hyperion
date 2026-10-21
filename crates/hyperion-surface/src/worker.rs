@@ -72,6 +72,14 @@
 //! survey with its weights over the body's classes, at most [`CLASS_MAP_CLASSES`], and the share of
 //! it surveyed. The render thread packs it into R07's map (`view/terrain/classMap.ts`).
 //!
+//! # The disc's normal map (plan R10, T10.g)
+//!
+//! [`WorkerFields::normal_map`] answers the disc with the body's cell-scale shading normals over the
+//! survey, at the field's own level ([`NormalMap`]): one a surveyed cell, the normal the root
+//! terrain's coarsest patches shade that cell's centre with, so that the disc and the terrain share
+//! their cell-scale slopes at the hand-over (decision-r10-t16-leans §1, remedy 1). The render
+//! thread packs it beside the class map (`view/bodies/discNormals.ts`).
+//!
 //! # The terrain readout (plan R10, T12)
 //!
 //! [`WorkerFields::ground_readout`] answers a view's `GROUND AT LINE OF SIGHT` at its 4 Hz in one
@@ -102,6 +110,7 @@ use crate::material::{
     interface_friction, lapse_drop_k, material_at, maturity_at, scaled_normal_albedo, weights_at,
 };
 use crate::num;
+use crate::patch::normals::{encode_octahedral_f32, surface_normal};
 use crate::reading::{
     LineOfSight, SLOPE_BASELINES, SlantRange, SurveyedReading, slant_range, surveyed_reading,
 };
@@ -568,6 +577,85 @@ impl ClassMap {
     /// Whether every texel the survey touches was answered: `false` where a texel's weights read a
     /// cell the field does not hold yet (a survey's margin in a later block), which leaves the
     /// texel out until a later block.
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        self.complete
+    }
+}
+
+/// The quadtree levels a patch spans, its 64 quads a side being 2⁶ cells of the level 6 below its
+/// own: a cell of a field's level L is a quad of the patches of level L − 6.
+const PATCH_SPAN_LEVELS: u8 = 6;
+
+/// The band level a normal map of a field of level `field_level` takes its heights at:
+/// max(`field_level` − 6, 0) ([`NormalMap::band`]).
+#[must_use]
+const fn normal_map_band(field_level: u8) -> u8 {
+    field_level.saturating_sub(PATCH_SPAN_LEVELS)
+}
+
+/// A body's normal map for R07's disc (plan R10, T10.g; decision-r10-t16-leans §1, remedy 1), from
+/// its field: each surveyed cell's shading normal at its centre, at the field's own level.
+///
+/// - **The cells** are the field's surveyed cells at its level L, 5 to 8, in rising
+///   [`cell_index`]. A margin cell, held but not surveyed, has none, as the class map leaves out
+///   what the survey has not measured.
+/// - **The normal** at a cell's centre (its centre in (s, t), the direction the class map's texels
+///   take theirs at) is [`surface_normal`] of R09's height and gradient there at band level
+///   [`band`](Self::band), max(L − 6, 0) ([`Synthesiser::height_at`]), on the field's spheroid: a
+///   unit vector, outward, in the body-fixed axes the field's figure has (z the rotation pole).
+/// - **The encoding** is the bake's
+///   ([`encode_octahedral`](crate::patch::normals::encode_octahedral), narrowed to `f32`): a pair (x, y), each
+///   dimensionless in [−1, 1], with |x| + |y| ≤ 1 where the normal's z is at least 0 and the lower
+///   hemisphere folded over the diagonals. The client narrows it to half floats as it narrows a
+///   bake's normals.
+///
+/// # Why band max(L − 6, 0), at the cells' centres
+///
+/// A patch of level P spans 64 quads a side, the cells of level P + 6, and its doubled normals
+/// ([`NormalScale::Double`](crate::patch::NormalScale::Double), 129 samples a side, 128 intervals)
+/// put a sample at each such cell's centre, its odd–odd samples, at band level P. So at L of 6 or more each pair is,
+/// bit for bit, what the patches of level L − 6 bake at that cell's centre on the high setting (the
+/// root's at L = 6): the cell-scale slope the coarsest terrain shades the cell with, the terrain's
+/// finer patches adding only slopes below a cell's size. At L = 5 the root's band, 0, is the
+/// coarsest there is, and each cell's centre is one of the root's vertices.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NormalMap {
+    level: u8,
+    cells: Vec<u32>,
+    pairs: Vec<[f32; 2]>,
+    complete: bool,
+}
+
+impl NormalMap {
+    /// The level of the field it was made from, 5 to 8, whose cells it holds.
+    #[must_use]
+    pub const fn level(&self) -> u8 {
+        self.level
+    }
+
+    /// The band level its heights and gradients were taken at: max([`level`](Self::level) − 6, 0).
+    #[must_use]
+    pub const fn band(&self) -> u8 {
+        normal_map_band(self.level)
+    }
+
+    /// The [`cell_index`] at [`level`](Self::level) of each surveyed cell answered, rising.
+    #[must_use]
+    pub fn cells(&self) -> &[u32] {
+        &self.cells
+    }
+
+    /// Each cell's octahedral pair, in [`cells`](Self::cells)' order: body-fixed, dimensionless,
+    /// each coordinate in [−1, 1].
+    #[must_use]
+    pub fn pairs(&self) -> &[[f32; 2]] {
+        &self.pairs
+    }
+
+    /// Whether every surveyed cell was answered: `false` where a cell's height read a cell the field
+    /// does not hold yet (a survey's margin in a later block), which leaves that cell out until a
+    /// later block.
     #[must_use]
     pub const fn is_complete(&self) -> bool {
         self.complete
@@ -1491,6 +1579,60 @@ impl WorkerFields {
             field_level: level,
             classes,
             texels,
+            complete,
+        })
+    }
+
+    /// `body`'s normal map for R07's disc ([`NormalMap`]), with the body's detail seed `seed`.
+    ///
+    /// Each cell of the field's level that it holds as surveyed is answered with its normal, one
+    /// [`Synthesiser::height_at`] at the cell's centre; a cell whose height reads a cell the field
+    /// does not hold yet is left out, and the map is then not
+    /// [complete](NormalMap::is_complete).
+    ///
+    /// # Errors
+    ///
+    /// [`QueryBodyError::NotStarted`] if no field of `body` is held.
+    ///
+    /// # Panics
+    ///
+    /// As [`Synthesiser::height_at`]: if a height or its gradient is not finite (a bug).
+    pub fn normal_map(
+        &mut self,
+        body: BodyRef,
+        seed: DetailSeed,
+    ) -> Result<NormalMap, QueryBodyError> {
+        let BodyField { field, cache, .. } = self.held(body)?;
+        let level = field.header().level();
+        let band_level = band(normal_map_band(level.get()));
+        let figure = field.header().figure();
+        let synth = Synthesiser::new(&*field, seed);
+        let mut cells = Vec::new();
+        let mut pairs = Vec::new();
+        let mut complete = true;
+        for index in 0..level.cell_count() {
+            let cell = cell_at_index(level.get(), index)
+                .expect("an index below the level's count is a cell");
+            if !field.is_surveyed(cell) {
+                continue;
+            }
+            let dir = unit_dir(face_uv_to_xyz(centre_of(cell)));
+            match synth.height_at(cache, dir, band_level) {
+                Ok(sample) => {
+                    let normal = surface_normal(&figure, dir, sample.height_m, sample.gradient);
+                    pairs.push(encode_octahedral_f32(normal));
+                    cells.push(index);
+                }
+                Err(QueryHeightError::NotSurveyed(_)) => {
+                    // A read past the cells held: the cell waits for a later block.
+                    complete = false;
+                }
+            }
+        }
+        Ok(NormalMap {
+            level: level.get(),
+            cells,
+            pairs,
             complete,
         })
     }

@@ -1,16 +1,36 @@
 import type { BodyIdHex } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
-import { vec3 } from "../../geometry/vec3";
+import { add, cross, dot, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import { aHostDisc } from "../../test/litFixtures";
+import {
+  constantNormalMap,
+  datumNormalAt,
+  directionAt,
+  perpendicularTo,
+  tilted,
+  UNREAD_TEXTURES,
+  unreadNormalMap,
+} from "../../test/normalMapFixtures";
+import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
 import type { PhaseTemplateId, PhotometricLaw } from "../appearance/law";
 import { lawFor, lawPhaseIntegral, withTemplateCurve } from "../appearance/phase";
 import { packPhaseFactorRows } from "../appearance/litBodyProbe";
-import { discReflectance } from "../bodies/discShading";
+import { AIRLESS_LIGHTING } from "../atmosphere/surfaceLighting";
+import { normalMapNormalAt } from "../bodies/discNormals";
+import { discReflectance, shadeDiscPoint } from "../bodies/discShading";
+import { type ClassMapTexels, classMapSurface, packClassMap } from "../bodies/discSurface";
+import { type LitBodyInput, planLitBodies } from "../bodies/draw";
 import { type LitRegime, REGIME_HYSTERESIS } from "../bodies/regime";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import type { ProjectionCamera } from "../camera/projection";
+import { rotateToBody, rotateToBodyFixed, rotation3FromRows } from "../coords/rotation";
+import { DISC_ANNULI_HIGH } from "../lighting/annuli";
+import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
 import type { Rgb } from "../photometry/toneCurve";
 import { SETTINGS, WIREFRAME_TERRAIN_TAU_PX } from "../quality/qualitySetting";
+import { AU_M } from "../scenes/kept";
+import { terrainHorizonFactor } from "./shadows/litFraction";
 import { CLASS_MAP_LEVEL, classMapLawsOf } from "./classMap";
 import { CoverageView } from "./coverage";
 import {
@@ -261,6 +281,10 @@ function answerOf(
     fractions: new Float32Array(0),
     weights: new Uint8Array(0),
     complete: true,
+    normalLevel: 6,
+    normalCells: new Uint32Array(0),
+    normalPairs: new Float16Array(0),
+    normalsComplete: true,
   };
 }
 
@@ -280,17 +304,19 @@ function uniformLaw(p: Rgb, q: Rgb, template: PhaseTemplateId): PhotometricLaw {
   return lawFor(p, q, template);
 }
 
+// Each class law, [B, V, R, code, L(0)] as the worker resolves it: a regolith at L(0) 1, an ice
+// frost at 0.9 (L(0) = 0.6696 ÷ 0.9 − 0.1160, decision-r10-limb), and a consolidated class under
+// Lambert's law.
+const CLASSES = [
+  [0.105, 0.142, 0.172, PHASE_LAW.regolith, 1],
+  [0.86, 0.9, 0.92, PHASE_LAW.ice, 0.6696 / 0.9 - 0.116],
+  [0.78, 0.8, 0.81, PHASE_LAW.lambert, 0],
+] as const;
+
+// Law 0, the body's own: Mercury's template at the Moon-like world's p (R10.T10.a's table).
+const ELSEWHERE = uniformLaw([0.172, 0.142, 0.105], [0.48, 0.48, 0.48], "mercury");
+
 describe("the disc and the terrain draw one law a class (R10.T10.e)", () => {
-  // Each class law, [B, V, R, code, L(0)] as the worker resolves it: a regolith at L(0) 1, an ice
-  // frost at 0.9 (L(0) = 0.6696 ÷ 0.9 − 0.1160, decision-r10-limb), and a consolidated class under
-  // Lambert's law.
-  const CLASSES = [
-    [0.105, 0.142, 0.172, PHASE_LAW.regolith, 1],
-    [0.86, 0.9, 0.92, PHASE_LAW.ice, 0.6696 / 0.9 - 0.116],
-    [0.78, 0.8, 0.81, PHASE_LAW.lambert, 0],
-  ] as const;
-  // Law 0, the body's own: Mercury's template at the Moon-like world's p (R10.T10.a's table).
-  const ELSEWHERE = uniformLaw([0.172, 0.142, 0.105], [0.48, 0.48, 0.48], "mercury");
   const GEOMETRIES = [1, 0.7, 0.4, 0.1].flatMap((mu0) =>
     [1, 0.6, 0.2, 0.05].map((mu) => [mu0, mu] as const),
   );
@@ -343,6 +369,181 @@ describe("the disc and the terrain draw one law a class (R10.T10.e)", () => {
         }
       });
       expect(checked).toBe(4 * 2 * GEOMETRIES.length * 3);
+      expect(worst).toBeLessThan(1e-6);
+    },
+  );
+});
+
+describe("the disc under the field's normal map and the terrain at the same cell normal (R10.T10.g)", () => {
+  /** The body's equatorial radius, m; the camera 100 radii from the shaded point. */
+  const RADIUS_M = 1.7374e6;
+  const RANGE_M = 100 * RADIUS_M;
+  /** The cell shaded: (+x, 20, 37) of the field's level 6, as the class map's. */
+  const FACE = 0;
+  const I = 20;
+  const J = 37;
+  const N = 2 ** 6;
+  /** Its neighbours within this many cells hold the class and the normal, the rest neither. */
+  const NEAR_RAD = 3.5 * (Math.PI / 2 / N);
+  const CENTRE = directionAt(FACE, (I + 0.5) / N, (J + 0.5) / N);
+  /** The shading normals' tilts from the datum's, deg, and their azimuths about it. */
+  const TILTS_DEG = [0, 5, 10, 15, 20];
+  const AZIMUTHS_DEG = [0, 90, 180, 270];
+
+  /** The class map: law `m`'s class (m ≥ 1) about the cell, or no class there for law 0. */
+  function classMapFor(m: number): ClassMapTexels {
+    return packClassMap(N, CLASSES.length, ({ face, i, j }) => {
+      const centre = directionAt(face, (i + 0.5) / N, (j + 0.5) / N);
+      if (m === 0 || Math.acos(Math.min(1, dot(centre, CENTRE))) > NEAR_RAD) {
+        return null;
+      }
+      return CLASSES.map((_, k) => (k === m - 1 ? 1 : 0));
+    });
+  }
+
+  /**
+   * One shading: the disc's I/F at the cell's centre lit at phase α, its datum's i = e = α ÷ 2, under
+   * a normal map holding `normal` (body-fixed) about it, against the terrain's twin at the normal
+   * the map holds there, and the geometry the test states.
+   */
+  function shadedPair(
+    m: number,
+    cOverA: number,
+    alphaRad: number,
+    normal: Vec3,
+  ): {
+    readonly disc: Rgb;
+    readonly terrain: Rgb;
+    readonly muFloorClear: boolean;
+    readonly cutClear: boolean;
+  } {
+    const datum = datumNormalAt(CENTRE, cOverA);
+    const across = perpendicularTo(datum, 0.3);
+    const observer = tilted(datum, across, alphaRad / 2);
+    const sun = tilted(datum, across, -alphaRad / 2);
+    // Body-fixed to galactic, the observer along galactic +z, towards the camera at the origin.
+    const e1 = perpendicularTo(observer, 0.7);
+    const rotation = rotation3FromRows([e1, cross(observer, e1), observer]);
+    const spheroidPoint = vec3(CENTRE.x, CENTRE.y, CENTRE.z * cOverA);
+    const pointM = vec3(0, 0, -RANGE_M);
+    const centreM = sub(pointM, scale(rotateToBody(rotation, spheroidPoint), RADIUS_M));
+    const normals = constantNormalMap(6, normal, CENTRE, NEAR_RAD);
+    const discLaws = classMapLawsOf(answerOf(CLASSES)).map((law) => law ?? ELSEWHERE);
+    const surface = classMapSurface(
+      UNREAD_TEXTURES,
+      "test",
+      classMapFor(m),
+      discLaws,
+      ELSEWHERE,
+      unreadNormalMap(normals),
+    );
+    const body: LitBodyInput = {
+      id: BODY,
+      centreM,
+      figure: {
+        equatorialRadiusM: RADIUS_M,
+        polarRadiusM: cOverA * RADIUS_M,
+        pole: rotateToBody(rotation, vec3(0, 0, 1)),
+      },
+      photometry: { ...PROVISIONAL_PHOTOMETRY, law: ELSEWHERE },
+      surface,
+      rotation,
+      lighting: undefined,
+    };
+    const starM = add(pointM, scale(rotateToBody(rotation, sun), AU_M));
+    const host = aHostDisc();
+    const plan = planLitBodies(
+      [body],
+      [{ disc: host, centreM: starM }],
+      {
+        camera: CAMERA,
+        viewport: HD,
+        presentedPx: HD,
+        exposureScale: 1e-3,
+        annuli: DISC_ANNULI_HIGH,
+        planetshine: PLANETSHINE_SOURCES_HIGH,
+        setting: "high",
+      },
+      new Map([[BODY, "disc"]]),
+    );
+    const record = plan.discs[0];
+    const light = record?.lights[0];
+    if (record === undefined || light === undefined) {
+      throw new Error("the body is drawn as a lit disc");
+    }
+    // The disc's side: its twin at the cell's centre, along the ray to it (the view's axes are the
+    // galactic, the camera unturned).
+    const shaded = shadeDiscPoint(
+      record,
+      CAMERA,
+      rotateToBody(rotation, spheroidPoint),
+      vec3(0, 0, -1),
+      AIRLESS_LIGHTING,
+      surface.texels,
+    );
+    const exposure = record.exposureOverPi;
+    const disc: Rgb = [
+      shaded.radiance[0] / (light.illuminance[0] * exposure),
+      shaded.radiance[1] / (light.illuminance[1] * exposure),
+      shaded.radiance[2] / (light.illuminance[2] * exposure),
+    ];
+    // The terrain's side, body-fixed: the map's normal there as its shading normal, its horizon
+    // term above a horizon map of 0 (the datum's horizontal), no cascades and no air.
+    const shading = normalMapNormalAt(normals, [CENTRE.x, CENTRE.y, CENTRE.z]);
+    if (shading === null) {
+      throw new Error("the map holds a normal at the cell");
+    }
+    const towards = normalise(rotateToBodyFixed(rotation, sub(starM, pointM)));
+    const mu0 = dot(shading, towards);
+    const mu = dot(shading, observer);
+    const phiDatum = Math.acos(Math.min(1, dot(datum, towards)));
+    const phi = Math.acos(Math.min(1, mu0));
+    const starRadiusRad = Math.asin(host.radius_m / AU_M);
+    const h = terrainHorizonFactor(AU_M / host.radius_m, phi, Math.PI / 2 - phiDatum, 0);
+    const shares = Array.from({ length: TERRAIN_CLASSES + 1 }, (_, k) => (k === m ? 1 : 0));
+    const laws = terrainTexelLaws(bakePhotometryOf(CLASSES), ELSEWHERE, cOverA);
+    const flat = terrainReflectance(laws, shares, mu0, mu, Math.acos(dot(towards, observer)));
+    const terrain: Rgb = [(flat[0] * h) / mu0, (flat[1] * h) / mu0, (flat[2] * h) / mu0];
+    return {
+      disc,
+      terrain,
+      // μ′ at least half the datum's μ, and the star's whole disc above both the datum's plane and
+      // the shading normal's: the floor and the cut at the datum's horizon take no part here.
+      muFloorClear: mu > 0.5 * dot(datum, observer),
+      cutClear: phi + starRadiusRad < Math.PI / 2 && phiDatum + starRadiusRad < Math.PI / 2,
+    };
+  }
+
+  it.each([
+    ["a sphere", 1],
+    ["an oblate body", 0.9],
+  ])(
+    "agree to 10⁻⁶ per class law and law 0 at 30° and 90° of phase, the normal tilted 0° to 20°, on %s",
+    (_, cOverA) => {
+      let worst = 0;
+      let checked = 0;
+      for (const m of [0, 1, 2, 3]) {
+        for (const alphaDeg of [30, 90]) {
+          for (const tiltDeg of TILTS_DEG) {
+            for (const azimuthDeg of AZIMUTHS_DEG) {
+              const datum = datumNormalAt(CENTRE, cOverA);
+              const normal = tilted(
+                datum,
+                perpendicularTo(datum, 0.3 + azimuthDeg * RAD),
+                tiltDeg * RAD,
+              );
+              const pair = shadedPair(m, cOverA, alphaDeg * RAD, normal);
+              expect([pair.muFloorClear, pair.cutClear]).toEqual([true, true]);
+              for (const c of [0, 1, 2] as const) {
+                expect(pair.disc[c]).toBeGreaterThan(0);
+                worst = Math.max(worst, Math.abs(pair.terrain[c] / pair.disc[c] - 1));
+                checked += 1;
+              }
+            }
+          }
+        }
+      }
+      expect(checked).toBe(4 * 2 * TILTS_DEG.length * AZIMUTHS_DEG.length * 3);
       expect(worst).toBeLessThan(1e-6);
     },
   );

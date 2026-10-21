@@ -235,6 +235,7 @@ function planOfOne(
   const options: BodyFrameOptions = {
     camera,
     viewport,
+    presentedPx: viewport,
     exposureScale: EXPOSURE,
     annuli: DISC_ANNULI_HIGH,
     planetshine: PLANETSHINE_SOURCES_HIGH,
@@ -479,6 +480,7 @@ function occultationPlans(promoted: boolean): BodyFramePlan[] {
       {
         camera: OCCULTATION_CAMERA,
         viewport: OCCULTATION_VIEWPORT,
+        presentedPx: OCCULTATION_VIEWPORT,
         exposureScale: EXPOSURE,
         annuli: DISC_ANNULI_HIGH,
         planetshine: PLANETSHINE_SOURCES_HIGH,
@@ -518,6 +520,7 @@ export async function captureOccultation(engine: RenderEngine): Promise<Captured
         const plan = renderer.render(view, {
           camera: OCCULTATION_CAMERA,
           viewport: CAPTURE_VIEWPORT,
+          presentedPx: CAPTURE_VIEWPORT,
           role: "eye",
           setting: "high",
           exposureScale: 5e-5,

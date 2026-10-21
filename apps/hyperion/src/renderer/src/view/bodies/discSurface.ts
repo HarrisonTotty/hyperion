@@ -21,7 +21,7 @@
  * {@link surfaceShares}) interpolated over the four nearest texel centres, counting surveyed texels
  * alone and renormalised, so the cells show no blocks; the gutter carries it across a face's edge.
  */
-import type { ClassMapDiscSurface, DiscSurface } from "../appearance/bodyAppearance";
+import type { ClassMapDiscSurface, DiscNormalMap, DiscSurface } from "../appearance/bodyAppearance";
 import type { PhotometricLaw } from "../appearance/law";
 import { TEXTURE_USAGE } from "../engine/gpuFlags";
 import type { TextureSpec } from "../engine/memory";
@@ -163,6 +163,31 @@ function acrossEdge(face: Face, x: number, y: number, faceTexels: number): Class
 }
 
 /**
+ * Visits each side texel of the one-texel gutter about every face of a cube-sphere map of N texels a
+ * face side, as the class map (R10.T10.d) and the normal map (R10.T10.g, `discNormals.ts`) lay it
+ * out: stored texel (x, y), x or y 0 or N + 1 and the other 1 to N, with the face texel across the
+ * edge whose value it holds, the neighbouring face's own edge texel there. The four corners are not
+ * visited.
+ */
+export function forEachGutterTexel(
+  faceTexels: number,
+  visit: (face: Face, x: number, y: number, from: ClassMapTexel) => void,
+): void {
+  for (const face of FACE_INDICES) {
+    for (let at = 1; at <= faceTexels; at += 1) {
+      for (const [x, y] of [
+        [0, at],
+        [faceTexels + 1, at],
+        [at, 0],
+        [at, faceTexels + 1],
+      ] as const) {
+        visit(face, x, y, acrossEdge(face, x, y, faceTexels));
+      }
+    }
+  }
+}
+
+/**
  * Packs a class map from each texel's weights, in the layout the shader reads, its gutter from
  * each face's neighbours.
  *
@@ -213,21 +238,11 @@ export function packClassMap(
     }
   }
   // The gutter: each side's texels from the neighbouring face's edge, the corners left empty.
-  for (const face of FACE_INDICES) {
-    for (let at = 1; at <= faceTexels; at += 1) {
-      for (const [x, y] of [
-        [0, at],
-        [faceTexels + 1, at],
-        [at, 0],
-        [at, faceTexels + 1],
-      ] as const) {
-        const from = acrossEdge(face, x, y, faceTexels);
-        for (let k = 0; k < classes; k += 1) {
-          map.data[storedOffset(map, face, x, y, k)] = map.data[weightOffset(map, from, k)] ?? 0;
-        }
-      }
+  forEachGutterTexel(faceTexels, (face, x, y, from) => {
+    for (let k = 0; k < classes; k += 1) {
+      map.data[storedOffset(map, face, x, y, k)] = map.data[weightOffset(map, from, k)] ?? 0;
     }
-  }
+  });
   return map;
 }
 
@@ -353,14 +368,18 @@ export function classMapTextureSpec(
 /**
  * A disc's class-map surface (R10.T10.d's construction): the map uploaded as its texture, with a law
  * per class and the uniform law for unsurveyed texels; the surface carries the map as `texels` too,
- * the texture's CPU copy, which the point regime integrates (R10.T10.f).
+ * the texture's CPU copy, which the point regime integrates (R10.T10.f), and the field's normal map
+ * where it is given one (R10.T10.g).
  *
  * @remarks
  * The texture is the caller's: it is made again, and this called again, after a device loss
- * (`onRestored`), and released with `releaseTexture` when the map is dropped.
+ * (`onRestored`), and released with `releaseTexture` when the map is dropped. So is the normal
+ * map's (`discNormals.ts`' `normalMapTexture` makes it), which the surface carries as it is given.
  *
  * @param laws - One per class of `map`, in its channel order.
  * @param elsewhere - The uniform `lawFor(p, q, template)`, for unsurveyed texels.
+ * @param normals - The field's normal map over the same survey, or `null` (the default) for none:
+ *   the datum's normal then shades everywhere.
  * @throws Error if `laws` are not one per class of `map`.
  */
 export function classMapSurface(
@@ -369,6 +388,7 @@ export function classMapSurface(
   map: ClassMapTexels,
   laws: ReadonlyArray<PhotometricLaw>,
   elsewhere: PhotometricLaw,
+  normals: DiscNormalMap | null = null,
 ): ClassMapDiscSurface {
   if (laws.length !== map.classes) {
     throw new Error(`a class map of ${map.classes} classes needs as many laws, got ${laws.length}`);
@@ -383,5 +403,5 @@ export function classMapSurface(
     { width: side, height: side, depthOrArrayLayers: classMapLayers(map.classes) },
     map.data,
   );
-  return { kind: "class-map", weights, texels: map, laws, elsewhere };
+  return { kind: "class-map", weights, texels: map, laws, elsewhere, normals };
 }

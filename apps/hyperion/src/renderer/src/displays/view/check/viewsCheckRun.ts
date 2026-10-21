@@ -258,6 +258,17 @@ export class ViewControls {
     return panel === null ? null : buttonIn(panel, label);
   }
 
+  /**
+   * The shown `EXPOSURE` panel's reading, its value, unit and automation level (`EV100 -1.0 MAN`,
+   * `EV100 15.1 INHIBITED · OPERATOR`), or `null` where none is shown.
+   */
+  exposureReading(): string | null {
+    const output = this.#document.querySelector(
+      "section.view-exposure:not([hidden]) .view-exposure__reading output",
+    );
+    return output === null ? null : output.textContent.trim();
+  }
+
   /** A meter of the shown `EXPOSURE METER` panel's `SELECT` (`AVG`, `LIT`, `DARK`), or `null`. */
   meterButton(label: string): HTMLButtonElement | null {
     const panel = this.#document.querySelector("section.view-meter:not([hidden])");

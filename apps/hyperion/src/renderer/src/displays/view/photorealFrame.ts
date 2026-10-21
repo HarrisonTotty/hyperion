@@ -53,7 +53,13 @@ export interface PhotorealInputs {
   readonly run: ViewRun;
   /** The frame's pose (`runPose`). */
   readonly pose: CameraPose;
+  /** The frame's own viewport, device px: the scene target's, at its internal scale. */
   readonly viewport: Viewport;
+  /**
+   * The size the view is presented at, device px, its canvas's (`PhotorealFrame.presentedPx`),
+   * whose centre pixel the lit bodies' hand-over to terrain measures (plan R10, R10.T10.g).
+   */
+  readonly presentedPx: Viewport;
   readonly setting: QualitySetting;
   /** The exposure scale (`exposureScale`), the target's pre-exposure. */
   readonly exposureScale: number;
@@ -231,6 +237,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
   return {
     camera,
     viewport,
+    presentedPx: inputs.presentedPx,
     role: run.camera.role,
     setting: inputs.setting,
     exposureScale,

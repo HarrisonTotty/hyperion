@@ -6,13 +6,17 @@
  * cells` pass against their in-fragment draws (T8.d's G11); its summed flux against the point's at
  * the 3 px switch, over phases and sub-pixel placements; a Saturn-like f = 0.098 disc's extents at
  * 100 px; a disc under a half-surveyed two-class map, and under a map of one class equal to the
- * uniform law against the uniform disc; a moon's night side lit by its planet's planetshine (T11).
+ * uniform law against the uniform disc; a moon's night side lit by its planet's planetshine (T11);
+ * and a class map's disc under the field's normal map (plan R10, R10.T10.g), of sloped cells and of
+ * the datum's own normals.
  */
 
 import { add, scale, vec3 } from "../geometry/vec3";
+import { checkerNormalMap, datumNormalMap, type FieldCell } from "../test/normalMapFixtures";
 import type { ClassMapDiscSurface } from "../view/appearance/bodyAppearance";
 import { PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
 import { lawFor } from "../view/appearance/phase";
+import { normalMapTexture } from "../view/bodies/discNormals";
 import {
   compositeDiscPixels,
   type CompositePixel,
@@ -155,6 +159,7 @@ async function drawDisc(
   const options = {
     camera,
     viewport,
+    presentedPx: viewport,
     exposureScale: extras.exposure ?? EXPOSURE,
     annuli: DISC_ANNULI_HIGH,
     planetshine: PLANETSHINE_SOURCES_HIGH,
@@ -711,6 +716,7 @@ export async function checkClassMap(engine: RenderEngine, checks: Checks): Promi
         reconstructed.expected.length > 0,
       `${String(reconstructed.expected.length)} pixels; every texel finite ${String(finite)}; worst error ${levelAgreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(levelAgreement.classes)}${levelAgreement.mismatches.length > 0 ? `: ${levelAgreement.mismatches.slice(0, 6).join("; ")}` : ""}`,
     );
+    await checkNormalMap(engine, renderer, checks, level, atLevel, reconstructed, made);
     const results: string[] = [];
     let worst = 0;
     for (const diameterPx of [20, 40]) {
@@ -747,9 +753,110 @@ export async function checkClassMap(engine: RenderEngine, checks: Checks): Promi
   } finally {
     for (const surface of made) {
       engine.releaseTexture(surface.weights);
+      if (surface.normals !== null) {
+        engine.releaseTexture(surface.normals.texture);
+      }
     }
     renderer.dispose();
   }
+}
+
+/** Whether a level-7 cell lies in the R10.T10.d map's survey, half of every face (i < 64). */
+function inLevelSurvey(cell: FieldCell): boolean {
+  return cell.i < 64;
+}
+
+/**
+ * R10.T10.g: the R10.T10.d disc's class map (`map`, its surface `plain`, drawn as `drawnPlain`)
+ * with the field's normal map at level 7 (128 texels a face, so that the shader reads the map's own
+ * N, not the class map's 64), surveyed where the class map is (half of every face): first a map of
+ * cells tilted ±12° in a checkerboard, against the CPU rasteriser at the texel tolerance, every
+ * texel finite; then a map of the datum's own normals, against the rasteriser of the same map and
+ * the disc without one by its flux.
+ *
+ * @remarks
+ * A map of the datum's normals draws the disc without one to 1.3 × 10⁻⁵ in flux on the CPU twin
+ * (2026-10-21), but not texel for texel: near the cube's edges its reconstruction tilts a normal by
+ * up to 2.7 × 10⁻³ rad at level 7 (the gutter's neighbouring texels stand at their own centres, not
+ * on the face's extended grid), which moves a texel at oblique light by up to about a percent (the
+ * record's deferred finding).
+ *
+ * @param made - The surfaces the caller releases; the two made here are added.
+ */
+async function checkNormalMap(
+  engine: RenderEngine,
+  renderer: LitBodyRenderer,
+  checks: Checks,
+  map: ClassMapTexels,
+  plain: ClassMapDiscSurface,
+  drawnPlain: Drawn,
+  made: ClassMapDiscSurface[],
+): Promise<void> {
+  const viewport = drawnPlain.viewport;
+  const sloped = classMapSurface(
+    engine,
+    "smoke class map with sloped cells",
+    map,
+    plain.laws,
+    plain.elsewhere,
+    normalMapTexture(
+      engine,
+      "smoke normal map of sloped cells",
+      checkerNormalMap(7, 12 * RAD_PER_DEG, 0.9, inLevelSurvey),
+    ),
+  );
+  made.push(sloped);
+  const drawnSloped = await drawDisc(
+    engine,
+    renderer,
+    viewport,
+    40,
+    60,
+    TILTED_OBLATE,
+    [0, 0],
+    CAMERA,
+    null,
+    { surface: sloped, rotation: TILTED, texels: map },
+  );
+  const finite = drawnSloped.texels.every((value) => Number.isFinite(value));
+  const agreement = texelAgreement(drawnSloped);
+  checks.check(
+    "R10.T10.g a disc under a half-surveyed class map with a normal map of sloped cells equals the CPU rasteriser's, every texel finite",
+    finite && agreement.worst <= 1 && agreement.classes && drawnSloped.expected.length > 0,
+    `${String(drawnSloped.expected.length)} pixels; every texel finite ${String(finite)}; worst error ${agreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(agreement.classes)}; the slopes move the flux by ${(texelFlux(drawnSloped) / texelFlux(drawnPlain) - 1).toExponential(2)}${agreement.mismatches.length > 0 ? `: ${agreement.mismatches.slice(0, 6).join("; ")}` : ""}`,
+  );
+  const datum = classMapSurface(
+    engine,
+    "smoke class map with the datum's normals",
+    map,
+    plain.laws,
+    plain.elsewhere,
+    normalMapTexture(
+      engine,
+      "smoke normal map of the datum",
+      datumNormalMap(7, 0.9, inLevelSurvey),
+    ),
+  );
+  made.push(datum);
+  const drawnDatum = await drawDisc(
+    engine,
+    renderer,
+    viewport,
+    40,
+    60,
+    TILTED_OBLATE,
+    [0, 0],
+    CAMERA,
+    null,
+    { surface: datum, rotation: TILTED, texels: map },
+  );
+  const datumAgreement = texelAgreement(drawnDatum);
+  const fluxMoved = texelFlux(drawnDatum) / texelFlux(drawnPlain) - 1;
+  checks.check(
+    "R10.T10.g a normal map of the datum's normals draws the disc without one: its texels the CPU rasteriser's, its flux the plain disc's to 1e-3",
+    datumAgreement.worst <= 1 && datumAgreement.classes && Math.abs(fluxMoved) <= 1e-3,
+    `${String(drawnDatum.expected.length)} pixels; worst error ${datumAgreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(datumAgreement.classes)}; flux against the disc without one ${fluxMoved.toExponential(2)}`,
+  );
 }
 
 /** The sprite materials whose row's z is the sprite's depth (decision-r07-t8a, item 2). */
@@ -840,6 +947,7 @@ export async function checkPhotorealFrame(engine: RenderEngine, checks: Checks):
     const plan = renderer.render(view, {
       camera: CAMERA,
       viewport,
+      presentedPx: viewport,
       role: "eye",
       setting: "high",
       exposureScale: 1e-4,

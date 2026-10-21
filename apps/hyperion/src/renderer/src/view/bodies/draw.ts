@@ -38,7 +38,12 @@
  * the promotion: its regime is `terrain`, drawn as a mesh body is, its figure the reference surface
  * beneath its terrain, discarded where its survey's coverage mask holds the ground surveyed
  * (R10.T10.c), and its terrain the view's own (`PhotorealFrame.terrain`); a view that draws none
- * draws its figure whole, as a mesh body's.
+ * draws its figure whole, as a mesh body's. The hand-over counts the pixels the view is presented
+ * at ({@link BodyFrameOptions.presentedPx}, R10.T10.g), R07's 3 px switch the frame's own.
+ *
+ * A class-map disc whose surface carries the field's normal map (plan R10, R10.T10.g) shades its
+ * surveyed ground with those normals, in its draws and in the point it switches with: its records'
+ * flag (`packDiscRecords`' row 24) and the normal map's texture at binding 14 (`surfaceNormals`).
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
@@ -195,7 +200,15 @@ export interface MeshBodyCoverage {
 /** What the plan needs of the view. */
 export interface BodyFrameOptions {
   readonly camera: ProjectionCamera;
+  /** The frame's own viewport, device px: the scene target's, at the frame's internal scale. */
   readonly viewport: Viewport;
+  /**
+   * The size the view is presented at, device px, its canvas's, whose centre pixel the hand-over to
+   * terrain measures (plan R10, R10.T10.g; decision-r10-t16-leans §13), so that the resolution
+   * controller's scale never moves it: `viewport` itself where the frame is drawn at the presented
+   * size. R07's 3 px switch keeps `viewport`.
+   */
+  readonly presentedPx: Viewport;
   /** The exposure scale the target is pre-exposed with (`exposureScale`), 1 ÷ (cd/m²). */
   readonly exposureScale: number;
   /** The eclipse term's annuli: `DISC_ANNULI_HIGH` or `DISC_ANNULI_LOW`. */
@@ -320,9 +333,10 @@ function occludersOf(
  * spheroid the law integrated over its figure, (E ÷ π)(a ÷ Δ)² A′ f(α) K (`bodyReflection`, A′ the
  * disc's scaled A), so that the point and the disc draw one flux. Under a class map, where the
  * body's rotation is known, each light's term is the map integrated over the figure by the disc's
- * own arithmetic (`classMapPointReflection`, plan R10, R10.T10.f), so that the point meets the
- * patterned disc it switches with; otherwise it is the photometry's law, which equals the map's
- * `elsewhere`. Each star's light is cut by its eclipse over the disc the camera sees
+ * own arithmetic (`classMapPointReflection`, plan R10, R10.T10.f), on its normal map's slopes where
+ * it carries one (R10.T10.g), so that the point meets the patterned disc it switches with;
+ * otherwise it is the photometry's law, which equals the map's `elsewhere`. Each star's light is
+ * cut by its eclipse over the disc the camera sees
  * (`discEclipseVisible`, T10.b), the share of the light the disc regime's pixels sum, so that the
  * flux stays continuous at the 3 px switch through an eclipse; it takes the photometry's limb
  * share under a class map too. Each planetshine source adds its own term, as a point source at its
@@ -520,8 +534,12 @@ function pointSpriteOf(
  *
  * @remarks
  * A disc whose relief subtends the photorealistic style's τ on `options.setting` (R10's
- * `handoverTauPx`) at its limb, in the view's centre pixels, which the 3 px switch measures, is
- * handed over to terrain (`handOverRegimes`, plan R10, R10.T10.e). A disc whose footprint
+ * `handoverTauPx`) at its limb, in the centre pixels of the size the view is presented at
+ * (`options.presentedPx`, plan R10, R10.T10.g), is handed over to terrain (`handOverRegimes`, plan
+ * R10, R10.T10.e). The two switches now count different pixels: R07's 3 px switch (`litRegimes`)
+ * the frame's own (`options.viewport`), in which the disc's summed flux meets the point's, and the
+ * hand-over the presented ones, so that the resolution controller's internal scale, which moves the
+ * first, never moves the second (decision-r10-t16-leans §13). A disc whose footprint
  * overlaps one of `options.depthWriters`, a mesh body or a body handed over is promoted to a mesh
  * (`promoteOverlapping`). A mesh body's limb, a handed-over body's included, is drawn in the
  * sequence as a disc's is, so the order takes it as a disc (Design note 2); its figure's pixels are
@@ -557,11 +575,13 @@ export function planLitBodies(
       footprints.set(sphere.id, footprint);
     }
   }
+  // The 3 px switch counts the frame's own pixels, where its flux match is drawn; the hand-over
+  // the presented ones, as the field's want does (R10.T10.g).
   const handed = handOverRegimes(
     litRegimes(spheres, camera, viewport, previous),
     spheres,
     handoverTauPx("photorealistic", options.setting),
-    pixelAngleRad(camera, viewport),
+    pixelAngleRad(camera, options.presentedPx),
     previous,
   );
   const regimes = promoteOverlapping(handed, footprints, options.depthWriters ?? []);
@@ -677,15 +697,20 @@ const DISC_SOURCE = LIT_SOURCE + bodyDiscDrawWgsl;
 /** The group 2 binding of the first of the body's atmosphere tables (`bodyDisc.wgsl`), past 0–5. */
 const ATMOSPHERE_FIRST_BINDING = 6;
 
+/** The group 2 binding of a class map's normal map (`bodyDisc.wgsl`'s `surface_normals`, R10.T10.g). */
+const SURFACE_NORMALS_BINDING = 14;
+
 /**
- * The disc's textures: the frame's phase table, its class map (any texture where uniform), and its
+ * The disc's textures: the frame's phase table, its class map (any texture where uniform), its
  * body's atmosphere tables at bindings 6 to 12 (plan R08, R08.T9.b), the one-texel defaults for a
- * body without one.
+ * body without one, and its class map's normal map at binding 14 (plan R10, R10.T10.g), any
+ * texture where it has none (its record's flag then 0, and the texture unread).
  */
 const DISC_TEXTURES: ReadonlyArray<TextureBindingSpec> = [
   { name: "phaseFactorTable", binding: 1, sampleType: "unfilterable-float" },
   { name: "classWeights", binding: 2, viewDimension: "2d-array" },
   ...surfaceLightingTextures(ATMOSPHERE_FIRST_BINDING),
+  { name: "surfaceNormals", binding: SURFACE_NORMALS_BINDING, viewDimension: "2d-array" },
 ];
 
 /**
@@ -874,7 +899,10 @@ interface DeviceResources {
   readonly sprites: BufferHandle[];
   table: TextureHandle;
   tableRows: number;
-  /** A texel of no weight, bound where a disc's surface is uniform and never read. */
+  /**
+   * A texel of no weight, bound where a disc's surface is uniform, and where it carries no normal
+   * map (R10.T10.g), and never read.
+   */
   readonly noClassMap: TextureHandle;
   /**
    * A coverage mask of no surveyed cell, one texel a face, bound where a mesh body has no survey
@@ -1089,8 +1117,19 @@ export class LitBodyRenderer {
   }
 
   /**
-   * The textures a record's draws bind: the frame's phase table, its class map and its body's
-   * atmosphere tables, or the defaults of a body without one (R08.T9.b).
+   * The normal map a record's draws bind (R10.T10.g): its class map's, or, where it has none, the
+   * texel of no weight, which its record's flag (row 24's w, 0) leaves unread.
+   */
+  #surfaceNormals(surface: DrawnDiscSurface): TextureHandle {
+    return surface.kind === "class-map" && surface.normals !== null
+      ? surface.normals.texture
+      : this.#resources.noClassMap;
+  }
+
+  /**
+   * The textures a record's draws bind: the frame's phase table, its class map, its body's
+   * atmosphere tables, or the defaults of a body without one (R08.T9.b), and its class map's normal
+   * map (R10.T10.g).
    */
   #recordTextures(record: DiscRecord): Readonly<Record<string, TextureHandle>> {
     const resources = this.#resources;
@@ -1098,6 +1137,7 @@ export class LitBodyRenderer {
       phaseFactorTable: resources.table,
       classWeights: this.#classWeights(record.surface),
       ...surfaceLightingDrawTextures(record.atmosphere ?? resources.noAtmosphere),
+      surfaceNormals: this.#surfaceNormals(record.surface),
     };
   }
 
@@ -1186,6 +1226,8 @@ export class LitBodyRenderer {
           phase_factor_table: resources.table,
           class_weights: resources.noClassMap,
           ...surfaceLightingKernelTextures(resources.noAtmosphere),
+          // Reached through `shade`, never read: the pass's discs are uniform (R10.T10.g).
+          surface_normals: resources.noClassMap,
         },
         storage: {},
       },

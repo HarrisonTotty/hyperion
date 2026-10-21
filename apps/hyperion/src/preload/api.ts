@@ -942,12 +942,18 @@ export interface ViewsCheckLaunch {
   readonly smoke: boolean;
   /** Where the results file goes, or `null` for the default. */
   readonly out: string | null;
-  /**
-   * Whether the launch runs the terrain run (`--terrain`, plan R10, R10.T16.d;
-   * decision-r10-t16-contracts §6) on `TERRAIN TEST` in place of T20's phases on `PHASE TEST`.
-   */
-  readonly terrain: boolean;
+  /** The run the launch makes ({@link ViewsCheckRunKind}). */
+  readonly run: ViewsCheckRunKind;
 }
+
+/**
+ * The run a views-check launch makes: T20's phases on `PHASE TEST` (`several-views`, plan R07,
+ * T20); the terrain run on `TERRAIN TEST` (`terrain`, `--terrain`, plan R10, R10.T16.d;
+ * decision-r10-t16-contracts §6); or the terrain run's check-only hand-over variant in its place
+ * (`handover`, `--terrain --handover`, plan R10, R10.T10.g; decision-r10-t16-leans §1), the three
+ * hand-over looks on `TERRAIN TEST`'s world ({@link HandoverCheckRecord}).
+ */
+export type ViewsCheckRunKind = "several-views" | "terrain" | "handover";
 
 /**
  * The check's phases, each a configuration of `VIEW` held while it is measured (R07.T20): the
@@ -1393,6 +1399,196 @@ export interface TerrainCheckRecord {
 }
 
 /**
+ * The hand-over check's looks (plan R10, R10.T10.g; decision-r10-t16-leans §1), each a check-only
+ * kept scene that a `--handover` launch alone offers: the survey's middle at incidence i and
+ * emission e, the phase α = i + e, in one plane.
+ */
+export type HandoverLookName =
+  /** `HAND-OVER 30°`: i = e = 15°, judged. */
+  | "handover-30"
+  /** `HAND-OVER 90°`: i = e = 45°, judged. */
+  | "handover-90"
+  /** `HAND-OVER TERMINATOR`: i = 78°, e = 12°, recorded and not judged. */
+  | "handover-terminator";
+
+/**
+ * How a frame drew the look's body, by the materials of its scene target's draws: its disc
+ * (`bodies:disc…`), its smooth figure alone (`bodies:smoothMesh`, the hand-over's mesh before the
+ * terrain's first draw), its terrain (`terrain-lit-…`), or none of them.
+ */
+export type HandoverRegime = "disc" | "figure" | "terrain" | "none";
+
+/**
+ * A switch the hand-over check compares the frames either side of: the regime's switch from the
+ * disc (the disc's last frame and the first after it), the terrain's first draw (the disc's last
+ * frame and the terrain's first), and the hand-back (the terrain's last frame and the disc's first
+ * after it).
+ */
+export type HandoverSwitchName = "disc-to-figure" | "disc-to-terrain" | "terrain-to-disc";
+
+/** The angles at the survey's middle, from its datum normal, deg. */
+export interface HandoverAngles {
+  /** The sun's incidence i. */
+  readonly incidenceDeg: number;
+  /** The camera's emission e. */
+  readonly emissionDeg: number;
+  /** The phase α, between the sun and the camera. */
+  readonly phaseDeg: number;
+}
+
+/** A frame the hand-over check read back. */
+export interface HandoverFrameRecord {
+  /** The animation frame it was drawn in, `performance.now()` ms. */
+  readonly atMs: number;
+  /** The script's time it drew, s. */
+  readonly scriptS: number;
+  readonly regime: HandoverRegime;
+  /** The camera's distance to the body's limb over the hand-over range. */
+  readonly rangeRatio: number;
+  /** Its scene target's size, px (the internal size). */
+  readonly target: ViewsCheckCanvas;
+  /** The body's pixels, by the target's meter classes (its lit and unlit body). */
+  readonly bodyPixels: number;
+  /**
+   * Of those, the pixels whose ray through the centre misses the datum spheroid: the camera
+   * model's self-check (the limb's relief alone may miss).
+   */
+  readonly bodyMisses: number;
+  /** The body's pixels whose ray meets a surveyed cell. */
+  readonly surveyPixels: number;
+  /** The angles at the survey's middle from this frame's camera. */
+  readonly angles: HandoverAngles;
+}
+
+/**
+ * A mean of the HDR's Rec. 709 luminance over each frame's own pixels, before and after, in the
+ * scene target's units (before the exposure's scale); 0 over no pixel.
+ */
+export interface HandoverOwnMeans {
+  readonly pixelsBefore: number;
+  readonly pixelsAfter: number;
+  readonly meanBefore: number;
+  readonly meanAfter: number;
+}
+
+/**
+ * The same mean over the pixels both frames share: the same pixel of the body, and for the survey
+ * and a cell the same pixel assigned to the same cell; 0 over no pixel.
+ */
+export interface HandoverSharedMeans {
+  readonly pixels: number;
+  readonly meanBefore: number;
+  readonly meanAfter: number;
+}
+
+/**
+ * One surveyed cell across a switch: the mean over the pixels both frames assign to it, which the
+ * main process judges (decision-r10-t16-leans §1: at least 2 such pixels, no floor; a cell dark on
+ * one side counted, never dropped).
+ */
+export interface HandoverTexelRecord {
+  /** The cell as its coverage-mask texel: face × N² + row j × N + column i, N = 2^level. */
+  readonly texel: number;
+  /** The pixels both frames assign to it, at least 1. */
+  readonly sharedPixels: number;
+  readonly meanBefore: number;
+  readonly meanAfter: number;
+}
+
+/** The frames either side of a switch, and what changed between them. */
+export interface HandoverComparisonRecord {
+  readonly name: HandoverSwitchName;
+  readonly before: HandoverFrameRecord;
+  readonly after: HandoverFrameRecord;
+  /** The animation frames from `before` to `after`: 1 where they are consecutive frames. */
+  readonly framesApart: number;
+  /** Whether `before` was the last frame drawn in its regime, and `after` the first in its own. */
+  readonly beforeWasLast: boolean;
+  readonly afterWasFirst: boolean;
+  readonly body: { readonly own: HandoverOwnMeans; readonly shared: HandoverSharedMeans };
+  readonly survey: { readonly own: HandoverOwnMeans; readonly shared: HandoverSharedMeans };
+  /** Every surveyed cell with a pixel both frames assign to it, in texel order. */
+  readonly texels: ReadonlyArray<HandoverTexelRecord>;
+}
+
+/** The look's exposure: `AUTO` on `LIT` until it settled, then `INHIBIT`, and whether that held. */
+export interface HandoverExposureRecord {
+  /** The EV100 the exposure was locked at, as `EXPOSURE` read it; `null` where it was not. */
+  readonly lockedEv100: number | null;
+  /** `EXPOSURE`'s reading once locked, and at the look's end; `null` where unread. */
+  readonly lockedReading: string | null;
+  readonly endReading: string | null;
+  /** Whether the lock held: `INHIBITED · OPERATOR` at the locked EV100 from the lock to the end. */
+  readonly held: boolean;
+}
+
+/** One look of the hand-over check. */
+export interface HandoverLookRecord {
+  readonly name: HandoverLookName;
+  /** Its kept scene's name. */
+  readonly scene: string;
+  /** Whether the verdict judges it (30° and 90°) or records it (the terminator's). */
+  readonly judged: boolean;
+  /** The angles asked, and those at the hand-over range's distance. */
+  readonly nominal: HandoverAngles;
+  readonly atRange: HandoverAngles;
+  readonly exposure: HandoverExposureRecord;
+  /** The cells the session's coverage held surveyed when the approach began. */
+  readonly surveyedCells: number;
+  /** Surveyed cells whose centre's direction did not map back to their texel (0 expected). */
+  readonly mappingMismatches: number;
+  /**
+   * The script's time of the first frame of each regime as the frames drew it, s: the figure's
+   * (or the terrain's, where it drew at the switch), the terrain's, and the disc's after it;
+   * `null` where none was seen.
+   */
+  readonly switchesS: {
+    readonly figure: number | null;
+    readonly terrain: number | null;
+    readonly disc: number | null;
+  };
+  /** The switches' comparisons, as many as were read: three for a look that ran whole. */
+  readonly comparisons: ReadonlyArray<HandoverComparisonRecord>;
+  /** Why the look could not be read whole: the harness's failures, each a reason. */
+  readonly failures: ReadonlyArray<string>;
+}
+
+/**
+ * What the hand-over check's renderer reports (plan R10, R10.T10.g), for its results file: the
+ * world, the range, the sizes and each look's comparisons.
+ */
+export interface HandoverCheckRecord {
+  /** The world the looks were made on: `TERRAIN TEST`'s now, a served world's for T15. */
+  readonly world: string;
+  readonly devicePixelRatio: number;
+  /** The primary's canvas, px (the presented size), and its scene target's (the internal size). */
+  readonly canvas: ViewsCheckCanvas;
+  readonly target: ViewsCheckCanvas;
+  /** The body's realised relief, m, the τ it hands over at, px, and the pixel, rad. */
+  readonly reliefM: number;
+  readonly tauPx: number;
+  readonly radPerPx: number;
+  /** The hand-over range, m, against the camera's distance to the limb. */
+  readonly rangeM: number;
+  /** The level of the cells the texels are, 6 on `TERRAIN TEST`. */
+  readonly cellLevel: number;
+  /**
+   * The camera's line: its rate, 1/s (the fraction of its distance to the limb it closes or opens a
+   * second), and its ratios of the range, and its hold, s.
+   */
+  readonly approach: {
+    readonly ratePerS: number;
+    readonly startRatio: number;
+    readonly closestRatio: number;
+    readonly holdS: number;
+    readonly endRatio: number;
+  };
+  readonly looks: ReadonlyArray<HandoverLookRecord>;
+  /** Every engine fault over the run, timed. */
+  readonly faults: ReadonlyArray<TerrainCheckFault>;
+}
+
+/**
  * The views check's narrow functions (plan R07, T20), present only when the client was launched
  * with `--views-check`; the main process checks each call's sender and arguments.
  */
@@ -1417,6 +1613,12 @@ export interface ViewsCheckApi {
    * the main process judges it, and a run whose checks fail ends with 1 whatever its end says.
    */
   writeTerrainResults(record: TerrainCheckRecord): Promise<SpikeResultsPaths>;
+  /**
+   * Writes a hand-over check's results file and its summary (R10.T10.g) from its renderer's
+   * record, refused on any other launch; the main process judges it, and a run whose verdict fails
+   * ends with 1 whatever its end says.
+   */
+  writeHandoverResults(record: HandoverCheckRecord): Promise<SpikeResultsPaths>;
   /**
    * Saves a picture of the page under the run's captures, named for the phase recording and
    * `label` (lower case letters, digits and hyphens, at most 48): a terrain run's look at a moment

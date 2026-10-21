@@ -6,6 +6,18 @@
 // rest, the shares reconstructed from the map's texels (`surface_shares`, R10.T10.d). The
 // TypeScript twin is `view/bodies/discShading.ts`.
 //
+// A class map may carry the field's normal map (plan R10, R10.T10.g; decision-r10-t16-leans §1):
+// its surveyed ground is then shaded with the field's own cell-scale slopes, as the terrain's
+// coarsest patches shade it, so that disc and terrain share them at the hand-over. Two normals
+// meet at each hit: the datum's ν, the spheroid's, and the shading normal n′, the map's there
+// (`shading_normal`) or ν where the map holds none. As `terrainLit.wgsl`'s `shade_terrain` takes
+// them: the law's μ and μ₀ on n′, μ floored at half the datum's, so that a cell whose slope faces
+// away near the limb never draws black; each star's horizon term on n′ with the datum's tangent
+// plane as the local horizon, so that the body's curvature still sets the terminator; R08's
+// lookups on ν; the sky's light by (1 + n′ · ν) ÷ 2; planetshine on n′. The hit, the limb, the
+// eclipse, the ring and the phase are the datum's, which have no normal. With no normal map
+// n′ = ν, the floor and the cut are inactive and every value is as before.
+//
 // A library composed by concatenation after frame.wgsl, preciseTrig.wgsl, R08's common.wgsl,
 // oblate.wgsl and surfaceLighting.wgsl (plan R08, R08.T9.b), litBody.wgsl and cubeTexel.wgsl (the
 // cube sphere's texel lookup, moved out of this file by R10.T11), with no entry point of
@@ -42,7 +54,8 @@
 //      illuminance face-on per channel (lx), w its radius ÷ a; then its annuli (`DiscAnnuli`'s outer
 //      edges and fluxes) for r, g and b, two rows each;
 //   22 + k, occluder k: its centre from the body's centre ÷ a; w, its radius ÷ a;
-//   24, 25  a class map's body-fixed x and y axes (z their cross product);
+//   24, 25  a class map's body-fixed x and y axes (z their cross product); 24's w 1 where it
+//      carries the field's normal map (`surface_normals`, R10.T10.g), 0 otherwise;
 //   26 + k, class k (law k + 1): its A per channel, scaled; w, its L(0);
 //   42 to 45  the classes' rows of `phase_factor_table`, four a row;
 //   46  the planetshine sources (x);
@@ -74,6 +87,14 @@
 @group(2) @binding(10) var atmosphere_last_absorber_pressure_column : texture_2d_array<f32>;
 @group(2) @binding(11) var atmosphere_absorber_curves : texture_2d<f32>;
 @group(2) @binding(12) var atmosphere_irradiance : texture_2d_array<f32>;
+
+// The class map's normal map (plan R10, R10.T10.g; `discNormals.ts`): the class map's layout at the
+// field's level, N = 2ᴸ texels a face's side, 32 to 256, (N + 2) × (N + 2) texels a layer, one layer
+// a face, each `rg16float` texel the octahedral pair of a body-fixed unit normal, the gutter the
+// neighbouring faces' edge texels, its corners and every unsurveyed texel the pair (2, 2); read by
+// texel (`textureLoad`) and reconstructed here (`shading_normal`) where row 24's w is 1; any one
+// texture where it is 0, unread.
+@group(2) @binding(14) var surface_normals : texture_2d_array<f32>;
 
 const DISC_ROWS : u32 = 52u;
 const FIRST_LIGHT_ROW : u32 = 6u;
@@ -133,6 +154,8 @@ struct Body {
   axis_x : vec3f,
   axis_y : vec3f,
   axis_z : vec3f,
+  // Whether the class map carries the field's normal map (row 24's w, R10.T10.g).
+  normals : bool,
 }
 
 fn stretch_along(body : Body, x : vec3f) -> vec3f {
@@ -148,9 +171,11 @@ fn body_of() -> Body {
   body.stretch = 1.0 / pole_row.w;
   body.radius = centre_row.w;
   body.scaled_centre = stretch_along(body, body.centre);
-  body.axis_x = to_view(disc_row(AXES_ROW).xyz);
+  let axes_row = disc_row(AXES_ROW);
+  body.axis_x = to_view(axes_row.xyz);
   body.axis_y = to_view(disc_row(AXES_ROW + 1u).xyz);
   body.axis_z = cross(body.axis_x, body.axis_y);
+  body.normals = axes_row.w > 0.5;
   return body;
 }
 
@@ -238,6 +263,91 @@ fn surface_shares(body : Body, q : vec3f, classes : u32) -> array<f32, SURFACE_L
   return sum;
 }
 
+// A normal-map texel holds no normal where its first coordinate's magnitude is above this
+// (`discNormals.ts`' NO_NORMAL_ABOVE): the sentinel pair (2, 2), outside every octahedral pair's
+// [−1, 1]².
+const NO_NORMAL_ABOVE : f32 = 1.5;
+
+// +1 for x ≥ 0, −1 otherwise: `terrainPatch.wgsl`'s `signNotZero`, under the disc's own name since
+// the terrain's library is not composed with this one.
+fn disc_sign_not_zero(v : vec2f) -> vec2f {
+  return select(vec2f(1.0), vec2f(-1.0), v < vec2f(0.0));
+}
+
+// The unit vector of an octahedral pair: `terrainPatch.wgsl`'s `decodeOctahedral`, operation for
+// operation (the bake's `decode_octahedral`; its twin `shadingNormal.ts`' `decodeOctahedral`).
+fn disc_decode_octahedral(e : vec2f) -> vec3f {
+  let z = 1.0 - abs(e.x) - abs(e.y);
+  var xy = e;
+  if (z < 0.0) {
+    xy = (1.0 - abs(e.yx)) * disc_sign_not_zero(e);
+  }
+  return normalize(vec3f(xy, z));
+}
+
+// The decoded body-fixed normal of the normal map's face texel `texel` (the gutter's at −1 and N)
+// of `face`'s layer in xyz, w 1; or w 0 where it holds none.
+fn stored_normal(texel : vec2i, face : u32) -> vec4f {
+  let pair = textureLoad(surface_normals, vec2u(texel + vec2i(1)), face, 0).xy;
+  if (abs(pair.x) > NO_NORMAL_ABOVE) {
+    return vec4f(0.0);
+  }
+  return vec4f(disc_decode_octahedral(pair), 1.0);
+}
+
+// The shading normal n′ at a hit, in view space, and whether it is the normal map's.
+struct ShadingNormal {
+  normal : vec3f,
+  mapped : bool,
+}
+
+// The shading normal at the point `q` (from the body's centre ÷ a) whose datum normal is `datum`
+// (R10.T10.g; `discNormals.ts`' `normalMapNormalAt`): `datum` where the record carries no normal
+// map or the texel holding the point's cube-sphere direction holds none; otherwise the normal map's
+// survey-masked bilinear reconstruction on the decoded vectors, as the class map's shares are
+// reconstructed (`surface_shares`) at the map's own N: each of the four texels whose centres are
+// nearest, the gutter's at a face's edge, by its bilinear weight, those holding a normal alone,
+// summed and renormalised (the holding texel's own where the sum vanishes), filtered on the vectors
+// and never on the pairs, for the octahedron's fold; then turned from the body-fixed axes into the
+// view's by the record's (rows 24, 25 and their cross product).
+fn shading_normal(body : Body, q : vec3f, datum : vec3f) -> ShadingNormal {
+  var out : ShadingNormal;
+  out.normal = datum;
+  out.mapped = false;
+  if (!body.normals) {
+    return out;
+  }
+  let d = normalize(stretch_along(body, q));
+  let p = vec3f(dot(d, body.axis_x), dot(d, body.axis_y), dot(d, body.axis_z));
+  let at = cube_face_uv(p);
+  // N, the texels along a face's side, the gutter apart.
+  let n = textureDimensions(surface_normals).x - 2u;
+  let last = f32(n - 1u);
+  let st_n = vec2f(uv_to_st(at.uv.x), uv_to_st(at.uv.y)) * f32(n);
+  let own = stored_normal(vec2i(clamp(floor(st_n), vec2f(0.0), vec2f(last))), at.face);
+  if (own.w == 0.0) {
+    return out;
+  }
+  let corner_at = st_n - 0.5;
+  let first = vec2i(clamp(floor(corner_at), vec2f(-1.0), vec2f(last)));
+  let f = corner_at - vec2f(first);
+  var sum = vec3f(0.0);
+  for (var corner = 0u; corner < 4u; corner = corner + 1u) {
+    let step = vec2i(i32(corner & 1u), i32(corner >> 1u));
+    let one = stored_normal(first + step, at.face);
+    if (one.w == 0.0) {
+      continue;
+    }
+    let b = select(1.0 - f.x, f.x, step.x == 1) * select(1.0 - f.y, f.y, step.y == 1);
+    sum = sum + b * one.xyz;
+  }
+  let size = length(sum);
+  let n_fixed = select(own.xyz, sum / size, size > 0.0);
+  out.normal = normalize(n_fixed.x * body.axis_x + n_fixed.y * body.axis_y + n_fixed.z * body.axis_z);
+  out.mapped = true;
+  return out;
+}
+
 // Law m of the disc: 0 from rows 4 and 5, class m − 1 from its rows.
 fn surface_law(m : u32) -> LunarLambert {
   var law : LunarLambert;
@@ -320,11 +430,13 @@ struct Shaded {
   lit : bool,
 }
 
-// The radiance of the point `q` (from the body's centre ÷ a) seen along `ray`, pre-exposed.
+// The radiance of the point `q` (from the body's centre ÷ a) seen along `ray`, pre-exposed: lit on
+// its shading normal n′ (`shading_normal`, R10.T10.g) and its datum's ν, as the header says.
 fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
   let stretch2 = body.stretch * body.stretch;
+  // The datum's normal ν, the spheroid's.
   let normal = normalize(q + (stretch2 - 1.0) * dot(q, body.pole) * body.pole);
-  let mu = dot(normal, -ray);
+  let mu_datum = dot(normal, -ray);
   let counts = disc_row(3u);
   let misc = disc_row(5u);
   let annulus_count = u32(misc.y);
@@ -332,9 +444,19 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
   var out : Shaded;
   out.radiance = vec3f(0.0);
   out.lit = false;
-  if (mu <= 0.0) {
+  if (mu_datum <= 0.0) {
     return out;
   }
+  let shading = shading_normal(body, q, normal);
+  let tilted = shading.normal;
+  // The law's μ on n′, floored at half the datum's, so that a cell whose slope faces away near the
+  // limb never draws black (R10.T10.g); μ itself wherever it is at least that, and on the datum.
+  let mu = max(dot(tilted, -ray), 0.5 * mu_datum);
+  // R08's sky light on a surface tilted by β from the datum: (1 + cos β) ÷ 2 of an isotropic sky
+  // (Bruneton 2017, `GetSunAndSkyIrradiance`'s `(1 + dot(normal, point) / r) × 0.5`: an isotropic
+  // sky seen by a tilted plane), as the terrain takes it (`shade_terrain`'s `sky_factor`); 1 on the
+  // datum.
+  let sky_tilt = select(1.0, 0.5 * (1.0 + dot(tilted, normal)), shading.mapped);
   var shares = surface_shares(body, q, laws - 1u);
   // The surface's mean A, for R08's sky light on the Lambert share's flat term.
   var mean_a = vec3f(0.0);
@@ -354,17 +476,31 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
     let to_star = to_view(place.xyz) * place.w - q;
     let distance = length(to_star);
     let towards = to_star / distance;
-    let mu0 = dot(normal, towards);
-    // R08's sky light (R08.T9.b): the star's illuminance times the sky's irradiance at its own μ₀,
-    // its light slot j's, on the Lambert share's flat term of the surface's mean A; added before
-    // the horizon's `continue`, so that a star just set still lights the twilight ground.
-    let sky = atmosphere_sky_irradiance(0.0, mu0, local.latitude, j);
+    // The star's cosine against the datum, R08's lookups', and against n′, the law's.
+    let mu0_datum = dot(normal, towards);
+    let mu0 = select(mu0_datum, dot(tilted, towards), shading.mapped);
+    // R08's sky light (R08.T9.b): the star's illuminance times the sky's irradiance at its own μ₀
+    // against the datum, its light slot j's, on the Lambert share's flat term of the surface's mean
+    // A, by the tilt's factor; added before the horizon's `continue`, so that a star just set still
+    // lights the twilight ground.
+    let sky = atmosphere_sky_irradiance(0.0, mu0_datum, local.latitude, j) * sky_tilt;
     // The horizon term: the star's whole disc over the element's tangent plane (Design note 6), its
     // angle from the normal by `preciseAtan2` of the cross and dot products, never WGSL's `acos`.
     // Its bound near μ₀ = 0 is atan2's 4,096 ULP, 4.9 × 10⁻⁴ rad, 10% of the Sun's angular radius at
     // 1 au, and Mesa's is 6.75 × 10⁻⁵ low just above μ₀ = 0 and as much high just below (R07.T6.d).
-    let phi = preciseAtan2(length(cross(normal, towards)), mu0);
-    let horizon = sphere_irradiance(distance / light.w, phi, 0.0);
+    // On n′ the datum's tangent plane is the local horizon (R10.T10.g; `horizon.wgsl`'s
+    // `element_horizon` at a horizon of 0): η = φ_ν − φ′ cuts the star's disc at its true distance
+    // from the datum's plane, π ÷ 2 − φ_ν, so that the body's curvature still sets the terminator for
+    // a slope that faces the star. The share cut off is exact and the light through it weighed about
+    // n′, an error of at most (2 ÷ 3π) ρ sin φ (1 − cos β) of face-on, β the angle at the star
+    // between the great circles to n′ and ν (decision-r10-t8b §1). n′'s own plane (η 0) where it
+    // hides more.
+    let phi_datum = preciseAtan2(length(cross(normal, towards)), mu0_datum);
+    var phi = phi_datum;
+    if (shading.mapped) {
+      phi = preciseAtan2(length(cross(tilted, towards)), mu0);
+    }
+    let horizon = sphere_irradiance(distance / light.w, phi, max(phi_datum - phi, 0.0));
     if (horizon <= 0.0 && !any(sky > vec3f(0.0))) {
       continue;
     }
@@ -410,9 +546,9 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
     // the surface's laws by its share.
     let reflectance = surface_reflectance(shares, laws, horizon, mu0, mu, alpha, star_radius);
     // R08's transmittance to the star's centre (R08.T9.b; Design note 7: a star's disc is under
-    // about 1°), its light slot j's, 0 where the ground hides it.
+    // about 1°), its light slot j's, 0 where the ground hides it, at the datum's cosine.
     let transmitted = atmosphere_sun_transmittance(
-      0.0, mu0, local.latitude, local_azimuth(local, towards), j
+      0.0, mu0_datum, local.latitude, local_azimuth(local, towards), j
     );
     out.radiance = out.radiance + light.xyz * misc.z * reflectance * visible * transmitted * ring;
     // Lit directly: the horizon and eclipse terms leave more than LIT_IRRADIANCE of face-on.
@@ -424,7 +560,8 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
   // face-on illuminance at the centre carried by the inverse square, as `planetshine_irradiance`
   // carries it) times the sky's irradiance at its own μ₀, both at light slot 0, the brightest star's
   // curves, and the sky's added before the horizon's `continue`, as a star's. It lights the night
-  // side, which stays unlit for the meter.
+  // side, which stays unlit for the meter. As the terrain takes it (R10.T10.g): its direct term and
+  // the law's μ₀ on n′, with no cut at the datum's plane; the sky's and the air's on ν.
   let secondaries = min(u32(disc_row(SECONDARY_COUNT_ROW).x), MAX_DISC_SECONDARIES);
   for (var j = 0u; j < secondaries; j = j + 1u) {
     let place = disc_row(FIRST_SECONDARY_ROW + j * SECONDARY_ROWS);
@@ -432,11 +569,12 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
     let to_source = to_view(place.xyz) * place.w - q;
     let distance = length(to_source);
     let towards = to_source / distance;
-    let mu0 = dot(normal, towards);
+    let mu0_datum = dot(normal, towards);
+    let mu0 = select(mu0_datum, dot(tilted, towards), shading.mapped);
     let near = place.w / distance;
-    let sky = atmosphere_sky_irradiance(0.0, mu0, local.latitude, 0u);
+    let sky = atmosphere_sky_irradiance(0.0, mu0_datum, local.latitude, 0u) * sky_tilt;
     out.radiance = out.radiance + source.xyz * (near * near) * misc.z * mean_a * sky;
-    let irradiance = planetshine_irradiance(to_source, source.w, place.w, normal, 0.0);
+    let irradiance = planetshine_irradiance(to_source, source.w, place.w, tilted, 0.0);
     if (irradiance <= 0.0) {
       continue;
     }
@@ -444,7 +582,7 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
     let source_radius = asin(min(1.0, source.w / distance));
     let reflectance = surface_reflectance(shares, laws, irradiance, mu0, mu, alpha, source_radius);
     let transmitted = atmosphere_source_transmittance(
-      0.0, mu0, local.latitude, local_azimuth(local, towards), source_radius, 0u
+      0.0, mu0_datum, local.latitude, local_azimuth(local, towards), source_radius, 0u
     );
     out.radiance = out.radiance + source.xyz * misc.z * reflectance * transmitted;
   }

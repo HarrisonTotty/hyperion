@@ -127,6 +127,13 @@
 //!   `Float32Array` of each texel's surveyed share; `weights()`, a `Uint8Array` of each texel's
 //!   bytes over the classes, texel t's at `classes · t`; and `complete`, `false` where some texel's
 //!   weights read a cell the field does not hold yet.
+//! - `normalMap(system, body, seed)` returns a `NormalMapAnswer`, the body's normal map for R07's
+//!   disc ([`WorkerFields::normal_map`], plan R10, T10.g), or `undefined` where no field of the
+//!   body is held: its `level`, the field's (5 to 8); `cells()`, a `Uint32Array` of the cell index
+//!   at `level` of each surveyed cell answered, rising; `pairs()`, a `Float32Array` of two a cell,
+//!   cell c's at `2 c`, the octahedral pair of its unit normal, body-fixed, as a bake's `normals()`
+//!   holds them; and `complete`, `false` where some cell's height read a cell the field does not
+//!   hold yet.
 
 use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::{Kelvin, Metres, Pascals, Radians};
@@ -144,8 +151,8 @@ use crate::reading::{LineOfSight, SlantRange, SurveyedReading};
 use crate::test_planet::{Ridges, TEST_PLANET};
 use crate::worker::{
     BodyBake, CLASS_MAP_LEVEL, ClassMap, DrawnPhotometry, GroundAtSight, GroundProperties,
-    GroundReadout, GroundReadoutQuery, QueryBodyError, SeasonAnomaly, SlopeBaseline, SurveyChange,
-    SurveyedMaterial, WorkerFields,
+    GroundReadout, GroundReadoutQuery, NormalMap, QueryBodyError, SeasonAnomaly, SlopeBaseline,
+    SurveyChange, SurveyedMaterial, WorkerFields,
 };
 
 /// The generator version this module computes surfaces for, the crate's `generator_version`.
@@ -1514,6 +1521,25 @@ impl JsSurfaceFields {
             .class_map(body_ref(system, body)?, DetailSeed::new(seed));
         Ok(unless_unsurveyed(answer).map(|map| ClassMapAnswer { map }))
     }
+
+    /// The body's normal map for R07's disc (see the module documentation), or `undefined` where
+    /// no field of the body is held.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` if the body's index is above 65,535.
+    #[wasm_bindgen(js_name = normalMap)]
+    pub fn normal_map(
+        &mut self,
+        system: u64,
+        body: u32,
+        seed: u64,
+    ) -> Result<Option<NormalMapAnswer>, JsError> {
+        let answer = self
+            .fields
+            .normal_map(body_ref(system, body)?, DetailSeed::new(seed));
+        Ok(unless_unsurveyed(answer).map(|map| NormalMapAnswer { map }))
+    }
 }
 
 /// A material's photometry as the `photometry` and `classMap` exports give it: `A_N` in B, V and
@@ -1633,6 +1659,43 @@ impl ClassMapAnswer {
     }
 
     /// Whether every texel the survey touches was answered ([`ClassMap::is_complete`]).
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn complete(&self) -> bool {
+        self.map.is_complete()
+    }
+}
+
+/// A body's normal map for R07's disc ([`NormalMap`]; see the module documentation).
+#[wasm_bindgen]
+#[derive(Debug)]
+pub struct NormalMapAnswer {
+    map: NormalMap,
+}
+
+#[wasm_bindgen]
+impl NormalMapAnswer {
+    /// The level of the field the map was made from, 5 to 8, whose cells it holds.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn level(&self) -> u8 {
+        self.map.level()
+    }
+
+    /// The cell index ([`cell_index`]) at the map's level of each surveyed cell answered, rising.
+    #[must_use]
+    pub fn cells(&self) -> Vec<u32> {
+        self.map.cells().to_vec()
+    }
+
+    /// Each cell's octahedral pair, two values a cell in [`cells`](Self::cells)' order: body-fixed,
+    /// each in [−1, 1], as a bake's `normals()` holds them.
+    #[must_use]
+    pub fn pairs(&self) -> Vec<f32> {
+        self.map.pairs().as_flattened().to_vec()
+    }
+
+    /// Whether every surveyed cell was answered ([`NormalMap::is_complete`]).
     #[wasm_bindgen(getter)]
     #[must_use]
     pub fn complete(&self) -> bool {

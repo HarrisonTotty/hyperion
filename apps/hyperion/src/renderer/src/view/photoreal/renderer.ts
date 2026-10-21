@@ -125,7 +125,14 @@ export interface FrameTerrain {
 /** What one photorealistic frame draws. */
 export interface PhotorealFrame {
   readonly camera: ProjectionCamera;
+  /** The frame's own viewport, device px: the scene target's, at the frame's internal scale. */
   readonly viewport: Viewport;
+  /**
+   * The size the view is presented at, device px, its canvas's, whose centre pixel the lit bodies'
+   * hand-over to terrain measures (plan R10, R10.T10.g; `BodyFrameOptions.presentedPx`): the
+   * frame's `viewport` where it is drawn at the presented size, larger under an internal scale.
+   */
+  readonly presentedPx: Viewport;
   readonly role: ViewRole;
   readonly setting: QualitySetting;
   /** The exposure scale the target is pre-exposed with (`exposureScale`), 1 ÷ (cd/m²). */
@@ -457,6 +464,7 @@ export class PhotorealRenderer {
       {
         camera,
         viewport,
+        presentedPx: frame.presentedPx,
         exposureScale: frame.exposureScale,
         annuli: settings.discAnnuli,
         planetshine: settings.planetshineSources,

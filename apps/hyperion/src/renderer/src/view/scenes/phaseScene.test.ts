@@ -76,6 +76,7 @@ function drawPlanet(index: number) {
     {
       camera,
       viewport: VIEWPORT,
+      presentedPx: VIEWPORT,
       exposureScale: 1e-4,
       annuli: 4,
       planetshine: PLANETSHINE_SOURCES_HIGH,

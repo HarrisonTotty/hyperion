@@ -24,6 +24,15 @@
  * invocation a cell, and summed there in the draws' order ({@link discCellJobs}, R07.T8.d); the
  * draws read the pixel's sums through row 51. The arithmetic is the draws' own.
  * {@link rasteriseDisc} runs the shader's arithmetic in `f64`.
+ *
+ * A class map that carries the field's normal map (plan R10, R10.T10.g; `discNormals.ts`) shades its
+ * surveyed ground on the map's shading normal n′ (`normalMapNormalAt`) beside the datum's ν, as the
+ * terrain does (`terrainLit.wgsl`'s `shade_terrain`): the law's μ and μ₀ on n′, μ floored at half
+ * the datum's; each star's horizon term on n′ with the datum's tangent plane as the local horizon,
+ * the star's disc cut at its true distance from that plane (η = φ_ν − φ′); R08's lookups on ν; the
+ * sky by (1 + n′ · ν) ÷ 2; planetshine on n′. The record says so in row 24's w; the twins read the
+ * map's texels from the record's surface. Without a normal map, or where it holds none, n′ = ν and
+ * every value is as before, bit for bit.
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
@@ -52,6 +61,7 @@ import { HALF_FLOAT_MAX } from "../photometry/toneCurve";
 import { METER_CLASS, type MeterClass } from "../post/meter";
 import { type Rotation3, rotateToBody } from "../coords/rotation";
 import type { ScreenRect } from "../wireframe/submit";
+import { type NormalMapTexels, normalMapNormalAt } from "./discNormals";
 import {
   classMapSharesAt,
   type ClassMapTexels,
@@ -438,7 +448,8 @@ export function packDiscRecords(
     put(5, [uniform?.tableRow ?? 0, annulusCount(record), record.exposureOverPi, classes.length]);
     if (record.surface.kind === "class-map") {
       const [x, y] = bodyAxesOf(record.surface.rotation);
-      put(AXES_ROW, [x.x, x.y, x.z, 0]);
+      // w: whether the map carries the field's normal map, which binding 14 holds (R10.T10.g).
+      put(AXES_ROW, [x.x, x.y, x.z, record.surface.normals === null ? 0 : 1]);
       put(AXES_ROW + 1, [y.x, y.y, y.z, 0]);
     }
     classes.forEach((law, k) => {
@@ -482,9 +493,13 @@ export function packDiscRecords(
   return out;
 }
 
-/** A class map as one camera sees it: its texels and the body-fixed axes in the view's axes. */
+/**
+ * A class map as one camera sees it: its texels, its normal map's (R10.T10.g) or `null`, and the
+ * body-fixed axes in the view's axes.
+ */
 interface ViewClassMap {
   readonly texels: ClassMapTexels;
+  readonly normals: NormalMapTexels | null;
   readonly axes: readonly [Vec3, Vec3, Vec3];
 }
 
@@ -524,7 +539,11 @@ function viewBodyOf(
     const [bodyX, bodyY] = bodyAxesOf(record.surface.rotation);
     const x = toView(bodyX);
     const y = toView(bodyY);
-    classMap = { texels, axes: [x, y, cross(x, y)] };
+    classMap = {
+      texels,
+      normals: record.surface.normals?.texels ?? null,
+      axes: [x, y, cross(x, y)],
+    };
   }
   return {
     centre,
@@ -623,6 +642,52 @@ function sharesAt(body: ViewBody, q: Vec3): number[] {
   const d = normalise(stretchAlong(body.pole, body.stretch, q));
   const [x, y, z] = body.classMap.axes;
   return classMapSharesAt(body.classMap.texels, [dot(d, x), dot(d, y), dot(d, z)]);
+}
+
+/** The shading normal n′ at a point, in the view's axes, and whether it is the normal map's. */
+interface ShadingNormal {
+  readonly normal: Vec3;
+  readonly mapped: boolean;
+}
+
+/**
+ * The shading normal at the point `q` (from the centre ÷ a) whose datum normal is `datum`
+ * (R10.T10.g; `bodyDisc.wgsl`'s `shading_normal`): `datum` where the body's class map carries no
+ * normal map or the map holds none at the point's cube-sphere direction; otherwise the map's
+ * reconstruction there (`normalMapNormalAt`), body-fixed, turned into the view's axes and
+ * renormalised.
+ */
+function shadingNormalAt(body: ViewBody, q: Vec3, datum: Vec3): ShadingNormal {
+  const normals = body.classMap?.normals ?? null;
+  if (body.classMap === null || normals === null) {
+    return { normal: datum, mapped: false };
+  }
+  const d = normalise(stretchAlong(body.pole, body.stretch, q));
+  const [x, y, z] = body.classMap.axes;
+  const fixed = normalMapNormalAt(normals, [dot(d, x), dot(d, y), dot(d, z)]);
+  if (fixed === null) {
+    return { normal: datum, mapped: false };
+  }
+  return {
+    normal: normalise(
+      vec3(
+        fixed.x * x.x + fixed.y * y.x + fixed.z * z.x,
+        fixed.x * x.y + fixed.y * y.y + fixed.z * z.y,
+        fixed.x * x.z + fixed.y * y.z + fixed.z * z.z,
+      ),
+    ),
+    mapped: true,
+  };
+}
+
+/** The angle between two unit vectors from their dot product `cosine`, rad, 0 to π. */
+function angleFrom(cosine: number): number {
+  return Math.acos(Math.min(1, Math.max(-1, cosine)));
+}
+
+/** R08's sky irradiance on the datum times a tilted surface's share of it, per channel. */
+function tiltedSky(sky: Rgb, tilt: number): Rgb {
+  return [sky[0] * tilt, sky[1] * tilt, sky[2] * tilt];
 }
 
 /**
@@ -761,11 +826,20 @@ function localAzimuthOf(frame: LocalFrame, d: Vec3): number {
 
 function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
   const stretch2 = body.stretch * body.stretch;
+  // The datum's normal ν, the spheroid's.
   const normal = normalise(stretchAlong(body.pole, stretch2, q));
-  const mu = -dot(normal, ray);
-  if (mu <= 0) {
+  const muDatum = -dot(normal, ray);
+  if (muDatum <= 0) {
     return { radiance: [0, 0, 0], lit: false };
   }
+  const shading = shadingNormalAt(body, q, normal);
+  const tilted = shading.normal;
+  // The law's μ on n′, floored at half the datum's (R10.T10.g); the datum's own without a map.
+  const mu = Math.max(-dot(tilted, ray), 0.5 * muDatum);
+  // The sky on a surface tilted from the datum, (1 + n′ · ν) ÷ 2 of it (Bruneton 2017,
+  // `GetSunAndSkyIrradiance`'s `(1 + dot(normal, point) / r) × 0.5`: an isotropic sky seen by a
+  // tilted plane), as the terrain's.
+  const skyTilt = shading.mapped ? 0.5 * (1 + dot(tilted, normal)) : 1;
   const shares = sharesAt(body, q);
   const radiance: [number, number, number] = [0, 0, 0];
   let lit = false;
@@ -786,12 +860,22 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
     const toStar = sub(place, q);
     const distance = norm(toStar);
     const towards = scale(toStar, 1 / distance);
-    const mu0 = dot(normal, towards);
-    // R08's sky light at the star's own μ₀ and light slot, before the horizon's `continue`.
-    const sky = lighting.skyIrradiance(0, mu0, local.latitudeRad, j);
+    // The star's cosine against the datum, R08's lookups', and against n′, the law's.
+    const mu0Datum = dot(normal, towards);
+    const mu0 = shading.mapped ? dot(tilted, towards) : mu0Datum;
+    // R08's sky light at the star's own μ₀ against the datum and light slot, by the tilt's factor,
+    // before the horizon's `continue`.
+    const sky = tiltedSky(lighting.skyIrradiance(0, mu0Datum, local.latitudeRad, j), skyTilt);
+    // On n′ the datum's tangent plane is the local horizon (R10.T10.g): η = φ_ν − φ′ cuts the star's
+    // disc at its true distance from the datum's plane, π ÷ 2 − φ_ν; the share cut off is exact and
+    // the light through it weighed about n′, an error of at most (2 ÷ 3π) ρ sin φ (1 − cos β) of
+    // face-on (decision-r10-t8b §1). n′'s own plane (η 0) where it hides more.
+    const phiDatum = angleFrom(mu0Datum);
+    const phi = shading.mapped ? angleFrom(mu0) : phiDatum;
     const horizon = sphereIrradianceFactor(
       distance / light.radius,
-      Math.acos(Math.min(1, Math.max(-1, mu0))),
+      phi,
+      Math.max(phiDatum - phi, 0),
     );
     if (horizon <= 0 && !sky.some((value) => value > 0)) {
       continue;
@@ -834,7 +918,7 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
     // R08's transmittance to the star's centre, its light slot's.
     const transmitted = lighting.sunTransmittance(
       0,
-      mu0,
+      mu0Datum,
       local.latitudeRad,
       localAzimuthOf(local, towards),
       j,
@@ -849,18 +933,21 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
   // Planetshine (Design note 7): it lights the night side, which stays unlit for the meter. Through
   // the air (R08.T9.b): its sky term at its illuminance at the point and its own μ₀, before the
   // horizon's `continue`, and its direct term by the three-node rule, both at light slot 0.
+  // On n′ as the terrain takes it (R10.T10.g): its direct term and the law's μ₀, with no cut at the
+  // datum's plane; the sky's and the air's on ν.
   for (const { place, source } of body.secondaries) {
     const toSource = sub(place, q);
     const distance = norm(toSource);
     const towards = scale(toSource, 1 / distance);
-    const mu0 = dot(normal, towards);
+    const mu0Datum = dot(normal, towards);
+    const mu0 = shading.mapped ? dot(tilted, towards) : mu0Datum;
     const near = source.distance / distance;
-    const sky = lighting.skyIrradiance(0, mu0, local.latitudeRad, 0);
+    const sky = tiltedSky(lighting.skyIrradiance(0, mu0Datum, local.latitudeRad, 0), skyTilt);
     for (const c of CHANNELS) {
       radiance[c] +=
         source.illuminance[c] * near * near * record.exposureOverPi * meanA[c] * sky[c];
     }
-    const irradiance = planetshineIrradiance(toSource, source.radius, source.distance, normal);
+    const irradiance = planetshineIrradiance(toSource, source.radius, source.distance, tilted);
     if (irradiance <= 0) {
       continue;
     }
@@ -877,7 +964,7 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
     );
     const transmitted = lighting.sourceTransmittance(
       0,
-      mu0,
+      mu0Datum,
       local.latitudeRad,
       localAzimuthOf(local, towards),
       sourceRadius,
@@ -898,7 +985,8 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
  *
  * @param lighting - The body's atmosphere's lookups ({@link AIRLESS_LIGHTING} for a body without
  *   one, R07's).
- * @param classMap - The texels of the record's class map; `null` for a uniform surface.
+ * @param classMap - The texels of the record's class map; `null` for a uniform surface. Its normal
+ *   map's texels, where it carries one (R10.T10.g), are read from the record's surface.
  * @throws Error as {@link rasteriseDisc}.
  */
 export function shadeDiscPoint(
@@ -1018,7 +1106,8 @@ interface CellSum {
  * terminator) or no star lights the body.
  *
  * @param classMap - The texels of the record's class map, which its surface holds only as a
- *   texture; `null` for a uniform surface.
+ *   texture; `null` for a uniform surface. Its normal map's texels, where it carries one
+ *   (R10.T10.g), are read from the record's surface, which holds them beside the texture.
  * @param lighting - The body's atmosphere's lookups (plan R08, R08.T9.b), which its record's
  *   tables hold only as textures: `tablesCpu.ts`'s `surfaceLightingTwin`, or
  *   {@link AIRLESS_LIGHTING} for a body without one.
@@ -1251,7 +1340,8 @@ export interface SampledPixel {
  * returned, in row order. The cost grows as m², so a test keeps the disc to a few pixels.
  *
  * @param samplesPerAxis - m, a positive integer.
- * @param classMap - The texels of the record's class map; `null` for a uniform surface.
+ * @param classMap - The texels of the record's class map; `null` for a uniform surface. Its normal
+ *   map's, as {@link rasteriseDisc} reads them, from the record's surface.
  * @param lighting - The body's atmosphere's lookups, as {@link rasteriseDisc}'s.
  * @throws Error if `samplesPerAxis` is not a positive integer; for a class-map record without its
  *   texels, or with another map's class count.

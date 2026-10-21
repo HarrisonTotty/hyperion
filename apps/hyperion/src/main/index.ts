@@ -386,35 +386,46 @@ const RIGHT_WAY_UP_TIMEOUT_MS = 180_000;
 /**
  * Where a views check writes, from the repository's root: T20's under `target/views-check/` for a
  * smoke and `docs/measurements/several-views/` otherwise, the terrain run's (R10.T16.d;
- * decision-r10-t16-contracts §6) under `target/views-check/terrain/` and
- * `docs/measurements/terrain-check/`; the captures under the smoke's directory either way.
+ * decision-r10-t16-contracts §6), and its hand-over check's beside it (R10.T10.g), under
+ * `target/views-check/terrain/` and `docs/measurements/terrain-check/`; the captures under the
+ * smoke's directory either way.
  */
 function viewsCheckDirs(launch: ViewsCheckLaunch): {
   readonly out: string;
   readonly captures: string;
 } {
-  const smokeDir = launch.terrain ? "target/views-check/terrain" : "target/views-check";
-  return {
-    out: launch.smoke
-      ? smokeDir
-      : launch.terrain
-        ? "docs/measurements/terrain-check"
-        : "docs/measurements/several-views",
-    captures: smokeDir,
-  };
+  let dirs: { readonly smoke: string; readonly full: string };
+  switch (launch.run) {
+    case "several-views":
+      dirs = { smoke: "target/views-check", full: "docs/measurements/several-views" };
+      break;
+    case "terrain":
+    case "handover":
+      dirs = { smoke: "target/views-check/terrain", full: "docs/measurements/terrain-check" };
+      break;
+  }
+  return { out: launch.smoke ? dirs.smoke : dirs.full, captures: dirs.smoke };
 }
 
 /**
  * How long a views check may take before the main process ends it with status 3: T20's smoke 4
  * minutes and its full run 20; the terrain run's smoke, whose loss phase plays its script to the
  * field's revision rise at 120 s, 8 minutes, and its full run, three phases of about five minutes
- * each, 30.
+ * each, 30; its hand-over check (R10.T10.g), three looks of about 3.5 minutes (a smoke's about one),
+ * takes the same.
  */
 function viewsCheckWatchdogMs(launch: ViewsCheckLaunch): number {
-  if (launch.terrain) {
-    return launch.smoke ? 8 * 60_000 : 30 * 60_000;
+  let ms: number;
+  switch (launch.run) {
+    case "several-views":
+      ms = launch.smoke ? 240_000 : 20 * 60_000;
+      break;
+    case "terrain":
+    case "handover":
+      ms = launch.smoke ? 8 * 60_000 : 30 * 60_000;
+      break;
   }
-  return launch.smoke ? 240_000 : 20 * 60_000;
+  return ms;
 }
 
 /**
@@ -515,7 +526,7 @@ function startViewsCheckSession(
     },
     isSender: (event) => isOwnPage(event.senderFrame, page, window.webContents.mainFrame),
     session: checkSession,
-    terrain: launch.terrain,
+    run: launch.run,
   });
   window.webContents.on("console-message", (details) => {
     checkSession.consoleMessage(details.message);

@@ -9,6 +9,7 @@
 
 import type {
   CheckPhaseName,
+  HandoverCheckRecord,
   SpikeEnd,
   SpikeResultsPaths,
   TerrainCheckRecord,
@@ -26,6 +27,7 @@ export const VIEWS_CHECK_CHANNEL_NAMES = {
   askRightWayUp: "hyperion:views-check:ask-right-way-up",
   writeResults: "hyperion:views-check:write-results",
   writeTerrainResults: "hyperion:views-check:write-terrain-results",
+  writeHandoverResults: "hyperion:views-check:write-handover-results",
   capture: "hyperion:views-check:capture",
   end: "hyperion:views-check:end",
 } as const;
@@ -69,6 +71,13 @@ export function viewsCheckApi(launch: ViewsCheckLaunch, deps: ViewsCheckApiDeps)
       const paths = await invoke(VIEWS_CHECK_CHANNEL_NAMES.writeTerrainResults, record);
       if (!isPaths(paths)) {
         throw new Error("the main process wrote no terrain results file");
+      }
+      return paths;
+    },
+    writeHandoverResults: async (record: HandoverCheckRecord) => {
+      const paths = await invoke(VIEWS_CHECK_CHANNEL_NAMES.writeHandoverResults, record);
+      if (!isPaths(paths)) {
+        throw new Error("the main process wrote no hand-over results file");
       }
       return paths;
     },

@@ -43,6 +43,7 @@ function frameWith(sky: ReadonlyArray<DrawItem>): PhotorealFrame {
   return {
     camera: { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 },
     viewport: VIEWPORT,
+    presentedPx: VIEWPORT,
     role: "eye",
     setting: "high",
     exposureScale: 1e-4,
@@ -537,6 +538,7 @@ function frameOfDiscs(bodies: ReadonlyArray<LitBodyInput>, viewport = VIEWPORT):
   return {
     ...frameWith([]),
     viewport,
+    presentedPx: viewport,
     bodies,
     previousRegimes: new Map(bodies.map((body) => [body.id, "disc"])),
   };

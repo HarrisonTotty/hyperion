@@ -339,20 +339,41 @@ describe("the several-views check's options", () => {
 
   it("takes the flag alone with its defaults, and no spike", () => {
     const args = parse(["--views-check"]);
-    expect(args.viewsCheck).toEqual({ setting: "high", smoke: false, out: null, terrain: false });
+    expect(args.viewsCheck).toEqual({
+      setting: "high",
+      smoke: false,
+      out: null,
+      run: "several-views",
+    });
     expect(args.spike).toBeUndefined();
   });
 
   it("takes the setting, the smoke and the directory it shares with the spike", () => {
     expect(
       parse(["--views-check", "--setting", "low", "--smoke", "--out", "/data/out"]).viewsCheck,
-    ).toEqual({ setting: "low", smoke: true, out: "/data/out", terrain: false });
+    ).toEqual({ setting: "low", smoke: true, out: "/data/out", run: "several-views" });
   });
 
   it("takes --terrain, the terrain run (R10.T16.d), at its setting", () => {
     expect(parse(["--views-check", "--terrain", "--setting", "low", "--smoke"]).viewsCheck).toEqual(
-      { setting: "low", smoke: true, out: null, terrain: true },
+      { setting: "low", smoke: true, out: null, run: "terrain" },
     );
+  });
+
+  it("takes --handover, the terrain run's hand-over check (R10.T10.g), beside --terrain", () => {
+    expect(
+      parse(["--views-check", "--terrain", "--handover", "--setting", "low"]).viewsCheck,
+    ).toEqual({ setting: "low", smoke: false, out: null, run: "handover" });
+  });
+
+  it.each([
+    [["--views-check", "--handover"]],
+    [["--handover"]],
+    [["--descent-spike", "--handover"]],
+  ])("refuses --handover without --terrain: %j", (args) => {
+    const error = refusal(args);
+    expect(error.exitCode).toBe(1);
+    expect(error.message).toContain("--handover is an option of --terrain");
   });
 
   it.each([[["--terrain"]], [["--descent-spike", "--terrain"]], [["--terrain", "--smoke"]]])(

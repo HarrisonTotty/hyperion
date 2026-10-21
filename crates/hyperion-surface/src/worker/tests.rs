@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use hyperion_testkit::float::bits;
+use hyperion_testkit::float::{bits, bits_f32};
 use hyperion_testkit::order::assert_order_independent;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use wasm_bindgen_test::wasm_bindgen_test as test;
@@ -1372,8 +1372,8 @@ fn worker_lines_of_sight_meet_the_survey_leave_it_and_miss() {
 }
 
 /// One of the worker's queries, for the order checks: a probe's bake, a reading at a point and
-/// baseline, a line of sight, a material at a point, the class map, or a ground readout along a
-/// line of sight over a baseline.
+/// baseline, a line of sight, a material at a point, the class map, the normal map, or a ground
+/// readout along a line of sight over a baseline.
 #[derive(Debug, Clone, Copy)]
 enum Query {
     Bake(usize),
@@ -1381,10 +1381,11 @@ enum Query {
     Sight(usize),
     Material(usize),
     ClassMap,
+    NormalMap,
     Readout(usize, SlopeBaseline),
 }
 
-/// A [`Query`]'s answer.
+/// A [`Query`]'s answer; the normal map's by its bits ([`NormalMapBits`]).
 #[derive(Debug, PartialEq)]
 enum Answer {
     Bake(Box<Result<BodyBake, QueryBodyError>>),
@@ -1392,6 +1393,7 @@ enum Answer {
     Sight(Result<LineOfSight, QueryBodyError>),
     Material(Result<Option<SurveyedMaterial>, QueryBodyError>),
     ClassMap(Result<ClassMap, QueryBodyError>),
+    NormalMap(Result<NormalMapBits, QueryBodyError>),
     Readout(Result<GroundReadout, QueryBodyError>),
 }
 
@@ -1405,7 +1407,8 @@ fn query_points() -> [FaceUv; 4] {
     ]
 }
 
-/// Every kind of query, interleaved, the class map after every second round of the others.
+/// Every kind of query, interleaved, the class map after every second round of the others and the
+/// normal map after each round between.
 fn queries() -> Vec<Query> {
     let mut queries = Vec::new();
     for n in 0..probes().len() {
@@ -1418,9 +1421,11 @@ fn queries() -> Vec<Query> {
         // 1 and 2 share the odd rounds.
         let sight = if n % 2 == 0 { 0 } else { 1 + (n / 2) % 2 };
         queries.push(Query::Readout(sight, SlopeBaseline::ALL[(n / 2) % 3]));
-        if n % 2 == 0 {
-            queries.push(Query::ClassMap);
-        }
+        queries.push(if n % 2 == 0 {
+            Query::ClassMap
+        } else {
+            Query::NormalMap
+        });
     }
     queries
 }
@@ -1446,6 +1451,11 @@ fn ask(
         }
         Query::Material(n) => Answer::Material(fields.material(body, SEED, query_points()[n])),
         Query::ClassMap => Answer::ClassMap(fields.class_map(body, SEED)),
+        Query::NormalMap => Answer::NormalMap(
+            fields
+                .normal_map(body, SEED)
+                .map(|map| normal_map_bits(&map)),
+        ),
         Query::Readout(n, slope_baseline) => {
             let (origin_m, direction) = sights[n];
             let query = GroundReadoutQuery {
@@ -1820,6 +1830,222 @@ fn worker_class_map_keeps_the_heaviest_classes_past_sixteen() {
     assert!(kept.contains(&materials[0]));
     assert!(!kept.contains(&materials[1]));
     assert_eq!(kept, [&materials[..1], &materials[2..]].concat());
+}
+
+/// The high setting's doubled normals alone: on the face-differences path, which moves the vertices
+/// and changes no normal, with no weights and no horizon map, neither of which changes a patch's
+/// normals either.
+const NORMALS_ONLY: TerrainBakeOptions = TerrainBakeOptions {
+    patch: BakeOptions {
+        vertex_path: VertexPath::FaceDifferences,
+        normals: NormalScale::Double,
+        skirt_m: 0.0,
+    },
+    weights: WeightsLayer::Skipped,
+    horizon: HorizonLayer::Skipped,
+};
+
+/// A normal map by its bits, as the tests compare two: its level, its cells, each pair's bits and
+/// whether it is complete.
+type NormalMapBits = (u8, Vec<u32>, Vec<[u32; 2]>, bool);
+
+/// `map`'s [`NormalMapBits`].
+fn normal_map_bits(map: &NormalMap) -> NormalMapBits {
+    (
+        map.level(),
+        map.cells().to_vec(),
+        map.pairs().iter().map(|pair| pair.map(bits_f32)).collect(),
+        map.is_complete(),
+    )
+}
+
+/// The coarsest patch whose doubled normals hold `cell`'s centre as a sample: the one of level
+/// max(L − 6, 0) holding it, L the cell's level.
+fn coarsest_patch_over(cell: PatchKey) -> PatchKey {
+    patch_over(cell, cell.level().saturating_sub(6))
+}
+
+/// The pair `bake`'s doubled normals hold at the centre of `cell`, a cell of a level at most 6
+/// below the patch's: of the patch's 129 samples a side (128 intervals), sample
+/// (2 c + 1) · 2^(6 − d) for the cell's place c in the patch, d levels below it (the odd–odd
+/// samples at d = 6).
+fn doubled_pair_at(bake: &BodyBake, cell: PatchKey) -> [f32; 2] {
+    let key = bake.terrain().patch().key;
+    let shift = u32::from(cell.level() - key.level());
+    let step = 1_u32 << (6 - shift);
+    let sample = |c: u32, k: u32| usize::try_from((2 * (c - (k << shift)) + 1) * step).unwrap();
+    let (x, y) = (sample(cell.i(), key.i()), sample(cell.j(), key.j()));
+    let at = 2 * (y * NormalScale::Double.side() + x);
+    let normals = &bake.terrain().patch().normals;
+    [normals[at], normals[at + 1]]
+}
+
+/// Checks that each pair of `map`, of `body`'s field in `fields`, is what the coarsest patch over its
+/// cell bakes at the cell's centre on the high setting, bit for bit, and the octahedral pair of a
+/// finite, unit and outward normal there, made apart from the worker.
+fn assert_normal_map_is_the_coarsest_doubled_bake(
+    fields: &mut WorkerFields,
+    body: BodyRef,
+    map: &NormalMap,
+) {
+    assert_eq!(map.pairs().len(), map.cells().len());
+    let field = fields.field(body).unwrap().clone();
+    assert_eq!(map.level(), field.header().level().get());
+    let figure = field.header().figure();
+    let synth = Synthesiser::new(&field, SEED);
+    let band_level = band(map.band());
+    let mut bakes = BTreeMap::<PatchKey, BodyBake>::new();
+    for (&index, &pair) in map.cells().iter().zip(map.pairs()) {
+        let cell = cell_at_index(map.level(), index).unwrap();
+        assert!(field.is_surveyed(cell), "{cell:?}");
+        let key = coarsest_patch_over(cell);
+        let bake = bakes
+            .entry(key)
+            .or_insert_with(|| fields.bake(body, SEED, key, &NORMALS_ONLY).unwrap());
+        assert_eq!(
+            pair.map(bits_f32),
+            doubled_pair_at(bake, cell).map(bits_f32),
+            "{cell:?}: the map's pair against {key:?}'s doubled normal"
+        );
+        let dir = point(cell, 0.5, 0.5);
+        let sample = synth
+            .height_at(&mut SynthCache::new(), dir, band_level)
+            .unwrap();
+        let normal = surface_normal(&figure, dir, sample.height_m, sample.gradient);
+        assert!(normal.iter().all(|c| c.is_finite()), "{cell:?}: {normal:?}");
+        let length = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+        assert!((length - 1.0).abs() < 1e-12, "{cell:?}: |n| = {length}");
+        let nu = figure.normal(dir);
+        let up = normal[0] * nu[0] + normal[1] * nu[1] + normal[2] * nu[2];
+        assert!(up > 0.5, "{cell:?}: n · ν = {up}, a slope past 60°");
+        assert_eq!(
+            pair.map(bits_f32),
+            encode_octahedral_f32(normal).map(bits_f32),
+            "{cell:?}"
+        );
+        assert!(pair.iter().all(|c| c.abs() <= 1.0), "{cell:?}: {pair:?}");
+    }
+}
+
+#[test]
+fn worker_normal_map_holds_each_surveyed_cell_with_the_root_s_doubled_normal_at_its_centre() {
+    let f = fixture();
+    let mut fields = f.worker();
+    let map = fields.normal_map(f.body, SEED).unwrap();
+    assert_eq!(
+        (map.level(), map.band()),
+        (6, 0),
+        "the Moon-like field is at level 6, its normals at the root's band"
+    );
+    assert!(map.is_complete());
+    // No cell for a margin cell or one not held: the surveyed cells, each once, rising.
+    let surveyed: BTreeSet<PatchKey> = f.first.union(&f.second).copied().collect();
+    assert_eq!(map.cells(), indices(&surveyed).as_slice());
+    assert!(
+        surveyed
+            .iter()
+            .all(|&cell| coarsest_patch_over(cell) == PatchKey::root(Face::PosY)),
+        "each cell's coarsest patch is the root of face +y"
+    );
+    assert_normal_map_is_the_coarsest_doubled_bake(&mut fields, f.body, &map);
+    // From the body's cache again, and from a fresh worker, the same map, bit for bit.
+    let bits = normal_map_bits(&map);
+    assert_eq!(
+        normal_map_bits(&fields.normal_map(f.body, SEED).unwrap()),
+        bits
+    );
+    assert_eq!(
+        normal_map_bits(&f.worker().normal_map(f.body, SEED).unwrap()),
+        bits
+    );
+}
+
+#[test]
+fn worker_normal_map_is_the_coarsest_doubled_bake_at_every_field_level() {
+    let mut levels = BTreeSet::new();
+    for &w in SyntheticWorld::ALL {
+        let field = world(w);
+        let (mut fields, cells) = surveyed_about(field, unit_dir([0.3, 1.0, 0.2]));
+        let body = field.header().body();
+        let map = fields.normal_map(body, SEED).unwrap();
+        let level = field.header().level().get();
+        assert_eq!(
+            (map.level(), map.band()),
+            (level, level.saturating_sub(6)),
+            "{w:?}"
+        );
+        assert!(map.is_complete(), "{w:?}");
+        assert_eq!(map.cells(), indices(&cells).as_slice(), "{w:?}");
+        assert_normal_map_is_the_coarsest_doubled_bake(&mut fields, body, &map);
+        levels.insert(level);
+    }
+    assert_eq!(levels.into_iter().collect::<Vec<_>>(), [5, 6, 7, 8]);
+}
+
+#[test]
+fn worker_normal_map_needs_the_body_s_field() {
+    let f = fixture();
+    let mut fields = f.worker();
+    let other = BodyRef::new(f.body.raw_system_id(), f.body.body_index() ^ 1);
+    assert_eq!(
+        fields.normal_map(other, SEED),
+        Err(QueryBodyError::NotStarted(other))
+    );
+}
+
+#[test]
+fn worker_normal_map_of_a_survey_without_its_margin_waits_for_the_margin() {
+    let f = fixture();
+    let mut fresh = WorkerFields::new();
+    fresh.init(f.body, &f.first_blocks[0]).unwrap();
+    for block in &f.first_blocks[1..] {
+        fresh.chunk(f.body, block).unwrap();
+    }
+    let full = fresh.normal_map(f.body, SEED).unwrap();
+    assert!(full.is_complete());
+    assert_eq!(full.cells(), indices(&f.first).as_slice());
+    // Each later block of the first payload with block 0 alone, so that a cell can be held surveyed
+    // while the margin its height reads, in other blocks, is not.
+    let mut waited = false;
+    for (k, block) in f.first_blocks.iter().enumerate().skip(1) {
+        let mut fields = WorkerFields::new();
+        fields.init(f.body, &f.first_blocks[0]).unwrap();
+        fields.chunk(f.body, block).unwrap();
+        let partial = fields.normal_map(f.body, SEED).unwrap();
+        // What it holds is the whole map's, bit for bit.
+        for (cell, pair) in partial.cells().iter().zip(partial.pairs()) {
+            let at = full.cells().binary_search(cell).unwrap();
+            assert_eq!(
+                pair.map(bits_f32),
+                full.pairs()[at].map(bits_f32),
+                "block {k}"
+            );
+        }
+        if partial.is_complete() {
+            continue;
+        }
+        let field = fields.field(f.body).unwrap();
+        let waiting = *full
+            .cells()
+            .iter()
+            .find(|&&c| {
+                field.is_surveyed(cell_at_index(full.level(), c).unwrap())
+                    && !partial.cells().contains(&c)
+            })
+            .unwrap_or_else(|| panic!("block {k}: an incomplete map leaves out a surveyed cell"));
+        // The rest of the payload: the map is whole, holds the cell and is a fresh worker's.
+        for (n, rest) in f.first_blocks.iter().enumerate().skip(1) {
+            if n != k {
+                fields.chunk(f.body, rest).unwrap();
+            }
+        }
+        let whole = fields.normal_map(f.body, SEED).unwrap();
+        assert!(whole.is_complete(), "block {k}");
+        assert!(whole.cells().contains(&waiting), "block {k}: {waiting}");
+        assert_eq!(normal_map_bits(&whole), normal_map_bits(&full), "block {k}");
+        waited = true;
+    }
+    assert!(waited, "some cell's height reads a margin still to come");
 }
 
 /// A worker holding a survey of the 2 × 2 cells of `field`'s level about the direction `dir`, at

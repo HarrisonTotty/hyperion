@@ -9,7 +9,13 @@ import { GalaxyDisplay } from "./displays/galaxy/GalaxyDisplay";
 import { SystemDisplay } from "./displays/system/SystemDisplay";
 import { ViewSceneProvider } from "./displays/view/ViewSceneProvider";
 import { ViewDisplay } from "./displays/view/ViewDisplay";
-import { ViewsCheckRunner } from "./displays/view/check/ViewsCheckRunner";
+import { type CheckedRun, ViewsCheckRunner } from "./displays/view/check/ViewsCheckRunner";
+import { HANDOVER_APPROACH } from "./displays/view/check/handoverGeometry";
+import {
+  handoverRangeAtM,
+  HandoverScenes,
+  terrainTestHandoverWorld,
+} from "./displays/view/check/handoverScenes";
 import { terrainProbeOptions } from "./displays/view/check/terrainCheckRun";
 import { TerrainProbe } from "./displays/view/check/terrainProbe";
 import { ViewsProbe } from "./displays/view/check/viewsProbe";
@@ -26,6 +32,7 @@ import { useDisplayKeys } from "./lib/useDisplayKeys";
 import { GraphicsStatusProvider } from "./view/engine/GraphicsStatusProvider";
 import { navigatorGpu } from "./view/engine/status";
 import type { QualitySetting } from "./view/quality/qualitySetting";
+import type { ViewsCheckLaunch } from "../../preload/api";
 import { useSurfaceModuleCheck } from "./wasm/useSurfaceModuleCheck";
 
 /** What `App` hands the displays besides the server link and the universe, which are contexts. */
@@ -62,25 +69,61 @@ interface CheckedView {
   readonly terrain: TerrainSeam | null;
 }
 
-/** The probes of a `--views-check` launch: the views probe, and the terrain run's on a `--terrain` one. */
+/**
+ * The probes of a `--views-check` launch: the views probe, and its run's own (`CheckedRun`): the
+ * terrain run's probe on a `--terrain` one, and on a `--handover` one also the hand-over check's
+ * looks (R10.T10.g), offered among the terrain probe's kept scenes on that launch alone.
+ */
 interface CheckProbes {
   readonly views: ViewsProbe;
-  readonly terrain: TerrainProbe | null;
+  readonly run: CheckedRun;
+}
+
+/** A `--views-check` launch's probes, by its options. */
+function checkProbesOf(launch: ViewsCheckLaunch): CheckProbes {
+  const views = new ViewsProbe();
+  const terrainProbe = (checkScenes: ReadonlyArray<SceneOption>): TerrainProbe =>
+    new TerrainProbe(views, { ...terrainProbeOptions(launch.smoke), checkScenes });
+  let run: CheckedRun;
+  switch (launch.run) {
+    case "several-views":
+      run = { kind: "several-views" };
+      break;
+    case "terrain":
+      run = { kind: "terrain", terrain: terrainProbe([]) };
+      break;
+    case "handover": {
+      const world = terrainTestHandoverWorld();
+      // A look chosen by hand before the run measures the primary is drawn at the range of a
+      // canvas the window's width, and measures nothing (`HandoverScenes`).
+      const windowPx = Math.max(1, Math.round(window.innerWidth * window.devicePixelRatio));
+      const scenes = new HandoverScenes(
+        world,
+        launch.smoke ? HANDOVER_APPROACH.smoke : HANDOVER_APPROACH.full,
+        handoverRangeAtM(world, launch.setting, windowPx).rangeM,
+      );
+      run = { kind: "handover", terrain: terrainProbe(scenes.sceneOptions), scenes };
+      break;
+    }
+  }
+  return { views, run };
 }
 
 /** The view a check launch hands `VIEW`, from its probes. */
 function checkedViewOf(probes: CheckProbes): CheckedView {
-  const terrain = probes.terrain;
-  return terrain === null
-    ? { engineSource: probes.views.source, terrain: null }
-    : {
-        engineSource: terrain.source,
-        terrain: {
-          heightWorkers: terrain.heightWorkers,
-          sceneOptions: terrain.sceneOptions,
-          watchTerrain: terrain.watchTerrain,
-        },
-      };
+  const { run } = probes;
+  if (run.kind === "several-views") {
+    return { engineSource: probes.views.source, terrain: null };
+  }
+  const { terrain } = run;
+  return {
+    engineSource: terrain.source,
+    terrain: {
+      heightWorkers: terrain.heightWorkers,
+      sceneOptions: terrain.sceneOptions,
+      watchTerrain: terrain.watchTerrain,
+    },
+  };
 }
 
 function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
@@ -164,17 +207,9 @@ export function App() {
   const viewsCheck = window.hyperion.viewsCheck;
   // A `--views-check` launch opens on `VIEW`, whose engine its probe watches (R07.T20); a
   // `--terrain` one also its terrain run's (R10.T16.d).
-  const [probes] = useState((): CheckProbes | null => {
-    if (viewsCheck === undefined) {
-      return null;
-    }
-    const views = new ViewsProbe();
-    const { terrain, smoke } = viewsCheck.launch;
-    return {
-      views,
-      terrain: terrain ? new TerrainProbe(views, terrainProbeOptions(smoke)) : null,
-    };
-  });
+  const [probes] = useState((): CheckProbes | null =>
+    viewsCheck === undefined ? null : checkProbesOf(viewsCheck.launch),
+  );
   const [activeDisplay, setActiveDisplay] = useState<DisplayId>(
     viewsCheck === undefined ? "link" : "view",
   );
@@ -213,7 +248,7 @@ export function App() {
   return (
     <GraphicsStatusProvider graphics={window.hyperion.graphics} gpu={navigatorGpu()}>
       {viewsCheck === undefined || probes === null ? null : (
-        <ViewsCheckRunner api={viewsCheck} probe={probes.views} terrain={probes.terrain} />
+        <ViewsCheckRunner api={viewsCheck} probe={probes.views} run={probes.run} />
       )}
       <ServerLinkContext value={link}>
         <UniverseProvider>

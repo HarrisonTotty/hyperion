@@ -18,15 +18,22 @@
  *   shades with `elsewhere`, as the lit terrain's law 0 takes such a slot ({@link classMapLawsOf}).
  *   `elsewhere` is R07's uniform `lawFor(p, q, template)`, the body's photometry's law. R07's disc
  *   scales every law's A for its figure (`oblateAlbedoScale`), the classes' included, as it did.
- * - **The store** ({@link ClassMapStore}) owns each body's texture, under `coarse-field-gpu`: it
- *   asks the pool for the map when a body is wanted and again after each block that surveys cells
- *   or brings what an incomplete map lacked (the pool's `onFieldChange`, the workers' coverage),
- *   remakes the texture after a device loss and releases it with the body.
+ * - **The normal map** (R10.T10.g; decision-r10-t16-leans §1, remedy 1) comes in the same answer:
+ *   each surveyed cell of the field's own level with the shading normal the coarsest terrain gives
+ *   its centre, packed as R07's disc reads it (`bodies/discNormals.ts`' `packNormalMap`,
+ *   {@link normalMapTexelsOf}), so that the disc and the terrain share their cell-scale slopes at
+ *   the hand-over. The surface carries it beside the class map, texture and texels.
+ * - **The store** ({@link ClassMapStore}) owns each body's two textures, both under
+ *   `coarse-field-gpu`: it asks the pool for the maps when a body is wanted and again after each
+ *   block that surveys cells or brings what an incomplete map lacked (the pool's `onFieldChange`,
+ *   the workers' coverage), a map being complete only where its classes and its normals both are;
+ *   it remakes both textures after a device loss and releases both with the body.
  */
 import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
 
 import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
 import type { PhotometricLaw } from "../appearance/law";
+import { type NormalMapTexels, normalMapTexture, packNormalMap } from "../bodies/discNormals";
 import {
   type ClassMapTexels,
   classMapSurface,
@@ -130,6 +137,21 @@ export function classMapTexelsOf(answer: ClassMapAnswer): ClassMapTexels | null 
 }
 
 /**
+ * An answered normal map packed as R07's disc reads it (`packNormalMap`, with its gutter, at the
+ * field's level): each surveyed cell answered its pair, every other texel `NO_NORMAL`; `null` for a
+ * map of no cell, under which the datum's normal shades everywhere.
+ *
+ * @throws Error for a level outside 5 to 8, pairs that are not two a cell, a cell past the level's,
+ *   or a pair coordinate outside [−1, 1].
+ */
+export function normalMapTexelsOf(answer: ClassMapAnswer): NormalMapTexels | null {
+  if (answer.normalCells.length === 0 && answer.normalPairs.length === 0) {
+    return null;
+  }
+  return packNormalMap(answer.normalLevel, answer.normalCells, answer.normalPairs);
+}
+
+/**
  * What a frame's lit bodies take their class maps from (R10.T10.d): `litBodiesOf`'s optional
  * source, absent where no view feeds one, every disc then uniform.
  */
@@ -148,10 +170,14 @@ export type ClassMapPool = Pick<HeightWorkerPool, "classMap" | "onFieldChange">;
 interface HeldMap {
   readonly texels: ClassMapTexels;
   readonly laws: ReadonlyArray<PhotometricLaw | null>;
-  /** Whether every texel the survey touched was answered. */
+  /** The normal map's texels, `null` for none (no surveyed cell answered). */
+  readonly normals: NormalMapTexels | null;
+  /** Whether every texel the survey touched, and every surveyed cell's normal, was answered. */
   readonly complete: boolean;
   /** Its texture, `null` while the device is lost. */
   texture: TextureHandle | null;
+  /** The normal map's texture, `null` while the device is lost or where it has none. */
+  normalTexture: TextureHandle | null;
   /** The surface last handed out, with its `elsewhere`. */
   surface: ClassMapDiscSurface | null;
 }
@@ -166,15 +192,17 @@ interface HeldBody {
 }
 
 /**
- * The bodies' class maps on one engine, fed from a height-worker pool (R10.T10.d): a texture each
- * under `coarse-field-gpu`, remade after a device loss and released with its body.
+ * The bodies' class maps and normal maps on one engine, fed from a height-worker pool (R10.T10.d,
+ * R10.T10.g): two textures a body under `coarse-field-gpu`, the class map's and the normal map's,
+ * remade after a device loss and released with their body.
  *
  * @remarks
  * {@link ClassMapStore.want} asks the pool for a body's map, and the store asks again after each of
- * the body's blocks the workers take that surveys a cell, brings a cell while the map lacked one,
- * or starts the field afresh; an answer to an older query than the body's latest is dropped. A map
- * of no class, or none (no field held yet), leaves the body uniform. A query refused by the module
- * is reported once a body, with `console.error`, and asked again after the next block.
+ * the body's blocks the workers take that surveys a cell, brings a cell while the map lacked one
+ * (its classes or its normals), or starts the field afresh; an answer to an older query than the
+ * body's latest is dropped. A map of no class, or none (no field held yet), leaves the body
+ * uniform; a map of no normal leaves its surface without one. A query refused by the module is
+ * reported once a body, with `console.error`, and asked again after the next block.
  */
 export class ClassMapStore implements ClassMapSource {
   readonly #engine: Pick<
@@ -188,7 +216,10 @@ export class ClassMapStore implements ClassMapSource {
   readonly #unsubscribe: ReadonlyArray<() => void>;
   #disposed = false;
 
-  /** Feeds from `pool` onto `engine`, its textures named `<name> <body>`. */
+  /**
+   * Feeds from `pool` onto `engine`, its class maps' textures named `<name> <body>` and its normal
+   * maps' `<name> normals <body>`.
+   */
   constructor(
     engine: Pick<RenderEngine, "createTexture" | "writeTexture" | "releaseTexture" | "onRestored">,
     pool: ClassMapPool,
@@ -228,7 +259,7 @@ export class ClassMapStore implements ClassMapSource {
     this.#ask(body);
   }
 
-  /** Drops `body`'s map and releases its texture; a body not asked for is no error. */
+  /** Drops `body`'s map and releases its textures; a body not asked for is no error. */
   release(body: BodyIdHex): void {
     const held = this.#bodies.get(body);
     if (held === undefined) {
@@ -244,13 +275,21 @@ export class ClassMapStore implements ClassMapSource {
     if (map === null || map.texture === null) {
       return null;
     }
-    if (map.surface?.elsewhere !== elsewhere || map.surface.weights !== map.texture) {
+    if (
+      map.surface?.elsewhere !== elsewhere ||
+      map.surface.weights !== map.texture ||
+      (map.surface.normals?.texture ?? null) !== map.normalTexture
+    ) {
       map.surface = {
         kind: "class-map",
         weights: map.texture,
         texels: map.texels,
         laws: map.laws.map((law) => law ?? elsewhere),
         elsewhere,
+        normals:
+          map.normals === null || map.normalTexture === null
+            ? null
+            : { texture: map.normalTexture, texels: map.normals },
       };
     }
     return map.surface;
@@ -321,6 +360,7 @@ export class ClassMapStore implements ClassMapSource {
       return;
     }
     const texels = classMapTexelsOf(answer);
+    const normals = normalMapTexelsOf(answer);
     this.#drop(held);
     if (texels === null) {
       return;
@@ -328,26 +368,41 @@ export class ClassMapStore implements ClassMapSource {
     const map: HeldMap = {
       texels,
       laws: classMapLawsOf(answer),
-      complete: answer.complete,
+      normals,
+      complete: answer.complete && answer.normalsComplete,
       texture: null,
+      normalTexture: null,
       surface: null,
     };
     held.map = map;
     this.#upload(body, map);
   }
 
-  /** Makes `map`'s texture, or leaves it `null` while the device is lost, for the restore. */
+  /**
+   * Makes `map`'s textures, or leaves them `null` while the device is lost, for the restore: both or
+   * neither, the class map's released again where the normal map's cannot be made.
+   */
   #upload(body: BodyIdHex, map: HeldMap): void {
     try {
       // R07's construction; the laws it is given stand in, `classMapOf` giving each frame's.
       const placeholder = map.laws.map((law) => law ?? STAND_IN_LAW);
-      map.texture = classMapSurface(
+      const weights = classMapSurface(
         this.#engine,
         `${this.#name} ${body}`,
         map.texels,
         placeholder,
         STAND_IN_LAW,
       ).weights;
+      try {
+        map.normalTexture =
+          map.normals === null
+            ? null
+            : normalMapTexture(this.#engine, `${this.#name} normals ${body}`, map.normals).texture;
+      } catch (error: unknown) {
+        this.#engine.releaseTexture(weights);
+        throw error;
+      }
+      map.texture = weights;
     } catch (error: unknown) {
       if (!(error instanceof EngineUnavailable)) {
         throw error;
@@ -356,12 +411,24 @@ export class ClassMapStore implements ClassMapSource {
     map.surface = null;
   }
 
-  /** Releases `held`'s texture and forgets its map. */
+  /** Releases `held`'s textures and forgets its map. */
   #drop(held: HeldBody): void {
-    if (held.map !== null && held.map.texture !== null) {
-      this.#engine.releaseTexture(held.map.texture);
+    if (held.map !== null) {
+      this.#release(held.map);
     }
     held.map = null;
+  }
+
+  /** Releases `map`'s textures, those it holds, and forgets them. */
+  #release(map: HeldMap): void {
+    if (map.texture !== null) {
+      this.#engine.releaseTexture(map.texture);
+      map.texture = null;
+    }
+    if (map.normalTexture !== null) {
+      this.#engine.releaseTexture(map.normalTexture);
+      map.normalTexture = null;
+    }
   }
 
   /** Asks again for a body whose block surveyed cells, brought what its map lacked, or started. */
@@ -381,18 +448,15 @@ export class ClassMapStore implements ClassMapSource {
     }
   }
 
-  /** Makes every map's texture again on the restored device. */
+  /** Makes every map's textures again on the restored device. */
   #restored(): void {
     for (const [body, held] of this.#bodies) {
       const map = held.map;
       if (map === null) {
         continue;
       }
-      if (map.texture !== null) {
-        // The lost device's handle: the resilient engine drops its release.
-        this.#engine.releaseTexture(map.texture);
-        map.texture = null;
-      }
+      // The lost device's handles: the resilient engine drops their release.
+      this.#release(map);
       this.#upload(body, map);
     }
   }

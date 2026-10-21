@@ -1,15 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { add, scale, type Vec3, vec3 } from "../../geometry/vec3";
+import { add, dot, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import { memoised } from "../../test/memo";
+import {
+  constantNormalMap,
+  datumNormalMap,
+  UNREAD_TEXTURES,
+  unreadNormalMap,
+} from "../../test/normalMapFixtures";
+import type { PhotometricLaw } from "../appearance/law";
 import { lawFor } from "../appearance/phase";
-import type { SurfaceLightingReader } from "../atmosphere/surfaceLighting";
+import { AIRLESS_LIGHTING, type SurfaceLightingReader } from "../atmosphere/surfaceLighting";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { pixelSolidAngle, type ProjectionCamera, type Viewport } from "../camera/projection";
+import { IDENTITY_ROTATION } from "../coords/rotation";
 import { annulusEdges } from "../lighting/annuli";
 import type { PlacedLight } from "../lighting/hostLights";
-import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
+import { PLANETSHINE_SOURCES_HIGH, planetshineIrradiance } from "../lighting/planetshine";
 import type { Rgb } from "../photometry/toneCurve";
 import { AU_M } from "../scenes/kept";
 import type { BodyFigure } from "../terrain/planet";
@@ -21,11 +29,15 @@ import {
   type DiscSamples,
   discSamples,
   FINE_DISC_PX,
+  type OrientedClassMap,
+  packDiscRecords,
   pointSampleDisc,
   rasteriseDisc,
   shadeDiscPoint,
   viewRay,
 } from "./discShading";
+import { type NormalMapTexels, normalMapNormalAt } from "./discNormals";
+import { classMapSurface, packClassMap } from "./discSurface";
 import { type LitBodyInput, planLitBodies } from "./draw";
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
@@ -40,6 +52,7 @@ const RADIUS_M = 6.371e6;
 const OPTIONS = {
   camera: CAMERA,
   viewport: VIEWPORT,
+  presentedPx: VIEWPORT,
   exposureScale: 1e-3,
   annuli: 4,
   planetshine: PLANETSHINE_SOURCES_HIGH,
@@ -411,5 +424,292 @@ describe("a disc's laws split by their two terms (R10.T10.f)", () => {
       }
     }
     expect(worst).toBeLessThan(1e-15);
+  });
+});
+
+/** The unit vector `from` turned by `angleRad` towards `to` in their plane. */
+function turned(from: Vec3, to: Vec3, angleRad: number): Vec3 {
+  const across = normalise(sub(to, scale(from, dot(to, from))));
+  return add(scale(from, Math.cos(angleRad)), scale(across, Math.sin(angleRad)));
+}
+
+/** A point of a unit sphere whose μ from galactic +z is `mu`, on the x–z plane. */
+function pointAt(mu: number): Vec3 {
+  return vec3(Math.sqrt(1 - mu * mu), 0, mu);
+}
+
+/** A packed record's flag of the field's normal map, row 24's w (R10.T10.g). */
+function normalsFlag(record: DiscRecord): number | undefined {
+  return packDiscRecords([record])[24 * 4 + 3];
+}
+
+/** The lookups a {@link recordingAir} was asked, each by the μ it took. */
+interface AskedAir {
+  readonly reader: SurfaceLightingReader;
+  /** `skyIrradiance`'s μ of the sun, each call in turn. */
+  readonly sky: number[];
+  /** `sunTransmittance`'s μ of the sun. */
+  readonly sun: number[];
+  /** `sourceTransmittance`'s μ of the source's centre. */
+  readonly source: number[];
+}
+
+/** {@link AIR}'s light, recording the μ each lookup is asked at. */
+function recordingAir(): AskedAir {
+  const asked: AskedAir = {
+    reader: {
+      skyIrradiance: (altitudeM, muSun, latitudeRad, curve) => {
+        asked.sky.push(muSun);
+        return AIR.skyIrradiance(altitudeM, muSun, latitudeRad, curve);
+      },
+      sunTransmittance: (altitudeM, muSun, latitudeRad, azimuthRad, curve) => {
+        asked.sun.push(muSun);
+        return AIR.sunTransmittance(altitudeM, muSun, latitudeRad, azimuthRad, curve);
+      },
+      sourceTransmittance: (altitudeM, muCentre, latitudeRad, azimuthRad, radiusRad, curve) => {
+        asked.source.push(muCentre);
+        return AIR.sourceTransmittance(
+          altitudeM,
+          muCentre,
+          latitudeRad,
+          azimuthRad,
+          radiusRad,
+          curve,
+        );
+      },
+    },
+    sky: [],
+    sun: [],
+    source: [],
+  };
+  return asked;
+}
+
+/** Whether `asked` are `expected`, one for one, each to 10⁻¹². */
+function allClose(asked: ReadonlyArray<number>, expected: ReadonlyArray<number>): boolean {
+  return (
+    asked.length === expected.length &&
+    asked.every((mu, k) => Math.abs(mu - (expected[k] ?? Number.NaN)) < 1e-12)
+  );
+}
+
+/** A lunar regolith class and the body's own law; a Lambert law, whose I/F is A f(α) h. */
+const REGOLITH = lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon");
+const OWN = lawFor([0.15, 0.14, 0.13], [0.6, 0.6, 0.6], "moon");
+const LAMBERT = lawFor([0.2, 0.2, 0.2], [1.5, 1.5, 1.5], "lambert");
+/** The camera's direction from every point of {@link litBy}'s far sphere: galactic +z. */
+const TO_CAMERA = vec3(0, 0, 1);
+/** The ray to each point of {@link litBy}'s far sphere. */
+const RAY = vec3(0, 0, -1);
+const NORTH = vec3(0, 1, 0);
+const EAST = vec3(1, 0, 0);
+
+/**
+ * A one-class map surveyed whole under `law`, `elsewhere` its unsurveyed ground's, carrying
+ * `normals` (none for `null`), body-fixed as galactic.
+ */
+function mapped(
+  normals: NormalMapTexels | null,
+  law: PhotometricLaw = REGOLITH,
+  elsewhere: PhotometricLaw = OWN,
+): OrientedClassMap {
+  const surface = classMapSurface(
+    UNREAD_TEXTURES,
+    "test",
+    packClassMap(64, 1, () => [1]),
+    [law],
+    elsewhere,
+    normals === null ? null : unreadNormalMap(normals),
+  );
+  return { ...surface, rotation: IDENTITY_ROTATION };
+}
+
+/** The map's normal held as the twin decodes it, at the body-fixed point `q`. */
+function heldAt(surface: OrientedClassMap, q: Vec3): Vec3 {
+  const held =
+    surface.normals === null ? null : normalMapNormalAt(surface.normals.texels, [q.x, q.y, q.z]);
+  if (held === null) {
+    throw new Error("the map holds no normal at the point");
+  }
+  return held;
+}
+
+/** A map holding the one body-fixed `normal` about the body-fixed point `q`. */
+function slopeAt(
+  q: Vec3,
+  normal: Vec3,
+  law: PhotometricLaw = REGOLITH,
+  elsewhere: PhotometricLaw = OWN,
+): OrientedClassMap {
+  return mapped(constantNormalMap(5, normal, q, 0.3), law, elsewhere);
+}
+
+/** {@link litBy}'s sphere under `surface`, lit by one point-like star towards `towards`. */
+function recordOver(
+  towards: Vec3,
+  surface: OrientedClassMap,
+  secondaries: DiscRecord["secondaries"] = [],
+): DiscRecord {
+  return { ...litBy(towards), surface, tableRows: [0, 1], secondaries };
+}
+
+/** The twin's light of `record` at its point `q` along {@link RAY}, through `lighting`. */
+function shadeAt(
+  record: DiscRecord,
+  q: Vec3,
+  lighting: SurfaceLightingReader = AIRLESS_LIGHTING,
+): ReturnType<typeof shadeDiscPoint> {
+  const texels = record.surface.kind === "class-map" ? record.surface.texels : null;
+  return shadeDiscPoint(record, CAMERA, q, RAY, lighting, texels);
+}
+
+/** {@link shadeAt} of {@link recordOver}. */
+function shadeOver(
+  towards: Vec3,
+  surface: OrientedClassMap,
+  q: Vec3,
+  lighting: SurfaceLightingReader = AIRLESS_LIGHTING,
+): ReturnType<typeof shadeDiscPoint> {
+  return shadeAt(recordOver(towards, surface), q, lighting);
+}
+
+/** A neighbour 60 radii off towards `direction`, 1 radius across, lighting by planetshine. */
+function neighbourTowards(direction: Vec3): DiscRecord["secondaries"][number] {
+  return { direction, distance: 60, radius: 1, illuminance: [0.02, 0.025, 0.03] };
+}
+
+/**
+ * The point at the datum's μ 0.2 lit along its datum's normal, its slope turned from the camera
+ * by 0° to 30° in 0.5° steps: past 11.5° its shading normal faces away from the camera, and from
+ * 5.8° the law's μ is floored at half the datum's, 0.1.
+ */
+function turnedAwayNearTheLimb(): Array<ReturnType<typeof shadeDiscPoint>> {
+  const q = pointAt(0.2);
+  return Array.from({ length: 61 }, (_, k) =>
+    shadeOver(q, slopeAt(q, turned(q, RAY, (k * 0.5 * Math.PI) / 180)), q),
+  );
+}
+
+describe("a disc under the field's normal map (R10.T10.g)", () => {
+  it("packs row 24's w 1 where the class map carries a normal map, 0 without one and for a uniform disc", () => {
+    const towards = normalise(vec3(1, 0, 1));
+    expect([
+      normalsFlag(recordOver(towards, mapped(datumNormalMap(6)))),
+      normalsFlag(recordOver(towards, mapped(null))),
+      normalsFlag(litBy(towards)),
+    ]).toEqual([1, 0, 0]);
+  });
+
+  it("draws every pixel bit for bit as without one where the map holds no normal", () => {
+    // Normals on the far side alone, which the camera does not see: some hundred pixels drawn.
+    const far = mapped(datumNormalMap(6, 1, (cell) => cell.centre.z < -0.3));
+    const record = recordAt(24, 60, SPHERE);
+    const draw = (surface: OrientedClassMap): ReturnType<typeof rasteriseDisc> =>
+      rasteriseDisc({ ...record, surface, tableRows: [0, 1] }, CAMERA, VIEWPORT, surface.texels);
+    const drawn = draw(far);
+    expect([drawn.length > 100, drawn]).toEqual([true, draw(mapped(null))]);
+  });
+
+  it("never draws black where a cell's slope faces away near the limb", () => {
+    expect(dot(turned(pointAt(0.2), RAY, (30 * Math.PI) / 180), TO_CAMERA)).toBeLessThan(0);
+    expect(
+      turnedAwayNearTheLimb().filter((value) => !(value.lit && value.radiance[1] > 0)),
+    ).toEqual([]);
+  });
+
+  it("draws a continuous light as the slope turns away near the limb, under 2% a 0.5° step", () => {
+    // No jump at the floor's kink or where the slope turns away.
+    const values = turnedAwayNearTheLimb();
+    const steps = values
+      .slice(1)
+      .map((next, k) => Math.abs(next.radiance[1] / (values[k]?.radiance[1] ?? Number.NaN) - 1));
+    expect(Math.max(...steps)).toBeLessThan(0.02);
+  });
+
+  it("keeps a slope facing the star dark beyond the geometric terminator", () => {
+    // The sub-camera point, the star 5° below its datum's horizon, its slope 20° towards the star,
+    // whose own plane the star stands 15° above: the datum's tangent plane hides it.
+    const q = TO_CAMERA;
+    const set = turned(q, EAST, (95 * Math.PI) / 180);
+    const facingSet = turned(q, set, (20 * Math.PI) / 180);
+    expect(dot(facingSet, set)).toBeGreaterThan(0.25);
+    expect(shadeOver(set, slopeAt(q, facingSet), q)).toEqual({ radiance: [0, 0, 0], lit: false });
+  });
+
+  it("lights the same slope with the star 5° above the datum's horizon", () => {
+    const q = TO_CAMERA;
+    const up = turned(q, EAST, (85 * Math.PI) / 180);
+    expect(shadeOver(up, slopeAt(q, turned(q, up, (20 * Math.PI) / 180)), q).lit).toBe(true);
+  });
+
+  it("takes R08's sky on the datum by a tilted surface's share of it, (1 + n′ · ν) ÷ 2", () => {
+    // A sky of the same light everywhere and a ground that hides the sun's direct light.
+    const skyAlone: SurfaceLightingReader = { ...AIR, sunTransmittance: () => [0, 0, 0] };
+    const q = pointAt(0.8);
+    const towards = turned(q, NORTH, (30 * Math.PI) / 180);
+    const plain = shadeOver(towards, mapped(null), q, skyAlone);
+    const ratios = [10, 25, 40].flatMap((tiltDeg) => {
+      const surface = slopeAt(q, turned(q, NORTH, (tiltDeg * Math.PI) / 180));
+      const tiltedSky = shadeOver(towards, surface, q, skyAlone);
+      const factor = 0.5 * (1 + dot(heldAt(surface, q), q));
+      return [0, 1, 2].map((c) => (tiltedSky.radiance[c] ?? 0) / (plain.radiance[c] ?? 0) / factor);
+    });
+    expect(ratios.map((ratio) => Math.abs(ratio - 1) < 1e-12)).toEqual(ratios.map(() => true));
+  });
+
+  it("asks R08's sky, the sun's and a source's transmittance at the datum's μ₀ under a tilted map", () => {
+    // A point at μ 0.8, its slope 20° to the north, a star 30° to the north and a neighbour 40° to
+    // the south of its datum's normal, both up on both normals.
+    const q = pointAt(0.8);
+    const star = turned(q, NORTH, (30 * Math.PI) / 180);
+    const neighbour = neighbourTowards(turned(q, scale(NORTH, -1), (40 * Math.PI) / 180));
+    const surface = slopeAt(q, turned(q, NORTH, (20 * Math.PI) / 180));
+    const record = recordOver(star, surface, [neighbour]);
+    const air = recordingAir();
+    shadeAt(record, q, air.reader);
+    // The cosines against the datum's normal (the unit sphere's: q), from the point.
+    const light = record.lights[0];
+    const towardsStar = normalise(sub(scale(light?.direction ?? star, light?.distance ?? 0), q));
+    const towardsNeighbour = normalise(sub(scale(neighbour.direction, neighbour.distance), q));
+    const datumStar = dot(q, towardsStar);
+    const datumNeighbour = dot(q, towardsNeighbour);
+    // Each differs from the shading normal's by more than 0.1, so the test tells them apart.
+    const held = heldAt(surface, q);
+    expect(
+      Math.min(
+        Math.abs(dot(held, towardsStar) - datumStar),
+        Math.abs(dot(held, towardsNeighbour) - datumNeighbour),
+      ),
+    ).toBeGreaterThan(0.1);
+    expect([
+      allClose(air.sky, [datumStar, datumNeighbour]),
+      allClose(air.sun, [datumStar]),
+      allClose(air.source, [datumNeighbour]),
+    ]).toEqual([true, true, true]);
+  });
+
+  it("lights a night-side point by planetshine on the shading normal, by planetshineIrradiance(n′) ÷ planetshineIrradiance(ν)", () => {
+    // The star 30° below the point's datum horizon; a neighbour 50° from its datum's normal; under
+    // Lambert's law, whose I/F is A f(α) times the source's irradiance factor.
+    const q = pointAt(0.8);
+    const star = turned(q, EAST, (120 * Math.PI) / 180);
+    const neighbour = neighbourTowards(turned(q, NORTH, (50 * Math.PI) / 180));
+    const towardsNeighbourFromQ = sub(scale(neighbour.direction, neighbour.distance), q);
+    const ratios = [10, 25].flatMap((tiltDeg) => {
+      const sloped = slopeAt(q, turned(q, NORTH, (tiltDeg * Math.PI) / 180), LAMBERT, LAMBERT);
+      const lit = shadeAt(recordOver(star, sloped, [neighbour]), q);
+      const plain = shadeAt(recordOver(star, mapped(null, LAMBERT, LAMBERT), [neighbour]), q);
+      const expected =
+        planetshineIrradiance(
+          towardsNeighbourFromQ,
+          neighbour.radius,
+          neighbour.distance,
+          heldAt(sloped, q),
+        ) / planetshineIrradiance(towardsNeighbourFromQ, neighbour.radius, neighbour.distance, q);
+      return [0, 1, 2].map(
+        (c) => (lit.radiance[c] ?? 0) / (plain.radiance[c] ?? Number.NaN) / expected,
+      );
+    });
+    expect(ratios.map((ratio) => Math.abs(ratio - 1) < 1e-12)).toEqual(ratios.map(() => true));
   });
 });

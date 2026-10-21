@@ -12,6 +12,7 @@ import type {
   DrawItem,
   FrameSubmission,
   RenderEngine,
+  TexelRect,
   TextureHandle,
 } from "../../../view/engine/types";
 import { TERRAIN_SCENE_NAME, terrainTestGolden } from "../../../view/scenes/terrainScene";
@@ -805,6 +806,37 @@ describe("the terrain probe's read-backs (R10.T16.d; the batch review's D-C)", (
       expect([record.views[0]?.readBacks, warn.mock.calls.length]).toEqual([0, warnings]);
     },
   );
+
+  it("reads a region of a scene target back for the hand-over check (R10.T10.g)", async () => {
+    const asked: Array<readonly [number | undefined, TexelRect | undefined]> = [];
+    const { probe, engine, stop } = await probed(
+      (_texture: TextureHandle, level?: number, rect?: TexelRect) => {
+        asked.push([level, rect]);
+        return finiteTexels();
+      },
+    );
+    sceneTarget(engine, "view");
+    const rect = { x: 0, y: 1, width: 2, height: 1 };
+    const bytes = await probe.readSceneTarget("view:hdr", rect);
+    stop();
+    expect([bytes.byteLength, asked]).toEqual([32, [[0, rect]]]);
+  });
+
+  it("refuses to read back a scene target it was not made, or another target", async () => {
+    const { probe, engine, stop } = await probed(finiteTexels);
+    engine.createRenderTarget({
+      name: "view:bloom",
+      size: { widthPx: 2, heightPx: 2 },
+      format: "rgba16float",
+      mips: 1,
+      depth: false,
+      category: "render-targets",
+    });
+    const rect = { x: 0, y: 0, width: 1, height: 1 };
+    await expect(probe.readSceneTarget("view:hdr", rect)).rejects.toThrow(/no scene target/);
+    await expect(probe.readSceneTarget("view:bloom", rect)).rejects.toThrow(/no scene target/);
+    stop();
+  });
 
   it("reads the coverage mask's texels that are not zero as its surveyed cells", async () => {
     const mask: TextureHandle = { kind: "texture", name: "coverage mask" };

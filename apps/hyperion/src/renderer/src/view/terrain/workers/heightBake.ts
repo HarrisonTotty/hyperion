@@ -175,6 +175,18 @@ export interface WasmClassMap {
 }
 
 /**
+ * The module's `NormalMapAnswer`, `WorkerFields::normal_map`'s (R10.T10.g): the field's level, each
+ * surveyed cell answered and its octahedral pair, two `f32` a cell; its getters copy out.
+ */
+export interface WasmNormalMap {
+  readonly level: number;
+  cells(): Uint32Array;
+  pairs(): Float32Array;
+  readonly complete: boolean;
+  free(): void;
+}
+
+/**
  * The module's `GroundReadoutAnswer`, `WorkerFields::ground_readout`'s (R10.T12): its `kind` a
  * {@link WASM_LINE_OF_SIGHT} value, and on the ground the sight's, the reading's, the material's and
  * the properties' getters, `undefined` (or `false`) off it and where not computed.
@@ -294,6 +306,11 @@ export interface WasmSurfaceFields {
    * is held.
    */
   classMap(system: bigint, body: number, seed: bigint): WasmClassMap | undefined;
+  /**
+   * The body's normal map for R07's disc (R10.T10.g); `undefined` where no field of the body is
+   * held.
+   */
+  normalMap(system: bigint, body: number, seed: bigint): WasmNormalMap | undefined;
   free(): void;
 }
 
@@ -750,18 +767,28 @@ export class WorkerFields {
 
   /**
    * `body`'s coarse class map for R07's disc over its field, with its detail seed (R10.T10.d,
-   * `WorkerFields::class_map`), copied out; `null` where no payload field of it is held (none, or a
-   * stand-in's, which holds no ground).
+   * `WorkerFields::class_map`), and its normal map (R10.T10.g, `WorkerFields::normal_map`), its
+   * pairs rounded to half floats as a bake's are ({@link packNormals}), copied out; `null` where no
+   * payload field of it is held (none, or a stand-in's, which holds no ground).
+   *
+   * @throws Error where the module answers a class map but no normal map, which holds where the
+   *   other does (a broken module).
    */
   classMap(body: BodyIdHex, detailSeed: DetailSeedHex): ClassMapAnswer | null {
     if (this.#forms.get(body) !== "payload") {
       return null;
     }
-    const map = this.#module.classMap(...bodyArgs(body), hexToU64(detailSeed));
+    const args = [...bodyArgs(body), hexToU64(detailSeed)] as const;
+    const map = this.#module.classMap(...args);
     if (map === undefined) {
       return null;
     }
+    let normals: WasmNormalMap | undefined;
     try {
+      normals = this.#module.normalMap(...args);
+      if (normals === undefined) {
+        throw new Error(`the module answered ${body}'s class map but no normal map`);
+      }
       return {
         level: map.level,
         fieldLevel: map.fieldLevel,
@@ -771,9 +798,14 @@ export class WorkerFields {
         fractions: map.fractions(),
         weights: map.weights(),
         complete: map.complete,
+        normalLevel: normals.level,
+        normalCells: normals.cells(),
+        normalPairs: packNormals(normals.pairs()),
+        normalsComplete: normals.complete,
       };
     } finally {
       map.free();
+      normals?.free();
     }
   }
 
@@ -991,7 +1023,8 @@ export interface HeightAnswer {
  * rethrown: the worker raises it as its error and the pool replaces the worker. A body's field
  * blocks go to `fields` (R10.T6.b: decoded into the module's field, or held undecoded for a
  * stand-in), each answered with what the worker then holds and what a payload's block changed. A
- * class-map query is answered over the body's field (R10.T10.d), and a ground-readout query
+ * class-map query is answered over the body's field (R10.T10.d), with its normal map (R10.T10.g),
+ * and a ground-readout query
  * likewise (R10.T12), or refused with the module's message.
  */
 export function answerRequest(

@@ -169,6 +169,10 @@ function oneTexelMap(): ClassMapAnswer {
     fractions: Float32Array.of(1),
     weights: Uint8Array.of(255),
     complete: true,
+    normalLevel: 5,
+    normalCells: new Uint32Array(0),
+    normalPairs: new Float16Array(0),
+    normalsComplete: true,
   };
 }
 

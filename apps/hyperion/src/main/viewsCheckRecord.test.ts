@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { ViewsCheckRecord } from "../preload/api";
+import { HANDOVER_RECORD, passingLook } from "./fixtures/handoverRecord";
 import { TERRAIN_RECORD } from "./fixtures/terrainRecord";
-import { readTerrainCheckRecord, readViewsCheckRecord } from "./viewsCheckRecord";
+import {
+  readHandoverCheckRecord,
+  readTerrainCheckRecord,
+  readViewsCheckRecord,
+} from "./viewsCheckRecord";
 
 const RECORD: ViewsCheckRecord = {
   timer: "full",
@@ -188,5 +193,92 @@ describe("the terrain run's record (R10.T16.d)", () => {
   it("refuses T20's record, and T20's reader refuses it", () => {
     expect(readTerrainCheckRecord(RECORD)).toBeNull();
     expect(readViewsCheckRecord(TERRAIN_RECORD)).toBeNull();
+  });
+});
+
+describe("the hand-over check's record (R10.T10.g)", () => {
+  it("is read back whole", () => {
+    expect(readHandoverCheckRecord(structuredClone(HANDOVER_RECORD))).toEqual(HANDOVER_RECORD);
+  });
+
+  it("is read back with a look that was not locked and compared nothing", () => {
+    const look = {
+      ...passingLook("handover-90", "HAND-OVER 90°", true),
+      exposure: { lockedEv100: null, lockedReading: null, endReading: null, held: false },
+      switchesS: { figure: null, terrain: null, disc: null },
+      comparisons: [],
+      failures: ["the exposure was not locked: AUTO did not resume on ENABLE"],
+    };
+    const record = { ...HANDOVER_RECORD, looks: [look] };
+    expect(readHandoverCheckRecord(structuredClone(record))).toEqual(record);
+  });
+
+  it.each([
+    [["world"], 6],
+    [["devicePixelRatio"], 0],
+    [["canvas"], null],
+    [["target", "heightPx"], -1],
+    [["rangeM"], 0],
+    [["radPerPx"], Number.NaN],
+    [["cellLevel"], 6.5],
+    [["approach", "ratePerS"], 0],
+    [["approach", "closestRatio"], 4],
+    [["looks"], null],
+    [["looks", 0, "name"], "handover-45"],
+    [["looks", 1, "name"], "handover-30"],
+    [["looks", 0, "judged"], "yes"],
+    [["looks", 0, "judged"], false],
+    [["looks", 2, "judged"], true],
+    [["looks", 0, "scene"], "HAND-OVER 90°"],
+    [["looks", 0, "nominal", "phaseDeg"], -1],
+    [["looks", 0, "exposure", "held"], null],
+    [["looks", 0, "exposure", "lockedEv100"], "13.5"],
+    [["looks", 0, "surveyedCells"], -1],
+    [["looks", 0, "switchesS", "terrain"], "late"],
+    [["looks", 0, "failures"], [1]],
+    [["looks", 0, "comparisons", 1, "name"], "disc-to-figure"],
+    [["looks", 0, "comparisons", 0, "name"], "figure-to-disc"],
+    [["looks", 0, "comparisons", 0, "framesApart"], 0],
+    [["looks", 0, "comparisons", 0, "beforeWasLast"], 1],
+    [["looks", 0, "comparisons", 0, "before", "regime"], "mesh"],
+    [["looks", 0, "comparisons", 0, "before", "regime"], "figure"],
+    [["looks", 0, "comparisons", 0, "after", "regime"], "disc"],
+    [["looks", 0, "comparisons", 1, "after", "regime"], "figure"],
+    [["looks", 0, "comparisons", 2, "before", "regime"], "disc"],
+    [["looks", 0, "comparisons", 0, "before", "rangeRatio"], 0],
+    [["looks", 0, "comparisons", 0, "after", "bodyMisses"], 50_000],
+    [["looks", 0, "comparisons", 0, "after", "angles"], null],
+    [["looks", 0, "comparisons", 0, "body", "own", "meanAfter"], -0.1],
+    [["looks", 0, "comparisons", 0, "survey", "shared", "pixels"], 1.5],
+    [["looks", 0, "comparisons", 0, "texels", 0, "sharedPixels"], 0],
+    [["looks", 0, "comparisons", 0, "texels", 1, "texel"], 19_200],
+    [["looks", 0, "comparisons", 0, "texels", 2, "meanAfter"], Number.POSITIVE_INFINITY],
+    [["faults", 0], { atMs: 1 }],
+  ])("refuses a record whose %j is %j", (path, value) => {
+    const record =
+      path[0] === "faults"
+        ? {
+            ...HANDOVER_RECORD,
+            faults: [{ atMs: 0, kind: "device-lost", reason: "unknown", line: "a" }],
+          }
+        : HANDOVER_RECORD;
+    expect(readHandoverCheckRecord(replaced(record, path, value))).toBeNull();
+  });
+
+  it("is read back with the regime's switch from the disc straight to the terrain", () => {
+    const record = replaced(
+      HANDOVER_RECORD,
+      ["looks", 0, "comparisons", 0, "after", "regime"],
+      "terrain",
+    );
+    expect(readHandoverCheckRecord(record)).toEqual(record);
+  });
+
+  it("refuses the terrain run's record", () => {
+    expect(readHandoverCheckRecord(TERRAIN_RECORD)).toBeNull();
+  });
+
+  it("is refused by the terrain run's reader", () => {
+    expect(readTerrainCheckRecord(HANDOVER_RECORD)).toBeNull();
   });
 });

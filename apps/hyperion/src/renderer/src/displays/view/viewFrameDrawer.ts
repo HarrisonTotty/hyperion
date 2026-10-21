@@ -542,6 +542,8 @@ export class ViewFrameDrawer {
           run,
           pose: camera.pose,
           viewport: internal,
+          // The hand-over's pixel, which the internal scale must not move (R10.T10.g).
+          presentedPx: viewport,
           setting: inputs.setting,
           exposureScale: exposed,
           list: { ...list, sprites: spritesAtScale(list.sprites, viewport, internal) },

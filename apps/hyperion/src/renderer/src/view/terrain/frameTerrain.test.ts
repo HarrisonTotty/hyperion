@@ -133,6 +133,10 @@ function oneClassMap(): ClassMapDiscSurface {
     fractions: new Float32Array(0),
     weights: new Uint8Array(0),
     complete: true,
+    normalLevel: 6,
+    normalCells: new Uint32Array(0),
+    normalPairs: new Float16Array(0),
+    normalsComplete: true,
   });
   if (law === null || law === undefined) {
     throw new Error("the class has a law");
@@ -143,6 +147,7 @@ function oneClassMap(): ClassMapDiscSurface {
     texels: { faceTexels: 64, classes: 1, data: new Uint8Array(0) },
     laws: [law],
     elsewhere: ELSEWHERE,
+    normals: null,
   };
 }
 
@@ -165,6 +170,7 @@ function bodyAt(distanceM: number, extra: Partial<LitBodyInput> = {}): LitBodyIn
 const OPTIONS: BodyFrameOptions = {
   camera: CAMERA,
   viewport: VIEWPORT,
+  presentedPx: VIEWPORT,
   exposureScale: EXPOSURE,
   annuli: DISC_ANNULI_HIGH,
   planetshine: PLANETSHINE_SOURCES_HIGH,

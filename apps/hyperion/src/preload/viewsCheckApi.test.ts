@@ -1,12 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { VIEWS_CHECK_CHANNELS } from "../main/viewsCheck";
+import { HANDOVER_RECORD } from "../main/fixtures/handoverRecord";
 import { TERRAIN_RECORD } from "../main/fixtures/terrainRecord";
 import type { ViewsCheckRecord } from "./api";
 import { VIEWS_CHECK_CHANNEL_NAMES, viewsCheckApi, viewsCheckMember } from "./viewsCheckApi";
 import { type ViewsCheckLaunch, viewsCheckSwitch } from "./viewsCheckLaunch";
 
-const LAUNCH: ViewsCheckLaunch = { setting: "high", smoke: true, out: null, terrain: false };
+const LAUNCH: ViewsCheckLaunch = {
+  setting: "high",
+  smoke: true,
+  out: null,
+  run: "several-views",
+};
 
 const RECORD: ViewsCheckRecord = {
   timer: "full",
@@ -57,7 +63,7 @@ describe("the preload's views-check functions", () => {
           : null,
       ),
     );
-    const api = viewsCheckApi({ ...LAUNCH, terrain: true }, { invoke });
+    const api = viewsCheckApi({ ...LAUNCH, run: "terrain" }, { invoke });
     await api.startPhase("terrain-loss");
     await api.capture("restored");
     await api.endPhase("terrain-loss", { startMs: 1, endMs: 2 });
@@ -68,6 +74,22 @@ describe("the preload's views-check functions", () => {
       [VIEWS_CHECK_CHANNEL_NAMES.endPhase, "terrain-loss", { startMs: 1, endMs: 2 }],
       [VIEWS_CHECK_CHANNEL_NAMES.writeTerrainResults, TERRAIN_RECORD],
     ]);
+  });
+
+  it("send a hand-over check's record on its own channel (R10.T10.g)", async () => {
+    const invoke = vi.fn<(channel: string, ...args: unknown[]) => Promise<unknown>>(() =>
+      Promise.resolve({ json: "a", markdown: "b" }),
+    );
+    const api = viewsCheckApi({ ...LAUNCH, run: "handover" }, { invoke });
+    expect(await api.writeHandoverResults(HANDOVER_RECORD)).toEqual({ json: "a", markdown: "b" });
+    expect(invoke.mock.calls).toEqual([
+      [VIEWS_CHECK_CHANNEL_NAMES.writeHandoverResults, HANDOVER_RECORD],
+    ]);
+  });
+
+  it("refuses a hand-over results answer of the wrong shape", async () => {
+    const api = viewsCheckApi(LAUNCH, { invoke: () => Promise.resolve(undefined) });
+    await expect(api.writeHandoverResults(HANDOVER_RECORD)).rejects.toThrow(/hand-over results/);
   });
 
   it("refuses a terrain results answer of the wrong shape", async () => {

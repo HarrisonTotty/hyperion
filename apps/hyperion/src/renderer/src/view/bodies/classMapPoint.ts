@@ -21,13 +21,26 @@
  * - **The normalisation.** The sum is divided by the same sum under `elsewhere` alone and
  *   multiplied by `bodyReflection` of `elsewhere`, the photometry's point, so that a map whose
  *   every law is the uniform one gives the uniform point exactly and the elements' error in the
- *   limb and the terminator cancels in the ratio, which is bounded by the map's laws' extremes.
+ *   limb and the terminator cancels in the ratio. Without a normal map the ratio is bounded by the
+ *   map's laws' extremes; with one it is not, since the slopes move the light as well as the laws
+ *   (one slope of 12° along every face's s moves it by +62% facing a pole at 120°, R10.T10.g).
  * - **The cache.** The ratio, the light's own and uneclipsed, is held per surface and light by the
  *   body-fixed directions of the light and the observer, and taken again while both stay within
  *   δ of where it was found ({@link classMapPointCacheAngleRad}); the uniform point is always fresh.
  *   The entries are held in a `WeakMap` keyed by the surface, at most eight a surface, so they go
  *   with their surface when its owner drops it (a new map, a new `elsewhere`, the body released);
  *   the elements' shares likewise with the map's texels.
+ * - **The normals** (plan R10, R10.T10.g). Where the surface carries the field's normal map, each
+ *   element shades on that map's normals (`normalMapNormalAt`; the datum's where it holds none), as
+ *   the disc's pixels do (`discShading.ts`), found once a map and held with its texels: k × k an
+ *   element at its sub-elements' centres, two a normal texel's side
+ *   ({@link classMapPointNormalSamples}: one, the element's centre, at levels 5 and 6, 2 × 2 at 7,
+ *   4 × 4 at 8), each element's terms their mean. The I/F is on the shading normal n′, μ floored at
+ *   half the datum's, the projected area the datum's, so that the sums are
+ *   Σ share · 2μ₀′μ_ν ÷ (μ₀′ + μ′) dS and Σ share · μ₀′μ_ν dS over the normals lit on both (μ₀′ > 0
+ *   and μ₀_ν > 0, the point-source form of the disc's cut at the datum's horizon) and visible
+ *   (μ_ν > 0). The normalisation's sums, `elsewhere`'s alone, stay on the datum's normals, so that
+ *   the ratio carries the slopes. Without a normal map every value is as before.
  */
 import { dot, type Vec3, vec3 } from "../../geometry/vec3";
 import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
@@ -36,6 +49,7 @@ import type { Rgb } from "../photometry/toneCurve";
 import { faceUvToXyz, stToUv } from "../terrain/cube";
 import type { BodyFigure } from "../terrain/planet";
 import type { Face } from "../terrain/patchKey";
+import { type NormalMapTexels, normalMapNormalAt } from "./discNormals";
 import { discLawTerms } from "./discShading";
 import { type ClassMapTexels, classMapSharesAt, discSurfaceLaws } from "./discSurface";
 import { bodyReflection } from "./oblate";
@@ -58,6 +72,27 @@ export const CLASS_MAP_POINT_FACE_ELEMENTS = 128;
 /** The elements along a texel's side for a map of N texels a face's side. */
 export function classMapPointSubdivision(faceTexels: number): number {
   return Math.max(1, Math.ceil(CLASS_MAP_POINT_FACE_ELEMENTS / faceTexels));
+}
+
+/**
+ * The shading normals an element takes along each side under a normal map of `normalTexels` a
+ * face's side (R10.T10.g), its elements `elementSide` a face's side: two a normal texel's side, at
+ * its quarter points, where the reconstruction is bilinear between the four nearest texel centres;
+ * so 1 at levels 5 and 6, 2 at level 7 and 4 at level 8 under R10's 128 elements a face's side.
+ *
+ * @remarks
+ * One normal at each element's centre reads a level-8 map at the corner four of its texels share,
+ * so that slopes changing from cell to cell are seen at their mean: the point then missed the disc
+ * at the 3 px switch by up to 2.4% under ridges of level-8 cells four a period and 1.4% under a
+ * ±12° checkerboard of them, against R07's 1%; one normal a level-8 texel, at its centre, sees each
+ * cell's whole tilt and missed an `f64` brute force by up to 12% (the checkerboard). At two a
+ * texel's side the point is within 6.3 × 10⁻³ of the brute force at levels 7 and 8 (4 × 10⁶
+ * directions), as at level 6, and within 0.74% of the disc at the switch (2026-10-21). The cost at
+ * level 8: the normals 1.1 s once a map, 19 MB (`f32`), and an evaluation 2 to 7 ms a light,
+ * against 62 ms, 1.2 MB and 1.2 ms at level 6 (vitest's V8, provisional).
+ */
+export function classMapPointNormalSamples(elementSide: number, normalTexels: number): number {
+  return Math.max(1, Math.ceil((2 * normalTexels) / elementSide));
 }
 
 /**
@@ -209,10 +244,84 @@ function elementSharesOf(texels: ClassMapTexels): ElementShares {
   return made;
 }
 
+/** A normal map's shading normals at a fineness of elements, k × k an element. */
+interface ElementNormals {
+  /** k, the normals along an element's side ({@link classMapPointNormalSamples}). */
+  readonly samples: number;
+  /**
+   * Element e's k² normals from entry 3 k² e, row by row in t, each three: body-fixed, `f32`
+   * (ample for the map's half floats), NaN in the first where the map holds none (the datum's).
+   */
+  readonly normals: Float32Array;
+}
+
+/** Each normal map's normals by the elements' fineness, made on first use, held while it is. */
+const NORMALS = new WeakMap<NormalMapTexels, Map<number, ElementNormals>>();
+
+/**
+ * The shading normals of `normals` at each element of `geometry`, `side` a face's side, k × k an
+ * element at its sub-elements' centres in (s, t): at k = 1 the element's own centre.
+ */
+function elementNormalsOf(
+  normals: NormalMapTexels,
+  geometry: ElementGeometry,
+  side: number,
+): ElementNormals {
+  const held = NORMALS.get(normals) ?? new Map<number, ElementNormals>();
+  const found = held.get(side);
+  if (found !== undefined) {
+    return found;
+  }
+  const k = classMapPointNormalSamples(side, normals.faceTexels);
+  const made = new Float32Array(3 * k * k * geometry.count);
+  const put = (at: number, normal: Vec3 | null): void => {
+    made[at] = normal?.x ?? Number.NaN;
+    made[at + 1] = normal?.y ?? Number.NaN;
+    made[at + 2] = normal?.z ?? Number.NaN;
+  };
+  const { directions } = geometry;
+  let e = 0;
+  for (const face of FACES) {
+    for (let j = 0; j < side; j += 1) {
+      for (let i = 0; i < side; i += 1) {
+        if (k === 1) {
+          put(
+            3 * e,
+            normalMapNormalAt(normals, [
+              directions[3 * e] ?? 0,
+              directions[3 * e + 1] ?? 0,
+              directions[3 * e + 2] ?? 0,
+            ]),
+          );
+        } else {
+          for (let b = 0; b < k; b += 1) {
+            const v = stToUv((j + (b + 0.5) / k) / side);
+            for (let a = 0; a < k; a += 1) {
+              const u = stToUv((i + (a + 0.5) / k) / side);
+              put(3 * (k * k * e + k * b + a), normalMapNormalAt(normals, faceUvToXyz(face, u, v)));
+            }
+          }
+        }
+        e += 1;
+      }
+    }
+  }
+  const elementNormals = { samples: k, normals: made };
+  held.set(side, elementNormals);
+  NORMALS.set(normals, held);
+  return elementNormals;
+}
+
 /**
  * Each law's geometric sums over the lit and visible elements, the shares weighting them: the
  * Lommel–Seeliger term's Σ share · 2μ₀μ ÷ (μ₀ + μ) dS and the Lambert term's Σ share · μ₀μ dS, and
  * the same sums over every element unweighted, `elsewhere`'s alone.
+ *
+ * @remarks
+ * With `normals` (R10.T10.g), each law's sums take each element's shading normals n′, the mean of
+ * its k² terms: Σ share · 2μ₀′μ ÷ (μ₀′ + μ′) dS and Σ share · μ₀′μ dS, μ the datum's (the
+ * projected area), μ′ = max(n′ · v, μ ÷ 2), a term 0 where n′ is unlit, the datum's where the map
+ * holds none, over the elements lit and visible on the datum; the unweighted sums stay the datum's.
  */
 interface LawSums {
   readonly lommelSeeliger: Float64Array;
@@ -226,6 +335,7 @@ function lawSums(
   cOverA: number,
   towardsLight: Vec3,
   towardsObserver: Vec3,
+  normals: ElementNormals | null,
 ): LawSums {
   const { geometry, offsets, law, share } = shares;
   const { directions, solidAngles } = geometry;
@@ -235,6 +345,7 @@ function lawSums(
   let totalLambert = 0;
   const { x: sx, y: sy, z: sz } = towardsLight;
   const { x: vx, y: vy, z: vz } = towardsObserver;
+  const perElement = normals === null ? 0 : normals.samples * normals.samples;
   for (let e = 0; e < geometry.count; e += 1) {
     const dx = directions[3 * e] ?? 0;
     const dy = directions[3 * e + 1] ?? 0;
@@ -255,12 +366,39 @@ function lawSums(
     const ls = ((2 * mu0 * mu) / (mu0 + mu)) * area;
     totalLommelSeeliger += ls;
     totalLambert += flat;
+    // The element's own terms: the datum's, or the mean over its shading normals n′ (R10.T10.g).
+    let shadedFlat = flat;
+    let shadedLs = ls;
+    if (normals !== null) {
+      let sumFlat = 0;
+      let sumLs = 0;
+      const first = 3 * perElement * e;
+      for (let q = first; q < first + 3 * perElement; q += 3) {
+        const tx = normals.normals[q] ?? Number.NaN;
+        if (Number.isNaN(tx)) {
+          sumFlat += flat;
+          sumLs += ls;
+          continue;
+        }
+        const ty = normals.normals[q + 1] ?? 0;
+        const tz = normals.normals[q + 2] ?? 0;
+        const mu0Tilted = tx * sx + ty * sy + tz * sz;
+        if (!(mu0Tilted > 0)) {
+          continue;
+        }
+        const muTilted = Math.max(tx * vx + ty * vy + tz * vz, 0.5 * mu);
+        sumFlat += mu0Tilted * mu * area;
+        sumLs += ((2 * mu0Tilted * mu) / (mu0Tilted + muTilted)) * area;
+      }
+      shadedFlat = sumFlat / perElement;
+      shadedLs = sumLs / perElement;
+    }
     const end = offsets[e + 1] ?? 0;
     for (let k = offsets[e] ?? 0; k < end; k += 1) {
       const m = law[k] ?? 0;
       const w = share[k] ?? 0;
-      lommelSeeliger[m] = (lommelSeeliger[m] ?? 0) + w * ls;
-      lambert[m] = (lambert[m] ?? 0) + w * flat;
+      lommelSeeliger[m] = (lommelSeeliger[m] ?? 0) + w * shadedLs;
+      lambert[m] = (lambert[m] ?? 0) + w * shadedFlat;
     }
   }
   return { lommelSeeliger, lambert, totalLommelSeeliger, totalLambert };
@@ -270,7 +408,9 @@ function lawSums(
  * The ratio, per channel, of the light a class map reflects towards a distant observer to the
  * light its `elsewhere` law alone would, both by the same elements: what the point regime
  * multiplies the photometry's point by under the map. 1 in a channel where `elsewhere` alone
- * reflects nothing by the elements: where none is lit and visible, at the extreme of phase.
+ * reflects nothing by the elements: where none is lit and visible, at the extreme of phase. Where
+ * the surface carries the field's normal map, the map's sums take its slopes and `elsewhere`'s stay
+ * the datum's (R10.T10.g), so that the ratio carries them.
  *
  * @param figure - The body's figure, drawn about the body-fixed z axis.
  * @param towardsLight - The unit direction from the body to the light, body-fixed.
@@ -289,7 +429,13 @@ export function classMapReflectionRatio(
     );
   }
   const cOverA = figure.polarRadiusM / figure.equatorialRadiusM;
-  const sums = lawSums(elementSharesOf(surface.texels), cOverA, towardsLight, towardsObserver);
+  const shares = elementSharesOf(surface.texels);
+  const side = surface.texels.faceTexels * classMapPointSubdivision(surface.texels.faceTexels);
+  const normals =
+    surface.normals === null
+      ? null
+      : elementNormalsOf(surface.normals.texels, shares.geometry, side);
+  const sums = lawSums(shares, cOverA, towardsLight, towardsObserver, normals);
   const alpha = Math.acos(Math.min(1, Math.max(-1, dot(towardsLight, towardsObserver))));
   const terms = discLawTerms(discSurfaceLaws(surface), cOverA, alpha);
   const ratio: [number, number, number] = [1, 1, 1];

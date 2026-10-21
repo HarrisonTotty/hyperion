@@ -149,6 +149,7 @@ function optionsOf(pose: Pose): BodyFrameOptions {
   return {
     camera: pose.camera,
     viewport: VIEWPORT,
+    presentedPx: VIEWPORT,
     exposureScale: EXPOSURE,
     annuli: DISC_ANNULI_HIGH,
     planetshine: PLANETSHINE_SOURCES_HIGH,
@@ -441,6 +442,7 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
       const plan = photoreal.render(canvas, {
         camera: pose.camera,
         viewport: VIEWPORT,
+        presentedPx: VIEWPORT,
         role: "eye",
         setting: "low",
         exposureScale: EXPOSURE,

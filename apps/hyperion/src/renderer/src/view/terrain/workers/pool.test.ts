@@ -679,6 +679,10 @@ function emptyMap(): ClassMapAnswer {
     fractions: new Float32Array(0),
     weights: new Uint8Array(0),
     complete: true,
+    normalLevel: 6,
+    normalCells: new Uint32Array(0),
+    normalPairs: new Float16Array(0),
+    normalsComplete: true,
   };
 }
 

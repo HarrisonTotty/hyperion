@@ -23,6 +23,7 @@ import {
 import { PROVISIONAL_PHOTOMETRY } from "../../view/appearance/fromWire";
 import type { PhotometricLaw } from "../../view/appearance/law";
 import { lawFor } from "../../view/appearance/phase";
+import type { Viewport } from "../../view/camera/projection";
 import { IDENTITY_QUATERNION } from "../../view/camera/quaternion";
 import { IDENTITY_ROTATION } from "../../view/coords/rotation";
 import type { TextureHandle } from "../../view/engine/types";
@@ -32,7 +33,7 @@ import type { ViewScene } from "../../view/scene/model";
 import { litBodiesOf, litLabelsOf, photorealFrame, type PhotorealInputs } from "./photorealFrame";
 import { runPose, startRun, startServerRun } from "./viewRun";
 
-const VIEWPORT = { widthPx: 1920, heightPx: 1080 };
+const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
 
 /** Stand-in colours, one distinct string per token, as `readTokens` would read them. */
 const TOKENS = {
@@ -71,6 +72,7 @@ function phaseRun(rotated: boolean): ReturnType<typeof startRun> {
 async function frameOfPhaseScene(
   sources: Pick<PhotorealInputs, "classMaps" | "reliefs" | "terrain"> = {},
   rotated = false,
+  presentedPx: Viewport = VIEWPORT,
 ): Promise<ReturnType<typeof photorealFrame>> {
   const engine = await countingRenderEngine();
   const run = phaseRun(rotated);
@@ -88,6 +90,7 @@ async function frameOfPhaseScene(
     run,
     pose,
     viewport: VIEWPORT,
+    presentedPx,
     setting: "high",
     exposureScale: exposureScale(controlEv100(DEFAULT_EXPOSURE)),
     list,
@@ -123,6 +126,7 @@ describe("a photorealistic frame of the phase scene", () => {
     const options = {
       camera: frame.camera,
       viewport: frame.viewport,
+      presentedPx: frame.presentedPx,
       exposureScale: frame.exposureScale,
       annuli: DISC_ANNULI_HIGH,
       planetshine: PLANETSHINE_SOURCES_HIGH,
@@ -194,6 +198,12 @@ describe("a photorealistic frame of the phase scene", () => {
     expect(frame.role).toBe("eye");
     expect(frame.camera.fovXRad).toBeCloseTo(Math.PI / 3, 12);
   });
+
+  it("carries the presented size beside its own viewport, for the hand-over's pixel (R10.T10.g)", async () => {
+    const presentedPx: Viewport = { widthPx: 3840, heightPx: 2160 };
+    const frame = await frameOfPhaseScene({}, false, presentedPx);
+    expect([frame.viewport, frame.presentedPx]).toEqual([VIEWPORT, presentedPx]);
+  });
 });
 
 /** The slice's server scene, the ship 1 au out, as the view draws it, with its camera's pose. */
@@ -244,7 +254,7 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
     const classMaps: ClassMapSource = {
       classMapOf: (body, elsewhere) => {
         asked.push([body, elsewhere]);
-        return { kind: "class-map", weights, texels, laws: [dark], elsewhere };
+        return { kind: "class-map", weights, texels, laws: [dark], elsewhere, normals: null };
       },
     };
     const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null), classMaps);
@@ -264,6 +274,7 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
     const options = {
       camera: { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 },
       viewport: VIEWPORT,
+      presentedPx: VIEWPORT,
       exposureScale: 1e-3,
       annuli: DISC_ANNULI_HIGH,
       planetshine: PLANETSHINE_SOURCES_HIGH,

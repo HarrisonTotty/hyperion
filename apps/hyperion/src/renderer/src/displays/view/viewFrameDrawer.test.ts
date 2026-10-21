@@ -1,7 +1,7 @@
 import type { BodyIdHex } from "@hyperion/protocol";
 import { describe, expect, it, vi } from "vitest";
 
-import { add, normalise, scale, vec3 } from "../../geometry/vec3";
+import { add, norm, normalise, scale, vec3 } from "../../geometry/vec3";
 import { moonLikeHeader } from "../../test/coarseFieldFixtures";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { aViewCraft, NO_TURN } from "../../test/viewFixtures";
@@ -16,6 +16,7 @@ import { sceneOrigins } from "../../view/scene/model";
 import { PHASE_GIANT, PHASE_PLANETS, phaseScene } from "../../view/scenes/phaseScene";
 import { CoverageView, fieldCellIndex } from "../../view/terrain/coverage";
 import { ANNUNCIATION_ONSET_MS } from "../../view/terrain/annunciation";
+import { handoverTauPx, limbDistanceM, pixelAngleRad } from "../../view/terrain/handover";
 import type { ViewTerrainSession, ViewTerrainSource } from "../../view/terrain/frameTerrain";
 import { PoseIntervals } from "../../view/terrain/poseInterval";
 import type { ResidentHeightsView } from "../../view/terrain/residentHeights";
@@ -210,6 +211,100 @@ describe("a view's photorealistic frame (R10.T10.d, T10.e)", () => {
       },
     });
     expect(asked).toEqual(LIT);
+  });
+});
+
+describe("a view's hand-over at its frame's internal scale (R10.T10.g)", () => {
+  /** The presented size: 1080 rows, which the low setting renders at 720. */
+  const PRESENTED = { widthPx: 1920, heightPx: 1080 };
+
+  /**
+   * Each lit body of the turning phase scene its relief at `reliefTau` × the setting's τ at its limb,
+   * in the presented centre pixels, where its disc spans 12 presented px or more, and none for a
+   * smaller one, which a frame's internal scale could make a point.
+   */
+  function reliefsOf(
+    run: ViewRun,
+    setting: "high" | "low",
+    reliefTau: number,
+  ): NonNullable<ViewFrameInputs["reliefs"]> {
+    const pose = runPose(run);
+    const origins = sceneOrigins(run.scene);
+    const radPerPx = pixelAngleRad(
+      { orientation: pose.orientation, fovXRad: (run.camera.fovDeg * Math.PI) / 180 },
+      PRESENTED,
+    );
+    return {
+      reliefM: (id) => {
+        const body = run.scene.bodies.find((each) => each.id === id);
+        if (body === undefined) {
+          return null;
+        }
+        const distanceM = norm(
+          relativeToCamera({ kind: "body", body: id, m: vec3(0, 0, 0) }, pose, origins),
+        );
+        if ((2 * Math.asin(body.radiusM / distanceM)) / radPerPx < 12) {
+          return null;
+        }
+        const limbM = limbDistanceM(distanceM, body.radiusM);
+        return reliefTau * handoverTauPx("photorealistic", setting) * limbM * radPerPx;
+      },
+    };
+  }
+
+  /** The bodies a drawer's photorealistic frame of the phase scene hands over. */
+  async function handedOver(
+    setting: "high" | "low",
+    renderScale: number,
+    reliefTau: number,
+  ): Promise<string[]> {
+    const run = phaseRun(true);
+    const inputs: ViewFrameInputs = {
+      run,
+      size: { ...PRESENTED, devicePixelRatio: 1, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      stars: [],
+      sky: null,
+      selection: null,
+      style: "photorealistic",
+      setting,
+      renderScale,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+      reliefs: reliefsOf(run, setting, reliefTau),
+    };
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    // The first frame draws the wireframe while its pipelines compile, and plans no regimes.
+    drawer.draw(inputs);
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    drawer.draw(inputs);
+    const handed = [...drawer.regimes].flatMap(([id, regime]) =>
+      regime === "terrain" ? [id] : [],
+    );
+    drawer.dispose();
+    return handed;
+  }
+
+  it.each(["high", "low"] as const)(
+    "hands the same bodies over at an internal scale of 0.5 as at 1 on %s, a relief of 1.5 τ",
+    async (setting) => {
+      const whole = await handedOver(setting, 1, 1.5);
+      expect(whole.length).toBeGreaterThan(0);
+      expect(await handedOver(setting, 0.5, 1.5)).toEqual(whole);
+    },
+  );
+
+  it("hands none over at either scale on either setting at a relief of 0.5 τ", async () => {
+    const handed = await Promise.all(
+      (["high", "low"] as const).flatMap((setting) =>
+        [1, 0.5].map((renderScale) => handedOver(setting, renderScale, 0.5)),
+      ),
+    );
+    expect(handed.flat()).toEqual([]);
   });
 });
 

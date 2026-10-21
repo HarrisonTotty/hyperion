@@ -1,10 +1,22 @@
 /**
  * The check of what the several-views check's renderer sends the main process (plan R07, T20):
  * its record, which the IPC handler treats as `unknown` until it passes; and the terrain run's
- * (plan R10, R10.T16.d), checked the same way.
+ * (plan R10, R10.T16.d) and the hand-over check's (R10.T10.g), checked the same way.
  */
 
 import type {
+  HandoverAngles,
+  HandoverCheckRecord,
+  HandoverComparisonRecord,
+  HandoverExposureRecord,
+  HandoverFrameRecord,
+  HandoverLookName,
+  HandoverLookRecord,
+  HandoverOwnMeans,
+  HandoverRegime,
+  HandoverSharedMeans,
+  HandoverSwitchName,
+  HandoverTexelRecord,
   TerrainCheckBytes,
   TerrainCheckFault,
   TerrainCheckLossRecord,
@@ -29,6 +41,7 @@ import type {
   ViewsCheckViewName,
   ViewsCheckViewRecord,
 } from "../preload/api";
+import { HANDOVER_LOOK_RULES, HANDOVER_SWITCH_REGIMES } from "./handoverCheckResults";
 
 type Rec = Readonly<Record<string, unknown>>;
 
@@ -633,5 +646,283 @@ export function readTerrainCheckRecord(value: unknown): TerrainCheckRecord | nul
     loss: lost,
     teardown: torn,
     handover: range,
+  };
+}
+
+/** A finite number of zero or more. */
+function isNonNegative(value: unknown): value is number {
+  return isFiniteNumber(value) && value >= 0;
+}
+
+const HANDOVER_LOOK_NAMES: ReadonlyArray<HandoverLookName> = [
+  "handover-30",
+  "handover-90",
+  "handover-terminator",
+];
+
+const HANDOVER_REGIMES: ReadonlyArray<HandoverRegime> = ["disc", "figure", "terrain", "none"];
+
+const HANDOVER_SWITCHES: ReadonlyArray<HandoverSwitchName> = [
+  "disc-to-figure",
+  "disc-to-terrain",
+  "terrain-to-disc",
+];
+
+function handoverAngles(value: unknown): HandoverAngles | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { incidenceDeg, emissionDeg, phaseDeg } = value;
+  return isNonNegative(incidenceDeg) && isNonNegative(emissionDeg) && isNonNegative(phaseDeg)
+    ? { incidenceDeg, emissionDeg, phaseDeg }
+    : null;
+}
+
+function handoverFrame(value: unknown): HandoverFrameRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const regime = HANDOVER_REGIMES.find((each) => each === value["regime"]) ?? null;
+  const target = canvas(value["target"]);
+  const angles = handoverAngles(value["angles"]);
+  const { atMs, scriptS, rangeRatio, bodyPixels, bodyMisses, surveyPixels } = value;
+  if (
+    regime === null ||
+    target === null ||
+    angles === null ||
+    !isFiniteNumber(atMs) ||
+    !isNonNegative(scriptS) ||
+    !isFiniteNumber(rangeRatio) ||
+    !(rangeRatio > 0) ||
+    !isCount(bodyPixels) ||
+    !isCount(bodyMisses) ||
+    !isCount(surveyPixels) ||
+    bodyMisses > bodyPixels ||
+    surveyPixels > bodyPixels
+  ) {
+    return null;
+  }
+  return {
+    atMs,
+    scriptS,
+    regime,
+    rangeRatio,
+    target,
+    bodyPixels,
+    bodyMisses,
+    surveyPixels,
+    angles,
+  };
+}
+
+function ownMeans(value: unknown): HandoverOwnMeans | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { pixelsBefore, pixelsAfter, meanBefore, meanAfter } = value;
+  return isCount(pixelsBefore) &&
+    isCount(pixelsAfter) &&
+    isNonNegative(meanBefore) &&
+    isNonNegative(meanAfter)
+    ? { pixelsBefore, pixelsAfter, meanBefore, meanAfter }
+    : null;
+}
+
+function sharedMeans(value: unknown): HandoverSharedMeans | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { pixels, meanBefore, meanAfter } = value;
+  return isCount(pixels) && isNonNegative(meanBefore) && isNonNegative(meanAfter)
+    ? { pixels, meanBefore, meanAfter }
+    : null;
+}
+
+/** A body's or a survey's means, own and shared, or `null`. */
+function meansPair(
+  value: unknown,
+): { readonly own: HandoverOwnMeans; readonly shared: HandoverSharedMeans } | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const own = ownMeans(value["own"]);
+  const shared = sharedMeans(value["shared"]);
+  return own === null || shared === null ? null : { own, shared };
+}
+
+function handoverTexel(value: unknown): HandoverTexelRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { texel, sharedPixels, meanBefore, meanAfter } = value;
+  return isCount(texel) &&
+    isCount(sharedPixels) &&
+    sharedPixels >= 1 &&
+    isNonNegative(meanBefore) &&
+    isNonNegative(meanAfter)
+    ? { texel, sharedPixels, meanBefore, meanAfter }
+    : null;
+}
+
+function handoverComparison(value: unknown): HandoverComparisonRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const name = HANDOVER_SWITCHES.find((each) => each === value["name"]) ?? null;
+  const before = handoverFrame(value["before"]);
+  const after = handoverFrame(value["after"]);
+  const body = meansPair(value["body"]);
+  const survey = meansPair(value["survey"]);
+  const texels = listOf(value["texels"], handoverTexel);
+  const { framesApart, beforeWasLast, afterWasFirst } = value;
+  if (
+    name === null ||
+    before === null ||
+    after === null ||
+    body === null ||
+    survey === null ||
+    texels === null ||
+    !isCount(framesApart) ||
+    framesApart < 1 ||
+    typeof beforeWasLast !== "boolean" ||
+    typeof afterWasFirst !== "boolean" ||
+    // The frames hold the regimes the switch is between.
+    !HANDOVER_SWITCH_REGIMES[name].before.includes(before.regime) ||
+    !HANDOVER_SWITCH_REGIMES[name].after.includes(after.regime) ||
+    // In texel order, each once.
+    !texels.every((each, i) => i === 0 || (texels[i - 1]?.texel ?? -1) < each.texel)
+  ) {
+    return null;
+  }
+  return {
+    name,
+    before,
+    after,
+    framesApart,
+    beforeWasLast,
+    afterWasFirst,
+    body,
+    survey,
+    texels,
+  };
+}
+
+function handoverExposure(value: unknown): HandoverExposureRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const lockedEv100 = finiteOrNull(value["lockedEv100"]);
+  const { lockedReading, endReading, held } = value;
+  return lockedEv100 !== undefined &&
+    (lockedReading === null || typeof lockedReading === "string") &&
+    (endReading === null || typeof endReading === "string") &&
+    typeof held === "boolean"
+    ? { lockedEv100, lockedReading, endReading, held }
+    : null;
+}
+
+function handoverLook(value: unknown): HandoverLookRecord | null {
+  if (!isRecord(value) || !isRecord(value["switchesS"])) {
+    return null;
+  }
+  const name = HANDOVER_LOOK_NAMES.find((each) => each === value["name"]) ?? null;
+  const nominal = handoverAngles(value["nominal"]);
+  const atRange = handoverAngles(value["atRange"]);
+  const exposure = handoverExposure(value["exposure"]);
+  const comparisons = listOf(value["comparisons"], handoverComparison);
+  const failures = strings(value["failures"]);
+  const switches = value["switchesS"];
+  const figure = finiteOrNull(switches["figure"]);
+  const terrain = finiteOrNull(switches["terrain"]);
+  const disc = finiteOrNull(switches["disc"]);
+  const { scene, judged, surveyedCells, mappingMismatches } = value;
+  if (
+    name === null ||
+    nominal === null ||
+    atRange === null ||
+    exposure === null ||
+    comparisons === null ||
+    failures === null ||
+    figure === undefined ||
+    terrain === undefined ||
+    disc === undefined ||
+    // The look's name decides its scene and whether it is judged (R10.T10.g).
+    scene !== HANDOVER_LOOK_RULES[name].scene ||
+    judged !== HANDOVER_LOOK_RULES[name].judged ||
+    !isCount(surveyedCells) ||
+    !isCount(mappingMismatches) ||
+    // Each switch at most once.
+    new Set(comparisons.map((each) => each.name)).size !== comparisons.length
+  ) {
+    return null;
+  }
+  return {
+    name,
+    ...HANDOVER_LOOK_RULES[name],
+    nominal,
+    atRange,
+    exposure,
+    surveyedCells,
+    mappingMismatches,
+    switchesS: { figure, terrain, disc },
+    comparisons,
+    failures,
+  };
+}
+
+/** `value` as the hand-over check's record (R10.T10.g), or `null` if it is not one. */
+export function readHandoverCheckRecord(value: unknown): HandoverCheckRecord | null {
+  if (!isRecord(value) || !isRecord(value["approach"])) {
+    return null;
+  }
+  const looks = listOf(value["looks"], handoverLook);
+  const faults = listOf(value["faults"], fault);
+  const size = canvas(value["canvas"]);
+  const target = canvas(value["target"]);
+  const { world, devicePixelRatio, reliefM, tauPx, radPerPx, rangeM, cellLevel } = value;
+  const approach = value["approach"];
+  const { ratePerS, startRatio, closestRatio, holdS, endRatio } = approach;
+  if (
+    looks === null ||
+    faults === null ||
+    size === null ||
+    target === null ||
+    typeof world !== "string" ||
+    !isFiniteNumber(devicePixelRatio) ||
+    !(devicePixelRatio > 0) ||
+    !isFiniteNumber(reliefM) ||
+    !(reliefM > 0) ||
+    !isFiniteNumber(tauPx) ||
+    !(tauPx > 0) ||
+    !isFiniteNumber(radPerPx) ||
+    !(radPerPx > 0) ||
+    !isFiniteNumber(rangeM) ||
+    !(rangeM > 0) ||
+    !isCount(cellLevel) ||
+    !isFiniteNumber(ratePerS) ||
+    !(ratePerS > 0) ||
+    !isFiniteNumber(startRatio) ||
+    !isFiniteNumber(closestRatio) ||
+    !isNonNegative(holdS) ||
+    !isFiniteNumber(endRatio) ||
+    !(startRatio > closestRatio && closestRatio > 0 && endRatio > closestRatio) ||
+    // Each look at most once.
+    new Set(looks.map((each) => each.name)).size !== looks.length
+  ) {
+    return null;
+  }
+  return {
+    world,
+    devicePixelRatio,
+    canvas: size,
+    target,
+    reliefM,
+    tauPx,
+    radPerPx,
+    rangeM,
+    cellLevel,
+    approach: { ratePerS, startRatio, closestRatio, holdS, endRatio },
+    looks,
+    faults,
   };
 }

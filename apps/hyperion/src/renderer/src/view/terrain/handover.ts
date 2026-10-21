@@ -7,9 +7,13 @@
  * - **The range** is the relief over τ pixels' angle, `handoverRangeM` = relief ÷ (τ · rad a
  *   pixel): about 1.8 × 10⁷ m for 10 km of relief at 1 px of 5.454 × 10⁻⁴ rad (Design note 13's
  *   1080p across 60° by width ÷ field), and 4.6 × 10⁶ m at the wireframe's 4 px. A view measures
- *   its pixel as R07's 3 px switch does, at the centre pixel ({@link pixelAngleRad}, the inverse
- *   of `angularDiameterPx`'s scale), so that both switches count the same pixels: 6.01 × 10⁻⁴ rad
- *   at 1080p across 60°, where 10 km hands over at 1.66 × 10⁷ m.
+ *   its pixel at the centre pixel, as R07's 3 px switch does ({@link pixelAngleRad}, the inverse
+ *   of `angularDiameterPx`'s scale): 6.01 × 10⁻⁴ rad at 1080p across 60°, where 10 km hands over
+ *   at 1.66 × 10⁷ m. It is the centre pixel of the size the view is presented at, its canvas's,
+ *   as the field's want measures it (R10.T10.g; decision-r10-t16-leans §13), not of the frame's
+ *   own viewport, so that the resolution controller's internal scale (0.5 to 1, and the low
+ *   setting's 720 rows) never moves the range. The two switches so count different pixels: R07's
+ *   3 px switch keeps the frame's own, in which the disc's summed flux meets the point's.
  * - **The relief** is R09's realised relief, the field header's `realised_relief_m` (the highest
  *   elevation less the lowest), known once the body's field is held; a body without a header, or
  *   whose survey covers no ground, never hands over ({@link handoverReliefM}).
@@ -37,6 +41,10 @@ import type { CoverageView } from "./coverage";
 /**
  * The angle of a view's centre pixel, rad: 2 tan(fov ÷ 2) ÷ width, R02's centre-pixel scale, by
  * which R07's regimes measure a body's diameter (`angularDiameterPx`).
+ *
+ * @remarks
+ * The hand-over takes it of the presented viewport (R10.T10.g: `BodyFrameOptions.presentedPx`),
+ * R07's 3 px switch of the frame's own.
  */
 export function pixelAngleRad(camera: ProjectionCamera, viewport: Viewport): number {
   return (2 * Math.tan(camera.fovXRad / 2)) / viewport.widthPx;

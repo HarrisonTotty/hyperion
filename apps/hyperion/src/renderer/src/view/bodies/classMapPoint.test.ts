@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import { add, cross, dot, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
 import { aHostDisc } from "../../test/litFixtures";
+import { memoised } from "../../test/memo";
+import {
+  checkerNormalMap,
+  datumNormalMap,
+  slopedNormalMap,
+  UNREAD_TEXTURES,
+  unreadNormalMap,
+} from "../../test/normalMapFixtures";
 import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
 import { type BodyPhotometry, PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
 import type { PhotometricLaw } from "../appearance/law";
@@ -13,7 +21,6 @@ import {
   rotateToBody,
   rotation3FromRows,
 } from "../coords/rotation";
-import type { RenderEngine } from "../engine/types";
 import { DISC_ANNULI_HIGH } from "../lighting/annuli";
 import type { PlacedLight } from "../lighting/hostLights";
 import type { LightingBody } from "../lighting/occluders";
@@ -25,9 +32,11 @@ import type { BodyFigure } from "../terrain/planet";
 import { classRowLaw, PHASE_LAW, type PhaseLawCode } from "../terrain/terrainMaterial";
 import {
   classMapPointCacheAngleRad,
+  classMapPointNormalSamples,
   classMapPointReflection,
   classMapReflectionRatio,
 } from "./classMapPoint";
+import { type NormalMapTexels, normalMapNormalAt } from "./discNormals";
 import {
   compositeDiscPixels,
   type DiscRecord,
@@ -54,6 +63,7 @@ const PX_PER_RAD = VIEWPORT.widthPx / (2 * Math.tan(CAMERA.fovXRad / 2));
 const OPTIONS = {
   camera: CAMERA,
   viewport: VIEWPORT,
+  presentedPx: VIEWPORT,
   exposureScale: EXPOSURE,
   annuli: 4,
   planetshine: PLANETSHINE_SOURCES_HIGH,
@@ -107,12 +117,6 @@ const IAPETUS = iapetusMap();
 
 /** Half the Iapetus surveyed, the survey's edge a circle across the cap and the bright side. */
 const HALF_IAPETUS = iapetusMap((d) => d.x + 0.3 * d.z > 0.1);
-
-/** An engine whose textures no test reads: the disc's twin and the point read the map's texels. */
-const UNREAD_TEXTURES: Pick<RenderEngine, "createTexture" | "writeTexture"> = {
-  createTexture: (spec) => ({ kind: "texture", name: spec.name }),
-  writeTexture: () => undefined,
-};
 
 /** A surface over `map` by R07's construction, a distinct object, so that its cache is its own. */
 function surfaceOf(
@@ -307,6 +311,11 @@ function worstRatio(measured: ReadonlyArray<number>, expected: ReadonlyArray<num
   return Math.max(...measured.map((m, c) => Math.abs(m / (expected[c] ?? Number.NaN) - 1)));
 }
 
+/** The uniform reflection of the sphere under `elsewhere`, from `light` to `observer`. */
+function uniformAt(light: Vec3, observer: Vec3): ReadonlyArray<number> {
+  return bodyReflection({ ...SPHERE, pole: vec3(0, 0, 1) }, ELSEWHERE, light, observer);
+}
+
 /** `d` turned by `angleRad` towards the k-th of a spread of tangent directions. */
 function turned(d: Vec3, k: number, angleRad: number): Vec3 {
   const seed = Math.abs(d.x) < 0.9 ? vec3(1, 0, 0) : vec3(0, 1, 0);
@@ -467,11 +476,6 @@ describe("the point under a class map (R10.T10.f)", () => {
     );
   }
 
-  /** The uniform reflection of the sphere under `elsewhere`, from `light` to `observer`. */
-  function uniformAt(light: Vec3, observer: Vec3): ReadonlyArray<number> {
-    return bodyReflection({ ...SPHERE, pole: vec3(0, 0, 1) }, ELSEWHERE, light, observer);
-  }
-
   it("reuses the ratio it found while both directions stay within δ of where it found it", () => {
     const misses = primed().filter(({ surface, light, observer, phaseRad, held }) => {
       // Both directions moved by just under δ, which the moved phase cannot narrow past.
@@ -539,5 +543,221 @@ describe("the point under a class map (R10.T10.f)", () => {
     expect(() => classMapReflectionRatio(SPHERE, { ...surface, laws: [DARK] }, APEX, APEX)).toThrow(
       /2 classes needs as many laws, got 1/,
     );
+  });
+});
+
+describe("the point under a class map with the field's normal map (R10.T10.g)", () => {
+  /** The cells' slopes: ±12° along each face's s in a checkerboard at the field's level 6. */
+  const TILT_RAD = 12 * RAD;
+  const CHECKER = checkerNormalMap(6, TILT_RAD);
+  /**
+   * Band-limited slopes: ridges along each face's t, the slope 12° sin(2π (i + ½) ÷ 4) along s,
+   * four cells a period, on a sphere and the spheroid; and one slope of 12° along +s everywhere.
+   */
+  const RIDGES = slopedNormalMap(6, ({ i }) => TILT_RAD * Math.sin((2 * Math.PI * (i + 0.5)) / 4));
+  const RIDGES_OBLATE = slopedNormalMap(
+    6,
+    ({ i }) => TILT_RAD * Math.sin((2 * Math.PI * (i + 0.5)) / 4),
+    0.9,
+  );
+  const SLANT = slopedNormalMap(6, () => TILT_RAD);
+  /**
+   * The checkerboard and the ridges at field level 8, 256 normal texels a face's side, where each of
+   * the point's elements, 128 a side, centres on a corner four normal texels share and so takes
+   * 4 × 4 normals (`classMapPointNormalSamples`): made once, on first use, since a level-8 map
+   * takes a second.
+   */
+  const levelEight = memoised(
+    (kind: "checkerboard" | "ridges"): NormalMapTexels =>
+      kind === "checkerboard"
+        ? checkerNormalMap(8, TILT_RAD)
+        : slopedNormalMap(8, ({ i }) => TILT_RAD * Math.sin((2 * Math.PI * (i + 0.5)) / 4)),
+    (kind) => kind,
+  );
+
+  it("takes two normals a normal texel's side in each element: one at levels 5 and 6, 2 × 2 at 7, 4 × 4 at 8", () => {
+    expect([32, 64, 128, 256].map((n) => classMapPointNormalSamples(128, n))).toEqual([1, 1, 2, 4]);
+  });
+
+  /** The Iapetus's surface with `normals`, a distinct object, so that its cache is its own. */
+  function slopedOf(map: ClassMapTexels, normals: NormalMapTexels): ClassMapDiscSurface {
+    return classMapSurface(
+      UNREAD_TEXTURES,
+      "iapetus",
+      map,
+      [DARK, BRIGHT],
+      ELSEWHERE,
+      unreadNormalMap(normals, "iapetus normals"),
+    );
+  }
+
+  /** A map's normal at each of the lattice's directions, `null` where it holds none. */
+  function latticeNormals(normals: NormalMapTexels): Array<Vec3 | null> {
+    return Array.from({ length: LATTICE.length / 3 }, (_, n) =>
+      normalMapNormalAt(normals, [
+        LATTICE[3 * n] ?? 0,
+        LATTICE[3 * n + 1] ?? 0,
+        LATTICE[3 * n + 2] ?? 0,
+      ]),
+    );
+  }
+
+  /**
+   * The brute force with the slopes: {@link bruteForce}'s sum with each direction's I/F on its
+   * shading normal n′ (the datum's where `normals` holds none), μ′ = max(n′ · v, μ ÷ 2), and its
+   * projected area the datum's, over the directions lit on both normals and visible on the datum's.
+   */
+  function slopedBruteForce(
+    surface: ClassMapDiscSurface,
+    cOverA: number,
+    shares: ReadonlyArray<ReadonlyArray<number>>,
+    normals: ReadonlyArray<Vec3 | null>,
+    light: Vec3,
+    observer: Vec3,
+  ): [number, number, number] {
+    const laws = discSurfaceLaws(surface);
+    const count = LATTICE.length / 3;
+    const alpha = Math.acos(Math.min(1, Math.max(-1, dot(light, observer))));
+    const out: [number, number, number] = [0, 0, 0];
+    for (let n = 0; n < count; n += 1) {
+      const dx = LATTICE[3 * n] ?? 0;
+      const dy = LATTICE[3 * n + 1] ?? 0;
+      const nz = (LATTICE[3 * n + 2] ?? 0) / cOverA;
+      const length = Math.hypot(dx, dy, nz);
+      const mu = (dx * observer.x + dy * observer.y + nz * observer.z) / length;
+      const mu0 = (dx * light.x + dy * light.y + nz * light.z) / length;
+      if (!(mu > 0 && mu0 > 0)) {
+        continue;
+      }
+      const tilted = normals[n] ?? null;
+      const mu0Shaded = tilted === null ? mu0 : dot(tilted, light);
+      const muShaded = tilted === null ? mu : Math.max(dot(tilted, observer), 0.5 * mu);
+      const area = ((4 * Math.PI) / count) * cOverA * length;
+      const reflectance = discReflectance(
+        laws,
+        cOverA,
+        shares[n] ?? [],
+        mu0Shaded,
+        muShaded,
+        alpha,
+      );
+      for (const c of [0, 1, 2] as const) {
+        out[c] += (reflectance[c] * mu * area) / Math.PI;
+      }
+    }
+    return out;
+  }
+
+  for (const [mapName, normalsOf] of [
+    ["a checkerboard of ±12° cells", (): NormalMapTexels => CHECKER],
+    ["one slope of 12°", (): NormalMapTexels => SLANT],
+    ["a level-8 checkerboard of ±12° cells", (): NormalMapTexels => levelEight("checkerboard")],
+    ["level-8 ridges four cells a period", (): NormalMapTexels => levelEight("ridges")],
+  ] as const) {
+    for (const [name, observer, across] of VIEWS) {
+      for (const phaseDeg of PHASES_DEG) {
+        it(`meets the CPU rasteriser's disc at the 3 px switch to 1% under ${mapName}, facing ${name} at ${String(phaseDeg)}°`, () => {
+          const { body, hosts } = iapetusAt(
+            slopedOf(IAPETUS, normalsOf()),
+            observer,
+            across,
+            phaseDeg * RAD,
+            POINT_BELOW_PX,
+          );
+          const point = pointFlux(body, hosts, [], DISC_ANNULI_HIGH);
+          expect(worstRatio(discFlux(body, hosts, SWITCH_SAMPLES), point)).toBeLessThan(0.01);
+        });
+      }
+    }
+  }
+
+  /** The point's largest error against the brute force over the views and phases. */
+  function worstAgainstBruteForce(figure: BodyFigure, normals: NormalMapTexels): number {
+    const shares = latticeShares(IAPETUS);
+    const surface = slopedOf(IAPETUS, normals);
+    const tilted = latticeNormals(normals);
+    const cOverA = figure.polarRadiusM / figure.equatorialRadiusM;
+    let worst = 0;
+    for (const [, observer, across] of VIEWS) {
+      for (const phaseDeg of PHASES_DEG) {
+        const light = lightAt(observer, across, phaseDeg * RAD);
+        const point = classMapPointReflection(figure, surface, IDENTITY_ROTATION, light, observer);
+        const exact = slopedBruteForce(surface, cOverA, shares, tilted, light, observer);
+        worst = Math.max(worst, worstRatio(point, exact));
+      }
+    }
+    return worst;
+  }
+
+  it("equals the f64 brute force with band-limited and coherent slopes to 0.3%, on a sphere and a spheroid", () => {
+    // Measured (2026-10-21, against 2 × 10⁶ directions): ridges four cells a period at most
+    // 1.8 × 10⁻³, eight cells 7.4 × 10⁻⁴, one slope 1.1 × 10⁻³.
+    for (const [figure, normals] of [
+      [SPHERE, RIDGES],
+      [OBLATE, RIDGES_OBLATE],
+      [SPHERE, SLANT],
+    ] as const) {
+      expect(worstAgainstBruteForce(figure, normals)).toBeLessThan(0.003);
+    }
+    // About 2 s here (2026-10-21): ten times that, rounded up.
+  }, 60_000);
+
+  it("equals the f64 brute force to 1% with slopes at the map's own resolution, a ±12° checkerboard of cells", () => {
+    // The elements, two a cell's side at its quarter points, see the bilinear saddle between a
+    // cell and its neighbours of the other sign at a quarter of its tilt: 6.5 × 10⁻³ at most,
+    // facing a pole at 120° (2026-10-21, against 8 × 10⁶ directions), R07's 1% the bound.
+    expect(worstAgainstBruteForce(SPHERE, CHECKER)).toBeLessThan(0.01);
+  }, 60_000);
+
+  /** The ratio under `normals` against the ratio without a map, at most over the views at 120°. */
+  function movedAt120(normals: NormalMapTexels): number {
+    return Math.max(
+      ...VIEWS.map(([, observer, across]) => {
+        const light = lightAt(observer, across, 120 * RAD);
+        const flat = classMapReflectionRatio(SPHERE, surfaceOf(IAPETUS), light, observer);
+        const mapped = classMapReflectionRatio(SPHERE, slopedOf(IAPETUS, normals), light, observer);
+        return worstRatio(mapped, flat);
+      }),
+    );
+  }
+
+  it("moves the point by a slope of 12° at high phase", () => {
+    expect(movedAt120(SLANT)).toBeGreaterThan(0.01);
+  });
+
+  it("keeps the point within 10⁻³ of the map's without one under the datum's own normals", () => {
+    expect(movedAt120(datumNormalMap(6))).toBeLessThan(1e-3);
+  });
+
+  it("keeps a cached value within 0.3% of a fresh one over the Iapetus's phases with sloped cells", () => {
+    let worst = 0;
+    for (const [, observer, across] of VIEWS) {
+      for (const phaseDeg of [0, 30, 60, 90, 120, 150]) {
+        const light = lightAt(observer, across, phaseDeg * RAD);
+        const surface = slopedOf(IAPETUS, CHECKER);
+        classMapPointReflection(SPHERE, surface, IDENTITY_ROTATION, light, observer);
+        const delta = 0.98 * classMapPointCacheAngleRad(phaseDeg * RAD);
+        for (let k = 0; k < 8; k += 1) {
+          const movedLight = turned(light, k, delta);
+          const movedObserver = turned(observer, 3 * k + 1, delta);
+          const cached = classMapPointReflection(
+            SPHERE,
+            surface,
+            IDENTITY_ROTATION,
+            movedLight,
+            movedObserver,
+          );
+          const fresh = classMapReflectionRatio(SPHERE, surface, movedLight, movedObserver);
+          worst = Math.max(
+            worst,
+            worstRatio(
+              cached,
+              uniformAt(movedLight, movedObserver).map((u, c) => u * (fresh[c] ?? 0)),
+            ),
+          );
+        }
+      }
+    }
+    expect(worst).toBeLessThan(0.003);
   });
 });

@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { TerrainCheckRecord, ViewsCheckRecord } from "../preload/api";
+import type {
+  HandoverCheckRecord,
+  TerrainCheckRecord,
+  ViewsCheckRecord,
+  ViewsCheckRunKind,
+} from "../preload/api";
+import { HANDOVER_RECORD } from "./fixtures/handoverRecord";
 import { TERRAIN_RECORD } from "./fixtures/terrainRecord";
+import type { HandoverCheckResults } from "./handoverCheckResults";
 import type { TraceFigures } from "./reduceTrace";
 import { measured } from "./results";
 import {
@@ -81,11 +88,13 @@ function session(overrides: Partial<ViewsCheckSessionDeps> = {}): {
   readonly deps: ViewsCheckSessionDeps;
   readonly written: ViewsCheckResults[];
   readonly terrainWritten: TerrainCheckResults[];
+  readonly handoverWritten: HandoverCheckResults[];
 } {
   const written: ViewsCheckResults[] = [];
   const terrainWritten: TerrainCheckResults[] = [];
+  const handoverWritten: HandoverCheckResults[] = [];
   const deps: ViewsCheckSessionDeps = {
-    launch: { setting: "high", smoke: false, out: null, terrain: false },
+    launch: { setting: "high", smoke: false, out: null, run: "several-views" },
     describe: () =>
       Promise.resolve({
         startedAt: new Date("2026-10-05T12:00:00Z"),
@@ -131,11 +140,15 @@ function session(overrides: Partial<ViewsCheckSessionDeps> = {}): {
       terrainWritten.push(results);
       return Promise.resolve({ json: "/out/t.json", markdown: "/out/t.md" });
     },
+    writeHandover: (_dir, results) => {
+      handoverWritten.push(results);
+      return Promise.resolve({ json: "/out/h.json", markdown: "/out/h.md" });
+    },
     exit: vi.fn<(code: number) => void>(),
     log: () => undefined,
     ...overrides,
   };
-  return { session: new ViewsCheckSession(deps), deps, written, terrainWritten };
+  return { session: new ViewsCheckSession(deps), deps, written, terrainWritten, handoverWritten };
 }
 
 /** A terrain launch's session (R10.T16.d). */
@@ -143,7 +156,17 @@ function terrainSession(
   overrides: Partial<ViewsCheckSessionDeps> = {},
 ): ReturnType<typeof session> {
   return session({
-    launch: { setting: "high", smoke: false, out: null, terrain: true },
+    launch: { setting: "high", smoke: false, out: null, run: "terrain" },
+    ...overrides,
+  });
+}
+
+/** A hand-over check's session (R10.T10.g). */
+function handoverSession(
+  overrides: Partial<ViewsCheckSessionDeps> = {},
+): ReturnType<typeof session> {
+  return session({
+    launch: { setting: "high", smoke: false, out: null, run: "handover" },
     ...overrides,
   });
 }
@@ -375,10 +398,83 @@ describe("the views check's session on a terrain launch (R10.T16.d)", () => {
   });
 });
 
+describe("a hand-over check's session (R10.T10.g)", () => {
+  it("judges the record it writes", async () => {
+    const { session: run, handoverWritten } = handoverSession();
+    await run.writeHandoverResults(HANDOVER_RECORD);
+    expect(handoverWritten[0]?.overall).toBe("pass");
+  });
+
+  it("records its captures from the repository's root", async () => {
+    const { session: run, handoverWritten } = handoverSession({
+      capturesRecordedAs: "target/views-check/terrain/captures-x",
+    });
+    await run.capture("handover-30-disc");
+    await run.writeHandoverResults(HANDOVER_RECORD);
+    expect(handoverWritten[0]?.run.captures.value).toBe("target/views-check/terrain/captures-x");
+  });
+
+  it("judges with the GPU process's exits and records the console's errors", async () => {
+    const { session: run, handoverWritten } = handoverSession();
+    run.gpuProcessGone();
+    run.consoleError("a pass timer's read-back failed");
+    await run.writeHandoverResults(HANDOVER_RECORD);
+    expect([
+      handoverWritten[0]?.findings.faults.gpuProcessExits,
+      handoverWritten[0]?.findings.consoleErrors.count,
+    ]).toEqual([1, 1]);
+  });
+
+  it("names a capture between phases, since it has none", async () => {
+    const { session: run, deps } = handoverSession();
+    await run.capture("handover-30-disc");
+    expect(deps.capture).toHaveBeenCalledWith("/captures/between-handover-30-disc.png");
+  });
+
+  it("ends with 0 when its verdict passes", async () => {
+    const { session: run, deps } = handoverSession();
+    await run.writeHandoverResults(HANDOVER_RECORD);
+    run.end(0, null);
+    expect(deps.exit).toHaveBeenCalledWith(0);
+  });
+
+  it("ends with 1 when its verdict fails, whatever its end says", async () => {
+    const failing: HandoverCheckRecord = {
+      ...HANDOVER_RECORD,
+      looks: HANDOVER_RECORD.looks.slice(1),
+    };
+    const lines: string[] = [];
+    const { session: run, deps } = handoverSession({ log: (line) => lines.push(line) });
+    await run.writeHandoverResults(failing);
+    run.end(0, null);
+    expect(deps.exit).toHaveBeenCalledWith(1);
+    expect(lines.at(-1)).toMatch(/the looks ran handover-90, handover-terminator/);
+  });
+
+  it("ends with 1 when it ends with no results written", () => {
+    const lines: string[] = [];
+    const { session: run } = handoverSession({ log: (line) => lines.push(line) });
+    run.end(0, null);
+    expect(lines.at(-1)).toBe(
+      "views check: FAIL the hand-over check ended with no results written",
+    );
+  });
+
+  it("ends with 1 when it wrote only the terrain run's results", async () => {
+    const lines: string[] = [];
+    const { session: run } = handoverSession({ log: (line) => lines.push(line) });
+    await run.writeTerrainResults(TERRAIN_RECORD);
+    run.end(0, null);
+    expect(lines.at(-1)).toBe(
+      "views check: FAIL the hand-over check ended with no results written",
+    );
+  });
+});
+
 describe("the views check's handlers", () => {
   type Listener = (event: { own: boolean }, ...args: unknown[]) => Promise<unknown>;
 
-  function handlers(terrain = false): {
+  function handlers(run: ViewsCheckRunKind = "several-views"): {
     readonly call: (channel: string, own: boolean, ...args: unknown[]) => Promise<unknown>;
     readonly calls: string[];
   } {
@@ -410,6 +506,10 @@ describe("the views check's handlers", () => {
           calls.push("write terrain");
           return Promise.resolve({ json: "a", markdown: "b" });
         },
+        writeHandoverResults: () => {
+          calls.push("write handover");
+          return Promise.resolve({ json: "a", markdown: "b" });
+        },
         capture: (label) => {
           calls.push(`capture ${label}`);
           return Promise.resolve();
@@ -418,7 +518,7 @@ describe("the views check's handlers", () => {
           calls.push(`exit ${String(code)} ${String(reason)}`);
         },
       },
-      terrain,
+      run,
     });
     return {
       call: (channel, own, ...args) => {
@@ -485,7 +585,7 @@ describe("the views check's handlers", () => {
   });
 
   it("carry out a terrain run's operations on a terrain launch", async () => {
-    const { call, calls } = handlers(true);
+    const { call, calls } = handlers("terrain");
     await call(VIEWS_CHECK_CHANNELS.startPhase, true, "terrain-loss");
     await call(VIEWS_CHECK_CHANNELS.capture, true, "restored");
     await call(VIEWS_CHECK_CHANNELS.endPhase, true, "terrain-loss", SPAN);
@@ -502,7 +602,7 @@ describe("the views check's handlers", () => {
     [VIEWS_CHECK_CHANNELS.startPhase, ["photoreal-alone"]],
     [VIEWS_CHECK_CHANNELS.endPhase, ["photoreal-alone", SPAN]],
   ] as const)("refuse T20's phase on %s on a terrain launch", async (channel, args) => {
-    const { call, calls } = handlers(true);
+    const { call, calls } = handlers("terrain");
     await expect(call(channel, true, ...args)).rejects.toThrow(/not a phase of the terrain run/);
     expect(calls).toEqual([]);
   });
@@ -511,13 +611,13 @@ describe("the views check's handlers", () => {
     [VIEWS_CHECK_CHANNELS.startPhase, ["terrain-alone"]],
     [VIEWS_CHECK_CHANNELS.endPhase, ["terrain-alone", SPAN]],
   ] as const)("refuse a terrain phase on %s on T20's launch", async (channel, args) => {
-    const { call, calls } = handlers(false);
+    const { call, calls } = handlers("several-views");
     await expect(call(channel, true, ...args)).rejects.toThrow(/not a phase of T20's run/);
     expect(calls).toEqual([]);
   });
 
   it("refuse T20's record on a terrain launch, which writes its own alone", async () => {
-    const { call, calls } = handlers(true);
+    const { call, calls } = handlers("terrain");
     await expect(call(VIEWS_CHECK_CHANNELS.writeResults, true, RECORD)).rejects.toThrow(
       /not the check's record/,
     );
@@ -525,7 +625,7 @@ describe("the views check's handlers", () => {
   });
 
   it("refuse a terrain record and a capture on T20's launch", async () => {
-    const { call, calls } = handlers(false);
+    const { call, calls } = handlers("several-views");
     await expect(
       call(VIEWS_CHECK_CHANNELS.writeTerrainResults, true, TERRAIN_RECORD),
     ).rejects.toThrow(/terrain run's record/);
@@ -533,8 +633,62 @@ describe("the views check's handlers", () => {
     expect(calls).toEqual([]);
   });
 
+  it("take a hand-over check's capture on a hand-over launch (R10.T10.g)", async () => {
+    const { call, calls } = handlers("handover");
+    await call(VIEWS_CHECK_CHANNELS.capture, true, "handover-90-back");
+    expect(calls).toEqual(["capture handover-90-back"]);
+  });
+
+  it("take a hand-over check's record on a hand-over launch", async () => {
+    const { call, calls } = handlers("handover");
+    await call(VIEWS_CHECK_CHANNELS.writeHandoverResults, true, HANDOVER_RECORD);
+    expect(calls).toEqual(["write handover"]);
+  });
+
+  it("refuse the terrain run's record on a hand-over launch", async () => {
+    const { call, calls } = handlers("handover");
+    await expect(
+      call(VIEWS_CHECK_CHANNELS.writeTerrainResults, true, TERRAIN_RECORD),
+    ).rejects.toThrow(/terrain run's record/);
+    expect(calls).toEqual([]);
+  });
+
+  it.each([["several-views"], ["terrain"]] as const)(
+    "refuse a hand-over record on a %s launch",
+    async (run) => {
+      const { call, calls } = handlers(run);
+      await expect(
+        call(VIEWS_CHECK_CHANNELS.writeHandoverResults, true, HANDOVER_RECORD),
+      ).rejects.toThrow(/hand-over check's record/);
+      expect(calls).toEqual([]);
+    },
+  );
+
+  it.each([
+    [VIEWS_CHECK_CHANNELS.startPhase, ["terrain-alone"]],
+    [VIEWS_CHECK_CHANNELS.endPhase, ["terrain-alone", SPAN]],
+    [VIEWS_CHECK_CHANNELS.startPhase, ["photoreal-alone"]],
+  ] as const)(
+    "refuse every phase on %s on a hand-over launch, which has none",
+    async (channel, args) => {
+      const { call, calls } = handlers("handover");
+      await expect(call(channel, true, ...args)).rejects.toThrow(
+        /not a phase of the hand-over check/,
+      );
+      expect(calls).toEqual([]);
+    },
+  );
+
+  it("refuse a hand-over record that does not check", async () => {
+    const { call, calls } = handlers("handover");
+    await expect(
+      call(VIEWS_CHECK_CHANNELS.writeHandoverResults, true, { ...HANDOVER_RECORD, looks: null }),
+    ).rejects.toThrow(/hand-over check's record/);
+    expect(calls).toEqual([]);
+  });
+
   it("refuse a terrain record that does not check, and a capture label of another shape", async () => {
-    const { call, calls } = handlers(true);
+    const { call, calls } = handlers("terrain");
     await expect(
       call(VIEWS_CHECK_CHANNELS.writeTerrainResults, true, { ...TERRAIN_RECORD, phases: null }),
     ).rejects.toThrow(/terrain run's record/);
