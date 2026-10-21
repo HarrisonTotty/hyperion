@@ -6721,6 +6721,44 @@ medium, sizes, figure)`.
   the module itself. `planetGeometry` refuses a figure not 0 < c ≤ a and a table not 100 finite
   entries. Shared test fixtures: `src/test/terrainFixtures.ts` (`UNIT_BOUNDS`, `WGS84_FIGURE`,
   `goldenLevelTable`, `selectionOf`).
+  - _A gap closed by R09.T8.d_ (2026-10-20; decision-r09-t8d-reach §7 and follow-up 1). Selection
+    drops a node and its whole subtree when no view sees its box. Its box with nothing baked above
+    took the level's own row, and the baked range's clamp took it too, so neither held the finer
+    levels' ground nor the skirts, which hang ε_n and an `f32` step below the edge vertices. On the
+    test planet a finer level adds octaves; on a generated world the old ±150 km rows hid it at
+    every level but 0. Both now take `subtreeHeightRangeM` (`planet.ts`): the rows from the node's
+    parent's to the deepest, each low less that level's skirt depth, the bake's margin taken off at
+    the call. `patchBounds`' default keeps the level's own range for callers that do not prune; the
+    count model (`cacheBudget.ts`), which prunes, takes the subtree's. Re-pinned with it, each
+    move stated in its test:
+    - `select.test.ts`' digests: one view with no ranges and the 1.5 km pose with no budget,
+      12,721 → 12,722 patches; under the budgets of 981 and 1,952 the same counts, with every
+      box's bounds moved; the approach still 38,746 patches over its 48 frames, its bounds moved.
+      Every other digest is as it was.
+    - The count model's own table (`cacheBudget.test.ts`): the wire column's greatest frustum peak
+      at 400 km, 32 → 33 on the boxes' horizon and 24 → 25 on the exact one. No other figure moved.
+    - The descent's replay (`cache.test.ts`): low lit past its slots in 110 frames, from 107.
+    - `demandRecord.test.ts`' fourteen windows did not move.
+
+    A test keeps a node with nothing baked where a finer row rises above the horizon and its own
+    row does not, and fails without the union (checked by hand). Another holds every vertex and
+    skirt bottom of level-0 to level-5 bakes over the Moon-like fixture inside its own level's box
+    and every coarser one's.
+
+  - _The widening, by the same task_ (decision-r09-t8d-reach follow-up 2). The bake hangs a
+    level-m patch's skirts from its own heights and its morph targets, its parent level's, by ε_m
+    and an `f32` step over both, so each level's skirt bottom in the union is the lower of its row's
+    low and its parent row's, less that. A baked range widened by ε_k + ε_{n−1} and hung its skirt
+    by ε_n, which held only while ε never rose with the level: it widens by ε_k + ε*\_n, ε*_n the
+    largest ε_m over m ≥ n − 1, and hangs the deepest skirt from level n on, the largest ε_m over
+    m ≥ n, both built in `tablesOf`. Every union and maximum stops at the planet's finest level
+    drawn, beneath which no patch is: the test planet's ε rises from 0 at level 19 to 0.037 m at
+    20, which moved two demand windows and the approach until the maxima stopped there. No pin
+    moved where ε does not rise. Tests: a non-monotone ε table whose baked range must hold every
+    finer level's vertices and skirts, which fails without the suffix maxima (checked by hand:
+    −132 m against −1,112 m); a table whose ε rises under a deeper parent row; and the Moon-like
+    fixture's bakes of levels 0 to 3 inside the range inherited from their own bake or their
+    parent's, which fails on the old clamp at levels 0 to 2 (checked by hand).
 - **Deviations in T7.b's selection, as built (2026-10-03).** `selectPatches` charges a level
   `selectionErrorM` = ε_n + `chordSagittaM`, the flat triangles' sag below the datum, which ε_n, a
   bound on heights, leaves out; without it a zero-height spheroid (R07's `mesh` regime) never

@@ -95,6 +95,98 @@ export function levelHeightRangeM(
   return [entry(planet, level, 1), entry(planet, level, 2)];
 }
 
+/**
+ * One `f32` step's relative size: a height rounded to `f32` is within this of its value, as the
+ * bake's `f32_step` takes it for the skirts' depth.
+ */
+export const F32_RELATIVE_STEP = 2 ** -23;
+
+/**
+ * Per level, the lowest bottom and the highest top any patch of the level, or of a finer level
+ * beneath one, can reach, before the skirt margin (see {@link subtreeHeightRangeM}).
+ */
+interface SubtreeRanges {
+  readonly lowM: Float64Array;
+  readonly highM: Float64Array;
+}
+
+const subtreeRanges = new WeakMap<PlanetGeometry, SubtreeRanges>();
+
+/** The planet's {@link SubtreeRanges}, made on first use (the planet is immutable). */
+function subtreeRangesOf(planet: PlanetGeometry): SubtreeRanges {
+  let ranges = subtreeRanges.get(planet);
+  if (ranges === undefined) {
+    const rows = MAX_LEVEL + 1;
+    // From each level to the deepest drawn, the planet's finest: the lowest skirt bottom and the
+    // highest height. No patch beneath the finest level is drawn, so from it on each level is its
+    // own.
+    const fromLow = new Float64Array(rows);
+    const fromHigh = new Float64Array(rows);
+    let low = Infinity;
+    let high = -Infinity;
+    for (let m = MAX_LEVEL; m >= 0; m -= 1) {
+      if (m >= planet.finestLevel) {
+        low = Infinity;
+        high = -Infinity;
+      }
+      const [rowLow, rowHigh] = levelHeightRangeM(planet, m);
+      // A level-m bake hangs its skirts from its own heights and its morph targets, its parent
+      // level's, alike: by ε_m, an f32 step of the largest height over both and its margin.
+      const [parentLow, parentHigh] = m > 0 ? levelHeightRangeM(planet, m - 1) : [rowLow, rowHigh];
+      const largest = Math.max(
+        Math.abs(rowLow),
+        Math.abs(rowHigh),
+        Math.abs(parentLow),
+        Math.abs(parentHigh),
+      );
+      const bottom =
+        Math.min(rowLow, parentLow) - levelBoundM(planet, m) - largest * F32_RELATIVE_STEP;
+      low = Math.min(low, bottom);
+      high = Math.max(high, rowHigh);
+      fromLow[m] = low;
+      fromHigh[m] = high;
+    }
+    // Level n's subtree takes the rows from its parent's on: a patch's morph targets are its
+    // parent level's heights.
+    const lowM = new Float64Array(rows);
+    const highM = new Float64Array(rows);
+    for (let n = 0; n < rows; n += 1) {
+      const from = Math.max(0, n - 1);
+      lowM[n] = fromLow[from] ?? 0;
+      highM[n] = fromHigh[from] ?? 0;
+    }
+    ranges = { lowM, highM };
+    subtreeRanges.set(planet, ranges);
+  }
+  return ranges;
+}
+
+/**
+ * The lowest and highest heights the patches of `level`, and of every finer level beneath one, can
+ * reach above the datum, metres, skirts included: over the level table's rows from the level's
+ * parent to the deepest drawn ({@link PlanetGeometry.finestLevel}), each level's skirt bottom the lower of its row's low and its parent row's,
+ * its morph targets', less its skirt depth (ε_m, an `f32` step of the largest |h| over both rows
+ * and `skirtMarginM`, as the bake hangs its skirts). Selection drops a patch's
+ * whole subtree when no view sees its box, so a box it prunes by holds every descendant's
+ * vertices, morph targets and skirts (R09.T8.d; decision-r09-t8d-reach, follow-up 1): a coarse
+ * level's own row may hold far less than a finer one's.
+ *
+ * @throws Error if `level` is outside the level table.
+ */
+export function subtreeHeightRangeM(
+  planet: PlanetGeometry,
+  level: number,
+  skirtMarginM = 0,
+): readonly [number, number] {
+  const ranges = subtreeRangesOf(planet);
+  const low = ranges.lowM[level];
+  const high = ranges.highM[level];
+  if (!Number.isInteger(level) || low === undefined || high === undefined) {
+    throw new Error(`level ${level} is outside the level table`);
+  }
+  return [low - skirtMarginM, high];
+}
+
 /** The lowest height anywhere on the planet, metres: the occluder's depth below the datum. */
 export function lowestHeightM(planet: PlanetGeometry): number {
   let lowest = 0;

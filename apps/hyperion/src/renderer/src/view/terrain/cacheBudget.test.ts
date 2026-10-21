@@ -202,7 +202,9 @@ const NOTE: Readonly<Record<Column["name"], ReadonlyArray<Cell>>> = {
 /**
  * The model's own table at τ, k₀ = 5, no margin or relief: on the boxes' horizon (selection's).
  * Re-pinned for R10.T14.e's normal margin (2026-10-20): 100 m high from 3,014 / 537–554 to 2,397 /
- * 423–432, the rest as plan 10's T14.e record has it.
+ * 423–432, the rest as plan 10's T14.e record has it. Re-pinned for R09.T8.d (2026-10-20), whose
+ * boxes take the subtree's range and its skirts: the wire column's greatest frustum peak at 400 km
+ * from 32 to 33, no other figure.
  */
 const MODEL_BOX: Readonly<Record<Column["name"], ReadonlyArray<Cell>>> = {
   high: [
@@ -224,14 +226,15 @@ const MODEL_BOX: Readonly<Record<Column["name"], ReadonlyArray<Cell>>> = {
     [252, 58, 63],
     [191, 44, 47],
     [135, 37, 41],
-    [101, 31, 32],
+    [101, 31, 33],
   ],
 };
 
 /**
  * The same on the exact horizon, Design note 15's premise. Re-pinned for R10.T14.e (2026-10-20):
  * refinement and the frustum still measure the boxes, so it moved a little too (100 m high from
- * 2,360 / 423–432 to 2,348 / 414–424).
+ * 2,360 / 423–432 to 2,348 / 414–424). Re-pinned for R09.T8.d (2026-10-20), as the boxes' table: the
+ * wire column's greatest frustum peak at 400 km from 24 to 25, no other figure.
  */
 const MODEL_EXACT: Readonly<Record<Column["name"], ReadonlyArray<Cell>>> = {
   high: [
@@ -253,7 +256,7 @@ const MODEL_EXACT: Readonly<Record<Column["name"], ReadonlyArray<Cell>>> = {
     [218, 52, 55],
     [163, 34, 38],
     [109, 28, 34],
-    [75, 24, 24],
+    [75, 24, 25],
   ],
 };
 

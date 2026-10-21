@@ -17,6 +17,7 @@ import {
   EDGES,
   FACES,
   edgeNeighbour,
+  MAX_LEVEL,
   parentKey,
   type PatchKey,
   patchKeyString,
@@ -873,7 +874,9 @@ describe("the budget's limit excess", () => {
   // when selection's output is meant to change. Re-recorded 2026-10-20 for R10.T14.e's normal
   // margin, which culls coarse patches below the horizon that R05's chord let pass (patches with no
   // budget, then under it: 12,731 to 12,721 and 300 to 299; 287 to 251 and 198 to 198; 13,220 to
-  // 13,210 and 1,998 to 2,000).
+  // 13,210 and 1,998 to 2,000). Re-recorded 2026-10-20 for R09.T8.d's boxes, over the subtree's
+  // range with its skirts, which keep a coarse patch whose finer ground can be seen: the first
+  // case's free selection, 12,721 to 12,722; every other digest as it was.
   const cases: readonly BudgetCase[] = [
     budgetCase({
       name: "one view and no baked ranges",
@@ -881,7 +884,7 @@ describe("the budget's limit excess", () => {
       budget: 300,
       bakedDepth: null,
       digests: {
-        free: "12721 80a1e935 1 84bfd6f6 false",
+        free: "12722 98bd76ce 1 84bfd6f6 false",
         budgeted: "299 3f3f0074 3 3a5eda2e true",
       },
     }),
@@ -1278,12 +1281,14 @@ describe("selection's output, bit for bit", () => {
   // every number it returns: the work on selection's cost changes none of them. Re-record only when
   // the output is meant to change. Re-recorded 2026-10-20 for R10.T14.e's normal margin (patches
   // 981 to 980, 1,952 to 1,952 and 12,731 to 12,721; along the approach 38,823 to 38,746 over its
-  // 48 frames).
+  // 48 frames). Re-recorded 2026-10-20 for R09.T8.d's boxes, over the subtree's range with its
+  // skirts: patches 980 to 980, 1,952 to 1,952 and 12,721 to 12,722, every box's bounds moving;
+  // along the approach still 38,746 over its 48 frames, the bounds alone moving.
   const pose = view(LOW, lookingDown(LOW, 1.2));
   it.each([
-    { label: "a budget of 981", budget: 981, digest: "980 3 5d0bb89f" },
-    { label: "a budget of 1,952", budget: 1952, digest: "1952 3 5eea445a" },
-    { label: "no budget", budget: undefined, digest: "12721 1 bed6f397" },
+    { label: "a budget of 981", budget: 981, digest: "980 3 c6b9db7c" },
+    { label: "a budget of 1,952", budget: 1952, digest: "1952 3 3bc9345c" },
+    { label: "no budget", budget: undefined, digest: "12722 1 903e4ada" },
   ])("is as recorded at the 1.5 km pose with $label", ({ budget, digest }) => {
     const sel = selectPatches({
       planet: PLANET,
@@ -1296,7 +1301,7 @@ describe("selection's output, bit for bit", () => {
   });
 
   it("is as recorded frame by frame along an approach, its bakes following its demand", () => {
-    expect(approachDigest()).toBe("48 1ac40f03");
+    expect(approachDigest()).toBe("48 584de8a8");
   });
 });
 
@@ -1535,5 +1540,76 @@ describe("selection over a survey (R10.T16.b; decision-r10-t16-contracts §2–3
       PATCH_QUADS * vertexSpacing(PLANET.figure.equatorialRadiusM, PLANET.finestLevel).maxM,
       6,
     );
+  });
+});
+
+/** A sphere of the Moon's radius whose rows to level `flatTo` reach no height and every finer one `reliefM`. */
+function steppedPlanet(flatTo: number, reliefM: number): PlanetGeometry {
+  const radiusM = 1_737_400;
+  const table = new Float64Array(4 * (MAX_LEVEL + 1));
+  for (let level = 0; level <= MAX_LEVEL; level += 1) {
+    table[4 * level + 2] = level <= flatTo ? 0 : reliefM;
+    table[4 * level + 3] = vertexSpacing(radiusM, level).maxM;
+  }
+  return planetGeometry({ equatorialRadiusM: radiusM, polarRadiusM: radiusM, pole: null }, table);
+}
+
+describe("a box that prunes its subtree", () => {
+  it("keeps a node with nothing baked where a finer row rises above the horizon and its own row does not", () => {
+    // Rows to level 7 are flat and every finer one reaches 30 km. A camera 10 m above a level-7
+    // patch, about 21 km across, looks along the face at another five patches off, some 100 km:
+    // that patch's own row puts its box below the horizon, but its subtree's ground rises 30 km
+    // above it, in view from there, so selection keeps it, and its ancestors (R09.T8.d;
+    // decision-r09-t8d-reach, follow-up 1).
+    const planet = steppedPlanet(7, 30_000);
+    const own: PatchKey = { face: 0, level: 7, i: 40, j: 64 };
+    const target: PatchKey = { face: 0, level: 7, i: 45, j: 64 };
+    const [cx, cy, cz] = surfacePoint(planet.figure, vertexDir(own, 32, 32), 10);
+    const camera = vec3(cx, cy, cz);
+    const [tx, ty, tz] = surfacePoint(planet.figure, vertexDir(target, 32, 32), 0);
+    const forward = normalise(vec3(tx - cx, ty - cy, tz - cz));
+    const orientation = lookAlong(forward, normalise(camera));
+    const horizon = horizonCone(planet, camera);
+    const boxAbove = (range: readonly [number, number]): boolean =>
+      aboveHorizon(relativeBounds(patchBounds(planet, target, range), camera), horizon);
+    // The case discriminates: below the horizon by its own row, above it by its subtree's.
+    expect(boxAbove(levelHeightRangeM(planet, target.level))).toBe(false);
+    expect(boxAbove(inheritedHeightRangeM(planet, target, null))).toBe(true);
+    const selection = selectPatches({
+      planet,
+      views: [view(camera, orientation)],
+      setting: "high",
+      grounded: [],
+    });
+    const [inside] = childKeys(target);
+    expect(coveringLeaf(selection, inside)).not.toBeNull();
+  });
+
+  it("widens a baked range by the largest ε and skirt of the levels beneath, where ε rises", () => {
+    // ε is 10 m but at level 9, where it rises to 500 m, on rows wide enough that no clamp binds.
+    // From a level-6 bake, a level-8 patch's subtree reaches level 9's ground, within ε₉ of the
+    // finest, and its skirts, ε₉ deeper again: ε₆ + ε₇ and ε₈ alone held neither
+    // (decision-r09-t8d-reach, follow-up 2).
+    const radiusM = 1_737_400;
+    const table = new Float64Array(4 * (MAX_LEVEL + 1));
+    for (let level = 0; level <= MAX_LEVEL; level += 1) {
+      table.set([level === 9 ? 500 : 10, -1e6, 1e6, vertexSpacing(radiusM, level).maxM], 4 * level);
+    }
+    const planet = planetGeometry(
+      { equatorialRadiusM: radiusM, polarRadiusM: radiusM, pole: null },
+      table,
+    );
+    const key: PatchKey = { face: 0, level: 8, i: 100, j: 100 };
+    const baked = { level: 6, lowM: -100, highM: 100 };
+    const skirtM = 2;
+    const [low, high] = inheritedHeightRangeM(planet, key, baked, skirtM);
+    const bound = (m: number): number => levelBoundM(planet, m);
+    for (let m = key.level; m <= planet.finestLevel; m += 1) {
+      // A level-m vertex or morph target lies within the larger of ε_m and ε_{m−1} of the finest
+      // ground, itself within ε₆ of the bake's; its skirt hangs ε_m and the margin below.
+      const reach = bound(baked.level) + Math.max(bound(m), bound(m - 1));
+      expect(low).toBeLessThanOrEqual(baked.lowM - reach - bound(m) - skirtM);
+      expect(high).toBeGreaterThanOrEqual(baked.highM + reach);
+    }
   });
 });

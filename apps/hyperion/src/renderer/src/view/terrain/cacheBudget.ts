@@ -31,6 +31,7 @@ import {
   levelBoundM,
   type PlanetGeometry,
   planetGeometry,
+  subtreeHeightRangeM,
   surfacePoint,
 } from "./planet";
 import { screenSpaceErrorPx, type ViewSelectionInput } from "./select";
@@ -430,7 +431,10 @@ export function patchCountModel(
   let exactLeaves = 0;
   const stack: PatchKey[] = FACES.map(rootKey);
   for (let key = stack.pop(); key !== undefined; key = stack.pop()) {
-    const bounds = relativeBounds(patchBounds(planet, key), positionM);
+    // Pruned with its subtree where it is below the horizon, so boxed over the subtree's range,
+    // as selection boxes it (R09.T8.d).
+    const range = subtreeHeightRangeM(planet, key.level);
+    const bounds = relativeBounds(patchBounds(planet, key, range), positionM);
     if (!aboveHorizon(bounds, horizon)) {
       continue;
     }

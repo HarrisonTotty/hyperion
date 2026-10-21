@@ -3473,6 +3473,14 @@ RESOLUTION       410 m
   (1,323 lit slots, 411,484,752 B, on `baked-offsets` under a default 128 MiB binding) for each
   machine. If R10.T9.b has not landed, the cascades are counted at 67,108,864 B from T9.a's spec,
   labelled computed.
+  Its sizing runs (the peaks, `cacheBytes`, the binding ceiling) follow R09.T8.d, which tightens
+  the level table's reach and with it the horizon occluder and the boxes (decision-r10-t14c-leans
+  F4; decision-r09-t8d-reach §5). Its other items need not wait. Its record states the occluder
+  depth and T14.c's ceiling it ran with, and that the flare's demand figures come from a plunge.
+  It runs an A/B: the same descent once more with a diagnostic occluder at the sampled extreme
+  depth (never shipped), recording the slots the remaining looseness costs in each setting's
+  all-round and frustum peaks; above 10% of a setting's sized all-round peak that is a finding to
+  main before the low setting's budget is final.
   By hand, recorded, on a quiet machine: the peaks and totals on the development
   machine's RTX 3080 and, by the owner, on the UHD 620. Acceptance: the figures recorded and the
   constants updated, with `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`

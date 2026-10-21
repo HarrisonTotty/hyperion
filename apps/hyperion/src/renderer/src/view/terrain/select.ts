@@ -48,7 +48,13 @@ import {
 } from "./patchKey";
 import { finestPatchSizeM, type GroundContact, inForcedRegionPacked } from "./grounded";
 import { compareRequests } from "./priority";
-import { type BodyFixedVec3, levelBoundM, levelHeightRangeM, type PlanetGeometry } from "./planet";
+import {
+  type BodyFixedVec3,
+  F32_RELATIVE_STEP,
+  levelBoundM,
+  type PlanetGeometry,
+  subtreeHeightRangeM,
+} from "./planet";
 import {
   distanceToPackedBoxFromM,
   type ViewGeometry,
@@ -367,8 +373,6 @@ interface MemoCell {
   /** The height range the bounds were built for, metres. */
   lowM: number;
   highM: number;
-  /** Whether that range was the level's own, with nothing baked above. */
-  levelRange: boolean;
   /** The bounds as an object, made when first drawn and kept while the range holds. */
   bounds: PatchBounds | null;
   /**
@@ -396,7 +400,6 @@ function memoCell(key: PatchKey): MemoCell {
     built: false,
     lowM: 0,
     highM: 0,
-    levelRange: false,
     bounds: null,
     keyString: null,
     geometrySlot: -1,
@@ -437,10 +440,23 @@ interface MemoState {
 interface PlanetTables {
   /** {@link selectionErrorM} per level, metres. */
   readonly errorM: ReadonlyArray<number>;
-  /** Per level: ε_n and the lowest and highest height, metres, from the level table. */
+  /**
+   * Per level: ε_n, metres, from the level table, and the lowest and highest height its patches
+   * and every finer one beneath them reach, skirts included but for the bake's margin
+   * ({@link subtreeHeightRangeM}): the range a box that prunes its subtree holds.
+   */
   readonly levelBoundM: ReadonlyArray<number>;
   readonly levelLowM: ReadonlyArray<number>;
   readonly levelHighM: ReadonlyArray<number>;
+  /**
+   * Per level n, metres: ε*_n, the largest ε_m over m ≥ n − 1 to the finest level drawn, by which a
+   * vertex or morph target of the level or any finer one lies from the finest ground; and the
+   * largest ε_m over m ≥ n alike, the deepest any of their skirts hangs but for its `f32` step and
+   * margin. A baked range widens by these, which hold where ε does not fall with the level
+   * (R09.T8.d, follow-up 2).
+   */
+  readonly widenBoundM: ReadonlyArray<number>;
+  readonly skirtBoundM: ReadonlyArray<number>;
   /** Bounds already built. */
   readonly memo: MemoState;
 }
@@ -452,11 +468,21 @@ function tablesOf(planet: PlanetGeometry): PlanetTables {
   let tables = planetTables.get(planet);
   if (tables === undefined) {
     const levels = { length: MAX_LEVEL + 1 };
+    const bounds = Array.from(levels, (_, level) => levelBoundM(planet, level));
+    // The largest ε from each level to the deepest drawn, the planet's finest, beneath which no
+    // patch is drawn: from it on each level's is its own.
+    const fromBound = bounds.map((bound, level) =>
+      level >= planet.finestLevel
+        ? bound
+        : Math.max(...bounds.slice(level, planet.finestLevel + 1)),
+    );
     tables = {
       errorM: Array.from(levels, (_, level) => selectionErrorM(planet, level)),
-      levelBoundM: Array.from(levels, (_, level) => levelBoundM(planet, level)),
-      levelLowM: Array.from(levels, (_, level) => levelHeightRangeM(planet, level)[0]),
-      levelHighM: Array.from(levels, (_, level) => levelHeightRangeM(planet, level)[1]),
+      levelBoundM: bounds,
+      widenBoundM: fromBound.map((_, level) => fromBound[Math.max(0, level - 1)] ?? 0),
+      skirtBoundM: fromBound,
+      levelLowM: Array.from(levels, (_, level) => subtreeHeightRangeM(planet, level)[0]),
+      levelHighM: Array.from(levels, (_, level) => subtreeHeightRangeM(planet, level)[1]),
       memo: {
         roots: FACES.map((face) => memoCell(rootKey(face))),
         cells: 0,
@@ -573,11 +599,9 @@ function memoChild(t: Traversal, up: MemoCell, key: PatchKey): MemoCell {
  * where the memo does not hold them for that range already.
  */
 function buildBounds(t: Traversal, cell: MemoCell, key: PatchKey, baked: BakedRange | null): void {
-  // The range only when the memo cannot answer with the level's own (nothing baked above it).
-  if (cell.built && baked === null && cell.levelRange) {
-    return;
-  }
-  let lowM = t.levelLowM[key.level] ?? 0;
+  // The level's subtree range, the skirts' margin taken off its low: a node no view sees drops its
+  // subtree, so its box holds every descendant's vertices, morph targets and skirts (R09.T8.d).
+  let lowM = (t.levelLowM[key.level] ?? 0) - t.skirtMarginM;
   let highM = t.levelHighM[key.level] ?? 0;
   if (baked !== null) {
     const range = t.range;
@@ -585,8 +609,8 @@ function buildBounds(t: Traversal, cell: MemoCell, key: PatchKey, baked: BakedRa
       range,
       lowM,
       highM,
-      (t.levelBoundM[baked.level] ?? 0) + (t.levelBoundM[Math.max(0, key.level - 1)] ?? 0),
-      t.levelBoundM[key.level] ?? 0,
+      (t.levelBoundM[baked.level] ?? 0) + (t.widenBoundM[key.level] ?? 0),
+      t.skirtBoundM[key.level] ?? 0,
       baked,
       t.skirtMarginM,
     );
@@ -600,7 +624,6 @@ function buildBounds(t: Traversal, cell: MemoCell, key: PatchKey, baked: BakedRa
   cell.built = true;
   cell.lowM = lowM;
   cell.highM = highM;
-  cell.levelRange = baked === null;
   cell.bounds = null;
 }
 
@@ -637,9 +660,6 @@ function boundsOfCell(cell: MemoCell): PatchBounds {
   return cell.bounds;
 }
 
-/** One `f32` step's relative size: a baked height rounded to `f32` is within this of its value. */
-const F32_RELATIVE_STEP = 2 ** -23;
-
 /** One call's state, with its planet's tables. */
 interface Traversal extends PlanetTables {
   readonly planet: PlanetGeometry;
@@ -657,11 +677,14 @@ interface Traversal extends PlanetTables {
 }
 
 /**
- * The height range a patch can reach, metres (the patch-demand ruling, 2026-10-03, item 4a): from
- * its nearest baked ancestor A at level m (or itself), A's baked range rounded outward from `f32`,
- * widened by ε_m (S_m lies within A's range and |S_f − S_m| ≤ ε_m) and ε_{n−1} (a vertex and its
- * morph target lie within ε_{n−1} of S_f), and below by the skirt (ε_n and an `f32` step), kept
- * within the level's range; the level's range itself with nothing baked.
+ * The height range a patch and every patch beneath it can reach, metres (the patch-demand ruling,
+ * 2026-10-03, item 4a; R09.T8.d): from its nearest baked ancestor A at level k (or itself), A's
+ * baked range rounded outward from `f32`, widened by ε_k (S_k lies within A's range and
+ * |S_f − S_k| ≤ ε_k) and ε*_n, the largest ε_m over m ≥ n − 1 (a vertex or morph target of the patch
+ * or a finer one lies within it of S_f), and below by the deepest skirt from level n on (the
+ * largest ε_m over m ≥ n, an `f32` step and the margin), kept within the range of the level's
+ * subtree, skirts included ({@link subtreeHeightRangeM}); that range itself with nothing baked. The
+ * suffix maxima hold where ε does not fall with the level (decision-r09-t8d-reach, follow-up 2).
  */
 export function inheritedHeightRangeM(
   planet: PlanetGeometry,
@@ -669,18 +692,19 @@ export function inheritedHeightRangeM(
   baked: BakedRange | null,
   skirtMarginM = 0,
 ): readonly [number, number] {
-  const [levelLow, levelHigh] = levelHeightRangeM(planet, key.level);
+  const [levelLow, levelHigh] = subtreeHeightRangeM(planet, key.level, skirtMarginM);
   if (baked === null) {
     return [levelLow, levelHigh];
   }
   const n = key.level;
+  const tables = tablesOf(planet);
   const range = new Float64Array(2);
   inheritedRangeInto(
     range,
     levelLow,
     levelHigh,
-    levelBoundM(planet, baked.level) + levelBoundM(planet, Math.max(0, n - 1)),
-    levelBoundM(planet, n),
+    levelBoundM(planet, baked.level) + (tables.widenBoundM[n] ?? 0),
+    tables.skirtBoundM[n] ?? 0,
     baked,
     skirtMarginM,
   );
@@ -689,14 +713,15 @@ export function inheritedHeightRangeM(
 
 /**
  * Writes {@link inheritedHeightRangeM}'s range for a baked ancestor into `out`, low then high,
- * metres, from the level's range, the widening ε_m + ε_{n−1} and the level's own bound ε_n.
+ * metres, from the level's subtree range, the widening ε_k + ε*_n and the deepest skirt's bound,
+ * the largest ε_m over m ≥ n.
  */
 function inheritedRangeInto(
   out: Float64Array,
   levelLowM: number,
   levelHighM: number,
   widenM: number,
-  ownBoundM: number,
+  skirtBoundM: number,
   baked: BakedRange,
   skirtMarginM: number,
 ): void {
@@ -704,8 +729,8 @@ function inheritedRangeInto(
   // `f32_step(largest_h)` in its skirt depth, and the rounding of the baked range.
   const largest = Math.max(Math.abs(baked.lowM), Math.abs(baked.highM)) + widenM;
   const step = largest * F32_RELATIVE_STEP;
-  // The bake's skirt depth: ε_n, an f32 step of the largest height and the caller's margin.
-  const skirt = ownBoundM + step + skirtMarginM;
+  // The deepest skirt from the level on: its ε, an f32 step of the largest height and the margin.
+  const skirt = skirtBoundM + step + skirtMarginM;
   const low = baked.lowM - step - widenM - skirt;
   const high = baked.highM + step + widenM;
   out[0] = Math.max(levelLowM, low);
