@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { SpikeSizesMemory } from "../preload/api";
 import { type SizesFixtureOptions, sizesReportOf } from "./fixtures/sizesReport";
 import { NO_WINDOWS_LOAD_AVERAGE } from "./machineLoad";
 import { measured, missing } from "./measured";
@@ -84,7 +85,8 @@ describe("the measured sizes in the results (R10.T14.b)", () => {
       endGpuProcessBytes: measured(540 * MIB),
       endOthersBytes: measured(220 * MIB),
       othersDriftBytes: measured(52 * MIB),
-      computedLessDriverBytes: measured(sizes.memory.computedGpuBytes - 600 * MIB),
+      itemizedLessDriverBytes: measured(sizes.memory.itemizedGpuBytes - 600 * MIB),
+      engineLessDriverBytes: measured(sizes.memory.engine.peak.bytes - 600 * MIB),
     });
     expect([results.load, sizesResultsProblems(results)]).toEqual([load, []]);
   });
@@ -99,7 +101,8 @@ describe("the measured sizes in the results (R10.T14.b)", () => {
     expect(results.driver).toMatchObject({
       endDeviceBytes: missing("no nvidia-smi reading at the run's last memory sample"),
       endOthersBytes: missing("no nvidia-smi reading at the run's last memory sample"),
-      computedLessDriverBytes: missing("no nvidia-smi baseline (not NVIDIA)"),
+      itemizedLessDriverBytes: missing("no nvidia-smi baseline (not NVIDIA)"),
+      engineLessDriverBytes: missing("no nvidia-smi baseline (not NVIDIA)"),
     });
     expect(sizesResultsProblems(results)).toEqual([]);
   });
@@ -152,8 +155,10 @@ describe("the measured sizes in the results (R10.T14.b)", () => {
       "a lead of 7.9 s (touchdown − every forced patch resident)",
       "every forced patch resident first at 1,192.0 s, and at every sample after",
       "the contact by the session's rule at 1,190.0 s (61 forced, 12 of them resident)",
-      "- The cascades: 64.0 MiB, computed",
-      "against 1 GB (low)",
+      "- The cascades: 64.0 MiB as the engine allocated them (its shadows category at its peak), T9.a's spec 64.0 MiB as built",
+      "- Itemized GPU (the caches, the session's masks and maps, the cascades): 836.4 MiB; with the workers' field copies (72.0 MiB at their peak): 908.4 MiB, against 1 GB (low)",
+      "- The engine's tally, the app's own GPU figure: 875.9 MiB at its whole peak (2.0 s); each category at its own peak: render-targets 39.6 MiB (before the flight), height-cache 760.4 MiB (2.0 s), coarse-field-gpu 12.0 MiB (1.0 s), shadows 64.0 MiB (1.0 s)",
+      "- Less the driver: the itemized GPU 236.4 MiB, the engine's tally 275.9 MiB",
       "the rest of the card 220.0 MiB",
       "4,920 publishes, 4,800 holding an answer",
       "0 of its guards' calls to fail the session counted and withheld",
@@ -200,7 +205,75 @@ describe("the measured sizes in the results (R10.T14.b)", () => {
     );
   });
 
-  it("stands the high setting's computed total against a discrete card's 2–3 GB", () => {
+  it("stands the high setting's itemized total against a discrete card's 2–3 GB", () => {
     expect(summaryOf([{ cache: "lit", views: 2 }], "high")).toContain("against 2–3 GB (discrete)");
+  });
+
+  /** The summary's lines of `sizes`' block with its cascades and engine tally changed. */
+  function memorySummary(memory: Partial<SpikeSizesMemory>): string {
+    const sizes = sizesReportOf({ samples: 3, passes: [{ cache: "lit", views: 1 }] });
+    const results = buildSizesResults({ ...sizes, memory: { ...sizes.memory, ...memory } }, load, {
+      nvidiaBaselineBytes: null,
+      peakLessBaselineBytes: missing("off NVIDIA"),
+      gpuProcessPeakBytes: missing("off NVIDIA"),
+      last: null,
+    });
+    return sizesSummaryLines(results, "low").join("\n");
+  }
+
+  it("states that no cascades were allocated, and why", () => {
+    expect(
+      memorySummary({
+        cascades: {
+          bytes: 0,
+          source: "none",
+          reason: "the low setting has no shadow cascades",
+          specBytes: 67_108_864,
+          differsFromSpec: false,
+        },
+      }),
+    ).toContain(
+      "- The cascades: none allocated (the low setting has no shadow cascades); T9.a's spec 64.0 MiB",
+    );
+  });
+
+  it("states cascades unlike T9.a's spec as a finding", () => {
+    expect(
+      memorySummary({
+        cascades: {
+          bytes: 16_777_216,
+          source: "engine",
+          reason: null,
+          specBytes: 67_108_864,
+          differsFromSpec: true,
+        },
+      }),
+    ).toContain(
+      "**not** T9.a's spec 64.0 MiB: 16,777,216 B against 67,108,864 B, a finding for main",
+    );
+  });
+
+  it("states the destructions whose creations the engine's tally never saw", () => {
+    expect(
+      memorySummary({
+        engine: {
+          categories: [{ category: "height-cache", bytes: 1_048_576, atS: 3 }],
+          peak: { bytes: 1_048_576, atS: 3 },
+          unseenDestroyed: 2,
+        },
+      }),
+    ).toContain(
+      "each category at its own peak: height-cache 1.0 MiB (3.0 s); 2 destructions of allocations made before the run's control listened, left out",
+    );
+  });
+
+  it("marks the session's own figure for the cascades as counted from the engine instead", () => {
+    expect(
+      memorySummary({
+        sessionGpu: [{ category: "shadows", bytes: 67_108_864, atS: 1 }],
+      }),
+    ).toContain(
+      "- The session's shadows: 64.0 MiB at its peak (1.0 s), its own figure for the cascades, which the itemized total counts as the engine allocated them",
+    );
   });
 });

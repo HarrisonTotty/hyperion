@@ -107,10 +107,10 @@ export interface SpikeControllerDeps {
   readonly nowMs: () => number;
   readonly log: (message: string, error?: unknown) => void;
   /**
-   * The measured sizes of `--sizes on` (plan R10, R10.T14.b), whose block the report carries;
-   * absent, the report is as before.
+   * The measured sizes of `--sizes on` (plan R10, R10.T14.b), told of the engine's allocations and
+   * whose block the report carries; absent, nothing is forwarded and the report is as before.
    */
-  readonly sizes?: Pick<SpikeSizes, "report">;
+  readonly sizes?: Pick<SpikeSizes, "report" | "noteAllocation">;
 }
 
 /** The terrain variant `launch`'s `--vertex-path` and `--normals` ask for (nulls left out). */
@@ -180,13 +180,18 @@ export class SpikeController {
     return this.#ended;
   }
 
-  /** The engine the run draws on: its pass times and allocations go to the recorder. */
+  /**
+   * The engine the run draws on: its pass times and allocations go to the recorder once the descent
+   * is prepared, and under `--sizes on` its allocations go to the measured sizes from now on.
+   */
   engine(engine: Pick<RenderEngine, "onPassTimes" | "onAllocation">): () => void {
     const offTimes = engine.onPassTimes((times: PassTimes) => {
       this.#recorder?.passTimes(times);
     });
+    const sizes = this.#deps.sizes;
     const offAllocation = engine.onAllocation((event: AllocationEvent) => {
       this.#recorder?.allocation(event);
+      sizes?.noteAllocation(event);
     });
     return () => {
       offTimes();

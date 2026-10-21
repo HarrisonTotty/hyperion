@@ -1,7 +1,11 @@
 import type { BodyIdHex } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
-import type { SpikeSizesColumn, SpikeSizesCountColumns } from "../../../../preload/api";
+import type {
+  SpikeSizesColumn,
+  SpikeSizesCountColumns,
+  SpikeSizesMemory,
+} from "../../../../preload/api";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { FakeAdapter, FakeGpu, SWIFTSHADER_INFO } from "../../test/fakeGpu";
 import { ScriptedHeightWorker } from "../../test/scriptedHeightWorker";
@@ -13,10 +17,10 @@ import { IDENTITY_ROTATION } from "../coords/rotation";
 import { MAX_REQUESTED_BUFFER_BYTES, requestAdapterOutcome } from "../engine/platform";
 import { cameraSceneOf } from "../scene/model";
 import { bindingCeilingSlots, WEBGPU_DEFAULT_STORAGE_BINDING_BYTES } from "../terrain/cacheBudget";
-import type { MemoryCategory } from "../engine/memory";
+import type { AllocationEvent, MemoryCategory } from "../engine/memory";
 import { planetGeometry } from "../terrain/planet";
 import type { PatchRequest } from "../terrain/select";
-import { CASCADE_BYTES } from "../terrain/shadows/cascades";
+import { CASCADE_BYTES, CASCADE_TEXTURE } from "../terrain/shadows/cascades";
 import { TerrainPass, type TerrainPassView, type TerrainPool } from "../terrain/terrainPass";
 import type { BakedPatch } from "../terrain/workers/messages";
 import { DescentProfile, landingSiteOf } from "./descentProfile";
@@ -103,11 +107,23 @@ function views(order: "main first" | "second first", tiltRad = 0): TerrainPassVi
   return order === "main first" ? [main, second] : [second, main];
 }
 
+/** A creation or destruction of `bytes` under `category`, named `name`. */
+function allocation(
+  kind: "created" | "destroyed",
+  category: MemoryCategory,
+  bytes: number,
+  name = `a test's ${category}`,
+): AllocationEvent {
+  return { kind, name, bytes, category };
+}
+
 /** A session stand-in whose passes the test sets, its memory a test's too. */
 class SizedSession implements SpikeSizesSession {
   lit: SpikeSizesTerrainPass | null = null;
   wire: SpikeSizesTerrainPass | null = null;
   workerField = 1_000;
+  /** The session's textures by category, as its memory reports them. */
+  readonly gpu = new Map<MemoryCategory, number>([["coarse-field-gpu", 4_096]]);
   readonly workerCount = 2;
 
   pass(_body: BodyIdHex): SpikeSizesTerrainPass | null {
@@ -126,7 +142,7 @@ class SizedSession implements SpikeSizesSession {
     return {
       workerFieldBytes: this.workerField,
       keptFieldBytes: 500,
-      gpuBytes: new Map<MemoryCategory, number>([["coarse-field-gpu", 4_096]]),
+      gpuBytes: new Map(this.gpu),
     };
   }
 
@@ -382,12 +398,15 @@ describe("the measured sizes of a run (decision-r10-t14b-measure §2–§6)", ()
     expect(sizes.report().forcedSets.value).toBeNull();
   });
 
-  it("reads the session's memory once a second, with the cascades computed and the caches' allocations", async () => {
+  it("reads the session's memory once a second, the caches' allocations, and the cascades as the engine allocated them, counted once", async () => {
     const engine = await countingRenderEngine();
     const session = new SizedSession();
+    // The session's own figure for the set the engine allocates.
+    session.gpu.set("shadows", CASCADE_BYTES);
     const sizes = sizesOf("high", "photorealistic");
     const pass = passOn(engine);
     session.lit = pass;
+    sizes.noteAllocation(allocation("created", "render-targets", 1_000));
     for (const [tS, field] of [
       [0, 1_000],
       [0.5, 9_000],
@@ -395,7 +414,14 @@ describe("the measured sizes of a run (decision-r10-t14b-measure §2–§6)", ()
       [2.5, 2_000],
     ] as const) {
       session.workerField = field;
-      play(sizes, session, tS, () => pass.step({ views: views("main first"), grounded: [] }));
+      play(sizes, session, tS, () => {
+        pass.step({ views: views("main first"), grounded: [] });
+        if (tS === 1) {
+          sizes.noteAllocation(
+            allocation("created", "shadows", CASCADE_BYTES, CASCADE_TEXTURE.name),
+          );
+        }
+      });
     }
     const { memory } = sizes.report();
     const slots = pass.layout.slots;
@@ -404,7 +430,10 @@ describe("the measured sizes of a run (decision-r10-t14b-measure §2–§6)", ()
       samples: 3,
       workerFieldBytes: { bytes: 3_000, atS: 1 },
       keptFieldBytes: { bytes: 500, atS: 0 },
-      sessionGpu: [{ category: "coarse-field-gpu", bytes: 4_096, atS: 0 }],
+      sessionGpu: [
+        { category: "coarse-field-gpu", bytes: 4_096, atS: 0 },
+        { category: "shadows", bytes: CASCADE_BYTES, atS: 0 },
+      ],
       caches: [
         {
           cache: "lit",
@@ -413,9 +442,23 @@ describe("the measured sizes of a run (decision-r10-t14b-measure §2–§6)", ()
           allocationBytes: cache,
         },
       ],
-      cascades: { bytes: CASCADE_BYTES, source: "computed" },
-      computedGpuBytes: cache + 4_096 + CASCADE_BYTES,
-      computedTotalBytes: cache + 4_096 + CASCADE_BYTES + 3_000,
+      cascades: {
+        bytes: CASCADE_BYTES,
+        source: "engine",
+        reason: null,
+        specBytes: CASCADE_BYTES,
+        differsFromSpec: false,
+      },
+      engine: {
+        categories: [
+          { category: "render-targets", bytes: 1_000, atS: null },
+          { category: "shadows", bytes: CASCADE_BYTES, atS: 1 },
+        ],
+        peak: { bytes: 1_000 + CASCADE_BYTES, atS: 1 },
+        unseenDestroyed: 0,
+      },
+      itemizedGpuBytes: cache + 4_096 + CASCADE_BYTES,
+      itemizedTotalBytes: cache + 4_096 + CASCADE_BYTES + 3_000,
       workersStarted: 2,
     });
   });
@@ -605,6 +648,96 @@ describe("the measured sizes of a run (decision-r10-t14b-measure §2–§6)", ()
     });
     expect(standIn?.notSized?.startsWith(`${STAND_IN_ONLY}: `)).toBe(true);
     expect(standIn?.samples).toBeGreaterThan(0);
+  });
+});
+
+describe("the engine's allocations under the measured sizes (R10.T9.b as built)", () => {
+  /** `sizes` told of `events` at script times, each in its own frame's step. */
+  function noted(
+    sizes: SpikeSizes,
+    events: ReadonlyArray<readonly [number, AllocationEvent]>,
+  ): SpikeSizesMemory {
+    const session = new SizedSession();
+    for (const [tS, event] of events) {
+      play(sizes, session, tS, () => {
+        sizes.noteAllocation(event);
+      });
+    }
+    return sizes.report().memory;
+  }
+
+  it.each([
+    ["low", "photorealistic", /^the low setting has no shadow cascades/],
+    ["low", "wireframe", /^the low setting has no shadow cascades/],
+    ["high", "wireframe", /^the wireframe alone was drawn/],
+  ] as const)(
+    "states none and why where none was allocated, on %s in the %s",
+    (setting, style, why) => {
+      const sizes = sizesOf(setting, style);
+      const memory = noted(sizes, [[0, allocation("created", "height-cache", 2_048)]]);
+      expect(memory.cascades).toEqual({
+        bytes: 0,
+        source: "none",
+        reason: expect.stringMatching(why),
+        specBytes: CASCADE_BYTES,
+        differsFromSpec: false,
+      });
+    },
+  );
+
+  it("itemizes no cascades where none was allocated", () => {
+    const memory = noted(sizesOf("low", "photorealistic"), [
+      [0, allocation("created", "height-cache", 2_048)],
+    ]);
+    expect([memory.itemizedGpuBytes, memory.itemizedTotalBytes]).toEqual([4_096, 4_096 + 1_000]);
+  });
+
+  it("flags cascades whose allocated bytes differ from T9.a's spec", () => {
+    const memory = noted(sizesOf("high", "photorealistic"), [
+      [0, allocation("created", "shadows", CASCADE_BYTES / 4, CASCADE_TEXTURE.name)],
+    ]);
+    expect(memory.cascades).toEqual({
+      bytes: CASCADE_BYTES / 4,
+      source: "engine",
+      reason: null,
+      specBytes: CASCADE_BYTES,
+      differsFromSpec: true,
+    });
+  });
+
+  it("lowers a category's live bytes at a destruction, the whole tally's peak the peak of the sum", () => {
+    const memory = noted(sizesOf("high", "photorealistic"), [
+      [0, allocation("created", "height-cache", 100, "first cache")],
+      [1, allocation("destroyed", "height-cache", 100, "first cache")],
+      [2, allocation("created", "shadows", 200)],
+      [3, allocation("created", "height-cache", 80, "second cache")],
+    ]);
+    // The categories' peaks sum to 300; the tally never held more than 280 at once.
+    expect(memory.engine).toEqual({
+      categories: [
+        { category: "height-cache", bytes: 100, atS: 0 },
+        { category: "shadows", bytes: 200, atS: 2 },
+      ],
+      peak: { bytes: 280, atS: 3 },
+      unseenDestroyed: 0,
+    });
+  });
+
+  it("takes nothing away for an upload, or for a destruction whose creation it never saw", () => {
+    const memory = noted(sizesOf("high", "photorealistic"), [
+      [0, allocation("created", "height-cache", 100, "seen")],
+      [1, { kind: "uploaded", name: "seen", bytes: 100 }],
+      [2, allocation("destroyed", "height-cache", 100, "made before the subscription")],
+      [3, allocation("created", "other", 10)],
+    ]);
+    expect(memory.engine).toEqual({
+      categories: [
+        { category: "height-cache", bytes: 100, atS: 0 },
+        { category: "other", bytes: 10, atS: 3 },
+      ],
+      peak: { bytes: 110, atS: 3 },
+      unseenDestroyed: 1,
+    });
   });
 });
 

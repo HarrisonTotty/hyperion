@@ -2,7 +2,8 @@
  * The measured sizes in the descent spike's results file (plan R10, R10.T14.b;
  * decision-r10-t14b-measure §6(d), §6(g)): the renderer's `sizes` block, with what the main process
  * adds to it, the machine's 1-minute load at the start, each minute and the end, and the driver's
- * memory figures against the renderer's computed ones; its check and its summary's section.
+ * memory figures against the renderer's itemized ones and the engine's own tally; its check and its
+ * summary's section.
  *
  * @remarks
  * The block is optional and the schema's version stays 6: a file without it, every run's but a
@@ -17,13 +18,18 @@
  * 1 Hz, and the pass's own counts go by segment.
  *
  * The driver's figure is the memory series' `nvidia-smi` device reading less its pre-launch
- * baseline (`memory.peakNvidiaDeviceLessBaselineBytes`). Since the local LLM shares the card, the
+ * baseline (`memory.peakNvidiaDeviceLessBaselineBytes`). Two of the renderer's figures stand
+ * against it: the itemized GPU bytes, the plan's parts (the caches, the coverage mask and class map,
+ * the cascades as allocated), and the engine's whole tally at its peak, every buffer and texture
+ * the app made from the run's control's subscription on. Since the local LLM shares the card, the
  * device is read at the run's end too, at the last memory sample, and the rest of the card there,
  * the device's reading less the GPU process's, stands beside the pre-launch baseline as its
  * second reading.
  */
 
 import type {
+  SpikeSizesCascades,
+  SpikeSizesEngineTally,
   SpikeSizesForcedMark,
   SpikeSizesMoment,
   SpikeSizesPass,
@@ -33,7 +39,7 @@ import type {
 import { type LoadSources, readLoadAverage } from "./machineLoad";
 import { type Measured, measured, missing } from "./measured";
 import type { SpikeSetting } from "./results";
-import { checkSchema, type Schema, sizesReportProblems } from "./sizesSchema";
+import { CASCADE_CATEGORY, checkSchema, type Schema, sizesReportProblems } from "./sizesSchema";
 
 /**
  * The `sizes` block's budget, bytes, as Prettier formats it in the results file, on the worst
@@ -123,7 +129,10 @@ export class LoadSampler {
   }
 }
 
-/** The driver's memory figures beside the renderer's computed ones (§6(d)), bytes. */
+/**
+ * The driver's memory figures beside the renderer's, its itemized GPU bytes and the engine's own
+ * tally (§6(d)), bytes.
+ */
 export interface SizesDriver {
   /** `nvidia-smi`'s device memory used before the launch. */
   readonly preLaunchBaselineBytes: Measured<number>;
@@ -141,8 +150,10 @@ export interface SizesDriver {
   readonly endOthersBytes: Measured<number>;
   /** That less the pre-launch baseline: how far the rest of the card moved over the run. */
   readonly othersDriftBytes: Measured<number>;
-  /** The renderer's computed GPU bytes less the driver's figure. */
-  readonly computedLessDriverBytes: Measured<number>;
+  /** The renderer's itemized GPU bytes less the driver's figure. */
+  readonly itemizedLessDriverBytes: Measured<number>;
+  /** The engine's whole tally at its peak, the app's own GPU figure, less the driver's. */
+  readonly engineLessDriverBytes: Measured<number>;
 }
 
 /** The results file's `sizes` block: the renderer's, with the main process's load and driver. */
@@ -210,8 +221,12 @@ export function buildSizesResults(
       endGpuProcessBytes,
       endOthersBytes,
       othersDriftBytes: less(endOthersBytes, baseline),
-      computedLessDriverBytes: less(
-        measured(sizes.memory.computedGpuBytes),
+      itemizedLessDriverBytes: less(
+        measured(sizes.memory.itemizedGpuBytes),
+        driver.peakLessBaselineBytes,
+      ),
+      engineLessDriverBytes: less(
+        measured(sizes.memory.engine.peak.bytes),
         driver.peakLessBaselineBytes,
       ),
     },
@@ -231,7 +246,8 @@ const DRIVER_SCHEMA: Schema<SizesDriver> = {
     endGpuProcessBytes: { figure: "count" },
     endOthersBytes: { figure: "number" },
     othersDriftBytes: { figure: "number" },
-    computedLessDriverBytes: { figure: "number" },
+    itemizedLessDriverBytes: { figure: "number" },
+    engineLessDriverBytes: { figure: "number" },
   },
 };
 
@@ -408,6 +424,45 @@ function ceilingText(setting: SpikeSetting): string {
   return text;
 }
 
+/** When an engine peak was first reached: its script time, or before the flight. */
+function peakTimeText(atS: number | null): string {
+  return atS === null ? "before the flight" : `${num(atS, 1)} s`;
+}
+
+/** The cascades' line: as the engine allocated them against T9.a's spec, or none and why. */
+function cascadesText(cascades: SpikeSizesCascades): string {
+  const spec = `T9.a's spec ${mib(cascades.specBytes)}`;
+  let text: string;
+  switch (cascades.source) {
+    case "engine":
+      text = `The cascades: ${mib(cascades.bytes)} as the engine allocated them (its ${CASCADE_CATEGORY} category at its peak), ${
+        cascades.differsFromSpec
+          ? `**not** ${spec}: ${num(cascades.bytes)} B against ${num(cascades.specBytes)} B, a finding for main`
+          : `${spec} as built`
+      }`;
+      break;
+    case "none":
+      text = `The cascades: none allocated (${cascades.reason ?? "no reason given"}); ${spec}`;
+      break;
+  }
+  return text;
+}
+
+/** The engine's tally's line: its whole peak, each category's, and the destructions left out. */
+function engineTallyText(engine: SpikeSizesEngineTally): string {
+  const categories =
+    engine.categories.length === 0
+      ? "no allocation seen"
+      : engine.categories
+          .map((c) => `${c.category} ${mib(c.bytes)} (${peakTimeText(c.atS)})`)
+          .join(", ");
+  const unseen =
+    engine.unseenDestroyed === 0
+      ? ""
+      : `; ${num(engine.unseenDestroyed)} destructions of allocations made before the run's control listened, left out`;
+  return `The engine's tally, the app's own GPU figure: ${mib(engine.peak.bytes)} at its whole peak (${peakTimeText(engine.peak.atS)}); each category at its own peak: ${categories}${unseen}`;
+}
+
 /** The summary's "Sizes" section (§6(g)): see the module's remarks and each line's words. */
 export function sizesSummaryLines(sizes: SizesResults, setting: SpikeSetting): string[] {
   const { memory, binding, readouts, driver, secondView } = sizes;
@@ -435,7 +490,7 @@ export function sizesSummaryLines(sizes: SizesResults, setting: SpikeSetting): s
         `| ${s.segment ?? "after the script"} | ${s.bakes.bakesPerSecond === null ? "—" : num(s.bakes.bakesPerSecond, 1)} | ${num(s.bakes.baked)} | ${num(s.bakes.bakedNeverResident)} | ${s.bakes.postToReplyMs.p50 === null ? "—" : num(s.bakes.postToReplyMs.p50, 1)} / ${s.bakes.postToReplyMs.p95 === null ? "—" : num(s.bakes.postToReplyMs.p95, 1)} | ${s.groundSpeedPerHeight === null ? "—" : `${num(s.groundSpeedPerHeight.mean, 3)} / ${num(s.groundSpeedPerHeight.max, 3)}`} |`,
     ),
     "",
-    "### Memory, computed against the driver",
+    "### Memory: itemized, the engine's tally and the driver",
     "",
     ...memory.caches.map(
       (cache) =>
@@ -443,13 +498,14 @@ export function sizesSummaryLines(sizes: SizesResults, setting: SpikeSetting): s
     ),
     ...memory.sessionGpu.map(
       (texture) =>
-        `- The session's ${texture.category}: ${mib(texture.bytes)} at its peak (${num(texture.atS, 1)} s)`,
+        `- The session's ${texture.category}: ${mib(texture.bytes)} at its peak (${num(texture.atS, 1)} s)${texture.category === CASCADE_CATEGORY ? ", its own figure for the cascades, which the itemized total counts as the engine allocated them" : ""}`,
     ),
-    `- The cascades: ${mib(memory.cascades.bytes)}, ${memory.cascades.source === "computed" ? "computed (T9.a's spec; the session reports no shadows category)" : "the session's"}`,
-    `- Computed GPU: ${mib(memory.computedGpuBytes)}; with the workers' field copies (${mib(memory.workerFieldBytes.bytes)} at their peak): ${mib(memory.computedTotalBytes)}, against ${ceilingText(setting)}; the pool's own copy beside them ${mib(memory.keptFieldBytes.bytes)}; ${num(memory.workersStarted)} workers started; ${num(memory.samples)} samples at 1 Hz`,
+    `- ${cascadesText(memory.cascades)}`,
+    `- Itemized GPU (the caches, the session's masks and maps, the cascades): ${mib(memory.itemizedGpuBytes)}; with the workers' field copies (${mib(memory.workerFieldBytes.bytes)} at their peak): ${mib(memory.itemizedTotalBytes)}, against ${ceilingText(setting)}; the pool's own copy beside them ${mib(memory.keptFieldBytes.bytes)}; ${num(memory.workersStarted)} workers started; ${num(memory.samples)} samples at 1 Hz`,
+    `- ${engineTallyText(memory.engine)}`,
     `- The driver: nvidia-smi's peak less its pre-launch baseline ${figureText(driver.peakLessBaselineBytes, mib)}; the GPU process's peak ${figureText(driver.gpuProcessPeakBytes, mib)}`,
     `- At the run's end: the device ${figureText(driver.endDeviceBytes, mib)}, the GPU process ${figureText(driver.endGpuProcessBytes, mib)}, the rest of the card ${figureText(driver.endOthersBytes, mib)} (the pre-launch baseline ${figureText(driver.preLaunchBaselineBytes, mib)}, a drift of ${figureText(driver.othersDriftBytes, mib)})`,
-    `- Computed less the driver: ${figureText(driver.computedLessDriverBytes, mib)}`,
+    `- Less the driver: the itemized GPU ${figureText(driver.itemizedLessDriverBytes, mib)}, the engine's tally ${figureText(driver.engineLessDriverBytes, mib)}`,
     "",
     "### The binding",
     "",

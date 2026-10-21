@@ -701,7 +701,11 @@ describe("DescentSpike over a generated world (R10.T14.c)", () => {
     await vi.waitFor(() => {
       expect(prepared).toEqual([1]);
     });
-    expect(screen.queryByText(MEASURING_LINE)).toBeNull();
+    // `onPrepared` is told before React re-renders the measured state, so the line's going and the
+    // site's reading are waited for too, not read at once.
+    await vi.waitFor(() => {
+      expect(screen.queryByText(MEASURING_LINE)).toBeNull();
+    });
     expect(siteElevationText()).toBe("—");
   });
 

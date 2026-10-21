@@ -19,6 +19,7 @@ import { LEVEL_TABLE_STRIDE, levelBoundM, planetGeometry } from "../terrain/plan
 import type { TerrainSurvey, TerrainViewReport } from "../terrain/session";
 import type { BakedPatch, BakeSettings, SurfaceGroundReadout } from "../terrain/workers/messages";
 import type { BakeFailure, HeightWorkerLane } from "../terrain/workers/pool";
+import { testPatienceMs } from "../../test/patience";
 import {
   type BodyDescentSession,
   type BodySite,
@@ -868,29 +869,35 @@ describe("the measurement's refusals over a stand-in session", () => {
     ]).toEqual([[first.cell], true, [1, siteAt(1).cell], true, true, [true]]);
   });
 
-  it("refuses the descent once every candidate's floors refuse it, and terminates the lane", async () => {
-    // Every candidate of the fixture's survey, under floors of 10²⁰ m.
-    const session = new StubSession();
-    session.table = tableOf(() => UNCLEARABLE_M);
-    const candidates = siteCandidates(session.coverage);
-    const error = await rejectionOf(measure(session));
-    const sites = [0, 1].map((attempt) => bodySiteOf(candidates, 7n, attempt, FINEST)?.key);
-    expect([
-      error instanceof DescentRefused,
-      error.message,
-      error.cause instanceof DescentUnclearable,
-      sites.map((key) =>
-        session.requested.some((asked) => key !== undefined && sameKey(asked, key)),
-      ),
-      lanesTerminated(session),
-    ]).toEqual([
-      true,
-      "the descent of seed 7 cannot clear its terrain",
-      true,
-      [true, true],
-      [true],
-    ]);
-  });
+  // Every candidate's profile is flown before the refusal: fixed work that a loaded machine only
+  // makes slower (19.4 s against vitest's 15 s under load), so its limit is the harness's patience.
+  it(
+    "refuses the descent once every candidate's floors refuse it, and terminates the lane",
+    async () => {
+      // Every candidate of the fixture's survey, under floors of 10²⁰ m.
+      const session = new StubSession();
+      session.table = tableOf(() => UNCLEARABLE_M);
+      const candidates = siteCandidates(session.coverage);
+      const error = await rejectionOf(measure(session));
+      const sites = [0, 1].map((attempt) => bodySiteOf(candidates, 7n, attempt, FINEST)?.key);
+      expect([
+        error instanceof DescentRefused,
+        error.message,
+        error.cause instanceof DescentUnclearable,
+        sites.map((key) =>
+          session.requested.some((asked) => key !== undefined && sameKey(asked, key)),
+        ),
+        lanesTerminated(session),
+      ]).toEqual([
+        true,
+        "the descent of seed 7 cannot clear its terrain",
+        true,
+        [true, true],
+        [true],
+      ]);
+    },
+    testPatienceMs(),
+  );
 
   it("rethrows a profile's error other than DescentUnclearable, trying no other candidate", async () => {
     // No cell held: the ceiling is +∞, a floor the profile takes as a bug, not a refusal.

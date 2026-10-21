@@ -691,14 +691,60 @@ export interface SpikeSizesBytePeak {
   readonly atS: number;
 }
 
-/** The resident total's parts the renderer computes (§6(d)). */
+/**
+ * A peak of the engine's live bytes: its bytes, and the script time it was first reached at, s,
+ * `null` where that was before the flight.
+ */
+export interface SpikeSizesEnginePeak {
+  readonly bytes: number;
+  readonly atS: number | null;
+}
+
+/**
+ * The engine's own tally of its allocations (`RenderEngine.onAllocation`), from the run's control's
+ * subscription on: each creation adds its bytes to its memory category's live bytes, the
+ * destruction of an allocation whose creation was seen takes them away, and uploads are left out.
+ */
+export interface SpikeSizesEngineTally {
+  /** Each memory category's peak live bytes, in the order of their first creations. */
+  readonly categories: ReadonlyArray<SpikeSizesEnginePeak & { readonly category: string }>;
+  /** The whole tally's peak live bytes: the peak of the sum, not the sum of the categories' peaks. */
+  readonly peak: SpikeSizesEnginePeak;
+  /**
+   * Destructions of an allocation whose creation was not seen, made before the subscription, and
+   * left out of the tally.
+   */
+  readonly unseenDestroyed: number;
+}
+
+/**
+ * The shadow cascades as built (R10.T9.b): the engine's `shadows` category at its peak, or none
+ * where nothing was allocated under it, beside T9.a's spec figure.
+ */
+export interface SpikeSizesCascades {
+  /** The `shadows` category's peak live bytes in the engine's tally; 0 where none was allocated. */
+  readonly bytes: number;
+  readonly source: "engine" | "none";
+  /** Why none was allocated (the low setting, or the wireframe alone); `null` where it was. */
+  readonly reason: string | null;
+  /** `CASCADE_BYTES`, T9.a's spec figure (67,108,864 B). */
+  readonly specBytes: number;
+  /** Whether the engine allocated other than the spec's bytes; `false` where none was allocated. */
+  readonly differsFromSpec: boolean;
+}
+
+/** The resident total's parts, itemized, and the engine's own tally beside them (§6(d)). */
 export interface SpikeSizesMemory {
   /** `TerrainSession.memory()` samples, at 1 Hz. */
   readonly samples: number;
   /** The height workers' copies of the fields together, and the pool's own copy, at their peaks. */
   readonly workerFieldBytes: SpikeSizesBytePeak;
   readonly keptFieldBytes: SpikeSizesBytePeak;
-  /** The session's textures (masks and class maps) by memory category, each at its peak. */
+  /**
+   * The session's textures by memory category, each at its peak, as the session reports them: its
+   * masks and class maps under `coarse-field-gpu`, and on the high setting the cascades under
+   * `shadows` and their placeholder under `other` (R10.T9.b).
+   */
   readonly sessionGpu: ReadonlyArray<SpikeSizesBytePeak & { readonly category: string }>;
   /** Each cache's allocation, slot count × bytes a slot, at its largest. */
   readonly caches: ReadonlyArray<{
@@ -707,15 +753,16 @@ export interface SpikeSizesMemory {
     readonly bytesPerSlot: number;
     readonly allocationBytes: number;
   }>;
+  readonly cascades: SpikeSizesCascades;
+  /** The engine's own tally: the app's own GPU figure, beside the itemized one, for the driver's. */
+  readonly engine: SpikeSizesEngineTally;
   /**
-   * The shadow cascades: the session's `shadows` category where it reports one, else
-   * `CASCADE_BYTES` (67,108,864 B, T9.a's spec), computed.
+   * The caches' allocations, the session's textures but its `shadows`, and the cascades as the
+   * engine allocated them, B: the session's own `shadows` figure is the same set's, counted once.
    */
-  readonly cascades: { readonly bytes: number; readonly source: "session" | "computed" };
-  /** The caches, the session's textures and the cascades, B. */
-  readonly computedGpuBytes: number;
+  readonly itemizedGpuBytes: number;
   /** That and the workers' field copies, the plan's resident total, B. */
-  readonly computedTotalBytes: number;
+  readonly itemizedTotalBytes: number;
   /** The height workers the session started, and the workers the bake clock wrapped. */
   readonly workersStarted: number;
 }
@@ -789,8 +836,8 @@ export interface SpikeSizesForcedSets {
 
 /**
  * The measured sizes of a `--sizes on` run (plan R10, R10.T14.b; decision-r10-t14b-measure): each
- * pass's counted peaks, rules, shares and samples, the streaming, the bakes, the memory computed,
- * the binding and the readout.
+ * pass's counted peaks, rules, shares and samples, the streaming, the bakes, the memory itemized and
+ * as the engine tallied it, the binding and the readout.
  */
 export interface SpikeSizesReport {
   /** The segments in the order the script met them, which the series' `segment` indexes. */

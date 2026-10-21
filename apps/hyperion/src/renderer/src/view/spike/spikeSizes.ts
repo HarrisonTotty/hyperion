@@ -2,8 +2,8 @@
  * The descent spike's measured sizes (plan R10, R10.T14.b; decision-r10-t14b-measure §2–§7), under
  * `--sizes on` over the terrain world: the second view's style, the counting of each of the
  * session's passes for the world's body, the bake clock at the height workers, the session's memory
- * at 1 Hz, each pass's streaming by segment, the storage binding, and `VIEW`'s terrain readout at
- * 4 Hz, gathered into the report's `sizes` block.
+ * at 1 Hz, the engine's allocations by memory category, each pass's streaming by segment, the
+ * storage binding, and `VIEW`'s terrain readout at 4 Hz, gathered into the report's `sizes` block.
  *
  * @remarks
  * The run tells it each frame: {@link SpikeSizes.beforeStep} before the session's step, with the
@@ -36,8 +36,10 @@ import type {
   SpikeSizesBakeWindow,
   SpikeSizesBytePeak,
   SpikeSizesCache,
+  SpikeSizesCascades,
   SpikeSizesColumn,
   SpikeSizesCountColumns,
+  SpikeSizesEngineTally,
   SpikeSizesMeanMax,
   SpikeSizesPass,
   SpikeSizesReport,
@@ -49,6 +51,7 @@ import { GroundReadouts } from "../../displays/view/groundReadout";
 import { instrumentViewId } from "../../displays/view/viewNames";
 import type { ViewRun } from "../../displays/view/viewRun";
 import type { RenderStyle, ViewId } from "../camera/state";
+import type { AllocationEvent, MemoryCategory } from "../engine/memory";
 import { type AdapterOutcome, type GpuCapabilities, requiredLimits } from "../engine/platform";
 import type { ViewSize } from "../engine/types";
 import type { QualitySetting } from "../quality/qualitySetting";
@@ -681,6 +684,118 @@ function bytePeakOf(peak: Peak | undefined): SpikeSizesBytePeak {
   return { bytes: peak?.bytes ?? 0, atS: peak?.atS ?? 0 };
 }
 
+/**
+ * A peak of the engine's live bytes, and when it was first reached, script s, `null` before the
+ * flight.
+ */
+interface EnginePeak {
+  bytes: number;
+  atS: number | null;
+}
+
+/**
+ * The engine's live bytes by memory category, from its allocations' events: each category's peak
+ * and the whole tally's, each with the script time it was first reached at.
+ *
+ * @remarks
+ * A destruction is matched to a creation seen of its name, bytes and category, as
+ * `allocationTally` matches it, so that one of an allocation made before the run's control
+ * subscribed is counted as unseen and left out rather than taken from the bytes of others.
+ */
+class EngineAllocations {
+  /** Each live allocation's bytes and category, by name, so that a destruction finds its creation. */
+  readonly #alive = new Map<
+    string,
+    Array<{ readonly bytes: number; readonly category: MemoryCategory }>
+  >();
+  readonly #live = new Map<MemoryCategory, number>();
+  readonly #peaks = new Map<MemoryCategory, EnginePeak>();
+  #liveBytes = 0;
+  readonly #peak: EnginePeak = { bytes: 0, atS: null };
+  #unseenDestroyed = 0;
+
+  /** One event at script time `atS`, `null` before the flight; an upload changes nothing. */
+  note(event: AllocationEvent, atS: number | null): void {
+    switch (event.kind) {
+      case "created": {
+        const list = this.#alive.get(event.name) ?? [];
+        list.push({ bytes: event.bytes, category: event.category });
+        this.#alive.set(event.name, list);
+        this.#change(event.category, event.bytes, atS);
+        break;
+      }
+      case "destroyed": {
+        const list = this.#alive.get(event.name);
+        const index =
+          list?.findIndex((a) => a.bytes === event.bytes && a.category === event.category) ?? -1;
+        if (list === undefined || index < 0) {
+          this.#unseenDestroyed += 1;
+          return;
+        }
+        list.splice(index, 1);
+        if (list.length === 0) {
+          this.#alive.delete(event.name);
+        }
+        this.#change(event.category, -event.bytes, atS);
+        break;
+      }
+      case "uploaded":
+        break;
+    }
+  }
+
+  /** The tally as the report gives it. */
+  report(): SpikeSizesEngineTally {
+    return {
+      categories: [...this.#peaks].map(([category, peak]) => ({
+        category,
+        bytes: peak.bytes,
+        atS: peak.atS,
+      })),
+      peak: { bytes: this.#peak.bytes, atS: this.#peak.atS },
+      unseenDestroyed: this.#unseenDestroyed,
+    };
+  }
+
+  /** `bytes` added to `category`'s live bytes and the whole tally's, their peaks taken up. */
+  #change(category: MemoryCategory, bytes: number, atS: number | null): void {
+    const live = (this.#live.get(category) ?? 0) + bytes;
+    this.#live.set(category, live);
+    this.#liveBytes += bytes;
+    const peak = this.#peaks.get(category);
+    if (peak === undefined) {
+      this.#peaks.set(category, { bytes: live, atS });
+    } else if (live > peak.bytes) {
+      peak.bytes = live;
+      peak.atS = atS;
+    }
+    if (this.#liveBytes > this.#peak.bytes) {
+      this.#peak.bytes = this.#liveBytes;
+      this.#peak.atS = atS;
+    }
+  }
+}
+
+/**
+ * Why the engine allocated no cascades on `setting` with the main view in `style` (R10.T9.b): the
+ * low setting has none, and the high setting draws them for its photorealistic views alone.
+ */
+function noCascadesReason(setting: QualitySetting, style: RenderStyle): string {
+  let reason: string;
+  switch (setting) {
+    case "low":
+      reason = "the low setting has no shadow cascades: the engine allocated nothing under shadows";
+      break;
+    case "high":
+      reason =
+        style === "wireframe"
+          ? "the wireframe alone was drawn, and the cascades are drawn for photorealistic views only: the engine allocated nothing under shadows"
+          : "the engine allocated nothing under shadows on the high setting's photorealistic run: no view-frame drew the cascades";
+      break;
+  }
+  return reason;
+}
+
 /** `slots`, or `null` where it is not finite: a ceiling with no storage field to bound it. */
 function finiteOrNull(slots: number): number | null {
   return Number.isFinite(slots) ? slots : null;
@@ -727,6 +842,8 @@ function bakeWindowOf(window: BakeWindow): SpikeSizesBakeWindow {
  *   secondViewName: SPIKE_VIEW_NAMES.craft,
  * });
  * sizes.noteAdapter(outcome);
+ * // each of the engine's allocations, as the run's control forwards them:
+ * engine.onAllocation((event) => sizes.noteAllocation(event));
  * // the session's worker factory, the same function for the same `make`:
  * const createWorker = sizes.heightWorkers(spikeWorkers.height);
  * // each frame, around the session's step, `touchedDown` read from the profile:
@@ -743,6 +860,7 @@ function bakeWindowOf(window: BakeWindow): SpikeSizesBakeWindow {
 export class SpikeSizes {
   /** The bake-time wrapper at the height workers (§6(c)). */
   readonly clock: BakeClock;
+  readonly #setting: QualitySetting;
   readonly #mainStyle: RenderStyle;
   readonly #secondStyle: RenderStyle;
   readonly #secondViewName: string;
@@ -773,6 +891,7 @@ export class SpikeSizes {
   #keptField: Peak | undefined;
   readonly #sessionGpu = new Map<string, Peak>();
   #workersStarted = 0;
+  readonly #engine = new EngineAllocations();
   readonly #forcedSets: ForcedSetTally = {
     comparedFrames: 0,
     differingFrames: 0,
@@ -793,6 +912,7 @@ export class SpikeSizes {
       ...(options.nowMs === undefined ? {} : { nowMs: options.nowMs }),
       segment: () => this.#moment.segment,
     });
+    this.#setting = options.setting;
     this.#mainStyle = options.style;
     this.#secondStyle = secondViewStyle(options.setting, options.style);
     this.#secondViewName = options.secondViewName;
@@ -858,6 +978,17 @@ export class SpikeSizes {
   /** The device the engine made: its own `maxStorageBufferBindingSize` (`RenderEngine.capabilities`). */
   noteDevice(capabilities: Pick<GpuCapabilities, "maxStorageBufferBindingSize">): void {
     this.#deviceBytes = present(capabilities.maxStorageBufferBindingSize);
+  }
+
+  /**
+   * One of the engine's allocations (`RenderEngine.onAllocation`), which the run's control forwards
+   * under `--sizes on`: a creation adds its bytes to its category's live bytes, the destruction of
+   * one whose creation was seen takes them away, and an upload is left out. Each category's peak,
+   * and the whole tally's, is kept with the script time it was first reached at, `null` before the
+   * flight; the cascades are the `shadows` category's peak (R10.T9.b, as built).
+   */
+  noteAllocation(event: AllocationEvent): void {
+    this.#engine.note(event, this.#flightStarted ? this.#moment.scriptTimeS : null);
   }
 
   /**
@@ -1152,6 +1283,11 @@ export class SpikeSizes {
     this.#workersStarted = Math.max(this.#workersStarted, session.workerCount);
   }
 
+  /**
+   * The memory block: the itemized resident total (the caches' allocations, the session's masks and
+   * maps, the cascades as the engine allocated them, and the workers' field copies), and the
+   * engine's own tally beside it.
+   */
   #memoryReport(): SpikeSizesReport["memory"] {
     const caches = [this.#followers.lit, this.#followers.wireframe].flatMap((follower) => {
       const allocation = follower.allocation;
@@ -1171,17 +1307,32 @@ export class SpikeSizes {
       bytes: peak.bytes,
       atS: peak.atS,
     }));
-    const shadows = this.#sessionGpu.get(CASCADE_MEMORY_CATEGORY);
-    const cascades =
-      shadows === undefined
-        ? { bytes: CASCADE_BYTES, source: "computed" as const }
-        : { bytes: shadows.bytes, source: "session" as const };
-    let computedGpuBytes = shadows === undefined ? cascades.bytes : 0;
+    const engine = this.#engine.report();
+    const shadows =
+      engine.categories.find(({ category }) => category === CASCADE_MEMORY_CATEGORY)?.bytes ?? 0;
+    const cascades: SpikeSizesCascades =
+      shadows > 0
+        ? {
+            bytes: shadows,
+            source: "engine",
+            reason: null,
+            specBytes: CASCADE_BYTES,
+            differsFromSpec: shadows !== CASCADE_BYTES,
+          }
+        : {
+            bytes: 0,
+            source: "none",
+            reason: noCascadesReason(this.#setting, this.#mainStyle),
+            specBytes: CASCADE_BYTES,
+            differsFromSpec: false,
+          };
+    let itemizedGpuBytes = cascades.bytes;
     for (const cache of caches) {
-      computedGpuBytes += cache.allocationBytes;
+      itemizedGpuBytes += cache.allocationBytes;
     }
     for (const texture of sessionGpu) {
-      computedGpuBytes += texture.bytes;
+      // The session's own figure for the cascades is the set the engine allocated: counted once.
+      itemizedGpuBytes += texture.category === CASCADE_MEMORY_CATEGORY ? 0 : texture.bytes;
     }
     const workerFieldBytes = bytePeakOf(this.#workerField);
     return {
@@ -1191,8 +1342,9 @@ export class SpikeSizes {
       sessionGpu,
       caches,
       cascades,
-      computedGpuBytes,
-      computedTotalBytes: computedGpuBytes + workerFieldBytes.bytes,
+      engine,
+      itemizedGpuBytes,
+      itemizedTotalBytes: itemizedGpuBytes + workerFieldBytes.bytes,
       workersStarted: this.#workersStarted,
     };
   }

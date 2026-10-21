@@ -1537,14 +1537,14 @@ describe("a results file's measured sizes (R10.T14.b)", () => {
   ] as const)(
     "keeps a 1,230-second run's block within its budget once Prettier formats it, with %s",
     async (_, passes) => {
-      // 241.6 kB with two passes, the worst case, and 235.1 kB with one of two views and its
+      // 242.4 kB with two passes, the worst case, and 236.0 kB with one of two views and its
       // stand-in (2026-10-21): each view's five count columns are most of a pass's.
       expect((await blockBytes(passes)).block).toBeLessThan(SIZES_BLOCK_BUDGET_BYTES);
     },
   );
 
   it("keeps the worst case's whole file under the repository's added-file limit", async () => {
-    // 357.5 kB here, its run's own part 115.9 kB against some 150–165 kB for a terrain run's.
+    // 358.3 kB here, its run's own part 115.9 kB against some 150–165 kB for a terrain run's.
     const { file } = await blockBytes([
       { cache: "lit", views: 1 },
       { cache: "wireframe", views: 1 },

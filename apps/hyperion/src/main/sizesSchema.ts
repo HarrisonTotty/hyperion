@@ -12,7 +12,9 @@
  * list's first malformed item alone is named. A pass that describes no view must be marked not
  * sized, with no rule and no samples, and a sized pass must have both. The columns of each sized
  * pass's samples are then checked as the memory series' are: each as long as the samples, -1 at
- * its gaps' samples and nowhere else.
+ * its gaps' samples and nowhere else. The memory's cascades must be the engine's `shadows` peak,
+ * with a reason exactly where none was allocated, and the engine's whole peak must lie between its
+ * largest category's and their sum.
  */
 
 import type {
@@ -21,9 +23,11 @@ import type {
   SpikeSizesColumn,
   SpikeSizesCountColumns,
   SpikeSizesCountPeaks,
+  SpikeSizesEnginePeak,
   SpikeSizesForcedMark,
   SpikeSizesLoggedSegment,
   SpikeSizesMeanMax,
+  SpikeSizesMemory,
   SpikeSizesMoment,
   SpikeSizesPass,
   SpikeSizesPeak,
@@ -280,6 +284,11 @@ const COUNT_COLUMNS: Schema<SpikeSizesCountColumns> = {
   },
 };
 
+const ENGINE_PEAK_FIELDS = {
+  bytes: "count",
+  atS: { nullable: "number" },
+} as const satisfies Schema<SpikeSizesEnginePeak>["fields"];
+
 const STYLE = { oneOf: ["photorealistic", "wireframe"] } as const;
 const CACHE = { oneOf: ["lit", "wireframe"] } as const;
 
@@ -494,9 +503,24 @@ export const SIZES_REPORT_SCHEMA: Schema<SpikeSizesReport> = {
             },
           },
         },
-        cascades: { fields: { bytes: "count", source: { oneOf: ["session", "computed"] } } },
-        computedGpuBytes: "count",
-        computedTotalBytes: "count",
+        cascades: {
+          fields: {
+            bytes: "count",
+            source: { oneOf: ["engine", "none"] },
+            reason: { nullable: "string" },
+            specBytes: "count",
+            differsFromSpec: "boolean",
+          },
+        },
+        engine: {
+          fields: {
+            categories: { list: { fields: { ...ENGINE_PEAK_FIELDS, category: "string" } } },
+            peak: { fields: ENGINE_PEAK_FIELDS },
+            unseenDestroyed: "count",
+          },
+        },
+        itemizedGpuBytes: "count",
+        itemizedTotalBytes: "count",
         workersStarted: "count",
       },
     },
@@ -679,6 +703,48 @@ function seriesProblems(
 }
 
 /**
+ * The engine's memory category the cascades are allocated under: the renderer's
+ * `CASCADE_MEMORY_CATEGORY` (`cascades.ts`), which the main process does not import.
+ */
+export const CASCADE_CATEGORY = "shadows";
+
+/**
+ * The memory's problems beyond its shape: the cascades are the engine's `shadows` peak, with a
+ * reason exactly where none was allocated and flagged exactly where they differ from the spec, and
+ * the engine's whole peak lies between its largest category's and their sum.
+ */
+function memoryProblems(memory: SpikeSizesMemory, path: string, problems: string[]): void {
+  const { cascades, engine } = memory;
+  const none = cascades.source === "none";
+  if ((cascades.reason !== null) !== none) {
+    problems.push(`${path}.cascades.reason is given exactly where none was allocated`);
+  }
+  const shadows =
+    engine.categories.find(({ category }) => category === CASCADE_CATEGORY)?.bytes ?? 0;
+  if (cascades.bytes !== shadows || (cascades.bytes === 0) !== none) {
+    problems.push(
+      `${path}.cascades.bytes is the engine's ${CASCADE_CATEGORY} peak, above 0 exactly where they were allocated`,
+    );
+  }
+  if (cascades.differsFromSpec !== (!none && cascades.bytes !== cascades.specBytes)) {
+    problems.push(
+      `${path}.cascades.differsFromSpec is set exactly where the allocated bytes differ from the spec's`,
+    );
+  }
+  let largest = 0;
+  let sum = 0;
+  for (const { bytes } of engine.categories) {
+    largest = Math.max(largest, bytes);
+    sum += bytes;
+  }
+  if (engine.peak.bytes < largest || engine.peak.bytes > sum) {
+    problems.push(
+      `${path}.engine.peak.bytes lies between its largest category's peak and their sum`,
+    );
+  }
+}
+
+/**
  * Whether `value` is a well-formed `sizes` block: its {@link SIZES_REPORT_SCHEMA} shape, the
  * structural check whose problems `problems` takes.
  */
@@ -688,7 +754,8 @@ function conforms(value: unknown, problems: string[]): value is SpikeSizesReport
 
 /**
  * The problems of `value` as the renderer's `sizes` block, each named from `sizes`: its shape, then
- * each pass's samples' columns; empty for a well-formed block.
+ * each pass's samples' columns, then the memory's cascades and engine tally; empty for a
+ * well-formed block.
  */
 export function sizesReportProblems(value: unknown): string[] {
   const problems: string[] = [];
@@ -698,6 +765,7 @@ export function sizesReportProblems(value: unknown): string[] {
   for (const [k, pass] of value.passes.entries()) {
     passProblems(pass, value.segments.length, `sizes.passes[${k}]`, problems);
   }
+  memoryProblems(value.memory, "sizes.memory", problems);
   return problems;
 }
 

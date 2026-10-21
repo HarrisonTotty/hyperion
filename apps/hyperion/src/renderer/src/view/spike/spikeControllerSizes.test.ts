@@ -4,7 +4,10 @@ import type { DescentSpikeReport, SpikeApi, SpikeLaunch } from "../../../../prel
 import { TEST_SPIKE_LAUNCH } from "../../test/stubHyperionApi";
 import { goldenLevelTable } from "../../test/terrainFixtures";
 import { viewId } from "../camera/state";
+import type { AllocationEvent } from "../engine/memory";
+import type { RenderEngine } from "../engine/types";
 import { planetGeometry } from "../terrain/planet";
+import { CASCADE_BYTES, CASCADE_TEXTURE } from "../terrain/shadows/cascades";
 import { recordProfile } from "./demandRecord";
 import { PassReads } from "./passReads";
 import { PipelineTally } from "./pipelineShim";
@@ -47,9 +50,16 @@ function settle(): Promise<void> {
   });
 }
 
-/** Flies a smoke to its end on `controller`, a frame at its start, each boundary and its end. */
-async function flySmoke(controller: SpikeController): Promise<void> {
+/**
+ * Flies a smoke to its end on `controller`, a frame at its start, each boundary and its end,
+ * `prepared` called once the descent is.
+ */
+async function flySmoke(
+  controller: SpikeController,
+  prepared: () => void = () => undefined,
+): Promise<void> {
   controller.prepared(DESCENT);
+  prepared();
   await settle();
   for (const scriptTimeS of [0, ...SMOKE_TRACE_BOUNDARIES_S, SMOKE_S]) {
     controller.frame({
@@ -87,6 +97,35 @@ function controllerOf(spike: SpikeApi, sizes: SpikeSizes | null): SpikeControlle
   });
 }
 
+/** The cascades' creation as the engine raises it. */
+const CASCADE_EVENT: AllocationEvent = {
+  kind: "created",
+  name: CASCADE_TEXTURE.name,
+  bytes: CASCADE_BYTES,
+  category: "shadows",
+};
+
+/** An engine whose allocations a test raises, its pass times never reported. */
+function fakeEngine(): Pick<RenderEngine, "onPassTimes" | "onAllocation"> & {
+  allocate(event: AllocationEvent): void;
+} {
+  const listeners = new Set<(event: AllocationEvent) => void>();
+  return {
+    onPassTimes: () => () => undefined,
+    onAllocation: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    allocate: (event) => {
+      for (const listener of listeners) {
+        listener(event);
+      }
+    },
+  };
+}
+
 const LAUNCH: SpikeLaunch = {
   ...TEST_SPIKE_LAUNCH,
   smoke: true,
@@ -113,5 +152,39 @@ describe("the spike's run control with the measured sizes (R10.T14.b)", () => {
     const { spike, reports } = fakeSpike(unmeasured);
     await flySmoke(controllerOf(spike, null));
     expect(reports.map((report) => "sizes" in report)).toEqual([false]);
+  });
+
+  it("forwards the engine's allocations to the measured sizes, whose cascades are the shadows allocated", async () => {
+    const { spike, reports } = fakeSpike(LAUNCH);
+    const sizes = new SpikeSizes({
+      setting: "high",
+      style: "photorealistic",
+      mainViewId: viewId("spike"),
+      secondViewName: "spike-craft",
+    });
+    const controller = controllerOf(spike, sizes);
+    const engine = fakeEngine();
+    controller.engine(engine);
+    // Before the descent is prepared, as the engine's first allocations are.
+    engine.allocate(CASCADE_EVENT);
+    await flySmoke(controller);
+    expect(reports[0]?.sizes?.memory.cascades).toMatchObject({
+      bytes: CASCADE_BYTES,
+      source: "engine",
+    });
+  });
+
+  it("forwards nothing without them, the recorder alone taking the engine's allocations", async () => {
+    const { sizes: _sizes, ...unmeasured } = LAUNCH;
+    const { spike, reports } = fakeSpike(unmeasured);
+    const controller = controllerOf(spike, null);
+    const engine = fakeEngine();
+    controller.engine(engine);
+    await flySmoke(controller, () => {
+      engine.allocate(CASCADE_EVENT);
+    });
+    expect(reports.map((report) => [report.adapterPeakBytes, "sizes" in report])).toEqual([
+      [CASCADE_BYTES, false],
+    ]);
   });
 });

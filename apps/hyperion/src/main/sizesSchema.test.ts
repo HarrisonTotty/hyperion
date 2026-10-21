@@ -35,6 +35,14 @@ describe("the measured sizes' check (R10.T14.b)", () => {
     expect(isSpikeSizesReport(sizesReportOf())).toBe(true);
   });
 
+  it("passes a block with no cascades allocated, and why, and one whose cascades differ from the spec, flagged", () => {
+    const block = sizesReportOf();
+    expect([
+      sizesReportProblems(noCascades(block, "the low setting has no shadow cascades")),
+      sizesReportProblems(withCascades(block, { specBytes: 1_024, differsFromSpec: true })),
+    ]).toEqual([[], []]);
+  });
+
   it.each<[string, (pass: SpikeSizesPass) => unknown, string]>([
     [
       "a stand-in's samples",
@@ -169,6 +177,42 @@ describe("the measured sizes' check (R10.T14.b)", () => {
       "sizes.passes[0].series.seconds.skipped is not ascending after the first second",
     ],
     [
+      "cascades of another source",
+      (b) => withCascades(b, { source: "computed" }),
+      "sizes.memory.cascades.source is not one of engine, none",
+    ],
+    [
+      "no cascades allocated, without a reason",
+      (b) => noCascades(b, null),
+      "sizes.memory.cascades.reason is given exactly where none was allocated",
+    ],
+    [
+      "cascades that are not the engine's shadows peak",
+      (b) => withCascades(b, { bytes: 1_024 }),
+      "sizes.memory.cascades.bytes is the engine's shadows peak, above 0 exactly where they were allocated",
+    ],
+    [
+      "cascades unlike the spec's not flagged",
+      (b) => withCascades(b, { specBytes: 1_024 }),
+      "sizes.memory.cascades.differsFromSpec is set exactly where the allocated bytes differ from the spec's",
+    ],
+    [
+      "an engine peak above the sum of its categories' peaks",
+      (b) => ({
+        ...b,
+        memory: { ...b.memory, engine: { ...b.memory.engine, peak: { bytes: 2 ** 40, atS: 1 } } },
+      }),
+      "sizes.memory.engine.peak.bytes lies between its largest category's peak and their sum",
+    ],
+    [
+      "an engine peak below its largest category's",
+      (b) => ({
+        ...b,
+        memory: { ...b.memory, engine: { ...b.memory.engine, peak: { bytes: 1, atS: null } } },
+      }),
+      "sizes.memory.engine.peak.bytes lies between its largest category's peak and their sum",
+    ],
+    [
       "a view's peaks for another number of views",
       (b) =>
         withFirstPass(b, (pass) => ({
@@ -189,6 +233,32 @@ describe("the measured sizes' check (R10.T14.b)", () => {
     expect(problems).toEqual(["x[1] is not a whole count"]);
   });
 });
+
+/** `block` with its cascades' fields in `change` changed. */
+function withCascades(block: SpikeSizesReport, change: Readonly<Record<string, unknown>>): unknown {
+  return {
+    ...block,
+    memory: { ...block.memory, cascades: { ...block.memory.cascades, ...change } },
+  };
+}
+
+/** `block` with no cascades allocated: none under the engine's `shadows`, for `reason`. */
+function noCascades(block: SpikeSizesReport, reason: string | null): SpikeSizesReport {
+  const { memory } = block;
+  const shadows = memory.engine.categories.find(({ category }) => category === "shadows");
+  return {
+    ...block,
+    memory: {
+      ...memory,
+      cascades: { ...memory.cascades, bytes: 0, source: "none", reason, differsFromSpec: false },
+      engine: {
+        ...memory.engine,
+        categories: memory.engine.categories.filter(({ category }) => category !== "shadows"),
+        peak: { ...memory.engine.peak, bytes: memory.engine.peak.bytes - (shadows?.bytes ?? 0) },
+      },
+    },
+  };
+}
 
 /** `block` with its first pass changed by `change`. */
 function withFirstPass(

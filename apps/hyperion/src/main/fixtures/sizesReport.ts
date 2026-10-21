@@ -306,9 +306,28 @@ export function sizesReportOf(
         bytesPerSlot: 310_000,
         allocationBytes: 398_660_000,
       })),
-      cascades: { bytes: 67_108_864, source: "computed" },
-      computedGpuBytes: options.passes.length * 398_660_000 + 12_582_912 + 67_108_864,
-      computedTotalBytes:
+      cascades: {
+        bytes: 67_108_864,
+        source: "engine",
+        reason: null,
+        specBytes: 67_108_864,
+        differsFromSpec: false,
+      },
+      engine: {
+        categories: [
+          { category: "render-targets", bytes: 41_472_000, atS: null },
+          { category: "height-cache", bytes: options.passes.length * 398_660_000, atS: 2 },
+          { category: "coarse-field-gpu", bytes: 12_582_912, atS: 1 },
+          { category: "shadows", bytes: 67_108_864, atS: 1 },
+        ],
+        peak: {
+          bytes: 41_472_000 + options.passes.length * 398_660_000 + 12_582_912 + 67_108_864,
+          atS: 2,
+        },
+        unseenDestroyed: 0,
+      },
+      itemizedGpuBytes: options.passes.length * 398_660_000 + 12_582_912 + 67_108_864,
+      itemizedTotalBytes:
         options.passes.length * 398_660_000 + 12_582_912 + 67_108_864 + 3 * 25_165_824,
       workersStarted: 3,
     },
