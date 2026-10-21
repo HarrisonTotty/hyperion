@@ -4,6 +4,8 @@
 //! CI runs this, so a library or a record list changed without a rerun, or a table edited by hand,
 //! fails it.
 
+mod common;
+
 use std::num::NonZeroUsize;
 
 use hyperion_fit::emit::Workspace;
@@ -24,17 +26,11 @@ fn thermo_equilibrium_table_is_reproduced() {
         GENERATOR_VERSION.get(),
     )
     .expect("the thermo_equilibrium task runs");
-    if planned.text != COMMITTED {
-        let line = planned
-            .text
-            .lines()
-            .zip(COMMITTED.lines())
-            .position(|(a, b)| a != b)
-            .map_or_else(|| "the length".to_owned(), |n| format!("line {}", n + 1));
-        panic!(
-            "crates/hyperion-sim/src/tables/thermo.rs differs from the fit at {line}: run `just fit \
-             thermo_equilibrium`"
-        );
-    }
+    common::assert_reproduced(
+        "crates/hyperion-sim/src/tables/thermo.rs",
+        "thermo_equilibrium",
+        COMMITTED,
+        &planned.text,
+    );
     assert!(!planned.body_changed);
 }

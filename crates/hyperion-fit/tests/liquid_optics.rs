@@ -4,6 +4,8 @@
 //! CI runs this, so a material file whose n or k changed without a rerun, or a table edited by
 //! hand, fails it.
 
+mod common;
+
 use std::num::NonZeroUsize;
 
 use hyperion_fit::emit::Workspace;
@@ -24,17 +26,11 @@ fn liquid_optics_table_is_reproduced() {
         GENERATOR_VERSION.get(),
     )
     .expect("the liquid_optics task runs");
-    if planned.text != COMMITTED {
-        let line = planned
-            .text
-            .lines()
-            .zip(COMMITTED.lines())
-            .position(|(a, b)| a != b)
-            .map_or_else(|| "the length".to_owned(), |n| format!("line {}", n + 1));
-        panic!(
-            "crates/hyperion-sim/src/tables/liquid_optics.rs differs from the fit at {line}: run \
-             `just fit liquid_optics`"
-        );
-    }
+    common::assert_reproduced(
+        "crates/hyperion-sim/src/tables/liquid_optics.rs",
+        "liquid_optics",
+        COMMITTED,
+        &planned.text,
+    );
     assert!(!planned.body_changed);
 }

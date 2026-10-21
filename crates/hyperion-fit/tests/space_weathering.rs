@@ -6,6 +6,8 @@
 //! fresh `feldspathic` and `basalt_fe` rows at the manifest's anchor-soil `FeO_T`, at m = 1. CI
 //! runs them, so a table that is stale, edited by hand, or refitted off the ruling fails.
 
+mod common;
+
 use std::num::NonZeroUsize;
 
 use hyperion_fit::emit::Workspace;
@@ -34,18 +36,12 @@ fn space_weathering_table_is_reproduced() {
         GENERATOR_VERSION.get(),
     )
     .expect("the space_weathering task runs");
-    if planned.text != COMMITTED {
-        let line = planned
-            .text
-            .lines()
-            .zip(COMMITTED.lines())
-            .position(|(a, b)| a != b)
-            .map_or_else(|| "the length".to_owned(), |n| format!("line {}", n + 1));
-        panic!(
-            "crates/hyperion-surface/src/tables/space_weathering.rs differs from the fit at \
-             {line}: run `just fit space_weathering`"
-        );
-    }
+    common::assert_reproduced(
+        "crates/hyperion-surface/src/tables/space_weathering.rs",
+        "space_weathering",
+        COMMITTED,
+        &planned.text,
+    );
     assert!(!planned.body_changed);
 }
 

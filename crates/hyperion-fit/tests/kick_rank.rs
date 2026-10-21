@@ -2,6 +2,8 @@
 //! rendering of its quantiles, and the task's smoke run goes end to end through the command line,
 //! the same bytes on one thread and on four.
 
+mod common;
+
 use std::fs;
 
 use clap::Parser;
@@ -35,18 +37,6 @@ fn the_committed_body_is_the_rendering_of_its_quantiles() {
         })
     );
     assert_eq!(header.task.as_deref(), Some("kick_rank"));
-}
-
-/// The declared items of a table, in order: every `pub const` or `pub static` of its body.
-fn declared(body: &str) -> Vec<String> {
-    body.lines()
-        .filter_map(|l| {
-            l.strip_prefix("pub const ")
-                .or_else(|| l.strip_prefix("pub static "))
-        })
-        .filter_map(|l| l.split(':').next())
-        .map(str::to_owned)
-        .collect()
 }
 
 #[test]
@@ -86,6 +76,9 @@ fn the_smoke_run_passes_the_header_grammar_and_is_the_same_on_any_thread_count()
         "{header:?}"
     );
     let task = find("kick_rank").unwrap();
-    assert_eq!(declared(&split.body), task.items());
-    assert_eq!(declared(&TableText::of_file(COMMITTED).body), task.items());
+    assert_eq!(common::declared(&split.body), task.items());
+    assert_eq!(
+        common::declared(&TableText::of_file(COMMITTED).body),
+        task.items()
+    );
 }

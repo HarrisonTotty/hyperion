@@ -3,6 +3,8 @@
 //!
 //! CI runs this, so a table that is stale, or edited by hand, fails it.
 
+mod common;
+
 use std::num::NonZeroUsize;
 
 use hyperion_fit::emit::Workspace;
@@ -26,17 +28,11 @@ fn bowl_permanent_shadow_table_is_reproduced() {
         GENERATOR_VERSION.get(),
     )
     .expect("the bowl_permanent_shadow task runs");
-    if planned.text != COMMITTED {
-        let line = planned
-            .text
-            .lines()
-            .zip(COMMITTED.lines())
-            .position(|(a, b)| a != b)
-            .map_or_else(|| "the length".to_owned(), |n| format!("line {}", n + 1));
-        panic!(
-            "crates/hyperion-surface/src/tables/bowl_permanent_shadow.rs differs from the fit at \
-             {line}: run `just fit bowl_permanent_shadow`"
-        );
-    }
+    common::assert_reproduced(
+        "crates/hyperion-surface/src/tables/bowl_permanent_shadow.rs",
+        "bowl_permanent_shadow",
+        COMMITTED,
+        &planned.text,
+    );
     assert!(!planned.body_changed);
 }

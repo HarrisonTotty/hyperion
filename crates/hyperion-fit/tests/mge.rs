@@ -3,6 +3,8 @@
 //!
 //! CI runs this, so a table that is stale, or edited by hand, fails it.
 
+mod common;
+
 use std::num::NonZeroUsize;
 
 use hyperion_fit::emit::Workspace;
@@ -24,18 +26,12 @@ fn mge_table_is_reproduced() {
         GENERATOR_VERSION.get(),
     )
     .expect("the mge task runs");
-    if planned.text != COMMITTED {
-        let line = planned
-            .text
-            .lines()
-            .zip(COMMITTED.lines())
-            .position(|(a, b)| a != b)
-            .map_or_else(|| "the length".to_owned(), |n| format!("line {}", n + 1));
-        panic!(
-            "crates/hyperion-sim/src/tables/mge.rs differs from the fit at {line}: run \
-             `just fit mge`"
-        );
-    }
+    common::assert_reproduced(
+        "crates/hyperion-sim/src/tables/mge.rs",
+        "mge",
+        COMMITTED,
+        &planned.text,
+    );
     assert!(!planned.body_changed);
 }
 

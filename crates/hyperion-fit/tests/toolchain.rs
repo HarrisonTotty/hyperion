@@ -2,6 +2,8 @@
 //! (plan 15, P15.T2) whose tables live in two crates (the crate split, CS.T1), and the check on the
 //! repository's own tables.
 
+mod common;
+
 use std::fs;
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
@@ -544,15 +546,7 @@ fn every_committed_table_declares_its_tasks_items() {
                     .body
             }
         };
-        let declared: Vec<&str> = body
-            .lines()
-            .filter_map(|l| {
-                l.strip_prefix("pub const ")
-                    .or_else(|| l.strip_prefix("pub static "))
-            })
-            .filter_map(|l| l.split(':').next())
-            .collect();
-        assert_eq!(declared, task.items(), "{}", task.name());
+        assert_eq!(common::declared(&body), task.items(), "{}", task.name());
     }
 }
 

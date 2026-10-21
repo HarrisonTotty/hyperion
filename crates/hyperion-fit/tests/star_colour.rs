@@ -9,6 +9,8 @@
 //! says so on stderr and checks nothing more; the sim's own tests of the table (`sky::colour`) run
 //! either way.
 
+mod common;
+
 use std::fs;
 use std::num::NonZeroUsize;
 use std::path::Path;
@@ -176,17 +178,12 @@ fn table_is_reproduced(name: &str, committed: &str) {
         render(1) == rendered,
         "{name}: one thread renders another table than eight"
     );
-    if rendered != committed {
-        let line = rendered
-            .lines()
-            .zip(committed.lines())
-            .position(|(a, b)| a != b)
-            .map_or_else(|| "the length".to_owned(), |n| format!("line {}", n + 1));
-        panic!(
-            "crates/hyperion-sim/src/tables/{name}.rs differs from the fit at {line}: run `just fit \
-             {name}`"
-        );
-    }
+    common::assert_reproduced(
+        &format!("crates/hyperion-sim/src/tables/{name}.rs"),
+        name,
+        committed,
+        &rendered,
+    );
 }
 
 /// The observer with the fetched V band.
