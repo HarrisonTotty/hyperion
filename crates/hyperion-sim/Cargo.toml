@@ -98,3 +98,8 @@ name = "surface"
 harness = false
 # `planetary::surface::reference` builds the reference Earth.
 required-features = ["testing"]
+
+[[example]]
+name = "surface_map"
+# `planetary::surface::reference` builds the reference Earth (R09.T15).
+required-features = ["testing"]

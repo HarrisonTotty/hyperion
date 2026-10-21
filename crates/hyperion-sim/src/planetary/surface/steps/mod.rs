@@ -63,7 +63,8 @@
 //! runoff read live, the construction's lakes by their water balance, `σ_h` matched again, the sea
 //! placed again, the lakes on the final field, the climate's lapse term and mean re-applied with
 //! the ices and liquids, and the final routing; and, after the late craters, the field routed
-//! again as it stands. The classes are still a no-op.
+//! again as it stands. R09.T15 filled [`classes`]: each cell's Köppen–Geiger class or surface-state
+//! form, and its crater state.
 
 pub mod classes;
 pub mod climate;

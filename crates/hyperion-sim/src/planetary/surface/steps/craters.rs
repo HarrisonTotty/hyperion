@@ -252,11 +252,18 @@ pub(crate) fn each_lift(
     let centre = figure.point(crater.centre);
     let rim = 0.5 * crater.diameter.value();
     for cell in crater.reach.cells() {
-        let p = figure.point(grid.centre(cell));
-        let gap = [p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]];
-        let chord = (gap[0] * gap[0] + gap[1] * gap[1] + gap[2] * gap[2]).sqrt();
+        let chord = chord_m(centre, figure.point(grid.centre(cell)));
         emit(cell, kept * profile.at(chord / rim).height_m);
     }
+}
+
+/// The chord between two points of the body, m: the one expression for a coarse crater's reach
+/// from its centre's point to a cell centre's, which [`each_lift`] profiles and the classes step's
+/// rim test reads (R09.T15), so that the two cannot part.
+#[must_use]
+pub(crate) fn chord_m(a: [f64; 3], b: [f64; 3]) -> f64 {
+    let gap = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    (gap[0] * gap[0] + gap[1] * gap[1] + gap[2] * gap[2]).sqrt()
 }
 
 /// Smooths into `working`'s elevation its craters of `phase`, in list order.

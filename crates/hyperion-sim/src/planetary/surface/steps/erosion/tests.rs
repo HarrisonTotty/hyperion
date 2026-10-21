@@ -109,7 +109,8 @@ impl Staged {
     }
 
     /// The working state after the whole pass from the staged one: the erosion step and the late
-    /// coarse craters (`coarse_pass`'s rest; the classes step changes nothing).
+    /// coarse craters (`coarse_pass`'s rest but the classes step, which writes only the classes and
+    /// the crater states).
     fn finished(&self) -> Working {
         let pass = self.pass();
         let mut working = self.working.clone();

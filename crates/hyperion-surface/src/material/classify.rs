@@ -169,8 +169,8 @@ const ZERO_CELSIUS_K: f64 = 273.15;
 ///   deposit.
 ///
 /// The temperatures are the climate record's, at the point's height by the header's lapse rate:
-/// the annual mean for melt, and the warmest month's for snow. R09's `SurfaceClass` is not read:
-/// until R09.T15 assigns its codes every cell is unclassified.
+/// the annual mean for melt, and the warmest month's for snow. R09's `SurfaceClass` is not read
+/// (R09.T15 assigns its codes; the synthetic worlds' cells stay unclassified).
 ///
 /// # Errors
 ///

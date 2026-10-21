@@ -80,10 +80,12 @@
 //! water balance; `σ_h` is matched again on the eroded field, the sea placed again, a world wet
 //! now's lakes placed on the final field by their balance, the climate's lapse term and mean
 //! re-applied with the ices and liquids, the final field routed, and routed again after the late
-//! craters. The classes are still a no-op: run on any inputs, the pass yields that eroded relief,
-//! sea and lakes, with their ices and liquids, under the climate its regime names, with the inputs'
-//! palette. The rest of R09.T13, R09.T14's iteration of `σ_h` and T15 fill the rest and R09.T16
-//! pins the reference worlds' fields.
+//! craters. R09.T15 filled the classes: each cell's Köppen–Geiger class on a seasonal water cycle's
+//! land, or its surface-state form naming its palette entry, and its crater state
+//! (`decision-r09-t15-classes.md`). Run on any inputs, the pass yields that eroded relief, sea and
+//! lakes, with their ices and liquids, under the climate its regime names, with the inputs'
+//! palette, classified. The rest of R09.T13 and R09.T14's iteration of `σ_h` fill the rest, and
+//! R09.T16 pins the reference worlds' fields.
 //!
 //! # Consumed items, by their paths in the code
 //!
@@ -263,7 +265,8 @@ pub fn coarse_pass(seed: SurfaceSeed, inputs: &CoarseInputs) -> CoarseField {
 mod tests {
     use super::*;
     use hyperion_surface::field::{
-        BoundaryKind, ClimateModelKind, Cover, CoverRange, FieldView, ResolutionCode, SynthesisCell,
+        BoundaryKind, ClimateModelKind, Cover, CoverRange, CraterState, FieldView, ResolutionCode,
+        SurfaceClass, SurfaceForm, SynthesisCell,
     };
     use hyperion_surface::wire::encode_payload;
     use hyperion_testkit::order::assert_order_independent;
@@ -355,6 +358,14 @@ mod tests {
                 "{name}"
             );
             assert_eq!(first.header().main_liquid(), inputs.main_liquid(), "{name}");
+            // R09.T15's classes and crater state reach every cell (decision-r09-t15-classes §5).
+            assert!(
+                first.synthesis().iter().all(|cell| {
+                    cell.class != SurfaceClass::UNCLASSIFIED
+                        && cell.crater_state >= CraterState::NONE_RETAINED.get()
+                }),
+                "{name}'s cells are classified"
+            );
             if name == "small Earth" {
                 small_earth_field = Some(first);
             }
@@ -395,6 +406,23 @@ mod tests {
                 .any(|month| month.rate_kg_per_m2_s() > 0.0)),
             "the small Earth rains somewhere"
         );
+        // R09.T15: its land classifies by Köppen–Geiger and its water by form, which shows no
+        // craters.
+        for cell in cells {
+            if cell.is_under_water() {
+                assert!(
+                    matches!(
+                        cell.class.surface_form(),
+                        Some(SurfaceForm::Sea | SurfaceForm::Lake | SurfaceForm::FrozenSea)
+                    ),
+                    "{:?}",
+                    cell.class
+                );
+                assert_eq!(cell.crater_state, CraterState::NONE_RETAINED.get());
+            } else {
+                assert!(cell.class.koppen_geiger().is_some(), "{:?}", cell.class);
+            }
+        }
     }
 
     #[test]

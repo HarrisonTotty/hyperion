@@ -324,8 +324,11 @@ impl LogSteepness {
 ///   frozen sea, a glacier, a melt), whose substance is the cell's palette entry: its ice or
 ///   liquid entry ([`SynthesisCell::substances`]) or its crust's.
 ///
-/// R09.T15, which classifies, assigns the codes in each range; until then every field's cells are
-/// [`SurfaceClass::UNCLASSIFIED`].
+/// R09.T15's coarse pass assigns codes 1 to 30, [`KoppenGeiger`](super::KoppenGeiger)'s classes
+/// in Beck et al. 2018's legend order, and 64 to 72, [`SurfaceForm`](super::SurfaceForm)'s forms
+/// (decision-r09-t15-classes §2 and §3); every other code in a range is open, named `None` by
+/// [`SurfaceClass::koppen_geiger`] and [`SurfaceClass::surface_form`] and never refused. The
+/// synthetic worlds' cells stay [`SurfaceClass::UNCLASSIFIED`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct SurfaceClass(u8);
 
@@ -436,8 +439,9 @@ pub struct SynthesisCell {
     pub substances: u8,
     /// The cell's climate or surface-state class.
     pub class: SurfaceClass,
-    /// The cell's crater state, whose codes R09.T15 defines with the classes (Design note 11); 0
-    /// until then.
+    /// The cell's crater state, a [`CraterState`](super::CraterState) code: the crater density
+    /// N(>1 km) its own surface has seen, on eight codes an octave (R09.T15;
+    /// decision-r09-t15-classes §6). The synthetic worlds' cells carry 0, unclassified.
     pub crater_state: u8,
     /// The sea floor's roughness inputs, which the coarse pass derives from the cell's own ridge
     /// (R09.T11 and T12.a; `decision-r09-t5.md` item 5): the draped abyssal-hill relief H in the

@@ -89,6 +89,7 @@ macro_rules! coded_enum {
 pub(crate) use coded_enum;
 
 mod cells;
+mod classes;
 mod cover;
 mod crater;
 mod header;
@@ -102,6 +103,7 @@ pub use cells::{
     SynthesisCell, Wind,
 };
 pub(crate) use cells::{hill_relief_of, ponded_sediment_of};
+pub use classes::{CraterState, KoppenGeiger, KoppenGeigerGroup, SurfaceForm};
 pub use cover::{BuildCoverError, Cover, CoverRange, ResolutionCode};
 pub use crater::{CoarseCrater, Morphology};
 pub use header::{

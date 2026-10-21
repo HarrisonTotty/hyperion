@@ -1063,17 +1063,23 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     the 70% rule sets P_th = 2 MAT, 2 MAT + 28 or 2 MAT + 14 (mm, MAT in °C) for winter-,
     summer- or neither-dominant precipitation; within B, W is MAP < 5 P_th and S is MAP ≥ 5 P_th;
     h and k divide at MAT 18 °C; when both s and w hold, w if summer precipitation exceeds
-    winter's, else s,
+    winter's, else s (a tie gives s); E at T_hot ≤ 10 °C (Beck et al. 2018, Table 2: Peel's
+    T_hot < 10 leaves 10 °C in no group); C's c without Peel's 1 ≤ T_mon10 bound; the 70% rule
+    strict,
     classifying climate and not life: there is no vegetation class, and a lifeless Earth-like world
     keeps its class with bare ground. Months are not Earth months, so the table is applied to
-    **rates** (precipitation per 30.44 d and per 365.25 d); summer is each cell's warmest
-    consecutive half-year, six months on a circular orbit, and every count of months in the table
+    **rates** (precipitation per 30.4375 d, 365.25 ÷ 12, and per 365.25 d); summer is each cell's
+    warmest consecutive half-year (HYPERION's adaptation: Peel and Beck use the warmer of ONDJFM
+    and AMJJAS), six months on a circular orbit, and every count of months in the table
     (such as four months above 10 °C) counts their durations in twelfths of the year, since an
     eccentric orbit's months differ in length (Design note 8); the temperature thresholds stay.
-    Worlds with one month, and every
+    The seasonal water-cycle regimes are the worlds whose model is `EnergyBalance`, with twelve
+    months and water as the climate condensable. Worlds with one month, and every
     non-seasonal regime, classify surface state (liquid, ice or frost of a named species, rock,
     regolith, melt, organic sediment) with the regime's named zones, such as a locked world's
-    substellar ocean and nightside glacier. One `SurfaceClass` byte holds either.
+    substellar ocean and nightside glacier: the zones are the forms under the header's model, with
+    no codes of their own until something reads one. One `SurfaceClass` byte holds either
+    (decision-r09-t15-classes, 2026-10-21).
 12. **One crater density, in the surface crate** (researched 2026-09-29: Neukum, Ivanov and Hartmann
     2001, Table 1, checked in Michael's Craterstats `functions.txt`; Trask 1966 and Hartmann 1984;
     Pike 1980a (Proc. LPSC 11th, 2159–2189), Tables 1–2, and Pike 1980b (USGS Prof. Paper 1046-C),
@@ -3072,14 +3078,24 @@ Acceptance:
 `steps/classes.rs`: Köppen–Geiger by Peel et al.'s Table 1 with Beck et al.'s rules, applied to
 rates with each cell's own summer (Design note 11); surface-state classes for the other regimes and
 for one-month worlds; each naming its palette entry (codes 64–255), with melt per cell;
-Köppen–Geiger 1–63 (decision-composition); the per-cell crater state. Tests: the classifier given
+Köppen–Geiger 1–63 (decision-composition); the per-cell crater state. The codes, the order of
+decision and the crater state are decision-r09-t15-classes's (2026-10-21): Köppen–Geiger 1–30 in
+Beck et al. 2018's legend order, 31–63 open; the forms 64 Sea, 65 Lake, 66 FrozenSea, 67 Ice,
+68 Frost, 69 Melt, 70 OrganicSediment, 71 Regolith and 72 Rock, 73–255 open, each of the entry
+the form names (§3); decided Melt (above a non-ice crust entry's transition, or a `MagmaOcean`),
+then under liquid, then Köppen–Geiger on a seasonal water cycle's land, then ice by its quantised
+byte, the organic cover under an atmosphere, regolith under 30 kPa and rock; and the crater state
+a log code of the lunar-equivalent N(>1 km) the cell's own surface has seen, eight codes an octave
+with 1 km⁻² at code 216, code 1 none retained (§6). Tests: the classifier given
 one monthly climatology labelled once as a one-year orbit and once as a four-year orbit (the same
-temperatures, and precipitation at the same rates per 30.44 d) returns the same classes, which tests
-the rate rule alone, not the climate a longer orbit would have; on an orbit of e = 0.6, four months
-above 10 °C centred on periapsis count as 2.0 twelfths of the year, so they do not meet a
+temperatures, and precipitation at the same rates per 30.4375 d) returns the same classes, which
+tests the rate rule alone, not the climate a longer orbit would have; on an orbit of e = 0.6, four
+months above 10 °C centred on periapsis count as 2.0 twelfths of the year, so they do not meet a
 four-month threshold; the reference Earth has tropical, arid, temperate, continental and polar
-classes in plausible areas; a lifeless world has no vegetation class; the reference Moon is
-regolith throughout.
+classes in plausible areas (each group's share of the land within [0.5×, 2×] of Peel et al.'s, and
+the tropical land nearer the equator than the polar, on a slow test run by name; the s, w and f
+letters and B's seasonal offset printed until I1); a lifeless world has no vegetation class; the
+reference Moon is regolith throughout, its substances its crust's entries.
 `crates/hyperion-sim/examples/surface_map.rs` (the sim's first example, with an `[[example]]` entry
 carrying `required-features = ["testing"]`) writes the reference Earth's elevation, class and flow
 as equirectangular PPM images under `target/`, with no new dependency, and the look (belts along
@@ -3771,8 +3787,8 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
     a crater's `degradation` is the
     share of its fresh rim relief lost, in 255ths. `Crust` adds `Lid` and `Province` (a stagnant
     lid's crust and its volcanic provinces) to the two populations. `SurfaceClass` and
-    `crater_state` are bytes whose codes T15 defines: 0 (`UNCLASSIFIED`) until then, in every
-    synthetic world too.
+    `crater_state` are bytes whose codes T15 defines (decision-r09-t15-classes §2, §3, §6): 0
+    (`UNCLASSIFIED`) until then, in every synthetic world too.
   - _Closed sets, for the composition audit_ (the owner's directive of 2026-10-09). `Crust` (four),
     `BoundaryKind` (five), `Morphology` (five), `ClimateModelKind` (four) and
     `PrecipitationSource` (one) are closed sets today. Each is a one-byte code whose unknown codes
@@ -13424,3 +13440,152 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
   - _Titan's bed factor_ (the review's science check; medium-low confidence). By saltation-abrasion,
     ice twice as strong gives B ≈ 3–4 against the table's 8, and K_Titan ÷ K⊕ ≈ 0.2, not 0.49. No
     built world reads it, since a methane world reads never wet.
+- **R09.T15's classes and crater state (decision-r09-t15-classes, 2026-10-21).** The codes, the
+  order of decision, the summer and the crater state are that ruling's, made under the owner's
+  delegation for lane r09-classes, with the lane's science check of Peel et al. 2007 and Beck et al.
+  2018 (sources in `.git/scichk/r09-t15-koppen/`). The decision agent could not write the
+  orchestration directory; the lane saved its text there.
+- **Deviations in T15, as built** (2026-10-21; lane r09-classes, from `01674b8c`; built to
+  decision-r09-t15-classes, all of it; `GENERATOR_VERSION` 22, no bump; one golden re-blessed at
+  22, by appended lines alone, with main's leave).
+  - _Files and public items._
+    - The surface crate: `field/classes.rs` (new, re-exported at `field::*`): `KoppenGeiger`
+      (`coded_enum!`, codes 1–30 in Beck et al.'s legend order, its `group()`),
+      `KoppenGeigerGroup` (`Tropical`, `Arid`, `Temperate`, `Continental`, `Polar`), `SurfaceForm`
+      (codes 64–72), `From` of both into `SurfaceClass`, `SurfaceClass::koppen_geiger` and
+      `SurfaceClass::surface_form` (an open code is `None`, never refused), and `CraterState` (`UNCLASSIFIED`,
+      `NONE_RETAINED`, `new`, `get`, `from_density`, `density`). `cells.rs`'s documentation of
+      `SurfaceClass` and `crater_state`; one line of `material/classify.rs`'s documentation.
+      `wire/tests.rs`'s codes writer appends the 39 assigned class codes and the crater state's
+      256 values: `tests/golden/wire/codes.golden` gains 295 lines, its range lines and header
+      unchanged.
+    - The sim: `steps/classes.rs` (`run`, the step), the private `steps/classes/koppen.rs` (the
+      table, `classify` over a `Year` of its figures) and `steps/classes/tests.rs`;
+      `quantise::header_pressure` now `pub(crate)`, the step reading the header's pressure; the
+      module documentation of `surface/mod.rs` and `steps/mod.rs`, and two test helpers' notes in
+      `steps/erosion/`; `examples/surface_map.rs` with its `[[example]]` entry (the sim's first).
+  - _The crater state's byte stays a `u8`._ `SynthesisCell::crater_state` keeps its type, its codes
+    `CraterState`'s, so that no layout, wire table or fixture moves (§6 asks for the newtype, not a
+    field of that type; the Rust review's "consider" to type the field, declined for that reason).
+  - _The months' shares from their edges._ Each month counts as its `month_edges` span over 2π, on
+    the seasonal orbit's eccentricity (the header's `season_eccentricity`), not by `month_share`,
+    which reads a header the pass has not built (T2's note on `month_edges`); the shares are the
+    same.
+  - _The summer on the climate cell's anomalies._ The warmest window is chosen on the months'
+    anomalies, so that it is the climate cell's alone, whatever a field cell's height (§4's "the
+    choice is the climate cell's"; the plan-conformance review). The classifier's months carry
+    their anomalies, the annual mean apart.
+  - _The crater state's own rounding._ `CraterState::from_density` rounds 8 log₂ N and holds the
+    code to 2–255 itself, not through `log_code`, which refuses codes above its maximum and gives 0
+    below code 1, where §6 holds and code 1 means none retained.
+  - _The organic cover, read twice._ `steps::classes::organic_cover` repeats R10's rule (the first
+    `Cover` entry of the organic family), `organic_cover_entry` being crate-private in the surface
+    crate.
+  - _The golden's names._ `codes.golden` names the crater state's values `crater_state_km2[c]`, in
+    km⁻², for §7(c)'s `crater_state[c]`.
+  - _One chord._ The rim test reads the craters' own `chord_m`, which `each_lift` now calls too (the
+    determinism review), its arithmetic unchanged; and the sea's surface is compared with ℓ with
+    either zero's sign folded, so that a −0 can never make a sea a lake.
+  - _The example's directory._ `surface_map` takes an optional output directory; the default is
+    the workspace's `target/surface_map/`.
+  - _Whole months count whole._ On a circular orbit the month shares are twelfths only to rounding,
+    so four of them summed to 3.999… and missed b's four-month threshold. A count within 10⁻⁹
+    twelfths (about 0.03 s of an Earth year) of its threshold meets it (`COUNT_TOLERANCE_TWELFTHS`).
+  - _The small Earth's classes ride an existing pass._ Its whole pass takes 108 s alone at load
+    about 7, so its pass-level checks (every cell classified, Köppen–Geiger on land, the liquid
+    forms on water, none retained under water, every world's cells classified with a crater state)
+    joined `planetary::surface`'s `the_pass_yields_a_valid_field_twice_with_identical_bytes`, which
+    already runs it twice; `steps::classes`'s lifeless test is hand-built on the small Earth's grid.
+  - _The reference Earth's D group._ Each group is present and A lies nearer the equator than E,
+    but D's land share, 0.0879, is under its band's floor (0.123, half Peel's 0.246). Pinned at a
+    floor of 0.08 and labelled (`LAND_SHARE_BANDS`), as §5 rules for a group present outside its
+    band; reported to main, who recorded it.
+  - _Tests_ (`steps::classes::tests`, 19, one slow): every Köppen–Geiger class reached by a
+    hand-built climatology, in code order; B before A and E; E's bound at 10 °C; the s-and-w
+    overlap resolved by the wetter half (an exact tie, s, is the code's strict comparison, not a
+    test: a float tie of the halves' sums is not built by hand reliably);
+    the summer across the year's end; the e = 0.6 count (2.015 twelfths, Cfc, against 4 and Cfb
+    on a circular orbit); one climatology on a one-year and a four-year orbit giving one set of
+    classes (six classes across five groups); every surface form reached by a hand-built cell, a
+    magma ocean's melt among them; the ice share on its byte; the massive-ice code R10's
+    `MASSIVE_ICE_SHARE` on the byte; an ice lid unmelted; the organic
+    cover; the crater state's density, a younger rim's, and the hidden surfaces; only ice that
+    flows or renews hiding its craters; the reference Moon regolith throughout, of its crusts'
+    entries; a lifeless world with no vegetation class; the step writing only its two members and
+    the same bits twice; a cell's class independent of the others; and the slow
+    `the_reference_earth_has_each_main_group_in_a_plausible_area`. The surface crate's
+    `field::classes::tests` (8) hold the codes, their ranges, the open codes, the names and the
+    crater state's scale to the bit; `wire::tests` (26) the extended `codes.golden`. The small
+    Earth's pass-level checks run in `planetary::surface`'s
+    `the_pass_yields_a_valid_field_twice_with_identical_bytes`.
+  - _Cost._ The step takes 0.161 s on the level-8 reference Earth's 393,216 cells (the slow test's
+    print, at load about 7; provisional).
+  - _The reference Earth's classes_ (level 8, at `01674b8c`'s climate; printed by the slow test).
+    Land shares A 0.2322, B 0.2810, C 0.1642, D 0.0879, E 0.2347 (Peel et al. 2007: 0.190, 0.302,
+    0.134, 0.246, 0.128), the area-weighted mean |latitude| 7.6°, 22.7°, 32.0°, 52.7° and 62.7°.
+    The largest classes ET 0.179, Aw 0.136, BSh 0.105, BWh 0.086, Af 0.079, Csb 0.066, EF 0.056
+    and BWk 0.051. Printed only, until I1: the arid land's offsets even 0.493, summer 0.349 and
+    winter 0.158; the C and D land's second letters f 0.535, s 0.415 and w 0.050.
+  - _The look_ (`surface_map`, 1,440 × 720, the reference Earth's whole pass in 1 min 53 s at the
+    dev profile under load about 7). The lane's agent read the images, as PNGs converted from the
+    PPMs; Verification's "compared with a person looking" stays pending by hand for the owner, from
+    the example's command.
+    - Elevation: mountain belts stand along the continents' margins over the offshore trenches,
+      and a collision belt crosses the central continent; the ridges and trenches mark the sea
+      floor; shelves and inland lakes in lighter blues.
+    - Flow: dendritic networks on every continent, their trunks running to the sea, the longest
+      across the northern polar land.
+    - Class: the tropics along the equator, subtropical deserts on the continents' interiors and
+      west, temperate belts poleward, the D classes across the north-eastern continent, ET and EF
+      over the northern polar land and the belts' heights, and a frozen sea about the south pole.
+  - _Acceptance._ `cargo test -p hyperion-sim planetary::surface::steps::classes` (18 passed, the
+    slow one by name: passed with D's pinned floor) and
+    `cargo run -p hyperion-sim --features testing --example surface_map`, writing
+    `target/surface_map/{elevation,class,flow}.ppm`. The commands miss the surface crate's tests
+    the task changed, so the lane ran `cargo test -p hyperion-surface field::classes` (8) and
+    `wire::` (26), and the pass test above. The lane's gate is
+    `just smart-ci origin/rendering-and-planets --hook-checks` (its log
+    `.git/rm45-scratch/r09-classes/smart-ci-final.log`), and the surface module's slow tests ran
+    by name on the same tree (`.git/rm45-scratch/r09-classes/surface-slow.log`).
+  - _The review_ (rust, determinism, plan conformance, science). Adopted: `#[must_use]` on the
+    private constructors and readers; the units in the fields' names; `run`'s panics; the driest
+    and wettest closures; the massive-ice code's test; one chord; the folded zero; the summer on the
+    anomalies; the stale 30.44 d citations; the BW and BS documentation ("under five times
+    `P_th`", not "half the arid threshold"); the clamp's claim narrowed to an unscreened body and
+    the retention age; Regolith's line cited as the photometric threshold, not impact gardening;
+    the lake's colour in the example moved off the legend's blues (turquoise). Science: every
+    threshold, the order of decision, the legend's numbers and colours, Peel's land shares, the
+    e = 0.6 figure and the crater state's scale confirmed against the sources.
+- **Deferred findings (2026-10-13 rule) (R09.T15)** (recorded, not ruled; each for "main"'s list).
+  - _The reference Earth's D group_, 0.0879 of the land against Peel's 0.246, with E at 0.2347
+    (ET 0.179) against 0.128: the land between them reads polar, beside R09.T13.i's I2 (the cold
+    high-latitude land). Pinned at 0.08; a climate revision moves it.
+  - _Dry-summer midlatitudes._ The C and D land's s is 0.415 of it, against f 0.535: E-P11's
+    remainder, the winter-heavy midlatitude land, until I1. Printed only.
+  - _R10's arid offset_ reads the six warmest months and the 70% rule at ≥ 0.7; T15 the warmest
+    consecutive half-year at > 0.7. R10 does not read T15, and is unchanged.
+  - _R10's melt_ tests any crust entry, an ice lid's too, after the water and the ice, and reads no
+    state; T15's skips ice lids, takes a magma ocean whole and comes first. Disjoint on consistent
+    inputs. A wording nit for main: decision-p14-t54a-states §2's table says R10's melt "reads
+    `MagmaOcean` only", where its code reads no state.
+  - _A locked world labelled `MagmaOcean` is melt throughout_ by P14's label, though its night side
+    may be solid by its temperatures: P14.T53.b's and P14.T28.a's.
+  - _Provinces on generated bodies_ read `province_surface_age` 0 until plan 14's
+    `volcanic_surface_age`, so their crater state is none retained.
+  - _What the crater state leaves out:_ the wet epoch's obliteration of small craters and fluvial
+    or aeolian resurfacing; it is the production since the cell's age.
+  - _The cold traps' crater fraction_ is still `SATURATED_CRATER_FRACTION`'s stand-in; reading the
+    crater state is its owner's later task.
+  - _A one-month wet world's land is rock_: Design note 11's forms have none for a climate without
+    seasons; a code appends when one is needed.
+  - _Regolith against rock at 30 kPa_, the photometric threshold reused, a labelled choice.
+  - _Lakes over-cover._ T14.d's lakes, 6.68% of the land against about 3.7%, are Lake cells.
+  - _The equirectangular images stretch the polar cells_ across their rows (the projection, not the
+    field).
+  - _Trask 1966's saturation coefficient_, 0.079 D⁻² km⁻² (`craters/density.rs`, not this task's),
+    stays unread: JPL Technical Report 32-800 is a 568 MB scan (the science check; medium-high
+    confidence by its 10^10.9 per 10⁶ km² conversion). The crater state's 29.3 km⁻² end does not
+    depend on its exact value.
+  - _Beck et al.'s code against their table._ `KoppenGeiger.m`'s `Pw*2.333>Ps` tests a 30% share
+    where Table 2 says over 70%; the table governs here, and Beck's maps were made with the code.
+    Noted for a reader comparing with Beck's maps.

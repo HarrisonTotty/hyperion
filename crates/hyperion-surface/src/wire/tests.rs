@@ -17,10 +17,11 @@ use super::form::{
 use super::*;
 use crate::craters::{Screening, TargetClass};
 use crate::field::{
-    BoundaryKind, BuildPaletteError, ClimateModelKind, Crust, FieldView, FlowDirection,
-    InsertBlockError, LIQUID_BINS, LiquidBasis, LiquidProperties, LogArea, LogPrecipitation,
-    LogRunoff, LogSteepness, MaterialPalette, MechanicsFamily, NO_ENTRY, PaletteEntry, PaletteRole,
-    PartialField, PrecipitationSource, SurfaceClass, Wind, cell_at_index, crater_key_order,
+    BoundaryKind, BuildPaletteError, ClimateModelKind, CraterState, Crust, FieldView,
+    FlowDirection, InsertBlockError, KoppenGeiger, LIQUID_BINS, LiquidBasis, LiquidProperties,
+    LogArea, LogPrecipitation, LogRunoff, LogSteepness, MaterialPalette, MechanicsFamily, NO_ENTRY,
+    PaletteEntry, PaletteRole, PartialField, PrecipitationSource, SurfaceClass, SurfaceForm, Wind,
+    cell_at_index, crater_key_order,
 };
 use crate::material::{PhaseLaw, UNASSIGNED_PHASE_ROW};
 use crate::substance_key::{ParseSubstanceKeyError, SubstanceKey};
@@ -1308,7 +1309,8 @@ where
 /// The golden file `tests/golden/wire/codes.golden`: every code a payload carries, decoded. Each
 /// one-byte enum's codes and variants, and the layout's own tags; the value of every code of every
 /// one-byte scale (the steepness index, the precipitation rate, the runoff, the wind's speed and
-/// azimuth, the resolution, the boundary obliquity, the ice share and the crater degradation); a
+/// azimuth, the resolution, the boundary obliquity, the ice share, the crater degradation and the
+/// crater state's density); the assigned surface-class codes; a
 /// sample of the two-byte drainage area's; the header's temperature and anomaly steps for every
 /// exponent and its temperatures at pinned codes; the cells' heights and distances at pinned
 /// codes; and the sea floor's two nibbles, every code. A code renumbered fails it; a code appended
@@ -1383,6 +1385,10 @@ fn write_enum_codes(w: &mut GoldenWriter) {
     write_codes(w, "phase_row", PhaseLaw::ALL);
     w.line(&format!("substance_nibble {NO_ENTRY} = None"));
     write_surface_class_ranges(w);
+    // The assigned class codes, R09.T15's (decision-r09-t15-classes §2 and §3), each range's open
+    // codes the rest.
+    write_codes(w, "surface_class", KoppenGeiger::ALL);
+    write_codes(w, "surface_class", SurfaceForm::ALL);
     w.line(&format!("screening {SCREENING_NONE} = None"));
     w.line(&format!("screening {SCREENING_ATMOSPHERE} = Atmosphere"));
     w.line(&format!("screening {SCREENING_CUTOFF} = Cutoff"));
@@ -1470,6 +1476,12 @@ fn write_byte_scales(w: &mut GoldenWriter) {
             &format!("degradation_fraction[{code}]"),
             degradation(code).degradation_fraction(),
         );
+    }
+    for code in 0..=u8::MAX {
+        match CraterState::new(code).density() {
+            Some(n) => w.f64(&format!("crater_state_km2[{code}]"), n.value()),
+            None => w.line(&format!("crater_state_km2[{code}] = unclassified")),
+        }
     }
     let areas = [0_u16, 1, 2]
         .into_iter()

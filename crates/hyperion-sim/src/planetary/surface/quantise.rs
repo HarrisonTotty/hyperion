@@ -239,8 +239,9 @@ fn unsigned_zero(x: f64) -> f64 {
 ///
 /// Every state but `Airless` keeps its pressure, so P14.T53.c's tenuous state, when it joins
 /// [`SurfaceState`], takes an arm here that keeps its own, positive and below the airless line.
+/// The classes step reads the same figure (R09.T15).
 #[must_use]
-fn header_pressure(inputs: &CoarseInputs) -> Pascals {
+pub(crate) fn header_pressure(inputs: &CoarseInputs) -> Pascals {
     match inputs.surface_state() {
         SurfaceState::Airless => Pascals::ZERO,
         SurfaceState::GasEnvelope

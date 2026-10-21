@@ -50,7 +50,8 @@ struct Through {
     /// The state the erosion step left.
     eroded: Working,
     record: Record,
-    /// The state after the late coarse craters (the classes step changes nothing).
+    /// The state after the late coarse craters (the classes step, left out, writes only the classes
+    /// and the crater states).
     finished: Working,
     /// The wall times, s: the step's first part (the solve and its provisional outputs), its rest
     /// (R09.T14.d's re-match to the final outputs), and the late craters.
