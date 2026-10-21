@@ -1573,3 +1573,34 @@ fit-check`; review-changes on this lane's diff.
     give the committed bytes.
   - The table's `since` is 21, because the emitter writes only the current version. It keeps 21
     over an unchanged body. At the 21 → 22 bump, main makes it 22 or rules that 21 stands.
+- **T8's follow-up tests as built (lane `lane/61-p15-t8-cluster-tests`, 2026-10-20, at
+  `GENERATOR_VERSION` 22; no table moved, no bump).** One file, `tests/cluster_dynamics.rs`, by
+  main's ruling of 2026-10-20 (issue #61 §3: rerun and compare bytes, tiered by the task's class).
+  Times are nextest's in the dev profile on an 8-thread laptop at load 3.4–3.7, four test threads
+  (a shared machine, so provisional).
+  - `cluster_bh_block_is_reproduced` (fast, 1.1–1.3 s) and `pulsars_block_is_reproduced` (fast,
+    0.2 s): `rerender` on the committed manifest gives the whole shared file byte for byte, its body
+    unchanged. Both reproduced it on the first run.
+  - `the_committed_blocks_hold_plan_nines_scratch_values` (fast, under 0.01 s): each block's body is
+    its task's `render` of `SCRATCH` or `SCRATCH_ETA`, `@provisional` by P15.T8.a, b or c, its
+    `task` the block's name. A ruling that adopts fitted values updates this test in its own lane.
+  - `the_equipartition_smoke_run_passes_the_header_grammar_and_is_the_same_on_any_thread_count`
+    (fast, 2.1–2.4 s): the smoke manifest through `cli::run` on one thread and on four, the same
+    block both times, its header's task, manifest and acceptance, and its declared items. The run is
+    `@provisional` by P15.T8.b (η 0.1588 over the two models, radii within 0.169). The task ignores
+    `--threads`, so the pair proves determinism and the command line, not a thread split.
+  - `equipartition_block_is_reproduced` (slow, `#[ignore]`, 21.0 s): `rerender` on the full
+    manifest's 40 models, as above.
+  - **Closes** the record's "Not done" item "a reproduction/smoke test for the three T8 blocks"
+    (T7.a, T8.a–c, T9.a as built). T7.b and the review of lane `fit15a`'s diff stay open.
+  - **Deviations.** The scratch test also pins `SCRATCH` and `SCRATCH_ETA` bit for bit at the
+    values P15.T8 quotes from plan 09 (the testkit's `assert_same_bits`), so that a changed scratch
+    constant cannot pass with its own re-emission. The `cluster_bh` test builds no galaxy of its
+    own: the task builds the Milky Way at the manifest's seed inside `rerender`, as in
+    `type_ia_delay_table_is_reproduced`. On a mismatch the panic gives the first differing line's
+    committed and rerendered text, not only its number.
+  - _Deferred findings (2026-10-13 rule)._ The declared-items helper is now copied in
+    `tests/cluster_dynamics.rs`, `tests/kick_rank.rs` and `tests/displaced_forms.rs`, and inline in
+    `tests/toolchain.rs`; the reproduction tests' first-differing-line panic is copied in eleven
+    other test files. Both belong in `tests/common/mod.rs` (rust-dev § Tests), for a lane whose
+    scope holds those files: this one's held two paths.
