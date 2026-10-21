@@ -437,8 +437,8 @@ pub(crate) fn lunar_sky() -> ColdTrapSky {
 }
 
 /// What the record's cold traps read beyond a body's figures and conditions
-/// (`GlobalFigures::condensates_under`; P14.T51.f, P14.T51.i): their rules, their sky and draw, and
-/// the bare regolith's Bond albedo its derivation gives.
+/// (`GlobalFigures::condensates_and_ice_under`; P14.T51.f, P14.T51.i): their rules, their sky and
+/// draw, and the bare regolith's Bond albedo its derivation gives.
 ///
 /// Plain data with crate-visible fields.
 #[derive(Debug, Clone, Copy)]
@@ -472,7 +472,7 @@ impl<'a> RecordColdTraps<'a> {
 }
 
 /// What a body's cold traps read beyond its partition and its cover, on the record path
-/// (`GlobalFigures::condensates_under`).
+/// (`GlobalFigures::condensates_and_ice_under`).
 ///
 /// Plain data with crate-visible fields.
 #[derive(Debug, Clone, Copy)]

@@ -2244,13 +2244,19 @@ impl GlobalFigures {
     /// ```
     #[must_use]
     pub fn with_surface(self, conditions: &SurfaceConditions, history: VolatileHistory) -> Self {
-        self.with_surface_under(conditions, history, None, &conditions.zonal_insolation())
+        self.with_surface_under(
+            conditions,
+            history,
+            None,
+            &conditions.zonal_insolation(),
+            WaterIce::OffTable,
+        )
     }
 
     /// [`with_surface`](Self::with_surface), with its ocean and ices from P14.T51.a's published
     /// condensates `condensates` where they are given, as the record gives them
-    /// ([`condensates_under`](Self::condensates_under)): the cover by substance, from the
-    /// condensates by their rule (decision-p14-t54a-water-consistency §4, W1–W3).
+    /// ([`condensates_and_ice_under`](Self::condensates_and_ice_under)): the cover by substance,
+    /// from the condensates by their rule (decision-p14-t54a-water-consistency §4, W1–W3).
     ///
     /// - The liquids are the condensates' ([`Condensates::surface_liquids`]), in the entries'
     ///   order, with water's ocean under a `Snowball`'s ice ([`cover::under_ice_ocean`]) at its
@@ -2267,8 +2273,10 @@ impl GlobalFigures {
     ///
     /// Nothing else is appended; P14.T53.c ends both appended items.
     ///
-    /// T24.b's ice reads the conditions' cold area off the body's insolation table `table`
-    /// ([`SurfaceConditions::cold_area_over`]), its record's, built once a body (lever (h)).
+    /// T24.b's ice is `water_ice`: the record's water cover's, read off the profile its partition
+    /// built ([`WaterIce::Covered`], lever (a)), or the conditions' cold area off the body's
+    /// insolation table `table` ([`SurfaceConditions::cold_area_over`]), its record's, built once
+    /// a body (lever (h)).
     #[must_use]
     pub(crate) fn with_surface_under(
         self,
@@ -2276,6 +2284,7 @@ impl GlobalFigures {
         history: VolatileHistory,
         condensates: Option<&Condensates>,
         table: &ZonalInsolation,
+        water_ice: WaterIce,
     ) -> Self {
         let water = Gas::Water.substance();
         // Step 8: the published ocean.
@@ -2285,8 +2294,9 @@ impl GlobalFigures {
             conditions.mean_surface_temperature(),
             self.heat_flow,
         );
-        // Step 11: the ice, at the conditions' θ, `cover::ice_fraction` off the body's table.
-        let ice = || {
+        // Step 11: the ice, at the conditions' θ, `cover::ice_fraction` off the body's table, or as
+        // the record's water cover read it.
+        let off_table = || {
             cover::ice_fraction_over(
                 &cover::IceInputs {
                     conditions,
@@ -2296,6 +2306,21 @@ impl GlobalFigures {
                 },
                 conditions.cold_area_over(cover::ice_threshold(self.state), table),
             )
+        };
+        let ice = || match water_ice {
+            WaterIce::OffTable => off_table(),
+            WaterIce::Covered(ice) => {
+                #[cfg(test)]
+                match ICE_READS.with(core::cell::Cell::get) {
+                    IceReads::Covered => {}
+                    IceReads::Unlevered => return off_table(),
+                    IceReads::Checked => {
+                        hyperion_testkit::float::assert_same_bits(ice, off_table());
+                        CHECKED_ICES.with(|cell| cell.set(cell.get() + 1));
+                    }
+                }
+                ice
+            }
         };
         let (surface_liquids, surface_ices) = match condensates {
             None => {
@@ -2348,15 +2373,22 @@ impl GlobalFigures {
     /// they are P14.T51.a's; under [`ColdTrapRules::Batch`] a body with no collisional atmosphere
     /// that is not locked to its star takes the cold traps' airless branch and their ices
     /// ([`cold_traps::publish`]).
+    ///
+    /// The third value is T24.b's water ice as the cover read it off that profile
+    /// ([`WaterCover::ice_fraction`]), which [`with_surface_under`](Self::with_surface_under) takes
+    /// in place of a second profile (lever (a), decision-p14-t54a-passes, "Cost escalation (after
+    /// Batch B)"): the same bits, since the ice reads only the figures, the conditions' mean
+    /// surface temperature and their cold profile, none of which their liquid-water flag
+    /// ([`SurfaceConditions::with_condensates`]) moves.
     #[must_use]
-    pub(crate) fn condensates_under(
+    pub(crate) fn condensates_and_ice_under(
         &self,
         atmosphere: &Atmosphere,
         conditions: &SurfaceConditions,
         gravity: MetresPerSecondSquared,
         traps: &RecordColdTraps<'_>,
         table: &ZonalInsolation,
-    ) -> (Partition, Condensates) {
+    ) -> (Partition, Condensates, WaterIce) {
         let (coldest, warmest) = conditions.climate_range();
         let climate = ClimateSpan::about((coldest, warmest), conditions.mean_surface_temperature());
         let ground = Ground::new(
@@ -2368,10 +2400,12 @@ impl GlobalFigures {
         // One profile for every solid's cold area, water's T24.b ice included.
         let profile = conditions.cold_profile_over(table);
         let cold_area = |t: Kelvin| profile.area_below(t);
+        let water = self.water_cover(conditions, &profile);
+        let ice = WaterIce::Covered(water.ice_fraction);
         let cover = Cover {
             cold_area: &cold_area,
             state: atmosphere.state(),
-            water: self.water_cover(conditions, &profile),
+            water,
         };
         let published = match traps.rules {
             ColdTrapRules::Held => solved.publish(&cover),
@@ -2390,6 +2424,23 @@ impl GlobalFigures {
                 },
             ),
         };
+        (solved, published, ice)
+    }
+
+    /// [`condensates_and_ice_under`](Self::condensates_and_ice_under)'s partition and condensates,
+    /// for the tests.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn condensates_under(
+        &self,
+        atmosphere: &Atmosphere,
+        conditions: &SurfaceConditions,
+        gravity: MetresPerSecondSquared,
+        traps: &RecordColdTraps<'_>,
+        table: &ZonalInsolation,
+    ) -> (Partition, Condensates) {
+        let (solved, published, _) =
+            self.condensates_and_ice_under(atmosphere, conditions, gravity, traps, table);
         (solved, published)
     }
 
@@ -3045,4 +3096,48 @@ pub(crate) fn table_figures(body: &crate::planetary::derive::DerivedBody) -> Opt
         continents: Continents::Given(relief::EARTH_CONTINENTAL_FRACTION),
     })
     .expect("the table's bodies are in range")
+}
+
+/// T24.b's water ice as [`GlobalFigures::with_surface_under`] takes it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum WaterIce {
+    /// Read off the conditions' cold profile over the body's insolation table.
+    OffTable,
+    /// The record's, its water cover's ice fraction as
+    /// [`GlobalFigures::condensates_and_ice_under`] read it off the cold profile it built: the
+    /// same bits as [`OffTable`](Self::OffTable), with no second profile (lever (a)).
+    Covered(f64),
+}
+
+/// How [`GlobalFigures::with_surface_under`] reads a [`WaterIce::Covered`] ice, a test-only switch
+/// of lever (a) ([`with_ice_reads`]).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IceReads {
+    /// As given, as the generator reads it.
+    Covered,
+    /// Off the table again, as before the lever: the unlevered path, the oracle.
+    Unlevered,
+    /// Both: the ice given asserted the table's to the bit, and counted.
+    Checked,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The switch on this thread, a test's own: tests run on threads of one process.
+    static ICE_READS: core::cell::Cell<IceReads> = const { core::cell::Cell::new(IceReads::Covered) };
+    /// The ices [`IceReads::Checked`] has checked on this thread.
+    static CHECKED_ICES: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+}
+
+/// `run`'s result with the record's water ice read as `reads` says, and how many ices it checked
+/// against the table under [`IceReads::Checked`]. The switch is set back after.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn with_ice_reads<R>(reads: IceReads, run: impl FnOnce() -> R) -> (R, u64) {
+    let before = ICE_READS.with(|cell| cell.replace(reads));
+    CHECKED_ICES.with(|cell| cell.set(0));
+    let result = run();
+    ICE_READS.with(|cell| cell.set(before));
+    (result, CHECKED_ICES.with(core::cell::Cell::take))
 }

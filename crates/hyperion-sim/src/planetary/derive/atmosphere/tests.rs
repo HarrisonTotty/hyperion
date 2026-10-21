@@ -3355,3 +3355,97 @@ fn a_warm_ice_bulk_inside_the_runaway_limit_keeps_no_water() {
     assert_same_bits(air.partial_pressures().of(Gas::Water).value(), 0.0);
     assert_eq!(air.state(), SurfaceState::Airless, "{air:?}");
 }
+
+// Lever (p) (decision-p14-t54a-passes, "Cost escalation (after Batch B)"): the greenhouse's
+// bit-exact exit, and a column with nothing to condense reading no step climate.
+
+/// Lever (p)'s exit from the greenhouse steps: they stop after a step whose temperature and
+/// partial pressures are the step before's, bit for bit, and the greenhouse is the full count's to
+/// the bit. Stub airs (a temperate Earth, a dry Earth beyond the maximum-greenhouse limit, Titan, a
+/// cold Titan-sized moon, a runaway Earth and the remnant ice bulk at 3.2 and 300 K) and the
+/// table's bodies, derived through their passes, their pass counts included, are the same with
+/// the exits and without, every greenhouse checked to the bit as it is made (`Exits::Checked`).
+#[test]
+fn the_greenhouse_stops_at_its_bit_exact_fixed_point() {
+    use crate::planetary::chem::partition::{ExitCounts, Exits, with_exits};
+
+    let run = || -> Vec<String> {
+        let airs = [
+            atmosphere(&earth_inputs(255.0, Insolation::Habitable)),
+            atmosphere(&earth_inputs(165.6, Insolation::BeyondMaximumGreenhouse)),
+            atmosphere(&titan_inputs()),
+            cold_moon(1e19, 94.0, SnowLineSide::Beyond, Crust::Solid),
+            runaway_earth(1.4e21, 4.57e9, 1.0, 300.0),
+            atmosphere(&remnant_ice_bulk(3.2)),
+            atmosphere(&remnant_ice_bulk(300.0)),
+        ];
+        let mut out: Vec<String> = airs.iter().map(|air| format!("{air:?}")).collect();
+        out.extend(
+            table()
+                .iter()
+                .map(|(name, body)| format!("{name}: {body:?}")),
+        );
+        out
+    };
+    let (checked, counts) = with_exits(Exits::Checked, run);
+    let (unlevered, uncounted) = with_exits(Exits::Unlevered, run);
+    assert_eq!(uncounted, ExitCounts::default());
+    assert_eq!(checked.len(), unlevered.len());
+    for (with, without) in checked.iter().zip(&unlevered) {
+        assert_eq!(with, without);
+    }
+    let most = counts.greenhouses * u64::from(GREENHOUSE_STEPS + 1);
+    eprintln!(
+        "{} greenhouses checked, {} evaluations of {most} at most: {counts:?}",
+        counts.checked_greenhouses, counts.evaluations
+    );
+    assert_eq!(counts.checked_greenhouses, counts.greenhouses);
+    assert!(counts.greenhouses > 20, "{counts:?}");
+    assert!(counts.evaluations < most, "{counts:?}");
+}
+
+/// Lever (p)'s third part: a column with nothing that condenses is partitioned the same over every
+/// climate, so its greenhouse reads none and takes the mean's isothermal span in its place, and the
+/// atmosphere is the same, bit for bit, as when every step reads its climate. The remnant ice bulk
+/// at 300 K keeps nothing, so all 33 of its step climates go and only the area mix's remain. An
+/// Earth, whose column condenses, reads its climate at every step it takes.
+#[test]
+fn a_column_with_nothing_to_condense_reads_no_step_climate() {
+    use crate::planetary::chem::partition::{Exits, with_exits};
+
+    let calls = core::cell::Cell::new(0_u32);
+    let climate = |t: Kelvin, _: &PartialPressures| {
+        calls.set(calls.get() + 1);
+        ClimateSpan::isothermal(t)
+    };
+    let surface = PassSurface {
+        climate_of: &climate,
+        ..PassSurface::stand_in(PassLight::HottestHost)
+    };
+    let read = |inputs: &AtmosphereInputs, exits: Exits| {
+        calls.set(0);
+        let (air, counts) = with_exits(exits, || atmosphere_under(inputs, &surface));
+        (format!("{air:?}"), calls.get(), counts)
+    };
+    let empty = remnant_ice_bulk(300.0);
+    let (taken, taken_calls, counts) = read(&empty, Exits::Taken);
+    let (unlevered, unlevered_calls, _) = read(&empty, Exits::Unlevered);
+    eprintln!(
+        "the empty column: {taken_calls} climates read with the exits, {unlevered_calls} without; \
+         {counts:?}"
+    );
+    assert_eq!(taken, unlevered);
+    assert_eq!(counts.greenhouses, 1);
+    assert_eq!(counts.climates, 0);
+    assert_eq!(unlevered_calls, taken_calls + GREENHOUSE_STEPS + 1);
+    let earth = earth_inputs(255.0, Insolation::Habitable);
+    let (taken, taken_calls, counts) = read(&earth, Exits::Taken);
+    let (unlevered, unlevered_calls, _) = read(&earth, Exits::Unlevered);
+    eprintln!(
+        "an Earth: {taken_calls} climates read with the exits, {unlevered_calls} without; \
+         {counts:?}"
+    );
+    assert_eq!(taken, unlevered);
+    assert_eq!(counts.climates, counts.evaluations);
+    assert!(taken_calls <= unlevered_calls);
+}

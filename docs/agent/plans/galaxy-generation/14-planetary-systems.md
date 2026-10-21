@@ -22481,3 +22481,68 @@ planetary::record` (624 tests at T57.a's commit).
       value moved. The rest hold: the sim's other lib and integration goldens, and the server's
       `systems_in_range`, `system_bodies` and `convert` tests.
     - _Files:_ `planetary/derive/atmosphere.rs`; the tests in `derive/atmosphere/tests.rs`.
+  - _Batch C's L2, levers (a) and (p): one profile a surface, and the bit-exact exits_
+    (decision-p14-t54a-passes, "Cost escalation (after Batch B)", §C.3's (a) and (p)). A refactor
+    at 22, bit for bit: no golden moves (`golden_diff.py` after a re-bless of every sim golden: "No
+    golden files changed"), and the pass counts hold.
+    - _(a) One profile a surface._ `GlobalFigures::condensates_and_ice_under`, the record's (it
+      was `condensates_under`, now a test-only wrapper), returns T24.b's water ice as its cover
+      read it off the one cold profile it builds (`WaterCover::ice_fraction`), as
+      `WaterIce::Covered`. `with_surface_under` takes it in place of a second profile;
+      `WaterIce::OffTable` reads the table as before, for the public `with_surface` and the tests.
+      The two are the same bits: the ice reads only the figures, the conditions' mean surface
+      temperature and their cold profile, none of which the liquid-water flag that
+      `with_condensates` sets between the stages moves.
+    - _(p) The exits._ Each is exact because a sweep, and a step, is a function of the one before
+      alone, so a repeat repeats forever.
+      - `AirborneWeights::solve` (`start`, then `sweep`s) stops after a sweep that moves no weight,
+        bit for bit (`total_cmp`), at most `PARTITION_SWEEPS`. A species' update reads only the
+        others' weights and its own fixed caps, so the caps' dominance and own ocean are the full
+        count's too.
+      - `partitioned_greenhouse` (its steps now `greenhouse_steps`) stops after a step whose
+        temperature and partial pressures are the step before's, bit for bit, and returns that
+        step's optical depth. Every solve starts afresh and the climate reads only the step's
+        temperature and partials, so the remaining steps and the final evaluation would repeat it.
+      - A column with nothing that condenses (`ColumnInventory::condenses`: no species with a
+        phase diagram and a positive weight) reads no step climate: the mean's isothermal span
+        stands in, which its partition does not read.
+      - `PARTITION_SWEEPS` and `GREENHOUSE_STEPS` are documented as caps with a bit-exact exit.
+        P14.T51.a's own record ("each solve starts afresh", still true of every solve) is the
+        docs batch's (§C.8).
+    - _Its tests._ The oracles are test-only switches in L1's form: `IceReads` (`with_ice_reads`,
+      figures) and `Exits` (`with_exits`, the partition), each `Unlevered` (the old path) or
+      `Checked` (both paths, asserted the same to the bit as each value is made, and counted).
+      - `levers_a_and_p_move_no_bit_of_the_sample`: over the 60-system sample, every record ice
+        (761), every greenhouse (14,181) and every solve outside one (15,766) checked. The
+        generated systems, their snapshots at the epoch and every planet's, member's and moon's
+        derivation then, its pass count and convergence included, are the same with the levers
+        and without. The exits took 82,114 of the greenhouses' 467,973 evaluations, read 78,005
+        step climates, and ran 347,857 of 783,040 sweeps (97,880 solves).
+      - On stubs: `a_solve_stops_at_its_bit_exact_fixed_point` (every mix, the plan's bodies, the
+        ocean worlds and an empty column on two grounds, 2,832 solves; sweeps a solve took 1–8,
+        33 at the cap); `the_greenhouse_stops_at_its_bit_exact_fixed_point` (seven stub airs and
+        the table derived through its passes: 34 greenhouses, 277 of 1,122 evaluations);
+        `a_column_with_nothing_to_condense_reads_no_step_climate` (the remnant ice bulk at 300 K
+        reads 1 climate, the area mix's, against 34; an Earth reads one a step and runs all 33,
+        its greenhouse not settling to the bit within the cap); and
+        `the_record_s_second_stage_reads_its_partition_s_ice_to_the_bit` (the table rotating and
+        locked 1:1: 16 surfaces, 9 reading T24.b's ice).
+      - L1's `the_zonal_insolation_table_moves_no_bit_of_the_sample` checks 744 profiles with modes
+        where it checked 1,461, since a surface now builds one: its floor is 500.
+    - _Its saving_ (the profile's probe, release, one CPU, `CPUQuota=100%`, under the heavy lock;
+      the tip after C0c, (a), and (a) with (p), alternated over three rounds, medians; load 0.3–3.3
+      at the starts; the passes histograms identical across all nine runs):
+      - The first 20 systems (stage timers off): `generate` 249.5 → 249.2 → 116.8 ms (−53%);
+        `snapshot_at` 199.1 → 197.4 → 134.3 ms (−1% by (a), −32% in all).
+      - The 400-system `snapshot_at` stage (timers on, as L1's): 3.46 → 3.46 → 2.17 s (−37%).
+        - (a): `with_surface_under` 12.3 → 1.2 ms, and 6,019 → 4,657 profiles built (51.9 →
+          40.7 ms), about 11 ms in all.
+        - (p): `partitioned_greenhouse` 1,538 → 254 ms, its 787,479 evaluations → 139,936
+          (`AirborneWeights::solve` 1,387 → 222 ms), and the passes 1.85 → 0.55 s. With the
+          timers on, the saving includes the dropped evaluations' timers, some 25 ns each.
+      - Against §C.6's budget, before Batch C: `generate` 116.8 ms of ≤ 141, `snapshot_at` 134.3
+        ms of ≤ 313, and the stage 2.17 s of ≤ 4.70.
+    - _Files:_ `planetary/chem/partition.rs`, `derive/atmosphere.rs`, `hooks/figures.rs`,
+      `planetary/system.rs`, and docs in `derive/atmosphere/surface_mix.rs` and
+      `hooks/cold_traps.rs`; the tests in `chem/partition/tests.rs`, `derive/atmosphere/tests.rs`,
+      `hooks/surface/tests.rs`, `moons/regular.rs` and `system/tests.rs`.

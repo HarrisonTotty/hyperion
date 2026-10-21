@@ -3041,6 +3041,7 @@ mod tests {
                     VolatileHistory::NONE,
                     Some(&published),
                     &table,
+                    crate::planetary::hooks::figures::WaterIce::OffTable,
                 );
                 let &(_, listed) = second
                     .surface_ices()

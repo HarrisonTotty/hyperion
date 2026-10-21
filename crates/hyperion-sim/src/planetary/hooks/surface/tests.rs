@@ -3050,7 +3050,7 @@ fn a_profile_refuses_another_obliquity_s_table() {
 fn the_batch_publishes_the_table_s_condensates() {
     use crate::planetary::chem::partition::CondensatePhase;
     use crate::planetary::hooks::cold_traps::{ColdTrapRules, RecordColdTraps, lunar_sky};
-    use crate::planetary::hooks::figures::{GlobalFigures, VolatileHistory, cover};
+    use crate::planetary::hooks::figures::{GlobalFigures, VolatileHistory, WaterIce, cover};
 
     let water = Gas::Water.substance();
     let sky = lunar_sky();
@@ -3080,8 +3080,9 @@ fn the_batch_publishes_the_table_s_condensates() {
             batch.condensates_under(atmosphere, &conditions, gravity, &traps, &table)
         };
         let (partition, published) = under();
+        let (history, off_table) = (VolatileHistory::NONE, WaterIce::OffTable);
         let second = |figures: GlobalFigures| {
-            figures.with_surface_under(&conditions, VolatileHistory::NONE, Some(&published), &table)
+            figures.with_surface_under(&conditions, history, Some(&published), &table, off_table)
         };
         if let Some(ice) = published.entry(water, CondensatePhase::Solid) {
             let t24b = cover::ice_fraction(&cover::IceInputs {
@@ -3225,4 +3226,79 @@ fn the_conditions_gases_are_the_mole_fractions() {
         }
         assert_eq!(GasFractions::of(partials, true).unwrap().as_slice(), []);
     }
+}
+
+/// Lever (a) on the table (decision-p14-t54a-passes, "Cost escalation (after Batch B)"): the
+/// record's second stage, given T24.b's water ice as its partition's cover read it off the profile
+/// it built (`WaterIce::Covered`, from `condensates_and_ice_under`), publishes the same figures, bit
+/// for bit, as when it reads the ice off the table again (`WaterIce::OffTable`), rotating and locked
+/// 1:1, after the conditions take the liquid-water flag the record sets between the two stages.
+/// Each ice the second stage reads is checked to the bit (`IceReads::Checked`).
+#[test]
+fn the_record_s_second_stage_reads_its_partition_s_ice_to_the_bit() {
+    use crate::planetary::chem::partition::CondensatePhase;
+    use crate::planetary::hooks::cold_traps::{ColdTrapRules, RecordColdTraps, lunar_sky};
+    use crate::planetary::hooks::figures::{IceReads, VolatileHistory, WaterIce, with_ice_reads};
+
+    let sky = lunar_sky();
+    let (mut surfaces, mut read) = (0_u64, 0_u64);
+    let ((), checked) = with_ice_reads(IceReads::Checked, || {
+        for (name, body) in historic_table() {
+            let Some(batch) = table_figures(&body) else {
+                continue;
+            };
+            let rotating = spin_of(name);
+            let locked = SeasonalSpin {
+                solar_day: None,
+                ..rotating
+            };
+            for spin in [rotating, locked] {
+                let inputs = SurfaceInputs {
+                    heat_flow: batch.heat_flow(),
+                    ocean_weight: batch.ocean_weight(),
+                    ..inputs_of(&body, spin)
+                };
+                let Some(conditions) = SurfaceConditions::derive(&inputs) else {
+                    continue;
+                };
+                let atmosphere = body.atmosphere();
+                let table = conditions.zonal_insolation();
+                let traps =
+                    RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, atmosphere);
+                let (_, published, ice) = batch.condensates_and_ice_under(
+                    atmosphere,
+                    &conditions,
+                    body.surface_gravity(),
+                    &traps,
+                    &table,
+                );
+                assert!(matches!(ice, WaterIce::Covered(_)), "{name}: {ice:?}");
+                let conditions = conditions.with_condensates(&published);
+                let second = |water_ice| {
+                    batch.clone().with_surface_under(
+                        &conditions,
+                        VolatileHistory::NONE,
+                        Some(&published),
+                        &table,
+                        water_ice,
+                    )
+                };
+                assert_eq!(
+                    format!("{:?}", second(ice)),
+                    format!("{:?}", second(WaterIce::OffTable)),
+                    "{name}, {spin:?}"
+                );
+                surfaces += 1;
+                if published
+                    .entry(Gas::Water.substance(), CondensatePhase::Solid)
+                    .is_none()
+                {
+                    read += 1;
+                }
+            }
+        }
+    });
+    eprintln!("{surfaces} surfaces, {read} of them reading T24.b's ice, {checked} checked");
+    assert_eq!(read, checked);
+    assert!(surfaces >= 10 && read >= 4, "{surfaces} {read}");
 }

@@ -5072,5 +5072,99 @@ fn the_zonal_insolation_table_moves_no_bit_of_the_sample() {
         same_rendering(with, without, &format!("system {k} of the sample"));
     }
     eprintln!("{checked} profiles with modes read off their tables and checked");
-    assert!(checked > 1_000, "{checked}");
+    // 1,461 at L1; 744 since lever (a), whose record builds one profile a surface, not two.
+    assert!(checked > 500, "{checked}");
+}
+
+// P14.T54.a, levers (a) and (p): one profile a surface, and the bit-exact exits
+// (decision-p14-t54a-passes, "Cost escalation (after Batch B)").
+
+/// Every planet's, member's and moon's derivation in `system`, of context `ctx`, at the epoch, as
+/// the records read them: its passes and their convergence included.
+fn derivations_at_epoch(ctx: &SystemContext, system: &PlanetarySystem) -> String {
+    use core::fmt::Write as _;
+
+    let mut out = String::new();
+    if ctx.age_at_epoch().value() <= 0.0 {
+        return out;
+    }
+    let t = UniverseTime::EPOCH;
+    let epoch = Epoch::new(system, ctx, t);
+    for body in system.bodies() {
+        if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+            continue;
+        }
+        let host = fate_host(ctx, system.zone_of(body));
+        let fate = system.fate_of(body, &host);
+        let label = label::label(system, body.index).unwrap();
+        let (_, now) = system.primary_record(&epoch, &HourCosines::new(), body, label, &fate);
+        writeln!(out, "{:?}: {:?}", body.index, now.derived).unwrap();
+        for child in system.children(body.index) {
+            let Part::Moon(moon) = &child.part else {
+                continue;
+            };
+            let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
+            let derived = PlanetarySystem::moon_derived(&epoch, moon, &orbit, &now);
+            writeln!(out, "{:?}: {derived:?}", child.index).unwrap();
+        }
+    }
+    out
+}
+
+/// Levers (a) and (p) over the 60-system sample: T24.b's water ice read from the record's
+/// partition's cover, and the partition's solves and the partitioned greenhouses stopping at their
+/// bit-exact fixed points.
+///
+/// - Every ice the record's second stage reads (`IceReads::Checked`), and every greenhouse and every
+///   solve outside one (`Exits::Checked`), is checked against the unlevered path to the bit as it
+///   is made.
+/// - The generated systems, their snapshots at the epoch and every planet's, member's and moon's
+///   derivation then, its pass count included, are the same bit for bit with the levers and
+///   without (`IceReads::Unlevered`, `Exits::Unlevered`).
+#[test]
+fn levers_a_and_p_move_no_bit_of_the_sample() {
+    use crate::planetary::chem::partition::{ExitCounts, Exits, with_exits};
+    use crate::planetary::hooks::figures::{IceReads, with_ice_reads};
+
+    let run = || -> Vec<String> {
+        sample()
+            .iter()
+            .take(60)
+            .map(|ctx| {
+                let system = generate(SEED, ctx);
+                let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
+                let derivations = derivations_at_epoch(ctx, &system);
+                format!("{system:?}\n{snapshot:?}\n{derivations}")
+            })
+            .collect()
+    };
+    let ((levered, counts), ices) =
+        with_ice_reads(IceReads::Checked, || with_exits(Exits::Checked, run));
+    let ((unlevered, uncounted), unread) =
+        with_ice_reads(IceReads::Unlevered, || with_exits(Exits::Unlevered, run));
+    assert_eq!(uncounted, ExitCounts::default());
+    assert_eq!(unread, 0);
+    assert_eq!(levered.len(), 60);
+    for (k, (with, without)) in levered.iter().zip(&unlevered).enumerate() {
+        same_rendering(with, without, &format!("system {k} of the sample"));
+    }
+    let most =
+        counts.greenhouses * u64::from(crate::planetary::derive::atmosphere::GREENHOUSE_STEPS + 1);
+    eprintln!(
+        "{ices} record ices checked; {} greenhouses checked, {} evaluations of {most} at most, {} \
+         step climates read; {} solves outside them checked; {} solves, {} sweeps of {} at most",
+        counts.checked_greenhouses,
+        counts.evaluations,
+        counts.climates,
+        counts.checked_solves,
+        counts.solves,
+        counts.sweeps,
+        counts.solves * u64::from(crate::planetary::chem::partition::PARTITION_SWEEPS),
+    );
+    assert!(ices > 50, "{ices}");
+    assert_eq!(counts.checked_greenhouses, counts.greenhouses);
+    assert!(
+        counts.greenhouses > 1_000 && counts.checked_solves > 1_000,
+        "{counts:?}"
+    );
 }

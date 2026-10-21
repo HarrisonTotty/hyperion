@@ -48,7 +48,7 @@
 //!
 //! It is P14.T51.a. Its call into T13's passes is `atmosphere_under` in
 //! [`atmosphere`](crate::planetary::derive::atmosphere), and its call on the record
-//! `GlobalFigures::condensates_under`, both on the record since P14.T54.a deleted the
+//! `GlobalFigures::condensates_and_ice_under`, both on the record since P14.T54.a deleted the
 //! `p14-snapshot` lane's hold, so its rules and constants are output, and a change to any of them a
 //! generator-version change. The record's surface section holds the published [`Condensates`]
 //! (P14.T54.a), and the wire sends them. Left to P14.T54.a's later steps: the passes' climate
@@ -117,8 +117,10 @@ pub const DOMINANCE_ONSET: f64 = 0.1;
 /// Icarus 246, 268, read).
 pub const DOMINANCE_FULL: f64 = 0.9;
 
-/// How many times the condensables are solved in turn, each against the others' weights: 8, a
-/// fixed count from a deterministic start (decision-composition §1.3's rule for every solver).
+/// How many times, at most, the condensables are solved in turn, each against the others' weights:
+/// 8, a fixed cap from a deterministic start (decision-composition §1.3's rule for every solver).
+/// The sweeps stop early after one that moves no weight, bit for bit, which every later sweep
+/// would repeat (lever (p), [`AirborneWeights::solve`]), so a solve is the full count's to the bit.
 ///
 /// From each condensable's least cap, one condensable over a background that does not condense is
 /// solved exactly in the first sweep, and a minor one in a condensing background meets its cap to
@@ -681,6 +683,16 @@ impl ColumnInventory {
     pub fn is_empty(&self) -> bool {
         self.species.is_empty()
     }
+
+    /// Whether any of its species can condense: one with a phase diagram and a positive weight,
+    /// the only species whose caps read the climate ([`AirborneWeights::solve`]). A column with
+    /// none is partitioned the same over every climate.
+    #[must_use]
+    pub(crate) fn condenses(&self) -> bool {
+        self.species
+            .iter()
+            .any(|species| species.diagram.is_some() && species.weight.value() > 0.0)
+    }
 }
 
 /// What the sweeps keep of one condensable over one partition: its saturation pressures at the
@@ -799,19 +811,36 @@ impl AirborneWeights {
     /// partition's pressures alone ([the module](self)'s rules), for T13.c's passes, which read
     /// them at every step of their greenhouse ([`partition`] gives the reservoirs and phases).
     ///
-    /// Each condensable starts at the least of its inventory and its two caps, and
-    /// [`PARTITION_SWEEPS`] sweeps run in registry order.
+    /// Each condensable starts at the least of its inventory and its two caps, and the sweeps run
+    /// in registry order, at most [`PARTITION_SWEEPS`] of them. They stop after a sweep that leaves
+    /// every weight as it was, bit for bit (lever (p), decision-p14-t54a-passes, "Cost escalation
+    /// (after Batch B)"): a species' update reads only the others' weights and its own fixed caps,
+    /// so every later sweep would repeat that one, its dominance and own ocean included, and the
+    /// solve is the full count's to the bit.
     pub(crate) fn solve(
         &mut self,
         climate: &ClimateSpan,
         ground: &Ground,
         inventory: &ColumnInventory,
     ) {
+        #[cfg(test)]
+        if let Some(checked) = checked_exits(
+            ExitsChecked::Solve,
+            || {
+                let mut solved = Self::new();
+                solved.solve_sweeping(climate, ground, inventory, PARTITION_SWEEPS);
+                solved
+            },
+            same_solve,
+        ) {
+            *self = checked;
+            return;
+        }
         self.solve_sweeping(climate, ground, inventory, PARTITION_SWEEPS);
     }
 
-    /// [`solve`](Self::solve) with `sweeps` sweeps, for the tests that compare the count with
-    /// more.
+    /// [`solve`](Self::solve) with at most `sweeps` sweeps, for the tests that compare the count
+    /// with more.
     fn solve_sweeping(
         &mut self,
         climate: &ClimateSpan,
@@ -819,6 +848,21 @@ impl AirborneWeights {
         inventory: &ColumnInventory,
         sweeps: u32,
     ) {
+        self.start(climate, inventory);
+        #[cfg(test)]
+        count_exits(|counts| counts.solves += 1);
+        for _ in 0..sweeps {
+            #[cfg(test)]
+            count_exits(|counts| counts.sweeps += 1);
+            if !self.sweep(climate, ground, inventory) && exits_taken() {
+                break;
+            }
+        }
+    }
+
+    /// Each species' weight before the sweeps, and each condensable's caps: its saturation
+    /// pressures at the climate `climate`'s two ends, with no dominance or own ocean yet.
+    fn start(&mut self, climate: &ClimateSpan, inventory: &ColumnInventory) {
         let Self { weights, caps } = self;
         weights.clear();
         caps.clear();
@@ -852,46 +896,213 @@ impl AirborneWeights {
             weights.push(start);
             caps.push(held);
         }
-        for _ in 0..sweeps {
-            for (k, species) in inventory.species.iter().enumerate() {
-                let (Some(held), Some(diagram)) = (caps[k], species.diagram) else {
-                    continue;
-                };
-                let (total, moles) = others(inventory, weights, k);
-                let at_cap = |cap: Pascals| {
-                    let w = weight_meeting_cap(cap, total, moles, species.molar_mass);
-                    if w < species.weight {
-                        w
-                    } else {
-                        species.weight
-                    }
-                };
-                let minor = at_cap(held.minor_cap);
-                let d = dominance(share(minor, species.molar_mass, moles));
-                // Its own sea, where it has one at the mean, holds it there (§4); a minor
-                // condensable is held there already.
-                let c = if d > 0.0 {
-                    own_ocean_weight(species, diagram, climate, ground, total, minor)
+    }
+
+    /// One sweep of the condensables in registry order over the climate `climate` on the ground
+    /// `ground`; whether it moved any weight, bit for bit.
+    fn sweep(
+        &mut self,
+        climate: &ClimateSpan,
+        ground: &Ground,
+        inventory: &ColumnInventory,
+    ) -> bool {
+        let Self { weights, caps } = self;
+        let mut moved = false;
+        for (k, species) in inventory.species.iter().enumerate() {
+            let (Some(held), Some(diagram)) = (caps[k], species.diagram) else {
+                continue;
+            };
+            let (total, moles) = others(inventory, weights, k);
+            let at_cap = |cap: Pascals| {
+                let w = weight_meeting_cap(cap, total, moles, species.molar_mass);
+                if w < species.weight {
+                    w
                 } else {
-                    0.0
-                };
-                let pull = d * (1.0 - c);
-                let cap = if d <= 0.0 {
-                    held.minor_cap
-                } else if pull >= 1.0 {
-                    held.cold_cap
-                } else {
-                    let humidity = math::powf(species.humidity, 1.0 - d);
-                    let at = diagram.saturation_pressure(climate.controlling(pull));
-                    Pascals::new(humidity * at.value())
-                };
-                weights[k] = if d <= 0.0 { minor } else { at_cap(cap) };
-                caps[k] = Some(Caps {
-                    dominance: d,
-                    own_ocean: c,
-                    ..held
-                });
+                    species.weight
+                }
+            };
+            let minor = at_cap(held.minor_cap);
+            let d = dominance(share(minor, species.molar_mass, moles));
+            // Its own sea, where it has one at the mean, holds it there (§4); a minor
+            // condensable is held there already.
+            let c = if d > 0.0 {
+                own_ocean_weight(species, diagram, climate, ground, total, minor)
+            } else {
+                0.0
+            };
+            let pull = d * (1.0 - c);
+            let cap = if d <= 0.0 {
+                held.minor_cap
+            } else if pull >= 1.0 {
+                held.cold_cap
+            } else {
+                let humidity = math::powf(species.humidity, 1.0 - d);
+                let at = diagram.saturation_pressure(climate.controlling(pull));
+                Pascals::new(humidity * at.value())
+            };
+            let weight = if d <= 0.0 { minor } else { at_cap(cap) };
+            moved |= !weight.value().total_cmp(&weights[k].value()).is_eq();
+            weights[k] = weight;
+            caps[k] = Some(Caps {
+                dominance: d,
+                own_ocean: c,
+                ..held
+            });
+        }
+        moved
+    }
+}
+
+/// Whether a solve of the partition's weights ([`AirborneWeights::solve`]) and a step of T13.c's
+/// partitioned greenhouse stop at their bit-exact fixed points (lever (p), decision-p14-t54a-passes,
+/// "Cost escalation (after Batch B)"): always in the generator, and in the tests unless they switch
+/// the exits off (`with_exits`).
+#[must_use]
+pub(crate) fn exits_taken() -> bool {
+    #[cfg(test)]
+    if EXITS.with(core::cell::Cell::get) == Exits::Unlevered {
+        return false;
+    }
+    true
+}
+
+/// How the partition's solves and T13.c's partitioned greenhouses stop, a test-only switch of
+/// lever (p) ([`with_exits`]).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Exits {
+    /// At their bit-exact fixed points, as the generator's do ([`exits_taken`]).
+    Taken,
+    /// After every sweep and every step, each step reading its climate, as before the lever: the
+    /// unlevered path, the oracle.
+    Unlevered,
+    /// Both: each greenhouse, and each solve outside one, run with the exits and without and
+    /// asserted the same to the bit, and counted.
+    Checked,
+}
+
+/// What [`checked_exits`] checks.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExitsChecked {
+    /// A solve of the partition's weights outside a greenhouse.
+    Solve,
+    /// A partitioned greenhouse, its solves inside it.
+    Greenhouse,
+}
+
+/// What [`with_exits`] counts on its thread while the exits are taken: the solves and their
+/// sweeps, the greenhouses and their evaluations (each step's and the final one) and the step
+/// climates they read; and under [`Exits::Checked`] the solves and greenhouses checked.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ExitCounts {
+    pub(crate) solves: u64,
+    pub(crate) sweeps: u64,
+    pub(crate) greenhouses: u64,
+    pub(crate) evaluations: u64,
+    pub(crate) climates: u64,
+    pub(crate) checked_solves: u64,
+    pub(crate) checked_greenhouses: u64,
+}
+
+#[cfg(test)]
+impl ExitCounts {
+    /// None counted.
+    const ZERO: Self = Self {
+        solves: 0,
+        sweeps: 0,
+        greenhouses: 0,
+        evaluations: 0,
+        climates: 0,
+        checked_solves: 0,
+        checked_greenhouses: 0,
+    };
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The switch on this thread, a test's own: tests run on threads of one process.
+    static EXITS: core::cell::Cell<Exits> = const { core::cell::Cell::new(Exits::Taken) };
+    /// What the exits did on this thread.
+    static EXIT_COUNTS: core::cell::Cell<ExitCounts> = const {
+        core::cell::Cell::new(ExitCounts::ZERO)
+    };
+}
+
+/// `run`'s result with the partition's solves and the partitioned greenhouses stopping as `exits`
+/// says, and what they counted. The switch is set back after.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn with_exits<R>(exits: Exits, run: impl FnOnce() -> R) -> (R, ExitCounts) {
+    let before = EXITS.with(|cell| cell.replace(exits));
+    EXIT_COUNTS.with(|cell| cell.set(ExitCounts::ZERO));
+    let result = run();
+    EXITS.with(|cell| cell.set(before));
+    (
+        result,
+        EXIT_COUNTS.with(|cell| cell.replace(ExitCounts::ZERO)),
+    )
+}
+
+/// Counts with `count` where the exits are taken on this thread: the generator's path, which
+/// [`Exits::Checked`] runs as well as the oracle's.
+#[cfg(test)]
+pub(crate) fn count_exits(count: impl FnOnce(&mut ExitCounts)) {
+    if EXITS.with(core::cell::Cell::get) == Exits::Taken {
+        EXIT_COUNTS.with(|cell| {
+            let mut counts = cell.get();
+            count(&mut counts);
+            cell.set(counts);
+        });
+    }
+}
+
+/// Under [`Exits::Checked`], `run`'s result with the exits taken, which `same` asserts is its
+/// result with them off, counted as `what`; `None` under any other setting, and inside a check
+/// already made.
+#[cfg(test)]
+pub(crate) fn checked_exits<T>(
+    what: ExitsChecked,
+    run: impl Fn() -> T,
+    same: impl FnOnce(&T, &T),
+) -> Option<T> {
+    if EXITS.with(core::cell::Cell::get) != Exits::Checked {
+        return None;
+    }
+    let set = |exits: Exits| EXITS.with(|cell| cell.set(exits));
+    set(Exits::Unlevered);
+    let oracle = run();
+    set(Exits::Taken);
+    let taken = run();
+    match what {
+        ExitsChecked::Solve => count_exits(|counts| counts.checked_solves += 1),
+        ExitsChecked::Greenhouse => count_exits(|counts| counts.checked_greenhouses += 1),
+    }
+    set(Exits::Checked);
+    same(&taken, &oracle);
+    Some(taken)
+}
+
+/// Asserts that the solves `taken` and `oracle` hold the same weights and caps, bit for bit.
+#[cfg(test)]
+fn same_solve(taken: &AirborneWeights, oracle: &AirborneWeights) {
+    use hyperion_testkit::float::assert_same_bits;
+    assert_eq!(taken.weights.len(), oracle.weights.len());
+    for (a, b) in taken.weights.iter().zip(&oracle.weights) {
+        assert_same_bits(a.value(), b.value());
+    }
+    assert_eq!(taken.caps.len(), oracle.caps.len());
+    for (a, b) in taken.caps.iter().zip(&oracle.caps) {
+        match (a, b) {
+            (Some(a), Some(b)) => {
+                assert_same_bits(a.minor_cap.value(), b.minor_cap.value());
+                assert_same_bits(a.cold_cap.value(), b.cold_cap.value());
+                assert_same_bits(a.dominance, b.dominance);
+                assert_same_bits(a.own_ocean, b.own_ocean);
             }
+            (None, None) => {}
+            _ => panic!("the caps differ: {a:?} against {b:?}"),
         }
     }
 }

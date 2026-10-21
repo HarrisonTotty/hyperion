@@ -176,7 +176,7 @@ fn pass_water_cover(
 
 /// The partition of the atmosphere `air` of the body `inputs` describe, solved once more at the
 /// pass's final climate (`surface.climate_of` at its surface temperature and partial pressures)
-/// as [`GlobalFigures::condensates_under`](crate::planetary::hooks::figures::GlobalFigures::condensates_under)
+/// as [`GlobalFigures::condensates_and_ice_under`](crate::planetary::hooks::figures::GlobalFigures::condensates_and_ice_under)
 /// solves the record's, and its condensates published over the pass's cover; `None` for a body
 /// of no mass or radius, which holds nothing.
 #[must_use]

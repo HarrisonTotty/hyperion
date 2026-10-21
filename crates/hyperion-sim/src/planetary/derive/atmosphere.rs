@@ -62,7 +62,7 @@ use crate::Seed;
 use crate::id::BodyId;
 use crate::math;
 use crate::planetary::chem::partition::{
-    AirborneWeights, BuildColumnInventoryError, ClimateSpan, ColumnInventory, Ground,
+    AirborneWeights, BuildColumnInventoryError, ClimateSpan, ColumnInventory, Ground, exits_taken,
 };
 use crate::planetary::chem::redox::SNOW_LINE_TEMPERATURE;
 use crate::planetary::context::XuvHistory;
@@ -1241,9 +1241,12 @@ pub(crate) fn ice_vapour_escape(
 /// gives 1,120.7 °C at zero pressure). A surface hotter than this is a magma ocean.
 pub const SILICATE_SOLIDUS: Kelvin = Kelvin::new(1_394.0);
 
-/// How many times the surface temperature is iterated against the greenhouse it holds, from the
-/// equilibrium temperature upward: 32, which settles on the lowest temperature at which the
-/// atmosphere holds itself, to a part in 10⁹ for every Solar System case (tested).
+/// How many times, at most, the surface temperature is iterated against the greenhouse it holds,
+/// from the equilibrium temperature upward: 32, which settles on the lowest temperature at which
+/// the atmosphere holds itself, to a part in 10⁹ for every Solar System case (tested). The steps
+/// stop early after one whose temperature and partial pressures repeat the step before's, bit for
+/// bit, which every later step would repeat (lever (p), decision-p14-t54a-passes), so the result
+/// is the full count's to the bit.
 pub const GREENHOUSE_STEPS: u32 = 32;
 
 /// What a body's surface is, which sets its albedo and cloud (P14.T13.c).
@@ -1889,6 +1892,15 @@ fn whole_column(inventory: &ColumnInventory) -> PartialPressures {
 /// column's contrasts, an airless body's, would freeze out even a bar of nitrogen that a full
 /// column's transport keeps airborne (the collapse is bistable, Wordsworth 2015), and the
 /// iteration keeps the state the full column leads to.
+///
+/// The steps stop after one whose temperature and partial pressures are the step before's, bit
+/// for bit, with that step's optical depth (lever (p), decision-p14-t54a-passes, "Cost escalation
+/// (after Batch B)"). A step is a function of the step before's alone, since every solve of the
+/// partition starts afresh and the climate reads only the step's temperature and partial
+/// pressures, so the remaining steps and the final evaluation would repeat it: the result is the
+/// full count's to the bit. A column with nothing that condenses ([`ColumnInventory::condenses`])
+/// is partitioned the same over every climate, so its steps read none, and the mean's isothermal
+/// span stands in.
 #[must_use]
 fn partitioned_greenhouse(
     inventory: &ColumnInventory,
@@ -1897,20 +1909,85 @@ fn partitioned_greenhouse(
     climate: &ClimateOf<'_>,
     ground: &Ground,
 ) -> (f64, PartialPressures, f64) {
+    #[cfg(test)]
+    if let Some(checked) = crate::planetary::chem::partition::checked_exits(
+        crate::planetary::chem::partition::ExitsChecked::Greenhouse,
+        || greenhouse_steps(inventory, equilibrium, saturate, climate, ground),
+        same_greenhouse,
+    ) {
+        return checked;
+    }
+    greenhouse_steps(inventory, equilibrium, saturate, climate, ground)
+}
+
+/// [`partitioned_greenhouse`]'s steps.
+#[must_use]
+fn greenhouse_steps(
+    inventory: &ColumnInventory,
+    equilibrium: Kelvin,
+    saturate: &impl Fn(f64) -> Kelvin,
+    climate: &ClimateOf<'_>,
+    ground: &Ground,
+) -> (f64, PartialPressures, f64) {
     let constants = GreenhouseConstants::FITTED;
+    let exits = exits_taken();
+    let reads_climate = !exits || inventory.condenses();
+    let span_at = |t: f64, partials: &PartialPressures| {
+        #[cfg(test)]
+        crate::planetary::chem::partition::count_exits(|counts| {
+            counts.climates += u64::from(reads_climate);
+        });
+        if reads_climate {
+            climate(Kelvin::new(t), partials)
+        } else {
+            ClimateSpan::isothermal(Kelvin::new(t))
+        }
+    };
+    #[cfg(test)]
+    crate::planetary::chem::partition::count_exits(|counts| counts.greenhouses += 1);
     let mut weights = AirborneWeights::new();
     let mut partials = whole_column(inventory);
     let mut t = equilibrium.value();
     for _ in 0..GREENHOUSE_STEPS {
-        let span = climate(Kelvin::new(t), &partials);
-        partials = partitioned_partials(inventory, &span, ground, &mut weights);
-        let tau = constants.optical_depth(&partials, equilibrium);
-        t = saturate(grey_surface_temperature(equilibrium, tau).value()).value();
+        #[cfg(test)]
+        crate::planetary::chem::partition::count_exits(|counts| counts.evaluations += 1);
+        let span = span_at(t, &partials);
+        let next = partitioned_partials(inventory, &span, ground, &mut weights);
+        let tau = constants.optical_depth(&next, equilibrium);
+        let next_t = saturate(grey_surface_temperature(equilibrium, tau).value()).value();
+        let settled = next_t.total_cmp(&t).is_eq() && same_partials(&next, &partials);
+        t = next_t;
+        partials = next;
+        if settled && exits {
+            return (t, partials, tau);
+        }
     }
-    let span = climate(Kelvin::new(t), &partials);
+    #[cfg(test)]
+    crate::planetary::chem::partition::count_exits(|counts| counts.evaluations += 1);
+    let span = span_at(t, &partials);
     partials = partitioned_partials(inventory, &span, ground, &mut weights);
     let tau = constants.optical_depth(&partials, equilibrium);
     (t, partials, tau)
+}
+
+/// Whether the partial pressures `a` and `b` are the same, bit for bit.
+#[must_use]
+fn same_partials(a: &PartialPressures, b: &PartialPressures) -> bool {
+    a.0.iter()
+        .zip(&b.0)
+        .all(|(x, y)| x.value().total_cmp(&y.value()).is_eq())
+}
+
+/// Asserts that the greenhouses `taken` and `oracle`, each a temperature, partial pressures and
+/// an optical depth, are the same, bit for bit.
+#[cfg(test)]
+fn same_greenhouse(taken: &(f64, PartialPressures, f64), oracle: &(f64, PartialPressures, f64)) {
+    use hyperion_testkit::float::assert_same_bits;
+    assert_same_bits(taken.0, oracle.0);
+    for (a, b) in taken.1.0.iter().zip(&oracle.1.0) {
+        assert_same_bits(a.value(), b.value());
+    }
+    assert_same_bits(taken.2, oracle.2);
 }
 
 /// The atmosphere of the body `inputs` describe (P14.T13.b–c, with P14.T24.f's carbon and oxygen).

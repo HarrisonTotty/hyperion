@@ -1934,3 +1934,52 @@ fn a_mars_with_its_caps_takes_almost_no_cloud() {
     );
     assert!(cloud < 0.05, "{cloud}");
 }
+
+/// Lever (p)'s exit from the sweeps (decision-p14-t54a-passes, "Cost escalation (after Batch B)"):
+/// a solve stops after a sweep that moves no weight, bit for bit, at most [`PARTITION_SWEEPS`] of
+/// them, and is the full count's to the bit. Over every mix, the plan's bodies, the ocean worlds
+/// and an empty column, on a bare ground and over Earth's basins, each solve is checked against the
+/// full count, weights and caps (`Exits::Checked`), and each partition is the same with the exits
+/// and without, whole. Some solves settle short of the cap.
+#[test]
+fn a_solve_stops_at_its_bit_exact_fixed_point() {
+    use std::collections::BTreeMap;
+
+    let mut cases = cases();
+    cases.extend([(360.0, 1e5), (373.0, 1e5), (310.0, 1e4)].map(|(t, n)| ocean_world(t, n)));
+    let empty = [(id("N2"), Pascals::ZERO), (id("H2O"), Pascals::ZERO)];
+    cases.push((span(30.0, 40.0, 50.0), ColumnInventory::new(empty).unwrap()));
+    let grounds = [gravity(3.0), on_earth(EARTH_GRAVITY)];
+    let run = || -> Vec<String> {
+        cases
+            .iter()
+            .flat_map(|(climate, inv)| {
+                grounds
+                    .iter()
+                    .map(move |ground| format!("{:?}", partition(climate, ground, inv)))
+            })
+            .collect()
+    };
+    let (checked, counts) = with_exits(Exits::Checked, run);
+    let (unlevered, uncounted) = with_exits(Exits::Unlevered, run);
+    assert_eq!(uncounted, ExitCounts::default());
+    assert_eq!(checked.len(), unlevered.len());
+    for (k, (with, without)) in checked.iter().zip(&unlevered).enumerate() {
+        assert_eq!(with, without, "case {k}");
+    }
+    let solves = u64::try_from(checked.len()).unwrap();
+    assert_eq!(counts.solves, solves);
+    assert_eq!(counts.checked_solves, solves);
+    let mut sweeps: BTreeMap<u64, u32> = BTreeMap::new();
+    for (climate, inv) in &cases {
+        for ground in &grounds {
+            let (_, one) = with_exits(Exits::Taken, || partition(climate, ground, inv));
+            assert_eq!(one.solves, 1);
+            *sweeps.entry(one.sweeps).or_default() += 1;
+        }
+    }
+    eprintln!("{solves} solves checked; the sweeps a solve takes, by count: {sweeps:?}");
+    let least = sweeps.keys().next().copied().unwrap();
+    assert!(least < u64::from(PARTITION_SWEEPS), "{sweeps:?}");
+    assert_eq!(sweeps.values().sum::<u32>(), u32::try_from(solves).unwrap());
+}

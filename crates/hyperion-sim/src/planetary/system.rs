@@ -128,8 +128,8 @@ use crate::planetary::halo::{
 use crate::planetary::hooks::cold_traps::{self, ColdTrapRules, ColdTrapSky, RecordColdTraps};
 use crate::planetary::hooks::figures::{
     BeltMembership, Continents, CraterInputs, FiguresInputs, HostOrbit, HostOrbiter, ImpactorOrbit,
-    ImpactorSources, MoonBirth, SourceBelt, VolatileHistory, VolatileHistoryInputs, WindowAt,
-    WindowEntryInputs, past_outgassing, relief, window_entry,
+    ImpactorSources, MoonBirth, SourceBelt, VolatileHistory, VolatileHistoryInputs, WaterIce,
+    WindowAt, WindowEntryInputs, past_outgassing, relief, window_entry,
 };
 use crate::planetary::hooks::surface::{
     ClimateInputs, HourCosines, SeasonalSpin, SeasonsFrom, SurfaceInputs, ZonalInsolation,
@@ -3665,7 +3665,7 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         return Section::NotApplicable;
     };
     let table = ZonalInsolation::of(spin.obliquity, time.cosines);
-    let (conditions, (partition, published)) =
+    let (conditions, (partition, published, ice)) =
         with_partition(&figures, case, (&spin, seasonal), conditions, &table);
     // The second stage: the volatile history reads the conditions' liquid-water flag, the hosts'
     // light over the body's past and its outgassing then (P14.T48.b), and the ocean and the ice
@@ -3680,7 +3680,8 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         window,
         outgassing: |age: Years| past_outgassing(&figure_inputs, age),
     });
-    let figures = figures.with_surface_under(&conditions, history, Some(&published), &table);
+    // T24.b's ice is the partition's cover's, read off the profile it built (lever (a)).
+    let figures = figures.with_surface_under(&conditions, history, Some(&published), &table, ice);
     // Step 10, the climate regime (P14.T48.d): it reads the cover, which reads no regime (an ice
     // belt's band is the profile's cold equator, science-p14-t24b-laws §4.3), so it follows the
     // second stage with no loop.
@@ -3707,12 +3708,12 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
 }
 
 /// The conditions `conditions` of the body `case` describes, of figures `figures`, spin and seasonal
-/// orbit `seasons`, with P14.T51.a's partition on the record
-/// ([`GlobalFigures::condensates_under`]): the conditions' liquid-water flag, the ocean and ices,
-/// and the regime's reservoirs read it. Its cold traps (P14.T51.f) take the sky [`cold_trap_sky`]
-/// gives and the bare regolith's albedo its derivation gives (P14.T51.i), under their own hold at
-/// 24, which follows the case's rules, those in force. The cold profile reads the body's
-/// insolation table `table`.
+/// orbit `seasons`, with P14.T51.a's partition on the record and T24.b's water ice as its cover read
+/// it ([`GlobalFigures::condensates_and_ice_under`]): the conditions' liquid-water flag, the ocean
+/// and ices, and the regime's reservoirs read it. Its cold traps (P14.T51.f) take the sky
+/// [`cold_trap_sky`] gives and the bare regolith's albedo its derivation gives (P14.T51.i), under
+/// their own hold at 24, which follows the case's rules, those in force. The cold profile reads the
+/// body's insolation table `table`.
 #[must_use]
 fn with_partition(
     figures: &GlobalFigures,
@@ -3720,8 +3721,8 @@ fn with_partition(
     seasons: (&SeasonalSpin, &KeplerElements),
     conditions: SurfaceConditions,
     table: &ZonalInsolation,
-) -> (SurfaceConditions, (Partition, Condensates)) {
-    let condensates = figures.condensates_under(
+) -> (SurfaceConditions, (Partition, Condensates, WaterIce)) {
+    let condensates = figures.condensates_and_ice_under(
         case.sky.atmosphere,
         &conditions,
         case.bulk.surface_gravity(),
