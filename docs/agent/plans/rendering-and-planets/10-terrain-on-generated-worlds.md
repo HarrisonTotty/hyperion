@@ -353,6 +353,14 @@ index, and each query is given the body's detail seed, which the field does not 
   `handoverReliefM`, `limbDistanceM`, `pixelAngleRad`, `handoverTauPx`, and `storeReliefSource`
   over a `CoarseFieldStore` as a `HandoverReliefSource`; with R07's `photoreal/renderer.ts`
   `FrameTerrain`, the frame's terrain input. R10.T16 ("The live terrain path") consumes them.
+  _Since R10.T10.g the hand-over counts the presented width's centre pixel
+  (`BodyFrameOptions.presentedPx`, `PhotorealFrame.presentedPx`)._
+- The disc's normal map (as built, R10.T10.g; Risks, "Deviations in T10.g, as built"): the
+  surface crate's `WorkerFields::normal_map` (`NormalMap`, the module's `normalMap`), carried in
+  the workers' `class-map` answer; R07's `bodies/discNormals.ts` (`NormalMapTexels`,
+  `packNormalMap`, `normalMapNormalAt`, `normalMapTexture`), held by `ClassMapStore` beside the
+  class map as `ClassMapDiscSurface.normals` and read by the disc (`bodyDisc.wgsl`, binding 14)
+  and by T10.f's point integral.
 - `levelBounds.ts`: `LevelBounds { hard: Float64Array; sigma: Float64Array }` per body, and
   `selectionBound(bounds, level, rule)`. As built, R05's selection reads its bound from the body's
   level table (`PlanetGeometry.levels`, four values a level: bound, lowest and highest height,
@@ -926,6 +934,18 @@ targets at header 21 (below).
    exact, and 1.35 for the particulate rows, against which the Ice row's A_N × sup η is 0.97 under
    the rule. A normal albedo above 1 is physical (Enceladus's is 0.9–1.4). See "Deviations in
    T1.a, as built"._
+   _The disc, recorded by R10.T10.g (decision-r10-t16-leans §1): R07's disc in its `class-map`
+   case shades surveyed ground with the field's own normals as well as its classes, a per-body
+   normal map at the field's level made by the workers beside the class map (one normal a
+   surveyed cell, the height's at band max(L − 6, 0) at the cell's centre: the coarsest patches'
+   doubled normals there, bit for bit), filed under `coarse-field-gpu`; each class's law takes
+   μ₀ and μ on that normal while the hit, the limb and the projected area stay the spheroid's, and
+   T10.f's point integral does the same. So disc and terrain agree at every phase by construction
+   in their laws, classes and cell-scale slopes, except where the disc floors μ at half the
+   spheroid's (a cell whose slope faces more than about 24° away from the camera at 90° of phase,
+   near the limb, where the terrain draws its facet hidden or black); what the disc still leaves
+   out is the sub-cell relief's shading and its cast shadows (Risks, "Deviations in T10.g, as
+   built")._
 9. **No textures in this plan.** The Materials section lists triplanar projection of rock and detail
    textures and two-scale repetition hiding. Anything a texture adds below the band limit is detail
    the simulation did not compute, which the brainstorm defines as decoration, and R11 owns it,
@@ -1050,7 +1070,16 @@ targets at header 21 (below).
     is why the same smooth law holds on both sides of it (Design note 8). _Not so at high phase: the
     fixture's level-6 cells, resolved over 2 to 3 px at the hand-over, change by up to 0.42 stop at
     90° (T16.d, F2), the shading of their mean slope. R10.T10.g gives the disc the field's normals
-    (decision-r10-t16-leans §1)._ A body with no survey never hands over.
+    (decision-r10-t16-leans §1)._ _As built by R10.T10.g, the premise recorded: the disc now shades
+    surveyed ground with the field's own normals, one a surveyed field cell (the coarsest patches'
+    cell-scale slope), so the law, the classes and the cell-scale slopes are the same on both sides
+    of the switch, and the hand-over changes the geometry and the sub-cell shading alone. The
+    quadtree takes the ground from the root faces down, but its steady terrain at the hand-over is
+    the field's level, not the roots: on TERRAIN TEST (15.8 km of relief) selection keeps level-6
+    patches, 64 quads a side over a cell, since level 5's bound (17.1 km) exceeds the relief, so
+    the roots are only its first draw. The 0.42 stop of F2 was taken with the switch at about 94.5°
+    and 102° of phase; the committed check (`--handover`) at 90° measures the figures in
+    "Deviations in T10.g, as built"._ A body with no survey never hands over.
 14. **The wireframe's contours are chosen as a scale is** (researched 2026-09-29). The wireframe
     draws its terrain once, depth only, at 4 px, and writes colour only where the interpolated
     height crosses a contour level. The interval is one deterministic rule of pose alone, so every
@@ -1996,6 +2025,13 @@ src/renderer/src/view/bodies src/renderer/src/displays/view` and `just test-rend
   harness at 30°, 90° and a view near the terminator (incidence 75° or more), both settings, every
   texel of at least 2 shared pixels within 1/3 stop at 30° and 90°, the terminator's recorded.
   Design note 13's premise and Design note 8's disc recorded.
+  _As built (Risks, "Deviations in T10.g, as built"): the normal map is the surface crate's
+  `WorkerFields::normal_map`, carried in the workers' `class-map` answer; the disc takes μ₀ and μ
+  on it, the area on the spheroid's, μ floored at half the spheroid's; the point's elements take
+  k × k normals at levels 7 and 8; the rise is the survey's 1.6° regional slope, not a law or an
+  albedo (traced on the CPU twins); the check is `--views-check --terrain --handover`; every judged
+  cell is within 1/3 stop at 30° and 90° on both settings (worst 0.093 stop), and the terminator
+  keeps 2 cells over on high, deferred; no cross-fade (ruled)._
 
 ### R10.T16 The live terrain path
 
@@ -2318,7 +2354,8 @@ src/renderer/src/view/spike` and `just test-render --part=6`.
       alone; the primary with a wireframe instrument; and the forced loss. Its own phase, record and
       results types (`TerrainCheckPhaseName`, `writeTerrainResults`), `ViewsCheckLaunch.terrain`
       required; full runs under `docs/measurements/terrain-check/`, smoke runs under
-      `target/views-check/terrain/`.
+      `target/views-check/terrain/`. _Since R10.T10.g the launch's kind is one field,
+      `ViewsCheckLaunch.run` (`"several-views"`, `"terrain"` or `"handover"`)._
     - The forced loss is expected exactly once: one `device-lost` with reason `destroyed` inside the
       loss phase's window, then one restore; the faults verdict excludes that one alone. After it
       the terrain is drawn again, no `surface_field` asked and no `field-init` posted, and no
@@ -7811,6 +7848,9 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     scale that `litRegimes` measures its 3 px switch by, so that both switches count pixels alike:
     6.014 × 10⁻⁴ rad at 1080p across 60°, where 10 km hands over at 1.663 × 10⁷ m (4.157 × 10⁶ m at
     4 px), as R07's orchestrator ruling of 2026-10-03 took the centre pixel for its own figures.
+    _Since R10.T10.g the hand-over counts the presented width's centre pixel
+    (`BodyFrameOptions.presentedPx`), the 3 px switch still the frame's own ("Deviations in T10.g,
+    as built")._
   - _The distance is the limb's_ (beyond the decisions; asked below). `handsOver` sets the range
     against the camera's distance to the body's limb, √(D² − a²) for a camera D from the centre of
     a body of equatorial radius a (`limbDistanceM`, 0 from inside), not the centre's: there the
@@ -7847,7 +7887,8 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     is not taken for one handed over (asked below). `planLitBodies` runs `litRegimes`, then
     `handOverRegimes` (each disc with a relief, at the photorealistic style's τ on
     `options.setting` and `pixelAngleRad` of the frame's camera and viewport, the pixel the 3 px
-    switch measures), then `promoteOverlapping`, whose writers now include a body handed over
+    switch measures; since R10.T10.g the presented viewport's), then `promoteOverlapping`, whose
+    writers now include a body handed over
     (`drawnAsMesh`), so that a disc overlapping it is promoted. A point never hands over: its flux
     is the point regime's, T10.f's. A body handed over is drawn as a mesh body is (its smooth figure
     in the `bodies` pass, its limb in the sequence), its `MeshBodyPlan.handedOver` set, its figure
@@ -7990,7 +8031,8 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     fully surveyed (none is, before T15), and T10.b's back-facing normals at grazing views (the
     survey seen at μ 0.97 and 0.71, no grazing view). The owner's UHD 620 runs stay his, pending:
     this procedure in `VIEW` once a served world is fully surveyed (T15). _Ruled a defect
-    (decision-r10-t16-leans §1): fixed by R10.T10.g before T15._
+    (decision-r10-t16-leans §1): fixed by R10.T10.g before T15._ _R10.T10.g commits this harness as
+    `--views-check --terrain --handover` and records its runs ("Deviations in T10.g, as built")._
 
   - _The residuals of T10.a against plan 14's p and q._ p: T10.a's own record ("Deviations in
     T10.a, as built", the table): in V zero to rounding (at most 2 × 10⁻¹⁶ relative) on every
@@ -8062,7 +8104,10 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     given the roughness its figure leaves unresolved (a macroscopic roughness from the field's
     unresolved slopes). For T10's follow-up, judged again on a patterned served world (T15); the
     bound's reading is asked of main (T16's F2 record, "Leans for a ruling"). _Ruled a defect
-    (decision-r10-t16-leans §1): fixed by R10.T10.g before T15._
+    (decision-r10-t16-leans §1): fixed by R10.T10.g before T15._ _By R10.T10.g: the disc shades with
+    the field's normals; the committed check at 90° measures the worst hand-back cell at 0.176 stop
+    on high before them and 0.093 after (0.119 and 0.084 on low); F2's 0.42 was taken at α ≈ 94.5°
+    ("Deviations in T10.g, as built")._
   - _The survey's rise at the terrain's first draw at 90°_ (+0.041 stop on high, +0.037 on low;
     +0.8% at 30°), against the disc's last frame. It cannot come from resolved relief under one
     law at i = e: relief only darkens or leaves the brightness equal there (Lommel–Seeliger's
@@ -8074,6 +8119,9 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     frames, which the read-back does not hold (a shader probe would have to write them). The
     earlier record's attribution, "the terrain's resolved relief against the smooth figure", is
     withdrawn. For T10's follow-up or T15. _Ruled (decision-r10-t16-leans §1): R10.T10.g traces it._
+    _Traced by R10.T10.g: the survey's regional slope, the 48 cells leaning about 1.6° towards the
+    sun (tan i tan δ), not a law or an albedo; the normal map takes it to −0.003 stop at 90°
+    ("Deviations in T10.g, as built")._
   - _Design note 13's example is one-sided; the header's relief is peak to trough._ Its "10 km of
     relief either side of the datum" is 20 km from peak to trough, while `realised_relief_m` is
     the highest elevation less the lowest, so a symmetric world of ±10 km takes 20 km and hands
@@ -8085,7 +8133,9 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     0.5 to 1), as the 3 px switch does, while `TerrainSettings.tauPx` is stated at the presented
     resolution and `TerrainPass` selects at it; so the range falls with the scale, to half at 0.5,
     and a body near its range may hand over and back as the resolution controller moves by more
-    than the 10% hysteresis. The lever: both switches on the presented pixel.
+    than the 10% hysteresis. The lever: both switches on the presented pixel. _Fixed by
+    R10.T10.g: the hand-over, both ways, on the presented width's centre pixel; R07's 3 px switch
+    keeps the frame's own ("Deviations in T10.g, as built")._
   - _The classes' q is the Regolith row's, not plan 14's._ The airless rocks take Mercury's q
     (0.480) while their classes draw the Regolith row's (0.626, the Moon's curve), and the
     reference Mars's dust Mars's (1.085) against the same 0.626: +30.5% and −42.3%. So away from
@@ -8304,6 +8354,259 @@ observer)`, in the body-fixed axes (`classMapPointReflection` takes the galactic
     (q 0.62600 in V) taking the rest of p: q_V ≈ 0.665, the glaciers 4.5% of p, against plan 14's
     1.08465 on Mars's template (−38.7%). Not checked against the worker's photometry export; T10.e's
     finding stands, for plan 14 and R10.T1.a's rows.
+- **Deviations in T10.g, as built** (2026-10-21; lane r10-handover, on `rendering-and-planets` at
+  `14094589`, merged to `c252e980`; decision-r10-t16-leans §1 and §13).
+  - _Files._ The surface crate's `worker.rs` (`NormalMap`: `level`, `band`, `cells`, `pairs`,
+    `is_complete`; `WorkerFields::normal_map`), `patch/normals.rs` (`encode_octahedral_f32`, the
+    one narrowing the bake and the map share), `wasm.rs` (`normalMap`, `NormalMapAnswer`) and
+    `worker/tests.rs`. The client's `view/terrain/workers/messages.ts` (the `class-map` answer's
+    `normalLevel`, `normalCells`, `normalPairs`, `normalsComplete`) and `heightBake.ts`; a new
+    `view/bodies/discNormals.ts` (`NORMAL_MAP_FORMAT`, `NO_NORMAL`, `NormalMapTexels`,
+    `packNormalMap`, `normalMapTextureSpec`, `normalMapTexture`, `normalMapNormalAt`);
+    `discSurface.ts` (`forEachGutterTexel`, shared by both maps' gutters; `classMapSurface`'s
+    normal map), `appearance/bodyAppearance.ts` (`ClassMapDiscSurface.normals`, `DiscNormalMap`),
+    `terrain/classMap.ts` (`ClassMapStore` holds both textures), `shaders/bodyDisc.wgsl`
+    (`surface_normals` at binding 14, `shading_normal`, `shade`), `bodies/discShading.ts` (the
+    twin; row 24's w the record's flag), `bodies/draw.ts` (binding 14 in `DISC_TEXTURES`, the
+    mesh's and the cells kernel's; `BodyFrameOptions.presentedPx`), `bodies/classMapPoint.ts`
+    (`classMapPointNormalSamples`), `photoreal/renderer.ts` and `displays/view/photorealFrame.ts`
+    (`presentedPx`), `viewFrameDrawer.ts`; `test/normalMapFixtures.ts`; the smoke's `bodies.ts`
+    (two checks) and every frame producer. The views check's hand-over variant: `main/cli.ts`
+    (`--handover`), `main/viewsCheck.ts`, `main/viewsCheckRecord.ts` (`readHandoverCheckRecord`),
+    `main/handoverCheckResults.ts` (new), `main/index.ts`, `preload/api.ts` (`ViewsCheckLaunch.run`,
+    a `ViewsCheckRunKind` in place of the `terrain` boolean; the `Handover…` record types),
+    `preload/viewsCheckApi.ts` and `viewsCheckLaunch.ts`, `scripts/viewsCheck.sh`, `App.tsx`, and in
+    `displays/view/check/` `handoverGeometry.ts`, `handoverScenes.ts`, `handoverReading.ts`,
+    `handoverPairing.ts` and `handoverCheckRun.ts` (new), `ViewsCheckRunner.tsx`, `terrainProbe.ts`
+    (`checkScenes`, `readSceneTarget`, `coverageCells(body?)`) and `viewsCheckRun.ts`;
+    `main/fixtures/handoverRecord.ts` (a passing record); `view/terrain/handover.ts` (its
+    documentation). Tests beside each. No wire format, payload or golden changes.
+  - _The presented pixel_ (§13's lever). `planLitBodies` measures the hand-over, both ways, at the
+    presented width's centre pixel, `pixelAngleRad(camera, options.presentedPx)`, the canvas's
+    device px that `ViewFrameDrawer` gives beside the internal viewport (`PhotorealInputs` and
+    `PhotorealFrame` carry it, required; `BodyFrameOptions.presentedPx` required, so every caller
+    states it), as the field's want and `TerrainPass` already do; so neither the resolution
+    controller's scale nor low's 720-row cap moves it (tested at scales 0.5 and 1 and under the
+    cap). R07's 3 px switch stays on the frame's own pixels (deviation: the ruling's "both
+    switches" is read as the hand-over and the hand-back, since the 3 px switch's 1% is a match
+    between the point's flux and the disc rasterised in the frame's own pixels).
+  - _The normal map_ (§1's remedy 1). `WorkerFields::normal_map`: for each surveyed cell of the
+    body's held field (level L, 5 to 8; margin cells left out), rising, the normal of R09's height
+    and gradient at band max(L − 6, 0) at the cell's centre (`surface_normal`, octahedral, `f32`):
+    at each level 5 to 8 of the synthetic worlds, bit for bit the coarsest patches' doubled normal
+    (`NormalScale::Double`) at that centre, natively and on both wasm targets (tested). The worker
+    answers it with the class map (one query, one set of triggers: the store asks again while
+    either is incomplete), its pairs narrowed to half floats as a bake's. Packed as an `rg16float`
+    2D array of six layers of (2^L + 2)² texels with the class map's gutter, `NO_NORMAL` (2, 2) for
+    an unsurveyed texel; 27,744 B at level 5, 104,544 B at 6, 405,600 B at 7, 1,597,536 B at 8
+    (§1's "about 1.5 MiB"), under `coarse-field-gpu`. Reconstructed at a point as the class map's
+    shares are: the datum's normal where the texel holding it has none, otherwise the four nearest
+    centres' decoded normals, surveyed ones alone, bilinearly, renormalised. The store makes both
+    textures or neither; a map of no cell packs to `null`; an answer whose module gives a class map
+    but no normal map is `class-map-failed`.
+  - _The disc's shading_ (`bodyDisc.wgsl` `shade` and its twin, mirroring `terrainLit.wgsl`
+    `shade_terrain`). Two normals at each hit: the datum's ν (the spheroid's, as before) and the
+    shading normal n′ (the map's where it holds one, ν elsewhere). The law's μ₀ and μ, each star's
+    horizon term and planetshine take n′; the hit, the limb, the projected area, R08's lookups and
+    the sky's μ₀ stay on ν, the sky scaled by (1 + n′ · ν) ÷ 2 (Bruneton 2017's tilted plane, as
+    the terrain); the datum's tangent plane is the local horizon on n′,
+    `sphere_irradiance(d ÷ R★, φ′, max(φ_ν − φ′, 0))`, the η that cuts the star's disc at its true
+    distance (decision-r10-t8b §1), so the body's curvature still sets the terminator for a slope
+    facing the star; μ is floored at ½ μ_ν (deviation: so that a cell whose mean slope faces away
+    near the limb never draws black, where the terrain's `μ ≤ 0` draws black and its geometry hides
+    the facet; equal to n′ · v wherever that is at least half the datum's). Without a normal map
+    every value is today's bit for bit (tested). The decode is the terrain's, a disc-local WGSL copy
+    pinned equal to `terrainPatch.wgsl`'s by test (deviation: the terrain's library is not composed
+    with the disc's).
+  - _The point_ (T10.f's integral). Each element's I/F on its shading normals and its area on the
+    datum's, lit where μ₀′ > 0 and μ₀_ν > 0, the normalisation's denominator on the datum's; at
+    levels 7 and 8 each element takes k × k normals at its sub-elements' centres (k 2 and 4,
+    `classMapPointNormalSamples`; deviation: one a element missed R07's 1% at level 8, up to 2.4%,
+    and one a normal texel up to 9%); within 1% of the disc at the 3 px switch (64 × 64 samples a
+    pixel) under a ±12° checkerboard and ridges at levels 6 and 8 (worst 0.75%), the cache's δ
+    unchanged (worst 2.27 × 10⁻³ with normals). Deviation from T10.f's bracket: against an `f64`
+    brute force the point holds 0.3% on band-limited and coherent slopes (worst 1.8 × 10⁻³) but
+    errs by up to 6.5 × 10⁻³ under the checkerboard at the map's own resolution, which is held at
+    R07's 1% instead.
+  - _The trace_ (the task's "+0.04 stop rise … traced"). On the CPU twins with the real module, the
+    TERRAIN TEST world (48 level-6 cells, F2's geometry): laws and albedos differ by nothing between
+    the disc and the terrain there (one class, pair 1:0, A 0.2 on the Regolith row, the same law as
+    `elsewhere`, `terrainMoonPhotometry`'s); the shading normals alone reproduce the rise, +0.038 to
+    +0.041 stop at 90° and +0.010 to +0.011 at 30° against the GPU's +0.041 and +0.011, its largest
+    texels to 0.01 stop: the 48 cells lean +1.5° to +1.7° towards the sun in the phase plane, and
+    at i = e a tilt δ raises the brightness by tan i tan δ (exact law 0.0393 and 0.0105 stop). Not a
+    law or albedo mismatch, so nothing to fix there; the normal map removes it on the twins (the
+    survey to within 0.003 stop). Selection at the hand-over keeps level 6 on this world (level 5's
+    bound 17.1 km exceeds its 15.8 km of relief), so the roots are only the first draw. The twins
+    reproduced about half of F2's 0.42 at the hand-back (0.23); the committed check (below)
+    measures it afresh. Deviation: traced on the CPU twins with the real module, which are tested
+    equal to the shaders, rather than in a GPU scratch build, since they reproduced F2's GPU
+    figures to 0.003 stop. On today's tree the committed check's own first-draw rise at 90° is
+    +0.008 (high) and +0.0095 (low) before the normal map, against the twins' +0.038 to +0.041 on
+    F2's geometry: not attributed (its hand-back survey, −0.043 and −0.033, is the twins' steady
+    level 6). Every law drawn on this fixture is one (pair 1:0 is `elsewhere`), so no law or albedo
+    mismatch can show on it; untraced, for T15: on a served world `elsewhere` is `lawFor`'s
+    Mercury template against the classes' Regolith row (T10.e's q finding), and at the roots'
+    first draw 10.4% of the survey's area is the reference surface, law 0 on the datum. Decision
+    §1's "symmetric relief only darkens" holds for slopes of zero mean; this survey's mean slope is
+    a tilt of about 1.6° towards the sun. Scratch: `rm45-scratch/r10-handover/trace/`.
+  - _The check_ (`--views-check --terrain --handover`, both settings, or `--setting`): three
+    check-only kept scenes, `HAND-OVER 30°`, `HAND-OVER 90°` and `HAND-OVER TERMINATOR`, offered on
+    that launch alone, `TERRAIN TEST`'s bodies with the moon held still, the clock at 1 s/s and both
+    survey passes served at once; the survey's middle turned to (i, e) = (15°, 15°), (45°, 45°) and
+    (78°, 12°), α = i + e, at the hand-over range, the camera's line solved for e there (deviation:
+    F2's far-off bisector put its 90° switch at about α 94.5° on high and 102° on low); the line
+    from 3 × the range to 0.85 at 1% a second, a 12 s hold, out to 1.25; the exposure settled on
+    `AUTO` then `INHIBIT`, verified and watched; read-backs of the scene target either side of the
+    figure's switch, the terrain's first draw and the hand-back, each pixel's cell by its ray to the
+    datum; per cell the mean over the pixels both frames assign to it, every cell of 2 or more
+    judged, a cell dark on one side counted. Main judges: every judged cell, and the body's and the
+    survey's means on both their own and their shared pixels (deviation: the stricter), within
+    1/3 stop at 30° and 90°; the terminator's recorded; the run exits 0 only with a passing record,
+    `<date>-<machine>-<setting>-handover.{json,md}` beside the terrain run's. The world is a
+    parameter (`HandoverWorld`) for T15's served one, not built. Beyond the brief (each the
+    smallest reversible choice): a frame fails the camera model's check at 5% of its body's pixels
+    off the datum (`HANDOVER_MISS_LIMIT`; the limb's ring is about 2%); the exposure counts as
+    settled within 0.15 EV for 3 s; read-backs cover the disc's region and 4 px about it, at most 3
+    in flight, and only the pairs across a regime's change are compared (`framesApart` says when a
+    read-back was skipped); a hand-over launch runs no phases and refuses them; main fixes each
+    look's scene and judged flag by its name and each switch's regimes, and refuses a record that
+    disagrees; GPU-process exits fail it, console errors are recorded. A look chosen by hand before
+    the run measures is drawn at a provisional range from the window's width and measures nothing.
+  - _The hand checks_ (2026-10-21, hidden, the RTX 3080, vulkan, high's primary 1126 × 906 px and
+    the range 15,419 km, low's 822 × 474 px and 5,628 km; provisional, a shared machine). Before:
+    the check on `6a5f2845` with the lane's change but the disc's normals unread (out/ of 09:53;
+    high at load 6.72, low 6.11). After: on `c252e980` with the whole change (out/ of 12:46; high at
+    load 4.91, low 4.71), committed as `docs/measurements/terrain-check/2026-10-21-effect-{high,low}-handover.{json,md}`.
+    Both pass, every look whole: 48 surveyed cells, 0 mapping mismatches, 0 body pixels off the
+    datum, the exposure locked and held (EV100 15.2, 13.6, 13.5 high; 15.3, 13.8, 13.5 low), no
+    engine fault; the hand-over at 0.9091 of the range and the hand-back at 1.111, as the app's
+    switches on the presented pixel put them; frames 1 apart at the switches but high's 90°
+    hand-back after (4: read-backs skipped, recorded) and 7 to 13 across the terrain's first draw.
+    log₂ (after ÷ before) in stops, the survey's mean (own pixels) and the worst judged cell (its
+    shared pixels), before → after:
+
+    | Setting, look              | Disc → terrain's first draw                  | Terrain → disc (hand-back)       | Cells over 1/3 stop |
+    | -------------------------- | -------------------------------------------- | -------------------------------- | ------------------- |
+    | High 30°                   | survey +0.003 → +0.000, cell +0.015 → −0.002 | −0.009 → +0.001, −0.034 → +0.032 | 0 → 0               |
+    | High 90°                   | +0.008 → −0.003, +0.044 → −0.014             | −0.043 → +0.000, −0.176 → −0.093 | 0 → 0               |
+    | High terminator (recorded) | +0.044 → −0.003, +0.267 → −0.040             | −0.186 → −0.012, +0.609 → +0.637 | 14 → 2              |
+    | Low 30°                    | +0.0025 → −0.000, +0.012 → −0.002            | −0.009 → +0.001, −0.031 → +0.021 | 0 → 0               |
+    | Low 90°                    | +0.0095 → −0.001, +0.049 → −0.011            | −0.033 → +0.008, −0.119 → +0.084 | 0 → 0               |
+    | Low terminator (recorded)  | +0.044 → −0.000, +0.261 → +0.021             | −0.167 → +0.008, −0.487 → −0.269 | 11 → 0              |
+
+    The figure's switch moves no figure by more than 0.001 stop, before or after; the body's means
+    stay within 0.006 stop everywhere. So every judged cell is within 1/3 stop at 30° and 90° on
+    both settings, before the normal map as after it, the normal map halving the worst hand-back
+    cell at 90° and taking the survey's means to within 0.012 stop at every switch of every look;
+    the terminator's two cells over on high are at the hand-back alone (3838 +0.637 and 7810
+    −0.382, 4 px each). F2's 0.42 did not reproduce on today's tree with the camera's line solved
+    for e: its 90° switch fell at α ≈ 94.5° on high and 102° on low, and the tree has changed since
+    (the relief re-blessed, R10.T8.c's normals, R10.T9.b, R10.T14); which explains it is not worked
+    out. By eye, a capture of each look on each setting: the survey under its mark, no seam, no dark
+    or bright cell, nothing of the harness; nothing the normal map changed is visible at this scale;
+    on low the label block covers the disc's middle at 30° and at the terminator. Logs and captures:
+    `rm45-scratch/r10-handover/harness/` (`after/`); the files name the captures' first directory.
+
+  - _The cross-fade_ (remedy 2): not built. Ruled (decision-r10-t16-leans, "R10.T10.g terminator
+    cross-fade", 2026-10-21): the task judges its bound at 30° and 90°, which hold, and records the
+    terminator; its two cells are a deferred finding below, whose levers T15.b's served world
+    decides (a new R10.T10.h if a line of cells is over there).
+  - _Design note 13's premise and Design note 8's disc_, recorded in both notes: the same law,
+    classes and cell-scale slopes on both sides; the steady terrain at the hand-over the field's
+    level, not the roots.
+  - _Acceptance, as built._ The surface crate's normal-map, order, patch, bake, worker and golden
+    tests natively and on wasip1 (176 each), the four normal-map tests on the browser target,
+    Clippy on the host and the browser target, `just doc-check`; vitest over
+    `src/renderer/src/view/bodies`, `view/terrain`, `view/photoreal`, `view/atmosphere`,
+    `view/scenes`, `displays/view` and `smoke` (196 files, 7,282 passed, 2 skipped) and over the
+    views check's suites in `src/main`, `src/preload`, `displays/view/check` and `App` (27 files,
+    619); the typecheck from a clean cache, `pnpm lint`, Prettier and the console-ux lint;
+    `just test-render --part=1 --part=7` on both variants (part 1 298 and 296 passing, part 7 23
+    each, the two new R10.T10.g checks among them: sloped cells at 0.187 of the texel tolerance, a
+    map of datum normals at 0.125 and its flux within 4.9 × 10⁻⁶ of the disc without one); the
+    hidden runs above; and the batch's gate, `just smart-ci rendering-and-planets --hook-checks`
+    over the final tree (`/home/quantum/gh/hyperion/.git/rm45-scratch/r10-handover/smart-ci-final.log`).
+  - _Generator version._ Untouched (22); no golden changed or added (the normal map's own golden is
+    deferred, below).
+- **Questions for "main" (R10.T10.g)** (none touches a contract of the server's; each built to its
+  lean).
+  - _"Both switches"._ Read as the hand-over and the hand-back; R07's 3 px switch stays on the
+    frame's own pixels. Lean: as built. _Ruled (decision-r10-t16-leans, "R10.T10.g terminator
+    cross-fade", 2026-10-21): agreed; on presented pixels at scale 0.5 the 3 px switch would sit at
+    1.5 frame px, where its 1% match is not defined._
+  - _The μ floor at the limb_ (½ μ_ν), an approximation where normal mapping has broken down
+    (the science check: it acts only on slopes facing more than about 24° away from the camera at
+    the 90° look). Lean: as built; limb texels on T15's fully surveyed world are not expected to
+    stay within 1/3 stop. _Ruled (ibid.): agreed; T15.b's per-texel bound leaves out each cell where
+    the floor binds at the cell's centre (n′ · v < ½ μ_ν) and counts those cells in its record, the
+    body's and the survey's means still judged over every pixel._
+  - _The cross-fade at the terminator._ Lean: not built (the bound is judged at 30° and 90°).
+    _Ruled (ibid.): accepted; remedy 2 of decision §1 reads "only for what remedy 1 leaves above
+    1/3 stop at the judged phases"._
+  - _The guide's rows for the three scenes_ (drafted for main's sign-off agent; the UX review's
+    companion edits folded in). A row of Kind `Scene`: "`HAND-OVER 30°`, `HAND-OVER 90°`,
+    `HAND-OVER TERMINATOR`: the hand-over check's kept test scenes, offered only on a views check
+    with `--terrain --handover`, under the measurement banner: `TERRAIN TEST`'s bodies (`TEST STAR`,
+    `TEST MOON`, the own ship `TEST HULL`), the moon held still with its survey's middle at 15° of
+    incidence and 15° of emission, 45° and 45°, or 78° and 12°, each of the first two named by its
+    phase α = i + e, the terminator's sharing the 90° look's phase at a grazing sun; the own ship
+    closing on the moon through its hand-over to terrain and backing out through the hand-back, its
+    clock at one second a second." And the `SCENE` row's list extended: "…or, on a views check with
+    `--terrain --handover`, `HAND-OVER 30°`, `HAND-OVER 90°` and `HAND-OVER TERMINATOR` under the
+    measurement banner". Lean: adopt with the views-check rows.
+- **Deferred findings (2026-10-13 rule) (R10.T10.g)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _The terminator's cells at the hand-back_: the terminator look (i 78°, e 12°) has 2 cells of
+    48 over 1/3 stop on high, both at the hand-back. Cell 3838 is +0.637 stop (4 px, the disc
+    brighter: a cast shadow the disc has no term for). Cell 7810 is −0.382 (4 px, the disc darker,
+    not yet explained; low's worst, −0.269). Low has none over. Recorded, not judged (the task's
+    text). The levers, in order (decision-r10-t16-leans, "R10.T10.g terminator cross-fade"): trace
+    7810; a coarse shadow term in the disc from the field's horizon toward the star; the cross-fade
+    over the hysteresis band for what remains. T15.b records the look on its served world, and a
+    new R10.T10.h builds the lever if a line of cells is over there.
+  - _The normal map's GPU cost_ is unmeasured: per shaded point of a class-map disc with a map,
+    one cube-face lookup, five `textureLoad`s and decodes, a renormalisation and a second
+    `preciseAtan2` a star (uniform discs and the cells pass return at the flag). For T14's A/B in
+    a quiet window.
+  - _`TERRAIN: STREAMING` at mid-hold_: still standing about 13 s after the hand-over on both
+    settings, in every look.
+  - _The results' writer_ prints `-0.000` for a change under 5 × 10⁻⁴ stop, and its files are not
+    in Prettier's form (as the terrain writer's; F1's finding); the committed four were formatted
+    after the runs, and they name the captures' first directory, since moved to scratch.
+  - _No golden pins the normal map_ (the determinism audit): it is tested bit for bit against the
+    coarsest patches' doubled bake on native and both wasm targets, but no golden pins the root's
+    or bands 1 and 2's doubled normals. The lever: a `normal_map` section in `worker/moon_like.golden`
+    (level, cells, `f32_digest` of the pairs, complete) at the next re-bless, and `fieldsWasm.test.ts`
+    compared with it.
+  - _Planetshine has no datum cut_, on the disc as on the terrain (both agree, so no step at the
+    hand-over): a facet tilted 12° towards Jupiter seen from Io takes 0.208 of face-on with Jupiter's
+    centre on the datum horizon, against 0.140 with the cut, and its lit band reaches about 690 km
+    past the datum's terminator. The lever: `planetshine_irradiance(…, n′, max(φ_ν − φ′, 0))` in
+    both shaders.
+  - _The point's first frame at levels 7 and 8_: the elements' shares and their k² normals cost the
+    render thread about 0.6 s at level 7 and 1.4 s at level 8 the first time a point is drawn under
+    a map (T10.f's 0.3 s at level 6), and hold 4.7 MB and 19 MB. The lever: off the frame (a worker
+    or an idle callback), or a quarter-point path decoding each normal texel once.
+  - _The point at the map's own resolution_: under a ±12° checkerboard of cells the point errs by
+    up to 6.5 × 10⁻³ against an `f64` brute force (band-limited slopes 1.8 × 10⁻³), within R07's 1%
+    at the switch.
+  - _The reconstruction near the cube's edges_ tilts a datum normal by up to 5.1 × 10⁻³ rad at level
+    6 and 2.7 × 10⁻³ at level 7 (under 0.01 stop at i 45°): the gutter holds the neighbour's edge
+    texel, whose centre is not where this face's extended grid puts it, as for the class map. The
+    lever: each gutter texel resampled from the neighbouring face at its own centre.
+  - _Each `class-map` query builds two synthesisers and walks the field's cells twice_ (about 13 ms
+    more at level 6 and 31 ms at level 8 a query), and a fully surveyed level-8 world's normal map
+    is remade whole at every block that surveys a cell (about 0.3 s native, extrapolated); the CPU
+    copy (1.52 MiB at level 8) is not counted under `coarse-field-gpu`. The levers: one combined
+    export, an incremental remake, the copy counted.
+  - _The terminator's noise_: in the terminator's band the horizon term's tangential part carries
+    a normal's half-float noise into the light (a map of datum normals moves terminator texels by up
+    to 13 times the smoke's texel tolerance on the twin); physical, as the terrain's own bakes.
+  - _A `--handover` launch's low layout_ is 822 × 474 px, not 544: the three scene buttons wrap the
+    `SCENE` row (the range is the width's); the label block covers the disc's middle on low.
+  - _A switch read across a skipped read-back_ is judged as the switch, with `framesApart` recorded
+    (high at 30°: 2 frames apart, 0.03% of the range).
 - **Deviations in T16.a, as built** (2026-10-19; lane r10-live, on `rendering-and-planets` at
   `b021342b`).
   - _Files._ New: `view/terrain/session.ts` (`TerrainSession`, `TerrainSessionOptions`,
@@ -8366,6 +8669,7 @@ observer)`, in the body-fixed axes (`classMapPointReflection` takes the galactic
     view is to draw), so a photorealistic view whose pipelines still compile is judged at 1 px.
     The pixel is the presented width's centre pixel (`pixelAngleRad` of the canvas's device px,
     decision 5), where T10.e's hand-over measures the frame's internal viewport (asked below).
+    _Since R10.T10.g the hand-over counts the same presented pixel._
   - _The sources_ (decision 6). `terrainSessionSource(stage)` is pure: the server's scene of the
     open universe over `useServerLink()`'s request client, a kept scene's `SceneOption.terrain`, and
     `null` otherwise (every kept scene today). A `TerrainFixture` is `{ universe, open() }`, its link
@@ -8454,7 +8758,9 @@ hyperion typecheck` from a clean cache, `pnpm lint` (type-aware oxlint) and Pret
     twice the hand-over's and a body's field is fetched as early as at full scale. Lean: as built;
     T10.e's lever (both switches on the presented pixel) would make them one. _Ruled
     (decision-r10-t16-leans §13): accepted; R10.T10.g takes T10.e's lever, both switches on the
-    presented pixel._
+    presented pixel._ _As built by R10.T10.g: the hand-over and the hand-back; R07's 3 px switch
+    stays on the frame's own pixels, where its 1% flux match is defined ("Deviations in T10.g, as
+    built")._
   - _A header with no surveyed ground._ The want takes the header's relief whatever the coverage, so
     a field whose survey covers nothing is kept within its range, though `handoverReliefM` gives
     such a body no hand-over. Lean: as built (the want follows the relief alone, so that the first
@@ -9267,7 +9573,7 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     CSS (the console-ux checks have nothing new to read).
   - _The launch_ (§6). `--terrain` is refused without `--views-check` ("--terrain is an option of
     --views-check, which was not given"); `ViewsCheckLaunch.terrain` is required, and
-    `readViewsCheckLaunch` refuses a launch without it. One launch a setting: the script's
+    `readViewsCheckLaunch` refuses a launch without it (_since R10.T10.g, `ViewsCheckLaunch.run`_). One launch a setting: the script's
     `--terrain` with no `--setting` makes two launches, high then low, each with its own profile
     (`mktemp` under `TMPDIR`), the client's watchdog and its results file
     (`<date>-<machine>-<setting>-terrain[-smoke].json` and `.md`), prints each launch's setting and
