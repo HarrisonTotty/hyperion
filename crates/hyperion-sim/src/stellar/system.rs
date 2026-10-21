@@ -1006,9 +1006,9 @@ pub struct StellarBrief {
 impl StellarBrief {
     /// The brief of a primary in `state`, of `composition` and `draws`, with the `extras` its
     /// history gives (a neutron star's class), in a system of `star_count` stars: its class, its
-    /// kind, log L and `T_eff`. [`SystemStars::brief_at`] and the range brief
-    /// ([`crate::stellar::brief`]) both make it here, so that a brief is the same function of the
-    /// state whichever built it.
+    /// kind, log L and `T_eff`. [`SystemStars::brief_at`], [`SystemStars::summary_brief_at`] and
+    /// the range brief ([`crate::stellar::brief`]) all make it here, so that a brief is the same
+    /// function of the state whichever built it.
     #[must_use]
     pub(crate) fn of(
         state: &StarState,
@@ -1577,9 +1577,9 @@ impl SystemStars {
     /// The primary is its single-star self here, and the star count the first redraw attempt's, as
     /// the range brief builds them without the binary engine ([`crate::stellar::brief`]), so that a
     /// row is the same whichever built it. A primary that its pair has changed reads so in
-    /// [`SystemStars::summary_at`], and a redrawn system's kept count in
-    /// [`SystemStars::star_count`] (plan 11's Risks, "Deviations in P11.T7, as built" and
-    /// "Deviations in P11.T11, as built").
+    /// [`SystemStars::summary_at`] and [`SystemStars::summary_brief_at`], and a redrawn system's
+    /// kept count in [`SystemStars::star_count`] (plan 11's Risks, "Deviations in P11.T7, as
+    /// built" and "Deviations in P11.T11, as built").
     ///
     /// # Panics
     ///
@@ -1594,6 +1594,68 @@ impl SystemStars {
             primary.draws(),
             primary.class_extras_at(&state, t),
             self.first_star_count,
+        ))
+    }
+
+    /// The system's brief at `t` as [`SystemStars::summary_at`] has it, or `None` before the system
+    /// is born or its primary forms: the kind, class, luminosity and temperature of the summary's
+    /// primary, from its pair's state where a pair the engine ran has changed it (P11.T11), and the
+    /// kept attempt's star count ([`SystemStars::star_count`]).
+    ///
+    /// It is the brief observed mode reports (plan 12; [`crate::observe::observe_hit`]), so that a
+    /// row and the summary asked of one system at one emitted time read one state: a primary its
+    /// companion has stripped is the stripped star in both, never its single-star track's
+    /// supergiant. It differs from [`SystemStars::brief_at`], the range brief's, only for a primary
+    /// its pair has changed at `t` and for a redrawn system's count.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`StarModel::state_at`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
+    /// use hyperion_sim::id::Layer;
+    /// use hyperion_sim::stellar::system::SystemStars;
+    /// use hyperion_sim::time::UniverseTime;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(11));
+    /// let mut cell = Vec::new();
+    /// generate_cell(&galaxy, CellKey::new(Layer::C, [0, 812, 0])?, &mut cell);
+    /// for record in cell.iter().take(10) {
+    ///     let stars = SystemStars::generate(&galaxy, record);
+    ///     let brief = stars.summary_brief_at(UniverseTime::EPOCH).ok_or("formed")?;
+    ///     let summary = stars.summary_at(UniverseTime::EPOCH);
+    ///     let primary = summary.stars().first().ok_or("a primary")?;
+    ///     // The brief is the summary's primary, whatever its pair has made of it.
+    ///     assert_eq!((brief.kind(), brief.class()), (primary.kind(), primary.classification()));
+    ///     assert_eq!(brief.star_count(), stars.star_count());
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn summary_brief_at(&self, t: UniverseTime) -> Option<StellarBrief> {
+        if SystemExistence::from(self.record.existence_at(t)) == SystemExistence::NotYetBorn {
+            return None;
+        }
+        let primary = self.primary();
+        let paired = self.paired_state(0, t);
+        let (state, extras) = match summarised(primary, t, paired.as_ref())? {
+            Summarised::Own(state) => {
+                let extras = primary.class_extras_at(&state, t);
+                (state, extras)
+            }
+            Summarised::Paired(paired) => (paired.state, paired.class_extras()),
+        };
+        Some(StellarBrief::of(
+            &state,
+            primary.composition(),
+            primary.draws(),
+            extras,
+            self.star_count(),
         ))
     }
 
@@ -1850,6 +1912,48 @@ struct PairedStar {
     own_death: bool,
 }
 
+impl PairedStar {
+    /// The class extras its pair's history gives it: a neutron star's recycled pulsar's class, and
+    /// nothing else, so a helium star its pair has made is classified with no helium surface.
+    #[must_use]
+    fn class_extras(&self) -> ClassExtras {
+        match self.pulsar {
+            Some(pulsar) if self.state.phase() == Phase::NeutronStar => {
+                ClassExtras::neutron_star(pulsar.class())
+            }
+            Some(_) | None => ClassExtras::NONE,
+        }
+    }
+}
+
+/// Where a star's summary at one time comes from ([`summarised`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Summarised<'a> {
+    /// Its own model's state then: it is in no pair the engine ran, or its pair has not changed it.
+    Own(StarState),
+    /// Its pair's word on it, whose state is not its own model's: its pair has changed it.
+    Paired(&'a PairedStar),
+}
+
+/// Where the summary of `star` at `t` comes from, given `paired`, its pair's word on it then: from
+/// its pair where the engine ran it in a pair that has changed it (P11.T11), and otherwise from its
+/// own model. `None` if the star has not formed by `t`.
+///
+/// It is the one place that chooses, so that [`star_summary_with`], the summary's star, and
+/// [`SystemStars::summary_brief_at`], observed mode's row (plan 12), read one state at one time.
+#[must_use]
+fn summarised<'a>(
+    star: &StarModel,
+    t: UniverseTime,
+    paired: Option<&'a PairedStar>,
+) -> Option<Summarised<'a>> {
+    let own = star.state_at(t)?;
+    Some(match paired {
+        Some(paired) if paired.state != own => Summarised::Paired(paired),
+        Some(_) | None => Summarised::Own(own),
+    })
+}
+
 /// Every pair of two stars of `hierarchy` that can interact by +H or holds a remnant by then, run
 /// through the binary engine on the tracks of `stars` (P11.T11): from zero age to the pair's age at
 /// the end of the clock window, +H, so that its timeline covers the source horizon. Any other pair
@@ -2014,7 +2118,7 @@ pub(crate) fn track_mass_of(initial_mass: SolarMasses) -> SolarMasses {
 
 /// The summary of `star`, the system's body `body`, at `t`, or `None` if it has not formed by then:
 /// from `paired`, its pair's word on it, where the engine ran it in a pair and its pair has changed
-/// it, and otherwise [`star_summary`] with the pair's class.
+/// it, and otherwise [`star_summary`] with the pair's class ([`summarised`] chooses).
 #[must_use]
 fn star_summary_with(
     star: &StarModel,
@@ -2022,23 +2126,17 @@ fn star_summary_with(
     t: UniverseTime,
     paired: Option<PairedStar>,
 ) -> Option<StarSummary> {
-    let Some(paired) = paired else {
-        return star_summary(star, body, t);
-    };
-    let own = star.state_at(t)?;
-    if own == paired.state {
-        return star_summary(star, body, t).map(|summary| StarSummary {
-            binary_class: paired.class,
-            ..summary
-        });
-    }
-    let state = paired.state;
-    let extras = match paired.pulsar {
-        Some(pulsar) if state.phase() == Phase::NeutronStar => {
-            ClassExtras::neutron_star(pulsar.class())
+    let paired = match summarised(star, t, paired.as_ref())? {
+        Summarised::Own(_) => {
+            return star_summary(star, body, t).map(|summary| StarSummary {
+                binary_class: paired.map_or(BinaryClass::None, |paired| paired.class),
+                ..summary
+            });
         }
-        Some(_) | None => ClassExtras::NONE,
+        Summarised::Paired(paired) => paired,
     };
+    let state = paired.state;
+    let extras = paired.class_extras();
     let classification = classify(&state, star.composition(), star.draws(), &extras);
     let spin = rotation::rotation(&state, star.composition(), star.draws(), None);
     let activity = rotation::activity(&state, spin.as_ref());
@@ -2848,6 +2946,25 @@ mod tests {
             let giant = spin(end * 1.1);
             assert!(giant.period() > after.period(), "{m} M☉: {giant:?}");
         }
+    }
+
+    /// Observed mode's brief counts the kept attempt's stars, as the summary does, where the range
+    /// brief keeps the first attempt's (plan 11's Risks, "Deviations in P11.T7, as built"): a
+    /// system whose first attempt drew one star more, as `generate_with` records it for a redrawn
+    /// system.
+    #[test]
+    fn the_summary_brief_counts_the_kept_stars() {
+        let galaxy = galaxy();
+        let record = young_disc_record(&galaxy, 7, 3.0e9);
+        let mut stars = SystemStars::generate(&galaxy, &record);
+        let kept = stars.star_count();
+        stars.first_star_count = kept + 1;
+        let count = |brief: Option<StellarBrief>| brief.map(|b| b.star_count());
+        assert_eq!(count(stars.brief_at(UniverseTime::EPOCH)), Some(kept + 1));
+        assert_eq!(
+            count(stars.summary_brief_at(UniverseTime::EPOCH)),
+            Some(kept)
+        );
     }
 
     /// The brief is the summary's primary, in brief, and a black hole is a black hole.

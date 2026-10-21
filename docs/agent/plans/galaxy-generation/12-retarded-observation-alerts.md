@@ -1395,3 +1395,50 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     legend names no selected joiner (`--text`, 2 px), as the orbit map's does its selected orbit.
     (5) `OBSERVER TO CENTRE` shares `CENTRE` with `CENTRE CHART`; `OBSERVE FROM CENTRE` was weighed
     and left, since it reads as a choice of the mode; the nomenclature row decides.
+- **The observed brief reads the summary's primary (P12.T2 fix, lane `observed-class`,
+  2026-10-21, at `GENERATOR_VERSION` 22).** P12.T11's landing look (look-72) found one system at
+  one emitted instant reading two classes on one screen: GDG 0E0V00 E-141 of LOOK72
+  (`820E6EE00000008D`, 10.96 + 6.38 M☉ at P = 326 d), seen from 20,000 ly, was
+  `M6.5Ib SUPERGIANT` in its observed range row and `sdO3 HOT SUBDWARF, 2.25 M☉` as the observed
+  summary's STAR A. The row read `SystemStars::brief_at`, the primary's single-star track (T0's
+  note above: "observed mode reads `SystemStars::brief_at`"; plan 11's "Deviations in P11.T11,
+  as built", _The brief_), and the summary read the pair's timeline. The pair's Roche-lobe
+  overflow in the Hertzsprung gap at 20.1946 Myr ran into a common envelope at 20.19485 Myr that
+  left a 2.37 M☉ helium star in a 1.04 d orbit. The light left 2.5 Myr later, so the summary was
+  right, and the row's red supergiant, which the stripped star never becomes, was wrong (science
+  check: Götberg et al. 2018, A&A 615, A78; Laplace et al. 2020, A&A 637, A6).
+  - _The fix._ `SystemStars::summary_brief_at(t)` is the brief of `summary_at(t)`'s primary: its
+    kind, class, log L and `T_eff` from the one private helper that chooses between a star's own
+    model and its pair's state (`summarised`, which `star_summary_with` now reads too), and the
+    kept attempt's star count (`SystemStars::star_count`). `observe_on_line`, and so
+    `observe_hit`, `range_query_observed` and the server's observed rows and `resolve_system`,
+    report it as `brief_then`. `SystemStars::brief_at` and the range brief (`BriefModel`) are
+    unchanged, so now mode is plan 06's row for row.
+  - _What moves._ An observed row of a primary its pair has changed by the emitted time (a
+    stripped star, an Algol's donor or gainer, a merger product), and the star count of a
+    redrawn system's observed row (P11.T7, about 5 × 10⁻⁴ of the grid). No golden pins an
+    observed row, so none moves; the record is not touched, so no bump.
+  - _Tests._ `tests/observe_brief.rs`: look-72's system at look-72's instant (the stripped helium
+    star of 2–4 M☉ in both the row and the summary, no supergiant, where its single-star track is
+    EAGB), and six layer-E systems near it whose primary its pair strips, re-aged so that the
+    stripping starts 40,000 years before the epoch and observed 20,000 years before, during and
+    20,000 years after it: the row's kind, class, log L, `T_eff` and count are the summary's
+    primary's, bit for bit. `stellar::system`'s `the_summary_brief_counts_the_kept_stars` holds
+    the kept count against a first attempt's. T2's dying supergiant is now searched by the
+    summary's brief, as observed mode reads it.
+  - _Deferred findings (2026-10-20 rule)._ (1) Now mode keeps the divergence: a range row
+    (`BriefModel`, single-star) and the now summary disagree for a primary its pair has changed
+    at the query's time (P11.T11's open ruling; with a decision agent through main). (2)
+    `822C72E00000008C`, a case-A Algol, core-collapses its donor while it is still on the main
+    sequence (6.34 M☉) at its pinned single-star death age, 24.6187 Myr (`binary/supernova.rs`,
+    `pinned_collapse`; with a decision agent through main). (3) The stripped mass, 2.37 M☉ for a
+    10.96 M☉ primary, is some 30% under the detailed grids' 3.32 M☉ (Götberg et al. 2018, Table 1,
+    Z = 0.014) and 3.43 M☉ (Laplace et al. 2020, Table A.2), likely the Hertzsprung-gap core mass
+    of Hurley et al.'s fits. (4) A 2.25 M☉ stripped star is classified `HOT SUBDWARF`, but Götberg
+    et al. (2018) find subdwarf-like spectra only up to about 1.7 M☉, and Drout et al. (2023,
+    Science 382, 1287) put the 2–8 M☉ stripped stars between the subdwarfs and the Wolf-Rayet
+    stars; `hot_subdwarf` (`classify/peculiar.rs`) has no upper edge in mass or luminosity. A
+    paired helium star is also classified without the helium surface (`ClassExtras::NONE`) that a
+    single one gets. (5) The pin collapses the helium star at about 0.7 of its helium main
+    sequence (Hurley et al. 2000, eq. 79, gives 3.4–3.6 Myr at 2.25–2.37 M☉, against the 2.53 Myr
+    to the pin), not after core-helium depletion.

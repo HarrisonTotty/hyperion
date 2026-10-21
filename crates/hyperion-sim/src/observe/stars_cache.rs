@@ -12,8 +12,9 @@ use crate::stellar::system::SystemStars;
 /// them.
 ///
 /// An observed row reads the system's brief at the emitted time through
-/// [`SystemStars::brief_at`], which holds for any time back to the source horizon (P12.T0 as
-/// built), and building a system's stars costs a millisecond or two per evolved star, so a caller
+/// [`SystemStars::summary_brief_at`], the summary's primary then, from its pair's timeline where
+/// the engine ran one, which holds for any time back to the source horizon (P12.T0 as built), and
+/// building a system's stars costs a millisecond or two per evolved star, so a caller
 /// that asks about the same systems again keeps them. An implementation must lend exactly what
 /// [`stars_of`] builds for `record` in `galaxy`, and one that keeps stars between calls keys them
 /// by galaxy as well as by system. Nothing the query returns then depends on what the cache held.
