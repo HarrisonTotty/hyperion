@@ -22690,3 +22690,23 @@ planetary::record` (624 tests at T57.a's commit).
       (measured with it held at `p_sat`); the rest is the batch's air before it. The test's doc,
       which says it reproduces the prototype's 1.09 and −0.83 to the printed digits, no longer
       holds.
+  - _The coarse Earth's converged-G1 references, re-measured at 23's air_ (R09.T13.i's
+    `CONVERGED_G1_DEFECT_K` and `CONVERGED_G1_G2_MEAN_K` in `climate/tests/hydrology.rs`; the
+    second to land re-measures, decision-r09-t13i row 8). R09's slow test of the coarse pass's
+    reference Earth failed `assert_the_probe_measures_g1`: the probe's d −0.343 K against the
+    converged G1's −0.438 K, and G2 287.985 K against 287.969 K, both measured at 22's air. The
+    batch's air (T49.b's `c_p`(T), the greenhouse's batch arm, `earth_air`'s water at 0.77 of
+    `p_sat`) moved the climate, not the probe.
+    - Re-measured by the follow-up 7 build's procedure, in a scratch build not kept: G1 under the
+      climate's stop alone (its probe stop disabled), d from its mean alone, and G2 from that d.
+      G1's run is the as-built one to the bit, since its probe does not fire before the climate's
+      stop: 287.665 K in 8 orbits (2 jumps) against Z₃'s 287.999 K. **d −0.438 → −0.335 K; G2
+      287.969 → 287.976 K** (predicted at u 0.491200, from 287.599 K in 3 orbits, 0.024 K below
+      T\*). Scratch log `rm45-scratch/p14-wire-23/g1/converged-g1.log`.
+    - The as-built probe against them: G1 ended by the climate's stop at 8 orbits, T̂ 287.656 K, d
+      −0.343 K (0.008 K off; bound 0.05 K), and G2 287.985 K in 3 orbits, kept (0.008 K off; bound
+      0.1 K). No tolerance or bound moved.
+    - With the two constants re-measured, R09's surface slow tests by name (the sim's `--lib`,
+      `planetary::surface::` but its plates, `--no-fail-fast`): 43 run, 43 passed, so no other
+      reference figure of its kind needed re-measuring. The reference Earth's order-independence
+      test took 982 s (248–256 s in Batches A and B, before R09.T13.i's merge).
