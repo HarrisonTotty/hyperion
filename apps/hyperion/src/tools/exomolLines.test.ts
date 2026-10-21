@@ -302,6 +302,23 @@ function total(values: Float64Array): number {
   return values.reduce((sum, v) => sum + v, 0);
 }
 
+/**
+ * `compute`'s promise, made on the first call and kept for every later one, so that the tests
+ * sharing it run the work once.
+ *
+ * @remarks
+ * `src/renderer/src/test/memo.ts`'s rule, which this file's compiler project does not reach: only
+ * for work that is deterministic and whose result no test mutates, so that whichever test calls
+ * first, alone or in any order, computes what any other would have.
+ */
+function kept<T>(compute: () => Promise<T>): () => Promise<T> {
+  let promise: Promise<T> | undefined;
+  return () => {
+    promise ??= compute();
+    return promise;
+  };
+}
+
 describe("a streaming pass over a list", () => {
   const directory = mkdtempSync(join(tmpdir(), "exomol-lines-"));
   afterAll(() => {
@@ -342,28 +359,31 @@ describe("a streaming pass over a list", () => {
     return { ...pass, q300: partitionSum(states, 300) };
   }
 
+  /** One {@link toyPass} for the four tests that read it, made by whichever calls first. */
+  const sharedToyPass = kept(toyPass);
+
   // 3 → 1 (14,000 cm⁻¹) and 4 → 2 (14,000 cm⁻¹) are bands 1 0 0 6 - 0 0 0 0 and 1 0 0 6 - 0 1 1 0;
   // only the first is the matched band. 5 → 1 (16,000) is 2 0 0 0 - 0 0 0 0; 3 → 2 (13,000) lies
   // below the range.
   it("bins the matched band's lines apart, at their S(T)", async () => {
-    const { bins, q300 } = await toyPass();
+    const { bins, q300 } = await sharedToyPass();
     const apart = intensity(3, 10, 14_000, 0, 300, q300);
     expect(total(bins.apart?.[1]?.values ?? new Float64Array(0)) / apart).toBeCloseTo(1, 10);
   });
 
   it("bins every other line in range in the main set, at its S(T)", async () => {
-    const { bins, q300 } = await toyPass();
+    const { bins, q300 } = await sharedToyPass();
     const main = intensity(5, 20, 14_000, 1_000, 300, q300) + intensity(3, 5, 16_000, 0, 300, q300);
     expect(total(bins.main[1]?.values ?? new Float64Array(0)) / main).toBeCloseTo(1, 10);
   });
 
   it("reads every line and bins those in range", async () => {
-    const { record } = await toyPass();
+    const { record } = await sharedToyPass();
     expect([record.linesRead, record.linesBinned]).toEqual([4, 3]);
   });
 
   it("records each band's lines over the range binned apart", async () => {
-    const { record } = await toyPass();
+    const { record } = await sharedToyPass();
     expect(record.bands.get(MATCHED)?.lines).toBe(1);
   });
 
@@ -429,8 +449,16 @@ describe("a streaming pass over a list", () => {
     return { main, apart, peak };
   }
 
+  /**
+   * One {@link cachedToy} for the four tests that read the cache, made by whichever calls first.
+   * Each still calls it, so that one run alone or in any order finds the files written. The test of
+   * what the pass writes still reads what the work itself wrote, as `memo.ts` asks: only this pass
+   * writes the files, and they stay until the block's `afterAll` removes the directory.
+   */
+  const sharedCachedToy = kept(cachedToy);
+
   it("writes a temperature's bins to the cache and reads them back a window at a time", async () => {
-    const { apart, peak } = await cachedToy();
+    const { apart, peak } = await sharedCachedToy();
     const file = openBins(join(directory, binsFileName("XX", "apart", 300)));
     const window = file.read(peak - 2, peak + 2);
     file.close();
@@ -440,7 +468,7 @@ describe("a streaming pass over a list", () => {
   });
 
   it("reads 0 beyond a cached file's nodes", async () => {
-    await cachedToy();
+    await sharedCachedToy();
     const file = openBins(join(directory, binsFileName("XX", "main", 300)));
     const window = file.read(-3, -1);
     file.close();
@@ -448,7 +476,7 @@ describe("a streaming pass over a list", () => {
   });
 
   it("adds the set apart to the main set node by node where both are read", async () => {
-    const { main, apart, peak } = await cachedToy();
+    const { main, apart, peak } = await sharedCachedToy();
     const species = cachedSpecies(TOY, TOY_DEFINITION, directory, "all");
     const both = species.binsAt(300, peak, peak).values[0];
     species.close();
@@ -456,7 +484,7 @@ describe("a streaming pass over a list", () => {
   });
 
   it("reads the main set alone where only it is asked for", async () => {
-    const { main, peak } = await cachedToy();
+    const { main, peak } = await sharedCachedToy();
     const species = cachedSpecies(TOY, TOY_DEFINITION, directory, "main");
     const alone = species.binsAt(300, peak, peak).values[0];
     species.close();

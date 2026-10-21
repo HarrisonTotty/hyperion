@@ -28,6 +28,7 @@ import {
 } from "../../generated/surface/hyperion_surface";
 import wasmDataUrl from "../../generated/surface/hyperion_surface_bg.wasm?inline";
 import { moonLikeFixture } from "../../test/moonLikeFixture";
+import { testPatienceMs } from "../../test/patience";
 import { add, cross, dot, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
 import type { PhotometricLaw } from "../appearance/law";
 import { lawFor } from "../appearance/phase";
@@ -195,6 +196,17 @@ describe("the hand-over's brightness on the Moon-like world (R10.T10.e, scripted
   let map: ClassMapAnswer;
   let bakes: Map<string, BakedPatch>;
 
+  // The hook's work is the test's subject, and fixed: the module's start, the fixture's every
+  // block held, its class map asked for, and every patch over the surveyed texels baked at each of
+  // the five levels. It took 5.6 s on the quiet 16-thread desktop, and 11.4 s in another lane's run
+  // on the 8-thread laptop beside a 4-thread reference trace (both 2026-10-21). On that laptop
+  // beside the same trace, run with `patience.test.ts` and `exomolLines.test.ts` at 4 workers
+  // (those three files, not the suite; 2026-10-21), it took 7.8 s (M2, 1-minute load 4.5 to 4.7)
+  // and, with a second such run beside it, 10.1 s and 9.9 s (M3, load 4.7 to 5.1), the first past
+  // vitest's 10 s hook limit. Its limit is the harness's patience, 180 s unless
+  // `HYPERION_TEST_PATIENCE_SECS` sets it, 23 times M2: the work is fixed and the machines it runs
+  // on are not, so the bound is the one a slower or busier machine raises, not a figure rounded
+  // from the machines it was measured on. The tests keep the 15 s default.
   beforeAll(() => {
     initSync({ module: wasmBytes() });
     const fields = heldFields();
@@ -237,7 +249,7 @@ describe("the hand-over's brightness on the Moon-like world (R10.T10.e, scripted
       }
       bakes.set(JSON.stringify(key), baked.bake);
     });
-  });
+  }, testPatienceMs());
 
   /** Each twin over the survey, with `override` on both sides. */
   function compare(override: Override | null): Comparison {
