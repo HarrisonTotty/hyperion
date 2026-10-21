@@ -325,7 +325,10 @@ built, T0 changes only the call sites here.
 - **R09:** the coarse pass on the server as arrival work, the coarse-field chunks and their request,
   the height function's bench (µs a point with its gradient).
 - **R10:** terrain on generated worlds, the wireframe's depth-only terrain at 4 px with contours,
-  horizon-map shadows, the height-texture cache sizes.
+  horizon-map shadows, the high setting's shadow cascades (R10.T9.b) and their pass label
+  `terrain shadows` (`TERRAIN_SHADOW_PASS_LABEL`, the cascades' four caster passes, submitted
+  before `bodies` on the high setting), which `PASS_ROWS` maps to `shadows`, the height-texture
+  cache sizes.
 - **R11:** the ladder entries R11.T1 adds to R05's `ViewSettings` (`decoration`,
   `scatterDensity`, `clouds`, `cloudShadows`, `oceanComponents`, `oceanRefraction`, `whitecaps`,
   `rings` and `ringShadowOnBody`, Design note 18); its pass labels (`decoration`, `rocks`,

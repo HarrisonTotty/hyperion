@@ -665,6 +665,22 @@ ruled 2026-10-09 and 2026-10-10).
   coefficients as the Ocean Optics Web Book gives them (https://www.oceanopticsbook.info/,
   CC BY), in seawater.json.
 
+- Liquid water's thermophysical properties in the substance registry's liquid columns (galaxy
+  plan 14, P14.T49.h; rendering plan R09, R09.T13.i), in
+  crates/hyperion-sim/src/substance/rows/liquids.rs: the Helmholtz energy of IAPWS R6-95(2018),
+  Revised Release on the IAPWS Formulation 1995 for the Thermodynamic Properties of Ordinary Water
+  Substance for General and Scientific Use (after W. Wagner and A. Pruss, J. Phys. Chem. Ref. Data
+  31 (2002) 387-535), its Table 1's ideal-gas and Table 2's residual coefficients;
+  the viscosity of IAPWS R12-08, Release on the IAPWS Formulation 2008 for the Viscosity of
+  Ordinary Water Substance (after M. L. Huber et al., J. Phys. Chem. Ref. Data 38 (2009) 101), its
+  Tables 1 and 2; and the surface tension of IAPWS R1-76(2014), Revised Release on Surface Tension
+  of Ordinary Water Substance. Each release allows publication in whole or in part provided that
+  attribution is given to the International Association for the Properties of Water and Steam, as
+  it is here. The pure liquid's scattering follows the method of X. Zhang, L. Hu and M.-X. He,
+  "Scattering by pure seawater: effect of salinity", Opt. Express 17 (2009) 5698-5710, DOI:
+  10.1364/OE.17.005698, re-implemented from its equations as its published code
+  (betasw_ZHH2009.m) states them, at zero salinity; no code of it is copied.
+
 - Refractive indices of the cryogenic liquids and molten sulphur (plan R08, R08.T5.g): liquid
   nitrogen's, H. Augustin, Ann. Phys. 351 (1915) 419-445, DOI: 10.1002/andp.19153510307 (the
   article's scan on Zenodo, record 1514490, CC0), as a Cauchy fit in nitrogen-liquid.json; liquid
@@ -864,22 +880,6 @@ Geophys. Res. 109, D06303) join this list when their values are quoted; neither 
   (https://creativecommons.org/licenses/by/4.0/), Table 1's index and density of amorphous H2S
   ice at 19 K (two values, cited).
 
-- Liquid water's thermophysical properties in the substance registry's liquid columns (galaxy
-  plan 14, P14.T49.h; rendering plan R09, R09.T13.i), in
-  crates/hyperion-sim/src/substance/rows/liquids.rs: the Helmholtz energy of IAPWS R6-95(2018),
-  Revised Release on the IAPWS Formulation 1995 for the Thermodynamic Properties of Ordinary Water
-  Substance for General and Scientific Use (after W. Wagner and A. Pruss, J. Phys. Chem. Ref. Data
-  31 (2002) 387-535), its Table 1's ideal-gas and Table 2's residual coefficients;
-  the viscosity of IAPWS R12-08, Release on the IAPWS Formulation 2008 for the Viscosity of
-  Ordinary Water Substance (after M. L. Huber et al., J. Phys. Chem. Ref. Data 38 (2009) 101), its
-  Tables 1 and 2; and the surface tension of IAPWS R1-76(2014), Revised Release on Surface Tension
-  of Ordinary Water Substance. Each release allows publication in whole or in part provided that
-  attribution is given to the International Association for the Properties of Water and Steam, as
-  it is here. The pure liquid's scattering follows the method of X. Zhang, L. Hu and M.-X. He,
-  "Scattering by pure seawater: effect of salinity", Opt. Express 17 (2009) 5698-5710, DOI:
-  10.1364/OE.17.005698, re-implemented from its equations as its published code
-  (betasw_ZHH2009.m) states them, at zero salinity; no code of it is copied.
-
 - Earth's land share by 2.5° band (72 values) and by 2.5° × 5° box (72 × 72 values), computed from
   Natural Earth's 1:110m land polygons (ne_110m_land; public domain,
   https://www.naturalearthdata.com/about/terms-of-use/), in the climate step's tests (plan R09,
@@ -897,18 +897,21 @@ Geophys. Res. 109, D06303) join this list when their values are quoted; neither 
   (2013) 375-393) and GBT v3 (J. L. Bamber et al., The Cryosphere 7 (2013) 499-510). Only these
   derived statistics are committed; no grid is.
 
-- The annual zonal-mean precipitation of GPCP v2.3 over 1991-2020 by 2.5° band (72 values),
-  computed from NOAA PSL's long-term monthly means (precip.mon.ltm.1991-2020.nc,
-  https://psl.noaa.gov/data/gridded/data.gpcp.html), printed beside the model in the climate
-  step's tests (plan R09, R09.T13.e). GPCP's papers: R. F. Adler et al., J. Hydrometeor. 4 (2003)
-  1147-1167 (version 2), and R. F. Adler et al., Atmosphere 9 (2018) 138, DOI:
-  10.3390/atmos9040138 (version 2.3). Only these derived means are committed; no grid is.
+- The annual zonal-mean precipitation of GPCP v2.3 over 1991-2020 by 2.5° band (72 values), computed
+  from NOAA PSL's long-term monthly means (precip.mon.ltm.1991-2020.nc,
+  https://psl.noaa.gov/data/gridded/data.gpcp.html), printed beside the model in the climate step's
+  tests (plan R09, R09.T13.e). Global Precipitation Climatology Project (GPCP) Monthly Analysis
+  Product data provided by the NOAA PSL, Boulder, Colorado, USA, from their website at
+  https://psl.noaa.gov. GPCP's papers: R. F. Adler et al., J. Hydrometeor. 4 (2003) 1147-1167
+  (version 2), and R. F. Adler et al., Atmosphere 9 (2018) 138, DOI: 10.3390/atmos9040138 (version
+  2.3). Only these derived means are committed; no grid is.
 
-- The annual zonal-mean 10 m meridional wind of the NCEP/NCAR Reanalysis 1 over 1991-2020 in four
-  5° bins of the trades (4 values), computed from NOAA PSL's long-term monthly means, printed
-  beside the model in the climate step's tests (plan R09, R09.T13.e). The dataset's citation: E.
-  Kalnay et al., Bull. Amer. Meteor. Soc. 77 (1996) 437-471. Only these derived means are
-  committed; no grid is.
+- The annual zonal-mean 10 m meridional wind of the NCEP/NCAR Reanalysis 1 over 1991-2020 in four 5°
+  bins of the trades (4 values), computed from NOAA PSL's long-term monthly means, printed beside
+  the model in the climate step's tests (plan R09, R09.T13.e). NCEP-NCAR Reanalysis 1 data provided
+  by the NOAA PSL, Boulder, Colorado, USA, from their website at https://psl.noaa.gov. The dataset's
+  citation: E. Kalnay et al., Bull. Amer. Meteor. Soc. 77 (1996) 437-471. Only these derived means
+  are committed; no grid is.
 
 - The monthly zonal-mean 2 m air temperature of the NCEP/NCAR Reanalysis 1 over 1991-2020, reduced
   to the sea level over land at the reference Earth's lapse rate, on the climate model's 72 bands
