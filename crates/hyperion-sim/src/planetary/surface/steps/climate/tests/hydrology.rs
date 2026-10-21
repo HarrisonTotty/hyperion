@@ -1211,7 +1211,9 @@ const JJA_MONTHS: [usize; 3] = [5, 6, 7];
 /// - the 40–70° N arid share with Peel's summer offset, 2T + 28, imposed on every cell ([`is_arid`]
 ///   with a summer share of 1), beside the ruling's estimate of 0.25 (its §3, the lane-like case's
 ///   0.251), and beside the share on the model's own months.
-fn report_seasons(run: &Run) {
+///
+/// Returns the 40–60° N land's DJF and JJA means, kg m⁻² s⁻¹ (decision-r09-t13i §3.4, 2).
+fn report_seasons(run: &Run) -> (f64, f64) {
     let land = run.land_counts();
     let mean_of = |values: &[f64], region: Region| {
         run.mean_where(values, |c, latitude, longitude| {
@@ -1278,6 +1280,143 @@ fn report_seasons(run: &Run) {
         arid(|_| Some(1.0)),
         arid(|k| k.summer_share)
     );
+    (winter, summer)
+}
+
+/// The NCEP/NCAR R1 1991–2020 sea's evaporation per unit of the sea's area over the four windows
+/// 40–60° N, 15–35° N, 40–60° S and 15–35° S, mm/day (decision-r09-t13i §3.4, 3, E-P8's windows,
+/// as decision-r09-t13e-revision's `ncep_evap.txt` gives them): 1.98, 4.69, 1.57 and 4.38.
+const NCEP_SEA_EVAPORATION_MM_PER_DAY: [((f64, f64), f64); 4] = [
+    ((40.0, 60.0), 1.98),
+    ((15.0, 35.0), 4.69),
+    ((-60.0, -40.0), 1.57),
+    ((-35.0, -15.0), 4.38),
+];
+
+/// The observed annual E − P over the same four windows, mm/day, GPCP v2.3 less NCEP/NCAR R1's
+/// evaporation and, in brackets, NCEP's own P − E (decision-r09-t13i §3.1's table): −0.73 (−0.83),
+/// +1.43 (+1.23), −1.41 (−1.50) and +1.65 (+1.44).
+const OBSERVED_E_MINUS_P_MM_PER_DAY: [(f64, f64); 4] =
+    [(-0.73, -0.83), (1.43, 1.23), (-1.41, -1.50), (1.65, 1.44)];
+
+/// The greatest 40–60° N sea's DJF ÷ JJA evaporation per sea area of the ruled Earth
+/// (decision-r09-t13i §3.4, 2; NCEP R1 3.75, T13.j 8.9, the ruling's stand-ins 4.2–6.6): 6, a
+/// ratio from 6 to [`SEA_SEASON_RATIO_BLOCK`] reported to main.
+const SEA_SEASON_RATIO_BOUND: f64 = 6.0;
+
+/// The 40–60° N sea's DJF ÷ JJA above which the ruled Earth's test fails (decision-r09-t13i §3.4,
+/// 2): 7.5.
+const SEA_SEASON_RATIO_BLOCK: f64 = 7.5;
+
+/// The least 40–60° N all-land JJA mean over its DJF mean of the ruled Earth (decision-r09-t13i
+/// §3.4, 2; T13.j 0.32, the ruling's estimate 0.69 at `n_c` = 6 and 0.37 at `n_c` = 4, GPCP 1.50):
+/// 0.45, a ratio from [`LAND_SEASON_RATIO_BLOCK`] to 0.45 reported to main.
+const LAND_SEASON_RATIO_BOUND: f64 = 0.45;
+
+/// The 40–60° N land's JJA ÷ DJF below which the ruled Earth's test fails (decision-r09-t13i
+/// §3.4, 2): 0.35.
+const LAND_SEASON_RATIO_BLOCK: f64 = 0.35;
+
+/// The mean over `months` of each month's window over `low` to `high` degrees of a band field
+/// `of` the month's cycle ([`band_window`]), each month weighted equally, as GPCP's and NCEP's
+/// seasonal means are.
+fn season_window(
+    run: &Run,
+    months: [usize; 3],
+    low: f64,
+    high: f64,
+    of: fn(&MonthCycle) -> &[f64],
+) -> f64 {
+    let water = run.water();
+    months.iter().fold(0.0, |sum, &m| {
+        sum + band_window(of(&water.months[m]), low, high)
+    }) / 3.0
+}
+
+/// Prints the 40–60° N water cycle's months (decision-r09-t13i §3.4, 3) and returns its sea's DJF
+/// ÷ JJA evaporation per sea area (§3.4, 2): each month's band windows over 40–60° N of the
+/// sea's evaporation per sea area `e_b`, the bands' mean evaporation Ē, the sea share `s_b`, the
+/// zonal budget's E − P, its convergence C⁺ = max(0, C), the sea's rate `P_sea` before the balance,
+/// the balance's k, the land's frozen share and the all-land climate cells' P (as
+/// decision-r09-t13e-revision §2's table gives them); the band-window convergence C = −(E − P) in
+/// JJA and DJF beside the ruling's stand-in (0.45 and 0.93) and NCEP's own (0.35 and 0.84); and
+/// E-P8's windows, the sea's annual evaporation per sea area and E − P in each hemisphere at
+/// 40–60° and 15–35°, beside NCEP's and GPCP − NCEP's.
+fn report_storm_track_months(run: &Run) -> f64 {
+    fn sea(c: &MonthCycle) -> &[f64] {
+        &c.sea.evaporation_kg_m2_s
+    }
+    fn budget(c: &MonthCycle) -> &[f64] {
+        &c.budget.evaporation_less_precipitation_kg_m2_s
+    }
+    let water = run.water();
+    let land = run.land_counts();
+    let storm_tracks = Region::band(40.0, 60.0);
+    eprintln!(
+        "  the 40–60° N months, mm/day: e_b, Ē, s_b, E − P, C⁺, P_sea, k, the frozen land share, the \
+         all-land climate cells' P"
+    );
+    for (m, cycle) in water.months.iter().enumerate() {
+        let precipitation: Vec<f64> = run
+            .working
+            .climate
+            .iter()
+            .map(|state| state.month_precipitation_kg_m2_s[m])
+            .collect();
+        let (all_land, _) = run.mean_where(&precipitation, |c, latitude, longitude| {
+            land[c] == 4 && storm_tracks.holds(latitude, longitude)
+        });
+        eprintln!(
+            "    month {m:2}: e_b {:.2}, Ē {:.2}, s_b {:.3}, E − P {:+.2}, C⁺ {:.2}, P_sea {:.2}, k \
+             {:.3}, frozen {:.3}, all-land P {:.2}",
+            band_window(&cycle.sea.evaporation_kg_m2_s, 40.0, 60.0) * DAY_S,
+            band_window(&cycle.band_evaporation_kg_m2_s, 40.0, 60.0) * DAY_S,
+            band_window(&cycle.sea.sea_shares, 40.0, 60.0),
+            band_window(
+                &cycle.budget.evaporation_less_precipitation_kg_m2_s,
+                40.0,
+                60.0
+            ) * DAY_S,
+            band_window(&cycle.sea.convergence_kg_m2_s, 40.0, 60.0) * DAY_S,
+            band_window(&cycle.sea.rates_kg_m2_s, 40.0, 60.0) * DAY_S,
+            cycle.scale,
+            cycle.frozen_land_share,
+            all_land * DAY_S
+        );
+    }
+    let (winter_sea, summer_sea) = (
+        season_window(run, DJF_MONTHS, 40.0, 60.0, sea),
+        season_window(run, JJA_MONTHS, 40.0, 60.0, sea),
+    );
+    let ratio = winter_sea / summer_sea;
+    eprintln!(
+        "  the 40–60° N sea's evaporation per sea area: DJF {:.2} mm/day, JJA {:.2}, DJF ÷ JJA \
+         {ratio:.2} (at most {SEA_SEASON_RATIO_BOUND}, reported to {SEA_SEASON_RATIO_BLOCK}; NCEP \
+         R1 3.75, T13.j 8.9, the ruling's stand-ins 4.2–6.6)",
+        winter_sea * DAY_S,
+        summer_sea * DAY_S
+    );
+    eprintln!(
+        "  the 40–60° N band-window convergence: JJA {:.2} mm/day, DJF {:.2} (the ruling's stand-in \
+         0.45 and 0.93; NCEP's own 0.35 and 0.84)",
+        -season_window(run, JJA_MONTHS, 40.0, 60.0, budget) * DAY_S,
+        -season_window(run, DJF_MONTHS, 40.0, 60.0, budget) * DAY_S
+    );
+    let sea_evaporation = annual_bands(run, |c, k| c.sea.evaporation_kg_m2_s[k]);
+    let annual = annual_budget(run);
+    for (((low, high), ncep), (gpcp_ncep, ncep_own)) in NCEP_SEA_EVAPORATION_MM_PER_DAY
+        .iter()
+        .zip(OBSERVED_E_MINUS_P_MM_PER_DAY)
+    {
+        eprintln!(
+            "  E-P8, {low:+.0}° to {high:+.0}°: the sea's evaporation per sea area {:.2} mm/day \
+             (NCEP R1 {ncep:.2}); E − P {:+.2} (GPCP − NCEP {gpcp_ncep:+.2}, NCEP's own \
+             {ncep_own:+.2})",
+            band_window(&sea_evaporation, *low, *high) * DAY_S,
+            band_window(&annual, *low, *high) * DAY_S
+        );
+    }
+    ratio
 }
 
 /// The ruled Earth test (decision-r09-t13ge §2.13, e9, as decision-r09-t13e-asbuilt §1.5 set it up
@@ -1313,14 +1452,44 @@ fn report_seasons(run: &Run) {
 /// and E-P11's seasons ([`report_seasons`]; decision-r09-t13e-revision, "E-P11 (follow-up)" §4):
 /// the 40–60° N land's DJF and JJA means, the 40–70° N land's warm-half classes, and its arid
 /// share with Peel's summer offset imposed on every cell, printed beside GPCP's and the ruling's
-/// estimate, not asserted.
+/// estimate.
+///
+/// R09.T13.i's water cycle (decision-r09-t13i §3.4, 2–3) adds:
+///
+/// - the 40–60° N sea's evaporation per sea area has a DJF ÷ JJA of at most
+///   [`SEA_SEASON_RATIO_BOUND`], 6 (NCEP R1 3.75; T13.j 8.9): from 6 to
+///   [`SEA_SEASON_RATIO_BLOCK`], 7.5, it is reported, and above it the test fails;
+/// - the 40–60° N all-land climate cells' JJA mean is at least [`LAND_SEASON_RATIO_BOUND`], 0.45,
+///   of their DJF mean (T13.j 0.32; GPCP 1.50): from [`LAND_SEASON_RATIO_BLOCK`], 0.35, to 0.45 it
+///   is reported, and below it the test fails (E-P11's "JJA above DJF" withdrawn with the land
+///   store, decision-r09-t13i §3.4, 5, and plan 09's deferred finding I1);
+/// - printed ([`report_storm_track_months`]): the 40–60° N months, its band-window JJA and DJF
+///   convergence, and E-P8's windows beside NCEP's and GPCP − NCEP's.
 #[test]
 fn the_reference_earth_s_storm_tracks_are_wetter_than_its_subtropics_its_interiors_are_watered_and_its_rain_band_is_on_its_energy_flux_equator()
  {
     let run = run_world(reference::earth_like(), 7, Grid::Own, synthetic_earth);
     report("The reference Earth (synthetic sea)", &run);
     let regions = report_regions(&run);
-    report_seasons(&run);
+    let (land_winter, land_summer) = report_seasons(&run);
+    let sea_ratio = report_storm_track_months(&run);
+    let land_ratio = land_summer / land_winter;
+    eprintln!(
+        "  the 40–60° N all-land climate cells' JJA ÷ DJF {land_ratio:.3} (at least \
+         {LAND_SEASON_RATIO_BOUND}, reported from {LAND_SEASON_RATIO_BLOCK}; T13.j 0.32, GPCP 1.50)"
+    );
+    if sea_ratio > SEA_SEASON_RATIO_BOUND {
+        eprintln!(
+            "  REPORT to main: the 40–60° N sea's DJF ÷ JJA {sea_ratio:.2} exceeds \
+             {SEA_SEASON_RATIO_BOUND} (decision-r09-t13i §3.4, 2)"
+        );
+    }
+    if land_ratio < LAND_SEASON_RATIO_BOUND {
+        eprintln!(
+            "  REPORT to main: the 40–60° N land's JJA ÷ DJF {land_ratio:.3} is under \
+             {LAND_SEASON_RATIO_BOUND} (decision-r09-t13i §3.4, 2)"
+        );
+    }
     let factors = report_balance(&run);
     let annual = run.annual_precipitation();
     let mut windows = Vec::with_capacity(2);
@@ -1387,6 +1556,14 @@ fn the_reference_earth_s_storm_tracks_are_wetter_than_its_subtropics_its_interio
     for (m, k) in factors.iter().enumerate() {
         assert!((0.85..=1.15).contains(k), "month {m}: k {k}");
     }
+    assert!(
+        sea_ratio <= SEA_SEASON_RATIO_BLOCK,
+        "the 40–60° N sea's DJF ÷ JJA {sea_ratio}"
+    );
+    assert!(
+        land_ratio >= LAND_SEASON_RATIO_BLOCK,
+        "the 40–60° N land's JJA ÷ DJF {land_ratio}"
+    );
 }
 
 /// The ruled balance (decision-r09-t13ge §2.13, e8): global precipitation equals global
