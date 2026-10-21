@@ -39,6 +39,7 @@ import {
 } from "../../test/terrainSessionFixtures";
 import { aBody, FIXTURE_PLANET_CENTRE_M, FIXTURE_SYSTEM } from "../../test/viewFixtures";
 import { lawFor } from "../appearance/phase";
+import { classMapPointState, classMapPointWork } from "../bodies/classMapPoint";
 import type { AllocationEvent } from "../engine/memory";
 import type { ViewBody, ViewScene } from "../scene/model";
 import { TERRAIN_COMPUTATION_FAILED, TERRAIN_NOT_AVAILABLE } from "./annunciation";
@@ -203,6 +204,11 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  // A session's class maps' point builds go with it (R10.T14.f), so that none steps another's.
+  const { builds, refreshes } = classMapPointWork();
+  if (builds !== 0 || refreshes !== 0) {
+    throw new Error(`a test left ${String(builds)} builds and ${String(refreshes)} refreshes`);
+  }
 });
 
 describe("a view's field candidates (R10.T16.a)", () => {
@@ -515,6 +521,42 @@ describe("the terrain session's detail seeds and class maps (R10.T16.a)", () => 
     await settle();
     const elsewhere = lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon");
     expect(h.session.classMaps.classMapOf(MOON, elsewhere)?.kind).toBe("class-map");
+    // Its map's point build cancelled with it (R10.T14.f), so that no later test steps it.
+    h.session.dispose();
+  });
+
+  it("makes a class map's point elements in its steps, a slice a step (R10.T14.f)", async () => {
+    // The slices' clock moves 1/16 ms at each reading, so that each step's slice is 32 readings.
+    let readings = 0;
+    vi.stubGlobal("performance", {
+      now: () => {
+        readings += 1;
+        return readings / 16;
+      },
+    });
+    const h = await harness();
+    await holdMoon(h);
+    h.socket().serverAnswers("body_detail", () => detailWithSeed(SEED));
+    await settle();
+    const query = h.workers.flatMap((w) => w.pendingClassMaps.map((q) => ({ w, q })))[0];
+    query?.w.reply({ kind: "class-map", id: query.q.id, body: MOON, map: oneTexelMap() });
+    await settle();
+    const surface = h.session.classMaps.classMapOf(
+      MOON,
+      lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+    );
+    if (surface === null) {
+      throw new Error("the session holds no map of the Moon");
+    }
+    const states = [classMapPointState(surface)];
+    let steps = 0;
+    while (classMapPointState(surface) === "queued" && steps < 10_000) {
+      h.session.step();
+      steps += 1;
+    }
+    states.push(classMapPointState(surface));
+    expect([states, steps > 1]).toEqual([["queued", "made"], true]);
+    h.session.dispose();
   });
 
   it("gives the views the relief of a body whose header and survey it holds", async () => {

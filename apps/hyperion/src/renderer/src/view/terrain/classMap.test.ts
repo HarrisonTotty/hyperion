@@ -1,10 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { countingRenderEngine } from "../../test/countingRenderEngine";
+import { vec3 } from "../../geometry/vec3";
+import { type CountingRenderEngine, countingRenderEngine } from "../../test/countingRenderEngine";
+import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
 import type { PhotometricLaw } from "../appearance/law";
 import { lawFor } from "../appearance/phase";
+import {
+  classMapPointReflection,
+  classMapPointState,
+  classMapPointWork,
+  classMapReflectionRatio,
+  makeClassMapPointNow,
+  stepClassMapPoints,
+} from "../bodies/classMapPoint";
 import { packNormalMap } from "../bodies/discNormals";
 import { classMapSide, classWeightsAt } from "../bodies/discSurface";
+import { bodyReflection } from "../bodies/oblate";
+import { IDENTITY_ROTATION } from "../coords/rotation";
 import type { AllocationEvent, TextureSpec } from "../engine/memory";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import {
@@ -19,6 +31,7 @@ import {
 import { fieldCellIndex } from "./coverage";
 import { faceUvToXyz, stToUv } from "./cube";
 import type { Face } from "./patchKey";
+import type { BodyFigure } from "./planet";
 import { classRowLaw, PHASE_LAW } from "./terrainMaterial";
 import { type ClassMapAnswer, PALETTE_NONE } from "./workers/messages";
 import type { FieldChange } from "./workers/pool";
@@ -663,6 +676,132 @@ describe("the class-map store", () => {
     expect(error).toHaveBeenCalledTimes(1);
     expect(pool.asked).toHaveLength(2);
     expect(store.classMapOf(MOON, ELSEWHERE)).toBeNull();
+    store.dispose();
+  });
+});
+
+/** Runs the class-mapped points' slices until no work remains, whatever the time. */
+function drain(): void {
+  stepClassMapPoints(Number.POSITIVE_INFINITY, () => 0);
+}
+
+describe("the class-map store's points (R10.T14.f)", () => {
+  afterEach(() => {
+    // Each test's store, disposed, cancels what it queued, so that none steps another's.
+    const { builds, refreshes } = classMapPointWork();
+    if (builds !== 0 || refreshes !== 0) {
+      throw new Error(`a test left ${String(builds)} builds and ${String(refreshes)} refreshes`);
+    }
+  });
+
+  /** A sphere: the point is drawn about the body-fixed pole. */
+  const SPHERE: BodyFigure = { equatorialRadiusM: 7.35e5, polarRadiusM: 7.35e5, pole: null };
+  /** Face 2's centre, the body-fixed pole, over which the answers' texels lie. */
+  const POLE = vec3(0, 0, 1);
+
+  /** The Moon's surface as the store hands it out, which must exist. */
+  function surfaceOf(store: ClassMapStore): ClassMapDiscSurface {
+    const surface = store.classMapOf(MOON, ELSEWHERE);
+    if (surface === null) {
+      throw new Error("the store holds no map of the Moon");
+    }
+    return surface;
+  }
+
+  /** The Moon's point under `surface`, lit and seen from over the pole. */
+  function pointOf(surface: ClassMapDiscSurface): ReadonlyArray<number> {
+    return classMapPointReflection(SPHERE, surface, IDENTITY_ROTATION, POLE, POLE);
+  }
+
+  /**
+   * A store holding the Moon's map with {@link NORMALS}, its point's elements made and its point
+   * drawn, and the surface it was drawn under.
+   */
+  async function drawnMoon(): Promise<{
+    readonly engine: CountingRenderEngine;
+    readonly pool: ScriptedPool;
+    readonly store: ClassMapStore;
+    readonly first: ClassMapDiscSurface;
+    readonly drawnFirst: ReadonlyArray<number>;
+  }> {
+    const engine = await countingRenderEngine();
+    const pool = new ScriptedPool();
+    const store = new ClassMapStore(engine, pool);
+    store.want(MOON, SEED);
+    pool.asked[0]?.resolve(answerOf(TEXELS, true, NORMALS));
+    await settle();
+    const first = surfaceOf(store);
+    makeClassMapPointNow(first);
+    return { engine, pool, store, first, drawnFirst: pointOf(first) };
+  }
+
+  /** A block that surveys cells, and the new map it brings, answered as the store's second. */
+  async function remade(pool: ScriptedPool): Promise<void> {
+    pool.change(MOON, 1, [7, 8]);
+    pool.asked[1]?.resolve(answerOf(TEXELS.slice(1), true, NORMALS));
+    await settle();
+  }
+
+  it("queues a map's point elements as it takes the map", async () => {
+    const engine = await countingRenderEngine();
+    const pool = new ScriptedPool();
+    const store = new ClassMapStore(engine, pool);
+    store.want(MOON, SEED);
+    pool.asked[0]?.resolve(answerOf(TEXELS));
+    await settle();
+    expect(classMapPointState(surfaceOf(store))).toBe("queued");
+    store.dispose();
+  });
+
+  it("cancels a map's unfinished point elements with its body", async () => {
+    const engine = await countingRenderEngine();
+    const pool = new ScriptedPool();
+    const store = new ClassMapStore(engine, pool);
+    store.want(MOON, SEED);
+    pool.asked[0]?.resolve(answerOf(TEXELS));
+    await settle();
+    const surface = surfaceOf(store);
+    store.release(MOON);
+    expect(classMapPointState(surface)).toBe("unmade");
+    store.dispose();
+  });
+
+  it("makes the elements anew for a surveying block's map, the last made map's point standing in meanwhile", async () => {
+    const { pool, store, first, drawnFirst } = await drawnMoon();
+    // A block that surveys cells brings a new map, its texels and normals new objects (R10.T10.g's
+    // remake), whose elements are made again.
+    await remade(pool);
+    const second = surfaceOf(store);
+    expect([
+      second.texels === first.texels,
+      second.normals?.texels === first.normals?.texels,
+      classMapPointState(second),
+      pointOf(second),
+    ]).toEqual([false, false, "queued", drawnFirst]);
+    store.dispose();
+  });
+
+  it("draws the new map's own point once the slices have made its elements and found its light", async () => {
+    const { pool, store, drawnFirst } = await drawnMoon();
+    await remade(pool);
+    const second = surfaceOf(store);
+    drain();
+    // The first frame after draws what it was drawn with, and queues its own light.
+    pointOf(second);
+    drain();
+    const ratio = classMapReflectionRatio(SPHERE, second, POLE, POLE);
+    const uniform = bodyReflection({ ...SPHERE, pole: POLE }, ELSEWHERE, POLE, POLE);
+    const own = uniform.map((u, c) => u * (ratio[c] ?? Number.NaN));
+    expect([pointOf(second), own[1] === drawnFirst[1]]).toEqual([own, false]);
+    store.dispose();
+  });
+
+  it("stands the old map in for a new one that comes before a frame asks again after a device loss", async () => {
+    const { engine, pool, store, drawnFirst } = await drawnMoon();
+    // The restore makes the textures again and forgets the surface handed out.
+    engine.restore();
+    await remade(pool);
+    expect(pointOf(surfaceOf(store))).toEqual(drawnFirst);
     store.dispose();
   });
 });

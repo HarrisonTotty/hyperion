@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { add, cross, dot, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
 import { aHostDisc } from "../../test/litFixtures";
@@ -31,10 +31,18 @@ import type { Face } from "../terrain/patchKey";
 import type { BodyFigure } from "../terrain/planet";
 import { classRowLaw, PHASE_LAW, type PhaseLawCode } from "../terrain/terrainMaterial";
 import {
+  CLASS_MAP_POINT_SLICE_MS,
+  cancelClassMapPoint,
   classMapPointCacheAngleRad,
   classMapPointNormalSamples,
   classMapPointReflection,
+  classMapPointStaleAngleRad,
+  classMapPointState,
+  classMapPointWork,
   classMapReflectionRatio,
+  makeClassMapPointNow,
+  queueClassMapPoint,
+  stepClassMapPoints,
 } from "./classMapPoint";
 import { type NormalMapTexels, normalMapNormalAt } from "./discNormals";
 import {
@@ -118,13 +126,22 @@ const IAPETUS = iapetusMap();
 /** Half the Iapetus surveyed, the survey's edge a circle across the cap and the bright side. */
 const HALF_IAPETUS = iapetusMap((d) => d.x + 0.3 * d.z > 0.1);
 
-/** A surface over `map` by R07's construction, a distinct object, so that its cache is its own. */
+/**
+ * A surface over `map` by R07's construction, a distinct object, so that its cache is its own, its
+ * point's elements made at once (R10.T14.f), as the frames' slices would have made them.
+ */
 function surfaceOf(
   map: ClassMapTexels,
   laws: ReadonlyArray<PhotometricLaw> = [DARK, BRIGHT],
   elsewhere: PhotometricLaw = ELSEWHERE,
 ): ClassMapDiscSurface {
-  return classMapSurface(UNREAD_TEXTURES, "iapetus", map, laws, elsewhere);
+  return made(classMapSurface(UNREAD_TEXTURES, "iapetus", map, laws, elsewhere));
+}
+
+/** `surface` with its point's elements made at once. */
+function made(surface: ClassMapDiscSurface): ClassMapDiscSurface {
+  makeClassMapPointNow(surface);
+  return surface;
 }
 
 /** The views, body-fixed: the observer's direction and the one the light turns towards. */
@@ -526,16 +543,58 @@ describe("the point under a class map (R10.T10.f)", () => {
     expect(worst).toBeLessThan(0.003);
   });
 
-  it("finds the ratio afresh once the light moves past δ", () => {
-    const stale = primed().filter(({ surface, light, observer, phaseRad }) => {
+  it("keeps the ratio it holds just past δ while the frames' slices find the fresh one (R10.T14.f)", () => {
+    const wrong = primed().filter(({ surface, light, observer, phaseRad, held }) => {
       const far = turned(light, 5, 1.05 * classMapPointCacheAngleRad(phaseRad));
+      const kept = uniformAt(far, observer).map((u, c) => u * (held[c] ?? Number.NaN));
+      const frames = [0, 1].map(() =>
+        classMapPointReflection(SPHERE, surface, IDENTITY_ROTATION, far, observer),
+      );
+      cancelClassMapPoint(surface.texels);
+      return frames.some((frame) => frame.some((value, c) => value !== kept[c]));
+    });
+    expect(wrong).toEqual([]);
+  });
+
+  it("queues one refresh a light past δ, however many frames miss there (R10.T14.f)", () => {
+    const queued = primed().map(({ surface, light, observer, phaseRad }) => {
+      const far = turned(light, 5, 1.05 * classMapPointCacheAngleRad(phaseRad));
+      const before = classMapPointWork().refreshes;
+      classMapPointReflection(SPHERE, surface, IDENTITY_ROTATION, far, observer);
+      classMapPointReflection(SPHERE, surface, IDENTITY_ROTATION, far, observer);
+      const count = classMapPointWork().refreshes - before;
+      cancelClassMapPoint(surface.texels);
+      return count;
+    });
+    expect(new Set(queued)).toEqual(new Set([1]));
+  });
+
+  it("draws the ratio the frames' slices found just past δ, bit for bit (R10.T14.f)", () => {
+    const wrong = primed().filter(({ surface, light, observer, phaseRad }) => {
+      const far = turned(light, 5, 1.05 * classMapPointCacheAngleRad(phaseRad));
+      classMapPointReflection(SPHERE, surface, IDENTITY_ROTATION, far, observer);
+      slicesToDrain();
+      const ratio = classMapReflectionRatio(SPHERE, surface, far, observer);
+      const fresh = uniformAt(far, observer).map((u, c) => u * (ratio[c] ?? Number.NaN));
+      return classMapPointReflection(SPHERE, surface, IDENTITY_ROTATION, far, observer).some(
+        (value, c) => value !== fresh[c],
+      );
+    });
+    expect(wrong).toEqual([]);
+  });
+
+  it("finds the ratio at once past the stand-in's angle, as a light's first", () => {
+    const before = classMapPointWork().refreshes;
+    const stale = primed().filter(({ surface, light, observer, phaseRad }) => {
+      // Past it by half again, which the moved phase cannot widen it past (by 12% at most).
+      const far = turned(light, 5, 1.5 * classMapPointStaleAngleRad(phaseRad));
       const ratio = classMapReflectionRatio(SPHERE, surface, far, observer);
       const expected = uniformAt(far, observer).map((u, c) => u * (ratio[c] ?? Number.NaN));
       return classMapPointReflection(SPHERE, surface, IDENTITY_ROTATION, far, observer).some(
         (value, c) => value !== expected[c],
       );
     });
-    expect(stale).toEqual([]);
+    expect([stale, classMapPointWork().refreshes - before]).toEqual([[], 0]);
   });
 
   it("refuses a surface whose laws are not one per class of its map", () => {
@@ -579,15 +638,20 @@ describe("the point under a class map with the field's normal map (R10.T10.g)", 
     expect([32, 64, 128, 256].map((n) => classMapPointNormalSamples(128, n))).toEqual([1, 1, 2, 4]);
   });
 
-  /** The Iapetus's surface with `normals`, a distinct object, so that its cache is its own. */
+  /**
+   * The Iapetus's surface with `normals`, a distinct object, so that its cache is its own, its
+   * point's elements made at once.
+   */
   function slopedOf(map: ClassMapTexels, normals: NormalMapTexels): ClassMapDiscSurface {
-    return classMapSurface(
-      UNREAD_TEXTURES,
-      "iapetus",
-      map,
-      [DARK, BRIGHT],
-      ELSEWHERE,
-      unreadNormalMap(normals, "iapetus normals"),
+    return made(
+      classMapSurface(
+        UNREAD_TEXTURES,
+        "iapetus",
+        map,
+        [DARK, BRIGHT],
+        ELSEWHERE,
+        unreadNormalMap(normals, "iapetus normals"),
+      ),
     );
   }
 
@@ -759,5 +823,362 @@ describe("the point under a class map with the field's normal map (R10.T10.g)", 
       }
     }
     expect(worst).toBeLessThan(0.003);
+  });
+});
+
+/** A fresh copy of {@link HALF_IAPETUS}'s texels: half the Iapetus surveyed. */
+function halfIapetus(): ClassMapTexels {
+  return iapetusMap((d) => d.x + 0.3 * d.z > 0.1);
+}
+
+/** A surface over a fresh map of `mapOf`'s, with a fresh copy of `normals`, its elements unmade. */
+function unmadeOf(
+  mapOf: () => ClassMapTexels,
+  normals: NormalMapTexels | null = null,
+): ClassMapDiscSurface {
+  return classMapSurface(
+    UNREAD_TEXTURES,
+    "unmade",
+    mapOf(),
+    [DARK, BRIGHT],
+    ELSEWHERE,
+    normals === null
+      ? null
+      : unreadNormalMap({ faceTexels: normals.faceTexels, data: normals.data.slice() }),
+  );
+}
+
+/** The ticks of the frames' slices' clock in tests, ms a reading: a 2 ms slice reads it 33 times. */
+const TICK_MS = 1 / 16;
+
+/** A clock that moves {@link TICK_MS} at each reading, and the readings it has given. */
+function tickingClock(): { readonly now: () => number; readonly readings: () => number } {
+  let readings = 0;
+  return {
+    now: () => {
+      readings += 1;
+      return readings * TICK_MS;
+    },
+    readings: () => readings,
+  };
+}
+
+/** Runs the frames' slices of their budget, on a ticking clock, until no work remains; how many. */
+function slicesToDrain(): number {
+  const clock = tickingClock();
+  let slices = 1;
+  while (stepClassMapPoints(CLASS_MAP_POINT_SLICE_MS, clock.now)) {
+    slices += 1;
+  }
+  return slices;
+}
+
+/** The light on the leading side at 60° of phase. */
+const LEADING_LIGHT = lightAt(APEX, vec3(1, 0, 0), 60 * RAD);
+
+/** The Iapetus's point under `surface` from its leading side at 60°. */
+function leadingPointOf(surface: ClassMapDiscSurface): ReturnType<typeof classMapPointReflection> {
+  return classMapPointReflection(SPHERE, surface, IDENTITY_ROTATION, LEADING_LIGHT, APEX);
+}
+
+/** `ratio` times the uniform point on the leading side at 60°. */
+function leadingWith(ratio: ReadonlyArray<number>): number[] {
+  return uniformAt(LEADING_LIGHT, APEX).map((u, c) => u * (ratio[c] ?? Number.NaN));
+}
+
+describe("the class-mapped point's first frame, off the render thread (R10.T14.f)", () => {
+  afterEach(() => {
+    // Each test cancels or drains what it queues, so that none steps another's.
+    const { builds, refreshes } = classMapPointWork();
+    if (builds !== 0 || refreshes !== 0) {
+      throw new Error(`a test left ${String(builds)} builds and ${String(refreshes)} refreshes`);
+    }
+  });
+
+  it("draws the uniform point, bit for bit, while a map's elements are unmade", () => {
+    const surface = unmadeOf(() => iapetusMap());
+    const { body, hosts } = iapetusAt(surface, APEX, vec3(1, 0, 0), 60 * RAD, 2);
+    const point = pointFlux(body, hosts, [], DISC_ANNULI_HIGH);
+    cancelClassMapPoint(surface.texels);
+    expect(point).toEqual(pointFlux(uniformBody(body), hosts, [], DISC_ANNULI_HIGH));
+  });
+
+  it("queues the build of a map whose elements a frame finds unmade", () => {
+    const surface = unmadeOf(() => iapetusMap());
+    const states = [classMapPointState(surface)];
+    leadingPointOf(surface);
+    states.push(classMapPointState(surface));
+    cancelClassMapPoint(surface.texels);
+    states.push(classMapPointState(surface));
+    expect(states).toEqual(["unmade", "queued", "unmade"]);
+  });
+
+  it("makes the elements in slices of its budget, each ending at its first step past it", () => {
+    const surface = unmadeOf(() => iapetusMap(), checkerNormalMap(6, 12 * RAD));
+    queueClassMapPoint(surface.texels, surface.normals?.texels ?? null, null);
+    const clock = tickingClock();
+    const slices: number[] = [];
+    for (let more = true; more;) {
+      const before = clock.readings();
+      more = stepClassMapPoints(CLASS_MAP_POINT_SLICE_MS, clock.now);
+      slices.push(clock.readings() - before);
+    }
+    expect([
+      slices.length > 100,
+      Math.max(...slices) <= CLASS_MAP_POINT_SLICE_MS / TICK_MS + 1,
+      classMapPointState(surface),
+    ]).toEqual([true, true, "made"]);
+  });
+
+  /**
+   * The checkerboard of ±12° cells at the field's levels 6, 7 and 8, made once, on first use, since
+   * a level-8 map takes a second.
+   */
+  const checkerAt = memoised(
+    (level: 6 | 7 | 8): NormalMapTexels => checkerNormalMap(level, 12 * RAD),
+    (level) => String(level),
+  );
+
+  for (const level of [6, 7, 8] as const) {
+    it(`draws, once the slices have made a level-${String(level)} map's elements, the synchronous path's ratio bit for bit`, () => {
+      const sliced = unmadeOf(halfIapetus, checkerAt(level));
+      const synchronous = unmadeOf(halfIapetus, checkerAt(level));
+      queueClassMapPoint(sliced.texels, sliced.normals?.texels ?? null, null);
+      const slices = slicesToDrain();
+      const wrong = VIEWS.flatMap(([name, observer, across]) =>
+        PHASES_DEG.filter((phaseDeg) => {
+          const light = lightAt(observer, across, phaseDeg * RAD);
+          const ratio = classMapReflectionRatio(SPHERE, synchronous, light, observer);
+          const expected = uniformAt(light, observer).map((u, c) => u * (ratio[c] ?? Number.NaN));
+          return classMapPointReflection(SPHERE, sliced, IDENTITY_ROTATION, light, observer).some(
+            (value, c) => !Object.is(value, expected[c]),
+          );
+        }).map((phaseDeg) => `${name} at ${String(phaseDeg)}°`),
+      );
+      expect([wrong, slices > 1]).toEqual([[], true]);
+      // Two builds of a level-8 map, about 3 s here (2026-10-21): ten times that, rounded up.
+    }, 60_000);
+  }
+
+  it("draws a replaced map's point while its successor's elements are unmade", () => {
+    const first = surfaceOf(iapetusMap());
+    const drawnFirst = leadingPointOf(first);
+    const second = unmadeOf(halfIapetus);
+    queueClassMapPoint(second.texels, null, { texels: first.texels, surface: first });
+    const whileSecond = leadingPointOf(second);
+    cancelClassMapPoint(second.texels);
+    expect(whileSecond).toEqual(drawnFirst);
+  });
+
+  it("cancels a map's unfinished build as a newer map replaces it, its stand-in standing for the newer", () => {
+    const first = surfaceOf(iapetusMap());
+    const drawnFirst = leadingPointOf(first);
+    const second = unmadeOf(halfIapetus);
+    const third = unmadeOf(halfIapetus);
+    queueClassMapPoint(second.texels, null, { texels: first.texels, surface: first });
+    queueClassMapPoint(third.texels, null, { texels: second.texels, surface: second });
+    const states = [classMapPointState(second), classMapPointState(third)];
+    const whileThird = leadingPointOf(third);
+    cancelClassMapPoint(third.texels);
+    expect([states, whileThird]).toEqual([["unmade", "queued"], drawnFirst]);
+  });
+
+  /** A map made in the slices behind the first, drawn at its stand-in's geometry as it was made. */
+  function madeBehind(): {
+    readonly drawnFirst: ReturnType<typeof leadingPointOf>;
+    readonly second: ClassMapDiscSurface;
+  } {
+    const first = surfaceOf(iapetusMap());
+    const drawnFirst = leadingPointOf(first);
+    const second = unmadeOf(halfIapetus);
+    queueClassMapPoint(second.texels, null, { texels: first.texels, surface: first });
+    leadingPointOf(second);
+    slicesToDrain();
+    return { drawnFirst, second };
+  }
+
+  it("draws, at the first frame after a map's elements are made, the ratio it was drawn with", () => {
+    const { drawnFirst, second } = madeBehind();
+    const before = classMapPointWork().refreshes;
+    const atMade = leadingPointOf(second);
+    const queued = classMapPointWork().refreshes - before;
+    slicesToDrain();
+    expect([atMade, queued]).toEqual([drawnFirst, 1]);
+  });
+
+  it("draws a map's own ratio once the slices have found it, after the frame its elements are made", () => {
+    const { second } = madeBehind();
+    leadingPointOf(second);
+    slicesToDrain();
+    const own = leadingWith(
+      classMapReflectionRatio(SPHERE, unmadeOf(halfIapetus), LEADING_LIGHT, APEX),
+    );
+    expect(leadingPointOf(second)).toEqual(own);
+  });
+
+  it("lets a made map's provisional ratios go when no frame draws its point as it is made", () => {
+    const { second } = madeBehind();
+    // The next frame's slice, no frame having drawn the point since the elements were made.
+    stepClassMapPoints(CLASS_MAP_POINT_SLICE_MS, tickingClock().now);
+    const own = leadingWith(
+      classMapReflectionRatio(SPHERE, unmadeOf(halfIapetus), LEADING_LIGHT, APEX),
+    );
+    expect(leadingPointOf(second)).toEqual(own);
+  });
+
+  it("draws the uniform point at a first map's first frame made where it was drawn uniform", () => {
+    const surface = unmadeOf(() => iapetusMap());
+    leadingPointOf(surface);
+    slicesToDrain();
+    const atMade = leadingPointOf(surface);
+    slicesToDrain();
+    expect(atMade).toEqual(uniformAt(LEADING_LIGHT, APEX));
+  });
+
+  it("draws a first map's own ratio once the slices have found it", () => {
+    const surface = unmadeOf(() => iapetusMap());
+    leadingPointOf(surface);
+    slicesToDrain();
+    leadingPointOf(surface);
+    slicesToDrain();
+    const mapped = leadingWith(
+      classMapReflectionRatio(
+        SPHERE,
+        unmadeOf(() => iapetusMap()),
+        LEADING_LIGHT,
+        APEX,
+      ),
+    );
+    expect(leadingPointOf(surface)).toEqual(mapped);
+  });
+
+  it("carries a made map's provisional ratios to the map that replaces it before its own are found", () => {
+    const { drawnFirst, second } = madeBehind();
+    // Made, and drawn on its provisional ratios, its own refresh out: then replaced.
+    leadingPointOf(second);
+    const third = unmadeOf(halfIapetus);
+    queueClassMapPoint(third.texels, null, { texels: second.texels, surface: second });
+    const whileThird = leadingPointOf(third);
+    cancelClassMapPoint(third.texels);
+    expect(whileThird).toEqual(drawnFirst);
+  });
+
+  it("draws the uniform point for a successor of a map that was never made", () => {
+    const first = unmadeOf(() => iapetusMap());
+    const second = unmadeOf(() => iapetusMap());
+    queueClassMapPoint(first.texels, null, null);
+    queueClassMapPoint(second.texels, null, { texels: first.texels, surface: first });
+    const drawn = leadingPointOf(second);
+    const states = [classMapPointState(first), classMapPointState(second)];
+    cancelClassMapPoint(second.texels);
+    expect([drawn, states]).toEqual([uniformAt(LEADING_LIGHT, APEX), ["unmade", "queued"]]);
+  });
+
+  it("draws two lights close together by their own ratios, each found at once", () => {
+    const surface = surfaceOf(IAPETUS);
+    const nearby = turned(LEADING_LIGHT, 1, 0.1);
+    const lights = [
+      ["a star", LEADING_LIGHT],
+      ["another star", nearby],
+    ] as const;
+    const expected = lights.map(([, light]) =>
+      uniformAt(light, APEX).map(
+        (u, c) => u * (classMapReflectionRatio(SPHERE, surface, light, APEX)[c] ?? Number.NaN),
+      ),
+    );
+    const frames = [0, 1, 2].map(() =>
+      lights.map(([key, light]) =>
+        classMapPointReflection(SPHERE, surface, IDENTITY_ROTATION, light, APEX, key),
+      ),
+    );
+    expect(frames).toEqual([expected, expected, expected]);
+  });
+
+  it("keeps each light's held ratio as another's refreshes land, so that its miss is found in the slices too", () => {
+    const surface = surfaceOf(IAPETUS);
+    // Eight lights and views, a surface's most: each one's first ratio found at once and held.
+    const geometries = VIEWS.flatMap(([, observer, across]) =>
+      [30, 60, 90].map((phaseDeg) => ({
+        light: lightAt(observer, across, phaseDeg * RAD),
+        observer,
+      })),
+    ).slice(0, 8);
+    for (const { light, observer } of geometries) {
+      classMapPointReflection(SPHERE, surface, IDENTITY_ROTATION, light, observer);
+    }
+    const [first, second] = geometries;
+    if (first === undefined || second === undefined) {
+      throw new Error("two geometries at the least");
+    }
+    // The first light past δ again and again, each refresh landing: eight of them.
+    const delta = classMapPointCacheAngleRad(30 * RAD);
+    for (let k = 1; k <= 8; k += 1) {
+      const moved = turned(first.light, 0, 1.5 * k * delta);
+      classMapPointReflection(SPHERE, surface, IDENTITY_ROTATION, moved, first.observer);
+      slicesToDrain();
+    }
+    const before = classMapPointWork().refreshes;
+    const moved = turned(second.light, 2, 1.5 * classMapPointCacheAngleRad(60 * RAD));
+    classMapPointReflection(SPHERE, surface, IDENTITY_ROTATION, moved, second.observer);
+    const queued = classMapPointWork().refreshes - before;
+    cancelClassMapPoint(surface.texels);
+    expect(queued).toBe(1);
+  });
+
+  it("drops the stand-in's refreshes with the map it stands for", () => {
+    const first = surfaceOf(iapetusMap());
+    leadingPointOf(first);
+    const second = unmadeOf(halfIapetus);
+    queueClassMapPoint(second.texels, null, { texels: first.texels, surface: first });
+    const before = classMapPointWork().refreshes;
+    // Past δ, within the stand-in's angle: the stand-in's ratio is found again for the second.
+    const moved = turned(LEADING_LIGHT, 3, 2 * classMapPointCacheAngleRad(60 * RAD));
+    classMapPointReflection(SPHERE, second, IDENTITY_ROTATION, moved, APEX);
+    const queued = classMapPointWork().refreshes - before;
+    cancelClassMapPoint(second.texels);
+    expect([queued, classMapPointWork().refreshes - before]).toEqual([1, 0]);
+  });
+
+  /** A first map made and drawn, and a map whose build throws queued behind it and stepped. */
+  function brokenBehind(): {
+    readonly drawnFirst: ReturnType<typeof leadingPointOf>;
+    readonly surface: ClassMapDiscSurface;
+    readonly errors: () => number;
+  } {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const first = surfaceOf(iapetusMap());
+    const drawnFirst = leadingPointOf(first);
+    const broken: ClassMapTexels = {
+      faceTexels: 64,
+      classes: 2,
+      get data(): Uint8Array {
+        throw new Error("the texels are lost");
+      },
+    };
+    queueClassMapPoint(broken, null, { texels: first.texels, surface: first });
+    slicesToDrain();
+    return {
+      drawnFirst,
+      surface: { ...first, texels: broken },
+      errors: () => error.mock.calls.length,
+    };
+  }
+
+  it("drops a map whose build throws, and never queues it again", () => {
+    const { surface } = brokenBehind();
+    leadingPointOf(surface);
+    expect([classMapPointState(surface), classMapPointWork().builds]).toEqual(["unmade", 0]);
+  });
+
+  it("draws a map whose build threw by its stand-in", () => {
+    const { drawnFirst, surface } = brokenBehind();
+    expect(leadingPointOf(surface)).toEqual(drawnFirst);
+  });
+
+  it("says a map whose build throws once", () => {
+    const { errors, surface } = brokenBehind();
+    leadingPointOf(surface);
+    slicesToDrain();
+    expect(errors()).toBe(1);
   });
 });

@@ -28,11 +28,16 @@
  *   block that surveys cells or brings what an incomplete map lacked (the pool's `onFieldChange`,
  *   the workers' coverage), a map being complete only where its classes and its normals both are;
  *   it remakes both textures after a device loss and releases both with the body.
+ * - **The point's elements** (R10.T14.f): as it takes a map the store queues the point integral's
+ *   elements for the frames' slices (`bodies/classMapPoint.ts`' `queueClassMapPoint`), the map it
+ *   replaces standing in for the point until they are made, and cancels a map's unfinished build as
+ *   it drops the map.
  */
 import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
 
 import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
 import type { PhotometricLaw } from "../appearance/law";
+import { cancelClassMapPoint, queueClassMapPoint } from "../bodies/classMapPoint";
 import { type NormalMapTexels, normalMapTexture, packNormalMap } from "../bodies/discNormals";
 import {
   type ClassMapTexels,
@@ -178,8 +183,13 @@ interface HeldMap {
   texture: TextureHandle | null;
   /** The normal map's texture, `null` while the device is lost or where it has none. */
   normalTexture: TextureHandle | null;
-  /** The surface last handed out, with its `elsewhere`. */
+  /** The surface last handed out, with its `elsewhere`; `null` after each upload. */
   surface: ClassMapDiscSurface | null;
+  /**
+   * The surface last handed out, kept across uploads: the point's stand-in once the map is
+   * replaced, whose point integral reads its texels and laws alone (R10.T14.f).
+   */
+  handedOut: ClassMapDiscSurface | null;
 }
 
 /** A body the store is asked for. */
@@ -291,6 +301,7 @@ export class ClassMapStore implements ClassMapSource {
             ? null
             : { texture: map.normalTexture, texels: map.normals },
       };
+      map.handedOut = map.surface;
     }
     return map.surface;
   }
@@ -354,13 +365,25 @@ export class ClassMapStore implements ClassMapSource {
     }
   }
 
-  /** Takes an answer for `body` in place of the map it held. */
+  /**
+   * Takes an answer for `body` in place of the map it held, and queues the new map's point
+   * elements for the frames' slices, the old map's point standing in meanwhile (R10.T14.f).
+   */
   #take(body: BodyIdHex, held: HeldBody, answer: ClassMapAnswer | null): void {
     if (answer === null) {
       return;
     }
     const texels = classMapTexelsOf(answer);
     const normals = normalMapTexelsOf(answer);
+    if (texels !== null) {
+      // Before the old map is dropped, which would cancel its build and forget its stand-in.
+      const previous = held.map;
+      queueClassMapPoint(
+        texels,
+        normals,
+        previous === null ? null : { texels: previous.texels, surface: previous.handedOut },
+      );
+    }
     this.#drop(held);
     if (texels === null) {
       return;
@@ -373,6 +396,7 @@ export class ClassMapStore implements ClassMapSource {
       texture: null,
       normalTexture: null,
       surface: null,
+      handedOut: null,
     };
     held.map = map;
     this.#upload(body, map);
@@ -411,10 +435,11 @@ export class ClassMapStore implements ClassMapSource {
     map.surface = null;
   }
 
-  /** Releases `held`'s textures and forgets its map. */
+  /** Releases `held`'s textures, cancels its point's unfinished build and forgets its map. */
   #drop(held: HeldBody): void {
     if (held.map !== null) {
       this.#release(held.map);
+      cancelClassMapPoint(held.map.texels);
     }
     held.map = null;
   }

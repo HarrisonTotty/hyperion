@@ -26,7 +26,8 @@
  *   (one slope of 12° along every face's s moves it by +62% facing a pole at 120°, R10.T10.g).
  * - **The cache.** The ratio, the light's own and uneclipsed, is held per surface and light by the
  *   body-fixed directions of the light and the observer, and taken again while both stay within
- *   δ of where it was found ({@link classMapPointCacheAngleRad}); the uniform point is always fresh.
+ *   δ of where it was found ({@link classMapPointCacheAngleRad}), and past δ while a fresh one is
+ *   found (below); the uniform point is always fresh.
  *   The entries are held in a `WeakMap` keyed by the surface, at most eight a surface, so they go
  *   with their surface when its owner drops it (a new map, a new `elsewhere`, the body released);
  *   the elements' shares likewise with the map's texels.
@@ -41,6 +42,26 @@
  *   and μ₀_ν > 0, the point-source form of the disc's cut at the datum's horizon) and visible
  *   (μ_ν > 0). The normalisation's sums, `elsewhere`'s alone, stay on the datum's normals, so that
  *   the ratio carries the slopes. Without a normal map every value is as before.
+ * - **The build, off the frame** (plan R10, R10.T14.f). The elements' shares and normals are made
+ *   in slices of at most {@link CLASS_MAP_POINT_SLICE_MS} a frame ({@link stepClassMapPoints},
+ *   the terrain session's step), from the moment the store takes a map
+ *   ({@link queueClassMapPoint}), the oldest map's first; the frame's path
+ *   ({@link classMapPointReflection}) never makes them. Made at once on the render thread they
+ *   stopped it for about 0.3 s at field level 6, 0.6 s at 7 and 1.4 s at 8 (T10.f's and T10.g's
+ *   records). Until a map's are made, its point is its previous map's, the one it replaced, where
+ *   that one's were made, and otherwise the uniform point of `elsewhere`: what was drawn before the
+ *   map came. A newer map cancels the older's unfinished build. Each slice takes the elements in
+ *   the order the synchronous path does ({@link classMapReflectionRatio}, for tests and harnesses),
+ *   by the same code, so that the ratio is the same bit for bit however the build is cut.
+ * - **The misses, off the frame too** (R10.T14.f). A light's evaluation at level 8 costs about 6 ms
+ *   (k² = 16 normals an element), and under time acceleration a fast rotator misses the cache every
+ *   frame. So past δ a ratio held within {@link classMapPointStaleAngleRad} stands in, and the fresh
+ *   one is found in the same slices, its sums in the synchronous order, and held. As a map's
+ *   elements are made, what its point was drawn with (its stand-in's ratios, or the uniform
+ *   point's) stands in the same way until its own are found, so that no light is evaluated on the
+ *   frame they are made. A light's first evaluation with none held so near, the body's first frame
+ *   as a point under a map made before, is found at once, so that the point meets the disc it
+ *   switches with from that frame.
  */
 import { dot, type Vec3, vec3 } from "../../geometry/vec3";
 import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
@@ -154,11 +175,40 @@ function rectangleSolidAngle(u0: number, u1: number, v0: number, v1: number): nu
   );
 }
 
+/**
+ * The longest a frame's slice of the class-mapped points' work runs, ms (R10.T14.f;
+ * decision-next-lane-2026-10-21b §2): an eighth of a 60 Hz frame, against R05 Design note 21's
+ * hitch row (none over 50 ms past 3 T) and the views' gap limit of 250 ms
+ * (decision-r10-t14d-stall §3).
+ *
+ * @remarks
+ * A slice ends at the first step past it, a step making a row of 128 elements' geometry, about 16
+ * elements' shares or 16 normals, copying a block of 65,536 shares, or taking 256 elements of an
+ * evaluation: some tens of microseconds each.
+ */
+export const CLASS_MAP_POINT_SLICE_MS = 2;
+
+/** The normals, or the elements' shares, a step of a build makes before it yields. */
+const STEP_WORK = 16;
+
+/** Runs a build's steps to their end at once: the synchronous path. */
+function finished<T>(steps: Generator<void, T>): T {
+  for (;;) {
+    const step = steps.next();
+    if (step.done === true) {
+      return step.value;
+    }
+  }
+}
+
 /** Each fineness's elements, made on first use: one per fineness in use. */
 const GEOMETRIES = new Map<number, ElementGeometry>();
 
-/** The sphere's elements at `side` along a face's side, face by face, then row by row in t. */
-function elementGeometry(side: number): ElementGeometry {
+/**
+ * The sphere's elements at `side` along a face's side, face by face, then row by row in t, a row a
+ * step; the one held where another build made them meanwhile.
+ */
+function* geometrySteps(side: number): Generator<void, ElementGeometry> {
   const held = GEOMETRIES.get(side);
   if (held !== undefined) {
     return held;
@@ -185,9 +235,10 @@ function elementGeometry(side: number): ElementGeometry {
         );
         e += 1;
       }
+      yield;
     }
   }
-  const geometry = { count, directions, solidAngles };
+  const geometry = GEOMETRIES.get(side) ?? { count, directions, solidAngles };
   GEOMETRIES.set(side, geometry);
   return geometry;
 }
@@ -205,19 +256,45 @@ interface ElementShares {
   readonly share: Float64Array;
 }
 
-/** Each map's element shares, made on first use and held while the map is. */
+/** Each map's element shares, made once and held while the map is. */
 const SHARES = new WeakMap<ClassMapTexels, ElementShares>();
 
-/** The shares of a map's laws at each of its elements, by the survey-masked reconstruction. */
-function elementSharesOf(texels: ClassMapTexels): ElementShares {
+/** The entries a block holds while a map's shares are made, a block's copy a step (R10.T14.f). */
+const SHARE_BLOCK = 2 ** 16;
+
+/** A block of a map's share entries while they are made: each entry's law and share. */
+interface ShareBlock {
+  readonly law: Uint8Array;
+  readonly share: Float64Array;
+}
+
+/** The elements along a face's side for a class map's point. */
+function elementSideOf(texels: ClassMapTexels): number {
+  return texels.faceTexels * classMapPointSubdivision(texels.faceTexels);
+}
+
+/**
+ * The shares of a map's laws at each of its elements, by the survey-masked reconstruction, after
+ * the elements' geometry where it is not made: {@link STEP_WORK} elements a step, and the stores'
+ * copy one; those held where they were made meanwhile.
+ */
+function* sharesSteps(texels: ClassMapTexels): Generator<void, ElementShares> {
   const held = SHARES.get(texels);
   if (held !== undefined) {
     return held;
   }
-  const geometry = elementGeometry(texels.faceTexels * classMapPointSubdivision(texels.faceTexels));
+  const geometry = yield* geometrySteps(elementSideOf(texels));
   const offsets = new Uint32Array(geometry.count + 1);
-  const law: number[] = [];
-  const share: number[] = [];
+  // The entries in blocks while they are made, then copied into their stores a block a step, so
+  // that no step copies a whole map's (614,400 entries on an eight-class map; R10.T14.f).
+  const newBlock = (): ShareBlock => ({
+    law: new Uint8Array(SHARE_BLOCK),
+    share: new Float64Array(SHARE_BLOCK),
+  });
+  let block = newBlock();
+  const blocks = [block];
+  let used = 0;
+  let entries = 0;
   const { directions } = geometry;
   for (let e = 0; e < geometry.count; e += 1) {
     const shares = classMapSharesAt(texels, [
@@ -225,20 +302,40 @@ function elementSharesOf(texels: ClassMapTexels): ElementShares {
       directions[3 * e + 1] ?? 0,
       directions[3 * e + 2] ?? 0,
     ]);
-    shares.forEach((value, m) => {
+    for (const [m, value] of shares.entries()) {
       if (value > 0) {
-        law.push(m);
-        share.push(value);
+        if (used === SHARE_BLOCK) {
+          block = newBlock();
+          blocks.push(block);
+          used = 0;
+        }
+        block.law[used] = m;
+        block.share[used] = value;
+        used += 1;
+        entries += 1;
       }
-    });
-    offsets[e + 1] = law.length;
+    }
+    offsets[e + 1] = entries;
+    if ((e + 1) % STEP_WORK === 0) {
+      yield;
+    }
   }
-  const made = {
+  const law = new Uint8Array(entries);
+  const share = new Float64Array(entries);
+  let copied = 0;
+  for (const full of blocks) {
+    yield;
+    const length = Math.min(SHARE_BLOCK, entries - copied);
+    law.set(full.law.subarray(0, length), copied);
+    share.set(full.share.subarray(0, length), copied);
+    copied += length;
+  }
+  const made = SHARES.get(texels) ?? {
     geometry,
     laws: texels.classes + 1,
     offsets,
-    law: Uint8Array.from(law),
-    share: Float64Array.from(share),
+    law,
+    share,
   };
   SHARES.set(texels, made);
   return made;
@@ -255,24 +352,30 @@ interface ElementNormals {
   readonly normals: Float32Array;
 }
 
-/** Each normal map's normals by the elements' fineness, made on first use, held while it is. */
+/** Each normal map's normals by the elements' fineness, made once, held while it is. */
 const NORMALS = new WeakMap<NormalMapTexels, Map<number, ElementNormals>>();
+
+/** The normals of `normals` made at `side` elements a face's side, if they are. */
+function madeNormals(normals: NormalMapTexels, side: number): ElementNormals | undefined {
+  return NORMALS.get(normals)?.get(side);
+}
 
 /**
  * The shading normals of `normals` at each element of `geometry`, `side` a face's side, k × k an
- * element at its sub-elements' centres in (s, t): at k = 1 the element's own centre.
+ * element at its sub-elements' centres in (s, t): at k = 1 the element's own centre. A step makes
+ * the elements of about {@link STEP_WORK} normals; those held where they were made meanwhile.
  */
-function elementNormalsOf(
+function* normalsSteps(
   normals: NormalMapTexels,
   geometry: ElementGeometry,
   side: number,
-): ElementNormals {
-  const held = NORMALS.get(normals) ?? new Map<number, ElementNormals>();
-  const found = held.get(side);
+): Generator<void, ElementNormals> {
+  const found = madeNormals(normals, side);
   if (found !== undefined) {
     return found;
   }
   const k = classMapPointNormalSamples(side, normals.faceTexels);
+  const perStep = Math.max(1, Math.floor(STEP_WORK / (k * k)));
   const made = new Float32Array(3 * k * k * geometry.count);
   const put = (at: number, normal: Vec3 | null): void => {
     made[at] = normal?.x ?? Number.NaN;
@@ -303,13 +406,195 @@ function elementNormalsOf(
           }
         }
         e += 1;
+        if (e % perStep === 0) {
+          yield;
+        }
       }
     }
   }
-  const elementNormals = { samples: k, normals: made };
+  const held = NORMALS.get(normals) ?? new Map<number, ElementNormals>();
+  const elementNormals = held.get(side) ?? { samples: k, normals: made };
   held.set(side, elementNormals);
   NORMALS.set(normals, held);
   return elementNormals;
+}
+
+/** A map's elements as the integral takes them: their shares, and their normals under a normal map. */
+interface PointElements {
+  readonly shares: ElementShares;
+  readonly normals: ElementNormals | null;
+}
+
+/** A map's elements, the shares first, then the normals under `normals`, step by step. */
+function* elementsSteps(
+  texels: ClassMapTexels,
+  normals: NormalMapTexels | null,
+): Generator<void, PointElements> {
+  const shares = yield* sharesSteps(texels);
+  return {
+    shares,
+    normals:
+      normals === null
+        ? null
+        : yield* normalsSteps(normals, shares.geometry, elementSideOf(texels)),
+  };
+}
+
+/** A map's elements where both are made, `null` while either is not. */
+function madeElements(
+  texels: ClassMapTexels,
+  normals: NormalMapTexels | null,
+): PointElements | null {
+  const shares = SHARES.get(texels);
+  if (shares === undefined) {
+    return null;
+  }
+  if (normals === null) {
+    return { shares, normals: null };
+  }
+  const made = madeNormals(normals, elementSideOf(texels));
+  return made === undefined ? null : { shares, normals: made };
+}
+
+/** A surface's elements where they are made, `null` while they are not. */
+function surfaceElements(surface: ClassMapDiscSurface): PointElements | null {
+  return madeElements(surface.texels, surface.normals?.texels ?? null);
+}
+
+/** A map's build, queued: its steps, run a slice at a time. */
+interface QueuedBuild {
+  readonly texels: ClassMapTexels;
+  readonly normals: NormalMapTexels | null;
+  readonly steps: Generator<void, PointElements>;
+}
+
+/** The builds queued, the oldest first: the store's maps, and any a frame's point found unmade. */
+const QUEUE: QueuedBuild[] = [];
+
+/**
+ * Each unfinished map's stand-in, the surface its point is drawn by until its elements are made:
+ * the map it replaced where that one's were made, or that one's own stand-in. Forgotten as its
+ * elements are made, so that the map it stands for is let go, its held ratios kept as the map's
+ * provisional ones ({@link PROVISIONAL}).
+ */
+const STAND_INS = new WeakMap<ClassMapTexels, ClassMapDiscSurface>();
+
+/**
+ * Each map's provisional ratios (R10.T14.f): what its point was drawn with before its elements were
+ * made, its stand-in's held ratios or the uniform point's ratio of 1 where it was drawn so, which
+ * stand in past δ, as a held ratio does, until the map's own are found in the frames' slices; so
+ * that the frame on which the elements are made evaluates no light. Never taken within δ as the
+ * map's own.
+ */
+const PROVISIONAL = new WeakMap<ClassMapTexels, ReadonlyArray<HeldRatio>>();
+
+/** The maps whose build threw: their points stay their stand-ins', and they are not queued again. */
+const FAILED = new WeakSet<ClassMapTexels>();
+
+/** Queues `texels`' elements under `normals` unless they are made, queued or failed. */
+function queueBuild(texels: ClassMapTexels, normals: NormalMapTexels | null): void {
+  if (
+    FAILED.has(texels) ||
+    madeElements(texels, normals) !== null ||
+    QUEUE.some((build) => build.texels === texels && build.normals === normals)
+  ) {
+    return;
+  }
+  QUEUE.push({ texels, normals, steps: elementsSteps(texels, normals) });
+}
+
+/** The map a newly taken one replaces (R10.T14.f): what its point was drawn by. */
+export interface ClassMapPointPrevious {
+  readonly texels: ClassMapTexels;
+  /** The surface last handed out over it, `null` where none was. */
+  readonly surface: ClassMapDiscSurface | null;
+}
+
+/**
+ * Queues the making of a map's elements for the frames' slices ({@link stepClassMapPoints}), as
+ * its owner takes it in place of `previous` (the class-map store, R10.T14.f).
+ *
+ * @remarks
+ * `previous` is the body's map it replaces. That one's unfinished build is cancelled, and its
+ * point, where its elements were made and a surface was handed out over it (or else its own
+ * stand-in), stands in for this map's until this map's elements are made, with the provisional
+ * ratios it was drawn with meanwhile. With no `previous`, or none that stands, the point is the
+ * uniform point of `elsewhere` meanwhile.
+ *
+ * @param normals - The field's normal map the surface carries with `texels`, or `null`.
+ */
+export function queueClassMapPoint(
+  texels: ClassMapTexels,
+  normals: NormalMapTexels | null,
+  previous: ClassMapPointPrevious | null,
+): void {
+  if (previous !== null && previous.texels !== texels) {
+    const standIn =
+      previous.surface !== null && surfaceElements(previous.surface) !== null
+        ? previous.surface
+        : (STAND_INS.get(previous.texels) ?? null);
+    const provisional = PROVISIONAL.get(previous.texels);
+    cancelClassMapPoint(previous.texels);
+    if (standIn !== null) {
+      STAND_INS.set(texels, standIn);
+    }
+    if (provisional !== undefined) {
+      PROVISIONAL.set(texels, provisional);
+    }
+  }
+  queueBuild(texels, normals);
+}
+
+/**
+ * Cancels a map's unfinished build, if it has one, and the refreshes queued for its point, its
+ * stand-in's among them, and forgets its stand-in and provisional ratios.
+ */
+export function cancelClassMapPoint(texels: ClassMapTexels): void {
+  STAND_INS.delete(texels);
+  PROVISIONAL.delete(texels);
+  for (let q = QUEUE.length - 1; q >= 0; q -= 1) {
+    if (QUEUE[q]?.texels === texels) {
+      QUEUE.splice(q, 1);
+    }
+  }
+  dropRefreshes((refresh) => refresh.forTexels === texels || refresh.surface.texels === texels);
+}
+
+/** Drops the queued refreshes `dropped` picks. */
+function dropRefreshes(dropped: (refresh: QueuedRefresh) => boolean): void {
+  for (let q = REFRESHES.length - 1; q >= 0; q -= 1) {
+    const refresh = REFRESHES[q];
+    if (refresh !== undefined && dropped(refresh)) {
+      REFRESHES.splice(q, 1);
+    }
+  }
+}
+
+/** Where a surface's point stands (R10.T14.f): its elements made, queued, or neither. */
+export type ClassMapPointState = "made" | "queued" | "unmade";
+
+/** Where `surface`'s point stands: `unmade` for one never queued, cancelled or failed. */
+export function classMapPointState(surface: ClassMapDiscSurface): ClassMapPointState {
+  if (surfaceElements(surface) !== null) {
+    return "made";
+  }
+  const normals = surface.normals?.texels ?? null;
+  return QUEUE.some((build) => build.texels === surface.texels && build.normals === normals)
+    ? "queued"
+    : "unmade";
+}
+
+/** The work the frames' slices hold (R10.T14.f). */
+export interface ClassMapPointWork {
+  /** The maps' builds queued and not finished. */
+  readonly builds: number;
+  /** The ratios queued to be found again. */
+  readonly refreshes: number;
+}
+
+/** The work the frames' slices hold now. */
+export function classMapPointWork(): ClassMapPointWork {
+  return { builds: QUEUE.length, refreshes: REFRESHES.length };
 }
 
 /**
@@ -326,27 +611,47 @@ function elementNormalsOf(
 interface LawSums {
   readonly lommelSeeliger: Float64Array;
   readonly lambert: Float64Array;
-  readonly totalLommelSeeliger: number;
-  readonly totalLambert: number;
+  totalLommelSeeliger: number;
+  totalLambert: number;
 }
 
-function lawSums(
+/** The elements a step of an evaluation takes before it yields (R10.T14.f): some tens of µs. */
+const EVALUATION_STEP = 256;
+
+/** The sums before any element, each law's and the unweighted, 0. */
+function emptyLawSums(shares: ElementShares): LawSums {
+  return {
+    lommelSeeliger: new Float64Array(shares.laws),
+    lambert: new Float64Array(shares.laws),
+    totalLommelSeeliger: 0,
+    totalLambert: 0,
+  };
+}
+
+/**
+ * Adds elements `from` to `to` (not included) to `sums`, in order: called once over every element
+ * at once, or a step at a time over consecutive ranges, it sums the same terms in the same order.
+ */
+function addLawSums(
+  sums: LawSums,
   shares: ElementShares,
   cOverA: number,
   towardsLight: Vec3,
   towardsObserver: Vec3,
   normals: ElementNormals | null,
-): LawSums {
+  from: number,
+  to: number,
+): void {
   const { geometry, offsets, law, share } = shares;
   const { directions, solidAngles } = geometry;
-  const lommelSeeliger = new Float64Array(shares.laws);
-  const lambert = new Float64Array(shares.laws);
-  let totalLommelSeeliger = 0;
-  let totalLambert = 0;
+  const { lommelSeeliger, lambert } = sums;
+  let { totalLommelSeeliger, totalLambert } = sums;
   const { x: sx, y: sy, z: sz } = towardsLight;
   const { x: vx, y: vy, z: vz } = towardsObserver;
+  const tilted = normals === null ? null : normals.normals;
   const perElement = normals === null ? 0 : normals.samples * normals.samples;
-  for (let e = 0; e < geometry.count; e += 1) {
+  const stride = 3 * perElement;
+  for (let e = from; e < to; e += 1) {
     const dx = directions[3 * e] ?? 0;
     const dy = directions[3 * e + 1] ?? 0;
     // R05's spheroid point of the unit direction d is (dx, dy, dz c ÷ a), its outward normal along
@@ -369,19 +674,20 @@ function lawSums(
     // The element's own terms: the datum's, or the mean over its shading normals n′ (R10.T10.g).
     let shadedFlat = flat;
     let shadedLs = ls;
-    if (normals !== null) {
+    if (tilted !== null) {
       let sumFlat = 0;
       let sumLs = 0;
-      const first = 3 * perElement * e;
-      for (let q = first; q < first + 3 * perElement; q += 3) {
-        const tx = normals.normals[q] ?? Number.NaN;
+      const first = stride * e;
+      const last = first + stride;
+      for (let q = first; q < last; q += 3) {
+        const tx = tilted[q] ?? Number.NaN;
         if (Number.isNaN(tx)) {
           sumFlat += flat;
           sumLs += ls;
           continue;
         }
-        const ty = normals.normals[q + 1] ?? 0;
-        const tz = normals.normals[q + 2] ?? 0;
+        const ty = tilted[q + 1] ?? 0;
+        const tz = tilted[q + 2] ?? 0;
         const mu0Tilted = tx * sx + ty * sy + tz * sz;
         if (!(mu0Tilted > 0)) {
           continue;
@@ -401,7 +707,8 @@ function lawSums(
       lambert[m] = (lambert[m] ?? 0) + w * shadedFlat;
     }
   }
-  return { lommelSeeliger, lambert, totalLommelSeeliger, totalLambert };
+  sums.totalLommelSeeliger = totalLommelSeeliger;
+  sums.totalLambert = totalLambert;
 }
 
 /**
@@ -411,6 +718,11 @@ function lawSums(
  * reflects nothing by the elements: where none is lit and visible, at the extreme of phase. Where
  * the surface carries the field's normal map, the map's sums take its slopes and `elsewhere`'s stay
  * the datum's (R10.T10.g), so that the ratio carries them.
+ *
+ * @remarks
+ * The synchronous path, for tests, harnesses and benches: where the surface's elements are not
+ * made it makes them at once, on the calling thread, as the frame's path never does
+ * ({@link classMapPointReflection}).
  *
  * @param figure - The body's figure, drawn about the body-fixed z axis.
  * @param towardsLight - The unit direction from the body to the light, body-fixed.
@@ -423,19 +735,102 @@ export function classMapReflectionRatio(
   towardsLight: Vec3,
   towardsObserver: Vec3,
 ): Rgb {
+  assertLawPerClass(surface);
+  return ratioOf(figure, surface, elementsNow(surface), towardsLight, towardsObserver);
+}
+
+/** A surface's elements, made at once where they are not. */
+function elementsNow(surface: ClassMapDiscSurface): PointElements {
+  return (
+    surfaceElements(surface) ??
+    finished(elementsSteps(surface.texels, surface.normals?.texels ?? null))
+  );
+}
+
+/**
+ * Makes a surface's elements at once on the calling thread where they are not made: the
+ * synchronous path's build, for tests, harnesses and benches.
+ *
+ * @remarks
+ * The frame's path then draws the surface's own map. A queued build of the same elements is left
+ * to finish on what this made.
+ */
+export function makeClassMapPointNow(surface: ClassMapDiscSurface): void {
+  elementsNow(surface);
+}
+
+/** @throws Error if the surface's laws are not one per class of its map. */
+function assertLawPerClass(surface: ClassMapDiscSurface): void {
   if (surface.laws.length !== surface.texels.classes) {
     throw new Error(
       `a class map of ${String(surface.texels.classes)} classes needs as many laws, got ${String(surface.laws.length)}`,
     );
   }
+}
+
+/** {@link classMapReflectionRatio} by the surface's made elements, at once, over every element. */
+function ratioOf(
+  figure: BodyFigure,
+  surface: ClassMapDiscSurface,
+  elements: PointElements,
+  towardsLight: Vec3,
+  towardsObserver: Vec3,
+): Rgb {
   const cOverA = figure.polarRadiusM / figure.equatorialRadiusM;
-  const shares = elementSharesOf(surface.texels);
-  const side = surface.texels.faceTexels * classMapPointSubdivision(surface.texels.faceTexels);
-  const normals =
-    surface.normals === null
-      ? null
-      : elementNormalsOf(surface.normals.texels, shares.geometry, side);
-  const sums = lawSums(shares, cOverA, towardsLight, towardsObserver, normals);
+  const sums = emptyLawSums(elements.shares);
+  addLawSums(
+    sums,
+    elements.shares,
+    cOverA,
+    towardsLight,
+    towardsObserver,
+    elements.normals,
+    0,
+    elements.shares.geometry.count,
+  );
+  return ratioOfSums(surface, cOverA, towardsLight, towardsObserver, sums);
+}
+
+/**
+ * {@link classMapReflectionRatio} by the surface's made elements, {@link EVALUATION_STEP} elements
+ * a step: the same sums in the same order as {@link ratioOf}'s.
+ */
+function* ratioSteps(
+  figure: BodyFigure,
+  surface: ClassMapDiscSurface,
+  elements: PointElements,
+  towardsLight: Vec3,
+  towardsObserver: Vec3,
+): Generator<void, Rgb> {
+  const cOverA = figure.polarRadiusM / figure.equatorialRadiusM;
+  const sums = emptyLawSums(elements.shares);
+  const { count } = elements.shares.geometry;
+  for (let from = 0; from < count; from += EVALUATION_STEP) {
+    if (from > 0) {
+      yield;
+    }
+    addLawSums(
+      sums,
+      elements.shares,
+      cOverA,
+      towardsLight,
+      towardsObserver,
+      elements.normals,
+      from,
+      Math.min(count, from + EVALUATION_STEP),
+    );
+  }
+  return ratioOfSums(surface, cOverA, towardsLight, towardsObserver, sums);
+}
+
+/** The ratio of the map's light to `elsewhere`'s alone, from the elements' sums. */
+function ratioOfSums(
+  surface: ClassMapDiscSurface,
+  cOverA: number,
+  towardsLight: Vec3,
+  towardsObserver: Vec3,
+  sums: LawSums,
+): Rgb {
   const alpha = Math.acos(Math.min(1, Math.max(-1, dot(towardsLight, towardsObserver))));
   const terms = discLawTerms(discSurfaceLaws(surface), cOverA, alpha);
   const ratio: [number, number, number] = [1, 1, 1];
@@ -461,6 +856,8 @@ export function classMapReflectionRatio(
 
 /** A ratio found at one geometry. */
 interface HeldRatio {
+  /** The light it was found for ({@link classMapPointReflection}'s `lightKey`). */
+  readonly lightKey: string;
   readonly towardsLight: Vec3;
   readonly towardsObserver: Vec3;
   readonly cOverA: number;
@@ -475,20 +872,139 @@ const HELD = new WeakMap<ClassMapDiscSurface, HeldRatio[]>();
 
 /** Whether two unit directions are within `angleRad` (by their chord, 2 sin(θ ÷ 2) ≤ θ). */
 function within(a: Vec3, b: Vec3, angleRad: number): boolean {
+  return chordSquared(a, b) <= angleRad * angleRad;
+}
+
+/** Holds a ratio found for `surface`, its oldest let go once it holds the most. */
+function hold(surface: ClassMapDiscSurface, found: HeldRatio): void {
+  HELD.set(surface, [...(HELD.get(surface) ?? []).slice(-(HELD_PER_SURFACE - 1)), found]);
+}
+
+/**
+ * Holds a refreshed ratio for `surface` in place of its light's held one nearest it within
+ * {@link classMapPointStaleAngleRad}, the one that stood in, and otherwise as {@link hold} does: so
+ * that under time acceleration each light keeps its one entry and no light's refresh lets another's
+ * only entry go (R10.T14.f).
+ */
+function holdRefreshed(surface: ClassMapDiscSurface, found: HeldRatio): void {
+  const held = HELD.get(surface) ?? [];
+  const alpha = Math.acos(
+    Math.min(1, Math.max(-1, dot(found.towardsLight, found.towardsObserver))),
+  );
+  const replaced = nearestHeld(held, found, classMapPointStaleAngleRad(alpha));
+  if (replaced === undefined) {
+    hold(surface, found);
+    return;
+  }
+  HELD.set(surface, [...held.filter((entry) => entry !== replaced), found]);
+}
+
+/**
+ * The angle at phase 0 within which a held ratio stands in for a fresh one while the frames'
+ * slices find it (R10.T14.f), rad, narrowing with the lit and visible lune as the cache's does.
+ *
+ * @remarks
+ * A refresh at level 8 takes about three frames' slices a light, so four lights each lag their
+ * geometry by about twelve frames under time acceleration: within this angle a spin of up to about
+ * 0.02 rad a frame (1.2 rad/s on the screen) at phase 0 is followed by held ratios and the slices
+ * alone. At the narrower 0.05 rad, misses came back to the frame at 0.002 rad a frame past 100° of
+ * phase, for up to 18 ms a frame over four lights (2026-10-21, provisional). By the cache's
+ * sensitivity, S (π − α) ≤ 5.2 on the synthetic Iapetus, a held ratio within it can be up to about
+ * 5.2 × 0.25 ÷ π ≈ 40% from a fresh one at that body's contrast: the point's light curve then lags
+ * the turn by those frames, about 0.2 s. Past it the miss is found at once, as before.
+ */
+export const CLASS_MAP_POINT_STALE_RAD = 0.25;
+
+/** The angle within which a held ratio stands in at phase α while a fresh one is found, rad. */
+export function classMapPointStaleAngleRad(alphaRad: number): number {
+  return (CLASS_MAP_POINT_STALE_RAD * Math.max(0, Math.PI - alphaRad)) / Math.PI;
+}
+
+/** A light at a geometry: the key and directions a held ratio, a refresh and a miss share. */
+interface LightGeometry {
+  readonly lightKey: string;
+  readonly towardsLight: Vec3;
+  readonly towardsObserver: Vec3;
+  readonly cOverA: number;
+}
+
+/** A ratio being found again in the frames' slices, at the geometry it was missed at. */
+interface QueuedRefresh extends LightGeometry {
+  /** The surface whose ratio it finds: the map's own, or its stand-in's. */
+  readonly surface: ClassMapDiscSurface;
+  /** The map whose point it is found for, with which it is cancelled. */
+  readonly forTexels: ClassMapTexels;
+  readonly steps: Generator<void, Rgb>;
+}
+
+/** The refreshes queued, the oldest first. */
+const REFRESHES: QueuedRefresh[] = [];
+
+/** Whether `entry` is of `at`'s light and within `angleRad` of it on both directions. */
+function nearAs(entry: LightGeometry, at: LightGeometry, angleRad: number): boolean {
+  return (
+    entry.lightKey === at.lightKey &&
+    entry.cOverA === at.cOverA &&
+    within(entry.towardsLight, at.towardsLight, angleRad) &&
+    within(entry.towardsObserver, at.towardsObserver, angleRad)
+  );
+}
+
+/** The held entry of `at`'s light nearest it of those within `angleRad`, if any. */
+function nearestHeld(
+  held: ReadonlyArray<HeldRatio>,
+  at: LightGeometry,
+  angleRad: number,
+): HeldRatio | undefined {
+  let nearest: HeldRatio | undefined;
+  let nearestChord = Number.POSITIVE_INFINITY;
+  for (const entry of held) {
+    if (!nearAs(entry, at, angleRad)) {
+      continue;
+    }
+    const chord = Math.max(
+      chordSquared(entry.towardsLight, at.towardsLight),
+      chordSquared(entry.towardsObserver, at.towardsObserver),
+    );
+    if (chord < nearestChord) {
+      nearest = entry;
+      nearestChord = chord;
+    }
+  }
+  return nearest;
+}
+
+/** The squared chord between two unit directions. */
+function chordSquared(a: Vec3, b: Vec3): number {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
   const dz = a.z - b.z;
-  return dx * dx + dy * dy + dz * dz <= angleRad * angleRad;
+  return dx * dx + dy * dy + dz * dz;
 }
 
-/** The ratio at a geometry: one held within the cache's angle, or found and held. */
+/** The surface a point is drawn by, with its made elements, for the map `forTexels`. */
+interface DrawnPoint {
+  readonly surface: ClassMapDiscSurface;
+  readonly elements: PointElements;
+  readonly forTexels: ClassMapTexels;
+}
+
+/**
+ * The ratio at a geometry by a surface's made elements (R10.T14.f).
+ *
+ * @remarks
+ * One held within the cache's angle, of any light; past it, the light's own nearest held within
+ * {@link classMapPointStaleAngleRad}, the surface's or else the provisional ones of the map it is
+ * drawn for ({@link PROVISIONAL}), while the frames' slices find the fresh one
+ * ({@link stepClassMapPoints}), queued once a light; and where none is held so near, the light's
+ * first, found at once and held.
+ */
 function heldRatio(
   figure: BodyFigure,
-  surface: ClassMapDiscSurface,
-  towardsLight: Vec3,
-  towardsObserver: Vec3,
+  { surface, elements, forTexels }: DrawnPoint,
+  at: LightGeometry,
 ): Rgb {
-  const cOverA = figure.polarRadiusM / figure.equatorialRadiusM;
+  const { towardsLight, towardsObserver, cOverA } = at;
   const alpha = Math.acos(Math.min(1, Math.max(-1, dot(towardsLight, towardsObserver))));
   const angle = classMapPointCacheAngleRad(alpha);
   const held = HELD.get(surface) ?? [];
@@ -501,12 +1017,66 @@ function heldRatio(
   if (found !== undefined) {
     return found.ratio;
   }
-  const ratio = classMapReflectionRatio(figure, surface, towardsLight, towardsObserver);
-  HELD.set(surface, [
-    ...held.slice(-(HELD_PER_SURFACE - 1)),
-    { towardsLight, towardsObserver, cOverA, ratio },
-  ]);
+  const staleAngle = classMapPointStaleAngleRad(alpha);
+  const near =
+    nearestHeld(held, at, staleAngle) ??
+    nearestHeld(PROVISIONAL.get(forTexels) ?? [], at, staleAngle);
+  if (near !== undefined) {
+    if (
+      !REFRESHES.some((refresh) => refresh.surface === surface && nearAs(refresh, at, staleAngle))
+    ) {
+      REFRESHES.push({
+        ...at,
+        surface,
+        forTexels,
+        steps: ratioSteps(figure, surface, elements, towardsLight, towardsObserver),
+      });
+    }
+    return near.ratio;
+  }
+  const ratio = ratioOf(figure, surface, elements, towardsLight, towardsObserver);
+  hold(surface, { ...at, ratio });
   return ratio;
+}
+
+/** The uniform point's ratio. */
+const UNIFORM_RATIO: Rgb = [1, 1, 1];
+
+/**
+ * Notes that a map's point was drawn as the uniform point for a light at a geometry (R10.T14.f),
+ * as a provisional ratio of 1, unless one is noted within δ of it already.
+ */
+function noteUniform(texels: ClassMapTexels, at: LightGeometry): void {
+  const alpha = Math.acos(Math.min(1, Math.max(-1, dot(at.towardsLight, at.towardsObserver))));
+  const noted = PROVISIONAL.get(texels) ?? [];
+  if (noted.some((entry) => nearAs(entry, at, classMapPointCacheAngleRad(alpha)))) {
+    return;
+  }
+  PROVISIONAL.set(texels, [
+    ...noted.slice(-(HELD_PER_SURFACE - 1)),
+    { ...at, ratio: UNIFORM_RATIO },
+  ]);
+}
+
+/**
+ * What a frame's point under `surface` is drawn by (R10.T14.f): the surface itself once its
+ * elements are made; until then its stand-in where it has one whose are, its build queued if it is
+ * not; `null` for the uniform point, noted as the map's provisional ratio.
+ */
+function drawnPointOf(surface: ClassMapDiscSurface, at: LightGeometry): DrawnPoint | null {
+  const forTexels = surface.texels;
+  const elements = surfaceElements(surface);
+  if (elements !== null) {
+    return { surface, elements, forTexels };
+  }
+  queueBuild(forTexels, surface.normals?.texels ?? null);
+  const standIn = STAND_INS.get(forTexels);
+  const standInElements = standIn === undefined ? null : surfaceElements(standIn);
+  if (standIn === undefined || standInElements === null) {
+    noteUniform(forTexels, at);
+    return null;
+  }
+  return { surface: standIn, elements: standInElements, forTexels };
 }
 
 /**
@@ -516,10 +1086,21 @@ function heldRatio(
  * ({@link classMapReflectionRatio}), cached by the body-fixed directions within
  * {@link classMapPointCacheAngleRad}. Uneclipsed: the caller cuts each star's light.
  *
+ * @remarks
+ * The frame's path: it never makes the map's elements (R10.T14.f). Until they are made, by the
+ * frames' slices ({@link stepClassMapPoints}), to which it queues them if the map's owner did
+ * not, the ratio is its stand-in's, the map it replaced ({@link queueClassMapPoint}), and where it
+ * has none the point is the uniform point of `elsewhere`, bit for bit what the body drew before
+ * its first map. Once they are made, what it was drawn with stands in, past δ, until its own ratio
+ * is found in the slices.
+ *
  * @param rotation - The body's rotation, body-fixed to galactic axes.
  * @param towardsLight - The unit direction from the body to the light, along the galactic axes.
  * @param towardsObserver - The unit direction from the body to the observer, along the galactic
  *   axes.
+ * @param lightKey - The light's identity among the body's lights, a star's or a planetshine
+ *   source's (`pointFlux`'s): past δ only its own held ratios stand in for it. One key for every
+ *   light, the default, treats them as one.
  * @throws Error if the surface's laws are not one per class of its map.
  */
 export function classMapPointReflection(
@@ -528,7 +1109,9 @@ export function classMapPointReflection(
   rotation: Rotation3,
   towardsLight: Vec3,
   towardsObserver: Vec3,
+  lightKey = "",
 ): Rgb {
+  assertLawPerClass(surface);
   // The uniform point in the galactic axes, about the rotation's pole, as `pointFlux` takes a
   // uniform body's about its figure's: the same call, bit for bit, where the two poles agree.
   const uniform = bodyReflection(
@@ -537,11 +1120,145 @@ export function classMapPointReflection(
     towardsLight,
     towardsObserver,
   );
-  const ratio = heldRatio(
-    figure,
-    surface,
-    rotateToBodyFixed(rotation, towardsLight),
-    rotateToBodyFixed(rotation, towardsObserver),
-  );
+  const at: LightGeometry = {
+    lightKey,
+    towardsLight: rotateToBodyFixed(rotation, towardsLight),
+    towardsObserver: rotateToBodyFixed(rotation, towardsObserver),
+    cOverA: figure.polarRadiusM / figure.equatorialRadiusM,
+  };
+  const drawn = drawnPointOf(surface, at);
+  if (drawn === null) {
+    return uniform;
+  }
+  const ratio = heldRatio(figure, drawn, at);
   return [uniform[0] * ratio[0], uniform[1] * ratio[1], uniform[2] * ratio[2]];
+}
+
+/** Whether a refresh failed already, said once. */
+const SAID = { refresh: false };
+
+/**
+ * The maps whose elements the last slice made: their provisional ratios are let go at the next
+ * slice unless a frame between drew their points (R10.T14.f), so that a map made while its body was
+ * a disc meets the disc at its first frame as a point, and not what it was drawn with before.
+ */
+let JUST_MADE: ClassMapTexels[] = [];
+
+/**
+ * One step of the oldest build, or its end: its elements held, its stand-in let go (its held
+ * ratios kept as the map's provisional ones) and the stand-in's refreshes dropped; or its drop as
+ * it throws, said once a map, its point left to its stand-in.
+ */
+function stepBuild(build: QueuedBuild): void {
+  let done: boolean;
+  try {
+    done = build.steps.next().done === true;
+  } catch (error: unknown) {
+    QUEUE.shift();
+    FAILED.add(build.texels);
+    console.error("the elements of a class-mapped point could not be made:", error);
+    return;
+  }
+  if (!done) {
+    return;
+  }
+  QUEUE.shift();
+  const standIn = STAND_INS.get(build.texels);
+  if (standIn !== undefined) {
+    STAND_INS.delete(build.texels);
+    const kept = [...(PROVISIONAL.get(build.texels) ?? []), ...(HELD.get(standIn) ?? [])];
+    if (kept.length > 0) {
+      PROVISIONAL.set(build.texels, kept.slice(-HELD_PER_SURFACE));
+    }
+  }
+  dropRefreshes(
+    (refresh) => refresh.forTexels === build.texels && refresh.surface.texels !== build.texels,
+  );
+  JUST_MADE.push(build.texels);
+}
+
+/** Lets a map's provisional ratios go once none of its own refreshes remains queued. */
+function settleProvisional(texels: ClassMapTexels): void {
+  if (!REFRESHES.some((refresh) => refresh.forTexels === texels)) {
+    PROVISIONAL.delete(texels);
+  }
+}
+
+/**
+ * One step of the oldest refresh: its ratio held as it ends, and its map's provisional ratios let go
+ * once none of its own refreshes remains queued; or its drop as it throws, said once.
+ */
+function stepRefresh(refresh: QueuedRefresh): void {
+  let step: IteratorResult<void, Rgb>;
+  try {
+    step = refresh.steps.next();
+  } catch (error: unknown) {
+    REFRESHES.shift();
+    settleProvisional(refresh.forTexels);
+    if (!SAID.refresh) {
+      SAID.refresh = true;
+      console.error("the light of a class-mapped point could not be found again:", error);
+    }
+    return;
+  }
+  if (step.done === true) {
+    REFRESHES.shift();
+    const { surface, forTexels, lightKey, towardsLight, towardsObserver, cOverA } = refresh;
+    holdRefreshed(surface, {
+      lightKey,
+      towardsLight,
+      towardsObserver,
+      cOverA,
+      ratio: step.value,
+    });
+    if (surface.texels === forTexels) {
+      settleProvisional(forTexels);
+    }
+  }
+}
+
+/**
+ * A frame's slice of the class-mapped points' work (R10.T14.f), once a frame from the terrain
+ * session's step: at most `budgetMs`, and a step past it.
+ *
+ * @remarks
+ * The oldest build's and the oldest refresh's steps in turn (the one that has work where the other
+ * has none), until `budgetMs` has passed since the slice began, read on `now` before each step. A
+ * finished build's elements are held for its map and its stand-in let go; a finished refresh's
+ * ratio is held for its surface. A step that throws drops its work. First, the provisional ratios
+ * of the maps the last slice made are let go where no frame since drew their points.
+ *
+ * @param budgetMs - The slice's length, ms.
+ * @param now - A monotonic clock, ms.
+ * @returns Whether work remains queued.
+ */
+export function stepClassMapPoints(
+  budgetMs: number = CLASS_MAP_POINT_SLICE_MS,
+  now: () => number = () => globalThis.performance.now(),
+): boolean {
+  for (const texels of JUST_MADE) {
+    settleProvisional(texels);
+  }
+  JUST_MADE = [];
+  if (QUEUE.length === 0 && REFRESHES.length === 0) {
+    return false;
+  }
+  const startMs = now();
+  let refreshTurn = true;
+  for (;;) {
+    const build = QUEUE[0];
+    const refresh = REFRESHES[0];
+    if (build === undefined && refresh === undefined) {
+      return false;
+    }
+    if (!(now() - startMs < budgetMs)) {
+      return true;
+    }
+    if (refresh !== undefined && (refreshTurn || build === undefined)) {
+      stepRefresh(refresh);
+    } else if (build !== undefined) {
+      stepBuild(build);
+    }
+    refreshTurn = !refreshTurn;
+  }
 }

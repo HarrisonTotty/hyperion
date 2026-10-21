@@ -362,7 +362,7 @@ export function pointFlux(
   const reflection = pointReflectionOf(body, toCamera);
   const flux: [number, number, number] = [0, 0, 0];
   for (const light of lightsOf(body, hosts)) {
-    const reflected = reflection(normalise(light.toStarM));
+    const reflected = reflection(normalise(light.toStarM), `star ${String(light.host.disc.star)}`);
     const visible = discEclipseVisible(
       light.host,
       body,
@@ -376,7 +376,7 @@ export function pointFlux(
     }
   }
   for (const source of secondaries) {
-    const reflected = reflection(source.direction);
+    const reflected = reflection(source.direction, source.body);
     for (const ch of [0, 1, 2] as const) {
       flux[ch] += source.illuminance[ch] * solid * reflected[ch];
     }
@@ -387,13 +387,20 @@ export function pointFlux(
 /**
  * What a point body reflects of a light from its direction towards the camera, uneclipsed: its
  * class map integrated (`classMapPointReflection`, R10.T10.f) where its surface is one and its
- * rotation is known, and otherwise its photometry's law over its figure (`bodyReflection`).
+ * rotation is known, and otherwise its photometry's law over its figure (`bodyReflection`). The
+ * frame never makes a map's elements: until the frames' slices have, the point is the map's stand-in
+ * (the map it replaced) or the uniform point, as before the map came (R10.T14.f). Each light is
+ * named by its key, a star's index or a planetshine source's body, by which the map's held ratios
+ * are its own.
  */
-function pointReflectionOf(body: LitBodyInput, toCamera: Vec3): (towardsLight: Vec3) => Rgb {
+function pointReflectionOf(
+  body: LitBodyInput,
+  toCamera: Vec3,
+): (towardsLight: Vec3, lightKey: string) => Rgb {
   const { surface, rotation } = body;
   if (surface?.kind === "class-map" && rotation !== undefined) {
-    return (towardsLight) =>
-      classMapPointReflection(body.figure, surface, rotation, towardsLight, toCamera);
+    return (towardsLight, lightKey) =>
+      classMapPointReflection(body.figure, surface, rotation, towardsLight, toCamera, lightKey);
   }
   return (towardsLight) => bodyReflection(body.figure, body.photometry.law, towardsLight, toCamera);
 }

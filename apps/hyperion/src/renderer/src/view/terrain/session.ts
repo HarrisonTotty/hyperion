@@ -107,6 +107,7 @@ import {
   type RecordSeasons,
   toBodyDetailRequest,
 } from "../../lib/system/bodiesWire";
+import { stepClassMapPoints } from "../bodies/classMapPoint";
 import type { LitRegime } from "../bodies/regime";
 import type { ViewBudget } from "../budget/viewBudget";
 import type { CameraPose } from "../camera/pose";
@@ -1028,7 +1029,8 @@ export class TerrainSession {
    * view's last report judges them (T7's `follow` over {@link viewFieldCandidates}), makes or
    * releases each body's mask, detail seed and class map with its want, and steps each body's
    * pass (R10.T16.b) once over the views that hand its body over, making the pass at its first
-   * hand-over.
+   * hand-over. First it runs the frame's slice of the class-mapped points' work (R10.T14.f,
+   * `stepClassMapPoints`): at most 2 ms of the elements' builds and the ratios' refreshes.
    *
    * @remarks
    * The views' debounces take their time from their own draws (`TerrainViewFrameInput.nowMs`), so
@@ -1038,6 +1040,9 @@ export class TerrainSession {
     if (this.#disposed) {
       return;
     }
+    // The frame's slice of the class-mapped points' builds and refreshes (R10.T14.f), which the
+    // store queues as it takes each map, so that no frame's point makes them itself.
+    stepClassMapPoints();
     // With no view's report there is nothing to judge the fields by: a loop that starts again on
     // a living session, before its first report, keeps every field (D1; the batch review's S2).
     if (this.#reports.size > 0) {
