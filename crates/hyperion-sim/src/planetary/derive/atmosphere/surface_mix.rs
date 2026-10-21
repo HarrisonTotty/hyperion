@@ -15,7 +15,7 @@ use super::{
     Atmosphere, AtmosphereInputs, ClimateOf, Gas, PartialPressures, SurfaceMaterial, SurfaceState,
 };
 use crate::planetary::chem::partition::{
-    Basins, ClimateSpan, Condensates, Cover, Ground, Partition, WaterCover, partition,
+    Basins, ClimateSpan, Condensates, Cover, CrustWater, Ground, Partition, WaterCover, partition,
 };
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::derive::photometry::area_mix::{self, HostShade, Regolith};
@@ -53,7 +53,9 @@ pub(crate) enum PassLight<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct PassSurface<'a> {
     /// The climate the condensate partition reads at each step, from the step's mean surface
-    /// temperature and the previous step's partial pressures.
+    /// temperature and the previous step's partial pressures. It must read nothing else: the
+    /// greenhouse's bit-exact exit ([`ClimateOf`]) holds only while it is a function of those two
+    /// alone.
     pub(crate) climate_of: &'a ClimateOf<'a>,
     /// The basins the liquids fill (P14.T24.b's hypsometry): the previous pass's from P14.T54.a.
     pub(crate) basins: Basins,
@@ -170,7 +172,7 @@ fn pass_water_cover(
         ice_density,
         // The area mix reads an ice bulk's crust as its regolith (`Regolith::of_material`), so the
         // pass lists no crust beside it (decision-p14-t54a-ganymede, C1 follow-up §C1.4).
-        crust_water: false,
+        crust_water: CrustWater::Unlisted,
     }
 }
 

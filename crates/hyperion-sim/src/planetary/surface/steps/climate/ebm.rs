@@ -1184,7 +1184,7 @@ const BAR_PA: f64 = 1e5;
 /// P14.T57.a's fits ([`GreenhouseConstants::FITTED`], water 4.47 per √bar) with the water held at
 /// [`WATER_SURFACE_HUMIDITY`] of its saturation pressure by mole (Manabe and Wetherald's 0.77,
 /// P14.T51.a's partition), so [`WATER_SURFACE_HUMIDITY`] × `M_w` ÷ μ of it by weight, μ the air's
-/// mean molar mass: 0.482 on the reference Earth's air (μ 28.78 g mol⁻¹; plan 14's
+/// mean molar mass: 0.481 on the reference Earth's air (μ 28.82 g mol⁻¹; plan 14's
 /// `GREENHOUSE_WATER` documents 0.496 from its own conversion). P14.T54.a's deletion of the
 /// snapshot lane's hold left this, the batch's arm, the only one (main's ruling on
 /// decision-r09-t13i, 2026-10-20).
@@ -5440,11 +5440,12 @@ mod tests {
     fn the_reference_earth_diffuses_moist_static_energy_in_its_own_air() {
         let inputs = reference::earth_like();
         let air = Air::of(&inputs);
-        // Dry air's 28.96 g mol⁻¹ and 1,004.7 J kg⁻¹ K⁻¹ with 1.67% of water vapour (18.02 g mol⁻¹,
-        // about 1,860 J kg⁻¹ K⁻¹), the reference's own (`reference::earth_air`).
-        assert!((air.molar_mass_g_per_mol - 28.78).abs() < 0.02, "{air:?}");
+        // Dry air's 28.96 g mol⁻¹ and 1,004.7 J kg⁻¹ K⁻¹ with 1.32% of water vapour (18.02 g mol⁻¹,
+        // about 1,860 J kg⁻¹ K⁻¹), the reference's own (`reference::earth_air`, its water at 0.77 of
+        // its saturation by mole since P14.T54.a; 28.820 g mol⁻¹ and 1,010.91 J kg⁻¹ K⁻¹ measured).
+        assert!((air.molar_mass_g_per_mol - 28.82).abs() < 0.02, "{air:?}");
         assert!(
-            (air.specific_heat_j_per_kg_k - 1_012.8).abs() < 2.0,
+            (air.specific_heat_j_per_kg_k - 1_010.9).abs() < 2.0,
             "{air:?}"
         );
         let model = EnergyBalance::for_inputs(&inputs);
@@ -5924,7 +5925,7 @@ mod tests {
     /// midpoint, and darker below it, the tanh law being convex above its midpoint and concave
     /// below; read through the table, the same. At 275, 280 and 285 K at sea level the two read
     /// decision-r09-t13a-relief §1.2's 0.537 against 0.615, 0.504 against 0.391 and 0.420
-    /// against 0.299 (its Γ 5.85 K km⁻¹; the reference Earth's 5.818), to 0.01.
+    /// against 0.299 (its Γ 5.85 K km⁻¹; the reference Earth's 5.829), to 0.01.
     #[test]
     fn a_band_half_3_km_up_is_brighter_than_its_mean_height_above_the_albedo_s_midpoint() {
         let inputs = reference::earth_like();

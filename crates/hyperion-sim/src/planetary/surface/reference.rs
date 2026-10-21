@@ -60,6 +60,7 @@ use super::inputs::{
 };
 use super::steps::relief::convergent::EARTH_GRAVITY;
 use crate::math;
+use crate::planetary::chem::partition::WATER_SURFACE_HUMIDITY;
 use crate::planetary::derive::atmosphere::{Gas, SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::irradiation;
 use crate::planetary::hooks::SurfaceSeed;
@@ -460,16 +461,22 @@ const EARTH_DRY_AIR: [GasShare; 7] = [
 ];
 
 /// The reference Earth's air by mole at the mean surface temperature `mean` under the surface
-/// pressure `pressure`: [`EARTH_DRY_AIR`] with water vapour at mole fraction x = `p_sat`(`T_s`) ÷
-/// `p_s`, the dry fractions scaled by 1 − x (decision-r09-t13a-relief §2.1).
+/// pressure `pressure`: [`EARTH_DRY_AIR`] with water vapour at mole fraction x = `h_w`
+/// `p_sat`(`T_s`) ÷ `p_s`, `h_w` the surface humidity [`WATER_SURFACE_HUMIDITY`], 0.77, the dry
+/// fractions scaled by 1 − x (decision-r09-t13a-relief §2.1).
 ///
-/// The vapour's partial pressure is plan 14's own rule for a generated Earth (P14.T13.c,
-/// `derive::atmosphere`'s `greenhouse`: each condensable held at the registry's saturation vapour
-/// pressure at the surface temperature, [`substance::saturation_pressure`]): on water's phase
-/// diagram (P14.T49.b's fitted curves; IAPWS SR1-86's ancillary to IAPWS-95, Wagner and Pruss
-/// 2002), 1.689 kPa at 288 K, x = 0.0171 of the 98.55 kPa. It enters the air's `c_p`, mean molar
-/// mass and lapse rate (plan 14's lapse factor reads it, `hooks::structure::lapse_factor`); the
-/// energy-balance model's moist static energy keeps its own 80% relative humidity.
+/// The vapour's partial pressure is plan 14's own rule for a generated Earth at version 23
+/// (P14.T51.a's partition, `chem::partition`: water over a surface reservoir held at Manabe and
+/// Wetherald's 0.77 of the registry's saturation vapour pressure at the mean surface temperature,
+/// [`substance::saturation_pressure`], by mole, as the energy balance's `greenhouse_in_force`
+/// reads it). P14.T54.a settled it so (decision-r09-t13i, its records' row 5): until then it was
+/// the whole saturation pressure by mole, version 22's P14.T13.c convention taken at mole
+/// partials, which was neither 22's column weight nor 23's humidity. On water's phase diagram
+/// (P14.T49.b's fitted curves; IAPWS SR1-86's ancillary to IAPWS-95, Wagner and Pruss 2002) the
+/// saturation pressure is 1.689 kPa at 288 K, so the vapour is 1.30 kPa, x = 0.0132 of the 98.55
+/// kPa. It enters the air's `c_p`, mean molar mass and lapse rate (plan 14's lapse factor reads
+/// it, `hooks::structure::lapse_factor`), and a dry Earth's water inventory; the energy-balance
+/// model's moist static energy keeps its own 80% relative humidity.
 ///
 /// # Panics
 ///
@@ -479,7 +486,7 @@ fn earth_air(mean: Kelvin, pressure: Pascals) -> [GasShare; 8] {
     let water = substance::by_key(H2O.as_str())
         .and_then(|id| substance::saturation_pressure(id, mean))
         .expect("the registry holds water's phase diagram");
-    let x = water.value() / pressure.value();
+    let x = WATER_SURFACE_HUMIDITY * water.value() / pressure.value();
     let mut air = [GasShare {
         substance: H2O,
         mole_fraction: x,
@@ -654,7 +661,7 @@ fn figure(radius_m: f64, f: f64) -> Spheroid {
 /// | day–night contrast | 3 K | a placeholder for P14.T24.a's: about 10 K over land and under 1 K over the ocean, area-weighted (low confidence) |
 /// | spin | obliquity 23.44°, sidereal day 23.9345 h; the March equinox at a true anomaly of 77.053°, 180° less the perihelion's longitude 102.947° | NASA's fact sheet and its J2000 elements |
 /// | orbit | 1.000 au, e 0.0167, 365.256 d | NASA's fact sheet |
-/// | air | 98.55 kPa; dry, by mole: N₂ 0.780 84, O₂ 0.209 476, Ar 0.009 34, CO₂ 0.000 314, Ne 1.818 × 10⁻⁵, He 5.24 × 10⁻⁶, CH₄ 2 × 10⁻⁶; water vapour at its saturation pressure at the mean temperature, 1.64 kPa (x = 0.0167), the dry fractions scaled by 1 − x | the mean total surface pressure over the topography (Trenberth and Smith 2005, J. Climate 18, 864; sea level's is 101.3 kPa); the U.S. Standard Atmosphere 1976's sea-level composition (Table 3), whose CO₂ is about 420 × 10⁻⁶ today; the vapour by plan 14's rule for a generated Earth, P14.T13.c's (decision-r09-t13a-relief §2.1; the real near-surface mean is about 1% and variable, from memory) |
+/// | air | 98.55 kPa; dry, by mole: N₂ 0.780 84, O₂ 0.209 476, Ar 0.009 34, CO₂ 0.000 314, Ne 1.818 × 10⁻⁵, He 5.24 × 10⁻⁶, CH₄ 2 × 10⁻⁶; water vapour at 0.77 of its saturation pressure at the mean temperature, 1.30 kPa (x = 0.0132), the dry fractions scaled by 1 − x | the mean total surface pressure over the topography (Trenberth and Smith 2005, J. Climate 18, 864; sea level's is 101.3 kPa); the U.S. Standard Atmosphere 1976's sea-level composition (Table 3), whose CO₂ is about 420 × 10⁻⁶ today; the vapour by plan 14's rule for a generated Earth at version 23, P14.T51.a's partition at Manabe and Wetherald's surface humidity (decision-r09-t13a-relief §2.1, decision-r09-t13i's row 5; the real near-surface mean is about 1% and variable, from memory) |
 /// | regime | mobile lid, `f_c` 0.405 | Design note 3 |
 /// | volcanism V | 1 | a placeholder: plan 14 has not set V's scale, which Mars calibrates at 1 (P14.T48.a) |
 /// | heat flow | 0.0916 W m⁻² | Davies and Davies 2010, Solid Earth 1, 5, Table 7 (46.7 TW) |

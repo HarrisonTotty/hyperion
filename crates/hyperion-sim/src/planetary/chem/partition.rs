@@ -691,7 +691,17 @@ impl ColumnInventory {
     pub(crate) fn condenses(&self) -> bool {
         self.species
             .iter()
-            .any(|species| species.diagram.is_some() && species.weight.value() > 0.0)
+            .any(|species| species.condensable().is_some())
+    }
+}
+
+impl Species {
+    /// The species' phase diagram where it can condense, with a positive weight: the only
+    /// species whose caps read the climate ([`AirborneWeights::solve`]).
+    #[must_use]
+    fn condensable(&self) -> Option<&'static PhaseDiagram> {
+        // By comparison, so that a NaN weight condenses nothing.
+        self.diagram.filter(|_| self.weight.value() > 0.0)
     }
 }
 
@@ -867,17 +877,14 @@ impl AirborneWeights {
         weights.clear();
         caps.clear();
         for species in &inventory.species {
-            let held = match species.diagram {
-                Some(diagram) if species.weight.value() > 0.0 => Some(Caps {
-                    minor_cap: Pascals::new(
-                        species.humidity * diagram.saturation_pressure(climate.mean).value(),
-                    ),
-                    cold_cap: diagram.saturation_pressure(climate.coldest),
-                    dominance: 0.0,
-                    own_ocean: 0.0,
-                }),
-                Some(_) | None => None,
-            };
+            let held = species.condensable().map(|diagram| Caps {
+                minor_cap: Pascals::new(
+                    species.humidity * diagram.saturation_pressure(climate.mean).value(),
+                ),
+                cold_cap: diagram.saturation_pressure(climate.coldest),
+                dominance: 0.0,
+                own_ocean: 0.0,
+            });
             // Each condensable starts at the least its caps allow, near where a dominant one ends,
             // so that one which collapses by orders of magnitude from its inventory misleads no
             // sweep.
@@ -1745,16 +1752,25 @@ pub struct WaterCover {
     /// The density of its ice, ice Ih's at the mean surface temperature
     /// ([`ice_ih_density`](crate::substance::ice_ih_density)), at which T24.b caps the ice.
     pub ice_density: KilogramsPerCubicMetre,
-    /// Whether the solid entry holds the crust's frozen water where the surface water holds none:
-    /// the record's, on a body whose bulk is ice ([`SurfaceMaterial::Ice`]), whose crust is its
-    /// water (decision-p14-t54a-ganymede, C1 follow-up §C1.4). Its entry is then the partition's
-    /// whole frozen water, the crust's ice-held water, shell and deeper ice, at
-    /// [`ice_fraction`](Self::ice_fraction), until P14.T53.c divides it; the surface water, the
-    /// water free to pool, stays P14.T13.b's, on water's Jeans verdict. False off an ice bulk, and
-    /// in T13.c's passes, whose area mix reads an ice bulk's crust as its regolith.
+    /// Whether the solid entry holds the crust's frozen water where the surface water holds none
+    /// ([`CrustWater`]).
+    pub crust_water: CrustWater,
+}
+
+/// Whether water's solid entry lists an ice bulk's crust where the surface water holds none
+/// ([`WaterCover::crust_water`]; decision-p14-t54a-ganymede, C1 follow-up §C1.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum CrustWater {
+    /// Listed: the record's, on a body whose bulk is ice ([`SurfaceMaterial::Ice`]), whose crust
+    /// is its water. Its entry is then the partition's whole frozen water, the crust's ice-held
+    /// water, shell and deeper ice, at [`WaterCover::ice_fraction`], until P14.T53.c divides it;
+    /// the surface water, the water free to pool, stays P14.T13.b's, on water's Jeans verdict.
     ///
     /// [`SurfaceMaterial::Ice`]: crate::planetary::derive::atmosphere::SurfaceMaterial::Ice
-    pub crust_water: bool,
+    Listed,
+    /// Not listed: off an ice bulk, and in T13.c's passes, whose area mix reads an ice bulk's
+    /// crust as its regolith.
+    Unlisted,
 }
 
 /// The net sublimation rate at which an airless surface keeps a solid over the Solar System's age:
@@ -2224,7 +2240,8 @@ impl Partition {
     ///
     /// ```
     /// use hyperion_sim::planetary::chem::partition::{
-    ///     ClimateSpan, ColumnInventory, CondensatePhase, Cover, Ground, WaterCover, partition,
+    ///     ClimateSpan, ColumnInventory, CondensatePhase, Cover, CrustWater, Ground, WaterCover,
+    ///     partition,
     /// };
     /// use hyperion_sim::planetary::derive::atmosphere::{Gas, SurfaceState};
     /// use hyperion_sim::units::{
@@ -2247,7 +2264,7 @@ impl Partition {
     ///     potential_ocean: 0.0,
     ///     ice_fraction: 0.0,
     ///     ice_density: KilogramsPerCubicMetre::new(917.0),
-    ///     crust_water: false,
+    ///     crust_water: CrustWater::Unlisted,
     /// };
     /// let published = mars.publish(&Cover { cold_area: &cold_area, state: SurfaceState::Temperate, water });
     /// let caps = published.entry(co2, CondensatePhase::Solid).expect("its caps");
@@ -2405,7 +2422,8 @@ fn water_parts(
 fn crust_ice(c: &Condensate, water: &WaterCover) -> Option<Part> {
     let mass = c.reservoir.value();
     // By comparison, so that a NaN reservoir holds none.
-    if !(water.crust_water && c.phase == CondensatePhase::Solid && mass > 0.0) {
+    let listed = water.crust_water == CrustWater::Listed;
+    if !(listed && c.phase == CondensatePhase::Solid && mass > 0.0) {
         return None;
     }
     let rho = water.ice_density.value();

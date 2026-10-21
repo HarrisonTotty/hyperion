@@ -227,7 +227,8 @@ pub const JEANS_RETENTION_THRESHOLD: f64 = 25.0;
 /// albedo a pass reads moves a retention.
 ///
 /// It is T13.c's 5 `T_eq` at its airless ice, the measured Ganymede's Bond albedo of 0.35 ± 0.03
-/// (Squyres and Veverka 1982, Icarus 52; Buratti 1991, Icarus 92, 312), so T13.b's calibration
+/// (Squyres and Veverka 1982, Icarus 52, 117, the figure as quoted, the paper not read in full,
+/// being paywalled; Buratti 1991, Icarus 92, 312), so T13.b's calibration
 /// figures hold: the measured Ganymede's nitrogen is lost at λ 23.1 and Titan's kept at λ 29.1
 /// ([`JEANS_RETENTION_THRESHOLD`]), a window of 4.15–5.23 `T₀` at their measured radii and
 /// 4.24–5.04 `T₀` over the moons' radius ranks. A constant cannot take a root, so the value is
@@ -1201,11 +1202,20 @@ pub const AIRLESS_PRESSURE: Pascals = Pascals::new(100.0);
 /// polynomials for nitrogen (Planet. Space Sci. 57, 2053). P14.T53.c replaces it with the ice's
 /// controlling temperature, its emissivity and the cold upper atmosphere's escape.
 ///
+/// With the exobase at the surface and at its temperature, the rate is a lower bound on the loss:
+/// a real exobase lies higher and is hotter. Schaller and Brown integrate the loss along the
+/// orbit, where perihelion dominates it; the code takes the pass's mean equilibrium temperature,
+/// which understates an eccentric body's loss. Both vapour curves are read below the
+/// temperatures they were fitted at, ice Ih's below R14-08's 50 K and α-nitrogen's below 20 K:
+/// there the pressures lie far below [`AIRLESS_PRESSURE`] and the loss is negligible, so the
+/// verdicts stand though the pressures are extrapolated.
+///
 /// `None` where the ice does not hold the gas: where its row has no phase diagram, where its
 /// saturation pressure at `temperature` is not below [`AIRLESS_PRESSURE`], so that its vapour
 /// would make a bulk air (above its critical temperature the pressure is infinite), and at a
 /// temperature that is not positive or not a number. A flux that underflows, of a gas bound too
-/// tightly for e^(−λ) to be represented, loses nothing.
+/// tightly for e^(−λ) to be represented, loses nothing, as does a gas whose λ is infinite, at a
+/// temperature so small that kTR underflows.
 #[must_use]
 pub(crate) fn ice_vapour_escape(
     mass: Kilograms,
@@ -1227,6 +1237,11 @@ pub(crate) fn ice_vapour_escape(
     let density = vapour.value() / kt;
     let speed = (2.0 * kt / m).sqrt();
     let lambda = jeans_parameter(mass, radius, gas, temperature);
+    // A temperature so small that kTR underflows (a subnormal one) gives an infinite λ, which binds
+    // the gas wholly: (1 + λ) e^(−λ) would be ∞ × 0, a NaN.
+    if !lambda.is_finite() {
+        return Some(Kilograms::ZERO);
+    }
     // 1 ÷ 2√π is (2 ÷ √π) ÷ 4.
     let flux =
         density * speed * (1.0 + lambda) * math::exp(-lambda) * core::f64::consts::FRAC_2_SQRT_PI
@@ -1482,7 +1497,8 @@ impl Atmosphere {
     }
 
     /// The species of [`retention`](Self::retention) that the body's ice holds, not Jeans's test:
-    /// water and nitrogen on an ice crust (rule (b)), none elsewhere.
+    /// water and nitrogen on an ice crust (rule (b)), with methane where the nitrogen is held,
+    /// none elsewhere.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn ice_held(&self) -> Retention {
@@ -1618,15 +1634,16 @@ impl From<CarbonCarrier> for Gas {
 /// The bulk-air test does not judge them: a crust is not lost by the thermal, non-thermal and
 /// impact escape of an air it cannot form. It reads the pass's temperature, as a volatile ice's
 /// vapour does, so its verdict can change between passes. Methane follows nitrogen
-/// ([`Retention::with_methane_as_nitrogen`], applied after it); carbon dioxide and argon, and the
+/// ([`Retention::with_methane_as_nitrogen`]), held by the ice where the nitrogen is
+/// ([`retention`](Self::retention)); carbon dioxide and argon, and the
 /// rock bulks, keep T13.b's verdicts until P14.T53.c. A past runaway leaves the water it holds
 /// ([`Airborne::divide`]): it takes an ice crust's surface layer, not its bulk.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct IceHeld {
-    /// The water the ice holds, kg, where some is held.
-    water: Option<f64>,
-    /// The nitrogen the ice holds, kg, where some is held.
-    nitrogen: Option<f64>,
+    /// The water the ice holds, where some is held.
+    water: Option<Kilograms>,
+    /// The nitrogen the ice holds, where some is held.
+    nitrogen: Option<Kilograms>,
 }
 
 impl IceHeld {
@@ -1655,7 +1672,7 @@ impl IceHeld {
             )?;
             let kept = inventory.value() - loss.value();
             // By comparison, so that a NaN keeps none.
-            (kept > 0.0).then_some(kept)
+            (kept > 0.0).then_some(Kilograms::new(kept))
         };
         Self {
             water: held(Gas::Water, inputs.inventory.water()),
@@ -1663,11 +1680,16 @@ impl IceHeld {
         }
     }
 
-    /// The species held, as a retention's bits.
+    /// The species held, as a retention's bits: the water and nitrogen held, and methane where
+    /// the nitrogen is. Methane follows nitrogen ([`Retention::with_methane_as_nitrogen`]) and
+    /// fails Jeans's test wherever nitrogen does, so where the ice holds the nitrogen it holds the
+    /// methane too, and neither passes the bulk-air test
+    /// ([`Atmosphere::retains_against_escape`]).
     #[must_use]
     fn retention(self) -> Retention {
-        let bit = |gas: Gas, held: Option<f64>| held.map_or(0, |_| 1_u16 << gas.index());
+        let bit = |gas: Gas, held: Option<Kilograms>| held.map_or(0, |_| 1_u16 << gas.index());
         Retention(bit(Gas::Water, self.water) | bit(Gas::Nitrogen, self.nitrogen))
+            .with_methane_as_nitrogen()
     }
 }
 
@@ -1717,12 +1739,13 @@ impl Airborne {
         Self {
             water: held
                 .water
-                .unwrap_or_else(|| kept(Gas::Water, inventory.water())),
+                .map_or_else(|| kept(Gas::Water, inventory.water()), Kilograms::value),
             carbon_dioxide: kept(Gas::CarbonDioxide, inventory.carbon_dioxide()),
             methane,
-            nitrogen: held
-                .nitrogen
-                .unwrap_or_else(|| kept(Gas::Nitrogen, inventory.nitrogen())),
+            nitrogen: held.nitrogen.map_or_else(
+                || kept(Gas::Nitrogen, inventory.nitrogen()),
+                Kilograms::value,
+            ),
             argon: kept(Gas::Argon, inventory.argon()),
             oxygen: 0.0,
             carrier,
@@ -1760,7 +1783,7 @@ impl Airborne {
             // so that rule (a)'s airs and the state are as they were (P14.T53.a divides it).
             (Crust::Solid, Insolation::InsideRunaway) => {
                 let lost = inputs.inventory.water().value();
-                self.water = held.water.unwrap_or(0.0);
+                self.water = held.water.map_or(0.0, Kilograms::value);
                 if retention.retains(Gas::Oxygen) {
                     self.oxygen = runaway_oxygen(
                         Kilograms::new(lost),
@@ -1841,6 +1864,12 @@ impl Airborne {
 /// The climate the condensate partition reads at a step of the greenhouse: a function of the
 /// step's mean surface temperature and of the partial pressures the previous step gave (P14.T51.a;
 /// [`atmosphere_under`]).
+///
+/// It must read nothing but those two. The greenhouse's exit (lever (p),
+/// [`partitioned_greenhouse`]) stops at a step that repeats the one before, bit for bit, which is
+/// the full count's result only while a step is a function of the step before's temperature and
+/// partial pressures alone: a climate that read anything else, a count of its calls or a state it
+/// keeps, would make the exit inexact.
 pub(crate) type ClimateOf<'a> = dyn Fn(Kelvin, &PartialPressures) -> ClimateSpan + 'a;
 
 /// The partial pressures, as column weights, of the airborne inventory `inventory` over the climate

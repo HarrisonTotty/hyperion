@@ -7,7 +7,7 @@ use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
 use crate::planetary::chem::partition::{
-    ClimateSpan, ColumnInventory, Cover, Ground, WaterCover, partition,
+    ClimateSpan, ColumnInventory, Cover, CrustWater, Ground, WaterCover, partition,
 };
 use crate::units::{KilogramsPerCubicMetre, MetresPerSecondSquared};
 
@@ -691,7 +691,7 @@ fn a_solution_takes_its_own_record_or_its_solvent_s_and_an_unrecorded_liquid_nit
         potential_ocean: 0.0,
         ice_fraction: 0.0,
         ice_density: KilogramsPerCubicMetre::new(917.0),
-        crust_water: false,
+        crust_water: CrustWater::Unlisted,
     };
     let cover = Cover {
         cold_area: &profile,

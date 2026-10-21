@@ -22106,8 +22106,10 @@ planetary::record` (624 tests at T57.a's commit).
       ruling's "4.4897" is its rounding. A constant cannot take a root, so the literal is written
       out, and its test holds it to the expression's bits.
     - _The window:_ at the measured radii and masses (JPL's GM, Archinal et al. 2018's radii) and
-      their giants' semi-major axes about the present Sun, Ganymede's N₂ is lost at λ 23.12 and
-      Titan's kept at λ 29.11: 4.151–5.227 `T₀`. Over the fixture's radius ranks Ganymede's λ is
+      their giants' semi-major axes about the present Sun (Saturn's 9.5826 au from an edition of
+      NASA's fact sheet before its update of 18 March 2025, which gives 9.5726 au; the value is
+      kept), Ganymede's N₂ is lost at λ 23.11 (23.115) and Titan's kept at λ 29.11: 4.151–5.227
+      `T₀`. Over the fixture's radius ranks Ganymede's λ is
       22.26–23.61 and Titan's 28.07–29.81: 4.241–5.042 `T₀`.
     - _The six printing tests, asserted again:_ T13.c's (b) in
       `the_solar_system_keeps_its_atmospheres_where_it_does` (Mercury, the Moon, Ganymede and
@@ -22125,7 +22127,9 @@ planetary::record` (624 tests at T57.a's commit).
     - _New tests:_ `the_exobase_multiple_loses_ganymede_s_nitrogen_and_keeps_titan_s` (the
       expression's bits and the measured window);
       `the_exobase_window_holds_over_the_fixture_s_ranks`;
-      `retention_is_independent_of_the_albedo_a_pass_reads` (the table, Jupiter and the icy
+      `bulk_air_retention_is_independent_of_the_albedo_a_pass_reads` (named
+      `retention_is_independent_of_the_albedo_a_pass_reads` until Batch C's review fixes; the
+      table, Jupiter and the icy
       member as recorded and as placed, each through one pass at albedos 0–0.95 by a test-only
       `PassDriver::Once`: the same exobase and retention bits as the solved body's, which is
       `exobase_temperature` of its zero-albedo `T_eq`).
@@ -22163,22 +22167,29 @@ planetary::record` (624 tests at T57.a's commit).
         W3 (a)'s T24.b ice (1.0) stands for it, their pressures moving by 3 × 10⁻¹⁰ and 3 × 10⁻⁸
         of themselves (a crust's water is held by its ice, P14.T53.c's ice-held route); and cold,
         airless bodies' frosts move with their N₂ and argon bits (`filler_b` `e205`–`e208`,
-        `e207`'s albedo 0.871 → 0.695 and `T_eq` 16.5 → 20.5 K; `filler_c` `e301`–`e303` and
+        `e207`'s albedo 0.871 → 0.695 and `T_eq` 16.5 → 20.5 K; `filler_c` `e301`, `e303` and
         `e305`; `close_binary` `e802` and `e803`; `hot_jupiter` `e101`; `fallback_black_hole`
         `e202`), no state moving.
+      - _And a drift of ulps_ (Batch C's review, DC1): `filler_b` `e204`'s `T_eq` 24.86009287572791
+        → 24.860092875728526 K, with its albedos, contrast and `reservoir_gel_m` by ulps, no bit
+        of its retention moving. Most likely the exobase no longer moves with each pass's albedo,
+        so its early passes' retention differs and the converged end differs within the passes'
+        tolerance.
     - _Moved goldens_, re-blessed at header 22 (`golden_diff.py`: 12 changed, none new; scratch
       `c0/golden_diff.txt`):
-      - `planetary/atmosphere_speciation` (4), `planetary/surface_conditions` (11) and
-        `planetary/global_figures` (1): the table's Ganymede airless at 78.13 K (no gases,
-        `AirlessLike`, its cloud 0.67 → 0).
-      - `planetary/surface_conditions_published` (68): eight records, no state moving: the N₂
+      - `planetary/atmosphere_speciation` (4), `planetary/surface_conditions` (11 changed, 3 gone:
+        Ganymede's N₂, CH₄ and Ar mole fractions) and `planetary/global_figures` (1): the table's
+        Ganymede airless at 78.13 K (no gases, `AirlessLike`, its cloud 0.67 → 0).
+      - `planetary/surface_conditions_published` (68 changed, 2 gained and 13 gone): eight
+        records, no state moving: the N₂
         bits of `01fffb2c9fff0000.e101`, `02000b2ca0000001.e203` and `.e204` and the two runaways'
         N₂ shares; `02000b2ca0000000.e104` and `.e105`'s argon; `21fff6587ff80000.0200`'s water
         (beyond the list).
       - `planetary/systems`: `close_binary` (`e304`'s air; `e802` and `e803`'s argon),
         `hierarchical_triple` (`0500`'s air), `solar_like` (`0300`'s water), `filler_a`
-        (`0100`'s argon), `filler_b` (`e205`–`e208`), `filler_c` (`0400`, `e201`, `e301`–`e303`,
-        `e305`), `hot_jupiter` (`e101`) and `fallback_black_hole` (`e202`).
+        (`0100`'s argon), `filler_b` (`e204`'s `T_eq` and albedos by ulps; `e205`–`e208`'s
+        frosts), `filler_c` (`0400`, `e201`, `e301`, `e303`, `e305`), `hot_jupiter` (`e101`) and
+        `fallback_black_hole` (`e202`).
       - The rest hold: the lib's other planetary goldens and the integration targets
         `planetary_golden`'s other systems, `planetary_moons_golden`, `observe_in_system_golden`,
         `body_frame_golden`, `body_fixed_golden`, `body_rotations_golden`, `orbit_drifting_states`,
@@ -22187,6 +22198,9 @@ planetary::record` (624 tests at T57.a's commit).
         `planetary_fate_golden`, `planetary_masses_golden`, `planetary_placement_golden`,
         `planetary_placement`, `frame`, `aerosol_golden`, `formation_golden`, `liquids_golden` and
         `substance_golden`.
+    - _Files:_ `planetary/derive/atmosphere.rs` and `derive/mod.rs`; the tests in
+      `derive/atmosphere/tests.rs`, `moons/regular.rs`, `hooks/surface/tests.rs` and
+      `hooks/figures/cover/tests.rs`.
   - _Batch C's L1, lever (h): the zonal insolation table once a body, with the continuity test's
     split_ (decision-p14-t54a-passes, "Cost escalation (after Batch B)", §C.3's (h) and §C.7; its
     relay's items 1 and 6). A refactor at 22, bit for bit: no golden moves.
@@ -22270,6 +22284,8 @@ planetary::record` (624 tests at T57.a's commit).
       `AIRLESS_PRESSURE`, keep max(0, W − L) (`ice_vapour_escape`). L = 4πR² m t n v₀ (1 + λ)
       e^(−λ) ÷ 2√π, with n = `p_sat` ÷ kT, v₀ = √(2kT ÷ m) and λ = G M m ÷ (k T R) at that
       temperature: the exobase at the surface, a 23 stand-in for P14.T53.c.
+      - Its scope is a solid crust and no envelope: a molten ice bulk has no crust to hold ice,
+        and an envelope is `GasEnvelope` before step 2.
       - CH₄ follows N₂ (`with_methane_as_nitrogen`, after it). Rock bulks, CO₂ and Ar keep T13.b's
         verdicts until T53.c.
       - `Atmosphere::retention` reports the held bits. T24.b's surface water and the wet epoch's
@@ -22292,8 +22308,9 @@ planetary::record` (624 tests at T57.a's commit).
       - The figures' ices take the entry in its sorted place, not T24.b's appended item, so the
         lists that W2 scales move in their last bit.
     - _The fractions held at 1_ (beyond the ruling's lists; a defect older than C0b). A list that
-      W2 divides by its total sums back to 1 only to rounding. C0's `filler_b` published an ice
-      fraction of 1.000 000 000 000 000 2, and the sorted order put the server sample's
+      W2 divides by its total sums back to 1 only to rounding. `filler_b` `e202` published an ice
+      fraction of 1.000 000 000 000 000 2, there since Batch B (5f11c835), and the sorted order
+      put the server sample's
       `2200165980000000.e201` an ulp over 1 too, which the wire's range test refused
       (`the_surface_s_mixture_and_fractions_are_in_range`). `GlobalFigures::ice_fraction` and
       `ocean_fraction` hold their sums at 1 (`covered`), and W2's quotients stay as they are, to
@@ -22305,7 +22322,8 @@ planetary::record` (624 tests at T57.a's commit).
       - (a): `a_runaway_world_whose_water_fails_its_jeans_test_keeps_the_oxygen_it_freed`, a
         Mars-sized world at 305 K whose water fails (λ ≈ 20) and whose O₂ passes (λ ≈ 35.5).
       - (b): `the_ice_s_vapour_escapes_by_jeans_s_flux_with_the_exobase_at_the_surface` (Triton's
-        N₂ at 32.5 K, about 0.02 Pa at λ about 109.5, the closed form to 10⁻¹²);
+        N₂ at 32.5 K, about 0.04 Pa (0.0435, the registry's Fray and Schmitt α-N₂; the ruling's
+        "some 0.02 Pa" is half of it) at λ about 109.5, the closed form to 10⁻¹²);
         `a_500_km_body_at_40_k_keeps_no_nitrogen`;
         `the_measured_icy_moons_hold_their_water_ice_and_ganymede_s_nitrogen_stays_lost` (N₂'s
         vapour 1.12 bar at 78 K, a bulk air);
@@ -22326,10 +22344,17 @@ planetary::record` (624 tests at T57.a's commit).
         crust's frozen water, each new; 11 keep T24.b's surface-water entry, unchanged. 98 list
         none: 36 past-only runaways at 3–10 K about stellar remnants, whose ice holds the water
         but whose runaway arm, judged at the hosts' largest past luminosity, takes it (item 33,
-        T53.b; as at C0); 5 present runaways; and 57 small or warm bodies at 140–570 K, whose ice's
-        vapour escapes (L ≥ W) or makes a bulk air. Of the systems goldens' 184 ice-surface bodies,
-        154 list H₂O solid, 151 of them new (3 at C0). The other 30 are warm and small, at
-        132–612 K: captured moons of at most 2 × 10⁻³ M⊕, and three dwarf planets at 220–424 K.
+        T53.b; as at C0); 5 past-only runaways labelled `RunawayGreenhouse`
+        (`01ffeb2c20000000.0400` at 107 K and 4 Jeans-retaining planets at 85–134 K; item 33,
+        T53.b); and 57 small or warm bodies at 140–570 K, whose ice's vapour escapes (L ≥ W) or
+        makes a bulk air. Of the systems goldens' 184 ice-surface bodies, 154 list H₂O solid, 151
+        of them new (3 at C0). The other 30 are warm and small, at 132–612 K: captured moons of at
+        most 2 × 10⁻³ M⊕, and three dwarf planets at 220–424 K.
+      - _Which figure the bless note carries:_ the sample's 401 of 510 ice-bulk surfaces that list
+        the crust's frozen water, in place of §C1.6's "350 of the sample's 397 icy bodies now hold
+        their water in the partition (38 before)". The two count different things: these are the
+        record's published surfaces whose bulk is ice (`SurfaceMaterial::Ice`) and their `H2O`
+        solid entries, the ruling's the icy bodies of its C1 probe whose partition holds water.
       - _The O₂ airs (six; the C1 probe over the sample's 969 bodies)._ Restored:
         `21fff6587ff80000.0200`, 56.2 → 155 bar with 98.7 bar of O₂, and
         `01ffeb2c20000000.0400`, 0.51 → 9.69 bar with 9.19 bar. New: `01ffeb2c1ffe0000.0200`,
@@ -22346,7 +22371,8 @@ planetary::record` (624 tests at T57.a's commit).
         `e204` regaining their CH₄ and N₂, and `hot_jupiter` `e105`, a 557 km Kuiper-belt body at
         49.9 au and `T_eq` 24 K, 0.823 → 0.887.
     - _Why each moves:_ (b) is Schaller and Brown's thermal criterion at 7–45 K: N₂ and CH₄ ice
-      escape negligibly from any body over a few hundred kilometres there. `e105` sits on the
+      escape negligibly below about 25 K from bodies over about 400 km, and near 40–45 K from
+      bodies over about 800–900 km (Schaller and Brown 2007, Fig. 1). `e105` sits on the
       volatile–albedo bistability: its N₂ loses 1.5% at 24 K, but would all go at its 37 K
       zero-albedo temperature (T53.c's ice temperature decides it). The six O₂ airs are (a)'s
       route with `runaway_oxygen`'s drag and sinks. The record's H₂O entries are §C1.4's form.
@@ -22372,6 +22398,10 @@ planetary::record` (624 tests at T57.a's commit).
         warmest zone rises above the ice's frost point at its own partial pressure, as on the
         airless Callisto, whose water is its only condensable. T53.c, which divides the crust from
         a seasonal frost, owns it.
+      - 47 published airless records whose screening was `None` now carry a column, 24 of them by
+        that line alone (1.9 × 10⁻⁹² to 4.4 × 10⁻³³ kg m⁻², the ice-held water's vapour, which
+        `screening_of` reads off the pass's air while the record publishes 0 Pa). It screens
+        nothing. Batch C's (f) or T53.c decides it (Batch C's review, PC2).
     - _Moved goldens_, re-blessed at header 22 against C0's tip (`golden_diff.py`, scratch
       `c0b/golden_diff_v3.txt`: 11 changed and 5 extended, none new):
       - `planetary/atmosphere_speciation` (9), `planetary/derive_body` (4),
@@ -22385,9 +22415,10 @@ planetary::record` (624 tests at T57.a's commit).
       - `planetary/systems`: `close_binary`, `eccentric_giant`, `filler_b`, `filler_c`,
         `hierarchical_triple` and `hot_jupiter` by (b)'s frosts, `filler_c` `0400` and `e201`'s
         water and the record's H₂O entries; `m_dwarf_resonant_chain`, `red_giant`, `solar_like`,
-        `subgiant` and `wide_binary` extended only, by the record's H₂O entries. 12 `ice_fraction`
-        lines move in their last bit with the sorted order (1 ↔ 0.999 999 999 999 999 9), and
-        `filler_b`'s fraction an ulp over the whole is held at it.
+        `subgiant` and `wide_binary` extended only, by the record's H₂O entries. 13 `ice_fraction`
+        lines move in their last bit with the sorted order (1 ↔ 0.999 999 999 999 999 9;
+        `hierarchical_triple` `1a00` rises to 1), and `filler_b` `e202`'s 1.000 000 000 000 000 2,
+        there since Batch B (5f11c835), is held at 1.
       - The rest hold, the server's goldens and `planetary_moons_golden` among them.
     - _Files:_ `planetary/derive/atmosphere.rs`, `derive/atmosphere/surface_mix.rs`,
       `chem/partition.rs`, `hooks/figures.rs`, `hooks/figures/cover.rs`,
@@ -22506,6 +22537,9 @@ planetary::record` (624 tests at T57.a's commit).
       - A column with nothing that condenses (`ColumnInventory::condenses`: no species with a
         phase diagram and a positive weight) reads no step climate: the mean's isothermal span
         stands in, which its partition does not read.
+        - _A constraint for Batch D's C1_ (Batch C's review, PC5): that step's span is an
+          isothermal stand-in, not the body's climate, so rule (f) must not carry it as the final
+          step's θ.
       - `PARTITION_SWEEPS` and `GREENHOUSE_STEPS` are documented as caps with a bit-exact exit.
         P14.T51.a's own record ("each solve starts afresh", still true of every solve) is the
         docs batch's (§C.8).
@@ -22532,6 +22566,9 @@ planetary::record` (624 tests at T57.a's commit).
     - _Its saving_ (the profile's probe, release, one CPU, `CPUQuota=100%`, under the heavy lock;
       the tip after C0c, (a), and (a) with (p), alternated over three rounds, medians; load 0.3–3.3
       at the starts; the passes histograms identical across all nine runs):
+      - _Before the levers:_ C0b and C0c, unlevered, raised the probe's figures from L1's 153.8,
+        151.5 ms and 2.62 s to 249.5, 199.1 ms and 3.46 s (the same script), most likely by the
+        partition over C0b's new condensing columns.
       - The first 20 systems (stage timers off): `generate` 249.5 → 249.2 → 116.8 ms (−53%);
         `snapshot_at` 199.1 → 197.4 → 134.3 ms (−1% by (a), −32% in all).
       - The 400-system `snapshot_at` stage (timers on, as L1's): 3.46 → 3.46 → 2.17 s (−37%).
@@ -22546,3 +22583,110 @@ planetary::record` (624 tests at T57.a's commit).
       `planetary/system.rs`, and docs in `derive/atmosphere/surface_mix.rs` and
       `hooks/cold_traps.rs`; the tests in `chem/partition/tests.rs`, `derive/atmosphere/tests.rs`,
       `hooks/surface/tests.rs`, `moons/regular.rs` and `system/tests.rs`.
+  - _Batch C's review fixes_ (the review of C0, L1, C0b, C0c and L2, `batch-c-fixes`). A
+    checkpoint at 22: `GENERATOR_VERSION` stays 22, and the golden it extends re-blesses at header
+    22 in the same commit.
+    - _The code_ (Rust review, RC1–RC5; determinism audit, DC3–DC4):
+      - RC1: `IceHeld`'s water and nitrogen are `Option<Kilograms>`; the tests'
+        `TITAN_IRRADIATION` is a `Kelvin`.
+      - RC2: `retains_against_escape(Gas::Methane)` was true on a body whose N₂ its ice holds,
+        though methane fails Jeans's test there. `IceHeld::retention` now sets methane's bit where
+        the nitrogen is held, so the ice-held bits hold the methane that follows it, and
+        `Atmosphere::retention` is unchanged (`with_methane_as_nitrogen` gave the same bits). The
+        albedo test's `bulk_air` workaround is gone: it reads `retains_against_escape` gas by gas.
+        Triton's test asserts neither its N₂ nor its CH₄ passes the bulk-air test, and the table
+        moons' check admits methane beside held nitrogen. No caller passed methane, so nothing
+        published moves.
+      - RC3: `bulk_air_retention_is_independent_of_the_albedo_a_pass_reads` (renamed) asserts
+        what it printed: the icy member as recorded holds its N₂ and CH₄ in its ice at 0.95
+        (20 K) and not at 0.832 (27 K) or in its solved pass, and every other body's ice-held bits
+        are its solved pass's at every albedo.
+      - RC4: `ice_vapour_escape` returns no loss for an infinite λ (a subnormal temperature),
+        where (1 + λ) e^(−λ) was ∞ × 0, a NaN that its `loss > 0` test already turned to 0 (the
+        same result, now explicit and tested at 2⁻¹⁰⁷⁴ K); `inner_points`' doc names
+        `with_table_reads` in backticks, a test-only item; the fixture-window test's literal 25 is
+        `JEANS_RETENTION_THRESHOLD`; the slow whole-window continuity test's floor is 1,100,000
+        steps (570 planets × 2,000 years is 1,140,000); `t24a_span` calls `retained`; and the
+        Squyres and Veverka 1982 citation has its pages.
+      - RC5: `WaterCover::crust_water` is the two-variant `CrustWater` (`Listed` on an ice bulk's
+        record, `Unlisted` elsewhere and in the passes). Not taken: building the insolation table
+        only where a profile has modes. Since L2 the record reads it once a surface, so the table
+        built for a locked or flat profile is the only waste; skipping it takes an
+        `Option<&ZonalInsolation>` through five signatures, and the table moves to
+        `primary_record` for the passes (design-batch-c §1), where that choice belongs.
+        `HourCosines` stays on `Epoch`, as L1 weighed it.
+      - DC3: `the_published_surface_conditions_are_pinned` now also pins a remnant's ice bulk on
+        an ice-rich crust, the sample's `41ffecb200000005.e605` (`Airless` at 3.17 K, C0c's
+        example): its `H2O` solid entry's area, reservoir and layer, by bits (`pin_remnant_crust`).
+      - DC4: one `Species::condensable` serves `ColumnInventory::condenses` and the caps in
+        `AirborneWeights::start`; `WaterIce::Covered` holds a `CoveredIce` whose field is private,
+        so that only `condensates_and_ice_under` builds it; and `ClimateOf`'s and
+        `PassSurface::climate_of`'s docs state that the greenhouse's exit is exact only while the
+        climate reads nothing but the step's temperature and partial pressures, which Batch C's C2
+        must keep.
+    - _The docs_ (science check, SC1–SC6): Triton's N₂ vapour at 32.5 K is about 0.04 Pa (0.0435),
+      its test's band now 0.04–0.05 Pa; Schaller and Brown 2007's Fig. 1 limits in C0b's
+      record; Saturn's 9.5826 au cited as an edition of NASA's fact sheet before its update of
+      18 March 2025 (9.5726 au there), the value kept; Squyres and Veverka 1982, Icarus 52, 117,
+      the 0.35 ± 0.03 marked as quoted, the paper not read in full; λ 23.11 in C0's record; the
+      measured moons' water vapour 10⁻²³–10⁻²¹ Pa; and on `ice_vapour_escape`, the surface
+      exobase's rate a lower bound on the loss, Schaller and Brown's integration along the orbit
+      against the code's mean `T_eq`, and the vapour curves read below their fitted ranges
+      (IAPWS R14-08 from 50 K, α-N₂ below 20 K), where the pressures lie far below 100 Pa and the
+      verdicts stand.
+    - _The record_ (determinism audit DC1–DC2, plan conformance PC1–PC5): C0's moved goldens now
+      name `filler_b` `e204`'s drift of ulps and its likely cause, the counts of
+      `surface_conditions` and `surface_conditions_published`, `filler_c` `e301` and `e303` but
+      not `e302`, and its files; C0b's 13 last-bit `ice_fraction` lines and `e202`'s fraction
+      there since Batch B, its 5 past-only runaways, the 47 screening columns, (b)'s scope and the
+      bless note's figure; L2's figures before the levers and PC5's constraint. The commits'
+      messages stand as they are; their corrections are these: C0's "frosts on e301–e303"
+      includes `e302`, which does not move; C0b moved 13 ice fractions, not 12; and C0c's golden
+      is a two-line reorder with no value moved, not an extension (PC4).
+    - _Moved goldens_, re-blessed at header 22 (`golden_diff.py`, scratch `cfix/golden_diff.txt`:
+      one extended only, none changed): `planetary/surface_conditions_published` gains
+      `41ffecb200000005.e605`'s state (`Airless`), crust (`IceRich`) and `H2O` solid entry (area
+      1, 2.970 × 10⁸ kg m⁻², a layer of 318 km), values the generator made at C0c and nothing
+      pinned. RC2's methane bit reaches no published value: no caller passed methane to
+      `retains_against_escape`, and `Atmosphere::retention` is the same bits. The rest hold: the
+      sim's other lib goldens and its 22 golden integration targets, and the server's
+      `systems_in_range`, `system_bodies` and `--lib convert` tests.
+    - _Files:_ `planetary/derive/atmosphere.rs`, `derive/atmosphere/surface_mix.rs`,
+      `derive/mod.rs`'s docs, `chem/partition.rs`, `hooks/figures.rs` and `hooks/surface.rs`'s
+      docs; the tests in `derive/atmosphere/tests.rs`, `moons/regular.rs`, `system/tests.rs`,
+      `chem/partition/tests.rs`, `derive/photometry/area_mix/tests.rs`,
+      `hooks/cold_traps/tests.rs`, `hooks/modifiers/tests.rs` and `tests/planetary_properties.rs`;
+      the golden `planetary/surface_conditions_published`.
+    - _Checks:_ the sim's `--lib planetary` in six runs (1,384 passed, 47 ignored), the 14 lib
+      goldens and the 22 golden integration targets re-blessed (137 passed), the server's
+      `systems_in_range`, `system_bodies` and `--lib convert`, `Partition::publish`'s doctest,
+      Clippy `--lib --tests` on the sim, rustdoc with `-D warnings`, rustfmt and Prettier. Not
+      run: the slow tier's whole-window continuity test, whose new floor its next slow pass
+      reads.
+    - _Deferred findings (2026-10-13 rule):_
+      - SC3, for P14.T53.c: CH₄ following N₂ contradicts Schaller and Brown 2007 §3, where 2005
+        FY9 keeps its CH₄ while losing its N₂. Below about 40 K a band of bodies should keep CH₄
+        ice and lose N₂: run CH₄ through `ice_vapour_escape` on its own row. Not a blocker
+        (FEATURES FIRST): the methane bit follows nitrogen's as before.
+  - _The merge's re-measure of R09.T13.i's NCEP table, and `reference::earth_air`'s water_ (after
+    f372ea5b, the merge of origin's R09.T13.i). The partition's test on observed temperatures
+    failed its first assertion: its data (`climate/tests/ncep_air.rs`) are reduced to the sea level
+    at R09.T13.i's reference Earth's Γ, 5.818 K km⁻¹, and A2's `c_p`(T) (74783d64) had moved it to
+    5.816 37.
+    - `earth_air`'s water is settled to 23's rule (decision-r09-t13i, its records' row 5 and "For
+      P14.T54.a or R09.T16"): a mole partial of `WATER_SURFACE_HUMIDITY` (0.77) × `p_sat`,
+      P14.T51.a's partition's convention, in place of the whole `p_sat`. At 288 K and 98.55 kPa the
+      vapour is 1.30 kPa, x = 0.0132 (was 0.0171); the air's μ 28.820 g mol⁻¹ (was 28.78), `c_p`
+      1,010.91 J kg⁻¹ K⁻¹ (1,013.03) and Γ 5.828 54 K km⁻¹ (5.816 37).
+    - The table is re-run at Γ = 5.829 × 10⁻³ K m⁻¹, the printed digits (the tolerance stays 5 ×
+      10⁻⁷). The inputs are R09.T13.i's own downloads of the three PSL responses, each matching
+      the module doc's SHA-256 (PSL's THREDDS answered 503 to every re-download for 45 minutes),
+      and `ncep_bands.py` reproduced R09.T13.i's table exactly at 5.818 × 10⁻³ first. 680 of the 864
+      means move, by at most 0.030 K (Antarctica's bands).
+    - The test's figures, R09.T13.i's as built → now: 40–60° N JJA 1.09 → 1.15 mm/day, DJF 0.76 →
+      0.82, annual E − P −0.83 → −0.89, every month positive (0.55–1.31 → 0.60–1.38); the latent
+      transport +2.22 → +2.37 PW at 40° N, −1.66 → −1.83 at 15° N, +0.52 → +0.59 at 15° S and
+      −2.15 → −2.30 at 40° S. Every bound holds. `earth_air`'s water moves them by 0.01 at most
+      (measured with it held at `p_sat`); the rest is the batch's air before it. The test's doc,
+      which says it reproduces the prototype's 1.09 and −0.83 to the printed digits, no longer
+      holds.

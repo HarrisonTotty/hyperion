@@ -9,7 +9,7 @@ use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
 use crate::planetary::chem::partition::{
-    ClimateSpan, ColumnInventory, Cover, Ground, WaterCover, partition,
+    ClimateSpan, ColumnInventory, Cover, CrustWater, Ground, WaterCover, partition,
 };
 use crate::planetary::derive::atmosphere::SurfaceState;
 use crate::planetary::hooks::figures::Crust;
@@ -127,7 +127,7 @@ fn published(
         potential_ocean: 0.0,
         ice_fraction: if water > 0.0 { 1.0 } else { 0.0 },
         ice_density: KilogramsPerCubicMetre::new(917.0),
-        crust_water: false,
+        crust_water: CrustWater::Unlisted,
     };
     solved.publish(&Cover {
         cold_area: &cold_area,

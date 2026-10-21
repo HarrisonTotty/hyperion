@@ -127,8 +127,8 @@ use crate::planetary::belts::{
     MEMBER_INCLINATION_WIDTH_DEG, SCATTERED_ECCENTRICITY_WIDTH, SCATTERED_INCLINATION_WIDTH_DEG,
 };
 use crate::planetary::chem::partition::{
-    Basins, ClimateSpan, CondensatePhase, Condensates, Cover, Ground, Partition, WaterCover,
-    partition,
+    Basins, ClimateSpan, CondensatePhase, Condensates, Cover, CrustWater, Ground, Partition,
+    WaterCover, partition,
 };
 use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
@@ -2309,7 +2309,7 @@ impl GlobalFigures {
         };
         let ice = || match water_ice {
             WaterIce::OffTable => off_table(),
-            WaterIce::Covered(ice) => {
+            WaterIce::Covered(CoveredIce(ice)) => {
                 #[cfg(test)]
                 match ICE_READS.with(core::cell::Cell::get) {
                     IceReads::Covered => {}
@@ -2401,7 +2401,7 @@ impl GlobalFigures {
         let profile = conditions.cold_profile_over(table);
         let cold_area = |t: Kelvin| profile.area_below(t);
         let water = self.water_cover(conditions, &profile);
-        let ice = WaterIce::Covered(water.ice_fraction);
+        let ice = WaterIce::Covered(CoveredIce(water.ice_fraction));
         let cover = Cover {
             cold_area: &cold_area,
             state: atmosphere.state(),
@@ -2470,7 +2470,10 @@ impl GlobalFigures {
             potential_ocean: self.potential_ocean,
             ice_fraction: ice,
             ice_density: substance::ice_ih_density(conditions.mean_surface_temperature()),
-            crust_water: self.material == SurfaceMaterial::Ice,
+            crust_water: match self.material {
+                SurfaceMaterial::Ice => CrustWater::Listed,
+                SurfaceMaterial::Rock => CrustWater::Unlisted,
+            },
         }
     }
 
@@ -3106,8 +3109,14 @@ pub(crate) enum WaterIce {
     /// The record's, its water cover's ice fraction as
     /// [`GlobalFigures::condensates_and_ice_under`] read it off the cold profile it built: the
     /// same bits as [`OffTable`](Self::OffTable), with no second profile (lever (a)).
-    Covered(f64),
+    Covered(CoveredIce),
 }
+
+/// T24.b's water ice as the record's water cover read it ([`WaterIce::Covered`]): built by
+/// [`GlobalFigures::condensates_and_ice_under`] alone, so that no other ice stands in for the
+/// cold profile's.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CoveredIce(f64);
 
 /// How [`GlobalFigures::with_surface_under`] reads a [`WaterIce::Covered`] ice, a test-only switch
 /// of lever (a) ([`with_ice_reads`]).

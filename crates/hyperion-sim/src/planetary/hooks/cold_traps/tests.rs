@@ -9,7 +9,7 @@ use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample};
 use super::*;
 use crate::id::SystemId;
 use crate::planetary::chem::partition::{
-    ClimateSpan, ColumnInventory, Ground, WaterCover, partition,
+    ClimateSpan, ColumnInventory, CrustWater, Ground, WaterCover, partition,
 };
 use crate::planetary::derive::solar::historic_table;
 use crate::planetary::hooks::figures::table_figures;
@@ -572,7 +572,7 @@ fn a_body_colder_than_its_threshold_everywhere_lays_a_whole_cover() {
                     potential_ocean: 0.0,
                     ice_fraction: 0.0,
                     ice_density: KilogramsPerCubicMetre::new(917.0),
-                    crust_water: false,
+                    crust_water: CrustWater::Unlisted,
                 },
             },
             SolidEdges::Exosphere {
@@ -634,7 +634,7 @@ fn the_merge_keeps_t51a_s_order() {
             potential_ocean: 0.0,
             ice_fraction: 0.0,
             ice_density: KilogramsPerCubicMetre::new(917.0),
-            crust_water: false,
+            crust_water: CrustWater::Unlisted,
         },
     });
     let caps = *published.entry(co2, CondensatePhase::Solid).unwrap();

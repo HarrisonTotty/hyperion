@@ -1144,9 +1144,11 @@ fn a_runaway_world_with_a_young_melt_keeps_less_oxygen() {
     }
 }
 
-/// Titan's irradiation temperature, K: the equilibrium temperature at zero albedo at Saturn's
-/// 9.5826 au from the present Sun, 278.33 K ÷ √9.5826 (NASA's Saturn fact sheet).
-const TITAN_IRRADIATION: f64 = 89.91;
+/// Titan's irradiation temperature: the equilibrium temperature at zero albedo at Saturn's
+/// 9.5826 au from the present Sun, 278.33 K ÷ √9.5826. The distance is an edition of NASA's Saturn
+/// fact sheet before its update of 18 March 2025 (1,433.53 × 10⁶ km), which gives 1,432.041 ×
+/// 10⁶ km, 9.5726 au; the value is kept.
+const TITAN_IRRADIATION: Kelvin = Kelvin::new(89.91);
 
 /// A Titan-like cold moon formed on the side `formed` of the snow line, with nitrogen and the
 /// carbon `carbon` (kg, counted as carbon dioxide) in its inventory, in equilibrium at
@@ -1166,7 +1168,7 @@ fn cold_moon(carbon: f64, equilibrium: f64, formed: SnowLineSide, crust: Crust) 
         ),
         formed,
         equilibrium: Kelvin::new(equilibrium),
-        irradiation_temperature: Kelvin::new(TITAN_IRRADIATION),
+        irradiation_temperature: TITAN_IRRADIATION,
         heated: Kelvin::new(equilibrium),
         xuv_fluence: JoulesPerSquareMetre::ZERO,
         saturated_xuv_flux: WattsPerSquareMetre::ZERO,
@@ -2036,9 +2038,7 @@ fn earth_inputs(equilibrium: f64, insolation: Insolation) -> AtmosphereInputs {
 fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) -> ClimateSpan {
     let (m, r) = (inputs.mass.value(), inputs.radius.value());
     let exobase = exobase_temperature(inputs.irradiation_temperature, inputs.xuv_fluence);
-    let jeans = Retention::of(inputs.mass, inputs.radius, exobase);
-    let held = IceHeld::of(inputs, jeans);
-    let retention = jeans.with(held.retention()).with_methane_as_nitrogen();
+    let (retention, held) = retained(inputs, exobase);
     let mut airborne = Airborne::kept(inputs, retention, held);
     airborne.divide(inputs, retention, held);
     let weight = GRAVITATIONAL_CONSTANT * m / (r * r) / (4.0 * core::f64::consts::PI * r * r);
@@ -2067,7 +2067,7 @@ fn titan_inputs() -> AtmosphereInputs {
     titan.material = SurfaceMaterial::Ice;
     titan.class = PlanetClass::Icy;
     titan.formed = SnowLineSide::Beyond;
-    titan.irradiation_temperature = Kelvin::new(TITAN_IRRADIATION);
+    titan.irradiation_temperature = TITAN_IRRADIATION;
     titan.inventory = VolatileInventory::new(
         Kilograms::new(1e22),
         Kilograms::new(1e21),
@@ -2266,7 +2266,8 @@ fn a_body_that_settles_keeps_t51b_s_bits() {
 /// Ganymede's Bond albedo, 5 × (1 − 0.35)^¼, to the bit, and it lies inside its window at the
 /// measured moons' radii, 4.15–5.23 `T₀`: the measured Ganymede's nitrogen is lost (λ 23.1) and
 /// Titan's kept (λ 29.1), each at the irradiation of its giant's semi-major axis about the present
-/// Sun (JPL's GM and mean radii, JUP365 and SAT441, Archinal et al. 2018; NASA's fact sheets).
+/// Sun (JPL's GM and mean radii, JUP365 and SAT441, Archinal et al. 2018; NASA's fact sheets,
+/// Saturn's 9.5826 au from an edition before the update of 18 March 2025, which gives 9.5726 au).
 #[test]
 fn the_exobase_multiple_loses_ganymede_s_nitrogen_and_keeps_titan_s() {
     assert_same_bits(EXOBASE_MULTIPLE, 5.0 * math::powf(1.0 - 0.35, 0.25));
@@ -2310,16 +2311,15 @@ fn the_exobase_multiple_loses_ganymede_s_nitrogen_and_keeps_titan_s() {
 /// pass at albedos from 0 to 0.95, while the equilibrium temperature each pass reads moves with
 /// its albedo. The ice-held water and nitrogen of an ice crust read that temperature, as a
 /// volatile ice's vapour does (the ruling's C0 follow-up, rule (b)), so they alone may differ
-/// between passes: the icy member as recorded, 10²¹ kg at 43 au, holds its N₂ at 0.95, at 20 K,
-/// and not at 0.832, at 27 K.
+/// between passes: the icy member as recorded, 10²¹ kg at 43 au, holds its N₂ (and the methane
+/// beside it) at 0.95, at 20 K, and not at 0.832, at 27 K, nor in its solved pass; every other
+/// body's ice holds the same at every albedo.
 #[test]
-fn retention_is_independent_of_the_albedo_a_pass_reads() {
+fn bulk_air_retention_is_independent_of_the_albedo_a_pass_reads() {
     use crate::planetary::derive::{PassDriver, derive_body_driven};
 
-    // The retention less what the ice holds, with methane following nitrogen's own verdict.
-    let bulk_air = |air: &Atmosphere| {
-        Retention(air.retention().0 & !air.ice_held().0).with_methane_as_nitrogen()
-    };
+    // The bulk-air verdict of each gas: Jeans's test's, not the ice's.
+    let bulk_air = |air: &Atmosphere| Gas::ALL.map(|gas| air.retains_against_escape(gas));
 
     let disc = solar_disc();
     let lights = [historic_sun()];
@@ -2367,14 +2367,26 @@ fn retention_is_independent_of_the_albedo_a_pass_reads() {
                 air.exobase_temperature().value(),
             );
             assert_eq!(bulk_air(at), bulk_air(air), "{name} at {albedo}");
-            if at.ice_held() != air.ice_held() {
-                eprintln!(
-                    "{name} at {albedo}: ice-held {:?} against the solved pass's {:?}",
-                    at.ice_held(),
-                    air.ice_held()
+            let t_eq = once.equilibrium_temperature().value();
+            if *name == "an icy member as recorded" && albedo > 0.9 {
+                // At 0.95, 20 K: its N₂ ice's vapour is too thin to escape over the age.
+                assert!((19.5..20.5).contains(&t_eq), "{name} at {albedo}: {t_eq} K");
+                for gas in [Gas::Nitrogen, Gas::Methane] {
+                    assert!(at.ice_held().retains(gas), "{name} at {albedo}: {at:?}");
+                    assert!(!air.ice_held().retains(gas), "{name}: {air:?}");
+                }
+            } else {
+                // At 0.832, 27 K, as in the solved pass, it escapes.
+                assert_eq!(at.ice_held(), air.ice_held(), "{name} at {albedo}");
+            }
+            if *name == "an icy member as recorded" && (albedo - 0.832).abs() < 1e-9 {
+                assert!((26.5..27.5).contains(&t_eq), "{name} at {albedo}: {t_eq} K");
+                assert!(
+                    !at.ice_held().retains(Gas::Nitrogen),
+                    "{name} at {albedo}: {at:?}"
                 );
             }
-            equilibria.push(once.equilibrium_temperature().value());
+            equilibria.push(t_eq);
         }
         assert_same_bits(equilibria[0], irradiation.value());
         assert!(
@@ -2976,12 +2988,14 @@ fn a_runaway_world_whose_water_fails_its_jeans_test_keeps_the_oxygen_it_freed() 
 /// whole surface and the age (Schaller and Brown 2007's criterion, the exobase at the surface):
 ///
 /// - at Triton (JPL's GM, 1,428.5 km³ s⁻², and mean radius, 1,352.6 km) and 32.5 K its N₂ ice's
-///   vapour is some 0.02 Pa and λ about 109.5 (the ruling's figures), and the loss is the closed
-///   form to 10⁻¹², a negligible share of any inventory;
+///   vapour is about 0.04 Pa (0.0435, the registry's Fray and Schmitt α-N₂; the ruling's "some
+///   0.02 Pa" is half of it) and λ about 109.5 (the ruling's), and the loss is the closed form to
+///   10⁻¹², a negligible share of any inventory;
 /// - it holds nothing where the vapour would be a bulk air: N₂ at 70 K, above its triple point,
 ///   and at 130 K, above its critical point, and water at 300 K; nor at a temperature that is not
 ///   positive;
-/// - a flux that underflows, of N₂ on an Earth at 30 K (λ ≈ 7,000), loses nothing.
+/// - a flux that underflows, of N₂ on an Earth at 30 K (λ ≈ 7,000), loses nothing, nor does water
+///   at the least subnormal temperature, whose λ is infinite.
 #[test]
 fn the_ice_s_vapour_escapes_by_jeans_s_flux_with_the_exobase_at_the_surface() {
     let (mass, radius) = (
@@ -3011,7 +3025,7 @@ fn the_ice_s_vapour_escapes_by_jeans_s_flux_with_the_exobase_at_the_surface() {
         "Triton at 32.5 K: N₂'s vapour {vapour:.4} Pa, λ {lambda:.2}, loss {loss:.3e} kg over \
          the age"
     );
-    assert!((0.01..0.1).contains(&vapour), "{vapour} Pa");
+    assert!((0.04..0.05).contains(&vapour), "{vapour} Pa");
     assert!((lambda - 109.5).abs() < 0.5, "{lambda}");
     assert!(
         (loss / by_hand - 1.0).abs() < 1e-12,
@@ -3036,6 +3050,11 @@ fn the_ice_s_vapour_escapes_by_jeans_s_flux_with_the_exobase_at_the_surface() {
         SOLAR_AGE,
     );
     assert_same_bits(earth.unwrap().value(), 0.0);
+    // 2⁻¹⁰⁷⁴, the least subnormal.
+    let subnormal = Kelvin::new(f64::MIN_POSITIVE * f64::EPSILON);
+    assert!(jeans_parameter(mass, radius, Gas::Water, subnormal).is_infinite());
+    let bound = ice_vapour_escape(mass, radius, Gas::Water, subnormal, SOLAR_AGE);
+    assert_same_bits(bound.unwrap().value(), 0.0);
 }
 
 /// Rule (b) leaves small bodies their loss (Schaller and Brown 2007, Fig. 1): a Kuiper-belt body

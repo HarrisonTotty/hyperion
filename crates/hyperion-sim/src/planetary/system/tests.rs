@@ -3448,7 +3448,54 @@ fn the_published_surface_conditions_are_pinned() {
         }
     }
     assert!(pinned > 20, "{pinned}");
+    pin_remnant_crust(&mut w, "41ffecb200000005", "41ffecb200000005.e605");
     golden!("planetary/surface_conditions_published", w.as_str());
+}
+
+/// Pins the `H2O` solid entry of the record `body` of the sample's system `system`, a remnant's ice
+/// bulk on an ice-rich crust, by bits: its area, reservoir and layer, the crust's frozen water a
+/// past runaway leaves it (P14.T54.a's C0c; decision-p14-t54a-ganymede, "Remnant ice-bulk bodies'
+/// water"). `41ffecb200000005.e605`, at 3.2 K about its host's remnant, lies beyond the systems
+/// [`the_published_surface_conditions_are_pinned`] reads.
+fn pin_remnant_crust(w: &mut hyperion_testkit::golden::GoldenWriter, system: &str, body: &str) {
+    use crate::planetary::chem::partition::CondensatePhase;
+    use crate::planetary::derive::atmosphere::SurfaceMaterial;
+    let (ctx, generated) = whole()
+        .iter()
+        .find(|(ctx, _)| ctx.id().to_string() == system)
+        .unwrap_or_else(|| panic!("{system} is in the sample"));
+    let snapshot = generated.snapshot_at(ctx, UniverseTime::EPOCH);
+    let record = snapshot
+        .bodies()
+        .iter()
+        .find(|record| record.identity().id().to_string() == body)
+        .unwrap_or_else(|| panic!("{body} is in its system"));
+    let Section::Ok(surface) = record.surface() else {
+        panic!("{body} has a surface");
+    };
+    assert_eq!(surface.material(), SurfaceMaterial::Ice, "{body}");
+    assert_eq!(
+        surface.figures().impactors().crust(),
+        Crust::IceRich,
+        "{body}"
+    );
+    let entry = surface
+        .condensates()
+        .entry(Gas::Water.substance(), CondensatePhase::Solid)
+        .unwrap_or_else(|| panic!("{body} lists its crust's water"));
+    assert!(entry.area_fraction() > 0.0, "{body}: {entry:?}");
+    w.line(&format!("{body}_state = {:?}", surface.state()));
+    w.line(&format!("{body}_crust = {:?}", Crust::IceRich));
+    w.f64(
+        &format!("{body}_h2o_solid_area_fraction"),
+        entry.area_fraction(),
+    );
+    w.f64(
+        &format!("{body}_h2o_solid_reservoir_kg_m2"),
+        entry.reservoir().value(),
+    );
+    let layer = entry.reservoir_gel().expect("ice Ih's density is read");
+    w.f64(&format!("{body}_h2o_solid_reservoir_gel_m"), layer.value());
 }
 
 /// P14.T48.d's published climate regime over the sample: every published body has one, read from

@@ -277,7 +277,7 @@ fn radius_temperature_and_envelope_are_continuous_in_time() {
 fn radius_temperature_and_envelope_are_continuous_over_the_whole_window() {
     let steps = continuity_steps(window());
     eprintln!("{steps} yearly steps compared");
-    assert!(steps > 50_000, "{steps}");
+    assert!(steps > 1_100_000, "{steps}");
 }
 
 /// The continuity tests' body: every planet of the 60 systems sampled at each of two ages, derived

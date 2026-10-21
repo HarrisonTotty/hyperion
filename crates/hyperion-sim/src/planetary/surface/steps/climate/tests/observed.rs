@@ -187,7 +187,9 @@ impl Observed {
 /// ruled form's prototype gave 1.09 and −0.83, as built 0.18 and −0.38; observed 0.35–1.1 and
 /// −0.73 (−0.83 with NCEP's evaporation scaled by 0.944). The prototype's figures printed beside
 /// the model are its `runs/obs_weighting3.txt` (the "zonal monthly narrow0.424" line, in
-/// `rm45-scratch/decision-r09-t13i/`), which the test reproduces to the printed digits.
+/// `rm45-scratch/decision-r09-t13i/`), which the test reproduced to the printed digits at version
+/// 22's air. From P14.T54.a's 23 air (T49.b's `c_p(T)`, and the fixture's water at 0.77 of its
+/// saturation) the model gives a JJA mean of 1.15 and an annual E − P of −0.89 mm/day.
 ///
 /// It prints the other windows (on observed temperatures the energy-flux equator stays north all
 /// year, so 15–35° N is no fair window), each month's energy-flux equator and centre, and the

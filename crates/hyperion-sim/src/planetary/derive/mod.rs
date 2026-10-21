@@ -1974,7 +1974,9 @@ pub(crate) mod solar {
     pub(crate) const SOLAR_AGE: Years = Years::new(4.57e9);
 
     /// The eight planets: name, mass (kg), volumetric mean radius (km), semi-major axis (au) and
-    /// eccentricity, from NASA's planetary fact sheets.
+    /// eccentricity, from NASA's planetary fact sheets. Saturn's 9.5826 au (1,433.53 × 10⁶ km) is
+    /// an edition before the sheet's update of 18 March 2025, which gives 1,432.041 × 10⁶ km,
+    /// 9.5726 au; the table keeps it.
     pub(crate) const PLANETS: [(&str, f64, f64, f64, f64); 8] = [
         ("Mercury", 0.330_10e24, 2_439.7, 0.387_098, 0.205_630),
         ("Venus", 4.867_3e24, 6_051.8, 0.723_332, 0.006_772),

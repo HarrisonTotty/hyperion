@@ -2776,7 +2776,7 @@ impl ZonalProfile {
     /// The points strictly between the ends of a profile with modes under the transport
     /// `transport`, each solved by [`zonal_point_newton`] at the table `table`'s insolation and
     /// Legendre values, of the profile's own obliquity (the tests may switch the table off,
-    /// [`with_table_reads`]).
+    /// `with_table_reads`).
     #[must_use]
     fn inner_points(&self, transport: &ZonalTransport, table: &ZonalInsolation) -> Vec<(f64, f64)> {
         #[cfg(test)]

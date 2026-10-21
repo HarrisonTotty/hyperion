@@ -2675,9 +2675,13 @@ mod tests {
         assert!(
             ganymede
                 .iter()
-                .all(|&(lambda, kept)| !kept && lambda < 25.0)
+                .all(|&(lambda, kept)| !kept && lambda < JEANS_RETENTION_THRESHOLD)
         );
-        assert!(titan.iter().all(|&(lambda, kept)| kept && lambda >= 25.0));
+        assert!(
+            titan
+                .iter()
+                .all(|&(lambda, kept)| kept && lambda >= JEANS_RETENTION_THRESHOLD)
+        );
         let edge = |lambda: f64| EXOBASE_MULTIPLE * lambda / JEANS_RETENTION_THRESHOLD;
         let lower = edge(ganymede.iter().map(|&(l, _)| l).fold(0.0, f64::max));
         let upper = edge(titan.iter().map(|&(l, _)| l).fold(f64::INFINITY, f64::min));
@@ -2763,10 +2767,13 @@ mod tests {
                     "{at}"
                 );
                 // The ice holds an ice crust's water and nitrogen alone, where Jeans's test fails
-                // them, and nothing of a rock bulk's (decision-p14-t54a-ganymede, C0 follow-up).
+                // them, with methane where it holds the nitrogen, and nothing of a rock bulk's
+                // (decision-p14-t54a-ganymede, C0 follow-up).
                 for gas in Gas::ALL {
                     if held.retains(gas) {
-                        assert!(matches!(gas, Gas::Water | Gas::Nitrogen), "{at}");
+                        let alone = matches!(gas, Gas::Water | Gas::Nitrogen);
+                        let methane = gas == Gas::Methane && held.retains(Gas::Nitrogen);
+                        assert!(alone || methane, "{at}");
                         assert!(!escape.retains(gas), "{at}");
                     }
                 }
@@ -2826,7 +2833,7 @@ mod tests {
     /// Decision-p14-t54a-ganymede, C0 follow-up, rule (b): at every radius rank the measured
     /// Ganymede, Callisto and Titan, ice crusts whose water fails Jeans's test at the exobase
     /// (λ(H₂O) = 0.643 λ(N₂), under 20 on all three), hold their water as ice: their ice's vapour
-    /// at their equilibrium temperatures, 74.2–78.2 K, is some 10⁻²⁴–10⁻²² Pa, so it loses under
+    /// at their equilibrium temperatures, 74.2–78.2 K, is some 10⁻²³–10⁻²¹ Pa, so it loses under
     /// 10⁻²⁴ kg over the age, the air's column holds the whole inventory and the partition lists it
     /// as a solid. Ganymede's and Callisto's N₂ stays lost: its saturated vapour at their 78.2 K is
     /// 1.1 bar (N₂ boils at 77.36 K under one atmosphere, Span et al. 2000), a bulk air, which
@@ -2861,10 +2868,12 @@ mod tests {
                 let partition = passes_partition(&derived);
                 let ice = partition.condensate(Gas::Water.substance());
                 let nitrogen = saturation_pressure(Gas::Nitrogen.substance(), t).unwrap();
+                let vapour = saturation_pressure(Gas::Water.substance(), t).unwrap();
                 let at = format!(
-                    "{name} at {rank:?}, T_eq {:.2} K: water's loss {:.3e} of {:.3e} kg, N₂'s \
-                     vapour {:.3e} Pa, water {ice:?}",
+                    "{name} at {rank:?}, T_eq {:.2} K: water's vapour {:.3e} Pa and loss {:.3e} \
+                     of {:.3e} kg, N₂'s vapour {:.3e} Pa, water {ice:?}",
                     t.value(),
+                    vapour.value(),
                     loss.value(),
                     water.value(),
                     nitrogen.value()
@@ -3807,6 +3816,11 @@ mod tests {
         assert_eq!(air.state(), SurfaceState::Airless);
         assert!(air.ice_held().retains(Gas::Nitrogen), "{air:?}");
         assert!(air.retention().retains(Gas::Methane), "{air:?}");
+        // The ice holds the methane beside the nitrogen, and neither passes the bulk-air test.
+        assert!(air.ice_held().retains(Gas::Methane), "{air:?}");
+        for gas in [Gas::Nitrogen, Gas::Methane] {
+            assert!(!air.retains_against_escape(gas), "{gas:?}: {air:?}");
+        }
         let nitrogen = partition
             .condensate(Gas::Nitrogen.substance())
             .expect("Triton's ice holds its nitrogen");
