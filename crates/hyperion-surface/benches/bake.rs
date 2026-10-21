@@ -19,6 +19,14 @@
 //! never runs them: `just bench -- bake/patch`. Every `bake/patch_65` case skips the horizon map,
 //! as T6.a measured it.
 //!
+//! `bake/patch_65/moon-<age>-<level>/maturity` and `/no-maturity` are R10.T1.c's client half's
+//! cost (decision-r10-t1c-client-scope §1.3): the weathered Moon-like world on its 4.4, 3.5 and
+//! 1 Gyr surfaces (N(>1 km) 0.05, 4.8 × 10⁻³ and 8.4 × 10⁻⁴ per km²), at maturity 1 and the
+//! Moon's rate, baked with the weights and so with its maturity layer, and the same world without
+//! the header's maturity, which bakes none, at the scope probe's place, direction (0.3, 1, 0.2),
+//! at levels 6, 10 and 14 and the band limit's, each warm from a first bake of the patch. The
+//! layer's added cost is the difference, against the ruling's 10 ms a patch (40 ms fails).
+//!
 //! `bake/horizon/<world>-<level>/<case>` bakes the same patches with the horizon map
 //! (`HorizonLayer::Baked`) and without it, with the weights, at the low setting, so that the map's
 //! cost is the difference, against the plan's quarter of the 40 ms (R10.T8.a): `without` and
@@ -40,16 +48,21 @@ mod bench {
     use criterion::Criterion;
     use hyperion_base::math;
     use hyperion_base::rng::DetailSeed;
+    use hyperion_base::units::{Gigayears, PerSquareKilometre};
     use hyperion_surface::bake::{HorizonLayer, TerrainBakeOptions, WeightsLayer, bake_terrain};
     use hyperion_surface::cube::{PatchKey, SampleGrid, unit_dir};
     use hyperion_surface::field::{
         CoarseField, Cover, CoverRange, FieldView, PartialField, ResolutionCode, cell_at_index,
         cell_index,
     };
+    use hyperion_surface::geometry::BAND_LIMIT_M;
     use hyperion_surface::patch::{BakeOptions, NormalScale, VertexPath};
     use hyperion_surface::synth::channels::{ChannelBody, deepest_level};
-    use hyperion_surface::synth::{SynthCache, Synthesiser};
-    use hyperion_surface::testing::{SyntheticWorld, synthetic_field};
+    use hyperion_surface::synth::levels::shortest_wavelength;
+    use hyperion_surface::synth::{BandLevel, SynthCache, Synthesiser};
+    use hyperion_surface::testing::{
+        SyntheticWorld, moon_like_builder, moon_like_crater_params, synthetic_field,
+    };
     use hyperion_surface::wire::{decode_payload, encode_payload};
 
     /// The detail seed, R09's `synth` bench's.
@@ -227,7 +240,70 @@ mod bench {
                 });
             }
         }
+        weathered_cases(&mut group);
         group.finish();
+    }
+
+    /// The scope probe's place, at which R10.T1.c's maturity layer was first costed.
+    const PROBE_DIR: [f64; 3] = [0.3, 1.0, 0.2];
+
+    /// The Moon-like world on a surface `age` Gyr old of N(>1 km) `n_1km` per km², weathered at
+    /// maturity 1 and the Moon's rate, and the same world without the header's maturity.
+    fn weathered_pair(age: f64, n_1km: f64) -> (CoarseField, CoarseField) {
+        let builder = || {
+            moon_like_builder()
+                .surface_age(Gigayears::new(age))
+                .crater_params(moon_like_crater_params(PerSquareKilometre::new(n_1km)))
+        };
+        (
+            builder().maturity(1.0).weathering_rate(1.0).build(),
+            builder().build(),
+        )
+    }
+
+    /// The shallowest band level whose shortest wavelength on `field`'s figure is the band limit,
+    /// from which the maturity's cut keeps every octave.
+    fn band_limit_level(field: &CoarseField) -> u8 {
+        let figure = field.header().figure();
+        (0..=hyperion_surface::cube::MAX_LEVEL)
+            .find(|&n| {
+                let level = BandLevel::new(n).expect("a quadtree level is a band level");
+                shortest_wavelength(&figure, level).value() <= BAND_LIMIT_M
+            })
+            .expect("a body's finest levels reach the band limit")
+    }
+
+    /// `bake/patch_65/moon-<age>-<level>/maturity` and `/no-maturity` (the module documentation).
+    fn weathered_cases(
+        group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    ) {
+        let opts = TerrainBakeOptions {
+            patch: LOW,
+            weights: WeightsLayer::Baked,
+            horizon: HorizonLayer::Skipped,
+        };
+        for (age, n_1km) in [("4.4", 0.05), ("3.5", 4.8e-3), ("1", 8.4e-4)] {
+            let (weathered, plain) =
+                weathered_pair(age.parse().expect("a stated age is a number"), n_1km);
+            let limit = band_limit_level(&weathered);
+            for level in [6, 10, 14, limit] {
+                let key = PatchKey::containing(level, unit_dir(PROBE_DIR)).expect("a level");
+                for (case, field, layer) in [
+                    ("maturity", &weathered, 65 * 65),
+                    ("no-maturity", &plain, 0),
+                ] {
+                    let view = client(field, key);
+                    let synth = Synthesiser::new(&view, SEED);
+                    let mut warm = SynthCache::new();
+                    let first = bake_terrain(&synth, &mut warm, key, &opts, &[]).expect("held");
+                    assert!(first.layers().is_complete(), "the patch is surveyed");
+                    assert_eq!(first.layers().maturity().len(), layer, "{case}");
+                    group.bench_function(format!("moon-{age}-{level}/{case}"), |b| {
+                        b.iter(|| black_box(bake_terrain(&synth, &mut warm, key, &opts, &[])));
+                    });
+                }
+            }
+        }
     }
 
     /// The patch's eight neighbours at its level on its face, those that exist.

@@ -7,7 +7,9 @@
 //! heights and gradients ([`Synthesiser::bake_patch`], the structural octaves' lattice covered once
 //! for the patch first), and extended with [`TerrainLayers`]: the class palette and weights
 //! (R10.T2's [`weights_at`](crate::material::weights_at), at each vertex, from the height the bake
-//! has made there), the survey mask, the patch's bound and σ, the horizon map (R10.T8.a's
+//! has made there), the ground's maturity at the patch's level and its parent's (R10.T1.c's
+//! [`patch_maturity`], at each vertex with weights, after them and through the same cache), the
+//! survey mask, the patch's bound and σ, the horizon map (R10.T8.a's
 //! [`horizon`] module, from the bake's own heights and the ground beyond the patch), and R11's
 //! layers through [`BakeHook`]. Normals are at R05's
 //! [`NormalScale`](crate::patch::NormalScale), which the worker packs as `rg16float` (R05's Design
@@ -37,9 +39,9 @@
 //! # Determinism
 //!
 //! Every value is a pure function of the view's cells, the body's detail seed and the patch: the
-//! same bytes in any order of bakes and from any cache, on every target. The weights are
-//! presentation (the plan's Generator version section); nothing is drawn from a stream, so the
-//! module opens no domain tag.
+//! same bytes in any order of bakes and from any cache, on every target. The weights and the
+//! maturity are presentation (the plan's Generator version section); nothing is drawn from a
+//! stream, so the module opens no domain tag.
 
 pub mod horizon;
 mod layers;
@@ -54,12 +56,12 @@ pub use horizon::{
     WORDS_PER_TEXEL, ZENITH_TOLERANCE, decode_horizon, encode_horizon, far_field_point,
     grid_azimuth,
 };
-pub use layers::{SURVEYED, TerrainLayers, UNSURVEYED};
+pub use layers::{SURVEYED, TerrainLayers, UNSURVEYED, decode_maturity, encode_maturity};
 
 use crate::cube::{PATCH_QUADS, PatchKey};
 use crate::field::ResolutionCode;
 use crate::height::HeightSample;
-use crate::material::{MAX_CLASSES, kept_omitted_rms, weights_with_sample};
+use crate::material::{MAX_CLASSES, kept_omitted_rms, patch_maturity, weights_with_sample};
 use crate::num;
 use crate::patch::{BakeOptions, HeightSource, PATCH_VERTICES, PatchBake, bake_with_heights};
 use crate::reading::SurveyView;
@@ -176,30 +178,34 @@ pub fn bake_terrain<F: SurveyView>(
     // Whether every height was the view's own, before the weights' reads.
     let heights_complete = complete;
 
-    let (palette, weights) = match opts.weights {
+    let (palette, weights, maturity) = match opts.weights {
         WeightsLayer::Baked => {
             let mut vertices = Vec::with_capacity(survey_mask.len());
+            // Each vertex's direction where it has weights, for the maturity.
+            let mut taken = Vec::with_capacity(survey_mask.len());
             for (n, sample) in heights.samples().iter().enumerate() {
-                let weights = if reference[n] {
-                    None
+                let (weights, dir) = if reference[n] {
+                    (None, None)
                 } else {
                     let dir = vertex_dir(key, n);
                     match weights_with_sample(synth, cache, dir, level, sample) {
-                        Ok(weights) => Some(weights),
+                        Ok(weights) => (Some(weights), Some(dir)),
                         Err(e) if survey_mask[n] == SURVEYED => return Err(e),
                         Err(_) => {
                             // Outside the survey, where the view lacks a cell the weights read:
                             // none, until a block brings it.
                             complete = false;
-                            None
+                            (None, None)
                         }
                     }
                 };
                 vertices.push(weights);
+                taken.push(dir);
             }
-            layers::gather(&vertices)
+            let (palette, weights) = layers::gather(&vertices);
+            (palette, weights, maturity_layer(synth, cache, key, &taken)?)
         }
-        WeightsLayer::Skipped => ([None; MAX_CLASSES], Vec::new()),
+        WeightsLayer::Skipped => ([None; MAX_CLASSES], Vec::new(), Vec::new()),
     };
     let sigma = sigma(synth, cache, key, level, &survey_mask)?;
     let horizon = match opts.horizon {
@@ -213,6 +219,7 @@ pub fn bake_terrain<F: SurveyView>(
     let layers = TerrainLayers {
         palette,
         weights,
+        maturity,
         survey_mask,
         horizon,
         bound: Metres::new(synth.level_bound_m(level)),
@@ -221,6 +228,34 @@ pub fn bake_terrain<F: SurveyView>(
         extra,
     };
     Ok(TerrainBake { patch, layers })
+}
+
+/// The patch's maturity layer ([`TerrainLayers::maturity`]): each vertex's pair of
+/// [`patch_maturity`] at the directions `taken` gives the vertices with weights, encoded against
+/// the header's `m_body`, or empty where the header carries none.
+///
+/// # Errors
+///
+/// [`QueryHeightError::NotSurveyed`] where the view does not hold a taken vertex's coarse cell,
+/// which its weights have read already.
+fn maturity_layer<F: SurveyView>(
+    synth: &Synthesiser<'_, F>,
+    cache: &mut SynthCache,
+    key: PatchKey,
+    taken: &[Option<[f64; 3]>],
+) -> Result<Vec<[u8; 2]>, QueryHeightError> {
+    let Some(pairs) = patch_maturity(synth, cache, key, taken)? else {
+        return Ok(Vec::new());
+    };
+    let background = synth
+        .field()
+        .header()
+        .maturity()
+        .expect("a patch's maturity is the header's");
+    Ok(pairs
+        .iter()
+        .map(|pair| pair.map(|m| encode_maturity(m, background)))
+        .collect())
 }
 
 /// R05's `u8` level of a patch as R09's band level.

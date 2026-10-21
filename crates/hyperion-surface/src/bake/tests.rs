@@ -3,8 +3,10 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::sync::OnceLock;
 
-use hyperion_testkit::float::{bits, bits_f32};
+use hyperion_base::units::{Gigayears, PerSquareKilometre};
+use hyperion_testkit::float::{assert_same_bits, bits, bits_f32};
 use hyperion_testkit::lcg::Lcg;
 use hyperion_testkit::order::assert_order_independent;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -14,12 +16,13 @@ use super::*;
 use crate::cube::{Face, FaceUv, face_uv_to_xyz, st_to_uv, unit_dir};
 use crate::field::{CoarseField, Cover, CoverRange, FieldView, PartialField, cell_index};
 use crate::material::{
-    ClassWeights, GroundMaterial, MAX_CLASSES, MaterialClass, WEIGHT_TOTAL, weights_at,
+    ClassWeights, GroundMaterial, MAX_CLASSES, MaterialClass, WEIGHT_TOTAL, maturity_at_level,
+    weights_at,
 };
 use crate::patch::normals::decode_octahedral;
 use crate::patch::{NormalScale, VertexPath, bake_patch};
 use crate::synth::test_support::{SEED, random_cells, rim_cells, world};
-use crate::testing::SyntheticWorld;
+use crate::testing::{SyntheticWorld, moon_like_builder, moon_like_crater_params};
 use crate::wire::{decode_payload, encode_payload};
 
 /// The options most tests bake with: the low setting's, mesh normals and the weights.
@@ -49,9 +52,10 @@ pub(super) fn code(metres: f64) -> ResolutionCode {
     ResolutionCode::from_resolution(Metres::new(metres)).unwrap()
 }
 
-/// The payload's blocks of `cells` of `w`, each surveyed at `code_of`'s code, with their margin.
+/// The payload's blocks of `cells` of `field`, each surveyed at `code_of`'s code, with their
+/// margin.
 fn blocks(
-    w: SyntheticWorld,
+    field: &CoarseField,
     cells: &BTreeSet<PatchKey>,
     code_of: impl Fn(PatchKey) -> ResolutionCode,
 ) -> Vec<crate::wire::DecodedBlock> {
@@ -63,7 +67,7 @@ fn blocks(
             .map(|&(i, c)| CoverRange::new(i, i + 1, code_of(c)).unwrap()),
     )
     .unwrap();
-    decode_payload(&encode_payload(world(w), &cover, None)).unwrap()
+    decode_payload(&encode_payload(field, &cover, None)).unwrap()
 }
 
 /// A client's field of `w` holding `cells`, each surveyed at `code_of`'s code, with their margin.
@@ -72,7 +76,17 @@ pub(super) fn client(
     cells: &BTreeSet<PatchKey>,
     code_of: impl Fn(PatchKey) -> ResolutionCode,
 ) -> PartialField {
-    let blocks = blocks(w, cells, code_of);
+    client_of(world(w), cells, code_of)
+}
+
+/// A client's field of `field` holding `cells`, each surveyed at `code_of`'s code, with their
+/// margin.
+pub(super) fn client_of(
+    field: &CoarseField,
+    cells: &BTreeSet<PatchKey>,
+    code_of: impl Fn(PatchKey) -> ResolutionCode,
+) -> PartialField {
+    let blocks = blocks(field, cells, code_of);
     let mut client = PartialField::new(blocks[0].header().unwrap().clone());
     for block in &blocks {
         client.insert(block).unwrap();
@@ -135,6 +149,8 @@ fn bake_bits(bake: &TerrainBake) -> Vec<u64> {
         })
     }));
     out.extend(l.weights().iter().flatten().map(|&b| u64::from(b)));
+    out.push(u64::try_from(l.maturity().len()).unwrap());
+    out.extend(l.maturity().iter().flatten().map(|&b| u64::from(b)));
     out.extend(l.survey_mask().iter().map(|&b| u64::from(b)));
     out.extend(l.horizon().near_words().iter().map(|&w| u64::from(w)));
     out.extend(l.horizon().far_words().iter().map(|&w| u64::from(w)));
@@ -398,7 +414,7 @@ fn bake_a_block_of_new_cells_changes_nothing_at_a_vertex_surveyed_before_it() {
         .map(|(i, j)| PatchKey::new(Face::PosY, coarse, i, j).unwrap())
         .into_iter()
         .collect();
-    for block in &blocks(w, &beside, |_| code(10.0)) {
+    for block in &blocks(world(w), &beside, |_| code(10.0)) {
         view.insert(block).unwrap();
     }
     let synth = Synthesiser::new(&view, SEED);
@@ -851,4 +867,206 @@ fn bake_palette_past_eight_keeps_the_heaviest_and_makes_each_vertex_whole_again(
     let (palette, bytes) = layers::gather(&vertices);
     assert_eq!(palette[..2], [Some(all[0]), Some(all[2])]);
     assert_eq!(bytes[0][..3], [126, 129, 0]);
+}
+
+// ---- R10.T1.c's client half: the maturity layer (decision-r10-t1c-client-scope §2.5) ----
+
+/// The low setting's bake without the horizon map, which the maturity's tests do not read.
+const MESH_ALONE: TerrainBakeOptions = TerrainBakeOptions {
+    horizon: HorizonLayer::Skipped,
+    ..MESH
+};
+
+/// The weathered Moon-like world on its 1 Gyr surface (N(>1 km) 8.4 × 10⁻⁴) at maturity 1 and
+/// the Moon's rate, the ruling's look fixture's world, and the same world without a maturity:
+/// built once per test process.
+fn weathered_pair() -> &'static (CoarseField, CoarseField) {
+    static WORLDS: OnceLock<(CoarseField, CoarseField)> = OnceLock::new();
+    WORLDS.get_or_init(|| {
+        let builder = || {
+            moon_like_builder()
+                .surface_age(Gigayears::new(1.0))
+                .crater_params(moon_like_crater_params(PerSquareKilometre::new(8.4e-4)))
+        };
+        (
+            builder().maturity(1.0).weathering_rate(1.0).build(),
+            builder().build(),
+        )
+    })
+}
+
+/// The patches the maturity's bake tests read: the level-12 patch at the scope probe's place, its
+/// neighbour across its u edge, its parent and two of its children.
+fn maturity_keys() -> [PatchKey; 5] {
+    let key = PatchKey::containing(12, unit_dir([0.3, 1.0, 0.2])).unwrap();
+    let [child, _, _, other] = key.children();
+    [
+        key,
+        key.edge_neighbour(crate::cube::Edge::UMax),
+        key.parent().unwrap(),
+        child,
+        other,
+    ]
+}
+
+/// A client's field of `field` holding the coarse cells under each of `keys`, surveyed at 20 m,
+/// with their margin.
+fn maturity_view(field: &CoarseField, keys: &[PatchKey]) -> PartialField {
+    let cells = keys.iter().flat_map(|&k| cells_under(field, k)).collect();
+    client_of(field, &cells, |_| code(20.0))
+}
+
+/// Test 2: the maturity layer is the same bytes in any order of bakes and from any cache, on the
+/// weathered world, where its codes are not all the background's.
+#[test]
+fn bake_maturity_is_the_same_bytes_in_any_order_and_from_any_cache() {
+    let (weathered, _) = weathered_pair();
+    let keys = maturity_keys();
+    let view = maturity_view(weathered, &keys);
+    let synth = Synthesiser::new(&view, SEED);
+    let warm = RefCell::new(SynthCache::new());
+    assert_order_independent(&keys, |&k| {
+        bake_bits(&bake_terrain(&synth, &mut warm.borrow_mut(), k, &MESH_ALONE, &[]).unwrap())
+    });
+    for &k in &keys {
+        let cold = bake_terrain(&synth, &mut SynthCache::new(), k, &MESH_ALONE, &[]).unwrap();
+        let warmed = bake_terrain(&synth, &mut warm.borrow_mut(), k, &MESH_ALONE, &[]).unwrap();
+        assert_eq!(bake_bits(&warmed), bake_bits(&cold), "{k:?}");
+        let maturity = cold.layers().maturity();
+        assert_eq!(maturity.len(), 65 * 65, "{k:?}");
+        assert!(
+            maturity.iter().any(|&[here, _]| here > 0),
+            "{k:?}: some of the 1 Gyr ground is fresher than its background"
+        );
+    }
+}
+
+/// Test 3: without a maturity the layer is empty and no other byte of the bake moves, the same
+/// world with and without the header's maturity baking the same bytes but the layer's; nor is it
+/// made without the weights; and no synthetic world carries one.
+#[test]
+fn bake_maturity_without_a_maturity_is_empty_and_moves_no_other_byte() {
+    let (weathered, plain) = weathered_pair();
+    let key = maturity_keys()[0];
+    let bake = |field: &CoarseField, opts: &TerrainBakeOptions| {
+        let view = maturity_view(field, &[key]);
+        let synth = Synthesiser::new(&view, SEED);
+        bake_terrain(&synth, &mut SynthCache::new(), key, opts, &[]).unwrap()
+    };
+    let with = bake(weathered, &MESH);
+    let without = bake(plain, &MESH);
+    assert_eq!(with.layers().maturity().len(), 65 * 65);
+    assert_eq!(without.layers().maturity(), [] as [[u8; 2]; 0]);
+    let mut stripped = with.clone();
+    stripped.layers.maturity.clear();
+    assert_eq!(bake_bits(&stripped), bake_bits(&without));
+    let skipped = TerrainBakeOptions {
+        weights: WeightsLayer::Skipped,
+        ..MESH
+    };
+    let unweighted = bake(weathered, &skipped);
+    assert_eq!(unweighted.layers().maturity(), [] as [[u8; 2]; 0]);
+    assert_eq!(unweighted.patch(), with.patch());
+    assert_eq!(unweighted.layers().horizon(), with.layers().horizon());
+    for &w in SyntheticWorld::ALL {
+        assert_eq!(world(w).header().maturity(), None, "{w:?}");
+    }
+}
+
+/// Each vertex's pair of codes is the point rule's at its direction at the patch's level and at
+/// its parent's ([`maturity_at_level`]), encoded against `m_body`, inside the survey and over its
+/// edge, and a vertex without weights is the background's, code 0, for both.
+#[test]
+fn bake_maturity_is_each_vertex_s_point_rule_at_its_level_and_its_parent_s() {
+    let (weathered, _) = weathered_pair();
+    let background = weathered.header().maturity().unwrap();
+    let key = maturity_keys()[0];
+    let inside = maturity_view(weathered, &[key]);
+    let (_, edge, surveyed) = straddling();
+    let over_the_edge = client_of(weathered, &surveyed, |_| code(50.0));
+    let (mut fresh, mut without) = (0, 0);
+    for (view, key) in [(&inside, key), (&over_the_edge, edge)] {
+        let synth = Synthesiser::new(view, SEED);
+        let mut cache = SynthCache::new();
+        let bake = bake_terrain(&synth, &mut cache, key, &MESH_ALONE, &[]).unwrap();
+        let layers = bake.layers();
+        let level = BandLevel::new(key.level()).unwrap();
+        let parent = BandLevel::new(key.level() - 1).unwrap();
+        for k in 0..=64_u8 {
+            for (x, y) in [(k, k), (64 - k, k)] {
+                let n = usize::from(y) * 65 + usize::from(x);
+                let pair = layers.maturity()[n];
+                if layers.weights()[n] == [0; MAX_CLASSES] {
+                    assert_eq!(pair, [0, 0], "{key:?} ({x}, {y})");
+                    without += 1;
+                    continue;
+                }
+                let uv = vertex_uv(key, x, y);
+                assert_eq!(
+                    unit_dir(face_uv_to_xyz(uv)).map(bits),
+                    key.vertex_dir(x, y).map(bits)
+                );
+                let mut at = |band: BandLevel| {
+                    let m = maturity_at_level(&synth, &mut cache, uv, band)
+                        .unwrap()
+                        .unwrap();
+                    encode_maturity(m, background)
+                };
+                assert_eq!(pair, [at(level), at(parent)], "{key:?} ({x}, {y})");
+                fresh += usize::from(pair[0] > 0);
+            }
+        }
+    }
+    assert!(
+        fresh > 0,
+        "some vertex's ground is fresher than its background"
+    );
+    assert!(
+        without > 0,
+        "the patch over the survey's edge has vertices without weights"
+    );
+}
+
+/// The layer's codes ([`encode_maturity`], [`decode_maturity`]): 0 at the background and 255 on
+/// fresh ground, each held to the bit; a code within half a step of r = √(D ÷ `m_body`), falling
+/// as the maturity rises; every code's maturity encoding to the code again; and every code 0, each
+/// holding +0, on a background of 0.
+#[test]
+fn bake_maturity_codes_round_trip_and_hold_their_ends() {
+    for background in [1.0, 0.75, 0.3, 1e-6] {
+        assert_eq!(encode_maturity(background, background), 0);
+        assert_eq!(encode_maturity(0.0, background), 255);
+        assert_same_bits(decode_maturity(0, background), background);
+        assert_same_bits(decode_maturity(255, background), 0.0);
+        let mut previous = u8::MAX;
+        for k in 0..=1_000_u32 {
+            let m = background * f64::from(k) / 1_000.0;
+            let code = encode_maturity(m, background);
+            assert!(
+                code <= previous,
+                "{background}: {code} after {previous} at {m}"
+            );
+            previous = code;
+            let r = ((background - m) / background).sqrt();
+            let back = ((background - decode_maturity(code, background)) / background).sqrt();
+            assert!(
+                (back - r).abs() <= 0.5 / 255.0 + 1e-12,
+                "{background}: {m} encodes to {code}, r {back} against {r}"
+            );
+        }
+        for code in 0..=255_u8 {
+            let m = decode_maturity(code, background);
+            assert!(
+                (0.0..=background).contains(&m),
+                "{background}: {code} holds {m}"
+            );
+            assert_eq!(encode_maturity(m, background), code, "{background}: {m}");
+        }
+    }
+    for m in [0.0, -0.0] {
+        assert_eq!(encode_maturity(m, 0.0), 0);
+    }
+    for code in [0, 1, 128, 255] {
+        assert_same_bits(decode_maturity(code, 0.0), 0.0);
+    }
 }
