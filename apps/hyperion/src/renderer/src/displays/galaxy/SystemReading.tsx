@@ -19,6 +19,12 @@ export interface SystemReadingProps {
   readonly symbol?: boolean;
   /** Whether the value is a stale snapshot: muted, with the guide's trailing `S`. */
   readonly stale?: boolean;
+  /**
+   * The width of the value's slot, in characters of its monospaced figures, the value
+   * right-aligned in it, so that a reading whose digits vary keeps its width (§ Numbers); as wide
+   * as its value when absent.
+   */
+  readonly widthCh?: number | undefined;
 }
 
 /**
@@ -36,6 +42,7 @@ export function SystemReading({
   missingWhy,
   symbol = false,
   stale = false,
+  widthCh,
 }: SystemReadingProps) {
   return (
     <>
@@ -50,7 +57,16 @@ export function SystemReading({
           </>
         ) : (
           <span className={stale ? "stale" : undefined}>
-            <span className="system-readout__value">{value}</span>
+            {widthCh === undefined ? (
+              <span className="system-readout__value">{value}</span>
+            ) : (
+              <span
+                className="system-readout__value system-readout__value--fixed"
+                style={{ minWidth: `${widthCh}ch` }}
+              >
+                {value}
+              </span>
+            )}
             {unit === undefined ? null : (
               <>
                 {/* The degree sign is written against the digits; other units after a space. */}

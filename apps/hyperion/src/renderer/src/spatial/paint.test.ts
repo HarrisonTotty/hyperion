@@ -14,6 +14,9 @@ import {
   type ChevronsOp,
   type DrawList,
   type DrawOp,
+  type LineOp,
+  type PolylineOp,
+  SEGMENT_DASH_PX,
   type SymbolOp,
 } from "./drawList";
 import { localFrameAt } from "../geometry/frame";
@@ -1035,4 +1038,97 @@ describe("the destination's chevrons (R07.T16.h; decision-r07-quality-and-destin
 
     expect(paintOps([peg], 0.78125).path).toEqual(paintOps([peg], 2).path);
   });
+});
+
+/** The ratios the line ruling is checked at for a segment: a 0.78125 laptop, 1 and 2. */
+const SEGMENT_RATIOS = [0.78125, 1, 2] as const;
+
+/** A dashed joiner `widthPx` wide, as a segment of the chart's apparent positions is. */
+function joiner(widthPx: number): LineOp {
+  return {
+    kind: "line",
+    from: { xPx: 10, yPx: 10 },
+    to: { xPx: 60, yPx: 30 },
+    stroke: "textMuted",
+    widthPx,
+    markId: null,
+    dashPx: SEGMENT_DASH_PX,
+  };
+}
+
+/** The joiner's line with no dash: a solid segment, or an apparent position's tick. */
+function solid(widthPx: number): LineOp {
+  const { from, to, stroke, markId } = joiner(widthPx);
+  return { kind: "line", from, to, stroke, widthPx, markId };
+}
+
+/** The observer's eye as a polyline at a mark's weight. */
+const EYE: PolylineOp = {
+  kind: "polyline",
+  points: [
+    { xPx: 50, yPx: 36 },
+    { xPx: 57, yPx: 40 },
+    { xPx: 50, yPx: 44 },
+    { xPx: 43, yPx: 40 },
+    { xPx: 50, yPx: 36 },
+  ],
+  stroke: "text",
+  widthPx: 1.5,
+  weight: "mark",
+};
+
+describe("paint's segments (plan 12, P12.T11; decision-thin-line-contrast)", () => {
+  it.each(SEGMENT_RATIOS)(
+    "strokes a dashed line at its width and dash times the line factor, at a ratio of %s",
+    (ratio) => {
+      const factor = lineScale(ratio) / ratio;
+      for (const widthPx of [1, 2]) {
+        const { recorder } = paintOps([joiner(widthPx)], ratio);
+
+        expect(Number(recorder.sets("lineWidth")[0])).toBeCloseTo(widthPx * factor, 12);
+        expect(recorder.calls("setLineDash").map((call) => call.args[0])).toEqual([
+          [SEGMENT_DASH_PX.onPx * factor, SEGMENT_DASH_PX.offPx * factor],
+          [],
+        ]);
+      }
+    },
+  );
+
+  it("draws a dash of 6 and 4 CSS px at 2 device px a CSS px below a ratio of 2", () => {
+    const { recorder } = paintOps([joiner(1)], 1);
+
+    expect(recorder.calls("setLineDash")[0]?.args[0]).toEqual([12, 8]);
+  });
+
+  it("sets the dash before the stroke and clears it after, so no other op inherits it", () => {
+    const { recorder } = paintOps([joiner(1), solid(1)], 1);
+    const order = recorder.records
+      .filter((record) => record.name === "setLineDash" || record.name === "stroke")
+      .map((record) => record.name);
+
+    expect(order).toEqual(["setLineDash", "stroke", "setLineDash", "stroke"]);
+  });
+
+  it("sets no dash for a solid line", () => {
+    const { recorder } = paintOps([solid(1)], 2);
+
+    expect(recorder.calls("setLineDash")).toEqual([]);
+  });
+
+  it("fills the observer's eye above the plane, closed, and leaves it open below", () => {
+    const filled = paintOps([{ ...EYE, fill: "text" }]);
+    const open = paintOps([EYE]);
+
+    expect(filled.recorder.calls("fill")).toHaveLength(1);
+    expect(filled.recorder.calls("closePath")).toHaveLength(1);
+    expect(filled.recorder.sets("fillStyle")).toContain(TOKENS.text);
+    expect(open.recorder.calls("fill")).toHaveLength(0);
+  });
+
+  it.each(SEGMENT_RATIOS)(
+    "strokes the observer's eye at a mark's outline, at a ratio of %s",
+    (ratio) => {
+      expect(firstWidth([EYE], ratio) * ratio).toBeCloseTo(markStrokeDevicePx(ratio), 9);
+    },
+  );
 });

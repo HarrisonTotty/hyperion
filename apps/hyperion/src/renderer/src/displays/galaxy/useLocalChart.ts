@@ -1,7 +1,14 @@
-import type { MassLayer, SystemIdHex } from "@hyperion/protocol";
+import type { MassLayer, SystemIdHex, UniverseIdHex } from "@hyperion/protocol";
 import { useMemo, useState } from "react";
 
-import type { CentreLy, ChartResult, ChartSystem } from "../../lib/galaxy/model";
+import type { DisplayMode } from "../../components/ModeControl";
+import {
+  type CentreLy,
+  type ChartResult,
+  type ChartSystem,
+  NOW_MODE,
+  type QueryMode,
+} from "../../lib/galaxy/model";
 import { linkDownReason, useServerLink } from "../../lib/serverLink";
 import { useUniverse } from "../../lib/universe";
 import type { RequestState } from "../../lib/useServerRequest";
@@ -61,6 +68,25 @@ export interface LocalChartState {
   readonly minLayer: MassLayer;
   readonly driveRangeLy: number;
   readonly timeYr: number;
+  /** The mode the operator chose: `now`, or `observed` from {@link LocalChartState.observerLy}. */
+  readonly displayMode: DisplayMode;
+  /**
+   * The observer, kept across a new centre and dropped with the universe; `null` until the first
+   * `OBSERVED` takes the centre of the chart on show.
+   */
+  readonly observerLy: CentreLy | null;
+  /** The mode the chart is asked in now; the answer on show carries the one it was asked in. */
+  readonly mode: QueryMode;
+  /**
+   * Why `OBSERVED` is held back, such as `NO CARRIER`, or that there is no chart on show to take an
+   * observer from; `null` when it acts.
+   */
+  readonly observedHeldBack: string | null;
+  /**
+   * Why the observer cannot be moved to the chart's centre now, the link's reason or no chart on
+   * show; `null` when it can.
+   */
+  readonly observerMoveHeldBack: string | null;
   /** Decimals every distance on this chart is written with. */
   readonly distanceDecimals: number;
   /** Why the chart's controls are held back, such as `NO CARRIER`; `null` when they act. */
@@ -71,7 +97,24 @@ export interface LocalChartState {
   readonly chooseStarFilter: (filter: StarFilter) => void;
   readonly setDriveRange: (rangeLy: number) => void;
   readonly setTime: (timeYr: number) => void;
+  /**
+   * Chooses the mode: the first `OBSERVED` takes the centre of the chart on show as the observer.
+   * Does nothing while that choice is held back.
+   */
+  readonly chooseMode: (mode: DisplayMode) => void;
+  /** Moves the observer to the centre of the chart on show; does nothing while held back. */
+  readonly moveObserverToCentre: () => void;
   readonly retry: () => void;
+}
+
+/** Why `OBSERVED`, or the observer's move, is held back with no chart on show to observe from. */
+export const NO_CHART_TO_OBSERVE = "NO CHART: centre one to observe from it";
+
+/** The mode the operator chose and the observer, with the universe they were chosen in. */
+interface ModeChoice {
+  readonly universe: UniverseIdHex | null;
+  readonly displayMode: DisplayMode;
+  readonly observerLy: CentreLy | null;
 }
 
 /**
@@ -89,6 +132,13 @@ export interface LocalChartState {
  * P07.T11.c). The scene and the frame keep their identity while nothing they are built from
  * changes, so that an idle chart paints nothing.
  *
+ * The mode and the observer are the chart's too (plan 12, P12.T11), beside the radius and the time:
+ * kept across a new centre and dropped with the universe. The query is asked in the mode, so a
+ * changed mode or observer supersedes the one in flight, as a changed radius does. The first
+ * `OBSERVED` takes the centre of the chart on show as the observer, and with no chart on show it
+ * is held back and says why; the observer moves to that centre on request at any time. Both are
+ * held back while the link is down, as every control that asks the server is.
+ *
  * @param centreLy - The chart centre, which `CENTRE CHART` publishes; `null` until it does.
  */
 export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
@@ -100,16 +150,31 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
   const [timeYr, setTime] = useState(0);
   const [chosenId, setChosenId] = useState<SystemIdHex | null>(null);
   const [starFilter, setStarFilter] = useState<StarFilter>("all");
+  const [modeChoice, setModeChoice] = useState<ModeChoice | null>(null);
   const [generation, setGeneration] = useState(0);
   const [extinctionGeneration, setExtinctionGeneration] = useState(0);
 
+  const universe = open?.id ?? null;
+  // Dropped with the universe it was chosen in, for good: adjusted during render, so that going
+  // back to that universe does not bring it back.
+  let choice = modeChoice;
+  if (choice !== null && choice.universe !== universe) {
+    choice = null;
+    setModeChoice(null);
+  }
+  const displayMode = choice?.displayMode ?? "now";
+  const observerLy = choice?.observerLy ?? null;
+  const mode: QueryMode =
+    displayMode === "observed" && observerLy !== null ? { kind: "observed", observerLy } : NOW_MODE;
+
   const queryRadiusLy = radiusChoiceLy ?? queryRadiusForDriveRange(driveRangeLy);
   const { state, shown: answered } = useRangeQuery({
-    universe: open?.id ?? null,
+    universe,
     centreLy,
     queryRadiusLy,
     minLayer,
     timeYr,
+    mode,
     generation,
   });
 
@@ -117,6 +182,15 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
   const fault = answered === null ? null : chartDataFault(answered);
   const shown = fault === null ? answered : null;
   const heldBack = linkDownReason(status);
+  const shownCentreLy = shown?.centreLy ?? null;
+  let observedHeldBack: string | null = heldBack;
+  if (observedHeldBack === null && observerLy === null && shownCentreLy === null) {
+    observedHeldBack = NO_CHART_TO_OBSERVE;
+  }
+  let observerMoveHeldBack: string | null = heldBack;
+  if (observerMoveHeldBack === null && shownCentreLy === null) {
+    observerMoveHeldBack = NO_CHART_TO_OBSERVE;
+  }
 
   // Filtered once per answer or filter, since the chart's scene is memoised on it.
   const systems = useMemo(
@@ -170,6 +244,11 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
     minLayer,
     driveRangeLy,
     timeYr,
+    displayMode,
+    observerLy,
+    mode,
+    observedHeldBack,
+    observerMoveHeldBack,
     distanceDecimals: distanceDecimalsFor(shown?.radiusLy ?? queryRadiusLy),
     heldBack,
     select: setChosenId,
@@ -178,6 +257,23 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
     chooseStarFilter: setStarFilter,
     setDriveRange,
     setTime,
+    chooseMode: (next) => {
+      if (next === "now") {
+        if (heldBack === null) {
+          setModeChoice({ universe, displayMode: "now", observerLy });
+        }
+        return;
+      }
+      const observer = observerLy ?? shownCentreLy;
+      if (observedHeldBack === null && observer !== null) {
+        setModeChoice({ universe, displayMode: "observed", observerLy: observer });
+      }
+    },
+    moveObserverToCentre: () => {
+      if (observerMoveHeldBack === null && shownCentreLy !== null) {
+        setModeChoice({ universe, displayMode, observerLy: shownCentreLy });
+      }
+    },
     retry: () => {
       setGeneration((count) => count + 1);
     },

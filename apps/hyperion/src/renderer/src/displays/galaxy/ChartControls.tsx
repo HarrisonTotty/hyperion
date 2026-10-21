@@ -2,6 +2,7 @@ import type { MassLayer } from "@hyperion/protocol";
 import { type ReactNode, useEffect, useId, useState } from "react";
 
 import { EarthMassUnit } from "../../components/EarthMassUnit";
+import { type DisplayMode, ModeControl } from "../../components/ModeControl";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { StatusText } from "../../components/StatusText";
 import {
@@ -199,6 +200,28 @@ function NumberField({
   );
 }
 
+/** What the chart's mode controls show and do (plan 12, P12.T11). */
+export interface ChartModeControls {
+  /** The mode chosen. */
+  readonly mode: DisplayMode;
+  readonly onMode: (mode: DisplayMode) => void;
+  /**
+   * Why `OBSERVED` is held back for a reason of its own, such as no chart on show to observe from;
+   * `null` when it acts. The link's reason is the controls' own, shown once above them.
+   */
+  readonly observedHeldBack: string | null;
+  /** Why the observer cannot be moved to the chart's centre, as `observedHeldBack` says it. */
+  readonly moveHeldBack: string | null;
+  /** Moves the observer to the centre of the chart on show. */
+  readonly onMoveObserver: () => void;
+}
+
+/**
+ * The command that moves the observer to the centre of the chart on show: named for what it moves,
+ * so that it is not taken for `CENTRE CHART`, which moves the chart (§ Controls).
+ */
+export const MOVE_OBSERVER_LABEL = "OBSERVER TO CENTRE";
+
 interface ChartControlsProps {
   /** The radius the operator chose, or `null` while it follows the drive range. */
   readonly radiusChoiceLy: number | null;
@@ -230,6 +253,8 @@ interface ChartControlsProps {
    * compact page (the orchestrator's ruling 149.1). `K` still steps the `STARS` filter.
    */
   readonly hidden?: boolean;
+  /** The chart's mode and its observer (plan 12, P12.T11); no mode control when absent. */
+  readonly modes?: ChartModeControls | undefined;
 }
 
 /** The five stellar layers, lightest first, for the mass floors before the first census arrives. */
@@ -290,6 +315,12 @@ const LOWEST_FLOOR: MassLayer = "rogue_planet";
  * `REMNANTS`, from the answer on show: a display control that asks nothing of the server, so it acts
  * with the link down. Its key, `K`, steps to the next filter from anywhere on the page but a text
  * field, and is shown on the group, as the guide asks of a frequent action.
+ *
+ * Last, the chart's mode (plan 12, P12.T11): `NOW` or `OBSERVED` ({@link ModeControl}, its key `M`,
+ * live while the controls are hidden as `K` is), held back with the link as every control that
+ * asks the server is, and `OBSERVED` with no chart on show to observe from. Beside it, in either
+ * mode, `OBSERVER TO CENTRE` moves the observer to the centre of the chart on show, held back with
+ * the link and with no chart on show; in `NOW` it sets where the next `OBSERVED` observes from.
  */
 export function ChartControls({
   radiusChoiceLy,
@@ -306,12 +337,16 @@ export function ChartControls({
   onStarFilter,
   heldBack,
   hidden = false,
+  modes,
 }: ChartControlsProps) {
   const radiusId = useId();
   const floorName = useId();
   const filterName = useId();
   const heldBackId = useId();
+  const moveReasonId = useId();
   const held = heldBack === null ? null : heldBackId;
+  const moveHeld =
+    held ?? (modes === undefined || modes.moveHeldBack === null ? null : moveReasonId);
 
   // The key reaches the selector from anywhere on the chart's page but a text field; the page is
   // under `Activity`, so the listener goes while another page is shown.
@@ -457,6 +492,41 @@ export function ChartControls({
         onEnter={onTime}
         heldBackId={held}
       />
+      {modes === undefined ? null : (
+        <div className="chart-controls__modes">
+          <ModeControl
+            mode={modes.mode}
+            onMode={modes.onMode}
+            heldBackId={held}
+            observedHeldBack={modes.observedHeldBack}
+          />
+          {/*
+           * In both modes, so that `M` never takes it from under the focus and the row never moves;
+           * in `NOW` it sets where the next `OBSERVED` observes from.
+           */}
+          <p className="chart-controls__observer">
+            <button
+              type="button"
+              className="control"
+              // Held back rather than disabled, so that it keeps its focus and can say why.
+              aria-disabled={moveHeld === null ? undefined : "true"}
+              aria-describedby={moveHeld ?? undefined}
+              onClick={() => {
+                if (moveHeld === null) {
+                  modes.onMoveObserver();
+                }
+              }}
+            >
+              {MOVE_OBSERVER_LABEL}
+            </button>
+            {held !== null || modes.moveHeldBack === null ? null : (
+              <span className="chart-controls__observer-reason" id={moveReasonId}>
+                <StatusText text={modes.moveHeldBack} />
+              </span>
+            )}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

@@ -15,6 +15,7 @@ import {
   type MapPopulation,
   type MapView,
   type MassLayer,
+  type ObservedDto,
   type Parameter,
   type ParameterGroup,
   type Population,
@@ -675,10 +676,50 @@ export interface SystemRecordSpec {
    * ROGUE_PLANET_FE_H_DEX} when absent, and none when `null`. Other layers' rows never carry one.
    */
   readonly feHDex?: number | null;
+  /** What the observer receives, for a row answered in observed mode; none when absent. */
+  readonly observed?: ObservedDto;
 }
 
 /** The metallicity a free-floating planet's row carries unless a test gives another, dex. */
 export const ROGUE_PLANET_FE_H_DEX = -0.25;
+
+/** What {@link anObservation} builds. */
+export interface ObservationSpec {
+  /** Where the observer sees the system, in the `GALACTIC` frame. */
+  readonly apparentLy: readonly [number, number, number];
+  /** The light's age, Julian years. */
+  readonly lightAgeYr: number;
+  /** The query's time, years from the epoch, from which the emitted time is the light age back. */
+  readonly timeYr?: number;
+  /**
+   * The stated curvature bound, ly; when absent 1.8E-4 ly, about plan 12's ½·a·Δ² for a disc star
+   * at the solar circle whose light is 4,000 years old (a = v_c² ÷ R, 230 km/s at 26,000 ly): a
+   * fixture's figure, not the sim's.
+   */
+  readonly boundLy?: number;
+  /** The same bound as an angle at the observer, arcsec; 9.3E-3″, the above's from 4,000 ly, when absent. */
+  readonly boundArcsec?: number;
+}
+
+/**
+ * What an observer receives from a system, as an observed row or summary carries it (plan 12,
+ * P12.T6): its light left the light age before the query's time.
+ */
+export function anObservation({
+  apparentLy,
+  lightAgeYr,
+  timeYr = 0,
+  boundLy = 1.8e-4,
+  boundArcsec = 9.3e-3,
+}: ObservationSpec): ObservedDto {
+  return {
+    emitted: universeTimeFromYears(timeYr - lightAgeYr),
+    light_age_yr: lightAgeYr,
+    apparent_position: galacticPositionFromLy(apparentLy),
+    curvature_error_ly: boundLy,
+    curvature_error_arcsec: boundArcsec,
+  };
+}
 
 /** One system of a range query's answer, as a query with `include_stellar` returns it. */
 export function aSystemRecord({
@@ -691,6 +732,7 @@ export function aSystemRecord({
   stellar,
   velocityKmS = [-231.25, 12.5, -7],
   feHDex,
+  observed,
 }: SystemRecordSpec): SystemRecord {
   const [low, high] = BANDS_MSUN[layer];
   const record: SystemRecord = {
@@ -702,6 +744,8 @@ export function aSystemRecord({
     age_myr: ageMyr,
     population,
     velocity_km_s: [...velocityKmS],
+    // Written only in observed mode, as the server writes it.
+    ...(observed === undefined ? {} : { observed }),
   };
   // A row without a brief leaves the key out, as the server writes it; a free-floating planet's
   // never has one unless a test gives it, and carries its metallicity instead.
@@ -796,9 +840,14 @@ export interface RangeRequestSpec {
   readonly minLayer?: MassLayer;
   readonly limit?: number;
   readonly universe?: UniverseIdHex;
+  /** The observer, for a query asked in observed mode; none, in `now`, when absent. */
+  readonly observerLy?: readonly [number, number, number];
 }
 
-/** A `systems_in_range` request, for comparing with what the client sends: with the briefs. */
+/**
+ * A `systems_in_range` request, for comparing with what the client sends: with the briefs, and
+ * with `mode` only when it is observed, as the client writes it.
+ */
 export function aRangeRequest({
   centreLy = [26_000, 0, 0],
   radiusLy = 50,
@@ -806,8 +855,9 @@ export function aRangeRequest({
   minLayer = "a",
   limit = 4_000,
   universe = UNIVERSE_ID,
+  observerLy,
 }: RangeRequestSpec = {}): RequestOf<"systems_in_range"> {
-  return {
+  const request: RequestOf<"systems_in_range"> = {
     kind: "systems_in_range",
     universe,
     centre: galacticPositionFromLy(centreLy),
@@ -817,6 +867,12 @@ export function aRangeRequest({
     limit,
     include_stellar: true,
   };
+  return observerLy === undefined
+    ? request
+    : {
+        ...request,
+        mode: { type: "observed", observer: galacticPositionFromLy(observerLy) },
+      };
 }
 
 /** One system of {@link aSystemsInRange}, placed relative to the centre. */
@@ -830,6 +886,19 @@ export interface RelativeSystemSpec {
   readonly velocityKmS?: readonly [number, number, number];
   /** A free-floating planet's metallicity, as {@link SystemRecordSpec.feHDex} has it. */
   readonly feHDex?: number | null;
+  /** Its age at the query's time, Myr; {@link aSystemRecord}'s default if absent. */
+  readonly ageMyr?: number;
+  /**
+   * What the observer receives, for an answer in observed mode: its light's age and where it shows
+   * the system, as an offset from the centre (the bound's {@link anObservation}'s defaults); none
+   * when absent.
+   */
+  readonly observed?: {
+    readonly lightAgeYr: number;
+    readonly apparentRelLy: readonly [number, number, number];
+    readonly boundLy?: number;
+    readonly boundArcsec?: number;
+  };
 }
 
 /** What {@link aSystemsInRange} builds. */
@@ -864,15 +933,33 @@ export function aSystemsInRange({
   universe = UNIVERSE_ID,
 }: SystemsInRangeSpec = {}): ResponseFor<"systems_in_range"> {
   const returned: Partial<Record<MassLayer, number>> = {};
-  const records = systems.map(({ relLy, layer, stellar, velocityKmS, feHDex }, position) => {
+  const records = systems.map((system, position) => {
+    const { relLy, layer, stellar, velocityKmS, feHDex, ageMyr, observed } = system;
     returned[layer] = (returned[layer] ?? 0) + 1;
+    const offset = (rel: readonly [number, number, number]): [number, number, number] => [
+      centreLy[0] + rel[0],
+      centreLy[1] + rel[1],
+      centreLy[2] + rel[2],
+    ];
     return aSystemRecord({
-      positionLy: [centreLy[0] + relLy[0], centreLy[1] + relLy[1], centreLy[2] + relLy[2]],
+      positionLy: offset(relLy),
       layer,
       index: position + 1,
       ...(stellar === undefined ? {} : { stellar }),
       ...(velocityKmS === undefined ? {} : { velocityKmS }),
       ...(feHDex === undefined ? {} : { feHDex }),
+      ...(ageMyr === undefined ? {} : { ageMyr }),
+      ...(observed === undefined
+        ? {}
+        : {
+            observed: anObservation({
+              apparentLy: offset(observed.apparentRelLy),
+              lightAgeYr: observed.lightAgeYr,
+              timeYr,
+              ...(observed.boundLy === undefined ? {} : { boundLy: observed.boundLy }),
+              ...(observed.boundArcsec === undefined ? {} : { boundArcsec: observed.boundArcsec }),
+            }),
+          }),
     });
   });
   return {

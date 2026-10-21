@@ -107,6 +107,10 @@ interface SystemListProps {
  * `CLASS` says `PLANET` and its `STARS` the em dash, and its mass is in Earth masses (plan 13,
  * design note 14; P13.T8.d). So every mass cell draws its own unit, `M☉` or `M⊕`, and the digits
  * of both line up at the unit.
+ *
+ * A row the chart was answered in observed mode carries its present distance as an Estimated
+ * value, `~2.00`, as the readout does (plan 12, P12.T11), and its class and stars are its brief's,
+ * the primary when the light left; the `DIST ly` column is as wide as that reading with its `~`.
  */
 export function SystemList({
   systems,
@@ -266,7 +270,9 @@ export function SystemList({
               return null;
             }
             const inRange = system.distanceLy <= driveRangeLy;
-            const distance = formatLengthLy(system.distanceLy, distanceDecimals);
+            // The present distance of a system read as observed is Estimated, as the readout's is
+            // (plan 12, P12.T11; § Data states: each state looks the same everywhere).
+            const distance = `${system.observed === null ? "" : "~"}${formatLengthLy(system.distanceLy, distanceDecimals)}`;
             const mass = formatSubstellarMass(system.initialMassMsun, system.layer);
             const massName = mass.unit === "mearth" ? "Earth masses" : "solar masses";
             return (

@@ -10,6 +10,7 @@
  * racing it.
  */
 import {
+  galacticPositionFromLy,
   type MassLayer,
   type RequestOf,
   type ResponseFor,
@@ -26,7 +27,9 @@ import { FakeWebSocket } from "../../test/FakeWebSocket";
 import {
   aCreatedUniverse,
   aDensityMap,
+  anObservation,
   aRangeRequest,
+  aStellarBrief,
   aSystemsInRange,
   aUniverse,
   aUniverseList,
@@ -36,6 +39,12 @@ import {
 import { announcements } from "../../test/liveRegions";
 import { type RecordingContext2D, stubCanvas } from "../../test/RecordingContext2D";
 import { statusLine } from "../../test/statusLine";
+import {
+  aNeutronStar,
+  aRedSupergiant,
+  aSingleStarSummary,
+  aSummaryResponse,
+} from "../../test/systemFixtures";
 
 /** The universe the operator creates: `SURVEY 1` from the seed typed below. */
 const UNIVERSE = aUniverse();
@@ -310,13 +319,38 @@ async function centreChart({ user }: Session): Promise<void> {
   await user.keyboard("c");
 }
 
+/**
+ * How far each system's apparent position lies along +y from its present one in an observed answer,
+ * in the plane so that `TOP` shows it: a fixture's figure, large enough for the joiner to be drawn
+ * at the fitted zoom, as a fast star's seen from far off would be.
+ */
+const APPARENT_SHIFT_LY = 2;
+
+/**
+ * A system as the server answers it to `body`: with what the observer receives in observed mode,
+ * the light's age its distance from the observer, which stands at the chart's centre in this script.
+ */
+function asAsked(
+  body: RequestOf<"systems_in_range">,
+  system: RelativeSystemSpec,
+): RelativeSystemSpec {
+  if (body.mode?.type !== "observed") {
+    return system;
+  }
+  const [x, y, z] = system.relLy;
+  return {
+    ...system,
+    observed: { lightAgeYr: Math.hypot(x, y, z), apparentRelLy: [x, y + APPARENT_SHIFT_LY, z] },
+  };
+}
+
 /** 7. The server answers the range query with forty systems, and the census of them. */
 async function answerQuery({ socket }: Session): Promise<void> {
   await server(() => {
     socket.serverAnswers("systems_in_range", (body) => {
       const kept = FORTY_SYSTEMS.filter(
         (system) => layerIndex(system.layer) >= layerIndex(body.min_layer),
-      );
+      ).map((system) => asAsked(body, system));
       const answer = aSystemsInRange({
         centreLy: CENTRE_LY,
         radiusLy: body.radius_ly,
@@ -360,6 +394,55 @@ async function enterChartTime(session: Session): Promise<void> {
   await answerQuery(session);
 }
 
+/**
+ * The selection's summary as the server answers `body`: a Sun-like star, with what the observer
+ * receives in observed mode, the light's age the selection's distance from the observer.
+ */
+function summaryFor(body: RequestOf<"system_summary">): ResponseFor<"system_summary"> {
+  const summary = {
+    ...aSingleStarSummary(),
+    universe: body.universe,
+    system: body.system,
+    time: body.time,
+  };
+  return aSummaryResponse(
+    body.mode?.type === "observed"
+      ? {
+          ...summary,
+          observed: anObservation({
+            apparentLy: [CENTRE_LY[0] - 2, APPARENT_SHIFT_LY, CENTRE_LY[2]],
+            lightAgeYr: 2,
+            timeYr: CHART_TIME_YR,
+          }),
+        }
+      : summary,
+  );
+}
+
+/** Answers the selection's summary as asked. */
+async function answerSummary({ socket }: Session): Promise<void> {
+  await server(() => {
+    socket.serverAnswers("system_summary", summaryFor);
+  });
+}
+
+/**
+ * 12. `OBSERVED` is chosen, which takes the chart's centre as the observer; the range query asked
+ * from there is answered, and then the selection's summary, which the observed chart asks again.
+ */
+async function observe(session: Session): Promise<void> {
+  await session.user.click(within(chartPage()).getByRole("button", { name: "OBSERVED" }));
+  await answerQuery(session);
+  await answerSummary(session);
+}
+
+/** 13. `NOW` is chosen again, and the range query and the summary are answered in it. */
+async function returnToNow(session: Session): Promise<void> {
+  await session.user.click(within(chartPage()).getByRole("button", { name: "NOW" }));
+  await answerQuery(session);
+  await answerSummary(session);
+}
+
 /** The script, in order, each step named for the state it leaves the console in. */
 const SCRIPT = [
   { stage: "galaxy", play: showGalaxy },
@@ -372,6 +455,8 @@ const SCRIPT = [
   { stage: "top", play: turnToTop },
   { stage: "floored", play: raiseFloor },
   { stage: "timed", play: enterChartTime },
+  { stage: "observed", play: observe },
+  { stage: "unobserved", play: returnToNow },
 ] as const satisfies ReadonlyArray<{
   readonly stage: string;
   readonly play: (session: Session) => Promise<void>;
@@ -571,4 +656,224 @@ describe("the GALAXY display, end to end", { timeout: 300_000 }, () => {
     expect(requestCounts(socket)).toEqual(asked);
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
+
+  it("asks the range query and the selection's summary from the chart's centre once OBSERVED is chosen", async () => {
+    const { socket } = await playTo("observed");
+
+    expect(socket.requestsOfKind("systems_in_range").at(-1)?.body).toEqual(
+      aRangeRequest({
+        centreLy: CENTRE_LY,
+        universe: UNIVERSE.id,
+        timeYr: CHART_TIME_YR,
+        minLayer: "b",
+        observerLy: CENTRE_LY,
+      }),
+    );
+    expect(socket.requestsOfKind("system_summary").at(-1)?.body).toEqual({
+      kind: "system_summary",
+      universe: UNIVERSE.id,
+      system: "0000000000000002",
+      time: universeTimeFromYears(CHART_TIME_YR),
+      mode: { type: "observed", observer: galacticPositionFromLy(CENTRE_LY) },
+    });
+  });
+
+  it("reads the selection AS OBSERVED and the chart OBSERVED FROM its centre, with the apparent positions", async () => {
+    const { recorder } = await playTo("observed");
+
+    const readout = screen.getByRole("status", { name: "Selected system" });
+    expect(within(readout).getByText("AS OBSERVED")).toBeInTheDocument();
+    expect(reading("LIGHT AGE")).toBe("2.00 yr");
+    expect(reading("DIST")).toBe("~2.00 ly");
+    expect(reading("VEL")).toBe("—");
+    expect(within(readout).getByRole("heading", { name: "STAR A" })).toBeInTheDocument();
+    expect(within(chartPage()).getByText("OBSERVED FROM")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("group", { name: "Chart legend" })).getByText("OBSERVER"),
+    ).toBeInTheDocument();
+    expect(options()[1]).toHaveAccessibleName(/, ~2\.00 ly, /u);
+    // The joiners are dashed at a predicted path's 6 and 4 px, at the line scale of 2 at a ratio of 1.
+    expect(recorder.calls("setLineDash").map((call) => call.args[0])).toContainEqual([12, 8]);
+  });
+
+  it("reads the stars answered in now as stale once the chart is answered observed, until their own come", async () => {
+    const session = await playTo("timed");
+    await answerSummary(session);
+    const readout = screen.getByRole("status", { name: "Selected system" });
+    expect(within(readout).getByRole("heading", { name: "STAR A" })).toBeInTheDocument();
+
+    await session.user.click(within(chartPage()).getByRole("button", { name: "OBSERVED" }));
+    await answerQuery(session);
+
+    expect(within(readout).getByRole("heading", { name: "STAR A stale" })).toBeInTheDocument();
+    await answerSummary(session);
+    expect(within(readout).getByRole("heading", { name: "STAR A" })).toBeInTheDocument();
+  });
+
+  it("asks without the mode once NOW is chosen again, and reads the selection in now", async () => {
+    const { socket } = await playTo("unobserved");
+
+    const body = socket.requestsOfKind("systems_in_range").at(-1)?.body;
+    expect(body).toEqual(
+      aRangeRequest({
+        centreLy: CENTRE_LY,
+        universe: UNIVERSE.id,
+        timeYr: CHART_TIME_YR,
+        minLayer: "b",
+      }),
+    );
+    expect(body).not.toHaveProperty("mode");
+    expect(socket.requestsOfKind("system_summary").at(-1)?.body).not.toHaveProperty("mode");
+    const readout = screen.getByRole("status", { name: "Selected system" });
+    expect(within(readout).queryByText("AS OBSERVED")).toBeNull();
+    expect(reading("DIST")).toBe("2.00 ly");
+    expect(chartReading("MODE")).toBe("NOW");
+  });
 });
+
+/** Where the chart is moved to, 20,000 ly coreward of where the observer stays. */
+const FAR_CENTRE_LY = [CENTRE_LY[0] - 20_000, CENTRE_LY[1], CENTRE_LY[2]] as const;
+
+/** The far chart's one system, 2 ly along −x of its centre, coreward. */
+const FAR_SYSTEM_REL_LY = [-2, 0, 0] as const;
+
+/**
+ * The far system's light's age seen from the observer, who stays at the first centre: its distance
+ * from there, 20,002 ly, in years.
+ */
+const FAR_LIGHT_AGE_YR = 20_002;
+
+/** The far chart as the server answers `body`: a neutron star now, a supergiant as observed. */
+function farChartFor(body: RequestOf<"systems_in_range">): ResponseFor<"systems_in_range"> {
+  const observed = body.mode?.type === "observed";
+  const answer = aSystemsInRange({
+    centreLy: FAR_CENTRE_LY,
+    radiusLy: body.radius_ly,
+    minLayer: body.min_layer,
+    systems: [
+      {
+        relLy: FAR_SYSTEM_REL_LY,
+        layer: "e",
+        ageMyr: 12,
+        stellar: aStellarBrief("e", observed ? "supergiant" : "neutron_star"),
+        ...(observed
+          ? { observed: { lightAgeYr: FAR_LIGHT_AGE_YR, apparentRelLy: FAR_SYSTEM_REL_LY } }
+          : {}),
+      },
+    ],
+  });
+  return { ...answer, time: body.time };
+}
+
+/** The far system's summary as the server answers `body`: the stars then, as the brief is. */
+function farSummaryFor(body: RequestOf<"system_summary">): ResponseFor<"system_summary"> {
+  const observed = body.mode?.type === "observed";
+  const summary = {
+    ...aSingleStarSummary(observed ? aRedSupergiant() : aNeutronStar()),
+    universe: body.universe,
+    system: body.system,
+    time: body.time,
+  };
+  const [x, y, z] = FAR_CENTRE_LY;
+  return aSummaryResponse(
+    observed
+      ? {
+          ...summary,
+          observed: anObservation({ apparentLy: [x - 2, y, z], lightAgeYr: FAR_LIGHT_AGE_YR }),
+        }
+      : summary,
+  );
+}
+
+describe(
+  "the GALAXY display's observed mode, end to end (plan 12, P12.T11)",
+  { timeout: 300_000 },
+  () => {
+    beforeEach(() => {
+      FakeWebSocket.instances = [];
+      vi.stubGlobal("WebSocket", FakeWebSocket);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /**
+     * The by-eye case as a fixture: the observer is set at the first chart's centre, and the chart is
+     * moved 20,000 ly away to a system whose present primary is a neutron star; its light left it when
+     * it was a supergiant.
+     */
+    async function chartFarFromTheObserver(): Promise<Session> {
+      const session = await playTo("charted");
+      const { user, socket } = session;
+      await user.click(within(chartPage()).getByRole("button", { name: "OBSERVED" }));
+      await answerQuery(session);
+      const x = within(cursorPanel()).getByRole("textbox", { name: "X" });
+      await user.clear(x);
+      await user.type(x, String(FAR_CENTRE_LY[0]));
+      // Entered as the field is left; `CENTRE CHART` then moves the chart, and not the observer.
+      await user.click(within(cursorPanel()).getByRole("button", { name: "C CENTRE CHART" }));
+      await server(() => {
+        socket.serverAnswers("systems_in_range", farChartFor);
+      });
+      const [system] = options();
+      if (system === undefined) {
+        throw new Error("the far chart lists no system");
+      }
+      await user.click(system);
+      await server(() => {
+        socket.serverAnswers("system_summary", farSummaryFor);
+      });
+      return session;
+    }
+
+    it("keeps the observer when the chart is moved, asking from where it stands", async () => {
+      const { socket } = await chartFarFromTheObserver();
+
+      expect(socket.requestsOfKind("systems_in_range").at(-1)?.body).toEqual(
+        aRangeRequest({ centreLy: FAR_CENTRE_LY, universe: UNIVERSE.id, observerLy: CENTRE_LY }),
+      );
+    });
+
+    it("moves the observer to the chart's centre on OBSERVER TO CENTRE, and asks from there", async () => {
+      const { user, socket } = await chartFarFromTheObserver();
+
+      await user.click(within(chartPage()).getByRole("button", { name: "OBSERVER TO CENTRE" }));
+
+      expect(socket.requestsOfKind("systems_in_range").at(-1)?.body).toEqual(
+        aRangeRequest({
+          centreLy: FAR_CENTRE_LY,
+          universe: UNIVERSE.id,
+          observerLy: FAR_CENTRE_LY,
+        }),
+      );
+    });
+
+    it("reads a supergiant known dead as alive from afar, with its light's age", async () => {
+      await chartFarFromTheObserver();
+
+      const readout = screen.getByRole("status", { name: "Selected system" });
+      expect(within(readout).getByText("AS OBSERVED")).toBeInTheDocument();
+      expect(reading("KIND")).toBe("SUPERGIANT");
+      expect(reading("LIGHT AGE")).toBe("20,002.00 yr");
+      expect(options()[0]).toHaveAccessibleName(/SUPERGIANT M2Iab/u);
+    });
+
+    it("reads the same system as the neutron star it is now in NOW", async () => {
+      const { user, socket } = await chartFarFromTheObserver();
+
+      await user.click(within(chartPage()).getByRole("button", { name: "NOW" }));
+      await server(() => {
+        socket.serverAnswers("systems_in_range", farChartFor);
+      });
+      await server(() => {
+        socket.serverAnswers("system_summary", farSummaryFor);
+      });
+
+      const readout = screen.getByRole("status", { name: "Selected system" });
+      expect(within(readout).queryByText("AS OBSERVED")).toBeNull();
+      expect(reading("KIND")).toBe("NEUTRON STAR");
+      expect(options()[0]).toHaveAccessibleName(/NEUTRON STAR NS/u);
+    });
+  },
+);

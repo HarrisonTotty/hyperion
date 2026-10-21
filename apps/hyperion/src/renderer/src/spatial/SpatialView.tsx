@@ -152,6 +152,14 @@ function viewKeyMove(key: string): CameraMove | null {
   }
 }
 
+/** A display's mode, as its spatial view shows it beside the frame and the time. */
+export interface SpatialMode {
+  /** The mode's name: `NOW` or `OBSERVED FROM`. */
+  readonly name: string;
+  /** Where the mode observes from, written as the centre is; empty for `NOW`. */
+  readonly from: ReadonlyArray<SpatialReading>;
+}
+
 /** Props of {@link SpatialView}. */
 export interface SpatialViewProps {
   /** What to draw, in scene units about the view centre. */
@@ -187,6 +195,12 @@ export interface SpatialViewProps {
   readonly centre: ReadonlyArray<SpatialReading>;
   /** The time the scene shows, labelled with its time system: `UT +0.00 yr`. */
   readonly time: SpatialReading;
+  /**
+   * The display's mode, shown after the frame, the centre and the time, as the guide asks of a
+   * display with more than one (plan 12, P12.T11): `NOW`, or `OBSERVED FROM` and the observer's
+   * coordinates. None when absent, as on a display with the one mode.
+   */
+  readonly mode?: SpatialMode | undefined;
   /**
    * The distance from the view centre to the galactic axis, for the core arrow: the same quantity
    * as the centre's `RADIUS`, written the same way (`26,000.0 ly`).
@@ -239,7 +253,8 @@ export interface SpatialViewProps {
  * `ELV +30°`), changing at most four times a second and not announced as they change; over the
  * canvas, the axis triad, the core arrow, a 1-2-5 scale bar, and the labels of the chosen marks
  * and of the spheres and rings, all DOM text, since the canvas carries none (D15); and below it,
- * in the same place on every spatial view, the frame, the centre and the time. The labels are
+ * in the same place on every spatial view, the frame, the centre and the time, and after them the
+ * mode where the display has one (`MODE NOW`, or `MODE OBSERVED FROM` and where from). The labels are
  * hidden from assistive technology, since the list and the readout beside the view carry the same
  * text. The canvas takes focus and is described by the visible key legend.
  *
@@ -257,6 +272,7 @@ export function SpatialView({
   frameName,
   centre,
   time,
+  mode,
   coreDistance,
   axes,
   accessibleName,
@@ -606,6 +622,22 @@ export function SpatialView({
             <Reading key={reading.label} reading={reading} />
           ))}
           <Reading reading={time} />
+          {mode === undefined ? null : (
+            <div className="field spatial-reading spatial-view__mode">
+              <dt className="field__label">MODE</dt>{" "}
+              {/* A word, as the frame's `GALACTIC` is; the observer's coordinates are figures. */}
+              <dd>
+                {mode.name}
+                {mode.from.length === 0 ? null : (
+                  <dl className="spatial-view__observer">
+                    {mode.from.map((reading) => (
+                      <Reading key={reading.label} reading={reading} />
+                    ))}
+                  </dl>
+                )}
+              </dd>
+            </div>
+          )}
         </dl>
         {camera === null || viewport === null ? null : (
           <ScaleBar

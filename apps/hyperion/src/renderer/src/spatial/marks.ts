@@ -1,5 +1,6 @@
 import type { LocalFrame } from "../geometry/frame";
 import { dot, type Vec3 } from "../geometry/vec3";
+import type { ColourToken } from "./drawList";
 
 /**
  * The outline of a mark, which encodes its type.
@@ -153,6 +154,68 @@ export interface AnnulusMark {
   readonly selected?: boolean | undefined;
 }
 
+/**
+ * How a segment is stroked: `solid`, or `dashed` at a predicted path's dash, since the guide keeps
+ * dashes for prediction (an apparent position's joiner is one: plan 12, P12.T11).
+ */
+export type SegmentLine = "solid" | "dashed";
+
+/**
+ * A straight line between two scene points, such as the dashed joiner from a system's mark to its
+ * apparent position (plan 12, P12.T11): drawn, clipped to the view, and never picked.
+ *
+ * @remarks
+ * Its width and dash are CSS px, which `paint` draws at the line scale, never under 2 device px
+ * (decision-thin-line-contrast; R07.T16.f). A line that carries meaning takes the guide's 6:1
+ * against `--surface-0`: `textMuted` reaches it and `line` does not ({@link PathRole}).
+ */
+export interface SegmentMark {
+  /** Stable identity. */
+  readonly id: string;
+  /** One end, relative to the view centre in scene units and the scene's axes. */
+  readonly from: Vec3;
+  /** The other end, in the same units and axes. */
+  readonly to: Vec3;
+  readonly line: SegmentLine;
+  readonly stroke: ColourToken;
+  /** Its width, CSS px. */
+  readonly widthPx: number;
+  /**
+   * The point mark it leaves from: it is drawn only outside that mark's outline on the screen, so
+   * that it never crosses the symbol whose shape encodes the type, and its tick only where `to`
+   * lies outside the outline. Not cut when absent, or when no mark of that ID is drawn.
+   */
+  readonly fromMark?: string | undefined;
+  /**
+   * Whether a solid tick 0.25 rem long crosses it at `to`, square to it on the screen, as wide and
+   * in its colour: an apparent position's tick. None when absent.
+   */
+  readonly endTick?: boolean | undefined;
+  /**
+   * The length on the screen, CSS px, that it must exceed to be drawn at all; 0 when absent.
+   */
+  readonly minLengthPx?: number | undefined;
+}
+
+/**
+ * Where a scene's observer stands, in observed mode (plan 12, P12.T11): a mark of its own, an eye
+ * (two arcs meeting at points left and right), labelled and with a stalk to its foot on the
+ * reference plane as the other marks have, drawn only where it lies inside the view, and never
+ * picked.
+ *
+ * @remarks
+ * Its shape is none of a {@link SymbolShape} (a contact's), the bracket reticle (the selection),
+ * the chevrons (a destination), and the galaxy map's upright cross with a gap (its cursor) or its
+ * diagonal cross (its chart centre). It is filled north of the reference plane and open south of
+ * it, as every mark is.
+ */
+export interface ObserverMark {
+  /** Its position, relative to the view centre in scene units and the scene's axes. */
+  readonly position: Vec3;
+  /** Text of its label. */
+  readonly label: string;
+}
+
 /** Everything a spatial view draws, in scene units about the view centre. */
 export interface SpatialScene {
   readonly frame: LocalFrame;
@@ -161,6 +224,10 @@ export interface SpatialScene {
   readonly plane: PlaneSpec;
   /** Paths such as orbits, drawn but never picked; none when absent (plan 14, T40.a). */
   readonly paths?: ReadonlyArray<PathMark> | undefined;
+  /** Straight lines, drawn but never picked; none when absent (plan 12, P12.T11). */
+  readonly segments?: ReadonlyArray<SegmentMark> | undefined;
+  /** The observer, in observed mode; none when absent (plan 12, P12.T11). */
+  readonly observer?: ObserverMark | undefined;
   /** Bands on the reference plane, drawn with it and never picked; none when absent. */
   readonly annuli?: ReadonlyArray<AnnulusMark> | undefined;
   /** The selected mark, drawn with the `--accent` bracket reticle. */

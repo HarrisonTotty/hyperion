@@ -980,14 +980,18 @@ function blockAtAngle(
   return { leftPx, topPx, widthPx, heightPx };
 }
 
-/** Where a ring's label may go beside a point of its ring: below right first, then round. */
+/**
+ * Where a ring's label may go beside a point of its ring: below right first, then round; kept
+ * `clearOfPointPx` from the point on every side where that is more than its own room.
+ */
 function ringCandidates(
   point: ScreenPoint,
   size: { readonly widthPx: number; readonly heightPx: number },
   remPx: number,
+  clearOfPointPx = 0,
 ): BoxPx[] {
-  const sidePx = CURVE_SIDE_REM * remPx;
-  const clearPx = (CURVE_SIDE_REM / 2) * remPx;
+  const sidePx = Math.max(CURVE_SIDE_REM * remPx, clearOfPointPx);
+  const clearPx = Math.max((CURVE_SIDE_REM / 2) * remPx, clearOfPointPx);
   const right = point.xPx + sidePx;
   const left = point.xPx - sidePx - size.widthPx;
   const below = point.yPx + clearPx;
@@ -1106,8 +1110,10 @@ function symbolReachPx(op: SymbolOp, strokes: ReticleStrokesCss): number {
  *
  * @remarks
  * A stalk is its line at the line scale, `lineScale` ÷ the ratio times its width; a symbol the disc
- * its outline reaches ({@link symbolReachPx}), whatever it holds. The selection's bracket and the
- * destination's chevrons are not counted.
+ * its outline reaches ({@link symbolReachPx}), whatever it holds; and the observer's eye, a
+ * polyline at a mark's weight (plan 12, P12.T11), the disc about the middle of its points that
+ * reaches its farthest, with half its outline. The selection's bracket and the destination's
+ * chevrons are not counted.
  */
 export function markInksPx(
   ops: ReadonlyArray<DrawOp>,
@@ -1121,6 +1127,17 @@ export function markInksPx(
       inks.push({ from: op.from, to: op.to, halfWidthPx: (op.widthPx * lineFactor) / 2 });
     } else if (op.kind === "symbol") {
       inks.push({ from: op.centre, to: op.centre, halfWidthPx: symbolReachPx(op, strokes) });
+    } else if (op.kind === "polyline" && op.weight === "mark" && op.points.length > 0) {
+      const xs = op.points.map((point) => point.xPx);
+      const ys = op.points.map((point) => point.yPx);
+      const centre = {
+        xPx: (Math.min(...xs) + Math.max(...xs)) / 2,
+        yPx: (Math.min(...ys) + Math.max(...ys)) / 2,
+      };
+      const reachPx = Math.max(
+        ...op.points.map((point) => Math.hypot(point.xPx - centre.xPx, point.yPx - centre.yPx)),
+      );
+      inks.push({ from: centre, to: centre, halfWidthPx: reachPx + strokes.markStrokePx / 2 });
     }
   }
   return inks;
@@ -1213,7 +1230,7 @@ export function placeCurveLabels(
     const size = textBoxPx(textSizeRem(label.text, OVERLAY_LETTER_SPACING_EM), remPx);
     const box = choose(
       [{ xPx: label.xPx, yPx: label.yPx }, ...(label.alongPx ?? [])].flatMap((point) =>
-        ringCandidates(point, size, remPx),
+        ringCandidates(point, size, remPx, label.clearOfPointPx),
       ),
     );
     if (box === undefined) {

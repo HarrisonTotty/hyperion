@@ -44,13 +44,25 @@ export type SystemModelResult =
   | { readonly kind: "ok"; readonly model: SystemModel }
   | { readonly kind: "fault"; readonly fault: string };
 
-/** The `system_summary` request for a system at a time. */
+/**
+ * The `system_summary` request for a system at a time, in a mode (plan 12, P12.T6.b).
+ *
+ * @remarks
+ * Only an observed request carries `mode`, so that one in `now` is byte for byte plan 06's (the
+ * port ruling, §6.1). Asked observed, the answer's stars are as the system was when the light the
+ * observer receives at `time` left it, and its `time` still echoes the request's.
+ *
+ * @param mode - The wire's mode, as `toQueryModeDto` writes it; `now` when absent, as the
+ *   `SYSTEM` display always asks.
+ */
 export function toSummaryRequest(
   universe: UniverseIdHex,
   system: SystemIdHex,
   time: UniverseTime,
+  mode?: RequestOf<"system_summary">["mode"],
 ): RequestOf<"system_summary"> {
-  return { kind: "system_summary", universe, system, time };
+  const request: RequestOf<"system_summary"> = { kind: "system_summary", universe, system, time };
+  return mode === undefined ? request : { ...request, mode };
 }
 
 /**
