@@ -1109,7 +1109,11 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
     frame's, each post-process, dispatches, splats, mip chains; the one-off rounding probe is
     untimed) carries `timestampWrites`, so nothing is `bracketed`, and the query set and a
     ring of resolve buffers are made through the one creation path (`timing.ts`; RM1 validation
-    m5). **Offscreen targets, asynchronous pipelines, indirect work and per-pass time.** Asked by
+    m5). _R10.T14.d adds `prepareMaterial(material, targets, meshes)`: a material's pipelines
+    made ahead with `createRenderPipelineAsync` and kept in its record; for a `createMaterial`
+    material none is marked pending, so a draw before one is made still makes it synchronously and
+    draws on its first frame (plan R10, T14.d's record)._
+    **Offscreen targets, asynchronous pipelines, indirect work and per-pass time.** Asked by
     R07 and R11 at review (R07's HDR target and bloom chain, R11's stills and GPU-culled scatter, R05's,
     R07's, R11's and R12's per-pass benchmarks). Checked 2026-09-29 in `@babylonjs/core` 9.28.0:
     - _Offscreen targets._ `createRenderTarget` builds a Babylon `RenderTargetTexture` of the given
