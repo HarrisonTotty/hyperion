@@ -48,7 +48,7 @@
 //!
 //! It is P14.T51.a. Its call into T13's passes is `atmosphere_under` in
 //! [`atmosphere`](crate::planetary::derive::atmosphere), and its call on the record
-//! `GlobalFigures::condensates_and_ice_under`, both on the record since P14.T54.a deleted the
+//! `GlobalFigures::condensates_and_ice_over`, both on the record since P14.T54.a deleted the
 //! `p14-snapshot` lane's hold, so its rules and constants are output, and a change to any of them a
 //! generator-version change. The record's surface section holds the published [`Condensates`]
 //! (P14.T54.a), and the wire sends them. Left to P14.T54.a's later steps: the passes' climate
@@ -67,7 +67,7 @@ use std::fmt;
 
 use crate::math;
 use crate::planetary::derive::atmosphere::{
-    Gas, METHANE_RELATIVE_HUMIDITY, MOLAR_GAS_CONSTANT, SurfaceState,
+    Gas, METHANE_RELATIVE_HUMIDITY, MOLAR_GAS_CONSTANT, SurfaceMaterial, SurfaceState,
 };
 #[cfg(doc)]
 use crate::planetary::hooks::figures::cover::{
@@ -416,6 +416,15 @@ impl Basins {
                 full_ocean: hypsometry.layer_filling(FULL_OCEAN_FRACTION),
             }),
         }
+    }
+
+    /// The hypsometry and the layer that fills [`FULL_OCEAN_FRACTION`] of it, where the basins are
+    /// known: what a pass's context compares of them (P14.T54.a).
+    #[must_use]
+    pub(crate) fn known(&self) -> Option<(&Hypsometry, Metres)> {
+        self.of
+            .as_ref()
+            .map(|filled| (&filled.hypsometry, filled.full_ocean))
     }
 
     /// The share of the surface, 0 to 1, that a liquid of global layer `depth` fills
@@ -1771,6 +1780,18 @@ pub enum CrustWater {
     /// Not listed: off an ice bulk, and in T13.c's passes, whose area mix reads an ice bulk's
     /// crust as its regolith.
     Unlisted,
+}
+
+impl CrustWater {
+    /// The record's, on a body whose bulk is of `material`: [`Listed`](Self::Listed) on an ice bulk
+    /// ([`SurfaceMaterial::Ice`]), [`Unlisted`](Self::Unlisted) on rock.
+    #[must_use]
+    pub(crate) const fn of_record(material: SurfaceMaterial) -> Self {
+        match material {
+            SurfaceMaterial::Ice => Self::Listed,
+            SurfaceMaterial::Rock => Self::Unlisted,
+        }
+    }
 }
 
 /// The net sublimation rate at which an airless surface keeps a solid over the Solar System's age:

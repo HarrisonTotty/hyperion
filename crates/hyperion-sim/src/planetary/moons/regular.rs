@@ -88,18 +88,24 @@ use std::fmt;
 use crate::Seed;
 use crate::math;
 use crate::orbit::KeplerElements;
-use crate::planetary::derive::atmosphere::VolatileDraws;
+use crate::planetary::derive::atmosphere::{Atmosphere, SurfaceState, VolatileDraws};
+#[cfg(doc)]
+use crate::planetary::derive::derive_body;
+use crate::planetary::derive::pass_record::{
+    PassBulk, PassContext, PassRecord, PassRecordOf, PassTide, RecordSpin,
+};
 use crate::planetary::derive::photometry::area_mix::ShadeBook;
 use crate::planetary::derive::rotation::{
     SpinTides, SpinningBody, moment_of_inertia_factor, tidal_locking_time,
 };
 use crate::planetary::derive::{
     BodyHosts, BuildBodyHostsError, BuildFormationZoneError, BuildPlacedBodyError, DeriveBodyError,
-    DerivedBody, FormationZone, GivenBulk, GivenFractions, HostLight, Illumination, MassFractions,
-    PlacedBody, PlanetClass, SnowLineSide, derive_body,
+    DerivedBody, DerivedBulk, FormationZone, GivenBulk, GivenFractions, HostLight, Illumination,
+    MassFractions, PassDriver, PlacedBody, PlanetClass, SnowLineSide, derive_body_driven,
+    derive_bulk,
 };
 use crate::planetary::disc::{self, DiscDraws, DiscHost, DiscProfile, Truncation};
-use crate::planetary::hooks::figures::{HeatInputs, Subsurface, non_tidal_heat_flow};
+use crate::planetary::hooks::figures::{HeatInputs, PassFigures, Subsurface, non_tidal_heat_flow};
 use crate::planetary::moons::tides::{
     MoonTides, TidalBranch, TidalMaterial, TideInputs, mean_density, tidal_forcing,
 };
@@ -1102,6 +1108,13 @@ impl DerivedMoon {
         self.body.regolith_albedo()
     }
 
+    /// What its passes over its record leave for its record (P14.T54.a, rule (f);
+    /// [`DerivedBody::spun`]): `None` over the passes' stand-in.
+    #[must_use]
+    pub(crate) const fn spun(&self) -> Option<&crate::planetary::derive::SpunPasses> {
+        self.body.spun()
+    }
+
     /// How many passes its derivation took (P14.T51.b; [`DerivedBody::atmosphere_passes`]).
     #[cfg(test)]
     #[must_use]
@@ -1549,6 +1562,10 @@ pub fn derive_regular_moon(
 /// [`VolatileSite::ParentZone`], its follow-up their air at that radius, [`MoonBulk::Stated`], and
 /// P14.T56.d their tides by composition and state, [`MoonTides`]).
 ///
+/// Its passes are the passes' stand-in, as every call here takes: no rotation law, no basins, the
+/// bulk material's regolith; a system's record derives the moon under its law, its basins and its
+/// lid (P14.T54.a).
+///
 /// # Errors
 ///
 /// As [`derive_regular_moon`], and [`DeriveMoonError::StatedRadius`] for a stated bulk whose
@@ -1561,24 +1578,126 @@ pub fn derive_moon(
     age: Years,
     t: UniverseTime,
 ) -> Result<DerivedMoon, DeriveMoonError> {
-    derive_moon_under(moon, parent, nursery, sky, (age, t), None)
+    derive_moon_under(
+        moon,
+        parent,
+        nursery,
+        sky,
+        (age, t),
+        None,
+        MoonPasses::STAND_IN,
+    )
 }
 
-/// [`derive_moon`] at the system's age `age` at the epoch and the time `t`, its shade reading the
-/// call chain's book `shades` where there is one (lever (d), decision-p14-t54a-passes, "Cost
-/// escalation (after Batch B)" §C.3): the same bits as without it.
+/// How a moon's passes run (P14.T54.a): over the system's record of the moon, or the passes'
+/// stand-in, as `driver` drives them (the tests' drivers beside the generator's).
+#[derive(Clone, Copy)]
+pub(crate) struct MoonPasses<'a> {
+    /// The moon's record, `None` for the passes' stand-in (no rotation law).
+    pub(crate) record: Option<&'a dyn MoonRecordOf>,
+    /// What drives the passes.
+    pub(crate) driver: PassDriver,
+}
+
+impl fmt::Debug for MoonPasses<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MoonPasses")
+            .field("record", &self.record.is_some())
+            .field("driver", &self.driver)
+            .finish()
+    }
+}
+
+impl MoonPasses<'_> {
+    /// The passes' stand-in, solved: [`derive_moon`]'s.
+    pub(crate) const STAND_IN: Self = Self {
+        record: None,
+        driver: PassDriver::Solve,
+    };
+}
+
+/// What a moon's passes read of the system's record of it (P14.T54.a), beside its tide, which its
+/// derivation reads at each pass ([`own_tides`]).
+pub(crate) trait MoonRecordOf {
+    /// The moon's spun climate's record ([`RecordSpin`]) for its shape `shape` and its bulk before
+    /// its passes `bulk`.
+    #[must_use]
+    fn spin(&self, shape: &MoonShape, bulk: &PassBulk) -> RecordSpin<'_>;
+
+    /// The figures' first stage of a pass whose atmosphere is `air`, with the tide `tide` raises
+    /// in it then, for the moon's shape `shape` and its bulk before its passes `bulk`: `None` where
+    /// its record has none, or the stage refuses.
+    #[must_use]
+    fn figures(
+        &self,
+        shape: &MoonShape,
+        bulk: &PassBulk,
+        air: &Atmosphere,
+        tide: &MoonTideAt,
+    ) -> Option<PassFigures>;
+}
+
+/// The shape a moon's derivation gives it before its passes, which no pass moves: its ice
+/// fraction, its radius and its mean density ([`DerivedMoon::ice_fraction`],
+/// [`DerivedMoon::radius`], [`DerivedMoon::density`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MoonShape {
+    /// Its mass fraction of water ice.
+    pub(crate) ice_fraction: f64,
+    /// Its radius ([`moon_radius`]).
+    pub(crate) radius: Metres,
+    /// Its mean density at that radius.
+    pub(crate) density: KilogramsPerCubicMetre,
+}
+
+impl MoonShape {
+    /// The fractions of a moon of this shape whose derivation splits its solids as `fractions`
+    /// ([`DerivedMoon::fractions`]): its ice as water.
+    #[must_use]
+    pub(crate) fn fractions(&self, fractions: &MassFractions) -> MassFractions {
+        fractions.with_water(self.ice_fraction)
+    }
+}
+
+/// What a moon's tide raises in it at a pass, as its figures read it: its tidal heat over its
+/// surface and its ocean under the surface ([`DerivedMoon::heat_flux`],
+/// [`DerivedMoon::subsurface`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MoonTideAt {
+    /// The tidal heat over its surface.
+    pub(crate) heat_flux: WattsPerSquareMetre,
+    /// Its subsurface ocean as its branch decided it.
+    pub(crate) subsurface: Subsurface,
+}
+
+/// A moon's derivation before its passes (lever (e)): its shape, and its bulk before its passes
+/// as [`derive_bulk`] gives it, the same bits as its derivation's
+/// ([`moon_before_passes`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MoonBeforePasses {
+    /// Its shape.
+    pub(crate) shape: MoonShape,
+    /// Its bulk before its passes.
+    pub(crate) bulk: DerivedBulk,
+}
+
+/// What [`derive_moon_under`] and [`moon_before_passes`] place of a moon before its passes: the
+/// placed body its derivation reads, and its shape.
+#[derive(Debug, Clone, Copy)]
+struct MoonPlaced {
+    placed: PlacedBody,
+    shape: MoonShape,
+}
+
+/// The moon `moon` placed in `nursery` (P14.T17.b, P14.T56.c and its follow-up): its ice fraction
+/// by its radius rank beyond the nursery's ice line, its radius and density, and the placed body
+/// its derivation reads, with its volatiles and its own bulk.
 ///
 /// # Errors
 ///
-/// As [`derive_moon`].
-pub(crate) fn derive_moon_under(
-    moon: &MoonInputs,
-    parent: &MoonParent,
-    nursery: &MoonNursery,
-    sky: &MoonSky,
-    (age, t): (Years, UniverseTime),
-    shades: Option<&ShadeBook>,
-) -> Result<DerivedMoon, DeriveMoonError> {
+/// [`DeriveMoonError::StatedRadius`] for a stated bulk whose radius is not positive and finite,
+/// and [`DeriveMoonError::Placed`] for a placement refused.
+fn place_moon(moon: &MoonInputs, nursery: &MoonNursery) -> Result<MoonPlaced, DeriveMoonError> {
     let MoonInputs {
         mass,
         orbit,
@@ -1620,46 +1739,193 @@ pub(crate) fn derive_moon_under(
             fractions,
         } => placed.with_bulk(GivenBulk::new(stated, GivenFractions::Exactly(fractions))),
     };
-    let hosts = BodyHosts::new(
+    Ok(MoonPlaced {
+        placed,
+        shape: MoonShape {
+            ice_fraction,
+            radius,
+            density: mean_density(Kilograms::from(mass), radius),
+        },
+    })
+}
+
+/// The hosts that light the moon of `parent` under `sky`, its shade reading the call chain's book
+/// `shades` where there is one.
+///
+/// # Errors
+///
+/// [`DeriveMoonError::Hosts`] for hosts refused, which a moon sky never gives.
+fn moon_hosts<'s>(
+    parent: &MoonParent,
+    sky: &'s MoonSky,
+    shades: Option<&'s ShadeBook>,
+) -> Result<BodyHosts<'s>, DeriveMoonError> {
+    Ok(BodyHosts::new(
         Kilograms::from(parent.mass()),
         sky.composition,
         &sky.planet,
         &sky.stars,
     )
     .map_err(DeriveMoonError::Hosts)?
-    .with_shades(shades);
-    let body =
-        derive_body(&placed, &hosts, &nursery.disc, age, t).map_err(DeriveMoonError::Body)?;
-    let density = mean_density(Kilograms::from(mass), radius);
-    let at = TideOf {
-        planet: Kilograms::from(parent.mass()),
-        mass,
-        orbit: &orbit,
-        body: &body,
-        radius,
-        ice_fraction,
-    };
+    .with_shades(shades))
+}
+
+/// [`derive_moon`] at the system's age `age` at the epoch and the time `t`, its shade reading the
+/// call chain's book `shades` where there is one (lever (d), decision-p14-t54a-passes, "Cost
+/// escalation (after Batch B)" §C.3): the same bits as without it; its passes over the system's
+/// record of it where `passes` gives one (P14.T54.a), as its driver drives them.
+///
+/// Over a record each pass reads the context of the pass before, K(P): the figures' first stage of
+/// that pass's own air, with the tide raised in the moon then, at that pass's equilibrium
+/// temperature and state ([`own_tides`]), whose branch, ocean flag and heat it holds. The moon's
+/// published tide is its published pass's own, by the same function.
+///
+/// # Errors
+///
+/// As [`derive_moon`].
+pub(crate) fn derive_moon_under(
+    moon: &MoonInputs,
+    parent: &MoonParent,
+    nursery: &MoonNursery,
+    sky: &MoonSky,
+    (age, t): (Years, UniverseTime),
+    shades: Option<&ShadeBook>,
+    passes: MoonPasses<'_>,
+) -> Result<DerivedMoon, DeriveMoonError> {
+    let MoonPlaced { placed, shape } = place_moon(moon, nursery)?;
+    let hosts = moon_hosts(parent, sky, shades)?;
     let age_now = Years::new(age.value() + t.since_epoch().as_julian_years_f64());
-    let tide = own_tides(&at, bulk, sky.composition.fe_h(), age_now);
+    let tide_of = TideOf {
+        planet: Kilograms::from(parent.mass()),
+        mass: moon.mass,
+        orbit: &moon.orbit,
+        radius: shape.radius,
+        ice_fraction: shape.ice_fraction,
+        bulk: moon.bulk,
+        fe_h: sky.composition.fe_h(),
+        age: age_now,
+    };
+    let record = passes.record.map(|record| MoonPassRecord {
+        record,
+        shape,
+        tide: tide_of,
+    });
+    let record = record
+        .as_ref()
+        .map_or(PassRecord::StandIn, |record| PassRecord::Record(record));
+    let body = derive_body_driven(
+        passes.driver,
+        &placed,
+        &hosts,
+        &nursery.disc,
+        age,
+        t,
+        record,
+    )
+    .map_err(DeriveMoonError::Body)?;
+    let tide = own_tides(
+        &tide_of,
+        &TideAt {
+            inventory_water: body.inventory().water(),
+            state: body.atmosphere().state(),
+            equilibrium: body.equilibrium_temperature(),
+            fractions: body.fractions(),
+        },
+    );
     Ok(DerivedMoon {
         body,
-        ice_fraction,
-        radius,
-        density,
+        ice_fraction: shape.ice_fraction,
+        radius: shape.radius,
+        density: shape.density,
         tide,
     })
 }
 
-/// What a moon's tide reads (crate-private): its planet's mass, its own mass and orbit about the
-/// planet, its derivation, and the radius and ice fraction its derivation gives it.
+/// The moon `moon` of `parent` derived before its passes and without them (lever (e)): its shape
+/// and its bulk as [`derive_bulk`] gives it, the same bits as [`derive_moon_under`]'s, which its
+/// rotation law's first round reads before any derivation with passes (P14.T54.a; decision-p14-
+/// t54a-passes §2.3).
+///
+/// # Errors
+///
+/// As [`derive_moon`].
+pub(crate) fn moon_before_passes(
+    moon: &MoonInputs,
+    parent: &MoonParent,
+    nursery: &MoonNursery,
+    sky: &MoonSky,
+    (age, t): (Years, UniverseTime),
+    shades: Option<&ShadeBook>,
+) -> Result<MoonBeforePasses, DeriveMoonError> {
+    let MoonPlaced { placed, shape } = place_moon(moon, nursery)?;
+    let hosts = moon_hosts(parent, sky, shades)?;
+    let bulk =
+        derive_bulk(&placed, &hosts, &nursery.disc, age, t).map_err(DeriveMoonError::Body)?;
+    Ok(MoonBeforePasses { shape, bulk })
+}
+
+/// A moon's passes over the system's record of it ([`PassRecordOf`]): the record's spin and figures,
+/// with the tide each pass raises in the moon.
+struct MoonPassRecord<'a> {
+    record: &'a dyn MoonRecordOf,
+    shape: MoonShape,
+    tide: TideOf<'a>,
+}
+
+impl PassRecordOf for MoonPassRecord<'_> {
+    fn spin(&self, bulk: &PassBulk) -> RecordSpin<'_> {
+        self.record.spin(&self.shape, bulk)
+    }
+
+    fn context(&self, bulk: &PassBulk, air: &Atmosphere, equilibrium: Kelvin) -> PassContext {
+        let tide = own_tides(
+            &self.tide,
+            &TideAt {
+                inventory_water: bulk.inventory_water,
+                state: air.state(),
+                equilibrium,
+                fractions: bulk.fractions,
+            },
+        );
+        let at = MoonTideAt {
+            heat_flux: tide.heat_flux,
+            subsurface: tide.subsurface,
+        };
+        PassContext::of(
+            self.record.figures(&self.shape, bulk, air, &at).as_ref(),
+            Some(PassTide {
+                branch: tide.tides.branch(),
+                ocean: matches!(tide.subsurface, Subsurface::Ocean(_)),
+                heat_flux: tide.heat_flux,
+            }),
+        )
+    }
+}
+
+/// What a moon's tide reads of the moon itself (crate-private): its planet's mass, its own mass and
+/// orbit about the planet, the radius and ice fraction its derivation gives it, its own bulk, its
+/// host's \[Fe/H\] and the system's age at the time.
 #[derive(Debug, Clone, Copy)]
 struct TideOf<'a> {
     planet: Kilograms,
     mass: EarthMasses,
     orbit: &'a KeplerElements,
-    body: &'a DerivedBody,
     radius: Metres,
     ice_fraction: f64,
+    bulk: MoonBulk,
+    fe_h: Dex,
+    age: Years,
+}
+
+/// What a moon's tide reads of a pass (P14.T54.a): its inventory's water, the state and the
+/// equilibrium temperature of the pass, and the mass fractions its derivation splits its solids
+/// into, all but the pass's state and temperature the same at every pass.
+#[derive(Debug, Clone, Copy)]
+struct TideAt {
+    inventory_water: Kilograms,
+    state: SurfaceState,
+    equilibrium: Kelvin,
+    fractions: MassFractions,
 }
 
 /// A moon's orbit as its eccentricity tide reads it ([`TideOf::elements`]).
@@ -1681,18 +1947,19 @@ impl TideOf<'_> {
         }
     }
 
-    /// The fractions its derivation gives it, [`DerivedMoon::fractions`]'s.
+    /// The fractions its derivation gives it at a pass `at`, [`DerivedMoon::fractions`]'s.
     #[must_use]
-    fn fractions(&self) -> MassFractions {
-        self.body.fractions().with_water(self.ice_fraction)
+    fn fractions(&self, at: &TideAt) -> MassFractions {
+        at.fractions.with_water(self.ice_fraction)
     }
 }
 
 /// Its own tides by composition and state (P14.T56.d; decision-p14-moons §3 and §F-ocean), at its
-/// own bulk `bulk` (a regular moon's its derivation's, a giant-impact moon's or a capture's its
-/// record's) about a host of \[Fe/H\] `fe_h`, at the system age `age`: its branch's loss for its
-/// heat over that bulk's surface, its branch's ocean, and its (k₂, Q) for its locking, at the
-/// class and moment of inertia its record states.
+/// own bulk (a regular moon's its derivation's, a giant-impact moon's or a capture's its record's)
+/// about a host of its \[Fe/H\], at the system age, as `at` gives them, at the pass `pass`: its
+/// branch's loss for its heat over that bulk's surface, its branch's ocean, and its (k₂, Q) for its
+/// locking, at the class and moment of inertia its record states. Its derivation takes it at its
+/// published pass, and a pass's context at that pass (P14.T54.a), by this one function.
 ///
 /// `F_nt` is P14.T24.b's at its record's bulk with its own air and water
 /// ([`non_tidal_heat_flow`]), with no tide and no ocean given, which the branch decides; the
@@ -1700,14 +1967,15 @@ impl TideOf<'_> {
 /// are those its branch was decided on, at that bulk's mean density ([`mean_density`]), which is
 /// its derivation's to the bit for a regular moon.
 #[must_use]
-fn own_tides(at: &TideOf<'_>, bulk: MoonBulk, fe_h: Dex, age: Years) -> TideState {
+fn own_tides(at: &TideOf<'_>, pass: &TideAt) -> TideState {
     let TideElements {
         a,
         e,
         mean_motion_rad_per_s: n,
     } = at.elements();
-    let (radius, fractions) = match bulk {
-        MoonBulk::Derived => (at.radius, at.fractions()),
+    let (fe_h, age) = (at.fe_h, at.age);
+    let (radius, fractions) = match at.bulk {
+        MoonBulk::Derived => (at.radius, at.fractions(pass)),
         MoonBulk::Stated { radius, fractions } => (radius, fractions),
     };
     let class = PlanetClass::of(at.mass, &fractions);
@@ -1720,17 +1988,17 @@ fn own_tides(at: &TideOf<'_>, bulk: MoonBulk, fe_h: Dex, age: Years) -> TideStat
             surface_gravity: MetresPerSecondSquared::new(GM_EARTH * at.mass.value() / (r * r)),
             class,
             fractions,
-            inventory_water: at.body.inventory().water(),
+            inventory_water: pass.inventory_water,
             fe_h,
             tidal_heat_flow: WattsPerSquareMetre::new(0.0),
             subsurface_ocean: Subsurface::NotComputed,
         },
         age,
-        at.body.atmosphere().state(),
+        pass.state,
     )
     // A moon's class is rocky or icy, so it always has one; none is a body with no solid heat.
     .unwrap_or(WattsPerSquareMetre::new(0.0));
-    let surface = at.body.equilibrium_temperature();
+    let surface = pass.equilibrium;
     let tides = MoonTides::of(&TideInputs {
         material: TidalMaterial::of_water(fractions.water()),
         moment_factor: moment_of_inertia_factor(class, &fractions),

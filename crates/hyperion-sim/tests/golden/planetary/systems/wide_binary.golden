@@ -798,7 +798,7 @@ iron = 0x3fd054784e1360bf  # 0.25515563606814945
 rock = 0x3fe0f541daecbd15  # 0.5299386287569258
 water = 0x3fcb8207f8264a30  # 0.21490573517492484
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x405d12ce0b1c0290  # 116.29382589087822
+t_eq_k = 0x4060d124712e47d0  # 134.53569850005306
 moons: []
 rings: []
 population: NotApplicable
@@ -836,9 +836,9 @@ figure_pole_y = 0x3fee0a6c4edbc46a  # 0.9387723484234247
 figure_pole_z = 0xbfcfd2c7d03a923d  # -0.24862001101895884
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: Snowball, provisional true
-geometric_albedo_b = 0x3fe4a38c4edbc62a  # 0.644964365025037
-geometric_albedo_v = 0x3fe4a38c4edbc62a  # 0.644964365025037
-geometric_albedo_r = 0x3fe4a38c4edbc62a  # 0.644964365025037
+geometric_albedo_b = 0x3fd80bde0bd89ac1  # 0.3757243266758615
+geometric_albedo_v = 0x3fd80bde0bd89ac1  # 0.3757243266758615
+geometric_albedo_r = 0x3fd80bde0bd89ac1  # 0.3757243266758615
 phase_exponent_b = 0x3fe55bee197c94b6  # 0.6674719331537264
 phase_exponent_v = 0x3fe55bee197c94b6  # 0.6674719331537264
 phase_exponent_r = 0x3fe55bee197c94b6  # 0.6674719331537264
@@ -846,13 +846,13 @@ phase_integral_b = 0x3ff028f5c28f5c29  # 1.01
 phase_integral_v = 0x3ff028f5c28f5c29  # 1.01
 phase_integral_r = 0x3ff028f5c28f5c29  # 1.01
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fe4f2683177e3de  # 0.6545906988313808
-bond_ratio = 0x3fefd83ea50b71d8  # 0.9951470588235294
-surface_state: Snowball, Ice; climate Efficient, Seasonal, CH4, Isothermal
-mean_surface_temperature_k = 0x405ea1cc256cbee7  # 122.52808509463976
-equator_pole_contrast_k = 0x40031348b076eb60  # 2.3844159876147586
-day_night_contrast_k = 0x3f59198487ff0000  # 0.0015319628000582952
-surface_pressure_pa = 0x410d7c5e7af940cc  # 241547.81004572508
+bond_albedo = 0x3fd867bef8eb1ef9  # 0.38133215244714297
+bond_ratio = 0x3fefd83ea50b71d9  # 0.9951470588235295
+surface_state: Snowball, Ice; climate Efficient, Seasonal, CH4, EnergyBalance
+mean_surface_temperature_k = 0x406180e773fe6ff4  # 140.02825355238713
+equator_pole_contrast_k = 0x400b5dcd5f80f840  # 3.4208018742783963
+day_night_contrast_k = 0x3f5223db4daa0000  # 0.001107181704952609
+surface_pressure_pa = 0x4121bfe3dbd90c19  # 581617.9293903142
 sigma_h_m = 0x408c20061efe3994  # 900.0029888020822
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fae9a71b91b2304  # 0.059772065969417226
@@ -861,11 +861,11 @@ ocean_fraction = 0x3ff0000000000000  # 1.0
 ice_fraction = 0x3ff0000000000000  # 1.0
 condensate: H2O, Solid, seasonal false
 reservoir_kg_m2 = 0x41825af3e6751ac7  # 38493820.80717998
-reservoir_gel_m = 0x40e429a6b2a12638  # 41293.209305357595
+reservoir_gel_m = 0x40e42ed7e6d3d223  # 41334.746927175926
 area_fraction = 0x3ff0000000000000  # 1.0
 condensate: ch4_c2h6_n2, Liquid, seasonal true
-reservoir_kg_m2 = 0x41822a73039e32bc  # 38096480.452245206
-reservoir_gel_m = 0x40f1ec9c4ec1b01d  # 73417.76922768397
+reservoir_kg_m2 = 0x418224889a1086f4  # 38048019.2580699
+reservoir_gel_m = 0x40f1e6c608735f52  # 73324.37706315264
 area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present
@@ -4276,7 +4276,7 @@ iron = 0x3fd054784e1360bf  # 0.25515563606814945
 rock = 0x3fe0f541daecbd15  # 0.5299386287569258
 water = 0x3fcb8207f8264a30  # 0.21490573517492484
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x405d12ce0b83e0af  # 116.29382598761252
+t_eq_k = 0x4060d12472562af9  # 134.53569905118619
 moons: []
 rings: []
 population: NotApplicable
@@ -4314,9 +4314,9 @@ figure_pole_y = 0x3fee0a6c4edbc46a  # 0.9387723484234247
 figure_pole_z = 0xbfcfd2c7d03a923d  # -0.24862001101895884
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: Snowball, provisional true
-geometric_albedo_b = 0x3fe4a38c51685e1c  # 0.6449643697732799
-geometric_albedo_v = 0x3fe4a38c51685e1c  # 0.6449643697732799
-geometric_albedo_r = 0x3fe4a38c51685e1c  # 0.6449643697732799
+geometric_albedo_b = 0x3fd80bde0c6e3765  # 0.3757243272201463
+geometric_albedo_v = 0x3fd80bde0c6e3765  # 0.3757243272201463
+geometric_albedo_r = 0x3fd80bde0c6e3765  # 0.3757243272201463
 phase_exponent_b = 0x3fe55bee197c94b6  # 0.6674719331537264
 phase_exponent_v = 0x3fe55bee197c94b6  # 0.6674719331537264
 phase_exponent_r = 0x3fe55bee197c94b6  # 0.6674719331537264
@@ -4324,13 +4324,13 @@ phase_integral_b = 0x3ff028f5c28f5c29  # 1.01
 phase_integral_v = 0x3ff028f5c28f5c29  # 1.01
 phase_integral_r = 0x3ff028f5c28f5c29  # 1.01
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fe4f268340e394e  # 0.654590703650493
-bond_ratio = 0x3fefd83ea50b71d9  # 0.9951470588235295
-surface_state: Snowball, Ice; climate Efficient, Seasonal, CH4, Isothermal
-mean_surface_temperature_k = 0x405ea1cc25cfdde9  # 122.5280851869535
-equator_pole_contrast_k = 0x40031348b1074560  # 2.384415991815942
-day_night_contrast_k = 0x3f59198486e30000  # 0.0015319627960224125
-surface_pressure_pa = 0x410d7c5e7dfd19a7  # 241547.81151790658
+bond_albedo = 0x3fd867bef982f745  # 0.38133215299955153
+bond_ratio = 0x3fefd83ea50b71d7  # 0.9951470588235293
+surface_state: Snowball, Ice; climate Efficient, Seasonal, CH4, EnergyBalance
+mean_surface_temperature_k = 0x406180e7751ba341  # 140.02825408361426
+equator_pole_contrast_k = 0x400b5dcd64056f40  # 3.420801907935953
+day_night_contrast_k = 0x3f5223db4a840000  # 0.00110718169349866
+surface_pressure_pa = 0x4121bfe3e3c6be70  # 581617.9448756706
 sigma_h_m = 0x408c20061efe9ac0  # 900.0029888049103
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fae9a710ebddfb4  # 0.05977204613640144
@@ -4339,11 +4339,11 @@ ocean_fraction = 0x3ff0000000000000  # 1.0
 ice_fraction = 0x3ff0000000000000  # 1.0
 condensate: H2O, Solid, seasonal false
 reservoir_kg_m2 = 0x41825af3e6751ac7  # 38493820.80717998
-reservoir_gel_m = 0x40e429a6b2a18b79  # 41293.209305546196
+reservoir_gel_m = 0x40e42ed7e6d6d6b4  # 41334.74692861494
 area_fraction = 0x3ff0000000000000  # 1.0
 condensate: ch4_c2h6_n2, Liquid, seasonal true
-reservoir_kg_m2 = 0x41822a73039ddda7  # 38096480.452082925
-reservoir_gel_m = 0x40f1ec9c4ec15c29  # 73417.76922737122
+reservoir_kg_m2 = 0x418224889a0c54e7  # 38048019.25602131
+reservoir_gel_m = 0x40f1e6c6086f3b8d  # 73324.3770592047
 area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present

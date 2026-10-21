@@ -56,7 +56,11 @@
 
 mod surface_mix;
 
-pub(crate) use surface_mix::{LARGEST_BOND_ALBEDO, PassLight, PassSurface};
+#[cfg(test)]
+pub(crate) use surface_mix::spun_read;
+pub(crate) use surface_mix::{
+    LARGEST_BOND_ALBEDO, PassClimate, PassLight, PassSurface, SpunClimate,
+};
 
 use crate::Seed;
 use crate::id::BodyId;
@@ -69,6 +73,8 @@ use crate::planetary::context::XuvHistory;
 use crate::planetary::derive::PlanetClass;
 use crate::planetary::derive::composition::{MassFractions, SnowLineSide};
 use crate::planetary::derive::irradiation::BondAlbedo;
+use crate::planetary::derive::pass_record::{PassContext, WaterGate};
+use crate::planetary::hooks::surface::{ClimateBody, step_climate};
 use crate::planetary::params::{ICY_WATER_FRACTION, THIN_ENVELOPE_FRACTION};
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::draws::UnitUniform;
@@ -1869,7 +1875,10 @@ impl Airborne {
 /// [`partitioned_greenhouse`]) stops at a step that repeats the one before, bit for bit, which is
 /// the full count's result only while a step is a function of the step before's temperature and
 /// partial pressures alone: a climate that read anything else, a count of its calls or a state it
-/// keeps, would make the exit inexact.
+/// keeps, would make the exit inexact. A pass's spun climate keeps it (P14.T54.a): its θ is a
+/// function of the step's own partition, and its body is fixed within the pass
+/// ([`SpunClimate`]). A column with nothing that condenses reads no step climate at all, the
+/// mean's isothermal span standing in, which no record carries as its climate.
 pub(crate) type ClimateOf<'a> = dyn Fn(Kelvin, &PartialPressures) -> ClimateSpan + 'a;
 
 /// The partial pressures, as column weights, of the airborne inventory `inventory` over the climate
@@ -2019,6 +2028,78 @@ fn same_greenhouse(taken: &(f64, PartialPressures, f64), oracle: &(f64, PartialP
     assert_same_bits(taken.2, oracle.2);
 }
 
+/// The climate a pass's greenhouse steps read ([`ClimateOf`]): a climate given, or the body's own
+/// under its spin ([`SpunClimate`], P14.T54.a), whose body is fixed for the pass and whose θ is
+/// each step's own partition's, so that a step's climate reads its temperature and partial
+/// pressures alone.
+#[derive(Clone, Copy)]
+enum StepClimate<'a> {
+    /// The climate given.
+    Given(&'a ClimateOf<'a>),
+    /// The body's own: its column's body, what gates its surface water, and the context the pass
+    /// reads.
+    Spun {
+        body: ClimateBody,
+        water: WaterGate,
+        context: &'a PassContext,
+    },
+}
+
+impl<'a> StepClimate<'a> {
+    /// The step climate of the body `inputs` describe over `surface`, its airborne inventory as
+    /// column weights `column`, and for its surface water the state of its climate's division
+    /// (step 3), which no step of its partition moves, and whether it keeps its water against
+    /// escape (decision-p14-t54a-passes §3.1).
+    #[must_use]
+    fn of(
+        surface: &PassSurface<'a>,
+        inputs: &AtmosphereInputs,
+        column: PartialPressures,
+        (state, retained): (SurfaceState, bool),
+    ) -> Self {
+        match surface.climate {
+            PassClimate::Given(climate_of) => Self::Given(climate_of),
+            PassClimate::Spun(spun) => Self::Spun {
+                body: ClimateBody {
+                    equilibrium_temperature: inputs.equilibrium,
+                    surface_gravity: spun.record.surface_gravity,
+                    radius: spun.record.radius,
+                    material: spun.record.material,
+                    spin: spun.record.spin,
+                    heat_flow: spun.context.heat_flow(),
+                    inventory: column,
+                },
+                water: WaterGate {
+                    state,
+                    retained,
+                    water: inputs.inventory.water(),
+                    radius: spun.record.radius,
+                    surface_gravity: spun.record.surface_gravity,
+                },
+                context: &spun.context,
+            },
+        }
+    }
+
+    /// The climate at a step of mean surface temperature `t` over the partial pressures
+    /// `partials`: the given one's, or P14.T24.a's range under the spin at θ from that step's own
+    /// partition ([`PassContext::ocean_weight`]; [`step_climate`]).
+    #[must_use]
+    fn at(&self, t: Kelvin, partials: &PartialPressures) -> ClimateSpan {
+        match self {
+            Self::Given(climate_of) => climate_of(t, partials),
+            Self::Spun {
+                body,
+                water,
+                context,
+            } => {
+                let theta = context.ocean_weight(water, partials.of(Gas::Water));
+                step_climate(body, theta, t, partials)
+            }
+        }
+    }
+}
+
 /// The atmosphere of the body `inputs` describe (P14.T13.b–c, with P14.T24.f's carbon and oxygen).
 ///
 /// 1. A body with a hydrogen and helium envelope of at least 0.1% of its mass is a
@@ -2103,7 +2184,9 @@ fn same_greenhouse(taken: &(f64, PartialPressures, f64), oracle: &(f64, PartialP
 /// An Earth with its median inventory keeps its air, warms to about 288 K and is temperate, at
 /// an equilibrium temperature of 255 K, about the generator's irradiation for Earth's measured Bond
 /// albedo of 0.294 (255.14 K), to which P14.T57.a fitted the water's greenhouse constant; its
-/// exobase reads the irradiation at zero albedo, 278.3 K.
+/// exobase reads the irradiation at zero albedo, 278.3 K. The 288 K is the passes' stand-in's (no
+/// rotation law, no basins, the bulk material's regolith), as every call here takes; a system's
+/// record derives the body under its law, its basins and its lid (P14.T54.a).
 ///
 /// ```
 /// use hyperion_sim::planetary::derive::atmosphere::{
@@ -2149,7 +2232,9 @@ fn same_greenhouse(taken: &(f64, PartialPressures, f64), oracle: &(f64, PartialP
 #[must_use]
 pub fn atmosphere(inputs: &AtmosphereInputs) -> Atmosphere {
     // A single pass has no climate, basins or lid of the body's: it reads the passes' stand-in
-    // surface, as `derive_body`'s passes do until P14.T54.a's Batch C.
+    // surface (no rotation law, no basins, the bulk material's regolith), as the public
+    // `derive_body`'s passes do; a system's record derives the body under its law, its basins and
+    // its lid (P14.T54.a).
     atmosphere_under(inputs, &PassSurface::stand_in(PassLight::HottestHost))
 }
 
@@ -2158,11 +2243,11 @@ pub fn atmosphere(inputs: &AtmosphereInputs) -> Atmosphere {
 ///
 /// - step 4 is the partition's ([`partitioned_greenhouse`]): after escape (step 2) and the
 ///   climate's division (step 3), each greenhouse step holds every condensable as
-///   [`partition`](crate::planetary::chem::partition) does over the climate `surface.climate_of`
+///   [`partition`](crate::planetary::chem::partition) does over the climate `surface.climate`
 ///   gives for the step's mean surface temperature and the previous step's partial pressures, on
 ///   the basins and with the water's surface share `surface` gives its own seas' weight
 ///   (decision-p14-t51a-partition §4; decision-p14-t51a-part2 §4.2): the previous pass's, from
-///   P14.T54.a;
+///   P14.T54.a, whose spun climate takes θ from each step's partition ([`SpunClimate`]);
 /// - the grey greenhouse reads P14.T57.a's constants, refitted at Venus's and then Earth's
 ///   measured states ([`GreenhouseConstants::FITTED`]);
 /// - after step 5 the Bond albedo and cloud fraction are the area mix's (P14.T51.b) over the
@@ -2257,15 +2342,13 @@ fn state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) ->
             None,
         );
     };
-    let (mut t, mut partials, tau) = partitioned_greenhouse(
-        &inventory,
-        equilibrium,
-        &saturate,
-        surface.climate_of,
-        &ground,
-    );
-    let carrier = Some(airborne.carbon_carrier());
     let column = airborne.column_weights(weight);
+    let retained = retention.retains(Gas::Water) && !ice_held.retains(Gas::Water);
+    let step = StepClimate::of(surface, inputs, column, (climate, retained));
+    let climate_of = |t: Kelvin, partials: &PartialPressures| step.at(t, partials);
+    let (mut t, mut partials, tau) =
+        partitioned_greenhouse(&inventory, equilibrium, &saturate, &climate_of, &ground);
+    let carrier = Some(airborne.carbon_carrier());
 
     // Step 5: the state.
     let molten = climate == SurfaceState::MagmaOcean || t >= SILICATE_SOLIDUS.value();

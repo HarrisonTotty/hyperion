@@ -48,8 +48,8 @@ use crate::planetary::fate::BodyState;
 use crate::planetary::frames::BodyFixedFrame;
 use crate::planetary::hooks::DetailSeed;
 use crate::planetary::hooks::cold_traps::ColdTrapRules;
-use crate::planetary::hooks::figures::GlobalFigures;
-use crate::planetary::hooks::surface::{ClimateRegime, SurfaceConditions};
+use crate::planetary::hooks::figures::{GlobalFigures, PartitionGround};
+use crate::planetary::hooks::surface::{ClimateRegime, OceanWeight, SurfaceConditions};
 use crate::planetary::index::{BodyIndex, BodySub};
 pub use crate::planetary::label::BodyLabel;
 use crate::planetary::placement::OrbitHost;
@@ -57,7 +57,7 @@ use crate::planetary::rings::Ring;
 use crate::time::UniverseTime;
 use crate::units::{
     EarthMasses, EarthRadii, Kelvin, KilogramsPerCubicMetre, Metres, MetresPerSecondSquared,
-    Radians,
+    Radians, WattsPerSquareMetre,
 };
 
 /// How much of a body a record holds, from least to most; each level holds everything the levels
@@ -614,6 +614,24 @@ pub struct Surface {
     crust: Modelled<CrustComposition>,
     modifiers: Modelled<SurfaceModifiers>,
     biosphere: Modelled<Biosphere>,
+    basis: Option<SurfaceBasis>,
+}
+
+/// What a record's surface conditions and condensates were built on (P14.T54.a;
+/// decision-p14-t54a-passes, "Cost escalation (after Batch B)", rule (f)), crate-private: the
+/// partition's ground and water's cover, the heat flow the conditions' night floor reads and the
+/// θ they read. For a body derived over its record it is its published pass's context's, so that
+/// its conditions and condensates are its last pass's to the bit, while its figures are its own
+/// air's K(P*): for a converged body they agree within 10⁻⁹, a bracketed body's by its context
+/// residual.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SurfaceBasis {
+    /// The partition's ground and water's cover.
+    pub(crate) ground: PartitionGround,
+    /// The heat flow at the surface its conditions' night floor reads.
+    pub(crate) heat_flow: WattsPerSquareMetre,
+    /// θ, the ocean weight its conditions read.
+    pub(crate) ocean_weight: OceanWeight,
 }
 
 impl Surface {
@@ -646,7 +664,25 @@ impl Surface {
             crust: Modelled::NotModelled,
             modifiers: Modelled::NotModelled,
             biosphere: Modelled::NotModelled,
+            basis: None,
         })
+    }
+
+    /// The surface with what its conditions and condensates were built on, `basis` (rule (f)).
+    #[must_use]
+    pub(crate) fn with_basis(self, basis: SurfaceBasis) -> Self {
+        Self {
+            basis: Some(basis),
+            ..self
+        }
+    }
+
+    /// What its conditions and condensates were built on (rule (f)); `None` for a surface built
+    /// apart from a record.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the tests of rule (f) read it"))]
+    #[must_use]
+    pub(crate) const fn basis(&self) -> Option<&SurfaceBasis> {
+        self.basis.as_ref()
     }
 
     /// The conditions and the figures, as the server's hooks repeat them

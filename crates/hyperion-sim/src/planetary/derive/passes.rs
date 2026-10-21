@@ -88,10 +88,6 @@ pub(crate) const HALVINGS: u32 = 32;
 /// context, its [`HALVINGS`] and the one pass more where a bound of [0, 1⁻] is still an end: 24 +
 /// 2 × (2 + 32 + 1) = 94. At C = (), as [`solve`] runs, no end is re-evaluated and no second round
 /// runs, so T51.h's [`PLAIN_PASSES`] + [`HALVINGS`] + 1 holds.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P14.T54.a's C2 wires the context path")
-)]
 pub(crate) const MOST_PASSES: u32 = PLAIN_PASSES + 2 * (2 + HALVINGS + 1);
 
 /// The residual |F(A) − A| in albedo above which a bracketed body's published pass is a jump across
@@ -107,10 +103,6 @@ pub(crate) const CONTEXT_AGREEMENT: f64 = 1e-9;
 /// Whether the float members `a` and `b` of two contexts agree (≡; decision-p14-t54a-passes §1.2):
 /// the same bits, or both finite with |a − b| ≤ [`CONTEXT_AGREEMENT`] max(|a|, |b|); never where
 /// either is a NaN, so that a NaN never settles, and an infinity only with itself.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P14.T54.a's C2 wires the context path")
-)]
 #[must_use]
 pub(crate) fn floats_agree(a: f64, b: f64) -> bool {
     if a.is_nan() || b.is_nan() {
@@ -139,8 +131,14 @@ pub(crate) trait Context: Copy {
     fn agrees(&self, other: &Self) -> bool;
 
     /// A total order on contexts, for the frozen context's last tie: the key's `Ord`, then each
-    /// float member's `total_cmp` in a fixed order. `Equal` exactly where the two are the same bits,
-    /// which the 2-cycle stop and the reuse of an end read.
+    /// float member's `total_cmp` in a fixed order. `Equal` exactly where every member is the
+    /// same bits, which the 2-cycle stop and the reuse of an end read: a pass reads nothing of a
+    /// context but its members.
+    ///
+    /// `total_cmp` orders a NaN by its sign bit, which is not portable across targets (the
+    /// sim-determinism skill), so a context holds no NaN: the planetary context debug-asserts its
+    /// floats finite where K builds it
+    /// ([`PassContext::of`](crate::planetary::derive::pass_record::PassContext::of)).
     #[must_use]
     fn rank(&self, other: &Self) -> Ordering;
 }
@@ -224,17 +222,9 @@ pub(crate) struct Solved<P, C = ()> {
     /// What the published pass gave.
     pub(crate) pass: P,
     /// The context the published pass read.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P14.T54.a's C2 wires the context path")
-    )]
     pub(crate) context: C,
     /// The context the published pass gives, K(P): the one the next pass would read, and the
     /// record's figures'.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P14.T54.a's C2 wires the context path")
-    )]
     pub(crate) next: C,
     /// How many passes were taken, the bisection's included.
     pub(crate) count: u32,
@@ -473,6 +463,10 @@ fn solve_with<C: Context, P: Copy>(
             (first_round, first_next, ContextFit::Jump)
         }
     };
+    debug_assert!(
+        count <= MOST_PASSES,
+        "{count} passes, above the cap of {MOST_PASSES}"
+    );
     Solved {
         albedo: published.read,
         pass: published.pass,
@@ -499,7 +493,7 @@ fn bracket<P: Copy, C: Context>(
     count: &mut u32,
 ) -> Evaluated<P, C> {
     let mut under = |end: Evaluated<P, C>| {
-        if end.context.rank(&frozen).is_eq() {
+        if end.context.rank(&frozen).is_eq() && ends_reused() {
             end
         } else {
             *count += 1;
@@ -543,6 +537,38 @@ fn bracket<P: Copy, C: Context>(
     };
     let (lo, hi) = (taken(lo), taken(hi));
     if hi.g.abs() < lo.g.abs() { hi } else { lo }
+}
+
+/// Whether the bracket reuses an end that read its frozen context to the bit: always in the
+/// generator, and for the tests' switch off ([`with_ends_evaluated`]) never, which takes the same
+/// bits at up to two passes more a round (the C1 review's DD2).
+#[must_use]
+fn ends_reused() -> bool {
+    #[cfg(test)]
+    {
+        !ENDS_EVALUATED.with(core::cell::Cell::get)
+    }
+    #[cfg(not(test))]
+    {
+        true
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Whether the bracket re-evaluates every end on this thread, a test's own.
+    static ENDS_EVALUATED: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// `run`'s result with every bracket's ends re-evaluated under its frozen context, none reused: a
+/// test-only switch, set back after (the C1 review's DD2).
+#[cfg(test)]
+#[must_use]
+pub(crate) fn with_ends_evaluated<R>(run: impl FnOnce() -> R) -> R {
+    let before = ENDS_EVALUATED.with(|cell| cell.replace(true));
+    let result = run();
+    ENDS_EVALUATED.with(|cell| cell.set(before));
+    result
 }
 
 #[cfg(test)]

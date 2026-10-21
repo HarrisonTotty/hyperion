@@ -42,6 +42,7 @@
 //! albedo does not have.
 
 use crate::math;
+use crate::planetary::chem::partition::Basins;
 use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceState};
 use crate::planetary::hooks::figures::Crust;
 use crate::planetary::hooks::figures::interior::REGIME_WATER_DENSITY;
@@ -233,7 +234,7 @@ pub(crate) struct SurfaceWaterInputs {
     pub(crate) surface_gravity: MetresPerSecondSquared,
     /// The water vapour's partial pressure in its air.
     pub(crate) vapour: Pascals,
-    /// The share of its condensed water at the surface ([`water_surface_share`]).
+    /// The share of its condensed water at the surface, 0 to 1 ([`water_surface_share`]).
     pub(crate) share: f64,
 }
 
@@ -274,6 +275,26 @@ pub(crate) fn surface_water_of(inputs: &SurfaceWaterInputs) -> KilogramsPerSquar
 #[must_use]
 pub(crate) fn water_layer(surface_water: KilogramsPerSquareMetre) -> Metres {
     Metres::new(surface_water.value() / liquid_water_density().value())
+}
+
+/// The surface water `σ_s` of the body `inputs` describe, kg m⁻², and the potential ocean `f_pot`
+/// it fills of the basins `basins`, 0 to 1 (P14.T54.a; decision-p14-t54a-passes §3.1):
+/// [`surface_water_of`]'s water and the share its [`water_layer`] fills
+/// ([`Basins::area_filled`], [`potential_ocean`]'s fill), none where no basins are known.
+///
+/// It is the one expression of both that a pass's greenhouse steps (θ from each step's
+/// partition), its published partition and the record's partition read, so that θ, the
+/// published water and the record's equal the pass's to the bit.
+#[must_use]
+pub(crate) fn water_under(
+    inputs: &SurfaceWaterInputs,
+    basins: &Basins,
+) -> (KilogramsPerSquareMetre, f64) {
+    let surface_water = surface_water_of(inputs);
+    (
+        surface_water,
+        basins.area_filled(water_layer(surface_water)),
+    )
 }
 
 /// The share of a body's condensed water that lies at its surface at the present outgassing

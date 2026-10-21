@@ -22914,3 +22914,194 @@ planetary::record` (624 tests at T57.a's commit).
       lib goldens and 18 golden integration targets re-blessed (58 passed, no golden changed); the
       changed items' doctests (6 passed); Clippy `--lib --tests` on the sim; rustdoc with
       `-D warnings`; rustfmt and Prettier.
+  - _Batch D's C2, the passes take the body's spin, basins and water share_
+    (decision-p14-t54a-passes, "For main → Relay to p14-wire-23 (Batch C)", Q1 items 1, 5 and 6,
+    Q2 as amended, the six points 1 and 2, with §2 and §3.1–3.2; "Cost escalation (after Batch B)",
+    rule (f) and item 5; design-batch-c §1, §2 and §5's commit 2, as the ruling corrected them). A
+    checkpoint at 22: `GENERATOR_VERSION` stays 22, and the goldens it moves re-bless at header 22
+    in the same commit. `COLD_TRAPS_VERSION` (24), its arm and its tripwire stand.
+    - _The spin_, once a body: `primary_now` (`primary_record`'s, and `parent_now`'s) computes a
+      planet's or member's `SeasonalSpin::of` its held law under its own orbit then and keeps it
+      on `ParentNow`; `satellite_record` a moon's under its planet's (`moon_spin`). Each goes to the
+      passes (`RecordSpin`, with the body's insolation table) and to `published_surface`
+      (`SurfaceTime::spin`), which no longer computes its own.
+    - _The passes over the record_ (`derive/pass_record.rs`, new):
+      - `PassRecord::{StandIn, Record}`; `derive_body_driven` takes one, `derive_body` the
+        stand-in. A record is a `PassRecordOf`: the spin with its record's bulk's gravity, radius
+        and material (`RecordSpin`, from the derivation's `PassBulk` by the record's bulk rule), and
+        K(P), the context of a pass's own air.
+      - `PassContext`, the solver's `Context`: the figures' first stage (`PassFigures`, now
+        `Copy`), its basins, and a moon's `PassTide` (branch, ocean flag, tidal heat). Its key is
+        `PassContextKey` (figures present, the basins' shape, the outgassing branch, the regime,
+        the craters' crust class, the tide's branch and flag); its floats are the basins'
+        populations and full-ocean layer, the water share, the heat flow, the surface age and the
+        tidal heat, ≡ by `floats_agree`, ranked by the key and then `total_cmp`. C₀ is
+        `PassContext::NONE`, K of a body with no figures, labelled. The inertia lid is C3's: not
+        held.
+      - K for a planet or member is `PrimaryPasses` (system.rs), the record's `FiguresInputs` of
+        the pass's air by one function (`FiguresOf::inputs`, which `published_surface` builds its
+        own on), its window entry per pass (no lever); for a moon `MoonPassRecord` (regular.rs)
+        over the system's `SatellitePasses` (`MoonRecordOf`), its tide by `own_tides` at the pass's
+        equilibrium temperature and state (`TideAt`), the same function its published tide takes.
+        `moon_before_passes` gives a moon's shape and bulk pass-free.
+      - `PassSurface::climate` is `PassClimate::{Given, Spun}`: the stand-in `Given` the isothermal
+        climate (its `cold_area` field gone, the linear rule inside), `Spun` a `SpunClimate`. Each
+        greenhouse step's climate (`StepClimate`) is `step_climate` under the spin at the context's
+        heat flow, at θ = `OceanWeight::of_potential_ocean` of the potential ocean the step's own
+        condensed water fills of the context's basins (`PassContext::ocean_weight`, over
+        `cover::water_under`, the one expression), gated by the climate's division (step 3's
+        state); 0 at the first step, whose column is the whole inventory. The body is fixed within
+        the pass, so a step reads (t, partials) alone (L2's constraint; `ClimateOf`'s and
+        `PassClimate::Given`'s docs say so).
+      - The pass's published partition (`spun_partition`) is the record's computation: its ground
+        from the context and its air's own water (`PassContext::partition_ground`), the conditions
+        of its air at the context's heat flow and that ground's θ, `partition_over` and its one
+        cold profile. A column with nothing that condenses reads no climate there (L2), its
+        partition solved over the mean's isothermal span, which nothing of it reads.
+      - `DerivedBody::spun()` carries `SpunPasses`: the context read, K(P*) (`Solved::next`) and θ.
+        `MOST_PASSES` bounds the solve (a debug assertion) and `atmosphere_passes`' doc says 94.
+    - _Rule (f)_ (`published_surface`): the figures are K(P*)'s first stage, reused
+      (`GlobalFigures::of_first_stage`); the conditions, the cold profile, the partition and the
+      condensates are built on the published pass's context and θ (`surface_basis`, the
+      `PartitionGround` of hooks/figures.rs and `partition_over`, shared with the pass), and the
+      record's `Surface` keeps that basis crate-private (`SurfaceBasis`). The figures' own ground
+      (`GlobalFigures::partition_ground`) stands in for the stand-in and the tests;
+      `condensates_and_ice_under` is now test-only.
+    - _Q2, the moons' rounds_ (`moon_law`): round 1 derives the moon over its record under the
+      locked spin, `SeasonalSpin::of` of `BodyRotation::locked_frame` of its own `SpinInputs` (its
+      bulk the record's rule on `moon_before_passes`; the frame `derive`'s, its pole, obliquity
+      and period the same, at a despinning time of the least positive `f64` second, locked from
+      birth), and holds the law its tides give if it is locked at `parent_time`; otherwise round 2
+      derives it under that law and holds the law its tides give. `moon_rotations` and
+      `derive_rotation`'s moon arm both call it (`parent_now` takes the call chain's cosines and
+      the parent's fate).
+    - _Stand-ins_ (the six points' item 2), labelled "no rotation law, no basins, the bulk
+      material's regolith; a system's record derives the body under its law, its basins and its
+      lid": `derive_body` and its example's 255 ± 2 K, `atmosphere` and its example's 288 K,
+      `derive_moon`, `generate_planets`, `parent_at_epoch` and `PassSurface::stand_in`.
+    - _The C1 review's items:_ RC1-a, `PassFigures`' doc names the surface pressure its crater
+      contract's screening reads; a first stage refused (the screening's) is no figures in K, C₀'s,
+      a key change ("figures present"), as the record's `NotModelled` is. DD1, `PassContext::of`
+      debug-asserts its floats finite, which `Context::rank`'s doc states. DD2,
+      `a_context_ranks_equal_exactly_at_the_same_members` and the sample run with every end
+      re-evaluated (`with_ends_evaluated`).
+    - _Deviations and lane choices_ (each the lane's lean, recorded):
+      - The record lists an ice bulk's crust as its `H2O` solid (decision-p14-t54a-ganymede, C1
+        follow-up §C1.4), which the pass's area mix reads as its regolith (`CrustWater::Unlisted`):
+        the record's condensates are the last pass's but for that entry.
+      - A column with nothing that condenses: the pass reads no climate (L2), and the record
+        builds its own conditions at the context's heat flow and θ (computed, 0), never the
+        stand-in span. Its partition's climate field is the pass's isothermal one, read by nothing.
+      - The context carries the whole first stage so that the record reuses K(P*); tested against
+        computing it again.
+      - θ's gate is step 3's state at a greenhouse step and the air's at the published partition
+        and on the record.
+      - `parent_now` derives the parent over its record, though its moons read no pass value of
+        it, so that it is `primary_record`'s `ParentNow` to the bit.
+      - The window entry stays a pass's own (no lever).
+      - `T51b`'s driver stays the stand-in's (`a_body_that_settles_keeps_t51b_s_bits` holds there);
+        no lagged T51b driver is kept.
+      - Test-only seams: `PassDriver::Again(Under)` (the solve, then one pass at A* under C or
+        K(P*)), `passes::with_ends_evaluated`, `system::with_first_stage_recomputed` and
+        `surface_mix::spun_read::capture`.
+    - _Its tests._
+      - `under_the_batch_the_photometry_states_the_derivation_s_albedo`, the re-check over the 60
+        whole systems (954 bodies, every one over its record, at most 94 passes): planets 226,
+        members 567, moons 161; bracketed 12 (1.26%): planets 11 (5 jumps across the diagonal and
+        6 fixed points, the largest joint residual 6.6 × 10⁻¹⁰), a moon 1 (a diagonal jump), no
+        context jump, no frost; jumping 6 (0.63%); one took the second round (02000b2cdfff0000.0d00,
+        a diagonal jump in the end). Passes: planets {3: 52, 4: 84, 5: 15, 6: 9, 7: 10, 8: 8, 9: 1,
+        10: 4, 11: 4, 12: 3, 13: 1, 14: 3, 15: 2, 16: 5, 17: 6, 18: 4, 19: 1, 20: 2, 22: 1, 38: 2,
+        41: 1, 43: 1, 44: 2, 47: 1, 56: 3, 77: 1}, members {3: 357, 4: 151, 5: 33, 6: 11, 7: 5,
+        8: 7, 10: 1, 12: 1, 17: 1}, moons {3: 131, 4: 22, 5: 5, 7: 2, 41: 1}. Every converged
+        body's published context ≡ its K, and its record's figures agree with it; every body's
+        pass, run again at its published albedo and context, is its derivation to the bit, and its
+        publication the record's (range, contrasts and entries; 438 ice bulks' water entries
+        differ by their crust; 324 columns read no climate). Six bracketed bodies' figures differ
+        from the context their published pass read (listed: four jumps and two fixed points).
+      - `the_passes_endings_over_the_whole_sample_are_recorded` (ignored, run by name): over all
+        400 systems, planets 1,568 with 58 bracketed (3.70%) and 15 jumping (0.96%), members 3,751
+        (5, 0.13%; 1, 0.03%), moons 1,185 (5, 0.42%; 2, 0.17%); 6,504 bodies, 68 bracketed (1.05%),
+        18 jumping (0.28%).
+      - `a_moon_s_law_is_held_after_at_most_two_rounds` (150 systems): 426 moons with a law, 90 of
+        them regular; 275 held after round 1 (every regular moon, 90 synchronous; 100 giant-impact,
+        synchronous; 85 captures, 5 synchronous and 80 at 3:2), their locked spin their held law's
+        to the bit and their record round 1's derivation to the bit, its tides giving the held
+        law; 151 after round 2 (142 captures and 9 giant-impact moons, all despinning in both
+        rounds), no oscillation, each round 2 giving round 1's law to the bit.
+      - `no_record_section_reads_a_stand_in_derivation`: over the 60 whole systems at the epoch
+        and at `parent_time`, 1,908 present planets', members' and moons' derivations, every one
+        over its record; none over the stand-in (a moon lost before the time has no section a
+        derivation fills); every present body of a `generate_planets` system's surface not
+        modelled.
+      - `an_envelope_body_s_passes_over_its_record_are_its_stand_in_s`: 61 envelope bodies (60
+        systems at `parent_time`) the same to the bit, count included; no ringed planet with a
+        surface in the sample, so no ring parent reads a stand-in temperature that its record's
+        passes would move.
+      - `reusing_a_bracket_s_ends_moves_no_bit_of_the_sample`: 403 derivations (20 systems), 5
+        bracketed, the same with every end re-evaluated but for their counts.
+      - `the_record_s_figures_reuse_its_last_pass_s_k_to_the_bit`: the 20 whole systems'
+        snapshots at the epoch, every record's first stage computed again
+        (`with_first_stage_recomputed`), the same bits as with K(P*) reused.
+      - `a_context_ranks_equal_exactly_at_the_same_members` (stub contexts: one ulp apart ranks
+        unequal and agrees, another key never agrees, 10⁻⁸ apart does not agree).
+      - T56.d's `a_regular_moon_has_one_locking_time` (219 regular moons held after round 1, none
+        after round 2) and `under_their_own_tides_a_moon_s_law_and_its_locking_time_agree` keep
+        their 10⁻¹² for moons round 1 held (Q2's test 1 holds them to the bit); the record's checks
+        (`check_cover_rule`, `check_ice_bulk`, `check_published_figures`, the moon's conditions)
+        read the record's `SurfaceBasis`.
+    - _The escalations_ (the ruling's, item 5), two trip:
+      - Planets jumping: 5 of the 60 systems' 226 planets (2.21%) against ≤ 2%; over the 400
+        systems' 1,568 planets, the population of the ruling's 1.53%, 15 (0.96%). Pinned at 5.
+      - Round-2 moons: 151 of 426 (35%) against ≤ 1%, every one a capture or a giant-impact moon
+        unlocked in both rounds; none of the 90 regular moons, the population of T56.d's 3 of
+        2,025 unlocked. Each costs a second derivation that gives round 1's law to the bit. Pinned
+        at 151.
+      - Held: bracketed ≤ 3% (1.26%), jumping ≤ 1% (0.63%), a fixed point's joint residual ≤ 10⁻³
+        (6.6 × 10⁻¹⁰).
+    - _Moved goldens_, re-blessed at header 22 (`golden_diff.py`, scratch `c2/golden_diff.txt`:
+      12 changed, none extended, and its "not bumped" problem the checkpoint's):
+      - `planetary/surface_conditions_published` (479 values): the climate (mean, range,
+        contrasts), the column, pressure and gases, the ices and liquids, the relief's volcanism
+        and constructional share and the craters' target density, θ, the potential ocean and the
+        surface water, and one regime. 02000b2ca0000001.1100, at 100.000 000 1 Pa of N₂ at the
+        stand-in, is airless (a jump at the state edge); .0d02 loses its 5.8 × 10⁻⁸ of Ar ice; .e306
+        gains N₂ and CH₄ ices.
+      - `planetary/systems/` close_binary, eccentric_giant, fallback_black_hole, filler_b, filler_c,
+        hierarchical_triple, hot_jupiter, m_dwarf_resonant_chain, solar_like, subgiant and
+        wide_binary (1,116 values): T_eq, the photometry, the surface section and the condensates.
+        By class (scratch `c2/bodies.txt`):
+        - Seas over known basins: a pass now sees the liquids its record published, which its
+          stand-in's unknown basins covered with none. Cold `Snowball`s under a global
+          CH₄–C₂H₆–N₂ sea darken and warm: filler_c's icy member e201, Bond 0.851 → 0.046, T_eq
+          106.6 → 169.5 K, T_s 110 → 172 K and 0.89 → 23 bar, and its planet 0400, 0.814 → 0.046
+          and 91 → 137 K; wide_binary's 0700, 0.655 → 0.381; m_dwarf_resonant_chain's 0500, T_s
+          110 → 151 K, above N₂'s critical point, so its N₂ is airborne, 15 → 148 bar, its
+          condensable CH₄.
+        - The real climate span and cold profile: airless icy members' frosts cover more of
+          their surface and brighten (filler_b e201–e208, hot_jupiter e101–e104, eccentric_giant
+          e101, close_binary e807: Bond about 0.70–0.83 → 0.87–0.97, T_eq 3–8 K colder); CH₄
+          solids seasonal → not on filler_b and hot_jupiter; wide_binary's climate model
+          `Isothermal` → `EnergyBalance`; solar_like's cold temperate 0300's cloud, Bond 0.216 →
+          0.141, T_eq +5.4 K.
+        - θ at each step and the context's heat flow: the remaining last-digit moves.
+        - None: no surface state flips in the systems goldens, and no rotation, orbit or bulk
+          value moved, moons' laws included.
+      - The rest hold: the sim's other 13 lib goldens and its 24 golden integration targets, and
+        the server's `systems_in_range`, `system_bodies` and `--lib` `convert`, `scene` and
+        `requests`.
+    - _Its cost_ (indicative, no timed probe): the sample test 5.2 s, the fast-tier continuity test
+      (`planetary_properties`, the stand-in's) 26.5 s; no HEAD figures taken.
+    - _Files:_ `planetary/derive/pass_record.rs` (new), `derive/mod.rs`, `derive/passes.rs`,
+      `derive/atmosphere.rs`, `derive/atmosphere/surface_mix.rs`, `derive/rotation.rs`,
+      `hooks/figures.rs`, `hooks/figures/cover.rs`, `hooks/surface.rs`, `hooks/cold_traps.rs`'s doc,
+      `chem/partition.rs`, `moons/regular.rs`, `record.rs` and `planetary/system.rs`; the tests in
+      `derive/atmosphere/tests.rs` and `system/tests.rs`; the goldens above.
+    - _Checks:_ the sim's `--lib planetary` in five runs (`system` 82 passed and 4 ignored,
+      `derive` 220 and 1, `hooks` and `chem` 363 and 3, the other modules 425 and 3, R09's
+      `surface` 422 and 44), the 14 planetary lib goldens and 24 golden integration targets
+      re-blessed (all passed), the server's `systems_in_range`, `system_bodies` and `--lib`
+      `convert`, `scene` and `requests` (180 passed, 2 ignored), the changed items' doctests (19
+      passed), the fast-tier continuity test, Clippy `--lib --tests` on the sim, rustdoc with
+      `-D warnings`, rustfmt and Prettier. Not run: D1's re-check lists (the jumps' classes, the
+      context changes during settled passes), the slow tier, the lid's tests (C3's).

@@ -2016,7 +2016,18 @@ impl GlobalFigures {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn derive(inputs: &FiguresInputs<'_>) -> Result<Option<Self>, DeriveFiguresError> {
-        let Some(PassFigures {
+        Ok(pass_figures(inputs)?.map(|first| Self::of_first_stage(inputs, &first)))
+    }
+
+    /// The figures of the body `inputs` describe on their first stage `first`, [`pass_figures`]'s
+    /// of `inputs` (P14.T54.a; decision-p14-t54a-passes, "Cost escalation (after Batch B)", rule
+    /// (f)): [`derive`](Self::derive)'s magnetic field and surface water on it, to the bit.
+    ///
+    /// The record's figures are its own air's K(P*), the first stage its passes' solve computed
+    /// last (`Solved::next`), which it reuses here rather than computing it again: the same bits.
+    #[must_use]
+    pub(crate) fn of_first_stage(inputs: &FiguresInputs<'_>, first: &PassFigures) -> Self {
+        let PassFigures {
             interior,
             heat,
             surface_age,
@@ -2025,10 +2036,7 @@ impl GlobalFigures {
             outgassing,
             volcanism,
             relief,
-        }) = pass_figures(inputs)?
-        else {
-            return Ok(None);
-        };
+        } = *first;
         let air = inputs.atmosphere;
         let field = magnetic_field(&interior::FieldInputs {
             class: inputs.class,
@@ -2050,7 +2058,7 @@ impl GlobalFigures {
             outgassing,
         );
         let potential_ocean = cover::potential_ocean(relief.hypsometry(), surface_water);
-        Ok(Some(Self {
+        Self {
             state: air.state(),
             material: SurfaceMaterial::of(&inputs.fractions),
             radiogenic_heat_flow: heat.radiogenic,
@@ -2075,7 +2083,7 @@ impl GlobalFigures {
             surface_ices: Vec::new(),
             cloud_fraction: 0.0,
             air_cloud_fraction: air.cloud_fraction(),
-        }))
+        }
     }
 
     /// The figures with what reads the surface conditions `conditions`, P14.T24.a's at this
@@ -2226,7 +2234,7 @@ impl GlobalFigures {
 
     /// [`with_surface`](Self::with_surface), with its ocean and ices from P14.T51.a's published
     /// condensates `condensates` where they are given, as the record gives them
-    /// ([`condensates_and_ice_under`](Self::condensates_and_ice_under)): the cover by substance,
+    /// ([`condensates_and_ice_over`](Self::condensates_and_ice_over)): the cover by substance,
     /// from the condensates by their rule (decision-p14-t54a-water-consistency §4, W1–W3).
     ///
     /// - The liquids are the condensates' ([`Condensates::surface_liquids`]), in the entries'
@@ -2266,31 +2274,34 @@ impl GlobalFigures {
             self.heat_flow,
         );
         // Step 11: the ice, at the conditions' θ, `cover::ice_fraction` off the body's table, or as
-        // the record's water cover read it.
-        let off_table = || {
+        // the record's water cover read it, over the crust and surface water its cap read.
+        let off_table = |crust: Crust, surface_water: KilogramsPerSquareMetre| {
             cover::ice_fraction_over(
                 &cover::IceInputs {
                     conditions,
                     state: self.state,
-                    crust: self.impactors.crust(),
-                    surface_water: self.surface_water,
+                    crust,
+                    surface_water,
                 },
                 conditions.cold_area_over(cover::ice_threshold(self.state), table),
             )
         };
         let ice = || match water_ice {
-            WaterIce::OffTable => off_table(),
-            WaterIce::Covered(CoveredIce(ice)) => {
+            WaterIce::OffTable => off_table(self.impactors.crust(), self.surface_water),
+            WaterIce::Covered(covered) => {
                 #[cfg(test)]
                 match ICE_READS.with(core::cell::Cell::get) {
                     IceReads::Covered => {}
-                    IceReads::Unlevered => return off_table(),
+                    IceReads::Unlevered => return off_table(covered.crust, covered.surface_water),
                     IceReads::Checked => {
-                        hyperion_testkit::float::assert_same_bits(ice, off_table());
+                        hyperion_testkit::float::assert_same_bits(
+                            covered.ice,
+                            off_table(covered.crust, covered.surface_water),
+                        );
                         CHECKED_ICES.with(|cell| cell.set(cell.get() + 1));
                     }
                 }
-                ice
+                covered.ice
             }
         };
         let (surface_liquids, surface_ices) = match condensates {
@@ -2329,28 +2340,15 @@ impl GlobalFigures {
     /// What P14.T51.a's partition gives the record of the body whose atmosphere is `atmosphere`,
     /// whose conditions are `conditions` and whose surface gravity is `gravity` (P14.T51.a's second
     /// part), under the cold traps' rules, sky and regolith `traps` (P14.T51.f and P14.T51.i, held
-    /// by [`COLD_TRAPS_VERSION`](crate::planetary::hooks::cold_traps)): its partition and its
-    /// published condensates. The conditions' cold profile reads the body's insolation table
-    /// `table`, built once a body (lever (h), [`SurfaceConditions::cold_profile_over`]).
+    /// by [`COLD_TRAPS_VERSION`](crate::planetary::hooks::cold_traps)), on these figures' own ground
+    /// ([`partition_ground`](Self::partition_ground)): its partition and its published condensates.
+    /// The conditions' cold profile reads the body's insolation table `table`, built once a body
+    /// (lever (h), [`SurfaceConditions::cold_profile_over`]).
     ///
-    /// The partition is of the atmosphere's inventory before condensation
-    /// ([`Atmosphere::column_inventory`]), over the conditions' climate (their range about their
-    /// mean, [`ClimateSpan::about`]), on these figures' relief's basins ([`Basins::of`]). The
-    /// condensates are published over these figures' cover ([`Cover`]): the conditions' cold
-    /// area, the state, the crust and the water's surface share, all of it while the volcanic
-    /// greenhouse runs and [`cover::DRY_SURFACE_WATER_SHARE`] of it after
-    /// ([`cover::surface_water`]), and on a body whose bulk is ice its crust's frozen water where
-    /// that share holds none ([`water_cover`](Self::water_cover)). Under [`ColdTrapRules::Held`]
-    /// they are P14.T51.a's; under [`ColdTrapRules::Batch`] a body with no collisional atmosphere
-    /// that is not locked to its star takes the cold traps' airless branch and their ices
-    /// ([`cold_traps::publish`]).
-    ///
-    /// The third value is T24.b's water ice as the cover read it off that profile
-    /// ([`WaterCover::ice_fraction`]), which [`with_surface_under`](Self::with_surface_under) takes
-    /// in place of a second profile (lever (a), decision-p14-t54a-passes, "Cost escalation (after
-    /// Batch B)"): the same bits, since the ice reads only the figures, the conditions' mean
-    /// surface temperature and their cold profile, none of which their liquid-water flag
-    /// ([`SurfaceConditions::with_condensates`]) moves.
+    /// It is [`condensates_and_ice_over`](Self::condensates_and_ice_over) on that ground, which the
+    /// record takes from its published pass's context instead (rule (f), P14.T54.a): the tests'
+    /// form, on the figures alone.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn condensates_and_ice_under(
         &self,
@@ -2360,19 +2358,56 @@ impl GlobalFigures {
         traps: &RecordColdTraps<'_>,
         table: &ZonalInsolation,
     ) -> (Partition, Condensates, WaterIce) {
-        let (coldest, warmest) = conditions.climate_range();
-        let climate = ClimateSpan::about((coldest, warmest), conditions.mean_surface_temperature());
-        let ground = Ground::new(
-            gravity,
-            Basins::of(self.relief.hypsometry()),
-            cover::water_surface_share(self.outgassing),
-        );
-        let solved = partition(&climate, &ground, &atmosphere.column_inventory());
-        // One profile for every solid's cold area, water's T24.b ice included.
-        let profile = conditions.cold_profile_over(table);
+        self.condensates_and_ice_over(
+            atmosphere,
+            conditions,
+            &self.partition_ground(gravity),
+            traps,
+            table,
+        )
+    }
+
+    /// What P14.T51.a's partition gives the record of the body whose atmosphere is `atmosphere`
+    /// and whose conditions are `conditions`, on the ground `ground`, under the cold traps' rules,
+    /// sky and regolith `traps` (P14.T51.f and P14.T51.i, held by
+    /// [`COLD_TRAPS_VERSION`](crate::planetary::hooks::cold_traps)): its partition and its
+    /// published condensates. The conditions' cold profile reads the body's insolation table
+    /// `table`, built once a body (lever (h), [`SurfaceConditions::cold_profile_over`]).
+    ///
+    /// The partition and water's cover are [`partition_over`]'s, the one computation a pass's area
+    /// mix publishes over (P14.T54.a, rule (f)). The condensates are published over that cover
+    /// ([`Cover`]): the conditions' cold area, the state and water's cover. Under
+    /// [`ColdTrapRules::Held`] they are P14.T51.a's; under [`ColdTrapRules::Batch`] a body with no
+    /// collisional atmosphere that is not locked to its star takes the cold traps' airless branch
+    /// and their ices ([`cold_traps::publish`]), which read these figures' heat flow, crust and
+    /// craters.
+    ///
+    /// The third value is T24.b's water ice as the cover read it off that profile
+    /// ([`WaterCover::ice_fraction`]), which [`with_surface_under`](Self::with_surface_under) takes
+    /// in place of a second profile (lever (a), decision-p14-t54a-passes, "Cost escalation (after
+    /// Batch B)"): the same bits, since the ice reads only the ground, the conditions' mean surface
+    /// temperature and their cold profile, none of which their liquid-water flag
+    /// ([`SurfaceConditions::with_condensates`]) moves.
+    #[must_use]
+    pub(crate) fn condensates_and_ice_over(
+        &self,
+        atmosphere: &Atmosphere,
+        conditions: &SurfaceConditions,
+        ground: &PartitionGround,
+        traps: &RecordColdTraps<'_>,
+        table: &ZonalInsolation,
+    ) -> (Partition, Condensates, WaterIce) {
+        let PartitionOver {
+            partition: solved,
+            profile,
+            water,
+        } = partition_over(atmosphere, conditions, ground, table);
         let cold_area = |t: Kelvin| profile.area_below(t);
-        let water = self.water_cover(conditions, &profile);
-        let ice = WaterIce::Covered(CoveredIce(water.ice_fraction));
+        let ice = WaterIce::Covered(CoveredIce {
+            ice: water.ice_fraction,
+            crust: ground.crust,
+            surface_water: ground.surface_water,
+        });
         let cover = Cover {
             cold_area: &cold_area,
             state: atmosphere.state(),
@@ -2386,7 +2421,7 @@ impl GlobalFigures {
                 &ColdTrapBody {
                     atmosphere,
                     profile: &profile,
-                    gravity,
+                    gravity: ground.ground.gravity(),
                     heat_flow: self.heat_flow,
                     crust: self.impactors.crust(),
                     craters: &self.craters,
@@ -2415,37 +2450,41 @@ impl GlobalFigures {
         (solved, published)
     }
 
-    /// Water's cover under the conditions `conditions`, whose cold profile is `profile`: P14.T24.b's
-    /// surface water, potential ocean and ice, the ice's area read off the profile at its edge, and
-    /// ice Ih's density at the mean surface temperature ([`WaterCover`]). On a body whose bulk is
-    /// ice its crust is listed where the surface water holds none ([`WaterCover::crust_water`]):
-    /// the partition's whole frozen water at that ice's area (decision-p14-t54a-ganymede, C1
-    /// follow-up §C1.4), while the surface water stays T24.b's, on water's Jeans verdict.
+    /// These figures' own ground for the partition of a body of surface gravity `gravity`
+    /// ([`PartitionGround`]): their relief's basins ([`Basins::of`]), the water's surface share at
+    /// their outgassing ([`cover::water_surface_share`]), their surface water and potential ocean,
+    /// their craters' crust, and on a body whose bulk is ice its crust listed
+    /// ([`CrustWater::Listed`]; decision-p14-t54a-ganymede, C1 follow-up §C1.4).
+    #[must_use]
+    pub(crate) fn partition_ground(&self, gravity: MetresPerSecondSquared) -> PartitionGround {
+        PartitionGround {
+            ground: Ground::new(
+                gravity,
+                Basins::of(self.relief.hypsometry()),
+                cover::water_surface_share(self.outgassing),
+            ),
+            surface_water: self.surface_water,
+            potential_ocean: self.potential_ocean,
+            crust: self.impactors.crust(),
+            crust_water: CrustWater::of_record(self.material),
+        }
+    }
+
+    /// Water's cover under the conditions `conditions`, whose cold profile is `profile`, on these
+    /// figures' own ground ([`partition_ground`](Self::partition_ground); [`water_cover_over`]).
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn water_cover(
         &self,
         conditions: &SurfaceConditions,
         profile: &ColdProfile,
     ) -> WaterCover {
-        let ice = cover::ice_fraction_over(
-            &cover::IceInputs {
-                conditions,
-                state: self.state,
-                crust: self.impactors.crust(),
-                surface_water: self.surface_water,
-            },
-            profile.area_below(cover::ice_threshold(self.state)),
-        );
-        WaterCover {
-            surface_water: self.surface_water,
-            potential_ocean: self.potential_ocean,
-            ice_fraction: ice,
-            ice_density: substance::ice_ih_density(conditions.mean_surface_temperature()),
-            crust_water: match self.material {
-                SurfaceMaterial::Ice => CrustWater::Listed,
-                SurfaceMaterial::Rock => CrustWater::Unlisted,
-            },
-        }
+        water_cover_over(
+            &self.partition_ground(MetresPerSecondSquared::new(0.0)),
+            self.state,
+            conditions,
+            profile,
+        )
     }
 
     /// The heat flow at the surface F, W m⁻²: the non-tidal part with the tidal heat added
@@ -2659,15 +2698,115 @@ impl GlobalFigures {
     }
 }
 
-/// The figures' first stage of a body at a time (P14.T54.a; decision-p14-t54a-passes §1.1): what
-/// [`GlobalFigures::derive`] computes before its magnetic field and its surface water, which reads
-/// the pass's air only through its state and mean surface temperature. Its heat ([`heat_at`]),
-/// its crater contract and surface age ([`crater_contract`]), its outgassing, its volcanism level
-/// and its relief, from which a pass's context takes the basins, the water's surface share, the
-/// heat flow, the surface age, the regime and the craters' crust class.
+/// What P14.T51.a's partition of a body reads beyond its air and its conditions (P14.T54.a;
+/// decision-p14-t54a-passes, "Cost escalation (after Batch B)", rule (f)): the ground its
+/// reservoirs lie on (its gravity, its basins and the water's surface share), and water's cover
+/// beside it: the surface water `σ_s` and the potential ocean it fills, the crust that caps
+/// T24.b's ice, and whether an ice bulk's crust is listed.
 ///
-/// [`pass_figures`] builds it, and [`GlobalFigures::derive`] is built on it, to the bit.
+/// The record's figures give their own ([`GlobalFigures::partition_ground`]); a pass, and the
+/// record under rule (f), the published pass's context
+/// ([`PassContext::partition_ground`](crate::planetary::derive::pass_record::PassContext::partition_ground)),
+/// so that the record's partition is its last pass's to the bit.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PartitionGround {
+    /// The ground: the surface gravity, the basins and the water's surface share.
+    pub(crate) ground: Ground,
+    /// The surface water `σ_s` ([`cover::surface_water`]'s rule).
+    pub(crate) surface_water: KilogramsPerSquareMetre,
+    /// The potential ocean `σ_s` fills of the basins, 0 to 1.
+    pub(crate) potential_ocean: f64,
+    /// The crust, whose silicate caps T24.b's ice by the surface water ([`cover::ice_fraction`]).
+    pub(crate) crust: Crust,
+    /// Whether an ice bulk's crust is listed ([`CrustWater`]).
+    pub(crate) crust_water: CrustWater,
+}
+
+/// What [`partition_over`] gives: the partition, the cold profile its cover reads, and water's
+/// cover.
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PartitionOver {
+    /// The partition over the conditions' climate.
+    pub(crate) partition: Partition,
+    /// The conditions' cold profile, read off the body's insolation table.
+    pub(crate) profile: ColdProfile,
+    /// Water's cover.
+    pub(crate) water: WaterCover,
+}
+
+/// P14.T51.a's partition of the body whose atmosphere is `atmosphere` and whose conditions are
+/// `conditions`, on the ground `ground`, with its cold profile off the body's insolation table
+/// `table` and water's cover (P14.T54.a, rule (f)): the one computation a pass's area mix and the
+/// record publish their condensates over.
+///
+/// The partition is of the atmosphere's inventory before condensation
+/// ([`Atmosphere::column_inventory`]), over the conditions' climate (their range about their
+/// mean, [`ClimateSpan::about`]), on the ground. The profile is the conditions'
+/// ([`SurfaceConditions::cold_profile_over`]), one for every solid's cold area, and water's cover
+/// is [`water_cover_over`]'s.
+#[must_use]
+pub(crate) fn partition_over(
+    atmosphere: &Atmosphere,
+    conditions: &SurfaceConditions,
+    ground: &PartitionGround,
+    table: &ZonalInsolation,
+) -> PartitionOver {
+    let (coldest, warmest) = conditions.climate_range();
+    let climate = ClimateSpan::about((coldest, warmest), conditions.mean_surface_temperature());
+    let solved = partition(&climate, &ground.ground, &atmosphere.column_inventory());
+    let profile = conditions.cold_profile_over(table);
+    let water = water_cover_over(ground, atmosphere.state(), conditions, &profile);
+    PartitionOver {
+        partition: solved,
+        profile,
+        water,
+    }
+}
+
+/// Water's cover on the ground `ground` of a body in the state `state` under the conditions
+/// `conditions`, whose cold profile is `profile`: P14.T24.b's surface water, potential ocean and
+/// ice, the ice's area read off the profile at its edge ([`cover::ice_fraction`]'s rule over the
+/// ground's crust and surface water), and ice Ih's density at the mean surface temperature
+/// ([`WaterCover`]). On a body whose bulk is ice its crust is listed where the ground says so
+/// ([`WaterCover::crust_water`]): the partition's whole frozen water at that ice's area
+/// (decision-p14-t54a-ganymede, C1 follow-up §C1.4), while the surface water stays T24.b's, on
+/// water's Jeans verdict.
+#[must_use]
+pub(crate) fn water_cover_over(
+    ground: &PartitionGround,
+    state: SurfaceState,
+    conditions: &SurfaceConditions,
+    profile: &ColdProfile,
+) -> WaterCover {
+    let ice = cover::ice_fraction_over(
+        &cover::IceInputs {
+            conditions,
+            state,
+            crust: ground.crust,
+            surface_water: ground.surface_water,
+        },
+        profile.area_below(cover::ice_threshold(state)),
+    );
+    WaterCover {
+        surface_water: ground.surface_water,
+        potential_ocean: ground.potential_ocean,
+        ice_fraction: ice,
+        ice_density: substance::ice_ih_density(conditions.mean_surface_temperature()),
+        crust_water: ground.crust_water,
+    }
+}
+
+/// The figures' first stage of a body at a time (P14.T54.a; decision-p14-t54a-passes §1.1): what
+/// [`GlobalFigures::derive`] computes before its magnetic field and its surface water. It reads
+/// the pass's air through its state, its mean surface temperature and its surface pressure, which
+/// the crater contract's atmospheric screening reads ([`crater_contract`]). Its heat
+/// ([`heat_at`]), its crater contract and surface age, its outgassing, its volcanism level and its
+/// relief, from which a pass's context takes the basins, the water's surface share, the heat
+/// flow, the surface age, the regime and the craters' crust class.
+///
+/// [`pass_figures`] builds it, and [`GlobalFigures::derive`] is built on it, to the bit
+/// ([`GlobalFigures::of_first_stage`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PassFigures {
     interior: Interior,
     heat: HeatAt,
@@ -2682,10 +2821,6 @@ pub(crate) struct PassFigures {
 impl PassFigures {
     /// The basins the liquids fill, the relief's hypsometry ([`Basins::of`]), as the record's
     /// partition reads them.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P14.T54.a's C2 wires the passes' context")
-    )]
     #[must_use]
     pub(crate) fn basins(&self) -> Basins {
         Basins::of(self.relief.hypsometry())
@@ -2693,60 +2828,49 @@ impl PassFigures {
 
     /// The share of the condensed water at the surface at the outgassing
     /// ([`cover::water_surface_share`]), as the record's partition reads it.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P14.T54.a's C2 wires the passes' context")
-    )]
     #[must_use]
     pub(crate) fn water_surface_share(&self) -> f64 {
         cover::water_surface_share(self.outgassing)
     }
 
     /// The heat flow at the surface F ([`GlobalFigures::heat_flow`]).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P14.T54.a's C2 wires the passes' context")
-    )]
     #[must_use]
     pub(crate) const fn heat_flow(&self) -> WattsPerSquareMetre {
         self.heat.heat_flow
     }
 
     /// The surface age S ([`GlobalFigures::surface_age`]).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P14.T54.a's C2 wires the passes' context")
-    )]
     #[must_use]
     pub(crate) const fn surface_age(&self) -> Years {
         self.surface_age
     }
 
     /// The tectonic regime ([`GlobalFigures::tectonic_regime`]).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P14.T54.a's C2 wires the passes' context")
-    )]
     #[must_use]
     pub(crate) const fn tectonic_regime(&self) -> TectonicRegime {
         self.heat.regime
     }
 
     /// The craters' crust class at the air's mean surface temperature ([`Impactors::crust`]).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P14.T54.a's C2 wires the passes' context")
-    )]
     #[must_use]
     pub(crate) const fn crust(&self) -> Crust {
         self.impactors.crust()
+    }
+
+    /// Whether the volcanic greenhouse still runs at the outgassing, the branch that sets the
+    /// water's surface share ([`water_surface_share`](Self::water_surface_share)): the outgassing
+    /// at least [`VOLCANIC_GREENHOUSE_OUTGASSING`](wet_epoch::VOLCANIC_GREENHOUSE_OUTGASSING).
+    #[must_use]
+    pub(crate) fn volcanic_greenhouse(&self) -> bool {
+        self.outgassing >= wet_epoch::VOLCANIC_GREENHOUSE_OUTGASSING
     }
 }
 
 /// The figures' first stage of the body `inputs` describe ([`PassFigures`]), with
 /// [`GlobalFigures::derive`]'s `None` and errors, in its order: `None` for a body in the
 /// gas-envelope state or of a class with no solid surface, then an age that is not finite and
-/// non-negative, then the crater contract's.
+/// non-negative, then the crater contract's, which its air's surface pressure can bring about
+/// (the screening's, [`DeriveFiguresError::Craters`]).
 ///
 /// # Errors
 ///
@@ -3227,16 +3351,20 @@ pub(crate) enum WaterIce {
     /// Read off the conditions' cold profile over the body's insolation table.
     OffTable,
     /// The record's, its water cover's ice fraction as
-    /// [`GlobalFigures::condensates_and_ice_under`] read it off the cold profile it built: the
+    /// [`GlobalFigures::condensates_and_ice_over`] read it off the cold profile it built: the
     /// same bits as [`OffTable`](Self::OffTable), with no second profile (lever (a)).
     Covered(CoveredIce),
 }
 
-/// T24.b's water ice as the record's water cover read it ([`WaterIce::Covered`]): built by
-/// [`GlobalFigures::condensates_and_ice_under`] alone, so that no other ice stands in for the
-/// cold profile's.
+/// T24.b's water ice as the record's water cover read it ([`WaterIce::Covered`]), with the crust
+/// and the surface water its cap read: built by [`GlobalFigures::condensates_and_ice_over`]
+/// alone, so that no other ice stands in for the cold profile's.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct CoveredIce(f64);
+pub(crate) struct CoveredIce {
+    ice: f64,
+    crust: Crust,
+    surface_water: KilogramsPerSquareMetre,
+}
 
 /// How [`GlobalFigures::with_surface_under`] reads a [`WaterIce::Covered`] ice, a test-only switch
 /// of lever (a) ([`with_ice_reads`]).

@@ -2093,7 +2093,7 @@ fn the_batch_holds_earth_s_water_and_titan_s_methane_on_the_minor_branch() {
     let air = atmosphere_under(
         &earth,
         &PassSurface {
-            climate_of: &climate,
+            climate: PassClimate::Given(&climate),
             ..PassSurface::stand_in(PassLight::HottestHost)
         },
     );
@@ -2118,7 +2118,7 @@ fn the_batch_holds_earth_s_water_and_titan_s_methane_on_the_minor_branch() {
     let batch = atmosphere_under(
         &titan,
         &PassSurface {
-            climate_of: &climate,
+            climate: PassClimate::Given(&climate),
             ..PassSurface::stand_in(PassLight::HottestHost)
         },
     );
@@ -2159,7 +2159,7 @@ fn a_dry_earth_beyond_the_maximum_greenhouse_still_runs_away_past_its_cold_trap(
     let air = atmosphere_under(
         &earth,
         &PassSurface {
-            climate_of: &climate,
+            climate: PassClimate::Given(&climate),
             ..PassSurface::stand_in(PassLight::HottestHost)
         },
     );
@@ -2219,6 +2219,7 @@ fn derived(placed: &PlacedBody, disc: &DiscProfile) -> DerivedBody {
 /// do not move).
 #[test]
 fn a_body_that_settles_keeps_t51b_s_bits() {
+    use crate::planetary::derive::pass_record::PassRecord;
     use crate::planetary::derive::{PassDriver, derive_body_driven};
 
     let disc = solar_disc();
@@ -2254,7 +2255,16 @@ fn a_body_that_settles_keeps_t51b_s_bits() {
     ));
     for (name, body) in &placed {
         let derive = |driver| {
-            derive_body_driven(driver, body, &hosts, &disc, SOLAR_AGE, UniverseTime::EPOCH).unwrap()
+            derive_body_driven(
+                driver,
+                body,
+                &hosts,
+                &disc,
+                SOLAR_AGE,
+                UniverseTime::EPOCH,
+                PassRecord::StandIn,
+            )
+            .unwrap()
         };
         let (solved, t51b) = (derive(PassDriver::Solve), derive(PassDriver::T51b));
         assert_eq!(solved.convergence(), Convergence::Converged, "{name}");
@@ -2316,6 +2326,7 @@ fn the_exobase_multiple_loses_ganymede_s_nitrogen_and_keeps_titan_s() {
 /// body's ice holds the same at every albedo.
 #[test]
 fn bulk_air_retention_is_independent_of_the_albedo_a_pass_reads() {
+    use crate::planetary::derive::pass_record::PassRecord;
     use crate::planetary::derive::{PassDriver, derive_body_driven};
 
     // The bulk-air verdict of each gas: Jeans's test's, not the ice's.
@@ -2348,7 +2359,16 @@ fn bulk_air_retention_is_independent_of_the_albedo_a_pass_reads() {
     placed.push(("an icy member as placed", member));
     for (name, body) in &placed {
         let derive = |driver| {
-            derive_body_driven(driver, body, &hosts, &disc, SOLAR_AGE, UniverseTime::EPOCH).unwrap()
+            derive_body_driven(
+                driver,
+                body,
+                &hosts,
+                &disc,
+                SOLAR_AGE,
+                UniverseTime::EPOCH,
+                PassRecord::StandIn,
+            )
+            .unwrap()
         };
         let solved = derive(PassDriver::Solve);
         let air = solved.atmosphere();
@@ -3438,7 +3458,7 @@ fn a_column_with_nothing_to_condense_reads_no_step_climate() {
         ClimateSpan::isothermal(t)
     };
     let surface = PassSurface {
-        climate_of: &climate,
+        climate: PassClimate::Given(&climate),
         ..PassSurface::stand_in(PassLight::HottestHost)
     };
     let read = |inputs: &AtmosphereInputs, exits: Exits| {

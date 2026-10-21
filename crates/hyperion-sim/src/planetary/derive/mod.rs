@@ -54,7 +54,10 @@
 //!    temperature at an albedo, from 0.3 on the first pass, gives the atmosphere its escape leaves
 //!    and its greenhouse holds, whose area-mix Bond albedo under the light of the body's hosts
 //!    (P14.T51.b) the next pass reads. The passes run until the equilibrium temperature converges,
-//!    and a body they do not settle takes its bracketed fixed point (P14.T51.h).
+//!    and a body they do not settle takes its bracketed fixed point (P14.T51.h). A body whose
+//!    system holds its rotation law takes them over its record from P14.T54.a: its spin's climate,
+//!    and the context the previous pass's own air gives, its basins, water share and heat flow
+//!    (`pass_record`); [`derive_body`] itself takes the passes' stand-in, with no law.
 //! 5. **Rotation and tides** (T14) are not run here: a body's spin reads its drawn pole against
 //!    its orbit's normal and whether it had a giant impact, which only the generator knows (a moon
 //!    of its is a body of its system), so the generator derives it from this assembly's radius,
@@ -83,6 +86,7 @@ pub mod habitable_zone;
 pub mod irradiation;
 pub mod limits;
 pub mod m_dwarfs;
+pub(crate) mod pass_record;
 pub(crate) mod passes;
 pub mod photometry;
 pub mod radius;
@@ -114,9 +118,9 @@ pub use rotation::tidal_locking_time;
 use crate::orbit::KeplerElements;
 use crate::planetary::chem::inventory::{ElementInventory, InventoryInputs, element_inventory};
 use crate::planetary::derive::atmosphere::{
-    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, PassLight, PassSurface,
-    SurfaceMaterial, VolatileDraws, VolatileInventory, atmosphere_under, energy_limited_loss,
-    formation_temperature,
+    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Gas, Insolation, PassLight, PassSurface,
+    SpunClimate, SurfaceMaterial, VolatileDraws, VolatileInventory, atmosphere_under,
+    energy_limited_loss, formation_temperature,
 };
 use crate::planetary::derive::composition::{
     SolveCompositionError, dry_composition, formed_with_envelope,
@@ -125,10 +129,14 @@ use crate::planetary::derive::envelope::radius_with_envelope;
 use crate::planetary::derive::habitable_zone::HabitableLimit;
 use crate::planetary::derive::irradiation::luminosity_flux;
 use crate::planetary::derive::limits::TidalPlanet;
+use crate::planetary::derive::pass_record::{
+    PassBulk, PassContext, PassRecord, PassRecordOf, WaterGate,
+};
 use crate::planetary::derive::passes::Convergence;
 use crate::planetary::derive::photometry::area_mix::{self, HostShade, HostShadeSum, ShadeBook};
 use crate::planetary::derive::rotation::tides;
 use crate::planetary::disc::DiscProfile;
+use crate::planetary::hooks::surface::OceanWeight;
 use crate::planetary::params::{
     GAS_GIANT_ENVELOPE_FRACTION, ICE_GIANT_MASS, ICY_WATER_FRACTION, THIN_ENVELOPE_FRACTION,
 };
@@ -694,6 +702,7 @@ pub struct DerivedBody {
     atmosphere: Atmosphere,
     atmosphere_passes: u32,
     convergence: Convergence,
+    spun: Option<SpunPasses>,
     regolith_albedo: f64,
     internal_luminosity: Watts,
     radius: EarthRadii,
@@ -811,18 +820,28 @@ impl DerivedBody {
     }
 
     /// How many passes of P14.T12 and T13 the derivation took: as many as converge, at most
-    /// `PLAIN_PASSES` (P14.T51.b), and for a body they do not settle its bisection's too, at most
-    /// 57 in all (P14.T51.h).
+    /// `PLAIN_PASSES` (P14.T51.b), and for a body they do not settle its bisection's too: at most
+    /// `MOST_PASSES`, 24 + 2 × (2 + 32 + 1) = 94 in all, under a lagged context (P14.T54.a;
+    /// decision-p14-t54a-passes §1.5), and T51.h's 57 over the stand-in, whose bracket takes one
+    /// round with its ends reused.
     #[cfg_attr(
         not(test),
         expect(
             dead_code,
-            reason = "the batch's convergence tests read it until P14.T54.a"
+            reason = "the batch's convergence tests read it until P14.T54.a's bless note"
         )
     )]
     #[must_use]
     pub(crate) const fn atmosphere_passes(&self) -> u32 {
         self.atmosphere_passes
+    }
+
+    /// What the passes over the body's record leave for its record (P14.T54.a; rule (f)): the
+    /// context the published pass read, the context its own air gives and θ of its published
+    /// partition. `None` for a derivation over the passes' stand-in, with no rotation law.
+    #[must_use]
+    pub(crate) const fn spun(&self) -> Option<&SpunPasses> {
+        self.spun.as_ref()
     }
 
     /// How the derivation's passes ended (P14.T51.h): converged or bracketed, with the published
@@ -1147,7 +1166,9 @@ pub fn radius_rank_in_window(rank: UnitUniform, window: &RadiusWindow) -> UnitUn
 /// # Examples
 ///
 /// Earth, at the rank that gives its composition's place in the observed spread (38%), about the
-/// present Sun in the zero-age Sun's disc:
+/// present Sun in the zero-age Sun's disc. Its 255 ± 2 K is the passes' stand-in's (no rotation
+/// law, no basins, the bulk material's regolith), as every call here takes; a system's record
+/// derives the body under its law, its basins and its lid (P14.T54.a):
 ///
 /// ```
 /// use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
@@ -1188,7 +1209,15 @@ pub fn derive_body(
     age: Years,
     t: UniverseTime,
 ) -> Result<DerivedBody, DeriveBodyError> {
-    derive_body_driven(PassDriver::Solve, placed, hosts, disc, age, t)
+    derive_body_driven(
+        PassDriver::Solve,
+        placed,
+        hosts,
+        disc,
+        age,
+        t,
+        PassRecord::StandIn,
+    )
 }
 
 /// What drives the passes (P14.T51.h): the bracketed fixed point, and for the tests the loop
@@ -1202,19 +1231,38 @@ pub(crate) enum PassDriver {
     #[cfg(test)]
     T51b,
     /// One pass at the albedo given, published, for the tests that hold what a pass reads apart
-    /// from the albedo it reads.
+    /// from the albedo it reads; over a record, under the first context, C₀.
     #[cfg(test)]
     Once(BondAlbedo),
+    /// The solve, then one pass more at its published albedo under the context `under` names,
+    /// published, its count the solve's and one, its outcome the solve's: the joint residual's
+    /// and rule (f)'s tests (decision-p14-t54a-passes §1.5). Over the stand-in, one pass more at
+    /// the published albedo.
+    #[cfg(test)]
+    Again(Under),
 }
 
-/// [`derive_body`], its passes driven by `driver` (P14.T51.h): [`derive_body`] is this under
-/// [`PassDriver::Solve`].
+/// Which context [`PassDriver::Again`]'s pass reads (the tests').
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Under {
+    /// The context the published pass read, C: it repeats that pass, to the bit.
+    Read,
+    /// The context the published pass's own air gives, K(P*): the joint residual's pass.
+    Next,
+}
+
+/// [`derive_body`], its passes driven by `driver` (P14.T51.h) over `record` (P14.T54.a):
+/// [`derive_body`] is this under [`PassDriver::Solve`] over the passes' stand-in
+/// ([`PassRecord::StandIn`]).
 ///
 /// The passes take the area-mix albedo (P14.T51.b) and run from
 /// [`BondAlbedo::BEFORE_ATMOSPHERES`] until the equilibrium temperature changes by at most
 /// [`ATMOSPHERE_CONVERGENCE`] of itself between passes, at most
 /// [`PLAIN_PASSES`](passes::PLAIN_PASSES) of them, under the light of its hosts built once before
-/// them; a body they do not settle takes its bracketed fixed point ([`passes`]).
+/// them; a body they do not settle takes its bracketed fixed point ([`passes`]). Over a record
+/// each pass reads its spin's climate and the context the previous pass's own air gives
+/// ([`passes::solve_in_context`]; [`PassBody::passes`]).
 ///
 /// # Errors
 ///
@@ -1226,6 +1274,7 @@ pub(crate) fn derive_body_driven(
     disc: &DiscProfile,
     age: Years,
     t: UniverseTime,
+    record: PassRecord<'_>,
 ) -> Result<DerivedBody, DeriveBodyError> {
     let BeforePasses {
         age_now,
@@ -1256,22 +1305,32 @@ pub(crate) fn derive_body_driven(
         Some(_) | None => Crust::Solid,
     };
     let class = PlanetClass::of(mass, &fractions);
+    // The bulk at the time, which no pass moves: what the record's bulk rule reads.
+    let volume = 4.0 / 3.0 * core::f64::consts::PI * (r * r * r);
+    let density = KilogramsPerCubicMetre::new(mass_kg.value() / volume);
+    let surface_gravity = MetresPerSecondSquared::new(GM_EARTH * mass.value() / (r * r));
+    let pass_bulk = PassBulk {
+        mass,
+        radius,
+        density,
+        surface_gravity,
+        class,
+        fractions,
+        inventory_water: bulk.elements.volatiles().water(),
+    };
     let passes = PassBody {
         placed,
         sky: &sky,
         bulk: &bulk,
+        pass_bulk: &pass_bulk,
         class,
         crust,
         internal_luminosity,
         radius: Metres::new(r),
         age: age_now,
     }
-    .passes(driver);
+    .passes(driver, record);
     let (passes, regolith_albedo) = passes;
-
-    let volume = 4.0 / 3.0 * core::f64::consts::PI * (r * r * r);
-    let density = KilogramsPerCubicMetre::new(mass_kg.value() / volume);
-    let surface_gravity = MetresPerSecondSquared::new(GM_EARTH * mass.value() / (r * r));
 
     // T15.
     let hill = hill_radius(a, 0.0, mass_kg, hosts.primary_mass);
@@ -1298,6 +1357,7 @@ pub(crate) fn derive_body_driven(
         atmosphere: passes.air,
         atmosphere_passes: passes.count,
         convergence: passes.convergence,
+        spun: passes.spun,
         regolith_albedo,
         internal_luminosity,
         radius,
@@ -1524,13 +1584,15 @@ fn tidal_planet(
 pub(crate) const ATMOSPHERE_CONVERGENCE: f64 = 1e-9;
 
 /// What each of T12's and T13's passes reads of a body (P14.T13.c): its placement, its sky, the
-/// bulk its air reads, its class (which a gas envelope's albedo reads), its crust, its own
-/// luminosity and radius, and its age.
+/// bulk its air reads, its bulk at the time (which its record's bulk rule reads, P14.T54.a), its
+/// class (which a gas envelope's albedo reads), its crust, its own luminosity and radius, and its
+/// age.
 #[derive(Debug, Clone, Copy)]
 struct PassBody<'a> {
     placed: &'a PlacedBody,
     sky: &'a Sky,
     bulk: &'a AirBulk,
+    pass_bulk: &'a PassBulk,
     class: PlanetClass,
     crust: Crust,
     internal_luminosity: Watts,
@@ -1540,7 +1602,7 @@ struct PassBody<'a> {
 
 /// What the passes leave (P14.T13.c, P14.T51.b, P14.T51.h): the albedo the published pass read,
 /// its equilibrium and heated temperatures and its atmosphere, how many passes were taken and how
-/// they ended.
+/// they ended, and over a record what its record reads of them (P14.T54.a).
 #[derive(Debug, Clone, Copy)]
 struct Passes {
     albedo: BondAlbedo,
@@ -1549,7 +1611,49 @@ struct Passes {
     air: Atmosphere,
     count: u32,
     convergence: Convergence,
+    spun: Option<SpunPasses>,
 }
+
+/// What a body's passes over its record leave for its record (P14.T54.a; decision-p14-t54a-passes,
+/// "Cost escalation (after Batch B)", rule (f)), crate-private on its derivation.
+///
+/// - The context its published pass read, whose basins, water share, heat flow and crust the
+///   record's conditions, partition and condensates are built on, so that they are that pass's to
+///   the bit.
+/// - The context the published pass's own air gives, K(P*), the last the solve computed
+///   (`Solved::next`): the record's figures reuse its first stage. For a converged body it agrees
+///   with the one read within 10⁻⁹; a bracketed body's differs by its context residual.
+/// - θ of the published pass's partition: the potential ocean its air's condensed water fills of
+///   the read context's basins ([`PassContext::ocean_weight`]), which the record's conditions read.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SpunPasses {
+    context: PassContext,
+    next: PassContext,
+    ocean_weight: OceanWeight,
+}
+
+impl SpunPasses {
+    /// The context the published pass read.
+    #[must_use]
+    pub(crate) const fn context(&self) -> &PassContext {
+        &self.context
+    }
+
+    /// The context the published pass's own air gives, K(P*).
+    #[must_use]
+    pub(crate) const fn next(&self) -> &PassContext {
+        &self.next
+    }
+
+    /// θ of the published pass's partition.
+    #[must_use]
+    pub(crate) const fn ocean_weight(&self) -> OceanWeight {
+        self.ocean_weight
+    }
+}
+
+/// One pass's output: its equilibrium and heated temperatures and its atmosphere.
+type PassOut = (Kelvin, Kelvin, Atmosphere);
 
 impl PassBody<'_> {
     /// One pass at the albedo `albedo` over the surface `surface`: the equilibrium temperature it
@@ -1590,16 +1694,21 @@ impl PassBody<'_> {
     /// last one's atmosphere gave, until the equilibrium temperature changes by at most
     /// [`ATMOSPHERE_CONVERGENCE`] of itself, at most [`PLAIN_PASSES`](passes::PLAIN_PASSES) of
     /// them, a body they do not settle then taking its bracketed fixed point ([`passes::solve`],
-    /// P14.T51.h), as `driver` drives them.
+    /// P14.T51.h), as `driver` drives them, over `record`.
     ///
-    /// Every pass reads one surface, built once before the first: the passes' stand-in surface
-    /// ([`PassSurface::stand_in`]) under the body's hosts' light, which [`Sky::of`] builds. So a
-    /// pass is a function of the albedo it reads alone, which the bisection needs.
+    /// - **Over the stand-in** ([`PassRecord::StandIn`]): every pass reads one surface, built once
+    ///   before the first: the passes' stand-in surface ([`PassSurface::stand_in`]) under the
+    ///   body's hosts' light, which [`Sky::of`] builds. So a pass is a function of the albedo it
+    ///   reads alone, which the bisection needs.
+    /// - **Over a record** ([`PassRecord::Record`], P14.T54.a): each pass reads its spin's climate
+    ///   ([`SpunClimate`]) under the context the previous pass's own air gives, K(P), the first the
+    ///   labelled C₀ ([`PassContext::NONE`]), so a pass is a function of the albedo and the context
+    ///   it reads ([`passes::solve_in_context`]).
     ///
     /// Beside them, the bare regolith's Bond albedo the cold traps read (P14.T51.i): the passes'
     /// regolith provider on the airless state under the hosts' light.
     #[must_use]
-    fn passes(&self, driver: PassDriver) -> (Passes, f64) {
+    fn passes(&self, driver: PassDriver, record: PassRecord<'_>) -> (Passes, f64) {
         let shade = &self.sky.shade;
         let surface = PassSurface::stand_in(PassLight::Shade(shade));
         // The bare regolith the cold traps read (P14.T51.i): the passes' row on an airless body,
@@ -1607,15 +1716,23 @@ impl PassBody<'_> {
         let regolith_albedo = (surface.regolith)(SurfaceMaterial::of(&self.bulk.fractions))
             .bond(SurfaceState::Airless, shade.bands())
             .bond;
-        let ended = match driver {
+        let ended = match record {
+            PassRecord::StandIn => self.stand_in_passes(driver, &surface),
+            PassRecord::Record(of) => self.record_passes(driver, of),
+        };
+        (ended, regolith_albedo)
+    }
+
+    /// The passes over the stand-in surface `surface`, as `driver` drives them ([`passes`](Self::passes)).
+    #[must_use]
+    fn stand_in_passes(&self, driver: PassDriver, surface: &PassSurface<'_>) -> Passes {
+        match driver {
             PassDriver::Solve => {
                 let solved = passes::solve(
                     BondAlbedo::BEFORE_ATMOSPHERES,
-                    |albedo| self.pass(&surface, albedo),
-                    |&(_, _, air): &(Kelvin, Kelvin, Atmosphere)| air.albedo(),
-                    |&(last, ..), &(now, ..)| {
-                        (now.value() - last.value()).abs() <= ATMOSPHERE_CONVERGENCE * now.value()
-                    },
+                    |albedo| self.pass(surface, albedo),
+                    |&(_, _, air): &PassOut| air.albedo(),
+                    settled,
                 );
                 let (irradiated, heated, air) = solved.pass;
                 Passes {
@@ -1625,13 +1742,14 @@ impl PassBody<'_> {
                     air,
                     count: solved.count,
                     convergence: solved.convergence,
+                    spun: None,
                 }
             }
             #[cfg(test)]
-            PassDriver::T51b => self.t51b_passes(&surface),
+            PassDriver::T51b => self.t51b_passes(surface),
             #[cfg(test)]
             PassDriver::Once(albedo) => {
-                let (irradiated, heated, air) = self.pass(&surface, albedo);
+                let (irradiated, heated, air) = self.pass(surface, albedo);
                 Passes {
                     albedo,
                     irradiated,
@@ -1639,10 +1757,109 @@ impl PassBody<'_> {
                     air,
                     count: 1,
                     convergence: Convergence::Converged,
+                    spun: None,
                 }
             }
+            #[cfg(test)]
+            PassDriver::Again(_) => {
+                let solved = self.stand_in_passes(PassDriver::Solve, surface);
+                let (irradiated, heated, air) = self.pass(surface, solved.albedo);
+                Passes {
+                    irradiated,
+                    heated,
+                    air,
+                    count: solved.count + 1,
+                    ..solved
+                }
+            }
+        }
+    }
+
+    /// The passes over the record `of`, as `driver` drives them ([`passes`](Self::passes)): each
+    /// pass's surface the body's own climate under its record's spin over the context it reads,
+    /// the context the next reads that pass's air's K(P) (`of`'s [`PassRecordOf::context`]), and
+    /// what the record reads of them ([`SpunPasses`]).
+    ///
+    /// # Panics
+    ///
+    /// Under P14.T51.b's loop ([`PassDriver::T51b`]), the stand-in's alone, which no test drives
+    /// over a record.
+    #[must_use]
+    fn record_passes(&self, driver: PassDriver, of: &dyn PassRecordOf) -> Passes {
+        let record = of.spin(self.pass_bulk);
+        let shade = &self.sky.shade;
+        let surface = |context: &PassContext| SpunClimate {
+            record,
+            stellar_flux: WattsPerSquareMetre::from(self.sky.flux),
+            xuv_flux: self.sky.xuv_flux,
+            context: *context,
+            inventory_water: self.pass_bulk.inventory_water,
         };
-        (ended, regolith_albedo)
+        let pass = |albedo: BondAlbedo, context: &PassContext| {
+            let spun = surface(context);
+            self.pass(&PassSurface::spun(&spun, PassLight::Shade(shade)), albedo)
+        };
+        let next = |&(irradiated, _, air): &PassOut| of.context(self.pass_bulk, &air, irradiated);
+        let solve = || {
+            let solved = passes::solve_in_context(
+                BondAlbedo::BEFORE_ATMOSPHERES,
+                PassContext::NONE,
+                pass,
+                |&(_, _, air): &PassOut| air.albedo(),
+                next,
+                settled,
+            );
+            (
+                solved.albedo,
+                solved.pass,
+                solved.context,
+                solved.next,
+                solved.count,
+                solved.convergence,
+            )
+        };
+        let (albedo, (irradiated, heated, air), context, next, count, convergence) = match driver {
+            PassDriver::Solve => solve(),
+            #[cfg(test)]
+            PassDriver::T51b => unreachable!("P14.T51.b's loop is the stand-in's"),
+            #[cfg(test)]
+            PassDriver::Once(albedo) => {
+                let out = pass(albedo, &PassContext::NONE);
+                (
+                    albedo,
+                    out,
+                    PassContext::NONE,
+                    next(&out),
+                    1,
+                    Convergence::Converged,
+                )
+            }
+            #[cfg(test)]
+            PassDriver::Again(under) => {
+                let (albedo, _, read, given, count, convergence) = solve();
+                let context = match under {
+                    Under::Read => read,
+                    Under::Next => given,
+                };
+                let out = pass(albedo, &context);
+                (albedo, out, context, next(&out), count + 1, convergence)
+            }
+        };
+        let water = WaterGate::of_air(&air, self.pass_bulk.inventory_water, &record);
+        let ocean_weight = context.ocean_weight(&water, air.partial_pressures().of(Gas::Water));
+        Passes {
+            albedo,
+            irradiated,
+            heated,
+            air,
+            count,
+            convergence,
+            spun: Some(SpunPasses {
+                context,
+                next,
+                ocean_weight,
+            }),
+        }
     }
 
     /// The passes over `surface` by P14.T51.b's loop as it was built, for the tests that hold a
@@ -1672,8 +1889,16 @@ impl PassBody<'_> {
             air,
             count,
             convergence: Convergence::Converged,
+            spun: None,
         }
     }
+}
+
+/// Whether the pass `now` has settled against the pass `last` before it, by P14.T51.b's test: its
+/// equilibrium temperature moved by at most [`ATMOSPHERE_CONVERGENCE`] of itself.
+#[must_use]
+fn settled(&(last, ..): &PassOut, &(now, ..): &PassOut) -> bool {
+    (now.value() - last.value()).abs() <= ATMOSPHERE_CONVERGENCE * now.value()
 }
 
 /// What a body's hosts give it at a time, as its atmosphere reads it.

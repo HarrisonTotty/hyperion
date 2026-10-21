@@ -1738,12 +1738,11 @@ fn climate_of(
 /// [`SurfaceConditions::derive`] that the passes do not change.
 ///
 /// P14.T54.a derives the spin before the passes (its rotation law reads nothing they give), and
-/// takes the heat flow, an input the figures give after them, from the previous pass.
+/// takes the heat flow, an input the figures give after them, from the context the pass reads,
+/// the previous pass's figures ([`SpunClimate`](crate::planetary::derive::atmosphere::SpunClimate)).
+/// Its surface gravity, radius and material are the record's bulk's, at which the record's
+/// conditions are derived.
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P14.T54.a's passes are the first callers")
-)]
 pub(crate) struct ClimateBody {
     /// The equilibrium temperature from the hosts' light at the albedo in use.
     pub(crate) equilibrium_temperature: Kelvin,
@@ -1777,10 +1776,6 @@ pub(crate) struct ClimateBody {
 /// publishes, but where the range does not hold the mean, whose ends are then widened to it
 /// ([`ClimateSpan::about`]). It allocates nothing.
 #[must_use]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P14.T54.a's passes are the first callers")
-)]
 pub(crate) fn step_climate(
     body: &ClimateBody,
     ocean_weight: OceanWeight,

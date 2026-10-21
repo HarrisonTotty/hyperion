@@ -1122,6 +1122,47 @@ impl BodyRotation {
         })
     }
 
+    /// The frame of the body `inputs` describe with its lock reached from its birth (P14.T54.a;
+    /// decision-p14-t54a-passes §2.3, a moon's locked spin): [`derive`](Self::derive)'s frame,
+    /// its pole, obliquity and primordial period the same, at a despinning time of the least
+    /// positive `f64` second, so that it is locked at every time its system has lived, in the
+    /// resonance its orbit's eccentricity sets. Its tides and their τ are not read.
+    ///
+    /// The spin a frame gives a moon ([`SeasonalSpin::of`](crate::planetary::hooks::surface::SeasonalSpin::of))
+    /// reads its pole, and its rate and state at the time: locked, the rate is the orbit's
+    /// resonance's, n p ÷ q, whatever its τ, so the locked frame's spin is that of every law of
+    /// these inputs locked at the time, to the bit.
+    ///
+    /// # Errors
+    ///
+    /// [`DeriveRotationError::Body`] for a mass or radius that is not positive and finite, and
+    /// [`DeriveRotationError::Law`] never: the despinning time is positive.
+    pub(crate) fn locked_frame(inputs: &SpinInputs) -> Result<BodyFixedFrame, DeriveRotationError> {
+        // The body as `derive` builds it, for its refusals and their order.
+        SpinningBody::with_tides(
+            inputs.mass,
+            inputs.radius,
+            inputs.class,
+            &inputs.fractions,
+            inputs.tides,
+        )?;
+        let drawn = primordial_period(SpinFamily::of(inputs.class), inputs.draws.period_rank);
+        let floor = breakup_period(inputs.mass, inputs.radius);
+        let period = Seconds::new(drawn.value().max(floor.value()));
+        let tilt = obliquity(inputs.obliquity_law, inputs.draws.obliquity_rank);
+        Ok(BodyFixedFrame::new(
+            &inputs.orbit,
+            &FrameSpin {
+                obliquity: tilt,
+                pole_azimuth: inputs.draws.pole_azimuth,
+                primordial_period: period,
+                locking_time: Seconds::new(f64::MIN_POSITIVE),
+                phase_at_epoch: inputs.draws.phase,
+            },
+            inputs.age_at_epoch,
+        )?)
+    }
+
     /// How the obliquity was drawn.
     #[must_use]
     pub const fn obliquity_law(&self) -> ObliquityLaw {
