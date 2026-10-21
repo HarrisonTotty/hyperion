@@ -747,6 +747,12 @@ struct MarchWalk {
   unitM : f32,
   anchorM : f32,
   towardLow : bool,
+  // Whether the walk takes the sun-aware warp's steps by piece (`marchWalkEvenReady`, plan R08,
+  // R08.T8): the ray march's two-sided sky segment, inside the air or outside it, cut at its
+  // crossings, with no more pieces than steps. Its warp a, and the piece's own a_p.
+  evenPieced : bool,
+  warp : f32,
+  pieceWarp : f32,
 }
 
 // A walk over `split` with no crossings yet.
@@ -918,6 +924,157 @@ fn marchWalkStep(walk : ptr<function, MarchWalk>, i : u32) -> MarchStep {
     fromLowest = (*walk).anchorM - unitM * (k * k + k + 0.5);
   }
   return MarchStep(split.lowestM + fromLowest, unitM * (2.0 * k + 1.0), fromLowest);
+}
+
+// --- The sun-aware warp of the ray march's two-sided sky segments (plan R08, R08.T8) -------------
+// Every two-sided sky segment the ray march marches (nothing drawn along it), from inside the air or
+// outside it, takes the sun-aware warp (`decision-r08-t8-leans.md` sections 4 and 5.4;
+// `marchSteps.ts`'s marchEvenStep and marchEvenSteps are the twin): its n steps evenly spaced in
+// u in [0, 1], t(u) = t_start + L ((1 - a) u + a u^2), L its length, a = clamp(-(d . s0) /
+// MARCH_SKY_WARP_COSINE, 0, 1) from the ray's direction d and the march's first source's s0. Even
+// where the Sun is ahead or across the ray (a = 0), R05's one-sided placement from the segment's
+// start where it is behind (a = 1). Where the light lies decides: with the Sun ahead, beyond the
+// lowest point, on the night-side and terminator limb from outside, where the placement about the
+// lowest point missed R05.T12.e's gate (12.19%) and even steps hold it (4.85% at high's 36); with
+// the Sun behind, at the camera's last light, on the camera's end of a night-side chord, its first
+// 30-65 km of 950-1,200, where even steps drew the sky under the horizontal 45-124 codes off under
+// a seam at the horizontal and the warp holds it within 1.7 codes on high and 10.8 on low. The
+// warp is continuous in d and the same on both sides of the top, so neither steps. One-sided
+// segments and drawn surfaces keep R05.T12.e's placement.
+
+// The span of the warp in the cosine between the ray and its march's first source: a rises from 0
+// with the Sun 90 degrees from the ray to 1 at about 101.5 degrees (`decision-r08-t8-leans.md`
+// section 5.4, the ruling's probe's constant; `marchSteps.ts`'s SKY_WARP_COSINE).
+const MARCH_SKY_WARP_COSINE : f32 = 0.2;
+
+// The warp a of a ray along the unit `dir` whose march's first source lies along the unit `sun`.
+fn marchSkyWarp(dir : vec3f, sun : vec3f) -> f32 {
+  return clamp(-dot(dir, sun) / MARCH_SKY_WARP_COSINE, 0.0, 1.0);
+}
+
+// Step k of n over a length warped by a, [t(k / n), t((k + 1) / n)] for t(u) = L ((1 - a) u + a u^2),
+// from `unitM` = L / n: x, its midpoint's distance from the start, (L / n)((1 - a)(k + 1/2) +
+// a (k^2 + k + 1/2) / n); y, its length, (L / n)((1 - a) + a (2k + 1) / n). At a = 0 they are
+// (k + 1/2) L / n and L / n to the bit; at a = 1 `marchStep`'s quadratic placement toward the start.
+fn marchWarpedStep(unitM : f32, n : f32, warp : f32, k : f32) -> vec2f {
+  let mid = (1.0 - warp) * (k + 0.5) + warp * (k * k + k + 0.5) / n;
+  let width = (1.0 - warp) + warp * (2.0 * k + 1.0) / n;
+  return vec2f(unitM * mid, unitM * width);
+}
+
+// Where a point `fromLowestM` from t*, strictly inside the segment, stands in u under the warp: the
+// root of a u^2 + (1 - a) u = x, x = (t - t_start) / L, as 2 x / ((1 - a) + sqrt((1 - a)^2 + 4 a x)),
+// which does not cancel and is x at a = 0.
+fn marchWarpU(split : MarchSplit, warp : f32, fromLowestM : f32) -> f32 {
+  let x = (fromLowestM + split.beforeM) / (split.beforeM + split.afterM);
+  let b = 1.0 - warp;
+  return 2.0 * x / (b + sqrt(b * b + 4.0 * warp * x));
+}
+
+// Step `i` of a split segment under the warp `warp` over the whole: step i of n = stepsBefore +
+// stepsAfter evenly spaced in u, its offset from t* formed from the start's (t - t_start) - beforeM,
+// with no difference of large distances; at a = 0 the even step (i + 1/2) L / n, L / n long, to the
+// bit.
+fn marchEvenStep(split : MarchSplit, i : u32, warp : f32) -> MarchStep {
+  let samples = f32(split.stepsBefore + split.stepsAfter);
+  let unitM = (split.beforeM + split.afterM) / samples;
+  let warped = marchWarpedStep(unitM, samples, warp, f32(i));
+  let fromLowest = warped.x - split.beforeM;
+  return MarchStep(split.lowestM + fromLowest, warped.y, fromLowest);
+}
+
+// Makes the walk ready for the warp `warp`'s steps once its crossings are in: each distance once, as
+// `marchWalkReady` keeps them, each crossing's u (`marchWarpU`), and the segment's steps shared
+// among its pieces in proportion to each piece's length in u, at least one a piece, each piece's
+// count rounding its end's share of the rest, the last the rest. A segment with no crossing, or more
+// pieces than steps, takes `marchEvenStep`'s.
+fn marchWalkEvenReady(walk : ptr<function, MarchWalk>, warp : f32) {
+  var n = 0u;
+  for (var j = 0u; j < (*walk).crossings; j++) {
+    let t = (*walk).fromLowestM[j];
+    if (n == 0u || t > (*walk).fromLowestM[n - 1u]) {
+      (*walk).fromLowestM[n] = t;
+      n++;
+    }
+  }
+  (*walk).crossings = n;
+  (*walk).warp = warp;
+  let split = (*walk).split;
+  let samples = split.stepsBefore + split.stepsAfter;
+  let pieces = n + 1u;
+  (*walk).evenPieced = n > 0u && pieces <= samples;
+  if (!(*walk).evenPieced) {
+    return;
+  }
+  var total = 0.0;
+  var lowU = 0.0;
+  for (var p = 0u; p < pieces; p++) {
+    var highU = 1.0;
+    if (p < n) {
+      highU = marchWarpU(split, warp, (*walk).fromLowestM[p]);
+    }
+    (*walk).shares[p] = highU - lowU;
+    total += highU - lowU;
+    lowU = highU;
+  }
+  let rest = samples - pieces;
+  var spent = 0u;
+  var cumulative = 0.0;
+  for (var p = 0u; p < pieces; p++) {
+    cumulative += (*walk).shares[p];
+    var share = rest;
+    if (p + 1u < pieces) {
+      share = u32(floor(f32(rest) * cumulative / total + 0.5));
+    }
+    (*walk).shares[p] = f32(1u + share - spent);
+    spent = share;
+  }
+  marchWalkEvenEnter(walk, 0u);
+}
+
+// Enters piece `piece` of a warped walk: its count n, its unit L_p / n over its length L_p in t
+// between its crossings, its start from t*, and its own warp a_p = a (u1 - u0) / ((1 - a) +
+// a (u0 + u1)) over its u0 to u1, the segment's quadratic t(u) in the piece's own u.
+fn marchWalkEvenEnter(walk : ptr<function, MarchWalk>, piece : u32) {
+  let split = (*walk).split;
+  let warp = (*walk).warp;
+  var lowM = -split.beforeM;
+  var lowU = 0.0;
+  if (piece > 0u) {
+    lowM = (*walk).fromLowestM[piece - 1u];
+    lowU = marchWarpU(split, warp, lowM);
+  }
+  var highM = split.afterM;
+  var highU = 1.0;
+  if (piece < (*walk).crossings) {
+    highM = (*walk).fromLowestM[piece];
+    highU = marchWarpU(split, warp, highM);
+  }
+  let n = (*walk).shares[piece];
+  (*walk).piece = piece;
+  (*walk).taken = 0u;
+  (*walk).pieceSteps = n;
+  (*walk).unitM = (highM - lowM) / n;
+  (*walk).anchorM = lowM;
+  (*walk).pieceWarp = warp * (highU - lowU) / ((1.0 - warp) + warp * (lowU + highU));
+}
+
+// Step `i` of a warped walk, the steps taken in order from 0: step k of its piece's n, evenly
+// spaced in the piece's u under its own warp, from the piece's start; `marchEvenStep`'s where the
+// walk is not cut.
+fn marchWalkEvenStep(walk : ptr<function, MarchWalk>, i : u32) -> MarchStep {
+  let split = (*walk).split;
+  if (!(*walk).evenPieced) {
+    return marchEvenStep(split, i, (*walk).warp);
+  }
+  if (f32((*walk).taken) >= (*walk).pieceSteps) {
+    marchWalkEvenEnter(walk, (*walk).piece + 1u);
+  }
+  let k = f32((*walk).taken);
+  (*walk).taken++;
+  let warped = marchWarpedStep((*walk).unitM, (*walk).pieceSteps, (*walk).pieceWarp, k);
+  let fromLowest = (*walk).anchorM + warped.x;
+  return MarchStep(split.lowestM + fromLowest, warped.y, fromLowest);
 }
 
 // Adds to the walk where a ray from `heightM` above a sphere of radius `bottom`, at zenith cosine

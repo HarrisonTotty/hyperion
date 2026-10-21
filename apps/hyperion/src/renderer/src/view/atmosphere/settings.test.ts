@@ -6,6 +6,7 @@ import {
   AERIAL_PERSPECTIVE_SCOPE,
   ATMOSPHERE_QUALITY_LIMITS,
   ATMOSPHERE_VIEW_SETTINGS,
+  MARCH_BAND,
   MAX_SKY_LIGHT_SLOTS,
   MAX_SKY_SOURCES,
   SKY_SUN_CAP,
@@ -22,6 +23,21 @@ describe("AERIAL_PERSPECTIVE_SCOPE", () => {
 
   it("applies aerial perspective to everything opaque on high and to the terrain alone on low", () => {
     expect(AERIAL_PERSPECTIVE_SCOPE).toEqual({ high: "scene", low: "terrain" });
+  });
+});
+
+describe("MARCH_BAND (R08.T8)", () => {
+  it("is each setting's march band, projected and not held twice", () => {
+    for (const setting of QUALITY_SETTINGS) {
+      expect(MARCH_BAND[setting]).toBe(SETTINGS[setting].atmosphere.marchBand);
+    }
+  });
+
+  it("hands the frame to the march between 0.3 and 0.5 of the top on high and 0.2 and 0.3 on low", () => {
+    expect(MARCH_BAND).toEqual({
+      high: { lowerShareOfTop: 0.3, upperShareOfTop: 0.5 },
+      low: { lowerShareOfTop: 0.2, upperShareOfTop: 0.3 },
+    });
   });
 });
 

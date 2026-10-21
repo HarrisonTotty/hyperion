@@ -5,7 +5,8 @@
  * `SETTINGS[s].terrain`, for R12's ladder audit.
  *
  * @remarks
- * R08.T9.a projects the aerial perspective's scope here; R08.T7 adds the view's sources
+ * R08.T9.a projects the aerial perspective's scope here, and R08.T8 the march band
+ * ({@link MARCH_BAND}); R08.T7 adds the view's sources
  * ({@link AtmosphereViewSettings}, {@link ATMOSPHERE_VIEW_SETTINGS}, {@link SKY_SUN_CAP},
  * {@link MAX_SKY_SOURCES}) and {@link ATMOSPHERE_QUALITY_LIMITS}. A projection is read from the
  * field it projects, never held twice; this module takes `TABLE_SIZES` from `hillaire.ts`, which
@@ -20,7 +21,7 @@
 import { MAX_BODY_LIGHTS } from "../lighting/hostLights";
 import { PLANETSHINE_SOURCES_HIGH, PLANETSHINE_SOURCES_LOW } from "../lighting/planetshine";
 import type { QualitySetting } from "../quality/qualitySetting";
-import { TABLE_SIZES, type TableSizes } from "./hillaire";
+import { type MarchBand, TABLE_SIZES, type TableSizes } from "./hillaire";
 
 /**
  * The sources the sky's kernels hold, and the stars among them, `hillaire.ts`'s (where the kernels'
@@ -46,6 +47,22 @@ export type AerialPerspectiveScope = TableSizes["aerialPerspectiveScope"];
 export const AERIAL_PERSPECTIVE_SCOPE: Readonly<Record<QualitySetting, AerialPerspectiveScope>> = {
   high: TABLE_SIZES.high.aerialPerspectiveScope,
   low: TABLE_SIZES.low.aerialPerspectiveScope,
+};
+
+/**
+ * Where the ray march takes over from the sky-view table and the aerial-perspective volume as the
+ * camera climbs, on each setting (plan R08, R08.T8: "the switch to the sky-view table is by
+ * altitude, with a blend band"): R05's `SETTINGS[s].atmosphere.marchBand`, projected here rather
+ * than held twice, each edge a share of the medium's top in h\*.
+ *
+ * @remarks
+ * 0.3 to 0.5 of the top on high and 0.2 to 0.3 on low: 30–50 km and 20–30 km under Earth's
+ * 100 km. Above the band the march draws every pixel, as from above the top, at the cost it has
+ * there. `hillaire.ts`'s `TABLE_SIZES` gives the measurement it was set from.
+ */
+export const MARCH_BAND: Readonly<Record<QualitySetting, MarchBand>> = {
+  high: TABLE_SIZES.high.marchBand,
+  low: TABLE_SIZES.low.marchBand,
 };
 
 /** What the atmosphere's view takes of a setting: the sky's sources and its stated limits. */

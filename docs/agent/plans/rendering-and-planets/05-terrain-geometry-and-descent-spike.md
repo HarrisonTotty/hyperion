@@ -998,8 +998,11 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
 
     _Decided 2026-10-06 by a delegated decision (`decision-r05-high-atmosphere.md`):_ the sky view
     and the ray march place their steps quadratically toward each ray's lowest point (the camera,
-    the ground or a limb's tangent point), not evenly. A ray from a camera inside the atmosphere
-    that falls to its lowest point and climbs out again places its camera side toward the camera
+    the ground or a limb's tangent point), not evenly (since R08.T8 the ray march's two-sided sky
+    segments, from inside and outside, take the sun-aware warp; "Deviations in T12.e, as
+    built"). A ray from a camera inside the atmosphere that falls to its lowest point and climbs
+    out again places
+    its camera side toward the camera
     instead, since the view's own attenuation puts that side's light there (addendum A). The counts
     are those above, except the high setting's sky view, which takes 75 steps (addendum B: from
     60–100 km, a limb ray's narrow source at its tangent point needs them), and each term's density
@@ -1972,8 +1975,10 @@ a side; a one-sided segment gives all its steps to its side. Each side is placed
 toward t\*, t_k = t\* ± L_side·(k ÷ n_side)². The exception is the camera side of a two-sided
 segment that starts at a camera inside the atmosphere, which is placed quadratically toward the
 camera, t_k = t_start + L_side·(k ÷ n_side)² (lane C's V1, adopted in addendum A of
-`decision-r05-high-atmosphere.md`). Each step is sampled at its midpoint. Its in-scattering is
-throughput · S · Δt · g(x) per channel, with x = σ_t·Δt and g(x) = (1 − e^(−x)) ÷ x, computed as 1 −
+`decision-r05-high-atmosphere.md`) (since R08.T8 the ray march's two-sided sky segments, from
+inside and outside, take the sun-aware warp; "Deviations in T12.e, as built"). Each step is
+sampled at its midpoint. Its in-scattering is throughput · S · Δt · g(x) per channel, with x = σ_t·Δt and g(x) =
+(1 − e^(−x)) ÷ x, computed as 1 −
 x·(1/2 − x/6) below x = 0.01 and directly from 0.01 up. The helper is in `common.wgsl`, and the
 step's transmittance stays e^(−x). One WGSL helper and one TypeScript twin hold the rule. Another
 placement may replace it only if it passes the gate below at no more steps. High takes 75 sky-view
@@ -1994,7 +1999,8 @@ passes, and the task refers back above 90 (sky view) or 48 (march).
     - against 4,096 placed steps, themselves within 0.05% of 8,192; _since decision-test-coverage
       R3(b) (2026-10-11), the coarsest of 2,048, 4,096 or 8,192 placed steps within 0.05% of
       twice its steps ("Deviations in T12.e, as built", the reference)_;
-    - over the decision's march rays: from 400 km, the disc and R08's limb heights; to terrain
+    - over the decision's march rays: from 400 km, the disc and R08's limb heights (_since R08.T8,
+      the limb from 400 km and 101 km with the sun at 90–105° at the tangent point_); to terrain
       beyond 32 km from 20 and 60 km; and, near level, from 0.5–5 km to terrain at 40–150 km. Over
       its sky rays: from 2 m, 1 km, 10 km and 50 km; and, from cameras at 0.5–50 km, the band
       between the local and the visible horizon (0.2, 0.5, 0.8 and 0.98 of the dip, and 0.01° either
@@ -6222,6 +6228,23 @@ medium, sizes, figure)`.
     - _High's atmosphere row against its 1 ms estimate_ (a finding for T19 and R12): 2.62 / 3.37
       ms p50 / p95 at the driver's clocks, against 2.66 / 3.87 before. The march's 18% saving pays
       for the sky view's 2.5 times the steps.
+
+  - _R08.T8 (2026-10-21, `decision-r08-t8-leans.md` §2 and §4)._ Since R08.T8 the ray march also
+    draws the sky from inside the air, in each setting's march band. Every two-sided sky segment it
+    marches (nothing drawn along it), from inside or outside the air, takes the sun-aware warp
+    (`decision-r08-t8-leans.md` §5.4): even steps where the Sun is ahead or across the ray, R05's
+    one-sided placement from the segment's start where it is behind (`marchEvenStep`, cut at layer
+    edges by `marchWalkEvenStep`). One-sided segments and drawn
+    surfaces keep this task's placement, and `marchSplit` takes `shell.x <= 0 && depth > 0`. The sky
+    view and the multiple-scattering kernel are unchanged. The placement from outside had failed the
+    night-side and terminator limb (sun 90–105° at the tangent point; 12.19% at high), which the gate
+    now samples. Even steps from inside alone stepped by 13–36% (high) and 67–164% (low) at the top.
+    The limb from orbit moves: the gate's limb family at high to 0.47% / 4.35% (from 1.05% /
+    1.16%), and its march families under the warp to 0.45% / 4.69%. At low its worst twilight ray
+    is 23.94% (it was 5.87%), and `LOW_TWIN_WORST.rayMarch` is re-measured (0.036 / 0.240). The
+    gate gains the night-side limb and the camera's last light (1,641 rays). No reference, drawn
+    surface or sky-view texel moves. The figures are in plan 08's Risks,
+    "Deviations in T8.a, as built".
 - **Deviations in T11.a, as built** (2026-10-02 and 2026-10-03).
   - _Device limits_ (decisions-r06-r07.md item 7). `createWebGpuEngine` requests
     `requiredLimits(adapter, overrides)` (`platform.ts`): the adapter's

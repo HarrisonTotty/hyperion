@@ -37,6 +37,12 @@
 // the transmittance to space is the sliced lookup's from the camera along the ray, the camera's
 // local scale height formed in f64 (`view.exact.z`); and the camera is above the air where its h*
 // is above the top.
+// Changes (plan R08, R08.T8): the switch to the ray march is by the camera's h*, with a blend band
+// (`TableSizes.marchBand`): below it the sky view and the aerial-perspective volume serve as before;
+// from its upper edge up the march serves every pixel, the sky's and the surfaces' within the
+// volume's reach, as from above the top; between them each is blended linearly with the march by
+// the march's share, `view.exact.w`, formed in f64. Inside the air what lies behind the sky, and each
+// disc, keeps the camera's own transmittance to space.
 
 struct Draw {
   offsetFromCameraM : vec3f,
@@ -204,6 +210,9 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   let topM = draw.shell.x;
   let body = oblateBodyOf(oblateBody);
   let aboveTop = v.camera.w * v.curvature.z >= topM;
+  // The ray march's share of the frame (R08.T8): 0 below the march band, 1 from its upper edge up,
+  // the same for every pixel, so each branch on it is uniform.
+  let marchWeight = v.exact.w;
   let count = skySourceCount(v);
 
   if (depth == 0.0) {
@@ -224,19 +233,32 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
       marchedAlpha = marched.a;
       behind = vec3f(marched.a);
     } else {
-      // The sky view's sphere at the ray's own azimuth, R_alpha, its horizon split, and the
-      // camera's height on it (R08.T6.f).
-      let heightM = skyViewHeight(v.camera.w, v.curvature.w);
-      let up = v.up.xyz;
-      let frame = skyFrame(v);
-      let column = skyViewColumnOf(v.curvature.x, v.curvature.y, up, frame.x, dir, heightM);
-      let viewZenithCos = dot(dir, up);
-      let viewZenith = preciseAtan2(length(cross(dir, up)), viewZenithCos);
-      let azimuthUnit = skyViewAzimuthUnit(dot(dir, frame.x), dot(dir, frame.y));
-      let ground = groundHitFromHeight(column.x, heightM, viewZenithCos);
-      let size = vec2f(textureDimensions(skyView));
-      let skyUv = skyViewParamsToUv(ground, viewZenith, azimuthUnit, size, column.y);
-      inscattered = textureSampleLevel(skyView, linearClamp, skyUv, 0.0).rgb;
+      // Inside the air: from the march band's upper edge up the march's sky, below its lower edge
+      // the sky view's, and between them the two blended by the march's share (R08.T8). What lies
+      // behind takes the camera's own transmittance to space either way.
+      if (marchWeight < 1.0) {
+        // The sky view's sphere at the ray's own azimuth, R_alpha, its horizon split, and the
+        // camera's height on it (R08.T6.f).
+        let heightM = skyViewHeight(v.camera.w, v.curvature.w);
+        let up = v.up.xyz;
+        let frame = skyFrame(v);
+        let column = skyViewColumnOf(v.curvature.x, v.curvature.y, up, frame.x, dir, heightM);
+        let viewZenithCos = dot(dir, up);
+        let viewZenith = preciseAtan2(length(cross(dir, up)), viewZenithCos);
+        let azimuthUnit = skyViewAzimuthUnit(dot(dir, frame.x), dot(dir, frame.y));
+        let ground = groundHitFromHeight(column.x, heightM, viewZenithCos);
+        let size = vec2f(textureDimensions(skyView));
+        let skyUv = skyViewParamsToUv(ground, viewZenith, azimuthUnit, size, column.y);
+        inscattered = textureSampleLevel(skyView, linearClamp, skyUv, 0.0).rgb;
+      }
+      if (marchWeight > 0.0) {
+        let marched = rayMarched(pixel, depth);
+        if (marchWeight < 1.0) {
+          inscattered = mix(inscattered, marched.rgb, marchWeight);
+        } else {
+          inscattered = marched.rgb;
+        }
+      }
       behind = transmittanceToSpace(v, body, dir, slotHere);
     }
     var luminance = colour * behind + inscattered * factor;
@@ -258,10 +280,15 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   let distance = distanceAtDepth(v, uv, depth);
   let reach = v.tables.y;
   // Within the volume's reach, the volume, through the read every reader of it takes
-  // (`aerialRead.wgsl`, R08.T9.a); beyond it, and from above the air, the ray march.
-  if (distance <= reach && !aboveTop) {
+  // (`aerialRead.wgsl`, R08.T9.a), blended with the ray march by its share in the march band
+  // (R08.T8); beyond it, and from the band's upper edge up (above the air included), the ray march.
+  if (distance <= reach && marchWeight < 1.0) {
     let aerialAt = aerialPerspectiveAt(aerial, linearClamp, uv, distance, reach);
-    let luminance = colour * aerialAt.a + aerialAt.rgb * factor;
+    var luminance = colour * aerialAt.a + aerialAt.rgb * factor;
+    if (marchWeight > 0.0) {
+      let marched = rayMarched(pixel, depth);
+      luminance = mix(luminance, colour * marched.a + marched.rgb * factor, marchWeight);
+    }
     return vec4f(min(luminance, vec3f(HALF_MAX)), meterClass);
   }
   let marched = rayMarched(pixel, depth);

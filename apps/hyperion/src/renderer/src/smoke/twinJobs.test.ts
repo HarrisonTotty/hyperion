@@ -90,6 +90,7 @@ describe("the twins as jobs for the twin workers", () => {
       rayMarchScale: 1,
       rayMarchSamples: 4,
       aerialPerspectiveReachM: 32_000,
+      marchBand: { lowerShareOfTop: 0.3, upperShareOfTop: 0.5 },
     };
     const depth = 0.1 / 60_000;
     const answer = runTwinJob(

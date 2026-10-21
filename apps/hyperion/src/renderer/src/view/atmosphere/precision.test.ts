@@ -29,7 +29,7 @@ import {
   viewExactOf,
 } from "./hillaire";
 import type { AtmosphereMedium } from "./medium";
-import { marchPieces, marchPiecesSteps, marchSplit } from "./marchSteps";
+import { marchEvenSteps, marchPieces, marchPiecesSteps, marchSplit } from "./marchSteps";
 import { MULTI_SCATTERING_SIZE, TRANSMITTANCE_SIZE } from "./tables";
 import { preciseAtan, preciseAtan2, preciseSinCos, TRIG_HALF_PI } from "../../test/preciseTrigF32";
 
@@ -1019,10 +1019,11 @@ function stepOf(split: Split, i: number): WalkStep {
 }
 
 /**
- * `common.wgsl`'s `marchWalkCross`, `marchWalkReady`, `marchSideShares`, `marchWalkEnter` and
- * `marchWalkStep`, emulated in f32 in the WGSL's order, over the whole segment.
+ * `common.wgsl`'s `marchWalkCross` over the crossings, in f32, each kept in order where it is
+ * strictly inside the segment off t*, and then each distance once, as `marchWalkReady` and
+ * `marchWalkEvenReady` keep them.
  */
-function walkSteps(split: Split, crossings: readonly number[]): WalkStep[] {
+function walkEnds(split: Split, crossings: readonly number[]): number[] {
   const fromLowest: number[] = [];
   for (const raw of crossings) {
     const t = f(raw);
@@ -1036,7 +1037,15 @@ function walkSteps(split: Split, crossings: readonly number[]): WalkStep[] {
       fromLowest[at] = t;
     }
   }
-  const ends = fromLowest.filter((t, j) => j === 0 || t > (fromLowest[j - 1] ?? 0));
+  return fromLowest.filter((t, j) => j === 0 || t > (fromLowest[j - 1] ?? 0));
+}
+
+/**
+ * `common.wgsl`'s `marchWalkCross`, `marchWalkReady`, `marchSideShares`, `marchWalkEnter` and
+ * `marchWalkStep`, emulated in f32 in the WGSL's order, over the whole segment.
+ */
+function walkSteps(split: Split, crossings: readonly number[]): WalkStep[] {
+  const ends = walkEnds(split, crossings);
   const crossingsBefore = ends.filter((t) => t < 0).length;
   const shares: number[] = [];
   const sideShares = (
@@ -1133,6 +1142,102 @@ function walkSteps(split: Split, crossings: readonly number[]): WalkStep[] {
   return steps;
 }
 
+/**
+ * The even step `common.wgsl`'s `marchEvenStep` took before the sun-aware warp (R08.T8, §4),
+ * emulated: step i of the whole segment, (i + ½) L ÷ n from its start, L ÷ n long.
+ */
+function plainEvenStepOf(split: Split, i: number): WalkStep {
+  const unit = f(f(split.before + split.after) / (split.stepsBefore + split.stepsAfter));
+  const fromLowestM = f(f(unit * (i + 0.5)) - split.before);
+  return { tM: f(split.lowest + fromLowestM), dtM: unit, fromLowestM };
+}
+
+/** `common.wgsl`'s `marchWarpedStep`, emulated: step k of n from L ÷ n under the warp a. */
+function warpedStepOf(unit: number, n: number, warp: number, k: number): readonly [number, number] {
+  const keep = f(1 - warp);
+  const mid = f(f(keep * f(k + 0.5)) + f(f(warp * f(f(f(k * k) + k) + 0.5)) / n));
+  const width = f(keep + f(f(warp * f(f(2 * k) + 1)) / n));
+  return [f(unit * mid), f(unit * width)];
+}
+
+/** `common.wgsl`'s `marchWarpU`, emulated: where a crossing `fromLowestM` from t* stands in u. */
+function warpUOf(split: Split, warp: number, fromLowestM: number): number {
+  const x = f(f(fromLowestM + split.before) / f(split.before + split.after));
+  const b = f(1 - warp);
+  return f(f(2 * x) / f(b + f(Math.sqrt(f(f(b * b) + f(f(4 * warp) * x))))));
+}
+
+/** `common.wgsl`'s `marchEvenStep`, emulated: step i of the whole segment under the warp a. */
+function evenStepOf(split: Split, i: number, warp: number): WalkStep {
+  const samples = split.stepsBefore + split.stepsAfter;
+  const unit = f(f(split.before + split.after) / samples);
+  const [fromStartM, dtM] = warpedStepOf(unit, samples, warp, i);
+  const fromLowestM = f(fromStartM - split.before);
+  return { tM: f(split.lowest + fromLowestM), dtM, fromLowestM };
+}
+
+/**
+ * `common.wgsl`'s `marchWalkCross`, `marchWalkEvenReady`, `marchWalkEvenEnter` and
+ * `marchWalkEvenStep`, emulated in f32 in the WGSL's order, over the whole segment (R08.T8): the
+ * ray march's two-sided sky segments under the sun-aware warp, cut at the layer edges.
+ */
+function evenWalkSteps(split: Split, crossings: readonly number[], warp: number): WalkStep[] {
+  const ends = walkEnds(split, crossings);
+  const samples = split.stepsBefore + split.stepsAfter;
+  const pieces = ends.length + 1;
+  if (!(ends.length > 0 && pieces <= samples)) {
+    return Array.from({ length: samples }, (_, i) => evenStepOf(split, i, warp));
+  }
+  // Each piece's length in u, their sum, and then each piece's count, as `marchWalkEvenReady`
+  // forms them.
+  const shares: number[] = [];
+  let total = 0;
+  let lowU = 0;
+  for (let p = 0; p < pieces; p += 1) {
+    const highU = p < ends.length ? warpUOf(split, warp, ends[p] ?? 0) : 1;
+    shares[p] = f(highU - lowU);
+    total = f(total + (shares[p] ?? 0));
+    lowU = highU;
+  }
+  const rest = samples - pieces;
+  let spent = 0;
+  let cumulative = 0;
+  for (let p = 0; p < pieces; p += 1) {
+    cumulative = f(cumulative + (shares[p] ?? 0));
+    const share = p + 1 < pieces ? Math.floor(f(f(f(rest * cumulative) / total) + 0.5)) : rest;
+    shares[p] = 1 + share - spent;
+    spent = share;
+  }
+  // The walk's place, as `marchWalkEvenEnter` sets it: its piece, the steps taken there, and the
+  // piece's count, unit, start from t* and own warp.
+  const walk = { piece: 0, taken: 0, n: 0, unit: 0, anchor: 0, warp: 0 };
+  const enter = (piece: number): void => {
+    const from = piece > 0 ? (ends[piece - 1] ?? 0) : -split.before;
+    const to = piece < ends.length ? (ends[piece] ?? 0) : split.after;
+    const fromU = piece > 0 ? warpUOf(split, warp, from) : 0;
+    const toU = piece < ends.length ? warpUOf(split, warp, to) : 1;
+    walk.piece = piece;
+    walk.taken = 0;
+    walk.n = shares[piece] ?? 0;
+    walk.unit = f(f(to - from) / walk.n);
+    walk.anchor = from;
+    walk.warp = f(f(warp * f(toU - fromU)) / f(f(1 - warp) + f(warp * f(fromU + toU))));
+  };
+  enter(0);
+  const steps: WalkStep[] = [];
+  for (let i = 0; i < samples; i += 1) {
+    if (walk.taken >= walk.n) {
+      enter(walk.piece + 1);
+    }
+    const k = walk.taken;
+    walk.taken += 1;
+    const [fromStartM, dtM] = warpedStepOf(walk.unit, walk.n, walk.warp, k);
+    const fromLowestM = f(walk.anchor + fromStartM);
+    steps.push({ tM: f(split.lowest + fromLowestM), dtM, fromLowestM });
+  }
+  return steps;
+}
+
 describe("the walk through a segment's pieces (common.wgsl's MarchWalk, R08.T6.i)", () => {
   /** Segments of every kind: from orbit, from a camera in the air, upward, down to the ground. */
   const SEGMENTS = [
@@ -1143,21 +1248,23 @@ describe("the walk through a segment's pieces (common.wgsl's MarchWalk, R08.T6.i
     [12, 4_000, 9_000, false],
   ] as const;
 
+  /** Crossings on either side, near its ends and near t*, as offsets from t* in the segment's lengths. */
+  const CUTS: ReadonlyArray<ReadonlyArray<number>> = [
+    [],
+    [0.3, 0.7],
+    [-0.2, 0.05, 0.6],
+    [-0.9, -0.5, -0.01, 0.01, 0.4, 0.95],
+    [0.001, 0.002, 0.003],
+  ];
+
   it("places every step as marchPiecesSteps does, within f32's rounding of t", () => {
     let compared = 0;
     for (const [tStart, tEnd, nearest, camera] of SEGMENTS) {
       for (const samples of [16, 32, 75]) {
         const split = splitOf(f(tStart), f(tEnd), f(nearest), samples, camera);
         const twinSplit = marchSplit(f(tStart), f(tEnd), f(nearest), samples, camera);
-        // Crossings on either side, near its ends and near t*, as offsets from t*.
         const length = split.before + split.after;
-        for (const cut of [
-          [],
-          [0.3, 0.7],
-          [-0.2, 0.05, 0.6],
-          [-0.9, -0.5, -0.01, 0.01, 0.4, 0.95],
-          [0.001, 0.002, 0.003],
-        ]) {
+        for (const cut of CUTS) {
           const crossings = cut.map((x) => x * length);
           const emulated = walkSteps(split, crossings);
           const twin = marchPiecesSteps(marchPieces(twinSplit, crossings.map(f)));
@@ -1180,6 +1287,51 @@ describe("the walk through a segment's pieces (common.wgsl's MarchWalk, R08.T6.i
       const split = splitOf(f(tStart), f(tEnd), f(nearest), 32, camera);
       const placed = Array.from({ length: 32 }, (_, i) => stepOf(split, i));
       expect(walkSteps(split, [])).toEqual(placed);
+    }
+  });
+
+  /** The sun-aware warps a the walk is taken at: even, between, and R05's placement from the start. */
+  const WARPS = [0, 0.25, 0.6, 1].map(f);
+
+  // The ray march's two-sided sky segments, from orbit's among them, since R08.T8
+  // (`decision-r08-t8-leans.md` §4.2 and §5.4): marchWarpedStep, marchWarpU, marchEvenStep,
+  // marchWalkEvenReady, marchWalkEvenEnter and marchWalkEvenStep.
+  it("places every step of the sun-aware warp as marchEvenSteps does, within f32's rounding of t (R08.T8)", () => {
+    let compared = 0;
+    for (const [tStart, tEnd, nearest, camera] of SEGMENTS) {
+      for (const samples of [16, 32, 75]) {
+        const split = splitOf(f(tStart), f(tEnd), f(nearest), samples, camera);
+        const twinSplit = marchSplit(f(tStart), f(tEnd), f(nearest), samples, camera);
+        const length = split.before + split.after;
+        for (const cut of CUTS) {
+          const crossings = cut.map((x) => x * length);
+          for (const warp of WARPS) {
+            const emulated = evenWalkSteps(split, crossings, warp);
+            const twin = marchEvenSteps(twinSplit, crossings.map(f), warp);
+            expect(emulated).toHaveLength(twin.length);
+            for (const [i, step] of emulated.entries()) {
+              const expected = twin[i];
+              const scaleM = Math.max(Math.abs(tStart), Math.abs(tEnd), 1);
+              expect(Math.abs(step.tM - (expected?.tM ?? Number.NaN))).toBeLessThan(4e-7 * scaleM);
+              expect(Math.abs(step.dtM - (expected?.dtM ?? Number.NaN))).toBeLessThan(
+                4e-7 * scaleM,
+              );
+              compared += 1;
+            }
+          }
+        }
+      }
+    }
+    expect(compared).toBeGreaterThan(8_000);
+  });
+
+  it("keeps the even steps to the bit at a = 0 on a segment that crosses no edge (R08.T8)", () => {
+    for (const [tStart, tEnd, nearest, camera] of SEGMENTS) {
+      for (const samples of [16, 32, 75]) {
+        const split = splitOf(f(tStart), f(tEnd), f(nearest), samples, camera);
+        const even = Array.from({ length: samples }, (_, i) => plainEvenStepOf(split, i));
+        expect(evenWalkSteps(split, [], 0)).toEqual(even);
+      }
     }
   });
 });

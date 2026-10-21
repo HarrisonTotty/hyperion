@@ -32,7 +32,10 @@
  *
  * The sky view and the ray march cut each side of their rays' split where the ray crosses one of
  * the medium's layer edges, the tables' `layerEdges` (plan R08, R08.T6.i; `tables.ts`'s
- * `packLayerEdges`), at the same counts; on a medium with none their steps are R05.T12.e's. The
+ * `packLayerEdges`), at the same counts; on a medium with none their steps are R05.T12.e's (since
+ * R08.T8 the ray march's two-sided sky segments, inside the air or outside it, take the sun-aware
+ * warp, even where the Sun is ahead or across the ray and R05's one-sided placement from the
+ * segment's start where it is behind; `marchSteps.ts`'s `marchEvenStep` and `marchEvenSteps`). The
  * aerial perspective keeps its even steps.
  *
  * Aerial perspective (plan R08, R08.T9.a). The composite lays it over every opaque surface of the
@@ -130,6 +133,57 @@ export interface TableSizes {
    * one deferred composite to the terrain alone (the budget's "aerial perspective on terrain only").
    */
   readonly aerialPerspectiveScope: "scene" | "terrain";
+  /**
+   * Where the ray march takes over the sky from the sky-view table, and the surfaces from the
+   * aerial-perspective volume, as the camera climbs (plan R08, R08.T8; projected as `settings.ts`'s
+   * `MARCH_BAND`): {@link marchWeightOf}'s band.
+   */
+  readonly marchBand: MarchBand;
+}
+
+/**
+ * The band of camera heights over which the per-pixel ray march takes over from the sky-view table
+ * and the aerial-perspective volume (plan R08, R08.T8: "the switch to the sky-view table is by
+ * altitude, with a blend band"), each edge a share of the medium's top in h\*, the height the
+ * medium is read at (Design note 17).
+ *
+ * @remarks
+ * Below the lower edge the tables serve as R05 drew them, and from the upper edge up the march
+ * draws everything, as it does from above the top; between them the composite blends the two
+ * linearly in h\*. The band stands well below the top because the sky view's bilinear read across
+ * the limb errs more the higher the camera, where the march does not: measured in the twin on
+ * R05's Earth (plan R08's Risks, "Deviations in T8.a, as built").
+ */
+export interface MarchBand {
+  /** The band's lower edge, a share of the medium's top, in [0, 1). */
+  readonly lowerShareOfTop: number;
+  /** The band's upper edge, a share of the medium's top, in (`lowerShareOfTop`, 1]. */
+  readonly upperShareOfTop: number;
+}
+
+/**
+ * The ray march's share of the frame at a camera whose h\* is `heightStarM` under a medium
+ * `topHeightM` deep (plan R08, R08.T8): 0 below `band`'s lower edge, where the sky-view table and
+ * the aerial-perspective volume serve; 1 from its upper edge up, the top and above included, where
+ * the march draws everything; linear in h\* between them, the composite's blend. Formed in `f64`
+ * for the kernels (`view.wgsl`'s `AtmosphereView.exact.w`) and the twins alike.
+ *
+ * @throws RangeError for a band whose edges are not 0 ≤ lower < upper ≤ 1, a top that is not
+ *   finite and above 0, or a height that is not a number.
+ */
+export function marchWeightOf(heightStarM: number, topHeightM: number, band: MarchBand): number {
+  const { lowerShareOfTop: lower, upperShareOfTop: upper } = band;
+  if (Number.isNaN(heightStarM)) {
+    throw new RangeError("the camera's height must be a number");
+  }
+  if (!(lower >= 0 && lower < upper && upper <= 1)) {
+    throw new RangeError(`a march band runs from 0 ≤ lower < upper ≤ 1, not ${lower} to ${upper}`);
+  }
+  if (!(Number.isFinite(topHeightM) && topHeightM > 0)) {
+    throw new RangeError(`the medium's top must be finite and above 0, not ${topHeightM} m`);
+  }
+  const share = (heightStarM / topHeightM - lower) / (upper - lower);
+  return Math.min(Math.max(share, 0), 1);
 }
 
 /**
@@ -143,7 +197,11 @@ export interface TableSizes {
  * full size on both (128 KB, rarely built).
  *
  * The sky view and the ray march place their steps toward each ray's lowest point, not evenly
- * (`marchSteps.ts`), and their counts are R05.T12.e's: its quadrature gate (`marchSteps.test.ts`)
+ * (`marchSteps.ts`; since R08.T8 the ray march's two-sided sky segments, inside the air or outside
+ * it, take the sun-aware warp, even where the Sun is ahead or across the ray and R05's one-sided
+ * placement from the segment's start where it is behind, `marchEvenStep` and `marchEvenSteps`), and
+ * their counts are R05.T12.e's: its
+ * quadrature gate (`marchSteps.test.ts`)
  * holds high's within 2% of a converged march (5% for twilight rays), where even steps were up to
  * 33% off, and low's 16 and 16 no worse over the gate than even steps at the same counts. The high
  * sky view takes 75 steps, not Hillaire 2020's 30 (Table 2; addendum B of
@@ -161,6 +219,16 @@ export interface TableSizes {
  * adds no step, a floor on the piece next to t*, cured that ray (2.76%) but put five others over
  * (the disc at 2.80%, against 2%), and was not adopted (plan R08's Risks, "Deviations in T7, as
  * built"). It costs 12.5% more on every high ray-march pixel.
+ *
+ * The march takes over the sky from the sky view between 0.3 and 0.5 of the medium's top on high,
+ * and between 0.2 and 0.3 on low (plan R08, R08.T8; {@link MarchBand}). Measured in the twin on
+ * R05's Earth (a 100 km top), against a march of 1,024 steps, at the 5% metric's floor (6 × 10⁻³ of
+ * the frame's brightest): the sky view's read across the upper limb is 2.31% off from 30 km, 4.30%
+ * from 50 km, 6.21% from 60 km and 15.8% from 1 m under the top on high, and 4.26% from 20 km,
+ * 5.73% from 30 km and 18.2% from 60 km on low, where each setting's march, every two-sided sky segment in
+ * even steps (`decision-r08-t8-leans.md` §4), stays within 0.40–1.55% on high from 20 km to 1 m under
+ * the top and 2.0–3.5% on low from 20 to 30 km (`marchBand.test.ts`). Through high's band the
+ * composite's blend stays within 2.31%, inside Design note 10's 5%.
  */
 export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
   high: {
@@ -174,6 +242,7 @@ export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
     rayMarchScale: 1,
     rayMarchSamples: 36,
     aerialPerspectiveScope: "scene",
+    marchBand: { lowerShareOfTop: 0.3, upperShareOfTop: 0.5 },
   },
   low: {
     transmittance: TRANSMITTANCE_SIZE,
@@ -186,6 +255,7 @@ export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
     rayMarchScale: 0.5,
     rayMarchSamples: 16,
     aerialPerspectiveScope: "terrain",
+    marchBand: { lowerShareOfTop: 0.2, upperShareOfTop: 0.3 },
   },
 };
 
@@ -1608,7 +1678,13 @@ export class HillaireAtmosphere {
       sizes.rayMarchScale,
       sizes.skyViewSamples,
     ]);
-    set("exact", [exact.groundQuadricM2, exact.topQuadricM2, exact.localScaleHeightM, 0]);
+    // The march's share of the frame at the camera's h* (R08.T8), formed in f64.
+    const marchWeight = marchWeightOf(
+      inputs.heightM * curvature.gravityRatio,
+      topHeightM,
+      sizes.marchBand,
+    );
+    set("exact", [exact.groundQuadricM2, exact.topQuadricM2, exact.localScaleHeightM, marchWeight]);
     set("curvature", [
       curvature.meridionalM,
       curvature.primeVerticalM,

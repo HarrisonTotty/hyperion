@@ -64,8 +64,11 @@ struct AtmosphereView {
   // 1, a / c) and S_t = diag(1, 1, (a + H / s_e) / (c + H / s_p)), the top the quadric through h* = H
   // at the equator and the poles (R08.T6.f; Design note 17); z, the camera's local scale height in
   // h*, which the composite's sliced lookup takes from the camera (`oblate.wgsl`'s LookupStart),
-  // from the medium's own column (R08.T6.f); w, unused. The sky view's beta, z before R08.T6.f, is
-  // each column's own since (`oblate.wgsl`'s skyViewColumnOf).
+  // from the medium's own column (R08.T6.f); w, the ray march's share of the frame at the camera's
+  // h* (R08.T8; `hillaire.ts`'s marchWeightOf): 0 below the setting's march band, where the sky view
+  // and the aerial-perspective volume serve, 1 from its upper edge up, the top and above included,
+  // and linear between, the composite's blend. The sky view's beta, z before R08.T6.f, is each
+  // column's own since (`oblate.wgsl`'s skyViewColumnOf).
   exact : vec4f,
   // The camera on an oblate body (plan R08, R08.T6.f; Design note 17), formed in f64: x and y its
   // principal radii of curvature M and N, from which each sky-view column's sphere R_alpha is

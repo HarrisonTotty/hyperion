@@ -35,6 +35,7 @@ import {
   RAY_MARCH_KERNEL,
   SKY_VIEW_KERNEL,
   localScaleHeightM,
+  marchWeightOf,
   skyAzimuthOrigin,
   skyViewColumnOf,
   skyViewHeight,
@@ -1195,6 +1196,67 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
     expect(Array.from(block ?? []).slice(40, 44)).toEqual(expected);
     expect(Array.from(block ?? []).slice(44, 48)).toEqual([...(draw.uniforms["curvature"] ?? [])]);
     expect(block).toHaveLength((12 + 3 * 6) * 4);
+  });
+
+  it.each(["high", "low"] as const)(
+    "puts the march's share of the frame at the camera's h* in the view's exact.w on %s (R08.T8)",
+    async (setting) => {
+      const engine = await countingRenderEngine();
+      const sizes = TABLE_SIZES[setting];
+      const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, sizes, WGS84);
+      const top = R05_EARTH_REFERENCE.topHeightM;
+      const { lowerShareOfTop: lower, upperShareOfTop: upper } = sizes.marchBand;
+      // Below the band, at its middle, above it, and from orbit; WGS 84 with no gravity, s ≡ 1.
+      const shares = [
+        2,
+        lower * top - 1_000,
+        ((lower + upper) / 2) * top,
+        upper * top + 1_000,
+        400_000,
+      ].map((heightM) => {
+        const camera: AtmosphereCamera = { ...CAMERA, positionM: pointAt(0, heightM) };
+        engine.dispatched.length = 0;
+        const draw = atmosphere.drawFrame(camera, [NOON], SCENE);
+        const inputs = atmosphereInputs(camera, WGS84);
+        const expected = Math.fround(marchWeightOf(inputs.heightM, top, sizes.marchBand));
+        // The composite's and the ray march's view block alike, `exact` its eleventh member.
+        const block = engine.dispatched.find((d) => d.kernel === "atmosphere ray march")?.bindings
+          .uniforms["view"];
+        expect([draw.uniforms["exact"]?.[3], block?.[43]]).toEqual([expected, expected]);
+        return expected;
+      });
+      expect(shares.map((w) => Math.round(w * 1e6) / 1e6)).toEqual([0, 0, 0.5, 1, 1]);
+    },
+  );
+
+  it("takes the march's share at h* = s h on a body with gravity (R08.T8)", async () => {
+    const engine = await countingRenderEngine();
+    const gravity = gravityOfSpheroid(SATURN_SPHEROID);
+    const atmosphere = new HillaireAtmosphere(
+      engine,
+      R05_EARTH_REFERENCE,
+      TABLE_SIZES.high,
+      SATURN_SPHEROID,
+      NO_ABSORBER_CURVES,
+      gravity,
+    );
+    const s = gravityRatio(gravity, 0);
+    const top = R05_EARTH_REFERENCE.topHeightM;
+    const band = TABLE_SIZES.high.marchBand;
+    // At the equator, h* = 40 km, the middle of high's band, stands at h = 40 km ÷ s, about 46 km.
+    const camera: AtmosphereCamera = {
+      ...CAMERA,
+      positionM: { x: SATURN_SPHEROID.equatorialRadiusM + 40_000 / s, y: 0, z: 0 },
+    };
+    const draw = atmosphere.drawFrame(camera, [NOON], SCENE);
+    const inputs = atmosphereInputs(camera, SATURN_SPHEROID, gravity);
+    expect(inputs.gravityRatio).toBe(s);
+    expect(Math.abs(s - 1)).toBeGreaterThan(0.05);
+    expect(draw.uniforms["exact"]?.[3]).toBe(
+      Math.fround(marchWeightOf(inputs.heightM * s, top, band)),
+    );
+    expect(draw.uniforms["exact"]?.[3]).toBeCloseTo(0.5, 6);
+    expect(marchWeightOf(inputs.heightM, top, band)).toBeGreaterThan(0.6);
   });
 
   it("keeps skyViewHeight to view.wgsl's clamp", () => {

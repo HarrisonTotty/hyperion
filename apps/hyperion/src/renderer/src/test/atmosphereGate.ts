@@ -5,11 +5,19 @@
  * with the multiple-scattering term included.
  *
  * @remarks
- * It holds the gate's 1,046 rays on Earth's medium, its metric and its schemes, the reference's
+ * It holds the gate's 1,641 rays on Earth's medium, its metric and its schemes, the reference's
  * convergence rule, and R05's own `f64` twin of the two kernels' quadrature: single scattering per
  * unit sun illuminance with the sun's transmittance from a fine grid, and a Lambertian ground. Moved
  * here unchanged from `marchSteps.test.ts` (R08.T6.a), so that the twin is held to the same rays
  * and R05's pixels.
+ *
+ * Since R08.T8 (`decision-r08-t8-leans.md` §4 and §5.4) the schemes follow the kernels' rule, the
+ * ray march's two-sided sky segments under the sun-aware warp ({@link Placement}'s `kernel`: even
+ * where the Sun is ahead or across the ray, R05's one-sided placement from the segment's start where
+ * it is behind), while the references keep R05.T12.e's placed steps; the march's rays gain the
+ * night-side and terminator limb (`night limb`, {@link marchRays}), and the sky's the camera's last
+ * light (`last light`, {@link skyRays}), which the ray march draws from the band's cameras and the
+ * gate holds as the ray march's ({@link kernelOf}).
  */
 
 import { add, cross, dot, normalise, scale, type Vec3 } from "../geometry/vec3";
@@ -19,9 +27,11 @@ import {
   grazingTwilight,
   LOW_TWIN_WORST,
   MARCH_TOLERANCE,
+  marchEvenStep,
   marchSplit,
   marchStep,
   type MarchStep,
+  skyWarpOf,
   TWILIGHT_TOLERANCE,
 } from "../view/atmosphere/marchSteps";
 import { densityAt, extinction, type MediumTerm } from "../view/atmosphere/medium";
@@ -166,18 +176,22 @@ export function oldFactorF32(x: number): number {
   return f(f(1 - f(Math.exp(-v))) / v);
 }
 
-/** How a scheme places its steps: the kernels' placement, or the even steps they had. */
-export type Placement = "placed" | "even";
+/**
+ * How a scheme places its steps: R05.T12.e's placement (`placed`, which every reference keeps); the
+ * kernels' own rule (`kernel`: R05.T12.e's, but the ray march's two-sided sky segments under the
+ * sun-aware warp since R08.T8, `decision-r08-t8-leans.md` §4.2 and §5.4); or the even steps the
+ * kernels had before R05.T12.e (`even`).
+ */
+export type Placement = "placed" | "kernel" | "even";
 
-/** The steps of a march over [tStartM, tEndM]: the kernels' placement, or the even steps they had. */
-export function stepsFor(
-  placement: Placement,
-  o: Vec3,
-  d: Vec3,
-  tStartM: number,
-  tEndM: number,
-  n: number,
-): MarchStep[] {
+/**
+ * The steps of a gate ray's march over its segment under a placement. Under `kernel` a segment the
+ * ray march marches as its sky, nothing drawn along it ({@link skySegmentOf}), takes the sun-aware
+ * warp by the ray's sun (`marchEvenStep`, `skyWarpOf`) where it is two-sided, and its sides about
+ * the lowest point where it is one-sided.
+ */
+export function stepsFor(placement: Placement, ray: GateRay, n: number): MarchStep[] {
+  const { o, d, tStartM, tEndM } = ray;
   let steps: MarchStep[];
   switch (placement) {
     case "even": {
@@ -189,6 +203,18 @@ export function stepsFor(
       // A segment starts at the camera exactly when the camera is inside the atmosphere.
       const split = marchSplit(tStartM, tEndM, -dot(o, d), n, tStartM <= 0);
       steps = Array.from({ length: n }, (_, i) => marchStep(split, i));
+      break;
+    }
+    case "kernel": {
+      // `rayMarch.wgsl`: the camera side toward the camera only for a drawn surface, and every
+      // two-sided sky segment under the warp by the march's first source, the ray's sun.
+      const sky = skySegmentOf(ray);
+      const split = marchSplit(tStartM, tEndM, -dot(o, d), n, tStartM <= 0 && !sky);
+      const warped = sky && split.beforeM > 0 && split.afterM > 0;
+      const warp = skyWarpOf(d, ray.s);
+      steps = Array.from({ length: n }, (_, i) =>
+        warped ? marchEvenStep(split, i, warp) : marchStep(split, i),
+      );
       break;
     }
   }
@@ -250,11 +276,17 @@ function sphereHits(o: Vec3, d: Vec3, radiusM: number): readonly [number, number
   return [-b - root, -b + root];
 }
 
-type MarchFamily = "disc" | "limb" | "inside" | "near-level";
-type SkyFamily = "sky" | "band" | "past" | "high limb" | "high band";
-/** A family of the gate's rays: the march's four, then the sky view's five. */
+type MarchFamily = "disc" | "limb" | "night limb" | "inside" | "near-level";
+type SkyFamily = "sky" | "band" | "past" | "high limb" | "high band" | "last light";
+/** A family of the gate's rays: the march's five, then the sky's six. */
 export type Family = MarchFamily | SkyFamily;
-const MARCH_FAMILIES: readonly Family[] = ["disc", "limb", "inside", "near-level"];
+const MARCH_FAMILIES: readonly Family[] = ["disc", "limb", "night limb", "inside", "near-level"];
+/**
+ * The families whose rays are the ray march's: the march's five, and since R08.T8 the sky's last
+ * light (`decision-r08-t8-leans.md` §5.5), which the ray march draws from the band's cameras and
+ * the gate holds it to wherever it holds the march, marched as a sky pixel at the march's count.
+ */
+const RAY_MARCH_FAMILIES: ReadonlySet<Family> = new Set([...MARCH_FAMILIES, "last light"]);
 /** The families in the order the gate counts them. */
 export const FAMILIES: readonly Family[] = [
   ...MARCH_FAMILIES,
@@ -263,6 +295,7 @@ export const FAMILIES: readonly Family[] = [
   "past",
   "high limb",
   "high band",
+  "last light",
 ];
 
 /** One ray of the gate, the segment its kernel marches and whether it ends on the ground. */
@@ -282,7 +315,15 @@ export interface GateRay {
 
 /** The kernel a family's rays are the twin of. */
 export const kernelOf = (ray: GateRay): "rayMarch" | "skyView" =>
-  MARCH_FAMILIES.includes(ray.family) ? "rayMarch" : "skyView";
+  RAY_MARCH_FAMILIES.has(ray.family) ? "rayMarch" : "skyView";
+
+/**
+ * Whether the ray march marches a gate ray as its sky, nothing drawn along it (R08.T8;
+ * `rayMarch.wgsl`'s `depth == 0.0`): a ray march family's ray that meets no ground, the limb's from
+ * orbit and the last light's from inside the air. A disc ray ends on the bare ground before its
+ * lowest point, one-sided, and the inside and near-level rays end on drawn terrain.
+ */
+export const skySegmentOf = (ray: GateRay): boolean => kernelOf(ray) === "rayMarch" && !ray.ground;
 
 /**
  * A sun at a zenith angle and an azimuth from the ray's own, at a point `q`; a vertical ray takes
@@ -317,6 +358,12 @@ function towardTerrain(o: Vec3, distanceM: number): { d: Vec3; tM: number } | nu
   return ground !== null && Math.abs(ground[0] - distanceM) < 1 ? { d, tM: ground[0] } : null;
 }
 
+/** The night limb's cameras, m above the ground: R05.T12.e's orbit, and 1 km over the top. */
+const NIGHT_LIMB_CAMERAS_M = [400_000, R05_EARTH_REFERENCE.topHeightM + 1_000] as const;
+
+/** The night limb's suns, degrees from the zenith at the tangent point: the terminator and beyond. */
+const NIGHT_LIMB_SUN_ZENITHS_DEG = [90, 95, 100, 105] as const;
+
 /**
  * The march's rays: from the decision's model, the disc from 400 km (ground zenith 0/60/80/87° ×
  * sun 30/80/90/95° at the ground × azimuth 0/90/180°), the limb at R08's tangent heights 0.1,
@@ -324,29 +371,36 @@ function towardTerrain(o: Vec3, distanceM: number): { d: Vec3; tM: number } | nu
  * terrain 40–300 km away from 20 and 60 km (sun 30/85° × azimuth 0/180°), beyond the
  * aerial-perspective volume's 32 km; from addendum A, the near-level march from 0.5–5 km to terrain
  * at 40, 80 and 150 km before the visible horizon (the ruling's suns).
+ *
+ * Since R08.T8 (`decision-r08-t8-leans.md` §4.3), the night limb: the night-side and terminator
+ * limb from 400 km and from 1 km over the top, at the limb's tangent heights, the sun 90, 95, 100
+ * and 105° from the zenith at the tangent point × azimuth 0/180°, less the limb's own rays (400 km,
+ * 90°), 70 rays, every one a twilight ray. R05.T12.e's suns at 30 and 90° never sampled it, where
+ * the placement about the lowest point from outside failed (12.19% at high's 36 steps).
  */
 export function marchRays(): GateRay[] {
   const rays: GateRay[] = [];
   const orbit = { x: 0, y: 0, z: BOTTOM_M + 400_000 };
   const fromOrbit = (
-    family: "disc" | "limb",
+    family: "disc" | "limb" | "night limb",
     name: string,
     alphaRad: number,
     sunZenithDeg: number,
     sunAzimuthDeg: number,
+    camera: Vec3 = orbit,
   ): void => {
     const d = { x: Math.sin(alphaRad), y: 0, z: -Math.cos(alphaRad) };
-    const shell = sphereHits(orbit, d, TOP_M);
+    const shell = sphereHits(camera, d, TOP_M);
     if (shell === null) {
       throw new Error(`${name} misses the atmosphere`);
     }
-    const ground = sphereHits(orbit, d, BOTTOM_M);
+    const ground = sphereHits(camera, d, BOTTOM_M);
     const hits = ground !== null && ground[0] > 0;
-    const q = along(orbit, d, hits ? ground[0] : -dot(orbit, d));
+    const q = along(camera, d, hits ? ground[0] : -dot(camera, d));
     rays.push({
       family,
       name,
-      o: orbit,
+      o: camera,
       d,
       s: sunAt(q, d, sunZenithDeg, sunAzimuthDeg),
       tStartM: shell[0],
@@ -376,6 +430,30 @@ export function marchRays(): GateRay[] {
         const tangentM = tangentScaleHeights * RAYLEIGH_SCALE_HEIGHT_M;
         const alpha = Math.asin((BOTTOM_M + tangentM) / orbit.z);
         fromOrbit("limb", `limb, ${tangentScaleHeights} H, sun ${zen}°/${az}°`, alpha, zen, az);
+      }
+    }
+  }
+  for (const cameraM of NIGHT_LIMB_CAMERAS_M) {
+    const camera = { x: 0, y: 0, z: BOTTOM_M + cameraM };
+    for (const tangentScaleHeights of [0.1, 0.3, 1, 3, 10]) {
+      for (const zen of NIGHT_LIMB_SUN_ZENITHS_DEG) {
+        for (const az of [0, 180]) {
+          // The limb's own rays, which it does not repeat.
+          if (cameraM === 400_000 && zen === 90) {
+            continue;
+          }
+          const alpha = Math.asin(
+            (BOTTOM_M + tangentScaleHeights * RAYLEIGH_SCALE_HEIGHT_M) / camera.z,
+          );
+          fromOrbit(
+            "night limb",
+            `night limb, ${cameraM / 1_000} km, ${tangentScaleHeights} H, sun ${zen}°/${az}°`,
+            alpha,
+            zen,
+            az,
+            camera,
+          );
+        }
       }
     }
   }
@@ -427,14 +505,44 @@ const BAND_SUNS = [30, 80, 90, 95].flatMap((zen) => [0, 180].map((az) => [zen, a
 /** Addendum B's high cameras, m: the sky view serves cameras up to 1 m below the top. */
 const HIGH_CAMERAS_M = [60_000, 80_000, R05_EARTH_REFERENCE.topHeightM - 1];
 
+/** The last light's cameras, m: every band's, 30–99.999 km (`decision-r08-t8-leans.md` §5.5). */
+const LAST_LIGHT_CAMERAS_M = [
+  30_000,
+  40_000,
+  50_000,
+  60_000,
+  80_000,
+  95_000,
+  R05_EARTH_REFERENCE.topHeightM - 1,
+];
+
 /**
- * The sky view's rays: from the decision's model, cameras at 2 m, 1 km, 10 km and 50 km at view
+ * The last light's rays, as shares of the way from 0.06° under the horizontal to 0.05° over the
+ * visible horizon, evenly.
+ */
+const LAST_LIGHT_RAYS = [0, 0.25, 0.5, 0.75, 1] as const;
+
+/** The last light's suns, degrees over the camera's own visible horizon: 0.5° under to 1.5° over. */
+const LAST_LIGHT_SUNS_OVER_DEG = [-0.5, 0, 0.5, 1, 1.5] as const;
+
+/** The last light's suns' azimuths from the ray's, degrees: behind the view and well off its side. */
+const LAST_LIGHT_AZIMUTHS_DEG = [120, 150, 180] as const;
+
+/**
+ * The sky's rays: from the decision's model, cameras at 2 m, 1 km, 10 km and 50 km at view
  * zenith 0/45/80/88/95°; from addendum A, cameras at 0.5–50 km in the band between the local and
  * the visible horizon (0.2, 0.5, 0.8 and 0.98 of the dip, and 0.01° either side of the horizontal)
  * and 0.01°, 0.1°, 0.5° and 2° past the visible horizon, the sun at 30/80/90/95° × 0/180° at the
  * camera; from addendum B, cameras at 60, 80 and 99.999 km, their band (0.2, 0.5, 0.8 and 0.98 of
  * the dip, the same suns) and their limb (tangent at 0.84–25 km). No ground bounce, as the kernel
  * has none; a ray that meets the ground ends there.
+ *
+ * Since R08.T8 (`decision-r08-t8-leans.md` §5.5), the last light, the ray march's: from cameras at
+ * 30, 40, 50, 60, 80, 95 and 99.999 km, five rays from 0.06° under the horizontal to 0.05° over the
+ * visible horizon, the sun 0.5° under to 1.5° over the camera's own visible horizon in 0.5° steps
+ * at 120°, 150° and 180° from the ray's azimuth, 525 rays, every one a two-sided twilight ray. The
+ * gate's band suns stopped at 95° from the zenith and its cameras skipped 30–45 km, which hid the
+ * window where even steps drew the sky under the horizontal 45–124 codes off (§5.1).
  */
 export function skyRays(): GateRay[] {
   const rays: GateRay[] = [];
@@ -442,7 +550,7 @@ export function skyRays(): GateRay[] {
     family: SkyFamily,
     cameraM: number,
     viewZenithDeg: number,
-    suns: ReadonlyArray<readonly [number, number]> = SKY_SUNS,
+    suns: ReadonlyArray<readonly [zenithDeg: number, azimuthDeg: number, name?: string]> = SKY_SUNS,
   ): void => {
     const o = { x: 0, y: 0, z: BOTTOM_M + cameraM };
     const d = { x: Math.sin(rad(viewZenithDeg)), y: 0, z: Math.cos(rad(viewZenithDeg)) };
@@ -452,7 +560,7 @@ export function skyRays(): GateRay[] {
       throw new Error("a sky ray misses the top");
     }
     const tEndM = ground !== null && ground[0] > 0 ? ground[0] : shell[1];
-    for (const [zen, az] of suns) {
+    for (const [zen, az, sunName] of suns) {
       const s = {
         x: Math.sin(rad(zen)) * Math.cos(rad(az)),
         y: Math.sin(rad(zen)) * Math.sin(rad(az)),
@@ -460,7 +568,7 @@ export function skyRays(): GateRay[] {
       };
       rays.push({
         family,
-        name: `${family}, ${cameraM} m, view zenith ${viewZenithDeg.toFixed(3)}°, sun ${zen}°/${az}°`,
+        name: `${family}, ${cameraM} m, view zenith ${viewZenithDeg.toFixed(3)}°, sun ${sunName ?? `${zen}°/${az}°`}`,
         o,
         d,
         s,
@@ -523,10 +631,27 @@ export function skyRays(): GateRay[] {
       }
     }
   }
+  // Since R08.T8 (`decision-r08-t8-leans.md` §5.5): the camera's last light, the sky between the
+  // horizontal and the visible horizon with the Sun just over or under the camera's own visible
+  // horizon, behind the view or well off to its side.
+  for (const cameraM of LAST_LIGHT_CAMERAS_M) {
+    const dipDeg = (Math.acos(BOTTOM_M / (BOTTOM_M + cameraM)) * 180) / Math.PI;
+    const suns = LAST_LIGHT_SUNS_OVER_DEG.flatMap((overDeg) => {
+      const where =
+        overDeg === 0 ? "on" : `${Math.abs(overDeg)}° ${overDeg > 0 ? "over" : "under"}`;
+      return LAST_LIGHT_AZIMUTHS_DEG.map(
+        (az) => [90 + dipDeg - overDeg, az, `${where} the visible horizon/${az}°`] as const,
+      );
+    });
+    for (const f of LAST_LIGHT_RAYS) {
+      // From 0.06° under the horizontal to 0.05° over the visible horizon.
+      add1("last light", cameraM, 90.06 + f * (dipDeg - 0.11), suns);
+    }
+  }
   return rays;
 }
 
-/** The gate's 1,046 rays: the march's, then the sky view's. */
+/** The gate's 1,641 rays: the march's, then the sky's. */
 export function gateRays(): GateRay[] {
   return [...marchRays(), ...skyRays()];
 }
@@ -553,12 +678,7 @@ export const twilight = (ray: GateRay): boolean =>
  * transmittance.
  */
 export function singleScatteringPixel(ray: GateRay, placement: Placement, n: number): Rgb3 {
-  const { l, t } = march(
-    ray.o,
-    ray.d,
-    ray.s,
-    stepsFor(placement, ray.o, ray.d, ray.tStartM, ray.tEndM, n),
-  );
+  const { l, t } = march(ray.o, ray.d, ray.s, stepsFor(placement, ray, n));
   if (!ray.ground) {
     return l;
   }
@@ -597,15 +717,18 @@ export interface RayResult {
 }
 
 const keyOf = (s: Scheme): string => `${s.placement} ${s.marchSteps}/${s.skySteps}`;
-/** The high setting's counts, placed. */
+/**
+ * The high setting's counts under the kernels' rule (since R08.T8 the ray march's two-sided sky
+ * segments under the sun-aware warp; the references keep R05.T12.e's placed steps).
+ */
 export const HIGH: Scheme = {
-  placement: "placed",
+  placement: "kernel",
   marchSteps: TABLE_SIZES.high.rayMarchSamples,
   skySteps: TABLE_SIZES.high.skyViewSamples,
 };
-/** The low setting's counts, placed. */
+/** The low setting's counts under the kernels' rule, as {@link HIGH}'s. */
 export const LOW: Scheme = {
-  placement: "placed",
+  placement: "kernel",
   marchSteps: TABLE_SIZES.low.rayMarchSamples,
   skySteps: TABLE_SIZES.low.skyViewSamples,
 };

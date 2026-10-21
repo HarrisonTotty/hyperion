@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { normalise, type Vec3 } from "../../geometry/vec3";
+import { dot, normalise, type Vec3 } from "../../geometry/vec3";
 import {
   CONVERGED,
   describeFailures,
@@ -15,12 +15,14 @@ import {
   HIGH,
   kernelOf,
   LOW,
+  lowBoundOf,
   oldFactorF32,
   overLowBounds,
   REFERENCE_STEPS,
   runGate,
   type Scheme,
   singleScatteringPixel,
+  skySegmentOf,
   stepFactorF32,
   sunZenithAtDeg,
   twilight,
@@ -29,11 +31,15 @@ import { RAY_MARCH_KERNEL, SKY_VIEW_KERNEL } from "./hillaire";
 import {
   grazingTwilight,
   marchEdgesM,
+  marchEvenStep,
+  marchEvenSteps,
   marchPieces,
   marchPiecesSteps,
   marchSplit,
   marchStep,
   type MarchStep,
+  SKY_WARP_COSINE,
+  skyWarpOf,
 } from "./marchSteps";
 import multiScatteringWgsl from "./shaders/multiScattering.wgsl?raw";
 import aerialPerspectiveWgsl from "./shaders/aerialPerspective.wgsl?raw";
@@ -265,6 +271,135 @@ describe("marchPieces and marchPiecesSteps: the marches cut at layer edges (R08.
   });
 });
 
+/**
+ * Where a point `t` along a segment from `startM`, `lengthM` long, stands in u under the warp a; a
+ * point a rounding before the start, at it.
+ */
+function warpedUAt(startM: number, lengthM: number, warp: number, t: number): number {
+  const x = (t - startM) / lengthM;
+  if (!(x > 0)) {
+    return 0;
+  }
+  return (2 * x) / (1 - warp + Math.sqrt((1 - warp) ** 2 + 4 * warp * x));
+}
+
+/** A unit vector `deg` from +y toward +x. */
+function fromY(deg: number): Vec3 {
+  return { x: Math.sin((deg * Math.PI) / 180), y: Math.cos((deg * Math.PI) / 180), z: 0 };
+}
+
+describe("the sun-aware warp of the ray march's two-sided sky segments (R08.T8)", () => {
+  /** Two-sided segments: from orbit, and from a camera in the band, as the ray march splits them. */
+  const orbit = marchSplit(300_000, 2_600_000, 1_450_000, 36, false);
+  const band = marchSplit(0, 1_100_000, 640_000, 16, false);
+  const WARPS = [0, 0.3, 0.7, 1] as const;
+
+  it("is 0 with the Sun ahead of the ray or across it, 1 beyond about 101.5°, and linear in d · s between", () => {
+    const d = { x: 0, y: 1, z: 0 };
+    const at = fromY;
+    expect(skyWarpOf(d, at(0))).toBe(0);
+    expect(skyWarpOf(d, at(90))).toBe(0);
+    expect(skyWarpOf(d, at(180))).toBe(1);
+    expect(skyWarpOf(d, at(102))).toBe(1);
+    expect(skyWarpOf(d, at(95))).toBeCloseTo(Math.sin((5 * Math.PI) / 180) / SKY_WARP_COSINE, 12);
+    expect(skyWarpOf(d, null)).toBe(0);
+    // No step in it as the Sun passes the ends of its ramp.
+    expect(Math.abs(skyWarpOf(d, at(90.0001)))).toBeLessThan(1e-5);
+    expect(skyWarpOf(d, at(Math.acos(-SKY_WARP_COSINE) / (Math.PI / 180) - 1e-4))).toBeCloseTo(
+      1,
+      4,
+    );
+  });
+
+  it("keeps the even steps to the bit at a = 0 on a segment that crosses no edge", () => {
+    for (const split of [orbit, band]) {
+      const n = split.stepsBefore + split.stepsAfter;
+      const unitM = (split.beforeM + split.afterM) / n;
+      const even = Array.from({ length: n }, (_, i) => ({
+        tM: split.lowestM + (unitM * (i + 0.5) - split.beforeM),
+        dtM: unitM,
+      }));
+      expect(Array.from({ length: n }, (_, i) => marchEvenStep(split, i, 0))).toEqual(even);
+      expect(marchEvenSteps(split, [], 0)).toEqual(even);
+    }
+  });
+
+  it("is R05.T12.e's one-sided placement from the segment's start at a = 1", () => {
+    for (const split of [orbit, band]) {
+      const n = split.stepsBefore + split.stepsAfter;
+      const fromStart = marchSplit(
+        split.startM,
+        split.startM + split.beforeM + split.afterM,
+        0,
+        n,
+        false,
+      );
+      for (let i = 0; i < n; i += 1) {
+        const warped = marchEvenStep(split, i, 1);
+        const placed = marchStep(fromStart, i);
+        expect(warped.tM).toBeCloseTo(placed.tM, 6);
+        expect(warped.dtM / placed.dtM).toBeCloseTo(1, 12);
+      }
+    }
+  });
+
+  it("tiles the segment front to back at every warp, whole and cut, every crossing a boundary", () => {
+    for (const [split, crossings] of [
+      [orbit, []],
+      [orbit, [-600_000, -200_000, 100_000, 700_000]],
+      [band, []],
+      [band, [-500_000, -20_000, 300_000]],
+    ] as const) {
+      for (const warp of WARPS) {
+        const steps = marchEvenSteps(split, crossings, warp);
+        expect(steps).toHaveLength(split.stepsBefore + split.stepsAfter);
+        const boundaries = boundariesOf(steps);
+        for (const [k, { dtM }] of steps.entries()) {
+          expect(dtM).toBeGreaterThan(0);
+          expect(boundaries[k + 1] ?? Number.NaN).toBeCloseTo(
+            (boundaries[k] ?? Number.NaN) + dtM,
+            6,
+          );
+        }
+        expect(boundaries[0]).toBeCloseTo(split.startM, 6);
+        expect(boundaries.at(-1)).toBeCloseTo(split.startM + split.beforeM + split.afterM, 6);
+        for (const t of crossings) {
+          expect(isBoundary(boundaries, split.lowestM + t)).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("spaces each piece's steps evenly in u, sharing the segment's by the pieces' lengths in u", () => {
+    const crossings = [-500_000, -20_000, 300_000];
+    const lengthM = band.beforeM + band.afterM;
+    for (const warp of WARPS) {
+      const steps = marchEvenSteps(band, crossings, warp);
+      const us = boundariesOf(steps).map((t) => warpedUAt(band.startM, lengthM, warp, t));
+      const cutsU = crossings.map((c) => warpedUAt(band.startM, lengthM, warp, band.lowestM + c));
+      const ends = [0, ...cutsU, 1];
+      let at = 0;
+      for (let p = 0; p + 1 < ends.length; p += 1) {
+        const highU = ends[p + 1] ?? Number.NaN;
+        const widths: number[] = [];
+        while (at + 1 < us.length && (us[at] ?? Number.NaN) < highU - 1e-12) {
+          widths.push((us[at + 1] ?? Number.NaN) - (us[at] ?? Number.NaN));
+          at += 1;
+        }
+        const width = (highU - (ends[p] ?? Number.NaN)) / widths.length;
+        for (const w of widths) {
+          expect(w).toBeCloseTo(width, 9);
+        }
+        // One a piece, and the 12 left over shared by the pieces' lengths in u, each piece's count
+        // rounding its end's share: within a step of 12 times its length.
+        expect(
+          Math.abs(widths.length - 1 - 12 * (highU - (ends[p] ?? Number.NaN))),
+        ).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+});
+
 /** A unit vector `deg` from +z toward +x. */
 function tilted(deg: number): Vec3 {
   return { x: Math.sin((deg * Math.PI) / 180), y: 0, z: Math.cos((deg * Math.PI) / 180) };
@@ -302,28 +437,72 @@ describe("grazingTwilight", () => {
 });
 
 describe("the kernels' WGSL", () => {
-  it("places the sky view's and the ray march's steps with marchSplit and marchStep", () => {
+  it("places the sky view's and the ray march's steps with marchSplit and marchStep, every two-sided sky segment of the ray march under the sun-aware warp (R08.T8)", () => {
     expect(SKY_VIEW_KERNEL.reference).toMatch(/\bmarchSplit\([^;]*, samples, true\);/);
-    expect(RAY_MARCH_KERNEL.reference).toMatch(/\bmarchSplit\([^;]*, samples, shell\.x <= 0\.0\);/);
+    expect(RAY_MARCH_KERNEL.reference).toMatch(
+      /\bmarchSplit\([^;]*, samples, shell\.x <= 0\.0 && depth > 0\.0\);/,
+    );
     for (const kernel of [SKY_VIEW_KERNEL.reference, RAY_MARCH_KERNEL.reference]) {
       expect(kernel).toMatch(/\bmarchStep\(split, i\)/);
     }
     for (const wgsl of [skyViewWgsl, rayMarchWgsl]) {
       expect(wgsl).not.toMatch(/\(f32\(i\) \+ 0\.5\) \* dt/);
     }
+    // Nothing drawn along it and both sides non-empty, from inside the air or outside it
+    // (`decision-r08-t8-leans.md` §4 and §5.4): the sun-aware warp by the first source, once a
+    // pixel, 0 where none is drawn, whole or cut at the layer edges.
+    expect(rayMarchWgsl).toMatch(
+      /let evenSky = depth == 0\.0 && split\.beforeM > 0\.0 && split\.afterM > 0\.0;/,
+    );
+    expect(rayMarchWgsl).toMatch(
+      /var warp = 0\.0;\s*if \(evenSky && count > 0u\) \{\s*warp = marchSkyWarp\(dir, view\.sources\[0\]\.direction\.xyz\);\s*\}/,
+    );
+    // One loop a path, its step chosen in it (`rayMarchStepOf`, `rayMarchWalkStepOf`).
+    expect(rayMarchWgsl).toMatch(
+      /fn rayMarchStepOf\([^)]*\) -> MarchStep \{\s*if \(evenSky\) \{\s*return marchEvenStep\(split, i, warp\);\s*\}\s*return marchStep\(split, i\);/,
+    );
+    expect(rayMarchWgsl).toMatch(
+      /fn rayMarchWalkStepOf\([^)]*\) -> MarchStep \{\s*if \(evenSky\) \{\s*return marchWalkEvenStep\(walk, i\);\s*\}\s*return marchWalkStep\(walk, i\);/,
+    );
+    expect(rayMarchWgsl).toMatch(
+      /for \(var i = 0u; i < samples; i\+\+\) \{\s*rayMarchStep\(&march, ray, body, rayMarchStepOf\(split, i, evenSky, warp\)\);/,
+    );
+    expect(rayMarchWgsl).toMatch(
+      /if \(evenSky\) \{\s*marchWalkEvenReady\(&walk, warp\);\s*\} else \{\s*marchWalkReady\(&walk\);\s*\}\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*rayMarchStep\(&march, ray, body, rayMarchWalkStepOf\(&walk, i, evenSky\)\);/,
+    );
+    // The sky view and the multiple-scattering kernel keep R05.T12.e's placement.
+    for (const wgsl of [skyViewWgsl, multiScatteringWgsl]) {
+      expect(wgsl).not.toMatch(/marchEvenStep|marchWalkEven|marchSkyWarp/);
+    }
+  });
+
+  it("takes the warp's constant and form in common.wgsl as marchSteps.ts takes them (R08.T8)", () => {
+    expect(commonWgsl).toMatch(
+      new RegExp(
+        `const MARCH_SKY_WARP_COSINE : f32 = ${String(SKY_WARP_COSINE).replace(".", "\\.")};`,
+      ),
+    );
+    expect(commonWgsl).toMatch(
+      /fn marchSkyWarp\(dir : vec3f, sun : vec3f\) -> f32 \{\s*return clamp\(-dot\(dir, sun\) \/ MARCH_SKY_WARP_COSINE, 0\.0, 1\.0\);/,
+    );
+    expect(commonWgsl).toMatch(
+      /let mid = \(1\.0 - warp\) \* \(k \+ 0\.5\) \+ warp \* \(k \* k \+ k \+ 0\.5\) \/ n;\s*let width = \(1\.0 - warp\) \+ warp \* \(2\.0 \* k \+ 1\.0\) \/ n;/,
+    );
+    expect(commonWgsl).toMatch(/return 2\.0 \* x \/ \(b \+ sqrt\(b \* b \+ 4\.0 \* warp \* x\)\);/);
   });
 
   it("cuts the sky view's, the ray march's and the multiple-scattering kernel's steps at the medium's layer edges, and keeps R05.T12.e's where it has none (R08.T6.i)", () => {
     for (const wgsl of [skyViewWgsl, rayMarchWgsl, multiScatteringWgsl]) {
       expect(wgsl).toMatch(/var<uniform> layerEdges : LayerEdges;/);
       expect(wgsl).toMatch(/let edgeCount = min\(u32\(layerEdges\.count\.x\), MARCH_EDGES_MAX\);/);
-      // No edge: R05.T12.e's steps, and no walk declared; edges: the walk, made ready first.
+      // No edge: R05.T12.e's steps, and no walk declared; edges: the walk, made ready first. The
+      // ray march chooses each step in its loop, its two-sided sky segments' warped (R08.T8).
       expect(wgsl).toMatch(
-        /if \(edgeCount == 0u\) \{\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(&march, ray, (body, (frame, )?)?marchStep\(split, i\)\);/,
+        /if \(edgeCount == 0u\) \{\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(&march, ray, (body, (frame, )?)?(marchStep\(split, i\)|rayMarchStepOf\(split, i, evenSky, warp\))\);/,
       );
       expect(wgsl).toMatch(/var walk : MarchWalk;\s*marchWalkStart\(&walk, split\);/);
       expect(wgsl).toMatch(
-        /marchWalkReady\(&walk\);\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(&march, ray, (body, (frame, )?)?marchWalkStep\(&walk, i\)\);/,
+        /marchWalkReady\(&walk\);\s*(\}\s*)?for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(&march, ray, (body, (frame, )?)?(marchWalkStep\(&walk, i\)|rayMarchWalkStepOf\(&walk, i, evenSky\))\);/,
       );
     }
     expect(skyViewWgsl).toMatch(/marchWalkCrossSphere\(/);
@@ -391,6 +570,33 @@ describe("the step factor", () => {
 
 const SCHEMES: readonly Scheme[] = [HIGH, evenAt(HIGH), LOW, evenAt(LOW)];
 
+/**
+ * The rays R05's twin misses at high's counts under the kernels' rule since R08.T8, the ray march's
+ * two-sided sky segments under the sun-aware warp (`decision-r08-t8-leans.md` §4.3 and §5.4;
+ * measured 2026-10-21 and recorded in plan R08's Risks, "Deviations in T8.a, as built"): the limb
+ * tangent at 0.1 H with the sun on its tangent point's horizon beyond it, from 400 km and from
+ * 101 km (congruent chords), over its 5%. Its sun is ahead, so the warp leaves it in even steps
+ * (a = 0), and the last light holds. R05.T12.e's placement held it at 3.22% in this twin, which has
+ * single scattering alone; R08.T6.a's twin, with multiple scattering, holds it in even steps at
+ * 4.35% on R05's Earth and 3.24% on the measured Earth (`tablesCpu.test.ts`). Pinned to the 0.01
+ * point both ways, so that a change shows.
+ */
+const R05_TWIN_HIGH_MISS = [
+  "limb, 0.1 H, sun 90°/0°: 13.25%",
+  "night limb, 101 km, 0.1 H, sun 90°/0°: 13.25%",
+] as const;
+
+/**
+ * The same rays over `LOW_TWIN_WORST`'s ray-march twilight bound at low's counts, which is R08.T6.a's
+ * twin's (23.94% on R05's Earth): R05's twin's single scattering puts them at 78.90%, the even steps'
+ * own figure (measured 2026-10-21 under the sun-aware warp, recorded as {@link R05_TWIN_HIGH_MISS}
+ * is; the last light holds).
+ */
+const R05_TWIN_LOW_MISS = [
+  "limb, 0.1 H, sun 90°/0°: 78.90%",
+  "night limb, 101 km, 0.1 H, sun 90°/0°: 78.90%",
+] as const;
+
 let gate: Gate = { results: [], lMax: new Map() };
 
 describe("the per-frame marches' quadrature (R05.T12.e's gate)", () => {
@@ -398,10 +604,39 @@ describe("the per-frame marches' quadrature (R05.T12.e's gate)", () => {
     gate = runGate(gateRays(), singleScatteringPixel, SCHEMES);
   }, 600_000);
 
-  it("covers the decision's rays and those of addenda A and B", () => {
+  it("covers the decision's rays, those of addenda A and B, and R08.T8's night limb and last light", () => {
     const count = (family: Family): number =>
       gate.results.filter((r) => r.ray.family === family).length;
-    expect(FAMILIES.map(count)).toEqual([40, 30, 20, 108, 120, 336, 224, 72, 96]);
+    expect(FAMILIES.map(count)).toEqual([40, 30, 70, 20, 108, 120, 336, 224, 72, 96, 525]);
+    expect(gate.results).toHaveLength(1_641);
+  });
+
+  it("makes every last-light ray a two-sided twilight sky ray of the ray march, held to its 5% (R08.T8)", () => {
+    const last = gate.results.filter(({ ray }) => ray.family === "last light");
+    expect(last.filter(({ ray }) => !twilight(ray)).map(({ ray }) => ray.name)).toEqual([]);
+    expect(new Set(last.map(({ ray }) => lowBoundOf(ray)))).toEqual(new Set(["rayMarch"]));
+    expect(last.filter(({ ray }) => !skySegmentOf(ray)).map(({ ray }) => ray.name)).toEqual([]);
+    // Each falls to a lowest point beyond the camera and climbs out, above the ground.
+    const oneSided = last.filter(({ ray }) => {
+      const split = marchSplit(ray.tStartM, ray.tEndM, -dot(ray.o, ray.d), 2, false);
+      return !(split.beforeM > 0 && split.afterM > 0);
+    });
+    expect(oneSided.map(({ ray }) => ray.name)).toEqual([]);
+  });
+
+  it("makes every night-limb ray a twilight ray of the ray march, held to its 5% (R08.T8)", () => {
+    const night = gate.results.filter(({ ray }) => ray.family === "night limb");
+    expect(night.filter(({ ray }) => !twilight(ray)).map(({ ray }) => ray.name)).toEqual([]);
+    expect(new Set(night.map(({ ray }) => lowBoundOf(ray)))).toEqual(new Set(["rayMarch"]));
+    // None repeats the limb's own rays.
+    const limb = new Set(
+      gate.results
+        .filter(({ ray }) => ray.family === "limb")
+        .map(({ ray }) => `${ray.d.x} ${ray.s.x} ${ray.s.y} ${ray.s.z}`),
+    );
+    expect(
+      night.filter(({ ray }) => limb.has(`${ray.d.x} ${ray.s.x} ${ray.s.y} ${ray.s.z}`)),
+    ).toEqual([]);
   });
 
   it("puts each ray's sun at its zenith angle where the ray names it", () => {
@@ -434,13 +669,18 @@ describe("the per-frame marches' quadrature (R05.T12.e's gate)", () => {
     expect(longer.filter(({ ray }) => !twilight(ray)).map(({ ray }) => ray.name)).toEqual([]);
   });
 
-  it("holds every ray within 2%, and twilight rays within 5%, at high's counts", () => {
-    expect(describeFailures(failures(gate, HIGH))).toEqual([]);
+  it("holds every ray within 2%, and twilight rays within 5%, at high's counts, but the limb's one named miss (R08.T8)", () => {
+    expect(describeFailures(failures(gate, HIGH))).toEqual([...R05_TWIN_HIGH_MISS]);
   });
 
-  it("fails the even steps the kernels had, on the disc, at the limb and in the sky", () => {
+  // Where the kernels keep R05.T12.e's placement. Since R08.T8 the ray march steps the limb under
+  // the sun-aware warp itself, evenly where its sun is ahead or across it, so the limb left this
+  // list: at high's counts R05's even steps miss it only on the kernels' own miss
+  // (`R05_TWIN_HIGH_MISS`, 13.25%), its ordinary rays at 0.52%, where R05.T12.e's placement had
+  // 1.07% and 3.22% (measured 2026-10-21).
+  it("fails the even steps the kernels had, on the disc and in the sky", () => {
     const failed = failures(gate, evenAt(HIGH));
-    const passed = (["disc", "limb", "sky"] as const).filter(
+    const passed = (["disc", "sky"] as const).filter(
       (family) => !failed.some(({ ray }) => ray.family === family),
     );
     expect(passed).toEqual([]);
@@ -451,7 +691,7 @@ describe("the per-frame marches' quadrature (R05.T12.e's gate)", () => {
     expect(worst(LOW)).toBeLessThanOrEqual(worst(evenAt(LOW)));
   });
 
-  it("keeps the twin within the bounds low's GPU agreement check holds low to", () => {
-    expect(describeFailures(overLowBounds(gate, LOW))).toEqual([]);
+  it("keeps the twin within the bounds low's GPU agreement check holds low to, but the limb's one named miss (R08.T8)", () => {
+    expect(describeFailures(overLowBounds(gate, LOW))).toEqual([...R05_TWIN_LOW_MISS]);
   });
 });

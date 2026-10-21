@@ -82,6 +82,7 @@ import {
   frameSourcesOf,
   type Geodetic,
   geodeticOf,
+  marchWeightOf,
   skyAxisOf,
   skyViewHeight,
   type SpheroidFigure,
@@ -99,12 +100,16 @@ import {
 import { type ForwardLobe, forwardLobeAt, forwardLobeOfTable, lobeIsDrawn } from "./forwardLobe";
 import {
   marchEdgesM,
+  marchEvenStep,
+  marchEvenSteps,
   type MarchPieces,
   marchPieces,
   marchPiecesSteps,
+  type MarchSplit,
   marchSplit,
   marchStep,
   type MarchStep,
+  skyWarpOf,
 } from "./marchSteps";
 import {
   ABSORBER_PRESSURE_FLOOR_PA,
@@ -1816,8 +1821,21 @@ export interface TwinRay {
   /** The segment marched, m along the ray. */
   readonly tStartM: number;
   readonly tEndM: number;
-  /** Whether the segment starts at a camera inside the atmosphere (`marchSplit`'s `fromCamera`). */
+  /**
+   * Whether the camera side of a two-sided segment is placed toward the camera (`marchSplit`'s
+   * `fromCamera`): a segment that starts at a camera inside the atmosphere, but in the ray march
+   * only one that ends on a drawn surface since R08.T8, a sky segment there taking the sun-aware
+   * warp ({@link TwinRay.skySegment}).
+   */
   readonly fromCamera: boolean;
+  /**
+   * Whether the segment is the ray march's sky (plan R08, R08.T8; `decision-r08-t8-leans.md` §4 and
+   * §5.4): nothing drawn along it, from inside the air or outside it. Two-sided, it takes the
+   * sun-aware warp by {@link TwinRay.sun} (`marchSteps.ts`'s `marchEvenSteps`): even where the Sun is
+   * ahead or across the ray, R05's one-sided placement from the segment's start where it is behind.
+   * One-sided, R05.T12.e's placement. Absent for every other march.
+   */
+  readonly skySegment?: boolean;
   /**
    * The march's sources, summed in one march (Design note 7, R08.T7), in the frame of the ray;
    * absent for the one source `sun` per unit of its illuminance.
@@ -1840,6 +1858,13 @@ export interface TwinRaySource {
 
 /** A per-frame march's segment, its ray without the sun: what its steps are placed on. */
 export type TwinSegment = Omit<TwinRay, "sun" | "sources">;
+
+/**
+ * A segment whose steps are placed, with the sun and sources a ray brings: the ray march's two-sided
+ * sky segment is warped by its sun (plan R08, R08.T8), which every other march's segment may leave
+ * out.
+ */
+export type PlacedSegment = TwinSegment & Partial<Pick<TwinRay, "sun" | "sources">>;
 
 /**
  * What a march takes a sample's height and sun cosine against: a sphere about the centre (the
@@ -1872,9 +1897,11 @@ export interface TwinMarch {
 }
 
 /**
- * A ray's steps as R05.T12.e places them: split at its lowest point t* = clamp(−o·d, t_start,
- * t_end) and placed quadratically toward it, or the camera side of a two-sided segment from a
- * camera inside the atmosphere toward the camera (`marchSplit`, `marchStep`).
+ * A ray's steps as the kernels place them: R05.T12.e's, split at its lowest point t* = clamp(−o·d,
+ * t_start, t_end) and placed quadratically toward it, or the camera side of a two-sided segment
+ * from a camera inside the atmosphere toward the camera (`marchSplit`, `marchStep`); a two-sided
+ * {@link TwinRay.skySegment} of the ray march under the sun-aware warp since R08.T8
+ * (`marchEvenStep`).
  *
  * @param samples - The steps, an integer of at least 2.
  * @throws RangeError from `marchSplit` for fewer than 2 steps.
@@ -1884,7 +1911,30 @@ export function placedSteps(ray: TwinRay, samples: number): MarchStep[] {
   const d = ray.direction;
   const nearestM = -(o.x * d.x + o.y * d.y + o.z * d.z);
   const split = marchSplit(ray.tStartM, ray.tEndM, nearestM, samples, ray.fromCamera);
+  const warp = skyWarpOfSegment(ray, split);
+  if (warp !== null) {
+    return Array.from({ length: samples }, (_, i) => marchEvenStep(split, i, warp));
+  }
   return Array.from({ length: samples }, (_, i) => marchStep(split, i));
+}
+
+/**
+ * The sun-aware warp a of a segment that takes it (plan R08, R08.T8; `rayMarch.wgsl`'s `evenSky`
+ * and `warp`), or `null` for one that keeps R05.T12.e's placement: the ray march's sky, two-sided,
+ * from inside the air or outside it, warped by its first source, {@link TwinRay.sun}
+ * (`marchSteps.ts`'s `skyWarpOf`), and by none, a = 0, where its march draws no source, as the
+ * kernel takes it.
+ *
+ * @throws RangeError for a two-sided sky segment given without its sun.
+ */
+function skyWarpOfSegment(ray: PlacedSegment, split: MarchSplit): number | null {
+  if (!(ray.skySegment === true && split.beforeM > 0 && split.afterM > 0)) {
+    return null;
+  }
+  if (ray.sun === undefined) {
+    throw new RangeError("the ray march's two-sided sky segment is warped by its sun, given none");
+  }
+  return skyWarpOf(ray.direction, ray.sources?.length === 0 ? null : ray.sun);
 }
 
 /**
@@ -2007,17 +2057,24 @@ export function rayPieces(
 
 /**
  * A per-frame march's steps as the kernels place them since R08.T6.i: {@link rayPieces}' segment,
- * stepped piece by piece (`marchSteps.ts`'s `marchPiecesSteps`).
+ * stepped piece by piece (`marchSteps.ts`'s `marchPiecesSteps`); the ray march's two-sided sky
+ * segments, inside the air or outside it, under the sun-aware warp by their sun over the same pieces
+ * (`marchEvenSteps`, R08.T8).
  *
- * @throws RangeError as {@link rayPieces}.
+ * @throws RangeError as {@link rayPieces}, and for a two-sided sky segment given without its sun.
  */
 export function piecedSteps(
-  ray: TwinSegment,
+  ray: PlacedSegment,
   samples: number,
   edgesM: ReadonlyArray<number>,
   geometry: MarchGeometry,
 ): MarchStep[] {
-  return marchPiecesSteps(rayPieces(ray, samples, edgesM, geometry));
+  const pieces = rayPieces(ray, samples, edgesM, geometry);
+  const warp = skyWarpOfSegment(ray, pieces.split);
+  if (warp !== null) {
+    return marchEvenSteps(pieces.split, pieces.fromLowestM, warp);
+  }
+  return marchPiecesSteps(pieces);
 }
 
 /**
@@ -3019,7 +3076,7 @@ function spheroidHits(o: Vec3, d: Vec3, a: number, c: number): readonly [number,
 /**
  * A ray-march texel's ray, as `rayMarch.wgsl` clips it: against the datum spheroid's shells, a +
  * top and c + top, ending at the ground or at the surface the depth puts it on. `null` where the
- * kernel marches nothing: the camera inside the atmosphere and the surface within the
+ * kernel marches nothing: the camera below the march band (R08.T8) and the surface within the
  * aerial-perspective reach or none, or a ray that misses the atmosphere.
  */
 export interface RayMarchRay {
@@ -3028,11 +3085,14 @@ export interface RayMarchRay {
   readonly bareGroundM: number | null;
 }
 
+/** What decides whether the ray march draws a texel: the volume's reach and the march band. */
+export type RayMarchReach = Pick<TableSizes, "aerialPerspectiveReachM" | "marchBand">;
+
 /**
  * The ray of the ray-march texel at `u`, `v` of the target, where the scene's reversed-Z depth is
- * `depth` (0 where nothing is drawn).
- *
- * @param reachM - The aerial-perspective volume's reach, m, beyond which the march serves surfaces.
+ * `depth` (0 where nothing is drawn): every texel once the camera reaches the march band
+ * (`hillaire.ts`'s `marchWeightOf` above 0, R08.T8; the camera's geodetic height is its h\* on the
+ * sphere, s ≡ 1), and below it the surfaces beyond the aerial-perspective volume's reach.
  */
 export function rayMarchRayTwin(
   medium: AtmosphereMedium,
@@ -3040,14 +3100,13 @@ export function rayMarchRayTwin(
   u: number,
   v: number,
   depth: number,
-  reachM: number,
+  reach: RayMarchReach,
 ): RayMarchRay | null {
-  const topM = medium.topHeightM;
-  const aboveTop = view.heightM >= topM;
+  const marched = marchWeightOf(view.heightM, medium.topHeightM, reach.marchBand) > 0;
   const unnormalised = unnormalisedRay(view, u, v);
   const lengthM = Math.sqrt(unnormalised.x ** 2 + unnormalised.y ** 2 + unnormalised.z ** 2);
   const tSurfaceM = depth > 0 ? (view.nearM / depth) * lengthM : Number.POSITIVE_INFINITY;
-  if (!(aboveTop || (depth > 0 && tSurfaceM > reachM))) {
+  if (!(marched || (depth > 0 && tSurfaceM > reach.aerialPerspectiveReachM))) {
     return null;
   }
   return rayMarchRayAlongTwin(medium, view, view.cameraM, unit(unnormalised), tSurfaceM);
@@ -3058,7 +3117,12 @@ export function rayMarchRayTwin(
  * against the datum spheroid's shells, ending at the ground or at a surface `tSurfaceM` along it
  * (infinite where nothing is drawn). `null` where it misses the atmosphere. {@link rayMarchRayTwin}
  * takes the camera's ray through a texel; the smoke takes it for a texel's ray turned or moved by
- * the kernel's own resolution (R08.T6.g, `decision-r08-f32.md` §10).
+ * the kernel's own resolution (R08.T6.g, `decision-r08-f32.md` §10). Every two-sided sky segment
+ * (no surface along it), from inside the air or outside it, takes the sun-aware warp by the view's
+ * first source, as the kernel steps it since R08.T8 (`TwinRay.skySegment`;
+ * `decision-r08-t8-leans.md` §4 and §5.4): even where the Sun is ahead or across the ray, R05's
+ * one-sided placement from the segment's start where it is behind. A one-sided segment and a drawn
+ * surface keep R05.T12.e's placement, a drawn surface's camera side from inside toward the camera.
  */
 export function rayMarchRayAlongTwin(
   medium: AtmosphereMedium,
@@ -3087,25 +3151,27 @@ export function rayMarchRayAlongTwin(
       sources: view.sources,
       tStartM,
       tEndM,
-      fromCamera: shellNear <= 0,
+      fromCamera: shellNear <= 0 && Number.isFinite(tSurfaceM),
+      skySegment: !Number.isFinite(tSurfaceM),
     },
     bareGroundM:
       !Number.isFinite(tSurfaceM) && hitsGround && groundNear <= tEndM ? groundNear : null,
   };
 }
 
-/** The ray march's settings: `TableSizes`' scale, steps and reach. */
+/** The ray march's settings: `TableSizes`' scale, steps, reach and march band (R08.T8). */
 export type RayMarchSettings = Pick<
   TableSizes,
-  "rayMarchScale" | "rayMarchSamples" | "aerialPerspectiveReachM"
+  "rayMarchScale" | "rayMarchSamples" | "aerialPerspectiveReachM" | "marchBand"
 >;
 
 /**
  * One ray-march texel's twin along a clipped ray (`rayMarchRayTwin`, `rayMarchRayAlongTwin`): its
  * in-scattered radiance in the view's sources' weights (R08.T7) and mean transmittance, with the bare ground
  * seen from above lit by the sun, and (0, 0, 0, 1) where the kernel marches nothing (`null`), its
- * placed steps cut at the medium's layer edges on their shell quadrics ({@link piecedSteps},
- * R08.T6.i). The smoke marches a texel's ray again, turned or moved, through it (R08.T6.g).
+ * steps as the kernel places them (a two-sided sky segment's under the sun-aware warp since R08.T8), cut at the
+ * medium's layer edges on their shell quadrics ({@link piecedSteps}, R08.T6.i). The smoke marches a
+ * texel's ray again, turned or moved, through it (R08.T6.g).
  *
  * @throws RangeError for a medium with a tabulated term that ends below its top at a density
  *   other than 0 (the module's remarks).
@@ -3258,14 +3324,7 @@ export function rayMarchTwin(
         Math.min(Math.floor(u * fullW), fullW - 1),
         Math.min(Math.floor(v * fullH), fullH - 1),
       );
-      const marched = rayMarchRayTwin(
-        planet.medium,
-        view,
-        u,
-        v,
-        depth,
-        settings.aerialPerspectiveReachM,
-      );
+      const marched = rayMarchRayTwin(planet.medium, view, u, v, depth, settings);
       rayMarchTexelInto(context, marched, texels.subarray((y * w + x) * 4, (y * w + x) * 4 + 4));
     }
   }
@@ -4838,7 +4897,11 @@ function shellScalesOf(planet: OblatePlanetTwin): readonly [number, number] {
 /**
  * A ray from `originM` along the unit `direction` clipped as the oblate ray march clips it
  * (R08.T6.e): {@link rayMarchRayAlongTwin}'s, its top the quadric through h\* = `topHeightM` at the
- * equator and the poles, (a + H ÷ s_e, c + H ÷ s_p), as R08.T12.d's tracer takes it.
+ * equator and the poles, (a + H ÷ s_e, c + H ÷ s_p), as R08.T12.d's tracer takes it; every
+ * two-sided sky segment under the sun-aware warp by the view's first source, inside the air or
+ * outside it (even where the Sun is ahead or across the ray, R05's one-sided placement from the
+ * segment's start where it is behind), and a drawn surface's camera side from inside toward the
+ * camera, as the kernel's since R08.T8.
  */
 export function oblateRayMarchRayAlongTwin(
   planet: OblatePlanetTwin,
@@ -4872,7 +4935,8 @@ export function oblateRayMarchRayAlongTwin(
       sources: view.sources,
       tStartM,
       tEndM,
-      fromCamera: shellNear <= 0,
+      fromCamera: shellNear <= 0 && Number.isFinite(tSurfaceM),
+      skySegment: !Number.isFinite(tSurfaceM),
     },
     bareGroundM:
       !Number.isFinite(tSurfaceM) && hitsGround && groundNear <= tEndM ? groundNear : null,
@@ -4881,7 +4945,7 @@ export function oblateRayMarchRayAlongTwin(
 
 /**
  * The oblate ray-march texel's ray at `u`, `v` of the target, where the scene's reversed-Z depth is
- * `depth` (R08.T6.e): {@link rayMarchRayTwin}'s, the camera above the atmosphere where its h\* is,
+ * `depth` (R08.T6.e): {@link rayMarchRayTwin}'s, the march band taken at the camera's h\* (R08.T8),
  * clipped by {@link oblateRayMarchRayAlongTwin}.
  */
 export function oblateRayMarchRayTwin(
@@ -4890,14 +4954,16 @@ export function oblateRayMarchRayTwin(
   u: number,
   v: number,
   depth: number,
-  reachM: number,
+  reach: RayMarchReach,
 ): RayMarchRay | null {
   const camera = oblateCameraOf(planet, view);
-  const aboveTop = camera.gravityRatio * view.heightM >= planet.medium.topHeightM;
+  const marched =
+    marchWeightOf(camera.gravityRatio * view.heightM, planet.medium.topHeightM, reach.marchBand) >
+    0;
   const unnormalised = unnormalisedRay(view, u, v);
   const lengthM = Math.sqrt(unnormalised.x ** 2 + unnormalised.y ** 2 + unnormalised.z ** 2);
   const tSurfaceM = depth > 0 ? (view.nearM / depth) * lengthM : Number.POSITIVE_INFINITY;
-  if (!(aboveTop || (depth > 0 && tSurfaceM > reachM))) {
+  if (!(marched || (depth > 0 && tSurfaceM > reach.aerialPerspectiveReachM))) {
     return null;
   }
   return oblateRayMarchRayAlongTwin(planet, view, view.cameraM, unit(unnormalised), tSurfaceM);
@@ -4978,14 +5044,7 @@ export function oblateRayMarchTwin(
         Math.min(Math.floor(u * fullW), fullW - 1),
         Math.min(Math.floor(v * fullH), fullH - 1),
       );
-      const marched = oblateRayMarchRayTwin(
-        planet,
-        view,
-        u,
-        v,
-        depth,
-        settings.aerialPerspectiveReachM,
-      );
+      const marched = oblateRayMarchRayTwin(planet, view, u, v, depth, settings);
       rayMarchTexelInto(context, marched, texels.subarray((y * w + x) * 4, (y * w + x) * 4 + 4));
     }
   }

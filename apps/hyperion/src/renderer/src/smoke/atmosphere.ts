@@ -29,7 +29,9 @@
  * to their twins under a K5 and M3 binary, each light on its own curves and multiple-scattering
  * layer, and the composite's pass-through of the scene's `METER_CLASS` (`checkSeveralSuns`); its
  * captures add the binary's sky (`captureAtmosphere`). Since R08.T7 the per-frame twins add the
- * tabulated terms' forward-lobe orders, so R08.T6.b's tabulated medium holds them too.
+ * tabulated terms' forward-lobe orders, so R08.T6.b's tabulated medium holds them too. R08.T8.a
+ * holds the ray march's sky from inside the air, in the march band where it takes over from the sky
+ * view, to its twin in both arms, and the composite's blend of the two (`checkMarchBand`).
  */
 
 import { add, normalise, scale, type Vec3 } from "../geometry/vec3";
@@ -50,6 +52,8 @@ import {
   bodyOfFigure,
   type FrameOutputs,
   HillaireAtmosphere,
+  type MarchBand,
+  marchWeightOf,
   skyViewHeight,
   type SpheroidFigure,
   type SunState,
@@ -2399,8 +2403,8 @@ function rayMarchEnvelope(
   // (R08.T6.b's) or an oblate body's (R08.T6.e's, R08.T6.f).
   const nominalAt = (u: number, v: number): RayMarchRay | null =>
     planet.kind === "sphere"
-      ? rayMarchRayTwin(planet.twin.medium, view, u, v, 0, sizes.aerialPerspectiveReachM)
-      : oblateRayMarchRayTwin(planet.twin, view, u, v, 0, sizes.aerialPerspectiveReachM);
+      ? rayMarchRayTwin(planet.twin.medium, view, u, v, 0, sizes)
+      : oblateRayMarchRayTwin(planet.twin, view, u, v, 0, sizes);
   const along = (origin: Vec3, d: Vec3): RayMarchRay | null =>
     planet.kind === "sphere"
       ? rayMarchRayAlongTwin(planet.twin.medium, view, origin, d, Number.POSITIVE_INFINITY)
@@ -3491,6 +3495,348 @@ export async function checkAtmosphereSlicesSaturn(
   twins: TwinPool,
 ): Promise<void> {
   await checkSlices(engine, checks, twins, slicesSaturn());
+}
+
+// --- R08.T8.a: the march band --------------------------------------------------------------------
+
+/**
+ * R08.T8.a's Earth: R08.T6.f's ({@link SLICES_EARTH}), WGS 84 with its normal gravity on the
+ * oblate twins and R05's Earth medium, its views the march band's ({@link bandViews}) rather than
+ * R08.T6.g's heights and limbs.
+ */
+const BAND_EARTH: HeightsBody = { ...SLICES_EARTH, task: "R08.T8.a", heightsM: [], limbsM: [] };
+
+/** How far below the visible horizon's dip a {@link bandCamera}'s frame reaches, rad: 0.5°. */
+const BAND_FRAME_BELOW_DIP_RAD = 0.5 * DEGREE_RAD;
+
+/** How far above the horizontal a {@link bandCamera}'s frame reaches, rad: 3°. */
+const BAND_FRAME_ABOVE_RAD = 3 * DEGREE_RAD;
+
+/**
+ * A camera `heightM` above the equator at longitude 0 of `figure`, looking north along the
+ * horizon, pitched so that its 64 × 32 frame spans from {@link BAND_FRAME_BELOW_DIP_RAD} below the
+ * visible horizon's dip to {@link BAND_FRAME_ABOVE_RAD} above the horizontal: the ground's last
+ * rows, the limb's rays, which pass below the camera and climb out, and the sky above. Nothing is
+ * drawn in front of it, so the scene's own projection is not read.
+ */
+function bandCamera(heightM: number, figure: SpheroidFigure): AtmosphereCamera {
+  const a = figure.equatorialRadiusM;
+  // The datum's horizon in the meridian plane: the ellipse x²/a² + z²/c² = 1 touched by the line
+  // from the camera at (a + h, 0), whose dip below the horizontal has tan = √(h (2a + h)) ÷ c.
+  const dipRad = Math.atan(Math.sqrt(heightM * (2 * a + heightM)) / figure.polarRadiusM);
+  const bottomRad = -(dipRad + BAND_FRAME_BELOW_DIP_RAD);
+  const pitchRad = (BAND_FRAME_ABOVE_RAD + bottomRad) / 2;
+  const tanY = Math.tan((BAND_FRAME_ABOVE_RAD - bottomRad) / 2);
+  // Body +x is up and +z north at the camera: forward and up pitched by `pitchRad`, east (+y) to
+  // the right.
+  const forward = { x: Math.sin(pitchRad), y: 0, z: Math.cos(pitchRad) };
+  const up = { x: Math.cos(pitchRad), y: 0, z: -Math.sin(pitchRad) };
+  const right = { x: 0, y: 1, z: 0 };
+  const aspect = FRAME_SIZE.widthPx / FRAME_SIZE.heightPx;
+  return {
+    positionM: { x: a + heightM, y: 0, z: 0 },
+    orientation: quaternionFromRows([
+      { x: right.x, y: up.x, z: -forward.x },
+      { x: right.y, y: up.y, z: -forward.y },
+      { x: right.z, y: up.z, z: -forward.z },
+    ]),
+    fovXRad: 2 * Math.atan(aspect * tanY),
+    viewport: FRAME_SIZE,
+  };
+}
+
+/** A camera height of R08.T8.a's views: its h\*, m, and what it stands for. */
+interface BandPlace {
+  readonly label: string;
+  readonly heightStarM: number;
+}
+
+/** The middle of `setting`'s march band, where the march's share w is ½. */
+function bandMiddle(setting: QualitySetting): BandPlace {
+  const { lowerShareOfTop, upperShareOfTop } = TABLE_SIZES[setting].marchBand;
+  return {
+    label: "the band's middle",
+    heightStarM: ((lowerShareOfTop + upperShareOfTop) / 2) * BAND_EARTH.medium.topHeightM,
+  };
+}
+
+/**
+ * One R08.T8.a view: a {@link bandCamera} on the equator at `place`'s h\*, the sun ahead at an
+ * elevation above the horizontal, nothing drawn, so that every pixel is sky.
+ */
+function bandView(place: BandPlace, elevationDeg: number): HeightsView {
+  const { figure, gravity } = BAND_EARTH;
+  // s at the equator, where the camera stands at every height: its geodetic height is h* ÷ s.
+  const s = atmosphereInputs(
+    { positionM: { x: figure.equatorialRadiusM, y: 0, z: 0 } },
+    figure,
+    gravity,
+  ).gravityRatio;
+  return {
+    name: `h* ${(place.heightStarM / 1_000).toFixed(1)} km (${place.label}), the sun ${elevationDeg}°, the sky from inside`,
+    camera: bandCamera(place.heightStarM / s, figure),
+    sun: sunAt(elevationDeg),
+    surfaceM: null,
+  };
+}
+
+/**
+ * R08.T8.a's views on a setting: on high, from the band's middle (w = ½) and from 100 m under the
+ * top (w = 1), each with the sun 20° up and 2° below the horizon; on low, from its band's middle
+ * with the sun 20° up.
+ */
+function bandViews(setting: QualitySetting): HeightsView[] {
+  const middle = bandMiddle(setting);
+  if (setting === "low") {
+    return [bandView(middle, 20)];
+  }
+  const underTop = {
+    label: "100 m under the top",
+    heightStarM: BAND_EARTH.medium.topHeightM - 100,
+  };
+  return [middle, underTop].flatMap((place) => [20, -2].map((e) => bandView(place, e)));
+}
+
+/**
+ * A march band wholly above the blend's camera, whose h\* is 0.4 of the top: w = 0 under it, the
+ * sky view alone.
+ */
+const BAND_ABOVE_CAMERA: MarchBand = { lowerShareOfTop: 0.6, upperShareOfTop: 0.8 };
+
+/** A march band wholly below the blend's camera: w = 1 under it, the ray march alone. */
+const BAND_BELOW_CAMERA: MarchBand = { lowerShareOfTop: 0.1, upperShareOfTop: 0.2 };
+
+/**
+ * The composite's blend's bound, as a share of the largest of the three outputs it compares: 2⁻¹⁰,
+ * with {@link HALF_SUBNORMAL_SPACING}'s 2⁻²⁴ added.
+ *
+ * @remarks
+ * Each output is rounded once to `rgba16float`: by at most 2⁻¹¹ of itself where it is normal and
+ * 2⁻²⁵ below 2⁻¹⁴. (1 − w) c₀ + w c₁ carries c₀'s and c₁'s roundings, weighted to at most 2⁻¹¹ of
+ * the larger, and c_w its own: 2⁻¹⁰ of the largest in all, 2⁻²⁴ where they are subnormal. The
+ * kernels' `f32` arithmetic adds some 2⁻²³ of it.
+ */
+const BLEND_SHARE = 2 ** -10;
+
+/** The composite's blend against its two ends, channel by channel. */
+interface BlendAgreement {
+  /** The worst |c_w − ((1 − w) c₀ + w c₁)| as a fraction of its bound: at most 1 to agree. */
+  readonly worst: number;
+  readonly at: string;
+  /** The largest colour value of the three outputs. */
+  readonly largest: number;
+  /** The channels the floor of 2⁻²⁴ carries: over 2⁻¹⁰ of the largest, within the bound. */
+  readonly floorCarried: number;
+  /** The channels where c₀ and c₁ differ by more than the bound, which the check tells apart. */
+  readonly distinct: number;
+  /** The channels compared. */
+  readonly channels: number;
+}
+
+/** A value to six figures, for a blend's worst channel, whose bound is 2⁻¹⁰ of it. */
+function precise(value: number): string {
+  return value.toPrecision(6);
+}
+
+/** A march band as its edges' shares of the top. */
+function bandOf(band: MarchBand): string {
+  return `${band.lowerShareOfTop}–${band.upperShareOfTop} of the top`;
+}
+
+/**
+ * The composite at the march's share `weight` (c_w) against (1 − w) c₀ + w c₁, its outputs with
+ * the sky view's read alone (c₀) and the march's alone (c₁), each channel within 2⁻¹⁰ of the
+ * largest of the three plus 2⁻²⁴ ({@link BLEND_SHARE}).
+ */
+function blendAgreement(
+  blended: Float32Array,
+  tables: Float32Array,
+  march: Float32Array,
+  weight: number,
+  widthPx: number,
+): BlendAgreement {
+  const channels = blended.length;
+  if (tables.length !== channels || march.length !== channels) {
+    return {
+      worst: Number.POSITIVE_INFINITY,
+      at: `${channels / 4}, ${tables.length / 4} and ${march.length / 4} texels read back`,
+      largest: Number.NaN,
+      floorCarried: 0,
+      distinct: 0,
+      channels,
+    };
+  }
+  let worst = 0;
+  let at = "every channel exact";
+  let largest = 0;
+  let floorCarried = 0;
+  let distinct = 0;
+  for (let i = 0; i < channels; i += 1) {
+    const cw = blended[i] ?? Number.NaN;
+    const c0 = tables[i] ?? Number.NaN;
+    const c1 = march[i] ?? Number.NaN;
+    const expected = (1 - weight) * c0 + weight * c1;
+    const larger = Math.max(Math.abs(cw), Math.abs(c0), Math.abs(c1));
+    const relative = BLEND_SHARE * larger;
+    const allowed = relative + HALF_SUBNORMAL_SPACING;
+    const delta = Math.abs(cw - expected);
+    // The colour's largest: alpha carries the scene's meter class through (R08.T7).
+    largest = i % 4 === 3 ? largest : Math.max(largest, larger);
+    floorCarried += delta > relative && delta <= allowed ? 1 : 0;
+    distinct += Math.abs(c1 - c0) > allowed ? 1 : 0;
+    const ratio = Number.isNaN(delta) ? Number.POSITIVE_INFINITY : delta / allowed;
+    if (ratio > worst) {
+      const texelIndex = Math.floor(i / 4);
+      worst = ratio;
+      at = `texel (${texelIndex % widthPx}, ${Math.floor(texelIndex / widthPx)}) channel ${i % 4}: composite ${precise(cw)}, the blend ${precise(expected)} of ${precise(c0)} and ${precise(c1)}`;
+    }
+  }
+  return { worst, at, largest, floorCarried, distinct, channels };
+}
+
+/**
+ * The composite's blend on the GPU (R08.T8.a): `view`, from inside the setting's march band, drawn
+ * three times, by `atmosphere` on the setting's band and by two more on `sizes` with a band wholly
+ * above the camera (w = 0) and one wholly below it (w = 1), and held to the blend of the two ends
+ * ({@link blendAgreement}), w as the CPU forms it (`hillaire.ts`'s `marchWeightOf`).
+ */
+async function checkCompositeBlend(
+  engine: RenderEngine,
+  ordered: OrderedChecks,
+  atmosphere: HillaireAtmosphere,
+  sizes: TableSizes,
+  view: HeightsView,
+): Promise<void> {
+  const body = BAND_EARTH;
+  const inputs = atmosphereInputs(view.camera, body.figure, body.gravity);
+  const heightStarM = inputs.heightM * inputs.gravityRatio;
+  const weightOf = (band: MarchBand): number =>
+    marchWeightOf(heightStarM, body.medium.topHeightM, band);
+  const suns = [view.sun];
+  // The same frame on each band, each read back before the next draws.
+  const frameOn = async (marchBand: MarchBand): Promise<Float32Array> => {
+    const other = new HillaireAtmosphere(
+      engine,
+      body.medium,
+      { ...sizes, marchBand },
+      body.figure,
+      body.curves,
+      body.gravity,
+    );
+    try {
+      return await compositeFrame(engine, other, view.camera, suns, null);
+    } finally {
+      other.dispose();
+    }
+  };
+  const blended = await compositeFrame(engine, atmosphere, view.camera, suns, null);
+  const tables = await frameOn(BAND_ABOVE_CAMERA);
+  const march = await frameOn(BAND_BELOW_CAMERA);
+  ordered.now((checks) => {
+    const weight = weightOf(sizes.marchBand);
+    const above = weightOf(BAND_ABOVE_CAMERA);
+    const below = weightOf(BAND_BELOW_CAMERA);
+    // The kernels read w as the uniform narrows it, to f32.
+    const result = blendAgreement(
+      blended,
+      tables,
+      march,
+      Math.fround(weight),
+      view.camera.viewport.widthPx,
+    );
+    const label = `${body.task} ${body.name}, high, ${view.name}`;
+    checks.check(
+      `${label}: the composites on the setting's band and on bands above and below the camera are finite and within rgba16float`,
+      [blended, tables, march].every(withinHalfRange),
+      `means ${show(meanRgb(blended))}; ${show(meanRgb(tables))}; ${show(meanRgb(march))}`,
+    );
+    checks.check(
+      `${label}: the composite blends the sky view's and the march's by the march's share w, to rgba16float's rounding (2⁻¹⁰ of the largest of the three, plus 2⁻²⁴)`,
+      result.worst <= 1 &&
+        weight > 0 &&
+        weight < 1 &&
+        above === 0 &&
+        below === 1 &&
+        result.distinct > 0,
+      `w ${weight} by marchWeightOf at h* ${heightStarM.toFixed(3)} m (the band ${bandOf(sizes.marchBand)}; ${Math.fround(weight)} in f32), ${above} on a band ${bandOf(BAND_ABOVE_CAMERA)}, ${below} on one ${bandOf(BAND_BELOW_CAMERA)}; worst ${result.worst.toFixed(3)} of the bound at ${result.at}; largest ${show([result.largest])}; ${result.floorCarried} channels carried by the floor; ${result.distinct} of ${result.channels} channels where the two ends differ by more than the bound`,
+    );
+  });
+}
+
+/**
+ * R08.T8.a: the ray march's new regime, the sky from inside the air, held where it takes over from
+ * the sky-view table in the march band (plan R08, R08.T8; `TableSizes.marchBand`), and the
+ * composite's blend of the two.
+ *
+ * @remarks
+ * On R08.T6.f's Earth ({@link BAND_EARTH}), R05's Earth medium on WGS 84 with its normal gravity
+ * and the oblate twins, from cameras inside the air looking along the horizon, their frames from
+ * just below the visible horizon's dip to 3° above the horizontal ({@link bandViews}), nothing
+ * drawn: on high from the band's middle (w = ½) and from 100 m under the top (w = 1), the sun 20°
+ * up and 2° below the horizon; on low from its band's middle, the sun 20° up. The three per-frame
+ * kernels are held against their twins in R08.T6.g's two arms (`checkViewArms`), the kernel arm on
+ * high, outright, as from inside the air: every pixel's ray march is a sky pixel's, its two-sided
+ * segments under the sun-aware warp, in both arms. The per-planet tables are read back for the
+ * twins but not twinned here: R08.T6.f's Earth group holds them. Then the composite's blend on the GPU
+ * ({@link checkCompositeBlend}), from the high band's middle with the sun 20° up, its disc out of
+ * the frame so that no pixel stands at the half float's clamp. The twins run on the page's twin
+ * workers (`twins`) beside the GPU's work, the checks recorded in the order they were in sequence
+ * (`ordered.ts`).
+ */
+export async function checkMarchBand(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  const body = BAND_EARTH;
+  const read = kernelMedium(body.medium);
+  await inOrder(checks, async (ordered) => {
+    let planet: SmokePlanet | null = null;
+    for (const setting of ["high", "low"] as const) {
+      const sizes = twinSizes(TABLE_SIZES[setting]);
+      const atmosphere = new HillaireAtmosphere(
+        engine,
+        body.medium,
+        sizes,
+        body.figure,
+        body.curves,
+        body.gravity,
+      );
+      try {
+        // The per-planet tables are the same on both settings: read back once.
+        // oxlint-disable-next-line no-await-in-loop
+        planet ??= await planetOf(engine, atmosphere, read, body.figure);
+        for (const view of bandViews(setting)) {
+          // The harness's GPU work runs in order: each frame is read back before the next draws.
+          // oxlint-disable-next-line no-await-in-loop
+          await checkViewArms(
+            engine,
+            ordered,
+            atmosphere,
+            planet,
+            body,
+            sizes,
+            setting,
+            view,
+            twins,
+          );
+        }
+        if (setting === "high") {
+          // After the high views' frames, before the low setting's tables are made.
+          // oxlint-disable-next-line no-await-in-loop
+          await checkCompositeBlend(
+            engine,
+            ordered,
+            atmosphere,
+            sizes,
+            bandView(bandMiddle(setting), 20),
+          );
+        }
+      } finally {
+        atmosphere.dispose();
+      }
+    }
+  });
 }
 
 // --- R08.T9.b: surface lighting ------------------------------------------------------------------

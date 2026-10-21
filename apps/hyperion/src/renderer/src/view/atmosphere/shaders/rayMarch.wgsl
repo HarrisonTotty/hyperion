@@ -14,7 +14,8 @@
 // spheroid's normal, and the tables are read at that height; the ground's bounce reads the sun's
 // transmittance at the ground (Bevy reads it at radius 0); the steps are placed toward the ray's
 // lowest point, the point nearest the body's centre, or, for the camera side of a two-sided ray
-// from inside the atmosphere, toward the camera (`marchSplit` in common.wgsl, R05.T12.e), where
+// from inside the atmosphere to a drawn surface, toward the camera (`marchSplit` in common.wgsl,
+// R05.T12.e; every two-sided sky segment under the sun-aware warp since R08.T8, below), where
 // Bevy spaces them evenly, and each is sampled at its midpoint; each term's density is evaluated
 // once a sample; a step's in-scattering is taken without f32's cancellation (`stepFactor` in
 // common.wgsl). The placement takes the centre alone: it needs no spheroid.
@@ -53,6 +54,25 @@
 // normal is the datum's at that height's foot. The medium is read at h* = s h, s at the sample's
 // latitude, and the sources through the sliced lookup and the bands (`source.wgsl`); the bare
 // ground is lit through the lookup from its own place. As `tablesCpu.ts`'s oblateRayMarchTwin.
+//
+// Changes (plan R08, R08.T8): the march also draws every pixel from inside the air once the camera's
+// h* reaches the setting's march band (`view.exact.w` above 0, `hillaire.ts`'s marchWeightOf), where
+// the composite blends it with the sky view and the aerial-perspective volume, as it draws every
+// pixel from above the top. Every two-sided sky segment it marches (nothing drawn along it), from
+// inside the air or outside it, takes the sun-aware warp by the first source (`marchSkyWarp`,
+// `marchEvenStep`, `marchWalkEvenStep`): even where the Sun is ahead or across the ray, R05's
+// one-sided placement from the segment's start where it is behind. From inside, R05.T12.e's gate
+// failed both placements on its sky families from the band's cameras (about the lowest point five
+// twilight rays with the Sun behind the camera, 17.6% at worst; toward the camera one, 8.12%), and
+// the placement about the lowest point from outside failed the night-side and terminator limb (the
+// Sun 90-105 degrees from the zenith at the tangent point; 12.19%), where even steps hold them
+// (4.32% and 4.85%) and keep the march one rule on both sides of the top, which it would otherwise
+// cross with a step of 13-36%. Even steps in turn drew the sky under the horizontal at the camera's
+// last light (the Sun just over the camera's visible horizon, behind) 45-124 codes off under a seam
+// at the horizontal, which the warp's placement from the start holds within 1.7 codes on high and
+// 10.8 on low. One-sided segments and every drawn surface keep R05.T12.e's placement, a drawn
+// surface's camera side from inside toward the camera (`decision-r08-t8-leans.md` sections 2, 4 and
+// 5.4; plan R08's Risks, "Deviations in T8.a, as built").
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -165,6 +185,25 @@ fn rayMarchStep(
   viewMarchStep(march, local, shares, stepAt.dtM);
 }
 
+// Step `i` of a split segment as the ray march steps it (R08.T8): a two-sided sky segment's under
+// the sun-aware warp `warp`, every other segment's R05.T12.e's.
+fn rayMarchStepOf(split : MarchSplit, i : u32, evenSky : bool, warp : f32) -> MarchStep {
+  if (evenSky) {
+    return marchEvenStep(split, i, warp);
+  }
+  return marchStep(split, i);
+}
+
+// Step `i` of a segment cut at the medium's layer edges as the ray march steps it (R08.T8): a
+// two-sided sky segment's warped walk (made ready by `marchWalkEvenReady`, which holds its warp),
+// every other segment's R08.T6.i walk (`marchWalkReady`).
+fn rayMarchWalkStepOf(walk : ptr<function, MarchWalk>, i : u32, evenSky : bool) -> MarchStep {
+  if (evenSky) {
+    return marchWalkEvenStep(walk, i);
+  }
+  return marchWalkStep(walk, i);
+}
+
 // Adds to the walk where the ray crosses the shell of the march edge `edgeM` above the datum in h*
 // (plan R08, R08.T6.i and R08.T6.f): the quadric (a + e_a, c + e_c), e_a = e / s_e and e_c = e / s_p,
 // as the top's shell (a + H / s_e, c + H / s_p) stands for the top, in space scaled by
@@ -228,14 +267,14 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let depth = textureLoad(sceneDepth, depthTexel, 0);
   let topM = medium.topHeightM;
   let body = oblateBodyOf(oblateBody);
-  // Above the air where the camera's h* is above its top (R08.T6.f).
-  let aboveTop = view.camera.w * view.curvature.z >= topM;
   let reach = view.tables.y;
   var tSurface = 3.4e38;
   if (depth > 0.0) {
     tSurface = distanceAtDepth(view, uv, depth);
   }
-  let needed = aboveTop || (depth > 0.0 && tSurface > reach);
+  // Every pixel once the camera's h* reaches the march band, whose weight is 1 at and above the top
+  // (R08.T8); below it, the surfaces beyond the aerial-perspective volume's reach.
+  let needed = view.exact.w > 0.0 || (depth > 0.0 && tSurface > reach);
   if (!needed) {
     textureStore(rayMarchOut, id.xy, vec4f(0.0, 0.0, 0.0, 1.0));
     return;
@@ -267,7 +306,17 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   }
   let samples = max(u32(view.figure.w), 2u);
   let nearest = -dot(origin, dir);
-  let split = marchSplit(tStart, tEnd, nearest, samples, shell.x <= 0.0);
+  // Every two-sided sky segment, from inside the air or outside it, under the sun-aware warp
+  // (R08.T8); a drawn surface's camera side from inside toward the camera, and every other segment's
+  // sides about its lowest point, R05.T12.e's.
+  let split = marchSplit(tStart, tEnd, nearest, samples, shell.x <= 0.0 && depth > 0.0);
+  let evenSky = depth == 0.0 && split.beforeM > 0.0 && split.afterM > 0.0;
+  let count = skySourceCount(view);
+  // The warp a, once a pixel: from the march's first source, 0 where no source is drawn.
+  var warp = 0.0;
+  if (evenSky && count > 0u) {
+    warp = marchSkyWarp(dir, view.sources[0].direction.xyz);
+  }
   // The closest-approach form's offsets: t - t* = (t - t_low) + (t_low - t*), t_low the split's
   // lowest point. Unclamped, t_low is t_o, the unscaled closest approach the split is placed about,
   // and t_o - t* = (k^2 - 1) d_z [d x (P x d)]_z / qa, 0 on a sphere. Clamped at the ground's near
@@ -282,7 +331,6 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   if (hitsGround && split.lowestM == ground.x) {
     lowestFromStar = -sqrt(max(groundQ.disc, 0.0)) / groundQ.qa;
   }
-  let count = skySourceCount(view);
   var sources : array<vec3f, MAX_SKY_SOURCES>;
   for (var k = 0u; k < count; k++) {
     sources[k] = view.sources[k].direction.xyz;
@@ -296,9 +344,11 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   // A medium with no layer edge takes R05.T12.e's steps as they were, and declares no walk; the
   // edges are the same for every pixel, so the branch is uniform (R08.T6.i).
   let edgeCount = min(u32(layerEdges.count.x), MARCH_EDGES_MAX);
+  // One loop a path, each step chosen in it (R08.T8), so that the step's work is compiled twice,
+  // not once a placement and path.
   if (edgeCount == 0u) {
     for (var i = 0u; i < samples; i++) {
-      rayMarchStep(&march, ray, body, marchStep(split, i));
+      rayMarchStep(&march, ray, body, rayMarchStepOf(split, i, evenSky, warp));
     }
   } else {
     var walk : MarchWalk;
@@ -307,9 +357,13 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
       let edgeM = layerEdges.middles[e / 4u][e % 4u];
       marchWalkCrossShell(&walk, ray, nearestFromStar, acrossZ, edgeM);
     }
-    marchWalkReady(&walk);
+    if (evenSky) {
+      marchWalkEvenReady(&walk, warp);
+    } else {
+      marchWalkReady(&walk);
+    }
     for (var i = 0u; i < samples; i++) {
-      rayMarchStep(&march, ray, body, marchWalkStep(&walk, i));
+      rayMarchStep(&march, ray, body, rayMarchWalkStepOf(&walk, i, evenSky));
     }
   }
   var luminance = march.luminance;

@@ -354,6 +354,9 @@ export const MAX_SKY_SOURCES = 6;
  * (high) applies it to everything opaque and publishes the volume; "terrain" (low) to terrain
  * alone, in R05's one deferred composite. */
 export const AERIAL_PERSPECTIVE_SCOPE: Readonly<Record<QualitySetting, "scene" | "terrain">>;
+/** Where the ray march takes over from the sky view and the aerial volume as the camera climbs:
+ * R05's `SETTINGS[s].atmosphere.marchBand`, projected (R08.T8). */
+export const MARCH_BAND: Readonly<Record<QualitySetting, MarchBand>>; // 0.3–0.5 of the top high, 0.2–0.3 low
 export const ATMOSPHERE_QUALITY_LIMITS: Readonly<Record<QualitySetting, ReadonlyArray<string>>>;
 ```
 
@@ -361,7 +364,8 @@ R05's `TABLE_SIZES` (`hillaire.ts`), which is `SETTINGS[s].atmosphere`, stays in
 gains the thick table's size (R08.T14.c). As built it holds the transmittance (256 × 64) and
 multiple-scattering (32²) sizes, the sky view (192 × 108 at 75 steps on high, 128 × 64 at 16 on
 low), the aerial-perspective volume (32³ and 32 × 32 × 16, 2 steps a slice, to 32 km), the march
-(full resolution at 36 steps since R08.T7, 32 before; half at 16) and `aerialPerspectiveScope`. `ViewSettings` also holds
+(full resolution at 36 steps since R08.T7, 32 before; half at 16), `aerialPerspectiveScope` and,
+since R08.T8, `marchBand`. `ViewSettings` also holds
 R06's `sky` and R07's `internalScaleBounds`, `budget` and `photoreal` today. `settings.ts` is the
 module R12 reads for this plan's ladder entries.
 
@@ -4246,6 +4250,20 @@ two suns, and its timings are taken with T11's.
 
 ### R08.T8 Views from outside and other bodies
 
+In two subtasks (split on implementation, 2026-10-21, as `decision-next-lane-2026-10-21.md` §2
+suggests; T8.b also waits on `view/bodies/` and `view/spike/` being free):
+
+- **R08.T8.a The march from inside and outside the air, and the switch band.** The march's N terms
+  and several sources (built by R08.T6.b and R08.T7, no source skipped outside the air), the switch
+  to the march by altitude with its blend band (`TableSizes.marchBand`, projected as `settings.ts`'s
+  `MARCH_BAND`), and the CPU tests below but the `apparentM` one. Tests also: `just test-render`'s
+  group "R08.T8.a the march band". Acceptance: `pnpm test` and `just test-render` pass. _Built
+  2026-10-21_ (Risks, "Deviations in T8.a, as built").
+- **R08.T8.b Bodies seen from outside, and the far limb.** A body's atmosphere at its `apparentM`
+  and its camera formed in `f64` relative to it, the `apparentM` test below, the far limb's twin
+  checks and its fidelity, and the ascent by hand. Acceptance: `pnpm test` and `just test-render`
+  pass, and the ascent below.
+
 Widen R05's ray march to N terms and several sources: each body's list of Design note 7 (its stars
 and its planetshine sources), with no source skipped outside the air. The march draws any body's
 atmosphere other than the ship's local body (`SceneFrame.localBody`) at its `apparentM` from R03's
@@ -4269,7 +4287,8 @@ a ÷ 2. At the far limb this task delivers:
 
 Tests (no GPU):
 
-- the CPU march just inside the top agrees with the sky-view twin to 1% at the band's edges;
+- the CPU march just inside the top agrees with the sky-view twin to 1% at the band's edges (_a
+  recorded figure since `decision-r08-t8-leans.md` §3; Risks, "Deviations in T8.a, as built"_);
 - R05.T12.e's quadrature gate holds for the widened march, at one source and at
   `MAX_SKY_SOURCES`;
 - the sky-view table's interpolation across the limb, from cameras at 60–100 km, against the march
@@ -7577,6 +7596,352 @@ it rides a bump.
   - _`testRender.sh`'s comment_ still named part 3 as R08.T6.g's and T6.i's, without R08.T7's
     group. It was left so that smart-ci does not plan the full `ci` for a comment. Done by
     perf-smoke's four-run split, which rewrote it.
+
+- **Deviations in T8.a, as built** (2026-10-21). `hillaire.ts`, `settings.ts`, `tablesCpu.ts`,
+  `marchSteps.ts`, the WGSL (`rayMarch`, `composite`, `view`, `common`); `test/atmosphereGate.ts`;
+  `smoke/atmosphere.ts` and `smoke/page.ts`; tests in `marchBand.test.ts`, `marchGate.test.ts` and
+  `limbColour.test.ts` (new) and the `hillaire`, `settings`, `tablesCpu`, `marchSteps`, `precision`
+  and `twinJobs` tests; plan 05's R05.T12.e (its task text, Design note 16, its Tests list and
+  "Deviations in T12.e, as built").
+  Ruled in `decision-r08-t8-leans.md` (§1 the band, §2 the drawn surfaces, §3 the seam, §4 even
+  steps), each under the owner's delegation.
+  - _The split._ T8 is two subtasks (its entry). T8.a is this record; T8.b (bodies at `apparentM`,
+    the far limb, the ascent) follows.
+  - _Already built before T8._ The march's N terms (R08.T6.b), its several sources and its sky's
+    sources from outside the air with no skip (R08.T7, `sources.ts`; "skips nothing from above the
+    air" in `sources.test.ts`), the spheroid's quadric constants formed in `f64` and the
+    closest-approach form beyond a ÷ 2 (R08.T6.g, R08.T6.f).
+  - _The switch band_ (§1). `TableSizes.marchBand` (`MarchBand`: `lowerShareOfTop`,
+    `upperShareOfTop`), projected as `settings.ts`'s `MARCH_BAND`: 0.3–0.5 of the medium's top on
+    high and 0.2–0.3 on low, in h\* (Design note 17). `marchWeightOf(h*, top, band)`, formed in
+    `f64`, is 0 below the band, 1 from its upper edge up (the top and above included) and linear
+    between, and fills `AtmosphereView.exact.w`, unused before. The ray march marches every pixel
+    where it is above 0; the composite blends the sky, mix(sky view, march, w), and the surfaces
+    within the aerial volume's reach, mix(aerial perspective, march, w), and takes the march alone
+    at 1. Inside the air what lies behind the sky and each disc keep the camera's own transmittance
+    to space. The weight is continuous in h\*, so there is no hysteresis (§3).
+    - _Why below the top._ Measured in the twin on R05's Earth (100 km top), against a march of
+      1,024 placed steps, at the 5% metric's floor (6 × 10⁻³ of the frame's brightest): the sky
+      view's bilinear read across the upper limb is 2.31% off from 30 km, 4.30% from 50 km, 6.21%
+      from 60 km and 15.8% from 1 m under the top on high; 4.26% from 20 km, 5.73% from 30 km, 18.2%
+      from 60 km and 51.7% near the top on low (`marchBand.test.ts`). From 1 m under the top the
+      worst lies at tangent heights of 47–67 km, where a sky-view row spans about 9 km (1.07 scale
+      heights) on high and up to 15 km (1.8) on low; inside high's band a row spans at most 0.63 of a
+      scale height, the worst rows at tangent heights of 13–28 km (the science check). A band just
+      under the top would have drawn those, a visibly wrong picture (§1).
+    - _Generality._ Measured on R05's Earth only, an exponential of H = 8,434.5 m whose 100 km top
+      stands at 11.86 scale heights. A column built by Design note 3 has its top at p_s × 10⁻⁷, 16.1
+      pressure scale heights, and the Earth the view draws (`EARTH_REFERENCE`, its column's 104.6 km
+      top cut at 100 km) has a scale height of about 6.3 km above 12.6 km. The read's error grows as
+      the square of a row's span in local scale heights (the science check estimated 1.8 times R05's
+      error there). Measured on the drawn Earth (`marchBand.test.ts`, beside R05's), the read is
+      2.03%, 3.71%, 5.01%, 7.77%, 11.15%, 18.79% and 25.97% off from 20, 30, 40, 50, 60, 80 and
+      99.999 km on high (5.08% to 88.94% on low), the march 0.34–1.01% (2.27–6.26% on low), and high's
+      blend through the band 3.71%, 2.81%, 2.48%, 1.56% and 0.53% from 30 to 50 km, inside 5% (low's
+      5.08%, 4.42% and 2.27% at 20, 25 and 30 km, recorded). A share of each body's top is therefore
+      an approximation in scale heights; each body's band is for R08.T10's bodies to check (deferred
+      below).
+    - _Cost._ A frame in or above the band costs what an orbit frame's atmosphere already costs,
+      since the march covers every pixel above the top; no budget row is crossed (§1). **For R08.T11:**
+      time a frame in each setting's band beside the 400 km frame, and report to "main" a band
+      frame over the orbit frame beyond noise.
+  - _Even steps for every two-sided sky segment_ (§2, §4). In the ray march every two-sided segment
+    with nothing drawn along it, from inside the air or outside it, takes even steps
+    (`common.wgsl`'s `marchEvenStep`, and `marchWalkEvenReady` and `marchWalkEvenStep` where the
+    medium has layer edges: the segment cut at its crossings, its steps shared by length, at least
+    one a piece; `marchSteps.ts`'s `marchEvenStep` and `marchEvenSteps` are the twin;
+    `TwinRay.skySegment`). One-sided segments and every drawn surface keep R05.T12.e's placement,
+    a drawn surface's camera side from inside toward the camera: `marchSplit`'s `fromCamera` is
+    `shell.x <= 0 && depth > 0`. The sky view and the multiple-scattering kernel are unchanged.
+    - _How it was reached._ The lane's first lean placed a sky segment's camera side about the
+      lowest point from inside too (§2 amended it to sky pixels). R05.T12.e's gate then failed it
+      on the gate's sky families from the band's cameras (high, 36 steps): five twilight rays, every
+      one with the Sun at 90–95° behind the camera, whose light comes from the camera's end of a
+      night-side chord (band, 50 km, view zenith 97.0°, sun 95°/180°, 17.56%; high band 60 km
+      15.79%; 99.999 km, sun 90°/180°, 11.46%; 80 km 9.48%; 99.999 km, sun 95°/180°, 5.39%; bound
+      5%). R05's V1 failed one of them (8.12%, 99.999 km, sun 90°/180°). Even steps held the set
+      (4.32% twilight, 1.03% ordinary).
+    - _The step at the top_ (1 m under against 1 m over, all 90 rows of a frame through the visible
+      horizon, floor 6 × 10⁻³, suns 30°/0°, 30°/90°, 5°/180°, 5°/0°, −3°/0°, 0°/180°, −5°/180°):
+      R05's V1 inside, 1.2–6.6% on high; even steps inside alone, 1.1–36% on high and 5.4–164% on
+      low (13–36% and 67–164% with the Sun on or under the horizon behind the camera); a per-setting
+      split, 5–164% on low; even steps on both sides (built), at most 0.056% on high and 0.057% on
+      low, the physical change across 2 m.
+    - _R05's placement from outside_ failed the night-side and terminator limb, which R05.T12.e's
+      limb suns (30° and 90°) never sampled: from 400 km and 101 km, at R08's tangent heights with
+      the Sun at 90–105° from the zenith at the tangent point, 12 of 80 rays over 5% on high, worst
+      12.19% (0.1 H, sun 105°/180°; 10.80% at the metric's floor). Even steps hold all 80 within
+      4.85%. Both figures take the floor over those 80 rays' own brightest; at the gate's floor, over
+      its march families, they are 10.80% and 4.79% (`marchGate.test.ts`).
+    - _What moves._ Every limb and sky pixel the march draws from outside the air: the orbit frames,
+      the smoke's 400 km frames and R05.T12.c's `hillaire-orbit` capture (by eye; it pins nothing).
+      The gate's limb family from 400 km goes to 0.47% ordinary and 4.35% twilight on high (from
+      1.05% and 1.16%). No reference, drawn surface or sky-view texel moves.
+    - _Earth only._ The placement was measured on Earth's three media alone: R05's Earth, the
+      measured Earth and the slab Earth. On another body a miss would show in R08.T8.b's far-limb
+      fidelity check on the other fixtures, whose pixels over 5% already go to "main" (§4.4).
+    - _Names beside the ruling's._ `TwinRay.skySegment` takes the ruling's `skyFromInside`, renamed
+      when the flag came to cover any sky segment (§4.2). `rayMarchRayTwin` and
+      `oblateRayMarchRayTwin` take a `RayMarchReach` (`aerialPerspectiveReachM`, `marchBand`) in
+      place of `reachM`, and `RayMarchSettings` gains `marchBand`. In the gate, `Placement` gains
+      `kernel`, `stepsFor` gains the sky segment's flag, and `skySegmentOf` is added.
+    - _Surfaces in the band._ Within the aerial volume's reach the composite blends the volume with
+      the march by w, as it blends the sky, so that from the band's upper edge up the march alone
+      draws every pixel, as from above the top. Passes that read the published volume
+      (`HillaireAtmosphere.aerialPerspective`, R11's) are not blended and keep the volume up to the
+      top.
+    - _The gate_ (`test/atmosphereGate.ts`). Its HIGH and LOW schemes take the kernel's rule (a new
+      `Placement`, `kernel`, and `skySegmentOf`: a march-family ray with no ground and both sides
+      non-empty takes even steps); its references and confirmations keep R05's placed steps, and
+      none moves. A new march family, `night limb`, after `limb`: from 400 km and 101 km, at R08's
+      tangent heights, the Sun at 90°, 95°, 100° and 105° from the zenith at the tangent point,
+      azimuths 0° and 180°, less the rays already in `limb`: 70 rays, every one a twilight ray, its
+      low bound `rayMarch`'s. The gate grows from 1,046 to 1,116 rays. The 101 km rays repeat the
+      400 km figures exactly, their chords being congruent.
+    - _On high_ (36 steps), the night limb's worst: 4.79% on R05's Earth, 3.24% on the measured
+      Earth and 6.77% on the slab Earth (R05's placement: 10.80%, 8.05% and 10.05%); R05's
+      single-scattering twin 13.25% (R05's placement 11.02%). The R08 twin holds every ray of the
+      gate on R05's Earth (4.79%) and on the measured Earth (3.24%; its limb, 1.88% before, is now
+      3.24% twilight and 0.22% ordinary).
+    - _Named misses_ (each pinned to the 0.01 point both ways, as `SLAB_R05_MISS` was; findings, not
+      holds, recorded by "main" 2026-10-21):
+      - `SLAB_HIGH_MISS`, the slab Earth at high's 36: the limb at 0.1 H, sun 90°/0°, 5.15% (R05's
+        placement held it at 2.39%), and the night limb at 0.1, 0.3 and 1 H with the sun at
+        100°/180°, 5.39%, 6.77% and 5.28%, each from 400 km and 101 km (8 rays);
+      - `R05_TWIN_HIGH_MISS`, R05's single-scattering twin on R05's Earth: the limb at 0.1 H, sun
+        90°/0°, 13.25% (3.22% before), from both cameras; the R08 twin, which carries Hillaire's
+        multiple scattering as the kernel does, holds it;
+      - `R05_TWIN_LOW_MISS`, the same two rays at low's counts, 78.90%;
+      - `SLAB_R05_MISS`, re-pinned 2026-10-21 at R05's 32 steps: 8 rays, the limb at 0.1 H, sun
+        90°/0°, 5.15% (5.63% before), and the night limb at 0.1, 0.3 and 1 H with the sun at
+        100°/180°, 5.45%, 6.75% and 6.24%, from both cameras.
+    - _The perf lane's candidate_ (§4.2), high's march back to 32 steps under the new rule: it
+      fails. R05's Earth misses 4 rays (5.77% and 5.40%, each from both cameras) and the slab 8
+      (5.15–6.75%); only the measured Earth holds (4.46%). Not a candidate.
+    - _`LOW_TWIN_WORST.rayMarch`_, re-measured by its own rule (the twin's worst at low's counts over
+      R05's Earth and the measured Earth, rounded up to 0.1%, the night limb included; addendum A,
+      4(b)): ordinary 0.049 → 0.036, set by the measured Earth's disc at ground zenith 80°, sun
+      95°/180° (3.59%), since the limb's ordinary rays fall to 0.91% and 2.50% in even steps;
+      twilight 0.182 → 0.245, set by the measured Earth's night limb at 0.1 H, sun 100°/180°
+      (24.47%). Its TSDoc records both. The smoke's low frames from 400 km take the new bound plus
+      1%, as before.
+    - _Re-measured under the warp_ (§5.5; the figures above are §4's even steps; these are the pins
+      as committed, dated 2026-10-21). The gate has 1,641 rays (`last light`, 525). High at one
+      source on R05's Earth: 0.45% / 4.69% over the march's rays and 0.59% / 4.32% over the sky's
+      (ordinary / twilight; the night limb 4.79% → 4.69%); on the measured Earth 0.53% / 3.24% /
+      0.53% / 3.29%; at six sources no miss on any medium (R05's Earth 0.33% / 0.60% / 0.07% /
+      0.63%). Low at one source on R05's Earth: 2.59% / 23.94% / 3.31% / 24.00%, R05's rule holding
+      at 24.00% against even steps' 46.37%, and no ray over its bounds at one or six sources on R05's
+      or the measured Earth: the record of two band rays over the sky view's low bound is dropped.
+      - `SLAB_HIGH_MISS` 8 → 4 rays: the limb at 0.1 H, sun 90°/0°, 5.15%, and the night limb at
+        0.3 H, sun 100°/180°, 6.27%, each from both cameras. The slab, newly in
+        `marchGate.test.ts`, also holds there two named misses that §4's even steps already had:
+        "high band, 99,999 m, view zenith 99.879°, sun 90°/180°" at 6.44% (a = 1; 6.74% at a = 0) and
+        "high limb, 99.999 km, tangent 0.84 km, sun 90°/0°" at 5.25% (a = 0). Findings, reported.
+      - `SLAB_R05_MISS` 8 → 6: the night limb at 0.3 H 5.89% and at 1 H 5.62%, the 0.1 H ray at
+        100°/180° no longer a miss. `R05_TWIN_HIGH_MISS` and `R05_TWIN_LOW_MISS` are unchanged, their
+        Sun being ahead (a = 0).
+      - `LOW_TWIN_WORST.rayMarch` {0.036, 0.245} → {0.036, 0.240}: the twilight bound is now set by
+        R05's limb at 23.94%, the measured Earth's night limb falling from 24.47% to 22.35%.
+      - The slab test's cut rays and sides, 714 and 968 under §4, are 984 and 1,463.
+    - _On low_ (16 steps), the night limb's worst: 23.94% on R05's Earth, 24.47% on the measured
+      Earth and 28.56% on the slab (R05's placement: 39.02%, 37.69% and 36.97%); even steps alone
+      give the same. The gate's limb family from 400 km: 0.91% ordinary and 23.94% twilight (the ray
+      at 0.1 H, sun 90°/0°; R05's placement 4.80% and 5.87%), low's trade (§4.1). R05's low rule
+      holds (placed no worse than even).
+    - _R05's evidence test_ (`marchSteps.test.ts`, "fails the even steps the kernels had") now reads
+      "on the disc and in the sky": all-even steps still fail the limb at 36, but only on the ray the
+      kernel itself now misses (13.25%), the kernel stepping the limb evenly too; the comment gives
+      the figures.
+    - _The camera's last light_ (§5, ruled 2026-10-21 on the review's two findings, both
+      blockers). Even steps missed the lit stretch next to the camera when the Sun stands 0–1.5°
+      over the camera's own visible horizon, behind the view or well to its side: the camera's end
+      of every two-sided chord is lit and the chord beyond it is in the Earth's shadow, so the light
+      comes from its first 30–65 km of 950–1,200 km, where even steps of 60–75 km (low) or 27–33 km
+      (high) put one midpoint or none. In 8-bit display codes (AgX at AUTO's calibration over a 36°
+      column centred on the horizontal; a seam shows at 2 codes, a band changes colour off by half),
+      against the converged march, on R05's Earth:
+
+      | Camera | High, sky under the horizontal | High, step at the horizontal | Low, sky under it | Low, step |
+      | ------ | ------------------------------ | ---------------------------- | ----------------- | --------- |
+      | 30 km  | not drawn (w = 0)              | not drawn                    | 106 codes, 94%    | 35 codes  |
+      | 40 km  | 23 codes (w = ½)               | 7.6 codes                    | 112 codes         | 26 codes  |
+      | 50 km  | 76–81 codes, 88%               | 9.5–10.5 codes               | 124 codes, 97%    | 21 codes  |
+      | 80 km  | 45 codes, 63%                  | 2.3 codes                    | 117 codes, 94%    | 31 codes  |
+
+      At 30 km on low the pink twilight band was drawn blue-grey under a hard line at the
+      horizontal; low's two band rays from 50 km (19.44% and 46.37%) were the gate's view of the same
+      defect. The gate's suns stopped at 95° from the zenith and its cameras skipped 30–45 km, which
+      hid the window; the lane's horizontal test took only the top's suns. Candidates measured in the
+      twin by the ruling's agent (§5.4): V1 inside and even outside, a step at the top of 24% on
+      high and 50–59% on low; the camera or entry side toward the start everywhere, 7 misses on the
+      night limb (8.12%); one-sided from the segment's start everywhere, 5 misses on the terminator
+      limb with the Sun ahead (9.58%, 144.6% on low). **The warp, built:** a two-sided sky segment
+      takes its N steps evenly in u ∈ [0, 1], t(u) = t_start + L((1 − a)u + a u²), a = clamp(−(d ·
+      s₀) ÷ 0.2, 0, 1), d the ray and s₀ the first source: a = 0 is §4's even walk (the Sun ahead
+      or across), a = 1 R05's one-sided placement from the segment's start (the Sun more than about
+      102° from the ray), continuous in d and the same rule on both sides of the top; the cut walk
+      shares its steps by each piece's length in u, each crossing's u the root
+      2x ÷ ((1 − a) + √((1 − a)² + 4ax)) that does not cancel, each piece its own warp
+      a_p = a Δu ÷ ((1 − a) + a(u₀ + u₁)) over its exact length in t. The constant is
+      `MARCH_SKY_WARP_COSINE` (WGSL) and `SKY_WARP_COSINE` (TypeScript), 0.2, the ruling's; a is 0
+      where no source is drawn. At a = 0 the steps are §4's even steps to the bit on an uncut segment,
+      in the twin and in `precision.test.ts`'s `f32` emulation, which holds the warped walk to the
+      twin within the walk test's bound at a = 0, 0.25, 0.6 and 1.
+      - _The window, under the warp_ (`marchBand.test.ts`, the window's 15 suns, the march alone):
+        the quadrature's own step across the horizontal is at most 0.22 codes on high and 0.47 on
+        low on R05's Earth (0.13 and 0.28 on the drawn Earth), under the ruling's 2 codes; the worst
+        under the horizontal is 1.68 codes and 3.45% on high and 10.81 codes and 21.7% on low (1.48
+        codes and 4.65%, 9.13 codes and 26.8% on the drawn Earth), the references converged to
+        1.04 × 10⁻⁴. The ±10⁻⁴ and ±10⁻³ rad record's quadrature part falls from 6.67% (high) and
+        45.6% (low) at worst to 0.08% and 0.29%.
+      - _The "last light" family_ (a sky family after `high band`, held as a ray-march family, the
+        march's sky pixel at its count, so `LOW_TWIN_WORST.rayMarch` covers it): cameras at 30, 40,
+        50, 60, 80, 95 and 99.999 km, five rays a camera from 0.06° under the horizontal to 0.05° over
+        the visible horizon, suns from 0.5° under to 1.5° over the camera's visible horizon in 0.5°
+        steps at 120°, 150° and 180° from the ray: 525 rays, the gate 1,641. High at one source:
+        0.79% on R05's Earth, 0.55% on the measured Earth and 0.55% on the slab (even steps: 12.47%,
+        16.37% and 16.46%); at six, 0.46%, 0.22% and 0.91%. Low at one source: 4.50%, 3.71% and
+        7.27% (even steps about 36%).
+      - _Daylight with the Sun behind_ (a finding, recorded): the warp reads d · s₀ alone, not
+        whether the Sun is up, so with the Sun 5° up behind the camera the march against the
+        converged march moves from 3.76% to 11.55% on low at 80 km (4.76% to 9.95% on the drawn
+        Earth), and on high from 0.76% to 1.78% at 80 km and from 1.55% to 2.40% at 1 m under the
+        top. Reported to "main".
+
+    - _One loop a path_ (§4.2's optional fold, taken). The kernel chooses each step inside one loop
+      a path (`rayMarchStepOf`, `rayMarchWalkStepOf`), so that the step's work is compiled twice, as
+      before T8, not once a placement and path. With four loops part 3 of the smoke took 154–156 s
+      alone at a load of 8–12 (R08.T6.g 118 s, R08.T6.i 35 s) and passed its watchdog under the
+      gate's load only narrowly; folded, 116–118 s (90 s and 23 s), its time before T8. The first
+      gate's part 2 also lost its GPU process mid-group on both variants at the same instant; it
+      passed alone and in the second gate.
+    - _`f32` parity._ `precision.test.ts` emulates `marchEvenStep`, `marchWalkEvenReady` and
+      `marchWalkEvenStep` against `marchEvenSteps` on its five segments, one from orbit, within the
+      walk test's bound, and to the bit on segments with no cut.
+  - _The CPU tests._
+    - `marchWeightOf`, `MARCH_BAND` and `exact.w` (`marchBand.test.ts`, `settings.test.ts`,
+      `hillaire.test.ts`): 0 below the band, 1 at its upper edge, at the top and above, linear
+      between, a share of each medium's own top (on a 200 km top high's band is 60–100 km), the
+      composite's and the march's uniform alike, and h\* on Saturn's equator with gravity (h\* =
+      40 km gives 0.5, where its plain h would give more than 0.6).
+    - _The fitted triple's u′v′ on the limb from orbit_ (`limbColour.test.ts`; R08.T4.a's colour
+      pipeline, the channel fit's objective: single scattering with the ground's shadow, no ground
+      bounce and no multiple scattering), the worst Δu′v′ over R06's twelve suns at tangent heights
+      0.1, 0.3, 1, 3 and 10 of R05's Rayleigh scale height (8,434.5 m), each within 10⁻⁴ of itself
+      when the chord's steps are doubled (3 × 10⁻⁵ measured; the sun columns' 128 steps are the
+      objective's and not doubled):
+
+      | Light                                       | Air      | 0.1 H   | 0.3 H   | 1 H     | 3 H     | 10 H    |
+      | ------------------------------------------- | -------- | ------- | ------- | ------- | ------- | ------- |
+      | Direct beam, the Sun behind the limb        | dry      | 0.0521  | 0.0367  | 0.0126  | 0.00411 | 4.8e-6  |
+      | Direct beam                                 | R05 haze | 0.105   | 0.0504  | 0.0126  | 0.00411 | 4.8e-6  |
+      | Scattered, the Sun overhead at the tangent  | dry      | 0.00085 | 0.00145 | 0.00343 | 0.00615 | 0.00721 |
+      | Scattered, the Sun overhead                 | R05 haze | 0.00195 | 0.00169 | 0.00341 | 0.00615 | 0.00721 |
+      | Scattered, the Sun on the tangent's horizon | dry      | 0.00362 | 0.00322 | 0.00281 | 0.00546 | 0.00720 |
+      | Scattered, the Sun on the horizon           | R05 haze | 0.00112 | 0.00105 | 0.00278 | 0.00546 | 0.00720 |
+
+      A limb chord at 0.1 H carries 1.8 times the horizon's molecular column (its aerosol column 0.99
+      times; τ(550) 15.1 against 12.5 with R05's haze, 6.05 against 3.34 dry), and its direct beam is
+      0.052 off in dry air and 0.105 with R05's aerosol, worst over R06's twelve suns (the 2,300 K
+      star), against the horizon's 0.072 over the same suns (0.022 under the Sun; R08.T4.a). Under
+      the Sun (the 5,772 K row) the direct beam is 0.0113, 0.0105, 0.0076, 0.0030 and 4.6 × 10⁻⁶ off
+      dry and 0.0587, 0.0107, 0.0076, 0.0030 and 4.6 × 10⁻⁶ with the aerosol, pinned beside them in
+      `limbColour.test.ts`. The Sun seen through the limb from orbit is the
+      spectral bakes' case (Design note 5). The scattered light stays within 0.0073. The six figures
+      were reproduced independently by the science check (Bodhaine et al. 1999 eq. 29, the CIE 1931
+      2° table, `bake_spectra.json`).
+
+    - _The band's edges_ (the task's "1% at the band's edges", a recorded figure since §3), on R05's
+      Earth on a 6,378,137 m sphere, the sky view's texels against the march along each texel's
+      direction (floor 10⁻³): 0.334% and 0.43% at high's edges (30 and 50 km), 3.49% and 3.57% at
+      low's (20 and 30 km); the read against the march at the same pixels: 2.35% and 4.29% (high),
+      4.11% and 5.81% (low). The figures here and below are the warp's (§5), measured 2026-10-21.
+    - _The sky view's interpolation across the limb_ (`marchBand.test.ts`; a 90-row column from
+      0.2° under the visible horizon to 4.5° over it, suns 30°/0°, 30°/90° and 5°/180°, against a
+      converged march of 1,024 placed steps, floor 6 × 10⁻³), the worst over the suns:
+
+      | Camera                | 20 km | 30 km | 40 km | 50 km | 60 km | 80 km  | 99.999 km |
+      | --------------------- | ----- | ----- | ----- | ----- | ----- | ------ | --------- |
+      | High, sky view's read | 2.50% | 2.31% | 2.95% | 4.30% | 6.21% | 10.62% | 15.80%    |
+      | High, march (36)      | 0.45% | 0.52% | 0.52% | 0.59% | 0.65% | 1.78%  | 2.40%     |
+      | Low, sky view's read  | 4.26% | 5.73% | 8.87% | 10.9% | 18.2% | 33.0%  | 51.7%     |
+      | Low, march (16)       | 2.12% | 3.03% | 2.22% | 3.51% | 6.05% | 11.55% | 10.83%    |
+
+      The march's worst at 80 km and over is the Sun 5° up behind the camera (the warp's daylight
+      finding, above). The composite's blend, (1 − w) read + w march, through high's band (30, 35,
+      40, 45, 50 km): 2.31%, 2.16%, 1.46%, 0.95% and 0.59%, held within Design note 10's 5%;
+      through low's (20, 25, 30 km), 4.26%, 2.45% and 3.03%, recorded. On the drawn Earth the march
+      is 0.35–1.31% on high and 1.85–9.95% on low, and the blend 3.71%, 2.81%, 2.49%, 1.55% and
+      0.49% through high's band (5.08%, 4.49% and 2.12% through low's).
+
+    - _The top._ The march 1 m under and 1 m over the top differs by at most 0.0559% on high and
+      0.0571% on low (suns 30°/0°, 30°/90°, 5°/180°, 5°/0°, −3°/0°, and 0°/180° and −5°/180°,
+      where even steps inside alone stepped by 13–36% and 67–164%: 0.0207% and 0.0260% on high,
+      0.0415% and 0.0547% on low), held under 0.2%. The limb
+      falls monotonically from 10 km to the top, and a ray whose closest approach is above the top
+      gives (0, 0, 0) with a transmittance of 1. At the top less 1 m it stands at 3.08 × 10⁻⁷,
+      7.54 × 10⁻⁷ and 1.21 × 10⁻⁶ of each channel's brightest on the limb from 400 km (red, green,
+      blue), pinned as recorded: R05's air at 99.999 km, the same at 4,096 steps.
+    - _R05.T12.e's gate for the widened march_ (`marchGate.test.ts`), at one source and at
+      `MAX_SKY_SOURCES` (the ray's sun and five more at about 20°, 50°, 70°, 85° and 92° from the
+      zenith at its sun point, azimuths 60–300° from it, weights 0.5 to 0.05, slot 0): the march
+      families and the gate's sky families from each setting's lower band edge up, marched as the
+      kernel marches a sky pixel (high: 50 km's sky, band and past, 60, 80 and 99.999 km's high limb
+      and high band, and the `last light` family; low also 20 km's band and past), on R05's, the
+      measured and the slab Earth: the figures are in "Re-measured under the warp", above. A ray at
+      six sources counts as a twilight ray if any of its sources makes it one, so most
+      near-horizontal rays are held to 5% there; the worst at six is 0.63%.
+    - _Run times_, each file alone at 4 workers (1-minute load 7–16 from other lanes):
+      `marchGate.test.ts` 246 s (three media at one and six sources; over the 90 s guide),
+      `tablesCpu.test.ts` 163 s (its three gate runs), `marchBand.test.ts` 113 s,
+      `limbColour.test.ts` 8.9 s, `marchSteps.test.ts` 10.4 s, `precision.test.ts` 2.7 s. A finding
+      for the suite's time: `marchGate.test.ts` could move to the slow tier if `pnpm test` needs it.
+  - _The smoke_ (`smoke/atmosphere.ts`'s `checkMarchBand`, "R08.T8.a the march band", part 6 after
+    R08.T9.b's groups). On R08.T6.f's Earth (WGS 84, `EARTH_GRAVITY`, R05's Earth; the oblate twins),
+    in a 64 × 32 frame from inside the air along the horizon (`bandCamera`: 0.5° under the visible
+    horizon's dip to 3° over the horizontal), nothing drawn: on high at h\* 40 km (w = ½) and 100 m
+    under the top (w = 1), the sun 20° up and 2° down, and on low at 25 km (w = ½), the three
+    kernels' arms are held against their twins outright (no envelope). The kernel arm's worst is
+    6.1 × 10⁻⁵ (the march) and every check passes, with no channel over its bound. The composite's
+    blend at h\* 40 km, drawn with the band, with a band above the camera (w = 0) and one below it
+    (w = 1): composite(w) = (1 − w) composite(0) + w composite(1) to 2⁻¹⁰ of the larger plus 2⁻²⁴,
+    worst 0.499 of the bound, with the ends apart in 5,740 of 8,192 channels; every output finite and
+    within `rgba16float`. Part 6 took 93.9 s and 95.1 s (default, no-subgroups) before the group and
+    139.8–145.8 s with it under §4's four march loops (the group 64–73 s, mostly its four
+    atmospheres' tables and kernels, 12–14 s each), at a load of 2–5, against the watchdog's 180 s.
+    With the warp and one loop a path, run alone at a load of 7–13: part 2 120 s, part 3 122 s, part
+    4 104 s and part 6 120 s, every check passing on both variants.
+- **Deferred findings (2026-10-13 rule)** (R08.T8.a).
+  - _**A known blocker, owned by R08.T8.b** (main, 2026-10-21)._ From above the top the composite
+    dims what lies behind the sky, and each disc, by the march's alpha, slot 0's mean transmittance
+    over the three channels, so an orbital sunset shows the Sun's disc (R06's layer, drawn beneath
+    since R08.T7) dimmed grey through the limb, not reddened, and stars through the limb the same;
+    inside the air the per-channel lookup from the camera serves, so the colour also steps at the
+    top. It dates from R08.T7, and T8.a does not make it worse. T8.b builds the per-channel
+    transmittance from above the top through the sliced lookup at the ray's entry to the top's
+    shell, in the composite and its twin, as its first item, and does not land without it; checked
+    by eye in a hidden capture of an orbital sunset, the disc's colour reported before and after.
+  - _The sky view's night side from high cameras._ Its "high limb" family (60–100 km) takes suns at
+    30° and 90° only; under V1 at 75 steps the night side is unmeasured (§4.3). Open for R08.T8.b's
+    far-limb work.
+  - _The band on other bodies._ Measured on R05's Earth, and recorded on the drawn Earth beside it;
+    a share of each body's top stands in for a row's span in its local scale heights (_Generality_,
+    above). R08.T8.b's far-limb checks run at 10⁷–10⁹ m, where w = 1 and the sky view is never read,
+    so they cannot see a misplaced band. Lean: R08.T10.b runs `marchBand.test.ts`'s read, march and
+    blend frames on each body it draws, and reports to "main" any blend over 5%.
+  - _Low's march from 50 km at twilight_ and _a seam at the horizontal from inside the band_: both
+    ruled blockers and fixed in T8.a by the sun-aware warp (`decision-r08-t8-leans.md` §5; above,
+    "The camera's last light").
+  - _A perf candidate, not this lane's_ (§1): from the band's upper edge up the sky view serves no
+    drawn pixel, but it still dispatches (with addendum B's 75 steps on high).
+  - _Part 6's time._ About 120 s of the 180 s watchdog with one march loop a path (140 s with
+    §4's four); a gate under heavy load takes it nearer. The group's two blend ends could share the
+    high atmosphere through a band hook in `hillaire.ts` (about 27 s less) if that is needed.
+  - _The slab Earth's two gate misses at high_ ("high band, 99,999 m, sun 90°/180°" 6.44%, "high
+    limb, 99.999 km, tangent 0.84 km, sun 90°/0°" 5.25%), new to `marchGate.test.ts` but already
+    over 5% under §4's even steps, and _daylight with the Sun behind_ under the warp (low at 80 km
+    3.76% → 11.55%): recorded above, reported to "main".
 
 - **Deviations in T6.e, as built** (2026-10-13). `tablesCpu.ts`, `oblate.ts` and `hillaire.ts`;
   tests in a new `tablesCpuOblate.test.ts` (inside the acceptance's `view/atmosphere/tablesCpu`

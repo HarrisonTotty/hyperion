@@ -15,6 +15,7 @@ import {
   HIGH,
   kernelOf,
   LOW,
+  lowBoundOf,
   evenAt,
   oldFactorF32,
   overLowBounds,
@@ -22,7 +23,9 @@ import {
   REFERENCE_STEPS,
   type Rgb3,
   runGate,
+  type Scheme,
   singleScatteringPixel,
+  skySegmentOf,
   stepFactorF32,
   stepsFor,
   sunTransmittance,
@@ -62,7 +65,7 @@ import {
   tableRadiusM,
 } from "./hillaire";
 import { type ForwardLobe, forwardLobeOfTable, lobeIsDrawn } from "./forwardLobe";
-import { marchSplit, marchStep, TWILIGHT_TOLERANCE } from "./marchSteps";
+import { marchSplit, marchStep, type MarchStep, TWILIGHT_TOLERANCE } from "./marchSteps";
 import {
   type AtmosphereMedium,
   type MediumTerm,
@@ -192,18 +195,39 @@ function twinRayOf(ray: GateRay): TwinRay {
 const GATE_SPHERE = { kind: "sphere", bottomRadiusM: BOTTOM_M } as const;
 
 /**
+ * A gate ray as the kernel marches it (R08.T8, `decision-r08-t8-leans.md` §4.2 and §5.4): the ray
+ * march's sky ({@link skySegmentOf}), its two-sided segments under the sun-aware warp by the ray's
+ * sun, and every other segment as {@link twinRayOf}'s.
+ */
+function kernelRayOf(ray: GateRay): TwinRay {
+  const sky = skySegmentOf(ray);
+  const twinRay = twinRayOf(ray);
+  return { ...twinRay, fromCamera: twinRay.fromCamera && !sky, skySegment: sky };
+}
+
+/**
  * A gate ray's pixel through the twin: its march over `sources`, with the twin's own placement for
- * placed steps, cut at the medium's layer edges as the kernels' are (R08.T6.i; on a medium with no
- * edge, R05.T12.e's to the bit), plus the gate's lit ground through the ray's transmittance.
+ * placed steps (the references', R05.T12.e's) and the kernel's (the schemes', since R08.T8 the ray
+ * march's two-sided sky segments under the sun-aware warp), cut at the medium's layer edges as the
+ * kernels' are (R08.T6.i; on a medium with no edge, R05.T12.e's to the bit), plus the gate's lit
+ * ground through the ray's transmittance.
  */
 function twinPixel(medium: AtmosphereMedium, sources: TwinSources) {
   const edges = mediumMarchEdgesM(medium);
   return (ray: GateRay, placement: Placement, n: number): Rgb3 => {
     const twinRay = twinRayOf(ray);
-    const steps =
-      placement === "placed"
-        ? piecedSteps(twinRay, n, edges, GATE_SPHERE)
-        : stepsFor(placement, ray.o, ray.d, ray.tStartM, ray.tEndM, n);
+    let steps: MarchStep[];
+    switch (placement) {
+      case "placed":
+        steps = piecedSteps(twinRay, n, edges, GATE_SPHERE);
+        break;
+      case "kernel":
+        steps = piecedSteps(kernelRayOf(ray), n, edges, GATE_SPHERE);
+        break;
+      case "even":
+        steps = stepsFor(placement, ray, n);
+        break;
+    }
     const { luminance: l, transmittance: t } = marchTwin(
       medium,
       sources,
@@ -226,6 +250,35 @@ function twinPixel(medium: AtmosphereMedium, sources: TwinSources) {
     return [l[0] + t[0] * lit(0), l[1] + t[1] * lit(1), l[2] + t[2] * lit(2)];
   };
 }
+
+/**
+ * The twin's worst e under a scheme by family and class, each ray's against its reference at the
+ * gate's floor: the gate's figures as plan R08's Risks records them.
+ */
+function worstByFamily(gate: Gate, scheme: Scheme): Record<string, number> {
+  const worst: Record<string, number> = {};
+  for (const { ray, e } of errors(gate, scheme)) {
+    const key = `${ray.family} ${twilight(ray) ? "twilight" : "ordinary"}`;
+    worst[key] = Math.max(worst[key] ?? 0, e);
+  }
+  return worst;
+}
+
+/** The twin's worst e under a scheme by `LOW_TWIN_WORST`'s bound and class: what it measures. */
+function worstByBound(gate: Gate, scheme: Scheme): Record<string, number> {
+  const worst: Record<string, number> = {};
+  for (const { ray, e } of errors(gate, scheme)) {
+    const key = `${lowBoundOf(ray)} ${twilight(ray) ? "twilight" : "ordinary"}`;
+    worst[key] = Math.max(worst[key] ?? 0, e);
+  }
+  return worst;
+}
+
+/** Figures as recorded: each within 5 × 10⁻⁵ (0.005 percentage points) of its value. */
+const asRecordedFigures = (figures: Readonly<Record<string, number>>): unknown =>
+  Object.fromEntries(
+    Object.entries(figures).map(([key, figure]) => [key, expect.closeTo(figure, 4)]),
+  );
 
 /** R05.T12.e's twin's sources: its sun from the 512 × 128 grid, and no multiple scattering. */
 const R05_SOURCES: TwinSources = {
@@ -267,7 +320,7 @@ describe("R05's constants as a medium", () => {
     expect(worst).toBeLessThan(1e-6);
   });
 
-  it("give R05.T12.e's twin's pixels on its 1,046 rays to 10⁻⁶, with its sun and no multiple scattering", () => {
+  it("give R05.T12.e's twin's pixels on its 1,641 rays to 10⁻⁶, with its sun and no multiple scattering", () => {
     const pixelOf = twinPixel(R05_EARTH_REFERENCE, R05_SOURCES);
     const off: string[] = [];
     for (const ray of gateRays()) {
@@ -383,6 +436,72 @@ describe("the sky view's and the march's twins under R05.T12.e's quadrature gate
 
   it("keeps low's counts within the bounds low's GPU agreement check holds them to", () => {
     expect(describeFailures(overLowBounds(gate, LOW))).toEqual([]);
+  });
+
+  // Measured 2026-10-21 under the sun-aware warp and recorded in plan R08's Risks ("Deviations in
+  // T8.a, as built"); the sky families are the sky view's, the last light the ray march's.
+  it("records the twin's worst by family and class at high's and low's counts", () => {
+    expect({ high: worstByFamily(gate, HIGH), low: worstByFamily(gate, LOW) }).toEqual({
+      high: asRecordedFigures({
+        "band ordinary": 0.00212,
+        "band twilight": 0.00377,
+        "disc ordinary": 0.00447,
+        "disc twilight": 0.00182,
+        "high band ordinary": 0.00177,
+        "high band twilight": 0.02581,
+        "high limb ordinary": 0.00309,
+        "high limb twilight": 0.01278,
+        "inside ordinary": 0.0023,
+        "inside twilight": 0.00029,
+        "last light twilight": 0.00788,
+        "limb ordinary": 0.00447,
+        "limb twilight": 0.04348,
+        "near-level ordinary": 0.00232,
+        "near-level twilight": 0.00311,
+        "night limb twilight": 0.04687,
+        "past ordinary": 0.00036,
+        "past twilight": 0.00198,
+        "sky ordinary": 0.00198,
+        "sky twilight": 0.00249,
+      }),
+      low: asRecordedFigures({
+        "band ordinary": 0.08203,
+        "band twilight": 0.14458,
+        "disc ordinary": 0.02589,
+        "disc twilight": 0.02701,
+        "high band ordinary": 0.0825,
+        "high band twilight": 0.38253,
+        "high limb ordinary": 0.07853,
+        "high limb twilight": 0.18621,
+        "inside ordinary": 0.01181,
+        "inside twilight": 0.00163,
+        "last light twilight": 0.04502,
+        "limb ordinary": 0.01805,
+        "limb twilight": 0.23945,
+        "near-level ordinary": 0.01158,
+        "near-level twilight": 0.01552,
+        "night limb twilight": 0.23945,
+        "past ordinary": 0.00804,
+        "past twilight": 0.15279,
+        "sky ordinary": 0.04184,
+        "sky twilight": 0.0562,
+      }),
+    });
+  });
+
+  // `LOW_TWIN_WORST`'s measure on R05's Earth (addendum A, 4(b)): its ray march's twilight bound,
+  // 0.240, is this medium's limb at 0.1 H, sun 90°/0° (23.94%, and its twin in the night limb).
+  it("records the twin's worst at low's counts by LOW_TWIN_WORST's bound and class", () => {
+    expect(worstByBound(gate, LOW)).toEqual(
+      asRecordedFigures({
+        "rayMarch ordinary": 0.02589,
+        "rayMarch twilight": 0.23945,
+        "skyView ordinary": 0.08203,
+        "skyView twilight": 0.15279,
+        "skyViewHigh ordinary": 0.0825,
+        "skyViewHigh twilight": 0.38253,
+      }),
+    );
   });
 });
 
@@ -947,19 +1066,28 @@ describe("the per-frame twins' steps", () => {
 
   it("start the ray march from orbit toward its lowest point, and end it on the bare ground", () => {
     const orbit = twinView(equatorCamera(WGS84, 400_000), sunAt(30), WGS84, 0.1);
-    const down = rayMarchRayTwin(R05_EARTH_REFERENCE, orbit, 0.5, 0.9, 0, 32_000);
+    const down = rayMarchRayTwin(R05_EARTH_REFERENCE, orbit, 0.5, 0.9, 0, TABLE_SIZES.high);
     expect(down?.ray.fromCamera).toBe(false);
     expect(down?.bareGroundM).not.toBeNull();
   });
 
   it("start the ray march at a camera inside the air, toward a surface beyond the reach", () => {
-    const inside = rayMarchRayTwin(R05_EARTH_REFERENCE, view, 0.5, 0.5, 0.1 / 60_000, 32_000);
+    const inside = rayMarchRayTwin(
+      R05_EARTH_REFERENCE,
+      view,
+      0.5,
+      0.5,
+      0.1 / 60_000,
+      TABLE_SIZES.high,
+    );
     expect(inside?.ray.fromCamera).toBe(true);
     expect(inside?.ray.tStartM).toBe(0);
   });
 
   it("march nothing from inside the air to a surface within the aerial-perspective reach", () => {
-    expect(rayMarchRayTwin(R05_EARTH_REFERENCE, view, 0.5, 0.5, 0.1 / 20_000, 32_000)).toBeNull();
+    expect(
+      rayMarchRayTwin(R05_EARTH_REFERENCE, view, 0.5, 0.5, 0.1 / 20_000, TABLE_SIZES.high),
+    ).toBeNull();
   });
 
   it("march each ray-march texel on the spheroid over its placed steps, as rayMarch.wgsl does", () => {
@@ -977,7 +1105,7 @@ describe("the per-frame twins' steps", () => {
         (x + 0.5) / target.widthTexels,
         (y + 0.5) / target.heightTexels,
         0,
-        settings.aerialPerspectiveReachM,
+        settings,
       );
       if (marched === null || marched.bareGroundM !== null) {
         continue;
@@ -1007,7 +1135,7 @@ describe("the per-frame twins' steps", () => {
       0.5,
       (1 + Math.tan(dip)) / 2,
       0,
-      32_000,
+      TABLE_SIZES.high,
     );
     if (marched === null) {
       throw new Error("the limb ray misses the atmosphere");
@@ -1787,8 +1915,12 @@ describe("R05.T12.e's quadrature gate on the measured Earth, the marches as buil
     expect(describeFailures(unconverged)).toEqual([]);
   });
 
-  // The limb's 1.88% (0.3 H, sun 90°/0°) stands 0.12 point under the 2%: a thin margin, recorded
-  // (`decision-r08-t6d-findings.md` §10.2).
+  // Since R08.T8, the limb's two-sided rays under the sun-aware warp (`decision-r08-t8-leans.md` §4
+  // and §5.4): its worst 3.24% (0.1 H, sun 90°/0°, a twilight ray whose sun is ahead, in even
+  // steps), the night limb's the same ray from 101 km, and its ordinary rays 0.53% (0.22% in §4's
+  // even steps; its suns behind the camera take the warp), the last light 0.55% (measured
+  // 2026-10-21). R05.T12.e's placement had the limb at 1.88% (0.3 H, sun 90°/0°;
+  // `decision-r08-t6d-findings.md` §10.2) and the night limb at 8.05%.
   it("holds every ray within 2%, and twilight rays within 5%, at high's counts", () => {
     expect(describeFailures(failures(gate, HIGH))).toEqual([]);
   });
@@ -1806,6 +1938,73 @@ describe("R05.T12.e's quadrature gate on the measured Earth, the marches as buil
   // 90°/180° (17.59%).
   it("keeps low's counts within the bounds low's GPU agreement check holds them to", () => {
     expect(describeFailures(overLowBounds(gate, LOW))).toEqual([]);
+  });
+
+  // Measured 2026-10-21 under the sun-aware warp, as R05's Earth's.
+  it("records the twin's worst by family and class at high's and low's counts", () => {
+    expect({ high: worstByFamily(gate, HIGH), low: worstByFamily(gate, LOW) }).toEqual({
+      high: asRecordedFigures({
+        "band ordinary": 0.0025,
+        "band twilight": 0.00298,
+        "disc ordinary": 0.00412,
+        "disc twilight": 0.00136,
+        "high band ordinary": 0.00148,
+        "high band twilight": 0.01085,
+        "high limb ordinary": 0.00209,
+        "high limb twilight": 0.01301,
+        "inside ordinary": 0.00207,
+        "inside twilight": 0.00026,
+        "last light twilight": 0.00554,
+        "limb ordinary": 0.00528,
+        "limb twilight": 0.03239,
+        "near-level ordinary": 0.00252,
+        "near-level twilight": 0.00322,
+        "night limb twilight": 0.03239,
+        "past ordinary": 0.00053,
+        "past twilight": 0.00188,
+        "sky ordinary": 0.00194,
+        "sky twilight": 0.00258,
+      }),
+      low: asRecordedFigures({
+        "band ordinary": 0.078,
+        "band twilight": 0.17587,
+        "disc ordinary": 0.0359,
+        "disc twilight": 0.02106,
+        "high band ordinary": 0.06817,
+        "high band twilight": 0.45091,
+        "high limb ordinary": 0.07932,
+        "high limb twilight": 0.23748,
+        "inside ordinary": 0.01092,
+        "inside twilight": 0.00069,
+        "last light twilight": 0.03705,
+        "limb ordinary": 0.02752,
+        "limb twilight": 0.13621,
+        "near-level ordinary": 0.01256,
+        "near-level twilight": 0.01603,
+        "night limb twilight": 0.22354,
+        "past ordinary": 0.00831,
+        "past twilight": 0.04776,
+        "sky ordinary": 0.04084,
+        "sky twilight": 0.0574,
+      }),
+    });
+  });
+
+  // `LOW_TWIN_WORST`'s measure on the measured Earth (addendum A, 4(b)): its ray march's ordinary
+  // bound, 0.036, is this medium's disc at ground zenith 80°, sun 95°/180° (3.59%); its night limb,
+  // whose ray at 0.1 H, sun 100°/180°, set the twilight bound at 24.47% in §4's even steps, takes the
+  // warp behind the camera (a = 1), its worst now 22.35%.
+  it("records the twin's worst at low's counts by LOW_TWIN_WORST's bound and class", () => {
+    expect(worstByBound(gate, LOW)).toEqual(
+      asRecordedFigures({
+        "rayMarch ordinary": 0.0359,
+        "rayMarch twilight": 0.22354,
+        "skyView ordinary": 0.078,
+        "skyView twilight": 0.17587,
+        "skyViewHigh ordinary": 0.07932,
+        "skyViewHigh twilight": 0.45091,
+      }),
+    );
   });
 });
 
@@ -1833,8 +2032,49 @@ describe("R05.T12.e's quadrature gate on the measured Earth, the marches as buil
  * disc 7.75%, limb 21.28%, inside 1.43%, near-level 0.41%, sky 0.51%, band 4.71%, past 3.21%, high
  * band 5.70% and high limb 14.21%; at low's, 8.33, 44.86, 9.88, 1.61, 9.58, 61.39, 11.78, 46.31 and
  * 59.05%.
+ *
+ * Re-measured 2026-10-21 under R08.T8's rule, the ray march's two-sided sky segments in even steps
+ * cut at the layer edges (`decision-r08-t8-leans.md` §4.2), with the gate's night limb: at 32 steps
+ * the limb's ray takes 5.15% (it was 5.63%), as does its twin from 101 km in the night limb, and the
+ * night limb missed three more rays with the sun 100° from the zenith behind the camera, each from
+ * 400 km and from 101 km (congruent chords), at 5.45–6.75%. R05.T12.e's placement at 32 missed the
+ * night limb by up to 11.04%.
+ *
+ * Re-measured 2026-10-21 under the sun-aware warp (§5.4), with the gate's last light: the sun behind
+ * the camera puts the night limb's rays at a = 1, R05's placement from the start of the chord, and
+ * at 32 steps two of its three rays still miss, at 0.3 H (6.75% → 5.89%) and 1 H (6.24% → 5.62%),
+ * each from 400 km and from 101 km; the one at 0.1 H holds (it was 5.45%), and the last light holds.
+ * So the rule at 32 does not hold every ray on the slab (nor on R05's Earth, whose limb at 0.1 H,
+ * sun 90°/0°, a sun-ahead ray the warp does not move, takes 5.77%): it is no candidate to return
+ * high's march to 32.
  */
-const SLAB_R05_MISS = ["limb, 0.1 H, sun 90°/0°: 5.63%"] as const;
+const SLAB_R05_MISS = [
+  "limb, 0.1 H, sun 90°/0°: 5.15%",
+  "night limb, 400 km, 0.3 H, sun 100°/180°: 5.89%",
+  "night limb, 400 km, 1 H, sun 100°/180°: 5.62%",
+  "night limb, 101 km, 0.1 H, sun 90°/0°: 5.15%",
+  "night limb, 101 km, 0.3 H, sun 100°/180°: 5.89%",
+  "night limb, 101 km, 1 H, sun 100°/180°: 5.62%",
+] as const;
+
+/**
+ * The rays the slab Earth misses at high's counts under R08.T8's rule (`decision-r08-t8-leans.md`
+ * §4.3, a named miss reported to main as a finding; plan R08's Risks, "Deviations in T8.a, as
+ * built"): the limb tangent at 0.1 H with the sun on its tangent point's horizon beyond it (5.15%,
+ * and its twin from 101 km; R05.T12.e's placement held the limb's twilight rays within 2.39%), and
+ * the night limb's rays with the sun 100° from the zenith behind the camera at 0.3 H (6.27%), from
+ * 400 km and from 101 km. Measured 2026-10-21 under the sun-aware warp (§5.4), which puts the
+ * night limb's sun-behind rays at a = 1: of §4's even steps' misses at 0.1, 0.3 and 1 H (5.39%,
+ * 6.77% and 5.28%) the one at 0.3 H still misses, and the last light holds. R05.T12.e's placement
+ * missed the night limb on the slab by up to 10.05%. The placement stands, and no tolerance or
+ * count moves; pinned to the 0.01 point both ways, so that a change shows.
+ */
+const SLAB_HIGH_MISS = [
+  "limb, 0.1 H, sun 90°/0°: 5.15%",
+  "night limb, 400 km, 0.3 H, sun 100°/180°: 6.27%",
+  "night limb, 101 km, 0.1 H, sun 90°/0°: 5.15%",
+  "night limb, 101 km, 0.3 H, sun 100°/180°: 6.27%",
+] as const;
 
 /** R05.T12.e's ray-march steps on high, before R08.T7 raised them to 36. */
 const R05_HIGH_MARCH_STEPS = 32;
@@ -1865,12 +2105,12 @@ describe("R05.T12.e's quadrature gate on the slab Earth, the marches cut at its 
     expect(describeFailures(unconverged)).toEqual([]);
   });
 
-  it("holds every ray within 2%, and twilight rays within 5%, at high's counts (R08.T7)", () => {
+  it("holds every ray within 2%, and twilight rays within 5%, at high's counts but the named misses of R08.T8's sky", () => {
     expect(HIGH.marchSteps).toBe(36);
-    expect(describeFailures(failures(gate, HIGH))).toEqual([]);
+    expect(describeFailures(failures(gate, HIGH))).toEqual([...SLAB_HIGH_MISS]);
   });
 
-  it("misses one twilight ray at R05.T12.e's 32 ray-march steps, the one T6.i raised", () => {
+  it("misses six twilight rays at R05.T12.e's 32 ray-march steps under R08.T8's sky, the limb's T6.i raised among them", () => {
     expect(describeFailures(failures(gate, r05High))).toEqual([...SLAB_R05_MISS]);
   });
 
@@ -1883,10 +2123,63 @@ describe("R05.T12.e's quadrature gate on the slab Earth, the marches cut at its 
     expect(worst(LOW)).toBeLessThanOrEqual(worst(evenAt(LOW)));
   });
 
-  it("cuts 856 sides of the 658 rays that cross its edges, and crowds none, at either setting's counts", () => {
+  // Measured 2026-10-21 under the sun-aware warp, as R05's Earth's; `LOW_TWIN_WORST` is not
+  // re-pinned on a test medium.
+  it("records the twin's worst by family and class at high's and low's counts", () => {
+    expect({ high: worstByFamily(gate, HIGH), low: worstByFamily(gate, LOW) }).toEqual({
+      high: asRecordedFigures({
+        "band ordinary": 0.0058,
+        "band twilight": 0.01658,
+        "disc ordinary": 0.01121,
+        "disc twilight": 0.00986,
+        "high band ordinary": 0.00605,
+        "high band twilight": 0.0161,
+        "high limb ordinary": 0.00367,
+        "high limb twilight": 0.01605,
+        "inside ordinary": 0.00531,
+        "inside twilight": 0.00034,
+        "last light twilight": 0.00553,
+        "limb ordinary": 0.00868,
+        "limb twilight": 0.05154,
+        "near-level ordinary": 0.00252,
+        "near-level twilight": 0.00322,
+        "night limb twilight": 0.06275,
+        "past ordinary": 0.00122,
+        "past twilight": 0.00205,
+        "sky ordinary": 0.00503,
+        "sky twilight": 0.00785,
+      }),
+      low: asRecordedFigures({
+        "band ordinary": 0.16058,
+        "band twilight": 0.30454,
+        "disc ordinary": 0.0597,
+        "disc twilight": 0.06702,
+        "high band ordinary": 0.13355,
+        "high band twilight": 0.38641,
+        "high limb ordinary": 0.07848,
+        "high limb twilight": 0.36804,
+        "inside ordinary": 0.03273,
+        "inside twilight": 0.00269,
+        "last light twilight": 0.07273,
+        "limb ordinary": 0.04109,
+        "limb twilight": 0.28556,
+        "near-level ordinary": 0.01253,
+        "near-level twilight": 0.01607,
+        "night limb twilight": 0.28556,
+        "past ordinary": 0.02099,
+        "past twilight": 0.09743,
+        "sky ordinary": 0.1101,
+        "sky twilight": 0.19143,
+      }),
+    });
+  });
+
+  // 658 rays and 856 sides before R08.T8's night limb, 56 of whose 70 rays cross the edges on both
+  // sides; 714 and 968 before its last light, 270 of whose 525 rays cross them.
+  it("cuts 1,463 sides of the 984 rays that cross its edges, and crowds none, at either setting's counts", () => {
     const edges = mediumMarchEdgesM(EARTH_SLAB_REFERENCE);
     expect(edges).toHaveLength(2);
-    for (const scheme of [HIGH, LOW]) {
+    const counts = [HIGH, LOW].map((scheme) => {
       let crossing = 0;
       let cut = 0;
       let crowded = 0;
@@ -1897,8 +2190,12 @@ describe("R05.T12.e's quadrature gate on the slab Earth, the marches cut at its 
         cut += (pieces.before === null ? 0 : 1) + (pieces.after === null ? 0 : 1);
         crowded += pieces.crowded;
       }
-      expect([crossing, cut, crowded]).toEqual([658, 856, 0]);
-    }
+      return [crossing, cut, crowded];
+    });
+    expect(counts).toEqual([
+      [984, 1_463, 0],
+      [984, 1_463, 0],
+    ]);
   });
 });
 

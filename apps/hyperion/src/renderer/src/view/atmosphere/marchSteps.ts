@@ -23,6 +23,12 @@
  * ({@link marchPieces}, `common.wgsl`'s `MarchWalk`), each piece placed by the same rule toward its
  * end nearer t*, at the same counts; a segment that crosses no edge keeps its steps to the bit.
  *
+ * Since plan R08's R08.T8 the ray march's two-sided sky segments, inside the air or outside it,
+ * take the sun-aware warp instead ({@link marchEvenStep}, {@link marchEvenSteps};
+ * `decision-r08-t8-leans.md` §4 and §5.4): even where the Sun is ahead or across the ray, R05's
+ * one-sided placement from the segment's start where it is behind. A camera in the march band's
+ * thin air, and the night-side limb from outside, put a sky segment's light away from t*.
+ *
  * sebh's reference code (UnrealEngineSkyAtmosphere, `RenderSkyRayMarching.hlsl`,
  * `IntegrateScatteredLuminance`) bounds its steps quadratically from the ray's start, at
  * t_max·(s ÷ N)² with N from 4 to 14, and samples each at 0.3 of its length; Bevy 0.19.1
@@ -56,13 +62,29 @@ export const TWILIGHT_TOLERANCE = 0.05;
  * The sky view's twilight bound is 0.176 since R08.T6.h, set by the measured Earth's band ray from
  * 50,000 m at view zenith 97.008°, sun 90°/180° (17.59%, against 13.13% without its ozone and
  * 14.46% on R05's Earth); it was 0.175, from R05's Earth.
+ *
+ * The ray march's are 0.036 and 0.240 since R08.T8 (2026-10-21, `decision-r08-t8-leans.md` §4.2
+ * and §5.5); they were 0.049 and 0.182 before it. Under §4's even steps for the march's two-sided
+ * sky segments they were 0.036 and 0.245: the gate gained the night-side and terminator limb
+ * (`test/atmosphereGate.ts`'s `night limb`), which R05.T12.e's placement had put at 39.0% on R05's
+ * Earth, and its twilight bound was the measured Earth's night limb tangent at 0.1 H, sun
+ * 100°/180° (24.47%). Under the sun-aware warp (§5.4), with the gate's last light (`last light`,
+ * the ray march's, 4.50% on R05's Earth and 3.71% on the measured one), that night limb's sun is
+ * behind the camera, its rays at a = 1, and the measured Earth's night limb falls to 22.35%, so the
+ * twilight bound is R05's Earth's limb at 0.1 H, sun 90°/0° (23.94%, its sun ahead and its steps
+ * even; 5.87% under R05.T12.e's placement), 0.245 → 0.240. The ordinary bound is the measured
+ * Earth's disc at ground zenith 80°, sun 95°/180° (3.59%), since the limb's ordinary rays, which set
+ * the old one (R05's Earth at 0.3 H, sun 30°/180°, 4.80%), fall to 1.81% on R05's Earth and 2.75%
+ * on the measured one (`tablesCpu.test.ts` records each by family). A measurement under addendum A,
+ * 4(b), not a wider gate. The sky view's are unchanged by R08.T8: its twin stands at 8.20% / 17.59%
+ * from cameras up to 50 km and 8.25% / 45.09% from 60–100 km over the two media, within them.
  */
 export const LOW_TWIN_WORST = {
   /** The sky view from cameras up to 50 km. */
   skyView: { ordinary: 0.091, twilight: 0.176 },
   /** The sky view from cameras at 60–100 km. */
   skyViewHigh: { ordinary: 0.116, twilight: 0.495 },
-  rayMarch: { ordinary: 0.049, twilight: 0.182 },
+  rayMarch: { ordinary: 0.036, twilight: 0.24 },
 } as const;
 
 /** The sun's least angle from the zenith, and the ray's greatest from the horizon, of a twilight ray. */
@@ -378,6 +400,155 @@ export function marchPiecesSteps(pieces: MarchPieces): MarchStep[] {
     }
   } else {
     cut(pieces.after, crossingsBefore, 0, split.afterM, true);
+  }
+  return steps;
+}
+
+// --- The sun-aware warp of the ray march's two-sided sky segments (plan R08, R08.T8) -------------
+
+/**
+ * The span of the sun-aware warp in the cosine between a sky segment's ray and its march's first
+ * source (plan R08, R08.T8): the warp a = clamp(−(d · s₀) ÷ 0.2, 0, 1) rises from 0 with the Sun 90°
+ * from the ray to 1 with it about 101.5° from the ray. The ruling's probe's constant
+ * (`decision-r08-t8-leans.md` §5.4), tuned only through the gate and its `last light` family;
+ * `common.wgsl`'s `MARCH_SKY_WARP_COSINE`.
+ */
+export const SKY_WARP_COSINE = 0.2;
+
+/**
+ * The sun-aware warp a of a two-sided sky segment of the ray march (plan R08, R08.T8;
+ * `common.wgsl`'s `marchSkyWarp`): clamp(−(d · s₀) ÷ {@link SKY_WARP_COSINE}, 0, 1), 0 with the
+ * Sun ahead of the ray or across it, 1 with it behind, more than about 101.5° from the ray.
+ *
+ * @param direction - The ray's unit direction.
+ * @param sun - The unit direction to the march's first source, or `null` where none is drawn,
+ *   whose warp is 0.
+ */
+export function skyWarpOf(direction: Vec3, sun: Vec3 | null): number {
+  if (sun === null) {
+    return 0;
+  }
+  return Math.min(Math.max(-dot(direction, sun) / SKY_WARP_COSINE, 0), 1);
+}
+
+/**
+ * Step k of n over a length warped by a: [t(k ÷ n), t((k + 1) ÷ n)] for t(u) = L ((1 − a) u + a u²),
+ * as its midpoint's distance from the start, (L ÷ n)((1 − a)(k + ½) + a (k² + k + ½) ÷ n), and its
+ * length, (L ÷ n)((1 − a) + a (2k + 1) ÷ n), in `common.wgsl`'s `marchWarpedStep`'s order. At a = 0
+ * they are (k + ½) L ÷ n and L ÷ n to the bit; at a = 1 `marchStep`'s quadratic placement toward
+ * the start.
+ *
+ * @param unitM - L ÷ n, m.
+ */
+function warpedStep(
+  unitM: number,
+  n: number,
+  warp: number,
+  k: number,
+): { readonly fromStartM: number; readonly dtM: number } {
+  const mid = (1 - warp) * (k + 0.5) + (warp * (k * k + k + 0.5)) / n;
+  const width = 1 - warp + (warp * (2 * k + 1)) / n;
+  return { fromStartM: unitM * mid, dtM: unitM * width };
+}
+
+/**
+ * Where a point `fromLowestM` from t* stands in u on a split segment warped by a (`common.wgsl`'s
+ * `marchWarpU`): the root of a u² + (1 − a) u = x, x = (t − t_start) ÷ L, as
+ * 2x ÷ ((1 − a) + √((1 − a)² + 4 a x)), which does not cancel and is x at a = 0.
+ */
+function warpedU(split: MarchSplit, warp: number, fromLowestM: number): number {
+  const x = (fromLowestM + split.beforeM) / (split.beforeM + split.afterM);
+  const b = 1 - warp;
+  return (2 * x) / (b + Math.sqrt(b * b + 4 * warp * x));
+}
+
+/**
+ * Step `i` of a two-sided sky segment of the ray march, from inside the air or outside it, under the
+ * sun-aware warp (plan R08, R08.T8; `common.wgsl`'s `marchEvenStep`): its n = `stepsBefore` +
+ * `stepsAfter` steps evenly spaced in u ∈ [0, 1], t(u) = t_start + L ((1 − a) u + a u²), L the
+ * segment's length, step i's midpoint and length those of [t(i ÷ n), t((i + 1) ÷ n)], its offset
+ * from t* formed from the start's.
+ *
+ * @remarks
+ * Every two-sided sky segment the ray march marches (nothing drawn along it) takes the sun-aware
+ * warp: even where the Sun is ahead or across the ray (a = 0, `decision-r08-t8-leans.md` §4), R05's
+ * one-sided placement from the segment's start where it is behind (a = 1, §5.4). Where the light
+ * lies decides. With the Sun ahead it lies beyond the lowest point: on the night-side and
+ * terminator limb from outside (the Sun 90–105° from the zenith at the tangent point), where the
+ * placement about the lowest point missed R05.T12.e's gate (12.19% from 400 km) and even steps hold
+ * it (4.85% at high's 36). With the Sun behind, at the camera's last light, it lies on the camera's
+ * end of a night-side chord, its first 30–65 km of 950–1,200, where even steps put one midpoint or
+ * none and drew the sky under the horizontal 45–124 codes off (63–97%) under a seam of 2–36 codes;
+ * the warp holds it within 1.7 codes on high and 10.8 on low (§5.1, §5.4). The warp is continuous in
+ * the ray's direction and is the same on both sides of the top, so neither the sky nor the top
+ * (0.057%) steps. A one-sided segment, and a drawn surface's, keep R05.T12.e's placement.
+ *
+ * @param i - In [0, `stepsBefore` + `stepsAfter`).
+ * @param warp - The segment's warp a ({@link skyWarpOf}), in [0, 1].
+ */
+export function marchEvenStep(split: MarchSplit, i: number, warp: number): MarchStep {
+  const samples = split.stepsBefore + split.stepsAfter;
+  const unitM = (split.beforeM + split.afterM) / samples;
+  const { fromStartM, dtM } = warpedStep(unitM, samples, warp, i);
+  const fromLowest = fromStartM - split.beforeM;
+  return { tM: split.lowestM + fromLowest, dtM };
+}
+
+/**
+ * The steps of a two-sided sky segment of the ray march under the sun-aware warp, cut into pieces
+ * where it crosses the marches' layer edges (plan R08, R08.T8 on R08.T6.i's cuts; `common.wgsl`'s
+ * `marchWalkEvenReady`, `marchWalkEvenEnter` and `marchWalkEvenStep`): each crossing's u found by
+ * inverting t(u), the segment's steps shared among its pieces in proportion to each piece's length
+ * in u, at least one a piece, each piece's count rounding its end's share of the rest, the last the
+ * rest, and each piece's steps evenly spaced in u over it, each at its midpoint. On a piece from u₀
+ * to u₁ the warp is t(u)'s own, the same quadratic in the piece's own u with a_p = a (u₁ − u₀) ÷
+ * ((1 − a) + a (u₀ + u₁)), over the piece's length in t between its crossings. With no crossing, or
+ * more pieces than steps, {@link marchEvenStep}'s steps over the whole segment. As in
+ * {@link marchPieces}, the twin forms the shares in `f64` where the kernel forms them in `f32`.
+ *
+ * @param crossingsFromLowestM - Where the ray crosses the edges, as signed distances from t*, m, in
+ *   any order; those not strictly inside the segment, at t* itself, and repeats are left out, as
+ *   {@link marchPieces} leaves them.
+ * @param warp - The segment's warp a ({@link skyWarpOf}), in [0, 1].
+ */
+export function marchEvenSteps(
+  split: MarchSplit,
+  crossingsFromLowestM: Iterable<number>,
+  warp: number,
+): MarchStep[] {
+  const samples = split.stepsBefore + split.stepsAfter;
+  const cuts = marchPieces(split, crossingsFromLowestM).fromLowestM;
+  const pieces = cuts.length + 1;
+  if (cuts.length === 0 || pieces > samples) {
+    return Array.from({ length: samples }, (_, i) => marchEvenStep(split, i, warp));
+  }
+  const bounds = [-split.beforeM, ...cuts, split.afterM];
+  const boundsU = [0, ...cuts.map((t) => warpedU(split, warp, t)), 1];
+  const lengthsU = Array.from(
+    { length: pieces },
+    (_, p) => (boundsU[p + 1] ?? Number.NaN) - (boundsU[p] ?? Number.NaN),
+  );
+  const total = lengthsU.reduce((sum, length) => sum + length, 0);
+  const rest = samples - pieces;
+  let spent = 0;
+  let cumulative = 0;
+  const steps: MarchStep[] = [];
+  for (const [p, lengthU] of lengthsU.entries()) {
+    cumulative += lengthU;
+    // floor(x + 0.5), as the WGSL rounds.
+    const share = p + 1 < pieces ? Math.floor((rest * cumulative) / total + 0.5) : rest;
+    const n = 1 + share - spent;
+    spent = share;
+    const lowM = bounds[p] ?? Number.NaN;
+    const highM = bounds[p + 1] ?? Number.NaN;
+    const lowU = boundsU[p] ?? Number.NaN;
+    const highU = boundsU[p + 1] ?? Number.NaN;
+    const pieceWarp = (warp * (highU - lowU)) / (1 - warp + warp * (lowU + highU));
+    const unitM = (highM - lowM) / n;
+    for (let k = 0; k < n; k += 1) {
+      const { fromStartM, dtM } = warpedStep(unitM, n, pieceWarp, k);
+      steps.push({ tM: split.lowestM + (lowM + fromStartM), dtM });
+    }
   }
   return steps;
 }
