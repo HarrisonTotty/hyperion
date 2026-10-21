@@ -158,6 +158,7 @@ pub(crate) mod tests {
                     mass_msun: 1.0,
                 }],
             },
+            observed: None,
         }
     }
 

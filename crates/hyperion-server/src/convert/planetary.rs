@@ -274,6 +274,7 @@ pub(crate) fn hosts_request(request: &SystemBodiesRequest) -> SystemSummaryReque
         universe: request.universe.clone(),
         system: request.system.clone(),
         time: request.time,
+        mode: hyperion_protocol::QueryModeDto::Now,
     }
 }
 

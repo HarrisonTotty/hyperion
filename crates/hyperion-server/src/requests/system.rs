@@ -1,5 +1,6 @@
-//! The system's handlers: `system_summary` (plan 06, P06.T34, with plan 11's P11.T13 slice), and
-//! `system_bodies` and `body_detail` (plan 14, P14.T36; `body_events` waits for P14.T31).
+//! The system's handlers: `system_summary` (plan 06, P06.T34, with plan 11's P11.T13 slice and
+//! plan 12's observed mode, P12.T6.b), and `system_bodies` and `body_detail` (plan 14, P14.T36;
+//! `body_events` waits for P14.T31).
 //!
 //! Each starts from [`openable_universe`](super::universe::openable_universe), as every handler
 //! that names a universe does, checks the time and decodes the ID, and takes the universe's galaxy
@@ -16,7 +17,9 @@ use hyperion_protocol::{
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::query::QueryMode;
 use hyperion_sim::id::SystemId;
+use hyperion_sim::observe::{Observer, curvature_error, summary_observed};
 use hyperion_sim::planetary::{ResolveBodyError, SystemContext};
 
 use super::universe::openable_universe;
@@ -26,10 +29,11 @@ use crate::compute::{
 };
 use crate::convert::{
     BodiesRequest, DetailRequest, SummaryRequest, body_detail, body_refusal, hosts_request,
-    system_bodies, system_summary, unknown_system,
+    system_bodies, system_summary, system_summary_observed, unknown_system, untraced,
 };
 
-/// Every star of one system at the request's time, and the orbits that hold them.
+/// Every star of one system at the request's time, and the orbits that hold them; in observed mode
+/// (plan 12, P12.T6.b), as the request's observer sees them then.
 ///
 /// Resolving the ID, generating the system on a miss and summarising it at the time are one
 /// interactive pool job: generation builds a track for every star, a millisecond or two for each
@@ -38,14 +42,23 @@ use crate::convert::{
 /// from it there, as the range query's job does with the cell cache. The small answer is
 /// serialised on the runtime (design note 22).
 ///
+/// In observed mode the same job reads the cached stars through the sim's [`summary_observed`], at
+/// the time the light the observer receives at the request's time left the system, and states the
+/// curvature error as a range row does; the emitted time is never held to the clock window, only
+/// the request's time is.
+///
 /// # Errors
 ///
-/// Those of [`openable_universe`] for a universe this server cannot serve; `bad_request` naming
-/// `time` for a time outside the clock window; `unknown_system` naming `system` for an ID whose
-/// bits are not a system ID, or that plan 03's `resolve` refuses in this universe's galaxy; those
-/// of [`GalaxyCache::get`](crate::compute::GalaxyCache::get) if the galaxy cannot be built;
-/// `queue_full` if the interactive queue has no room for the job; `internal` if the pool is
-/// shutting down or the job panics; and `cancelled` if the client gave up before it ran.
+/// In the order they are checked: those of [`openable_universe`] for a universe this server cannot
+/// serve; `bad_request` naming `time` for a time outside the clock window; `unknown_system` naming
+/// `system` for an ID whose bits are not a system ID; `bad_request` naming `mode` for an observer
+/// that is not a canonical position inside the root cube; those of
+/// [`GalaxyCache::get`](crate::compute::GalaxyCache::get) if the galaxy cannot be built;
+/// `queue_full` if the interactive queue has no room for the job; then, on the job,
+/// `unknown_system` naming `system` for an ID that plan 03's `resolve` refuses in this universe's
+/// galaxy, or whose stars are not generated (a member of the galactic centre, a rogue planet), in
+/// either mode; `internal` if the pool is shutting down or the job panics; and `cancelled` if the
+/// client gave up before it ran.
 pub(crate) async fn summary(
     state: Arc<AppState>,
     request: SystemSummaryRequest,
@@ -57,11 +70,29 @@ pub(crate) async fn summary(
     let key = universe.key();
     let shared = Arc::clone(&state);
     let answer = move |_: &CancelToken| {
+        // The cache's refusals come first, in either mode: a member of the galactic centre and a
+        // rogue planet have no stars generated.
         let stars = shared
             .systems
             .get_or_generate(key, &galaxy, wanted.system())
             .map_err(|error| unknown_system(&request.system, error))?;
-        Ok::<_, RequestError>(system_summary(request, &stars, wanted.time()))
+        let time = wanted.time();
+        let answered = match wanted.mode() {
+            QueryMode::Now => system_summary(request, &stars, time),
+            QueryMode::ObservedFrom(position) => {
+                let observer = Observer::new(position, time).expect(
+                    "the request's observer is in the root cube and its time in the clock window",
+                );
+                // Only a member of the galactic centre has no traced motion yet, and the cache has
+                // refused it above, so this refusal waits for a system that reaches it.
+                let (summary, retardation) =
+                    summary_observed(&galaxy, stars.record(), &stars, &observer)
+                        .map_err(untraced)?;
+                let error = curvature_error(&galaxy, observer.position(), &retardation);
+                system_summary_observed(request, &stars, &summary, &retardation, error)
+            }
+        };
+        Ok::<_, RequestError>(answered)
     };
     let receiver = state
         .pool

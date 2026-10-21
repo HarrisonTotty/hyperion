@@ -10,16 +10,23 @@
 //! (T28).
 //! A remnant's natal kick is P06.T19's ([`StarModel::natal_kick`]), `null` where the model holds
 //! none.
+//!
+//! Asked in plan 12's observed mode (P12.T6.b), the system is summarised as the sim's
+//! [`summary_observed`](hyperion_sim::observe::summary_observed) reads it, at the time the light
+//! the observer receives left it, and
+//! the answer carries that light's `observed`; both modes' answers are built by one function.
 
 use hyperion_protocol::{
     BinaryClassDto, CataclysmicKindDto, ErrorCode, HierarchyDto, HierarchyNodeDto,
-    HighMassXrayBinaryKindDto, KickModeDto, Modelled, NatalKickDto, ObjectKindDto, OrbitDto,
-    PhaseDto, PlanetaryNebulaDto, PulsarDto, RemnantDto, RequestError, StarSummaryDto,
+    HighMassXrayBinaryKindDto, KickModeDto, Modelled, NatalKickDto, ObjectKindDto, ObservedDto,
+    OrbitDto, PhaseDto, PlanetaryNebulaDto, PulsarDto, RemnantDto, RequestError, StarSummaryDto,
     StellarBriefDto, SystemExistenceDto, SystemIdHex, SystemSummaryDto, SystemSummaryRequest,
     VariabilityDto, VariableKindDto, XrayBinaryKindDto,
 };
+use hyperion_sim::galaxy::query::QueryMode;
 use hyperion_sim::id::SystemId;
 use hyperion_sim::math;
+use hyperion_sim::observe::{CurvatureError, Retardation};
 use hyperion_sim::orbit::KeplerElements;
 use hyperion_sim::stellar::binary::{BinaryClass, CvKind, HmxbKind, XrbKind};
 use hyperion_sim::stellar::multiplicity::{HierarchyNode, SystemHierarchy};
@@ -30,6 +37,7 @@ use hyperion_sim::stellar::remnant::{
 };
 use hyperion_sim::stellar::system::{
     RemnantDetail, StarModel, StarSummary, StellarBrief, SystemExistence, SystemStars,
+    SystemSummary,
 };
 use hyperion_sim::stellar::variability::{Variability, VariableKind};
 use hyperion_sim::stellar::{ObjectKind, Phase, StarState};
@@ -38,10 +46,11 @@ use hyperion_sim::units::{
     Days, Dex, Kelvin, KilometresPerSecond, Magnitudes, Megayears, SolarLuminosities, Years,
 };
 
+use super::observe::{observed_dto, query_mode};
 use super::query_time;
 
-/// A `system_summary` request, checked: the system it names, decoded, and the time inside the
-/// clock window.
+/// A `system_summary` request, checked: the system it names, decoded, the time inside the clock
+/// window, and the mode.
 ///
 /// The universe is looked up before this, as every handler that names one does. Then `time` is
 /// checked as the range query checks it (plan 04, design note 24): a time outside the clock window
@@ -49,11 +58,16 @@ use super::query_time;
 /// are not a system ID names no system, so it is `unknown_system` naming `system`, as an ID that
 /// plan 03's `resolve` refuses is on the pool job ([`unknown_system`]). A `SystemIdHex` that is not
 /// sixteen hexadecimal digits never reaches here: the request does not parse, and plan 04 answers
-/// `bad_request`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// `bad_request`. Last, the mode's observer is checked as the range query's is (plan 12,
+/// P12.T6.b): one that is not a canonical position inside the root cube is a `bad_request` naming
+/// `mode`.
+///
+/// It is neither `Eq` nor `Hash`, since the observer's position holds `f64`s.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct SummaryRequest {
     system: SystemId,
     time: UniverseTime,
+    mode: QueryMode,
 }
 
 impl SummaryRequest {
@@ -68,17 +82,24 @@ impl SummaryRequest {
     pub(crate) fn time(self) -> UniverseTime {
         self.time
     }
+
+    /// The mode asked in, its observer inside the root cube.
+    #[must_use]
+    pub(crate) fn mode(self) -> QueryMode {
+        self.mode
+    }
 }
 
 impl TryFrom<&SystemSummaryRequest> for SummaryRequest {
     type Error = RequestError;
 
-    /// Checks `time`, then decodes `system`.
+    /// Checks `time`, then decodes `system`, then checks `mode`.
     fn try_from(request: &SystemSummaryRequest) -> Result<Self, Self::Error> {
         let time = query_time(&request.time)?;
         let system = SystemId::from_raw(request.system.to_u64())
             .map_err(|error| unknown_system(&request.system, error))?;
-        Ok(Self { system, time })
+        let mode = query_mode(&request.mode)?;
+        Ok(Self { system, time, mode })
     }
 }
 
@@ -96,7 +117,8 @@ pub(crate) fn unknown_system(system: &SystemIdHex, reason: impl std::fmt::Displa
     }
 }
 
-/// The answer to `system_summary`: the system's stars and their hierarchy at the request's time.
+/// The answer to `system_summary` in `now`: the system's stars and their hierarchy at the request's
+/// time, with no `observed`.
 ///
 /// `universe`, `system` and `time` are echoed from the request, which is why it is taken by value.
 /// Before the system is born it has no stars and no nodes, and its age is negative.
@@ -106,13 +128,57 @@ pub(crate) fn system_summary(
     stars: &SystemStars,
     time: UniverseTime,
 ) -> SystemSummaryDto {
-    let summary = stars.summary_at(time);
+    summary_dto(request, stars, &stars.summary_at(time), None)
+}
+
+/// The answer to `system_summary` in observed mode (plan 12, P12.T6.b): `summary`, the system as
+/// the sim's [`summary_observed`](hyperion_sim::observe::summary_observed) reads it at
+/// `retardation`'s emitted time, with what the observer receives, its stated curvature `error`
+/// included, as `observed`.
+///
+/// `universe`, `system` and `time` are echoed from the request, as in `now`, so `time` is the
+/// observer's and the rest the emitted time's. The emitted time is reported, never checked against
+/// the clock window: only the request's time is (plan 04's ±H check), as for a range row.
+///
+/// # Panics
+///
+/// In debug builds, if `summary` is not of `retardation`'s emitted time.
+#[must_use]
+pub(crate) fn system_summary_observed(
+    request: SystemSummaryRequest,
+    stars: &SystemStars,
+    summary: &SystemSummary,
+    retardation: &Retardation,
+    error: CurvatureError,
+) -> SystemSummaryDto {
+    debug_assert_eq!(
+        summary.time(),
+        retardation.emitted(),
+        "an observed summary is of the time its light left"
+    );
+    summary_dto(
+        request,
+        stars,
+        summary,
+        Some(observed_dto(retardation, error)),
+    )
+}
+
+/// The wire's summary of `stars` as `summary` describes them, at `summary`'s time, with
+/// `observed`: the one builder of both modes' answers, so that they cannot drift apart.
+#[must_use]
+fn summary_dto(
+    request: SystemSummaryRequest,
+    stars: &SystemStars,
+    summary: &SystemSummary,
+    observed: Option<ObservedDto>,
+) -> SystemSummaryDto {
     SystemSummaryDto {
         universe: request.universe,
         system: request.system,
         time: request.time,
         existence: existence(summary.existence()),
-        age_myr: Megayears::from(stars.record().age_at(time)).value(),
+        age_myr: Megayears::from(stars.record().age_at(summary.time())).value(),
         fe_h_dex: summary.composition().fe_h().value(),
         stars: summary
             .stars()
@@ -125,6 +191,7 @@ pub(crate) fn system_summary(
         hierarchy: summary
             .hierarchy()
             .map_or_else(|| HierarchyDto { nodes: Vec::new() }, hierarchy),
+        observed,
     }
 }
 
@@ -544,12 +611,15 @@ fn phase(phase: Phase, kind: ObjectKind) -> PhaseDto {
 mod tests {
     use std::sync::OnceLock;
 
-    use hyperion_protocol::UniverseIdHex;
+    use hyperion_protocol::{QueryModeDto, UniverseIdHex};
     use hyperion_sim::Seed;
+    use hyperion_sim::coords::GalacticPosition;
     use hyperion_sim::galaxy::Galaxy;
     use hyperion_sim::galaxy::placement::{CellKey, SystemOrigin, SystemRecord, generate_cell};
     use hyperion_sim::id::Layer;
+    use hyperion_sim::observe::{Observer, curvature_error, summary_observed};
     use hyperion_sim::units::SolarMasses;
+    use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
 
     use super::*;
 
@@ -594,8 +664,128 @@ mod tests {
             universe: UniverseIdHex::from_u64(7),
             system: SystemIdHex::from_u64(stars.record().id().raw()),
             time: wire_time(time),
+            mode: QueryModeDto::Now,
         };
         system_summary(request, stars, time)
+    }
+
+    /// A summary request for the system `0x0200_0800_2000_0000` at the epoch, in `mode`.
+    fn summary_request(mode: QueryModeDto) -> SystemSummaryRequest {
+        SystemSummaryRequest {
+            universe: UniverseIdHex::from_u64(7),
+            system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+            time: hyperion_protocol::UniverseTime::default(),
+            mode,
+        }
+    }
+
+    /// An observer at the centre of the light-year cell `cell_ly`, as the wire carries it.
+    fn observed_from(cell_ly: [i32; 3]) -> QueryModeDto {
+        QueryModeDto::Observed {
+            observer: hyperion_protocol::GalacticPosition {
+                cell_ly,
+                offset_m: [0.0; 3],
+            },
+        }
+    }
+
+    #[test]
+    fn a_summary_request_checks_time_then_system_then_mode() {
+        let outside = observed_from([70_000, 0, 0]);
+        let off_grid = QueryModeDto::Observed {
+            observer: hyperion_protocol::GalacticPosition {
+                cell_ly: [0, 23_000, 0],
+                offset_m: [2.0 * METRES_PER_LIGHT_YEAR, 0.0, 0.0],
+            },
+        };
+        for mode in [outside, off_grid] {
+            let error = SummaryRequest::try_from(&summary_request(mode)).unwrap_err();
+            assert_eq!(
+                (error.code, error.field.as_deref()),
+                (ErrorCode::BadRequest, Some("mode")),
+                "{mode:?}: {error:?}"
+            );
+            // A time at fault is named before the observer.
+            let late = SystemSummaryRequest {
+                time: hyperion_protocol::UniverseTime {
+                    seconds: 40_000_000_000,
+                    nanos: 0,
+                },
+                ..summary_request(mode)
+            };
+            let error = SummaryRequest::try_from(&late).unwrap_err();
+            assert_eq!(
+                (error.code, error.field.as_deref()),
+                (ErrorCode::BadRequest, Some("time")),
+                "{mode:?}: {error:?}"
+            );
+            // So is a well-formed ID whose bits are no system ID, the first of a scatter over the
+            // 64 bits.
+            let no_id = (0_u64..100_000)
+                .map(|k| k.wrapping_mul(0x9e37_79b9_7f4a_7c15))
+                .find(|&raw| SystemId::from_raw(raw).is_err())
+                .expect("most 64-bit patterns are no system ID");
+            let nameless = SystemSummaryRequest {
+                system: SystemIdHex::from_u64(no_id),
+                ..summary_request(mode)
+            };
+            let error = SummaryRequest::try_from(&nameless).unwrap_err();
+            assert_eq!(
+                (error.code, error.field.as_deref()),
+                (ErrorCode::UnknownSystem, Some("system")),
+                "{mode:?}: {error:?}"
+            );
+        }
+        let now = SummaryRequest::try_from(&summary_request(QueryModeDto::Now)).unwrap();
+        assert_eq!(now.mode(), QueryMode::Now);
+        assert_eq!(now.time(), UniverseTime::EPOCH);
+        assert_eq!(now.system().raw(), 0x0200_0800_2000_0000);
+        let seen =
+            SummaryRequest::try_from(&summary_request(observed_from([0, 23_000, 0]))).unwrap();
+        assert_eq!(
+            seen.mode(),
+            QueryMode::ObservedFrom(
+                GalacticPosition::from_light_years([0.0, 23_000.0, 0.0]).expect("in the cube")
+            )
+        );
+    }
+
+    /// P12.T6.b: a system born 300 years after the epoch exists four centuries after it, and from
+    /// 3,000 ly away its light then left before its birth; the observed answer is the summary at
+    /// the emitted time, with `time` the request's and the observation beside it.
+    #[test]
+    fn an_observed_summary_is_the_summary_when_the_light_left() {
+        let stars = system(1.0, -300.0);
+        let time = years(400);
+        let request = SystemSummaryRequest {
+            time: wire_time(time),
+            system: SystemIdHex::from_u64(stars.record().id().raw()),
+            ..summary_request(observed_from([0, 23_000, 0]))
+        };
+        let position = GalacticPosition::from_light_years([0.0, 23_000.0, 0.0]).expect("in range");
+        let observer = Observer::new(position, time).expect("an observer in the cube and window");
+        let (summary, retardation) = summary_observed(galaxy(), stars.record(), &stars, &observer)
+            .expect("a grid system's motion is traced");
+        let error = curvature_error(galaxy(), observer.position(), &retardation);
+        let seen = system_summary_observed(request.clone(), &stars, &summary, &retardation, error);
+        assert_eq!(
+            seen,
+            SystemSummaryDto {
+                observed: Some(observed_dto(&retardation, error)),
+                ..system_summary(request.clone(), &stars, retardation.emitted())
+            }
+        );
+        assert_eq!(seen.time, request.time);
+        assert_eq!(seen.existence, SystemExistenceDto::NotYetBorn);
+        assert!(seen.stars.is_empty() && seen.hierarchy.nodes.is_empty());
+        assert!(seen.age_myr < 0.0, "{}", seen.age_myr);
+        let now = answer(&stars, 400);
+        assert_eq!(now.existence, SystemExistenceDto::Exists);
+        assert_eq!(now.observed, None);
+        assert_eq!(
+            (&now.universe, &now.system, now.time),
+            (&seen.universe, &seen.system, seen.time)
+        );
     }
 
     #[test]

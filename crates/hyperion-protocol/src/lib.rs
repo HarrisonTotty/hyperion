@@ -161,9 +161,10 @@ pub use universe::{
 /// variant added after that bumps (`decision-gg-port-d0.md` §1).
 ///
 /// A defaulted field is an optional one: `mode` on `systems_in_range` and `resolve_system`
-/// (galaxy plan 12, P12.T6) reads absent as `now`, so a request built before it is answered as
-/// before; a server built before it ignores the field and answers `now`, so a client reads a row
-/// without `observed` as not observed, whatever it asked.
+/// (galaxy plan 12, P12.T6) and on `system_summary` (P12.T6.b) reads absent as `now`, so a request
+/// built before it is answered as before; a server built before it ignores the field and answers
+/// `now`, so a client reads an answer without `observed`, a row or a summary, as not observed,
+/// whatever it asked.
 pub const PROTOCOL_VERSION: u32 = 2;
 
 #[cfg(test)]

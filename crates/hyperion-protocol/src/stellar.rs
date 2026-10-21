@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::modelled::Modelled;
+use crate::observe::{ObservedDto, QueryModeDto};
 use crate::orbit::HierarchyDto;
 use crate::primitives::{SystemIdHex, UniverseIdHex, UniverseTime};
 
@@ -149,17 +150,33 @@ pub struct StellarBriefDto {
 /// Asks for every star of one system as it is at one time (`system_summary`), answered with a
 /// [`SystemSummaryDto`].
 ///
-/// The server resolves the system ID first: a well-formed ID that names no system is refused with
-/// `unknown_system`, and a time outside the clock window with `bad_request` naming `time`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+/// The server resolves the system ID before it describes the system: a well-formed ID that names
+/// no system is refused with `unknown_system`, and a time outside the clock window with
+/// `bad_request` naming `time`.
+///
+/// Asked in `now`, the stars are described at `time`. Asked `observed` from a position (plan 12,
+/// P12.T6.b), they are described as that observer sees them at `time`: as they were when the light
+/// the observer receives then left the system, and the answer carries that light's `observed`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SystemSummaryRequest {
     /// The universe the system is in.
     pub universe: UniverseIdHex,
     /// The system.
     pub system: SystemIdHex,
-    /// The instant at which the stars are described, within 1,000 years of the epoch.
+    /// The instant asked about, within 1,000 years of the epoch: the one the stars are described
+    /// at in `now`, and the one the observer receives their light at in observed mode.
     pub time: UniverseTime,
+    /// The mode to answer in (plan 12, P12.T6.b): `now` when absent, and written only when
+    /// observed, so that a request of plan 06's form is unchanged.
+    ///
+    /// An observer that is not a canonical position inside the root cube is refused with
+    /// `bad_request` naming `mode`. It is checked after `time` is checked and `system` decoded, but
+    /// before the system is resolved, so a bad observer is named even for an ID that names no
+    /// system.
+    #[serde(default, skip_serializing_if = "QueryModeDto::is_now")]
+    #[ts(as = "Option<QueryModeDto>", optional)]
+    pub mode: QueryModeDto,
 }
 
 /// Whether a system exists at a time: its stars form at its birth, which may lie after the epoch
@@ -176,7 +193,12 @@ pub enum SystemExistenceDto {
 
 /// Every star of one system at one time, and the orbits that hold them together.
 ///
-/// `universe`, `system` and `time` echo the request.
+/// `universe`, `system` and `time` echo the request, in either mode. The system is described at
+/// its *described time*, which its stars' and hierarchy's docs call the summary's time: `time` in
+/// `now`, and in observed mode `observed.emitted`, when the light the observer receives at `time`
+/// left the system (plan 12, P12.T6.b). So in observed mode
+/// `existence`, `age_myr`, `stars` and `hierarchy` are already the emitted time's, unlike a range
+/// row's `age_myr`, and no light age is to be subtracted from them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SystemSummaryDto {
@@ -184,19 +206,32 @@ pub struct SystemSummaryDto {
     pub universe: UniverseIdHex,
     /// The system described.
     pub system: SystemIdHex,
-    /// The instant at which it is described.
+    /// The request's instant: the one the system is described at in `now`, and the one the
+    /// observer receives its light at in observed mode.
     pub time: UniverseTime,
-    /// Whether it exists at `time`.
+    /// Whether it exists at the described time: `time` in `now`, `observed.emitted` in observed
+    /// mode.
     pub existence: SystemExistenceDto,
-    /// Its age at `time` in megayears, counted from the onset of its stars' collapse: negative
-    /// before it forms. Every star of a system is the same age.
+    /// Its age at the described time (`time` in `now`, `observed.emitted` in observed mode) in
+    /// megayears, counted from the onset of its stars' collapse: negative before it forms. Every
+    /// star of a system is the same age.
     pub age_myr: f64,
     /// Its metallicity \[Fe/H\] in dex, drawn once for the whole system and fixed at its birth.
     pub fe_h_dex: f64,
-    /// Every star, by body index: the primary first. Empty when the system has not yet formed.
+    /// Every star, by body index: the primary first, each as it is at the described time (`time`
+    /// in `now`, `observed.emitted` in observed mode). Empty when the system has not yet formed
+    /// then.
     pub stars: Vec<StarSummaryDto>,
-    /// How the stars are arranged in pairs and on which orbits, at `time`.
+    /// How the stars are arranged in pairs and on which orbits, at the described time: `time` in
+    /// `now`, `observed.emitted` in observed mode.
     pub hierarchy: HierarchyDto,
+    /// What the request's observer receives from the system, in observed mode only (plan 12,
+    /// P12.T6.b); the key is left out in `now`, so that such an answer is exactly plan 06's.
+    ///
+    /// A server built before P12.T6.b answers an observed request without this key, and in `now`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub observed: Option<ObservedDto>,
 }
 
 /// One star of a [`SystemSummaryDto`], as it is at the summary's time.
@@ -576,6 +611,7 @@ pub(crate) mod tests {
     use crate::envelope::{
         ClientMessage, ErrorCode, RequestBody, RequestError, RequestId, ResponseBody, ServerMessage,
     };
+    use crate::observe::tests::{observed, observed_json, observer};
     use crate::orbit::{HierarchyNodeDto, OrbitDto};
     use crate::testing::{assert_wire_form, assert_wire_strings};
 
@@ -594,6 +630,7 @@ pub(crate) mod tests {
             universe: UniverseIdHex::from_u64(UNIVERSE),
             system: SystemIdHex::from_u64(SYSTEM),
             time: epoch_plus_a_century(),
+            mode: QueryModeDto::Now,
         }
     }
 
@@ -764,6 +801,7 @@ pub(crate) mod tests {
                     },
                 ],
             },
+            observed: None,
         }
     }
 
@@ -807,6 +845,46 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_system_summary_request_of_plan_06s_form_reads_as_now() {
+        let body: RequestBody = serde_json::from_value(json!({
+            "kind": "system_summary",
+            "universe": "0123456789abcdef",
+            "system": "0200080020000000",
+            "time": { "seconds": 3_155_760_000_i64, "nanos": 0 },
+        }))
+        .unwrap();
+        match body {
+            RequestBody::SystemSummary(read) => {
+                assert_eq!(read.mode, QueryModeDto::Now);
+                assert_eq!(read, request());
+            }
+            other => panic!("expected a summary request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn system_summary_request_wire_form_observed() {
+        assert_wire_form(
+            &RequestBody::SystemSummary(SystemSummaryRequest {
+                mode: QueryModeDto::Observed {
+                    observer: observer(),
+                },
+                ..request()
+            }),
+            json!({
+                "kind": "system_summary",
+                "universe": "0123456789abcdef",
+                "system": "0200080020000000",
+                "time": { "seconds": 3_155_760_000_i64, "nanos": 0 },
+                "mode": {
+                    "type": "observed",
+                    "observer": { "cell_ly": [0, 23_000, 0], "offset_m": [0.0, 0.0, 0.0] },
+                },
+            }),
+        );
+    }
+
+    #[test]
     fn system_summary_request_refuses_a_malformed_system_id() {
         let error = serde_json::from_value::<SystemSummaryRequest>(json!({
             "universe": "0123456789abcdef",
@@ -832,6 +910,20 @@ pub(crate) mod tests {
                 body: ResponseBody::SystemSummary(summary()),
             },
             json!({ "type": "response", "id": 12, "body": body }),
+        );
+    }
+
+    #[test]
+    fn system_summary_response_wire_form_observed() {
+        let mut body = summary_json();
+        body["kind"] = json!("system_summary");
+        body["observed"] = observed_json();
+        assert_wire_form(
+            &ResponseBody::SystemSummary(SystemSummaryDto {
+                observed: Some(observed()),
+                ..summary()
+            }),
+            body,
         );
     }
 
