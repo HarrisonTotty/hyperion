@@ -387,6 +387,8 @@ impl<F: SurveyView> HeightSource for SurveyedGround<'_, '_, F> {
 }
 
 #[cfg(test)]
+mod drawn_ground;
+#[cfg(test)]
 mod golden;
 #[cfg(test)]
 mod tests;
