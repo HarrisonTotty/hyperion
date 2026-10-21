@@ -360,7 +360,7 @@ fn class_bonds(host: Kelvin) -> ([f64; SUDARSKY_CLASSES], f64) {
 /// gas-envelope albedos by class flux-weighted ([`class_bonds`]), the water cloud's albedo
 /// calibrated on Earth ([`water_cloud_albedo`]) and the reference cloud column
 /// ([`reference_cloud_column`]), built once per body before its passes ([`HostShadeSum`]) and never
-/// across bodies.
+/// across bodies. A call chain's [`ShadeBook`] holds what its bodies' shades share.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct HostShade {
     bands: [f64; OPTICS_BANDS],
@@ -393,6 +393,124 @@ impl HostShade {
     pub(crate) const fn bands(&self) -> &[f64; OPTICS_BANDS] {
         &self.bands
     }
+
+    /// Asserts it is `other`, every value to the bit (lever (d)'s check, and the tests').
+    ///
+    /// # Panics
+    ///
+    /// If any value differs in any bit.
+    #[cfg(test)]
+    pub(crate) fn assert_same_bits_as(&self, other: &Self) {
+        use hyperion_testkit::float::assert_same_bits;
+        let pairs = self
+            .bands
+            .iter()
+            .zip(&other.bands)
+            .chain(self.bins.iter().zip(&other.bins))
+            .chain(self.giants.iter().zip(&other.giants));
+        for (&a, &b) in pairs {
+            assert_same_bits(a, b);
+        }
+        assert_same_bits(self.ice_giant, other.ice_giant);
+        assert_same_bits(self.water_cloud, other.water_cloud);
+        assert_same_bits(self.cloud_column.value(), other.cloud_column.value());
+    }
+}
+
+/// One host's light as the area mix weighs it (lever (d), decision-p14-t54a-passes, "Cost
+/// escalation (after Batch B)" §C.3): at its effective temperature, its shares in the optics' bins
+/// ([`optics_shares`]) and the liquids' weights ([`liquid_shares`]) and its gas-envelope albedos by
+/// class ([`class_bonds`]), each a function of the temperature alone, before any flux weighs them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct HostLightShares {
+    temperature: Kelvin,
+    bands: [f64; OPTICS_BANDS],
+    bins: [f64; LIQUID_WEIGHTS],
+    giants: [f64; SUDARSKY_CLASSES],
+    ice_giant: f64,
+}
+
+impl HostLightShares {
+    /// The light of a host of effective temperature `host`.
+    #[must_use]
+    pub(crate) fn of(host: Kelvin) -> Self {
+        let bands = optics_shares(host);
+        let bins = liquid_shares(host, &bands);
+        let (giants, ice_giant) = class_bonds(host);
+        Self {
+            temperature: host,
+            bands,
+            bins,
+            giants,
+            ice_giant,
+        }
+    }
+
+    /// Whether it is the light of a host of effective temperature `host`, bit for bit.
+    #[must_use]
+    fn is_at(&self, host: Kelvin) -> bool {
+        self.temperature.value().total_cmp(&host.value()).is_eq()
+    }
+}
+
+/// What the shades of one call chain's bodies share (lever (d), decision-p14-t54a-passes, "Cost
+/// escalation (after Batch B)" §C.3): the host-independent water cloud's albedo
+/// ([`water_cloud_albedo`]) and reference cloud column ([`reference_cloud_column`]), and each
+/// distinct luminous host's light ([`HostLightShares`]), each computed once, in its constructor,
+/// where every [`HostShadeSum`] would compute them for every body.
+///
+/// It is an immutable table of its inputs alone (the sim-determinism skill's "Allowed"), built by
+/// the call chain that derives (`generate`, `snapshot_at` and the other queries that derive), never
+/// held across chains. A shade read off it is the same bits as one computed afresh, since each
+/// entry is the function a [`HostShadeSum`] would call, at the same temperature, summed in the same
+/// order; a test holds every body's shade of the sample to it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ShadeBook {
+    water_cloud: f64,
+    cloud_column: KilogramsPerSquareMetre,
+    hosts: Vec<HostLightShares>,
+}
+
+impl ShadeBook {
+    /// The book of a call chain whose luminous hosts are of effective temperatures `hosts`: each
+    /// distinct temperature's light once, a temperature that is not positive and finite skipped
+    /// (a [`HostShadeSum`] adds no such host).
+    #[must_use]
+    pub(crate) fn new(hosts: impl IntoIterator<Item = Kelvin>) -> Self {
+        let mut book = Self {
+            water_cloud: water_cloud_albedo(),
+            cloud_column: reference_cloud_column(),
+            hosts: Vec::new(),
+        };
+        for host in hosts {
+            book.add(host);
+        }
+        book
+    }
+
+    /// The same book with the light of one more host of effective temperature `host`, a moon's
+    /// planet's own glow, if it is not in it already (and is positive and finite).
+    #[must_use]
+    pub(crate) fn with_host(&self, host: Kelvin) -> Self {
+        let mut book = self.clone();
+        book.add(host);
+        book
+    }
+
+    /// Adds the light of a host of effective temperature `host` unless it holds it already or the
+    /// temperature is not positive and finite.
+    fn add(&mut self, host: Kelvin) {
+        let t = host.value();
+        if t.is_finite() && t > 0.0 && self.shares(host).is_none() {
+            self.hosts.push(HostLightShares::of(host));
+        }
+    }
+
+    /// The light of a host of effective temperature `host`, if it holds it.
+    #[must_use]
+    fn shares(&self, host: Kelvin) -> Option<&HostLightShares> {
+        self.hosts.iter().find(|shares| shares.is_at(host))
+    }
 }
 
 /// A [`HostShade`] being summed over a body's hosts, in their order: each luminous host's Planck
@@ -423,23 +541,33 @@ impl HostShadeSum {
     /// flux there. A host of no flux, or of a temperature that is not positive and finite, adds
     /// nothing.
     pub(crate) fn add(&mut self, flux: EarthFluxes, host: Kelvin) {
+        self.add_from(flux, host, None);
+    }
+
+    /// [`add`](Self::add), with the host's light read off the call chain's book `book` where it
+    /// holds it (lever (d)), and computed here otherwise.
+    pub(crate) fn add_from(&mut self, flux: EarthFluxes, host: Kelvin, book: Option<&ShadeBook>) {
         let (flux, t) = (flux.value(), host.value());
         if !(flux.is_finite() && flux > 0.0 && t.is_finite() && t > 0.0) {
             return;
         }
-        let bands = optics_shares(host);
-        let bins = liquid_shares(host, &bands);
-        for (sum, share) in self.bands.iter_mut().zip(bands) {
+        let computed;
+        let light = if let Some(light) = book.and_then(|book| book.shares(host)) {
+            light
+        } else {
+            computed = HostLightShares::of(host);
+            &computed
+        };
+        for (sum, share) in self.bands.iter_mut().zip(light.bands) {
             *sum += flux * share;
         }
-        for (sum, share) in self.bins.iter_mut().zip(bins) {
+        for (sum, share) in self.bins.iter_mut().zip(light.bins) {
             *sum += flux * share;
         }
-        let (classes, ice_giant) = class_bonds(host);
-        for (sum, bond) in self.giants.iter_mut().zip(classes) {
+        for (sum, bond) in self.giants.iter_mut().zip(light.giants) {
             *sum += flux * bond;
         }
-        self.ice_giant += flux * ice_giant;
+        self.ice_giant += flux * light.ice_giant;
         self.flux += flux;
     }
 
@@ -447,18 +575,93 @@ impl HostShadeSum {
     /// computed here once; a Sun's ([`HostShade::sun`], labelled) where no host added any.
     #[must_use]
     pub(crate) fn finish(self) -> HostShade {
+        self.finish_from(None)
+    }
+
+    /// [`finish`](Self::finish), with the water cloud's calibration and the reference cloud column
+    /// read off the call chain's book `book` if there is one (lever (d)). A body no host lights
+    /// takes a Sun's computed afresh, as without a book: a rare body, whose albedo the light moves
+    /// not at all.
+    #[must_use]
+    pub(crate) fn finish_from(self, book: Option<&ShadeBook>) -> HostShade {
         if self.flux.is_nan() || self.flux <= 0.0 {
             return HostShade::sun();
         }
+        let (water_cloud, cloud_column) = book.map_or_else(
+            || (water_cloud_albedo(), reference_cloud_column()),
+            |book| (book.water_cloud, book.cloud_column),
+        );
         HostShade {
             bands: self.bands,
             bins: self.bins,
             giants: self.giants.map(|sum| sum / self.flux),
             ice_giant: self.ice_giant / self.flux,
-            water_cloud: water_cloud_albedo(),
-            cloud_column: reference_cloud_column(),
+            water_cloud,
+            cloud_column,
         }
     }
+}
+
+/// How a body's shade reads its call chain's [`ShadeBook`], a test-only switch of lever (d)
+/// ([`with_shade_reads`]).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShadeReads {
+    /// Off the book where there is one, as the generator reads it.
+    Book,
+    /// Each body's own, as before the book: the unlevered path, the oracle.
+    Unlevered,
+    /// Both: each shade read off a book asserted the unlevered path's to the bit, and counted.
+    Checked,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The switch on this thread, a test's own: tests run on threads of one process.
+    static SHADE_READS: core::cell::Cell<ShadeReads> = const {
+        core::cell::Cell::new(ShadeReads::Book)
+    };
+    /// The shades [`ShadeReads::Checked`] has checked on this thread.
+    static CHECKED_SHADES: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+}
+
+/// The book `book` a body's shade reads: itself, and in the tests none where they switch the book
+/// off ([`ShadeReads::Unlevered`]).
+#[must_use]
+pub(crate) fn book_read(book: Option<&ShadeBook>) -> Option<&ShadeBook> {
+    #[cfg(test)]
+    if SHADE_READS.with(core::cell::Cell::get) == ShadeReads::Unlevered {
+        return None;
+    }
+    book
+}
+
+/// Under [`ShadeReads::Checked`], asserts the shade `read`, read off the book `book`, is the
+/// unlevered path's, `unlevered`, to the bit, and counts it; nothing where there is no book or
+/// under any other setting.
+#[cfg(test)]
+pub(crate) fn check_shade(
+    read: &HostShade,
+    book: Option<&ShadeBook>,
+    unlevered: impl FnOnce() -> HostShade,
+) {
+    if book.is_some() && SHADE_READS.with(core::cell::Cell::get) == ShadeReads::Checked {
+        read.assert_same_bits_as(&unlevered());
+        CHECKED_SHADES.with(|cell| cell.set(cell.get() + 1));
+    }
+}
+
+/// `run`'s result with the bodies' shades reading their books as `reads` says, and how many
+/// shades it checked against the unlevered path under [`ShadeReads::Checked`]. The switch is set
+/// back after.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn with_shade_reads<R>(reads: ShadeReads, run: impl FnOnce() -> R) -> (R, u64) {
+    let before = SHADE_READS.with(|cell| cell.replace(reads));
+    CHECKED_SHADES.with(|cell| cell.set(0));
+    let result = run();
+    SHADE_READS.with(|cell| cell.set(before));
+    (result, CHECKED_SHADES.with(core::cell::Cell::take))
 }
 
 /// A gas envelope's Bond albedo at its effective temperature `heated` (its equilibrium

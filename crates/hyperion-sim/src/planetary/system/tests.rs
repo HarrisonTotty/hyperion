@@ -2499,7 +2499,7 @@ fn a_regular_moon_has_one_locking_time() {
             let elements = moon
                 .satellite
                 .orbit_at(&moon.parent, ctx.age_at(parent_time(ctx)));
-            let now = system.parent_now(&epoch, &HourCosines::new(), parent);
+            let now = system.parent_now(&epoch, parent);
             let derived = PlanetarySystem::moon_derived(&epoch, moon, &elements, &now).unwrap();
             let mass = Kilograms::from(*mass);
             let primary = Kilograms::new(
@@ -4510,7 +4510,7 @@ fn under_their_own_tides_a_moon_s_law_and_its_locking_time_agree() {
                 continue;
             };
             laws += 1;
-            let now = system.parent_now(&epoch, &HourCosines::new(), parent);
+            let now = system.parent_now(&epoch, parent);
             let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
             let derived = PlanetarySystem::moon_derived(&epoch, part, &orbit, &now).unwrap();
             if matches!(part.satellite.moon(), SatelliteMoon::Regular(_)) {
@@ -4558,7 +4558,7 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
             let Section::Ok(figures) = hooks.figures() else {
                 continue;
             };
-            let now = system.parent_now(&epoch, &HourCosines::new(), parent);
+            let now = system.parent_now(&epoch, parent);
             let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
             let derived = PlanetarySystem::moon_derived(&epoch, part, &orbit, &now).unwrap();
             let tides = derived.tides();
@@ -5214,4 +5214,60 @@ fn levers_a_and_p_move_no_bit_of_the_sample() {
         counts.greenhouses > 1_000 && counts.checked_solves > 1_000,
         "{counts:?}"
     );
+}
+
+// P14.T54.a, levers (d) and (e): the host shade's constants once a call chain, and generation's
+// dead derivations (decision-p14-t54a-passes, "Cost escalation (after Batch B)" §C.3).
+
+/// The first 60 systems of the sample, generated, and their snapshots at the epoch, rendered.
+fn sixty_rendered() -> Vec<String> {
+    sample()
+        .iter()
+        .take(60)
+        .map(|ctx| {
+            let system = generate(SEED, ctx);
+            let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
+            format!("{system:?}\n{snapshot:?}")
+        })
+        .collect()
+}
+
+/// Lever (d) over the 60-system sample: every body's shade that `generate` and `snapshot_at`
+/// build, planets', members' and moons' alike, read off its call chain's book, is the shade each
+/// body computes for itself, to the bit, each checked as it is built (`ShadeReads::Checked`); and
+/// the generated systems and their snapshots are the same, bit for bit, with the book and without
+/// it (`ShadeReads::Unlevered`).
+#[test]
+fn every_host_shade_off_its_book_is_its_own_to_the_bit() {
+    use crate::planetary::derive::photometry::area_mix::{ShadeReads, with_shade_reads};
+
+    let (read, checked) = with_shade_reads(ShadeReads::Checked, sixty_rendered);
+    let (unlevered, uncounted) = with_shade_reads(ShadeReads::Unlevered, sixty_rendered);
+    assert_eq!(uncounted, 0);
+    assert_eq!(read.len(), 60);
+    for (k, (with, without)) in read.iter().zip(&unlevered).enumerate() {
+        same_rendering(with, without, &format!("system {k} of the sample"));
+    }
+    eprintln!("{checked} shades read off their books and checked");
+    assert!(checked > 2_000, "{checked}");
+}
+
+/// Lever (e) over the 60-system sample: the rotation pass's and the Laplace frames' records at
+/// `parent_time` read before the passes (e1), each member as its moons' parent before its passes
+/// (e2) and each parent as its moons read it without its record (e3) are the unlevered path's,
+/// each checked as it is read (`PassFree::Checked`); and the generated systems (every law,
+/// Laplace frame, satellite, ring and moon) and their snapshots at the epoch are the same, bit for
+/// bit, with the lever and without it (`PassFree::Unlevered`).
+#[test]
+fn generation_s_dead_derivations_move_no_bit_of_the_sample() {
+    let (read, checked) = with_pass_free(PassFree::Checked, sixty_rendered);
+    let (unlevered, uncounted) = with_pass_free(PassFree::Unlevered, sixty_rendered);
+    assert_eq!(uncounted, PassFreeCounts::default());
+    assert_eq!(read.len(), 60);
+    for (k, (with, without)) in read.iter().zip(&unlevered).enumerate() {
+        same_rendering(with, without, &format!("system {k} of the sample"));
+    }
+    eprintln!("checked: {checked:?}");
+    assert_eq!(checked.records, 60, "{checked:?}");
+    assert!(checked.members > 400 && checked.parents > 50, "{checked:?}");
 }

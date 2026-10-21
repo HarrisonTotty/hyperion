@@ -89,6 +89,7 @@ use crate::Seed;
 use crate::math;
 use crate::orbit::KeplerElements;
 use crate::planetary::derive::atmosphere::VolatileDraws;
+use crate::planetary::derive::photometry::area_mix::ShadeBook;
 use crate::planetary::derive::rotation::{
     SpinTides, SpinningBody, moment_of_inertia_factor, tidal_locking_time,
 };
@@ -1007,6 +1008,13 @@ impl MoonSky {
             composition: *planet_hosts.composition(),
         })
     }
+
+    /// The planet's own glow as its moons' host (the light of its internal luminosity, at its
+    /// effective temperature; no light for a planet with none).
+    #[must_use]
+    pub(crate) const fn planet_light(&self) -> &HostLight {
+        &self.planet[0]
+    }
 }
 
 /// A regular moon derived at a time (P14.T17.b): P14.T16's derivation with the planet as its
@@ -1553,6 +1561,24 @@ pub fn derive_moon(
     age: Years,
     t: UniverseTime,
 ) -> Result<DerivedMoon, DeriveMoonError> {
+    derive_moon_under(moon, parent, nursery, sky, (age, t), None)
+}
+
+/// [`derive_moon`] at the system's age `age` at the epoch and the time `t`, its shade reading the
+/// call chain's book `shades` where there is one (lever (d), decision-p14-t54a-passes, "Cost
+/// escalation (after Batch B)" §C.3): the same bits as without it.
+///
+/// # Errors
+///
+/// As [`derive_moon`].
+pub(crate) fn derive_moon_under(
+    moon: &MoonInputs,
+    parent: &MoonParent,
+    nursery: &MoonNursery,
+    sky: &MoonSky,
+    (age, t): (Years, UniverseTime),
+    shades: Option<&ShadeBook>,
+) -> Result<DerivedMoon, DeriveMoonError> {
     let MoonInputs {
         mass,
         orbit,
@@ -1600,7 +1626,8 @@ pub fn derive_moon(
         &sky.planet,
         &sky.stars,
     )
-    .map_err(DeriveMoonError::Hosts)?;
+    .map_err(DeriveMoonError::Hosts)?
+    .with_shades(shades);
     let body =
         derive_body(&placed, &hosts, &nursery.disc, age, t).map_err(DeriveMoonError::Body)?;
     let density = mean_density(Kilograms::from(mass), radius);

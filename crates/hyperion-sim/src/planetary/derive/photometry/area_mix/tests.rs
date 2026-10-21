@@ -29,18 +29,7 @@ fn body(a: f64, b: f64) -> BodyTerm {
 
 /// Two shades' every value is the same, to the bit.
 fn assert_same_shade(a: &HostShade, b: &HostShade) {
-    for (x, y) in a.bands.iter().zip(&b.bands) {
-        assert_same_bits(*x, *y);
-    }
-    for (x, y) in a.bins.iter().zip(&b.bins) {
-        assert_same_bits(*x, *y);
-    }
-    for (x, y) in a.giants.iter().zip(&b.giants) {
-        assert_same_bits(*x, *y);
-    }
-    assert_same_bits(a.ice_giant, b.ice_giant);
-    assert_same_bits(a.water_cloud, b.water_cloud);
-    assert_same_bits(a.cloud_column.value(), b.cloud_column.value());
+    a.assert_same_bits_as(b);
 }
 
 /// The unpolarised Fresnel reflectance of a flat surface of real index `n` > 1 for light from
@@ -384,6 +373,76 @@ fn several_hosts_weigh_by_their_flux() {
     dark.add(flux(f64::NAN), sun);
     assert_same_shade(&dark.finish(), &HostShade::sun());
     assert_same_shade(&HostShadeSum::EMPTY.finish(), &HostShade::sun());
+}
+
+/// Lever (d): a call chain's book holds each distinct luminous host's light once, each entry the
+/// light `optics_shares`, `liquid_shares` and `class_bonds` give at its temperature, and the
+/// shade's constants; a shade read off it is the shade its body computes for itself, to the bit,
+/// for one host or several, a host the book holds or not, and a body no host lights; and a moon's
+/// planet's glow added to it leaves the rest as it was.
+#[test]
+fn a_shade_off_its_book_is_its_own_to_the_bit() {
+    let hosts = [
+        2_600.0, 3_200.0, 4_620.0, 5_772.0, 7_500.0, 12_000.0, 40_000.0,
+    ]
+    .map(kelvin);
+    let repeated = [
+        hosts[3],
+        hosts[0],
+        kelvin(0.0),
+        kelvin(-5.0),
+        kelvin(f64::NAN),
+    ];
+    let book = ShadeBook::new(hosts.iter().copied().chain(repeated));
+    assert_eq!(book.hosts.len(), hosts.len());
+    for (&host, light) in hosts.iter().zip(&book.hosts) {
+        let bands = optics_shares(host);
+        let bins = liquid_shares(host, &bands);
+        let (giants, ice_giant) = class_bonds(host);
+        let pairs = light
+            .bands
+            .iter()
+            .zip(&bands)
+            .chain(light.bins.iter().zip(&bins))
+            .chain(light.giants.iter().zip(&giants));
+        for (&a, &b) in pairs {
+            assert_same_bits(a, b);
+        }
+        assert_same_bits(light.ice_giant, ice_giant);
+        assert_same_bits(light.temperature.value(), host.value());
+    }
+    assert_same_bits(book.water_cloud, water_cloud_albedo());
+    assert_same_bits(book.cloud_column.value(), reference_cloud_column().value());
+    let flux = EarthFluxes::new;
+    let skies: [&[(f64, Kelvin)]; 6] = [
+        &[(1.0, hosts[3])],
+        &[(0.37, hosts[1]), (2.5e-4, hosts[6])],
+        &[(12.0, hosts[0]), (0.8, hosts[2]), (3.0e-3, hosts[4])],
+        &[(1.0, kelvin(5_000.0)), (0.2, hosts[5])],
+        &[(0.0, hosts[3]), (1.0, kelvin(0.0))],
+        &[],
+    ];
+    let shade_of = |sky: &[(f64, Kelvin)], book: Option<&ShadeBook>| {
+        let mut sum = HostShadeSum::EMPTY;
+        for &(f, host) in sky {
+            sum.add_from(flux(f), host, book);
+        }
+        sum.finish_from(book)
+    };
+    for sky in skies {
+        let mut own = HostShadeSum::EMPTY;
+        for &(f, host) in sky {
+            own.add(flux(f), host);
+        }
+        assert_same_shade(&shade_of(sky, Some(&book)), &own.finish());
+        assert_same_shade(&shade_of(sky, None), &own.finish());
+    }
+    let glow = book.with_host(kelvin(110.0));
+    assert_eq!(glow.hosts.len(), hosts.len() + 1);
+    assert_eq!(glow.hosts[..hosts.len()], book.hosts[..]);
+    let moon = [(1.0, hosts[3]), (4.0e-6, kelvin(110.0))];
+    assert_same_shade(&shade_of(&moon, Some(&glow)), &shade_of(&moon, None));
+    assert_eq!(book.with_host(hosts[2]), book);
 }
 
 /// Every one of Sudarsky, Burrows and Pinto's Fiducial albedos is reproduced at its tabled host and

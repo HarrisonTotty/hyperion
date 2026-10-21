@@ -22710,3 +22710,96 @@ planetary::record` (624 tests at T57.a's commit).
       `planetary::surface::` but its plates, `--no-fail-fast`): 43 run, 43 passed, so no other
       reference figure of its kind needed re-measuring. The reference Earth's order-independence
       test took 982 s (248–256 s in Batches A and B, before R09.T13.i's merge).
+  - _Batch D's L3, levers (d) and (e): the host shade's constants once a call chain, and
+    generation's dead derivations_ (decision-p14-t54a-passes, "Cost escalation (after Batch B)",
+    §C.3's (d) and (e)). A refactor at 22, bit for bit: no golden moves (`golden_diff.py` after a
+    re-bless of every sim golden: "No golden files changed"), and the pass counts hold.
+    - _(d) The shades' book._ `area_mix::ShadeBook` holds what each body's `HostShadeSum`
+      computed for itself: the water cloud's albedo (`water_cloud_albedo`, with its reference
+      Earth's clear sky) and the reference cloud column (`reference_cloud_column`), and each
+      distinct luminous host's light at its effective temperature (`HostLightShares`: its
+      `optics_shares`, `liquid_shares` and `class_bonds`). It is an immutable table built in its
+      constructor, with no cache (the sim-determinism skill's "Allowed"). The sums are as before,
+      in the hosts' order, each host's light and the constants read off the book where it holds
+      them (`HostShadeSum::add_from`, `finish_from`), so a shade is the same bits.
+      - `Epoch::with_shades` builds one from the stars that shine at the epoch's time, in the
+        queries that derive: `snapshot_at`, `body_at`, `hooks_at`, `satellite_parent`,
+        `derive_rotation`'s moon arm, and `generate`, whose one epoch at `parent_time` now serves
+        step 7's parents (each `parent_at_epoch` built its own `Epoch` before), the rotation pass
+        and the moons' laws. `position_at`, `state_at` and `habitable_zone_at` build none.
+      - It reaches `Sky::of` on `BodyHosts` (the crate-private `with_shades`; the public
+        `BodyHosts::new` carries none), and a moon's derivation through `ParentNow::shades`, the
+        epoch's book with its planet's glow added (`ShadeBook::with_host`, at
+        `MoonSky::planet_light`'s temperature), by `derive_moon_under` (the public `derive_moon`
+        passes none).
+      - A host the book does not hold is computed as before, and a body no host lights takes
+        `HostShade::sun()` computed afresh, as before: a rare body, whose albedo the light does
+        not move.
+    - _(e) The dead derivations._
+      - (e1) `generate`'s rotation pass and Laplace frames read `RecordThen` (the record's orbit
+        elements, its bulk's radius, class and fractions as `SpinBulk`, and its mass) from
+        `records_at_parent_time`: each planet and member present then, on `snapshot_at`'s fates
+        (now `PlanetarySystem::fates`, shared), derived by `derive_bulk`, with the record's bulk
+        rule (`icy_member_spin_bulk`, on `icy_member_bulk`'s `icy_member_shape`) and its mass,
+        the derivation's, escape's loss taken (`BodyRecordBuilder::derived` sets it so). There is
+        no snapshot at `parent_time`: no passes, surfaces or moons' records.
+        - `derive_bulk` (derive/mod.rs) is `derive_body_driven`'s stage before the passes
+          (`BeforePasses::of`: formation, the sky, escape and `at_the_time`), which
+          `derive_body_driven` now calls too, and P14.T15's moon limit (`moon_limit`, shared),
+          as `DerivedBulk` (mass, radius, fractions, class and the moon limit).
+        - `rotation_from` takes a `SpinBulk` and `figure_section` is `figure_of` on one;
+          `derive_rotation` and `RecordThen::of_record` are test-only now, the tests' law from a
+          record and the oracle.
+      - (e2) `parent_at_epoch` derives a member by `derive_bulk`; a planet keeps `derive_body`,
+        since its `RingParent` reads its `T_eff` or `T_eq`. One `moon_parent` builds both kinds'
+        `MoonParent`, ruling 112.8's icy member included.
+      - (e3) `parent_now` is `primary_now`, the part of `primary_record` its record is built on
+        (state, position, derivation, the moons' sky, nursery and book), with no record. So
+        `moon_rotations` and `derive_rotation`'s moon arm build no `HourCosines` now: L1's list
+        of the call chains that build one is `snapshot_at`, `body_at` and `hooks_at`.
+    - _Its tests._ The oracles are test-only switches in L1's and L2's form: `ShadeReads`
+      (`with_shade_reads`, area_mix) and `PassFree` (`with_pass_free`, system), each `Unlevered`
+      (the old path) or `Checked` (both paths, asserted the same as each value is made, and
+      counted).
+      - `every_host_shade_off_its_book_is_its_own_to_the_bit`: over the 60-system sample, every
+        shade `generate` and `snapshot_at` build off a book (2,799), planets', members' and
+        moons', is the body's own to the bit, and the generated systems and their snapshots at the
+        epoch are the same with the book and without.
+      - `generation_s_dead_derivations_move_no_bit_of_the_sample`: over the same sample, each
+        system's records at `parent_time` (60), each member as its moons' parent (585) and each
+        parent as its moons read it (77) are the unlevered path's, and the generated systems
+        (every law, Laplace frame, satellite, ring and moon) and their snapshots at the epoch are
+        the same with the lever and without. Its first run caught the records' mass, which the
+        lever had read off the history (`FateAt::mass`, before escape) and not off the
+        derivation.
+      - On stubs: `a_shade_off_its_book_is_its_own_to_the_bit` (seven hosts from 2,600 to 40,000 K
+        and invalid ones: the book's entries, its constants, six skies of one to three hosts, one
+        of them a host the book does not hold and two lit by none, and a planet's glow) and
+        `the_bulk_before_the_passes_is_the_whole_derivation_s` (the eight planets, the table's four
+        small bodies and 117 bodies across the composition solve, at three ages and one before
+        birth: 516 derivations, refusals included).
+    - _Its saving_ (the profile's probe, re-applied as L1 and L2 did, its rejected hunks put back
+      at the L3 trees' anchors, with two stages of its own for (e); release, one CPU,
+      `CPUQuota=100%`, under the heavy lock; 25814d3d, (d), and (d) with (e), alternated over three
+      rounds, medians; load 3.0–3.6 at the starts; the snapshot's passes histograms identical
+      across all nine runs):
+      - The first 20 systems (stage timers off): `generate` 116.9 → 92.3 → 35.5 ms (−21% by (d),
+        −70% in all); `snapshot_at` 132.6 → 121.2 → 120.8 ms (−9% by (d); (e) touches no
+        snapshot).
+      - The 400-system `snapshot_at` stage (timers on): 2.14 → 1.97 → 1.96 s (−8%). `Sky::of`
+        188.0 → 2.0 ms over its 6,379 calls (29.5 → 0.3 µs a body); the passes (551 ms) and the
+        surfaces (0.99 and 0.25 s) as before.
+      - `generate`'s stages (the 20 systems, timers on): (d) `Sky::of` 25.7 → 0.2 ms; (e) the
+        snapshot at `parent_time` (42.6 ms) gives way to `records_at_parent_time` (4.5 ms),
+        `parent_at_epoch` 34.2 → 18.7 ms, `place_on_laplace_surfaces` 15.9 → 9.5 ms, and the
+        derivations with passes 831 → 147 (74.4 → 23.3 ms), beside 643 before the passes (1.8 ms).
+      - Against §C.6's budget, before Batch D's C1–C3: `generate` 35.5 ms of ≤ 141, `snapshot_at`
+        120.8 ms of ≤ 313, and the stage 1.96 s of ≤ 4.70.
+    - _Files:_ `planetary/derive/photometry/area_mix.rs`, `derive/mod.rs`, `moons/regular.rs` and
+      `planetary/system.rs`; the tests in `derive/photometry/area_mix/tests.rs`, `derive/mod.rs`
+      and `system/tests.rs`.
+    - _Checks:_ the sim's `--lib planetary` in five runs (1,491 passed, 54 ignored), the
+      `derive_body` and `derive_moon` doctests, the 14 lib goldens and the 22 golden integration
+      targets re-blessed (61 passed, no golden changed), the server's `systems_in_range`,
+      `system_bodies` and `--lib convert` (76 passed), Clippy `--lib --tests` on the sim, rustdoc
+      with `-D warnings`, rustfmt and Prettier.

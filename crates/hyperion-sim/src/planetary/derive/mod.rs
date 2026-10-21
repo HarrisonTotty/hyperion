@@ -126,7 +126,7 @@ use crate::planetary::derive::habitable_zone::HabitableLimit;
 use crate::planetary::derive::irradiation::luminosity_flux;
 use crate::planetary::derive::limits::TidalPlanet;
 use crate::planetary::derive::passes::Convergence;
-use crate::planetary::derive::photometry::area_mix::{HostShade, HostShadeSum};
+use crate::planetary::derive::photometry::area_mix::{self, HostShade, HostShadeSum, ShadeBook};
 use crate::planetary::derive::rotation::tides;
 use crate::planetary::disc::DiscProfile;
 use crate::planetary::params::{
@@ -501,12 +501,16 @@ impl GivenFractions {
 /// one star, or both of a pair for a circumbinary body. Each of the `companions` is another star of
 /// the system, seen at the orbit that separates it from the body's host (design note 10; P14.T12.a).
 /// The system's composition is the one a giant's cooling reads (plan 13's `giant_cooling`).
+///
+/// Inside the crate, the hosts may also carry what the shades of their call chain's bodies share
+/// (lever (d), `with_shades`), which moves no value.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BodyHosts<'a> {
     primary_mass: Kilograms,
     composition: Composition,
     orbited: &'a [HostLight],
     companions: &'a [Illumination],
+    shades: Option<&'a ShadeBook>,
 }
 
 impl<'a> BodyHosts<'a> {
@@ -536,7 +540,16 @@ impl<'a> BodyHosts<'a> {
             composition,
             orbited,
             companions,
+            shades: None,
         })
+    }
+
+    /// The same hosts, whose body's shade reads its call chain's book `shades` where there is one
+    /// (lever (d), decision-p14-t54a-passes, "Cost escalation (after Batch B)" §C.3): the same bits
+    /// as without it.
+    #[must_use]
+    pub(crate) const fn with_shades(self, shades: Option<&'a ShadeBook>) -> Self {
+        Self { shades, ..self }
     }
 
     /// The mass the body orbits.
@@ -1214,29 +1227,21 @@ pub(crate) fn derive_body_driven(
     age: Years,
     t: UniverseTime,
 ) -> Result<DerivedBody, DeriveBodyError> {
-    let age_now = Years::new(age.value() + t.since_epoch().as_julian_years_f64());
-    if age_now.value().is_nan() || age_now.value() <= 0.0 {
-        return Err(DeriveBodyError::NotYetFormed { age: age_now });
-    }
-    let (formed, radius_rank, solved) = formation(placed, disc)?;
-
-    // T12, at the time: the light now, the worst it has been, and the X-rays so far.
+    let BeforePasses {
+        age_now,
+        formed,
+        radius_rank,
+        solved,
+        sky,
+        escape,
+        radius,
+        fractions,
+        core,
+        giant,
+    } = BeforePasses::of(placed, hosts, disc, age, t)?;
     let a = placed.orbit_now.semi_major_axis();
     let e = placed.orbit_now.eccentricity().value();
-    let sky = Sky::of(placed, hosts, age_now);
-
-    // T13.b, energy-limited escape, and T11, the radius at the time.
-    let escape = envelope_escape(placed, hosts, disc, solved.as_ref(), sky.xuv_fluence);
     let mass = escape.mass;
-    let (radius, fractions, core, giant) = at_the_time(
-        mass,
-        formed,
-        solved.as_ref(),
-        escape.stripped(),
-        sky.flux,
-        age_now,
-        hosts.composition(),
-    )?;
     let r = Metres::from(radius).value();
     let internal_luminosity = giant.as_ref().map_or(Watts::ZERO, |giant| {
         Watts::from(giant.internal_luminosity())
@@ -1272,9 +1277,7 @@ pub(crate) fn derive_body_driven(
     let hill = hill_radius(a, 0.0, mass_kg, hosts.primary_mass);
     let prograde_limit = satellite_stability_limit(hill, e, 0.0, OrbitSense::Prograde);
     let retrograde_limit = satellite_stability_limit(hill, e, 0.0, OrbitSense::Retrograde);
-    let tidal = tidal_planet(class, mass_kg, Metres::new(r), &fractions);
-    let moon =
-        maximum_surviving_moon_mass(&tidal, hosts.primary_mass, a, e, Seconds::from(age_now));
+    let moon = moon_limit(placed, hosts, class, (mass, radius, &fractions), age_now);
 
     Ok(DerivedBody {
         mass,
@@ -1304,7 +1307,188 @@ pub(crate) fn derive_body_driven(
         hill_radius: hill,
         prograde_limit,
         retrograde_limit,
-        maximum_moon_mass: EarthMasses::from(moon),
+        maximum_moon_mass: moon,
+    })
+}
+
+/// What [`derive_body_driven`] derives of a body before its passes, none of which a pass reads
+/// back (lever (e), decision-p14-t54a-passes, "Cost escalation (after Batch B)" §C.3): its age at
+/// the time, its formation (T10–T11), its sky then (T12), its envelope's escape (T13.b) and its
+/// radius, mass fractions, core and giant's radius at the time (T11).
+struct BeforePasses {
+    age_now: Years,
+    formed: SnowLineSide,
+    radius_rank: UnitUniform,
+    solved: Option<SolvedComposition>,
+    sky: Sky,
+    escape: Escape,
+    radius: EarthRadii,
+    fractions: MassFractions,
+    core: CoreComposition,
+    giant: Option<GiantRadius>,
+}
+
+impl BeforePasses {
+    /// The stage of `placed` about `hosts`, formed in `disc`, in a system aged `age` at the epoch,
+    /// at time `t` ([`derive_body`]'s inputs).
+    ///
+    /// # Errors
+    ///
+    /// As [`derive_body`].
+    fn of(
+        placed: &PlacedBody,
+        hosts: &BodyHosts<'_>,
+        disc: &DiscProfile,
+        age: Years,
+        t: UniverseTime,
+    ) -> Result<Self, DeriveBodyError> {
+        let age_now = Years::new(age.value() + t.since_epoch().as_julian_years_f64());
+        if age_now.value().is_nan() || age_now.value() <= 0.0 {
+            return Err(DeriveBodyError::NotYetFormed { age: age_now });
+        }
+        let (formed, radius_rank, solved) = formation(placed, disc)?;
+
+        // T12, at the time: the light now, the worst it has been, and the X-rays so far.
+        let sky = Sky::of(placed, hosts, age_now);
+
+        // T13.b, energy-limited escape, and T11, the radius at the time.
+        let escape = envelope_escape(placed, hosts, disc, solved.as_ref(), sky.xuv_fluence);
+        let (radius, fractions, core, giant) = at_the_time(
+            escape.mass,
+            formed,
+            solved.as_ref(),
+            escape.stripped(),
+            sky.flux,
+            age_now,
+            hosts.composition(),
+        )?;
+        Ok(Self {
+            age_now,
+            formed,
+            radius_rank,
+            solved,
+            sky,
+            escape,
+            radius,
+            fractions,
+            core,
+            giant,
+        })
+    }
+}
+
+/// P14.T15's largest moon that survives about the body `placed`, about `hosts`, of class `class`
+/// and of mass, radius and mass fractions `bulk` at the age `age_now`: [`maximum_surviving_moon_mass`]
+/// at its own tides ([`tidal_planet`]) on its orbit at the time.
+#[must_use]
+fn moon_limit(
+    placed: &PlacedBody,
+    hosts: &BodyHosts<'_>,
+    class: PlanetClass,
+    (mass, radius, fractions): (EarthMasses, EarthRadii, &MassFractions),
+    age_now: Years,
+) -> EarthMasses {
+    let a = placed.orbit_now.semi_major_axis();
+    let e = placed.orbit_now.eccentricity().value();
+    let r = Metres::from(radius).value();
+    let tidal = tidal_planet(class, Kilograms::from(mass), Metres::new(r), fractions);
+    EarthMasses::from(maximum_surviving_moon_mass(
+        &tidal,
+        hosts.primary_mass,
+        a,
+        e,
+        Seconds::from(age_now),
+    ))
+}
+
+/// A body's bulk as [`derive_body`] gives it, derived before its passes and without them (lever
+/// (e), decision-p14-t54a-passes, "Cost escalation (after Batch B)" §C.3): its mass, radius, mass
+/// fractions and class at the time, and P14.T15's largest surviving moon, none of which a pass
+/// reads back, so that each is [`derive_body`]'s to the bit ([`derive_bulk`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DerivedBulk {
+    mass: EarthMasses,
+    radius: EarthRadii,
+    fractions: MassFractions,
+    class: PlanetClass,
+    maximum_moon_mass: EarthMasses,
+}
+
+impl DerivedBulk {
+    /// The body's mass at the time ([`DerivedBody::mass`]).
+    #[must_use]
+    pub(crate) const fn mass(&self) -> EarthMasses {
+        self.mass
+    }
+
+    /// The body's radius at the time ([`DerivedBody::radius`]).
+    #[must_use]
+    pub(crate) const fn radius(&self) -> EarthRadii {
+        self.radius
+    }
+
+    /// The body's mass fractions at the time ([`DerivedBody::fractions`]).
+    #[must_use]
+    pub(crate) const fn fractions(&self) -> MassFractions {
+        self.fractions
+    }
+
+    /// The body's class ([`DerivedBody::class`]).
+    #[must_use]
+    pub(crate) const fn class(&self) -> PlanetClass {
+        self.class
+    }
+
+    /// The largest moon that survives about it ([`DerivedBody::maximum_moon_mass`]).
+    #[must_use]
+    pub(crate) const fn maximum_moon_mass(&self) -> EarthMasses {
+        self.maximum_moon_mass
+    }
+}
+
+impl From<&DerivedBody> for DerivedBulk {
+    fn from(derived: &DerivedBody) -> Self {
+        Self {
+            mass: derived.mass,
+            radius: derived.radius,
+            fractions: derived.fractions,
+            class: derived.class,
+            maximum_moon_mass: derived.maximum_moon_mass,
+        }
+    }
+}
+
+/// [`derive_body`]'s bulk of `placed` about `hosts`, formed in `disc`, in a system aged `age` at
+/// the epoch, at time `t`, without its passes (lever (e), decision-p14-t54a-passes, "Cost
+/// escalation (after Batch B)" §C.3): its stage before the passes and P14.T15's moon limit, the
+/// same bits as [`derive_body`]'s, at a fraction of its cost.
+///
+/// # Errors
+///
+/// As [`derive_body`], whose errors all come from that stage.
+pub(crate) fn derive_bulk(
+    placed: &PlacedBody,
+    hosts: &BodyHosts<'_>,
+    disc: &DiscProfile,
+    age: Years,
+    t: UniverseTime,
+) -> Result<DerivedBulk, DeriveBodyError> {
+    let stage = BeforePasses::of(placed, hosts, disc, age, t)?;
+    let mass = stage.escape.mass;
+    let class = PlanetClass::of(mass, &stage.fractions);
+    let maximum_moon_mass = moon_limit(
+        placed,
+        hosts,
+        class,
+        (mass, stage.radius, &stage.fractions),
+        stage.age_now,
+    );
+    Ok(DerivedBulk {
+        mass,
+        radius: stage.radius,
+        fractions: stage.fractions,
+        class,
+        maximum_moon_mass,
     })
 }
 
@@ -1527,8 +1711,26 @@ impl Sky {
     /// luminosities, and beyond the maximum-greenhouse limit when it falls below 1 now.
     ///
     /// It also sums the luminous hosts' light by band, each weighted by its flux now
-    /// ([`HostShadeSum`]), for the area mix (P14.T51.b): once per body, before its passes.
+    /// ([`HostShadeSum`]), for the area mix (P14.T51.b): once per body, before its passes, each
+    /// host's light and the shade's constants read off the hosts' book where they carry one
+    /// (lever (d)).
     fn of(placed: &PlacedBody, hosts: &BodyHosts<'_>, age: Years) -> Self {
+        let book = area_mix::book_read(hosts.shades);
+        let sky = Self::of_from(placed, hosts, age, book);
+        #[cfg(test)]
+        area_mix::check_shade(&sky.shade, book, || {
+            Self::of_from(placed, hosts, age, None).shade
+        });
+        sky
+    }
+
+    /// [`of`](Self::of), the shade reading `book` if there is one.
+    fn of_from(
+        placed: &PlacedBody,
+        hosts: &BodyHosts<'_>,
+        age: Years,
+        book: Option<&ShadeBook>,
+    ) -> Self {
         let (a, e) = (
             placed.orbit_now.semi_major_axis(),
             placed.orbit_now.eccentricity().value(),
@@ -1567,7 +1769,7 @@ impl Sky {
                 if t_eff > sums.hottest {
                     sums.hottest = t_eff;
                 }
-                sums.shade.add(flux, t_eff);
+                sums.shade.add_from(flux, t_eff, book);
             }
         };
         for host in hosts.orbited {
@@ -1592,7 +1794,7 @@ impl Sky {
             saturated_xuv_flux: sums.saturated_xuv_flux,
             insolation,
             hottest: sums.hottest,
-            shade: sums.shade.finish(),
+            shade: sums.shade.finish_from(book),
         }
     }
 }
@@ -2458,6 +2660,62 @@ mod tests {
                 Err(DeriveBodyError::GiantCooling(_) | DeriveBodyError::Giant(_))
             ),
             "{result:?}"
+        );
+    }
+
+    /// Lever (e): a body's bulk before its passes ([`derive_bulk`]) is its whole derivation's, to
+    /// the bit, refusals included: the eight planets and the table's small bodies about the present
+    /// Sun with its history, and masses across the composition solve at three distances and three
+    /// ranks, each at three ages and one before its system is born.
+    #[test]
+    fn the_bulk_before_the_passes_is_the_whole_derivation_s() {
+        let disc = solar_disc();
+        let lights = [historic_sun()];
+        let hosts = BodyHosts::new(
+            Kilograms::new(SOLAR_MASS_KG),
+            Composition::SOLAR,
+            &lights,
+            &[],
+        )
+        .unwrap();
+        let mut bodies: Vec<PlacedBody> = PLANETS
+            .iter()
+            .map(|&(name, kg, km, a, e)| {
+                let rank = if name == "Jupiter" {
+                    0.5
+                } else {
+                    rank_for(&disc, kg, km, a, e)
+                };
+                placed(kg, a, e, rank)
+            })
+            .collect();
+        bodies.extend(
+            SMALL_BODIES
+                .iter()
+                .map(|&(_, kg, km, a, e)| placed_about_the_sun(&disc, (kg, km, a, e))),
+        );
+        for m in MASSES {
+            for a in [0.1, 1.0, 30.0] {
+                for rank in [0.1, 0.5, 0.9] {
+                    bodies.push(placed(m * EARTH_MASS_KG, a, 0.05, rank));
+                }
+            }
+        }
+        let mut compared = 0;
+        let mut refused = 0;
+        for body in &bodies {
+            for age in [5e7, 4.4e9, 4.57e9, -1.0].map(Years::new) {
+                let whole = derive_body(body, &hosts, &disc, age, UniverseTime::EPOCH)
+                    .map(|derived| DerivedBulk::from(&derived));
+                let before = derive_bulk(body, &hosts, &disc, age, UniverseTime::EPOCH);
+                assert_eq!(format!("{before:?}"), format!("{whole:?}"));
+                compared += 1;
+                refused += usize::from(before.is_err());
+            }
+        }
+        assert!(
+            compared > 400 && refused >= bodies.len(),
+            "{compared} {refused}"
         );
     }
 
