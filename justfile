@@ -687,9 +687,11 @@ test-slow *args:
 
 # The client's slow tests: the descent spike's terrain clearance on all six of its ruling's runs
 # (seeds 0, 1 and 7, ridges off and on, decision-r05-descent-clearance.md), some 600 real bakes a
-# run. `just ci` runs the roughest of them alone.
+# run, and its descent over `TERRAIN TEST`'s moon through the terrain session (R10.T14.c), about
+# 1,600 real bakes in-process, about 120 s. `just ci` runs the roughest clearance run alone, and the
+# moon's measurement in parts.
 test-slow-client: gen-surface
-    just _locked bash -c 'cd apps/hyperion && HYPERION_SLOW_TESTS=1 pnpm exec vitest run src/renderer/src/view/spike/clearance.wasm.test.ts'
+    just _locked bash -c 'cd apps/hyperion && HYPERION_SLOW_TESTS=1 pnpm exec vitest run src/renderer/src/view/spike/clearance.wasm.test.ts src/renderer/src/view/spike/bodyDescent.wasm.test.ts'
 
 # The body of `test-slow`'s locked step: the slow tests with the recipe's arguments, then the timed
 # check.
