@@ -22397,3 +22397,87 @@ planetary::record` (624 tests at T57.a's commit).
       `hooks/surface/tests.rs`, `chem/partition/tests.rs`, `hooks/cold_traps/tests.rs`,
       `derive/photometry/area_mix/tests.rs` and `hooks/modifiers/tests.rs`, and the server's
       `convert/planetary.rs`.
+  - _Batch C's C0c, the remnant ice bulks' water_ (decision-p14-t54a-ganymede, "Remnant ice-bulk
+    bodies' water", 2026-10-21: a blocker, a wrong state and the owner's example of icy worlds
+    that publish no water). A checkpoint at 22: `GENERATOR_VERSION` stays 22, and the golden that
+    moves re-blesses at header 22 in the same commit.
+    - _The rule._ `Airborne::divide` takes the `held: IceHeld` that `state_and_greenhouse` already
+      has, and its `(Crust::Solid, Insolation::InsideRunaway)` arm keeps
+      `self.water = held.water.unwrap_or(0.0)` in place of 0.
+      - Where rule (b) holds the water (an ice bulk with a solid crust, its ice's vapour under
+        `AIRLESS_PRESSURE` at `inputs.equilibrium`, its loss over the age under its inventory), a
+        past runaway leaves the crust. Elsewhere the water is lost, as before.
+      - `lost` stays `inputs.inventory.water()`, so `runaway_oxygen`, C0b's six O₂ airs and the
+        arm's state do not move.
+      - It reads `held`, not a wider test, so that a big body whose Jeans test retains its water
+        and that lies inside the limit now, bright-iced under 253 K, keeps no frozen ocean.
+    - _The sources, checked as cited._ A past runaway takes an ice crust's surface layer, not its
+      bulk.
+      - Jura and Xu 2010 (AJ 140, 1129, §§2–3 and Figs. 3–6): by the AGB's end the water of a
+        100 km body's outer 7–10 km is vaporised, and bodies of 100 km or more keep at least half
+        their internal water (at least 70% in their second case).
+      - Malamud and Perets 2016 (ApJ 832, 160, its abstract): water often survives in large
+        amounts through every stage before the white dwarf.
+      - Documented on `Airborne::divide`'s arm, on `IceHeld` and in `atmosphere`'s step 3.
+    - _Tests:_
+      - `a_past_runaway_leaves_an_ice_bulk_the_water_its_ice_holds`: an e605-like ice bulk
+        (2.34 × 10⁻³ M⊕, 0.189 R⊕, 3.2 K, 5 Gyr, 37% water, an irradiation of 370 K at its host's
+        peak, the ruling's 3.1 S⊕), whose exobase of 1,661 K fails its water (λ 1.01) and its O₂
+        (λ 1.80).
+        - Its ice holds the water. Its column is W − `ice_vapour_escape` (5.17 × 10²¹ kg less 0)
+          times its weight, and on the record's path (its figures, its conditions and
+          `condensates_under`) its partition's frozen water is that column over g, both to the bit.
+        - That is its `H2O` solid entry, at the figures' T24.b ice area (1) to the bit, with no
+          water sea and T24.b's surface water nil.
+        - Its state, `Airless`, and its temperature are those of the same body with no water, to
+          the bit.
+      - `a_warm_ice_bulk_inside_the_runaway_limit_keeps_no_water`: the same body at 300 K, where
+        ice Ih's vapour is an air, holds none and stays `Airless`.
+      - Unchanged and passing: rule (a)'s
+        `a_runaway_world_whose_water_fails_its_jeans_test_keeps_the_oxygen_it_freed`, the rock-bulk
+        runaways' tests (`a_runaway_world_carries_the_oxygen_of_the_water_it_lost_less_its_sinks`,
+        `a_runaway_world_with_a_young_melt_keeps_less_oxygen` and the rest of
+        `derive::atmosphere::tests`), and C0b's (b) and measured moons' tests.
+    - _The count_ (`the_record_s_surface_holds_its_published_condensates`' tally). Of the sample's
+      510 ice-bulk surfaces, 438 now list their crust's frozen water as `H2O` solid (401 + 37) and
+      11 T24.b's surface water.
+      - 61 list none, as the ruling counts: C0b's 98 less the 36 remnant bodies at 3.00–10.34 K
+        and `01ffeb2c20000000.0400`, whose ice holds its water under the same rule. They are the
+        57 small or warm bodies whose ice's vapour escapes (`Airless`) and the 4 Jeans-retaining
+        planets labelled `RunawayGreenhouse`.
+      - No state moves: the 37 keep theirs (36 `Airless`, `.0400` `RunawayGreenhouse`) and their
+        mean temperatures, and no other body reaches the arm with water held.
+    - _Bless note_ (for §C1.6, the ruling's line):
+      - **Past runaways on ice bulks.** A past runaway, judged at the host's peak, no longer takes
+        an ice crust's held water: 36 sample bodies about stellar remnants (3–10 K) and
+        01ffeb2c20000000.0400 list their H₂O ice. 61 of 510 ice bulks list none: small or warm
+        bodies whose vapour escapes, and 4 past-only runaway planets labelled `RunawayGreenhouse`
+        (item 33, P14.T53.b).
+    - _Recorded beyond the ruling, no hold:_
+      - Three of the 37 list their crust at area 0: `61ffd9680000000c.0201` and `.0202` (3.0 K)
+        and `42002cb1ffc00004.0401` (7.7 K). They are small captured moons whose `Crust::of` is
+        `Silicate` (born `Birthplace::Other`, their water's layer under `ICE_RICH_LAYER_DEPTH`),
+        so T24.b caps their ice at their nil surface water. Their published H₂O ice stays 0, as
+        their appended T24.b item was; the sample's other 435 crust entries lie on ice-rich crusts.
+        An ice bulk's crust is its ice whatever `Crust::of` says. Main accepted this as recorded
+        (2026-10-21): the disagreement of `SurfaceMaterial` and `Crust::of` is deferred to
+        P14.T53.c, with no uncapped-area rule now.
+      - _Further reading:_ Malamud and Perets's third paper (2017, doi:10.3847/1538-4357/aa8df5)
+        carries the same model to dwarf planets and moons of hundreds of kilometres, e605's size,
+        and finds some water nearly always kept. The code cites the ruling's two sources.
+      - This supersedes C0b's "The 36 past-only runaways above publish no water".
+    - _Recorded, as the ruling states them (docs batch):_
+      - T53.b: item 33's "a past runaway removes its water only" becomes "only its free water, not
+        an ice crust's", and the history's lost layer a sublimation-with-lag term at the peak
+        (Malamud and Perets 2016), sized by the body.
+      - T53.b: the 4 Jeans-retaining ice-bulk planets dry at 85–134 K go to its present-insolation
+        rule.
+      - T53.a: `.0400`'s O₂ (about 8.6 × 10¹⁹ kg) is counted from the whole inventory beside the
+        kept crust.
+    - _Moved goldens_, re-blessed at header 22 (`golden_diff.py`, scratch `l2/p1_golden_diff.txt`:
+      one extended only, none changed): `planetary/surface_conditions_published`, where the
+      remnant moons `61ffd9680000000c.0201` and `.0202` list their crust's `H2O` ice before their
+      N₂ frost, in the entries' sorted order, at the same area 0 as before: two lines reordered, no
+      value moved. The rest hold: the sim's other lib and integration goldens, and the server's
+      `systems_in_range`, `system_bodies` and `convert` tests.
+    - _Files:_ `planetary/derive/atmosphere.rs`; the tests in `derive/atmosphere/tests.rs`.

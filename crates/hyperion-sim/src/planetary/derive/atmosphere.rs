@@ -1616,7 +1616,8 @@ impl From<CarbonCarrier> for Gas {
 /// impact escape of an air it cannot form. It reads the pass's temperature, as a volatile ice's
 /// vapour does, so its verdict can change between passes. Methane follows nitrogen
 /// ([`Retention::with_methane_as_nitrogen`], applied after it); carbon dioxide and argon, and the
-/// rock bulks, keep T13.b's verdicts until P14.T53.c.
+/// rock bulks, keep T13.b's verdicts until P14.T53.c. A past runaway leaves the water it holds
+/// ([`Airborne::divide`]): it takes an ice crust's surface layer, not its bulk.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct IceHeld {
     /// The water the ice holds, kg, where some is held.
@@ -1726,8 +1727,13 @@ impl Airborne {
     }
 
     /// How the climate of the body `inputs` describe divides what it keeps, with retention
-    /// `retention` ([`atmosphere`]'s step 3); the state it gives.
-    fn divide(&mut self, inputs: &AtmosphereInputs, retention: Retention) -> SurfaceState {
+    /// `retention` and its ice holding `held` ([`atmosphere`]'s step 3); the state it gives.
+    fn divide(
+        &mut self,
+        inputs: &AtmosphereInputs,
+        retention: Retention,
+        held: IceHeld,
+    ) -> SurfaceState {
         match (inputs.crust, inputs.insolation) {
             // A young magma ocean, whatever its greenhouse's temperature, holds its carbon as
             // carbon dioxide (the reported surface is at least the solidus).
@@ -1742,9 +1748,16 @@ impl Airborne {
             // 2015), not by H₂O's molecular Jeans test: the water that fails that test still frees
             // its oxygen, which O₂'s own test then judges (decision-p14-t54a-ganymede, C0
             // follow-up, rule (a)).
+            //
+            // A past runaway takes an ice crust's surface layer, not its bulk: the water rule (b)
+            // holds at the present temperature stays (Jura and Xu 2010, AJ 140, 1129, whose AGB
+            // host vaporises a 100 km body's outer 7–10 km and leaves it at least half its
+            // internal water; Malamud and Perets 2016, ApJ 832, 160; decision-p14-t54a-ganymede,
+            // "Remnant ice-bulk bodies' water"). The oxygen is still that of the whole inventory,
+            // so that rule (a)'s airs and the state are as they were (P14.T53.a divides it).
             (Crust::Solid, Insolation::InsideRunaway) => {
                 let lost = inputs.inventory.water().value();
-                self.water = 0.0;
+                self.water = held.water.unwrap_or(0.0);
                 if retention.retains(Gas::Oxygen) {
                     self.oxygen = runaway_oxygen(
                         Kilograms::new(lost),
@@ -1939,10 +1952,13 @@ fn partitioned_greenhouse(
 ///    ([`runaway_oxygen`], P14.T24.f, if oxygen is retained). That water is the whole drawn
 ///    inventory's, whatever water's own Jeans test says: a runaway world loses it by photolysis
 ///    and hydrogen escape (Luger and Barnes 2015), and the water that fails that test still frees
-///    its oxygen (decision-p14-t54a-ganymede, C0 follow-up, rule (a)). In the habitable zone a
-///    world with water stores all but [`TEMPERATE_AIRBORNE_CARBON`] of its carbon in rock; beyond
-///    the maximum-greenhouse limit the carbon is airborne, since no ocean weathers it. A molten
-///    crust holds nothing back.
+///    its oxygen (decision-p14-t54a-ganymede, C0 follow-up, rule (a)). An ice crust keeps the
+///    water its ice holds at the present temperature (step 2): a past runaway takes an ice
+///    crust's surface layer, not its bulk (Jura and Xu 2010, AJ 140, 1129; Malamud and Perets
+///    2016, ApJ 832, 160), while its oxygen is still that of the whole inventory. In the habitable
+///    zone a world with water stores all but [`TEMPERATE_AIRBORNE_CARBON`] of its carbon in rock;
+///    beyond the maximum-greenhouse limit the carbon is airborne, since no ocean weathers it. A
+///    molten crust holds nothing back.
 /// 4. The partial pressures are each airborne mass's weight over the surface, M g ÷ 4πR², less
 ///    what condenses: each gas whose row of the substance registry has a phase diagram is held at
 ///    its cap as P14.T51.a's
@@ -2118,7 +2134,7 @@ fn state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) ->
 
     // Steps 2 and 3: what escape leaves, and how the climate divides it.
     let mut airborne = Airborne::kept(inputs, retention, held);
-    let climate = airborne.divide(inputs, retention);
+    let climate = airborne.divide(inputs, retention, held);
 
     // Step 4: the partial pressures and the greenhouse they hold.
     let equilibrium = inputs.equilibrium;

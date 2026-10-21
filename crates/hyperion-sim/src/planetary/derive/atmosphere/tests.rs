@@ -2040,7 +2040,7 @@ fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) 
     let held = IceHeld::of(inputs, jeans);
     let retention = jeans.with(held.retention()).with_methane_as_nitrogen();
     let mut airborne = Airborne::kept(inputs, retention, held);
-    airborne.divide(inputs, retention);
+    airborne.divide(inputs, retention, held);
     let weight = GRAVITATIONAL_CONSTANT * m / (r * r) / (4.0 * core::f64::consts::PI * r * r);
     let body = ClimateBody {
         equilibrium_temperature: inputs.equilibrium,
@@ -2167,8 +2167,12 @@ fn a_dry_earth_beyond_the_maximum_greenhouse_still_runs_away_past_its_cold_trap(
     // No state below freezing holds itself: at each, with its column held by the partition over
     // its own climate, the greenhouse warms the surface above it.
     let retention = air.retention();
-    let mut airborne = Airborne::kept(&earth, retention, IceHeld::of(&earth, retention));
-    assert_eq!(airborne.divide(&earth, retention), SurfaceState::Snowball);
+    let held = IceHeld::of(&earth, retention);
+    let mut airborne = Airborne::kept(&earth, retention, held);
+    assert_eq!(
+        airborne.divide(&earth, retention, held),
+        SurfaceState::Snowball
+    );
     let (m, r) = (earth.mass.value(), earth.radius.value());
     let weight_gravity = GRAVITATIONAL_CONSTANT * m / (r * r);
     let weight = weight_gravity / (4.0 * core::f64::consts::PI * r * r);
@@ -3088,4 +3092,266 @@ fn a_500_km_body_at_40_k_keeps_no_nitrogen() {
     assert_same_bits(air.inventory_weights().of(Gas::Methane).value(), 0.0);
     assert!(air.ice_held().retains(Gas::Water));
     assert_eq!(air.state(), SurfaceState::Airless);
+}
+
+// Decision-p14-t54a-ganymede, "Remnant ice-bulk bodies' water" (2026-10-21): a past runaway
+// leaves an ice crust the water its ice holds.
+
+/// The inputs of an ice bulk like the sample's 41ffecb200000005.e605, a belt member of
+/// 2.34 × 10⁻³ M⊕ and 0.189 R⊕ about a stellar remnant, at 5 Gyr and the equilibrium temperature
+/// `equilibrium` K. It lay inside the runaway limit at its host's peak, an irradiation of 370 K
+/// (the ruling's 3.1 S⊕, 40 au from 5 × 10³ L☉), so that its exobase of some 1,660 K fails its
+/// water (λ ≈ 1.0) and its O₂ (λ ≈ 1.8). Its bulk is 37% water, as the member's is.
+fn remnant_ice_bulk(equilibrium: f64) -> AtmosphereInputs {
+    let kg = 2.34e-3 * EARTH_MASS_KG;
+    AtmosphereInputs {
+        mass: Kilograms::new(kg),
+        radius: Metres::new(0.189 * crate::units::consts::EARTH_RADIUS_M),
+        material: SurfaceMaterial::Ice,
+        envelope_fraction: 0.0,
+        class: PlanetClass::Icy,
+        inventory: VolatileInventory::new(
+            Kilograms::new(0.37 * kg),
+            Kilograms::new(100.0 * EARTH_CARBON_DIOXIDE_PER_MASS * kg),
+            Kilograms::new(100.0 * EARTH_NITROGEN_PER_MASS * kg),
+            Kilograms::ZERO,
+        ),
+        formed: SnowLineSide::Beyond,
+        equilibrium: Kelvin::new(equilibrium),
+        irradiation_temperature: Kelvin::new(370.0),
+        heated: Kelvin::new(equilibrium),
+        xuv_fluence: earth_xuv_fluence(),
+        saturated_xuv_flux: WattsPerSquareMetre::new(1.0),
+        insolation: Insolation::InsideRunaway,
+        crust: Crust::Solid,
+        molten_for: Years::ZERO,
+        age: Years::new(5e9),
+        hottest_host: Kelvin::new(10_000.0),
+    }
+}
+
+/// The figures of the body `inputs` describe, whose atmosphere is `air`, turning as Ceres does,
+/// its crater contract a planet's on a circular orbit at 1 au under the Solar System's sources,
+/// as `table_figures` gives the table's bodies theirs.
+fn remnant_figures(
+    inputs: &AtmosphereInputs,
+    air: &Atmosphere,
+    spin: &crate::planetary::hooks::surface::SeasonalSpin,
+) -> crate::planetary::hooks::figures::GlobalFigures {
+    use crate::planetary::hooks::figures::relief::EARTH_CONTINENTAL_FRACTION;
+    use crate::planetary::hooks::figures::tests::solar_sources;
+    use crate::planetary::hooks::figures::{
+        Continents, CraterInputs, FiguresInputs, GlobalFigures, HostOrbit, HostOrbiter,
+        ImpactorOrbit, Subsurface,
+    };
+    use crate::units::{Dex, KilogramsPerCubicMetre};
+    let (kg, r) = (inputs.mass.value(), inputs.radius.value());
+    let mass = EarthMasses::new(kg / EARTH_MASS_KG);
+    GlobalFigures::derive(&FiguresInputs {
+        atmosphere: air,
+        mass,
+        radius: inputs.radius,
+        surface_gravity: MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * kg / (r * r)),
+        class: PlanetClass::Icy,
+        fractions: MassFractions::solid(0.0, 0.63, 0.37),
+        inventory_water: inputs.inventory.water(),
+        rotation_period: spin.rotation_period,
+        fe_h: Dex::new(0.0),
+        age: inputs.age,
+        tidal_heat_flow: WattsPerSquareMetre::new(0.0),
+        subsurface_ocean: Subsurface::NotComputed,
+        craters: CraterInputs {
+            orbit: ImpactorOrbit::Host(HostOrbiter {
+                orbit: HostOrbit {
+                    semi_major_axis: Metres::new(METRES_PER_AU),
+                    eccentricity: 0.0,
+                    inclination: Radians::ZERO,
+                },
+                mass,
+                belt: None,
+            }),
+            density: KilogramsPerCubicMetre::new(
+                kg / (4.0 / 3.0 * core::f64::consts::PI * r * r * r),
+            ),
+            sources: solar_sources(),
+            molten_until: None,
+            last_giant_impact: None,
+        },
+        continents: Continents::Given(EARTH_CONTINENTAL_FRACTION),
+    })
+    .expect("the remnant's ice bulk is in range")
+    .expect("an airless ice bulk has a surface")
+}
+
+/// What the record's path gives a body ([`remnant_record`]).
+struct RemnantRecord {
+    figures: crate::planetary::hooks::figures::GlobalFigures,
+    conditions: crate::planetary::hooks::surface::SurfaceConditions,
+    partition: crate::planetary::chem::partition::Partition,
+    published: crate::planetary::chem::partition::Condensates,
+}
+
+/// The record's path for the body `inputs` describe, whose atmosphere is `air`, turning as Ceres
+/// does: its figures ([`remnant_figures`]), its conditions under the flux that holds its
+/// equilibrium temperature at its albedo, and its partition and published condensates
+/// (`condensates_under`, the cold traps held, under the Moon's sky).
+fn remnant_record(inputs: &AtmosphereInputs, air: &Atmosphere) -> RemnantRecord {
+    use crate::planetary::hooks::cold_traps::{ColdTrapRules, RecordColdTraps, lunar_sky};
+    use crate::planetary::hooks::surface::tests::spin_of;
+    use crate::planetary::hooks::surface::{SurfaceConditions, SurfaceInputs};
+    use crate::units::consts::STEFAN_BOLTZMANN;
+    let spin = spin_of("Ceres");
+    let figures = remnant_figures(inputs, air, &spin);
+    let r = inputs.radius.value();
+    let gravity =
+        MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * inputs.mass.value() / (r * r));
+    let albedo = air.albedo().value();
+    let flux = 4.0 * STEFAN_BOLTZMANN * math::powi(inputs.equilibrium.value(), 4) / (1.0 - albedo);
+    let conditions = SurfaceConditions::derive(&SurfaceInputs {
+        atmosphere: air,
+        equilibrium_temperature: inputs.equilibrium,
+        surface_gravity: gravity,
+        radius: inputs.radius,
+        material: SurfaceMaterial::Ice,
+        stellar_flux: WattsPerSquareMetre::new(flux),
+        xuv_flux: WattsPerSquareMetre::ZERO,
+        spin,
+        heat_flow: figures.heat_flow(),
+        ocean_weight: figures.ocean_weight(),
+    })
+    .expect("it has a surface");
+    let table = conditions.zonal_insolation();
+    let sky = lunar_sky();
+    let traps = RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, air);
+    let (partition, published) =
+        figures.condensates_under(air, &conditions, gravity, &traps, &table);
+    RemnantRecord {
+        figures,
+        conditions,
+        partition,
+        published,
+    }
+}
+
+/// A past runaway takes an ice crust's surface layer, not its bulk (Jura and Xu 2010; Malamud and
+/// Perets 2016): an ice bulk like e605 at 3.2 K, inside the runaway limit at its remnant host's
+/// peak, whose water fails Jeans's test, keeps the water its ice holds (rule (b)). Its column holds
+/// its inventory less its ice's vapour's escape, and on the record's path (its figures and
+/// conditions and `condensates_under`) its partition's frozen water is that column over its
+/// gravity, all of it, to the bit, listed as its `H2O` solid at the figures' T24.b ice area. Its
+/// state is the one its lost water gave it, `Airless`, at the same temperature, and its O₂, which
+/// fails Jeans's test, stays unretained (rule (a)'s oxygen reads the whole inventory still).
+#[test]
+fn a_past_runaway_leaves_an_ice_bulk_the_water_its_ice_holds() {
+    use crate::planetary::chem::partition::CondensatePhase;
+    use crate::planetary::hooks::figures::cover;
+    let inputs = remnant_ice_bulk(3.2);
+    let (mass, radius) = (inputs.mass, inputs.radius);
+    let air = atmosphere(&inputs);
+    let exobase = air.exobase_temperature();
+    let lambda = |gas: Gas| jeans_parameter(mass, radius, gas, exobase);
+    let water = inputs.inventory.water().value();
+    let loss = ice_vapour_escape(mass, radius, Gas::Water, inputs.equilibrium, inputs.age)
+        .expect("water ice's vapour at 3.2 K is no air");
+    let kept = water - loss.value();
+    eprintln!(
+        "a remnant's ice bulk at {:.1} K: exobase {:.1} K, λ(H₂O) {:.3}, λ(O₂) {:.3}; water \
+         {water:.4e} kg, its ice's loss {:.3e} kg",
+        inputs.equilibrium.value(),
+        exobase.value(),
+        lambda(Gas::Water),
+        lambda(Gas::Oxygen),
+        loss.value()
+    );
+    assert!(lambda(Gas::Water) < JEANS_RETENTION_THRESHOLD);
+    assert!(lambda(Gas::Oxygen) < JEANS_RETENTION_THRESHOLD);
+    assert!(!Retention::of(mass, radius, exobase).retains(Gas::Water));
+    assert!(air.ice_held().retains(Gas::Water), "{air:?}");
+    assert!(air.retention().retains(Gas::Water), "{air:?}");
+    assert!(!air.retention().retains(Gas::Oxygen), "{air:?}");
+    assert!(kept > 0.0, "{kept}");
+    let (m, r) = (mass.value(), radius.value());
+    let g = GRAVITATIONAL_CONSTANT * m / (r * r);
+    let weight = g / (4.0 * core::f64::consts::PI * r * r);
+    assert_same_bits(
+        air.inventory_weights().of(Gas::Water).value(),
+        kept * weight,
+    );
+    assert_same_bits(air.inventory_weights().of(Gas::Oxygen).value(), 0.0);
+    // The state is the one the lost water gave: that of the same body with no water.
+    let mut dry = inputs;
+    dry.inventory = VolatileInventory::new(
+        Kilograms::ZERO,
+        inputs.inventory.carbon_dioxide(),
+        inputs.inventory.nitrogen(),
+        inputs.inventory.argon(),
+    );
+    let dry = atmosphere(&dry);
+    assert_eq!(air.state(), SurfaceState::Airless, "{air:?}");
+    assert_eq!(air.state(), dry.state());
+    assert_same_bits(
+        air.surface_temperature().value(),
+        dry.surface_temperature().value(),
+    );
+
+    // The record's path.
+    let RemnantRecord {
+        figures,
+        conditions,
+        partition,
+        published,
+    } = remnant_record(&inputs, &air);
+    let ice = cover::ice_fraction(&cover::IceInputs {
+        conditions: &conditions,
+        state: air.state(),
+        crust: figures.impactors().crust(),
+        surface_water: figures.surface_water(),
+    });
+    let at = format!(
+        "at a mean {:.2} K: T24.b's ice {ice}, {:?}",
+        conditions.mean_surface_temperature().value(),
+        published.entries()
+    );
+    eprintln!("{at}");
+    let frozen = partition
+        .condensate(Gas::Water.substance())
+        .unwrap_or_else(|| panic!("{at}: the partition holds the crust's water"));
+    assert_eq!(frozen.phase(), CondensatePhase::Solid, "{at}");
+    assert_same_bits(frozen.reservoir().value(), kept * weight / g);
+    let entry = published
+        .entry(Gas::Water.substance(), CondensatePhase::Solid)
+        .unwrap_or_else(|| panic!("{at}: no H2O solid entry"));
+    assert_same_bits(entry.reservoir().value(), frozen.reservoir().value());
+    assert_same_bits(entry.area_fraction(), ice);
+    assert!(ice > 0.0, "{at}");
+    assert!(
+        published
+            .entry(Gas::Water.substance(), CondensatePhase::Liquid)
+            .is_none(),
+        "{at}"
+    );
+    // T24.b's surface water stays on water's Jeans verdict: none.
+    assert_same_bits(figures.surface_water().value(), 0.0);
+}
+
+/// The ice holds no water whose vapour would be an air: the same ice bulk inside the runaway limit
+/// at an equilibrium temperature of 300 K, where ice Ih's vapour is some 3.5 kPa, keeps none, as
+/// before the remnant ruling, and its water's column is nil.
+#[test]
+fn a_warm_ice_bulk_inside_the_runaway_limit_keeps_no_water() {
+    let inputs = remnant_ice_bulk(300.0);
+    let air = atmosphere(&inputs);
+    let held = ice_vapour_escape(
+        inputs.mass,
+        inputs.radius,
+        Gas::Water,
+        inputs.equilibrium,
+        inputs.age,
+    );
+    assert_eq!(held, None);
+    assert!(!air.ice_held().retains(Gas::Water), "{air:?}");
+    assert!(!air.retention().retains(Gas::Water), "{air:?}");
+    assert_same_bits(air.inventory_weights().of(Gas::Water).value(), 0.0);
+    assert_same_bits(air.partial_pressures().of(Gas::Water).value(), 0.0);
+    assert_eq!(air.state(), SurfaceState::Airless, "{air:?}");
 }
