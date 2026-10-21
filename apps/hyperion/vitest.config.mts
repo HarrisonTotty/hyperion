@@ -64,7 +64,7 @@ export default defineConfig({
     // about 30 s to about 14 s. It gives up the isolation of the module registry and of the jsdom,
     // so the suite has to be order-independent, which is a rule it already keeps:
     // `vitest run --sequence.shuffle` passes. The shared setup clears what would otherwise carry
-    // from one file to the next.
+    // from one file to the next. The logic files run isolated all the same, for memory (below).
     isolate: false,
     // A stylesheet imported for its effect is empty in a test, as Vitest makes every CSS file, so
     // that jsdom applies no layout rules; one imported as text (`?raw`) keeps its text, so that a
@@ -76,6 +76,18 @@ export default defineConfig({
         test: {
           name: "logic",
           environment: "node",
+          // Each logic file runs in a fresh worker. A shared worker keeps the high-water mark of
+          // every file it has run, since V8 and the C allocator keep the memory they grew, and its
+          // module registry keeps every module the files imported: with these files' four workers
+          // shared, they held 0.6 to 1.3 GB each by the suite's end, and with vitest's own 1.1 GB
+          // the suite's scope peaked at 4.6 to 5.1 GB, against `_vitest-run`'s cap of 5 GB, which
+          // killed CI-167's suite (2026-10-20). Isolated, these files' part of the suite peaked at
+          // 2.2 to 3.0 GB, when its heaviest files ran together, and a Node worker costs so little
+          // to start that the suite took no longer: 267 s against 297 s shared, at 4 workers on a
+          // quiet machine. The DOM files' shared workers now set the suite's peak, at 3.2 to 3.5
+          // GB. Isolating them as well took that part to 2.1 GB but the suite to 317 s, a jsdom
+          // being set up for each file.
+          isolate: true,
           include: ["src/**/*.test.ts"],
           exclude: DOM_TESTS,
         },
