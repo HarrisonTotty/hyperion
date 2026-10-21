@@ -2174,7 +2174,9 @@ fn a_locked_world_with_obliquity_has_twelve_months_that_differ() {
 mod cold_traps;
 mod earth_land;
 mod hydrology;
+mod ncep_air;
 mod normalisation;
+mod observed;
 mod thin_air;
 
 /// R09.T13.c's tests: the radiative model with thermal inertia and the isothermal surface.

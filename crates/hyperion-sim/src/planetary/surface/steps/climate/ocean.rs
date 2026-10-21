@@ -55,7 +55,6 @@ use super::grid::{LATITUDE_BANDS, ModelGrid};
 use super::partition::edge_fluxes;
 use super::partition::{
     Circulation, Turning, UPPER_BRANCH_ENERGY_RATIO, edge_fluxes_into, energy_flux_equator,
-    hadley_share,
 };
 use super::transport::rotation_ratio;
 use super::wind;
@@ -545,7 +544,7 @@ impl OceanGrid {
         let mut psi = [0.0; LATITUDE_BANDS + 1];
         for (edge, mass) in psi.iter_mut().enumerate().take(LATITUDE_BANDS).skip(1) {
             let x = grid.edge_sine(edge);
-            let share = hadley_share(x, centre, circulation.width());
+            let share = circulation.share(x, centre);
             let energy = f64::midpoint(band_energy[edge - 1], band_energy[edge]);
             let poleward = if x >= 0.0 { flux[edge] } else { -flux[edge] };
             let value = self.edge_sea[edge] * share * poleward / (upper - energy);
@@ -553,7 +552,7 @@ impl OceanGrid {
         }
         for (edge, gain) in gains.iter_mut().enumerate().take(LATITUDE_BANDS).skip(1) {
             let x = grid.edge_sine(edge);
-            let share = hadley_share(x, centre, circulation.width());
+            let share = circulation.share(x, centre);
             let sea = f64::midpoint(band_sea_k[edge - 1], band_sea_k[edge]);
             // Each band between the edge and the return band, poleward, with the flux at its two
             // edges: band k north of edge k in the north, band k − 1 south of it in the south.
@@ -603,7 +602,7 @@ impl OceanGrid {
             |most, &h| if h > most { h } else { most },
         );
         let x = grid.edge_sine(edge);
-        let share = hadley_share(x, centre, ekman.circulation.width());
+        let share = ekman.circulation.share(x, centre);
         let energy = f64::midpoint(band_energy[edge - 1], band_energy[edge]);
         let poleward = if x >= 0.0 { flux[edge] } else { -flux[edge] };
         let psi = self.edge_sea[edge] * share * poleward

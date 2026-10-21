@@ -17,6 +17,7 @@ use super::super::lfpm::{
     self, CellWind, Cover, DOWNWIND_TOLERANCE, EARTH_DEEP_TOLERANCE, GroundState, MAX_RESTARTS,
     Mesh, Month, Parameters, RATE_FLOOR_SHARE, TOLERANCE,
 };
+use super::super::partition;
 use super::super::wind;
 use super::super::{
     Diagnostics, annual_runoff_kg_m2_s, energy_balance, finish, month_shares, normalised,
@@ -2106,8 +2107,10 @@ fn the_annual_runoff_is_none_over_liquid_the_unrecycled_share_on_thawed_ground_a
 /// A locked world's circulation converges on its substellar point, uncapped (decision-r09-t13ge
 /// §2.10, §2.12; Design note 8): the reference Earth locked 1:1 to its star on a circular orbit
 /// with no obliquity (one month), all sea, at level 5. Its energy-flux equator is the tidally locked
-/// pole, the substellar point, and its centre that equator; every moving wind on the day side
-/// blows towards the substellar point; and the rain is heaviest near it.
+/// pole, the substellar point, and its centre that equator; its Hadley share at every inner band
+/// edge is the as-built one to the bit, no edge lying beyond its centre (decision-r09-t13i §3.5,
+/// 1); every moving wind on the day side blows towards the substellar point; and the rain is
+/// heaviest near it.
 #[test]
 fn a_locked_aquaplanet_s_winds_converge_on_its_substellar_point() {
     let run = run_world(locked_earth(0.0, 0.0), 5, Grid::Own, flood_all);
@@ -2116,6 +2119,14 @@ fn a_locked_aquaplanet_s_winds_converge_on_its_substellar_point() {
     let cycle = &water.months[0];
     assert_same_bits(cycle.budget.centre_sine, cycle.budget.efe_sine);
     assert!(cycle.budget.efe_sine > 0.99, "{}", cycle.budget.efe_sine);
+    let grid = ModelGrid::locked();
+    for edge in 1..LATITUDE_BANDS {
+        let x = grid.edge_sine(edge);
+        assert_same_bits(
+            water.circulation.share(x, cycle.budget.centre_sine),
+            partition::as_built_share(x, cycle.budget.centre_sine, water.circulation.width()),
+        );
+    }
     let (mut towards, mut day, mut wettest) = (0_u32, 0_u32, (0.0_f64, 0.0_f64));
     for (state, &up) in run.working.climate.iter().zip(run.climate.centres()) {
         let gamma_cosine = up[0];

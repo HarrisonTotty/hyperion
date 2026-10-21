@@ -30,9 +30,21 @@
 //!   min(|`φ_EFE`|, Φ₁) ([`Circulation::cap_deg`]). A world locked 1:1 to its host takes no cap:
 //!   its circulation converges on the substellar point, in tidally locked coordinates (Design note
 //!   8), which the energy-flux equator there finds.
-//! - **The weighting** is 1 between the equator and the centre, with Siler et al.'s Gaussian of
-//!   width `σ_x` beyond each end: from the centre poleward in its hemisphere, and from the equator
-//!   into the other ([`hadley_share`]). At c = 0 it is their eq. 6.
+//! - **The weighting** is 1 between the equator and the centre. From the equator into the other
+//!   hemisphere it is Siler et al.'s Gaussian of width `σ_x`. Beyond the centre in its own, the
+//!   summer, hemisphere it is a Gaussian of the narrower width `σ_s` = `σ_x` max(0, 1 − |c| ÷
+//!   `x_H`), `x_H` = sin `φ_H`, and zero where that width is zero ([`hadley_share`];
+//!   decision-r09-t13i §3.1). The summer cell weakens and narrows as the ascending branch moves
+//!   poleward, and vanishes at the cell's edge: in solstice seasons the winter cell is strong and
+//!   spans the equator, the summer cell weak and confined (Lindzen, R. S., and Hou, A. Y. 1988,
+//!   "Hadley Circulations for Zonally Averaged Heating Centered off the Equator", J. Atmos. Sci.
+//!   45, 2416–2427; Dima, I. M., and Wallace, J. M. 2003, "On the Seasonality of the Hadley Cell",
+//!   J. Atmos. Sci. 60, 1522–1527; both from memory, as the ruling reads them). Without it the
+//!   summer midlatitudes took a Hadley share Siler et al.'s annual calibration never has, 0.14 at
+//!   40° N in July against 0.01, and their summer convergence collapsed even on observed
+//!   temperatures (0.18 mm/day at 40–60° N in JJA against 1.09; decision-r09-t13i §1.2). At c = 0
+//!   it is their eq. 6 to the bit; a locked world's centre stands at its substellar pole, beyond
+//!   which no edge lies, so its share is as before.
 //! - **The width** scales with rotation after Kaspi and Showman 2015 (decision-r09-t13ge §2.5): the
 //!   Hadley edge `φ_H` = 25.1° (Ω⊕ ÷ Ω)^½, held at 90°, and `σ_x` = 0.3 sin `φ_H` ÷ sin 25.1°.
 //! - **`h_T`** is 1.06 times the month's greatest band h (Siler et al. take 1.06 h(0), their
@@ -173,9 +185,17 @@ impl Circulation {
     }
 
     /// The Hadley width `σ_x` in sine latitude.
+    #[cfg(test)]
     #[must_use]
     pub(super) const fn width(&self) -> f64 {
         self.width
+    }
+
+    /// The Hadley cell's share w at sine latitude `x` about a centre of sine `centre`, under this
+    /// circulation's width and edge ([`hadley_share`]).
+    #[must_use]
+    pub(super) fn share(&self, x: f64, centre: f64) -> f64 {
+        hadley_share(x, centre, self.width, self.edge_sine)
     }
 
     /// The ascending branch's latitude Φ₁ that caps the centre, degrees, or `None` on a locked
@@ -234,13 +254,73 @@ fn ascending_branch_deg(inputs: &CoarseInputs, rate: f64) -> f64 {
     }
 }
 
-/// The Hadley cell's share w of the flux at sine latitude `x` for a centre of sine `centre` and a
-/// width `width` (decision-r09-t13ge §2.10): 1 from the equator to the centre, and beyond each
-/// end Siler et al.'s Gaussian exp(−(d ÷ `σ_x`)²), d the distance in sine latitude past that end,
-/// poleward from the centre in its hemisphere and from the equator into the other. At a centre on
-/// the equator it is their eq. 6.
+/// The Hadley cell's share w of the flux at sine latitude `x` for a centre of sine `centre`, a
+/// width `width` (`σ_x`) and an edge of sine `edge_sine` (`x_H`; decision-r09-t13ge §2.10, as
+/// decision-r09-t13i §3.1 narrows its summer side): 1 from the equator to the centre; from the
+/// equator into the other hemisphere Siler et al.'s Gaussian exp(−(d ÷ `σ_x`)²), d the distance in
+/// sine latitude past the equator; beyond the centre in its own hemisphere exp(−((x − c) ÷
+/// `σ_s`)²) with the summer width `σ_s` ([`summer_width`]), and zero where `σ_s` is zero. At a
+/// centre on the equator it is their eq. 6 to the bit, `σ_s` being `σ_x` there.
 #[must_use]
-pub(super) fn hadley_share(x: f64, centre: f64, width: f64) -> f64 {
+pub(super) fn hadley_share(x: f64, centre: f64, width: f64, edge_sine: f64) -> f64 {
+    let (low, high) = if centre < 0.0 {
+        (centre, 0.0)
+    } else {
+        (0.0, centre)
+    };
+    // Past the centre in its own hemisphere: the summer side. At a centre of 0 neither side is the
+    // summer's; the summer width is then `σ_x` itself, so either reading gives eq. 6's bits.
+    let (past, scale) = if x > high {
+        (
+            x - high,
+            if centre > 0.0 {
+                summer_width(centre, width, edge_sine)
+            } else {
+                width
+            },
+        )
+    } else if x < low {
+        (
+            low - x,
+            if centre < 0.0 {
+                summer_width(centre, width, edge_sine)
+            } else {
+                width
+            },
+        )
+    } else {
+        return 1.0;
+    };
+    // By comparison, so that no width at all gives no share rather than a NaN.
+    if scale > 0.0 {
+        let d = past / scale;
+        math::exp(-d * d)
+    } else {
+        0.0
+    }
+}
+
+/// The summer side's width `σ_s` = `σ_x` max(0, 1 − |c| ÷ `x_H`) of a centre of sine `centre` under
+/// the width `width` (`σ_x`) and the edge's sine `edge_sine` (`x_H`; decision-r09-t13i §3.1): the
+/// summer cell narrows as its ascending branch moves poleward and has no width once the centre
+/// reaches the cell's edge. It scales with rotation through `φ_H`. At c = 0 it is `σ_x` to the bit.
+#[must_use]
+pub(super) fn summer_width(centre: f64, width: f64, edge_sine: f64) -> f64 {
+    let narrowing = 1.0 - centre.abs() / edge_sine;
+    // By comparison, so that a centre at or past the edge (and a NaN) gives no width.
+    if narrowing > 0.0 {
+        width * narrowing
+    } else {
+        0.0
+    }
+}
+
+/// The as-built share of decision-r09-t13ge §2.10, before decision-r09-t13i §3.1 narrowed its
+/// summer side: Siler et al.'s Gaussian of width `width` beyond each end, from the centre in its
+/// hemisphere and from the equator into the other. For the tests that hold the new share to it.
+#[cfg(test)]
+#[must_use]
+pub(super) fn as_built_share(x: f64, centre: f64, width: f64) -> f64 {
     let (low, high) = if centre < 0.0 {
         (centre, 0.0)
     } else {
@@ -414,7 +494,7 @@ pub(super) fn budget(
     let mut mass_flux = vec![0.0; LATITUDE_BANDS + 1];
     let mut latent_flux = vec![0.0; LATITUDE_BANDS + 1];
     for edge in 1..LATITUDE_BANDS {
-        let share = hadley_share(grid.edge_sine(edge), centre_sine, circulation.width());
+        let share = circulation.share(grid.edge_sine(edge), centre_sine);
         let energy = f64::midpoint(bands.energy_j_per_kg[edge], bands.energy_j_per_kg[edge - 1]);
         let latent = f64::midpoint(bands.latent_j_per_kg[edge], bands.latent_j_per_kg[edge - 1]);
         let psi = share * flux[edge] / (upper - energy);
@@ -448,23 +528,110 @@ mod tests {
     use super::*;
     use hyperion_testkit::float::assert_same_bits;
 
-    /// The weighting is Siler et al.'s Gaussian at a centre on the equator, 1 between the equator
-    /// and the centre, continuous at both ends, and the Gaussian beyond each.
+    /// Earth's Hadley edge in sine latitude, sin 25.1° = 0.424 (decision-r09-t13i §3.1).
+    const EARTH_EDGE_SINE: f64 = 0.424;
+
+    /// decision-r09-t13i §3.5, 1: at a centre on the equator the share is the as-built function,
+    /// Siler et al.'s eq. 6, to the bit, at every edge and under any edge sine.
     #[test]
-    fn the_hadley_share_is_one_to_the_centre_and_siler_s_gaussian_beyond() {
-        for x in [-0.9, -0.3, 0.0, 0.2, 0.7] {
-            let siler = math::exp(-(x / 0.3) * (x / 0.3));
-            assert!((hadley_share(x, 0.0, 0.3) - siler).abs() < 1e-15);
-        }
-        for centre in [0.4, -0.4] {
-            for x in [0.0, 0.1 * centre, 0.5 * centre, centre] {
-                assert_same_bits(hadley_share(x, centre, 0.3), 1.0);
+    fn at_a_centre_on_the_equator_the_share_is_the_as_built_one_to_the_bit() {
+        let grid = ModelGrid::zonal();
+        for edge_sine in [EARTH_EDGE_SINE, 0.2, 1.0] {
+            for edge in 0..=LATITUDE_BANDS {
+                let x = grid.edge_sine(edge);
+                assert_same_bits(
+                    hadley_share(x, 0.0, 0.3, edge_sine),
+                    as_built_share(x, 0.0, 0.3),
+                );
+                let siler = math::exp(-(x / 0.3) * (x / 0.3));
+                assert!((hadley_share(x, 0.0, 0.3, edge_sine) - siler).abs() < 1e-15);
             }
-            let beyond = hadley_share(centre * 1.5, centre, 0.3);
-            assert!((beyond - math::exp(-(0.2 / 0.3) * (0.2 / 0.3))).abs() < 1e-15);
-            let winter = hadley_share(-centre * 0.5, centre, 0.3);
-            assert!((winter - math::exp(-(0.2 / 0.3) * (0.2 / 0.3))).abs() < 1e-15);
-            assert!((hadley_share(centre * (1.0 + 1e-12), centre, 0.3) - 1.0).abs() < 1e-12);
+            assert_same_bits(summer_width(0.0, 0.3, edge_sine), 0.3);
+        }
+    }
+
+    /// decision-r09-t13i §3.5, 1: at c = 0.2 and `x_H` = 0.424 the summer side's width is 0.3 (1 −
+    /// 0.2 ÷ 0.424) to 10⁻¹², and its share that width's Gaussian about the centre; at c ≥ `x_H`
+    /// the summer side has no share at all; 1 between the equator and the centre; the winter side
+    /// as built to the bit; in each hemisphere.
+    #[test]
+    fn the_summer_side_narrows_with_the_centre_and_the_winter_side_is_as_built() {
+        let expected = 0.3 * (1.0 - 0.2 / EARTH_EDGE_SINE);
+        for sign in [1.0_f64, -1.0] {
+            let centre = 0.2 * sign;
+            let width = summer_width(centre, 0.3, EARTH_EDGE_SINE);
+            assert!(
+                (width - expected).abs() < 1e-12,
+                "{width} against {expected}"
+            );
+            for past in [0.01, 0.05, 0.1, 0.3] {
+                let x = centre + sign * past;
+                let w = hadley_share(x, centre, 0.3, EARTH_EDGE_SINE);
+                let gaussian = math::exp(-(past / expected) * (past / expected));
+                assert!(
+                    (w - gaussian).abs() < 1e-12,
+                    "x {x}: {w} against {gaussian}"
+                );
+                // Narrower than the as-built tail.
+                assert!(w < as_built_share(x, centre, 0.3), "x {x}");
+            }
+            for share in [0.0, 0.1, 0.5, 0.99, 1.0] {
+                assert_same_bits(
+                    hadley_share(centre * share, centre, 0.3, EARTH_EDGE_SINE),
+                    1.0,
+                );
+            }
+            for x in [-0.9, -0.3, -0.05, -1e-9].map(|x| x * sign) {
+                assert_same_bits(
+                    hadley_share(x, centre, 0.3, EARTH_EDGE_SINE),
+                    as_built_share(x, centre, 0.3),
+                );
+            }
+            for at in [EARTH_EDGE_SINE, 0.5, 0.9] {
+                let centre = at * sign;
+                assert_same_bits(summer_width(centre, 0.3, EARTH_EDGE_SINE), 0.0);
+                for past in [1e-12, 0.01, 0.05] {
+                    assert_same_bits(
+                        hadley_share(centre + sign * past, centre, 0.3, EARTH_EDGE_SINE),
+                        0.0,
+                    );
+                }
+                assert_same_bits(hadley_share(centre, centre, 0.3, EARTH_EDGE_SINE), 1.0);
+            }
+        }
+    }
+
+    /// decision-r09-t13i §3.5, 1: a world locked 1:1 to its host takes no cap, its centre the
+    /// energy-flux equator at its substellar pole (the north pole of its tidally locked frame), in
+    /// the pole's band, beyond which no inner edge lies: its share at every edge is the as-built one
+    /// to the bit, for a slow rotation's edge (79.4°, a 10-day rotation) and for Earth's.
+    #[test]
+    fn a_locked_world_s_share_is_as_built() {
+        let grid = ModelGrid::locked();
+        // The pole band's energy-flux equator, F < 0 at its southern edge and 0 at the pole.
+        let south = grid.edge_sine(LATITUDE_BANDS - 1);
+        let north = grid.edge_sine(LATITUDE_BANDS);
+        let flux = [-3.0, 0.0];
+        let efe = south + (north - south) * (-flux[0] / (flux[1] - flux[0]));
+        for edge_deg in [79.4_f64, HADLEY_EDGE_AT_EARTH_DEG] {
+            let edge_sine = math::sin(edge_deg * DEGREE_RAD);
+            let circulation = Circulation {
+                edge_deg,
+                edge_sine,
+                width: HADLEY_WIDTH_AT_EARTH * edge_sine
+                    / math::sin(HADLEY_EDGE_AT_EARTH_DEG * DEGREE_RAD),
+                cap_deg: None,
+                cap_sine: None,
+            };
+            let centre = circulation.centre_sine(efe);
+            assert_same_bits(centre, efe);
+            for edge in 1..LATITUDE_BANDS {
+                let x = grid.edge_sine(edge);
+                assert_same_bits(
+                    circulation.share(x, centre),
+                    as_built_share(x, centre, circulation.width()),
+                );
+            }
         }
     }
 

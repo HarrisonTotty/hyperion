@@ -878,3 +878,12 @@ Geophys. Res. 109, D06303) join this list when their values are quoted; neither 
   beside the model in the climate step's tests (plan R09, R09.T13.e). The dataset's citation: E.
   Kalnay et al., Bull. Amer. Meteor. Soc. 77 (1996) 437-471. Only these derived means are
   committed; no grid is.
+
+- The monthly zonal-mean 2 m air temperature of the NCEP/NCAR Reanalysis 1 over 1991-2020, reduced
+  to the sea level over land at the reference Earth's lapse rate, on the climate model's 72 bands
+  of 2.5° (864 values), computed from NOAA PSL's long-term monthly means
+  (air.2m.mon.ltm.1991-2020.nc, with the reanalysis's land mask land.sfc.gauss.nc and surface
+  height hgt.sfc.nc, https://psl.noaa.gov/data/gridded/data.ncep.reanalysis.html), the input of
+  the climate step's partition test on observed temperatures (plan R09, R09.T13.i). NOAA PSL's
+  data are in the public domain. The dataset's citation: E. Kalnay et al., Bull. Amer. Meteor.
+  Soc. 77 (1996) 437-471. Only these derived means are committed; no grid is.
