@@ -114,6 +114,21 @@
 //! with the wire's `silicate_vapour` rule. Rendering plan R09.T13.c applies each cell's own
 //! entry's solidus.
 //!
+//! # In stages
+//!
+//! The derivation runs in three stages, each a pure function, so that the passes can read the lid
+//! at their own climate (P14.T54.a), and [`CrustComposition::derive`] is their composition, to the
+//! bit:
+//!
+//! 1. **Once a body**, what no pass moves: the inputs that are neither the climate's nor the
+//!    record's, checked; the redox class; the mantle's `FeO` and norm; and the thermal history's
+//!    peak wherever the origin can need it, whatever the tide, so that a change of tide never
+//!    re-runs the series.
+//! 2. **At a climate**, a pass's: the state, the mean and warmest surface temperatures, the surface
+//!    age and the tide give the thermal class, the crusts and the lid.
+//! 3. **On the record**: the volcanism level, the continental fraction and the surface conditions
+//!    give the tertiary crust, the provinces and the melt area.
+//!
 //! # The lithologies it names
 //!
 //! A closed set, each a registry row with condensed columns ([`CrustLithology::ALL`]): `H2O`,
@@ -1097,19 +1112,18 @@ pub struct CrustComposition {
     peak_central_temperature: Option<Kelvin>,
 }
 
-/// A body's crusts before its lid, as the rules give them.
+/// A body's crusts before its lid, as the rules give them at a climate; a melted body's tertiary
+/// crust is the record's, which its continents set ([`CrustComposition::of`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Crusts {
     /// An undifferentiated body's own material.
     Bulk(CrustLithology),
     /// A frozen ocean's shell over rock that never melted: a primary crust alone (Ceres).
     Shell(CrustLithology),
-    /// A body whose rock melted: its secondary crust, and its primary and tertiary where it has
-    /// them.
+    /// A body whose rock melted: its secondary crust, and its primary where it has one.
     Melted {
         primary: Option<CrustLithology>,
         secondary: CrustLithology,
-        tertiary: Option<CrustLithology>,
         /// Whether the primary crust is a frozen ocean's shell.
         ice_shell: bool,
     },
@@ -1217,43 +1231,52 @@ impl CrustComposition {
     /// ```
     pub fn derive(inputs: &CrustCompositionInputs<'_>) -> Result<Self, DeriveCrustError> {
         validate(inputs)?;
-        let redox = RedoxClass::of(inputs.delta_iw);
-        let (thermal_history, peak) = thermal_class(inputs);
-        let crusts = match thermal_history {
-            ThermalHistory::RockMelted(cause) => melted_crusts(inputs, redox, cause),
-            ThermalHistory::IceMelted(_) => ice_melted(inputs, peak),
-            ThermalHistory::Unmelted => Crusts::Bulk(unmelted_bulk(inputs, redox)),
-        };
-        let (lid, lid_lithology) = lid_of(inputs, crusts);
-        let (primary, secondary, tertiary, bulk) = match crusts {
+        let basis = CrustBasis::derive(&CrustBasisInputs::of(inputs))?;
+        let lid = basis.lid(&LidClimate::of(inputs))?;
+        Self::of(&lid, &CrustRecord::of(inputs))
+    }
+
+    /// The crust on the record of the lid `lid` ([`CrustBasis::lid`]) under what only the record
+    /// reads, `record` (P14.T54.a; the [module](self)'s "In stages"): the tertiary crust, the
+    /// provinces and the melt area.
+    ///
+    /// # Errors
+    ///
+    /// A [`DeriveCrustError`] for a volcanism level or a continental fraction out of range, as
+    /// [`CrustComposition::derive`] orders them.
+    pub(crate) fn of(lid: &CrustLid, record: &CrustRecord<'_>) -> Result<Self, DeriveCrustError> {
+        validate_record(record)?;
+        let (primary, secondary, tertiary, bulk) = match lid.crusts {
             Crusts::Bulk(bulk) => (None, None, None, Some(bulk)),
             Crusts::Shell(shell) => (Some(shell), None, None, None),
             Crusts::Melted {
+                primary, secondary, ..
+            } => (
                 primary,
-                secondary,
-                tertiary,
-                ..
-            } => (primary, Some(secondary), tertiary, None),
+                Some(secondary),
+                (record.continental_fraction > 0.0).then_some(CrustLithology::Granite),
+                None,
+            ),
         };
-        let provinces = match crusts {
+        let provinces = match lid.crusts {
             Crusts::Melted {
                 secondary,
                 ice_shell: false,
                 ..
-            } if lid == LidCrust::Primary && inputs.volcanism > 0.0 => secondary,
-            Crusts::Bulk(_) | Crusts::Shell(_) | Crusts::Melted { .. } => lid_lithology,
+            } if lid.lid == LidCrust::Primary && record.volcanism > 0.0 => secondary,
+            Crusts::Bulk(_) | Crusts::Shell(_) | Crusts::Melted { .. } => lid.lithology,
         };
         Ok(Self {
             primary: primary.map(CrustLithology::substance),
             secondary: secondary.map(CrustLithology::substance),
             tertiary: tertiary.map(CrustLithology::substance),
             bulk: bulk.map(CrustLithology::substance),
-            lid,
+            lid: lid.lid,
             provinces: provinces.substance(),
-            redox,
-            melt_area_fraction: melt_area(inputs, lid_lithology),
-            thermal_history,
-            peak_central_temperature: peak,
+            redox: lid.redox,
+            melt_area_fraction: melt_area(lid.state, record.surface, lid.lithology),
+            thermal_history: lid.thermal_history,
+            peak_central_temperature: lid.peak,
         })
     }
 
@@ -1396,9 +1419,328 @@ fn validate(inputs: &CrustCompositionInputs<'_>) -> Result<(), DeriveCrustError>
     Ok(())
 }
 
+/// What a body's crust reads that no pass moves (P14.T54.a; the [module](self)'s "In stages"):
+/// [`CrustCompositionInputs`]'s pass-invariant fields, as their doc gives them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CrustBasisInputs {
+    /// How it came to be.
+    pub(crate) origin: CrustOrigin,
+    /// Its formation time `t_f` ([`CrustCompositionInputs::formation`]).
+    pub(crate) formation: Megayears,
+    /// Its system's age at the time, positive.
+    pub(crate) age: Years,
+    /// The system age at which its magma ocean ended, a planet's only.
+    pub(crate) molten_until: Option<Years>,
+    /// Its mean radius, positive.
+    pub(crate) radius: Metres,
+    /// Its mass, positive.
+    pub(crate) mass: EarthMasses,
+    /// Its mass fractions, summing to 1.
+    pub(crate) fractions: MassFractions,
+    /// The side of the snow line it formed on.
+    pub(crate) snow_line_side: SnowLineSide,
+    /// Whether its ice carries ammonia.
+    pub(crate) ammonia: AmmoniaIce,
+    /// Its mantle's ΔIW, log₁₀ units.
+    pub(crate) delta_iw: Dex,
+    /// Its host's Mg/Si by number, positive.
+    pub(crate) host_magnesium_to_silicon: f64,
+    /// Its system's \[α/Fe\], dex.
+    pub(crate) alpha_fe: Dex,
+    /// Its host's \[Fe/H\], dex.
+    pub(crate) fe_h: Dex,
+    /// The surface temperature `T_s` of its thermal history, positive: the formation stand-in.
+    pub(crate) formation_temperature: Kelvin,
+}
+
+impl CrustBasisInputs {
+    /// The pass-invariant fields of `inputs`.
+    #[must_use]
+    pub(crate) const fn of(inputs: &CrustCompositionInputs<'_>) -> Self {
+        Self {
+            origin: inputs.origin,
+            formation: inputs.formation,
+            age: inputs.age,
+            molten_until: inputs.molten_until,
+            radius: inputs.radius,
+            mass: inputs.mass,
+            fractions: inputs.fractions,
+            snow_line_side: inputs.snow_line_side,
+            ammonia: inputs.ammonia,
+            delta_iw: inputs.delta_iw,
+            host_magnesium_to_silicon: inputs.host_magnesium_to_silicon,
+            alpha_fe: inputs.alpha_fe,
+            fe_h: inputs.fe_h,
+            formation_temperature: inputs.formation_temperature,
+        }
+    }
+}
+
+/// What a pass's climate gives a body's crust (P14.T54.a; the [module](self)'s "In stages"): its
+/// state, its mean and warmest surface temperatures, its surface age and its tide.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LidClimate {
+    /// Its surface state, which is not the gas-envelope state.
+    pub(crate) state: SurfaceState,
+    /// Its mean surface temperature, the craters' ice-rich test's
+    /// ([`SurfaceConditions::mean_surface_temperature`]).
+    pub(crate) mean_surface_temperature: Kelvin,
+    /// Its warmest temperature, the cometary test's (the warmest of
+    /// [`SurfaceConditions::climate_range`]).
+    pub(crate) warmest: Kelvin,
+    /// Its surface age ([`CrustCompositionInputs::surface_age`]), in [0, the age].
+    pub(crate) surface_age: Years,
+    /// Whether its tides make it volcanic ([`CrustCompositionInputs::tidal`]).
+    pub(crate) tidal: TidalVolcanism,
+}
+
+impl LidClimate {
+    /// The climate `inputs` give: their state, surface age and tide, and their surface's mean and
+    /// warmest temperatures.
+    #[must_use]
+    pub(crate) const fn of(inputs: &CrustCompositionInputs<'_>) -> Self {
+        Self {
+            state: inputs.state,
+            mean_surface_temperature: inputs.surface.mean_surface_temperature(),
+            warmest: inputs.surface.climate_range().1,
+            surface_age: inputs.surface_age,
+            tidal: inputs.tidal,
+        }
+    }
+}
+
+/// What only the record reads of a body's crust (P14.T54.a; the [module](self)'s "In stages"):
+/// its volcanism level, its continental fraction and its surface conditions, for the provinces,
+/// the tertiary crust and the melt area.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CrustRecord<'a> {
+    /// Its volcanism level V ([`CrustCompositionInputs::volcanism`]), at least 0.
+    pub(crate) volcanism: f64,
+    /// Its continental fraction `f_c` ([`CrustCompositionInputs::continental_fraction`]), 0 to 1.
+    pub(crate) continental_fraction: f64,
+    /// Its surface conditions, for the melt area.
+    pub(crate) surface: &'a SurfaceConditions,
+}
+
+impl<'a> CrustRecord<'a> {
+    /// What `inputs` give the record.
+    #[must_use]
+    pub(crate) const fn of(inputs: &CrustCompositionInputs<'a>) -> Self {
+        Self {
+            volcanism: inputs.volcanism,
+            continental_fraction: inputs.continental_fraction,
+            surface: inputs.surface,
+        }
+    }
+}
+
+/// How a body's thermal history melts it, as its origin and its series decide before any pass
+/// (the [module](self)'s three classes).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Melting {
+    /// A planet's magma ocean or a rocky parent's impact debris, whatever its tide.
+    ByRule(MeltCause),
+    /// Any other origin: its tide's where it is volcanic; otherwise the class `quiet` its series'
+    /// peak central temperature `peak` gives.
+    ByHeat {
+        /// Its peak central temperature `T_c,max`.
+        peak: Kelvin,
+        /// Its class with no tidal volcanism.
+        quiet: ThermalHistory,
+    },
+}
+
+/// A body's crust before any pass (P14.T54.a; the [module](self)'s "In stages"): what no pass
+/// moves, once a body. Its inputs validated, its redox class, its mantle's `FeO` and norm, and its
+/// thermal history's peak wherever its origin can need it, whatever its tide, so that a tide's
+/// change between passes never re-runs the series.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CrustBasis {
+    inputs: CrustBasisInputs,
+    redox: RedoxClass,
+    iron_oxide: f64,
+    norm: MantleNorm,
+    melting: Melting,
+}
+
+impl CrustBasis {
+    /// The basis of the body `inputs` describe.
+    ///
+    /// # Errors
+    ///
+    /// A [`DeriveCrustError`] for an input out of range, the first in
+    /// [`CrustComposition::derive`]'s order that these inputs hold.
+    pub(crate) fn derive(inputs: &CrustBasisInputs) -> Result<Self, DeriveCrustError> {
+        validate_basis(inputs)?;
+        let iron_oxide = mantle_iron_oxide_mass_fraction(
+            core_share(&inputs.fractions),
+            inputs.host_magnesium_to_silicon,
+            inputs.alpha_fe,
+        );
+        Ok(Self {
+            inputs: *inputs,
+            redox: RedoxClass::of(inputs.delta_iw),
+            iron_oxide,
+            norm: MantleNorm::of(inputs.host_magnesium_to_silicon, iron_oxide),
+            melting: melting(inputs),
+        })
+    }
+
+    /// The lid at the climate `climate` (the [module](self)'s "In stages"): the thermal class, the
+    /// crusts and which of them lies at the surface.
+    ///
+    /// # Errors
+    ///
+    /// A [`DeriveCrustError`] for a body in the gas-envelope state, or a surface age that is not
+    /// finite or lies outside [0, the age], in [`CrustComposition::derive`]'s order.
+    pub(crate) fn lid(&self, climate: &LidClimate) -> Result<CrustLid, DeriveCrustError> {
+        validate_climate(climate, self.inputs.age)?;
+        let (thermal_history, peak) = match (self.melting, climate.tidal) {
+            (Melting::ByRule(cause), _) => (ThermalHistory::RockMelted(cause), None),
+            (Melting::ByHeat { .. }, TidalVolcanism::Volcanic) => {
+                (ThermalHistory::RockMelted(MeltCause::Tides), None)
+            }
+            (Melting::ByHeat { peak, quiet }, TidalVolcanism::Quiet) => (quiet, Some(peak)),
+        };
+        let crusts = match thermal_history {
+            ThermalHistory::RockMelted(cause) => melted_crusts(self, cause, climate),
+            ThermalHistory::IceMelted(_) => ice_melted(&self.inputs, climate, peak),
+            ThermalHistory::Unmelted => Crusts::Bulk(unmelted_bulk(&self.inputs, self.redox)),
+        };
+        let (lid, lithology) = lid_of(&self.inputs, climate.surface_age, crusts);
+        Ok(CrustLid {
+            crusts,
+            lid,
+            lithology,
+            redox: self.redox,
+            thermal_history,
+            peak,
+            state: climate.state,
+        })
+    }
+}
+
+/// A body's crust at a pass's climate (P14.T54.a; [`CrustBasis::lid`]): its crusts, its lid and
+/// the lithology the lid names, with its redox class, its thermal history and its state, all that
+/// the record's crust reads beyond [`CrustRecord`] ([`CrustComposition::of`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CrustLid {
+    crusts: Crusts,
+    lid: LidCrust,
+    lithology: CrustLithology,
+    redox: RedoxClass,
+    thermal_history: ThermalHistory,
+    peak: Option<Kelvin>,
+    state: SurfaceState,
+}
+
+impl CrustLid {
+    /// The registry row at the surface, the lid's lithology's: the row the regolith and the
+    /// ground's thermal inertia read.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P14.T54.a's C3 wires the lid into the passes")
+    )]
+    #[must_use]
+    pub(crate) fn row(&self) -> SubstanceId {
+        self.lithology.substance()
+    }
+}
+
+/// Refuses the pass-invariant inputs out of range ([`CrustBasis::derive`]), in
+/// [`CrustComposition::derive`]'s order.
+fn validate_basis(inputs: &CrustBasisInputs) -> Result<(), DeriveCrustError> {
+    let positive = |x: f64| x.is_finite() && x > 0.0;
+    if !positive(inputs.radius.value()) {
+        return Err(DeriveCrustError::RadiusNotPositive(inputs.radius));
+    }
+    if !positive(inputs.mass.value()) {
+        return Err(DeriveCrustError::MassNotPositive(inputs.mass));
+    }
+    if !positive(inputs.age.value()) {
+        return Err(DeriveCrustError::AgeNotPositive(inputs.age));
+    }
+    if !positive(inputs.formation_temperature.value()) {
+        return Err(DeriveCrustError::TemperatureNotPositive(
+            inputs.formation_temperature,
+        ));
+    }
+    if !positive(inputs.host_magnesium_to_silicon) {
+        return Err(DeriveCrustError::MagnesiumToSiliconNotPositive(
+            inputs.host_magnesium_to_silicon,
+        ));
+    }
+    let f = inputs.fractions;
+    let parts = [f.iron(), f.rock(), f.water(), f.envelope()];
+    let sum = parts.iter().fold(0.0, |sum, &x| sum + x);
+    if !(parts.iter().all(|x| (0.0..=1.0).contains(x)) && (sum - 1.0).abs() <= 1e-9) {
+        return Err(DeriveCrustError::FractionsNotNormalised(sum));
+    }
+    let formed = Years::from(inputs.formation).value();
+    if !(formed >= 0.0 && formed <= inputs.age.value()) {
+        return Err(DeriveCrustError::FormationOutsideAge {
+            formation: inputs.formation,
+            age: inputs.age,
+        });
+    }
+    let finite = [
+        (inputs.delta_iw.value(), CrustInput::DeltaIw),
+        (inputs.alpha_fe.value(), CrustInput::AlphaFe),
+        (inputs.fe_h.value(), CrustInput::FeH),
+        (
+            inputs.molten_until.map_or(0.0, Years::value),
+            CrustInput::MoltenUntil,
+        ),
+    ];
+    if let Some((_, input)) = finite.into_iter().find(|(x, _)| !x.is_finite()) {
+        return Err(DeriveCrustError::NotFinite(input));
+    }
+    Ok(())
+}
+
+/// Refuses a climate out of range for a body of age `age` ([`CrustBasis::lid`]), in
+/// [`CrustComposition::derive`]'s order.
+fn validate_climate(climate: &LidClimate, age: Years) -> Result<(), DeriveCrustError> {
+    if climate.state == SurfaceState::GasEnvelope {
+        return Err(DeriveCrustError::NoSolidSurface);
+    }
+    let surface_age = climate.surface_age.value();
+    if !surface_age.is_finite() {
+        return Err(DeriveCrustError::NotFinite(CrustInput::SurfaceAge));
+    }
+    if !(surface_age >= 0.0 && surface_age <= age.value()) {
+        return Err(DeriveCrustError::SurfaceAgeOutsideAge {
+            surface_age: climate.surface_age,
+            age,
+        });
+    }
+    Ok(())
+}
+
+/// Refuses what the record reads out of range ([`CrustComposition::of`]), in
+/// [`CrustComposition::derive`]'s order.
+fn validate_record(record: &CrustRecord<'_>) -> Result<(), DeriveCrustError> {
+    let finite = [
+        (record.volcanism, CrustInput::Volcanism),
+        (record.continental_fraction, CrustInput::ContinentalFraction),
+    ];
+    if let Some((_, input)) = finite.into_iter().find(|(x, _)| !x.is_finite()) {
+        return Err(DeriveCrustError::NotFinite(input));
+    }
+    if record.volcanism < 0.0 {
+        return Err(DeriveCrustError::VolcanismNegative(record.volcanism));
+    }
+    if !(0.0..=1.0).contains(&record.continental_fraction) {
+        return Err(DeriveCrustError::ContinentalFractionOutsideUnit(
+            record.continental_fraction,
+        ));
+    }
+    Ok(())
+}
+
 /// Whether the body holds ice: formed beyond the snow line with water above zero.
 #[must_use]
-fn holds_ice(inputs: &CrustCompositionInputs<'_>) -> bool {
+fn holds_ice(inputs: &CrustBasisInputs) -> bool {
     inputs.snow_line_side == SnowLineSide::Beyond && inputs.fractions.water() > 0.0
 }
 
@@ -1406,7 +1748,7 @@ fn holds_ice(inputs: &CrustCompositionInputs<'_>) -> bool {
 /// holding ice, and dry rock's otherwise, of ordinary chondrite inside the snow line and
 /// carbonaceous rock beyond it.
 #[must_use]
-fn thermal_material(inputs: &CrustCompositionInputs<'_>) -> (f64, ChondriticRock) {
+fn thermal_material(inputs: &CrustBasisInputs) -> (f64, ChondriticRock) {
     let rock = match inputs.snow_line_side {
         SnowLineSide::Inside => ChondriticRock::Ordinary,
         SnowLineSide::Beyond => ChondriticRock::Carbonaceous,
@@ -1419,10 +1761,10 @@ fn thermal_material(inputs: &CrustCompositionInputs<'_>) -> (f64, ChondriticRock
     (c, rock)
 }
 
-/// The body's thermal history and, where its class needed it, its peak central temperature
-/// (the [module](self)'s three classes).
+/// How the body's thermal history melts it (the [module](self)'s three classes): by its origin's
+/// rule, or by its series' peak central temperature, computed wherever its origin can need it.
 #[must_use]
-fn thermal_class(inputs: &CrustCompositionInputs<'_>) -> (ThermalHistory, Option<Kelvin>) {
+fn melting(inputs: &CrustBasisInputs) -> Melting {
     let by_rule = match inputs.origin {
         CrustOrigin::Planet => Some(MeltCause::MagmaOcean),
         CrustOrigin::ImpactMoon(ParentSurface::Rocky) => Some(MeltCause::ImpactDebris),
@@ -1430,13 +1772,10 @@ fn thermal_class(inputs: &CrustCompositionInputs<'_>) -> (ThermalHistory, Option
         | CrustOrigin::ImpactMoon(ParentSurface::Icy)
         | CrustOrigin::CapturedMoon
         | CrustOrigin::BeltMember
-        | CrustOrigin::Comet => match inputs.tidal {
-            TidalVolcanism::Volcanic => Some(MeltCause::Tides),
-            TidalVolcanism::Quiet => None,
-        },
+        | CrustOrigin::Comet => None,
     };
     if let Some(cause) = by_rule {
-        return (ThermalHistory::RockMelted(cause), None);
+        return Melting::ByRule(cause);
     }
     let (c, rock) = thermal_material(inputs);
     let ice = inputs.fractions.water();
@@ -1450,7 +1789,7 @@ fn thermal_class(inputs: &CrustCompositionInputs<'_>) -> (ThermalHistory, Option
     let sources = chondritic_sources(inputs.formation, rock, rock_share, inputs.fe_h);
     let duration = Years::new(inputs.age.value() - Years::from(inputs.formation).value());
     let peak = peak_central_temperature(&sphere, &sources, duration);
-    let history = if peak >= CrustLithology::ChondriteH.transition() {
+    let quiet = if peak >= CrustLithology::ChondriteH.transition() {
         ThermalHistory::RockMelted(MeltCause::Radiogenic)
     } else if inputs.origin == CrustOrigin::ImpactMoon(ParentSurface::Icy) {
         ThermalHistory::IceMelted(IceMeltCause::ImpactDebris)
@@ -1462,42 +1801,35 @@ fn thermal_class(inputs: &CrustCompositionInputs<'_>) -> (ThermalHistory, Option
     } else {
         ThermalHistory::Unmelted
     };
-    (history, Some(peak))
+    Melting::ByHeat { peak, quiet }
 }
 
-/// Whether the body's ocean froze into an ice-rich crust, by [`Crust::of`]: the craters' one
-/// ice-rich predicate, its birthplace icy for a body formed beyond the snow line.
+/// Whether the body's ocean froze into an ice-rich crust under the mean surface temperature
+/// `mean_surface_temperature`, by [`Crust::of`]: the craters' one ice-rich predicate, its
+/// birthplace icy for a body formed beyond the snow line.
 #[must_use]
-fn ocean_froze(inputs: &CrustCompositionInputs<'_>) -> bool {
+fn ocean_froze(inputs: &CrustBasisInputs, mean_surface_temperature: Kelvin) -> bool {
     let birthplace = match inputs.snow_line_side {
         SnowLineSide::Beyond => Birthplace::Icy,
         SnowLineSide::Inside => Birthplace::Other,
     };
     let water = Kilograms::new(Kilograms::from(inputs.mass).value() * inputs.fractions.water());
     inputs.fractions.water() > 0.0
-        && Crust::of(
-            birthplace,
-            inputs.surface.mean_surface_temperature(),
-            water,
-            inputs.radius,
-        ) == Crust::IceRich
+        && Crust::of(birthplace, mean_surface_temperature, water, inputs.radius) == Crust::IceRich
 }
 
-/// The crusts of a body whose rock melted, by `cause` ([module](self)'s "The crusts of a body
-/// whose rock melted").
+/// The crusts of the body of basis `basis` whose rock melted, by `cause`, at the climate
+/// `climate` ([module](self)'s "The crusts of a body whose rock melted").
 #[must_use]
-fn melted_crusts(
-    inputs: &CrustCompositionInputs<'_>,
-    redox: RedoxClass,
-    cause: MeltCause,
-) -> Crusts {
-    let reduced = redox == RedoxClass::Reduced;
+fn melted_crusts(basis: &CrustBasis, cause: MeltCause, climate: &LidClimate) -> Crusts {
+    let inputs = &basis.inputs;
+    let reduced = basis.redox == RedoxClass::Reduced;
     let magma_ocean = match cause {
         MeltCause::MagmaOcean | MeltCause::ImpactDebris => true,
         MeltCause::Tides | MeltCause::Radiogenic => false,
     };
     let flotation = magma_ocean && !reduced && inputs.mass < FLOTATION_MASS_LIMIT;
-    let ice_shell = ocean_froze(inputs);
+    let ice_shell = ocean_froze(inputs, climate.mean_surface_temperature);
     let primary = if ice_shell {
         // Its rock differentiated beneath its ocean (Europa), so its shell is ice.
         Some(CrustLithology::Water)
@@ -1510,41 +1842,36 @@ fn melted_crusts(
     } else {
         Some(CrustLithology::Ultramafic)
     };
-    let iron_oxide = mantle_iron_oxide_mass_fraction(
-        core_share(&inputs.fractions),
-        inputs.host_magnesium_to_silicon,
-        inputs.alpha_fe,
-    );
     let secondary = if reduced {
         CrustLithology::ReducedBasalt
-    } else if hot_mantle(inputs.fe_h, inputs.age, inputs.tidal) {
+    } else if hot_mantle(inputs.fe_h, inputs.age, climate.tidal) {
         CrustLithology::Komatiite
-    } else if flotation || iron_oxide >= IRON_RICH_MANTLE_FEO {
+    } else if flotation || basis.iron_oxide >= IRON_RICH_MANTLE_FEO {
         // An iron-rich source stays iron-rich: where its norm is periclase-normative, its excess
         // is its `FeO`'s, and its melt is not Mg-rich.
         CrustLithology::IronRichBasalt
     } else {
-        match MantleNorm::of(inputs.host_magnesium_to_silicon, iron_oxide) {
+        match basis.norm {
             MantleNorm::PericlaseNormative => CrustLithology::Komatiite,
             // A silica-rich secondary crust has no row (not modelled).
             MantleNorm::QuartzNormative | MantleNorm::OlivinePyroxene => CrustLithology::Basalt,
         }
     };
-    let tertiary = (inputs.continental_fraction > 0.0).then_some(CrustLithology::Granite);
     Crusts::Melted {
         primary,
         secondary,
-        tertiary,
         ice_shell,
     }
 }
 
-/// The crust of a body whose ice melted and whose rock did not, whose peak central temperature
-/// is `peak` ([module](self)'s class 2).
+/// The crust at the climate `climate` of a body whose ice melted and whose rock did not, whose
+/// peak central temperature is `peak` ([module](self)'s class 2).
 #[must_use]
-fn ice_melted(inputs: &CrustCompositionInputs<'_>, peak: Option<Kelvin>) -> Crusts {
+fn ice_melted(inputs: &CrustBasisInputs, climate: &LidClimate, peak: Option<Kelvin>) -> Crusts {
     let water = inputs.fractions.water();
-    if inputs.radius >= OCEAN_SEPARATION_RADIUS && ocean_froze(inputs) {
+    if inputs.radius >= OCEAN_SEPARATION_RADIUS
+        && ocean_froze(inputs, climate.mean_surface_temperature)
+    {
         let shell = if water >= ICE_SHELL_FRACTION {
             CrustLithology::Water
         } else {
@@ -1552,9 +1879,8 @@ fn ice_melted(inputs: &CrustCompositionInputs<'_>, peak: Option<Kelvin>) -> Crus
         };
         return Crusts::Shell(shell);
     }
-    let (_, warmest) = inputs.surface.climate_range();
     let rock = inputs.fractions.iron() + inputs.fractions.rock();
-    let bulk = if warmest < WATER_ICE_RETENTION_TEMPERATURE {
+    let bulk = if climate.warmest < WATER_ICE_RETENTION_TEMPERATURE {
         CrustLithology::Cometary
     } else if peak.is_some_and(|t| t >= DEHYDRATION_TEMPERATURE) {
         CrustLithology::ChondriteCv
@@ -1568,7 +1894,7 @@ fn ice_melted(inputs: &CrustCompositionInputs<'_>, peak: Option<Kelvin>) -> Crus
 
 /// The `bulk` material of a body that never melted ([module](self)'s class 3).
 #[must_use]
-fn unmelted_bulk(inputs: &CrustCompositionInputs<'_>, redox: RedoxClass) -> CrustLithology {
+fn unmelted_bulk(inputs: &CrustBasisInputs, redox: RedoxClass) -> CrustLithology {
     match (inputs.snow_line_side, redox) {
         (SnowLineSide::Beyond, _) => CrustLithology::Cometary,
         (SnowLineSide::Inside, RedoxClass::Reduced) => CrustLithology::ChondriteE,
@@ -1581,14 +1907,19 @@ fn unmelted_bulk(inputs: &CrustCompositionInputs<'_>, redox: RedoxClass) -> Crus
 /// counts as unresurfaced: the two are one subtraction apart on the record.
 const SURFACE_AGE_ROUNDING: f64 = 1e-9;
 
-/// The body's lid ([module](self)'s "The lid and the provinces"), and the lithology it names: a
-/// `graphite` primary crust is never the lid, since a melted body's secondary crust buries it.
+/// The body's lid under the surface age `surface_age` ([module](self)'s "The lid and the
+/// provinces"), and the lithology it names: a `graphite` primary crust is never the lid, since a
+/// melted body's secondary crust buries it.
 #[must_use]
-fn lid_of(inputs: &CrustCompositionInputs<'_>, crusts: Crusts) -> (LidCrust, CrustLithology) {
+fn lid_of(
+    inputs: &CrustBasisInputs,
+    surface_age: Years,
+    crusts: Crusts,
+) -> (LidCrust, CrustLithology) {
     let since_melt = inputs
         .molten_until
         .map_or(inputs.age.value(), |end| inputs.age.value() - end.value());
-    let unresurfaced = inputs.surface_age.value() >= since_melt * (1.0 - SURFACE_AGE_ROUNDING);
+    let unresurfaced = surface_age.value() >= since_melt * (1.0 - SURFACE_AGE_ROUNDING);
     match crusts {
         Crusts::Bulk(bulk) => (LidCrust::Bulk, bulk),
         Crusts::Shell(shell) => (LidCrust::Primary, shell),
@@ -1603,18 +1934,18 @@ fn lid_of(inputs: &CrustCompositionInputs<'_>, crusts: Crusts) -> (LidCrust, Cru
     }
 }
 
-/// The share of the surface above the solidus of `lid` ([module](self)'s "The melt area"), in
-/// [0, 1]: 1 in the `MagmaOcean` state, and otherwise 0 for an ice lid, whose liquid is a
-/// condensate.
+/// The share of the surface `surface` above the solidus of `lid` ([module](self)'s "The melt
+/// area"), in [0, 1], in the state `state`: 1 in the `MagmaOcean` state, and otherwise 0 for an
+/// ice lid, whose liquid is a condensate.
 #[must_use]
-fn melt_area(inputs: &CrustCompositionInputs<'_>, lid: CrustLithology) -> f64 {
-    if inputs.state == SurfaceState::MagmaOcean {
+fn melt_area(state: SurfaceState, surface: &SurfaceConditions, lid: CrustLithology) -> f64 {
+    if state == SurfaceState::MagmaOcean {
         return 1.0;
     }
     if lid.is_ice() {
         return 0.0;
     }
-    let melt = 1.0 - inputs.surface.cold_area(lid.transition());
+    let melt = 1.0 - surface.cold_area(lid.transition());
     // By comparison, so that a NaN, which no valid surface makes, becomes no melt.
     if melt > 1.0 {
         1.0

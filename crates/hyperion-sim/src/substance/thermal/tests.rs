@@ -1180,3 +1180,89 @@ fn substance_thermal_reduced_conductivities_are_their_arithmetic() {
     assert!((k("chondrite_cm", 200.0) - 1.61).abs() < 1e-12);
     assert!((k("chondrite_h", 200.0) - 2.18).abs() < 1e-12);
 }
+
+/// The ground's inertia is P14.T49.j's law at its lid, with its fallbacks (P14.T54.a;
+/// decision-pre-23-review item 7; decision-p14-t54a-passes §3.5): Mars's `basalt_fe` at 214 K
+/// takes the law, about 48.1, the reference form's to the bit; `graphite` and `ca_al_residue`, with
+/// no thermal columns, rock's 55; `cometary`, of the `Organic` family, which has no form, ice's 20;
+/// `H2O` above its 273.16 K triple point, with no solid, its family's 20, and `basalt` above its
+/// solidus rock's 55, whatever the bulk material; and no lid the bulk material's constant, as
+/// P14.T24.a reads it, to the bit.
+#[test]
+fn the_ground_s_inertia_is_the_law_at_its_lid_with_its_fallbacks() {
+    let at = |key: &str, material: SurfaceMaterial, t: f64| {
+        ground_inertia(Some(row(key)), material, Kelvin::new(t))
+    };
+    let assert_ground = |ground: GroundInertia, source: InertiaSource, gamma: f64| {
+        assert_eq!(ground.source(), source, "{ground:?}");
+        assert_same_bits(ground.inertia_j_per_m2_k_sqrt_s(), gamma);
+    };
+    let mars = at("basalt_fe", SurfaceMaterial::Rock, 214.0);
+    assert_ground(
+        mars,
+        InertiaSource::Law,
+        reference("basalt_fe", 214.0).inertia_j_per_m2_k_sqrt_s(),
+    );
+    assert!(
+        (mars.inertia_j_per_m2_k_sqrt_s() - 48.1).abs() < 0.05,
+        "{mars:?}"
+    );
+    let (rock, ice) = (
+        ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+        ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+    );
+    for material in [SurfaceMaterial::Rock, SurfaceMaterial::Ice] {
+        for key in ["graphite", "ca_al_residue"] {
+            assert_ground(
+                at(key, material, 214.0),
+                InertiaSource::NoThermalColumns,
+                rock,
+            );
+        }
+        assert_ground(
+            at("cometary", material, 40.0),
+            InertiaSource::NoRegolithForm,
+            ice,
+        );
+        assert_ground(at("H2O", material, 280.0), InertiaSource::NoSolid, ice);
+        assert_ground(
+            at("basalt", material, 2_000.0),
+            InertiaSource::NoSolid,
+            rock,
+        );
+    }
+    for (material, gamma) in [(SurfaceMaterial::Rock, rock), (SurfaceMaterial::Ice, ice)] {
+        assert_ground(
+            ground_inertia(None, material, Kelvin::new(214.0)),
+            InertiaSource::NoLid,
+            gamma,
+        );
+    }
+    // Below its triple point, water ice takes the law.
+    let europa = at("H2O", SurfaceMaterial::Ice, 102.0);
+    assert_ground(
+        europa,
+        InertiaSource::Law,
+        reference("H2O", 102.0).inertia_j_per_m2_k_sqrt_s(),
+    );
+    eprintln!(
+        "Γ: basalt_fe at 214 K {:.2}, H2O at 102 K {:.2}",
+        mars.inertia_j_per_m2_k_sqrt_s(),
+        europa.inertia_j_per_m2_k_sqrt_s()
+    );
+}
+
+/// What a lid's row at a positive, finite temperature never gives, a temperature that is not one,
+/// fails the fallback's debug assertion: a bug, which a release build reads as the bulk material's
+/// constant.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "a lid's row at a positive, finite temperature never gives it")]
+fn an_unreachable_inertia_fails_its_debug_assertion() {
+    let ground = ground_inertia(
+        Some(row("basalt")),
+        SurfaceMaterial::Rock,
+        Kelvin::new(f64::NAN),
+    );
+    assert_eq!(ground.source(), InertiaSource::Unreachable);
+}

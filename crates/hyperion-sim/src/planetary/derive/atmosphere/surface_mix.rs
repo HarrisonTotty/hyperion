@@ -22,7 +22,7 @@ use crate::planetary::derive::photometry::area_mix::{self, HostShade, Regolith};
 use crate::planetary::hooks::figures::cover;
 use crate::substance::ice_ih_density;
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
-use crate::units::{Kelvin, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared};
+use crate::units::{Kelvin, KilogramsPerSquareMetre, MetresPerSecondSquared};
 
 #[cfg(doc)]
 use super::atmosphere_under;
@@ -155,7 +155,7 @@ fn pass_water_cover(
     } else {
         0.0
     };
-    let layer = Metres::new(sigma / cover::liquid_water_density().value());
+    let layer = cover::water_layer(KilogramsPerSquareMetre::new(sigma));
     let ice_density = ice_ih_density(climate.mean());
     let cold = (surface.cold_area)(climate, cover::ice_threshold(state));
     let ice_fraction = match (state, material) {

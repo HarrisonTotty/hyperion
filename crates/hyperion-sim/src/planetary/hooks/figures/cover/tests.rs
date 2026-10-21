@@ -4,6 +4,7 @@
 use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
+use crate::planetary::chem::partition::Basins;
 use crate::planetary::derive::DerivedBody;
 use crate::planetary::derive::MassFractions;
 use crate::planetary::derive::atmosphere::SurfaceMaterial;
@@ -634,4 +635,90 @@ fn a_steam_atmosphere_holds_no_surface_water() {
     assert!(at(edge * (1.0 + 1e-6)) < 2e-6 * at(edge * 2.0));
     assert!(at(edge * 2.0) > 0.0);
     assert_same_bits(at(edge * 0.5), 0.0);
+}
+
+/// [`surface_water`] as it was built, before P14.T54.a factored its parts out
+/// ([`surface_water_of`]): the oracle of `the_surface_water_is_its_parts_to_the_bit`.
+fn surface_water_as_built(
+    atmosphere: &Atmosphere,
+    water: Kilograms,
+    radius: Metres,
+    surface_gravity: MetresPerSecondSquared,
+    outgassing: f64,
+) -> KilogramsPerSquareMetre {
+    let holds = match atmosphere.state() {
+        SurfaceState::Temperate | SurfaceState::Snowball => true,
+        SurfaceState::GasEnvelope
+        | SurfaceState::MagmaOcean
+        | SurfaceState::Airless
+        | SurfaceState::RunawayGreenhouse => false,
+    };
+    let (kg, r, g) = (water.value(), radius.value(), surface_gravity.value());
+    if !(holds && atmosphere.retains_against_escape(Gas::Water) && kg > 0.0 && r > 0.0 && g > 0.0) {
+        return KilogramsPerSquareMetre::ZERO;
+    }
+    let vapour = atmosphere.partial_pressures().of(Gas::Water);
+    let condensed = kg / (4.0 * core::f64::consts::PI * r * r) - vapour.value() / g;
+    if condensed.is_nan() || condensed <= 0.0 {
+        return KilogramsPerSquareMetre::ZERO;
+    }
+    KilogramsPerSquareMetre::new(condensed * water_surface_share(outgassing))
+}
+
+/// The surface water is its parts' to the bit (P14.T54.a; decision-p14-t54a-passes §3.1): over the
+/// table's atmospheres, airless, temperate, a runaway's and the rest, at waters from none to an
+/// ocean world's and a NaN, at each body's radius and gravity, a small moon's and none, and on
+/// both sides of the outgassing's edge, [`surface_water`], [`surface_water_of`] of the air's parts,
+/// is the expression as built.
+#[test]
+fn the_surface_water_is_its_parts_to_the_bit() {
+    let (mut compared, mut wet) = (0, 0);
+    for (_, body, _) in figures_table() {
+        let air = body.atmosphere();
+        let own = (Metres::from(body.radius()), body.surface_gravity());
+        let small = (Metres::new(1.0e6), MetresPerSecondSquared::new(1.3));
+        let none = (Metres::new(0.0), MetresPerSecondSquared::new(0.0));
+        for kg in [0.0, 1e15, 1e18, 1.4e21, 1e23, 1e25, f64::NAN] {
+            for outgassing in [0.0, 0.3, 1.0, f64::NAN] {
+                for (r, g) in [own, small, none] {
+                    let water = Kilograms::new(kg);
+                    let now = surface_water(air, water, r, g, outgassing);
+                    let built = surface_water_as_built(air, water, r, g, outgassing);
+                    assert_same_bits(now.value(), built.value());
+                    compared += 1;
+                    if now.value() > 0.0 {
+                        wet += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(wet > 10, "{wet} of {compared}");
+}
+
+/// The passes' basins and the record's hypsometry fill one layer, [`water_layer`]'s `σ_s` ÷ `ρ_l`
+/// (P14.T54.a; decision-p14-t54a-passes §3.1, "one function"): over the table's reliefs and surface
+/// waters from none to an ocean world's, the share the passes' basins fill,
+/// `Basins::of(h).area_filled(water_layer(σ))`, is [`potential_ocean`]'s to the bit, and at each
+/// body's own surface water its θ is its figures'.
+#[test]
+fn the_passes_and_the_record_fill_one_layer() {
+    for (name, _, figures) in figures_table() {
+        let hypsometry = figures.relief().hypsometry();
+        let basins = Basins::of(hypsometry);
+        for sigma in [0.0, 1e2, 2e4, 1e5, 1e6, 2.7e6, 1e7, 1e8] {
+            let water = KilogramsPerSquareMetre::new(sigma);
+            assert_same_bits(
+                basins.area_filled(water_layer(water)),
+                potential_ocean(hypsometry, water),
+            );
+        }
+        let own = basins.area_filled(water_layer(figures.surface_water()));
+        assert_same_bits(own, figures.potential_ocean());
+        assert_same_bits(
+            OceanWeight::of_potential_ocean(own).get(),
+            figures.ocean_weight().get(),
+        );
+        assert!(own.is_finite(), "{name}");
+    }
 }

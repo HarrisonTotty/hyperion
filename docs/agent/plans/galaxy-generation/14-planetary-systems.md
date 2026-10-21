@@ -22803,3 +22803,114 @@ planetary::record` (624 tests at T57.a's commit).
       targets re-blessed (61 passed, no golden changed), the server's `systems_in_range`,
       `system_bodies` and `--lib convert` (76 passed), Clippy `--lib --tests` on the sim, rustdoc
       with `-D warnings`, rustfmt and Prettier.
+  - _Batch D's C1, the passes' seams and the lagged solver_ (decision-p14-t54a-passes, "For main →
+    Relay to p14-wire-23 (Batch C)", Q1 and its stub tests, with §1's reasons; design-batch-c §2,
+    §3's crust split and §5's commit 1, as the ruling corrected them). A refactor at 22, pure:
+    nothing in production reads a context yet (C2 wires it), so no value moves (`golden_diff.py`
+    after a re-bless of the planetary goldens: "No golden files changed"), and the pass counts hold.
+    - _The solver_ (`derive/passes.rs`) is `solve_in_context`, whose arguments are the start, the
+      first context and `pass`, `gives`, `next` and `settled`: a pass reads an albedo and a
+      context, and `next` gives K(P), the context its own air gives. A context is a
+      `passes::Context`: its discrete `Key` (a derived `Ord`), `agrees` (≡) and `rank`, a total
+      order that is `Equal` exactly at the same bits. `solve` is it at C = (), its signature as
+      before.
+      - The plain passes are lagged: pass n reads Cₙ = K(Pₙ₋₁), pass 1 the caller's labelled C₀.
+      - Settled: T51.b's test, Cₙ₋₁ ≡ Cₙ and Cₙ ≡ K(Pₙ). On a float, ≡ is `floats_agree`: the
+        same bits, or both finite within `CONTEXT_AGREEMENT` (10⁻⁹) of the larger. A NaN never
+        agrees, and an infinity only with itself, since |∞ − ∞| ≤ 10⁻⁹ ∞ would hold.
+      - The 2-cycle stop is on (A, C) two passes back, bit for bit (`rank`'s `Equal`).
+      - The frozen context `C_f` is the one read by the lower of the last two plain passes in the
+        canonical order: the albedo read (`total_cmp`), then the albedo given, then `rank` (the
+        key's `Ord`, then each float's `total_cmp`). The floats are a last tie-break of the lane's,
+        so that the choice is a function of the pair alone.
+      - `bracket` is T51.h's bracket under a frozen context. The plain passes' least and greatest
+        albedo are re-evaluated under it, an end that read it to the bit reused (the ruling's "the
+        lane's choice": the same bits, the cap counting 2). At C = () every end is reused, so
+        T51.h's counts hold. Where the ends no longer bracket, it is [0, 1⁻].
+      - Where K(P*) differs from `C_f` in the key, a second round runs frozen at C* = K(P*). Its
+        pass is published where its own K has C*'s key (`ContextFit::SecondRound`). Otherwise the
+        lower of the two rounds' passes in the canonical order is published, a context jump
+        (`ContextFit::Jump`, which `is_jump` counts).
+      - `Convergence::Bracketed` gains `context: ContextFit` (`FirstRound` for every bracketed
+        body at C = ()). `Solved` gains the context the published pass read and its K (`context`
+        and `next`), for C2's rule (f) and the record's figures.
+      - The cap is `MOST_PASSES`, 24 + 2 × (2 + 32 + 1) = 94. `atmosphere_passes`' doc and the
+        sample test keep T51.h's 57 until C2 puts a context on the path.
+      - The greenhouse's and the partition's exits (L2) are inside the pass, untouched.
+    - _The seams._
+      - `GroundInertia` and `ground_inertia(lid, material, T)` sit in `substance/thermal.rs`,
+        inside the inertia tripwire's own module, so that the tripwire stands until C3 deletes
+        it. They give T49.j's law at the lid's row (`reference_regolith_thermal_inertia`) and the
+        six points' item 5 fallbacks (`InertiaSource`):
+        - no lid: the bulk material's constant, P14.T24.a's to the bit;
+        - `NoThermalColumns`: 55;
+        - `NoRegolithForm`: 20;
+        - `NoSolid`: the row family's, `WaterIce` 20 and otherwise 55;
+        - `Temperature`, `NotCondensed` and `FamilyMismatch`: the material's constant, with a
+          `debug_assert_ne!` (`InertiaSource::Unreachable`).
+      - The crust in stages (`hooks/crust.rs`; the module doc's new "In stages").
+        - `CrustBasis::derive(&CrustBasisInputs)`, once a body: the pass-invariant inputs
+          checked; the redox class; the mantle's `FeO` and norm; and `Melting`, by the origin's
+          rule or by the series' peak with its class under a quiet tide. The peak is computed for
+          every origin that can need it, whatever the tide.
+        - `CrustBasis::lid(&LidClimate)`, at a climate (the state, the mean and warmest surface
+          temperatures, the surface age and the tide): the thermal class, the crusts and the lid,
+          as `CrustLid`, whose `row()` is the lid's substance.
+        - `CrustComposition::of(&CrustLid, &CrustRecord)`, on the record (the volcanism level,
+          the continental fraction and the conditions): the tertiary crust, the provinces and
+          the melt area. `Crusts::Melted` lost its tertiary, which is the record's.
+        - `derive` keeps its `validate`, so its refusals and their order are as built, and is
+          then the stages' composition. Each stage refuses its own inputs, in `derive`'s order;
+          with two inputs out of range across stages, the stages name the earlier stage's.
+      - `cover::surface_water_of(&SurfaceWaterInputs)` is `surface_water`'s rule in its parts
+        (the gate's state, water's retention, T13.a's water, R, g, `p_H₂O` and the surface share),
+        which `surface_water` calls. `cover::water_layer(σ_s)`, `σ_s` ÷ `ρ_l`, is the one depth
+        expression, which `potential_ocean` and the passes' `pass_water_cover` read.
+      - `PassFigures` and `pass_figures(&FiguresInputs)` (`hooks/figures.rs`) are
+        `GlobalFigures::derive`'s stage before its field and its surface water: the interior, the
+        heat, the crater contract, the outgassing, the volcanism level and the relief. They keep
+        its `None`s and refusals, in its order. Their getters are K's members: the basins, the
+        water's surface share, the heat flow, the surface age, the regime and the craters' crust
+        class. `derive` destructures the stage, then builds its field and its surface water.
+      - The new crate-private items that nothing in production reads yet carry
+        `expect(dead_code)` under `not(test)`, naming C2 or C3.
+    - _Its tests._
+      - On stubs, in `passes.rs`:
+        - `at_no_context_the_solver_is_t51h_s_to_the_bit`, against a frozen copy of T51.h's
+          solver: its 361 stubs and the other stub tests' maps, with the early stop and run on.
+          Over 742 runs, 384 of them bracketed, the albedo, pass, count and residual are the same.
+        - `a_weakly_coupled_context_settles_at_its_joint_fixed_point`: 5 passes; A within
+          4.5 × 10⁻¹³ of 0.25 and C within 4.4 × 10⁻¹⁶ of 0.5; its context ≡ its K.
+        - `a_pass_whose_context_moved_after_the_one_before_is_not_published`, the ruling's settle
+          hole: pass 2 is not published; 57 passes, bracketed at 0.5, residual 3.5 × 10⁻¹¹.
+        - `stopping_at_a_detected_2_cycle_moves_nothing`, extended: caps 24 and 25, with the
+          early stop and run on, at C = () and on the ruling's parity stub, which publishes
+          0.652 ÷ 2.6 under C = 1 in all four.
+        - `the_ends_are_re_evaluated_under_the_frozen_context`: [0, 1⁻], 38 passes.
+        - The second round, 74 passes where it fits:
+          `a_consistent_pair_only_at_the_other_context_is_found_by_the_second_round`; and
+          `a_flip_flop_publishes_the_lower_albedo_as_a_context_jump`.
+        - `the_passes_take_at_most_94`, a stub that takes all 94.
+        - `the_solver_under_a_context_is_deterministic`.
+        - The design's `an_albedo_2_cycle_under_a_moving_context_does_not_stop_early`, and
+          `floats_agree_within_1e_9_and_never_at_a_nan`.
+      - The seams:
+        - `derive_is_its_stages_composition_to_the_bit`, against a frozen copy of T51.c's
+          derivation: 6,272 crusts, each body's basis built once and its lid taken at four
+          climates, 71 kinds of thermal class, lid and crusts; and
+          `each_single_refusal_is_the_stages_own`.
+        - `the_ground_s_inertia_is_the_law_at_its_lid_with_its_fallbacks` (Mars's `basalt_fe` at
+          214 K, 48.08; `H2O` at 102 K, 56.81), and
+          `an_unreachable_inertia_fails_its_debug_assertion`.
+        - `the_surface_water_is_its_parts_to_the_bit`, against a frozen copy, and
+          `the_passes_and_the_record_fill_one_layer`.
+        - `the_figures_first_stage_is_the_record_s_to_the_bit`.
+    - _Files:_ `planetary/derive/passes.rs`, `hooks/crust.rs`, `hooks/figures.rs`,
+      `hooks/figures/cover.rs`, `derive/atmosphere/surface_mix.rs` and `substance/thermal.rs`; the
+      tests in `hooks/crust/tests.rs`, `hooks/figures/tests.rs`, `hooks/figures/cover/tests.rs`,
+      `substance/thermal/tests.rs` and `system/tests.rs` (its pattern on `Bracketed`).
+    - _Checks:_ the tests of `derive::passes`, `hooks::crust`, `substance::thermal` and
+      `hooks::figures::cover`, with the figures' first stage, by name (108 passed); the 14 planetary
+      lib goldens and 18 golden integration targets re-blessed (58 passed, no golden changed); the
+      changed items' doctests (6 passed); Clippy `--lib --tests` on the sim; rustdoc with
+      `-D warnings`; rustfmt and Prettier.

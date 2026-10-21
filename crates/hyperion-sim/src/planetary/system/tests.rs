@@ -4680,7 +4680,7 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
         );
         match derived.convergence() {
             Convergence::Converged => {}
-            Convergence::Bracketed { residual } => {
+            Convergence::Bracketed { residual, .. } => {
                 assert!(
                     residual.is_finite() && residual >= 0.0,
                     "{what}: {residual}"

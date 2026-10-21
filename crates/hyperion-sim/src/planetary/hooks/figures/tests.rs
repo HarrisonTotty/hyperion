@@ -2854,3 +2854,56 @@ fn shares_beyond_the_whole_surface_are_scaled_to_it() {
     assert!((total - 1.0).abs() < 1e-15, "{over:?}");
     assert!((over[0].1 / over[1].1 - 1.5).abs() < 1e-12, "{over:?}");
 }
+
+/// The figures' first stage is the record's, to the bit (P14.T54.a; decision-p14-t54a-passes
+/// §1.1): over the table's bodies at four ages (birth, 1 Gyr, their own and a NaN) and with and
+/// without a tide's heat, [`pass_figures`] gives the basins, the water's surface share, the heat
+/// flow, the surface age, the regime and the craters' crust class of [`GlobalFigures::derive`]'s
+/// figures, which are built on it, and its refusals.
+#[test]
+fn the_figures_first_stage_is_the_record_s_to_the_bit() {
+    let (mut compared, mut refused) = (0, 0);
+    for (name, body) in crate::planetary::derive::solar::historic_table() {
+        let inputs = inputs_of(&body, name);
+        for age in [
+            Years::ZERO,
+            Years::new(1e9),
+            inputs.age,
+            Years::new(f64::NAN),
+        ] {
+            for tide in [0.0, 0.05] {
+                let at = FiguresInputs {
+                    age,
+                    tidal_heat_flow: WattsPerSquareMetre::new(tide),
+                    ..inputs
+                };
+                match (pass_figures(&at), GlobalFigures::derive(&at)) {
+                    (Ok(Some(stage)), Ok(Some(figures))) => {
+                        assert_eq!(stage.basins(), Basins::of(figures.relief().hypsometry()));
+                        assert_same_bits(
+                            stage.water_surface_share(),
+                            cover::water_surface_share(figures.outgassing()),
+                        );
+                        assert_same_bits(stage.heat_flow().value(), figures.heat_flow().value());
+                        assert_same_bits(
+                            stage.surface_age().value(),
+                            figures.surface_age().value(),
+                        );
+                        assert_eq!(stage.tectonic_regime(), figures.tectonic_regime());
+                        assert_eq!(stage.crust(), figures.impactors().crust());
+                        compared += 1;
+                    }
+                    (Ok(None), Ok(None)) => {}
+                    (Err(stage), Err(figures)) => {
+                        // By their text: a NaN age refused is not equal to itself.
+                        assert_eq!(format!("{stage:?}"), format!("{figures:?}"), "{name}");
+                        refused += 1;
+                    }
+                    (stage, figures) => panic!("{name}: {stage:?} against {figures:?}"),
+                }
+            }
+        }
+    }
+    assert!(compared > 40, "{compared}");
+    assert!(refused > 10, "{refused}");
+}

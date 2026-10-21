@@ -2016,19 +2016,20 @@ impl GlobalFigures {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn derive(inputs: &FiguresInputs<'_>) -> Result<Option<Self>, DeriveFiguresError> {
-        let air = inputs.atmosphere;
-        if matches!(air.state(), SurfaceState::GasEnvelope) {
-            return Ok(None);
-        }
-        let heat_inputs = inputs.heat();
-        let Some((interior, rock_core)) = interior_of(&heat_inputs) else {
+        let Some(PassFigures {
+            interior,
+            heat,
+            surface_age,
+            impactors,
+            craters,
+            outgassing,
+            volcanism,
+            relief,
+        }) = pass_figures(inputs)?
+        else {
             return Ok(None);
         };
-        let age = inputs.age;
-        if !non_negative(age.value()) {
-            return Err(DeriveFiguresError::Age(age));
-        }
-        let heat = heat_at(&heat_inputs, (interior, rock_core), age, air.state());
+        let air = inputs.atmosphere;
         let field = magnetic_field(&interior::FieldInputs {
             class: inputs.class,
             interior,
@@ -2037,38 +2038,8 @@ impl GlobalFigures {
             regime: heat.regime,
             radiogenic: heat.radiogenic,
             tidal: heat.tidal,
-            age,
+            age: inputs.age,
             rotation_period: inputs.rotation_period,
-        });
-        let (surface_age, impactors, craters) =
-            crater_contract(inputs, heat.water, heat.heat_flow)?;
-        let outgassing = outgassing(heat.heat_flow);
-        let crust = impactors.crust();
-        let surface_temperature = air.surface_temperature();
-        // Step 3 (science-p14-t24b-laws §4.6): the volcanism level over the surface's life, at the
-        // heat flow then under today's state.
-        let volcanism = relief::volcanism_level(&relief::VolcanismInputs {
-            crust,
-            surface_age,
-            age,
-            surface_temperature,
-            surface_gravity: inputs.surface_gravity,
-            radius: inputs.radius,
-            iron_share: heat.iron_share,
-            heat_flow_at: |t: Years| {
-                heat_at(&heat_inputs, (interior, rock_core), t, air.state()).heat_flow
-            },
-        });
-        // Steps 4 and 5: the continents, by the regime and T48.b's start condition, and the relief.
-        let relief = Relief::of(&relief::ReliefInputs {
-            regime: heat.regime,
-            continental_fraction: relief::continental_fraction(inputs.continents, heat.regime, age),
-            crust,
-            surface_gravity: inputs.surface_gravity,
-            radius: inputs.radius,
-            crater_density: craters.n_1km(),
-            volcanism,
-            lithosphere: relief::lithosphere_thickness(crust, surface_temperature, heat.heat_flow),
         });
         // Step 6: the surface water, its potential ocean, and the weight θ the conditions read.
         let surface_water = cover::surface_water(
@@ -2686,6 +2657,155 @@ impl GlobalFigures {
     pub const fn cloud_fraction(&self) -> f64 {
         self.cloud_fraction
     }
+}
+
+/// The figures' first stage of a body at a time (P14.T54.a; decision-p14-t54a-passes §1.1): what
+/// [`GlobalFigures::derive`] computes before its magnetic field and its surface water, which reads
+/// the pass's air only through its state and mean surface temperature. Its heat ([`heat_at`]),
+/// its crater contract and surface age ([`crater_contract`]), its outgassing, its volcanism level
+/// and its relief, from which a pass's context takes the basins, the water's surface share, the
+/// heat flow, the surface age, the regime and the craters' crust class.
+///
+/// [`pass_figures`] builds it, and [`GlobalFigures::derive`] is built on it, to the bit.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PassFigures {
+    interior: Interior,
+    heat: HeatAt,
+    surface_age: Years,
+    impactors: Impactors,
+    craters: CraterParams,
+    outgassing: f64,
+    volcanism: f64,
+    relief: Relief,
+}
+
+impl PassFigures {
+    /// The basins the liquids fill, the relief's hypsometry ([`Basins::of`]), as the record's
+    /// partition reads them.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P14.T54.a's C2 wires the passes' context")
+    )]
+    #[must_use]
+    pub(crate) fn basins(&self) -> Basins {
+        Basins::of(self.relief.hypsometry())
+    }
+
+    /// The share of the condensed water at the surface at the outgassing
+    /// ([`cover::water_surface_share`]), as the record's partition reads it.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P14.T54.a's C2 wires the passes' context")
+    )]
+    #[must_use]
+    pub(crate) fn water_surface_share(&self) -> f64 {
+        cover::water_surface_share(self.outgassing)
+    }
+
+    /// The heat flow at the surface F ([`GlobalFigures::heat_flow`]).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P14.T54.a's C2 wires the passes' context")
+    )]
+    #[must_use]
+    pub(crate) const fn heat_flow(&self) -> WattsPerSquareMetre {
+        self.heat.heat_flow
+    }
+
+    /// The surface age S ([`GlobalFigures::surface_age`]).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P14.T54.a's C2 wires the passes' context")
+    )]
+    #[must_use]
+    pub(crate) const fn surface_age(&self) -> Years {
+        self.surface_age
+    }
+
+    /// The tectonic regime ([`GlobalFigures::tectonic_regime`]).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P14.T54.a's C2 wires the passes' context")
+    )]
+    #[must_use]
+    pub(crate) const fn tectonic_regime(&self) -> TectonicRegime {
+        self.heat.regime
+    }
+
+    /// The craters' crust class at the air's mean surface temperature ([`Impactors::crust`]).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P14.T54.a's C2 wires the passes' context")
+    )]
+    #[must_use]
+    pub(crate) const fn crust(&self) -> Crust {
+        self.impactors.crust()
+    }
+}
+
+/// The figures' first stage of the body `inputs` describe ([`PassFigures`]), with
+/// [`GlobalFigures::derive`]'s `None` and errors, in its order: `None` for a body in the
+/// gas-envelope state or of a class with no solid surface, then an age that is not finite and
+/// non-negative, then the crater contract's.
+///
+/// # Errors
+///
+/// As [`GlobalFigures::derive`].
+pub(crate) fn pass_figures(
+    inputs: &FiguresInputs<'_>,
+) -> Result<Option<PassFigures>, DeriveFiguresError> {
+    let air = inputs.atmosphere;
+    if matches!(air.state(), SurfaceState::GasEnvelope) {
+        return Ok(None);
+    }
+    let heat_inputs = inputs.heat();
+    let Some((interior, rock_core)) = interior_of(&heat_inputs) else {
+        return Ok(None);
+    };
+    let age = inputs.age;
+    if !non_negative(age.value()) {
+        return Err(DeriveFiguresError::Age(age));
+    }
+    let heat = heat_at(&heat_inputs, (interior, rock_core), age, air.state());
+    let (surface_age, impactors, craters) = crater_contract(inputs, heat.water, heat.heat_flow)?;
+    let outgassing = outgassing(heat.heat_flow);
+    let crust = impactors.crust();
+    let surface_temperature = air.surface_temperature();
+    // Step 3 (science-p14-t24b-laws §4.6): the volcanism level over the surface's life, at the
+    // heat flow then under today's state.
+    let volcanism = relief::volcanism_level(&relief::VolcanismInputs {
+        crust,
+        surface_age,
+        age,
+        surface_temperature,
+        surface_gravity: inputs.surface_gravity,
+        radius: inputs.radius,
+        iron_share: heat.iron_share,
+        heat_flow_at: |t: Years| {
+            heat_at(&heat_inputs, (interior, rock_core), t, air.state()).heat_flow
+        },
+    });
+    // Steps 4 and 5: the continents, by the regime and T48.b's start condition, and the relief.
+    let relief = Relief::of(&relief::ReliefInputs {
+        regime: heat.regime,
+        continental_fraction: relief::continental_fraction(inputs.continents, heat.regime, age),
+        crust,
+        surface_gravity: inputs.surface_gravity,
+        radius: inputs.radius,
+        crater_density: craters.n_1km(),
+        volcanism,
+        lithosphere: relief::lithosphere_thickness(crust, surface_temperature, heat.heat_flow),
+    });
+    Ok(Some(PassFigures {
+        interior,
+        heat,
+        surface_age,
+        impactors,
+        craters,
+        outgassing,
+        volcanism,
+        relief,
+    }))
 }
 
 /// What a body's heat flow reads of it ([`heat_at`]; P14.T24.b), as plain values: the part of

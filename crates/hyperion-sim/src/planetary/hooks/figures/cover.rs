@@ -54,7 +54,7 @@ use crate::planetary::moons::regular::ICE_CONDUCTIVITY_COEFFICIENT;
 use crate::substance;
 use crate::units::{
     Kelvin, Kilograms, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metres,
-    MetresPerSecondSquared, WattsPerSquareMetre,
+    MetresPerSecondSquared, Pascals, WattsPerSquareMetre,
 };
 
 #[cfg(test)]
@@ -206,24 +206,74 @@ pub fn surface_water(
     surface_gravity: MetresPerSecondSquared,
     outgassing: f64,
 ) -> KilogramsPerSquareMetre {
-    let holds = match atmosphere.state() {
+    surface_water_of(&SurfaceWaterInputs {
+        state: atmosphere.state(),
+        retained: atmosphere.retains_against_escape(Gas::Water),
+        water,
+        radius,
+        surface_gravity,
+        vapour: atmosphere.partial_pressures().of(Gas::Water),
+        share: water_surface_share(outgassing),
+    })
+}
+
+/// What [`surface_water_of`] reads, [`surface_water`]'s inputs as plain values (P14.T54.a): the
+/// passes give them from a greenhouse step's partition, the record from its atmosphere.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SurfaceWaterInputs {
+    /// The surface state that gates the water: only a temperate world or a snowball holds it.
+    pub(crate) state: SurfaceState,
+    /// Whether the body keeps its water against escape ([`Atmosphere::retains_against_escape`]).
+    pub(crate) retained: bool,
+    /// P14.T13.a's water.
+    pub(crate) water: Kilograms,
+    /// The body's mean radius.
+    pub(crate) radius: Metres,
+    /// Its mean surface gravity.
+    pub(crate) surface_gravity: MetresPerSecondSquared,
+    /// The water vapour's partial pressure in its air.
+    pub(crate) vapour: Pascals,
+    /// The share of its condensed water at the surface ([`water_surface_share`]).
+    pub(crate) share: f64,
+}
+
+/// The surface water `σ_s` of the body `inputs` describe, kg m⁻²: [`surface_water`]'s rule in its
+/// parts, the one expression the record's figures and the passes' climate read (P14.T54.a;
+/// decision-p14-t54a-passes §3.1). The water condensed at the surface over 4πR², `M` ÷ 4πR² −
+/// `p_H₂O` ÷ g, times its surface share, where the state holds water, the body keeps it and the
+/// water, radius and gravity are positive; none otherwise, nor where nothing is condensed.
+#[must_use]
+pub(crate) fn surface_water_of(inputs: &SurfaceWaterInputs) -> KilogramsPerSquareMetre {
+    let holds = match inputs.state {
         SurfaceState::Temperate | SurfaceState::Snowball => true,
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse => false,
     };
-    let (kg, r, g) = (water.value(), radius.value(), surface_gravity.value());
+    let (kg, r, g) = (
+        inputs.water.value(),
+        inputs.radius.value(),
+        inputs.surface_gravity.value(),
+    );
     // By comparison, so that a NaN water, radius or gravity holds none.
-    if !(holds && atmosphere.retains_against_escape(Gas::Water) && kg > 0.0 && r > 0.0 && g > 0.0) {
+    if !(holds && inputs.retained && kg > 0.0 && r > 0.0 && g > 0.0) {
         return KilogramsPerSquareMetre::ZERO;
     }
-    let vapour = atmosphere.partial_pressures().of(Gas::Water);
-    let condensed = kg / (4.0 * core::f64::consts::PI * r * r) - vapour.value() / g;
+    let condensed = kg / (4.0 * core::f64::consts::PI * r * r) - inputs.vapour.value() / g;
     if condensed.is_nan() || condensed <= 0.0 {
         return KilogramsPerSquareMetre::ZERO;
     }
-    KilogramsPerSquareMetre::new(condensed * water_surface_share(outgassing))
+    KilogramsPerSquareMetre::new(condensed * inputs.share)
+}
+
+/// The global layer of liquid water that the surface water `surface_water` makes, m: `σ_s` ÷
+/// `ρ_l` ([`liquid_water_density`]), the depth to which [`potential_ocean`] fills its hypsometry
+/// and the passes' basins fill theirs, one expression on both paths (P14.T54.a;
+/// decision-p14-t54a-passes §3.1).
+#[must_use]
+pub(crate) fn water_layer(surface_water: KilogramsPerSquareMetre) -> Metres {
+    Metres::new(surface_water.value() / liquid_water_density().value())
 }
 
 /// The share of a body's condensed water that lies at its surface at the present outgassing
@@ -438,8 +488,7 @@ impl Hypsometry {
 /// ```
 #[must_use]
 pub fn potential_ocean(hypsometry: &Hypsometry, surface_water: KilogramsPerSquareMetre) -> f64 {
-    let depth = Metres::new(surface_water.value() / liquid_water_density().value());
-    hypsometry.fill(depth).1
+    hypsometry.fill(water_layer(surface_water)).1
 }
 
 /// Whether a `Snowball` holds an ocean under its ice (science-p14-t24b-laws §4.2): its surface
