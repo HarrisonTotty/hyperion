@@ -1208,12 +1208,52 @@ impl SurfaceConditions {
     #[must_use]
     pub(crate) fn cold_profile(&self) -> ColdProfile {
         if self.locked {
-            ColdProfile::Eyeball {
-                day_k: self.day_and_night.0.value(),
-                night_k: self.day_and_night.1.value(),
-            }
+            self.eyeball()
         } else {
             ColdProfile::Zonal(self.zonal.points())
+        }
+    }
+
+    /// [`cold_profile`](Self::cold_profile), a rotating world's zonal points read off its body's
+    /// insolation table `table` (lever (h), [`ZonalProfile::points_over`]): the same bits. A
+    /// world locked 1:1 reads none of it.
+    ///
+    /// # Panics
+    ///
+    /// As [`ZonalProfile::points_over`]: if a rotating world's `table` is not of its obliquity.
+    #[must_use]
+    pub(crate) fn cold_profile_over(&self, table: &ZonalInsolation) -> ColdProfile {
+        if self.locked {
+            self.eyeball()
+        } else {
+            ColdProfile::Zonal(self.zonal.points_over(table))
+        }
+    }
+
+    /// [`cold_area`](Self::cold_area) read off the body's insolation table `table`
+    /// ([`cold_profile_over`](Self::cold_profile_over)): the same bits.
+    ///
+    /// # Panics
+    ///
+    /// As [`cold_profile_over`](Self::cold_profile_over).
+    #[must_use]
+    pub(crate) fn cold_area_over(&self, threshold: Kelvin, table: &ZonalInsolation) -> f64 {
+        self.cold_profile_over(table).area_below(threshold)
+    }
+
+    /// The insolation table of the conditions' own obliquity, over hour angles' cosines of its
+    /// own ([`ZonalInsolation`]): for the conditions built outside a record's call chain.
+    #[must_use]
+    pub(crate) fn zonal_insolation(&self) -> ZonalInsolation {
+        ZonalInsolation::of(self.spin.obliquity, &HourCosines::new())
+    }
+
+    /// A locked world's cold profile, its day's and night's mean temperatures.
+    #[must_use]
+    fn eyeball(&self) -> ColdProfile {
+        ColdProfile::Eyeball {
+            day_k: self.day_and_night.0.value(),
+            night_k: self.day_and_night.1.value(),
         }
     }
 }
@@ -2471,6 +2511,108 @@ fn hour_cosines() -> Vec<f64> {
         .collect()
 }
 
+/// The trapezoid's hour angles' cosines ([`hour_cosines`]), computed once for a call chain that
+/// builds records (`snapshot_at`'s, `body_at`'s, `hooks_at`'s, and generation's moon rotations')
+/// and read by every body's [`ZonalInsolation`] in it (decision-p14-t54a-passes §C.3, lever (h)).
+/// They depend on nothing, so the chain that builds them changes no bit.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct HourCosines(Vec<f64>);
+
+impl HourCosines {
+    /// The cosines, [`ZONAL_INSOLATION_STEPS`] + 1 of them.
+    #[must_use]
+    pub(crate) fn new() -> Self {
+        Self(hour_cosines())
+    }
+}
+
+/// A body's zonal insolation at the profile's area points, built once a body from its obliquity
+/// and read by every zonal profile the body builds (decision-p14-t54a-passes §C.3, lever (h)): the
+/// insolation's modes ([`insolation_modes`]), and at each point xₖ = (k + ½) ÷ 64 of
+/// [`ZONAL_AREA_POINTS`] its insolation ([`annual_insolation_at`]'s trapezoid) and its modes'
+/// Legendre polynomials.
+///
+/// None of these reads a pass: the obliquity holds over a body's passes and its record, and only
+/// the points' temperatures read the column ([`zonal_point_newton`]). The trapezoid, 64 × 1,024
+/// square roots, is 95% of a profile's cost: a table takes 0.154 ms to build, and a profile read
+/// off it 7.9 µs, against 0.165 ms for one that computes its own (release, one CPU, the 400-system
+/// sample's 5,978 tables and 9,155 profiles, 2026-10-20). Its values are those each profile
+/// computed for itself before, to the bit, an immutable table built in its constructor, which
+/// holds no state between calls.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ZonalInsolation {
+    /// The obliquity it is the table of.
+    obliquity: Radians,
+    /// The insolation's modes at that obliquity.
+    modes: [InsolationMode; ZONAL_MODES],
+    /// At each area point, from the equator: x, its insolation over S ÷ 4 and its modes' Legendre
+    /// polynomials.
+    points: Vec<(f64, f64, ModeValues)>,
+}
+
+impl ZonalInsolation {
+    /// The table at the obliquity `obliquity`, its trapezoids over the hour angles' cosines
+    /// `cosines`.
+    #[must_use]
+    pub(crate) fn of(obliquity: Radians, cosines: &HourCosines) -> Self {
+        let n = f64::from(ZONAL_AREA_POINTS);
+        let points = (0..ZONAL_AREA_POINTS)
+            .map(|k| {
+                let x = (f64::from(k) + 0.5) / n;
+                (x, insolation_with(obliquity, x, &cosines.0), legendre_at(x))
+            })
+            .collect();
+        Self {
+            obliquity,
+            modes: insolation_modes(obliquity),
+            points,
+        }
+    }
+
+    /// Whether it is the table of the obliquity `obliquity`, bit for bit.
+    #[must_use]
+    fn is_at(&self, obliquity: Radians) -> bool {
+        self.obliquity.value().total_cmp(&obliquity.value()).is_eq()
+    }
+}
+
+/// How the zonal profiles read their body's [`ZonalInsolation`], a test-only switch of lever (h)
+/// ([`with_table_reads`]).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TableReads {
+    /// Off the table, as the generator reads it.
+    Table,
+    /// Each profile's own insolation, as before the table: the unlevered path, the oracle.
+    Unlevered,
+    /// Both: each profile's points off the table asserted the unlevered path's to the bit, and
+    /// counted.
+    Checked,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The switch on this thread, a test's own: tests run on threads of one process.
+    static TABLE_READS: core::cell::Cell<TableReads> = const {
+        core::cell::Cell::new(TableReads::Table)
+    };
+    /// The profiles [`TableReads::Checked`] has checked on this thread.
+    static CHECKED_PROFILES: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+}
+
+/// `run`'s result with the zonal profiles reading their tables as `reads` says, and how many
+/// profiles with modes it checked against the unlevered path under [`TableReads::Checked`]. The
+/// switch is set back after.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn with_table_reads<R>(reads: TableReads, run: impl FnOnce() -> R) -> (R, u64) {
+    let before = TABLE_READS.with(|cell| cell.replace(reads));
+    CHECKED_PROFILES.with(|cell| cell.set(0));
+    let result = run();
+    TABLE_READS.with(|cell| cell.set(before));
+    (result, CHECKED_PROFILES.with(core::cell::Cell::take))
+}
+
 /// [`annual_insolation_at`] at x = `sine_latitude` with the hour angles' cosines `cosines`
 /// ([`hour_cosines`]).
 #[must_use]
@@ -2595,24 +2737,129 @@ impl ZonalProfile {
     }
 
     /// The profile at the equator, at [`ZONAL_AREA_POINTS`] points uniform in area,
-    /// xₖ = (k + ½) ÷ 64, and at the pole, as `(x, T)` with T in K, the modes and cosines read once.
+    /// xₖ = (k + ½) ÷ 64, and at the pole, as `(x, T)` with T in K, read off its own obliquity's
+    /// [`ZonalInsolation`], built for it: [`points_over`](Self::points_over) of that table.
     #[must_use]
     fn points(&self) -> Vec<(f64, f64)> {
-        let n = f64::from(ZONAL_AREA_POINTS);
-        let xs = (0..ZONAL_AREA_POINTS).map(|k| (f64::from(k) + 0.5) / n);
-        let inner: Vec<(f64, f64)> = match self.modal {
-            Some((transport, obliquity)) => {
-                let (modes, cosines) = (insolation_modes(obliquity), hour_cosines());
-                xs.map(|x| {
-                    (
-                        x,
-                        self.modal_at(&transport, obliquity, x, (&modes, &cosines)),
-                    )
-                })
-                .collect()
-            }
-            None => xs.map(|x| (x, self.surface_k)).collect(),
+        let inner = match self.modal {
+            Some((transport, obliquity)) => self.inner_points(
+                &transport,
+                &ZonalInsolation::of(obliquity, &HourCosines::new()),
+            ),
+            None => self.flat_points(),
         };
+        self.with_ends(inner)
+    }
+
+    /// [`points`](Self::points) read off the body's table `table`, built once for every profile
+    /// the body builds (lever (h)): the same bits.
+    ///
+    /// # Panics
+    ///
+    /// If the profile has modes and `table` is not the table of its obliquity, a broken
+    /// invariant: a body's profiles all read its one spin.
+    #[must_use]
+    pub(crate) fn points_over(&self, table: &ZonalInsolation) -> Vec<(f64, f64)> {
+        let inner = match self.modal {
+            Some((transport, obliquity)) => {
+                assert!(
+                    table.is_at(obliquity),
+                    "a zonal profile reads the insolation table of its own obliquity"
+                );
+                self.inner_points(&transport, table)
+            }
+            None => self.flat_points(),
+        };
+        self.with_ends(inner)
+    }
+
+    /// The points strictly between the ends of a profile with modes under the transport
+    /// `transport`, each solved by [`zonal_point_newton`] at the table `table`'s insolation and
+    /// Legendre values, of the profile's own obliquity (the tests may switch the table off,
+    /// [`with_table_reads`]).
+    #[must_use]
+    fn inner_points(&self, transport: &ZonalTransport, table: &ZonalInsolation) -> Vec<(f64, f64)> {
+        #[cfg(test)]
+        match TABLE_READS.with(core::cell::Cell::get) {
+            TableReads::Table => {}
+            TableReads::Unlevered => {
+                return self.inner_points_unlevered(transport, table.obliquity);
+            }
+            TableReads::Checked => {
+                let points = self.inner_points_read(transport, table);
+                let oracle = self.inner_points_unlevered(transport, table.obliquity);
+                assert_eq!(points.len(), oracle.len());
+                for (&(x, t), &(x_oracle, t_oracle)) in points.iter().zip(&oracle) {
+                    hyperion_testkit::float::assert_same_bits(x, x_oracle);
+                    hyperion_testkit::float::assert_same_bits(t, t_oracle);
+                }
+                CHECKED_PROFILES.with(|cell| cell.set(cell.get() + 1));
+                return points;
+            }
+        }
+        self.inner_points_read(transport, table)
+    }
+
+    /// [`inner_points`](Self::inner_points) off the table `table`.
+    #[must_use]
+    fn inner_points_read(
+        &self,
+        transport: &ZonalTransport,
+        table: &ZonalInsolation,
+    ) -> Vec<(f64, f64)> {
+        table
+            .points
+            .iter()
+            .map(|(x, insolation, legendre)| {
+                (
+                    *x,
+                    zonal_point_newton(
+                        self.surface_k,
+                        transport,
+                        &table.modes,
+                        *insolation,
+                        legendre,
+                    ),
+                )
+            })
+            .collect()
+    }
+
+    /// [`inner_points`](Self::inner_points) as each profile computed them before its body's table
+    /// (lever (h)): the modes, the hour angles' cosines, and each point's insolation and Legendre
+    /// values computed for the profile itself, at the obliquity `obliquity`. The tests' oracle.
+    #[cfg(test)]
+    #[must_use]
+    fn inner_points_unlevered(
+        &self,
+        transport: &ZonalTransport,
+        obliquity: Radians,
+    ) -> Vec<(f64, f64)> {
+        let n = f64::from(ZONAL_AREA_POINTS);
+        let (modes, cosines) = (insolation_modes(obliquity), hour_cosines());
+        (0..ZONAL_AREA_POINTS)
+            .map(|k| {
+                let x = (f64::from(k) + 0.5) / n;
+                (
+                    x,
+                    self.modal_at(transport, obliquity, x, (&modes, &cosines)),
+                )
+            })
+            .collect()
+    }
+
+    /// The points strictly between the ends of a flat profile, at its mean.
+    #[must_use]
+    fn flat_points(&self) -> Vec<(f64, f64)> {
+        let n = f64::from(ZONAL_AREA_POINTS);
+        (0..ZONAL_AREA_POINTS)
+            .map(|k| ((f64::from(k) + 0.5) / n, self.surface_k))
+            .collect()
+    }
+
+    /// The points `inner` with the equator's end before them and the pole's after.
+    #[must_use]
+    fn with_ends(&self, inner: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
         core::iter::once((0.0, self.ends.0))
             .chain(inner)
             .chain(core::iter::once((1.0, self.ends.1)))

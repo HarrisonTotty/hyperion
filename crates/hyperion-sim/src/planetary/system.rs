@@ -131,7 +131,9 @@ use crate::planetary::hooks::figures::{
     ImpactorSources, MoonBirth, SourceBelt, VolatileHistory, VolatileHistoryInputs, WindowAt,
     WindowEntryInputs, past_outgassing, relief, window_entry,
 };
-use crate::planetary::hooks::surface::{ClimateInputs, SeasonalSpin, SeasonsFrom, SurfaceInputs};
+use crate::planetary::hooks::surface::{
+    ClimateInputs, HourCosines, SeasonalSpin, SeasonsFrom, SurfaceInputs, ZonalInsolation,
+};
 use crate::planetary::hooks::{
     self, BodyHooks, BulkComposition, GlobalFigures, Subsurface, SurfaceConditions, SurfaceSeed,
 };
@@ -1758,6 +1760,8 @@ impl PlanetarySystem {
     #[must_use]
     pub fn snapshot_at(&self, ctx: &SystemContext, t: UniverseTime) -> SystemSnapshot {
         let epoch = Epoch::new(self, ctx, t);
+        // Once for the whole snapshot, every body's zonal profiles reading them (lever (h)).
+        let cosines = HourCosines::new();
         let labels: Vec<(BodyIndex, BodyLabel)> = label::labels(self);
         let label_of = |index: BodyIndex| {
             labels
@@ -1801,7 +1805,7 @@ impl PlanetarySystem {
                     let fate = fate
                         .as_ref()
                         .expect("every planet and member orbits one of its system's zones");
-                    let (record, now) = self.primary_record(&epoch, body, label, fate);
+                    let (record, now) = self.primary_record(&epoch, &cosines, body, label, fate);
                     records.push(record);
                     parents.push((body.index, now, fate));
                 }
@@ -1814,7 +1818,7 @@ impl PlanetarySystem {
                         .find(|(at, ..)| *at == parent)
                         .map(|(_, now, fate)| (now, *fate))
                         .expect("a satellite's parent comes before it in index order");
-                    records.push(self.satellite_record(&epoch, body, label, now, fate));
+                    records.push(self.satellite_record(&epoch, &cosines, body, label, now, fate));
                 }
             }
         }
@@ -1872,6 +1876,7 @@ impl PlanetarySystem {
         t: UniverseTime,
     ) -> Result<BodyRecord, ResolveBodyError> {
         let epoch = Epoch::new(self, ctx, t);
+        let cosines = HourCosines::new();
         let label = label::label(self, index).ok_or(ResolveBodyError::NoSuchBody)?;
         if let Some(belt) = self.belt(index) {
             return Ok(self.belt_record(&epoch, belt, label));
@@ -1889,13 +1894,13 @@ impl PlanetarySystem {
                 let fate = self.fate_of(parent, &host);
                 let parent_label =
                     label::label(self, parent.index).expect("every body of a system has a label");
-                let (_, now) = self.primary_record(&epoch, parent, parent_label, &fate);
-                Ok(self.satellite_record(&epoch, body, label, &now, &fate))
+                let (_, now) = self.primary_record(&epoch, &cosines, parent, parent_label, &fate);
+                Ok(self.satellite_record(&epoch, &cosines, body, label, &now, &fate))
             }
             OrbitHost::Star(_) | OrbitHost::Pair(_) | OrbitHost::Barycentre => {
                 let host = fate_host(ctx, self.zone_of(body));
                 let fate = self.fate_of(body, &host);
-                Ok(self.primary_record(&epoch, body, label, &fate).0)
+                Ok(self.primary_record(&epoch, &cosines, body, label, &fate).0)
             }
         }
     }
@@ -2089,7 +2094,9 @@ impl PlanetarySystem {
         let fate = self.fate_of(primary, &host);
         let primary_label =
             label::label(self, primary.index).expect("every body of a system has a label");
-        let (primary_record, now) = self.primary_record(&epoch, primary, primary_label, &fate);
+        let cosines = HourCosines::new();
+        let (primary_record, now) =
+            self.primary_record(&epoch, &cosines, primary, primary_label, &fate);
         let (bulk, record) = match &body.part {
             Part::Planet(_) | Part::Member(_) => {
                 let bulk = match now.derived {
@@ -2104,7 +2111,7 @@ impl PlanetarySystem {
             }
             Part::Moon(moon) => {
                 let label = label::label(self, index).expect("every body of a system has a label");
-                let record = self.satellite_record(&epoch, body, label, &now, &fate);
+                let record = self.satellite_record(&epoch, &cosines, body, label, &now, &fate);
                 let state = moon_state(now.state, &moon.satellite, ctx.age_at_epoch(), t);
                 let bulk = if state == BodyState::Present && now.position.is_some() {
                     let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
@@ -2165,6 +2172,7 @@ impl PlanetarySystem {
     fn surface_section(
         &self,
         epoch: &Epoch<'_>,
+        cosines: &HourCosines,
         body: &Body,
         fate: &BodyFate<'_>,
         of: SurfaceOf<'_>,
@@ -2198,6 +2206,7 @@ impl PlanetarySystem {
             t,
             fe_h: ctx.fe_h(),
             age: ctx.age_at(t),
+            cosines,
         };
         let case = match of {
             SurfaceOf::Body { derived, bulk } => SurfaceCase {
@@ -2296,7 +2305,7 @@ impl PlanetarySystem {
                 unreachable!("a moon's host is a body")
             };
             let epoch = Epoch::new(self, ctx, parent_time(ctx));
-            let now = self.parent_now(&epoch, parent);
+            let now = self.parent_now(&epoch, &HourCosines::new(), parent);
             return self.moon_rotation(ctx, &epoch, body, moon, &now);
         }
         self.rotation_from(ctx, body, orbit.elements(), bulk, *mass, SpinTides::OfClass)
@@ -2475,6 +2484,7 @@ impl PlanetarySystem {
     fn moon_rotations(&self, ctx: &SystemContext) -> Vec<Option<BodyRotation>> {
         let t = parent_time(ctx);
         let epoch = Epoch::new(self, ctx, t);
+        let cosines = HourCosines::new();
         let mut parents: Vec<(BodyIndex, ParentNow)> = Vec::new();
         self.bodies
             .iter()
@@ -2487,7 +2497,7 @@ impl PlanetarySystem {
                 };
                 let at = parents.iter().position(|(index, _)| *index == parent);
                 let at = at.unwrap_or_else(|| {
-                    parents.push((parent, self.parent_now(&epoch, parent)));
+                    parents.push((parent, self.parent_now(&epoch, &cosines, parent)));
                     parents.len() - 1
                 });
                 self.moon_rotation(ctx, &epoch, body, moon, &parents[at].1)
@@ -2496,16 +2506,17 @@ impl PlanetarySystem {
     }
 
     /// The planet or member `parent` as its satellites read it at the epoch's time
-    /// ([`primary_record`](Self::primary_record)'s).
+    /// ([`primary_record`](Self::primary_record)'s), its record built over the call chain's hour
+    /// angles' cosines `cosines`.
     #[must_use]
-    fn parent_now(&self, epoch: &Epoch<'_>, parent: BodyIndex) -> ParentNow {
+    fn parent_now(&self, epoch: &Epoch<'_>, cosines: &HourCosines, parent: BodyIndex) -> ParentNow {
         let primary = self
             .body(parent)
             .expect("a satellite's parent is a body of its system");
         let host = fate_host(epoch.ctx, self.zone_of(primary));
         let fate = self.fate_of(primary, &host);
         let label = label::label(self, parent).expect("every body of a system has a label");
-        self.primary_record(epoch, primary, label, &fate).1
+        self.primary_record(epoch, cosines, primary, label, &fate).1
     }
 
     /// The rotation law of the moon `body`, `moon`, whose parent is as `now` says at the epoch's
@@ -2718,11 +2729,13 @@ impl PlanetarySystem {
     }
 
     /// The record of the planet or member `body` at the epoch's time, labelled `label`, with its
-    /// history `fate`, and what its satellites read of it then.
+    /// history `fate`, and what its satellites read of it then. Its surface reads the call chain's
+    /// hour angles' cosines `cosines` ([`published_surface`]).
     #[must_use]
     fn primary_record(
         &self,
         epoch: &Epoch<'_>,
+        cosines: &HourCosines,
         body: &Body,
         label: BodyLabel,
         fate: &BodyFate<'_>,
@@ -2785,7 +2798,7 @@ impl PlanetarySystem {
                         bulk: &bulk,
                     };
                     (
-                        self.surface_section(epoch, body, fate, of),
+                        self.surface_section(epoch, cosines, body, fate, of),
                         Section::NotApplicable,
                     )
                 } else {
@@ -2872,11 +2885,13 @@ impl PlanetarySystem {
     }
 
     /// The record of the moon or ring `body` at the epoch's time, labelled `label`, whose parent
-    /// is as `parent` says then and goes round its hosts as `fate` tells.
+    /// is as `parent` says then and goes round its hosts as `fate` tells. Its surface reads the
+    /// call chain's hour angles' cosines `cosines` ([`published_surface`]).
     #[must_use]
     fn satellite_record(
         &self,
         epoch: &Epoch<'_>,
+        cosines: &HourCosines,
         body: &Body,
         label: BodyLabel,
         parent: &ParentNow,
@@ -2932,7 +2947,7 @@ impl PlanetarySystem {
                                 orbit: &orbit,
                             };
                             (
-                                self.surface_section(epoch, body, fate, of),
+                                self.surface_section(epoch, cosines, body, fate, of),
                                 Section::NotApplicable,
                             )
                         } else {
@@ -3409,8 +3424,9 @@ impl SurfaceInterior {
 /// What a body's surface conditions and global figures read of the time they are asked at
 /// ([`published_surface`]): the hosts' light over the past up to it as the primary's orbit sees
 /// it, which the volatile history reads (P14.T48.b; a moon's its planet's), the body's rotation,
-/// its seasonal orbit then (`None` where this version does not compute it), and the system's
-/// \[Fe/H\] and age.
+/// its seasonal orbit then (`None` where this version does not compute it), the system's
+/// \[Fe/H\] and age, and the hour angles' cosines of the call chain that asks, which every body's
+/// zonal insolation table reads (lever (h)).
 #[derive(Debug, Clone, Copy)]
 struct SurfaceTime<'a> {
     past: &'a PastSky<'a>,
@@ -3419,6 +3435,7 @@ struct SurfaceTime<'a> {
     t: UniverseTime,
     fe_h: Dex,
     age: Years,
+    cosines: &'a HourCosines,
 }
 
 /// What [`PlanetarySystem::surface_section`] reads of a body beyond its record's place: a planet's
@@ -3571,6 +3588,10 @@ struct SurfaceCraters {
 /// the conditions: the volatile history from their liquid-water flag (P14.T48.b), the ocean, the
 /// ice and the cloud, and then the conditions' climate regime (P14.T48.d), which reads the history
 /// and the ice.
+///
+/// The conditions' zonal profile is read off the body's insolation table, built once from its
+/// spin's obliquity over the call chain's hour angles' cosines (the time's), and read by the
+/// partition's cold profile and T24.b's ice alike (decision-p14-t54a-passes §C.3, lever (h)).
 #[must_use]
 fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<Surface> {
     let Some(seasonal) = time.seasonal else {
@@ -3643,7 +3664,9 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
     let Some(conditions) = SurfaceConditions::derive(&inputs) else {
         return Section::NotApplicable;
     };
-    let (conditions, condensates) = with_partition(&figures, case, (&spin, seasonal), conditions);
+    let table = ZonalInsolation::of(spin.obliquity, time.cosines);
+    let (conditions, (partition, published)) =
+        with_partition(&figures, case, (&spin, seasonal), conditions, &table);
     // The second stage: the volatile history reads the conditions' liquid-water flag, the hosts'
     // light over the body's past and its outgassing then (P14.T48.b), and the ocean and the ice
     // read the conditions (science-p14-t24b-laws §4.6, steps 8–12).
@@ -3657,8 +3680,7 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         window,
         outgassing: |age: Years| past_outgassing(&figure_inputs, age),
     });
-    let (partition, published) = condensates;
-    let figures = figures.with_surface_under(&conditions, history, Some(&published));
+    let figures = figures.with_surface_under(&conditions, history, Some(&published), &table);
     // Step 10, the climate regime (P14.T48.d): it reads the cover, which reads no regime (an ice
     // belt's band is the profile's cold equator, science-p14-t24b-laws §4.3), so it follows the
     // second stage with no loop.
@@ -3689,13 +3711,15 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
 /// ([`GlobalFigures::condensates_under`]): the conditions' liquid-water flag, the ocean and ices,
 /// and the regime's reservoirs read it. Its cold traps (P14.T51.f) take the sky [`cold_trap_sky`]
 /// gives and the bare regolith's albedo its derivation gives (P14.T51.i), under their own hold at
-/// 24, which follows the case's rules, those in force.
+/// 24, which follows the case's rules, those in force. The cold profile reads the body's
+/// insolation table `table`.
 #[must_use]
 fn with_partition(
     figures: &GlobalFigures,
     case: &SurfaceCase<'_>,
     seasons: (&SeasonalSpin, &KeplerElements),
     conditions: SurfaceConditions,
+    table: &ZonalInsolation,
 ) -> (SurfaceConditions, (Partition, Condensates)) {
     let condensates = figures.condensates_under(
         case.sky.atmosphere,
@@ -3706,6 +3730,7 @@ fn with_partition(
             sky: &cold_trap_sky(case, seasons),
             regolith_albedo: case.sky.regolith_albedo,
         },
+        table,
     );
     let conditions = conditions.with_condensates(&condensates.1);
     (conditions, condensates)

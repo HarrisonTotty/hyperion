@@ -1,5 +1,6 @@
 //! Plan 14's property tests of derivation on placed planets (P14.T16.b): no planet hotter than its
-//! star, and a body's radius, temperatures and envelope continuous in time across ±H.
+//! star, and a body's radius, temperatures and envelope continuous in time, across ±100 years in
+//! the fast tier and ±H in the slow tier.
 //!
 //! The hosts are `planetary_support`'s, made as P14.T30.a makes them. Each star is plan 06's
 //! `StarModel` at the system's age, and each body goes through P14.T16.a's `derive_body` as the
@@ -252,12 +253,37 @@ fn no_planet_hotter_than_its_star() {
     assert!(share <= 1e-3, "{saturated} of {samples} surfaces saturated");
 }
 
-/// P14.T16.b: a body's radius, temperatures and envelope fraction are continuous in time across
-/// ±H: at steps of a year, no relative jump reaches 10⁻³ except where a star it orbits changes
-/// phase in that step, or the body's surface state, the gases it retains or its carbon's carrier
-/// (P14.T24.f) change (a recorded state change).
+/// P14.T16.b: a body's radius, temperatures and envelope fraction are continuous in time: at
+/// steps of a year, no relative jump reaches 10⁻³ except where a star it orbits changes phase in
+/// that step, or the body's surface state, the gases it retains or its carbon's carrier (P14.T24.f)
+/// change (a recorded state change).
+///
+/// The fast tier, across ±100 years: every planet of both ages at the test's own yearly steps,
+/// 114,570 derivations, so that every class of discontinuity stays covered at full resolution
+/// (decision-p14-t54a-passes §C.7). The whole of ±H is the slow tier's
+/// ([`radius_temperature_and_envelope_are_continuous_over_the_whole_window`]).
 #[test]
 fn radius_temperature_and_envelope_are_continuous_in_time() {
+    let steps = continuity_steps(100);
+    eprintln!("{steps} yearly steps compared");
+    assert!(steps > 50_000, "{steps}");
+}
+
+/// P14.T16.b's continuity ([`radius_temperature_and_envelope_are_continuous_in_time`]) across the
+/// whole of ±H, at the same yearly steps: the slow tier, run in the slow pass
+/// (decision-p14-t54a-passes §C.7).
+#[test]
+#[ignore = "slow: derives 570 planets every year over ±1,000 years, about 1.1 million derivations"]
+fn radius_temperature_and_envelope_are_continuous_over_the_whole_window() {
+    let steps = continuity_steps(window());
+    eprintln!("{steps} yearly steps compared");
+    assert!(steps > 50_000, "{steps}");
+}
+
+/// The continuity tests' body: every planet of the 60 systems sampled at each of two ages, derived
+/// every year from `years` before the epoch to `years` after it, each step's relative jumps held
+/// under 10⁻³ but at a recorded state change. It returns the steps compared.
+fn continuity_steps(years: i64) -> u64 {
     let galaxy = galaxy(SEED);
     let mut lcg = Lcg::new(0x0016_b0d2);
     let mut steps = 0_u64;
@@ -272,7 +298,7 @@ fn radius_temperature_and_envelope_are_continuous_in_time() {
                 }
                 let drawn: Vec<_> = planets.iter().map(|_| ranks(&mut lcg)).collect();
                 let mut previous: Option<Step> = None;
-                for step in -window()..=window() {
+                for step in -years..=years {
                     let t = at(step);
                     let states: Vec<Option<StarState>> =
                         stars.iter().map(|(s, _)| s.state_at(t)).collect();
@@ -313,7 +339,7 @@ fn radius_temperature_and_envelope_are_continuous_in_time() {
             }
         }
     }
-    assert!(steps > 50_000, "{steps}");
+    steps
 }
 
 /// The ages the small planets of [`small_planets`] are derived at.

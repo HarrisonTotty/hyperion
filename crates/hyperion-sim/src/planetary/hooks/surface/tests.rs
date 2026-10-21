@@ -2902,6 +2902,144 @@ fn the_batch_s_zonal_solver_moves_the_table_only_at_its_last_bits() {
     assert!(compared >= 8, "{compared}");
 }
 
+// P14.T54.a, lever (h): a body's zonal insolation table (decision-p14-t54a-passes §C.3).
+
+/// The obliquities, degrees, at which the table's tests read it: none, the Solar System's
+/// (Mercury's, Ganymede's, Earth's, Venus's), and either side of the trapezoid's kinks, the polar
+/// circle's and the ends' near 90°, to 180°.
+const TABLE_OBLIQUITIES_DEG: [f64; 11] = [
+    0.0, 0.034, 3.13, 23.44, 45.0, 60.0, 89.9, 90.0, 120.0, 177.36, 180.0,
+];
+
+/// Asserts two profiles' points equal bit for bit, `(x, T)` by `(x, T)`.
+fn same_points(read: &[(f64, f64)], own: &[(f64, f64)], what: &str) {
+    assert_eq!(read.len(), own.len(), "{what}");
+    for (&(x, t), &(x_own, t_own)) in read.iter().zip(own) {
+        assert_same_bits(x, x_own);
+        assert_same_bits(t, t_own);
+    }
+}
+
+/// The points of the profile `profile` as each profile computed them before its body's table:
+/// its own modes, cosines, insolations and Legendre values (lever (h)'s oracle).
+fn unlevered_points(profile: &ZonalProfile) -> Vec<(f64, f64)> {
+    let inner = match profile.modal {
+        Some((transport, obliquity)) => profile.inner_points_unlevered(&transport, obliquity),
+        None => profile.flat_points(),
+    };
+    profile.with_ends(inner)
+}
+
+/// Lever (h): the table holds, at each area point, the point's own insolation
+/// (`insolation_with` over `hour_cosines`, and `annual_insolation_at`) and Legendre values
+/// (`legendre_at`), with `insolation_modes`'s modes, bit for bit; and a call chain's cosines are
+/// `hour_cosines`'.
+#[test]
+fn the_zonal_insolation_table_is_each_point_s_own_insolation() {
+    let cosines = HourCosines::new();
+    let own = hour_cosines();
+    assert_eq!(cosines.0.len(), own.len());
+    for (&shared, &fresh) in cosines.0.iter().zip(&own) {
+        assert_same_bits(shared, fresh);
+    }
+    let n = f64::from(ZONAL_AREA_POINTS);
+    for degrees in TABLE_OBLIQUITIES_DEG {
+        let obliquity = Radians::from(Degrees::new(degrees));
+        let table = ZonalInsolation::of(obliquity, &cosines);
+        assert!(table.is_at(obliquity), "{degrees}°");
+        for (mode, own) in table.modes.iter().zip(&insolation_modes(obliquity)) {
+            assert_same_bits(mode.degree, own.degree);
+            assert_same_bits(mode.coefficient, own.coefficient);
+            assert_same_bits(mode.at_equator, own.at_equator);
+        }
+        assert_eq!(table.points.len(), 64, "{degrees}°");
+        for (k, (x, insolation, legendre)) in (0..ZONAL_AREA_POINTS).zip(&table.points) {
+            let x_k = (f64::from(k) + 0.5) / n;
+            assert_same_bits(*x, x_k);
+            assert_same_bits(*insolation, insolation_with(obliquity, x_k, &own));
+            assert_same_bits(*insolation, annual_insolation_at(obliquity, x_k));
+            for (&value, &own) in legendre.iter().zip(&legendre_at(x_k)) {
+                assert_same_bits(value, own);
+            }
+        }
+    }
+}
+
+/// Lever (h): a profile read off its body's table is the profile's own, bit for bit: the table's
+/// bodies under their own spins and at the table's obliquities, with modes or flat, rotating or
+/// locked 1:1, in their points, cold profiles and cold areas. A flat profile reads no table.
+#[test]
+fn a_profile_off_its_body_s_table_is_its_own_to_the_bit() {
+    let thresholds = [
+        Kelvin::new(110.0),
+        PERENNIAL_ICE_TEMPERATURE,
+        Kelvin::new(273.15),
+    ];
+    let (mut modal, mut locked) = (0, 0);
+    for (name, body) in historic_table() {
+        let own = spin_of(name);
+        let obliquities = core::iter::once(own.obliquity)
+            .chain(TABLE_OBLIQUITIES_DEG.map(|d| Radians::from(Degrees::new(d))));
+        for obliquity in obliquities {
+            for solar_day in [own.solar_day, None] {
+                let spin = SeasonalSpin {
+                    obliquity,
+                    solar_day,
+                    ..own
+                };
+                let Some(conditions) = conditions_of(&body, spin) else {
+                    continue;
+                };
+                let what = format!("{name} at {obliquity:?}, solar day {solar_day:?}");
+                let table = ZonalInsolation::of(obliquity, &HourCosines::new());
+                let profile = conditions.zonal;
+                let unlevered = unlevered_points(&profile);
+                same_points(&profile.points_over(&table), &unlevered, &what);
+                same_points(&profile.points(), &unlevered, &what);
+                assert_eq!(
+                    format!("{:?}", conditions.cold_profile_over(&table)),
+                    format!("{:?}", conditions.cold_profile()),
+                    "{what}"
+                );
+                for threshold in thresholds {
+                    let read = conditions.cold_area_over(threshold, &table);
+                    assert_same_bits(read, conditions.cold_area(threshold));
+                    if !conditions.locked {
+                        assert_same_bits(read, area_below(&unlevered, threshold));
+                    }
+                }
+                assert_eq!(conditions.zonal_insolation(), table, "{what}");
+                modal += u32::from(profile.modal.is_some());
+                locked += u32::from(conditions.locked);
+            }
+        }
+    }
+    eprintln!("{modal} profiles with modes, {locked} locked conditions");
+    assert!(modal >= 100 && locked >= 50, "{modal}, {locked}");
+    // A flat profile, at its mean everywhere, whatever table it is given.
+    let flat = ZonalProfile {
+        surface_k: 95.0,
+        modal: None,
+        ends: (95.0, 95.0),
+    };
+    let elsewhere = ZonalInsolation::of(Radians::from(Degrees::new(60.0)), &HourCosines::new());
+    same_points(
+        &flat.points_over(&elsewhere),
+        &unlevered_points(&flat),
+        "flat",
+    );
+}
+
+/// Lever (h): a profile with modes refuses a table of another obliquity, a broken invariant.
+#[test]
+#[should_panic(expected = "a zonal profile reads the insolation table of its own obliquity")]
+fn a_profile_refuses_another_obliquity_s_table() {
+    let (column, spin) = earth_column();
+    let profile = ZonalProfile::of(&column, &spin, OceanWeight::FULL);
+    let tilted = Radians::new(spin.obliquity.value().next_up());
+    let _ = profile.points_over(&ZonalInsolation::of(tilted, &HourCosines::new()));
+}
+
 /// The record path on the table (P14.T51.a's second part; decision-p14-t51a-part2 §3.7 and
 /// §4.4): the wet worlds hold surface water, Earth's published water ice is T24.b's `ice_fraction`
 /// to the bit at the same surface water, within 0.01–0.07 (decision-p14-t54a-bands §4.3), Earth
@@ -2910,7 +3048,7 @@ fn the_batch_s_zonal_solver_moves_the_table_only_at_its_last_bits() {
 fn the_batch_publishes_the_table_s_condensates() {
     use crate::planetary::chem::partition::CondensatePhase;
     use crate::planetary::hooks::cold_traps::{ColdTrapRules, RecordColdTraps, lunar_sky};
-    use crate::planetary::hooks::figures::{VolatileHistory, cover};
+    use crate::planetary::hooks::figures::{GlobalFigures, VolatileHistory, cover};
 
     let water = Gas::Water.substance();
     let sky = lunar_sky();
@@ -2934,11 +3072,15 @@ fn the_batch_publishes_the_table_s_condensates() {
         let gravity = body.surface_gravity();
         let atmosphere = body.atmosphere();
         // P14.T51.a's published condensates, with the cold traps held (P14.T51.f).
+        let table = conditions.zonal_insolation();
         let under = || {
             let traps = RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, atmosphere);
-            batch.condensates_under(atmosphere, &conditions, gravity, &traps)
+            batch.condensates_under(atmosphere, &conditions, gravity, &traps, &table)
         };
         let (partition, published) = under();
+        let second = |figures: GlobalFigures| {
+            figures.with_surface_under(&conditions, VolatileHistory::NONE, Some(&published), &table)
+        };
         if let Some(ice) = published.entry(water, CondensatePhase::Solid) {
             let t24b = cover::ice_fraction(&cover::IceInputs {
                 conditions: &conditions,
@@ -2962,11 +3104,7 @@ fn the_batch_publishes_the_table_s_condensates() {
         // and divided with them by their total where it exceeds the surface (W2): the airless
         // table Ganymede's whole surface lies under 110 K beside its argon frost.
         if published.entry(water, CondensatePhase::Solid).is_none() {
-            let figures = batch.clone().with_surface_under(
-                &conditions,
-                VolatileHistory::NONE,
-                Some(&published),
-            );
+            let figures = second(batch.clone());
             let t24b = cover::ice_fraction(&cover::IceInputs {
                 conditions: &conditions,
                 state: atmosphere.state(),
@@ -3003,8 +3141,7 @@ fn the_batch_publishes_the_table_s_condensates() {
                     .liquid_water()
             );
             assert_eq!(partition.reservoirs(), [water]);
-            let figures =
-                batch.with_surface_under(&conditions, VolatileHistory::NONE, Some(&published));
+            let figures = second(batch);
             assert_same_bits(figures.ocean_fraction(), batch_ocean(&published));
         }
     }

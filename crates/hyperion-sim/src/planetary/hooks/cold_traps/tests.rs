@@ -177,12 +177,14 @@ fn the_cold_traps_are_held_only_until_the_24_bump() {
             continue;
         };
         let (air, g) = (body.atmosphere(), body.surface_gravity());
+        let table = conditions.zonal_insolation();
         let under = |traps| {
             figures.condensates_under(
                 air,
                 &conditions,
                 g,
                 &RecordColdTraps::at_the_albedo_of(traps, &sky, air),
+                &table,
             )
         };
         let (solved, held) = under(ColdTrapRules::Held);
@@ -736,6 +738,7 @@ fn the_record_path_publishes_the_moon_s_cold_traps_under_the_batch() {
     let conditions = SurfaceConditions::derive(&inputs).unwrap();
     let (air, g) = (moon.atmosphere(), moon.surface_gravity());
     let sky = lunar_sky();
+    let table = conditions.zonal_insolation();
     let under = |traps| {
         figures
             .condensates_under(
@@ -743,6 +746,7 @@ fn the_record_path_publishes_the_moon_s_cold_traps_under_the_batch() {
                 &conditions,
                 g,
                 &RecordColdTraps::at_the_albedo_of(traps, &sky, air),
+                &table,
             )
             .1
     };
@@ -818,6 +822,8 @@ fn time_the_cold_traps() {
             continue;
         };
         let (air, g) = (body.atmosphere(), body.surface_gravity());
+        // Built once, outside the timed rounds, as a record builds its body's table.
+        let table = conditions.zonal_insolation();
         let n = 200_u32;
         let mut each = [f64::INFINITY; 2];
         let mut entries = 0;
@@ -834,6 +840,7 @@ fn time_the_cold_traps() {
                         &conditions,
                         g,
                         &RecordColdTraps::at_the_albedo_of(traps, &sky, air),
+                        &table,
                     );
                     entries += published.entries().len();
                 }
@@ -921,6 +928,7 @@ fn the_trap_fraction_is_the_latitude_integral_of_fractions_at() {
         &conditions,
         g,
         &RecordColdTraps::at_the_albedo_of(ColdTrapRules::Batch, &sky, air),
+        &conditions.zonal_insolation(),
     );
     let ground = ColdTrapGround::new(&ColdTrapGroundParts {
         bond_albedo: air.albedo().value(),
@@ -1357,7 +1365,13 @@ impl RecordMoon {
             regolith_albedo: regolith,
         };
         self.figures
-            .condensates_under(air, &self.conditions, self.gravity, &traps)
+            .condensates_under(
+                air,
+                &self.conditions,
+                self.gravity,
+                &traps,
+                &self.conditions.zonal_insolation(),
+            )
             .1
     }
 }
@@ -1397,6 +1411,7 @@ fn one_field_built_once_serves_every_publish() {
         &moon.conditions,
         moon.gravity,
         &RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, &moon.air),
+        &moon.conditions.zonal_insolation(),
     );
     let profile = moon.conditions.cold_profile();
     let cold_area = |t: Kelvin| profile.area_below(t);

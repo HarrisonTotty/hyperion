@@ -2418,7 +2418,7 @@ fn a_regular_moon_has_one_locking_time() {
             let elements = moon
                 .satellite
                 .orbit_at(&moon.parent, ctx.age_at(parent_time(ctx)));
-            let now = system.parent_now(&epoch, parent);
+            let now = system.parent_now(&epoch, &HourCosines::new(), parent);
             let derived = PlanetarySystem::moon_derived(&epoch, moon, &elements, &now).unwrap();
             let mass = Kilograms::from(*mass);
             let primary = Kilograms::new(
@@ -2474,7 +2474,8 @@ fn a_planet_s_locking_time_and_moon_limit_take_its_tides() {
             let host = fate_host(ctx, system.zone_of(body));
             let fate = system.fate_of(body, &host);
             let label = label::label(system, body.index).unwrap();
-            let (record, now) = system.primary_record(&epoch, body, label, &fate);
+            let (record, now) =
+                system.primary_record(&epoch, &HourCosines::new(), body, label, &fate);
             let (Section::Ok(bulk), Section::Ok(mass), Section::Ok(orbit), Some(derived)) =
                 (record.bulk(), record.mass(), record.orbit(), now.derived)
             else {
@@ -3208,7 +3209,7 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
             let host = fate_host(ctx, system.zone_of(planet));
             let fate = system.fate_of(planet, &host);
             let label = label::label(system, planet.index).unwrap();
-            let (_, now) = system.primary_record(&epoch, planet, label, &fate);
+            let (_, now) = system.primary_record(&epoch, &HourCosines::new(), planet, label, &fate);
             let seasonal = *fate.at(t).orbit().unwrap();
             let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
             let derived = PlanetarySystem::moon_derived(&epoch, part, &orbit, &now).unwrap();
@@ -3562,7 +3563,8 @@ fn the_published_figures_read_each_body_s_interior() {
                     let host = fate_host(ctx, system.zone_of(planet));
                     let fate = system.fate_of(planet, &host);
                     let label = label::label(system, planet.index).unwrap();
-                    let (_, now) = system.primary_record(&epoch, planet, label, &fate);
+                    let (_, now) =
+                        system.primary_record(&epoch, &HourCosines::new(), planet, label, &fate);
                     let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
                     let derived =
                         PlanetarySystem::moon_derived(&epoch, part, &orbit, &now).unwrap();
@@ -3816,7 +3818,8 @@ fn the_past_sky_is_the_derivation_s_at_the_present() {
                 multiple += u32::from(ctx.stars().len() > 1);
                 if ctx.stars().len() == 1 {
                     let label = label::label(system, body.index).unwrap();
-                    let (_, now) = system.primary_record(&epoch, body, label, &fate);
+                    let (_, now) =
+                        system.primary_record(&epoch, &HourCosines::new(), body, label, &fate);
                     if let Some(derived) = now.derived {
                         let star = ctx.stars()[0].state_at(t).unwrap();
                         let alone = runaway(derived.flux().value(), star.effective_temperature());
@@ -4293,7 +4296,7 @@ fn every_moon_s_inventory_is_its_own_ranks_at_its_own_bulk() {
             let host = fate_host(ctx, system.zone_of(planet));
             let fate = system.fate_of(planet, &host);
             let label = label::label(system, planet.index).unwrap();
-            let (_, now) = system.primary_record(&epoch, planet, label, &fate);
+            let (_, now) = system.primary_record(&epoch, &HourCosines::new(), planet, label, &fate);
             let satellite = &part.satellite;
             let bulk = PlanetarySystem::moon_own_bulk(part, &now);
             let mut inputs = MoonInputs {
@@ -4376,7 +4379,7 @@ fn under_their_own_tides_a_moon_s_law_and_its_locking_time_agree() {
                 continue;
             };
             laws += 1;
-            let now = system.parent_now(&epoch, parent);
+            let now = system.parent_now(&epoch, &HourCosines::new(), parent);
             let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
             let derived = PlanetarySystem::moon_derived(&epoch, part, &orbit, &now).unwrap();
             if matches!(part.satellite.moon(), SatelliteMoon::Regular(_)) {
@@ -4424,7 +4427,7 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
             let Section::Ok(figures) = hooks.figures() else {
                 continue;
             };
-            let now = system.parent_now(&epoch, parent);
+            let now = system.parent_now(&epoch, &HourCosines::new(), parent);
             let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
             let derived = PlanetarySystem::moon_derived(&epoch, part, &orbit, &now).unwrap();
             let tides = derived.tides();
@@ -4581,7 +4584,8 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
             let host = fate_host(ctx, system.zone_of(body));
             let fate = system.fate_of(body, &host);
             let label = label::label(system, body.index).unwrap();
-            let (record, now) = system.primary_record(&epoch, body, label, &fate);
+            let (record, now) =
+                system.primary_record(&epoch, &HourCosines::new(), body, label, &fate);
             let (Section::Ok(photometry), Some(derived)) = (record.photometry(), now.derived)
             else {
                 continue;
@@ -4590,7 +4594,8 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
             // A bracketed body's bisection, the same twice (the sim-determinism skill).
             if matches!(derived.convergence(), Convergence::Bracketed { .. }) {
                 let label = label::label(system, body.index).unwrap();
-                let (_, again) = system.primary_record(&epoch, body, label, &fate);
+                let (_, again) =
+                    system.primary_record(&epoch, &HourCosines::new(), body, label, &fate);
                 assert_eq!(
                     format!("{:?}", again.derived),
                     format!("{:?}", Some(derived))
@@ -4621,7 +4626,8 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
                     continue;
                 };
                 let label = label::label(system, child.index).unwrap();
-                let record = system.satellite_record(&epoch, child, label, &now, &fate);
+                let record =
+                    system.satellite_record(&epoch, &HourCosines::new(), child, label, &now, &fate);
                 let Section::Ok(photometry) = record.photometry() else {
                     continue;
                 };
@@ -4705,7 +4711,8 @@ fn under_24_s_record_rules_the_records_read_the_derivations_regolith() {
             let host = fate_host(ctx, batch.zone_of(body));
             let fate = batch.fate_of(body, &host);
             let label = label::label(&batch, body.index).unwrap();
-            let (record, now) = batch.primary_record(&batch_epoch, body, label, &fate);
+            let (record, now) =
+                batch.primary_record(&batch_epoch, &HourCosines::new(), body, label, &fate);
             let (Some(derived), Section::Ok(bulk), Section::Ok(surface)) =
                 (now.derived, record.bulk(), record.surface())
             else {
@@ -4719,7 +4726,8 @@ fn under_24_s_record_rules_the_records_read_the_derivations_regolith() {
             assert!((0.0..1.0).contains(&regolith), "{regolith}");
             airless += 1;
             let label = label::label(&held, body.index).unwrap();
-            let (other, _) = held.primary_record(&held_epoch, body, label, &fate);
+            let (other, _) =
+                held.primary_record(&held_epoch, &HourCosines::new(), body, label, &fate);
             let Section::Ok(other) = other.surface() else {
                 continue;
             };
@@ -4759,7 +4767,7 @@ fn time_the_cold_traps_over_the_sample() {
         // Every record of the system, how many of its bodies are airless and not collisional, and
         // how many ices its records' figures list, the cold traps' among them.
         let records = |system: &PlanetarySystem| {
-            let epoch = Epoch::new(system, ctx, t);
+            let (epoch, cosines) = (Epoch::new(system, ctx, t), HourCosines::new());
             let mut airless = 0_u32;
             let mut ices = 0_usize;
             let mut count = |record: &BodyRecord| {
@@ -4779,7 +4787,7 @@ fn time_the_cold_traps_over_the_sample() {
                 let host = fate_host(ctx, system.zone_of(body));
                 let fate = system.fate_of(body, &host);
                 let label = label::label(system, body.index).unwrap();
-                let (record, now) = system.primary_record(&epoch, body, label, &fate);
+                let (record, now) = system.primary_record(&epoch, &cosines, body, label, &fate);
                 if let (Some(derived), Section::Ok(bulk)) = (now.derived, record.bulk()) {
                     let air = derived.atmosphere();
                     airless += u32::from(
@@ -4792,7 +4800,7 @@ fn time_the_cold_traps_over_the_sample() {
                         continue;
                     }
                     let label = label::label(system, child.index).unwrap();
-                    let moon = system.satellite_record(&epoch, child, label, &now, &fate);
+                    let moon = system.satellite_record(&epoch, &cosines, child, label, &now, &fate);
                     count(&moon);
                 }
                 count(&record);
@@ -4892,7 +4900,7 @@ fn the_batch_s_surface_temperatures_over_the_sample_are_recorded() {
             let host = fate_host(ctx, system.zone_of(body));
             let fate = system.fate_of(body, &host);
             let label = label::label(system, body.index).unwrap();
-            let (_, now) = system.primary_record(&epoch, body, label, &fate);
+            let (_, now) = system.primary_record(&epoch, &HourCosines::new(), body, label, &fate);
             let Some(derived) = now.derived else {
                 continue;
             };
@@ -4922,4 +4930,63 @@ fn the_batch_s_surface_temperatures_over_the_sample_are_recorded() {
         *states.entry(format!("{:?}", b.0)).or_default() += 1;
     }
     eprintln!("{} bodies; by state: {states:?}", rows.len());
+}
+
+// P14.T54.a, lever (h): a body's zonal insolation table (decision-p14-t54a-passes §C.3).
+
+/// Asserts two renderings `with` and `without` the same, showing where they first differ.
+fn same_rendering(with: &str, without: &str, what: &str) {
+    if with == without {
+        return;
+    }
+    let at = with
+        .bytes()
+        .zip(without.bytes())
+        .position(|(a, b)| a != b)
+        .unwrap_or_else(|| with.len().min(without.len()));
+    let near = |s: &str| {
+        let start = (at.saturating_sub(300)..=at)
+            .find(|&k| s.is_char_boundary(k))
+            .unwrap_or(0);
+        let end = (at..=(at + 300).min(s.len()))
+            .rev()
+            .find(|&k| s.is_char_boundary(k))
+            .unwrap_or(s.len());
+        s.get(start..end).unwrap_or_default().to_owned()
+    };
+    panic!(
+        "{what} differs at byte {at}\n  with the table: …{}…\n  without it:     …{}…",
+        near(with),
+        near(without)
+    );
+}
+
+/// Lever (h): over the 60-system sample, every zonal profile `generate` and `snapshot_at` build
+/// reads its body's insolation table to the bit of the profile's own path, each profile checked
+/// as it is built (`TableReads::Checked`), and the generated systems and their snapshots at the
+/// epoch are the same, bit for bit, with the table and without it (`TableReads::Unlevered`).
+#[test]
+fn the_zonal_insolation_table_moves_no_bit_of_the_sample() {
+    use crate::planetary::hooks::surface::{TableReads, with_table_reads};
+
+    let run = || -> Vec<String> {
+        sample()
+            .iter()
+            .take(60)
+            .map(|ctx| {
+                let system = generate(SEED, ctx);
+                let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
+                format!("{system:?}\n{snapshot:?}")
+            })
+            .collect()
+    };
+    let (read, checked) = with_table_reads(TableReads::Checked, run);
+    let (unlevered, uncounted) = with_table_reads(TableReads::Unlevered, run);
+    assert_eq!(uncounted, 0);
+    assert_eq!(read.len(), 60);
+    for (k, (with, without)) in read.iter().zip(&unlevered).enumerate() {
+        same_rendering(with, without, &format!("system {k} of the sample"));
+    }
+    eprintln!("{checked} profiles with modes read off their tables and checked");
+    assert!(checked > 1_000, "{checked}");
 }

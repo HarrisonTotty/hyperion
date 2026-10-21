@@ -133,7 +133,9 @@ use crate::planetary::chem::partition::{
 use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceState};
 use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
 use crate::planetary::hooks::cold_traps::{self, ColdTrapBody, ColdTrapRules, RecordColdTraps};
-use crate::planetary::hooks::surface::{ColdProfile, OceanWeight, SurfaceConditions};
+use crate::planetary::hooks::surface::{
+    ColdProfile, OceanWeight, SurfaceConditions, ZonalInsolation,
+};
 use crate::planetary::moons::CaptureKind;
 use crate::planetary::moons::regular::{ICE_MELTING_POINT, ocean_layers};
 use crate::planetary::record::BeltKind;
@@ -2240,7 +2242,7 @@ impl GlobalFigures {
     /// ```
     #[must_use]
     pub fn with_surface(self, conditions: &SurfaceConditions, history: VolatileHistory) -> Self {
-        self.with_surface_under(conditions, history, None)
+        self.with_surface_under(conditions, history, None, &conditions.zonal_insolation())
     }
 
     /// [`with_surface`](Self::with_surface), with its ocean and ices from P14.T51.a's published
@@ -2260,12 +2262,16 @@ impl GlobalFigures {
     ///   the whole surface (W2): ices of several substances compete for the same cold zones.
     ///
     /// Nothing else is appended; P14.T53.c ends both appended items.
+    ///
+    /// T24.b's ice reads the conditions' cold area off the body's insolation table `table`
+    /// ([`SurfaceConditions::cold_area_over`]), its record's, built once a body (lever (h)).
     #[must_use]
     pub(crate) fn with_surface_under(
         self,
         conditions: &SurfaceConditions,
         history: VolatileHistory,
         condensates: Option<&Condensates>,
+        table: &ZonalInsolation,
     ) -> Self {
         let water = Gas::Water.substance();
         // Step 8: the published ocean.
@@ -2275,14 +2281,17 @@ impl GlobalFigures {
             conditions.mean_surface_temperature(),
             self.heat_flow,
         );
-        // Step 11: the ice, at the conditions' θ.
+        // Step 11: the ice, at the conditions' θ, `cover::ice_fraction` off the body's table.
         let ice = || {
-            cover::ice_fraction(&cover::IceInputs {
-                conditions,
-                state: self.state,
-                crust: self.impactors.crust(),
-                surface_water: self.surface_water,
-            })
+            cover::ice_fraction_over(
+                &cover::IceInputs {
+                    conditions,
+                    state: self.state,
+                    crust: self.impactors.crust(),
+                    surface_water: self.surface_water,
+                },
+                conditions.cold_area_over(cover::ice_threshold(self.state), table),
+            )
         };
         let (surface_liquids, surface_ices) = match condensates {
             None => {
@@ -2321,7 +2330,8 @@ impl GlobalFigures {
     /// whose conditions are `conditions` and whose surface gravity is `gravity` (P14.T51.a's second
     /// part), under the cold traps' rules, sky and regolith `traps` (P14.T51.f and P14.T51.i, held
     /// by [`COLD_TRAPS_VERSION`](crate::planetary::hooks::cold_traps)): its partition and its
-    /// published condensates.
+    /// published condensates. The conditions' cold profile reads the body's insolation table
+    /// `table`, built once a body (lever (h), [`SurfaceConditions::cold_profile_over`]).
     ///
     /// The partition is of the atmosphere's inventory before condensation
     /// ([`Atmosphere::column_inventory`]), over the conditions' climate (their range about their
@@ -2339,6 +2349,7 @@ impl GlobalFigures {
         conditions: &SurfaceConditions,
         gravity: MetresPerSecondSquared,
         traps: &RecordColdTraps<'_>,
+        table: &ZonalInsolation,
     ) -> (Partition, Condensates) {
         let (coldest, warmest) = conditions.climate_range();
         let climate = ClimateSpan::about((coldest, warmest), conditions.mean_surface_temperature());
@@ -2349,7 +2360,7 @@ impl GlobalFigures {
         );
         let solved = partition(&climate, &ground, &atmosphere.column_inventory());
         // One profile for every solid's cold area, water's T24.b ice included.
-        let profile = conditions.cold_profile();
+        let profile = conditions.cold_profile_over(table);
         let cold_area = |t: Kelvin| profile.area_below(t);
         let cover = Cover {
             cold_area: &cold_area,

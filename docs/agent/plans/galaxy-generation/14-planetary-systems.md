@@ -1686,7 +1686,8 @@ which removes the moons of close-in planets. The planet's k₂ and Q are T14.d's
   temperatures are below the hottest host's effective temperature; hosts that are black holes are
   excluded, and bodies with internal heat are checked against their coeval host, which the cooling
   fits keep hotter at equal age. Radius, temperature and envelope fraction are continuous in time
-  across ±H (step of 1 year, relative jump under 10⁻³ except at a recorded state change).
+  at steps of a year, across ±100 years in the fast tier and ±H in the slow tier (relative jump
+  under 10⁻³ except at a recorded state change).
   - _Accept:_ `cargo test -p hyperion-sim --test planetary_properties no_planet_hotter`.
 - **P14.T16.c The radius valley** (needs T8; slow). The radius distribution of sampled small planets
   inside 100 days of FGK hosts of 1–10 Gyr is bimodal with a minimum between 1.5 and 2.0 R⊕ at under
@@ -22186,3 +22187,70 @@ planetary::record` (624 tests at T57.a's commit).
         `planetary_fate_golden`, `planetary_masses_golden`, `planetary_placement_golden`,
         `planetary_placement`, `frame`, `aerosol_golden`, `formation_golden`, `liquids_golden` and
         `substance_golden`.
+  - _Batch C's L1, lever (h): the zonal insolation table once a body, with the continuity test's
+    split_ (decision-p14-t54a-passes, "Cost escalation (after Batch B)", §C.3's (h) and §C.7; its
+    relay's items 1 and 6). A refactor at 22, bit for bit: no golden moves.
+    - _The table._ `ZonalInsolation::of(obliquity, &HourCosines)` holds what each profile
+      recomputed for itself: `insolation_modes`, and at each of the 64 area points its x, its
+      insolation (`insolation_with`'s 1,024-step trapezoid) and its Legendre values
+      (`legendre_at`). It is an immutable table built in its constructor, with no cache (the
+      sim-determinism skill's "Allowed").
+      - `published_surface` builds it once a body, from its spin's obliquity, after the
+        conditions. The partition's cold profile (`condensates_under`, through
+        `SurfaceConditions::cold_profile_over`) and T24.b's ice (`with_surface_under`, through
+        `cold_area_over`) read it by reference. Batch C's passes read the same table once the
+        spin moves to `primary_record` (design-batch-c §1).
+      - `HourCosines` is built once a call chain, in `snapshot_at`, `body_at`, `hooks_at`,
+        `moon_rotations` and `derive_rotation`'s moon arm. It goes down `primary_record`,
+        `satellite_record`, `parent_now` and `surface_section` into `SurfaceTime`.
+        `position_at`, `state_at` and `habitable_zone_at` build none.
+      - `ZonalProfile::points_over` asserts that the table is of the profile's own obliquity, a
+        broken invariant otherwise. The public `cold_area`, `with_surface` and
+        `cover::ice_fraction` build their own table, to the same bits.
+    - _Its tests._ The oracle is version 22's path, each profile's own insolation, kept as the
+      `#[cfg(test)]` `inner_points_unlevered`.
+      - `the_zonal_insolation_table_is_each_point_s_own_insolation`: at 11 obliquities from 0°
+        to 180°, each point's insolation (`insolation_with` and `annual_insolation_at`), its
+        Legendre values and the modes, bit for bit.
+      - `a_profile_off_its_body_s_table_is_its_own_to_the_bit`: the table's bodies at their own
+        and the 11 obliquities, rotating and locked (192 profiles with modes, 96 locked
+        conditions), and a flat profile: points, cold profiles and cold areas, bit for bit.
+      - `a_profile_refuses_another_obliquity_s_table` (a table one ulp off).
+      - `the_zonal_insolation_table_moves_no_bit_of_the_sample`, over the 60-system sample: a
+        test-only switch (`with_table_reads`) checks every profile `generate` and
+        `snapshot_at` build against the oracle as it is built (1,461 profiles with modes). The
+        generated systems and their snapshots at the epoch are the same, bit for bit, with the
+        table and without it.
+    - _Its saving_ (the profile's probe, release, one CPU, `CPUQuota=100%`, under the heavy lock;
+      7015ccf8's binary and L1's alternated twice):
+      - The first 20 systems, medians of three: `snapshot_at` 192.9 and 192.5 → 151.5 and 151.8
+        ms (−21%); `generate` 155.7 and 154.9 → 153.8 and 153.5 ms (−1%), since its inner
+        snapshot at `parent_time` holds no rotation yet and so builds few profiles.
+      - The 400-system `snapshot_at` stage: 3.15 and 3.11 → 2.62 and 2.60 s (−0.51 s, −16%).
+      - The profile stage: 1.507 s, 48% of it (9,155 profiles at 0.165 ms), → 0.990 s, 38%. That
+        is 0.918 s for the 5,978 tables at 0.154 ms each, and 0.072 s for the 9,155 profiles read
+        off them at 7.9 µs each. The trapezoid was 95% of a profile's cost. A body reads its table
+        1.53 times today; Batch C's passes will read it once a pass.
+    - _The split_ (§C.7). `radius_temperature_and_envelope_are_continuous_in_time` keeps its
+      name and its body, now `continuity_steps(years)`, at the fast tier's `-100..=100`: every
+      planet of both ages at yearly steps, 114,570 derivations, and `steps > 50,000` holds
+      (114,000 steps compared, in 61–64 s in the dev profile). The whole of ±H is the slow tier's
+      `radius_temperature_and_envelope_are_continuous_over_the_whole_window`, ignored with the
+      ruling's reason ("slow: derives 570 planets every year over ±1,000 years, about 1.1 million
+      derivations") for the slow pass, and run by name once before the blessing message. No time
+      stride. P14.T16.b's text now reads "at steps of a year, across ±100 years in the fast tier
+      and ±H in the slow tier".
+      - _The other fast-tier tests above 120 s native in Batch B's gate:_ one,
+        `sky::caps::tests::the_eyes_visibility_caps_count_what_it_sees_and_open_a_fifth_fewer_systems`
+        (130.6 s, against 120.5 s at Batch A). It is a sky test, which this batch does not touch,
+        so the batch did not push it there, and it is not split.
+      - _Above 120 s on wasip1 alone_ (the ruling's measure is native): the order-independence
+        test `planetary::surface::tests::the_pass_is_order_independent` (220.8 s; 118.9 native),
+        the pinned `sky::limits::tests::the_eye_cut_and_a_band_face_row_are_pinned` (184.7 s), the
+        golden `material_weights_match_their_goldens` (125.0 s), none of which a split may touch,
+        and `planetary::system::tests::radius_temperature_and_envelope_are_continuous_across_the_window`
+        (150.8 s; 79.6 s native, against 8.8 s at Batch A), under the native threshold and so not
+        split.
+    - _Files:_ `planetary/hooks/surface.rs`, `planetary/hooks/figures.rs` and
+      `planetary/system.rs`; the tests in `hooks/surface/tests.rs`, `hooks/cold_traps/tests.rs`
+      and `system/tests.rs`; `tests/planetary_properties.rs`; and this plan's P14.T16.b.
