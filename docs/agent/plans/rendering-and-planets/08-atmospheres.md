@@ -4974,6 +4974,10 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
   to 10⁻⁶ for ω = 1. A PythonicDISORT plane-parallel cross-check is run once by hand and recorded.
   Acceptance:
   `pnpm --filter hyperion exec vitest run view/atmosphere/thick/discreteOrdinates`.
+  - Ruled 2026-10-21 (decision-r08-t14a-scope): T14.a starts before T13, which it does not read.
+    Garcia and Siewert's assertions stay pending for access, as R08.T12.c's; until they land, the
+    solver is held to exact checks that need no outside table (its record lists them). "16
+    streams" is 16 in all, 8 a hemisphere.
 - **R08.T14.b The bake.** `thick/bake.ts`: Dahlback and Stamnes's pseudo-spherical beam, delta-M
   with Nakajima and Tanaka's corrections, and the source function J_ms(h, μ₀, μ_v, m) for
   m = 0, 1. The solve is spectral at `BAKE_WAVELENGTHS_NM`, converted to channels on storage, each
@@ -14700,6 +14704,221 @@ hydrogenNucleiPerM3`), a fault for H alone, which T4.h's stages never took, with
       lines: Na–H₂'s open tables run 2–12 times their impact estimate in D2's blue wing at
       200–2,000 cm⁻¹.
     - _Kurucz's Zn II in `gf3001.pos`_ (T4.h's finding) stays deferred.
+- **Deviations in T14.a, as built** (2026-10-21; `thick/discreteOrdinates.ts` and
+  `thick/linearAlgebra.ts`, with their tests; decision-r08-t14a-scope).
+  - _The signature._ The entry point is
+    `solveDiscreteOrdinates(problem: DiscreteOrdinatesProblem): DiscreteOrdinatesSolution`.
+    - In: `layers` from the top down, each an `OrdinateLayer` with `opticalDepth`,
+      `singleScatteringAlbedo` and `moments`; `groundAlbedo` (Lambertian); `beamCosines` (μ₀, all
+      on one factorisation a mode); `userCosines` in (0, 1], each solved upward and downward;
+      `maxMode` M ≤ NSTR − 1; optional `streams` (NSTR, even, ≥ 2; `DISCRETE_ORDINATE_STREAMS` =
+      16 by default, counting both hemispheres) and `beamPaths` (the seam, below).
+    - Out: `quadrature` (`DoubleGaussQuadrature`: `streams`, `nodes` μ_i ascending, `weights`
+      summing to 1 a hemisphere), `interfaceDepths` (L + 1), `userCosines`, and per beam a
+      `BeamSolution` `{ beamCosine, modes, fluxes }`. Each of `modes` (m = 0 … M) is a
+      `ModeIntensities` of I^m at every interface: `quadratureUp`, `quadratureDown` ((L + 1) × N)
+      and `userUp`, `userDown` ((L + 1) × U), interface-major `Float64Array`s. `fluxes`
+      (`InterfaceFluxes`, m = 0) holds `direct`, `diffuseDown`, `diffuseUp` and `meanIntensity`,
+      the last with the direct beam's T ÷ 4π.
+    - The beam's flux normal to itself is 1, and I = Σ_m I^m cos(mΔφ). Δφ is the azimuth of the
+      stream's direction of travel less the beam's: a downward stream at Δφ = 0 is the forward one,
+      and for an observer Δφ is the azimuth looked toward less the sun's. `intensityAtAzimuth`
+      sums the modes.
+    - Separable, for T14.e's vector mode and T15's deck: `doubleGaussQuadrature(streams)`,
+      `normalizedAssociatedLegendre(m, maxDegree, μ)`, `homogeneousSolution(layer, m, quadrature)`,
+      and the stack, generic in n (the streams a hemisphere, times the Stokes components):
+      `factorLayerStack(faces, n, reflection)`, which takes each layer's 2n solutions at its two
+      faces (`LayerFaces`) and the ground's n × n reflection R (I⁺ = R I⁻ + S), then
+      `layerStackRightHandSide` and `solveLayerStack`. `linearAlgebra.ts` exports `choleskyLower`,
+      `solveLower`, `solveLowerTransposed`, `symmetricEigen` (cyclic Jacobi) and `bandMatrix`,
+      `bandIndex`, `factorBand` and `solveBand` (banded LU with partial pivoting). Nothing vector is
+      built.
+  - _The eigenproblem._ Stamnes and Swanson's reduced (α − β)(α + β) is made symmetric through
+    the Cholesky factor L of −P, its odd-parity half: Lᵀ(−Q)L, by cyclic Jacobi (Golub and Van
+    Loan §§8.5, 8.7; LAPACK Users' Guide Table 2.13, type 3), in place of a nonsymmetric
+    eigensolver. −P is the factor taken because at ω = 1 −Q holds the conservative null. Its k²
+    are real by construction. G⁺ − G⁻ is taken as k(α − β)⁻¹X, which stays finite as k → 0. The
+    beam's particular solution uses the same eigenvectors, so a beam costs no factorisation.
+  - _Raw forward-peaked moments are refused_ (the science check's finding, 2026-10-21). The
+    double-Gauss rule integrates Λ_l Λ_l′ exactly only to l + l′ = 2N − 1, so the discrete
+    scattering operator of a phase function's own χ₀ … χ_{NSTR−1} need not be a contraction.
+    Henyey–Greenstein's χ_l = g^l fail from g 0.9436 at 16 streams and ω 1 (0.9444 at ω 0.99,
+    0.9522 at ω 0.9, 0.99 at 32 streams): −P is not definite or a k² is negative, and the
+    discrete system itself breaks down there, so the solver refuses them with a `RangeError`
+    naming delta-M as the cure. Their delta-M truncations (f = χ_NSTR) passed for g 0.85–0.999 at
+    ω 1 and 0.5 and NSTR 4–32, and a test holds g 0.95: refused raw, solved and conserving energy
+    truncated. T14.b must truncate before it solves.
+  - _ω = 1 is the conservative solution, no dither._ At m = 0 the null pair is replaced by I = 1
+    and I = t ± u_i, u = −(α − β)⁻¹1. A co-albedo at or below
+    `DISCRETE_ORDINATE_CONSERVATIVE_CO_ALBEDO` = 10⁻¹² is solved as conservative. With that bound
+    set to 0, k₀² held to 0.2% down to 10⁻¹² at 16, 32 and 64 streams and reached rounding at
+    10⁻¹⁵; the rule drops at most about 9 × 10⁻¹⁰ of absorption, on a slab of τ 1,000. As a
+    check that the null vector is there, a conservative layer's smallest k² must lie within 10⁻⁸
+    of its largest k² from 0 (measured: at most 7 × 10⁻¹⁶ absolute).
+  - _A μ₀ at an eigenvalue's reciprocal._ Where a layer's slant factor λ lies within
+    `RESONANCE_HALF_WIDTH` = 10⁻⁵ of one of its k_n, relatively, that mode is solved at
+    λ(1 ∓ 2 × 10⁻⁵) in the flagged layers and the two averaged: two more back-solves on the same
+    factorisation. Measured, the value at μ₀ = 1 ÷ k_n is within 2.4 × 10⁻⁸ of the mean of
+    μ₀(1 ± 10⁻⁴)'s, and energy at ω = 1 holds there to 6 × 10⁻¹⁰ (4 × 10⁻¹⁴ elsewhere; 4 × 10⁻⁸
+    at a half-width of 10⁻⁴, 1.2 × 10⁻⁹ at 3 × 10⁻⁶). A user cosine at μ₀ or at a 1 ÷ k_n needs
+    nothing: the source's integrals are divided differences of exponentials, taken stably.
+  - _The seam is built_ (ruling 4): it cost nothing past the particular solution's algebra, which
+    takes λ as a parameter anyway. `beamPaths[b]` is a `BeamPath`: its `topTransmission` is T_p
+    at each layer's top, and its `slantFactor` λ_p, the slant optical depth per unit vertical
+    optical depth inside the layer. `planeParallelBeam(layers, μ₀)` fills the default,
+    e^{−τ_p ÷ μ₀} and 1 ÷ μ₀. Inside layer p the beam is T_p e^{−λ_p t}; at the ground it is
+    T_L e^{−λ_L τ_L}. The scattering geometry is the beam's one μ₀ in every layer, as the
+    pseudo-spherical approximation takes it. A pseudo-spherical caller (T14.b, Dahlback and
+    Stamnes 1991) supplies, per μ₀ and layer, T_p from the slant path to the layer's top and λ_p
+    from the layer's slant optical depth. The direct flux reported at interface p is μ₀ T_p, so
+    T_{p+1} = T_p e^{−λ_p τ_p} is the caller's to keep; the solver does not check it.
+  - _Moments._ χ₀ … χ_{NSTR−1} enter the solve, missing ones as 0; later ones are ignored, their
+    truncation (delta-M) being T14.b's. χ₀ must be within 10⁻¹² of 1, and is taken as 1.
+  - _For T14.b's J_ms._ The solver returns intensities; the source function at a view cosine is
+    J^m(τ, μ_v) = (ω ÷ 2) Σ_l (2l + 1) χ_l Λ_l(μ_v) Σ_j w_j Λ_l(μ_j) (I⁺_j + (−1)^{l+m} I⁻_j), plus
+    the beam's term, from the quadrature intensities at an interface. The module computes it
+    privately (`userSource`); T14.b may export it, or rebuild it with its own phase function, the
+    single-scattering term taken out for J_ms. User cosines are refused at μ = 0, where the
+    formal integration divides by μ but J is finite.
+  - _The checks as held._ Each is deterministic, so no α applies. The two files hold 62 tests,
+    about 0.5 s in all, the slowest 0.22 s. The cases:
+    - (a) energy at ω 1 on 1 and 64 layers at τ 10⁻³, 0.1, 1, 10, 64 and 1,000, for
+      Henyey–Greenstein g 0.85 (cut at l = 15) and Rayleigh, μ₀ 0.1, 0.5 and 1, over black and
+      white grounds;
+    - (b) τ 50, isotropic, ω 0.5 and 0.9, μ and μ₀ 0.1–1, at user and quadrature angles;
+    - (c) τ 10⁻⁶, ω 0.9, Rayleigh and g 0.5 cut at l = 15, modes 0–15 summed at Δφ 0°, 60°, 120°
+      and 180°;
+    - (d) τ 2, ω 0.9, g 0.5, A 0.2, modes 0–3; (e) three layers, A 0.3, five μ₀, modes 0–4;
+    - (f) as (a)'s g 0.85 at τ 1,000, modes 0–1; (g) and (h) τ 1, ω 0.9, g 0.75, (h) at A 0.3.
+
+    | Check                                                 | Held to                                              | Measured                         |
+    | ----------------------------------------------------- | ---------------------------------------------------- | -------------------------------- |
+    | (a) energy, ω 1                                       | 10⁻⁶ of μ₀                                           | 4 × 10⁻¹⁴ black, 6 × 10⁻¹⁴ white |
+    | (b) the H-function                                    | 10⁻³ relative                                        | 4.7 × 10⁻⁶                       |
+    | (b) H against Chandrasekhar's first form              | 10⁻¹² absolute, at μ 0.1, 0.5 and 1                  | 10⁻¹⁵                            |
+    | (b) H's α₀ (with it, H(0) = 1)                        | 5 × 10⁻¹³ absolute                                   | 7 × 10⁻¹⁶                        |
+    | (c) single scattering                                 | 10⁻⁴ relative                                        | 6.2 × 10⁻⁶                       |
+    | (d) one layer against 64                              | 10⁻¹⁰, floors μ₀ (flux) and μ₀ ÷ π (intensity)       | 1.8 × 10⁻¹⁴                      |
+    | (e) all μ₀ together against each alone                | 10⁻¹³, the same floors                               | 0, bit for bit                   |
+    | (f) τ 1,000                                           | finite; (a) at ω 1; R + T < μ₀ at 0.999              | as (a)                           |
+    | (g) reciprocity, quadrature angles, m 0–3             | 10⁻¹³ of the mode's largest                          | 4.3 × 10⁻¹⁶                      |
+    | (g) reciprocity, user angles 0.15–1, m 0–3            | 10⁻¹³ of the mode's largest                          | 6.6 × 10⁻¹⁶                      |
+    | (h) the adding identity                               | 10⁻¹² relative                                       | 6.3 × 10⁻¹⁶                      |
+    | a μ₀ at 1 ÷ k_n, m 0 and 1                            | 10⁻⁶ × max(\|I\|, 10⁻³), against μ₀(1 ± 10⁻⁴)'s mean | 2.4 × 10⁻⁸ (relative)            |
+    | user cosines on the nodes                             | 5 × 10⁻¹³ absolute, of the quadrature's              | 2.2 × 10⁻¹⁵                      |
+    | the conservative limit, 1 − c for c 10⁻⁶, 10⁻⁸, 10⁻¹¹ | absorption in (0, 10³c), R within 10³c of ω 1's      | passes                           |
+    - _(g) at user angles holds to rounding_, not to a looser measured figure: the source's
+      integration keeps the reflection reciprocal at any cosine.
+    - _(b) at grazing angles_ (recorded, not asserted), with the other cosine 0.5: at μ (or μ₀)
+      0.05, 0.02, 0.01 and 0.005, it misses by 3.6 × 10⁻⁵, 2.3 × 10⁻⁴, 4.5 × 10⁻⁴ and 5.7 × 10⁻⁴
+      at ω 0.5, and by 6.1 × 10⁻⁵, 4.1 × 10⁻⁴, 8.0 × 10⁻⁴ and 1.03 × 10⁻³ at ω 0.9.
+    - The tests also cover: energy at every 1 ÷ k_n ≤ 1 of a conservative slab (10⁻⁶); the
+      seam's plane-parallel identity (bit for bit) and its scaling; the stack's boundary
+      conditions with a dense ground reflection and source (10⁻¹²); raw g 0.95 refused and its
+      delta-M truncation solved; and the refusals, of the solver's inputs and each helper's.
+
+  - _(i), recorded and not asserted._ On a Henyey–Greenstein g 0.75 slab, cut at l = NSTR − 1,
+    over a black ground, 16 and 32 streams give these fluxes, of the beam's 1 normal to it. The
+    largest gap is 6.7 × 10⁻⁴, in F↑ at τ 1, ω 0.9, μ₀ 1; most are 10⁻⁵–2 × 10⁻⁴.
+
+    | ω   | τ   | μ₀  | F↑(0), 16 | F↑(0), 32 | F↓ diffuse(τ), 16 | F↓ diffuse(τ), 32 |
+    | --- | --- | --- | --------- | --------- | ----------------- | ----------------- |
+    | 1   | 1   | 0.2 | 0.095776  | 0.095787  | 0.102876          | 0.102865          |
+    | 1   | 1   | 0.5 | 0.120233  | 0.120240  | 0.312099          | 0.312092          |
+    | 1   | 1   | 1   | 0.078764  | 0.078740  | 0.553357          | 0.553381          |
+    | 1   | 10  | 0.2 | 0.159613  | 0.159617  | 0.040387          | 0.040383          |
+    | 1   | 10  | 0.5 | 0.352513  | 0.352517  | 0.147487          | 0.147483          |
+    | 1   | 10  | 1   | 0.568989  | 0.568975  | 0.430966          | 0.430979          |
+    | 0.9 | 1   | 0.2 | 0.071449  | 0.071463  | 0.074025          | 0.074018          |
+    | 0.9 | 1   | 0.5 | 0.085509  | 0.085519  | 0.243507          | 0.243503          |
+    | 0.9 | 1   | 1   | 0.055984  | 0.055947  | 0.460031          | 0.460038          |
+    | 0.9 | 10  | 0.2 | 0.085415  | 0.085428  | 0.004488          | 0.004488          |
+    | 0.9 | 10  | 0.5 | 0.142430  | 0.142440  | 0.018333          | 0.018332          |
+    | 0.9 | 10  | 1   | 0.164746  | 0.164707  | 0.073708          | 0.073710          |
+
+  - _Timing (ruling 8), recorded and never asserted; provisional._ One solve of 16 streams, 64
+    layers, 32 μ₀, m = 0–1 and 16 user angles took 54 ms, the median of 12 (53–57 ms, the first
+    57 ms).
+    - It ran on one of this laptop's 8 threads (an i7-8665U, governor `powersave`, energy
+      preference `balance_performance`), at a 1-minute load of 3.4, with #65's 4-thread trace
+      beside it.
+    - Being under load, it is provisional by the roadmap's rule (README, "Measurements on a quiet
+      machine"), to be repeated on a quiet machine, as T14.b's bake timing will be.
+    - DN9's operation count puts a bake at 0.1–1 s; T14.b measures one against `BAKE_CEILING_S`.
+    - For scale, at the same load: 64 streams with all 64 modes on 8 layers and 2 μ₀ took 2–3.4 s
+      a solve. The banded LU dominates there (512 unknowns, bandwidth 95, about 9 × 10⁶
+      operations a mode), and T14.e's 8-stream vector mode at 64 layers is of that order a mode.
+  - _PythonicDISORT 1.8_ (MIT; Python 3.14, numpy 2.5.4, scipy 1.18.1), run once by hand and
+    never asserted.
+    - How it was run: after the solver was written, with only its documented interface read. Each
+      case was over a black ground, with its I₀ = 1 the beam's flux normal to itself, compared at
+      its double-Gauss nodes (the solver's own), with all modes and the fluxes.
+    - (b), τ 50, isotropic, μ₀ 0.5: F↑(0) 0.2539692487 at ω 0.9 and 0.08007210895 at ω 0.5 in
+      both, to 2 × 10⁻¹⁵ and 3 × 10⁻¹⁵. The node intensities at the top agree to 8 × 10⁻¹⁴ and
+      3 × 10⁻¹⁴.
+    - (c), τ 10⁻⁶, ω 0.9, at Δφ 0°, 60°, 120° and 180°: Rayleigh at μ₀ 0.3 agrees to 1.8 × 10⁻¹⁰
+      in flux and 7.7 × 10⁻¹⁰ in intensity, and g 0.5 at μ₀ 0.7 to 1.3 × 10⁻⁹ and 7.9 × 10⁻⁹,
+      which is rounding at that τ in either solver.
+    - (i), all 24 cases: at ω 0.9, fluxes agree to 1.9 × 10⁻¹³ and node intensities to 3 × 10⁻¹⁰.
+      It refuses ω = 1. At 1 − 10⁻⁶ they agree to 3.6 × 10⁻⁹ and 7.8 × 10⁻⁷, and at 1 − 10⁻⁹ to
+      7.9 × 10⁻⁶ and 1.8 × 10⁻⁴ (32 streams).
+    - Why the gap near ω = 1 is read as PythonicDISORT's conditioning there: it warned of complex
+      eigenvalues in every case. This solver's values at 1 − 10⁻⁶, 1 − 10⁻⁹ and 1 lie on a line
+      in the co-albedo; PythonicDISORT's at 1 − 10⁻⁹ move the other way. Both balance energy there.
+  - _Garcia and Siewert stay pending for access_ (ruling 2), as R08.T12.c's: "Benchmark results in
+    radiative transfer", Transport Theory Stat. Phys. 14(4) (1985) 437–483,
+    doi:10.1080/00411458508211687. No test is written, and no placeholder. When a copy is held,
+    Haze L's and Cloud C1's tables go in `discreteOrdinates.test.ts` beside (a)–(h), the values
+    asserted only at 10⁻³ to their published digits, at the streams those digits need (recorded
+    then).
+  - _`DELTA_M_STREAMS`, for T14.b._ `aerosol.ts`'s `DELTA_M_STREAMS` = 16 counts a hemisphere
+    (2M = 32 moments kept, f = χ₃₂). `DISCRETE_ORDINATE_STREAMS` = 16 counts both, so a 16-stream
+    solve reads χ₀ … χ₁₅, and its delta-M is `deltaMTruncation(table, channel, 8)` (f = χ₁₆), not
+    that function's default. T14.b sets its count. Nothing here changes `aerosol.ts`.
+  - _Sources._
+    - Read: Stamnes et al. 1988 (by the research agent, its eqs. 4–8e); the LAPACK Users' Guide's
+      "Generalized Symmetric Definite Eigenproblems" (Table 2.13); Chandrasekhar 1947 (Bull. Amer.
+      Math. Soc. 53, 641, eqs. 125 and 168, in place of _Radiative Transfer_, not read).
+    - The DISORT methodology report (Stamnes et al. 2000, v1.1, a document, not code) was read by
+      the research agent for the conventions only.
+    - Cited, not re-read: Golub and Van Loan's 4th edition, its sections placed by the book's
+      contents alone (§3.1 triangular systems, §4.2 Cholesky, §4.3 banded systems, §8.5 Jacobi,
+      §8.7 the symmetric-definite problems), each method held by its own test; Abramowitz and
+      Stegun §8.5 and _Numerical Recipes_ §6.7 for the Legendre recurrence, whose normalised form
+      was derived here and is held to P_l and the addition theorem.
+    - Checked by their DOI or Crossref records alone: Stamnes and Swanson 1981, Stamnes and Conklin
+      1984, Dahlback and Stamnes 1991 and Demmel and Veselić 1992 (cited for Jacobi's relative
+      accuracy).
+    - The H-function's 1 ÷ H form and α₀ were checked against the 1947 form numerically (its
+      residual is asserted), not against the book.
+    - The science check re-derived items 1–10 of the module and its tests and confirmed them with
+      an independent full 2N × 2N solve. Its one finding, that raw forward-peaked moments can fail
+      the contraction, is recorded above.
+  - _Departures from the brief._
+    - `linearAlgebra.ts` is a module of its own, with its own test (ruling 6 allows one), and the
+      acceptance ran as the brief's `vitest run view/atmosphere/thick/`, which covers it.
+    - The interface refines ruling 4's lean:
+      - one list of user cosines, each solved both ways;
+      - the outputs as flat arrays;
+      - the stack taking a general reflection matrix R and source S, for T15's deck. The solver
+        itself fills only the Lambertian ones: its ground's beam source and its ground term at the
+        user cosines are Lambertian and m = 0 alone, which T15 widens.
+      - a `StreamDirection` type (`"up"` or `"down"`) for `intensityAtAzimuth`.
+    - Jacobi on the symmetric reduction, not a nonsymmetric QR: still a text's method (ruling 5),
+      and it keeps the small k² that ω near 1 needs.
+    - PythonicDISORT ran at ω 1 − 10⁻⁹ where the cases ask ω 1, since it refuses 1.
+- **Deferred findings (2026-10-13 rule)** (R08.T14.a). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _Two Legendre recurrences in `atm/`._ `aerosol.ts`'s private `legendre` and this module's
+    `normalizedAssociatedLegendre`, whose m = 0 is P_l, compute the same polynomials. One could
+    serve both, but `aerosol.ts` lies outside this task's paths.
+  - _PythonicDISORT near ω = 1._ As a cross-check it is reliable at ω ≤ 1 − 10⁻⁶, and not at
+    1 − 10⁻⁹ (its warnings; the record above). T14.b's and T14.e's by-hand checks against it
+    should stay at or below 1 − 10⁻⁶.
+  - _The boundary solve's cost at many streams._ The stack is block-bidiagonal, layer by layer, so
+    a block elimination would cost less than the general banded LU, whose bandwidth 3N − 1 grows
+    with the streams (2–3.4 s a 64-stream, 64-mode solve of 8 layers). At 16 streams it is not
+    needed (54 ms for the ruling's solve); T14.e's vector mode may want it.
 - **Composition (decision-composition, 2026-10-09).** Every species and material is a plan-14
   registry key. The client's tables are keyed by those strings, with measured, estimated, derived
   or stand-in provenance, and the labelled fallback never drops a species. R08.T19 holds the client
