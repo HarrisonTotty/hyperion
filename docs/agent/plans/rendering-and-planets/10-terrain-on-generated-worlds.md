@@ -12268,7 +12268,12 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
   - _The double-dark band_ (`TERRAIN TEST` north at 228, 232 and 236 s, frozen; plain, the
     cascades off, tinted by cascade, and c′ alone): none at a cascade's edge; the blends run across
     the tinted bands with no line in the plain frames, and the plain frame is nowhere brighter than
-    with the cascades off. The one band found was the penumbra's (above), fixed by the top edge.
+    with the cascades off. The one band found was the penumbra's (above), fixed by the top edge. On
+    the final tree (the top edge, 1.5 texels, the traversal's horizon texel) the cascades darken
+    0.10%, 0.06%, 0.10% and 0.07% of the terrain's pixels by more than 2% of full scale at 210,
+    228, 232 and 236 s (at most 26 to 70 of 255, small near-field shadows), the horizon texel 4.8 to
+    12.6 m at h 2.2 to 5.5 km; the run that would have shown w's steadiness over 190–238 s on it
+    was not taken (the heavy lock was held), the walk's fix resting on its vitest.
   - _The offset and the bias._ At 1 texel the cascades' acne showed as moiré and a step at a level
     boundary in c′ (1.4% of the terrain's pixels darkened by more than 2% of full scale at 232 s);
     at 1.5 texels, Design note 11's upper end, 0.6%, the moiré and the step gone; a slope scale of
