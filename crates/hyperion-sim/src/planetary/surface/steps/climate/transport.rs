@@ -18,7 +18,10 @@
 //!
 //! `f_Ω` and `f_p` are tables at Kaspi and Showman's runs, each fitted with this model itself
 //! ([`ROTATION_TABLE`], [`PRESSURE_TABLE`]): linear in log–log between the runs and held at the
-//! end values beyond them (Design note 8).
+//! end values beyond them (Design note 8), but for `f_p` below its first run, 0.2 bar, where it
+//! falls linearly to zero with the pressure, as plan 14's column factor ramps below 0.2 m⊕
+//! ([`pressure_factor`]; R09.T13.i, decision-r09-t13i §2.4): a thin air carries no transport at no
+//! air, where a held end would keep 0.308 of Earth's.
 
 use crate::math;
 use crate::planetary::hooks::surface::{
@@ -181,6 +184,25 @@ pub(super) fn table_factor(table: &[TransportNode], ratio: f64) -> f64 {
     math::exp(math::ln(a.factor) + t * (math::ln(b.factor) - math::ln(a.factor)))
 }
 
+/// `f_p` at the surface pressure `pressure_ratio` bar ([`PRESSURE_TABLE`]): the table's
+/// ([`table_factor`]) at and above its first run, 0.2 bar, and below it linear to zero,
+/// `f_p`(0.2 bar) × p ÷ 0.2 bar, as plan 14's column factor ramps below 0.2 m⊕
+/// (`COLUMN_TRANSPORT_RANGE`; decision-r09-t13i §2.4, T13.a's deferred finding). At and above
+/// 0.2 bar it is the table's to the bit; a ratio that is not a number takes the table's first.
+#[must_use]
+pub(super) fn pressure_factor(pressure_ratio: f64) -> f64 {
+    let first = PRESSURE_TABLE[0];
+    if pressure_ratio < first.ratio {
+        if pressure_ratio > 0.0 {
+            first.factor * (pressure_ratio / first.ratio)
+        } else {
+            0.0
+        }
+    } else {
+        table_factor(&PRESSURE_TABLE, pressure_ratio)
+    }
+}
+
 /// What the model diffuses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum Diffusing {
@@ -207,7 +229,7 @@ pub(super) fn transport_kg_m2_s(
     let mass = EARTH_AIR_MOLAR_MASS_G_PER_MOL / molar_mass_g_per_mol;
     let scaled = EARTH_TRANSPORT_KG_M2_S
         * table_factor(&ROTATION_TABLE, rotation_ratio)
-        * table_factor(&PRESSURE_TABLE, pressure_ratio)
+        * pressure_factor(pressure_ratio)
         * mass
         * mass;
     let cap = TRANSPORT_CAP * EARTH_TRANSPORT_KG_M2_S * EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K
@@ -266,6 +288,32 @@ mod tests {
         }
         assert!((table_factor(&ROTATION_TABLE, 1.0) - 1.0).abs() < 1e-15);
         assert!((table_factor(&PRESSURE_TABLE, 1.0) - 1.0).abs() < 1e-15);
+    }
+
+    /// R09.T13.i's ramp (decision-r09-t13i §2.5, test 7): `f_p`(0.1 bar) is half `f_p`(0.2 bar),
+    /// `f_p`(0) is 0, it is continuous at 0.2 bar and the table's to the bit at and above it.
+    #[test]
+    fn the_pressure_factor_falls_linearly_to_zero_below_0_2_bar() {
+        let at = pressure_factor(0.2);
+        hyperion_testkit::float::assert_same_bits(at, PRESSURE_TABLE[0].factor);
+        assert!((pressure_factor(0.1) - 0.5 * at).abs() <= 1e-15 * at);
+        hyperion_testkit::float::assert_same_bits(pressure_factor(0.0), 0.0);
+        assert!((pressure_factor(0.2 * (1.0 - 1e-12)) - at).abs() < 1e-11 * at);
+        assert!((pressure_factor(0.2 * (1.0 + 1e-12)) - at).abs() < 1e-11 * at);
+        for ratio in [0.2, 0.3, 1.0, 7.0, 50.0, 100.0] {
+            hyperion_testkit::float::assert_same_bits(
+                pressure_factor(ratio),
+                table_factor(&PRESSURE_TABLE, ratio),
+            );
+        }
+        // A thin air's transport falls with it.
+        let (mu, cp) = (
+            EARTH_AIR_MOLAR_MASS_G_PER_MOL,
+            EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K,
+        );
+        let thin = transport_kg_m2_s(1.0, 0.01, mu, cp, Diffusing::SensibleHeat);
+        let thick = transport_kg_m2_s(1.0, 0.2, mu, cp, Diffusing::SensibleHeat);
+        assert!((thin / thick - 0.05).abs() < 1e-12, "{}", thin / thick);
     }
 
     /// Earth's air at Earth's rotation and 1 bar takes Λ⊕; a dry world half of it; a light air is

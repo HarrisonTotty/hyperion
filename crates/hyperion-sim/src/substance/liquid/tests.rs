@@ -2507,10 +2507,9 @@ fn each_liquid_specific_heat_is_ordered_and_physical() {
         assert!(low < high, "{key}");
         assert!(diagram.triple_temperature().value() < low, "{key}");
         assert!(high < diagram.critical_temperature().value(), "{key}");
-        assert_eq!(
-            column.equation(),
-            columns.scattering().unwrap().equation(),
-            "{key}"
+        assert!(
+            core::ptr::eq(column.equation(), columns.scattering().unwrap().equation()),
+            "{key}: the specific heat's equation is the scattering column's own"
         );
         let mut own_least = f64::INFINITY;
         let mut own_greatest = f64::NEG_INFINITY;

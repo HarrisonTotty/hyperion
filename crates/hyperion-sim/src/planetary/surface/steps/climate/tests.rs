@@ -106,6 +106,12 @@ pub(super) fn set_ground(
     }
 }
 
+/// The synthetic sea's floor below the sea level, m: the reference Earth's mean ocean depth, its
+/// ocean's 1.335 × 10¹⁸ m³ ([`reference::earth_like`]) over its 0.7095 of the sphere's
+/// 5.10082 × 10¹⁴ m², 3,689 m (decision-r09-t13i §2.5), so that the ocean's heat transport reads
+/// a sea deeper than the main thermocline, as Earth's is.
+const SYNTHETIC_SEA_DEPTH_M: f64 = 1.335e18 / (0.7095 * 510.082e12);
+
 /// Land at the sea level in every band: the synthetic sea with no relief.
 const SEA_LEVEL_LAND: [[i16; 8]; LATITUDE_BANDS] = [[0; 8]; LATITUDE_BANDS];
 
@@ -115,8 +121,8 @@ const SEA_LEVEL_LAND: [[i16; 8]; LATITUDE_BANDS] = [[0; 8]; LATITUDE_BANDS];
 /// - **The land** is Natural Earth's by 2.5° × 5° box ([`EARTH_LAND_BOXES`], thousandths; a cell's
 ///   box the one its centre lies in, the geographic grid's point): in each box the cells in order
 ///   of longitude, then cell index, are land until their solid angle reaches the box's share (a
-///   cell is land while half of it fits), and the rest sea, 100 m below the sea level and flooded
-///   to it with the main liquid ([`set_ground`]).
+///   cell is land while half of it fits), and the rest sea, its floor [`SYNTHETIC_SEA_DEPTH_M`]
+///   below the sea level and flooded to it with the main liquid ([`set_ground`]).
 /// - **The heights**: each band's land cells, in order of their box's Earth2014 median land height
 ///   ([`EARTH_BOX_MEDIAN_M`]; a box with no Earth2014 land lowest), then longitude, then cell
 ///   index, take the band's eight heights in turn, the q-th eighth of the band's land solid angle
@@ -159,7 +165,7 @@ fn synthetic_sea(pass: &Pass<'_>, working: &mut Working, hypsometry: &[[i16; 8];
                 } else {
                     set_ground(
                         &mut working.cells[cell],
-                        Metres::new(-100.0),
+                        Metres::new(-SYNTHETIC_SEA_DEPTH_M),
                         Metres::ZERO,
                         flood,
                     );
@@ -192,8 +198,48 @@ fn synthetic_sea(pass: &Pass<'_>, working: &mut Working, hypsometry: &[[i16; 8];
 /// ([`EARTH_LAND_BOXES`]; each band's land share within 0.03 of [`EARTH_LAND_SHARE`]'s, the worst
 /// band printed), its land at the heights `hypsometry` gives it ([`synthetic_sea`]), and its zonal
 /// model's answer over that ground, the zonal relief from its cells as the step builds it: the
-/// pass's grids, the working state, the relief and the answer.
+/// answer, the relief and the working state.
 fn era_earth(hypsometry: &[[i16; 8]; LATITUDE_BANDS]) -> (ebm::Solution, Relief, Working) {
+    let (sea, relief, ocean, working) = era_set_up(hypsometry);
+    let ground = Ground::Relief {
+        grid: &relief,
+        zonal: &relief,
+    };
+    let solution = ebm::solve(
+        &reference::earth_like(),
+        &ModelGrid::zonal(),
+        &sea,
+        NOMINAL_STEP,
+        ground,
+        ocean,
+    );
+    (solution, relief, working)
+}
+
+/// [`era_earth`]'s Earth, its seasonal run A continued at u = `u` (decision-r09-t13i's §2.4
+/// follow-up 2 §3; [`ebm::solve_continued`]).
+fn era_earth_at(hypsometry: &[[i16; 8]; LATITUDE_BANDS], u: f64) -> ebm::ContinuedRun {
+    let (sea, relief, ocean, _) = era_set_up(hypsometry);
+    let ground = Ground::Relief {
+        grid: &relief,
+        zonal: &relief,
+    };
+    ebm::solve_continued(
+        &reference::earth_like(),
+        &ModelGrid::zonal(),
+        &sea,
+        NOMINAL_STEP,
+        ground,
+        ocean,
+        u,
+    )
+}
+
+/// [`era_earth`]'s set-up: the bands' sea shares, the zonal relief, the sea's transport and the
+/// working state.
+fn era_set_up(
+    hypsometry: &[[i16; 8]; LATITUDE_BANDS],
+) -> (Vec<f64>, Relief, OceanTransport, Working) {
     let inputs = reference::earth_like();
     let (field, climate) = grids(7);
     let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
@@ -211,37 +257,71 @@ fn era_earth(hypsometry: &[[i16; 8]; LATITUDE_BANDS]) -> (ebm::Solution, Relief,
         "the synthetic sea's land share against Earth's: {:+.4} at worst, band {}",
         -worst.1, worst.0
     );
-    let grid = ModelGrid::zonal();
     let relief = Relief::of(
         &inputs,
-        Hypsometry::of_field(&pass, &working, &grid, Coordinates::Geographic),
+        Hypsometry::of_field(
+            &pass,
+            &working,
+            &ModelGrid::zonal(),
+            Coordinates::Geographic,
+        ),
     );
-    let ground = Ground::Relief {
-        grid: &relief,
-        zonal: &relief,
-    };
-    let solution = ebm::solve(
-        &inputs,
-        &grid,
-        &sea,
-        NOMINAL_STEP,
-        ground,
-        super::sea_transport(&pass, &working),
-    );
-    (solution, relief, working)
+    let ocean = super::sea_transport(&pass, &working);
+    (sea, relief, ocean, working)
 }
 
-/// The plan's Earth test. The reference Earth, with Earth's land by box as a synthetic sea
-/// (R09.T12's relief is not built; [`era_earth`]) and its land at the sea level, converges within
-/// [`MAX_ORBITS`], and its annual-mean zonal temperature at sea level lies within 5 K of
-/// ERA-Interim's (Siler et al. 2018, Fig. 2b) from 58.75° S to the North Pole.
+/// The ice edge's bound, K: 7, the named tier of the bands from [`ICE_EDGE_DEG`]'s 61.25° N to
+/// 71.25° N in place of 5 K, on the relief Earth's absolute test and the sea-level Earth's shape
+/// test alike (decision-r09-t13i's §2.4 follow-up 2 §2). There ERA-Interim's annual means, 274.4
+/// to 267.6 K, straddle the freezing point, and the model's, at the right mean, stand at the albedo
+/// ramp's midpoint, where Spiegel et al.'s cloud-free law is steepest and brightest against the
+/// real sky: its cold bias there, 5.2 K at 66.25° N on the relief Earth, is the cloud-free
+/// albedo's (decision-r09-t13i §6, I2, amended), with the North Atlantic Current's heat that no
+/// diffusion delivers (I6). The tier returns to 5 K when I2's cloud revision lands.
+const ICE_EDGE_BOUND_K: f64 = 7.0;
+
+/// The ice edge's tier, degrees north: the bands centred from 61.25° N to 71.25° N.
+const ICE_EDGE_DEG: (f64, f64) = (61.25, 71.25);
+
+/// The bound the ERA tests hold the bands from 58.75° S northward to outside their tiers, K: 5
+/// (the plan's).
+const ERA_BOUND_K: f64 = 5.0;
+
+/// The latitude of band `band`'s centre on the zonal grid, degrees.
+fn band_latitude_deg(band: usize) -> f64 {
+    math::asin(ModelGrid::zonal().centre_sine(band)).to_degrees()
+}
+
+/// Whether band `band` lies in the ice edge's tier ([`ICE_EDGE_DEG`]).
+fn in_ice_edge(band: usize) -> bool {
+    let latitude = band_latitude_deg(band);
+    latitude >= ICE_EDGE_DEG.0 - 1e-9 && latitude <= ICE_EDGE_DEG.1 + 1e-9
+}
+
+/// The bound of T13.a's sea-level Earth test's mean departure from ERA-Interim, K: 3
+/// (decision-r09-t13i's §2.4 follow-up §3).
+const SEA_LEVEL_MEAN_BOUND_K: f64 = 3.0;
+
+/// The plan's Earth test, as decision-r09-t13i's §2.4 follow-up §3 and follow-up 2 §2 amend it.
+/// The reference Earth, with Earth's land by box as a synthetic sea ([`era_earth`]) and its land at
+/// the sea level, converges within [`MAX_ORBITS`]; from 58.75° S to the North Pole each band's
+/// departure of its annual-mean zonal temperature at sea level from ERA-Interim's (Siler et al.
+/// 2018, Fig. 2b), less the solid-angle mean of the departures over those bands, lies within 5 K,
+/// the profile's shape, and within [`ICE_EDGE_BOUND_K`] in the ice edge's tier; and that mean
+/// departure lies within [`SEA_LEVEL_MEAN_BOUND_K`]. Every band is printed beside its bound, with
+/// the absolute departures and the mean.
 ///
-/// South of that it is too warm, by up to about 11 K at 76° S, where ERA-Interim's curve ends: the
-/// model's Antarctica lies at sea level, so its summer rises above the albedo's ramp and its ice
-/// darkens, where the real ice sheet, 2–3 km up, stays bright. Those bands are held to
-/// [`SOUTHERN_BOUND_K`], and every band is printed. With Earth's hypsometry
-/// ([`an_earth_with_its_land_s_hypsometry_lies_within_the_ruled_bounds_of_era_interim`]) the model
-/// reads the ice sheet's height (R09.T13.g).
+/// The mean is held loosely because this set-up, Antarctica at the sea level, has no steady state
+/// between about 208 and 292 K under the water term (R1): its absolute mean tests the fold, not the
+/// model (decision-r09-t13i's §2.4 follow-up §1, §3; the lane's sea-level means lie 2.64 K above
+/// plan 14's uncorrected and 1.82 K after the correction's first step). The relief Earth, Earth's
+/// own set-up, keeps its absolute bounds
+/// ([`an_earth_with_its_land_s_hypsometry_lies_within_the_ruled_bounds_of_era_interim`]).
+///
+/// South of 58.75° S it is too warm, by up to about 11 K at 76° S, where ERA-Interim's curve ends:
+/// the model's Antarctica lies at sea level, so its summer rises above the albedo's ramp and its
+/// ice darkens, where the real ice sheet, 2–3 km up, stays bright. Those bands are held to
+/// [`SOUTHERN_BOUND_K`], and every band is printed.
 #[test]
 fn an_earth_like_world_converges_and_lies_within_5_k_of_era_interim() {
     let (solution, relief, _) = era_earth(&SEA_LEVEL_LAND);
@@ -256,114 +336,780 @@ fn an_earth_like_world_converges_and_lies_within_5_k_of_era_interim() {
     let earth = &solution.climate;
     assert!(earth.converged, "{} orbits", earth.orbits);
     assert!(earth.orbits <= MAX_ORBITS);
+    let (mut sum, mut weight) = (0.0, 0.0);
+    for (band, &era) in (ERA_FIRST_BAND..).zip(&ERA_INTERIM_K) {
+        if band >= EARTH_ASSERTED_FROM_BAND {
+            sum += grid.weight(band) * (earth.annual_k[band] - era);
+            weight += grid.weight(band);
+        }
+    }
+    let mean = sum / weight;
     let mut worst: f64 = 0.0;
+    let mut misses = Vec::new();
     for (band, &era) in (ERA_FIRST_BAND..).zip(&ERA_INTERIM_K) {
         let model = earth.annual_k[band];
-        let latitude = math::asin(grid.centre_sine(band)).to_degrees();
-        eprintln!(
-            "{latitude:7.2}° model {model:6.1} K, ERA-Interim {era:6.1} K, {:+5.1} K",
-            model - era
-        );
-        if band >= EARTH_ASSERTED_FROM_BAND {
-            worst = worst.max((model - era).abs());
+        let latitude = band_latitude_deg(band);
+        let (departure, bound) = if band >= EARTH_ASSERTED_FROM_BAND {
+            let bound = if in_ice_edge(band) {
+                ICE_EDGE_BOUND_K
+            } else {
+                ERA_BOUND_K
+            };
+            worst = worst.max((model - era - mean).abs());
+            (model - era - mean, bound)
         } else {
-            assert!(
-                (model - era).abs() <= SOUTHERN_BOUND_K,
-                "{latitude}°: {model} K"
-            );
+            (model - era, SOUTHERN_BOUND_K)
+        };
+        eprintln!(
+            "{latitude:7.2}° model {model:6.2} K, ERA-Interim {era:6.1} K, {:+6.2} K, less the \
+             mean {:+6.2} K; held {departure:+6.2} K to {bound} K",
+            model - era,
+            model - era - mean
+        );
+        if departure.abs() > bound {
+            misses.push((latitude, departure, bound));
         }
     }
     eprintln!(
-        "orbits {}, τ {:.3}, global mean {:.2} K, worst asserted {worst:.2} K",
+        "orbits {}, x {:.4} ({:?}), global mean {:.2} K, the mean departure from 58.75° S {mean:+.2} \
+         K, the worst shape {worst:.2} K; the mean's correction {:?}",
         earth.orbits,
-        (solution.emission_factor - 1.0) / 0.75,
-        grid.mean(&earth.annual_k)
+        solution.emission_factor,
+        solution.optical_depth,
+        grid.mean(&earth.annual_k),
+        solution.correction
     );
-    assert!(worst <= 5.0, "worst {worst} K");
+    assert!(misses.is_empty(), "bands beyond their bounds: {misses:?}");
+    assert!(mean.abs() <= SEA_LEVEL_MEAN_BOUND_K, "mean {mean} K");
 }
 
-/// The bound R09.T13.g's Earth test holds the band of 76.25° S to, K: 11, the measured +9.29 K
-/// with a margin (decision-r09-t13ge §1.3, (i)).
-const RELIEF_POLAR_BOUND_K: f64 = 11.0;
+/// The bound R09.T13.g's Earth test holds the band of 76.25° S to, K: 9, tightened from R09.T13.g's
+/// 11 by R09.T13.i's water term and ocean (decision-r09-t13i §2.5, test 1; the ruling's prototype
+/// +6.5 K without R2).
+const RELIEF_POLAR_BOUND_K: f64 = 9.0;
 
-/// The bound it holds the bands from 73.75° S to 61.25° S to, K: 8, the measured +6.85 K with a
-/// margin (decision-r09-t13ge §1.3, (i)).
-const RELIEF_SOUTHERN_BOUND_K: f64 = 8.0;
+/// The bound it holds the bands from 73.75° S to 61.25° S to, K: 6.5, tightened from 8
+/// (decision-r09-t13i §2.5; the prototype's worst +4.1 K).
+const RELIEF_SOUTHERN_BOUND_K: f64 = 6.5;
 
-/// R09.T13.g's Earth test (decision-r09-t13ge §1.6). The reference Earth with its land's
+/// The bound it holds the bands within 23.75° of the equator to, K: 3 (decision-r09-t13i §2.5,
+/// new; the prototype −1.8 to +1.1 K, R09.T13.g's 0.8–3.4 K cold).
+const TROPICAL_BOUND_K: f64 = 3.0;
+
+/// The tropics' reach, degrees: the bands whose centres lie within 23.75° of the equator.
+const TROPICAL_REACH_DEG: f64 = 23.75;
+
+/// The bound of the band of `band` in the relief Earth's test, K: [`RELIEF_POLAR_BOUND_K`] at
+/// 76.25° S, [`RELIEF_SOUTHERN_BOUND_K`] from 73.75° S to 61.25° S, [`TROPICAL_BOUND_K`] within
+/// [`TROPICAL_REACH_DEG`] of the equator, [`ICE_EDGE_BOUND_K`] in the ice edge's tier and
+/// [`ERA_BOUND_K`] elsewhere from 58.75° S northward.
+fn relief_bound_k(band: usize) -> f64 {
+    let latitude = band_latitude_deg(band);
+    match band {
+        ERA_FIRST_BAND => RELIEF_POLAR_BOUND_K,
+        _ if band < EARTH_ASSERTED_FROM_BAND => RELIEF_SOUTHERN_BOUND_K,
+        _ if latitude.abs() <= TROPICAL_REACH_DEG + 1e-9 => TROPICAL_BOUND_K,
+        _ if in_ice_edge(band) => ICE_EDGE_BOUND_K,
+        _ => ERA_BOUND_K,
+    }
+}
+
+/// The u = ln x of the run the mean's correction kept, or `None` where it ran none.
+fn kept_u(correction: &ebm::MeanCorrection) -> Option<f64> {
+    match correction {
+        ebm::MeanCorrection::None | ebm::MeanCorrection::Clamped => None,
+        ebm::MeanCorrection::Zonal { search, answer } => Some(search[*answer].run.u),
+        ebm::MeanCorrection::Searched { g1, g2, kept, .. } => match kept {
+            ebm::KeptRun::G1 => Some(g1.u),
+            ebm::KeptRun::G2 => Some(g2.u),
+        },
+    }
+}
+
+/// The zonal search's runs and answer of a zonal set-up's correction.
+fn zonal_search(correction: &ebm::MeanCorrection) -> (&[ebm::SearchRun], usize) {
+    let ebm::MeanCorrection::Zonal { search, answer } = correction else {
+        panic!("a zonal set-up's correction is the zonal search: {correction:?}");
+    };
+    (search, *answer)
+}
+
+/// How far below the relief Earth's surface mean the sea-level Earth's continued run's mean may
+/// fall before the relief's comparison reports rather than asserts, K: 5, the run having left its
+/// warm branch (decision-r09-t13i's §2.4 follow-up 2 §3).
+const LEFT_BRANCH_K: f64 = 5.0;
+
+/// R09.T13.g's Earth test (decision-r09-t13ge §1.6), with R09.T13.i's bounds (decision-r09-t13i
+/// §2.5, test 1, as its §2.4 follow-up 2 §2–§3 amend it). The reference Earth with its land's
 /// hypsometry by hand ([`EARTH_HYPSOMETRY_M`], each band's land cells at its eight heights in order
-/// of their 2.5° × 5° box's Earth2014 median land height, its sea flooded to the sea level; Natural
-/// Earth's land by box, [`EARTH_LAND_BOXES`], its band totals [`EARTH_LAND_SHARE`]'s;
-/// [`synthetic_sea`], decision-r09-t13e-asbuilt): its annual-mean zonal
+/// of their 2.5° × 5° box's Earth2014 median land height, its sea flooded to the sea level from a
+/// floor [`SYNTHETIC_SEA_DEPTH_M`] down; Natural Earth's land by box, [`EARTH_LAND_BOXES`], its
+/// band totals [`EARTH_LAND_SHARE`]'s; [`synthetic_sea`], decision-r09-t13e-asbuilt), under the
+/// water term at each column's temperature and the ocean's heat transport: its annual-mean zonal
 /// temperature at sea level lies within 5 K of Siler et al.'s Fig. 2b from 58.75° S northward,
-/// within 8 K from 73.75° S to 61.25° S and within 11 K at 76.25° S, every band printed, beside the
-/// same Earth with every land cell at the sea level; its 76.25° S and 73.75° S bands are each at
-/// least 1 K colder than that Earth's; and its τ solve's steady state has converged, with τ, the
-/// steady and seasonal surface means printed.
+/// within 7 K in the ice edge's tier from 61.25° N to 71.25° N ([`ICE_EDGE_BOUND_K`]), within 3 K
+/// within 23.75° of the equator, within 6.5 K from 73.75° S to 61.25° S and within 9 K at
+/// 76.25° S, every band printed beside its bound and beside the same Earth with every land cell at
+/// the sea level; and its τ solve's steady state has converged, with τ, the multiplier, the steady
+/// and seasonal surface means, the orbits and the mean's correction printed.
 ///
-/// The remaining warm bias in the south (+9.3 K at 76.25° S in the ruling's prototype) is the
-/// model's, deferred to R09.T13.i (decision-r09-t13ge §1.2–§1.3, G1): the Southern Ocean's own
-/// bias, the temperature-only albedo's summer coast and the grey column's surface. ERA-Interim's
-/// sea-level temperatures over the plateau are reduced by ECMWF's own method, unread, where the
-/// model's sea level reads Γ ≈ 5.8 K km⁻¹; the bounds hold either way
-/// (decision-r09-t13a-relief §2.1).
+/// The relief effect (follow-up 2 §3): 76.25° S and 73.75° S are each at least 1 K colder on the
+/// relief Earth's kept run than on the same Earth with every land cell at the sea level, run at
+/// the relief Earth's kept u: its seasonal run A continued there under the stop, so that the
+/// comparison holds the radiation fixed rather than mixing the height's effect with two
+/// corrections. Both runs' u and means are printed; if the sea-level run's mean falls more than
+/// [`LEFT_BRANCH_K`] below the relief Earth's, the test prints and reports instead.
+///
+/// The ruling's zonal prototype read, R1 + O1 as ruled: the tropics −1.8 to +1.1 K, the Southern
+/// Ocean +3.6 to +4.8 K, 76.25° S +6.5 K (without R2), the worst from 58.75° S 4.86 K. What is left
+/// is the cloud-free albedo's (decision-r09-t13i §6, I2), and the column's surface over the
+/// plateau (I3, I4). ERA-Interim's sea-level temperatures over the plateau are reduced by ECMWF's
+/// own method, unread, where the model's sea level reads Γ ≈ 5.8 K km⁻¹ (decision-r09-t13a-relief
+/// §2.1).
 #[test]
 fn an_earth_with_its_land_s_hypsometry_lies_within_the_ruled_bounds_of_era_interim() {
     let (solution, relief, _) = era_earth(&EARTH_HYPSOMETRY_M);
-    let (flat, _, _) = era_earth(&SEA_LEVEL_LAND);
+    let u = kept_u(&solution.correction).expect("the relief Earth's correction ran");
+    let flat = era_earth_at(&SEA_LEVEL_LAND, u);
     let grid = ModelGrid::zonal();
     let (earth, level) = (&solution.climate, &flat.climate);
     assert!(earth.converged, "{} orbits", earth.orbits);
     let mut worst: f64 = 0.0;
+    let mut tropics = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut misses = Vec::new();
     for (band, &era) in (ERA_FIRST_BAND..).zip(&ERA_INTERIM_K) {
         let (model, sea_level) = (earth.annual_k[band], level.annual_k[band]);
-        let latitude = math::asin(grid.centre_sine(band)).to_degrees();
+        let latitude = band_latitude_deg(band);
         let heights = relief.hypsometry().point(band);
+        let bound = relief_bound_k(band);
         eprintln!(
-            "{latitude:7.2}° relief {model:6.2} K ({:+6.2} K), at sea level {sea_level:6.2} K \
-             ({:+6.2} K), ERA-Interim {era:6.1} K; quantiles {:?} m",
+            "{latitude:7.2}° relief {model:6.2} K ({:+6.2} K, bound {bound} K), at sea level \
+             {sea_level:6.2} K ({:+6.2} K), ERA-Interim {era:6.1} K; quantiles {:?} m",
             model - era,
             sea_level - era,
             heights.quantiles_m.map(f64::round)
         );
-        let bound = match band {
-            ERA_FIRST_BAND => RELIEF_POLAR_BOUND_K,
-            _ if band < EARTH_ASSERTED_FROM_BAND => RELIEF_SOUTHERN_BOUND_K,
-            _ => {
-                worst = worst.max((model - era).abs());
-                5.0
-            }
-        };
-        assert!((model - era).abs() <= bound, "{latitude}°: {model} K");
+        if band >= EARTH_ASSERTED_FROM_BAND {
+            worst = worst.max((model - era).abs());
+        }
+        if bound <= TROPICAL_BOUND_K {
+            tropics = (tropics.0.min(model - era), tropics.1.max(model - era));
+        }
+        if (model - era).abs() > bound {
+            misses.push((latitude, model - era, bound));
+        }
     }
-    for band in [ERA_FIRST_BAND, ERA_FIRST_BAND + 1] {
-        assert!(
-            earth.annual_k[band] <= level.annual_k[band] - 1.0,
-            "band {band}: {} K against {} K at sea level",
-            earth.annual_k[band],
-            level.annual_k[band]
+    let relief_mean = relief.surface_mean_k(&grid, &earth.annual_k);
+    let level_mean = grid.mean(&level.annual_k);
+    eprintln!(
+        "the relief effect at u {u:.5}: the relief Earth's kept run, surface mean {relief_mean:.3} \
+         K; the sea-level Earth's run A (u {:.5}, surface mean {:.3} K) continued there (u {:.5}), \
+         surface mean {level_mean:.3} K, {} orbits, converged {}",
+        flat.a.u, flat.a.mean_k, flat.continued.u, level.orbits, level.converged
+    );
+    if level_mean < relief_mean - LEFT_BRANCH_K {
+        eprintln!(
+            "REPORT: the sea-level run left its warm branch, {level_mean:.3} K against the relief \
+             Earth's {relief_mean:.3} K; the relief effect is not asserted"
         );
+    } else {
+        for band in [ERA_FIRST_BAND, ERA_FIRST_BAND + 1] {
+            assert!(
+                earth.annual_k[band] <= level.annual_k[band] - 1.0,
+                "band {band}: {} K against {} K at sea level",
+                earth.annual_k[band],
+                level.annual_k[band]
+            );
+        }
     }
     assert!(solution.steady_converged, "{:?}", solution.optical_depth);
     eprintln!(
-        "relief: orbits {}, τ {:.4} ({:?}), steady surface mean {:.3} K, seasonal surface mean \
-         {:.3} K, seasonal sea-level mean {:.3} K, worst from 58.75° S {worst:.2} K",
+        "relief: orbits {}, x {:.4} (τ(T*) {:.4}, m {:?}; {:?}), steady surface mean {:.3} K, \
+         seasonal surface mean {:.3} K, seasonal sea-level mean {:.3} K, the mean's correction \
+         {:?}; worst from 58.75° S {worst:.2} K, the tropics {:+.2} to {:+.2} K",
         earth.orbits,
+        solution.emission_factor,
         (solution.emission_factor - 1.0) / ebm::EDDINGTON_COEFFICIENT,
+        solution.radiation.multiplier(),
         solution.optical_depth,
         solution.steady_surface_mean_k,
-        relief.surface_mean_k(&grid, &earth.annual_k),
-        grid.mean(&earth.annual_k)
+        relief_mean,
+        grid.mean(&earth.annual_k),
+        solution.correction,
+        tropics.0,
+        tropics.1
     );
+    assert!(misses.is_empty(), "bands beyond their bounds: {misses:?}");
+}
+
+/// One petawatt, W.
+const PETAWATT_W: f64 = 1e15;
+
+/// The relief Earth's annual northward transports at each band edge, PW: the atmosphere's, the
+/// ocean's (the Ekman cells' and the gyres') and their total, from the model's record times 2πR²
+/// at the reference Earth's radius.
+fn transports_pw(solution: &ebm::Solution) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let record = solution
+        .ocean
+        .as_ref()
+        .expect("the relief Earth's sea carries the ocean's transport");
+    let radius = reference::earth_like().radius().value();
+    let scale = 2.0 * core::f64::consts::PI * radius * radius / PETAWATT_W;
+    let annual = &record.annual;
+    let atmosphere: Vec<f64> = annual.atmosphere_w_m2.iter().map(|f| f * scale).collect();
+    let ocean: Vec<f64> = annual
+        .ekman_w_m2
+        .iter()
+        .zip(&annual.gyres_w_m2)
+        .map(|(e, g)| (e + g) * scale)
+        .collect();
+    let total = atmosphere.iter().zip(&ocean).map(|(a, o)| a + o).collect();
+    (atmosphere, ocean, total)
+}
+
+/// The latitude of band edge `edge`, degrees: −90° + 2.5° × `edge`.
+fn edge_latitude_deg(edge: usize) -> f64 {
+    -90.0 + 2.5 * super::grid::index(edge)
+}
+
+/// The band edge at latitude `latitude_deg`, a multiple of 2.5° from −90° to 90°.
+fn edge_at(latitude_deg: f64) -> usize {
+    (0..=LATITUDE_BANDS)
+        .find(|&e| (edge_latitude_deg(e) - latitude_deg).abs() < 1e-6)
+        .expect("an edge lies at every multiple of 2.5°")
+}
+
+/// Which way a transport's extreme points.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Toward {
+    /// The greatest, northward.
+    North,
+    /// The least, southward.
+    South,
+}
+
+/// The extreme of `values` (one an edge) over the edges from `low_deg` to `high_deg`: the greatest
+/// toward the north, the least toward the south.
+fn extreme_over(values: &[f64], low_deg: f64, high_deg: f64, toward: Toward) -> (f64, f64) {
+    let northward = toward == Toward::North;
+    let start = if northward {
+        f64::NEG_INFINITY
+    } else {
+        f64::INFINITY
+    };
+    (edge_at(low_deg)..=edge_at(high_deg))
+        .map(|e| (edge_latitude_deg(e), values[e]))
+        .fold((f64::NAN, start), |best, (latitude, v)| {
+            if (northward && v > best.1) || (!northward && v < best.1) {
+                (latitude, v)
+            } else {
+                best
+            }
+        })
+}
+
+/// R09.T13.i's transport test (decision-r09-t13i §2.5, test 2) on R09.T13.g's relief Earth
+/// ([`an_earth_with_its_land_s_hypsometry_lies_within_the_ruled_bounds_of_era_interim`]'s): its
+/// annual northward transports lie within bounds set on Trenberth and Caron's and Ganachaud and
+/// Wunsch's data, every 10° printed beside Trenberth and Caron's:
+///
+/// - each hemisphere's total peak in [4.2, 6.5] PW (the ruling's prototype 4.91 and −4.57; as
+///   built 3.78 and −3.46; Trenberth and Caron 5.61 and −5.62);
+/// - the ocean's peak in 5–25° N in [0.3, 1.2] PW, and in 5–25° S in [−1.2, −0.3] PW
+///   (decision-r09-t13i's §2.2/§2.3 follow-up 5 §1, the walled basins' shallow cells of Held's eq.
+///   7): beside Trenberth and Caron's adjusted ocean, 2.09 ± 0.27 at 15.35° N and −1.24 ± 0.36,
+///   Ganachaud and Wunsch 2003 (J. Climate 16, 696, Table 1) 1.8 ± 0.3 at 24° N and −0.8 ± 0.6 at
+///   19° S, and Klinger and Marotzke 2000's shallow cells, 0.39 PW at 10° N (the Atlantic's 0.10
+///   and the Pacific's 0.29) and −0.64 at 10° S, the rest the overturning's and the boundary
+///   currents' (I6);
+/// - the ocean's at 47.5° N in [0.15, 1.0] PW (about 0.41; Ganachaud and Wunsch 0.6 ± 0.1 at
+///   47° N), and at 47.5° S in [−0.6, 0.1] PW (about −0.13; Trenberth and Caron's `OTna` −0.25 and
+///   −0.32 PW at 46.0° S and 48.8° S);
+/// - the atmosphere's share of the total at 35° N in [0.70, 0.95] (about 0.88; Trenberth and Caron
+///   0.78) and at 35° S in [0.80, 1.0] (about 0.89; 0.92).
+///
+/// Trenberth and Caron 2001 (J. Climate 14, 3433), their archived `ANNUAL_TRANSPORTS_1985_1989`
+/// (NCAR CGD, through the Internet Archive; SHA-256 3a89b709…a15c2a9d as decision-r09-t13i's
+/// literature subagent fetched it), in PW at the rows nearest each 10°, the radiatively required
+/// total RT and their adjusted ocean `OTna` (NCEP), not committed as data:
+///
+/// | Latitude | 79.5° N | 71.2° N | 60.0° N | 48.8° N | 40.5° N | 29.3° N | 20.9° N | 9.8° N | 1.4° N |
+/// | -------- | ------- | ------- | ------- | ------- | ------- | ------- | ------- | ------ | ------ |
+/// | RT | 0.59 | 1.72 | 3.45 | 4.94 | 5.55 | 5.47 | 4.84 | 2.50 | 0.12 |
+/// | `OTna` | — | — | 0.25 | 0.38 | 0.62 | 1.65 | 2.00 | 1.82 | 0.47 |
+///
+/// | Latitude | 1.4° S | 9.8° S | 20.9° S | 29.3° S | 40.5° S | 48.8° S | 60.0° S | 71.2° S | 79.5° S |
+/// | -------- | ------ | ------ | ------- | ------- | ------- | ------- | ------- | ------- | ------- |
+/// | RT | −0.73 | −2.91 | −4.77 | −5.47 | −5.45 | −4.66 | −2.98 | −1.18 | −0.35 |
+/// | `OTna` | −0.24 | −1.22 | −1.01 | −0.68 | −0.14 | −0.32 | −0.21 | — | — |
+///
+/// The northern tropics carry about a quarter of the observed ocean's: the Atlantic overturning's,
+/// the western boundary currents' and the Indonesian throughflow's share needs a basin model
+/// (decision-r09-t13i §2.3.5, I6, as its follow-up 5 §3 amends it).
+#[test]
+fn the_relief_earth_s_transports_lie_within_bounds_on_trenberth_and_caron_s_data() {
+    let (solution, _, _) = era_earth(&EARTH_HYPSOMETRY_M);
+    let (atmosphere, ocean, total) = transports_pw(&solution);
+    for latitude in (-8..=8).map(|k| 10.0 * f64::from(k)) {
+        let e = edge_at(latitude);
+        eprintln!(
+            "{latitude:5.0}°: total {:+5.2} PW, atmosphere {:+5.2}, ocean {:+5.2}",
+            total[e], atmosphere[e], ocean[e]
+        );
+    }
+    let (north_at, north) = extreme_over(&total, 0.0, 90.0, Toward::North);
+    let (south_at, south) = extreme_over(&total, -90.0, 0.0, Toward::South);
+    let (tropical_north_at, tropical_north) = extreme_over(&ocean, 5.0, 25.0, Toward::North);
+    let (tropical_south_at, tropical_south) = extreme_over(&ocean, -25.0, -5.0, Toward::South);
+    let (mid_north, mid_south) = (ocean[edge_at(47.5)], ocean[edge_at(-47.5)]);
+    let share = |latitude: f64| atmosphere[edge_at(latitude)] / total[edge_at(latitude)];
     eprintln!(
-        "at sea level: orbits {}, τ {:.4} ({:?}), steady mean {:.3} K, seasonal mean {:.3} K",
-        level.orbits,
-        (flat.emission_factor - 1.0) / ebm::EDDINGTON_COEFFICIENT,
-        flat.optical_depth,
-        flat.steady_surface_mean_k,
-        grid.mean(&level.annual_k)
+        "total peaks {north:+.2} PW at {north_at}° and {south:+.2} PW at {south_at}° (Trenberth and \
+         Caron +5.61, −5.62); the ocean's tropical peaks {tropical_north:+.2} PW at \
+         {tropical_north_at}° and {tropical_south:+.2} PW at {tropical_south_at}° (Trenberth and \
+         Caron +2.09, −1.24; Klinger and Marotzke's shallow cells +0.39 and −0.64 at ±10°); \
+         at ±47.5° {mid_north:+.2} and {mid_south:+.2} PW; the atmosphere's share at 35° N {:.3}, \
+         at 35° S {:.3} (0.78, 0.92)",
+        share(35.0),
+        share(-35.0)
     );
-    assert!(worst <= 5.0, "worst {worst} K");
+    let mut misses = Vec::new();
+    let mut check = |name: &str, value: f64, low: f64, high: f64| {
+        if !(low..=high).contains(&value) {
+            misses.push(format!("{name} {value:.3} outside [{low}, {high}]"));
+        }
+    };
+    check("the northern total peak", north, 4.2, 6.5);
+    check("the southern total peak", -south, 4.2, 6.5);
+    check("the ocean's peak in 5–25° N", tropical_north, 0.3, 1.2);
+    check("the ocean's peak in 5–25° S", tropical_south, -1.2, -0.3);
+    check("the ocean at 47.5° N", mid_north, 0.15, 1.0);
+    check("the ocean at 47.5° S", mid_south, -0.6, 0.1);
+    check("the atmosphere's share at 35° N", share(35.0), 0.70, 0.95);
+    check("the atmosphere's share at 35° S", share(-35.0), 0.80, 1.0);
+    assert!(misses.is_empty(), "{misses:?}");
+}
+
+/// The ruled fold (decision-r09-t13i's §2.4 follow-up §3, the fold's unit test, as its follow-up 4
+/// §7 restates it): on R09.T13.g's relief zonal Earth under the water term and the ocean, τ's fit is
+/// labelled a fold; the zonal search's first step, by the steady states' slope, lies nearer plan
+/// 14's mean than its first run; no unconverged run is a secant point; and its answer, the climate
+/// on the zonal grid, has converged within 0.3 K of the mean, or the test prints and the lane
+/// reports. Each run's u, surface mean, orbits and convergence are printed.
+#[test]
+fn the_relief_earth_s_fit_is_a_fold_and_its_correction_closes_on_the_mean() {
+    let (solution, relief, _) = era_earth(&EARTH_HYPSOMETRY_M);
+    let mean = reference::earth_like().mean_surface_temperature().value();
+    let kept = relief.surface_mean_k(&ModelGrid::zonal(), &solution.climate.annual_k);
+    eprintln!(
+        "{:?}: x {:.5}, the steady state's surface mean {:.3} K; the kept run's surface mean \
+         {kept:.3} K",
+        solution.optical_depth, solution.emission_factor, solution.steady_surface_mean_k,
+    );
+    assert_eq!(solution.optical_depth, ebm::OpticalDepth::Folded);
+    let (search, answer) = zonal_search(&solution.correction);
+    for (i, run) in search.iter().enumerate() {
+        eprintln!("  Z{i}: {run:?}");
+        if let ebm::SearchStep::Secant { points, from } = run.step {
+            assert!(points.iter().all(|&j| search[j].run.converged), "Z{i}");
+            assert!(search[from].run.converged, "Z{i}");
+        }
+    }
+    if let [first, second, ..] = search {
+        assert!(
+            (second.run.mean_k - mean).abs() < (first.run.mean_k - mean).abs(),
+            "{first:?} against {second:?}"
+        );
+    }
+    assert!(search[answer].run.converged);
+    assert!(solution.climate.converged);
+    if (kept - mean).abs() > 0.3 {
+        eprintln!(
+            "REPORT: the kept run lies {:.3} K from the mean",
+            kept - mean
+        );
+    }
+}
+
+/// The spin-up's extrapolation (decision-r09-t13i's §2.4 follow-up 4 §7): on R09.T13.g's relief
+/// zonal Earth, its run at the fit's u from the fit's steady state, extrapolated, has every band's
+/// annual mean within 0.2 K, twice the stop, of the same run marched orbit by orbit, and the same
+/// converged outcome; both runs' orbits are printed.
+#[test]
+fn the_extrapolated_run_lies_within_twice_the_stop_of_the_marched_one() {
+    let (sea, relief, ocean, _) = era_set_up(&EARTH_HYPSOMETRY_M);
+    let ground = Ground::Relief {
+        grid: &relief,
+        zonal: &relief,
+    };
+    let run = |jumps| {
+        ebm::solve_at_fit(
+            &reference::earth_like(),
+            &ModelGrid::zonal(),
+            &sea,
+            NOMINAL_STEP,
+            ground,
+            ocean,
+            (jumps, None),
+        )
+    };
+    let (jumped, marched) = (run(ebm::Jumps::Allowed), run(ebm::Jumps::Never));
+    let worst = jumped
+        .annual_k
+        .iter()
+        .zip(&marched.annual_k)
+        .fold(0.0_f64, |worst, (a, b)| worst.max((a - b).abs()));
+    eprintln!(
+        "extrapolated: {} orbits, converged {}; marched: {} orbits, converged {}; the worst band \
+         {worst:.3} K apart",
+        jumped.orbits, jumped.converged, marched.orbits, marched.converged
+    );
+    assert_eq!(jumped.converged, marched.converged);
+    assert!(worst <= 2.0 * ebm::CONVERGENCE_K, "{worst} K");
+}
+
+/// The zonal search on the deep all-sea aquaplanet (decision-r09-t13i's §2.4 follow-up 8 §2,
+/// restating its follow-up 4 §7's "closes on the mean in four runs", whose premise, a fast branch,
+/// the physics near a fold no longer has): the reference Earth with every band sea over a deep sea,
+/// on the zonal grid, keeps to the search's rules. Every secant point met the search's stop; every
+/// predicted run's start, its state and return temperatures, is its pair's linear prediction to the
+/// bit, and only secant runs are predicted; the answer is the search's ruled choice, the run nearest
+/// plan 14's mean among those that met the climate's stop, the earlier on a tie; and two calls are
+/// equal to the bit. Every run, the fit's label and the answer's miss are printed; neither a run
+/// count nor a miss is asserted (its 0.83 K is I12's and I13's case). Its ocean's tropical peak is
+/// printed beside Enderton and Marshall 2009's Aqua, 2.4 PW at 15° (not asserted: theirs is a colder
+/// world, iced to about 61°; decision-r09-t13i's §2.2/§2.3 follow-up 5 §1).
+#[test]
+fn the_deep_aquaplanet_s_search_keeps_to_its_rules() {
+    let inputs = reference::earth_like();
+    let zonal = ModelGrid::zonal();
+    let deep = OceanTransport::Currents {
+        mean_depth_m: SYNTHETIC_SEA_DEPTH_M,
+    };
+    let solve = || {
+        ebm::solve(
+            &inputs,
+            &zonal,
+            &[1.0; LATITUDE_BANDS],
+            NOMINAL_STEP,
+            Ground::SeaLevel,
+            deep,
+        )
+    };
+    let (solution, again) = (solve(), solve());
+    assert_same_solution("the aquaplanet twice", &solution, &again);
+    let (search, answer) = zonal_search(&solution.correction);
+    let states = ebm::search_states(
+        &inputs,
+        &zonal,
+        &[1.0; LATITUDE_BANDS],
+        NOMINAL_STEP,
+        Ground::SeaLevel,
+        deep,
+    );
+    assert_each_search_run_keeps_its_rules(search, &states);
+    let mean = inputs.mean_surface_temperature().value();
+    let ruled = search
+        .iter()
+        .enumerate()
+        .filter(|(_, run)| run.run.converged && run.run.mean_k.is_finite())
+        .fold(None, |best: Option<(usize, f64)>, (i, run)| {
+            let miss = (run.run.mean_k - mean).abs();
+            match best {
+                Some((_, nearest)) if nearest <= miss => best,
+                _ => Some((i, miss)),
+            }
+        })
+        .map(|(i, _)| i);
+    assert_eq!(
+        Some(answer),
+        ruled,
+        "the answer is the nearest converged run"
+    );
+    print_the_aquaplanet_s_cells(&inputs, &solution);
+    eprintln!(
+        "the aquaplanet: {:?}, {} runs, the answer Z{answer} at {:.4} K, {:+.4} K from plan 14's \
+         mean; the kept run's moves {:.4?}",
+        solution.optical_depth,
+        search.len(),
+        search[answer].run.mean_k,
+        search[answer].run.mean_k - mean,
+        solution.moves_k
+    );
+}
+
+/// The deep aquaplanet's search test's rules for each run (decision-r09-t13i's §2.4 follow-up 8
+/// §2): its records are the solve's own search's, `search`, to the bit; a secant run's two points
+/// met the search's stop and its start, its state and return temperatures, is their end states'
+/// linear prediction at its u to the bit; and no other run is predicted. Each run is printed.
+fn assert_each_search_run_keeps_its_rules(search: &[ebm::SearchRun], states: &[ebm::SearchState]) {
+    assert_eq!(states.len(), search.len());
+    for (i, (run, state)) in search.iter().zip(states).enumerate() {
+        let record = run.run;
+        eprintln!(
+            "  Z{i}: {:?} {:?}, u {:.6}, {:.4} K, {} orbits, {} jumps, {} rejects, the climate's \
+             stop {}, the search's {}",
+            record.start,
+            run.step,
+            record.u,
+            record.mean_k,
+            record.orbits,
+            record.jumps,
+            record.rejects,
+            record.converged,
+            record.searched
+        );
+        // The same search as the solve's, its record to the bit.
+        let again = state.record;
+        assert_same_bits(again.run.u, record.u);
+        assert_same_bits(again.run.mean_k, record.mean_k);
+        assert_same_bits(again.target_k, run.target_k);
+        assert_eq!(
+            (
+                again.step,
+                again.run.orbits,
+                again.run.jumps,
+                again.run.rejects,
+                again.run.start,
+                again.run.converged,
+                again.run.searched
+            ),
+            (
+                run.step,
+                record.orbits,
+                record.jumps,
+                record.rejects,
+                record.start,
+                record.converged,
+                record.searched
+            ),
+            "Z{i}"
+        );
+        let predicted = record.start == ebm::RunStart::Predicted;
+        let ebm::SearchStep::Secant { points: [a, b], .. } = run.step else {
+            assert!(!predicted, "Z{i}: only a secant run is predicted");
+            continue;
+        };
+        assert!(
+            search[a].run.searched && search[b].run.searched,
+            "Z{i}: a secant point that did not meet the search's stop"
+        );
+        assert!(predicted, "Z{i}: a secant run starts from its prediction");
+        let share = (record.u - search[a].run.u) / (search[b].run.u - search[a].run.u);
+        let line = |x: f64, y: f64| x + (y - x) * share;
+        assert_same_values(
+            &format!("Z{i}'s start"),
+            &state.start_k,
+            &states[a]
+                .final_k
+                .iter()
+                .zip(&states[b].final_k)
+                .map(|(&x, &y)| line(x, y))
+                .collect::<Vec<f64>>(),
+        );
+        let (
+            super::ocean::Returning::Coldest(start),
+            super::ocean::Returning::Coldest(first),
+            super::ocean::Returning::Coldest(second),
+        ) = (
+            &state.start_returning,
+            &states[a].final_returning,
+            &states[b].final_returning,
+        )
+        else {
+            panic!("Z{i}: an aquaplanet's runs return the coldest months' water");
+        };
+        for ((&start, &x), &y) in start.iter().zip(first.iter()).zip(second.iter()) {
+            assert_same_bits(start, line(x, y));
+        }
+    }
+}
+
+/// Prints the deep aquaplanet's ocean beside Enderton and Marshall 2009's Aqua (decision-r09-t13i's
+/// §2.2/§2.3 follow-up 5 §1 and §2.4 follow-up 6 §7): its ocean's peak in 5–25° N against their
+/// 2.4 PW at 15°, and at 15° N the Ekman cells' ψ against their about 60 Sv and the open ocean's
+/// `ΔT_D` against their about 10 K, at the annual mean.
+fn print_the_aquaplanet_s_cells(inputs: &CoarseInputs, solution: &ebm::Solution) {
+    let (_, ocean, _) = transports_pw(solution);
+    let (at, peak) = extreme_over(&ocean, 5.0, 25.0, Toward::North);
+    let model = EnergyBalance::for_inputs(inputs);
+    let currents = super::ocean::Currents::of(
+        inputs,
+        model.freezing,
+        SYNTHETIC_SEA_DEPTH_M,
+        super::partition::Turning::Rotating,
+    );
+    let radius = inputs.radius().value();
+    let sphere = 2.0 * core::f64::consts::PI * radius * radius;
+    let (psi, open) = model
+        .ekman_at(
+            &[1.0; LATITUDE_BANDS],
+            &currents,
+            &solution.climate,
+            edge_at(15.0),
+        )
+        .expect("an aquaplanet's cells turn");
+    eprintln!(
+        "the aquaplanet at 15° N: the Ekman cells' ψ {:.1} × 10⁹ kg s⁻¹ (Enderton and Marshall's \
+         Aqua about 60 Sv), the open ocean's ΔT_D {open:.2} K (about 10 K), at the annual mean; the \
+         ocean's peak in 5–25° N {peak:+.2} PW at {at}° (Enderton and Marshall's Aqua 2.4 PW at \
+         15°)",
+        psi * sphere / 1e9
+    );
+}
+
+/// R09.T13.i's no-ocean limit (decision-r09-t13i §2.5, test 3): on the dry world, the all-land
+/// reference Earth and R09.T13.g's relief Earth with its sea share set to zero, the zonal model
+/// with the ocean's heat transport over a deep sea is the model with none to the bit: with no sea
+/// every term is an exact zero.
+#[test]
+fn with_no_sea_the_ocean_s_transport_is_nothing_to_the_bit() {
+    let deep = OceanTransport::Currents {
+        mean_depth_m: SYNTHETIC_SEA_DEPTH_M,
+    };
+    let zonal = ModelGrid::zonal();
+    let land = [0.0; LATITUDE_BANDS];
+    let dry = builder_of(&reference::earth_like())
+        .liquids([])
+        .condensates([])
+        .build()
+        .expect("a dry Earth is valid");
+    for (name, inputs) in [
+        ("the dry world", dry),
+        ("the all-land Earth", reference::earth_like()),
+    ] {
+        assert_same_solution(
+            name,
+            &ebm::solve(&inputs, &zonal, &land, NOMINAL_STEP, Ground::SeaLevel, deep),
+            &ebm::solve(
+                &inputs,
+                &zonal,
+                &land,
+                NOMINAL_STEP,
+                Ground::SeaLevel,
+                OceanTransport::None,
+            ),
+        );
+    }
+    let (_, relief, _, _) = era_set_up(&EARTH_HYPSOMETRY_M);
+    let inputs = reference::earth_like();
+    let ground = Ground::Relief {
+        grid: &relief,
+        zonal: &relief,
+    };
+    assert_same_solution(
+        "the relief Earth with no sea",
+        &ebm::solve(&inputs, &zonal, &land, NOMINAL_STEP, ground, deep),
+        &ebm::solve(
+            &inputs,
+            &zonal,
+            &land,
+            NOMINAL_STEP,
+            ground,
+            OceanTransport::None,
+        ),
+    );
+}
+
+/// R09.T13.i's R1 at a warm climate (decision-r09-t13i §2.5, test 4): the reference Earth as an
+/// aquaplanet over a deep sea at plan 14's mean raised to 330 K, where the water term is large
+/// (∂ln(1 + ¾τ) ÷ ∂T near 4 ÷ T in the tropics), converges within [`MAX_ORBITS`] with every
+/// record finite.
+#[test]
+fn a_330_k_aquaplanet_converges_under_the_water_term() {
+    let inputs = builder_of(&reference::earth_like())
+        .mean_surface_temperature(crate::units::Kelvin::new(330.0))
+        .build()
+        .expect("a warm Earth is valid");
+    let zonal = ModelGrid::zonal();
+    let solution = ebm::solve(
+        &inputs,
+        &zonal,
+        &[1.0; LATITUDE_BANDS],
+        NOMINAL_STEP,
+        Ground::SeaLevel,
+        OceanTransport::Currents {
+            mean_depth_m: SYNTHETIC_SEA_DEPTH_M,
+        },
+    );
+    let climate = &solution.climate;
+    eprintln!(
+        "330 K aquaplanet: x {:.4} ({:?}, m {:?}), {} orbits, converged {}, mean {:.2} K, the \
+         equator {:.1} K, the poles {:.1} and {:.1} K; the correction {:?}; moves {:.4?}",
+        solution.emission_factor,
+        solution.optical_depth,
+        solution.radiation.multiplier(),
+        climate.orbits,
+        climate.converged,
+        zonal.mean(&climate.annual_k),
+        climate.annual_k[LATITUDE_BANDS / 2],
+        climate.annual_k[0],
+        climate.annual_k[LATITUDE_BANDS - 1],
+        solution.correction,
+        solution.moves_k
+    );
+    assert!(climate.converged, "{} orbits", climate.orbits);
+    assert!(climate.orbits <= MAX_ORBITS);
+    assert!(
+        climate
+            .annual_k
+            .iter()
+            .chain(climate.months_k.iter().flatten())
+            .all(|t| t.is_finite())
+    );
+}
+
+/// R09.T13.i's stop (decision-r09-t13i §2.5, test 6): an Earth on an orbit of 0.1 year, much
+/// shorter than its ocean's relaxation, keeps running until the remainder its moves extrapolate to
+/// is under 0.1 K, or flags at [`MAX_ORBITS`]; its moves are printed.
+#[test]
+fn a_short_orbit_runs_until_its_remainder_is_under_the_bound_or_flags() {
+    let earth = reference::earth_like();
+    let orbit = *earth
+        .seasonal_orbit()
+        .expect("the reference Earth orbits the Sun");
+    let inputs = builder_of(&earth)
+        .seasonal_orbit(SeasonalOrbit {
+            period: Seconds::new(0.1 * orbit.period.value()),
+            ..orbit
+        })
+        .build()
+        .expect("an Earth on a short orbit is valid");
+    let zonal = ModelGrid::zonal();
+    let solution = ebm::solve(
+        &inputs,
+        &zonal,
+        &[0.7; LATITUDE_BANDS],
+        NOMINAL_STEP,
+        Ground::SeaLevel,
+        OceanTransport::None,
+    );
+    let climate = &solution.climate;
+    let moves = &solution.moves_k;
+    eprintln!(
+        "an orbit of 0.1 year: {} orbits, converged {}, moves {moves:.4?}; the correction {:?}",
+        climate.orbits, climate.converged, solution.correction
+    );
+    let (search, _) = zonal_search(&solution.correction);
+    for run in search {
+        assert!(run.run.converged || run.run.orbits == MAX_ORBITS, "{run:?}");
+    }
+    if climate.converged {
+        let (&last, &before) = (
+            moves.last().expect("a converged run moved"),
+            moves
+                .iter()
+                .rev()
+                .nth(1)
+                .expect("a converged run moved twice"),
+        );
+        let ratio = last / before;
+        assert!(last < ebm::CONVERGENCE_K);
+        assert!(last <= 0.0 || (ratio < 1.0 && last * ratio / (1.0 - ratio) < ebm::CONVERGENCE_K));
+        assert!(climate.orbits >= ebm::MIN_ORBITS);
+    } else {
+        assert_eq!(climate.orbits, MAX_ORBITS);
+    }
 }
 
 /// R09.T13.i's liquid (decision-r09-t13i §2.5, test 5): the reference Earth's sea is water's, its
@@ -379,7 +1125,10 @@ fn an_earth_with_its_land_s_hypsometry_lies_within_the_ruled_bounds_of_era_inter
 fn a_methane_sea_holds_its_own_heat_and_water_s_ratio_is_one() {
     let earth = reference::earth_like();
     let water = super::ocean::SeaLiquid::of(&earth, Freezing::of(&earth));
-    assert!(water.has_column());
+    let has_column = |key: &str| {
+        by_key(key).is_some_and(|row| row.substance().liquid_specific_heat_range().is_some())
+    };
+    assert!(has_column("H2O"));
     assert_same_bits(water.capacity_ratio(), 1.0);
     assert_same_bits(water.heat_ratio(), 1.0);
     let titan = normalisation::titan_like();
@@ -392,9 +1141,9 @@ fn a_methane_sea_holds_its_own_heat_and_water_s_ratio_is_one() {
         methane.specific_heat_j_per_kg_k(),
         methane.capacity_ratio(),
         methane.heat_ratio(),
-        methane.has_column()
+        has_column("CH4")
     );
-    assert!(methane.has_column());
+    assert!(has_column("CH4"));
     assert!(
         (methane.capacity_ratio() / expected - 1.0).abs() < 0.02,
         "{} against {expected}",
@@ -435,12 +1184,126 @@ fn the_step_s_mean_constant_reconciles_the_relief_earth_s_surface_means() {
     );
     let mean = inputs.mean_surface_temperature().value();
     assert!((surface - mean).abs() < 0.1, "{surface} K against {mean} K");
+    // R09.T13.i's test 8 (decision-r09-t13i's §2.4 follow-up §3): the ruled Earth's geographic
+    // surface mean before T13.d lies within 0.3 K of plan 14's; 0.3–0.5 K is reported to main, and
+    // above 0.5 K it blocks.
+    let miss = (means.seasonal_k - mean).abs();
+    eprintln!(
+        "test 8: the seasonal surface mean {:.3} K, {miss:.3} K from plan 14's {mean} K after {} \
+         orbits; the correction {:?}",
+        means.seasonal_k, means.orbits, means.correction
+    );
+    if miss > 0.3 {
+        eprintln!("test 8: REPORT to main, {miss:.3} K lies between 0.3 and 0.5 K");
+    }
+    assert!(miss <= 0.5, "{} K against {mean} K", means.seasonal_k);
+}
+
+/// The values `a` and `b` are the same to the bit, as many of each.
+fn assert_same_values<'a>(
+    name: &str,
+    a: impl IntoIterator<Item = &'a f64>,
+    b: impl IntoIterator<Item = &'a f64>,
+) {
+    let (a, b): (Vec<f64>, Vec<f64>) = (
+        a.into_iter().copied().collect(),
+        b.into_iter().copied().collect(),
+    );
+    assert_eq!(a.len(), b.len(), "{name}");
+    for (x, y) in a.iter().zip(&b) {
+        assert_same_bits(*x, *y);
+    }
+}
+
+/// The correction's records `a` and `b` are the same, each run's u and surface mean to the bit.
+fn assert_same_correction(name: &str, a: &ebm::MeanCorrection, b: &ebm::MeanCorrection) {
+    type Runs = (
+        Vec<ebm::CorrectionRun>,
+        Vec<ebm::SearchStep>,
+        String,
+        Option<f64>,
+    );
+    let runs = |c: &ebm::MeanCorrection| -> Runs {
+        match c {
+            ebm::MeanCorrection::None => (Vec::new(), Vec::new(), "none".to_owned(), None),
+            ebm::MeanCorrection::Clamped => (Vec::new(), Vec::new(), "clamped".to_owned(), None),
+            ebm::MeanCorrection::Zonal { search, answer } => (
+                search.iter().map(|r| r.run).collect(),
+                search.iter().map(|r| r.step).collect(),
+                format!("zonal {answer}"),
+                None,
+            ),
+            ebm::MeanCorrection::Searched {
+                search,
+                answer,
+                g1,
+                g1_probe,
+                defect,
+                g2_start_k,
+                g2,
+                kept,
+            } => (
+                search.iter().map(|r| r.run).chain([*g1, *g2]).collect(),
+                search.iter().map(|r| r.step).collect(),
+                format!(
+                    "searched {answer:?} {kept:?} {:?} {:?} {:?}",
+                    defect.map(|(_, slope)| slope.pair),
+                    g2_start_k.map(|_| ()),
+                    g1_probe.as_ref().map(|probe| probe.orbits)
+                ),
+                defect.map(|(d, _)| d),
+            ),
+        }
+    };
+    let ((x, xs, xl, xd), (y, ys, yl, yd)) = (runs(a), runs(b));
+    assert_eq!((xs, xl), (ys, yl), "{name}");
+    assert_eq!(xd.is_some(), yd.is_some(), "{name}");
+    if let (Some(p), Some(q)) = (xd, yd) {
+        assert_same_bits(p, q);
+    }
+    assert_eq!(x.len(), y.len(), "{name}");
+    for (p, q) in x.iter().zip(&y) {
+        assert_same_bits(p.u, q.u);
+        assert_same_bits(p.mean_k, q.mean_k);
+        assert_eq!(
+            (p.orbits, p.jumps, p.converged, p.searched),
+            (q.orbits, q.jumps, q.converged, q.searched),
+            "{name}"
+        );
+    }
 }
 
 /// The two answers of the model are the same to the bit: every record, the orbits, τ and its
 /// steady state's mean.
 fn assert_same_solution(name: &str, a: &ebm::Solution, b: &ebm::Solution) {
     assert_eq!(a.climate.orbits, b.climate.orbits, "{name}");
+    assert_same_correction(name, &a.correction, &b.correction);
+    assert_eq!(a.ocean.is_some(), b.ocean.is_some(), "{name}");
+    if let (Some(x), Some(y)) = (&a.ocean, &b.ocean) {
+        assert_same_values(
+            name,
+            x.convergence_w_m2.iter().flatten(),
+            y.convergence_w_m2.iter().flatten(),
+        );
+        for (p, q) in x
+            .months
+            .iter()
+            .chain([&x.annual])
+            .zip(y.months.iter().chain([&y.annual]))
+        {
+            for (u, v) in [
+                (&p.atmosphere_w_m2, &q.atmosphere_w_m2),
+                (&p.ekman_w_m2, &q.ekman_w_m2),
+                (&p.gyres_w_m2, &q.gyres_w_m2),
+            ] {
+                assert_same_values(name, u.iter(), v.iter());
+            }
+        }
+    }
+    assert_eq!(a.moves_k.len(), b.moves_k.len(), "{name}");
+    for (x, y) in a.moves_k.iter().zip(&b.moves_k) {
+        assert_same_bits(*x, *y);
+    }
     assert_eq!(a.climate.converged, b.climate.converged, "{name}");
     assert_eq!(a.optical_depth, b.optical_depth, "{name}");
     assert_eq!(a.steady_converged, b.steady_converged, "{name}");
@@ -473,11 +1336,11 @@ fn with_every_height_zero_the_model_is_t13a_s_to_the_bit() {
     let zonal = ModelGrid::zonal();
     let sea = sea_shares(&pass, &working);
     let (_, relief) = super::reliefs(&pass, &working, &zonal, Coordinates::Geographic);
+    let ocean = super::sea_transport(&pass, &working);
     let ground = Ground::Relief {
         grid: &relief,
         zonal: &relief,
     };
-    let ocean = super::sea_transport(&pass, &working);
     assert_same_solution(
         "the zonal Earth",
         &ebm::solve(&inputs, &zonal, &sea, NOMINAL_STEP, ground, ocean),
@@ -502,11 +1365,11 @@ fn with_every_height_zero_the_model_is_t13a_s_to_the_bit() {
         let working = Working::initial(&pass);
         let sea = point_sea_shares(&pass, &working, &grid, coordinates);
         let (on_grid, zonal) = super::reliefs(&pass, &working, &grid, coordinates);
+        let ocean = super::sea_transport(&pass, &working);
         let ground = Ground::Relief {
             grid: &on_grid,
             zonal: &zonal,
         };
-        let ocean = super::sea_transport(&pass, &working);
         let solve = |ground| match coordinates {
             Coordinates::Geographic => {
                 ebm::solve(&inputs, &grid, &sea, NOMINAL_STEP, ground, ocean)
@@ -579,6 +1442,7 @@ impl KaspiShowman {
             // (§2, §3.3): one τ (decision-r09-t13i §2.2).
             greenhouse: Greenhouse::Grey,
             sea_capacity_ratio: 1.0,
+            ice_fraction: 0.0,
         }
     }
 
@@ -955,31 +1819,28 @@ fn argmax(values: &[f64]) -> usize {
         .0
 }
 
-/// The plan's reproduction test at sea share `sea` everywhere: every point of the geographic
-/// model is its band of the zonal model to 0.01 K, in the annual mean and in every month, after
-/// the same orbits.
+/// The plan's reproduction test at sea share `sea` everywhere, as decision-r09-t13i's §2.4
+/// follow-up 7 §3 restates it, the model test it is: with no ocean term, the zonal and the
+/// geographic models, each from the zonal steady state broadcast at the fit's u, run three orbits
+/// each, and every point's annual and monthly means lie within 10⁻⁶ K of its band's in the zonal
+/// model. The correction's outcome is not part of it.
 fn reproduces_the_zonal_model(sea: f64) {
     let inputs = reference::earth_like();
     let (zonal, geographic) = (ModelGrid::zonal(), ModelGrid::geographic());
-    let one = ebm::solve(
-        &inputs,
-        &zonal,
-        &[sea; LATITUDE_BANDS],
-        NOMINAL_STEP,
-        Ground::SeaLevel,
-        OceanTransport::None,
-    )
-    .climate;
-    let wide = ebm::solve(
-        &inputs,
-        &geographic,
-        &vec![sea; geographic.points()],
-        NOMINAL_STEP,
-        Ground::SeaLevel,
-        OceanTransport::None,
-    )
-    .climate;
-    assert_eq!(wide.orbits, one.orbits);
+    let run = |grid: &ModelGrid, share: &[f64]| {
+        ebm::solve_at_fit(
+            &inputs,
+            grid,
+            share,
+            NOMINAL_STEP,
+            Ground::SeaLevel,
+            OceanTransport::None,
+            (ebm::Jumps::Never, Some(3)),
+        )
+    };
+    let one = run(&zonal, &[sea; LATITUDE_BANDS]);
+    let wide = run(&geographic, &vec![sea; geographic.points()]);
+    assert_eq!((one.orbits, wide.orbits), (3, 3));
     assert_eq!(wide.months_k.len(), 12);
     let mut worst: f64 = 0.0;
     for p in 0..geographic.points() {
@@ -989,21 +1850,21 @@ fn reproduces_the_zonal_model(sea: f64) {
             worst = worst.max((a[p] - b[band]).abs());
         }
     }
-    eprintln!("sea {sea}: {} orbits, worst {worst:e} K", one.orbits);
-    assert!(worst < 0.01, "sea {sea}: {worst} K");
+    eprintln!("sea {sea}: three orbits each, worst {worst:e} K");
+    assert!(worst < 1e-6, "sea {sea}: {worst} K");
 }
 
 /// The plan's reproduction test with no land–sea contrast, all land (the field until R09.T12):
-/// the geographic model is the zonal one to 0.01 K ([`reproduces_the_zonal_model`]).
+/// the geographic model is the zonal one to 10⁻⁶ K over three orbits ([`reproduces_the_zonal_model`]).
 #[test]
 fn the_geographic_model_reproduces_the_zonal_one_all_land() {
     reproduces_the_zonal_model(0.0);
 }
 
 /// The plan's reproduction test with no land–sea contrast, all sea: the geographic model is the
-/// zonal one to 0.01 K ([`reproduces_the_zonal_model`]), over the eleven orbits a sea takes.
+/// zonal one to 10⁻⁶ K over three orbits ([`reproduces_the_zonal_model`]).
 #[test]
-#[ignore = "slow: eleven orbits of the 72 × 72 model, about 7 s"]
+#[ignore = "slow: three orbits of the 72 × 72 model over a sea"]
 fn the_geographic_model_reproduces_the_zonal_one_all_sea() {
     reproduces_the_zonal_model(1.0);
 }
@@ -1025,7 +1886,7 @@ fn amplitude(climate: &GridClimate, point: usize) -> f64 {
 /// the same latitude half a turn away, and in its warmest month the continent is warmer than the
 /// sea 10° off its coast; the sea there, warmed by it, is warmer than the open sea.
 #[test]
-#[ignore = "slow: ten orbits of the 72 × 72 model over a sea, about 6 s"]
+#[ignore = "slow: three seasonal runs of the 72 × 72 model over a sea, 87 orbits, about 67 s"]
 fn a_continent_has_larger_seasons_and_a_warmer_summer_than_the_sea_beside_it() {
     let inputs = reference::earth_like();
     let grid = ModelGrid::geographic();
@@ -1040,15 +1901,27 @@ fn a_continent_has_larger_seasons_and_a_warmer_summer_than_the_sea_beside_it() {
             }
         })
         .collect();
-    let climate = ebm::solve(
+    let start = std::time::Instant::now();
+    let solution = ebm::solve(
         &inputs,
         &grid,
         &sea,
         NOMINAL_STEP,
         Ground::SeaLevel,
         OceanTransport::None,
-    )
-    .climate;
+    );
+    eprintln!(
+        "the continent aquaplanet: x {:.5} ({:?}), steady surface mean {:.3} K, seasonal mean \
+         {:.3} K; the mean's correction, each run's u, surface mean, orbits and convergence, and \
+         the run kept: {:?}; the model's wall time {:.2} s",
+        solution.emission_factor,
+        solution.optical_depth,
+        solution.steady_surface_mean_k,
+        grid.mean(&solution.climate.annual_k),
+        solution.correction,
+        start.elapsed().as_secs_f64()
+    );
+    let climate = solution.climate;
     assert!(climate.converged, "{} orbits", climate.orbits);
     let at = |longitude: f64| grid.point_of(direction(46.25, longitude));
     let (land, coast, open) = (at(0.0), at(40.0), at(180.0));

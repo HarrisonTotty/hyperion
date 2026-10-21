@@ -8,7 +8,7 @@
 //! At each grid point, of sea share s, at the surface temperature T at sea level, written here
 //! for a point at the sea level (the relief's terms follow):
 //!
-//! C(T) ∂T/∂t = S (1 − α(T)) + `F_int` − σT⁴ ÷ (1 + ¾τ) + Λ ∇²h,
+//! C(T) ∂T/∂t = S (1 − α(T)) + `F_int` − σT⁴ ÷ (1 + ¾τ) + Λ ∇²h + `Q_O`,
 //!
 //! with ∇²h = (1 ÷ cos φ) ∂/∂φ (cos φ ∂h/∂φ) + (1 ÷ cos² φ) ∂²h/∂λ², the sphere's isotropic
 //! Laplacian per unit of R⁻², in the grid's own coordinates (geographic, or tidally locked about
@@ -31,14 +31,19 @@
 //!   the body ([`Greenhouse::Vapour`]; R09.T13.i, R1 of decision-r09-t13i §2.2), which thickens the
 //!   moist tropics' column and thins the dry poles': `p_w` = `h_w` `p_sat`(T) at the local
 //!   saturation where liquid water lies at the surface, and otherwise the lesser of that and the
-//!   air's own water, `x_w` `p_s` (its §2.4 follow-up 2 §4, [`Reservoir`]); where the gases hold no
-//!   water, and in Kaspi and Showman's fit, one τ ([`Greenhouse::Grey`]);
+//!   air's own water, both by weight as plan 14 takes them (its §2.4 follow-up 2 §4 and follow-up 5
+//!   §2, [`Reservoir`]); where the gases hold no water, and in Kaspi and Showman's fit, one τ
+//!   ([`Greenhouse::Grey`]);
 //! - h the near-surface moist static energy `c_p` T + L q, with q the climate condensable's
 //!   specific humidity at 80% relative humidity ([`RELATIVE_HUMIDITY`]), from its saturation
 //!   pressure in the substance registry at the surface pressure, L its latent heat of
 //!   vaporisation per kilogram, and `c_p` the air's mixed heat capacity: on a dry world, one whose
 //!   condensable is not among its surface liquids or that has none, h is `c_p` T alone;
-//! - Λ the transport's coefficient ([`transport`](super::transport)), no-flux at the poles.
+//! - Λ the transport's coefficient ([`transport`](super::transport)), no-flux at the poles;
+//! - `Q_O` the ocean's heat convergence over the sea (R09.T13.i, decision-r09-t13i §2.3,
+//!   [`ocean`](super::ocean)): the Ekman cells' share of the latitude flux of h inside the Hadley
+//!   cell and the gyres' diffusion of the sea's water-surface temperature, none on a world with no
+//!   sea.
 //!
 //! # The relief (R09.T13.g)
 //!
@@ -94,11 +99,14 @@
 //! decision-r09-t13ge §3, G3); on the locked grid it is the steady
 //! state of the tidally locked longitudes' mean sunlight, the steady state itself in a one-month
 //! year, whose beam stands over the pole. Then, in a twelve-month year, whole orbits of steps
-//! on the whole grid from that steady state, each column of it the zonal one ([`Sunlight`]),
-//! relaxed first on the whole grid where the sunlight varies in longitude
-//! ([`orbits`](EnergyBalance::orbits)), until the points' annual means move under
-//! [`CONVERGENCE_K`] between orbits, at most [`MAX_ORBITS`]. A one-month year is the steady state
-//! itself.
+//! ([`orbits`](EnergyBalance::orbits)), each run until its stop holds: the move of the points'
+//! annual means between orbits under [`CONVERGENCE_K`], and the remainder the shrinking moves
+//! extrapolate to under it too, at least [`MIN_ORBITS`] and at most [`MAX_ORBITS`], its slow mode
+//! extrapolated once the moves shrink steadily ([`Extrapolation`]). The surface mean is corrected
+//! on the seasonal climate (decision-r09-t13i's §2.4 follow-up 4): a search for the greenhouse on
+//! the zonal model's seasonal runs, from the fit's steady state, then at most two runs on the
+//! whole grid, the first from the zonal answer broadcast to every column
+//! ([`corrected`](EnergyBalance::corrected)). A one-month year is the steady state itself.
 
 use super::coordinates::Coordinates;
 use super::frost;
@@ -108,7 +116,7 @@ use super::grid::{
 use super::hypsometry::{Hypsometry, PointHeights, QUANTILES, Shape};
 use super::lapse;
 use super::ocean::{Currents, OceanGrid, OceanTransport, Returning, SeaLiquid};
-use super::partition::{Circulation, Turning};
+use super::partition::Turning;
 use super::sun::Sunlight;
 use super::transport::{Diffusing, REFERENCE_PRESSURE_PA, rotation_ratio, transport_kg_m2_s};
 use crate::math;
@@ -249,14 +257,507 @@ const WATER_TABLE_TOLERANCES: [f64; 4] = [1e-10, 1e-8, 1e-10, 1e-8];
 const TABLE_MARGIN_K: f64 = 200.0;
 
 /// The most seasonal orbits a run takes after its spin-up: 40 (`Adopted`). An Earth's ocean
-/// converges in about ten; an orbit much shorter than the ocean's relaxation time moves little
-/// each orbit, so it stops early (R09's Risks, "Deferred findings (2026-10-13 rule)
-/// (R09.T13.a)").
+/// converges in about ten. A run that reaches it is flagged as not converged.
 pub(super) const MAX_ORBITS: u32 = 40;
 
-/// The move of the points' annual means between orbits under which a run has converged, K: 0.1
-/// (Design note 8).
+/// The fewest seasonal orbits a run takes: 3, so that its stop reads two moves of the annual
+/// means (decision-r09-t13i §2.4).
+pub(super) const MIN_ORBITS: u32 = 3;
+
+/// The bound of the stop, K: 0.1 (Design note 8). A run has converged when the move of the
+/// points' annual means between its last two orbits, `m_n` (the largest over the points), is
+/// under it, the moves are shrinking, r = `m_n` ÷ `m_n−1` < 1, and the remainder they extrapolate
+/// to, `m_n` r ÷ (1 − r), is under it too (decision-r09-t13i §2.4, T13.a's deferred finding: an
+/// orbit much shorter than the ocean's relaxation time, C ÷ B of about two years on an Earth under
+/// one τ and 3.7 under the water term's weaker restoring, moves little each orbit, and the move
+/// alone stopped an orbit of 0.1 year several kelvin short). The zonal search's runs take the same
+/// rule at [`SEARCH_CONVERGENCE_K`].
 pub(super) const CONVERGENCE_K: f64 = 0.1;
+
+/// The change of u = ln(1 + ¾τ(T\*)) on either side of the fitted one at which the zonal search
+/// takes the zonal steady states' two-sided slope of the surface mean in u for its first step: 0.05
+/// (decision-r09-t13i §2.4, as its §2.4 follow-ups keep it).
+pub(super) const CORRECTION_STEP: f64 = 0.05;
+
+/// The bound of the zonal search's stop, and its extrapolation's trigger, K: 0.01 (`Adopted`,
+/// decision-r09-t13i's §2.4 follow-up 4 §4): the stop's rule at a tenth of its bound, so that the
+/// search's secant reads differences clean of its runs' own convergence (its steps are 0.1–2 K), at
+/// the zonal model's cost, about a seventy-second of a geographic orbit's. A search ends when one
+/// of its converged runs lies within it of its target.
+pub(super) const SEARCH_CONVERGENCE_K: f64 = 0.01;
+
+/// The most runs one zonal search makes: 6 (`Adopted`, decision-r09-t13i's §2.4 follow-up 4 §4).
+pub(super) const SEARCH_RUNS: usize = 6;
+
+/// The most the search's secant step moves u where its two points do not straddle the target,
+/// over the step between them: 4 (`Adopted`, decision-r09-t13i's §2.4 follow-up §2, kept by its
+/// follow-up 4: the lane's sea-level Earth needed about 2.2 times, and a 5.2-times step ran into
+/// the seasonal branch's own collapse).
+pub(super) const SECANT_STEP_CAP: f64 = 4.0;
+
+/// The range, open at both ends, of the ratio r of an orbit's move to the one before within which
+/// the spin-up extrapolates the run's slow mode: (0.3, 0.97) (`Adopted`, decision-r09-t13i's §2.4
+/// follow-up 4 §3). Below 0.3 the mode shrinks tenfold in two orbits anyway, and the ratio of small
+/// moves is noise; above 0.97, a gain over 32, the run is in a fold's critical slowing or on a short
+/// orbit, where one linear mode no longer holds (in the ruling's prototype a gain of 37.7 past the
+/// fold was rejected by its first fresh move, 0.338 against 0.160 K).
+pub(super) const JUMP_RATIO_RANGE: (f64, f64) = (0.3, 0.97);
+
+/// The fewest orbits between two of a run's extrapolations: 2 (`Adopted`, decision-r09-t13i's §2.4
+/// follow-up 4 §3).
+pub(super) const JUMP_SPACING_ORBITS: u32 = 2;
+
+/// How near two successive ratios of a run's moves must agree for it to jump again after a reject:
+/// 0.05 (`Adopted`, decision-r09-t13i's §2.4 follow-up 6 §1: the ruling's prototype's stricter
+/// trigger, so that a reject mid-transient, as the deep aquaplanet's at orbit 3, does not leave the
+/// run's steady tail marching).
+pub(super) const JUMP_AGREEMENT: f64 = 0.05;
+
+/// The most jumps a run may have rejected before it only marches: 2 (`Adopted`, decision-r09-t13i's
+/// §2.4 follow-up 7 §2: a reject wastes an orbit, and ten of them used up the deep aquaplanet's
+/// 40).
+pub(super) const MAX_REJECTS: u32 = 2;
+
+/// The bound of G1's probe stop on its surface mean's remainder, K: 0.05 (`Adopted`,
+/// decision-r09-t13i's §2.4 follow-up 8 §1). G1 measures d and G2's start, not the climate, so it
+/// needs only d's precision: half the climate's bound, so that d's error (at most 0.05 K, moving
+/// G2's mean by at most about 0.035 K at `S_g` ÷ `S_Z` ≈ 0.67) and G2's own stop together stay
+/// within the climate stop's 0.1 K of the ideal G2.
+pub(super) const PROBE_STOP_K: f64 = 0.05;
+
+/// The fewest fresh orbits, counted since a run's start or its last jump that stood, before G1's
+/// probe stop may end it: 4 (`Adopted`, decision-r09-t13i's §2.4 follow-up 9 §1: the surface
+/// mean's last two ratios need three fresh changes).
+pub(super) const PROBE_FRESH_ORBITS: u32 = 4;
+
+/// How near the surface mean's last two ratios must agree for G1's probe stop to read its
+/// remainder: 0.05 (`Adopted`, decision-r09-t13i's §2.4 follow-up 9 §1). While a faster component
+/// remains, the mean's ratio approaches its slow rate from below (`δ_n` = a `λ_f`ⁿ + b `λ_s`ⁿ
+/// gives ratios between `λ_f` and `λ_s`, rising), so two that agree are the sign that the faster
+/// part has gone; a ratio at or above the tail's rate then brackets the limit, |limit − T̂| ≤ R̄.
+pub(super) const PROBE_AGREEMENT: f64 = 0.05;
+
+/// How far from the mean τ's fit's final probe may lie and still be `Solved`, K: 0.1 (`Adopted`,
+/// decision-r09-t13i's §2.4 follow-up §4 (a)): farther, converged or not, the bisection has
+/// closed on a jump, and the fit is labelled a fold.
+pub(super) const FOLD_MISS_K: f64 = 0.1;
+
+/// The difference of two probes' ice shares, of the sphere, above which a fold is snowball-class:
+/// 0.5 (`Adopted`, decision-r09-t13i's §2.4 follow-up §4 (b)). There the fold guard takes the probe
+/// whose ice share lies nearer plan 14's surface ice, so that plan 14's history, not a few kelvin
+/// of mean, picks the branch.
+pub(super) const SNOWBALL_FOLD_ICE_SHARE: f64 = 0.5;
+
+/// Whether a run's moves `moved` and `before`, K, the move of its last orbit's annual means and
+/// the one before (`None` before its second move), stop it under the bound `bound_k`, K:
+/// [`CONVERGENCE_K`]'s rule. A move of nothing stops it, its remainder being nothing.
+#[cfg(test)]
+#[must_use]
+fn settled(moved: f64, before: Option<f64>, bound_k: f64) -> bool {
+    settled_after(moved, before, bound_k, None)
+}
+
+/// [`settled`] after a jump that stood, triggered by the ratio `jump_ratio`: the remainder reads
+/// r* = max(r, `jump_ratio`), so that the jump's own faster transient is not read as the slow
+/// mode's convergence (decision-r09-t13i's §2.4 follow-up 7 §2.3, the prototype's false pass 0.23 K
+/// short); with no jump, [`settled`] to the bit.
+#[must_use]
+fn settled_after(moved: f64, before: Option<f64>, bound_k: f64, jump_ratio: Option<f64>) -> bool {
+    // A move that is not a number does not stop the run; a move of nothing does.
+    if moved.is_nan() || moved >= bound_k {
+        return false;
+    }
+    if moved <= 0.0 {
+        return true;
+    }
+    let Some(before) = before else {
+        return false;
+    };
+    let ratio = stop_ratio(moved, before, jump_ratio);
+    ratio < 1.0 && moved * ratio / (1.0 - ratio) < bound_k
+}
+
+/// The stop's ratio r\* of a run's last move `moved` to the one before `before`, K, after a jump
+/// that stood triggered by the ratio `jump_ratio`: the fresh ratio, or the jump's where larger
+/// (decision-r09-t13i's §2.4 follow-up 7 §2.3), which [`settled_after`] and G1's probe stop
+/// ([`probe_end`]) both read.
+#[must_use]
+fn stop_ratio(moved: f64, before: f64, jump_ratio: Option<f64>) -> f64 {
+    let fresh = moved / before;
+    match jump_ratio {
+        Some(jump) if jump > fresh => jump,
+        Some(_) | None => fresh,
+    }
+}
+
+/// G1's probe of its surface mean's limit (decision-r09-t13i's §2.4 follow-ups 8 §1 and 9 §1): the
+/// orbit it read, the mean, its change over that orbit, the mean's own last two ratios and r\*, and
+/// from them its remainder and its extrapolated limit.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct MeanProbe {
+    /// The orbit it read.
+    pub(super) orbits: u32,
+    /// `T̄_n`, that orbit's annual field's surface mean, K.
+    pub(super) mean_k: f64,
+    /// `δ_n`, the mean's change over that orbit, K.
+    pub(super) change_k: f64,
+    /// (`ρ_n`, `ρ_n−1`) = (`δ_n` ÷ `δ_n−1`, `δ_n−1` ÷ `δ_n−2`), the mean's own last two ratios,
+    /// where it had three fresh changes.
+    pub(super) mean_ratios: Option<[f64; 2]>,
+    /// r\* = max(the stop's ratio, `ρ_n`), below 1 ([`stop_ratio`]; `ρ_n` where it lies in (0, 1)).
+    pub(super) ratio: f64,
+    /// R̄ = |`δ_n`| r\* ÷ (1 − r\*), K.
+    pub(super) remainder_k: f64,
+    /// T̂ = `T̄_n` + `δ_n` r\* ÷ (1 − r\*), the mean's extrapolated limit, K.
+    pub(super) limit_k: f64,
+}
+
+impl MeanProbe {
+    /// The probe after orbit `orbits` of surface mean and change `(mean_k, change_k)`, K, with the
+    /// mean's ratios `mean_ratios`, at r\* = `ratio`, below 1.
+    #[must_use]
+    fn of(
+        orbits: u32,
+        (mean_k, change_k): (f64, f64),
+        mean_ratios: Option<[f64; 2]>,
+        ratio: f64,
+    ) -> Self {
+        // The extrapolation's form, the gain r ÷ (1 − r) times the change, as the jump's: d reads
+        // T̂ to the bit, so an algebraically equal rewrite (the stop's m r ÷ (1 − r)) moves G2.
+        let gain = ratio / (1.0 - ratio);
+        Self {
+            orbits,
+            mean_k,
+            change_k,
+            mean_ratios,
+            ratio,
+            remainder_k: change_k.abs() * gain,
+            limit_k: mean_k + change_k * gain,
+        }
+    }
+}
+
+/// G1's count of fresh orbits and its surface mean's fresh changes (decision-r09-t13i's §2.4
+/// follow-ups 8 §1 and 9 §1): both since the run's start or its last jump that stood, and both as
+/// they were at the last jump, which a reject restores.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct MeanTrail {
+    /// The orbits since the start or the last jump.
+    fresh: u32,
+    /// The mean's fresh changes before this orbit, `(δ_n−1, δ_n−2)`, K.
+    changes: [Option<f64>; 2],
+    /// Both as they were at the last jump.
+    at_jump: (u32, [Option<f64>; 2]),
+}
+
+impl MeanTrail {
+    /// An orbit has run.
+    fn orbit(&mut self) {
+        self.fresh += 1;
+    }
+
+    /// That orbit's mean changed by `change_k`, K, and the run carries on.
+    fn push(&mut self, change_k: f64) {
+        self.changes = [Some(change_k), self.changes[0]];
+    }
+
+    /// The run jumped after that orbit: its count and its changes start again.
+    fn jumped(&mut self) {
+        self.at_jump = (self.fresh, self.changes);
+        (self.fresh, self.changes) = (0, [None; 2]);
+    }
+
+    /// The jump was rejected: the count and the changes go back to theirs at it.
+    fn rejected(&mut self) {
+        (self.fresh, self.changes) = self.at_jump;
+    }
+}
+
+/// The surface mean's own last two ratios (`ρ_n`, `ρ_n−1`) of its change `change_k` over the last
+/// orbit and the fresh changes before it `(δ_n−1, δ_n−2)`, K, where it has both.
+#[must_use]
+fn mean_ratios(change_k: f64, [last, before]: [Option<f64>; 2]) -> Option<[f64; 2]> {
+    let (last, before) = (last?, before?);
+    Some([change_k / last, last / before])
+}
+
+/// Whether G1's probe stop ends its run after orbit `orbits`, `fresh` orbits since its start or its
+/// last jump that stood, its surface mean and its change over that orbit `(mean_k, change_k)` and
+/// its fresh changes before `earlier`, K, at the stop's ratio `stop` (`None` before two fresh
+/// moves), under the bound `bound_k`, K (decision-r09-t13i's §2.4 follow-up 9 §1): after at least
+/// [`PROBE_FRESH_ORBITS`] fresh orbits, where the mean's last two ratios each lie in (0, 1) and agree
+/// within [`PROBE_AGREEMENT`], at r\* = max(the stop's ratio, `ρ_n`) below 1 and a remainder R̄ at
+/// most the bound; the probe where it does.
+#[must_use]
+fn probe_end(
+    (orbits, fresh): (u32, u32),
+    (mean_k, change_k): (f64, f64),
+    earlier: [Option<f64>; 2],
+    stop: Option<f64>,
+    bound_k: f64,
+) -> Option<MeanProbe> {
+    let (stop, ratios) = (stop?, mean_ratios(change_k, earlier)?);
+    let [rho, rho_before] = ratios;
+    // By comparison, so that a ratio, a mean or a remainder that is not a number never ends it.
+    let within = |ratio: f64| ratio > 0.0 && ratio < 1.0;
+    if fresh < PROBE_FRESH_ORBITS
+        || !within(rho)
+        || !within(rho_before)
+        || (rho - rho_before).abs() > PROBE_AGREEMENT
+        || stop.is_nan()
+        || stop >= 1.0
+    {
+        return None;
+    }
+    let ratio = if rho > stop { rho } else { stop };
+    let probe = MeanProbe::of(orbits, (mean_k, change_k), Some(ratios), ratio);
+    (probe.remainder_k <= bound_k).then_some(probe)
+}
+
+/// G1's probe where the climate's stop ended its run first (decision-r09-t13i's §2.4 follow-up 9
+/// §1.2), after orbit `orbits`, its surface mean and change `(mean_k, change_k)` and fresh changes
+/// before `earlier`, K, at the stop's ratio `stop`: T̂ at r\* = max(the stop's ratio, `ρ_n`), `ρ_n`
+/// read only where it lies in (0, 1), and the stop's ratio nothing where a move of nothing stopped
+/// the run before it had one, or two moves of nothing made it 0 ÷ 0, its remainder being nothing
+/// as [`settled_after`]'s is.
+#[must_use]
+fn settled_probe(
+    orbits: u32,
+    (mean_k, change_k): (f64, f64),
+    earlier: [Option<f64>; 2],
+    stop: Option<f64>,
+) -> MeanProbe {
+    let ratios = mean_ratios(change_k, earlier);
+    // By comparison, so that a ratio that is not a number reads as none.
+    let stop = stop.filter(|ratio| *ratio < 1.0).unwrap_or(0.0);
+    let ratio = match ratios {
+        Some([rho, _]) if rho > stop && rho < 1.0 => rho,
+        Some(_) | None => stop,
+    };
+    MeanProbe::of(orbits, (mean_k, change_k), ratios, ratio)
+}
+
+/// A seasonal run's stop (decision-r09-t13i §2.4 and its §2.4 follow-ups 4 and 8).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Stop {
+    /// Its bound, K ([`settled`]), and the extrapolation's trigger.
+    bound_k: f64,
+    /// Whether the run extrapolates its slow mode ([`Extrapolation`]).
+    jumps: Jumps,
+    /// The most orbits it runs: [`MAX_ORBITS`] but in the tests' fixed runs.
+    max_orbits: u32,
+    /// G1's probe stop's bound on its surface mean's remainder, K ([`probe_end`]), where the run is
+    /// G1; `None` for every other run.
+    probe_k: Option<f64>,
+}
+
+/// The climate's runs' stop: [`CONVERGENCE_K`], extrapolating.
+const CLIMATE_STOP: Stop = Stop {
+    bound_k: CONVERGENCE_K,
+    jumps: Jumps::Allowed,
+    max_orbits: MAX_ORBITS,
+    probe_k: None,
+};
+
+/// G1's stop: the climate's, or its probe stop at [`PROBE_STOP_K`] where that comes first
+/// (decision-r09-t13i's §2.4 follow-up 8 §1).
+const G1_STOP: Stop = Stop {
+    probe_k: Some(PROBE_STOP_K),
+    ..CLIMATE_STOP
+};
+
+/// The zonal search's runs' stop: [`SEARCH_CONVERGENCE_K`], extrapolating.
+const SEARCH_STOP: Stop = Stop {
+    bound_k: SEARCH_CONVERGENCE_K,
+    jumps: Jumps::Allowed,
+    max_orbits: MAX_ORBITS,
+    probe_k: None,
+};
+
+/// Whether a run may extrapolate its slow mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum Jumps {
+    /// It may, as every run of the model does (decision-r09-t13i's §2.4 follow-up 4 §3).
+    Allowed,
+    /// It marches every orbit: the tests' comparison.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the model always extrapolates; the tests compare the marched run"
+        )
+    )]
+    Never,
+}
+
+/// The spin-up's extrapolation of one run's slow mode (decision-r09-t13i's §2.4 follow-up 4 §3,
+/// as its follow-up 6 §1 amends it; I13's remedy). After an orbit whose stop fails on its
+/// remainder, `m_n` r ÷ (1 − r) at least the stop's bound, r = `m_n` ÷ `m_n−1` in
+/// [`JUMP_RATIO_RANGE`] (no floor on `m_n` itself), each point's end-of-orbit state and its stored
+/// annual mean, the one the next move is taken from, shift by that orbit's annual-mean change times
+/// r ÷ (1 − r), the geometric remainder of a mode shrinking by r an orbit, at most once every
+/// [`JUMP_SPACING_ORBITS`] orbits and only where two more orbits fit under [`MAX_ORBITS`]. The stop
+/// then reads only the moves after the jump, so it needs two fresh ones. If the first of them
+/// exceeds `m_n`, the jump is rejected: the state, the stored annual means and the return
+/// temperatures go back to theirs before it, and the run jumps again only once two successive
+/// ratios agree within [`JUMP_AGREEMENT`], each in the range. The records are always a marched
+/// orbit's: a jump moves the next orbit's start, never an orbit's means. On a mixed layer relaxing
+/// over years (r about 0.87 an orbit on the reference Earth under the water term) it spares most of
+/// the orbits the march takes (decision-r09-t13i's §2.4 follow-up 4 §1).
+#[derive(Debug, Clone, PartialEq)]
+struct Extrapolation {
+    /// Whether the run may jump at all: not where its stop forbids it.
+    allowed: bool,
+    /// Whether a reject requires two agreeing ratios before the next jump.
+    rejected: bool,
+    /// The ratio of the last orbit's move to the one before, where both were marched.
+    last_ratio: Option<f64>,
+    /// The orbit of the run's last jump.
+    last_jump: Option<u32>,
+    /// What the last jump displaced, until its first fresh move accepts or rejects it.
+    pending: Option<Jumped>,
+    /// The jumps that stood.
+    jumps: u32,
+    /// The jumps rejected; at [`MAX_REJECTS`] the run only marches.
+    rejects: u32,
+    /// The ratio that triggered the last jump that stood, which the stop's remainder reads.
+    jump_ratio: Option<f64>,
+    /// The ratio that triggered the jump [`gain`](Self::gain) last found due.
+    due_ratio: f64,
+}
+
+/// What a jump displaced, to restore on a reject.
+#[derive(Debug, Clone, PartialEq)]
+struct Jumped {
+    /// The state at the jump's orbit's end, K.
+    state_k: Vec<f64>,
+    /// That orbit's annual means, K.
+    annual_k: Vec<f64>,
+    /// The return temperatures after it.
+    returning: Returning,
+    /// Its move, `m_n`, K.
+    move_k: f64,
+    /// The ratio that triggered it.
+    ratio: f64,
+}
+
+/// What a jump's first fresh move says.
+#[derive(Debug, Clone, PartialEq)]
+enum Review {
+    /// No jump awaited it.
+    None,
+    /// The move was no larger than the jump's own: the jump stands.
+    Accepted,
+    /// The move was larger: the displaced state, means and return temperatures, to restore.
+    Rejected(Jumped),
+}
+
+impl Extrapolation {
+    /// A run's extrapolation under `jumps`.
+    #[must_use]
+    const fn new(jumps: Jumps) -> Self {
+        Self {
+            allowed: matches!(jumps, Jumps::Allowed),
+            rejected: false,
+            last_ratio: None,
+            last_jump: None,
+            pending: None,
+            jumps: 0,
+            rejects: 0,
+            jump_ratio: None,
+            due_ratio: 0.0,
+        }
+    }
+
+    /// The gain r ÷ (1 − r) of a jump due after orbit `orbits`, whose move is `moved` and the move
+    /// before `before`, K, under the bound `bound_k`, K, or `None` where none is due; it notes the
+    /// orbit's ratio for the agreement a reject requires.
+    #[must_use]
+    fn gain(&mut self, orbits: u32, moved: f64, before: Option<f64>, bound_k: f64) -> Option<f64> {
+        let (low, high) = JUMP_RATIO_RANGE;
+        let within = |ratio: f64| ratio > low && ratio < high;
+        let ratio = before.map(|before| moved / before);
+        let earlier = core::mem::replace(&mut self.last_ratio, ratio);
+        if !self.allowed
+            || self.rejects >= MAX_REJECTS
+            || self.pending.is_some()
+            || orbits + 2 > MAX_ORBITS
+            || self
+                .last_jump
+                .is_some_and(|last| orbits < last + JUMP_SPACING_ORBITS)
+        {
+            return None;
+        }
+        let ratio = ratio?;
+        // By comparison, so that a move or a ratio that is not a number makes no jump.
+        if !within(ratio) {
+            return None;
+        }
+        if self.rejected {
+            let agreeing = earlier.is_some_and(|earlier| {
+                within(earlier) && (ratio - earlier).abs() <= JUMP_AGREEMENT
+            });
+            if !agreeing {
+                return None;
+            }
+        }
+        let gain = ratio / (1.0 - ratio);
+        // The stop fails on its remainder: a move at least the bound whose remainder is under it
+        // only marches.
+        if moved * gain >= bound_k {
+            self.due_ratio = ratio;
+            Some(gain)
+        } else {
+            None
+        }
+    }
+
+    /// Jumps after orbit `orbits`, whose move was `moved`, K, by `gain`: each point's state
+    /// `state_k` and stored annual mean `stored_k` shift by its annual mean `annual_k` less the
+    /// stored one times `gain`, K; the displaced state, means and return temperatures `returning`
+    /// are kept for a reject.
+    fn jump(
+        &mut self,
+        orbits: u32,
+        moved: f64,
+        gain: f64,
+        (state_k, annual_k, stored_k): (&mut [f64], &[f64], &mut [f64]),
+        returning: Returning,
+    ) {
+        self.pending = Some(Jumped {
+            state_k: state_k.to_vec(),
+            annual_k: annual_k.to_vec(),
+            returning,
+            move_k: moved,
+            ratio: self.due_ratio,
+        });
+        for ((state, &annual), stored) in state_k.iter_mut().zip(annual_k).zip(stored_k) {
+            let shift = (annual - *stored) * gain;
+            *state += shift;
+            *stored = annual + shift;
+        }
+        self.last_jump = Some(orbits);
+        self.last_ratio = None;
+    }
+
+    /// The review of the last jump by its first fresh move `moved`, K: a move larger than the
+    /// jump's own, or one that is not a number, rejects it, and the run makes no more.
+    #[must_use]
+    fn review(&mut self, moved: f64) -> Review {
+        let Some(jumped) = self.pending.take() else {
+            return Review::None;
+        };
+        if moved <= jumped.move_k {
+            self.jumps += 1;
+            self.jump_ratio = Some(jumped.ratio);
+            Review::Accepted
+        } else {
+            self.rejected = true;
+            self.rejects += 1;
+            Review::Rejected(jumped)
+        }
+    }
+}
 
 /// Where the model's ice forms, and the albedo it takes: the freezing point lies in the one
 /// variant that needs it.
@@ -389,6 +890,30 @@ pub(super) struct Fitted {
     pub(super) surface_mean_k: f64,
     /// How τ was found.
     pub(super) optical_depth: OpticalDepth,
+    /// At a fold, the fold guard's candidates, the cold side's and the warm side's last converged
+    /// probes (decision-r09-t13ge §1.4, g4); none elsewhere.
+    pub(super) candidates: [Option<Candidate>; 2],
+}
+
+/// One of the fold guard's candidates: its emission factor, its steady state's surface mean, K, and
+/// its ice share.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Candidate {
+    /// The probe's emission factor.
+    pub(super) emission_factor: f64,
+    /// Its steady state's surface mean, K.
+    pub(super) surface_mean_k: f64,
+    /// Its steady state's ice share of the sphere.
+    pub(super) ice_share: f64,
+}
+
+/// A side of the fold guard's bracket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum Side {
+    /// The cold side's probe.
+    Cold,
+    /// The warm side's.
+    Warm,
 }
 
 /// A probe of τ's bisection, and its steady state, which the fold guard keeps where it converged
@@ -399,6 +924,8 @@ struct Probe {
     emission_factor: f64,
     /// Its radiation.
     radiation: Radiation,
+    /// Its steady state's ice share of the sphere ([`ice_share`]).
+    ice_share: f64,
     /// Its steady state's surface mean, K: not a number where the steady state is not finite, a
     /// probe the bisection takes as warm (decision-r09-t13i §2.2).
     surface_mean_k: f64,
@@ -408,18 +935,67 @@ struct Probe {
 
 /// The fold guard's choice between the last converged probe on the cold side of the bracket,
 /// `cold`, and on the warm side, `warm`: the one whose surface mean lies nearer `target_k`, K, ties
-/// to the warm side (decision-r09-t13ge §1.4, g4); `None` where neither side kept one.
+/// to the warm side (decision-r09-t13ge §1.4, g4); `None` where neither side kept one. At a
+/// snowball-class fold, where the two probes' ice shares differ by more than
+/// [`SNOWBALL_FOLD_ICE_SHARE`], the one whose ice share lies nearer `target_ice`, plan 14's surface
+/// ice share, ties to the nearer mean, then warm (decision-r09-t13i's §2.4 follow-up §4 (b)).
 #[must_use]
-fn nearer(cold: Option<Probe>, warm: Option<Probe>, target_k: f64) -> Option<Probe> {
+fn nearer(
+    cold: Option<Probe>,
+    warm: Option<Probe>,
+    target_k: f64,
+    target_ice: f64,
+) -> Option<Probe> {
+    let candidate = |probe: &Probe| Candidate {
+        emission_factor: probe.emission_factor,
+        surface_mean_k: probe.surface_mean_k,
+        ice_share: probe.ice_share,
+    };
+    let side = nearer_side(
+        [cold.as_ref().map(candidate), warm.as_ref().map(candidate)],
+        target_k,
+        target_ice,
+    )?;
+    match side {
+        Side::Cold => cold,
+        Side::Warm => warm,
+    }
+}
+
+/// [`nearer`]'s rule on the candidates `[cold, warm]`: the side it keeps.
+#[must_use]
+fn nearer_side(
+    [cold, warm]: [Option<Candidate>; 2],
+    target_k: f64,
+    target_ice: f64,
+) -> Option<Side> {
     match (cold, warm) {
         (Some(cold), Some(warm)) => {
-            if (warm.surface_mean_k - target_k).abs() <= (cold.surface_mean_k - target_k).abs() {
-                Some(warm)
+            let by_mean = if (warm.surface_mean_k - target_k).abs()
+                <= (cold.surface_mean_k - target_k).abs()
+            {
+                Side::Warm
             } else {
-                Some(cold)
+                Side::Cold
+            };
+            if (cold.ice_share - warm.ice_share).abs() > SNOWBALL_FOLD_ICE_SHARE {
+                let (cold_miss, warm_miss) = (
+                    (cold.ice_share - target_ice).abs(),
+                    (warm.ice_share - target_ice).abs(),
+                );
+                Some(if cold_miss < warm_miss {
+                    Side::Cold
+                } else if warm_miss < cold_miss {
+                    Side::Warm
+                } else {
+                    by_mean
+                })
+            } else {
+                Some(by_mean)
             }
         }
-        (Some(only), None) | (None, Some(only)) => Some(only),
+        (Some(_), None) => Some(Side::Cold),
+        (None, Some(_)) => Some(Side::Warm),
         (None, None) => None,
     }
 }
@@ -528,6 +1104,17 @@ impl Moisture {
     }
 }
 
+/// The column weight of the gas `gas`, of mole fraction `mole_fraction` in the air `air` under the
+/// surface pressure `surface_pressure_pa`, Pa: `w_i` = `x_i` (`M_i` ÷ μ) `p_s`, μ the air's mean
+/// molar mass, the airborne mass's weight over the surface M g ÷ 4πR² that plan 14's grey law reads
+/// (`derive::atmosphere`; decision-r09-t13i's §2.2/§2.3 follow-up 5 §2), for the water term's `τ_d`
+/// and the vapour cap alike, so that each is plan 14's own term. On the reference Earth `τ_d` is
+/// 0.513 by weight against 0.440 at mole partials (carbon dioxide's term 1.23 times, nitrogen's 0.98).
+#[must_use]
+fn partial_pressure_pa(gas: Gas, mole_fraction: f64, surface_pressure_pa: f64, air: &Air) -> f64 {
+    mole_fraction * (gas.molar_mass_g_per_mol() / air.molar_mass_g_per_mol) * surface_pressure_pa
+}
+
 /// One bar, Pa: the unit of the partial pressures plan 14's grey terms take their square roots
 /// of (P14.T13.c, `derive::atmosphere`'s τ = Σ k (p ÷ 1 bar)^½).
 const BAR_PA: f64 = 1e5;
@@ -543,8 +1130,8 @@ const BAR_PA: f64 = 1e5;
 /// - Under [`SnapshotRules::Batch`] (from 23): P14.T57.a's fits ([`GreenhouseConstants::FITTED`],
 ///   water 4.47 per √bar) with the water held at [`WATER_SURFACE_HUMIDITY`] of its saturation
 ///   pressure by mole (Manabe and Wetherald's 0.77, P14.T51.a's partition), so
-///   [`WATER_SURFACE_HUMIDITY`] × `M_w` ÷ μ of it by weight, μ the air's mean molar mass: 0.496 on
-///   an Earth (`GREENHOUSE_WATER`'s documentation).
+///   [`WATER_SURFACE_HUMIDITY`] × `M_w` ÷ μ of it by weight, μ the air's mean molar mass: 0.482 on
+///   the reference Earth's air ([`greenhouse_for`]).
 ///
 /// P14.T54.a, the 22 → 23 bump, deletes the snapshot lane's hold and its `SnapshotRules`: the
 /// batch's arm is then the only one, and this is the one function to change (main's ruling on
@@ -552,7 +1139,17 @@ const BAR_PA: f64 = 1e5;
 /// the climate (decision-r09-t13i §4).
 #[must_use]
 fn greenhouse_in_force(air: &Air) -> (GreenhouseConstants, f64) {
-    match SnapshotRules::in_force() {
+    greenhouse_for(SnapshotRules::in_force(), air)
+}
+
+/// Plan 14's grey greenhouse under the rules `rules` for the air `air` ([`greenhouse_in_force`]):
+/// the constants, and the water's share of its saturation pressure by weight, 1 under
+/// [`SnapshotRules::Held`] and [`WATER_SURFACE_HUMIDITY`] × `M_w` ÷ μ under
+/// [`SnapshotRules::Batch`], 0.482 on the reference Earth's air (μ 28.78 g mol⁻¹; plan 14's
+/// `GREENHOUSE_WATER` documents 0.496 from its own conversion).
+#[must_use]
+fn greenhouse_for(rules: SnapshotRules, air: &Air) -> (GreenhouseConstants, f64) {
+    match rules {
         SnapshotRules::Held => (GreenhouseConstants::VERSION_22, 1.0),
         SnapshotRules::Batch => (
             GreenhouseConstants::FITTED,
@@ -588,13 +1185,13 @@ pub(super) enum Reservoir {
     /// relative humidity, `p_w` = `h_w` `p_sat`(T).
     Surface,
     /// No liquid water at the surface (a desert, or a world whose water is ice): the air holds the
-    /// water it has, plan 14's listed `x_w` `p_s`, and the saturation caps it where the air is
-    /// colder than that vapour's dew or frost point, the cold trap: `p_w` = min(`h_w` `p_sat`(T),
-    /// `x_w` `p_s`). Uncapped, the term grows with T without limit, and the reference Earth with
-    /// no liquid ran away to a 53,093 K mean.
+    /// water it has, its column weight `x_w` (`M_w` ÷ μ) `p_s`, and the saturation caps it where the
+    /// air is colder than the crossover, the cold trap: `p_w` = min(`h_w` `p_sat`(T), `x_w` (`M_w` ÷
+    /// μ) `p_s`), both sides by weight (decision-r09-t13i's §2.4 follow-up 2 §4, with its follow-up
+    /// 5 §2). Uncapped, the term grows with T without limit, and the reference Earth with no liquid
+    /// ran away to a 53,093 K mean.
     Air {
-        /// `x_w` `p_s`, Pa, the inputs' water mole fraction times their surface pressure, as
-        /// `τ_d` takes the other gases' partial pressures.
+        /// `x_w` (`M_w` ÷ μ) `p_s`, Pa, the air's water by weight ([`partial_pressure_pa`]).
         inventory_pa: f64,
     },
 }
@@ -648,8 +1245,9 @@ pub(super) enum Greenhouse {
     /// Plan 14's grey law at each column's own temperature (R1 and R2):
     /// τ(T, z) = m [`τ_d` e^(−z ÷ 2H) + `τ_w`(T − Γz)], m one multiplier solved per body.
     Vapour {
-        /// `τ_d`, plan 14's terms of the gases other than water at their partial pressures
-        /// `x_i p_s`: carbon dioxide's and nitrogen's, nitrogen's collision factor at the body's
+        /// `τ_d`, plan 14's terms of the gases other than water at their column weights
+        /// ([`partial_pressure_pa`]): carbon dioxide's and nitrogen's, nitrogen's collision factor at
+        /// the body's
         /// equilibrium temperature ([`Greenhouse::of`]); methane and the other condensables enter
         /// no term, as in plan 14's law.
         dry_depth: f64,
@@ -663,12 +1261,14 @@ impl Greenhouse {
     /// [`Greenhouse::Vapour`] where its gases hold water, else [`Greenhouse::Grey`]
     /// (decision-r09-t13i §2.2). Its vapour's [`Reservoir`] is the surface where water is among
     /// its surface liquids ([`CoarseInputs::liquids`]), pure or as an aqueous solution's
-    /// component, and otherwise the air's own water, `x_w` `p_s` (decision-r09-t13i's §2.4
-    /// follow-up 2 §4). A solution's lowering of the vapour pressure is not taken: `h_w` stands
-    /// for it as for the humidity.
+    /// component, and otherwise the air's own water by weight (decision-r09-t13i's §2.4 follow-up 2
+    /// §4 and follow-up 5 §2). A solution's lowering of the vapour pressure is not taken until
+    /// P14.T52 makes seas of solutions (follow-up 5 §4 rules its form, `a_w` `h_w` `p_sat`, `a_w` the
+    /// solution's water activity).
     ///
     /// `τ_d` takes plan 14's grey terms ([`GreenhouseConstants::terms`]) of the inputs' gases at
-    /// `x_i p_s`, water's left out, and nitrogen's collision factor at the body's equilibrium
+    /// their column weights ([`partial_pressure_pa`]), water's left out, and nitrogen's collision
+    /// factor at the body's equilibrium
     /// temperature, here σ`T_eq`⁴ = (1 − α(T\*)) F ÷ 4 + `F_int`: F the light of its hosts
     /// ([`CoarseInputs::host_flux`]), α the model's albedo law at plan 14's mean T\* and `F_int`
     /// its heat flow, the model's own equilibrium with the sunlight at its mean (the lane's choice;
@@ -706,7 +1306,7 @@ impl Greenhouse {
             Reservoir::Surface
         } else {
             Reservoir::Air {
-                inventory_pa: water_fraction * pressure,
+                inventory_pa: partial_pressure_pa(Gas::Water, water_fraction, pressure, air),
             }
         };
         let mean_k = inputs.mean_surface_temperature().value();
@@ -716,7 +1316,14 @@ impl Greenhouse {
         let equilibrium = Kelvin::new((absorbed.max(0.0) / STEFAN_BOLTZMANN).sqrt().sqrt());
         let dry = PartialPressures::from_fn(|gas| match gas {
             Gas::Water => Pascals::ZERO,
-            _ => Pascals::new(fraction(gas) * pressure),
+            Gas::CarbonDioxide
+            | Gas::Nitrogen
+            | Gas::Oxygen
+            | Gas::Argon
+            | Gas::Methane
+            | Gas::Ammonia
+            | Gas::Hydrogen
+            | Gas::Helium => Pascals::new(partial_pressure_pa(gas, fraction(gas), pressure, air)),
         });
         let dry_depth = constants
             .terms(&dry, equilibrium)
@@ -724,7 +1331,14 @@ impl Greenhouse {
             .fold(0.0, |sum, &(_, term)| sum + term);
         let unit = PartialPressures::from_fn(|gas| match gas {
             Gas::Water => Pascals::new(BAR_PA),
-            _ => Pascals::ZERO,
+            Gas::CarbonDioxide
+            | Gas::Nitrogen
+            | Gas::Oxygen
+            | Gas::Argon
+            | Gas::Methane
+            | Gas::Ammonia
+            | Gas::Hydrogen
+            | Gas::Helium => Pascals::ZERO,
         });
         let constant = constants
             .terms(&unit, equilibrium)
@@ -800,22 +1414,36 @@ impl Radiation {
             } => multiplier * dry_depth,
         }
     }
+
+    /// The multiplier m, or `None` under one τ.
+    #[cfg(test)]
+    #[must_use]
+    pub(super) fn multiplier(&self) -> Option<f64> {
+        match *self {
+            Self::Grey { .. } => None,
+            Self::Vapour { multiplier, .. } => Some(multiplier),
+        }
+    }
 }
 
 /// How the optical depth was found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum OpticalDepth {
-    /// By bisection, so that the steady state's surface mean is the inputs'. Its steady state
-    /// converged, but where the final probe's did not and the fold guard kept no converged probe
-    /// on either side of the bracket: then the state is the final probe's, unconverged, as before
-    /// the guard ([`Solution::steady_converged`] says which).
+    /// By bisection, so that the steady state's surface mean is the inputs': its final probe
+    /// converged within [`FOLD_MISS_K`] of the mean; or, where neither side of the bracket kept a
+    /// converged probe, the final probe within it, unconverged, as before the guard
+    /// ([`Solution::steady_converged`] says which).
     Solved,
-    /// By bisection, but the final probe's steady state did not converge within
-    /// [`STEADY_ITERATIONS`]: the bisection closed on a fold, a jump of the steady states' mean
-    /// between two branches (the relief Earth's small Arctic cap), where the iteration crawls. The
-    /// fold guard took the last converged probe on either side of the bracket whose surface mean
-    /// lies nearer the inputs', ties to the warm side (decision-r09-t13ge §1.4, g4); R09.T13.d's
-    /// constant takes up the rest.
+    /// By bisection, but the final probe's surface mean misses the mean by more than
+    /// [`FOLD_MISS_K`], converged or not: the bisection closed on a fold, a jump of the steady
+    /// states' mean between two branches (under the water term the reference Earth's, between a
+    /// snowball near 207 K and its warm branch's end near 290 K). The fold guard took, of the last
+    /// converged probes on either side of the bracket and the final probe where it converged, the
+    /// one whose surface mean lies nearer the inputs', ties to the warm side (decision-r09-t13ge
+    /// §1.4, g4), or at a snowball-class fold, its candidates' ice shares more than
+    /// [`SNOWBALL_FOLD_ICE_SHARE`] apart, the one whose ice share lies nearer plan 14's
+    /// (decision-r09-t13i's §2.4 follow-up §4); with none, the final probe, unconverged. The mean's
+    /// correction and R09.T13.d's constant take up the rest.
     Folded,
     /// Clamped at zero: the steady state is warmer than the mean even with no greenhouse, a mean
     /// colder than the albedo allows, which R09.T13.d's constant makes up.
@@ -853,6 +1481,11 @@ pub(super) struct Solution {
     /// each month's ocean heat convergence at each point and the transports at each edge
     /// (decision-r09-t13i §2.3.3); `None` with no sea's transport, or none to carry.
     pub(super) ocean: Option<OceanRecord>,
+    /// What the mean's correction did (decision-r09-t13i §2.4).
+    pub(super) correction: MeanCorrection,
+    /// The kept seasonal run's moves of its annual means between orbits, K, in order (its stop's
+    /// record, [`CONVERGENCE_K`]); none for a steady state.
+    pub(super) moves_k: Vec<f64>,
 }
 
 /// The ground a run of the model reads (R09.T13.g).
@@ -877,6 +1510,17 @@ pub(super) enum Ground<'a> {
         /// The zonal grid's relief.
         zonal: &'a Relief,
     },
+}
+
+impl<'a> Ground<'a> {
+    /// The ground on the run's grid and on the zonal grid τ is solved on.
+    #[must_use]
+    fn on_grids(self) -> (GridGround<&'a Relief>, GridGround<&'a Relief>) {
+        match self {
+            Self::SeaLevel => (GridGround::SeaLevel, GridGround::SeaLevel),
+            Self::Relief { grid, zonal } => (GridGround::Relief(grid), GridGround::Relief(zonal)),
+        }
+    }
 }
 
 /// The ground one solve reads on one grid (R09.T13.g), `R` the grid's relief ([`Relief`]) or that
@@ -1003,6 +1647,36 @@ impl Relief {
         } else {
             (ground, 1.0)
         }
+    }
+
+    /// The quantiles' grounds of a point of heights `heights` under the sea-level temperature
+    /// `t_k`, K ([`ground_k`](Self::ground_k)), and their places in `table`: the first alone at a
+    /// level point, the rest left nothing.
+    #[must_use]
+    fn quantiles_at(
+        &self,
+        t_k: f64,
+        heights: &PointHeights,
+        table: Option<&Tabulated>,
+    ) -> [Quantile; QUANTILES] {
+        let count = match heights.shape {
+            Shape::Varied => QUANTILES,
+            Shape::SeaLevel | Shape::Level => 1,
+        };
+        let mut quantiles = [Quantile {
+            ground_k: 0.0,
+            rate: 0.0,
+            located: None,
+        }; QUANTILES];
+        for (quantile, &z) in quantiles.iter_mut().zip(&heights.quantiles_m).take(count) {
+            let (ground_k, rate) = self.ground_k(t_k, z);
+            *quantile = Quantile {
+                ground_k,
+                rate,
+                located: table.and_then(|table| table.locate(ground_k)),
+            };
+        }
+        quantiles
     }
 
     /// The temperature of the water's surface of a point of heights `heights` under the sea-level
@@ -1146,6 +1820,9 @@ pub(super) struct EnergyBalance {
     /// `r_l`, the sea's heat capacities' factor on water's, its liquid's `ρ_l c_l` ÷ (`ρ_w c_w`)
     /// ([`SeaLiquid::of`]; decision-r09-t13i §2.1): exactly 1 for water.
     pub(super) sea_capacity_ratio: f64,
+    /// Plan 14's surface ice share of the sphere ([`CoarseInputs::ice_fraction`]), by which τ's fit
+    /// picks a snowball-class fold's branch (decision-r09-t13i's §2.4 follow-up §4 (b)).
+    pub(super) ice_fraction: f64,
 }
 
 /// The model's working arrays: h, its slope, the albedo, its slope, the step's right side, its
@@ -1189,6 +1866,19 @@ struct Work {
     row_rhs: Vec<f64>,
     row_solution: Vec<f64>,
     cyclic: CyclicWork,
+    /// Each point's quantiles' grounds at the step's start, K, their slopes in T and their places
+    /// in the run's table, computed once a step for the albedo and the emission alike (the first
+    /// quantile's alone at a level point).
+    quantiles: Vec<[Quantile; QUANTILES]>,
+}
+
+/// One quantile's ground at a step's start: its temperature, K, its slope in T (1, or 0 where the
+/// floor holds it), and its interval and fraction in the run's table where it holds them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Quantile {
+    ground_k: f64,
+    rate: f64,
+    located: Option<(usize, f64)>,
 }
 
 impl Work {
@@ -1230,6 +1920,14 @@ impl Work {
             row_rhs: columns.clone(),
             row_solution: columns,
             cyclic: CyclicWork::new(grid.columns().max(3)),
+            quantiles: vec![
+                [Quantile {
+                    ground_k: 0.0,
+                    rate: 0.0,
+                    located: None,
+                }; QUANTILES];
+                grid.points()
+            ],
         }
     }
 }
@@ -1263,7 +1961,10 @@ enum Storage<'a> {
 ///
 /// Under the water term (decision-r09-t13i §2.2) it also holds `τ_w` and its slope, and the relief's
 /// water transmission e^(−(3/2) m `τ_w`) and its slope at the run's multiplier m, which each raised
-/// quantile reads at its ground's temperature.
+/// quantile reads at its ground's temperature. An interval is then tabulated only where these meet
+/// [`WATER_TABLE_TOLERANCES`] too, so whether h and the albedo are read from the table or directly
+/// at a temperature depends on the run's radiation as well as the span (deterministically: each run
+/// builds its own table, and the water's reads are keyed to its multiplier's bits).
 #[derive(Debug, Clone, PartialEq)]
 struct Tabulated {
     first_node: f64,
@@ -1391,6 +2092,7 @@ impl Tabulated {
 
     /// The water transmission e^(−(3/2) m `τ_w`) and its slope at `t_k`, K, from the table where it
     /// holds `t_k` and the water term at the multiplier `multiplier`, to the bit.
+    #[cfg(test)]
     #[must_use]
     fn wet_at(&self, multiplier: f64, t_k: f64) -> Option<[f64; 2]> {
         let (held, wet) = self.wet.as_ref()?;
@@ -1480,6 +2182,7 @@ fn water_terms(water: &WaterVapour, t_k: f64, table: Option<&Tabulated>) -> [f64
 /// The water transmission of `water` at the multiplier `multiplier` and its slope at the ground's
 /// temperature `ground_k`, K ([`wet_of`]), from `table` where it holds `ground_k` at that
 /// multiplier, and directly otherwise.
+#[cfg(test)]
 #[must_use]
 fn wet_terms(
     water: &WaterVapour,
@@ -1543,6 +2246,7 @@ impl EnergyBalance {
             heat_flow_w_m2: inputs.heat_flow().value(),
             greenhouse: Greenhouse::of(inputs, &air, freezing),
             sea_capacity_ratio: SeaLiquid::of(inputs, freezing).capacity_ratio(),
+            ice_fraction: inputs.ice_fraction(),
         }
     }
 
@@ -1622,6 +2326,7 @@ impl EnergyBalance {
     /// The albedo at the ground's temperature `ground_k`, K, and its slope, from `table` where it
     /// holds `ground_k` and directly otherwise (the nodes lie on one lattice, so the value does
     /// not depend on the table's span).
+    #[cfg(test)]
     #[must_use]
     fn ground_albedo(&self, ground_k: f64, table: Option<&Tabulated>) -> AlbedoAt {
         match table.and_then(|table| Some((table, table.locate(ground_k)?))) {
@@ -1640,6 +2345,7 @@ impl EnergyBalance {
     /// temperature `t_k`, K, and its slope in T: the mean over its quantiles of the albedo law at
     /// each ground's temperature, and of its slope times the ground's in T (zero where the floor
     /// holds it), once at a level point (decision-r09-t13a-relief §1.2).
+    #[cfg(test)]
     #[must_use]
     fn point_albedo(
         &self,
@@ -1670,6 +2376,49 @@ impl EnergyBalance {
                             let (a, s) = at(z);
                             (albedo + a, slope + s)
                         });
+                AlbedoAt {
+                    albedo: albedo * QUANTILE_WEIGHT,
+                    slope_per_k: slope * QUANTILE_WEIGHT,
+                }
+            }
+        }
+    }
+
+    /// [`point_albedo`](Self::point_albedo) from a step's quantiles `quantiles`, their grounds and
+    /// places in `table` computed once: the same operations on the same operands, to the bit.
+    #[must_use]
+    fn located_albedo(
+        &self,
+        shape: Shape,
+        quantiles: &[Quantile; QUANTILES],
+        table: Option<&Tabulated>,
+    ) -> AlbedoAt {
+        let at = |quantile: &Quantile| {
+            let albedo = match table.zip(quantile.located) {
+                Some((table, (i, f))) => {
+                    let (albedo, slope_per_k) = hermite(&table.albedo, i, f);
+                    AlbedoAt {
+                        albedo,
+                        slope_per_k,
+                    }
+                }
+                None => self.albedo_and_slope(quantile.ground_k),
+            };
+            (albedo.albedo, albedo.slope_per_k * quantile.rate)
+        };
+        match shape {
+            Shape::SeaLevel | Shape::Level => {
+                let (albedo, slope_per_k) = at(&quantiles[0]);
+                AlbedoAt {
+                    albedo,
+                    slope_per_k,
+                }
+            }
+            Shape::Varied => {
+                let (albedo, slope) = quantiles.iter().fold((0.0, 0.0), |(albedo, slope), q| {
+                    let (a, s) = at(q);
+                    (albedo + a, slope + s)
+                });
                 AlbedoAt {
                     albedo: albedo * QUANTILE_WEIGHT,
                     slope_per_k: slope * QUANTILE_WEIGHT,
@@ -1744,7 +2493,7 @@ impl EnergyBalance {
         storage: Storage<'_>,
         table: Option<&Tabulated>,
         ground: GridGround<ReliefAt<'_>>,
-        ocean: Option<(&OceanGrid, Returning)>,
+        ocean: Option<(&OceanGrid, &Returning)>,
         t_k: &mut [f64],
         work: &mut Work,
     ) -> f64 {
@@ -1757,7 +2506,8 @@ impl EnergyBalance {
                 None => self.functions(v, table),
                 Some((relief, (heights, _))) => {
                     let [energy, slope] = self.energies(v, table);
-                    let ground = self.point_albedo(v, heights, relief, table);
+                    work.quantiles[p] = relief.quantiles_at(v, heights, table);
+                    let ground = self.located_albedo(heights.shape, &work.quantiles[p], table);
                     [energy, slope, ground.albedo, ground.slope_per_k]
                 }
             };
@@ -1785,7 +2535,7 @@ impl EnergyBalance {
                         fixed_slope_w_m2_k: fixed_slope,
                     },
                     sea_k,
-                ) = emission_and_sea(radiation, t_k[p], raised(p), table);
+                ) = emission_and_sea(radiation, t_k[p], raised(p), &work.quantiles[p], table);
                 // The pseudo-capacity reads the slope at a fixed τ, so that the relaxation stays
                 // conditioned as R09.T13.a built it where the water term weakens the restoring
                 // (decision-r09-t13i §2.2); under one τ the two are the same.
@@ -1854,7 +2604,7 @@ impl EnergyBalance {
         &self,
         grid: &ModelGrid,
         ocean: &OceanGrid,
-        returning: Returning,
+        returning: &Returning,
         t_k: &[f64],
         ground: GridGround<ReliefAt<'_>>,
         work: &mut Work,
@@ -1867,8 +2617,7 @@ impl EnergyBalance {
                 Some((relief, (heights, _))) => relief.water_k(t, heights),
             };
         }
-        let bands = grid.band_means(&work.energy);
-        work.band_energy.copy_from_slice(&bands);
+        grid.band_means_into(&work.energy, &mut work.band_energy);
         ocean.band_sea_k(grid, &work.water, &mut work.band_sea);
         ocean.ekman_gains(
             grid,
@@ -2015,7 +2764,7 @@ impl EnergyBalance {
                 Storage::Relaxation,
                 table,
                 at,
-                ocean.map(|ocean| (ocean, Returning::Own)),
+                ocean.map(|ocean| (ocean, &Returning::Own)),
                 &mut t_k,
                 &mut work,
             );
@@ -2060,14 +2809,16 @@ impl EnergyBalance {
     /// fall with T where ∂ln(1 + ¾τ) ÷ ∂T exceeds 4 ÷ T, a runaway: a probe whose steady state is
     /// not finite counts as warm, its surface mean not being below the target.
     ///
-    /// The fold guard (decision-r09-t13ge §1.4, g4): the bisection keeps, on each side of its
-    /// bracket, the last probe whose steady state converged, the bracket's two ends among them. If
-    /// the final midpoint's steady state has not converged within [`STEADY_ITERATIONS`], it
-    /// answers whichever kept probe's surface mean lies nearer `mean_k`, ties to the warm side
-    /// ([`OpticalDepth::Folded`]), or, where it kept none, the final midpoint, unconverged and
-    /// labelled [`OpticalDepth::Solved`] as before the guard; otherwise the midpoint, as before, to
-    /// the bit. On a world of one month the steady state is the climate, and a steady state that
-    /// had not converged would be a transient between two branches.
+    /// The fold guard (decision-r09-t13ge §1.4, g4, as decision-r09-t13i's §2.4 follow-up §4 amends
+    /// it): the bisection keeps, on each side of its bracket, the last probe whose steady state
+    /// converged, the bracket's two ends among them. A final midpoint that converged within
+    /// [`FOLD_MISS_K`] of `mean_k` is the answer, [`OpticalDepth::Solved`], to the bit as before.
+    /// Otherwise the fit is labelled [`OpticalDepth::Folded`]: a converged final midpoint replaces its
+    /// side's kept probe, and the answer is the candidate [`nearer`] picks (the nearer surface mean,
+    /// ties to the warm side, or at a snowball-class fold the nearer ice share); where no candidate
+    /// converged, the final midpoint, unconverged, labelled `Solved` only within [`FOLD_MISS_K`]. On a
+    /// world of one month the steady state is the climate, and a steady state that had not converged
+    /// would be a transient between two branches.
     #[must_use]
     fn fit(
         &self,
@@ -2077,35 +2828,14 @@ impl EnergyBalance {
         ground: GridGround<&Relief>,
         ocean: Option<&OceanGrid>,
     ) -> Fitted {
-        let solve = |factor: f64| {
-            let radiation = Radiation::at(self.greenhouse, factor, mean_k);
-            let steady = self.relax(
-                grid,
-                &radiation,
-                insolation_w_m2,
-                vec![mean_k; grid.points()],
-                None,
-                ground,
-                ocean,
-                STEADY_ITERATIONS,
-            );
-            let surface = match ground {
-                GridGround::Relief(relief) => relief.surface_mean_k(grid, &steady.t_k),
-                GridGround::SeaLevel => grid.mean(&steady.t_k),
-            };
-            Probe {
-                emission_factor: factor,
-                radiation,
-                surface_mean_k: surface,
-                steady,
-            }
-        };
+        let solve = |factor: f64| self.probe(grid, insolation_w_m2, mean_k, ground, ocean, factor);
         let fitted = |probe: Probe, optical_depth: OpticalDepth| Fitted {
             emission_factor: probe.emission_factor,
             radiation: probe.radiation,
             steady: probe.steady,
             surface_mean_k: probe.surface_mean_k,
             optical_depth,
+            candidates: [None; 2],
         };
         let clear = solve(1.0);
         if clear.surface_mean_k >= mean_k {
@@ -2130,24 +2860,261 @@ impl EnergyBalance {
             }
         }
         let last = solve(math::exp(f64::midpoint(low, high)));
-        if last.steady.converged {
+        // A converged final probe within FOLD_MISS_K of the mean is solved; one farther, converged
+        // or not, means the bisection closed on a jump (decision-r09-t13i's §2.4 follow-up §4 (a)),
+        // and joins its side's candidates if it converged.
+        if last.steady.converged && (last.surface_mean_k - mean_k).abs() <= FOLD_MISS_K {
             return fitted(last, OpticalDepth::Solved);
         }
-        match nearer(cold, warm, mean_k) {
-            Some(probe) => fitted(probe, OpticalDepth::Folded),
-            None => fitted(last, OpticalDepth::Solved),
+        let last = if last.steady.converged {
+            if last.surface_mean_k < mean_k {
+                cold = Some(last);
+            } else {
+                warm = Some(last);
+            }
+            None
+        } else {
+            Some(last)
+        };
+        let candidates = [&cold, &warm].map(|side| {
+            side.as_ref().map(|probe| Candidate {
+                emission_factor: probe.emission_factor,
+                surface_mean_k: probe.surface_mean_k,
+                ice_share: probe.ice_share,
+            })
+        });
+        match (nearer(cold, warm, mean_k, self.ice_fraction), last) {
+            (Some(probe), _) => Fitted {
+                candidates,
+                ..fitted(probe, OpticalDepth::Folded)
+            },
+            // By comparison, so that a mean that is not a number is a fold.
+            (None, Some(last)) if (last.surface_mean_k - mean_k).abs() <= FOLD_MISS_K => {
+                fitted(last, OpticalDepth::Solved)
+            }
+            (None, Some(last)) => fitted(last, OpticalDepth::Folded),
+            (None, None) => unreachable!("a converged final probe is a candidate"),
+        }
+    }
+
+    /// The seasonal climate of `run` at the fitted emission factor and radiation `fitted`, corrected
+    /// on its surface mean against `mean_k`, K, T\* (decision-r09-t13i's §2.4 follow-up 4 §4; the
+    /// water cycle reads the raw records):
+    ///
+    /// 1. **The zonal search** Z(T\*) on `zonal`, the fit's own zonal model, each run under the
+    ///    search's stop ([`SEARCH_STOP`]), recording both stops' flags: Z₀ at the fit's u₀ from its
+    ///    zonal steady state `steady_k`, then by [`search`], its first step on the zonal steady
+    ///    states' two-sided slope in u at u₀ ± [`CORRECTION_STEP`] (on `fit`'s set-up), as ruled
+    ///    before.
+    /// 2. **On the zonal grid** (where `run` is the zonal model), the search's answer is the climate,
+    ///    its convergence the climate's stop's.
+    /// 3. **G1**, a measurement of d and of G2's start (decision-r09-t13i's §2.4 follow-up 8 §1):
+    ///    the run at the answer's u from its end state broadcast to every column, with its return
+    ///    temperatures, under [`G1_STOP`]: the climate's stop, or its probe stop where that comes
+    ///    first, once the surface mean's own last two ratios agree and its remainder is at most
+    ///    [`PROBE_STOP_K`] ([`probe_end`], as follow-up 9 §1 amends it).
+    /// 4. **G2**, always: where G1's probe measured its mean's extrapolated limit T̂, at u = `u_Z` −
+    ///    d ÷ `S_Z`, d = T̂ − `T̄_Z` the geographic run's departure from the zonal one at the same u
+    ///    and `S_Z` the search's own slope ([`defect_slope`]), held to the fit's bracket, from G1's
+    ///    end plus the zonal predictor's change ([`g2_start`]), under the climate's stop (a defect
+    ///    correction, follow-up 6 §2, no second search); where it did not, G1 having reached its
+    ///    last orbit under neither stop, run A, at u₀ from the fit's steady state broadcast
+    ///    ([`second_run`]).
+    /// 5. **Kept** ([`kept_run`]): G2 where it converged; G1 where only it met the climate's stop;
+    ///    the nearer where neither did, flagged.
+    ///
+    /// Where no zonal run's mean is finite, G1 is run A under its own stop. Every run's u is held to
+    /// the fit's bracket (the slope's two steady probes at u₀ ± [`CORRECTION_STEP`] are not runs).
+    /// The kept run, its emission factor and radiation, and the record of every zonal and
+    /// geographic run's u, surface mean, orbits and convergence, G1's probe, and d.
+    #[must_use]
+    fn corrected(
+        &self,
+        run: &Seasonal<'_>,
+        zonal: &Seasonal<'_>,
+        fit: &ZonalFit<'_>,
+        mean_k: f64,
+        fitted: (f64, Radiation),
+        steady_k: &[f64],
+    ) -> (Orbited, f64, Radiation, MeanCorrection) {
+        let at = FitAt {
+            u0: math::ln(fitted.0),
+            factor: fitted.0,
+            radiation: fitted.1,
+            greenhouse: self.greenhouse,
+            mean_k,
+        };
+        let mut zonal_search = ZonalSearch::begin(self, zonal, fit, at, steady_k);
+        let answer = zonal_search.toward(mean_k, SEARCH_RUNS - 1);
+        if run.grid.columns() == 1 {
+            return zonal_search.into_climate(answer);
+        }
+        let geographic = |u: f64, start: (Vec<f64>, Start), stop: Stop| {
+            let (x, radiation) = at.at(u);
+            let orbited = self.orbits(
+                run.grid,
+                run.sunlight,
+                &radiation,
+                start,
+                run.sea_share,
+                run.ground,
+                run.ocean,
+                stop,
+            );
+            let record = CorrectionRun::of(u, run, &orbited);
+            (orbited, x, radiation, record)
+        };
+        let steady = || (run.grid.broadcast(steady_k), Start::Steady);
+        let first = match answer {
+            Some(i) => {
+                let (record, from) = &zonal_search.runs[i];
+                geographic(
+                    record.run.u,
+                    (
+                        run.grid.broadcast(&from.final_k),
+                        Start::Continued(from.returning.clone()),
+                    ),
+                    G1_STOP,
+                )
+            }
+            None => geographic(at.u0, steady(), G1_STOP),
+        };
+        let (g1, g1_probe) = (first.3, first.0.mean_probe);
+        let search = zonal_search.records();
+        let (second, defect, g2_start_k) = match second_run(answer, &search, g1_probe) {
+            SecondRun::Defect {
+                answer: i,
+                defect_k,
+            } => {
+                let zonal_answer = zonal_search.runs[i].0.run;
+                let slope = zonal_search.defect_slope();
+                let u = (zonal_answer.u - defect_k / slope.slope_k_per_u)
+                    .clamp(0.0, math::ln(EMISSION_FACTOR_MAX));
+                let (state, returning, begun) = g2_start(
+                    run.grid,
+                    &first.0,
+                    &zonal_search.runs,
+                    slope.pair,
+                    (zonal_answer.u, u),
+                );
+                let start_k = surface_mean(run.ground, run.grid, &state);
+                let (orbited, x, radiation, record) =
+                    geographic(u, (state, Start::Continued(returning)), CLIMATE_STOP);
+                let record = CorrectionRun {
+                    start: begun,
+                    ..record
+                };
+                (
+                    (orbited, x, radiation, record),
+                    Some((defect_k, slope)),
+                    Some(start_k),
+                )
+            }
+            SecondRun::RunA => (geographic(at.u0, steady(), CLIMATE_STOP), None, None),
+        };
+        let g2 = second.3;
+        let kept = kept_run(&g1, &g2, mean_k);
+        let correction = MeanCorrection::Searched {
+            search,
+            answer,
+            g1,
+            g1_probe: g1_probe.map(Box::new),
+            defect,
+            g2_start_k,
+            g2,
+            kept,
+        };
+        match kept {
+            KeptRun::G2 => (second.0, second.1, second.2, correction),
+            KeptRun::G1 => (first.0, first.1, first.2, correction),
+        }
+    }
+
+    /// The seasonal run `run` continued from the last state of `from`, whose return temperatures
+    /// it carries on, at u = ln x, x the emission factor at `mean_k`, K ([`Radiation::at`]), under
+    /// the stop `stop`: the run, its emission factor and radiation, and its record.
+    #[cfg(test)]
+    #[must_use]
+    fn continued(
+        &self,
+        run: &Seasonal<'_>,
+        from: &Orbited,
+        u: f64,
+        mean_k: f64,
+        stop: Stop,
+    ) -> (Orbited, f64, Radiation, CorrectionRun) {
+        let factor = math::exp(u);
+        let radiation = Radiation::at(self.greenhouse, factor, mean_k);
+        let orbited = self.orbits(
+            run.grid,
+            run.sunlight,
+            &radiation,
+            (
+                from.final_k.clone(),
+                Start::Continued(from.returning.clone()),
+            ),
+            run.sea_share,
+            run.ground,
+            run.ocean,
+            stop,
+        );
+        let record = CorrectionRun::of(u, run, &orbited);
+        (orbited, factor, radiation, record)
+    }
+
+    /// One probe of τ's solve: the annual-mean steady state under `insolation_w_m2` over the
+    /// ground `ground` with the sea's transport `ocean`, from an isothermal start at `mean_k`, K,
+    /// at the emission factor `emission_factor` at `mean_k` ([`Radiation::at`]), and its surface
+    /// mean ([`Relief::surface_mean_k`]).
+    #[must_use]
+    fn probe(
+        &self,
+        grid: &ModelGrid,
+        insolation_w_m2: &[f64],
+        mean_k: f64,
+        ground: GridGround<&Relief>,
+        ocean: Option<&OceanGrid>,
+        emission_factor: f64,
+    ) -> Probe {
+        let radiation = Radiation::at(self.greenhouse, emission_factor, mean_k);
+        let steady = self.relax(
+            grid,
+            &radiation,
+            insolation_w_m2,
+            vec![mean_k; grid.points()],
+            None,
+            ground,
+            ocean,
+            STEADY_ITERATIONS,
+        );
+        let surface = match ground {
+            GridGround::Relief(relief) => relief.surface_mean_k(grid, &steady.t_k),
+            GridGround::SeaLevel => grid.mean(&steady.t_k),
+        };
+        Probe {
+            emission_factor,
+            radiation,
+            ice_share: ice_share(self.freezing, grid, ground, &steady.t_k),
+            surface_mean_k: surface,
+            steady,
         }
     }
 
     /// Whole seasonal orbits of `sunlight` under the radiation `radiation` from `start_k`, K,
-    /// over points of sea share `sea_share` and the ground `ground`, with the sea's transport
-    /// `ocean`, until the annual means move under [`CONVERGENCE_K`] between orbits, at most
-    /// [`MAX_ORBITS`]: the last orbit's annual and monthly means, its ocean record, and the state
-    /// at its end. The table reaches as far below and above the start as the highest and deepest
-    /// quantiles' grounds need.
+    /// begun as `start` says, over points of sea share `sea_share` and the ground `ground`, with
+    /// the sea's transport `ocean`, at least [`MIN_ORBITS`] and at most [`MAX_ORBITS`], until the
+    /// stop `stop` holds ([`settled`] at its bound), its slow mode extrapolated where it allows
+    /// ([`Extrapolation`]): the last orbit's annual and monthly means, its ocean record, and the
+    /// state at its end. A run whose state is no longer finite stops, unconverged. The table
+    /// reaches as far below and above the start as the highest and deepest quantiles' grounds
+    /// need.
     ///
-    /// The Ekman cells' return temperature is the state's own in the first orbit, and from the
-    /// second the previous orbit's coldest month's band-mean sea temperature at the return
+    /// G1's stop also ends it at its probe stop ([`probe_end`]), whichever comes first, the probe
+    /// reading the same orbit's moves and ratio as the stop, after them; G1's run records its
+    /// probe at the orbit it ended, by either stop (decision-r09-t13i's §2.4 follow-up 8 §1).
+    ///
+    /// The Ekman cells' return temperature is the state's own in a steady start's first orbit,
+    /// and after each orbit that orbit's coldest month's band-mean sea temperature at the return
     /// latitude in each hemisphere (decision-r09-t13i §2.3.1).
     ///
     /// Where the sunlight varies in the grid's longitude, as a locked world's beam does on an
@@ -2179,10 +3146,11 @@ impl EnergyBalance {
         grid: &ModelGrid,
         sunlight: &Sunlight,
         radiation: &Radiation,
-        start_k: Vec<f64>,
+        (start_k, start): (Vec<f64>, Start),
         sea_share: &[f64],
         ground: GridGround<&Relief>,
         ocean: Option<&OceanGrid>,
+        stop: Stop,
     ) -> Orbited {
         let steps = sunlight.steps();
         assert!(steps > 0, "a seasonal run needs a seasonal orbit");
@@ -2204,7 +3172,7 @@ impl EnergyBalance {
             GridGround::Relief(relief) => relief.table_reach_k(),
         };
         let table = Tabulated::new(self, radiation, low - below, high + above);
-        let start_k = if sunlight.varies_in_longitude() {
+        let start_k = if start == Start::Steady && sunlight.varies_in_longitude() {
             self.relax(
                 grid,
                 radiation,
@@ -2230,11 +3198,30 @@ impl EnergyBalance {
         let (mut annual, mut months) = (vec![0.0; points], vec![vec![0.0; points]; 12]);
         let mut counts = [0_u32; 12];
         let mut recorder = ocean.map(|_| Recorder::new(points, 12));
-        let mut returning = Returning::Own;
+        let begun = match start {
+            Start::Steady => RunStart::Steady,
+            Start::Continued(_) => RunStart::Continued,
+        };
+        let mut returning = match start {
+            Start::Steady => Returning::Own,
+            Start::Continued(returning) => returning,
+        };
+        #[cfg(test)]
+        let started = (t.clone(), returning.clone());
+        let mut before: Option<f64> = None;
+        let mut history = Vec::new();
         let mut water = vec![0.0; points];
         let mut band_sea = vec![0.0; LATITUDE_BANDS];
-        let (mut orbits, mut converged) = (0, false);
-        while orbits < MAX_ORBITS {
+        let mut orbits = 0;
+        // Whether the last orbit met the climate's stop and the search's (decision-r09-t13i's
+        // §2.4 follow-up 6 §3): a climate reads the first, the search's secant the second.
+        let mut met = (false, false);
+        let mut extrapolation = Extrapolation::new(stop.jumps);
+        // G1's fresh orbits and its surface mean's fresh changes, and its probe where its run
+        // ended (follow-ups 8 §1 and 9 §1).
+        let mut trail = MeanTrail::default();
+        let mut mean_probe = None;
+        while orbits < stop.max_orbits {
             annual.fill(0.0);
             for month in &mut months {
                 month.fill(0.0);
@@ -2252,7 +3239,7 @@ impl EnergyBalance {
                     storage,
                     Some(&table),
                     at,
-                    ocean.map(|ocean| (ocean, returning)),
+                    ocean.map(|ocean| (ocean, &returning)),
                     &mut t,
                     &mut work,
                 );
@@ -2267,12 +3254,13 @@ impl EnergyBalance {
                 }
             }
             orbits += 1;
+            trail.orbit();
             let n = f64::from(steps);
             for sum in &mut annual {
                 *sum /= n;
             }
             if let Some(ocean) = ocean {
-                returning = Returning::Coldest(coldest_return_k(
+                returning = Returning::Coldest(Box::new(coldest_return_k(
                     grid,
                     ocean,
                     at,
@@ -2280,17 +3268,78 @@ impl EnergyBalance {
                     &counts,
                     &mut water,
                     &mut band_sea,
-                ));
+                )));
             }
-            if let Some(last) = &previous {
-                let moved = annual.iter().zip(last).fold(0.0, |most: f64, (a, b)| {
+            if !annual.iter().all(|t| t.is_finite()) {
+                break;
+            }
+            let moved = previous.as_ref().map(|last| {
+                annual.iter().zip(last).fold(0.0, |most: f64, (a, b)| {
                     let d = (a - b).abs();
                     if d > most { d } else { most }
-                });
-                if moved < CONVERGENCE_K {
-                    converged = true;
+                })
+            });
+            if let Some(moved) = moved {
+                history.push(moved);
+                match extrapolation.review(moved) {
+                    Review::Rejected(jumped) => {
+                        t.copy_from_slice(&jumped.state_k);
+                        returning = jumped.returning;
+                        before = Some(jumped.move_k);
+                        previous = Some(jumped.annual_k);
+                        met = (false, false);
+                        trail.rejected();
+                        continue;
+                    }
+                    // The stop reads only the moves after a jump.
+                    Review::Accepted => before = None,
+                    Review::None => {}
+                }
+                let enough = orbits >= MIN_ORBITS;
+                let jump_ratio = extrapolation.jump_ratio;
+                met = (
+                    enough && settled_after(moved, before, CONVERGENCE_K, jump_ratio),
+                    enough && settled_after(moved, before, SEARCH_CONVERGENCE_K, jump_ratio),
+                );
+                // G1's probe reads the surface mean of this orbit and its change from the last
+                // (follow-ups 8 §1 and 9 §1).
+                let probed = stop
+                    .probe_k
+                    .zip(previous.as_deref())
+                    .map(|(bound_k, last)| {
+                        let mean = surface_mean(ground, grid, &annual);
+                        (bound_k, (mean, mean - surface_mean(ground, grid, last)))
+                    });
+                let ratio = before.map(|before| stop_ratio(moved, before, jump_ratio));
+                if enough && settled_after(moved, before, stop.bound_k, jump_ratio) {
+                    mean_probe =
+                        probed.map(|(_, means)| settled_probe(orbits, means, trail.changes, ratio));
                     break;
                 }
+                if let Some((bound_k, means)) = probed {
+                    let fresh = (orbits, trail.fresh);
+                    if let Some(probe) = probe_end(fresh, means, trail.changes, ratio, bound_k) {
+                        mean_probe = Some(probe);
+                        break;
+                    }
+                    trail.push(means.1);
+                }
+                if let (Some(gain), Some(stored)) = (
+                    extrapolation.gain(orbits, moved, before, stop.bound_k),
+                    previous.as_mut(),
+                ) {
+                    extrapolation.jump(
+                        orbits,
+                        moved,
+                        gain,
+                        (&mut t, &annual, stored),
+                        returning.clone(),
+                    );
+                    before = None;
+                    trail.jumped();
+                    continue;
+                }
+                before = Some(moved);
             }
             previous.get_or_insert_with(Vec::new).clone_from(&annual);
         }
@@ -2306,12 +3355,228 @@ impl EnergyBalance {
                 annual_k: annual,
                 months_k: months,
                 orbits,
-                converged,
+                converged: met.0,
             },
             ocean: recorder.map(|recorder| recorder.finish(&counts, steps)),
             final_k: t,
             returning,
+            moves_k: history,
+            searched: met.1,
+            jumps: extrapolation.jumps,
+            rejects: extrapolation.rejects,
+            start: begun,
+            mean_probe,
+            #[cfg(test)]
+            started,
         }
+    }
+
+    /// The zonal search's first run, Z₀, that [`run`](Self::run) makes over the same zonal set-up
+    /// (`grid` the zonal grid), of a world that is lit, continued from its last state at u = `u`
+    /// under the stop (decision-r09-t13i's §2.4 follow-up 2 §3, as its follow-up 4 §7 restates it:
+    /// the sea-level Earth at the relief Earth's kept u, so that the relief's comparison holds the
+    /// radiation fixed).
+    ///
+    /// # Panics
+    ///
+    /// If `sunlight` is constant.
+    #[cfg(test)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "run's own set-up, and the u to continue at"
+    )]
+    #[must_use]
+    pub(super) fn run_continued(
+        &self,
+        grid: &ModelGrid,
+        sunlight: &Sunlight,
+        mean_k: f64,
+        sea_share: &[f64],
+        ground: Ground<'_>,
+        currents: Option<&Currents>,
+        u: f64,
+    ) -> ContinuedRun {
+        let (on_grid, on_zonal) = ground.on_grids();
+        let zonal = ModelGrid::zonal();
+        let annual = grid.band_means(sunlight.annual());
+        let ocean = currents.map(|currents| OceanGrid::new(grid, sea_share.to_vec(), currents));
+        let zonal_ocean =
+            currents.map(|currents| OceanGrid::new(&zonal, grid.band_means(sea_share), currents));
+        let fitted = self.fit(&zonal, &annual, mean_k, on_zonal, zonal_ocean.as_ref());
+        let run = Seasonal {
+            grid,
+            sunlight,
+            sea_share,
+            ground: on_grid,
+            ocean: ocean.as_ref(),
+        };
+        let first = self.orbits(
+            grid,
+            sunlight,
+            &fitted.radiation,
+            (grid.broadcast(&fitted.steady.t_k), Start::Steady),
+            sea_share,
+            on_grid,
+            ocean.as_ref(),
+            SEARCH_STOP,
+        );
+        let a = CorrectionRun::of(math::ln(fitted.emission_factor), &run, &first);
+        let (orbited, _, _, continued) = self.continued(&run, &first, u, mean_k, CLIMATE_STOP);
+        ContinuedRun {
+            a,
+            continued,
+            climate: orbited.climate,
+        }
+    }
+
+    /// One seasonal run at the fit's u from its steady state broadcast, over [`run`](Self::run)'s
+    /// set-up, of a world that is lit, with the extrapolation as `jumps` says: under the climate's
+    /// stop, or for exactly `orbits` orbits where it is given (decision-r09-t13i's §2.4 follow-up 4
+    /// §7, the extrapolation against the march; its follow-up 7 §3, the geographic model against
+    /// the zonal one).
+    #[cfg(test)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "run's own set-up, and whether the run may jump"
+    )]
+    #[must_use]
+    pub(super) fn run_at_fit(
+        &self,
+        grid: &ModelGrid,
+        sunlight: &Sunlight,
+        mean_k: f64,
+        sea_share: &[f64],
+        ground: Ground<'_>,
+        currents: Option<&Currents>,
+        jumps: Jumps,
+        orbits: Option<u32>,
+    ) -> GridClimate {
+        let (on_grid, on_zonal) = ground.on_grids();
+        let zonal = ModelGrid::zonal();
+        let annual = grid.band_means(sunlight.annual());
+        let ocean = currents.map(|currents| OceanGrid::new(grid, sea_share.to_vec(), currents));
+        let zonal_ocean =
+            currents.map(|currents| OceanGrid::new(&zonal, grid.band_means(sea_share), currents));
+        let fitted = self.fit(&zonal, &annual, mean_k, on_zonal, zonal_ocean.as_ref());
+        self.orbits(
+            grid,
+            sunlight,
+            &fitted.radiation,
+            (grid.broadcast(&fitted.steady.t_k), Start::Steady),
+            sea_share,
+            on_grid,
+            ocean.as_ref(),
+            Stop {
+                // A bound of nothing never stops the run.
+                bound_k: if orbits.is_some() { 0.0 } else { CONVERGENCE_K },
+                jumps,
+                max_orbits: orbits.unwrap_or(MAX_ORBITS),
+                probe_k: None,
+            },
+        )
+        .climate
+    }
+
+    /// The zonal search [`run`](Self::run) makes over the zonal set-up of `grid`, of a world that
+    /// is lit and whose τ's fit is solved or a fold, with each run's start and end states and
+    /// return temperatures (decision-r09-t13i's §2.4 follow-up 8 §2, the search's test of its
+    /// predicted starts).
+    #[cfg(test)]
+    #[must_use]
+    pub(super) fn search_runs(
+        &self,
+        grid: &ModelGrid,
+        sunlight: &Sunlight,
+        mean_k: f64,
+        sea_share: &[f64],
+        ground: Ground<'_>,
+        currents: Option<&Currents>,
+    ) -> Vec<SearchState> {
+        let (_, on_zonal) = ground.on_grids();
+        let zonal = ModelGrid::zonal();
+        let annual = grid.band_means(sunlight.annual());
+        let zonal_sea = grid.band_means(sea_share);
+        let zonal_ocean =
+            currents.map(|currents| OceanGrid::new(&zonal, zonal_sea.clone(), currents));
+        let fitted = self.fit(&zonal, &annual, mean_k, on_zonal, zonal_ocean.as_ref());
+        let banded = sunlight.band_means(grid);
+        let zonal_run = Seasonal {
+            grid: &zonal,
+            sunlight: if grid.columns() == 1 {
+                sunlight
+            } else {
+                &banded
+            },
+            sea_share: &zonal_sea,
+            ground: on_zonal,
+            ocean: zonal_ocean.as_ref(),
+        };
+        let fit = ZonalFit {
+            insolation_w_m2: &annual,
+            ground: on_zonal,
+            ocean: zonal_ocean.as_ref(),
+        };
+        let at = FitAt {
+            u0: math::ln(fitted.emission_factor),
+            factor: fitted.emission_factor,
+            radiation: fitted.radiation,
+            greenhouse: self.greenhouse,
+            mean_k,
+        };
+        let mut search = ZonalSearch::begin(self, &zonal_run, &fit, at, &fitted.steady.t_k);
+        let _answer = search.toward(mean_k, SEARCH_RUNS - 1);
+        search
+            .runs
+            .into_iter()
+            .map(|(record, orbited)| SearchState {
+                record,
+                start_k: orbited.started.0,
+                start_returning: orbited.started.1,
+                final_k: orbited.final_k,
+                final_returning: orbited.returning,
+            })
+            .collect()
+    }
+
+    /// The Ekman cells of the zonal `climate` over sea shares `sea_share` with `currents` at band
+    /// edge `edge` ([`OceanGrid::ekman_at`]), from its annual-mean h and sea temperatures and its
+    /// coldest month's: ψ, kg s⁻¹ per 2πR², and `ΔT_D`, K. A print's, at the annual mean.
+    #[cfg(test)]
+    #[must_use]
+    pub(super) fn ekman_at(
+        &self,
+        sea_share: &[f64],
+        currents: &Currents,
+        climate: &GridClimate,
+        edge: usize,
+    ) -> Option<(f64, f64)> {
+        let grid = ModelGrid::zonal();
+        let ocean = OceanGrid::new(&grid, sea_share.to_vec(), currents);
+        let energy: Vec<f64> = climate
+            .annual_k
+            .iter()
+            .map(|&t| self.energies(t, None)[0])
+            .collect();
+        let mut sea = vec![0.0; LATITUDE_BANDS];
+        ocean.band_sea_k(&grid, &climate.annual_k, &mut sea);
+        let mut coldest = [f64::INFINITY; LATITUDE_BANDS];
+        let mut month = vec![0.0; LATITUDE_BANDS];
+        for means in &climate.months_k {
+            ocean.band_sea_k(&grid, means, &mut month);
+            for (least, &t) in coldest.iter_mut().zip(&month) {
+                if t < *least {
+                    *least = t;
+                }
+            }
+        }
+        ocean.ekman_at(
+            &grid,
+            self.transport_kg_m2_s,
+            &energy,
+            &sea,
+            &Returning::Coldest(Box::new(coldest)),
+            edge,
+        )
     }
 
     /// The ocean's record of one state `t_k`, K, a steady state's, the year's one month: the
@@ -2333,7 +3598,7 @@ impl EnergyBalance {
             work.energy[p] = energy;
             work.slope[p] = slope;
         }
-        self.couple_ocean(grid, ocean, Returning::Own, t_k, at, &mut work);
+        self.couple_ocean(grid, ocean, &Returning::Own, t_k, at, &mut work);
         let mut recorder = Recorder::new(grid.points(), 1);
         recorder.add(grid, &work, 0);
         recorder.finish(&[1], 1)
@@ -2344,7 +3609,7 @@ impl EnergyBalance {
     /// `currents` (the [module documentation](self)): τ, or under the water term its multiplier,
     /// solved on the zonal grid in the grid's coordinates, over the zonal relief and its bands' sea
     /// shares, so that the steady state's surface mean is `mean_k`, then the orbits over the grid's
-    /// own relief and sea.
+    /// own relief and sea, the mean corrected by the zonal search ([`solved`](Self::solved)).
     ///
     /// # Panics
     ///
@@ -2359,81 +3624,46 @@ impl EnergyBalance {
         ground: Ground<'_>,
         currents: Option<&Currents>,
     ) -> Solution {
-        let (on_grid, on_zonal) = match ground {
-            Ground::SeaLevel => (GridGround::SeaLevel, GridGround::SeaLevel),
-            Ground::Relief { grid, zonal } => (GridGround::Relief(grid), GridGround::Relief(zonal)),
-        };
-        let months = usize::from(sunlight.months());
+        let (on_grid, on_zonal) = ground.on_grids();
         let zonal = ModelGrid::zonal();
         let annual = grid.band_means(sunlight.annual());
         let forcing = zonal.mean(&annual) + self.heat_flow_w_m2;
-        let ocean = currents.map(|currents| OceanGrid::new(grid, sea_share, currents));
+        let zonal_sea = grid.band_means(sea_share);
+        let ocean = currents.map(|currents| OceanGrid::new(grid, sea_share.to_vec(), currents));
         let zonal_ocean =
-            currents.map(|currents| OceanGrid::new(&zonal, &grid.band_means(sea_share), currents));
+            currents.map(|currents| OceanGrid::new(&zonal, zonal_sea.clone(), currents));
         let solution = if positive(forcing) {
-            let Fitted {
-                emission_factor: factor,
-                radiation,
-                steady,
-                surface_mean_k,
-                optical_depth: depth,
-            } = self.fit(&zonal, &annual, mean_k, on_zonal, zonal_ocean.as_ref());
-            let converged = steady.converged;
-            let steady = grid.broadcast(&steady.t_k);
-            let (climate, record) = if sunlight.steps() == 0 {
-                let record = ocean.as_ref().filter(|ocean| ocean.any()).map(|ocean| {
-                    self.steady_ocean_record(grid, &radiation, &steady, on_grid, ocean)
-                });
-                (
-                    GridClimate {
-                        annual_k: steady.clone(),
-                        months_k: vec![steady; months],
-                        orbits: 0,
-                        converged,
-                    },
-                    record,
-                )
+            let fitted = self.fit(&zonal, &annual, mean_k, on_zonal, zonal_ocean.as_ref());
+            // The zonal search reads each step's band mean of the grid's sunlight.
+            let banded;
+            let zonal_sunlight = if grid.columns() == 1 {
+                sunlight
             } else {
-                let orbited = self.orbits(
-                    grid,
-                    sunlight,
-                    &radiation,
-                    steady,
-                    sea_share,
-                    on_grid,
-                    ocean.as_ref(),
-                );
-                (orbited.climate, orbited.ocean)
+                banded = sunlight.band_means(grid);
+                &banded
             };
-            Solution {
-                climate,
-                emission_factor: factor,
-                radiation,
-                optical_depth: depth,
-                steady_converged: converged,
-                steady_surface_mean_k: surface_mean_k,
-                month_insolation_w_m2: sunlight.month_means(grid),
-                ocean: record,
-            }
+            let run = Seasonal {
+                grid,
+                sunlight,
+                sea_share,
+                ground: on_grid,
+                ocean: ocean.as_ref(),
+            };
+            let zonal_run = Seasonal {
+                grid: &zonal,
+                sunlight: zonal_sunlight,
+                sea_share: &zonal_sea,
+                ground: on_zonal,
+                ocean: zonal_ocean.as_ref(),
+            };
+            let zonal_fit = ZonalFit {
+                insolation_w_m2: &annual,
+                ground: on_zonal,
+                ocean: zonal_ocean.as_ref(),
+            };
+            self.solved(&run, &zonal_run, &zonal_fit, mean_k, fitted)
         } else {
-            let isothermal = vec![mean_k; grid.points()];
-            Solution {
-                climate: GridClimate {
-                    annual_k: isothermal.clone(),
-                    months_k: vec![isothermal; months],
-                    orbits: 0,
-                    converged: true,
-                },
-                emission_factor: 1.0,
-                radiation: Radiation::Grey {
-                    emission_factor: 1.0,
-                },
-                optical_depth: OpticalDepth::Unforced,
-                steady_converged: true,
-                steady_surface_mean_k: mean_k,
-                month_insolation_w_m2: sunlight.month_means(grid),
-                ocean: None,
-            }
+            unforced(grid, sunlight, mean_k)
         };
         let climate = &solution.climate;
         for v in climate
@@ -2445,6 +3675,901 @@ impl EnergyBalance {
         }
         solution
     }
+
+    /// The answer of `run` for a body of mean surface temperature `mean_k`, K, τ's fit `fitted` made
+    /// on `fit`'s zonal set-up: in a one-month year the steady state itself; in a twelve-month one
+    /// the seasonal climate the correction keeps ([`corrected`](Self::corrected), on the zonal model
+    /// `zonal`), or, where the fit was clamped, the run at its u from its steady state.
+    #[must_use]
+    fn solved(
+        &self,
+        run: &Seasonal<'_>,
+        zonal: &Seasonal<'_>,
+        fit: &ZonalFit<'_>,
+        mean_k: f64,
+        fitted: Fitted,
+    ) -> Solution {
+        let Fitted {
+            emission_factor: factor,
+            radiation,
+            steady,
+            surface_mean_k,
+            optical_depth: depth,
+            candidates: _,
+        } = fitted;
+        let converged = steady.converged;
+        let broadcast = run.grid.broadcast(&steady.t_k);
+        let (climate, record, factor, radiation, correction, moves) = if run.sunlight.steps() == 0 {
+            let record = run.ocean.filter(|ocean| ocean.any()).map(|ocean| {
+                self.steady_ocean_record(run.grid, &radiation, &broadcast, run.ground, ocean)
+            });
+            let climate = GridClimate {
+                annual_k: broadcast.clone(),
+                months_k: vec![broadcast; usize::from(run.sunlight.months())],
+                orbits: 0,
+                converged,
+            };
+            (
+                climate,
+                record,
+                factor,
+                radiation,
+                MeanCorrection::None,
+                Vec::new(),
+            )
+        } else {
+            let (kept, factor, radiation, correction) = match depth {
+                OpticalDepth::Solved | OpticalDepth::Folded => {
+                    self.corrected(run, zonal, fit, mean_k, (factor, radiation), &steady.t_k)
+                }
+                OpticalDepth::Transparent | OpticalDepth::Opaque | OpticalDepth::Unforced => {
+                    let first = self.orbits(
+                        run.grid,
+                        run.sunlight,
+                        &radiation,
+                        (broadcast, Start::Steady),
+                        run.sea_share,
+                        run.ground,
+                        run.ocean,
+                        CLIMATE_STOP,
+                    );
+                    (first, factor, radiation, MeanCorrection::Clamped)
+                }
+            };
+            (
+                kept.climate,
+                kept.ocean,
+                factor,
+                radiation,
+                correction,
+                kept.moves_k,
+            )
+        };
+        Solution {
+            climate,
+            emission_factor: factor,
+            radiation,
+            optical_depth: depth,
+            steady_converged: converged,
+            steady_surface_mean_k: surface_mean_k,
+            month_insolation_w_m2: run.sunlight.month_means(run.grid),
+            ocean: record,
+            correction,
+            moves_k: moves,
+        }
+    }
+}
+
+/// The zonal search's Z₀ continued at another u (decision-r09-t13i's §2.4 follow-up 2 §3).
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct ContinuedRun {
+    /// Z₀'s record.
+    pub(super) a: CorrectionRun,
+    /// The continued run's u and surface mean.
+    pub(super) continued: CorrectionRun,
+    /// The continued run's climate.
+    pub(super) climate: GridClimate,
+}
+
+/// One run of the zonal search with the states it began and ended in
+/// ([`EnergyBalance::search_runs`]).
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct SearchState {
+    /// Its record.
+    pub(super) record: SearchRun,
+    /// The state it began from, K.
+    pub(super) start_k: Vec<f64>,
+    /// The return temperatures it began with.
+    pub(super) start_returning: Returning,
+    /// The state at its last orbit's end, K.
+    pub(super) final_k: Vec<f64>,
+    /// The return temperatures after its last orbit.
+    pub(super) final_returning: Returning,
+}
+
+/// The answer for a body with neither light nor heat over the points of `grid` under `sunlight`:
+/// isothermal at `mean_k`, K, at no greenhouse.
+#[must_use]
+fn unforced(grid: &ModelGrid, sunlight: &Sunlight, mean_k: f64) -> Solution {
+    let isothermal = vec![mean_k; grid.points()];
+    Solution {
+        climate: GridClimate {
+            annual_k: isothermal.clone(),
+            months_k: vec![isothermal; usize::from(sunlight.months())],
+            orbits: 0,
+            converged: true,
+        },
+        emission_factor: 1.0,
+        radiation: Radiation::Grey {
+            emission_factor: 1.0,
+        },
+        optical_depth: OpticalDepth::Unforced,
+        steady_converged: true,
+        steady_surface_mean_k: mean_k,
+        month_insolation_w_m2: sunlight.month_means(grid),
+        ocean: None,
+        correction: MeanCorrection::None,
+        moves_k: Vec::new(),
+    }
+}
+
+/// The ice share of the steady state `t_k`, K, one a point of `grid`, over the ground `ground`, where
+/// the ice forms as `freezing` says: the solid angle whose ground, each quantile's T − Γz, lies below
+/// the albedo's midpoint `T_f` − [`ALBEDO_MIDPOINT_BELOW_FREEZING_K`], over the sphere's; none where
+/// no ice forms (decision-r09-t13i's §2.4 follow-up §4 (b)).
+#[must_use]
+fn ice_share(
+    freezing: Freezing,
+    grid: &ModelGrid,
+    ground: GridGround<&Relief>,
+    t_k: &[f64],
+) -> f64 {
+    let Freezing::At { point_k } = freezing else {
+        return 0.0;
+    };
+    let midpoint = point_k - ALBEDO_MIDPOINT_BELOW_FREEZING_K;
+    let iced: Vec<f64> = t_k
+        .iter()
+        .enumerate()
+        .map(|(p, &t)| match ground {
+            GridGround::SeaLevel => f64::from(u8::from(t < midpoint)),
+            GridGround::Relief(relief) => {
+                relief
+                    .hypsometry()
+                    .point(p)
+                    .quantiles_m
+                    .iter()
+                    .fold(0.0, |share, &z| {
+                        if relief.ground_k(t, z).0 < midpoint {
+                            share + QUANTILE_WEIGHT
+                        } else {
+                            share
+                        }
+                    })
+            }
+        })
+        .collect();
+    grid.mean(&iced)
+}
+
+/// The surface mean of the temperatures `t_k`, K, one a point of `grid`, over the ground `ground`
+/// ([`Relief::surface_mean_k`]; [`ModelGrid::mean`] at the sea level).
+#[must_use]
+fn surface_mean(ground: GridGround<&Relief>, grid: &ModelGrid, t_k: &[f64]) -> f64 {
+    match ground {
+        GridGround::Relief(relief) => relief.surface_mean_k(grid, t_k),
+        GridGround::SeaLevel => grid.mean(t_k),
+    }
+}
+
+/// The run kept of the runs `runs` against the surface mean `target_k`, K (decision-r09-t13i's
+/// §2.4 follow-up 3, as its follow-up 4 keeps it): the converged run nearest the target, the earlier
+/// on a tie; where none converged, the nearest run, the earlier on a tie, its climate flagged
+/// unconverged; `None` where no run's mean is finite. An unconverged run's mean is not a climate:
+/// on the continent aquaplanet the old secant's run C, at 40 orbits still falling about 0.1 K an
+/// orbit, lay 1.67 K from the mean against the converged B's 2.45 K, and by its moves would have
+/// ended 3.0–3.6 K from it.
+#[must_use]
+fn kept_index(runs: &[CorrectionRun], target_k: f64) -> Option<usize> {
+    let any_converged = runs
+        .iter()
+        .any(|run| run.converged && run.mean_k.is_finite());
+    let mut kept: Option<(usize, f64)> = None;
+    for (i, run) in runs.iter().enumerate() {
+        if any_converged && !run.converged {
+            continue;
+        }
+        let miss = (run.mean_k - target_k).abs();
+        // A run whose mean is not finite is never kept, and a later run only where strictly
+        // nearer.
+        if !miss.is_finite() {
+            continue;
+        }
+        if kept.is_none_or(|(_, best)| miss < best) {
+            kept = Some((i, miss));
+        }
+    }
+    kept.map(|(i, _)| i)
+}
+
+/// The run the correction keeps of G1 `g1` and G2 `g2` against the surface mean `target_k`, K
+/// (decision-r09-t13i's §2.4 follow-up 8 §1.3): G2 where it converged; G1 where only it met the
+/// climate's stop (follow-up 3's fallback); where neither did, the nearer, the earlier on a tie,
+/// its climate flagged unconverged ([`kept_index`]), and G2 where neither mean is finite.
+#[must_use]
+fn kept_run(g1: &CorrectionRun, g2: &CorrectionRun, target_k: f64) -> KeptRun {
+    if g2.converged {
+        KeptRun::G2
+    } else if g1.converged {
+        KeptRun::G1
+    } else {
+        match kept_index(&[*g1, *g2], target_k) {
+            Some(0) => KeptRun::G1,
+            Some(_) | None => KeptRun::G2,
+        }
+    }
+}
+
+/// G2's run (decision-r09-t13i's §2.4 follow-up 8 §1.2–§1.4).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SecondRun {
+    /// The defect's step from the zonal search's answer, run `answer` of its runs, d = `defect_k`,
+    /// K.
+    Defect {
+        /// The answer's index among the search's runs.
+        answer: usize,
+        /// d = T̂ − `T̄_Z`, K.
+        defect_k: f64,
+    },
+    /// Run A, at u₀ from the fit's steady state broadcast.
+    RunA,
+}
+
+/// G2's run after the zonal search's runs `search`, its answer `answer`, and G1's probe `probe`:
+/// the defect's step, d = T̂ − `T̄_Z` with T̂ the probe's extrapolated limit, where G1 measured it
+/// and the search has an answer; run A where G1 measured no d, having reached its last orbit
+/// under neither of its stops or its state having stopped being finite, or where no zonal run's
+/// mean is finite (decision-r09-t13i's §2.4 follow-up 8 §1.4).
+#[must_use]
+fn second_run(answer: Option<usize>, search: &[SearchRun], probe: Option<MeanProbe>) -> SecondRun {
+    match (answer, probe) {
+        (Some(i), Some(probe)) => SecondRun::Defect {
+            answer: i,
+            defect_k: probe.limit_k - search[i].run.mean_k,
+        },
+        (Some(_), None) | (None, _) => SecondRun::RunA,
+    }
+}
+
+/// One zonal search toward the surface mean `target_k`, K, Z(target) (decision-r09-t13i's §2.4
+/// follow-up 4 §4, as its follow-ups 6 and 7 amend it), over the runs so far `runs`, each its record
+/// and its state: until one of its runs that met the search's stop lies within
+/// [`SEARCH_CONVERGENCE_K`] of the target, or `limit` more runs, each `run(u, step, runs)`, a run at
+/// u started as its step `step` says, its u chosen by [`next_search_step`] under the zonal steady
+/// states' slope `slope_k`, K per unit of u, within [0, `bracket`]. Its answer: the run nearest the target
+/// that met the climate's stop, the earlier on a tie, or the nearest where none did
+/// ([`kept_index`]); `None` where no run's mean is finite.
+#[must_use]
+fn search<S>(
+    runs: &mut Vec<(SearchRun, S)>,
+    target_k: f64,
+    slope_k: f64,
+    bracket: f64,
+    limit: usize,
+    run: &impl Fn(f64, &SearchStep, &[(SearchRun, S)]) -> (CorrectionRun, S),
+) -> Option<usize> {
+    let records = |runs: &[(SearchRun, S)]| -> Vec<CorrectionRun> {
+        runs.iter().map(|(record, _)| record.run).collect()
+    };
+    for _ in 0..limit {
+        let within = runs.iter().any(|(record, _)| {
+            record.run.searched && (record.run.mean_k - target_k).abs() <= SEARCH_CONVERGENCE_K
+        });
+        if within {
+            break;
+        }
+        let Some((u, step, _)) = next_search_step(&records(runs), target_k, slope_k, bracket)
+        else {
+            break;
+        };
+        let (record, state) = run(u, &step, runs);
+        runs.push((
+            SearchRun {
+                run: record,
+                target_k,
+                step,
+            },
+            state,
+        ));
+    }
+    kept_index(&records(runs), target_k)
+}
+
+/// The zonal search's next u toward the surface mean `target_k`, K, after the runs `runs`, how it
+/// was chosen, and the run it continues from (decision-r09-t13i's §2.4 follow-up 4 §4, as its
+/// follow-up 6 §3 amends it), held to [0, `bracket`]; `None` where no run met the climate's stop,
+/// the slope `slope_k` (K per unit of u) is not positive where the step needs it, or the secant's
+/// two points have one mean:
+///
+/// - where the latest run did not meet the climate's stop, halfway from the nearest run that did to
+///   its u (such a run is never a secant point);
+/// - else, with two runs or more that met the search's stop, the secant on the latest two, held
+///   inside them where they straddle the target and otherwise to [`SECANT_STEP_CAP`] times the step
+///   between them;
+/// - else, from the nearest run that met the climate's stop, the slope's step, (target − T̄) ÷ S
+///   (so Z₁ may read a Z₀ that met only the climate's stop).
+///
+/// Each continues from the nearest run that met the climate's stop.
+#[must_use]
+fn next_search_step(
+    runs: &[CorrectionRun],
+    target_k: f64,
+    slope_k: f64,
+    bracket: f64,
+) -> Option<(f64, SearchStep, usize)> {
+    let miss = |i: usize| (runs[i].mean_k - target_k).abs();
+    let nearest = (0..runs.len())
+        .filter(|&i| runs[i].converged && runs[i].mean_k.is_finite())
+        .fold(None, |best: Option<usize>, i| match best {
+            Some(b) if miss(b) <= miss(i) => Some(b),
+            _ => Some(i),
+        })?;
+    let searched: Vec<usize> = (0..runs.len())
+        .filter(|&i| runs[i].searched && runs[i].mean_k.is_finite())
+        .collect();
+    let latest = runs.len() - 1;
+    let (u, step) = if !runs[latest].converged {
+        (
+            f64::midpoint(runs[nearest].u, runs[latest].u),
+            SearchStep::Halfway {
+                from: nearest,
+                toward: latest,
+            },
+        )
+    } else if let [.., a, b] = searched[..] {
+        let (first, second) = (runs[a], runs[b]);
+        let rise = second.mean_k - first.mean_k;
+        // By comparison, so that two points of one mean, or of means that are not numbers, end
+        // the search.
+        if rise.is_nan() || rise.abs() <= 0.0 {
+            return None;
+        }
+        let secant = (target_k - second.mean_k) * (second.u - first.u) / rise;
+        let straddle = (first.mean_k - target_k) * (second.mean_k - target_k) < 0.0;
+        let u = if straddle {
+            let (low, high) = if first.u < second.u {
+                (first.u, second.u)
+            } else {
+                (second.u, first.u)
+            };
+            (second.u + secant).clamp(low, high)
+        } else {
+            let cap = SECANT_STEP_CAP * (second.u - first.u).abs();
+            second.u + secant.clamp(-cap, cap)
+        };
+        (
+            u,
+            SearchStep::Secant {
+                points: [a, b],
+                from: nearest,
+            },
+        )
+    } else {
+        if !positive(slope_k) {
+            return None;
+        }
+        let from = runs[nearest];
+        (
+            from.u + (target_k - from.mean_k) / slope_k,
+            SearchStep::Slope { from: nearest },
+        )
+    };
+    u.is_finite()
+        .then(|| (u.clamp(0.0, bracket), step, nearest))
+}
+
+/// The zonal slope `S_Z` of the defect's step, K per unit of u (decision-r09-t13i's §2.4 follow-up 6
+/// §2): the secant of the search's two runs nearest the target `target_k`, K, that met the search's
+/// stop and whose means differ by at least [`DEFECT_PAIR_SPREAD_K`], with the pair; the steady
+/// states' slope `steady_k` where no such pair has a positive one.
+#[must_use]
+fn defect_slope(runs: &[CorrectionRun], target_k: f64, steady_k: f64) -> DefectSlope {
+    let mut order: Vec<usize> = (0..runs.len())
+        .filter(|&i| runs[i].searched && runs[i].mean_k.is_finite())
+        .collect();
+    // Nearest first, the earlier on a tie (the sort is stable).
+    order.sort_by(|&a, &b| {
+        (runs[a].mean_k - target_k)
+            .abs()
+            .total_cmp(&(runs[b].mean_k - target_k).abs())
+    });
+    let pair = order.first().and_then(|&a| {
+        order[1..]
+            .iter()
+            .find(|&&b| (runs[b].mean_k - runs[a].mean_k).abs() >= DEFECT_PAIR_SPREAD_K)
+            .map(|&b| [a, b])
+    });
+    let secant = pair.map(|[a, b]| (runs[b].mean_k - runs[a].mean_k) / (runs[b].u - runs[a].u));
+    match secant {
+        Some(slope) if positive(slope) => DefectSlope {
+            slope_k_per_u: slope,
+            pair,
+        },
+        Some(_) | None => DefectSlope {
+            slope_k_per_u: steady_k,
+            pair: None,
+        },
+    }
+}
+
+/// The defect step's zonal slope (decision-r09-t13i's §2.4 follow-up 6 §2).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct DefectSlope {
+    /// `S_Z`, K per unit of u.
+    pub(super) slope_k_per_u: f64,
+    /// The search's two runs it is the secant of, indices in its runs, nearer first; `None` where
+    /// it is the steady states' slope.
+    pub(super) pair: Option<[usize; 2]>,
+}
+
+/// The secant predictor of a run's start (decision-r09-t13i's §2.4 follow-up 7 §1, natural-parameter
+/// continuation: Allgower and Georg 1990, from the ruling's memory): each point's state of the two
+/// runs' end states `states`, K, at the share `share` of the way from the first's u to the second's,
+/// `x_a` + (`x_b` − `x_a`) share, and their return temperatures `returning` the same way where both are
+/// the coldest month's (the first's otherwise).
+#[must_use]
+fn predicted(
+    (first, second): (&[f64], &[f64]),
+    (first_returning, second_returning): (&Returning, &Returning),
+    share: f64,
+) -> (Vec<f64>, Returning) {
+    let state = first
+        .iter()
+        .zip(second)
+        .map(|(&a, &b)| a + (b - a) * share)
+        .collect();
+    let returning = match (first_returning, second_returning) {
+        (Returning::Coldest(a), Returning::Coldest(b)) => {
+            let mut bands = [0.0; LATITUDE_BANDS];
+            for ((out, &a), &b) in bands.iter_mut().zip(a.iter()).zip(b.iter()) {
+                *out = a + (b - a) * share;
+            }
+            Returning::Coldest(Box::new(bands))
+        }
+        (Returning::Own | Returning::Coldest(_), _) => first_returning.clone(),
+    };
+    (state, returning)
+}
+
+/// G2's start (decision-r09-t13i's §2.4 follow-up 7 §1): G1's end `g1` on `grid` plus the broadcast
+/// change of the zonal predictor over `S_Z`'s pair `pair` of the search's runs `runs`, from the
+/// answer's u to G2's, `(u_Z, u_2)`, and its return temperatures likewise; G1's end itself where
+/// `S_Z` is the steady slope, with no pair.
+#[must_use]
+fn g2_start(
+    grid: &ModelGrid,
+    g1: &Orbited,
+    runs: &[(SearchRun, Orbited)],
+    pair: Option<[usize; 2]>,
+    (answer_u, u): (f64, f64),
+) -> (Vec<f64>, Returning, RunStart) {
+    let Some([nearer, other]) = pair else {
+        return (
+            g1.final_k.clone(),
+            g1.returning.clone(),
+            RunStart::Continued,
+        );
+    };
+    let (first, second) = (&runs[nearer], &runs[other]);
+    let share = (u - answer_u) / (second.0.run.u - first.0.run.u);
+    let change: Vec<f64> = first
+        .1
+        .final_k
+        .iter()
+        .zip(&second.1.final_k)
+        .map(|(x_a, x_b)| (x_b - x_a) * share)
+        .collect();
+    let state = g1
+        .final_k
+        .iter()
+        .zip(grid.broadcast(&change))
+        .map(|(g1_k, change)| g1_k + change)
+        .collect();
+    let returning = shifted_returning(
+        &g1.returning,
+        (&first.1.returning, &second.1.returning),
+        share,
+    );
+    (state, returning, RunStart::Predicted)
+}
+
+/// G1's return temperatures `g1` shifted by the zonal pair's change of theirs, (second − first)
+/// times `share` (decision-r09-t13i's §2.4 follow-up 7 §1): band by band where all are the coldest
+/// month's, G1's own otherwise.
+#[must_use]
+fn shifted_returning(
+    g1: &Returning,
+    (first, second): (&Returning, &Returning),
+    share: f64,
+) -> Returning {
+    match (g1, first, second) {
+        (Returning::Coldest(g1), Returning::Coldest(first), Returning::Coldest(second)) => {
+            let mut bands = [0.0; LATITUDE_BANDS];
+            for (((out, &g1), &first), &second) in bands
+                .iter_mut()
+                .zip(g1.iter())
+                .zip(first.iter())
+                .zip(second.iter())
+            {
+                *out = g1 + (second - first) * share;
+            }
+            Returning::Coldest(Box::new(bands))
+        }
+        (Returning::Own | Returning::Coldest(_), _, _) => g1.clone(),
+    }
+}
+
+/// How a run of the correction began.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum RunStart {
+    /// From the fit's steady state.
+    Steady,
+    /// From an earlier run's end.
+    Continued,
+    /// From the secant predictor of two earlier runs (decision-r09-t13i's §2.4 follow-up 7 §1).
+    Predicted,
+}
+
+/// The fit's radiation at any u (decision-r09-t13i §2.2): the fit's own at its u₀, so that Z₀ and
+/// run A are the fit's to the bit, and [`Radiation::at`] the emission factor e^u at T\* elsewhere.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FitAt {
+    /// The fit's u₀ = ln x.
+    u0: f64,
+    /// The fit's emission factor x.
+    factor: f64,
+    /// The fit's radiation.
+    radiation: Radiation,
+    /// The model's greenhouse.
+    greenhouse: Greenhouse,
+    /// T\*, K.
+    mean_k: f64,
+}
+
+impl FitAt {
+    /// The emission factor and radiation at u = `u`.
+    #[must_use]
+    fn at(&self, u: f64) -> (f64, Radiation) {
+        if u.total_cmp(&self.u0).is_eq() {
+            (self.factor, self.radiation)
+        } else {
+            let x = math::exp(u);
+            (x, Radiation::at(self.greenhouse, x, self.mean_k))
+        }
+    }
+}
+
+/// The zonal search of a run's correction over its fit's zonal model (decision-r09-t13i's §2.4
+/// follow-up 4 §4): its runs so far, each its record and its orbits, and what its steps read.
+struct ZonalSearch<'a> {
+    /// The model.
+    model: &'a EnergyBalance,
+    /// The fit's zonal model.
+    zonal: &'a Seasonal<'a>,
+    /// The radiation at any u.
+    at: FitAt,
+    /// The zonal steady states' two-sided slope of the surface mean in u at u₀ ±
+    /// [`CORRECTION_STEP`], K per unit of u.
+    slope_k: f64,
+    /// The runs so far, in order.
+    runs: Vec<(SearchRun, Orbited)>,
+}
+
+impl<'a> ZonalSearch<'a> {
+    /// The search's first run, Z₀, at the fit's u₀ from its zonal steady state `steady_k`, K, under
+    /// the search's stop, and the steady states' slope on `fit`'s set-up.
+    #[must_use]
+    fn begin(
+        model: &'a EnergyBalance,
+        zonal: &'a Seasonal<'a>,
+        fit: &ZonalFit<'_>,
+        at: FitAt,
+        steady_k: &[f64],
+    ) -> Self {
+        let first = model.orbits(
+            zonal.grid,
+            zonal.sunlight,
+            &at.radiation,
+            (steady_k.to_vec(), Start::Steady),
+            zonal.sea_share,
+            zonal.ground,
+            zonal.ocean,
+            SEARCH_STOP,
+        );
+        let runs = vec![(
+            SearchRun {
+                run: CorrectionRun::of(at.u0, zonal, &first),
+                target_k: at.mean_k,
+                step: SearchStep::Fit,
+            },
+            first,
+        )];
+        let probe = |u: f64| {
+            model
+                .probe(
+                    zonal.grid,
+                    fit.insolation_w_m2,
+                    at.mean_k,
+                    fit.ground,
+                    fit.ocean,
+                    math::exp(u),
+                )
+                .surface_mean_k
+        };
+        let slope_k = (probe(at.u0 + CORRECTION_STEP) - probe(at.u0 - CORRECTION_STEP))
+            / (2.0 * CORRECTION_STEP);
+        Self {
+            model,
+            zonal,
+            at,
+            slope_k,
+            runs,
+        }
+    }
+
+    /// The search carried on toward the surface mean `target_k`, K, for at most `limit` more runs
+    /// ([`search`]), each under the search's stop from the run its step names: its answer.
+    fn toward(&mut self, target_k: f64, limit: usize) -> Option<usize> {
+        let (model, zonal, at) = (self.model, self.zonal, self.at);
+        let run = |u: f64, step: &SearchStep, runs: &[(SearchRun, Orbited)]| {
+            let (state, returning, start) = match *step {
+                // From Z₂ on, the secant's two runs predict the start (follow-up 7 §1).
+                SearchStep::Secant { points: [a, b], .. } => {
+                    let (first, second) = (&runs[a], &runs[b]);
+                    let share = (u - first.0.run.u) / (second.0.run.u - first.0.run.u);
+                    let (state, returning) = predicted(
+                        (&first.1.final_k, &second.1.final_k),
+                        (&first.1.returning, &second.1.returning),
+                        share,
+                    );
+                    (state, returning, RunStart::Predicted)
+                }
+                SearchStep::Fit | SearchStep::Slope { .. } | SearchStep::Halfway { .. } => {
+                    let from = match *step {
+                        SearchStep::Slope { from } | SearchStep::Halfway { from, .. } => from,
+                        SearchStep::Fit | SearchStep::Secant { .. } => 0,
+                    };
+                    let from = &runs[from].1;
+                    (
+                        from.final_k.clone(),
+                        from.returning.clone(),
+                        RunStart::Continued,
+                    )
+                }
+            };
+            let orbited = model.orbits(
+                zonal.grid,
+                zonal.sunlight,
+                &at.at(u).1,
+                (state, Start::Continued(returning)),
+                zonal.sea_share,
+                zonal.ground,
+                zonal.ocean,
+                SEARCH_STOP,
+            );
+            let record = CorrectionRun {
+                start,
+                ..CorrectionRun::of(u, zonal, &orbited)
+            };
+            (record, orbited)
+        };
+        search(
+            &mut self.runs,
+            target_k,
+            self.slope_k,
+            math::ln(EMISSION_FACTOR_MAX),
+            limit,
+            &run,
+        )
+    }
+
+    /// The runs' records, in order.
+    #[must_use]
+    fn records(&self) -> Vec<SearchRun> {
+        self.runs.iter().map(|(record, _)| *record).collect()
+    }
+
+    /// The defect step's slope over the search's runs toward T\* ([`defect_slope`]).
+    #[must_use]
+    fn defect_slope(&self) -> DefectSlope {
+        let runs: Vec<CorrectionRun> = self.runs.iter().map(|(record, _)| record.run).collect();
+        defect_slope(&runs, self.at.mean_k, self.slope_k)
+    }
+
+    /// The zonal set-up's climate: the answer's run `answer` (the first where none is), its
+    /// emission factor and radiation, and the search's record.
+    #[must_use]
+    fn into_climate(mut self, answer: Option<usize>) -> (Orbited, f64, Radiation, MeanCorrection) {
+        let kept = answer.unwrap_or(0);
+        let (x, radiation) = self.at.at(self.runs[kept].0.run.u);
+        let search = self.records();
+        let orbited = self.runs.swap_remove(kept).1;
+        (
+            orbited,
+            x,
+            radiation,
+            MeanCorrection::Zonal {
+                search,
+                answer: kept,
+            },
+        )
+    }
+}
+
+/// A seasonal run's set-up: its grid, sunlight, sea shares, ground and sea's transport.
+#[derive(Debug, Clone, Copy)]
+struct Seasonal<'a> {
+    grid: &'a ModelGrid,
+    sunlight: &'a Sunlight,
+    sea_share: &'a [f64],
+    ground: GridGround<&'a Relief>,
+    ocean: Option<&'a OceanGrid>,
+}
+
+/// τ's solve on the zonal grid: its annual insolation, ground and sea's transport.
+#[derive(Debug, Clone, Copy)]
+struct ZonalFit<'a> {
+    insolation_w_m2: &'a [f64],
+    ground: GridGround<&'a Relief>,
+    ocean: Option<&'a OceanGrid>,
+}
+
+/// One seasonal run of the mean's correction: its u = ln x, its surface mean, its orbits and
+/// whether it converged (decision-r09-t13i's §2.4 follow-up 3).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct CorrectionRun {
+    /// u = ln(1 + ¾τ(T\*)).
+    pub(super) u: f64,
+    /// Its annual field's surface mean, K.
+    pub(super) mean_k: f64,
+    /// The orbits it ran.
+    pub(super) orbits: u32,
+    /// The extrapolation's jumps that stood.
+    pub(super) jumps: u32,
+    /// The extrapolation's jumps rejected.
+    pub(super) rejects: u32,
+    /// How it began.
+    pub(super) start: RunStart,
+    /// Whether its last orbit met the climate's stop, [`CONVERGENCE_K`], within [`MAX_ORBITS`]: a
+    /// climate reads it (decision-r09-t13i's §2.4 follow-up 6 §3).
+    pub(super) converged: bool,
+    /// Whether its last orbit met the search's stop, [`SEARCH_CONVERGENCE_K`]: the search's secant
+    /// and the defect's slope read it.
+    pub(super) searched: bool,
+}
+
+impl CorrectionRun {
+    /// The record of `orbited`, a run of `run`'s set-up at u = `u`.
+    #[must_use]
+    fn of(u: f64, run: &Seasonal<'_>, orbited: &Orbited) -> Self {
+        Self {
+            u,
+            mean_k: surface_mean(run.ground, run.grid, &orbited.climate.annual_k),
+            orbits: orbited.climate.orbits,
+            jumps: orbited.jumps,
+            rejects: orbited.rejects,
+            start: orbited.start,
+            converged: orbited.climate.converged,
+            searched: orbited.searched,
+        }
+    }
+}
+
+/// The least spread of the means of the two search runs whose secant is the defect step's slope, K:
+/// 0.1 (`Adopted`, decision-r09-t13i's §2.4 follow-up 6 §2): two reads nearer than that differ by
+/// little more than the runs' own reproducibility (the coarse Earth's second search: two runs
+/// 1.3 × 10⁻⁶ apart in u differed by 0.037 K).
+pub(super) const DEFECT_PAIR_SPREAD_K: f64 = 0.1;
+
+/// How a run of the zonal search took its u (decision-r09-t13i's §2.4 follow-up 4 §4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum SearchStep {
+    /// Z₀: at the fit's u, from its zonal steady state.
+    Fit,
+    /// By the zonal steady states' slope from run `from`.
+    Slope {
+        /// The run it continued from.
+        from: usize,
+    },
+    /// The secant on the converged runs `points`, continued from run `from`.
+    Secant {
+        /// The secant's two runs, earlier first.
+        points: [usize; 2],
+        /// The run it continued from.
+        from: usize,
+    },
+    /// Halfway from the converged run `from`'s u to the unconverged run `toward`'s.
+    Halfway {
+        /// The converged run it continued from.
+        from: usize,
+        /// The unconverged run.
+        toward: usize,
+    },
+}
+
+/// One run of the zonal search: its record, the target it served, K, and how it took its u.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct SearchRun {
+    /// Its u, surface mean, orbits and convergence.
+    pub(super) run: CorrectionRun,
+    /// Its search's target surface mean, K: T\*, or T\* − d for the second search.
+    pub(super) target_k: f64,
+    /// How it took its u.
+    pub(super) step: SearchStep,
+}
+
+/// Which geographic run the mean's correction kept ([`kept_run`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum KeptRun {
+    /// G1, at the zonal search's answer (run A at u₀ where the search has none): only where G2 did
+    /// not converge and G1 met the climate's stop, or where neither converged and G1 lies nearer,
+    /// or as near.
+    G1,
+    /// G2, the defect's step, or run A where G1 measured no d or the search has no answer.
+    G2,
+}
+
+/// What the mean's correction did (decision-r09-t13i's §2.4 follow-up 4 §4).
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum MeanCorrection {
+    /// None: a one-month year, whose steady state is its climate, or a body with neither light
+    /// nor heat.
+    None,
+    /// None: τ's solve was clamped, so no greenhouse within its bracket holds the mean; the run is
+    /// at the fit's u from its steady state.
+    Clamped,
+    /// On the zonal grid: the zonal search, its answer the climate.
+    Zonal {
+        /// The search's runs, in order.
+        search: Vec<SearchRun>,
+        /// The answer's index in `search`.
+        answer: usize,
+    },
+    /// On the geographic or the locked grid: the zonal search, G1 and G2.
+    Searched {
+        /// The search's runs, in order.
+        search: Vec<SearchRun>,
+        /// Z(T\*)'s answer, its index in `search`.
+        answer: Option<usize>,
+        /// G1.
+        g1: CorrectionRun,
+        /// G1's probe at the orbit it ended: its R̄ and T̂ (decision-r09-t13i's §2.4 follow-up 8
+        /// §1); `None` where it reached its last orbit under neither of its stops, or its state
+        /// stopped being finite.
+        g1_probe: Option<Box<MeanProbe>>,
+        /// d = T̂ − `T̄_Z`, K, and the defect step's zonal slope, where G2 took it.
+        defect: Option<(f64, DefectSlope)>,
+        /// The surface mean of G2's start, K, where G2 took the defect's step: G1's end, predicted
+        /// along the zonal search's pair where `S_Z` has one (decision-r09-t13i's §2.4 follow-up
+        /// 7 §1).
+        g2_start_k: Option<f64>,
+        /// G2, which always runs (follow-up 8 §1.3).
+        g2: CorrectionRun,
+        /// The run kept.
+        kept: KeptRun,
+    },
+}
+
+/// How a seasonal run begins (decision-r09-t13i §2.4).
+#[derive(Debug, Clone, PartialEq)]
+enum Start {
+    /// From the annual-mean steady state, relaxed first on the whole grid where the sunlight varies
+    /// in longitude, the Ekman cells' first return temperatures the state's own.
+    Steady,
+    /// From a seasonal run's last state, carrying on with its return temperatures `0`.
+    Continued(Returning),
 }
 
 /// What a seasonal run's orbits leave: the last orbit's means, the ocean's record over it, the
@@ -2459,6 +4584,26 @@ struct Orbited {
     final_k: Vec<f64>,
     /// The return temperatures after the last orbit.
     returning: Returning,
+    /// Each orbit's move of the points' annual means from the orbit before, K, the largest over
+    /// the points, in order (none after the first).
+    moves_k: Vec<f64>,
+    /// Whether its last orbit met the search's stop, [`SEARCH_CONVERGENCE_K`]; its climate's
+    /// `converged` says whether it met the climate's, [`CONVERGENCE_K`].
+    searched: bool,
+    /// The extrapolation's jumps that stood.
+    jumps: u32,
+    /// The extrapolation's jumps rejected.
+    rejects: u32,
+    /// How it began: from a steady state, or continued from a run's end.
+    start: RunStart,
+    /// G1's probe at the orbit its run ended, by its probe stop or the climate's; `None` for every
+    /// other run, and for a G1 that reached its last orbit under neither or whose state stopped
+    /// being finite (decision-r09-t13i's §2.4 follow-up 8 §1).
+    mean_probe: Option<MeanProbe>,
+    /// The state it began from, K, and the return temperatures it began with: the search's test of
+    /// its predicted starts reads them.
+    #[cfg(test)]
+    started: (Vec<f64>, Returning),
 }
 
 /// The northward transports at each band edge of a grid ([`LATITUDE_BANDS`] + 1 values, zero at
@@ -2541,7 +4686,9 @@ impl Recorder {
             month.fill(0.0);
         }
         for month in &mut self.months {
-            *month = Transports::zero();
+            month.atmosphere_w_m2.fill(0.0);
+            month.ekman_w_m2.fill(0.0);
+            month.gyres_w_m2.fill(0.0);
         }
     }
 
@@ -2614,11 +4761,12 @@ impl Recorder {
     }
 }
 
-/// The return temperatures, south and north, K, that the next orbit's Ekman cells read: each
-/// hemisphere's least over the months of its return band's sea temperature ([`OceanGrid::return_k`]),
-/// from each month's sums `months` of the points' sea-level temperatures over its `counts` steps,
-/// each point's water surface under the ground `ground`, with `water` and `band_sea` the scratch
-/// of one month's points and bands.
+/// The bands' return temperatures, K, that the next orbit's Ekman cells read: each band's least over
+/// the months of its sea temperature ([`OceanGrid::band_sea_k`]), from each month's sums `months`
+/// of the points' sea-level temperatures over its `counts` steps, each point's water surface under
+/// the ground `ground`, with `water` and `band_sea` the scratch of one month's points and bands
+/// (decision-r09-t13i §2.3.1 and its §2.2/§2.3 follow-up 5 §1: the return band's is `T_R`, and the
+/// bands' between the edge and it the subducted water's).
 #[must_use]
 fn coldest_return_k(
     grid: &ModelGrid,
@@ -2628,8 +4776,8 @@ fn coldest_return_k(
     counts: &[u32; 12],
     water: &mut [f64],
     band_sea: &mut [f64],
-) -> [f64; 2] {
-    let mut coldest = [f64::INFINITY; 2];
+) -> [f64; LATITUDE_BANDS] {
+    let mut coldest = [f64::INFINITY; LATITUDE_BANDS];
     for (sums, &count) in months.iter().zip(counts) {
         if count == 0 {
             continue;
@@ -2643,7 +4791,7 @@ fn coldest_return_k(
             };
         }
         ocean.band_sea_k(grid, water, band_sea);
-        for (least, value) in coldest.iter_mut().zip(ocean.return_k(band_sea)) {
+        for (least, &value) in coldest.iter_mut().zip(band_sea.iter()) {
             if value < *least {
                 *least = value;
             }
@@ -2861,6 +5009,7 @@ fn vapour_quantile_emission(
 /// T at the sea-level temperature `t_k`, K, under emission factor `emission_factor`, each
 /// quantile seen through its transmission `transmission` ([`quantile_emission`]): the mean over
 /// its quantiles, once at a level point.
+#[cfg(test)]
 #[must_use]
 fn point_emission(
     t_k: f64,
@@ -2912,6 +5061,7 @@ fn quantile_mean(shape: Shape, at: impl Fn(usize) -> Emission) -> Emission {
     reason = "the point's temperature, its relief and heights, the water term's three parts and the \
               table; bundling them would only rename them"
 )]
+#[cfg(test)]
 #[must_use]
 fn vapour_point_emission(
     t_k: f64,
@@ -2984,16 +5134,7 @@ fn currents_of(
     match ocean {
         OceanTransport::None => None,
         OceanTransport::Currents { mean_depth_m } => {
-            let circulation = match turning {
-                Turning::Rotating => Some(Circulation::for_inputs(inputs, turning)),
-                Turning::Locked => None,
-            };
-            Some(Currents::of(
-                inputs,
-                model.freezing,
-                mean_depth_m,
-                circulation,
-            ))
+            Some(Currents::of(inputs, model.freezing, mean_depth_m, turning))
         }
     }
 }
@@ -3015,6 +5156,84 @@ pub(super) fn solve(
     let sunlight = Sunlight::of(inputs, grid, step);
     let currents = currents_of(inputs, &model, ocean, Turning::Rotating);
     model.run(
+        grid,
+        &sunlight,
+        inputs.mean_surface_temperature().value(),
+        sea_share,
+        ground,
+        currents.as_ref(),
+    )
+}
+
+/// The seasonal run A of [`solve`] continued at u = `u` ([`EnergyBalance::run_continued`]).
+#[cfg(test)]
+#[must_use]
+pub(super) fn solve_continued(
+    inputs: &CoarseInputs,
+    grid: &ModelGrid,
+    sea_share: &[f64],
+    step: Seconds,
+    ground: Ground<'_>,
+    ocean: OceanTransport,
+    u: f64,
+) -> ContinuedRun {
+    let model = EnergyBalance::for_inputs(inputs);
+    let sunlight = Sunlight::of(inputs, grid, step);
+    let currents = currents_of(inputs, &model, ocean, Turning::Rotating);
+    model.run_continued(
+        grid,
+        &sunlight,
+        inputs.mean_surface_temperature().value(),
+        sea_share,
+        ground,
+        currents.as_ref(),
+        u,
+    )
+}
+
+/// One seasonal run of [`solve`]'s at the fit's u from its steady state, extrapolating as `jumps`
+/// says ([`EnergyBalance::run_at_fit`]).
+#[cfg(test)]
+#[must_use]
+pub(super) fn solve_at_fit(
+    inputs: &CoarseInputs,
+    grid: &ModelGrid,
+    sea_share: &[f64],
+    step: Seconds,
+    ground: Ground<'_>,
+    ocean: OceanTransport,
+    (jumps, orbits): (Jumps, Option<u32>),
+) -> GridClimate {
+    let model = EnergyBalance::for_inputs(inputs);
+    let sunlight = Sunlight::of(inputs, grid, step);
+    let currents = currents_of(inputs, &model, ocean, Turning::Rotating);
+    model.run_at_fit(
+        grid,
+        &sunlight,
+        inputs.mean_surface_temperature().value(),
+        sea_share,
+        ground,
+        currents.as_ref(),
+        jumps,
+        orbits,
+    )
+}
+
+/// The zonal search of [`solve`]'s, with each run's states ([`EnergyBalance::search_runs`]).
+#[cfg(test)]
+#[must_use]
+pub(super) fn search_states(
+    inputs: &CoarseInputs,
+    grid: &ModelGrid,
+    sea_share: &[f64],
+    step: Seconds,
+    ground: Ground<'_>,
+    ocean: OceanTransport,
+) -> Vec<SearchState> {
+    let model = EnergyBalance::for_inputs(inputs);
+    let sunlight = Sunlight::of(inputs, grid, step);
+    let currents = currents_of(inputs, &model, ocean, Turning::Rotating);
+    model.search_runs(
         grid,
         &sunlight,
         inputs.mean_surface_temperature().value(),
@@ -3053,20 +5272,29 @@ pub(super) fn solve_locked(
 
 /// A point's outgoing radiation at `t_k`, K, under `radiation`, at the sea level where `raised` is
 /// `None` (T13.a's arithmetic to the bit) and otherwise over its relief, heights and
-/// transmissions; and the temperature its sea's capacity reads, its water surface's, K.
+/// transmissions, its quantiles' grounds and table places `quantiles` the step's own; and the
+/// temperature its sea's capacity reads, its water surface's, K.
 #[must_use]
 fn emission_and_sea(
     radiation: &Radiation,
     t_k: f64,
     raised: Option<(&Relief, (&PointHeights, &[f64; QUANTILES]))>,
+    quantiles: &[Quantile; QUANTILES],
     table: Option<&Tabulated>,
 ) -> (Emission, f64) {
     match (*radiation, raised) {
         (_, None) => (sea_level_emission(radiation, t_k, table), t_k),
-        (Radiation::Grey { emission_factor }, Some((relief, (heights, transmission)))) => (
-            point_emission(t_k, emission_factor, heights, transmission, relief),
-            relief.water_k(t_k, heights),
-        ),
+        (Radiation::Grey { emission_factor }, Some((relief, (heights, transmission)))) => {
+            let column = Column::at(t_k, emission_factor);
+            let at = |q: usize| {
+                let quantile = quantiles[q];
+                quantile_emission(&column, quantile.ground_k, quantile.rate, transmission[q])
+            };
+            (
+                quantile_mean(heights.shape, at),
+                relief.water_k(t_k, heights),
+            )
+        }
         (
             Radiation::Vapour {
                 multiplier,
@@ -3074,19 +5302,39 @@ fn emission_and_sea(
                 water,
             },
             Some((relief, (heights, transmission))),
-        ) => (
-            vapour_point_emission(
-                t_k,
-                multiplier,
-                dry_depth,
-                &water,
-                heights,
-                transmission,
-                relief,
-                table,
-            ),
-            relief.water_k(t_k, heights),
-        ),
+        ) => {
+            let column =
+                Column::vapour(t_k, multiplier, dry_depth, water_terms(&water, t_k, table));
+            // The table's water transmission holds only at its own multiplier, to the bit.
+            let wet_table = table.and_then(|table| {
+                table
+                    .wet
+                    .as_ref()
+                    .filter(|(held, _)| held.total_cmp(&multiplier).is_eq())
+                    .map(|(_, wet)| wet)
+            });
+            let at = |q: usize| {
+                let quantile = quantiles[q];
+                let wet = match wet_table.zip(quantile.located) {
+                    Some((wet, (i, f))) => {
+                        let (transmission, slope) = hermite(wet, i, f);
+                        [transmission, slope]
+                    }
+                    None => wet_of(multiplier, water.depth_and_slope(quantile.ground_k)),
+                };
+                vapour_quantile_emission(
+                    &column,
+                    quantile.ground_k,
+                    quantile.rate,
+                    transmission[q],
+                    wet,
+                )
+            };
+            (
+                quantile_mean(heights.shape, at),
+                relief.water_k(t_k, heights),
+            )
+        }
     }
 }
 
@@ -3170,49 +5418,81 @@ mod tests {
     }
 
     /// The steady state's net heating sums to nothing over the sphere, the diffusion's to
-    /// rounding, and its mean is the inputs' 288 K.
+    /// rounding, under one τ and under the water term. Under one τ its mean is the inputs' 288 K;
+    /// under the water term the all-land Earth's annual-mean steady states jump across the mean
+    /// (decision-r09-t13i's §2.4 follow-up §1; under the 22 rules by weight the cold side ends at a
+    /// capped state near 285.3 K, ice share 0.157, its follow-up 6 §5), so its fit is labelled a
+    /// fold and keeps the guard's choice among its converged candidates (follow-up 6 §4).
     #[test]
     fn the_steady_state_conserves_energy_and_holds_the_mean() {
-        let (model, sun, grid) = earth();
-        let Fitted {
-            emission_factor: factor,
-            radiation,
-            steady: Steady {
-                t_k: steady,
-                converged,
-            },
-            surface_mean_k,
-            optical_depth: depth,
-        } = model.emission_factor(&grid, sun.annual(), 288.0);
-        assert!(converged);
-        assert_same_bits(surface_mean_k, grid.mean(&steady));
-        assert_eq!(depth, OpticalDepth::Solved);
-        assert!(
-            (grid.mean(&steady) - 288.0).abs() < 1e-6,
-            "{}",
-            grid.mean(&steady)
-        );
-        let tau = (factor - 1.0) / 0.75;
-        assert!((0.3..2.0).contains(&tau), "{tau}");
-        let (radiative, diffusive) = model.heating(&grid, &radiation, sun.annual(), &steady);
-        let absorbed = grid.mean(sun.annual());
-        assert!(
-            grid.mean(&diffusive).abs() < 1e-12 * absorbed,
-            "{}",
-            grid.mean(&diffusive)
-        );
-        assert!(
-            grid.mean(&radiative).abs() < 1e-6 * absorbed,
-            "{}",
-            grid.mean(&radiative)
-        );
-        for k in 0..LATITUDE_BANDS {
-            let net = radiative[k] + diffusive[k];
-            assert!(net.abs() < 1e-5, "band {k}: {net}");
+        let (vapour, sun, grid) = earth();
+        let grey = EnergyBalance {
+            greenhouse: Greenhouse::Grey,
+            ..vapour
+        };
+        for (name, model) in [("one τ", grey), ("the water term", vapour)] {
+            let Fitted {
+                emission_factor: factor,
+                radiation,
+                steady:
+                    Steady {
+                        t_k: steady,
+                        converged,
+                    },
+                surface_mean_k,
+                optical_depth: depth,
+                candidates,
+            } = model.emission_factor(&grid, sun.annual(), 288.0);
+            eprintln!(
+                "{name}: x {factor:.5} ({depth:?}), the steady state's mean {surface_mean_k:.3} K, \
+                 its ice share {:.3}; the fold guard's candidates {candidates:?}",
+                ice_share(model.freezing, &grid, GridGround::SeaLevel, &steady)
+            );
+            assert!(converged, "{name}");
+            assert_same_bits(surface_mean_k, grid.mean(&steady));
+            if model.greenhouse == Greenhouse::Grey {
+                assert_eq!(depth, OpticalDepth::Solved);
+                assert!(
+                    (grid.mean(&steady) - 288.0).abs() < 1e-6,
+                    "{}",
+                    grid.mean(&steady)
+                );
+            } else {
+                // The branch by g4's ruled rule (decision-r09-t13i's §2.4 follow-up 6 §4): a fold,
+                // and the kept probe the guard's choice among its converged candidates.
+                assert_eq!(depth, OpticalDepth::Folded);
+                let side = nearer_side(candidates, 288.0, model.ice_fraction)
+                    .expect("a fold keeps a candidate");
+                let chosen = match side {
+                    Side::Cold => candidates[0],
+                    Side::Warm => candidates[1],
+                }
+                .expect("the chosen side kept a probe");
+                assert_same_bits(factor, chosen.emission_factor);
+                assert_same_bits(surface_mean_k, chosen.surface_mean_k);
+            }
+            let tau = (factor - 1.0) / 0.75;
+            assert!((0.3..2.0).contains(&tau), "{tau}");
+            let (radiative, diffusive) = model.heating(&grid, &radiation, sun.annual(), &steady);
+            let absorbed = grid.mean(sun.annual());
+            assert!(
+                grid.mean(&diffusive).abs() < 1e-12 * absorbed,
+                "{}",
+                grid.mean(&diffusive)
+            );
+            assert!(
+                grid.mean(&radiative).abs() < 1e-6 * absorbed,
+                "{}",
+                grid.mean(&radiative)
+            );
+            for k in 0..LATITUDE_BANDS {
+                let net = radiative[k] + diffusive[k];
+                assert!(net.abs() < 1e-5, "{name}, band {k}: {net}");
+            }
+            // Warm at the equator, cold at the poles, and symmetric.
+            assert!(contrast(&steady) > 20.0);
+            assert!((steady[0] - steady[LATITUDE_BANDS - 1]).abs() < 1e-6);
         }
-        // Warm at the equator, cold at the poles, and symmetric.
-        assert!(contrast(&steady) > 20.0);
-        assert!((steady[0] - steady[LATITUDE_BANDS - 1]).abs() < 1e-6);
     }
 
     /// A mean colder than the albedo allows clamps τ at zero; one that no greenhouse within the
@@ -3331,6 +5611,83 @@ mod tests {
         assert!(total.abs() < 1e-12 * size, "{total} of {size}");
     }
 
+    /// The step's shared quantiles (a bit-exact cost lever, decision-r09-t13i's §2.4 follow-up 6
+    /// §3): each quantile's ground and table place computed once a step give the albedo and the
+    /// outgoing radiation of the point-by-point functions to the bit, under one τ and under the
+    /// water term, through the table and directly, at a level point, a split one and one whose
+    /// highest quantiles the night floor holds.
+    #[test]
+    fn the_step_s_shared_quantiles_give_the_point_functions_to_the_bit() {
+        let inputs = reference::earth_like();
+        let model = EnergyBalance::for_inputs(&inputs);
+        let relief = Relief::of(
+            &inputs,
+            Hypsometry::new(vec![
+                PointHeights::new(
+                    [0.0, 0.0, 120.0, 900.0, 1_800.0, 3_000.0, 4_500.0, 6_000.0],
+                    0.0,
+                ),
+                PointHeights::level(1_500.0, 0.0),
+                PointHeights::new([0.0; QUANTILES].map(|_| 0.0), 0.0),
+                PointHeights::new(
+                    [0.0, 0.0, 0.0, 0.0, 9_000.0, 12_000.0, 15_000.0, 20_000.0],
+                    0.0,
+                ),
+            ]),
+        );
+        for radiation in [
+            Radiation::Grey {
+                emission_factor: 1.65,
+            },
+            Radiation::at(model.greenhouse, 1.65, 288.0),
+        ] {
+            let table = Tabulated::new(&model, &radiation, 180.0, 330.0);
+            let transmissions = GridGround::Relief(&relief).transmissions(&radiation);
+            for table in [Some(&table), None] {
+                for point in [0, 1, 3] {
+                    let heights = relief.hypsometry().point(point);
+                    for t in [150.0, 205.0, 250.0, 270.0, 273.16, 288.0, 305.0, 330.0] {
+                        let quantiles = relief.quantiles_at(t, heights, table);
+                        let shared = model.located_albedo(heights.shape, &quantiles, table);
+                        let direct = model.point_albedo(t, heights, &relief, table);
+                        assert_same_bits(shared.albedo, direct.albedo);
+                        assert_same_bits(shared.slope_per_k, direct.slope_per_k);
+                        let raised = Some((&relief, (heights, &transmissions[point])));
+                        let (emission, sea) =
+                            emission_and_sea(&radiation, t, raised, &quantiles, table);
+                        let reference = match radiation {
+                            Radiation::Grey { emission_factor } => point_emission(
+                                t,
+                                emission_factor,
+                                heights,
+                                &transmissions[point],
+                                &relief,
+                            ),
+                            Radiation::Vapour {
+                                multiplier,
+                                dry_depth,
+                                water,
+                            } => vapour_point_emission(
+                                t,
+                                multiplier,
+                                dry_depth,
+                                &water,
+                                heights,
+                                &transmissions[point],
+                                &relief,
+                                table,
+                            ),
+                        };
+                        assert_same_bits(emission.flux_w_m2, reference.flux_w_m2);
+                        assert_same_bits(emission.slope_w_m2_k, reference.slope_w_m2_k);
+                        assert_same_bits(emission.fixed_slope_w_m2_k, reference.fixed_slope_w_m2_k);
+                        assert_same_bits(sea, relief.water_k(t, heights));
+                    }
+                }
+            }
+        }
+    }
+
     /// The tabulated functions are the direct ones to the interpolant's error, h within 10⁻⁹ of
     /// itself and its slope within 10⁻⁶, the albedo and its slope within 10⁻⁹, everywhere: the
     /// intervals holding the saturation curve's kinks, at the triple point and where the vapour
@@ -3376,6 +5733,32 @@ mod tests {
         );
         assert!(worst_h < 1e-9 && worst_slope < 1e-6);
         assert!(worst_albedo < 1e-9 && worst_albedo_slope < 1e-8);
+        // The water term's τ_w and the relief's water transmission, under its multiplier
+        // (decision-r09-t13i §2.2): within the table's tolerances wherever it holds them.
+        let Radiation::Vapour {
+            multiplier, water, ..
+        } = Radiation::at(model.greenhouse, 1.65, 288.0)
+        else {
+            panic!("the reference Earth's air holds water");
+        };
+        let (mut worst_water, mut worst_wet) = (0.0_f64, 0.0_f64);
+        for i in 0..40_000 {
+            let t = 60.0 + 0.012_345 * f64::from(i);
+            let direct = water.depth_and_slope(t);
+            let read = water_terms(&water, t, Some(&table));
+            let wet = wet_terms(&water, multiplier, t, Some(&table));
+            let wet_direct = wet_of(multiplier, direct);
+            worst_water = worst_water
+                .max((read[0] - direct[0]).abs())
+                .max((read[1] - direct[1]).abs() * 1e-2);
+            worst_wet = worst_wet
+                .max((wet[0] - wet_direct[0]).abs())
+                .max((wet[1] - wet_direct[1]).abs() * 1e-2);
+        }
+        eprintln!("τ_w {worst_water:e}, its transmission {worst_wet:e}");
+        assert!(worst_water < 1e-9 && worst_wet < 1e-9);
+        // Another multiplier's transmission is never read from this table.
+        assert!(table.wet_at(multiplier * 1.01, 288.0).is_none());
         for kink in [273.16, 377.7] {
             assert!(table.locate(kink).is_none(), "{kink}");
         }
@@ -3659,19 +6042,21 @@ mod tests {
     /// Earth's fold, 287.34 K on the cold branch and 288.46 K on the warm one, the warm.
     #[test]
     fn the_fold_guard_takes_the_nearer_converged_probe_ties_to_the_warm_side() {
-        let probe = |factor: f64, mean: f64| Probe {
+        let iced = |factor: f64, mean: f64, ice_share: f64| Probe {
             emission_factor: factor,
             radiation: Radiation::Grey {
                 emission_factor: factor,
             },
+            ice_share,
             surface_mean_k: mean,
             steady: Steady {
                 t_k: vec![mean],
                 converged: true,
             },
         };
+        let probe = |factor: f64, mean: f64| iced(factor, mean, 0.05);
         let chosen = |cold: Option<Probe>, warm: Option<Probe>| {
-            nearer(cold, warm, 288.0).map(|probe| probe.emission_factor)
+            nearer(cold, warm, 288.0, 0.041).map(|probe| probe.emission_factor)
         };
         assert_eq!(
             chosen(Some(probe(1.656_70, 287.34)), Some(probe(1.656_80, 288.46))),
@@ -3688,5 +6073,905 @@ mod tests {
         assert_eq!(chosen(Some(probe(1.0, 280.0)), None), Some(1.0));
         assert_eq!(chosen(None, Some(probe(2.0, 300.0))), Some(2.0));
         assert_eq!(chosen(None, None), None);
+        // decision-r09-t13i's §2.4 follow-up §4 (b): at a snowball-class fold the branch whose ice
+        // share lies nearer plan 14's, though its mean lies farther: the warm one for a world plan
+        // 14 makes capped, the snowball for one it makes a snowball; ties to the nearer mean.
+        let (snowball, capped) = (iced(1.6545, 287.9, 1.0), iced(1.6595, 293.0, 0.03));
+        assert_eq!(
+            nearer(Some(snowball.clone()), Some(capped.clone()), 288.0, 0.041)
+                .map(|probe| probe.emission_factor),
+            Some(1.6595)
+        );
+        assert_eq!(
+            nearer(Some(snowball), Some(capped), 288.0, 0.9).map(|probe| probe.emission_factor),
+            Some(1.6545)
+        );
+        assert_eq!(
+            nearer(
+                Some(iced(1.0, 287.0, 0.9)),
+                Some(iced(2.0, 288.5, 0.1)),
+                288.0,
+                0.5
+            )
+            .map(|probe| probe.emission_factor),
+            Some(2.0)
+        );
+    }
+
+    /// R09.T13.i's stop (decision-r09-t13i §2.4): a move under 0.1 K stops a run only where the
+    /// moves shrink and the remainder they extrapolate to, `m_n` r ÷ (1 − r), is under 0.1 K too;
+    /// a move of nothing stops it; a first move, with none before it, never does.
+    #[test]
+    fn the_stop_reads_the_move_and_its_extrapolated_remainder() {
+        assert!(settled(0.05, Some(0.2), CONVERGENCE_K));
+        // r = 0.8: the remainder 0.2 K.
+        assert!(!settled(0.05, Some(0.0625), CONVERGENCE_K));
+        // Growing moves.
+        assert!(!settled(0.05, Some(0.04), CONVERGENCE_K));
+        assert!(!settled(0.15, Some(1.0), CONVERGENCE_K));
+        assert!(!settled(0.05, None, CONVERGENCE_K));
+        assert!(settled(0.0, None, CONVERGENCE_K));
+        assert!(settled(0.0, Some(0.0), CONVERGENCE_K));
+        assert!(!settled(f64::NAN, Some(1.0), CONVERGENCE_K));
+        // At the edge: r = 0.5, the remainder equal to the move.
+        assert!(settled(0.099, Some(0.198), CONVERGENCE_K));
+        assert!(!settled(0.1, Some(0.2), CONVERGENCE_K));
+        // The search's stop is the same rule at its own bound.
+        assert!(!settled(0.05, Some(0.2), SEARCH_CONVERGENCE_K));
+        assert!(settled(0.005, Some(0.02), SEARCH_CONVERGENCE_K));
+    }
+
+    /// A run's record for the tests: converged at the climate's stop as `converged` says, and at
+    /// the search's too where it did.
+    fn record(u: f64, mean_k: f64, converged: bool) -> CorrectionRun {
+        CorrectionRun {
+            u,
+            mean_k,
+            orbits: if converged { 12 } else { MAX_ORBITS },
+            jumps: 0,
+            rejects: 0,
+            start: RunStart::Continued,
+            converged,
+            searched: converged,
+        }
+    }
+
+    /// The correction's choice (decision-r09-t13i's §2.4 follow-up 3, as its follow-ups 4 and 6
+    /// keep it): the run nearest the mean that met the climate's stop, the earlier on a tie, over a
+    /// nearer run that did not; the nearest of all where none did; never a run whose mean is not
+    /// finite.
+    #[test]
+    fn the_correction_keeps_the_converged_run_nearest_the_mean() {
+        // The continent aquaplanet's old runs: C nearer, unconverged; B kept.
+        let (a, b, c) = (
+            record(0.506_49, 292.03, true),
+            record(0.502_29, 290.45, true),
+            record(0.495_77, 286.33, false),
+        );
+        assert_eq!(kept_index(&[a, b, c], 288.0), Some(1));
+        let c_converged = record(c.u, c.mean_k, true);
+        assert_eq!(kept_index(&[a, b, c_converged], 288.0), Some(2));
+        let unconverged = |r: CorrectionRun| record(r.u, r.mean_k, false);
+        assert_eq!(
+            kept_index(&[unconverged(a), unconverged(b), c], 288.0),
+            Some(2)
+        );
+        // A tie keeps the earlier.
+        assert_eq!(
+            kept_index(
+                &[record(0.5, 289.0, true), record(0.49, 287.0, true)],
+                288.0
+            ),
+            Some(0)
+        );
+        // A run whose mean is not finite is never kept, and none finite keeps none.
+        assert_eq!(
+            kept_index(
+                &[unconverged(a), record(0.5, f64::NAN, false), unconverged(c)],
+                288.0
+            ),
+            Some(2)
+        );
+        assert_eq!(kept_index(&[record(0.5, f64::NAN, true)], 288.0), None);
+    }
+
+    /// The correction's choice of G1 and G2 (decision-r09-t13i's §2.4 follow-up 8 §1.3): G2 where
+    /// it converged, even where a converged G1 lies nearer the mean; G1 where only it met the
+    /// climate's stop; the nearer where neither did; G2 where neither mean is finite.
+    #[test]
+    fn the_correction_keeps_g2_unless_only_g1_converged() {
+        let (near, far) = (record(0.5, 288.01, true), record(0.49, 288.3, true));
+        let unconverged = |r: CorrectionRun| record(r.u, r.mean_k, false);
+        assert_eq!(kept_run(&near, &far, 288.0), KeptRun::G2);
+        assert_eq!(kept_run(&near, &unconverged(far), 288.0), KeptRun::G1);
+        assert_eq!(
+            kept_run(&unconverged(near), &unconverged(far), 288.0),
+            KeptRun::G1
+        );
+        assert_eq!(
+            kept_run(&unconverged(far), &unconverged(near), 288.0),
+            KeptRun::G2
+        );
+        let lost = record(0.5, f64::NAN, false);
+        assert_eq!(kept_run(&lost, &lost, 288.0), KeptRun::G2);
+    }
+
+    /// The orbit at which G1's probe stop ends a hand-built run of surface means `mean_k(n)` after
+    /// orbit n, K, from `mean_k(0)`, every orbit fresh, at the stop's ratio `stop`, its fresh
+    /// changes kept by the model's own [`MeanTrail`]; `None` within [`MAX_ORBITS`].
+    fn probe_of(mean_k: impl Fn(u32) -> f64, stop: f64) -> Option<MeanProbe> {
+        let mut trail = MeanTrail::default();
+        for orbit in 1..=MAX_ORBITS {
+            trail.orbit();
+            let (mean, last) = (mean_k(orbit), mean_k(orbit - 1));
+            let ended = probe_end(
+                (orbit, trail.fresh),
+                (mean, mean - last),
+                trail.changes,
+                Some(stop),
+                PROBE_STOP_K,
+            );
+            if ended.is_some() {
+                return ended;
+            }
+            trail.push(mean - last);
+        }
+        None
+    }
+
+    /// `x` to the power `n`, by repeated product.
+    fn power(x: f64, n: u32) -> f64 {
+        (0..n).fold(1.0, |product, _| product * x)
+    }
+
+    /// The probe's remainder and limit are the extrapolation's form to the bit: |`δ_n`| times the
+    /// gain r\* ÷ (1 − r\*), and `T̄_n` plus `δ_n` times it.
+    fn assert_the_probe_s_form(probe: &MeanProbe) {
+        let gain = probe.ratio / (1.0 - probe.ratio);
+        assert_same_bits(probe.remainder_k, probe.change_k.abs() * gain);
+        assert_same_bits(probe.limit_k, probe.mean_k + probe.change_k * gain);
+    }
+
+    /// G1's probe stop (decision-r09-t13i's §2.4 follow-ups 8 §1 and 9 §2, its unit tests).
+    ///
+    /// On a hand-built geometric sequence of surface means, ratio 0.9, 1 K below its limit at the
+    /// start, the probe ends at the first orbit whose remainder R̄ = |`δ_n`| r ÷ (1 − r) = 0.9ⁿ is
+    /// at most 0.05 K, the 29th (0.9²⁸ = 0.0523, 0.9²⁹ = 0.0471), its own ratios agreeing at 0.9,
+    /// and its extrapolated limit T̂ is the sequence's within 10⁻⁹ K.
+    ///
+    /// On two modes, `δ_n` = 0.3ⁿ + 0.02 × 0.9ⁿ K, with the stop's ratio at the fast mode's 0.3, the
+    /// lane's failure in small: follow-up 8's probe ended it at orbit 3, R̄ 0.027 K against a true
+    /// remainder of 0.143 K; this one waits for the mean's two ratios to agree, ending it at orbit
+    /// 13 with T̂ within 3 × 10⁻⁵ K of the limit (the ruling's scratch figure; −2.73 × 10⁻⁵).
+    ///
+    /// It never ends a run before four fresh orbits or three changes, where the mean's two ratios
+    /// disagree by more than 0.05 or either lies outside (0, 1), at a stop's ratio of 1 or more, or
+    /// where a ratio is not a number; r\* is the larger of the stop's ratio and the mean's; and R̄
+    /// and T̂ are the extrapolation's form to the bit.
+    #[test]
+    fn g1_s_probe_ends_at_the_first_orbit_within_its_bound_and_reads_the_limit() {
+        let limit = 288.0;
+        let probe = probe_of(|n| limit - power(0.9, n), 0.9).expect("one mode ends the probe");
+        eprintln!("one mode: {probe:?}");
+        assert_eq!(probe.orbits, 29);
+        assert!(probe.remainder_k <= PROBE_STOP_K);
+        assert!((probe.limit_k - limit).abs() <= 1e-9, "{}", probe.limit_k);
+        assert_the_probe_s_form(&probe);
+        // Two modes: each orbit's change 0.3ⁿ + 0.02 × 0.9ⁿ, the remainder after orbit n
+        // 0.3ⁿ⁺¹ ÷ 0.7 + 0.02 × 0.9ⁿ⁺¹ ÷ 0.1.
+        let remainder = |n: u32| power(0.3, n + 1) / 0.7 + 0.02 * power(0.9, n + 1) / 0.1;
+        let two = probe_of(|n| limit - remainder(n), 0.3).expect("two modes end the probe");
+        eprintln!(
+            "two modes: {two:?}, the true remainder at orbit 3 {:.4} K",
+            remainder(3)
+        );
+        assert_eq!(two.orbits, 13);
+        let [rho, rho_before] = two.mean_ratios.expect("the probe read the mean's ratios");
+        assert!((rho - rho_before).abs() <= PROBE_AGREEMENT);
+        assert!((two.limit_k - limit).abs() <= 3e-5, "{}", two.limit_k);
+        assert!((two.limit_k - limit).abs() <= PROBE_STOP_K);
+        assert_the_probe_s_form(&two);
+        // The edges, at the mean's ratios 0.5 and 0.5.
+        let (means, agreeing) = ((287.99, 0.01), [Some(0.02), Some(0.04)]);
+        let end = |fresh: u32, means: (f64, f64), earlier: [Option<f64>; 2], stop: Option<f64>| {
+            probe_end((5, fresh), means, earlier, stop, PROBE_STOP_K)
+        };
+        assert!(end(4, means, agreeing, Some(0.5)).is_some());
+        assert!(end(3, means, agreeing, Some(0.5)).is_none());
+        assert!(end(4, means, [Some(0.02), None], Some(0.5)).is_none());
+        assert!(end(4, means, [Some(0.02), Some(0.03)], Some(0.5)).is_none());
+        assert!(end(4, (287.99, 0.03), agreeing, Some(0.5)).is_none());
+        assert!(end(4, (287.99, -0.01), agreeing, Some(0.5)).is_none());
+        assert!(end(4, means, agreeing, None).is_none());
+        assert!(end(4, means, agreeing, Some(1.0)).is_none());
+        assert!(end(4, means, agreeing, Some(f64::NAN)).is_none());
+        let larger = end(4, means, agreeing, Some(0.8)).expect("R̄ 0.04 K at r* 0.8");
+        assert_same_bits(larger.ratio, 0.8);
+        assert!(end(4, means, agreeing, Some(0.9)).is_none());
+    }
+
+    /// The mean's changes `a` and `b` are the same, each to the bit.
+    fn assert_same_changes(a: [Option<f64>; 2], b: [Option<f64>; 2]) {
+        for (x, y) in a.into_iter().zip(b) {
+            match (x, y) {
+                (Some(x), Some(y)) => assert_same_bits(x, y),
+                (None, None) => {}
+                (x, y) => panic!("{x:?} against {y:?}"),
+            }
+        }
+    }
+
+    /// G1's fresh count and the mean's changes (decision-r09-t13i's §2.4 follow-ups 8 §1 and 9 §1.3):
+    /// a jump restarts both; a reject restores both to the bit, the jump orbit's change included;
+    /// and after a jump that stood even a perfect geometric run's probe cannot end it before
+    /// [`PROBE_FRESH_ORBITS`] fresh orbits, ending it at the fourth.
+    #[test]
+    fn the_mean_s_trail_restarts_at_a_jump_and_a_reject_restores_it() {
+        let mut trail = MeanTrail::default();
+        for change in [0.04, 0.02, 0.01] {
+            trail.orbit();
+            trail.push(change);
+        }
+        assert_eq!(trail.fresh, 3);
+        let before = trail;
+        trail.jumped();
+        assert_eq!(trail.fresh, 0);
+        assert_same_changes(trail.changes, [None, None]);
+        trail.orbit();
+        trail.rejected();
+        assert_eq!(trail.fresh, before.fresh);
+        assert_same_changes(trail.changes, before.changes);
+        let mut trail = before;
+        trail.jumped();
+        let (mut mean, mut change) = (287.9, 0.02);
+        for n in 1..=PROBE_FRESH_ORBITS {
+            trail.orbit();
+            mean += change;
+            let ended = probe_end(
+                (10 + n, trail.fresh),
+                (mean, change),
+                trail.changes,
+                Some(0.5),
+                PROBE_STOP_K,
+            );
+            assert_eq!(ended.is_some(), n == PROBE_FRESH_ORBITS, "fresh orbit {n}");
+            trail.push(change);
+            change *= 0.5;
+        }
+    }
+
+    /// G1's probe where the climate's stop ends its run (decision-r09-t13i's §2.4 follow-up 9
+    /// §1.2): r\* is the mean's ratio where it lies above the stop's and below 1, the stop's ratio
+    /// otherwise, and nothing where the stop has no ratio or two moves of nothing made it 0 ÷ 0, T̂
+    /// then the mean itself.
+    #[test]
+    fn a_climate_stop_s_probe_reads_the_larger_ratio_and_a_still_run_none() {
+        let (means, agreeing) = ((287.99, 0.01), [Some(0.02), Some(0.04)]);
+        let from_mean = settled_probe(7, means, agreeing, Some(0.3));
+        assert_same_bits(from_mean.ratio, 0.5);
+        assert!(
+            (from_mean.limit_k - 288.0).abs() <= 1e-9,
+            "{}",
+            from_mean.limit_k
+        );
+        assert_the_probe_s_form(&from_mean);
+        assert_same_bits(settled_probe(7, means, agreeing, Some(0.8)).ratio, 0.8);
+        assert_same_bits(
+            settled_probe(7, (287.99, 0.03), agreeing, Some(0.3)).ratio,
+            0.3,
+        );
+        for stop in [None, Some(f64::NAN)] {
+            let still = settled_probe(7, (288.0, 0.0), [None, None], stop);
+            assert_same_bits(still.ratio, 0.0);
+            assert_same_bits(still.remainder_k, 0.0);
+            assert_same_bits(still.limit_k, 288.0);
+        }
+    }
+
+    /// G1's probe reads its run without changing it (decision-r09-t13i's §2.4 follow-up 8 §1's
+    /// "the probe reads the same sums as the stop"): on the reference Earth's zonal model at its
+    /// fitted u over a sea share of 0.7, from its steady state, a run
+    /// under G1's stop whose probe cannot fire (a bound of nothing) is the climate's run to the
+    /// bit, its probe recorded only where the climate's stop ended it; and on the marched run the
+    /// probe with no bound on its remainder ends it at the first fresh orbit whose mean's two
+    /// ratios agree, long before the climate's stop (at 0.05 K it ends that run nowhere before its
+    /// climate stop at orbit 27, the mean's last ratios there 0.60 and 0.92).
+    #[test]
+    fn g1_s_probe_reads_its_run_without_changing_it() {
+        let (model, sun, grid) = earth();
+        let fitted = model.emission_factor(&grid, sun.annual(), 288.0);
+        let sea = vec![0.7; grid.points()];
+        let run = |stop| {
+            model.orbits(
+                &grid,
+                &sun,
+                &fitted.radiation,
+                (fitted.steady.t_k.clone(), Start::Steady),
+                &sea,
+                GridGround::SeaLevel,
+                None,
+                stop,
+            )
+        };
+        let (plain, probed) = (
+            run(CLIMATE_STOP),
+            run(Stop {
+                probe_k: Some(0.0),
+                ..G1_STOP
+            }),
+        );
+        let same = |name: &str, a: &[f64], b: &[f64]| {
+            assert_eq!(a.len(), b.len(), "{name}");
+            for (x, y) in a.iter().zip(b) {
+                assert_same_bits(*x, *y);
+            }
+        };
+        same("annual", &plain.climate.annual_k, &probed.climate.annual_k);
+        for (a, b) in plain.climate.months_k.iter().zip(&probed.climate.months_k) {
+            same("month", a, b);
+        }
+        same("state", &plain.final_k, &probed.final_k);
+        same("moves", &plain.moves_k, &probed.moves_k);
+        assert_eq!(
+            (
+                plain.climate.orbits,
+                plain.climate.converged,
+                plain.searched,
+                plain.jumps,
+                plain.rejects
+            ),
+            (
+                probed.climate.orbits,
+                probed.climate.converged,
+                probed.searched,
+                probed.jumps,
+                probed.rejects
+            )
+        );
+        assert_eq!(plain.mean_probe, None);
+        assert_eq!(
+            probed.mean_probe.map(|probe| probe.orbits),
+            probed.climate.converged.then_some(probed.climate.orbits)
+        );
+        let marched = Stop {
+            jumps: Jumps::Never,
+            ..CLIMATE_STOP
+        };
+        let (climate, measured) = (
+            run(marched),
+            run(Stop {
+                probe_k: Some(f64::INFINITY),
+                ..marched
+            }),
+        );
+        let probe = measured.mean_probe.expect("the probe ends a marched run");
+        eprintln!(
+            "marched: {} orbits, converged {}; probed: {probe:?}",
+            climate.climate.orbits, climate.climate.converged
+        );
+        assert_eq!(probe.orbits, measured.climate.orbits);
+        assert!(!measured.climate.converged);
+        assert!(measured.climate.orbits < climate.climate.orbits);
+        let [rho, rho_before] = probe.mean_ratios.expect("the probe read the mean's ratios");
+        assert!((rho - rho_before).abs() <= PROBE_AGREEMENT);
+    }
+
+    /// The probe stop's fallback (decision-r09-t13i's §2.4 follow-up 8 §1.4, its test): a G1 that
+    /// reaches its last orbit under neither of its stops, here the reference Earth's zonal model
+    /// for two orbits, fewer than either stop needs, records no probe, and G2 is then run A; where
+    /// G1's probe measured T̂ and the search has an answer, G2 takes the defect's step, d = T̂ −
+    /// `T̄_Z`.
+    #[test]
+    fn a_g1_that_never_meets_its_probe_stop_makes_g2_run_a() {
+        let (model, sun, grid) = earth();
+        let radiation = Radiation::at(model.greenhouse, 1.6, 288.0);
+        let g1 = model.orbits(
+            &grid,
+            &sun,
+            &radiation,
+            (vec![288.0; grid.points()], Start::Steady),
+            &vec![0.7; grid.points()],
+            GridGround::SeaLevel,
+            None,
+            Stop {
+                max_orbits: 2,
+                ..G1_STOP
+            },
+        );
+        assert_eq!(g1.climate.orbits, 2);
+        assert!(!g1.climate.converged);
+        assert_eq!(g1.mean_probe, None);
+        let search = [SearchRun {
+            run: record(0.5, 288.2, true),
+            target_k: 288.0,
+            step: SearchStep::Fit,
+        }];
+        assert_eq!(second_run(Some(0), &search, g1.mean_probe), SecondRun::RunA);
+        let probe = MeanProbe::of(5, (287.9, -0.01), None, 0.8);
+        assert_eq!(second_run(None, &search, Some(probe)), SecondRun::RunA);
+        let SecondRun::Defect { answer, defect_k } = second_run(Some(0), &search, Some(probe))
+        else {
+            panic!("a measured G1 takes the defect's step");
+        };
+        assert_eq!(answer, 0);
+        assert_same_bits(defect_k, probe.limit_k - 288.2);
+        assert!((defect_k + 0.34).abs() < 1e-9, "{defect_k}");
+    }
+
+    /// The spin-up's extrapolation (decision-r09-t13i's §2.4 follow-up 4 §3, as its follow-up 6 §1
+    /// amends it): a jump is due only while the stop fails on its remainder, `m_n` r ÷ (1 − r) at
+    /// least the bound, with r in (0.3, 0.97), at most once every two orbits and where two more
+    /// orbits fit; it shifts the state and the stored annual means by the orbit's change times
+    /// r ÷ (1 − r); a first fresh move larger than the jump's own rejects it, restoring the state,
+    /// the means and the return temperatures to the bit, after which a jump needs two successive
+    /// ratios that agree within 0.05; a smaller first fresh move accepts it.
+    #[test]
+    fn a_jump_whose_first_fresh_move_grows_is_rejected_and_restored_to_the_bit() {
+        let mut spin = Extrapolation::new(Jumps::Allowed);
+        let bound = CONVERGENCE_K;
+        // Not due: the remainder under the bound (0.05 at r 0.5), outside the range, with no move
+        // before, not a number, at the cap.
+        assert!(spin.gain(5, 0.05, Some(0.1), bound).is_none());
+        assert!(spin.gain(5, 0.5, Some(2.0), bound).is_none());
+        assert!(spin.gain(5, 0.5, Some(0.5), bound).is_none());
+        assert!(spin.gain(5, 0.5, None, bound).is_none());
+        assert!(spin.gain(5, f64::NAN, Some(1.0), bound).is_none());
+        assert!(spin.gain(MAX_ORBITS - 1, 0.5, Some(1.0), bound).is_none());
+        // Due with no floor on the move: 0.005 at r 0.95 leaves 0.095 K, over the search's bound.
+        assert!(
+            spin.gain(5, 0.005, Some(0.005 / 0.95), SEARCH_CONVERGENCE_K)
+                .is_some()
+        );
+        let gain = spin.gain(5, 0.8, Some(1.0), bound).expect("r 0.8 is due");
+        assert!((gain - 4.0).abs() < 1e-12, "{gain}");
+        assert!(
+            Extrapolation::new(Jumps::Never)
+                .gain(5, 0.8, Some(1.0), bound)
+                .is_none()
+        );
+        let mut state = vec![290.0, 280.5, 270.25];
+        let annual = vec![289.0, 281.0, 271.0];
+        let mut stored = vec![288.5, 280.0, 271.5];
+        let returning = Returning::Coldest(Box::new([271.0; LATITUDE_BANDS]));
+        let before = (state.clone(), stored.clone());
+        spin.jump(
+            5,
+            0.8,
+            gain,
+            (&mut state, &annual, &mut stored),
+            returning.clone(),
+        );
+        for p in 0..3 {
+            let shift = (annual[p] - before.1[p]) * gain;
+            assert_same_bits(state[p], before.0[p] + shift);
+            assert_same_bits(stored[p], annual[p] + shift);
+        }
+        let Review::Rejected(jumped) = spin.review(0.9) else {
+            panic!("a growing move rejects the jump");
+        };
+        for (restored, kept) in jumped.state_k.iter().zip(&before.0) {
+            assert_same_bits(*restored, *kept);
+        }
+        for (restored, kept) in jumped.annual_k.iter().zip(&annual) {
+            assert_same_bits(*restored, *kept);
+        }
+        let (Returning::Coldest(restored), Returning::Coldest(kept)) =
+            (&jumped.returning, &returning)
+        else {
+            panic!("the jump kept the coldest months' return temperatures");
+        };
+        for (restored, kept) in restored.iter().zip(kept.iter()) {
+            assert_same_bits(*restored, *kept);
+        }
+        assert_same_bits(jumped.move_k, 0.8);
+        assert!(matches!(spin.review(0.1), Review::None));
+        // After the reject: one ratio is not enough, two that agree within 0.05 are, two that
+        // disagree are not.
+        assert!(spin.gain(7, 0.5, Some(0.6), bound).is_none());
+        assert!(spin.gain(8, 0.42, Some(0.5), bound).is_some());
+        let mut other = Extrapolation::new(Jumps::Allowed);
+        other.rejected = true;
+        assert!(other.gain(7, 0.5, Some(0.6), bound).is_none());
+        assert!(other.gain(8, 0.3, Some(0.5), bound).is_none());
+        // A shrinking first fresh move accepts it, and the run may jump again two orbits on.
+        let mut spin = Extrapolation::new(Jumps::Allowed);
+        let gain = spin.gain(5, 0.8, Some(1.0), bound).expect("r 0.8 is due");
+        spin.jump(5, 0.8, gain, (&mut state, &annual, &mut stored), returning);
+        assert!(spin.gain(6, 0.8, Some(1.0), bound).is_none());
+        assert!(matches!(spin.review(0.4), Review::Accepted));
+        assert_eq!(spin.jumps, 1);
+        assert!(spin.gain(7, 0.3, Some(0.4), bound).is_some());
+        // After a jump that stood, the stop's remainder reads r* = max(r, the jump's 0.8): a fresh
+        // ratio of 0.42, the jump's own transient, does not stop it (follow-up 7 §2.3).
+        assert_eq!(spin.jump_ratio, Some(0.8));
+        assert!(settled(0.05, Some(0.119), bound));
+        assert!(!settled_after(0.05, Some(0.119), bound, spin.jump_ratio));
+        assert!(settled_after(0.01, Some(0.012), bound, spin.jump_ratio));
+        // At most two rejects: after the second the run only marches (follow-up 7 §2.2).
+        let mut capped = Extrapolation::new(Jumps::Allowed);
+        for orbit in [5, 9] {
+            capped.last_ratio = Some(0.8);
+            let gain = capped.gain(orbit, 0.8, Some(1.0), bound).expect("due");
+            capped.jump(
+                orbit,
+                0.8,
+                gain,
+                (&mut state, &annual, &mut stored),
+                Returning::Own,
+            );
+            assert!(matches!(capped.review(1.0), Review::Rejected(_)));
+        }
+        assert_eq!(capped.rejects, MAX_REJECTS);
+        capped.last_ratio = Some(0.8);
+        assert!(capped.gain(13, 0.8, Some(1.0), bound).is_none());
+    }
+
+    /// The zonal search (decision-r09-t13i's §2.4 follow-up 4 §4) and the defect step (its
+    /// follow-up 6 §2) on a hand-built linear pair: a zonal branch of slope 340 K per unit of u
+    /// through 288 K at u 0.5, and a geographic one 1 K warmer there whose slope is 380. Z₀ at
+    /// u 0.49, then the slope's step, closes on 288 K in two runs; G1 at its u lies at the defect
+    /// d = 1 K; `S_Z` is the secant of the two runs nearest T\* that met the search's stop, 0.1 K
+    /// or more apart, here 340; and G2 at `u_Z` − d ÷ `S_Z` misses T\* by |1 − `S_g` ÷ `S_Z`| d, the
+    /// defect step's own error.
+    #[test]
+    fn the_search_closes_on_a_linear_branch_and_its_defect_step_misses_by_the_slopes_difference() {
+        let zonal = |u: f64| 288.0 + 340.0 * (u - 0.5);
+        let geographic = |u: f64| zonal(u) + 1.0 + 40.0 * (u - 0.5);
+        let run = |u: f64, _: &SearchStep, _: &[(SearchRun, ())]| (record(u, zonal(u), true), ());
+        let mut runs = vec![(
+            SearchRun {
+                run: record(0.49, zonal(0.49), true),
+                target_k: 288.0,
+                step: SearchStep::Fit,
+            },
+            (),
+        )];
+        let first = search(&mut runs, 288.0, 340.0, 13.8, SEARCH_RUNS - 1, &run).unwrap();
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[1].0.step, SearchStep::Slope { from: 0 });
+        assert!((runs[first].0.run.mean_k - 288.0).abs() <= SEARCH_CONVERGENCE_K);
+        let answer = runs[first].0.run;
+        let defect = geographic(answer.u) - answer.mean_k;
+        assert!((defect - 1.0).abs() < 1e-9, "{defect}");
+        let records: Vec<CorrectionRun> = runs.iter().map(|(r, ())| r.run).collect();
+        let slope = defect_slope(&records, 288.0, 999.0);
+        assert_eq!(slope.pair, Some([1, 0]));
+        assert!((slope.slope_k_per_u - 340.0).abs() < 1e-6, "{slope:?}");
+        let miss = geographic(answer.u - defect / slope.slope_k_per_u) - 288.0;
+        let expected = (1.0 - 380.0 / 340.0) * defect;
+        eprintln!("the defect step's miss {miss:+.6} K against {expected:+.6} K");
+        assert!((miss - expected).abs() < 1e-6, "{miss} against {expected}");
+        // With no pair 0.1 K apart, the steady slope.
+        let close = [record(0.5, 288.0, true), record(0.501, 288.05, true)];
+        let fallback = defect_slope(&close, 288.0, 333.0);
+        assert!(fallback.pair.is_none());
+        assert_same_bits(fallback.slope_k_per_u, 333.0);
+    }
+
+    /// The zonal search never takes an unconverged run for a secant point (decision-r09-t13i's
+    /// §2.4 follow-up 4 §4, as its follow-up 6 §3 amends it): on a hand-built branch that ends
+    /// below u 0.497, a run there meets neither stop, and the next u is halfway from the nearest
+    /// run that met the climate's to its u; the secant reads only runs that met the search's; the
+    /// answer met the climate's.
+    #[test]
+    fn the_search_never_takes_an_unconverged_run_for_a_secant_point() {
+        let zonal = |u: f64| 288.0 + 340.0 * (u - 0.5);
+        let run =
+            |u: f64, _: &SearchStep, _: &[(SearchRun, ())]| (record(u, zonal(u), u >= 0.497), ());
+        let mut runs = vec![(
+            SearchRun {
+                run: record(0.505, zonal(0.505), true),
+                target_k: 286.0,
+                step: SearchStep::Fit,
+            },
+            (),
+        )];
+        let answer = search(&mut runs, 286.0, 340.0, 13.8, SEARCH_RUNS - 1, &run).unwrap();
+        for (i, (record, ())) in runs.iter().enumerate() {
+            eprintln!("run {i}: {record:?}");
+            match record.step {
+                SearchStep::Secant { points, from } => {
+                    assert!(points.iter().all(|&j| runs[j].0.run.searched), "{i}");
+                    assert!(runs[from].0.run.converged);
+                }
+                SearchStep::Halfway { from, toward } => {
+                    assert!(runs[from].0.run.converged && !runs[toward].0.run.converged);
+                    assert_same_bits(
+                        record.run.u,
+                        f64::midpoint(runs[from].0.run.u, runs[toward].0.run.u),
+                    );
+                }
+                SearchStep::Fit | SearchStep::Slope { .. } => {}
+            }
+        }
+        assert!(
+            runs.iter()
+                .any(|(record, ())| matches!(record.step, SearchStep::Halfway { .. }))
+        );
+        assert!(runs[answer].0.run.converged);
+    }
+
+    /// Plan 14's greenhouse under each generator version's rules (decision-r09-t13i §2.2): under
+    /// version 22 water's 2.89 per √bar at its saturation, under 23's batch rules 4.47 per √bar at
+    /// 0.77 of it by mole, `M_w` ÷ μ of that by weight on the reference Earth's air.
+    #[test]
+    fn the_greenhouse_reads_each_version_s_rules() {
+        let inputs = reference::earth_like();
+        let air = Air::of(&inputs);
+        let water_term = |constants: &GreenhouseConstants| {
+            let unit = PartialPressures::from_fn(|gas| match gas {
+                Gas::Water => Pascals::new(BAR_PA),
+                Gas::CarbonDioxide
+                | Gas::Nitrogen
+                | Gas::Oxygen
+                | Gas::Argon
+                | Gas::Methane
+                | Gas::Ammonia
+                | Gas::Hydrogen
+                | Gas::Helium => Pascals::ZERO,
+            });
+            constants
+                .terms(&unit, Kelvin::new(255.0))
+                .iter()
+                .find(|(gas, _)| *gas == Gas::Water)
+                .map_or(0.0, |&(_, term)| term)
+        };
+        let (held, held_humidity) = greenhouse_for(SnapshotRules::Held, &air);
+        assert!((water_term(&held) - 2.89).abs() < 1e-12);
+        assert_same_bits(held_humidity, 1.0);
+        let (batch, batch_humidity) = greenhouse_for(SnapshotRules::Batch, &air);
+        assert!((water_term(&batch) - 4.47).abs() < 1e-12);
+        let expected =
+            WATER_SURFACE_HUMIDITY * Gas::Water.molar_mass_g_per_mol() / air.molar_mass_g_per_mol;
+        assert_same_bits(batch_humidity, expected);
+        eprintln!("23's humidity by weight on the reference Earth's air {batch_humidity:.4}");
+        assert!((0.47..0.50).contains(&batch_humidity), "{batch_humidity}");
+    }
+
+    #[test]
+    fn the_water_term_follows_the_column_s_own_temperature() {
+        let inputs = reference::earth_like();
+        let model = EnergyBalance::for_inputs(&inputs);
+        let Greenhouse::Vapour { dry_depth, water } = model.greenhouse else {
+            panic!("the reference Earth's air holds water");
+        };
+        let share = water.depth(288.0) / (dry_depth + water.depth(288.0));
+        eprintln!(
+            "τ_d {dry_depth:.4}, τ_w(288 K) {:.4}, the water's share {share:.3}; k_w {} per √bar, \
+             h_w {}",
+            water.depth(288.0),
+            water.constant,
+            water.humidity
+        );
+        assert!((0.40..0.55).contains(&share), "{share}");
+        if SnapshotRules::in_force() == SnapshotRules::Held {
+            assert_same_bits(water.constant, 2.89);
+            assert_same_bits(water.humidity, 1.0);
+        }
+        let radiation = Radiation::at(model.greenhouse, 1.65, 288.0);
+        let Radiation::Vapour { multiplier, .. } = radiation else {
+            panic!("a water term")
+        };
+        // The emission factor at T* is the one asked for.
+        let at_mean = 1.0 + EDDINGTON_COEFFICIENT * multiplier * (dry_depth + water.depth(288.0));
+        assert!((at_mean - 1.65).abs() < 1e-12, "{at_mean}");
+        for t in [275.0, 288.0, 300.0, 320.0] {
+            let column = Column::vapour(t, multiplier, dry_depth, water.depth_and_slope(t));
+            let tau = (STEFAN_BOLTZMANN * math::powi(t, 4) / column.emission.flux_w_m2 - 1.0)
+                / EDDINGTON_COEFFICIENT;
+            let expected = multiplier * (dry_depth + water.depth(t));
+            assert!(
+                (tau - expected).abs() <= 1e-12 * expected,
+                "{t}: {tau} against {expected}"
+            );
+            let flux = |t: f64| {
+                Column::vapour(t, multiplier, dry_depth, water.depth_and_slope(t))
+                    .emission
+                    .flux_w_m2
+            };
+            let numeric = (flux(t + 1e-3) - flux(t - 1e-3)) / 2e-3;
+            let e = column.emission;
+            assert!(
+                (numeric - column.whole_slope_w_m2_k).abs() < 1e-5 * e.fixed_slope_w_m2_k,
+                "{t}: {numeric} against {}",
+                column.whole_slope_w_m2_k
+            );
+            assert!(e.slope_w_m2_k >= EMISSION_SLOPE_FLOOR * e.fixed_slope_w_m2_k);
+            assert!(e.slope_w_m2_k < e.fixed_slope_w_m2_k);
+            let cube = t * t * t;
+            assert_same_bits(
+                e.fixed_slope_w_m2_k,
+                4.0 * STEFAN_BOLTZMANN * cube
+                    / (1.0 + EDDINGTON_COEFFICIENT * multiplier * (dry_depth + water.depth(t))),
+            );
+        }
+        // A world whose gases hold no water has one τ, independent of T.
+        let dry = reference::builder_of(&inputs)
+            .gases([crate::planetary::surface::inputs::GasShare {
+                substance: crate::substance::SubstanceKey::new("N2").unwrap(),
+                mole_fraction: 1.0,
+            }])
+            .build()
+            .unwrap();
+        assert_eq!(EnergyBalance::for_inputs(&dry).greenhouse, Greenhouse::Grey);
+    }
+
+    /// R1 on a world with no surface water (decision-r09-t13i's §2.4 follow-up 2 §4, by weight as
+    /// its follow-up 5 §2 amends it): the reference Earth with no liquid keeps its air's water, so
+    /// its water term's vapour is the lesser of `h_w` of the saturation and that water's column
+    /// weight, `x_w` (`M_w` ÷ μ) `p_s`: above the crossover, where `h_w` `p_sat`(T) equals it, the
+    /// inventory's term, and below it the saturation's, on the ice branch too, each to 10⁻¹²; and
+    /// its zonal model converges, every record finite. The reference Earth itself, with its sea,
+    /// takes the saturation at every temperature, to the bit as before the cap.
+    #[test]
+    fn a_world_with_no_surface_water_caps_its_vapour_at_its_air_s_water() {
+        let inputs = reference::earth_like();
+        let desert = reference::builder_of(&inputs)
+            .liquids([])
+            .condensates([])
+            .build()
+            .unwrap();
+        let model = EnergyBalance::for_inputs(&desert);
+        let Greenhouse::Vapour { water, .. } = model.greenhouse else {
+            panic!("the desert's air holds water: {:?}", model.greenhouse);
+        };
+        let Reservoir::Air { inventory_pa } = water.reservoir else {
+            panic!("no liquid water lies at the desert's surface");
+        };
+        let saturated = |water: &WaterVapour, t: f64| {
+            water.humidity
+                * saturation_pressure(water.water, Kelvin::new(t)).map_or(0.0, Pascals::value)
+        };
+        let term = |water: &WaterVapour, pressure: f64| water.constant * (pressure / BAR_PA).sqrt();
+        let (mut low, mut high) = (200.0, 330.0);
+        for _ in 0..60 {
+            let middle = f64::midpoint(low, high);
+            if saturated(&water, middle) < inventory_pa {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+        let dew = f64::midpoint(low, high);
+        eprintln!(
+            "the desert's water {inventory_pa:.1} Pa by weight, its crossover {dew:.3} K (h_w {}); \
+             τ_w capped {:.5}, at 288 K {:.5}",
+            water.humidity,
+            term(&water, inventory_pa),
+            water.depth(288.0)
+        );
+        let capped = term(&water, inventory_pa);
+        for t in [dew + 0.01, dew + 1.0, dew + 10.0, 330.0, 400.0] {
+            let depth = water.depth(t);
+            assert!(
+                (depth - capped).abs() <= 1e-12 * capped,
+                "{t} K: {depth} against {capped}"
+            );
+        }
+        for t in [dew - 0.01, dew - 1.0, dew - 10.0, 260.0, 230.0, 200.0] {
+            let (depth, expected) = (water.depth(t), term(&water, saturated(&water, t)));
+            assert!(
+                (depth - expected).abs() <= 1e-12 * expected,
+                "{t} K: {depth} against {expected}"
+            );
+        }
+        let Greenhouse::Vapour { water: sea, .. } = EnergyBalance::for_inputs(&inputs).greenhouse
+        else {
+            panic!("the reference Earth's air holds water");
+        };
+        assert_eq!(sea.reservoir, Reservoir::Surface);
+        for t in [200.0, 230.0, 260.0, dew, 300.0, 330.0, 400.0] {
+            assert_same_bits(sea.depth(t), term(&sea, saturated(&sea, t)));
+        }
+        let grid = ModelGrid::zonal();
+        let sun = Sunlight::of(&desert, &grid, super::super::sun::NOMINAL_STEP);
+        let solution = model.run(
+            &grid,
+            &sun,
+            desert.mean_surface_temperature().value(),
+            &[0.0; LATITUDE_BANDS],
+            Ground::SeaLevel,
+            None,
+        );
+        eprintln!(
+            "the desert: x {:.5} ({:?}, m {:?}), steady converged {}, orbits {}, converged {}, \
+             surface mean {:.3} K, the mean's correction {:?}",
+            solution.emission_factor,
+            solution.optical_depth,
+            solution.radiation.multiplier(),
+            solution.steady_converged,
+            solution.climate.orbits,
+            solution.climate.converged,
+            grid.mean(&solution.climate.annual_k),
+            solution.correction
+        );
+        assert!(solution.climate.converged);
+        assert!(solution.steady_converged);
+        assert!(solution.emission_factor.is_finite());
+        assert!(
+            solution
+                .climate
+                .annual_k
+                .iter()
+                .chain(solution.climate.months_k.iter().flatten())
+                .chain(solution.month_insolation_w_m2.iter().flatten())
+                .all(|v| v.is_finite())
+        );
+    }
+
+    /// R09.T13.i's R2 (decision-r09-t13i §2.5, test 4): at z = 0 a raised quantile's outgoing
+    /// radiation under the water term is the sea-level column's to the bit; higher up, its whole
+    /// slope is the derivative of its flux in T, the transmission's own slope included, and it is
+    /// never below the floor; the vapour above raised ground follows the ground's temperature, so
+    /// that a plateau's column is thinner than the dry gases' thinning alone gives.
+    #[test]
+    fn a_raised_quantile_s_water_term_follows_its_ground() {
+        let inputs = reference::earth_like();
+        let model = EnergyBalance::for_inputs(&inputs);
+        let radiation = Radiation::at(model.greenhouse, 1.65, 288.0);
+        let Radiation::Vapour {
+            multiplier,
+            dry_depth,
+            water,
+        } = radiation
+        else {
+            panic!("a water term")
+        };
+        let (gamma, h) = (lapse::lapse_rate_k_per_m(&inputs), scale_height_m(&inputs));
+        let dry = |z: f64| {
+            math::exp(
+                -FLUX_OPTICAL_DEPTH_PER_GREY * multiplier * dry_depth * math::exp(-z / (2.0 * h)),
+            )
+        };
+        for t in [260.0, 288.0, 305.0] {
+            let column = Column::vapour(t, multiplier, dry_depth, water.depth_and_slope(t));
+            let at_sea = vapour_quantile_emission(
+                &column,
+                t,
+                1.0,
+                dry(0.0),
+                wet_of(multiplier, water.depth_and_slope(t)),
+            );
+            assert_same_bits(at_sea.flux_w_m2, column.emission.flux_w_m2);
+            assert_same_bits(at_sea.slope_w_m2_k, column.emission.slope_w_m2_k);
+            assert_same_bits(
+                at_sea.fixed_slope_w_m2_k,
+                column.emission.fixed_slope_w_m2_k,
+            );
+            for z in [500.0, 2_000.0, 4_000.0] {
+                let quantile = |dt: f64| {
+                    let column = Column::vapour(
+                        t + dt,
+                        multiplier,
+                        dry_depth,
+                        water.depth_and_slope(t + dt),
+                    );
+                    let ground = t + dt - gamma * z;
+                    vapour_quantile_emission(
+                        &column,
+                        ground,
+                        1.0,
+                        dry(z),
+                        wet_of(multiplier, water.depth_and_slope(ground)),
+                    )
+                };
+                let e = quantile(0.0);
+                let numeric = (quantile(1e-3).flux_w_m2 - quantile(-1e-3).flux_w_m2) / 2e-3;
+                let whole = e.slope_w_m2_k.max(numeric);
+                assert!(
+                    e.flux_w_m2 > 0.0 && e.slope_w_m2_k > 0.0,
+                    "{t} K, {z} m: {e:?}"
+                );
+                if e.slope_w_m2_k > EMISSION_SLOPE_FLOOR * e.fixed_slope_w_m2_k * (1.0 + 1e-9) {
+                    assert!(
+                        (numeric - e.slope_w_m2_k).abs() < 1e-5 * whole,
+                        "{t} K, {z} m: {numeric} against {e:?}"
+                    );
+                }
+                // The ground's vapour: thinner than at the sea level's temperature.
+                let ground = t - gamma * z;
+                assert!(water.depth(ground) < water.depth(t));
+            }
+        }
     }
 }

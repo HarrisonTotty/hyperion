@@ -216,7 +216,9 @@ impl PlanckEinsteinTerm {
 }
 
 /// The ideal-gas part of a fluid's dimensionless Helmholtz energy, φ°(δ, τ), as far as its second
-/// τ-derivative `φ°_ττ` needs it: the coefficient of its ln τ term, its power terms in τ and its
+/// τ-derivative `φ°_ττ` needs it.
+///
+/// It holds the coefficient of its ln τ term, its power terms in τ and its
 /// Planck–Einstein terms, each as printed, in the τ of the residual it belongs to (each equation's
 /// two parts share their reducing temperature). Its ln δ term, its constant and its term linear
 /// in τ, the last two fixing only the zeros of energy and entropy, have no second τ-derivative and
@@ -475,8 +477,12 @@ impl HelmholtzResidual {
     }
 
     /// The specific isochoric heat capacity at `density` and `temperature`, J kg⁻¹ K⁻¹, with
-    /// `ideal` the same equation's ideal-gas part: `c_v` = −R τ² (`φ°_ττ` + `φʳ_ττ`) (IAPWS
-    /// R6-95(2018), Table 3), with the gas constant the coefficients were fitted with.
+    /// `ideal` the same equation's ideal-gas part.
+    ///
+    /// `c_v` = −R τ² (`φ°_ττ` + `φʳ_ττ`) (IAPWS R6-95(2018), Table 3), with the gas constant the
+    /// coefficients were fitted with. The isobaric heat capacity's example
+    /// ([`isobaric_heat_capacity_j_per_kg_k`](Self::isobaric_heat_capacity_j_per_kg_k)) shows where
+    /// an equation and its ideal part come from.
     #[must_use]
     pub fn isochoric_heat_capacity_j_per_kg_k(
         &self,
@@ -546,13 +552,14 @@ impl HelmholtzResidual {
         self.gas_constant_j_per_kg_k * (isochoric + numerator * numerator / denominator)
     }
 
-    /// The density at which the equation gives `pressure` at `temperature`, from `start`: a fixed
-    /// four Newton steps along the isotherm, ρ ← ρ + (p − p(ρ, T)) ρ `κ_T`(ρ, T), by
-    /// [`pressure`](Self::pressure) and
+    /// The density at which the equation gives `pressure` at `temperature`, from `start`.
+    ///
+    /// It takes a fixed four Newton steps along the isotherm, ρ ← ρ + (p − p(ρ, T)) ρ `κ_T`(ρ, T),
+    /// by [`pressure`](Self::pressure) and
     /// [`isothermal_compressibility_per_pa`](Self::isothermal_compressibility_per_pa)
-    /// (decision-r09-t13i-cl-licence §6.1). Started from a saturated liquid's ancillary density at
-    /// the vapour pressure, it is the equation's own saturated liquid; it stays on the branch it
-    /// starts on, where (∂p ÷ ∂ρ)_T is positive.
+    /// (decision-r09-t13i-cl-licence §6.1), and stays on the branch it starts on, where (∂p ÷ ∂ρ)_T
+    /// is positive. So `start` picks the phase: started from a saturated liquid's ancillary density
+    /// at the vapour pressure, it is the equation's own saturated liquid.
     #[must_use]
     pub fn density_at_pressure(
         &self,

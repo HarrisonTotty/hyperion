@@ -704,6 +704,77 @@ fn assert_the_water_balances(run: &Run) {
 /// windows of decision-r09-t13ge §2.13, the global means, the energy-flux equators and centres, the
 /// balance's factors, the orographic solves' convergence, and the trades and westerlies.
 fn report(name: &str, run: &Run) {
+    if let Some(means) = &run.diagnostics.surface_means {
+        eprintln!(
+            "{name}: the energy balance's steady surface mean {:.3} K ({:?}), its seasonal one \
+             {:.3} K after {} orbits; the mean's correction {:?}; T13.d's constant c {:+.3} K",
+            means.steady_k,
+            means.optical_depth,
+            means.seasonal_k,
+            means.orbits,
+            means.correction,
+            run.diagnostics.correction.mean_k
+        );
+        if let super::super::ebm::MeanCorrection::Searched {
+            search,
+            answer,
+            g1,
+            g1_probe,
+            defect,
+            g2_start_k,
+            g2,
+            kept,
+        } = &means.correction
+        {
+            let mean = run.inputs.mean_surface_temperature().value();
+            for (i, record) in search.iter().enumerate() {
+                eprintln!("{name}:   Z{i} {record:?}");
+            }
+            eprintln!(
+                "{name}: the answer {answer:?}; G1 {g1:?}; d and S_Z (and its pair) {defect:?}; G2 \
+                 {g2:?}, from a start of surface mean {g2_start_k:?} K, its miss {:+.4} K; kept \
+                 {kept:?}",
+                g2.mean_k - mean
+            );
+            // G1's probe stop (decision-r09-t13i's §2.4 follow-ups 8 §1 and 9 §1).
+            eprintln!(
+                "{name}: G1 {} orbits, its probe ρ_n and ρ_n−1 {:?}, r* {:?}, R̄ {:?} K, T̂ {:?} K, \
+                 d {:?} K; G2 from {g2_start_k:?} K, {} orbits, {:.4} K",
+                g1.orbits,
+                g1_probe.as_ref().and_then(|probe| probe.mean_ratios),
+                g1_probe.as_ref().map(|probe| probe.ratio),
+                g1_probe.as_ref().map(|probe| probe.remainder_k),
+                g1_probe.as_ref().map(|probe| probe.limit_k),
+                defect.map(|(d, _)| d),
+                g2.orbits,
+                g2.mean_k
+            );
+        }
+        if let Some((annual, _)) = &means.transports {
+            let radius = run.inputs.radius().value();
+            let scale = 2.0 * core::f64::consts::PI * radius * radius / 1e15;
+            let peak = |values: &[f64]| {
+                values
+                    .iter()
+                    .fold((0.0_f64, 0.0_f64), |(north, south), &v| {
+                        (north.max(v * scale), south.min(v * scale))
+                    })
+            };
+            let ocean: Vec<f64> = annual
+                .ekman_w_m2
+                .iter()
+                .zip(&annual.gyres_w_m2)
+                .map(|(e, g)| e + g)
+                .collect();
+            eprintln!(
+                "{name}: the annual transports' peaks, PW: the atmosphere's {:+.2?}, the ocean's \
+                 {:+.2?} (the Ekman cells' {:+.2?})",
+                peak(&annual.atmosphere_w_m2),
+                peak(&ocean),
+                peak(&annual.ekman_w_m2)
+            );
+        }
+    }
     report_bands(name, run);
     report_summary(run);
     report_months(run);
@@ -2236,6 +2307,58 @@ fn report_patch(run: &Run, rates: &[Vec<f64>]) {
     );
 }
 
+/// The coarse Earth's d with G1 converged at the climate's stop, K: −0.438 (the follow-up 7 build,
+/// plan 09's R09.T13.i as-built record: G1 287.561 K in 7 orbits against Z₃'s 287.998 K), against
+/// which decision-r09-t13i's §2.4 follow-up 8 §1 holds its probe's d.
+const CONVERGED_G1_DEFECT_K: f64 = -0.438;
+
+/// The coarse Earth's kept G2 from a converged G1, K: 287.969 (the same build: G2 predicted, 3
+/// orbits, 0.031 K from plan 14's mean), against which follow-up 8 §1 holds G2 from the probe.
+const CONVERGED_G1_G2_MEAN_K: f64 = 287.969;
+
+/// How near G1's probe stop must leave d to the converged G1's, K: 0.05, the probe's own precision
+/// (decision-r09-t13i's §2.4 follow-up 8 §1 tests, kept by its follow-up 9 §2).
+const PROBE_DEFECT_AGREEMENT_K: f64 = 0.05;
+
+/// How near the kept G2 from G1's probe must lie to the one from the converged G1, K: 0.1, the
+/// climate stop's (decision-r09-t13i's §2.4 follow-up 9 §2, corrected from follow-up 8's 0.05 K:
+/// d's error, moving G2 by at most about 0.035 K, and the two G2 runs' own stops together).
+const PROBE_G2_AGREEMENT_K: f64 = 0.1;
+
+/// Asserts G1's probe stop on the coarse Earth (decision-r09-t13i's §2.4 follow-up 8 §1 tests, as
+/// its follow-up 9 §2 corrects them): its d within [`PROBE_DEFECT_AGREEMENT_K`] of the converged
+/// G1's [`CONVERGED_G1_DEFECT_K`], and G2, kept, within [`PROBE_G2_AGREEMENT_K`] of
+/// [`CONVERGED_G1_G2_MEAN_K`].
+fn assert_the_probe_measures_g1(run: &Run) {
+    let means = run
+        .diagnostics
+        .surface_means
+        .as_ref()
+        .expect("the energy-balance model's surface means");
+    let super::super::ebm::MeanCorrection::Searched {
+        defect, g2, kept, ..
+    } = &means.correction
+    else {
+        panic!("the geographic model searches: {:?}", means.correction);
+    };
+    let (d, _) = defect.expect("G1's probe measured d");
+    eprintln!(
+        "  the probe's d {d:+.4} K against the converged G1's {CONVERGED_G1_DEFECT_K:+.3}; G2 {:.4} \
+         K against {CONVERGED_G1_G2_MEAN_K:.3}",
+        g2.mean_k
+    );
+    assert!(
+        (d - CONVERGED_G1_DEFECT_K).abs() <= PROBE_DEFECT_AGREEMENT_K,
+        "d {d} K"
+    );
+    assert_eq!(*kept, super::super::ebm::KeptRun::G2);
+    assert!(
+        (g2.mean_k - CONVERGED_G1_G2_MEAN_K).abs() <= PROBE_G2_AGREEMENT_K,
+        "G2 {} K",
+        g2.mean_k
+    );
+}
+
 /// The coarse pass's reference Earth (its generated continents and R09.T12.e's sea, level 8)
 /// through the climate step, printed beside GPCP and NCEP/NCAR R1 as the synthetic Earth is, its
 /// water cycle run again on the finished state to the same diagnostics. It reads no clock: its
@@ -2307,6 +2430,7 @@ fn the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp() {
         diagnostics,
     };
     report("The reference Earth (the coarse pass)", &run);
+    assert_the_probe_measures_g1(&run);
     report_regions(&run);
     report_balance(&run);
     let rates = field_rates(&run, coordinates);

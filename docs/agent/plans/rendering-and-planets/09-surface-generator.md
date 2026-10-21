@@ -2823,6 +2823,112 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   tests by name, among them `the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp` and
   `the_reference_earth_s_pass_is_order_independent`.
 
+- **R09.T13.i Ocean heat transport and the energy balance's next revision** (after T13.j, before
+  R09.T16; decision-r09-t13i, with its §2.4 follow-ups 1–3, its §2.4 follow-up 4 (cost), its
+  §2.2/§2.3 follow-up 5 and its §2.4 follow-ups 6–10, and decision-r09-t13i-cl-licence, whose
+  specification and tests bind). In
+  two batches, each with its own gate. No contract moves (`GENERATOR_VERSION` 22); no golden pins
+  the climate.
+  - _Batch 1, the energy balance_ (§2):
+    - the liquid's heat: an additive, internal saturated-liquid specific heat on `LiquidColumns`,
+      each liquid's reference equation of state evaluated in the registry
+      (decision-r09-t13i-cl-licence), and the sea's capacity ratio r_l = ρ_l c_l ÷ (ρ_w c_w) at the
+      freezing point + 10 K, water's exactly 1;
+    - R1 and R2: τ(T, z) = m [τ_d e^(−z ÷ 2H) + τ_w(T − Γz)], τ_w = k_w √(p_w ÷ 1 bar), plan 14's
+      water term under the rules in force at the local saturation where liquid water lies at the
+      surface and at the lesser of that and the air's own water elsewhere, every partial pressure a
+      column weight as plan 14's law takes it (follow-up 2 §4, follow-up 5 §2), m solved per body as
+      τ was;
+    - O1: the Ekman cells inside the Hadley cell (Held 2001), their gross oceanic stability the
+      walls' blend of Held's eq. 7 in a walled basin and the whole contrast to the return water in
+      an open ocean (follow-up 5 §1), and the gyres' and eddies' diffusion (Rose and Marshall 2009's
+      constant, scaled by rotation, walls, depth and liquid);
+    - the mean's correction: a search for u on the zonal model's seasonal runs under a 0.01 K stop,
+      its secant runs started from their pair's secant predictor, then two geographic runs: G1 at
+      its answer, a measurement of d that ends at a probe stop where that comes before the
+      climate's, once its surface mean's own last two ratios agree and its remainder is at most
+      0.05 K, and G2, always, at one defect step on the search's own slope, started from G1 plus
+      the predicted change; G2 kept, G1 only as follow-up 3's fallback (follow-ups 3, 4 and 6–9);
+      each run's slow mode extrapolated while its remainder is at least the bound, with a reject
+      rule and at most two rejects (follow-ups 4, 6 and 7); the convergence stop on the move and its
+      extrapolated remainder, after a jump at the larger of the fresh ratio and the jump's; and the
+      transport's pressure ramp below 0.2 bar.
+  - _Batch 2, the water cycle_ (§3): the summer side of the Hadley share, and the sea's evaporation
+    in Priestley and Taylor's yearly amount with the Penman split's monthly shape, reading batch 1's
+    ocean heat.
+  - _Tests, batch 1_ (§2.5, as the follow-ups amend it), on T13.g's relief Earth with
+    `synthetic_sea`'s floor at the reference Earth's mean ocean depth, 3,689 m:
+    1. ERA-Interim (Siler et al.'s Fig. 2b): within 5 K from 58.75° S northward, within 7 K in the
+       ice edge's tier from 61.25° N to 71.25° N (until I2's cloud revision, then 5 K), within 3 K
+       within 23.75° of the equator, within 6.5 K from 73.75° S to 61.25° S and within 9 K at
+       76.25° S, every band printed beside its bound; 76.25° S and 73.75° S each at least 1 K colder
+       than the same Earth with every land cell at the sea level run at the relief Earth's kept u
+       (its search's first run continued there under the stop), printed with both runs' u and
+       means, and reported instead where that run's mean falls more than 5 K below the relief
+       Earth's. T13.a's sea-level test holds the profile's shape: each band's departure less the
+       solid-angle mean departure within 5 K from 58.75° S (7 K in the ice edge's tier), the mean
+       departure within 3 K, the absolute departures and the mean printed, its south printed;
+    2. the transports beside Trenberth and Caron's table: each hemisphere's total peak in [4.2, 6.5]
+       PW, the ocean's peak in 5–25° N in [0.3, 1.2] and in 5–25° S in [−1.2, −0.3] (printed beside
+       Trenberth and Caron's and Klinger and Marotzke's shallow cells), at 47.5° N in [0.15, 1.0]
+       and at 47.5° S in [−0.6, 0.1], the atmosphere's share at 35° N in [0.70, 0.95] and at 35° S
+       in [0.80, 1.0]; an aquaplanet's ocean peak printed beside Enderton and Marshall's 2.4 PW;
+    3. the no-ocean limit: the dry world, the all-land Earth and the relief Earth with no sea are the
+       model without the ocean term to the bit; Kaspi and Showman's fit and sweeps are unchanged;
+    4. R1: τ(T, 0) = m (τ_d + τ_w(T)) to 10⁻¹² on a frost-free column; a world with no water in its
+       gases has one τ; at z = 0 the quantile emission is the sea-level column's to the bit; a 330 K
+       aquaplanet converges with every record finite; a world with water in its air and none at its
+       surface converges, its τ_w the air's water's above its crossover and the saturation's below,
+       to 10⁻¹², and a world with liquid water is unchanged to the bit; both versions' greenhouse
+       rules;
+    5. the liquid: a methane sea's capacity ratio within 2% of the reference equations' ρ c_p ratio
+       at its states (Setzmann and Wagner's, over IAPWS-95 as NIST's WebBook evaluates it), water's
+       exactly 1, the Titan-like world's step runs;
+    6. the stop: an Earth on an orbit of 0.1 year runs until its remainder is under 0.1 K, or flags,
+       its moves and the runs' orbits printed;
+    7. the ramp: f_p(0.1 bar) = ½ f_p(0.2 bar), f_p(0) = 0, continuous at 0.2 bar;
+    8. the correction: the ruled Earth's geographic surface mean (level 7) before T13.d within 0.3 K
+       of plan 14's mean (0.3–0.5 K reported; above, it blocks), each run's u, mean, orbits and
+       convergence and T13.d's c printed, and the coarse pass's reference Earth's in the slow
+       coarse-pass test; on the relief zonal Earth the fit is labelled a fold, the search's slope
+       step lies nearer the mean than its first run, no unconverged run is a secant point and the
+       answer lies within 0.3 K (or the test prints and the lane reports); the model keeps the
+       converged run nearest the mean (follow-up 3), and the continent aquaplanet's test, as
+       written, keeps a converged run and prints its runs and wall time;
+    9. the spin-up and the search (follow-up 4 §7): the extrapolated run within 0.2 K of the
+       marched one on the relief zonal Earth, with the same outcome; a rejected jump restored to the
+       bit; two calls equal to the bit; on the deep all-sea aquaplanet the search's rules (follow-up 8
+       §2): every secant point met the search's stop, every predicted start its pair's linear
+       prediction, the answer the nearest converged run, the earlier on a tie, two calls equal to
+       the bit, its runs printed, no run count or miss asserted; G1's probe stop (follow-ups 8 §1
+       and 9 §2): on a geometric sequence of means (ratio 0.9, 1 K from its limit) it ends at the
+       first orbit with R̄ ≤ 0.05 K and T̂ is the limit within 10⁻⁹ K, on two modes (changes
+       0.3ⁿ + 0.02 × 0.9ⁿ K) it waits for the mean's ratios to agree, ending at orbit 13 with T̂
+       within 3 × 10⁻⁵ K, a G1 that never meets it makes G2 run A, and on the coarse Earth its d
+       lies within 0.05 K of the converged G1's −0.438 K and the kept G2 within 0.1 K of
+       287.969 K;
+       the defect step on a hand-built pair; and the walls' blend (follow-up 5 §1): Held's eq. 9 on
+       his profiles, χ = 1 and χ = 0 each regime to the bit; the models (follow-up 7 §3): on the
+       all-land and the all-sea world with no ocean term, the zonal and the geographic model from
+       the same broadcast steady state at the fit's u, three orbits each, every point's annual and
+       monthly means within 10⁻⁶ K; the conservation test (follow-up 6 §4): energy and the mean as
+       before, `Folded` and g4's choice among the converged candidates;
+    10. unchanged and re-run: the 60° aquaplanet and its Ω⊕ ÷ 8 twin, the locked worlds, the
+        Titan-like and dry worlds, Mars, Venus and the one-month world, T13.d's tests, both order
+        tests, T13.j's ruled Earth assertions and the slow coarse-pass test.
+  - _Tests, batch 2_ (§3.4–§3.5): the partition on NCEP R1's observed temperatures (its 40–60° N
+    convergence positive every month, its JJA mean at least 0.6 mm/day, its annual E − P at most
+    −0.6); on the ruled Earth the 40–60° N sea's DJF ÷ JJA evaporation at most 6 (6–7.5 reported,
+    above it blocks) and its all-land JJA at least 0.45 of its DJF (0.35–0.45 reported, below it
+    blocks), with §3.4's prints; T13.j's assertions, batch 1's ERA and transport tests, E-L8's
+    sample and the slow coarse-pass test re-run; the Hadley share's and the evaporation's unit
+    tests (§3.5).
+  - _Acceptance:_ T13.j's ruled Earth assertions holding (batch 1 lands alone if its northern ratio
+    stays at least 1.10); the reference Earth's climate step at level 8 at most 30 s on a quiet
+    machine (load ≤ 2), one thread; 30–35 s lands with its figure and each lever's saving recorded,
+    over 35 s holds (follow-up 10 §1, restating follow-ups 4 §2 and 6 §3 for R09.T13.i); `cargo test -p hyperion-sim planetary::surface::steps::climate`;
+    and the surface module's slow tests by name.
+
 Offline check (recorded, not in CI): the reference Earth's monthly fields against an ExoPlaSim run
 of the same inputs, with the differences written into this plan. Acceptance:
 `cargo test -p hyperion-sim planetary::surface::steps::climate`.
@@ -11394,6 +11500,431 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
   - _The clearing's sources_ (Kieffer and Titus 2001, Icarus 154, 162; Piqueux et al. 2015, Icarus
     251, 164) could not be read by the lane's science check; the 70–100° window stays from memory,
     for the calibration to read.
+- **Deviations in T13.i batch 1, as built** (2026-10-20; lane r09-ocean, from `a851f634`, merged
+  with `bd185668`; built to decision-r09-t13i §2 with its §2.4 follow-ups 1–4 and 6–10, its
+  §2.2/§2.3 follow-up 5, and decision-r09-t13i-cl-licence). Batch 1 of 2, the energy balance; batch
+  2, the water cycle (§3), is a fresh lane's.
+  - _Commits_, one per subtask: `1c386677` (2.1's column), `2f9aa0a4` (R1 and R2), `5252d1f6` (O1
+    and the sea's liquid, with test 5), and the last (2.4 as the follow-ups rebuilt it, follow-up
+    5's two formulas, the tests, the reviews' fixes and these records). The intermediate trees are
+    the subtasks as first built, clippy-clean, not gated; the vapour cap of follow-up 2 is ported
+    into the R1 commit; the final tree is the gated one.
+  - _Files._ `substance/{helmholtz.rs,liquid.rs,liquid/tests.rs,rows/equations.rs,rows/liquids.rs,rows/melts.rs}`
+    and `NOTICE` (commit 1); `derive/atmosphere.rs` (`PartialPressures::from_fn` no longer
+    test-only); `steps/climate/{ebm.rs,ocean.rs (new),mod.rs,transport.rs,wind.rs,hydrology.rs,sun.rs,grid.rs,partition.rs}`
+    and the tests in `ebm.rs`, `ocean.rs`, `transport.rs`, `wind.rs`, `tests.rs`,
+    `tests/hydrology.rs` and `tests/normalisation.rs`. No contract moved: `CoarseInputs`, the
+    working state's and the field's types, the header, the wire, the public mirror and every golden
+    are as they were (`golden_diff.py --base bd185668`: no golden changed, nothing to
+    reconcile), and `GENERATOR_VERSION` stays at 22. The climate cells' temperatures,
+    precipitation and winds move on every energy-balance world, as §4 rules.
+  - _The liquid's specific heat_ (2.1; decision-r09-t13i-cl-licence).
+    `Substance::liquid_specific_heat_j_per_kg_k(Kelvin) -> Option<f64>` and
+    `liquid_specific_heat_range() -> Option<(Kelvin, Kelvin)>`: the saturated liquid's c_p from
+    each liquid's reference equation of state, evaluated in the registry (`substance::helmholtz`):
+    IAPWS-95 (water), Setzmann and Wagner 1991 (methane), Bücker and Wagner 2006 (ethane), Span et
+    al. 2000 (nitrogen), Gao et al. 2023 (ammonia) and Span and Wagner 1996 (carbon dioxide), over
+    the table's ranges, held at their ends; a solution its components' mass-weighted mean; a row
+    with none, none. Not in the public mirror. Its misses against NIST's Chemistry WebBook at the
+    ranges' ends, J kg⁻¹ K⁻¹ (relative):
+
+    | Liquid | Low end                                                  | High end                        |
+    | ------ | -------------------------------------------------------- | ------------------------------- |
+    | H₂O    | 275 K, 4,213.9464 (1.2 × 10⁻⁹)                           | 305 K, 4,179.7735 (1.1 × 10⁻⁹)  |
+    | CH₄    | 91 K, 3,368.8130 (−6.9 × 10⁻¹⁰)                          | 116 K, 3,514.5173 (−1.0 × 10⁻⁸) |
+    | C₂H₆   | 95 K, 2,299.0653 (1.1 × 10⁻⁹)                            | 150 K, 2,332.5969 (2.3 × 10⁻⁹)  |
+    | N₂     | 64 K, 2,001.6226 (−6.8 × 10⁻⁹)                           | 78 K, 2,044.6685 (2.7 × 10⁻⁸)   |
+    | NH₃    | 196 K, 4,306.5963 (3.4 × 10⁻⁷, the gas constant's ratio) | 241 K, 4,469.7670 (3.6 × 10⁻⁷)  |
+    | CO₂    | 217 K, 1,954.1527 (1.1 × 10⁻⁸)                           | 272 K, 2,507.8792 (4.2 × 10⁻⁶)  |
+
+    The saturation pressures the evaluation solves miss by at most 2.4 × 10⁻⁴.
+
+  - _The sea's liquid_ (2.1; `ocean::SeaLiquid`). r_l = ρ_l c_l ÷ (ρ_w c_w) and c_l ÷ c_w at the
+    model's freezing point + 10 K, each liquid held into its own column's range (water at its 275 K
+    end where colder), the liquid's density its phase diagram's saturated liquid's (the source of
+    the held grain density, `GrainDensity::OfDiagram`, of every liquid with a specific heat
+    column, which the record may not read before P14.T54.a; `substance::optics`' tripwire, which
+    the gate's first run caught reading `grain_density`); water's exactly 1 (tested), so every
+    water world's capacities are as built. It scales the sea's three heat capacities; the Ekman
+    cells carry c_l and the gyres c_l ÷ c_w. Measured: water's c_l 4,195.5 J kg⁻¹ K⁻¹ at 283.15 K
+    (the ruling's prototype took seawater's 3,990); the Titan-like world's methane sea r_l 0.3546
+    against the reference equations' 0.3550, c_l 3,412.1, c_l ÷ c_w 0.8097.
+  - _R1 and R2_ (2.2; `ebm::Greenhouse`, `WaterVapour`, `Reservoir`, `Radiation`). As ruled, every
+    partial pressure a column weight x_i (M_i ÷ μ) p_s, as plan 14's law takes it (follow-up 5 §2,
+    `ebm::partial_pressure_pa`), with follow-up 2 §4's cap: the vapour at `h_w` of the local
+    saturation where water is among the surface liquids, and min(`h_w` p_sat(T), x_w (M_w ÷ μ)
+    p_s) where the gases hold water but no liquid water lies at the surface (an ice world's
+    saturation on the registry's ice branch); one τ where the gases hold none and in Kaspi and
+    Showman's fit. Under 22, k_w 2.89 per √bar at the saturation (`h_w` = 1). On the reference
+    Earth: τ_d 0.5147 by weight (0.4399 at mole partials before follow-up 5), τ_w(288 K) 0.3702,
+    the water's share of τ at 288 K 0.418 (0.457 before; decision-p14-t54a-bands' 49% under 23's
+    fit); 23's humidity on the same air read by `ebm::greenhouse_for` (both versions tested). The
+    emission's slope carries the water term's, floored at 0.1 of 4σT³ ÷ x (`EMISSION_SLOPE_FLOOR`);
+    the relaxation's pseudo-capacity reads the fixed-τ slope; τ_w, its slope and the relief's water
+    transmission e^(−(3/2) m τ_w) at the run's m join `Tabulated`, an interval whose quarter points
+    miss evaluated directly (an interval then holds h and the albedo only where the water terms
+    meet their tolerances too, so its read depends on the run's radiation as well as the span,
+    deterministically).
+  - _O1_ (2.3; `ocean::Currents`, `OceanGrid`, `ebm::couple_ocean`). As ruled: the Ekman cells'
+    γ = χ_d s w c_l ΔT_O ÷ (h_T − h̄) on each edge's latitude conductance (per point on the
+    geographic grid, s the two points' lesser sea share), lagged to the step's start, w the
+    partition's Hadley share about the step's energy-flux equator, rotating worlds only. ΔT_O is
+    the walls' blend χ_e ΔT_S + (1 − χ_e) ΔT_D (follow-up 5 §1, `ocean::ekman_contrast_k`): ΔT_D
+    the whole contrast to the return latitude's coldest month, max(0, T_s − T_R) (Enderton and
+    Marshall 2009's open form), and ΔT_S Held 2001's eq. 7 (Klinger and Marotzke 2000's eq. 11),
+    the edge's sea less the water subducted between it and the return band, each band weighted by
+    the decrement max(0, ψ_k − ψ_k+1) of the poleward Ekman mass flux across it, ψ at φ_R taken as
+    0, at its coldest month's band-mean sea temperature (`ocean::subducted_k`, tested against
+    Held's eq. 9 on his profiles to 10⁻⁶ of ΔT over 4,000 bands, and each regime to the bit at χ_e
+    1 and 0). The gyres' diffusion K⊕ (c_l ÷ c_w) f_Ω χ_e χ_d s A_e of T_w = T − Γ z̄_w, K⊕ = 10⁷ ×
+    5.2 × 10⁵ ÷ R⊕² = 0.128 W m⁻² K⁻¹ (Rose and Marshall 2009, Table 1, eq. 5b), f_Ω = (Ω ÷
+    Ω⊕)^−⅓ below Ω⊕ held at Ω⊕ ÷ 24, χ_e = min(1, L̄ ÷ 0.2) (1 on locked worlds), χ_d = min(1, d̄ ÷
+    700 m), d̄ the flooded cells' mean depth in cell order (`steps::climate::sea_transport`); both
+    in the steady state. `Solution::ocean` records each month's ocean heat convergence per point and
+    the annual and monthly transports at each band edge (the atmosphere's, the Ekman cells' and the
+    gyres'); the partition reads the atmosphere's flux alone. A world with no sea, or
+    `OceanTransport::None`, is the model without the term to the bit (tested). The blend's effect on
+    the relief Earth (the ocean's annual transport, which carries ΔT_O at a near-fixed ψ): at 10° N
+    +1.08 PW under the whole contrast, +0.63 under the blend; at 10° S −0.91 and −0.61; the tropical
+    peaks +1.25 at 15° N and −1.14 at 17.5° S before, +0.76 at 17.5° N and −0.83 at 20° S after.
+  - _The correction_ (2.4, as follow-ups 1, 3, 4 and 6–9 rebuilt it; `ebm::corrected`,
+    `ZonalSearch`, `search`, `next_search_step`, `defect_slope`, `g2_start`, `second_run`,
+    `kept_run`):
+    - the fit labels a fold whenever its final probe misses T\* by more than 0.1 K (`FOLD_MISS_K`),
+      converged or not, a converged final probe replacing its side's last candidate; at a
+      snowball-class fold (`SNOWBALL_FOLD_ICE_SHARE`) the candidate whose ice share lies nearer
+      `ice_fraction()` is taken (`nearer_side`); the fit records its candidates;
+    - the zonal search Z(T\*) on the fit's zonal model (band-mean sea shares, ground, ocean and
+      sunlight, `Sunlight::band_means`), each run under the search's stop, 0.01 K
+      (`SEARCH_CONVERGENCE_K`), recording whether it met the climate's stop (0.1 K) and the
+      search's: Z₀ at the fit's u from its zonal steady state; Z₁ by the two-sided steady slope at
+      u₀ ± 0.05 from the nearest run that met the climate's stop; from Z₂ the secant on the latest
+      two runs that met the search's stop, held inside them where they straddle the target and
+      otherwise to four times their step (`SECANT_STEP_CAP`), started from their secant predictor
+      of end states and return temperatures, linear in u (follow-up 7 §1); halfway to an
+      unconverged latest run from the nearest converged one; until a run that met the search's stop
+      lies within 0.01 K, or six runs (`SEARCH_RUNS`); its answer the nearest run that met the
+      climate's stop;
+    - on the zonal grid the answer is the climate; elsewhere G1, a measurement of d and of G2's
+      start (follow-up 8 §1), at the answer's u from its end state broadcast, under `G1_STOP`: the
+      climate's stop, or its probe stop where that comes first (`ebm::probe_end`, as follow-up 9
+      §1 amends it): after at least four fresh orbits since its start or its last jump that stood
+      (`PROBE_FRESH_ORBITS`; a reject restores the count and the mean's changes, `MeanTrail`), at the first
+      orbit where the surface mean's own last two ratios ρ_n = δ_n ÷ δ_n−1 and ρ_n−1 each lie in
+      (0, 1) and agree within 0.05 (`PROBE_AGREEMENT`), and its remainder R̄ = |δ_n| r\* ÷ (1 − r\*)
+      is at most 0.05 K (`PROBE_STOP_K`), r\* = max(the stop's own ratio, ρ_n) (`stop_ratio`, which
+      `settled_after` reads too), δ_n the surface mean's change over the orbit; its probe records
+      ρ_n, ρ_n−1, r\*, R̄ and T̂ = T̄_n + δ_n r\* ÷ (1 − r\*) at the orbit it ended, by either stop
+      (`MeanProbe`; at the climate's stop `settled_probe`, ρ_n read only where it lies in (0, 1));
+    - G2 always runs (`second_run`), at u_Z − d ÷ S_Z (d = T̂ − T̄_Z, S_Z the secant of the search's
+      two runs nearest T\* that met its stop and lie 0.1 K or more apart, `DEFECT_PAIR_SPREAD_K`,
+      else the steady slope), held to the bracket, started from G1's end plus the broadcast zonal
+      predictor's change over that pair, and likewise its return temperatures (G1's end alone
+      without a pair), under the climate's stop; or run A where G1 reached its last orbit under
+      neither stop, having measured no d, or the search has no answer. G2 is kept where it
+      converged, G1 where only it met the climate's stop, the nearer where neither did
+      (`kept_run`); follow-up 4's early end at a G1 within 0.1 K (`CORRECTION_TOLERANCE_K`) is
+      gone. Every run's u, surface mean, orbits, jumps, rejects, start (steady, continued or
+      predicted) and both flags, G1's probe, d, S_Z and its pair and G2's start mean are recorded
+      (`MeanCorrection::{Zonal, Searched}`, G2 no longer optional), and the slow coarse-pass test
+      prints them;
+    - the spin-up's extrapolation (follow-ups 4, 6 and 7; `Extrapolation`): after an orbit whose
+      stop fails on its remainder, m r ÷ (1 − r) at least the bound with r in (0.3, 0.97)
+      (`JUMP_RATIO_RANGE`), every point's end state and stored annual mean shift by the orbit's
+      annual change times r ÷ (1 − r), at most once every two orbits (`JUMP_SPACING_ORBITS`) and
+      only where two more orbits fit; a first fresh move larger than the move before the jump
+      rejects it, restoring the state, the means and the return temperatures to the bit; after a
+      reject a jump needs two successive ratios within 0.05 (`JUMP_AGREEMENT`); at most two rejects
+      a run (`MAX_REJECTS`); after a jump that stood, the stop's remainder reads r\* = max(r, the
+      ratio of the run's last jump) (`settled_after`); a run without jumps is unchanged to the bit;
+    - the stop: the move under the bound, the moves shrinking and their extrapolated remainder
+      under it, at least 3 orbits (`MIN_ORBITS`), at most 40; the transport's pressure factor falls
+      linearly to zero below 0.2 bar (`transport::pressure_factor`), bit for bit at and above it.
+  - _The bit-exact cost levers_ (follow-up 6 §6, follow-up 7 §4), each timed in scratch on the
+    coarse-pass Earth's geographic model, 10 orbits, one thread, load 3.7–6.3, interleaved, and the
+    climate module's records equal to the bit before and after (`logs/climate-9.log` against
+    `climate-10.log`, every run's record identical): one ground temperature and one table place per
+    quantile a step, shared by the albedo and the water transmission (`Relief::quantiles_at`,
+    `EnergyBalance::located_albedo`; tested against the point-by-point functions to the bit),
+    27.58 → 24.84 s, −2.7 s (−10%); the coupled step's per-step allocations hoisted to the run
+    (`ModelGrid::band_means_into`, `partition::edge_fluxes_into`, the bands' sea means on the
+    stack, the recorder's sums cleared in place), 24.84 → 24.79 s, inside the noise (a second
+    all-levers run 25.41 s).
+  - _Choices the ruling did not state_:
+    - nitrogen's collision factor in τ_d at the model's own equilibrium with its sunlight at T\*,
+      σT_eq⁴ = (1 − α(T\*)) F ÷ 4 + F_int (256.4 K on Earth against plan 14's 255.1 K, 1% in
+      nitrogen's term), since the inputs carry no equilibrium temperature;
+    - the vapour cap's criterion: water among a surface liquid's components (pure, or an aqueous
+      solution's), a brine's water as much a reservoir as a fresh sea's (follow-up 5 §4); its
+      water activity, p_w = a_w `h_w` p_sat, is P14.T52's;
+    - the sea's liquid is `liquids()`'s first, the one the relief step floods; `Freezing::Never`'s
+      reference temperature is plan 14's mean; d̄ counts every liquid's flooded cells, as the sea
+      shares do;
+    - the Ekman cells' return temperatures are the state's own in the steady state and a run's
+      first orbit (`Returning::Own`), then each band's previous-orbit coldest month
+      (`Returning::Coldest`, boxed per band), read for T_R at the template's first node at its
+      Earth share of the way from the edge to the pole (`wind::return_latitude_deg`) and for
+      T_sub; the equator's edge reads the northern hemisphere's; an edge's sea temperature is the
+      mean of its two bands'; the Ekman mass flux's sea share is the edge's points' mean;
+    - K_o takes no factor of the body's radius: the conductance is per R² as the model's Laplacian
+      is (low confidence either way);
+    - a run whose state is no longer finite mid-orbit leaves the Ekman gains at zero (a band's h
+      not finite), so the orbit ends and the run stops unconverged rather than panicking;
+    - a move of exactly nothing stops a run; every u of a run is held to the fit's bracket (the
+      slope's two steady probes are not runs); where no zonal run's mean is finite, G1 is run A;
+    - test 5's reference is Setzmann and Wagner's Table 39 at 100 K over the WebBook's IAPWS-95 at
+      275 K (0.3550), not NIST's ratio at the registry's 100.7 K (0.1% in ρ c_p, inside the 2%);
+    - the ocean record holds each step's starting-state fluxes, which the step applies implicitly,
+      so batch 2's Q_O will not close exactly on the energy the model moved; a one-month year
+      records its steady state's fluxes;
+    - the test-only `ebm::solve_continued`, `solve_at_fit` and `EnergyBalance::ekman_at` make the
+      relief effect's sea-level run, the extrapolation's and the models' comparisons and the
+      aquaplanet's ψ print;
+    - the test set-up's sea floor `SYNTHETIC_SEA_DEPTH_M` is the reference Earth's mean depth,
+      1.335 × 10¹⁸ m³ over 0.7095 of 510.082 × 10¹² m², 3,689 m (§2.5).
+  - _The 288.000 correction_ (the §2.4 follow-up, row 1): the ruling's prototype's fitted 288.000 K
+    was its bisection's unconverged transient at a fold.
+  - _The fold probes_ (zonal steady states' surface means against x; mole partials, before
+    follow-up 5): the sea-level reference Earth (a uniform sea share of 0.7 over 3,689 m) under one
+    τ rises smoothly to 288.000 K at x 1.64725 (`Solved`) and jumps 288.0 → 289.9 K between x
+    1.6472 and 1.6522; under the water term every state from 207.5 to 208.1 K at x ≤ 1.6545 was a
+    snowball and 292.97 K at 1.6595 the warm branch's end (`Folded`). By weight (follow-up 5) the
+    all-land sea-level fold's cold side ends at a capped state, 285.31 K (ice share 0.157), not a
+    snowball, against the warm 292.61 K (0.009), and the guard keeps the warm; the dry Earth's
+    crossover is 280.758 K. The sea-level ERA Earth's steady states by u from its fit: 204.6–207.7
+    K for u −0.10 to −0.01, then 292.24 K at u 0 and 314.0 K at +0.10; its two-sided slope at ±0.05
+    straddles the gap, 949.3 K per unit of u; the warm branch's one-sided slopes 179.0 (sea level)
+    and 203.9 (relief).
+  - _Follow-up 4's two-search build_ (the coarse pass's Earth, the 58.75 s tree): Z(T\*) Z₀–Z₃ in
+    22, 19, 33 and 18 orbits, its answer Z₃ at 287.991 K; Z(T\* − d) Z₄–Z₉ in 23, 4, 10, 10, 3 and
+    15, its answer Z₈ at 288.413 K against 288.426; G1 287.565 K in 7 orbits, d −0.426 K; G2 at Z₈'s
+    u 287.846 K in 13, kept, 0.154 K off; S_g ÷ S_Z = 0.280 ÷ 0.422 = 0.66 (the follow-up 6
+    ruling's ≈ 0.67), so one step of the zonal slope undershoots G1's defect by a third.
+  - _The prototype's table_ (follow-up 7 §1, the ruling's `runs/spinup_check.txt`): C predicted 3
+    orbits, 289.340 K, its worst band within 0.15 K of the marched C, each within its own stop; C
+    marched from A 14 orbits, 289.396 K; C under the global jump 18 orbits, component-wise 21,
+    RRE(2) 15.
+  - _The trace's rejects_ (`logs/trace-sealevel.log`, the follow-up 6 tree, before follow-up 7's
+    cap of two): on the sea-level Earth Z₀ (from the steady state) jumped four times, none
+    rejected; every continued run's jumps were rejected: Z₁ at orbits 3 (r 0.825, gain 4.71) and 8
+    (r 0.818, gain 4.48), their first fresh moves 0.333 and 0.160 K against 0.257 and 0.116; Z₂ at
+    orbits 3, 6, 13, 17 and 25 (0.961 against 0.624 K at the first); Z₃ at 3, 9 and 13: ten rejects,
+    each an orbit spent. The deep aquaplanet's Z₀ rejected its first jump (orbit 3, r 0.573: 3.417
+    against 2.495 K) and then one jump in every three orbits, so its 40 ran out (follow-up 7 row 4).
+    The stop's false pass after a jump was the ruling's prototype's (follow-up 7 row 3), fixed by r\*.
+  - _Follow-up 8's three-orbit probe_ (its probe on the stop's ratio alone, `logs/climate-11.log`):
+    on the coarse Earth G1 ended at 3 orbits at 287.639 K, R̄ 0.0078 K, T̂ 287.631 K against the
+    converged G1's 287.561 K in 7, so d −0.367 against −0.438 K (0.071 K off its 0.05 K bound); G2
+    predicted at 0.492804 from 287.577 to 287.897 K in 5 orbits, kept, 0.072 K from the converged
+    G1's G2 and 0.103 K from T\*; follow-up 9 rebuilt the probe on the mean's own ratio.
+  - _Follow-up 9's scratch timings_ (the draft, one thread, at load 3–8; the coarse Earth's step):
+    the ruled form 33.46 s (the model 25.36 s), G1 at its climate stop in 7 orbits; (a) alone
+    (r\* = max(the stop's ratio, ρ_n) from three fresh orbits, no agreement) G1 ended at orbit 3,
+    ρ 0.385, R̄ 0.0101 K, T̂ 287.629 K, d −0.369 K, G2 from 287.579 to 287.898 K in 5 orbits,
+    28.96 s (the model 21.87 s), refused by follow-up 10 row 3 (d 0.069 K off, an error nothing
+    the run measures bounds); (b) at four fresh orbits, as the ruled form, 32.19 s. G1's jumps at
+    orbits 3 and 5 restart its fresh count, so follow-up 9's four fresh orbits never come before
+    its climate stop at 7; by follow-up 10 row 1 a probe at 0.05 K needs orbit 6–7 either way, and
+    a marched G1 would stop at about 9–10.
+  - _The runs on the final tree_ (each u, surface mean, orbits, jumps and rejects):
+    - the coarse pass's reference Earth (level 8): Z₀ steady 0.495521, 289.225 K, 25, 1, 2; Z₁
+      continued 0.494192, 288.841 K, 25, 0, 2; Z₂ predicted 0.491283, 287.857 K, 16, 1, 1; Z₃
+      predicted 0.491705, 287.998 K, 3, 0, 0, the answer; G1 287.561 K in 7 orbits (jumps at
+      orbits 3 and 5), ended by the climate's stop before its probe's four fresh orbits came, its
+      probe at r\* 0.518 (the mean's ratios not yet read), R̄ 0.0098 K, T̂ 287.551 K, d −0.447 K
+      (−0.438 from its mean alone, follow-up 7); S_Z 333.8 K per unit of u from Z₃ and Z₂; G2
+      predicted at 0.493046, from a start of 287.595 K to 287.979 K in 3 orbits, kept, 0.021 K
+      off; S_g ÷ S_Z 0.93; G1's means 287.655, 287.639, 287.614, 287.600, 287.570 and 287.561 K
+      from orbit 2, the mean's own ratio 0.385 at orbit 3 and 0.813 at orbit 5; every zonal run met
+      both its stops;
+    - the ruled Earth (level 7, test 8): Z₀ 0.498877, 288.224 K, 21, 1, 2; Z₁ 0.498634, 288.156 K,
+      9, 0, 1; Z₂ predicted 0.498083, 287.974 K, 4; Z₃ predicted 0.498162, 287.994 K, 3, the answer;
+      G1 287.803 K in 6 orbits (one jump), ended by the climate's stop, T̂ 287.807 K, d −0.186 K;
+      S_Z 343.4 from Z₃ and Z₁; G2 predicted at 0.498705, from 287.125 K to **287.981 K in 3
+      orbits, kept, 0.019 K from T\***;
+    - the relief Earth (zonal, `Folded`, x 1.6457, m 0.9729, its steady state 289.651 K): Z₀
+      0.498862, 288.217 K, 23, 1, 1; Z₁ 0.498627, 288.147 K, 10, 0, 1; Z₂ predicted 0.498131,
+      287.984 K, 7, 0, 1; Z₃ predicted 0.498179, 287.995 K, 3, the answer;
+    - the sea-level Earth (zonal, `Folded`, x 1.6377): Z₀ 0.501589, 290.445 K, 13, 4, 0; Z₁
+      0.498960, 289.748 K, 22, 0, 2; Z₂ predicted 0.492361, 287.714 K, 22, 1, 2; Z₃ predicted
+      0.493288, 288.009 K, 4, the answer;
+    - the continent aquaplanet (geographic, no ocean term; I12's world in the gap): `Folded` at x
+      1.66021, its steady state 285.308 K; Z₀ 0.507163 unconverged at 40 orbits at 291.464 K (2
+      rejects), the answer for want of another; G1 291.669 K in 7 orbits, ended by the climate's
+      stop, the mean's ratios 0.732 and 0.418 (disagreeing), T̂ 291.688 K, d +0.224 K, the steady
+      slope 938.2 (no pair); G2 continued at 0.506925, 291.659 K in 4, kept, 3.66 K warm; its
+      land's seasonal range 28.2 K, the coast's 11.0 K and the open sea's 6.1 K; July 299.3, 290.8
+      and 289.5 K; the test's model 9.99 s;
+    - the 330 K aquaplanet (`Solved`, x 2.7417, m 1.373): Z₀ 28 orbits (4 jumps, 2 rejects), Z₁ 4,
+      Z₂ predicted 31 (2 rejects), Z₃ predicted 22 (2 rejects), Z₄ predicted 3, 329.999 K, the
+      answer; the climate 330.00 K in 3 orbits, the equator 332.6 K and the poles 323.7 K;
+    - the Earth on a 0.1-year orbit (zonal): Z₀ 0.507163 unconverged at 40 orbits (1 jump, 2
+      rejects), 285.483 K, its last moves 0.012–0.014 K an orbit, kept for want of another and
+      flagged (I13);
+    - the dry Earth (zonal; its air's water 1,027.1 Pa by weight, its crossover 280.758 K under
+      22's `h_w` = 1): Z₀ 0.664611, 282.697 K; Z₁ 0.691209, 286.358 K; Z₂ 0.703134, 287.937 K; Z₃
+      0.703612, 287.999 K, the answer, each in 3 orbits; its τ_w the inventory's above the crossover
+      and the saturation's below it, to 10⁻¹²;
+    - the deep all-sea aquaplanet (zonal, deep ocean, `Folded`): Z₀ steady 0.505982, 291.715 K, 40
+      orbits, 2 rejects, met the climate's stop only; Z₁ slope 0.502015, 290.494 K, 34, 2; Z₂ slope
+      0.499350, 289.447 K, 40, 2, unconverged; Z₃ halfway 0.500682, 289.9997 K, 32, 2; Z₄ secant
+      predicted 0.495354, 286.993 K, 40, 1 jump, 2 rejects, unconverged; Z₅ halfway 0.498018,
+      288.832 K, 40, 2, the answer 0.83 K off at the six-run limit, as follow-up 8 §2's
+      restatement asserts no run count or miss (its four-run test failed under follow-up 7, I12's
+      and I13's case); every predicted start its pair's prediction to the bit. At 15° N its ocean
+      peak +1.20 PW,
+      the Ekman cells' ψ 30.6 × 10⁹ kg s⁻¹ and ΔT_D 8.72 K at the annual mean, against Enderton and
+      Marshall's Aqua, 2.4 PW, about 60 Sv and about 10 K (I6).
+  - _Measured against §2.5_ (the relief Earth unless named; ERA-Interim, Siler et al.'s Fig. 2b):
+    - from 58.75° S northward outside the tiers, worst +4.62 K at 48.75° S (bound 5); the ice edge's
+      tier 61.25–71.25° N −1.95, −3.61, −5.01, −4.27 and −3.11 K (bound 7); the tropics −2.19 to
+      +0.57 K (bound 3); 73.75–61.25° S at most +4.42 K (bound 6.5); 76.25° S +6.77 K (bound 9);
+    - the relief effect at the relief Earth's u 0.49818: the sea-level Earth's Z₀ (u 0.50159,
+      290.445 K) continued there converged in 17 orbits at 289.563 K; 76.25° S 263.57 against
+      266.40 K (2.83 K colder) and 73.75° S 265.02 against 267.69 K (2.67 K colder);
+    - the sea-level Earth's shape: worst 5.44 K at 66.25° N (the tier's 7 K), 5 K elsewhere met, the
+      mean departure −1.03 K (bound 3);
+    - the transports (PW; Trenberth and Caron): the totals' peaks +4.74 at 40° N and −4.40 at 37.5°
+      S (+5.61, −5.62); the ocean's tropical peaks +0.76 at 17.5° N and −0.83 at 20° S (bounds [0.3,
+      1.2] and [−1.2, −0.3]; Trenberth and Caron +2.09 and −1.24, Klinger and Marotzke's shallow
+      cells +0.39 and −0.64 at ±10°); at 47.5° N +0.40 and at 47.5° S −0.11 (Trenberth and Caron
+      −0.25 and −0.32 at 46.0° and 48.8° S); the atmosphere's share at 35° N 0.888 and at 35° S
+      0.903: every bound met;
+    - the models agree (test 3 as follow-up 7 restates it): three orbits each from the same
+      broadcast steady state, all land within 2.3 × 10⁻¹³ K and all sea within 6.6 × 10⁻¹² K at
+      every point; the extrapolated relief run against the marched one, 13 orbits each, both
+      converged, the worst band 0.054 K apart;
+    - T13.j's ruled Earth assertions hold: the north 2.41 mm/day, **1.250** (at least 1.10; T13.j
+      1.160), the south 1.348, the interior 0.572, the 40–70° N arid share 0.099, k 0.926–0.975 by
+      month; the coarse pass's north 1.503 and south 1.223.
+  - _Cost_ (the reference Earth's climate step at level 8, one thread, `CPUQuota` 400%; the
+    landwater lane's probe, inserted and deleted): **31.83 and 31.82 s quiet** on the final tree,
+    two runs back to back under the heavy-test lock in a window main cleared (load 0.31–0.89; the
+    model 24.78 and 24.77 s, the rest 7.05 and 7.04 s, the water cycle 6.73 and 6.74 s against
+    T13.j's quiet 6.60–6.74 s): within decision-r09-t13i's §2.4 follow-up 10 §1, which restates
+    the landing trigger for R09.T13.i (30–35 s quiet lands with the figure and each lever's saving
+    recorded; the 30 s was a report-before-landing trigger, the remaining cost R1's relaxation and
+    two verified geographic runs, G2 at its stop's floor of 3 orbits and G1 at 6–7). Each lever
+    since the first build:
+    - as T13.j built it, 12.33–12.47 s (the model 5.45 s);
+    - R1, O1 and runs A, B and C: 109.29 s at load 1.9 (the model 100.95 s, 51 geographic orbits
+      at 2.0 s; R1 adds 65% to an orbit and O1 11%, against the ruling's 15% and 5%; under R1 each
+      run took 14–26 orbits against 3–6 under one τ);
+    - follow-ups 4 and 5 (the zonal search, G1 and G2, the extrapolation): 58.75 s at load 4.7–8.1
+      (the model 51.43 s; 20 geographic orbits, G1 7 and G2 13);
+    - follow-up 6 (one search and the defect step): 25 geographic orbits (G1 7, G2 18), not timed,
+      about 60 s by the orbit's cost;
+    - follow-up 7 (the predictor, two rejects, r\*): G2 18 → 3 orbits, 10 geographic orbits;
+    - the bit-exact pass (the shared quantiles −10%, the hoisted allocations nothing measurable):
+      33.14 s at load 6.3, 31.96 and 32.55 s quiet (load 1.71–2.43);
+    - follow-up 8's probe on the stop's ratio: refused by its own test (d 0.071 K off);
+      follow-up 9's on the mean's own agreeing ratios: G1 still at its climate stop in 7 orbits,
+      the step unchanged (33.46 s at load; scratch above), the quiet figure above.
+
+    Of the model, G1's 7 geographic orbits take about 17 s, G2's 3 about 7 s and the fit and the
+    zonal search about 1 s. `Jumps::Never` for G1 (follow-up 10 §2, allowed where it takes no
+    more orbits) was not tried: follow-up 10 row 1 puts a marched G1's climate stop at about 9–10
+    orbits. Slow tests' times (decision-r09-t13-test-cost §3.3): the continent test's model 9.99 s
+    (`logs/climate-12.log`); the coarse pass's, E-L8's sample's and the land-heavy Earth's with
+    the gate's slow-test run.
+
+  - _The tests_ (§2.5 as the follow-ups amend it). In `tests.rs`:
+    `an_earth_like_world_converges_and_lies_within_5_k_of_era_interim` (the sea-level shape, the
+    ice-edge tier), `an_earth_with_its_land_s_hypsometry_lies_within_the_ruled_bounds_of_era_interim`
+    (the relief Earth's bounds and the relief effect at its u),
+    `the_relief_earth_s_transports_lie_within_bounds_on_trenberth_and_caron_s_data`,
+    `the_relief_earth_s_fit_is_a_fold_and_its_correction_closes_on_the_mean`,
+    `with_no_sea_the_ocean_s_transport_is_nothing_to_the_bit`,
+    `a_330_k_aquaplanet_converges_under_the_water_term`,
+    `a_short_orbit_runs_until_its_remainder_is_under_the_bound_or_flags`,
+    `a_methane_sea_holds_its_own_heat_and_water_s_ratio_is_one`,
+    `the_extrapolated_run_lies_within_twice_the_stop_of_the_marched_one`,
+    `the_deep_aquaplanet_s_search_keeps_to_its_rules` (follow-up 8 §2's restatement of the
+    four-run test, its predicted starts checked to the bit against their pairs' end states through
+    the test-only `ebm::search_states`), the models' reproduction (all land, all sea) and, slow,
+    `the_step_s_mean_constant_reconciles_the_relief_earth_s_surface_means` (test 8) and the
+    continent test (printing each run and its wall time, its `ignore` reason restated); in
+    `ebm.rs`: the water term's and the raised quantile's (test 4),
+    `a_world_with_no_surface_water_caps_its_vapour_at_its_air_s_water`, both versions' greenhouse
+    rules, the stop's, the kept run's choice and G1's and G2's (`kept_run`), G1's probe stop on one
+    and on two modes (its R̄ and T̂ the extrapolation's form to the bit), its trail's restart at a
+    jump and restore on a reject (`MeanTrail`), its probe at the climate's stop
+    (`settled_probe`), the probe reading its run to the bit and ending a marched one before its
+    climate stop, its fallback to run A, the extrapolation's reject and restore, the search's
+    hand-built branches and the defect step, the shared quantiles to the bit, the conservation test
+    as follow-up 6 restates it, the table's and the fold guard's; in `ocean.rs`: the rotation
+    factor, the mean depth, the currents' depth and turning, the grid's edges and walls, the Ekman
+    gain's zeros, Held's eq. 9 and the blend; in `wind.rs` the return latitude; in `transport.rs`
+    the pressure factor (test 7); in `tests/hydrology.rs` the coarse Earth's probe (follow-up 9
+    §2). The climate module, ignored tests included, on the final tree: 198 of 198 passed
+    (`logs/climate-12.log`).
+- **Deferred findings (2026-10-13 rule)** (R09.T13.i; decision-r09-t13i §6 and its follow-ups;
+  recorded, not ruled; each for "main"'s list).
+  - I1 (E-P11's remainder, with E-P10). The land's seasonal water: a store (snow, soil) replacing the
+    orographic model's fast recycling, its evaporation energy-limited, its own budget; before R09.T15
+    asserts s, w or f letters.
+  - I2 (amended by follow-up 2). The cloud-free albedo: the Southern Ocean +3.0 to +4.6 K from 61.25°
+    S to 43.75° S (relief Earth), the midlatitude sea's summer storage the same sunlight; and the ice
+    edge's cold bias at the right mean, −5.01 K at 66.25° N on the relief Earth and 5.44 K in shape
+    at the sea level, at the albedo ramp's midpoint. The 7 K tier at 61.25–71.25° N holds until the
+    cloud revision lands, then 5 K.
+  - I3 (R1b). The two-part window: the grey relief transmission passes 27% of the ground's emission
+    against Earth's 10–15%.
+  - I4 (R3). Surface inversions, with G1(c), partly met by R2.
+  - I5 (E-P8's southern half). The southern storm track's convergence, −0.54 to −0.59 mm/day at
+    40–60° S on observed temperatures against −1.41.
+  - I6 (amended by follow-ups 5, 6 and 7). The ocean's NH tropical half and E-P3: with Held's eq. 7
+    on walled edges the relief Earth's NH tropical ocean carries about a third of the observed
+    (+0.63 PW at 10° N, its peak +0.76 at 17.5° N, against Trenberth and Caron's 1.8–2.1 at 10–15°
+    N; the ruling's estimate was 0.4–0.5, a quarter); the missing 1.2–1.5 PW at 10–20° N is the
+    overturning's, the western boundary currents' and the Indonesian throughflow's, which only a
+    basin model holds; the open-ocean form's confidence
+    is Enderton and Marshall's GCMs alone, and χ_e sets each edge's regime. The deep aquaplanet's
+    ocean peak is +1.20 PW at 15° (1.12 on the follow-up 6 tree) against Enderton and Marshall's
+    2.4: its ψ 30.6 × 10⁹ kg s⁻¹ against about 60 × 10⁹ and its ΔT_D 8.72 K against about 10 (30.7
+    and 8.25 on the follow-up 6 tree), so the factor of two is mostly the mass flux, the partition's
+    Hadley mass flux at half Held's 60 × 10⁹ kg s⁻¹ from Peixoto and Oort: a candidate for the
+    partition's own revision, not O1's.
+  - I7 (E2). β by column, needing a surface net longwave (I3).
+  - I8. The land's relative humidity, 80% over hot continents (with I1).
+  - I9 (O2, for plan 14). Plan 14's D⊕ scaled by atmosphere-only laws; T13.i's ocean scalings are
+    the reference for its next revision.
+  - I10 (O3, for plan 14). Locked aquaplanets' ocean widening the open dayside.
+  - I11 (G1(b)). An ice albedo that remembers T13.d's perennial ice.
+  - I12 (the §2.4 follow-up; amended by follow-ups 3 and 8). A world whose target lies in the
+    fold's gap runs its nearest branch, its water cycle reading a climate up to the gap's width off
+    T13.d's mean. Its first measured world is the continent aquaplanet with no ocean term: its Z₀
+    unconverged at 40 orbits, G2 kept 3.66 K warm on the final tree (B kept 2.45 K warm
+    under follow-up 3's A, B and C). The deep all-sea aquaplanet: its search's nearest converged
+    answer lies 0.83 K from T\*, and half its runs are unconverged at 40 orbits. Candidates: a
+    cloud-masked ice albedo (with I2), or τ solved on the zonal model's seasonal mean.
+  - I13 (follow-up 2; amended by follow-ups 3, 4 and 6–10). Slow convergence:
+    - short orbits converge slowly: a 0.1-year orbit's runs moved 0.44–0.5 K an orbit after 40;
+      on the final tree its Z₀ ends unconverged at 40 orbits at 285.48 K, flagged;
+    - near-fold slowing: secant runs in the gap stall at 40 orbits (the continent's C under
+      follow-up 3); test 3's all-sea world runs at r ≥ 0.97, past the jump's cap (inferred: no jump
+      fired in 40 orbits), and needs more than 40 orbits marched; the deep aquaplanet's search spends
+      four of its six runs at 40 orbits (two unconverged) and ends 0.83 K off: near-fold search
+      cost, runs of 32–40 orbits on that aquaplanet against 3–25 on the coarse Earth (follow-up 8);
+    - the extrapolation is built for 0.3 < r < 0.97; short orbits (r → 1) stay open; a run's r from
+      two moves scatters, so a run of 3–4 orbits can stop short of its bound (the 0.037 K pair of
+      follow-up 4's second search); a jump's own fast transient read as convergence was the stop's
+      false pass after a jump (the ruling's prototype stopped 0.23 K short), fixed by follow-up 7's
+      r\*; and a continued run's largest-point ratio reads the fast adjustment for its first orbits
+      (the coarse Earth's three-orbit G1 probe of follow-up 8: r\* about 0.3, R̄ 0.0078 K, T̂ 0.070 K
+      above the converged G1's mean), so a quantity's remainder is read from that quantity's own
+      ratio once two agree (follow-up 9);
+    - the cost record: the 109 s breakdown and the lane's trials above; the landing trigger
+      restated for R09.T13.i by follow-up 10 §1 (30–35 s quiet lands, recorded; over 35 s holds),
+      the remaining cost being physical, R1's relaxation over about 7 orbits and two verified
+      geographic runs at their floor (G2 at its stop's 3 orbits, G1 at 6–7);
+    - the route back under 30 s, each under its own ruling: RRE(2) or Newton on the G runs, and
+      the costlier worlds' times (the land-heavy Earth, E-L8's sample) once measured;
+    - the candidates, each under its own ruling, in order: RRE(2) (the prototype's B in 15 orbits
+      against 21, within 0.033 K of the marched), a Newton–Krylov solve of the periodic state
+      (Merlis and Khatiwala 2008), the time step, threads in R09.T17; and for the stop, r as the
+      larger of its last two ratios, or four fresh orbits for the search's stop.
+  - G3 and G4 stand as recorded; G2 is superseded by the §2.4 follow-up.
 - **Deviations in T7.i, as built** (2026-10-20; lane `r09-craters`, from
   `origin/rendering-and-planets` at `8f307d16` with the plan text of `84c56ed5`, measured there and
   merged with `1870973b` before its goldens were blessed; main's rulings of 2026-10-19,

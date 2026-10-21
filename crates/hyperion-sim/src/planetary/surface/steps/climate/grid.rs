@@ -261,14 +261,22 @@ impl ModelGrid {
     /// grid of one column, `values` itself.
     #[must_use]
     pub(super) fn band_means(&self, values: &[f64]) -> Vec<f64> {
+        let mut means = vec![0.0; values.len() / self.columns];
+        self.band_means_into(values, &mut means);
+        means
+    }
+
+    /// [`band_means`](Self::band_means) into `out`, one value per band, with no allocation: the
+    /// same sums in the same order.
+    pub(super) fn band_means_into(&self, values: &[f64], out: &mut [f64]) {
         if self.columns == 1 {
-            return values.to_vec();
+            out.copy_from_slice(values);
+            return;
         }
         let n = index(self.columns);
-        values
-            .chunks_exact(self.columns)
-            .map(|row| row.iter().fold(0.0, |s, v| s + v) / n)
-            .collect()
+        for (mean, row) in out.iter_mut().zip(values.chunks_exact(self.columns)) {
+            *mean = row.iter().fold(0.0, |s, v| s + v) / n;
+        }
     }
 
     /// The field of this grid whose every column is `bands`, one value per band.

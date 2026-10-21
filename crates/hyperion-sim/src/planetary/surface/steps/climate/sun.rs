@@ -549,6 +549,39 @@ impl Sunlight {
         }
     }
 
+    /// This sunlight over `grid` as the zonal model reads it: each step's band means over `grid`'s
+    /// columns, summed column by column (decision-r09-t13i's §2.4 follow-up 4 §4, the zonal search).
+    /// A turning world's diurnal mean is the same in every column, so its bands are its own; a
+    /// beam's are averaged step by step.
+    #[must_use]
+    pub(super) fn band_means(&self, grid: &ModelGrid) -> Self {
+        let light = match &self.light {
+            Light::Constant => Light::Constant,
+            Light::Bands { insolation_w_m2 } => Light::Bands {
+                insolation_w_m2: insolation_w_m2.clone(),
+            },
+            Light::Beam { .. } => {
+                let mut insolation = vec![0.0; grid.points()];
+                let mut bands = Vec::with_capacity(slot(self.steps) * LATITUDE_BANDS);
+                for step in 0..self.steps {
+                    self.fill(step, grid, &mut insolation);
+                    bands.extend(grid.band_means(&insolation));
+                }
+                Light::Bands {
+                    insolation_w_m2: bands,
+                }
+            }
+        };
+        Self {
+            steps: self.steps,
+            step_s: self.step_s,
+            months: self.months,
+            month_of_step: self.month_of_step.clone(),
+            light,
+            annual_w_m2: grid.band_means(&self.annual_w_m2),
+        }
+    }
+
     /// Whether a step's insolation varies along a band, which only a beam's does: the diurnal
     /// mean is the same in every column, and constant sunlight runs no orbit.
     #[must_use]

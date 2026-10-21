@@ -208,13 +208,26 @@ struct Diagnostics {
 /// An energy-balance model's surface means over its relief, K, which R09.T13.d's constant c
 /// reconciles (decision-r09-t13ge §3, G3): its τ solve's, of the zonal grid's steady state over
 /// each band's pooled quantiles, and its seasonal run's, of the annual field on its own grid over
-/// each point's.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// each point's; with how τ was found and what the mean's correction did (R09.T13.i), and the
+/// ocean's transports.
+#[derive(Debug, Clone, PartialEq)]
 struct SurfaceMeans {
     /// The τ solve's steady state's, K.
     steady_k: f64,
     /// The seasonal run's annual field's, K.
     seasonal_k: f64,
+    /// How τ was found: its fit's label, a fold's included (decision-r09-t13i's §2.4 follow-up §5,
+    /// I12).
+    optical_depth: ebm::OpticalDepth,
+    /// What the seasonal run's correction of its own surface mean did (decision-r09-t13i's §2.4
+    /// follow-up 4 §4): every zonal and geographic run's u, surface mean, orbits and convergence.
+    correction: ebm::MeanCorrection,
+    /// The orbits the kept seasonal run took.
+    orbits: u32,
+    /// The kept run's northward transports at each band edge, the year's and each month's: the
+    /// atmosphere's, the Ekman cells' and the gyres' (decision-r09-t13i §2.3.3); none where no sea
+    /// carries a term.
+    transports: Option<(ebm::Transports, Vec<ebm::Transports>)>,
 }
 
 /// The kind of mean a model's records are normalised in (decision-r09-t13d-normalisation §2.2),
@@ -367,6 +380,10 @@ fn energy_balance(
     let surface_means = SurfaceMeans {
         steady_k: solution.steady_surface_mean_k,
         seasonal_k: on_grid.surface_mean_k(&grid, &solution.climate.annual_k),
+        optical_depth: solution.optical_depth,
+        correction: solution.correction,
+        orbits: solution.climate.orbits,
+        transports: solution.ocean.map(|record| (record.annual, record.months)),
     };
     let own = hydrology::OwnRecords {
         months_k: solution.climate.months_k.clone(),

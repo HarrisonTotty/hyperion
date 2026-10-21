@@ -313,15 +313,26 @@ impl Bands {
 /// divergence (`F_k+1` − `F_k`) ÷ `w_k` is the negative of the model's convergence.
 #[must_use]
 pub(super) fn edge_fluxes(grid: &ModelGrid, transport_kg_m2_s: f64, values: &[f64]) -> Vec<f64> {
-    (0..=LATITUDE_BANDS)
-        .map(|edge| {
-            if edge == 0 || edge == LATITUDE_BANDS {
-                0.0
-            } else {
-                -transport_kg_m2_s * grid.edge_conductance(edge) * (values[edge] - values[edge - 1])
-            }
-        })
-        .collect()
+    let mut flux = vec![0.0; LATITUDE_BANDS + 1];
+    edge_fluxes_into(grid, transport_kg_m2_s, values, &mut flux);
+    flux
+}
+
+/// [`edge_fluxes`] into `out` ([`LATITUDE_BANDS`] + 1 values), with no allocation: the same
+/// arithmetic.
+pub(super) fn edge_fluxes_into(
+    grid: &ModelGrid,
+    transport_kg_m2_s: f64,
+    values: &[f64],
+    out: &mut [f64],
+) {
+    for (edge, flux) in out.iter_mut().enumerate() {
+        *flux = if edge == 0 || edge == LATITUDE_BANDS {
+            0.0
+        } else {
+            -transport_kg_m2_s * grid.edge_conductance(edge) * (values[edge] - values[edge - 1])
+        };
+    }
 }
 
 /// The energy-flux equator's sine latitude of the flux `flux_w_m2` (one an edge, W m⁻² per 2πR²)

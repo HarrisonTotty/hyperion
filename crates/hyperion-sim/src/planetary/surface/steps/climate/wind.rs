@@ -582,4 +582,16 @@ mod tests {
         );
         assert_calm(along_bands(CellWind::Towards([1.0, 0.0, 0.0]), locked));
     }
+
+    /// The Ekman cells' return latitude (decision-r09-t13i §2.3.1): the template's first node at
+    /// Earth's Hadley edge, 35.4° at 25.1°, the same share of the way to the pole at another edge,
+    /// and the pole where the edge reaches it.
+    #[test]
+    fn the_return_latitude_is_the_template_s_first_node_at_its_earth_share() {
+        assert!((return_latitude_deg(TEMPLATE_EDGE_DEG) - TEMPLATE_NODES_DEG[0]).abs() < 1e-12);
+        let share = (TEMPLATE_NODES_DEG[0] - TEMPLATE_EDGE_DEG) / (90.0 - TEMPLATE_EDGE_DEG);
+        assert!((return_latitude_deg(40.0) - (40.0 + share * 50.0)).abs() < 1e-12);
+        assert!((return_latitude_deg(90.0) - 90.0).abs() < 1e-12);
+        assert!((return_latitude_deg(95.0) - 90.0).abs() < 1e-12);
+    }
 }
