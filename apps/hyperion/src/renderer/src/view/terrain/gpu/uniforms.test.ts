@@ -184,6 +184,42 @@ describe("an instance record", () => {
     expect(records.count).toBe(0);
     expect(records.bytes().byteLength).toBe(0);
   });
+
+  it("copies another's record word for word, as a shadow cascade's casters take it (R10.T9.b)", () => {
+    const source = new InstanceRecords(2);
+    source.push(4, vec3(1.25, -2.5, 0.1), 10, 20);
+    source.push(5, vec3(-3, 4, 1e-7), 30, 40, 9, 2, 3);
+    const copy = new InstanceRecords(1);
+    copy.pushCopy(source, 1);
+    expect(Array.from(copy.bytes())).toEqual(
+      Array.from(source.bytes().subarray(INSTANCE_RECORD_BYTES)),
+    );
+  });
+
+  it("refuses a copy past its capacity", () => {
+    const source = new InstanceRecords(2);
+    source.push(4, vec3(0, 0, 0), 0, 1);
+    source.push(5, vec3(0, 0, 0), 0, 1);
+    const copy = new InstanceRecords(1);
+    copy.pushCopy(source, 0);
+    expect(() => {
+      copy.pushCopy(source, 1);
+    }).toThrow(RangeError);
+    expect(copy.count).toBe(1);
+  });
+
+  it.each([-1, 1, 0.5, Number.NaN])(
+    "refuses to copy record %f, which is not one of the source's this frame",
+    (index) => {
+      const source = new InstanceRecords(2);
+      source.push(4, vec3(0, 0, 0), 0, 1);
+      const copy = new InstanceRecords(2);
+      expect(() => {
+        copy.pushCopy(source, index);
+      }).toThrow(RangeError);
+      expect(copy.count).toBe(0);
+    },
+  );
 });
 
 describe("the contacts buffer", () => {

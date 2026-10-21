@@ -51,7 +51,10 @@ export const INPUT_SAMPLER: SamplerSpec = {
   binding: POST_PROCESS_BINDINGS["hdr-colour-sampler"],
 };
 
-/** The descriptor of a sampler of `spec`: its filter between mips too. */
+/**
+ * The descriptor of a sampler of `spec`: its filter between mips too, and its comparison, where it
+ * has one (plan R10, R10.T9.b).
+ */
 export function samplerDescriptor(spec: SamplerSpec): GPUSamplerDescriptor {
   return {
     label: spec.name,
@@ -61,8 +64,23 @@ export function samplerDescriptor(spec: SamplerSpec): GPUSamplerDescriptor {
     addressModeU: spec.address,
     addressModeV: spec.address,
     addressModeW: spec.address,
+    ...(spec.compare === undefined ? {} : { compare: spec.compare }),
   };
 }
+
+/** The layout's binding type of a sampler of `spec`. */
+export function samplerBindingType(spec: SamplerSpec): GPUSamplerBindingType {
+  if (spec.compare !== undefined) {
+    return "comparison";
+  }
+  return spec.filter === "linear" ? "filtering" : "non-filtering";
+}
+
+/**
+ * A pipeline's colour output: a colour format, or none at all, for a depth-only pass into a
+ * `DepthLayerTarget` (plan R10, R10.T9.b), which always has depth.
+ */
+export type PipelineColour = GPUTextureFormat | "depth-only";
 
 /** What a specification binds in `@group(2)`. */
 export interface ResourceBindings {
@@ -161,7 +179,7 @@ export function resourceLayoutEntries(
     ...bindings.samplers.map((sampler) => ({
       binding: sampler.binding,
       visibility,
-      sampler: { type: sampler.filter === "linear" ? "filtering" : "non-filtering" } as const,
+      sampler: { type: samplerBindingType(sampler) },
     })),
     ...bindings.storageBuffers.map((buffer) => ({
       binding: buffer.binding,
@@ -179,16 +197,35 @@ export function resourceLayoutEntries(
   return entries.toSorted((a, b) => a.binding - b.binding);
 }
 
-/** The depth bias of a pipeline for a bias away from the camera, negated for reversed depth. */
+/**
+ * The depth bias of a pipeline for a bias away from the camera, negated for reversed depth: its
+ * constant, its slope scale and its clamp.
+ *
+ * @remarks
+ * WebGPU bounds a bias by a positive `depthBiasClamp` from above and by a negative one from below
+ * (§10.3.6, "biased fragment depth"). Under reversed depth a bias away is negative, so its clamp is
+ * negated too, to bound it from below: its size is then at most the clamp, as asked (plan R10,
+ * R10.T9.b). A clamp of 0 or none bounds nothing.
+ */
 export function depthBiasOf(
   bias: WgslMaterialSpec["depthBiasAway"],
   topology: GPUPrimitiveTopology,
-): { readonly depthBias: number; readonly depthBiasSlopeScale: number } {
+): {
+  readonly depthBias: number;
+  readonly depthBiasSlopeScale: number;
+  readonly depthBiasClamp: number;
+} {
   // WebGPU takes a bias on triangles only.
   if (bias === undefined || topology !== "triangle-list") {
-    return { depthBias: 0, depthBiasSlopeScale: 0 };
+    return { depthBias: 0, depthBiasSlopeScale: 0, depthBiasClamp: 0 };
   }
-  return { depthBias: -bias.constant, depthBiasSlopeScale: -bias.slopeScale };
+  const clamp = bias.clamp ?? 0;
+  return {
+    depthBias: -bias.constant,
+    depthBiasSlopeScale: -bias.slopeScale,
+    // Not -0, which a descriptor's reader would compare unequal to 0.
+    depthBiasClamp: clamp === 0 ? 0 : -clamp,
+  };
 }
 
 /** The modules of a material, one when both stages are the same source. */
@@ -197,17 +234,26 @@ export interface MaterialModules {
   readonly fragment: GPUShaderModule;
 }
 
-/** The render pipeline of a material drawing a mesh of `buffers` into these attachments. */
+/**
+ * The render pipeline of a material drawing a mesh of `buffers` into these attachments.
+ *
+ * @remarks
+ * Into `depth-only` (plan R10, R10.T9.b) the pipeline has no colour target, whatever `hasDepth`
+ * says, and keeps its fragment stage, so that a material may `discard`; its depth state is the
+ * material's, as into any target with depth. A material with `unclippedDepth` takes
+ * `primitive.unclippedDepth`, which the engine refuses earlier without `depth-clip-control`.
+ */
 export function materialPipelineDescriptor(
   spec: WgslMaterialSpec,
   modules: MaterialModules,
   layout: GPUPipelineLayout,
   buffers: ReadonlyArray<GPUVertexBufferLayout>,
   topology: GPUPrimitiveTopology,
-  colourFormat: GPUTextureFormat,
+  colourFormat: PipelineColour,
   hasDepth: boolean,
 ): GPURenderPipelineDescriptor {
   const blend = BLEND_STATES[spec.blend];
+  const depthOnly = colourFormat === "depth-only";
   return {
     label: spec.name,
     layout,
@@ -215,16 +261,23 @@ export function materialPipelineDescriptor(
     fragment: {
       module: modules.fragment,
       entryPoint: ENTRY_POINTS.fragment,
-      targets: [
-        {
-          format: colourFormat,
-          ...(blend === undefined ? {} : { blend }),
-          writeMask: spec.colourWrites ? COLOUR_WRITE_ALL : 0,
-        },
-      ],
+      targets: depthOnly
+        ? []
+        : [
+            {
+              format: colourFormat,
+              ...(blend === undefined ? {} : { blend }),
+              writeMask: spec.colourWrites ? COLOUR_WRITE_ALL : 0,
+            },
+          ],
     },
-    primitive: { topology, cullMode: spec.cullMode, frontFace: "ccw" },
-    ...(hasDepth
+    primitive: {
+      topology,
+      cullMode: spec.cullMode,
+      frontFace: "ccw",
+      ...(spec.unclippedDepth === true ? { unclippedDepth: true } : {}),
+    },
+    ...(hasDepth || depthOnly
       ? {
           depthStencil: {
             format: "depth32float",

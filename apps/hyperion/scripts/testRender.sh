@@ -8,17 +8,19 @@
 #   testRender.sh [--variant=NAME]... [--part=N]... [--fixture=broken-wgsl|external-fetch]
 #                 [--drop-adapter-switches] [--captures=DIR]
 #
-# The page's groups are in six parts (`src/renderer/src/smoke/page.ts`), each a run of its own
+# The page's groups are in seven parts (`src/renderer/src/smoke/page.ts`), each a run of its own
 # under its own watchdog, the harness's hang detector (perf-smoke, 2026-10-13): parts 2 to 6 hold
 # the atmosphere's CPU-twin groups (2 R08.T6.b, 3 R08.T6.g and R08.T6.i, 4 R08.T7, 5 R08.T6.f's
 # two, 6 R08.T9.b's two), part 4 also R05.T12.e's marches and part 6 R05.T12.c's frames, each
-# first, and part 1 every other group.
+# first, part 7 R10's terrain groups, and part 1 every other group.
 # SwiftShader's GPU process and the twins together took some 940 CPU-seconds for the two variants
 # (measured 2026-10-13), so on a machine busy with other work, with about 4 cores left to the
 # smoke, a run of the whole page outlasted the 180 s watchdog however its work overlapped. Three
 # parts left the third 140 s once R08.T7 had joined it (load 3 to 9), so there were four; four
 # left three of them 124 to 155 s once R08.T6.f's slices had joined them (load about 7), so there
-# are five, each about a fifth of the page; R08.T9.b's surface lighting took a sixth of its own.
+# are five, each about a fifth of the page; R08.T9.b's surface lighting took a sixth of its own,
+# and R10's terrain groups a seventh once R10.T9.b's cascades took the sixth to 163 s at a load of
+# 2 (2026-10-21).
 # --part=N runs that part alone (every part by default).
 #
 # --captures=DIR also renders the capture frames (R05.T12.c's atmosphere comparison, R05.T11.c's
@@ -55,7 +57,7 @@ captures=()
 for arg in "$@"; do
     case "$arg" in
         --variant=*) variants+=("${arg#--variant=}") ;;
-        --part=1 | --part=2 | --part=3 | --part=4 | --part=5 | --part=6) parts+=("${arg#--part=}") ;;
+        --part=1 | --part=2 | --part=3 | --part=4 | --part=5 | --part=6 | --part=7) parts+=("${arg#--part=}") ;;
         --fixture=*) fixture="${arg#--fixture=}" ;;
         --drop-adapter-switches) adapter_switches=() ;;
         --captures=*) captures=("--smoke-captures=${arg#--captures=}") ;;
@@ -66,7 +68,7 @@ if [[ ${#variants[@]} -eq 0 ]]; then
     variants=(default no-subgroups)
 fi
 if [[ ${#parts[@]} -eq 0 ]]; then
-    parts=(1 2 3 4 5 6)
+    parts=(1 2 3 4 5 6 7)
 fi
 
 # Milliseconds since the epoch: GNU date's `%3N`, or Perl's clock where date has no `%N` (macOS).

@@ -30,6 +30,15 @@ describe("a pipeline's key", () => {
     ]);
     expect(keys.size).toBe(4);
   });
+
+  it("keeps a depth-only pipeline apart from every colour one (R10.T9.b)", () => {
+    const depthOnly = pipelineKey("a", "depth-only", true);
+    expect([
+      pipelineKey("a", "rgba16float", true),
+      pipelineKey("a", "bgra8unorm", true),
+      pipelineKey("b", "depth-only", true),
+    ]).not.toContain(depthOnly);
+  });
 });
 
 describe("a chain's intermediates", () => {

@@ -67,6 +67,7 @@ describe("a material's pipeline", () => {
       depthCompare: "greater-equal",
       depthBias: 0,
       depthBiasSlopeScale: 0,
+      depthBiasClamp: 0,
     });
     expect([...(descriptor.fragment?.targets ?? [])]).toEqual([
       { format: "rgba16float", blend: BLEND_STATES.additive, writeMask: 0 },
@@ -91,8 +92,67 @@ describe("a material's pipeline", () => {
     expect(depthBiasOf(bias, "triangle-list")).toEqual({
       depthBias: -4,
       depthBiasSlopeScale: -1.5,
+      depthBiasClamp: 0,
     });
-    expect(depthBiasOf(bias, "line-list")).toEqual({ depthBias: 0, depthBiasSlopeScale: 0 });
+    expect(depthBiasOf(bias, "line-list")).toEqual({
+      depthBias: 0,
+      depthBiasSlopeScale: 0,
+      depthBiasClamp: 0,
+    });
+  });
+
+  it("negates a bias's clamp with it, so that it bounds the reversed bias from below (R10.T9.b)", () => {
+    expect(depthBiasOf({ constant: 1, slopeScale: 1, clamp: 0.01 }, "triangle-list")).toEqual({
+      depthBias: -1,
+      depthBiasSlopeScale: -1,
+      depthBiasClamp: -0.01,
+    });
+    // 0 bounds nothing, as WebGPU's 0 does, and is never -0.
+    expect(
+      Object.is(
+        depthBiasOf({ constant: 1, slopeScale: 1, clamp: 0 }, "triangle-list").depthBiasClamp,
+        0,
+      ),
+    ).toBe(true);
+  });
+
+  it("has no colour target into depth-only, keeps the fragment stage, and keeps the material's depth state (R10.T9.b)", () => {
+    const descriptor = materialPipelineDescriptor(
+      { ...SPEC, depthWrite: true, colourWrites: false },
+      { vertex: MODULE, fragment: MODULE },
+      LAYOUT,
+      BUFFERS,
+      "triangle-list",
+      "depth-only",
+      false,
+    );
+    expect([...(descriptor.fragment?.targets ?? [])]).toEqual([]);
+    expect(descriptor.fragment?.entryPoint).toBe("fragmentMain");
+    expect(descriptor.depthStencil).toMatchObject({
+      format: "depth32float",
+      depthWriteEnabled: true,
+      depthCompare: "greater-equal",
+    });
+  });
+
+  it("takes unclippedDepth only for a material that asks for it (R10.T9.b)", () => {
+    const of = (spec: WgslMaterialSpec): GPUPrimitiveState | undefined =>
+      materialPipelineDescriptor(
+        spec,
+        { vertex: MODULE, fragment: MODULE },
+        LAYOUT,
+        BUFFERS,
+        "triangle-list",
+        "depth-only",
+        true,
+      ).primitive;
+    expect(of({ ...SPEC, unclippedDepth: true })).toEqual({
+      topology: "triangle-list",
+      cullMode: "back",
+      frontFace: "ccw",
+      unclippedDepth: true,
+    });
+    expect(of(SPEC)).not.toHaveProperty("unclippedDepth");
   });
 });
 
@@ -162,6 +222,34 @@ describe("a material's resources", () => {
       addressModeU: "repeat",
       addressModeW: "repeat",
     });
+    expect(samplerDescriptor(nearest)).not.toHaveProperty("compare");
+  });
+
+  it("make a comparison sampler compare, and bind it as comparison whatever its filter (R10.T9.b)", () => {
+    const pcf = {
+      name: "cascades",
+      filter: "linear",
+      address: "clamp-to-edge",
+      binding: 1,
+      compare: "greater-equal",
+    } as const;
+    const point = { ...pcf, name: "cascades point", filter: "nearest", binding: 2 } as const;
+    expect(samplerDescriptor(pcf)).toMatchObject({
+      magFilter: "linear",
+      minFilter: "linear",
+      compare: "greater-equal",
+    });
+    expect(
+      resourceLayoutEntries({
+        owner: "m",
+        textures: [],
+        samplers: [pcf, point],
+        storageBuffers: [],
+      }),
+    ).toEqual([
+      { binding: 1, visibility: 3, sampler: { type: "comparison" } },
+      { binding: 2, visibility: 3, sampler: { type: "comparison" } },
+    ]);
   });
 });
 

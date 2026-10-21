@@ -22,6 +22,12 @@
  *   point is {@link terrainLightingOf}: whichever of R10.T16.c and R08.T10.b lands second gives it
  *   the record's `atmosphere`, R08.T10.a's medium's tables, and tests the composite over the
  *   terrain.
+ * - **The shadow cascades** (plan R10, R10.T9.b; decision-r10-t9b-design D3). One set serves one
+ *   body a view-frame: of the bodies handed over, the one over whose datum the camera stands lowest
+ *   takes the view's cascades ({@link cascadeBodyIndex}), ties going to the first in the plan's
+ *   order; the others are drawn at w = 0, under the horizon map alone. On the high setting its
+ *   pass draws the cascades' four caster passes as {@link LiveFrameTerrain.draws} asks for its
+ *   draw, so they are submitted before the bodies pass the draws are drawn in.
  * - **The label block.** Each view's frame keeps the annunciation of the bodies it hands over
  *   ({@link LiveFrameTerrain.annunciation}: `TERRAIN: STREAMING` before `TERRAIN: DETAIL LIMITED`),
  *   which its label block states through `labelStatements(run, terrain)`; the fault goes through
@@ -61,6 +67,8 @@ import { sphereInFrustum } from "../wireframe/cull";
 import { type DrawCamera, STROKE_PX } from "../wireframe/drawList";
 import { linearColour, type SurveyedDatumFrame, type WireframeTerrain } from "../wireframe/submit";
 import type { TerrainAnnunciation } from "./annunciation";
+import { datumGroundUnder } from "./grounded";
+import type { BodyFigure } from "./planet";
 import type { ResidentHeightsView } from "./residentHeights";
 import type { TerrainSurvey } from "./session";
 import type { SurveyEdgeView } from "./surveyEdge";
@@ -161,6 +169,37 @@ export function terrainViewOf(
     fovXRad: camera.fovXRad,
     viewport: presentedPx,
   };
+}
+
+/**
+ * Which of a view-frame's handed-over bodies takes the view's shadow cascades (plan R10,
+ * R10.T9.b; decision-r10-t9b-design D3): the one over whose datum the camera stands lowest, the
+ * height along the spheroid's normal (`datumGroundUnder`), ties going to the first in their
+ * order; −1 for none.
+ *
+ * @param bodies - Each body's figure and its terrain's view, in the plan's order:
+ *   {@link LiveFrameTerrain.draws} gives those a pass draws, so that a body with no pass takes
+ *   none another could take.
+ */
+export function cascadeBodyIndex(
+  bodies: ReadonlyArray<{
+    readonly figure: Pick<BodyFigure, "equatorialRadiusM" | "polarRadiusM">;
+    readonly view: Pick<TerrainView, "rotation" | "cameraM">;
+  }>,
+): number {
+  let lowest = -1;
+  let lowestM = Number.POSITIVE_INFINITY;
+  bodies.forEach(({ figure, view }, index) => {
+    const heightM = datumGroundUnder(figure)(
+      rotateToBodyFixed(view.rotation, view.cameraM),
+    ).heightM;
+    // Strictly lower, so that a tie keeps the earlier body.
+    if (lowest < 0 || heightM < lowestM) {
+      lowest = index;
+      lowestM = heightM;
+    }
+  });
+  return lowest;
 }
 
 /** The more pressing of two terrain annunciations: `STREAMING`, then `DETAIL LIMITED`. */
@@ -313,6 +352,14 @@ export class LiveFrameTerrain implements FrameTerrain {
    * none for a body without a rotation or a pass, or with nothing drawn. Notes the frame's
    * annunciation and its terrain's depth for the symbology's pass.
    *
+   * @remarks
+   * The body over whose datum the camera stands lowest, of those the source has a pass for, takes
+   * the view's shadow cascades ({@link cascadeBodyIndex}; R10.T9.b, D3). On the high setting its
+   * pass renders their four caster passes into the session's one set before this returns, each a
+   * submission of its own: call it immediately before the bodies pass its draws are drawn in,
+   * whose resolve times them and whose terrain reads the layers, with no other view's frame
+   * between.
+   *
    * @param bodies - The lit bodies the plan was made from, its `LitBodyInput`s.
    */
   draws(plan: BodyFramePlan, bodies: ReadonlyArray<LitBodyInput>): ReadonlyArray<DrawItem> {
@@ -321,6 +368,11 @@ export class LiveFrameTerrain implements FrameTerrain {
     const draws: DrawItem[] = [];
     const depth: DrawItem[] = [];
     let annunciation: TerrainAnnunciation | null = null;
+    const handed: Array<{
+      readonly record: DiscRecord;
+      readonly figure: BodyFigure;
+      readonly view: TerrainView;
+    }> = [];
     for (const mesh of plan.meshes) {
       if (mesh.role.kind !== "handed-over") {
         continue;
@@ -328,13 +380,23 @@ export class LiveFrameTerrain implements FrameTerrain {
       const record = plan.discs[mesh.index];
       const body = record === undefined ? undefined : byId.get(record.body);
       const terrainView = body === undefined ? null : terrainViewOf(body, camera, presentedPx);
-      if (record === undefined || terrainView === null) {
+      if (record === undefined || body === undefined || terrainView === null) {
         continue;
       }
+      handed.push({ record, figure: body.figure, view: terrainView });
+    }
+    // Among the bodies a pass draws, so that one with no pass, whose draw is none, takes no
+    // cascades another could take.
+    const drawable = handed.flatMap((each, index) =>
+      this.#source.pass(each.record.body) === null ? [] : [{ ...each, index }],
+    );
+    const cascades = drawable[cascadeBodyIndex(drawable)]?.index ?? -1;
+    for (const [index, { record, view: terrainView }] of handed.entries()) {
       const frame = this.#source.drawTerrain(view, record.body, {
         view: terrainView,
         ...terrainLightingOf(record, terrainView.rotation, exposureScale),
         exposureScale,
+        takesCascades: index === cascades,
         nowMs,
       });
       if (frame === null) {

@@ -34,6 +34,13 @@ export const TERRAIN_BINDINGS = {
 /** The pass's label in `PassTimes`, the `terrain` row of the spike's metrics (Design note 18). */
 export const TERRAIN_PASS_LABEL = "terrain";
 
+/**
+ * The label in `PassTimes` of a view's shadow cascades' caster passes on the high setting (plan
+ * R10, R10.T9.b; decision-r10-t9b-design D7): one label for the four, whose entries are summed,
+ * submitted before the view's bodies pass and timed in its resolve.
+ */
+export const TERRAIN_SHADOW_PASS_LABEL = "terrain shadows";
+
 /** Each vertex path's source, which defines `ownOffset` and `morphOffset`. */
 export const PATH_SOURCES: Readonly<Record<TerrainVertexPath, string>> = {
   "baked-offsets": bakedOffsetsWgsl,

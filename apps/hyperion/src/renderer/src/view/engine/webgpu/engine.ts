@@ -11,6 +11,7 @@
  * an allocation event for it.
  */
 
+import { assertMaterialSupported } from "../depthLayers";
 import type { KernelPair } from "../kernels";
 import type { AllocationEvent, BufferSpec, MemoryCategory, TextureSpec } from "../memory";
 import {
@@ -33,6 +34,9 @@ import type {
   ComputeBindings,
   ComputeHandle,
   CreateWebGpuEngine,
+  DepthLayerPass,
+  DepthLayersSpec,
+  DepthLayerTarget,
   DepthPolicy,
   FrameSubmission,
   IndirectArgs,
@@ -62,8 +66,10 @@ import {
   type KernelRecord,
   type Workgroups,
 } from "./compute";
+import { WebGpuDepthLayers } from "./depthLayers";
 import { logUncapturedErrors, watchDeviceLoss } from "./deviceLoss";
 import {
+  type DepthLayerOutput,
   Drawing,
   type DrawingHost,
   type FrameOutput,
@@ -75,6 +81,7 @@ import {
   FULL_SCREEN_WGSL,
   materialBindings,
   type MaterialModules,
+  type PipelineColour,
   postProcessBindings,
   samplerDescriptor,
 } from "./materials";
@@ -110,12 +117,13 @@ import { srgbViewFormat, WebGpuView } from "./view";
 /**
  * The colour formats, with or without depth, a material's pipelines are made for ahead of its
  * draws, for one of `createMaterialAsync`'s targets or `prepareMaterial`'s (a colour format with
- * its depth or without it alone, R10.T14.d).
+ * its depth or without it alone, R10.T14.d; `depth-only`, a depth-layer target's passes, with
+ * depth and no colour, R10.T9.b).
  */
 export function pipelineOutputs(
   target: PreparedTarget,
   preferredCanvas: GPUTextureFormat,
-): Array<readonly [GPUTextureFormat, boolean]> {
+): Array<readonly [PipelineColour, boolean]> {
   if (typeof target === "object") {
     return [[target.colour, target.depth]];
   }
@@ -125,10 +133,21 @@ export function pipelineOutputs(
   if (target === "canvas-in-pass") {
     return [[preferredCanvas, true]];
   }
+  if (target === "depth-only") {
+    return [["depth-only", true]];
+  }
   return [
     [target, true],
     [target, false],
   ];
+}
+
+/**
+ * The engine's sampler cache's key of `spec`: its filter, its address mode and its comparison
+ * (R10.T9.b), all that its descriptor holds but its name.
+ */
+export function samplerKey(spec: Pick<SamplerSpec, "filter" | "address" | "compare">): string {
+  return `${spec.filter}:${spec.address}:${spec.compare ?? "none"}`;
 }
 
 /** A caught value as an `Error`, keeping it as the cause when it is not one. */
@@ -165,6 +184,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   readonly #kernels = new WeakMap<ComputeHandle, KernelRecord>();
   readonly #views = new Set<WebGpuView>();
   readonly #targets = new Set<WebGpuRenderTarget>();
+  readonly #depthLayers = new Set<WebGpuDepthLayers>();
   /** The kernel that last wrote each buffer and texture (Design notes 16 and 20). */
   readonly #writers = new WriterRecord();
   #mipGenerator: MipGenerator | null = null;
@@ -251,8 +271,9 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     this.#drawing.forgetBindGroups();
   }
 
-  sampler(spec: Pick<SamplerSpec, "name" | "filter" | "address">): GPUSampler {
-    const key = `${spec.filter}:${spec.address}`;
+  /** The one sampler of each filter, address mode and comparison, made at its first use. */
+  sampler(spec: Pick<SamplerSpec, "name" | "filter" | "address" | "compare">): GPUSampler {
+    const key = samplerKey(spec);
     let sampler = this.#samplers.get(key);
     if (sampler === undefined) {
       sampler = this.device.createSampler(samplerDescriptor({ ...spec, binding: 0 }));
@@ -280,6 +301,33 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       this.#drawing.encodeFrame(encoder, frame, output, (label) => this.#timer.writesFor(label));
     });
     this.#resolveTimes();
+  }
+
+  /**
+   * Draws one pass of a depth-layer target into `output`, timed, in a submission of its own
+   * (R10.T9.b).
+   *
+   * @remarks
+   * Its timestamps take no resolve of their own: they ride the next one, as a dispatch's do, the
+   * same view's next render's, so a photorealistic frame keeps its count of resolves, which
+   * `TIMING_FRAMES_IN_FLIGHT` is sized by (decision-r10-t9b-design D1). A run of passes that has
+   * half filled the query set resolves at once, as a bake's dispatches do.
+   */
+  renderDepthLayer(label: string, pass: DepthLayerPass, output: DepthLayerOutput): void {
+    this.#submit(label, (encoder) => {
+      this.#drawing.encodeDepthLayer(encoder, pass, output, (timed) =>
+        this.#timer.writesFor(timed),
+      );
+    });
+    if (this.#timer.mark() >= PASSES_PER_FRAME / 2) {
+      this.#resolveTimes();
+    }
+  }
+
+  forgetDepthLayers(target: DepthLayerTarget): void {
+    if (target instanceof WebGpuDepthLayers) {
+      this.#depthLayers.delete(target);
+    }
   }
 
   forgetView(view: RenderView): void {
@@ -367,6 +415,18 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     this.#assertLive();
     const target = new WebGpuRenderTarget(this, spec);
     this.#targets.add(target);
+    return target;
+  }
+
+  /**
+   * A depth-only target of array layers (R10.T9.b).
+   *
+   * @throws Error naming the target where its size or layer count does not fit the device.
+   */
+  createDepthLayers(spec: DepthLayersSpec): DepthLayerTarget {
+    this.#assertLive();
+    const target = new WebGpuDepthLayers(this, spec);
+    this.#depthLayers.add(target);
     return target;
   }
 
@@ -537,8 +597,9 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   }
 
   /**
-   * @throws Error for a render target's colour or depth, which the target owns and releases at
-   *   its disposal, as well as for a handle the engine did not make or has released.
+   * @throws Error for a render target's colour or depth, or a depth-layer target's layers, which
+   *   the target owns and releases at its disposal, as well as for a handle the engine did not make
+   *   or has released.
    */
   releaseTexture(texture: TextureHandle): void {
     this.#assertLive();
@@ -546,6 +607,13 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       if (target.colour === texture || target.depth === texture) {
         throw new Error(
           `texture ${texture.name} belongs to a render target and is released with it`,
+        );
+      }
+    }
+    for (const target of this.#depthLayers) {
+      if (target.depth === texture) {
+        throw new Error(
+          `texture ${texture.name} belongs to a depth-layer target and is released with it`,
         );
       }
     }
@@ -848,6 +916,10 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       target.dispose();
     }
     this.#targets.clear();
+    for (const target of this.#depthLayers) {
+      target.dispose();
+    }
+    this.#depthLayers.clear();
     this.#drawing.dispose();
     this.#timer.dispose();
     this.#resources.dispose();
@@ -863,6 +935,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     asyncPipelines: boolean,
   ): { readonly handle: MaterialHandle; readonly record: MaterialRecord } {
     this.#assertLive();
+    // Refused before any module is made: the device would refuse every pipeline of it.
+    assertMaterialSupported(spec, this.capabilities);
     const drawLayout = uniformLayout([OFFSET_MEMBER, ...spec.uniforms]);
     assertDrawStruct(`material ${spec.name}`, drawLayout, spec.vertexWgsl, spec.fragmentWgsl);
     const bindings = materialBindings(spec);

@@ -86,6 +86,12 @@ export interface CapabilityOverrides {
   readonly withholdShaderF16: boolean;
   readonly withholdFloat32Blendable?: boolean;
   /**
+   * Withholds `depth-clip-control` (plan R10, R10.T9.b), so that the shadow cascades' casters take
+   * the pulled-back near plane, not `unclippedDepth`, on an adapter that offers the feature, as
+   * SwiftShader turned out to (T9.a's deferred finding; decision-r10-t9b-design D2).
+   */
+  readonly withholdDepthClipControl?: boolean;
+  /**
    * Requests WebGPU's default limits rather than {@link requiredLimits}' raised ones, so that the
    * harness runs R05's `FaceDifferences` fallback for the high setting (decisions-r06-r07.md
    * item 7).
@@ -249,6 +255,9 @@ export function requiredFeatures(
   }
   if (overrides?.withholdFloat32Blendable === true) {
     withheld.add("float32-blendable");
+  }
+  if (overrides?.withholdDepthClipControl === true) {
+    withheld.add("depth-clip-control");
   }
   return WANTED_FEATURES.filter(
     (feature) => adapter.features.has(feature) && !withheld.has(feature),

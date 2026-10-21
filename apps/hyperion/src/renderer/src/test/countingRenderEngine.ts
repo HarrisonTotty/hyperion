@@ -9,7 +9,9 @@
  * device, whose capabilities it reports; R01's fake itself, the `ResilientEngine`'s inner engine,
  * is left alone. Bytes follow the engine's own rules: a buffer its `bytes`, a texture
  * {@link textureBytes}. Readbacks resolve to zeros of no length; packed cubes and splats are not
- * faked.
+ * faked. A depth-layer target (plan R10, R10.T9.b) makes the texture the engine makes, through
+ * `createTexture`, refuses the passes the engine refuses, and records each render; a material with
+ * `unclippedDepth` is refused without `depth-clip-control`, as the engine refuses it.
  *
  * Creations are held to the device's limits as WebGPU's validation would hold them: a buffer above
  * `maxBufferSize`, a storage buffer above `maxStorageBufferBindingSize` (every binding here spans
@@ -25,6 +27,12 @@
  * ({@link CountingRenderEngine.failMaterials}).
  */
 
+import {
+  assertDepthLayerPasses,
+  assertDepthLayersFit,
+  assertMaterialSupported,
+  depthLayersTexture,
+} from "../view/engine/depthLayers";
 import { BUFFER_USAGE } from "../view/engine/gpuFlags";
 import { EngineUnavailable } from "../view/engine/resilientEngine";
 import type { KernelPair } from "../view/engine/kernels";
@@ -42,6 +50,9 @@ import type {
   BufferHandle,
   ComputeBindings,
   ComputeHandle,
+  DepthLayerPass,
+  DepthLayersSpec,
+  DepthLayerTarget,
   FrameSubmission,
   IndirectArgs,
   MaterialHandle,
@@ -72,6 +83,10 @@ export interface EngineCounts {
   postProcesses: number;
   kernels: number;
   renderTargets: number;
+  /** Depth-layer targets made (R10.T9.b). */
+  depthLayerTargets: number;
+  /** Passes their renders drew, whose draws `draws` counts too. */
+  depthLayerPasses: number;
   bufferWrites: number;
   textureWrites: number;
   dispatches: number;
@@ -127,6 +142,14 @@ export interface RecordedPrepare {
   readonly meshes: ReadonlyArray<string>;
 }
 
+/** One render of a depth-layer target, with the passes it was given (R10.T9.b). */
+export interface RecordedDepthLayerRender {
+  readonly target: string;
+  /** The view the render named as drawing it. */
+  readonly owner: string;
+  readonly passes: ReadonlyArray<DepthLayerPass>;
+}
+
 /** How many of each kind of handle are live: made and neither released nor lost (R10.T16.b). */
 export interface LiveHandles {
   readonly buffers: number;
@@ -152,6 +175,8 @@ function zeroCounts(): EngineCounts {
     postProcesses: 0,
     kernels: 0,
     renderTargets: 0,
+    depthLayerTargets: 0,
+    depthLayerPasses: 0,
     bufferWrites: 0,
     textureWrites: 0,
     dispatches: 0,
@@ -185,6 +210,8 @@ export class CountingRenderEngine implements RenderEngine {
   readonly textureSpecs: TextureSpec[] = [];
   /** Every frame submitted to a render target, first first (views record their own). */
   readonly targetFrames: FrameSubmission[] = [];
+  /** Every depth-layer target's render, first first (R10.T9.b). */
+  readonly depthLayerRenders: RecordedDepthLayerRender[] = [];
   /** Every material asked of `createMaterialAsync`, first first, refused ones too (R10.T14.d). */
   readonly compiles: RecordedCompile[] = [];
   /** Every material asked of `prepareMaterial`, first first, refused ones too (R10.T14.d). */
@@ -277,6 +304,11 @@ export class CountingRenderEngine implements RenderEngine {
   /** Whether the engine is inside a modelled loss's window. */
   get unavailable(): boolean {
     return this.#unavailable;
+  }
+
+  /** How many restore listeners are subscribed ({@link CountingRenderEngine.onRestored}) now. */
+  get restoredListenerCount(): number {
+    return this.#restoredListeners.size;
   }
 
   /**
@@ -374,6 +406,48 @@ export class CountingRenderEngine implements RenderEngine {
     };
   }
 
+  /**
+   * A depth-layer target whose texture is made, and counted, as the engine makes it (R10.T9.b):
+   * its renders are checked as the engine checks them and recorded; its disposal releases the
+   * texture, raising its `destroyed` event.
+   *
+   * @throws Error naming the target where its size or layer count does not fit the device, as the
+   *   engine refuses it.
+   */
+  createDepthLayers(spec: DepthLayersSpec): DepthLayerTarget {
+    this.#available("createDepthLayers");
+    assertDepthLayersFit(spec, this.#capabilities);
+    this.counts.depthLayerTargets += 1;
+    const depth = this.createTexture(depthLayersTexture(spec));
+    let disposed = false;
+    const target: DepthLayerTarget = {
+      name: spec.name,
+      sizePx: spec.sizePx,
+      layers: spec.layers,
+      depth,
+      render: (owner: string, passes: ReadonlyArray<DepthLayerPass>): void => {
+        // A target a modelled loss took draws nothing, as one a lost engine made.
+        if (disposed || passes.length === 0 || this.#lost.has(depth)) {
+          return;
+        }
+        assertDepthLayerPasses(target, passes);
+        this.counts.depthLayerPasses += passes.length;
+        for (const pass of passes) {
+          this.counts.draws += pass.draws.length;
+        }
+        this.depthLayerRenders.push({ target: spec.name, owner, passes });
+      },
+      dispose: (): void => {
+        if (disposed) {
+          return;
+        }
+        disposed = true;
+        this.#release(depth);
+      },
+    };
+    return target;
+  }
+
   createMesh(spec: MeshSpec): MeshHandle {
     this.#available("createMesh");
     this.counts.meshes += 1;
@@ -399,8 +473,15 @@ export class CountingRenderEngine implements RenderEngine {
     return mesh;
   }
 
+  /**
+   * A handle with nothing behind it, counted.
+   *
+   * @throws Error for a material with `unclippedDepth` on a device without `depth-clip-control`,
+   *   as the engine refuses it.
+   */
   createMaterial(spec: WgslMaterialSpec): MaterialHandle {
     this.#available("createMaterial");
+    assertMaterialSupported(spec, this.#capabilities);
     this.counts.materials += 1;
     const material: MaterialHandle = { kind: "material", name: spec.name };
     this.#materials.add(material);
@@ -419,7 +500,12 @@ export class CountingRenderEngine implements RenderEngine {
     if (this.#failsMaterial(spec.name)) {
       return Promise.reject(new Error(`material ${spec.name} could not be compiled`));
     }
-    return Promise.resolve(this.createMaterial(spec));
+    // The engine's refusal of a material is a rejection here, as its own is.
+    try {
+      return Promise.resolve(this.createMaterial(spec));
+    } catch (error: unknown) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   /**

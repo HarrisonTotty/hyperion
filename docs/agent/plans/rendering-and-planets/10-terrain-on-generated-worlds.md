@@ -12124,3 +12124,198 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
     stop near level 19–20, so nothing reaches it. Lever: assert the level, or widen the key.
   - _The memo fills sooner_ by the margin's 2,336 heights a cold bake (T8.a's "The far memo starts
     afresh wholesale").
+- **Deviations in T9.b, as built** (2026-10-21; lane r10-shadows, on `rendering-and-planets` at
+  `8ef421c4`; decision-r10-t9b-design D1–D10 and decision-r10-t9b-penumbra, built as ruled except
+  where stated). Two commits: the engine's depth-only layered target, then the cascades on the
+  terrain with this record.
+  - _Files._ Engine (`view/engine/`): `types.ts` (`RenderEngine.createDepthLayers`,
+    `DepthLayersSpec`, `DepthLayerTarget`, `DepthLayerPass`; `RenderTargetFormat` gains
+    `"depth-only"`; `WgslMaterialSpec.unclippedDepth`; `depthBiasAway.clamp`;
+    `SamplerSpec.compare`), `memory.ts` (`shadows` in `MemoryCategory`), new `depthLayers.ts` and
+    `webgpu/depthLayers.ts`, `webgpu/{engine,drawing,materials,uniforms}.ts`, `platform.ts`
+    (`CapabilityOverrides.withholdDepthClipControl`), `resilientEngine.ts`, the views check's
+    `probedEngine.ts`, and the fakes `test/countingRenderEngine.ts` and `test/fakeRenderEngine.ts`.
+    Terrain (`view/terrain/`): new `shadows/cascadeShadow.wgsl` (the receiver),
+    `shadows/cascadeShadow.ts` (its twin and the uniforms' packing), `shadows/terrainShadows.ts`
+    (the set, the placeholder and the other casters' registry) and `shaders/terrainShadow.wgsl`
+    (the caster); `shaders/terrainLit.wgsl`, `shaders/terrainLitShade.wgsl`, `terrainMaterial.ts`,
+    `materialSet.ts`, `terrainPass.ts`, `session.ts`, `frameTerrain.ts`,
+    `gpu/{resources,uniforms,material}.ts`; `shadows/cascades.ts` (the offset's figure and the
+    disc's top edge, below); `view/photoreal/{passes,renderer}.ts`; `view/engine/catalogue.ts`.
+    Smoke: `smoke/page.ts`, `sharedPass.ts`, new `depthLayers.ts`, `litTerrain.ts`,
+    `surveyEdge.ts`, `catalogue.ts`, `apps/hyperion/scripts/testRender.sh` and
+    `apps/hyperion/src/smoke/main.ts` (a seventh part).
+  - _The engine (D1, as amended)._ `createDepthLayers({ name, sizePx, layers, category })` makes
+    one `depth32float` 2-D array (render attachment and texture binding) through the resource
+    registry, so it is tallied under its category. `render(owner, passes)` draws each pass into its
+    layer as a submit of its own, a depth-only variant of `encodeFrame` (the frame's uniforms and
+    the ring are rewritten per submit), its single-layer view cleared to 0 and stored; the passes'
+    timestamps ride the next resolve, the view's `bodies` render, as a dispatch's do, so a
+    photorealistic frame keeps its resolves. A layer out of range, a layer named twice, or a draw
+    sampling the layers it writes (`DepthSelfSample`) is refused before anything is submitted.
+    `"depth-only"` pipelines have no colour targets and keep the fragment stage (the caster's
+    survey discard); `unclippedDepth` is refused on a device without `depth-clip-control`;
+    `depthBiasAway.clamp` is negated with the other two for the reversed depth; a comparison
+    sampler binds as `comparison` and is cached by filter, address and comparison.
+  - _The set and the placeholder (D2)._ The session's `TerrainShadows` owns the one set of four
+    2,048² layers, "terrain shadow cascades", 67,108,864 B under `shadows`: made at the first lit
+    frame on a high-setting session whose weight w is above 0, once the caster material is
+    compiled; kept to the session's disposal (orbit included); let go at a device loss and made
+    again at its next need. A low-setting session never makes it. Where no set exists the lit draw
+    binds "terrain shadow placeholder", a 1 × 1 × 4 `depth32float` array (16 B, under `other`), and
+    the lit draw is made again when its bound shadow texture changes. A lit pass given no session's
+    shadows (the smoke's and the spike's) makes its own.
+  - _The casters (D4)._ Each cascade's pass draws the view's own records, byte-for-byte copies
+    (`InstanceRecords.pushCopy`), culled on the CPU by `castsInto`: the patch's bounding sphere (the
+    resident bake's `boundingRadiusM` about its origin) against the cascade's square on the light's
+    axes, from r behind its centre to r plus T9.a's caster reach towards the sun, on both
+    capability paths. Four caster buffers a view, "terrain casters (<view>) 1–4", slots × 32 B each,
+    under `other`, released with the view. The caster material (`terrainShadowMaterialSpec`,
+    "TERRAIN SHADOWS" and "TERRAIN SHADOWS OFFSETS") is the lit material's vertex stage unchanged,
+    the cascade's matrices in the frame's place, and a fragment stage that only discards outside
+    the survey; cull none; `CASCADE_DEPTH_BIAS`; `unclippedDepth` from the device's capabilities at
+    every making. The passes are rendered from `TerrainPass.drawFor`, which `LiveFrameTerrain.draws`
+    calls while the photorealistic renderer builds its `bodies` pass, which renders next. All four
+    passes run at w > 0, an empty one clearing its layer, so that no other view's casts remain;
+    none at w = 0. The other casters' registry (`ShadowCasters`, D9) appends its providers' draws
+    after the terrain's; nothing fills it yet.
+  - _The receiver (D5)._ `cascadeShadow.wgsl`, composed into the lit material alone (its depth
+    and caster siblings share `LIT_TERRAIN_SOURCE`, whose functions WGSL type-checks whole): the
+    cascade by the fragment's distance along the view axis against the splits, the next cascade
+    where the point and its filter's footprint (2 texels) fall outside the snapped map, the blend
+    over each cascade's last 10% and the last into lit; Holbert's offset along the geometric normal
+    (fine screen derivatives of the place, taken before the discard) × saturate(1 − N·L), his basic
+    variant, which moves the compared depth as well; four taps on a one-texel circle (the standard
+    four-sample rotated grid, a maximin square), each a 2 × 2 comparison through
+    `textureSampleCompareLevel`; c′ = 1 − w (1 − c), formed once in `fragmentMain` and handed to
+    `shade_terrain`, which gives star 0 alone the term min(1, c′ ÷ m), m R07's
+    `disc_visible_fraction` at the cut `sphere_irradiance` used, clamped to [0, π]. Reference
+    fragments (skirt walls and fins below the lip) take c′ = 1; a skirt's lip is received at its
+    edge vertex's height with the datum's normal. The lit `Draw` gains `cascadeLight0`–`3`,
+    `cascadeFarM`, `cascadeFadeStartM`, `cascadeNormalOffsetM` and `cascadeViewAxis` (w in .w);
+    bindings 19 (`texture_depth_2d_array`) and 20 (`sampler_comparison`).
+  - _Deviation: `textureSampleCompareLevel`, not Design note 11's `textureSampleCompare`._ The
+    receiver runs after the survey's discard and the reference branch, in non-uniform control flow,
+    where WGSL allows only the former.
+  - _Deviation: the cascades are fitted to the sun's disc's top edge_ (decision-r10-t9b-penumbra;
+    main ruled the centre's picture a blocker). The science check found min(m, c′) sound only where
+    c′ is a share of the disc; a shadow map tests the ray to the disc's centre, blurred by a filter
+    of about two texels, while the Sun's penumbra is 2ρL ÷ sin e on the ground, outgrowing the
+    filter at L ≈ 38 m. Fitted to the centre, the cascades kept the horizon map's penumbra on its
+    lit half and drew its dark half black, a hard step at m = ½ (seen hidden on the RTX 3080 at
+    `TERRAIN TEST`'s 232 s beside a crater's shadow: darker than the map alone by up to 108 of
+    255). As built, the fit's sun is s′ = cos ρ s + sin ρ u ÷ |u|, u = ν − (ν · s) s, ν the
+    datum's normal at the camera's nadir and ρ star 0's angular radius (`discTopDirection`;
+    s′ = s where |u| < 10⁻⁹; the set's light axes, its `sunElevationRad`, e★ + ρ, its caster
+    reach and its near plane all follow s′), so a receiver is in the cascades' shadow only where
+    the disc's top edge is hidden, where m has reached 0 behind terrain, and min(m, c′) is m
+    across the whole penumbra; the receiver's N·L, its offset and the shading keep the true sun.
+    In the same look the darkening fell to at most 42 of 255, on 0.1% of the terrain's pixels by
+    more than 2% of full scale. Design note 11's centre is replaced; decision-r10-t8b §2's min
+    stands.
+  - _Deviation: SwiftShader offers `depth-clip-control`_ (T9.a's deferred finding answered): the
+    part-1 group logs "depth-clip-control yes" in `just test-render`, as R01's record had it and
+    `platform.test.ts`'s `SWIFTSHADER_FEATURES` did not (corrected). So the smoke's
+    `no-subgroups` variant withholds it (`withholdDepthClipControl`): the default variant runs the
+    unclipped path, `no-subgroups` the pulled-back near plane, and the cascades' group logs which.
+  - _Deviation: a seventh smoke part._ The cascades' group took part 6 to 163 s at a load of 2,
+    against its 180 s watchdog, so R10's terrain groups (R10.T10.b, T10.c, T16's frame and shared
+    pass, T11 and T9.b) are part 7 and part 6 keeps R05.T12.c's frames and R08.T9.b's two.
+  - _Deviation: the horizon texel from the selection's traversal._ D6(a)'s level whose band holds
+    h, walked from the finest level, took the first band end beyond h; the bands are not monotonic
+    in level (`selectionErrorM` has bumps at fine levels), and on `TERRAIN TEST` it returned
+    0.605 m at h = 6.6 km, five levels too fine, so w fell to 0 in 574 of 900 frames over
+    190–205 s and the cascades switched on and off. As built the walk descends from the root as
+    selection does, to the first level whose children's band end h is beyond; continuous where the
+    bands are monotonic.
+  - _Smaller deviations._ No star, a non-positive or non-finite viewport, a non-finite relief or a
+    fit that refuses its input draws the frame at w = 0 with no fit (the centres drop); the body
+    taking a view's cascades (D3) is the handed-over body with a pass over whose datum the camera
+    stands lowest, ties to the plan's order; R is the figure's mean radius, (2a + c) ÷ 3; Δh is the
+    header's `realised_relief_m` (0 until the header arrives); the providers take
+    `TerrainViewId`; the catalogue's entries gain `targets`, the casters compiled for
+    `depth-only` without `unclippedDepth`; the `terrain shadows` slot
+    (`TERRAIN_SHADOW_PASS_LABEL`) stands before `bodies` in both settings' pass list, which they
+    share; `TerrainViewFrame.cascades` carries the set and its passes.
+  - _Tests._ Vitest: `terrainPassCascades.test.ts`, `shadows/terrainShadows.test.ts`,
+    `shadows/cascadeShadow.test.ts`, `view/engine/depthLayers.test.ts`, the counting engine's and
+    the probe's new tests, and cases in the engine's, the materials', `terrainMaterial`,
+    `materialSet`, `sessionPasses`, `frameTerrain`, `platform` and `photoreal` tests: the tally
+    (67,108,864 B under `shadows`, made once on high at the first w > 0, never on low, released at
+    disposal, made again after a restore); the placeholder; the caster passes' draws per cascade
+    and per view, two views of one shared pass each with their own; the cull; the morph-matched
+    caster structurally (D4: the view's contacts and `Draw` values, its records a byte-identical
+    subset, the lit vertex source unchanged); the centres carried and dropped; the horizon texel;
+    the body choice; the providers; the lit material's stages and bindings; the twin of c′, the
+    min, the fade and the top edge. Smoke (part 7, both variants): "the four caster passes are
+    drawn at w > 0", "finite at every texel, darker at some and nowhere brighter than at w = 0"
+    (of 2,108 terrain texels, 585 darker under the cascades before the top-edge fit and 3 after,
+    none brighter, on both variants), and the tally while the set lives and after; part 1's "depth
+    layers and a comparison sampler". Part 7 takes 113–115 s at a low load.
+- **By hand, recorded (R10.T9.b)** (hidden, the RTX 3080, the views check's terrain run at the
+  high setting: window 1,926 × 1,086, the primary's canvas 1,126 × 906, render scale 1; a scratch
+  harness never committed, `rm45-scratch/r10-shadows/harness/`, on a looks worktree with the
+  lane's tree and the harness's freeze, hold and shader modes).
+  - _The GPU time_ (main's quiet window, load 1.2, the full timer; the four caster passes' sum,
+    median / p90 / max): the descent's last part, 150–165 s (h 11 to 7.6 km, w 0.92 to 1), 2.39 /
+    2.72 / 2.80 ms; 165–180 s (h 7.6 to 6.7 km), 3.15 / 3.25 / 3.26 ms; west along the track at
+    4 km, 190–205 s, 1.27 / 1.88 / 2.25 ms where drawn; north, 225–238 s, 1.01 / 1.37 / 1.70 ms.
+    The `bodies` pass (the lit terrain, the receiver in it), medians 2.63, 2.86, 2.63 and 1.79 ms;
+    the frame's GPU 6.2, 7.0, 3.9 and 4.4 ms. Against the budget's 1.5–3 ms the passes sit inside
+    it but for the descent's last fifteen seconds, 0.25 ms over (a finding, below). Taken on the
+    build with the top-edge fit as a prototype and before the horizon-texel fix; the casters are as
+    built.
+  - _The double-dark band_ (`TERRAIN TEST` north at 228, 232 and 236 s, frozen; plain, the
+    cascades off, tinted by cascade, and c′ alone): none at a cascade's edge; the blends run across
+    the tinted bands with no line in the plain frames, and the plain frame is nowhere brighter than
+    with the cascades off. The one band found was the penumbra's (above), fixed by the top edge.
+  - _The offset and the bias._ At 1 texel the cascades' acne showed as moiré and a step at a level
+    boundary in c′ (1.4% of the terrain's pixels darkened by more than 2% of full scale at 232 s);
+    at 1.5 texels, Design note 11's upper end, 0.6%, the moiré and the step gone; a slope scale of
+    2 for 1 moved it by under 0.2 points. Built: `NORMAL_OFFSET_TEXELS` 1.5, `CASCADE_DEPTH_BIAS`
+    {1, 1, 0} as T9.a had it.
+  - _The sun's crawl at 60 s/s_ (frozen, then eight single-frame steps at 230 s, north; c′ alone
+    and plain): each cascade's centre moves by whole texels (0.00000 off whole at every step), the
+    light's axes turn 72.4 to 72.9 µrad a frame, and the near cascades' shadow edges keep their PCF
+    pattern from step to step: no crawl seen. T9.a's bound, 1,024 δ texel a frame (0.074), stands.
+  - _The radius against shimmer in a descent_ (the same steps at 140, 160 and 172 s, h 16.7, 8.4
+    and 5.0 km): the radius rescales by 790, 361 and 139 ppm a frame, up to 0.8 texel a frame at a
+    cascade's edge; the crater shadows' stair-stepped edges keep their shape from step to step and
+    no shimmer was seen, so the radius stays continuous (no steps).
+- **Deferred findings (2026-10-13 rule) (R10.T9.b)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _The descent's last fifteen seconds cost 3.15–3.26 ms_, over the budget's 3 ms: cascade 4 is
+    r ≈ 113 km there and holds most of the drawn set. Levers (decision-r10-t9b-design D4): the
+    caster's fragment stage (its survey discard), the lit vertex outputs the caster leaves unused,
+    a tighter cull, or the reach's cap (T9.a's finding).
+  - _w stays above 0 into orbit_: with the horizon texel from the bands, w reaches 0 only where
+    cascade 1's texel passes the coarsest level's spacing, so the four passes run in low orbit
+    (Design note 11's "off as in orbit" does not hold); a cost to measure, or a ruling.
+  - _Casters outside the view's records_ (beyond its frustum and motion margin; behind the camera
+    with the sun behind it) are not drawn: their sharp shadows are the horizon map's.
+  - _The cull's ρ ignores the morph_: a vertex morphing towards its parent can leave the bake's
+    bounding sphere by up to the parent's error, so a grazing caster may be culled (the horizon
+    map's then), and the skirts and fins may lie outside it.
+  - _Non-terrain casters' shadows are short by half a penumbra_, ρL (4.7 cm at 10 m, 13% of a
+    shadow's length at a 2° sun), from the top-edge fit; `casterHeightM` stays 0 until a provider
+    exists.
+  - _The terminator_: the cascades shadow the mesh's flat facets while m takes the shading normal,
+    so a facet turned from the sun with its shading normal still towards it is darkened whole.
+  - _Holbert's basic offset_ moves the compared depth as well as the uv, up to ¼ texel towards the
+    sun; his "offset in UV space only" is not built.
+  - _A cooler host's wider disc_ is followed by the top edge's ρ but not by the filter (T9.a's).
+  - _The smoke cannot place a shadow_: it asserts finiteness, "never brighter" and some darkening,
+    so a transposed matrix or a flipped v would still pass; the hidden looks placed them.
+  - _Draw order between views_: one set serves every view, so a view's draw must render before the
+    next view's `drawFor`; the shared-pass smoke's helper draws two views first and so never takes
+    the cascades.
+  - _Δh is 0 until the field's header arrives_, so the reach is 0 and the pulled-back path's near
+    plane sits at r for those frames.
+- **Pointers for main (R10.T9.b).** Design note 11's "through `textureSampleCompare`" (now
+  `textureSampleCompareLevel`), its disc's centre (now the top edge) and its "SwiftShader does
+  not" (it does); decision-r10-t9-split §3's "cascade by the sphere" (by the distance along the
+  view axis, falling to the next outside the snapped map) and §5(g); decision-r10-t8b §2's min
+  (exact with the top-edge fit); plan 12's `PASS_ROWS` (`terrain shadows` → `shadows`) and its
+  lines 821 and 1122; README row 383; plan 07's pass order (the `terrain shadows` slot before
+  `bodies`; `FrameTerrain.draws` submits the cascades' passes on the high setting); the Tasks
+  opening's "T9 after T8"; `just test-render`'s seven parts wherever six are named.

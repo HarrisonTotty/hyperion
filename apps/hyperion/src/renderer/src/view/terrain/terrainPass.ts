@@ -58,14 +58,28 @@
  * view's draw's resources), whether a view's frame may give the body's coverage mask before its
  * draw ({@link TerrainPass.maskReadyFor}), and the heights of its resident bakes that the survey
  * edge's rim and its note's line of sight read ({@link TerrainPass.heights}).
+ *
+ * On the high setting a lit pass also draws each view's shadow cascades (plan R10, R10.T9.b;
+ * Design note 11; decision-r10-t9b-design), for the body that takes them in the view's frame
+ * ({@link TerrainFrameInput.takesCascades}): {@link TerrainPass.drawFor} fits the four cascades to
+ * the view (R10.T9.a's `fitCascades`, the view's snapped centres carried from its frame before)
+ * and to the top edge of star 0's disc (decision-r10-t9b-penumbra), so that their shadow begins
+ * where the horizon map's share m reaches 0 and min(m, c′) is m across the penumbra (non-terrain
+ * casters' shadows are short by about half a penumbra, ρL, 4.7 cm at 10 m), culls the view's own
+ * records into each cascade by its light-space box and T9.a's caster reach,
+ * and renders the four caster passes into the session's one set ({@link TerrainShadows}) before
+ * it returns, so that they are submitted before the bodies pass its draw is drawn in; the lit draw
+ * binds the set, or the placeholder where none exists, and receives the cascades through its
+ * `Draw` ({@link CascadeUniforms}).
  */
 
 import type { Quaternion } from "../camera/pose";
-import { conjugate, multiply, quaternionFromRows } from "../camera/quaternion";
+import { conjugate, multiply, quaternionFromRows, rotationRows } from "../camera/quaternion";
 import type { ViewId } from "../camera/state";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import { type Rotation3, rotateToBodyFixed } from "../coords/rotation";
 import type {
+  DepthLayerPass,
   DrawItem,
   MaterialHandle,
   RenderEngine,
@@ -83,7 +97,7 @@ import {
   TERRAIN_SETTINGS,
   type TerrainSettings,
 } from "../quality/qualitySetting";
-import type { Vec3 } from "../../geometry/vec3";
+import { norm, type Vec3 } from "../../geometry/vec3";
 import {
   TERRAIN_NOT_AVAILABLE,
   type TerrainAnnunciation,
@@ -94,7 +108,8 @@ import {
 import { distanceToBoxM, relativeBounds } from "./bounds";
 import { type DrawSet, DrawSetResolver, PatchCache } from "./cache";
 import { CoarseFineHolds } from "./coarseFineHolds";
-import { terrainMaterialSpec } from "./gpu/material";
+import { vertexSpacing } from "./cube";
+import { TERRAIN_SHADOW_PASS_LABEL, terrainMaterialSpec } from "./gpu/material";
 import {
   DEFAULT_TERRAIN_VIEW,
   normalsAtlasOf,
@@ -112,7 +127,13 @@ import {
 } from "./gpu/uniforms";
 import { MAX_LEVEL, type PatchKey, patchKeyString } from "./patchKey";
 import { type PlanetGeometry, planetGeometry } from "./planet";
-import { finestPatchSizeM, type GroundContact, heldRadiusM, morphRampM } from "./grounded";
+import {
+  finestPatchSizeM,
+  type GroundContact,
+  heldGroundUnder,
+  heldRadiusM,
+  morphRampM,
+} from "./grounded";
 import {
   MAX_SELECTION_VIEWS,
   type PatchRequest,
@@ -127,7 +148,15 @@ import { RESELECT_MOVE_FRACTION, selectionTolerancePx } from "./selectionToleran
 import { TERRAIN_SHADING_TRAITS, type TerrainShading } from "./slotLayout";
 import { ResidentHeights, type ResidentHeightsView } from "./residentHeights";
 import { type TerrainMaterialSource, terrainMaterialOf } from "./materialSet";
-import type { TerrainLighting } from "./terrainMaterial";
+import {
+  type CascadeIndex,
+  cascadeUniforms,
+  type CascadeUniforms,
+  packCascadeUniforms,
+} from "./shadows/cascadeShadow";
+import { type CascadeSet, discTopDirection, fitCascades } from "./shadows/cascades";
+import { TerrainShadows } from "./shadows/terrainShadows";
+import { SHADOW_CASCADES_TEXTURE, type TerrainLighting } from "./terrainMaterial";
 import { CONTOUR_PX, contourPhase, type GraticulePatch, graticulePatch } from "./terrainWire";
 import type {
   BakedPatch,
@@ -302,8 +331,28 @@ export interface TerrainFrameInput {
    * wireframe pass given none draws nothing; the other shadings read none.
    */
   readonly wire?: TerrainWireFrameInput;
+  /**
+   * Whether this body takes the view's shadow cascades this frame (plan R10, R10.T9.b;
+   * decision-r10-t9b-design D3): one set serves one body a view-frame, the handed-over body over
+   * whose datum the camera stands lowest (`LiveFrameTerrain.draws`). Read by a lit pass on the high
+   * setting alone; absent, it does not, and the body has the horizon map alone.
+   */
+  readonly takesCascades?: boolean;
   /** A monotonic time for the annunciation's debounce, milliseconds. */
   readonly nowMs: number;
+}
+
+/** One view-frame's shadow cascades (plan R10, R10.T9.b), as {@link TerrainPass.drawFor} drew them. */
+export interface TerrainCascadeFrame {
+  /** The view's four cascades this frame (R10.T9.a's `fitCascades`), with their weight w. */
+  readonly set: CascadeSet;
+  /**
+   * The caster passes rendered into the set this frame, one a cascade, nearest first, each the
+   * terrain's draw of the view's records in that cascade (where it has any) and then the other
+   * casters' ({@link TerrainShadows.casters}); none at w = 0, before the caster material is
+   * compiled, or with no draw of the view's terrain, when the lit draw samples nothing.
+   */
+  readonly passes: ReadonlyArray<DepthLayerPass>;
 }
 
 /** One frame's outcome. */
@@ -388,6 +437,11 @@ export interface TerrainViewFrame {
    * terrain draws all the surveyed ground the mask would discard.
    */
   readonly maskReady: boolean;
+  /**
+   * The view's shadow cascades this frame (plan R10, R10.T9.b), where its body took them on the
+   * high setting under a star; `null` otherwise, when its lit draw takes w = 0.
+   */
+  readonly cascades: TerrainCascadeFrame | null;
 }
 
 /** The survey a pass's selection reads, with a count of its changes (R10.T16.b). */
@@ -444,6 +498,19 @@ export interface TerrainPassOptions {
    * its own in {@link TerrainPass.ready} and releases them.
    */
   readonly materials?: TerrainMaterialSource;
+  /**
+   * The terrain session's shadow cascades (plan R10, R10.T9.b; `TerrainShadows`): the one set for
+   * the engine, which a lit pass draws each view's cascades into on the high setting, the
+   * placeholder its draws bind where no set exists, and the other casters. The pass never lets it
+   * go. Absent, a lit pass makes its own, with cascades on the high setting, and lets it go at its
+   * disposal.
+   */
+  readonly shadows?: TerrainShadows;
+  /**
+   * The body's realised relief range, m (its field header's `realised_relief_m`, R09), read each
+   * frame the cascades are fitted, for their caster reach (R10.T9.a's Δh); absent, or `null`, 0.
+   */
+  readonly reliefM?: () => number | null;
 }
 
 /**
@@ -519,6 +586,11 @@ interface Device {
    * `null` before, and for the spike's.
    */
   depthMaterial: MaterialHandle | null;
+  /**
+   * A lit terrain's caster into the shadow cascades on the high setting (R10.T9.b), compiled for
+   * `depth-only`; `null` before, on the low setting, and for the other shadings.
+   */
+  shadowMaterial: MaterialHandle | null;
   /** Each resident patch's layers' summary and request, by key string. */
   readonly residents: Map<string, Resident>;
   /** The resident patches asked for again by the rebake rule, at their last requests. */
@@ -551,12 +623,39 @@ interface ViewState {
     readonly sunRadiance: Float32Array;
     readonly atlas: Float32Array;
   };
-  /** The lit material's `Draw` (`terrainLit.wgsl`), rewritten in place each frame. */
+  /**
+   * The lit material's `Draw` (`terrainLit.wgsl`), rewritten in place each frame: its own fields,
+   * then the shadow cascades' (R10.T9.b; `packCascadeUniforms`), w = 0 where none are drawn. The
+   * cascades' are typed as a mapped type, not by `CascadeUniforms`' interface, which has no index
+   * signature, so that the whole is a `DrawItem`'s uniforms.
+   */
   readonly litUniforms: {
     readonly bodyRotation: Float32Array;
     readonly cameraBodyFixedM: Float32Array;
     readonly atlas: Float32Array;
+  } & Readonly<Record<keyof CascadeUniforms, Float32Array>>;
+  /**
+   * The casters' `Draw` (`terrainShadow.wgsl`, R10.T9.b): the lit `Draw`'s own three fields, the
+   * same arrays, so that a caster places its vertices as the lit draw does.
+   */
+  readonly casterUniforms: {
+    readonly bodyRotation: Float32Array;
+    readonly cameraBodyFixedM: Float32Array;
+    readonly atlas: Float32Array;
   };
+  /**
+   * The four cascades' snapped centres from the last frame its pass fitted them in, body-fixed, m,
+   * handed back to the next fit (decision-r10-t9-split, ruling 7 amended); `null` in a view new to
+   * the pass, after a rebuild, and after a frame in which this pass did not take the view's
+   * cascades (decision-r10-t9b-design D6(d)).
+   */
+  centres: readonly [Vec3, Vec3, Vec3, Vec3] | null;
+  /** The draw set's index of each of this frame's instance records, in their order (R10.T9.b). */
+  readonly drawn: number[];
+  /** The cascades' caster records and draws, made at the view's first caster frame (R10.T9.b). */
+  casters: ViewCasters | null;
+  /** The shadow texture the lit draw binds: the set's layers or the placeholder (R10.T9.b). */
+  drawnShadow: TextureHandle | null;
   /** The wireframe's `Draw` (`terrainWire.wgsl`), rewritten in place each frame (R10.T11). */
   readonly wireUniforms: {
     readonly bodyRotation: Float32Array;
@@ -578,6 +677,117 @@ interface ViewState {
   /** The phase table and atmosphere tables a lit draw binds, to make it again when they change. */
   drawnTable: TextureHandle | null;
   drawnAtmosphere: SurfaceLightingTables | null;
+}
+
+/** One view's casters into the four cascades (R10.T9.b; decision-r10-t9b-design D4). */
+interface ViewCasters {
+  /** Each cascade's records this frame, a byte-identical subset of the view's. */
+  readonly records: readonly [InstanceRecords, InstanceRecords, InstanceRecords, InstanceRecords];
+  /** Each cascade's caster draw but its count, on {@link ViewCasters.device}; `null` before. */
+  items: readonly [DrawItem, DrawItem, DrawItem, DrawItem] | null;
+  /** The device and material the draws were made for, to make them again when either changes. */
+  device: Device | null;
+  material: MaterialHandle | null;
+}
+
+/** No caster passes: a frame that draws no cascades. */
+const NO_PASSES: ReadonlyArray<DepthLayerPass> = [];
+
+/** The cascades' indices, nearest first. */
+const CASCADES: readonly [CascadeIndex, CascadeIndex, CascadeIndex, CascadeIndex] = [0, 1, 2, 3];
+
+/**
+ * The horizon map's texel at the camera's nadir, m, as the cascades' weight compares cascade 1's
+ * against it (plan R10, R10.T9.b; decision-r10-t9b-design D6(a)): the vertex spacing of the level L
+ * CDLOD draws at distance h in the view, × 2^k, k the level's morph factor at h.
+ *
+ * @remarks
+ * L is the level selection's traversal reaches at h: from level 0 down, to each next level while h
+ * lies inside that level's band end in `morph`, so that h falls in [end₍L+1₎, end_L) where the
+ * ends fall with level, and the coarsest, level 0, beyond them all; k = clamp((h − start_L) ÷
+ * (end_L − start_L), 0, 1), 0 at level 0, which morphs to nothing. The spacing is `vertexSpacing`'s
+ * mean at the equatorial radius. Since a level's spacing is twice its child's, the texel is
+ * continuous in h through each split as through each band, and is defined at every height, with no
+ * drawn patch to look up: a lookup would step w whenever the nadir's patch changes level, stands
+ * in or leaves the view's records (decision-r10-t9-split §5(d)).
+ *
+ * The walk descends from the root, as selection does, because the band ends need not fall with
+ * level: a level's selection error, its bound plus its chord's sagitta, has bumps at fine levels.
+ * Walked up from the finest level instead, a fine level's bump stopped it too fine: on `TERRAIN
+ * TEST` at h = 6.6 km it gave 0.605 m, 19.35 m ÷ 32, five levels too fine, in 574 of 900 frames
+ * over 190–205 s (the RTX 3080, hidden), so that w fell to 0 and the cascades switched on and off.
+ *
+ * @param morph - A view's morph bands, start then end a level (`ViewState.morph`, at its
+ *   effective τ).
+ * @param heightAboveGroundM - h, the camera's height above the drawn ground at its nadir, m; below
+ *   0 it is taken as 0.
+ */
+export function cascadeHorizonTexelM(
+  planet: PlanetGeometry,
+  morph: Float64Array,
+  heightAboveGroundM: number,
+): number {
+  const h = Math.max(heightAboveGroundM, 0);
+  let level = 0;
+  while (level < planet.finestLevel && h < (morph[2 * (level + 1) + 1] ?? 0)) {
+    level += 1;
+  }
+  let k = 0;
+  if (level > 0) {
+    const start = morph[2 * level] ?? 0;
+    const end = morph[2 * level + 1] ?? 0;
+    k = end > start ? Math.min(1, Math.max(0, (h - start) / (end - start))) : 0;
+  }
+  return vertexSpacing(planet.figure.equatorialRadiusM, level).meanM * 2 ** k;
+}
+
+/**
+ * A spheroid's mean radius, m: (2a + c) ÷ 3, the arithmetic mean of its three semi-axes (IUGG's
+ * R₁, Moritz 1980, "Geodetic Reference System 1980", Bulletin Géodésique 54), the R the cascades'
+ * caster reach takes (R10.T9.a's `casterReachM`).
+ */
+export function meanRadiusM(
+  figure: Pick<PlanetGeometry["figure"], "equatorialRadiusM" | "polarRadiusM">,
+): number {
+  return (2 * figure.equatorialRadiusM + figure.polarRadiusM) / 3;
+}
+
+/**
+ * Whether a patch casts into cascade `index` of `set` (plan R10, R10.T9.b;
+ * decision-r10-t9b-design D4): whether its bounding sphere meets the cascade's light-space box,
+ * the sphere's square on the light's axes, from the far plane, r behind the snapped centre, to the
+ * caster reach towards the sun beyond the sphere.
+ *
+ * @remarks
+ * With v the patch's centre less the cascade's snapped centre in the light's axes (x_L, y_L, and
+ * z_L towards the sun), r the cascade's radius, ρ the patch's and ℓ the set's caster reach: kept
+ * where |v·x_L| ≤ r + ρ, |v·y_L| ≤ r + ρ and −r − ρ ≤ v·z_L ≤ r + ℓ + ρ. On both capability paths
+ * a caster up to ℓ nearer the sun than the sphere shadows it: pancaked onto the near plane by
+ * `unclippedDepth`, or inside the pulled-back near plane.
+ *
+ * @param fromCameraBodyFixedM - The patch's centre less the camera, body-fixed, m (`f64`).
+ * @param radiusM - ρ, the patch's bounding radius about that centre, m.
+ */
+export function castsInto(
+  set: CascadeSet,
+  index: CascadeIndex,
+  fromCameraBodyFixedM: Vec3,
+  radiusM: number,
+): boolean {
+  const { x: xL, y: yL, z: zL } = set.basis;
+  const p = fromCameraBodyFixedM;
+  const cascade = set.cascades[index];
+  const o = cascade.centreFromCameraLightM;
+  const reachM = cascade.radiusM + radiusM;
+  const vx = xL.x * p.x + xL.y * p.y + xL.z * p.z - o.x;
+  const vy = yL.x * p.x + yL.y * p.y + yL.z * p.z - o.y;
+  const vz = zL.x * p.x + zL.y * p.y + zL.z * p.z - o.z;
+  return (
+    Math.abs(vx) <= reachM &&
+    Math.abs(vy) <= reachM &&
+    vz >= -reachM &&
+    vz <= reachM + set.casterReachM
+  );
 }
 
 /** A view as selection takes it, with the pass's name for it and the τ of its morph bands. */
@@ -763,6 +973,15 @@ export class TerrainPass {
   readonly #shading: TerrainShading;
   /** The session's materials, which it draws with and never releases; `null` to compile its own. */
   readonly #materials: TerrainMaterialSource | null;
+  /**
+   * A lit pass's shadow cascades (R10.T9.b): the session's, or its own where none is given
+   * ({@link TerrainPass}'s `#ownShadows`); `null` for the other shadings, which bind none.
+   */
+  readonly #shadows: TerrainShadows | null;
+  /** Whether {@link TerrainPass}'s `#shadows` are the pass's own, to let go at its disposal. */
+  readonly #ownShadows: boolean;
+  /** The body's realised relief range, m, for the cascades' caster reach (R10.T9.b). */
+  readonly #reliefM: () => number | null;
   /** Each view's own frame state, by its name. */
   readonly #views = new Map<TerrainViewId, ViewState>();
   /** Each view's camera at the last step, for its motion ({@link frustumMarginRad}). */
@@ -798,7 +1017,27 @@ export class TerrainPass {
     this.#onResident = options.onResident ?? null;
     this.#onSelect = options.onSelect ?? null;
     this.#frustumMargin = options.frustumMargin ?? "none";
-    this.#device = this.#makeDevice();
+    this.#reliefM = options.reliefM ?? ((): number | null => null);
+    if (this.#shading === "lit") {
+      this.#ownShadows = options.shadows === undefined;
+      this.#shadows =
+        options.shadows ??
+        new TerrainShadows(options.engine, { cascades: options.setting === "high" });
+    } else {
+      this.#ownShadows = false;
+      this.#shadows = null;
+    }
+    let made = false;
+    try {
+      this.#device = this.#makeDevice();
+      made = true;
+    } finally {
+      // A device not made (`EngineUnavailable` during a loss, or a disposed engine) leaves no pass
+      // to dispose: its own cascades are let go here, so that their restore listener goes too.
+      if (!made && this.#ownShadows) {
+        this.#shadows?.dispose();
+      }
+    }
     this.#offRestored = this.#device.resources.onRebuilt(() => {
       this.#rebuild();
     });
@@ -903,12 +1142,19 @@ export class TerrainPass {
    * the symbology's pass, or takes the session's, compiled when the session was made
    * ({@link TerrainPassOptions.materials}; R10.T14.d); frames draw nothing until the first
    * resolves, and give no depth until the second does. A depth material that cannot be made is
-   * reported, and the pass draws on without it.
+   * reported, and the pass draws on without it. On the high setting a lit pass also compiles, or
+   * takes, its caster into the shadow cascades (R10.T9.b); until it is made, and where it cannot
+   * be, the view's draws take w = 0.
    */
   async ready(): Promise<void> {
     const device = this.#device;
     const path = device.resources.layout.vertexPath;
-    const depth = this.#shading === "lit" ? this.#readyDepth(device, path) : Promise.resolve();
+    const lit = this.#shading === "lit";
+    const cascades = lit && this.#shadows?.cascades === true;
+    const depth = Promise.all([
+      lit ? this.#readyDepth(device, path) : Promise.resolve(),
+      cascades ? this.#readyShadow(device, path) : Promise.resolve(),
+    ]);
     let material: MaterialHandle;
     try {
       material = await this.#materialOf(this.#shading, device, path);
@@ -938,7 +1184,7 @@ export class TerrainPass {
    * the wireframe's into the canvas), and R05's spike shading into the scene target (`rgba16float`).
    */
   #materialOf(
-    kind: TerrainShading | "depth",
+    kind: TerrainShading | "depth" | "shadow",
     device: Device,
     path: TerrainLayout["vertexPath"],
   ): Promise<MaterialHandle> {
@@ -952,7 +1198,9 @@ export class TerrainPass {
     if (this.#materials !== null) {
       return this.#materials.material(kind, path);
     }
-    const { spec, targets } = terrainMaterialOf(kind, path);
+    // The device's capabilities at each making: a caster made again after a restore onto another
+    // adapter takes that adapter's `depth-clip-control` (decision-r10-t9b-design D1).
+    const { spec, targets } = terrainMaterialOf(kind, path, this.#engine.capabilities);
     return this.#engine.createMaterialAsync(spec, targets, [device.resources.mesh]);
   }
 
@@ -977,6 +1225,26 @@ export class TerrainPass {
       // symbology has no terrain depth over the image, and the terrain itself still draws.
       if (!this.#superseded(device) && !(error instanceof EngineUnavailable)) {
         console.error("the terrain's depth material for the symbology failed:", error);
+      }
+    }
+  }
+
+  /**
+   * Compiles, or takes, `device`'s caster into the shadow cascades (R10.T9.b), for `depth-only`
+   * with the lit mesh; never rejects. One that cannot be made is reported, and the pass draws on
+   * without cascades.
+   */
+  async #readyShadow(device: Device, path: TerrainLayout["vertexPath"]): Promise<void> {
+    try {
+      const caster = await this.#materialOf("shadow", device, path);
+      if (device === this.#device && !this.#disposed && device.shadowMaterial === null) {
+        device.shadowMaterial = caster;
+      } else {
+        this.#releaseOwn(caster);
+      }
+    } catch (error: unknown) {
+      if (!this.#superseded(device) && !(error instanceof EngineUnavailable)) {
+        console.error("the terrain's shadow caster failed: the cascades are not drawn", error);
       }
     }
   }
@@ -1112,6 +1380,13 @@ export class TerrainPass {
    * conditions and debounced annunciation, and the fault where it stands. A view the last step did
    * not take draws nothing.
    *
+   * @remarks
+   * Where the view's body takes its shadow cascades on the high setting
+   * ({@link TerrainFrameInput.takesCascades}; R10.T9.b), it fits them, and where their weight is
+   * above 0 and its draw is made it renders their four caster passes into the one set before it
+   * returns: render this view's draw, in the bodies pass that follows, before another view's
+   * `drawFor` draws its own cascades into the set.
+   *
    * @throws RangeError if more contacts are given than the contact buffer holds.
    */
   drawFor(id: TerrainViewId, input: TerrainViewFrameInput): TerrainViewFrame {
@@ -1119,6 +1394,10 @@ export class TerrainPass {
     const state = this.#views.get(id);
     const bit = selected?.views.findIndex((view) => view.id === id) ?? -1;
     if (this.#faulted || this.#disposed || selected === null || state === undefined || bit < 0) {
+      if (state !== undefined) {
+        // This pass took no cascades of the view this frame (decision-r10-t9b-design D6(d)).
+        state.centres = null;
+      }
       return {
         draw: null,
         conditions: CLEAR,
@@ -1127,6 +1406,7 @@ export class TerrainPass {
         missing: false,
         standingIn: false,
         maskReady: false,
+        cascades: null,
       };
     }
     const { selection, drawSet } = selected;
@@ -1134,7 +1414,14 @@ export class TerrainPass {
     const mask = 1 << bit;
     const missing = (drawSet.missingViews & mask) !== 0;
     const standingIn = (drawSet.standingInViews & mask) !== 0;
-    const { draw, count, refused } = this.#writeOrNone(state, mask, selected.nearContacts, input);
+    const set = this.#cascadesFor(state, input);
+    const { draw, count, refused, passes } = this.#writeOrNone(
+      state,
+      mask,
+      selected.nearContacts,
+      input,
+      set,
+    );
     const conditions: TerrainConditions = {
       streaming: missing || standingIn,
       // A view of weight w is limited where its τ′ is above τ (decision-r10-t16-contracts §3); the
@@ -1157,7 +1444,93 @@ export class TerrainPass {
       // A draw a loss refused at its making withholds the mask, whatever it would have drawn.
       maskReady:
         !missing && !refused && (draw !== null || count === 0) && !this.#seesCodeZeroOpen(mask),
+      cascades: set === null ? null : { set, passes },
     };
+  }
+
+  /**
+   * View `state`'s cascades this frame (plan R10, R10.T9.b; decision-r10-t9b-design D6), fitted
+   * where its pass is lit, its setting draws cascades, its body takes them this frame and a star
+   * lights it; `null` otherwise, and for a frame whose inputs cannot be fitted. The fit's snapped
+   * centres are kept for the next frame's, and those of a frame with no fit are dropped.
+   *
+   * @remarks
+   * The inputs, as the pass forms them: the camera's body-fixed place and orientation (as
+   * selection takes them), the view's field and aspect; h, the camera's height above the datum
+   * less the resident bakes' ground at its nadir (or less 0 where none is held, the reference
+   * surface's datum: `heldGroundUnder`), and ν, the datum's normal there; the top edge of star 0's
+   * disc, the lit rows' brightest, its body-fixed direction raised by its angular radius ρ towards
+   * ν ({@link discTopDirection}; decision-r10-t9b-penumbra), so that the cascades' shadow begins
+   * where the horizon map's share m reaches 0 and min(m, c′) is m across the penumbra; R, the
+   * figure's mean radius; Δh, the body's realised relief, 0 where it is not finite; the horizon
+   * texel from the view's morph bands ({@link cascadeHorizonTexelM}); and the device's
+   * `depth-clip-control`. A frame at w = 0 still fits, so that its centres carry. The receiver's
+   * N·L, its normal offset and the shading take star 0's own direction from the lights' rows, not
+   * the fit's.
+   *
+   * A frame whose inputs cannot be fitted (a viewport of no area or not finite, a star of zero or
+   * non-finite direction or angular radius, or any input `fitCascades` refuses) takes no cascades,
+   * as a frame of no star does, rather than throwing out of {@link TerrainPass.drawFor}.
+   */
+  #cascadesFor(state: ViewState, input: TerrainViewFrameInput): CascadeSet | null {
+    const previous = state.centres;
+    state.centres = null;
+    const star = input.lighting?.lights[0];
+    if (
+      this.#shading !== "lit" ||
+      this.#shadows?.cascades !== true ||
+      input.takesCascades !== true ||
+      star === undefined
+    ) {
+      return null;
+    }
+    const { rotation, cameraM, orientation, fovXRad, viewport } = input.view;
+    const aspect = viewport.widthPx / viewport.heightPx;
+    const sunLength = norm(star.direction);
+    const rhoRad = Math.asin(Math.min(1, star.radius / star.distance));
+    if (
+      !(viewport.widthPx > 0 && viewport.heightPx > 0 && aspect > 0 && Number.isFinite(aspect)) ||
+      !(sunLength > 0 && Number.isFinite(sunLength)) ||
+      !(rhoRad >= 0)
+    ) {
+      return null;
+    }
+    const relief = this.#reliefM();
+    const camera = rotateToBodyFixed(rotation, cameraM);
+    const planet = this.#planet;
+    let set: CascadeSet;
+    try {
+      const under = heldGroundUnder(planet.figure, this.#heights)(camera);
+      set = fitCascades({
+        cameraBodyFixedM: camera,
+        orientationBodyFixed: multiply(conjugate(quaternionFromRows(rotation.rows)), orientation),
+        rotation,
+        fovXRad,
+        aspect,
+        heightAboveGroundM: under.heightM,
+        sunDirectionBodyFixed: discTopDirection(star.direction, under.normal, rhoRad),
+        datumNormalBodyFixed: under.normal,
+        bodyRadiusM: meanRadiusM(planet.figure),
+        reliefRangeM: relief !== null && Number.isFinite(relief) ? Math.max(0, relief) : 0,
+        horizonTexelM: cascadeHorizonTexelM(planet, state.morph, under.heightM),
+        depthClipControl: this.#engine.capabilities.depthClipControl,
+        ...(previous === null ? {} : { previousCentresBodyFixedM: previous }),
+      });
+    } catch (error: unknown) {
+      // The fit refuses what it cannot fit, a camera not finite, say: no cascades this frame.
+      if (error instanceof RangeError) {
+        return null;
+      }
+      throw error;
+    }
+    const [c0, c1, c2, c3] = set.cascades;
+    state.centres = [
+      c0.centreBodyFixedM,
+      c1.centreBodyFixedM,
+      c2.centreBodyFixedM,
+      c3.centreBodyFixedM,
+    ];
+    return set;
   }
 
   /**
@@ -1279,9 +1652,9 @@ export class TerrainPass {
   /**
    * Stops the pool and following restores, tells every block still waiting for its rebakes, and
    * releases every handle the pass made on the current device: its resources and every view's, its
-   * mesh, the materials it compiled itself (not the session's, R10.T14.d) and its tables of no air
-   * (decision-r10-t16-contracts §1). A caller never disposes of a pass a frame not yet submitted
-   * draws.
+   * mesh, the materials it compiled itself (not the session's, R10.T14.d), its tables of no air
+   * (decision-r10-t16-contracts §1) and its own shadow cascades (not the session's, R10.T9.b). A
+   * caller never disposes of a pass a frame not yet submitted draws.
    */
   dispose(): void {
     if (this.#disposed) {
@@ -1303,7 +1676,13 @@ export class TerrainPass {
       try {
         device.resources.dispose();
       } finally {
-        this.#releaseDevice(device);
+        try {
+          this.#releaseDevice(device);
+        } finally {
+          if (this.#ownShadows) {
+            this.#shadows?.dispose();
+          }
+        }
       }
     }
   }
@@ -1317,6 +1696,10 @@ export class TerrainPass {
     if (device.depthMaterial !== null) {
       this.#releaseOwn(device.depthMaterial);
       device.depthMaterial = null;
+    }
+    if (device.shadowMaterial !== null) {
+      this.#releaseOwn(device.shadowMaterial);
+      device.shadowMaterial = null;
     }
     if (device.airless !== null) {
       this.#engine.releaseTexture(device.airless.body);
@@ -1352,6 +1735,7 @@ export class TerrainPass {
         this.#shading === "lit" ? createAirlessTables(this.#engine, "terrain: no air") : null,
       material: null,
       depthMaterial: null,
+      shadowMaterial: null,
       residents: new Map(),
       rebakes: new Map(),
       gates: [],
@@ -1374,7 +1758,8 @@ export class TerrainPass {
     this.#releaseDevice(old);
     this.#heights.clear();
     this.#device = this.#makeDevice(old.resources);
-    // Each view's records sized to the new layout's slots, its debounce kept.
+    // Each view's records sized to the new layout's slots, its debounce kept; its cascades'
+    // centres dropped, since the pass is remade (decision-r10-t9-split, ruling 7 amended).
     for (const [id, state] of this.#views) {
       this.#views.set(id, { ...this.#viewState(id), debounce: state.debounce });
     }
@@ -1542,6 +1927,7 @@ export class TerrainPass {
   #viewState(id: TerrainViewId): ViewState {
     const bodyRotation = new Float32Array(16);
     const atlas = new Float32Array(4);
+    const cameraBodyFixedM = new Float32Array(4);
     const { slotCount } = this.#device.resources.layout.slots;
     return {
       id,
@@ -1555,7 +1941,12 @@ export class TerrainPass {
         sunRadiance: new Float32Array(4),
         atlas,
       },
-      litUniforms: { bodyRotation, cameraBodyFixedM: new Float32Array(4), atlas },
+      litUniforms: { bodyRotation, cameraBodyFixedM, atlas, ...cascadeUniforms() },
+      casterUniforms: { bodyRotation, cameraBodyFixedM, atlas },
+      centres: null,
+      drawn: [],
+      casters: null,
+      drawnShadow: null,
       wireUniforms: {
         bodyRotation,
         atlas: new Float32Array(4),
@@ -1790,12 +2181,21 @@ export class TerrainPass {
     mask: number,
     contacts: ReadonlyArray<GroundContact>,
     input: TerrainViewFrameInput,
-  ): { readonly draw: DrawItem | null; readonly count: number; readonly refused: boolean } {
+    cascades: CascadeSet | null,
+  ): {
+    readonly draw: DrawItem | null;
+    readonly count: number;
+    readonly refused: boolean;
+    readonly passes: ReadonlyArray<DepthLayerPass>;
+  } {
     try {
-      return { ...this.#write(this.#device, state, mask, contacts, input), refused: false };
+      return {
+        ...this.#write(this.#device, state, mask, contacts, input, cascades),
+        refused: false,
+      };
     } catch (error: unknown) {
       if (error instanceof EngineUnavailable) {
-        return { draw: null, count: 0, refused: true };
+        return { draw: null, count: 0, refused: true, passes: NO_PASSES };
       }
       throw error;
     }
@@ -1803,7 +2203,8 @@ export class TerrainPass {
 
   /**
    * Writes view `state`'s records, the drawn patches in `mask`, relative to its camera, and returns
-   * its draw, or `null`, with how many patches it draws.
+   * its draw, or `null`, with how many patches it draws; and, where its lit draw receives
+   * `cascades` (R10.T9.b), draws their caster passes, which it returns.
    */
   #write(
     device: Device,
@@ -1811,9 +2212,14 @@ export class TerrainPass {
     mask: number,
     contacts: ReadonlyArray<GroundContact>,
     input: TerrainViewFrameInput,
-  ): { readonly draw: DrawItem | null; readonly count: number } {
+    cascades: CascadeSet | null,
+  ): {
+    readonly draw: DrawItem | null;
+    readonly count: number;
+    readonly passes: ReadonlyArray<DepthLayerPass>;
+  } {
     const { resources } = device;
-    const { instances, morph, phases } = state;
+    const { instances, morph, phases, drawn: drawnIndices } = state;
     const { cameraM } = input.view;
     const [r0, r1, r2] = input.view.rotation.rows;
     const drawSet = this.#selected?.drawSet;
@@ -1821,6 +2227,7 @@ export class TerrainPass {
     const { holds } = device.holds;
     instances.clear();
     phases?.clear();
+    drawnIndices.length = 0;
     if (drawSet !== undefined) {
       // `patches` holds exactly the `count` drawn patches (`DrawSetResolver`), and `holds` their
       // morph holds in the same order (`#select`).
@@ -1844,6 +2251,7 @@ export class TerrainPass {
           parentQuadrant(patch.key),
           holds[n] ?? 0,
         );
+        drawnIndices.push(n);
         if (phases !== null && wire !== undefined) {
           this.#pushPhase(device, phases, drawn.keyString, patch.originM, wire);
         }
@@ -1868,14 +2276,18 @@ export class TerrainPass {
     }
     const count = instances.count;
     if (device.material === null || count === 0) {
-      return { draw: null, count };
+      return { draw: null, count, passes: NO_PASSES };
     }
     rotationMat4(input.view.rotation, state.uniforms.bodyRotation);
     let draw: DrawItem | null;
+    let live: CascadeSet | null = null;
     switch (this.#shading) {
-      case "lit":
-        draw = this.#writeLit(device, state, input);
+      case "lit": {
+        const lit = this.#writeLit(device, state, input, cascades);
+        draw = lit.draw;
+        live = lit.live;
         break;
+      }
       case "wire":
         // A wireframe view's frame with no contours to draw draws nothing (R10.T11).
         draw = wire === undefined ? null : this.#writeWire(device, state, device.material, wire);
@@ -1884,7 +2296,9 @@ export class TerrainPass {
         draw = this.#writeSpike(device, state, device.material, input);
         break;
     }
-    return { draw, count };
+    const passes =
+      draw !== null && live !== null ? this.#drawCasters(device, state, input, live) : NO_PASSES;
+    return { draw, count, passes };
   }
 
   /** R05's spike shading's uniforms for this frame, and its draw item, made once a device. */
@@ -1930,9 +2344,27 @@ export class TerrainPass {
       : NO_PARENT_SLOT;
   }
 
-  /** A lit frame's uniforms and lights, and its draw, made again where its tables changed. */
-  #writeLit(device: Device, state: ViewState, input: TerrainViewFrameInput): DrawItem | null {
+  /**
+   * A lit frame's uniforms and lights, its shadow cascades' fields (R10.T9.b), and its draw, made
+   * again where its tables or its bound shadow texture changed; with the cascades its draw
+   * receives, `null` where it receives none.
+   *
+   * @remarks
+   * The draw receives `cascades` where their weight is above 0 and the caster material is made, the
+   * set then made at its first need; it binds the set's layers while the set lives, and the
+   * placeholder before. Otherwise its cascades' fields take w = 0, so that it samples nothing.
+   */
+  #writeLit(
+    device: Device,
+    state: ViewState,
+    input: TerrainViewFrameInput,
+    cascades: CascadeSet | null,
+  ): { readonly draw: DrawItem | null; readonly live: CascadeSet | null } {
     const { resources } = device;
+    const shadows = this.#shadows;
+    if (shadows === null) {
+      throw new Error("a lit terrain pass has no shadow cascades to bind");
+    }
     const lighting = input.lighting;
     if (lighting !== undefined) {
       resources.setLighting(lighting, state.id);
@@ -1946,21 +2378,160 @@ export class TerrainPass {
     const table = resources.phaseTable;
     const atmosphere = lighting?.atmosphere ?? device.airless;
     const material = device.material;
+    const drawable = table !== null && atmosphere !== null && material !== null;
+    const live =
+      drawable &&
+      cascades !== null &&
+      cascades.weight > 0 &&
+      device.shadowMaterial !== null &&
+      shadows.cascadeTarget() !== null
+        ? cascades
+        : null;
+    packCascadeUniforms(live, viewAxisOf(input.view.orientation), state.litUniforms);
     if (table === null || atmosphere === null || material === null) {
-      return null;
+      return { draw: null, live: null };
     }
+    const shadow = shadows.bound();
     if (
       state.draw === null ||
       state.drawDevice !== device ||
       state.drawnTable !== table ||
-      state.drawnAtmosphere !== atmosphere
+      state.drawnAtmosphere !== atmosphere ||
+      state.drawnShadow !== shadow
     ) {
-      state.draw = this.#drawItem(device, state, material, { table, atmosphere });
+      state.draw = this.#drawItem(device, state, material, { table, atmosphere, shadow });
       state.drawDevice = device;
       state.drawnTable = table;
       state.drawnAtmosphere = atmosphere;
+      state.drawnShadow = shadow;
     }
-    return state.draw;
+    return { draw: state.draw, live };
+  }
+
+  /**
+   * Draws view `state`'s casters into each of `set`'s cascades (plan R10, R10.T9.b;
+   * decision-r10-t9b-design D4), one pass a cascade, and returns the passes.
+   *
+   * @remarks
+   * Each cascade's casters are the view's own records this frame, in its order, whose patch's
+   * bounding sphere (the resident bake's origin and bounding radius) meets the cascade's
+   * light-space box with the caster reach ({@link castsInto}), each copied as it stands, so that a
+   * caster is drawn with the view's own morph bands, holds and parents and stores the surface the
+   * view draws. They are written into the view's caster buffer for the cascade and drawn with a
+   * direct instance count, through the caster material, the lit mesh and the view's storage and
+   * `Draw` values. Each pass, into the cascade's layer with its light rotation and projection,
+   * draws the terrain's draw, where it has casters, and then the other casters'
+   * ({@link TerrainShadows.casters}); every pass is drawn, clearing its layer, so that no other
+   * view's casts remain in it. The set renders them under the view's name, each a submission of
+   * its own, before this returns.
+   */
+  #drawCasters(
+    device: Device,
+    state: ViewState,
+    input: TerrainViewFrameInput,
+    set: CascadeSet,
+  ): ReadonlyArray<DepthLayerPass> {
+    const shadows = this.#shadows;
+    const target = shadows?.target ?? null;
+    const material = device.shadowMaterial;
+    const drawSet = this.#selected?.drawSet;
+    if (shadows === null || target === null || material === null || drawSet === undefined) {
+      return NO_PASSES;
+    }
+    const { resources } = device;
+    const slots = resources.layout.slots.slotCount;
+    const casters = (state.casters ??= {
+      records: [
+        new InstanceRecords(slots),
+        new InstanceRecords(slots),
+        new InstanceRecords(slots),
+        new InstanceRecords(slots),
+      ],
+      items: null,
+      device: null,
+      material: null,
+    });
+    for (const records of casters.records) {
+      records.clear();
+    }
+    // Each patch's centre less the camera, body-fixed, in `f64`, as the fit placed the cascades.
+    const camera = rotateToBodyFixed(input.view.rotation, input.view.cameraM);
+    const drawn = state.drawn;
+    for (let record = 0; record < drawn.length; record += 1) {
+      const drawnIndex = drawn[record];
+      // A record whose patch the draw set no longer holds casts nothing.
+      const patch = drawnIndex === undefined ? undefined : drawSet.patches[drawnIndex]?.patch;
+      if (patch === undefined) {
+        continue;
+      }
+      const o = patch.originM;
+      const fromCamera = { x: o.x - camera.x, y: o.y - camera.y, z: o.z - camera.z };
+      for (const index of CASCADES) {
+        if (castsInto(set, index, fromCamera, patch.boundingRadiusM)) {
+          casters.records[index].pushCopy(state.instances, record);
+        }
+      }
+    }
+    if (casters.items === null || casters.device !== device || casters.material !== material) {
+      casters.items = this.#casterItems(device, state, material);
+      casters.device = device;
+      casters.material = material;
+    }
+    const items = casters.items;
+    const passes = CASCADES.map((index): DepthLayerPass => {
+      const records = casters.records[index];
+      resources.writeCasters(state.id, index, records);
+      const cascade = set.cascades[index];
+      const others = shadows.casters.draws(set, index, state.id);
+      const count = records.count;
+      return {
+        label: TERRAIN_SHADOW_PASS_LABEL,
+        layer: index,
+        viewRotation: cascade.viewRotation,
+        projection: cascade.projection,
+        draws: count > 0 ? [{ ...items[index], instanceCount: count }, ...others] : others,
+      };
+    });
+    target.render(state.id, passes);
+    return passes;
+  }
+
+  /**
+   * View `state`'s caster draws of `device`'s resources with the caster `material`, one a
+   * cascade, but their counts (R10.T9.b): the lit mesh, R05's vertex storage with the cascade's
+   * caster records as its instances, the view's contacts and the survey mask, the lit `Draw`'s own
+   * fields, and no texture.
+   */
+  #casterItems(
+    device: Device,
+    state: ViewState,
+    material: MaterialHandle,
+  ): readonly [DrawItem, DrawItem, DrawItem, DrawItem] {
+    const { resources } = device;
+    const buffers = resources.viewBuffers(state.id);
+    const casters = resources.casterBuffers(state.id);
+    const heights = resources.field("heights");
+    const surveyMask = resources.field("survey-mask");
+    if (heights === null || surveyMask === null) {
+      throw new Error("a lit terrain's casters have no lit layout: its heights or survey masks");
+    }
+    const offsets = resources.field("offsets");
+    const item = (instances: BufferHandle): DrawItem => ({
+      mesh: resources.mesh,
+      material,
+      offsetFromCameraM: ZERO_OFFSET,
+      uniforms: state.casterUniforms,
+      textures: {},
+      storageBuffers: {
+        heights,
+        slots: resources.slotRecords,
+        instances,
+        contacts: buffers.contacts,
+        surveyMask,
+        ...(offsets === null ? {} : { offsets }),
+      },
+    });
+    return [item(casters[0]), item(casters[1]), item(casters[2]), item(casters[3])];
   }
 
   /**
@@ -2081,6 +2652,8 @@ export class TerrainPass {
     phase: {
       readonly table: TextureHandle;
       readonly atmosphere: SurfaceLightingTables;
+      /** The shadow cascades' layers, or the placeholder (R10.T9.b). */
+      readonly shadow: TextureHandle;
     } | null = null,
   ): DrawItem {
     const { resources } = device;
@@ -2143,6 +2716,7 @@ export class TerrainPass {
         normals: resources.normals,
         phaseFactorTable: phase.table,
         ...surfaceLightingDrawTextures(phase.atmosphere),
+        [SHADOW_CASCADES_TEXTURE]: phase.shadow,
       },
       storageBuffers,
       indirect: { buffer: buffers.indirect, offsetBytes: 0 },
@@ -2151,6 +2725,12 @@ export class TerrainPass {
 }
 
 const ZERO_OFFSET = new Float32Array(3);
+
+/** The camera's forward, its −z, in the axes its orientation is given in: the view axis. */
+function viewAxisOf(orientation: Quaternion): Vec3 {
+  const [r0, r1, r2] = rotationRows(orientation);
+  return { x: -r0.z, y: -r1.z, z: -r2.z };
+}
 
 /** A selection of nothing: what a faulted pass draws. */
 const EMPTY_SELECTION: Selection = {

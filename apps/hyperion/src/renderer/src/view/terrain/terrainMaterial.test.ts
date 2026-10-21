@@ -14,14 +14,25 @@ import { lawPhaseIntegral, withTemplateCurve } from "../appearance/phase";
 import { oblateAlbedoScale } from "../bodies/oblate";
 import { WGSL_CATALOGUE } from "../engine/catalogue";
 import type { WgslMaterialSpec } from "../engine/types";
+import {
+  declaredStructLayout,
+  OFFSET_MEMBER,
+  type StructLayout,
+  uniformLayout,
+} from "../engine/webgpu/uniforms";
 import { annulusEdges } from "../lighting/annuli";
 import { bindingStages } from "../../test/wgslStages";
 import occluderWgsl from "../shaders/occluder.wgsl?raw";
 import terrainDepthWgsl from "./shaders/terrainDepth.wgsl?raw";
 import terrainLitWgsl from "./shaders/terrainLit.wgsl?raw";
+import terrainLitShadeWgsl from "./shaders/terrainLitShade.wgsl?raw";
+import terrainShadowWgsl from "./shaders/terrainShadow.wgsl?raw";
 import terrainSurveyWgsl from "./shaders/terrainSurvey.wgsl?raw";
+import cascadeShadowWgsl from "./shadows/cascadeShadow.wgsl?raw";
+import { CASCADE_DEPTH_BIAS } from "./shadows/cascades";
 import horizonWgsl from "./shadows/horizon.wgsl?raw";
 import { LIT_VERTEX_CODE } from "./gpu/resources";
+import { PATH_SOURCES } from "./gpu/material";
 import {
   CLASS_LAWS_BYTES,
   CLASS_LAYERS_BYTES,
@@ -39,23 +50,57 @@ import {
   dominantSlot,
   packClassLaws,
   packTerrainLighting,
+  SHADOW_CASCADES_TEXTURE,
+  SHADOW_COMPARE_SAMPLER,
   TERRAIN_CLASSES,
   TERRAIN_LIGHT_ROWS,
   TERRAIN_DEPTH_MATERIALS,
   TERRAIN_LIT_BINDINGS,
   TERRAIN_LIT_MATERIALS,
+  TERRAIN_SHADOW_MATERIALS,
   PHASE_LAW,
   type TerrainLighting,
   TerrainPhaseRows,
   terrainDepthMaterialSpec,
   terrainLitMaterialSpec,
   terrainReflectance,
+  terrainShadowMaterialSpec,
   terrainShares,
   texelLawOf,
   texelWeights,
 } from "./terrainMaterial";
 
 const RAD = Math.PI / 180;
+
+/** A struct layout's members as `name : type @ offset`, for comparison. */
+function membersOf(layout: StructLayout | null): string[] | undefined {
+  return layout?.members.map((m) => `${m.name} : ${m.type} @ ${String(m.offsetBytes)}`);
+}
+
+/** The `Draw` the engine packs from a material's uniforms, its offset member first. */
+function packedDraw(spec: WgslMaterialSpec): string[] | undefined {
+  return membersOf(uniformLayout([OFFSET_MEMBER, ...spec.uniforms]));
+}
+
+/** Each storage buffer's name, its declared stages and the stages its entry points read it in. */
+function storageStages(spec: WgslMaterialSpec): string[][] {
+  const read = bindingStages(spec.vertexWgsl);
+  return (spec.storageBuffers ?? []).map((buffer) => [
+    buffer.name,
+    [...(buffer.stages ?? [])].toSorted().join(" "),
+    [...(read.get(buffer.binding) ?? [])].toSorted().join(" "),
+  ]);
+}
+
+/** The `@group(2)` bindings a material's entry points read that its layout does not declare. */
+function undeclaredBindings(spec: WgslMaterialSpec): number[] {
+  const declared = new Set([
+    ...(spec.storageBuffers ?? []).map((buffer) => buffer.binding),
+    ...(spec.textures ?? []).map((texture) => texture.binding),
+    ...spec.samplers.map((sampler) => sampler.binding),
+  ]);
+  return [...bindingStages(spec.vertexWgsl).keys()].filter((binding) => !declared.has(binding));
+}
 
 /** A bake's photometry: each slot `[B, V, R, law, L(0)]`, the rest empty. */
 function photometryOf(slots: ReadonlyArray<readonly [number, number, number, number, number]>) {
@@ -107,12 +152,16 @@ describe("the lit terrain's depth material for the symbology (R10.T16.c)", () =>
     expect([...read.keys()].filter((binding) => !declared.has(binding))).toEqual([]);
   });
 
-  it("takes the lit material's draw with the overlay's slope term after it", () => {
+  it("takes the lit material's own draw fields, without the cascades', with the overlay's slope term after them", () => {
     expect(terrainDepthMaterialSpec("face-differences").uniforms.map((u) => u.name)).toEqual([
-      ...terrainLitMaterialSpec("face-differences").uniforms.map((u) => u.name),
+      ...terrainLitMaterialSpec("face-differences")
+        .uniforms.slice(0, 3)
+        .map((u) => u.name),
       "occluderSlopePx",
     ]);
     expect(terrainDepthWgsl).toContain("occluderSlopePx : f32,");
+    const spec = terrainDepthMaterialSpec("baked-offsets");
+    expect(membersOf(declaredStructLayout(spec.vertexWgsl, "Draw"))).toEqual(packedDraw(spec));
   });
 
   it("pushes its depth away by the occluders' constant fraction", () => {
@@ -168,7 +217,8 @@ describe("the lit terrain's material (R10.T10.b)", () => {
       ["surveyMask", "vertex fragment"],
     ]);
     const textures = differences.textures ?? [];
-    expect(textures.map((t) => t.binding)).toEqual([4, 7, 9, 10, 11, 12, 13, 14, 15]);
+    expect(textures.map((t) => t.binding)).toEqual([4, 7, 9, 10, 11, 12, 13, 14, 15, 19]);
+    expect(differences.samplers.map((s) => s.binding)).toEqual([20]);
     for (const [name, binding] of [
       ["class_layers", TERRAIN_LIT_BINDINGS.classLayers],
       ["phase_factor_table", TERRAIN_LIT_BINDINGS.phaseFactorTable],
@@ -176,11 +226,15 @@ describe("the lit terrain's material (R10.T10.b)", () => {
       ["atmosphere_body", TERRAIN_LIT_BINDINGS.atmosphere],
       ["horizon_map", TERRAIN_LIT_BINDINGS.horizonMap],
       ["survey_mask", TERRAIN_LIT_BINDINGS.surveyMask],
+      ["shadow_cascades", TERRAIN_LIT_BINDINGS.shadowCascades],
+      ["shadow_compare", TERRAIN_LIT_BINDINGS.shadowCompare],
     ] as const) {
-      expect(terrainLitWgsl + horizonWgsl + terrainSurveyWgsl).toMatch(
+      expect(terrainLitWgsl + horizonWgsl + terrainSurveyWgsl + cascadeShadowWgsl).toMatch(
         new RegExp(`@binding\\(${String(binding)}\\) var[^\\n]* ${name}`, "u"),
       );
     }
+    // No binding its entry points read is left out of the layout, on either path.
+    expect([offsets, differences].map(undeclaredBindings)).toEqual([[], []]);
   });
 
   it("states the hooks R11 fills, each with no effect", () => {
@@ -223,6 +277,195 @@ describe("the lit terrain's material (R10.T10.b)", () => {
     (name, code) => {
       const constant = `LIT_${name.replace(/[A-Z]/gu, (letter) => `_${letter}`).toUpperCase()}`;
       expect(terrainSurveyWgsl).toContain(`const ${constant} : u32 = ${String(code)}u;`);
+    },
+  );
+});
+
+describe("the lit terrain's shadow receiver (R10.T9.b)", () => {
+  const lit = terrainLitMaterialSpec("face-differences");
+
+  it("takes its own draw fields, then the cascades', in the Draw struct's order", () => {
+    expect(lit.uniforms.map((u) => `${u.name} : ${u.type}`)).toEqual([
+      "bodyRotation : mat4x4f",
+      "cameraBodyFixedM : vec4f",
+      "atlas : vec4f",
+      "cascadeLight0 : mat4x4f",
+      "cascadeLight1 : mat4x4f",
+      "cascadeLight2 : mat4x4f",
+      "cascadeLight3 : mat4x4f",
+      "cascadeFarM : vec4f",
+      "cascadeFadeStartM : vec4f",
+      "cascadeNormalOffsetM : vec4f",
+      "cascadeViewAxis : vec4f",
+    ]);
+    for (const path of ["baked-offsets", "face-differences"] as const) {
+      const spec = terrainLitMaterialSpec(path);
+      expect(membersOf(declaredStructLayout(spec.vertexWgsl, "Draw"))).toEqual(packedDraw(spec));
+    }
+  });
+
+  it("binds the cascades' layers as a depth array and reads them through a linear greater-equal comparison sampler", () => {
+    expect(lit.textures?.find((t) => t.name === SHADOW_CASCADES_TEXTURE)).toEqual({
+      name: "shadowCascades",
+      binding: 19,
+      sampleType: "depth",
+      viewDimension: "2d-array",
+    });
+    expect(lit.samplers).toEqual([
+      {
+        name: SHADOW_COMPARE_SAMPLER,
+        filter: "linear",
+        address: "clamp-to-edge",
+        binding: 20,
+        compare: "greater-equal",
+      },
+    ]);
+    expect(cascadeShadowWgsl).toContain(
+      "@group(2) @binding(19) var shadow_cascades : texture_depth_2d_array;",
+    );
+    expect(cascadeShadowWgsl).toContain(
+      "@group(2) @binding(20) var shadow_compare : sampler_comparison;",
+    );
+    // Read by the fragment stage alone, where the receiver runs.
+    const read = bindingStages(lit.vertexWgsl);
+    expect([read.get(19), read.get(20)].map((stages) => Array.from(stages ?? []))).toEqual([
+      ["fragment"],
+      ["fragment"],
+    ]);
+  });
+
+  it("composes the receiver into the lit material alone, after its Draw, not into the shared source", () => {
+    const shade = lit.vertexWgsl.indexOf(terrainLitShadeWgsl);
+    const receiver = lit.vertexWgsl.indexOf(cascadeShadowWgsl);
+    expect(shade).toBeGreaterThan(0);
+    expect(receiver).toBe(shade + terrainLitShadeWgsl.length);
+    for (const spec of [
+      terrainDepthMaterialSpec("face-differences"),
+      terrainShadowMaterialSpec("face-differences", false),
+    ]) {
+      const code = spec.vertexWgsl.replaceAll(/\/\/[^\n]*/gu, "");
+      expect(code).not.toContain("fn cascade_lit_fraction");
+      expect(code).not.toContain("cascadeLight0");
+      expect(code).not.toContain("shadow_cascades");
+    }
+  });
+
+  it("samples with textureSampleCompareLevel, which needs no uniform control flow, never textureSampleCompare", () => {
+    const code = cascadeShadowWgsl.replaceAll(/\/\/[^\n]*/gu, "");
+    expect(code.match(/textureSampleCompareLevel\(/gu)).toHaveLength(1);
+    expect(code).not.toMatch(/textureSampleCompare\(/u);
+  });
+
+  it("forms the geometric normal before the discard and hands c′ to shade_terrain, 1 for reference fragments", () => {
+    const code = terrainLitShadeWgsl.replaceAll(/\/\/[^\n]*/gu, "");
+    const derivatives = code.indexOf("dpdyFine(in.fromCameraBf)");
+    expect(derivatives).toBeGreaterThan(0);
+    expect(derivatives).toBeLessThan(code.indexOf("discard"));
+    expect(code).toContain("var cascade_lit = 1.0;");
+    expect(code).toContain("shade_terrain(in, normal, reference, cascade_lit)");
+    expect(terrainLitWgsl).toContain("cascade_lit : f32,");
+  });
+
+  it("multiplies the cascades' term into star 0's direct light alone, at the map's share of the cut R07 used", () => {
+    expect(terrainLitWgsl).toContain("fn terrain_cascade_term(m : f32, cascade_lit : f32) -> f32");
+    expect(terrainLitWgsl).toMatch(
+      /if \(j == 0u\) \{[^}]*disc_visible_fraction\(star_distance_radii, clamp\(phi \+ max\(local_horizon, 0\.0\), 0\.0, LIT_PI\)\);\s*shadowed = shadowed \* terrain_cascade_term\(m, cascade_lit\);/u,
+    );
+    // The meter's class keeps the horizon's and the eclipse's tests alone.
+    expect(terrainLitWgsl).toContain(
+      "out.lit = out.lit || (horizon > TERRAIN_LIT_IRRADIANCE && any(visible > vec3f(TERRAIN_LIT_IRRADIANCE)));",
+    );
+  });
+});
+
+describe("the terrain's shadow casters (R10.T9.b)", () => {
+  it("registers both vertex paths' casters in the catalogue, compiled for depth-only", () => {
+    for (const spec of TERRAIN_SHADOW_MATERIALS) {
+      const entry = WGSL_CATALOGUE.find(
+        (candidate) => candidate.kind === "material" && candidate.spec === spec,
+      );
+      expect(entry?.kind === "material" ? entry.targets : undefined).toEqual(["depth-only"]);
+    }
+    expect(TERRAIN_SHADOW_MATERIALS.map((spec) => spec.displayName)).toEqual([
+      "TERRAIN SHADOWS OFFSETS",
+      "TERRAIN SHADOWS",
+    ]);
+    expect(TERRAIN_SHADOW_MATERIALS.map((spec) => spec.unclippedDepth)).toEqual([false, false]);
+  });
+
+  it.each([true, false])(
+    "writes depth alone, cull none, biased away by the cascades' bias, unclippedDepth %s as given",
+    (unclippedDepth) => {
+      const spec = terrainShadowMaterialSpec("face-differences", unclippedDepth);
+      expect({
+        cullMode: spec.cullMode,
+        depthWrite: spec.depthWrite,
+        colourWrites: spec.colourWrites,
+        blend: spec.blend,
+        textures: spec.textures,
+        samplers: spec.samplers,
+        depthBiasAway: spec.depthBiasAway,
+        unclippedDepth: spec.unclippedDepth,
+      }).toEqual({
+        cullMode: "none",
+        depthWrite: true,
+        colourWrites: false,
+        blend: "none",
+        textures: [],
+        samplers: [],
+        depthBiasAway: {
+          constant: CASCADE_DEPTH_BIAS.constant,
+          slopeScale: CASCADE_DEPTH_BIAS.slopeScale,
+          clamp: CASCADE_DEPTH_BIAS.clamp,
+        },
+        unclippedDepth,
+      });
+    },
+  );
+
+  it("binds what its entry points read, as the depth material does: R05's vertex storage and the survey mask", () => {
+    const offsets = terrainShadowMaterialSpec("baked-offsets", false);
+    expect(storageStages(offsets)).toEqual([
+      ["heights", "vertex", "vertex"],
+      ["slots", "vertex", "vertex"],
+      ["instances", "vertex", "vertex"],
+      ["contacts", "vertex", "vertex"],
+      ["offsets", "vertex", "vertex"],
+      ["surveyMask", "fragment vertex", "fragment vertex"],
+    ]);
+    expect(offsets.storageBuffers).toEqual(
+      terrainDepthMaterialSpec("baked-offsets").storageBuffers,
+    );
+    expect(undeclaredBindings(offsets)).toEqual([]);
+    expect(storageNames(terrainShadowMaterialSpec("face-differences", false))).not.toContain(
+      "offsets",
+    );
+  });
+
+  it("takes the lit material's own draw fields alone, its Draw mirroring each the shared source reads", () => {
+    for (const path of ["baked-offsets", "face-differences"] as const) {
+      const spec = terrainShadowMaterialSpec(path, false);
+      expect(spec.uniforms).toEqual(terrainLitMaterialSpec(path).uniforms.slice(0, 3));
+      expect(membersOf(declaredStructLayout(spec.vertexWgsl, "Draw"))).toEqual(packedDraw(spec));
+    }
+  });
+
+  it.each(["baked-offsets", "face-differences"] as const)(
+    "draws the lit vertex stage unchanged on %s, with a fragment stage that only discards and writes nothing",
+    (path) => {
+      const caster = terrainShadowMaterialSpec(path, false).vertexWgsl;
+      const lit = terrainLitMaterialSpec(path).vertexWgsl;
+      // The shared source up to the material's own Draw, and the path's source after it, are the
+      // lit material's own, byte for byte.
+      const shared = lit.slice(0, lit.indexOf(terrainLitShadeWgsl));
+      expect(caster).toBe(shared + terrainShadowWgsl + PATH_SOURCES[path]);
+      expect(shared).toContain("fn vertexMain(");
+      const code = terrainShadowWgsl.replaceAll(/\/\/[^\n]*/gu, "");
+      expect(code).toMatch(
+        /@fragment\s+fn fragmentMain\(in : LitVertexOut\) \{\s*if \(!survey_kept\(in\)\) \{\s*discard;\s*\}\s*\}/u,
+      );
+      expect(code).not.toContain("@location");
+      expect(code).not.toContain("frag_depth");
     },
   );
 });

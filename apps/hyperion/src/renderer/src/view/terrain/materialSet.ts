@@ -12,7 +12,8 @@
  *   prepares). Compiled when the session is made, the materials are ready before any view hands a
  *   body over, and every pass of the session draws with the same handles.
  * - **What is compiled.** {@link sessionMaterials}: the lit material and its depth material on the
- *   lit layout's path, and the wireframe's on the wireframe layout's, each as `terrainLayout`
+ *   lit layout's path, on the high setting the shadow cascades' caster beside them (R10.T9.b), and
+ *   the wireframe's on the wireframe layout's, each as `terrainLayout`
  *   resolves the setting's own path against the device's limits (`baked-offsets` falling back to
  *   `face-differences` where the offsets exceed a binding), into the targets its pass draws into
  *   ({@link terrainMaterialOf}). Each is compiled against a mesh of the patches' own vertex layout
@@ -22,7 +23,8 @@
  * - **A path not compiled** (a pass on another setting, say) is compiled at its first ask and kept
  *   for the next; a compile that fails is forgotten, so that the next ask tries again.
  * - **A device loss.** The handles die with the device; at the restore the set forgets them and
- *   compiles the setting's materials again, before any pass is told: its listener is added when the
+ *   compiles the setting's materials again, the caster with the new device's `depth-clip-control`
+ *   (decision-r10-t9b-design D1), before any pass is told: its listener is added when the
  *   session is made, before any pass's resources add theirs, and the engine calls its listeners in
  *   the order they were added (`ResilientEngine`'s restore). A compile that ends after a restore or
  *   after the set is let go is released at once, and rejects.
@@ -31,6 +33,7 @@
  */
 
 import { EngineUnavailable } from "../engine/resilientEngine";
+import type { GpuCapabilities } from "../engine/platform";
 import type {
   MaterialHandle,
   RenderEngine,
@@ -44,14 +47,19 @@ import {
 } from "../quality/qualitySetting";
 import { fittedTerrainLayout, type TerrainLimits, terrainMeshSpec } from "./gpu/resources";
 import type { TerrainShading } from "./slotLayout";
-import { terrainDepthMaterialSpec, terrainLitMaterialSpec } from "./terrainMaterial";
+import {
+  terrainDepthMaterialSpec,
+  terrainLitMaterialSpec,
+  terrainShadowMaterialSpec,
+} from "./terrainMaterial";
 import { terrainWireMaterialSpec, wireframeTerrainSettings } from "./terrainWire";
 
 /**
  * A material of the terrain session's passes: R10's lit material (`lit`), its depth material for
- * the symbology's pass (`depth`, R10.T16.c), and the wireframe's (`wire`, R10.T11).
+ * the symbology's pass (`depth`, R10.T16.c), the wireframe's (`wire`, R10.T11), and the lit
+ * terrain as a caster into the high setting's shadow cascades (`shadow`, R10.T9.b).
  */
-export type TerrainMaterialKind = "lit" | "depth" | "wire";
+export type TerrainMaterialKind = "lit" | "depth" | "wire" | "shadow";
 
 /** A material of the terrain and a vertex path it is compiled on. */
 export interface TerrainMaterialKey {
@@ -73,11 +81,17 @@ export interface TerrainMaterialMaking {
  *
  * @remarks
  * The lit material draws into the photorealistic scene target (`rgba16float`); its depth material
- * and the wireframe's into the canvas, the symbology's pass and the wireframe's frame.
+ * and the wireframe's into the canvas, the symbology's pass and the wireframe's frame; the caster
+ * into the shadow cascades' layers (`depth-only`), drawing the lit mesh, with `unclippedDepth`
+ * where the device offers `depth-clip-control` (decision-r10-t9b-design D1).
+ *
+ * @param capabilities - The device's, read at each making, so that a caster made again after a
+ *   restore onto another adapter takes that adapter's `depth-clip-control`.
  */
 export function terrainMaterialOf(
   kind: TerrainMaterialKind,
   path: TerrainVertexPath,
+  capabilities: Pick<GpuCapabilities, "depthClipControl">,
 ): TerrainMaterialMaking {
   let made: TerrainMaterialMaking;
   switch (kind) {
@@ -90,15 +104,23 @@ export function terrainMaterialOf(
     case "wire":
       made = { spec: terrainWireMaterialSpec(path), targets: ["canvas"], shading: "wire" };
       break;
+    case "shadow":
+      made = {
+        spec: terrainShadowMaterialSpec(path, capabilities.depthClipControl),
+        targets: ["depth-only"],
+        shading: "lit",
+      };
+      break;
   }
   return made;
 }
 
 /**
  * The materials a terrain session's passes draw with on `setting`, on a device of `limits`: the lit
- * material and its depth material on the lit layout's vertex path, and the wireframe's on the
- * wireframe layout's, as `terrainLayout` resolves each; none of a layout the device cannot hold
- * (`fittedTerrainLayout`), of which no pass can be made either.
+ * material and its depth material on the lit layout's vertex path, on the high setting the shadow
+ * cascades' caster on that path too (R10.T9.b; the low setting has no cascades), and the
+ * wireframe's on the wireframe layout's, as `terrainLayout` resolves each; none of a layout the
+ * device cannot hold (`fittedTerrainLayout`), of which no pass can be made either.
  */
 export function sessionMaterials(
   setting: QualitySetting,
@@ -108,6 +130,9 @@ export function sessionMaterials(
   const lit = fittedTerrainLayout(TERRAIN_SETTINGS[setting], limits, "lit");
   if (lit !== null) {
     keys.push({ kind: "lit", path: lit.vertexPath }, { kind: "depth", path: lit.vertexPath });
+    if (setting === "high") {
+      keys.push({ kind: "shadow", path: lit.vertexPath });
+    }
   }
   const wire = fittedTerrainLayout(wireframeTerrainSettings(setting), limits, "wire");
   if (wire !== null) {
@@ -251,7 +276,7 @@ export class TerrainMaterialSet implements TerrainMaterialSource {
 
   /** Compiles `kind` on `path` against a mesh of its pass's layout, made and released for it. */
   async #compile(kind: TerrainMaterialKind, path: TerrainVertexPath): Promise<MaterialHandle> {
-    const { spec, targets, shading } = terrainMaterialOf(kind, path);
+    const { spec, targets, shading } = terrainMaterialOf(kind, path, this.#engine.capabilities);
     const mesh = this.#engine.createMesh({ ...terrainMeshSpec(shading), name: COMPILE_MESH_NAME });
     try {
       return await this.#engine.createMaterialAsync(spec, targets, [mesh]);

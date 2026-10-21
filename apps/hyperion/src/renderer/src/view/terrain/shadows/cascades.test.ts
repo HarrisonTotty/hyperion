@@ -31,6 +31,7 @@ import {
   cascadeSplitsM,
   cascadeWeight,
   casterReachM,
+  discTopDirection,
   fitCascades,
   gridLatticeSpacingM,
   halfDiagonalTanSquared,
@@ -1115,12 +1116,97 @@ describe("the caster reach and the capability", () => {
 });
 
 describe("the normal offset", () => {
-  it("is one texel in each cascade", () => {
-    expect(NORMAL_OFFSET_TEXELS).toBe(1);
+  it("is one and a half texels in each cascade, R10.T9.b's tuning", () => {
+    expect(NORMAL_OFFSET_TEXELS).toBe(1.5);
     for (const heightM of [2, 1_000]) {
       for (const cascade of fitCascades(baseInput({ heightAboveGroundM: heightM })).cascades) {
-        expect(cascade.normalOffsetM).toBe(cascade.texelM);
+        expect(cascade.normalOffsetM).toBe(1.5 * cascade.texelM);
       }
+    }
+  });
+});
+
+/** The angle between two directions, rad, by atan2 so that it keeps its precision when small. */
+function angleRad(a: Vec3, b: Vec3): number {
+  return Math.atan2(norm(cross(a, b)), dot(a, b));
+}
+
+/** A matcher of `v`, each component to 10⁻¹⁵. */
+function nearVec(v: Vec3): unknown {
+  return {
+    x: expect.closeTo(v.x, 15),
+    y: expect.closeTo(v.y, 15),
+    z: expect.closeTo(v.z, 15),
+  };
+}
+
+describe("the disc's top edge (decision-r10-t9b-penumbra)", () => {
+  /** The Sun's angular radius from 1 au, rad: asin(R☉ ÷ au) (IAU 2015 B3, IAU 2012 B2). */
+  const RHO = Math.asin(6.957e8 / 1.495978707e11);
+
+  it.each([-0.2, 2, 45])(
+    "stands ρ from the sun, of unit length, its elevation e★ + ρ in the sun's azimuth, at e★ = %f°",
+    (elevationDeg) => {
+      const sun = sunOver(BASE_UP, elevationDeg * RAD);
+      const top = discTopDirection(scale(sun, 3), scale(BASE_UP, 0.5), RHO);
+      // The azimuth: the horizontal parts of the two point the same way.
+      const level = (v: Vec3): Vec3 => normalise(sub(v, scale(BASE_UP, dot(v, BASE_UP))));
+      expect([
+        angleRad(top, sun),
+        norm(top),
+        sunElevationRad(top, BASE_UP),
+        dot(level(top), level(sun)),
+      ]).toEqual([
+        expect.closeTo(RHO, 12),
+        expect.closeTo(1, 14),
+        expect.closeTo(elevationDeg * RAD + RHO, 12),
+        expect.closeTo(1, 12),
+      ]);
+    },
+  );
+
+  it("lies in the plane of the sun and the datum's normal, on the normal's side of the sun", () => {
+    const sun = sunOver(BASE_UP, 10 * RAD);
+    const top = discTopDirection(sun, BASE_UP, RHO);
+    const planeNormal = normalise(cross(sun, BASE_UP));
+    // On the normal's side: nearer the normal than the sun, by ρ.
+    expect([dot(top, planeNormal), angleRad(top, BASE_UP)]).toEqual([
+      expect.closeTo(0, 14),
+      expect.closeTo(angleRad(sun, BASE_UP) - RHO, 12),
+    ]);
+  });
+
+  it("is the sun where the sun stands along the datum's normal, at the zenith or the nadir", () => {
+    expect([
+      discTopDirection(scale(BASE_UP, 2), BASE_UP, RHO),
+      discTopDirection(scale(BASE_UP, -1), BASE_UP, RHO),
+    ]).toEqual([nearVec(BASE_UP), nearVec(scale(BASE_UP, -1))]);
+  });
+
+  it("is the sun at ρ = 0, and finite for a grazing sun and a disc of a quarter turn", () => {
+    const sun = sunOver(BASE_UP, 10 * RAD);
+    const grazing = sunOver(BASE_UP, 0);
+    const numbers = [
+      discTopDirection(grazing, BASE_UP, RHO),
+      discTopDirection(grazing, BASE_UP, Math.PI / 2),
+      discTopDirection(sunOver(BASE_UP, -89.999 * RAD), BASE_UP, RHO),
+    ].flatMap(({ x, y, z }) => [x, y, z]);
+    expect(discTopDirection(sun, BASE_UP, 0)).toEqual(sun);
+    expect(numbers.filter((n) => !Number.isFinite(n))).toEqual([]);
+    expect(sunElevationRad(discTopDirection(grazing, BASE_UP, RHO), BASE_UP)).toBeCloseTo(RHO, 12);
+  });
+
+  it("refuses a sun or a normal of zero length, and a ρ outside [0, π ÷ 2]", () => {
+    const sun = sunOver(BASE_UP, 10 * RAD);
+    const zero = { x: 0, y: 0, z: 0 };
+    for (const call of [
+      () => discTopDirection(zero, BASE_UP, RHO),
+      () => discTopDirection(sun, zero, RHO),
+      () => discTopDirection(sun, BASE_UP, -1e-3),
+      () => discTopDirection(sun, BASE_UP, Number.NaN),
+      () => discTopDirection(sun, BASE_UP, 2),
+    ]) {
+      expect(call).toThrow(RangeError);
     }
   });
 });

@@ -68,9 +68,11 @@ export interface TextureHandle {
 
 /**
  * A render target's colour format, or a view's canvas: `canvas` through its `-srgb` view, and
- * `canvas-in-pass` through its own format, for a submission with `encoding` `"in-pass"` (R07.T15).
+ * `canvas-in-pass` through its own format, for a submission with `encoding` `"in-pass"` (R07.T15);
+ * or `depth-only`, a {@link DepthLayerTarget}'s passes, which have a `depth32float` attachment and
+ * no colour target at all (plan R10, R10.T9.b).
  */
-export type RenderTargetFormat = ColourTargetFormat | "canvas" | "canvas-in-pass";
+export type RenderTargetFormat = ColourTargetFormat | "canvas" | "canvas-in-pass" | "depth-only";
 
 /**
  * What a material's pipelines are prepared for ({@link RenderEngine.prepareMaterial}; plan R10,
@@ -116,6 +118,80 @@ export interface IndirectArgs {
   /** Created with `GPUBufferUsage.INDIRECT`. */
   readonly buffer: BufferHandle;
   readonly offsetBytes: number;
+}
+
+/**
+ * A depth-only target of square array layers to create (plan R10, R10.T9.b): the terrain's shadow
+ * cascades, each layer drawn by a pass of its own and the whole sampled as one
+ * `texture_depth_2d_array`.
+ */
+export interface DepthLayersSpec {
+  /** Its name, and its texture's in allocation events. */
+  readonly name: string;
+  /** Texels on a side of each layer, at most the device's `maxTextureDimension2D`. */
+  readonly sizePx: number;
+  /** Array layers, 1 to 256 (WebGPU's default `maxTextureArrayLayers`). */
+  readonly layers: number;
+  /** `shadows` for the cascades. */
+  readonly category: MemoryCategory;
+}
+
+/**
+ * One pass of a {@link DepthLayerTarget}'s render: its draws into one layer, depth only.
+ *
+ * @remarks
+ * The layer is cleared to 0, reversed depth's far, before the draws, and stored. The `Frame` the
+ * draws read is this pass's own, from its matrices and the layers' size, as a
+ * {@link FrameSubmission}'s is: each pass is a submission of its own.
+ */
+export interface DepthLayerPass {
+  /** The pass's label in {@link PassTimes}, stable across frames (R12 keys its records on it). */
+  readonly label: string;
+  /** The layer it draws into, 0 to `layers` − 1. */
+  readonly layer: number;
+  /** As {@link FrameSubmission.viewRotation}: the light's axes, for a cascade. */
+  readonly viewRotation: Float32Array;
+  /** As {@link FrameSubmission.projection}: reversed depth, WebGPU clip space, column-major. */
+  readonly projection: Float32Array;
+  /** Encoded in order, each through its material's pipeline for `depth-only`. */
+  readonly draws: ReadonlyArray<DrawItem>;
+}
+
+/**
+ * A depth-only target of array layers (plan R10, R10.T9.b): one `depth32float` 2D-array texture,
+ * each layer rendered as its own attachment, sampled by later passes as a `texture_depth_2d_array`,
+ * through a comparison sampler ({@link SamplerSpec.compare}) for shadows.
+ */
+export interface DepthLayerTarget {
+  readonly name: string;
+  /** Texels on a side of each layer. */
+  readonly sizePx: number;
+  readonly layers: number;
+  /**
+   * The layers, `depth32float`, with `RENDER_ATTACHMENT` and `TEXTURE_BINDING`, made through the
+   * engine's one creation path under the spec's category. A material binds it with `sampleType`
+   * `depth` and `viewDimension` `2d-array`; the target owns it and releases it at its disposal.
+   */
+  readonly depth: TextureHandle;
+  /**
+   * Encodes and submits every pass, in order, each a submission of its own, and each timed under
+   * its label.
+   *
+   * @remarks
+   * The passes take no resolve of their own: their times ride the engine's next one, as a
+   * dispatch's do, which is the same view's next render's (decision-r10-t9b-design D1). A layer no
+   * pass names keeps what it holds. A render of no passes submits nothing; a disposed target, or
+   * one whose engine was lost or disposed, draws nothing.
+   *
+   * @param owner - The view drawing them, which names their command encoders, and through which the
+   *   views check counts their main-thread time (`<owner>:shadows`).
+   * @throws Error naming the target and the layer for a pass's layer outside 0 to `layers` − 1, or
+   *   a layer two passes name, whose second clear would lose the first's draws.
+   * @throws {@link DepthSelfSample} when a draw samples the target's own depth. Both are checked
+   *   before any pass is encoded, so nothing is submitted.
+   */
+  render(owner: string, passes: ReadonlyArray<DepthLayerPass>): void;
+  dispose(): void;
 }
 
 /** One frame's GPU time per labelled pass. */
@@ -260,11 +336,23 @@ export interface UniformSpec {
 /** A sampler a material or post-process declares. */
 export interface SamplerSpec {
   readonly name: string;
-  /** `linear` binds as a filtering sampler, `nearest` as a non-filtering one. */
+  /**
+   * `linear` binds as a filtering sampler, `nearest` as a non-filtering one; a comparison sampler
+   * binds as `comparison` either way.
+   */
   readonly filter: "nearest" | "linear";
   readonly address: "clamp-to-edge" | "repeat";
   /** Its `@group(2)` binding (Design note 23). */
   readonly binding: number;
+  /**
+   * `greater-equal` makes it a comparison sampler (plan R10, R10.T9.b), declared
+   * `sampler_comparison` and read by `textureSampleCompare` or `textureSampleCompareLevel` from a
+   * texture bound with `sampleType` `depth`: a texel's comparison gives 1 where the reference is at
+   * least the stored depth (under reversed depth, a receiver as near the light as the nearest
+   * caster, or nearer) and 0 elsewhere. With `filter` `linear` the four nearest texels' results
+   * are filtered bilinearly: 2 × 2 PCF.
+   */
+  readonly compare?: "greater-equal";
 }
 
 /** One view: a canvas with its own context and depth, drawn by the engine's one device. */
@@ -368,6 +456,10 @@ export interface DrawItem {
  * `Frame` from `view/shaders/frame.wgsl` included by string concatenation. The two sources may be
  * the same module. A texture bound per draw is a `DrawItem.textures` entry named in
  * {@link WgslMaterialSpec.textures}.
+ *
+ * The one exception to `@location(0)` is a material drawn into a `depth-only` target, a
+ * {@link DepthLayerTarget}'s passes (plan R10, R10.T9.b): its `fragmentMain` writes no location.
+ * Its pipelines have no colour target and keep the fragment stage, so that it may `discard`.
  */
 export interface WgslMaterialSpec {
   readonly name: string;
@@ -397,9 +489,29 @@ export interface WgslMaterialSpec {
   readonly storageBuffers?: ReadonlyArray<StorageBufferSpec>;
   /**
    * Positive is away from the camera, whatever the depth direction (R02's hull occluder faces;
-   * never set on a line pass).
+   * never set on a line pass; the shadow cascades' casters, plan R10, R10.T9.b).
+   *
+   * @remarks
+   * WebGPU's `depthBias` (a whole number of the depth format's least resolvable differences),
+   * `depthBiasSlopeScale` and `depthBiasClamp`, each negated for reversed depth. `clamp`, in depth
+   * units and positive, bounds the bias's size; 0 or absent bounds it not at all.
    */
-  readonly depthBiasAway?: { readonly constant: number; readonly slopeScale: number };
+  readonly depthBiasAway?: {
+    readonly constant: number;
+    readonly slopeScale: number;
+    readonly clamp?: number;
+  };
+  /**
+   * `primitive.unclippedDepth` (plan R10, R10.T9.b): a fragment's depth outside [0, 1] is clamped
+   * to the range rather than the primitive clipped there, so that a caster nearer the light than a
+   * cascade's near plane is still stored, at the near plane ("pancaking").
+   *
+   * @remarks
+   * Only on a device with `depth-clip-control` ({@link GpuCapabilities.depthClipControl});
+   * creating a material with it on any other throws, since there the cascades pull their near
+   * plane back instead (decision-r10-t9-split §5(e) and (g)).
+   */
+  readonly unclippedDepth?: boolean;
 }
 
 /**
@@ -452,7 +564,26 @@ export interface RenderEngine {
   createView(canvas: HTMLCanvasElement, name: string): RenderView;
   /** An offscreen colour target with its own depth: HDR, bloom chains, stills, the harness. */
   createRenderTarget(spec: RenderTargetSpec): RenderTarget;
+  /**
+   * A depth-only target of array layers (plan R10, R10.T9.b): the terrain's shadow cascades, one
+   * set for the engine, drawn again for each view.
+   *
+   * @remarks
+   * As a render target's, its texture belongs to the lost device after a loss, and its owner makes
+   * it again at {@link RenderEngine.onRestored}; `releaseTexture` refuses its depth, which its
+   * disposal releases.
+   *
+   * @throws Error naming the target for a size that is not a whole number of texels from 1 to the
+   *   device's `maxTextureDimension2D`, or a layer count that is not a whole number from 1 to 256.
+   */
+  createDepthLayers(spec: DepthLayersSpec): DepthLayerTarget;
   createMesh(spec: MeshSpec): MeshHandle;
+  /**
+   * A material, its pipelines made as its draws need them.
+   *
+   * @throws Error naming the material and `depth-clip-control` for a material with
+   *   {@link WgslMaterialSpec.unclippedDepth} on a device without that feature.
+   */
   createMaterial(spec: WgslMaterialSpec): MaterialHandle;
   /**
    * Resolves once the material's shaders are compiled and its pipelines for `meshes` into
@@ -462,7 +593,8 @@ export interface RenderEngine {
    * A pipeline depends on the mesh's vertex layout as well; a mesh not named here has its pipeline
    * made asynchronously at its first draw, which is left out until it is ready.
    *
-   * @throws Error, as a rejection, naming the material and the compiler's messages.
+   * @throws Error, as a rejection, naming the material and the compiler's messages; or naming the
+   *   material and `depth-clip-control`, as {@link RenderEngine.createMaterial} throws it.
    */
   createMaterialAsync(
     spec: WgslMaterialSpec,

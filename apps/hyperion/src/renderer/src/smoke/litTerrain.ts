@@ -51,7 +51,12 @@ import {
 } from "../view/terrain/gpu/uniforms";
 import { parentKey, type PatchKey } from "../view/terrain/patchKey";
 import type { BodyFigure } from "../view/terrain/planet";
-import { type TerrainLighting, terrainLitMaterialSpec } from "../view/terrain/terrainMaterial";
+import { createShadowPlaceholder } from "../view/terrain/shadows/terrainShadows";
+import {
+  SHADOW_CASCADES_TEXTURE,
+  type TerrainLighting,
+  terrainLitMaterialSpec,
+} from "../view/terrain/terrainMaterial";
 import type {
   BakedPatch,
   BakeSettings,
@@ -241,11 +246,15 @@ async function drawLit(
   const settings = { ...TERRAIN_SETTINGS[setting], cacheBytes: CACHE_BYTES };
   const resources = new TerrainResources(engine, settings, MOON_LIKE, "lit");
   const air = createAirlessTables(engine, "lit terrain smoke: no air");
+  // No cascades: the lit material binds the placeholder, which it never samples at w = 0
+  // (R10.T9.b).
+  const shadow = createShadowPlaceholder(engine);
   try {
-    return await drawInto(engine, setting, field, resources, air);
+    return await drawInto(engine, setting, field, resources, air, shadow);
   } finally {
     resources.dispose();
     engine.releaseTexture(air.body);
+    engine.releaseTexture(shadow);
   }
 }
 
@@ -256,6 +265,7 @@ async function drawInto(
   field: WorkerFixture,
   resources: TerrainResources,
   air: SurfaceLightingTables,
+  shadow: TextureHandle,
 ): Promise<LitFrames> {
   const settings = TERRAIN_SETTINGS[setting];
   const { layout } = resources;
@@ -418,6 +428,7 @@ async function drawInto(
     resources,
     material,
     air,
+    shadow,
     lit,
     storageBuffers,
     orientation,
@@ -445,6 +456,8 @@ interface LitDraw {
   readonly resources: TerrainResources;
   readonly material: MaterialHandle;
   readonly air: SurfaceLightingTables;
+  /** The shadow cascades' placeholder, which the lit material binds (R10.T9.b). */
+  readonly shadow: TextureHandle;
   readonly lit: { readonly lights: BufferHandle; readonly phaseTable: TextureHandle };
   readonly storageBuffers: Readonly<Record<string, BufferHandle>>;
   readonly orientation: Quaternion;
@@ -460,7 +473,7 @@ async function renderInto(
   target: RenderTarget,
   draw: LitDraw,
 ): Promise<Float32Array> {
-  const { resources, material, air, lit, storageBuffers, orientation, camera } = draw;
+  const { resources, material, air, shadow, lit, storageBuffers, orientation, camera } = draw;
   const { layout } = resources;
   const atlas = normalsAtlasOf(layout);
   target.render({
@@ -486,6 +499,7 @@ async function renderInto(
           normals: resources.normals,
           phaseFactorTable: lit.phaseTable,
           ...surfaceLightingDrawTextures(air),
+          [SHADOW_CASCADES_TEXTURE]: shadow,
         },
         storageBuffers,
         indirect: { buffer: resources.indirect, offsetBytes: 0 },

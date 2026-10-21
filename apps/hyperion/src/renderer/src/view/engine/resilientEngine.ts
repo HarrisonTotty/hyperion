@@ -24,6 +24,8 @@ import type {
   BufferHandle,
   ComputeBindings,
   ComputeHandle,
+  DepthLayersSpec,
+  DepthLayerTarget,
   DepthPolicy,
   FrameSubmission,
   IndirectArgs,
@@ -202,6 +204,16 @@ export class ResilientEngine implements RenderEngine {
 
   createRenderTarget(spec: RenderTargetSpec): RenderTarget {
     return this.#current("createRenderTarget").createRenderTarget(spec);
+  }
+
+  /**
+   * The current engine's depth-layer target (plan R10, R10.T9.b), which dies with its device as a
+   * render target does: after a loss it draws nothing, and its owner makes it again at the restore.
+   *
+   * @throws {@link EngineUnavailable} while there is no device.
+   */
+  createDepthLayers(spec: DepthLayersSpec): DepthLayerTarget {
+    return this.#current("createDepthLayers").createDepthLayers(spec);
   }
 
   createMesh(spec: MeshSpec): MeshHandle {
