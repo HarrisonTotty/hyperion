@@ -107,7 +107,9 @@ pub const DEFAULT_SYSTEM_CACHE_MIB: usize = 128;
 pub const DEFAULT_BODY_CACHE_MIB: usize = 128;
 /// The brief cache's budget when `--brief-cache` is not given, in MiB (plan 06, P06.T34): some
 /// 25,000 main-sequence rows at about 2.5 kB each, or 2,000–2,500 dead ones, whose model holds a
-/// full track, at 25–35 kB (P06.T38.e's measurement).
+/// full track, at 25–35 kB (P06.T38.e's measurement), or some 700 paired ones, whose model holds
+/// its system's stars and timelines, at 87–110 kB on average (P11.T11.a's measurement; 5% of the
+/// rows near the Sun, 18–63% in the bulge).
 pub const DEFAULT_BRIEF_CACHE_MIB: usize = 64;
 /// The extinction map cache's budget when `--extinction-map-cache` is not given, in MiB (plan 07,
 /// P07.T10.a): every view at every resolution of one galaxy, 128 to 1,024 pixels across and the

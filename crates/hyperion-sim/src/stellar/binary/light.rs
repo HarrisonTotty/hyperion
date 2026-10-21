@@ -307,6 +307,57 @@ pub fn pair_light_bound(
     pair_light_bound_over([a..=a, b..=b], periastron_min, composition, ages)
 }
 
+/// Whether the pair of stars of initial masses `a` and `b`, of drawn periastron `periastron_min`
+/// and `composition`, certainly leaves each of its stars its own single-star model through the
+/// window of its `ages`, and certainly falls into no carved class by their end, which would have
+/// its system redrawn (plan 11, P11.T11.a; `decision-observed-class-findings.md` §A.2): the range
+/// brief's gate, with `ages` the system's ages over the clock window, the last its age at +H.
+///
+/// It holds where [`pair_light_bound`] answers [`PairLight::Detached`] over `ages`, so that the
+/// pair cannot interact by their end and no star of it can have died suddenly, and the reach table
+/// finds that at most one of its two stars may have left its main sequence by then.
+///
+/// - **Neither star off its main sequence:** neither holds a remnant, and the pair cannot
+///   interact, so `SystemStars`' `run_pairs` does not run it at all.
+/// - **One star off it:** `run_pairs` runs the pair for that star's remnant, as one detached
+///   segment of its two models ([`evolve`](super::evolve)'s pre-test gate). With no merger, no
+///   transfer and no neutron star or black hole by then, the only carved classes such a segment
+///   could show are a white dwarf fed by its companion's wind, which the classifier finds only for
+///   a giant's wind, and the other star stays on its main sequence.
+///
+/// Two stars that may both have left their main sequences could make a white dwarf and a giant,
+/// a wind-fed symbiotic star, which is carved: such a pair, or one that is not `Detached`, is
+/// refused. `false` also where the reach table does not reach (a mass below 0.08 M☉, or an age
+/// past its last bin).
+#[must_use]
+pub(crate) fn pair_keeps_own_models(
+    a: SolarMasses,
+    b: SolarMasses,
+    periastron_min: Metres,
+    composition: &Composition,
+    ages: RangeInclusive<Years>,
+) -> bool {
+    let until = ages.end().value().max(0.0);
+    // Only `Detached` says the pair cannot have interacted; a verdict added later certifies only
+    // once it is weighed here.
+    match pair_light_bound(a, b, periastron_min, composition, ages) {
+        Some(PairLight::Detached) => {}
+        Some(PairLight::Unchanged | PairLight::Remnants | PairLight::Bright(_)) | None => {
+            return false;
+        }
+    }
+    let fe_h = fe_h_of(composition);
+    let table = ReachTable::generator();
+    let mut evolved = 0_u8;
+    for m in [a.value(), b.value()] {
+        let Some(reach) = table.bound(m, m, fe_h, until) else {
+            return false;
+        };
+        evolved += u8::from(reach.may_hold_core());
+    }
+    evolved <= 1
+}
+
 /// [`pair_light_bound`] over every pair whose initial masses lie in `masses`, each interval its
 /// ends included: what it answers holds for each such pair. An interval whose start lies above
 /// its end is `None`. The tables are read for exact masses only, so a pair of intervals of some
@@ -647,6 +698,52 @@ mod tests {
         for (p, age) in [(5.0, 1.0e9), (0.3, 3.0e9), (40.0, 1.3e10)] {
             assert_eq!(solar(1.0, 0.6, p, age), solar(0.6, 1.0, p, age));
         }
+    }
+
+    /// The range brief's gate (P11.T11.a) keeps a `Detached` pair with at most one star that may
+    /// have left its main sequence by the window's end, and refuses a pair that is not
+    /// `Detached`, one whose two stars may both have evolved (a white dwarf fed by a giant's wind
+    /// is a symbiotic star, which is carved), and a mass the reach table does not hold. Along a
+    /// pair of 3 and 2.5 M☉ 10⁴ au apart, ages are found where one star and where both may have
+    /// evolved while the pair stays `Detached`.
+    #[test]
+    fn the_gate_keeps_a_pair_only_while_it_can_neither_change_nor_be_carved() {
+        let keeps = |a: f64, b: f64, au: f64, age: f64| {
+            pair_keeps_own_models(
+                SolarMasses::new(a),
+                SolarMasses::new(b),
+                Metres::new(au * AU_M),
+                &Composition::SOLAR,
+                Years::new(age)..=Years::new(age),
+            )
+        };
+        let fe_h = fe_h_of(&Composition::SOLAR);
+        let evolved = |m: f64, age: f64| {
+            ReachTable::generator()
+                .bound(m, m, fe_h, age)
+                .expect("inside the reach table")
+                .may_hold_core()
+        };
+        assert!(keeps(1.0, 0.6, 2_000.0, 1.0e9));
+        assert!(!keeps(1.0, 0.6, 0.04, 9.0e9));
+        assert!(
+            !keeps(1.0, 0.05, 2_000.0, 1.0e9),
+            "below the table's 0.08 M☉"
+        );
+        let (mut one, mut both) = (false, false);
+        for k in 0..60 {
+            let age = 1.0e8 * crate::math::powi(1.06, k);
+            let off = u8::from(evolved(3.0, age)) + u8::from(evolved(2.5, age));
+            let detached = solar(3.0, 2.5, 1.0e4, age) == Some(PairLight::Detached);
+            assert_eq!(
+                keeps(3.0, 2.5, 1.0e4, age),
+                detached && off <= 1,
+                "at {age} yr"
+            );
+            one |= detached && off == 1;
+            both |= detached && off == 2;
+        }
+        assert!(one && both, "one star evolved {one}, both {both}");
     }
 
     /// A wider orbit, an earlier age and narrower mass intervals only bring a pair into

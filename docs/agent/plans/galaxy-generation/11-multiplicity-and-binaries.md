@@ -228,7 +228,8 @@ impl SystemStars {
     pub fn system_mass_at(&self, t: UniverseTime) -> SolarMasses;
     pub fn recoil(&self) -> Option<SystemVelocity>;          // the pair's, after a low-mode kick
 }
-// `summary_at` and `brief_at` (plan 06) now cover all stars; `SystemSummary` gains
+// `summary_at` and `brief_at` (plan 06) now cover all stars: `brief_at` is the primary's state as
+// the system's summary gives it (P11.T11.a); `SystemSummary` gains
 // `hierarchy: HierarchySummary`, and `StarSummary` gains `binary_class: BinaryClass`.
 pub struct MultiplicityFates<F: StellarFates>(/* wraps plan 06's fates */); // plan 02's seam
 ```
@@ -1476,6 +1477,31 @@ Acceptance: `cargo test -p hyperion-sim stellar::system`.
 
 _As built (round 9c, `bin5b`; output moves, its bump batched into version 16): see Risks,
 "Deviations in P11.T11, as built"._
+
+- **P11.T11.a The range rows read the pair** (ruling `decision-observed-class-findings.md` §A,
+  2026-10-21; a blocker: in now mode a primary its pair has changed read one class in its range
+  row and another in the summary, on one screen; no version of its own). Plan 06's brief model
+  first decides, by a gate, whether the system's primary is certainly its own single-star model
+  through the whole clock window: a single system, or one whose first redraw attempt holds no pair
+  of two stars that the binary engine can run so as to change its stars or carve it
+  (`pair_light_bound` `Detached`, and no second star off its main sequence). A certified system
+  keeps plan 06's routes bit for bit; every other takes a new `BriefRoute::Paired`, which holds the
+  system's `SystemStars` and reads their brief. `SystemStars::brief_at` takes the body of plan 12's
+  `summary_brief_at`, which goes, so that one public brief remains; the row keeps the first
+  attempt's star count (P11.T7).
+  - **Files:** `stellar/brief.rs`, `stellar/system.rs`, `stellar/binary/light.rs`,
+    `stellar/multiplicity/bound.rs` and `hierarchy.rs`, the callers in `observe/`, the server's
+    cache docs (`compute/systems.rs`, `config.rs`), the tests and benches named in the as-built,
+    and `stellar/briefs.golden` and the server's `systems_in_range_briefs.golden` re-blessed at
+    version 22 with no bump (the ruling's §A.4).
+  - **Tests:** a now row is the summary's primary for stripped, merged and fed primaries before,
+    during and after their change, and for LOOK72's 820E6EE00000008D and 822C72E00000008C; every
+    row the gate certifies is its primary's own model at the times sampled; a certified row is its
+    single-star brief bit for bit; the retargeted tests of §A.2.4.
+  - **Acceptance:** §A.3: the gate at most 5 µs a row on average, the 50 ly Sun-like query's briefs
+    cold at most 300 ms on one thread (ceiling 500 ms), warm at most 1.5 µs a row; the commands
+    are in the as-built.
+  - _As built: see Risks, "P11.T11.a as built"._
 
 ### P11.T12 Statistical suite
 
@@ -3110,12 +3136,15 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
     single star is never in a class, so the grid half of complementarity stays exact, and moving
     one period would need the engine run again with no guarantee. Unreachable in expectation
     (below 10⁻²⁸ a system at the measured carve rates).
-  - _The brief's count._ The range brief (`draw_star_count`, P06.T38.e) runs no engine and reads
-    attempt 0, and `SystemStars::brief_at` reports the same first attempt's count, so that a row is
-    the same whichever built it. For a redrawn system whose kept attempt has another star count the
-    row then disagrees with the summary and `SystemStars::star_count`, about half of the redrawn
-    systems. **For the orchestrator to rule:** accept, or have the brief evolve the pairs of a
-    multiple system (the engine for every multiple row).
+  - _The brief's count._ The range brief (`draw_star_count`, P06.T38.e) ran no engine and read
+    attempt 0, and `SystemStars::brief_at` reported the same first attempt's count, so that a row
+    was the same whichever built it. For a redrawn system whose kept attempt has another star count
+    the row then disagrees with the summary and `SystemStars::star_count`, about half of the
+    redrawn systems. **Ruled 2026-10-21** (`decision-observed-class-findings.md` §A.2, item 2;
+    P11.T11.a): the row keeps the first attempt's count, the engine runs only for the rows whose
+    pair can have changed their primary, and every redrawn system is among them, so its row reads
+    the kept system's primary with attempt 0's count. `SystemStars::brief_at`, the one brief, now
+    counts the kept attempt's stars.
   - _`tables/binary.rs`_ holds `ClassShareTable`, `ClassShareRow` and the scratch `CLASS_SHARES`
     (Design note 13): the same hosts per solar mass formed in every population, scaled to the Milky
     Way fixture's formed mass, `MILKY_WAY_FORMED_MASS` = 9.376 × 10¹⁰ M☉ (its components' born
@@ -3171,10 +3200,14 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
     in the list as plan 06's `NoRemnant`, so the list keeps its length. The hierarchy in the
     summary is the drawn one; `state_at` has the orbits then. The server sends `binary_class`
     (`null` for none); the client's `BINARY CLASSES: NOT YET MODELLED` state gives way to `NONE`.
-  - _The brief_ (`brief_at`, and the range brief) keeps the primary's single-star state, so that a
-    range row is the same whichever built it and the range brief stays free of the engine. A
-    primary that its pair has changed (an Algol's donor, a merger product) reads so in the summary
-    only. **For the orchestrator to rule.**
+  - _The brief_ (`brief_at`, and the range brief) kept the primary's single-star state, so that a
+    range row was the same whichever built it and the range brief stayed free of the engine. A
+    primary that its pair has changed (an Algol's donor, a merger product) read so in the summary
+    only. **Ruled 2026-10-21** (`decision-observed-class-findings.md` §A, a blocker: a row and the
+    summary showed different classes on one screen): the brief must read the pair. P11.T11.a
+    certifies the rows whose primary is certainly its own model, which keep plan 06's routes bit for
+    bit, and runs the engine for every other (`BriefRoute::Paired`); `SystemStars::brief_at` is the
+    summary's primary. See "P11.T11.a as built".
   - _The tidal radius and census fields._ `planetary::context` already reads the tidal radius at
     the hierarchy's system mass; plan 03's frame rule keeps the primary's mass, as it must before
     any hierarchy is drawn, which the tidal cut's half share covers. The bright exception is
@@ -5244,3 +5277,174 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     keeps only systems with no carved pair: at the measured redraw rate that moves the count by
     about 0.2σ at most (this lane's science-checker).
   - The slow test passes by name (`--cargo-profile slow-test --run-ignored only`).
+- **P11.T11.a as built** (lane p11-rows, 2026-10-21, at version 22 with no bump;
+  `decision-observed-class-findings.md` §A). Range rows in now mode read the pair: a row's class
+  is the summary's. The record, the summaries and the timelines do not move; only the brief's read
+  path and its two goldens do (§A.4's exception, named in the commit).
+  - **Built:**
+    - `stellar/brief.rs`: the gate (`gate`, private, returning the first attempt's star count
+      and whether the primary is certified) runs first in every constructor (`new`, `with_fates`,
+      `of_member`, and so `of_record` and `range_brief`). A certified system keeps
+      `MainSequence`, `Table` and `Exact` unchanged; every other takes `BriefRoute::Paired`,
+      which holds `Box<SystemStars>` (`generate_with` at the model's composition and context:
+      `SystemStars::generate` for a grid record, `MemberRecord::stars` for a member) and answers
+      its `brief_at` with the model's star count (`StellarBrief::with_star_count`,
+      crate-private). `heap_bytes` counts `SystemStars::heap_bytes`, which the server's
+      `SharedBriefCache` charges as before. `BriefModel::certifies(galaxy, record)` (public) is
+      the gate alone, for its bench. Plan 06's `stellar::brief` Provides gains `BriefRoute::Paired`
+      and `BriefModel::certifies`.
+    - `stellar/multiplicity/hierarchy.rs`: `drawn_single` (crate-private), the count words'
+      test with which `draw_star_count` already began, now shared. A system drawn single is
+      certified with a count of 1 and no hierarchy; any other has its first attempt drawn once,
+      by `first_attempt`, for its count (`draw_star_count`'s, which the tests compare) and its
+      pairs at once, where the first build drew it twice.
+    - `stellar/multiplicity/bound.rs`: `first_attempt` (crate-private), the bound's own attempt 0
+      (a shared `attempt_at`, so its draw is `hierarchy_bound`'s first, bit for bit; tested).
+    - `stellar/binary/light.rs`: `pair_keeps_own_models` (crate-private), the gate's test of one
+      pair: `pair_light_bound` is `Detached` over the system's ages from the window's start to its
+      end, and the reach table's cores column says at most one of the two stars may have left its
+      main sequence by then. The ages end at the age at +H, to which `run_pairs` runs, so the
+      bound's `RUN_HORIZON_PAST_WINDOW_YEARS` contract (the age at +H at most 2H + L past their
+      end) holds at zero, with its whole margin to spare.
+    - `stellar/system.rs`: `SystemStars::brief_at` has the body of plan 12's `summary_brief_at`
+      (the summary's primary, the kept attempt's count), which goes; its callers in `observe/`
+      read `brief_at`. The `first_star_count` field goes with it, since nothing reads it now, and
+      so does its test, `the_summary_brief_counts_the_kept_stars`: the one brief counts the kept
+      stars by construction.
+  - **The gate, and two deviations from §A.2's item 1.**
+    - _"`hierarchy_bound` lists attempt 0 alone" is read as its stated meaning, "the system cannot
+      be redrawn"._ `hierarchy_bound` lists attempt 1 whenever attempt 0 holds any pair of two
+      stars (`AttemptBound::may_carve` is that coarse), so the literal test certifies no grid
+      system with a pair of two stars, only those whose companions are brown dwarfs, and of the
+      ruling's examples a triple's outer star never: of the gate test's 400 systems a layer near
+      the Sun, 29% (A) to 88% (E) are multiple. The gate shows instead that attempt 0 cannot be
+      carved. A pair `run_pairs` does not run cannot be carved; a `Detached` pair it runs only for
+      a remnant is one detached segment of its two models (`evolve`'s pre-test), with no merger,
+      no transfer and, `Detached` ruling out a sudden death, no neutron star or black hole, so the
+      only carved class it could show is a white dwarf fed by its companion's wind
+      (`CarvedClass::AccretingWd*`), which the classifier finds only for a giant's wind
+      (`pair_class`), and so only once both stars have left their main sequences. Hence the
+      clause "at most one star may have left its main sequence by the window's end", which the
+      ruling does not have. For a grid system every pair of attempt 0 must pass, since a carved
+      one has the system redrawn and the primary may sit in another pair at the attempt kept;
+      then attempt 0 is kept and its count is the kept one. Only attempt 0 is drawn, not
+      `hierarchy_bound`'s later attempts.
+    - _A system the grid does not redraw_ (a feature member) is certified when the primary's own
+      pair passes the same test, where the ruling takes `Detached` alone: one rule for both, and
+      stricter, which costs time only.
+    - Every redrawn system is paired, since its attempt 0 is carved and so holds a pair the gate
+      refuses. The row keeps the first attempt's count on every route (§A.2, item 2), which
+      differs from the summary's only for those systems (plan 11's P11.T7 deviation, now ruled):
+      the server's FPG 0Z0B00 E-55 (`systems_in_range.rs`) counts 2 in its row and 3 in its
+      summary. `carve.rs`'s CARVED record counts 2 at both attempts, so its test cannot tell the
+      two counts apart.
+  - **Shares** (`stellar::brief`'s `the_gate_is_conservative`, the Milky Way fixture): paired
+    rows near the Sun, of 400 systems a layer, A 0, B 2, C 61, D 221, E 349; in the bulge, of 150,
+    A 0, B 2, C 30, D 79, E 131. Certified multiples near the Sun: A 117 of 117, B 170 of 172, C
+    152 of 213, D 48 of 269, E 1 of 350. Paired rows of the benches' queries: the 50 ly Sun-like
+    query 45 of 917 (4.9%), the thick disc's 200 ly 211 of 3,704 (5.7%), the bulge's 50 ly 1,380
+    of 2,206 (62.6%; at the default census limit only layers D and E are admitted there) and the
+    bulge at the 20,000-row cap 3,043 of 16,746 (18.2%).
+  - **Tests.**
+    - New: `stellar_briefs.rs`'s `now_rows_read_the_pair_before_during_and_after_it_changes_the_primary`
+      (two stripped and two merged primaries of layer E near the solar circle, and the only two
+      primaries of 4,000 layer-E systems that their companions feed on the main sequence,
+      `REJUVENATED`, after a case-A mass-ratio reversal, each re-aged so that the epoch falls
+      5,000 years before the change, in its middle and 20,000 years after it; at both ends of the
+      window and the epoch each row is its summary's primary, bit for bit, and paired during and
+      after) and `certified_rows_are_their_single_star_briefs` (every certified row of 300 random
+      systems is the brief of its primary alone, bit for bit, the table's its kind and class);
+      `observe_brief.rs`'s `look72_now_rows_read_the_pair`, run by its
+      `observed_rows_and_summaries_read_one_state` (820E6EE00000008D and 822C72E00000008C of
+      LOOK72 at full potential, re-aged to the first age at which the pair has made the primary
+      another class, or changed it at all: a paired model whose rows at both ends of the window and
+      the epoch are the summary's, the stripped one no longer its single-star class);
+      `brief.rs`'s `the_gate_is_conservative` (400 systems of each layer near the Sun and 150 in
+      the bulge: every certified system keeps attempt 0 and its primary is its own model at the
+      window's ends, the epoch, a random time and 200,000 years before, and its row is its full
+      brief and its single-star brief bit for bit; `certifies` is the route's); `light.rs`'s
+      `the_gate_keeps_a_pair_only_while_it_can_neither_change_nor_be_carved`; `bound.rs`'s
+      `the_first_attempt_is_the_bounds_attempt_0`.
+    - Retargeted to the pair-aware brief (§A.2, item 4): `briefs_are_the_full_systems_over_random_systems`
+      and the 3 × 10⁴ slow test (now also at ±H; the count against `draw_star_count`), which
+      passes by name in 246 s with 24,940 table rows inside their stated error; `briefs_are_pinned`;
+      `BriefModel`'s and `SystemStars::brief_at`'s doc examples; `members.rs`'s route test (a
+      binary neutron-star member takes the paired route); `carve.rs`'s redrawn record (paired, its
+      row counting attempt 0's stars and its brief the kept attempt's); the server's
+      `a_range_request_with_include_stellar_returns_a_brief_on_every_row` and
+      `systems_in_range.rs`'s `assert_briefs_are_the_sims`, which now check the count against
+      attempt 0's. `stellar_system.rs`'s `companions_move_no_primary` compares a primary's brief
+      with its lone self only where no pair holds it.
+    - _Departures from §A.2's item 4._ Only `check_briefs` (300 systems and the slow test), the
+      gate test and the new tests sample both ends of the window, the epoch and random times:
+      `briefs_are_pinned` keeps its golden's −500, 0 and +500 years, `members.rs`'s test and the
+      doc examples the epoch, and the server's tests their query's time, since goldens and wire
+      tests are pinned at fixed times and `check_briefs` covers ±H. The order and cache tests are
+      extended where the ruling kept them unchanged: `a_model_does_not_depend_on_what_was_asked_before`
+      runs all 180 of its records rather than 40 and requires every route, the server's
+      `a_brief_model_is_built_once_and_every_cache_answers_the_same` adds a paired system of
+      layer C, and their assertions are unchanged.
+    - **Acceptance** (all green on the gated tree), with `cargo nextest run`:
+      - `-p hyperion-sim --lib`, filtered to `stellar::brief`, `stellar::binary::light`,
+        `stellar::multiplicity::bound`, `stellar::binary::carve` and `galaxy::features::members`;
+      - `-p hyperion-sim --test stellar_briefs --test observe_brief --test stellar_system`;
+      - `-p hyperion-server --lib`, filtered to `compute::systems` and `convert`, and
+        `-p hyperion-server --test systems_in_range`;
+      - the slow test by name: `--test stellar_briefs --run-ignored only`, filtered to
+        `briefs_are_the_full_systems_over_thirty_thousand_systems`.
+  - **Goldens** (blessed by name, main's go, 2026-10-21; `golden_diff.py`: only these two move,
+    and its "not bumped" verdict is §A.4's exception):
+    - `stellar/briefs`: three pinned systems go from `Table` to `Paired`: layer C's DA9.2 white
+      dwarf and layer E's NS neutron star, both of two stars, whose log L and `T_eff` move within
+      the table's stated error (the paired route is exact, and their pairs have not changed them),
+      and layer E's black hole of four stars, which does not move. Classes and counts unchanged.
+    - `systems_in_range_briefs`: 19 of 51 rows, all paired (checked with a probe), each now its
+      summary's primary: FPF 1Z0P1Z D-35 DA9.7, FPG 1Z0P00 D-27 DQ7.1 → DQ6.0, GPF 000P1Z D-2
+      DC7.5, FPG 1Z0P00 D-6 DB2.4 → DB2.2, FPF 1Z0N1Z D-4 DA8.6, GPF 000P1Z D-12 DC9.4,
+      GPF 000N1Z D-38 DA7.9, FPG 1Z0P00 D-12 DC10.1, GPF 000N1Z D-6 DC33.7 → NS (an ONe white
+      dwarf of 1.36 M☉ alone, a 1.20 M☉ neutron star in its pair), GPG 000N00 D-30 DA7.0,
+      FPG 1Z0P00 D-29 DC35.1 → NS (an ONe white dwarf of 1.19 M☉ alone), FPG 1Z0P00 D-22 DA3.8,
+      FPG 1Z0P00 D-3 DA9.0 → DA8.9, GPG 000P00 D-24 DC10.5 → DC10.4, GPF 000N1Z D-36 DA2.9 → NS
+      (a CO white dwarf of 1.12 M☉ alone, a 1.45 M☉ neutron star in its pair), FPF 0Z0B0Z E-23
+      NS, FPG 1Z0P00 D-19 DC7.8, GPG 000P00 D-19 DC9.7 → DC8.5, GPF 000P1Z D-19 DC11.2 →
+      DC11.0. Thirteen are primaries the pair changed; six are unchanged primaries that move
+      from the table's approximation to the exact state. Every star count is unchanged.
+  - **Cost** (§A.3; `benches/stellar.rs`, its groups `stellar/briefs` and
+    `stellar/briefs_elsewhere`, one thread under the heavy lock in main's quiet window 9, load 2,
+    2026-10-21; the Milky Way fixture's 50 ly query about the Sun-like point, 917 rows):
+    - _The gate:_ **0.28 µs a row** over what every row read before it (the gate alone 4.93 ms
+      for the query, its metallicity and first attempt's count alone 4.67 ms), against the bound of
+      5 µs. The first build drew a multiple's hierarchy twice and cost 9.9 µs a row in all (window
+      8); drawing it once (`drawn_single`, then `first_attempt` for the count and the pairs) is what
+      brought it under.
+    - _Cold:_ **304.6 ms**, against the target of 300 ms (missed by 1.5%) and the ceiling of 500 ms
+      (held). Every row's `SystemStars` with the engine, as observed mode builds them, is 350.9 ms
+      on the same run: the 45 paired rows (4.9%) carry most of it, as §A.3 expected. Recorded, not
+      a hold (the 2026-10-20 rule).
+    - _Warm:_ **0.89 µs a row** (818.6 µs for the query), against the bound of 1.5 µs.
+    - _Heap bytes of a paired model_ (`size_of::<BriefModel>()` + `heap_bytes`), on average: 94.6 kB
+      in the 50 ly query, 90.9 kB in the thick disc's, 109.5 kB in the bulge's and 87.2 kB at the
+      cap; the server's 64 MiB brief cache holds some 700 of them.
+    - _Recorded, not bounded_ (`stellar/briefs_elsewhere`): the thick disc's 200 ly query (3,000 ly
+      above the Sun-like point, 3,704 rows, 5.7% paired) 1.17 s cold, 505 ms per 1,600 rows
+      against P06.T38.e's 29 ms; the bulge's 50 ly query (2,000 ly out, 300 ly above the plane, at
+      the default census limit, which admits only layers D and E there: 2,206 rows, 62.6% paired)
+      **9.75 s cold, 7.07 s per 1,600 rows against P06.T38.e's 148 ms, past the 3 times §A.3 asks
+      to be told of (main was told, 2026-10-21)**; the bulge at the 20,000-row cap (16,746 rows,
+      18.2% paired) 15.0 s on one thread, about 2.1 s over the pool's seven workers, against
+      1.8 s before on one thread. A paired bulge row costs some 7 ms: its dead primary's full
+      track to its death, its companions' and the engine, where the table route needed none.
+  - **Not done:** the cost levers of §A.3 item 5 (narrowing the paired build to the primary's
+    pair; sharing `SharedSystemCache`), since the 50 ly query's ceiling holds; they are the levers
+    for the bulge (below). The lens-mass ruling (`first_attempt_models`) stays open, as §A.2
+    item 5 says. Stale text outside this lane's files, reported to main: `sky/census/cell.rs`'s
+    module doc and R06's plan (`06-the-sky.md`) still call the brief the primary's single-star
+    model, which it now is only where the gate certifies it.
+  - **Deferred findings (2026-10-20 rule).**
+    - The three white dwarfs the server's golden now shows as neutron stars are the engine's: an
+      ONe white dwarf grown to its collapse by accretion is a known channel (accretion-induced
+      collapse); a 1.12 M☉ CO white dwarf ending as a neutron star rather than a Type Ia is less
+      usual, and is the summary's already. For P15's review of the engine's white-dwarf channels.
+    - A main-sequence primary fed by its companion is rare in the engine: two of 4,000 layer-E
+      systems near the solar circle, both after a case-A reversal; the primary's accretion is
+      otherwise onto a remnant or a helium star.

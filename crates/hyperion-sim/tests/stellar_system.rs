@@ -230,9 +230,10 @@ fn summaries_are_pinned() {
 }
 
 /// Plan 11's companions move no primary (P11.T2.c): the primary of each system the summaries golden
-/// pins is plan 06's model, built from the record alone, with plan 06's death, and its brief and,
-/// unless the binary engine ran it in a pair (P11.T11), its summaries at the pinned times are the
-/// same, bit for bit, as those of the system with its companions ruled out.
+/// pins is plan 06's model, built from the record alone, with plan 06's death, and unless the
+/// binary engine ran it in a pair (P11.T11) its summaries and its brief at the pinned times are the
+/// same, bit for bit, as those of the system with its companions ruled out. A paired primary's
+/// brief is its summary's since P11.T11.a.
 #[test]
 fn companions_move_no_primary() {
     let galaxy = milky_way();
@@ -260,14 +261,15 @@ fn companions_move_no_primary() {
                 continue;
             };
             let paired = stars.pairs().iter().any(|p| p.stars()[0].get() == 0);
-            if !paired {
-                assert_eq!(a, b, "{:?} at {y} yr", record.id());
-                // Every field the golden writes, by its bits.
-                let (mut wa, mut wb) = (GoldenWriter::new(), GoldenWriter::new());
-                write_star(&mut wa, "  ", a);
-                write_star(&mut wb, "  ", b);
-                assert_eq!(wa.as_str(), wb.as_str(), "{:?} at {y} yr", record.id());
+            if paired {
+                continue;
             }
+            assert_eq!(a, b, "{:?} at {y} yr", record.id());
+            // Every field the golden writes, by its bits.
+            let (mut wa, mut wb) = (GoldenWriter::new(), GoldenWriter::new());
+            write_star(&mut wa, "  ", a);
+            write_star(&mut wb, "  ", b);
+            assert_eq!(wa.as_str(), wb.as_str(), "{:?} at {y} yr", record.id());
             let brief = |s: &SystemStars| {
                 let mut w = GoldenWriter::new();
                 if let Some(b) = s.brief_at(years(y)) {

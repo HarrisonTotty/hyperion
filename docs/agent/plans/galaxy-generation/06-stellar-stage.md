@@ -2018,7 +2018,13 @@ Option<StarState>`, `None` unless the star is on a knot-free main sequence at `a
     to the exact path wherever they could differ. Only the primary is built and only the tags the
     brief reads are opened; the star count comes from the hierarchy (a count-only path, tested
     equal to `star_count()`, if T38.a finds the hierarchy dominant). A system where plan 11's
-    `can_interact` holds, once P11.T4 exists, routes exact.
+    `can_interact` holds, once P11.T4 exists, routes exact. _Amended by plan 11's P11.T11.a_
+    (`decision-observed-class-findings.md` §A): the router no longer runs without the binary
+    engine everywhere. A gate first certifies the primary as its own single-star model through the
+    window (a single system, or one whose first attempt's pairs cannot change its stars or be
+    carved); those rows take the routes here, bit for bit, and every other row takes
+    `BriefRoute::Paired`, the system's `SystemStars` with the engine, whose brief is the summary's
+    primary.
   - **Provides:** `stellar::brief::{BriefModel, range_brief}`.
   - **Files:** `stellar/brief.rs` (new), `stellar/mod.rs`, `stellar/system.rs` (the shared
     `object_kind` and `classify` call), `tests/golden/stellar/briefs.golden`.

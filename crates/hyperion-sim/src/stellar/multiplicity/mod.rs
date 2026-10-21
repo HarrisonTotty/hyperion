@@ -43,6 +43,7 @@ mod substellar;
 #[cfg(test)]
 pub(crate) mod testing;
 
+pub(crate) use bound::first_attempt;
 pub use bound::{AttemptBound, BoundPair, HierarchyBound, hierarchy_bound};
 pub use dist::{
     CIRCULARISATION_PERIOD, ECCENTRICITY_ENVELOPE_PERIOD, EccentricityDistribution, LOG_PERIOD_MAX,
@@ -50,6 +51,7 @@ pub use dist::{
     PeriodDistribution,
 };
 pub use fates::{COMPANION_LAW_LN_RATIO_STEP, CompanionLaw, MultiplicityFates};
+pub(crate) use hierarchy::drawn_single;
 #[cfg(test)]
 pub(crate) use hierarchy::hand_built;
 pub use hierarchy::{

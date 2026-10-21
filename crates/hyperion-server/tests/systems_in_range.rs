@@ -30,8 +30,9 @@ use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::math;
 use hyperion_sim::stellar::ObjectKind;
 use hyperion_sim::stellar::brief::BriefModel;
+use hyperion_sim::stellar::multiplicity::{RedrawAttempt, draw_star_count};
 use hyperion_sim::stellar::photometry::{absolute_bolometric_magnitude, bolometric_correction_v};
-use hyperion_sim::stellar::system::{SystemStars, draw_metallicity};
+use hyperion_sim::stellar::system::{SystemStars, draw_metallicity, grid_multiplicity};
 use hyperion_sim::units::consts::{
     EARTH_MASS_KG, JUPITER_MASS_KG, METRES_PER_LIGHT_YEAR, SOLAR_MASS_KG,
 };
@@ -1204,7 +1205,8 @@ fn wire_kind(kind: ObjectKind) -> ObjectKindDto {
 }
 
 /// Every row of `answer` carries its system's brief at `time`, the sim's range brief, with the
-/// full system's kind and class, and the rows are otherwise those of `bare`, the same query without briefs.
+/// full system's kind and class and the first redraw attempt's star count, and the rows are
+/// otherwise those of `bare`, the same query without briefs.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "the wire's f32s are the sim's f64s rounded, which is what is checked"
@@ -1227,8 +1229,9 @@ fn assert_briefs_are_the_sims(
         );
         let id = SystemId::from_raw(row.id.to_u64()).expect("a system ID");
         let record = resolve(galaxy, id).expect("a system of the galaxy");
-        // The row's brief is the sim's range brief, whose route is exact but for a dead star the
-        // fate table answers; that one has the full system's kind and class (ruling 90.4).
+        // The row's brief is the sim's range brief, the system's summary's primary (P11.T11.a),
+        // whose route is exact but for a dead star the fate table answers; that one has the full
+        // system's kind and class (ruling 90.4).
         let expected = BriefModel::new(galaxy, &record)
             .brief_at(time)
             .expect("every system returned has formed");
@@ -1236,15 +1239,20 @@ fn assert_briefs_are_the_sims(
             .brief_at(time)
             .expect("every system returned has formed");
         assert_eq!(
-            (
-                expected.kind(),
-                expected.class().to_string(),
-                expected.star_count()
-            ),
-            (full.kind(), full.class().to_string(), full.star_count()),
+            (expected.kind(), expected.class().to_string()),
+            (full.kind(), full.class().to_string()),
             "{}",
             row.designation
         );
+        // The row counts the first attempt's stars, the kept count but for a system the grid
+        // redrew (plan 11's Risks, "Deviations in P11.T7, as built"), which the full brief counts.
+        let first = draw_star_count(
+            galaxy,
+            &record,
+            grid_multiplicity(&record),
+            RedrawAttempt::FIRST,
+        );
+        assert_eq!(expected.star_count(), first, "{}", row.designation);
         let brief = row.stellar.as_ref().expect("a brief on every row");
         let lit = expected.log_luminosity();
         assert_eq!(

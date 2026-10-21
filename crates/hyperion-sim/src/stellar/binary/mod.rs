@@ -63,6 +63,7 @@ pub use classify::{
 pub(crate) use evolve::lobe_reached;
 pub use evolve::{MAX_SEGMENTS, can_interact, evolve};
 pub(crate) use evolve::{can_interact_with_tracks, evolve_with_tracks};
+pub(crate) use light::pair_keeps_own_models;
 pub use light::{PairLight, RUN_HORIZON_PAST_WINDOW_YEARS, pair_light_bound};
 pub use marks::{BinaryMarks, BuildBinaryMarksError, MarkedMerger, MarkedPhase};
 pub use params::{BinaryParams, WindSpeedFactor};

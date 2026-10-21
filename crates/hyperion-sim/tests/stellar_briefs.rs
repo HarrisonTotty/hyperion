@@ -1,15 +1,22 @@
-//! A range query's brief of a system (plan 06, P06.T38.e): pinned briefs across the five layers
-//! and both routes, and over random systems the brief of each route is the full system's, bit for
-//! bit (rulings 89 and 90).
+//! A range query's brief of a system (plan 06, P06.T38.e; plan 11, P11.T11.a): pinned briefs across
+//! the five layers and the routes, over random systems the brief of each route is the full
+//! system's, the summary's primary, bit for bit (rulings 89 and 90), and in now mode a row reads a
+//! primary its pair has stripped, merged or fed as the summary does, before, during and after.
 
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::params::GalaxyParams;
-use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, generate_cell};
-use hyperion_sim::id::Layer;
-use hyperion_sim::stellar::ObjectKind;
+use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, generate_cell, resolve};
+use hyperion_sim::id::{Layer, SystemId};
+use hyperion_sim::math;
+use hyperion_sim::stellar::binary::{Component, Segment, SegmentKind};
 use hyperion_sim::stellar::brief::{BriefModel, BriefRoute};
-use hyperion_sim::stellar::system::{StellarBrief, SystemStars};
+use hyperion_sim::stellar::multiplicity::{
+    MultiplicityContext, RedrawAttempt, StarIndex, draw_star_count,
+};
+use hyperion_sim::stellar::system::{StarSummary, StellarBrief, SystemStars, grid_multiplicity};
+use hyperion_sim::stellar::{ObjectKind, Phase};
 use hyperion_sim::time::{ClockWindow, UniverseTime};
+use hyperion_sim::units::Years;
 use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_testkit::float::bits;
 use hyperion_testkit::golden;
@@ -58,10 +65,32 @@ fn years(y: i64) -> UniverseTime {
     UniverseTime::from_julian_years(y).expect("inside the clock")
 }
 
+/// The kind of `record`'s primary at the epoch as its single-star self (the system of its primary
+/// alone), which chose the pinned giant before P11.T11.a, so that the pinned systems stay the same.
 fn kind_at_epoch(galaxy: &Galaxy, record: &SystemRecord) -> Option<ObjectKind> {
-    SystemStars::generate(galaxy, record)
+    SystemStars::generate_in(galaxy, record, MultiplicityContext::ForcedSingle)
         .brief_at(UniverseTime::EPOCH)
         .map(|b| b.kind())
+}
+
+/// `route`'s place in a tally of the four.
+fn route_index(route: BriefRoute) -> usize {
+    match route {
+        BriefRoute::MainSequence => 0,
+        BriefRoute::Table => 1,
+        BriefRoute::Exact => 2,
+        BriefRoute::Paired => 3,
+    }
+}
+
+/// The brief's kind, class, and the bits of its log L and `T_eff`: all of it but its star count.
+fn state_of(brief: &StellarBrief) -> (ObjectKind, String, Option<u64>, u64) {
+    (
+        brief.kind(),
+        brief.class().to_string(),
+        brief.log_luminosity().map(|l| bits(l.value())),
+        bits(brief.effective_temperature().value()),
+    )
 }
 
 /// The pinned systems: two, two, two, two and two of layers A to E near the solar circle, another
@@ -112,7 +141,7 @@ fn write_brief(w: &mut GoldenWriter, brief: &StellarBrief) {
 
 /// Golden briefs of the pinned systems at t = −500, 0 and +500 years, new at generator version 11
 /// (P06.T38.e): the route each takes, and each brief, which the test checks against the full
-/// system's first.
+/// system's first, the summary's primary since P11.T11.a.
 #[test]
 fn briefs_are_pinned() {
     let galaxy = milky_way();
@@ -174,24 +203,38 @@ fn sample_records(galaxy: &Galaxy, seed: u64, n: usize) -> Vec<SystemRecord> {
     records
 }
 
-/// Over `n` random systems at three times: the exact routes' briefs are the full system's bit
-/// for bit; the table's have its kind and class exactly, and a luminosity and temperature inside
-/// their stated error (ruling 90.4). Every route is taken. Returns the table rows.
+/// Over `n` random systems at the epoch, both ends of the window, a random time in it and 200,000
+/// years before it: the exact, main-sequence and paired routes' briefs are the full system's, the
+/// summary's primary, bit for bit, with the first attempt's star count; the table's have its kind
+/// and class exactly, and a luminosity and temperature inside their stated error (ruling 90.4).
+/// Every route is taken. Returns the table rows.
 fn check_briefs(seed: u64, n: usize) -> usize {
     let galaxy = milky_way();
-    let mut routes = [0_usize; 3];
+    let mut routes = [0_usize; 4];
     let mut table_rows = 0;
     let mut rng = Lcg::new(seed ^ 0x7469_6d65);
     for record in sample_records(&galaxy, seed, n) {
         let model = BriefModel::new(&galaxy, &record);
         let stars = SystemStars::generate(&galaxy, &record);
-        routes[match model.route() {
-            BriefRoute::MainSequence => 0,
-            BriefRoute::Table => 1,
-            BriefRoute::Exact => 2,
-        }] += 1;
+        routes[route_index(model.route())] += 1;
+        let first = draw_star_count(
+            &galaxy,
+            &record,
+            grid_multiplicity(&record),
+            RedrawAttempt::FIRST,
+        );
+        assert_eq!(model.star_count(), first, "{record:?}");
+        if stars.attempt() == RedrawAttempt::FIRST {
+            assert_eq!(first, stars.star_count(), "{record:?}");
+        }
         let y = i64::try_from(rng.next_u64() % 2_001).expect("small") - 1_000;
-        for t in [years(y), UniverseTime::EPOCH, years(-200_000)] {
+        for t in [
+            years(y),
+            UniverseTime::EPOCH,
+            ClockWindow::START,
+            ClockWindow::END,
+            years(-200_000),
+        ] {
             let (fitted, exact) = (model.brief_at(t), stars.brief_at(t));
             if model.route() == BriefRoute::Table {
                 if t < ClockWindow::START {
@@ -216,20 +259,16 @@ fn check_briefs(seed: u64, n: usize) -> usize {
                 }
                 continue;
             }
-            assert_eq!(fitted, exact, "{record:?} at {t}");
-            if let (Some(fitted), Some(exact)) = (fitted, exact) {
-                assert_eq!(
-                    (
-                        bits(fitted.effective_temperature().value()),
-                        fitted.log_luminosity().map(|l| bits(l.value()))
-                    ),
-                    (
-                        bits(exact.effective_temperature().value()),
-                        exact.log_luminosity().map(|l| bits(l.value()))
-                    ),
-                    "{record:?} at {t}"
-                );
-            }
+            assert_eq!(
+                fitted.as_ref().map(state_of),
+                exact.as_ref().map(state_of),
+                "{record:?} at {t}"
+            );
+            assert_eq!(
+                fitted.map(|b| b.star_count()),
+                exact.map(|_| first),
+                "{record:?} at {t}"
+            );
         }
     }
     assert!(routes.iter().all(|&r| r > 0), "{routes:?}");
@@ -246,4 +285,245 @@ fn briefs_are_the_full_systems_over_random_systems() {
 fn briefs_are_the_full_systems_over_thirty_thousand_systems() {
     let rows = check_briefs(0x6272_6567, 30_000);
     println!("{rows} table-routed rows, every one inside its stated error");
+}
+
+/// What a pair the engine ran does to its system's primary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Change {
+    /// Its companion strips it: it donates by Roche-lobe overflow, or a common envelope ejects
+    /// an envelope.
+    Stripped,
+    /// It accretes its companion's overflow on its main sequence, and is rejuvenated.
+    Rejuvenated,
+    /// It merges with its companion.
+    Merged,
+}
+
+/// When the engine's pair makes `change` of `stars`' primary, the ages, years, from the start of
+/// that segment of its timeline to the start of the next: its merger, at its age (both ages); the
+/// first segment that strips it; or the first in which it accretes its companion's overflow on its
+/// hydrogen or helium main sequence.
+fn change_in(stars: &SystemStars, change: Change) -> Option<(f64, f64)> {
+    let pair = stars
+        .pairs()
+        .iter()
+        .find(|pair| pair.stars()[0] == StarIndex::PRIMARY)?;
+    let timeline = pair.timeline();
+    if change == Change::Merged {
+        return timeline.merger_age().map(|t| (t.value(), t.value()));
+    }
+    let segments = timeline.segments();
+    segments.iter().enumerate().find_map(|(i, segment)| {
+        let onset = segment.start();
+        let found = match (change, segment.kind()) {
+            (
+                Change::Stripped,
+                SegmentKind::StableTransfer {
+                    donor: Component::Primary,
+                }
+                | SegmentKind::CommonEnvelope,
+            ) => true,
+            (
+                Change::Rejuvenated,
+                SegmentKind::StableTransfer {
+                    donor: Component::Secondary,
+                },
+            ) => matches!(
+                timeline.state_at(Years::new(onset.value() + 1.0)).stars()[0].phase(),
+                Phase::MainSequence | Phase::HeliumMainSequence
+            ),
+            _ => false,
+        };
+        let end = segments.get(i + 1).map_or(timeline.until(), Segment::start);
+        found.then(|| (onset.value(), end.value()))
+    })
+}
+
+/// Two primaries of the test galaxy whose companions, grown past them after a case-A transfer,
+/// overflow back onto them while they are still on their main sequences (24.5 and 19.3 M☉ then),
+/// found among the 4,000 systems of 150 layer-E cells near the solar circle, two of them: the
+/// engine feeds a main-sequence primary that rarely.
+const REJUVENATED: [u64; 2] = [0x8211_b2e0_0000_0010, 0x826c_b2e0_0000_0013];
+
+/// `record` with its age at the epoch `age` years and nothing else changed: a real record whose
+/// history moves on the clock, so that one of its ages falls at the epoch.
+fn re_aged(record: &SystemRecord, age: f64) -> SystemRecord {
+    SystemRecord::from_parts(
+        record.id(),
+        *record.epoch_position(),
+        record.origin(),
+        record.population(),
+        record.primary_initial_mass(),
+        Years::new(age),
+    )
+}
+
+/// The now row `row` is the summary's primary `primary`: the same kind and class, the same
+/// luminosity and temperature to the bit, and the first attempt's star count `count`.
+fn assert_row_is_the_summary(
+    row: Option<StellarBrief>,
+    primary: Option<&StarSummary>,
+    count: u8,
+    what: &str,
+) {
+    let (Some(row), Some(primary)) = (row, primary) else {
+        assert!(
+            row.is_none() && primary.is_none(),
+            "{what}: a row {row:?} with a primary {primary:?}"
+        );
+        return;
+    };
+    assert_eq!(
+        (row.kind(), row.class()),
+        (primary.kind(), primary.classification()),
+        "{what}"
+    );
+    let state = primary.state();
+    assert_eq!(
+        bits(row.effective_temperature().value()),
+        bits(state.effective_temperature().value()),
+        "{what}: T_eff"
+    );
+    let luminosity = state.luminosity().value();
+    match row.log_luminosity() {
+        Some(log) => assert_eq!(
+            bits(log.value()),
+            bits(math::log10(luminosity)),
+            "{what}: log L"
+        ),
+        None => assert!(luminosity <= 0.0, "{what}: L = {luminosity} L☉ has no log"),
+    }
+    assert_eq!(row.star_count(), count, "{what}");
+}
+
+/// P11.T11.a: in now mode a range row reads the primary its pair has made, as the summary does.
+/// Two systems of each change, a primary its companion strips and one that merges (the first of
+/// layer E near the solar circle whose change comes after 25,000 years) and the two primaries
+/// their companions feed ([`REJUVENATED`]), are each re-aged three times, a real record with only
+/// its age at the epoch changed: so that the epoch falls 5,000 years before the change, in the
+/// middle of it, and 20,000 years after it ends. At both ends of the clock window and at the
+/// epoch, each row's model's brief is the summary's primary then, bit for bit, with the first
+/// attempt's star count, and the model takes the paired route during and after. Some rows are not
+/// the class their primary's single-star track has then, which they read before P11.T11.a.
+#[test]
+fn now_rows_read_the_pair_before_during_and_after_it_changes_the_primary() {
+    let galaxy = milky_way();
+    let mut found: Vec<(Change, SystemRecord, (f64, f64))> = Vec::new();
+    for id in REJUVENATED {
+        let record = resolve(&galaxy, SystemId::from_raw(id).expect("a system ID"))
+            .expect("a grid system of the test galaxy");
+        let ages = change_in(
+            &SystemStars::generate(&galaxy, &record),
+            Change::Rejuvenated,
+        )
+        .unwrap_or_else(|| panic!("{id:#x}: its companion feeds it on its main sequence"));
+        found.push((Change::Rejuvenated, record, ages));
+    }
+    let mut cell = Vec::new();
+    'search: for step in 0..100 {
+        generate_cell(&galaxy, solar_cell(Layer::E, step, 0), &mut cell);
+        for record in cell.drain(..) {
+            let stars = SystemStars::generate(&galaxy, &record);
+            for change in [Change::Stripped, Change::Merged] {
+                if found.iter().filter(|(c, ..)| *c == change).count() == 2 {
+                    continue;
+                }
+                if let Some(ages) = change_in(&stars, change).filter(|&(onset, _)| onset > 25_000.0)
+                {
+                    found.push((change, record, ages));
+                    break;
+                }
+            }
+            if found.len() == 6 {
+                break 'search;
+            }
+        }
+    }
+    assert_eq!(found.len(), 6, "two systems of each change: {found:?}");
+    let mut reclassed = 0;
+    for (change, grown, (onset, end)) in &found {
+        for (when, age) in [
+            ("before", onset - 5_000.0),
+            ("during", f64::midpoint(*onset, *end)),
+            ("after", end + 20_000.0),
+        ] {
+            let record = re_aged(grown, age);
+            let model = BriefModel::new(&galaxy, &record);
+            let stars = SystemStars::generate(&galaxy, &record);
+            let count = draw_star_count(
+                &galaxy,
+                &record,
+                grid_multiplicity(&record),
+                RedrawAttempt::FIRST,
+            );
+            if when != "before" {
+                assert_eq!(
+                    model.route(),
+                    BriefRoute::Paired,
+                    "{:?} {change:?} {when}",
+                    record.id()
+                );
+            }
+            for t in [ClockWindow::START, UniverseTime::EPOCH, ClockWindow::END] {
+                let row = model.brief_at(t);
+                let summary = stars.summary_at(t);
+                let what = format!(
+                    "{:?} {change:?} {when}, at age {age:.0} yr, at {t}",
+                    record.id()
+                );
+                assert_row_is_the_summary(row, summary.stars().first(), count, &what);
+                let single =
+                    SystemStars::generate_in(&galaxy, &record, MultiplicityContext::ForcedSingle)
+                        .brief_at(t);
+                reclassed += usize::from(
+                    row.map(|b| (b.kind(), b.class())) != single.map(|b| (b.kind(), b.class())),
+                );
+            }
+        }
+    }
+    assert!(
+        reclassed > 0,
+        "no row reads a class its single-star track does not have"
+    );
+}
+
+/// P11.T11.a: a row the gate certifies is its single-star primary's brief, bit for bit, as every
+/// row was before it. Over the random systems of [`check_briefs`], each row on the exact or
+/// main-sequence route at both ends of the window and the epoch is the brief of the system of
+/// its primary alone (plan 06's single-star system), with the first attempt's star count; a
+/// table row has that brief's kind and class.
+#[test]
+fn certified_rows_are_their_single_star_briefs() {
+    let galaxy = milky_way();
+    let mut certified = 0;
+    for record in sample_records(&galaxy, 0x6365_7274, 300) {
+        let model = BriefModel::new(&galaxy, &record);
+        if model.route() == BriefRoute::Paired {
+            continue;
+        }
+        certified += 1;
+        let single = SystemStars::generate_in(&galaxy, &record, MultiplicityContext::ForcedSingle);
+        for t in [ClockWindow::START, UniverseTime::EPOCH, ClockWindow::END] {
+            let (row, own) = (model.brief_at(t), single.brief_at(t));
+            if model.route() == BriefRoute::Table {
+                assert_eq!(
+                    row.map(|b| (b.kind(), b.class().to_string())),
+                    own.map(|b| (b.kind(), b.class().to_string())),
+                    "{record:?} at {t}"
+                );
+                continue;
+            }
+            assert_eq!(
+                row.as_ref().map(state_of),
+                own.as_ref().map(state_of),
+                "{record:?} at {t}"
+            );
+            assert_eq!(
+                row.map(|b| b.star_count()),
+                own.map(|_| model.star_count()),
+                "{record:?} at {t}"
+            );
+        }
+    }
+    assert!(certified > 150, "{certified} certified rows of 300");
 }

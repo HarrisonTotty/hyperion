@@ -113,11 +113,7 @@ fn bound_in(
     let mut attempts = Vec::with_capacity(1);
     let mut attempt = RedrawAttempt::FIRST;
     loop {
-        let stars = draw.stars_at(attempt);
-        let listed = AttemptBound::new(
-            attempt,
-            substellar::with_companion(galaxy, record, ctx, attempt, stars),
-        );
+        let listed = attempt_at(&mut draw, galaxy, record, ctx, attempt);
         let may_carve = listed.may_carve();
         attempts.push(listed);
         if !(redrawn && may_carve) {
@@ -135,6 +131,41 @@ fn bound_in(
         };
         attempt = next;
     }
+}
+
+/// The attempt `attempt` of `record`'s system under `ctx`, from the record's `draw`: its stars,
+/// then its brown-dwarf companion, and the pairs of the hierarchy the binary engine may run.
+#[must_use]
+fn attempt_at(
+    draw: &mut RecordDraw<'_>,
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    ctx: MultiplicityContext,
+    attempt: RedrawAttempt,
+) -> AttemptBound {
+    let stars = draw.stars_at(attempt);
+    AttemptBound::new(
+        attempt,
+        substellar::with_companion(galaxy, record, ctx, attempt, stars),
+    )
+}
+
+/// The first redraw attempt of `record`'s system at `composition` under `ctx`, as the bound lists
+/// it (plan 11, P11.T11.a).
+///
+/// It is the generator's own draw there, bit for bit, with the pairs the binary engine may run.
+/// The range brief's gate reads it alone: it keeps a primary on its single-star routes only where
+/// no pair of this attempt can change its stars or be carved, so that the generator keeps this
+/// attempt, and the primary is its own model.
+#[must_use]
+pub(crate) fn first_attempt(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: &Composition,
+    ctx: MultiplicityContext,
+) -> AttemptBound {
+    let mut draw = RecordDraw::new(galaxy, record, Some(composition), ctx, &PERIOD_CORRECTION);
+    attempt_at(&mut draw, galaxy, record, ctx, RedrawAttempt::FIRST)
 }
 
 /// The hierarchies of every redraw attempt that [`SystemStars::generate`] can keep for one record
@@ -822,6 +853,29 @@ mod tests {
         }
         for draw in [".stars_at(", "substellar::with_companion("] {
             assert!(code.contains(draw), "the bound draws through `{draw}`");
+        }
+    }
+
+    /// The range brief's first attempt (P11.T11.a) is the bound's attempt 0 under the grid's own
+    /// context and a forced one: the same hierarchy, stars and pairs.
+    #[test]
+    fn the_first_attempt_is_the_bounds_attempt_0() {
+        let galaxy = galaxy();
+        let forced = MultiplicityContext::ForcedMultiple {
+            max_separation: None,
+        };
+        for layer in [Layer::C, Layer::D, Layer::E] {
+            for record in records_near(&galaxy, layer, &sun(), 60) {
+                let composition = draw_metallicity(&galaxy, &record);
+                for ctx in [MultiplicityContext::Free, forced] {
+                    assert_eq!(
+                        first_attempt(&galaxy, &record, &composition, ctx),
+                        bound_in(&galaxy, &record, &composition, ctx).attempts()[0],
+                        "{:?} under {ctx:?}",
+                        record.id()
+                    );
+                }
+            }
         }
     }
 

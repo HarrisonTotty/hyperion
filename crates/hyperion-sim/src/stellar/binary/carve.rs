@@ -64,6 +64,7 @@ mod tests {
     use super::testing::{CARVED, galaxy, record};
     use super::*;
     use crate::galaxy::Galaxy;
+    use crate::stellar::brief::{BriefModel, BriefRoute};
     use crate::stellar::multiplicity::RedrawAttempt;
     use crate::stellar::system::SystemStars;
 
@@ -74,8 +75,10 @@ mod tests {
     }
 
     /// A grid system whose first attempt is carved is redrawn: every attempt before the kept one
-    /// carves, the kept one does not, it is `at_attempt`'s system at that attempt, the primary is
-    /// the same model, and the brief keeps the first attempt's star count.
+    /// carves, the kept one does not, it is `at_attempt`'s system at that attempt, and the primary
+    /// is the same model. Its brief counts the kept attempt's stars; its range row's model reads
+    /// the kept system on the paired route and keeps the first attempt's star count (P11.T11.a;
+    /// plan 11's Risks, "Deviations in P11.T7, as built").
     #[test]
     fn a_carved_first_attempt_is_redrawn() {
         let galaxy = galaxy();
@@ -107,7 +110,15 @@ mod tests {
         let now = crate::time::UniverseTime::EPOCH;
         assert_eq!(
             kept.brief_at(now).map(|b| b.star_count()),
-            first.brief_at(now).map(|b| b.star_count())
+            Some(kept.star_count())
+        );
+        let model = BriefModel::new(&galaxy, &r);
+        assert_eq!(model.route(), BriefRoute::Paired);
+        assert_eq!(model.star_count(), first.star_count());
+        assert_eq!(
+            model.brief_at(now),
+            kept.brief_at(now)
+                .map(|b| b.with_star_count(first.star_count()))
         );
         // The same system whatever was generated before, and twice the same.
         assert_eq!(kept, SystemStars::generate(&galaxy, &r));

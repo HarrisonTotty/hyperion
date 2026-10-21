@@ -1330,7 +1330,8 @@ mod tests {
     use hyperion_sim::galaxy::placement::{NoCache, SystemKind};
     use hyperion_sim::galaxy::query::range_query;
     use hyperion_sim::stellar::brief::range_brief;
-    use hyperion_sim::stellar::system::SystemStars;
+    use hyperion_sim::stellar::multiplicity::{RedrawAttempt, draw_star_count};
+    use hyperion_sim::stellar::system::{SystemStars, grid_multiplicity};
     use hyperion_testkit::float::assert_same_bits;
 
     use super::*;
@@ -2199,8 +2200,8 @@ mod tests {
             .zip(&plain.systems)
             .zip(result.systems())
         {
-            // The brief is the sim's range brief, of the full system's kind and class, and the
-            // rest of the row is plan 04's.
+            // The brief is the sim's range brief, of the full system's kind and class, its
+            // summary's primary's (P11.T11.a), and the rest of the row is plan 04's.
             let expected =
                 range_brief(milky_way(), hit.record(), query.time()).map(|b| brief_dto(&b));
             let full = SystemStars::generate(milky_way(), hit.record())
@@ -2209,9 +2210,18 @@ mod tests {
             assert!(expected.is_some(), "every system here has formed");
             assert_eq!(row.stellar, expected);
             assert_eq!(
-                expected.map(|b| (b.kind, b.class, b.star_count)),
-                full.map(|b| (b.kind, b.class, b.star_count))
+                expected.as_ref().map(|b| (b.kind, b.class.clone())),
+                full.map(|b| (b.kind, b.class))
             );
+            // The row counts the first attempt's stars (plan 11's Risks, "Deviations in P11.T7,
+            // as built"), the full brief the kept attempt's.
+            let first = draw_star_count(
+                milky_way(),
+                hit.record(),
+                grid_multiplicity(hit.record()),
+                RedrawAttempt::FIRST,
+            );
+            assert_eq!(expected.map(|b| b.star_count), Some(first));
             assert_eq!(
                 hyperion_protocol::SystemRecord {
                     stellar: None,

@@ -1006,9 +1006,9 @@ pub struct StellarBrief {
 impl StellarBrief {
     /// The brief of a primary in `state`, of `composition` and `draws`, with the `extras` its
     /// history gives (a neutron star's class), in a system of `star_count` stars: its class, its
-    /// kind, log L and `T_eff`. [`SystemStars::brief_at`], [`SystemStars::summary_brief_at`] and
-    /// the range brief ([`crate::stellar::brief`]) all make it here, so that a brief is the same
-    /// function of the state whichever built it.
+    /// kind, log L and `T_eff`. [`SystemStars::brief_at`] and the range brief
+    /// ([`crate::stellar::brief`]) both make it here, so that a brief is the same function of the
+    /// state whichever built it.
     #[must_use]
     pub(crate) fn of(
         state: &StarState,
@@ -1026,6 +1026,14 @@ impl StellarBrief {
             effective_temperature: state.effective_temperature(),
             star_count,
         }
+    }
+
+    /// The same brief in a system of `star_count` stars: the range brief's paired route, which
+    /// reads the kept system's primary and reports the first attempt's count (P11.T11.a; plan 11's
+    /// Risks, "Deviations in P11.T7, as built").
+    #[must_use]
+    pub(crate) const fn with_star_count(self, star_count: u8) -> Self {
+        Self { star_count, ..self }
     }
 
     /// How many stars the system has, the primary included, with a bound brown dwarf (plan 11,
@@ -1274,10 +1282,10 @@ impl SystemState {
 /// 11's binary engine once, from zero age to the system's age at +H (P11.T11,
 /// [`evolve`](crate::stellar::binary::evolve)), on the tracks the star models hold (ruling
 /// 111.5), and its timeline is kept ([`SystemStars::pairs`]). Any other pair is two single stars
-/// on their orbit, in no class, and is not run. Each
-/// [`StarModel`] stays the star's single-star self, and [`SystemStars::state_at`] and
-/// [`SystemStars::summary_at`] read a paired star from its pair's timeline. A pair with a
-/// member that is itself a pair, and a brown dwarf, never enter the engine.
+/// on their orbit, in no class, and is not run. Each [`StarModel`] stays the star's single-star
+/// self, and [`SystemStars::state_at`], [`SystemStars::summary_at`] and [`SystemStars::brief_at`]
+/// read a paired star from its pair's timeline. A pair with a member that is itself a pair, and a
+/// brown dwarf, never enter the engine.
 ///
 /// A grid system one of whose pairs falls into a carved catalogue class at any age of the source
 /// horizon ([`carved_class`], P11.T7) is redrawn, on the next [`RedrawAttempt`] of the hierarchy
@@ -1318,8 +1326,6 @@ pub struct SystemStars {
     stars: Vec<StarModel>,
     pairs: Vec<PairTimeline>,
     attempt: RedrawAttempt,
-    /// The star count at the first attempt, which the brief reports (P11.T7).
-    first_star_count: u8,
 }
 
 impl SystemStars {
@@ -1390,18 +1396,13 @@ impl SystemStars {
         .expect("a grid record's primary is a star or a brown dwarf, with a finite age");
         let carves = crate::stellar::binary::carve::grid_redraws(record, ctx);
         let mut attempt = GRID_ATTEMPT;
-        let mut first_star_count = None;
         loop {
-            let mut drawn = Self::at_attempt(galaxy, record, &primary, ctx, attempt);
-            let first = *first_star_count.get_or_insert(drawn.first_star_count);
+            let drawn = Self::at_attempt(galaxy, record, &primary, ctx, attempt);
             if !carves || drawn.carved_pair().is_none() {
-                drawn.first_star_count = first;
                 return drawn;
             }
             let Some(next) = attempt.next() else {
-                let mut kept = Self::after_last_attempt(record, primary, attempt);
-                kept.first_star_count = first;
-                return kept;
+                return Self::after_last_attempt(record, primary, attempt);
             };
             attempt = next;
         }
@@ -1423,7 +1424,6 @@ impl SystemStars {
         let pairs = run_pairs(&hierarchy, &stars);
         Self {
             record: *record,
-            first_star_count: hierarchy.star_count(),
             hierarchy,
             stars,
             pairs,
@@ -1455,7 +1455,6 @@ impl SystemStars {
             stars: vec![primary],
             pairs: Vec::new(),
             attempt,
-            first_star_count: 1,
         }
     }
 
@@ -1570,43 +1569,19 @@ impl SystemStars {
         }
     }
 
-    /// The system's brief at `t`, for a range query's row, or `None` before the system is born:
-    /// its primary's kind, class, luminosity and temperature, with no photometry and no death, and
-    /// how many stars it has.
+    /// The system's brief at `t`, for a range query's row, or `None` before the system is born or
+    /// its primary forms: the kind, class, luminosity and temperature of the primary that
+    /// [`SystemStars::summary_at`] has then, from its pair's state where a pair the engine ran has
+    /// changed it (P11.T11), with no photometry and no death, and the kept attempt's star count
+    /// ([`SystemStars::star_count`]).
     ///
-    /// The primary is its single-star self here, and the star count the first redraw attempt's, as
-    /// the range brief builds them without the binary engine ([`crate::stellar::brief`]), so that a
-    /// row is the same whichever built it. A primary that its pair has changed reads so in
-    /// [`SystemStars::summary_at`] and [`SystemStars::summary_brief_at`], and a redrawn system's
-    /// kept count in [`SystemStars::star_count`] (plan 11's Risks, "Deviations in P11.T7, as
-    /// built" and "Deviations in P11.T11, as built").
-    ///
-    /// # Panics
-    ///
-    /// In debug builds, as [`StarModel::state_at`].
-    #[must_use]
-    pub fn brief_at(&self, t: UniverseTime) -> Option<StellarBrief> {
-        let primary = self.primary();
-        let state = primary.state_at(t)?;
-        Some(StellarBrief::of(
-            &state,
-            primary.composition(),
-            primary.draws(),
-            primary.class_extras_at(&state, t),
-            self.first_star_count,
-        ))
-    }
-
-    /// The system's brief at `t` as [`SystemStars::summary_at`] has it, or `None` before the system
-    /// is born or its primary forms: the kind, class, luminosity and temperature of the summary's
-    /// primary, from its pair's state where a pair the engine ran has changed it (P11.T11), and the
-    /// kept attempt's star count ([`SystemStars::star_count`]).
-    ///
-    /// It is the brief observed mode reports (plan 12; [`crate::observe::observe_hit`]), so that a
-    /// row and the summary asked of one system at one emitted time read one state: a primary its
-    /// companion has stripped is the stripped star in both, never its single-star track's
-    /// supergiant. It differs from [`SystemStars::brief_at`], the range brief's, only for a primary
-    /// its pair has changed at `t` and for a redrawn system's count.
+    /// It is the one brief of a system (plan 11, P11.T11.a): a row and the summary asked of one
+    /// system at one time read one state, so a primary its companion has stripped is the stripped
+    /// star in both, never its single-star track's supergiant. Observed mode reports it at the
+    /// emitted time (plan 12; [`crate::observe::observe_hit`]), and the range brief
+    /// ([`crate::stellar::brief`]) gives it at the query's time, the primary's single-star model
+    /// where that is certainly the primary's state and this brief otherwise, with the first
+    /// attempt's star count (plan 11's Risks, "Deviations in P11.T7, as built").
     ///
     /// # Panics
     ///
@@ -1627,7 +1602,7 @@ impl SystemStars {
     /// generate_cell(&galaxy, CellKey::new(Layer::C, [0, 812, 0])?, &mut cell);
     /// for record in cell.iter().take(10) {
     ///     let stars = SystemStars::generate(&galaxy, record);
-    ///     let brief = stars.summary_brief_at(UniverseTime::EPOCH).ok_or("formed")?;
+    ///     let brief = stars.brief_at(UniverseTime::EPOCH).ok_or("formed")?;
     ///     let summary = stars.summary_at(UniverseTime::EPOCH);
     ///     let primary = summary.stars().first().ok_or("a primary")?;
     ///     // The brief is the summary's primary, whatever its pair has made of it.
@@ -1637,7 +1612,7 @@ impl SystemStars {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[must_use]
-    pub fn summary_brief_at(&self, t: UniverseTime) -> Option<StellarBrief> {
+    pub fn brief_at(&self, t: UniverseTime) -> Option<StellarBrief> {
         if SystemExistence::from(self.record.existence_at(t)) == SystemExistence::NotYetBorn {
             return None;
         }
@@ -1657,6 +1632,17 @@ impl SystemStars {
             extras,
             self.star_count(),
         ))
+    }
+
+    /// Whether the summary's primary at `t` is its own single-star model's state (`Summarised::Own`),
+    /// or `None` before it forms: what the range brief's gate certifies of every row it keeps on
+    /// its single-star routes (P11.T11.a).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn primary_is_its_own_at(&self, t: UniverseTime) -> Option<bool> {
+        let paired = self.paired_state(0, t);
+        summarised(self.primary(), t, paired.as_ref())
+            .map(|summarised| matches!(summarised, Summarised::Own(_)))
     }
 
     /// When the primary dies on the clock: T = lifetime − age at the epoch.
@@ -1873,8 +1859,9 @@ fn models_at(
 }
 
 /// The single-star models of the grid system `record`'s stars at the first redraw attempt,
-/// primary first, without the binary engine: what a range row's brief reads (its first attempt's
-/// star count), at a range row's cost, for plan 12's lens masses (P12.T4). For the few systems
+/// primary first, without the binary engine: what a range row's brief read before P11.T11.a (its
+/// first attempt's star count), at a certified range row's cost, for plan 12's lens masses
+/// (P12.T4). For the few systems
 /// the grid redraws (P11.T7) they are the first attempt's stars, and a pair's mass transfer is
 /// not in them (plan 11's Risks, "Deviations in P11.T11, as built").
 ///
@@ -1940,7 +1927,8 @@ enum Summarised<'a> {
 /// own model. `None` if the star has not formed by `t`.
 ///
 /// It is the one place that chooses, so that [`star_summary_with`], the summary's star, and
-/// [`SystemStars::summary_brief_at`], observed mode's row (plan 12), read one state at one time.
+/// [`SystemStars::brief_at`], the range row's and observed mode's (plan 12), read one state at one
+/// time.
 #[must_use]
 fn summarised<'a>(
     star: &StarModel,
@@ -2946,25 +2934,6 @@ mod tests {
             let giant = spin(end * 1.1);
             assert!(giant.period() > after.period(), "{m} M☉: {giant:?}");
         }
-    }
-
-    /// Observed mode's brief counts the kept attempt's stars, as the summary does, where the range
-    /// brief keeps the first attempt's (plan 11's Risks, "Deviations in P11.T7, as built"): a
-    /// system whose first attempt drew one star more, as `generate_with` records it for a redrawn
-    /// system.
-    #[test]
-    fn the_summary_brief_counts_the_kept_stars() {
-        let galaxy = galaxy();
-        let record = young_disc_record(&galaxy, 7, 3.0e9);
-        let mut stars = SystemStars::generate(&galaxy, &record);
-        let kept = stars.star_count();
-        stars.first_star_count = kept + 1;
-        let count = |brief: Option<StellarBrief>| brief.map(|b| b.star_count());
-        assert_eq!(count(stars.brief_at(UniverseTime::EPOCH)), Some(kept + 1));
-        assert_eq!(
-            count(stars.summary_brief_at(UniverseTime::EPOCH)),
-            Some(kept)
-        );
     }
 
     /// The brief is the summary's primary, in brief, and a black hole is a black hole.

@@ -46,9 +46,9 @@ impl ObservedSystem {
     /// Its brief when the light left it, or `None` if it was not yet born, or if it is a rogue
     /// planet, which has no stars.
     ///
-    /// It is the summary's at the emitted time ([`SystemStars::summary_brief_at`]), so that the
-    /// row and [`summary_observed`] read one state: a primary its companion had stripped by then
-    /// is the stripped star in both, not its single-star track's supergiant.
+    /// It is the summary's at the emitted time ([`SystemStars::brief_at`]), so that the row and
+    /// [`summary_observed`] read one state: a primary its companion had stripped by then is the
+    /// stripped star in both, not its single-star track's supergiant.
     #[must_use]
     pub const fn brief_then(&self) -> Option<StellarBrief> {
         self.brief_then
@@ -64,8 +64,8 @@ impl ObservedSystem {
 /// What `observer` sees of the system `hit`, whose stars are `stars`: its retardation, its
 /// existence and brief at the emitted time, and the stated error (plan 12's Provides).
 ///
-/// The brief is the summary's ([`SystemStars::summary_brief_at`]), whose primary is the one its
-/// pair has made of it, so that it is [`summary_observed`]'s first star at the same instant.
+/// The brief is the summary's ([`SystemStars::brief_at`]), whose primary is the one its pair has
+/// made of it, so that it is [`summary_observed`]'s first star at the same instant.
 ///
 /// `observer`'s time must be the time the search was made at. The present is taken from the
 /// system's own line, not from the hit, whose position plan 03's drift rounds differently by up to
@@ -145,7 +145,7 @@ pub(crate) fn observe_on_line(
         hit: *hit,
         retardation,
         existence_then: SystemExistence::from(hit.record().existence_at(emitted)),
-        brief_then: stars.and_then(|stars| stars.summary_brief_at(emitted)),
+        brief_then: stars.and_then(|stars| stars.brief_at(emitted)),
         error: curvature_error(galaxy, observer.position(), &retardation),
     }
 }
@@ -281,7 +281,7 @@ mod tests {
                 let off = death.checked_since(target).unwrap().as_julian_years_f64();
                 assert!(off.abs() < 1.0, "re-aged death {off} yr from the target");
                 // As observed mode reads it: a primary its companion stripped is no supergiant.
-                let kind = |t| stars.summary_brief_at(t).map(|b| b.kind());
+                let kind = |t| stars.brief_at(t).map(|b| b.kind());
                 let century = Span::from_julian_years(100).unwrap();
                 let before = kind(death.checked_sub(century).unwrap());
                 let after = kind(death.checked_add(century).unwrap());

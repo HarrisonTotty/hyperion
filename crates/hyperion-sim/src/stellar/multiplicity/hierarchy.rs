@@ -894,22 +894,7 @@ fn star_count_with(
     ctx: MultiplicityContext,
     attempt: RedrawAttempt,
 ) -> u8 {
-    let model = MultiplicityModel::default_v1();
-    let streams = Streams::new(galaxy, record.id(), attempt);
-    let m0 = record.primary_initial_mass();
-    let pmf = if is_direct(&streams, m0) {
-        direct_count_pmf(m0)
-    } else {
-        model.companion_count_pmf(m0)
-    };
-    if companion_count(
-        &streams,
-        innermost(galaxy, record, composition, ctx),
-        &pmf,
-        ctx,
-    ) == 0
-        && !substellar::wants_companion(galaxy.seed(), record.id(), m0, ctx, attempt)
-    {
+    if drawn_single(galaxy, record, composition, ctx, attempt) {
         return 1;
     }
     let stars = draw_hierarchy_with(
@@ -921,6 +906,36 @@ fn star_count_with(
         &PERIOD_CORRECTION,
     );
     substellar::with_companion(galaxy, record, ctx, attempt, stars).star_count()
+}
+
+/// Whether `record`'s system is drawn single under `ctx` at `attempt`, at `composition` if given
+/// and otherwise at the record's [`draw_metallicity`]: no companion to try and no brown dwarf, from
+/// the count words alone, as [`draw_star_count`] decides before it builds any orbit. Where it is
+/// not, the hierarchy is drawn in full (plan 11, P11.T11.a: the range brief's gate then reads that
+/// draw's attempt 0 for its count and its pairs at once).
+#[must_use]
+pub(crate) fn drawn_single(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: Option<&Composition>,
+    ctx: MultiplicityContext,
+    attempt: RedrawAttempt,
+) -> bool {
+    let model = MultiplicityModel::default_v1();
+    let streams = Streams::new(galaxy, record.id(), attempt);
+    let m0 = record.primary_initial_mass();
+    let pmf = if is_direct(&streams, m0) {
+        direct_count_pmf(m0)
+    } else {
+        model.companion_count_pmf(m0)
+    };
+    companion_count(
+        &streams,
+        innermost(galaxy, record, composition, ctx),
+        &pmf,
+        ctx,
+    ) == 0
+        && !substellar::wants_companion(galaxy.seed(), record.id(), m0, ctx, attempt)
 }
 
 /// What the primary's stripped mark asks of its orbit under `ctx` (Design note 1; ruling 123.5),

@@ -615,7 +615,8 @@ mod tests {
     /// A binary neutron-star member, a primary of 8 M☉ or more forced multiple, judges its
     /// primary's stripped mark at its own composition and draws, not a grid system's metallicity
     /// draw (whose debug assertion a member, with no density component, trips), and its brief
-    /// model routes it the same way (`BriefModel::of_member`).
+    /// model routes it the same way (`BriefModel::of_member`): a member whose pair can have
+    /// changed its primary on the paired route (P11.T11.a), whose brief is its stars' bit for bit.
     #[test]
     fn a_massive_binary_member_is_drawn_at_its_own_composition() {
         use crate::stellar::brief::{BriefModel, BriefRoute};
@@ -633,6 +634,7 @@ mod tests {
             .0;
         let position = at(&feature, [1.0, 0.0, 0.0]);
         let mut multiple = 0;
+        let mut paired = 0;
         for i in 0..8 {
             let member = draw_member(
                 &galaxy,
@@ -659,6 +661,7 @@ mod tests {
             multiple += usize::from(stars.star_count() > 1);
             let brief = BriefModel::of_member(&galaxy, &member);
             assert_eq!(brief.star_count(), stars.star_count());
+            paired += usize::from(brief.route() == BriefRoute::Paired);
             let (fitted, exact) = (
                 brief.brief_at(UniverseTime::EPOCH).expect("formed"),
                 stars.brief_at(UniverseTime::EPOCH).expect("formed"),
@@ -673,6 +676,8 @@ mod tests {
             }
         }
         assert!(multiple > 0, "no binary member kept a companion");
+        // A neutron star's pair may have been kicked and interacted, so its brief reads the pair.
+        assert!(paired > 0, "no binary member takes the paired route");
     }
 
     #[test]

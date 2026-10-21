@@ -71,19 +71,19 @@ t = 500 yr:
 C system = 0x42002cb200000000
 initial mass = 0x3ff2a1c9609bdd8c  # 1.1644986890586067
 age at epoch = 0x4201885ff630275c  # 9412804294.019218
-route Table
+route Paired
 t = -500 yr:
   WhiteDwarf DA9.2 in 2 stars
-  log L = 0xc00e7ed457dbde96  # -3.811928450009712
-  Teff = 0x40b55528ade3eb00  # 5461.158903355477
+  log L = 0xc00e7eeac92baad2  # -3.811971255917663
+  Teff = 0x40b55508bff34ab2  # 5461.034178930031
 t = 0 yr:
   WhiteDwarf DA9.2 in 2 stars
-  log L = 0xc00e7ed469be259a  # -3.8119285832551215
-  Teff = 0x40b55528929480da  # 5461.158486634691
+  log L = 0xc00e7eeadb0da6e0  # -3.81197138915455
+  Teff = 0x40b55508a4a47b56  # 5461.033762245284
 t = 500 yr:
   WhiteDwarf DA9.2 in 2 stars
-  log L = 0xc00e7ed47ba06c5b  # -3.811928716500501
-  Teff = 0x40b555287745173c  # 5461.158069914029
+  log L = 0xc00e7eeaecefa2ac  # -3.811971522391408
+  Teff = 0x40b555088955ac82  # 5461.0333455606615
 
 C system = 0x42002cb200000001
 initial mass = 0x3ff6a89dbae25bbf  # 1.4161660480656193
@@ -139,7 +139,7 @@ t = 500 yr:
 E system = 0x8200b2e000000000
 initial mass = 0x404a49cdf88e95c6  # 52.57659823381577
 age at epoch = 0x41e83f01df848d48  # 3254259452.1422462
-route Table
+route Paired
 t = -500 yr:
   BlackHole BH in 4 stars
   log L none
@@ -156,19 +156,19 @@ t = 500 yr:
 E system = 0x8200b2e000000001
 initial mass = 0x402de953d7b4d99f  # 14.955717793299128
 age at epoch = 0x41ec2a8f32ec68e2  # 3780409751.387803
-route Table
+route Paired
 t = -500 yr:
   NeutronStar NS in 2 stars
-  log L = 0xc0217ece61e0be53  # -8.74766832226229
-  Teff = 0x40c1815d7a81a334  # 8962.730301098527
+  log L = 0xc0217ece783876a9  # -8.747668988125342
+  Teff = 0x40c1815d09ef2d9d  # 8962.726865670464
 t = 0 yr:
   NeutronStar NS in 2 stars
-  log L = 0xc0217ece65bf7773  # -8.747668437597644
-  Teff = 0x40c1815d6701f058  # 8962.729706041675
+  log L = 0xc0217ece7c172fc9  # -8.747669103460696
+  Teff = 0x40c1815cf66f7b3d  # 8962.726270613837
 t = 500 yr:
   NeutronStar NS in 2 stars
-  log L = 0xc0217ece699e308a  # -8.747668552932982
-  Teff = 0x40c1815d53823dbd  # 8962.729110984941
+  log L = 0xc0217ece7ff5e8e0  # -8.747669218796034
+  Teff = 0x40c1815ce2efc91d  # 8962.725675557327
 
 A below 0.1 M_sun system = 0x0200fb2ca0000000
 initial mass = 0x3fb8a884f0290df4  # 0.09632140029230368

@@ -16,9 +16,11 @@
 //!
 //! [`SharedBriefCache`] holds what a range query's row needs instead: each system's
 //! [`BriefModel`] (plan 06, P06.T38.e), its primary alone by the cheapest exact route and its star
-//! count, under the same key and the same rules. It is a cache of its own because its entries are a
-//! few kilobytes where a system's stars can be tens, and a 20,000-row answer would otherwise evict
-//! every system the `SYSTEM` display is looking at.
+//! count, or, for a system whose pair can have changed its primary, its whole `SystemStars`
+//! (plan 11, P11.T11.a), under the same key and the same rules. It is a cache of its own because
+//! most of its entries are a few kilobytes where a system's stars can be tens, and a 20,000-row
+//! answer would otherwise evict every system the `SYSTEM` display is looking at; a paired entry
+//! is charged its system's bytes, about 90 kB on average.
 //!
 //! An observed range query reads each system's brief when its light left it, which needs the
 //! system's stars (plan 12, P12.T3): [`SharedSystemCache::handle`] lends the same cache to it as the
@@ -227,8 +229,8 @@ impl StarsCache for SystemStarsHandle<'_> {
 }
 
 impl HeapBytes for BriefModel {
-    /// The sim's own count of what the model owns on the heap: its primary's track, if it has one
-    /// ([`BriefModel::heap_bytes`]).
+    /// The sim's own count of what the model owns on the heap: its primary's track, if it has one,
+    /// or for a paired model its system's stars and timelines ([`BriefModel::heap_bytes`]).
     fn heap_bytes(&self) -> usize {
         Self::heap_bytes(self)
     }
@@ -256,8 +258,9 @@ impl SharedBriefCache {
     /// built and stored.
     ///
     /// The record comes from a range query's hit, so a grid system needs no resolving. Building
-    /// one costs its primary's main sequence or its track ([`BriefModel::new`]), so this belongs
-    /// on a pool job. A catalogue feature's member is routed through its member record
+    /// one costs its primary's main sequence or its track, or for a system whose pair can have
+    /// changed its primary its stars and the binary engine ([`BriefModel::new`], P11.T11.a), so
+    /// this belongs on a pool job. A catalogue feature's member is routed through its member record
     /// ([`BriefModel::of_record`]), at its cluster's composition; the server keeps no feature
     /// interiors yet, so each member's miss builds its feature's interior again.
     ///
@@ -301,6 +304,7 @@ impl SharedBriefCache {
 mod tests {
     use hyperion_sim::galaxy::placement::{CellKey, candidate_count, generate_cell};
     use hyperion_sim::id::Layer;
+    use hyperion_sim::stellar::brief::BriefRoute;
     use hyperion_sim::{GENERATOR_VERSION, Seed};
 
     use super::*;
@@ -447,10 +451,19 @@ mod tests {
 
     #[test]
     fn a_brief_model_is_built_once_and_every_cache_answers_the_same() {
-        let records: Vec<SystemRecord> = systems(6)
+        let mut records: Vec<SystemRecord> = systems(6)
             .into_iter()
             .map(|id| resolve(galaxy(), id).unwrap())
             .collect();
+        // A system whose pair can have changed its primary, whose model holds its whole system
+        // (P11.T11.a).
+        records.push(
+            systems(400)
+                .into_iter()
+                .map(|id| resolve(galaxy(), id).unwrap())
+                .find(|record| BriefModel::new(galaxy(), record).route() == BriefRoute::Paired)
+                .expect("a paired system among 400 of layer C"),
+        );
         let roomy = SharedBriefCache::new(64 << 20);
         let none = SharedBriefCache::new(0);
         for _ in 0..2 {
@@ -463,7 +476,7 @@ mod tests {
         let counters = roomy.counters();
         assert_eq!(
             (counters.misses(), counters.hits(), counters.entries()),
-            (6, 6, 6)
+            (7, 7, 7)
         );
         assert_eq!(none.counters().entries(), 0);
     }

@@ -1413,7 +1413,9 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     kept attempt's star count (`SystemStars::star_count`). `observe_on_line`, and so
     `observe_hit`, `range_query_observed` and the server's observed rows and `resolve_system`,
     report it as `brief_then`. `SystemStars::brief_at` and the range brief (`BriefModel`) are
-    unchanged, so now mode is plan 06's row for row.
+    unchanged, so now mode is plan 06's row for row. _Since P11.T11.a_ (plan 11; ruling
+    `decision-observed-class-findings.md` §A) `SystemStars::brief_at` has this body and
+    `summary_brief_at` is gone, so one brief remains, and now mode's rows read the pair too.
   - _What moves._ An observed row of a primary its pair has changed by the emitted time (a
     stripped star, an Algol's donor or gainer, a merger product), and the star count of a
     redrawn system's observed row (P11.T7, about 5 × 10⁻⁴ of the grid). No golden pins an
@@ -1423,12 +1425,14 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     EAGB), and six layer-E systems near it whose primary its pair strips, re-aged so that the
     stripping starts 40,000 years before the epoch and observed 20,000 years before, during and
     20,000 years after it: the row's kind, class, log L, `T_eff` and count are the summary's
-    primary's, bit for bit. `stellar::system`'s `the_summary_brief_counts_the_kept_stars` holds
-    the kept count against a first attempt's. T2's dying supergiant is now searched by the
+    primary's, bit for bit. `stellar::system`'s `the_summary_brief_counts_the_kept_stars` held
+    the kept count against a first attempt's (removed by P11.T11.a with `first_star_count`, since
+    the one brief counts the kept stars by construction). T2's dying supergiant is now searched by the
     summary's brief, as observed mode reads it.
   - _Deferred findings (2026-10-20 rule)._ (1) Now mode keeps the divergence: a range row
     (`BriefModel`, single-star) and the now summary disagree for a primary its pair has changed
-    at the query's time (P11.T11's open ruling; with a decision agent through main). (2)
+    at the query's time (P11.T11's open ruling; with a decision agent through main). **Ruled
+    2026-10-21 (`decision-observed-class-findings.md` §A), built by plan 11's P11.T11.a.** (2)
     `822C72E00000008C`, a case-A Algol, core-collapses its donor while it is still on the main
     sequence (6.34 M☉) at its pinned single-star death age, 24.6187 Myr (`binary/supernova.rs`,
     `pinned_collapse`; with a decision agent through main). (3) The stripped mass, 2.37 M☉ for a

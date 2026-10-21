@@ -1,13 +1,15 @@
-//! Plan 12, P12.T2: an observed row and the observed summary read one state of a system at one
-//! emitted time, whatever its primary's companion has made of it.
+//! Plan 12, P12.T2, and plan 11, P11.T11.a: an observed row and the observed summary read one state
+//! of a system at one emitted time, and a range row in now mode and the summary at one clock time,
+//! whatever its primary's companion has made of it.
 //!
 //! The landing look of P12.T11 (look-72) found GDG 0E0V00 E-141 of the universe LOOK72 read as a
 //! single star's red supergiant in its observed range row and as the hot subdwarf its companion
 //! had stripped it to in its observed summary, at the same emitted time. The row read the
-//! primary's single-star track (`SystemStars::brief_at`) and the summary its pair's timeline
-//! (`SystemStars::summary_at`); the row now reads the summary's primary
-//! (`SystemStars::summary_brief_at`). These tests build the galaxy as the server does, with its
-//! full potential, so that each system moves on its own line.
+//! primary's single-star track and the summary its pair's timeline (`SystemStars::summary_at`);
+//! the row now reads the summary's primary, `SystemStars::brief_at`, the one brief of a system
+//! (P11.T11.a), and the now-mode row's model (`BriefModel`) reads it wherever its pair can have
+//! changed the primary. These tests build the galaxy as the server does, with its full potential,
+//! so that each system moves on its own line.
 
 use std::sync::OnceLock;
 
@@ -20,10 +22,11 @@ use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::math;
 use hyperion_sim::observe::{Drift, Observer, Trajectory, observe_hit, summary_observed};
 use hyperion_sim::stellar::binary::{Component, Segment, SegmentKind};
-use hyperion_sim::stellar::multiplicity::StarIndex;
+use hyperion_sim::stellar::brief::{BriefModel, BriefRoute};
+use hyperion_sim::stellar::multiplicity::{MultiplicityContext, StarIndex};
 use hyperion_sim::stellar::system::{StarSummary, StellarBrief, SystemStars};
 use hyperion_sim::stellar::{ObjectKind, Phase};
-use hyperion_sim::time::{Span, UniverseTime};
+use hyperion_sim::time::{ClockWindow, Span, UniverseTime};
 use hyperion_sim::units::consts::{METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR};
 use hyperion_sim::units::{LightYears, Years};
 use hyperion_testkit::float::bits;
@@ -34,6 +37,10 @@ const LOOK72: u64 = 0xa49f_649b_ef43_4b20;
 /// GDG 0E0V00 E-141: a 10.96 M☉ primary that a 6.38 M☉ companion strips in a common envelope at
 /// 20.195 Myr, and a neutron star at the epoch.
 const STRIPPED: &str = "820e6ee00000008d";
+
+/// A pinned case-A donor of LOOK72 whose companion strips it on its main sequence, and which
+/// collapses there at its pin (`decision-observed-class-findings.md` §B).
+const CASE_A: &str = "822c72e00000008c";
 
 /// LOOK72's galaxy, as the server builds it ([`Galaxy::with_full_potential`]), once per process.
 ///
@@ -50,6 +57,13 @@ fn galaxy() -> &'static Galaxy {
 fn observed_rows_and_summaries_read_one_state() {
     look72_stripped_primary_is_the_stripped_star_in_the_row_and_the_summary();
     stripped_primaries_read_one_state_before_during_and_after_stripping();
+    look72_now_rows_read_the_pair();
+}
+
+/// The brief at `t` of `record`'s primary as its single-star self: the system of its primary
+/// alone, which is plan 06's single-star system, as every row read it before P11.T11.a.
+fn single_star_brief(record: &SystemRecord, t: UniverseTime) -> Option<StellarBrief> {
+    SystemStars::generate_in(galaxy(), record, MultiplicityContext::ForcedSingle).brief_at(t)
 }
 
 /// `id`'s record in LOOK72.
@@ -176,16 +190,12 @@ fn look72_stripped_primary_is_the_stripped_star_in_the_row_and_the_summary() {
     let own = stars.primary().state_at(emitted).expect("formed");
     assert_eq!(own.phase(), Phase::EarlyAgb);
     assert_eq!(
-        stars
-            .brief_at(emitted)
-            .map(|b| (b.kind(), b.class().to_string())),
+        single_star_brief(&record, emitted).map(|b| (b.kind(), b.class().to_string())),
         Some((ObjectKind::Supergiant, "M6.5Ib".to_owned()))
     );
     // At the epoch it is a neutron star either way.
     assert_eq!(
-        stars
-            .summary_brief_at(UniverseTime::EPOCH)
-            .map(|b| b.kind()),
+        stars.brief_at(UniverseTime::EPOCH).map(|b| b.kind()),
         Some(ObjectKind::NeutronStar)
     );
 }
@@ -282,7 +292,7 @@ fn stripped_primaries_read_one_state_before_during_and_after_stripping() {
                 let what = format!("{} {when} its stripping, at {at_yr:.0} yr", record.id());
                 assert_one_state(brief, primary.as_ref(), &stars, &what);
                 if when == "after" {
-                    let single = stars.brief_at(emitted).map(|b| (b.kind(), b.class()));
+                    let single = single_star_brief(&record, emitted).map(|b| (b.kind(), b.class()));
                     changed += usize::from(single != brief.map(|b| (b.kind(), b.class())));
                     helium += usize::from(primary.is_some_and(|p| {
                         matches!(
@@ -310,4 +320,104 @@ fn stripped_primaries_read_one_state_before_during_and_after_stripping() {
     // The rows read the pair where the single-star track would have said otherwise.
     assert!(changed > 0, "no row reads a primary its pair has changed");
     assert!(helium > 0, "no primary is a stripped helium star after");
+}
+
+/// Whether `stars`' pair has changed its primary at `t`: the summary's primary then is not its own
+/// model's state.
+fn pair_has_changed_primary(stars: &SystemStars, t: UniverseTime) -> bool {
+    let own = stars.primary().state_at(t);
+    let summary = stars.summary_at(t);
+    summary.stars().first().map(StarSummary::state) != own.as_ref()
+}
+
+/// P11.T11.a: the now-mode rows of look-72's two systems read the summary's primary. Each of GDG
+/// 0E0V00 E-141 (820E6EE00000008D, stripped in a common envelope) and 822C72E00000008C (a case-A
+/// donor that collapses on its main sequence) is re-aged so that an age at which its pair has
+/// changed its primary, the first such at the start or middle of a segment of its pair's
+/// timeline, falls at the epoch, a real record with only its age at the epoch changed. Its range
+/// row's model takes the paired route, and the row at both ends of the clock window and at the
+/// epoch is the summary's primary then, with the first attempt's star count. At the epoch the
+/// stripped primary's row is not the class its single-star track has then, which the row read
+/// before P11.T11.a.
+///
+/// Run on its one build of the galaxy by [`observed_rows_and_summaries_read_one_state`].
+fn look72_now_rows_read_the_pair() {
+    let galaxy = galaxy();
+    for id in [STRIPPED, CASE_A] {
+        let grown = record_of(id);
+        let stars = SystemStars::generate(galaxy, &grown);
+        let pair = stars
+            .pairs()
+            .iter()
+            .find(|pair| pair.stars()[0] == StarIndex::PRIMARY)
+            .unwrap_or_else(|| panic!("{id}: the engine ran the primary's pair"));
+        let age = grown.age_at_epoch();
+        let segments = pair.timeline().segments();
+        let candidates: Vec<f64> = segments
+            .iter()
+            .zip(
+                segments
+                    .iter()
+                    .skip(1)
+                    .map(Segment::start)
+                    .chain([pair.timeline().until()]),
+            )
+            .flat_map(|(segment, end)| {
+                let onset = segment.start().value();
+                [onset + 1.0, f64::midpoint(onset, end.value())]
+            })
+            .filter(|&at| {
+                at < age.value() && pair_has_changed_primary(&stars, clock_at(age, Years::new(at)))
+            })
+            .collect();
+        // The first age at which the pair has made the primary another class than its single-star
+        // track's, if there is one, and otherwise the first at which it has changed it at all.
+        let reclassed = |at: f64| {
+            let t = clock_at(age, Years::new(at));
+            let summary = stars.summary_at(t);
+            let paired = summary
+                .stars()
+                .first()
+                .map(|p| (p.kind(), p.classification()));
+            paired != single_star_brief(&grown, t).map(|b| (b.kind(), b.class()))
+        };
+        let changed = candidates
+            .iter()
+            .copied()
+            .find(|&at| reclassed(at))
+            .or_else(|| candidates.first().copied())
+            .unwrap_or_else(|| panic!("{id}: its pair never changes its primary"));
+        let record = SystemRecord::from_parts(
+            grown.id(),
+            *grown.epoch_position(),
+            grown.origin(),
+            grown.population(),
+            grown.primary_initial_mass(),
+            Years::new(changed),
+        );
+        let stars = SystemStars::generate(galaxy, &record);
+        assert!(
+            pair_has_changed_primary(&stars, UniverseTime::EPOCH),
+            "{id} re-aged to {changed} yr"
+        );
+        let model = BriefModel::new(galaxy, &record);
+        assert_eq!(model.route(), BriefRoute::Paired, "{id}");
+        assert_eq!(model.star_count(), stars.star_count(), "{id}: not redrawn");
+        for t in [ClockWindow::START, UniverseTime::EPOCH, ClockWindow::END] {
+            let summary = stars.summary_at(t);
+            let what = format!("{id} re-aged to {changed:.0} yr, at {t}");
+            assert_one_state(model.brief_at(t), summary.stars().first(), &stars, &what);
+        }
+        if id == STRIPPED {
+            let row = model
+                .brief_at(UniverseTime::EPOCH)
+                .map(|b| (b.kind(), b.class()));
+            let single =
+                single_star_brief(&record, UniverseTime::EPOCH).map(|b| (b.kind(), b.class()));
+            assert_ne!(
+                row, single,
+                "{id}: the row reads the pair, not the single-star track"
+            );
+        }
+    }
 }
