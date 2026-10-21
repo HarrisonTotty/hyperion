@@ -234,17 +234,20 @@ ambiguous, the design note that reads it is named.
   (`RenderEngine.createRenderTarget(spec: RenderTargetSpec)`); indirect draws and dispatches
   (`DrawItem.indirect` and `dispatch(kernel, bindings, IndirectArgs)`); asynchronous pipeline
   creation (`createMaterialAsync`, `createComputeAsync`); per-pass GPU time (`onPassTimes`,
-  delivering `PassTimes` keyed by `FrameSubmission.label`, `bracketed` always `false` since R01
-  Design note 24) where the
-  adapter exposes `timestamp-query`, quantised to 65,536 ns in shipping launches and unquantised
-  under `--hyperion-gpu-timing` (its Design note 4, found by probe), with
-  `GraphicsStatus.timer: GpuTimer` (`"quantized" | "full" | "absent"`); CPU read-back
-  (`readTexture(texture, level?, rect?)` and `readBuffer`, not harness-only); `MemoryCategory`, the
-  union later plans extend, on every creation; the
-  device-loss and GPU-process-loss fault and its three-loss rule; the preload's `HyperionApi`, to
-  which this plan adds `ipcRenderer.invoke` handlers of its own, validating the sender itself (R01
-  sets no invoke convention); the SwiftShader smoke harness, `just test-render`, into whose
-  `WGSL_CATALOGUE` every shader here is registered for its no-f16 and no-subgroup runs.
+  delivering `PassTimes`, whose `passes` is a list of `{ label, ns, bracketed }`, one entry for each
+  timed pass by its label (a frame's is its `FrameSubmission.label`), not a map keyed by label;
+  `bracketed` always `false` since R01 Design note 24) where the adapter exposes `timestamp-query`,
+  quantised to 65,536 ns in shipping launches and unquantised under `--hyperion-gpu-timing` (its
+  Design note 4, found by probe), with `GraphicsStatus.timer: GpuTimer`
+  (`"quantized" | "full" | "absent"`); CPU read-back (`readTexture(texture, level?, rect?, access?)`
+  and `readBuffer(buffer, access?)`, not harness-only; each throws `PresentationOnlyReadback` for a
+  resource a `presentation-only` kernel wrote last, which T10.b's read-back must not meet, and
+  `access: "tolerance"`, which lifts that refusal, is the smoke harness's alone); `MemoryCategory`,
+  the union later plans extend, on every creation; the device-loss and GPU-process-loss fault and
+  its three-loss rule; the preload's `HyperionApi`, to which this plan adds `ipcRenderer.invoke`
+  handlers of its own, validating the sender itself (R01 sets no invoke convention); the SwiftShader
+  smoke harness, `just test-render`, into whose `WGSL_CATALOGUE` every shader here is registered for
+  its no-f16 and no-subgroup runs.
 - **R02:** the camera, camera-relative `f64` differencing and per-patch origins; `BodyFixedPosition`
   and its client mirror; the fixed reversed-Z infinite projection; `transparentLayerOrder`
   (R02.T7.b: opaque first, then per body back to front, within a body the shells above the camera by
@@ -273,10 +276,13 @@ ambiguous, the design note that reads it is named.
   allocations by `MemoryCategory`; the finest-level set under grounded and descending bodies
   (`SelectionInput.grounded: readonly GroundContact[]`, its Design note 9), with morph held at zero,
   to which this plan adds a swept path as a chain of `GroundContact`s spaced at most one radius
-  apart; `FORCED_REGION_RESIDENCY_S` in `view/terrain/grounded.ts`, the forced region's p99
-  residency, provisional until R05.T18 sets it (Design note 7); streaming priority; `BAND_LIMIT_M`
-  and `FINEST_SPACING_M`, with the band limit exported to TypeScript as the wasm `band_limit_m()`
-  and the client's `bandLimitM()` (R05.T5, T7.a); the `TERRAIN: STREAMING` and
+  apart; the selection's entry, `selectPatches(input: SelectionInput)`, with `ViewSelectionInput`
+  and `screenSpaceErrorPx(boundM, distanceM, view)` (`view/terrain/select.ts`), and
+  `view/terrain/cull.ts`'s `Frustum`, `frustumOf` and `inFrustum`, through which T10.a's still
+  selects once and culls each tile; `FORCED_REGION_RESIDENCY_S` in `view/terrain/grounded.ts`, the
+  forced region's p99 residency, provisional until R05.T18 sets it (Design note 7); streaming
+  priority; `BAND_LIMIT_M` and `FINEST_SPACING_M`, with the band limit exported to TypeScript as the
+  wasm `band_limit_m()` and the client's `bandLimitM()` (R05.T5, T7.a); the `TERRAIN: STREAMING` and
   `TERRAIN: DETAIL LIMITED` annunciations; `hyperion_surface::num`'s `min`, `max` and
   `assert_finite`; the scripted, seeded descent and its metrics harness, which this plan's by-hand
   runs reuse.
@@ -857,7 +863,10 @@ the label is text in the DOM, not canvas. Acceptance: `pnpm test`, `just ci`.
   offset, each texture's contribution zero-mean about R10's class albedo. Tests: the TypeScript
   reference's hash equals the WGSL's on SwiftShader through R01's smoke harness for 10⁴ lattice
   points; each perturbation has zero mean over a patch to 10⁻³; no octave above the band limit is
-  ever summed.
+  ever summed. T10.a's deferred decoration-fade test lands with the fade: in
+  `stills/stillPlan.test.ts`, the fade chosen for a pixel of a still's tile equals the fade for the
+  same pixel untiled, taken at `footprintView`'s pixel, which completes T10.a's test line (T10.a's
+  record).
 - **R11.T2.b On the terrain.** Wire the library into R10's `terrain_decoration` hook, compiled out
   when `decoration` is off; `DECORATION ON` shows while it is drawn. Tests: R01's smoke harness
   renders one patch's depth with decoration on and off and asserts the read-backs equal bit for bit;
@@ -1038,6 +1047,10 @@ tests. Acceptance: `pnpm test`, `just ci`, `just test-render`, by hand at the su
     `coverage.ts` and their tests, waits for P14.T52.c's decks, a condensate mode through R08's
     `modeOptics` and R09's zonal climatology, and is re-validated first (Risks, "Composition,
     for the re-validation").
+  - _The stand-in co-albedo, for T7.a's rest_ (R11.T7.a.1's review, 2026-10-20). A physics
+    reviewer recalled, with low confidence, that a 10 µm water cloud's co-albedo 1 − ϖ₀ at 0.55 µm
+    is nearer 10⁻⁶–10⁻⁷ than the 10⁻⁵ above. The rest re-checks it against Hansen and Travis 1974
+    with the other stand-ins; T7.a.1 depends on neither value.
 
 - **R11.T7.b The two-dimensional layer.** `cloudDensity.ts`, `cloudLayer.wgsl` and
   `cloudShadow.wgsl`: a shell at the condensate's altitude, its per-texel τ the column integral of
@@ -1051,6 +1064,20 @@ tests. Acceptance: `pnpm test`, `just ci`, `just test-render`, by hand at the su
   `cloudShadows` off neither hook is written; the smoke harness; every texel finite. Bench on the
   UHD 620 at 720p, by the owner, against about 1 ms and under 16 MB, with the development machine's
   figure beside it.
+  - _The `f32` twin of `deltaEddington`_ (R11.T7.a.1's notes, 2026-10-20). The shader's
+    δ-Eddington follows `clouds/cloudOptics.ts`'s `f64` one, with these changes for `f32`:
+    - only decaying exponentials: e^(−kτ′), e^(−2kτ′) as (e^(−kτ′))², and e^(−τ′ ÷ μ₀); the
+      direct transmittance T_dir = e^(−τ ÷ μ₀) with the unscaled τ, and T_diff = T − T_dir;
+    - the co-albedo 1 − ϖ₀ passed, not ϖ₀, which `f32` cannot hold near 1 − 10⁻⁵ to useful
+      precision, and 1 − ϖ′ computed as (1 − ϖ₀) ÷ (1 − ϖ₀f);
+    - the conservative switch re-derived for `f32`, well above `CONSERVATIVE_CO_ALBEDO`'s 10⁻¹²:
+      the general solution's relative error grows as ε ÷ k, about 10⁻⁵ in `f32` at ϖ₀ = 1 − 10⁻⁵
+      and g 0.85, where k ≈ 7.6 × 10⁻³;
+    - no division by zero at kμ₀ = 1: it is not reached at cloud ϖ₀ unless g is within about 10⁻⁵
+      of 1, but is at ϖ₀ ≥ 0.9 as g nears 1 (T7.a.1's deferred findings), so the twin interpolates
+      R and T − e^(−τ′ ÷ μ₀) alone, linearly in μ₀, across a window near ε₃₂^(1/3), about
+      5 × 10⁻³ (ε₃₂ = 2⁻²³), as `deltaEddington` does across 10⁻⁵;
+    - T_diff clamped to ≥ 0 for the lighting, since thin layers leave it at round-off.
 - **R11.T7.c The volume.** `cloudVolume.wgsl` with the noises, march, integration, phase and octaves
   of Design note 10, and the transmittance map for its shadows; high setting only. The noise
   textures are generated into a storage-capable format and copied, or generated on the CPU once,
@@ -1060,6 +1087,11 @@ tests. Acceptance: `pnpm test`, `just ci`, `just test-render`, by hand at the su
   3–5% at μ₀ ≥ 0.5; per coverage cell, the mean of per-texel δ-Eddington equals the march's cell
   mean to 2%; the smoke harness. Bench on the discrete target (the development machine's RTX 3080)
   against 1.5–3 ms and 10–20 MB, and by the owner on the UHD 620 for the record.
+  - _The `f32` twin and the reference's bias_ (R11.T7.a.1's notes, 2026-10-20). The volume's
+    `f32` δ-Eddington follows T7.b's notes. Against a converged Monte Carlo, δ-Eddington's R at
+    τ 1, g 0.85, μ₀ 1 is about 10% high (10.0 ± 0.2% and 10.2 ± 0.15% in two 10⁷-photon runs;
+    T7.a.1's deferred findings), against the table's Monte Carlo column's 8.9%. The octave fit's
+    doc comment, which states its error, reads δ-Eddington's own bias there as about 10%.
 - **R11.T7.d The switch.** Switching the setting, or the style, leaves the coverage and density
   fields identical and the cell-mean brightness within the T7.c tolerance. By hand, recorded: an
   Earth-like world from orbit, from within the layer and from below, on both settings, and its zonal
@@ -1340,7 +1372,8 @@ ejecta-block population), shape parameter or authoritative dip opens a new tag a
   - _The decoration-fade test is deferred._ It waits for T2 (the Tasks preamble; main's rulings) and
     is added when T2's fade exists, in `stillPlan.test.ts`, with the fade taken at
     `footprintView`'s pixel; T10.a's test line is complete only then, and main assigns the task that
-    adds it. The rest of T10.a's test line is built.
+    adds it. The rest of T10.a's test line is built. _Assigned 2026-10-20 to R11.T2, the task that
+    builds the fade (main's ruling at T10.a's landing); T2.a's Tests carry it._
   - _The names._ Provides kept: `planTiles`, `tileProjection`, `nextBatch(measured)` (a method of
     the class `BatchController`) and `STILL_TILE_MAX_PX`. Added in `stillPlan.ts`:
     `tileLimitPx(maxTextureDimension2D, setting)`; `tileFrustum(camera, tile, marginPx = 0)`, a

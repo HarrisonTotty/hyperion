@@ -7833,6 +7833,10 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       `discs`, only on a frame with a mesh body. `LitBodyRenderer.meshDraws(plan)` is one
       instanced draw a body (its `firstInstance` in its `Draw`); a plan's records are written once
       for both calls, and again after a device loss.
+      _R10.T14.d: `LitBodyRenderer` prepares `SMOOTH_MESH_MATERIAL`, `bodies:disc` and
+      `bodies:discLimb` for the scene target through R01's `prepareMaterial` as it makes its
+      resources and at each restore, so that a regime's first draw in a running view compiles
+      nothing (plan R10, T14.d)._
   - **Known limits.**
     - A mesh body behind a host star shows over the star's disc: R06's disc lies at depth 0, which
       the figure's depth hides (a disc body is ordered by the painter). It needs the body beyond a

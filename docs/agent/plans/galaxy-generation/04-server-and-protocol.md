@@ -1937,7 +1937,11 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
       clap's implicit `false` reaches `Ignore`. `tests/cli.rs` still clears a fixed list of
       variables, which leaves out the new one, as it already left out the three cache variables. Its
       `run` should take the names from the parser, as `tests/stop.rs` does. Both are left for a
-      follow-up, since they need a test run while the machine is held quiet for timings.
+      follow-up, since they need a test run while the machine is held quiet for timings. _Settled
+      2026-10-20 for `tests/cli.rs` (decision-test-robustness): its `run` has started the server
+      through `common::process::server_binary()` since 99f33a85 (R06.T11.b), and `server_binary()`
+      clears every variable the parser names, `HYPERION_STOP_ON_STDIN_CLOSE` and the cache variables
+      included. The off-value test is still open._
   - _Other platforms._ Linux runs every test here. On macOS the signal tests and the stdin tests
     compile under cross-clippy. On Windows the stdin tests do, without the signal tests. Both will
     run once a runner exists.
