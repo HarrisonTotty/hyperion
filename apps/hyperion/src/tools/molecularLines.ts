@@ -652,7 +652,7 @@ export function lineStates(
 
 /** The indices of the lines whose centres lie within a cut-off of a wavenumber range. */
 export function linesNear(
-  lines: LineList,
+  lines: Pick<LineList, "wavenumbersPerCm">,
   lowPerCm: number,
   highPerCm: number,
   cutoffPerCm = LINE_CUTOFF_PER_CM,
@@ -758,7 +758,7 @@ export function cellPointCount(cellNm: number, states: ReadonlyArray<LineState>)
  */
 export function cellSpectrum(
   cellNm: number,
-  species: LineSpecies,
+  species: { readonly lines: Pick<LineList, "wavenumbersPerCm"> },
   indices: ReadonlyArray<number>,
   states: ReadonlyArray<LineState>,
   points: number,

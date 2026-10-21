@@ -42,6 +42,7 @@
  */
 
 import type { Rgb } from "../photometry/toneCurve";
+import alkaliPairsFile from "./absorbers/alkaliPairs.json" with { type: "json" };
 import crossSectionsFile from "./absorbers/crossSections.json" with { type: "json" };
 import oxygenPairsFile from "./absorbers/oxygenPairs.json" with { type: "json" };
 import { HE_MINUS_FREE_FREE_RANGE_K, heMinusFreeFreeM5 } from "./absorbers/heliumMinus";
@@ -49,6 +50,8 @@ import { H_MINUS_FREE_FREE_RANGE_K, hMinusBoundFreeM2, hMinusFreeFreeM5 } from "
 import {
   broadeningFactor,
   cellSigmasAt,
+  curveRowsPa,
+  isLatticeMidpoint,
   type KDistributionTable,
   kDistributionAt,
   type SpeciesKDistribution,
@@ -472,14 +475,22 @@ export const ABSORBER_CROSS_SECTIONS: ReadonlyArray<CrossSectionTable> =
  *   the tables end (below 1,000 K the 5–0 overtone is not tabulated), a stated approximation
  *   (`decision-r08-cmf-licence.md` §8). HITRAN's H₂–H₂ file ends at 1 µm.
  *
+ * - the alkali resonance doublets' far wings beyond the atoms' 25 cm⁻¹ shape (R08.T4.e,
+ *   `absorbers/alkaliPairs.json`; follow-up 5, ruling 2), linear in the perturber's density:
+ *   `Na+H2` from N. F. Allard et al. 2019's open tables (Astron. Astrophys. 628, A120), their
+ *   one-perturber wing, measured over 500–3,000 K; and `Na+He`, `K+H2` and `K+He`, the ruled
+ *   estimate (decision-r08-t4ef-storage §6), R08.T4.c's impact (Lorentz) wing at the atoms' widths,
+ *   `estimated` at every temperature and wavelength. The atoms' own tables hold each line within
+ *   25 cm⁻¹ of its centre, so nothing is counted twice.
+ *
  * In closed form ({@link pairCrossSectionAt}): H⁻'s free–free, the `H+e-` pair, and He⁻'s, the
  * `He+e-` pair. Pending, with its estimated cell means (`absorbers/transparency.ts`'s
  * `PENDING_ABSORBERS`): H₂⁻'s free–free (`H2+e-`, Bell 1980's table not obtained).
  */
 export const ABSORBER_PAIR_CROSS_SECTIONS: ReadonlyArray<PairCrossSectionTable> =
   readPairCrossSections(
-    { pairs: [...oxygenPairsFile.pairs, ...crossSectionsFile.pairs] },
-    "oxygenPairs.json or crossSections.json",
+    { pairs: [...oxygenPairsFile.pairs, ...crossSectionsFile.pairs, ...alkaliPairsFile.pairs] },
+    "oxygenPairs.json, crossSections.json or alkaliPairs.json",
   );
 
 /** A species' cross-sections at one temperature, on its table's grid. */
@@ -1531,11 +1542,11 @@ export function absorberSpecs(
       );
     }
     listed.set(layer.species, { index, layer, ...clamped });
-    if (
-      !tables.some((t) => t.species === layer.species) &&
-      !kTables.some((t) => t.species === layer.species) &&
-      isTransparent(layer.species, layerTemperatureK(onColumn, 1))
-    ) {
+    // Below a stated none's limit the species is transparent whatever the client holds for it, a
+    // table from a visibility floor among them (the belowK contract, ruled 2026-10-19; R08.T4.e):
+    // consulted before any table, so that a floor's table is not held at its first node, labelled,
+    // on a colder body. Its pairs stay listed.
+    if (isTransparent(layer.species, layerTemperatureK(onColumn, 1))) {
       continue;
     }
     const key = `${clamped.basePa}:${clamped.topPa}:${profileKey(layer.profile)}`;
@@ -2611,18 +2622,47 @@ function dominantLines(absorber: AbsorberSpec): SpeciesLines | undefined {
  * ({@link dominantLines}) as pressures, p = p_eff ÷ f, from the first, 10 Pa ÷ f, through every one
  * up to the layer's base and one more beyond, so that the cubic read has its stencil there; for one
  * without lines, its base alone, since its curves do not depend on pressure.
+ *
+ * @remarks
+ * Where the dominant table is thinned (R08.T4.e's economy E3: its nodes a strict subset of the
+ * standard pressures), its rows are the standard pressures over its span (`curveRowsPa`), each
+ * table read between its own nodes: a client change, no stored layout (ruled 2026-10-16). To them
+ * are added the 8-a-decade midpoints any of the spec's line tables holds
+ * (decision-r08-t4e-unsold's follow-up, the 581 nm residual), each as its physical pressure
+ * p_mid ÷ f_s on its own species' factor, within the rows' span, one within
+ * {@link MIDPOINT_MERGE_DECADES} of a row already there left out.
  */
 export function absorberCurvePressures(absorber: AbsorberSpec): Float64Array {
   const lines = dominantLines(absorber);
   if (lines === undefined) {
     return Float64Array.of(Math.log(absorber.basePa));
   }
-  const nodes = lines.kDistribution.pressuresPa;
+  const nodes = curveRowsPa(lines.kDistribution.pressuresPa);
   const f = lines.broadeningFactor;
   const deepest = nodes.findIndex((p) => p / f >= absorber.basePa);
   const last = deepest < 0 ? nodes.length - 1 : Math.min(deepest + 1, nodes.length - 1);
-  return Float64Array.from(nodes.slice(0, last + 1), (p) => Math.log(p / f));
+  const rows = nodes.slice(0, last + 1).map((p) => Math.log(p / f));
+  const low = rows[0] ?? Number.NaN;
+  const high = rows.at(-1) ?? Number.NaN;
+  const merge = MIDPOINT_MERGE_DECADES * Math.LN10;
+  for (const s of absorber.kind === "column" ? absorber.species : []) {
+    for (const p of s.lines?.kDistribution.pressuresPa ?? []) {
+      const row = Math.log(p / (s.lines?.broadeningFactor ?? 1));
+      if (
+        isLatticeMidpoint(p) &&
+        row > low &&
+        row < high &&
+        rows.every((r) => Math.abs(r - row) >= merge)
+      ) {
+        rows.push(row);
+      }
+    }
+  }
+  return Float64Array.from(rows.toSorted((a, b) => a - b));
 }
+
+/** How near a midpoint row lies to a row already there and is left out, decades: 1/32. */
+export const MIDPOINT_MERGE_DECADES = 1 / 32;
 
 /**
  * The read's top for a curve's rows, ln(p ÷ 1 Pa): {@link LINE_TABLE_TOP_PA} ÷ f for an absorber

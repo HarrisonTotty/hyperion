@@ -66,5 +66,8 @@ export function lineAt(
     lowerLabel: "a",
     upperLabel: "b",
     reference: "XX",
+    logGammaRadPerS: 0,
+    logGammaStarkPerElectron: 0,
+    logGammaVanDerWaalsPerHydrogen: 0,
   };
 }

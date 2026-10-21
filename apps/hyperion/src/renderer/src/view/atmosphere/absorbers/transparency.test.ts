@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ABSORBER_CROSS_SECTIONS } from "../absorbers";
+import { ABSORBER_CROSS_SECTIONS, pairCrossSectionAt } from "../absorbers";
 import atomicBounds from "./atomicBounds.json" with { type: "json" };
 import exomolBounds from "./exomol/bounds.json" with { type: "json" };
 import { committedLineSpecies } from "./kDistribution";
@@ -25,8 +25,38 @@ function pendingBound(key: string): AbsorberBound | undefined {
   return PENDING_ABSORBERS.find((p) => p.key === key)?.bound;
 }
 
+/**
+ * The committed k-distribution sidecars' first temperature nodes, K, by species: the `belowK`
+ * contract's table branch reads them. Typing the files by the two fields read is a cast at the
+ * committed-data boundary, as `kDistribution.ts`' loader's is: they are the tools' own writing.
+ */
+const TABLE_FIRST_NODES: ReadonlyMap<string, number> = new Map(
+  Object.entries(
+    import.meta.glob<{ readonly species: string; readonly temperaturesK: ReadonlyArray<number> }>(
+      ["./kDistributions/*.json", "./exomol/kDistributions/*.json"],
+      { import: "default", eager: true },
+    ),
+  ).map(([, sidecar]) => [sidecar.species, sidecar.temperaturesK[0] ?? Number.NaN]),
+);
+
+/**
+ * Which branch of the `belowK` contract (ruled 2026-10-19) a stated none's key takes at and above
+ * its limit: `table`, a committed table whose first node is at or below it and no pending entry of
+ * the key's task left; `pending`, a pending entry whose first node is at or above it; or `none`.
+ */
+function contractBranch(species: string, belowK: number): "table" | "pending" | "none" {
+  const first = TABLE_FIRST_NODES.get(species);
+  const pending = PENDING_ABSORBERS.filter((p) => p.key === species);
+  if (first !== undefined) {
+    return first <= belowK && pending.every((p) => p.task !== "R08.T4.e") ? "table" : "none";
+  }
+  return pending.some((p) => (p.bound.temperaturesK[0] ?? Number.NaN) >= belowK)
+    ? "pending"
+    : "none";
+}
+
 describe("the stated transparency", () => {
-  it("names He below 5,000 K, N₂ below 1,800 K, e⁻ at every temperature and seven ions by their lines' share, and nothing else", () => {
+  it("names He below 5,000 K, N₂ below 1,800 K, e⁻ at every temperature, seven ions and O by their lines' share, and H and Zn below their visibility floors, and nothing else", () => {
     expect(NO_VISIBLE_ABSORPTION.map((n) => [n.species, n.reason, n.belowK])).toEqual([
       ["He", "bandsOutsideRange", 5_000],
       ["N2", "bandsOutsideRange", 1_800],
@@ -38,15 +68,44 @@ describe("the stated transparency", () => {
       ["K+", "underEquivalentWidthBound", 5_000],
       ["Ni+", "underEquivalentWidthBound", 4_600],
       ["Zn+", "underEquivalentWidthBound", 5_000],
+      ["O", "underEquivalentWidthBound", 5_000],
+      ["H", "underEquivalentWidthBound", 3_300],
+      ["Zn", "underEquivalentWidthBound", 3_300],
     ]);
   });
 
-  it("pends each ion stated none by its lines' share from its own limit, in atomicBounds.json", () => {
+  it("answers each species stated none by its lines' share from its own limit: a table from a visibility floor, or a pending entry in atomicBounds.json", () => {
     const atomic = readAbsorberBounds(atomicBounds, "atomicBounds.json");
     const byShare = NO_VISIBLE_ABSORPTION.filter((n) => n.reason === "underEquivalentWidthBound");
     expect(
-      byShare.map((n) => [n.species, atomic.find((b) => b.key === n.species)?.temperaturesK[0]]),
-    ).toEqual(byShare.map((n) => [n.species, n.belowK]));
+      byShare.map((n) => {
+        const branch = contractBranch(n.species, n.belowK ?? Number.NaN);
+        const entry = atomic.find((b) => b.key === n.species)?.temperaturesK[0];
+        return [n.species, branch === "pending" ? entry === n.belowK : branch === "table"];
+      }),
+    ).toEqual(byShare.map((n) => [n.species, true]));
+  });
+
+  it("draws Mg⁺, Si⁺, H and Zn from their limits by tables, and pends the other stated nones", () => {
+    expect(
+      NO_VISIBLE_ABSORPTION.filter((n) => n.belowK !== undefined).map((n) => [
+        n.species,
+        contractBranch(n.species, n.belowK ?? Number.NaN),
+      ]),
+    ).toEqual([
+      ["He", "pending"],
+      ["N2", "pending"],
+      ["Na+", "pending"],
+      ["Mg+", "table"],
+      ["Al+", "pending"],
+      ["Si+", "table"],
+      ["K+", "pending"],
+      ["Ni+", "pending"],
+      ["Zn+", "pending"],
+      ["O", "pending"],
+      ["H", "table"],
+      ["Zn", "table"],
+    ]);
   });
 
   it("holds below a species' limit and not above it", () => {
@@ -74,21 +133,61 @@ describe("the stated transparency", () => {
     }
   });
 
-  it("lists a temperature-limited species as pending from its limit", () => {
+  it("gives a temperature-limited species one answer from its limit: a table or a pending entry", () => {
     for (const entry of NO_VISIBLE_ABSORPTION.filter((n) => n.belowK !== undefined)) {
-      const pending = PENDING_ABSORBERS.find((p) => p.key === entry.species);
-      expect(pending?.bound.temperaturesK[0]).toBeGreaterThanOrEqual(entry.belowK ?? Number.NaN);
+      expect([
+        entry.species,
+        contractBranch(entry.species, entry.belowK ?? Number.NaN),
+      ]).not.toEqual([entry.species, "none"]);
     }
   });
 });
 
+describe("the belowK contract's branches (ruled 2026-10-19)", () => {
+  it("takes a committed table from at or below the limit, with no pending entry left", () => {
+    // Mg⁺'s table starts at 4,400 K, under its 4,600 K limit; Ni⁺, deferred, holds its entry.
+    expect([contractBranch("Mg+", 4_600), contractBranch("Ni+", 4_600)]).toEqual([
+      "table",
+      "pending",
+    ]);
+  });
+
+  it("refuses a table that starts above the limit, or a pending entry that starts below it", () => {
+    // Ni⁺'s entry starts at 4,600 K: above a 4,000 K limit it answers, below a 5,000 K one not.
+    expect([
+      contractBranch("Mg+", 4_000),
+      contractBranch("Ni+", 5_000),
+      contractBranch("Ni+", 4_000),
+      contractBranch("Xx", 4_000),
+    ]).toEqual(["none", "none", "pending", "none"]);
+  });
+});
+
 describe("the pending absorbers", () => {
-  it("leave R08.T4.d's and R08.T4.g's lists once a species' line table is committed", () => {
+  it("leave R08.T4.d's, R08.T4.e's and R08.T4.g's lists once a species' line table is committed", () => {
     const tables = committedLineSpecies();
     expect(
       PENDING_ABSORBERS.filter(
-        (p) => (p.task === "R08.T4.d" || p.task === "R08.T4.g") && tables.includes(p.key),
+        (p) =>
+          (p.task === "R08.T4.d" || p.task === "R08.T4.e" || p.task === "R08.T4.g") &&
+          tables.includes(p.key),
       ).map((p) => p.key),
+    ).toEqual([]);
+  });
+
+  it("say why each R08.T4.e entry stays: He's and the stated nones' above their limits, the stages deferred past T4.e's byte budget, and H₂⁻'s free–free", () => {
+    const deferred = "deferred past T4.e's byte budget (main, 2026-10-19)";
+    const above = "R08.T4.e's range (to 5000 K) does not draw";
+    expect(
+      PENDING_ABSORBERS.filter((p) => p.task === "R08.T4.e")
+        .filter(
+          (p) =>
+            !p.what.includes(deferred) &&
+            !p.what.includes(above) &&
+            p.key !== "He" &&
+            p.key !== "H2+e-",
+        )
+        .map((p) => p.key),
     ).toEqual([]);
   });
 
@@ -148,25 +247,32 @@ describe("the pending absorbers", () => {
     }
   });
 
-  it("hold K's far wing as pairs with H₂ and He, estimated, beside K's own lines per atom", () => {
-    expect(
-      ["K", "K+H2", "K+He"].map((key) => {
-        const bound = pendingBound(key);
-        return [bound?.kind, bound?.basis, bound?.task];
-      }),
-    ).toEqual([
-      ["species", "measured", "R08.T4.e"],
-      ["pair", "estimated", "R08.T4.e"],
-      ["pair", "estimated", "R08.T4.e"],
+  it("draw Na's and K's far wings as pairs with H₂ and He, beside their own tables per atom, none pending", () => {
+    const pairs = ["Na+H2", "Na+He", "K+H2", "K+He"];
+    expect([
+      ["Na", "K"].filter((key) => committedLineSpecies().includes(key)),
+      pairs.filter(
+        (key) =>
+          pendingBound(key) !== undefined || pendingBound(key.split("+")[0] ?? "") !== undefined,
+      ),
+      pairs.map((key) => pairCrossSectionAt(key, 1_000)?.provenance),
+    ]).toEqual([["Na", "K"], [], ["measured", "estimated", "estimated", "estimated"]]);
+  });
+
+  it("measure Na–H₂ over Allard et al.'s 500–3,000 K and hold it, estimated, beyond", () => {
+    expect([500, 3_000, 4_000].map((t) => pairCrossSectionAt("Na+H2", t)?.provenance)).toEqual([
+      "measured",
+      "measured",
+      "estimated",
     ]);
   });
 
   it("give K's wing pairs their largest value in the range at 760 nm, nearest the doublet", () => {
     for (const key of ["K+H2", "K+He"]) {
-      const bound = pendingBound(key);
-      const row =
-        bound === undefined ? new Float64Array(0) : (cellMeans(bound)[1] ?? new Float64Array(0));
-      expect(row.indexOf(Math.max(...row)) + 380).toBe(760);
+      const sigma = pairCrossSectionAt(key, 1_000)?.crossSectionsM5 ?? new Float64Array(0);
+      // The grid starts at 380 nm; the bake range ends at 760 nm.
+      const inRange = sigma.subarray(0, 381);
+      expect(inRange.indexOf(Math.max(...inRange)) + 380).toBe(760);
     }
   });
 

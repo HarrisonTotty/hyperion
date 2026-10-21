@@ -55,7 +55,7 @@ describe("the third reason's rule (ruled 2026-10-19)", () => {
 });
 
 describe("the answers' stages", () => {
-  it("cover the fourteen atomic and ionic rows and Mg⁺'s check, each with a Kurucz list", () => {
+  it("cover R08.T4.h's rows as R08.T4.e leaves them, Zn drawn, and O, each with a Kurucz list", () => {
     expect([
       ATOMIC_ANSWERS.map((a) => a.key).toSorted(),
       ATOMIC_ANSWERS.every((a) => KURUCZ_LISTS.some((l) => l.key === a.key)),
@@ -71,10 +71,10 @@ describe("the answers' stages", () => {
         "Na+",
         "Ni",
         "Ni+",
+        "O",
         "Si+",
         "V",
         "V+",
-        "Zn",
         "Zn+",
       ],
       true,
@@ -85,7 +85,8 @@ describe("the answers' stages", () => {
     for (const list of KURUCZ_LISTS) {
       const [z, stage] = [list.name.slice(2, 4), list.name.slice(4, 6)];
       expect([Number(stage), list.sha256.length]).toEqual([list.stage, 64]);
-      expect(Number(z)).toBeGreaterThan(10);
+      // O I's gf0800.all the lowest, R08.T4.e's.
+      expect(Number(z)).toBeGreaterThanOrEqual(8);
     }
   });
 });
@@ -172,9 +173,11 @@ describe("atomicBounds.json", () => {
     ]);
   });
 
-  it("holds an entry for each answer", () => {
+  it("holds an entry for each answer but the stages drawn from their limit by R08.T4.e's tables", () => {
     expect(atomicBounds.bounds.map((b) => b.key).toSorted()).toEqual(
-      ATOMIC_ANSWERS.map((a) => a.key).toSorted(),
+      ATOMIC_ANSWERS.filter((a) => a.answer !== "drawnFromFloor")
+        .map((a) => a.key)
+        .toSorted(),
     );
   });
 
@@ -235,28 +238,33 @@ describe("the answers on toy data", () => {
     ]);
   });
 
-  it("state the weak-lined ions none below 5,000 K and give the eight drawn stages T4.c's nodes", () => {
+  it("state the weak-lined stages none below 5,000 K and give the seven deferred stages T4.c's nodes", () => {
     const answers = atomicAnswers(data, linesBy(-12));
     const byKey = new Map(answers.map((a) => [a.key, a]));
     expect([
-      ["Na+", "Al+", "Si+", "K+", "Ni+", "Zn+", "Mg+"].map((k) => byKey.get(k)?.belowK),
-      ["Al", "V", "Mn", "Ni", "Zn", "V+", "Cr+", "Mn+"].map(
-        (k) => byKey.get(k)?.entry?.temperaturesK,
-      ),
-      byKey.get("Mg+")?.entry?.temperaturesK,
-    ]).toEqual([Array(7).fill(5_000), Array(8).fill(ATOMIC_NODES_K), nodesFrom(5_000)]);
+      ["Na+", "Al+", "Si+", "K+", "Ni+", "Zn+", "Mg+", "O"].map((k) => byKey.get(k)?.belowK),
+      ["Al", "V", "Mn", "Ni", "V+", "Cr+", "Mn+"].map((k) => byKey.get(k)?.entry?.temperaturesK),
+      ["Mg+", "Si+"].map((k) => byKey.get(k)?.entry),
+      byKey.get("O")?.entry?.temperaturesK,
+    ]).toEqual([
+      Array(8).fill(5_000),
+      Array(7).fill(ATOMIC_NODES_K),
+      [undefined, undefined],
+      nodesFrom(5_000),
+    ]);
   });
 
   it("mark Zn⁺'s entry estimated, on its bound, and every other measured, each for R08.T4.e", () => {
     const answers = atomicAnswers(data, linesBy(-12));
     expect(
       answers
+        .filter((a) => a.entry !== undefined)
         .map((a) => [a.key, a.entry?.basis, a.entry?.task])
         .filter(([, b]) => b !== "measured"),
     ).toEqual([["Zn+", "estimated", "R08.T4.e"]]);
   });
 
-  it("pend a strong-lined ion at T4.c's nodes, and leave Mg⁺'s own entry where it is", () => {
+  it("pend a strong-lined ion at T4.c's nodes, and write no entry for Mg⁺, drawn by its table", () => {
     const answers = atomicAnswers(data, linesBy(-12, { "Ni+": 2, "Mg+": 2 }));
     const byKey = new Map(answers.map((a) => [a.key, a]));
     expect([

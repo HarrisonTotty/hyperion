@@ -50,6 +50,16 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
+import {
+  runAlkaliPairs,
+  runAtomicCellReferences,
+  runAtomicLines,
+  runAtomicFloors,
+  runAtomicKDistributions,
+  runAtomicKDistributionsMerge,
+  runAtomicProjection,
+  runAtomicReprojection,
+} from "./atomicKDistributionsCli";
 import { runAtomicBounds, runAtomicShares } from "./atomicLinesCli";
 import {
   runExomolBands,
@@ -1733,6 +1743,22 @@ const USAGE =
   "       atmosphereData atomic-shares --kurucz <dir> --barklem <dir> [--asd-zn2 <csv>] " +
   "[--stages <key,...>] [--out <json>]\n" +
   "       atmosphereData atomic-bounds --kurucz <dir> --barklem <dir> --asd-zn2 <csv> [--out <json>]\n" +
+  "       atmosphereData atomic-floors --kurucz <dir> --barklem <dir> [--ladder E1|E1prime] " +
+  "[--species <key,...>] --out <json>\n" +
+  "       atmosphereData atomic-projection | atomic-reprojection --kurucz <dir> --barklem <dir> " +
+  "--abo <table1.dat.gz> --deb-hibbert <dir> [--stehle <dir>] --floors <json> " +
+  "[--samples <json,...>] [--ladder E1|E1prime] [--species <key,...>] [--stride n:k] --out <json>\n" +
+  "       atmosphereData atomic-k-distributions --species <key> --kurucz <dir> --barklem <dir> " +
+  "--abo <table1.dat.gz> [--deb-hibbert <dir>] [--stehle <dir>] --temperatures t,... " +
+  "[--pressures p,...] [--cells a-b] [--stride n:k] --out <partial.json>\n" +
+  "       atmosphereData atomic-k-distributions-merge --species <key> --out-dir <dir> " +
+  "--measured-from <K> [--kurucz <dir> --barklem <dir> --abo <table1.dat.gz>] <partial.json>...\n" +
+  "       atmosphereData atomic-lines --kurucz <dir> --barklem <dir> --abo <table1.dat.gz> " +
+  "[--stehle <dir>] --species <key,...> --out-dir <dir>\n" +
+  "       atmosphereData atomic-cell-references --kurucz <dir> --barklem <dir> " +
+  "--abo <table1.dat.gz> [--stehle <dir>] --references <key=nm,...;...> --tables <dir> --out <json>\n" +
+  "       atmosphereData alkali-pairs --kurucz <dir> --barklem <dir> --abo <table1.dat.gz> " +
+  "--allard <tables dir> --out <json>\n" +
   "       atmosphereData hcl-overtones --lines <hcl-13100-26400-broad.csv> --tips <dir> [--bounds <json>]";
 
 /** `matching`: writes `colourMatching.json`. */
@@ -1959,6 +1985,22 @@ export function main(args: readonly string[]): number | Promise<number> {
       runAtomicShares(rest);
     } else if (command === "atomic-bounds") {
       runAtomicBounds(rest);
+    } else if (command === "atomic-floors") {
+      runAtomicFloors(rest);
+    } else if (command === "atomic-projection") {
+      runAtomicProjection(rest);
+    } else if (command === "atomic-reprojection") {
+      runAtomicReprojection(rest);
+    } else if (command === "atomic-k-distributions") {
+      runAtomicKDistributions(rest);
+    } else if (command === "atomic-k-distributions-merge") {
+      return runAtomicKDistributionsMerge(rest);
+    } else if (command === "alkali-pairs") {
+      runAlkaliPairs(rest);
+    } else if (command === "atomic-lines") {
+      runAtomicLines(rest);
+    } else if (command === "atomic-cell-references") {
+      runAtomicCellReferences(rest);
     } else if (command === "hcl-overtones") {
       runHclOvertones(rest);
     } else {

@@ -16,7 +16,8 @@
  * - **The equivalent widths** ({@link lineBinWidthsNm}) are the science ruling's upper-bound method:
  *   each line's own Voigt profile (Humlíček 1982, `molecularLines.ts`'s {@link voigtK}) with Doppler
  *   broadening plus 1 km s⁻¹ of microturbulence, classical radiative damping and Unsöld's van der
- *   Waals width doubled, its 1 − e^(−τ) integrated over the part of its profile inside each bake
+ *   Waals width (bounded for a neutral atom's Rydberg levels, {@link vanDerWaalsWidthPerS}) doubled,
+ *   its 1 − e^(−τ) integrated over the part of its profile inside each bake
  *   bin, and the lines' widths summed without overlap, which only raises them. Stimulated emission
  *   is neglected, which also only raises them.
  * - **The cell means** ({@link lineCellMeansM2}) are R08.T4.c's method: each line's
@@ -60,7 +61,7 @@ const BOHR_RADIUS_M = 5.291_772_109_03e-11;
 /** e² ÷ 4πε₀, J m: r_e m_e c². */
 const COULOMB_E2_J_M = ELECTRON_RADIUS_CM * 1e-2 * ELECTRON_MASS_KG * SPEED_OF_LIGHT_M_PER_S ** 2;
 
-/** The hydrogen ionisation energy, the Rydberg's, eV (CODATA 2018: 13.605 693 122 994). */
+/** The Rydberg energy R∞hc, eV (CODATA 2018: 13.605 693 122 994). */
 const RYDBERG_EV = 13.605_693_122_994;
 
 // --- Kurucz's records ---
@@ -93,6 +94,17 @@ export interface KuruczLine {
   readonly upperLabel: string;
   /** Kurucz's reference code for the gf value, trimmed. */
   readonly reference: string;
+  /**
+   * The record's damping constants (R08.T4.e), each log₁₀ of a Lorentzian full width in angular
+   * frequency, 0 where the record gives none (a blank or 0.00 field): the radiative Γ_rad, s⁻¹;
+   * Γ_4 ÷ n_e, the quadratic Stark width per electron, rad s⁻¹ cm³, taken as independent of
+   * temperature; and Γ_6 ÷ N_H, the van der Waals width per neutral hydrogen atom at 10,000 K,
+   * rad s⁻¹ cm³ (the readme's fields 10–12, as Kurucz's `rgfall.for` states them, lines 30–41, the
+   * R08.T4.e science check's reading).
+   */
+  readonly logGammaRadPerS: number;
+  readonly logGammaStarkPerElectron: number;
+  readonly logGammaVanDerWaalsPerHydrogen: number;
 }
 
 /** A fixed-width field of a record, as a number. */
@@ -159,6 +171,9 @@ export function parseKuruczLines(text: string): ReadonlyArray<KuruczLine> {
       lowerLabel: firstIsLower ? firstLabel : secondLabel,
       upperLabel: firstIsLower ? secondLabel : firstLabel,
       reference: record.slice(98, 102).trim(),
+      logGammaRadPerS: optionalField(record, 80, 86, "radiative damping", n),
+      logGammaStarkPerElectron: optionalField(record, 86, 92, "Stark damping", n),
+      logGammaVanDerWaalsPerHydrogen: optionalField(record, 92, 98, "van der Waals damping", n),
     });
   }
   return lines;
@@ -619,7 +634,12 @@ function massPerHydrogenNucleusKg(): number {
  */
 export function referenceColumnPerM2(balance: SahaBalance, symbol: string, stage: 0 | 1): number {
   const element = SOLAR_ABUNDANCES.find((e) => e.symbol === symbol);
-  const fraction = balance.stageFractions.get(symbol)?.[stage];
+  // H I's stage is its free atoms: the balance's neutral share of H counts H₂'s nuclei too
+  // (R08.T4.e, a fault for H alone, which R08.T4.h's stages never took).
+  const fraction =
+    symbol === "H" && stage === 0
+      ? balance.atomicHydrogenPerM3 / balance.hydrogenNucleiPerM3
+      : balance.stageFractions.get(symbol)?.[stage];
   if (element === undefined || fraction === undefined) {
     throw new Error(`the Saha balance holds no element ${symbol}`);
   }
@@ -678,9 +698,137 @@ export interface PerturbersPerM3 {
 /**
  * The least I − E an Unsöld radius takes, eV: a level within 0.1 eV of the limit, or above it, is
  * taken at 0.1 eV, n*² = 136 Z², where the hydrogenic radius has long passed any the impact
- * approximation describes; it only widens such a line.
+ * approximation describes. The floor narrows Unsöld's width below its value at the level's true n*;
+ * where {@link takesRydbergBound} applies, the Rydberg bound ({@link rydbergWidthM3PerS}) now sets
+ * these levels' widths ({@link vanDerWaalsWidthPerS}).
  */
 export const UNSOLD_BINDING_FLOOR_EV = 0.1;
+
+/**
+ * The perturbers' zero-energy electron scattering lengths L, a₀, for the Rydberg bound's Fermi term
+ * (decision-r08-t4e-unsold §2): He's 1.19 (T. F. O'Malley, Phys. Rev. 130 (1963) 1020, its abstract
+ * read; Omont's Table I and Lei et al. 2025's Table III give it from Massey and Burhop 1969); H₂'s
+ * 1.61 (J. Randell et al., J. Phys. B 27 (1994) 2369, as Lei et al. 2025 take it), within Thompson
+ * et al. 1987's 1.64 ± 0.07 from Rb Rydberg shifts (Phys. Rev. A 36, 2134, its abstract read) and
+ * above Chang 1981's 1.27 (J. Phys. B 14, 893, as main's ruling cites it, not read); and H's
+ * spin-weighted √((a_s² + 3a_t²) ÷ 4) = 3.353 of the singlet and triplet lengths 5.965 and 1.7686
+ * (C. Schwartz, Phys. Rev. 124 (1961) 1468, not read; Osorio et al. 2015, Astron. Astrophys. 579,
+ * A53, §3.3.2, give 5.965 and 1.769; the weights are Alekseev and Sobel'man's eqs. (20)–(22)).
+ */
+export const PERTURBER_SCATTERING_LENGTHS_A0 = {
+  H: Math.sqrt((5.965 ** 2 + 3 * 1.768_6 ** 2) / 4),
+  H2: 1.61,
+  He: 1.19,
+} as const;
+
+/** The least effective principal quantum number the Rydberg bound takes: 6 (Omont 1977, §4.2). */
+export const RYDBERG_BOUND_LEAST_N_STAR = 6;
+
+/**
+ * The least distance of a level's n* from an integer at which the Rydberg bound applies: 0.1. Nearer,
+ * the level lies by the high-l manifold, whose l-mixing collisions, which the elastic model leaves
+ * out, widen it: Na 8d–11d + He at 571 K is 2–3 times the bound (Lam, McFarlane and Steel 1984,
+ * DTIC ADA146827, as main's table in decision-r08-t4e-unsold §1 gives it).
+ */
+export const RYDBERG_BOUND_LEAST_DEFECT = 0.1;
+
+/** The atomic unit of speed, αc, m s⁻¹: e² ÷ 4πε₀ħ. */
+const ATOMIC_SPEED_M_PER_S = COULOMB_E2_J_M / HBAR_J_S;
+
+/**
+ * A neutral atom's level's effective principal quantum number, unfloored: √(Ry ÷ (I − E)), or
+ * `Infinity` at or above the limit.
+ */
+export function effectiveQuantumNumber(limitEv: number, levelEv: number): number {
+  const binding = limitEv - levelEv;
+  return binding > 0 ? Math.sqrt(RYDBERG_EV / binding) : Infinity;
+}
+
+/**
+ * Whether a line takes the Rydberg bound (decision-r08-t4e-unsold §2): a neutral atom's line on
+ * Unsöld's width (no Kurucz damping field; R08.T4.e's callers give it only lines with no ABO width
+ * either, and ABO's tables stop below n* 6), whose upper level's unfloored n* is at least
+ * {@link RYDBERG_BOUND_LEAST_N_STAR} and at least {@link RYDBERG_BOUND_LEAST_DEFECT} from an
+ * integer, or which lies at or above the limit.
+ *
+ * @param hydrogenic - True for H I, whose every level lies on the hydrogenic manifold (no quantum
+ *   defect), so that only an entry at or above its limit takes the bound: its n* from Barklem and
+ *   Collet's limit, rounded to 0.1 meV, and the infinite-mass Rydberg would drift from the integer
+ *   by over 0.1 from n 42.
+ */
+export function takesRydbergBound(
+  line: KuruczLine,
+  limitEv: number,
+  coreCharge: number,
+  hydrogenic = false,
+): boolean {
+  if (coreCharge !== 1 || line.logGammaVanDerWaalsPerHydrogen !== 0) {
+    return false;
+  }
+  const nStar = effectiveQuantumNumber(limitEv, line.upperPerCm / PER_CM_PER_EV);
+  return (
+    nStar === Infinity ||
+    (!hydrogenic &&
+      nStar >= RYDBERG_BOUND_LEAST_N_STAR &&
+      Math.abs(nStar - Math.round(nStar)) >= RYDBERG_BOUND_LEAST_DEFECT)
+  );
+}
+
+/**
+ * The Rydberg bound on a neutral atom's line width per perturber, the full width in angular
+ * frequency per perturber density, m³ s⁻¹ (decision-r08-t4e-unsold §2): Γ_R ÷ N = 2 v̄ (σ_pol +
+ * σ_F), in atomic units within, from the upper level's unfloored n* and the pair's mean speed v̄.
+ *
+ * @remarks
+ * - **σ_pol = 3.59 (α_p ÷ v̄)^(2/3)**, the polarisation width's asymptote: V. A. Alekseev and I. I.
+ *   Sobel'man, Sov. Phys. JETP 22 (1966) 882, eq. (34), a full width by their eq. (2), as A. Omont,
+ *   J. Physique 38 (1977) 1343 (HAL jpa-00208705), eq. (4.3) gives it; both read in full by main.
+ *   The coefficient 3.59, not Omont's (4.15) Anderson estimate of 3.18, reproduces his Table III
+ *   (Lei et al. 2025's predicted widths take 3.18, and so run about 11% under the bound).
+ * - **σ_F**, the Fermi scattering-length term over b₁ < b < 2n*² (Omont's (4.9), (4.11)–(4.17)):
+ *   b₁ = (α_p ÷ v̄)^(1/3), b₂ = ½ (0.53 L_p ÷ (n*³ v̄))², and σ_F = 0 where 2n*² ≤ b₁; 2π b₂ (2n*²
+ *   − b₁) where b₂ ≤ b₁ (4.17a); π (4 b₂ n*² − b₂² − b₁²) where b₁ < b₂ < 2n*² (4.17b); π (4n*⁴ −
+ *   b₁²), the orbit's whole area, where b₂ ≥ 2n*², which (4.12)–(4.13) give there. At or above
+ *   the limit, n* → ∞ leaves σ_pol alone.
+ * - α_p is {@link PERTURBER_POLARISABILITIES_A03}'s and L_p {@link PERTURBER_SCATTERING_LENGTHS_A0}'s;
+ *   the lower level is left out, as Omont's model does (its Unsöld C₆ in the phase would lower Γ_R
+ *   35–50%).
+ * - Against measurements (main's table, decision-r08-t4e-unsold §1) the bound is 0.6–1.6 times the
+ *   low-pressure s- and p-series widths (Rb + He, Na + He, K + He) and 0.35–0.76 times the 1930s
+ *   high-density data for He and H₂; it is `estimated`, good to about a factor of 2. From n* 6 to
+ *   about 10 it is extrapolated: Omont §2.6 finds its potential "a good approximation for n > 10"
+ *   that "might be used in the range 5 < n < 10", and Alekseev and Sobel'man's condition (38), ρ_i
+ *   ≪ n*², is marginal there, ρ_i ≈ 10–17 a₀ for H, H₂ and He at 300–1,000 K. Where Omont's Fig. 2
+ *   tests it below that (Cs + Ar, n 10–13, n* 6.4–9.4), the model meets or slightly exceeds the
+ *   data.
+ *
+ * @param speedMPerS - The pair's mean relative speed √(8kT ÷ πμ), as Unsöld's width takes it.
+ */
+export function rydbergWidthM3PerS(
+  nStar: number,
+  perturber: keyof PerturbersPerM3,
+  speedMPerS: number,
+): number {
+  const v = speedMPerS / ATOMIC_SPEED_M_PER_S;
+  const alpha = PERTURBER_POLARISABILITIES_A03[perturber];
+  const sigmaPol = 3.59 * (alpha / v) ** (2 / 3);
+  let sigmaFermi = 0;
+  if (Number.isFinite(nStar)) {
+    const orbit = 2 * nStar * nStar;
+    const b1 = (alpha / v) ** (1 / 3);
+    const b2 = 0.5 * ((0.53 * PERTURBER_SCATTERING_LENGTHS_A0[perturber]) / (nStar ** 3 * v)) ** 2;
+    if (orbit <= b1) {
+      sigmaFermi = 0;
+    } else if (b2 <= b1) {
+      sigmaFermi = 2 * Math.PI * b2 * (orbit - b1);
+    } else if (b2 < orbit) {
+      sigmaFermi = Math.PI * (2 * b2 * orbit - b2 * b2 - b1 * b1);
+    } else {
+      sigmaFermi = Math.PI * (orbit * orbit - b1 * b1);
+    }
+  }
+  return 2 * speedMPerS * (sigmaPol + sigmaFermi) * BOHR_RADIUS_M ** 2;
+}
 
 /** ⟨r²⟩ ÷ a₀² of a level E below the limit I of a stage of core charge Z, Unsöld's 2.5 n*⁴ ÷ Z². */
 function unsoldRadiusSquared(limitEv: number, levelEv: number, coreCharge: number): number {
@@ -695,10 +843,15 @@ function unsoldRadiusSquared(limitEv: number, levelEv: number, coreCharge: numbe
  * not re-read): C₆ = (e² ÷ 4πε₀ħ) α_p (⟨r²⟩_u − ⟨r²⟩_l), ⟨r²⟩ = 2.5 n*⁴ a₀² ÷ Z², and the impact
  * theory's Γ₆ = 8.08 v̄^(3/5) C₆^(2/5) n_p summed over the perturbers H, H₂ and He, v̄ = √(8kT ÷ πμ)
  * (as D. F. Gray, The Observation and Analysis of Stellar Photospheres, 3rd ed., 2005, §11, gives
- * them; not re-read).
+ * them; not re-read). Where a line takes the Rydberg bound ({@link takesRydbergBound}), each
+ * perturber's width is the lesser of Unsöld's and the bound's ({@link rydbergWidthM3PerS}) before the
+ * sum (decision-r08-t4e-unsold): Unsöld's C₆ is the R⁻⁶ term of a multipole expansion, valid only
+ * for a perturber outside the orbit, and from n* 6 the perturber meets the ion core and the
+ * electron apart, each width saturating.
  *
  * @param limitEv - The stage's ionisation energy.
  * @param coreCharge - 1 for a neutral atom, 2 for a first ion.
+ * @param hydrogenic - True for H I ({@link takesRydbergBound}).
  */
 export function vanDerWaalsWidthPerS(
   line: KuruczLine,
@@ -707,12 +860,16 @@ export function vanDerWaalsWidthPerS(
   atomMassDa: number,
   temperatureK: number,
   perturbers: PerturbersPerM3,
+  hydrogenic = false,
 ): number {
   const deltaR2 = Math.max(
     unsoldRadiusSquared(limitEv, line.upperPerCm / PER_CM_PER_EV, coreCharge) -
       unsoldRadiusSquared(limitEv, line.lowerPerCm / PER_CM_PER_EV, coreCharge),
     0,
   );
+  const nStar = takesRydbergBound(line, limitEv, coreCharge, hydrogenic)
+    ? effectiveQuantumNumber(limitEv, line.upperPerCm / PER_CM_PER_EV)
+    : undefined;
   let width = 0;
   for (const p of ["H", "H2", "He"] as const) {
     const alphaM3 = PERTURBER_POLARISABILITIES_A03[p] * BOHR_RADIUS_M ** 3;
@@ -721,7 +878,10 @@ export function vanDerWaalsWidthPerS(
       ((atomMassDa * PERTURBER_MASSES_DA[p]) / (atomMassDa + PERTURBER_MASSES_DA[p])) *
       ATOMIC_MASS_KG;
     const speed = Math.sqrt((8 * BOLTZMANN_J_PER_K * temperatureK) / (Math.PI * reducedKg));
-    width += 8.08 * speed ** 0.6 * c6 ** 0.4 * perturbers[p];
+    const unsold = 8.08 * speed ** 0.6 * c6 ** 0.4;
+    const perPerturber =
+      nStar === undefined ? unsold : Math.min(unsold, rydbergWidthM3PerS(nStar, p, speed));
+    width += perPerturber * perturbers[p];
   }
   return width;
 }
@@ -900,15 +1060,19 @@ export function linesInWindow(
  * {@link REFERENCE_PRESSURE_PA}, Doppler broadening with {@link MICROTURBULENCE_M_PER_S}, classical
  * damping and {@link VAN_DER_WAALS_FACTOR} times Unsöld's width with the balance's H, H₂ and He,
  * summed over the lines and divided by the bin's width.
+ *
+ * @param columnFactor - The column over the reference column: 1, or R08.T4.e's recorded 100 for a
+ *   visibility floor's figure at a hundred times it (the widths stay the balance's).
  */
 export function stageBinShares(
   data: SahaData,
   stage: AtomicStage,
   lines: ReadonlyArray<KuruczLine>,
   temperatureK: number,
+  columnFactor = 1,
 ): StageShares {
   const balance = sahaBalance(data, temperatureK, REFERENCE_PRESSURE_PA);
-  const columnPerM2 = referenceColumnPerM2(balance, stage.symbol, stage.stage);
+  const columnPerM2 = columnFactor * referenceColumnPerM2(balance, stage.symbol, stage.stage);
   const limitEv = ionisationLimitEv(data, stage);
   const q = partitionFunctionAt(data.partitionFunctions, barklemName(stage), temperatureK);
   const atomMassDa = atomMassOf(stage);
@@ -935,6 +1099,7 @@ export function stageBinShares(
             atomMassDa,
             temperatureK,
             perturbers,
+            stage.symbol === "H",
           )) /
       (4 * Math.PI * SPEED_OF_LIGHT_M_PER_S * 100);
     const widths = lineBinWidthsNm(

@@ -13937,6 +13937,769 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
       10⁻⁴ (the HCl record above). Not visible vertically; R08.T10.a's test decides grazing paths.
     - _Unsöld's widths near the limit._ The 0.1 eV floor on a level's binding only widens a line; a
       dedicated (ABO) width is R08.T4.e's.
+- **Deviations in T4.e, as built** (2026-10-20; decision-r08-t4ef-storage and its addendum of
+  2026-10-19, decision-r08-t4e-budget of 2026-10-19, decision-r08-t4e-unsold and its follow-up "The
+  581 nm residual" of 2026-10-20). New `src/tools/atomicKDistributions.ts`,
+  `atomicKDistributionsCli.ts`, `balmerStark.ts` and `alkaliPairs.ts`, with
+  `atomicKDistributions.test.ts`, `atomicKDistributionsCli.test.ts`, `balmerStark.test.ts` and
+  `alkaliPairs.test.ts`; `atmosphereData.ts`'s `atomic-floors`,
+  `atomic-projection`, `atomic-reprojection`, `atomic-k-distributions`,
+  `atomic-k-distributions-merge`, `atomic-lines`, `atomic-cell-references` and `alkali-pairs`;
+  `atomicLines.ts` (Kurucz's three damping fields on `KuruczLine`, H I's free atoms in
+  `referenceColumnPerM2`, `stageBinShares`' column factor, the Rydberg bound in
+  `vanDerWaalsWidthPerS` with `PERTURBER_SCATTERING_LENGTHS_A0`, `effectiveQuantumNumber`,
+  `takesRydbergBound` and `rydbergWidthM3PerS`), `atomicLinesCli.ts` (O's list and answer, the
+  `drawnFromFloor` answer), `kDistributions.ts` (`ReductionGrid.rowsPa`, `curveRowsPa`,
+  `chainRowsPa`, `sigmaAtPressure`, the chain's rows, `raisedFirstNodeChecksPa`, the pressure
+  lattice `PRESSURE_LATTICE_PA` with `meetsPressureRule`, `midpointFor` and `latticePressurePa`,
+  `exactRowsError` and `ChainError.exactRowsError`, the `antoine` `SaturationCurve`),
+  `kDistributionsCli.ts` (`droppedNodesAbout`, `withKeptPressures`, `sortFailures`' alternates,
+  refinement economy and midpoints, the merge's `pressuresPa`, `TableSource.finestStepK`,
+  `CellReductionSource.chainSaturation`), `lineReferences.ts` (`nearK`; `cell-references` on the
+  lattice) and `molecularLines.ts` (two parameter types); the client's `absorbers.ts`
+  (`absorberSpecs`' order, `absorberCurvePressures`' rows and midpoints, `MIDPOINT_MERGE_DECADES`,
+  `ABSORBER_PAIR_CROSS_SECTIONS`), `absorbers/kDistribution.ts` (`STANDARD_PRESSURES_PA`,
+  `PRESSURE_LATTICE_PA`, `isLatticeMidpoint`, `curveRowsPa`) and `absorbers/transparency.ts`; the
+  tables in `absorbers/kDistributions/` (Na, K, Fe, H, Zn, Mg⁺, Si⁺, Mg and Cr), the line files in
+  `absorbers/lines/`, `absorbers/alkaliPairs.json` and `absorbers/lineReferencesAtoms.json`, new;
+  `bounds.json` and `atomicBounds.json`; tests `atomicTables.test.ts` (new), `transparency.test.ts`,
+  `lineCurves.test.ts`, `kDistribution.test.ts`, `lineReferences.test.ts`, `atomicLines.test.ts`,
+  `atomicLinesCli.test.ts`, `kDistributions.test.ts` (the lattice's, E3's alternates', E4's checks,
+  the read through exact rows and the Antoine fit) and `kDistributionsReduce.test.ts` (the held
+  node's check, a thinned table's rows, the condensing cap and the midpoint merge); `parity.test.ts`'
+  doc; `scripts/atmosphereData.mjs`'s comment; `.prettierignore`; `NOTICE`.
+  No Rust, wire, WGSL or generator change.
+  - _The plan's entry, superseded._ As the brief lists them, and the rulings add:
+    - "Each drawn species takes every line in 380–760 nm, and within 20 nm outside it for its
+      wings, whose equivalent width there is at least 10⁻³ nm": the tables take every line over
+      360–780 nm;
+    - "on R08.T4.f's temperature ladder": E1′ (decision-r08-t4e-budget §3), and Mg⁺'s and Si⁺'s
+      ruled nodes (§6);
+    - "with Allard et al.'s pressure-broadened profiles for H₂ and He perturbers" and "Na D's and
+      K's far wings as pairs with H₂ and He, from Allard et al.'s profiles": only Na–H₂'s are
+      open, and `Na+He`, `K+H2` and `K+He` take the ruled estimate (decision-r08-t4ef-storage §6);
+    - "O I's forbidden lines [O I] 630.0 and 636.4 nm": a stated none below 5,000 K
+      (decision-r08-t4e-budget §7); and "He I's lines in the range for profiles above 5,000 K":
+      He stays pending above 5,000 K;
+    - "Mg II … stays pending … unless" and the expected shares (T4.h's record);
+    - the lines of the deferred stages (decision-r08-t4e-budget §10): Ca I's bullet whole (422.7
+      nm, its 1.88–1.90 eV lines and 657.3 nm), Ca being deferred on the built bytes (below); Si I
+      390.6 nm; Al I's, Mn I's, V I's, Ni I's and Ti I's; and the ions Ca II's, Fe II's, Ti II's, V
+      II's, Cr II's and Mn II's, with [Fe II]'s forbidden lines;
+    - in its tests, "each line's equivalent width" (each reference cell's, below), "Sudarsky et al.
+      2000's Bond albedo for class IV is 0.03, Table 1a" (the test cites their §7's geometric
+      albedo, below), and the shares "recorded beside science-r08-unowned-absorbers' estimate",
+      which this record holds, not a test.
+
+    Main's docs pass adds the bytes bullet.
+
+  - _The projection on E1_ (the first round's, accepted): per stage on T4.d's format with the
+    samples' mean G, its ladder from its floor and E3's 20 pressures with the alternates its
+    samples kept, 192.2 MB (187.2 of tables and 5.05 of line files) for the 23 stages, 212.5 MB
+    with the committed 20.3 MB; as specified (the 50 K grid on 30 pressures) 1,110.6 MB; E1 −748
+    MB, E2 −96, its refinement +7.5, E3 −82 and E4 −0.2 MB; the 50 K grid figure 1,105 MB of
+    tables. Its table, the blocked report's of 2026-10-20 (`agent-blocked`): each stage's samples
+    are its strongest, a median and a band-edge cell at its ladder's lowest, middle and highest
+    nodes on all 30 pressures; "refined" counts the nodes after E1's bisection as the samples
+    needed it; MB is T4.d's format (20 + 8G + 2·T·P·G a cell) at the samples' mean G on P, E3's 20
+    nodes and the alternates a sample kept, less E4's raised nodes, the 50 K grid on 30 pressures in
+    brackets; CPU the full reduction's on E1–E3 from the samples' times at 20 pressures:
+
+    | Stage     |     Cells | Nodes: range, ladder (refined) | G: strongest/median/edge (cells, nm) | MB, E1–E4 (50 K grid) |   P | CPU, h | List, MB | Lines, kB |
+    | --------- | --------: | ------------------------------ | ------------------------------------ | --------------------: | --: | -----: | -------: | --------: |
+    | H         |        16 | 3,400–5,000 K, 9 (9)           | 22/18/18 (656/383/655)               |               0.1 (2) |  19 |    0.0 |     0.19 |         5 |
+    | Na        |        47 | 500–5,000 K, 36 (36)           | 28/28/20 (589/425/588)               |               2.0 (7) |  23 |    0.3 |     0.06 |         3 |
+    | Mg        |       119 | 1,000–5,000 K, 26 (34)         | 40/32/36 (384/441/385)               |              6.7 (21) |  23 |    1.0 |     0.43 |        11 |
+    | Mg⁺       |        77 | 4,600–5,000 K, 3 (4)           | 36/20/26 (448/386/449)               |              0.3 (10) |  19 |    0.1 |     0.09 |         7 |
+    | Al        |        76 | 1,000–5,000 K, 26 (26)         | 36/24/20 (396/487/397)               |              2.2 (10) |  21 |    0.6 |     0.13 |         5 |
+    | Si        |       320 | 1,600–5,000 K, 20 (20)         | 34/40/30 (391/473/390)               |             10.3 (54) |  23 |    1.9 |     1.06 |        45 |
+    | Si⁺       |       172 | 4,600–5,000 K, 3 (5)           | 24/4/14 (386/716/387)                |              0.5 (12) |  19 |    0.1 |     0.14 |        11 |
+    | K         |        69 | 500–5,000 K, 36 (36)           | 42/26/26 (405/404/404)               |              3.1 (12) |  20 |    1.0 |     0.11 |         5 |
+    | Ca        |       381 | 1,000–5,000 K, 26 (26)         | 46/32/58 (423/524/422)               |             19.0 (84) |  21 |    3.0 |     1.99 |       316 |
+    | Ca⁺       |       132 | 1,600–5,000 K, 20 (20)         | 34/24/24 (393/394/394)               |              2.9 (18) |  20 |    1.0 |     0.15 |        11 |
+    | Ti        |       381 | 1,000–5,000 K, 26 (26)         | 30/52/64 (396/485/397)               |             20.4 (90) |  21 |    2.7 |     2.45 |       418 |
+    | Ti⁺       |       379 | 2,600–5,000 K, 13 (13)         | 34/52/32 (440/456/439)               |              8.3 (73) |  21 |    1.0 |     0.71 |        83 |
+    | V         |       381 | 1,000–5,000 K, 26 (31)         | 28/36/30 (439/513/440)               |             16.4 (58) |  22 |    2.7 |     2.58 |       452 |
+    | V⁺        |       381 | 3,000–5,000 K, 11 (11)         | 32/28/34 (390/619/391)               |              5.4 (58) |  20 |    0.8 |     1.47 |       188 |
+    | Cr        |       381 | 1,000–5,000 K, 26 (26)         | 52/28/46 (426/599/425)               |             17.6 (78) |  21 |    2.8 |     2.57 |       530 |
+    | Cr⁺       |       381 | 3,400–5,000 K, 9 (9)           | 34/26/30 (424/612/423)               |              4.2 (56) |  20 |    0.6 |     5.63 |       490 |
+    | Mn        |       381 | 1,000–5,000 K, 26 (26)         | 56/30/58 (403/462/402)               |             19.2 (89) |  20 |    3.0 |     1.53 |       224 |
+    | Mn⁺       |       381 | 3,800–5,000 K, 7 (7)           | 58/32/42 (413/480/412)               |              5.1 (82) |  21 |    0.6 |     3.08 |       200 |
+    | Fe        |       381 | 1,000–5,000 K, 26 (26)         | 48/26/56 (386/452/385)               |             17.3 (80) |  20 |    3.1 |     6.99 |       764 |
+    | Fe⁺       |       381 | 3,400–5,000 K, 9 (9)           | 24/38/38 (517/544/518)               |              4.7 (62) |  20 |    0.6 |     7.10 |       677 |
+    | Ni        |       380 | 1,000–5,000 K, 26 (26)         | 64/34/42 (386/424/387)               |             18.6 (86) |  20 |    2.7 |     0.61 |       126 |
+    | Ni⁺       |       381 | 4,600–5,000 K, 3 (5)           | 28/30/38 (407/510/408)               |              2.4 (59) |  19 |    0.3 |     4.50 |       481 |
+    | Zn        |        47 | 3,400–5,000 K, 9 (9)           | 40/20/20 (481/396/482)               |               0.5 (6) |  20 |    0.1 |     0.02 |         2 |
+    | **Total** | **6,025** |                                |                                      |     **187.2 (1,105)** |     | **30** | **44.6** | **5,055** |
+
+    O I is not in it, a stated none to 5,000 K. The totals, each line adding one economy, the line
+    files' 5.05 MB throughout:
+
+    | Economy                                                                        |  T4.e, MB | With the committed 20.3 MB |
+    | ------------------------------------------------------------------------------ | --------: | -------------------------: |
+    | As specified (50 K grid, 30 pressures)                                         |   1,110.6 |                    1,130.9 |
+    | E1, the ladder over each full range                                            |     362.6 |                      382.9 |
+    | + E2, the floors                                                               |     266.5 |                      286.9 |
+    | + E1's refinement, as the samples needed it                                    |     274.1 |                      294.4 |
+    | + E3, 20 pressures with the rows at 30 (alternates kept where a sample failed) |     192.4 |                      212.7 |
+    | + E4, raised first nodes                                                       | **192.2** |                  **212.5** |
+
+  - _E1′, the 10% ladder_ (decision-r08-t4e-budget §3, a deviation from E1): below 1,000 K E1's
+    50 K steps; from 1,000 K each step the largest multiple of 50 K at most 10% of its lower node,
+    the range's top the last node (1,000, 1,100, …, 4,300, 4,700 and 5,000 K: 20 nodes for
+    1,000–5,000 K, 30 for 500–5,000 K), refined by bisection to a quarter of E1's step there
+    (12.5 K below 1,000 K, 25 K to 2,000 K, 50 K beyond), an interval still failing then
+    `estimated` (`ladderTemperatures(…, "E1prime")`, `ladderFinestStepK`).
+  - _The re-projection on E1′_ (§3's "samples first"): each stage's three earlier samples reduced
+    over its whole ladder on E3's pressures and refined as the merge refines
+    (`atomic-reprojection`), after the two fixes below (the alternates first, the fixed grid):
+
+    | Stage | Cells | Nodes: range, refined | G: strongest/median/edge (mean) |   P | Table, MB | Lines, kB | Total, MB | CPU, h |
+    | ----- | ----: | --------------------- | ------------------------------- | --: | --------: | --------: | --------: | -----: |
+    | Na    |    47 | 500–5,000 K, 30       | 28/28/20 (25.3)                 |  23 |      1.65 |         3 |      1.66 |    0.5 |
+    | K     |    69 | 500–5,000 K, 30       | 38/24/24 (28.7)                 |  20 |      2.39 |         5 |      2.40 |    1.9 |
+    | Fe    |   381 | 1,000–5,000 K, 20     | 42/44/76 (54.0)                 |  20 |     16.63 |       764 |     17.40 |    4.5 |
+    | H     |    16 | 3,300–5,000 K, 6      | 22/18/18 (19.3)                 |  20 |      0.08 |         5 |      0.08 |    0.0 |
+    | Zn    |    47 | 3,300–5,000 K, 6      | 26/20/20 (22.0)                 |  20 |      0.26 |         2 |      0.26 |    0.1 |
+    | Mg⁺   |    77 | 4,400–5,000 K, 4      | 36/16/20 (24.0)                 |  20 |      0.31 |         7 |      0.32 |    0.1 |
+    | Si⁺   |   172 | 4,400–5,000 K, 4      | 26/4/14 (14.7)                  |  20 |      0.43 |        11 |      0.44 |    0.1 |
+    | Mg    |   119 | 1,000–5,000 K, 20     | 44/38/34 (38.7)                 |  23 |      4.27 |        11 |      4.28 |    1.3 |
+    | Cr    |   381 | 1,000–5,000 K, 20     | 56/34/58 (49.3)                 |  21 |     15.95 |       530 |     16.48 |    4.3 |
+    | Ca    |   381 | 1,000–5,000 K, 20     | 46/38/62 (48.7)                 |  20 |     14.99 |       316 |     15.31 |    4.1 |
+    | Ca⁺   |   132 | 1,500–5,000 K, 15     | 34/24/24 (27.3)                 |  20 |      2.20 |        11 |      2.21 |    1.3 |
+    | Al    |    76 | 1,000–5,000 K, 20     | 36/20/20 (25.3)                 |  20 |      1.56 |         5 |      1.56 |    0.9 |
+    | V     |   381 | 1,000–5,000 K, 24     | 30/52/28 (36.7)                 |  22 |     14.87 |       452 |     15.32 |    3.8 |
+    | Ti    |   381 | 1,000–5,000 K, 20     | 32/56/68 (52.0)                 |  21 |     16.81 |       418 |     17.23 |    3.9 |
+    | Fe⁺   |   381 | 3,300–5,000 K, 6      | 24/34/34 (30.7)                 |  20 |      2.91 |       677 |      3.58 |    0.6 |
+    | Ti⁺   |   379 | 2,500–5,000 K, 9      | 36/50/40 (42.0)                 |  20 |      5.87 |        83 |      5.95 |    1.1 |
+    | Mn    |   381 | 1,000–5,000 K, 20     | 58/40/62 (53.3)                 |  21 |     17.24 |       224 |     17.46 |    4.4 |
+    | Ni    |   380 | 1,000–5,000 K, 20     | 50/32/44 (42.0)                 |  20 |     12.90 |       126 |     13.03 |    4.0 |
+
+    The 18 stages of the order come to 135.0 MB on E1′, against 162.5 MB on E1 for the same 18 in
+    the first projection. Two changes act together: E1′'s nodes (26 → 20, 23% of a 1,000–5,000 K
+    table; 36 → 30, 17% of Na's and K's), and the fixed fine grid, which raised the samples' mean
+    G by up to 26% (Fe 43 → 54). No refinement was needed on E1′ but V's median cell's (24
+    nodes), and no interval stayed `estimated`.
+
+  - _The samples on the bound_ (decision-r08-t4e-unsold §5, step 4): Na's, K's, H's, Zn's and Mg's
+    samples re-projected on the bounded widths: Na 1.66 → 1.63 MB (22 pressures), K 2.40, H 0.08 and
+    Zn 0.26 as before, Mg 4.28 → 3.60 MB (20 pressures, mean G 38.7 → 37.3); the 18 stages 134.25 MB.
+  - _Each stage's ladder._ E1′ for every drawn stage: each one's E1′ bytes after refinement lie
+    under E1's least, its unrefined nodes on E3's 20 pressures at E1′'s G (Na 1.66 against 1.73 MB,
+    Fe 17.40 against 22.33, …). Mg⁺'s and Si⁺'s ruled nodes are E1's; V's E1′ (24 refined nodes,
+    15.32 MB) lies just above E1's bound (15.10 MB), and V is deferred on either.
+  - _The order and the draw_ (decision-r08-t4e-budget §§2 and 4). The order is main's, by colour:
+    the science ruling's NIST sums as transmitted sunlight (5,772 K Planck, CIE 1931), each stage
+    alone, largest over 2,000–4,600 K, Δu′v′ at the reference column (main's figures): Fe 5.3 ×
+    10⁻², Na 2.7 × 10⁻², Ca 2.2 × 10⁻², Cr 1.8 × 10⁻², Ti 1.1 × 10⁻², Mg 9.3 × 10⁻³, V 9.1 × 10⁻³,
+    Mn 3.4 × 10⁻³, Ti⁺ 1.8 × 10⁻³, Ni 1.6 × 10⁻³, Ca⁺ 5.9 × 10⁻⁴, Al 5.5 × 10⁻⁴, Fe⁺ 5.4 × 10⁻⁴,
+    Cr⁺ 1.5 × 10⁻⁴, V⁺ 1.1 × 10⁻⁴, Si 9 × 10⁻⁵, Zn 4.5 × 10⁻⁵, Mn⁺ 2.6 × 10⁻⁵, Mg⁺ 2.2 × 10⁻⁵, Si⁺
+    3 × 10⁻⁶ and Ni⁺ 1 × 10⁻⁶; Na and K first from the literature (Sudarsky, Burrows and Pinto
+    2000's class IV; Burrows, Marley and Sharp 2000), and the iron group's forests over 405–560 nm
+    moving colour most. In the order Na, K, Fe, H, Zn, Mg⁺, Si⁺, Mg, Cr, Ca, Ca⁺, Al, V, Ti, Fe⁺,
+    Ti⁺, Mn, Ni, each stage was drawn while the projected total stayed at or under 60,000,000 bytes,
+    each projection replaced by the stage's built bytes once built and the stages reduced in the
+    order. On the samples' projection (E1′ on the bound, above) the draw was Na, K, Fe, H, Zn, Mg⁺,
+    Si⁺, Mg, Cr, Ca and Al, 59.47 MB, Ca⁺ deferred; on the built bytes it is:
+
+    | Stage                   |                          Projected, MB | Built, MB |           Running, MB |                      |
+    | ----------------------- | -------------------------------------: | --------: | --------------------: | -------------------- |
+    | Na                      |                                   1.63 |     1.775 |                 1.775 | drawn                |
+    | K                       |                                   2.40 |     2.513 |                 4.288 | drawn                |
+    | Fe                      |                                  17.40 |    27.337 |                31.625 | drawn                |
+    | H                       |                                   0.08 |     0.132 |                31.757 | drawn                |
+    | Zn                      |                                   0.26 |     0.302 |                32.058 | drawn                |
+    | Mg⁺                     |                                   0.32 |     0.321 |                32.379 | drawn                |
+    | Si⁺                     |                                   0.44 |     0.557 |                32.936 | drawn                |
+    | Mg                      |                                   3.60 |     3.670 |                36.607 | drawn                |
+    | Cr                      |                                  16.48 |    21.713 |                58.320 | drawn                |
+    | Ca                      |                                  15.31 |         – |                 73.63 | deferred             |
+    | Ca⁺                     |                                   2.21 |         – |                 60.53 | deferred             |
+    | Al                      |                                   1.56 |         – | 59.88 → 60.03 or more | drawn, then deferred |
+    | V, Ti, Fe⁺, Ti⁺, Mn, Ni | 15.32, 17.23, 3.58, 5.95, 17.46, 13.03 |         – |          each past 60 | deferred             |
+
+    Fe's and Cr's full tables refined well past their samples: Fe's three samples passed on E1′'s
+    20 nodes, but its 381 cells asked for E3's three alternates and then 13 refined nodes (33), its
+    mean G 45.6 against the samples' 54.0; Cr's for two alternates (177.8 and 562.3 kPa) and a
+    midpoint (421.7 kPa; 23 pressures) and 9 refined nodes (29), mean G 41.4 against 49.3. Ca was deferred on its projection after Cr (it
+    would make 73.6 MB), Ca⁺ likewise (60.53). Al was drawn on its projection (59.88 MB) and
+    reduced: its first pass kept E3's three alternates and its second asked for two midpoints (421.7
+    and 749.9 kPa) and eight refined intervals, so that at its 25 pressures and 20 nodes alone its
+    table (mean G 22.2) takes the total to 60.03 MB and with the refinement to about 60.7 MB; the
+    built tables would pass 60,000,000 bytes, so the last drawn stage, Al, is deferred (§4's
+    "defer the last drawn stage") and its reduction was stopped there. No later stage fits the
+    1.68 MB left. Si, V⁺, Cr⁺, Mn⁺ and Ni⁺ are deferred whatever room is left. Main's expected
+    outcome on E1′ drew Ca, Ca⁺ and Al at about 58 MB; the fixed grid's larger G and the full
+    tables' refinement take their room.
+
+  - _The deferred stages_ (decision-r08-t4e-budget §5), each keeping its entry, cell means, file and
+    task R08.T4.e, its `PENDING_ABSORBERS` line's `what` ending "deferred past T4.e's byte budget
+    (main, 2026-10-19)", no line file committed: T4.c's in `bounds.json`, Si, Ti, Ca, Ca⁺, Fe⁺ and
+    Ti⁺; T4.h's interim ones in `atomicBounds.json`, Al, V, Mn, Ni, V⁺, Cr⁺ and Mn⁺; and Ni⁺, its
+    stated none below 4,600 K and its entry from 4,600 K. Ca's T4.c entry, taken out while Ca was
+    drawn, is back in `bounds.json` byte for byte. R08.T10.a labels any body where one is not
+    negligible.
+  - _What stays pending for R08.T4.e, and why._ He, Na⁺, Al⁺, K⁺, Zn⁺ and O above 5,000 K, where
+    T4.e's range ends (He's lines are drawn by no table, the others are stated none to 5,000 K,
+    each pending from its `belowK` at He's nodes in `atomicBounds.json`); the 14 deferred stages
+    above, Ni⁺'s from 4,600 K; and `H2+e-`, H₂⁻'s free–free, at its estimate, no lawful table being
+    found (below).
+  - _The floors_ (§3; `atomic-floors` on the stage's ladder), T_v with the temperature at which the
+    share at 100 times the reference column reaches 10⁻³, E1′'s (E1's in brackets): H 3,300 K and
+    3,300 K (3,400, 3,400); Zn 3,300 and 2,750 K (3,400, 2,600); Ca⁺ 1,500 and 1,500 (1,600, 1,500);
+    Ti⁺ 2,500 and 2,300 (2,600, 2,400); Fe⁺ 3,300 and 3,300 (3,400, 3,200); Mg⁺ 4,700 on the ladder,
+    ruled 4,600, and 4,300 (4,600, 4,200); Si⁺ 4,700, ruled 4,600, and 4,300 (4,600, 4,400). E1's
+    for the stages deferred on both: Si 1,600 (1,300), V⁺ 3,000 (2,800), Cr⁺ 3,400 (3,200), Mn⁺
+    3,800 (3,400), Ni⁺ 4,600 ruled (4,000). Na, K, Mg, Al, Ca, Ti, V, Cr, Mn, Fe and Ni have none:
+    each passes 10⁻³ at its range's first node. A floor pairs a stated none below T_v with the
+    table from T_v (the `belowK` contract's table branch): H and Zn are stated none below 3,300 K
+    (`underEquivalentWidthBound`, their evidence in `transparency.ts`: H 4.9 × 10⁻⁵ at 3,300 K and
+    1.0 × 10⁻³ at 3,600 K in 633–659 nm, Hα; Zn 8.2 × 10⁻⁴ and 1.3 × 10⁻³ in 456–481 nm, Zn I
+    481.05 nm); the deferred stages' floors state nothing, their entries kept. Main weighs the
+    100-times figures at R08.T10.a.
+  - _Mg⁺'s and Si⁺'s 4,400 K node_ (decision-r08-t4e-budget §6). Their nodes are 4,400, 4,600,
+    4,800 and 5,000 K, E1's, for the cubic read; `belowK` stays 4,600 K, their pending entries from
+    4,600 K went by the table branch, and `absorberSpecs`' order skips them below it, so the
+    4,400 K node only shapes the cubic. Neither table refined a temperature; Mg⁺ kept two alternates
+    (22 pressures), Si⁺ three and the two midpoints (25). `atomic-bounds` still decides them by
+    their shares (`drawnFromFloor`) and writes no entry.
+  - _O I_ (decision-r08-t4e-budget §7): a stated none by the third reason below 5,000 K in Na⁺'s
+    form, its entry from 5,000 K at He's nodes in `atomicBounds.json` (`atomic-bounds`, its list
+    now in `KURUCZ_LISTS`), its `what` that T4.e's range does not draw it above 5,000 K; T4.c's
+    300–5,000 K `O` entry left `bounds.json`. Its largest share to 4,600 K is 4.92 × 10⁻⁴ (at
+    4,600 K, in 608–633 nm) and 5.84 × 10⁻⁴ at 5,000 K, 160 lines in 360–780 nm, mostly [O I]
+    630.03 nm (Kurucz's log gf −9.819): τ₀ ≈ 2.8 at the reference column, the Doppler curve of
+    growth keeping about half its linear width, main's check 4.8 × 10⁻⁴. Storey and Zeippen 2000
+    (MNRAS 312, 813, Table 4) give A = 6.446 × 10⁻³ s⁻¹ (log gf about −9.72), above Kurucz's,
+    which raises the share about 10%, still under 10⁻³; the statement stays on Kurucz's list. At
+    100 times the reference column its share reaches 10⁻³ (1.6 × 10⁻³ from 1,000 K, on the flat
+    part of its curve of growth).
+  - _H I's widths_ (decision-r08-t4e-budget §8). By H atoms, Hα, Hβ and Hγ take Barklem, Piskunov
+    and O'Mara 2000b's Table 3 p–d component (Hα σ 1,180 a₀², α 0.677; Hβ 2,320, 0.455; Hγ 4,208,
+    0.380; their impact limits 35.0, 13.2 and 7.7 Å, beyond the 25 cm⁻¹ shape), converted as ABO's
+    are (`aboWidth`, at the H–H reduced mass), the members above Hγ Hγ's, a lower bound; by H₂ and
+    He Unsöld's, as before (`selfBroadeningSource`, `hydrogenLineSet`). They enter only H's
+    broadening ratio: the table's axis is H₂'s pressure. Stark broadening (the brief's §3.1) is a
+    Lorentzian of Stehlé and Hutcheon 1999's half width (A&AS 140, 93; CDS VI/98A: H3–H10, 10¹⁰–
+    10¹⁵ cm⁻³, 2,500–10,000 K, ln w linear in ln n_e, linear in T; H10's for the members above,
+    whose 25 cm⁻¹ shapes reach no cell) at the node's n_e from the solar-abundance Saha balance at
+    its T and p (`balmerStark.ts`): 6 × 10⁹–1 × 10¹⁵ cm⁻³ at 3,300–5,000 K and 10 Pa–10 MPa. Near
+    1 kPa above 4,300 K it is 35–50% of Hα's Lorentz width; at 10 Pa under the radiative; at
+    0.1 MPa and above about 10% of the van der Waals. The table is `estimated` (n_e is no axis, and
+    a Lorentzian overstates the quasi-static ion wing, ∝ Δλ^(−5/2) beyond a few half widths). In
+    LTE; a non-LTE thermosphere is not modelled. H's bound–free from n ≥ 3 is stated negligible
+    beside H⁻ below 5,000 K, as the plan has it.
+  - _H I's reference column, fixed_ (decision-r08-t4e-budget §9): `referenceColumnPerM2` counted the
+    nuclei bound in H₂ as H I; H I's stage is now the free atoms (`atomicHydrogenPerM3 ÷
+hydrogenNucleiPerM3`), a fault for H alone, which T4.h's stages never took, with a regression
+    test ("gives H I's stage its free atoms alone").
+  - _Na D's widths._ By H₂, Allard et al. 2019's ab initio impact half widths (A&A 628, A120, the
+    deposit's tables' headers at 500–3,000 K and 10²¹ cm⁻³; ln w linear in ln T, a power law beyond,
+    T^0.37 for D2 and T^0.38 for D1 above 3,000 K), since Barklem et al.'s ABO width scaled to H₂ by
+    Unsöld's rule is 1.25–1.37 times theirs for D2 and 1.64–1.74 for D1 (5.83 against 4.40 ×
+    10⁻²⁰ cm⁻¹ cm³ full width for D2 at 1,000 K); by H the line's own ABO width, ab initio for H
+    atoms; by He and the air gases Allard's H₂ width scaled by Unsöld's rule (`NA_D_H2_WIDTHS`,
+    `withSodiumH2Widths`; Na's sidecar names the source). The headers are half widths: the
+    deposit's `lect_sig.f` (read as data, not run) builds its impact core as a Lorentzian of that
+    half width, and the paper's Fig. 6 caption names it so, though the text before its Eq. 7 says
+    full width. The first build read them as full widths; the science check found it, and Na's
+    table and the `Na+He` pair were rebuilt. D1's headers match Eq. 7 within 3–5%; D2's lie within
+    2.5% of Fig. 6's label (0.242 × 10⁻²⁰ n_H2 T^0.32) and 1.5–1.7 times under Eq. 8 as printed
+    (T^0.39), so the tables' own are taken. Their shifts (D2 +1.3 to +2.7, D1 −8.2 to −12.7 cm⁻¹ at
+    10²¹ cm⁻³) are left out: under 0.13 cm⁻¹ at 10¹⁹ cm⁻³. Main confirmed the half widths
+    (decision-r08-t4e-unsold §7: the deposit's Python reader says "Half width at half maximum", its
+    shipped D2 example reproduces only so, Allard et al. 2023, A&A 674, A171, writes HWHM, and the
+    tables' low-density profiles match a Lorentzian of that half width within 0.86–1.07 at ±10–20
+    cm⁻¹; the sentence before Eq. 7 is template wording from their 2018 Mg–He paper). Na's ratios:
+    He 0.464, H 1.74, N₂ 0.674, O₂ 0.636, Ar 0.632, air 0.666 (3.47 for H in the first build).
+  - _The pairs_ (§3.3; FU5 ruling 2), in `absorbers/alkaliPairs.json` (`alkali-pairs`), m⁵ a pair,
+    1 nm cells over 380–800 nm, each line's wing beyond 25 cm⁻¹ of its centre, where the atom's own
+    table ends, so nothing is counted twice:
+    - `Na+H2` from Allard et al. 2019's deposit (read as data, its readers not run), their
+      one-perturber wing: the first-order expansion coefficient c₁ of the normalised profile at
+      n_ref = 10²¹ cm⁻³ (their §3.3, Eqs. 14–16), S c₁ ÷ n_ref a pair, S the line's strength per Na
+      atom. At ±20–30 cm⁻¹ of either line at 500–3,000 K, about the core's 25 cm⁻¹ edge, π Δ² c₁ ÷ w
+      is 0.6–1.3, w the table's impact half width, so the wing meets the core's impact Lorentzian
+      there; the README's linear D1 red wing is 0.91 times π r₀ f c₁ at −100 cm⁻¹ at 1,000 K (the
+      higher orders at 10²¹). Where c₁ falls below 0 at D2's blue edge (beyond about
+      +2,900 cm⁻¹ at 1,000 K) the pair is 0, and 0 beyond each table's detunings. D1's red wing
+      beyond its near-wing table is its `redwing` file, linear in density by the README; its blue
+      wing beyond the near-wing table is not deposited and is left out (by its impact estimate
+      2–5% of D2's blue wing at 200–2,000 cm⁻¹). Measured over 500–3,000 K, held, `estimated`,
+      beyond. D2's blue wing reaches 2–12 times the impact estimate at its own half width at
+      200–2,000 cm⁻¹ and ends near 510 nm.
+    - `Na+He`, `K+H2` and `K+He`: the ruled estimate (decision-r08-t4ef-storage §6, ruling 6), T4.c's
+      impact (Lorentz) wing S γ_p ÷ (π Δ²) at the atoms' widths (so that it meets the core at
+      25 cm⁻¹), `estimated` at every temperature and wavelength (`estimatedBelowNm` past the grid),
+      at 500–5,000 K. No open Na–He or K–He set was found at fetch; K–H₂'s open deposit (Allard et
+      al. 2016, CDS J/A+A/589/A21) holds only the red wing beyond 776 nm. K+H2's 760 nm cell at
+      1,000 K is 5.8 × 10⁻⁴⁷ m⁵ (T4.c's estimate, on Unsöld's width, 4 × 10⁻⁴⁷). Asking the author
+      stays the owner's option (decision-r08-t4ef-storage §6). T4.c's pending `K+H2` and `K+He`
+      left `bounds.json` with Na's and K's.
+  - _H₂⁻'s free–free_ (`H2+e-`) stays pending at its estimate (twice H⁻'s free–free): no lawful copy
+    of Bell 1980's table (J. Phys. B 13, 1859) was found; VizieR's catalogue descriptions (TAP,
+    2026-10-19) hold none for free–free or H₂⁻.
+  - _The Rydberg bound on Unsöld's widths_ (decision-r08-t4e-unsold, main, 2026-10-20), a deviation
+    from T4.h as built that settles its deferred finding "Unsöld's widths near the limit".
+    `vanDerWaalsWidthPerS` takes, per perturber p of H, H₂ and He before the sum, Γ_p =
+    min(Γ_Unsöld,p, Γ_R,p), Γ_R,p = 2 v̄ N_p (σ_pol + σ_F) in atomic units (`rydbergWidthM3PerS`):
+    σ_pol = 3.59 (α_p ÷ v̄)^(2/3), the polarisation width's asymptote (Alekseev and Sobel'man 1966,
+    Sov. Phys. JETP 22, 882, eq. (34), a full width by their eq. (2); Omont 1977, J. Physique 38,
+    1343, eq. (4.3); 3.59, not Omont's (4.15) Anderson estimate of 3.18, reproduces his Table III);
+    σ_F the Fermi term over b₁ < b < 2n*² (Omont's (4.9), (4.11)–(4.17)), b₁ = (α_p ÷ v̄)^(1/3),
+    b₂ = ½ (0.53 L_p ÷ (n*³ v̄))², σ_F = 0 where 2n*² ≤ b₁, 2π b₂ (2n*² − b₁) where b₂ ≤ b₁
+    (4.17a), π (4 b₂ n*² − b₂² − b₁²) where b₁ < b₂ < 2n*² (4.17b), π (4n*⁴ − b₁²) where b₂ ≥ 2n*²;
+    v̄ = √(8kT ÷ πμ), as Unsöld's width takes it. Both papers were read in full by main and the
+    equations checked on the page images; this build's science check read Omont (HAL), Alekseev
+    and Sobel'man (the JETP archive), Lei et al. 2025 and Osorio et al. 2015 again and reproduced
+    every test value to 3 × 10⁻⁵.
+    - _Where it applies_ (`takesRydbergBound`), all four together: a neutral atom; a line on
+      Unsöld's width (no Kurucz damping field; the tables give it only lines with no ABO width, and
+      ABO's tables stop below n* 6); the upper level's own n*, √(Ry ÷ (I − E_u)) unfloored, at least
+      6 (Omont §4.2: n* < 6 "are not proper Rydberg states"); and that n* at least 0.1 from an
+      integer (a level by the high-l manifold is widened by l-mixing, which the elastic model leaves
+      out: Na 8d–11d + He is 2–3 times Γ_R). At or above the limit Γ_R is 2 v̄ N σ_pol. Γ_Unsöld
+      keeps T4.h's 0.1 eV floor, whose doc now says that it narrows Unsöld's width below its value
+      at the true n*. H I's levels are all hydrogenic, so only its 364.70 nm series-limit entry,
+      above Barklem and Collet's limit, takes the bound: its n* from their 13.5984 eV (to 0.1 meV)
+      and the infinite-mass Rydberg drifts past 0.1 from the integer from n 42 (`hydrogenic`; main
+      confirmed it as physics, the drift being arithmetic). Every other stage takes its limit as
+      Barklem and Collet give it, to their four decimals, at which the near-hydrogenic test is stable
+      to n* ≈ 40. The lower level is left out, as Omont's model does (its
+      Unsöld C₆ in the phase would lower Γ_R 35–50%).
+    - _Parameters_ (`PERTURBER_SCATTERING_LENGTHS_A0`): α_p T4.h's (H 4.5, H₂ 5.429, He 1.387 a₀³);
+      L_He 1.19 a₀ (O'Malley 1963, Phys. Rev. 130, 1020, its abstract read; Omont's Table I and Lei
+      et al.'s Table III give it from Massey and Burhop 1969); L_H₂ 1.61 a₀ (Randell et al. 1994, J.
+      Phys. B 27, 2369, as Lei et al. 2025 take it; within Thompson et al. 1987's 1.64 ± 0.07 from Rb
+      Rydberg shifts, abstract read, and above Chang 1981's 1.27, not read; the spread moves Γ_R 5%
+      at n* 10.8 and 30–38% at n* 6); L_H = √((a_s² + 3a_t²) ÷ 4) = 3.353 a₀, a_s 5.965 and a_t 1.7686
+      (Schwartz 1961, Phys. Rev. 124, 1468, not open at write; Osorio et al. 2015 §3.3.2 give 5.965
+      and 1.769), the spin weights Alekseev and Sobel'man's eqs. (20)–(22).
+    - _Where it switches_, for K's 4p lower level: by H₂ from n* 6.0 at 650–5,000 K; by He 6.4 at
+      650 K, then 6.0; by H 7.0, 6.6, 6.0 and 6.0 at 650, 1,000, 2,000 and 5,000 K (main's figures).
+    - _Main's measurements_ (decision-r08-t4e-unsold §1; full widths per perturber, Γ/N, cm³ s⁻¹):
+
+      | Case                                         | Regime                           | Measured                                 | Γ_R                                             | Source                                                             |
+      | -------------------------------------------- | -------------------------------- | ---------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------ |
+      | ⁸⁵Rb nS/nD n 25–37 + He, 304 K               | low pressure                     | 3.64 × 10⁻⁹                              | 4.66 × 10⁻⁹ (n* 30)                             | Lei et al. 2025, Phys. Rev. Applied 23, 034028, Table III          |
+      | Rb nS + He, about 470 K, n* 5.7 / 8.7 / 11.9 | low pressure                     | 2.7 / 0.6 / 0.18 × Unsöld's              | 2.1 / 0.34 / 0.12 × Unsöld's                    | Weber and Niemax 1982, Z. Phys. A 307, 13, as Lei et al. replot it |
+      | Na 8s, 12s + He, 571 K                       | low pressure                     | 1.30 × 10⁻⁸, 6.2 × 10⁻⁹                  | 2.10 × 10⁻⁸, 7.83 × 10⁻⁹                        | Lam, McFarlane and Steel 1984, DTIC ADA146827                      |
+      | Na 8d–11d + He, 571 K (near-hydrogenic)      | low pressure                     | 2.4–2.9 × 10⁻⁸                           | model 0.86–1.31 × 10⁻⁸; Unsöld's 3.3–4.7 × 10⁻⁸ | same                                                               |
+      | K 4s–14p + He, about 700 K                   | 5–22 amagat                      | 0.88–1.06 × 10⁻⁸                         | 6.72 × 10⁻⁹                                     | Füchtbauer and von Heesen 1939, Z. Phys. 113, 323, Fig. 3          |
+      | Na series end + H₂, 762 K                    | 0.5 amagat, with self-broadening | ≤ 4.3 × 10⁻⁸ (about 3 × 10⁻⁸ without it) | 1.51 × 10⁻⁸                                     | Füchtbauer and Schulz 1935, Z. Phys. 97, 699, Table 6              |
+
+      The bound is 0.6–1.6 times the low-pressure s- and p-series data and 0.35–0.76 times the 1930s
+      high-density data. Its tier is `estimated`, good to about a factor of 2; wherever these widths
+      matter (γ_L > 0.25 cm⁻¹) the nodes are already `estimated` by the shape rule, so no node
+      changes tier. From n* 6 to about 10 it is extrapolated: the science check found Omont §2.6's
+      "a good approximation for n > 10" and Alekseev and Sobel'man's condition (38) put the edge
+      there, not at the ruling's "about 8", and Omont's Fig. 2 (Cs + Ar, n* 6.4–9.4) shows the model
+      meeting or slightly exceeding the data below it.
+
+    - _Its tests_ (`atomicLines.test.ts`, the ruling's §6): Unsöld's width kept for K 4s–5p,
+      4p₁/₂–8s (n* 5.816) and Na 3p₁/₂–11d (n* 10.985, near-hydrogenic), within 5 × 10⁻⁴ of the
+      ruling's figures, and an ion's line keeping the T^0.3 law; the bound for K 4p₁/₂–13s by H₂, He
+      and H and 4p₁/₂–9s, and Unsöld's widths beside them, within 0.5%; 5s–20p within 2.1% of γ_p,
+      and a level above the limit taking it; the width non-increasing in n* from 6.5 and under
+      Unsöld's, and continuous in T to 0.1% a 0.1% step from 300 to 10,000 K; H I's levels kept;
+      and the measured He widths: Rb 33s (n* 29.87) at 304 K within 1.5 times Lei et al.'s 3.64 ×
+      10⁻⁹ (Table III, 5.8(6) × 10⁻¹⁰ Hz cm³, read), K n* 12.3 at 700 K within twice Füchtbauer and
+      von Heesen's 0.88–1.06 × 10⁻⁸ (main's reading; Springer's copy was not open at write).
+    - _Lines by width source_, over 360–780 nm (`unsold (bounded)` the bound's; the ratio the
+      bounded width over Unsöld's by H₂ at 1,000 K; H I's Unsöld widths are its Balmer lines' by
+      H₂ and He, by H Barklem et al. 2000b's):
+
+      | Stage | Lines |  ABO | Kurucz | Unsöld | Bound | Allard (Na D) | Bound ÷ Unsöld by H₂ |
+      | ----- | ----: | ---: | -----: | -----: | ----: | ------------: | -------------------- |
+      | Na    |    46 |    3 |      0 |     29 |    12 |             2 | 0.14–0.52            |
+      | K     |    80 |    5 |      0 |     14 |    61 |             – | 0.11–0.50            |
+      | Fe    | 10523 | 1479 |   9042 |      2 |     0 |             – | –                    |
+      | H     |    80 |    0 |      0 |     79 |     1 |             – | 0.09–0.09            |
+      | Zn    |    24 |    0 |      0 |     22 |     2 |             – | 0.62–0.65            |
+      | Mg⁺   |   103 |    0 |      0 |    103 |     0 |             – | –                    |
+      | Si⁺   |   175 |    0 |      0 |    175 |     0 |             – | –                    |
+      | Mg    |   179 |   11 |      1 |     90 |    77 |             – | 0.11–0.58            |
+      | Cr    |  7382 |  317 |   7065 |      0 |     0 |             – | –                    |
+      | Ca    |  4443 |   40 |   4403 |      0 |     0 |             – | –                    |
+      | Ca⁺   |   152 |    2 |    150 |      0 |     0 |             – | –                    |
+      | Al    |    65 |    2 |     59 |      4 |     0 |             – | –                    |
+      | V     |  6218 |  375 |   5841 |      2 |     0 |             – | –                    |
+      | Ti    |  5995 |  239 |   5756 |      0 |     0 |             – | –                    |
+      | Fe⁺   |  9427 |    0 |   8158 |   1269 |     0 |             – | –                    |
+      | Ti⁺   |  1145 |    0 |   1145 |      0 |     0 |             – | –                    |
+      | Mn    |  3058 |  267 |   2787 |      0 |     4 |             – | 0.11–0.11            |
+      | Ni    |  1729 |  245 |   1484 |      0 |     0 |             – | –                    |
+      | Si    |   764 |    5 |      0 |    409 |   350 |             – | 0.11–0.71            |
+      | V⁺    |  2674 |    0 |   2674 |      0 |     0 |             – | –                    |
+      | Cr⁺   |  6774 |    0 |   6774 |      0 |     0 |             – | –                    |
+      | Mn⁺   |  2859 |    0 |   2859 |      0 |     0 |             – | –                    |
+      | Ni⁺   |  6560 |    0 |   6560 |      0 |     0 |             – | –                    |
+
+      Main's count for Mg was 78; this build's is 77. The narrowed lines' He/H₂ runs 0.36–0.62
+      and H/H₂ 0.98–2.10 (H's series-limit entry 9.5).
+
+    - _`stageBinShares`' factor of 2_ (`VAN_DER_WAALS_FACTOR`, the shares' upper-bound method) now
+      applies to the bounded width; the tables take factor 1.
+    - _T4.h's figures, rerun on it_ (`atomic-shares`, `atomic-bounds`, `atomic-floors`): no stated
+      none moves (all ions); Mn's largest share moves in its printed digits, 4.483 × 10⁻¹ → 4.482 ×
+      10⁻¹ at 4,600 K and 3.321 × 10⁻¹ → 3.320 × 10⁻¹ at 5,000 K (380–405 nm), its entry's cell means
+      unchanged; `atomicBounds.json` is rewritten byte for byte as it was; the floors are unchanged,
+      Zn's shares moving only in their 13th figure. The drawn stages' recorded shares move for Mg
+      alone, 1.03 → 0.884 at 4,600 K (and 0.858 → 0.720 at 5,000 K): its near-limit 3p–nd lines in
+      380–405 nm are saturated there, against the ruling's expectation: Mg I's 3p ¹P–nd and 3p ¹P–ns
+      series converge at 375.7 nm, so the bin holds members of n* 7.5–19, saturated at the reference
+      column at 4,600 K, their W following the damping width (main's reading). Nothing rests on the
+      figure: it stays far above 10⁻³, Mg has no floor, and the draw order rests on colour sums.
+    - _The re-reduced stages and why:_ Na (12 lines narrowed, and Allard's half widths), K (61), H
+      (its series-limit entry), Zn (2) and Mg (77); Fe, Cr, Ca, Ca⁺, Al, Mg⁺ and Si⁺ have none and go
+      on as built. K's 18 failing cells, each cell's worst chain error within the caps (its
+      temperature and pressure) and its count of failures, on Unsöld's widths (its second pass,
+      23 pressures) and on the bound (its first pass on it, the same 23):
+
+      | Cell, nm | On Unsöld's widths               | On the bound                     | Failures |
+      | -------: | -------------------------------- | -------------------------------- | -------- |
+      |      475 | 2.51 × 10⁻³ (700 K, 421.7 kPa)   | 1.47 × 10⁻³ (2,500 K, 17.8 Pa)   | 10 → 0   |
+      |      486 | 2.89 × 10⁻³ (800 K, 421.7 kPa)   | 1.61 × 10⁻³ (675 K, 421.7 kPa)   | 28 → 0   |
+      |      581 | 2.22 × 10⁻³ (875 K, 421.7 kPa)   | 2.22 × 10⁻³ (875 K, 421.7 kPa)   | 16 → 16  |
+      |      697 | 2.08 × 10⁻³ (650 K, 749.9 kPa)   | 2.08 × 10⁻³ (650 K, 749.9 kPa)   | 1 → 1    |
+      |      732 | 3.23 × 10⁻³ (1,400 K, 421.7 kPa) | 1.45 × 10⁻³ (2,625 K, 56.2 Pa)   | 42 → 0   |
+      |      733 | 2.80 × 10⁻³ (1,000 K, 421.7 kPa) | 1.63 × 10⁻³ (2,400 K, 56.2 Pa)   | 43 → 0   |
+      |      734 | 3.39 × 10⁻³ (1,300 K, 421.7 kPa) | 1.32 × 10⁻³ (2,625 K, 56.2 Pa)   | 56 → 0   |
+      |      735 | 3.03 × 10⁻³ (1,000 K, 421.7 kPa) | 1.63 × 10⁻³ (2,625 K, 56.2 Pa)   | 22 → 0   |
+      |      736 | 2.51 × 10⁻³ (1,150 K, 237.1 kPa) | 1.57 × 10⁻³ (4,850 K, 177.8 Pa)  | 32 → 0   |
+      |      737 | 3.12 × 10⁻³ (2,500 K, 421.7 kPa) | 1.20 × 10⁻³ (1,050 K, 749.9 kPa) | 60 → 0   |
+      |      740 | 3.09 × 10⁻³ (2,750 K, 421.7 kPa) | 1.35 × 10⁻³ (1,050 K, 749.9 kPa) | 57 → 0   |
+      |      743 | 2.24 × 10⁻³ (1,500 K, 749.9 kPa) | 1.31 × 10⁻³ (2,875 K, 56.2 Pa)   | 12 → 0   |
+      |      744 | 3.16 × 10⁻³ (1,650 K, 421.7 kPa) | 1.22 × 10⁻³ (2,400 K, 56.2 Pa)   | 48 → 0   |
+      |      748 | 3.24 × 10⁻³ (1,300 K, 421.7 kPa) | 1.06 × 10⁻³ (5,000 K, 177.8 Pa)  | 35 → 0   |
+      |      749 | 2.88 × 10⁻³ (1,100 K, 421.7 kPa) | 1.47 × 10⁻³ (2,625 K, 56.2 Pa)   | 22 → 0   |
+      |      754 | 3.24 × 10⁻³ (1,500 K, 421.7 kPa) | 9.39 × 10⁻⁴ (3,775 K, 56.2 Pa)   | 35 → 0   |
+      |      755 | 2.41 × 10⁻³ (1,100 K, 421.7 kPa) | 1.54 × 10⁻³ (4,125 K, 56.2 Pa)   | 16 → 0   |
+      |      760 | 2.79 × 10⁻³ (1,000 K, 421.7 kPa) | 1.65 × 10⁻³ (2,625 K, 56.2 Pa)   | 15 → 0   |
+
+      581 nm's lines lie at n* 4.8, below the bound's 6, and 697 nm's (4p–4d) take ABO's width,
+      so neither moved. The residuals, the condensing cap and the midpoint rule follow.
+
+    - _Each re-reduced stage's ratios to H₂_ (at its middle node): Na He 0.464 and H 1.736, K 0.454
+      and 1.198, H 0.549 and 2.198, Zn 0.476 and 1.137, Mg 0.472 and 1.154. No ratio is
+      under 0.40, so no pure-gas cap widens (the narrowed lines' He/H₂ runs 0.36–0.62 alone).
+    - _The two labels corrected_ (main's): K's 732–778 nm lines are 5s–np and 3d–np, not 3d–nf (20p
+      at 34,681.8 cm⁻¹, n* 18.29, quantum defect 1.71), and 697 nm's are 4p ²P₃/₂–4d ²D (696.42 and
+      696.47 nm in air; 4d at 27,398 cm⁻¹, 5d at 30,185).
+  - _The 581 nm residual and the pressure lattice_ (decision-r08-t4e-unsold's follow-up, "The 581 nm
+    residual", main, 2026-10-20), contract changes ruled by main. On the bound, K's 581 nm cell (K I
+    4p₁/₂–5d₃/₂ 581.376 nm and 4p₃/₂–7s 580.336 nm vacuum, n* 4.8, Unsöld's widths, 3.4 and 2.5
+    cm⁻¹ by H₂ at 0.4217 MPa and 750 and 1,150 K) still failed the chain test at 13 states within
+    every cap, all at 0.4217 MPa, the 4-a-decade midpoint of 316 and 562 kPa, over 750–1,150 K and
+    2.8 × 10²³ to 2.05 × 10²⁷ cm⁻², by 2.05–2.22 × 10⁻³: its τ at a fixed column bends between the
+    rows (1.340, 1.955, 2.742, 3.138 at 0.18, 0.32, 0.56 and 1 MPa and 750 K), and the client's
+    read through exact line-by-line rows misses it by 1.89–2.19 × 10⁻³, the table adding 1–2 ×
+    10⁻⁴. It was posted as residual protocol item (iii) and ruled:
+    - _The lattice_ (`PRESSURE_LATTICE_PA`): 10 × 10^(j/8) Pa for j = 0…48, 10 Pa to 10 MPa, and the
+      13.3 MPa stencil node (j = 49); its even j below 1 MPa and every j from it are
+      `STORED_PRESSURES_PA`, by the same values, which stays the standard 30; its odd j below 1 MPa
+      are the 8-a-decade midpoints of the 4-a-decade intervals, 421.7 kPa being j = 37.
+    - _A table's pressures_ (`meetsPressureRule`) are a subset of it holding E3's base nodes (2 a
+      decade below 1 MPa and every node from 1 MPa up), 4-a-decade alternates as E3 keeps them, and
+      a midpoint only where both its 4-a-decade neighbours are held.
+    - _The merge asks for a midpoint_ (`sortFailures`' `addMidpointsPa`, `midpointFor`), as it asks
+      for E3's alternates and before any interval is refined, where a failure at a node's
+      temperature lies at the midpoint of two held 4-a-decade rows below 1 MPa, or a between-node
+      failure falls under the refinement economy there; within every cap, the condensing cap
+      included (the failures listed are those within the chain test's cap); and where the read
+      through exact rows is itself the larger part of the error. Each partial's failure now carries
+      that read's error (`ChainError.exactRowsError`, `exactRowsError`: the four rows about the
+      failure taken line by line at its temperature and read cubic in ln p). It asks once an
+      interval; a failure still standing after it is posted as before.
+    - _The chain test's rows_ (`chainRowsPa`) are E3's rows over the table's span and every midpoint
+      it holds, as the client reads a slot holding it alone. `lineReferences.ts`' `cell-references`
+      takes a part meeting the rule in place of exactly the standard 30 (`latticePressurePa`).
+    - _The client's rows_ (`absorbers.ts`' `absorberCurvePressures`): E3's rows over the dominant
+      line table's span on its factor f_d, and every midpoint any of the slot's line tables holds,
+      as its physical pressure p_mid ÷ f_s on its own species' factor, within the rows' span, one
+      within 1/32 decade of a row already there left out (`MIDPOINT_MERGE_DECADES`). `curveDepth`,
+      `tables.ts`, the HYKD layout, the sidecars and the WGSL are unchanged, as are every committed
+      table and every body whose slots hold no table with a midpoint.
+    - _Its tests_ (the ruling's §4): the lattice with the 30 standard nodes pinned, the rule's accept
+      and refuse cases, `chainRowsPa`, the six-figure snap, and a merge asking for a midpoint under
+      the three conditions and for none where the table's share is the larger, a row is dropped or
+      the midpoint is held (the tools' `kDistributions.test.ts`), and the merge's `refine` with the
+      midpoint's pressures (`kDistributionsReduce.test.ts`); the client's rows with no midpoint
+      pinned to today's, a dominant table's midpoint among them, a non-dominant one's at p_mid ÷
+      f_s, one within 1/32 decade left out, and the read through them as `absorberTransmittance`
+      reads every row (`lineCurves.test.ts`); `lineReferences.test.ts` on K's 24-pressure table.
+    - Main weighed and refused an exception within a margin (a looser chain tier) and deferring K;
+      8 a decade below 1 MPa for every table, per-cell pressure grids and a higher-order or ln τ read
+      were refused as contract changes. T4.f inherits the rule.
+  - _K's table_: 24 pressures, E3's 20, the three alternates its first pass on Unsöld's widths kept
+    (56.2, 178 and 562 kPa) and 421.7 kPa: 2,489,140 bytes in 6 parts and a 17,312-byte sidecar,
+    worst node 8.92 × 10⁻⁴, chain 1.83 × 10⁻³, no interval refined. The midpoint adds one node to
+    23, about 4% of the table. The 13 states, chain error at 0.4217 MPa on Unsöld's widths → on the
+    bound at 23 pressures → at 24 (0.4217 MPa now a stored row), and at the new midpoints 0.3652 and
+    0.4870 MPa:
+
+    | T, K  |    Unsöld's |   Bound, 23 |   Bound, 24 |  0.3652 MPa |  0.4870 MPa |
+    | ----- | ----------: | ----------: | ----------: | ----------: | ----------: |
+    | 750   | 2.15 × 10⁻³ | 2.15 × 10⁻³ | 7.69 × 10⁻⁵ | 2.62 × 10⁻⁴ | 2.96 × 10⁻⁴ |
+    | 775   | 2.20 × 10⁻³ | 2.20 × 10⁻³ | 1.08 × 10⁻⁴ | 2.95 × 10⁻⁴ | 3.37 × 10⁻⁴ |
+    | 800   | 2.17 × 10⁻³ | 2.17 × 10⁻³ | 7.06 × 10⁻⁵ | 2.32 × 10⁻⁴ | 3.13 × 10⁻⁴ |
+    | 825   | 2.21 × 10⁻³ | 2.21 × 10⁻³ | 1.02 × 10⁻⁴ | 2.72 × 10⁻⁴ | 3.48 × 10⁻⁴ |
+    | 850   | 2.18 × 10⁻³ | 2.18 × 10⁻³ | 7.54 × 10⁻⁵ | 2.26 × 10⁻⁴ | 3.25 × 10⁻⁴ |
+    | 875   | 2.22 × 10⁻³ | 2.22 × 10⁻³ | 9.23 × 10⁻⁵ | 2.45 × 10⁻⁴ | 3.49 × 10⁻⁴ |
+    | 900   | 2.19 × 10⁻³ | 2.19 × 10⁻³ | 7.11 × 10⁻⁵ | 2.01 × 10⁻⁴ | 3.31 × 10⁻⁴ |
+    | 925   | 2.21 × 10⁻³ | 2.21 × 10⁻³ | 9.10 × 10⁻⁵ | 2.24 × 10⁻⁴ | 3.57 × 10⁻⁴ |
+    | 950   | 2.16 × 10⁻³ | 2.16 × 10⁻³ | 7.03 × 10⁻⁵ | 1.84 × 10⁻⁴ | 3.37 × 10⁻⁴ |
+    | 975   | 2.16 × 10⁻³ | 2.16 × 10⁻³ | 8.75 × 10⁻⁵ | 2.03 × 10⁻⁴ | 3.55 × 10⁻⁴ |
+    | 1,000 | 2.11 × 10⁻³ | 2.11 × 10⁻³ | 7.19 × 10⁻⁵ | 1.68 × 10⁻⁴ | 3.35 × 10⁻⁴ |
+    | 1,050 | 2.16 × 10⁻³ | 2.16 × 10⁻³ | 1.57 × 10⁻⁴ | 2.81 × 10⁻⁴ | 4.37 × 10⁻⁴ |
+    | 1,150 | 2.05 × 10⁻³ | 2.05 × 10⁻³ | 1.71 × 10⁻⁴ | 2.81 × 10⁻⁴ | 4.54 × 10⁻⁴ |
+
+    So the 13 fall from 2.05–2.22 × 10⁻³ to 0.70–1.71 × 10⁻⁴ at their own pressure and 1.68–4.54 ×
+    10⁻⁴ at the new midpoints, as the ruling expected (2–4 × 10⁻⁴). The same rule added midpoints to
+    Mg (421.7 and 749.9 kPa, about 0.29 MB), Si⁺ (the same two, about 0.04 MB) and Cr (421.7 kPa,
+    about 0.92 MB); Na, Fe, H and Zn took none.
+
+  - _The condensing cap in the chain test_ (residual protocol item (ii), decision-r08-t4e-unsold
+    §5; `CellReductionSource.chainSaturation`, `POTASSIUM_SATURATION`, a `SaturationCurve` of kind
+    `antoine`): at a temperature where liquid K is fitted, the between-node test's columns also stop
+    at 400 p_sat(T) ÷ (m g), g = 0.5 m s⁻², errors beyond it recorded, not gated; the node tier, the
+    bisection, G = 1 and the 16-bit test keep their wider columns, so no g-point moves. p_sat is NIST
+    Chemistry WebBook's Antoine fit for liquid K, log₁₀(p ÷ 1 bar) = 4.45718 − 4,691.58 ÷ (T +
+    24.195) over 679.4–1,033 K, NIST's coefficients from Fiock and Rodebush 1926 (J. Am. Chem. Soc.
+    48, 2522), read 2026-10-20, used from K's 650 K node, extrapolated 29 K below the fit (main:
+    it can't matter at that margin), to 1,033 K, with no cap outside them; Alcock, Itkin and
+    Horrigan 1984 (the ruling's example) was not open. Its caps: 3.9 × 10²⁶ cm⁻² at 650 K, 6.9 ×
+    10²⁶ at 675 K, 1.2 × 10²⁷ at 700 K, 1.9 × 10²⁷ at 725 K and 3.1 × 10²⁷ at 750 K. It moved out of
+    the gate 697 nm's one failure (650 K, 0.75 MPa, 4.0 × 10²⁹ cm⁻², about 1,000 times past its
+    cap; 4p₃/₂–4d on ABO's width) and 581 nm's at 675, 700 and 725 K (3.3 × 10²⁸, 1.2 × 10²⁸ and
+    4.9 × 10²⁷ cm⁻², 48, 10 and 2.6 times past theirs). No other stage took a condensing cap.
+  - _The residual protocol's item (i), the refinement economy_ (decision-r08-t4e-unsold §5, from
+    this lane's note): a failure between temperature nodes is not bisected, nor `estimated`, where a
+    bracketing node fails at the same pressure between the same rows with no alternate to keep; it
+    is reported with that node's failure, which the merge refuses (`sortFailures`). On K's second
+    pass on Unsöld's widths it would have spared 255 of the 268 interval failures (the pass asked
+    for 30 → 56 nodes).
+  - _The broadening axis_ (§3): the reference broadener is H₂; each table's `broadening` holds every
+    gas's width ratio to H₂ at its middle node, N₂, O₂, Ar and air among them (the client would
+    otherwise take them at ratio 1, as it takes air for a molecular table, here H₂'s width,
+    unlabelled), by Unsöld's scaling from the line's H width (N₂ 1.710,
+    O₂ 1.562 and Ar 1.664 Å³, NIST CCCBDB's experimental list from Olney et al. 1997, Chem. Phys.
+    223, 59, read 2026-10-20; air by US Standard Atmosphere 1976's Table 3, 0.780 84 N₂, 0.209 476
+    O₂ and 0.009 34 Ar, normalised over them), the exponent offsets 0, each gas's width sharing its
+    line's exponent. He and H to H₂: Na 0.464 and 1.736, K 0.454 and 1.198, Fe 0.453 and 1.196, H
+    0.549 and 2.198, Zn 0.476 and 1.137, Mg⁺ 0.482 and 1.129, Si⁺ 0.481 and 1.130, Mg 0.472 and
+    1.154, Cr 0.456 and 1.190. No ratio is under 0.40, so no cap widens. H₂'s and He's
+    polarisabilities are Lorentz–Lorenz on the client's dispersions, the air gases' Olney et
+    al.'s: Lorentz–Lorenz on the client's N₂, O₂ and Ar would differ by 1.7%, 0.4% and −1.3%, and
+    Olney's H₂ lies 2.2% under T4.h's, moving the ratios by 0.7% or less (the science check's
+    figures).
+    - _A gas a table gives no ratio_ (CO₂, H₂O, SiO, …) the client takes at ratio 1 (`broadeningFactor`'s
+      `ratio ?? 1`), `estimated`: for an atom's table that is H₂'s width, 1.4–1.5 times the
+      table's `air` ratio, where the brief's §4 has such a gas "taken as air". A deviation, left as
+      built: taking the table's `air` ratio instead changes the curves' read, which is main's
+      question (this lane's report).
+  - _E3's alternates, as built._ The merge keeps a thinned table's dropped alternate where the
+    between-node test fails at a node's temperature between two stored nodes that hold one, or in an
+    interval at its finest step (`sortFailures`' `keepPressuresPa`, `droppedNodesAbout`), and asks
+    for them as `refine-pressures:`; where any failure at a node's temperature asks for one, the pass
+    keeps those alone and refines no interval, since a dropped node also fails between temperature
+    nodes at its pressure. Keeping both at once, as first built, refined every interval of Na's
+    425 nm sample (30 → 53 nodes) where the alternates alone sufficed (30). On a table of every
+    standard pressure nothing changes.
+  - _The fixed fine grid_ (`atomicSpectra`). T4.d's line-by-line takes a cell's fine grid from its
+    lines at each pressure; for the atoms the grid at 10 Pa (their own below) serves every higher
+    pressure. On each pressure's own grid a saturated wing's 25 cm⁻¹ cut-off moved by up to a step
+    between pressures and the exact depth jittered by up to 1% (Mg I's 385 nm cell at 3,600 K and
+    2 × 10²⁵ cm⁻²: 2.384 at 31.6 kPa, 2.372 at 42.2 kPa, 2.409 at 56.2 kPa), which the chain test
+    read as failures at node temperatures between two standard rows (Mg's 385 nm and Mn's 402 nm
+    samples) that no refinement reaches, and which kept Ni's 386 nm sample refining for six passes.
+    The read through exact rows erred as much (2.56 × 10⁻³), so the fault was the reference's. On
+    the fixed grid the depth is smooth to five figures, and 0.8% deeper than the 512-point grid's at
+    45 kPa. It costs 1.5–1.8 times the CPU. T4.d's and T4.g's tables keep their own grids (a
+    deferred finding).
+  - _E4_ raises no drawn stage's first node. On E1′'s re-projection every drawn stage's
+    strongest sample held its first node at 10 Pa only (the 10 Pa hold failing its 1 Pa check, or
+    the hold of 31.6 Pa, E3's next node, its checks at 1, 10 and 17.8 Pa), but Si⁺'s, whose
+    samples allowed 31.6 Pa, one node in 25 (about 0.02 MB), which
+    the build did not take: its table, as every other, starts at 10 Pa. E4 saved 0.2 MB in the
+    first projection. The 1 Pa check: measured for H (1.73 ×
+    10⁻³), Mg⁺ (5.71 × 10⁻⁴) and Si⁺ (7.84 × 10⁻⁴); for Na (5.85 × 10⁻²), K (5.97 × 10⁻²), Fe (1.44
+    × 10⁻¹), Zn (4.61 × 10⁻³), Mg (1.38 × 10⁻¹) and Cr (9.18 × 10⁻²) it fails; where it
+    fails the hold below 10 Pa is `estimated` (`measuredBelowGrid` false), a node below 10 Pa being
+    a layout change (deferred).
+  - _The line files_ (§3.1): `absorbers/lines/<key>.json`, the stage's lines over 360–780 nm from a
+    level below its limit, each row its vacuum wavelength, log gf, lower level's energy and J,
+    Kurucz's three damping constants, its ABO width where Barklem et al.'s table holds it and
+    Kurucz's reference code, with the list's URL, SHA-256, fetch dates, citation and selection rule
+    (`atomic-lines`). Fe's and Cr's split into parts `<key>-<n>.json` under 480,000 bytes, each with
+    the header and its share of the lines in wavenumber order: a recorded deviation from "one file
+    a spectrum". They come to 1,351,936 bytes: Fe's 766,410 in two parts (479,934 and 286,476)
+    and Cr's 533,036 in two (479,927 and 53,109), the rest one file each, 2,907–12,320 bytes. No
+    line file for a deferred stage.
+  - _The `+` file names_ (§3.6): `Mg+.json`, `Mg+-1.bin`, `Si+.json`, `Si+-1.bin` and `Si+-2.bin`
+    in `kDistributions/`, and `Mg+.json` and `Si+.json` in `lines/`, load
+    through Vite's `?url` (the worker's `fetchPart`, tested with `Mg+-1.bin`) and the tests'
+    `?inline` reader (`kDistribution.test.ts`' load of every committed table); + is a plain
+    character in a URL's path and in a file name on Linux, macOS (APFS) and Windows (NTFS). No
+    key was mapped. A production build was not run: Rollup's file-name sanitiser may write `+` as
+    `_` in an emitted asset's name (from memory, not re-read), which the load does not see, since
+    each part is reached through the URL its glob key gives.
+  - _The `belowK` contract_ (ruled 2026-10-19), as two deviations: `absorberSpecs` consults
+    `isTransparent` before any table, so below `belowK` a key with a table is skipped (its pairs
+    stay listed), tested with a toy table under Mg⁺'s 4,600 K (`lineCurves.test.ts`); and
+    `TransparentSpecies.belowK`'s doc states the contract. `transparency.test.ts`' two tests are
+    widened to both branches (`contractBranch`): the table branch checks the key's table's first
+    node against `belowK` and that no R08.T4.e entry of the key remains; Mg⁺, Si⁺, H and Zn take it,
+    the other stated nones the pending branch; and the list of stated nones adds O, H and Zn.
+  - _E3's row rule, client_ (ruled 2026-10-16): `absorberCurvePressures` takes `curveRowsPa` of the
+    dominant table's nodes, the standard pressures over its span where they are a strict subset of
+    them, each table read between its own nodes by `cellSigmasAt`, as a non-dominant species
+    already is (`lineCurves.test.ts`' thinned toy). The tools' `curveRowsPa` and the chain's
+    `sigmaAtPressure` mirror it (the tools' `kDistributions.test.ts` holds the two `curveRowsPa`
+    equal).
+    The client matches a table's nodes to the standard pressures within 10⁻⁵ (`STANDARD_TOLERANCE`),
+    since a sidecar writes its pressures to six figures: at the 10⁻⁹ first built, a committed thinned
+    table was read on its own nodes, not the standard rows, which the atoms' references found (the
+    toys, on exact pressures, had not); `kDistribution.test.ts` now reads a six-figure thinned list
+    at the standard rows, and `atomicTables.test.ts` each sidecar's own pressures.
+  - _Tests_ (§3.7): Na D's depth monotone in column at every stored pressure; a class IV giant's
+    geometric albedo at 550 nm under 0.1 at 900, 1,200 and 1,500 K (`atomicTables.test.ts`: an
+    isothermal H₂–He column with solar Na and K, the pairs' absorption and the atoms' own 550 nm
+    cells against H₂'s and He's Rayleigh scattering, single scattering at full phase, the higher
+    orders bounded by p₁ ÷ (1 − ω_max) over the levels giving 99% of p₁; p₁ 0.0049, 0.0054 and
+    0.0059 at 900, 1,200 and 1,500 K, the bounds 0.015, 0.018 and 0.021; Sudarsky, Burrows and
+    Pinto 2000's §7 gives class IV's geometric albedo at 0.48 µm as 0.03, and their Fig. 12a's
+    flux ratios imply about 0.055 at 0.45 µm and 0.0055 at 0.65 µm, as the science check read
+    them, beside Table 1a's Bond albedo 0.03, which bounds no geometric albedo at one wavelength;
+    the bound holds where each order is at most ω_max times the last, as here, ω falling with
+    depth, and is loose, 11 times or more above an exact all-orders albedo in the science check's
+    isotropic model); each reference cell's equivalent width within 1% of its
+    f64 line-by-line reference over three columns at its node states, and its curves within the
+    node and chain tiers and within 2 × 10⁻⁴ of the f64 reduction (`lineReferences.test.ts` with
+    `lineReferencesAtoms.json`: Na 589 and 568 nm, K 404 and 694, Fe 386 and 527, H 656 and 486,
+    Zn 481 and 472, Mg⁺ 448 and 439, Si⁺ 634 and 637, Mg 518 and 383, Cr 425 and 520, each at its
+    table's middle node and the midpoint above it at 1 kPa, 0.1 and 1 MPa; K's D lines lie past the
+    tables' 760 nm cells, in its pairs); every T_c in [10⁻⁶, 1] and non-increasing in u through
+    the client's curves; each table's recorded tiers, nodes, pressures and bytes; the `belowK`
+    branches and `absorberSpecs`' order. Two deviations from the entry's list: the equivalent
+    width is each reference cell's, two a stage, not each line's (a table holds up to 10,523
+    lines); and the shares are recorded here (below), not tested, a test of a list kept in the
+    test being one no change can fail. §7's command runs 1,212 tests in 54 s on four workers, the
+    tables' 47.7 MB of Fe and Cr parts loaded in `atomicTables.test.ts`, `kDistribution.test.ts`
+    and `lineReferences.test.ts`.
+  - _The drawn stages' shares beside the science ruling's_ (largest bake-bin share at the reference
+    column to 4,600 K, Kurucz's full lists; the ruling's NIST sums): Na 1.81 (2,000 K, 583–608 nm),
+    K 0.264 (2,000 K, 735–760 nm), Fe 7.26 (4,000 K, 380–405 nm), Mg 0.884 (4,600 K, 380–405 nm;
+    1.03 on Unsöld's widths alone) and Cr 0.777 (4,000 K, 380–405 nm), against its 0.039–4.6 for
+    the atoms; Zn 4.09 × 10⁻³ (4,600 K) against 3.1 × 10⁻³; H 2.01 × 10⁻² (4,600 K, Hα), which it does
+    not estimate; Mg⁺ 7.24 × 10⁻⁴ and Si⁺ 3.32 × 10⁻⁴ (4,600 K) against 7.1 and 4.8 × 10⁻⁴, both
+    drawn from 4,600 K. A share sums the lines' widths across a bin and may pass 1 (Fe's forest).
+  - _Figures_ (T4.d's table; "beyond cap" recorded, not gated):
+
+    | Species | Cells | Worst node (16-bit)       | Worst chain | 1 Pa        | Bytes, parts   | G = 1 | Temperatures, K             | Pressures | Beyond cap  | Estimated                            |
+    | ------- | ----- | ------------------------- | ----------- | ----------- | -------------- | ----- | --------------------------- | --------- | ----------- | ------------------------------------ |
+    | Na      | 47    | 8.85 × 10⁻⁴ (1.10 × 10⁻⁴) | 1.68 × 10⁻³ | 5.85 × 10⁻² | 1,753,964, 4   | 0     | 30: 500–5,000               | 22        | 7.81 × 10⁻² | shapes above 3.2–10 kPa; below 10 Pa |
+    | K       | 69    | 8.92 × 10⁻⁴ (1.63 × 10⁻⁴) | 1.83 × 10⁻³ | 5.97 × 10⁻² | 2,489,140, 6   | 0     | 30: 500–5,000               | 24        | 9.99 × 10⁻¹ | shapes above 10–56 kPa; below 10 Pa  |
+    | Fe      | 381   | 8.64 × 10⁻⁴ (6.57 × 10⁻⁵) | 2.00 × 10⁻³ | 1.44 × 10⁻¹ | 26,545,720, 60 | 0     | 33: 1,000–5,000, 13 refined | 23        | 3.06 × 10⁻² | shapes above 56–100 kPa; below 10 Pa |
+    | H       | 16    | 8.37 × 10⁻⁴ (4.36 × 10⁻⁵) | 1.75 × 10⁻³ | 1.73 × 10⁻³ | 116,448, 1     | 0     | 8: 3,300–5,000, 2 refined   | 20        | 2.07 × 10⁻² | the table (n_e)                      |
+    | Zn      | 47    | 8.19 × 10⁻⁴ (7.55 × 10⁻⁵) | 1.58 × 10⁻³ | 4.61 × 10⁻³ | 290,908, 1     | 0     | 6: 3,300–5,000              | 22        | 9.64 × 10⁻¹ | shapes above 32 kPa; below 10 Pa     |
+    | Mg⁺     | 77    | 8.67 × 10⁻⁴ (8.10 × 10⁻⁵) | 1.84 × 10⁻³ | 5.71 × 10⁻⁴ | 305,892, 1     | 0     | 4: 4,400–5,000              | 22        | 9.67 × 10⁻¹ | shapes above 32 kPa                  |
+    | Si⁺     | 172   | 8.67 × 10⁻⁴ (8.25 × 10⁻⁵) | 1.56 × 10⁻³ | 7.84 × 10⁻⁴ | 537,824, 2     | 5     | 4: 4,400–5,000              | 25        | 9.81 × 10⁻¹ | shapes above 10 kPa                  |
+    | Mg      | 119   | 8.92 × 10⁻⁴ (1.54 × 10⁻⁴) | 1.90 × 10⁻³ | 1.38 × 10⁻¹ | 3,643,260, 8   | 0     | 23: 1,000–5,000, 3 refined  | 25        | 9.99 × 10⁻¹ | shapes above 3.2–10 kPa; below 10 Pa |
+    | Cr      | 381   | 8.60 × 10⁻⁴ (7.80 × 10⁻⁵) | 1.98 × 10⁻³ | 9.18 × 10⁻² | 21,158,308, 48 | 0     | 29: 1,000–5,000, 9 refined  | 23        | 9.96 × 10⁻² | shapes above 32–100 kPa; below 10 Pa |
+
+    The refined nodes: Fe's 1,050, 1,150, 1,450, 1,575, 1,687.5, 1,725, 1,875, 2,025, 2,200,
+    2,400, 2,625, 2,875 and 3,150 K; Cr's 1,050, 1,150, 1,250, 1,350, 1,450, 1,575, 1,725, 1,875
+    and 2,025 K; Mg's 2,200, 2,400 and 2,625 K; H's 4,125 and 4,850 K. Every refined interval
+    passed, so none is `estimated` in temperature. "Shapes" is the line shape at and above the
+    pressure given, the nodes' `measuredShapeTo` (`estimatedShape`, T4.d's rule); "below 10 Pa" is
+    `measuredBelowGrid` false, the 1 Pa check above the chain tier (the deferred findings). The
+    sidecars are 7,086–25,237 bytes, 126,827 in all; the line files are as above. Beyond the caps
+    the errors reach 0.999 (K, Mg): recorded, not gated, as T4.d's.
+
+  - _Bytes._ T4.e's committed files under the cap come to 58,320,227 bytes against its
+    60,000,000 (56,968,291 of parts and sidecars in `absorbers/kDistributions/` and 1,351,936 of
+    line files in `absorbers/lines/`); with the committed 20,313,536, R08's tables come to 78,633,763
+    bytes against the 150,000,000 cap. Every part is under 480,000 bytes. The other data files, each
+    under 500,000 bytes: `bounds.json` 195,111 (340,701 at the base, less the drawn stages' and the
+    alkali pairs' T4.c entries and O's), `atomicBounds.json` 215,731, `alkaliPairs.json` 229,398 and
+    `lineReferencesAtoms.json` 364,472.
+  - _Sources and their terms._ Kurucz's lists and CDS's files as the first round's report gives
+    them, each matching the brief's SHA-256 (fetched 2026-10-19 or kept from then); CDS's terms as
+    read then (VizieR's data free of usage in a scientific context; the A&A and AAS paragraphs
+    hidden in its page's source; none of the ReadMes used states a copyright); A&A's copyright page
+    refused the fetch (403); Kurucz and Allard's README state none. New this round: Stehlé and
+    Hutcheon's 88 profile files (H3–H10, `profil1`–`profil11`), each SHA-256 in
+    `balmerStark.ts`' `STEHLE_PROFILES`; Allard et al.'s 24 tables, each in `alkaliPairs.ts`'
+    `ALLARD_TABLES`. The first round's new SHA-256: Barklem et al. 2000's `table1.dat.gz`
+    `5934b730…cfbf` (123,535 bytes) and its ReadMe `ea8ab018…7c7a`; Stehlé and Hutcheon's ReadMe
+    `cd26a955…df8e`; Allard et al. 2019 on arXiv (1908.01989v1) `d9ab4663…7df2`; CDS's VizieR
+    licence page `f6bab16f…9e9f`.
+  - _Costs_, on the laptop (8 threads, 16 GB), two workers a pass, the 1-minute load 2–8 with
+    another lane's builds beside them at times. The final tables' runs, CPU and wall: Na 0.6 and 0.3
+    h (one pass), K 1.0 and 0.5 (one), Fe 15.2 and 7.6 (three, its first pass on E3's 20 pressures
+    2.0 h of wall more), H 0.03 and 0.02 (two), Zn 0.3 and 0.2 (two), Mg⁺ 0.1 and 0.1 (two), Si⁺ 0.4
+    and 0.2 (three), Mg 4.4 and 2.4 (four), Cr 12.8 and 6.4 (four); peak RSS 373–596 MB a worker,
+    under its 4 GB scope. Runs set aside: K on Unsöld's widths (two passes, about 1 h of wall) and
+    on the bound at 23 pressures (0.5 h), Na on Allard's full widths and on its half widths before
+    the bound (0.4 h each), Al (0.6 h, stopped). The floors, the re-projections and
+    `atomic-bounds` minutes each; the references 40 minutes on two processes. Disk: the downloads
+    51 MB, kept outside the repository (re-fetchable by URL and SHA-256); the partials 326 MB, kept there too.
+  - _Deferred findings (2026-10-13 rule)_ (R08.T4.e). Each leaves the algorithm and every contract
+    as they are.
+    - _The 10 Pa hold fails the 1 Pa check_ in most atomic cells (Na's 5.9 × 10⁻², Fe I 527 nm's
+      2.2 × 10⁻² in the first projection), so the atomic tables are `estimated` below 10 Pa; a node
+      below 10 Pa would be a layout change.
+    - _Deb and Hibbert's table 9_ holds computed wavelengths (190 lines in 360–780 nm); it bites
+      only if Fe⁺ is drawn, as it is not.
+    - _J/A+A/657/A121's_ open H–H Balmer-α profile could inform Hα's self-broadening.
+    - _[O I] near 10⁻³ at 100 times the reference column._
+    - _Storey and Zeippen's A for [O I] 630 nm_ lies 10% above Kurucz's; the statement stays on
+      Kurucz's list.
+    - _K's H₂ width_ is Barklem et al.'s ABO width scaled by Unsöld's rule, which for Na D ran
+      1.25–1.74 times Allard et al.'s ab initio widths; K's core and its `K+H2` estimate may be as wide.
+      Allard et al. 2016's K–H₂ paper gives K's impact widths (not read).
+    - _Allard et al. 2019's Eq. 8_ (D2's width, T^0.39) lies 1.5–1.7 times above their own tables'
+      widths, which match their Fig. 6's label (T^0.32) within 2.5%; A&A refused the fetch, so the
+      published version was not read.
+    - _D1's blue far wing_ by H₂ is not deposited (2–5% of D2's blue wing by the impact estimate).
+    - _The Stark Lorentzian_ overstates the quasi-static ion wing of H I's Balmer lines: against
+      Stehlé and Hutcheon's Stark-only profiles it is within 1–15% to about three half widths,
+      1.4–2.5 times above at 300–3,000 half widths (10¹⁰ cm⁻³) and about 11 times at 25 cm⁻¹
+      (3 × 10¹² cm⁻³), the profile's tail going as Δλ^(−5/2) (the science check's figures).
+    - _The line-by-line grid jitter_ that the atoms' fixed grid removes may also act, more weakly, in
+      T4.d's and T4.g's tables, whose grids follow each pressure's lines.
+    - _Ions' near-limit widths_ keep Unsöld's (Mg⁺ 24, Si⁺ 71 lines from within 0.6 eV of the
+      limit), no ion source read (decision-r08-t4e-unsold §8).
+    - _Near-hydrogenic levels_ keep Unsöld's width, and l-mixing is not modelled: Na nd + He is
+      0.5–0.9 of Unsöld's width and 2–3 times Γ_R. Above n* ≈ 15–20 the exception keeps Unsöld's
+      floored width, about 9 times γ_p in H₂ (H's Balmer members from n 15, and Mg's highest
+      near-hydrogenic levels), where l-mixing cross-sections fall and widths tend to γ_p (Omont §4.1
+      finds n > 30 agreeing with γ_p on principal series); an upper end near n* 15 is one route, not
+      ruled.
+    - _Below n\* 6_ Unsöld's width is kept, though the measured widths there exceed it 2–4 times.
+    - _The bound's own approximations_, which all err wide: it is extrapolated from n* 6 to about
+      10; the Fermi part leaves the impact regime at the tables' high pressures (collision duration
+      times width 0.6–2.8 at 0.42 MPa for n* ≤ 8); the lower level is left out (35–50%); H's
+      zero-energy L is used (up to 30%); L(H₂) spans 1.27–1.64 a₀; the mean speed stands in for the
+      Maxwell average (−13% to +8%).
+    - _H₂'s molecular channels_ (ion–quadrupole, rotational excitation) are not modelled: Na's 1935
+      series-end width in H₂ is 2–3 times Γ_R. _The H ion-pair channel_ is not modelled either.
+    - _Pressure shifts are left out_, as for every atomic line: Fermi's shift less the polarisation
+      shift is +3.5–4.8 × 10⁻⁸ rad cm³ s⁻¹ per H₂ at 1,000 K, +5.7–7.8 cm⁻¹ at 0.42 MPa, above these
+      lines' bounded half widths (Ny and Ch'en 1938 measure +3.2–3.7 × 10⁻⁸ for H₂).
+    - _At 10 MPa_ the highest members stop being distinct lines: Alekseev and Sobel'man's χ_i
+      reaches 0.3–0.6, and Fermi's merging limit falls to n* ≈ 11.
+    - _The 4-a-decade grid below 1 MPa_ limits atoms whose lines from n* 4–6 are a fifth to a tenth of
+      the cut-off wide; the midpoint rule covers it table by table.
+    - _The air gases' widths of the bounded lines_ are scaled from the line's bounded H width by
+      Unsöld's α^(2/5) rule, while H₂'s takes its own bound from its scattering length; not
+      quantified (the science check's), these lines being from n* 6 and weak in the strength-weighted
+      ratios.
+    - _The estimated pairs_ (`Na+He`, `K+H2`, `K+He`) may lie below their true wings near the
+      lines: Na–H₂'s open tables run 2–12 times their impact estimate in D2's blue wing at
+      200–2,000 cm⁻¹.
+    - _Kurucz's Zn II in `gf3001.pos`_ (T4.h's finding) stays deferred.
 - **Composition (decision-composition, 2026-10-09).** Every species and material is a plan-14
   registry key. The client's tables are keyed by those strings, with measured, estimated, derived
   or stand-in provenance, and the labelled fallback never drops a species. R08.T19 holds the client

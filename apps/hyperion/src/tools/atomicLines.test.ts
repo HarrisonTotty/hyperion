@@ -11,6 +11,7 @@ import {
   dopplerHalfWidthWithTurbulencePerCm,
   ELECTRON_RADIUS_CM,
   hydrogenEquilibriumPa,
+  type KuruczLine,
   kuruczVacuumNm,
   linesInWindow,
   lineBinWidthsNm,
@@ -27,6 +28,7 @@ import {
   REFERENCE_PRESSURE_PA,
   referenceColumnPerM2,
   roundUpToThreeFigures,
+  rydbergWidthM3PerS,
   sahaBalance,
   SLANT_FACTOR,
   SOLAR_ABUNDANCES,
@@ -78,6 +80,25 @@ describe("Kurucz's records", () => {
       line?.upperPerCm,
       line?.reference,
     ]).toEqual([406.8136, -1.29, 32_499.53, 57_080.38, "HEIS"]);
+  });
+
+  it("read Kurucz's three damping constants: log Γ_rad, log Γ_Stark ÷ n_e and log Γ_vdW ÷ n_H", () => {
+    const [line] = parseKuruczLines(record(406.8136, -1.29, 32_499.53, 57_080.38));
+    expect([
+      line?.logGammaRadPerS,
+      line?.logGammaStarkPerElectron,
+      line?.logGammaVanDerWaalsPerHydrogen,
+    ]).toEqual([8.19, -5.38, -7.59]);
+  });
+
+  it("read a blank damping constant as 0, Kurucz's none", () => {
+    const base = record(406.8136, -1.29, 32_499.53, 57_080.38);
+    const [line] = parseKuruczLines(`${base.slice(0, 80)}${" ".repeat(18)}${base.slice(98)}`);
+    expect([
+      line?.logGammaRadPerS,
+      line?.logGammaStarkPerElectron,
+      line?.logGammaVanDerWaalsPerHydrogen,
+    ]).toEqual([0, 0, 0]);
   });
 
   it("take the lesser energy as the lower level, a negative (predicted) one by its magnitude", () => {
@@ -213,6 +234,34 @@ describe("the Saha balance", () => {
       (REFERENCE_GRAVITY_M_S2 * perH);
     expect(referenceColumnPerM2(balance, "Na", 1) / expected).toBeCloseTo(1, 12);
   });
+
+  it("gives H I's stage its free atoms alone, the nuclei bound in H₂ left out (R08.T4.e)", () => {
+    // H₂ that forms: K_p = 100 Pa at every node, so that at 0.1 bar most H is molecular.
+    const toy = toySahaData();
+    const temperaturesK = [100, 1_000, 3_000, 10_000];
+    const molecular = sahaBalance(
+      {
+        ...toy,
+        equilibriumConstants: parseBarklemTable(
+          toyTable({ H2: temperaturesK.map(() => 2) }, temperaturesK),
+          "toy 7",
+        ),
+      },
+      2_000,
+      REFERENCE_PRESSURE_PA,
+    );
+    const [neutral = 0] = molecular.stageFractions.get("H") ?? [];
+    const free = molecular.atomicHydrogenPerM3 / molecular.hydrogenNucleiPerM3;
+    const column =
+      (SLANT_FACTOR * REFERENCE_PRESSURE_PA * free) /
+      (REFERENCE_GRAVITY_M_S2 *
+        SOLAR_ABUNDANCES.reduce((s, e) => s + 10 ** (e.logEpsilon - 12) * e.atomicWeightDa, 0) *
+        ATOMIC_MASS_KG);
+    expect([free < 0.5 * neutral, referenceColumnPerM2(molecular, "H", 0) / column]).toEqual([
+      true,
+      expect.closeTo(1, 12),
+    ]);
+  });
 });
 
 /** A line's equivalent width over [a, b] nm by a fine uniform trapezoid in wavelength, an f64 reference. */
@@ -332,6 +381,170 @@ describe("a line's strength and widths", () => {
     expect([at(4_000, 2e23) / at(4_000, 1e23), at(8_000, 1e23) / at(4_000, 1e23)]).toEqual([
       expect.closeTo(2, 12),
       expect.closeTo(2 ** 0.3, 12),
+    ]);
+  });
+});
+
+/** K I's limit, eV, as decision-r08-t4e-unsold §6's test values take it, and K's mass, Da. */
+const POTASSIUM_LIMIT_EV = 4.340_664;
+const POTASSIUM_DA = 39.0983;
+
+/** A line between two levels, cm⁻¹, its vacuum wavelength theirs. */
+function between(lowerPerCm: number, upperPerCm: number): KuruczLine {
+  return lineAt(1e7 / (upperPerCm - lowerPerCm), 0, lowerPerCm, upperPerCm);
+}
+
+/** The same line with a Kurucz damping field, which keeps it on Unsöld's width alone. */
+function onUnsold(line: KuruczLine): KuruczLine {
+  return { ...line, logGammaVanDerWaalsPerHydrogen: -7.5 };
+}
+
+/** A line's full van der Waals width per perturber at factor 1, cm³ s⁻¹. */
+function widthPer(
+  line: KuruczLine,
+  perturber: "H" | "H2" | "He",
+  temperatureK: number,
+  { limitEv = POTASSIUM_LIMIT_EV, massDa = POTASSIUM_DA, coreCharge = 1 } = {},
+): number {
+  const perturbers = { H: 0, H2: 0, He: 0, [perturber]: 1 };
+  return vanDerWaalsWidthPerS(line, limitEv, coreCharge, massDa, temperatureK, perturbers) * 1e6;
+}
+
+/** A level of n* below a limit, cm⁻¹. */
+function levelAt(limitEv: number, nStar: number): number {
+  return (limitEv - 13.605_693_122_994 / (nStar * nStar)) * PER_CM_PER_EV;
+}
+
+/** The mean relative speed of K and a perturber at a temperature, m s⁻¹. */
+function potassiumSpeed(perturberDa: number, temperatureK: number): number {
+  const reducedKg = ((POTASSIUM_DA * perturberDa) / (POTASSIUM_DA + perturberDa)) * ATOMIC_MASS_KG;
+  return Math.sqrt((8 * BOLTZMANN_J_PER_K * temperatureK) / (Math.PI * reducedKg));
+}
+
+/** An H I line's width per H₂ at 1,000 K, m³ s⁻¹, its levels taken as hydrogenic or not. */
+function hydrogen(line: KuruczLine, hydrogenic: boolean): number {
+  return vanDerWaalsWidthPerS(line, 13.5984, 1, 1.008, 1_000, { H: 0, H2: 1, He: 0 }, hydrogenic);
+}
+
+describe("the Rydberg bound on Unsöld's widths (decision-r08-t4e-unsold)", () => {
+  // K's 4p₁/₂ level, cm⁻¹ (the ruling's figure).
+  const p12 = 12_985.185;
+
+  it("keeps Unsöld's width below n* 6, by a near-hydrogenic level, and for an ion", () => {
+    // K 4s–5p 404.41 nm and 4p₁/₂–8s 532.33 nm (n* 5.816); Na 3p₁/₂–11d 423.90 nm (n* 10.985).
+    expect([
+      widthPer(between(0, 24_720.139), "H2", 1_000) / 1.8335e-8,
+      widthPer(between(p12, 31_765.37), "H2", 5_000) / 7.689e-8,
+      widthPer(between(16_956.172, 40_540.07), "H2", 1_000, {
+        limitEv: 5.139_076,
+        massDa: 22.989_77,
+      }) / 1.3368e-7,
+    ]).toEqual([expect.closeTo(1, 3), expect.closeTo(1, 3), expect.closeTo(1, 3)]);
+    // An ion's line from n* 10.8 keeps Unsöld's T^0.3 law, where the bound's is about T^(1/6).
+    const ion = between(p12, 34_072.2);
+    const ionAt = (t: number): number => widthPer(ion, "H2", t, { coreCharge: 2 });
+    expect(ionAt(2_000) / ionAt(1_000)).toBeCloseTo(2 ** 0.3, 12);
+  });
+
+  it("bounds K 4p₁/₂–13s 474.09 nm and 4p₁/₂–9s 508.42 nm by the ruling's figures, within 1%", () => {
+    const thirteen = between(p12, 34_072.2);
+    const nine = between(p12, 32_648.35);
+    expect([
+      widthPer(thirteen, "H2", 1_000) / 1.8137e-8,
+      widthPer(thirteen, "He", 1_000) / 7.5856e-9,
+      widthPer(thirteen, "H", 1_000) / 2.3311e-8,
+      widthPer(nine, "H2", 1_000) / 2.9896e-8,
+      widthPer(onUnsold(thirteen), "H2", 1_000) / 1.2911e-7,
+      widthPer(onUnsold(thirteen), "He", 1_000) / 6.1758e-8,
+      widthPer(onUnsold(thirteen), "H", 1_000) / 1.4636e-7,
+      widthPer(onUnsold(nine), "H2", 1_000) / 6.1423e-8,
+    ]).toEqual(Array.from({ length: 8 }, () => expect.closeTo(1, 2)));
+  });
+
+  it("reaches the polarisation width's asymptote at high n* and above the limit", () => {
+    // K 5s–20p 732.11 nm (n* 18.29), within 2.1% of γ_p alone, 1.5619 × 10⁻⁸ cm³ s⁻¹.
+    const asymptote = rydbergWidthM3PerS(Infinity, "H2", potassiumSpeed(2.016, 1_000)) * 1e6;
+    const twenty = widthPer(between(21_026.551, 34_681.84), "H2", 1_000);
+    expect([twenty / 1.5941e-8, asymptote / 1.5619e-8, twenty / asymptote < 1.021]).toEqual([
+      expect.closeTo(1, 2),
+      expect.closeTo(1, 2),
+      true,
+    ]);
+    expect(widthPer(between(21_026.551, 35_100), "H2", 1_000)).toBeCloseTo(asymptote, 20);
+  });
+
+  it("keeps H I's levels on Unsöld's width, all hydrogenic, but an entry at or above its limit", () => {
+    // Balmer n = 42 from Kurucz's levels, whose n* from Barklem and Collet's 13.5984 eV is 42.10,
+    // and the series-limit entry at 109,678.76 cm⁻¹, above it.
+    const member = between(82_259.1, 109_616.59);
+    const limit = between(82_259.1, 109_678.76);
+    expect([
+      hydrogen(member, true) / hydrogen(onUnsold(member), true),
+      hydrogen(member, false) < hydrogen(onUnsold(member), false),
+      hydrogen(limit, true) < hydrogen(onUnsold(limit), true),
+    ]).toEqual([1, true, true]);
+  });
+
+  /** K I's 4p₁/₂ to levels from n* 6.5 to 30.5 at a fixed temperature. */
+  const rydbergSeries = Array.from({ length: 25 }, (_, k) =>
+    between(p12, levelAt(POTASSIUM_LIMIT_EV, 6.5 + k)),
+  );
+
+  it.each(["H", "H2", "He"] as const)("is non-increasing in n* from 6 by %s", (perturber) => {
+    const widths = rydbergSeries.map((l) => widthPer(l, perturber, 1_000));
+    expect(widths.every((w, k) => k === 0 || w <= (widths[k - 1] ?? 0))).toBe(true);
+  });
+
+  it.each(["H", "H2", "He"] as const)("is never above Unsöld's width by %s", (perturber) => {
+    const widths = rydbergSeries.map((l) => widthPer(l, perturber, 1_000));
+    const unsold = rydbergSeries.map((l) => widthPer(onUnsold(l), perturber, 1_000));
+    expect(widths.every((w, k) => w <= (unsold[k] ?? 0))).toBe(true);
+  });
+
+  it("is continuous in T", () => {
+    // Steps of 0.1% in T from 300 K to 10,000 K move the width by under 0.1% at every n*.
+    for (const n of [6.3, 7.5, 10.8, 18.3]) {
+      const line = between(p12, levelAt(POTASSIUM_LIMIT_EV, n));
+      let worst = 0;
+      for (let t = 300; t < 10_000; t *= 1.001) {
+        worst = Math.max(
+          worst,
+          Math.abs(widthPer(line, "H2", t * 1.001) / widthPer(line, "H2", t) - 1),
+        );
+      }
+      expect(worst).toBeLessThan(1e-3);
+    }
+  });
+
+  /** Rb nS + He at 304 K, n* 29.87 (33s, nS's quantum defect 3.13): a toy line at Rb's mass and limit. */
+  const rubidiumWidth = (): number =>
+    widthPer(between(0, levelAt(4.177_128, 29.87)), "He", 304, {
+      limitEv: 4.177_128,
+      massDa: 85.4678,
+    });
+
+  /** K 4s–np + He at 700 K, n* 12.3. */
+  const potassiumWidth = (): number =>
+    widthPer(between(0, levelAt(POTASSIUM_LIMIT_EV, 12.3)), "He", 700);
+
+  it("lies within 1.5 times Lei et al.'s Rydberg width of Rb by He", () => {
+    // Lei et al. 2025 (Phys. Rev. Applied 23, 034028, Table III) observe γ/n 5.8(6) × 10⁻¹⁰ Hz cm³,
+    // 3.64 × 10⁻⁹ cm³ s⁻¹ as an angular width.
+    const rb = rubidiumWidth() / 3.64e-9;
+    expect([rb > 1 / 1.5, rb < 1.5]).toEqual([true, true]);
+  });
+
+  it("lies within twice Füchtbauer and von Heesen's Rydberg width of K by He", () => {
+    // Füchtbauer and von Heesen 1939 (Z. Phys. 113, 323, Fig. 3, self-broadening removed; 1 cm⁻¹
+    // an amagat is 7.011 × 10⁻⁹ cm³ s⁻¹) measure 0.88–1.06 × 10⁻⁸ at 5–22 amagat, as main read it.
+    const k = potassiumWidth();
+    expect([k > 1.06e-8 / 2, k < 0.88e-8 * 2]).toEqual([true, true]);
+  });
+
+  it("gives the ruling's bound for those two, 4.66 and 6.72 × 10⁻⁹ cm³ s⁻¹", () => {
+    expect([rubidiumWidth(), potassiumWidth()]).toEqual([
+      expect.closeTo(4.66e-9, 11),
+      expect.closeTo(6.72e-9, 11),
     ]);
   });
 });

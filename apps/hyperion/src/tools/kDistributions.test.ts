@@ -5,6 +5,15 @@ import {
   broadeningExponentOffsets,
   broadeningRatios,
   chainColumnCm2,
+  chainRowsPa,
+  curveRowsPa,
+  exactRowsError,
+  latticePressurePa,
+  meetsPressureRule,
+  PRESSURE_LATTICE_PA,
+  raisedFirstNodeChecksPa,
+  type SaturationCurve,
+  sigmaAtPressure,
   CHI_CO2_CO2,
   CHI_CO2_N2,
   chiFactor,
@@ -38,7 +47,13 @@ import {
   sortedNode,
   VERIFY_COLUMNS_PER_DECADE,
 } from "./kDistributions";
-import { LINE_SOURCES, refinedTemperatures, sortFailures } from "./kDistributionsCli";
+import {
+  droppedNodesAbout,
+  LINE_SOURCES,
+  refinedTemperatures,
+  sortFailures,
+  withKeptPressures,
+} from "./kDistributionsCli";
 import type { LineList } from "./molecularLines";
 
 /**
@@ -361,6 +376,30 @@ describe("the cold end's column cap", () => {
     expect(saturationPressurePa(co2, 305)).toBe(Infinity);
   });
 
+  /** NIST's Antoine fit for liquid K (Fiock and Rodebush 1926), used from 650 K to its 1,033 K top. */
+  const potassium: SaturationCurve = {
+    kind: "antoine",
+    a: 4.457_18,
+    bK: 4_691.58,
+    cK: 24.195,
+    fromK: 650,
+    criticalK: 1_033,
+    source: "a test's",
+  };
+
+  it("takes an Antoine fit's 10^(A − B ÷ (T + C)) bar within its use: liquid K's 5,819 Pa at 800 K", () => {
+    // 1e5 × 10^(4.45718 − 4691.58 ÷ 824.195) = 5,819.183 Pa.
+    expect(saturationPressurePa(potassium, 800) / 5_819.183).toBeCloseTo(1, 6);
+  });
+
+  it("takes no condensing cap below an Antoine fit's use or at or above its top", () => {
+    expect([
+      saturationPressurePa(potassium, 640),
+      saturationPressurePa(potassium, 1_033),
+      saturationPressurePa(potassium, 1_200),
+    ]).toEqual([Infinity, Infinity, Infinity]);
+  });
+
   it("is ten times the saturated column 40 p_sat ÷ (m g) at 0.5 m s⁻² where that is the lower", () => {
     if (o2 === undefined) {
       throw new Error("O₂ has no saturation curve");
@@ -622,5 +661,307 @@ describe("a k-distribution table's files", () => {
       codes: new Uint16Array(3),
     };
     expect(() => kDistributionPart(grid, 1, [cell])).toThrow("codes");
+  });
+});
+
+/** E3's thinned pressures (R08.T4.e): the stored 30 less every other node below 1 MPa, 20 of them. */
+const THINNED_PA = STORED_PRESSURES_PA.filter((p, i) => p >= 1e6 * (1 - 1e-9) || i % 2 === 0);
+
+/** E1's quarter step from a lower node, K, as R08.T4.e's tables refine: 12.5, 25 and 50 K. */
+function quarterStepK(lowerK: number): number {
+  if (lowerK < 1_000) {
+    return 12.5;
+  }
+  return lowerK < 2_000 ? 25 : 50;
+}
+
+/** A chain failure at a state, its error past the tier. */
+function failureAtState(
+  temperatureK: number,
+  pressurePa: number,
+): { error: number; temperatureK: number; pressurePa: number; columnCm2: number } {
+  return { error: 3e-3, temperatureK, pressurePa, columnCm2: 1e24 };
+}
+
+describe("a thinned table's rows (R08.T4.e's economy E3)", () => {
+  it("are the standard pressures over a thinned table's span, as the client's rule gives them", async () => {
+    // The node project's compiler does not reach the renderer's modules, so the client's is loaded
+    // at run time and its function narrowed.
+    const url = new URL(
+      "../renderer/src/view/atmosphere/absorbers/kDistribution.ts",
+      import.meta.url,
+    ).href;
+    const client: unknown = await import(/* @vite-ignore */ url);
+    const rows: unknown =
+      typeof client === "object" && client !== null
+        ? Reflect.get(client, "curveRowsPa")
+        : undefined;
+    if (typeof rows !== "function") {
+      throw new Error("the client's kDistribution.ts exports no curveRowsPa");
+    }
+    const grids = [THINNED_PA, THINNED_PA.slice(1), STORED_PRESSURES_PA, [10, 50]];
+    for (const grid of grids) {
+      expect(curveRowsPa(grid)).toEqual(Reflect.apply(rows, undefined, [grid]));
+    }
+  });
+
+  it("read a g-point's σ at a node exactly", () => {
+    const pressures = [1e3, 1e4, 1e5, 1e6];
+    expect(sigmaAtPressure(pressures, [1, 2, 3, 4], 1e5)).toBe(3);
+  });
+
+  it("read a g-point's σ off its nodes by 4-point Lagrange on ln σ in ln p, exact for a cubic", () => {
+    const pressures = [1e3, 1e4, 1e5, 1e6];
+    const sigma = (p: number): number => cubicExp(10 * Math.log(p));
+    expect(sigmaAtPressure(pressures, pressures.map(sigma), 3e4) / sigma(3e4)).toBeCloseTo(1, 10);
+  });
+
+  it("read a g-point's σ linearly in ln p between the two nodes about it where one of the four is 0", () => {
+    const pressures = [1e3, 1e4, 1e5, 1e6];
+    expect(sigmaAtPressure(pressures, [0, 2, 4, 6], 10 ** 4.5)).toBeCloseTo(3, 12);
+  });
+
+  it("hold a g-point's σ beyond its end nodes", () => {
+    const pressures = [1e3, 1e4, 1e5, 1e6];
+    expect([
+      sigmaAtPressure(pressures, [1, 2, 3, 4], 10),
+      sigmaAtPressure(pressures, [1, 2, 3, 4], 1e8),
+    ]).toEqual([1, 4]);
+  });
+});
+
+describe("E3's alternates (R08.T4.e)", () => {
+  it("name a failure's dropped alternates, none at a stored node or between two standard ones", () => {
+    expect([
+      droppedNodesAbout(THINNED_PA, 20),
+      droppedNodesAbout(THINNED_PA, 31.622_776_601_683_796),
+      droppedNodesAbout(STORED_PRESSURES_PA, 20),
+    ]).toEqual([[expect.closeTo(17.782_794, 5)], [], []]);
+  });
+
+  it("keep the alternate a failure at a node's temperature asks for", () => {
+    const sorted = sortFailures(
+      [1_000, 1_100, 1_200],
+      [failureAtState(1_000, 20), failureAtState(1_050, 20)],
+      quarterStepK,
+      THINNED_PA,
+    );
+    expect([sorted.keepPressuresPa.length, sorted.atNodes]).toEqual([1, []]);
+  });
+
+  it("refine no interval in the pass that keeps an alternate", () => {
+    const sorted = sortFailures(
+      [1_000, 1_100, 1_200],
+      [failureAtState(1_000, 20), failureAtState(1_050, 20)],
+      quarterStepK,
+      THINNED_PA,
+    );
+    expect(sorted.refine).toEqual([]);
+  });
+
+  it("refine an interval whose failure no node shares, keeping no alternate", () => {
+    const sorted = sortFailures(
+      [1_000, 1_100, 1_200],
+      [failureAtState(1_050, 20)],
+      quarterStepK,
+      THINNED_PA,
+    );
+    expect([sorted.refine, sorted.keepPressuresPa]).toEqual([[0], []]);
+  });
+
+  it("keep an interval's alternate at its finest step, in place of estimating it", () => {
+    const failure = { error: 3e-3, temperatureK: 1_012.5, pressurePa: 20, columnCm2: 1e24 };
+    const sorted = sortFailures([1_000, 1_025], [failure], quarterStepK, THINNED_PA);
+    expect([sorted.keepPressuresPa.length, sorted.estimated]).toEqual([1, []]);
+  });
+
+  it("estimate an interval at its finest step on a table of every standard pressure", () => {
+    const failure = { error: 3e-3, temperatureK: 1_012.5, pressurePa: 20, columnCm2: 1e24 };
+    expect(
+      sortFailures([1_000, 1_025], [failure], quarterStepK, STORED_PRESSURES_PA).estimated,
+    ).toEqual([[1_000, 1_025]]);
+  });
+
+  it("refine no interval for the pressure read's error, where a bracketing node fails at its pressure between the same rows", () => {
+    // decision-r08-t4e-unsold §5, item (i): 42.2 Pa's neighbours are stored, so nothing is kept.
+    const p = 42.169_650_342_858_22;
+    const sorted = sortFailures(
+      [1_000, 1_100, 1_200],
+      [failureAtState(1_000, p), failureAtState(1_050, p), failureAtState(1_150, 20)],
+      quarterStepK,
+      STORED_PRESSURES_PA,
+    );
+    expect([sorted.refine, sorted.atNodes.map((f) => f.temperatureK)]).toEqual([
+      [1],
+      [1_000, 1_050],
+    ]);
+  });
+
+  it("join kept alternates into the stored pressures, ascending, each once", () => {
+    expect(withKeptPressures([10, 100], [31.6, 10, 50])).toEqual([10, 31.6, 50, 100]);
+  });
+});
+
+/** The lattice's 421.7 kPa, j = 37, the 8-a-decade midpoint of 316 and 562 kPa. */
+const MIDPOINT_PA = 10 * 10 ** (37 / 8);
+
+/** A failure at 421.7 kPa, its read through exact rows given. */
+function readFailure(
+  temperatureK: number,
+  exactRowsErrorValue: number,
+): {
+  error: number;
+  temperatureK: number;
+  pressurePa: number;
+  columnCm2: number;
+  exactRowsError: number;
+} {
+  return {
+    error: 2.2e-3,
+    temperatureK,
+    pressurePa: MIDPOINT_PA,
+    columnCm2: 1e25,
+    exactRowsError: exactRowsErrorValue,
+  };
+}
+
+describe("the pressure lattice and its midpoints (decision-r08-t4e-unsold's follow-up, the 581 nm residual)", () => {
+  /** K's 24 pressures: E3's 20, the three alternates its first pass kept, and 421.7 kPa. */
+  const potassium = [...THINNED_PA, 10 ** 4.75, 10 ** 5.25, 10 ** 5.75, MIDPOINT_PA].toSorted(
+    (a, b) => a - b,
+  );
+  const withAlternates = potassium.filter((p) => Math.abs(p / MIDPOINT_PA - 1) > 1e-9);
+
+  it("run 10 × 10^(j/8) for j = 0…49, the 30 standard pressures among them by the same values", () => {
+    const standard = PRESSURE_LATTICE_PA.filter((_, j) => j >= 40 || j % 2 === 0);
+    expect([PRESSURE_LATTICE_PA.length, standard]).toEqual([50, STORED_PRESSURES_PA]);
+  });
+
+  it("hold 421.7 kPa at j = 37 and the 13.3 MPa stencil node at j = 49", () => {
+    expect([PRESSURE_LATTICE_PA[37], PRESSURE_LATTICE_PA[49]]).toEqual([
+      expect.closeTo(421_696.5, 1),
+      expect.closeTo(13_335_214.32, 1),
+    ]);
+  });
+
+  it("accept the standard 30, E3's, and a midpoint between two held 4-a-decade rows", () => {
+    expect([STORED_PRESSURES_PA, THINNED_PA, potassium].map((p) => meetsPressureRule(p))).toEqual([
+      true,
+      true,
+      true,
+    ]);
+  });
+
+  it("refuse a midpoint beside a dropped alternate, a missing base node, or a pressure off the lattice", () => {
+    const lonely = [...THINNED_PA, MIDPOINT_PA].toSorted((a, b) => a - b);
+    const missing = THINNED_PA.filter((p) => Math.abs(p / 1e4 - 1) > 1e-9);
+    const off = [...THINNED_PA, 2e5].toSorted((a, b) => a - b);
+    expect([lonely, missing, off].map((p) => meetsPressureRule(p))).toEqual([false, false, false]);
+  });
+
+  it("read a table's chain on E3's rows and its midpoints", () => {
+    const rows = chainRowsPa(potassium);
+    expect([rows.length, rows.filter((p) => Math.abs(p / MIDPOINT_PA - 1) < 1e-9).length]).toEqual([
+      STORED_PRESSURES_PA.length + 1,
+      1,
+    ]);
+  });
+
+  it("take a sidecar's 6-figure pressures back to the lattice, K's 24 among them", () => {
+    const back = potassium.map((p) => latticePressurePa(Number(p.toPrecision(6))));
+    expect([back, meetsPressureRule(back)]).toEqual([potassium, true]);
+  });
+
+  it("refuse a sidecar's pressure off the lattice", () => {
+    expect(() => latticePressurePa(2e5)).toThrow("lattice");
+  });
+
+  it("ask for a midpoint where the read fails between held rows, by its own error, and refine nothing", () => {
+    const sorted = sortFailures(
+      [700, 750, 800],
+      [readFailure(750, 2.1e-3), readFailure(725, 2.0e-3)],
+      quarterStepK,
+      withAlternates,
+    );
+    expect([sorted.addMidpointsPa, sorted.refine]).toEqual([[expect.closeTo(421_696.5, 1)], []]);
+  });
+
+  it("ask for none where the table's share of the error is the larger, refusing the failure", () => {
+    const own = sortFailures(
+      [700, 750, 800],
+      [readFailure(750, 0.5e-3)],
+      quarterStepK,
+      withAlternates,
+    );
+    expect([own.addMidpointsPa, own.atNodes.length]).toEqual([[], 1]);
+  });
+
+  it("ask for none beside a dropped alternate, keeping the alternate", () => {
+    const dropped = sortFailures(
+      [700, 750, 800],
+      [readFailure(750, 2.1e-3)],
+      quarterStepK,
+      THINNED_PA,
+    );
+    expect([dropped.addMidpointsPa, dropped.keepPressuresPa.length]).toEqual([[], 1]);
+  });
+
+  it("ask for none where the midpoint is held", () => {
+    const held = sortFailures([700, 750, 800], [readFailure(750, 2.1e-3)], quarterStepK, potassium);
+    expect(held.addMidpointsPa).toEqual([]);
+  });
+});
+
+/** A one-point node at each pressure whose depth at a column is a function of ln p. */
+function rowNode(
+  depth: (x: number) => number,
+  columnCm2: number,
+): (pressurePa: number) => SortedNode {
+  return (pressurePa) => sortedNode(Float64Array.of(depth(Math.log(pressurePa)) / columnCm2));
+}
+
+/** A depth cubic in ln p over the rows, which the read takes exactly. */
+function cubicInLogP(x: number): number {
+  return 1 + 0.01 * (x - 9) ** 3 + 0.1 * (x - 9);
+}
+
+/** A depth that bends between the rows, as 581 nm's did. */
+function bend(x: number): number {
+  return 2 + Math.tanh(3 * (x - 10.5));
+}
+
+describe("the read's error through exact rows (the 581 nm residual)", () => {
+  const rowsPa = [1e3, 1e4, 1e5, 1e6, 1e7];
+  const columnCm2 = 1e23;
+  const failure = { error: 3e-3, temperatureK: 1_000, pressurePa: 3e4, columnCm2 };
+
+  it("is 0 where the depth is cubic in ln p", () => {
+    const node = rowNode(cubicInLogP, columnCm2);
+    expect(exactRowsError(rowsPa, node, node(failure.pressurePa), failure)).toBeLessThan(1e-12);
+  });
+
+  it("is the cubic read's own miss where the depth bends between the rows", () => {
+    const node = rowNode(bend, columnCm2);
+    const rows = [0, 1, 2, 3];
+    const read = Math.exp(
+      -cubicInLogPressure(
+        rows.map((r) => Math.log(rowsPa[r] ?? Number.NaN)),
+        rows.map((r) => bend(Math.log(rowsPa[r] ?? Number.NaN))),
+        Math.log(failure.pressurePa),
+      ),
+    );
+    expect(
+      exactRowsError(rowsPa, node, node(failure.pressurePa), failure) /
+        Math.abs(read - Math.exp(-bend(Math.log(failure.pressurePa)))),
+    ).toBeCloseTo(1, 9);
+  });
+});
+
+describe("a raised first node's hold (R08.T4.e's economy E4)", () => {
+  it("is checked at 1 Pa and at every standard node below the first", () => {
+    expect([
+      raisedFirstNodeChecksPa(10),
+      raisedFirstNodeChecksPa(THINNED_PA[1] ?? Number.NaN),
+    ]).toEqual([[1], [1, 10, expect.closeTo(17.782_794, 5)]]);
   });
 });

@@ -534,3 +534,178 @@ describe("the read between rows", () => {
     expect(at(2e6)).toBeCloseTo(cubicTau(6.25 * Math.LN10), 10);
   });
 });
+
+describe("a stated none's table below its limit (the belowK contract, R08.T4.e)", () => {
+  // Mg⁺ is stated none below 4,600 K and drawn by a table from 4,400 K; a toy stands for it here.
+  const table = toyTable("Mg+");
+  const at = (temperatureK: number): ReturnType<typeof absorberSpecs> =>
+    absorberSpecs(
+      [wellMixed("Mg+", 1e20)],
+      { ...COLUMN, temperaturesK: COLUMN.temperaturesK.map(() => temperatureK) },
+      [],
+      [],
+      { kDistributions: [table] },
+    );
+
+  it("is skipped below the limit, with no column and no label, though the client holds its table", () => {
+    const specs = at(4_000);
+    expect([specs.specs, specs.approximations]).toEqual([[], []]);
+  });
+
+  it("is drawn from its table at and above the limit", () => {
+    expect(onlyColumnSpec(at(4_700)).species.map((s) => s.species)).toEqual(["Mg+"]);
+  });
+});
+
+describe("a thinned dominant table's curve rows (R08.T4.e's economy E3)", () => {
+  // Alternate nodes below 1 MPa dropped, 10, 31.6, 100, … Pa, as R08.T4.e's tables store them.
+  const thinned = PRESSURES_PA.filter((p, k) => p > 1e6 * (1 - 1e-9) || k % 2 === 0);
+  const sigmasM2 = TEMPERATURES_K.flatMap((t) =>
+    thinned.flatMap((p) => [toySigma(t, p, 0), toySigma(t, p, 1)]),
+  );
+  const table = readKDistribution(
+    toySidecar(TEMPERATURES_K, thinned, 1, {
+      species: "H2O",
+      measuredRangeK: [150, 296],
+      measuredShapeTo: TEMPERATURES_K.map(() => thinned.length - 1),
+      broadening: { self: 1.5 },
+    }),
+    [
+      toyPart([{ nm: 690, weights: [0.8, 0.2], sigmasM2 }], {
+        variants: 1,
+        temperatures: TEMPERATURES_K.length,
+        pressures: thinned.length,
+      }),
+    ],
+    "toy thinned H2O",
+  );
+  const spec = onlyColumnSpec(
+    absorberSpecs([wellMixed("H2O", 1e26)], COLUMN, [], [], { kDistributions: [table] }),
+  );
+
+  it("are the standard pressures over its span, 4 a decade below 1 MPa, not its own nodes", () => {
+    const f = spec.species[0]?.lines?.broadeningFactor ?? Number.NaN;
+    const rows = Array.from(absorberCurvePressures(spec), (x) => Math.exp(x) * f);
+    // As the unthinned toy's: 10 Pa to 1.78 × 10⁵ Pa, 19 rows, every other one between nodes.
+    expect([table.pressuresPa.length < PRESSURES_PA.length, rows.length]).toEqual([true, 19]);
+    for (const [r, p] of rows.entries()) {
+      expect(p / (PRESSURES_PA[r] ?? Number.NaN)).toBeCloseTo(1, 12);
+    }
+  });
+});
+
+/**
+ * A toy line species on E3's thinned pressures with the 56.2 kPa alternate kept and the 42.2 kPa
+ * midpoint between it and 31.6 kPa added (j = 29 of the lattice, decision-r08-t4e-unsold's follow-up).
+ */
+function midpointTable(
+  species: string,
+  broadening: Readonly<Record<string, number>> = { self: 1.5 },
+): KDistributionTable {
+  const thinned = PRESSURES_PA.filter((p, k) => p > 1e6 * (1 - 1e-9) || k % 2 === 0);
+  const pressures = [...thinned, 10 ** 4.75, 10 * 10 ** (29 / 8)].toSorted((a, b) => a - b);
+  const sigmasM2 = TEMPERATURES_K.flatMap((t) =>
+    pressures.flatMap((p) => [toySigma(t, p, 0), toySigma(t, p, 1)]),
+  );
+  return readKDistribution(
+    toySidecar(TEMPERATURES_K, pressures, 1, {
+      species,
+      measuredRangeK: [150, 296],
+      measuredShapeTo: TEMPERATURES_K.map(() => pressures.length - 1),
+      broadening,
+    }),
+    [
+      toyPart([{ nm: 690, weights: [0.8, 0.2], sigmasM2 }], {
+        variants: 1,
+        temperatures: TEMPERATURES_K.length,
+        pressures: pressures.length,
+      }),
+    ],
+    `toy midpoint ${species}`,
+  );
+}
+
+/** A spec's curve rows as physical pressures, Pa. */
+function physicalRowsOf(spec: ColumnAbsorberSpec): number[] {
+  return Array.from(absorberCurvePressures(spec), (x) => Math.exp(x));
+}
+
+describe("curve rows with a table's midpoints (decision-r08-t4e-unsold's follow-up, the 581 nm residual)", () => {
+  const midpointPa = 10 * 10 ** (29 / 8);
+
+  it("are today's rows for a slot whose tables hold no midpoint", () => {
+    const spec = onlyColumnSpec(
+      absorberSpecs([wellMixed("H2O", 1e26), wellMixed("CO2", 5e25)], COLUMN, [], [], {
+        kDistributions: [toyTable("H2O"), toyTable("CO2", { broadening: { self: 1.3 } })],
+      }),
+    );
+    const f = spec.species[0]?.lines?.broadeningFactor ?? Number.NaN;
+    const rows = physicalRowsOf(spec).map((p) => p * f);
+    expect(rows.length).toBe(19);
+    for (const [r, p] of rows.entries()) {
+      expect(p / (PRESSURES_PA[r] ?? Number.NaN)).toBeCloseTo(1, 12);
+    }
+  });
+
+  it("hold the dominant table's midpoint among the standard rows", () => {
+    const spec = onlyColumnSpec(
+      absorberSpecs([wellMixed("H2O", 1e26)], COLUMN, [], [], {
+        kDistributions: [midpointTable("H2O")],
+      }),
+    );
+    const f = spec.species[0]?.lines?.broadeningFactor ?? Number.NaN;
+    const rows = physicalRowsOf(spec).map((p) => p * f);
+    expect([rows.length, rows.filter((p) => Math.abs(p / midpointPa - 1) < 1e-9).length]).toEqual([
+      20, 1,
+    ]);
+  });
+
+  it("hold a non-dominant table's midpoint at p_mid ÷ f_s, on that species' own factor", () => {
+    const spec = onlyColumnSpec(
+      absorberSpecs([wellMixed("H2O", 1e26), wellMixed("CO2", 5e25)], COLUMN, [], [], {
+        kDistributions: [toyTable("H2O"), midpointTable("CO2", { self: 1.3, air: 2 })],
+      }),
+    );
+    const fs = spec.species[1]?.lines?.broadeningFactor ?? Number.NaN;
+    const rows = physicalRowsOf(spec);
+    expect([
+      fs,
+      rows.length,
+      rows.filter((p) => Math.abs((p * fs) / midpointPa - 1) < 1e-9).length,
+    ]).toEqual([expect.closeTo(2, 3), 20, 1]);
+  });
+
+  it("leave out a midpoint within 1/32 decade of a row already there", () => {
+    // f_s = 10^0.1 puts 42.2 kPa ÷ f_s at 33.5 kPa, 0.025 decade from the 31.6 kPa row.
+    const spec = onlyColumnSpec(
+      absorberSpecs([wellMixed("H2O", 1e26), wellMixed("CO2", 5e25)], COLUMN, [], [], {
+        kDistributions: [toyTable("H2O"), midpointTable("CO2", { self: 1.3, air: 10 ** 0.1 })],
+      }),
+    );
+    expect(physicalRowsOf(spec).length).toBe(19);
+  });
+
+  it("are read through, a midpoint's row as the row, as absorberTransmittance reads every row", () => {
+    const spec = onlyColumnSpec(
+      absorberSpecs([wellMixed("H2O", 1e26)], COLUMN, [], [], {
+        kDistributions: [midpointTable("H2O")],
+      }),
+    );
+    const curve = absorberCurve(spec, SUN);
+    const nodes = curve.logColumns.length;
+    const r = Array.from(curve.logPressures).findIndex(
+      (x) =>
+        Math.abs(Math.exp(x) * (spec.species[0]?.lines?.broadeningFactor ?? 1) - midpointPa) <
+        1e-3 * midpointPa,
+    );
+    const j = 160;
+    const u = Math.exp(curve.logColumns[j] ?? Number.NaN);
+    const at = (p: number): number =>
+      absorberTransmittance(curve, { kind: "column", columnPerM2: u }, p)[0];
+    expect([curve.logPressures, r >= 0]).toEqual([absorberCurvePressures(spec), true]);
+    expect(at(Math.exp(curve.logPressures[r] ?? Number.NaN))).toBeCloseTo(
+      curve.transmittance[0][r * nodes + j] ?? Number.NaN,
+      12,
+    );
+  });
+});
