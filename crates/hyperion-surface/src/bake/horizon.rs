@@ -38,18 +38,27 @@
 //! # The near field
 //!
 //! At each vertex and azimuth, the highest ground along the patch's grid line through it, ahead in
-//! that direction, from the patch's own heights: the drawn mesh, whose edges along a row or column
-//! are the segments between its vertices, so that the line's highest point seen from the vertex is
-//! one of them. It is found by Timonen and Westerholm 2010's line sweep, O(n) a line: each line is
-//! walked from its far end back, and a stack keeps the convex hull of the vertices passed, in the
-//! plane through the body's centre that holds the line's two ends (a row or a column of S2's grid
-//! is a great circle, in that plane; a diagonal, which S2's warp bends a little off it, and a
+//! that direction, from the patch's own heights and, beyond its edges, a margin of eight of its
+//! level's vertices on its neighbours: the drawn mesh, whose edges along a row or column are the
+//! segments between its vertices, so that the line's highest point seen from the vertex is one of
+//! them. It is found by Timonen and Westerholm 2010's line sweep, O(n) a line: each line is walked
+//! from its far end back, and a stack keeps the convex hull of the vertices passed, in the plane
+//! through the body's centre that holds the line's two ends (a row or a column of S2's grid is a
+//! great circle, in that plane; a diagonal, which S2's warp bends a little off it, and a
 //! spheroid's heights along ν, are projected onto it). The hull's tangent from a vertex is its
 //! horizon, since the horizon is the most raised
 //! direction from the vertex in that plane whatever the planet's curvature; its elevation is then
 //! taken exactly, from the two points' body-fixed positions and the datum's normal, so that the
-//! curvature drop, d² ÷ 2R on a sphere, is included and no small-angle form is needed. A vertex
-//! with no vertex ahead (on the patch's edge, looking out) has no near horizon, [`NO_HORIZON`].
+//! curvature drop, d² ÷ 2R on a sphere, is included and no small-angle form is needed.
+//!
+//! The margin's heights are those the neighbours' own vertices have, the height function's at the
+//! same lattice vertex of the same level, read as the far field reads its ground (below): from the
+//! caller's cache, where a neighbour baked before keeps them, or asked, and the reference surface
+//! where the view cannot make them, the map then not complete. So a vertex on a patch's edge,
+//! looking out, sees the ground its neighbour's vertex there sees within the margin, and the two
+//! sides of an edge differ only by the ground beyond it, which each takes from the far field
+//! (R10.T8.c). The margin stops at the face's edge, where the grid's lines turn onto another face's
+//! grid: a vertex on a face's edge, looking off the face, has no near horizon, [`NO_HORIZON`].
 //!
 //! # The far field
 //!
@@ -65,7 +74,8 @@
 //! after. The point stands at its own height, the patch's vertex's. The patch's own vertex heights
 //! and its parent level's at its even vertices are the bake's; the others are kept in the caller's
 //! [`SynthCache`] by face, level and lattice vertex, with the band of its own that its neighbours'
-//! marches read, so that a patch's neighbours, and its children, read them again for free.
+//! near fields and marches read, so that a patch's neighbours, and its children, read them again
+//! for free.
 //!
 //! The lattice is the face's ([`far_field_point`]): its points are the same points, with the same
 //! values, in every patch of a level on the face that holds them, so the far field is the same bits
@@ -77,21 +87,22 @@
 //! # The survey
 //!
 //! The near field reads the bake's own heights, where a vertex the view cannot make already stands
-//! at the reference surface. A far sample whose vertex the view cannot make takes the reference
-//! surface too, height 0, the datum the client draws there (Design note 12), and the map is then
-//! not [complete](HorizonMap::is_complete): a later block may bring the ground that casts the
-//! shadow. The map names the cells it was refused for ([`HorizonMap::refused_cells`]): each the
-//! first cell a refused height's reads lacked, the one whose arrival alone can change that height,
-//! so that a patch is baked again exactly on a block that brings one of them (decision-r10-t8a §3,
-//! R10.T8.b).
+//! at the reference surface. A vertex of its margin, or a far sample's, that the view cannot make
+//! takes the reference surface too, height 0, the datum the client draws there (Design note 12),
+//! and the map is then not [complete](HorizonMap::is_complete): a later block may bring the ground
+//! that casts the shadow. The map names the cells it was refused for
+//! ([`HorizonMap::refused_cells`]): each the first cell a refused height's reads lacked, the one
+//! whose arrival alone can change that height, so that a patch is baked again exactly on a block
+//! that brings one of them (decision-r10-t8a §3, R10.T8.b; the margin's refusals since R10.T8.c).
 //!
 //! # Determinism
 //!
 //! Every value is a pure function of the view's cells, the detail seed and the patch: the same
 //! bits in any order of bakes and from any cache whose views only grow, on every target. The cache
 //! keeps only answered heights, each the height function's own; a refused one is asked again by the
-//! next bake. The map is presentation (the plan's Generator version section): no golden pins it,
-//! and nothing is drawn from a stream.
+//! next bake. The map is presentation (the plan's Generator version section): goldens pin it at
+//! the generator version in force, and a change to it re-blesses them with no bump; nothing is
+//! drawn from a stream.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, SQRT_2, TAU};
@@ -137,8 +148,9 @@ pub const FAR_STRIDE: u8 = 8;
 /// The `u32` words a vertex or a far-field point takes: two azimuths to a word.
 pub const WORDS_PER_TEXEL: usize = 4;
 
-/// The code of no horizon, −90°: a vertex with no ground ahead of it in the patch (on its edge,
-/// looking out), or a far-field point with no sample within the reach (a body with no relief).
+/// The code of no horizon, −90°: a vertex with no ground ahead of it on its face (on the face's
+/// edge, looking off it), or a far-field point with no sample within the reach (a body with no
+/// relief).
 pub const NO_HORIZON: i16 = -32767;
 
 /// The azimuths of a turn, as a number of 45° steps.
@@ -214,24 +226,28 @@ impl HorizonMap {
         self.near.is_empty() && self.far.is_empty()
     }
 
-    /// Whether the far field read only ground the view could make. It is false where a sample took
-    /// the reference surface for want of a cell the view does not hold: a later block can bring
-    /// ground that raises the horizon, so the map can change while the bake's survey mask does not
-    /// ([`TerrainLayers::is_complete`](super::TerrainLayers::is_complete) does not count it).
+    /// Whether the near field's margin and the far field read only ground the view could make.
+    ///
+    /// It is false where a vertex of the margin or a far sample took the reference surface for
+    /// want of a cell the view does not hold, or the bake's own heights stood at it: a later block
+    /// can bring ground that raises the horizon, so the map can change while the bake's survey mask
+    /// does not ([`TerrainLayers::is_complete`](super::TerrainLayers::is_complete) does not count
+    /// it).
     #[must_use]
     pub const fn is_complete(&self) -> bool {
         !self.refused
     }
 
-    /// The cells the far field was refused for, as rising [`cell_index`]es at the field's level.
+    /// The cells the near field's margin and the far field were refused for, as rising
+    /// [`cell_index`]es at the field's level.
     ///
     /// Each is, for a height the view could not make, the first cell its reads lacked
-    /// ([`QueryHeightError::NotSurveyed`]), each once. Every read before that cell was held and is final, so
-    /// the height can change only once that cell is held: a block that brings none of these cells,
-    /// surveyed or margin, leaves the map's words as they are (decision-r10-t8a §3). Empty for a
-    /// map whose far field read only ground the view holds, and for one not baked; a map whose
-    /// bake was not complete may be incomplete with none, its own heights standing at the
-    /// reference surface.
+    /// ([`QueryHeightError::NotSurveyed`]), each once. Every read before that cell was held and is
+    /// final, so the height can change only once that cell is held: a block that brings none of
+    /// these cells, surveyed or margin, leaves the map's words as they are (decision-r10-t8a §3).
+    /// Empty for a map whose margin and far field read only ground the view holds, and for one not
+    /// baked; a map whose bake was not complete may be incomplete with none, its own heights
+    /// standing at the reference surface.
     #[must_use]
     pub fn refused_cells(&self) -> &[u32] {
         &self.refused_cells
@@ -519,7 +535,6 @@ pub(super) fn bake_horizon<F: FieldView>(
 ) -> HorizonMap {
     let header = synth.field().header();
     let figure = header.figure();
-    let near = near_codes(key, &figure, heights);
     let steps = far_steps(key.level(), &figure, header.realised_relief().value());
     let mut ground = FarGround {
         synth,
@@ -531,6 +546,11 @@ pub(super) fn bake_horizon<F: FieldView>(
         // The bake's own heights stand at the reference surface where it was not complete.
         refused: !complete,
     };
+    // The margin's heights are the far field's ground at the patch's level: the height function's
+    // at the lattice vertex, as the neighbour's own vertex there has it.
+    let near = near_codes(key, &figure, heights, |i, j| {
+        ground.vertex_height_m(cache, key.face(), key.level(), i, j)
+    });
     let far = far_codes(&mut ground, cache, key, &figure, &steps);
     if complete {
         keep_own_band(cache, ground.id, heights);
@@ -544,13 +564,25 @@ pub(super) fn bake_horizon<F: FieldView>(
 }
 
 /// The vertices within this many of a patch's edge, at its level and its parent's, that its
-/// neighbours' far marches read: the march reads the patch's own level to 2^(11/4) ≈ 6.7 vertex
-/// spacings from a far point and its parent's to as many of the parent's, and a sample's cell
-/// reaches one vertex further.
+/// neighbours' far marches and near fields read: the march reads the patch's own level to
+/// 2^(11/4) ≈ 6.7 vertex spacings from a far point and its parent's to as many of the parent's, a
+/// sample's cell reaches one vertex further, and the near field's margin is [`NEAR_MARGIN`].
 const OWN_BAND: u8 = 8;
 
-/// Keeps in `cache` the heights of `heights`' patch that its neighbours' far fields read
-/// ([`OWN_BAND`]): its vertices near its edges at its level, and its even ones at its parent's.
+/// The vertices of its level the near field reads beyond each of a patch's edges, on its
+/// neighbours: the band a complete bake keeps of its own for them (`OWN_BAND`), so that a patch
+/// baked beside baked neighbours reads its margin from the cache, and the far field's stride, so
+/// that from every edge vertex the near field reaches the next far point's distance out.
+const NEAR_MARGIN: u8 = OWN_BAND;
+
+const _: () = assert!(
+    NEAR_MARGIN == FAR_STRIDE,
+    "the near field's margin reaches the next far point's distance out from every edge vertex"
+);
+
+/// Keeps in `cache` the heights of `heights`' patch that its neighbours' near fields' margins and
+/// far fields read ([`OWN_BAND`]): its vertices near its edges at its level, and its even ones at
+/// its parent's.
 /// They are the height function's own, every one answered (the caller's `complete`), so the
 /// cache's rule, answered heights only, holds.
 fn keep_own_band(cache: &mut SynthCache, id: NetworkId, heights: &PatchHeights) {
@@ -613,18 +645,32 @@ fn pack(codes: &[i16]) -> Vec<u32> {
 // ---------------------------------------------------------------------------------------------
 
 /// The near field's codes, [`AZIMUTHS`] a vertex, vertex by vertex, row by row (see the
-/// [module documentation](self)).
+/// [module documentation](self)): the line sweep over the patch's own heights `heights` and, ahead
+/// of its edges, its margin ([`NearGrid`]), whose heights `margin_m` gives by their lattice indices
+/// (i, j) at the patch's level on its face, metres along the datum's normal.
 #[must_use]
-pub(super) fn near_codes(key: PatchKey, figure: &Spheroid, heights: &PatchHeights) -> Vec<i16> {
-    let quads = u8::try_from(PATCH_QUADS).expect("64 quads fit a u8");
-    let count = PATCH_VERTICES * PATCH_VERTICES;
+pub(super) fn near_codes(
+    key: PatchKey,
+    figure: &Spheroid,
+    heights: &PatchHeights,
+    mut margin_m: impl FnMut(u32, u32) -> f64,
+) -> Vec<i16> {
+    let grid = NearGrid::of(key);
+    let count = grid.len();
     let mut datum = Vec::with_capacity(count);
     let mut up = Vec::with_capacity(count);
     let mut position = Vec::with_capacity(count);
-    for y in 0..=quads {
-        for x in 0..=quads {
-            let dir = key.vertex_dir(x, y);
-            let h = heights.sample(x, y).height_m;
+    for y in grid.y0..=grid.y1 {
+        for x in grid.x0..=grid.x1 {
+            let (dir, h) = if let Some((vx, vy)) = NearGrid::own(x, y) {
+                (key.vertex_dir(vx, vy), heights.sample(vx, vy).height_m)
+            } else {
+                let (i, j) = grid.lattice(x, y);
+                (
+                    lattice_vertex_dir(key.face(), key.level(), i, j),
+                    margin_m(i, j),
+                )
+            };
             let base = figure.point(dir);
             let nu = figure.normal(dir);
             position.push(add(base, scale(nu, h)));
@@ -637,25 +683,28 @@ pub(super) fn near_codes(key: PatchKey, figure: &Spheroid, heights: &PatchHeight
         up: &up,
         datum: &datum,
     };
-    let mut codes = vec![NO_HORIZON; count * AZIMUTHS];
+    let mut codes = vec![NO_HORIZON; PATCH_VERTICES * PATCH_VERTICES * AZIMUTHS];
     let mut sweep = Sweep::default();
     let side = i32::try_from(PATCH_VERTICES).expect("65 fits an i32");
-    let inside = |x: i32, y: i32| (0..side).contains(&x) && (0..side).contains(&y);
     for (k, &[dx, dy]) in AZIMUTH_STEPS.iter().enumerate() {
         let (dx, dy) = (i32::from(dx), i32::from(dy));
         for y in 0..side {
             for x in 0..side {
-                // A line starts where the step back leaves the grid.
-                if inside(x - dx, y - dy) {
+                // A line starts at the patch's vertex whose step back leaves the patch, since only
+                // the ground ahead of a vertex is its horizon, and runs on through the margin.
+                if NearGrid::own(x - dx, y - dy).is_some() {
                     continue;
                 }
                 sweep.line.clear();
+                sweep.texels.clear();
                 let (mut cx, mut cy) = (x, y);
-                while inside(cx, cy) {
-                    let n = cy * side + cx;
-                    sweep
-                        .line
-                        .push(usize::try_from(n).expect("a vertex index is non-negative"));
+                while let Some(n) = grid.index(cx, cy) {
+                    sweep.line.push(n);
+                    if let Some((vx, vy)) = NearGrid::own(cx, cy) {
+                        sweep
+                            .texels
+                            .push(usize::from(vy) * PATCH_VERTICES + usize::from(vx));
+                    }
                     cx += dx;
                     cy += dy;
                 }
@@ -666,28 +715,110 @@ pub(super) fn near_codes(key: PatchKey, figure: &Spheroid, heights: &PatchHeight
     codes
 }
 
-/// A patch's vertices in `f64`, row by row: their body-fixed positions, the datum's normal under
-/// each, and the datum's point under each.
+/// The near field's grid about a patch, in the patch's vertex indices: its own 65 × 65 vertices
+/// and, beyond each edge, [`NEAR_MARGIN`] of its level's on its face, fewer where the face's edge
+/// comes first, so that x runs from `x0` (−8 to 0) to `x1` (64 to 72), and y likewise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NearGrid {
+    /// The lattice indices at the patch's level of the patch's vertex (0, 0).
+    i0: u32,
+    j0: u32,
+    /// The grid's extent in the patch's vertex indices, both ends held.
+    x0: i32,
+    x1: i32,
+    y0: i32,
+    y1: i32,
+}
+
+impl NearGrid {
+    /// `key`'s grid.
+    #[must_use]
+    fn of(key: PatchKey) -> Self {
+        let margin = u32::from(NEAR_MARGIN);
+        let last = PATCH_QUADS << key.level();
+        let (i0, j0) = (key.i() * PATCH_QUADS, key.j() * PATCH_QUADS);
+        let quads = i32::try_from(PATCH_QUADS).expect("64 fits an i32");
+        let to = |n: u32| i32::try_from(n.min(margin)).expect("a margin of 8 fits an i32");
+        Self {
+            i0,
+            j0,
+            x0: -to(i0),
+            x1: quads + to(last - i0 - PATCH_QUADS),
+            y0: -to(j0),
+            y1: quads + to(last - j0 - PATCH_QUADS),
+        }
+    }
+
+    /// The vertices it holds.
+    #[must_use]
+    fn len(&self) -> usize {
+        let side = |a: i32, b: i32| usize::try_from(b - a + 1).expect("an extent is positive");
+        side(self.x0, self.x1) * side(self.y0, self.y1)
+    }
+
+    /// The index, row by row, of vertex (`x`, `y`), or `None` outside the grid.
+    #[must_use]
+    fn index(&self, x: i32, y: i32) -> Option<usize> {
+        if !(self.x0..=self.x1).contains(&x) || !(self.y0..=self.y1).contains(&y) {
+            return None;
+        }
+        let width = self.x1 - self.x0 + 1;
+        Some(
+            usize::try_from((y - self.y0) * width + (x - self.x0))
+                .expect("a vertex within the grid has a non-negative index"),
+        )
+    }
+
+    /// The lattice indices at the patch's level, on its face, of vertex (`x`, `y`) of the grid.
+    ///
+    /// # Panics
+    ///
+    /// If (`x`, `y`) lies before the face's first row or column.
+    #[must_use]
+    fn lattice(&self, x: i32, y: i32) -> (u32, u32) {
+        let on = |start: u32, n: i32| {
+            start
+                .checked_add_signed(n)
+                .expect("a vertex of the grid is on the face")
+        };
+        (on(self.i0, x), on(self.j0, y))
+    }
+
+    /// The patch's own vertex (`x`, `y`), or `None` where it is not one of the patch's.
+    #[must_use]
+    fn own(x: i32, y: i32) -> Option<(u8, u8)> {
+        let quads = u8::try_from(PATCH_QUADS).expect("64 quads fit a u8");
+        // An index that fits no u8, negative or past 255, is not the patch's: that is the answer.
+        let own = |n: i32| u8::try_from(n).ok().filter(|&n| n <= quads);
+        Some((own(x)?, own(y)?))
+    }
+}
+
+/// A near field's vertices in `f64`, row by row over its grid: their body-fixed positions, the
+/// datum's normal under each, and the datum's point under each.
 struct Points<'a> {
     position: &'a [[f64; 3]],
     up: &'a [[f64; 3]],
     datum: &'a [[f64; 3]],
 }
 
-/// One line's sweep: the line's vertices in its azimuth's order, their places in its plane, and
-/// the hull's stack, kept between lines for their allocations.
+/// One line's sweep: the line's vertices in its azimuth's order, the patch's own first and its
+/// margin's after them, the patch's texels of its own, their places in its plane, and the hull's
+/// stack, kept between lines for their allocations.
 #[derive(Default)]
 struct Sweep {
     line: Vec<usize>,
+    texels: Vec<usize>,
     plane: Vec<[f64; 2]>,
     hull: Vec<usize>,
 }
 
 impl Sweep {
-    /// Writes the near horizon in azimuth `azimuth` of each vertex of the line to `codes`: Timonen
-    /// and Westerholm's sweep from the line's far end back, the hull kept in the plane through the
-    /// body's centre and the line's two ends, in which the line runs counterclockwise, so that a
-    /// point ahead stands higher as seen from a vertex where it lies clockwise of another.
+    /// Writes the near horizon in azimuth `azimuth` of each of the patch's own vertices of the
+    /// line to `codes` by its texel: Timonen and Westerholm's sweep from the line's far end back,
+    /// the hull kept in the plane through the body's centre and the line's two ends, in which the
+    /// line runs counterclockwise, so that a point ahead stands higher as seen from a vertex where
+    /// it lies clockwise of another. The margin's vertices join the hull and take no code.
     fn run(&mut self, points: &Points<'_>, azimuth: usize, codes: &mut [i16]) {
         let (Some(&first), Some(&last)) = (self.line.first(), self.line.last()) else {
             return;
@@ -719,14 +850,16 @@ impl Sweep {
                     break;
                 }
             }
-            if let Some(&top) = self.hull.last() {
+            // The patch's own vertices are the line's first ones, `texels` theirs in order: a grid
+            // line that leaves the patch, a rectangle, does not come back to it.
+            if let (Some(&texel), Some(&top)) = (self.texels.get(at), self.hull.last()) {
                 let (vertex, horizon) = (self.line[at], self.line[top]);
                 let seen = elevation(
                     points.position[vertex],
                     points.up[vertex],
                     points.position[horizon],
                 );
-                codes[vertex * AZIMUTHS + azimuth] = encode_horizon(seen);
+                codes[texel * AZIMUTHS + azimuth] = encode_horizon(seen);
             }
             self.hull.push(at);
         }
@@ -862,9 +995,9 @@ fn higher((v, d2): (f64, f64), (best_v, best_d2): (f64, f64)) -> bool {
     v * v.abs() * best_d2 > best_v * best_v.abs() * d2
 }
 
-/// The far field's ground: the vertex heights of a level, the patch's own and its parent level's
-/// from the bake, others from the caller's cache where it keeps them, the reference surface where
-/// the view cannot make them.
+/// The far field's ground, and the near field's margin's: the vertex heights of a level, the
+/// patch's own and its parent level's from the bake, others from the caller's cache where it keeps
+/// them, the reference surface where the view cannot make them.
 struct FarGround<'s, 'a, F> {
     synth: &'s Synthesiser<'a, F>,
     /// The field the cache's heights are kept for.
@@ -1021,7 +1154,11 @@ fn lattice_vertex_dir(face: Face, level: u8, i: u32, j: u32) -> [f64; 3] {
 }
 
 /// A lattice vertex's key in the far field's memo: the face, the level and the vertex's indices,
-/// each below 2^28 since the march reads no level finer than [`MAX_LEVEL`] less three.
+/// 28 bits each. A level's indices reach 64 × 2^level, below 2^28 to level 21; the march's first
+/// steps and the near field's margin read the patch's own level, whose indices need 29 bits from
+/// level 22 (of [`MAX_LEVEL`]'s 24), where keys would collide. Patches stop near levels 19 to 20,
+/// at the body's finest level (`finest_level`: 19 for an Earth, one finer for each doubling of the
+/// radius), so no rocky world's bake reaches it (R10.T8.c's deferred finding).
 #[must_use]
 fn memo_key(face: Face, level: u8, i: u32, j: u32) -> u64 {
     (u64::from(face.index()) << 61) | (u64::from(level) << 56) | (u64::from(i) << 28) | u64::from(j)

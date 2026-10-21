@@ -1,7 +1,9 @@
 //! The horizon map's tests (plan R10, T8.a): the encoding against WGSL's rounding and its fixture,
 //! the Sun's lit fraction through it, the near field on a flat field, a cliff and real terrain
 //! against brute force, the far field's reach, its bits at shared points, its independence of the
-//! cache and the order of bakes, the survey, and the azimuths.
+//! cache and the order of bakes, the survey, and the azimuths; the near field's margin (T8.c): a
+//! patch's edges looking out at the ground beside them, and two patches' horizons where they meet,
+//! of one level and at a coarse–fine edge.
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -20,9 +22,10 @@ use wasm_bindgen_test::wasm_bindgen_test as test;
 use super::*;
 use crate::bake::tests::{MESH, cells_under, client, code, patch_in, straddling};
 use crate::bake::{TerrainBakeOptions, WeightsLayer, bake_terrain};
+use crate::cube::SampleGrid;
 use crate::field::{CoarseField, Cover, CoverRange, PartialField, cell_at_index, cell_index};
 use crate::height::HeightSample;
-use crate::synth::test_support::{SEED, rim_cells, world};
+use crate::synth::test_support::{Recorder, SEED, rim_cells, world};
 use crate::testing::{FieldBuilder, SyntheticWorld};
 use crate::wire::{decode_payload, encode_payload};
 
@@ -334,45 +337,111 @@ fn flat_field(height_m: f64) -> CoarseField {
         .build()
 }
 
+/// The patches of `key`'s level beside it on its face: the eight about it that the face holds.
+fn beside(key: PatchKey) -> Vec<PatchKey> {
+    let last = (1_u32 << key.level()) - 1;
+    let mut out = Vec::new();
+    for dj in -1..=1 {
+        for di in -1..=1 {
+            let (Some(i), Some(j)) = (
+                key.i().checked_add_signed(di),
+                key.j().checked_add_signed(dj),
+            ) else {
+                continue;
+            };
+            if (di, dj) != (0, 0) && i <= last && j <= last {
+                out.push(PatchKey::new(key.face(), key.level(), i, j).unwrap());
+            }
+        }
+    }
+    out
+}
+
+/// The coarse cells of `field` under `key` and under the patches beside it: those its near field
+/// and its margin read.
+fn cells_about(field: &CoarseField, key: PatchKey) -> BTreeSet<PatchKey> {
+    let mut cells = cells_under(field, key);
+    for next in beside(key) {
+        cells.extend(cells_under(field, next));
+    }
+    cells
+}
+
+/// The unit direction of vertex (`x`, `y`) of `key`'s near grid, its own or its margin's.
+fn grid_dir(key: PatchKey, x: i32, y: i32) -> [f64; 3] {
+    let (i, j) = NearGrid::of(key).lattice(x, y);
+    lattice_vertex_dir(key.face(), key.level(), i, j)
+}
+
+/// `key`'s level's height function at its lattice vertex (`i`, `j`) on its face, as the far field
+/// and the margin ask it, every one answered.
+fn lattice_height_m(
+    synth: &Synthesiser<'_, PartialField>,
+    cache: &mut SynthCache,
+    key: PatchKey,
+    (i, j): (u32, u32),
+) -> f64 {
+    let band = BandLevel::new(key.level()).unwrap();
+    synth
+        .height_at(
+            cache,
+            lattice_vertex_dir(key.face(), key.level(), i, j),
+            band,
+        )
+        .unwrap()
+        .height_m
+}
+
 #[test]
 fn horizon_of_a_flat_field_is_the_curvature_drop_and_never_above_zero() {
     let field = flat_field(1_500.0);
     assert_eq!(bits(field.header().realised_relief().value()), bits(0.0));
     let coarse = field.header().level().get();
-    let key = patch_in(
+    let inner = patch_in(
         PatchKey::new(Face::PosX, coarse, 20, 41).unwrap(),
         coarse + 3,
     );
-    let view = client_of(&field, &cells_under(&field, key));
-    let synth = Synthesiser::new(&view, SEED);
-    let map = horizon_of(&synth, &mut SynthCache::new(), key);
-    assert!(map.is_complete(), "the view holds the flat field");
-    let side = i16::try_from(PATCH_VERTICES).unwrap();
-    for y in 0..=64_u8 {
-        for x in 0..=64_u8 {
-            for (k, &[dx, dy]) in AZIMUTH_STEPS.iter().enumerate() {
-                let (nx, ny) = (i16::from(x) + i16::from(dx), i16::from(y) + i16::from(dy));
-                let near = map.near(x, y, k).value();
-                assert!(near <= 0.0, "({x}, {y}) {k}: {near}");
-                if (0..side).contains(&nx) && (0..side).contains(&ny) {
-                    // Every point at one height: the nearest stands highest, at −θ ÷ 2.
-                    let next = key.vertex_dir(u8::try_from(nx).unwrap(), u8::try_from(ny).unwrap());
-                    let drop = -angle_between(key.vertex_dir(x, y), next) / 2.0;
-                    assert!(
-                        (near - drop).abs() <= half_step() * 1.001,
-                        "({x}, {y}) {k}: {near} against {drop}"
-                    );
-                } else {
-                    assert_eq!(bits(near), bits(-FRAC_PI_2), "({x}, {y}) {k} looks off");
+    // A patch on the face's edge s = 0, where its margin stops.
+    let rim = PatchKey::new(Face::PosX, coarse + 3, 0, inner.j()).unwrap();
+    for key in [inner, rim] {
+        let view = client_of(&field, &cells_about(&field, key));
+        let synth = Synthesiser::new(&view, SEED);
+        let map = horizon_of(&synth, &mut SynthCache::new(), key);
+        assert!(
+            map.is_complete(),
+            "the view holds the flat field beside the patch"
+        );
+        for y in 0..=64_u8 {
+            for x in 0..=64_u8 {
+                for (k, &[dx, dy]) in AZIMUTH_STEPS.iter().enumerate() {
+                    let (nx, ny) = (i32::from(x) + i32::from(dx), i32::from(y) + i32::from(dy));
+                    let near = map.near(x, y, k).value();
+                    assert!(near <= 0.0, "{key:?} ({x}, {y}) {k}: {near}");
+                    if key.i() == 0 && nx < 0 {
+                        assert_eq!(
+                            bits(near),
+                            bits(-FRAC_PI_2),
+                            "{key:?} ({x}, {y}) {k} looks off the face"
+                        );
+                    } else {
+                        // Every point at one height: the nearest stands highest, at −θ ÷ 2, the
+                        // patch's own or, from its edge, its margin's.
+                        let next = grid_dir(key, nx, ny);
+                        let drop = -angle_between(key.vertex_dir(x, y), next) / 2.0;
+                        assert!(
+                            (near - drop).abs() <= half_step() * 1.001,
+                            "{key:?} ({x}, {y}) {k}: {near} against {drop}"
+                        );
+                    }
                 }
             }
         }
-    }
-    // With no relief the far field's reach is nought: no sample, no horizon.
-    for b in 0..=8 {
-        for a in 0..=8 {
-            for k in 0..AZIMUTHS {
-                assert_eq!(bits(map.far(a, b, k).value()), bits(-FRAC_PI_2));
+        // With no relief the far field's reach is nought: no sample, no horizon.
+        for b in 0..=8 {
+            for a in 0..=8 {
+                for k in 0..AZIMUTHS {
+                    assert_eq!(bits(map.far(a, b, k).value()), bits(-FRAC_PI_2));
+                }
             }
         }
     }
@@ -380,68 +449,138 @@ fn horizon_of_a_flat_field_is_the_curvature_drop_and_never_above_zero() {
 
 #[test]
 fn horizon_of_a_cliff_of_height_h_at_distance_d_is_its_top_s_elevation() {
-    // A cliff 100 m high along column 40 of a level-14 patch on an Earth-sized sphere, about 10 m
-    // between vertices: (H − d² ÷ 2R) ÷ d differs from the exact tan e by a part in H ÷ R, at most
-    // (H ÷ R) ÷ 2, about 1.6″, in elevation here (at e near 45°).
+    // A cliff 100 m high along a column of a level-14 patch on an Earth-sized sphere, about 10 m
+    // between vertices, in the patch (column 40) and on its neighbour, in its margin (column 68):
+    // (H − d² ÷ 2R) ÷ d differs from the exact tan e by a part in H ÷ R, at most (H ÷ R) ÷ 2, about
+    // 1.6″, in elevation here (at e near 45°).
     let radius = 6_371_000.0;
     let figure = Spheroid::sphere(radius);
     let key = PatchKey::new(Face::PosZ, 14, 5_000, 7_100).unwrap();
-    let (h, cliff) = (100.0, 40_u8);
-    let heights = PatchHeights::from_queries(key, |q| {
-        Ok::<_, std::convert::Infallible>(HeightSample {
-            height_m: if q.x >= cliff { h } else { 0.0 },
-            gradient: [0.0; 3],
+    let start = i64::from(key.i() * PATCH_QUADS);
+    let h = 100.0;
+    for cliff in [40_i32, 68] {
+        let ground = |x: i32| if x >= cliff { h } else { 0.0 };
+        let heights = PatchHeights::from_queries(key, |q| {
+            Ok::<_, std::convert::Infallible>(HeightSample {
+                height_m: ground(i32::from(q.x)),
+                gradient: [0.0; 3],
+            })
         })
-    })
-    .unwrap();
-    let codes = near_codes(key, &figure, &heights);
-    let mut seen = 0;
-    for y in 0..=64_u8 {
-        for x in 0..cliff {
+        .unwrap();
+        let codes = near_codes(key, &figure, &heights, |i, _| {
+            ground(i32::try_from(i64::from(i) - start).unwrap())
+        });
+        let mut seen = 0;
+        for y in 0..=64_u8 {
+            let top = grid_dir(key, cliff, i32::from(y));
+            for x in (0..=64_u8).filter(|&x| i32::from(x) < cliff) {
+                let n = usize::from(y) * PATCH_VERTICES + usize::from(x);
+                let near = decode_horizon(codes[n * AZIMUTHS]).value();
+                let d = radius * angle_between(key.vertex_dir(x, y), top);
+                let formula = math::atan((h - d * d / (2.0 * radius)) / d);
+                assert!(
+                    (near - formula).abs() <= 2.0 * half_step(),
+                    "{cliff} ({x}, {y}): {near} against {formula}"
+                );
+                let from = figure.surface_point(key.vertex_dir(x, y), 0.0);
+                let exact = elevation(
+                    from,
+                    figure.normal(key.vertex_dir(x, y)),
+                    figure.surface_point(top, h),
+                );
+                assert_eq!(
+                    codes[n * AZIMUTHS],
+                    encode_horizon(exact),
+                    "{cliff} ({x}, {y})"
+                );
+                seen += 1;
+            }
+        }
+        assert_eq!(seen, 65 * cliff.min(65));
+        // On level ground, looking on: the curvature drop to the next vertex, the margin's from
+        // the patch's edges, on the plateau to +x and below the cliffs to −x.
+        let level: &[(u8, u8, usize, i32)] = if cliff == 40 {
+            &[(50, 20, 0, 51), (64, 20, 0, 65), (0, 20, 4, -1)]
+        } else {
+            &[(0, 20, 4, -1), (30, 40, 4, 29)]
+        };
+        for &(x, y, k, next) in level {
             let n = usize::from(y) * PATCH_VERTICES + usize::from(x);
-            let near = decode_horizon(codes[n * AZIMUTHS]).value();
-            let d = radius * angle_between(key.vertex_dir(x, y), key.vertex_dir(cliff, y));
-            let formula = math::atan((h - d * d / (2.0 * radius)) / d);
+            let ahead = grid_dir(key, next, i32::from(y));
+            let drop = -angle_between(key.vertex_dir(x, y), ahead) / 2.0;
+            let flat = decode_horizon(codes[n * AZIMUTHS + k]).value();
             assert!(
-                (near - formula).abs() <= 2.0 * half_step(),
-                "({x}, {y}): {near} against {formula}"
+                (flat - drop).abs() <= half_step(),
+                "{cliff} ({x}, {y}) {k}: {flat} against {drop}"
             );
-            let from = figure.surface_point(key.vertex_dir(x, y), 0.0);
-            let top = figure.surface_point(key.vertex_dir(cliff, y), h);
-            let exact = elevation(from, figure.normal(key.vertex_dir(x, y)), top);
-            assert_eq!(codes[n * AZIMUTHS], encode_horizon(exact), "({x}, {y})");
-            seen += 1;
         }
     }
-    assert_eq!(seen, 65 * 40);
-    // On the plateau, looking on: the curvature drop to the next vertex.
-    let n = 20 * PATCH_VERTICES + 50;
-    let drop = -angle_between(key.vertex_dir(50, 20), key.vertex_dir(51, 20)) / 2.0;
-    let plateau = decode_horizon(codes[n * AZIMUTHS]).value();
-    assert!(
-        (plateau - drop).abs() <= half_step(),
-        "{plateau} against {drop}"
-    );
 }
 
-/// The highest elevation over the vertices ahead of (`x`, `y`) along azimuth `k`'s grid line,
-/// each taken exactly: the near field by brute force.
-fn brute_near(points: &Points<'_>, vertex: (u8, u8), k: usize) -> Option<Radians> {
+/// The highest elevation over the vertices ahead of `vertex` along azimuth `k`'s grid line, each
+/// taken exactly, the patch's own and on to the end of its margin or of the face: the near field
+/// by brute force. `position` is each vertex's body-fixed position, `None` past those ends.
+fn brute_near(
+    position: &dyn Fn(i32, i32) -> Option<[f64; 3]>,
+    up: [f64; 3],
+    vertex: (u8, u8),
+    k: usize,
+) -> Option<Radians> {
     let [dx, dy] = AZIMUTH_STEPS[k];
-    let from = usize::from(vertex.1) * PATCH_VERTICES + usize::from(vertex.0);
-    let (mut cx, mut cy) = (
-        i32::from(vertex.0) + i32::from(dx),
-        i32::from(vertex.1) + i32::from(dy),
-    );
+    let (x, y) = (i32::from(vertex.0), i32::from(vertex.1));
+    let from = position(x, y).unwrap();
     let mut best: Option<f64> = None;
-    while (0..65).contains(&cx) && (0..65).contains(&cy) {
-        let to = usize::try_from(cy * 65 + cx).unwrap();
-        let seen = elevation(points.position[from], points.up[from], points.position[to]).value();
+    for n in 1.. {
+        let Some(to) = position(x + n * i32::from(dx), y + n * i32::from(dy)) else {
+            break;
+        };
+        let seen = elevation(from, up, to).value();
         best = Some(best.map_or(seen, |highest| num::max(highest, seen)));
-        cx += i32::from(dx);
-        cy += i32::from(dy);
     }
     best.map(Radians::new)
+}
+
+/// The body-fixed positions of `key`'s vertices over `figure`, its own from `heights` and, within
+/// [`NEAR_MARGIN`] of its edges on its face, its margin's from `margin_m` at their lattice indices,
+/// by the patch's vertex indices; `None` past the margin or off the face.
+fn near_ground(
+    key: PatchKey,
+    figure: &Spheroid,
+    heights: &PatchHeights,
+    mut margin_m: impl FnMut(u32, u32) -> f64,
+) -> impl Fn(i32, i32) -> Option<[f64; 3]> {
+    let m = i32::from(NEAR_MARGIN);
+    let span = -m..=64 + m;
+    let side = 65 + 2 * m;
+    let last = i64::from(PATCH_QUADS << key.level());
+    let (i0, j0) = (
+        i64::from(key.i() * PATCH_QUADS),
+        i64::from(key.j() * PATCH_QUADS),
+    );
+    let mut positions = Vec::new();
+    for y in span.clone() {
+        for x in span.clone() {
+            let (i, j) = (i0 + i64::from(x), j0 + i64::from(y));
+            let on_face = (0..=last).contains(&i) && (0..=last).contains(&j);
+            let own = (u8::try_from(x), u8::try_from(y));
+            positions.push(on_face.then(|| match own {
+                (Ok(vx), Ok(vy)) if vx <= 64 && vy <= 64 => {
+                    figure.surface_point(key.vertex_dir(vx, vy), heights.sample(vx, vy).height_m)
+                }
+                _ => {
+                    let (i, j) = (u32::try_from(i).unwrap(), u32::try_from(j).unwrap());
+                    let dir = lattice_vertex_dir(key.face(), key.level(), i, j);
+                    figure.surface_point(dir, margin_m(i, j))
+                }
+            }));
+        }
+    }
+    move |x, y| {
+        if !span.contains(&x) || !span.contains(&y) {
+            return None;
+        }
+        positions[usize::try_from((y + m) * side + (x + m)).unwrap()]
+    }
 }
 
 #[test]
@@ -453,38 +592,33 @@ fn horizon_near_field_sweep_is_the_brute_force_horizon_on_rough_ground() {
         let field = world(w);
         let coarse = field.header().level().get();
         let key = patch_in(rim_cells(field, 1)[0], coarse + level_above);
-        let view = client(w, &cells_under(field, key), |_| code(20.0));
+        // The view holds the ground beside the patch, so that the margin reads its real heights.
+        let view = client(w, &cells_about(field, key), |_| code(20.0));
         let synth = Synthesiser::new(&view, SEED);
-        let heights = synth.bake_patch(&mut SynthCache::new(), key).unwrap();
+        let mut cache = SynthCache::new();
+        let heights = synth.bake_patch(&mut cache, key).unwrap();
         let figure = field.header().figure();
-        let codes = near_codes(key, &figure, &heights);
-        let (mut position, mut up, mut datum) = (vec![], vec![], vec![]);
-        for y in 0..=64_u8 {
-            for x in 0..=64_u8 {
-                let dir = key.vertex_dir(x, y);
-                position.push(figure.surface_point(dir, heights.sample(x, y).height_m));
-                up.push(figure.normal(dir));
-                datum.push(figure.point(dir));
-            }
-        }
-        let points = Points {
-            position: &position,
-            up: &up,
-            datum: &datum,
-        };
+        let mut margin = |i, j| lattice_height_m(&synth, &mut cache, key, (i, j));
+        let codes = near_codes(key, &figure, &heights, &mut margin);
+        let position = near_ground(key, &figure, &heights, &mut margin);
         let (mut above, mut off_by_one) = (0, 0);
         for y in 0..=64_u8 {
             for x in 0..=64_u8 {
+                let up = figure.normal(key.vertex_dir(x, y));
                 for k in 0..AZIMUTHS {
                     let n = usize::from(y) * PATCH_VERTICES + usize::from(x);
                     let swept = codes[n * AZIMUTHS + k];
-                    let brute = brute_near(&points, (x, y), k).map_or(NO_HORIZON, encode_horizon);
+                    let brute =
+                        brute_near(&position, up, (x, y), k).map_or(NO_HORIZON, encode_horizon);
                     // The sweep's hull lies in the line's plane; where a diagonal or a spheroid's
                     // heights lie a little off it, it may pick a tangent a hair from the exact one.
                     assert!(
                         (i32::from(swept) - i32::from(brute)).abs() <= 1,
                         "{w:?} ({x}, {y}) {k}: {swept} against {brute}"
                     );
+                    // Away from the face's edges every vertex has ground ahead, its edges' the
+                    // margin's.
+                    assert_ne!(swept, NO_HORIZON, "{w:?} ({x}, {y}) {k}");
                     off_by_one += i32::from(swept != brute);
                     above += i32::from(swept > 0);
                 }
@@ -493,6 +627,247 @@ fn horizon_near_field_sweep_is_the_brute_force_horizon_on_rough_ground() {
         assert!(off_by_one < 50, "{w:?}: {off_by_one} codes a step off");
         assert!(above > 1_000, "{w:?}: rough ground has horizons above zero");
     }
+}
+
+#[test]
+fn horizon_near_field_at_a_patch_s_edge_sees_the_neighbour_s_rising_ground() {
+    for (w, level_above) in [
+        (SyntheticWorld::MoonLike, 4),
+        (SyntheticWorld::EarthLike, 3),
+    ] {
+        let field = world(w);
+        let coarse = field.header().level().get();
+        let key = patch_in(rim_cells(field, 1)[0], coarse + level_above);
+        let view = client(w, &cells_about(field, key), |_| code(20.0));
+        let synth = Synthesiser::new(&view, SEED);
+        // The bake's map, its margin from the far field's ground.
+        let map = horizon_of(&synth, &mut SynthCache::new(), key);
+        let mut cache = SynthCache::new();
+        let heights = synth.bake_patch(&mut cache, key).unwrap();
+        let figure = field.header().figure();
+        let grid = NearGrid::of(key);
+        let (mut outward, mut rising) = (0, 0);
+        for y in 0..=64_u8 {
+            for x in (0..=64_u8).filter(|&x| x == 0 || x == 64 || y == 0 || y == 64) {
+                let from =
+                    figure.surface_point(key.vertex_dir(x, y), heights.sample(x, y).height_m);
+                let up = figure.normal(key.vertex_dir(x, y));
+                for (k, &[dx, dy]) in AZIMUTH_STEPS.iter().enumerate() {
+                    let (nx, ny) = (i32::from(x) + i32::from(dx), i32::from(y) + i32::from(dy));
+                    if NearGrid::own(nx, ny).is_some() {
+                        continue;
+                    }
+                    outward += 1;
+                    let near = map.near(x, y, k).value();
+                    assert!(
+                        near > -FRAC_PI_2,
+                        "{w:?} ({x}, {y}) {k} looks out at the neighbour's ground"
+                    );
+                    // The neighbour's vertex a step on: the horizon is at least as high, to the
+                    // sweep's code and the encoding's half step.
+                    let next_m = lattice_height_m(&synth, &mut cache, key, grid.lattice(nx, ny));
+                    let next = figure.surface_point(grid_dir(key, nx, ny), next_m);
+                    let first = elevation(from, up, next).value();
+                    assert!(
+                        near >= first - 3.0 * half_step() * 1.001,
+                        "{w:?} ({x}, {y}) {k}: {near} below the next vertex's {first}"
+                    );
+                    if first > 0.0 {
+                        rising += 1;
+                        assert!(near > 0.0, "{w:?} ({x}, {y}) {k}");
+                    }
+                }
+            }
+        }
+        // Three azimuths out of each edge vertex, five out of a corner.
+        assert_eq!(outward, 4 * 63 * 3 + 4 * 5, "{w:?}");
+        assert!(
+            rising > 50,
+            "{w:?}: {rising} azimuths look out at rising ground"
+        );
+    }
+}
+
+/// The vertices two patches of one level share along an edge, and the edge's azimuths.
+struct SharedEdge {
+    /// Each shared vertex's indices in the first patch and in the second.
+    pairs: Vec<[(u8, u8); 2]>,
+    /// The two azimuths along the edge.
+    along: [usize; 2],
+    /// The three azimuths out of the first patch, across the edge; their opposites are out of
+    /// the second.
+    out_of_a: [usize; 3],
+}
+
+impl SharedEdge {
+    /// The edge `a` shares with `b`, its neighbour of its level on its face.
+    fn of(a: PatchKey, b: PatchKey) -> Self {
+        let all = 0..=64_u8;
+        let step = (
+            b.i().cast_signed() - a.i().cast_signed(),
+            b.j().cast_signed() - a.j().cast_signed(),
+        );
+        let (pairs, along, out_of_a) = match step {
+            (1, 0) => (all.map(|y| [(64, y), (0, y)]).collect(), [2, 6], [7, 0, 1]),
+            (-1, 0) => (all.map(|y| [(0, y), (64, y)]).collect(), [2, 6], [3, 4, 5]),
+            (0, 1) => (all.map(|x| [(x, 64), (x, 0)]).collect(), [0, 4], [1, 2, 3]),
+            (0, -1) => (all.map(|x| [(x, 0), (x, 64)]).collect(), [0, 4], [5, 6, 7]),
+            other => panic!("{a:?} and {b:?} share no edge: {other:?}"),
+        };
+        Self {
+            pairs,
+            along,
+            out_of_a,
+        }
+    }
+}
+
+/// The differences between `a`'s and `b`'s horizons, radians, at the vertices they share along
+/// `edge`: none along the edge, where both read the same line of vertices; and looking across it,
+/// where the side looking in sees everything the side looking out sees and more, the excess of the
+/// horizon looking in over the horizon looking out, at each azimuth's knot.
+fn shared_edge_excess(a: &HorizonMap, b: &HorizonMap, edge: &SharedEdge) -> Vec<f64> {
+    let mut excess = Vec::new();
+    for &[(xa, ya), (xb, yb)] in &edge.pairs {
+        for k in 0..AZIMUTHS {
+            #[expect(clippy::cast_precision_loss, reason = "eight azimuths")]
+            let phi = Radians::new(FRAC_PI_4 * k as f64);
+            let (ea, eb) = (
+                a.elevation_at(xa, ya, phi).value(),
+                b.elevation_at(xb, yb, phi).value(),
+            );
+            if edge.along.contains(&k) {
+                assert_eq!(
+                    bits(a.near(xa, ya, k).value()),
+                    bits(b.near(xb, yb, k).value()),
+                    "({xa}, {ya}) {k}: one line along the edge"
+                );
+                // The far field, the same bits at shared points, is lerped to the edge by each.
+                assert!(
+                    (ea - eb).abs() <= 1e-12,
+                    "({xa}, {ya}) {k}: {ea} against {eb}"
+                );
+                continue;
+            }
+            let (inward, outward) = if edge.out_of_a.contains(&k) {
+                (eb, ea)
+            } else {
+                (ea, eb)
+            };
+            // Each sweep within a code of the brute force over the same vertices and more.
+            assert!(
+                inward >= outward - 4.0 * half_step() - 1e-12,
+                "({xa}, {ya}) {k}: {inward} looking in below {outward} looking out"
+            );
+            excess.push(inward - outward);
+        }
+    }
+    excess
+}
+
+#[test]
+fn horizon_at_an_edge_two_patches_share_differs_only_by_the_ground_beyond_the_margin() {
+    for (w, level_above) in [
+        (SyntheticWorld::MoonLike, 4),
+        (SyntheticWorld::EarthLike, 3),
+    ] {
+        let field = world(w);
+        let coarse = field.header().level().get();
+        let a = patch_in(rim_cells(field, 1)[0], coarse + level_above);
+        let next = |di: u32, dj: u32| PatchKey::new(a.face(), a.level(), a.i() + di, a.j() + dj);
+        let (east, north) = (next(1, 0).unwrap(), next(0, 1).unwrap());
+        let view = client_within_reach(field, a);
+        let synth = Synthesiser::new(&view, SEED);
+        let mut cache = SynthCache::new();
+        let m_a = horizon_of(&synth, &mut cache, a);
+        // The margin's heights are the neighbour's own, bit for bit.
+        let heights = synth.bake_patch(&mut cache, east).unwrap();
+        let grid = NearGrid::of(a);
+        for y in 0..=64_u8 {
+            for x in 1..=NEAR_MARGIN {
+                let at = grid.lattice(64 + i32::from(x), i32::from(y));
+                assert_eq!(
+                    bits(lattice_height_m(&synth, &mut cache, a, at)),
+                    bits(heights.sample(x, y).height_m),
+                    "{w:?} ({x}, {y})"
+                );
+            }
+        }
+        let mut excess = Vec::new();
+        for b in [east, north] {
+            let m_b = horizon_of(&synth, &mut cache, b);
+            // Its margin read from `a`'s kept band, it is a cold bake's bits.
+            assert_eq!(
+                m_b,
+                horizon_of(&synth, &mut SynthCache::new(), b),
+                "{w:?} {b:?}: warm against cold"
+            );
+            excess.extend(shared_edge_excess(&m_a, &m_b, &SharedEdge::of(a, b)));
+        }
+        assert_shared_edge_excess(&format!("{w:?}"), &excess);
+    }
+}
+
+#[test]
+fn horizon_at_a_coarse_fine_edge_the_parent_s_differs_from_the_coarse_neighbour_s_by_as_much() {
+    // A fine patch at k = 1 draws its parent's ground and takes its parent's horizon (R10.T8.b's
+    // blend), beside a coarse neighbour of its parent's level that takes its own: the two meet as
+    // two patches of one level do, along the half of the parent's edge the child's lies on.
+    let w = SyntheticWorld::MoonLike;
+    let field = world(w);
+    let coarse = field.header().level().get();
+    let child = patch_in(rim_cells(field, 1)[0], coarse + 3);
+    let parent = child.parent().unwrap();
+    let (qx, qy) = (child.i() & 1, child.j() & 1);
+    let neighbour = PatchKey::new(
+        parent.face(),
+        parent.level(),
+        if qx == 1 {
+            parent.i() + 1
+        } else {
+            parent.i() - 1
+        },
+        parent.j(),
+    )
+    .unwrap();
+    let view = client_within_reach(field, parent);
+    let synth = Synthesiser::new(&view, SEED);
+    let mut cache = SynthCache::new();
+    let (m_parent, m_neighbour) = (
+        horizon_of(&synth, &mut cache, parent),
+        horizon_of(&synth, &mut cache, neighbour),
+    );
+    let mut edge = SharedEdge::of(parent, neighbour);
+    // The child's even vertices on its edge, at the parent's (32 qy + y ÷ 2).
+    let half = u8::try_from(32 * qy).unwrap();
+    edge.pairs
+        .retain(|&[(_, y), _]| (half..=half + 32).contains(&y));
+    assert_eq!(edge.pairs.len(), 33);
+    let excess = shared_edge_excess(&m_parent, &m_neighbour, &edge);
+    assert_shared_edge_excess("the coarse–fine edge", &excess);
+}
+
+/// The largest excess of the horizon looking in over the horizon looking out at a vertex two maps
+/// of one level share, degrees ([`shared_edge_excess`]): the ground past the margin, which the
+/// side looking out sees only through the far field, lerped between its points eight vertices
+/// apart. The study's estimate (R10.T8.c) is about Δh ÷ D for ground of relief Δh seen from D, at
+/// least nine vertex spacings out: 1–3° on rough ground. Measured (2026-10-20), at most 2.29° on
+/// the Moon-like world's rim at L + 4 (level 10; 99% of knots under 2.06°), 0.42° on the Earth-like
+/// world's at L + 3, and 0.48° at the Moon-like coarse–fine edge, its parent at L + 2; at L + 6,
+/// 0.79° and 0.15°. With no margin, 10.4°, 4.9° and 4.4° (3.0° and 2.3° at L + 6). The bound is
+/// half as much again as the largest.
+const SHARED_EDGE_EXCESS_DEG: f64 = 3.5;
+
+/// Asserts the excesses `excess` of `case` within [`SHARED_EDGE_EXCESS_DEG`], and that some knot
+/// looks across the edge.
+fn assert_shared_edge_excess(case: &str, excess: &[f64]) {
+    assert!(!excess.is_empty(), "{case}: knots looking across the edge");
+    let worst = excess.iter().copied().fold(0.0, num::max);
+    assert!(
+        worst.to_degrees() <= SHARED_EDGE_EXCESS_DEG,
+        "{case}: {}° looking in over looking out",
+        worst.to_degrees()
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -846,6 +1221,159 @@ fn horizon_names_the_cells_its_far_field_was_refused_for() {
     assert!(complete.is_complete());
     assert_eq!(complete.refused_cells(), [] as [u32; 0]);
     assert_eq!(HorizonMap::default().refused_cells(), [] as [u32; 0]);
+}
+
+/// The coarse cells the height function reads over `field`, every cell held, at the unit
+/// directions `dirs` at band level `level`.
+fn cells_read(
+    field: &CoarseField,
+    level: u8,
+    dirs: impl IntoIterator<Item = [f64; 3]>,
+) -> BTreeSet<PatchKey> {
+    let view = Recorder::new(field);
+    let synth = Synthesiser::new(&view, SEED);
+    let band = BandLevel::new(level).unwrap();
+    let mut cache = SynthCache::new();
+    view.take();
+    for dir in dirs {
+        synth.height_at(&mut cache, dir, band).unwrap();
+    }
+    view.take().into_iter().collect()
+}
+
+/// The coarse cells `key`'s bake reads over `field`, every cell held: its vertices and its
+/// normals' samples at its level, and its even vertices at its parent's.
+fn bake_reads(field: &CoarseField, key: PatchKey) -> BTreeSet<PatchKey> {
+    let mut own = cells_read(
+        field,
+        key.level(),
+        (0..=128).flat_map(|y| (0..=128).map(move |x| key.sample_dir(x, y, SampleGrid::Double))),
+    );
+    own.extend(cells_read(
+        field,
+        key.level() - 1,
+        (0..=32_u8).flat_map(|y| (0..=32_u8).map(move |x| key.vertex_dir(2 * x, 2 * y))),
+    ));
+    own
+}
+
+/// The unit directions of the vertices of `key`'s near field's margin, row by row.
+fn margin_dirs(key: PatchKey) -> Vec<[f64; 3]> {
+    let grid = NearGrid::of(key);
+    (grid.y0..=grid.y1)
+        .flat_map(|y| (grid.x0..=grid.x1).map(move |x| (x, y)))
+        .filter(|&(x, y)| NearGrid::own(x, y).is_none())
+        .map(|(x, y)| grid_dir(key, x, y))
+        .collect()
+}
+
+#[test]
+fn horizon_names_the_cells_its_margin_alone_was_refused_for() {
+    // A client's view holds its survey's cells and their margin of `SYNTHESIS_MARGIN_CELLS`, five
+    // cells, which holds every cell the near field's margin of a patch at the field's level or
+    // finer reads, beside every cell its own vertices read. A patch three levels coarser, eight
+    // cells a side, has a margin a cell deep, whose outer vertices read a column of cells its own
+    // do not: a survey whose margin's edge falls between the two refuses the near field's margin
+    // alone.
+    let field = flat_field(1_500.0);
+    let header = field.header();
+    let coarse = header.level().get();
+    let key = PatchKey::new(Face::PosX, coarse - 3, 3, 3).unwrap();
+    // With no relief the far field's reach is nought: its march takes no step and reads nothing.
+    assert!(
+        far_steps(
+            key.level(),
+            &header.figure(),
+            header.realised_relief().value()
+        )
+        .is_empty(),
+        "the far march takes no step"
+    );
+    // What the bake reads, and what its near field's margin reads.
+    let own = bake_reads(&field, key);
+    let margin = margin_dirs(key);
+    let margin_reads = cells_read(&field, key.level(), margin.iter().copied());
+    assert!(
+        own.iter()
+            .chain(&margin_reads)
+            .all(|c| c.face() == Face::PosX),
+        "the patch and its margin read the face's cells alone"
+    );
+    let west = own.iter().map(|c| c.i()).min().unwrap();
+    assert!(
+        margin_reads.iter().any(|c| c.i() < west),
+        "the margin reads further toward −s than the patch's own vertices"
+    );
+    // A survey from five cells east of the bake's westmost column, so that its margin stops at that
+    // column, and reaching far enough every other way.
+    let (i0, j0) = (key.i() << 3, key.j() << 3);
+    let surveyed: BTreeSet<PatchKey> = (j0 - 14..=j0 + 21)
+        .flat_map(|j| {
+            (west + 5..=i0 + 21).map(move |i| PatchKey::new(Face::PosX, coarse, i, j).unwrap())
+        })
+        .collect();
+    let view = client_of(&field, &surveyed);
+    assert!(
+        own.iter().all(|&c| view.resolution(c).is_some()),
+        "the view holds every cell the bake reads"
+    );
+    let synth = Synthesiser::new(&view, SEED);
+    let bake = bake_terrain(&synth, &mut SynthCache::new(), key, &HORIZON_ONLY, &[]).unwrap();
+    assert!(
+        bake.layers().is_complete(),
+        "the view holds the patch's own ground"
+    );
+    let map = bake.layers().horizon();
+    assert!(!map.is_complete(), "the margin reaches past the view");
+    // Each margin height the view refuses names the first cell its reads lacked, as the height
+    // function names it, and the map names those and no other.
+    let band = BandLevel::new(key.level()).unwrap();
+    let mut cache = SynthCache::new();
+    let expected: BTreeSet<u32> = margin
+        .iter()
+        .filter_map(|&dir| match synth.height_at(&mut cache, dir, band) {
+            Ok(_) => None,
+            Err(QueryHeightError::NotSurveyed(cell)) => Some(cell_index(cell)),
+        })
+        .collect();
+    assert!(!expected.is_empty(), "the view refuses margin heights");
+    assert_eq!(
+        map.refused_cells(),
+        expected.iter().copied().collect::<Vec<_>>().as_slice()
+    );
+    let next = beside(key);
+    for &index in &expected {
+        let c = cell_at_index(coarse, index).unwrap();
+        assert_eq!(view.resolution(c), None, "{c:?} is one the view lacks");
+        assert!(c.i() < west, "{c:?} lies past what the bake reads");
+        let under = PatchKey::containing(key.level(), c.vertex_dir(32, 32)).unwrap();
+        assert!(next.contains(&under), "{c:?} lies under a patch beside it");
+    }
+    // A view grown by the cells named answers each height that named one: none is named again (a
+    // height whose reads lacked more than one cell may name the next).
+    let mut cells = surveyed;
+    cells.extend(expected.iter().map(|&i| cell_at_index(coarse, i).unwrap()));
+    let again = horizon_of(
+        &Synthesiser::new(&client_of(&field, &cells), SEED),
+        &mut SynthCache::new(),
+        key,
+    );
+    assert!(
+        again.refused_cells().iter().all(|i| !expected.contains(i)),
+        "a cell held is never named"
+    );
+    // A view grown by every cell the margin reads holds the margin's ground: the map is complete.
+    cells.extend(margin_reads);
+    let grown = client_of(&field, &cells);
+    let synth_grown = Synthesiser::new(&grown, SEED);
+    let complete = horizon_of(&synth_grown, &mut SynthCache::new(), key);
+    assert!(complete.is_complete(), "the grown view holds the margin");
+    assert_eq!(complete.refused_cells(), [] as [u32; 0]);
+    // A cache warmed under the smaller view, which kept no refused height, bakes the grown view's
+    // map as a cold one does.
+    let mut warm = SynthCache::new();
+    assert_eq!(&horizon_of(&synth, &mut warm, key), map);
+    assert_eq!(horizon_of(&synth_grown, &mut warm, key), complete);
 }
 
 #[test]
