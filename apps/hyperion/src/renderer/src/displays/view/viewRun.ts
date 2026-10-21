@@ -610,8 +610,9 @@ export function sceneClockReading(secondsPerSecond: number): string {
  * the scene's name in a kept scene, and after it, while that scene's clock runs at other than one
  * second a second, its rate, `SCENE CLOCK 100 s/s` ({@link sceneClockReading}, R07.T16.k), so
  * that a `TIME` that runs fast says so. `POSITIONS AS SEEN FROM SHIP` while the camera is off the
- * hull and `ROTATION: NOT YET MODELLED` while a body other than a star, with a radius, has no
- * rotation (decision-r07-rotation-note) are statements ({@link labelStatements}).
+ * hull, `ROTATION: NOT YET MODELLED` while a body other than a star, with a radius, has no
+ * rotation (decision-r07-rotation-note), and `ROTATION: NOT RESOLVED` while the granted detail
+ * level withholds one's (rotation-not-resolved) are statements ({@link labelStatements}).
  *
  * @remarks
  * `SCENE` and `SCENE CLOCK` describe the display's scene, not one view's picture, so an
@@ -703,8 +704,27 @@ export const POSITIONS_FROM_SHIP = "POSITIONS AS SEEN FROM SHIP";
 export const EASED_MOVES_STATEMENT = "EASED CAMERA MOVES";
 
 /**
+ * The statement while the rotation of a body other than a star, with a radius, is not modelled:
+ * this generator version does not compute it, or a kept scene sets none
+ * (decision-r07-rotation-note).
+ */
+export const ROTATION_NOT_MODELLED = "ROTATION: NOT YET MODELLED";
+
+/**
+ * The statement while the detail level granted to the console withholds the rotation of a body
+ * other than a star, with a radius (`ViewBody.rotationNotResolved`; rotation-not-resolved): never
+ * read as "none" or as not modelled.
+ */
+export const ROTATION_NOT_RESOLVED = "ROTATION: NOT RESOLVED";
+
+/**
  * The steady statements under the label block's lines, each while its condition holds, as
  * {@link labelLines} states them.
+ *
+ * @remarks
+ * {@link ROTATION_NOT_RESOLVED} stands directly after {@link ROTATION_NOT_MODELLED} where both
+ * hold, from two bodies, as the guide's "Data states" places a `NOT RESOLVED` note after its
+ * `NOT YET MODELLED` one, and both before the terrain annunciation.
  *
  * @param terrain - The view's debounced terrain annunciation (plan R05, T9), or `null` while
  *   neither condition holds or the view draws no terrain.
@@ -717,12 +737,14 @@ export function labelStatements(
   if (run.camera.preset !== "seat" && run.scene.ownShip !== null) {
     statements.push(POSITIONS_FROM_SHIP);
   }
-  if (
-    run.scene.bodies.some(
-      (body) => body.kind !== "star" && body.radiusM > 0 && body.rotation === null,
-    )
-  ) {
-    statements.push("ROTATION: NOT YET MODELLED");
+  // The bodies whose graticule turns with their rotation: a star's is a reference grid, and a body
+  // with no radius is its symbol at any range.
+  const drawn = run.scene.bodies.filter((body) => body.kind !== "star" && body.radiusM > 0);
+  if (drawn.some((body) => body.rotation === null && body.rotationNotResolved !== true)) {
+    statements.push(ROTATION_NOT_MODELLED);
+  }
+  if (drawn.some((body) => body.rotationNotResolved === true)) {
+    statements.push(ROTATION_NOT_RESOLVED);
   }
   if (terrain !== null) {
     statements.push(terrain);

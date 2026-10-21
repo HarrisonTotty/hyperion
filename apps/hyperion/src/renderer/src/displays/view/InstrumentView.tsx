@@ -140,12 +140,12 @@ function instrumentLines(
  * `PHOTOREALISTIC: PREPARING`, and each photorealistic statement that holds for its picture
  * (`LIGHTING: …`, `BODY PHOTOMETRY: NOT YET MODELLED`, `CRAFT PHOTOMETRY: NOT YET MODELLED` or the
  * two composed, R07.T16.e) unless the primary's block shows the same line
- * (decision-r07-t19-layout, item 5). `ROTATION: NOT YET MODELLED`, about the scene's bodies, is
- * the primary's alone. While its wireframe draws a body's contours, its block states its own
- * `CONTOUR INTERVAL` after its `FOV` (plan R10, R10.T12.b), the interval the primary's states where
- * the two stand at one pose. Its list and its camera and style controls are the side column's while
- * `CONTROLS` points at it, and so are its `POSITION` and `POINTING` (R07.T19.f): at 1280 × 720 the
- * slot has no room for another line.
+ * (decision-r07-t19-layout, item 5). `ROTATION: NOT YET MODELLED` and `ROTATION: NOT RESOLVED`,
+ * about the scene's bodies, are the primary's alone. While its wireframe draws a body's contours,
+ * its block states its own `CONTOUR INTERVAL` after its `FOV` (plan R10, R10.T12.b), the interval
+ * the primary's states where the two stand at one pose. Its list and its camera and style controls
+ * are the side column's while `CONTROLS` points at it, and so are its `POSITION` and `POINTING`
+ * (R07.T19.f): at 1280 × 720 the slot has no room for another line.
  */
 export function InstrumentView({
   instrument,

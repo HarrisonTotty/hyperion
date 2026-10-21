@@ -158,7 +158,7 @@ describe("the lower plate's terrain parts (R10.T12; decision-r10-view-block-room
     expect(terrainLowerParts(null)).toEqual([]);
   });
 
-  it.each<SightGap>(["rotation", "far", "centre"])(
+  it.each<SightGap>(["rotationNotModelled", "rotationNotResolved", "far", "centre"])(
     "gives the readout part where no line of sight forms (%s), reckoned at the full readout's tallest form (R10.T12.a)",
     (gap) => {
       const parts = terrainLowerParts(linesOf({ sightGap: gap }));

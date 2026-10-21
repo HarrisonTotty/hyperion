@@ -18,7 +18,12 @@ import {
   sendFieldFrames,
 } from "../../test/coarseFieldFixtures";
 import { vec3 } from "../../geometry/vec3";
-import { earthDetail, FIXTURE_EARTH } from "../../test/planetaryFixture";
+import {
+  earthDetail,
+  FIXTURE_EARTH,
+  FIXTURE_JUPITER,
+  withBodyRotation,
+} from "../../test/planetaryFixture";
 import { SCENE_TIDAL_RADIUS_M, sceneClock, sliceSceneSystem } from "../../test/sceneFixture";
 import {
   ANNUNCIATION_ONSET_MS,
@@ -29,6 +34,7 @@ import { PALETTE_NONE, type SurfaceGroundReadout } from "../../view/terrain/work
 import {
   NO_BREAK_SPACE,
   NO_SIGHT_ROTATION,
+  NO_SIGHT_ROTATION_NOT_RESOLVED,
   SURVEY_PENDING,
   TERRAIN_NOT_MODELLED,
 } from "../../view/terrain/readouts";
@@ -56,7 +62,13 @@ import type { TerrainFixture } from "./useTerrainSession";
 import { instrumentViewId, PRIMARY_VIEW_ID } from "./viewNames";
 import { GROUND_NOTE_NAME } from "./ViewMarkList";
 import { type ViewFrameDrawn, ViewFrameDrawer, type ViewFrameInputs } from "./viewFrameDrawer";
-import { runPose, SCENE_OPTIONS } from "./viewRun";
+import {
+  POSITIONS_FROM_SHIP,
+  ROTATION_NOT_MODELLED,
+  ROTATION_NOT_RESOLVED,
+  runPose,
+  SCENE_OPTIONS,
+} from "./viewRun";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -1197,13 +1209,44 @@ function controlsRow(): HTMLElement {
   return screen.getByRole("group", { name: "CONTROLS" });
 }
 
-/** The slice's system as the scene carries it, the Earth's rotation not modelled. */
-function sliceSystemWithStillEarth(): SceneSystemDto {
+/**
+ * `body`, its rotation withheld by the granted detail level where it is the slice's Earth, its bulk
+ * and figure kept: a hand-built record, since no server sends a radius beside a withheld rotation
+ * today, the rotation withheld with the bulk (rotation-not-resolved).
+ */
+function withWithheldEarth(body: BodySummaryDto): BodySummaryDto {
+  return body.id === FIXTURE_EARTH ? { ...body, rotation: { state: "not_resolved" } } : body;
+}
+
+/** The slice's system as the scene carries it, its bodies changed by `change`. */
+function sliceSystemWith(change: (body: BodySummaryDto) => BodySummaryDto): SceneSystemDto {
   const scene = sliceSceneSystem();
   return {
     ...scene,
-    system: { ...scene.system, bodies: scene.system.bodies.map(withStillEarth) },
+    system: { ...scene.system, bodies: scene.system.bodies.map(change) },
   };
+}
+
+/** The slice's system as the scene carries it, the Earth's rotation not modelled. */
+function sliceSystemWithStillEarth(): SceneSystemDto {
+  return sliceSystemWith(withStillEarth);
+}
+
+/**
+ * The slice's system as the scene carries it, the Earth's rotation withheld
+ * ({@link withWithheldEarth}) and the Jupiter turning by the slice Earth's law, so that the Earth's
+ * state alone speaks for the scene's rotation notes: the slice sends its Jupiter no rotation, which
+ * states `ROTATION: NOT YET MODELLED` of its own.
+ *
+ * @throws Error when the slice's Earth has no rotation law.
+ */
+function sliceSystemWithWithheldEarth(): SceneSystemDto {
+  const earth = sliceSceneSystem().system.bodies.find((body) => body.id === FIXTURE_EARTH);
+  if (earth?.rotation?.state !== "ok") {
+    throw new Error("the slice's Earth has a rotation law");
+  }
+  const turnJupiter = withBodyRotation(FIXTURE_JUPITER, earth.rotation.value);
+  return sliceSystemWith((body) => withWithheldEarth(turnJupiter(body)));
 }
 
 describe("the primary's readout's BASELINE on the STYLE panel (R10.T12.a; decision-r10-t12a-scope §3.1)", () => {
@@ -1274,6 +1317,8 @@ describe("the primary's readout where no line of sight forms (R10.T12.a; decisio
       elevation: readingIn(plate(), "ELEVATION"),
       point: [...new Set(sights.primary)],
       note: screen.queryByRole("note", { name: GROUND_NOTE_NAME }),
+      notModelled: within(primaryLabelBlock()).getByText(ROTATION_NOT_MODELLED).textContent,
+      notResolved: within(primaryLabelBlock()).queryByText(ROTATION_NOT_RESOLVED),
     }).toEqual({
       answered: 0,
       line: NO_SIGHT_ROTATION,
@@ -1281,6 +1326,56 @@ describe("the primary's readout where no line of sight forms (R10.T12.a; decisio
       elevation: null,
       point: [undefined],
       note: null,
+      notModelled: ROTATION_NOT_MODELLED,
+      notResolved: null,
+    });
+  });
+
+  it("reads NOT AVAILABLE: ROTATION not resolved under its heading, with DATUM, no tripod and no note, over a body whose rotation is withheld (rotation-not-resolved)", async () => {
+    // The server's scene, its FREE camera in the Earth's frame, the Earth's rotation withheld
+    // beside its radius (a hand-built record, which no server sends today) and the Jupiter turning.
+    const view = await earthInWireframe([], sliceSystemWithWithheldEarth());
+    await view.user.keyboard("3");
+    const answered = await readFor(view, 4);
+    const sights = sightsOver(view, 200);
+    const heading = within(plate()).getByRole("heading", { name: "GROUND AT LINE OF SIGHT" });
+    expect({
+      answered,
+      line: heading.nextElementSibling?.textContent,
+      datum: readingIn(plate(), "DATUM"),
+      elevation: readingIn(plate(), "ELEVATION"),
+      point: [...new Set(sights.primary)],
+      note: screen.queryByRole("note", { name: GROUND_NOTE_NAME }),
+      notModelled: within(primaryLabelBlock()).queryByText(ROTATION_NOT_MODELLED),
+      notResolved: within(primaryLabelBlock()).getByText(ROTATION_NOT_RESOLVED).textContent,
+    }).toEqual({
+      answered: 0,
+      line: NO_SIGHT_ROTATION_NOT_RESOLVED,
+      datum: expect.stringMatching(/^REFERENCE SPHEROID 6378\.1 km × 6356\.8 km/u),
+      elevation: null,
+      point: [undefined],
+      note: null,
+      notModelled: null,
+      notResolved: ROTATION_NOT_RESOLVED,
+    });
+  });
+
+  it("states both rotation notes on the primary's block alone, an instrument's stating neither (rotation-not-resolved)", async () => {
+    // The Earth's rotation withheld beside its radius (a hand-built record, which no server sends
+    // today), and the slice's Jupiter's not modelled.
+    const view = await earthInWireframe([], sliceSystemWith(withWithheldEarth));
+    await openInstrument(view, "INSTRUMENT 1");
+    const slot = screen.getByRole("region", { name: "INSTRUMENT 1" });
+    const notes = [ROTATION_NOT_MODELLED, ROTATION_NOT_RESOLVED];
+    expect({
+      primary: notes.map((note) => within(primaryLabelBlock()).getByText(note).textContent),
+      // The instrument starts in CHASE, so its own statements stand.
+      instrument: within(slot).getByText(POSITIONS_FROM_SHIP).textContent,
+      instrumentNotes: notes.map((note) => within(slot).queryByText(note)),
+    }).toEqual({
+      primary: notes,
+      instrument: POSITIONS_FROM_SHIP,
+      instrumentNotes: [null, null],
     });
   });
 });

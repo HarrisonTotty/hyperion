@@ -747,9 +747,25 @@ describe("the primary's terrain readout at each publish (R10.T12; decision-r10-t
       );
     }
 
+    /**
+     * `run` with `TEST MOON`'s rotation withheld by the granted detail level, its radius kept: a
+     * hand-built body, since no server sends a radius beside a withheld rotation today, the
+     * rotation withheld with the bulk (rotation-not-resolved).
+     */
+    function withheldMoon(run: ViewRun): ViewRun {
+      return withBodies(run, (bodies) =>
+        bodies.map((body) =>
+          body.id === terrainMoon()
+            ? { ...body, rotation: null, rotationNotResolved: true as const }
+            : body,
+        ),
+      );
+    }
+
     /** Each cause, and `TERRAIN TEST` posed to bring it about. */
     const GAPS: ReadonlyArray<readonly [SightGap, () => ViewRun]> = [
-      ["rotation", () => stillMoon(terrainRun())],
+      ["rotationNotModelled", () => stillMoon(terrainRun())],
+      ["rotationNotResolved", () => withheldMoon(terrainRun())],
       ["far", () => framedOn(terrainRun(), terrainMoon(), vec3(0, 0, 2 * MAX_SIGHT_M))],
       ["centre", () => framedOn(terrainRun(), terrainMoon(), vec3(0, 0, 0.5))],
     ];
@@ -783,7 +799,7 @@ describe("the primary's terrain readout at each publish (R10.T12; decision-r10-t
       const gapped = readouts.publish(asSession(fake), stillMoon(terrainRun()), 0);
       const formed = readouts.publish(asSession(fake), terrainRun(), 16);
       expect([gapped?.sightGap, formed?.sightGap, fake.asks.length]).toEqual([
-        "rotation",
+        "rotationNotModelled",
         undefined,
         1,
       ]);
@@ -801,7 +817,7 @@ describe("the primary's terrain readout at each publish (R10.T12; decision-r10-t
         16,
       );
       expect([gapped?.sightGap, other?.body, other?.sightGap]).toEqual([
-        "rotation",
+        "rotationNotModelled",
         OTHER_MOON,
         undefined,
       ]);
@@ -814,14 +830,17 @@ describe("the primary's terrain readout at each publish (R10.T12; decision-r10-t
       const gapped = readouts.publish(asSession(fake), run, 0);
       raise(fake);
       const withheld = readouts.publish(asSession(fake), run, 16);
-      expect([gapped?.sightGap, withheld?.sightGap]).toEqual(["rotation", undefined]);
+      expect([gapped?.sightGap, withheld?.sightGap]).toEqual(["rotationNotModelled", undefined]);
     });
 
     it("clears the cause for a session let go", () => {
       const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
       const run = stillMoon(terrainRun());
       const gapped = readouts.publish(asSession(holdingMoon()), run, 0);
-      expect([gapped?.sightGap, readouts.publish(null, run, 16)]).toEqual(["rotation", null]);
+      expect([gapped?.sightGap, readouts.publish(null, run, 16)]).toEqual([
+        "rotationNotModelled",
+        null,
+      ]);
     });
 
     it("lets the cause go where the next ask finds a distance that is not finite", () => {

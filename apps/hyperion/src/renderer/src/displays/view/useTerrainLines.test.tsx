@@ -6,7 +6,12 @@ import { FIXTURE_MOON, FIXTURE_PLANET } from "../../test/viewFixtures";
 import { TERRAIN_COMPUTATION_FAILED } from "../../view/terrain/annunciation";
 import type { FieldStatus } from "../../view/terrain/coarseFieldStore";
 import { CoverageView } from "../../view/terrain/coverage";
-import { NO_SIGHT_FAR, NO_SIGHT_ROTATION, readoutLineText } from "../../view/terrain/readouts";
+import {
+  NO_SIGHT_FAR,
+  NO_SIGHT_ROTATION,
+  NO_SIGHT_ROTATION_NOT_RESOLVED,
+  readoutLineText,
+} from "../../view/terrain/readouts";
 import type { TerrainSurvey } from "../../view/terrain/session";
 import type { SurfaceGroundReadout } from "../../view/terrain/workers/messages";
 import type { GroundSnapshot } from "./groundReadout";
@@ -173,7 +178,7 @@ describe("the readout the plate states, which its tripod and note follow (decisi
 
 describe("useTerrainLines where no line of sight forms (R10.T12.a; decision-r10-t12a-scope §3.2)", () => {
   it("passes the snapshot's cause on: the heading and its NOT AVAILABLE line, with DATUM", () => {
-    const { result } = renderLines(snapshotOf({ sightGap: "rotation" }));
+    const { result } = renderLines(snapshotOf({ sightGap: "rotationNotModelled" }));
     expect({
       readout: result.current?.model.readout.map(readoutLineText),
       datum: result.current?.model.datum === null ? null : "DATUM",
@@ -185,8 +190,21 @@ describe("useTerrainLines where no line of sight forms (R10.T12.a; decision-r10-
     });
   });
 
+  it("passes a withheld rotation's cause on as its own NOT AVAILABLE line, with DATUM (rotation-not-resolved)", () => {
+    const { result } = renderLines(snapshotOf({ sightGap: "rotationNotResolved" }));
+    expect({
+      readout: result.current?.model.readout.map(readoutLineText),
+      datum: result.current?.model.datum === null ? null : "DATUM",
+      answer: result.current?.readout,
+    }).toEqual({
+      readout: ["GROUND AT LINE OF SIGHT", NO_SIGHT_ROTATION_NOT_RESOLVED],
+      datum: "DATUM",
+      answer: null,
+    });
+  });
+
   it("follows the cause from one snapshot to the next", () => {
-    const hook = renderLines(snapshotOf({ sightGap: "rotation" }));
+    const hook = renderLines(snapshotOf({ sightGap: "rotationNotModelled" }));
     hook.rerender({ snapshot: snapshotOf({ sightGap: "far" }) });
     expect(hook.result.current?.model.readout.map(readoutLineText)).toEqual([
       "GROUND AT LINE OF SIGHT",

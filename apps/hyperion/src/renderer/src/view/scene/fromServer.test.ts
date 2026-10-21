@@ -1,6 +1,7 @@
 import {
   type BodyGrantDto,
   type BodyIdHex,
+  type BodySummaryDto,
   type CameraReportDto,
   type KinematicsDto,
   type SceneStateDto,
@@ -30,6 +31,7 @@ import {
   sceneModelOf,
   shipFrameOf,
   shipInSystem,
+  sliceSceneSystem,
   stateAfterHeartbeat,
   stateInSpace,
   stateInSystem,
@@ -60,6 +62,7 @@ import {
   cameraSceneOf,
   type CraftPose,
   sceneOrigins,
+  type ViewBody,
   type ViewCraft,
   type ViewScene,
 } from "./model";
@@ -862,6 +865,22 @@ function heldAxes(scene: ViewScene, id: string) {
       };
 }
 
+/**
+ * The slice's Earth as the view's scene draws it with the ship near it, its record changed by
+ * `change`, the other bodies as the slice has them.
+ */
+function earthWithRotation(change: (body: BodySummaryDto) => BodySummaryDto): ViewBody {
+  const slice = sliceSceneSystem();
+  const bodies = slice.system.bodies.map((body) =>
+    body.id === FIXTURE_EARTH ? change(body) : body,
+  );
+  const model = sceneModelOf({
+    ...stateNearEarth(),
+    system: { ...slice, system: { ...slice.system, bodies } },
+  });
+  return viewBodyOf(viewSceneOf(model, shipFrameOf(model)), FIXTURE_EARTH);
+}
+
 describe("a server body's rotation and shading from plan 14's sections (R07.T2.b)", () => {
   it("turns the ship's local body by its rotation law at the frame's time, drawn at the present", () => {
     const model = sceneModelOf(stateNearEarth());
@@ -912,6 +931,42 @@ describe("a server body's rotation and shading from plan 14's sections (R07.T2.b
     const scene = viewSceneOf(model, shipFrameOf(model));
     const star = scene.bodies.find((body) => body.kind === "star");
     expect([viewBodyOf(scene, FIXTURE_JUPITER).rotation, star?.rotation]).toEqual([null, null]);
+  });
+
+  it("marks the Earth's rotation not resolved where its section is withheld, with its radius kept (rotation-not-resolved)", () => {
+    // A hand-built record: no server sends a radius beside a withheld rotation today, since the
+    // rotation is withheld with the bulk.
+    const withheld = earthWithRotation((body) => ({
+      ...body,
+      rotation: { state: "not_resolved" },
+    }));
+    expect([withheld.rotation, withheld.rotationNotResolved, withheld.radiusM]).toEqual([
+      null,
+      true,
+      6_378_137,
+    ]);
+  });
+
+  it.each<readonly [string, (body: BodySummaryDto) => BodySummaryDto, boolean]>([
+    ["not modelled", (body) => ({ ...body, rotation: { state: "not_modelled" } }), false],
+    ["absent, as an older server sends it", ({ rotation: _rotation, ...body }) => body, false],
+    ["given", (body) => body, true],
+  ])(
+    "gives the Earth no rotationNotResolved where its rotation section is %s",
+    (_, change, turns) => {
+      const earth = earthWithRotation(change);
+      expect(earth.rotation !== null).toBe(turns);
+      expect(earth).not.toHaveProperty("rotationNotResolved");
+    },
+  );
+
+  it("gives a star no rotationNotResolved", () => {
+    const model = sceneModelOf(stateNearEarth());
+    const star = viewSceneOf(model, shipFrameOf(model)).bodies.find((body) => body.kind === "star");
+    if (star === undefined) {
+      throw new Error("the fixture's scene draws its star");
+    }
+    expect(star).not.toHaveProperty("rotationNotResolved");
   });
 
   it("shades a body with its sections' appearance, one object a record across frames", () => {

@@ -247,7 +247,8 @@ function parentOf(
 
 /**
  * A body's rotation from body-fixed to body axes at `time` from its rotation section, through
- * `rotation3FromRows` (decision-p14-phase-j), or `null` where the section is not `ok`.
+ * `rotation3FromRows` (decision-p14-phase-j), or `null` where the section is not `ok`: where the
+ * rotation is not modelled or not resolved, which `ViewBody.rotationNotResolved` tells apart.
  *
  * @remarks
  * The rows are the transpose of the simulation's `FrameRotation` rows (meridian, east, pole): the
@@ -372,7 +373,8 @@ function standInAttitude(velocityMPerS: Vec3): CraftPose["attitude"] {
  * camera's frame selection measures to these drawn centres (Design note 6, as amended), while `sceneAt` chooses the local body on geometric positions. A body's rotation
  * is its rotation section's law at the time it is drawn at (R07.T2.b), the frame's for the local
  * body and its light's emission for every other, and `null` without the section, when its pole
- * stands as its orbit's normal (Design note 14); its figure and photometry are its sections'
+ * stands as its orbit's normal (Design note 14), with `rotationNotResolved` where the granted
+ * detail level withholds the section; its figure and photometry are its sections'
  * (`heldAppearanceOf`, made once a record), and its radius its figure's equatorial one. Rings are drawn
  * about their planet, each in the plane its normal gives, its planet's local Laplace plane (plan
  * 14, P14.T56.a and T56.b), or in the planet's orbital plane where an older server sends no normal;
@@ -465,6 +467,9 @@ export function viewSceneFromServer(
       retarded,
       ...(presentVelocityMPerS === null ? {} : { presentVelocityMPerS }),
       rotation: rotationAt(record.rotation, drawnAt),
+      // A rotation the granted detail level withholds, which the view states as such rather than
+      // as one not modelled (rotation-not-resolved).
+      ...(record.rotation.state === "not_resolved" ? { rotationNotResolved: true as const } : {}),
       appearance,
       orbitNormal: record.orbit.state === "ok" ? orbitNormal(record.orbit.value.orbit) : null,
       symbol: symbolOf(record, kind),
@@ -563,7 +568,8 @@ export function viewSceneFromServer(
 
 /**
  * A position in its body's non-rotating frame where it is held in the body's fixed one: turned by
- * the body's rotation as the scene holds it (none, where the rotation is not modelled).
+ * the body's rotation as the scene holds it (none, where the rotation is not modelled or not
+ * resolved).
  */
 function inBodyFrame(position: ViewPosition, origins: FrameOrigins): ViewPosition {
   if (position.kind !== "body_fixed") {
