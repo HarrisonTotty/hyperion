@@ -518,7 +518,8 @@ with `observed` present only in one; an observer outside the cube is `BadRequest
 Acceptance: `just ci`.
 
 - **P12.T6.b The summary's mode** (added 2026-10-15 by `decision-gg-port-d0.md` §6.2, from T6's
-  record below; not built yet). T6 as built is the range query's mode and `resolve_system`; this
+  record below; built in `lane/70-p12-t6b-summary-mode`, recorded at the end of Risks). T6 as
+  built is the range query's mode and `resolve_system`; this
   subtask puts the mode on plan 06's `system_summary`, in the shape the Protocol section above
   already gives it, so it is additive and `PROTOCOL_VERSION` stays 2. A defaulted
   `mode: QueryModeDto` on `SystemSummaryRequest` (`#[serde(default)]`, written only when observed,
@@ -1106,7 +1107,7 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     `resolve_system`'s row, and the brief then from a range query with `include_stellar`, but not
     the stars as observed. Ruled (`decision-gg-port-d0.md` §6.2): it is the new subtask P12.T6.b,
     before T11, whose text is under T6 above; T6 as built is the range query's mode and
-    `resolve_system`.
+    `resolve_system`. _Built by P12.T6.b (`lane/70-p12-t6b-summary-mode`, below)._
   - _Server._ `RangeRequest` checks `mode` after `limit`: an observer that is not a canonical
     position inside the root cube is `bad_request` naming `mode`, as `refused_query` names the
     sim's `ObserverOutsideRootCube`. Only the query's time is held to ±H; emitted times before −H
@@ -1194,3 +1195,65 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   shows the age then (`age_myr − light_age_yr ÷ 10⁶`, an Observed value, or `NOT YET FORMED` below
   zero) and `—` for the velocity, until a task puts the velocity at emission on the wire. T11's
   text carries the amendment.
+- **P12.T6.b as built (`lane/70-p12-t6b-summary-mode`, 2026-10-21, at `GENERATOR_VERSION` 22).**
+  No golden or generated output moves: the mode and the observation are optional wire fields, and a
+  summary request or answer in `now` is byte for byte plan 06's. `PROTOCOL_VERSION` stays 2; its
+  doc's defaulted-field paragraph now names `system_summary` (`decision-gg-port-d0.md` §6.1).
+  - _Protocol._ `SystemSummaryRequest` gains `mode: QueryModeDto`, last, with
+    `SystemsInRangeRequest.mode`'s attributes, and loses its `Eq` and `Hash` derives;
+    `SystemSummaryDto` gains `observed: Option<ObservedDto>`, last, with `SystemRecord.observed`'s.
+    The summary's docs give its `existence`, `age_myr`, `stars` and `hierarchy` at the described
+    time, `time` in `now` and `observed.emitted` in observed mode, with `time` echoing the request
+    in both, so T11 subtracts no light age from a summary; `ObservedDto`'s doc adds the summary and
+    keeps the row's sentences. The nested types' "the summary's time" (`StarSummaryDto`,
+    `PulsarDto`, `VariabilityDto`, `StarEventDto`, `HierarchyDto`) is left as it is, so that only
+    three bindings move: `SystemSummaryDto`'s doc says that it means the described time. The
+    bindings `SystemSummaryRequest.ts`, `SystemSummaryDto.ts` and
+    `ObservedDto.ts` change, and nothing else.
+  - _Server._ `SummaryRequest` gains the accessor `mode() -> QueryMode` and loses `Eq` and `Hash`;
+    its `TryFrom` checks `time`, decodes `system`, then runs `convert::observe::query_mode`
+    (`bad_request` naming `mode`). `convert::system_summary(request, stars, time)` keeps its
+    signature and answers `observed: None`, so `bodies`, `SceneWorld::hosts` and the scene fixture
+    are unchanged. The observed answer is
+    `convert::system_summary_observed(request, stars, &summary, &retardation, error)`; both are
+    built by the private `summary_dto`, which takes the age at the summary's own time
+    (`SystemSummary::time`), so the two cannot drift. The handler keeps one interactive job:
+    `get_or_generate` first, so a centre member and a rogue planet are `unknown_system` naming
+    `system` in either mode; then, observed, `Observer::new`, `summary_observed` over
+    `stars.record()` and the cached stars, a `TraceMotionError` mapped by `untraced` (unreached:
+    the cache has refused the only systems that raise it), and `curvature_error`. The emitted time
+    is never held to the clock window.
+  - _Tests._ Wire forms in `stellar::tests`:
+    `a_system_summary_request_of_plan_06s_form_reads_as_now`,
+    `system_summary_request_wire_form_observed` and `system_summary_response_wire_form_observed`,
+    the `now` forms unchanged; `observe::tests`'s `observer`, `observed` and `observed_json` are
+    `pub(crate)` for them. In `convert::stellar::tests`:
+    `a_summary_request_checks_time_then_system_then_mode` and
+    `an_observed_summary_is_the_summary_when_the_light_left` (a system born after the epoch, seen
+    from 3,000 ly before its birth; the answer is `system_summary` at the emitted time with
+    `observed` beside it). In `tests/system_summary.rs`, two more properties of the shared-server
+    test `pinned_summaries_are_the_sims_and_refusals_name_their_field`, each with its own universe:
+    `a_summary_asked_in_both_modes_is_the_sims_now_and_when_its_light_left` (a pinned binary a
+    century after the epoch from 3,000 ly coreward, its light emitted before −1,000 years; the
+    observed state is `summary_observed`'s bit for bit and its `observed` the sim's retardation and
+    `curvature_error` to 1e-15 relative, over a second `OnceLock` galaxy with the full potential,
+    `moving_galaxy`) and
+    `an_observed_summary_names_the_mode_for_a_bad_observer_and_the_system_for_the_centre`.
+    `assert_summary_is_the_sims` takes the time it holds the summary at. The literals of the two
+    structs gain `mode: QueryModeDto::Now` or `observed: None`; the hosts of `system_bodies` and the
+    scene's hosts stay `now`.
+  - _The order of the refusals._ "After the summary's own checks" is read as the request's own
+    checks, as the brief orders them and as `resolve_system` does (T6): `SummaryRequest::try_from`
+    checks `time`, decodes the ID's bits, then the observer, and the pool job resolves the ID after
+    that. So an ID that `resolve` refuses, a centre member or a rogue planet asked with a bad
+    observer is `bad_request` naming `mode`, and `unknown_system` naming `system` with a valid
+    observer or in `now`; no pool job is taken for a request that cannot be answered. The wire's
+    `mode` doc and the handler's `# Errors` say so. No other deviation.
+  - _Deferred findings (2026-10-13 rule), from review._ (1) An observed summary of a feature member
+    rebuilds the member's feature interior on every request, cached stars or not: the sim's
+    `summary_observed` traces the record through `Drift::of_record`, which resolves the member over
+    `NoInteriorCache` (`resolve_system`'s observed path does the same). It costs only a summary
+    asked of a member by its ID, since the server's range query passes no feature sources yet; a
+    sim entry point that takes the member's `Drift`, or lends an interior cache, would remove it.
+    (2) `tests/system_summary.rs` keeps its own `close` and `assert_observed_is_the_sims`, near copies of `tests/observed.rs`'s; moving both
+    into `tests/common/` touches files outside this lane.

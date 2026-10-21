@@ -436,6 +436,7 @@ mod tests {
             fe_h_dex: 0.0,
             stars: Vec::new(),
             hierarchy: HierarchyDto { nodes: Vec::new() },
+            observed: None,
         }
     }
 
@@ -563,6 +564,7 @@ mod tests {
                     universe,
                     system: system(),
                     time: UniverseTime::default(),
+                    mode: QueryModeDto::Now,
                 }))
             }
             Some(RequestBody::SystemSummary(_)) => {

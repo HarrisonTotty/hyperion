@@ -15,9 +15,9 @@ use common::{TestClient, TestServer};
 use hyperion_protocol::{
     BodyDetailDto, BodyDetailRequest, BodyFigureDto, BodyHooksDto, BodyIdHex, BodyKindDto,
     BodyPhotometryDto, BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto,
-    DetailLevelDto, DetailSeedHex, ErrorCode, OrbitHostDto, RequestBody, RequestError,
-    ResponseBody, SectionDto, ServerMessage, SystemBodiesDto, SystemBodiesRequest, SystemIdHex,
-    SystemSummaryRequest, UniverseIdHex, UniverseTime,
+    DetailLevelDto, DetailSeedHex, ErrorCode, OrbitHostDto, QueryModeDto, RequestBody,
+    RequestError, ResponseBody, SectionDto, ServerMessage, SystemBodiesDto, SystemBodiesRequest,
+    SystemIdHex, SystemSummaryRequest, UniverseIdHex, UniverseTime,
 };
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{CellKey, candidate_count};
@@ -762,6 +762,7 @@ async fn a_pinned_systems_bodies_are_the_sims_snapshot(server: &TestServer) {
                     universe: universe.clone(),
                     system: SystemIdHex::from_u64(raw),
                     time,
+                    mode: QueryModeDto::Now,
                 }))
                 .await
             {

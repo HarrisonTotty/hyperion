@@ -5,8 +5,9 @@
 //! finds the same systems, on their present positions, and each row also carries what a sensor at
 //! that position receives from it at the query's time: the light's emission time and age, where the
 //! system was when the light left it, and the stated error from the curvature the straight line
-//! neglects ([`ObservedDto`]). The mode is an optional field that reads as `now` when absent, so a
-//! request written before plan 12 is unchanged.
+//! neglects ([`ObservedDto`]). A `system_summary` asked observed (P12.T6.b) describes the system as
+//! it was when that light left, and carries the same observation. The mode is an optional field
+//! that reads as `now` when absent, so a request written before plan 12 is unchanged.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -51,6 +52,10 @@ impl QueryModeDto {
 /// The row's `age_myr` and `velocity_km_s` stay the present's too (plan 12, Design note 4): the age
 /// when the light left is `age_myr` less `light_age_yr` ÷ 10⁶, and the wire carries no observed
 /// velocity.
+///
+/// Carried by a `system_summary` answer too, only in observed mode (P12.T6.b), and there the state
+/// beside it is the emitted time's: the summary's `existence`, `age_myr`, `stars` and `hierarchy`
+/// are as the system was at `emitted`, and only its `time` is the request's.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct ObservedDto {
@@ -106,7 +111,7 @@ pub struct ResolvedSystem {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use serde_json::json;
 
     use super::*;
@@ -130,14 +135,14 @@ mod tests {
     }
 
     /// An observer 3,000 ly coreward of the Sun-like point.
-    fn observer() -> GalacticPosition {
+    pub(crate) fn observer() -> GalacticPosition {
         GalacticPosition {
             cell_ly: [0, 23_000, 0],
             offset_m: [0.0, 0.0, 0.0],
         }
     }
 
-    fn observed() -> ObservedDto {
+    pub(crate) fn observed() -> ObservedDto {
         ObservedDto {
             emitted: UniverseTime {
                 seconds: -91_512_883_200,
@@ -153,7 +158,7 @@ mod tests {
         }
     }
 
-    fn observed_json() -> serde_json::Value {
+    pub(crate) fn observed_json() -> serde_json::Value {
         json!({
             "emitted": { "seconds": -91_512_883_200_i64, "nanos": 250 },
             "light_age_yr": 3_000.5,

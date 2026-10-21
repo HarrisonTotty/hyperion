@@ -66,7 +66,7 @@ pub(crate) use self::planetary::{
 };
 pub(crate) use self::scene::{ShipRequest, unknown_frame_body, unknown_frame_system};
 pub(crate) use self::stellar::{
-    SummaryRequest, brief_dto, system_summary, unknown_system, wire_time,
+    SummaryRequest, brief_dto, system_summary, system_summary_observed, unknown_system, wire_time,
 };
 pub(crate) use self::surface::{
     FieldRequest, SurveyRequest, cover_dto, open_surveys_refusal, record_section,

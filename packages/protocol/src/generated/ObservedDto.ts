@@ -11,6 +11,10 @@ import type { UniverseTime } from "./UniverseTime";
  * The row's `age_myr` and `velocity_km_s` stay the present's too (plan 12, Design note 4): the age
  * when the light left is `age_myr` less `light_age_yr` ÷ 10⁶, and the wire carries no observed
  * velocity.
+ *
+ * Carried by a `system_summary` answer too, only in observed mode (P12.T6.b), and there the state
+ * beside it is the emitted time's: the summary's `existence`, `age_myr`, `stars` and `hierarchy`
+ * are as the system was at `emitted`, and only its `time` is the request's.
  */
 export type ObservedDto = { 
 /**

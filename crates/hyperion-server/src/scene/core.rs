@@ -23,9 +23,10 @@ use std::fmt;
 use std::sync::Arc;
 
 use hyperion_protocol::{
-    CameraReportDto, ErrorCode, FramePositionDto, RequestError, SceneArrivalDto, SceneBodyDto,
-    SceneClockDto, SceneCraftDto, SceneNotificationDto, SceneStateDto, SceneSystemDto,
-    SeenPositionDto, SystemIdHex, SystemSummaryDto, SystemSummaryRequest, UniverseIdHex,
+    CameraReportDto, ErrorCode, FramePositionDto, QueryModeDto, RequestError, SceneArrivalDto,
+    SceneBodyDto, SceneClockDto, SceneCraftDto, SceneNotificationDto, SceneStateDto,
+    SceneSystemDto, SeenPositionDto, SystemIdHex, SystemSummaryDto, SystemSummaryRequest,
+    UniverseIdHex,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::coords::{
@@ -144,6 +145,7 @@ impl SceneWorld<'_> {
             universe: self.universe.clone(),
             system: SystemIdHex::from_u64(record.id().raw()),
             time: wire_time(t),
+            mode: QueryModeDto::Now,
         };
         system_summary(request, &stars, t)
     }

@@ -1181,6 +1181,7 @@ mod tests {
                 universe: universe.clone(),
                 system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
                 time: UniverseTime::default(),
+                mode: hyperion_protocol::QueryModeDto::Now,
             }),
             RequestBody::SystemBodies(SystemBodiesRequest {
                 universe: universe.clone(),
