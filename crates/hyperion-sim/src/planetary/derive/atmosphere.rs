@@ -16,8 +16,8 @@
 //!   inventory reads ([`chem`](crate::planetary::chem), P14.T50.a); nothing here reads them.
 //! - **Escape** (P14.T13.b). A gas is retained over the system's age when its Jeans parameter λ =
 //!   G M m ÷ (k `T_exo` R) is at least [`JEANS_RETENTION_THRESHOLD`], with the exobase temperature
-//!   a stated multiple of the equilibrium temperature at the host's largest past luminosity,
-//!   raised by the X-ray and ultraviolet energy the body has received beyond Earth's
+//!   a stated multiple of the zero-albedo irradiation temperature at the hosts' largest past
+//!   luminosity, raised by the X-ray and ultraviolet energy the body has received beyond Earth's
 //!   ([`exobase_temperature`]). A hydrogen envelope, far too massive for Jeans escape to remove, is
 //!   judged by energy-limited escape instead ([`energy_limited_loss`]; Owen and Wu 2017).
 //! - **Greenhouse and surface state** (P14.T13.c). The retained gases, less what the climate
@@ -202,23 +202,34 @@ pub fn jeans_parameter(mass: Kilograms, radius: Metres, gas: Gas, exobase: Kelvi
 }
 
 /// The Jeans parameter above which a species is retained over a system's age: 25 (plan 14,
-/// P14.T13.b, "a threshold near 25"), fixed by T13.c's Solar System table with
-/// [`EXOBASE_MULTIPLE`] at that table's albedos: Ganymede's nitrogen, airless at its measured Bond
-/// albedo of 0.35 (λ ≈ 23), is lost, and Titan's, a snowball at 0.50 (λ ≈ 31), kept. The passes'
-/// area-mix albedo does not keep that calibration, which P14.T54.a's Batch C re-bases on the
-/// irradiation (decision-p14-t54a-ganymede §1).
+/// P14.T13.b, "a threshold near 25").
+///
+/// With [`EXOBASE_MULTIPLE`] it is the stand-in for thermal, non-thermal and impact loss together,
+/// read from the irradiation, not the surface: calibrated so that the measured Ganymede loses its
+/// nitrogen (λ 23.1 at its 2,631 km) and Titan keeps its own (λ 29.1), a window of 4.15–5.23 times
+/// the zero-albedo irradiation temperature at their measured radii (decision-p14-t54a-ganymede
+/// §1.4).
 pub const JEANS_RETENTION_THRESHOLD: f64 = 25.0;
 
-/// The exobase temperature as a multiple of the equilibrium temperature: 5 (the lane's, fixed by
-/// the Solar System table; provisional).
+/// The exobase temperature as a multiple of the zero-albedo irradiation temperature `T₀` at the
+/// hosts' largest past luminosity: 5 × (1 − 0.35)^¼ = 4.4895 (decision-p14-t54a-ganymede §1.4).
 ///
-/// It is larger than a real exobase's ratio (Earth's 1,000 K is about 4 `T_eq`, Titan's 150–180 K
-/// about 2), because Jeans escape alone must stand in for the non-thermal losses, sputtering and
-/// pick-up ions, that empty the Moon and Mercury. Within T13.c's table, at its albedos (Ganymede's
-/// measured 0.35, Titan's 0.50), it has a window of 4.6–5.5: below it Ganymede keeps its nitrogen,
-/// above it Titan loses its own. The window does not hold under the passes' area-mix albedo, which
-/// P14.T54.a's Batch C re-bases on the irradiation (decision-p14-t54a-ganymede §1).
-pub const EXOBASE_MULTIPLE: f64 = 5.0;
+/// It is a stated multiple, the stand-in for thermal, non-thermal and impact loss together, not a
+/// real exobase's ratio (Earth's 1,000 K is about 3.6 `T₀`, Titan's 150–180 K about 1.7–2.0).
+/// Jeans escape alone must stand in for the sputtering and pick-up ions that empty the Moon and
+/// Mercury, and for the impact erosion in a giant's well that leaves Ganymede and Callisto airless
+/// beside Titan (Zahnle and Catling 2017, ApJ 843, 122, §5). Those losses read the insolation, the
+/// magnetosphere and the escape velocity, not the surface's albedo (the cosmic shoreline is drawn
+/// against insolation alone, ibid., Fig. 1), so the exobase reads the irradiation alone and no
+/// albedo a pass reads moves a retention.
+///
+/// It is T13.c's 5 `T_eq` at its airless ice, the measured Ganymede's Bond albedo of 0.35 ± 0.03
+/// (Squyres and Veverka 1982, Icarus 52; Buratti 1991, Icarus 92, 312), so T13.b's calibration
+/// figures hold: the measured Ganymede's nitrogen is lost at λ 23.1 and Titan's kept at λ 29.1
+/// ([`JEANS_RETENTION_THRESHOLD`]), a window of 4.15–5.23 `T₀` at their measured radii and
+/// 4.24–5.04 `T₀` over the moons' radius ranks. A constant cannot take a root, so the value is
+/// written out; the module's tests hold it to that expression's bits.
+pub const EXOBASE_MULTIPLE: f64 = 4.489_503_800_059_242;
 
 /// The index by which the X-ray and ultraviolet energy a body has received beyond Earth's raises
 /// its exobase temperature: `T_exo` ∝ (Φ ÷ Φ⊕)^0.5 above Φ⊕ (the lane's, provisional; the plan's
@@ -247,21 +258,26 @@ pub fn earth_xuv_fluence() -> JoulesPerSquareMetre {
     )
 }
 
-/// The exobase temperature of a body whose equilibrium temperature at its hosts' largest past
-/// luminosity is `worst_equilibrium` and which has received the X-ray and ultraviolet fluence
-/// `fluence`: [`EXOBASE_MULTIPLE`] × `T_eq` × max(1, Φ ÷ Φ⊕)^[`EXOBASE_XUV_INDEX`] (P14.T13.b).
+/// The exobase temperature of a body whose zero-albedo irradiation temperature at its hosts'
+/// largest past luminosity is `irradiation` and which has received the X-ray and ultraviolet
+/// fluence `fluence`: [`EXOBASE_MULTIPLE`] × `T₀` × max(1, Φ ÷ Φ⊕)^[`EXOBASE_XUV_INDEX`]
+/// (P14.T13.b; decision-p14-t54a-ganymede §1.4).
+///
+/// `T₀` = (`F_peak` ÷ 4σ)^¼ is the irradiation's alone: the stand-in for thermal, non-thermal and
+/// impact loss together reads no surface, so a body's retention is the same at every albedo its
+/// passes read.
 ///
 /// Both inputs only grow with time (design note 11: the worst the body has seen), so the exobase
 /// never cools and a gas once lost stays lost.
 #[must_use]
-pub fn exobase_temperature(worst_equilibrium: Kelvin, fluence: JoulesPerSquareMetre) -> Kelvin {
+pub fn exobase_temperature(irradiation: Kelvin, fluence: JoulesPerSquareMetre) -> Kelvin {
     let exposure = fluence.value() / earth_xuv_fluence().value();
     let boost = if exposure > 1.0 {
         math::powf(exposure, EXOBASE_XUV_INDEX)
     } else {
         1.0
     };
-    Kelvin::new(EXOBASE_MULTIPLE * worst_equilibrium.value() * boost)
+    Kelvin::new(EXOBASE_MULTIPLE * irradiation.value() * boost)
 }
 
 /// Which species a body retains over its system's age: those whose Jeans parameter at its
@@ -1308,8 +1324,10 @@ pub struct AtmosphereInputs {
     pub formed: SnowLineSide,
     /// Its equilibrium temperature from its hosts' light at the time, at the albedo in use.
     pub equilibrium: Kelvin,
-    /// Its equilibrium temperature at its hosts' largest past luminosity, at the same albedo.
-    pub worst_equilibrium: Kelvin,
+    /// Its irradiation temperature, which its exobase reads ([`exobase_temperature`]): its
+    /// equilibrium temperature at zero albedo, (F ÷ 4σ)^¼, at its hosts' largest past luminosity,
+    /// whatever albedo [`equilibrium`](Self::equilibrium) is at (decision-p14-t54a-ganymede §1.4).
+    pub irradiation_temperature: Kelvin,
     /// Its temperature with its internal heat added, which a gas envelope radiates at: the
     /// equilibrium temperature for a body with none.
     pub heated: Kelvin,
@@ -1734,14 +1752,15 @@ fn partitioned_greenhouse(
 ///    snow line may become methane (step 4), which lies in the air of its surface reservoir and is
 ///    kept where nitrogen, the cold worlds' bulk gas, is (P14.T24.f), and the reported
 ///    [`Atmosphere::retention`] says so. Kept where nitrogen is, methane passes its own Jeans test
-///    at 5 × 16.043 ÷ 28.014 = 2.86 `T_eq`, on a body of any size, above the real ratio of
-///    exobase to equilibrium temperature of every nitrogen and methane air known, 1.8–2.7
-///    (Titan's exobase near 4,000 km and 150 K, Johnson 2010, ApJ 716, 1573, §5; Pluto's upper
-///    atmosphere near 70 K, Gladstone and Young 2019, Annu. Rev. Earth Planet. Sci. 47, 119;
-///    Triton's isothermal 102 K to its exobase at 870 km, Krasnopolsky et al. 1993, JGR 98, 3065,
-///    over its nitrogen ice's 38 K, Tryka et al. 1993, Science 261, 751), whose methane
-///    and its products cool their thermospheres. Titan's own methane, at λ ≈ 18 at the exobase
-///    multiple that stands in for the bulk air's non-thermal losses ([`EXOBASE_MULTIPLE`]), has
+///    at an exobase of [`EXOBASE_MULTIPLE`] × 16.043 ÷ 28.014 = 2.57 `T₀`, on a body of any size,
+///    above the real ratio of exobase to zero-albedo irradiation temperature of every nitrogen and
+///    methane air known, 1.6–2.0 (Titan's exobase near 4,000 km and 150 K over its 89.9 K,
+///    Johnson 2010, ApJ 716, 1573, §5; Pluto's upper atmosphere near 70 K over its 44.3 K,
+///    Gladstone and Young 2019, Annu. Rev. Earth Planet. Sci. 47, 119; Triton's isothermal 102 K
+///    to its exobase at 870 km over its 50.8 K, Krasnopolsky et al. 1993, JGR 98, 3065, where its
+///    nitrogen ice is at 38 K, Tryka et al. 1993, Science 261, 751), whose methane and its
+///    products cool their thermospheres. Titan's own methane, at λ ≈ 17 at the exobase multiple
+///    that stands in for the bulk air's thermal, non-thermal and impact losses, has
 ///    λ ≈ 24–28 at its real exobase, near 4,075 km and 150–180 K (G M m ÷ k T r; Johnson 2010
 ///    gives about 20). That is marginal against [`JEANS_RETENTION_THRESHOLD`]: methane stays
 ///    because its thermal escape is negligible at λ ≳ 20, and because through nitrogen a minor
@@ -1795,7 +1814,8 @@ fn partitioned_greenhouse(
 ///
 /// An Earth with its median inventory keeps its air, warms to about 288 K and is temperate, at
 /// an equilibrium temperature of 255 K, about the generator's irradiation for Earth's measured Bond
-/// albedo of 0.294 (255.14 K), to which P14.T57.a fitted the water's greenhouse constant.
+/// albedo of 0.294 (255.14 K), to which P14.T57.a fitted the water's greenhouse constant; its
+/// exobase reads the irradiation at zero albedo, 278.3 K.
 ///
 /// ```
 /// use hyperion_sim::planetary::derive::atmosphere::{
@@ -1824,7 +1844,7 @@ fn partitioned_greenhouse(
 ///     inventory,
 ///     formed: SnowLineSide::Inside,
 ///     equilibrium: Kelvin::new(255.0),
-///     worst_equilibrium: Kelvin::new(255.0),
+///     irradiation_temperature: Kelvin::new(278.3),
 ///     heated: Kelvin::new(255.0),
 ///     xuv_fluence: earth_xuv_fluence(),
 ///     saturated_xuv_flux: WattsPerSquareMetre::new(0.3),
@@ -1873,7 +1893,7 @@ pub(crate) fn atmosphere_under(inputs: &AtmosphereInputs, surface: &PassSurface<
 fn state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) -> Atmosphere {
     let cap = inputs.hottest_host.value();
     let saturate = |t: f64| Kelvin::new(if cap > 0.0 { t.min(cap) } else { t });
-    let exobase = exobase_temperature(inputs.worst_equilibrium, inputs.xuv_fluence);
+    let exobase = exobase_temperature(inputs.irradiation_temperature, inputs.xuv_fluence);
     let (m, r) = (inputs.mass.value(), inputs.radius.value());
     let valid = m.is_finite() && m > 0.0 && r.is_finite() && r > 0.0;
     let retention = if valid {

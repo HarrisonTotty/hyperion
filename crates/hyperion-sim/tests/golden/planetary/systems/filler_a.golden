@@ -90,9 +90,9 @@ bond_albedo = 0x3fb999999999999a  # 0.1
 bond_ratio = 0x3ff37fa12ad18b15  # 1.2186595604513901
 surface_state: MagmaOcean, Rock; climate Efficient, Locked, none, Isothermal
 mean_surface_temperature_k = 0x409a4d1d1721461f  # 1683.278408546357
-equator_pole_contrast_k = 0xc030baf2c2ee0700  # -16.73026674567427
-day_night_contrast_k = 0x4020f4dc85a95e80  # 8.478244950222916
-surface_pressure_pa = 0x41751d91a71398b1  # 22141210.44228429
+equator_pole_contrast_k = 0xc030bac1933dc580  # -16.72951622255414
+day_night_contrast_k = 0x4020f4c0c6be1000  # 8.47803326673602
+surface_pressure_pa = 0x41751dbcf2cd0345  # 22141903.175051946
 sigma_h_m = 0x408c200852a8dc4b  # 900.0040639106968
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fb5fea3f5d69ae4  # 0.08591675521766323
@@ -392,9 +392,9 @@ bond_albedo = 0x3fb999999999999a  # 0.1
 bond_ratio = 0x3ff37fa12ad18b15  # 1.2186595604513901
 surface_state: MagmaOcean, Rock; climate Efficient, Locked, none, Isothermal
 mean_surface_temperature_k = 0x409a4d1d173ebe73  # 1683.2784089854947
-equator_pole_contrast_k = 0xc030baf2c3079440  # -16.730266751623503
-day_night_contrast_k = 0x4020f4dc864e4200  # 8.478244969418483
-surface_pressure_pa = 0x41751d91a71398b1  # 22141210.44228429
+equator_pole_contrast_k = 0xc030bac193564800  # -16.729516228260763
+day_night_contrast_k = 0x4020f4c0c7625d00  # 8.478033285863148
+surface_pressure_pa = 0x41751dbcf2cdee3d  # 22141903.17527603
 sigma_h_m = 0x408c200852a90d39  # 900.0040639121208
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fb5fea36a50261d  # 0.0859167227319166

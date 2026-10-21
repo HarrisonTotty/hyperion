@@ -339,8 +339,12 @@ fn the_table_s_ices_are_the_ruling_s() {
 /// An airless body's ice lasts below 110 K (Schorghofer and Williams 2020), and its cold area is
 /// where its radiative profile, `T_s` q(x)^¼, lies below it: the generated Moon's and Mercury's
 /// at their edges, and none of the Moon's ice, whose crust is silicate and holds no surface water.
-/// The table's Ganymede, whose band about its pole the 110 K edge gave, is a snowball under the
-/// batch (`atmosphere::tests`' table, printed), so its band waits on its airless state.
+///
+/// The table's Ganymede is airless, and its ice is its cold area under 110 K. Its band about its
+/// pole, which the edge gave at T13.c's 0.35, is stated, not asserted: under the frost's albedo
+/// (`T_eq` 78 K against 109.6 K at its measured 0.35, decision-p14-t54a-ganymede §1.5) its
+/// warmest zone lies under the edge, so the whole of it is cold. Its band returns with its icy
+/// regolith's darkening, P14.T49.m's.
 #[test]
 fn an_airless_body_s_edge_is_110_k() {
     assert_same_bits(ice_temperature(SurfaceState::Airless).value(), 110.0);
@@ -378,10 +382,13 @@ fn an_airless_body_s_edge_is_110_k() {
             1.0 - low
         );
     }
-    let (_, ganymede, _, _) = found(&table, "Ganymede");
+    let (_, body, ganymede, conditions) = found(&table, "Ganymede");
+    assert_eq!(body.atmosphere().state(), SurfaceState::Airless);
+    let cold = conditions.cold_area(AIRLESS_ICE_TEMPERATURE);
+    assert!((ganymede.ice_fraction() - cold).abs() < 1e-15);
     eprintln!(
-        "Ganymede under the batch: {:?}",
-        ganymede.atmosphere().state()
+        "Ganymede: its equator's zone at {:.2} K, {cold} of it below 110 K (P14.T49.m)",
+        conditions.zonal_temperature(0.0).value()
     );
     assert_same_bits(found(&table, "Moon").2.ice_fraction(), 0.0);
 }

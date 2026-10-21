@@ -1179,14 +1179,19 @@ pub fn derive_body(
 }
 
 /// What drives the passes (P14.T51.h): the bracketed fixed point, and for the tests the loop
-/// P14.T51.b built, to which a body that settles within the plain passes is held bit for bit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// P14.T51.b built, to which a body that settles within the plain passes is held bit for bit, and
+/// a single pass at a stated albedo.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum PassDriver {
     /// [`passes::solve`], the generator's.
     Solve,
     /// P14.T51.b's loop as it was built: at most 64 passes until one settles, the last published.
     #[cfg(test)]
     T51b,
+    /// One pass at the albedo given, published, for the tests that hold what a pass reads apart
+    /// from the albedo it reads.
+    #[cfg(test)]
+    Once(BondAlbedo),
 }
 
 /// [`derive_body`], its passes driven by `driver` (P14.T51.h): [`derive_body`] is this under
@@ -1383,7 +1388,7 @@ impl PassBody<'_> {
             inventory: *bulk.elements.volatiles(),
             formed: bulk.side,
             equilibrium: irradiated,
-            worst_equilibrium: equilibrium_temperature(sky.peak_flux, albedo),
+            irradiation_temperature: sky.irradiation,
             heated,
             xuv_fluence: sky.xuv_fluence,
             saturated_xuv_flux: sky.saturated_xuv_flux,
@@ -1440,6 +1445,18 @@ impl PassBody<'_> {
             }
             #[cfg(test)]
             PassDriver::T51b => self.t51b_passes(&surface),
+            #[cfg(test)]
+            PassDriver::Once(albedo) => {
+                let (irradiated, heated, air) = self.pass(&surface, albedo);
+                Passes {
+                    albedo,
+                    irradiated,
+                    heated,
+                    air,
+                    count: 1,
+                    convergence: Convergence::Converged,
+                }
+            }
         };
         (ended, regolith_albedo)
     }
@@ -1480,8 +1497,11 @@ impl PassBody<'_> {
 struct Sky {
     /// The flux now, averaged over the orbit.
     flux: EarthFluxes,
-    /// The flux at every host's largest past luminosity (design note 11).
-    peak_flux: EarthFluxes,
+    /// The irradiation temperature its exobase reads: the equilibrium temperature at zero albedo
+    /// under the flux at every host's largest past luminosity (design note 11), once a body
+    /// before its passes, so that no albedo a pass reads moves it (decision-p14-t54a-ganymede
+    /// §1.4).
+    irradiation: Kelvin,
     /// The X-ray and ultraviolet energy per unit area received so far.
     xuv_fluence: JoulesPerSquareMetre,
     /// The X-ray and ultraviolet flux now, averaged over the orbit (P14.T24.a).
@@ -1566,7 +1586,7 @@ impl Sky {
         };
         Self {
             flux: sums.flux,
-            peak_flux: sums.peak_flux,
+            irradiation: equilibrium_temperature(sums.peak_flux, BondAlbedo::from_fraction(0.0)),
             xuv_fluence: sums.xuv_fluence,
             xuv_flux: sums.xuv_flux,
             saturated_xuv_flux: sums.saturated_xuv_flux,

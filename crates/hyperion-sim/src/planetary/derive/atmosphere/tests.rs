@@ -248,8 +248,9 @@ fn the_volatile_draws_read_their_three_words() {
 
 #[test]
 fn the_solar_system_keeps_its_atmospheres_where_it_does() {
-    // P14.T13.b: Earth, Venus, Mars and Titan keep atmospheres; Mercury, the Moon and Ceres do
-    // not, and Ganymede does not but at the passes' stand-ins (below).
+    // P14.T13.b: Earth, Venus, Mars and Titan keep atmospheres; Mercury, the Moon, Ganymede and
+    // Ceres do not. The table's Ganymede, a body at 5.2 au, is airless under the frost's albedo
+    // because its exobase reads the irradiation, not the surface (decision-p14-t54a-ganymede §1.4).
     let table = table();
     for (name, body) in &table {
         let air = body.atmosphere();
@@ -268,19 +269,10 @@ fn the_solar_system_keeps_its_atmospheres_where_it_does() {
         let air = found(&table, name).atmosphere();
         assert!(air.keeps_atmosphere(), "{name}: {air:?}");
     }
-    for name in ["Mercury", "Moon", "Ceres"] {
+    for name in ["Mercury", "Moon", "Ganymede", "Ceres"] {
         let air = found(&table, name).atmosphere();
         assert_eq!(air.state(), SurfaceState::Airless, "{name}: {air:?}");
     }
-    // The table's Ganymede, a body at 5.2 au, is a snowball at the passes' stand-ins, its nitrogen
-    // and methane aloft over the isothermal stand-in climate, which has no cold trap (plan 14,
-    // P14.T49.i as built: "Ganymede, as a body at 5.2 au, now a snowball"). Printed until
-    // P14.T54.a's Batch C gives the passes the body's climate, where T13.b's airless verdict is
-    // asserted again.
-    eprintln!(
-        "Ganymede at the passes' stand-ins: {:?}",
-        found(&table, "Ganymede").atmosphere().state()
-    );
     // The states the table's atmospheres are in.
     assert_eq!(
         found(&table, "Venus").atmosphere().state(),
@@ -511,7 +503,7 @@ fn no_surface_is_hotter_than_its_hottest_host() {
         ),
         formed: SnowLineSide::Inside,
         equilibrium: Kelvin::new(1_500.0),
-        worst_equilibrium: Kelvin::new(1_500.0),
+        irradiation_temperature: Kelvin::new(1_500.0),
         heated: Kelvin::new(1_500.0),
         xuv_fluence: JoulesPerSquareMetre::ZERO,
         saturated_xuv_flux: WattsPerSquareMetre::ZERO,
@@ -606,7 +598,7 @@ fn escape_and_retention_follow_their_formulae() {
     );
     assert!(retention.retains(Gas::CarbonDioxide));
     assert!(!retention.retains(Gas::Hydrogen));
-    // The exobase takes the worst temperature and the X-rays beyond Earth's.
+    // The exobase takes the irradiation at the worst and the X-rays beyond Earth's.
     let earth = earth_xuv_fluence();
     assert!((earth.value() / 2.57e15 - 1.0).abs() < 0.01, "{earth:?}");
     assert_same_bits(
@@ -615,7 +607,9 @@ fn escape_and_retention_follow_their_formulae() {
     );
     let quadruple = JoulesPerSquareMetre::new(4.0 * earth.value());
     assert!(
-        (exobase_temperature(Kelvin::new(250.0), quadruple).value() / (2.0 * 5.0 * 250.0) - 1.0)
+        (exobase_temperature(Kelvin::new(250.0), quadruple).value()
+            / (2.0 * EXOBASE_MULTIPLE * 250.0)
+            - 1.0)
             .abs()
             < 1e-12
     );
@@ -821,7 +815,8 @@ fn venus_s_oxygen_is_under_a_thousandth_of_its_carbon_dioxide_by_its_sinks() {
 }
 
 /// A runaway Earth that lost the water `water` (kg), at `age`, with the saturated X-ray and
-/// ultraviolet flux `xuv` (W m⁻²), in equilibrium at `equilibrium` (K).
+/// ultraviolet flux `xuv` (W m⁻²), in equilibrium at `equilibrium` (K), which its exobase reads as
+/// its irradiation.
 fn runaway_earth(water: f64, age: f64, xuv: f64, equilibrium: f64) -> Atmosphere {
     atmosphere(&AtmosphereInputs {
         mass: Kilograms::new(EARTH_MASS_KG),
@@ -837,7 +832,7 @@ fn runaway_earth(water: f64, age: f64, xuv: f64, equilibrium: f64) -> Atmosphere
         ),
         formed: SnowLineSide::Inside,
         equilibrium: Kelvin::new(equilibrium),
-        worst_equilibrium: Kelvin::new(equilibrium),
+        irradiation_temperature: Kelvin::new(equilibrium),
         heated: Kelvin::new(equilibrium),
         xuv_fluence: earth_xuv_fluence(),
         saturated_xuv_flux: WattsPerSquareMetre::new(xuv),
@@ -1149,9 +1144,13 @@ fn a_runaway_world_with_a_young_melt_keeps_less_oxygen() {
     }
 }
 
+/// Titan's irradiation temperature, K: the equilibrium temperature at zero albedo at Saturn's
+/// 9.5826 au from the present Sun, 278.33 K ÷ √9.5826 (NASA's Saturn fact sheet).
+const TITAN_IRRADIATION: f64 = 89.91;
+
 /// A Titan-like cold moon formed on the side `formed` of the snow line, with nitrogen and the
 /// carbon `carbon` (kg, counted as carbon dioxide) in its inventory, in equilibrium at
-/// `equilibrium` (K), its crust `crust`.
+/// `equilibrium` (K), its crust `crust`, its exobase at Titan's irradiation ([`TITAN_IRRADIATION`]).
 fn cold_moon(carbon: f64, equilibrium: f64, formed: SnowLineSide, crust: Crust) -> Atmosphere {
     atmosphere(&AtmosphereInputs {
         mass: Kilograms::new(1.345e23),
@@ -1167,7 +1166,7 @@ fn cold_moon(carbon: f64, equilibrium: f64, formed: SnowLineSide, crust: Crust) 
         ),
         formed,
         equilibrium: Kelvin::new(equilibrium),
-        worst_equilibrium: Kelvin::new(82.0),
+        irradiation_temperature: Kelvin::new(TITAN_IRRADIATION),
         heated: Kelvin::new(equilibrium),
         xuv_fluence: JoulesPerSquareMetre::ZERO,
         saturated_xuv_flux: WattsPerSquareMetre::ZERO,
@@ -1235,7 +1234,7 @@ fn a_gas_envelope_and_a_body_of_no_mass_have_no_carbon_carrier() {
         ),
         formed: SnowLineSide::Beyond,
         equilibrium: Kelvin::new(60.0),
-        worst_equilibrium: Kelvin::new(60.0),
+        irradiation_temperature: Kelvin::new(60.0),
         heated: Kelvin::new(60.0),
         xuv_fluence: JoulesPerSquareMetre::ZERO,
         saturated_xuv_flux: WattsPerSquareMetre::ZERO,
@@ -1998,7 +1997,8 @@ use crate::units::{Degrees, MetresPerSecondSquared, Radians, Seconds};
 
 /// An Earth's inputs, with its median inventory at its median ranks (the planets' own,
 /// [`volatile_inventory`] at Earth's mass and fractions), at the equilibrium temperature
-/// `equilibrium` and against the habitable zone as `insolation` puts it.
+/// `equilibrium`, which its exobase reads as its irradiation, and against the habitable zone as
+/// `insolation` puts it.
 fn earth_inputs(equilibrium: f64, insolation: Insolation) -> AtmosphereInputs {
     let mass = EARTH_MASS_KG;
     AtmosphereInputs {
@@ -2015,7 +2015,7 @@ fn earth_inputs(equilibrium: f64, insolation: Insolation) -> AtmosphereInputs {
         ),
         formed: SnowLineSide::Inside,
         equilibrium: Kelvin::new(equilibrium),
-        worst_equilibrium: Kelvin::new(equilibrium),
+        irradiation_temperature: Kelvin::new(equilibrium),
         heated: Kelvin::new(equilibrium),
         xuv_fluence: earth_xuv_fluence(),
         saturated_xuv_flux: WattsPerSquareMetre::new(0.3),
@@ -2035,7 +2035,7 @@ fn earth_inputs(equilibrium: f64, insolation: Insolation) -> AtmosphereInputs {
 /// gives it from a body's own spin.
 fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) -> ClimateSpan {
     let (m, r) = (inputs.mass.value(), inputs.radius.value());
-    let exobase = exobase_temperature(inputs.worst_equilibrium, inputs.xuv_fluence);
+    let exobase = exobase_temperature(inputs.irradiation_temperature, inputs.xuv_fluence);
     let retention = Retention::of(inputs.mass, inputs.radius, exobase).with_methane_as_nitrogen();
     let mut airborne = Airborne::kept(inputs, retention);
     airborne.divide(inputs, retention);
@@ -2057,7 +2057,7 @@ fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) 
 }
 
 /// A Titan's inputs: its mass and radius, formed beyond the snow line, beyond the
-/// maximum-greenhouse limit, with the cold moon's inventory of [`cold_moon`].
+/// maximum-greenhouse limit, with the cold moon's inventory and irradiation of [`cold_moon`].
 fn titan_inputs() -> AtmosphereInputs {
     let mut titan = earth_inputs(75.6, Insolation::BeyondMaximumGreenhouse);
     titan.mass = Kilograms::new(1.345e23);
@@ -2065,7 +2065,7 @@ fn titan_inputs() -> AtmosphereInputs {
     titan.material = SurfaceMaterial::Ice;
     titan.class = PlanetClass::Icy;
     titan.formed = SnowLineSide::Beyond;
-    titan.worst_equilibrium = Kelvin::new(82.0);
+    titan.irradiation_temperature = Kelvin::new(TITAN_IRRADIATION);
     titan.inventory = VolatileInventory::new(
         Kilograms::new(1e22),
         Kilograms::new(1e21),
@@ -2253,6 +2253,112 @@ fn a_body_that_settles_keeps_t51b_s_bits() {
         let (solved, t51b) = (derive(PassDriver::Solve), derive(PassDriver::T51b));
         assert_eq!(solved.convergence(), Convergence::Converged, "{name}");
         assert_eq!(format!("{solved:?}"), format!("{t51b:?}"), "{name}");
+    }
+}
+
+/// Decision-p14-t54a-ganymede §1.4: [`EXOBASE_MULTIPLE`] is T13.c's 5 `T_eq` at the measured
+/// Ganymede's Bond albedo, 5 × (1 − 0.35)^¼, to the bit, and it lies inside its window at the
+/// measured moons' radii, 4.15–5.23 `T₀`: the measured Ganymede's nitrogen is lost (λ 23.1) and
+/// Titan's kept (λ 29.1), each at the irradiation of its giant's semi-major axis about the present
+/// Sun (JPL's GM and mean radii, JUP365 and SAT441, Archinal et al. 2018; NASA's fact sheets).
+#[test]
+fn the_exobase_multiple_loses_ganymede_s_nitrogen_and_keeps_titan_s() {
+    assert_same_bits(EXOBASE_MULTIPLE, 5.0 * math::powf(1.0 - 0.35, 0.25));
+    let nitrogen = |gm: f64, km: f64, a_au: f64| {
+        let irradiation = equilibrium_temperature(
+            EarthFluxes::new(1.0 / (a_au * a_au)),
+            BondAlbedo::from_fraction(0.0),
+        );
+        let exobase = exobase_temperature(irradiation, JoulesPerSquareMetre::ZERO);
+        assert_same_bits(exobase.value(), EXOBASE_MULTIPLE * irradiation.value());
+        let (mass, radius) = (
+            Kilograms::new(gm / GRAVITATIONAL_CONSTANT),
+            Metres::new(km * 1e3),
+        );
+        let lambda = jeans_parameter(mass, radius, Gas::Nitrogen, exobase);
+        let retained = Retention::of(mass, radius, exobase).retains(Gas::Nitrogen);
+        (lambda, retained)
+    };
+    let (ganymede, ganymede_kept) = nitrogen(9_887.832_75e9, 2_631.20, 5.203_8);
+    let (titan, titan_kept) = nitrogen(8_978.137_10e9, 2_574.76, 9.582_6);
+    eprintln!("λ(N₂) at {EXOBASE_MULTIPLE} T₀: Ganymede {ganymede:.3}, Titan {titan:.3}");
+    assert!(
+        !ganymede_kept && (ganymede - 23.1).abs() < 0.05,
+        "Ganymede: {ganymede}"
+    );
+    assert!(titan_kept && (titan - 29.1).abs() < 0.05, "Titan: {titan}");
+    // The window: the multiples at which each sits on the threshold.
+    let (lower, upper) = (
+        EXOBASE_MULTIPLE * ganymede / JEANS_RETENTION_THRESHOLD,
+        EXOBASE_MULTIPLE * titan / JEANS_RETENTION_THRESHOLD,
+    );
+    eprintln!("the window at the measured radii: {lower:.4}–{upper:.4} T₀");
+    assert!((lower - 4.15).abs() < 0.005 && (upper - 5.23).abs() < 0.005);
+    assert!(lower < EXOBASE_MULTIPLE && EXOBASE_MULTIPLE < upper);
+}
+
+/// Decision-p14-t54a-ganymede §1.4: a body's exobase and retention are the same bits at every albedo
+/// a pass reads, its passes' published ones included, and its exobase is [`exobase_temperature`]
+/// of its zero-albedo irradiation temperature: every body of the table, Jupiter, an icy belt
+/// member as recorded and as placed, each through one pass at albedos from 0 to 0.95, while the
+/// equilibrium temperature each pass reads moves with its albedo.
+#[test]
+fn retention_is_independent_of_the_albedo_a_pass_reads() {
+    use crate::planetary::derive::{PassDriver, derive_body_driven};
+
+    let disc = solar_disc();
+    let lights = [historic_sun()];
+    let hosts = BodyHosts::new(
+        Kilograms::new(SOLAR_MASS_KG),
+        Composition::SOLAR,
+        &lights,
+        &[],
+    )
+    .unwrap();
+    let mut placed: Vec<(&str, PlacedBody)> = table_bodies()
+        .map(|&(name, kg, km, a, e)| (name, placed_about_the_sun(&disc, (kg, km, a, e))))
+        .collect();
+    placed.push((
+        "Jupiter",
+        crate::planetary::derive::solar::placed(1_898.13e24, 5.203_8, 0.048_9, 0.5),
+    ));
+    let member = crate::planetary::derive::solar::placed(1e21, 43.0, 0.05, 0.05);
+    let bulk = GivenBulk::new(
+        moon_radius(member.mass(), 0.35),
+        GivenFractions::Exactly(crate::planetary::derive::MassFractions::solid(
+            0.0, 0.65, 0.35,
+        )),
+    );
+    placed.push(("an icy member as recorded", member.with_bulk(bulk)));
+    placed.push(("an icy member as placed", member));
+    for (name, body) in &placed {
+        let derive = |driver| {
+            derive_body_driven(driver, body, &hosts, &disc, SOLAR_AGE, UniverseTime::EPOCH).unwrap()
+        };
+        let solved = derive(PassDriver::Solve);
+        let air = solved.atmosphere();
+        // The present Sun is its brightest, so the flux now is the flux at the peak.
+        let irradiation = equilibrium_temperature(solved.flux(), BondAlbedo::from_fraction(0.0));
+        assert_same_bits(
+            air.exobase_temperature().value(),
+            exobase_temperature(irradiation, solved.xuv_fluence()).value(),
+        );
+        let mut equilibria = Vec::new();
+        for albedo in [0.0, 0.11, 0.3, 0.35, 0.536, 0.832, 0.95] {
+            let once = derive(PassDriver::Once(BondAlbedo::from_fraction(albedo)));
+            let at = once.atmosphere();
+            assert_same_bits(
+                at.exobase_temperature().value(),
+                air.exobase_temperature().value(),
+            );
+            assert_eq!(at.retention(), air.retention(), "{name} at {albedo}");
+            equilibria.push(once.equilibrium_temperature().value());
+        }
+        assert_same_bits(equilibria[0], irradiation.value());
+        assert!(
+            equilibria.windows(2).all(|pair| pair[1] < pair[0]),
+            "{name}: {equilibria:?}"
+        );
     }
 }
 
@@ -2579,8 +2685,8 @@ fn at_measured_albedo(body: &DerivedBody, state: SurfaceState) -> Kelvin {
 }
 
 /// The table's Earth's inputs at the equilibrium temperature `equilibrium`, its
-/// inventory and bulk as derived: what its passes give its greenhouse, with the hosts' light and
-/// history Earth's ([`earth_inputs`]).
+/// inventory and bulk as derived: what its passes give its greenhouse, its exobase at the
+/// irradiation its passes read, with the hosts' light and history Earth's ([`earth_inputs`]).
 fn table_earth_inputs(earth: &DerivedBody, equilibrium: Kelvin) -> AtmosphereInputs {
     AtmosphereInputs {
         mass: Kilograms::from(earth.mass()),
@@ -2590,7 +2696,10 @@ fn table_earth_inputs(earth: &DerivedBody, equilibrium: Kelvin) -> AtmosphereInp
         class: earth.class(),
         inventory: *earth.inventory(),
         equilibrium,
-        worst_equilibrium: equilibrium,
+        irradiation_temperature: equilibrium_temperature(
+            earth.flux(),
+            BondAlbedo::from_fraction(0.0),
+        ),
         heated: equilibrium,
         ..earth_inputs(equilibrium.value(), Insolation::Habitable)
     }

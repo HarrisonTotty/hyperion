@@ -22085,3 +22085,104 @@ planetary::record` (624 tests at T57.a's commit).
         finding (decision-p14-t54a-states), which P14.T53.a's form at 24 cools.
       - DB3's subnormal residue: zero it where the partition makes it, if a later reader of a
         `> 0` test on an airless body meets it.
+  - _Batch C's C0, Ganymede's exobase on the zero-albedo temperature_ (decision-p14-t54a-ganymede
+    item 1, §1.4; before the lid). A checkpoint at 22: `GENERATOR_VERSION` stays 22, and the
+    goldens that move re-bless at header 22 in the same commit (decision-bump-plan-after-22 §5–§6).
+    - _The change:_ the exobase reads the irradiation, not the albedo a pass reads: `T_exo` =
+      `EXOBASE_MULTIPLE` × `T₀` × max(1, Φ ÷ Φ⊕)^½, with `T₀` = (`F_peak` ÷ 4σ)^¼, the
+      equilibrium temperature at zero albedo under the hosts' largest past luminosity
+      (`Sky::irradiation`, once a body in `Sky::of`, before the passes, which all read it).
+      `AtmosphereInputs::worst_equilibrium` is now `irradiation_temperature`, at every caller: the
+      passes, the public `atmosphere` (its Earth example at 278.3 K) and the tests' hand inputs
+      (the Titan-like ones at Titan's 89.91 K, the table's Earth at its passes' `T₀`).
+      `derive_moon_under` is not on the branch: a moon's air goes through `derive_body`. The docs
+      of `JEANS_RETENTION_THRESHOLD`, `EXOBASE_MULTIPLE` and `exobase_temperature` state the
+      stand-in for thermal, non-thermal and impact loss together (Zahnle and Catling 2017, §5 and
+      Fig. 1), and `atmosphere`'s step 2 follows it: methane kept where N₂ is passes its own test
+      at 2.57 `T₀`, above the 1.6–2.0 `T₀` of the known N₂ and CH₄ airs (Titan, Pluto, Triton).
+    - _The constant:_ `EXOBASE_MULTIPLE` = 5 × (1 − 0.35)^¼ = 4.48950, T13.c's 5 `T_eq` at the
+      measured Ganymede's Bond albedo, 0.35 ± 0.03 (Squyres and Veverka 1982; Buratti 1991); the
+      ruling's "4.4897" is its rounding. A constant cannot take a root, so the literal is written
+      out, and its test holds it to the expression's bits.
+    - _The window:_ at the measured radii and masses (JPL's GM, Archinal et al. 2018's radii) and
+      their giants' semi-major axes about the present Sun, Ganymede's N₂ is lost at λ 23.12 and
+      Titan's kept at λ 29.11: 4.151–5.227 `T₀`. Over the fixture's radius ranks Ganymede's λ is
+      22.26–23.61 and Titan's 28.07–29.81: 4.241–5.042 `T₀`.
+    - _The six printing tests, asserted again:_ T13.c's (b) in
+      `the_solar_system_keeps_its_atmospheres_where_it_does` (Mercury, the Moon, Ganymede and
+      Ceres airless); `an_airless_body_has_no_gases_and_no_mean_molar_mass` (the four);
+      `an_airless_body_s_warmest_lies_between_its_dayside_and_its_subsolar_point` (Ganymede, now
+      asserted airless); `the_table_s_ganymede_and_callisto_stay_airless` (airless and `Converged`
+      at every rank, λ(N₂) under 25: Ganymede 22.26–23.61, Callisto 17.38–18.49; the review's
+      RB6); `the_table_s_moons_take_their_air_at_their_own_bulk` (Ganymede's print arm gone: its
+      air is radiogenic argon, 1.2–17 Pa, and Callisto's up to 12 Pa); and
+      `an_airless_body_s_edge_is_110_k`, whose Ganymede is asserted airless with its ice its cold
+      area under 110 K, and its band stated: under the frost its equator's zone is 83.0 K and its
+      warmest 98.6 K, so the whole of it is cold, P14.T49.m's to return.
+      `the_table_s_climate_ranges_are_the_ruling_s` prints Ganymede's 22.25–98.64 K against
+      version 22's 17.9–142.8 K, P14.T49.m's too.
+    - _New tests:_ `the_exobase_multiple_loses_ganymede_s_nitrogen_and_keeps_titan_s` (the
+      expression's bits and the measured window);
+      `the_exobase_window_holds_over_the_fixture_s_ranks`;
+      `retention_is_independent_of_the_albedo_a_pass_reads` (the table, Jupiter and the icy
+      member as recorded and as placed, each through one pass at albedos 0–0.95 by a test-only
+      `PassDriver::Once`: the same exobase and retention bits as the solved body's, which is
+      `exobase_temperature` of its zero-albedo `T_eq`).
+      `the_batch_publishes_the_table_s_condensates` holds the listed water ice to W2: the airless
+      table Ganymede's T24.b ice of 1 beside its argon frost of 3.8 × 10⁻⁶ lists 0.99999619.
+    - _The fix's own moves, counted before the lid's_ (like for like at the branch's tip, after
+      Batch B's fix commit, by a scratch probe's switch back to the old rule, which reproduces
+      every systems golden at HEAD to the bit; scratch `c0/compare_c0.out` and
+      `c0/compare_pb.out`):
+      - _As ruled:_ the measured Ganymede and Callisto airless and converged at every rank, Titan
+        unchanged; the table's Ganymede body, a 2.218 bar snowball at 117.02 K, airless at
+        78.13 K; in the 60-system sample (970 bodies) one past-only runaway planet,
+        `01ffeb2c20000000.0300`, 946.95 Pa → airless at 65.83 Pa, 13 N₂ bits with no state moving
+        (the runaways `02000b2ca0000000.0100` 18.08 → 17.83 bar and `21fff6587ff80000.0100`
+        14.39 → 14.27 bar, the magma ocean `21ffd6587ff80001.0500` 27.78 → 27.86 MPa, and ten
+        cold, airless members) and 14 airless traces, now settling in 3 passes (13 lose argon, at
+        most 10.98 Pa; `41ffecb200000005.0300` gains 3 × 10⁻¹³⁶ Pa of CO₂); bracketed 9 → 9, the
+        same bodies; no icy moon; in the goldens `close_binary` `e304` airless → `Temperate` at
+        5.12 bar (624.0 K) and `hierarchical_triple` `0500` airless → `MagmaOcean` at 113.8 bar
+        (1,864.3 K), both by CO₂ newly kept. Against the ruling's measure at 32685703 the bodies
+        and counts are the same, but for the sample's bracketed, 9 here (under either rule, after
+        Batch B's fix commit) against 8 there.
+      - _Beyond the ruling's list, for main_ (its count read states, N₂ bits and airless traces,
+        not the pressures of bodies with air or other gases' bits): two runaway worlds of the sample lose their water's
+        oxygen when water fails Jeans's test (`01ffeb2c20000000.0400` 9.69 → 0.506 bar,
+        `21fff6587ff80000.0200` 155.0 → 56.2 bar), two lose argon (`01ffeb2c20000000.0100`
+        22.5 Pa, `01fffb2c60020000.0100` 1,130 Pa), their exobases 28% hotter now that Venus's
+        0.76 deck no longer cools them, and `220016587ff80001.e101`'s traces move in their last
+        bits. In the goldens, `solar_like` `0300`, a 0.106 M⊕ planet at `T_eq` 244 K, keeps its
+        water at λ 22.83 → 25.07 and stores its carbon (`Temperate` 5.04 bar at 536.5 K →
+        1.05 bar at 245.3 K, Bond albedo 0.056 → 0.216, 0.35% water ice), 0.05 dex on the
+        atmosphere side of the cosmic shoreline; `filler_a` `0100`, a magma ocean, keeps argon
+        (221.41 → 221.42 bar); `filler_c`'s Titan-like snowballs `0400` and `e201` lose water's
+        bit (and `e201` ammonia's) at λ × 0.73 and × 0.69, so the partition's water ice goes and
+        W3 (a)'s T24.b ice (1.0) stands for it, their pressures moving by 3 × 10⁻¹⁰ and 3 × 10⁻⁸
+        of themselves (a crust's water is held by its ice, P14.T53.c's ice-held route); and cold,
+        airless bodies' frosts move with their N₂ and argon bits (`filler_b` `e205`–`e208`,
+        `e207`'s albedo 0.871 → 0.695 and `T_eq` 16.5 → 20.5 K; `filler_c` `e301`–`e303` and
+        `e305`; `close_binary` `e802` and `e803`; `hot_jupiter` `e101`; `fallback_black_hole`
+        `e202`), no state moving.
+    - _Moved goldens_, re-blessed at header 22 (`golden_diff.py`: 12 changed, none new; scratch
+      `c0/golden_diff.txt`):
+      - `planetary/atmosphere_speciation` (4), `planetary/surface_conditions` (11) and
+        `planetary/global_figures` (1): the table's Ganymede airless at 78.13 K (no gases,
+        `AirlessLike`, its cloud 0.67 → 0).
+      - `planetary/surface_conditions_published` (68): eight records, no state moving: the N₂
+        bits of `01fffb2c9fff0000.e101`, `02000b2ca0000001.e203` and `.e204` and the two runaways'
+        N₂ shares; `02000b2ca0000000.e104` and `.e105`'s argon; `21fff6587ff80000.0200`'s water
+        (beyond the list).
+      - `planetary/systems`: `close_binary` (`e304`'s air; `e802` and `e803`'s argon),
+        `hierarchical_triple` (`0500`'s air), `solar_like` (`0300`'s water), `filler_a`
+        (`0100`'s argon), `filler_b` (`e205`–`e208`), `filler_c` (`0400`, `e201`, `e301`–`e303`,
+        `e305`), `hot_jupiter` (`e101`) and `fallback_black_hole` (`e202`).
+      - The rest hold: the lib's other planetary goldens and the integration targets
+        `planetary_golden`'s other systems, `planetary_moons_golden`, `observe_in_system_golden`,
+        `body_frame_golden`, `body_fixed_golden`, `body_rotations_golden`, `orbit_drifting_states`,
+        `orbit_states`, `photometry_templates_golden`, `planetary_small_bodies_golden`,
+        `planetary_derive_golden`, `planetary_giants_golden`, `planetary_context_golden`,
+        `planetary_fate_golden`, `planetary_masses_golden`, `planetary_placement_golden`,
+        `planetary_placement`, `frame`, `aerosol_golden`, `formation_golden`, `liquids_golden` and
+        `substance_golden`.

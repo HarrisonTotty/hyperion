@@ -390,11 +390,10 @@ fn an_airless_body_has_no_gases_and_no_mean_molar_mass() {
         assert_eq!(conditions.surface_pressure(), Pascals::ZERO, "{name}");
         assert!(!conditions.liquid_water(), "{name}");
     }
-    // Mercury, the Moon and Ceres; the table's Ganymede, airless under T13.c's ice, is a snowball
-    // under the batch (`atmosphere::tests`' table, printed).
-    eprintln!("airless: {airless:?}");
-    for name in ["Mercury", "Moon", "Ceres"] {
-        assert!(airless.contains(&name), "{name}");
+    // Mercury, the Moon, Ganymede and Ceres.
+    assert_eq!(airless.len(), 4, "{airless:?}");
+    for name in ["Mercury", "Moon", "Ganymede", "Ceres"] {
+        assert!(airless.contains(&name), "{name}: {airless:?}");
     }
 }
 
@@ -2006,9 +2005,11 @@ fn the_table_s_climate_ranges_are_the_ruling_s() {
     }
     // Under the batch the table's Venus is the median draw at P14.T57.a's constants, 696.3 K
     // (decision-p14-t57a-fits §3), where the ruling's 733.5–736.1 K was version 22's 735.1 K.
-    // Mars and Ganymede at the passes' stand-ins are printed: Mars ices over (196.6 K;
-    // decision-p14-t51-batch E3) and Ganymede is a snowball, until P14.T54.a's Batch C and main's
-    // ruling; the ruling's [203.3, 221.2] and [17.9, 142.8] K were version 22's.
+    // Mars and Ganymede are printed: at the passes' stand-ins Mars ices over (196.6 K;
+    // decision-p14-t51-batch E3) until P14.T54.a's Batch C, and Ganymede, airless, lies under its
+    // frost's albedo at 22.3–98.6 K (`T_eq` 78 K against 109.6 K at its measured 0.35, P14.T49.m's;
+    // decision-p14-t54a-ganymede §1.5); the ruling's [203.3, 221.2] and [17.9, 142.8] K were
+    // version 22's.
     for name in ["Mars", "Ganymede"] {
         let (cold, warm) = found(&table, name).2.climate_range();
         eprintln!(
@@ -2106,12 +2107,7 @@ fn an_airless_body_s_warmest_lies_between_its_dayside_and_its_subsolar_point() {
     let table = table();
     for name in ["Mercury", "Moon", "Ganymede", "Ceres"] {
         let (_, body, _) = found(&table, name);
-        if body.atmosphere().state() != SurfaceState::Airless {
-            // The table's Ganymede, a snowball under the batch (printed in `atmosphere::tests`), and
-            // no other.
-            assert_eq!(name, "Ganymede", "{:?}", body.atmosphere().state());
-            continue;
-        }
+        assert_eq!(body.atmosphere().state(), SurfaceState::Airless, "{name}");
         let base = spin_of(name);
         for spin in [
             base,
@@ -2962,7 +2958,9 @@ fn the_batch_publishes_the_table_s_condensates() {
         if body.atmosphere().state() == SurfaceState::Airless {
             assert_same_bits(batch.surface_water().value(), 0.0);
         }
-        // Water's ice where the partition holds none is T24.b's.
+        // Water's ice where the partition holds none is T24.b's, appended to the partition's ices
+        // and divided with them by their total where it exceeds the surface (W2): the airless
+        // table Ganymede's whole surface lies under 110 K beside its argon frost.
         if published.entry(water, CondensatePhase::Solid).is_none() {
             let figures = batch.clone().with_surface_under(
                 &conditions,
@@ -2980,7 +2978,17 @@ fn the_batch_publishes_the_table_s_condensates() {
                 .iter()
                 .find(|&&(id, _)| id == water)
                 .unwrap_or_else(|| panic!("{name} lists its water ice"));
-            assert_same_bits(listed, t24b);
+            let total = published
+                .surface_ices()
+                .iter()
+                .fold(0.0, |sum, &(_, f)| sum + f)
+                + t24b;
+            let expected = if total > 1.0 { t24b / total } else { t24b };
+            eprintln!(
+                "{name}: water ice {listed}, T24.b's {t24b} over a total of {total}, beside {:?}",
+                published.surface_ices()
+            );
+            assert_same_bits(listed, expected);
         }
         if name == "Earth" {
             let ocean = published.entry(water, CondensatePhase::Liquid);

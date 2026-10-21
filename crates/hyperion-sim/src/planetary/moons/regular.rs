@@ -2593,26 +2593,27 @@ mod tests {
     }
 
     /// P14.T56.c and its follow-up: the table's Ganymede and Callisto stay airless at every radius
-    /// rank, read at their own bulk: Jeans escape removes what nitrogen and methane they hold
-    /// (decision-p14-moons §2.1, Ganymede's λ near the threshold).
+    /// rank, read at their own bulk, and their passes converge: Jeans escape removes what nitrogen
+    /// and methane they hold (decision-p14-moons §2.1, Ganymede's λ near the threshold).
     ///
     /// Read at the composition solve's bulk, version 22's, they were airless only near the rank
     /// that keeps their measured radii. At the median rank that solve gives Ganymede 2,281 km
     /// against its own 2,653 km, so it held 3.6 bar (2.8 of N₂, 0.8 of CH₄) before the ammonia line
     /// and 0.31 bar, mostly CH₄, under it; at the lowest ranks Ganymede held 9.4 bar (0.39 under
-    /// the line) and Callisto 7.4. Read at its own radius, 2,574–2,731 km across the ranks, the
-    /// airless body's N₂ is at λ 22.3–23.6 at its 548 K exobase, under the threshold of 25. At the
-    /// lowest ranks a snowball's 513 K exobase would hold it (λ 25.2 at 2,574 km); the passes,
-    /// which start from an albedo of 0.3 (`BondAlbedo::BEFORE_ATMOSPHERES`), settle on the airless
-    /// state.
+    /// the line) and Callisto 7.4. Read at their own radii, 2,574–2,731 km and 2,387–2,540 km
+    /// across the ranks, Ganymede's N₂ is at λ 22.3–23.6 and Callisto's at 17.4–18.5 at their
+    /// 548 K exobase, under the threshold of 25, whatever state a pass reads.
     ///
-    /// Under P14.T51.b's area mix their frost is brighter than T13.c's ice, their exobase colder,
-    /// and where a rank's N₂ passes Jeans's test there the passes settle on a snowball instead:
-    /// those ranks are printed, a finding for main at P14.T54.a's bless, and the rest asserted
-    /// airless.
+    /// The exobase reads the irradiation, not the albedo a pass reads (decision-p14-t54a-ganymede
+    /// §1.4). Read at the pass's albedo, it read P14.T51.b's frost, brighter than T13.c's ice: the
+    /// passes left Ganymede a 133–166 mbar snowball of N₂ and CH₄ at every rank, and Callisto a
+    /// bracketed jump at λ = 25 on three.
     #[test]
     fn the_table_s_ganymede_and_callisto_stay_airless() {
-        use crate::planetary::derive::atmosphere::SurfaceState;
+        use crate::planetary::derive::atmosphere::{
+            Gas, JEANS_RETENTION_THRESHOLD, SurfaceState, jeans_parameter,
+        };
+        use crate::planetary::derive::passes::Convergence;
         let jupiter = table_giant("Jupiter", 5, None);
         for moon in [GANYMEDE, CALLISTO] {
             let ((kg, keep), orbit) = table_moon(moon, &jupiter);
@@ -2625,22 +2626,63 @@ mod tests {
                     MoonBulk::Derived,
                 );
                 let air = derived.atmosphere();
-                if air.state() == SurfaceState::Airless {
-                    continue;
-                }
-                eprintln!(
-                    "{} km at {rank:?}: {:?}, {:.4e} Pa, T_eq {:.2} K, exobase {:.1} K, radius \
-                     {:.1} km",
-                    moon.2,
-                    air.state(),
-                    air.surface_pressure()
-                        .map_or(0.0, crate::units::Pascals::value),
-                    derived.equilibrium_temperature().value(),
-                    air.exobase_temperature().value(),
-                    derived.radius().value() / 1e3,
+                let lambda = jeans_parameter(
+                    Kilograms::new(kg),
+                    derived.radius(),
+                    Gas::Nitrogen,
+                    air.exobase_temperature(),
                 );
+                let at = format!(
+                    "{} km at {rank:?}: λ(N₂) {lambda:.3} at {:.1} km, exobase {:.1} K, {air:?}",
+                    moon.1,
+                    derived.radius().value() / 1e3,
+                    air.exobase_temperature().value()
+                );
+                eprintln!("{at}");
+                assert_eq!(air.state(), SurfaceState::Airless, "{at}");
+                assert_eq!(derived.convergence(), Convergence::Converged, "{at}");
+                assert!(lambda < JEANS_RETENTION_THRESHOLD, "{at}");
             }
         }
+    }
+
+    /// Decision-p14-t54a-ganymede §1.4: over the fixture's radius ranks the window of
+    /// [`EXOBASE_MULTIPLE`](crate::planetary::derive::atmosphere::EXOBASE_MULTIPLE) is 4.24–5.04
+    /// times the irradiation temperature, and holds it: at every rank the table's Ganymede loses
+    /// its N₂ and Titan keeps its own. The window's edges are the multiples at which Ganymede's
+    /// most bound rank and Titan's least bound sit on the threshold.
+    #[test]
+    fn the_exobase_window_holds_over_the_fixture_s_ranks() {
+        use crate::planetary::derive::atmosphere::{
+            EXOBASE_MULTIPLE, Gas, JEANS_RETENTION_THRESHOLD, jeans_parameter,
+        };
+        let jupiter = table_giant("Jupiter", 5, None);
+        let saturn = table_giant("Saturn", 6, None);
+        let lambdas = |moon: (f64, f64, f64, f64), giant: &(MoonParent, MoonNursery, MoonSky)| {
+            let ((kg, keep), orbit) = table_moon(moon, giant);
+            every_rank(keep).map(|rank| {
+                let shared = &MoonVolatiles::SHARED;
+                let derived = own_moon((kg, rank), &orbit, giant, shared, MoonBulk::Derived);
+                let air = derived.atmosphere();
+                let exobase = air.exobase_temperature();
+                let lambda =
+                    jeans_parameter(Kilograms::new(kg), derived.radius(), Gas::Nitrogen, exobase);
+                (lambda, air.retention().retains(Gas::Nitrogen))
+            })
+        };
+        let (ganymede, titan) = (lambdas(GANYMEDE, &jupiter), lambdas(TITAN, &saturn));
+        eprintln!("λ(N₂): Ganymede {ganymede:?}, Titan {titan:?}");
+        assert!(
+            ganymede
+                .iter()
+                .all(|&(lambda, kept)| !kept && lambda < 25.0)
+        );
+        assert!(titan.iter().all(|&(lambda, kept)| kept && lambda >= 25.0));
+        let edge = |lambda: f64| EXOBASE_MULTIPLE * lambda / JEANS_RETENTION_THRESHOLD;
+        let lower = edge(ganymede.iter().map(|&(l, _)| l).fold(0.0, f64::max));
+        let upper = edge(titan.iter().map(|&(l, _)| l).fold(f64::INFINITY, f64::min));
+        eprintln!("the window over the ranks: {lower:.4}–{upper:.4} T₀");
+        assert!((lower - 4.24).abs() < 0.005 && (upper - 5.04).abs() < 0.005);
     }
 
     /// P14.T56.c's follow-up: every moon of the table, read at its own bulk at every radius rank
@@ -2650,9 +2692,12 @@ mod tests {
     ///   ice fraction, and Triton's, a capture's, its measured mean radius (JPL).
     /// - Its water floor is its own ice: the inventory holds the larger of the drawn water and its
     ///   bulk's.
-    /// - Io and Europa, formed dry inside Jupiter's ice line, and Triton are airless, under 1 mbar.
-    ///   Io's is the vapour of its CO₂ frost, some 7 Pa at 119 K; Europa's and Triton's hold
-    ///   nothing. Triton's measured N₂ is some 14 µbar (1.4 Pa): Voyager 2's radio occultation
+    /// - Io and Europa, formed dry inside Jupiter's ice line, Ganymede, Callisto and Triton are
+    ///   airless, under 1 mbar. Io's is the vapour of its CO₂ frost, some 7 Pa at 119 K;
+    ///   Ganymede's and Callisto's are radiogenic argon, 1.2–17 Pa and up to 12 Pa across the ranks
+    ///   (Callisto's argon sits at λ ≈ 25 and is lost at two of them), where Ganymede's measured
+    ///   air is an O₂ and H₂O exosphere under 1 µPa (Hall et al. 1998, ApJ 499, 475; Roth et al.
+    ///   2021, Nat. Astron. 5, 1043); Europa's and Triton's hold nothing. Triton's measured N₂ is some 14 µbar (1.4 Pa): Voyager 2's radio occultation
     ///   as Gurrola 1995 (doctoral thesis, Stanford University) re-analysed it, 14 ± 2 µbar as
     ///   Marques Oliveira et al. 2022 (A&A 659, A136, §1) quote it, where Tyler et al. 1989
     ///   (Science 246, 1466) gave a preliminary 1.6 ± 0.3 Pa. That is thin and under the line
@@ -2722,9 +2767,6 @@ mod tests {
                         (air.surface_temperature().value() - 93.65).abs() < 2.0,
                         "{at}"
                     );
-                } else if name == "Ganymede" && air.state() != SurfaceState::Airless {
-                    // A finding for main (`the_table_s_ganymede_and_callisto_stay_airless`).
-                    eprintln!("{at}");
                 } else {
                     assert_eq!(air.state(), SurfaceState::Airless, "{at}");
                     assert!(pressure < AIRLESS_PRESSURE, "{at}");
