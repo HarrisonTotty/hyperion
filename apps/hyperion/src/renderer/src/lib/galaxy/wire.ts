@@ -12,7 +12,9 @@ import {
   galacticDeltaLy,
   galacticPositionFromLy,
   type MassLayer,
+  type ObservedDto,
   type Population,
+  type QueryModeDto,
   type RequestOf,
   type StellarBriefDto,
   type SystemRecord,
@@ -31,6 +33,9 @@ import {
   type ChartResult,
   type ChartSystem,
   type LayerIndex,
+  NOW_MODE,
+  type Observation,
+  type QueryMode,
   type StarBrief,
 } from "./model";
 
@@ -48,6 +53,21 @@ function toStarBrief(brief: StellarBriefDto): StarBrief {
     logLuminosityLsun: brief.log_luminosity_lsun,
     teffK: brief.teff_k,
     starCount: brief.star_count,
+  };
+}
+
+/**
+ * What an observed row carries, in the client's units: the apparent position as an offset from the
+ * chart centre, taken with `galacticDeltaLy` as the row's own is, so that it keeps its precision
+ * anywhere in the galaxy.
+ */
+function toObservation(centre: GalacticPosition, observed: ObservedDto): Observation {
+  return {
+    emittedYr: universeTimeToYears(observed.emitted),
+    lightAgeYr: observed.light_age_yr,
+    apparentRelLy: toVec3(galacticDeltaLy(centre, observed.apparent_position)),
+    curvatureBoundLy: observed.curvature_error_ly,
+    curvatureBoundArcsec: observed.curvature_error_arcsec,
   };
 }
 
@@ -71,6 +91,9 @@ function toChartSystem(centre: GalacticPosition, record: SystemRecord): ChartSys
     // system's is its summary's.
     feHDex: record.layer === "rogue_planet" ? (record.fe_h_dex ?? null) : null,
     velocityKmS: toVec3(record.velocity_km_s),
+    // Only a row answered in observed mode carries it: one from a server that ignored the mode is
+    // the present's, whatever was asked (the port ruling, §6.2).
+    observed: record.observed === undefined ? null : toObservation(centre, record.observed),
   };
 }
 
@@ -106,14 +129,19 @@ function toChartCensus(census: SystemsInRange["census"]): ChartCensus {
  *
  * @remarks
  * The centre, radius and time come from the response's echo of its request, never from what the
- * client asked for, so that what is drawn is what was answered.
+ * client asked for, so that what is drawn is what was answered. The answer echoes no mode, so the
+ * mode is the one of the request it answers, which the caller passes; each row says for itself
+ * whether it was answered in it.
+ *
+ * @param mode - The mode of the request this answers; `now` when absent.
  */
-export function toChartResult(response: SystemsInRange): ChartResult {
+export function toChartResult(response: SystemsInRange, mode: QueryMode = NOW_MODE): ChartResult {
   const [x, y, z] = galacticDeltaLy(ORIGIN, response.centre);
   return {
     centreLy: [x, y, z],
     radiusLy: response.radius_ly,
     timeYr: universeTimeToYears(response.time),
+    mode,
     census: toChartCensus(response.census),
     layers: response.census.layers,
     systems: response.systems
@@ -123,19 +151,43 @@ export function toChartResult(response: SystemsInRange): ChartResult {
 }
 
 /**
+ * The wire's form of a mode, or `undefined` for `now`, which a request leaves out (the port ruling,
+ * §6.1: a request without `mode` is `now`).
+ *
+ * @remarks
+ * The observer is carried exactly as a cell and an offset, as a chart's centre is.
+ *
+ * @throws RangeError when a coordinate of the observer is not finite.
+ */
+export function toQueryModeDto(mode: QueryMode): QueryModeDto | undefined {
+  let dto: QueryModeDto | undefined;
+  switch (mode.kind) {
+    case "now":
+      dto = undefined;
+      break;
+    case "observed":
+      dto = { type: "observed", observer: galacticPositionFromLy(mode.observerLy) };
+      break;
+  }
+  return dto;
+}
+
+/**
  * Builds the range query for a chart.
  *
  * @remarks
  * The centre is carried exactly as a cell and an offset (`galacticPositionFromLy`), so a negative
  * coordinate falls in the cell below it. Every query carries {@link CHART_SYSTEM_LIMIT} and asks
  * for each row's stellar brief, from which the chart draws its symbols and the HR diagram its
- * points.
+ * points. Only an observed query carries `mode`, so that a query in `now` is byte for byte the one
+ * a server built before plan 12 reads (the port ruling, §6.1).
  *
  * @param centreLy - The chart centre in the `GALACTIC` frame.
  * @param radiusLy - The query radius.
  * @param timeYr - The chart time in years from the epoch.
  * @param minLayer - The lightest layer wanted.
- * @throws RangeError when a coordinate or the time is not finite.
+ * @param mode - The mode to ask in; `now` when absent.
+ * @throws RangeError when a coordinate, the observer's included, or the time is not finite.
  */
 export function toRangeRequest(
   universe: UniverseIdHex,
@@ -143,8 +195,9 @@ export function toRangeRequest(
   radiusLy: number,
   timeYr: number,
   minLayer: MassLayer,
+  mode: QueryMode = NOW_MODE,
 ): RequestOf<"systems_in_range"> {
-  return {
+  const request: RequestOf<"systems_in_range"> = {
     kind: "systems_in_range",
     universe,
     centre: galacticPositionFromLy(centreLy),
@@ -154,6 +207,8 @@ export function toRangeRequest(
     limit: CHART_SYSTEM_LIMIT,
     include_stellar: true,
   };
+  const dto = toQueryModeDto(mode);
+  return dto === undefined ? request : { ...request, mode: dto };
 }
 
 /** The upper-case name of a stellar population, as the readout shows it. */

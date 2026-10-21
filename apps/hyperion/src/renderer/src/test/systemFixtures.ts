@@ -119,6 +119,33 @@ export function aNeutronStar(overrides: Partial<StarSummaryDto> = {}): StarSumma
   });
 }
 
+/**
+ * A red supergiant of 15 M☉ late in its life: the star a neutron star of {@link aNeutronStar}'s
+ * initial mass was when the light seen from afar left it (plan 12, P12.T11's by-eye case). Not a
+ * pin: a fixture's figures. Its 3,600 K and 900 R☉ are Betelgeuse's (Levesque and Massey 2020:
+ * 3,600 ± 25 K, 887 ± 203 R☉), and its luminosity follows from them by Stefan and Boltzmann to 2%;
+ * its M(V) is M(bol) = 4.74 − 2.5 log₁₀ L = −8.00 less the bolometric correction of −1.75 at
+ * 3,600 K (Levesque et al. 2005, Table 6), and its B−V is Betelgeuse's as observed. Its masses and
+ * mass loss are plausible values, not taken from a source.
+ */
+export function aRedSupergiant(overrides: Partial<StarSummaryDto> = {}): StarSummaryDto {
+  return aSunlikeStar({
+    kind: "supergiant",
+    phase: "core_helium_burning",
+    class: "M2Iab",
+    initial_mass_msun: 15,
+    mass_msun: 13.5,
+    core_mass_msun: 4.5,
+    luminosity_lsun: 125_000,
+    radius_rsun: 900,
+    teff_k: 3_600,
+    absolute_v_mag: -6.25,
+    colour_b_v_mag: 1.85,
+    mass_loss_rate_msun_per_yr: 2e-6,
+    ...overrides,
+  });
+}
+
 /** The pair orbit of `stellar.rs`'s `pair_orbit`: a = 23.5 au, e = 0.5, 60.9 yr. */
 export function aPairOrbit(overrides: Partial<OrbitDto> = {}): OrbitDto {
   return {

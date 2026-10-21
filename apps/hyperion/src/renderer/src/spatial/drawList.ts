@@ -6,12 +6,14 @@ import {
   type ViewBasis,
   type Viewport,
 } from "./camera";
+import { apparentOffset } from "./apparent";
 import {
   type AnnulusMark,
   isAbovePlane,
   type PathMark,
   type PathRole,
   type PointMark,
+  type SegmentMark,
   type SpatialScene,
   type SymbolShape,
 } from "./marks";
@@ -35,23 +37,51 @@ export interface ScreenPoint {
   readonly yPx: number;
 }
 
-/** A straight line: a mark's stalk (with its `markId`) or a grid line. */
+/** A dash's lengths, CSS px: drawn, then left. */
+export interface DashPx {
+  readonly onPx: number;
+  readonly offPx: number;
+}
+
+/**
+ * A straight line: a mark's stalk (with its `markId`), a grid line, or a scene's segment or the
+ * tick across one (plan 12, P12.T11).
+ */
 export interface LineOp {
   readonly kind: "line";
   readonly from: ScreenPoint;
   readonly to: ScreenPoint;
   readonly stroke: ColourToken;
   readonly widthPx: number;
-  /** The mark whose stalk this is, or `null` for the grid. */
+  /**
+   * The mark whose stalk this is, or `null` for the grid and a segment; the observer's stalk is
+   * {@link OBSERVER_MARK_ID}'s.
+   */
   readonly markId: string | null;
+  /**
+   * Its dash, which `paint` draws at the line scale as it does the width, as a dashed segment's;
+   * solid when absent.
+   */
+  readonly dashPx?: DashPx | undefined;
 }
 
-/** A polyline, such as a ring on the reference plane. */
+/** A polyline, such as a ring on the reference plane, or the observer's mark. */
 export interface PolylineOp {
   readonly kind: "polyline";
   readonly points: ReadonlyArray<ScreenPoint>;
   readonly stroke: ColourToken;
   readonly widthPx: number;
+  /**
+   * Which the polyline is: `line`, drawn at the line scale as every line is; or `mark`, drawn at
+   * the mark stroke as a symbol's outline is and not moved out, as the observer's mark is (plan 12,
+   * P12.T11). A line when absent.
+   */
+  readonly weight?: "line" | "mark" | undefined;
+  /**
+   * The fill of a closed polyline, its last point its first, as a mark is filled above the
+   * reference plane, such as the observer's eye; not filled when absent or `null`.
+   */
+  readonly fill?: ColourToken | null | undefined;
 }
 
 /** A circle on the screen, such as a sphere's outline. */
@@ -184,6 +214,12 @@ export interface RingLabel extends CurveLabelBase {
    * for a path's.
    */
   readonly alongPx?: ReadonlyArray<ScreenPoint>;
+  /**
+   * How far the label's text keeps from its point on every side, CSS px, where that is more than a
+   * curve label's own room: the observer's, which names a mark (plan 12, P12.T11). A curve's room
+   * when absent.
+   */
+  readonly clearOfPointPx?: number;
 }
 
 /** Where to put the DOM label of a sphere, a ring, an annulus or a path. */
@@ -795,6 +831,276 @@ function markCurveLabels(
 }
 
 /**
+ * The dash of a segment drawn `dashed`, CSS px on and off: a predicted path's 6 and 4, restated from
+ * the view's `PREDICTED_DASH_PX` (`view/wireframe/drawList.ts`), which owns it, so that a dash
+ * means the same on every spatial display (plan 12, P12.T11). `paint` draws both at the line scale.
+ */
+export const SEGMENT_DASH_PX: DashPx = { onPx: 6, offPx: 4 };
+
+/** The length of the tick across a segment's `to` end, in `rem` (§ Accessibility: sizes in rem). */
+const SEGMENT_TICK_REM = 0.25;
+
+/**
+ * The `markId` of the observer's stalk, so that the labels keep clear of it as they do of a mark's
+ * (`markInksPx`); no system's ID, which is sixteen hex digits.
+ */
+export const OBSERVER_MARK_ID = "observer";
+
+/** Half the width of the observer's mark, in `rem`: 1 rem across, the largest symbol's size. */
+const OBSERVER_HALF_WIDTH_REM = 0.5;
+
+/**
+ * How far outside the place of a selection's bracket about the observer's mark its label's text
+ * starts, in `rem`, as a mark's label's does (the guide's 3D conventions).
+ */
+const OBSERVER_LABEL_GAP_REM = 0.25;
+
+/** The points each arc of the observer's eye is drawn through, ends included. */
+const OBSERVER_ARC_POINTS = 9;
+
+/** The point a share `t` of the way from `from` to `to`. */
+function along(from: ScreenPoint, to: ScreenPoint, t: number): ScreenPoint {
+  return { xPx: from.xPx + (to.xPx - from.xPx) * t, yPx: from.yPx + (to.yPx - from.yPx) * t };
+}
+
+/**
+ * The part of a line on the screen that lies inside the viewport, or `null` where none does
+ * (Liang and Barsky's clip): the view is orthographic, so a scene's straight line is straight on
+ * the screen and is clipped there.
+ */
+function clipToViewport(
+  from: ScreenPoint,
+  to: ScreenPoint,
+  viewport: Viewport,
+): readonly [ScreenPoint, ScreenPoint] | null {
+  const dx = to.xPx - from.xPx;
+  const dy = to.yPx - from.yPx;
+  // Each edge as p·t ≤ q: left, right, top, bottom.
+  const edges: ReadonlyArray<readonly [number, number]> = [
+    [-dx, from.xPx],
+    [dx, viewport.widthPx - from.xPx],
+    [-dy, from.yPx],
+    [dy, viewport.heightPx - from.yPx],
+  ];
+  let enter = 0;
+  let leave = 1;
+  for (const [p, q] of edges) {
+    if (p === 0) {
+      // Parallel to this edge: wholly outside it, or never crossing it.
+      if (q < 0) {
+        return null;
+      }
+      continue;
+    }
+    const t = q / p;
+    if (p < 0) {
+      enter = Math.max(enter, t);
+    } else {
+      leave = Math.min(leave, t);
+    }
+  }
+  return leave > enter ? [along(from, to, enter), along(from, to, leave)] : null;
+}
+
+/**
+ * The shares along a line on the screen, from `from` to `to`, of its parts outside a circle: none
+ * for a line wholly inside it, and the whole line for one that misses it or only touches it.
+ */
+function outsideCircle(
+  from: ScreenPoint,
+  to: ScreenPoint,
+  centre: ScreenPoint,
+  radiusPx: number,
+): ReadonlyArray<readonly [number, number]> {
+  const dx = to.xPx - from.xPx;
+  const dy = to.yPx - from.yPx;
+  const fx = from.xPx - centre.xPx;
+  const fy = from.yPx - centre.yPx;
+  const a = dx * dx + dy * dy;
+  const b = 2 * (fx * dx + fy * dy);
+  const c = fx * fx + fy * fy - radiusPx * radiusPx;
+  if (!(a > 0)) {
+    return c > 0 ? [[0, 1]] : [];
+  }
+  const discriminant = b * b - 4 * a * c;
+  if (!(discriminant > 0)) {
+    return [[0, 1]];
+  }
+  const root = Math.sqrt(discriminant);
+  const enters = (-b - root) / (2 * a);
+  const leaves = (-b + root) / (2 * a);
+  const parts: Array<readonly [number, number]> = [];
+  if (enters > 0) {
+    parts.push([0, Math.min(1, enters)]);
+  }
+  if (leaves < 1) {
+    parts.push([Math.max(0, leaves), 1]);
+  }
+  return parts.filter(([start, end]) => end > start);
+}
+
+/**
+ * A scene's segments on the screen (plan 12, P12.T11): each one whose length there, its
+ * {@link apparentOffset}, exceeds its least, cut where it leaves its mark's outline and clipped to
+ * the viewport, then the tick across its `to` end, square to it, where that end lies outside the
+ * outline. Lines, with no mark of their own, so that none is picked.
+ */
+function segmentOps(
+  scene: SpatialScene,
+  placed: ReadonlyArray<PlacedMark>,
+  basis: ViewBasis,
+  camera: Camera,
+  viewport: Viewport,
+): LineOp[] {
+  const ops: LineOp[] = [];
+  const segments = scene.segments ?? [];
+  if (segments.length === 0) {
+    return ops;
+  }
+  // By ID, once per list: a chart observed has a segment for each of up to a few thousand marks,
+  // and a drag builds the list at every frame.
+  const marks = new Map(placed.map((entry) => [entry.mark.id, entry]));
+  const lineOf = (segment: SegmentMark, from: ScreenPoint, to: ScreenPoint, dashed: boolean) => {
+    const clipped = clipToViewport(from, to, viewport);
+    if (clipped !== null) {
+      ops.push({
+        kind: "line",
+        from: clipped[0],
+        to: clipped[1],
+        stroke: segment.stroke,
+        widthPx: segment.widthPx,
+        markId: null,
+        ...(dashed ? { dashPx: SEGMENT_DASH_PX } : {}),
+      });
+    }
+  };
+  for (const segment of segments) {
+    const offset = apparentOffset(segment.from, segment.to, scene.frame, camera);
+    const lengthPx = Math.hypot(offset.dxPx, offset.dyPx);
+    if (!(lengthPx > (segment.minLengthPx ?? 0))) {
+      continue;
+    }
+    const from = screen(project(segment.from, basis, camera, viewport));
+    const to: ScreenPoint = { xPx: from.xPx + offset.dxPx, yPx: from.yPx + offset.dyPx };
+    const leaves = segment.fromMark === undefined ? undefined : marks.get(segment.fromMark);
+    const centre = leaves === undefined ? null : screen(leaves.at);
+    const radiusPx = leaves === undefined ? 0 : outerRadiusPx(leaves.mark, viewport);
+    const pieces: ReadonlyArray<readonly [number, number]> =
+      centre === null ? [[0, 1]] : outsideCircle(from, to, centre, radiusPx);
+    for (const [start, end] of pieces) {
+      lineOf(segment, along(from, to, start), along(from, to, end), segment.line === "dashed");
+    }
+    const endOutside =
+      centre === null || Math.hypot(to.xPx - centre.xPx, to.yPx - centre.yPx) > radiusPx;
+    if (segment.endTick === true && endOutside) {
+      const halfPx = (SEGMENT_TICK_REM * viewport.remPx) / 2;
+      const acrossX = (-offset.dyPx / lengthPx) * halfPx;
+      const acrossY = (offset.dxPx / lengthPx) * halfPx;
+      lineOf(
+        segment,
+        { xPx: to.xPx + acrossX, yPx: to.yPx + acrossY },
+        { xPx: to.xPx - acrossX, yPx: to.yPx - acrossY },
+        false,
+      );
+    }
+  }
+  return ops;
+}
+
+/**
+ * The observer's eye about `centre`: two arcs from a point `halfWidthPx` to its left to one as far
+ * to its right, each a quadratic curve whose control point stands `halfWidthPx` above or below the
+ * centre, so that the eye is half as tall as it is wide. The polyline starts and ends at the top
+ * of its upper arc, where the outline is smooth, so that its seam does not blunt a point.
+ */
+function eyePoints(centre: ScreenPoint, halfWidthPx: number): ScreenPoint[] {
+  // x = a(2t − 1), y = ∓2a·t(1 − t) on the upper and lower arcs, t from 0 to 1 left to right.
+  const point = (t: number, upper: boolean): ScreenPoint => ({
+    xPx: centre.xPx + halfWidthPx * (2 * t - 1),
+    yPx: centre.yPx + (upper ? -2 : 2) * halfWidthPx * t * (1 - t),
+  });
+  const steps = OBSERVER_ARC_POINTS - 1;
+  const half = steps / 2;
+  const points: ScreenPoint[] = [];
+  for (let step = half; step <= steps; step += 1) {
+    points.push(point(step / steps, true));
+  }
+  for (let step = steps - 1; step >= 0; step -= 1) {
+    points.push(point(step / steps, false));
+  }
+  for (let step = 1; step <= half; step += 1) {
+    points.push(point(step / steps, true));
+  }
+  return points;
+}
+
+/**
+ * The observer's stalk and mark, and its label, where it lies inside the view (plan 12, P12.T11):
+ * the stalk to its foot on the reference plane in `--text`, as a mark's is, and the open eye at a
+ * mark's outline. Neither gives an anchor, so the observer is never picked.
+ */
+function observerOps(
+  scene: SpatialScene,
+  basis: ViewBasis,
+  camera: Camera,
+  viewport: Viewport,
+): { readonly ops: ReadonlyArray<DrawOp>; readonly labels: ReadonlyArray<CurveLabel> } {
+  const observer = scene.observer;
+  if (observer === undefined) {
+    return { ops: [], labels: [] };
+  }
+  const at = project(observer.position, basis, camera, viewport);
+  const inside =
+    at.xPx >= 0 && at.xPx <= viewport.widthPx && at.yPx >= 0 && at.yPx <= viewport.heightPx;
+  if (!inside) {
+    return { ops: [], labels: [] };
+  }
+  const north = scene.frame.north;
+  const foot = sub(observer.position, scale(north, dot(observer.position, north)));
+  const centre = screen(at);
+  const outerHalfWidthPx = OBSERVER_HALF_WIDTH_REM * viewport.remPx;
+  return {
+    ops: [
+      {
+        kind: "line",
+        from: centre,
+        to: screen(project(foot, basis, camera, viewport)),
+        stroke: "text",
+        widthPx: STALK_WIDTH_PX,
+        markId: OBSERVER_MARK_ID,
+      },
+      {
+        kind: "polyline",
+        points: eyePoints(centre, outerHalfWidthPx - SYMBOL_STROKE_PX / 2),
+        stroke: "text",
+        widthPx: SYMBOL_STROKE_PX,
+        weight: "mark",
+        // Filled north of the plane and open south of it, as every mark is (the guide's 3D
+        // conventions: fill means nothing else).
+        fill: isAbovePlane(scene.frame, observer.position) ? "text" : null,
+      },
+    ],
+    labels:
+      observer.label.length === 0
+        ? []
+        : [
+            {
+              key: "observer",
+              text: observer.label,
+              placement: "ring",
+              xPx: centre.xPx,
+              yPx: centre.yPx,
+              stack: 0,
+              // As a mark's label stands: 0.25 rem outside the place of a selection's bracket.
+              clearOfPointPx:
+                reticleHalfSizePx(outerHalfWidthPx, viewport.remPx) +
+                OBSERVER_LABEL_GAP_REM * viewport.remPx,
+            },
+          ],
+  };
+}
+
+/**
  * Turns a scene and a camera into drawing instructions, mark anchors and curve-label positions.
  *
  * @remarks
@@ -818,6 +1124,17 @@ function markCurveLabels(
  * the reference plane's coreward laid onto it. Neither a path nor an annulus gives an anchor, so neither is
  * picked, and their labels follow the rings' in the curve labels. `--line` is left to the grid and
  * the plane's rings (the orchestrator's ruling 35).
+ *
+ * A scene's segments and its observer (plan 12, P12.T11) change nothing else in the order. The
+ * segments come first, before every mark, so that a joiner never crosses another system's symbol
+ * as no path does. Each is a line, dashed at {@link SEGMENT_DASH_PX} where it is `dashed`, drawn
+ * where its length on the screen exceeds its least, only outside the outline of the mark it
+ * leaves, and clipped to the viewport, so that one wholly outside draws nothing; its tick follows
+ * it. The observer, drawn only where it lies inside the view, comes after every mark and before
+ * the screen annotations: its stalk, then its eye, a polyline at a mark's outline, filled above the
+ * plane; its label follows the paths' in the curve labels and stands 0.25 rem outside the place of
+ * a selection's bracket about it, as a mark's label does. Neither gives an anchor, so neither is
+ * picked.
  *
  * The list holds the guide's CSS widths; `paint` draws them at no less than 2 device px
  * (R07.T16.f). A destination is four chevrons pointing at its mark, their apices at least
@@ -850,7 +1167,8 @@ export function buildDrawList(
     ? [pieces.below, pieces.above]
     : [pieces.above, pieces.below];
 
-  const ops: DrawOp[] = [];
+  // Before every mark, so that a joiner never crosses another system's symbol.
+  const ops: DrawOp[] = [...segmentOps(scene, placed, basis, camera, viewport)];
   for (const piece of farPieces) {
     ops.push(pathOp(piece, basis, camera, viewport));
   }
@@ -864,6 +1182,8 @@ export function buildDrawList(
   for (const entry of nearHalf) {
     ops.push(...markOps(entry, scene, basis, camera, viewport));
   }
+  const observer = observerOps(scene, basis, camera, viewport);
+  ops.push(...observer.ops);
   const spheres = sphereOps(scene, camera, viewport);
   ops.push(...spheres.ops, ...reticleOps(placed, scene, viewport, minReticleGapPx));
 
@@ -881,6 +1201,7 @@ export function buildDrawList(
       ...spheres.labels,
       ...ringLabels(scene, basis, camera, viewport),
       ...markCurveLabels(scene, basis, camera, viewport),
+      ...observer.labels,
     ],
   };
 }

@@ -48,6 +48,66 @@ export const CHART_SYSTEM_LIMIT = 4_000;
 export type CentreLy = readonly [xLy: number, yLy: number, zLy: number];
 
 /**
+ * The mode a query is asked in (plan 12, Design note 4): `now`, the present, or `observed`, what
+ * an observer at `observerLy` receives at the query's time.
+ *
+ * @remarks
+ * Observed mode changes what is reported, never what is found: the systems, the census and the
+ * positions are the present's in both, and each system found also carries its
+ * {@link Observation}.
+ */
+export type QueryMode =
+  | { readonly kind: "now" }
+  | {
+      readonly kind: "observed";
+      /** Where the observer is, in the `GALACTIC` frame. */
+      readonly observerLy: CentreLy;
+    };
+
+/** The present: the mode every query is asked in unless the operator chooses another. */
+export const NOW_MODE: QueryMode = { kind: "now" };
+
+/** Whether two modes are the same: both `now`, or both observed from the same point. */
+export function sameQueryMode(a: QueryMode, b: QueryMode): boolean {
+  if (a.kind === "now" || b.kind === "now") {
+    return a.kind === b.kind;
+  }
+  const [ax, ay, az] = a.observerLy;
+  const [bx, by, bz] = b.observerLy;
+  return ax === bx && ay === by && az === bz;
+}
+
+/**
+ * What an observer receives from one system: when its light left it, how old that light is, and
+ * where it shows the system (plan 12, P12.T6).
+ *
+ * @remarks
+ * Carried by a row only in observed mode. The row's own position, age and velocity stay the
+ * present's (Design note 4), so a reading of the system as observed takes its age from
+ * {@link observedAgeMyr} and shows no velocity, which is present state the crew cannot know (the
+ * port ruling, §6.2).
+ */
+export interface Observation {
+  /** When the light the observer receives at the chart's time left the system, years from the epoch. */
+  readonly emittedYr: number;
+  /** How long that light has travelled, in Julian years: the chart time less {@link emittedYr}. */
+  readonly lightAgeYr: number;
+  /**
+   * Where the observer sees the system, its position when the light left: the offset from the
+   * chart centre along the `GALACTIC` axes, as {@link ChartSystem.relLy} is.
+   */
+  readonly apparentRelLy: Vec3;
+  /**
+   * The stated bound on the apparent position's error from the neglected curvature of the system's
+   * galactic orbit, in light-years at the system: a bound, not an uncertainty; zero for an orbit
+   * followed in full.
+   */
+  readonly curvatureBoundLy: number;
+  /** The same bound as the angle it subtends at the observer, in arcseconds. */
+  readonly curvatureBoundArcsec: number;
+}
+
+/**
  * A mass layer's place from the lightest stellar layer, A, to the heaviest, E: also its symbols'
  * size class. The two substellar layers take layer A's, 0, since no size class below A is drawn
  * (plan 13, design note 15).
@@ -119,14 +179,41 @@ export interface ChartSystem {
   readonly feHDex: number | null;
   /** Velocity at the epoch along the `GALACTIC` axes, in km/s (plan 08, P08.T7.a). */
   readonly velocityKmS: Vec3;
+  /**
+   * What the chart's observer receives from it, for a row answered in observed mode (plan 12,
+   * P12.T6); `null` for a row without it, which reads as in `now` whatever was asked, since a
+   * server built before P12.T6 ignores the mode.
+   */
+  readonly observed: Observation | null;
+}
+
+/** Myr in one Julian year, the light age's unit on the wire. */
+const MYR_PER_YR = 1e-6;
+
+/**
+ * A system's age when the light the observer receives left it, `ageMyr − lightAgeYr ÷ 10⁶`,
+ * negative for one not yet formed then; `null` for a row without an observation (the port ruling,
+ * §6.2).
+ */
+export function observedAgeMyr(system: ChartSystem): number | null {
+  return system.observed === null ? null : system.ageMyr - system.observed.lightAgeYr * MYR_PER_YR;
 }
 
 /**
- * Whether a chart's object is a free-floating planet that exists at the chart's time: one that
- * has formed, which alone is drawn, listed as `PLANET` and counted as one.
+ * A system's age as the chart shows it: when its light left it for a row answered in observed
+ * mode ({@link observedAgeMyr}), and at the chart's time for every other.
+ */
+export function shownAgeMyr(system: ChartSystem): number {
+  return observedAgeMyr(system) ?? system.ageMyr;
+}
+
+/**
+ * Whether a chart's object is a free-floating planet that exists at the time the chart shows it,
+ * the chart's time or, as observed, when its light left: one that has formed, which alone is
+ * drawn, listed as `PLANET` and counted as one.
  */
 export function isFormedPlanet(system: ChartSystem): boolean {
-  return system.kind === "rogue_planet" && system.ageMyr > 0;
+  return system.kind === "rogue_planet" && shownAgeMyr(system) > 0;
 }
 
 /**
@@ -149,6 +236,12 @@ export interface ChartResult {
   readonly radiusLy: number;
   /** The chart time, in years from the epoch. */
   readonly timeYr: number;
+  /**
+   * The mode the query was asked in, and from where, taken from the request it answers, so that an
+   * answer on show is never relabelled by a later choice. Each row says for itself whether it was
+   * answered so ({@link ChartSystem.observed}).
+   */
+  readonly mode: QueryMode;
   readonly census: ChartCensus;
   /**
    * The census of the five stellar layers, A to E, then the substellar layers the query asked for,

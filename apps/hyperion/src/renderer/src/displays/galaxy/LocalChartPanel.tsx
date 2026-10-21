@@ -13,13 +13,15 @@ import {
 import { StatusLine } from "../../components/StatusLine";
 import { StatusText } from "../../components/StatusText";
 import { useElementSize } from "../../lib/useElementSize";
+import type { CentreLy, QueryMode } from "../../lib/galaxy/model";
 import { AXIS_TOLERANCE_LY, cylindrical } from "../../geometry/frame";
 import type { SpatialQuantity, SpatialReading } from "../../spatial/Reading";
 import type { ScaleUnit } from "../../spatial/scale";
-import { SpatialView } from "../../spatial/SpatialView";
+import { type SpatialMode, SpatialView } from "../../spatial/SpatialView";
 import { vec3 } from "../../geometry/vec3";
 import { CensusReadout } from "./CensusReadout";
 import { chartLayout, controlsGiveWay } from "./chartLayout";
+import { answeredMode } from "./chartModel";
 import { ChartControls } from "./ChartControls";
 import { usePageTabFocus } from "./pageTabFocus";
 import { SymbolLegend } from "./SymbolLegend";
@@ -94,27 +96,11 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
       focusPageTab?.();
     }
   }, [fault, focusPageTab]);
-  const centre = result === null ? null : cylindrical(vec3(...result.centreLy));
-  const onAxis = centre !== null && !(centre.radiusLy > AXIS_TOLERANCE_LY);
-  const radiusText = centre === null ? null : formatLengthLy(centre.radiusLy, CENTRE_DECIMALS);
   const centreReadings: ReadonlyArray<SpatialReading> =
-    centre === null
-      ? []
-      : [
-          { label: "RADIUS", value: radiusText, unit: "ly", widthCh: RADIUS_WIDTH_CH },
-          {
-            label: "ANGLE",
-            value: onAxis ? null : formatBearingDeg(centre.angleDeg, CENTRE_DECIMALS),
-            unit: "",
-            widthCh: ANGLE_WIDTH_CH,
-          },
-          {
-            label: "HEIGHT",
-            value: formatSigned(centre.heightLy, CENTRE_DECIMALS),
-            unit: "ly",
-            widthCh: HEIGHT_WIDTH_CH,
-          },
-        ];
+    result === null ? [] : placeReadings(result.centreLy);
+  // The core arrow's distance is the centre's `RADIUS`, written the same way.
+  const radiusText =
+    result === null ? null : radiusReading(cylindrical(vec3(...result.centreLy)).radiusLy);
   const time: SpatialReading = {
     label: TIME_SYSTEM_LABEL,
     value: result === null ? null : formatUniverseTimeYr(result.timeYr),
@@ -122,6 +108,8 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
     widthCh: TIME_WIDTH_CH,
   };
   const coreDistance: SpatialQuantity = { value: radiusText ?? "", unit: "ly" };
+  // The mode the answer on show was given in, which the furniture and the legend state.
+  const answered = result === null ? null : answeredMode(result);
 
   return (
     <div
@@ -153,6 +141,7 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
           frameName="GALACTIC"
           centre={centreReadings}
           time={time}
+          mode={modeReading(answered ?? result.mode)}
           coreDistance={coreDistance}
           accessibleName="Local chart"
           stale={stale}
@@ -174,6 +163,13 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
         onStarFilter={chart.chooseStarFilter}
         heldBack={heldBack}
         hidden={controlsGiveWay(layout, censusShown, result !== null)}
+        modes={{
+          mode: chart.displayMode,
+          onMode: chart.chooseMode,
+          observedHeldBack: chart.observedHeldBack,
+          moveHeldBack: chart.observerMoveHeldBack,
+          onMoveObserver: chart.moveObserverToCentre,
+        }}
       />
       <CensusReadout
         result={result}
@@ -193,7 +189,60 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
           result?.layers.find((line) => line.layer === "brown_dwarf" && line.status === "included")
             ?.mass_min_msun ?? null
         }
+        observed={answered?.kind === "observed"}
       />
     </div>
   );
+}
+
+/** A galactocentric radius as the chart's furniture writes it, to 0.1 ly, without its unit. */
+function radiusReading(radiusLy: number): string {
+  return formatLengthLy(radiusLy, CENTRE_DECIMALS);
+}
+
+/**
+ * A point's place in the `GALACTIC` frame as the chart's furniture writes it: `RADIUS`, `ANGLE`
+ * (missing on the galactic axis, where it is undefined) and `HEIGHT`, to 0.1 ly, as the chart's
+ * centre and its observer are both written.
+ */
+function placeReadings(positionLy: CentreLy): ReadonlyArray<SpatialReading> {
+  const place = cylindrical(vec3(...positionLy));
+  const onAxis = !(place.radiusLy > AXIS_TOLERANCE_LY);
+  return [
+    {
+      label: "RADIUS",
+      value: radiusReading(place.radiusLy),
+      unit: "ly",
+      widthCh: RADIUS_WIDTH_CH,
+    },
+    {
+      label: "ANGLE",
+      value: onAxis ? null : formatBearingDeg(place.angleDeg, CENTRE_DECIMALS),
+      unit: "",
+      widthCh: ANGLE_WIDTH_CH,
+    },
+    {
+      label: "HEIGHT",
+      value: formatSigned(place.heightLy, CENTRE_DECIMALS),
+      unit: "ly",
+      widthCh: HEIGHT_WIDTH_CH,
+    },
+  ];
+}
+
+/**
+ * The mode of the chart on show, as its furniture writes it beside the frame and the time (plan 12,
+ * P12.T11): `NOW`, or `OBSERVED FROM` and the observer, written as the centre is.
+ */
+function modeReading(mode: QueryMode): SpatialMode {
+  let reading: SpatialMode;
+  switch (mode.kind) {
+    case "now":
+      reading = { name: "NOW", from: [] };
+      break;
+    case "observed":
+      reading = { name: "OBSERVED FROM", from: placeReadings(mode.observerLy) };
+      break;
+  }
+  return reading;
 }

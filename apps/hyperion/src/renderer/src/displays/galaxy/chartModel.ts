@@ -15,11 +15,28 @@ import {
   MEARTH_PER_MSUN,
   MJUP_PER_MSUN,
 } from "../../lib/format";
-import type { ChartCensus, ChartResult, ChartSystem, LayerIndex } from "../../lib/galaxy/model";
+import {
+  type ChartCensus,
+  type ChartResult,
+  type ChartSystem,
+  type LayerIndex,
+  NOW_MODE,
+  type Observation,
+  type QueryMode,
+  shownAgeMyr,
+} from "../../lib/galaxy/model";
 import { chartSymbol, starSizeClass } from "../../lib/galaxy/starSymbols";
 import { layerIndex, layerRank } from "../../lib/galaxy/wire";
 import type { LocalFrame } from "../../geometry/frame";
-import type { PlaneRing, PointMark, SpatialScene, SphereMark } from "../../spatial/marks";
+import { vec3 } from "../../geometry/vec3";
+import { APPARENT_OFFSET_MIN_PX } from "../../spatial/apparent";
+import type {
+  PlaneRing,
+  PointMark,
+  SegmentMark,
+  SpatialScene,
+  SphereMark,
+} from "../../spatial/marks";
 import { ceil125, gridSpacing, RADIUS_STEPS_LY } from "../../spatial/scale";
 
 /**
@@ -238,7 +255,8 @@ function planeLabel(driveRangeLy: number): string {
  * is an inverted triangle at layer A's size (plan 13, design note 15).
  */
 function toMark(system: ChartSystem, driveRangeLy: number, index: LayerIndex): PointMark | null {
-  const shape = chartSymbol(system.kind, system.star?.kind ?? null, system.ageMyr > 0);
+  // As observed, a free-floating planet is drawn once it had formed when its light left.
+  const shape = chartSymbol(system.kind, system.star?.kind ?? null, shownAgeMyr(system) > 0);
   if (shape === null) {
     return null;
   }
@@ -273,6 +291,52 @@ function planeRings(radiusLy: number, spacing: number, driveRangeLy: number): Pl
   return rings;
 }
 
+/** The label of the observer's mark on the chart (plan 12, P12.T11). */
+export const OBSERVER_LABEL = "OBSERVER";
+
+/**
+ * The mode a chart's answer reads in (plan 12, P12.T11): the one it was asked in, but `now` for
+ * one asked observed whose rows all came without their observation, as a server that ignores the
+ * mode answers, so that the chart never claims a mode its answer was not given in. An answer with
+ * no rows keeps the mode asked, which nothing contradicts.
+ */
+export function answeredMode(result: ChartResult): QueryMode {
+  const ignored =
+    result.mode.kind === "observed" &&
+    result.systems.length > 0 &&
+    result.systems.every((system) => system.observed === null);
+  return ignored ? NOW_MODE : result.mode;
+}
+
+/**
+ * The dashed joiner from a drawn system's mark to its apparent position, with the tick across its
+ * end there (plan 12, P12.T11), or none for a row answered without an observation.
+ *
+ * @remarks
+ * 1 px in `--text-muted`, which carries meaning at 6:1 where `--line` does not; the selected
+ * system's in `--text` 2 px wide, as a selected orbit is, so that the selection is not carried by
+ * colour alone (the line ruling). The selected system's is drawn whatever its offset; any other's
+ * only where its offset on the screen exceeds {@link APPARENT_OFFSET_MIN_PX}. Both are drawn only
+ * outside the mark's outline, so that neither crosses the symbol: with the observer at the chart
+ * centre the offsets are under a pixel at the fitted zoom.
+ */
+function apparentSegment(system: ChartSystem, selected: boolean): SegmentMark | null {
+  if (system.observed === null) {
+    return null;
+  }
+  return {
+    id: `apparent:${system.id}`,
+    from: system.relLy,
+    to: system.observed.apparentRelLy,
+    line: "dashed",
+    stroke: selected ? "text" : "textMuted",
+    widthPx: selected ? 2 : 1,
+    fromMark: system.id,
+    endTick: true,
+    minLengthPx: selected ? 0 : APPARENT_OFFSET_MIN_PX,
+  };
+}
+
 /**
  * Turns a range query's answer into the scene the spatial view draws.
  *
@@ -285,6 +349,14 @@ function planeRings(radiusLy: number, spacing: number, driveRangeLy: number): Pl
  * drawn twice, as the guide's 3D
  * conventions require: as a sphere, whose outline is a circle at every angle, and as a ring on the
  * reference plane, which measures distance within the plane alone.
+ *
+ * In observed mode the chart still draws every system at its present position (plan 12, Design
+ * note 4), with its symbol from the brief the row carries, which is its primary when the light
+ * left. Each drawn system whose row carries an observation has its apparent position's tick and
+ * dashed joiner ({@link apparentSegment}), the selected one's last, so that it lies on top; a row
+ * without one has none. The observer of a chart answered in observed mode ({@link answeredMode})
+ * is drawn where it lies inside the view, labelled `OBSERVER`; one asked observed and answered in
+ * `now`, by a server that ignores the mode, draws none.
  */
 export function toScene(result: ChartResult, options: ChartSceneOptions): SpatialScene {
   const { frame, driveRangeLy, selectedId, destinationId, starFilter = "all" } = options;
@@ -298,12 +370,39 @@ export function toScene(result: ChartResult, options: ChartSceneOptions): Spatia
     role: "data_edge",
     label: `QUERY EDGE ${formatChartLengthLy(result.radiusLy)} ly`,
   });
+  const drawn = filterSystems(result.systems, starFilter).flatMap((system) => {
+    const mark = toMark(system, driveRangeLy, layerIndex(system.layer));
+    return mark === null ? [] : [{ system, mark }];
+  });
+  const mode = answeredMode(result);
+  const segments =
+    mode.kind === "now"
+      ? []
+      : drawn
+          .toSorted(
+            (a, b) => Number(a.system.id === selectedId) - Number(b.system.id === selectedId),
+          )
+          .flatMap(({ system }) => {
+            const segment = apparentSegment(system, system.id === selectedId);
+            return segment === null ? [] : [segment];
+          });
+  const [centreX, centreY, centreZ] = result.centreLy;
   return {
     frame,
-    points: filterSystems(result.systems, starFilter).flatMap((system) => {
-      const mark = toMark(system, driveRangeLy, layerIndex(system.layer));
-      return mark === null ? [] : [mark];
-    }),
+    points: drawn.map(({ mark }) => mark),
+    ...(segments.length === 0 ? {} : { segments }),
+    ...(mode.kind === "observed"
+      ? {
+          observer: {
+            position: vec3(
+              mode.observerLy[0] - centreX,
+              mode.observerLy[1] - centreY,
+              mode.observerLy[2] - centreZ,
+            ),
+            label: OBSERVER_LABEL,
+          },
+        }
+      : {}),
     spheres,
     plane: {
       spacing,
@@ -486,7 +585,10 @@ export function censusLinesLightestFirst(
  * and not take the display down: the counterpart of the galaxy map's `MAP DATA INVALID` (plan 05,
  * T8.d). The brainstorm's range query answers with a complete census per layer, so a census that
  * does not name every layer leaves it unknown what the answer is complete above, and the whole
- * answer goes unshown.
+ * answer goes unshown. So does an answer with an observed row the client cannot read (plan 12,
+ * P12.T11): a light age or a stated bound that is not a finite number of zero or more, or an
+ * emitted time or an apparent position that is not finite, since the readout would print it and
+ * the chart draw it.
  */
 export function chartDataFault(result: ChartResult): string | null {
   if (!(result.radiusLy > 0) || !Number.isFinite(result.radiusLy)) {
@@ -497,5 +599,30 @@ export function chartDataFault(result: ChartResult): string | null {
   }
   // A census complete above an edge names a layer it included, whose unit the edge is read in.
   const included = result.layers.some((line) => line.status === "included");
-  return result.census.kind === "complete" && !included ? "census incomplete" : null;
+  if (result.census.kind === "complete" && !included) {
+    return "census incomplete";
+  }
+  const unusable = result.systems.some(
+    (system) => system.observed !== null && !observationUsable(system.observed),
+  );
+  return unusable ? "observation unusable" : null;
+}
+
+/** Whether a quantity that cannot be negative, such as a light age or a bound, can be read. */
+function isUsableMagnitude(value: number): boolean {
+  return Number.isFinite(value) && value >= 0;
+}
+
+/** Whether an observed row's observation can be read and drawn. */
+function observationUsable(observed: Observation): boolean {
+  const { x, y, z } = observed.apparentRelLy;
+  return (
+    isUsableMagnitude(observed.lightAgeYr) &&
+    isUsableMagnitude(observed.curvatureBoundLy) &&
+    isUsableMagnitude(observed.curvatureBoundArcsec) &&
+    Number.isFinite(observed.emittedYr) &&
+    Number.isFinite(x) &&
+    Number.isFinite(y) &&
+    Number.isFinite(z)
+  );
 }

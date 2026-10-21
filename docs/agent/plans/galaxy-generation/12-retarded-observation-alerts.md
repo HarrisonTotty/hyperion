@@ -1257,3 +1257,141 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     sim entry point that takes the member's `Drift`, or lends an interior cache, would remove it.
     (2) `tests/system_summary.rs` keeps its own `close` and `assert_observed_is_the_sims`, near copies of `tests/observed.rs`'s; moving both
     into `tests/common/` touches files outside this lane.
+- **P12.T11 as built (`lane/72-p12-t11-observed-mode`, 2026-10-21, at `GENERATOR_VERSION` 22).**
+  Client only: no Rust, protocol, binding, server, sim, GPU or golden change, and nothing generated
+  moves. The wire is used as P12.T6 and T6.b left it; a request in `now` carries no `mode` and is
+  byte for byte the one before (`decision-gg-port-d0.md` §6.1).
+  - _Names._ Under `apps/hyperion/src/renderer/src/`: `lib/galaxy/model.ts` gains
+    `QueryMode` (`{ kind: "now" }` or `{ kind: "observed", observerLy }`), `NOW_MODE`,
+    `sameQueryMode`, `Observation` (`emittedYr`, `lightAgeYr`, `apparentRelLy` from the chart
+    centre by `galacticDeltaLy`, `curvatureBoundLy`, `curvatureBoundArcsec`),
+    `ChartSystem.observed: Observation | null`, `ChartResult.mode`, `observedAgeMyr` (the age then,
+    `ageMyr − lightAgeYr ÷ 10⁶`) and `shownAgeMyr`. `lib/galaxy/wire.ts`: `toQueryModeDto`,
+    `toRangeRequest(…, mode = NOW_MODE)` and `toChartResult(response, mode = NOW_MODE)`, the mode
+    passed from the request the answer is `ok` for, so that an answer on show keeps its label.
+    `lib/galaxy/observation.ts`: `formatLightAgeYr`, `formatCurvatureBound` (`BoundUnit`),
+    `formatCurvatureBoundArcsec`, `LIGHT_AGE_WIDTH_CH` (10) and `EMITTED_WIDTH_CH` (11).
+    `spatial/marks.ts`: `SegmentMark` (`id`, `from`, `to`, `line: SegmentLine` `solid` or `dashed`,
+    `stroke: ColourToken`, `widthPx`, and optional `fromMark`, `endTick`, `minLengthPx`),
+    `ObserverMark` (`position`, `label`) and `SpatialScene.segments` and `.observer`, none when
+    absent. `spatial/apparent.ts`: `apparentOffset(present, apparent, frame, camera): ScreenOffset`
+    (`dxPx`, `dyPx`) and `APPARENT_OFFSET_MIN_PX` (4). `spatial/drawList.ts`: `LineOp.dashPx`
+    (`DashPx`), `PolylineOp.weight` (`line` or `mark`), `SEGMENT_DASH_PX` (6 and 4 CSS px, restated
+    from `view/wireframe/drawList.ts`'s `PREDICTED_DASH_PX` with a pointer) and `OBSERVER_MARK_ID`.
+    `spatial/SpatialView.tsx`: `mode?: SpatialMode` (`name`, `from`). `components/ModeControl.tsx`:
+    `ModeControl({ mode, onMode, heldBackId, observedHeldBack })`, `DisplayMode` and `MODE_KEY`
+    (`M`). `ChartControls`: `modes?: ChartModeControls` and `MOVE_OBSERVER_LABEL`.
+    `useLocalChart`: `displayMode`, `observerLy`, `mode`, `observedHeldBack`,
+    `observerMoveHeldBack`, `chooseMode`, `moveObserverToCentre` and `NO_CHART_TO_OBSERVE`.
+    `useRangeQuery`'s input gains `mode?`. `useSystemSummary` takes a fourth argument, the mode,
+    `NOW_MODE` when absent, and returns `shownMode` and `shownEmitted` too. `SystemReadout` gains
+    `starsAt?`, `AS_OBSERVED`, `CURVATURE_BOUND_LABEL` and `EMITTED_LABEL`; `SystemReading` gains
+    `widthCh?`; `SymbolLegend` gains `observed?` and `APPARENT_LEGEND`; `chartModel.ts` gains
+    `OBSERVER_LABEL` and `answeredMode`; `drawList.ts`'s `PolylineOp` gains `fill?` and its
+    `RingLabel` `clearOfPointPx?`, which `furniture.ts`'s ring candidates keep, and `markInksPx`
+    counts a mark-weight polyline as ink. Provides' `ObserverMark` is a scene mark, not a
+    component, and the task's "its coordinates in the readout" is the view's furniture, as the
+    lane's brief directed.
+  - _Deviation: no new draw op._ The existing paint test's `leadingCall` switches over every
+    `DrawOp` kind with no default, so a new kind would fail its type check. A segment and its tick
+    are `line` ops with an optional dash, and the observer's eye a closed `polyline` at a mark's
+    weight with an optional fill, which `paint` draws at `markStrokeDevicePx` and does not move
+    out. Every existing scene's draw list and paint are unchanged.
+  - _Deviation: where the 4 px rule lives._ The view owns its camera and hands it to nobody, so
+    `toScene` cannot measure an offset on the screen. It puts the rule on each segment as data
+    (`minLengthPx` 4, or 0 for the selected system's; `fromMark`, the mark it leaves), and
+    `buildDrawList` measures each segment with `apparentOffset` and cuts it at the mark's outline
+    there. A chart in `now`, and a row without `observed`, have no segment.
+  - _§5 a, the bound._ The present position's readings (`DIST`, `NORTH`, `COREWARD`, `SPINWARD`,
+    `RADIUS`, `ANGLE`, `HEIGHT`) take `~` and no `±`; `CURVATURE BOUND` follows `HEIGHT` under
+    `GALACTIC`, in the distance ladder (`km`, `Mm`, `Gm` and `AU` through `formatBodyDistance`
+    below 0.01 ly, `ly` from there, each switch with `DISTANCE_HYSTERESIS`'s 5%, held across
+    readings as the habitable zones' rows hold theirs), then after a middle dot, as a value of its
+    own in `--text`, in `″` to three significant figures, E notation below 0.001″, set against its
+    digits (`0.632 AU · 0.00150″`), on a row of its own. A bound of zero reads `0 ly · 0″`.
+  - _§5 b, the joiner and the tick._ As leaned: 1 px `--text-muted` at 6 and 4 px, the selected
+    system's `--text` 2 px, the tick 0.25 rem across the joiner's end, solid, as wide; never picked.
+    Both stand only outside the mark's outline, the tick only where the apparent position does, so
+    that the amendment's rule wins over "the selected system whatever its offset" inside the
+    outline. They are drawn before every mark, as no path crosses a symbol, the selected one last
+    among them.
+  - _§5 c, the observer._ An eye, two quadratic arcs 1 rem across and half as tall, filled north
+    of the plane and open south of it as every mark is, with a stalk to its foot in `--text`,
+    labelled `OBSERVER` as a curve label whose text stands 0.25 rem outside the place of a
+    selection's bracket about it, as a mark's label does, counted as ink by the other labels,
+    drawn only inside the view after every mark, and never picked. It is none of the symbol
+    shapes, the bracket, the chevrons, or the galaxy map's upright cross with a gap (its cursor)
+    and diagonal cross (its chart centre). The furniture writes the mode after the time: `MODE NOW`,
+    or `MODE OBSERVED FROM` and the observer's `RADIUS`, `ANGLE` and `HEIGHT`. The furniture, the
+    legend's `OBSERVER` and `TICK APPARENT POSITION, DASHED TO PRESENT` and the eye follow the
+    answer on show's `answeredMode`: the mode asked, but `now` for an answer asked observed whose
+    rows all came without their observation, as from a server that ignores the mode.
+  - _§5 d, words._ As leaned; the rows proposed are in the report and below.
+  - _§5 e, the first observer._ As leaned: `OBSERVED` takes the centre of the chart on show and is
+    held back with `NO CHART: centre one to observe from it` while there is neither an observer nor
+    a chart on show, and with the link's reason, as both modes are. `OBSERVER TO CENTRE` stands
+    beside the mode in both modes and moves the observer at any time, in `NOW` setting where the
+    next `OBSERVED` observes from, so that `M` never takes it from under the focus; it is held back
+    with the link and without a chart on show. The mode and the observer are kept across a new
+    centre and dropped for good with the universe: going back to it does not bring them back.
+  - _`AS OBSERVED`._ A line above the readout's scrolling region, so that it stays on show however
+    far the readings are scrolled, with a copy in the live region, so that a selection is announced
+    with it.
+  - _§5 f, the key._ `M`, gated as `K` is (no modifier, no repeat, not in a text field), stepping
+    to the other mode, and live while the controls are hidden on a compact page.
+  - _§5 g._ `AGE` prints `AT UT <emitted>` in observed mode; the list's `DIST ly` takes `~` for an
+    observed row, its column 7 ch for `~500.00`; `LIGHT AGE` and `EMITTED UT` stand in 10 and 11 ch
+    slots for `228,000.00` and `-228,000.00`, to universe time's 0.01 yr, so that the three times
+    read side by side add up.
+  - _The summary._ `SystemsPanel` asks `system_summary` in the mode of the chart on show; the
+    `SYSTEM` display's `useSystemData` is unchanged and asks in `now`. `toSummaryRequest` takes the
+    wire's mode (`RequestOf<"system_summary">["mode"]`) so that `lib/system/wire.ts` changes in
+    that function alone; `useSystemSummary` converts with `toQueryModeDto` and reads only the
+    answer's `observed` presence and `emitted`, so `toSystemModel` is unchanged. An answer is in the
+    mode asked where it carries `observed` and in `now` where it does not, and is stale where that
+    differs from the selection's: the chart's for a row that carries `observed`, `now` for one that
+    does not. The primary's `DIES IN`/`DIED` counts from the emitted time, which the stars describe.
+  - _Observed rows elsewhere._ A free-floating planet is drawn and listed by its age then
+    (`isFormedPlanet`, `toMark`), and every symbol and class is the brief the row carries, the
+    primary when the light left.
+  - _Deviation: systems unborn when their light left._ A star system that exists now but whose
+    light shows it unborn has no brief in observed mode (Design note 4: the wire drops it and keeps
+    the row), so it is listed as `NOT YET FORMED` and not drawn, as in `now` (the legend's
+    `NOT YET FORMED: LIST ONLY`), although the chart otherwise draws every system at its present
+    position. Whether it should be drawn there, with a mark that claims no type, is the owner's.
+  - _Tests (123 new, as run)._ `lib/galaxy/wire.observed.test.ts` (12),
+    `lib/galaxy/observation.test.ts` (7), `spatial/apparent.test.ts` (6),
+    `spatial/drawList.segments.test.ts` (21), `spatial/paint.test.ts`'s new `paint's segments`
+    block (10), `displays/galaxy/chartModel.observed.test.ts` (20),
+    `components/ModeControl.test.tsx` (9), `displays/galaxy/ChartControls.modes.test.tsx` (6),
+    `displays/galaxy/useRangeQuery.observed.test.tsx` (5),
+    `displays/system/useSystemSummary.test.tsx` (6),
+    `displays/galaxy/SystemReadout.observed.test.tsx` (9),
+    `displays/galaxy/SymbolLegend.observed.test.tsx` (2),
+    `displays/galaxy/GalaxyDisplay.observed.test.tsx` (2: `OBSERVED` held back until a chart is on
+    show, and the mode and observer dropped for good with the universe), and in
+    `displays/galaxy/GalaxyDisplay.integration.test.tsx` two steps of the script (`observed`,
+    `unobserved`) with four tests and the by-eye case's own block of four (a neutron star now 20,002
+    ly from an observer kept at the first centre, read `AS OBSERVED` as the supergiant it was, with
+    `LIGHT AGE 20,002.00 yr`). Every existing test passes unchanged.
+  - _Proposed nomenclature rows (main adds them to the guide)._ `OBSERVED`, control: the mode
+    control's word for `OBSERVED FROM`. `MODE`, label: a display's mode in its furniture and on its
+    control (`MODE NOW`). `EMITTED`, label: when the light a reading shows left the thing, in
+    universe time (`EMITTED UT -4197.50 yr`). `CURVATURE BOUND`, label: the stated bound on an
+    apparent position's error from the neglected curvature of the source's orbit, a bound and not a
+    `±`, in the distance ladder and in `″` to three significant figures (E notation below 0.001″).
+    `LIGHT AGE`'s precision: 0.01 yr, as universe time. `OBSERVER`, legend and label: the eye, two
+    arcs meeting at points, with a stalk, that marks the observer in observed mode.
+    `TICK APPARENT POSITION, DASHED TO PRESENT`, legend: the apparent position's marks.
+    `OBSERVER TO CENTRE`, command: moves the observer to the centre of the chart on show.
+    `NO CHART: centre one to observe from it`, held-back reason.
+  - _Deferred findings (2026-10-13 rule)._ (1) `FROM CHART CENTRE` stays the present's dust from
+    the chart's centre at the chart's time; with the observer moved off the centre it is not the
+    dust the observed light crossed, which would be the observer to the apparent position at the
+    emitted time. (2) The `HR DIAGRAM` page plots the briefs of the chart on show, which in
+    observed mode are the primaries when the light left, and does not name the mode; it could carry
+    the chart's `MODE` reading. (3) The legend's dashed sample relies on `stroke-dasharray` at
+    `--line-scale` in a non-scaling-stroke SVG, which only the look at landing can check. (4) The
+    legend names no selected joiner (`--text`, 2 px), as the orbit map's does its selected orbit.
+    (5) `OBSERVER TO CENTRE` shares `CENTRE` with `CENTRE CHART`; `OBSERVE FROM CENTRE` was weighed
+    and left, since it reads as a choice of the mode; the nomenclature row decides.

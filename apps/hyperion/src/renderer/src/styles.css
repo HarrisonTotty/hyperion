@@ -1972,6 +1972,19 @@ body {
   fill: currentColor;
 }
 
+/*
+ * An apparent position's sample: the joiner 1 px, dashed 6 on and 4 off as a predicted path is, and
+ * the tick across its end as wide, both at the line scale, as the chart draws them (plan 12,
+ * P12.T11; R07.T16.f).
+ */
+.symbol-legend__apparent path {
+  stroke-width: calc(1px * var(--line-scale));
+}
+
+.symbol-legend__apparent .symbol-legend__joiner {
+  stroke-dasharray: calc(6px * var(--line-scale)) calc(4px * var(--line-scale));
+}
+
 .chart-controls__floors,
 .chart-controls__stars {
   min-width: 0;
@@ -1998,6 +2011,71 @@ body {
 .chart-controls__stars > legend {
   color: var(--text-muted);
   letter-spacing: 0.15em;
+}
+
+/*
+ * The chart's mode and, while observing, the command that moves its observer: one line where the
+ * column has the room, the command wrapping under the mode where it has not (plan 12, P12.T11).
+ */
+.chart-controls__modes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 1rem;
+}
+
+/*
+ * NOW and OBSERVED beside their legend, `M MODE`, floated as a choice's legend is so that it
+ * stands on their line rather than over the group.
+ */
+.mode-control {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  font-size: 0.875rem;
+}
+
+.mode-control__legend {
+  float: left;
+  margin-right: 0.5rem;
+  padding: 0;
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+  line-height: 2rem;
+}
+
+.mode-control__options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.25rem;
+}
+
+/*
+ * The chosen mode carries a rule under it, a shape as well as its pressed state; the other keeps
+ * room for it, so that nothing moves.
+ */
+.mode-control__button {
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.mode-control__button[aria-pressed="true"] {
+  border-bottom-color: var(--accent);
+}
+
+.mode-control__reason,
+.chart-controls__observer-reason {
+  margin-left: 0.5rem;
+  color: var(--text-muted);
+}
+
+.chart-controls__observer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 0;
 }
 
 /*
@@ -2186,12 +2264,14 @@ body {
  * is as wide as its longer word, `RANGE`, with its letter spacing: ruling 115.5's 4ch holds `OUT`
  * but not the header's words, which ran past the panel's edge at both sizes. A fixed width, since
  * the head and each row are grids of their own and must share their columns. The mass holds a
- * free-floating planet's `4132 M⊕` on one line, its unit drawn in the cell (plan 13, P13.T8.d).
+ * free-floating planet's `4132 M⊕` on one line, its unit drawn in the cell (plan 13, P13.T8.d). The
+ * distance holds the longest as observed, Estimated, `~500.00` (plan 12, P12.T11), as the guide
+ * sizes a field for its longest Estimated reading with its marks.
  */
 .system-list__head,
 .system-list__row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 8ch 6ch 6ch 8.5ch 6.5ch;
+  grid-template-columns: minmax(0, 1fr) 8ch 6ch 7ch 8.5ch 6.5ch;
   align-items: center;
   gap: 0 0.375rem;
 }
@@ -2205,7 +2285,7 @@ body {
 @container (max-width: 30rem) {
   .system-list__head,
   .system-list__row {
-    grid-template-columns: minmax(0, 1fr) 6ch 6ch 8.5ch 6.5ch;
+    grid-template-columns: minmax(0, 1fr) 6ch 7ch 8.5ch 6.5ch;
   }
 
   .system-list__row {
@@ -2431,6 +2511,22 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* A value whose digits vary, right-aligned in a slot that holds its longest (§ Numbers). */
+.system-readout__value--fixed {
+  display: inline-block;
+  text-align: right;
+}
+
+/*
+ * A readout's state, as `AS OBSERVED` qualifies every reading under it (plan 12, P12.T11): above
+ * the readings' scrolling region, and never giving way to it.
+ */
+.system-readout__state {
+  flex: none;
+  margin: 0;
+  letter-spacing: 0.15em;
+}
+
 .system-readout__unit {
   color: var(--text-muted);
 }
@@ -2640,6 +2736,20 @@ body {
 
 .spatial-reading {
   white-space: nowrap;
+}
+
+/*
+ * The display's mode and where it observes from, `MODE OBSERVED FROM RADIUS … ANGLE … HEIGHT …`,
+ * one reading whose observer's coordinates run on after its name (plan 12, P12.T11).
+ */
+.spatial-view__mode > dd {
+  display: inline;
+}
+
+.spatial-view__observer {
+  display: inline-flex;
+  gap: 0 1.25rem;
+  margin: 0 0 0 1.25rem;
 }
 
 .spatial-reading dd {

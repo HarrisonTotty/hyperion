@@ -5,6 +5,7 @@ import { RequestStatus } from "../../components/RequestStatus";
 import { StaleMark } from "../../components/StaleMark";
 import { StatusLine } from "../../components/StatusLine";
 import { StatusText } from "../../components/StatusText";
+import { NOW_MODE, sameQueryMode } from "../../lib/galaxy/model";
 import { useUniverse } from "../../lib/universe";
 import { type SummaryTarget, useSystemSummary } from "../system/useSystemSummary";
 import { type SystemTarget, systemTargetFor } from "../system/systemTarget";
@@ -50,7 +51,11 @@ interface SystemsPanelProps {
  * drops an answer to a superseded one. Where that request stands is said between the readout and
  * `OPEN SYSTEM`, outside the live region, with `RETRY` after a failure; an answer the client cannot
  * read says `SYSTEM DATA INVALID` there. The answer on show while the chart's time has moved on, or
- * after the newer request failed, is read as stale. The selection's extinction from the chart's
+ * after the newer request failed, is read as stale. The summary is asked in the mode of the chart
+ * on show (plan 12, P12.T11), so that a system read `AS OBSERVED` shows its stars as observed, as
+ * they come; one answered in another mode or from another observer than the selection is read in
+ * is stale too, among them one answered without its observation, by a server that ignores the
+ * mode, for a selection whose row carries one. The selection's extinction from the chart's
  * centre (plan 07, P07.T11.c) is asked for by the chart ({@link LocalChartState}), and where that
  * request stands is said after the summary's, its subject `EXTINCTION` before its state
  * (`EXTINCTION PENDING`), so that two waits are told apart; a selection the server resolves to no
@@ -78,14 +83,21 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
       ? null
       : { universe: open.id, system: selected.id, designation: selected.designation };
   const chartTime = universeTimeFromYears(result?.timeYr ?? chart.timeYr);
-  const summary = useSystemSummary(summaryTarget, chartTime, generation);
+  // Asked in the mode of the chart on show, so that its stars are as the chart's observer sees them
+  // (plan 12, P12.T11).
+  const chartMode = result?.mode ?? NOW_MODE;
+  const summary = useSystemSummary(summaryTarget, chartTime, generation, chartMode);
   const stars = summary.shown?.kind === "ok" ? summary.shown.model : null;
-  // An answer for a time the chart has left, or kept through a newer request that failed, is a
-  // snapshot the chart no longer stands on.
+  // The selection is read as observed only where its row carries an observation, so its stars
+  // must be answered in that mode, and in `now` for a row a server answered so.
+  const readoutMode = selected?.observed === null ? NOW_MODE : chartMode;
+  // An answer for a time or a mode the chart has left, or kept through a newer request that failed,
+  // is a snapshot the chart no longer stands on.
   const starsStale =
     stars !== null &&
     (stars.time.seconds !== chartTime.seconds ||
       stars.time.nanos !== chartTime.nanos ||
+      (summary.shownMode !== null && !sameQueryMode(summary.shownMode, readoutMode)) ||
       summary.state.kind === "rejected" ||
       summary.state.kind === "timed_out");
   const retry = (): void => {
@@ -161,6 +173,7 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
         distanceDecimals={chart.distanceDecimals}
         stars={stars}
         starsStale={starsStale}
+        starsAt={summary.shownEmitted}
         extinction={answer.kind === "line" ? answer.line : null}
       />
       {summary.shown?.kind === "fault" ? (

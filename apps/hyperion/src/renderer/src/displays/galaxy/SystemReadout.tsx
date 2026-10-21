@@ -1,3 +1,6 @@
+import type { UniverseTime } from "@hyperion/protocol";
+import { useState } from "react";
+
 import { EarthMassUnit } from "../../components/EarthMassUnit";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { StaleMark } from "../../components/StaleMark";
@@ -15,7 +18,15 @@ import {
   formatUniverseTimeYr,
   TIME_SYSTEM_LABEL,
 } from "../../lib/format";
-import { type ChartSystem, isFormedPlanet } from "../../lib/galaxy/model";
+import { type ChartSystem, isFormedPlanet, observedAgeMyr } from "../../lib/galaxy/model";
+import {
+  type BoundUnit,
+  EMITTED_WIDTH_CH,
+  formatCurvatureBound,
+  formatCurvatureBoundArcsec,
+  formatLightAgeYr,
+  LIGHT_AGE_WIDTH_CH,
+} from "../../lib/galaxy/observation";
 import { populationLabel } from "../../lib/galaxy/wire";
 import { useItemsInView } from "../../lib/itemsInView";
 import type { SystemModel } from "../../lib/system/model";
@@ -73,11 +84,82 @@ export interface SystemReadoutProps {
    */
   readonly starsStale: boolean;
   /**
+   * The time the stars describe, from which a death is counted: when their light left, for an
+   * answer asked in observed mode (plan 12, P12.T6.b); the answer's own time when absent or `null`.
+   */
+  readonly starsAt?: UniverseTime | null | undefined;
+  /**
    * What lies between the chart's centre and the selected system at the chart's time, or `null`
    * before the answer, without a selection, for a system the server names no such system and after
    * a failed request (plan 07, P07.T11.c); where the request stands is said beside the readout.
    */
   readonly extinction: LineExtinction | null;
+}
+
+/** The state of a readout of a system as its light shows it (plan 12, P12.T11). */
+export const AS_OBSERVED = "AS OBSERVED";
+
+/** The label of the stated curvature bound on where an observed system appears (plan 12, P12.T11). */
+export const CURVATURE_BOUND_LABEL = "CURVATURE BOUND";
+
+/** The label of the time the light an observed system is read by left it, in universe time. */
+export const EMITTED_LABEL = `EMITTED ${TIME_SYSTEM_LABEL}`;
+
+interface CurvatureBoundReadingProps {
+  readonly boundLy: number;
+  readonly boundArcsec: number;
+}
+
+/**
+ * The stated bound on an observed system's apparent position (plan 12, Design note 3), one reading
+ * of two parts joined by a middle dot, as the guide joins a reading's parts: the bound in the
+ * distance ladder, its unit held from one reading to the next with the distance units' hysteresis,
+ * adjusted during render as the habitable zones' rows are, and the angle it subtends at the
+ * observer, its `″` set against the digits as `°` is (`0.632 AU · 0.00150″`). Both are values, in
+ * `--text`. A bound, not a `±`, which the guide keeps for a standard uncertainty: a reading of its
+ * own after the position's, on a row of its own.
+ */
+function CurvatureBoundReading({ boundLy, boundArcsec }: CurvatureBoundReadingProps) {
+  const [held, setHeld] = useState<BoundUnit | null>(
+    () => formatCurvatureBound(boundLy, null).unit,
+  );
+  const bound = formatCurvatureBound(boundLy, held);
+  if (bound.unit !== held) {
+    setHeld(bound.unit);
+  }
+  return (
+    <>
+      <dt>{CURVATURE_BOUND_LABEL}</dt>
+      <dd className="system-readout__wide">
+        <span className="system-readout__value">{bound.value}</span>{" "}
+        <span className="system-readout__unit">{bound.unit}</span>
+        {" · "}
+        <span className="system-readout__value">{formatCurvatureBoundArcsec(boundArcsec)}″</span>
+      </dd>
+    </>
+  );
+}
+
+/** A reading of the present that the readout states as Estimated, `~`, for a system observed. */
+function estimatedIf(estimated: boolean, text: string | null): string | null {
+  return text === null || !estimated ? text : `~${text}`;
+}
+
+/** The age reading: the age then, `NOT YET FORMED` before the system formed, or the age now. */
+function ageReading(system: ChartSystem | null): {
+  readonly value: string | null;
+  readonly unit: string | undefined;
+  readonly formed: boolean;
+} {
+  if (system === null) {
+    return { value: null, unit: undefined, formed: true };
+  }
+  const then = observedAgeMyr(system);
+  if (then !== null && then < 0) {
+    return { value: "NOT YET FORMED", unit: undefined, formed: false };
+  }
+  const age = formatAge(then ?? system.ageMyr);
+  return { value: age.value, unit: age.unit, formed: true };
 }
 
 /**
@@ -124,6 +206,20 @@ export interface SystemReadoutProps {
  * absent, never zero. An answer kept for a time the chart has left, or after a newer request
  * failed, is a stale snapshot: its readings are muted and trail the guide's `S`.
  *
+ * A row the chart was answered in observed mode reads `AS OBSERVED` (plan 12, P12.T11), on a line
+ * above the scrolling readings, so that it stays on show however far they are scrolled, and in the
+ * live region, so that a selection is announced with it; a row without its observation reads as
+ * above whatever was asked. Then the system's `LIGHT AGE`, in
+ * `yr`, and the time that light left it, `EMITTED UT`, follow its ID, each in a slot that holds the
+ * oldest light of the source horizon; its `AGE` is its age then, an Observed value, given at the
+ * emitted time, or `NOT YET FORMED` before it formed (the port ruling, §6.2); its present position,
+ * `DIST`, the offsets and `RADIUS`, `ANGLE` and `HEIGHT`, is Estimated, `~`, with the stated
+ * `CURVATURE BOUND` on where it appears after them, in the distance ladder and, after a middle
+ * dot, in `″`; and `VEL`
+ * and its components, present state the crew cannot know, are the em dash. Its stars are the
+ * summary's asked in the same mode, as they come, and a death is counted from the emitted time.
+ * `FROM CHART CENTRE` stays the dust from the chart's centre at the chart's time.
+ *
  * The readings outrun the column at 1280 × 720, so they scroll inside their own region with the
  * readings in view and their total under it, as the guide asks of a list and ruling 70.6 allows a
  * readout: each reading and each of the star list's tables counts one. A new selection returns the
@@ -137,19 +233,28 @@ export function SystemReadout({
   distanceDecimals,
   stars,
   starsStale,
+  starsAt = null,
   extinction,
 }: SystemReadoutProps) {
+  // Read as observed only where the row carries its observation, whatever was asked: a server that
+  // ignores the mode answers in `now` (the port ruling, §6.2).
+  const observation = system?.observed ?? null;
+  const observed = observation !== null;
   const local = system === null ? null : toLocal(frame, system.relLy);
+  // The velocity is the present's, which the crew cannot know as observed, and the wire carries
+  // none at emission yet: its readings are missing in observed mode.
+  const moving = system === null || observed ? null : system;
   const velocity =
-    system === null ? null : toLocal(localFrameAt(system.positionLy), system.velocityKmS);
+    moving === null ? null : toLocal(localFrameAt(moving.positionLy), moving.velocityKmS);
   const speed =
-    system === null
+    moving === null
       ? null
-      : Math.hypot(system.velocityKmS.x, system.velocityKmS.y, system.velocityKmS.z);
+      : Math.hypot(moving.velocityKmS.x, moving.velocityKmS.y, moving.velocityKmS.z);
   const galactic = system === null ? null : cylindrical(system.positionLy);
   const onAxis = galactic !== null && !(galactic.radiusLy > AXIS_TOLERANCE_LY);
-  const age = system === null ? null : formatAge(system.ageMyr);
-  const atTime = `AT ${TIME_SYSTEM_LABEL} ${formatUniverseTimeYr(timeYr)} yr`;
+  const age = ageReading(system);
+  // The age is given at the time it describes: when the light left, as observed.
+  const atTime = `AT ${TIME_SYSTEM_LABEL} ${formatUniverseTimeYr(observation?.emittedYr ?? timeYr)} yr`;
   const formed = stars !== null && stars.formed ? stars : null;
   const primary = formed?.hosts[0] ?? null;
   const initialMass =
@@ -182,6 +287,15 @@ export function SystemReadout({
 
   return (
     <>
+      {/*
+       * Above the scrolling readings, so that the state of every reading stays on show however far
+       * they are scrolled (§ Data states: a mode is always shown); the live region says it too.
+       */}
+      {observed ? (
+        <p className="system-readout__state" aria-hidden="true">
+          {AS_OBSERVED}
+        </p>
+      ) : null}
       <section
         className="system-readout__scroll"
         ref={ref}
@@ -201,12 +315,33 @@ export function SystemReadout({
           // Atomic, so the whole selection is read, not the values that happen to have changed.
           aria-atomic="true"
         >
+          {/* Said with the selection; the line on show stands above the scrolling readings. */}
+          {observed ? <p className="visually-hidden">{AS_OBSERVED}</p> : null}
           <dl className="readout system-readout__values">
             <Reading label="DESIG" value={system?.designation ?? null} wide />
             <Reading label="ID" value={system === null ? null : formatHex64(system.id)} wide />
+            {observation === null ? null : (
+              <>
+                <Reading
+                  label="LIGHT AGE"
+                  value={formatLightAgeYr(observation.lightAgeYr)}
+                  unit="yr"
+                  widthCh={LIGHT_AGE_WIDTH_CH}
+                />
+                <Reading
+                  label={EMITTED_LABEL}
+                  value={formatUniverseTimeYr(observation.emittedYr)}
+                  unit="yr"
+                  widthCh={EMITTED_WIDTH_CH}
+                />
+              </>
+            )}
             <Reading
               label="DIST"
-              value={system === null ? null : formatLengthLy(system.distanceLy, distanceDecimals)}
+              value={estimatedIf(
+                observed,
+                system === null ? null : formatLengthLy(system.distanceLy, distanceDecimals),
+              )}
               unit="ly"
             />
             {/*
@@ -217,17 +352,26 @@ export function SystemReadout({
             <Reading label="DRIVE RANGE" value={rangeWords(system, driveRangeLy)} />
             <Reading
               label="NORTH"
-              value={local === null ? null : formatSigned(local.north, distanceDecimals)}
+              value={estimatedIf(
+                observed,
+                local === null ? null : formatSigned(local.north, distanceDecimals),
+              )}
               unit="ly"
             />
             <Reading
               label="COREWARD"
-              value={local === null ? null : formatSigned(local.coreward, distanceDecimals)}
+              value={estimatedIf(
+                observed,
+                local === null ? null : formatSigned(local.coreward, distanceDecimals),
+              )}
               unit="ly"
             />
             <Reading
               label="SPINWARD"
-              value={local === null ? null : formatSigned(local.spinward, distanceDecimals)}
+              value={estimatedIf(
+                observed,
+                local === null ? null : formatSigned(local.spinward, distanceDecimals),
+              )}
               unit="ly"
             />
             <Reading
@@ -242,7 +386,13 @@ export function SystemReadout({
               unit={mass === null ? <SolarMassUnit /> : massUnit(mass)}
               stale={starsStale}
             />
-            <Reading label="AGE" value={age?.value ?? null} unit={age?.unit} beside={atTime} />
+            <Reading
+              label="AGE"
+              value={age.value}
+              unit={age.unit}
+              beside={atTime}
+              wide={!age.formed}
+            />
             <Reading
               label="POPULATION"
               value={system === null ? null : populationLabel(system.population)}
@@ -296,18 +446,34 @@ export function SystemReadout({
           <dl className="readout system-readout__values">
             <Reading
               label="RADIUS"
-              value={galactic === null ? null : formatLengthLy(galactic.radiusLy, 1)}
+              value={estimatedIf(
+                observed,
+                galactic === null ? null : formatLengthLy(galactic.radiusLy, 1),
+              )}
               unit="ly"
             />
             <Reading
               label="ANGLE"
-              value={galactic === null || onAxis ? null : formatBearingDeg(galactic.angleDeg, 1)}
+              value={estimatedIf(
+                observed,
+                galactic === null || onAxis ? null : formatBearingDeg(galactic.angleDeg, 1),
+              )}
             />
             <Reading
               label="HEIGHT"
-              value={system === null ? null : formatSigned(system.positionLy.z, 1)}
+              value={estimatedIf(
+                observed,
+                system === null ? null : formatSigned(system.positionLy.z, 1),
+              )}
               unit="ly"
             />
+            {observation === null || system === null ? null : (
+              <CurvatureBoundReading
+                key={system.id}
+                boundLy={observation.curvatureBoundLy}
+                boundArcsec={observation.curvatureBoundArcsec}
+              />
+            )}
           </dl>
           {/*
            * The dust between the chart's centre and the system (plan 07, P07.T11.c): A(V), E(B−V)
@@ -347,7 +513,7 @@ export function SystemReadout({
             <>
               <h3 className="system-readout__heading">STAR A{starsStale ? <StaleMark /> : null}</h3>
               <dl className="readout system-readout__values">
-                <PrimaryReadings host={primary} at={formed.time} stale={starsStale} />
+                <PrimaryReadings host={primary} at={starsAt ?? formed.time} stale={starsStale} />
               </dl>
               <StarList model={formed} stale={starsStale} />
             </>
