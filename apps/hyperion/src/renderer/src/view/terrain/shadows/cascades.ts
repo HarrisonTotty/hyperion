@@ -27,7 +27,13 @@
  *   2008 was not reached). Microsoft's "Common Techniques to Improve Shadow Depth Maps" snaps the
  *   same way ("Moving the Light in Texel-Sized Increments"), but fits to the slice's diagonal, not
  *   a sphere.
- * - **The light's axes** ({@link lightBasis}) are built from the body-fixed sun (the split
+ * - **The fitted sun** is the top edge of the star's disc, not its centre
+ *   (decision-r10-t9b-penumbra): the pass gives {@link fitCascades} s★ raised by the star's
+ *   angular radius ρ towards the zenith ({@link discTopDirection}). So the cascades are fitted to
+ *   the disc's top edge, their shadow begins where the horizon map's share m reaches 0, and
+ *   min(m, c′) is m across the penumbra; non-terrain casters' shadows are short by about half a
+ *   penumbra, ρL (4.7 cm at 10 m). The receiver's N·L and normal offset keep the true star.
+ * - **The light's axes** ({@link lightBasis}) are built from the fitted body-fixed sun (the split
  *   ruling's S4), and each sphere's centre is snapped in them to whole texels, body-fixed in `f64`;
  *   everything is then expressed camera-relative.
  * - **The grid is carried** (decision-r10-t9-split, ruling 7 amended, replacing S3; issue #52).
@@ -53,15 +59,17 @@
  *   terrain's vertices are drawn (`terrainPatch.wgsl`: `draw.offsetFromCameraM + inst.originM +
  *   bodyRotation × q`), through each cascade's {@link Cascade.lightFromCamera}; the caster pass
  *   takes {@link Cascade.viewRotation} and {@link Cascade.projection} as its frame's.
- * - **Filtering** is T9.b's 2 × 2 hardware PCF through `textureSampleCompare` with a few Poisson
+ * - **Filtering** is T9.b's 2 × 2 hardware PCF through `textureSampleCompare` with a few rotated
  *   taps. WebGPU leaves a comparison sampler's filtering to the implementation (§7.1.1: "the
  *   sampling results will be implementation-dependent"), so the hardware's 2 × 2 is not
- *   guaranteed. The Sun's penumbra needs no more (no PCSS): the Sun subtends 2 arcsin(R☉ ÷ au) =
- *   2 arcsin(6.957 × 10⁸ ÷ 1.495 978 707 × 10¹¹) = 0.533° (IAU 2015 B3's nominal radius, IAU 2012
- *   B2's au), so 10 m behind an occluder its penumbra is 10 m × 9.30 × 10⁻³ rad = 9.3 cm, about
- *   one of cascade 1's texels at 2 m up. That holds for the Sun from 1 au: at the same insolation a
- *   host's disc scales as (T☉ ÷ T★)², T☉ = 5,772 K (IAU 2015 B3), so a 3,000 K star subtends about
- *   2.0° and its penumbra there is about 34 cm, four texels, for T9.b's filter to follow.
+ *   guaranteed. The Sun's penumbra needs no more (no PCSS) for casters near the receiver: the Sun
+ *   subtends 2 arcsin(R☉ ÷ au) = 2 arcsin(6.957 × 10⁸ ÷ 1.495 978 707 × 10¹¹) = 0.533° (IAU 2015
+ *   B3's nominal radius, IAU 2012 B2's au), so 10 m behind an occluder its penumbra is
+ *   10 m × 9.30 × 10⁻³ rad = 9.3 cm, about one of cascade 1's texels at 2 m up. At the same
+ *   insolation a host's disc scales as (T☉ ÷ T★)², T☉ = 5,772 K (IAU 2015 B3), so a 3,000 K star
+ *   subtends about 2.0° and its penumbra there is about 34 cm, four texels. The filter does not
+ *   follow ρ (decision-r10-t9b-penumbra): beyond some 38 m the penumbra is the horizon map's, which
+ *   the top-edge fit leaves whole.
  */
 
 import { add, cross, dot, norm, normalise, scale, sub, type Vec3 } from "../../../geometry/vec3";
@@ -106,16 +114,22 @@ export const SHADOWED_RANGE_PER_HEIGHT = 20;
 export const CASCADE_FADE_FRACTION = 0.1;
 
 /**
- * The normal offset, in texels of each cascade's world size: 1, the start of Design note 11's
- * 1–1.5, which T9.b tunes by hand (the split ruling's S7).
+ * The normal offset, in texels of each cascade's world size: 1.5, tuned by hand in R10.T9.b within
+ * Design note 11's 1–1.5 (the split ruling's S7), its upper end.
  *
  * @remarks
  * Holbert's normal offset ("Saying 'Goodbye' to Shadow Acne", GDC 2011 poster): the receiver's
  * world position moves along its geometric normal (not a normal-mapped one) before it is
  * projected, by the offset × saturate(1 − N·L), with "a small, constant depth bias" beside it; his
  * demo's offset is 1.0 texel. T9.b applies the angular factor per fragment.
+ *
+ * The tuning (R10.T9.b, the RTX 3080, hidden, `TERRAIN TEST` at 232 s, looking north): the share
+ * of the terrain's pixels the cascades darken by more than 2% of full scale fell from 1.4% at 1
+ * texel to 0.6% at 1.5 (and to 0.1% with the fit to the disc's top edge), the acne's moiré and a
+ * step at a level boundary that 1 texel showed gone at 1.5. A slope scale of 2 changed the share
+ * by under 0.2 points, so {@link CASCADE_DEPTH_BIAS} stays { 1, 1, 0 }.
  */
-export const NORMAL_OFFSET_TEXELS = 1;
+export const NORMAL_OFFSET_TEXELS = 1.5;
 
 /**
  * The ratio of cascade 1's texel to the horizon map's at the nadir at and below which the cascades
@@ -181,8 +195,8 @@ export interface CascadeDepthBias {
 }
 
 /**
- * The casters' slope-scaled depth bias, as data, for T9.b to tune (Design note 11; the split
- * ruling's S7).
+ * The casters' slope-scaled depth bias, as data (Design note 11; the split ruling's S7), kept by
+ * R10.T9.b's tuning ({@link NORMAL_OFFSET_TEXELS}).
  *
  * @remarks
  * The values: `constant` 1, the least non-zero integer, for Holbert's "small, constant depth bias"
@@ -344,7 +358,7 @@ export interface LightBasis {
   readonly x: Vec3;
   /** y_L = z_L × x_L. */
   readonly y: Vec3;
-  /** z_L = s★, towards the sun; the light looks down −z_L. */
+  /** z_L, the fitted sun ({@link discTopDirection}); the light looks down −z_L. */
   readonly z: Vec3;
 }
 
@@ -391,6 +405,63 @@ export function sunElevationRad(sunBodyFixed: Vec3, datumNormalBodyFixed: Vec3):
   const sun = normalise(sunBodyFixed);
   const normal = normalise(datumNormalBodyFixed);
   return Math.atan2(dot(sun, normal), norm(cross(sun, normal)));
+}
+
+/**
+ * Below this |u|, the sun's distance from the datum's normal in {@link discTopDirection}, the sun
+ * stands at the zenith or the nadir, where its vertical plane is undefined.
+ */
+const DISC_TOP_DEGENERATE = 1e-9;
+
+/**
+ * The direction the cascades are fitted to: the top edge of the star's disc, s★ raised by its
+ * angular radius ρ towards the zenith in the sun's vertical plane (decision-r10-t9b-penumbra).
+ *
+ * @remarks
+ * With s the unit sun and ν the datum's unit normal at the camera's nadir, u = ν − (ν·s) s and
+ * s′ = cos ρ s + sin ρ u ÷ |u|, a unit vector at angle ρ from s on ν's side of it, in the plane of
+ * the two; s′ = s where |u| < 10⁻⁹, the sun at the zenith or the nadir. Its elevation is e★ + ρ in
+ * s★'s azimuth.
+ *
+ * Why: the horizon map cuts the disc from below, and its visible share m reaches 0 where the
+ * skyline passes the disc's top edge (R07's cut, decision-r10-t8b §2). Fitted to that edge, the
+ * cascades' shadow begins where m reaches 0, so that the direct sun's min(m, c′) is m across the
+ * whole penumbra, the cascades darkening only where the horizon map's m has reached 0, for every
+ * caster the map resolves. Fitted to the centre, they cut at m = ½, a step across the penumbra.
+ * Non-terrain casters' shadows are short by about half a penumbra, ρL (4.7 cm at 10 m). The
+ * receiver's N·L, its normal offset and the shading keep the true star, s★.
+ *
+ * @param sunBodyFixed - s★, the direction to the star's centre, body-fixed; any length.
+ * @param datumNormalBodyFixed - ν, the datum's normal at the camera's nadir, body-fixed; any
+ * length.
+ * @param angularRadiusRad - ρ, the star's angular radius, rad, in [0, π ÷ 2]:
+ * asin(min(1, radius ÷ distance)), R07's; 0 gives s★.
+ * @throws RangeError for a direction of zero length or with a component that is not finite, or a
+ * ρ outside [0, π ÷ 2].
+ */
+export function discTopDirection(
+  sunBodyFixed: Vec3,
+  datumNormalBodyFixed: Vec3,
+  angularRadiusRad: number,
+): Vec3 {
+  requireFiniteVec("sun direction", sunBodyFixed);
+  requireFiniteVec("datum normal", datumNormalBodyFixed);
+  if (!(angularRadiusRad >= 0 && angularRadiusRad <= Math.PI / 2)) {
+    throw new RangeError(
+      `a star's angular radius lies in [0, π/2], not ${String(angularRadiusRad)}`,
+    );
+  }
+  const sun = normalise(sunBodyFixed);
+  const normal = normalise(datumNormalBodyFixed);
+  const up = sub(normal, scale(sun, dot(normal, sun)));
+  const upLength = norm(up);
+  if (!(upLength >= DISC_TOP_DEGENERATE)) {
+    return sun;
+  }
+  return add(
+    scale(sun, Math.cos(angularRadiusRad)),
+    scale(up, Math.sin(angularRadiusRad) / upLength),
+  );
 }
 
 /**
@@ -632,7 +703,11 @@ export interface CascadeInput {
   readonly farM?: number;
   /** h, the camera's height above the ground at its nadir, m; below 0 it is taken as 0. */
   readonly heightAboveGroundM: number;
-  /** s★, the direction to the sun, body-fixed; any length. */
+  /**
+   * The direction the cascades are fitted to, body-fixed; any length. The pass gives the top edge
+   * of star 0's disc ({@link discTopDirection}; decision-r10-t9b-penumbra), so that the light's
+   * axes, the elevation, the caster reach and the near plane all take it.
+   */
   readonly sunDirectionBodyFixed: Vec3;
   /** ν, the datum's normal at the camera's nadir, body-fixed; any length. */
   readonly datumNormalBodyFixed: Vec3;
@@ -708,7 +783,10 @@ export interface CascadeSet {
   readonly unclippedDepth: boolean;
   /** The caster reach, m ({@link casterReachM}), for culling. */
   readonly casterReachM: number;
-  /** e★, rad ({@link sunElevationRad}). */
+  /**
+   * The fitted sun's elevation at the nadir, rad ({@link sunElevationRad}): the disc top's, e★ + ρ,
+   * as the pass fits it ({@link discTopDirection}).
+   */
   readonly sunElevationRad: number;
   /** The light's axes, body-fixed ({@link lightBasis}). */
   readonly basis: LightBasis;
@@ -815,7 +893,10 @@ function splitAt(splitsM: Float64Array, index: number): number {
  * centre's offset from the camera is formed from P's and the steps in `f64`, and every matrix from
  * it in `f64`, narrowed once ({@link cascadeMatricesF64}). Nothing body-fixed depends on the body's
  * rotation, which enters only the view rotation. Δh is the larger of the relief range and the
- * caster height. The outputs depend on the inputs alone, whatever the order of calls.
+ * caster height. Every use of the sun here (the light's axes, the elevation, the caster reach and
+ * the near plane) takes {@link CascadeInput.sunDirectionBodyFixed} as given, which the pass raises
+ * to the disc's top edge ({@link discTopDirection}). The outputs depend on the inputs alone,
+ * whatever the order of calls.
  *
  * @throws RangeError for a non-finite input other than an infinite far plane; a sun or datum
  * normal of zero length; a field of view outside (0, π); an aspect, near plane, body radius or

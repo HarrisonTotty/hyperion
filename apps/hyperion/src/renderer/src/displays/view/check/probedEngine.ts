@@ -8,7 +8,9 @@
  * views and targets it makes: their `render` notes the resolves it took and its CPU time, and their
  * `resize` the size given. Nothing else changes, so `VIEW` draws as it does on any launch. Only the
  * check's launch uses it (`ViewsProbe`). The terrain run (plan R10, R10.T16.d) also reads each
- * render's submission and each target made, through the same probe.
+ * render's submission and each target made, through the same probe. A depth-layer target's render
+ * (plan R10, R10.T9.b) notes its CPU time as `<owner>:shadows`'s, its owner the view it names: one
+ * target serves every view.
  */
 
 import type {
@@ -23,6 +25,9 @@ import type {
   BufferHandle,
   ComputeBindings,
   ComputeHandle,
+  DepthLayerPass,
+  DepthLayersSpec,
+  DepthLayerTarget,
   FrameSubmission,
   IndirectArgs,
   MaterialHandle,
@@ -147,6 +152,59 @@ class ProbedTarget implements RenderTarget {
   }
 }
 
+/**
+ * A depth-layer target that reports its renders' main-thread time (plan R10, R10.T9.b).
+ *
+ * @remarks
+ * The engine has one set of cascades, drawn again for each view (decision-r10-t9-split §5(i)), so
+ * a render is reported as its owner's, `<owner>:shadows`, which `viewOf` reads as the view. Its
+ * passes take no resolve of their own: their GPU time rides the view's next render's resolve, so
+ * the resolves it reports are normally none, and need no other attribution (decision-r10-t9b-design
+ * D7). It reports no submission: a render is not a {@link FrameSubmission}.
+ */
+class ProbedDepthLayers implements DepthLayerTarget {
+  readonly name: string;
+  readonly sizePx: number;
+  readonly layers: number;
+  readonly depth: TextureHandle;
+  readonly #inner: DepthLayerTarget;
+  readonly #engine: RenderEngine;
+  readonly #probe: EngineProbe;
+  readonly #nowMs: () => number;
+
+  constructor(
+    inner: DepthLayerTarget,
+    engine: RenderEngine,
+    probe: EngineProbe,
+    nowMs: () => number,
+  ) {
+    this.name = inner.name;
+    this.sizePx = inner.sizePx;
+    this.layers = inner.layers;
+    this.depth = inner.depth;
+    this.#inner = inner;
+    this.#engine = engine;
+    this.#probe = probe;
+    this.#nowMs = nowMs;
+  }
+
+  render(owner: string, passes: ReadonlyArray<DepthLayerPass>): void {
+    const first = this.#engine.passTimesFrame;
+    const startMs = this.#nowMs();
+    this.#inner.render(owner, passes);
+    this.#probe.rendered(
+      `${owner}:shadows`,
+      first,
+      this.#engine.passTimesFrame,
+      this.#nowMs() - startMs,
+    );
+  }
+
+  dispose(): void {
+    this.#inner.dispose();
+  }
+}
+
 /** `inner`, its views and targets reporting to `probe`; every other member forwarded unchanged. */
 export class ProbedEngine implements RenderEngine {
   readonly #inner: RenderEngine;
@@ -181,6 +239,15 @@ export class ProbedEngine implements RenderEngine {
     const probed = new ProbedTarget(target, this, this.#probe, this.#nowMs);
     this.#probe.madeTarget(spec, probed);
     return probed;
+  }
+
+  createDepthLayers(spec: DepthLayersSpec): DepthLayerTarget {
+    return new ProbedDepthLayers(
+      this.#inner.createDepthLayers(spec),
+      this,
+      this.#probe,
+      this.#nowMs,
+    );
   }
 
   createMesh(spec: MeshSpec): MeshHandle {

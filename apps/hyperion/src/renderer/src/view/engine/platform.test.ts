@@ -25,12 +25,17 @@ const INTEL_FEATURES: ReadonlyArray<GPUFeatureName> = [
   "texture-compression-bc",
 ];
 
-/** SwiftShader's, which lack `shader-f16` (R01 Design note 17). */
+/**
+ * SwiftShader's, which lack `shader-f16` (R01 Design note 17). `depth-clip-control` is among them:
+ * `just test-render`'s SwiftShader offers it, as R10.T9.b's depth-layers group logs, and as R01's
+ * record of its engine task ("no `shader-f16`, the rest present") says.
+ */
 const SWIFTSHADER_FEATURES: ReadonlyArray<GPUFeatureName> = [
   "subgroups",
   "timestamp-query",
   "float32-filterable",
   "float32-blendable",
+  "depth-clip-control",
 ];
 
 async function outcomeOf(adapter: FakeAdapter): Promise<AdapterOutcome> {
@@ -126,6 +131,7 @@ describe("the capability summary", () => {
     );
     expect(capabilities.shaderF16).toBe(false);
     expect(capabilities.float32Blendable).toBe(true);
+    expect(capabilities.depthClipControl).toBe(true);
     expect(capabilities.subgroupMinSize).toBe(4);
   });
 
@@ -165,7 +171,26 @@ describe("the required features", () => {
       withholdShaderF16: false,
       withholdFloat32Blendable: true,
     });
-    expect(required).toEqual(["subgroups", "timestamp-query", "float32-filterable"]);
+    expect(required).toEqual([
+      "subgroups",
+      "timestamp-query",
+      "float32-filterable",
+      "depth-clip-control",
+    ]);
+  });
+
+  it("leave out depth-clip-control when withheld, and keep it otherwise (R10.T9.b)", () => {
+    const withheld = requiredFeatures(intel, {
+      withholdSubgroups: false,
+      withholdShaderF16: false,
+      withholdDepthClipControl: true,
+    });
+    const kept = requiredFeatures(intel, { withholdSubgroups: false, withholdShaderF16: false });
+    expect([withheld.includes("depth-clip-control"), kept.includes("depth-clip-control")]).toEqual([
+      false,
+      true,
+    ]);
+    expect(withheld).toEqual(kept.filter((feature) => feature !== "depth-clip-control"));
   });
 });
 
@@ -183,6 +208,20 @@ describe("the device's capabilities", () => {
       shaderF16: false,
       subgroupMinSize: null,
     });
+  });
+
+  it("read depth-clip-control as absent where it was withheld (R10.T9.b)", async () => {
+    const intel = new FakeAdapter({ info: INTEL_UHD_620_INFO, features: INTEL_FEATURES });
+    const device = await intel.requestDevice({
+      requiredFeatures: [
+        ...requiredFeatures(intel, {
+          withholdSubgroups: false,
+          withholdShaderF16: false,
+          withholdDepthClipControl: true,
+        }),
+      ],
+    });
+    expect(deviceCapabilities(device).depthClipControl).toBe(false);
   });
 
   it("equal the adapter's when nothing is withheld", async () => {

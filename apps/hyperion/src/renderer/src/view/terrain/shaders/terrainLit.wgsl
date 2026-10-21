@@ -15,10 +15,12 @@
 // preciseTrig.wgsl, common.wgsl, oblate.wgsl, surfaceLighting.wgsl), R07's litBody.wgsl,
 // terrainPatch.wgsl, the horizon map's lookup (`shadows/horizon.wgsl`, R10.T8.b) and the survey's
 // placement and discard (`terrainSurvey.wgsl`, which the wireframe's terrain shares, R10.T11),
-// then a `Draw` and a fragment stage: the lit material's own (`terrainLitShade.wgsl`), or the
-// terrain's depth alone for the symbology's pass over the image (`terrainDepth.wgsl`, R10.T16.c),
-// each over this module's vertices and survey discard; and one of the two vertex paths
-// (`terrainMaterial.ts`).
+// then a `Draw` and a fragment stage: the lit material's own (`terrainLitShade.wgsl`, with the
+// shadow cascades' receiver, `shadows/cascadeShadow.wgsl`, R10.T9.b), the terrain's depth alone for
+// the symbology's pass over the image (`terrainDepth.wgsl`, R10.T16.c), or the terrain as a caster
+// into the shadow cascades (`terrainShadow.wgsl`, R10.T9.b), each over this module's vertices and
+// survey discard; and one of the two vertex paths (`terrainMaterial.ts`). This module reads only
+// the `Draw` fields all three declare, so that each compiles with its own.
 //
 // Each star's horizon term takes its local horizon from the patch's horizon map (R10.T8.b; Design
 // note 10): `terrain_horizon` looks the horizon up towards the star's grid azimuth, blends it to the
@@ -26,6 +28,24 @@
 // `sphere_irradiance(h, phi, horizon)` takes it (used unchanged), whose visible fraction of the disc
 // is then Design note 10's lit fraction about the horizon. R08 draws no refraction yet, so the star's
 // direction is the geometric one. Planetshine is not shadowed by the map (R10's Risks).
+//
+// On the high setting the shadow cascades shadow star 0's direct light beside the map (R10.T9.b;
+// Design note 11; decision-r10-t8b §2; decision-r10-t9b-design D5): the fragment stage forms the
+// cascades' lit fraction c′ once (`cascadeShadow.wgsl`'s `cascade_lit_fraction`, 1 where no
+// cascades were drawn) and `shade_terrain` takes it as `cascade_lit`. Star 0 is the brightest, the
+// one whose disc the cascades are fitted to (`frameTerrain.ts`' `terrainLightingOf` puts it first).
+// The map's share m is R07's visible share of the disc at the cut `sphere_irradiance` used,
+// `disc_visible_fraction(H, φ + max(η, 0))`, and the cascades' term min(1, c′ ÷ m), 1 where m ≤ 0,
+// multiplies the direct sun (`terrain_cascade_term`): R07's term at a lit share of min(m, c′), the
+// minimum of the two, every caster cutting the disc from below. The cascades are fitted to the
+// disc's top edge (decision-r10-t9b-penumbra), so their shadow begins where the horizon map's share
+// m reaches 0, and min(m, c′) is m across the penumbra; non-terrain casters' shadows are short by
+// about half a penumbra, ρL (4.7 cm at 10 m). So the cascades add what the map cannot, casters that
+// are not terrain and sub-texel detail near the camera, and the map stands wherever they are off,
+// with no seam where the last fades to lit. The receiver's N·L and normal offset, and the shading,
+// keep star 0's own direction. A binary's second star has the map alone; the sky light and
+// planetshine take no cascade; the meter's class (`out.lit`) does not change with the term, as with
+// R11's factor or the ring's.
 //
 // Each lookup of R08's takes the texel's geodetic height above the datum (the baked heights,
 // mixed by the morph factor, never |P| − R), its geodetic latitude from the datum's normal ν
@@ -134,9 +154,26 @@ fn terrain_decoration(p : vec3f, normal : vec3f) -> TerrainDecoration {
 }
 
 // The direct sun's lit fraction beyond the horizon map's, which enters each star's horizon term
-// (R10.T8.b): T9's cascades, into which R11's cloud shadows multiply; 1 until T9 lands.
+// (R10.T8.b): R11's cloud shadows; 1 here. The cascades are a term of their own beside it
+// (`terrain_cascade_term`; decision-r10-t9-split §5(h)), since a body-scaled f32 `p` places a point
+// only to about 0.4 m on an Earth, coarser than cascade 1's texel.
 fn terrain_shadow_factor(p : vec3f) -> f32 {
   return 1.0;
+}
+
+// The shadow cascades' term on star 0's direct light (R10.T9.b; decision-r10-t8b §2):
+// min(1, c′ ÷ m), 1 where m ≤ 0, with m the horizon map's visible share of the disc and c′
+// `cascade_lit`, the cascades' lit fraction; so that m times it is min(m, c′) (`cascadeShadow.ts`'
+// `cascadeTerm`). It never brightens: at most 1. Where m ≤ 0 R07's term is already 0. The cascades
+// are fitted to the disc's top edge (decision-r10-t9b-penumbra), so their shadow begins where m
+// reaches 0, and min(m, c′) is m across the penumbra: for a caster the map resolves, the term is 1
+// wherever m > 0, the map's own penumbra standing; non-terrain casters' shadows are short by about
+// half a penumbra, ρL (4.7 cm at 10 m).
+fn terrain_cascade_term(m : f32, cascade_lit : f32) -> f32 {
+  if (!(m > 0.0)) {
+    return 1.0;
+  }
+  return min(1.0, cascade_lit / m);
 }
 
 // The ring's shadow on the direct sun per channel (R11's `ring_shadow_on_body`); 1 here.
@@ -371,8 +408,15 @@ struct TerrainShaded {
 // The radiance of the texel `in` with the terrain's normal `terrain_normal`, both body-fixed; with
 // `reference`, a skirt's or a fin's in the reference surface's appearance (R10.T10.c): law 0 alone
 // under `terrain_normal`, the datum's, seen from either side, with no decoration and no horizon map.
-// A skirt's lip (`skirt_lip`) is shaded as the grid, with `reference` false.
-fn shade_terrain(in : LitVertexOut, terrain_normal : vec3f, reference : bool) -> TerrainShaded {
+// A skirt's lip (`skirt_lip`) is shaded as the grid, with `reference` false. `cascade_lit` is the
+// shadow cascades' lit fraction c′ of star 0's direct light (R10.T9.b), 1 for a reference fragment
+// and where no cascades were drawn.
+fn shade_terrain(
+  in : LitVertexOut,
+  terrain_normal : vec3f,
+  reference : bool,
+  cascade_lit : f32,
+) -> TerrainShaded {
   var out : TerrainShaded;
   out.radiance = vec3f(0.0);
   out.lit = false;
@@ -437,9 +481,8 @@ fn shade_terrain(in : LitVertexOut, terrain_normal : vec3f, reference : bool) ->
         in.slot, in.parent, in.horizonFace, in.horizonSt, in.patchUv, in.morph, nu, towards, phi
       );
     }
-    let horizon = sphere_irradiance(
-      terrain_star_distance_radii(distance, light.w), phi, local_horizon
-    );
+    let star_distance_radii = terrain_star_distance_radii(distance, light.w);
+    let horizon = sphere_irradiance(star_distance_radii, phi, local_horizon);
     if (horizon <= 0.0 && !any(sky > vec3f(0.0))) {
       continue;
     }
@@ -482,7 +525,13 @@ fn shade_terrain(in : LitVertexOut, terrain_normal : vec3f, reference : bool) ->
     let transmitted = atmosphere_sun_transmittance(
       height, mu_datum, local.latitude, local_azimuth(local, towards), j
     );
-    let shadowed = terrain_shadow_factor(q) * terrain_ring_shadow(q, towards);
+    var shadowed = terrain_shadow_factor(q) * terrain_ring_shadow(q, towards);
+    if (j == 0u) {
+      // The map's share at the cut R07's term used, the nearer of the horizon and the element's
+      // own plane (decision-r10-t8b §2), and the cascades by the minimum beside it.
+      let m = disc_visible_fraction(star_distance_radii, clamp(phi + max(local_horizon, 0.0), 0.0, LIT_PI));
+      shadowed = shadowed * terrain_cascade_term(m, cascade_lit);
+    }
     out.radiance = out.radiance + light.xyz * misc.y * reflectance * visible * transmitted * shadowed;
     out.lit = out.lit || (horizon > TERRAIN_LIT_IRRADIANCE && any(visible > vec3f(TERRAIN_LIT_IRRADIANCE)));
   }

@@ -28,7 +28,10 @@
  * Each view that draws the terrain has its own frame buffers (plan R10, R10.T16.b): its instance,
  * contact and indirect buffers and, on a lit layout, its lights, made at its first frame and
  * released when it leaves ({@link TerrainResources.releaseView}); {@link DEFAULT_TERRAIN_VIEW}'s go
- * by R05's names and with the resources. {@link TerrainResources.dispose} releases every handle the
+ * by R05's names and with the resources. On the high setting a view whose body takes its shadow
+ * cascades also has four caster instance buffers (plan R10, R10.T9.b;
+ * {@link TerrainResources.casterBuffers}), made at its first caster frame and released with its
+ * other buffers. {@link TerrainResources.dispose} releases every handle the
  * resources made, so that a pass disposed while the engine lives leaves nothing behind
  * (decision-r10-t16-contracts §1); after a device loss the old handles are released first, which
  * `ResilientEngine` drops, as they went with the lost device.
@@ -48,6 +51,7 @@ import type {
 import type { TerrainSettings, TerrainVertexPath } from "../../quality/qualitySetting";
 import type { SpheroidFigure } from "../../atmosphere/hillaire";
 import type { PatchKey } from "../patchKey";
+import type { CascadeIndex } from "../shadows/cascadeShadow";
 import {
   CLASS_WEIGHTS_BYTES,
   DOUBLE_NORMALS_PER_SIDE,
@@ -728,6 +732,18 @@ export interface TerrainViewBuffers {
   readonly phases: BufferHandle | null;
 }
 
+/**
+ * One view's caster instance buffers (plan R10, R10.T9.b): one a shadow cascade, nearest first,
+ * each holding the view's own records that cast into that cascade ({@link INSTANCE_RECORD_BYTES}
+ * each, one per slot at most).
+ */
+export type TerrainCasterBuffers = readonly [
+  BufferHandle,
+  BufferHandle,
+  BufferHandle,
+  BufferHandle,
+];
+
 /** The buffers and textures of one layout, made together, whatever its shading. */
 interface MadeFields {
   /** The lit layout's phase table; `null` for R05's spike shading and the wireframe's. */
@@ -738,6 +754,8 @@ interface MadeFields {
   readonly mesh: MeshHandle;
   /** Each view's frame buffers, made at its first frame on the device. */
   readonly views: Map<string, TerrainViewBuffers>;
+  /** Each view's caster buffers, made at its first caster frame on the device (R10.T9.b). */
+  readonly casters: Map<string, TerrainCasterBuffers>;
 }
 
 /** A layout with normals made, with its atlas's texture. */
@@ -761,7 +779,8 @@ type Made = NormalsMade | WireMade;
  * @remarks
  * Every slot buffer and the atlas are made once at the layout's size and written in place, so a
  * freed slot is overwritten with no new allocation. The slot buffers, records and atlas are the
- * `height-cache` category; the per-frame instance, contact and indirect buffers are `other`.
+ * `height-cache` category; the per-frame instance, contact and indirect buffers are `other`, as
+ * are the casters' (R10.T9.b).
  */
 export class TerrainResources {
   readonly #engine: RenderEngine;
@@ -892,6 +911,67 @@ export class TerrainResources {
     if (buffers !== undefined) {
       this.#made.views.delete(view);
       this.#releaseView(buffers);
+    }
+    const casters = this.#made.casters.get(view);
+    if (casters !== undefined) {
+      this.#made.casters.delete(view);
+      this.#releaseCasters(casters);
+    }
+  }
+
+  /**
+   * `view`'s four caster instance buffers (plan R10, R10.T9.b; decision-r10-t9b-design D4), made at
+   * its first call on the current device: one a shadow cascade, nearest first, named
+   * `terrain casters (view) 1` to `4` (`terrain casters 1` to `4` for
+   * {@link DEFAULT_TERRAIN_VIEW}), each the size of the view's instance buffer, since a cascade's
+   * casters are a subset of the view's records, and filed under `other`, as that buffer is.
+   * Released with the view's other buffers ({@link TerrainResources.releaseView}) and at disposal.
+   *
+   * @throws Error once the resources are disposed.
+   */
+  casterBuffers(view: string): TerrainCasterBuffers {
+    if (this.#disposed) {
+      throw new Error("the terrain's resources were disposed: they make nothing more");
+    }
+    const made = this.#made;
+    let casters = made.casters.get(view);
+    if (casters === undefined) {
+      const engine = this.#engine;
+      const bytes = made.layout.slots.slotCount * INSTANCE_RECORD_BYTES;
+      const named = (n: number): string =>
+        view === DEFAULT_TERRAIN_VIEW
+          ? `terrain casters ${String(n)}`
+          : `terrain casters (${view}) ${String(n)}`;
+      const make = (n: number): BufferHandle =>
+        engine.createBuffer({
+          name: named(n),
+          bytes,
+          usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+          category: "other",
+        });
+      casters = [make(1), make(2), make(3), make(4)];
+      made.casters.set(view, casters);
+    }
+    return casters;
+  }
+
+  /**
+   * Writes one shadow cascade's caster records into `view`'s caster buffer for it (R10.T9.b);
+   * nothing for a cascade with none this frame, whose pass draws no terrain.
+   *
+   * @param cascade - The cascade, the nearest first.
+   * @throws RangeError for more records than the buffer holds.
+   */
+  writeCasters(view: string, cascade: CascadeIndex, records: InstanceRecords): void {
+    const made = this.#made;
+    if (records.count > made.layout.slots.slotCount) {
+      throw new RangeError(
+        `${records.count} casters exceed the ${made.layout.slots.slotCount} slots`,
+      );
+    }
+    const buffer = this.casterBuffers(view)[cascade];
+    if (records.count > 0) {
+      this.#engine.writeBuffer(buffer, 0, records.bytes());
     }
   }
 
@@ -1167,14 +1247,24 @@ export class TerrainResources {
       ...[...made.views.values()].map((buffers) => () => {
         this.#releaseView(buffers);
       }),
+      ...[...made.casters.values()].map((casters) => () => {
+        this.#releaseCasters(casters);
+      }),
     ];
     made.views.clear();
+    made.casters.clear();
     for (const release of releases) {
       try {
         release();
       } catch (error: unknown) {
         console.error("a terrain resource could not be released:", error);
       }
+    }
+  }
+
+  #releaseCasters(casters: TerrainCasterBuffers): void {
+    for (const buffer of casters) {
+      this.#engine.releaseBuffer(buffer);
     }
   }
 
@@ -1394,7 +1484,15 @@ export class TerrainResources {
       const mesh = engine.createMesh(terrainMeshSpec(layout.shading));
       // Every view's buffers, the default view's included, are made at its first frame.
       const views = new Map<string, TerrainViewBuffers>();
-      return { lit: traits.lit ? this.#makeLit() : null, fields, slotRecords, mesh, views };
+      const casters = new Map<string, TerrainCasterBuffers>();
+      return {
+        lit: traits.lit ? this.#makeLit() : null,
+        fields,
+        slotRecords,
+        mesh,
+        views,
+        casters,
+      };
     };
     if (layout.shading === "wire") {
       return { ...rest(), layout, normals: null };

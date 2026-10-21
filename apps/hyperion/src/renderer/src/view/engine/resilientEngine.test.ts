@@ -96,6 +96,9 @@ const MATERIAL: WgslMaterialSpec = {
   blend: "none",
 };
 
+/** The depth-layer set the fake engines make a target for (R10.T9.b). */
+const LAYERS = { name: "cascades", sizePx: 64, layers: 4, category: "shadows" } as const;
+
 function nth(module: ReturnType<typeof fakeEngineModule>, index: number): FakeRenderEngine {
   const engine = module.engines.at(index);
   if (engine === undefined) {
@@ -478,5 +481,28 @@ describe("a device loss", () => {
     expect(() =>
       engine.createBuffer({ name: "b", bytes: 4, usage: 0x40, category: "other" }),
     ).toThrow(EngineUnavailable);
+  });
+
+  it("makes depth layers on the current engine, and on the new one after a restore (R10.T9.b)", async () => {
+    const { engine, module } = await load([adapter(), adapter()]);
+    const first = engine.createDepthLayers(LAYERS);
+    first.render("view", []);
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(module.engines).toHaveLength(2);
+    });
+    const remade = engine.createDepthLayers(LAYERS);
+    expect([nth(module, 0).depthLayers, nth(module, 1).depthLayers]).toEqual([[first], [remade]]);
+    expect(nth(module, 0).depthLayers[0]?.renders).toEqual([{ owner: "view", passes: [] }]);
+  });
+
+  it("refuses depth layers while there is no device (R10.T9.b)", async () => {
+    const gpu = new HeldGpu([adapter()]);
+    const { engine, module } = await load([], {}, gpu);
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(gpu.waiting).toBe(1);
+    });
+    expect(() => engine.createDepthLayers(LAYERS)).toThrow(EngineUnavailable);
   });
 });

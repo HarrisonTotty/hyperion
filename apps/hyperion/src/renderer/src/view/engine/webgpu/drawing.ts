@@ -8,16 +8,20 @@
  * groups: the pass's `Frame`, written once a pass; the draw's `Draw`, a slot of the frame's
  * {@link UniformRing} at a dynamic offset; and the material's resources. With post-processes, the
  * draws go into an `rgba16float` intermediate of the output's size, and the passes ping-pong
- * between two such intermediates, the last writing the output.
+ * between two such intermediates, the last writing the output. A depth-layer target's pass (plan
+ * R10, R10.T9.b) is a depth-only variant of a frame's draws' pass, into one layer, and a
+ * submission of its own, as a frame is.
  */
 
 import { BUFFER_USAGE } from "../gpuFlags";
 import type { TextureSpec } from "../memory";
 import {
   type BufferHandle,
+  type DepthLayerPass,
   type DrawItem,
   type FrameSubmission,
   type PostProcessItem,
+  type SamplerSpec,
   type TextureHandle,
   type ViewSize,
   type WgslMaterialSpec,
@@ -26,6 +30,7 @@ import {
 import {
   type MaterialModules,
   materialPipelineDescriptor,
+  type PipelineColour,
   postProcessPipelineDescriptor,
   type ResourceBindings,
   resourceLayoutEntries,
@@ -98,6 +103,14 @@ export interface FrameOutput {
   readonly intermediates: () => readonly [GPUTexture, GPUTexture];
 }
 
+/** Where a depth-layer target's pass is drawn (plan R10, R10.T9.b). */
+export interface DepthLayerOutput {
+  /** The layer's size: the pass's `Frame` viewport. */
+  readonly size: ViewSize;
+  /** The pass's layer as its attachment: a single-layer `2d` view of the target's texture. */
+  readonly depth: GPUTextureView;
+}
+
 /** What the draw path needs of the engine. */
 export interface DrawingHost extends RingHost {
   readonly device: GPUDevice;
@@ -106,11 +119,7 @@ export interface DrawingHost extends RingHost {
   postProcessOf(handle: PostProcessItem["postProcess"]): PostProcessRecord;
   /** A texture's GPU object and specification. */
   textureOf(handle: TextureHandle): { readonly texture: GPUTexture; readonly spec: TextureSpec };
-  sampler(spec: {
-    readonly name: string;
-    readonly filter: "nearest" | "linear";
-    readonly address: "clamp-to-edge" | "repeat";
-  }): GPUSampler;
+  sampler(spec: Pick<SamplerSpec, "name" | "filter" | "address" | "compare">): GPUSampler;
 }
 
 /** A draw resolved to what its encoding needs. */
@@ -163,10 +172,13 @@ function pipelineFor(
   return undefined;
 }
 
-/** A pipeline's key: the mesh's layout (or none), the colour format and whether there is depth. */
+/**
+ * A pipeline's key: the mesh's layout (or none), the colour format (or `depth-only`) and whether
+ * there is depth.
+ */
 export function pipelineKey(
   layoutKey: string,
-  colourFormat: GPUTextureFormat,
+  colourFormat: PipelineColour,
   hasDepth: boolean,
 ): string {
   return `${layoutKey}|${colourFormat}|${String(hasDepth)}`;
@@ -239,7 +251,7 @@ export class Drawing {
   materialPipeline(
     record: MaterialRecord,
     mesh: MeshRecord,
-    colourFormat: GPUTextureFormat,
+    colourFormat: PipelineColour,
     hasDepth: boolean,
     asynchronous = record.asyncPipelines,
   ): GPURenderPipeline | undefined {
@@ -266,7 +278,7 @@ export class Drawing {
   async prepareMaterialPipeline(
     record: MaterialRecord,
     mesh: MeshRecord,
-    colourFormat: GPUTextureFormat,
+    colourFormat: PipelineColour,
     hasDepth: boolean,
   ): Promise<void> {
     const key = pipelineKey(mesh.layoutKey, colourFormat, hasDepth);
@@ -305,7 +317,7 @@ export class Drawing {
   async preparePipeline(
     record: MaterialRecord,
     mesh: MeshRecord,
-    colourFormat: GPUTextureFormat,
+    colourFormat: PipelineColour,
     hasDepth: boolean,
   ): Promise<void> {
     if (record.asyncPipelines) {
@@ -362,7 +374,7 @@ export class Drawing {
     const postProcesses = this.#resolvePostProcesses(frame, output.colourFormat);
     const intermediates = postProcesses.length > 0 ? output.intermediates() : null;
     const sceneFormat = intermediates === null ? output.colourFormat : INTERMEDIATE_FORMAT;
-    const draws = this.#resolveDraws(frame, sceneFormat, output.depth !== null);
+    const draws = this.#resolveDraws(frame.draws, sceneFormat, output.depth !== null);
     host.writeBuffer(this.#frameBuffer, 0, packFrame(frame, output.size));
     this.#ring.upload();
 
@@ -424,6 +436,47 @@ export class Drawing {
     });
   }
 
+  /**
+   * Encodes one pass of a depth-layer target into `output` (plan R10, R10.T9.b): the depth-only
+   * variant of {@link Drawing.encodeFrame}'s draws' pass, with no colour attachment and the pass's
+   * layer as its depth, cleared to 0 and stored, its draws through their materials' `depth-only`
+   * pipelines.
+   *
+   * @remarks
+   * It rewinds the ring and rewrites the one `Frame` buffer, as a frame does, so the caller submits
+   * `encoder` before it encodes the next pass or frame: each layer is a submission of its own. A
+   * draw whose pipeline is still being made is left out, as from a frame.
+   *
+   * @param timestamps - The timestamp writes of a pass by its label, when it is timed.
+   */
+  encodeDepthLayer(
+    encoder: GPUCommandEncoder,
+    pass: DepthLayerPass,
+    output: DepthLayerOutput,
+    timestamps: (label: string) => GPURenderPassTimestampWrites | undefined,
+  ): void {
+    this.#ring.begin();
+    const draws = this.#resolveDraws(pass.draws, "depth-only", true);
+    this.#host.writeBuffer(this.#frameBuffer, 0, packFrame(pass, output.size));
+    this.#ring.upload();
+    const encoded = encoder.beginRenderPass({
+      label: pass.label,
+      colorAttachments: [],
+      depthStencilAttachment: {
+        view: output.depth,
+        depthLoadOp: "clear",
+        depthStoreOp: "store",
+        depthClearValue: 0,
+      },
+      ...optionalTimestamps(timestamps(pass.label)),
+    });
+    encoded.setBindGroup(0, this.#frameBindGroup);
+    for (const draw of draws) {
+      encodeDraw(encoded, draw, this.#ring.bindGroup(draw.slot));
+    }
+    encoded.end();
+  }
+
   /** Destroys the draw path's buffers. */
   dispose(): void {
     this.#ring.dispose();
@@ -437,12 +490,12 @@ export class Drawing {
   }
 
   #resolveDraws(
-    frame: FrameSubmission,
-    colourFormat: GPUTextureFormat,
+    draws: ReadonlyArray<DrawItem>,
+    colourFormat: PipelineColour,
     hasDepth: boolean,
   ): ResolvedDraw[] {
     const resolved: ResolvedDraw[] = [];
-    for (const draw of frame.draws) {
+    for (const draw of draws) {
       if ((draw.instanceCount ?? 1) === 0 && draw.indirect === undefined) {
         continue;
       }

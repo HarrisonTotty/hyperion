@@ -30,8 +30,16 @@
  * - **Memory.** The masks and maps are under `coarse-field-gpu` (R12 Design note 6); the
  *   session's report ({@link TerrainSession.memory}) gives the workers' copies of the fields, the
  *   pool's kept blocks and the session's own GPU bytes by category.
+ * - **The shadow cascades (R10.T9.b; Design note 11; decision-r10-t9b-design D2, D3 and D9).** The
+ *   session holds the engine's one set of cascades, on the high setting alone, made at the first
+ *   view-frame that draws them and let go at its teardown; the placeholder every lit draw binds
+ *   where no set exists; and the registry of casters that are not terrain
+ *   ({@link TerrainSession.shadowCasters}), all in one {@link TerrainShadows} that every lit pass
+ *   draws with. Each view's frame draws its cascades for the one body that takes them
+ *   (`LiveFrameTerrain.draws`), through its pass's `drawFor`, before its bodies pass.
  * - **The materials (R10.T14.d; decision-r10-t14a §1, decision-r10-t14d-stall).** The lit
- *   material, its depth material and the wireframe's, on the vertex paths of the setting it is
+ *   material, its depth material, on the high setting its caster into the shadow cascades
+ *   (R10.T9.b), and the wireframe's, on the vertex paths of the setting it is
  *   made for, are compiled as it is made and after each restore ({@link TerrainMaterialSet}),
  *   before any hand-over, so that a body's hand-over compiles nothing and the terrain draws on its
  *   frame; every pass draws with those handles, and the session releases them at its teardown.
@@ -148,6 +156,7 @@ import { unreachable } from "./patchKey";
 import { type BodyFigure, type BodyFixedVec3, planetGeometry } from "./planet";
 import { PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
 import { MAX_SELECTION_VIEWS } from "./select";
+import { type ShadowCasters, TerrainShadows } from "./shadows/terrainShadows";
 import { SurveyedCells } from "./surveyLookup";
 import {
   TerrainPass,
@@ -285,7 +294,9 @@ export interface TerrainSessionMemory {
   readonly keptFieldBytes: number;
   /**
    * The GPU bytes of the textures the session holds, by category, the engine's own texel sizes
-   * (`textureBytes`): its masks and maps under `coarse-field-gpu`.
+   * (`textureBytes`): its masks and maps under `coarse-field-gpu`, and on the high setting its
+   * shadow cascades under `shadows` while the set lives and their placeholder under `other`
+   * (R10.T9.b).
    */
   readonly gpuBytes: ReadonlyMap<MemoryCategory, number>;
 }
@@ -767,6 +778,8 @@ export class TerrainSession {
   readonly #engine: RenderEngine;
   /** The materials every pass draws with, compiled at its making on its setting (R10.T14.d). */
   readonly #materials: TerrainMaterialSet;
+  /** The shadow cascades every lit pass draws with, on the high setting (R10.T9.b). */
+  readonly #shadows: TerrainShadows;
   readonly #bodies = new Map<BodyIdHex, SessionBody>();
   readonly #reports = new Map<ViewId, TerrainViewReport>();
   /** Each handed-over body's pass (R10.T16.b), from its first hand-over to its field's release. */
@@ -836,9 +849,21 @@ export class TerrainSession {
         this.#restored();
       }),
     ];
+    // Makes nothing until a frame needs it and cannot throw; before any pass, so that its restore
+    // listener forgets the lost device's set before any pass's resources are made again.
+    this.#shadows = new TerrainShadows(options.engine, { cascades: options.setting === "high" });
     // Last, so that nothing before it can throw and leave it compiling, and before any pass, so that
     // its restore listener runs before any pass's resources' (`materialSet.ts`).
     this.#materials = new TerrainMaterialSet(options.engine, options.setting);
+  }
+
+  /**
+   * The registry of the shadow cascades' casters that are not terrain (plan R10, R10.T9.b;
+   * decision-r10-t9b-design D9): craft and R11's rocks add a provider of each cascade's draws, which
+   * every view's caster passes draw after the terrain's. Nothing in the app fills it yet.
+   */
+  get shadowCasters(): ShadowCasters {
+    return this.#shadows.casters;
   }
 
   /**
@@ -939,7 +964,9 @@ export class TerrainSession {
    * View `view`'s draw of `body`'s terrain this frame (R10.T16.b; R10.T16.c's `FrameTerrain`
    * calls it): its pass's `drawFor` with the view's `TerrainView` and lighting from its plan, or
    * `null` where no pass draws the body, or once the session is disposed. Call it after the
-   * frame's {@link TerrainSession.step}, once a view frame.
+   * frame's {@link TerrainSession.step}, once a view frame. On the high setting, for the body that
+   * takes the view's cascades (`input.takesCascades`, R10.T9.b), it draws them into the session's
+   * one set before it returns, so the view's bodies pass is drawn next.
    *
    * @throws RangeError if more contacts are given than the contact buffer holds.
    */
@@ -1228,16 +1255,21 @@ export class TerrainSession {
 
   /** The session's memory report: the fields' copies and its GPU bytes. */
   memory(): TerrainSessionMemory {
+    const gpuBytes = new Map(this.#textures.bytesByCategory());
+    for (const [category, bytes] of this.#shadows.bytesByCategory()) {
+      gpuBytes.set(category, (gpuBytes.get(category) ?? 0) + bytes);
+    }
     return {
       workerFieldBytes: this.#pool.fieldResidentBytes,
       keptFieldBytes: this.#pool.keptFieldBytes,
-      gpuBytes: this.#textures.bytesByCategory(),
+      gpuBytes,
     };
   }
 
   /**
    * Tears the session down, in order: its passes (their resources and meshes released, their lanes
-   * ended), the terrain's materials (R10.T14.d), the class-map store, the masks (with the detail
+   * ended), the terrain's materials (R10.T14.d), the shadow cascades and their placeholder
+   * (R10.T9.b), the class-map store, the masks (with the detail
    * seeds' requests and the session's listeners), the store (its requests cancelled and its fields
    * released) and the pool (its workers terminated). Nothing is left: no worker, request, timer,
    * listener or GPU handle.
@@ -1253,6 +1285,7 @@ export class TerrainSession {
     this.#passes.clear();
     this.#wirePasses.clear();
     this.#materials.dispose();
+    this.#shadows.dispose();
     this.#wireHanded.clear();
     this.#faultListeners.clear();
     this.#classMaps.dispose();
@@ -1595,6 +1628,10 @@ export class TerrainSession {
         survey: held.survey,
         // Compiled when the session was made, so that the hand-over compiles none (R10.T14.d).
         materials: this.#materials,
+        // The engine's one set of cascades, which every view draws into in turn (R10.T9.b), and
+        // the body's relief for their caster reach.
+        ...(shading === "lit" ? { shadows: this.#shadows } : {}),
+        reliefM: () => this.#store.header(body)?.realised_relief_m ?? null,
         // Each view's selection opened by its motion, so that no strip at its leading edge is
         // left unselected while its mask discards the reference surface there (S6).
         frustumMargin: "motion",

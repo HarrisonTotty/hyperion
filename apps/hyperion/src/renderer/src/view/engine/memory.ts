@@ -20,6 +20,8 @@
  *   byte a coarse cell a face (R10.T7, R10 Design note 12), and the disc's class map once R10.T10.d
  *   files it here; the fields themselves stay in the height workers.
  * - `height-cache`: the terrain's patch cache, its slot buffers and normals atlas (R05.T11.a).
+ * - `shadows`: the terrain's shadow cascades, one set of four 2,048² `depth32float` layers for the
+ *   engine, 64 MiB (R10.T9.b; R12's name, plan 12's `MemoryItem`).
  * - `sky-cube`: R06's baked star cube and the buffer of its scale (R06.T13.g).
  * - `sky-scratch`: the sky bake's transients, released when it ends (R06.T13.g).
  */
@@ -30,6 +32,7 @@ export type MemoryCategory =
   | "atmosphere-view"
   | "coarse-field-gpu"
   | "height-cache"
+  | "shadows"
   | "sky-cube"
   | "sky-scratch";
 

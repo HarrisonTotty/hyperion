@@ -5,17 +5,18 @@
  *
  * @remarks
  * Its variant comes in the query string: `default` runs the device as the adapter offers it,
- * `no-subgroups` requests it with subgroups withheld (T9.c). A fixture adds a broken shader to the
+ * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
+ * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in six parts, each a run of its own under the harness's watchdog (perf-smoke,
+ * groups are in seven parts, each a run of its own under the harness's watchdog (perf-smoke,
  * 2026-10-13), parts 2 to 6 the atmosphere's CPU-twin groups (R08.T6, R08.T7, R08.T9.b), part 4
- * with R05.T12.e's marches beside them and part 6 with R05.T12.c's frames, and part 1 every other;
- * with no part given the page runs them all, in its order. Each part checks its path (T9.c)
- * itself. R08.T6.f's slices and bands run in two groups in part 5: the Saturn-class figure's, and
- * Earth's, which took R08.T6.g's Earth; R08.T9.b's surface lighting in two in part 6, Earth's and
- * the Saturn-class figure's, and beside them R10.T10.b's lit terrain, R10.T10.c's survey edge,
- * R10.T16.c's frame, R10.T11's wireframe terrain and R10.T16.b's shared pass (on an engine of its
- * own, whose device it destroys), part 6 being the shortest.
+ * with R05.T12.e's marches beside them and part 6 with R05.T12.c's frames, part 7 R10's terrain
+ * groups, and part 1 every other; with no part given the page runs them all, in its order. Each
+ * part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups in part 5: the
+ * Saturn-class figure's, and Earth's, which took R08.T6.g's Earth; R08.T9.b's surface lighting in
+ * two in part 6, Earth's and the Saturn-class figure's; and part 7 R10.T10.b's lit terrain,
+ * R10.T10.c's survey edge, R10.T16.c's frame, R10.T11's wireframe terrain, R10.T9.b's cascades and
+ * R10.T16.b's shared pass (on an engine of its own, whose device it destroys).
  */
 
 import { WGSL_CATALOGUE } from "../view/engine/catalogue";
@@ -45,6 +46,7 @@ import {
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
 import { checkBloom } from "./bloom";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
+import { checkDepthLayers } from "./depthLayers";
 import { captureEclipse, checkEclipse } from "./eclipse";
 import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvases } from "./frames";
 import { Checks } from "./harness";
@@ -67,7 +69,7 @@ import { checkTwins } from "./twins";
 import { checkSpatialStrokeContrast } from "./spatial";
 import { checkStrokeContrast } from "./strokeContrast";
 import { checkWireframe } from "./wireframe";
-import { checkSharedPass } from "./sharedPass";
+import { checkShadowCascades, checkSharedPass } from "./sharedPass";
 import { checkTerrainFrame } from "./terrainFrame";
 import { checkWireframeTerrain } from "./wireframeTerrain";
 import { checkForcedLoss, checkOneLayerArrays, checkTargetsAsyncIndirectTiming } from "./work";
@@ -83,22 +85,37 @@ interface Report {
   readonly images?: ReadonlyArray<CapturedImage>;
 }
 
-/** The page's variants and the capabilities each withholds. */
+/**
+ * The page's variants and the capabilities each withholds.
+ *
+ * @remarks
+ * `no-subgroups` also withholds `depth-clip-control` (plan R10, R10.T9.b): SwiftShader offers it
+ * in `just test-render` (the depth-layers group logs "depth-clip-control yes"), as R01's record of
+ * its engine task has it ("the rest present") and `platform.test.ts`' `SWIFTSHADER_FEATURES` now
+ * does, so the default run takes the shadow cascades' unclipped path, `unclippedDepth` pancaking the
+ * casters in front, and `no-subgroups` the pulled-back near plane that every adapter without the
+ * feature takes (decision-r10-t9b-design D2).
+ */
 const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
   default: undefined,
-  "no-subgroups": { withholdSubgroups: true, withholdShaderF16: false },
+  "no-subgroups": {
+    withholdSubgroups: true,
+    withholdShaderF16: false,
+    withholdDepthClipControl: true,
+  },
 };
 
 /**
  * A part of the page's groups, each about a fifth of the page's time: 2 to 6 the atmosphere's
  * CPU-twin groups (R08.T6, R08.T7, R08.T9.b), whose twins outweigh their GPU work (2 R08.T6.b's, 3
  * R08.T6.g's and R08.T6.i's, 4 R08.T7's, 5 R08.T6.f's Saturn-class figure and Earth, 6 R08.T9.b's
- * Earth and Saturn-class figure), and 1 every other group but R05.T12.e's and R05.T12.c's frames,
- * which parts 4 and 6 run first, before their twins start, to even the parts out (R08.T9.b's
- * lit materials, larger, took part 1 past 150 s under load); part 1 also takes the captures, when
- * asked, under the same watchdog.
+ * Earth and Saturn-class figure), 7 R10's terrain groups (R10.T10.b, T10.c, T11, T16 and T9.b),
+ * which took part 6 to 163 s at a load of 2 once R10.T9.b's cascades joined them (2026-10-21), and
+ * 1 every other group but R05.T12.e's and R05.T12.c's frames, which parts 4 and 6 run first, before
+ * their twins start, to even the parts out (R08.T9.b's lit materials, larger, took part 1 past
+ * 150 s under load); part 1 also takes the captures, when asked, under the same watchdog.
  */
-type PagePart = 1 | 2 | 3 | 4 | 5 | 6;
+type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -118,6 +135,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 5;
     case "6":
       return 6;
+    case "7":
+      return 7;
     default:
       return null;
   }
@@ -238,6 +257,9 @@ async function run(
   await group(1, "T9.a clear and triangle", () => checkClearAndTriangle(engine, checks));
   await group(1, "T9.d three canvases", () => checkThreeCanvases(engine, checks));
   await group(1, "T9.f depth, culling and bias", () => checkDepthCullBias(engine, checks));
+  await group(1, "R10.T9.b depth layers and a comparison sampler", () =>
+    checkDepthLayers(engine, checks),
+  );
   await group(1, "T9.g blending, compute and the packed cube", () =>
     checkBlendComputeCube(engine, checks),
   );
@@ -298,12 +320,14 @@ async function run(
   await group(6, "R08.T9.b surface lighting on a Saturn-class figure", () =>
     checkSurfaceLightingSaturn(engine, checks, twins),
   );
-  await group(6, "R10.T10.b the lit terrain", () => checkLitTerrain(engine, checks));
-  await group(6, "R10.T10.c the survey edge", () => checkSurveyEdge(engine, checks));
-  await group(6, "R10.T16 the frame", () => checkTerrainFrame(engine, checks));
-  await group(6, "R10.T11 the wireframe's terrain", () => checkWireframeTerrain(engine, checks));
+  await group(7, "R10.T10.b the lit terrain", () => checkLitTerrain(engine, checks));
+  await group(7, "R10.T10.c the survey edge", () => checkSurveyEdge(engine, checks));
+  await group(7, "R10.T16 the frame", () => checkTerrainFrame(engine, checks));
+  await group(7, "R10.T11 the wireframe's terrain", () => checkWireframeTerrain(engine, checks));
+  // On the page's engine, whose variant decides the cascades' capability path (R10.T9.b).
+  await group(7, "R10.T9.b the high setting's cascades", () => checkShadowCascades(engine, checks));
   // On an engine of its own, whose device it destroys mid-stream (R10.T16.b).
-  await group(6, "R10.T16 the shared pass", async () => {
+  await group(7, "R10.T16 the shared pass", async () => {
     const second = await requestAdapterOutcome(navigator.gpu);
     if (second.kind !== "adapter") {
       throw new Error(`no second adapter: ${second.kind}`);

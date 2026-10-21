@@ -53,6 +53,7 @@ import { CLASS_MAP_LEVEL, classMapLawsOf } from "./classMap";
 import { CoverageView, fieldCellIndex } from "./coverage";
 import { uvToSt } from "./cube";
 import {
+  cascadeBodyIndex,
   type FrameTerrainPass,
   LiveFrameTerrain,
   morePressingAnnunciation,
@@ -81,6 +82,8 @@ import { contourInterval } from "./terrainWire";
 import { type BakedPatch, PALETTE_NONE, PHOTOMETRY_STRIDE } from "./workers/messages";
 
 const BODY: BodyIdHex = "0200080020000000.0301";
+/** A second body of the system, handed over beside the first. */
+const OTHER_BODY: BodyIdHex = "0200080020000000.0302";
 const VIEW = viewId("primary");
 const INSTRUMENT = viewId("instrument 1");
 
@@ -378,6 +381,7 @@ function fakeSource(
     missing: false,
     standingIn: false,
     maskReady: true,
+    cascades: null,
   };
   return {
     drawn,
@@ -409,6 +413,55 @@ function frameTerrain(source: ViewTerrainSource): LiveFrameTerrain {
   });
 }
 
+/**
+ * A body's view from `cameraM`, the camera from its centre along the galactic axes, its own axes
+ * turned by `rotation`.
+ */
+function viewOf(
+  cameraM: Vec3,
+  rotation: Rotation3 = IDENTITY_ROTATION,
+): { readonly rotation: Rotation3; readonly cameraM: Vec3 } {
+  return { rotation, cameraM };
+}
+
+describe("the body that takes a view's cascades (R10.T9.b; decision-r10-t9b-design D3)", () => {
+  /** An Earth-sized spheroid, m. */
+  const OBLATE = { equatorialRadiusM: 6_378_137, polarRadiusM: 6_356_752 };
+
+  it("is the one over whose datum the camera stands lowest, by the height along its normal", () => {
+    expect(
+      cascadeBodyIndex([
+        { figure: FIGURE, view: viewOf(vec3(0, 0, A + 900)) },
+        // 500 m over the spheroid's pole, though 6,357 km from its centre.
+        { figure: OBLATE, view: viewOf(vec3(0, 0, OBLATE.polarRadiusM + 500)) },
+        { figure: FIGURE, view: viewOf(vec3(A + 700, 0, 0)) },
+      ]),
+    ).toBe(1);
+  });
+
+  it("is found in the body-fixed axes, the camera turned by each body's rotation", () => {
+    // 1 km over the pole as it stands; under CYCLIC the same place is body-fixed +y, on the
+    // equator, 20 km under the datum there.
+    const camera = vec3(0, 0, OBLATE.polarRadiusM + 1_000);
+    expect(
+      cascadeBodyIndex([
+        { figure: OBLATE, view: viewOf(camera) },
+        { figure: OBLATE, view: viewOf(camera, CYCLIC) },
+      ]),
+    ).toBe(1);
+  });
+
+  it("goes to the first in the plan's order at a tie, and is none with no body", () => {
+    expect([
+      cascadeBodyIndex([
+        { figure: FIGURE, view: viewOf(vec3(0, 0, A + 50)) },
+        { figure: FIGURE, view: viewOf(vec3(A + 50, 0, 0)) },
+      ]),
+      cascadeBodyIndex([]),
+    ]).toEqual([0, -1]);
+  });
+});
+
 describe("a view's frame terrain (R10.T16.c)", () => {
   it("draws each body its plan hands over, from the plan's body and its record's lights", () => {
     const { plan, body } = handed();
@@ -435,10 +488,46 @@ describe("a view's frame terrain (R10.T16.c)", () => {
           sunDirectionBodyFixed,
           sunIlluminanceLx,
           exposureScale: EXPOSURE,
+          // The one body handed over takes the view's cascades (R10.T9.b, D3).
+          takesCascades: true,
           nowMs: 1_234,
         },
       },
     ]);
+  });
+
+  it("gives the view's cascades to the body over whose datum the camera stands lowest, and not the other (R10.T9.b, D3)", () => {
+    const near = bodyAt(3 * A);
+    const other = bodyAt(5 * A, { id: OTHER_BODY, centreM: vec3(2.5 * A, 0, -5 * A) });
+    // The farther first, so that the plan's order alone would choose it.
+    const plan = planLitBodies(
+      [other, near],
+      [{ disc: sunLikeHostDisc(), centreM: add(near.centreM, scale(SUN, AU_M)) }],
+      OPTIONS,
+      new Map(),
+    );
+    const { source, drawn } = fakeSource();
+    frameTerrain(source).draws(plan, [other, near]);
+    expect(Object.fromEntries(drawn.map(({ body, input }) => [body, input.takesCascades]))).toEqual(
+      { [BODY]: true, [OTHER_BODY]: false },
+    );
+  });
+
+  it("gives the view's cascades to the lowest body a pass draws, past a lower one with no pass (R10.T9.b, D3)", () => {
+    // The nearer, lower body has no pass in the source, so its draw is none.
+    const unpassed = bodyAt(3 * A, { id: OTHER_BODY });
+    const passed = bodyAt(5 * A, { centreM: vec3(2.5 * A, 0, -5 * A) });
+    const plan = planLitBodies(
+      [passed, unpassed],
+      [{ disc: sunLikeHostDisc(), centreM: add(unpassed.centreM, scale(SUN, AU_M)) }],
+      OPTIONS,
+      new Map(),
+    );
+    const { source, drawn } = fakeSource();
+    frameTerrain(source).draws(plan, [passed, unpassed]);
+    expect(Object.fromEntries(drawn.map(({ body, input }) => [body, input.takesCascades]))).toEqual(
+      { [BODY]: true, [OTHER_BODY]: false },
+    );
   });
 
   it("draws no terrain of a body its plan draws as a disc", () => {
@@ -880,6 +969,7 @@ function wireSource(bodies: ReadonlyMap<BodyIdHex, WireBody>): {
               missing: false,
               standingIn: false,
               maskReady: true,
+              cascades: null,
               ...each.frame,
             };
       },

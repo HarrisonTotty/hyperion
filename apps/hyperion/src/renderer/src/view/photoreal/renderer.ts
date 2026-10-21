@@ -104,6 +104,12 @@ export interface FrameTerrain {
    * `MeshBodyPlan` whose `role` is `handed-over`, its record its lights), opaque with depth, drawn
    * in the `bodies` pass after the mesh bodies' figures; none for a body with nothing resident.
    *
+   * @remarks
+   * On the high setting it submits the view's shadow cascades' four caster passes, for the body
+   * that takes them, before it returns (plan R10, R10.T9.b; decision-r10-t9b-design D1 and D3): it
+   * is called as the `bodies` pass is built, and that pass is rendered next, so that its resolve
+   * times them and the terrain's draws read the layers they drew.
+   *
    * @param bodies - The frame's lit bodies, which the plan was made from: each handed-over body's
    *   terrain is drawn with the rotation and centre the plan drew its figure with (R10.T16.c).
    */
@@ -476,7 +482,10 @@ export class PhotorealRenderer {
       size: { widthPx: viewport.widthPx, heightPx: viewport.heightPx },
     });
     // The mesh bodies' figures, with depth, before the sequence, then the terrain of the bodies
-    // handed over to it over them; no pass where there are none.
+    // handed over to it over them; no pass where there are none. On the high setting the terrain's
+    // draws submit the view's shadow cascades first (R10.T9.b's `terrain shadows`), whose times
+    // ride this pass's resolve: nothing is rendered between them and it. A frame whose terrain
+    // draws nothing submits none, so the pass always follows them.
     const meshes = [
       ...this.#bodies.meshDraws(plan),
       ...(frame.terrain?.draws(plan, frame.bodies) ?? []),

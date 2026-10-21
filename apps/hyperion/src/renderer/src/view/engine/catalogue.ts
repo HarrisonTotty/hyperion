@@ -32,18 +32,35 @@ import { DISC_MATERIAL } from "../sky/disc";
 import { SKY_SPRITE_HDR_MATERIAL } from "../sky/spriteHdr";
 import { LIT_AGX_MATERIAL } from "../spike/litView";
 import { TERRAIN_MATERIALS } from "../terrain/gpu/material";
-import { TERRAIN_DEPTH_MATERIALS, TERRAIN_LIT_MATERIALS } from "../terrain/terrainMaterial";
+import {
+  TERRAIN_DEPTH_MATERIALS,
+  TERRAIN_LIT_MATERIALS,
+  TERRAIN_SHADOW_MATERIALS,
+} from "../terrain/terrainMaterial";
 import { TERRAIN_WIRE_MATERIALS } from "../terrain/terrainWire";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import { SUBGROUP_TWINS } from "./twins";
-import type { PointSplatSpec, WgslMaterialSpec, WgslPostProcessSpec } from "./types";
+import type {
+  PointSplatSpec,
+  RenderTargetFormat,
+  WgslMaterialSpec,
+  WgslPostProcessSpec,
+} from "./types";
 
 /** A named rendering setting at which the harness renders an entry. */
 export type CatalogueSetting = "default";
 
 /** One shader the harness renders. */
 export type CatalogueEntry = (
-  | { readonly kind: "material"; readonly spec: WgslMaterialSpec }
+  | {
+      readonly kind: "material";
+      readonly spec: WgslMaterialSpec;
+      /**
+       * The targets its pipelines are compiled for; `rgba16float` alone when absent. A caster into
+       * a depth-only target (R10.T9.b's shadow cascades) names `depth-only`, which has no colour.
+       */
+      readonly targets?: ReadonlyArray<RenderTargetFormat>;
+    }
   | { readonly kind: "post-process"; readonly spec: WgslPostProcessSpec }
   | { readonly kind: "compute"; readonly spec: KernelPair }
   // R06.T13.h: R06's bake splat, compiled by the harness through `createPointSplatAsync`.
@@ -102,16 +119,24 @@ const ATMOSPHERE_VIEW_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 /**
  * R05.T11.b's terrain pass, one material per vertex path, T11.c's lit view's display pass,
  * R10.T10.b's lit terrain, one material per vertex path, R10.T16.c's lit terrain as depth
- * alone for the symbology's pass, one per vertex path, and R10.T11's wireframe terrain, one per
- * vertex path.
+ * alone for the symbology's pass, one per vertex path, R10.T11's wireframe terrain, one per
+ * vertex path, and R10.T9.b's shadow casters, one per vertex path, for the cascades' `depth-only`
+ * layers.
  */
 const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
-  ...TERRAIN_MATERIALS,
-  LIT_AGX_MATERIAL,
-  ...TERRAIN_LIT_MATERIALS,
-  ...TERRAIN_DEPTH_MATERIALS,
-  ...TERRAIN_WIRE_MATERIALS,
-].map((spec) => ({ kind: "material", spec }));
+  ...[
+    ...TERRAIN_MATERIALS,
+    LIT_AGX_MATERIAL,
+    ...TERRAIN_LIT_MATERIALS,
+    ...TERRAIN_DEPTH_MATERIALS,
+    ...TERRAIN_WIRE_MATERIALS,
+  ].map((spec): CatalogueEntry => ({ kind: "material", spec })),
+  ...TERRAIN_SHADOW_MATERIALS.map((spec): CatalogueEntry => ({
+    kind: "material",
+    spec,
+    targets: ["depth-only"],
+  })),
+];
 
 /**
  * R01's point splat as the harness's blending check draws it (R01.T9.i): the catalogue's one

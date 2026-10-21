@@ -4,6 +4,7 @@ import { CLEAR_COLOUR } from "../engine/webgpu/drawing";
 import { HDR_COLOUR_FORMAT } from "../photometry/toneCurve";
 import { METER_CLASS } from "../post/meter";
 import { QUALITY_SETTINGS } from "../quality/qualitySetting";
+import { TERRAIN_PASS_LABEL, TERRAIN_SHADOW_PASS_LABEL } from "../terrain/gpu/material";
 import { PHOTOREAL_PASS_LABELS, photorealisticPasses } from "./passes";
 import { sceneTargetSpec } from "./sceneTarget";
 import { aCameraScene } from "../../test/viewFixtures";
@@ -31,9 +32,22 @@ describe("photorealisticPasses", () => {
 
   it("puts the disc cells between the sky and the discs, before the mesh bodies that read them (R07.T8.d)", () => {
     const labels = photorealisticPasses("high").passes.map((pass) => pass.label);
-    expect(labels.slice(0, 3)).toEqual(["sky", "disc cells", "bodies"]);
+    expect(labels.slice(0, 2)).toEqual(["sky", "disc cells"]);
+    expect(labels.indexOf("disc cells")).toBeLessThan(labels.indexOf("bodies"));
     expect(labels.indexOf("disc cells")).toBeLessThan(labels.indexOf("discs"));
   });
+
+  it.each(QUALITY_SETTINGS)(
+    "puts R10's terrain shadows, built, just before the bodies and the terrain on %s (R10.T9.b)",
+    (setting) => {
+      const passes = photorealisticPasses(setting).passes;
+      const labels = passes.map((pass) => pass.label);
+      const at = labels.indexOf(TERRAIN_SHADOW_PASS_LABEL);
+      expect(passes[at]).toEqual({ label: "terrain shadows", owner: "R10", built: true });
+      expect(labels.slice(at, at + 2)).toEqual([TERRAIN_SHADOW_PASS_LABEL, "bodies"]);
+      expect(at).toBeLessThan(labels.indexOf(TERRAIN_PASS_LABEL));
+    },
+  );
 
   it("leaves the slots of plans not yet built empty, R06's sky built (R07.T8.a)", () => {
     const empty = photorealisticPasses("high").passes.filter((pass) => !pass.built);

@@ -19,6 +19,19 @@
  *
  * A buffer or texture beyond the device's limits, or a write outside one, raises an uncaptured
  * validation error, which the harness's main process counts against the run.
+ *
+ * Beside it, on the page's own engine, whose variant decides the capability path, the high
+ * setting's shadow cascades (plan R10, R10.T9.b; decision-r10-t9b-design D2): one high-setting
+ * pass with cascades of its own streams a view 40 m over the fixture's ground under the centre
+ * patch, looking west 20° below the horizon, the sun 12° up in the east, and draws one frame with
+ * its body taking the cascades. It checks that the four caster passes are drawn at w > 0, the
+ * nearest with the terrain's draw, on the path the device's `depth-clip-control` gives (logged:
+ * unclipped, or pulled back); that `shadows` holds 67,108,864 B while the set lives and its figure
+ * from before once it is let go; and that the frame is finite at every texel, darker than the same
+ * draw at w = 0 at some (the cascades shadow something the horizon map does not: 585 of 2,108
+ * terrain texels on SwiftShader with the cascades fitted to the disc's centre, before
+ * decision-r10-t9b-penumbra's fit to its top edge, which leaves only where the two disagree) and
+ * nowhere brighter, since the minimum never brightens.
  */
 
 import { withTemplateCurve } from "../view/appearance/phase";
@@ -28,13 +41,15 @@ import { quaternionFromRows } from "../view/camera/quaternion";
 import { viewId } from "../view/camera/state";
 import { IDENTITY_ROTATION } from "../view/coords/rotation";
 import type { MemoryCategory } from "../view/engine/memory";
-import type { RenderEngine } from "../view/engine/types";
+import type { DrawItem, RenderEngine } from "../view/engine/types";
 import { annulusEdges } from "../view/lighting/annuli";
 import { TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
 import { vertexDir } from "../view/terrain/cube";
 import { allocationTally } from "../view/terrain/gpu/allocationTally";
 import type { PatchKey } from "../view/terrain/patchKey";
 import { planetGeometry, spheroidNormal, surfacePoint } from "../view/terrain/planet";
+import { CASCADE_BYTES, CASCADE_MEMORY_CATEGORY } from "../view/terrain/shadows/cascades";
+import { TerrainShadows } from "../view/terrain/shadows/terrainShadows";
 import { SurveyedCells } from "../view/terrain/surveyLookup";
 import type { TerrainLighting } from "../view/terrain/terrainMaterial";
 import {
@@ -72,6 +87,7 @@ const CATEGORIES: ReadonlyArray<MemoryCategory> = [
   "atmosphere-view",
   "coarse-field-gpu",
   "height-cache",
+  "shadows",
   "sky-cube",
   "sky-scratch",
 ];
@@ -120,7 +136,14 @@ const MOON_LIKE_FIGURE = { ...MOON_LIKE, pole: null };
  */
 function viewOver(heightM: number, depressionDeg: number, headingDeg: number): TerrainView {
   const dir = vertexDir(CENTRE, 32, 32);
-  const camera = vector(surfacePoint(MOON_LIKE_FIGURE, dir, heightM));
+  return viewFrom(vector(surfacePoint(MOON_LIKE_FIGURE, dir, heightM)), depressionDeg, headingDeg);
+}
+
+/**
+ * A view from `camera`, body-fixed, looking `depressionDeg` below the centre patch's horizon
+ * towards a heading `headingDeg` east of north.
+ */
+function viewFrom(camera: Xyz, depressionDeg: number, headingDeg: number): TerrainView {
   const { nu, east, north } = frameOverCentre();
   const h = (headingDeg * Math.PI) / 180;
   const ahead = along(north, Math.cos(h), east, Math.sin(h));
@@ -143,18 +166,19 @@ function viewOver(heightM: number, depressionDeg: number, headingDeg: number): T
 }
 
 /**
- * The views' lights: a Sun-like star 40° from the zenith towards the east, at 1 au (IAU 2012 B2's
- * 1.495978707 × 10¹¹ m) with the Sun's nominal radius (IAU 2015 B3's 6.957 × 10⁸ m) and about the
- * Sun's illuminance at 1 au, relative to the centre ÷ a, body-fixed, as the lit-terrain check's.
+ * The views' lights: a Sun-like star `elevationRad` above the centre patch's horizon towards the
+ * east, 40° from the zenith by default, at 1 au (IAU 2012 B2's 1.495978707 × 10¹¹ m) with the
+ * Sun's nominal radius (IAU 2015 B3's 6.957 × 10⁸ m) and about the Sun's illuminance at 1 au,
+ * relative to the centre ÷ a, body-fixed, as the lit-terrain check's.
  */
-function lighting(): TerrainLighting {
+function lighting(elevationRad = Math.PI / 2 - 0.7): TerrainLighting {
   const a = MOON_LIKE.equatorialRadiusM;
   const { nu, east } = frameOverCentre();
   const annuli = annulusEdges(0.6, 0.2, 2);
   return {
     lights: [
       {
-        direction: unit(along(nu, Math.cos(0.7), east, Math.sin(0.7))),
+        direction: unit(along(nu, Math.sin(elevationRad), east, Math.cos(elevationRad))),
         distance: 1.495978707e11 / a,
         radius: 6.957e8 / a,
         illuminance: [1.3e5, 1.25e5, 1.2e5],
@@ -424,4 +448,261 @@ export async function checkSharedPass(
 /** Fails the check where a frame it needs is missing. */
 function fail(): never {
   throw new Error("a view's frame is missing");
+}
+
+/** The cascades' camera's height above the fixture's ground under it, m (D2: a few to 100 m). */
+const CASCADES_HEIGHT_M = 40;
+
+/** The cascades' view's depression below the horizon and heading, west, away from the sun, °. */
+const CASCADES_DEPRESSION_DEG = 20;
+const CASCADES_HEADING_DEG = 270;
+
+/** The sun's elevation in the cascades' frame, towards the east, rad: 12°, low, so shadows are long. */
+const CASCADES_SUN_RAD = (12 * Math.PI) / 180;
+
+/** How long the cascades' pass may stream before its frame is drawn, ms (part 7's watchdog). */
+const CASCADES_STREAM_MS = 25_000;
+
+/**
+ * The fixture's realised relief, m: the worker golden's `realised_relief_m`, 14,921.5 m (plan 10,
+ * R10.T9.a's figures, S6), for the cascades' caster reach.
+ */
+const MOON_LIKE_RELIEF_M = 14_921.5;
+
+/** How much brighter than at w = 0 a texel of the frame with cascades may be, relative. */
+const NEVER_BRIGHTER = 1e-3;
+
+/** `view`'s frame inputs under `light`, its body taking the cascades or not. */
+function frameInput(
+  view: TerrainView,
+  light: TerrainLighting,
+  takesCascades: boolean,
+  nowMs: number,
+): Parameters<TerrainPass["drawFor"]>[1] {
+  return {
+    view,
+    sunDirectionBodyFixed: light.lights[0]?.direction ?? { x: 0, y: 0, z: 1 },
+    sunIlluminanceLx: [1.3e5, 1.3e5, 1.3e5],
+    exposureScale: light.exposureScale,
+    lighting: light,
+    takesCascades,
+    nowMs,
+  };
+}
+
+/** `draws` drawn from `view` into a frame of their own, read back four channels a texel. */
+async function texelsOf(
+  engine: RenderEngine,
+  name: string,
+  view: TerrainView,
+  draws: ReadonlyArray<DrawItem>,
+): Promise<Float32Array> {
+  const target = engine.createRenderTarget({
+    name,
+    size: FRAME,
+    format: "rgba16float",
+    mips: 1,
+    depth: true,
+    category: "render-targets",
+  });
+  try {
+    target.render({
+      label: name,
+      viewRotation: viewRotation4(view.orientation),
+      projection: projection(FRAME.widthPx / FRAME.heightPx),
+      draws,
+      postProcesses: [],
+    });
+    return halfTexels(await engine.readTexture(target.colour));
+  } finally {
+    target.dispose();
+  }
+}
+
+/**
+ * The frame with cascades against the same draw at w = 0, over the texels both draw as terrain:
+ * how many, how many are darker by more than {@link NEVER_BRIGHTER}, and the most any is brighter,
+ * relative, a channel under a millionth of the frame's brightest taken at that millionth.
+ */
+function againstUnshadowed(
+  shadowed: Float32Array,
+  open: Float32Array,
+): { readonly terrain: number; readonly darker: number; readonly brighter: number } {
+  let brightest = 0;
+  for (let p = 0; p < FRAME.widthPx * FRAME.heightPx; p += 1) {
+    brightest = Math.max(brightest, open[4 * p] ?? 0, open[4 * p + 1] ?? 0, open[4 * p + 2] ?? 0);
+  }
+  const floor = Math.max(1e-6 * brightest, Number.MIN_VALUE);
+  let terrain = 0;
+  let darker = 0;
+  let brighter = 0;
+  for (let p = 0; p < FRAME.widthPx * FRAME.heightPx; p += 1) {
+    const meter = open[4 * p + 3];
+    if (meter !== 2 && meter !== 3) {
+      continue;
+    }
+    terrain += 1;
+    let dark = false;
+    for (let c = 0; c < 3; c += 1) {
+      const lit = Math.max(open[4 * p + c] ?? Number.NaN, floor);
+      const seen = shadowed[4 * p + c] ?? Number.NaN;
+      brighter = Math.max(brighter, (seen - lit) / lit);
+      dark ||= seen < lit * (1 - NEVER_BRIGHTER);
+    }
+    darker += dark ? 1 : 0;
+  }
+  return { terrain, darker, brighter };
+}
+
+/** R10.T9.b's cascades on the high setting: see the module's remarks. */
+export async function checkShadowCascades(engine: RenderEngine, checks: Checks): Promise<void> {
+  const unclipped = engine.capabilities.depthClipControl;
+  const path = unclipped
+    ? "unclipped: depth-clip-control, the casters pancaked"
+    : "pulled back: no depth-clip-control, the near plane at the caster reach";
+  const field = moonLikeFixture("first");
+  const tally = allocationTally(engine);
+  const pool = new HeightWorkerPool({
+    workers: 2,
+    createWorker: () =>
+      new Worker(new URL("../view/terrain/workers/height.worker.ts", import.meta.url), {
+        type: "module",
+      }),
+  });
+  const survey = new SurveyedCells();
+  const offChange = pool.onFieldChange((change) => {
+    survey.add(change);
+  });
+  const before = tally.liveBytes(CASCADE_MEMORY_CATEGORY);
+  const shadows = new TerrainShadows(engine, { cascades: true });
+  let pass: TerrainPass | null = null;
+  try {
+    field.blocks.forEach((block, n) => {
+      if (n === 0) {
+        pool.fieldInit(field.body, block);
+      } else {
+        pool.fieldChunk(field.body, block);
+      }
+    });
+    const held = await until(
+      () => pool.fieldBlocks(field.body)?.reported === field.blocks.length,
+      FIELD_TIMEOUT_MS,
+    );
+    if (!held) {
+      throw new Error("the workers did not take the fixture's blocks in time");
+    }
+    // The field's own ground under the centre patch, along the datum's normal, which the drawn
+    // ground converges on as the finer bakes land.
+    const { nu } = frameOverCentre();
+    const ground = await pool.groundReadout(field.body, field.seed, {
+      originM: vector(surfacePoint(MOON_LIKE_FIGURE, vertexDir(CENTRE, 32, 32), 20_000)),
+      direction: { x: -nu.x, y: -nu.y, z: -nu.z },
+      maxM: 40_000,
+      slopeBaselineM: 2,
+      padWidthM: 1,
+      seasonMeanAnomalyRad: undefined,
+    });
+    if (ground?.kind !== "ground") {
+      throw new Error(`the cascades' pose has no ground under it: ${ground?.kind ?? "no field"}`);
+    }
+    const view = viewFrom(
+      along(vector(ground.sight.hitM), 1, nu, CASCADES_HEIGHT_M),
+      CASCADES_DEPRESSION_DEG,
+      CASCADES_HEADING_DEG,
+    );
+    const made = new TerrainPass({
+      engine,
+      setting: "high",
+      terrain: { ...TERRAIN_SETTINGS.high, cacheBytes: CACHE_BYTES },
+      planet: planetGeometry(MOON_LIKE_FIGURE, pool.fieldLevels(field.body)),
+      source: { kind: "body", body: field.body, detailSeed: field.seed, weights: "baked" },
+      createPool: (bake) => pool.lane(bake),
+      survey,
+      shadows,
+      reliefM: () => MOON_LIKE_RELIEF_M,
+    });
+    pass = made;
+    await made.ready();
+    const passView: TerrainPassView = {
+      id: viewId("cascades"),
+      view,
+      tauPx: TERRAIN_SETTINGS.high.tauPx,
+      weight: 1,
+    };
+    const light = lighting(CASCADES_SUN_RAD);
+    // Streamed without the cascades, so that SwiftShader rasterises their 2,048² layers once.
+    const started = performance.now();
+    let settled = false;
+    while (!settled && performance.now() - started < CASCADES_STREAM_MS) {
+      made.step({ views: [passView], grounded: [] });
+      const streaming = made.drawFor(
+        passView.id,
+        frameInput(view, light, false, performance.now()),
+      );
+      settled = !streaming.missing && !streaming.standingIn && streaming.draw !== null;
+      if (!settled) {
+        // The workers bake and the engine answers on the event loop, between the polls.
+        // oxlint-disable-next-line no-await-in-loop
+        await pause(50);
+      }
+    }
+    made.step({ views: [passView], grounded: [] });
+    const frame = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
+    const living = tally.liveBytes(CASCADE_MEMORY_CATEGORY) - before;
+    const cascades = frame.cascades;
+    const passes = cascades?.passes ?? [];
+    const draws = passes.map((each) => each.draws.length);
+    const weight = cascades?.set.weight ?? 0;
+    checks.check(
+      "R10.T9.b on the high setting near the ground the four caster passes are drawn at w > 0, the nearest with the terrain",
+      frame.draw !== null &&
+        weight > 0 &&
+        passes.length === 4 &&
+        passes.every((each, n) => each.layer === n) &&
+        (draws[0] ?? 0) >= 1 &&
+        cascades?.set.unclippedDepth === unclipped,
+      `${path}; settled ${String(settled)} in ${((performance.now() - started) / 1_000).toFixed(1)} s; w ${weight.toFixed(3)}, shadowed range ${(cascades?.set.rangeM ?? 0).toFixed(0)} m, cascade 1's texel ${((cascades?.set.cascades[0].texelM ?? 0) * 100).toFixed(2)} cm, caster reach ${((cascades?.set.casterReachM ?? 0) / 1_000).toFixed(1)} km; draws per cascade ${draws.join(", ")}`,
+    );
+    const draw = frame.draw;
+    if (draw === null) {
+      throw new Error("the cascades' view drew no terrain");
+    }
+    // The receiver's read as drawn, then the same draw at w = 0, before any other draws the set.
+    const shadowed = await texelsOf(engine, "cascades: shadowed", view, [draw]);
+    const axis = draw.uniforms["cascadeViewAxis"] ?? new Float32Array(4);
+    const open = await texelsOf(engine, "cascades: w = 0", view, [
+      {
+        ...draw,
+        uniforms: {
+          ...draw.uniforms,
+          cascadeViewAxis: Float32Array.of(axis[0] ?? 0, axis[1] ?? 0, axis[2] ?? 0, 0),
+        },
+      },
+    ]);
+    const finite = shadowed.every(Number.isFinite) && open.every(Number.isFinite);
+    const seen = againstUnshadowed(shadowed, open);
+    checks.check(
+      "R10.T9.b the frame with cascades is finite at every texel, darker at some and nowhere brighter than at w = 0",
+      finite &&
+        seen.terrain >= 0.3 * FRAME.widthPx * FRAME.heightPx &&
+        seen.darker > 0 &&
+        seen.brighter <= NEVER_BRIGHTER,
+      `${path}; finite ${String(finite)}; terrain ${String(seen.terrain)} texels, ${String(seen.darker)} darker under the cascades, the most brighter ${seen.brighter.toExponential(2)} (at most ${String(NEVER_BRIGHTER)})`,
+    );
+    made.dispose();
+    pass = null;
+    shadows.dispose();
+    const after = tally.liveBytes(CASCADE_MEMORY_CATEGORY);
+    checks.check(
+      "R10.T9.b the cascades' 67,108,864 B are counted under shadows while they live, and released after",
+      living === CASCADE_BYTES && after === before,
+      `${path}; shadows ${String(before)} B before, ${String(before + living)} B while the set lived (${String(living)} B, expected ${String(CASCADE_BYTES)} B), ${String(after)} B after`,
+    );
+  } finally {
+    pass?.dispose();
+    shadows.dispose();
+    offChange();
+    pool.terminate();
+    tally.dispose();
+  }
 }

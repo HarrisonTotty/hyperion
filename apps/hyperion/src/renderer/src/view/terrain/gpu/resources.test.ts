@@ -923,6 +923,38 @@ describe("the terrain's resources", () => {
     engine.restore();
     expect(rebuilt).toBe(0);
   });
+
+  it("write a shadow cascade's casters into the view's buffer for it (R10.T9.b)", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84);
+    const records = new InstanceRecords(2);
+    records.pushXyz(3, 1, 2, 3, 0, 1);
+    records.pushXyz(4, 4, 5, 6, 0, 1);
+    resources.writeCasters("primary", 3, records);
+    const write = engine.writes.at(-1);
+    expect([write?.buffer, write?.offsetBytes, [...(write?.data ?? [])]]).toEqual([
+      "terrain casters (primary) 4",
+      0,
+      [...records.bytes()],
+    ]);
+    resources.dispose();
+  });
+
+  it("refuse, writing nothing, more of a cascade's casters than the slots (R10.T9.b)", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84);
+    const slots = resources.layout.slots.slotCount;
+    const records = new InstanceRecords(slots + 1);
+    for (let n = 0; n <= slots; n += 1) {
+      records.pushXyz(n % slots, 0, 0, 0, 0, 1);
+    }
+    const writes = engine.writes.length;
+    expect(() => {
+      resources.writeCasters("primary", 0, records);
+    }).toThrow(RangeError);
+    expect(engine.writes.length).toBe(writes);
+    resources.dispose();
+  });
 });
 
 /** A wireframe bake's layers (R10.T11): no class weights and no horizon map, its survey mask whole. */

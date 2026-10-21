@@ -383,6 +383,30 @@ export class InstanceRecords {
   }
 
   /**
+   * Appends record `index` of `source` as it stands, word for word, so that its bytes are the
+   * source's (plan R10, R10.T9.b: a shadow cascade's casters are a subset of a view's own records,
+   * with its origins, morph bands, parents and holds, decision-r10-t9b-design D4).
+   *
+   * @throws RangeError past {@link capacity}, or for an index that is not one of `source`'s
+   * records this frame.
+   */
+  pushCopy(source: InstanceRecords, index: number): void {
+    if (this.#count >= this.capacity) {
+      throw new RangeError(`more than ${this.capacity} instances in a frame`);
+    }
+    if (!Number.isInteger(index) || index < 0 || index >= source.#count) {
+      throw new RangeError(`record ${index} is not one of the ${source.#count} records`);
+    }
+    // Word by word, as bits, so that no float is rounded and a frame allocates no view a record.
+    const from = index * F32_WORDS_PER_INSTANCE;
+    const to = this.#count * F32_WORDS_PER_INSTANCE;
+    for (let word = 0; word < F32_WORDS_PER_INSTANCE; word += 1) {
+      this.#u32[to + word] = source.#u32[from + word] ?? 0;
+    }
+    this.#count += 1;
+  }
+
+  /**
    * This frame's records as bytes, for one `writeBuffer`; a view made once per record count, so
    * that a frame allocates nothing once its counts have been seen.
    */

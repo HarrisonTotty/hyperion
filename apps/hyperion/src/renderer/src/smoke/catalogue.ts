@@ -46,10 +46,12 @@ export async function checkCatalogue(
       // oxlint-disable-next-line no-await-in-loop
       await checks.group(name, async () => {
         switch (entry.kind) {
-          case "material":
-            await engine.createMaterialAsync(entry.spec, ["rgba16float"]);
-            checks.check(name, true, "compiled");
+          case "material": {
+            const targets = entry.targets ?? ["rgba16float"];
+            await engine.createMaterialAsync(entry.spec, targets);
+            checks.check(name, true, `compiled for ${targets.join(", ")}`);
             break;
+          }
           case "compute": {
             const kernel = await engine.createComputeAsync(entry.spec);
             checks.check(name, true, `compiled on the ${kernel.path} path`);

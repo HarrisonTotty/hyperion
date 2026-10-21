@@ -4,7 +4,8 @@
  *
  * @remarks
  * Only views, faults, allocation listeners, disposal, buffer, mesh and material handles and
- * releases are faked; every other member throws, naming itself.
+ * releases, and depth-layer targets that record their renders, are faked; every other member
+ * throws, naming itself.
  */
 
 import type { AllocationEvent, BufferSpec } from "../view/engine/memory";
@@ -13,6 +14,9 @@ import type { GraphicsFault } from "../view/engine/status";
 import type {
   BufferHandle,
   CreateWebGpuEngine,
+  DepthLayerPass,
+  DepthLayersSpec,
+  DepthLayerTarget,
   FrameSubmission,
   MaterialHandle,
   MeshHandle,
@@ -63,11 +67,41 @@ export class FakeView implements RenderView {
   }
 }
 
+/** A depth-layer target that records its renders' passes (plan R10, R10.T9.b). */
+export class FakeDepthLayers implements DepthLayerTarget {
+  readonly name: string;
+  readonly sizePx: number;
+  readonly layers: number;
+  readonly depth: TextureHandle;
+  /** Each render's owner and passes, first first. */
+  readonly renders: Array<{
+    readonly owner: string;
+    readonly passes: ReadonlyArray<DepthLayerPass>;
+  }> = [];
+  disposed = false;
+
+  constructor(spec: DepthLayersSpec) {
+    this.name = spec.name;
+    this.sizePx = spec.sizePx;
+    this.layers = spec.layers;
+    this.depth = Object.freeze({ kind: "texture", name: spec.name });
+  }
+
+  render(owner: string, passes: ReadonlyArray<DepthLayerPass>): void {
+    this.renders.push({ owner, passes });
+  }
+  dispose(): void {
+    this.disposed = true;
+  }
+}
+
 /** An engine made on a device the test may lose. */
 export class FakeRenderEngine implements RenderEngine {
   readonly capabilities: RenderEngine["capabilities"];
   readonly depthPolicy = "reversed-z-float" as const;
   readonly views: FakeView[] = [];
+  /** The depth-layer targets made, first first (R10.T9.b). */
+  readonly depthLayers: FakeDepthLayers[] = [];
   /** The buffers, textures, meshes and materials released, in order. */
   readonly released: Array<BufferHandle | TextureHandle | MeshHandle | MaterialHandle> = [];
   /** The materials asked of `prepareMaterial`, in order (R10.T14.d). */
@@ -162,6 +196,16 @@ export class FakeRenderEngine implements RenderEngine {
   }
   createRenderTarget(): never {
     throw notFaked("createRenderTarget");
+  }
+  /**
+   * A depth-layer target with nothing behind it (plan R10, R10.T9.b), its depth a handle as
+   * {@link FakeRenderEngine.createMesh} gives one, which records its renders' passes and whether it
+   * was disposed.
+   */
+  createDepthLayers(spec: DepthLayersSpec): FakeDepthLayers {
+    const target = new FakeDepthLayers(spec);
+    this.depthLayers.push(target);
+    return target;
   }
   /** A handle with nothing behind it, for tests of what is done with handles (R10.T16.b). */
   createMesh(spec: MeshSpec): MeshHandle {

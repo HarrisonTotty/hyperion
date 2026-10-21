@@ -4,18 +4,22 @@
  *
  * @remarks
  * In order: R06's sky; the small discs' cells (R07.T8.d, a compute pass whose sums the bodies'
- * draws read); mesh bodies (opaque, depth); R10's terrain; host discs, disc bodies and
- * point bodies in one painter order (Design note 2); R08's atmosphere; R11's rings, clouds and
- * oceans; the histogram; bloom of the light above the display's range; the tone-mapping pass; the
- * symbology cased over the result. A style owns no scene, camera or projection, so switching style
- * is a change of pass list. The slots of R06, R08, R10 and R11 are listed with the labels their
- * plans give or (for R08 and R11, whose passes are not built) the lane's provisional names,
- * marked `built: false` until those plans fill them (R06's sky, drawn by R07.T8.a's frame, is); the settings share one order today, their
- * differences being each pass's parameters (Design note 18).
+ * draws read); R10's terrain shadows (R10.T9.b, the shadow cascades' four caster passes, depth
+ * alone into the engine's layers, which the terrain's draws read); mesh bodies (opaque, depth);
+ * R10's terrain; host discs, disc bodies and point bodies in one painter order (Design note 2);
+ * R08's atmosphere; R11's rings, clouds and oceans; the histogram; bloom of the light above the
+ * display's range; the tone-mapping pass; the symbology cased over the result. A style owns no
+ * scene, camera or projection, so switching style is a change of pass list. The slots of R06, R08,
+ * R10 and R11 are listed with the labels their plans give or (for R08 and R11, whose passes are not
+ * built) the lane's provisional names, marked `built: false` until those plans fill them (R06's
+ * sky, drawn by R07.T8.a's frame, is); the settings share one order today, their differences being
+ * each pass's parameters (Design note 18): on the high setting the terrain's cascade passes are
+ * submitted before the bodies pass, while the low setting, which has no cascades, submits none in
+ * their slot.
  */
 import { DISC_CELLS_PASS } from "../bodies/draw";
 import type { QualitySetting } from "../quality/qualitySetting";
-import { TERRAIN_PASS_LABEL } from "../terrain/gpu/material";
+import { TERRAIN_PASS_LABEL, TERRAIN_SHADOW_PASS_LABEL } from "../terrain/gpu/material";
 import { BLOOM_PASS } from "../post/bloomChain";
 import { HISTOGRAM_PASS } from "../post/histogram";
 import { TONEMAP_PASS } from "../post/tonemap";
@@ -84,6 +88,8 @@ export function photorealisticPasses(setting: QualitySetting): PassList {
       slot(SKY_PASS_LABEL, "R06", true),
       // Before the mesh bodies' figures, which read its sums as the discs' draws do.
       own(PHOTOREAL_PASS_LABELS.discCells),
+      // Before the bodies, whose resolve times them, and the terrain, which reads the layers.
+      slot(TERRAIN_SHADOW_PASS_LABEL, "R10", true),
       own(PHOTOREAL_PASS_LABELS.bodies),
       slot(TERRAIN_PASS_LABEL, "R10", true),
       own(PHOTOREAL_PASS_LABELS.discs),

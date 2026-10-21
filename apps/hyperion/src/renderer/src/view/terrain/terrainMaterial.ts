@@ -32,6 +32,10 @@
  *   a source's irradiance factor and floors the Lommel–Seeliger term at the source's angular
  *   radius, as R07's disc does (`lit_disc_term`), which equals the twin wherever the whole source
  *   is up and μ₀ + μ exceeds that radius.
+ * - **The shadow cascades** (R10.T9.b; Design note 11): the lit material receives them
+ *   (`shadows/cascadeShadow.wgsl`, its twin `shadows/cascadeShadow.ts`), star 0's direct light
+ *   taking min(1, c′ ÷ m) beside the horizon map; the caster ({@link terrainShadowMaterialSpec})
+ *   draws the lit vertices into each cascade, depth alone.
  */
 import { brdfFromTable } from "../appearance/brdf";
 import {
@@ -44,18 +48,22 @@ import { withTemplateCurve } from "../appearance/phase";
 import { SURFACE_LIGHTING_WGSL, surfaceLightingTextures } from "../atmosphere/surfaceLighting";
 import type { DiscLight, DiscOccluder, DiscSecondary } from "../bodies/discShading";
 import { oblateAlbedoScale } from "../bodies/oblate";
-import type { StorageBufferSpec, WgslMaterialSpec } from "../engine/types";
+import type { StorageBufferSpec, UniformSpec, WgslMaterialSpec } from "../engine/types";
 import type { Rgb } from "../photometry/toneCurve";
 import type { TerrainVertexPath } from "../quality/qualitySetting";
 import frameWgsl from "../shaders/frame.wgsl?raw";
 import litBodyWgsl from "../shaders/litBody.wgsl?raw";
 import { PATH_SOURCES, TERRAIN_BINDINGS, terrainVertexStorage } from "./gpu/material";
+import { CASCADE_UNIFORM_SPECS } from "./shadows/cascadeShadow";
+import cascadeShadowWgsl from "./shadows/cascadeShadow.wgsl?raw";
+import { CASCADE_DEPTH_BIAS } from "./shadows/cascades";
 import horizonWgsl from "./shadows/horizon.wgsl?raw";
 import patchVertexWgsl from "./shaders/patchVertex.wgsl?raw";
 import terrainDepthWgsl from "./shaders/terrainDepth.wgsl?raw";
 import terrainLitWgsl from "./shaders/terrainLit.wgsl?raw";
 import terrainLitShadeWgsl from "./shaders/terrainLitShade.wgsl?raw";
 import terrainPatchWgsl from "./shaders/terrainPatch.wgsl?raw";
+import terrainShadowWgsl from "./shaders/terrainShadow.wgsl?raw";
 import terrainSurveyWgsl from "./shaders/terrainSurvey.wgsl?raw";
 import { PATCH_VERTICES_PER_SIDE } from "./slotLayout";
 import { PHOTOMETRY_STRIDE } from "./workers/messages";
@@ -79,7 +87,35 @@ export const TERRAIN_LIT_BINDINGS = {
   horizonMap: 16,
   /** Each slot's survey mask (`slotLayout.ts`' `survey-mask`, R10.T10.c). */
   surveyMask: 17,
+  /** The shadow cascades' layers, a `texture_depth_2d_array` (`cascadeShadow.wgsl`, R10.T9.b). */
+  shadowCascades: 19,
+  /** The comparison sampler that reads them, a `sampler_comparison` (R10.T9.b). */
+  shadowCompare: 20,
 } as const;
+
+/**
+ * The `DrawItem.textures` name under which a lit terrain draw binds the shadow cascades' layers
+ * (R10.T9.b): the engine's `DepthLayerTarget.depth`, or, where no cascades are drawn, any
+ * `depth32float` array texture, which the receiver never samples at w = 0.
+ */
+export const SHADOW_CASCADES_TEXTURE = "shadowCascades";
+
+/**
+ * The lit material's comparison sampler (R10.T9.b): declared by the spec and made by the engine,
+ * linear for the 2 × 2 PCF, clamped to the edge and `greater-equal`; a draw binds nothing for it.
+ */
+export const SHADOW_COMPARE_SAMPLER = "shadowCompare";
+
+/**
+ * The lit `Draw`'s fields after `offsetFromCameraM` that {@link LIT_TERRAIN_SOURCE} reads, which
+ * the depth material and the caster mirror: the body's rotation, the camera's body-fixed place and
+ * the normals atlas.
+ */
+const LIT_DRAW_UNIFORMS: ReadonlyArray<UniformSpec> = [
+  { name: "bodyRotation", type: "mat4x4f" },
+  { name: "cameraBodyFixedM", type: "vec4f" },
+  { name: "atlas", type: "vec4f" },
+];
 
 /** The console names of the two paths' lit materials. */
 const DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
@@ -106,9 +142,19 @@ const LIT_TERRAIN_SOURCE =
 
 /**
  * The lit terrain material of a vertex path: {@link LIT_TERRAIN_SOURCE}, its own `Draw` and
- * fragment stage (`terrainLitShade.wgsl`) and the path's source.
+ * fragment stage (`terrainLitShade.wgsl`), the shadow cascades' receiver
+ * (`shadows/cascadeShadow.wgsl`, R10.T9.b) and the path's source.
  *
  * @remarks
+ * Its uniforms are the `Draw`'s own fields, then the cascades' ({@link CASCADE_UNIFORM_SPECS},
+ * which `packCascadeUniforms` writes; zeros read as no cascades), and it binds the cascades' layers
+ * as {@link SHADOW_CASCADES_TEXTURE} at binding 19, `depth` and `2d-array`, read through the
+ * comparison sampler {@link SHADOW_COMPARE_SAMPLER} at binding 20. The receiver is composed here
+ * alone, not into {@link LIT_TERRAIN_SOURCE}, which the depth material and the caster share: WGSL
+ * type-checks every function, and their `Draw`s have none of the cascades' fields
+ * (decision-r10-t9b-design D5(a)). Textures and samplers are visible to both stages, as the engine
+ * lays out every material's.
+ *
  * Each storage buffer is visible only to the stages that read it (decision-r10-t10b-r09-t2e §5):
  * R05's five, four on `face-differences`, to the vertex stage, the class layers, the lights and
  * the horizon map to the fragment stage, and the survey mask to both (R10.T10.c), the vertex stage
@@ -119,7 +165,7 @@ const LIT_TERRAIN_SOURCE =
  * surface at the survey's edge.
  */
 export function terrainLitMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
-  const source = LIT_TERRAIN_SOURCE + terrainLitShadeWgsl + PATH_SOURCES[path];
+  const source = LIT_TERRAIN_SOURCE + terrainLitShadeWgsl + cascadeShadowWgsl + PATH_SOURCES[path];
   const b = TERRAIN_LIT_BINDINGS;
   const fragment = ["fragment"] as const;
   const storageBuffers: StorageBufferSpec[] = [
@@ -134,16 +180,26 @@ export function terrainLitMaterialSpec(path: TerrainVertexPath): WgslMaterialSpe
     displayName: DISPLAY_NAMES[path],
     vertexWgsl: source,
     fragmentWgsl: source,
-    uniforms: [
-      { name: "bodyRotation", type: "mat4x4f" },
-      { name: "cameraBodyFixedM", type: "vec4f" },
-      { name: "atlas", type: "vec4f" },
+    uniforms: [...LIT_DRAW_UNIFORMS, ...CASCADE_UNIFORM_SPECS],
+    samplers: [
+      {
+        name: SHADOW_COMPARE_SAMPLER,
+        filter: "linear",
+        address: "clamp-to-edge",
+        binding: b.shadowCompare,
+        compare: "greater-equal",
+      },
     ],
-    samplers: [],
     textures: [
       { name: "normals", binding: b.normals, viewDimension: "2d-array" },
       { name: "phaseFactorTable", binding: b.phaseFactorTable, sampleType: "unfilterable-float" },
       ...surfaceLightingTextures(b.atmosphere),
+      {
+        name: SHADOW_CASCADES_TEXTURE,
+        binding: b.shadowCascades,
+        sampleType: "depth",
+        viewDimension: "2d-array",
+      },
     ],
     cullMode: "back",
     depthWrite: true,
@@ -179,12 +235,7 @@ export function terrainDepthMaterialSpec(path: TerrainVertexPath): WgslMaterialS
     displayName: DEPTH_DISPLAY_NAMES[path],
     vertexWgsl: source,
     fragmentWgsl: source,
-    uniforms: [
-      { name: "bodyRotation", type: "mat4x4f" },
-      { name: "cameraBodyFixedM", type: "vec4f" },
-      { name: "atlas", type: "vec4f" },
-      { name: "occluderSlopePx", type: "f32" },
-    ],
+    uniforms: [...LIT_DRAW_UNIFORMS, { name: "occluderSlopePx", type: "f32" }],
     samplers: [],
     textures: [],
     cullMode: "back",
@@ -202,6 +253,65 @@ export function terrainDepthMaterialSpec(path: TerrainVertexPath): WgslMaterialS
   };
 }
 
+/** The console names of the two paths' shadow casters (decision-r10-t9b-design D4). */
+const SHADOW_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "TERRAIN SHADOWS OFFSETS",
+  "face-differences": "TERRAIN SHADOWS",
+};
+
+/**
+ * The lit terrain of a vertex path as a caster into the high setting's shadow cascades, depth
+ * alone (plan R10, R10.T9.b; Design note 11; `terrainShadow.wgsl`): {@link LIT_TERRAIN_SOURCE},
+ * the caster's own `Draw` and fragment stage and the path's source, drawn into each cascade's
+ * layer of a `depth-only` target with a lit view draw's own records, storage and `Draw` values,
+ * the pass's `Frame` being the cascade's.
+ *
+ * @remarks
+ * Its vertex stage is the lit material's, unchanged, so a patch casts the surface the view draws,
+ * at the view's own morph factors. It binds what its entry points read alone, as the depth
+ * material does: R05's vertex storage (four on `face-differences`) and the survey mask in both
+ * stages, and no texture. Its uniforms are the lit `Draw`'s own three, without the cascades'.
+ * Culling is off, so that either face casts (decision-r10-t9b-design D1); colour writes are off,
+ * and its depth, the rasteriser's, is biased away from the light by `CASCADE_DEPTH_BIAS`.
+ *
+ * @param unclippedDepth - `primitive.unclippedDepth`, pancaking casters in front of a cascade's
+ *   near plane onto it: the engine's `capabilities.depthClipControl` at every creation and
+ *   re-creation, since the engine refuses it on a device without the feature (D1).
+ */
+export function terrainShadowMaterialSpec(
+  path: TerrainVertexPath,
+  unclippedDepth: boolean,
+): WgslMaterialSpec {
+  const source = LIT_TERRAIN_SOURCE + terrainShadowWgsl + PATH_SOURCES[path];
+  return {
+    name: `terrain-shadow-${path}`,
+    displayName: SHADOW_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: LIT_DRAW_UNIFORMS,
+    samplers: [],
+    textures: [],
+    cullMode: "none",
+    depthWrite: true,
+    colourWrites: false,
+    blend: "none",
+    storageBuffers: [
+      ...terrainVertexStorage(path),
+      {
+        name: "surveyMask",
+        binding: TERRAIN_LIT_BINDINGS.surveyMask,
+        stages: ["vertex", "fragment"],
+      },
+    ],
+    depthBiasAway: {
+      constant: CASCADE_DEPTH_BIAS.constant,
+      slopeScale: CASCADE_DEPTH_BIAS.slopeScale,
+      clamp: CASCADE_DEPTH_BIAS.clamp,
+    },
+    unclippedDepth,
+  };
+}
+
 /** Both paths' lit materials, for the catalogue. */
 export const TERRAIN_LIT_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainLitMaterialSpec("baked-offsets"),
@@ -212,6 +322,15 @@ export const TERRAIN_LIT_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
 export const TERRAIN_DEPTH_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainDepthMaterialSpec("baked-offsets"),
   terrainDepthMaterialSpec("face-differences"),
+];
+
+/**
+ * Both paths' shadow casters (R10.T9.b), for the catalogue, which compiles them for `depth-only`:
+ * without `unclippedDepth`, the path every adapter can take, SwiftShader among them.
+ */
+export const TERRAIN_SHADOW_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainShadowMaterialSpec("baked-offsets", false),
+  terrainShadowMaterialSpec("face-differences", false),
 ];
 
 /**

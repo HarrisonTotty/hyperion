@@ -5,6 +5,7 @@ import {
   FakeCommandBuffer,
   type FakeDevice,
   FakeGpu,
+  FakeTextureView,
   INTEL_UHD_620_INFO,
 } from "../../../test/fakeGpu";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../gpuFlags";
@@ -12,6 +13,9 @@ import type { KernelPair } from "../kernels";
 import type { AllocationEvent, TextureSpec } from "../memory";
 import { GraphicsStatusStore, initialGraphicsStatus } from "../status";
 import {
+  type DepthLayerPass,
+  DepthSelfSample,
+  type DrawItem,
   Float32BlendUnavailable,
   type MaterialHandle,
   type MeshHandle,
@@ -21,7 +25,7 @@ import {
   type TextureHandle,
   type WgslMaterialSpec,
 } from "../types";
-import { WebGpuRenderEngine } from "./engine";
+import { pipelineOutputs, samplerKey, WebGpuRenderEngine } from "./engine";
 
 /** An engine over a fake device with `features`. */
 async function engineOn(features: ReadonlyArray<GPUFeatureName> = []): Promise<{
@@ -863,5 +867,329 @@ describe("a material's pipelines by its mesh's layout (R10.T14.d)", () => {
     });
     drawEach(outTarget(engine), coloured, [material], tiles);
     expect(gpu.renderPipelines).toHaveLength(made + 1);
+  });
+});
+
+/** A depth-only caster: no colour, depth written, both sides (R10.T9.b). */
+const CASTER: WgslMaterialSpec = {
+  name: "caster",
+  displayName: "CASTER",
+  vertexWgsl: "",
+  fragmentWgsl: "",
+  uniforms: [],
+  samplers: [],
+  cullMode: "none",
+  depthWrite: true,
+  colourWrites: false,
+  blend: "none",
+};
+
+/** A 64² set of four layers under `shadows`. */
+const LAYERS = { name: "cascades", sizePx: 64, layers: 4, category: "shadows" } as const;
+
+const IDENTITY_4 = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+
+/** A pass of `draws` into `layer`, its projection's depth translation `depth` (clip z there). */
+function layerPass(layer: number, draws: ReadonlyArray<DrawItem>, depth = 0.5): DepthLayerPass {
+  const projection = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, depth, 1]);
+  return { label: `view:shadow ${layer}`, layer, viewRotation: IDENTITY_4, projection, draws };
+}
+
+/** A draw of `mesh` with `material`, binding `textures`. */
+function drawItem(
+  mesh: MeshHandle,
+  material: MaterialHandle,
+  textures: Readonly<Record<string, TextureHandle>> = {},
+): DrawItem {
+  return { mesh, material, offsetFromCameraM: new Float32Array(3), uniforms: {}, textures };
+}
+
+/** The command buffers the queue took whose encoder is labelled `label`. */
+function submittedAs(gpu: FakeDevice, label: string): FakeCommandBuffer[] {
+  return gpu.queue.submitted.filter(
+    (buffer): buffer is FakeCommandBuffer =>
+      buffer instanceof FakeCommandBuffer && buffer.label === label,
+  );
+}
+
+/** Whether a recorded command's argument is a render pass's descriptor. */
+function isRenderPassDescriptor(value: unknown): value is GPURenderPassDescriptor {
+  return typeof value === "object" && value !== null && "colorAttachments" in value;
+}
+
+/** The descriptor of each render pass a command buffer began. */
+function renderPasses(buffer: FakeCommandBuffer): GPURenderPassDescriptor[] {
+  return buffer.commands
+    .filter(({ op }) => op === "beginRenderPass")
+    .map(({ args }) => args[0])
+    .filter(isRenderPassDescriptor);
+}
+
+/** The texture, dimension and layers of a depth attachment's view. */
+function layerOf(
+  attachment: GPURenderPassDepthStencilAttachment | undefined,
+): ReadonlyArray<unknown> | null {
+  const view = attachment?.view;
+  if (!(view instanceof FakeTextureView)) {
+    return null;
+  }
+  const { dimension, baseArrayLayer, arrayLayerCount } = view.descriptor ?? {};
+  return [view.texture.label, dimension, baseArrayLayer, arrayLayerCount];
+}
+
+describe("depth-layer targets (R10.T9.b)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  it("tally the layers' bytes under their category, and release them at disposal", async () => {
+    const { engine, gpu } = await engineOn();
+    const events: AllocationEvent[] = [];
+    engine.onAllocation((event) => events.push(event));
+    const target = engine.createDepthLayers(LAYERS);
+    const texture = gpu.textures.find((t) => t.label === "cascades");
+    expect(texture?.descriptor).toMatchObject({
+      size: { width: 64, height: 64, depthOrArrayLayers: 4 },
+      dimension: "2d",
+      format: "depth32float",
+      mipLevelCount: 1,
+      usage: TEXTURE_USAGE.RENDER_ATTACHMENT | TEXTURE_USAGE.TEXTURE_BINDING,
+    });
+    target.dispose();
+    expect(events).toEqual([
+      { kind: "created", name: "cascades", bytes: 4 * 64 * 64 * 4, category: "shadows" },
+      { kind: "destroyed", name: "cascades", bytes: 4 * 64 * 64 * 4, category: "shadows" },
+    ]);
+    expect(texture?.destroyed).toBe(true);
+  });
+
+  it("encode each pass in a submission of its own, onto its layer, cleared to 0 and stored", async () => {
+    const { engine, gpu } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const caster = engine.createMaterial(CASTER);
+    const target = engine.createDepthLayers(LAYERS);
+    target.render("view", [layerPass(2, [drawItem(mesh, caster)]), layerPass(0, [])]);
+    const buffers = [
+      ...submittedAs(gpu, "view view:shadow 2"),
+      ...submittedAs(gpu, "view view:shadow 0"),
+    ];
+    const passes = buffers.flatMap(renderPasses);
+    const depths = passes.map(({ depthStencilAttachment }) => depthStencilAttachment);
+    expect({
+      submissions: buffers.length,
+      labels: passes.map(({ label }) => label),
+      colour: passes.map(({ colorAttachments }) => Array.from(colorAttachments)),
+      ops: depths.map((d) => [d?.depthLoadOp, d?.depthStoreOp, d?.depthClearValue]),
+      layers: depths.map(layerOf),
+      draws: buffers.map((b) => b.commands.filter(({ op }) => op === "drawIndexed").length),
+    }).toEqual({
+      submissions: 2,
+      labels: ["view:shadow 2", "view:shadow 0"],
+      colour: [[], []],
+      ops: [
+        ["clear", "store", 0],
+        ["clear", "store", 0],
+      ],
+      layers: [
+        ["cascades", "2d", 2, 1],
+        ["cascades", "2d", 0, 1],
+      ],
+      draws: [1, 0],
+    });
+  });
+
+  it("write each pass's own Frame before its submission: its matrices and the layers' size", async () => {
+    const { engine, gpu } = await engineOn();
+    const writes = vi.spyOn(gpu.queue, "writeBuffer");
+    const target = engine.createDepthLayers(LAYERS);
+    target.render("view", [layerPass(1, [], 0.25), layerPass(3, [], 0.75)]);
+    const frames = writes.mock.calls
+      .filter(([buffer]) => buffer.label === "frame uniforms")
+      .map(([, , data, offset = 0, size = 0]) =>
+        data instanceof ArrayBuffer
+          ? new Float32Array(data, offset, size / 4)
+          : new Float32Array(0),
+      );
+    // The projection's depth translation, then the viewport's width and height.
+    expect(frames.map((frame) => [frame[16 + 14], frame[32], frame[33]])).toEqual([
+      [0.25, 64, 64],
+      [0.75, 64, 64],
+    ]);
+  });
+
+  it("draw through each material's depth-only pipeline: no colour target, the material's depth state", async () => {
+    const { engine, gpu } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const caster = await engine.createMaterialAsync(CASTER, ["depth-only"], [mesh]);
+    const made = gpu.renderPipelines.filter((p) => p.label === "caster");
+    engine.createDepthLayers(LAYERS).render("view", [layerPass(0, [drawItem(mesh, caster)])]);
+    expect({
+      made: made.map((p) => [
+        Array.from(p.descriptor.fragment?.targets ?? []),
+        p.descriptor.depthStencil?.depthCompare,
+        p.descriptor.depthStencil?.depthWriteEnabled,
+      ]),
+      afterDraw: gpu.renderPipelines.filter((p) => p.label === "caster").length,
+      drawnWith: pipelinesSet(gpu).includes(made[0]),
+    }).toEqual({ made: [[[], "greater-equal", true]], afterDraw: 1, drawnWith: true });
+  });
+
+  it("make a material's pipelines for depth-only ahead, with depth and no colour", () => {
+    expect(pipelineOutputs("depth-only", "bgra8unorm")).toEqual([["depth-only", true]]);
+  });
+
+  it("refuse a layer outside the target, or named twice, submitting nothing", async () => {
+    const { engine, gpu } = await engineOn();
+    const target = engine.createDepthLayers(LAYERS);
+    const before = gpu.queue.submitted.length;
+    expect(() => {
+      target.render("view", [layerPass(0, []), layerPass(4, [])]);
+    }).toThrow(/layer 4 of cascades, which has layers 0 to 3/u);
+    expect(() => {
+      target.render("view", [layerPass(1, []), layerPass(1, [])]);
+    }).toThrow(/layer 1 of cascades again/u);
+    expect(gpu.queue.submitted).toHaveLength(before);
+  });
+
+  it("refuse a draw that samples the layers it writes, submitting nothing", async () => {
+    const { engine, gpu } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const caster = engine.createMaterial(CASTER);
+    const target = engine.createDepthLayers(LAYERS);
+    const before = gpu.queue.submitted.length;
+    expect(() => {
+      target.render("view", [layerPass(0, [drawItem(mesh, caster, { cascades: target.depth })])]);
+    }).toThrow(DepthSelfSample);
+    expect(gpu.queue.submitted).toHaveLength(before);
+  });
+
+  it("refuse the release of the layers' texture, which the target releases", async () => {
+    const { engine } = await engineOn();
+    const target = engine.createDepthLayers(LAYERS);
+    expect(() => {
+      engine.releaseTexture(target.depth);
+    }).toThrow(/belongs to a depth-layer target/u);
+  });
+
+  it("refuse layers that do not fit the device, naming the target", async () => {
+    const { engine } = await engineOn();
+    expect(() => engine.createDepthLayers({ ...LAYERS, sizePx: 8193 })).toThrow(
+      /depth layers cascades of 8193 px a side/u,
+    );
+  });
+
+  it("draw nothing once disposed, or once their engine is", async () => {
+    const { engine, gpu } = await engineOn();
+    const disposed = engine.createDepthLayers(LAYERS);
+    disposed.dispose();
+    const kept = engine.createDepthLayers({ ...LAYERS, name: "kept" });
+    engine.dispose();
+    const before = gpu.queue.submitted.length;
+    disposed.render("view", [layerPass(0, [])]);
+    kept.render("view", [layerPass(0, [])]);
+    expect({
+      submitted: gpu.queue.submitted.length - before,
+      keptDestroyed: gpu.textures.find((t) => t.label === "kept")?.destroyed,
+    }).toEqual({ submitted: 0, keptDestroyed: true });
+  });
+
+  it("bind the layers where a material declares a depth 2d-array, through a comparison sampler", async () => {
+    const { engine, gpu } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const receiver = engine.createMaterial({
+      ...SYNC_TILED,
+      name: "receiver",
+      samplers: [
+        {
+          name: "cascadesSampler",
+          filter: "linear",
+          address: "clamp-to-edge",
+          binding: 1,
+          compare: "greater-equal",
+        },
+      ],
+      textures: [{ name: "cascades", binding: 0, sampleType: "depth", viewDimension: "2d-array" }],
+    });
+    const target = engine.createDepthLayers(LAYERS);
+    outTarget(engine).render({
+      label: "receiver",
+      viewRotation: new Float32Array(16),
+      projection: new Float32Array(16),
+      draws: [drawItem(mesh, receiver, { cascades: target.depth })],
+      postProcesses: [],
+    });
+    expect({
+      views: gpu.textures.find((t) => t.label === "cascades")?.views,
+      layout: gpu.bindGroupLayouts.find((l) => l.label === "material receiver")?.descriptor.entries,
+      samplers: gpu.samplers.map(({ descriptor }) => descriptor.compare),
+    }).toEqual({
+      views: [
+        { label: "cascades layer 0", dimension: "2d", baseArrayLayer: 0, arrayLayerCount: 1 },
+        { label: "cascades layer 1", dimension: "2d", baseArrayLayer: 1, arrayLayerCount: 1 },
+        { label: "cascades layer 2", dimension: "2d", baseArrayLayer: 2, arrayLayerCount: 1 },
+        { label: "cascades layer 3", dimension: "2d", baseArrayLayer: 3, arrayLayerCount: 1 },
+        { dimension: "2d-array", aspect: "depth-only" },
+      ],
+      layout: [
+        { binding: 0, visibility: 3, texture: { sampleType: "depth", viewDimension: "2d-array" } },
+        { binding: 1, visibility: 3, sampler: { type: "comparison" } },
+      ],
+      samplers: ["greater-equal"],
+    });
+  });
+
+  it("take no resolve of their own: their passes ride the next render's", async () => {
+    const { engine } = await engineOn(["timestamp-query"]);
+    const times = vi.fn<(times: PassTimes) => void>();
+    engine.onPassTimes(times);
+    engine.createDepthLayers(LAYERS).render("view", [layerPass(0, []), layerPass(1, [])]);
+    const afterShadows = engine.passTimesFrame;
+    renderEmptyFrame(engine, "view:bodies");
+    await vi.waitFor(() => {
+      expect(times).toHaveBeenCalledOnce();
+    });
+    expect({
+      frames: [afterShadows, engine.passTimesFrame],
+      labels: times.mock.calls[0]?.[0].passes.map(({ label }) => label),
+    }).toEqual({ frames: [0, 1], labels: ["view:shadow 0", "view:shadow 1", "view:bodies"] });
+  });
+});
+
+describe("unclippedDepth (R10.T9.b)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  const UNCLIPPED: WgslMaterialSpec = { ...CASTER, name: "unclipped", unclippedDepth: true };
+
+  it("is refused without depth-clip-control, by createMaterial and createMaterialAsync alike", async () => {
+    const { engine, gpu } = await engineOn();
+    expect(() => engine.createMaterial(UNCLIPPED)).toThrow(
+      /material unclipped asks for unclippedDepth, which needs depth-clip-control/u,
+    );
+    await expect(engine.createMaterialAsync(UNCLIPPED, ["depth-only"])).rejects.toThrow(
+      /material unclipped .* depth-clip-control/u,
+    );
+    expect(gpu.shaderModules.filter((m) => m.label === "unclipped")).toEqual([]);
+  });
+
+  it("takes primitive.unclippedDepth with the feature", async () => {
+    const { engine, gpu } = await engineOn(["depth-clip-control"]);
+    await engine.createMaterialAsync(UNCLIPPED, ["depth-only"], [indexedTriangle(engine)]);
+    expect(
+      gpu.renderPipelines
+        .filter((p) => p.label === "unclipped")
+        .map((p) => p.descriptor.primitive?.unclippedDepth),
+    ).toEqual([true]);
+  });
+});
+
+describe("the sampler cache (R10.T9.b)", () => {
+  it("keys a sampler by its filter, its address mode and its comparison", () => {
+    const plain = { filter: "linear", address: "clamp-to-edge" } as const;
+    expect([samplerKey(plain), samplerKey({ ...plain, compare: "greater-equal" })]).toEqual([
+      "linear:clamp-to-edge:none",
+      "linear:clamp-to-edge:greater-equal",
+    ]);
   });
 });

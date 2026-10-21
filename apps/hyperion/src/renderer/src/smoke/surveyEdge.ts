@@ -43,7 +43,13 @@ import {
 } from "../view/camera/projection";
 import { lookAlong } from "../view/camera/quaternion";
 import { IDENTITY_ROTATION } from "../view/coords/rotation";
-import type { BufferHandle, DrawItem, MaterialHandle, RenderEngine } from "../view/engine/types";
+import type {
+  BufferHandle,
+  DrawItem,
+  MaterialHandle,
+  RenderEngine,
+  TextureHandle,
+} from "../view/engine/types";
 import { annulusEdges, DISC_ANNULI_HIGH } from "../view/lighting/annuli";
 import { sunLikeHostDisc } from "../view/lighting/hostDisc";
 import { PLANETSHINE_SOURCES_HIGH } from "../view/lighting/planetshine";
@@ -59,7 +65,12 @@ import { vertexDir } from "../view/terrain/cube";
 import { ContactRecords, InstanceRecords } from "../view/terrain/gpu/uniforms";
 import type { PatchKey } from "../view/terrain/patchKey";
 import { spheroidNormal, surfacePoint } from "../view/terrain/planet";
-import { type TerrainLighting, terrainLitMaterialSpec } from "../view/terrain/terrainMaterial";
+import { createShadowPlaceholder } from "../view/terrain/shadows/terrainShadows";
+import {
+  SHADOW_CASCADES_TEXTURE,
+  type TerrainLighting,
+  terrainLitMaterialSpec,
+} from "../view/terrain/terrainMaterial";
 import type {
   BakedPatch,
   BakeSettings,
@@ -266,12 +277,16 @@ export function poseOver(): Pose {
   };
 }
 
-/** The terrain's draw of `resources` from `pose`, lit by its star through a body without air. */
+/**
+ * The terrain's draw of `resources` from `pose`, lit by its star through a body without air, with
+ * no shadow cascades: it binds their placeholder, `shadow` (R10.T9.b).
+ */
 async function terrainDraw(
   engine: RenderEngine,
   resources: TerrainResources,
   pose: Pose,
   air: SurfaceLightingTables,
+  shadow: TextureHandle,
 ): Promise<DrawItem> {
   const { layout } = resources;
   const a = MOON_LIKE.equatorialRadiusM;
@@ -343,6 +358,7 @@ async function terrainDraw(
       normals: resources.normals,
       phaseFactorTable: lit.phaseTable,
       ...surfaceLightingDrawTextures(air),
+      [SHADOW_CASCADES_TEXTURE]: shadow,
     },
     storageBuffers,
     indirect: { buffer: resources.indirect, offsetBytes: 0 },
@@ -466,6 +482,7 @@ export async function checkSurveyEdge(engine: RenderEngine, checks: Checks): Pro
   const relief = new TerrainResources(engine, settings, MOON_LIKE, "lit");
   const datum = new TerrainResources(engine, settings, MOON_LIKE, "lit");
   const air = createAirlessTables(engine, "survey edge smoke: no air");
+  const shadow = createShadowPlaceholder(engine);
   const mask = new CoverageMask(engine, "survey edge smoke: coverage mask");
   const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
   try {
@@ -475,8 +492,8 @@ export async function checkSurveyEdge(engine: RenderEngine, checks: Checks): Pro
     place(relief, bakes, pose);
     place(datum, bakes.map(onTheDatum), pose);
     const reference = referenceDraws(renderer, pose, mask);
-    const terrain = await terrainDraw(engine, relief, pose, air);
-    const flat = await terrainDraw(engine, datum, pose, air);
+    const terrain = await terrainDraw(engine, relief, pose, air, shadow);
+    const flat = await terrainDraw(engine, datum, pose, air, shadow);
     const bodies = PHOTOREAL_PASS_LABELS.bodies;
     const both = await drawn(engine, pose, [
       { label: bodies, draws: reference },
@@ -514,5 +531,6 @@ export async function checkSurveyEdge(engine: RenderEngine, checks: Checks): Pro
     relief.dispose();
     datum.dispose();
     engine.releaseTexture(air.body);
+    engine.releaseTexture(shadow);
   }
 }

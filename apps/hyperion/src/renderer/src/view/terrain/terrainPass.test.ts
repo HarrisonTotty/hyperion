@@ -1089,7 +1089,10 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
       "atmosphereTransmittance",
       "normals",
       "phaseFactorTable",
+      "shadowCascades",
     ]);
+    // The low setting has no cascades: the placeholder stands for them (R10.T9.b).
+    expect(draw.textures["shadowCascades"]?.name).toBe("terrain shadow placeholder");
     // The camera body-fixed, with 1 ÷ a beside it.
     expect([...(draw.uniforms["cameraBodyFixedM"] ?? [])]).toEqual(
       [0, 0, PLANET.figure.polarRadiusM + 2_000_000, 1 / PLANET.figure.equatorialRadiusM].map(

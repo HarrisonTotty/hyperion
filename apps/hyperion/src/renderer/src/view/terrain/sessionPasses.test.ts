@@ -43,8 +43,8 @@ import { lawFor } from "../appearance/phase";
 import { type BodyFramePlan, type LitBodyInput, planLitBodies } from "../bodies/draw";
 import { type ViewId, viewId } from "../camera/state";
 import { IDENTITY_ROTATION } from "../coords/rotation";
-import type { MemoryCategory } from "../engine/memory";
-import { DISC_ANNULI_HIGH } from "../lighting/annuli";
+import { type MemoryCategory, textureBytes } from "../engine/memory";
+import { annulusEdges, DISC_ANNULI_HIGH } from "../lighting/annuli";
 import { sunLikeHostDisc } from "../lighting/hostDisc";
 import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
 import {
@@ -69,6 +69,8 @@ import { datumGroundUnder } from "./grounded";
 import { limbDistanceM, pixelAngleRad } from "./handover";
 import { childKeys, type PatchKey, patchKeyString } from "./patchKey";
 import { MAX_CONTACTS } from "./gpu/uniforms";
+import { CASCADE_BYTES, casterReachM } from "./shadows/cascades";
+import { SHADOW_PLACEHOLDER, SHADOW_PLACEHOLDER_NAME } from "./shadows/terrainShadows";
 import { PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
 import {
   sceneContacts,
@@ -499,8 +501,13 @@ describe("the terrain session's passes (R10.T16.b; decision-r10-live-path, D3 an
     h.session.step();
     expect(h.session.passBodies.size).toBe(0);
     expect(h.session.drawTerrain(PRIMARY, MOON, frameAt(16))).toBeNull();
-    expect(h.engine.live).toEqual(before);
-    expect((["height-cache", "other"] as const).map((c) => h.tally.liveBytes(c))).toEqual(bytes);
+    // But the shadow cascades' placeholder, the session's, which it lets go at its teardown
+    // (R10.T9.b).
+    expect(h.engine.live).toEqual({ ...before, textures: before.textures + 1 });
+    expect((["height-cache", "other"] as const).map((c) => h.tally.liveBytes(c))).toEqual([
+      bytes[0],
+      (bytes[1] ?? 0) + textureBytes(SHADOW_PLACEHOLDER),
+    ]);
   });
 
   it("leaves the tallies where they started after 50 hand-overs and releases", async () => {
@@ -1399,8 +1406,13 @@ describe("a body handed over in both styles at once (R10.T11)", () => {
     h.session.drawWireTerrain(INSTRUMENT, MOON, wireFrameAt(0));
     farAway(h);
     expect([h.session.passBodies.size, h.session.wirePassBodies.size]).toEqual([0, 0]);
-    expect(h.engine.live).toEqual(before);
-    expect(categories.map((c) => h.tally.liveBytes(c))).toEqual(bytes);
+    // But the session's shadow placeholder, let go at its teardown (R10.T9.b).
+    expect(h.engine.live).toEqual({ ...before, textures: before.textures + 1 });
+    expect(categories.map((c) => h.tally.liveBytes(c))).toEqual([
+      bytes[0],
+      (bytes[1] ?? 0) + textureBytes(SHADOW_PLACEHOLDER),
+      bytes[2],
+    ]);
   });
 
   it("draws nothing of the wireframe pass once the field is released", async () => {
@@ -1446,15 +1458,24 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     [INSTRUMENT, wireAt(5e6, { streamPriority: "secondary" })],
   ];
 
+  /** The high setting's four, its shadow cascades' caster among them (R10.T9.b). */
   const HIGH = [
+    "terrain-lit-baked-offsets",
+    "terrain-depth-baked-offsets",
+    "terrain-shadow-baked-offsets",
+    "terrain-wire-baked-offsets",
+  ];
+
+  /** What the moon's passes draw with on the high setting ({@link drawnWith}). */
+  const HIGH_DRAWN = [
     "terrain-lit-baked-offsets",
     "terrain-depth-baked-offsets",
     "terrain-wire-baked-offsets",
   ];
 
-  it("compiles its setting's lit, depth and wireframe materials as it is made", async () => {
+  it("compiles its setting's lit, depth, caster and wireframe materials as it is made", async () => {
     const h = await harness();
-    expect([await h.session.compiled, compiled(h)]).toEqual([3, HIGH]);
+    expect([await h.session.compiled, compiled(h)]).toEqual([4, HIGH]);
   });
 
   it("compiles the low setting's on face differences", async () => {
@@ -1472,7 +1493,7 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     await h.session.compiled;
     await handedOverBy(h, BOTH);
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
-    expect([compiled(h, 3), drawnWith(h), h.engine.live.materials]).toEqual([[], HIGH, 3]);
+    expect([compiled(h, 4), drawnWith(h), h.engine.live.materials]).toEqual([[], HIGH_DRAWN, 4]);
   });
 
   it("compiles nothing at a hand-over on the low setting either", async () => {
@@ -1503,7 +1524,7 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     h.engine.restore();
     await settle();
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
-    expect([compiled(h, 3), drawnWith(h), h.engine.live.materials]).toEqual([HIGH, HIGH, 3]);
+    expect([compiled(h, 4), drawnWith(h), h.engine.live.materials]).toEqual([HIGH, HIGH_DRAWN, 4]);
   });
 
   it("releases its materials only at its teardown, not with a pass", async () => {
@@ -1515,7 +1536,121 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     h.session.step();
     const kept = [h.session.passBodies.size, h.engine.live.materials];
     h.session.dispose();
-    expect([kept, h.engine.live.materials]).toEqual([[0, 3], 0]);
+    expect([kept, h.engine.live.materials]).toEqual([[0, 4], 0]);
+  });
+});
+
+describe("the terrain session's shadow cascades (R10.T9.b; decision-r10-t9b-design D2 and D9)", () => {
+  /** The moon's figure, as its field header gives it. */
+  const HEADER = moonLikeHeader(MOON);
+
+  /**
+   * A frame of the primary 30 m over the moon's north pole, looking straight down, under one star
+   * 17° up, its body taking the cascades: near enough the ground that w > 0.
+   */
+  function nearGround(nowMs: number): TerrainViewFrameInput {
+    const a = HEADER.equatorial_radius_m;
+    const annuli = annulusEdges(0.6, 0.2, 2);
+    const lighting = {
+      lights: [
+        {
+          direction: normalise(vec3(1, 0, 0.3)),
+          distance: AU_M / a,
+          radius: 6.957e8 / a,
+          illuminance: [1.3e5, 1.25e5, 1.2e5] as const,
+          annuli: [annuli, annuli, annuli] as const,
+        },
+      ],
+      occluders: [],
+      secondaries: [],
+      elsewhere: lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+      exposureScale: 1e-5,
+    };
+    return {
+      ...frameAt(nowMs),
+      view: { ...PRIMARY_VIEW, cameraM: vec3(0, 0, HEADER.polar_radius_m + 30) },
+      lighting,
+      takesCascades: true,
+    };
+  }
+
+  /** A session of `setting` with the moon handed over and its first bakes drawn. */
+  async function drawing(setting: QualitySetting): Promise<Harness> {
+    const h = await harness(setting);
+    await handedOverBy(h, [[PRIMARY, handing(5e6, { setting })]]);
+    answerBakes(h, new Set([0, 1]), new Map());
+    h.session.step();
+    return h;
+  }
+
+  it("makes the engine's one set at the first frame that draws them on the high setting, counts it, and lets it go at its teardown", async () => {
+    const h = await drawing("high");
+    const destroyed: string[] = [];
+    h.engine.onAllocation((event) => {
+      if (event.kind === "destroyed") {
+        destroyed.push(event.name);
+      }
+    });
+    // A frame whose body takes none binds the placeholder first.
+    h.session.drawTerrain(PRIMARY, MOON, { ...nearGround(0), takesCascades: false });
+    const first = h.session.drawTerrain(PRIMARY, MOON, nearGround(16));
+    h.session.drawTerrain(PRIMARY, MOON, nearGround(32));
+    const living = [
+      h.tally.liveBytes("shadows"),
+      h.engine.counts.depthLayerTargets,
+      h.session.memory().gpuBytes.get("shadows"),
+    ];
+    h.session.dispose();
+    expect([
+      (first?.cascades?.set.weight ?? 0) > 0,
+      first?.cascades?.passes.length,
+      living,
+      h.tally.liveBytes("shadows"),
+      destroyed.filter((name) => name.startsWith("terrain shadow")).toSorted(),
+    ]).toEqual([
+      true,
+      4,
+      [CASCADE_BYTES, 1, CASCADE_BYTES],
+      0,
+      ["terrain shadow cascades", SHADOW_PLACEHOLDER_NAME],
+    ]);
+  });
+
+  it("never makes one on the low setting, its draws binding the placeholder", async () => {
+    const h = await drawing("low");
+    const frame = h.session.drawTerrain(PRIMARY, MOON, nearGround(0));
+    expect([
+      frame?.cascades ?? null,
+      frame?.draw?.textures["shadowCascades"]?.name,
+      h.engine.counts.depthLayerTargets,
+      h.session.memory().gpuBytes.get("shadows"),
+    ]).toEqual([null, SHADOW_PLACEHOLDER_NAME, 0, undefined]);
+  });
+
+  it("gives its passes the body's realised relief for the casters' reach", async () => {
+    const h = await drawing("high");
+    const set = h.session.drawTerrain(PRIMARY, MOON, nearGround(0))?.cascades?.set;
+    if (set === undefined) {
+      throw new Error("the frame drew no cascades");
+    }
+    const radiusM = (2 * HEADER.equatorial_radius_m + HEADER.polar_radius_m) / 3;
+    expect(set.casterReachM).toBeCloseTo(
+      casterReachM(set.sunElevationRad, HEADER.realised_relief_m, radiusM),
+      6,
+    );
+  });
+
+  it("draws the casters its registry holds into every pass of every view, until one is removed", async () => {
+    const h = await drawing("high");
+    const asked: number[] = [];
+    const remove = h.session.shadowCasters.add((_set, index) => {
+      asked.push(index);
+      return [];
+    });
+    h.session.drawTerrain(PRIMARY, MOON, nearGround(0));
+    remove();
+    h.session.drawTerrain(PRIMARY, MOON, nearGround(16));
+    expect(asked).toEqual([0, 1, 2, 3]);
   });
 });
 

@@ -6,7 +6,13 @@
 
 import { BUFFER_USAGE } from "../gpuFlags";
 import type { BufferSpec } from "../memory";
-import type { BufferHandle, FrameSubmission, UniformSpec, ViewSize } from "../types";
+import type {
+  BufferHandle,
+  DepthLayerPass,
+  FrameSubmission,
+  UniformSpec,
+  ViewSize,
+} from "../types";
 
 /** One member of a uniform struct, with its offset in bytes. */
 export interface StructMember {
@@ -173,8 +179,11 @@ export function packUniforms(
   }
 }
 
-/** The `Frame` block of `frame` drawn at `size`. */
-export function packFrame(frame: FrameSubmission, size: ViewSize): Float32Array<ArrayBuffer> {
+/** The `Frame` block of `frame` (a submission, or a depth-layer pass) drawn at `size`. */
+export function packFrame(
+  frame: FrameSubmission | DepthLayerPass,
+  size: ViewSize,
+): Float32Array<ArrayBuffer> {
   const block = new Float32Array(FRAME_BYTES / 4);
   block.set(frame.viewRotation.subarray(0, 16), 0);
   block.set(frame.projection.subarray(0, 16), 16);
