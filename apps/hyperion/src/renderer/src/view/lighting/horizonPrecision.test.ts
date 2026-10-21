@@ -469,8 +469,9 @@ describe("the horizon term in f32 (R07.T6.d)", () => {
     const call = /sphere_irradiance\([^;]*;/u.exec(wgslCode(bodyDiscWgsl))?.[0] ?? "";
     expect(call).toContain("phi");
     expect(call).not.toMatch(BUILTIN_TRIGONOMETRY);
+    // The datum's angle and, under R10.T10.g's normal map, the shading normal's.
     expect(wgslCode(bodyDiscWgsl)).toMatch(
-      /let phi = preciseAtan2\(length\(cross\(normal, towards\)\), mu0\);/u,
+      /let phi_datum = preciseAtan2\(length\(cross\(normal, towards\)\), mu0_datum\);[^]*phi = preciseAtan2\(length\(cross\(tilted, towards\)\), mu0\);/u,
     );
   });
 });
