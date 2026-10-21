@@ -43,6 +43,7 @@ import {
   kDistributionMetaText,
   kDistributionPart,
   lineByLine,
+  midpointFor,
   MIX_SHARES,
   NODE_BOUND,
   QUANTISATION_BOUND,
@@ -744,10 +745,21 @@ export interface CellReductionSource {
   readonly molecularMassDa: number;
   readonly saturation?: SaturationCurve;
   /**
+   * A condensing cap for the between-node test alone (R08.T4.e's residual protocol, item (ii),
+   * decision-r08-t4e-unsold §5): the pure condensed element's saturation, the node tier, the
+   * bisection, G = 1 and the 16-bit test keeping their wider columns.
+   */
+  readonly chainSaturation?: SaturationCurve;
+  /**
    * The species' measured Rayleigh cross-section, whose column the between-node test also stops at
    * (R08.T4.g's ruling, {@link chainColumnCm2}); helium's where absent, as T4.d's tables were gated.
    */
   readonly rayleighCm2?: RayleighCrossSection;
+  /**
+   * The pressures the held first node is checked at, Pa, where they are not the 1 Pa check alone:
+   * a raised first node's (R08.T4.e's E4, `raisedFirstNodeChecksPa`).
+   */
+  readonly belowGridChecksPa?: ReadonlyArray<number>;
 }
 
 /**
@@ -767,7 +779,14 @@ export function reducePartialCell(
   const cap = (t: number, p: number): number =>
     gatedColumnCm2(source.saturation, cellNm, t, p, source.molecularMassDa);
   const chainCap = (t: number, p: number): number =>
-    chainColumnCm2(source.saturation, cellNm, t, p, source.molecularMassDa, source.rayleighCm2);
+    chainColumnCm2(
+      source.chainSaturation ?? source.saturation,
+      cellNm,
+      t,
+      p,
+      source.molecularMassDa,
+      source.rayleighCm2,
+    );
   const cell = reduceGridCell(cellNm, spectra, grid, source.policy, cap, chainCap);
   if (cell === undefined) {
     return undefined;
@@ -812,7 +831,15 @@ export function reducePartialCell(
     nearWingShare: Array.from(cell.nearWingShare),
     quantisation: quantisation.within,
     quantisationBeyondCap: quantisation.beyond,
-    belowGrid: belowGridError(cellNm, spectra, grid, source.policy, cell, source.molecularMassDa),
+    belowGrid: belowGridError(
+      cellNm,
+      spectra,
+      grid,
+      source.policy,
+      cell,
+      source.molecularMassDa,
+      source.belowGridChecksPa,
+    ),
   };
   const c = cell.worstChain;
   const mixing =
@@ -881,47 +908,198 @@ function isPartial(value: unknown): value is PartialFile {
 
 /** What the merge found of the chain test's failures, by where they lie on the temperature grid. */
 export interface FailureSorting {
-  /** The intervals [t, t + 1] whose failures can still be refined: wider than 12.5 K. */
+  /** The intervals [t, t + 1] whose failures can still be refined: wider than their finest step. */
   readonly refine: ReadonlyArray<number>;
-  /** The intervals failing at 12.5 K, recorded and `estimated`. */
+  /** The intervals failing at their finest step (12.5 K on T4.d's grid), recorded and `estimated`. */
   readonly estimated: ReadonlyArray<readonly [number, number]>;
-  /** Failures at a node's temperature, between pressure rows, which refinement cannot reach. */
+  /**
+   * Failures at a node's temperature, between pressure rows, which refinement cannot reach, and
+   * failures between temperature nodes at a pressure where a bracketing node so fails.
+   */
   readonly atNodes: ReadonlyArray<ChainError>;
+  /**
+   * A thinned table's alternate pressure nodes to keep, Pa, ascending (R08.T4.e's economy E3,
+   * decision-r08-t4ef-storage §5.3): the standard nodes inside a stored interval where the test
+   * fails at a node's temperature, or in an interval already at its finest step. Empty for a table
+   * on every standard pressure.
+   */
+  readonly keepPressuresPa: ReadonlyArray<number>;
+  /**
+   * The lattice midpoints to add, Pa, ascending (decision-r08-t4e-unsold's follow-up, the 581 nm
+   * residual): below 1 MPa, the 8-a-decade midpoint of a 4-a-decade interval, both its rows held,
+   * where a failure at a node's temperature lies there, or one between nodes under the refinement
+   * economy, whose read through exact rows is the larger part of its error.
+   */
+  readonly addMidpointsPa: ReadonlyArray<number>;
+}
+
+/**
+ * The standard pressure nodes ({@link STORED_PRESSURES_PA}) strictly between the two stored nodes
+ * about a pressure, Pa: a thinned table's dropped alternates there, or none where the pressure lies
+ * at a stored node or between two standard neighbours.
+ */
+export function droppedNodesAbout(
+  pressuresPa: ReadonlyArray<number>,
+  pressurePa: number,
+): ReadonlyArray<number> {
+  const at = (p: number): boolean => Math.abs(p / pressurePa - 1) < 1e-9;
+  if (pressuresPa.some(at)) {
+    return [];
+  }
+  const i = pressuresPa.findIndex(
+    (p, k) => p < pressurePa && pressurePa < (pressuresPa[k + 1] ?? 0),
+  );
+  if (i < 0) {
+    return [];
+  }
+  const lo = (pressuresPa[i] ?? 0) * (1 + 1e-9);
+  const hi = (pressuresPa[i + 1] ?? 0) * (1 - 1e-9);
+  return STORED_PRESSURES_PA.filter((p) => p > lo && p < hi);
+}
+
+/** A test state's key, its temperature and its pressure to 9 figures. */
+function stateKey(temperatureK: number, pressurePa: number): string {
+  return `${temperatureK} ${pressurePa.toPrecision(9)}`;
+}
+
+/** A set's values, ascending. */
+function ascending(values: ReadonlySet<number>): number[] {
+  return [...values].toSorted((a, b) => a - b);
 }
 
 /**
  * The chain test's failures sorted onto the temperature grid: a failure between nodes t and t + 1
  * refines that interval while it is wider than {@link FINEST_STEP_K}, and is recorded and
  * `estimated` once it is not (`decision-r08-t4d-kdist-chain.md`, ruling 4).
+ *
+ * @remarks
+ * On a thinned table (R08.T4.e's economy E3, `pressuresPa` given) a failure whose pressure lies in a
+ * stored interval holding a dropped alternate keeps that alternate in place of refusing, where the
+ * failure is at a node's temperature, or of being `estimated`, where its interval is at its finest
+ * step: E3 drops an alternate only where the between-node test passes without it. Where any failure
+ * at a node's temperature asks for an alternate, the pass keeps those alternates alone and refines
+ * no interval, since a dropped node also fails the test between temperature nodes at its pressure;
+ * otherwise a failure between temperature nodes refines them, as on any table.
+ *
+ * A failure between temperature nodes is not refined, nor `estimated`, where a bracketing node fails
+ * at the same pressure between the same rows with no alternate to keep: it is the pressure read's
+ * error, not the temperature's, and is reported with that node's failure, which the merge refuses
+ * (R08.T4.e's residual protocol, item (i), decision-r08-t4e-unsold §5).
+ *
+ * Such a failure, or one at a node's temperature, at the 8-a-decade midpoint of a 4-a-decade interval
+ * below 1 MPa whose rows the table holds, and whose read through exact rows is the larger part of its
+ * error, asks for that midpoint ({@link midpointFor}), once an interval, and the pass refines no
+ * interval (decision-r08-t4e-unsold's follow-up, the 581 nm residual); one still standing after it
+ * is refused. The failures within the chain test's cap alone are listed, so each lies within every
+ * cap.
+ *
+ * @param finestStepK - The finest step an interval from a lower node refines to, K:
+ *   {@link FINEST_STEP_K}, or on R08.T4.e's ladders a quarter of E1's ladder step
+ *   (decision-r08-t4ef-storage §5.3; decision-r08-t4e-budget §3).
+ * @param pressuresPa - The table's stored pressures, Pa, ascending, for a thinned table's
+ *   alternates; none for a table on every standard pressure.
  */
 export function sortFailures(
   temperaturesK: ReadonlyArray<number>,
   failures: ReadonlyArray<ChainError>,
+  finestStepK: (lowerK: number) => number = () => FINEST_STEP_K,
+  pressuresPa: ReadonlyArray<number> = STORED_PRESSURES_PA,
 ): FailureSorting {
   const refine = new Set<number>();
   const estimated = new Map<number, readonly [number, number]>();
   const atNodes: ChainError[] = [];
-  for (const f of failures) {
-    const t = temperaturesK.findIndex(
+  // Alternates a failure at a node's temperature asks for, and those an interval at its finest step
+  // asks for.
+  const keepAtNodes = new Set<number>();
+  const keepAtFinest = new Set<number>();
+  const intervalOf = (f: ChainError): number =>
+    temperaturesK.findIndex(
       (lo, i) => lo < f.temperatureK && f.temperatureK < (temperaturesK[i + 1] ?? -Infinity),
     );
+  // The node temperatures and pressures at which the test fails between rows with no alternate to
+  // keep.
+  const unreachable = new Set(
+    failures
+      .filter((f) => intervalOf(f) < 0 && droppedNodesAbout(pressuresPa, f.pressurePa).length === 0)
+      .map((f) => stateKey(f.temperatureK, f.pressurePa)),
+  );
+  // The midpoints the read's own failures ask for.
+  const midpoints = new Set<number>();
+  const readFailure = (f: ChainError): void => {
+    atNodes.push(f);
+    const midpoint = midpointFor(pressuresPa, f.pressurePa);
+    if (midpoint !== undefined && (f.exactRowsError ?? 0) > f.error / 2) {
+      midpoints.add(midpoint);
+    }
+  };
+  for (const f of failures) {
+    const t = intervalOf(f);
+    const dropped = droppedNodesAbout(pressuresPa, f.pressurePa);
     if (t < 0) {
-      atNodes.push(f);
+      if (dropped.length > 0) {
+        dropped.forEach((p) => keepAtNodes.add(p));
+      } else {
+        readFailure(f);
+      }
       continue;
     }
     const lo = temperaturesK[t] ?? 0;
     const hi = temperaturesK[t + 1] ?? 0;
-    if (hi - lo > FINEST_STEP_K + 1e-9) {
+    if (
+      unreachable.has(stateKey(lo, f.pressurePa)) ||
+      unreachable.has(stateKey(hi, f.pressurePa))
+    ) {
+      readFailure(f);
+    } else if (hi - lo > finestStepK(lo) + 1e-9) {
       refine.add(t);
+    } else if (dropped.length > 0) {
+      dropped.forEach((p) => keepAtFinest.add(p));
     } else {
       estimated.set(t, [lo, hi]);
     }
   }
+  // A failure at a node's temperature shows the dropped alternates' cost alone, so they are kept
+  // first and the temperatures refined only where the test still fails between nodes with them.
+  if (keepAtNodes.size > 0) {
+    return {
+      refine: [],
+      estimated: [],
+      atNodes,
+      keepPressuresPa: ascending(keepAtNodes),
+      addMidpointsPa: [],
+    };
+  }
+  // The read's own failures take their midpoints first, as the alternates are kept first.
+  if (midpoints.size > 0) {
+    return {
+      refine: [],
+      estimated: [],
+      atNodes,
+      keepPressuresPa: [],
+      addMidpointsPa: ascending(midpoints),
+    };
+  }
   return {
-    refine: [...refine].toSorted((a, b) => a - b),
+    refine: ascending(refine),
     estimated: [...estimated.entries()].toSorted((a, b) => a[0] - b[0]).map(([, v]) => v),
     atNodes,
+    keepPressuresPa: ascending(keepAtFinest),
+    addMidpointsPa: [],
   };
+}
+
+/** A thinned table's stored pressures with its kept alternates, Pa, ascending. */
+export function withKeptPressures(
+  pressuresPa: ReadonlyArray<number>,
+  keepPa: ReadonlyArray<number>,
+): number[] {
+  const all = [...pressuresPa];
+  for (const p of keepPa) {
+    if (!all.some((q) => Math.abs(q / p - 1) < 1e-9)) {
+      all.push(p);
+    }
+  }
+  return all.toSorted((a, b) => a - b);
 }
 
 /** The grid with each interval to refine halved. */
@@ -961,8 +1139,16 @@ function broadeningRecords(partial: PartialFile): string {
 
 /** What merging a species' partials comes to. */
 export type MergeOutcome =
-  /** The chain test fails between nodes wider than 12.5 K apart: run again on these nodes. */
-  | { readonly kind: "refine"; readonly temperaturesK: ReadonlyArray<number> }
+  /**
+   * The chain test fails between nodes wider than their finest step apart (12.5 K on T4.d's grid):
+   * run again on these nodes; on a thinned table where it fails between pressure nodes with an alternate dropped, on these
+   * pressures too (R08.T4.e's E3), given only where they change.
+   */
+  | {
+      readonly kind: "refine";
+      readonly temperaturesK: ReadonlyArray<number>;
+      readonly pressuresPa?: ReadonlyArray<number>;
+    }
   /** A failure refinement cannot reach, at a node or of the mix or the node tier. */
   | { readonly kind: "refused"; readonly reason: string }
   /** The species' sidecar and its binary parts, each part's file named. */
@@ -992,6 +1178,11 @@ export interface TableSource {
   readonly reduction: string;
   /** The sidecar's description where it is not R08.T4.d's: an ExoMol list's, naming its licence. */
   readonly description: string | undefined;
+  /**
+   * The finest temperature step a failing interval refines to from its lower node, K, where it is
+   * not {@link FINEST_STEP_K}: a quarter of the ladder's step (R08.T4.e's E1).
+   */
+  readonly finestStepK?: (lowerK: number) => number;
 }
 
 /** A HITRAN source as its sidecar names it: its lines file and its TIPS files the inputs. */
@@ -1059,6 +1250,8 @@ export function mergePartials(
   const sorting = sortFailures(
     temperaturesK,
     cells.flatMap((c) => c.failures),
+    source.finestStepK,
+    first.pressuresPa,
   );
   const nodeFailures = cells.filter(
     (c) => c.worstNodeError + c.quantisation > NODE_BOUND || c.quantisation > QUANTISATION_BOUND,
@@ -1114,8 +1307,13 @@ export function mergePartials(
   log(
     `${source.species}: ${cells.length} cells; worst node ${nodeWorst.toExponential(2)} (quantisation ${quantisationWorst.toExponential(2)}), worst chain ${chainWorst.toExponential(2)}, beyond cap ${beyondWorst.toExponential(2)}, 1 Pa ${belowWorst.toExponential(2)}${mixingWorst === undefined ? "" : `, mixing ${mixingWorst.toExponential(2)}`}\n`,
   );
-  if (sorting.refine.length > 0) {
-    return { kind: "refine", temperaturesK: refinedTemperatures(temperaturesK, sorting.refine) };
+  const added = [...sorting.keepPressuresPa, ...sorting.addMidpointsPa];
+  if (sorting.refine.length > 0 || added.length > 0) {
+    return {
+      kind: "refine",
+      temperaturesK: refinedTemperatures(temperaturesK, sorting.refine),
+      ...(added.length === 0 ? {} : { pressuresPa: withKeptPressures(first.pressuresPa, added) }),
+    };
   }
   if (sorting.atNodes.length > 0 || nodeFailures.length > 0) {
     return {
@@ -1210,7 +1408,7 @@ export function mergePartials(
     kind: "written",
     sidecar: kDistributionMetaText(meta, grid, listing),
     parts: parts.map(({ file, bytes }) => ({ file, bytes })),
-    summary: `${source.species}: written in ${parts.length} parts, ${total} bytes, ${meta.linearCells} cells of G = 1; ${sorting.estimated.length} intervals estimated at 12.5 K (${sorting.estimated.map(([a, b]) => `${a}-${b} K`).join(", ")})\n`,
+    summary: `${source.species}: written in ${parts.length} parts, ${total} bytes, ${meta.linearCells} cells of G = 1; ${sorting.estimated.length} intervals estimated at their finest step (${sorting.estimated.map(([a, b]) => `${a}-${b} K`).join(", ")})\n`,
   };
 }
 

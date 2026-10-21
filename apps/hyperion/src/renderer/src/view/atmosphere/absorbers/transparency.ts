@@ -6,10 +6,10 @@
  *
  * @remarks
  * Every row the substance registry flags `absorber` has cross-sections, a committed line table
- * (R08.T4.d's and R08.T4.g's k-distributions, `kDistribution.ts`), an entry of
- * {@link PENDING_ABSORBERS} with its cell means while R08.T4.e and T4.f are unbuilt, or an entry of
- * {@link NO_VISIBLE_ABSORPTION} (R08.T19 holds the client to it). A species leaves R08.T4.d's and
- * R08.T4.g's pending lists when its table is committed.
+ * (R08.T4.d's, R08.T4.e's and R08.T4.g's k-distributions, `kDistribution.ts`), an entry of
+ * {@link PENDING_ABSORBERS} with its cell means for what a later task, or a deferral, leaves, or an
+ * entry of {@link NO_VISIBLE_ABSORPTION} (R08.T19 holds the client to it). A species leaves
+ * R08.T4.d's, R08.T4.e's and R08.T4.g's pending lists when its table is committed.
  * - A transparent species takes no column and no label.
  * - A pending one draws nothing and is labelled `ATMOSPHERE: APPROXIMATE` meanwhile, under Design
  *   note 12's τ rule, as any species without cross-sections is, unless R08.T10.a finds it
@@ -59,7 +59,12 @@ export interface TransparentSpecies {
   readonly reason: TransparencyReason;
   /**
    * The profile temperature, K, below which the statement holds, or `undefined` at every
-   * temperature. Above it the species is pending ({@link PENDING_ABSORBERS}).
+   * temperature (the `belowK` contract, ruled 2026-10-19). Below it the species is transparent,
+   * with no column and no label, whatever data the client holds for it (`absorbers.ts`'s
+   * `absorberSpecs` consults it before any table). At and above it the key has exactly one answer:
+   * a committed table or cross-sections whose first temperature node is at or below it (a
+   * visibility floor's, R08.T4.e), or a pending entry whose first node is at or above it
+   * ({@link PENDING_ABSORBERS}; He's form).
    */
   readonly belowK: number | undefined;
   /** The bands, their catalogued coverage and the check's figures, each with its source. */
@@ -257,7 +262,11 @@ const EQUIVALENT_WIDTH_METHOD =
  * R08.T4.h states seven ions none by the third reason (`underEquivalentWidthBound`), each under
  * 10⁻³ of every bin's light through 4,600 K, and below 5,000 K where it stays under at 5,000 K
  * too; above its limit each is pending in R08.T4.e (`atomicBounds.json`), as He is. Mg⁺ is among
- * them: on Kurucz's full list its 448.1 nm lines take 7.2 × 10⁻⁴ at 4,600 K.
+ * them: on Kurucz's full list its 448.1 nm lines take 7.2 × 10⁻⁴ at 4,600 K. R08.T4.e draws Mg⁺
+ * and Si⁺ from their limit by its tables (the `belowK` contract's table branch), defers Ni⁺, and
+ * adds O, stated none to 5,000 K in Na⁺'s form (decision-r08-t4e-budget §7), and H and Zn, each
+ * stated none below its visibility floor, 3,300 K on the 10% ladder, from which its table draws
+ * it (the floors of the deferred Ca⁺, Ti⁺ and Fe⁺ are recorded in the plan, their entries kept).
  */
 export const NO_VISIBLE_ABSORPTION: ReadonlyArray<TransparentSpecies> = [
   {
@@ -327,7 +336,8 @@ export const NO_VISIBLE_ABSORPTION: ReadonlyArray<TransparentSpecies> = [
       EQUIVALENT_WIDTH_METHOD +
       " give a largest share of 7.2e-4 at 4600 K, in the 431-456 nm bin (Mg II 448.24 and 448.26 nm, " +
       "3d 2D - 4f 2F, from 8.86 eV), against the science ruling's 7.1e-4 from NIST ASD's lines; " +
-      "1.7e-3 at 5000 K, so the statement holds below 4600 K and Mg+ is pending above it (R08.T4.e).",
+      "1.7e-3 at 5000 K, so the statement holds below 4600 K and Mg+ is drawn above it by " +
+      "R08.T4.e's table (its nodes 4400, 4600, 4800 and 5000 K, the 4400 K node shaping its cubic).",
   },
   {
     species: "Al+",
@@ -353,7 +363,8 @@ export const NO_VISIBLE_ABSORPTION: ReadonlyArray<TransparentSpecies> = [
       " give a largest share to 4600 K of 3.3e-4 at 4600 K, in the 380-405 nm bin (Si II 385.71 and " +
       "386.37 nm, from 6.86 eV), against the science ruling's 4.8e-4 from NIST ASD's lines; 1.3e-3 " +
       "at 5000 K (634.89 and 637.31 nm, from 8.12 eV), so the statement holds below 4600 K and Si+ " +
-      "is pending above it (R08.T4.e).",
+      "is drawn above it by R08.T4.e's table (its nodes 4400, 4600, 4800 and 5000 K, the 4400 K " +
+      "node shaping its cubic).",
   },
   {
     species: "K+",
@@ -379,7 +390,7 @@ export const NO_VISIBLE_ABSORPTION: ReadonlyArray<TransparentSpecies> = [
       " give a largest share to 4600 K of 6.7e-4 at 4600 K, in the 405-431 nm bin, 58% of it Ni II " +
       "406.82 nm ((1G)4s 2G - (3F)4p 2F, log gf -1.29, from 4.03 eV, saturated), against the " +
       "science ruling's 1.5e-4; 1.5e-3 at 5000 K, so the statement holds below 4600 K and Ni+ is " +
-      "pending above it (R08.T4.e).",
+      "pending above it (R08.T4.e, deferred past its byte budget: decision-r08-t4e-budget).",
   },
   {
     species: "Zn+",
@@ -400,6 +411,56 @@ export const NO_VISIBLE_ABSORPTION: ReadonlyArray<TransparentSpecies> = [
       "probability; at Kurucz's computed gf it would be near 1e-6 at 5000 K. Above 5000 K it is " +
       "pending (R08.T4.e, estimated).",
   },
+  {
+    species: "O",
+    reason: "underEquivalentWidthBound",
+    belowK: 5_000,
+    evidence:
+      "O I's lines in the range are the forbidden [O I] 630.03 and 636.38 nm (air; 2p4 3P2,1 - " +
+      "2p4 1D2, from 0 and 0.02 eV) and permitted lines from 9.1 eV up. On R. L. Kurucz's " +
+      "gf0800.all (160 lines in 360-780 nm; Kurucz 2011, Can. J. Phys. 89, 417), " +
+      EQUIVALENT_WIDTH_METHOD +
+      " give a largest share to 4600 K of 4.9e-4 at 4600 K and 5.8e-4 at 5000 K, in the 608-633 nm " +
+      "bin ([O I] 630.03 nm, log gf -9.82, tau0 near 2.8 at the reference column, so that the Doppler " +
+      "curve of growth keeps about half its linear width, main's check giving 4.8e-4), so the " +
+      "statement holds below 5000 K (R08.T4.e; decision-r08-t4e-budget section 7). P. J. Storey " +
+      "and C. J. Zeippen's A = 6.446e-3 s-1 for the line (Mon. Not. R. Astron. Soc. 312 (2000) 813, " +
+      "Table 4, as main's ruling gives it, not re-read; log gf near -9.72, above Kurucz's) would " +
+      "raise the share by about 10%, still under 1e-3: the statement stays on Kurucz's list. On " +
+      "the flat part of its curve of growth its " +
+      "share reaches about 1e-3 at 100 times the reference column (1.6e-3 from 1000 K). Above " +
+      "5000 K it is pending (R08.T4.e).",
+  },
+  {
+    species: "H",
+    reason: "underEquivalentWidthBound",
+    belowK: 3_300,
+    evidence:
+      "H I's lines in the range are the Balmer series, from n = 2, 10.2 eV up. On R. L. Kurucz's " +
+      "gf0100.all (Kurucz 2011, Can. J. Phys. 89, 417), " +
+      EQUIVALENT_WIDTH_METHOD +
+      ", taken instead at the nodes of R08.T4.e's 10% ladder (decision-r08-t4e-budget section 3) with " +
+      "the free H atoms as the column (the H2-bound nuclei left out), give a largest share of 4.9e-5 " +
+      "at 3300 K and 1.0e-3 at 3600 K, in the 633-659 nm bin (H-alpha, 656.28 nm air): H's " +
+      "visibility floor is 3300 K, below which the statement holds, and from which R08.T4.e's " +
+      "table draws it. At 100 times the reference column the share reaches 1e-3 from 3300 K (1.9e-3 " +
+      "there). A non-LTE thermosphere is not modelled.",
+  },
+  {
+    species: "Zn",
+    reason: "underEquivalentWidthBound",
+    belowK: 3_300,
+    evidence:
+      "Zn I's lines in the range arise 4.0 eV up or more. On R. L. Kurucz's gf3000.all (Kurucz " +
+      "2011, Can. J. Phys. 89, 417), " +
+      EQUIVALENT_WIDTH_METHOD +
+      ", taken instead at the nodes of R08.T4.e's 10% ladder (decision-r08-t4e-budget section 3), " +
+      "give a largest share of 8.2e-4 at 3300 K and 1.3e-3 at 3600 K, in the 456-481 nm bin (Zn I " +
+      "481.05 nm air, 4s4p 3P2 - 4s5s 3S1, from 4.08 eV), against the science ruling's 3.1e-3 at " +
+      "4600 K: Zn's visibility floor is 3300 K, below which the statement holds, and from which " +
+      "R08.T4.e's table draws it. At 100 times the reference column the share reaches 1e-3 from " +
+      "2750 K.",
+  },
 ];
 
 /** A pending absorber before its cell means are attached. */
@@ -416,83 +477,92 @@ interface PendingListing {
 
 /**
  * The species and pairs whose absorption over the bake range R08.T4.d–g draw
- * (`decision-r08-t4b-t12c.md`, follow-ups 2 to 5). A resonance line's far wing, which grows with
- * its perturbers' density, is a pair of the atom and each perturber (`K+H2`, `K+He`; follow-up 5,
- * ruling 2), beside the atom's own entry per atom. R08.T4.h adds the interim entries of the atoms
- * and ions R08.T4.e draws and the entries of its stated nones above their limits
- * (`atomicBounds.json`).
+ * (`decision-r08-t4b-t12c.md`, follow-ups 2 to 5). R08.T4.e's tables and the alkali pairs
+ * (`absorbers/alkaliPairs.json`) replace the atoms' entries they draw. What stays for R08.T4.e: He
+ * above 5,000 K; the stages it defers past its byte budget (decision-r08-t4e-budget §§4–5), each
+ * with the entry it had, T4.c's in `bounds.json` or R08.T4.h's interim one in `atomicBounds.json`;
+ * the stated nones above their limits (`atomicBounds.json`), O's among them; and H₂⁻'s free–free.
  */
 const PENDING: ReadonlyArray<PendingListing> = [
-  { key: "Na", task: "R08.T4.e", what: "Na D (589.0 and 589.6 nm), pressure-broadened" },
-  { key: "K", task: "R08.T4.e", what: "K I's lines in the range, per atom (404.5 and 404.8 nm)" },
-  {
-    key: "K+H2",
-    task: "R08.T4.e",
-    what: "the far blue wing of K I 766.7 and 770.1 nm per (K, H2) pair, from Allard et al.",
-  },
-  {
-    key: "K+He",
-    task: "R08.T4.e",
-    what: "the far blue wing of K I 766.7 and 770.1 nm per (K, He) pair, from Allard et al.",
-  },
-  { key: "Ca", task: "R08.T4.e", what: "Ca I 422.7 nm" },
-  { key: "Cr", task: "R08.T4.e", what: "Cr I 425.4, 427.5 and 429.0 nm" },
-  { key: "Si", task: "R08.T4.e", what: "Si I 390.6 nm" },
-  { key: "Mg", task: "R08.T4.e", what: "Mg I's b triplet (516.7, 517.3 and 518.4 nm)" },
-  { key: "Ti", task: "R08.T4.e", what: "Ti I's lines in the range" },
-  { key: "Fe", task: "R08.T4.e", what: "Fe I's lines in the range" },
-  { key: "H", task: "R08.T4.e", what: "H I's Balmer lines in LTE, H-alpha 656.3 nm and up" },
-  { key: "O", task: "R08.T4.e", what: "the forbidden [O I] 630.0 and 636.4 nm lines" },
   { key: "He", task: "R08.T4.e", what: "He I's lines in the range, for profiles above 5000 K" },
-  { key: "Ca+", task: "R08.T4.e", what: "Ca II's H and K lines (393.4 and 396.8 nm)" },
-  { key: "Fe+", task: "R08.T4.e", what: "Fe II's lines in the range" },
-  { key: "Ti+", task: "R08.T4.e", what: "Ti II's lines in the range" },
-  // R08.T4.h's interim entries, which R08.T4.e's tables replace.
-  { key: "Al", task: "R08.T4.e", what: "Al I 394.4 and 396.2 nm" },
+  // The stages R08.T4.e defers past its byte budget (decision-r08-t4e-budget §§4-5), each keeping
+  // its entry: T4.c's in bounds.json, T4.h's interim ones in atomicBounds.json.
+  {
+    key: "Si",
+    task: "R08.T4.e",
+    what: "Si I 390.6 nm, deferred past T4.e's byte budget (main, 2026-10-19)",
+  },
+  {
+    key: "Ti",
+    task: "R08.T4.e",
+    what: "Ti I's lines in the range, deferred past T4.e's byte budget (main, 2026-10-19)",
+  },
+  {
+    key: "Ca",
+    task: "R08.T4.e",
+    what: "Ca I 422.7 nm, deferred past T4.e's byte budget (main, 2026-10-19)",
+  },
+  {
+    key: "Ca+",
+    task: "R08.T4.e",
+    what: "Ca II's H and K lines (393.4 and 396.8 nm), deferred past T4.e's byte budget (main, 2026-10-19)",
+  },
+  {
+    key: "Fe+",
+    task: "R08.T4.e",
+    what: "Fe II's lines in the range, deferred past T4.e's byte budget (main, 2026-10-19)",
+  },
+  {
+    key: "Ti+",
+    task: "R08.T4.e",
+    what: "Ti II's lines in the range, deferred past T4.e's byte budget (main, 2026-10-19)",
+  },
+  {
+    key: "Al",
+    task: "R08.T4.e",
+    what: "Al I 394.4 and 396.2 nm, deferred past T4.e's byte budget (main, 2026-10-19)",
+  },
   {
     key: "V",
     task: "R08.T4.e",
-    what: "V I's lines in the range, strongest at 437.9, 438.5, 439.0, 411.2 and 384.1 nm",
+    what: "V I's lines in the range, strongest at 437.9, 438.5, 439.0, 411.2 and 384.1 nm, deferred past T4.e's byte budget (main, 2026-10-19)",
   },
   {
     key: "Mn",
     task: "R08.T4.e",
-    what: "Mn I 403.1, 403.3 and 403.4 nm and its 2.1-2.3 eV lines",
+    what: "Mn I 403.1, 403.3 and 403.4 nm and its 2.1-2.3 eV lines, deferred past T4.e's byte budget (main, 2026-10-19)",
   },
   {
     key: "Ni",
     task: "R08.T4.e",
-    what: "Ni I's lines in the range, strongest at 385.8, 380.7 and 547.7 nm",
+    what: "Ni I's lines in the range, strongest at 385.8, 380.7 and 547.7 nm, deferred past T4.e's byte budget (main, 2026-10-19)",
   },
-  { key: "Zn", task: "R08.T4.e", what: "Zn I 468.0, 472.2 and 481.1 nm (4.0 eV) and 636.2 nm" },
-  { key: "V+", task: "R08.T4.e", what: "V II's lines (387-404 nm, from 1.4-1.8 eV)" },
+  {
+    key: "V+",
+    task: "R08.T4.e",
+    what: "V II's lines (387-404 nm, from 1.4-1.8 eV), deferred past T4.e's byte budget (main, 2026-10-19)",
+  },
   {
     key: "Cr+",
     task: "R08.T4.e",
-    what: "Cr II's lines (455.9 and 458.8 nm and others, from 3.9-4.1 eV)",
+    what: "Cr II's lines (455.9 and 458.8 nm and others, from 3.9-4.1 eV), deferred past T4.e's byte budget (main, 2026-10-19)",
   },
-  { key: "Mn+", task: "R08.T4.e", what: "Mn II's lines (412.8 and 420.5 nm, and 432-440 nm)" },
-  // R08.T4.h's stated nones above their limits, as He is: R08.T4.e draws them from the limit as a
-  // visibility floor, and its range, to 5,000 K, does not draw them above 5,000 K.
+  {
+    key: "Mn+",
+    task: "R08.T4.e",
+    what: "Mn II's lines (412.8 and 420.5 nm, and 432-440 nm), deferred past T4.e's byte budget (main, 2026-10-19)",
+  },
+  // The stated nones above their limits, as He is: R08.T4.e's range, to 5,000 K, does not draw
+  // them above 5,000 K. Mg⁺ and Si⁺ are drawn from their limit as a visibility floor by its tables.
   {
     key: "Na+",
     task: "R08.T4.e",
     what: "Na II's lines in the range above 5000 K, which R08.T4.e's range (to 5000 K) does not draw",
   },
   {
-    key: "Mg+",
-    task: "R08.T4.e",
-    what: "Mg II 448.2 nm and its other lines above 4600 K; R08.T4.e's range (to 5000 K) does not draw them above 5000 K",
-  },
-  {
     key: "Al+",
     task: "R08.T4.e",
     what: "Al II's lines in the range above 5000 K, which R08.T4.e's range (to 5000 K) does not draw",
-  },
-  {
-    key: "Si+",
-    task: "R08.T4.e",
-    what: "Si II's lines in the range above 4600 K; R08.T4.e's range (to 5000 K) does not draw them above 5000 K",
   },
   {
     key: "K+",
@@ -502,7 +572,12 @@ const PENDING: ReadonlyArray<PendingListing> = [
   {
     key: "Ni+",
     task: "R08.T4.e",
-    what: "Ni II's lines in the range above 4600 K; R08.T4.e's range (to 5000 K) does not draw them above 5000 K",
+    what: "Ni II's lines in the range above 4600 K, deferred past T4.e's byte budget (main, 2026-10-19)",
+  },
+  {
+    key: "O",
+    task: "R08.T4.e",
+    what: "O I's lines in the range ([O I] 630.0 and 636.4 nm) above 5000 K, which R08.T4.e's range (to 5000 K) does not draw",
   },
   {
     key: "Zn+",

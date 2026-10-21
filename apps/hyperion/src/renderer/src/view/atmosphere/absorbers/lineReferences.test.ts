@@ -6,6 +6,8 @@ import { absorberTransmittance, type AbsorberCurve } from "../absorbers";
 import {
   cellSigmasAt,
   cellTransmittance,
+  curveRowsPa,
+  isLatticeMidpoint,
   type KDistributionTable,
   kDistributionAt,
   loadKDistributions,
@@ -13,6 +15,7 @@ import {
 } from "./kDistribution";
 import nitrousOxide from "./exomol/lineReferencesN2O.json" with { type: "json" };
 import ammonia from "./exomol/lineReferencesNH3.json" with { type: "json" };
+import atoms from "./lineReferencesAtoms.json" with { type: "json" };
 import oxygen from "./lineReferencesO2.json" with { type: "json" };
 import water from "./lineReferencesH2O.json" with { type: "json" };
 
@@ -59,7 +62,14 @@ interface TableRows {
  *   between its own nodes at each row (`absorbers.ts`'s `absorberCurvePressures`).
  */
 function tableRows(kd: SpeciesKDistribution, rowShift: number): TableRows {
-  const rowPressuresPa = kd.pressuresPa.map((p) => p * rowShift);
+  // A thinned table's rows are the standard pressures over its span (R08.T4.e's E3), and the
+  // midpoints it holds (decision-r08-t4e-unsold's follow-up), as a slot holding it alone reads it.
+  const rowPressuresPa = [
+    ...curveRowsPa(kd.pressuresPa),
+    ...kd.pressuresPa.filter(isLatticeMidpoint),
+  ]
+    .toSorted((a, b) => a - b)
+    .map((p) => p * rowShift);
   return { kd, rowPressuresPa, sigmas: rowPressuresPa.map((p) => cellSigmasAt(kd, p)) };
 }
 
@@ -107,73 +117,127 @@ const WATER: References = water;
 const AMMONIA: References = ammonia;
 const NITROUS_OXIDE: References = nitrousOxide;
 
-describe.each([
+// R08.T4.e's atoms and ions: their strongest cells, about each table's middle node.
+const ATOMS: ReadonlyArray<References> = atoms.references;
+
+/** Every committed species' references, by its name. */
+const ALL_REFERENCES: ReadonlyArray<readonly [string, References]> = [
   ["O₂", OXYGEN],
   ["H₂O", WATER],
   ["NH₃", AMMONIA],
   ["N₂O", NITROUS_OXIDE],
-])("%s's committed cells against their line-by-line curves", (_, references) => {
-  let table: KDistributionTable | undefined;
-  beforeAll(async () => {
-    [table] = await loadKDistributions([references.species], inlinePart);
-  }, 120_000); // M2 worst 0.65 s, desktop over 10 s under load (2026-10-15): 100× M2
-  const states = references.cells.flatMap((cell) =>
-    cell.states.map((state) => [cell.nm, state] as const),
-  );
+  ...ATOMS.map((r): readonly [string, References] => [r.species, r]),
+];
 
-  // The block's states share two temperatures, so the table is read once at each, and once more
-  // for each row shift there, by the first test that needs it, rather than whole in every test.
-  const kdAt = memoised(
-    (temperatureK: number): SpeciesKDistribution => {
-      if (table === undefined) {
-        throw new Error(`no committed table for ${references.species}`);
+describe.each(ALL_REFERENCES)(
+  "%s's committed cells against their line-by-line curves",
+  (_, references) => {
+    let table: KDistributionTable | undefined;
+    beforeAll(async () => {
+      [table] = await loadKDistributions([references.species], inlinePart);
+    }, 120_000); // M2 worst 0.65 s, desktop over 10 s under load (2026-10-15): 100× M2
+    const states = references.cells.flatMap((cell) =>
+      cell.states.map((state) => [cell.nm, state] as const),
+    );
+
+    // The block's states share two temperatures, so the table is read once at each, and once more
+    // for each row shift there, by the first test that needs it, rather than whole in every test.
+    const kdAt = memoised(
+      (temperatureK: number): SpeciesKDistribution => {
+        if (table === undefined) {
+          throw new Error(`no committed table for ${references.species}`);
+        }
+        return kDistributionAt(table, temperatureK);
+      },
+      (temperatureK) => String(temperatureK),
+    );
+    const rowsAt = memoised(
+      ([temperatureK, rowShift]: readonly [number, number]): TableRows =>
+        tableRows(kdAt(temperatureK), rowShift),
+      ([temperatureK, rowShift]) => `${String(temperatureK)} ${String(rowShift)}`,
+    );
+
+    /** The client's curve at a state, from the loaded table. */
+    function client(nm: number, state: ReferenceState, rowShift = 1): number[] {
+      return clientCurve(rowsAt([state.temperatureK, rowShift]), nm, state);
+    }
+
+    it.each(states)(
+      "hold the %s nm cell's curve to line by line within its tier (%o)",
+      (nm, state) => {
+        const errors = client(nm, state).map((t, k) =>
+          Math.abs(t - (state.lineByLine[k] ?? Number.NaN)),
+        );
+        expect(Math.max(...errors)).toBeLessThanOrEqual(
+          state.kind === "node" ? NODE_BOUND : CHAIN_BOUND,
+        );
+      },
+    );
+
+    it.each(states)(
+      "hold the %s nm cell's curve to the reduction's f64 one within 2 × 10⁻⁴ (%o)",
+      (nm, state) => {
+        // The references are written to 6 significant figures, under 10⁻⁶ of T.
+        const errors = client(nm, state).map((t, k) => Math.abs(t - (state.f64[k] ?? Number.NaN)));
+        expect(Math.max(...errors)).toBeLessThanOrEqual(QUANTISATION_BOUND + 1e-6);
+      },
+    );
+
+    it.each(states)(
+      "hold the %s nm cell's curve within the chain's tier on another species' rows, half a node off its own (%o)",
+      (nm, state) => {
+        // A species sharing a profile's rows with a dominant one of another broadening factor: its σ
+        // read between its nodes at each row, then τ between the rows. Half a node, 10^(1/8), is the
+        // farthest a row falls from both of its neighbouring nodes below 1 MPa.
+        const errors = client(nm, state, 10 ** (1 / 8)).map((t, k) =>
+          Math.abs(t - (state.lineByLine[k] ?? Number.NaN)),
+        );
+        expect(Math.max(...errors)).toBeLessThanOrEqual(CHAIN_BOUND);
+      },
+    );
+  },
+);
+
+/** A state's three columns where its line-by-line transmittance lies nearest 0.8, 0.5 and 0.2. */
+function threeColumns(state: ReferenceState): ReadonlyArray<number> {
+  return [0.8, 0.5, 0.2].map((target) => {
+    let best = 0;
+    for (const [k, t] of state.lineByLine.entries()) {
+      if (Math.abs(t - target) < Math.abs((state.lineByLine[best] ?? Infinity) - target)) {
+        best = k;
       }
-      return kDistributionAt(table, temperatureK);
-    },
-    (temperatureK) => String(temperatureK),
-  );
-  const rowsAt = memoised(
-    ([temperatureK, rowShift]: readonly [number, number]): TableRows =>
-      tableRows(kdAt(temperatureK), rowShift),
-    ([temperatureK, rowShift]) => `${String(temperatureK)} ${String(rowShift)}`,
-  );
+    }
+    return best;
+  });
+}
 
-  /** The client's curve at a state, from the loaded table. */
-  function client(nm: number, state: ReferenceState, rowShift = 1): number[] {
-    return clientCurve(rowsAt([state.temperatureK, rowShift]), nm, state);
-  }
+describe.each(ATOMS.map((r): readonly [string, References] => [r.species, r]))(
+  "%s's strongest cells' equivalent widths (R08.T4.e)",
+  (_, references) => {
+    let table: KDistributionTable | undefined;
+    beforeAll(async () => {
+      [table] = await loadKDistributions([references.species], inlinePart);
+    }, 120_000);
+    const states = references.cells.flatMap((cell) =>
+      cell.states.filter((s) => s.kind === "node").map((state) => [cell.nm, state] as const),
+    );
 
-  it.each(states)(
-    "hold the %s nm cell's curve to line by line within its tier (%o)",
-    (nm, state) => {
-      const errors = client(nm, state).map((t, k) =>
-        Math.abs(t - (state.lineByLine[k] ?? Number.NaN)),
-      );
-      expect(Math.max(...errors)).toBeLessThanOrEqual(
-        state.kind === "node" ? NODE_BOUND : CHAIN_BOUND,
-      );
-    },
-  );
-
-  it.each(states)(
-    "hold the %s nm cell's curve to the reduction's f64 one within 2 × 10⁻⁴ (%o)",
-    (nm, state) => {
-      // The references are written to 6 significant figures, under 10⁻⁶ of T.
-      const errors = client(nm, state).map((t, k) => Math.abs(t - (state.f64[k] ?? Number.NaN)));
-      expect(Math.max(...errors)).toBeLessThanOrEqual(QUANTISATION_BOUND + 1e-6);
-    },
-  );
-
-  it.each(states)(
-    "hold the %s nm cell's curve within the chain's tier on another species' rows, half a node off its own (%o)",
-    (nm, state) => {
-      // A species sharing a profile's rows with a dominant one of another broadening factor: its σ
-      // read between its nodes at each row, then τ between the rows. Half a node, 10^(1/8), is the
-      // farthest a row falls from both of its neighbouring nodes below 1 MPa.
-      const errors = client(nm, state, 10 ** (1 / 8)).map((t, k) =>
-        Math.abs(t - (state.lineByLine[k] ?? Number.NaN)),
-      );
-      expect(Math.max(...errors)).toBeLessThanOrEqual(CHAIN_BOUND);
-    },
-  );
-});
+    it.each(states)(
+      "hold the %s nm cell's equivalent width to its f64 line-by-line reference within 1% over three columns (%o)",
+      (nm, state) => {
+        if (table === undefined) {
+          throw new Error(`no committed table for ${references.species}`);
+        }
+        const client = clientCurve(
+          tableRows(kDistributionAt(table, state.temperatureK), 1),
+          nm,
+          state,
+        );
+        const ratios = threeColumns(state).map(
+          (k) => (1 - (client[k] ?? Number.NaN)) / (1 - (state.lineByLine[k] ?? Number.NaN)),
+        );
+        expect(Math.max(...ratios.map((r) => Math.abs(r - 1)))).toBeLessThanOrEqual(0.01);
+      },
+    );
+  },
+);

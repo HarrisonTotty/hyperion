@@ -1,6 +1,6 @@
 /**
  * `node scripts/atmosphereData.mjs atomic-shares …` and `atomic-bounds …` (plan R08, R08.T4.h):
- * the fifteen registry rows' atomic and ionic answers from Kurucz's line lists and Barklem and
+ * the fifteen registry rows' atomic and ionic answers, as R08.T4.e leaves them with O's, from Kurucz's line lists and Barklem and
  * Collet 2016's tables.
  *
  * @remarks
@@ -164,6 +164,15 @@ export const KURUCZ_LISTS: ReadonlyArray<
     spectrum: "Ni II",
     name: "gf2801.all",
     sha256: "60993b3cad578d31b2f454899675bbcd87ccb7421b6fca8786bb3550a401b963",
+  },
+  // R08.T4.e's: O I, stated none to 5,000 K by its lines' share (decision-r08-t4e-budget §7).
+  {
+    key: "O",
+    symbol: "O",
+    stage: 0,
+    spectrum: "O I",
+    name: "gf0800.all",
+    sha256: "5f6fce8aa4226b6c827b841d9657ffe07c26c24c7eb49667433ece8461809ba1",
   },
   {
     key: "Zn",
@@ -565,6 +574,9 @@ export function zincIonLines(csv: string): ReadonlyArray<KuruczLine> {
       lowerLabel: `${at(row, "conf_i")} ${at(row, "term_i")}`,
       upperLabel: `${at(row, "conf_k")} ${at(row, "term_k")}`,
       reference,
+      logGammaRadPerS: 0,
+      logGammaStarkPerElectron: 0,
+      logGammaVanDerWaalsPerHydrogen: 0,
     };
   });
 }
@@ -578,31 +590,39 @@ function angularMomentum(text: string): number {
 // --- The answers' cell means: atomicBounds.json ---
 
 /**
- * The fifteen rows' atomic and ionic answers and Mg⁺'s check (§4): `interim`, an interim pending
- * entry at T4.c's nodes that R08.T4.e's table replaces; `byShares`, a stated none from its `belowK`
- * if its shares stay under 10⁻³ through 4,600 K, or else an interim pending entry; and Mg⁺'s
- * `byShares` written only if it becomes a stated none, its present entry in `bounds.json` staying
- * otherwise.
+ * The atomic and ionic answers `atomicBounds.json` holds (R08.T4.h's fifteen rows, as R08.T4.e
+ * leaves them): R08.T4.h's interim entries of the stages R08.T4.e defers past its byte budget
+ * (decision-r08-t4e-budget §5), Al, V, Mn, Ni, V⁺, Cr⁺ and Mn⁺, Zn's having left for its table;
+ * the stated nones decided by their shares, with an entry from their `belowK`; Mg⁺ and Si⁺,
+ * decided so and drawn from their `belowK` by R08.T4.e's tables; and O, R08.T4.e's stated none to
+ * 5,000 K (decision-r08-t4e-budget §7).
  */
 export const ATOMIC_ANSWERS: ReadonlyArray<{
   readonly key: string;
-  readonly answer: "interim" | "byShares";
+  /**
+   * `interim`: a pending entry at T4.c's nodes (R08.T4.h's, kept for a stage R08.T4.e defers past
+   * its byte budget, decision-r08-t4e-budget §5); `byShares`: decided by its lines' shares, a
+   * stated none with a pending entry from its `belowK`; `drawnFromFloor`: decided so, but drawn
+   * from its `belowK` by R08.T4.e's table, so that no pending entry stays (Mg⁺'s and Si⁺'s; the
+   * `belowK` contract's table branch).
+   */
+  readonly answer: "interim" | "byShares" | "drawnFromFloor";
 }> = [
   { key: "Al", answer: "interim" },
   { key: "V", answer: "interim" },
   { key: "Mn", answer: "interim" },
   { key: "Ni", answer: "interim" },
-  { key: "Zn", answer: "interim" },
   { key: "V+", answer: "interim" },
   { key: "Cr+", answer: "interim" },
   { key: "Mn+", answer: "interim" },
   { key: "Na+", answer: "byShares" },
   { key: "Al+", answer: "byShares" },
-  { key: "Si+", answer: "byShares" },
+  { key: "Si+", answer: "drawnFromFloor" },
   { key: "K+", answer: "byShares" },
   { key: "Ni+", answer: "byShares" },
   { key: "Zn+", answer: "byShares" },
-  { key: "Mg+", answer: "byShares" },
+  { key: "Mg+", answer: "drawnFromFloor" },
+  { key: "O", answer: "byShares" },
 ];
 
 /** A stage's lines: Kurucz's list, or for Zn⁺ ASD's transitions ({@link zincIonLines}). */
@@ -757,19 +777,29 @@ export function atomicAnswers(
       throw new Error(`no line list for ${key}`);
     }
     const lines = linesOf(list);
-    const shares = answer === "byShares" ? largestShares(data, list, lines) : undefined;
-    const belowK = shares === undefined ? undefined : belowKOf(shares);
-    if (key === "Mg+" && belowK === undefined) {
-      return { key, shares, belowK, entry: undefined };
+    let shares: ReturnType<typeof largestShares> | undefined;
+    switch (answer) {
+      case "interim":
+        shares = undefined;
+        break;
+      case "byShares":
+        shares = largestShares(data, list, lines);
+        break;
+      case "drawnFromFloor": {
+        // Its table answers from its belowK; below it, its stated none.
+        const drawn = largestShares(data, list, lines);
+        return { key, shares: drawn, belowK: belowKOf(drawn), entry: undefined };
+      }
     }
+    const belowK = shares === undefined ? undefined : belowKOf(shares);
     const nodesK = belowK === undefined ? ATOMIC_NODES_K : nodesFrom(belowK);
     const { rows, largest } = stageCellMeans(data, list, lines, nodesK);
     const leading =
       largest.line === undefined ? "no line" : describeLine(list.spectrum, largest.line);
     const role =
       belowK === undefined
-        ? `An interim entry (R08.T4.h), which R08.T4.e's table replaces.`
-        : `Above ${belowK} K, where ${key} is no longer stated none (R08.T4.h: its largest bake-bin share at its reference column ${belowK === 5_000 ? "stays under 1e-3 to 5000 K" : "passes 1e-3 between 4600 and 5000 K"}).`;
+        ? `An interim entry (R08.T4.h), kept: R08.T4.e defers its table past its byte budget (main, 2026-10-19; decision-r08-t4e-budget section 5).`
+        : `Above ${belowK} K, where ${key} is no longer stated none (${key === "O" ? "R08.T4.e" : "R08.T4.h"}: its largest bake-bin share at its reference column ${belowK === 5_000 ? "stays under 1e-3 to 5000 K" : "passes 1e-3 between 4600 and 5000 K"}).`;
     const entry: AtomicBoundEntry = {
       key,
       kind: "species",
@@ -794,8 +824,9 @@ export const ATOMIC_BOUNDS_DESCRIPTION =
   "and task, its 1 nm cell-mean cross-sections over 380-760 nm at its source's temperature nodes, " +
   "cellMeansM2, m2 an absorber, one row of 381 cells a node, the cells centred on 380, 381, ..., " +
   "760 nm, each [nm - 0.5, nm + 0.5) on vacuum wavelengths, rounded up to 3 significant figures so " +
-  "that each stays a bound: the interim entries of the atoms and ions R08.T4.e draws, and the " +
-  "entries above their limits of the ions stated none below them. Reduced values from R. L. " +
+  "that each stays a bound: the interim entries of the atoms and ions R08.T4.e defers past its " +
+  "byte budget (decision-r08-t4e-budget), and the entries above their limits of the stages stated " +
+  "none below them (O's from R08.T4.e). Reduced values from R. L. " +
   "Kurucz's atomic line lists and, for Zn+, NIST ASD's Zn II lines with their levels from Martin " +
   "and Kaufman 1970 and their transition probabilities as its entry's source states, each with its " +
   "citation, written by apps/hyperion/scripts/atmosphereData.mjs atomic-bounds. R08.T10.a bounds " +
@@ -831,12 +862,15 @@ export function runAtomicBounds(rest: readonly string[]): void {
   const data = readSahaData(values.barklem);
   const answers = atomicAnswers(data, (list) => stageLines(list, kurucz, asd));
   for (const a of answers) {
+    const top = a.shares
+      ?.filter((s) => s.temperatureK <= 4_600)
+      .reduce((best, s) => (s.share > best.share ? s : best));
     const largest =
-      a.shares === undefined
+      a.shares === undefined || top === undefined
         ? ""
-        : `, largest share ${Math.max(...a.shares.filter((s) => s.temperatureK <= 4_600).map((s) => s.share)).toExponential(2)} to 4600 K, ${a.shares.at(-1)?.share.toExponential(2)} at 5000 K`;
+        : `, largest share ${top.share.toExponential(2)} to 4600 K (at ${top.temperatureK} K, bin ${top.bin}), ${a.shares.at(-1)?.share.toExponential(2)} at 5000 K (bin ${a.shares.at(-1)?.bin}; ${a.shares.at(-1)?.linesSummed} lines)`;
     process.stdout.write(
-      `${a.key}: ${a.entry === undefined ? "stays pending in bounds.json" : a.belowK === undefined ? `pending at ${a.entry.temperaturesK.join(", ")} K` : `stated none below ${a.belowK} K, pending at ${a.entry.temperaturesK.join(", ")} K`}${largest}\n`,
+      `${a.key}: ${a.entry === undefined ? `stated none below ${a.belowK ?? "-"} K, drawn above it by R08.T4.e's table` : a.belowK === undefined ? `pending at ${a.entry.temperaturesK.join(", ")} K` : `stated none below ${a.belowK} K, pending at ${a.entry.temperaturesK.join(", ")} K`}${largest}\n`,
     );
   }
   const entries = answers.flatMap((a) => (a.entry === undefined ? [] : [a.entry]));

@@ -534,6 +534,63 @@ export function mixLimitColumnM2(
   return Math.exp(Math.log(a) + (Math.log(b) - Math.log(a)) * t);
 }
 
+/**
+ * The standard broadening pressures a table's nodes are drawn from, Pa (`decision-r08-t4d-kdist.md`,
+ * ruling 2; `decision-r08-t4d-kdist-chain.md` §8): 4 a decade from 10 Pa to 1 MPa, 8 a decade to
+ * 10 MPa, and 13.3 MPa, 30 in all, as `src/tools/kDistributions.ts`'s `STORED_PRESSURES_PA`.
+ */
+export const STANDARD_PRESSURES_PA: ReadonlyArray<number> = [
+  ...Array.from({ length: 21 }, (_, k) => 10 * 10 ** (k / 4)),
+  ...Array.from({ length: 9 }, (_, k) => 1e6 * 10 ** ((k + 1) / 8)),
+];
+
+/**
+ * How near a table's node lies to a standard or lattice pressure and is it, relatively: 10⁻⁵, since
+ * a sidecar writes its pressures to six figures (`src/tools/kDistributions.ts`'s
+ * `kDistributionMetaText`).
+ */
+const STANDARD_TOLERANCE = 1e-5;
+
+/**
+ * The pressure lattice a table's nodes are drawn from, Pa (decision-r08-t4e-unsold's follow-up, the
+ * 581 nm residual), as `src/tools/kDistributions.ts`'s `PRESSURE_LATTICE_PA`: 10 × 10^(j/8) for
+ * j = 0…49, its even j below 1 MPa and every j from it {@link STANDARD_PRESSURES_PA}, by the same
+ * values, its odd j below 1 MPa the 8-a-decade midpoints a table may add.
+ */
+export const PRESSURE_LATTICE_PA: ReadonlyArray<number> = Array.from({ length: 50 }, (_, j) => {
+  if (j >= 40) {
+    return STANDARD_PRESSURES_PA[20 + (j - 40)] ?? Number.NaN;
+  }
+  return j % 2 === 0 ? (STANDARD_PRESSURES_PA[j / 2] ?? Number.NaN) : 10 * 10 ** (j / 8);
+});
+
+/** Whether a table's node is a lattice midpoint: an odd j below 1 MPa. */
+export function isLatticeMidpoint(pressurePa: number): boolean {
+  const j = PRESSURE_LATTICE_PA.findIndex((p) => Math.abs(p / pressurePa - 1) < STANDARD_TOLERANCE);
+  return j >= 0 && j < 40 && j % 2 === 1;
+}
+
+/**
+ * The pressure rows E3's rule gives a table's curves, Pa, ascending (R08.T4.e's economy E3,
+ * decision-r08-t4ef-storage §5.3, ruled 2026-10-16): its nodes, or where its nodes other than the
+ * midpoints it holds ({@link isLatticeMidpoint}) are a strict subset of
+ * {@link STANDARD_PRESSURES_PA} (alternates dropped below 1 MPa), the standard pressures from its
+ * first node to its last, each table then read between its own nodes ({@link cellSigmasAt}), as a
+ * non-dominant species' already is. The midpoints a slot's tables hold are added to these
+ * (`absorbers.ts`'s `absorberCurvePressures`). No stored layout changes.
+ */
+export function curveRowsPa(pressuresPa: ReadonlyArray<number>): ReadonlyArray<number> {
+  const standard = (p: number): boolean =>
+    STANDARD_PRESSURES_PA.some((s) => Math.abs(s / p - 1) < STANDARD_TOLERANCE);
+  const base = pressuresPa.filter((p) => !isLatticeMidpoint(p));
+  const first = base[0] ?? Number.NaN;
+  const last = base.at(-1) ?? Number.NaN;
+  const span = STANDARD_PRESSURES_PA.filter(
+    (s) => s >= first * (1 - STANDARD_TOLERANCE) && s <= last * (1 + STANDARD_TOLERANCE),
+  );
+  return base.every(standard) && span.length > base.length ? span : base;
+}
+
 /** The gases that broaden as air does by definition: air's own (HITRAN's γ_air). */
 const AIR_GASES: ReadonlySet<string> = new Set(["air", "N2", "O2", "Ar"]);
 

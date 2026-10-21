@@ -13,7 +13,9 @@ import {
   type RayleighCrossSection,
   READ_TOP_PA,
   reduceGridCell,
+  type SaturationCurve,
   type ShapePolicy,
+  STORED_PRESSURES_PA,
 } from "./kDistributions";
 import {
   LINE_SOURCES,
@@ -249,6 +251,70 @@ describe("a cell's reduction on its grid", () => {
     expect(quantisationError(cell, encodeCell(cell), 16, () => 1e25).within).toBeLessThan(2e-4);
   });
 
+  describe("a held first node's check (R08.T4.e's economy E4)", () => {
+    const species = toySpecies(CENTRES, 1e-23);
+    const grid = { temperaturesK: [200, 250, 300, 350], pressuresPa: [10, 100, 1e3, 1e4] };
+    const cell = reduceGridCell(
+      690,
+      lineByLine(species, PLAIN),
+      grid,
+      PLAIN,
+      () => 1e25,
+      () => 1e25,
+    );
+    if (cell === undefined) {
+      throw new Error("the toy cell has no lines");
+    }
+    const errorOf = (of: typeof cell, checksPa: ReadonlyArray<number>, heldNode: number): number =>
+      belowGridError(
+        690,
+        lineByLine(species, PLAIN),
+        grid,
+        PLAIN,
+        of,
+        31.98983,
+        checksPa,
+        heldNode,
+      );
+
+    it("is the worst over every pressure it is checked at", () => {
+      expect(errorOf(cell, [1, 5], 0)).toBe(Math.max(errorOf(cell, [1], 0), errorOf(cell, [5], 0)));
+    });
+
+    it("holds the node it is given, as a table whose first node that is", () => {
+      // The 100 Pa node's values in the 10 Pa node's place, at every temperature.
+      const g = cell.weights.length;
+      const nP = grid.pressuresPa.length;
+      const raised = Float64Array.from(cell.values);
+      for (let t = 0; t < grid.temperaturesK.length; t += 1) {
+        raised.set(cell.values.subarray((t * nP + 1) * g, (t * nP + 2) * g), t * nP * g);
+      }
+      expect(errorOf(cell, [1], 1)).toBe(errorOf({ ...cell, values: raised }, [1], 0));
+    });
+  });
+
+  it("reads a row that is not a stored node between the nodes, even at a node's temperature", () => {
+    // Two stored nodes and a row between them, read linearly in σ: the row at a node's temperature
+    // is a state of the chain test, and fails it.
+    const grid = {
+      temperaturesK: [200, 250, 300, 350],
+      pressuresPa: [1e5, 1e7],
+      rowsPa: [1e5, 1e6, 1e7],
+    };
+    const cell = reduceGridCell(
+      690,
+      lineByLine(toySpecies(CENTRES, 1e-22), PLAIN),
+      grid,
+      PLAIN,
+      () => 1e25,
+      () => 1e25,
+    );
+    const atRow = (cell?.failures ?? []).filter(
+      (f) => f.pressurePa === 1e6 && grid.temperaturesK.includes(f.temperatureK),
+    );
+    expect(atRow.length).toBeGreaterThan(0);
+  });
+
   it("gates the 16-bit test within each node's cap, and records it beyond", () => {
     const weak = reduceGridCell(
       690,
@@ -312,6 +378,32 @@ describe("a cell's reduction on its grid", () => {
       (helium?.partial.worstChain.columnCm2 ?? 0) > 1e21,
       (own?.partial.worstChain.columnCm2 ?? Infinity) <= 1e21,
       own?.partial.k === helium?.partial.k,
+    ]).toEqual([true, true, true]);
+  });
+
+  it("stops a partial cell's between-node test at its condensing cap alone, its g-points as without it", () => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const species = toySpecies(CENTRES, 1e-22);
+    const source = { species: "O2", policy: PLAIN, molecularMassDa: 31.98983 };
+    // p_sat 6.64 × 10⁻⁴ Pa at every temperature: 400 p_sat ÷ (m g) at 0.5 m s⁻² is 10²¹ cm⁻².
+    const condensing: SaturationCurve = {
+      kind: "antoine",
+      a: Math.log10(((1e25 * 31.98983 * 1.660_539_066_6e-27 * 0.5) / 400) * 1e-5),
+      bK: 0,
+      cK: 0,
+      fromK: 100,
+      criticalK: 1_000,
+      source: "a test's",
+    };
+    const open = reducePartialCell(690, lineByLine(species, PLAIN), GRID, source);
+    const capped = reducePartialCell(690, lineByLine(species, PLAIN), GRID, {
+      ...source,
+      chainSaturation: condensing,
+    });
+    expect([
+      (open?.partial.worstChain.columnCm2 ?? 0) > 1e21,
+      (capped?.partial.worstChain.columnCm2 ?? Infinity) <= 1e21 * (1 + 1e-9),
+      capped?.partial.k === open?.partial.k,
     ]).toEqual([true, true, true]);
   });
 
@@ -475,6 +567,29 @@ describe("a species' merge", () => {
       () => undefined,
     );
     expect(outcome).toEqual({ kind: "refine", temperaturesK: [100, 125, 150] });
+  });
+
+  it("asks for a lattice midpoint where the read fails between two held 4-a-decade rows", () => {
+    // 316 and 562 kPa held, the read through exact rows the larger part of the failure at 421.7 kPa
+    // (decision-r08-t4e-unsold's follow-up).
+    const rows = [STORED_PRESSURES_PA[18] ?? Number.NaN, STORED_PRESSURES_PA[19] ?? Number.NaN];
+    const failure = {
+      error: 2.2e-3,
+      temperatureK: 100,
+      pressurePa: 10 * 10 ** (37 / 8),
+      columnCm2: 1e25,
+      exactRowsError: 2.1e-3,
+    };
+    const outcome = mergePartials(
+      source,
+      [{ ...partial([partialCell(698, [failure])]), pressuresPa: rows }],
+      () => undefined,
+    );
+    expect(outcome).toEqual({
+      kind: "refine",
+      temperaturesK: [100, 150],
+      pressuresPa: [rows[0], expect.closeTo(421_696.5, 1), rows[1]],
+    });
   });
 
   it("refuses a failure at a node's temperature", () => {

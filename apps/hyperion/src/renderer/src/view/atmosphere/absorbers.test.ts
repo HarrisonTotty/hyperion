@@ -2066,8 +2066,8 @@ describe("pair absorbers", () => {
     const hot = at(3_000);
     const cool = at(1_000);
     expect(hot.specs.map((s) => s.name)).toEqual(["pair:H+e-"]);
+    // H I is stated none below 3,300 K (R08.T4.e's visibility floor), so it takes no label there.
     expect(cool.approximations).toEqual([
-      { species: "H", provenance: "none", reason: "noCrossSections" },
       { species: "H+e-", provenance: "estimated", reason: "temperatureOutsideTable" },
     ]);
   });

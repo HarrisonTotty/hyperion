@@ -7,6 +7,7 @@ import {
   cellSigmasAt,
   cellTransmittance,
   committedLineSpecies,
+  curveRowsPa,
   fetchPart,
   type KDistributionFile,
   type KDistributionTable,
@@ -14,6 +15,7 @@ import {
   loadKDistributions,
   mixLimitColumnM2,
   readKDistribution,
+  STANDARD_PRESSURES_PA,
 } from "./kDistribution";
 
 /**
@@ -419,6 +421,42 @@ describe("a table's estimated temperature intervals", () => {
   });
 });
 
+describe("a table's curve rows (R08.T4.e's economy E3)", () => {
+  const thinned = STANDARD_PRESSURES_PA.filter((p, k) => p > 1e6 * (1 - 1e-9) || k % 2 === 0);
+
+  it("are the standard pressures over a thinned table's span", () => {
+    expect([thinned.length, curveRowsPa(thinned)]).toEqual([20, STANDARD_PRESSURES_PA]);
+  });
+
+  it("are the standard pressures for a sidecar's thinned pressures, written to six figures", () => {
+    // A sidecar writes 177,827.94… Pa as 177,828: its nodes still take the standard rows.
+    const written = thinned.map((p) => Number(p.toPrecision(6)));
+    expect(curveRowsPa(written)).toEqual(STANDARD_PRESSURES_PA);
+  });
+
+  it("start at a thinned table's raised first node (E4)", () => {
+    const raised = thinned.slice(1);
+    expect(curveRowsPa(raised)).toEqual(STANDARD_PRESSURES_PA.slice(2));
+  });
+
+  it("are a table's own nodes where it holds every standard pressure, or any other", () => {
+    const own = [10, 50, 300];
+    expect([curveRowsPa(STANDARD_PRESSURES_PA), curveRowsPa(own)]).toEqual([
+      STANDARD_PRESSURES_PA,
+      own,
+    ]);
+  });
+
+  it("are 30: 4 a decade from 10 Pa to 1 MPa, 8 a decade to 10 MPa, and 13.3 MPa", () => {
+    expect([
+      STANDARD_PRESSURES_PA.length,
+      (STANDARD_PRESSURES_PA[20] ?? Number.NaN) / 1e6,
+      (STANDARD_PRESSURES_PA[28] ?? Number.NaN) / 1e7,
+      (STANDARD_PRESSURES_PA[29] ?? Number.NaN) / 1.333_521e7,
+    ]).toEqual([30, expect.closeTo(1, 9), expect.closeTo(1, 9), expect.closeTo(1, 6)]);
+  });
+});
+
 describe("the committed k-distributions", () => {
   it("load nothing for a species the client holds no table for", async () => {
     await expect(loadKDistributions(["Xx"], inlinePart)).resolves.toEqual([]);
@@ -441,6 +479,17 @@ describe("the worker's part reader", () => {
       [1, 2, 3, 4],
       expect.stringMatching(/O2-1\.bin/u),
     ]);
+  });
+
+  it("fetches an ion's part, a + in its file name, through its bundled URL (R08.T4.e)", async () => {
+    // Mg⁺'s is the first ion's table: + is a plain character in a URL's path and in a file name
+    // on Linux, macOS (APFS) and Windows (NTFS), which forbid only <>:"/\|?* of the printable ones.
+    const fetched = vi.fn<(url: string) => Promise<Response>>(
+      async () => new Response(Uint8Array.of(7)),
+    );
+    vi.stubGlobal("fetch", fetched);
+    await fetchPart("kDistributions/Mg+-1.bin");
+    expect(fetched.mock.calls[0]?.[0]).toMatch(/Mg\+-1\.bin/u);
   });
 
   it("refuses a part the client does not hold, without fetching", async () => {

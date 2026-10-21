@@ -122,8 +122,10 @@ describe("the registry's absorbers", () => {
  * @remarks
  * R08.T4.h answered each: interim pending entries with their cell means for Al, V, Mn, Ni, Zn, V⁺,
  * Cr⁺ and Mn⁺; stated nones by their lines' share for Na⁺, Al⁺, Si⁺, K⁺, Ni⁺ and Zn⁺; HCl's
- * HITRAN2024 answer. This test may go once the fixture flags them, when the check above holds
- * them. The fixture is the sim's, written by its test: this test never edits it.
+ * HITRAN2024 answer. R08.T4.e then drew Zn's table, from 3,300 K, and Si⁺'s, from 4,600 K, each a
+ * stated none below; the rest keep T4.h's answers, Al, V, Mn, Ni, V⁺, Cr⁺, Mn⁺ and Ni⁺ deferred past
+ * its byte budget. This test may go once the fixture flags them, when the check above holds them.
+ * The fixture is the sim's, written by its test: this test never edits it.
  */
 const AWAITING_THEIR_FLAG = [
   "Al",

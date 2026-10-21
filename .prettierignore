@@ -53,3 +53,9 @@ apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lineReferencesH2O.json
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/lineReferencesNH3.json
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/lineReferencesN2O.json
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/n2oMerge.json
+# The atoms' and ions' reduced line lists (`atmosphereData.mjs atomic-lines`), the alkali wings' pairs
+# (`alkali-pairs`) and the atoms' line-by-line references (`atomic-cell-references`; plan R08,
+# R08.T4.e)
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lines/
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/alkaliPairs.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lineReferencesAtoms.json

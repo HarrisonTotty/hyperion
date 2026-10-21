@@ -11,7 +11,11 @@
 // The tool's header names each input's source, version and checksum. ExoMol's temperate lines
 // (R08.T4.g) take `exomol-bands` (N2O), `exomol-bins`, `exomol-k-distributions` and
 // `exomol-k-distributions-merge`, as `src/tools/exomolCli.ts` gives them; they stream the lists'
-// `.bz2` files through the system's `bzip2 -dc`, which must be on the PATH.
+// `.bz2` files through the system's `bzip2 -dc`, which must be on the PATH. The atoms' and ions'
+// tables (R08.T4.e) take `atomic-floors`, `atomic-projection`, `atomic-reprojection`,
+// `atomic-k-distributions`, `atomic-k-distributions-merge`, `atomic-lines`,
+// `atomic-cell-references` and `alkali-pairs`, as `src/tools/atomicKDistributionsCli.ts` gives
+// them.
 import { fileURLToPath } from "node:url";
 
 import { runnerImport } from "vite";

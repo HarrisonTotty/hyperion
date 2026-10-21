@@ -340,8 +340,109 @@ export function linearCell(
 export interface ReductionGrid {
   /** K, ascending. */
   readonly temperaturesK: ReadonlyArray<number>;
-  /** Air-equivalent broadening pressures, Pa, ascending. */
+  /** Air-equivalent broadening pressures, Pa, ascending: the stored nodes. */
   readonly pressuresPa: ReadonlyArray<number>;
+  /**
+   * The client's curve rows, Pa, ascending, where they are not the stored nodes (R08.T4.e's economy
+   * E3, decision-r08-t4ef-storage §5.3, and its midpoints, decision-r08-t4e-unsold's follow-up): a
+   * thinned table, its nodes a subset of {@link PRESSURE_LATTICE_PA}, is read at the standard
+   * pressures over its own span and at the midpoints it holds ({@link chainRowsPa}), each row's σ
+   * between the table's nodes ({@link sigmaAtPressure}). Absent, the rows are the nodes.
+   */
+  readonly rowsPa?: ReadonlyArray<number>;
+}
+
+/**
+ * The rows E3's rule gives a table's curves (decision-r08-t4ef-storage §5.3): its stored nodes, or
+ * where its nodes other than the midpoints it holds ({@link latticeMidpointsPa}) are a strict subset
+ * of {@link STORED_PRESSURES_PA}, the standard pressures from its first node to its last. The
+ * client adds every midpoint a slot's tables hold (`absorbers.ts`'s `absorberCurvePressures`); a
+ * table's own chain test reads {@link chainRowsPa}.
+ */
+export function curveRowsPa(pressuresPa: ReadonlyArray<number>): ReadonlyArray<number> {
+  const standard = (p: number): boolean =>
+    STORED_PRESSURES_PA.some((s) => Math.abs(s / p - 1) < 1e-9);
+  const base = pressuresPa.filter((p) => !isLatticeMidpoint(p));
+  const first = base[0] ?? Number.NaN;
+  const last = base.at(-1) ?? Number.NaN;
+  const span = STORED_PRESSURES_PA.filter((s) => s >= first * (1 - 1e-9) && s <= last * (1 + 1e-9));
+  return base.every(standard) && span.length > base.length ? span : base;
+}
+
+/**
+ * The rows a table's own chain test reads, Pa, ascending, as the client reads a slot holding it
+ * alone: E3's rows ({@link curveRowsPa}) and every midpoint the table holds, one within 1/32 decade
+ * of a row merged into it (decision-r08-t4e-unsold's follow-up, the 581 nm residual).
+ */
+export function chainRowsPa(pressuresPa: ReadonlyArray<number>): ReadonlyArray<number> {
+  return withMidpointRows(curveRowsPa(pressuresPa), latticeMidpointsPa(pressuresPa));
+}
+
+/**
+ * Rows with midpoints added, Pa, ascending: each midpoint not within {@link MIDPOINT_MERGE_DECADES}
+ * of a row already present.
+ */
+export function withMidpointRows(
+  rowsPa: ReadonlyArray<number>,
+  midpointsPa: ReadonlyArray<number>,
+): ReadonlyArray<number> {
+  const rows = [...rowsPa];
+  for (const m of midpointsPa) {
+    if (rows.every((r) => Math.abs(Math.log10(m / r)) >= MIDPOINT_MERGE_DECADES)) {
+      rows.push(m);
+    }
+  }
+  return rows.toSorted((a, b) => a - b);
+}
+
+/** How near a midpoint lies to a row and is merged into it, decades: 1/32. */
+export const MIDPOINT_MERGE_DECADES = 1 / 32;
+
+/**
+ * A g-point's σ at a broadening pressure from its values at a table's stored pressures, as the
+ * client reads a table off its nodes (`absorbers/kDistribution.ts`'s `cellSigmasAt`): exact at a
+ * node; otherwise 4-point Lagrange in ln p on ln σ over the four nodes nearest, held beyond the
+ * nodes, and linear in σ between the two about it where any of the four is 0 or there are under
+ * four nodes.
+ */
+export function sigmaAtPressure(
+  pressuresPa: ReadonlyArray<number>,
+  values: ReadonlyArray<number>,
+  pressurePa: number,
+): number {
+  const n = pressuresPa.length;
+  const node = pressuresPa.findIndex((p) => Math.abs(p / pressurePa - 1) < 1e-12);
+  if (node >= 0) {
+    return values[node] ?? 0;
+  }
+  let i = 0;
+  while (i < n - 2 && (pressuresPa[i + 1] ?? Infinity) < pressurePa) {
+    i += 1;
+  }
+  const lo = Math.log(pressuresPa[i] ?? Number.NaN);
+  const hi = Math.log(pressuresPa[Math.min(i + 1, n - 1)] ?? Number.NaN);
+  const x = Math.min(Math.max(Math.log(pressurePa), Math.min(lo, hi)), Math.max(lo, hi));
+  const a = values[i] ?? 0;
+  const b = values[Math.min(i + 1, n - 1)] ?? 0;
+  const fraction = hi === lo ? 0 : (x - lo) / (hi - lo);
+  if (n < 4) {
+    return a + (b - a) * fraction;
+  }
+  const s = stencil(i, n);
+  const v = s.map((k) => values[k] ?? 0);
+  if (!v.every((value) => value > 0)) {
+    return a + (b - a) * fraction;
+  }
+  const w = lagrangeWeights(
+    [
+      Math.log(pressuresPa[s[0]] ?? 1),
+      Math.log(pressuresPa[s[1]] ?? 1),
+      Math.log(pressuresPa[s[2]] ?? 1),
+      Math.log(pressuresPa[s[3]] ?? 1),
+    ],
+    x,
+  );
+  return Math.exp(w.reduce((sum, wk, k) => sum + wk * Math.log(v[k] ?? 1), 0));
 }
 
 /**
@@ -354,6 +455,91 @@ export const STORED_PRESSURES_PA: ReadonlyArray<number> = [
   ...Array.from({ length: 21 }, (_, k) => 10 * 10 ** (k / 4)),
   ...Array.from({ length: 9 }, (_, k) => 1e6 * 10 ** ((k + 1) / 8)),
 ];
+
+/**
+ * The lattice a table's pressures are drawn from, Pa (decision-r08-t4e-unsold's follow-up, the
+ * 581 nm residual): 10 × 10^(j/8) for j = 0…48, 10 Pa to 10 MPa, and the 13.3 MPa stencil node,
+ * j = 49. Its even j below 1 MPa and every j from it are {@link STORED_PRESSURES_PA}, by the same
+ * values; its odd j below 1 MPa are the 8-a-decade midpoints of the 4-a-decade intervals, 421.7 kPa
+ * being j = 37.
+ */
+export const PRESSURE_LATTICE_PA: ReadonlyArray<number> = Array.from({ length: 50 }, (_, j) => {
+  if (j >= 40) {
+    return STORED_PRESSURES_PA[20 + (j - 40)] ?? Number.NaN;
+  }
+  return j % 2 === 0 ? (STORED_PRESSURES_PA[j / 2] ?? Number.NaN) : 10 * 10 ** (j / 8);
+});
+
+/** A pressure's index j on {@link PRESSURE_LATTICE_PA}, or −1 off it. */
+export function latticeIndex(pressurePa: number): number {
+  return PRESSURE_LATTICE_PA.findIndex((p) => Math.abs(p / pressurePa - 1) < 1e-9);
+}
+
+/**
+ * A sidecar's pressure, written to 6 figures, as the lattice pressure it is, Pa.
+ *
+ * @throws Error where it lies off the lattice.
+ */
+export function latticePressurePa(pressurePa: number): number {
+  const nearest = PRESSURE_LATTICE_PA.reduce((best, p) =>
+    Math.abs(p / pressurePa - 1) < Math.abs(best / pressurePa - 1) ? p : best,
+  );
+  if (Math.abs(nearest / pressurePa - 1) > 1e-5) {
+    throw new Error(`${pressurePa} Pa is not a lattice pressure`);
+  }
+  return nearest;
+}
+
+/** Whether a pressure is a lattice midpoint: an odd j below 1 MPa. */
+export function isLatticeMidpoint(pressurePa: number): boolean {
+  const j = latticeIndex(pressurePa);
+  return j >= 0 && j < 40 && j % 2 === 1;
+}
+
+/** The lattice midpoints a table holds, Pa, ascending. */
+export function latticeMidpointsPa(pressuresPa: ReadonlyArray<number>): ReadonlyArray<number> {
+  return pressuresPa.filter(isLatticeMidpoint);
+}
+
+/**
+ * Whether a table's pressures meet the lattice rule (decision-r08-t4e-unsold's follow-up): a subset
+ * of {@link PRESSURE_LATTICE_PA}, ascending, holding E3's base nodes (2 a decade below 1 MPa, and
+ * every node from 1 MPa up), 4-a-decade alternates as E3 keeps them, and a midpoint only where both
+ * its 4-a-decade neighbours are held. A table on all 30 standard pressures meets it.
+ */
+export function meetsPressureRule(pressuresPa: ReadonlyArray<number>): boolean {
+  const js = pressuresPa.map(latticeIndex);
+  if (js.some((j) => j < 0) || js.some((j, k) => k > 0 && j <= (js[k - 1] ?? -1))) {
+    return false;
+  }
+  const held = new Set(js);
+  for (let j = 0; j < PRESSURE_LATTICE_PA.length; j += 1) {
+    const base = j >= 40 || j % 4 === 0;
+    if (base && !held.has(j)) {
+      return false;
+    }
+    if (j < 40 && j % 2 === 1 && held.has(j) && !(held.has(j - 1) && held.has(j + 1))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * The midpoint a chain failure's pressure is, Pa, where the table may add it: the odd-j lattice
+ * point below 1 MPa it lies on, between two held 4-a-decade rows, not yet held; else `undefined`.
+ */
+export function midpointFor(
+  pressuresPa: ReadonlyArray<number>,
+  pressurePa: number,
+): number | undefined {
+  const j = latticeIndex(pressurePa);
+  if (j < 0 || j >= 40 || j % 2 === 0) {
+    return undefined;
+  }
+  const held = (k: number): boolean => pressuresPa.some((p) => latticeIndex(p) === k);
+  return held(j - 1) && held(j + 1) && !held(j) ? PRESSURE_LATTICE_PA[j] : undefined;
+}
 
 /** The highest broadening pressure the read takes, Pa: above it p̄ is held (§8). */
 export const READ_TOP_PA = 1e7;
@@ -986,6 +1172,11 @@ export interface ChainError {
   readonly temperatureK: number;
   readonly pressurePa: number;
   readonly columnCm2: number;
+  /**
+   * For a failure past {@link CHAIN_BOUND}, the read's own error through exact rows
+   * ({@link exactRowsError}): the part of the failure that is the client's read, not the table's.
+   */
+  readonly exactRowsError?: number;
 }
 
 /** The chain test's worst errors within the column cap and beyond it. */
@@ -999,7 +1190,9 @@ export interface ChainErrors {
 /**
  * The client's chain at a state, as a cell's curve of growth: σ at fixed g cubic in T from the
  * cell's node values ({@link cubicInTemperature}), each of the four rows about the pressure summed
- * into a curve, and the curve's depth read cubic in ln p ({@link cubicInLogPressure}).
+ * into a curve, and the curve's depth read cubic in ln p ({@link cubicInLogPressure}). A thinned
+ * table's rows ({@link ReductionGrid.rowsPa}) take each g-point's σ between its nodes
+ * ({@link sigmaAtPressure}), as the client reads them.
  *
  * @param values - One variant's σ, `values[t × P + p][g]`, cm² a molecule.
  * @returns T at a column, cm⁻².
@@ -1013,29 +1206,91 @@ export function chainCurve(
 ): (columnCm2: number) => number {
   const nT = grid.temperaturesK.length;
   const nP = grid.pressuresPa.length;
-  const logP = grid.pressuresPa.map(Math.log);
+  const rowsPa = grid.rowsPa ?? grid.pressuresPa;
+  const nR = rowsPa.length;
   let j = 0;
-  while (j < nP - 2 && (grid.pressuresPa[j + 1] ?? Infinity) < pressurePa) {
+  while (j < nR - 2 && (rowsPa[j + 1] ?? Infinity) < pressurePa) {
     j += 1;
   }
-  const rows = nP < 4 ? [j, Math.min(j + 1, nP - 1)] : [...stencil(j, nP)];
+  const rows = nR < 4 ? [j, Math.min(j + 1, nR - 1)] : [...stencil(j, nR)];
   const g = weights.length;
-  const rowSigmas = rows.map((p) =>
-    Float64Array.from({ length: g }, (_, k) =>
-      cubicInTemperature(
-        grid.temperaturesK,
-        Array.from({ length: nT }, (_unused, t) => values[t * nP + p]?.[k] ?? 0),
-        temperatureK,
+  // Each g-point's σ at a stored pressure, cubic in T, taken once for the nodes the rows read.
+  const atNodes = new Map<number, Float64Array>();
+  const atNode = (p: number): Float64Array => {
+    let sigmas = atNodes.get(p);
+    if (sigmas === undefined) {
+      sigmas = Float64Array.from({ length: g }, (_, k) =>
+        cubicInTemperature(
+          grid.temperaturesK,
+          Array.from({ length: nT }, (_unused, t) => values[t * nP + p]?.[k] ?? 0),
+          temperatureK,
+        ),
+      );
+      atNodes.set(p, sigmas);
+    }
+    return sigmas;
+  };
+  const rowSigmas = rows.map((r) => {
+    const rowPa = rowsPa[r] ?? Number.NaN;
+    const node = grid.pressuresPa.findIndex((p) => Math.abs(p / rowPa - 1) < 1e-12);
+    if (node >= 0) {
+      return atNode(node);
+    }
+    let i = 0;
+    while (i < nP - 2 && (grid.pressuresPa[i + 1] ?? Infinity) < rowPa) {
+      i += 1;
+    }
+    const near = nP < 4 ? [i, Math.min(i + 1, nP - 1)] : [...stencil(i, nP)];
+    return Float64Array.from({ length: g }, (_, k) =>
+      sigmaAtPressure(
+        grid.pressuresPa,
+        Array.from({ length: nP }, (_unused, p) => (near.includes(p) ? (atNode(p)[k] ?? 0) : 0)),
+        rowPa,
       ),
-    ),
-  );
-  const rowLogP = rows.map((p) => logP[p] ?? 0);
+    );
+  });
+  const rowLogP = rows.map((r) => Math.log(rowsPa[r] ?? Number.NaN));
   return (u) => {
     const depths = rowSigmas.map(
       (sigmas) => -Math.log(Math.max(exponentialSum(weights, sigmas, u), 1e-300)),
     );
     return Math.exp(-cubicInLogPressure(rowLogP, depths, Math.log(pressurePa)));
   };
+}
+
+/**
+ * The read's own error at a chain failure through exact rows (decision-r08-t4e-unsold's follow-up,
+ * the 581 nm residual): the four rows about its pressure taken line by line at its temperature,
+ * their depths at its column read cubic in ln p as the client reads a curve
+ * ({@link cubicInLogPressure}), against line by line at the state.
+ *
+ * @param rowNode - A row's line-by-line spectrum at the failure's temperature.
+ */
+export function exactRowsError(
+  rowsPa: ReadonlyArray<number>,
+  rowNode: (rowPa: number) => SortedNode | undefined,
+  exact: SortedNode,
+  failure: ChainError,
+): number {
+  const nR = rowsPa.length;
+  let j = 0;
+  while (j < nR - 2 && (rowsPa[j + 1] ?? Infinity) < failure.pressurePa) {
+    j += 1;
+  }
+  const rows = nR < 4 ? [j, Math.min(j + 1, nR - 1)] : [...stencil(j, nR)];
+  const depths = rows.map((r) => {
+    const node = rowNode(rowsPa[r] ?? Number.NaN);
+    const t = node === undefined ? 1 : intervalTransmittance(node, 0, 1, failure.columnCm2);
+    return -Math.log(Math.max(t, 1e-300));
+  });
+  const read = Math.exp(
+    -cubicInLogPressure(
+      rows.map((r) => Math.log(rowsPa[r] ?? Number.NaN)),
+      depths,
+      Math.log(failure.pressurePa),
+    ),
+  );
+  return Math.abs(read - intervalTransmittance(exact, 0, 1, failure.columnCm2));
 }
 
 /**
@@ -1106,6 +1361,26 @@ export type SaturationCurve =
       readonly source: string;
     }
   /**
+   * A measured vapour-pressure fit in Antoine's form, log₁₀(p ÷ 1 bar) = A − B ÷ (T + C), used from
+   * `fromK` to `criticalK` (its range, or a stated extrapolation) and no condensing cap outside it
+   * (R08.T4.e's residual protocol, item (ii), decision-r08-t4e-unsold §5).
+   */
+  | {
+      readonly kind: "antoine";
+      /** A, p in bar. */
+      readonly a: number;
+      readonly bK: number;
+      readonly cK: number;
+      /** The bottom of the fit's use, K. */
+      readonly fromK: number;
+      /**
+       * The top of the fit's use, K, at and above which, as at a critical point, no cap is taken: the
+       * fit's own top, not the element's critical point.
+       */
+      readonly criticalK: number;
+      readonly source: string;
+    }
+  /**
    * A sublimation-pressure fit ln(p ÷ 1 bar) = Σ Aᵢ ÷ Tⁱ below the triple point (N. Fray and B.
    * Schmitt, Planet. Space Sci. 57 (2009) 2053, Eq. 4), and above it Clausius–Clapeyron from the
    * fit's own pressure at the triple point with a constant enthalpy of vaporisation (R08.T4.g).
@@ -1147,6 +1422,12 @@ export function saturationPressurePa(curve: SaturationCurve, temperatureK: numbe
         );
       break;
     }
+    case "antoine":
+      pressurePa =
+        temperatureK < curve.fromK
+          ? Infinity
+          : 1e5 * 10 ** (curve.a - curve.bK / (temperatureK + curve.cK));
+      break;
     case "ancillary":
       pressurePa =
         temperatureK < curve.tripleK
@@ -1532,22 +1813,30 @@ export function reduceGridCell(
   const nearWingShare = share((n) => n.nearWingShare);
   const midT = (t: number): number =>
     0.5 * ((grid.temperaturesK[t] ?? 0) + (grid.temperaturesK[t + 1] ?? 0));
-  const midP = (p: number): number =>
-    Math.sqrt((grid.pressuresPa[p] ?? 0) * (grid.pressuresPa[p + 1] ?? 0));
+  // The rows the client's curves take: the nodes, or a thinned table's standard rows (E3).
+  const rowsPa = grid.rowsPa ?? grid.pressuresPa;
+  const nR = rowsPa.length;
+  const midP = (k: number): number => Math.sqrt((rowsPa[k] ?? 0) * (rowsPa[k + 1] ?? 0));
+  const stored = (pressurePa: number): boolean =>
+    grid.pressuresPa.some((p) => Math.abs(p / pressurePa - 1) < 1e-12);
   // Every midpoint the read takes: none above READ_TOP_PA, where p̄ is held.
   const read = (p: number): boolean => p <= READ_TOP_PA * (1 + 1e-12);
   const states: (readonly [number, number])[] = [];
   for (let t = 0; t < nT; t += 1) {
-    for (let p = 0; p < nP; p += 1) {
-      const node = grid.pressuresPa[p] ?? 0;
-      if (t + 1 < nT && read(node)) {
-        states.push([midT(t), node]);
+    for (let k = 0; k < nR; k += 1) {
+      const row = rowsPa[k] ?? 0;
+      // A row that is not a stored node is read between nodes even at a node's temperature.
+      if (!stored(row) && read(row)) {
+        states.push([grid.temperaturesK[t] ?? 0, row]);
       }
-      if (p + 1 < nP && read(midP(p))) {
-        states.push([grid.temperaturesK[t] ?? 0, midP(p)]);
+      if (t + 1 < nT && read(row)) {
+        states.push([midT(t), row]);
       }
-      if (t + 1 < nT && p + 1 < nP && read(midP(p))) {
-        states.push([midT(t), midP(p)]);
+      if (k + 1 < nR && read(midP(k))) {
+        states.push([grid.temperaturesK[t] ?? 0, midP(k)]);
+      }
+      if (t + 1 < nT && k + 1 < nR && read(midP(k))) {
+        states.push([midT(t), midP(k)]);
       }
     }
   }
@@ -1571,7 +1860,13 @@ export function reduceGridCell(
       }
 
       if (e.within.error > CHAIN_BOUND) {
-        failures.push(e.within);
+        // The read's own share of the failure, through exact rows at its temperature.
+        const rowNode = (rowPa: number): SortedNode | undefined =>
+          spectra(cellNm, t, rowPa, only(policy, v))?.node;
+        failures.push({
+          ...e.within,
+          exactRowsError: exactRowsError(rowsPa, rowNode, exact.node, e.within),
+        });
       }
     }
   }
@@ -1653,6 +1948,11 @@ const ATOMIC_MASS_KG = 1.660_539_066_6e-27;
  * molecular mass m (Da).
  *
  * @param spectra - The cell's spectrum at each state, as the reduction took it ({@link NodeSpectra}).
+ * @param checkPressuresPa - The pressures the held first node is checked at, Pa: 1 Pa, and for a
+ *   raised first node (R08.T4.e's economy E4, decision-r08-t4ef-storage §5.3) every standard node
+ *   below it ({@link raisedFirstNodeChecksPa}), each over columns to 40 p ÷ (m g) at its own p.
+ * @param heldNode - The stored pressure node whose table is held below it: 0, the first, unless a
+ *   projection tries a raised first node on a table reduced from a lower one.
  */
 export function belowGridError(
   cellNm: number,
@@ -1661,36 +1961,48 @@ export function belowGridError(
   policy: ShapePolicy,
   cell: ReducedCell,
   molecularMassDa: number,
+  checkPressuresPa: ReadonlyArray<number> = [BELOW_GRID_CHECK_PA],
+  heldNode = 0,
 ): number {
   const nT = grid.temperaturesK.length;
   const nP = grid.pressuresPa.length;
   const g = cell.weights.length;
-  const capCm2 = grazingColumnCm2(BELOW_GRID_CHECK_PA, molecularMassDa);
   let worst = 0;
-  for (let v = 0; v < policy.variants.length; v += 1) {
-    for (const [t, temperatureK] of grid.temperaturesK.entries()) {
-      const exact = spectra(cellNm, temperatureK, BELOW_GRID_CHECK_PA, only(policy, v));
-      if (exact === undefined) {
-        continue;
-      }
-      const first = (v * nT + t) * nP * g;
-      const held = cell.values.subarray(first, first + g).map((x) => x / M2_PER_CM2);
-      for (const u of errorColumns(
-        exact.node,
-        REDUCTION_TARGET,
-        CHAIN_COLUMNS_PER_DECADE,
-        capCm2,
-      )) {
-        worst = Math.max(
-          worst,
-          Math.abs(
-            exponentialSum(cell.weights, held, u) - intervalTransmittance(exact.node, 0, 1, u),
-          ),
-        );
+  for (const checkPa of checkPressuresPa) {
+    const capCm2 = grazingColumnCm2(checkPa, molecularMassDa);
+    for (let v = 0; v < policy.variants.length; v += 1) {
+      for (const [t, temperatureK] of grid.temperaturesK.entries()) {
+        const exact = spectra(cellNm, temperatureK, checkPa, only(policy, v));
+        if (exact === undefined) {
+          continue;
+        }
+        const first = ((v * nT + t) * nP + heldNode) * g;
+        const held = cell.values.subarray(first, first + g).map((x) => x / M2_PER_CM2);
+        for (const u of errorColumns(
+          exact.node,
+          REDUCTION_TARGET,
+          CHAIN_COLUMNS_PER_DECADE,
+          capCm2,
+        )) {
+          worst = Math.max(
+            worst,
+            Math.abs(
+              exponentialSum(cell.weights, held, u) - intervalTransmittance(exact.node, 0, 1, u),
+            ),
+          );
+        }
       }
     }
   }
   return worst;
+}
+
+/**
+ * The pressures a raised first node's hold is checked at (decision-r08-t4ef-storage §5.3, E4), Pa:
+ * 1 Pa and every standard node ({@link STORED_PRESSURES_PA}) below the first node.
+ */
+export function raisedFirstNodeChecksPa(firstPa: number): ReadonlyArray<number> {
+  return [BELOW_GRID_CHECK_PA, ...STORED_PRESSURES_PA.filter((p) => p < firstPa * (1 - 1e-9))];
 }
 
 /**

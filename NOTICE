@@ -405,7 +405,38 @@ ruled 2026-10-09 and 2026-10-10).
   Reader and NIST ASD Team, 2024, DOI: 10.18434/T4W30F; a stated exception, Kurucz lacking them
   and their primary papers being closed), which ASD attributes to N. C. Deb, A. Hibbert, Z.
   Felfli and A. Z. Msezane, J. Phys. B 42 (2009) 015701, and H. Hartman et al., Mon. Not. R.
-  Astron. Soc. 361 (2005) 206.
+  Astron. Soc. 361 (2005) 206. The reduced line lists in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lines/ are selected from them, and the
+  atoms' and ions' k-distribution tables in absorbers/kDistributions/ reduced from them (R08.T4.e).
+
+- Broadening of metallic lines by neutral hydrogen: P. S. Barklem, N. Piskunov and B. J. O'Mara,
+  "A list of data for the broadening of metallic lines by neutral hydrogen collisions", Astron.
+  Astrophys. Suppl. Ser. 142 (2000) 467, via CDS VizieR (DOI: 10.26093/cds/vizier), catalogue
+  J/A+AS/142/467, table1.dat.gz (fetched 2026-10-19). Its widths (log Gamma and the temperature
+  exponent) are taken for the lines it holds into the reduced line lists in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lines/ and the atoms' k-distribution
+  tables in absorbers/kDistributions/ (plan R08, R08.T4.e); the table itself is not committed.
+  The Balmer lines' self-broadening is P. S. Barklem, N. Piskunov and B. J. O'Mara, "Self-broadening
+  in Balmer line wing formation in stellar atmospheres", Astron. Astrophys. 363 (2000) 1091 (Table
+  3's p-d component; open copy arXiv:astro-ph/0010022), its three cross-sections and velocity
+  parameters in apps/hyperion/src/tools/atomicKDistributions.ts.
+
+- Stark broadening of the Balmer lines: C. Stehle and R. Hutcheon, "Extensive tabulations of
+  Stark broadened hydrogen line profiles", Astron. Astrophys. Suppl. Ser. 140 (1999) 93, via CDS
+  VizieR, catalogue VI/98A (its H3-H10 profiles' headers at 1e10-1e15 cm-3, fetched 2026-10-19).
+  Their Stark half widths enter H I's k-distribution table in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/kDistributions/ (plan R08, R08.T4.e);
+  the profiles themselves are not committed.
+
+- Sodium perturbed by molecular hydrogen: N. F. Allard, F. Spiegelman, T. Leininger and P.
+  Molliere, "New study of the line profiles of sodium perturbed by H2", Astron. Astrophys. 628
+  (2019) A120, DOI: 10.1051/0004-6361/201935593, via CDS VizieR, catalogue J/A+A/628/A120
+  (opacity.tar.gz's tables 2017, fetched 2026-10-19; read as data, the deposit's readers not run).
+  Its D lines' one-perturber far wings, reduced to 1 nm cell means per (Na, H2) pair, are in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/alkaliPairs.json, and its impact half
+  widths for the D lines in apps/hyperion/src/tools/atomicKDistributions.ts and Na I's
+  k-distribution table in absorbers/kDistributions/ (plan R08, R08.T4.e); the tables themselves
+  are not committed.
 
 - H2-H2 collision-induced absorption: A. Borysow, "Collision-induced absorption coefficients of H2
   pairs at temperatures from 60 K to 1000 K", Astron. Astrophys. 390 (2002) 779-782, DOI

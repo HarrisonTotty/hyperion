@@ -32,8 +32,10 @@ import {
   reduceGridCell,
   type ReductionGrid,
   type ShapePolicy,
+  chainRowsPa,
+  latticePressurePa,
+  meetsPressureRule,
   sortedNode,
-  STORED_PRESSURES_PA,
 } from "./kDistributions";
 import { readLineSpecies, sourceOf } from "./kDistributionsCli";
 import {
@@ -329,12 +331,15 @@ interface ReferenceState {
 
 /**
  * The states of a cell's reference on a grid: three node pressures (1 kPa, 0.1 and 1 MPa) at the
- * node nearest 250 K, and three midpoints, half way in T to the next node and in ln p to the next
+ * node nearest `nearK`, and three midpoints, half way in T to the next node and in ln p to the next
  * stored pressure above each.
+ *
+ * @param nearK - The temperature whose nearest node the states take, K: 250 for T4.d's and T4.g's
+ *   temperate tables, an atom's middle node for R08.T4.e's.
  */
-export function referenceStates(grid: ReductionGrid): ReadonlyArray<ReferenceState> {
+export function referenceStates(grid: ReductionGrid, nearK = 250): ReadonlyArray<ReferenceState> {
   const t = grid.temperaturesK.reduce((best, x) =>
-    Math.abs(x - 250) < Math.abs(best - 250) ? x : best,
+    Math.abs(x - nearK) < Math.abs(best - nearK) ? x : best,
   );
   const ti = grid.temperaturesK.indexOf(t);
   const next = grid.temperaturesK[ti + 1] ?? t;
@@ -391,12 +396,16 @@ export function runCellReferences(rest: readonly string[]): void {
   if (!isPart(part)) {
     throw new Error(`${values.table} is not a k-distribution part`);
   }
-  if (part.pressuresPa.join() !== STORED_PRESSURES_PA.map((p) => Number(p.toPrecision(6))).join()) {
-    throw new Error(`${values.table} is not on the stored pressures`);
+  // The part's pressures on the lattice, as the midpoint rule lets a table hold them
+  // (decision-r08-t4e-unsold's follow-up): the standard 30, or E3's with its midpoints.
+  const pressuresPa = part.pressuresPa.map(latticePressurePa);
+  if (!meetsPressureRule(pressuresPa)) {
+    throw new Error(`${values.table}'s pressures do not meet the lattice rule`);
   }
   const grid: ReductionGrid = {
     temperaturesK: part.temperaturesK,
-    pressuresPa: STORED_PRESSURES_PA,
+    pressuresPa,
+    rowsPa: chainRowsPa(pressuresPa),
   };
   const species = readLineSpecies(source, values.lines, values.tips);
   const spectra = lineByLine(species, source.policy);
@@ -432,6 +441,7 @@ export interface CellReferenceState extends ReferenceState {
  *
  * @param cap - The node tier's column cap ({@link gatedColumnCm2}).
  * @param chainCap - The chain test's, at most `cap` ({@link chainColumnCm2}).
+ * @param nearK - The temperature whose nearest node the states take ({@link referenceStates}).
  * @throws Error for a cell with no lines within the cut-off.
  */
 export function cellReference(
@@ -441,6 +451,7 @@ export function cellReference(
   policy: ShapePolicy,
   cap: (temperatureK: number, pressurePa: number) => number,
   chainCap: (temperatureK: number, pressurePa: number) => number,
+  nearK = 250,
 ): { readonly nm: number; readonly states: ReadonlyArray<CellReferenceState> } {
   const nP = grid.pressuresPa.length;
   const cell = reduceGridCell(cellNm, spectra, grid, policy, cap, chainCap);
@@ -451,7 +462,7 @@ export function cellReference(
   const values64 = Array.from({ length: grid.temperaturesK.length * nP }, (_, n) =>
     cell.values.subarray(n * g, (n + 1) * g).map((v) => v / M2_PER_CM2),
   );
-  const states = referenceStates(grid).map((state): CellReferenceState => {
+  const states = referenceStates(grid, nearK).map((state): CellReferenceState => {
     const exact = spectra(cellNm, state.temperatureK, state.pressurePa, [1])?.node;
     if (exact === undefined) {
       throw new Error(`no lines within the cut-off of ${cellNm} nm at a reference state`);
