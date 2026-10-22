@@ -1509,6 +1509,88 @@ fn worker_answers_are_the_same_in_any_order_from_the_body_s_cache_and_across_blo
     }
 }
 
+/// One of the queries of the weathered fixture's order check (R10.T1.c's client half): a patch's
+/// bake with its weights and their maturity layer, a material at a point, the class map with its
+/// texels' maturities and its classes' nodes, or a material's nodes at a band level.
+#[derive(Debug, Clone, Copy)]
+enum WeatheredQuery {
+    Bake(PatchKey, TerrainBakeOptions),
+    Material(FaceUv),
+    ClassMap,
+    Nodes(Material, u8),
+}
+
+/// A [`WeatheredQuery`]'s answer.
+#[derive(Debug, PartialEq)]
+enum WeatheredAnswer {
+    Bake(Box<Result<BodyBake, QueryBodyError>>),
+    Material(Result<Option<SurveyedMaterial>, QueryBodyError>),
+    ClassMap(Result<ClassMap, QueryBodyError>),
+    Nodes(Box<Result<DrawnNodes, ResolvePhotometryError>>),
+}
+
+/// `q`'s answer on `body` from `fields`.
+fn ask_weathered(fields: &mut WorkerFields, body: BodyRef, q: WeatheredQuery) -> WeatheredAnswer {
+    match q {
+        WeatheredQuery::Bake(key, opts) => {
+            WeatheredAnswer::Bake(Box::new(fields.bake(body, SEED, key, &opts)))
+        }
+        WeatheredQuery::Material(at) => WeatheredAnswer::Material(fields.material(body, SEED, at)),
+        WeatheredQuery::ClassMap => WeatheredAnswer::ClassMap(fields.class_map(body, SEED)),
+        WeatheredQuery::Nodes(material, level) => {
+            WeatheredAnswer::Nodes(Box::new(fields.maturity_nodes(body, material, band(level))))
+        }
+    }
+}
+
+/// The order check on `TEST MOON` weathered, whose header carries a maturity and a rate (R10.T1.c's
+/// client half): its bakes with their maturity layers, its materials, its class map and its nodes
+/// at several levels share the body's caches (the synthesis's, the unresolved terms and each
+/// material's drawn albedo) in any order, and each answer is a fresh worker's, whose caches are
+/// empty.
+#[test]
+fn worker_weathered_answers_are_the_same_in_any_order_and_from_a_fresh_worker() {
+    let field = weathered_terrain_world();
+    let body = field.header().body();
+    let dir = unit_dir([0.3, 1.0, 0.2]);
+    let coarse = field.header().level().get();
+    let limit = band_limit_level(field);
+    let (warm, cells) = surveyed_about(field, dir);
+    let inside = *cells.first().expect("the survey holds four cells");
+    let regolith = crust_regolith();
+    let melt = Material::new(MaterialClass::Melt, 0).unwrap();
+    let queries = [
+        WeatheredQuery::Nodes(regolith, limit),
+        WeatheredQuery::Bake(PatchKey::containing(limit, dir).unwrap(), MESH),
+        WeatheredQuery::Material(face_uv(inside, 0.3, 0.6)),
+        WeatheredQuery::ClassMap,
+        WeatheredQuery::Nodes(melt, 9),
+        WeatheredQuery::Bake(PatchKey::containing(coarse + 2, dir).unwrap(), DOUBLE),
+        WeatheredQuery::Nodes(regolith, 0),
+        WeatheredQuery::Material(face_uv(inside, 0.8, 0.1)),
+        WeatheredQuery::Nodes(melt, limit + 1),
+    ];
+    let warm = std::cell::RefCell::new(warm);
+    assert_order_independent(&queries, |&q| {
+        ask_weathered(&mut warm.borrow_mut(), body, q)
+    });
+    let mut warm = warm.into_inner();
+    for q in queries {
+        let (mut cold, _) = surveyed_about(field, dir);
+        assert_eq!(
+            ask_weathered(&mut warm, body, q),
+            ask_weathered(&mut cold, body, q),
+            "{q:?}"
+        );
+    }
+    // The answers compared carry the maturity: the band limit's bake its layer, the texels theirs.
+    let key = PatchKey::containing(limit, dir).unwrap();
+    let bake = warm.bake(body, SEED, key, &MESH).unwrap();
+    assert_eq!(bake.terrain().layers().maturity().len(), 65 * 65);
+    let map = warm.class_map(body, SEED).unwrap();
+    assert!(map.texels().iter().all(|t| t.maturity().is_some()));
+}
+
 /// R10.T10.b: a material's drawn photometry is its properties over the body's palette under the
 /// header's albedo scale, 1 where the header holds none, with its law's L(0) at the scaled V; a
 /// consolidated form draws Lambert's law whatever its entry; and a body not held, or an entry past
@@ -3108,6 +3190,12 @@ fn worker_class_map_texel_maturity_is_the_point_rule_at_band_zero() {
 /// under the header's scale, within the interpolation's and the codes' stated errors (tests 5 and
 /// 6: 0.5% at a scale of 1 and 1.2% where a range clamps, plus the unorm16 code's 0.25%), on the
 /// 3.5 Gyr world at a scale of 1 and on `TEST MOON` weathered at its haloed scale; printed.
+///
+/// The clamp corner's error depends on the scale c: at K = 16, 0.495% at the fixture's c of
+/// 1.22997 and 0.86% at the 3.5 Gyr world's haloed c, but up to 2.19% for c from 1.0 to 1.8 on the
+/// Moon-like palette (1.73% at K = 20, 1.44% at 24 and 1.07% at 32; the science checker's
+/// replica), so the 1.2% holds for the tested scales alone (plan R10's Risks, R10.T1.c's
+/// client-half deferred findings).
 #[test]
 fn worker_drawn_albedo_at_a_vertex_is_the_material_query_s() {
     for (field, interpolation) in [
@@ -3162,6 +3250,12 @@ fn worker_drawn_albedo_at_a_vertex_is_the_material_query_s() {
             100.0 * worst
         );
         assert!(compared > 0);
-        assert!(worst <= interpolation + 0.0025, "{worst}");
+        assert!(
+            worst <= interpolation + 0.0025,
+            "{worst} over {interpolation} + 0.0025 at c {scale}; where a range clamps, the 1.2% \
+             holds for the tested scales alone, the error depending on c (up to 2.19% at K = 16 \
+             for c 1.0-1.8 on the Moon-like palette; plan R10's R10.T1.c client-half deferred \
+             findings)"
+        );
     }
 }

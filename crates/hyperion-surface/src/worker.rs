@@ -649,12 +649,14 @@ impl ClassMapTexel {
         self.weights
     }
 
-    /// Its ground's space-weathering maturity at the map's band level, [`CLASS_MAP_BAND`]
-    /// (R10.T1.c's client half), as the layer's code ([`encode_maturity`] against the header's
-    /// `m_body`): the point rule at that level ([`maturity_at_level`]) at the points its weights are
-    /// read at, their mean where several; `None` where the header carries no maturity or no
-    /// weathering rate. Band level 0 draws the coarse craters' haloes and leaves a Moon's small
-    /// craters to its classes' [`nodes`](ClassMapClass::nodes).
+    /// Its ground's space-weathering maturity at the map's band level, [`CLASS_MAP_BAND`], as the
+    /// layer's code (R10.T1.c's client half).
+    ///
+    /// The code is [`encode_maturity`]'s against the header's `m_body`, of the point rule at that
+    /// level ([`maturity_at_level`]) at the points its weights are read at, their mean where
+    /// several; `None` where the header carries no maturity or no weathering rate. Band level 0
+    /// draws the coarse craters' haloes and leaves a Moon's small craters to its classes'
+    /// [`nodes`](ClassMapClass::nodes).
     #[must_use]
     pub const fn maturity(&self) -> Option<u16> {
         self.maturity
@@ -856,8 +858,8 @@ fn field_cells_of(texel: PatchKey, level: u8, cells: &mut Vec<PatchKey>) {
 }
 
 /// A class-map texel's readings at `points`, each at band level `band`: each material's weight
-/// bytes summed over the points, and, `with_maturity`, their maturities ([`maturity_at_level`])
-/// summed, 0 otherwise, each in the points' order from +0.
+/// bytes summed over the points, and their maturities ([`maturity_at_level`]) summed, `None` where
+/// the header carries no maturity or no weathering rate, each in the points' order from +0.
 ///
 /// # Errors
 ///
@@ -865,24 +867,23 @@ fn field_cells_of(texel: PatchKey, level: u8, cells: &mut Vec<PatchKey>) {
 ///
 /// # Panics
 ///
-/// If `with_maturity` is asked of a header that carries no maturity or no weathering rate (a bug),
-/// and as [`weights_at`].
+/// As [`weights_at`].
 fn texel_sums(
     synth: &Synthesiser<'_, PartialField>,
     cache: &mut SynthCache,
     points: &[FaceUv],
     band: BandLevel,
-    with_maturity: bool,
-) -> Result<(BTreeMap<GroundMaterial, f64>, f64), QueryHeightError> {
+) -> Result<(BTreeMap<GroundMaterial, f64>, Option<f64>), QueryHeightError> {
     let mut weights = BTreeMap::<GroundMaterial, f64>::new();
-    let mut maturity = 0.0;
+    let mut maturity: Option<f64> = None;
     for &at in points {
         for (material, byte) in weights_at(synth, cache, at, band)?.iter() {
             *weights.entry(material).or_insert(0.0) += f64::from(byte);
         }
-        if with_maturity {
-            maturity += maturity_at_level(synth, cache, at, band)?
-                .expect("the header carries a maturity and a rate");
+        // `Ok(None)` before any read where the header carries no maturity or no rate; the first
+        // point's sum is +0 plus its value, as a sum from +0 always was.
+        if let Some(m) = maturity_at_level(synth, cache, at, band)? {
+            maturity = Some(maturity.unwrap_or(0.0) + m);
         }
     }
     Ok((weights, maturity))
@@ -1737,15 +1738,14 @@ impl WorkerFields {
             } else {
                 points.extend(surveyed.iter().map(|&cell| centre_of(cell)));
             }
-            let (mut weights, maturity) =
-                match texel_sums(&synth, cache, &points, band, background.is_some()) {
-                    Ok(sums) => sums,
-                    Err(QueryHeightError::NotSurveyed(_)) => {
-                        // A read past the cells held: the texel waits for a later block.
-                        complete = false;
-                        continue;
-                    }
-                };
+            let (mut weights, maturity) = match texel_sums(&synth, cache, &points, band) {
+                Ok(sums) => sums,
+                Err(QueryHeightError::NotSurveyed(_)) => {
+                    // A read past the cells held: the texel waits for a later block.
+                    complete = false;
+                    continue;
+                }
+            };
             let points_read = f64::from(count(points.len()));
             for value in weights.values_mut() {
                 *value /= points_read;
@@ -1755,10 +1755,12 @@ impl WorkerFields {
                 surveyed: count(surveyed.len()),
                 cells: count(cells.len()),
                 weights,
-                maturity: background.map(|body| {
+                // The sum is `Some` exactly where `background` is: both are the header's maturity
+                // where it carries a rate.
+                maturity: background.zip(maturity).map(|(body, sum)| {
                     // The mean of maturities no higher than `m_body`, held there against the sum's
                     // rounding; one point's own value where one is read.
-                    let mean = maturity / points_read;
+                    let mean = sum / points_read;
                     encode_maturity(if mean < body { mean } else { body }, body)
                 }),
             });

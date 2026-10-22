@@ -56,8 +56,10 @@ impl TerrainLayers {
         &self.weights
     }
 
-    /// Each vertex's space-weathering maturity at the patch's band level n and at its parent's,
-    /// n − 1 (level 0's own at level 0), each [`encode_maturity`]'s code of
+    /// Each vertex's space-weathering maturity codes at the patch's band level n and at its
+    /// parent's, n − 1 (level 0's own at level 0).
+    ///
+    /// Each is [`encode_maturity`]'s code of
     /// [`patch_maturity`](crate::material::patch_maturity)'s value against the header's `m_body`:
     /// the ground's maturity with the fresh haloes of every coarse crater, and of the small craters
     /// of the octaves each level resolves, drawn crater by crater (R10.T1.c's client half;
@@ -123,11 +125,12 @@ impl TerrainLayers {
     }
 }
 
-/// The code of the maturity `maturity` on ground of background maturity `background` (`m_body`),
-/// both dimensionless, `maturity` in [0, `background`] and `background` in [0, 1]: the unsigned
-/// normalised 16-bit code of r = √(D ÷ `m_body`), D = `m_body` − m the deficit below the
-/// background, 65,535 r rounded to the nearest integer (decision-r10-t1c-client-scope §1.4): 0 at
-/// the background and 65,535 on fresh ground, m = 0. Every code is 0 where `m_body` is 0.
+/// The code of the maturity `maturity` on ground of background maturity `background` (`m_body`).
+///
+/// Both are dimensionless, `maturity` in [0, `background`] and `background` in [0, 1]. The code is
+/// the unsigned normalised 16-bit code of r = √(D ÷ `m_body`), D = `m_body` − m the deficit below
+/// the background, 65,535 r rounded to the nearest integer (decision-r10-t1c-client-scope §1.4): 0
+/// at the background and 65,535 on fresh ground, m = 0. Every code is 0 where `m_body` is 0.
 ///
 /// The square root spends the codes where the deficits are small, as they are over most of an old
 /// surface: decoded ([`decode_maturity`]), D = `m_body` r², so the code's first step is a deficit

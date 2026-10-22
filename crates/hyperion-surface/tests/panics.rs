@@ -1621,6 +1621,12 @@ mod maturity {
     }
 
     #[test]
+    #[should_panic(expected = "a maturity must be in [0, 0.5], its background's, got -0.1")]
+    fn the_node_interpolation_refuses_a_negative_maturity() {
+        let _ = maturity_node_albedo(&[[0.1; 3]; MATURITY_NODES], 0.5, -0.1);
+    }
+
+    #[test]
     #[should_panic(expected = "a maturity must be in [0, 0.5], its background's, got NaN")]
     fn the_node_interpolation_refuses_a_nan_maturity() {
         let _ = maturity_node_albedo(&[[0.1; 3]; MATURITY_NODES], 0.5, f64::NAN);
@@ -1636,6 +1642,12 @@ mod maturity {
     #[should_panic(expected = "a background maturity must be in [0, 1], got 1.5")]
     fn the_node_interpolation_refuses_a_background_above_one() {
         let _ = maturity_node_albedo(&[[0.1; 3]; MATURITY_NODES], 1.5, 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a background maturity must be in [0, 1], got -0.5")]
+    fn the_node_interpolation_refuses_a_negative_background() {
+        let _ = maturity_node_albedo(&[[0.1; 3]; MATURITY_NODES], -0.5, 0.0);
     }
 }
 
@@ -1956,6 +1968,12 @@ mod bake {
     #[should_panic(expected = "a maturity must be in [0, 0.5], its background's, got 0.6")]
     fn a_maturity_code_of_a_maturity_above_its_background_is_refused() {
         let _ = encode_maturity(0.6, 0.5);
+    }
+
+    #[test]
+    #[should_panic(expected = "a maturity must be in [0, 0.5], its background's, got -0.1")]
+    fn a_maturity_code_of_a_negative_maturity_is_refused() {
+        let _ = encode_maturity(-0.1, 0.5);
     }
 
     #[test]

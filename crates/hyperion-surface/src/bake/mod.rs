@@ -181,8 +181,11 @@ pub fn bake_terrain<F: SurveyView>(
     let (palette, weights, maturity) = match opts.weights {
         WeightsLayer::Baked => {
             let mut vertices = Vec::with_capacity(survey_mask.len());
-            // Each vertex's direction where it has weights, for the maturity.
-            let mut taken = Vec::with_capacity(survey_mask.len());
+            // Each vertex's direction where it has weights, for the maturity, kept only where the
+            // header carries a maturity and a rate, so that a bake without one does no added work.
+            let header = synth.field().header();
+            let mut taken = (header.maturity().is_some() && header.weathering_rate().is_some())
+                .then(|| Vec::with_capacity(survey_mask.len()));
             for (n, sample) in heights.samples().iter().enumerate() {
                 let (weights, dir) = if reference[n] {
                     (None, None)
@@ -200,10 +203,17 @@ pub fn bake_terrain<F: SurveyView>(
                     }
                 };
                 vertices.push(weights);
-                taken.push(dir);
+                if let Some(taken) = &mut taken {
+                    taken.push(dir);
+                }
             }
             let (palette, weights) = layers::gather(&vertices);
-            (palette, weights, maturity_layer(synth, cache, key, &taken)?)
+            let maturity = match taken {
+                Some(taken) => maturity_layer(synth, cache, key, &taken)?,
+                // No maturity or no rate: the empty layer `patch_maturity` would have answered.
+                None => Vec::new(),
+            };
+            (palette, weights, maturity)
         }
         WeightsLayer::Skipped => ([None; MAX_CLASSES], Vec::new(), Vec::new()),
     };
@@ -251,7 +261,7 @@ fn maturity_layer<F: SurveyView>(
         .field()
         .header()
         .maturity()
-        .expect("a patch's maturity is the header's");
+        .expect("patch_maturity answers Some only where the header carries a maturity");
     Ok(pairs
         .iter()
         .map(|pair| pair.map(|m| encode_maturity(m, background)))

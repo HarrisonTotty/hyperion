@@ -1706,8 +1706,8 @@ impl FaceSpans {
                 continue;
             };
             let at = |dir: [f64; 3]| {
-                let cell =
-                    PatchKey::containing(level, dir).expect("a level of a search is a level");
+                let cell = PatchKey::containing(level, dir)
+                    .expect("a search's level is above an octave's, which is within MAX_LEVEL");
                 debug_assert_eq!(cell.face(), face, "a direction's cell is on its face");
                 cell
             };
@@ -2484,7 +2484,7 @@ pub fn unresolved_terms(header: &FieldHeader) -> Option<UnresolvedTerms> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnresolvedMix {
     body: f64,
-    unresolved: usize,
+    unresolved: u32,
     nodes: Vec<MaturityNode>,
 }
 
@@ -2497,7 +2497,7 @@ impl UnresolvedMix {
 
     /// How many of the octaves that can expose fresh ground the level leaves to the mix.
     #[must_use]
-    pub const fn unresolved_octaves(&self) -> usize {
+    pub const fn unresolved_octaves(&self) -> u32 {
         self.unresolved
     }
 
@@ -2518,6 +2518,10 @@ impl UnresolvedMix {
 /// It is the body's maturity mix ([`maturity_mix`]) without its coarse list where the level keeps
 /// no octave, as band level 0 keeps none of a Moon's, and the atom at `m_body` where it keeps
 /// every one, from the band limit's level on.
+///
+/// # Panics
+///
+/// If `terms` hold more octaves than a `u32` counts, which a body's at most 32 never are (a bug).
 #[must_use]
 pub fn unresolved_mix(terms: &UnresolvedTerms, level: BandLevel) -> UnresolvedMix {
     let body = terms.body;
@@ -2548,7 +2552,7 @@ pub fn unresolved_mix(terms: &UnresolvedTerms, level: BandLevel) -> UnresolvedMi
     });
     UnresolvedMix {
         body,
-        unresolved: left.len(),
+        unresolved: u32::try_from(left.len()).expect("a body has at most 32 crater octaves"),
         nodes,
     }
 }
@@ -2563,10 +2567,17 @@ pub fn unresolved_mix(terms: &UnresolvedTerms, level: BandLevel) -> UnresolvedMi
 /// of levels 0 to the band limit's on the 4.4, 3.5 and 1 Gyr Moon-like worlds, this grading's worst
 /// error is 0.77% at K = 12, 0.42% at 16, 0.27% at 20 and 0.19% at 24 (the sin² grading's 1.6% at
 /// 12, u²'s 0.65% at 16, each linear in T; linear in ln T moves none by more than 0.05 points): 16
-/// is the least K that meets it. Where a scale carries a material's V to its range's end
+/// is the least K that meets it.
+///
+/// Where a scale c carries a material's V to its range's end
 /// ([`scaled_normal_albedo`](super::scaled_normal_albedo)), its drawn albedo has a corner in m,
-/// which no fixed nodes follow; there the error is 0.86–1.37% at K of 12 to 24, 0.86% at 16
-/// (recorded in plan R10's Risks).
+/// which no fixed nodes follow, and the error there depends on c. At K = 16 it is 0.86% at the
+/// 3.5 Gyr world's haloed c and 0.495% at the weathered fixture's (`TEST MOON` weathered, c =
+/// 1.22997), but up to 2.19% for c from 1.0 to 1.8 on the Moon-like palette, where K = 20 holds
+/// it to 1.73%, 24 to 1.44% and 32 to 1.07% (the science checker's replica). The 1.2% the tests
+/// pin there holds for the scales they test alone. The levers for a later pass are K = 32 or a
+/// node of each slot's own at the clamp corner (plan R10's Risks, R10.T1.c's client-half deferred
+/// findings).
 pub const MATURITY_NODES: usize = 16;
 
 /// Node `node`'s maturity as a share of `m_body`, dimensionless in [0, 1]: q = 1 − (1 − u³)² with u =
@@ -5231,7 +5242,10 @@ mod tests {
                     &at,
                 );
                 if level == 0 {
-                    assert!(got.iter().all(|pair| pair[0].total_cmp(&pair[1]).is_eq()));
+                    assert!(
+                        got.iter().all(|pair| pair[0].total_cmp(&pair[1]).is_eq()),
+                        "{name}: level 0's parent is level 0, so each vertex's two values are one"
+                    );
                 }
                 eprintln!(
                     "{name}: level {level}, {} octaves kept, {below} compared vertices below m_body",
@@ -5406,7 +5420,11 @@ mod tests {
                 assert_same_bits(sum_at(k, OctaveTerms::at_middles), law.small_rate(d));
             }
             let zero = unresolved_mix(&terms, BandLevel::new(0).unwrap());
-            assert_eq!(zero.unresolved_octaves(), terms.octaves().len(), "{name}");
+            assert_eq!(
+                zero.unresolved_octaves(),
+                u32::try_from(terms.octaves().len()).unwrap(),
+                "{name}"
+            );
             let mut free = law.clone();
             free.coarse = None;
             assert_eq!(mix_bits(zero.nodes()), mix_bits(&cut(&free, 1)), "{name}");
@@ -5440,7 +5458,7 @@ mod tests {
             let body = terms.body();
             let band = |level: u8| BandLevel::new(level).unwrap();
             let limit = band_limit_level(field);
-            let mut left = terms.octaves().len();
+            let mut left = u32::try_from(terms.octaves().len()).unwrap();
             let mut counts = Vec::new();
             for level in 0..=MAX_LEVEL {
                 let mix = unresolved_mix(&terms, band(level));
@@ -5538,6 +5556,17 @@ mod tests {
         }
     }
 
+    /// The unresolved terms of [`halo_worlds`]' world `k`, one of its first three, the weathered
+    /// Moon-like worlds: built once per test process on the first ask, so that tests 5 and 6 build
+    /// only the worlds they read (on the wasm targets, the 1 Gyr world's alone).
+    fn halo_terms(k: usize) -> &'static UnresolvedTerms {
+        static TERMS: [OnceLock<UnresolvedTerms>; 3] = [const { OnceLock::new() }; 3];
+        TERMS[k].get_or_init(|| {
+            unresolved_terms(halo_worlds()[k].field.header())
+                .expect("a weathered world carries a maturity and a rate")
+        })
+    }
+
     /// One case of test 5 and test 6: a palette exposed as `exposure`, whose unresolved terms are
     /// `terms`, drawn at the scale `scale`, and whether the scale carries some material to its
     /// range's end.
@@ -5555,7 +5584,7 @@ mod tests {
     /// terms, at a scale of 1; and, where a range clamps, the 3.5 and 1 Gyr worlds at their haloed
     /// scales, the 1 Gyr one's that of the weathered fixture, `TEST MOON` weathered, whose solve
     /// for p in V, 0.12, is the same. On the wasm targets, the 1 Gyr world alone, at both scales.
-    fn node_cases(terms: &[UnresolvedTerms]) -> Vec<NodeCase<'_>> {
+    fn node_cases() -> Vec<NodeCase<'static>> {
         let worlds = halo_worlds();
         let wasm = cfg!(target_arch = "wasm32");
         let mut cases = Vec::new();
@@ -5568,7 +5597,7 @@ mod tests {
                 name: format!("{} at c 1", world.name),
                 palette: header.palette(),
                 exposure: GroundExposure::of_header(header),
-                terms: &terms[k],
+                terms: halo_terms(k),
                 scale: 1.0,
                 clamped: false,
             });
@@ -5580,7 +5609,7 @@ mod tests {
                     name: format!("{w:?}'s palette at m_body 1, c 1"),
                     palette: header.palette(),
                     exposure: GroundExposure::NONE.with_maturity(1.0),
-                    terms: &terms[2],
+                    terms: halo_terms(2),
                     scale: 1.0,
                     clamped: false,
                 });
@@ -5595,7 +5624,7 @@ mod tests {
                 name: format!("{} at its haloed scale", worlds[k].name),
                 palette: header.palette(),
                 exposure: GroundExposure::of_header(header),
-                terms: &terms[k],
+                terms: halo_terms(k),
                 scale: worlds[k].haloed.scale(),
                 clamped: true,
             });
@@ -5630,16 +5659,16 @@ mod tests {
     /// in each band at every compared maturity in [0, `m_body`] (some 4,400 natively), at each
     /// level, on every material of the three weathered Moon-like worlds and of every other
     /// `testing` world's palette weathered at maturity 1, at a scale of 1; printed with where
-    /// each is worst. Where a scale carries a material's V to its range's end its drawn albedo has a
-    /// corner the fixed nodes cannot follow: there the figure is pinned as it stands, a known miss
-    /// (recorded in plan R10's Risks).
+    /// each is worst. Where a scale c carries a material's V to its range's end its drawn albedo has
+    /// a corner the fixed nodes cannot follow, and the error there depends on c: at K = 16, 0.86%
+    /// at the 3.5 Gyr world's haloed c and 0.495% at the 1 Gyr world's, the weathered fixture's c
+    /// of 1.22997, but up to 2.19% for c from 1.0 to 1.8 on the Moon-like palette (1.73% at K =
+    /// 20, 1.44% at 24 and 1.07% at 32; the science checker's replica). There the figure is pinned
+    /// as it stands, 1.2%, a known miss of the ruled 0.5% that holds for these two scales alone
+    /// (plan R10's Risks, R10.T1.c's client-half deferred findings).
     #[test]
     fn maturity_nodes_interpolate_within_half_a_percent() {
         let worlds = halo_worlds();
-        let terms: Vec<UnresolvedTerms> = worlds[..3]
-            .iter()
-            .map(|w| unresolved_terms(w.field.header()).unwrap())
-            .collect();
         let shares = compared_shares(if cfg!(target_arch = "wasm32") {
             200
         } else {
@@ -5647,7 +5676,7 @@ mod tests {
         });
         let limit = band_limit_level(worlds[2].field);
         let (mut plain, mut clamped) = ((0.0, String::new()), (0.0, String::new()));
-        for case in node_cases(&terms) {
+        for case in node_cases() {
             let body = case.terms.body();
             let g_of = |material| drawn(material, case.palette, case.exposure, case.scale);
             let mut worst = (0.0, String::new());
@@ -5693,8 +5722,14 @@ mod tests {
             clamped.1
         );
         assert!(plain.0 <= 0.005, "{plain:?}");
-        // Known miss, pinned as built: a range's corner between two nodes (the bound is 0.5%).
-        assert!(clamped.0 <= 0.012, "{clamped:?}");
+        // Known miss, pinned as built: a range's corner between two nodes, whose error depends on
+        // the scale (the bound is 0.5%).
+        assert!(
+            clamped.0 <= 0.012,
+            "{clamped:?}: the clamp corner's 1.2% holds for the tested scales alone, the error \
+             depending on c (up to 2.19% at K = 16 for c 1.0-1.8 on the Moon-like palette; plan \
+             R10's R10.T1.c client-half deferred findings)"
+        );
     }
 
     /// Test 6 (decision-r10-t1c-client-scope §1.4 and §2.5): the layer's unorm16 codes against
@@ -5707,10 +5742,6 @@ mod tests {
     #[test]
     fn maturity_codes_hold_the_drawn_albedo() {
         let worlds = halo_worlds();
-        let terms: Vec<UnresolvedTerms> = worlds[..3]
-            .iter()
-            .map(|w| unresolved_terms(w.field.header()).unwrap())
-            .collect();
         let shares = compared_shares(if cfg!(target_arch = "wasm32") {
             200
         } else {
@@ -5735,7 +5766,7 @@ mod tests {
                     let g = g_of(material);
                     for &level in &levels {
                         let band = BandLevel::new(level).unwrap();
-                        let nodes = maturity_nodes(&unresolved_mix(&terms[k], band), &g);
+                        let nodes = maturity_nodes(&unresolved_mix(halo_terms(k), band), &g);
                         let draw = |m: f64| maturity_node_albedo(&nodes, body, m);
                         let coded = |m: f64| draw(decode_maturity(encode_maturity(m, body), body));
                         let at = |x: f64| {
@@ -6151,21 +6182,31 @@ mod tests {
         }
 
         /// Test 8 (decision-r10-t1c-client-scope §2.5; the halo ruling's item 3): on the 3.5 and
-        /// 1 Gyr Moon-like worlds, the mean drawn normal albedo in V, as the terrain's shader draws
-        /// it (each vertex's level-n code decoded, its slots' nodes at level n interpolated there,
-        /// the weights and the albedos each bilinear over a quad, the morph 0), over 64 patches
-        /// sampled uniformly in area at each of levels 8, 10, 12 and 14, each patch's mean taken by
-        /// area, is within 1% of the same ground's mean drawn over the body's maturity mix, Σ a
-        /// E[clamp(c W(`m_local`))] with a each slot's sampled share; and the class map's texels,
-        /// each by its area, drawn at its code and its classes' band-0 nodes, are within 1% of the
-        /// same over their weights. Each is printed, beside the body's own Σ a E over its class
-        /// fractions, from which the sample's classes stray.
+        /// 1 Gyr Moon-like worlds, each at its haloed scale c for [`TARGET`] (the 1 Gyr world's
+        /// that of the weathered fixture, `TEST MOON` weathered), so that a range clamps and the
+        /// nodes, the class map's and the reference all take c from the header, the mean drawn
+        /// normal albedo in V, as the terrain's shader draws it (each vertex's level-n code
+        /// decoded, its slots' nodes at level n interpolated there, the weights and the albedos
+        /// each bilinear over a quad, the morph 0), over 64 patches sampled uniformly in area at
+        /// each of levels 8, 10, 12 and 14, each patch's mean taken by area, is within 1% of the
+        /// same ground's mean drawn over the body's maturity mix, Σ a E[clamp(c W(`m_local`))] with
+        /// a each slot's sampled share; and the class map's texels, each by its area, drawn at its
+        /// code and its classes' band-0 nodes, are within 1% of the same over their weights. Each
+        /// is printed, beside the body's own Σ a E over its class fractions, from which the
+        /// sample's classes stray, and p in V, a geometric albedo (each material's normal albedo
+        /// times (2 + L) ÷ 3), with the drawn mean's gap to each.
         #[test]
         #[ignore = "slow: 512 weathered patches baked and two whole class maps, drawn as the shader draws them"]
         fn maturity_drawn_mean_is_the_body_s_mix_mean() {
             let worlds = halo_worlds();
+            let p = TARGET[1];
             for world in [&worlds[1], &worlds[2]] {
-                let field = world.field;
+                let scaled = world
+                    .field
+                    .clone()
+                    .with_albedo_scale(Some(world.haloed.scale()))
+                    .expect("a solved scale is finite and positive");
+                let field = &scaled;
                 let header = field.header();
                 let body = header.maturity().unwrap();
                 let (palette, exposure) = (header.palette(), GroundExposure::of_header(header));
@@ -6213,14 +6254,17 @@ mod tests {
                         want_sum += want_patch;
                     }
                     let gap = drawn_sum / want_sum - 1.0;
+                    let drawn_mean = drawn_sum / 64.0;
                     eprintln!(
-                        "{}: level {level}, {} octaves left out: the drawn mean V {:.6}, the mix's \
-                         over the same ground {:.6}, {:+.4}%; the body's Σ a E {body_mean:.6}",
+                        "{} at c {scale:.6}: level {level}, {} octaves left out: the drawn mean V \
+                         {drawn_mean:.6}, the mix's over the same ground {:.6}, {:+.4}%; the \
+                         body's Σ a E {body_mean:.6}, {:+.4}%; p {p}, {:+.4}%",
                         world.name,
                         mix.unresolved_octaves(),
-                        drawn_sum / 64.0,
                         want_sum / 64.0,
-                        100.0 * gap
+                        100.0 * gap,
+                        100.0 * (drawn_mean / body_mean - 1.0),
+                        100.0 * (drawn_mean / p - 1.0)
                     );
                     assert!(gap.abs() < 0.01, "{}: level {level}: {gap}", world.name);
                 }
@@ -6230,12 +6274,14 @@ mod tests {
                 let (drawn_mean, want_mean) = class_map_means(&map, (body, &figure), &mut mean_of);
                 let gap = drawn_mean / want_mean - 1.0;
                 eprintln!(
-                    "{}: the class map's {} texels: the drawn mean V {drawn_mean:.6}, the mix's \
-                     over the same ground {want_mean:.6}, {:+.4}%; the body's Σ a E \
-                     {body_mean:.6}",
+                    "{} at c {scale:.6}: the class map's {} texels: the drawn mean V \
+                     {drawn_mean:.6}, the mix's over the same ground {want_mean:.6}, {:+.4}%; the \
+                     body's Σ a E {body_mean:.6}, {:+.4}%; p {p}, {:+.4}%",
                     world.name,
                     map.texels().len(),
-                    100.0 * gap
+                    100.0 * gap,
+                    100.0 * (drawn_mean / body_mean - 1.0),
+                    100.0 * (drawn_mean / p - 1.0)
                 );
                 assert!(gap.abs() < 0.01, "{}: the class map: {gap}", world.name);
             }
