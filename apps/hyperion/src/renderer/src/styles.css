@@ -1468,7 +1468,8 @@ body {
  * Room after a value for its stale `S` (`StaleSlot`): a space and the mark, 2 ch of the value's
  * figures, the mark set at the slot's right. It is kept while the value is live, empty, so that the
  * mark's coming moves nothing after it (the guide's "Numbers": a field is sized for its longest
- * value and its status marks; plan 05, P05.T14).
+ * value and its status marks; plan 05, P05.T14). The spatial readings keep it after each value read
+ * from a source that can go stale (plan 12, P12.T11.d), and an em dash keeps its slot, empty.
  */
 .stale-slot {
   display: inline-block;
@@ -3011,18 +3012,6 @@ body {
 .spatial-reading__unit {
   color: var(--text-muted);
   font-family: var(--font-sans);
-}
-
-/*
- * Room after a value read from a source that can go stale, for the guide's trailing `S`: a space
- * and the mark in the value's monospaced figures, after its unit. It is kept while the value is
- * live, so that the mark's coming moves nothing after it (the guide's "Numbers": a field is sized
- * for its longest value and its status marks), and the em dash keeps it too (plan 12, P12.T11.d).
- */
-.spatial-reading__stale-slot {
-  display: inline-block;
-  min-width: 2ch;
-  text-align: right;
 }
 
 /*

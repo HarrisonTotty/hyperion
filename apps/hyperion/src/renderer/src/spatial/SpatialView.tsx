@@ -49,7 +49,7 @@ import { ModeReading, type SpatialMode } from "./ModeReading";
 import { type ColourTokens, paint, readTokens, sameTokens, staleTokens } from "./paint";
 import { pick } from "./pick";
 import { PRESET_CONTROLS, PresetButtons } from "./PresetButtons";
-import { Reading, type SpatialQuantity, type SpatialReading } from "./Reading";
+import { Reading, sourceState, type SpatialQuantity, type SpatialReading } from "./Reading";
 import type { ScaleUnit } from "./scale";
 import { ScaleBar } from "./ScaleBar";
 import { type CameraMove, useOrbitCamera } from "./useOrbitCamera";
@@ -630,9 +630,9 @@ export function SpatialView({
         <dl className="spatial-view__readings">
           <FrameReading frameName={frameName} />
           {centre.map((reading) => (
-            <Reading key={reading.label} reading={reading} stale={stale} />
+            <Reading key={reading.label} reading={reading} state={sourceState(stale)} />
           ))}
-          {timeIsOwn ? <Reading reading={time} own /> : <Reading reading={time} stale={stale} />}
+          <Reading reading={time} state={timeIsOwn ? "own" : sourceState(stale)} />
         </dl>
         {camera === null || viewport === null ? null : (
           <ScaleBar
@@ -647,7 +647,7 @@ export function SpatialView({
             P12.T11.d's ruling). */}
         {mode === undefined ? null : (
           <dl className="spatial-view__readings">
-            <ModeReading mode={mode} stale={stale} />
+            <ModeReading mode={mode} state={sourceState(stale)} />
           </dl>
         )}
         {shownAxes.onAxis ? (

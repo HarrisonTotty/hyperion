@@ -240,7 +240,7 @@ describe("SystemView's requests", () => {
     // The display time is the console's own, which `RUN` and `HOLD` move: no slot and no mark.
     const time = furnitureValue("DISPLAY TIME UT");
     expect(time).not.toHaveTextContent(/stale/u);
-    expect(time.querySelector(".spatial-reading__stale-slot")).toBeNull();
+    expect(time.querySelector(".stale-slot")).toBeNull();
     expect(time.parentElement).toHaveClass("spatial-reading--own");
   });
 

@@ -22,7 +22,7 @@ import { LegendSymbol } from "../../spatial/LegendSymbol";
 import { FrameReading } from "../../spatial/FrameReading";
 import { ModeReading } from "../../spatial/ModeReading";
 import { type ColourTokens, paint, readTokens, sameTokens, staleTokens } from "../../spatial/paint";
-import { Reading } from "../../spatial/Reading";
+import { Reading, sourceState } from "../../spatial/Reading";
 import { SIZE_CLASS_REM } from "../../spatial/symbols";
 import { shownCount, type StarFilter } from "./chartModel";
 import { CHART_FRAME_NAME, modeReading, timeReading } from "./chartReadings";
@@ -349,8 +349,8 @@ export function HrDiagram({
       {/* In the furniture's own classes too, so that the line is set as the chart's furniture is. */}
       <dl className="hr-diagram__readings spatial-view__readings">
         {mode.kind === "observed" ? <FrameReading frameName={CHART_FRAME_NAME} /> : null}
-        <Reading reading={timeReading(timeYr)} stale={stale} />
-        <ModeReading mode={modeReading(mode)} stale={stale} />
+        <Reading reading={timeReading(timeYr)} state={sourceState(stale)} />
+        <ModeReading mode={modeReading(mode)} state={sourceState(stale)} />
       </dl>
       <Counts rows={plottedRows} stale={stale} />
       <h3 className="hr-diagram__counts-heading">NOT PLOTTED</h3>

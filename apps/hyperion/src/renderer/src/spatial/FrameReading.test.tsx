@@ -25,6 +25,6 @@ describe("FrameReading (plan 12, P12.T11.d)", () => {
     );
 
     const name = screen.getByText("FRAME", { selector: "dt" }).nextElementSibling;
-    expect(name?.querySelector(".spatial-reading__stale-slot")).toBeNull();
+    expect(name?.querySelector(".stale-slot")).toBeNull();
   });
 });
