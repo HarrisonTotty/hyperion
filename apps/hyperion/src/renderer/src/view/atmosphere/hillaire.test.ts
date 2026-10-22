@@ -6,7 +6,13 @@ import {
   lineAbsorberMedium,
   SATURN_SPHEROID,
 } from "../../test/atmosphereFixtures";
-import { forbiddenIn, wgslCode } from "../../test/atmosphereWgsl";
+import {
+  arraysByValueFrom,
+  forbiddenIn,
+  wgslCode,
+  wgslFunctions,
+  wgslStructs,
+} from "../../test/atmosphereWgsl";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { quaternion } from "../camera/quaternion";
 import type { TextureHandle } from "../engine/types";
@@ -54,6 +60,7 @@ import oblateWgsl from "./shaders/oblate.wgsl?raw";
 import viewWgsl from "./shaders/view.wgsl?raw";
 import {
   KERNEL_ARM_FORMAT,
+  MAX_TERMS,
   MULTI_SCATTERING_KERNEL,
   NO_ABSORBER_CURVES,
   TRANSMITTANCE_KERNEL,
@@ -878,14 +885,68 @@ describe("the atmosphere's WGSL", () => {
     expect(source).toMatch(/var<storage, read> terms : array<Term, MAX_TERMS>;/);
     expect(source).toMatch(/var densityTables : texture_2d_array<f32>;/);
     expect(source).toMatch(/var phaseTables : texture_2d_array<f32>;/);
-    // The sources' directions and angles are the kernel's own variables, read in place by each step
-    // (R08.T8.d).
-    expect(source).toMatch(/var angles = sourceAngles\(dir, &sources, count\);/);
+    // Each source's direction is read from the view at each step and its angle formed there
+    // (R08.T8.d), as the kernels formed them once a pixel before.
+    expect(source).toMatch(/let source = view\.sources\[k\];/);
+    expect(source).toMatch(/let angle = scatteringAngle\(ray, dir\);/);
+    expect(source).not.toMatch(/\bsourceAngles\b/);
   });
 
   it("keeps the composite's code clear of the medium, which it does not declare", () => {
     const code = COMPOSITE_MATERIAL.fragmentWgsl.replaceAll(/\/\/[^\n]*/gu, "");
     expect(code).not.toMatch(/\b(medium|terms|densityTables|phaseTables)\b/);
+  });
+});
+
+describe("the per-frame marches' steps (R08.T8.d)", () => {
+  // An array held by value and indexed by a loop variable is copied whole into each invocation at
+  // every call, and a function-scope array indexed by a variable lives in local memory: the
+  // sources' directions and angles passed to each step so, with the slots' and terms' arrays,
+  // made the ray march's step about 7 times R05's on the RTX 3080 (`decision-r08-t8-leans.md` §8),
+  // R05.T14's `Medium` by value over again. No helper a step reaches takes or returns one, nor a
+  // struct that holds one; pointers are allowed.
+  it.each([
+    [
+      "the ray-march kernel",
+      RAY_MARCH_KERNEL.reference,
+      ["rayMarchStep", "rayMarchStepOf", "rayMarchWalkStepOf"],
+    ],
+    [
+      "the sky-view kernel",
+      SKY_VIEW_KERNEL.reference,
+      ["skyViewStep", "marchStep", "marchWalkStep"],
+    ],
+    [
+      "the aerial-perspective kernel",
+      AERIAL_PERSPECTIVE_KERNEL.reference,
+      [
+        "shellHeightAlong",
+        "quadricAlong",
+        "oblateNeedsLatitude",
+        "datumPointOf",
+        "gravityRatioAt",
+        "sampleMediumAt",
+        "sampleStartOf",
+        "viewSourcesAt",
+        "viewMarchStep",
+      ],
+    ],
+  ] as const)(
+    "%s's per-step helpers take and return no array, nor a struct that holds one, by value",
+    (_name, source, roots) => {
+      // The roots are the step's own: each is declared.
+      const declared = wgslFunctions(source);
+      expect(roots.filter((root) => !declared.has(root))).toEqual([]);
+      expect(arraysByValueFrom(source, roots)).toEqual([]);
+    },
+  );
+
+  it("gives each light slot and each term a member of its own, as many as the kernels allow", () => {
+    const structs = wgslStructs(RAY_MARCH_KERNEL.reference);
+    expect(structs.get("ViewShares")).toHaveLength(MAX_SKY_LIGHT_SLOTS);
+    // The luminance, then a throughput and a path a slot.
+    expect(structs.get("ViewMarch")).toHaveLength(1 + 2 * MAX_SKY_LIGHT_SLOTS);
+    expect(structs.get("TermDensities")).toHaveLength(MAX_TERMS);
   });
 });
 

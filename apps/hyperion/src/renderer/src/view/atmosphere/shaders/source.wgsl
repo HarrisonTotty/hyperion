@@ -36,6 +36,18 @@
 // h* = s h, s at the sample's own latitude; each source's transmittance through the sliced lookup
 // from the sample along the source (`oblate.wgsl`), its stored optical depth over s; the multiple
 // scattering from the latitude bands about the sample's s; the ground's shadow the lookup's.
+// Changes (plan R08, R08.T8.d; `decision-r08-t8-leans.md` section 8): no step of the three
+// per-frame marches holds an array or takes one by value. Tint keeps an array value indexed by a
+// loop variable in a function-scope variable of its own, stored whole at each call (the SPIR-V's
+// OpVariable and whole-array OpStore at the callee's entry), and a function-scope array indexed by
+// a variable lives in the invocation's local memory: the sources' directions and angles passed by
+// value to each step made the ray march's step about 2.6 times its cost on the RTX 3080, and the
+// slots' and terms' arrays the rest of its excess, as R05.T14's `Medium` by value had. So each
+// light slot's share and march, and each term's density, is a member of its own, selected by a
+// switch (`ViewShares`, `ViewMarch`, and scattering.wgsl's `TermDensities`); each source's
+// direction is read from the view at each step and its scattering angle formed there, as the
+// kernels formed both once a pixel before; the arithmetic is unchanged, and the read-backs with it,
+// to the bit.
 
 // A march's absorber path one step `dtM` on, through the sample `local` (`absorberStep`): the
 // view's own path under light slot `slot`'s curves, since what it carries is that light's
@@ -124,104 +136,253 @@ fn sourceAt(
   return single + multiple * local.scattering;
 }
 
-// The scattering angle between a ray and each of the view's sources, constant along a straight
-// ray, `dirs` the sources' directions in the frame the ray's is given in, the kernel's own
-// variable, read in place (R08.T8.d, `viewSourcesAt`).
-fn sourceAngles(
-  dir : vec3f,
-  dirs : ptr<function, array<vec3f, MAX_SKY_SOURCES>>,
-  count : u32,
-) -> array<ScatteringAngle, MAX_SKY_SOURCES> {
-  var angles : array<ScatteringAngle, MAX_SKY_SOURCES>;
-  for (var k = 0u; k < count; k++) {
-    angles[k] = scatteringAngle(dir, (*dirs)[k]);
-  }
-  return angles;
+// The view's sources at a sample summed by light slot, a member a slot (MAX_SKY_LIGHT_SLOTS of
+// them), so that no step indexes an array (R08.T8.d).
+struct ViewShares {
+  slot0 : vec3f,
+  slot1 : vec3f,
+  slot2 : vec3f,
+  slot3 : vec3f,
 }
 
-// The view's sources at a sample, summed by light slot: each source's `sourceAt` times its weight,
+// `shares` with a source's light `one` times its weight `weight` added into slot `slot`'s, at most
+// MAX_SKY_LIGHT_SLOTS - 1: the multiply and its add in one statement, as `shares[slot] += weight *
+// one` had them before R08.T8.d, so that a compiler that fuses the two fuses them alike.
+fn viewShareAdd(shares : ViewShares, slot : u32, weight : vec3f, one : vec3f) -> ViewShares {
+  var out = shares;
+  switch (slot) {
+    case 0u: {
+      out.slot0 += weight * one;
+    }
+    case 1u: {
+      out.slot1 += weight * one;
+    }
+    case 2u: {
+      out.slot2 += weight * one;
+    }
+    default: {
+      out.slot3 += weight * one;
+    }
+  }
+  return out;
+}
+
+// Slot `slot`'s share, at most MAX_SKY_LIGHT_SLOTS - 1.
+fn viewShareOf(shares : ViewShares, slot : u32) -> vec3f {
+  switch (slot) {
+    case 0u: {
+      return shares.slot0;
+    }
+    case 1u: {
+      return shares.slot1;
+    }
+    case 2u: {
+      return shares.slot2;
+    }
+    default: {
+      return shares.slot3;
+    }
+  }
+}
+
+// The kernel's drawn sources and the light slots its marches track a path for, read from its own
+// `view` in place, never through the whole view by value (`view.wgsl`'s skySourceCount and
+// skyPathCount, R08.T8.d).
+fn viewSourceCount() -> u32 {
+  return min(u32(view.sky.x), MAX_SKY_SOURCES);
+}
+
+fn viewPathCount() -> u32 {
+  return clamp(u32(view.sky.y), 1u, MAX_SKY_LIGHT_SLOTS);
+}
+
+// One source's light at a sample towards the eye per unit of its weight, its `sourceAt` for the
+// ray along `ray`: `dir` the source's direction and `up` the unit normal the sample's zenith cosine
+// is taken against, all three in the march's frame, `bodyDir` its direction body-fixed, which the
+// lookups take from the sample's start (R08.T6.f), and `slot` its light slot; its scattering angle
+// formed here from `ray` and `dir` at each step (R08.T8.d), as the kernels formed it once a pixel
+// before.
+fn sourceInScatteringAt(
+  body : OblateBody,
+  start : LookupStart,
+  up : vec3f,
+  ray : vec3f,
+  dir : vec3f,
+  bodyDir : vec3f,
+  slot : u32,
+  lobes : bool,
+  local : SampleMedium,
+) -> vec3f {
+  let muSun = dot(dir, up);
+  let light = sourceLightAt(body, start, bodyDir, slot);
+  let angle = scatteringAngle(ray, dir);
+  var phased = phasedScatteringOf(local, angle);
+  if (lobes) {
+    // The forward lobes' higher orders, at the stored optical depth along the source (R08.T7).
+    phased += lobeOrdersOf(local, angle, light.depth);
+  }
+  return sourceAt(body, start, light, muSun, slot, local, phased);
+}
+
+// The view's sources at a sample, summed by light slot, for a march in the body-fixed frame (the
+// ray march's, the aerial perspective's): each source's `sourceInScatteringAt` times its weight
 // added into its slot's share, so that each share is carried along the view's path under its own
-// curves (`viewMarchStep`). `dirs` are the sources' directions and `up` the unit normal the
-// sample's zenith cosines are taken against, both in the march's frame; `bodyDirs` the sources'
-// directions body-fixed, which the lookups take from the sample's start (R08.T6.f).
-//
-// `dirs`, `bodyDirs` and `angles` are the kernel's own variables, written once a pixel and read here
-// in place (plan R08, R08.T8.d; `decision-r08-t8-leans.md` section 8). Passed by value, each was
-// copied whole into the invocation's memory at every step, since Tint keeps an array argument
-// indexed by a loop variable in a function-scope variable of its own (the SPIR-V's OpVariable and
-// whole-array OpStore at the callee's entry): on the RTX 3080 that made each step of the ray march
-// about 2.6 times its cost and the sky view's about 3.7 (20.99 ms against 8.13 ms for the
-// atmosphere's passes at 1920 x 1080 from 400 km, read-backs unchanged to the bit). R05.T14's
-// `Medium` by value was the same mechanism.
+// curves (`viewMarchStep`).
 fn viewSourcesAt(
   body : OblateBody,
   start : LookupStart,
   up : vec3f,
-  dirs : ptr<function, array<vec3f, MAX_SKY_SOURCES>>,
-  bodyDirs : ptr<function, array<vec3f, MAX_SKY_SOURCES>>,
-  angles : ptr<function, array<ScatteringAngle, MAX_SKY_SOURCES>>,
+  ray : vec3f,
   local : SampleMedium,
-) -> array<vec3f, MAX_SKY_LIGHT_SLOTS> {
-  var shares : array<vec3f, MAX_SKY_LIGHT_SLOTS>;
-  let count = skySourceCount(view);
+) -> ViewShares {
+  var shares = ViewShares(vec3f(0.0), vec3f(0.0), vec3f(0.0), vec3f(0.0));
+  let count = viewSourceCount();
   let lobes = hasForwardLobes();
   for (var k = 0u; k < count; k++) {
     let source = view.sources[k];
     let slot = skySlotOf(source);
-    let muSun = dot((*dirs)[k], up);
-    let light = sourceLightAt(body, start, (*bodyDirs)[k], slot);
-    let angle = (*angles)[k];
-    var phased = phasedScatteringOf(local, angle);
-    if (lobes) {
-      // The forward lobes' higher orders, at the stored optical depth along the source (R08.T7).
-      phased += lobeOrdersOf(local, angle, light.depth);
-    }
-    let one = sourceAt(body, start, light, muSun, slot, local, phased);
-    shares[slot] += source.weight.rgb * one;
+    let d = source.direction.xyz;
+    let one = sourceInScatteringAt(body, start, up, ray, d, d, slot, lobes, local);
+    shares = viewShareAdd(shares, slot, source.weight.rgb, one);
+  }
+  return shares;
+}
+
+// The same for a march in the sky frame `frame` (the sky view's), `up` and `ray` in that frame:
+// each source's direction taken into it, its components along the frame's axes.
+fn skySourcesAt(
+  body : OblateBody,
+  start : LookupStart,
+  up : vec3f,
+  ray : vec3f,
+  frame : SkyFrame,
+  local : SampleMedium,
+) -> ViewShares {
+  var shares = ViewShares(vec3f(0.0), vec3f(0.0), vec3f(0.0), vec3f(0.0));
+  let count = viewSourceCount();
+  let lobes = hasForwardLobes();
+  for (var k = 0u; k < count; k++) {
+    let source = view.sources[k];
+    let slot = skySlotOf(source);
+    let s = source.direction.xyz;
+    let d = vec3f(dot(s, frame.x), dot(s, frame.y), dot(s, frame.z));
+    let one = sourceInScatteringAt(body, start, up, ray, d, s, slot, lobes, local);
+    shares = viewShareAdd(shares, slot, source.weight.rgb, one);
   }
   return shares;
 }
 
 // A march along a ray so far: the light it has gathered, and per light slot its throughput and its
-// own absorber path (R08.T7), slot 0's throughput the views' mean transmittance.
+// own absorber path (R08.T7), slot 0's throughput the views' mean transmittance; a member a slot
+// (MAX_SKY_LIGHT_SLOTS of them), so that no step indexes an array (R08.T8.d).
 struct ViewMarch {
   luminance : vec3f,
-  throughput : array<vec3f, MAX_SKY_LIGHT_SLOTS>,
-  paths : array<AbsorberPath, MAX_SKY_LIGHT_SLOTS>,
+  throughput0 : vec3f,
+  throughput1 : vec3f,
+  throughput2 : vec3f,
+  throughput3 : vec3f,
+  path0 : AbsorberPath,
+  path1 : AbsorberPath,
+  path2 : AbsorberPath,
+  path3 : AbsorberPath,
 }
 
 fn viewMarchStart() -> ViewMarch {
-  var march : ViewMarch;
-  march.luminance = vec3f(0.0);
-  for (var p = 0u; p < MAX_SKY_LIGHT_SLOTS; p++) {
-    march.throughput[p] = vec3f(1.0);
-    march.paths[p] = absorberPathStart();
+  let path = absorberPathStart();
+  let one = vec3f(1.0);
+  return ViewMarch(vec3f(0.0), one, one, one, one, path, path, path, path);
+}
+
+// Slot `slot`'s throughput, at most MAX_SKY_LIGHT_SLOTS - 1.
+fn viewThroughputOf(march : ViewMarch, slot : u32) -> vec3f {
+  switch (slot) {
+    case 0u: {
+      return march.throughput0;
+    }
+    case 1u: {
+      return march.throughput1;
+    }
+    case 2u: {
+      return march.throughput2;
+    }
+    default: {
+      return march.throughput3;
+    }
   }
-  return march;
+}
+
+// Slot `slot`'s absorber path, at most MAX_SKY_LIGHT_SLOTS - 1.
+fn viewPathOf(march : ViewMarch, slot : u32) -> AbsorberPath {
+  switch (slot) {
+    case 0u: {
+      return march.path0;
+    }
+    case 1u: {
+      return march.path1;
+    }
+    case 2u: {
+      return march.path2;
+    }
+    default: {
+      return march.path3;
+    }
+  }
+}
+
+// `march` with slot `slot`'s throughput and path set, at most MAX_SKY_LIGHT_SLOTS - 1.
+fn withViewSlot(
+  march : ViewMarch,
+  slot : u32,
+  throughput : vec3f,
+  path : AbsorberPath,
+) -> ViewMarch {
+  var out = march;
+  switch (slot) {
+    case 0u: {
+      out.throughput0 = throughput;
+      out.path0 = path;
+    }
+    case 1u: {
+      out.throughput1 = throughput;
+      out.path1 = path;
+    }
+    case 2u: {
+      out.throughput2 = throughput;
+      out.path2 = path;
+    }
+    default: {
+      out.throughput3 = throughput;
+      out.path3 = path;
+    }
+  }
+  return out;
 }
 
 // One step `dtM` of a march through the sample `local`, with each light slot's share of the
-// source there (`viewSourcesAt`): each slot's path one step on under its curves, its share's
-// in-scattering through its own throughput, without f32's cancellation (`stepFactor`), and its
-// throughput carried on.
+// source there (`viewSourcesAt`, `skySourcesAt`): each slot's path one step on under its curves,
+// its share's in-scattering through its own throughput, without f32's cancellation (`stepFactor`),
+// and its throughput carried on.
 fn viewMarchStep(
   march : ptr<function, ViewMarch>,
   local : SampleMedium,
-  shares : array<vec3f, MAX_SKY_LIGHT_SLOTS>,
+  shares : ViewShares,
   dtM : f32,
 ) {
-  let paths = skyPathCount(view);
+  let paths = viewPathCount();
+  var m = *march;
   for (var p = 0u; p < paths; p++) {
-    let next = viewAbsorberStep((*march).paths[p], local, dtM, p);
-    let stepDepth = local.extinction * dtM + (next.depth - (*march).paths[p].depth);
-    (*march).paths[p] = next;
-    (*march).luminance += (*march).throughput[p] * shares[p] * dtM * stepFactor(stepDepth);
-    (*march).throughput[p] *= exp(-stepDepth);
+    let path = viewPathOf(m, p);
+    let throughput = viewThroughputOf(m, p);
+    let next = viewAbsorberStep(path, local, dtM, p);
+    let stepDepth = local.extinction * dtM + (next.depth - path.depth);
+    m.luminance += throughput * viewShareOf(shares, p) * dtM * stepFactor(stepDepth);
+    m = withViewSlot(m, p, throughput * exp(-stepDepth), next);
   }
+  *march = m;
 }
 
 // The views' mean transmittance of a march, slot 0's throughput averaged over the channels.
 fn viewMeanTransmittance(march : ViewMarch) -> f32 {
-  let t = march.throughput[0];
+  let t = march.throughput0;
   return (t.r + t.g + t.b) / 3.0;
 }
