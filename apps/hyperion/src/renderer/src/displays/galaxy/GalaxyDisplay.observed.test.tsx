@@ -131,3 +131,158 @@ describe("the chart's mode across universes (plan 12, P12.T11)", () => {
     );
   });
 });
+
+/** A chart centre off the galactic axis, typed into `CURSOR`: the observer `OBSERVED` takes. */
+const OFF_AXIS_LY = [8_000, 6_000, -12] as const;
+
+/** Types `centreLy` into `CURSOR`'s fields and centres the chart there with `CENTRE CHART`. */
+async function centreAt(
+  { user }: Rendered,
+  [xLy, yLy, zLy]: readonly [number, number, number],
+): Promise<void> {
+  const cursor = screen.getByRole("region", { name: "Cursor" });
+  const enter = async (label: "X" | "Y" | "Z", valueLy: number): Promise<void> => {
+    const field = within(cursor).getByRole("textbox", { name: label });
+    await user.clear(field);
+    await user.type(field, `${valueLy}{Enter}`);
+  };
+  await enter("X", xLy);
+  await enter("Y", yLy);
+  await enter("Z", zLy);
+  await user.click(within(cursor).getByRole("button", { name: "C CENTRE CHART" }));
+}
+
+/**
+ * Answers the latest range query with one system 1 ly from `centreLy`, the centre asked, carrying
+ * what the observer at the centre receives where the query was asked observed.
+ */
+async function answerChartAt(
+  { socket }: Rendered,
+  centreLy: readonly [number, number, number],
+): Promise<void> {
+  await server(() => {
+    socket.serverAnswers("systems_in_range", (body) => ({
+      ...aSystemsInRange({
+        universe: body.universe,
+        centreLy,
+        systems: [
+          {
+            relLy: [1, 0, 0],
+            layer: "c",
+            ...(body.mode?.type === "observed"
+              ? { observed: { lightAgeYr: 1, apparentRelLy: [1, 0, 0] } }
+              : {}),
+          },
+        ],
+      }),
+      time: body.time,
+    }));
+  });
+}
+
+function hrPage(): HTMLElement {
+  return screen.getByRole("tabpanel", { name: "HR DIAGRAM" });
+}
+
+/** The value `label` reads on a page: the chart's furniture, or the HR page's mode line. */
+function valueOn(page: HTMLElement, label: string): string {
+  return within(page).getByText(label, { selector: "dt" }).nextElementSibling?.textContent ?? "";
+}
+
+/** The `MODE` reading's value on a page: its name, then any observer. */
+function modeOn(page: HTMLElement): Element | null {
+  return within(page).getByText("MODE", { selector: "dt" }).nextElementSibling;
+}
+
+async function showPage({ user }: Rendered, name: "LOCAL CHART" | "HR DIAGRAM"): Promise<void> {
+  await user.click(screen.getByRole("tab", { name }));
+}
+
+/**
+ * Opens `SURVEY 1`, centres the chart off the galactic axis, and observes from that centre: the
+ * chart is answered in `now`, then `OBSERVED` is chosen and answered so, the `LOCAL CHART` on show.
+ */
+async function observeOffAxis(rendered: Rendered): Promise<void> {
+  await server(() => {
+    rendered.socket.serverAnswers("list_universes", () => aUniverseList([SURVEY_1]));
+  });
+  await open(rendered);
+  await centreAt(rendered, OFF_AXIS_LY);
+  await answerChartAt(rendered, OFF_AXIS_LY);
+  await rendered.user.click(within(chartPage()).getByRole("button", { name: "OBSERVED" }));
+  await answerChartAt(rendered, OFF_AXIS_LY);
+}
+
+describe("the HR DIAGRAM page's mode (plan 12, P12.T11.b)", () => {
+  beforeEach(() => {
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+  });
+
+  it("reads OBSERVED FROM the chart's observer once the chart is answered so", async () => {
+    const rendered = renderDisplay();
+    await observeOffAxis(rendered);
+
+    await showPage(rendered, "HR DIAGRAM");
+
+    expect(modeOn(hrPage())).toHaveTextContent(/^OBSERVED FROM/u);
+    expect(valueOn(hrPage(), "FRAME")).toBe("GALACTIC");
+    expect(valueOn(hrPage(), "RADIUS")).toBe("10,000.0 ly");
+    expect(valueOn(hrPage(), "ANGLE")).toBe("036.9°");
+    expect(valueOn(hrPage(), "HEIGHT")).toBe("-12.0 ly");
+  });
+
+  it("reads the answer's mode, observer and time as the chart's furniture does", async () => {
+    const rendered = renderDisplay();
+    await observeOffAxis(rendered);
+    const chart = { mode: valueOn(chartPage(), "MODE"), time: valueOn(chartPage(), "UT") };
+
+    await showPage(rendered, "HR DIAGRAM");
+
+    expect({ mode: valueOn(hrPage(), "MODE"), time: valueOn(hrPage(), "UT") }).toEqual(chart);
+  });
+
+  it("keeps the answer's OBSERVED FROM while NOW is chosen and not yet answered", async () => {
+    const rendered = renderDisplay();
+    await observeOffAxis(rendered);
+    await rendered.user.click(within(chartPage()).getByRole("button", { name: "NOW" }));
+
+    await showPage(rendered, "HR DIAGRAM");
+
+    expect(modeOn(hrPage())).toHaveTextContent(/^OBSERVED FROM/u);
+  });
+
+  it("reads MODE NOW once NOW is answered", async () => {
+    const rendered = renderDisplay();
+    await observeOffAxis(rendered);
+    await rendered.user.click(within(chartPage()).getByRole("button", { name: "NOW" }));
+    await answerChartAt(rendered, OFF_AXIS_LY);
+
+    await showPage(rendered, "HR DIAGRAM");
+
+    expect(valueOn(hrPage(), "MODE")).toBe("NOW");
+    expect(within(hrPage()).queryByText("OBSERVED FROM")).not.toBeInTheDocument();
+  });
+
+  it("reads NOW for an answer asked observed whose rows all came without their observation", async () => {
+    const rendered = renderDisplay();
+    const { user } = rendered;
+    await server(() => {
+      rendered.socket.serverAnswers("list_universes", () => aUniverseList([SURVEY_1]));
+    });
+    await open(rendered);
+    await user.keyboard("c");
+    await answerChart(rendered);
+    await user.click(within(chartPage()).getByRole("button", { name: "OBSERVED" }));
+    expect(rendered.socket.requestsOfKind("systems_in_range").at(-1)?.body.mode?.type).toBe(
+      "observed",
+    );
+    // As a server that ignores the mode answers: every row without its observation.
+    await answerChart(rendered);
+
+    await showPage(rendered, "HR DIAGRAM");
+
+    expect(valueOn(hrPage(), "MODE")).toBe("NOW");
+    expect(within(hrPage()).queryByText("OBSERVED FROM")).not.toBeInTheDocument();
+  });
+});

@@ -15,13 +15,15 @@ import {
   type PlotAreaPx,
   projectHr,
 } from "../../lib/galaxy/hrProjection";
-import type { ChartSystem } from "../../lib/galaxy/model";
+import type { ChartSystem, QueryMode } from "../../lib/galaxy/model";
 import { useElementSize } from "../../lib/useElementSize";
 import { LegendReticle } from "../../spatial/LegendReticle";
 import { LegendSymbol } from "../../spatial/LegendSymbol";
 import { type ColourTokens, paint, readTokens, sameTokens, staleTokens } from "../../spatial/paint";
+import type { SpatialReading } from "../../spatial/Reading";
 import { SIZE_CLASS_REM } from "../../spatial/symbols";
 import { shownCountText, type StarFilter } from "./chartModel";
+import { CHART_FRAME_NAME, modeReading, timeReading } from "./chartReadings";
 import { StarShapeLegend } from "./StarShapeLegend";
 
 /**
@@ -104,6 +106,90 @@ function Counts({ rows, stale, underHeading = false }: CountsProps) {
   );
 }
 
+/** Props of {@link LineReading}. */
+interface LineReadingProps {
+  readonly reading: SpatialReading;
+  readonly stale: boolean;
+}
+
+/**
+ * One labelled value of the mode line, written as the chart's `Reading` writes it, in its classes,
+ * with a slot after it for the stale mark.
+ *
+ * @remarks
+ * `Reading` itself has no room for the mark, and a mark beside its `div` would stand in the `dl`
+ * outside any term's group. The slot is kept in every state, so that the mark's coming moves
+ * nothing on the line; a missing value, the em dash, takes none.
+ */
+function LineReading({ reading, stale }: LineReadingProps) {
+  return (
+    <div className="field spatial-reading">
+      <dt className="field__label">{reading.label}</dt>{" "}
+      <dd className="field__value">
+        <span className="spatial-reading__value" style={{ minWidth: `${reading.widthCh}ch` }}>
+          {reading.value ?? <span className="readout__missing">—</span>}
+        </span>
+        {reading.unit.length > 0 && reading.value !== null ? (
+          <>
+            {" "}
+            <span className="spatial-reading__unit">{reading.unit}</span>
+          </>
+        ) : null}
+        <span className="hr-diagram__stale-slot">
+          {stale && reading.value !== null ? <StaleMark /> : null}
+        </span>
+      </dd>
+    </div>
+  );
+}
+
+/** Props of {@link ModeLine}. */
+interface ModeLineProps {
+  readonly mode: QueryMode;
+  readonly timeYr: number;
+  readonly stale: boolean;
+}
+
+/**
+ * The answer's time and mode, as the chart's furniture writes them (plan 12, P12.T11.b): `UT` and
+ * `MODE NOW`; or `FRAME GALACTIC`, `UT` and `MODE OBSERVED FROM`, the observer's `RADIUS`, `ANGLE`
+ * and `HEIGHT` nested in it as the furniture nests them.
+ *
+ * @remarks
+ * A `dl` of readings in the furniture's own classes, so that it is set as the furniture is: wrapping
+ * between readings and never inside one, each value right-aligned in its slot. The diagram plots no
+ * positions, so in `NOW` it names no frame; observed, the frame names the heading the observer's
+ * coordinates stand under. Each value read from a stale answer trails its `S` (the guide's "Data
+ * states"), the time and each coordinate; the mode's name, a word, does not.
+ */
+function ModeLine({ mode, timeYr, stale }: ModeLineProps) {
+  const shown = modeReading(mode);
+  return (
+    <dl className="hr-diagram__readings spatial-view__readings">
+      {mode.kind === "observed" ? (
+        <div className="field spatial-reading">
+          <dt className="field__label">FRAME</dt> <dd>{CHART_FRAME_NAME}</dd>
+        </div>
+      ) : null}
+      <LineReading reading={timeReading(timeYr)} stale={stale} />
+      <div className="field spatial-reading spatial-view__mode">
+        <dt className="field__label">MODE</dt>{" "}
+        {/* A word, as the frame's `GALACTIC` is; the observer's coordinates are figures. */}
+        <dd>
+          {shown.name}
+          {shown.from.length === 0 ? null : (
+            <dl className="spatial-view__observer">
+              {shown.from.map((reading) => (
+                <LineReading key={reading.label} reading={reading} stale={stale} />
+              ))}
+            </dl>
+          )}
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
 /** Props of {@link HrDiagram}. */
 export interface HrDiagramProps {
   /** The chart's systems that pass its `STARS` filter, which the diagram plots. */
@@ -118,6 +204,13 @@ export interface HrDiagramProps {
   readonly driveRangeLy: number;
   /** Whether the answer is a snapshot the link no longer backs: drawn muted, with a trailing `S`. */
   readonly stale: boolean;
+  /**
+   * The mode the answer on show was given in, as `answeredMode` reads it, which the diagram names
+   * under its plot: in observed mode every point is a primary as its light shows it.
+   */
+  readonly mode: QueryMode;
+  /** The answer's chart time, in years from the epoch: the observer's time in observed mode. */
+  readonly timeYr: number;
 }
 
 /**
@@ -141,6 +234,12 @@ export interface HrDiagramProps {
  * hides. The title is the page's name, `HR DIAGRAM`, and the canvas's accessible name spells it
  * out (ruling 115.4).
  *
+ * Under the plot, before the counts, where the chart's furniture stands, the answer's time and mode
+ * are read as the furniture reads them (plan 12, P12.T11.b): `UT` and `MODE NOW`, or `FRAME
+ * GALACTIC`, `UT` and `MODE OBSERVED FROM` with the observer, since in observed mode each point is
+ * the primary its light shows, when the light left. They follow the answer's mode, never the mode
+ * being chosen, and are stale with the answer.
+ *
  * A click selects the point within 1 rem, which selects the system everywhere. The canvas is an
  * image with an accessible name and is not focusable: keyboard access is through the shared list in
  * `SYSTEMS`, where every point is a row. It is painted when what it shows changes, never on a loop.
@@ -153,6 +252,8 @@ export function HrDiagram({
   onSelect,
   driveRangeLy,
   stale,
+  mode,
+  timeYr,
 }: HrDiagramProps) {
   const { ref: stageRef, size } = useElementSize();
   const widthPx = size?.widthPx ?? 0;
@@ -303,6 +404,7 @@ export function HrDiagram({
       <p className="hr-diagram__axis-label hr-diagram__axis-label--x">
         EFFECTIVE TEMPERATURE K, LOG SCALE
       </p>
+      <ModeLine mode={mode} timeYr={timeYr} stale={stale} />
       <Counts rows={plottedRows} stale={stale} />
       <h3 className="hr-diagram__counts-heading">NOT PLOTTED</h3>
       <Counts rows={notPlottedRows} stale={stale} underHeading />

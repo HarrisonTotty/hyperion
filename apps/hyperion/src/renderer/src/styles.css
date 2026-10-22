@@ -1901,6 +1901,27 @@ body {
   translate: calc(-100% - 0.25rem) -50%;
 }
 
+/*
+ * The answer's time and mode under the plot, where the chart's furniture stands (plan 12,
+ * P12.T11.b). The line takes the furniture's own classes as well, so that it is set as the
+ * furniture is: wrapping between readings and never inside one, each value right-aligned in its
+ * slot.
+ */
+.hr-diagram__readings {
+  flex: none;
+}
+
+/*
+ * Room after each value for its stale `S`, a space and the mark in the value's monospaced figures,
+ * kept while the answer is live, so that the mark's coming moves nothing on the line (the guide's
+ * "Numbers": a field is sized for its longest value and its status marks).
+ */
+.hr-diagram__stale-slot {
+  display: inline-block;
+  min-width: 2ch;
+  text-align: right;
+}
+
 .hr-diagram__counts {
   display: flex;
   flex: none;
@@ -1943,7 +1964,7 @@ body {
   flex: none;
 }
 
-.hr-diagram--stale :is(.hr-diagram__labels, .hr-diagram__counts) {
+.hr-diagram--stale :is(.hr-diagram__labels, .hr-diagram__readings, .hr-diagram__counts) {
   color: var(--text-muted);
 }
 

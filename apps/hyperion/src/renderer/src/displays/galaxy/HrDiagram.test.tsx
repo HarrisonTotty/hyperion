@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { hrXPx, hrYPx } from "../../lib/galaxy/hrProjection";
-import type { ChartSystem } from "../../lib/galaxy/model";
+import { type ChartSystem, NOW_MODE, type QueryMode } from "../../lib/galaxy/model";
 import { toChartResult } from "../../lib/galaxy/wire";
 import { aStellarBrief, aSystemsInRange } from "../../test/galaxyFixtures";
 import {
@@ -12,6 +12,7 @@ import {
   type RecordingContext2D,
   stubCanvas,
 } from "../../test/RecordingContext2D";
+import { stylesheetRule } from "../../test/stylesheet";
 import { type StarFilter } from "./chartModel";
 import { HrDiagram } from "./HrDiagram";
 
@@ -47,6 +48,8 @@ interface RenderSpec {
   readonly starFilter?: StarFilter;
   readonly selectedId?: SystemIdHex | null;
   readonly stale?: boolean;
+  readonly mode?: QueryMode;
+  readonly timeYr?: number;
 }
 
 function renderDiagram({
@@ -55,6 +58,8 @@ function renderDiagram({
   starFilter = "all",
   selectedId = null,
   stale = false,
+  mode = NOW_MODE,
+  timeYr = 0,
 }: RenderSpec = {}) {
   const recorder = stubCanvas();
   stubLayout();
@@ -68,6 +73,8 @@ function renderDiagram({
       onSelect={onSelect}
       driveRangeLy={50}
       stale={stale}
+      mode={mode}
+      timeYr={timeYr}
     />
   );
   const { rerender } = render(view(selectedId));
@@ -329,5 +336,128 @@ describe("HrDiagram", () => {
     expect(canvas()).toHaveAccessibleName("Hertzsprung-Russell diagram, stale");
     expect(recorder.sets("strokeStyle")).not.toContain("#c8d6e5");
     expect(recorder.sets("strokeStyle")).toContain("#8a9db3");
+  });
+});
+
+/** An observer off the galactic axis: 10,000 ly out, 36.87° from +x, 12.34 ly south. */
+const OBSERVED: QueryMode = { kind: "observed", observerLy: [8_000, 6_000, -12.34] };
+
+/** An observer on the galactic axis, where its `ANGLE` is undefined. */
+const OBSERVED_ON_AXIS: QueryMode = { kind: "observed", observerLy: [0, 0, 100] };
+
+/** The term `label` of the mode line under the plot. */
+function lineTerm(label: string): HTMLElement {
+  return screen.getByText(label, { selector: ".hr-diagram__readings dt" });
+}
+
+/** The value read beside `label` on the mode line under the plot. */
+function lineValue(label: string): string {
+  return lineTerm(label).nextElementSibling?.textContent ?? "";
+}
+
+/** The mode line's terms, in the order they are read. */
+function lineTerms(): Array<string | null> {
+  const line = lineTerm("MODE").closest("dl");
+  return [...(line?.querySelectorAll("dt") ?? [])].map((term) => term.textContent);
+}
+
+describe("HrDiagram's mode line (plan 12, P12.T11.b)", () => {
+  it("reads MODE NOW and the chart time in UT in now, naming no frame and no observer", () => {
+    renderDiagram({ timeYr: 12.5 });
+
+    expect(lineTerms()).toEqual(["UT", "MODE"]);
+    expect(lineValue("UT")).toBe("+12.50 yr");
+    expect(lineValue("MODE")).toBe("NOW");
+    expect(screen.queryByText("OBSERVED FROM")).not.toBeInTheDocument();
+    expect(screen.queryByText("FRAME")).not.toBeInTheDocument();
+  });
+
+  it("stands under the plot, after the temperature axis's label and before the counts", () => {
+    renderDiagram();
+
+    const line = lineTerm("MODE").closest("dl");
+    const axisLabel = screen.getByText("EFFECTIVE TEMPERATURE K, LOG SCALE");
+    const firstCount = screen.getByText("PLOTTED", { selector: "dt" });
+    expect(line).not.toBeNull();
+    expect(line?.closest("figure")).toContainElement(canvas());
+    expect(axisLabel.compareDocumentPosition(line ?? axisLabel)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(firstCount.compareDocumentPosition(line ?? firstCount)).toBe(
+      Node.DOCUMENT_POSITION_PRECEDING,
+    );
+  });
+
+  it("reads OBSERVED FROM and the observer at the chart's precisions in observed mode, after FRAME GALACTIC", () => {
+    renderDiagram({ mode: OBSERVED, timeYr: -4_197.5 });
+
+    expect(lineTerms()).toEqual(["FRAME", "UT", "MODE", "RADIUS", "ANGLE", "HEIGHT"]);
+    expect(lineValue("FRAME")).toBe("GALACTIC");
+    expect(lineValue("UT")).toBe("-4197.50 yr");
+    expect(lineTerm("MODE").nextElementSibling).toHaveTextContent(/^OBSERVED FROM/u);
+    expect(lineValue("RADIUS")).toBe("10,000.0 ly");
+    expect(lineValue("ANGLE")).toBe("036.9°");
+    expect(lineValue("HEIGHT")).toBe("-12.3 ly");
+    // The observer's coordinates are the mode's, nested in its value as the chart's furniture has them.
+    expect(lineTerm("MODE").nextElementSibling).toContainElement(lineTerm("HEIGHT"));
+  });
+
+  it("reads an observer's ANGLE on the galactic axis as an em dash", () => {
+    renderDiagram({ mode: OBSERVED_ON_AXIS });
+
+    expect(lineValue("RADIUS")).toBe("0.0 ly");
+    expect(lineValue("ANGLE")).toBe("—");
+    expect(lineValue("HEIGHT")).toBe("+100.0 ly");
+  });
+
+  it("keeps its accessible name for the plot alone in observed mode", () => {
+    renderDiagram({ mode: OBSERVED });
+
+    expect(canvas()).toHaveAccessibleName("Hertzsprung-Russell diagram");
+  });
+
+  it("marks the time and each coordinate stale when the answer is, and no word", () => {
+    renderDiagram({ mode: OBSERVED, stale: true });
+
+    for (const label of ["UT", "RADIUS", "ANGLE", "HEIGHT"]) {
+      expect(lineValue(label)).toMatch(/S\s*stale$/u);
+    }
+    // Four marks in all, so neither the frame's GALACTIC nor the mode's name carries one.
+    const line = lineTerm("MODE").closest("dl");
+    expect(line === null ? [] : within(line).getAllByText("stale")).toHaveLength(4);
+  });
+
+  it("marks the time stale in now, but not NOW", () => {
+    renderDiagram({ stale: true });
+
+    expect(lineValue("UT")).toMatch(/S\s*stale$/u);
+    expect(lineValue("MODE")).toBe("NOW");
+  });
+
+  it("marks no missing angle stale", () => {
+    renderDiagram({ mode: OBSERVED_ON_AXIS, stale: true });
+
+    expect(lineValue("ANGLE")).toBe("—");
+    expect(lineValue("HEIGHT")).toMatch(/S\s*stale$/u);
+  });
+
+  it("keeps room for each value's stale mark while the answer is live", () => {
+    renderDiagram({ mode: OBSERVED });
+
+    // jsdom lays nothing out, so the room is held by the slot after each value and its rule.
+    for (const label of ["UT", "RADIUS", "ANGLE", "HEIGHT"]) {
+      expect(lineTerm(label).nextElementSibling?.lastElementChild).toHaveClass(
+        "hr-diagram__stale-slot",
+      );
+    }
+    expect(stylesheetRule(".hr-diagram__stale-slot")).toMatch(/min-width: 2ch;/u);
+  });
+
+  it("mutes the line with the rest of a stale diagram", () => {
+    expect(
+      stylesheetRule(
+        ".hr-diagram--stale :is(.hr-diagram__labels, .hr-diagram__readings, .hr-diagram__counts)",
+      ),
+    ).toMatch(/color: var\(--text-muted\);/u);
   });
 });
