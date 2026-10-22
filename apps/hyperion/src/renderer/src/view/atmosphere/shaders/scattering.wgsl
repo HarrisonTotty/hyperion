@@ -175,7 +175,12 @@ fn sampleMediumAt(heightM : f32) -> SampleMedium {
     extinction += (term.scattering.rgb + term.absorption.rgb) * d;
     columns = addColumns(columns, termColumns(term, d), 1.0);
   }
-  let pressureColumns = pressureColumnsOf(columns, lineSlots(), pressureBarAt(heightM));
+  // A medium with no absorber has no column to weight: its pressure-weighted columns are the zeros
+  // `pressureColumnsOf` would give (R08.T8.d).
+  var pressureColumns = AbsorberColumns(0.0, vec4f(0.0));
+  if (absorberCount() > 0u) {
+    pressureColumns = pressureColumnsOf(columns, lineSlots(), pressureBarAt(heightM));
+  }
   return SampleMedium(scattering, extinction, columns, pressureColumns, densities);
 }
 

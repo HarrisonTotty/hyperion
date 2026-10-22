@@ -41,13 +41,17 @@
 // loop variable in a function-scope variable of its own, stored whole at each call (the SPIR-V's
 // OpVariable and whole-array OpStore at the callee's entry), and a function-scope array indexed by
 // a variable lives in the invocation's local memory: the sources' directions and angles passed by
-// value to each step made the ray march's step about 2.6 times its cost on the RTX 3080, and the
-// slots' and terms' arrays the rest of its excess, as R05.T14's `Medium` by value had. So each
-// light slot's share and march, and each term's density, is a member of its own, selected by a
-// switch (`ViewShares`, `ViewMarch`, and scattering.wgsl's `TermDensities`); each source's
-// direction is read from the view at each step and its scattering angle formed there, as the
-// kernels formed both once a pixel before; the arithmetic is unchanged, and the read-backs with it,
-// to the bit.
+// value to each step made the ray march's step about 2.6 times its cost on the RTX 3080, as
+// R05.T14's `Medium` by value had. So each light slot's share and each term's density is a member
+// of its own, selected by a switch (`ViewShares`, scattering.wgsl's `TermDensities`); the march's
+// slot 0 is a member of its own and the slots only absorbing media lit by several stars step stand
+// apart, held by pointer (`ViewMarch`), which keeps the registers of the march that every view
+// takes its steps' own; each source's direction is read from the view at each step and its
+// scattering angle formed there, as the kernels formed both once a pixel before; and the forward
+// lobes' test is the kernel's, taken once a pixel. The arithmetic is unchanged: read-backs are
+// byte-identical on SwiftShader, and on the RTX 3080 only its fused multiply-adds, which follow the
+// code's shape, move a half-float ulp in a few values (plan R08's Risks, "Deviations in T8.d, as
+// built").
 
 // A march's absorber path one step `dtM` on, through the sample `local` (`absorberStep`): the
 // view's own path under light slot `slot`'s curves, since what it carries is that light's
@@ -233,11 +237,11 @@ fn viewSourcesAt(
   start : LookupStart,
   up : vec3f,
   ray : vec3f,
+  lobes : bool,
   local : SampleMedium,
 ) -> ViewShares {
   var shares = ViewShares(vec3f(0.0), vec3f(0.0), vec3f(0.0), vec3f(0.0));
   let count = viewSourceCount();
-  let lobes = hasForwardLobes();
   for (var k = 0u; k < count; k++) {
     let source = view.sources[k];
     let slot = skySlotOf(source);
@@ -256,11 +260,11 @@ fn skySourcesAt(
   up : vec3f,
   ray : vec3f,
   frame : SkyFrame,
+  lobes : bool,
   local : SampleMedium,
 ) -> ViewShares {
   var shares = ViewShares(vec3f(0.0), vec3f(0.0), vec3f(0.0), vec3f(0.0));
   let count = viewSourceCount();
-  let lobes = hasForwardLobes();
   for (var k = 0u; k < count; k++) {
     let source = view.sources[k];
     let slot = skySlotOf(source);
@@ -273,95 +277,42 @@ fn skySourcesAt(
 }
 
 // A march along a ray so far: the light it has gathered, and per light slot its throughput and its
-// own absorber path (R08.T7), slot 0's throughput the views' mean transmittance; a member a slot
-// (MAX_SKY_LIGHT_SLOTS of them), so that no step indexes an array (R08.T8.d).
+// own absorber path (R08.T7), slot 0's throughput the views' mean transmittance. Slot 0, which every
+// march steps, is a member of its own; slots 1 to MAX_SKY_LIGHT_SLOTS - 1, which only a medium with
+// absorbers lit by several stars' lights steps, stand apart in arrays, which a march holds by
+// pointer and its steps index only where the view has those slots (R08.T8.d).
 struct ViewMarch {
   luminance : vec3f,
   throughput0 : vec3f,
-  throughput1 : vec3f,
-  throughput2 : vec3f,
-  throughput3 : vec3f,
   path0 : AbsorberPath,
-  path1 : AbsorberPath,
-  path2 : AbsorberPath,
-  path3 : AbsorberPath,
+  throughputs : array<vec3f, MAX_SKY_LIGHT_SLOTS - 1u>,
+  paths : array<AbsorberPath, MAX_SKY_LIGHT_SLOTS - 1u>,
 }
 
 fn viewMarchStart() -> ViewMarch {
-  let path = absorberPathStart();
-  let one = vec3f(1.0);
-  return ViewMarch(vec3f(0.0), one, one, one, one, path, path, path, path);
+  var march : ViewMarch;
+  march.luminance = vec3f(0.0);
+  march.throughput0 = vec3f(1.0);
+  march.path0 = absorberPathStart();
+  for (var p = 0u; p < MAX_SKY_LIGHT_SLOTS - 1u; p++) {
+    march.throughputs[p] = vec3f(1.0);
+    march.paths[p] = absorberPathStart();
+  }
+  return march;
 }
 
 // Slot `slot`'s throughput, at most MAX_SKY_LIGHT_SLOTS - 1.
-fn viewThroughputOf(march : ViewMarch, slot : u32) -> vec3f {
-  switch (slot) {
-    case 0u: {
-      return march.throughput0;
-    }
-    case 1u: {
-      return march.throughput1;
-    }
-    case 2u: {
-      return march.throughput2;
-    }
-    default: {
-      return march.throughput3;
-    }
+fn viewThroughputOf(march : ptr<function, ViewMarch>, slot : u32) -> vec3f {
+  if (slot == 0u) {
+    return (*march).throughput0;
   }
-}
-
-// Slot `slot`'s absorber path, at most MAX_SKY_LIGHT_SLOTS - 1.
-fn viewPathOf(march : ViewMarch, slot : u32) -> AbsorberPath {
-  switch (slot) {
-    case 0u: {
-      return march.path0;
-    }
-    case 1u: {
-      return march.path1;
-    }
-    case 2u: {
-      return march.path2;
-    }
-    default: {
-      return march.path3;
-    }
-  }
-}
-
-// `march` with slot `slot`'s throughput and path set, at most MAX_SKY_LIGHT_SLOTS - 1.
-fn withViewSlot(
-  march : ViewMarch,
-  slot : u32,
-  throughput : vec3f,
-  path : AbsorberPath,
-) -> ViewMarch {
-  var out = march;
-  switch (slot) {
-    case 0u: {
-      out.throughput0 = throughput;
-      out.path0 = path;
-    }
-    case 1u: {
-      out.throughput1 = throughput;
-      out.path1 = path;
-    }
-    case 2u: {
-      out.throughput2 = throughput;
-      out.path2 = path;
-    }
-    default: {
-      out.throughput3 = throughput;
-      out.path3 = path;
-    }
-  }
-  return out;
+  return (*march).throughputs[slot - 1u];
 }
 
 // One step `dtM` of a march through the sample `local`, with each light slot's share of the
 // source there (`viewSourcesAt`, `skySourcesAt`): each slot's path one step on under its curves,
 // its share's in-scattering through its own throughput, without f32's cancellation (`stepFactor`),
-// and its throughput carried on.
+// and its throughput carried on, slot 0 first.
 fn viewMarchStep(
   march : ptr<function, ViewMarch>,
   local : SampleMedium,
@@ -369,20 +320,26 @@ fn viewMarchStep(
   dtM : f32,
 ) {
   let paths = viewPathCount();
-  var m = *march;
-  for (var p = 0u; p < paths; p++) {
-    let path = viewPathOf(m, p);
-    let throughput = viewThroughputOf(m, p);
+  let path0 = (*march).path0;
+  let throughput0 = (*march).throughput0;
+  let next0 = viewAbsorberStep(path0, local, dtM, 0u);
+  let stepDepth0 = local.extinction * dtM + (next0.depth - path0.depth);
+  (*march).path0 = next0;
+  (*march).luminance += throughput0 * shares.slot0 * dtM * stepFactor(stepDepth0);
+  (*march).throughput0 = throughput0 * exp(-stepDepth0);
+  for (var p = 1u; p < paths; p++) {
+    let path = (*march).paths[p - 1u];
+    let throughput = (*march).throughputs[p - 1u];
     let next = viewAbsorberStep(path, local, dtM, p);
     let stepDepth = local.extinction * dtM + (next.depth - path.depth);
-    m.luminance += throughput * viewShareOf(shares, p) * dtM * stepFactor(stepDepth);
-    m = withViewSlot(m, p, throughput * exp(-stepDepth), next);
+    (*march).paths[p - 1u] = next;
+    (*march).luminance += throughput * viewShareOf(shares, p) * dtM * stepFactor(stepDepth);
+    (*march).throughputs[p - 1u] = throughput * exp(-stepDepth);
   }
-  *march = m;
 }
 
 // The views' mean transmittance of a march, slot 0's throughput averaged over the channels.
-fn viewMeanTransmittance(march : ViewMarch) -> f32 {
-  let t = march.throughput0;
+fn viewMeanTransmittance(march : ptr<function, ViewMarch>) -> f32 {
+  let t = (*march).throughput0;
   return (t.r + t.g + t.b) / 3.0;
 }

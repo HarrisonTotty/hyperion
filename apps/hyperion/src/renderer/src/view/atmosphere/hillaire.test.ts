@@ -1002,12 +1002,18 @@ describe("the per-frame marches' steps (R08.T8.d)", () => {
     },
   );
 
-  it("gives each light slot and each term a member of its own, as many as the kernels allow", () => {
+  it("gives each light slot's share and each term's density a member of its own, and the march's slot 0", () => {
     const structs = wgslStructs(RAY_MARCH_KERNEL.reference);
     expect(structs.get("ViewShares")).toHaveLength(MAX_SKY_LIGHT_SLOTS);
-    // The luminance, then a throughput and a path a slot.
-    expect(structs.get("ViewMarch")).toHaveLength(1 + 2 * MAX_SKY_LIGHT_SLOTS);
     expect(structs.get("TermDensities")).toHaveLength(MAX_TERMS);
+    // The luminance and slot 0's throughput and path, then the other slots', held by pointer.
+    expect(structs.get("ViewMarch")).toEqual([
+      "vec3f",
+      "vec3f",
+      "AbsorberPath",
+      "array<vec3f, MAX_SKY_LIGHT_SLOTS - 1u>",
+      "array<AbsorberPath, MAX_SKY_LIGHT_SLOTS - 1u>",
+    ]);
   });
 });
 

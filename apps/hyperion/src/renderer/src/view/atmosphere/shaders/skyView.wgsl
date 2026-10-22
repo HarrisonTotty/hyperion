@@ -84,6 +84,7 @@ fn skyViewStep(
   body : OblateBody,
   frame : SkyFrame,
   stepAt : MarchStep,
+  lobes : bool,
 ) {
   let t = stepAt.tM;
   let p = ray.origin + t * ray.dir;
@@ -102,7 +103,7 @@ fn skyViewStep(
   }
   let local = sampleMediumAt(s * sampleHeightM);
   let start = sampleStartOf(body, place, quadric, sampleHeightM, normal, latitudeNormal, s, local);
-  let shares = skySourcesAt(body, start, up, ray.dir, frame, local);
+  let shares = skySourcesAt(body, start, up, ray.dir, frame, lobes, local);
   viewMarchStep(march, local, shares, stepAt.dtM);
 }
 
@@ -154,13 +155,14 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     oblateScaled(body, cameraPlace), cameraQuadric
   );
   var march = viewMarchStart();
+  let lobes = hasForwardLobes();
   // A medium with no layer edge takes R05.T12.e's steps as they were, and declares no walk; the
   // edges are the same for every texel, so the branch is uniform (R08.T6.i). They stand at e over
   // the camera's s on the column's sphere (R08.T6.f).
   let edgeCount = min(u32(layerEdges.count.x), MARCH_EDGES_MAX);
   if (edgeCount == 0u) {
     for (var i = 0u; i < samples; i++) {
-      skyViewStep(&march, ray, body, frame, marchStep(split, i));
+      skyViewStep(&march, ray, body, frame, marchStep(split, i), lobes);
     }
   } else {
     var walk : MarchWalk;
@@ -172,7 +174,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     }
     marchWalkReady(&walk);
     for (var i = 0u; i < samples; i++) {
-      skyViewStep(&march, ray, body, frame, marchWalkStep(&walk, i));
+      skyViewStep(&march, ray, body, frame, marchWalkStep(&walk, i), lobes);
     }
   }
   textureStore(skyViewOut, id.xy, vec4f(march.luminance, 1.0));

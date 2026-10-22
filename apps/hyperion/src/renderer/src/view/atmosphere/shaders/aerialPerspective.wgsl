@@ -68,6 +68,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let perSlice = max(u32(view.tables.w), 1u);
   let dt = view.tables.y / f32(slices * perSlice);
   var march = viewMarchStart();
+  let lobes = hasForwardLobes();
   for (var slice = 0u; slice < slices; slice++) {
     for (var step = 0u; step < perSlice; step++) {
       let t = (f32(slice * perSlice + step) + 0.5) * dt;
@@ -87,9 +88,9 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
       }
       let local = sampleMediumAt(s * heightM);
       let start = sampleStartOf(body, place, quadric, heightM, up, latitudeNormal, s, local);
-      let shares = viewSourcesAt(body, start, up, dir, local);
+      let shares = viewSourcesAt(body, start, up, dir, lobes, local);
       viewMarchStep(&march, local, shares, dt);
     }
-    textureStore(aerialOut, vec3u(id.xy, slice), vec4f(march.luminance, viewMeanTransmittance(march)));
+    textureStore(aerialOut, vec3u(id.xy, slice), vec4f(march.luminance, viewMeanTransmittance(&march)));
   }
 }
