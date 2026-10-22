@@ -121,6 +121,9 @@ describe("readSmokeImages", () => {
   });
 });
 
+/** `scripts/testRender.sh`, which sets each run's outer limit. */
+const script = (): string => readFileSync(join(__dirname, "../../scripts/testRender.sh"), "utf8");
+
 describe("smokeWatchdogMs", () => {
   const plain = { part: "1", captures: false, soakSeconds: 0, childSeconds: 0 };
 
@@ -139,8 +142,8 @@ describe("smokeWatchdogMs", () => {
     }
   });
 
-  it("adds nothing for the captures to parts 2 to 7, which take none", () => {
-    for (const part of ["2", "3", "4", "5", "6", "7"]) {
+  it("adds nothing for the captures to parts 2 to 9, which take none", () => {
+    for (const part of ["2", "3", "4", "5", "6", "7", "8", "9"]) {
       expect(smokeWatchdogMs({ ...plain, part, captures: true })).toBe(180_000);
     }
   });
@@ -153,9 +156,12 @@ describe("smokeWatchdogMs", () => {
   });
 
   it("is the allowance testRender.sh adds to part 1's outer limit", () => {
-    const script = readFileSync(join(__dirname, "../../scripts/testRender.sh"), "utf8");
-    const allowance = /^captures_allowance_s=(\d+)$/mu.exec(script)?.[1];
+    const allowance = /^captures_allowance_s=(\d+)$/mu.exec(script())?.[1];
     expect(Number(allowance) * 1000).toBe(CAPTURES_WATCHDOG_MS);
-    expect(script).toMatch(/^outer_limit_s=300$/mu);
+  });
+
+  it("leaves testRender.sh's outer limit 120 s over the base watchdog", () => {
+    const limit = /^outer_limit_s=(\d+)$/mu.exec(script())?.[1];
+    expect(Number(limit) * 1000).toBe(SMOKE_WATCHDOG_BASE_MS + 120_000);
   });
 });

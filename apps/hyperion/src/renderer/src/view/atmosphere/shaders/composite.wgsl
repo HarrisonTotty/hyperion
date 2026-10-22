@@ -48,6 +48,11 @@
 // shell (`transmittanceFromAbove`), in place of the march's mean over the channels, which dimmed a
 // sun seen through the limb grey where the air reddens it, and stepped in colour at the top. Low's
 // half-resolution march is read from the nearest of the texels whose depths tie (`rayMarched`).
+// Changes (plan R08, R08.T8.c): from above the top, that transmittance takes the mean over the
+// pixel's far-limb footprint, blended in by its span, as the march's in-scatter does
+// (`farLimb.wgsl`; `decision-r08-t8-leans.md` section 6.1), so that a star, or the Sun's disc in
+// an eclipse seen from afar, is not cut out row by row where the centre ray grazes the base of the
+// air.
 
 struct Draw {
   offsetFromCameraM : vec3f,
@@ -257,6 +262,32 @@ fn transmittanceFromAbove(v : AtmosphereView, body : OblateBody, dir : vec3f, sl
   return transmittanceFrom(body, start, dir, slot);
 }
 
+// A light's transmittance to space from a camera above the top across the pixel's far-limb
+// footprint (R08.T8.c): `transmittanceFromAbove` along the pixel's ray `dir`, blended by w_L with
+// its mean over the footprint's nodes, the share above the top counted as 1, what lies there.
+fn transmittanceAcrossFromAbove(
+  v : AtmosphereView,
+  body : OblateBody,
+  footprint : ptr<function, FarLimbFootprint>,
+  dir : vec3f,
+  slot : u32,
+) -> vec3f {
+  let centre = transmittanceFromAbove(v, body, dir, slot);
+  let blend = (*footprint).blend;
+  if (!(blend > 0.0)) {
+    return centre;
+  }
+  var mean = vec3f((*footprint).spaceShare);
+  for (var i = 0u; i < (*footprint).count; i++) {
+    let node = (*footprint).nodes[i];
+    mean += node.z * transmittanceFromAbove(v, body, rayThrough(v, node.xy), slot);
+  }
+  if (blend >= 1.0) {
+    return mean;
+  }
+  return mix(centre, mean, blend);
+}
+
 // Whether a ray falls within a source's disc: |d x s| <= sin(rho) with d . s > 0, sin(rho) formed
 // in f64 (Design note 18), and no disc where it is 0.
 fn withinDisc(dir : vec3f, source : SkySource) -> bool {
@@ -333,11 +364,16 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
     }
     var inscattered : vec3f;
     var behind : vec3f;
+    // The pixel's far-limb footprint from above the top (R08.T8.c), w_L 0 elsewhere.
+    var footprint : FarLimbFootprint;
+    footprint.blend = 0.0;
     if (aboveTop) {
       // What lies behind takes its transmittance to space per channel from the ray's entry into the
-      // air (R08.T8.b), not the march's mean over the channels.
+      // air (R08.T8.b), not the march's mean over the channels, and across the pixel's footprint
+      // (R08.T8.c).
+      footprint = farLimbFootprintOf(v, body, oblateBody, uv, v.output.xy);
       inscattered = rayMarched(pixel, depth).rgb;
-      behind = transmittanceFromAbove(v, body, dir, slotHere);
+      behind = transmittanceAcrossFromAbove(v, body, &footprint, dir, slotHere);
     } else {
       // Inside the air: from the march band's upper edge up the march's sky, below its lower edge
       // the sky view's, and between them the two blended by the march's share (R08.T8). What lies
@@ -375,7 +411,7 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
       if (withinDisc(dir, source) && dot(source.disc.rgb, vec3f(1.0)) > 0.0) {
         var toSpace : vec3f;
         if (aboveTop) {
-          toSpace = transmittanceFromAbove(v, body, dir, skySlotOf(source));
+          toSpace = transmittanceAcrossFromAbove(v, body, &footprint, dir, skySlotOf(source));
         } else {
           toSpace = transmittanceToSpace(v, body, dir, skySlotOf(source));
         }

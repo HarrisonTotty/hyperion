@@ -52,16 +52,21 @@ export const SMOKE_WATCHDOG_BASE_MS = 180_000;
  * ascent 143.4 / 140.0 s, the terrain 3.0 / 3.5 s, the spike 80.3 / 81.7 s, the occultation
  * 23.5 / 23.2 s and the eclipse 28.8 / 28.7 s: 410.5 / 409.0 s in all, and part 1 489.6 / 489.2 s.
  * Twice 410.5 s is 821 s, 14 minutes rounded up. The ruling named five groups, before R08.T8.b
- * added the ascent (267.1 / 269.0 s without it).
+ * added the ascent (267.1 / 269.0 s without it), which set 840 s. Measured again 2026-10-22 in
+ * quiet window 15 (load 0.12 at the start), on R08.T8.c's kernels with its far limb's captures and
+ * R10.T14.e's spike settle: the comparison 179.6 / 176.9 s, the ascent 160.5 / 162.2 s, the
+ * terrain 2.6 / 4.8 s, the spike 211.9 / 212.6 s, the occultation 21.8 / 21.6 s, the eclipse
+ * 28.1 / 28.2 s and the far limb 62.7 / 64.6 s: 667.2 / 670.9 s in all, and part 1 757.9 /
+ * 756.1 s. Twice 670.9 s is 1,341.8 s, 23 minutes rounded up.
  *
  * `scripts/testRender.sh` adds the same allowance to its outer limit, as `captures_allowance_s`,
  * so that the outer limit stays 120 s over the watchdog; `result.test.ts` holds the two equal.
  */
-export const CAPTURES_WATCHDOG_MS = 840_000;
+export const CAPTURES_WATCHDOG_MS = 1_380_000;
 
 /** What sets a run's watchdog: the main process's switches. */
 export interface SmokeWatchdogInputs {
-  /** `--smoke-part`'s value: `1` to `7`, or `all`. */
+  /** `--smoke-part`'s value: `1` to `9`, or `all`. */
   readonly part: string;
   /** Whether `--smoke-captures` asks for the capture frames. */
   readonly captures: boolean;

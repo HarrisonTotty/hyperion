@@ -102,6 +102,8 @@ import {
   aerialPerspectiveTwin,
   curveOpticalDepth,
   kernelOpticalDepth,
+  farLimbFootprintTwin,
+  farLimbShellsOf,
   marchTwin,
   mediumMarchEdgesM,
   MULTI_SCATTERING_DIRECTIONS,
@@ -119,6 +121,7 @@ import {
   type PlanetTwin,
   rayMarchRayAlongTwin,
   rayMarchRayTwin,
+  rayMarchTexelTwin,
   rayMarchTwin,
   rayPieces,
   skyViewRayTwin,
@@ -1090,15 +1093,22 @@ describe("the per-frame twins' steps", () => {
     ).toBeNull();
   });
 
+  // Each texel's own ray is marched over its placed steps; the target holds it where the texel
+  // keeps its centre ray, and where its far-limb footprint is blended in (R08.T8.c; this frame's
+  // texels span degrees, so every air texel takes its own) the mean is `farLimb.test.ts`'s.
   it("march each ray-march texel on the spheroid over its placed steps, as rayMarch.wgsl does", () => {
     const orbit = twinView(equatorCamera(WGS84, 400_000), sunAt(30), WGS84, 0.1);
     const settings = { ...TABLE_SIZES.high, rayMarchSamples: 24 };
     const target = rayMarchTwin(earth, orbit, settings, () => 0);
     const sources = tableSources(earth);
+    const shells = farLimbShellsOf(earth, orbit);
+    const off: string[] = [];
     let compared = 0;
     for (let i = 0; i < target.widthTexels * target.heightTexels; i += 1) {
       const x = i % target.widthTexels;
       const y = Math.floor(i / target.widthTexels);
+      const texel = { x, y, widthTexels: target.widthTexels, heightTexels: target.heightTexels };
+      const footprint = shells === null ? null : farLimbFootprintTwin(shells, orbit, texel);
       const marched = rayMarchRayTwin(
         R05_EARTH_REFERENCE,
         orbit,
@@ -1117,9 +1127,18 @@ describe("the per-frame twins' steps", () => {
         marched.ray,
         placedSteps(marched.ray, settings.rayMarchSamples),
       );
-      expect(at(target, x, y)).toEqual([...luminance]);
+      const ray = rayMarchTexelTwin(earth, orbit, settings, marched);
+      const own = footprint === null || !(footprint.blend > 0);
+      const drawn = at(target, x, y);
+      if (![0, 1, 2].every((c) => ray[c] === luminance[c])) {
+        off.push(`texel (${x}, ${y})'s ray`);
+      }
+      if (own && ![0, 1, 2].every((c) => drawn[c] === luminance[c])) {
+        off.push(`texel (${x}, ${y}) as drawn`);
+      }
       compared += 1;
     }
+    expect(off).toEqual([]);
     expect(compared).toBeGreaterThan(0);
   });
 

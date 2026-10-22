@@ -2773,6 +2773,14 @@ function unnormalisedRay(view: TwinView, u: number, v: number): Vec3 {
   };
 }
 
+/**
+ * The unit ray through the point (`u`, `v`) of the output, (0, 0) at its top left, body-fixed:
+ * `view.wgsl`'s `rayThrough`.
+ */
+export function unitRayTwin(view: TwinView, u: number, v: number): Vec3 {
+  return unit(unnormalisedRay(view, u, v));
+}
+
 /** A vector's unit direction. */
 function unit(v: Vec3): Vec3 {
   const length = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -3297,9 +3305,11 @@ function groundLightInto(
 }
 
 /**
- * The ray-march target's twin at the setting's scale of the viewport: each texel's in-scattered
- * radiance in the view's sources' weights (rgb; R08.T7) and mean transmittance (a), with the bare ground seen
- * from above lit by the sun, and (0, 0, 0, 1) where the kernel marches nothing.
+ * The ray-march target's twin at the setting's scale of the viewport, each texel as the kernel
+ * draws it ({@link rayMarchTargetTexelTwin}): its in-scattered radiance in the view's sources'
+ * weights (rgb; R08.T7) and mean transmittance (a), with the bare ground seen from above lit by
+ * the sun, and (0, 0, 0, 1) where the kernel marches nothing; from above the top, where a texel's
+ * footprint meets the shell, its far-limb footprint's mean blended in by w_L (R08.T8.c).
  *
  * @param depthAt - The scene's reversed-Z depth at a full-resolution pixel, 0 where nothing is
  *   drawn: the texel the kernel loads.
@@ -3313,6 +3323,7 @@ export function rayMarchTwin(
   depthAt: (xPx: number, yPx: number) => number,
 ): TwinTable {
   const context = rayMarchContext(planet, view, settings);
+  const shells = farLimbShellsOf(planet, view);
   const fullW = view.viewport.widthPx;
   const fullH = view.viewport.heightPx;
   const w = Math.ceil(fullW * settings.rayMarchScale);
@@ -3320,17 +3331,463 @@ export function rayMarchTwin(
   const texels = new Float64Array(w * h * 4);
   for (let y = 0; y < h; y += 1) {
     for (let x = 0; x < w; x += 1) {
-      const u = (x + 0.5) / w;
-      const v = (y + 0.5) / h;
-      const depth = depthAt(
-        Math.min(Math.floor(u * fullW), fullW - 1),
-        Math.min(Math.floor(v * fullH), fullH - 1),
+      marchTargetTexelInto(
+        context,
+        shells,
+        (u, v, depthHere) => rayMarchRayTwin(planet.medium, view, u, v, depthHere, settings),
+        (u, v) => depthAtUv(depthAt, fullW, fullH, u, v),
+        { x, y, widthTexels: w, heightTexels: h },
+        texels.subarray((y * w + x) * 4, (y * w + x) * 4 + 4),
       );
-      const marched = rayMarchRayTwin(planet.medium, view, u, v, depth, settings);
-      rayMarchTexelInto(context, marched, texels.subarray((y * w + x) * 4, (y * w + x) * 4 + 4));
     }
   }
   return { widthTexels: w, heightTexels: h, texels };
+}
+
+/**
+ * One texel of the ray-march target as the kernel draws it (plan R08, R08.T8.c), RGBA: the centre
+ * ray's texel ({@link rayMarchTexelTwin}) and, from above the top where its footprint meets the
+ * shell, its far-limb footprint's mean blended in by the texel's span ({@link farLimbFootprintTwin}),
+ * the in-scatter and the transmittance alike; the sphere's march (`rayMarch.wgsl`'s `main`).
+ *
+ * @param x - The texel's column of the target, 0 at its left.
+ * @param y - The texel's row, 0 at its top.
+ * @param depth - The scene's reversed-Z depth, the same at every full-resolution pixel the texel's
+ *   centre and its nodes stand on: 0 where nothing is drawn.
+ * @throws RangeError as {@link rayMarchTexelTwin}.
+ */
+export function rayMarchTargetTexelTwin(
+  planet: PlanetTwin,
+  view: TwinView,
+  settings: RayMarchSettings,
+  x: number,
+  y: number,
+  depth: number,
+): readonly [number, number, number, number] {
+  const out = new Float64Array(4);
+  marchTargetTexelInto(
+    rayMarchContext(planet, view, settings),
+    farLimbShellsOf(planet, view),
+    (u, v, depthHere) => rayMarchRayTwin(planet.medium, view, u, v, depthHere, settings),
+    () => depth,
+    targetTexelOf(view, settings, x, y),
+    out,
+  );
+  return [out[0] ?? Number.NaN, out[1] ?? Number.NaN, out[2] ?? Number.NaN, out[3] ?? Number.NaN];
+}
+
+// --- The far limb's footprint (R08.T8.c) ---------------------------------------------------------
+
+/**
+ * Where the far limb's blend w_L begins, in s, the texel's span in tangent height over the local
+ * scale height at its tangent point: the centre ray alone at and under it
+ * (`decision-r08-t8-leans.md` §6.1). `farLimb.wgsl`'s `FAR_LIMB_BLEND_FROM`.
+ */
+export const FAR_LIMB_BLEND_FROM = 0.6;
+
+/**
+ * The span in s over which w_L rises from 0 to 1, the footprint's mean alone from s = 1 (§6.1).
+ * `farLimb.wgsl`'s `FAR_LIMB_BLEND_WIDTH`.
+ */
+export const FAR_LIMB_BLEND_WIDTH = 0.4;
+
+/**
+ * The far limb's blend weight w_L = clamp((s − 0.6) ÷ 0.4, 0, 1) at s, the texel's span in tangent
+ * height over the local scale height at its tangent point (`decision-r08-t8-leans.md` §6.1):
+ * continuous in the camera, so that nothing pops and no hysteresis is needed.
+ */
+export function farLimbBlend(span: number): number {
+  return Math.min(Math.max((span - FAR_LIMB_BLEND_FROM) / FAR_LIMB_BLEND_WIDTH, 0), 1);
+}
+
+/**
+ * Gauss–Legendre nodes and weights on [0, 1] for the far limb's pieces, the nodes x and weights w
+ * of the n-point rule on [−1, 1] taken to (1 + x) ÷ 2 and w ÷ 2 (Abramowitz and Stegun 1964,
+ * Table 25.4, to 15 digits): exact for polynomials of degree up to 2n − 1. `farLimb.wgsl` holds the
+ * same.
+ */
+export const FAR_LIMB_GAUSS_LEGENDRE: Readonly<
+  Record<2 | 8, ReadonlyArray<readonly [number, number]>>
+> = {
+  2: [
+    [0.211_324_865_405_187, 0.5],
+    [0.788_675_134_594_813, 0.5],
+  ],
+  8: [
+    [0.019_855_071_751_232, 0.050_614_268_145_188],
+    [0.101_666_761_293_187, 0.111_190_517_226_687],
+    [0.237_233_795_041_836, 0.156_853_322_938_944],
+    [0.408_282_678_752_175, 0.181_341_891_689_181],
+    [0.591_717_321_247_825, 0.181_341_891_689_181],
+    [0.762_766_204_958_164, 0.156_853_322_938_944],
+    [0.898_333_238_706_813, 0.111_190_517_226_687],
+    [0.980_144_928_248_768, 0.050_614_268_145_188],
+  ],
+};
+
+/** The nodes the footprint's ground piece takes (§6.1). */
+const FAR_LIMB_GROUND_NODES = 2;
+
+/**
+ * The nodes the footprint's shell piece takes for a piece `scaleHeights` local scale heights tall:
+ * up to 8 (§6.1), and 2 where the lane's schedule takes fewer.
+ */
+export type FarLimbSchedule = (scaleHeights: number) => 2 | 8;
+
+/**
+ * The shell piece's schedule as built: 8 nodes at every span (§6.1's ceiling). 2 nodes under one
+ * local scale height put the Saturn-class figure's 1 H pixel from 10⁸ m at 10.9% of its converged
+ * footprint, where 8 hold it at 5.0% (plan R08's Risks, "Deviations in T8.c, as built").
+ */
+export const FAR_LIMB_SCHEDULE: FarLimbSchedule = () => 8;
+
+/** What a view's far-limb footprints are formed from (R08.T8.c), once a frame. */
+export interface FarLimbShells {
+  /** The datum's equatorial radius a, m. */
+  readonly groundEquatorialRadiusM: number;
+  /** The datum's polar radius c, m. */
+  readonly groundPolarRadiusM: number;
+  /** The top's shell's equatorial radius, a + H ÷ s_e, m: the quadric through h\* = top. */
+  readonly topEquatorialRadiusM: number;
+  /** The top's shell's polar radius, c + H ÷ s_p, m. */
+  readonly topPolarRadiusM: number;
+  /** The medium's top, m of h\*. */
+  readonly topM: number;
+  /**
+   * The local scale heights in h\* the body's table holds (`tables.ts`'s `packedScaleHeightsM`),
+   * which the kernel reads (`oblate.wgsl`'s `oblateScaleHeightAt`).
+   */
+  readonly scaleHeightsM: ArrayLike<number>;
+  /** The body's gravity, for s at the tangent point's latitude, or `null` on a sphere (s ≡ 1). */
+  readonly gravity: BodyGravity | null;
+}
+
+/** A node of a footprint: the target's coordinates of its ray, and its weight. */
+export interface FarLimbNode {
+  readonly u: number;
+  readonly v: number;
+  readonly weight: number;
+}
+
+/** A texel's far-limb footprint (R08.T8.c), as the kernel forms it. */
+export interface FarLimbFootprint {
+  /** s: the texel's span in tangent height over the local scale height at its tangent point. */
+  readonly span: number;
+  /** w_L = {@link farLimbBlend}(s). */
+  readonly blend: number;
+  /** The footprint's shares under the datum's edge, in the shell, and above the top. */
+  readonly groundShare: number;
+  readonly shellShare: number;
+  readonly spaceShare: number;
+  /** The shell piece's span, local scale heights: what its schedule takes. */
+  readonly shellScaleHeights: number;
+  /** The ground piece's nodes, then the shell piece's; none where w_L is 0. */
+  readonly nodes: ReadonlyArray<FarLimbNode>;
+}
+
+/** A texel of a target, and the target's size. */
+export interface TargetTexel {
+  readonly x: number;
+  readonly y: number;
+  readonly widthTexels: number;
+  readonly heightTexels: number;
+}
+
+/** The ray-march target's texel (`x`, `y`) at the setting's scale of the viewport. */
+function targetTexelOf(
+  view: TwinView,
+  settings: Pick<RayMarchSettings, "rayMarchScale">,
+  x: number,
+  y: number,
+): TargetTexel {
+  return {
+    x,
+    y,
+    widthTexels: Math.ceil(view.viewport.widthPx * settings.rayMarchScale),
+    heightTexels: Math.ceil(view.viewport.heightPx * settings.rayMarchScale),
+  };
+}
+
+/** Each medium's tabulated local scale heights, packed once (`tables.ts`'s `packedScaleHeightsM`). */
+const SCALE_HEIGHTS = new WeakMap<AtmosphereMedium, Float32Array>();
+
+function scaleHeightsOf(medium: AtmosphereMedium): Float32Array {
+  const known = SCALE_HEIGHTS.get(medium);
+  if (known !== undefined) {
+    return known;
+  }
+  const packed = packedScaleHeightsM(medium);
+  SCALE_HEIGHTS.set(medium, packed);
+  return packed;
+}
+
+/**
+ * A sphere's far-limb shells (R08.T8.c): the datum and the top a + H, s ≡ 1, and `null` with the
+ * camera under the top.
+ */
+export function farLimbShellsOf(planet: PlanetTwin, view: TwinView): FarLimbShells | null {
+  const topM = planet.medium.topHeightM;
+  if (!(view.heightM >= topM)) {
+    return null;
+  }
+  const { equatorialRadiusM: a, polarRadiusM: c } = view.figure;
+  return {
+    groundEquatorialRadiusM: a,
+    groundPolarRadiusM: c,
+    topEquatorialRadiusM: a + topM,
+    topPolarRadiusM: c + topM,
+    topM,
+    scaleHeightsM: scaleHeightsOf(planet.medium),
+    gravity: null,
+  };
+}
+
+/**
+ * The height of a line's closest approach over the spheroid of radii (a, a, c), taken in space
+ * scaled to its sphere, S = diag(1, 1, a ÷ c): |S o × S d| ÷ |S d| − a, m, negative where the line
+ * meets it; and whether that approach lies ahead of `originM` along `direction`.
+ */
+function closestApproachOf(
+  originM: Vec3,
+  direction: Vec3,
+  a: number,
+  c: number,
+): { readonly heightM: number; readonly ahead: boolean; readonly alongM: number } {
+  const k = a / c;
+  const oz = originM.z * k;
+  const dz = direction.z * k;
+  const { x: ox, y: oy } = originM;
+  const { x: dx, y: dy } = direction;
+  const cx = oy * dz - oz * dy;
+  const cy = oz * dx - ox * dz;
+  const cz = ox * dy - oy * dx;
+  const qa = dx * dx + dy * dy + dz * dz;
+  const qb = ox * dx + oy * dy + oz * dz;
+  return {
+    heightM: Math.sqrt((cx * cx + cy * cy + cz * cz) / qa) - a,
+    ahead: qb < 0,
+    alongM: -qb / qa,
+  };
+}
+
+/**
+ * The footprint's projection on the screen direction ĝ, a unit square's: the density of a sum of
+ * uniforms of widths |ĝ_x| and |ĝ_y| texels, a trapezoid (a box where one is 0), at ξ texels from
+ * the centre, and its share below ξ.
+ */
+interface FootprintProjection {
+  readonly density: (xi: number) => number;
+  readonly shareBelow: (xi: number) => number;
+  /** Half the projection's support, texels. */
+  readonly halfWidth: number;
+}
+
+/** The projection's narrower width under which it is taken as a box, texels. */
+const FOOTPRINT_BOX_WIDTH = 1e-4;
+
+function footprintProjection(gx: number, gy: number): FootprintProjection {
+  const ax = Math.abs(gx);
+  const ay = Math.abs(gy);
+  const hi = Math.max(ax, ay);
+  const lo = Math.min(ax, ay);
+  const halfWidth = (hi + lo) / 2;
+  if (lo < FOOTPRINT_BOX_WIDTH) {
+    return {
+      density: (xi) => (Math.abs(xi) <= hi / 2 ? 1 / hi : 0),
+      shareBelow: (xi) => Math.min(Math.max((xi + hi / 2) / hi, 0), 1),
+      halfWidth: hi / 2,
+    };
+  }
+  const plateau = (hi - lo) / 2;
+  const below = (t: number): number =>
+    t <= -plateau ? (t + halfWidth) ** 2 / (2 * hi * lo) : lo / (2 * hi) + (t + plateau) / hi;
+  return {
+    density: (xi) => Math.min(Math.max(halfWidth - Math.abs(xi), 0) / lo, 1) / hi,
+    shareBelow: (xi) => {
+      const t = Math.min(Math.max(xi, -halfWidth), halfWidth);
+      return t <= 0 ? below(t) : 1 - below(-t);
+    },
+    halfWidth,
+  };
+}
+
+/** A node of a footprint's piece: its place ξ along ĝ from the centre, texels, and its weight. */
+interface PieceNode {
+  readonly xi: number;
+  readonly weight: number;
+}
+
+/**
+ * The Gauss–Legendre nodes of a piece [ξ₀, ξ₁] of a footprint, texels along ĝ, each weighted by the
+ * projection's density there, the piece's weights scaled to its share.
+ */
+function pieceNodes(
+  projection: FootprintProjection,
+  from: number,
+  to: number,
+  count: 2 | 8,
+): PieceNode[] {
+  const share = projection.shareBelow(to) - projection.shareBelow(from);
+  if (!(to > from) || !(share > 0)) {
+    return [];
+  }
+  const rule = FAR_LIMB_GAUSS_LEGENDRE[count];
+  const nodes = rule.map(([x, w]) => {
+    const xi = from + x * (to - from);
+    return { xi, raw: w * projection.density(xi) };
+  });
+  const total = nodes.reduce((sum, n) => sum + n.raw, 0);
+  return nodes.map((n, i) => ({
+    xi: n.xi,
+    weight: total > 0 ? (share * n.raw) / total : share * (rule[i]?.[1] ?? Number.NaN),
+  }));
+}
+
+/**
+ * A texel's far-limb footprint (plan R08, R08.T8.c; `decision-r08-t8-leans.md` §6.1), as
+ * `farLimb.wgsl`'s `farLimbFootprintOf` forms it, or `null` where the texel keeps its centre ray:
+ * its footprint wholly on the face or wholly in space, or the closest approach behind the camera.
+ *
+ * @remarks
+ * The tangent height h of a ray is its closest approach's height over the datum, taken in space
+ * scaled to its sphere; across the texel it is taken as linear, its gradient (g_x, g_y) from h at
+ * the midpoints of the texel's edges, so that its span over the texel is |g_x| + |g_y|. The top's
+ * cut is the same over the top's shell. s is that span over the local scale height at the
+ * tangent point: the body's table's (`tables.ts`'s `packedScaleHeightsM`) at its h\* (h at the
+ * centre ray's, held to the ground, times s(φ) at its geocentric latitude) over s(φ), the table
+ * holding it in h\*. The footprint is projected on ĝ, the
+ * screen direction in which h rises (a trapezoid: {@link footprintProjection}), and cut where h
+ * meets the datum's edge and the top: its ground piece takes 2 Gauss–Legendre nodes, its shell
+ * piece those of `schedule` by the piece's span in local scale heights, and space none, each
+ * piece weighted by its share and each node by the projection's density there.
+ *
+ * @param schedule - The shell piece's node count by its span, local scale heights: the built
+ *   schedule, or another for the schedule's own measurement.
+ */
+export function farLimbFootprintTwin(
+  shells: FarLimbShells,
+  view: TwinView,
+  texel: TargetTexel,
+  schedule: FarLimbSchedule = FAR_LIMB_SCHEDULE,
+): FarLimbFootprint | null {
+  const { x, y, widthTexels: w, heightTexels: h } = texel;
+  const uc = (x + 0.5) / w;
+  const vc = (y + 0.5) / h;
+  const o = view.cameraM;
+  const rayAt = (u: number, v: number): Vec3 => unit(unnormalisedRay(view, u, v));
+  const groundAt = (u: number, v: number): number =>
+    closestApproachOf(o, rayAt(u, v), shells.groundEquatorialRadiusM, shells.groundPolarRadiusM)
+      .heightM;
+  const centre = closestApproachOf(
+    o,
+    rayAt(uc, vc),
+    shells.groundEquatorialRadiusM,
+    shells.groundPolarRadiusM,
+  );
+  if (!centre.ahead) {
+    return null;
+  }
+  const gx = groundAt(uc + 0.5 / w, vc) - groundAt(uc - 0.5 / w, vc);
+  const gy = groundAt(uc, vc + 0.5 / h) - groundAt(uc, vc - 0.5 / h);
+  const spanM = Math.abs(gx) + Math.abs(gy);
+  const topHeightM = closestApproachOf(
+    o,
+    rayAt(uc, vc),
+    shells.topEquatorialRadiusM,
+    shells.topPolarRadiusM,
+  ).heightM;
+  if (!(centre.heightM + spanM / 2 > 0) || !(topHeightM - spanM / 2 < 0) || !(spanM > 0)) {
+    return null;
+  }
+  const d = rayAt(uc, vc);
+  const tangent = add(o, scale(d, centre.alongM));
+  const sin = tangent.z / Math.hypot(tangent.x, tangent.y, tangent.z);
+  const s = shells.gravity === null ? 1 : gravityRatio(shells.gravity, Math.asin(sin));
+  const scaleHeightM = tabulatedScaleHeightM(
+    shells.scaleHeightsM,
+    shells.topM,
+    s * Math.max(centre.heightM, 0),
+  );
+  // The table's H is in h*, s times the geometric height's: the span over H ÷ s.
+  const span = (spanM * s) / scaleHeightM;
+  const blend = farLimbBlend(span);
+  const g = Math.hypot(gx, gy);
+  const projection = footprintProjection(gx / g, gy / g);
+  const halfWidth = projection.halfWidth;
+  // h rises along ĝ by g a texel: under the datum's edge below ξ_G, over the top above ξ_T.
+  const groundXi = Math.min(Math.max(-centre.heightM / g, -halfWidth), halfWidth);
+  const topXi = Math.min(Math.max(-topHeightM / g, groundXi), halfWidth);
+  const groundShare = projection.shareBelow(groundXi);
+  const shellShare = projection.shareBelow(topXi) - groundShare;
+  const spaceShare = 1 - projection.shareBelow(topXi);
+  const shellScaleHeights = ((topXi - groundXi) * g) / scaleHeightM;
+  const toNode = ({ xi, weight }: PieceNode): FarLimbNode => ({
+    u: uc + (xi * gx) / g / w,
+    v: vc + (xi * gy) / g / h,
+    weight,
+  });
+  const nodes =
+    blend > 0
+      ? [
+          ...pieceNodes(projection, -halfWidth, groundXi, FAR_LIMB_GROUND_NODES).map(toNode),
+          ...pieceNodes(projection, groundXi, topXi, schedule(shellScaleHeights)).map(toNode),
+        ]
+      : [];
+  return { span, blend, groundShare, shellShare, spaceShare, shellScaleHeights, nodes };
+}
+
+/**
+ * The scene's reversed-Z depth the kernel loads for the point (`u`, `v`) of the output: the
+ * full-resolution pixel under it, the point held to the output.
+ */
+function depthAtUv(
+  depthAt: (xPx: number, yPx: number) => number,
+  fullW: number,
+  fullH: number,
+  u: number,
+  v: number,
+): number {
+  return depthAt(
+    Math.min(Math.floor(Math.min(Math.max(u, 0), 1) * fullW), fullW - 1),
+    Math.min(Math.floor(Math.min(Math.max(v, 0), 1) * fullH), fullH - 1),
+  );
+}
+
+/**
+ * One texel of a ray-march target into `out` as the kernel draws it (R08.T8.c): its centre ray's
+ * texel, and with `shells` (the camera above the top) its footprint's mean blended in by w_L, the
+ * space share counted as (0, 0, 0, 1), what the kernel writes for a ray that misses the air; each
+ * ray at the scene's depth under its own point (`depthAt`).
+ */
+function marchTargetTexelInto(
+  context: RayMarchContext,
+  shells: FarLimbShells | null,
+  rayAt: (u: number, v: number, depth: number) => RayMarchRay | null,
+  depthAt: (u: number, v: number) => number,
+  texel: TargetTexel,
+  out: Float64Array,
+): void {
+  const uc = (texel.x + 0.5) / texel.widthTexels;
+  const vc = (texel.y + 0.5) / texel.heightTexels;
+  rayMarchTexelInto(context, rayAt(uc, vc, depthAt(uc, vc)), out);
+  const footprint = shells === null ? null : farLimbFootprintTwin(shells, context.view, texel);
+  if (footprint === null || !(footprint.blend > 0)) {
+    return;
+  }
+  const mean = Float64Array.of(0, 0, 0, footprint.spaceShare);
+  const node = new Float64Array(4);
+  for (const { u, v, weight } of footprint.nodes) {
+    rayMarchTexelInto(context, rayAt(u, v, depthAt(u, v)), node);
+    for (let c = 0; c < 4; c += 1) {
+      mean[c] = (mean[c] ?? Number.NaN) + weight * (node[c] ?? Number.NaN);
+    }
+  }
+  // As WGSL's mix, (1 − w) × the centre + w × the mean: the mean alone at w = 1.
+  const b = footprint.blend;
+  for (let c = 0; c < 4; c += 1) {
+    const m = mean[c] ?? Number.NaN;
+    out[c] = b === 1 ? m : (1 - b) * (out[c] ?? Number.NaN) + b * m;
+  }
 }
 
 // --- Oblate bodies: the slices and the bands (R08.T6.e) ------------------------------------------
@@ -5034,8 +5491,10 @@ export function oblateRayMarchTexelTwin(
 }
 
 /**
- * The oblate ray-march target's twin (R08.T6.e): {@link rayMarchTwin}'s texels, each by
- * {@link oblateRayMarchRayTwin} and {@link oblateRayMarchTexelTwin}.
+ * The oblate ray-march target's twin (R08.T6.e): {@link rayMarchTwin}'s texels, each as the kernel
+ * draws it ({@link oblateRayMarchTargetTexelTwin}): its centre ray by {@link oblateRayMarchRayTwin}
+ * and {@link oblateRayMarchTexelTwin}, and from above the top its far-limb footprint's mean
+ * blended in by w_L (R08.T8.c).
  *
  * @throws RangeError as {@link rayMarchTwin}.
  */
@@ -5046,6 +5505,7 @@ export function oblateRayMarchTwin(
   depthAt: (xPx: number, yPx: number) => number,
 ): TwinTable {
   const context = oblateRayMarchContext(planet, view, settings);
+  const shells = oblateFarLimbShellsOf(planet, view);
   const fullW = view.viewport.widthPx;
   const fullH = view.viewport.heightPx;
   const w = Math.ceil(fullW * settings.rayMarchScale);
@@ -5053,17 +5513,70 @@ export function oblateRayMarchTwin(
   const texels = new Float64Array(w * h * 4);
   for (let y = 0; y < h; y += 1) {
     for (let x = 0; x < w; x += 1) {
-      const u = (x + 0.5) / w;
-      const v = (y + 0.5) / h;
-      const depth = depthAt(
-        Math.min(Math.floor(u * fullW), fullW - 1),
-        Math.min(Math.floor(v * fullH), fullH - 1),
+      marchTargetTexelInto(
+        context,
+        shells,
+        (u, v, depthHere) => oblateRayMarchRayTwin(planet, view, u, v, depthHere, settings),
+        (u, v) => depthAtUv(depthAt, fullW, fullH, u, v),
+        { x, y, widthTexels: w, heightTexels: h },
+        texels.subarray((y * w + x) * 4, (y * w + x) * 4 + 4),
       );
-      const marched = oblateRayMarchRayTwin(planet, view, u, v, depth, settings);
-      rayMarchTexelInto(context, marched, texels.subarray((y * w + x) * 4, (y * w + x) * 4 + 4));
     }
   }
   return { widthTexels: w, heightTexels: h, texels };
+}
+
+/**
+ * One texel of the oblate ray-march target as the kernel draws it (R08.T8.c):
+ * {@link rayMarchTargetTexelTwin}'s, on the oblate march's shells, s at the tangent point's
+ * latitude.
+ *
+ * @throws RangeError as {@link rayMarchTexelTwin}.
+ */
+export function oblateRayMarchTargetTexelTwin(
+  planet: OblatePlanetTwin,
+  view: TwinView,
+  settings: RayMarchSettings,
+  x: number,
+  y: number,
+  depth: number,
+): readonly [number, number, number, number] {
+  const out = new Float64Array(4);
+  marchTargetTexelInto(
+    oblateRayMarchContext(planet, view, settings),
+    oblateFarLimbShellsOf(planet, view),
+    (u, v, depthHere) => oblateRayMarchRayTwin(planet, view, u, v, depthHere, settings),
+    () => depth,
+    targetTexelOf(view, settings, x, y),
+    out,
+  );
+  return [out[0] ?? Number.NaN, out[1] ?? Number.NaN, out[2] ?? Number.NaN, out[3] ?? Number.NaN];
+}
+
+/**
+ * An oblate body's far-limb shells (R08.T8.c): the datum, the top's quadric through h\* = top at
+ * the equator and the poles (a + H ÷ s_e, c + H ÷ s_p), the body's gravity for s, and `null` with
+ * the camera's h\* under the top.
+ */
+export function oblateFarLimbShellsOf(
+  planet: OblatePlanetTwin,
+  view: TwinView,
+): FarLimbShells | null {
+  const topM = planet.medium.topHeightM;
+  if (!(oblateCameraOf(planet, view).gravityRatio * view.heightM >= topM)) {
+    return null;
+  }
+  const [equatorial, polar] = shellScalesOf(planet);
+  const { equatorialRadiusM: a, polarRadiusM: c } = view.figure;
+  return {
+    groundEquatorialRadiusM: a,
+    groundPolarRadiusM: c,
+    topEquatorialRadiusM: a + topM * equatorial,
+    topPolarRadiusM: c + topM * polar,
+    topM,
+    scaleHeightsM: scaleHeightsOf(planet.medium),
+    gravity: planet.body.gravity,
+  };
 }
 
 // --- The composite's transmittance to space (R08.T8.b) -------------------------------------------
@@ -5187,5 +5700,88 @@ export function oblateCompositeTransmittanceTwin(
     Math.exp(-(depth[0] + absorbed[0])),
     Math.exp(-(depth[1] + absorbed[1])),
     Math.exp(-(depth[2] + absorbed[2])),
+  ];
+}
+
+/**
+ * What the composite multiplies what lies behind output pixel (`x`, `y`), and a source's disc, by
+ * from above the top on a sphere (R08.T8.c; `composite.wgsl`'s `transmittanceAcrossFromAbove`):
+ * {@link compositeTransmittanceTwin} along the pixel's ray, blended by w_L with its mean over the
+ * pixel's far-limb footprint ({@link farLimbFootprintTwin}), the share above the top counted as
+ * (1, 1, 1); the centre's alone with the camera under the top or the footprint's w_L 0.
+ */
+export function compositeFootprintTransmittanceTwin(
+  planet: PlanetTwin,
+  view: TwinView,
+  x: number,
+  y: number,
+  slot = 0,
+): Rgb {
+  const sources = tableSources(planet);
+  const topM = planet.medium.topHeightM;
+  return footprintTransmittance(view, farLimbShellsOf(planet, view), x, y, (direction) =>
+    compositeTransmittanceTwin(sources, topM, view, direction, slot),
+  );
+}
+
+/**
+ * {@link compositeFootprintTransmittanceTwin} on an oblate body (R08.T8.c): along each node's ray
+ * {@link oblateCompositeTransmittanceTwin}'s, on the oblate march's shells, s at the tangent
+ * point's latitude.
+ *
+ * @throws RangeError as {@link oblateCompositeTransmittanceTwin}.
+ */
+export function oblateCompositeFootprintTransmittanceTwin(
+  planet: OblatePlanetTwin,
+  view: TwinView,
+  x: number,
+  y: number,
+  slot = 0,
+): Rgb {
+  const scaleHeightsM = scaleHeightsOf(planet.medium);
+  return footprintTransmittance(view, oblateFarLimbShellsOf(planet, view), x, y, (direction) =>
+    oblateCompositeTransmittanceTwin(planet, view, direction, slot, scaleHeightsM),
+  );
+}
+
+/**
+ * Output pixel (`x`, `y`)'s transmittance from above the top across its far-limb footprint, the
+ * output's own pixel its texel: `along` its centre's ray, blended by w_L with the nodes' mean.
+ */
+function footprintTransmittance(
+  view: TwinView,
+  shells: FarLimbShells | null,
+  x: number,
+  y: number,
+  along: (direction: Vec3) => Rgb,
+): Rgb {
+  const { widthPx: w, heightPx: h } = view.viewport;
+  const centre = along(unit(unnormalisedRay(view, (x + 0.5) / w, (y + 0.5) / h)));
+  const footprint =
+    shells === null
+      ? null
+      : farLimbFootprintTwin(shells, view, { x, y, widthTexels: w, heightTexels: h });
+  if (footprint === null || !(footprint.blend > 0)) {
+    return centre;
+  }
+  const mean: [number, number, number] = [
+    footprint.spaceShare,
+    footprint.spaceShare,
+    footprint.spaceShare,
+  ];
+  for (const { u, v, weight } of footprint.nodes) {
+    const t = along(unit(unnormalisedRay(view, u, v)));
+    for (const c of CHANNELS) {
+      mean[c] += weight * t[c];
+    }
+  }
+  const b = footprint.blend;
+  if (b === 1) {
+    return mean;
+  }
+  return [
+    (1 - b) * centre[0] + b * mean[0],
+    (1 - b) * centre[1] + b * mean[1],
+    (1 - b) * centre[2] + b * mean[2],
   ];
 }

@@ -73,6 +73,12 @@
 // 10.8 on low. One-sided segments and every drawn surface keep R05.T12.e's placement, a drawn
 // surface's camera side from inside toward the camera (`decision-r08-t8-leans.md` sections 2, 4 and
 // 5.4; plan R08's Risks, "Deviations in T8.a, as built").
+//
+// Changes (plan R08, R08.T8.c): from above the top, a texel whose footprint meets the shell takes
+// the march's mean over its footprint across the limb, blended in by its span (`farLimb.wgsl`;
+// `decision-r08-t8-leans.md` section 6.1): from about one scale height a texel one ray cannot stand
+// for its footprint, and the limb broke into specks and gaps that flickered as the body moved by a
+// fraction of a pixel. A ray's march is `marchRay`, once for the centre and once a node.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -254,30 +260,16 @@ fn marchWalkCrossShell(
   marchWalkCross(walk, hits.y - lowestM);
 }
 
-@compute @workgroup_size(8, 8, 1)
-fn main(@builtin(global_invocation_id) id : vec3u) {
-  // The target may be larger than this frame's output (it grows and is never remade smaller).
-  let size = vec2u(ceil(view.output.xy * view.output.z));
-  if (id.x >= size.x || id.y >= size.y) {
-    return;
-  }
-  let uv = (vec2f(id.xy) + 0.5) / vec2f(size);
-  let full = vec2u(view.output.xy);
-  let depthTexel = min(vec2u(uv * vec2f(full)), full - 1u);
-  let depth = textureLoad(sceneDepth, depthTexel, 0);
+// One ray of the march, through `uv` of the output, the scene's reversed-Z depth under the texel
+// `depth` (0 where nothing is drawn): its in-scatter (rgb) and mean transmittance (a), (0, 0, 0, 1)
+// where it misses the air. The texel's centre ray, and each node of its far-limb footprint
+// (R08.T8.c), each at the scene's depth under its own point.
+fn marchRay(uv : vec2f, depth : f32) -> vec4f {
   let topM = medium.topHeightM;
   let body = oblateBodyOf(oblateBody);
-  let reach = view.tables.y;
   var tSurface = 3.4e38;
   if (depth > 0.0) {
     tSurface = distanceAtDepth(view, uv, depth);
-  }
-  // Every pixel once the camera's h* reaches the march band, whose weight is 1 at and above the top
-  // (R08.T8); below it, the surfaces beyond the aerial-perspective volume's reach.
-  let needed = view.exact.w > 0.0 || (depth > 0.0 && tSurface > reach);
-  if (!needed) {
-    textureStore(rayMarchOut, id.xy, vec4f(0.0, 0.0, 0.0, 1.0));
-    return;
   }
   let dir = rayThrough(view, uv);
   let origin = view.camera.xyz;
@@ -301,8 +293,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   }
   tEnd = min(tEnd, tSurface);
   if (shell.y <= 0.0 || tEnd <= tStart) {
-    textureStore(rayMarchOut, id.xy, vec4f(0.0, 0.0, 0.0, 1.0));
-    return;
+    return vec4f(0.0, 0.0, 0.0, 1.0);
   }
   let samples = max(u32(view.figure.w), 2u);
   let nearest = -dot(origin, dir);
@@ -391,5 +382,54 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   if (depth == 0.0 && hitsGround && ground.x <= tEnd) {
     meanTransmittance = 0.0;
   }
-  textureStore(rayMarchOut, id.xy, vec4f(luminance, meanTransmittance));
+  return vec4f(luminance, meanTransmittance);
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) id : vec3u) {
+  // The target may be larger than this frame's output (it grows and is never remade smaller).
+  let size = vec2u(ceil(view.output.xy * view.output.z));
+  if (id.x >= size.x || id.y >= size.y) {
+    return;
+  }
+  let uv = (vec2f(id.xy) + 0.5) / vec2f(size);
+  let full = vec2u(view.output.xy);
+  let depthTexel = min(vec2u(uv * vec2f(full)), full - 1u);
+  let depth = textureLoad(sceneDepth, depthTexel, 0);
+  let reach = view.tables.y;
+  var tSurface = 3.4e38;
+  if (depth > 0.0) {
+    tSurface = distanceAtDepth(view, uv, depth);
+  }
+  // Every pixel once the camera's h* reaches the march band, whose weight is 1 at and above the top
+  // (R08.T8); below it, the surfaces beyond the aerial-perspective volume's reach.
+  let needed = view.exact.w > 0.0 || (depth > 0.0 && tSurface > reach);
+  if (!needed) {
+    textureStore(rayMarchOut, id.xy, vec4f(0.0, 0.0, 0.0, 1.0));
+    return;
+  }
+  var marched = marchRay(uv, depth);
+  // From above the top, a texel whose footprint meets the shell takes its mean across the limb,
+  // blended in by its span (R08.T8.c, `farLimb.wgsl`); the camera's h* against the top is the same
+  // for every texel, so the branch is uniform.
+  if (view.camera.w * view.curvature.z >= medium.topHeightM) {
+    var footprint = farLimbFootprintOf(view, oblateBodyOf(oblateBody), oblateBody, uv, vec2f(size));
+    if (footprint.blend > 0.0) {
+      var mean = vec4f(0.0, 0.0, 0.0, footprint.spaceShare);
+      for (var i = 0u; i < footprint.count; i++) {
+        let node = footprint.nodes[i];
+        // Each node at the scene's depth under its own point, so that a drawn surface's edge across
+        // the footprint cuts only the nodes on it.
+        let nodeUv = clamp(node.xy, vec2f(0.0), vec2f(1.0));
+        let nodeTexel = min(vec2u(nodeUv * vec2f(full)), full - 1u);
+        mean += node.z * marchRay(node.xy, textureLoad(sceneDepth, nodeTexel, 0));
+      }
+      if (footprint.blend >= 1.0) {
+        marched = mean;
+      } else {
+        marched = mix(marched, mean, footprint.blend);
+      }
+    }
+  }
+  textureStore(rayMarchOut, id.xy, marched);
 }

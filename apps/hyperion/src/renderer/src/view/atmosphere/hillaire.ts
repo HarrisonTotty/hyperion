@@ -75,6 +75,7 @@ import commonWgsl from "./shaders/common.wgsl?raw";
 import aerialPerspectiveWgsl from "./shaders/aerialPerspective.wgsl?raw";
 import aerialReadWgsl from "./shaders/aerialRead.wgsl?raw";
 import compositeWgsl from "./shaders/composite.wgsl?raw";
+import farLimbWgsl from "./shaders/farLimb.wgsl?raw";
 import mediumWgsl from "./shaders/medium.wgsl?raw";
 import oblateWgsl from "./shaders/oblate.wgsl?raw";
 import rayMarchWgsl from "./shaders/rayMarch.wgsl?raw";
@@ -721,8 +722,8 @@ export const AERIAL_PERSPECTIVE_KERNEL = kernel(
   "atmosphere aerial perspective",
   aerialPerspectiveWgsl,
 );
-/** The per-pixel ray-march kernel. */
-export const RAY_MARCH_KERNEL = kernel("atmosphere ray march", rayMarchWgsl);
+/** The per-pixel ray-march kernel, after the far limb's footprint (`farLimb.wgsl`, R08.T8.c). */
+export const RAY_MARCH_KERNEL = kernel("atmosphere ray march", `${farLimbWgsl}\n${rayMarchWgsl}`);
 
 /**
  * The sources' members, `view.wgsl`'s `AtmosphereView.sources`: each source's direction, weight
@@ -753,9 +754,10 @@ const VIEW_MEMBERS = [
 
 /**
  * The composite's WGSL: `view/shaders/preciseTrig.wgsl`, `common.wgsl`, `view.wgsl`, `oblate.wgsl`
- * (R08.T6.f), the volume's read (`aerialRead.wgsl`, R08.T9.a), then its own.
+ * (R08.T6.f), the volume's read (`aerialRead.wgsl`, R08.T9.a), the far limb's footprint
+ * (`farLimb.wgsl`, R08.T8.c), then its own.
  */
-const COMPOSITE_WGSL = `${preciseTrigWgsl}\n${commonWgsl}\n${viewWgsl}\n${oblateWgsl}\n${aerialReadWgsl}\n${compositeWgsl}`;
+const COMPOSITE_WGSL = `${preciseTrigWgsl}\n${commonWgsl}\n${viewWgsl}\n${oblateWgsl}\n${aerialReadWgsl}\n${farLimbWgsl}\n${compositeWgsl}`;
 
 /** The composite: a full-screen draw of pre-exposed luminance over the terrain target. */
 export const COMPOSITE_MATERIAL: WgslMaterialSpec = {
