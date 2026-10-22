@@ -5136,9 +5136,10 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
       the DOM order by a render test), `SystemList.layout.test.ts`, and an at-rule lookup,
       `stylesheetRuleIn`, in `test/stylesheet.ts`.
     - _Deviation: ruling 134.9's floor lowered._ The compact stage keeps at least 14rem at 80 × 45
-      rem (it was 15rem), a design floor in both modes. `LocalChartPanel.tsx`'s doc still says the
-      angles and keys stand in the column and that the stage keeps 15rem; that file is #73's until
-      it lands, so P12.T11.c corrects both sentences if this lane's landing does not.
+      rem (it was 15rem), a design floor in both modes. `LocalChartPanel.tsx`'s doc said the angles
+      and keys stand in the column and that the stage keeps 15rem; that file was #73's until it
+      landed (187f4e60), so both sentences were corrected at this lane's landing merge, doc only
+      (ruling A).
     - _Measured, final tree._ At 1280 × 720, 100%: `NOW` stage 262 px, column 52 px clear;
       `OBSERVED` 228 px (14.25rem), 18 px clear; 0 overlaps in every common state; one refused
       entry 4 px past the foot, inside the furniture's top margin, 0 overlaps. The angles (x
@@ -5153,6 +5154,32 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
       device pixel ratio 1.5, since the harness's device scale factor left the offscreen page at
       1): `NOW` 266 px, 57 px clear; `OBSERVED` 232 px, 23 px clear; 0 overlaps; one refusal 2 px
       clear; `He-sdO3` whole (82 px).
+    - _Landing (2026-10-22, at `GENERATOR_VERSION` 23)._ The lane merged the tip with 23,
+      P12.T11.b, P12.T11.c and P12.T11.d on it, and no golden moved (`golden_diff.py`; the class-
+      and kind-reading goldens pass at 23 by name). Re-measured hidden on look-74's harness, with
+      look-75's axis and hint cases and this lane's list checks (LOOK72, 80 × 45 rem). At 1280 ×
+      720, 100%: `NOW` 262 px, 52.5 px clear; `OBSERVED` 228 px, 18.5 px clear; one refusal or two
+      change neither, since P12.T11.c's refusals add no line. At 150%: 266 and 232 px, 56.5 and
+      22.5 px clear. 0 overlaps of the column on the furniture, the census or the legend in every
+      state. The census's hint at 50 ly (`DENSE REGION`), which look-75 counted at 30 overlaps on
+      the tip before this fix, has 0 at 1280 × 720 with or without refusals: in `OBSERVED` the
+      stage is 206 px and the mode row ends 3.5 px past its foot, 0.5 px above the furniture
+      (211.3 px and 1.8 px clear at 150%), and in `NOW` 240 px. At 1920 × 1080, 100%, the stacked
+      page has no overlap (stages 509 px in `NOW`, 491 in `OBSERVED`), and the wide list's class
+      cell is 113.7 px. `He-sdO3` stands whole in every list (76, 82 and 114 px), and no
+      designation is cut.
+    - _Recorded at landing, not blockers._ (1) The galactic-axis case (the chart centred at
+      [0, 0, 3000] ly, `ANGLE —`): the axis note takes a line of its own, so the stage is 246 px in
+      `NOW` and 212 px in `OBSERVED` at 100% (250 and 216 at 150%), under the 14rem floor in
+      `OBSERVED` by 12 px (8 at 150%), with the column 2.5 px clear (6.5 at 150%) and 0 overlaps;
+      it was 222 px before this lane's fix, under the 15rem floor of then. Like the hint, it is a
+      line of some states only, measured and recorded (the layout ruling's §B); main records it as
+      pre-existing, for P12.T11.e's look. (2) The census's hint leaves `OBSERVED` 206 px, under the
+      floor, as the layout ruling's §D foresaw; 0 overlaps, which closes look-74's and look-75's
+      case. (3) The furniture's 1rem lines are shorter than B612's 0.875rem content boxes, so
+      the boxes of adjacent lines meet by 1–2 px (`RADIUS`'s `ly` and the scale bar's `10 ly`;
+      `UT`'s `yr` and `OBSERVED FROM`): up to 3 pairs at 100% and 1 at 150%, none at 1920 × 1080;
+      the glyphs stand apart in 3× crops.
     - _Recorded, not blockers._ In the narrow list (1280 × 720) classes of eight to eleven
       characters are cut with an ellipsis, rare (an LBV, a half-subtype stripped helium star, and
       perhaps a Be, Bp, Ap or Am star whose gravity gives it III, `B2.5IIIe`, not counted), and

@@ -57,9 +57,11 @@ interface LocalChartPanelProps {
  * in `--text-muted` with a trailing `S`.
  *
  * A page too short for all that, as at 1280 × 720, is laid out `compact` (the orchestrator's ruling
- * 134.9): the camera's angles and keys and what the chart is asked for stand in a column beside the
- * chart, the census line beside the chart's frame, centre, time and scale, and the legend across
- * the page under both, on show in every state, so that the chart keeps 15 rem of height. The census
+ * 134.9): the camera's angles and keys stand at the end of the preset views' row, as the stacked
+ * page sets them, and what the chart is asked for in a column beside the chart; the census line
+ * beside the chart's frame, centre, time and scale, and the legend across the page under both, on
+ * show in every state, so that the chart keeps at least 14 rem of height (ruling 134.9's 15 rem,
+ * lowered for the legend's seventh line by P06.T24.c's ruling of 2026-10-21). The census
  * table, shown, takes the query controls' place in the column, whose settings the page shows
  * elsewhere (`QUERY EDGE`, the census line, the count line, `UT`, the range label); their single
  * keys stay live, and folding the table brings them back (ruling 149.1). The page's parts, and so

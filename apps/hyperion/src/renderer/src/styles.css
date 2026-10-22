@@ -1611,9 +1611,11 @@ body {
  * `OBSERVED`, so the angles and keys left the column for the presets' row and the furniture's
  * lines are 1rem: the stage keeps at least 14rem at 80 x 45 rem, ruling 134.9's 15rem lowered for
  * the legend's seventh line (decision-stripped-star-class.md, 2026-10-21). Measured hidden at
- * 1280 x 720, 100%: in `NOW` the stage is 262 px tall and the column ends 52 px above its foot; in
- * `OBSERVED` 228 px and 18 px; with one refused entry in `OBSERVED` the column ends 4 px past the
- * foot, inside the furniture's top margin, over no text.
+ * 1280 x 720, 100%, at P06.T24.c's landing: in `NOW` the stage is 262 px tall and the column ends
+ * 52 px above its foot; in `OBSERVED` 228 px and 18 px, the same with one refused entry or two.
+ * A line that stands only in some states takes its room from the stage, measured and recorded
+ * there: the census's hint leaves `OBSERVED` 206 px, its mode row 3.5 px past the stage's foot and
+ * 0.5 px above the furniture, over no text; the galactic axis's note leaves 212 px, 2.5 px clear.
  */
 .local-chart--compact {
   /*
