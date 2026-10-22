@@ -1,13 +1,19 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
+  CAPTURES_WATCHDOG_MS,
   isOfflineUrl,
   isUncapturedGpuError,
   judgeSmokeRun,
   readSmokeImages,
   readSmokeResult,
   SMOKE_EXIT,
+  SMOKE_WATCHDOG_BASE_MS,
   type SmokeResult,
+  smokeWatchdogMs,
   UNCAPTURED_GPU_ERROR,
 } from "./result";
 
@@ -112,5 +118,50 @@ describe("readSmokeImages", () => {
     const { images, rejected } = readSmokeImages({ images: [image, { ...image, rgba: "!!" }] });
     expect(images).toEqual([image]);
     expect(rejected).toBe(1);
+  });
+});
+
+/** `scripts/testRender.sh`, which sets each run's outer limit. */
+const script = (): string => readFileSync(join(__dirname, "../../scripts/testRender.sh"), "utf8");
+
+describe("smokeWatchdogMs", () => {
+  const plain = { part: "1", captures: false, soakSeconds: 0, childSeconds: 0 };
+
+  it("is 180 s for a run without the captures", () => {
+    expect(SMOKE_WATCHDOG_BASE_MS).toBe(180_000);
+    for (const part of ["1", "4", "7", "all"]) {
+      expect(smokeWatchdogMs({ ...plain, part })).toBe(180_000);
+    }
+  });
+
+  it("adds the captures' allowance to part 1 and to every part at once", () => {
+    for (const part of ["1", "all"]) {
+      expect(smokeWatchdogMs({ ...plain, part, captures: true })).toBe(
+        180_000 + CAPTURES_WATCHDOG_MS,
+      );
+    }
+  });
+
+  it("adds nothing for the captures to parts 2 to 9, which take none", () => {
+    for (const part of ["2", "3", "4", "5", "6", "7", "8", "9"]) {
+      expect(smokeWatchdogMs({ ...plain, part, captures: true })).toBe(180_000);
+    }
+  });
+
+  it("adds the soak's and the child window's seconds as before", () => {
+    expect(smokeWatchdogMs({ ...plain, soakSeconds: 60, childSeconds: 30 })).toBe(270_000);
+    expect(smokeWatchdogMs({ ...plain, captures: true, soakSeconds: 60 })).toBe(
+      240_000 + CAPTURES_WATCHDOG_MS,
+    );
+  });
+
+  it("is the allowance testRender.sh adds to part 1's outer limit", () => {
+    const allowance = /^captures_allowance_s=(\d+)$/mu.exec(script())?.[1];
+    expect(Number(allowance) * 1000).toBe(CAPTURES_WATCHDOG_MS);
+  });
+
+  it("leaves testRender.sh's outer limit 120 s over the base watchdog", () => {
+    const limit = /^outer_limit_s=(\d+)$/mu.exec(script())?.[1];
+    expect(Number(limit) * 1000).toBe(SMOKE_WATCHDOG_BASE_MS + 120_000);
   });
 });

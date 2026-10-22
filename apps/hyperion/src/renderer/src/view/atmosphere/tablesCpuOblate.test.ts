@@ -8,6 +8,7 @@ import {
   saturnScaleHeightM,
   WGS84_SPHEROID,
 } from "../../test/atmosphereFixtures";
+import { limbCamera, limbPitchRad } from "../../test/farLimb";
 import { quaternion, quaternionFromRows } from "../camera/quaternion";
 import type { Rgb } from "../photometry/toneCurve";
 import { EARTH_REFERENCE, EARTH_REFERENCE_CURVES, referenceSunIlluminanceLx } from "./earth";
@@ -26,6 +27,8 @@ import { type AbsorberCurveSlots, multiScatteringLayersOf, type TableSize } from
 import {
   aerialPerspectiveTwin,
   bandMultiScattering,
+  farLimbFootprintTwin,
+  farLimbShellsOf,
   kernelOpticalDepth,
   MULTI_SCATTERING_GROUND_OFFSET_M,
   MULTI_SCATTERING_KERNEL_OPTIONS,
@@ -205,6 +208,11 @@ function skyThenSurface(_x: number, y: number): number {
   return y < 4 ? 0 : 0.1 / 60_000;
 }
 
+/** A twin with its ground black: the air's light alone. */
+function withBlackGround<T extends { readonly medium: AtmosphereMedium }>(planet: T): T {
+  return { ...planet, medium: { ...planet.medium, groundAlbedo: [0, 0, 0] } };
+}
+
 describe("a sphere with ω = 0 (R08.T6.e)", () => {
   const body: TwinBody = { figure: STILL_SPHERE, gravity: gravityOf(STILL_SPHERE) };
   const radius = tableRadiusM(STILL_SPHERE);
@@ -286,6 +294,40 @@ describe("a sphere with ω = 0 (R08.T6.e)", () => {
       worstRelative(
         oblateRayMarchTwin(o, low, settings, skyThenSurface),
         rayMarchTwin(p, low, settings, skyThenSurface),
+      ),
+    ).toBeLessThan(1e-12);
+  });
+
+  // R08.T8.c: from 10⁸ m, on a 16 × 8 frame whose pixels are 1080p's at 60° across, its forward ray
+  // grazing 8 km up, the limb texels take their footprints (low's texel spans tens of local scale
+  // heights), so the oblate march's footprint, its shells and s at the tangent point's latitude are
+  // held to the sphere's, of the air alone: the oblate twin lights the bare ground by the sliced
+  // lookup from the ground's own place, 10⁻⁷ from the sphere's table there, which no footprint moves.
+  it("reproduces T6.d's ray march to 10⁻¹² across the far limb's footprints", () => {
+    const o = withBlackGround(twins().oblate);
+    const p = withBlackGround(twins().spherical);
+    const settings = { ...TABLE_SIZES.low, rayMarchSamples: 24 };
+    const viewport = { widthPx: 16, heightPx: 8 };
+    const pitch = limbPitchRad(1e8, STILL_SPHERE.equatorialRadiusM, 8_000, viewport, 7.5, 3.5);
+    const camera = {
+      ...limbCamera(1e8, pitch, viewport),
+      fovXRad: 2 * Math.atan((viewport.widthPx * Math.tan(Math.PI / 6)) / 1_920),
+    };
+    const far = twinView(camera, sunAt(30), STILL_SPHERE, 0.1);
+    const shells = farLimbShellsOf(p, far);
+    let footprints = 0;
+    for (let y = 0; y < 4; y += 1) {
+      for (let x = 0; x < 8; x += 1) {
+        const texel = { x, y, widthTexels: 8, heightTexels: 4 };
+        const footprint = shells === null ? null : farLimbFootprintTwin(shells, far, texel);
+        footprints += footprint !== null && footprint.blend > 0 ? 1 : 0;
+      }
+    }
+    expect(footprints).toBeGreaterThan(0);
+    expect(
+      worstRelative(
+        oblateRayMarchTwin(o, far, settings, () => 0),
+        rayMarchTwin(p, far, settings, () => 0),
       ),
     ).toBeLessThan(1e-12);
   });

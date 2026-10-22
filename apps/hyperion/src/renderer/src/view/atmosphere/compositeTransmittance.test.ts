@@ -211,13 +211,18 @@ describe("the composite's transmittance to space from above the top (R08.T8.b)",
     expect(compositeTransmittanceTwin(SOURCES, TOP_M, view, grounded)).toEqual([0, 0, 0]);
   });
 
+  // Since R08.T8.c both take it across the pixel's far-limb footprint
+  // (`transmittanceAcrossFromAbove`), whose centre is the entry's lookup along the pixel's ray.
   it("dims what lies behind the sky and each disc from above through the entry's lookup", () => {
     const code = COMPOSITE_MATERIAL.fragmentWgsl.replaceAll(/\/\/[^\n]*/gu, "");
     expect([
-      /behind = transmittanceFromAbove\(v, body, dir, slotHere\);/u.test(code),
-      /toSpace = transmittanceFromAbove\(v, body, dir, skySlotOf\(source\)\);/u.test(code),
+      /behind = transmittanceAcrossFromAbove\(v, body, &footprint, dir, slotHere\);/u.test(code),
+      /toSpace = transmittanceAcrossFromAbove\(v, body, &footprint, dir, skySlotOf\(source\)\);/u.test(
+        code,
+      ),
+      /let centre = transmittanceFromAbove\(v, body, dir, slot\);/u.test(code),
       /vec3f\(marched\.a\)|marchedAlpha/u.test(code),
-    ]).toEqual([true, true, false]);
+    ]).toEqual([true, true, true, false]);
   });
 });
 

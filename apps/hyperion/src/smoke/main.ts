@@ -9,7 +9,7 @@
  * Its switches come from the `just test-render` recipe's command line, never from the client's
  * `graphicsSwitches`, which a test keeps free of the unsafe flag and the adapter override. The
  * page's variant and fixture arrive as `--smoke-variant=` and `--smoke-fixture=`, and the part of
- * its groups to run as `--smoke-part=1` to `7` (every group without it), and
+ * its groups to run as `--smoke-part=1` to `9` (every group without it), and
  * `--smoke-twin-workers=<n>` the atmosphere twins' workers, at most 4 (a quarter of the hardware
  * threads, at most 4, without it);
  * `--smoke-gpu-timing=1` says the run lifted timestamp quantization (the hardware runs of T11),
@@ -41,6 +41,7 @@ import {
   readSmokeResult,
   SMOKE_EXIT,
   SMOKE_RESULT_CHANNEL,
+  smokeWatchdogMs,
 } from "./result";
 import { isOwnPage } from "../main/ipcSender";
 import { describeMachine, nodeMachineSources } from "../main/results";
@@ -170,8 +171,13 @@ const childSwitches =
 // Before `ready`: Chromium reads its switches when the GPU process starts.
 applyGraphicsSwitches(app.commandLine, childSwitches);
 
-/** How long a run may take before the watchdog ends it. */
-const WATCHDOG_MS = 180_000 + (soakSeconds + childSeconds) * 1000;
+/** How long a run may take before the watchdog ends it: part 1's grows with the captures. */
+const WATCHDOG_MS = smokeWatchdogMs({
+  part,
+  captures: capturesDir !== "",
+  soakSeconds,
+  childSeconds,
+});
 
 /** A display as the child-window run records it. */
 function displayInfo(display: Electron.Display): DisplayInfo {

@@ -33,7 +33,14 @@
  * holds the ray march's sky from inside the air, in the march band where it takes over from the sky
  * view, to its twin in both arms, and the composite's blend of the two (`checkMarchBand`).
  * R08.T8.b's ascent by hand, from 2 m to 10⁸ m, takes frames for the eye and figures across the
- * band's edges and the top, when the run is asked for captures (`captureAscent`).
+ * band's edges and the top, when the run is asked for captures (`captureAscent`). R08.T8.c times
+ * the far limb's passes from the orbit frame to 10⁸ m on both settings' own outputs when the run
+ * lifts timestamp quantization (`timeFarLimb`), and captures the limb from 10⁸ and 10⁹ m at the
+ * output's own pixel, for the eye, when the run is asked for captures (`captureFarLimb`). It holds
+ * the far limb integrated across the texel on the GPU from 10⁸ m on both settings at the output's
+ * own pixel, the per-frame kernels and the composite's transmittance across each pixel's footprint
+ * against their twins (`checkFarLimbFootprint`), and every ray-march envelope from above the top
+ * is a footprint texel's whole where the footprint is blended in.
  */
 
 import {
@@ -45,6 +52,7 @@ import {
   scale,
   type Vec3,
 } from "../geometry/vec3";
+import { DEFAULT_FOV_DEG } from "../view/camera/projection";
 import { quaternion, quaternionFromRows, rotate } from "../view/camera/quaternion";
 import { hydrostaticColumn } from "../view/atmosphere/column";
 import {
@@ -106,11 +114,16 @@ import {
   TRANSMITTANCE_SIZE,
 } from "../view/atmosphere/tables";
 import {
+  type FarLimbShells,
+  farLimbFootprintTwin,
+  farLimbShellsOf,
   frameTwinView,
   type OblatePlanetTwin,
-  oblateCompositeTransmittanceTwin,
+  oblateCompositeFootprintTransmittanceTwin,
+  oblateFarLimbShellsOf,
   oblateRayMarchRayAlongTwin,
   oblateRayMarchRayTwin,
+  oblateRayMarchTargetTexelTwin,
   oblateRayMarchTexelTwin,
   oblateSkyViewMarchTwin,
   oblateSkyViewRayTwin,
@@ -121,6 +134,7 @@ import {
   piecedSteps,
   rayMarchRayAlongTwin,
   rayMarchRayTwin,
+  rayMarchTargetTexelTwin,
   rayMarchTexelTwin,
   skyViewRayTwin,
   surfaceLightingTwin,
@@ -131,6 +145,7 @@ import {
   type TwinTransmittance,
   type TwinView,
   type TwinVolume,
+  unitRayTwin,
 } from "../view/atmosphere/tablesCpu";
 import {
   earthBody,
@@ -142,6 +157,7 @@ import {
 } from "../test/atmosphereFixtures";
 import {
   type DrawItem,
+  type PassTimes,
   PresentationOnlyReadback,
   type RenderEngine,
   type RenderTarget,
@@ -150,7 +166,8 @@ import {
 } from "../view/engine/types";
 import { exposureScale } from "../view/photometry/exposure";
 import { METER_CLASS } from "../view/post/meter";
-import type { QualitySetting } from "../view/quality/qualitySetting";
+import type { GpuTimer, TargetRounding } from "../view/engine/status";
+import { type QualitySetting, SETTINGS } from "../view/quality/qualitySetting";
 import { HALF_FLOAT_MAX, toneCurve } from "../view/photometry/toneCurve";
 import {
   type Checks,
@@ -160,6 +177,7 @@ import {
   fullScreenMesh,
   halfTexels,
   NEAR_M,
+  pause,
   rectangleMesh,
   show,
   texel,
@@ -173,7 +191,9 @@ import {
 import { surfaceLightingTablesOf } from "../view/atmosphere/surfaceLighting";
 import { probeSurfaceLighting } from "./litBody";
 import { attempt, handled, inOrder, type OrderedChecks } from "./ordered";
+import { percentile } from "./soak";
 import type { TwinPool } from "./twinPool";
+import { surfaceChannelOff } from "./writeSlack";
 
 /** The ground's radius the check builds Earth's tables on, m: WGS 84's mean radius R₁. */
 const EARTH_MEAN_RADIUS_M = 6_371_008.8;
@@ -2477,10 +2497,68 @@ function memoised<T>(provide: (index: number) => T): (index: number) => T {
   };
 }
 
+/** A planet's far-limb shells for a view (R08.T8.c): a sphere's, or an oblate body's. */
+function farLimbShellsOfPlanet(planet: SmokePlanet, view: TwinView): FarLimbShells | null {
+  return planet.kind === "sphere"
+    ? farLimbShellsOf(planet.twin, view)
+    : oblateFarLimbShellsOf(planet.twin, view);
+}
+
+/**
+ * `view` with its ray basis (forward, right and up) turned by `angleRad` about the axis that turns
+ * the unit `d` towards `e`, a unit vector across it, so that `d` becomes `d` turned towards `e` and
+ * every other ray of the view turns with it (Rodrigues' rotation about d × e).
+ */
+function turnedView(view: TwinView, d: Vec3, e: Vec3, angleRad: number): TwinView {
+  const axis = normalise(crossProduct(d, e));
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+  const turn = (v: Vec3): Vec3 =>
+    add(
+      add(scale(v, cos), scale(crossProduct(axis, v), sin)),
+      scale(axis, dot(axis, v) * (1 - cos)),
+    );
+  return { ...view, forward: turn(view.forward), right: turn(view.right), upRay: turn(view.upRay) };
+}
+
+/**
+ * The tangent height of the ray from `p` along the unit `d` over `figure`: its closest approach to
+ * the centre in the space scaled to a sphere of radius a, less a, m.
+ */
+function tangentHeightOverM(figure: SpheroidFigure, p: Vec3, d: Vec3): number {
+  const k = figure.equatorialRadiusM / figure.polarRadiusM;
+  const sp = { x: p.x, y: p.y, z: p.z * k };
+  const sd = { x: d.x, y: d.y, z: d.z * k };
+  const cross = {
+    x: sp.y * sd.z - sp.z * sd.y,
+    y: sp.z * sd.x - sp.x * sd.z,
+    z: sp.x * sd.y - sp.y * sd.x,
+  };
+  const closest = Math.hypot(cross.x, cross.y, cross.z) / Math.hypot(sd.x, sd.y, sd.z);
+  return closest - figure.equatorialRadiusM;
+}
+
 /**
  * A ray-march texel's envelope, or `null` where the kernel marches nothing. The texel's ray, turned
  * by {@link RAY_RESOLUTION_RAD} about two axes across it, and moved by `ORIGIN_RESOLUTION` |P|
  * along them, is clipped and marched again in the twin: eight rays beside the nominal.
+ *
+ * @remarks
+ * From above the top, a texel whose far-limb footprint is blended in (w_L > 0; plan R08, R08.T8.c,
+ * `decision-r08-t8-leans.md` §6.1) is drawn as a weighted sum of its centre ray and up to ten node
+ * rays, its footprint formed from the rays through the midpoints of its edges: the kernel's `f32`
+ * moves every one of them as it moves one ray, and the footprint's cuts and weights with them. The
+ * one ray turned or moved cannot stand for that: it marches the centre ray, not the mean, and
+ * spreads such a texel by 0.4 to 0.5 of its value from 10⁸ m (a probe, 2026-10-22), where the
+ * whole texel moves by 2.8 × 10⁻³ at the median. So the same eight perturbations
+ * (`decision-r08-f32.md` §10.3's, the rays the kernel cannot tell from the nominal) are applied to
+ * the whole texel: the texel as drawn (`oblateRayMarchTargetTexelTwin`, or the sphere's
+ * `rayMarchTargetTexelTwin`) under a view whose camera is moved by the offset, or whose ray basis
+ * is turned by the angle about the axis that turns the centre ray towards each axis across it
+ * ({@link turnedView}), so that its footprint is formed anew under each, and the envelope is their
+ * least and greatest with the nominal. A texel whose w_L is 0 keeps its one ray's envelope as
+ * before R08.T8.c, bit for bit. Nothing is drawn in front of either: every view from above the top
+ * the smoke draws is of the open sky.
  */
 function rayMarchEnvelope(
   planet: SmokePlanet,
@@ -2492,6 +2570,31 @@ function rayMarchEnvelope(
   const figure = view.figure;
   const p = view.cameraM;
   const offsetM = ORIGIN_RESOLUTION * Math.hypot(p.x, p.y, p.z);
+  const shells = farLimbShellsOfPlanet(planet, view);
+  // The texel as the kernel draws it under a view, its footprint's mean blended in (R08.T8.c).
+  const drawnUnder = (under: TwinView, x: number, y: number): ArrayLike<number> =>
+    planet.kind === "sphere"
+      ? rayMarchTargetTexelTwin(planet.twin, under, sizes, x, y, 0)
+      : oblateRayMarchTargetTexelTwin(planet.twin, under, sizes, x, y, 0);
+  const footprintEnvelope = (index: number, x: number, y: number, d: Vec3): TexelEnvelope => {
+    const values: Array<ArrayLike<number>> = [twin.texels.subarray(index * 4, index * 4 + 4)];
+    for (const e of across(d)) {
+      for (const sign of [1, -1]) {
+        values.push(drawnUnder(turnedView(view, d, e, sign * RAY_RESOLUTION_RAD), x, y));
+        const moved = {
+          x: p.x + e.x * sign * offsetM,
+          y: p.y + e.y * sign * offsetM,
+          z: p.z + e.z * sign * offsetM,
+        };
+        values.push(drawnUnder({ ...view, cameraM: moved }, x, y));
+      }
+    }
+    return {
+      ...rangeOf(values, 4),
+      tangentHeightM: tangentHeightOverM(figure, p, d),
+      split: false,
+    };
+  };
   // A texel's ray, clipped and marched as the planet's twin clips and marches it: a sphere's
   // (R08.T6.b's) or an oblate body's (R08.T6.e's, R08.T6.f).
   const nominalAt = (u: number, v: number): RayMarchRay | null =>
@@ -2507,7 +2610,19 @@ function rayMarchEnvelope(
       ? rayMarchTexelTwin(planet.twin, view, sizes, ray)
       : oblateRayMarchTexelTwin(planet.twin, view, sizes, ray);
   return memoised((index) => {
-    const nominal = nominalAt(((index % w) + 0.5) / w, (Math.floor(index / w) + 0.5) / h);
+    const x = index % w;
+    const y = Math.floor(index / w);
+    const u = (x + 0.5) / w;
+    const v = (y + 0.5) / h;
+    const footprint =
+      shells === null
+        ? null
+        : farLimbFootprintTwin(shells, view, { x, y, widthTexels: w, heightTexels: h });
+    if (footprint !== null && footprint.blend > 0) {
+      // Even where the centre ray misses the air: its footprint's nodes meet it.
+      return footprintEnvelope(index, x, y, unitRayTwin(view, u, v));
+    }
+    const nominal = nominalAt(u, v);
     if (nominal === null) {
       return null;
     }
@@ -2524,20 +2639,9 @@ function rayMarchEnvelope(
         values.push(texelOf(along(moved, d)));
       }
     }
-    // The tangent height: the ray's closest approach to the centre in the space scaled to a sphere
-    // of radius a, less a.
-    const k = figure.equatorialRadiusM / figure.polarRadiusM;
-    const sp = { x: p.x, y: p.y, z: p.z * k };
-    const sd = { x: d.x, y: d.y, z: d.z * k };
-    const cross = {
-      x: sp.y * sd.z - sp.z * sd.y,
-      y: sp.z * sd.x - sp.x * sd.z,
-      z: sp.x * sd.y - sp.y * sd.x,
-    };
-    const closest = Math.hypot(cross.x, cross.y, cross.z) / Math.hypot(sd.x, sd.y, sd.z);
     return {
       ...rangeOf(values, 4),
-      tangentHeightM: closest - figure.equatorialRadiusM,
+      tangentHeightM: tangentHeightOverM(figure, p, d),
       split: false,
     };
   });
@@ -2874,7 +2978,8 @@ function describeEnvelopeShare(share: EnvelopeShare): string {
       text = `capped at ${percentOf(ENVELOPE_SHARE_CAP, ROUND_PERCENT)}`;
       break;
     case "missed":
-      text = `capped at ${percentOf(FAR_LIMB_NEAR_SHARE_MISS, ROUND_PERCENT)}, a named miss of the`;
+      // To the 0.01 point it is pinned to (R08.T8.c), not rounded to one figure.
+      text = `capped at ${percentOf(FAR_LIMB_NEAR_SHARE_MISS)}, a named miss of the`;
       text += ` ${percentOf(ENVELOPE_SHARE_CAP, ROUND_PERCENT)} cap`;
       break;
     case "recorded":
@@ -2897,10 +3002,11 @@ interface HeightsView {
   readonly surfaceM: number | null;
   /**
    * How the ray march's envelope channels count; `capped` where absent. `recorded` only for
-   * R08.T8.b's far limb from 10⁸ and 10⁹ m (§10.4), where the tangent height's own resolution in
-   * the march, 2ε|P| ≈ 12–120 m, is a sizeable share of the 1.2 km aerosol's scale height; `missed`
-   * only for it from 10⁷ m ({@link FAR_LIMB_NEAR_SHARE_MISS}). The sky view's envelope stays capped
-   * in every view: its texels' resolution does not depend on |P|.
+   * R08.T8.b's far limb from 10⁸ and 10⁹ m and R08.T8.c's footprint frames from 10⁸ m (§10.4),
+   * where the tangent height's own resolution in the march, 2ε|P| ≈ 12–120 m, is a sizeable share
+   * of the 1.2 km aerosol's scale height; `missed` only for R08.T8.b's far limb from 10⁷ m
+   * ({@link FAR_LIMB_NEAR_SHARE_MISS}). The sky view's envelope stays capped in every view: its
+   * texels' resolution does not depend on |P|.
    */
   readonly marchEnvelopeShare?: EnvelopeShare;
 }
@@ -4219,9 +4325,6 @@ const COMPOSITE_FACTOR = 1;
 const HALF_ROUNDING = 2 ** -11;
 const HALF_SUBNORMAL_ROUNDING = HALF_SUBNORMAL_SPACING / 2;
 
-/** `f32`'s two roundings of colour × alpha + rgb, as a share of |colour × alpha| + |rgb|: 2⁻²³. */
-const F32_TWO_ROUNDINGS = 2 ** -23;
-
 /** Low's pick's camera, m above the equator: R08.T6.g's limb from 400 km. */
 const PICK_HEIGHT_M = 400_000;
 
@@ -4408,13 +4511,38 @@ interface PickedPixel {
   readonly text: string;
 }
 
+/** A surface channel's bound as a check's detail names it, under the target's rounding. */
+function describeWriteSlack(rounding: TargetRounding): string {
+  let text: string;
+  switch (rounding) {
+    case "nearest":
+      text = "half an rgba16float step either way";
+      break;
+    case "toward-zero":
+      text = "up to one rgba16float step under the value and none over";
+      break;
+    case "unknown":
+      text = "one rgba16float step either way";
+      break;
+  }
+  return `${text} (the target's ${rounding} rounding; a step 2⁻¹⁰ of the binade's base, 2⁻²⁴ among the subnormals, or rounded to nearest 2⁻¹⁰ of the value plus 2⁻²⁴)`;
+}
+
 /**
  * Whether pixel `k`'s colour channels agree with what the composite draws from above the top
  * from march texel `t` (`composite.wgsl`'s fragment): over the sky, depth 0, the scene's colour
  * (black) times the transmittance plus rgb × the factor; over a surface, its colour × alpha +
- * rgb × the factor. Each channel is held to half an `rgba16float` step of its value
- * ({@link HALF_ROUNDING}, 2⁻²⁵ among the subnormals), plus `f32`'s two roundings of a surface's
- * terms.
+ * rgb × the factor.
+ *
+ * @remarks
+ * A sky channel writes the march texel's own value, which `rgba16float` holds exactly, and is held
+ * to half a step of its value ({@link HALF_ROUNDING}, 2⁻²⁵ among the subnormals) under any
+ * rounding. A surface channel is formed in `f32` and rounded by the target's write: it is held to
+ * the write's slack under `rounding` (`writeSlack.ts`'s `surfaceChannelOff`), the probed `targetRounding` (R01's
+ * Design note 22: Gen9 and the RTX 3080 truncate, SwiftShader rounds to nearest), each step
+ * 2⁻¹⁰ of the binade's base (2⁻²⁴ among the subnormals; rounded to nearest, 2⁻¹⁰ of the value plus
+ * 2⁻²⁴, the bound as before §8), plus `f32`'s two roundings of its terms either
+ * way (`decision-r08-t8-leans.md` §8).
  */
 function pickedPixel(
   frame: PickFrame,
@@ -4422,6 +4550,7 @@ function pickedPixel(
   k: number,
   t: TexelPlace,
   surface: boolean,
+  rounding: TargetRounding,
 ): PickedPixel {
   const m = (t[1] * marchWidth + t[0]) * 4;
   const alpha = frame.march[m + 3] ?? Number.NaN;
@@ -4431,10 +4560,15 @@ function pickedPixel(
     const rgb = (frame.march[m + c] ?? Number.NaN) * COMPOSITE_FACTOR;
     const colour = surface ? (frame.scene[k * 4 + c] ?? Number.NaN) * alpha : 0;
     const expected = colour + rgb;
-    const terms = surface ? F32_TWO_ROUNDINGS * (Math.abs(colour) + Math.abs(rgb)) : 0;
-    const bound = HALF_ROUNDING * Math.abs(expected) + HALF_SUBNORMAL_ROUNDING + terms;
     const actual = frame.composite[k * 4 + c] ?? Number.NaN;
-    const off = Math.abs(actual - expected) / bound;
+    let off: number;
+    if (surface) {
+      off = surfaceChannelOff(actual, colour, rgb, rounding);
+    } else {
+      off =
+        Math.abs(actual - expected) /
+        (HALF_ROUNDING * Math.abs(expected) + HALF_SUBNORMAL_ROUNDING);
+    }
     const channelRatio = Number.isNaN(off) ? Number.POSITIVE_INFINITY : off;
     if (channelRatio >= ratio) {
       ratio = channelRatio;
@@ -4447,13 +4581,14 @@ function pickedPixel(
 
 /**
  * A frame's pixels against the march texel `pick` names for each, from above the top, over the
- * pixels `within` keeps ({@link pickedPixel}).
+ * pixels `within` keeps ({@link pickedPixel}), a surface's channels under the target's `rounding`.
  */
 function pickAgreement(
   frame: PickFrame,
   viewport: ViewSize,
   marchScale: number,
   covered: Coverage,
+  rounding: TargetRounding,
   pick: (xPx: number, yPx: number) => TexelPlace,
   within: (xPx: number, yPx: number) => boolean = () => true,
 ): PickAgreement {
@@ -4466,7 +4601,8 @@ function pickAgreement(
     for (let x = 0; x < viewport.widthPx; x += 1) {
       if (within(x, y)) {
         const k = y * viewport.widthPx + x;
-        const { ratio, text } = pickedPixel(frame, marchWidth, k, pick(x, y), covered(x, y));
+        const surface = covered(x, y);
+        const { ratio, text } = pickedPixel(frame, marchWidth, k, pick(x, y), surface, rounding);
         pixels += 1;
         over += ratio > 1 ? 1 : 0;
         if (ratio > worst) {
@@ -4535,8 +4671,20 @@ function litTexels(march: Float32Array): number {
  * depths and then its distance ({@link pickedTexel}), the surface's colour × alpha + rgb where
  * covered; the pixels within two rows or columns of its edge whose depth-nearest texel is not the
  * nearest are counted, and must include some that the nearest would draw wrong.
+ *
+ * A covered pixel's colour × alpha + rgb is formed in `f32` and rounded by the target's write, so
+ * it is held to the write's slack under the adapter's probed `rgba16float` rounding (`rounding`,
+ * the graphics status's `targetRounding`, as R07.T14.b's bloom takes it; R01's Design note 22): on
+ * the RTX 3080, which truncates, the surface check failed on half a step to nearest while its pick
+ * was right (`decision-r08-t8-leans.md` §8: 261 of 2,048 pixels over, the worst 0.95 of a step
+ * toward zero, the 47 tie-break pixels 0 over). A sky pixel writes its texel exactly under any
+ * rounding and keeps half a step.
  */
-export async function checkLowPick(engine: RenderEngine, checks: Checks): Promise<void> {
+export async function checkLowPick(
+  engine: RenderEngine,
+  rounding: TargetRounding,
+  checks: Checks,
+): Promise<void> {
   const body = SLICES_EARTH;
   const sizes = TABLE_SIZES.low;
   const marchScale = sizes.rayMarchScale;
@@ -4559,10 +4707,10 @@ export async function checkLowPick(engine: RenderEngine, checks: Checks): Promis
     const bound = "half an rgba16float step, 2⁻¹¹ of the value (2⁻²⁵ among the subnormals)";
 
     const sky = await pickFrame(engine, atmosphere, camera, suns, null);
-    const nearest = pickAgreement(sky, viewport, marchScale, uncovered, (x, y) =>
+    const nearest = pickAgreement(sky, viewport, marchScale, uncovered, rounding, (x, y) =>
       nearestTexel(x, y, marchScale),
     );
-    const first = pickAgreement(sky, viewport, marchScale, uncovered, (x, y) =>
+    const first = pickAgreement(sky, viewport, marchScale, uncovered, rounding, (x, y) =>
       firstCandidate(x, y, viewport, marchScale),
     );
     const black = coverageShown(sky.scene, viewport, uncovered);
@@ -4595,14 +4743,15 @@ export async function checkLowPick(engine: RenderEngine, checks: Checks): Promis
       const [nx, ny] = nearestTexel(x, y, marchScale);
       return near(x, y) && (px !== nx || py !== ny);
     };
-    const whole = pickAgreement(edge, viewport, marchScale, covered, picked);
-    const atEdge = pickAgreement(edge, viewport, marchScale, covered, picked, near);
-    const kept = pickAgreement(edge, viewport, marchScale, covered, picked, moved);
+    const whole = pickAgreement(edge, viewport, marchScale, covered, rounding, picked);
+    const atEdge = pickAgreement(edge, viewport, marchScale, covered, rounding, picked, near);
+    const kept = pickAgreement(edge, viewport, marchScale, covered, rounding, picked, moved);
     const nearestThere = pickAgreement(
       edge,
       viewport,
       marchScale,
       covered,
+      rounding,
       (x, y) => nearestTexel(x, y, marchScale),
       moved,
     );
@@ -4618,7 +4767,7 @@ export async function checkLowPick(engine: RenderEngine, checks: Checks): Promis
         `a surface ${surfaceKm} km ahead from column ${fromXPx} and row ${fromYPx}`,
         `${shown} of ${whole.pixels} pixels covered as drawn`,
         `${whole.pixels} pixels against the shader's pick by depth, then distance, emulated`,
-        `${whole.over} over ${bound}, plus f32's 2⁻²³ of a surface's terms`,
+        `${whole.over} over ${bound} where uncovered, and where covered ${describeWriteSlack(rounding)}, plus f32's 2⁻²³ of a surface's terms`,
         `worst ${whole.worst.toFixed(3)} of it at ${whole.at}`,
         `${atEdge.pixels} within two rows or columns of the edge, ${atEdge.over} over`,
         `${kept.pixels} of them keep a depth-nearest texel not the nearest, ${kept.over} over`,
@@ -4686,35 +4835,35 @@ function describeRange(range: ChannelRange): string {
     .join(", ");
 }
 
+/** One frame on a source's disc seen through the limb from above the top, read back. */
+interface DiscThroughLimb {
+  readonly camera: AtmosphereCamera;
+  readonly sun: SunState;
+  /** The composite's output, pre-exposed. */
+  readonly composite: Float32Array;
+  /** The stored ray-march target, at `marchScale` of the output. */
+  readonly march: Float32Array;
+  /** The ray march's scale of the output (`TableSizes.rayMarchScale`). */
+  readonly marchScale: number;
+  /** The disc × the factor per channel, pre-exposed, narrowed to `f32` as the uniform holds it. */
+  readonly disc: readonly number[];
+  /** The twins' view of the frame. */
+  readonly view: TwinView;
+}
+
 /**
- * R08.T8.b's composite from above the top, per channel (`composite.wgsl`'s
- * `transmittanceFromAbove`): one frame through the limb at the Sun's disc ({@link discFrame}),
- * nothing drawn, each pixel's (composite − the stored march's rgb × the factor) ÷ (the disc × the
- * factor) against its twin, `oblateCompositeTransmittanceTwin` over the GPU's tables along the
- * pixel's ray.
- *
- * @remarks
- * The scene is black, so the composite is the march's rgb plus the disc through its transmittance
- * per channel, each term clamped at `rgba16float`'s largest after the factor; no channel may reach
- * it. Each channel is held to 1% of the twin's T (of 10⁻³ where T is below it) plus the output's
- * rounding, half an `rgba16float` step of it, over the disc. The disc is `frameSourcesOf`'s at
+ * Draws the composite of one frame on `sun`'s disc over a black scene, nothing drawn, and reads it
+ * back with the stored march (R08.T8.b): the disc `frameSourcesOf`'s at
  * {@link SMOKE_EXPOSURE_SCALE}, narrowed to `f32` as the uniform holds it.
  */
-async function checkDiscFromAbove(
+async function drawDiscThroughLimb(
   engine: RenderEngine,
-  ordered: OrderedChecks,
   atmosphere: HillaireAtmosphere,
-  planet: SmokePlanet,
-  body: HeightsBody,
-): Promise<void> {
-  if (planet.kind !== "oblate") {
-    throw new Error(`R08.T8.b's ${body.name} stands on the oblate twins`);
-  }
-  const figure = body.figure;
-  const frame = discFrame();
-  const distanceM = figure.equatorialRadiusM + ORBITAL_SUNSET_HEIGHT_M;
-  const camera = limbCamera(distanceM, figure, frame);
-  const sun = limbSun(distanceM, figure, 0, frame);
+  camera: AtmosphereCamera,
+  sun: SunState,
+  figure: SpheroidFigure,
+  marchScale: number,
+): Promise<DiscThroughLimb> {
   const composite = await compositeFrame(engine, atmosphere, camera, [sun], null);
   const { rayMarch } = atmosphere.frameTables;
   if (rayMarch === null) {
@@ -4733,65 +4882,178 @@ async function checkDiscFromAbove(
   }
   const disc = [0, 1, 2].map((c) => Math.fround(source.disc[c] ?? Number.NaN) * COMPOSITE_FACTOR);
   const view = frameViewOf(atmosphere, camera, [sun], figure);
-  ordered.now((checks) => {
-    const { widthPx: w, heightPx: h } = camera.viewport;
-    const s = sun.directionBodyFixed;
-    const sinRadius = Math.sin(sun.angularRadiusRad);
-    const twinRange = emptyRange();
-    const gpuRange = emptyRange();
-    let worst = 0;
-    let at = "none";
-    let outside = 0;
-    let farthest = 0;
-    let brightest = 0;
-    let saturated = 0;
-    const ratios: number[][] = Array.from({ length: h }, () => []);
-    for (let y = 0; y < h; y += 1) {
-      for (let x = 0; x < w; x += 1) {
-        const k = y * w + x;
-        const d = pixelRay(view, x, y);
-        const share = norm(crossProduct(d, s)) / sinRadius;
-        farthest = Math.max(farthest, share);
-        outside += share <= 1 && dot(d, s) > 0 ? 0 : 1;
-        const t = oblateCompositeTransmittanceTwin(planet.twin, view, d, curveSlotOf(sun));
-        ratios[y]?.push(t[0] / t[2]);
-        for (const c of [0, 1, 2] as const) {
-          const out = composite[k * 4 + c] ?? Number.NaN;
-          const dc = disc[c] ?? Number.NaN;
-          const gpu = (out - (march[k * 4 + c] ?? Number.NaN) * COMPOSITE_FACTOR) / dc;
-          const rounding = (HALF_ROUNDING * Math.abs(out) + HALF_SUBNORMAL_ROUNDING) / dc;
-          const bound =
-            DISC_TRANSMITTANCE_SHARE * Math.max(t[c], DISC_TRANSMITTANCE_FLOOR) + rounding;
-          const off = Math.abs(gpu - t[c]) / bound;
-          const ratio = Number.isNaN(off) ? Number.POSITIVE_INFINITY : off;
-          widen(twinRange, c, t[c]);
-          widen(gpuRange, c, gpu);
-          brightest = Math.max(brightest, out);
-          saturated += out >= HALF_FLOAT_MAX || dc * t[c] >= HALF_FLOAT_MAX ? 1 : 0;
-          if (ratio > worst) {
-            worst = ratio;
-            const apart = percentOf((gpu - t[c]) / t[c], { kind: "places", digits: 3 });
-            const values = `GPU ${precise(gpu)}, twin ${precise(t[c])}, ${apart}`;
-            at = `pixel (${x}, ${y}) channel ${c}: ${values}`;
-          }
+  return { camera, sun, composite, march, marchScale, disc, view };
+}
+
+/** A disc frame's pixels against their twin, as {@link discAgreement} holds them. */
+interface DiscAgreement {
+  /** The worst |GPU − twin| as a fraction of its bound, over the pixels compared. */
+  readonly worst: number;
+  readonly at: string;
+  /** The pixels compared: those inside the share of the disc asked for. */
+  readonly compared: number;
+  /** The frame's other pixels. */
+  readonly outside: number;
+  /** The farthest compared pixel centre from the disc's centre, of sin ρ. */
+  readonly farthest: number;
+  readonly brightest: number;
+  /** The compared channels at `rgba16float`'s largest, or whose disc through T would be. */
+  readonly saturated: number;
+  readonly twinRange: ChannelRange;
+  readonly gpuRange: ChannelRange;
+  /** Red ÷ blue of the twin's T, the median of the top and of the lowest row compared. */
+  readonly topRatio: number;
+  readonly lowestRatio: number;
+  /** The compared pixels whose far-limb footprint is blended in (w_L > 0), and the largest w_L. */
+  readonly blended: number;
+  readonly largestBlend: number;
+}
+
+/**
+ * A disc frame's pixels whose centres lie in front within `innerShare` of the disc's angular
+ * radius (|d × s| ≤ `innerShare` sin ρ), each channel's (composite − its march texel's rgb × the
+ * factor) ÷ (the disc × the factor) against its twin, `oblateCompositeFootprintTransmittanceTwin`
+ * over the GPU's tables at the pixel (`composite.wgsl`'s `transmittanceAcrossFromAbove`, R08.T8.c):
+ * the pixel's ray's, blended by w_L with its mean over the output pixel's far-limb footprint. The
+ * march texel is the one the composite reads, the nearest, every depth 0 tying (R08.T8.b's pick).
+ *
+ * @remarks
+ * The scene is black, so the composite is the march's rgb plus the disc through its transmittance
+ * per channel, each term clamped at `rgba16float`'s largest after the factor; no channel may reach
+ * it. Each channel is held to 1% of the twin's T (of 10⁻³ where T is below it) plus the output's
+ * rounding, half an `rgba16float` step of it, over the disc.
+ */
+function discAgreement(
+  planet: OblatePlanetTwin,
+  frame: DiscThroughLimb,
+  innerShare: number,
+): DiscAgreement {
+  const { view, sun, composite, march, disc, marchScale } = frame;
+  const { widthPx: w, heightPx: h } = frame.camera.viewport;
+  const marchWidth = Math.ceil(w * marchScale);
+  const s = sun.directionBodyFixed;
+  const sinRadius = Math.sin(sun.angularRadiusRad);
+  const shells = oblateFarLimbShellsOf(planet, view);
+  const twinRange = emptyRange();
+  const gpuRange = emptyRange();
+  let worst = 0;
+  let at = "none";
+  let compared = 0;
+  let farthest = 0;
+  let brightest = 0;
+  let saturated = 0;
+  let blended = 0;
+  let largestBlend = 0;
+  const ratios: number[][] = Array.from({ length: h }, () => []);
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const d = pixelRay(view, x, y);
+      const share = norm(crossProduct(d, s)) / sinRadius;
+      if (!(share <= innerShare && dot(d, s) > 0)) {
+        continue;
+      }
+      compared += 1;
+      farthest = Math.max(farthest, share);
+      const footprint =
+        shells === null
+          ? null
+          : farLimbFootprintTwin(shells, view, { x, y, widthTexels: w, heightTexels: h });
+      const blend = footprint?.blend ?? 0;
+      blended += blend > 0 ? 1 : 0;
+      largestBlend = Math.max(largestBlend, blend);
+      const t = oblateCompositeFootprintTransmittanceTwin(planet, view, x, y, curveSlotOf(sun));
+      ratios[y]?.push(t[0] / t[2]);
+      const [mx, my] = nearestTexel(x, y, marchScale);
+      const k = y * w + x;
+      const m = my * marchWidth + mx;
+      for (const c of [0, 1, 2] as const) {
+        const out = composite[k * 4 + c] ?? Number.NaN;
+        const dc = disc[c] ?? Number.NaN;
+        const gpu = (out - (march[m * 4 + c] ?? Number.NaN) * COMPOSITE_FACTOR) / dc;
+        const rounding = (HALF_ROUNDING * Math.abs(out) + HALF_SUBNORMAL_ROUNDING) / dc;
+        const bound =
+          DISC_TRANSMITTANCE_SHARE * Math.max(t[c], DISC_TRANSMITTANCE_FLOOR) + rounding;
+        const off = Math.abs(gpu - t[c]) / bound;
+        const ratio = Number.isNaN(off) ? Number.POSITIVE_INFINITY : off;
+        widen(twinRange, c, t[c]);
+        widen(gpuRange, c, gpu);
+        brightest = Math.max(brightest, out);
+        saturated += out >= HALF_FLOAT_MAX || dc * t[c] >= HALF_FLOAT_MAX ? 1 : 0;
+        if (ratio > worst) {
+          worst = ratio;
+          const apart = percentOf((gpu - t[c]) / t[c], { kind: "places", digits: 3 });
+          const values = `GPU ${precise(gpu)}, twin ${precise(t[c])}, ${apart}`;
+          at = `pixel (${x}, ${y}) channel ${c}: ${values}`;
         }
       }
     }
-    const rowMedian = (y: number): string => show([medianOf(ratios[y] ?? [])]);
+  }
+  const rows = ratios.filter((row) => row.length > 0);
+  return {
+    worst,
+    at,
+    compared,
+    outside: w * h - compared,
+    farthest,
+    brightest,
+    saturated,
+    twinRange,
+    gpuRange,
+    topRatio: medianOf(rows[0] ?? []),
+    lowestRatio: medianOf(rows.at(-1) ?? []),
+    blended,
+    largestBlend,
+  };
+}
+
+/**
+ * R08.T8.b's composite from above the top, per channel (`composite.wgsl`'s
+ * `transmittanceFromAbove`): one frame through the limb at the Sun's disc ({@link discFrame}),
+ * nothing drawn, every pixel inside the disc, each held as {@link discAgreement} holds it.
+ *
+ * @remarks
+ * Its twin is R08.T8.c's `oblateCompositeFootprintTransmittanceTwin`, the composite's since then:
+ * where a pixel's w_L is 0 it is `oblateCompositeTransmittanceTwin` along the pixel's ray, the twin
+ * this check held before R08.T8.c, and the narrowed frame gives w_L 0 at every pixel (its rows of
+ * 250 m give s about 0.016, far under the blend's 0.6), which the check records.
+ */
+async function checkDiscFromAbove(
+  engine: RenderEngine,
+  ordered: OrderedChecks,
+  atmosphere: HillaireAtmosphere,
+  planet: SmokePlanet,
+  body: HeightsBody,
+): Promise<void> {
+  if (planet.kind !== "oblate") {
+    throw new Error(`R08.T8.b's ${body.name} stands on the oblate twins`);
+  }
+  const figure = body.figure;
+  const frame = discFrame();
+  const distanceM = figure.equatorialRadiusM + ORBITAL_SUNSET_HEIGHT_M;
+  const camera = limbCamera(distanceM, figure, frame);
+  const sun = limbSun(distanceM, figure, 0, frame);
+  const drawn = await drawDiscThroughLimb(engine, atmosphere, camera, sun, figure, 1);
+  ordered.now((checks) => {
+    const { widthPx: w, heightPx: h } = camera.viewport;
+    const result = discAgreement(planet.twin, drawn, 1);
     checks.check(
       "R08.T8.b the composite from above the top: each disc through the limb, per channel",
-      worst <= 1 && outside === 0 && saturated === 0 && march.length === w * h * 4,
+      result.worst <= 1 &&
+        result.outside === 0 &&
+        result.saturated === 0 &&
+        drawn.march.length === w * h * 4,
       [
-        `worst ${worst.toFixed(3)} of the bound at ${at}`,
+        `worst ${result.worst.toFixed(3)} of the bound at ${result.at}`,
         `the bound ${percentOf(DISC_TRANSMITTANCE_SHARE, ROUND_PERCENT)} of max(T, 10⁻³), plus` +
           " the output's rounding, 2⁻¹¹ of it, over the disc",
-        `T, the twin's: ${describeRange(twinRange)}; the GPU's: ${describeRange(gpuRange)}`,
-        `red ÷ blue, a row's median: ${rowMedian(0)} on the top, ${rowMedian(h - 1)} the lowest`,
-        `${w * h - outside} of ${w * h} pixels inside the disc`,
-        `the farthest at ${farthest.toFixed(3)} of sin ρ`,
-        `the disc ${show(disc)}, pre-exposed at EV100 ${SMOKE_EV100}` +
+        `T, the twin's: ${describeRange(result.twinRange)}; the GPU's: ${describeRange(result.gpuRange)}`,
+        `red ÷ blue, a row's median: ${show([result.topRatio])} on the top, ${show([result.lowestRatio])} the lowest`,
+        `${result.compared} of ${w * h} pixels inside the disc`,
+        `the farthest at ${result.farthest.toFixed(3)} of sin ρ`,
+        `${result.blended} pixels with a far-limb footprint blended in (w_L > 0)`,
+        `the disc ${show(drawn.disc)}, pre-exposed at EV100 ${SMOKE_EV100}` +
           `, the factor ${COMPOSITE_FACTOR}`,
-        `the brightest output ${show([brightest])}, ${saturated} channels at rgba16float's largest`,
+        `the brightest output ${show([result.brightest])}, ${result.saturated} channels at rgba16float's largest`,
       ].join("; "),
     );
   });
@@ -4820,12 +5082,19 @@ const FAR_LIMB_DISTANCES_M = [1e7, 1e8, 1e9] as const;
 const FAR_LIMB_RECORDED_FROM_M = 1e8;
 
 /**
- * The far limb's ray-march envelope share from 10⁷ m, at most: 7%, the plan's 1% cap at 10⁷ m
- * missed (measured 2026-10-22, by view and arm 3.59%, 5.88%, 4.52% and 6.54% on both variants,
- * the worst rounded up to the next point); the narrowed frame puts its rows on the limb's lowest
- * 3 km, where the texels need the envelope (half-widths 1.9 to 16 × 10⁻³); reported to "main".
+ * The far limb's ray-march envelope share from 10⁷ m, at most: 6.55%, the plan's 1% cap at 10⁷ m
+ * missed (R08.T8.b measured it 2026-10-22, by view and arm 3.59%, 5.88%, 4.52% and 6.54% on both
+ * variants, and held it to 7%); the narrowed frame puts its rows on the limb's lowest 3 km, where
+ * the texels need the envelope (half-widths 1.9 to 16 × 10⁻³); reported to "main".
+ *
+ * @remarks
+ * R08.T8.c re-measured it by its gate's run and tightened it to the worst view's 6.54% rounded up
+ * to the next 0.01 point (536 of 8,192 channels; 6.55% holds 536). It could not drop: the narrowed
+ * frame's rows of 240 m give s 0.017 to 0.10, far under the blend's 0.6, so the far-limb footprint
+ * never engages there (w_L 0, `decision-r08-t8-leans.md` §6.1), every texel is drawn and
+ * enveloped by its one ray as before, and the share stands where R08.T8.b left it.
  */
-const FAR_LIMB_NEAR_SHARE_MISS = 0.07;
+const FAR_LIMB_NEAR_SHARE_MISS = 0.0655;
 
 /** The far limb's suns, deg above the horizon of the frame's centre's tangent point. */
 const FAR_LIMB_SUNS_DEG = [20, -2] as const;
@@ -6328,4 +6597,1032 @@ function describePair(
     `brightest ${show([change.brightest])}`,
   ].join(", ");
   return `${pair.label} (${place}, ${w}): ${relative}; ${codes}`;
+}
+
+// --- R08.T8.c: the far limb's timings and captures -----------------------------------------------
+
+/** The view's default horizontal field, rad: 60° across (`projection.ts`'s `DEFAULT_FOV_DEG`). */
+const FAR_LIMB_FIELD_X_RAD = DEFAULT_FOV_DEG * DEGREE_RAD;
+
+/** The height of a 1080p canvas, px: high's output, which renders at the canvas's own size. */
+const CANVAS_1080P_HEIGHT_PX = 1_080;
+
+/**
+ * A setting's own output at 16:9, the size its frames are timed at and its pixel's angle taken
+ * from: high at the 1080p canvas's 1,920 × 1,080, low at its `renderHeightPx` rows, 1,280 × 720
+ * (`qualitySetting.ts`'s `SETTINGS`).
+ */
+function settingOutput(setting: QualitySetting): ViewSize {
+  const heightPx = SETTINGS[setting].terrain.renderHeightPx ?? CANVAS_1080P_HEIGHT_PX;
+  return { widthPx: Math.round((heightPx * 16) / 9), heightPx };
+}
+
+/**
+ * The tangent of the angle one pixel of `setting`'s output spans at its centre, 60° across:
+ * 2 tan(30°) ÷ its width, 6.01 × 10⁻⁴ on high and 9.02 × 10⁻⁴ on low (the angle in rad, to first
+ * order).
+ */
+function outputPixelTan(setting: QualitySetting): number {
+  return (2 * Math.tan(FAR_LIMB_FIELD_X_RAD / 2)) / settingOutput(setting).widthPx;
+}
+
+/**
+ * The far limb's timed cameras' distances from the centre (plan R08, R08.T8.c's acceptance 7,
+ * R08.T11's rows), each named by its distance: the orbit frame, 400 km over the equator's datum,
+ * then 10⁷ m, 1.54 × 10⁷ m (where s would reach 1 at 1080p on high by Rayleigh's 8.43 km, plan
+ * R08's "Deviations in T8.b, as built"), 2.55 × 10⁷ m (where the 1 H row reaches s = 1 by the
+ * table's local scale height, R08.T8.c) and 10⁸ m.
+ */
+const FAR_LIMB_TIMING_PLACES: ReadonlyArray<{
+  readonly label: string;
+  readonly distanceM: number;
+}> = [
+  { label: "400 km", distanceM: WGS84.equatorialRadiusM + 400_000 },
+  { label: "1e7 m", distanceM: 1e7 },
+  { label: "1.54e7 m", distanceM: 1.54e7 },
+  { label: "2.55e7 m", distanceM: 2.55e7 },
+  { label: "1e8 m", distanceM: 1e8 },
+];
+
+/** The rounds of frames drawn before the timed rounds, every camera once a round: 10. */
+const FAR_LIMB_WARM_UP_ROUNDS = 10;
+
+/** The timed rounds, every camera once a round: 60 frames a camera. */
+const FAR_LIMB_TIMED_ROUNDS = 60;
+
+/**
+ * The timed rounds between two waits for the GPU: 10, 50 frames, so that the timer's resolves in
+ * flight stay well under its `TIMING_FRAMES_IN_FLIGHT` (135), past which it drops a frame's times.
+ */
+const FAR_LIMB_FENCE_ROUNDS = 10;
+
+/** The timed frames' sun: 30° from the zenith at the limb's tangent point, 90° right of the view. */
+const FAR_LIMB_TIMING_SUN_ZENITH_DEG = 30;
+const FAR_LIMB_TIMING_SUN_AZIMUTH_DEG = 90;
+
+/**
+ * The label of the per-frame kernels' passes (`hillaire.ts`'s `#dispatchFrame`): the sky view, the
+ * aerial perspective and the ray march, dispatched in that order, so that a frame's three are told
+ * apart by their place.
+ */
+const ATMOSPHERE_VIEW_PASS = "atmosphere view";
+
+/** The timed frames' targets' and frames' label: `<label> scene`, `<label> composite`. */
+const FAR_LIMB_TIMING_LABEL = "far limb timing";
+
+/** The label of the timed frames' composite pass, its frame's. */
+const FAR_LIMB_TIMING_COMPOSITE_PASS = `${FAR_LIMB_TIMING_LABEL} composite`;
+
+/** Dawn's timestamp quantum where quantization is not lifted, ns (R01 Design note 4). */
+const QUANTIZED_TIMESTAMP_NS = 65_536;
+
+/** The place of the far limb's timed cameras: the datum's edge, at the far limb's longitude. */
+const FAR_LIMB_TIMING_FRAME: LimbFrame = { centreM: 0, longitudeRad: FAR_LIMB_LONGITUDE_RAD };
+
+/**
+ * A far limb's timed camera (R08.T8.c): `distanceM` from the centre on the equator at longitude
+ * {@link FAR_LIMB_LONGITUDE_RAD}, looking along the limb at the datum's edge (tangent height 0),
+ * the limb level across a frame of `viewport` at the view's 60° across: {@link limbCamera}'s, its
+ * half-span of tangent height the 60° field's at the tangent point.
+ */
+function farLimbTimingCamera(distanceM: number, viewport: ViewSize): AtmosphereCamera {
+  const figure = SLICES_EARTH.figure;
+  const frame = FAR_LIMB_TIMING_FRAME;
+  const tanY = (Math.tan(FAR_LIMB_FIELD_X_RAD / 2) * viewport.heightPx) / viewport.widthPx;
+  const halfSpanM = tanY * limbTangentDistanceM(distanceM, figure, frame);
+  return limbCamera(distanceM, figure, { ...frame, halfSpanM }, viewport);
+}
+
+/**
+ * The sun `zenithDeg` from the zenith of a {@link limbCamera}'s tangent point and `azimuthDeg` from
+ * the view's direction there, clockwise seen from above (90° the frame's right), for the camera
+ * `frame` places, the Sun at 1 au: {@link limbSun} at any azimuth.
+ */
+function limbSunToward(
+  distanceM: number,
+  figure: SpheroidFigure,
+  zenithDeg: number,
+  azimuthDeg: number,
+  frame: LimbFrame,
+): SunState {
+  const sin = (figure.equatorialRadiusM + (frame.centreM ?? LIMB_CENTRE_M)) / distanceM;
+  const cos = Math.sqrt(1 - sin * sin);
+  const z = zenithDeg * DEGREE_RAD;
+  const a = azimuthDeg * DEGREE_RAD;
+  const ahead = Math.sin(z) * Math.cos(a);
+  const right = Math.sin(z) * Math.sin(a);
+  const up = Math.cos(z);
+  // At longitude 0 the view runs along (−cos, sin, 0), the tangent point's vertical is
+  // (sin, cos, 0) and the frame's right −z, the pole's axis, which the longitude does not turn.
+  return {
+    directionBodyFixed: aboutPole(
+      { x: ahead * -cos + up * sin, y: ahead * sin + up * cos, z: -right },
+      frame.longitudeRad ?? 0,
+    ),
+    illuminanceLx: SUN_ILLUMINANCE_LX,
+    angularRadiusRad: SUN_ANGULAR_RADIUS_RAD,
+  };
+}
+
+/** One timed frame's passes, ns. */
+interface FarLimbFrameTimes {
+  readonly skyViewNs: number;
+  readonly aerialNs: number;
+  readonly rayMarchNs: number;
+  /**
+   * Any {@link ATMOSPHERE_VIEW_PASS} passes after the ray march, summed, ns: none today; a kernel
+   * a later change adds to the frame under the same label is counted here, not lost.
+   */
+  readonly moreNs: number;
+  readonly morePasses: number;
+  readonly compositeNs: number;
+}
+
+/**
+ * A timed frame's passes from its resolve: the {@link ATMOSPHERE_VIEW_PASS} passes by their place
+ * (the sky view, the aerial perspective, the ray march, then any more) and the composite's by its
+ * label, any other pass (an `atmosphere tables` build's) left out; `null` for a resolve without
+ * the three kernels' passes and exactly one composite's.
+ */
+function farLimbFrameTimes(times: PassTimes): FarLimbFrameTimes | null {
+  const views = times.passes.filter((pass) => pass.label === ATMOSPHERE_VIEW_PASS);
+  const composites = times.passes.filter((pass) => pass.label === FAR_LIMB_TIMING_COMPOSITE_PASS);
+  const [skyView, aerial, rayMarch, ...more] = views;
+  const [composite] = composites;
+  if (
+    composites.length !== 1 ||
+    skyView === undefined ||
+    aerial === undefined ||
+    rayMarch === undefined ||
+    composite === undefined
+  ) {
+    return null;
+  }
+  return {
+    skyViewNs: skyView.ns,
+    aerialNs: aerial.ns,
+    rayMarchNs: rayMarch.ns,
+    moreNs: more.reduce((sum, pass) => sum + pass.ns, 0),
+    morePasses: more.length,
+    compositeNs: composite.ns,
+  };
+}
+
+/** A timed frame's pass times, each pass's own: the kernels', any more view passes' and the composite's. */
+function passTimesOf(frame: FarLimbFrameTimes): readonly number[] {
+  return [frame.skyViewNs, frame.aerialNs, frame.rayMarchNs, frame.moreNs, frame.compositeNs];
+}
+
+/** The sum of a timed frame's passes, ns. */
+function frameSumNs(frame: FarLimbFrameTimes): number {
+  return passTimesOf(frame).reduce((sum, ns) => sum + ns, 0);
+}
+
+/** One camera's timed frames, and what became of the rest. */
+interface FarLimbTimedPlace {
+  readonly label: string;
+  readonly frames: readonly FarLimbFrameTimes[];
+  /** Timed frames whose times never arrived (a resolve the timer dropped, or a late one). */
+  readonly missing: number;
+  /** Timed frames whose resolve lacked a kernel's pass or held other than one composite's. */
+  readonly malformed: number;
+}
+
+/** One setting's timed frames: each camera's, the timer kinds seen, and the times on Dawn's grid. */
+interface FarLimbTimedSetting {
+  readonly places: readonly FarLimbTimedPlace[];
+  readonly timers: ReadonlySet<GpuTimer>;
+  /** The timed frames' pass times that are not multiples of {@link QUANTIZED_TIMESTAMP_NS}. */
+  readonly offGrid: number;
+  /** The timed frames' pass times, in all. */
+  readonly times: number;
+}
+
+/** The median and 95th percentile of times in ns, as µs to a tenth: `median / p95`. */
+function microsecondsOf(valuesNs: readonly number[]): string {
+  const at = (p: number): string => (percentile(valuesNs, p) / 1_000).toFixed(1);
+  return `${at(0.5)} / ${at(0.95)}`;
+}
+
+/** Whether every time of every frame is finite and not negative. */
+function framesFinite(frames: readonly FarLimbFrameTimes[]): boolean {
+  return frames.every((frame) => passTimesOf(frame).every((ns) => Number.isFinite(ns) && ns >= 0));
+}
+
+/** The timings' table's heading, with a column for more view passes where any frame had them. */
+function farLimbTimingHeading(more: boolean): string {
+  const passes = ["sky view", "aerial perspective", "ray march"];
+  const extra = more ? [`more ${ATMOSPHERE_VIEW_PASS} passes`] : [];
+  return ["distance", ...passes, ...extra, "composite", "sum", "frames"].join(" | ");
+}
+
+/**
+ * A camera's row of the timings' table: each pass's and their sum's median / p95, its frames; the
+ * more view passes' column only where `more`.
+ */
+function farLimbTimingRow(place: FarLimbTimedPlace, more: boolean): string {
+  const { frames } = place;
+  const column = (pick: (frame: FarLimbFrameTimes) => number): string =>
+    microsecondsOf(frames.map(pick));
+  const lost = place.missing + place.malformed;
+  const count =
+    lost === 0
+      ? String(frames.length)
+      : `${frames.length} (${place.missing} missing, ${place.malformed} malformed)`;
+  const morePasses = Math.max(0, ...frames.map((frame) => frame.morePasses));
+  const extra = more ? [`${column((frame) => frame.moreNs)} (${morePasses})`] : [];
+  return [
+    place.label,
+    column((frame) => frame.skyViewNs),
+    column((frame) => frame.aerialNs),
+    column((frame) => frame.rayMarchNs),
+    ...extra,
+    column((frame) => frame.compositeNs),
+    column(frameSumNs),
+    count,
+  ].join(" | ");
+}
+
+/** One timed camera: its frame, its sun, and the resolve numbers of its timed frames. */
+interface FarLimbTimedView {
+  readonly label: string;
+  readonly camera: AtmosphereCamera;
+  readonly sun: SunState;
+  readonly numbers: number[];
+}
+
+/**
+ * Draws one setting's far limb frames over a black scene at depth 0 of `viewport`: every camera
+ * once a round, {@link FAR_LIMB_WARM_UP_ROUNDS} rounds and then {@link FAR_LIMB_TIMED_ROUNDS},
+ * interleaved so that the GPU's clocks, as they ramp or settle, weigh on every camera alike, with
+ * no read-back but a one-texel wait for the GPU after the warm-up and every
+ * {@link FAR_LIMB_FENCE_ROUNDS} timed rounds; each timed frame's resolve number goes to its view's
+ * `numbers`. A frame's three dispatches ride the resolve its composite's render makes, numbered as
+ * it is made (`RenderEngine.passTimesFrame`).
+ */
+async function drawFarLimbRounds(
+  engine: RenderEngine,
+  atmosphere: HillaireAtmosphere,
+  viewport: ViewSize,
+  views: readonly FarLimbTimedView[],
+): Promise<void> {
+  const aspect = viewport.widthPx / viewport.heightPx;
+  const target = (name: string): RenderTarget =>
+    engine.createRenderTarget({
+      name,
+      size: viewport,
+      format: "rgba16float",
+      mips: 1,
+      depth: true,
+      category: "render-targets",
+    });
+  const sceneTarget = target(`${FAR_LIMB_TIMING_LABEL} scene`);
+  try {
+    const output = target(`${FAR_LIMB_TIMING_LABEL} output`);
+    try {
+      // Nothing drawn, so that every pixel is the march's. Its render also resolves the tables'
+      // build, so that none of it rides a timed frame.
+      sceneTarget.render(frameOf(`${FAR_LIMB_TIMING_LABEL} scene`, [], aspect));
+      const scene = {
+        colour: sceneTarget.colour,
+        depth: requireDepth(sceneTarget.depth),
+        nearM: NEAR_M,
+        exposureScale: SMOKE_EXPOSURE_SCALE,
+      };
+      const draw = (view: FarLimbTimedView): number => {
+        const composite = atmosphere.drawFrame(view.camera, [view.sun], scene);
+        output.render(frameOf(FAR_LIMB_TIMING_COMPOSITE_PASS, [composite], aspect));
+        return engine.passTimesFrame;
+      };
+      const fence = async (): Promise<void> => {
+        await engine.readTexture(output.colour, 0, { x: 0, y: 0, width: 1, height: 1 });
+      };
+      for (let round = 0; round < FAR_LIMB_WARM_UP_ROUNDS; round += 1) {
+        for (const view of views) {
+          draw(view);
+        }
+      }
+      await fence();
+      for (let round = 1; round <= FAR_LIMB_TIMED_ROUNDS; round += 1) {
+        for (const view of views) {
+          view.numbers.push(draw(view));
+        }
+        if (round % FAR_LIMB_FENCE_ROUNDS === 0) {
+          // The rounds wait for the GPU in turn, so that the timer's resolves in flight stay
+          // bounded.
+          // oxlint-disable-next-line no-await-in-loop
+          await fence();
+        }
+      }
+      await fence();
+    } finally {
+      output.dispose();
+    }
+  } finally {
+    sceneTarget.dispose();
+  }
+}
+
+/**
+ * Times one setting's far limb frames, drawn by {@link drawFarLimbRounds} on the setting's own
+ * tables, and sorts each camera's resolves into its passes ({@link farLimbFrameTimes}) once they
+ * have arrived (2 s at most after the last frame's work).
+ */
+async function timeFarLimbSetting(
+  engine: RenderEngine,
+  setting: QualitySetting,
+): Promise<FarLimbTimedSetting> {
+  const body = SLICES_EARTH;
+  const viewport = settingOutput(setting);
+  const views: FarLimbTimedView[] = FAR_LIMB_TIMING_PLACES.map(({ label, distanceM }) => ({
+    label,
+    camera: farLimbTimingCamera(distanceM, viewport),
+    sun: limbSunToward(
+      distanceM,
+      body.figure,
+      FAR_LIMB_TIMING_SUN_ZENITH_DEG,
+      FAR_LIMB_TIMING_SUN_AZIMUTH_DEG,
+      FAR_LIMB_TIMING_FRAME,
+    ),
+    numbers: [],
+  }));
+  const arrived = new Map<number, PassTimes>();
+  const atmosphere = new HillaireAtmosphere(
+    engine,
+    body.medium,
+    TABLE_SIZES[setting],
+    body.figure,
+    body.curves,
+    body.gravity,
+  );
+  try {
+    const stopTimes = engine.onPassTimes((times) => {
+      arrived.set(times.frame, times);
+    });
+    try {
+      await drawFarLimbRounds(engine, atmosphere, viewport, views);
+      const all = views.flatMap((view) => view.numbers);
+      for (let wait = 0; wait < 100 && !all.every((n) => arrived.has(n)); wait += 1) {
+        // The times are mapped a frame or more after their work: each wait gives the rest 20 ms.
+        // oxlint-disable-next-line no-await-in-loop
+        await pause(20);
+      }
+    } finally {
+      stopTimes();
+    }
+  } finally {
+    atmosphere.dispose();
+  }
+  const timers = new Set<GpuTimer>();
+  let offGrid = 0;
+  let times = 0;
+  const places = views.map((view): FarLimbTimedPlace => {
+    const frames: FarLimbFrameTimes[] = [];
+    let missing = 0;
+    let malformed = 0;
+    for (const n of view.numbers) {
+      const resolve = arrived.get(n);
+      const frame = resolve === undefined ? null : farLimbFrameTimes(resolve);
+      if (resolve !== undefined) {
+        timers.add(resolve.timer);
+      }
+      if (frame === null) {
+        missing += resolve === undefined ? 1 : 0;
+        malformed += resolve === undefined ? 0 : 1;
+        continue;
+      }
+      frames.push(frame);
+      // A sum of quantized times is on the grid too, so more view passes count as one time.
+      const own = [frame.skyViewNs, frame.aerialNs, frame.rayMarchNs, frame.compositeNs];
+      for (const ns of frame.morePasses > 0 ? [...own, frame.moreNs] : own) {
+        times += 1;
+        offGrid += ns % QUANTIZED_TIMESTAMP_NS === 0 ? 0 : 1;
+      }
+    }
+    return { label: view.label, frames, missing, malformed };
+  });
+  return { places, timers, offGrid, times };
+}
+
+/**
+ * R08.T8.c's far limb timed per pass (plan R08, R08.T8.c's acceptance 7, R08.T11's rows): R05's
+ * test planet ({@link SLICES_EARTH}, WGS 84 with its normal gravity, R05's Earth medium) on each
+ * setting's own tables (`TABLE_SIZES`) and output (high 1,920 × 1,080, low 1,280 × 720,
+ * {@link settingOutput}), from the orbit frame and from 10⁷ to 10⁸ m
+ * ({@link FAR_LIMB_TIMING_PLACES}), for the run that lifts timestamp quantization
+ * (`--smoke-gpu-timing=1`, the hardware runs of R01.T11), whose pass times are the measurement.
+ *
+ * @remarks
+ * Each camera stands on the equator at longitude {@link FAR_LIMB_LONGITUDE_RAD}, the datum's limb
+ * at its frame's centre and level across it, 60° across ({@link farLimbTimingCamera}); the Sun at
+ * 1 au stands 30° from the zenith at the tangent point and 90° right of the view
+ * ({@link limbSunToward}), pre-exposed at the smoke's EV100 15; nothing is drawn, so that every
+ * pixel is the march's (from above the top the composite takes the march alone). The frames are
+ * drawn as {@link timeFarLimbSetting} says, and each frame's sky view, aerial perspective, ray
+ * march and composite are told apart in its resolve ({@link farLimbFrameTimes}), with a column of
+ * their own for any more view passes a later kernel adds under the kernels' label. One check per
+ * setting passes when every camera has its {@link FAR_LIMB_TIMED_ROUNDS} frames with finite
+ * times, and records the table of each pass's and their sum's median and 95th percentile, µs, by
+ * distance (rows split at ` || `, cells at ` | `), with the timer's kind and the times off Dawn's
+ * 65,536 ns grid (none where quantization was not lifted). They are R08.T11's figures, not held:
+ * the orbit frame stands beside the far limb's, which T8.c's footprint mean must not raise beyond
+ * noise.
+ */
+export async function timeFarLimb(engine: RenderEngine, checks: Checks): Promise<void> {
+  for (const setting of ["high", "low"] as const) {
+    const viewport = settingOutput(setting);
+    const size = `${viewport.widthPx} × ${viewport.heightPx}`;
+    const name = `R08.T8.c the far limb's timings, ${setting}`;
+    if (!engine.capabilities.timestampQuery) {
+      checks.check(name, false, `${size}: no timestamp-query, so no pass times`);
+      continue;
+    }
+    // The settings are timed one after the other, each on its own tables.
+    // oxlint-disable-next-line no-await-in-loop
+    const timed = await timeFarLimbSetting(engine, setting);
+    const held = timed.places.every(
+      (place) => place.frames.length === FAR_LIMB_TIMED_ROUNDS && framesFinite(place.frames),
+    );
+    const timers = timed.timers.size > 0 ? [...timed.timers].join(", ") : "none";
+    const grid = `${timed.offGrid} of ${timed.times} times off the ${QUANTIZED_TIMESTAMP_NS} ns grid`;
+    const more = timed.places.some((place) => place.frames.some((frame) => frame.morePasses > 0));
+    const rows = [
+      farLimbTimingHeading(more),
+      ...timed.places.map((place) => farLimbTimingRow(place, more)),
+    ].join(" || ");
+    checks.check(
+      name,
+      held,
+      [
+        `${setting} at ${size} on its own tables, the march at ×${TABLE_SIZES[setting].rayMarchScale}`,
+        `timer ${timers}, ${grid}`,
+        `${FAR_LIMB_WARM_UP_ROUNDS} warm-up and ${FAR_LIMB_TIMED_ROUNDS} timed frames a camera, every camera once a round`,
+        `R05's Earth on WGS 84, each camera on the equator at longitude ${FAR_LIMB_LONGITUDE_RAD} rad, the datum's limb at the frame's centre, 60° across, nothing drawn`,
+        `the Sun at 1 au ${FAR_LIMB_TIMING_SUN_ZENITH_DEG}° from the zenith at the tangent point and ${FAR_LIMB_TIMING_SUN_AZIMUTH_DEG}° right of the view, EV100 ${SMOKE_EV100}`,
+        `GPU time, µs, median / p95: ${rows}`,
+      ].join("; "),
+    );
+  }
+}
+
+/** The far limb captures' distances from the centre, m (R08.T8.c's acceptance 8): 10⁸ and 10⁹ m. */
+const FAR_LIMB_CAPTURE_DISTANCES_M = [1e8, 1e9] as const;
+
+/** How much wider than the planet's disc a far limb capture's frame is: 1.25 times. */
+const FAR_LIMB_CAPTURE_MARGIN = 1.25;
+
+/** A far limb capture's least side, px. */
+const FAR_LIMB_CAPTURE_MIN_SIDE_PX = 32;
+
+/**
+ * The side an enlarged far limb capture reaches at most, px: its factor the largest whole one
+ * within it, so that each is 532 to 640 px across (×2 from 266 px on high from 10⁸ m, ×3 from
+ * 178 px on low, ×20 from 32 px from 10⁹ m), some 30 MB of images in all for the report to carry.
+ */
+const FAR_LIMB_ENLARGED_MAX_SIDE_PX = 640;
+
+/**
+ * The far limb captures' suns by their phase angle, at the planet's centre from the camera to the
+ * Sun, the Sun towards the frame's right: side-lit at 90°, the terminator down the disc's middle,
+ * so that the lit limb (right), the terminator's (top and bottom) and the night's (left) all show;
+ * and backlit at 170°, the Sun behind the planet 10° right of the frame's centre, its disc outside
+ * every frame, so that the twilight ring shows, brightest on the right, with the day's crescent a
+ * sliver 0.76% of the disc wide there.
+ */
+const FAR_LIMB_CAPTURE_SUNS = [
+  { tag: "lit", phaseDeg: 90 },
+  { tag: "backlit", phaseDeg: 170 },
+] as const;
+
+/**
+ * The far limb captures' aims, raised by a share of a pixel's angle at the centre, so that the
+ * planet moves down by as much: 0 and ½, between which a speck that moves or flickers shows.
+ */
+const FAR_LIMB_CAPTURE_AIMS = [
+  { tag: "0", shareOfPixel: 0 },
+  { tag: "half", shareOfPixel: 0.5 },
+] as const;
+
+/**
+ * The exposure the far limb captures are encoded at: 1, so that each shows its frame as drawn at
+ * the smoke's EV100 15 through R02's tone curve, the same in every frame (lit and backlit, either
+ * aim, before T8.c and after), never one of its own.
+ *
+ * @remarks
+ * AgX's span, 16.5 stops from 2⁻¹²·⁴⁷ to 2⁴·⁰³ of its unit, shows the ring at EV100 15 too: the
+ * ring's lit side is lit at its tangent points' sunset and seen 10° from the Sun, where the
+ * aerosol's forward lobe (Cornette–Shanks, g 0.8, about 1.8 sr⁻¹ there against 0.08 isotropic) and
+ * Rayleigh's 0.12 sr⁻¹ against 0.06 at 90° make it about as bright as the lit limb (an estimate,
+ * not measured), while the centre ray's specks, up to 29 times their footprint's light from 10⁹ m
+ * (`decision-r08-t8-leans.md` §6.1), stay under AgX's ceiling. Each frame's brightest pixel is
+ * recorded beside it.
+ */
+const FAR_LIMB_CAPTURE_ENCODING = 1;
+
+/** One far limb capture's frame: its camera and sun, the planet's size and the Sun's place in it. */
+interface FarLimbCaptureFrame {
+  readonly camera: AtmosphereCamera;
+  readonly sun: SunState;
+  /** The planet's equatorial diameter across the frame, px. */
+  readonly diameterPx: number;
+  /** The Sun's centre's angle from the frame's centre, rad. */
+  readonly sunFromCentreRad: number;
+  /** The frame's half-diagonal, rad. */
+  readonly halfDiagonalRad: number;
+}
+
+/**
+ * A far limb capture's frame on `setting` from `distanceM` from the centre (R08.T8.c's acceptance
+ * 8): on the equator at longitude {@link FAR_LIMB_LONGITUDE_RAD}, aimed at the planet's centre
+ * raised by `shareOfPixel` of a pixel, north up, each pixel spanning the angle a pixel of the
+ * setting's 60°-across output spans at its centre ({@link outputPixelTan}), so that the limb is
+ * drawn at its real scale, in a square frame {@link FAR_LIMB_CAPTURE_MARGIN} times the disc across
+ * (at least {@link FAR_LIMB_CAPTURE_MIN_SIDE_PX}, an even side, so that the centre falls on a
+ * pixel's corner); the sun at `phaseDeg` ({@link FAR_LIMB_CAPTURE_SUNS}).
+ */
+function farLimbCaptureFrame(
+  setting: QualitySetting,
+  distanceM: number,
+  phaseDeg: number,
+  shareOfPixel: number,
+): FarLimbCaptureFrame {
+  const figure = SLICES_EARTH.figure;
+  const pixelTan = outputPixelTan(setting);
+  const diameterPx = (2 * Math.asin(figure.equatorialRadiusM / distanceM)) / pixelTan;
+  const sidePx = Math.max(
+    FAR_LIMB_CAPTURE_MIN_SIDE_PX,
+    2 * Math.ceil((FAR_LIMB_CAPTURE_MARGIN * diameterPx) / 2),
+  );
+  const toward = aboutPole({ x: 1, y: 0, z: 0 }, FAR_LIMB_LONGITUDE_RAD);
+  const forward = scale(toward, -1);
+  const north = { x: 0, y: 0, z: 1 };
+  const right = crossProduct(forward, north);
+  // Raised about the frame's right, so that the centre's ray moves up by the share of a pixel.
+  const raisedRad = Math.atan(shareOfPixel * pixelTan);
+  const aim = add(scale(forward, Math.cos(raisedRad)), scale(north, Math.sin(raisedRad)));
+  const up = add(scale(north, Math.cos(raisedRad)), scale(forward, -Math.sin(raisedRad)));
+  const phaseRad = phaseDeg * DEGREE_RAD;
+  const tanX = (sidePx * pixelTan) / 2;
+  return {
+    camera: {
+      positionM: scale(toward, distanceM),
+      orientation: quaternionFromRows([
+        { x: right.x, y: up.x, z: -aim.x },
+        { x: right.y, y: up.y, z: -aim.y },
+        { x: right.z, y: up.z, z: -aim.z },
+      ]),
+      fovXRad: 2 * Math.atan(tanX),
+      viewport: { widthPx: sidePx, heightPx: sidePx },
+    },
+    sun: {
+      directionBodyFixed: add(scale(toward, Math.cos(phaseRad)), scale(right, Math.sin(phaseRad))),
+      illuminanceLx: SUN_ILLUMINANCE_LX,
+      angularRadiusRad: SUN_ANGULAR_RADIUS_RAD,
+    },
+    diameterPx,
+    sunFromCentreRad: Math.PI - phaseRad,
+    halfDiagonalRad: Math.atan(Math.SQRT2 * tanX),
+  };
+}
+
+/**
+ * An 8-bit RGBA frame `widthPx` × `heightPx` enlarged `factor` times, each pixel replicated
+ * (nearest neighbour), so that a person sees single pixels.
+ */
+function enlargedRgba8(
+  rgba: Uint8Array,
+  widthPx: number,
+  heightPx: number,
+  factor: number,
+): Uint8Array {
+  const outWidthPx = widthPx * factor;
+  const out = new Uint8Array(rgba.length * factor * factor);
+  for (let y = 0; y < heightPx * factor; y += 1) {
+    const sourceRow = Math.floor(y / factor) * widthPx;
+    for (let x = 0; x < outWidthPx; x += 1) {
+      const from = (sourceRow + Math.floor(x / factor)) * 4;
+      out.set(rgba.subarray(from, from + 4), (y * outWidthPx + x) * 4);
+    }
+  }
+  return out;
+}
+
+/** A frame's brightest pixel by Rec. 709 luminance, pre-exposed: its place and its colour. */
+interface BrightestPixel {
+  readonly xPx: number;
+  readonly yPx: number;
+  readonly luminance: number;
+  readonly rgb: readonly [number, number, number];
+}
+
+/** The brightest pixel of a frame `widthPx` wide, by Rec. 709 luminance. */
+function brightestPixel(texels: Float32Array, widthPx: number): BrightestPixel {
+  let luminance = Number.NEGATIVE_INFINITY;
+  let at = 0;
+  for (let i = 0; i < texels.length; i += 4) {
+    const l =
+      0.2126 * (texels[i] ?? 0) + 0.7152 * (texels[i + 1] ?? 0) + 0.0722 * (texels[i + 2] ?? 0);
+    if (l > luminance) {
+      luminance = l;
+      at = i;
+    }
+  }
+  const k = at / 4;
+  return {
+    xPx: k % widthPx,
+    yPx: Math.floor(k / widthPx),
+    luminance,
+    rgb: [texels[at] ?? Number.NaN, texels[at + 1] ?? Number.NaN, texels[at + 2] ?? Number.NaN],
+  };
+}
+
+/** A distance as a capture's name gives it: `1e8m`, `1e9m`. */
+function exponentTag(distanceM: number): string {
+  return `${distanceM.toExponential(0).replace("e+", "e")}m`;
+}
+
+/**
+ * R08.T8.c's far limb captures for the eye (plan R08, R08.T8.c's acceptance 8: "a hidden capture at
+ * 10⁸ and 10⁹ m, before and after"): R05's test planet ({@link SLICES_EARTH}) on each setting's
+ * own tables, from 10⁸ and 10⁹ m, the limb at its real scale (each pixel the setting's 60°-across
+ * output's, {@link farLimbCaptureFrame}), under the side-lit and the backlit sun
+ * ({@link FAR_LIMB_CAPTURE_SUNS}), at both aims ({@link FAR_LIMB_CAPTURE_AIMS}): where the centre
+ * ray stands for the texel's footprint the ring breaks into specks and gaps that move between the
+ * aims.
+ *
+ * @remarks
+ * Nothing is drawn, so the face is the air's in-scatter over a black ground; every frame is
+ * pre-exposed at the smoke's EV100 15 and encoded at {@link FAR_LIMB_CAPTURE_ENCODING}, never at
+ * an exposure of its own, so that frames compare pixel for pixel. Each is saved as drawn, named
+ * `r08-far-limb-<setting>-<distance>-<sun>-aim-<aim>`, and enlarged by the largest whole factor
+ * within {@link FAR_LIMB_ENLARGED_MAX_SIDE_PX} (`-x<factor>`). One check holds every frame finite
+ * and within `rgba16float`, and records each frame's size, the planet's diameter in pixels, the
+ * Sun's angle from the centre against the frame's half-diagonal, and its brightest pixel.
+ */
+export async function captureFarLimb(
+  engine: RenderEngine,
+  checks: Checks,
+): Promise<CapturedImage[]> {
+  const body = SLICES_EARTH;
+  const images: CapturedImage[] = [];
+  const sections: string[] = [];
+  let frames = 0;
+  let inRange = true;
+  for (const setting of ["high", "low"] as const) {
+    const atmosphere = new HillaireAtmosphere(
+      engine,
+      body.medium,
+      TABLE_SIZES[setting],
+      body.figure,
+      body.curves,
+      body.gravity,
+    );
+    try {
+      for (const distanceM of FAR_LIMB_CAPTURE_DISTANCES_M) {
+        const each: string[] = [];
+        let heading = "";
+        for (const sun of FAR_LIMB_CAPTURE_SUNS) {
+          for (const aim of FAR_LIMB_CAPTURE_AIMS) {
+            const frame = farLimbCaptureFrame(setting, distanceM, sun.phaseDeg, aim.shareOfPixel);
+            const { widthPx, heightPx } = frame.camera.viewport;
+            // Each capture reads the GPU back before the next frame draws.
+            // oxlint-disable-next-line no-await-in-loop
+            const texels = await compositeFrame(
+              engine,
+              atmosphere,
+              frame.camera,
+              [frame.sun],
+              null,
+            );
+            frames += 1;
+            const held = withinHalfRange(texels);
+            inRange &&= held;
+            const rgba = rgba8At(texels, FAR_LIMB_CAPTURE_ENCODING);
+            const factor = Math.max(
+              1,
+              Math.floor(FAR_LIMB_ENLARGED_MAX_SIDE_PX / Math.max(widthPx, heightPx)),
+            );
+            const name = `r08-far-limb-${setting}-${exponentTag(distanceM)}-${sun.tag}-aim-${aim.tag}`;
+            images.push(
+              { name, width: widthPx, height: heightPx, rgba: base64Of(rgba) },
+              {
+                name: `${name}-x${factor}`,
+                width: widthPx * factor,
+                height: heightPx * factor,
+                rgba: base64Of(enlargedRgba8(rgba, widthPx, heightPx, factor)),
+              },
+            );
+            heading =
+              `${widthPx} × ${heightPx} px, ×${factor} to ${widthPx * factor} × ${heightPx * factor}, ` +
+              `the planet ${frame.diameterPx.toFixed(1)} px across, ` +
+              `the frame's half-diagonal ${(frame.halfDiagonalRad / DEGREE_RAD).toFixed(2)}°`;
+            const brightest = brightestPixel(texels, widthPx);
+            const sunFromCentreDeg = (frame.sunFromCentreRad / DEGREE_RAD).toFixed(0);
+            each.push(
+              `${sun.tag} (phase ${sun.phaseDeg}°, the Sun ${sunFromCentreDeg}° from the centre), aim ${aim.tag}: ` +
+                `brightest ${show([brightest.luminance])} at (${brightest.xPx}, ${brightest.yPx}), ` +
+                `rgb ${show(brightest.rgb)}${held ? "" : ", not finite or within rgba16float"}`,
+            );
+          }
+        }
+        sections.push(`${setting} from ${exponentTag(distanceM)} (${heading}): ${each.join("; ")}`);
+      }
+    } finally {
+      atmosphere.dispose();
+    }
+  }
+  checks.check(
+    "R08.T8.c the far limb captures",
+    inRange && frames > 0,
+    [
+      `${frames} frames (${images.length} images with the enlarged) finite and within rgba16float: ${String(inRange)}`,
+      `R05's Earth on WGS 84, nothing drawn, each pixel the setting's 60°-across output's, pre-exposed and encoded at EV100 ${SMOKE_EV100}, brightest by luminance pre-exposed`,
+      ...sections,
+    ].join(" || "),
+  );
+  return images;
+}
+
+// --- R08.T8.c: the far limb's footprint on the GPU -----------------------------------------------
+
+/** The footprint frames' camera's distance from the centre, m (R08.T8.c's acceptance 6): 10⁸ m. */
+const FAR_LIMB_FOOTPRINT_DISTANCE_M = 1e8;
+
+/**
+ * R08.T8.c's far limb's Earth: R08.T8.b's ({@link FAR_LIMB_EARTH}), R05's Earth medium on WGS 84
+ * with its normal gravity on the oblate twins, its checks named for R08.T8.c.
+ */
+const FAR_LIMB_FOOTPRINT_EARTH: HeightsBody = { ...FAR_LIMB_EARTH, task: "R08.T8.c" };
+
+/**
+ * The share of the Sun's angular radius within which the footprint's disc frame compares pixel
+ * centres: 0.9, so that the composite's disc test (|d × s| ≤ sin ρ, in `f32`) decides none of them.
+ */
+const FAR_LIMB_DISC_INNER_SHARE = 0.9;
+
+/**
+ * The footprint frames' place on `setting` (R08.T8.c's acceptance 6): from
+ * {@link FAR_LIMB_FOOTPRINT_DISTANCE_M} at longitude {@link FAR_LIMB_LONGITUDE_RAD}, centred on
+ * the tangent height {@link LIMB_CENTRE_M}, the middle of R05's 100 km air, so that the limb
+ * crosses the 64 × 32 frame's middle rows, each pixel spanning the angle a pixel of the setting's
+ * 60°-across output spans at its centre ({@link outputPixelTan}): its half-span 16 such pixels at
+ * the tangent point, so that fovX = 2 atan(32 × 2 tan 30° ÷ 1,920) on high and ÷ 1,280 on low,
+ * rows of 60.0 km and 90.0 km of tangent height there.
+ *
+ * @remarks
+ * On the centre columns on high the datum's edge and the top fall 10 km inside their rows (rows
+ * from −10 to 50 km and from 50 to 110 km), so that no texel's footprint stands on a cut by its
+ * rounding; across the frame the limb bends down to row 21 at the frame's sides, its footprints
+ * cut at every place in their rows.
+ */
+function farLimbFootprintFrame(setting: QualitySetting): LimbFrame {
+  const figure = FAR_LIMB_FOOTPRINT_EARTH.figure;
+  const place = { centreM: LIMB_CENTRE_M, longitudeRad: FAR_LIMB_LONGITUDE_RAD };
+  const toTangentM = limbTangentDistanceM(FAR_LIMB_FOOTPRINT_DISTANCE_M, figure, place);
+  const halfRows = FRAME_SIZE.heightPx / 2;
+  return { ...place, halfSpanM: halfRows * outputPixelTan(setting) * toTangentM };
+}
+
+/**
+ * The footprint frames' views on `setting` (R08.T8.c's acceptance 6):
+ * {@link farLimbFootprintFrame}'s, the sun 20° up and 2° below the horizon of its centre's tangent
+ * point ({@link FAR_LIMB_SUNS_DEG}, as {@link farLimbViews}), nothing drawn, the ray march's
+ * envelope share recorded, not capped, as R08.T8.b's far limb's from 10⁸ m is
+ * (`decision-r08-f32.md` §10.4).
+ */
+function farLimbFootprintViews(setting: QualitySetting): HeightsView[] {
+  const { figure } = FAR_LIMB_FOOTPRINT_EARTH;
+  const distanceM = FAR_LIMB_FOOTPRINT_DISTANCE_M;
+  const frame = farLimbFootprintFrame(setting);
+  const rowKm = (2 * (frame.halfSpanM ?? Number.NaN)) / FRAME_SIZE.heightPx / 1_000;
+  const centreKm = (frame.centreM ?? Number.NaN) / 1_000;
+  const place = `the output's own pixel, rows of ${rowKm.toFixed(1)} km about ${centreKm} km, longitude ${FAR_LIMB_LONGITUDE_RAD} rad`;
+  return FAR_LIMB_SUNS_DEG.map((elevationDeg) => ({
+    name: `the far limb from ${distanceM.toExponential(0)} m (${place}), the sun ${elevationDeg}° at its tangent point`,
+    camera: limbCamera(distanceM, figure, frame),
+    sun: limbSun(distanceM, figure, elevationDeg, frame),
+    sunElevationDeg: elevationDeg,
+    surfaceM: null,
+    marchEnvelopeShare: "recorded",
+  }));
+}
+
+/** A target's far-limb footprints as the twin forms them (R08.T8.c), counted. */
+interface FootprintCensus {
+  readonly texels: number;
+  /** The texels whose footprint meets the shell, w_L 0 or more. */
+  readonly met: number;
+  /** The texels whose footprint is blended in (w_L > 0), and the largest w_L. */
+  readonly blended: number;
+  readonly largestBlend: number;
+  /** The least and greatest s of the texels that meet the shell; NaN for none. */
+  readonly leastSpan: number;
+  readonly greatestSpan: number;
+}
+
+/**
+ * Every texel's far-limb footprint of a target `widthTexels` × `heightTexels` under `view`
+ * (`farLimbFootprintTwin` on the planet's shells), counted; none with the camera under the top.
+ */
+function footprintCensus(
+  shells: FarLimbShells | null,
+  view: TwinView,
+  widthTexels: number,
+  heightTexels: number,
+): FootprintCensus {
+  let met = 0;
+  let blended = 0;
+  let largestBlend = 0;
+  let leastSpan = Number.POSITIVE_INFINITY;
+  let greatestSpan = Number.NEGATIVE_INFINITY;
+  const texels = widthTexels * heightTexels;
+  for (let i = 0; i < texels; i += 1) {
+    const at = { x: i % widthTexels, y: Math.floor(i / widthTexels), widthTexels, heightTexels };
+    const footprint = shells === null ? null : farLimbFootprintTwin(shells, view, at);
+    if (footprint !== null) {
+      met += 1;
+      blended += footprint.blend > 0 ? 1 : 0;
+      largestBlend = Math.max(largestBlend, footprint.blend);
+      leastSpan = Math.min(leastSpan, footprint.span);
+      greatestSpan = Math.max(greatestSpan, footprint.span);
+    }
+  }
+  return {
+    texels,
+    met,
+    blended,
+    largestBlend,
+    leastSpan: met > 0 ? leastSpan : Number.NaN,
+    greatestSpan: met > 0 ? greatestSpan : Number.NaN,
+  };
+}
+
+/**
+ * Records one footprint view's ray march (R08.T8.c's acceptance 6): how many of its texels the
+ * twin blends their footprint into, the largest w_L and the span of s, which fails where none is,
+ * since the view would then hold nothing of R08.T8.c; and each arm's worst and envelope share, as
+ * its own checks held them.
+ */
+function recordMarchFootprint(
+  checks: Checks,
+  label: string,
+  census: FootprintCensus,
+  marches: readonly MarchArm[],
+): void {
+  const arms = marches.map(({ arm, result }) => {
+    const share = percentOf(result.envelope.length / Math.max(result.channels, 1));
+    return `the ${arm} arm: worst ${result.worst.toFixed(3)}, ${share} by the envelope (${describeEnvelopeShare("recorded")})`;
+  });
+  checks.check(
+    `${label}: the ray march blends in the far limb's footprint`,
+    census.blended > 0,
+    [
+      `${census.blended} of ${census.texels} texels with their footprint blended in (w_L > 0), the largest w_L ${show([census.largestBlend])}`,
+      `${census.met} texels meet the shell, s ${show([census.leastSpan, census.greatestSpan])} over them`,
+      ...arms,
+    ].join("; "),
+  );
+}
+
+/**
+ * R08.T8.c's composite from above the top across the output pixel's footprint, on `setting`
+ * (`composite.wgsl`'s `transmittanceAcrossFromAbove`): {@link farLimbFootprintFrame}'s camera, the
+ * Sun at 1 au on the limb, its centre on the frame's centre ray, whose tangent point stands
+ * {@link LIMB_CENTRE_M} up (the sun at 0° there, {@link limbSun}), so that its disc, 7.7 px in
+ * radius on high and 5.2 px on low, holds the limb's two rows; nothing drawn, each pixel within
+ * {@link FAR_LIMB_DISC_INNER_SHARE} of the disc's radius held as {@link discAgreement} holds it,
+ * against the twin of the transmittance across its footprint.
+ */
+async function checkDiscAcrossFootprint(
+  engine: RenderEngine,
+  ordered: OrderedChecks,
+  atmosphere: HillaireAtmosphere,
+  planet: SmokePlanet,
+  body: HeightsBody,
+  setting: QualitySetting,
+  sizes: TableSizes,
+): Promise<void> {
+  if (planet.kind !== "oblate") {
+    throw new Error(`R08.T8.c's ${body.name} stands on the oblate twins`);
+  }
+  const figure = body.figure;
+  const distanceM = FAR_LIMB_FOOTPRINT_DISTANCE_M;
+  const frame = farLimbFootprintFrame(setting);
+  const camera = limbCamera(distanceM, figure, frame);
+  const sun = limbSun(distanceM, figure, 0, frame);
+  const marchScale = sizes.rayMarchScale;
+  const drawn = await drawDiscThroughLimb(engine, atmosphere, camera, sun, figure, marchScale);
+  ordered.now((checks) => {
+    const { widthPx: w, heightPx: h } = camera.viewport;
+    const marchTexels = Math.ceil(w * marchScale) * Math.ceil(h * marchScale);
+    const result = discAgreement(planet.twin, drawn, FAR_LIMB_DISC_INNER_SHARE);
+    const radiusPx = Math.tan(sun.angularRadiusRad) / outputPixelTan(setting);
+    checks.check(
+      `${body.task} the composite from above the top across the footprint, ${setting}: the Sun's disc through the limb from ${distanceM.toExponential(0)} m, per channel`,
+      result.worst <= 1 &&
+        result.compared > 0 &&
+        result.blended > 0 &&
+        result.saturated === 0 &&
+        drawn.march.length === marchTexels * 4,
+      [
+        `worst ${result.worst.toFixed(3)} of the bound at ${result.at}`,
+        `the bound ${percentOf(DISC_TRANSMITTANCE_SHARE, ROUND_PERCENT)} of max(T, 10⁻³), plus` +
+          " the output's rounding, 2⁻¹¹ of it, over the disc",
+        `${result.compared} pixels within ${FAR_LIMB_DISC_INNER_SHARE} of the disc's ${radiusPx.toFixed(2)} px radius, the farthest at ${result.farthest.toFixed(3)} of sin ρ`,
+        `${result.blended} of them with their footprint blended in (w_L > 0), the largest w_L ${show([result.largestBlend])}`,
+        `T, the twin's: ${describeRange(result.twinRange)}; the GPU's: ${describeRange(result.gpuRange)}`,
+        `red ÷ blue, a row's median: ${show([result.topRatio])} on the top, ${show([result.lowestRatio])} the lowest`,
+        `the march at ×${marchScale}, ${drawn.march.length / 4} texels read back of ${marchTexels}`,
+        `the disc ${show(drawn.disc)}, pre-exposed at EV100 ${SMOKE_EV100}` +
+          `, the factor ${COMPOSITE_FACTOR}`,
+        `the brightest output ${show([result.brightest])}, ${result.saturated} channels at rgba16float's largest`,
+      ].join("; "),
+    );
+  });
+}
+
+/**
+ * R08.T8.c's far limb integrated across the texel on the GPU against its twins (plan R08,
+ * R08.T8.c's acceptance 6; `decision-r08-t8-leans.md` §6.1): from 10⁸ m on each setting, the frame
+ * at the output's own pixel, where every texel that meets the shell takes its footprint's mean.
+ *
+ * @remarks
+ * On R08.T8.b's far limb's Earth ({@link FAR_LIMB_FOOTPRINT_EARTH}), each setting on an atmosphere
+ * of its own (`twinSizes` of its `TABLE_SIZES`), the per-planet tables read back once, as they are
+ * the same on both:
+ *
+ * - Two views a setting ({@link farLimbFootprintViews}), the per-frame kernels held against their
+ *   twins in R08.T6.g's arms ({@link checkViewArms}; the kernel arm on high, the stored arm alone
+ *   on low), the twins' ray march the kernel's, footprints and all (`oblateRayMarchTwin`), and its
+ *   envelope the whole texel's under the kernel's resolution where the footprint is blended in
+ *   ({@link rayMarchEnvelope}); the march's envelope share is recorded, not capped, as from 10⁸ m
+ *   in R08.T8.b's far limb. Each view also records the twin's count of its texels' footprints
+ *   ({@link recordMarchFootprint}): 178 of high's 2,048 texels and 60 of low's 512, every one at
+ *   w_L 1 (s 4.0 to 75 on high, 12 to 237 on low).
+ * - One frame a setting on the Sun's disc through the limb ({@link checkDiscAcrossFootprint}): 148
+ *   pixels compared on high, 32 of them with a footprint, and 68 on low, 20 with one.
+ *
+ * The twins run on the page's twin workers (`twins`) beside the GPU's work, the checks recorded in
+ * the order they were in sequence (`ordered.ts`).
+ */
+export async function checkFarLimbFootprint(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  const body = FAR_LIMB_FOOTPRINT_EARTH;
+  const read = kernelMedium(body.medium);
+  await inOrder(checks, async (ordered) => {
+    let planet: SmokePlanet | null = null;
+    for (const setting of ["high", "low"] as const) {
+      const sizes = twinSizes(TABLE_SIZES[setting]);
+      const atmosphere = new HillaireAtmosphere(
+        engine,
+        body.medium,
+        sizes,
+        body.figure,
+        body.curves,
+        body.gravity,
+      );
+      try {
+        // The per-planet tables are the same on both settings: read back once.
+        // oxlint-disable-next-line no-await-in-loop
+        planet ??= await planetOf(engine, atmosphere, read, body.figure);
+        const known = planet;
+        const marchScale = sizes.rayMarchScale;
+        for (const view of farLimbFootprintViews(setting)) {
+          // The harness's GPU work runs in order: each frame is read back before the next draws.
+          // oxlint-disable-next-line no-await-in-loop
+          const arms = await checkViewArms(
+            engine,
+            ordered,
+            atmosphere,
+            known,
+            body,
+            sizes,
+            setting,
+            view,
+            twins,
+          );
+          const twin = frameViewOf(atmosphere, view.camera, [view.sun], body.figure);
+          const label = `${body.task} ${body.name}, ${setting}, ${view.name}`;
+          void ordered.later(async (slot) => {
+            const { widthPx: w, heightPx: h } = view.camera.viewport;
+            const census = footprintCensus(
+              farLimbShellsOfPlanet(known, twin),
+              twin,
+              Math.ceil(w * marchScale),
+              Math.ceil(h * marchScale),
+            );
+            recordMarchFootprint(slot, label, census, await arms.marches);
+          });
+        }
+        // Its twin runs on the page, while the views' run on the workers.
+        // oxlint-disable-next-line no-await-in-loop
+        await checkDiscAcrossFootprint(engine, ordered, atmosphere, known, body, setting, sizes);
+      } finally {
+        atmosphere.dispose();
+      }
+    }
+  });
 }

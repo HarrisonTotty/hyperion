@@ -8,21 +8,25 @@
  * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
  * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in seven parts, each a run of its own under the harness's watchdog (perf-smoke,
- * 2026-10-13), parts 2 to 6 the atmosphere's CPU-twin groups (R08.T6, R08.T7, R08.T9.b, R08.T8.a,
- * R08.T8.b), part 4 with R05.T12.e's marches beside them and part 6 with R05.T12.c's frames, part
- * 7 R10's terrain groups, and part 1 every other; with no part given the page runs them all, in
- * its order.
- * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups in part 5:
- * the Saturn-class figure's, and Earth's, which took R08.T6.g's Earth; R08.T9.b's surface lighting
- * in two in part 6, Earth's and the Saturn-class figure's, and R08.T8.a's march band after them, in
- * the twins' part with the most headroom (94 s of the watchdog's 180 at a load of about 5 before it
- * joined, 140 to 146 s after at a load of 2 to 5, the group 64 to 73 s of it, mostly its four
+ * groups are in nine parts, each a run of its own under the harness's watchdog (perf-smoke,
+ * 2026-10-13), parts 2 to 6, 8 and 9 the atmosphere's CPU-twin groups (R08.T6, R08.T7, R08.T9.b,
+ * R08.T8.a, R08.T8.b, R08.T8.c), part 4 with R05.T12.e's marches before them and part 6 with
+ * R05.T12.c's frames, part 7 R10's terrain groups, and part 1 every other; with no part given the
+ * page runs them all, in its order.
+ * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
+ * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
+ * Earth, in part 8; R08.T9.b's surface lighting in two in part 6, Earth's and the Saturn-class
+ * figure's; R08.T8.a's march band in part 9 with R08.T7's several suns (in part 6 it took the part
+ * from 94 s to 140 to 146 s at a load of 2 to 5, the group 64 to 73 s, mostly its four
  * atmospheres' tables and kernels, 2026-10-21); R08.T8.b's far limb, with the composite from above
- * the top, after R08.T7's several suns in part 4, and its low pick, which has no twin, in part 1;
- * and part 7 R10.T10.b's lit terrain, R10.T10.c's survey edge, R10.T16.c's frame, R10.T11's
- * wireframe terrain, R10.T9.b's cascades and R10.T16.b's shared pass (on an engine of its own,
- * whose device it destroys).
+ * the top, in part 4 after R05.T12.e's marches, and its low pick, which has no twin, in part 1;
+ * R08.T8.c's far limb's footprint, its frames from 10⁸ m at the output's own pixel, in part 8
+ * after R08.T6.f's Earth; and part 7 R10.T10.b's lit terrain, R10.T10.c's survey edge, R10.T16.c's
+ * frame, R10.T11's wireframe terrain, R10.T9.b's cascades and R10.T16.b's shared pass (on an
+ * engine of its own, whose device it destroys). Two groups of part 1 run only when asked:
+ * R08.T8.c's far limb's timings, after the low pick, when the run lifted timestamp quantization
+ * (`gpuTiming`, the hardware runs of R01.T11), and R08.T8.c's far limb captures, after R07.T10.c's
+ * eclipse captures, with the other captures; a plain `just test-render` runs neither.
  */
 
 import { WGSL_CATALOGUE } from "../view/engine/catalogue";
@@ -38,6 +42,7 @@ import {
   captureAscent,
   captureAtmosphere,
   type CapturedImage,
+  captureFarLimb,
   checkAtmosphereFrames,
   checkAtmosphereHeights,
   checkAtmosphereLayerEdges,
@@ -47,11 +52,13 @@ import {
   checkAtmosphereTables,
   checkAtmosphereTwins,
   checkFarLimb,
+  checkFarLimbFootprint,
   checkLowPick,
   checkMarchBand,
   checkSeveralSuns,
   checkSurfaceLightingEarth,
   checkSurfaceLightingSaturn,
+  timeFarLimb,
 } from "./atmosphere";
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
 import { checkBloom } from "./bloom";
@@ -116,18 +123,29 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
 };
 
 /**
- * A part of the page's groups, each about a fifth of the page's time: 2 to 6 the atmosphere's
- * CPU-twin groups (R08.T6, R08.T7, R08.T9.b, R08.T8.a, R08.T8.b), whose twins outweigh their GPU
- * work (2 R08.T6.b's, 3 R08.T6.g's and R08.T6.i's, 4 R08.T7's and R08.T8.b's far limb, with the
- * composite from above the top, 5 R08.T6.f's Saturn-class figure and Earth, 6 R08.T9.b's Earth and
- * Saturn-class figure and R08.T8.a's march band), 7 R10's terrain groups
- * (R10.T10.b, T10.c, T11, T16 and T9.b), which took part 6 to 163 s at a load of 2 once R10.T9.b's
- * cascades joined them (2026-10-21), and 1 every other group but R05.T12.e's and R05.T12.c's
- * frames, which parts 4 and 6 run first, before their twins start, to even the parts out (R08.T9.b's
- * lit materials, larger, took part 1 past 150 s under load), R08.T8.b's low pick, which has no twin,
- * among them; part 1 also takes the captures, when asked, under the same watchdog.
+ * A part of the page's groups: 2 to 6, 8 and 9 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
+ * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c), whose twins outweigh their GPU work (2 R08.T6.b's, 3
+ * R08.T6.g's, 4 R08.T8.b's far limb, with the composite from above the top, 5 R08.T6.f's
+ * Saturn-class figure and R08.T6.i's layer edges, 6 R08.T9.b's Earth and Saturn-class figure, 8
+ * R08.T6.f's Earth and R08.T8.c's far limb's footprint, 9 R08.T8.a's march band and R08.T7's
+ * several suns), 7 R10's terrain groups (R10.T10.b, T10.c, T11, T16 and T9.b), which took part 6
+ * to 163 s at a load of 2 once R10.T9.b's cascades joined them (2026-10-21), and 1 every other
+ * group but R05.T12.e's and R05.T12.c's frames, which parts 4 and 6 run first, before their twins
+ * start, to even the parts out (R08.T9.b's lit materials, larger, took part 1 past 150 s under
+ * load), R08.T8.b's low pick, which has no twin, among them; part 1 also takes the captures,
+ * R08.T8.c's far limb's among them, when asked, under the same watchdog, and R08.T8.c's far limb's
+ * timings when the run lifted timestamp quantization (`gpuTiming`).
+ *
+ * @remarks
+ * R08.T8.c's footprints, whose nodes the twins and SwiftShader march on every limb from above the
+ * top, took part 4 past its 180 s watchdog (R05.T12.e 89 s, R08.T7 54 s, R08.T8.b's far limb
+ * about 40 s) and parts 2, 3, 5 and 6 to 149 to 159 s (2026-10-22), so parts 8 and 9 joined, and
+ * R08.T6.i, R08.T6.f's Earth, R08.T8.a's march band and R08.T7 moved to them and to part 5: at
+ * those figures part 3 holds 122 s, part 4 129, part 5 117, part 6 80, part 9 130 and part 8 68
+ * with R08.T8.c's footprint beside it, every part about 130 s at most but part 2, R08.T6.b's alone
+ * at 149 s.
  */
-type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -149,6 +167,10 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 6;
     case "7":
       return 7;
+    case "8":
+      return 8;
+    case "9":
+      return 9;
     default:
       return null;
   }
@@ -203,7 +225,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1, 2, 3, 4, 5, 6 or all");
+    return failed("the part asked for is not 1 to 9 or all");
   }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
@@ -296,7 +318,15 @@ async function run(
   await group(1, "R05.T10.b the height worker", () => checkHeightWorker(checks));
 
   await group(1, "R05.T12.b the atmosphere's tables", () => checkAtmosphereTables(engine, checks));
-  await group(1, "R08.T8.b low's half-resolution pick", () => checkLowPick(engine, checks));
+  // Its surface's writes are held under the probed rounding (`decision-r08-t8-leans.md` §8).
+  await group(1, "R08.T8.b low's half-resolution pick", () =>
+    checkLowPick(engine, status.getSnapshot().targetRounding.rgba16float, checks),
+  );
+  // The hardware runs' measurement (R08.T11's rows): pass times are figures only where the run
+  // lifted their quantization.
+  if (gpuTiming) {
+    await group(1, "R08.T8.c the far limb's timings", () => timeFarLimb(engine, checks));
+  }
   await group(1, "R07.T12 the exposure histogram", () => checkHistogram(engine, checks));
   await group(1, "R07.T14.b bloom and glare", () =>
     checkBloom(engine, status.getSnapshot().targetRounding.rgba16float, checks),
@@ -321,10 +351,10 @@ async function run(
   await group(3, "R08.T6.g heights and angles in f32", () =>
     checkAtmosphereHeights(engine, checks, twins),
   );
-  await group(5, "R08.T6.f slices and bands on Earth", () =>
+  await group(8, "R08.T6.f slices and bands on Earth", () =>
     checkAtmosphereSlicesEarth(engine, checks, twins),
   );
-  await group(3, "R08.T6.i the marches cut at layer edges", () =>
+  await group(5, "R08.T6.i the marches cut at layer edges", () =>
     checkAtmosphereLayerEdges(engine, checks, twins),
   );
   await group(6, "R08.T9.b surface lighting on Earth", () =>
@@ -333,7 +363,7 @@ async function run(
   await group(6, "R08.T9.b surface lighting on a Saturn-class figure", () =>
     checkSurfaceLightingSaturn(engine, checks, twins),
   );
-  await group(6, "R08.T8.a the march band", () => checkMarchBand(engine, checks, twins));
+  await group(9, "R08.T8.a the march band", () => checkMarchBand(engine, checks, twins));
   await group(7, "R10.T10.b the lit terrain", () => checkLitTerrain(engine, checks));
   await group(7, "R10.T10.c the survey edge", () => checkSurveyEdge(engine, checks));
   await group(7, "R10.T16 the frame", () => checkTerrainFrame(engine, checks));
@@ -356,10 +386,13 @@ async function run(
       shared.dispose();
     }
   });
-  await group(4, "R08.T7 several suns, and the sky through the air", () =>
+  await group(9, "R08.T7 several suns, and the sky through the air", () =>
     checkSeveralSuns(engine, checks, twins),
   );
   await group(4, "R08.T8.b the far limb", () => checkFarLimb(engine, checks, twins));
+  await group(8, "R08.T8.c the far limb's footprint", () =>
+    checkFarLimbFootprint(engine, checks, twins),
+  );
   await group(1, "R05.T11.a the terrain's resources", () => checkTerrainResources(engine, checks));
   await group(1, "R05.T11.b the terrain's frames", () => checkTerrainFrames(engine, checks));
   await group(1, "R06.T13.d the sky's band", () => checkSkyBand(engine, checks));
@@ -422,6 +455,12 @@ async function run(
         frames.length > 0,
         `${String(frames.length)} frames`,
       );
+    });
+  }
+
+  if (captures) {
+    await group(1, "R08.T8.c the far limb captures", async () => {
+      images = [...images, ...(await captureFarLimb(engine, checks))];
     });
   }
 
