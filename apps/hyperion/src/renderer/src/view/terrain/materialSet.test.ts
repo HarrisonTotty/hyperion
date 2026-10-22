@@ -51,8 +51,8 @@ const HIGH = [
 ];
 
 /**
- * A binding under the high lit cache's offsets (1,286 slots × 101,400 B), and over its fallback's
- * horizon map at the same 1,286 slots (decision-r10-t14b-constants §4) and the wireframe's offsets
+ * A binding under the high lit cache's offsets (1,208 slots × 101,400 B), and over its fallback's
+ * horizon map at the same 1,208 slots (decision-r10-t14b-constants §4) and the wireframe's offsets
  * (520 slots).
  */
 const NARROW: CountingLimits = { maxStorageBufferBindingSize: 1e8, maxBufferSize: 1e8 };

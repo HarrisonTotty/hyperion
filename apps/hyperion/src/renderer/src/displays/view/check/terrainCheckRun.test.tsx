@@ -427,6 +427,7 @@ async function run(): Promise<{
     },
     terrain,
     setting: "high",
+    fixture: "terrain-test",
     document,
     timing: TIMING,
     nowMs: clock,

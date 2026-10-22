@@ -40,6 +40,7 @@ function input(
       launchMode: "vulkan",
       setting: "high",
       smoke: false,
+      fixture: "terrain-test",
       switches: [],
       shown: false,
       window: { widthDip: 1926, heightDip: 1086 },
@@ -366,5 +367,58 @@ describe("the hand-over check's files", () => {
       overall: "pass",
       rangeM: 1.5419e7,
     });
+  });
+
+  it("are named -handover-weathered for a weathered run, its run block and summary naming its field (R10.T1.c)", async () => {
+    const { files, written } = inMemory();
+    const weathered = (smoke: boolean): HandoverCheckInput => ({
+      ...input(),
+      run: { ...input().run, smoke, fixture: "terrain-test-weathered" },
+    });
+    const full = await writeHandoverResults(
+      "/out",
+      buildHandoverCheckResults(weathered(false)),
+      files,
+    );
+    const smoke = await writeHandoverResults(
+      "/out",
+      buildHandoverCheckResults(weathered(true)),
+      files,
+    );
+    expect([full.json, smoke.markdown]).toEqual([
+      "/out/2026-10-21-effect-high-handover-weathered.json",
+      "/out/2026-10-21-effect-high-handover-weathered-smoke.md",
+    ]);
+    expect(JSON.parse(written.get(full.json) ?? "null")).toMatchObject({
+      run: { smoke: false, fixture: "terrain-test-weathered" },
+    });
+    expect(written.get(full.markdown)).toContain(
+      "- **Field:** `terrain-test-weathered`, TEST MOON weathered (`terrain_test_weathered.golden`), served in TERRAIN TEST's place",
+    );
+  });
+
+  it("keep TERRAIN TEST's run block, and its summary, as before the option (R10.T1.c)", () => {
+    const results = buildHandoverCheckResults(input());
+    expect([
+      Object.keys(results.run),
+      handoverCheckMarkdown(results).includes("**Field:**"),
+    ]).toEqual([
+      [
+        "startedAt",
+        "machine",
+        "versions",
+        "platform",
+        "launchMode",
+        "setting",
+        "smoke",
+        "switches",
+        "shown",
+        "window",
+        "devicePixelRatio",
+        "captures",
+        "provisional",
+      ],
+      false,
+    ]);
   });
 });

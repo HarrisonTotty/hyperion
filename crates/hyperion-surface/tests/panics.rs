@@ -1366,10 +1366,12 @@ mod material {
 mod maturity {
     use hyperion_base::rng::DetailSeed;
     use hyperion_base::units::{Gigayears, Metres};
+    use hyperion_surface::cube::{Face, PatchKey};
     use hyperion_surface::field::{CoarseField, FieldView};
     use hyperion_surface::material::{
-        GroundExposure, class_fractions, crater_maturity, excavated_share, halo_reach, halo_share,
-        haloed_albedo_scale, maturity_after, maturity_mix, reworked_depth,
+        GroundExposure, MATURITY_NODES, class_fractions, crater_maturity, excavated_share,
+        halo_reach, halo_share, haloed_albedo_scale, maturity_after, maturity_mix,
+        maturity_node_albedo, maturity_node_share, patch_maturity, reworked_depth,
     };
     use hyperion_surface::synth::{SynthCache, Synthesiser};
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -1592,6 +1594,60 @@ mod maturity {
         let field = weathered_field();
         let mix = maturity_mix(&Synthesiser::new(&field, DetailSeed::new(1))).unwrap();
         let _ = mix.share_above(f64::NAN);
+    }
+
+    #[test]
+    #[should_panic(expected = "a patch's maturity takes its 4225 vertices, got 3")]
+    fn a_patch_s_maturity_refuses_a_list_that_is_not_its_vertices() {
+        let field = weathered_field();
+        let _ = patch_maturity(
+            &Synthesiser::new(&field, DetailSeed::new(1)),
+            &mut SynthCache::new(),
+            PatchKey::root(Face::PosZ),
+            &[None; 3],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "a maturity node is one of 16, got 16")]
+    fn the_node_grading_refuses_a_node_past_its_count() {
+        let _ = maturity_node_share(MATURITY_NODES);
+    }
+
+    #[test]
+    #[should_panic(expected = "a maturity must be in [0, 0.5], its background's, got 0.6")]
+    fn the_node_interpolation_refuses_a_maturity_above_its_background_s() {
+        let _ = maturity_node_albedo(&[[0.1; 3]; MATURITY_NODES], 0.5, 0.6);
+    }
+
+    #[test]
+    #[should_panic(expected = "a maturity must be in [0, 0.5], its background's, got -0.1")]
+    fn the_node_interpolation_refuses_a_negative_maturity() {
+        let _ = maturity_node_albedo(&[[0.1; 3]; MATURITY_NODES], 0.5, -0.1);
+    }
+
+    #[test]
+    #[should_panic(expected = "a maturity must be in [0, 0.5], its background's, got NaN")]
+    fn the_node_interpolation_refuses_a_nan_maturity() {
+        let _ = maturity_node_albedo(&[[0.1; 3]; MATURITY_NODES], 0.5, f64::NAN);
+    }
+
+    #[test]
+    #[should_panic(expected = "a background maturity must be in [0, 1], got NaN")]
+    fn the_node_interpolation_refuses_a_nan_background() {
+        let _ = maturity_node_albedo(&[[0.1; 3]; MATURITY_NODES], f64::NAN, 0.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a background maturity must be in [0, 1], got 1.5")]
+    fn the_node_interpolation_refuses_a_background_above_one() {
+        let _ = maturity_node_albedo(&[[0.1; 3]; MATURITY_NODES], 1.5, 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a background maturity must be in [0, 1], got -0.5")]
+    fn the_node_interpolation_refuses_a_negative_background() {
+        let _ = maturity_node_albedo(&[[0.1; 3]; MATURITY_NODES], -0.5, 0.0);
     }
 }
 
@@ -1832,7 +1888,10 @@ mod weights {
 /// patch heights are another patch's.
 mod bake {
     use hyperion_base::rng::DetailSeed;
-    use hyperion_surface::bake::{HorizonLayer, TerrainBakeOptions, WeightsLayer, bake_terrain};
+    use hyperion_surface::bake::{
+        HorizonLayer, TerrainBakeOptions, WeightsLayer, bake_terrain, decode_maturity,
+        encode_maturity,
+    };
     use hyperion_surface::cube::{Face, PatchKey};
     use hyperion_surface::field::{CoarseField, FieldView, PartialField};
     use hyperion_surface::height::HeightSample;
@@ -1897,6 +1956,36 @@ mod bake {
             &opts,
             &mut SynthCache::new(),
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "a background maturity must be in [0, 1], got 1.5")]
+    fn a_maturity_code_on_a_background_above_one_is_refused() {
+        let _ = encode_maturity(0.5, 1.5);
+    }
+
+    #[test]
+    #[should_panic(expected = "a maturity must be in [0, 0.5], its background's, got 0.6")]
+    fn a_maturity_code_of_a_maturity_above_its_background_is_refused() {
+        let _ = encode_maturity(0.6, 0.5);
+    }
+
+    #[test]
+    #[should_panic(expected = "a maturity must be in [0, 0.5], its background's, got -0.1")]
+    fn a_maturity_code_of_a_negative_maturity_is_refused() {
+        let _ = encode_maturity(-0.1, 0.5);
+    }
+
+    #[test]
+    #[should_panic(expected = "a maturity must be in [0, 0.5], its background's, got NaN")]
+    fn a_maturity_code_of_a_nan_maturity_is_refused() {
+        let _ = encode_maturity(f64::NAN, 0.5);
+    }
+
+    #[test]
+    #[should_panic(expected = "a background maturity must be in [0, 1], got NaN")]
+    fn a_maturity_decoded_on_a_nan_background_is_refused() {
+        let _ = decode_maturity(17, f64::NAN);
     }
 
     #[test]

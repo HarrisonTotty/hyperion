@@ -46,7 +46,15 @@
 //! [`HALO_LENGTH_RIM_RADII`], [`HALO_EXTENT_RIM_RADII`]). So that a body drawn at each point's
 //! maturity keeps its p, the server solves its scale ([`haloed_albedo_scale`]) over the body's
 //! maturity mix ([`maturity_mix`], [`MaturityMix`], [`MaturityNode`]), the distribution of its
-//! young craters' deficits in closed form, through the inverse halo ([`halo_reach`]).
+//! young craters' deficits in closed form, through the inverse halo ([`halo_reach`]). A patch's
+//! bake draws the maturity at each vertex over the craters its level resolves ([`patch_maturity`],
+//! the point rule at a level [`maturity_at_level`], its cut [`maturity_cut`],
+//! [`maturity_keeps_octave`] and [`MATURITY_CUT_SHARE`]), and the client draws the octaves a level
+//! leaves out at their expectation: the body's unresolved terms ([`unresolved_terms`],
+//! [`UnresolvedTerms`], [`OctaveTerms`]), a level's unresolved mix ([`unresolved_mix`],
+//! [`UnresolvedMix`]), and each material's [`MATURITY_NODES`] albedo nodes at a level
+//! ([`maturity_nodes`], [`maturity_node_share`]), which it interpolates
+//! ([`maturity_node_albedo`]).
 //!
 //! Nothing here draws from a stream, so the module opens no domain tag.
 
@@ -77,7 +85,7 @@ pub(crate) use classify::{IceCuts, lapse_drop_k};
 // (`modifiers_nothing_on_the_record_reads_the_modifiers_yet`) allows the time law's names outside
 // `material/maturity.rs` on this module's one re-export line of that module alone.
 #[rustfmt::skip]
-pub use maturity::{EXCAVATION_DEPTH_RATIO, GroundExposure, HALO_EXTENT_RIM_RADII, HALO_LENGTH_RIM_RADII, LUNAR_MATURATION_TIME, MaturityMix, MaturityNode, REWORKING_DEPTH_AT_ONE_MYR, REWORKING_EXPONENT, body_maturity, crater_maturity, excavated_share, exposed_properties, halo_reach, halo_share, maturity_after, maturity_at, maturity_mix, reworked_depth, takes_organic_cover};
+pub use maturity::{EXCAVATION_DEPTH_RATIO, GroundExposure, HALO_EXTENT_RIM_RADII, HALO_LENGTH_RIM_RADII, LUNAR_MATURATION_TIME, MATURITY_CUT_SHARE, MATURITY_NODES, MaturityMix, MaturityNode, OctaveTerms, REWORKING_DEPTH_AT_ONE_MYR, REWORKING_EXPONENT, UnresolvedMix, UnresolvedTerms, body_maturity, crater_maturity, excavated_share, exposed_properties, halo_reach, halo_share, maturity_after, maturity_at, maturity_at_level, maturity_cut, maturity_keeps_octave, maturity_mix, maturity_node_albedo, maturity_node_share, maturity_nodes, patch_maturity, reworked_depth, takes_organic_cover, unresolved_mix, unresolved_terms};
 pub use properties::{
     AlbedoSpan, BRIGHT_FROST_LIMB_PARAMETER, BRIGHT_FROST_NORMAL_ALBEDO, Citation, Figure, FormRow,
     FrictionModel, LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO, LUNAR_LIMB_ONSET_NORMAL_ALBEDO,

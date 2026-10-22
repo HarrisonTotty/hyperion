@@ -43,7 +43,13 @@ function standingModeBanner(): string | null {
 /** A views-check launch's functions, each a mock. */
 function viewsCheckApi(): ViewsCheckApi & { readonly end: Mock<ViewsCheckApi["end"]> } {
   return {
-    launch: { setting: "high", smoke: true, out: null, run: "several-views" },
+    launch: {
+      setting: "high",
+      smoke: true,
+      out: null,
+      run: "several-views",
+      fixture: "terrain-test",
+    },
     startPhase: () => Promise.resolve(),
     endPhase: () => Promise.resolve(),
     askRightWayUp: () => Promise.resolve(),

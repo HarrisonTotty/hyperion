@@ -994,8 +994,10 @@ browser_timeout := "600"
 # heaviest goldens, the class, weights and albedo tests) took 229 s of the library's 394 s, and the
 # rest 165 s (2026-10-15, in the heavy-test lock, at a 1-minute load of 8 to 20; each call's time
 # includes the runner's bindings and Electron's start), where in one call it took 406 s (R10.T10.a's
-# gate, 2026-10-14).
-browser_split := "hyperion-surface=material::"
+# gate, 2026-10-14). `material::weights::` (its tests and golden) runs as a part of its own ahead of
+# the rest of `material::`, which had reached 555–595 s of its 600 s on the laptop (R10.T1.c,
+# 2026-10-21; plan 10's halo follow-up, deferred finding 10).
+browser_split := "hyperion-surface=material::weights:: hyperion-surface=material::"
 
 # Run the browser target's suites (`--lib --tests`, at the slow-test profile, since debug wasm is
 # slow) on the V8 that Electron ships, through `tools/electron-node/node` (R04 Design note 13).

@@ -42,6 +42,16 @@
  *   and μ₀_ν > 0, the point-source form of the disc's cut at the datum's horizon) and visible
  *   (μ_ν > 0). The normalisation's sums, `elsewhere`'s alone, stay on the datum's normals, so that
  *   the ratio carries the slopes. Without a normal map every value is as before.
+ * - **The maturity** (plan R10, R10.T1.c's client half; decision-r10-t1c-client-scope §2.3). Where
+ *   the map carries its texels' maturity, each element's share of a class drawn from its nodes is
+ *   multiplied per channel by T_c(m_e) ÷ T_c(m_body) as the shares are made: the class's albedo at
+ *   the element, as the disc draws it (`classMapAlbedoAt`), over its law's A, its node K − 1 (the
+ *   store's `classMapLawsOf`), so that the class's sums carry its albedo across the body. The I/F
+ *   is linear in A for a law of fixed row, so the fold is exact, and the frame's path is as it was.
+ *   The point meets the disc only while each drawn class's A is its node K − 1, so a surface whose
+ *   A is another is refused (`assertLawPerClass`), as one whose laws are not one per class is.
+ *   The factors, three `f32` an entry, are made in the same steps as the shares, the sliced and the
+ *   synchronous builds alike. Without a maturity every value is as before, bit for bit.
  * - **The build, off the frame** (plan R10, R10.T14.f). The elements' shares and normals are made
  *   in slices of at most {@link CLASS_MAP_POINT_SLICE_MS} a frame ({@link stepClassMapPoints},
  *   the terrain session's step), from the moment the store takes a map
@@ -68,11 +78,18 @@ import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
 import { type Rotation3, rotateToBody, rotateToBodyFixed } from "../coords/rotation";
 import type { Rgb } from "../photometry/toneCurve";
 import { faceUvToXyz, stToUv } from "../terrain/cube";
+import { MATURITY_NODES } from "../terrain/maturityNodes";
 import type { BodyFigure } from "../terrain/planet";
 import type { Face } from "../terrain/patchKey";
 import { type NormalMapTexels, normalMapNormalAt } from "./discNormals";
 import { discLawTerms } from "./discShading";
-import { type ClassMapTexels, classMapSharesAt, discSurfaceLaws } from "./discSurface";
+import {
+  classMapAlbedoAt,
+  type ClassMapMaturity,
+  classMapSharesAt,
+  type ClassMapTexels,
+  discSurfaceLaws,
+} from "./discSurface";
 import { bodyReflection } from "./oblate";
 
 /**
@@ -254,6 +271,13 @@ interface ElementShares {
   readonly law: Uint8Array;
   /** Each entry's share. */
   readonly share: Float64Array;
+  /**
+   * Under a map's maturity (R10.T1.c's client half), each entry's factor on its law's A per display
+   * channel, three an entry (r, g, b): T_c(m_e) ÷ T_c(m_body), the class's albedo at the element
+   * (`classMapAlbedoAt`) over its law's A, its node K − 1; 1 for `elsewhere` and a class not drawn
+   * from its nodes. `null` for a map without a maturity.
+   */
+  readonly factor: Float32Array | null;
 }
 
 /** Each map's element shares, made once and held while the map is. */
@@ -262,10 +286,37 @@ const SHARES = new WeakMap<ClassMapTexels, ElementShares>();
 /** The entries a block holds while a map's shares are made, a block's copy a step (R10.T14.f). */
 const SHARE_BLOCK = 2 ** 16;
 
-/** A block of a map's share entries while they are made: each entry's law and share. */
+/**
+ * A block of a map's share entries while they are made: each entry's law and share, and its
+ * factors under a maturity.
+ */
 interface ShareBlock {
   readonly law: Uint8Array;
   readonly share: Float64Array;
+  readonly factor: Float32Array | null;
+}
+
+/** The display channels' indices, r, g, b. */
+const CHANNELS = [0, 1, 2] as const;
+
+/**
+ * An entry's factors on its law's A under a map's maturity (R10.T1.c's client half), into `out` at
+ * `at`: law m's class's albedo at the element over its node K − 1 per channel, 1 for `elsewhere`, a
+ * class drawn by its law's A there (`albedo` `null`), or a channel whose node K − 1 is not above 0.
+ */
+function putFactors(
+  out: Float32Array,
+  at: number,
+  maturity: ClassMapMaturity,
+  albedo: ReadonlyArray<Rgb | null> | null,
+  m: number,
+): void {
+  const drawn = m === 0 ? null : (albedo?.[m - 1] ?? null);
+  const background = 3 * (MATURITY_NODES * (m - 1) + MATURITY_NODES - 1);
+  for (const c of CHANNELS) {
+    const own = maturity.nodes[background + c] ?? 0;
+    out[at + c] = drawn === null || !(own > 0) ? 1 : drawn[c] / own;
+  }
 }
 
 /** The elements along a face's side for a class map's point. */
@@ -276,7 +327,10 @@ function elementSideOf(texels: ClassMapTexels): number {
 /**
  * The shares of a map's laws at each of its elements, by the survey-masked reconstruction, after
  * the elements' geometry where it is not made: {@link STEP_WORK} elements a step, and the stores'
- * copy one; those held where they were made meanwhile.
+ * copy one; those held where they were made meanwhile. Under a map's maturity (R10.T1.c's client
+ * half) each entry's factors on its law's A are found with its share, from the classes' albedos
+ * at the element (`classMapAlbedoAt`), in the same steps: the one loop of the sliced and the
+ * synchronous builds.
  */
 function* sharesSteps(texels: ClassMapTexels): Generator<void, ElementShares> {
   const held = SHARES.get(texels);
@@ -285,11 +339,13 @@ function* sharesSteps(texels: ClassMapTexels): Generator<void, ElementShares> {
   }
   const geometry = yield* geometrySteps(elementSideOf(texels));
   const offsets = new Uint32Array(geometry.count + 1);
+  const { maturity } = texels;
   // The entries in blocks while they are made, then copied into their stores a block a step, so
   // that no step copies a whole map's (614,400 entries on an eight-class map; R10.T14.f).
   const newBlock = (): ShareBlock => ({
     law: new Uint8Array(SHARE_BLOCK),
     share: new Float64Array(SHARE_BLOCK),
+    factor: maturity === undefined ? null : new Float32Array(3 * SHARE_BLOCK),
   });
   let block = newBlock();
   const blocks = [block];
@@ -297,11 +353,13 @@ function* sharesSteps(texels: ClassMapTexels): Generator<void, ElementShares> {
   let entries = 0;
   const { directions } = geometry;
   for (let e = 0; e < geometry.count; e += 1) {
-    const shares = classMapSharesAt(texels, [
+    const direction = [
       directions[3 * e] ?? 0,
       directions[3 * e + 1] ?? 0,
       directions[3 * e + 2] ?? 0,
-    ]);
+    ] as const;
+    const shares = classMapSharesAt(texels, direction);
+    const albedo = maturity === undefined ? null : classMapAlbedoAt(texels, direction, shares);
     for (const [m, value] of shares.entries()) {
       if (value > 0) {
         if (used === SHARE_BLOCK) {
@@ -311,6 +369,9 @@ function* sharesSteps(texels: ClassMapTexels): Generator<void, ElementShares> {
         }
         block.law[used] = m;
         block.share[used] = value;
+        if (maturity !== undefined && block.factor !== null) {
+          putFactors(block.factor, 3 * used, maturity, albedo, m);
+        }
         used += 1;
         entries += 1;
       }
@@ -322,12 +383,16 @@ function* sharesSteps(texels: ClassMapTexels): Generator<void, ElementShares> {
   }
   const law = new Uint8Array(entries);
   const share = new Float64Array(entries);
+  const factor = maturity === undefined ? null : new Float32Array(3 * entries);
   let copied = 0;
   for (const full of blocks) {
     yield;
     const length = Math.min(SHARE_BLOCK, entries - copied);
     law.set(full.law.subarray(0, length), copied);
     share.set(full.share.subarray(0, length), copied);
+    if (factor !== null && full.factor !== null) {
+      factor.set(full.factor.subarray(0, 3 * length), 3 * copied);
+    }
     copied += length;
   }
   const made = SHARES.get(texels) ?? {
@@ -336,6 +401,7 @@ function* sharesSteps(texels: ClassMapTexels): Generator<void, ElementShares> {
     offsets,
     law,
     share,
+    factor,
   };
   SHARES.set(texels, made);
   return made;
@@ -607,10 +673,18 @@ export function classMapPointWork(): ClassMapPointWork {
  * its k² terms: Σ share · 2μ₀′μ ÷ (μ₀′ + μ′) dS and Σ share · μ₀′μ dS, μ the datum's (the
  * projected area), μ′ = max(n′ · v, μ ÷ 2), a term 0 where n′ is unlit, the datum's where the map
  * holds none, over the elements lit and visible on the datum; the unweighted sums stay the datum's.
+ *
+ * Under a map's maturity (R10.T1.c's client half) each law's sums are per display channel too,
+ * each entry's share times its factor on the law's A (`ElementShares.factor`): Σ f_c share · …,
+ * law m's channel c at 3m + c. The I/F is linear in A for a law of fixed row, so these times the
+ * law's terms are the map's light with each class's A its albedo at each element.
  */
 interface LawSums {
   readonly lommelSeeliger: Float64Array;
   readonly lambert: Float64Array;
+  /** Under a maturity, each law's factor-weighted sums per channel, 3 a law; `null` without. */
+  readonly lommelSeeligerRgb: Float64Array | null;
+  readonly lambertRgb: Float64Array | null;
   totalLommelSeeliger: number;
   totalLambert: number;
 }
@@ -620,9 +694,12 @@ const EVALUATION_STEP = 256;
 
 /** The sums before any element, each law's and the unweighted, 0. */
 function emptyLawSums(shares: ElementShares): LawSums {
+  const rgb = shares.factor !== null;
   return {
     lommelSeeliger: new Float64Array(shares.laws),
     lambert: new Float64Array(shares.laws),
+    lommelSeeligerRgb: rgb ? new Float64Array(3 * shares.laws) : null,
+    lambertRgb: rgb ? new Float64Array(3 * shares.laws) : null,
     totalLommelSeeliger: 0,
     totalLambert: 0,
   };
@@ -642,9 +719,9 @@ function addLawSums(
   from: number,
   to: number,
 ): void {
-  const { geometry, offsets, law, share } = shares;
+  const { geometry, offsets, law, share, factor } = shares;
   const { directions, solidAngles } = geometry;
-  const { lommelSeeliger, lambert } = sums;
+  const { lommelSeeliger, lambert, lommelSeeligerRgb, lambertRgb } = sums;
   let { totalLommelSeeliger, totalLambert } = sums;
   const { x: sx, y: sy, z: sz } = towardsLight;
   const { x: vx, y: vy, z: vz } = towardsObserver;
@@ -700,11 +777,30 @@ function addLawSums(
       shadedLs = sumLs / perElement;
     }
     const end = offsets[e + 1] ?? 0;
-    for (let k = offsets[e] ?? 0; k < end; k += 1) {
-      const m = law[k] ?? 0;
-      const w = share[k] ?? 0;
-      lommelSeeliger[m] = (lommelSeeliger[m] ?? 0) + w * shadedLs;
-      lambert[m] = (lambert[m] ?? 0) + w * shadedFlat;
+    if (factor === null || lommelSeeligerRgb === null || lambertRgb === null) {
+      for (let k = offsets[e] ?? 0; k < end; k += 1) {
+        const m = law[k] ?? 0;
+        const w = share[k] ?? 0;
+        lommelSeeliger[m] = (lommelSeeliger[m] ?? 0) + w * shadedLs;
+        lambert[m] = (lambert[m] ?? 0) + w * shadedFlat;
+      }
+    } else {
+      // Under a maturity (R10.T1.c): each channel's sum by the entry's factor on its law's A.
+      for (let k = offsets[e] ?? 0; k < end; k += 1) {
+        const at = 3 * (law[k] ?? 0);
+        const w = share[k] ?? 0;
+        const wLs = w * shadedLs;
+        const wFlat = w * shadedFlat;
+        const fr = factor[3 * k] ?? 1;
+        const fg = factor[3 * k + 1] ?? 1;
+        const fb = factor[3 * k + 2] ?? 1;
+        lommelSeeligerRgb[at] = (lommelSeeligerRgb[at] ?? 0) + fr * wLs;
+        lommelSeeligerRgb[at + 1] = (lommelSeeligerRgb[at + 1] ?? 0) + fg * wLs;
+        lommelSeeligerRgb[at + 2] = (lommelSeeligerRgb[at + 2] ?? 0) + fb * wLs;
+        lambertRgb[at] = (lambertRgb[at] ?? 0) + fr * wFlat;
+        lambertRgb[at + 1] = (lambertRgb[at + 1] ?? 0) + fg * wFlat;
+        lambertRgb[at + 2] = (lambertRgb[at + 2] ?? 0) + fb * wFlat;
+      }
     }
   }
   sums.totalLommelSeeliger = totalLommelSeeliger;
@@ -727,7 +823,8 @@ function addLawSums(
  * @param figure - The body's figure, drawn about the body-fixed z axis.
  * @param towardsLight - The unit direction from the body to the light, body-fixed.
  * @param towardsObserver - The unit direction from the body to the observer, body-fixed.
- * @throws Error if the surface's laws are not one per class of its map.
+ * @throws Error if the surface's laws are not one per class of its map, or, under its map's
+ *   maturity, a class drawn from its nodes has an A other than its node K − 1.
  */
 export function classMapReflectionRatio(
   figure: BodyFigure,
@@ -759,13 +856,44 @@ export function makeClassMapPointNow(surface: ClassMapDiscSurface): void {
   elementsNow(surface);
 }
 
-/** @throws Error if the surface's laws are not one per class of its map. */
+/**
+ * Checks the invariants the point's sums take of a surface's laws: one law per class of its map,
+ * and, under the map's maturity, each class drawn from its nodes with its node K − 1 as its A.
+ *
+ * @remarks
+ * A drawn class's factors are T_c(m_e) ÷ T_c(m_body) on its law's A (`putFactors`), so the
+ * point draws the disc's T_c(m_e) only where that A is T_c(m_body), its node K − 1 in the display
+ * channels, as the store's `classMapLawsOf` sets it. The test is exact equality in `f32`, the
+ * nodes' own precision: each channel of the A rounded to `f32` (`Math.fround`) must equal the
+ * node's value as its `Float32Array` holds it. The store's A, read from those very values, passes
+ * as it is; an `f64` A within the rounding of the node passes too, its factor's `f32` error being as
+ * large. A class not drawn from its nodes, and a map without a maturity, take any A.
+ *
+ * @throws Error if the surface's laws are not one per class of its map, or if a class drawn from
+ *   its nodes has an A that is not its node K − 1.
+ */
 function assertLawPerClass(surface: ClassMapDiscSurface): void {
   if (surface.laws.length !== surface.texels.classes) {
     throw new Error(
       `a class map of ${String(surface.texels.classes)} classes needs as many laws, got ${String(surface.laws.length)}`,
     );
   }
+  const { maturity } = surface.texels;
+  if (maturity === undefined) {
+    return;
+  }
+  surface.laws.forEach((law, k) => {
+    if (maturity.drawn[k] !== true) {
+      return;
+    }
+    const background = 3 * (MATURITY_NODES * k + MATURITY_NODES - 1);
+    const node = CHANNELS.map((c) => maturity.nodes[background + c] ?? Number.NaN);
+    if (CHANNELS.some((c) => Math.fround(law.a[c]) !== node[c])) {
+      throw new Error(
+        `class ${String(k)} of a matured class map is drawn from its nodes, so its law's A must be its node K − 1 (${node.join(", ")}), not (${law.a.join(", ")}): the point would not meet the disc`,
+      );
+    }
+  });
 }
 
 /** {@link classMapReflectionRatio} by the surface's made elements, at once, over every element. */
@@ -834,13 +962,23 @@ function ratioOfSums(
   const alpha = Math.acos(Math.min(1, Math.max(-1, dot(towardsLight, towardsObserver))));
   const terms = discLawTerms(discSurfaceLaws(surface), cOverA, alpha);
   const ratio: [number, number, number] = [1, 1, 1];
+  const { lommelSeeligerRgb, lambertRgb } = sums;
   for (const c of [0, 1, 2] as const) {
     let mapped = 0;
-    terms.forEach((term, m) => {
-      mapped +=
-        term.lommelSeeliger[c] * (sums.lommelSeeliger[m] ?? 0) +
-        term.lambert[c] * (sums.lambert[m] ?? 0);
-    });
+    if (lommelSeeligerRgb === null || lambertRgb === null) {
+      terms.forEach((term, m) => {
+        mapped +=
+          term.lommelSeeliger[c] * (sums.lommelSeeliger[m] ?? 0) +
+          term.lambert[c] * (sums.lambert[m] ?? 0);
+      });
+    } else {
+      // Under a maturity (R10.T1.c), each law's channel sums by its entries' factors.
+      terms.forEach((term, m) => {
+        mapped +=
+          term.lommelSeeliger[c] * (lommelSeeligerRgb[3 * m + c] ?? 0) +
+          term.lambert[c] * (lambertRgb[3 * m + c] ?? 0);
+      });
+    }
     const uniform = terms[0];
     const alone =
       uniform === undefined
@@ -1101,7 +1239,8 @@ function drawnPointOf(surface: ClassMapDiscSurface, at: LightGeometry): DrawnPoi
  * @param lightKey - The light's identity among the body's lights, a star's or a planetshine
  *   source's (`pointFlux`'s): past δ only its own held ratios stand in for it. One key for every
  *   light, the default, treats them as one.
- * @throws Error if the surface's laws are not one per class of its map.
+ * @throws Error if the surface's laws are not one per class of its map, or, under its map's
+ *   maturity, a class drawn from its nodes has an A other than its node K − 1.
  */
 export function classMapPointReflection(
   figure: BodyFigure,

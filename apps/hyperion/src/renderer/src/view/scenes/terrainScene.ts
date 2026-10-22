@@ -17,6 +17,12 @@
  * - **Its photometry** is its field's palette's own: its primary crust's normal albedo under the
  *   Regolith law, R10's class law of that crust ({@link terrainMoonPhotometry}), so that its disc
  *   and figure over unsurveyed ground stand where its terrain's highlands do.
+ * - **Its two fields** ({@link ViewsCheckTerrainFixture}): `TERRAIN TEST`'s own golden by default,
+ *   and `TEST MOON` weathered's (`terrain_test_weathered.golden`; plan R10, R10.T1.c's client half;
+ *   decision-r10-t1c-client-scope §3), the same moon, ID, seed and figure on a 1 Gyr surface whose
+ *   young craters' haloes the maturity draws, which a `--terrain --weathered` check launch serves in
+ *   its place. Every function here takes the fixture, `terrain-test` unless given, so that the
+ *   scene, its spike and every launch but that one are as they were.
  * - **Its script.** The own ship, `TEST HULL`, whose seat the camera takes, flies a scripted path
  *   in `TEST MOON`'s body-fixed axes: from {@link TERRAIN_START_ALTITUDE_M} (beyond the hand-over
  *   range) down over the survey, on a smoothstep in the logarithm of its height over the datum, to
@@ -33,6 +39,8 @@
 import type { BodyIdHex, HostDiscDto, SurfaceHeaderDto, SystemIdHex } from "@hyperion/protocol";
 
 import terrainGoldenText from "../../../../../../../crates/hyperion-surface/tests/golden/worker/terrain_test.golden?raw";
+import weatheredGoldenText from "../../../../../../../crates/hyperion-surface/tests/golden/worker/terrain_test_weathered.golden?raw";
+import type { ViewsCheckTerrainFixture } from "../../../../preload/api";
 import { add, cross, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type { BodyPhotometry, WireAppearance } from "../appearance/fromWire";
 import type { PhotometricLaw } from "../appearance/law";
@@ -46,7 +54,11 @@ import { bodyKindSymbol, staticRetarded, type ViewBody, type ViewScene } from ".
 import { classRowLaw, PHASE_LAW } from "../terrain/terrainMaterial";
 import { AU_M, KEPT_BARYCENTRE, KEPT_TIDAL_RADIUS_M, type KeptScene, keptTime } from "./kept";
 import { terrainTestFixture, type TerrainTestFixture } from "./terrainFixture";
-import { parseTerrainGolden, type TerrainGolden } from "./terrainGolden";
+import {
+  parseTerrainGolden,
+  type TerrainGolden,
+  type TerrainGoldenMaturity,
+} from "./terrainGolden";
 
 /** The terrain test scene's name, as the `SCENE` selector shows it. */
 export const TERRAIN_SCENE_NAME = "TERRAIN TEST";
@@ -142,31 +154,52 @@ export const TERRAIN_TEST_SHIP = "test-ship";
  */
 export const LIMB_ONSET_NORMAL_ALBEDO = 0.6;
 
-let parsed: TerrainGolden | null = null;
+/** Each fixture's golden: its text and its file's name, which the reader's refusals give. */
+const FIXTURE_GOLDENS: Readonly<
+  Record<ViewsCheckTerrainFixture, { readonly text: string; readonly file: string }>
+> = {
+  "terrain-test": { text: terrainGoldenText, file: "terrain_test.golden" },
+  "terrain-test-weathered": { text: weatheredGoldenText, file: "terrain_test_weathered.golden" },
+};
 
-/** The terrain golden as read, once a page: `TEST MOON`'s ID, seed, figure, palette and field. */
-export function terrainTestGolden(): TerrainGolden {
-  parsed ??= parseTerrainGolden(terrainGoldenText);
-  return parsed;
+/** Each fixture's golden as read, once a page. */
+const parsed = new Map<ViewsCheckTerrainFixture, TerrainGolden>();
+
+/**
+ * A fixture's terrain golden as read, once a page: `TEST MOON`'s ID, seed, figure, palette and
+ * field; `TERRAIN TEST`'s own unless `fixture` names `TEST MOON` weathered's.
+ */
+export function terrainTestGolden(
+  fixture: ViewsCheckTerrainFixture = "terrain-test",
+): TerrainGolden {
+  const known = parsed.get(fixture);
+  if (known !== undefined) {
+    return known;
+  }
+  const { text, file } = FIXTURE_GOLDENS[fixture];
+  const golden = parseTerrainGolden(text, file);
+  parsed.set(fixture, golden);
+  return golden;
 }
 
-/** `TEST MOON`: the golden's body. */
-export function terrainMoon(): BodyIdHex {
-  return terrainTestGolden().body;
+/** `TEST MOON`: the fixture's golden's body. */
+export function terrainMoon(fixture: ViewsCheckTerrainFixture = "terrain-test"): BodyIdHex {
+  return terrainTestGolden(fixture).body;
 }
 
 /** The scene's system: `TEST MOON`'s. */
-export function terrainSystem(): SystemIdHex {
-  const [system] = terrainMoon().split(".");
+export function terrainSystem(fixture: ViewsCheckTerrainFixture = "terrain-test"): SystemIdHex {
+  const moon = terrainMoon(fixture);
+  const [system] = moon.split(".");
   if (system === undefined) {
-    throw new Error(`${terrainMoon()} is not a body ID`);
+    throw new Error(`${moon} is not a body ID`);
   }
   return system;
 }
 
 /** `TEST STAR`, the system's body `.0000`, which no synthetic world is. */
-export function terrainStar(): BodyIdHex {
-  return `${terrainSystem()}.0000`;
+export function terrainStar(fixture: ViewsCheckTerrainFixture = "terrain-test"): BodyIdHex {
+  return `${terrainSystem(fixture)}.0000`;
 }
 
 /**
@@ -175,19 +208,36 @@ export function terrainStar(): BodyIdHex {
  * L(0) = 1 (`classRowLaw`: the Moon's template at s = 1), the law R10's workers give that crust's
  * regolith; p is then A, since L(0) = 1 (R10.T10.a's p = A (2 + L(0)) ÷ 3).
  *
+ * @remarks
+ * A field whose golden carries its maturity's lines (`maturity`, `TEST MOON` weathered's; R10.T1.c's
+ * client half) takes A from their `crust_albedo` line instead, its B, V and R as r, g and b take
+ * R, V and B, under the same law: the primary crust's regolith's drawn band-0 albedo at the body's
+ * background maturity, T₀(m_body), its maturity nodes' last, as the worker draws it under the
+ * header's albedo scale (the haloed scale, solved with the haloes' excess) and its clamps. The
+ * palette's own albedo is not what that field draws: its header scales it, with clamps this does not
+ * model, and its maturity moves the drawn albedo off it. So the disc and the figure over unsurveyed
+ * ground, which the class map leaves to this law (`elsewhere`), stand where the terrain's mature
+ * highlands do, as the scale's solve and the draw agree. `TERRAIN TEST`'s field, with neither
+ * scale nor maturity, takes the palette's albedo as it always has, to the bit.
+ *
  * @throws Error for a palette with no primary crust, a crust at or above the particulate rule's
- *   onset (where L(0) falls below 1), or a header with an albedo scale, whose clamps this does not
- *   model: the terrain golden's has none.
+ *   onset (where L(0) falls below 1), or a header with an albedo scale and no `maturity` to give
+ *   the drawn albedo, whose clamps this does not model.
  */
-export function terrainMoonPhotometry(header: SurfaceHeaderDto): BodyPhotometry {
+export function terrainMoonPhotometry(
+  header: SurfaceHeaderDto,
+  maturity?: TerrainGoldenMaturity,
+): BodyPhotometry {
   const crust = header.palette.find((entry) => entry.role === "primary_crust");
   if (crust === undefined) {
     throw new Error("the terrain test's palette names no primary crust");
   }
-  if (header.albedo_scale !== null) {
-    throw new Error("the terrain test's photometry takes a field with no albedo scale");
+  if (header.albedo_scale !== null && maturity === undefined) {
+    throw new Error(
+      "the terrain test's photometry takes a field with no albedo scale, or its golden's crust_albedo",
+    );
   }
-  const [b, v, r] = crust.normal_albedo_bvr;
+  const [b, v, r] = maturity?.crustAlbedoBvr ?? crust.normal_albedo_bvr;
   if (!(v < LIMB_ONSET_NORMAL_ALBEDO)) {
     throw new Error(`the terrain test's crust, A_N ${String(v)}, is not below the onset`);
   }
@@ -201,8 +251,20 @@ export function terrainMoonPhotometry(header: SurfaceHeaderDto): BodyPhotometry 
   };
 }
 
-/** `TEST MOON`'s photometry, made once a page. */
-let moonPhotometry: BodyPhotometry | null = null;
+/** `TEST MOON`'s photometry on each fixture's field, made once a page. */
+const moonPhotometry = new Map<ViewsCheckTerrainFixture, BodyPhotometry>();
+
+/** `TEST MOON`'s photometry on `fixture`'s field ({@link terrainMoonPhotometry}), made once a page. */
+function moonPhotometryOf(fixture: ViewsCheckTerrainFixture): BodyPhotometry {
+  const known = moonPhotometry.get(fixture);
+  if (known !== undefined) {
+    return known;
+  }
+  const { header, maturity } = terrainTestGolden(fixture);
+  const photometry = terrainMoonPhotometry(header, maturity);
+  moonPhotometry.set(fixture, photometry);
+  return photometry;
+}
 
 /** `TEST MOON`'s rotation from body-fixed to body axes at scene time `sceneS`. */
 export function terrainMoonRotationAt(sceneS: number): Rotation3 {
@@ -263,8 +325,11 @@ function datumRadiusM(n: Vec3, aM: number, cM: number): number {
 }
 
 /** The ship's place, body-fixed, m from `TEST MOON`'s centre, at script time `tS`. */
-export function terrainShipBodyFixedM(tS: number): Vec3 {
-  const { header } = terrainTestGolden();
+export function terrainShipBodyFixedM(
+  tS: number,
+  fixture: ViewsCheckTerrainFixture = "terrain-test",
+): Vec3 {
+  const { header } = terrainTestGolden(fixture);
   const { latRad, lonRad } = terrainShipGround(tS);
   const n = directionOf(latRad, lonRad);
   const radiusM = datumRadiusM(n, header.equatorial_radius_m, header.polar_radius_m);
@@ -279,18 +344,22 @@ const VELOCITY_STEP_S = 0.05;
  * along the galactic axes: its body-fixed motion's, by a central difference over
  * {@link VELOCITY_STEP_S} of the script, turned by the rotation, plus the rotation's own ω × r.
  */
-function shipVelocityMPerS(tS: number, rotation: Rotation3): Vec3 {
+function shipVelocityMPerS(
+  tS: number,
+  rotation: Rotation3,
+  fixture: ViewsCheckTerrainFixture,
+): Vec3 {
   const before = Math.max(tS - VELOCITY_STEP_S, 0);
   const after = Math.min(tS + VELOCITY_STEP_S, TERRAIN_TEST_SCRIPT.durationS);
   const sceneSpanS = (after - before) * TERRAIN_TIME_RATE;
   const fixed = scale(
-    sub(terrainShipBodyFixedM(after), terrainShipBodyFixedM(before)),
+    sub(terrainShipBodyFixedM(after, fixture), terrainShipBodyFixedM(before, fixture)),
     1 / sceneSpanS,
   );
   const omega = scale(TERRAIN_MOON_POLE, (2 * Math.PI) / TERRAIN_ROTATION_PERIOD_S);
   return add(
     rotateToBody(rotation, fixed),
-    cross(omega, rotateToBody(rotation, terrainShipBodyFixedM(tS))),
+    cross(omega, rotateToBody(rotation, terrainShipBodyFixedM(tS, fixture))),
   );
 }
 
@@ -321,15 +390,20 @@ export const TERRAIN_HOST_DISCS: ReadonlyArray<HostDiscDto> = Object.freeze([
   frozenHostDisc(sunLikeHostDisc({ star: 0 })),
 ]);
 
-/** The scene at script time `tS`, its clock {@link TERRAIN_TIME_RATE} times the script's. */
-export function terrainSceneAt(tS: number): ViewScene {
-  const golden = terrainTestGolden();
+/**
+ * The scene at script time `tS`, its clock {@link TERRAIN_TIME_RATE} times the script's, on
+ * `fixture`'s field.
+ */
+export function terrainSceneAt(
+  tS: number,
+  fixture: ViewsCheckTerrainFixture = "terrain-test",
+): ViewScene {
+  const golden = terrainTestGolden(fixture);
   const { header } = golden;
   const sceneS = TERRAIN_TIME_RATE * tS;
   const rotation = terrainMoonRotationAt(sceneS);
-  moonPhotometry ??= terrainMoonPhotometry(header);
   const appearance: WireAppearance = {
-    photometry: moonPhotometry,
+    photometry: moonPhotometryOf(fixture),
     figure: {
       equatorialRadiusM: header.equatorial_radius_m,
       polarRadiusM: header.polar_radius_m,
@@ -338,7 +412,7 @@ export function terrainSceneAt(tS: number): ViewScene {
     labels: [],
     bondRatioFinding: null,
   };
-  const star = terrainStar();
+  const star = terrainStar(fixture);
   const moon = golden.body;
   const bodies: ViewBody[] = [
     {
@@ -375,7 +449,7 @@ export function terrainSceneAt(tS: number): ViewScene {
     provenance: { kind: "kept", name: TERRAIN_SCENE_NAME },
     time: keptTime(sceneS),
     timeRate: TERRAIN_TIME_RATE,
-    system: terrainSystem(),
+    system: terrainSystem(fixture),
     barycentre: KEPT_BARYCENTRE,
     tidalRadiusM: KEPT_TIDAL_RADIUS_M,
     bodies,
@@ -387,11 +461,11 @@ export function terrainSceneAt(tS: number): ViewScene {
         designation: "TEST HULL",
         hull: TEST_HULL,
         pose: {
-          position: { kind: "body_fixed", body: moon, m: terrainShipBodyFixedM(tS) },
+          position: { kind: "body_fixed", body: moon, m: terrainShipBodyFixedM(tS, fixture) },
           attitude: shipAttitude(tS, rotation),
         },
         predictedPath: null,
-        velocityMPerS: shipVelocityMPerS(tS, rotation),
+        velocityMPerS: shipVelocityMPerS(tS, rotation, fixture),
       },
     ],
     stars: [],
@@ -407,13 +481,13 @@ export function terrainSceneAt(tS: number): ViewScene {
 
 /**
  * The terrain test scene: the scripted descent onto `TEST MOON`'s survey, the seat camera on the
- * own ship.
+ * own ship; on `fixture`'s field, under `TERRAIN TEST`'s name on either.
  */
-export function terrainScene(): KeptScene {
+export function terrainScene(fixture: ViewsCheckTerrainFixture = "terrain-test"): KeptScene {
   return {
     name: TERRAIN_SCENE_NAME,
     durationS: TERRAIN_TEST_SCRIPT.durationS,
-    sceneAt: terrainSceneAt,
+    sceneAt: (tS) => terrainSceneAt(tS, fixture),
     cameraAt: (tS): CameraPose => {
       const attitude = shipAttitude(tS, terrainMoonRotationAt(TERRAIN_TIME_RATE * tS));
       return {
@@ -426,16 +500,19 @@ export function terrainScene(): KeptScene {
 }
 
 /**
- * The terrain test's fixture (`SceneOption.terrain`): `TEST MOON`'s field served from the terrain
- * golden, its revision rising at {@link TERRAIN_TEST_SCRIPT}'s `deltaAtS`.
+ * The terrain test's fixture (`SceneOption.terrain`): `TEST MOON`'s field served from `fixture`'s
+ * terrain golden, its revision rising at {@link TERRAIN_TEST_SCRIPT}'s `deltaAtS`.
  *
  * @param chunkIntervalMs - How long its links wait before each chunk, ms: 0, each on the next task,
  *   by default (`TerrainTestFixtureOptions.chunkIntervalMs`).
  */
-export function terrainSceneFixture(chunkIntervalMs = 0): TerrainTestFixture {
+export function terrainSceneFixture(
+  chunkIntervalMs = 0,
+  fixture: ViewsCheckTerrainFixture = "terrain-test",
+): TerrainTestFixture {
   return terrainTestFixture({
     universe: TERRAIN_TEST_UNIVERSE,
-    golden: terrainTestGolden,
+    golden: () => terrainTestGolden(fixture),
     deltaAtS: TERRAIN_TEST_SCRIPT.deltaAtS,
     chunkIntervalMs,
   });

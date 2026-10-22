@@ -1,6 +1,6 @@
 //! What this plan adds to R05's patch bake (plan R10, Provides' `TerrainLayers`): the class
-//! palette and weights, the survey mask, the patch's bound and σ, the horizon map (R10.T8.a's,
-//! [`super::horizon`]) and R11's layers.
+//! palette and weights, the ground's maturity (R10.T1.c's client half), the survey mask, the
+//! patch's bound and σ, the horizon map (R10.T8.a's, [`super::horizon`]) and R11's layers.
 
 use std::collections::BTreeMap;
 
@@ -18,13 +18,14 @@ pub const SURVEYED: u8 = u8::MAX;
 pub const UNSURVEYED: u8 = 0;
 
 /// What this plan adds to R05's [`PatchBake`](crate::patch::PatchBake) of a patch (Provides): the
-/// patch's class palette and each vertex's weights over it, its survey mask, its bound and σ, its
-/// horizon map and R11's layers. Each per-vertex array is 65 × 65, row by row (y outer, x inner),
-/// as R05's heights are.
+/// patch's class palette and each vertex's weights over it, each vertex's maturity, its survey
+/// mask, its bound and σ, its horizon map and R11's layers. Each per-vertex array is 65 × 65, row
+/// by row (y outer, x inner), as R05's heights are.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TerrainLayers {
     pub(super) palette: [Option<GroundMaterial>; MAX_CLASSES],
     pub(super) weights: Vec<[u8; MAX_CLASSES]>,
+    pub(super) maturity: Vec<[u16; 2]>,
     pub(super) survey_mask: Vec<u8>,
     pub(super) horizon: HorizonMap,
     pub(super) bound: Metres,
@@ -53,6 +54,22 @@ impl TerrainLayers {
     #[must_use]
     pub fn weights(&self) -> &[[u8; MAX_CLASSES]] {
         &self.weights
+    }
+
+    /// Each vertex's space-weathering maturity codes at the patch's band level n and at its
+    /// parent's, n − 1 (level 0's own at level 0).
+    ///
+    /// Each is [`encode_maturity`]'s code of
+    /// [`patch_maturity`](crate::material::patch_maturity)'s value against the header's `m_body`:
+    /// the ground's maturity with the fresh haloes of every coarse crater, and of the small craters
+    /// of the octaves each level resolves, drawn crater by crater (R10.T1.c's client half;
+    /// decision-r10-t1c-client-scope §1.4), so that the client morphs it as it morphs the heights.
+    /// A vertex without weights takes `m_body`, code 0, for both. Empty where the header carries
+    /// no maturity or no weathering rate, as no body's does until P14.T54.b, or where the weights
+    /// are not baked ([`WeightsLayer::Skipped`](super::WeightsLayer::Skipped)).
+    #[must_use]
+    pub fn maturity(&self) -> &[[u16; 2]] {
+        &self.maturity
     }
 
     /// Each vertex's survey mask: [`SURVEYED`] where the field's level cell holding it
@@ -106,6 +123,77 @@ impl TerrainLayers {
     pub fn extra(&self) -> &[ExtraLayer] {
         &self.extra
     }
+}
+
+/// The code of the maturity `maturity` on ground of background maturity `background` (`m_body`).
+///
+/// Both are dimensionless, `maturity` in [0, `background`] and `background` in [0, 1]. The code is
+/// the unsigned normalised 16-bit code of r = √(D ÷ `m_body`), D = `m_body` − m the deficit below
+/// the background, 65,535 r rounded to the nearest integer (decision-r10-t1c-client-scope §1.4): 0
+/// at the background and 65,535 on fresh ground, m = 0. Every code is 0 where `m_body` is 0.
+///
+/// The square root spends the codes where the deficits are small, as they are over most of an old
+/// surface: decoded ([`decode_maturity`]), D = `m_body` r², so the code's first step is a deficit
+/// of 2.3 × 10⁻¹⁰ `m_body` and its last one of 3.1 × 10⁻⁵ of it, half of either step the most a
+/// code is off. The ruling's lean, unorm8, whose last step is 0.8% of `m_body`, carried a drawn
+/// albedo up to 1.6% off on fresh ground against its bound of 0.25%; 16 bits hold it within 0.064%
+/// (`maturity_codes_hold_the_drawn_albedo`), so the ruling's alternative is taken: 16,900 B a
+/// patch.
+///
+/// # Panics
+///
+/// If `background` is outside [0, 1] or NaN, or `maturity` is outside [0, `background`] or NaN:
+/// the layer's maturities lie between 0 and the header's validated `m_body`.
+#[must_use]
+pub fn encode_maturity(maturity: f64, background: f64) -> u16 {
+    check_background(background);
+    assert!(
+        (0.0..=background).contains(&maturity),
+        "a maturity must be in [0, {background}], its background's, got {maturity}"
+    );
+    if background > 0.0 {
+        // In [0, 1]: the correctly rounded quotient of a deficit no larger than its divisor.
+        let ratio = ((background - maturity) / background).sqrt();
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "an integer in [0, 65,535], exact in a u16"
+        )]
+        let code = (UNORM16_MAX * ratio).round() as u16;
+        code
+    } else {
+        0
+    }
+}
+
+/// The maturity that the code `code` of [`encode_maturity`] holds on ground of background maturity
+/// `background` (`m_body`, dimensionless in [0, 1]), dimensionless in [0, `m_body`]: `m_body` (1 −
+/// r²) with r = `code` ÷ 65,535, so `m_body` itself at code 0 and +0 at 65,535, and +0 at every
+/// code where `m_body` is 0.
+///
+/// # Panics
+///
+/// If `background` is outside [0, 1] or NaN.
+#[must_use]
+pub fn decode_maturity(code: u16, background: f64) -> f64 {
+    check_background(background);
+    if background > 0.0 {
+        let ratio = f64::from(code) / UNORM16_MAX;
+        background * (1.0 - ratio * ratio)
+    } else {
+        0.0
+    }
+}
+
+/// An unsigned normalised 16-bit code's largest value, 65,535, as an `f64`.
+const UNORM16_MAX: f64 = 65_535.0;
+
+/// Refuses a background maturity outside [0, 1] or NaN.
+fn check_background(background: f64) {
+    assert!(
+        (0.0..=1.0).contains(&background),
+        "a background maturity must be in [0, 1], got {background}"
+    );
 }
 
 /// The patch's palette and each vertex's bytes over it, from each vertex's class weights, `None`

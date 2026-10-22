@@ -8,9 +8,11 @@
  *   its relief, the cells the frames are judged by, its survey's middle and its star, and how a
  *   look's scene and its session's fixture are made. {@link terrainTestHandoverWorld} is
  *   `TERRAIN TEST`'s: its star and moon, the moon's terrain served by the scene's fixture from the
- *   terrain golden, both survey passes at once. T15's served world gives the same members from the
- *   server (its body's header, its coverage's middle) and its own scene and field source; the run
- *   (`handoverCheckRun.ts`) reads the world alone and is unchanged by it. That half is T15's.
+ *   terrain golden, both survey passes at once; on a `--weathered` launch, `TEST MOON` weathered's
+ *   field in its place, as `TERRAIN TEST WEATHERED` (plan R10, R10.T1.c's client half). T15's
+ *   served world gives the same members from the server (its body's header, its coverage's
+ *   middle) and its own scene and field source; the run (`handoverCheckRun.ts`) reads the world
+ *   alone and is unchanged by it. That half is T15's.
  * - **Each look's scene** is `TERRAIN TEST`'s bodies with the moon held still at the look's rotation
  *   ({@link lookGeometry}) and the clock at one second a second, and the own ship, `TEST HULL`,
  *   flown along the look's line ({@link limbRatioAt}) looking at the moon's centre, its seat the
@@ -28,7 +30,7 @@
 
 import type { BodyIdHex } from "@hyperion/protocol";
 
-import type { QualitySettingName } from "../../../../../preload/api";
+import type { QualitySettingName, ViewsCheckTerrainFixture } from "../../../../../preload/api";
 import { scale, sub, type Vec3, vec3 } from "../../../geometry/vec3";
 import { DEFAULT_FOV_DEG } from "../../../view/camera/projection";
 import { handoverRangeM, handoverTauPx, pixelAngleRad } from "../../../view/terrain/handover";
@@ -121,15 +123,19 @@ const TERRAIN_TEST_SURVEY_MIDDLE = vec3(1, 1, 0.71);
 /** The span of the script over which the ship's velocity is a central difference, s. */
 const VELOCITY_STEP_S = 0.05;
 
-/** `TERRAIN TEST`'s moon at the look's rotation, the own ship on its line, at script time `tS`. */
+/**
+ * `TERRAIN TEST`'s moon at the look's rotation, on `fixture`'s field, the own ship on its line, at
+ * script time `tS`.
+ */
 function terrainLookSceneAt(
+  fixture: ViewsCheckTerrainFixture,
   look: HandoverLook,
   geometry: LookGeometry,
   approach: HandoverApproach,
   photometry: BodyPhotometry,
   tS: number,
 ): ViewScene {
-  const golden = terrainTestGolden();
+  const golden = terrainTestGolden(fixture);
   const { header } = golden;
   const appearance: WireAppearance = {
     photometry,
@@ -141,7 +147,7 @@ function terrainLookSceneAt(
     labels: [],
     bondRatioFinding: null,
   };
-  const star = terrainStar();
+  const star = terrainStar(fixture);
   const moon = golden.body;
   const bodies: ViewBody[] = [
     {
@@ -191,7 +197,7 @@ function terrainLookSceneAt(
     provenance: { kind: "kept", name: look.scene },
     time: keptTime(tS),
     timeRate: 1,
-    system: terrainSystem(),
+    system: terrainSystem(fixture),
     barycentre: KEPT_BARYCENTRE,
     tidalRadiusM: KEPT_TIDAL_RADIUS_M,
     bodies,
@@ -222,18 +228,32 @@ function terrainLookSceneAt(
 }
 
 /**
- * `TERRAIN TEST`'s world: its moon, the terrain golden's figure, relief, level and survey (its last
- * pass's surveyed cells), its survey's middle, and its star along −x at 1 au; each look's fixture
- * serves the golden's whole survey at its first ask (the revision's rise at 0 s of the script).
+ * The hand-over world's name in the record on each fixture's field: `TERRAIN TEST`'s own, or
+ * `TEST MOON` weathered's (plan R10, R10.T1.c's client half) under the scene's name.
  */
-export function terrainTestHandoverWorld(): HandoverWorld {
-  const golden = terrainTestGolden();
+const HANDOVER_WORLD_NAMES: Readonly<Record<ViewsCheckTerrainFixture, string>> = {
+  "terrain-test": "TERRAIN TEST",
+  "terrain-test-weathered": "TERRAIN TEST WEATHERED",
+};
+
+/**
+ * `TERRAIN TEST`'s world on `fixture`'s field (`TERRAIN TEST`'s own unless given, or `TEST MOON`
+ * weathered's on a `--weathered` launch): its moon, the golden's figure, relief, level and survey
+ * (its last pass's surveyed cells), its survey's middle, and its star along −x at 1 au; each look's
+ * fixture serves the golden's whole survey at its first ask (the revision's rise at 0 s of the
+ * script).
+ */
+export function terrainTestHandoverWorld(
+  fixture: ViewsCheckTerrainFixture = "terrain-test",
+): HandoverWorld {
+  const golden = terrainTestGolden(fixture);
   const { header } = golden;
   const survey = golden.surveys.at(-1);
-  // Its crust's photometry, made once for every frame of every look.
-  const photometry = terrainMoonPhotometry(header);
+  // Its crust's photometry, made once for every frame of every look: the weathered field's from its
+  // golden's crust_albedo (`terrainMoonPhotometry`).
+  const photometry = terrainMoonPhotometry(header, golden.maturity);
   return {
-    name: "TERRAIN TEST",
+    name: HANDOVER_WORLD_NAMES[fixture],
     body: golden.body,
     figure: { equatorialRadiusM: header.equatorial_radius_m, polarRadiusM: header.polar_radius_m },
     reliefM: header.realised_relief_m,
@@ -245,7 +265,7 @@ export function terrainTestHandoverWorld(): HandoverWorld {
     scene: (look, geometry, approach): KeptScene => ({
       name: look.scene,
       durationS: approachDurationS(approach),
-      sceneAt: (tS) => terrainLookSceneAt(look, geometry, approach, photometry, tS),
+      sceneAt: (tS) => terrainLookSceneAt(fixture, look, geometry, approach, photometry, tS),
       cameraAt: (): CameraPose => {
         const attitude = lookAttitude(geometry);
         return {
@@ -258,7 +278,7 @@ export function terrainTestHandoverWorld(): HandoverWorld {
     fixture: () =>
       terrainTestFixture({
         universe: TERRAIN_TEST_UNIVERSE,
-        golden: terrainTestGolden,
+        golden: () => terrainTestGolden(fixture),
         deltaAtS: 0,
         chunkIntervalMs: 0,
       }),

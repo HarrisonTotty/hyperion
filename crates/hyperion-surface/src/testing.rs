@@ -33,12 +33,11 @@ pub use liquids::{
 };
 #[cfg(test)]
 pub(crate) use worlds::pluto_like;
-pub use worlds::{SyntheticWorld, synthetic_field};
-// R10.T1.c's tests weather and vary these worlds (`material/maturity.rs`, `material/golden.rs`).
+// R10.T1.c's tests and the bake's bench weather and vary the Moon-like world
+// (`material/maturity.rs`, `material/golden.rs`, `bake/tests.rs`, `benches/bake.rs`).
+pub use worlds::{SyntheticWorld, moon_like_builder, moon_like_crater_params, synthetic_field};
 #[cfg(test)]
-pub(crate) use worlds::{
-    moon_like_builder, moon_like_crater_params, one_crater_builder, one_crater_centre,
-};
+pub(crate) use worlds::{one_crater_builder, one_crater_centre};
 
 use hyperion_base::math;
 use hyperion_base::units::{

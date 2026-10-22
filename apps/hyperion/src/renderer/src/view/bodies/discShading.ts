@@ -33,6 +33,15 @@
  * sky by (1 + n′ · ν) ÷ 2; planetshine on n′. The record says so in row 24's w; the twins read the
  * map's texels from the record's surface. Without a normal map, or where it holds none, n′ = ν and
  * every value is as before, bit for bit.
+ *
+ * A class map that carries its texels' maturity (plan R10, R10.T1.c's client half;
+ * decision-r10-t1c-client-scope §2.3) draws each class of a named substance with its A from its
+ * albedo nodes: at a point of a surveyed texel, Σ b T_c(x) ÷ Σ b over the reconstruction's very
+ * corners and bilinear weights, x each corner's code (`classMapAlbedoAt`), scaled for the figure as
+ * the class's A is; the shares, L(0) and the rows stay as they are, and law 0 is `elsewhere`'s. The
+ * record carries each class's nodes from row {@link FIRST_NODE_ROW} on, and says so in row 25's w;
+ * without a maturity it packs what it packed before, its node rows 0, and every value is as before,
+ * bit for bit.
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
@@ -61,8 +70,10 @@ import { HALF_FLOAT_MAX } from "../photometry/toneCurve";
 import { METER_CLASS, type MeterClass } from "../post/meter";
 import { type Rotation3, rotateToBody } from "../coords/rotation";
 import type { ScreenRect } from "../wireframe/submit";
+import { MATURITY_NODES } from "../terrain/maturityNodes";
 import { type NormalMapTexels, normalMapNormalAt } from "./discNormals";
 import {
+  classMapAlbedoAt,
   classMapSharesAt,
   type ClassMapTexels,
   discSurfaceLaws,
@@ -76,8 +87,18 @@ import { oblateAlbedoScale } from "./oblate";
  */
 export const LIT_IRRADIANCE = 1e-5;
 
-/** `vec4f` rows per disc in the shader's `discs` buffer. */
-export const DISC_ROWS = 52;
+/**
+ * The first of a record's maturity node rows (R10.T1.c's client half): class k's node j at row
+ * {@link FIRST_NODE_ROW} + K k + j, past R07's and R10's 52 rows.
+ */
+export const FIRST_NODE_ROW = 52;
+
+/**
+ * `vec4f` rows per disc in the shader's `discs` buffer: R07's and R10's 52 and a maturity node row
+ * for each of K nodes of each of {@link MAX_DISC_CLASSES} classes, 308 rows, 4,928 bytes a disc
+ * (832 before R10.T1.c).
+ */
+export const DISC_ROWS = FIRST_NODE_ROW + MAX_DISC_CLASSES * MATURITY_NODES;
 
 /** The stars that light one disc at most: the brightest two, `MAX_BODY_LIGHTS`. */
 export const MAX_DISC_LIGHTS = MAX_BODY_LIGHTS;
@@ -366,6 +387,8 @@ interface ScaledLaw {
   readonly share: number;
   readonly table: PhaseFactorTable;
   readonly tableRow: number;
+  /** The figure's factor on A, `oblateAlbedoScale` of L(0); a class's nodes take it too. */
+  readonly albedoScale: number;
 }
 
 /**
@@ -401,7 +424,14 @@ function scaledLawOf(
     share: law.lommelSeeligerShare,
     table: phaseFactorTableOf(law),
     tableRow,
+    albedoScale: k,
   };
+}
+
+/** `law` with its A an albedo `a` drawn from its nodes, unscaled, scaled as its own A is. */
+function withAlbedo(law: ScaledLaw, a: Rgb): ScaledLaw {
+  const k = law.albedoScale;
+  return { ...law, a: [a[0] * k, a[1] * k, a[2] * k] };
 }
 
 /** The body-fixed x and y axes along the galactic axes: the rotation's first two columns. */
@@ -411,6 +441,12 @@ function bodyAxesOf(rotation: Rotation3): readonly [Vec3, Vec3] {
 
 /**
  * Packs the frame's discs as the shader's `array<vec4f>`, {@link DISC_ROWS} rows each.
+ *
+ * @remarks
+ * A class map that carries its texels' maturity (R10.T1.c's client half) sets row 25's w and fills
+ * the node rows of each class drawn from its nodes, from {@link FIRST_NODE_ROW}: class k's node j at
+ * row {@link FIRST_NODE_ROW} + K k + j, its r, g and b times the figure's factor on the class's A,
+ * node 0's w 1. Every other disc writes the rows it wrote before, its node rows 0.
  *
  * @param cells - The `disc cells` pass's jobs for these records, whose ranges row 51 carries; `null`
  *   where no pass runs, when every record's row 51 says its draws sum their own cells.
@@ -446,16 +482,38 @@ export function packDiscRecords(
       put(4, [...uniform.a, uniform.share]);
     }
     put(5, [uniform?.tableRow ?? 0, annulusCount(record), record.exposureOverPi, classes.length]);
+    const maturity =
+      record.surface.kind === "class-map" ? record.surface.texels.maturity : undefined;
     if (record.surface.kind === "class-map") {
       const [x, y] = bodyAxesOf(record.surface.rotation);
       // w: whether the map carries the field's normal map, which binding 14 holds (R10.T10.g).
       put(AXES_ROW, [x.x, x.y, x.z, record.surface.normals === null ? 0 : 1]);
-      put(AXES_ROW + 1, [y.x, y.y, y.z, 0]);
+      // w: whether it carries its texels' maturity, past its weights' layers (R10.T1.c).
+      put(AXES_ROW + 1, [y.x, y.y, y.z, maturity === undefined ? 0 : 1]);
     }
     classes.forEach((law, k) => {
       put(FIRST_CLASS_ROW + k, [...law.a, law.share]);
       out[base + FIRST_CLASS_TABLE_ROW * 4 + k] = law.tableRow;
     });
+    if (maturity !== undefined) {
+      // Each drawn class's nodes, scaled for the figure as its A is, node 0's w its flag; an
+      // undrawn class's rows stay 0 and are never read.
+      classes.forEach((law, k) => {
+        if (maturity.drawn[k] !== true) {
+          return;
+        }
+        for (let j = 0; j < MATURITY_NODES; j += 1) {
+          const at = 3 * (MATURITY_NODES * k + j);
+          const factor = law.albedoScale;
+          put(FIRST_NODE_ROW + MATURITY_NODES * k + j, [
+            (maturity.nodes[at] ?? 0) * factor,
+            (maturity.nodes[at + 1] ?? 0) * factor,
+            (maturity.nodes[at + 2] ?? 0) * factor,
+            j === 0 ? 1 : 0,
+          ]);
+        }
+      });
+    }
     record.lights.slice(0, MAX_DISC_LIGHTS).forEach((light, j) => {
       const first = FIRST_LIGHT_ROW + j * LIGHT_ROWS;
       put(first, [light.direction.x, light.direction.y, light.direction.z, light.distance]);
@@ -644,6 +702,28 @@ function sharesAt(body: ViewBody, q: Vec3): number[] {
   return classMapSharesAt(body.classMap.texels, [dot(d, x), dot(d, y), dot(d, z)]);
 }
 
+/**
+ * The body's laws at the point `q` (from the centre ÷ a) of laws' shares `shares`, as `surface_at`
+ * takes their A (R10.T1.c's client half): the body's own, unless its class map carries its texels'
+ * maturity, when each class drawn from its nodes there (`classMapAlbedoAt`, at the point's
+ * cube-sphere direction as {@link sharesAt} takes it) has that A, scaled for the figure as its own.
+ */
+function lawsAt(body: ViewBody, q: Vec3, shares: ReadonlyArray<number>): ReadonlyArray<ScaledLaw> {
+  if (body.classMap?.texels.maturity === undefined) {
+    return body.laws;
+  }
+  const d = normalise(stretchAlong(body.pole, body.stretch, q));
+  const [x, y, z] = body.classMap.axes;
+  const albedos = classMapAlbedoAt(body.classMap.texels, [dot(d, x), dot(d, y), dot(d, z)], shares);
+  if (albedos === null) {
+    return body.laws;
+  }
+  return body.laws.map((law, m) => {
+    const a = m === 0 ? null : (albedos[m - 1] ?? null);
+    return a === null ? law : withAlbedo(law, a);
+  });
+}
+
 /** The shading normal n′ at a point, in the view's axes, and whether it is the normal map's. */
 interface ShadingNormal {
   readonly normal: Vec3;
@@ -734,6 +814,9 @@ function surfaceReflectance(
  * @param polarOverEquatorial - The figure's c ÷ a, 1 for a sphere.
  * @param shares - Each law's share at the point.
  * @param alphaRad - The phase angle, rad.
+ * @param albedos - Each law's A at the point where it is not the law's own, unscaled for the
+ *   figure, `null` (or absent) keeping the law's: a class drawn from its maturity nodes there
+ *   (`classMapAlbedoAt`, R10.T1.c's client half), scaled as the law's A is.
  */
 export function discReflectance(
   laws: ReadonlyArray<PhotometricLaw>,
@@ -742,11 +825,16 @@ export function discReflectance(
   mu0: number,
   mu: number,
   alphaRad: number,
+  albedos?: ReadonlyArray<Rgb | null>,
 ): Rgb {
   if (!(mu0 > 0 && mu > 0)) {
     return [0, 0, 0];
   }
-  const scaled = laws.map((law, m) => scaledLawOf(law, polarOverEquatorial, m));
+  const scaled = laws.map((law, m) => {
+    const own = scaledLawOf(law, polarOverEquatorial, m);
+    const a = albedos?.[m] ?? null;
+    return a === null ? own : withAlbedo(own, a);
+  });
   return surfaceReflectance(scaled, shares, mu0, mu0, mu, alphaRad, 0);
 }
 
@@ -841,12 +929,14 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
   // tilted plane), as the terrain's.
   const skyTilt = shading.mapped ? 0.5 * (1 + dot(tilted, normal)) : 1;
   const shares = sharesAt(body, q);
+  // Each law's A at the point: a class's from its nodes under a map's maturity (R10.T1.c).
+  const laws = lawsAt(body, q, shares);
   const radiance: [number, number, number] = [0, 0, 0];
   let lit = false;
   // The surface's mean A, which R08's sky light reflects on the Lambert share's flat term, and the
   // point's frame for R08's lookups, its geodetic height 0 on the figure (R08.T9.b).
   const meanA: [number, number, number] = [0, 0, 0];
-  body.laws.forEach((law, m) => {
+  laws.forEach((law, m) => {
     const weight = shares[m] ?? 0;
     if (weight > 0) {
       for (const c of CHANNELS) {
@@ -914,7 +1004,7 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
       continue;
     }
     const alpha = Math.acos(Math.min(1, Math.max(-1, -dot(towards, ray))));
-    const reflectance = surfaceReflectance(body.laws, shares, horizon, mu0, mu, alpha, starRadius);
+    const reflectance = surfaceReflectance(laws, shares, horizon, mu0, mu, alpha, starRadius);
     // R08's transmittance to the star's centre, its light slot's.
     const transmitted = lighting.sunTransmittance(
       0,
@@ -953,15 +1043,7 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
     }
     const alpha = Math.acos(Math.min(1, Math.max(-1, -dot(towards, ray))));
     const sourceRadius = Math.asin(Math.min(1, source.radius / distance));
-    const reflectance = surfaceReflectance(
-      body.laws,
-      shares,
-      irradiance,
-      mu0,
-      mu,
-      alpha,
-      sourceRadius,
-    );
+    const reflectance = surfaceReflectance(laws, shares, irradiance, mu0, mu, alpha, sourceRadius);
     const transmitted = lighting.sourceTransmittance(
       0,
       mu0Datum,

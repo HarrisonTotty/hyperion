@@ -18,7 +18,13 @@ function checkApi(): ViewsCheckApi & {
   readonly writeResults: ReturnType<typeof vi.fn<ViewsCheckApi["writeResults"]>>;
 } {
   return {
-    launch: { setting: "high", smoke: true, out: null, run: "several-views" },
+    launch: {
+      setting: "high",
+      smoke: true,
+      out: null,
+      run: "several-views",
+      fixture: "terrain-test",
+    },
     startPhase: () => Promise.resolve(),
     endPhase: () => Promise.resolve(),
     askRightWayUp: () => Promise.resolve(),

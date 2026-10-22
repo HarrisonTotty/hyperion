@@ -27,6 +27,17 @@
  *   weights leave: the share of a slot whose palette names no substance, and of the vertices
  *   outside the survey, which have no weights, so that the terrain shows there what the disc shows
  *   ({@link terrainShares}; T10.c then discards those texels over the reference surface).
+ * - **Maturity** (R10.T1.c's client half; decision-r10-t1c-client-scope §1.4). Where a bake carries
+ *   a maturity layer (`TerrainLayers.maturity`), each named slot's A is drawn from its albedo nodes
+ *   (`maturityNodes.ts`): the bilinear mean over the texel's quad's four vertices of T_n at each
+ *   vertex's maturity at the patch's band level n, mixed by the morph factor μ with the parent's
+ *   term, the bilinear mean over the parent's quad, on the even vertices, of T_{n−1} at each
+ *   vertex's maturity at n − 1, so that at μ = 1 the patch draws its parent's field exactly (the
+ *   albedo interpolated, not the maturity: the halo ruling's finding 8). The nodes take the
+ *   figure's factor as A does ({@link packClassNodes}); L(0), the row and law 0 stay the slot's and
+ *   the body's. A flag in each slot's law ({@link packClassLaws}) marks a slot drawn from its
+ *   nodes, so that without a layer every A is the law's, bit for bit. The twin is
+ *   {@link texelClassAlbedo}, which {@link terrainTexelLaws} takes for a texel's place and morph.
  * - **The twin** ({@link terrainReflectance}) is R07.T4.c's: each law's I/F through `brdfFromTable`
  *   with its own row, as `body_brdf` reads it; the shader's `terrain_reflectance` replaces μ₀ by
  *   a source's irradiance factor and floors the Lommel–Seeliger term at the source's angular
@@ -53,7 +64,15 @@ import type { Rgb } from "../photometry/toneCurve";
 import type { TerrainVertexPath } from "../quality/qualitySetting";
 import frameWgsl from "../shaders/frame.wgsl?raw";
 import litBodyWgsl from "../shaders/litBody.wgsl?raw";
+import maturityNodesWgsl from "../shaders/maturityNodes.wgsl?raw";
 import { PATH_SOURCES, TERRAIN_BINDINGS, terrainVertexStorage } from "./gpu/material";
+import {
+  MATURITY_NODES,
+  maturityCodeRatio,
+  maturityNodeAlbedo,
+  type MaturitySegment,
+  maturitySegment,
+} from "./maturityNodes";
 import { CASCADE_UNIFORM_SPECS } from "./shadows/cascadeShadow";
 import cascadeShadowWgsl from "./shadows/cascadeShadow.wgsl?raw";
 import { CASCADE_DEPTH_BIAS } from "./shadows/cascades";
@@ -65,8 +84,8 @@ import terrainLitShadeWgsl from "./shaders/terrainLitShade.wgsl?raw";
 import terrainPatchWgsl from "./shaders/terrainPatch.wgsl?raw";
 import terrainShadowWgsl from "./shaders/terrainShadow.wgsl?raw";
 import terrainSurveyWgsl from "./shaders/terrainSurvey.wgsl?raw";
-import { PATCH_VERTICES_PER_SIDE } from "./slotLayout";
-import { PHOTOMETRY_STRIDE } from "./workers/messages";
+import { CLASS_NODES_BYTES, PATCH_VERTICES_PER_SIDE } from "./slotLayout";
+import { PHOTOMETRY_STRIDE, type TerrainMaturity } from "./workers/messages";
 
 /** A palette's slots: `hyperion_surface`'s `MAX_CLASSES`. */
 export const TERRAIN_CLASSES = 8;
@@ -77,7 +96,10 @@ export const TERRAIN_LAWS = TERRAIN_CLASSES + 1;
 /** The `@group(2)` bindings of `terrainLit.wgsl`: R05's, then the lit material's. */
 export const TERRAIN_LIT_BINDINGS = {
   ...TERRAIN_BINDINGS,
-  /** Each slot's class weights and laws, one storage buffer (`slotLayout.ts`' `class-layers`). */
+  /**
+   * Each slot's class weights and laws, and its maturity codes and nodes (R10.T1.c), one storage
+   * buffer (`slotLayout.ts`' `class-layers`).
+   */
   classLayers: 6,
   phaseFactorTable: 7,
   terrainLights: 8,
@@ -127,8 +149,9 @@ const DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
  * What every lit terrain module composes before its `Draw` and fragment stage: `frame.wgsl`,
  * `patchVertex.wgsl`, R08's surface lighting, R07's `litBody.wgsl`, `terrainPatch.wgsl`, the
  * horizon map's lookup (`shadows/horizon.wgsl`, R10.T8.b), the survey's placement and discard
- * (`terrainSurvey.wgsl`, which the wireframe's terrain shares, R10.T11) and `terrainLit.wgsl`, its
- * vertices and shading.
+ * (`terrainSurvey.wgsl`, which the wireframe's terrain shares, R10.T11), the maturity nodes'
+ * formula (`shaders/maturityNodes.wgsl`, R10.T1.c) and `terrainLit.wgsl`, its vertices and
+ * shading.
  */
 const LIT_TERRAIN_SOURCE =
   frameWgsl +
@@ -138,6 +161,7 @@ const LIT_TERRAIN_SOURCE =
   terrainPatchWgsl +
   horizonWgsl +
   terrainSurveyWgsl +
+  maturityNodesWgsl +
   terrainLitWgsl;
 
 /**
@@ -504,14 +528,19 @@ export function figureScaledA(photometry: ClassPhotometry, polarOverEquatorial: 
  * A patch's class laws as `terrainLit.wgsl`'s `class_layers` holds them after its slot's weights,
  * each palette slot two `vec4f`: A per display channel, scaled for the figure ({@link
  * figureScaledA}), and L(0), then its row (−1 for a slot with no law), the rows taken from `rows`,
- * which adds any it lacks.
+ * which adds any it lacks, then whether the slot is drawn from its maturity nodes (R10.T1.c): 1 for
+ * a slot with a law where `drawnFromNodes`, else 0, so that a patch without a maturity layer packs
+ * what it packed before, bit for bit.
  *
  * @param polarOverEquatorial - The body's c ÷ a, 1 for a sphere.
+ * @param drawnFromNodes - Whether the patch carries a maturity layer (`TerrainLayers.maturity`),
+ *   whose nodes ({@link packClassNodes}) its named slots are then drawn from.
  */
 export function packClassLaws(
   photometry: Float32Array,
   rows: TerrainPhaseRows,
   polarOverEquatorial: number,
+  drawnFromNodes = false,
 ): Float32Array {
   const out = new Float32Array(CLASS_LAW_ROWS * 4);
   for (let k = 0; k < TERRAIN_CLASSES; k += 1) {
@@ -522,6 +551,54 @@ export function packClassLaws(
     }
     out.set([...figureScaledA(law, polarOverEquatorial), law.l0], 8 * k);
     out[8 * k + 4] = rows.rowOf(law.code, law.l0);
+    if (drawnFromNodes) {
+      out[8 * k + 5] = 1;
+    }
+  }
+  return out;
+}
+
+/** The `f32` values of a patch's maturity nodes, as the module gives them and as packed. */
+const CLASS_NODE_VALUES = CLASS_NODES_BYTES / 4;
+
+/** The values of one palette slot's nodes: both levels' K nodes of three channels. */
+const SLOT_NODE_VALUES = 2 * MATURITY_NODES * 3;
+
+/**
+ * A patch's maturity nodes as `terrainLit.wgsl`'s `class_layers` holds them after its maturity
+ * codes (R10.T1.c's client half): the module's layout (`TerrainMaturity.nodes`, slot k's level ℓ's
+ * node j at `3 (K (2k + ℓ) + j)`), each node's B, V and R turned to the display channels r, g and
+ * b as {@link classPhotometryOf} turns a law's A, and scaled for the figure as {@link
+ * figureScaledA} scales A: each times `oblateAlbedoScale` of the slot's L(0), the product taken in
+ * `f64` and narrowed once; zeros for a slot with no law.
+ *
+ * @param nodes - The bake's `TerrainMaturity.nodes`.
+ * @param photometry - The bake's `TerrainLayers.photometry`, which names each slot's law.
+ * @param polarOverEquatorial - The body's c ÷ a, 1 for a sphere.
+ * @throws RangeError for nodes of another length than 8 × 2 × K × 3.
+ */
+export function packClassNodes(
+  nodes: Float32Array,
+  photometry: Float32Array,
+  polarOverEquatorial: number,
+): Float32Array {
+  if (nodes.length !== CLASS_NODE_VALUES) {
+    throw new RangeError(
+      `${String(nodes.length)} maturity node values, where a patch has ${String(CLASS_NODE_VALUES)}`,
+    );
+  }
+  const out = new Float32Array(CLASS_NODE_VALUES);
+  for (let k = 0; k < TERRAIN_CLASSES; k += 1) {
+    const law = classPhotometryOf(photometry, k);
+    if (law === null) {
+      continue;
+    }
+    const factor = oblateAlbedoScale(law.l0, polarOverEquatorial);
+    for (let at = SLOT_NODE_VALUES * k; at < SLOT_NODE_VALUES * (k + 1); at += 3) {
+      out[at] = (nodes[at + 2] ?? 0) * factor;
+      out[at + 1] = (nodes[at + 1] ?? 0) * factor;
+      out[at + 2] = (nodes[at] ?? 0) * factor;
+    }
   }
   return out;
 }
@@ -649,6 +726,125 @@ export function texelWeights(weights: Uint8Array, u: number, v: number): number[
   return out;
 }
 
+/** One level's quad of a texel's maturity: its four corners' segments and the bilinear fractions. */
+interface MaturityQuad {
+  /** Corners (0, 0), (1, 0), (0, 1) and (1, 1) of the quad, in that order. */
+  readonly corners: ReadonlyArray<MaturitySegment>;
+  readonly fx: number;
+  readonly fy: number;
+}
+
+/**
+ * The quad of corner (`x`, `y`) and side `span` vertices (1 the patch's own, 2 the parent's on the
+ * even vertices), each corner's code at `level` (0 the patch's band level, 1 its parent's) as its
+ * segment, as `terrainLit.wgsl`'s `maturity_quad`.
+ */
+function maturityQuad(
+  codes: Uint16Array,
+  x: number,
+  y: number,
+  span: number,
+  level: number,
+  fx: number,
+  fy: number,
+): MaturityQuad {
+  const corners = [0, 1, 2, 3].map((c) => {
+    const vx = x + span * (c & 1);
+    const vy = y + span * (c >> 1);
+    const code = codes[2 * (vy * PATCH_VERTICES_PER_SIDE + vx) + level];
+    if (code === undefined) {
+      throw new RangeError(`vertex (${String(vx)}, ${String(vy)}) has no maturity code`);
+    }
+    return maturitySegment(maturityCodeRatio(code));
+  });
+  return { corners, fx, fy };
+}
+
+/** WGSL's `mix(a, b, t)`, a (1 − t) + b t. */
+function wgslMix(a: number, b: number, t: number): number {
+  return a * (1 - t) + b * t;
+}
+
+/**
+ * Palette slot `slot`'s albedo over `quad` at `level` from the packed nodes, the bilinear mean of
+ * its corners' interpolated nodes, as `terrainLit.wgsl`'s `maturity_quad_albedo`.
+ */
+function maturityQuadAlbedo(
+  nodes: Float32Array,
+  slot: number,
+  level: number,
+  quad: MaturityQuad,
+): Rgb {
+  const first = 3 * MATURITY_NODES * (2 * slot + level);
+  const [c00, c10, c01, c11] = quad.corners.map((segment) =>
+    maturityNodeAlbedo(nodes, first, segment),
+  );
+  if (c00 === undefined || c10 === undefined || c01 === undefined || c11 === undefined) {
+    throw new Error("a maturity quad has four corners");
+  }
+  const channel = (c: 0 | 1 | 2): number =>
+    wgslMix(wgslMix(c00[c], c10[c], quad.fx), wgslMix(c01[c], c11[c], quad.fx), quad.fy);
+  return [channel(0), channel(1), channel(2)];
+}
+
+/**
+ * Palette slot `slot`'s A at (u, v) of its patch with morph factor `morph`, drawn from its maturity
+ * nodes (R10.T1.c's client half; decision-r10-t1c-client-scope §1.4), the twin of `terrainLit.wgsl`'s
+ * `terrain_class_albedo`, operation for operation in `f64`: the bilinear mean over the texel's quad
+ * of the slot's nodes at the patch's band level n, each vertex at its own code at n, mixed by the
+ * morph factor μ with the bilinear mean over the parent's quad, on the even vertices, of its nodes
+ * at n − 1, each vertex at its code at n − 1; with explicit ends, so that μ ≤ 0 draws the patch's
+ * own field and μ ≥ 1 the parent's exactly, which a bilinear field on the parent's grid draws on
+ * the child's.
+ *
+ * @param codes - The bake's `TerrainMaturity.codes`.
+ * @param nodes - The patch's packed nodes ({@link packClassNodes}): display channels, figure
+ *   scaled.
+ * @param slot - The palette slot, 0 to 7.
+ * @param u - The patch's x ÷ 64, 0 to 1.
+ * @param v - The patch's y ÷ 64, 0 to 1.
+ * @param morph - The texel's morph factor μ: 0 the patch's own field, 1 its parent's.
+ * @throws RangeError for codes or nodes too short for the patch's vertices or the slot.
+ */
+export function texelClassAlbedo(
+  codes: Uint16Array,
+  nodes: Float32Array,
+  slot: number,
+  u: number,
+  v: number,
+  morph: number,
+): Rgb {
+  const quads = PATCH_VERTICES_PER_SIDE - 1;
+  const sx = Math.max(u * quads, 0);
+  const sy = Math.max(v * quads, 0);
+  const own = (): Rgb => {
+    const x = Math.min(Math.floor(sx), quads - 1);
+    const y = Math.min(Math.floor(sy), quads - 1);
+    const fx = Math.min(Math.max(sx - x, 0), 1);
+    const fy = Math.min(Math.max(sy - y, 0), 1);
+    return maturityQuadAlbedo(nodes, slot, 0, maturityQuad(codes, x, y, 1, 0, fx, fy));
+  };
+  const parent = (): Rgb => {
+    const x = Math.min(2 * Math.floor(sx / 2), quads - 2);
+    const y = Math.min(2 * Math.floor(sy / 2), quads - 2);
+    const fx = Math.min(Math.max((sx - x) / 2, 0), 1);
+    const fy = Math.min(Math.max((sy - y) / 2, 0), 1);
+    return maturityQuadAlbedo(nodes, slot, 1, maturityQuad(codes, x, y, 2, 1, fx, fy));
+  };
+  if (!(morph > 0)) {
+    return own();
+  }
+  if (morph >= 1) {
+    return parent();
+  }
+  const [a, b] = [own(), parent()];
+  return [
+    (1 - morph) * a[0] + morph * b[0],
+    (1 - morph) * a[1] + morph * b[1],
+    (1 - morph) * a[2] + morph * b[2],
+  ];
+}
+
 /**
  * The share of each of a texel's {@link TERRAIN_LAWS} laws from its slots' weights: each slot with
  * a law at its weight, scaled down to sum to 1 where they sum to more, and law 0 (`elsewhere`)
@@ -703,30 +899,59 @@ export function classTexelLaw(photometry: ClassPhotometry, polarOverEquatorial: 
   };
 }
 
+/** Where a texel lies in a patch with a maturity layer, and its morph (R10.T1.c's client half). */
+export interface TexelMaturity {
+  /** The bake's `TerrainLayers.maturity`. */
+  readonly maturity: TerrainMaturity;
+  /** The patch's x ÷ 64, 0 to 1. */
+  readonly u: number;
+  /** The patch's y ÷ 64, 0 to 1. */
+  readonly v: number;
+  /** The texel's morph factor μ: 0 the patch's own field, 1 its parent's. */
+  readonly morph: number;
+}
+
 /**
  * A bake's {@link TERRAIN_LAWS} laws as the lit terrain draws them, the twin of {@link
  * packTerrainLighting}'s law 0 and {@link packClassLaws}' slots: law 0, `elsewhere` with its A
  * scaled for the figure (`oblateAlbedoScale` of its L(0)), then each palette slot's ({@link
- * classTexelLaw}), `null` for a slot with none.
+ * classTexelLaw}), `null` for a slot with none; and, at a texel of a patch with a maturity layer
+ * (`at`), each slot's A drawn from its nodes there ({@link texelClassAlbedo} over {@link
+ * packClassNodes}), its table and law 0 as without (R10.T1.c's client half). Without `at` it is
+ * what it was, bit for bit.
  *
  * @param photometry - The bake's `TerrainLayers.photometry`.
  * @param polarOverEquatorial - The body's c ÷ a, 1 for a sphere.
+ * @param at - The texel's place in a patch with a maturity layer, and its morph factor.
+ * @throws RangeError for a maturity layer of another size than a patch's.
  */
 export function terrainTexelLaws(
   photometry: Float32Array,
   elsewhere: PhotometricLaw,
   polarOverEquatorial: number,
+  at?: TexelMaturity,
 ): Array<TexelLaw | null> {
   const k = oblateAlbedoScale(elsewhere.lommelSeeligerShare, polarOverEquatorial);
   const law0: TexelLaw = {
     a: [elsewhere.a[0] * k, elsewhere.a[1] * k, elsewhere.a[2] * k],
     table: phaseFactorTableOf(elsewhere),
   };
+  const nodes =
+    at === undefined ? null : packClassNodes(at.maturity.nodes, photometry, polarOverEquatorial);
   return [
     law0,
     ...Array.from({ length: TERRAIN_CLASSES }, (_, slot): TexelLaw | null => {
       const law = classPhotometryOf(photometry, slot);
-      return law === null ? null : classTexelLaw(law, polarOverEquatorial);
+      if (law === null) {
+        return null;
+      }
+      const texel = classTexelLaw(law, polarOverEquatorial);
+      return at === undefined || nodes === null
+        ? texel
+        : {
+            ...texel,
+            a: texelClassAlbedo(at.maturity.codes, nodes, slot, at.u, at.v, at.morph),
+          };
     }),
   ];
 }
@@ -736,7 +961,9 @@ export function terrainTexelLaws(
  * rₘ its law's I/F through its own row, a zero share skipped, so that a law with a zero share adds
  * nothing whatever its values.
  *
- * @param laws - Law 0 (`elsewhere`) then each slot's, `null` for a slot with none.
+ * @param laws - Law 0 (`elsewhere`) then each slot's, `null` for a slot with none; at a texel of a
+ *   patch with a maturity layer, each slot's A drawn from its nodes there ({@link
+ *   terrainTexelLaws} with its texel, R10.T1.c's client half).
  * @param shares - Each law's share ({@link terrainShares}).
  * @param mu0 - Cosine of the incidence angle on the texel's normal.
  * @param mu - Cosine of the emission angle.

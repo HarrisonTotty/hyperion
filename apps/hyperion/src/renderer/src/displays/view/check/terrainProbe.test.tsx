@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { TerrainCheckViewRecord } from "../../../../../preload/api";
 import { fakeViewEngineSource } from "../../../test/fakeViewEngine";
@@ -15,7 +15,14 @@ import type {
   TexelRect,
   TextureHandle,
 } from "../../../view/engine/types";
-import { TERRAIN_SCENE_NAME, terrainTestGolden } from "../../../view/scenes/terrainScene";
+import { blockBytes } from "../../../view/scenes/terrainGolden";
+import {
+  TERRAIN_SCENE_NAME,
+  terrainMoonPhotometry,
+  terrainScene,
+  terrainTestGolden,
+} from "../../../view/scenes/terrainScene";
+import type { ViewScene } from "../../../view/scene/model";
 import { type ViewId, viewId } from "../../../view/camera/state";
 import {
   TERRAIN_COMPUTATION_FAILED,
@@ -700,6 +707,72 @@ function settled(): Promise<void> {
 function finiteTexels(): Promise<ArrayBuffer> {
   return Promise.resolve(new ArrayBuffer(2 * 2 * 4 * 2));
 }
+
+/** The scene of `probe`'s `TERRAIN TEST` option at 0 s of its script. */
+function terrainSceneOf(probe: TerrainProbe): ViewScene | undefined {
+  return probe.sceneOptions
+    .find((option) => option.name === TERRAIN_SCENE_NAME)
+    ?.make()
+    .sceneAt(0);
+}
+
+describe("the terrain probe on TEST MOON weathered's field (R10.T1.c)", () => {
+  const WEATHERED = "terrain-test-weathered";
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("makes TERRAIN TEST's own scene by default", () => {
+    const probe = new TerrainProbe(new ViewsProbe(), { paceMs: 0, readBackMs: 100 });
+    expect(terrainSceneOf(probe)).toEqual(terrainScene().sceneAt(0));
+  });
+
+  it("makes TERRAIN TEST's scene on the weathered field, its moon's photometry the golden's crust_albedo's", () => {
+    const probe = new TerrainProbe(new ViewsProbe(), {
+      paceMs: 0,
+      readBackMs: 100,
+      fixture: WEATHERED,
+    });
+    const { body, header, maturity } = terrainTestGolden(WEATHERED);
+    const moon = terrainSceneOf(probe)?.bodies.find((each) => each.id === body);
+    expect([probe.moon, moon?.appearance?.photometry]).toEqual([
+      body,
+      terrainMoonPhotometry(header, maturity),
+    ]);
+  });
+
+  it("serves the weathered golden's blocks through its fixture, and counts them", async () => {
+    vi.useFakeTimers();
+    const probe = new TerrainProbe(new ViewsProbe(), {
+      paceMs: 0,
+      readBackMs: 100,
+      fixture: WEATHERED,
+    });
+    const golden = terrainTestGolden(WEATHERED);
+    const link = probe.fixture.open();
+    const chunks: number[][] = [];
+    const pending = link.requests.requestBulk(
+      {
+        kind: "surface_field",
+        universe: probe.fixture.universe,
+        body: golden.body,
+        have_revision: null,
+      },
+      (response) => (response.state === "ready" ? response.bulk : null),
+      {
+        onChunk: (chunk) => {
+          chunks.push(Array.from(chunk.payload));
+        },
+      },
+    );
+    await vi.runAllTimersAsync();
+    await pending.outcome;
+    link.close();
+    const blocks = (golden.payloads[0]?.blocksHex ?? []).map((hex) => Array.from(blockBytes(hex)));
+    expect([chunks, probe.mark().fixture.blocksSent]).toEqual([blocks, blocks.length]);
+  });
+});
 
 describe("the terrain probe's read-backs (R10.T16.d; the batch review's D-C)", () => {
   /** A probe over a fake engine whose read-backs `readTexture` answers, on a page the test runs. */

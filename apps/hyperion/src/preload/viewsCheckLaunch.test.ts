@@ -12,6 +12,7 @@ const LAUNCH: ViewsCheckLaunch = {
   smoke: false,
   out: "/data/out",
   run: "several-views",
+  fixture: "terrain-test",
 };
 
 describe("the views check's launch switch", () => {
@@ -26,6 +27,23 @@ describe("the views check's launch switch", () => {
       expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
     },
   );
+
+  it.each([["terrain"], ["handover"]] as const)(
+    "carries a %s run's weathered fixture, TEST MOON weathered (R10.T1.c)",
+    (run) => {
+      const launch = { ...LAUNCH, run, fixture: "terrain-test-weathered" } as const;
+      expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
+    },
+  );
+
+  it("refuses the weathered fixture on T20's run, which serves no field (R10.T1.c)", () => {
+    expect(readViewsCheckLaunch({ ...LAUNCH, fixture: "terrain-test-weathered" })).toBeNull();
+    expect(() =>
+      viewsCheckLaunchFromArgv([
+        viewsCheckSwitch({ ...LAUNCH, fixture: "terrain-test-weathered" }),
+      ]),
+    ).toThrow(/does not hold/);
+  });
 
   it("is absent on any other launch", () => {
     expect(viewsCheckLaunchFromArgv(["--hyperion-server-url=ws://127.0.0.1:7878/ws"])).toBeNull();
@@ -44,6 +62,9 @@ describe("the views check's launch switch", () => {
     [{ ...LAUNCH, out: "" }],
     [{ ...LAUNCH, run: "sunset" }],
     [{ ...LAUNCH, run: true }],
+    [{ ...LAUNCH, run: "terrain", fixture: "weathered" }],
+    [{ ...LAUNCH, run: "terrain", fixture: null }],
+    [{ setting: "low", smoke: false, out: "/data/out", run: "terrain" }],
     [{ setting: "high", smoke: false }],
     [{ setting: "high", smoke: false, out: null }],
     [{ setting: "high", smoke: false, out: null, terrain: true }],

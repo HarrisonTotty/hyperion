@@ -16,8 +16,10 @@
  * - **The height workers** ({@link TerrainProbe.heightWorkers}): the renderer's own, each message
  *   posted and answered counted (bakes, `field-init`, `field-chunk`, `field-release`), and each
  *   worker made and terminated.
- * - **The kept scenes** ({@link TerrainProbe.sceneOptions}): `VIEW`'s own, `TERRAIN TEST`'s fixture
- *   replaced by one of the probe's, its blocks paced ({@link TerrainProbeOptions.paceMs}) so that
+ * - **The kept scenes** ({@link TerrainProbe.sceneOptions}): `VIEW`'s own, `TERRAIN TEST`'s scene
+ *   and fixture replaced by the probe's on the launch's field ({@link TerrainProbeOptions.fixture}:
+ *   `TEST MOON` weathered's on a `--weathered` launch, R10.T1.c), its blocks paced
+ *   ({@link TerrainProbeOptions.paceMs}) so that
  *   blocks are still arriving when the device is destroyed, its traffic counted, and the script's
  *   time it is told read back; on a `--handover` launch the hand-over check's check-only looks
  *   follow them ({@link TerrainProbeOptions.checkScenes}; plan R10, R10.T10.g), and on no other.
@@ -46,6 +48,7 @@ import type {
   TerrainCheckSessionRecord,
   TerrainCheckTeardownRecord,
   TerrainCheckViewRecord,
+  ViewsCheckTerrainFixture,
 } from "../../../../../preload/api";
 import type { ViewId } from "../../../view/camera/state";
 import type { AllocationEvent, MemoryCategory } from "../../../view/engine/memory";
@@ -64,6 +67,7 @@ import type {
 import {
   TERRAIN_SCENE_NAME,
   terrainMoon,
+  terrainScene,
   terrainSceneFixture,
 } from "../../../view/scenes/terrainScene";
 import { EngineUnavailable } from "../../../view/engine/resilientEngine";
@@ -367,6 +371,12 @@ export interface TerrainProbeOptions {
    * looks on a `--handover` launch (plan R10, R10.T10.g), none otherwise.
    */
   readonly checkScenes?: ReadonlyArray<SceneOption>;
+  /**
+   * The field `TERRAIN TEST`'s scene and fixture are made on: the launch's
+   * (`ViewsCheckLaunch.fixture`; `TEST MOON` weathered's on a `--weathered` launch, plan R10,
+   * R10.T1.c's client half), `TERRAIN TEST`'s own by default.
+   */
+  readonly fixture?: ViewsCheckTerrainFixture;
 }
 
 /** The terrain run's probe: see the module's remarks. */
@@ -375,7 +385,7 @@ export class TerrainProbe {
   readonly source: ViewEngineSource;
   /** Starts one of the session's height workers, counted; stable in identity. */
   readonly heightWorkers: () => WorkerLike;
-  /** `VIEW`'s kept scenes, `TERRAIN TEST`'s fixture the probe's. */
+  /** `VIEW`'s kept scenes, `TERRAIN TEST`'s scene and fixture the probe's, on its field. */
   readonly sceneOptions: ReadonlyArray<SceneOption>;
   /** `TERRAIN TEST`'s fixture as the probe serves it: paced, counted, its script's time read. */
   readonly fixture: TerrainFixture;
@@ -422,8 +432,9 @@ export class TerrainProbe {
     this.#views = views;
     this.#nowMs = options.nowMs ?? (() => performance.now());
     this.#readBackMs = options.readBackMs;
-    this.#moon = terrainMoon();
-    this.#inner = terrainSceneFixture(options.paceMs);
+    const field = options.fixture ?? "terrain-test";
+    this.#moon = terrainMoon(field);
+    this.#inner = terrainSceneFixture(options.paceMs, field);
     const inner = this.#inner;
     this.fixture = {
       universe: inner.universe,
@@ -436,7 +447,7 @@ export class TerrainProbe {
     this.sceneOptions = [
       ...SCENE_OPTIONS.map((option) =>
         option.name === TERRAIN_SCENE_NAME
-          ? Object.assign({}, option, { terrain: this.fixture })
+          ? Object.assign({}, option, { make: () => terrainScene(field), terrain: this.fixture })
           : option,
       ),
       ...(options.checkScenes ?? []),

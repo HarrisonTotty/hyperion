@@ -9,6 +9,7 @@ import {
   UNREAD_TEXTURES,
   unreadNormalMap,
 } from "../../test/normalMapFixtures";
+import { wgslFunction } from "../../test/wgslText";
 import type { PhotometricLaw } from "../appearance/law";
 import { lawFor } from "../appearance/phase";
 import { AIRLESS_LIGHTING, type SurfaceLightingReader } from "../atmosphere/surfaceLighting";
@@ -20,15 +21,28 @@ import type { PlacedLight } from "../lighting/hostLights";
 import { PLANETSHINE_SOURCES_HIGH, planetshineIrradiance } from "../lighting/planetshine";
 import type { Rgb } from "../photometry/toneCurve";
 import { AU_M } from "../scenes/kept";
+import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
+import maturityNodesWgsl from "../shaders/maturityNodes.wgsl?raw";
+import { faceUvToXyz, stToUv } from "../terrain/cube";
+import {
+  MATURITY_CODE_MAX,
+  MATURITY_NODES,
+  maturityCodeRatio,
+  maturityNodeAlbedo,
+  maturitySegment,
+} from "../terrain/maturityNodes";
 import type { BodyFigure } from "../terrain/planet";
 import {
+  type CompositePixel,
   compositeDiscPixels,
+  DISC_ROWS,
   discLawTerms,
   type DiscRecord,
   discReflectance,
   type DiscSamples,
   discSamples,
   FINE_DISC_PX,
+  FIRST_NODE_ROW,
   type OrientedClassMap,
   packDiscRecords,
   pointSampleDisc,
@@ -37,8 +51,23 @@ import {
   viewRay,
 } from "./discShading";
 import { type NormalMapTexels, normalMapNormalAt } from "./discNormals";
-import { classMapSurface, packClassMap } from "./discSurface";
-import { type LitBodyInput, planLitBodies } from "./draw";
+import {
+  classMapAlbedoAt,
+  type ClassMapTexel,
+  classMapMaturityLayer,
+  classMapSharesAt,
+  classMapSurface,
+  MATURITY_HIGH_CHANNEL,
+  MAX_DISC_CLASSES,
+  packClassMap,
+} from "./discSurface";
+import {
+  BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_MATERIALS,
+  type LitBodyInput,
+  planLitBodies,
+  SMOOTH_MESH_MATERIAL,
+} from "./draw";
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
 const CAMERA: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
@@ -711,5 +740,254 @@ describe("a disc under the field's normal map (R10.T10.g)", () => {
       );
     });
     expect(ratios.map((ratio) => Math.abs(ratio - 1) < 1e-12)).toEqual(ratios.map(() => true));
+  });
+});
+
+// --- A disc under its class map's maturity (plan R10, R10.T1.c's client half) --------------------
+
+/** A `u32` or `f32` constant of a WGSL source. */
+function wgslConstant(source: string, name: string): number {
+  const found = new RegExp(`const ${name} : (?:u32|f32) = ([0-9.]+)u?;`, "u").exec(source);
+  if (found === null) {
+    throw new Error(`no constant ${name}`);
+  }
+  return Number(found[1]);
+}
+
+/**
+ * Monotone nodes of one class, as `ClassMapMaturity.nodes` holds them: node j in channel c the
+ * background `background[c]` times 1 + 1.5 (1 − j ÷ 15), fresh ground 2.5 times it, `f32`.
+ */
+function oneClassNodes(background: readonly [number, number, number]): Float32Array {
+  const nodes = new Float32Array(3 * MATURITY_NODES);
+  for (let j = 0; j < MATURITY_NODES; j += 1) {
+    for (const c of [0, 1, 2] as const) {
+      nodes[3 * j + c] = background[c] * (1 + 1.5 * (1 - j / (MATURITY_NODES - 1)));
+    }
+  }
+  return nodes;
+}
+
+/** Node K − 1's channels of a one-class table: its background, as `f32` holds it. */
+function backgroundOf(nodes: Float32Array): Rgb {
+  const at = 3 * (MATURITY_NODES - 1);
+  return [nodes[at] ?? Number.NaN, nodes[at + 1] ?? Number.NaN, nodes[at + 2] ?? Number.NaN];
+}
+
+/**
+ * A one-class map surveyed whole under `law` with its A set to `nodes`' background, as the store's
+ * `classMapLawsOf` sets it, each texel's maturity code `codeOf`'s; body-fixed as galactic.
+ */
+function matured(
+  nodes: Float32Array,
+  codeOf: (texel: ClassMapTexel) => number,
+  law: PhotometricLaw = LAMBERT,
+): OrientedClassMap {
+  const surface = classMapSurface(
+    UNREAD_TEXTURES,
+    "matured",
+    packClassMap(64, 1, () => [1], { codeOf, nodes, drawn: [true] }),
+    [{ ...law, a: backgroundOf(nodes) }],
+    OWN,
+  );
+  return { ...surface, rotation: IDENTITY_ROTATION };
+}
+
+describe("a disc under its class map's maturity (R10.T1.c)", () => {
+  const NODES = oneClassNodes([0.3, 0.25, 0.2]);
+
+  it("carries as many rows as the shader, its node rows from the shader's first", () => {
+    expect([
+      wgslConstant(bodyDiscWgsl, "DISC_ROWS"),
+      wgslConstant(bodyDiscWgsl, "FIRST_NODE_ROW"),
+    ]).toEqual([DISC_ROWS, FIRST_NODE_ROW]);
+    expect(DISC_ROWS).toBe(FIRST_NODE_ROW + MAX_DISC_CLASSES * MATURITY_NODES);
+    // K from the nodes' library, which the shader composes and does not restate.
+    expect(wgslConstant(maturityNodesWgsl, "MATURITY_NODES")).toBe(MATURITY_NODES);
+    expect(bodyDiscWgsl).not.toMatch(/const MATURITY_NODES/u);
+    expect(wgslFunction(bodyDiscWgsl, "class_node")).toBe(
+      "{ return disc_row(FIRST_NODE_ROW + MATURITY_NODES * k + j); }",
+    );
+  });
+
+  it("reads a texel's code from the layer past the weights' its packing writes, rebuilt exactly from its two bytes", () => {
+    expect(wgslFunction(bodyDiscWgsl, "class_map_maturity")).toBe(
+      "{ let bytes = textureLoad(class_weights, texel, face + 6u * ((count + 3u) / 4u), 0); " +
+        "let code = round(bytes.r * UNORM8_MAX) * (UNORM8_MAX + 1.0) + round(bytes.g * UNORM8_MAX); " +
+        "return code / MATURITY_CODE_MAX; }",
+    );
+    expect([
+      wgslConstant(bodyDiscWgsl, "UNORM8_MAX"),
+      wgslConstant(bodyDiscWgsl, "MATURITY_CODE_MAX"),
+      MATURITY_HIGH_CHANNEL,
+    ]).toEqual([255, MATURITY_CODE_MAX, 0]);
+    const misplaced: string[] = [];
+    for (let classes = 1; classes <= MAX_DISC_CLASSES; classes += 1) {
+      for (const face of [0, 1, 2, 3, 4, 5] as const) {
+        if (face + 6 * Math.floor((classes + 3) / 4) !== classMapMaturityLayer(face, classes)) {
+          misplaced.push(`${String(classes)} classes, face ${String(face)}`);
+        }
+      }
+    }
+    expect(misplaced).toEqual([]);
+  });
+
+  it("takes a corner's code only under the record's flag, through the nodes' library and never its own formula", () => {
+    const body = wgslFunction(bodyDiscWgsl, "surface_at");
+    expect(body).toContain(
+      "if (body.maturity) { corner_b[corner] = b; corner_segment[corner] = maturity_segment( class_map_maturity(vec2u(texel + vec2i(1)), at.face, count) ); }",
+    );
+    expect(body).toContain("maturity_mix(lo, hi, segment.fraction)");
+    expect(bodyDiscWgsl).not.toMatch(/fn maturity_segment|fn maturity_mix|pow\(/u);
+    expect(wgslFunction(bodyDiscWgsl, "body_of")).toContain("body.maturity = y_row.w > 0.5;");
+  });
+
+  it("skips a class of no share before it reads a node, and renormalises its albedo as the shares", () => {
+    const body = wgslFunction(bodyDiscWgsl, "surface_at");
+    const skip = body.indexOf("if (!(out.shares[k + 1u] > 0.0) || !class_drawn(k)) { continue; }");
+    expect(skip).toBeGreaterThan(0);
+    expect(skip).toBeLessThan(body.indexOf("class_node(k, segment.node)"));
+    expect(body.indexOf("class_node(")).toBe(body.indexOf("class_node(k, segment.node)"));
+    expect(body).toContain("out.albedo[k + 1u] = albedo / norm;");
+    expect(wgslFunction(bodyDiscWgsl, "class_drawn")).toBe("{ return class_node(k, 0u).w > 0.5; }");
+  });
+
+  it("mixes each surveyed corner's nodes j and j + 1 of its class by its segment, weighted by its bilinear weight, as the twin does", () => {
+    // The twin, `classMapAlbedoAt`: Σ b T_c(x) ÷ Σ b over the surveyed corners, T_c(x) its
+    // `maturityNodeAlbedo`, (1 − f) Tⱼ + f Tⱼ₊₁ of class c's nodes (its weighting against the
+    // bilinear mean and an unsurveyed corner in `discSurface.test.ts`).
+    expect(wgslFunction(bodyDiscWgsl, "surface_at")).toContain(
+      "for (var corner = 0u; corner < 4u; corner = corner + 1u) { " +
+        "if (!(corner_b[corner] > 0.0)) { continue; } " +
+        "let segment = corner_segment[corner]; " +
+        "let lo = class_node(k, segment.node).xyz; " +
+        "let hi = class_node(k, segment.node + 1u).xyz; " +
+        "albedo = albedo + corner_b[corner] * maturity_mix(lo, hi, segment.fraction); }",
+    );
+    // The twin under one code everywhere: its class's nodes j and j + 1, read from the table.
+    const d = [0.3, -0.5, 0.8] as const;
+    const misses = [9_000, 50_000].flatMap((code) => {
+      const { node, fraction } = maturitySegment(maturityCodeRatio(code));
+      const { texels } = matured(NODES, () => code);
+      const albedo = classMapAlbedoAt(texels, d, classMapSharesAt(texels, d))?.[0] ?? null;
+      return ([0, 1, 2] as const).map((c) => {
+        const lo = NODES[3 * node + c] ?? Number.NaN;
+        const hi = NODES[3 * (node + 1) + c] ?? Number.NaN;
+        return Math.abs((albedo?.[c] ?? Number.NaN) - ((1 - fraction) * lo + fraction * hi));
+      });
+    });
+    expect(Math.max(...misses)).toBeLessThan(1e-15);
+  });
+
+  it("shades each law by its albedo at the point, in the reflectance and the sky's mean A", () => {
+    expect(wgslFunction(bodyDiscWgsl, "surface_reflectance")).toContain(
+      "reflectance = reflectance + share * surface.albedo[m] * row.rgb * disc_term;",
+    );
+    expect(wgslFunction(bodyDiscWgsl, "surface_reflectance")).not.toContain("law.a");
+    const shade = wgslFunction(bodyDiscWgsl, "shade");
+    expect(shade).toContain("mean_a = mean_a + surface.shares[m] * surface.albedo[m];");
+    expect(shade.match(/surface_reflectance\(surface, laws,/gu)).toHaveLength(2);
+    // Each law's own A where nothing else is drawn.
+    expect(wgslFunction(bodyDiscWgsl, "surface_at")).toContain(
+      "for (var m = 0u; m <= count; m = m + 1u) { out.albedo[m] = surface_law(m).a; }",
+    );
+  });
+
+  it("composes the nodes' library before the disc's shading in every module that draws it", () => {
+    for (const source of [
+      BODY_DISC_MATERIALS.interior.fragmentWgsl,
+      BODY_DISC_MATERIALS.limb.fragmentWgsl,
+      SMOOTH_MESH_MATERIAL.fragmentWgsl,
+      BODY_DISC_CELLS_KERNEL.reference,
+    ]) {
+      expect(source.indexOf(maturityNodesWgsl)).toBeGreaterThan(0);
+      expect(source.indexOf(maturityNodesWgsl)).toBeLessThan(source.indexOf(bodyDiscWgsl));
+    }
+  });
+
+  it("draws a class's A from its nodes at the point's code: its law's light by T(x) ÷ T(m_body), to 10⁻¹²", () => {
+    // Lambert's law, whose I/F is A f(α) μ₀, so that the light is linear in A; one code everywhere.
+    const q = pointAt(0.8);
+    const towards = turned(q, EAST, (30 * Math.PI) / 180);
+    const background = shadeOver(
+      towards,
+      matured(NODES, () => 0),
+      q,
+    );
+    const misses = [1, 9_000, 32_768, 50_000, 65_535].flatMap((code) => {
+      const drawn = shadeOver(
+        towards,
+        matured(NODES, () => code),
+        q,
+      );
+      const albedo = maturityNodeAlbedo(NODES, 0, maturitySegment(maturityCodeRatio(code)));
+      const own = backgroundOf(NODES);
+      return ([0, 1, 2] as const).map(
+        (c) => drawn.radiance[c] / (background.radiance[c] * (albedo[c] / own[c])) - 1,
+      );
+    });
+    expect(Math.max(...misses.map(Math.abs))).toBeLessThan(1e-12);
+    // Fresh ground at 2.5 times the background.
+    const fresh = shadeOver(
+      towards,
+      matured(NODES, () => 65_535),
+      q,
+    );
+    expect(fresh.radiance[1] / background.radiance[1]).toBeCloseTo(2.5, 6);
+  });
+
+  it("draws a map whose codes are all 0 as without a maturity, its class's A its node K − 1, to 10⁻¹²", () => {
+    const record = recordAt(24, 60, SPHERE);
+    const draw = (surface: OrientedClassMap): Map<string, PixelValue> =>
+      pixelMap(
+        compositeDiscPixels(
+          rasteriseDisc(
+            { ...record, surface, tableRows: [0, 1] },
+            CAMERA,
+            VIEWPORT,
+            surface.texels,
+          ),
+        ),
+      );
+    const moon = lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon");
+    const withMaturity = draw(matured(NODES, () => 0, moon));
+    const plain = mapped(null, { ...moon, a: backgroundOf(NODES) });
+    const without = draw(plain);
+    expect(withMaturity.size).toBe(without.size);
+    expect(withMaturity.size).toBeGreaterThan(300);
+    expect(pixelErrors(withMaturity, without).worst).toBeLessThan(1e-12);
+  });
+
+  it("draws a young crater's halo where its codes are, the background elsewhere", () => {
+    // Fresh ground within 0.2 rad of the sub-camera point of a 24 px disc, mature elsewhere.
+    const record = recordAt(24, 0, SPHERE);
+    const centre = vec3(0, 0, 1);
+    const surface = matured(NODES, ({ face, i, j }) => {
+      const [x, y, z] = faceUvToXyz(face, stToUv((i + 0.5) / 64), stToUv((j + 0.5) / 64));
+      return dot(normalise(vec3(x, y, z)), centre) > Math.cos(0.2) ? 65_535 : 0;
+    });
+    const pixels = compositeDiscPixels(
+      rasteriseDisc({ ...record, surface, tableRows: [0, 1] }, CAMERA, VIEWPORT, surface.texels),
+    );
+    const mature = matured(NODES, () => 0);
+    const plain = pixelMap(
+      compositeDiscPixels(
+        rasteriseDisc(
+          { ...record, surface: mature, tableRows: [0, 1] },
+          CAMERA,
+          VIEWPORT,
+          mature.texels,
+        ),
+      ),
+    );
+    const cx = VIEWPORT.widthPx / 2;
+    const cy = VIEWPORT.heightPx / 2;
+    const near = pixels.filter((p) => Math.hypot(p.xPx + 0.5 - cx, p.yPx + 0.5 - cy) < 1);
+    const far = pixels.filter((p) => Math.hypot(p.xPx + 0.5 - cx, p.yPx + 0.5 - cy) > 8);
+    const brightening = (p: CompositePixel): number =>
+      p.rgb[1] / (plain.get(`${String(p.xPx)},${String(p.yPx)}`)?.rgb[1] ?? Number.NaN);
+    expect(near.length).toBeGreaterThan(0);
+    expect(Math.min(...near.map(brightening))).toBeGreaterThan(2.4);
+    expect(Math.max(...far.map((p) => Math.abs(brightening(p) - 1)))).toBeLessThan(1e-12);
   });
 });

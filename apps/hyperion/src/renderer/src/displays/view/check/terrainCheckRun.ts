@@ -50,6 +50,7 @@ import type {
   TerrainCheckSpanRecord,
   ViewsCheckApi,
   ViewsCheckStyle,
+  ViewsCheckTerrainFixture,
   ViewsCheckWindow,
 } from "../../../../../preload/api";
 import { DEFAULT_FOV_DEG } from "../../../view/camera/projection";
@@ -248,6 +249,11 @@ export interface TerrainCheckDeps {
     | "scriptSAt"
   >;
   readonly setting: QualitySettingName;
+  /**
+   * The field the terrain probe serves: the launch's (`ViewsCheckLaunch.fixture`; R10.T1.c), whose
+   * golden the hand-over's range and the loss phase's first payload are read from.
+   */
+  readonly fixture: ViewsCheckTerrainFixture;
   readonly document: Document;
   readonly timing: TerrainCheckTiming;
   /** The page's clock, `performance.now()`, on which the probes stamp frames. */
@@ -263,16 +269,18 @@ export interface TerrainCheckDeps {
 /**
  * `TEST MOON`'s hand-over range at a canvas `widthPx` wide at the default field of view on
  * `setting`, m (`handoverRangeM` of the field's relief, against the camera's distance to the limb),
- * and the script's time at which the descent crosses it, s, by bisection over the descent.
+ * and the script's time at which the descent crosses it, s, by bisection over the descent; on
+ * `fixture`'s field, `TERRAIN TEST`'s own unless given.
  */
 export function terrainHandover(
   widthPx: number,
   setting: QualitySettingName,
+  fixture: ViewsCheckTerrainFixture = "terrain-test",
 ): { readonly rangeM: number; readonly scriptS: number } | null {
   if (!(widthPx > 0)) {
     return null;
   }
-  const { header } = terrainTestGolden();
+  const { header } = terrainTestGolden(fixture);
   const radPerPx = pixelAngleRad(
     { fovXRad: (DEFAULT_FOV_DEG * Math.PI) / 180, orientation: IDENTITY_QUATERNION },
     { widthPx, heightPx: widthPx },
@@ -283,7 +291,7 @@ export function terrainHandover(
     radPerPx,
   );
   const limbAt = (tS: number): number =>
-    limbDistanceM(norm(terrainShipBodyFixedM(tS)), header.equatorial_radius_m);
+    limbDistanceM(norm(terrainShipBodyFixedM(tS, fixture)), header.equatorial_radius_m);
   let low = 0;
   let high: number = TERRAIN_TEST_SCRIPT.descentEndS;
   if (!(limbAt(low) > rangeM && limbAt(high) < rangeM)) {
@@ -489,7 +497,7 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
     const chosen = await freshSession();
     await driver.configure(plan);
     const start = await begin(plan.name);
-    const firstBlocks = terrainTestGolden().payloads[0]?.blocksHex.length ?? 0;
+    const firstBlocks = terrainTestGolden(deps.fixture).payloads[0]?.blocksHex.length ?? 0;
     // The fresh session's blocks, from the choice, since some may come during its compile.
     const midStream = (): boolean => {
       const mark = terrain.mark();
@@ -672,7 +680,11 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
     restoresAtMs: deps.views.restoresAtMs(),
     loss,
     teardown: terrain.teardown(),
-    handover: terrainHandover(deps.views.canvasOf(PRIMARY_VIEW_NAME).widthPx, deps.setting),
+    handover: terrainHandover(
+      deps.views.canvasOf(PRIMARY_VIEW_NAME).widthPx,
+      deps.setting,
+      deps.fixture,
+    ),
   };
 }
 

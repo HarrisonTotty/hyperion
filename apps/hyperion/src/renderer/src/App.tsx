@@ -82,8 +82,13 @@ interface CheckProbes {
 /** A `--views-check` launch's probes, by its options. */
 function checkProbesOf(launch: ViewsCheckLaunch): CheckProbes {
   const views = new ViewsProbe();
+  // A `--weathered` launch's probe serves `TEST MOON` weathered's field in TERRAIN TEST's place.
   const terrainProbe = (checkScenes: ReadonlyArray<SceneOption>): TerrainProbe =>
-    new TerrainProbe(views, { ...terrainProbeOptions(launch.smoke), checkScenes });
+    new TerrainProbe(views, {
+      ...terrainProbeOptions(launch.smoke),
+      checkScenes,
+      fixture: launch.fixture,
+    });
   let run: CheckedRun;
   switch (launch.run) {
     case "several-views":
@@ -93,7 +98,7 @@ function checkProbesOf(launch: ViewsCheckLaunch): CheckProbes {
       run = { kind: "terrain", terrain: terrainProbe([]) };
       break;
     case "handover": {
-      const world = terrainTestHandoverWorld();
+      const world = terrainTestHandoverWorld(launch.fixture);
       // A look chosen by hand before the run measures the primary is drawn at the range of a
       // canvas the window's width, and measures nothing (`HandoverScenes`).
       const windowPx = Math.max(1, Math.round(window.innerWidth * window.devicePixelRatio));

@@ -103,6 +103,7 @@ export function ViewsCheckRunner({ api, probe, run }: ViewsCheckRunnerProps) {
               views: probe,
               terrain,
               setting: api.launch.setting,
+              fixture: api.launch.fixture,
               timing: api.launch.smoke ? TERRAIN_CHECK_TIMING.smoke : TERRAIN_CHECK_TIMING.full,
             }),
           controller.signal,

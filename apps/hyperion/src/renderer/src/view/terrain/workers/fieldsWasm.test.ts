@@ -9,23 +9,39 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import earthFixture from "../../../../../../../../crates/hyperion-surface/tests/golden/worker/earth_like.golden?raw";
 import fixture from "../../../../../../../../crates/hyperion-surface/tests/golden/worker/moon_like.golden?raw";
+import weatheredFixture from "../../../../../../../../crates/hyperion-surface/tests/golden/worker/terrain_test_weathered.golden?raw";
 import {
   bakePatch,
   HorizonLayer,
   initSync,
   LineOfSightKind,
+  maturityNodeCount,
   SurfaceFields,
   testPlanetVersion,
   WeightsLayer,
 } from "../../../generated/surface/hyperion_surface";
 import wasmDataUrl from "../../../generated/surface/hyperion_surface_bg.wasm?inline";
-import { classWeightsAt } from "../../bodies/discSurface";
-import { CLASS_MAP_LEVEL, classMapTexelsOf } from "../classMap";
+import { add, cross, normalise, scale, vec3 } from "../../../geometry/vec3";
+import { UNREAD_TEXTURES } from "../../../test/normalMapFixtures";
+import type { PhotometricLaw } from "../../appearance/law";
+import { classMapReflectionRatio } from "../../bodies/classMapPoint";
+import { discReflectance } from "../../bodies/discShading";
+import {
+  classMapAlbedoAt,
+  classMapSharesAt,
+  classMapSurface,
+  classWeightsAt,
+  discSurfaceLaws,
+} from "../../bodies/discSurface";
+import { parseTerrainGolden } from "../../scenes/terrainGolden";
+import { CLASS_MAP_LEVEL, classMapLawsOf, classMapTexelsOf } from "../classMap";
 import { fieldCellAt } from "../coverage";
 import { faceUvToXyz, stToUv } from "../cube";
+import { MATURITY_NODES } from "../maturityNodes";
 import type { Face, PatchKey } from "../patchKey";
+import type { BodyFigure } from "../planet";
 import { decodeOctahedral } from "../shadingNormal";
-import { dominantSlot } from "../terrainMaterial";
+import { classRowLaw, dominantSlot, PHASE_LAW } from "../terrainMaterial";
 import { f32Digest, f64Digest } from "./f32Digest";
 import {
   answerRequest,
@@ -1305,6 +1321,278 @@ describe("the height worker's fields on the real module", () => {
         : `${String(material.classCode)}:${material.entry === null ? "-" : String(material.entry)}`;
     });
     expect(asked).toEqual(sample.map((v) => EARTH.materials[v]));
+  });
+
+  describe("the maturity layer and its nodes (R10.T1.c's client half)", () => {
+    it("counts the module's nodes a level as the twin does", () => {
+      expect(maturityNodeCount()).toBe(MATURITY_NODES);
+    });
+
+    it("bakes no layer where the header carries no maturity, posts none, and repeats each slot's photometry at every node (test 3)", () => {
+      const fields = heldFields();
+      const { direct, args, seed } = directFields();
+      for (const record of recordsOf("patch")) {
+        const [, name, face, level, i, j, path, normals, weights] = record.head;
+        const key = { face: faceOf(face), level: Number(level), i: Number(i), j: Number(j) };
+        const weightsLayer = lookup(WEIGHTS, weights);
+        const settings: BakeSettings = {
+          vertexPath: lookup(VERTEX_PATHS, path),
+          normals: lookup(NORMALS, normals),
+          source: {
+            kind: "body",
+            body: FIXTURE.body,
+            detailSeed: FIXTURE.seed,
+            weights: weightsLayer,
+          },
+        };
+        const { reply } = answerRequest(
+          module,
+          { kind: "bake", id: 3, key, generation: 5, settings },
+          fields,
+        );
+        if (reply.kind !== "baked" || reply.bake.layers === null) {
+          throw new Error(`${String(name)} was not baked: ${JSON.stringify(reply)}`);
+        }
+        const { layers } = reply.bake;
+        expect([name, Object.hasOwn(layers, "maturity")]).toEqual([name, false]);
+        const raw = direct.bake(
+          ...args,
+          seed,
+          key.face,
+          key.level,
+          key.i,
+          key.j,
+          WASM_VERTEX_PATH[settings.vertexPath],
+          WASM_NORMAL_SCALE[settings.normals],
+          WASM_WEIGHTS_LAYER[weightsLayer],
+          WASM_HORIZON_LAYER[weightsLayer],
+          0,
+        );
+        expect([name, raw?.maturity().length]).toEqual([name, 0]);
+        raw?.free();
+        const nodes = direct.maturityNodes(...args, layers.palette, key.level);
+        expect(nodes).toHaveLength(8 * 2 * MATURITY_NODES * 3);
+        const misses: unknown[] = [];
+        for (let k = 0; k < 8; k += 1) {
+          for (let at = 0; at < 2 * MATURITY_NODES; at += 1) {
+            for (let c = 0; c < 3; c += 1) {
+              const node = nodes?.[6 * MATURITY_NODES * k + 3 * at + c];
+              if (node !== layers.photometry[PHOTOMETRY_STRIDE * k + c]) {
+                misses.push([name, k, at, c, node]);
+              }
+            }
+          }
+        }
+        expect(misses).toEqual([]);
+      }
+      direct.free();
+    });
+
+    describe("on TEST MOON weathered (decision-r10-t1c-client-scope §2.5, test 10)", () => {
+      const WEATHERED = parseTerrainGolden(weatheredFixture);
+      /** The point's figure: a sphere, the ratio taken about the body-fixed pole. */
+      const WEATHERED_SPHERE: BodyFigure = {
+        equatorialRadiusM: 1.7374e6,
+        polarRadiusM: 1.7374e6,
+        pole: null,
+      };
+
+      /** A worker's fields holding payloads 1 and 2's blocks, posted in turn as the native writer. */
+      function weatheredFields(): WorkerFields {
+        const fields = new WorkerFields(module);
+        const blocks = WEATHERED.payloads.slice(0, 2).flatMap(({ blocksHex }) => blocksHex);
+        blocks.forEach((hex, n) => {
+          const block = bytesOf(hex);
+          const request: HeightWorkerRequest =
+            n === 0
+              ? { kind: "field-init", id: n, body: WEATHERED.body, block, form: "payload" }
+              : { kind: "field-chunk", id: n, body: WEATHERED.body, block };
+          const { reply } = answerRequest(module, request, fields);
+          if (reply.kind !== "field-held") {
+            throw new Error(`block ${String(n)} was refused: ${JSON.stringify(reply)}`);
+          }
+        });
+        return fields;
+      }
+
+      it("bakes each pinned patch's codes and nodes as the native bake does, bit for bit, both transferred", () => {
+        const patches = WEATHERED.maturity?.patches ?? [];
+        expect(patches.map(({ key }) => key.level)).toEqual([8, 13, 17]);
+        const fields = weatheredFields();
+        const digests = patches.map(({ key }) => {
+          const { reply, transfer } = answerRequest(
+            module,
+            {
+              kind: "bake",
+              id: 7,
+              key,
+              generation: 1,
+              settings: {
+                vertexPath: "face-differences",
+                normals: "mesh",
+                source: {
+                  kind: "body",
+                  body: WEATHERED.body,
+                  detailSeed: WEATHERED.seed,
+                  weights: "baked",
+                },
+              },
+            },
+            fields,
+          );
+          if (reply.kind !== "baked") {
+            throw new Error(`level ${String(key.level)} was not baked: ${JSON.stringify(reply)}`);
+          }
+          const maturity = reply.bake.layers?.maturity;
+          if (maturity === undefined) {
+            throw new Error(`level ${String(key.level)} was baked without its maturity layer`);
+          }
+          expect([maturity.codes.length, maturity.nodes.length]).toEqual([
+            2 * 65 * 65,
+            8 * 2 * MATURITY_NODES * 3,
+          ]);
+          expect(transfer).toEqual(
+            expect.arrayContaining([maturity.codes.buffer, maturity.nodes.buffer]),
+          );
+          return [
+            digestHex(f64Digest(Float64Array.from(maturity.codes))),
+            digestHex(f32Digest(maturity.nodes)),
+          ];
+        });
+        expect(digests).toEqual(
+          patches.map(({ codesDigest, nodesDigest }) => [
+            digestHex(codesDigest),
+            digestHex(nodesDigest),
+          ]),
+        );
+      });
+
+      /** The worker's class-map answer over payloads 1 and 2's blocks, and what it transfers. */
+      function weatheredClassMap(): {
+        readonly map: ClassMapAnswer;
+        readonly transfer: ReadonlyArray<Transferable>;
+      } {
+        const { reply, transfer } = answerRequest(
+          module,
+          { kind: "class-map", id: 9, body: WEATHERED.body, detailSeed: WEATHERED.seed },
+          weatheredFields(),
+        );
+        if (reply.kind !== "class-map" || reply.map === null) {
+          throw new Error(`no class map: ${JSON.stringify(reply)}`);
+        }
+        return { map: reply.map, transfer };
+      }
+
+      it("answers its class map's codes and nodes as the native golden's, bit for bit, both transferred (test 10)", () => {
+        const { map, transfer } = weatheredClassMap();
+        const { maturity } = map;
+        if (maturity === undefined) {
+          throw new Error("the weathered class map was answered without its maturity");
+        }
+        const classes = map.classes.length / 2;
+        expect([maturity.codes.length, maturity.nodes.length]).toEqual([
+          map.texels.length,
+          3 * MATURITY_NODES * classes,
+        ]);
+        expect(transfer).toEqual(
+          expect.arrayContaining([maturity.codes.buffer, maturity.nodes.buffer]),
+        );
+        const pinned = WEATHERED.maturity?.classMap;
+        expect([
+          digestHex(f64Digest(Float64Array.from(maturity.codes))),
+          digestHex(f32Digest(maturity.nodes)),
+        ]).toEqual([digestHex(pinned?.codesDigest ?? 0n), digestHex(pinned?.nodesDigest ?? 0n)]);
+      });
+
+      it("draws its class map's point within 0.3% of the disc's f64 integral with each direction's albedos (test 11)", () => {
+        const { map } = weatheredClassMap();
+        const texels = classMapTexelsOf(map);
+        const crust = WEATHERED.maturity?.crustAlbedoBvr;
+        if (texels?.maturity === undefined || crust === undefined) {
+          throw new Error("the weathered class map carries no maturity");
+        }
+        // Seen from over the survey: the surveyed texels' mean direction.
+        const side = 2 ** CLASS_MAP_LEVEL;
+        const sum = [...map.texels].reduce(
+          (total, index) => {
+            const cell = fieldCellAt(CLASS_MAP_LEVEL, index);
+            const [x, y, z] = faceUvToXyz(
+              cell.face,
+              stToUv((cell.i + 0.5) / side),
+              stToUv((cell.j + 0.5) / side),
+            );
+            return add(total, normalise(vec3(x, y, z)));
+          },
+          vec3(0, 0, 0),
+        );
+        const observer = normalise(sum);
+        const across = normalise(
+          cross(observer, Math.abs(observer.z) < 0.9 ? vec3(0, 0, 1) : vec3(1, 0, 0)),
+        );
+        // An f64 brute force over 2 × 10⁵ Fibonacci directions: the map's light by each
+        // direction's shares and albedos over `elsewhere`'s alone, as the point's ratio is taken.
+        const count = 200_000;
+        const turn = Math.PI * (3 - Math.sqrt(5));
+        const directions = Array.from(
+          { length: count },
+          (_, n): readonly [number, number, number] => {
+            const z = 1 - (2 * (n + 0.5)) / count;
+            const r = Math.sqrt(1 - z * z);
+            return [r * Math.cos(n * turn), r * Math.sin(n * turn), z];
+          },
+        );
+        const shares = directions.map((d) => classMapSharesAt(texels, d));
+        const albedos = directions.map((d, n) => {
+          const albedo = classMapAlbedoAt(texels, d, shares[n] ?? []);
+          return albedo === null ? undefined : [null, ...albedo];
+        });
+        // `elsewhere` the crust's drawn albedo at the background, the scene's uniform law, and
+        // half of it, against which the survey's own ground stands out.
+        const misses = [1, 0.5].flatMap((darker) => {
+          const elsewhere: PhotometricLaw = {
+            ...classRowLaw(PHASE_LAW.regolith, 1),
+            a: [darker * crust[2], darker * crust[1], darker * crust[0]],
+          };
+          const laws = classMapLawsOf(map).map((law) => law ?? elsewhere);
+          const surface = classMapSurface(UNREAD_TEXTURES, "weathered", texels, laws, elsewhere);
+          const allLaws = discSurfaceLaws(surface);
+          return [0, 30, 60].map((phaseDeg) => {
+            const alpha = phaseDeg * (Math.PI / 180);
+            const light = add(scale(observer, Math.cos(alpha)), scale(across, Math.sin(alpha)));
+            const mapped = [0, 0, 0];
+            const alone = [0, 0, 0];
+            directions.forEach(([x, y, z], n) => {
+              const mu = x * observer.x + y * observer.y + z * observer.z;
+              const mu0 = x * light.x + y * light.y + z * light.z;
+              if (!(mu > 0 && mu0 > 0)) {
+                return;
+              }
+              const withMap = discReflectance(
+                allLaws,
+                1,
+                shares[n] ?? [],
+                mu0,
+                mu,
+                alpha,
+                albedos[n],
+              );
+              const uniform = discReflectance([elsewhere], 1, [1], mu0, mu, alpha);
+              for (const c of [0, 1, 2] as const) {
+                mapped[c] = (mapped[c] ?? 0) + withMap[c] * mu;
+                alone[c] = (alone[c] ?? 0) + uniform[c] * mu;
+              }
+            });
+            const ratio = classMapReflectionRatio(WEATHERED_SPHERE, surface, light, observer);
+            return Math.max(
+              ...[0, 1, 2].map((c) =>
+                Math.abs((ratio[c] ?? Number.NaN) / ((mapped[c] ?? 0) / (alone[c] ?? 0)) - 1),
+              ),
+            );
+          });
+        });
+        expect(Math.max(...misses)).toBeLessThan(0.003);
+      }, 60_000);
+    });
   });
 });
 

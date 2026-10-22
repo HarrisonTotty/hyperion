@@ -20,13 +20,30 @@
  * a point in a surveyed texel takes the share vector (`elsewhere`'s 1 − Σ w and each class's w,
  * {@link surfaceShares}) interpolated over the four nearest texel centres, counting surveyed texels
  * alone and renormalised, so the cells show no blocks; the gutter carries it across a face's edge.
+ *
+ * A map may carry each surveyed texel's maturity and each class's albedo nodes (plan R10, R10.T1.c's
+ * client half; decision-r10-t1c-client-scope §2.3): the texel's unorm16 code (`bake::encode_maturity`)
+ * in six more layers after the weights', one a face, its high byte in channel r and its low byte in
+ * g, the gutter as the weights'. A class drawn from its nodes then takes as its A, at a point of a
+ * surveyed texel, its nodes' albedo at each of the four texels' codes (`maturityNodes.ts`) by the
+ * very bilinear weights the shares take, those of the surveyed texels alone, renormalised
+ * ({@link classMapAlbedoAt}); the shares stay as they are.
  */
 import type { ClassMapDiscSurface, DiscNormalMap, DiscSurface } from "../appearance/bodyAppearance";
 import type { PhotometricLaw } from "../appearance/law";
 import { TEXTURE_USAGE } from "../engine/gpuFlags";
 import type { TextureSpec } from "../engine/memory";
 import type { RenderEngine, TextureHandle } from "../engine/types";
+import type { Rgb } from "../photometry/toneCurve";
 import { faceUvToXyz, stToUv, uvToSt, type Xyz, xyzToFaceUv } from "../terrain/cube";
+import {
+  MATURITY_CODE_MAX,
+  MATURITY_NODES,
+  maturityCodeRatio,
+  maturityNodeAlbedo,
+  type MaturitySegment,
+  maturitySegment,
+} from "../terrain/maturityNodes";
 import type { Face } from "../terrain/patchKey";
 
 /** The classes one disc's class map may hold; the record and the shader carry this many laws. */
@@ -58,9 +75,47 @@ export function classMapLayers(classes: number): number {
   return FACES * Math.ceil(classes / CLASSES_PER_LAYER);
 }
 
+/**
+ * The layers a class map's texture takes: its weights' ({@link classMapLayers}), and six more, one
+ * a face, where it carries its texels' maturity (R10.T1.c's client half).
+ */
+export function classMapTexelLayers(map: Pick<ClassMapTexels, "classes" | "maturity">): number {
+  return classMapLayers(map.classes) + (map.maturity === undefined ? 0 : FACES);
+}
+
+/**
+ * The layer of `face`'s maturity codes in a map of `classes` classes that carries them: past the
+ * weights' layers, face + 6 ⌈classes ÷ 4⌉, as `class_map_maturity` reads it in the shader.
+ */
+export function classMapMaturityLayer(face: Face, classes: number): number {
+  return classMapLayers(classes) + face;
+}
+
+/** The channel of a maturity layer that holds a code's high byte, r; its low byte is in the next, g. */
+export const MATURITY_HIGH_CHANNEL = 0;
+
 /** The texels along a layer's side for N texels along a face's: N and a gutter texel each side. */
 export function classMapSide(faceTexels: number): number {
   return faceTexels + 2;
+}
+
+/**
+ * A class map's maturity, beside its codes in its texels' data (plan R10, R10.T1.c's client half):
+ * each class's albedo nodes at band level 0, and which classes are drawn from them.
+ */
+export interface ClassMapMaturity {
+  /**
+   * Class c's node j at 3 (K c + j), K = `MATURITY_NODES`: its normal albedo in the display
+   * channels r, g and b (the module's R, V and B), unscaled for the figure; all 0 for a class not
+   * drawn from its nodes.
+   */
+  readonly nodes: Float32Array;
+  /**
+   * Whether each class is drawn from its nodes, in its order: a class of a named substance, with a
+   * law of its own, whose A is then its node K − 1, its albedo at the body's background maturity;
+   * a class that shades with `elsewhere` is not.
+   */
+  readonly drawn: ReadonlyArray<boolean>;
 }
 
 /** A class map's texels as they are uploaded. */
@@ -70,12 +125,25 @@ export interface ClassMapTexels {
   /** The body's classes, one law each. */
   readonly classes: number;
   /**
-   * Layer after layer ({@link classMapLayers}), each N + 2 rows y of N + 2 texels x
+   * Layer after layer ({@link classMapTexelLayers}), each N + 2 rows y of N + 2 texels x
    * ({@link classMapSide}), four bytes a texel: class 4g + c's weight × 255 in channel c of layer
-   * f + 6g. Face texel (i, j) is at (i + 1, j + 1); the gutter's sides hold the neighbouring faces'
-   * edge texels, and its corners nothing.
+   * f + 6g; then, where the map carries its maturity, face f's codes in layer
+   * {@link classMapMaturityLayer}, each surveyed texel's code ⌊code ÷ 256⌋ in channel r and its
+   * code mod 256 in g, b and a 0, 0 at every unsurveyed texel. Face texel (i, j) is at (i + 1, j + 1);
+   * the gutter's sides hold the neighbouring faces' edge texels, and its corners nothing.
    */
   readonly data: Uint8Array;
+  /** Its maturity's nodes (R10.T1.c's client half); absent for a map without one. */
+  readonly maturity?: ClassMapMaturity;
+}
+
+/** What {@link packClassMap} takes to pack a map's maturity: its codes, and its nodes as it holds them. */
+export interface ClassMapMaturityInput extends ClassMapMaturity {
+  /**
+   * A surveyed texel's maturity code, an integer 0 to 65,535 (`bake::encode_maturity`: 0 the
+   * body's background maturity, 65,535 fresh ground); asked of each texel `weightsOf` surveys.
+   */
+  readonly codeOf: (texel: ClassMapTexel) => number;
 }
 
 /** One texel of a class map: a face and a cell on it. */
@@ -117,6 +185,32 @@ function storedOffset(map: ClassMapTexels, face: Face, x: number, y: number, k: 
 /** The byte offset of class `k`'s weight at a face texel. */
 function weightOffset(map: ClassMapTexels, texel: ClassMapTexel, k: number): number {
   return storedOffset(map, texel.face, texel.i + 1, texel.j + 1, k);
+}
+
+/** The byte offset of the high byte of the maturity code at stored texel (x, y) of `face`. */
+function codeOffset(map: ClassMapTexels, face: Face, x: number, y: number): number {
+  const side = classMapSide(map.faceTexels);
+  const layer = classMapMaturityLayer(face, map.classes);
+  return ((layer * side + y) * side + x) * CLASSES_PER_LAYER + MATURITY_HIGH_CHANNEL;
+}
+
+/** The maturity code at stored texel (x, y) of `face`, from its two bytes, as the shader reads it. */
+function storedCode(map: ClassMapTexels, face: Face, x: number, y: number): number {
+  const at = codeOffset(map, face, x, y);
+  return (map.data[at] ?? 0) * (UNORM_MAX + 1) + (map.data[at + 1] ?? 0);
+}
+
+/**
+ * Checks a map's maturity against its classes: the nodes K × 3 a class, a flag a class.
+ *
+ * @throws Error where either does not fit `classes`.
+ */
+function checkMaturity(maturity: ClassMapMaturity, classes: number): void {
+  if (maturity.nodes.length !== 3 * MATURITY_NODES * classes || maturity.drawn.length !== classes) {
+    throw new Error(
+      `a class map of ${classes} classes has ${3 * MATURITY_NODES * classes} node values and as many flags as classes, not ${maturity.nodes.length} and ${maturity.drawn.length}`,
+    );
+  }
 }
 
 /**
@@ -197,14 +291,21 @@ export function forEachGutterTexel(
  * the survey covers in part, whose rest `elsewhere` takes. They are quantised to bytes keeping that
  * sum, so a texel surveyed whole leaves no share to `elsewhere`.
  *
+ * With `maturity` (R10.T1.c's client half), each surveyed texel's code goes in its face's maturity
+ * layer, its gutter as the weights', and the map carries the nodes; the weights' bytes are as
+ * without it.
+ *
  * @param weightsOf - A texel's weight per class, each in [0, 1], or `null` for an unsurveyed texel.
+ * @param maturity - The texels' maturity codes and the classes' nodes, for a map that carries them.
  * @throws Error if N is not a positive integer, or `classes` is not 1 to {@link MAX_DISC_CLASSES},
- *   or a texel's weights are not `classes` many.
+ *   or a texel's weights are not `classes` many; with `maturity`, if its nodes are not K × 3 a
+ *   class or its flags one a class, or a code is not an integer 0 to 65,535.
  */
 export function packClassMap(
   faceTexels: number,
   classes: number,
   weightsOf: (texel: ClassMapTexel) => ReadonlyArray<number> | null,
+  maturity?: ClassMapMaturityInput,
 ): ClassMapTexels {
   if (!(Number.isInteger(faceTexels) && faceTexels > 0)) {
     throw new Error(`a class map has a positive whole number of texels a side, got ${faceTexels}`);
@@ -212,11 +313,22 @@ export function packClassMap(
   if (!(Number.isInteger(classes) && classes > 0 && classes <= MAX_DISC_CLASSES)) {
     throw new Error(`a class map holds 1 to ${MAX_DISC_CLASSES} classes, got ${classes}`);
   }
+  if (maturity !== undefined) {
+    checkMaturity(maturity, classes);
+  }
   const side = classMapSide(faceTexels);
+  const held: ClassMapMaturity | undefined =
+    maturity === undefined ? undefined : { nodes: maturity.nodes, drawn: maturity.drawn };
   const map: ClassMapTexels = {
     faceTexels,
     classes,
-    data: new Uint8Array(classMapLayers(classes) * side * side * CLASSES_PER_LAYER),
+    data: new Uint8Array(
+      classMapTexelLayers(held === undefined ? { classes } : { classes, maturity: held }) *
+        side *
+        side *
+        CLASSES_PER_LAYER,
+    ),
+    ...(held === undefined ? {} : { maturity: held }),
   };
   for (const face of FACE_INDICES) {
     for (let j = 0; j < faceTexels; j += 1) {
@@ -234,6 +346,9 @@ export function packClassMap(
         weightBytes(weights).forEach((byte, k) => {
           map.data[weightOffset(map, texel, k)] = byte;
         });
+        if (maturity !== undefined) {
+          putCode(map, texel, maturity.codeOf(texel));
+        }
       }
     }
   }
@@ -242,8 +357,30 @@ export function packClassMap(
     for (let k = 0; k < classes; k += 1) {
       map.data[storedOffset(map, face, x, y, k)] = map.data[weightOffset(map, from, k)] ?? 0;
     }
+    if (maturity !== undefined) {
+      const to = codeOffset(map, face, x, y);
+      const of = codeOffset(map, from.face, from.i + 1, from.j + 1);
+      map.data[to] = map.data[of] ?? 0;
+      map.data[to + 1] = map.data[of + 1] ?? 0;
+    }
   });
   return map;
+}
+
+/**
+ * Writes a face texel's maturity code as its two bytes, high then low.
+ *
+ * @throws Error for a code that is not an integer 0 to 65,535.
+ */
+function putCode(map: ClassMapTexels, texel: ClassMapTexel, code: number): void {
+  if (!(Number.isInteger(code) && code >= 0 && code <= MATURITY_CODE_MAX)) {
+    throw new Error(
+      `texel (${texel.face}, ${texel.i}, ${texel.j}) has maturity code ${code}, not an integer 0 to ${MATURITY_CODE_MAX}`,
+    );
+  }
+  const at = codeOffset(map, texel.face, texel.i + 1, texel.j + 1);
+  map.data[at] = Math.floor(code / (UNORM_MAX + 1));
+  map.data[at + 1] = code % (UNORM_MAX + 1);
 }
 
 /** The weight of each class at stored texel (x, y) of `face`'s layers, as the shader reads it. */
@@ -276,7 +413,7 @@ export function surfaceShares(weights: ReadonlyArray<number>): number[] {
 
 /**
  * The share of each of {@link discSurfaceLaws}' laws at a body-fixed direction under a class map,
- * by the survey-masked bilinear reconstruction `surface_shares` computes (R10.T10.d,
+ * by the survey-masked bilinear reconstruction `surface_at` computes (R10.T10.d,
  * decision-r07-t8b).
  *
  * @remarks
@@ -291,20 +428,7 @@ export function surfaceShares(weights: ReadonlyArray<number>): number[] {
  * @param direction - Along the body-fixed axes, z the pole; it need not be unit.
  */
 export function classMapSharesAt(map: ClassMapTexels, direction: Xyz): number[] {
-  const n = map.faceTexels;
-  const { face, u, v } = xyzToFaceUv(direction);
-  const sN = uvToSt(u) * n;
-  const tN = uvToSt(v) * n;
-  const holding = [
-    Math.min(Math.max(Math.floor(sN), 0), n - 1),
-    Math.min(Math.max(Math.floor(tN), 0), n - 1),
-  ] as const;
-  const x = sN - 0.5;
-  const y = tN - 0.5;
-  const i0 = Math.min(Math.max(Math.floor(x), -1), n - 1);
-  const j0 = Math.min(Math.max(Math.floor(y), -1), n - 1);
-  const fx = x - i0;
-  const fy = y - j0;
+  const { face, holding, i0, j0, fx, fy } = reconstructionCorners(map, direction);
   const shares = Array.from({ length: map.classes + 1 }, () => 0);
   let norm = 0;
   for (let corner = 0; corner < 4; corner += 1) {
@@ -320,13 +444,128 @@ export function classMapSharesAt(map: ClassMapTexels, direction: Xyz): number[] 
     if (!surveyed) {
       continue;
     }
-    const b = (di === 0 ? 1 - fx : fx) * (dj === 0 ? 1 - fy : fy);
+    const b = cornerWeight(di, dj, fx, fy);
     surfaceShares(weights).forEach((share, m) => {
       shares[m] = (shares[m] ?? 0) + b * share;
     });
     norm += b;
   }
   return norm > 0 ? shares.map((share) => share / norm) : [1, ...shares.slice(1).map(() => 0)];
+}
+
+/**
+ * Where the survey-masked reconstruction reads a map at a direction: its face, the texel holding it
+ * and the first of the four whose centres are nearest, with the bilinear fractions there
+ * ({@link classMapSharesAt}'s remarks).
+ */
+interface ReconstructionCorners {
+  readonly face: Face;
+  /** The texel holding the direction, (⌊n s⌋, ⌊n t⌋), each held to the face's. */
+  readonly holding: readonly [number, number];
+  /** The first corner's face texel, (⌊n s − ½⌋, ⌊n t − ½⌋), −1 the gutter's. */
+  readonly i0: number;
+  readonly j0: number;
+  /** The fractions (n s − ½ − i₀, n t − ½ − j₀). */
+  readonly fx: number;
+  readonly fy: number;
+}
+
+/** The texels the reconstruction reads at `direction`, as `surface_at` finds them. */
+function reconstructionCorners(map: ClassMapTexels, direction: Xyz): ReconstructionCorners {
+  const n = map.faceTexels;
+  const { face, u, v } = xyzToFaceUv(direction);
+  const sN = uvToSt(u) * n;
+  const tN = uvToSt(v) * n;
+  const holding = [
+    Math.min(Math.max(Math.floor(sN), 0), n - 1),
+    Math.min(Math.max(Math.floor(tN), 0), n - 1),
+  ] as const;
+  const x = sN - 0.5;
+  const y = tN - 0.5;
+  const i0 = Math.min(Math.max(Math.floor(x), -1), n - 1);
+  const j0 = Math.min(Math.max(Math.floor(y), -1), n - 1);
+  return { face, holding, i0, j0, fx: x - i0, fy: y - j0 };
+}
+
+/** Corner (i₀ + di, j₀ + dj)'s bilinear weight at fractions (fx, fy). */
+function cornerWeight(di: number, dj: number, fx: number, fy: number): number {
+  return (di === 0 ? 1 - fx : fx) * (dj === 0 ? 1 - fy : fy);
+}
+
+/** Whether stored texel (x, y) of `face` holds any weight: one byte of its classes above 0. */
+function storedSurveyed(map: ClassMapTexels, face: Face, x: number, y: number): boolean {
+  for (let k = 0; k < map.classes; k += 1) {
+    if ((map.data[storedOffset(map, face, x, y, k)] ?? 0) > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Each class's A at a body-fixed direction under a map that carries its maturity (plan R10,
+ * R10.T1.c's client half; decision-r10-t1c-client-scope §2.3), as `surface_at` takes it in the
+ * shader: unscaled for the figure, display channels.
+ *
+ * @remarks
+ * Over the very corners and bilinear weights b of {@link classMapSharesAt}, its surveyed texels
+ * alone, a drawn class c's A is Σ b T_c(x) ÷ Σ b, T_c(x) its nodes' albedo at the corner's code
+ * (`maturityNodes.ts`' segment and mix), a product form beside the shares, which stay as they are.
+ * A class not drawn from its nodes, or of no share at the point (`shares[c + 1]` not above 0), is
+ * `null`: its law's A, its nodes unread.
+ *
+ * @param direction - Along the body-fixed axes, z the pole; it need not be unit.
+ * @param shares - The laws' shares at `direction` ({@link classMapSharesAt}).
+ * @returns Each class's A, or `null` for a class drawn by its law's; `null` for a map without a
+ *   maturity, or at a direction whose texel holds no weight, where `elsewhere` takes it all.
+ */
+export function classMapAlbedoAt(
+  map: ClassMapTexels,
+  direction: Xyz,
+  shares: ReadonlyArray<number>,
+): Array<Rgb | null> | null {
+  const { maturity } = map;
+  if (maturity === undefined) {
+    return null;
+  }
+  const { face, holding, i0, j0, fx, fy } = reconstructionCorners(map, direction);
+  const corners: Array<{ readonly b: number; readonly segment: MaturitySegment }> = [];
+  let norm = 0;
+  for (let corner = 0; corner < 4; corner += 1) {
+    const di = corner % 2;
+    const dj = Math.floor(corner / 2);
+    const i = i0 + di;
+    const j = j0 + dj;
+    const surveyed = storedSurveyed(map, face, i + 1, j + 1);
+    if (i === holding[0] && j === holding[1] && !surveyed) {
+      return null;
+    }
+    if (!surveyed) {
+      continue;
+    }
+    const b = cornerWeight(di, dj, fx, fy);
+    corners.push({
+      b,
+      segment: maturitySegment(maturityCodeRatio(storedCode(map, face, i + 1, j + 1))),
+    });
+    norm += b;
+  }
+  if (!(norm > 0)) {
+    return null;
+  }
+  return Array.from({ length: map.classes }, (_, c): Rgb | null => {
+    if (maturity.drawn[c] !== true || !((shares[c + 1] ?? 0) > 0)) {
+      return null;
+    }
+    const sum: [number, number, number] = [0, 0, 0];
+    for (const { b, segment } of corners) {
+      const albedo = maturityNodeAlbedo(maturity.nodes, 3 * MATURITY_NODES * c, segment);
+      sum[0] += b * albedo[0];
+      sum[1] += b * albedo[1];
+      sum[2] += b * albedo[2];
+    }
+    return [sum[0] / norm, sum[1] / norm, sum[2] / norm];
+  });
 }
 
 /** The laws a surface shades with, in the disc record's order: one, or `elsewhere` then each class's. */
@@ -346,17 +585,17 @@ export function discSurfaceLaws(surface: DiscSurface): ReadonlyArray<Photometric
 /**
  * The specification of a class map's texture: (N + 2) × (N + 2) texels a layer, the gutter
  * included, filed under `coarse-field-gpu` beside the coverage mask (R12 Design note 6's coarse
- * field's GPU copy; R10.T10.d), 418 KB at R10's 64 texels a face and 16 classes.
+ * field's GPU copy; R10.T10.d), 418 KB at R10's 64 texels a face and 16 classes, and 523 KB with
+ * the six layers of a map's maturity (R10.T1.c's client half).
  */
 export function classMapTextureSpec(
   name: string,
-  faceTexels: number,
-  classes: number,
+  map: Pick<ClassMapTexels, "faceTexels" | "classes" | "maturity">,
 ): TextureSpec {
-  const side = classMapSide(faceTexels);
+  const side = classMapSide(map.faceTexels);
   return {
     name,
-    size: { width: side, height: side, depthOrArrayLayers: classMapLayers(classes) },
+    size: { width: side, height: side, depthOrArrayLayers: classMapTexelLayers(map) },
     dimension: "2d",
     format: CLASS_MAP_FORMAT,
     mips: 1,
@@ -393,14 +632,12 @@ export function classMapSurface(
   if (laws.length !== map.classes) {
     throw new Error(`a class map of ${map.classes} classes needs as many laws, got ${laws.length}`);
   }
-  const weights: TextureHandle = engine.createTexture(
-    classMapTextureSpec(name, map.faceTexels, map.classes),
-  );
+  const weights: TextureHandle = engine.createTexture(classMapTextureSpec(name, map));
   const side = classMapSide(map.faceTexels);
   engine.writeTexture(
     weights,
     { x: 0, y: 0, z: 0 },
-    { width: side, height: side, depthOrArrayLayers: classMapLayers(map.classes) },
+    { width: side, height: side, depthOrArrayLayers: classMapTexelLayers(map) },
     map.data,
   );
   return { kind: "class-map", weights, texels: map, laws, elsewhere, normals };

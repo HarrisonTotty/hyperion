@@ -135,6 +135,19 @@ describe.runIf(process.platform === "linux")("the views check's script", () => {
     ]).toEqual([["high", "low"], true]);
   });
 
+  it("passes --weathered on to both launches of the hand-over check (R10.T1.c)", () => {
+    const run = runScript(["--hidden", "--terrain", "--handover", "--weathered"]);
+    expect([
+      run.status,
+      run.launches.map((launch) => valueOf(launch, "--setting")),
+      run.launches.every((launch) =>
+        ["--views-check", "--terrain", "--handover", "--weathered"].every((flag) =>
+          launch.includes(flag),
+        ),
+      ),
+    ]).toEqual([0, ["high", "low"], true]);
+  });
+
   it("makes one launch at the setting given", () => {
     const run = runScript(["--terrain", "--setting", "low"]);
     expect(run.launches.map((launch) => valueOf(launch, "--setting"))).toEqual(["low"]);

@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import propertiesSource from "../../../../../../../crates/hyperion-surface/src/material/properties.rs?raw";
+import weatheredGoldenText from "../../../../../../../crates/hyperion-surface/tests/golden/worker/terrain_test_weathered.golden?raw";
+import type { ViewsCheckTerrainFixture } from "../../../../preload/api";
 import { SCENE_OPTIONS } from "../../displays/view/viewRun";
 import { dot, norm, normalise, sub, type Vec3 } from "../../geometry/vec3";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
@@ -15,16 +17,19 @@ import { planetGeometry } from "../terrain/planet";
 import { sceneContacts } from "../terrain/session";
 import { classRowLaw, PHASE_LAW } from "../terrain/terrainMaterial";
 import { keptTime } from "./kept";
+import { blockBytes, parseTerrainGolden } from "./terrainGolden";
 import {
   LIMB_ONSET_NORMAL_ALBEDO,
   TERRAIN_LOWEST_ALTITUDE_M,
   TERRAIN_MOON_CENTRE_M,
   TERRAIN_SCENE_NAME,
   TERRAIN_TEST_SCRIPT,
+  TERRAIN_TEST_UNIVERSE,
   TERRAIN_TIME_RATE,
   terrainMoonPhotometry,
   terrainScene,
   terrainSceneAt,
+  terrainSceneFixture,
   terrainShipAltitudeM,
   terrainShipBodyFixedM,
   terrainTestGolden,
@@ -203,5 +208,106 @@ describe("TERRAIN TEST (R10.T16.d)", () => {
       );
     }
     expect(LIMB_ONSET_NORMAL_ALBEDO).toBe(Number(stated.replaceAll("_", "")));
+  });
+});
+
+/** The first payload's blocks of `fixture`'s golden, as byte arrays. */
+function firstBlocksOf(fixture: ViewsCheckTerrainFixture): number[][] {
+  return (terrainTestGolden(fixture).payloads[0]?.blocksHex ?? []).map((hex) =>
+    Array.from(blockBytes(hex)),
+  );
+}
+
+describe("TERRAIN TEST on TEST MOON weathered's field (R10.T1.c)", () => {
+  const WEATHERED = "terrain-test-weathered";
+
+  it("reads the weathered golden once: maturity 1, rate 1 and its haloed albedo scale", () => {
+    const golden = terrainTestGolden(WEATHERED);
+    expect([
+      golden.header.maturity,
+      golden.header.weathering_rate,
+      golden.header.albedo_scale,
+      golden.header.surface_age_gyr,
+      terrainTestGolden(WEATHERED) === golden,
+    ]).toEqual([1, 1, 1.2299665675542657, 1, true]);
+    expect(golden).toEqual(
+      parseTerrainGolden(weatheredGoldenText, "terrain_test_weathered.golden"),
+    );
+  });
+
+  it("is TEST MOON again: its ID, seed and figure TERRAIN TEST's, in the same system", () => {
+    const plain = terrainTestGolden();
+    const weathered = terrainTestGolden(WEATHERED);
+    expect([
+      weathered.body,
+      weathered.seed,
+      weathered.header.equatorial_radius_m,
+      weathered.header.polar_radius_m,
+    ]).toEqual([
+      plain.body,
+      plain.seed,
+      plain.header.equatorial_radius_m,
+      plain.header.polar_radius_m,
+    ]);
+  });
+
+  it("takes TEST MOON's photometry from the golden's crust_albedo under the Regolith law", () => {
+    const { header, maturity } = terrainTestGolden(WEATHERED);
+    const [b, v, r] = maturity?.crustAlbedoBvr ?? [Number.NaN, Number.NaN, Number.NaN];
+    const photometry = terrainMoonPhotometry(header, maturity);
+    expect([photometry.law, photometry.geometricAlbedo]).toEqual([
+      { ...classRowLaw(PHASE_LAW.regolith, 1), a: [r, v, b] },
+      [r, v, b],
+    ]);
+    // The palette's own albedo is not what the weathered field draws: its header scales it.
+    expect(() => terrainMoonPhotometry(header)).toThrow("albedo scale");
+  });
+
+  it("makes the scene on its field, under TERRAIN TEST's name, its moon drawn with that photometry", () => {
+    const { header, maturity } = terrainTestGolden(WEATHERED);
+    const kept = terrainScene(WEATHERED);
+    const at = kept.sceneAt(0);
+    const moon = at.bodies.find((body) => body.designation === "TEST MOON");
+    expect([kept.name, at.provenance, moon?.id, moon?.appearance?.photometry]).toEqual([
+      TERRAIN_SCENE_NAME,
+      { kind: "kept", name: TERRAIN_SCENE_NAME },
+      terrainTestGolden().body,
+      terrainMoonPhotometry(header, maturity),
+    ]);
+  });
+
+  describe("its fixture", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("serves the weathered golden's header and first payload's blocks, not TERRAIN TEST's", async () => {
+      vi.useFakeTimers();
+      const golden = terrainTestGolden(WEATHERED);
+      const link = terrainSceneFixture(0, WEATHERED).open();
+      const chunks: number[][] = [];
+      const pending = link.requests.requestBulk(
+        {
+          kind: "surface_field",
+          universe: TERRAIN_TEST_UNIVERSE,
+          body: golden.body,
+          have_revision: null,
+        },
+        (response) => (response.state === "ready" ? response.bulk : null),
+        {
+          onChunk: (chunk) => {
+            chunks.push(Array.from(chunk.payload));
+          },
+        },
+      );
+      await vi.runAllTimersAsync();
+      const outcome = await pending.outcome;
+      link.close();
+      expect([
+        outcome.ok && outcome.response.state === "ready" ? outcome.response.header : null,
+        chunks,
+      ]).toEqual([golden.header, firstBlocksOf(WEATHERED)]);
+      expect(chunks).not.toEqual(firstBlocksOf("terrain-test"));
+    });
   });
 });

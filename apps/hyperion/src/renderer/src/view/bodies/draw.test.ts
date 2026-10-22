@@ -1349,7 +1349,7 @@ describe("the renderer", () => {
         released.push(event.name);
       }
     });
-    // Sixteen discs need 16 × 832 bytes, past the first 4,096.
+    // Sixteen discs need 16 × 4,928 bytes (DISC_ROWS rows of 16), past the 16,384 two took.
     const many = planOf(16);
     expect(many.discs).toHaveLength(16);
     renderer.draws(many);

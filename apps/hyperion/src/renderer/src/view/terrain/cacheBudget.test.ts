@@ -68,9 +68,11 @@ describe("bytesPerPatch", () => {
     readonly shading: TerrainShading;
     readonly bytes: number;
   }> = [
-    { name: "lit low", terrain: LOW, shading: "lit", bytes: 158_936 },
-    { name: "lit high", terrain: HIGH, shading: "lit", bytes: 311_024 },
-    { name: "lit high's fallback", terrain: HIGH_FALLBACK, shading: "lit", bytes: 209_624 },
+    // The lit slots with R10.T1.c's maturity codes and nodes, 19,972 B more than R10.T14.a's
+    // 158,936, 311,024 and 209,624 B.
+    { name: "lit low", terrain: LOW, shading: "lit", bytes: 178_908 },
+    { name: "lit high", terrain: HIGH, shading: "lit", bytes: 330_996 },
+    { name: "lit high's fallback", terrain: HIGH_FALLBACK, shading: "lit", bytes: 229_596 },
     {
       name: "wireframe on face-differences",
       terrain: wireframeTerrainSettings("low"),
@@ -101,20 +103,20 @@ describe("bytesPerPatch", () => {
     ]);
   });
 
-  it("gives the lit low slot on baked-offsets 260,336 B, 257 slots in 64 MiB, not 430", () => {
+  it("gives the lit low slot on baked-offsets 280,308 B, 239 slots in 64 MiB, not 430", () => {
     // Built directly: `terrainSettingsFor` refuses the pair (Design note 15, "not with BakedOffsets").
     const terrain: TerrainSettings = { ...LOW, vertexPath: "baked-offsets" };
     expect([
       terrain.cacheBytes,
       bytesPerPatch({ terrain, shading: "lit" }),
       terrainSlotLayout(terrain, "lit").slotCount,
-    ]).toEqual([64 * MIB, 260_336, 257]);
+    ]).toEqual([64 * MIB, 280_308, 239]);
   });
 
   it("sizes no slot from a budget, so a budget under six slots does not throw", () => {
     const terrain: TerrainSettings = { ...HIGH, cacheBytes: 1 };
     expect(() => terrainSlotLayout(terrain, "lit")).toThrow("fewer than 6");
-    expect(bytesPerPatch({ terrain, shading: "lit" })).toBe(311_024);
+    expect(bytesPerPatch({ terrain, shading: "lit" })).toBe(330_996);
   });
 
   /** Design note 15's bytes for each field, and the departures as built (T14.a's record). */
@@ -129,8 +131,9 @@ describe("bytesPerPatch", () => {
     // The atlas's one-texel gutter (R05.T8).
     { field: "mesh normals", note: 16_900, built: MESH_NORMALS_BYTES, departure: 1_056 },
     { field: "double normals", note: 66_564, built: DOUBLE_NORMALS_BYTES, departure: 2_080 },
-    // One storage buffer with the class laws, interpolated by hand (R10.T10.b).
-    { field: "class weights", note: 33_800, built: CLASS_LAYERS_BYTES, departure: 256 },
+    // One storage buffer with the class laws, interpolated by hand (R10.T10.b), and the maturity
+    // codes and nodes (R10.T1.c's client half: 16,900 and 3,072 B).
+    { field: "class weights", note: 33_800, built: CLASS_LAYERS_BYTES, departure: 20_228 },
     // The 9 × 9 far field (R10.T8.a, T8.b).
     { field: "horizon map", note: 67_600, built: HORIZON_MAP_BYTES, departure: 1_296 },
     // Word alignment and the cell-code byte (R10.T10.c).
@@ -141,15 +144,18 @@ describe("bytesPerPatch", () => {
     expect(row.built - row.note).toBe(row.departure);
   });
 
-  it("totals a low lit slot 1.7% over Design note 15's, and a high one with offsets 1.2% over", () => {
+  it("totals a low lit slot 14.4% over Design note 15's, and a high one with offsets 7.7% over", () => {
     const note = (names: ReadonlyArray<string>): number =>
       FIELDS.filter((f) => names.includes(f.field)).reduce((sum, f) => sum + f.note, 0);
     const common = ["heights", "class weights", "horizon map", "survey mask"];
     const lowNote = note([...common, "mesh normals"]);
     const highNote = note([...common, "double normals"]);
     expect([lowNote, highNote, highNote + 101_400]).toEqual([156_325, 205_989, 307_389]);
-    expect((158_936 / lowNote - 1) * 100).toBeCloseTo(1.67, 2);
-    expect((311_024 / (highNote + 101_400) - 1) * 100).toBeCloseTo(1.18, 2);
+    // 1.67% and 1.18% before R10.T1.c's maturity layer, which the note does not hold.
+    const low = bytesPerPatch({ terrain: LOW, shading: "lit" });
+    const high = bytesPerPatch({ terrain: HIGH, shading: "lit" });
+    expect((low / lowNote - 1) * 100).toBeCloseTo(14.45, 2);
+    expect((high / (highNote + 101_400) - 1) * 100).toBeCloseTo(7.68, 2);
   });
 });
 
@@ -664,10 +670,12 @@ describe("the caches' allocations and the storage-binding ceiling (decision-r10-
   const WIRE_LOW = terrainSlotLayout(wireframeTerrainSettings("low"), "wire");
   const WIRE_HIGH = terrainSlotLayout(wireframeTerrainSettings("high"), "wire");
 
-  it("holds 422 lit slots on low, 1,286 on high and 520 for the wireframe on both", () => {
+  it("holds 375 lit slots on low, 1,208 on high and 520 for the wireframe on both", () => {
+    // 422 and 1,286 before R10.T1.c's maturity layer grew the lit slot (decision-r10-t1c-client-scope
+    // §2.2: recorded, not re-ruled).
     expect([LIT_LOW, LIT_HIGH, WIRE_LOW, WIRE_HIGH].map((l) => l.slotCount)).toEqual([
-      422,
-      1_286,
+      375,
+      1_208,
       WIREFRAME_TERRAIN_SLOTS,
       WIREFRAME_TERRAIN_SLOTS,
     ]);
@@ -685,10 +693,10 @@ describe("the caches' allocations and the storage-binding ceiling (decision-r10-
     ];
     const sums = cases.map((c) => [allocationSumBytes(c.low), allocationSumBytes(c.high)]);
     expect(sums).toEqual([
-      [67_070_992, 399_976_864],
-      [134_141_984, 799_953_728],
-      [86_845_552, 472_479_424],
-      [173_691_104, 944_958_848],
+      [67_090_500, 399_843_168],
+      [134_181_000, 799_686_336],
+      [86_865_060, 472_345_728],
+      [173_730_120, 944_691_456],
     ]);
     expect(sums.filter(([low = NaN, high = NaN]) => !(low < 1e9 && high < 2e9))).toEqual([]);
   });
@@ -699,13 +707,13 @@ describe("the caches' allocations and the storage-binding ceiling (decision-r10-
     ]);
   });
 
-  it("holds at most 1,323 high lit slots on baked-offsets in a default binding, 37 over 1,286", () => {
+  it("holds at most 1,323 high lit slots on baked-offsets in a default binding, 115 over 1,208", () => {
     const slots = bindingCeilingSlots(terrainSlotFields(HIGH, "lit"));
     expect([
       slots,
       slots * bytesPerPatch({ terrain: HIGH, shading: "lit" }),
-      slots - 1_286,
-    ]).toEqual([1_323, 411_484_752, 37]);
+      slots - 1_208,
+    ]).toEqual([1_323, 437_907_708, 115]);
     // Its offsets bind first.
     expect(slots * OFFSETS_BYTES).toBeLessThanOrEqual(WEBGPU_DEFAULT_STORAGE_BINDING_BYTES);
     expect((slots + 1) * OFFSETS_BYTES).toBeGreaterThan(WEBGPU_DEFAULT_STORAGE_BINDING_BYTES);
@@ -744,8 +752,8 @@ describe("the caches' allocations and the storage-binding ceiling (decision-r10-
       terrainLayout(wireframeTerrainSettings("high"), limits, "wire"),
     ];
     expect(layouts.map((l) => [l.fallback, l.slots.slotCount])).toEqual([
-      ["none", 422],
-      ["none", 1_286],
+      ["none", 375],
+      ["none", 1_208],
       ["none", 520],
       ["none", 520],
     ]);

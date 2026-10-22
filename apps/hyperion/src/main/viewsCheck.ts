@@ -19,7 +19,8 @@
  * hand-over check in its place: no phases (a start or end of one refused), its captures named for
  * its looks, and its record through
  * a writer of its own (`handoverCheckResults.ts`), the terrain run's refused; it ends with 1 unless
- * that record was written and its verdict passes.
+ * that record was written and its verdict passes. Either run's results take the launch's field
+ * (`ViewsCheckLaunch.fixture`), which a `--weathered` launch's record and name (R10.T1.c).
  */
 
 import type { ContentTracing, IpcMainInvokeEvent, TraceConfig } from "electron";
@@ -524,6 +525,7 @@ export class ViewsCheckSession {
     const results = buildHandoverCheckResults({
       run: {
         ...run,
+        fixture: this.#deps.launch.fixture,
         window: this.#deps.windowSize(),
         captures:
           dir === null
@@ -550,6 +552,7 @@ export class ViewsCheckSession {
     const results = buildTerrainCheckResults({
       run: {
         ...run,
+        fixture: this.#deps.launch.fixture,
         window: this.#deps.windowSize(),
         captures:
           dir === null

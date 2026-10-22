@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { SETTINGS, type TerrainVertexPath } from "../quality/qualitySetting";
+import { MATURITY_NODES } from "./maturityNodes";
 import {
   CLASS_LAWS_BYTES,
   CLASS_LAYERS_BYTES,
+  CLASS_MATURITY_BYTES,
+  CLASS_NODES_BYTES,
   CLASS_WEIGHTS_BYTES,
   DOUBLE_NORMALS_BYTES,
   HEIGHTS_BYTES,
@@ -53,10 +56,24 @@ describe("the slot layout", () => {
     });
   });
 
-  it("adds R10.T10.b's class layers, its weights then its laws, to a lit layout alone, 34,056 B a slot", () => {
+  it("adds R10.T10.b's class layers to a lit layout alone, its weights, laws, maturity codes and nodes, 54,028 B a slot", () => {
     expect(CLASS_WEIGHTS_BYTES).toBe(65 * 65 * 8);
     expect(CLASS_LAWS_BYTES).toBe(256);
-    expect(CLASS_LAYERS_BYTES).toBe(34_056);
+    // R10.T1.c's client half: two unorm16 codes a vertex, one word, and 8 slots × 2 levels × K
+    // nodes × 3 channels as f32, K = 16.
+    expect(CLASS_MATURITY_BYTES).toBe(65 * 65 * 2 * 2);
+    expect(CLASS_NODES_BYTES).toBe(8 * 2 * MATURITY_NODES * 3 * 4);
+    expect([CLASS_MATURITY_BYTES, CLASS_NODES_BYTES]).toEqual([16_900, 3_072]);
+    expect(CLASS_LAYERS_BYTES).toBe(
+      CLASS_WEIGHTS_BYTES + CLASS_LAWS_BYTES + CLASS_MATURITY_BYTES + CLASS_NODES_BYTES,
+    );
+    expect(CLASS_LAYERS_BYTES).toBe(54_028);
+    // Each part starts on a word, as a buffer write's offset and size must.
+    expect(
+      [CLASS_WEIGHTS_BYTES, CLASS_LAWS_BYTES, CLASS_MATURITY_BYTES, CLASS_NODES_BYTES].map(
+        (bytes) => bytes % 4,
+      ),
+    ).toEqual([0, 0, 0, 0]);
     const spike = terrainSlotLayout(SETTINGS.low.terrain);
     const lit = terrainSlotLayout(SETTINGS.low.terrain, "lit");
     expect(spike.fields.map((f) => f.name)).not.toContain("class-layers");
@@ -85,9 +102,10 @@ describe("the slot layout", () => {
     expect(terrainSlotFields(SETTINGS.high.terrain).map((f) => f.name)).not.toContain(
       "survey-mask",
     );
-    // The low lit slot is 158,936 B: 422 slots in 64 MiB, against Design note 15's rule of 430.
-    expect(lit.bytesPerSlot).toBe(158_936);
-    expect(lit.slotCount).toBe(422);
+    // The low lit slot is 178,908 B with R10.T1.c's maturity layer (158,936 B before): 375 slots in
+    // 64 MiB (422 before), against Design note 15's rule of 430.
+    expect(lit.bytesPerSlot).toBe(178_908);
+    expect(lit.slotCount).toBe(375);
   });
 
   it("carries offsets on the baked-offsets path only", () => {

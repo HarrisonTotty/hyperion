@@ -12,6 +12,7 @@ const LAUNCH: ViewsCheckLaunch = {
   smoke: true,
   out: null,
   run: "several-views",
+  fixture: "terrain-test",
 };
 
 const RECORD: ViewsCheckRecord = {

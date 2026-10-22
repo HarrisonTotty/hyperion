@@ -5,6 +5,7 @@ import {
   answerRequest,
   type HeightModule,
   StandInFields,
+  type WasmBakedTerrain,
   type WasmClassMap,
   type WasmFieldBlock,
   type WasmGroundReadout,
@@ -28,8 +29,11 @@ function emptyBlock(): WasmFieldBlock {
   };
 }
 
-/** The fake module's class map: one texel of one class, wholly surveyed; `free` names it in `freed`. */
-function oneTexelMap(freed: string[]): WasmClassMap {
+/**
+ * The fake module's class map: one texel of one class, wholly surveyed, with `codes` its maturity
+ * (none by default) and then K × 3 nodes rising from 0.01; `free` names it in `freed`.
+ */
+function oneTexelMap(freed: string[], codes: Uint16Array = new Uint16Array()): WasmClassMap {
   return {
     level: 6,
     fieldLevel: 6,
@@ -38,6 +42,8 @@ function oneTexelMap(freed: string[]): WasmClassMap {
     texels: () => Uint32Array.from([7]),
     fractions: () => Float32Array.from([1]),
     weights: () => Uint8Array.from([255]),
+    maturity: () => codes.slice(),
+    nodes: () => Float32Array.from({ length: 16 * 3 }, (_, k) => 0.01 * (k + 1)),
     complete: true,
     free: () => {
       freed.push("class map");
@@ -102,12 +108,52 @@ function bodyKey(system: bigint, body: number): string {
   return `${system.toString(16)}.${String(body)}`;
 }
 
+/** What {@link fakeModule}'s bake gives (R10.T1.c), and what its fields were asked of it. */
+interface FakeBake {
+  /** The bake's maturity codes: two a vertex, or none. */
+  readonly codes: Uint16Array;
+  /** The levels and palettes `maturityNodes` was asked at, in order. */
+  readonly nodesAsked: Array<{ readonly level: number; readonly palette: Uint8Array }>;
+}
+
+/** A body's bake of the fake module: zeros of a patch's sizes, a palette of one slot, `codes`. */
+function fakeBaked(codes: Uint16Array): WasmBakedTerrain {
+  return {
+    heights: () => new Float32Array(65 * 65 * 2),
+    offsets: () => undefined,
+    normals: () => new Float32Array(67 * 67 * 2),
+    origin: () => Float64Array.of(1, 2, 3),
+    heightRangeM: () => Float32Array.of(-10, 10),
+    boundingRadiusM: 100,
+    originHeightM: 0,
+    skirtDepthM: 1,
+    palette: () =>
+      Uint8Array.of(1, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255),
+    weights: () => new Uint8Array(65 * 65 * 8),
+    surveyMask: () => new Uint8Array(65 * 65),
+    unsurveyedCells: () => new Uint32Array(),
+    horizonNear: () => new Uint32Array(),
+    horizonFar: () => new Uint32Array(),
+    horizonRefusedCells: () => new Uint32Array(),
+    maturity: () => codes,
+    boundM: 1,
+    sigmaM: 0,
+    complete: true,
+    horizonComplete: true,
+    free: () => {},
+  };
+}
+
 /**
  * A module whose fields take every block of 8 bytes or more, refuse a shorter one as the real
  * module refuses a block it cannot decode, and trap on a block whose first byte is 255; it bakes
- * nothing, the bake tests being `heightWasm.test.ts`'s and `fieldsWasm.test.ts`'s.
+ * nothing unless given `bake`, whose bake a held body's fields answer with its photometry and
+ * nodes, the bake tests being otherwise `heightWasm.test.ts`'s and `fieldsWasm.test.ts`'s.
  */
-function fakeModule(): {
+function fakeModule(
+  bake?: FakeBake,
+  classMapCodes: Uint16Array = new Uint16Array(),
+): {
   module: HeightModule;
   held: Map<string, number>;
   /** The module's class and normal maps freed, in order. */
@@ -142,13 +188,19 @@ function fakeModule(): {
     get heldBytes() {
       return [...held.values()].reduce((a, b) => a + b, 0);
     },
-    bake: () => undefined,
+    bake: (system, body) =>
+      bake !== undefined && held.has(key(system, body)) ? fakeBaked(bake.codes) : undefined,
     reading: () => undefined,
     slantRange: () => {
       throw new Error("a field test drew a line of sight");
     },
     material: () => undefined,
-    photometry: () => undefined,
+    photometry: (system, body) =>
+      bake !== undefined && held.has(key(system, body)) ? new Float32Array(40) : undefined,
+    maturityNodes: (system, body, palette, level) => {
+      bake?.nodesAsked.push({ level, palette });
+      return held.has(key(system, body)) ? new Float32Array(8 * 2 * 16 * 3) : undefined;
+    },
     // A held body's map of one texel; seed 0xdead the module's refusal, 0xffff a trap.
     classMap: (system, body, seed) => {
       if (seed === 0xdeadn) {
@@ -157,7 +209,7 @@ function fakeModule(): {
       if (seed === 0xffffn) {
         throw new WebAssembly.RuntimeError("unreachable");
       }
-      return held.has(key(system, body)) ? oneTexelMap(freed) : undefined;
+      return held.has(key(system, body)) ? oneTexelMap(freed, classMapCodes) : undefined;
     },
     // A held body's normal map of the class map's cell; seed 0xbeef, a broken module's, none.
     normalMap: (system, body, seed) =>
@@ -188,13 +240,16 @@ function fakeModule(): {
   };
 }
 
-/** A class-map query's answer from {@link fakeModule} holding a field, and what it freed. */
-function classMapAnswered(): {
+/**
+ * A class-map query's answer from {@link fakeModule} holding a field, its map's maturity `codes`
+ * (none by default), and what it freed.
+ */
+function classMapAnswered(codes: Uint16Array = new Uint16Array()): {
   readonly map: ClassMapAnswer;
   readonly transfer: ReadonlyArray<Transferable>;
   readonly freed: ReadonlyArray<string>;
 } {
-  const { module, freed } = fakeModule();
+  const { module, freed } = fakeModule(undefined, codes);
   const fields = new WorkerFields(module);
   answerRequest(
     module,
@@ -404,6 +459,26 @@ describe("a height worker's fields", () => {
     it("frees both of the module's answers", () => {
       expect(classMapAnswered().freed).toEqual(["class map", "normal map"]);
     });
+
+    it("answers no maturity where the module's map carries none (R10.T1.c)", () => {
+      const { map } = classMapAnswered();
+      expect(Object.hasOwn(map, "maturity")).toBe(false);
+    });
+
+    it("answers each texel's maturity code and each class's nodes where the module's map carries them, both transferred (R10.T1.c)", () => {
+      const { map, transfer } = classMapAnswered(Uint16Array.from([40_000]));
+      const { maturity } = map;
+      if (maturity === undefined) {
+        throw new Error("the map was answered without its maturity");
+      }
+      expect([
+        [...maturity.codes],
+        maturity.nodes.length,
+        maturity.nodes[0],
+        maturity.nodes[47],
+      ]).toEqual([[40_000], 48, Math.fround(0.01), Math.fround(0.01 * 48)]);
+      expect(transfer.slice(-2)).toEqual([maturity.codes.buffer, maturity.nodes.buffer]);
+    });
   });
 
   it("answers a module's class map without its normal map as class-map-failed, the class map freed", () => {
@@ -602,5 +677,64 @@ describe("a height worker's fields", () => {
     );
     expect(answer.reply).toMatchObject({ kind: "bake-unsurveyed", id: 9 });
     expect(answer.transfer).toEqual([]);
+  });
+
+  describe("a bake's maturity layer (R10.T1.c's client half)", () => {
+    /** A held body's bake at level 13 by {@link fakeModule} baking `codes`, and what it asked. */
+    function bakedWith(codes: Uint16Array): {
+      readonly answer: ReturnType<typeof answerRequest>;
+      readonly asked: FakeBake["nodesAsked"];
+    } {
+      const bake: FakeBake = { codes, nodesAsked: [] };
+      const { module } = fakeModule(bake);
+      const fields = new WorkerFields(module);
+      answerRequest(
+        module,
+        { kind: "field-init", id: 1, body: MOON, block: new ArrayBuffer(8), form: "payload" },
+        fields,
+      );
+      const answer = answerRequest(
+        module,
+        {
+          kind: "bake",
+          id: 2,
+          key: { face: 1, level: 13, i: 8_161, j: 6_926 },
+          generation: 4,
+          settings: {
+            vertexPath: "face-differences",
+            normals: "mesh",
+            source: { kind: "body", body: MOON, detailSeed: "617373656d626c79", weights: "baked" },
+          },
+        },
+        fields,
+      );
+      return { answer, asked: bake.nodesAsked };
+    }
+
+    it("posts the bake's codes with its palette's nodes at the patch's level, both transferred", () => {
+      const codes = Uint16Array.from({ length: 2 * 65 * 65 }, (_, n) => n % 65_536);
+      const { answer, asked } = bakedWith(codes);
+      if (answer.reply.kind !== "baked") {
+        throw new Error(`not baked: ${JSON.stringify(answer.reply)}`);
+      }
+      const maturity = answer.reply.bake.layers?.maturity;
+      expect(maturity?.codes).toBe(codes);
+      expect(maturity?.nodes).toHaveLength(8 * 2 * 16 * 3);
+      expect(asked.map(({ level, palette }) => [level, palette])).toEqual([
+        [13, answer.reply.bake.layers?.palette],
+      ]);
+      expect(answer.transfer).toEqual(
+        expect.arrayContaining([maturity?.codes.buffer, maturity?.nodes.buffer]),
+      );
+    });
+
+    it("posts no maturity, and asks for no nodes, where the bake made no layer", () => {
+      const { answer, asked } = bakedWith(new Uint16Array());
+      if (answer.reply.kind !== "baked") {
+        throw new Error(`not baked: ${JSON.stringify(answer.reply)}`);
+      }
+      expect(Object.hasOwn(answer.reply.bake.layers ?? {}, "maturity")).toBe(false);
+      expect(asked).toEqual([]);
+    });
   });
 });

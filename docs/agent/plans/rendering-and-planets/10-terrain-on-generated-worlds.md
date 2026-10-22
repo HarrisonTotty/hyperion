@@ -322,6 +322,15 @@ pub fn bake_terrain<F: SurveyView>(synth: &Synthesiser<'_, F>, cache: &mut Synth
     -> Result<TerrainBake, QueryHeightError>;
 ```
 
+_After R10.T1.c's client half (Risks, "Deviations in T1.c's client half, as built"):
+`TerrainLayers` also holds `maturity()`, 65 × 65 `[u16; 2]` (the unorm16 codes at n and n − 1;
+empty without a maturity or with the weights skipped), with `encode_maturity` and
+`decode_maturity` in `bake`; `material` adds `maturity_cut`, `maturity_at_level`,
+`patch_maturity`, `unresolved_terms` (`UnresolvedTerms`), `unresolved_mix` (`UnresolvedMix`),
+`maturity_nodes`, `maturity_node_share`, `maturity_node_albedo` and `MATURITY_NODES` (16); and
+`worker` adds `WorkerFields::maturity_nodes` (`DrawnNodes`), `ClassMapClass::nodes` and
+`ClassMapTexel::maturity`._
+
 The worker's WebAssembly entry points, on R05's binding, gain `field_init`, `field_chunk`,
 `field_release` and a `bake` that takes R05's `BakeOptions` with this plan's settings, and answer
 `field_init` with the body's `LevelBounds` (below). They replace R05's single `postField(bytes)`
@@ -1194,6 +1203,9 @@ targets at header 21 (below).
     under the rule's 430; and R05.T18 kept `BakedOffsets` on the high setting, so a high slot is
     about 310 kB and 400,000,000 B holds about 1,290 slots, against the rule's 1,900. T14 decides,
     as Risks' "The low setting's cache is at its edge" already has it for the low setting._
+    _After R10.T1.c's client half: a low lit slot is 178,908 B and 64 MiB holds 375; a high lit
+    slot is 330,996 B and 400,000,000 B holds 1,208 (the class layers' maturity codes and nodes,
+    19,972 B a slot; Risks, "Deviations in T1.c's client half, as built")._
     _As built by T14.a (`cacheBudget.ts`): the model counts by the selection's own metric, and on
     it, on the exact horizon this note's premise names (`exactHorizon`), the note's high column is
     about 1.6 times low (model ÷ note ×1.53–1.91) and its low and wireframe columns near
@@ -1434,7 +1446,11 @@ that own them measure them.
       maturity with the same function and blends between Rust-computed albedos
       (`bake/layers.rs`, `worker.rs`, `wasm.rs`, `heightBake.ts`, `terrainMaterial.ts`,
       `terrainLit.wgsl`, `classMap.ts`, `bodies/draw.ts`), with its check by hand on the RTX 3080.
-      It is presentation, so it owes no bump.
+      It is presentation, so it owes no bump. _As built (2026-10-22; Risks, "Deviations in T1.c's
+      client half, as built"), its acceptance adds
+      `cargo test -p hyperion-surface --lib worker::golden` and the ignored
+      `maturity_drawn_mean_is_the_body_s_mix_mean`, `maturity_layer_s_time_per_patch` and
+      `maturity_nodes_s_time`, each `cargo test -p hyperion-surface --lib <name> -- --ignored`._
 
   - _Files (the Rust half):_ `material/{maturity,mod,albedo,properties,classify,golden}.rs`,
     `synth.rs` (an accessor), `worker.rs`, `testing.rs`, `testing/worlds.rs`,
@@ -3578,7 +3594,8 @@ RESOLUTION       410 m
   rebakes' worker time and built if adopted; "The live path's costs" and the T16 records' measured
   costs; the owner's UHD 620 figures before the low setting is sized; and the binding ceiling
   (1,323 lit slots, 411,484,752 B, on `baked-offsets` under a default 128 MiB binding) for each
-  machine. If R10.T9.b has not landed, the cascades are counted at 67,108,864 B from T9.a's spec,
+  machine. _After R10.T1.c's client half: the same 1,323 slots are 437,907,708 B at the 330,996 B
+  slot._ If R10.T9.b has not landed, the cascades are counted at 67,108,864 B from T9.a's spec,
   labelled computed.
   Its sizing runs (the peaks, `cacheBytes`, the binding ceiling) follow R09.T8.d, which tightens
   the level table's reach and with it the horizon occluder and the boxes (decision-r10-t14c-leans
@@ -3837,6 +3854,8 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   T14.b decides after the UHD 620 run._ _After R10.T14.e: about 708 at τ_sel on the boxes' horizon
   (T14.e's record)._ _After R10.T14.b: 2,996 slots (455 MiB) measured on the hard bound, ×7.1 the
   422; held at 64 MiB until the UHD 620 run and R10.T4.b (decision-r10-t14b-constants)._
+  _After R10.T1.c's client half: 375 lit slots in 64 MiB (178,908 B a slot), so the 2,996 are ×8.0
+  the 375 (T1.c's client-half record and deferred finding 14)._
 - **Coarse weights assume Gaussian slopes.** The slope-exceedance probability of Design note 3
   treats the unresolved slope as Gaussian; ridged and cratered terrain is not. The ten-point test is
   the guard; if it fails on a class of world, the fallback is counting a sparse sample of finest
@@ -5300,6 +5319,238 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
        (the Rust half's text); Lucey et al.'s OMAT papers are the source to cite for it.
     10. The browser target's lib binary runs about 555 s of its 600 s on the laptop; the halo
         golden's five worlds add some seconds to it.
+- **Deviations in T1.c's client half, as built** (2026-10-22; lane r10-maturity, on
+  `rendering-and-planets` at `843b82af`; decision-r10-t1c-client-scope). Presentation at 22: no
+  served header carries a maturity, so every served bake, class map and point is as it was; the
+  golden-diff script shows only `tests/golden/worker/maturity_layer.golden` and
+  `tests/golden/worker/terrain_test_weathered.golden` new, written at 22 and re-blessed at 23 in
+  their own commit; `GENERATOR_VERSION` and `PROTOCOL_VERSION` are unchanged.
+  - _Commits:_ `e262769b` (the browser split: `material::weights::` a part of its own),
+    `b566f140` (the layer and its gather), `256a7298` (the unresolved mix, the nodes and the two
+    goldens) and `80ef7142` (the terrain's data path and shader); then, on the gated tree, subtask
+    4's (the class map, the disc, the point, the fixture's check, the look's results and this
+    record), the review's fix commit (`fix(surface)`, the Rust review's items) and the re-bless of the
+    two goldens at 23 (`test(surface)`), after the merge of 23 (`797343c6`); their hashes are in the
+    lane's handoff.
+  - _Files beyond the brief's:_ the surface crate's `testing.rs` and `testing/worlds.rs`
+    (`moon_like_builder` and `moon_like_crater_params` public under `testing`, for the bench); new
+    `view/terrain/maturityNodes.ts` and `view/shaders/maturityNodes.wgsl` (the nodes' grading and
+    interpolation, which the terrain's and the disc's shaders and their twins share);
+    `bodies/discShading.ts` (the disc's record); `scenes/terrainGolden.ts`; the `--weathered`
+    plumbing in `main/{viewsCheck,terrainCheckResults,handoverCheckResults}.ts`,
+    `scripts/viewsCheck.sh`, `preload/{api,viewsCheckLaunch}.ts`, `App.tsx`,
+    `ViewsCheckRunner.tsx` and `terrainProbe.ts`; the figures restated in `qualitySetting.ts`,
+    `cache.ts`, `cache.test.ts` and `materialSet.test.ts`. `cacheBudget.ts` is unchanged (it counts
+    through the slot fields), and `draw.ts` changes only its shader's composition (the codes share
+    the class map's texture).
+  - _Public items:_ in `hyperion_surface::material`, `maturity_cut` (`MATURITY_CUT_SHARE` ½,
+    `maturity_keeps_octave`), `maturity_at_level`, `patch_maturity`, `unresolved_terms`
+    (`UnresolvedTerms`, `OctaveTerms`), `unresolved_mix` (`UnresolvedMix`), `maturity_nodes`,
+    `maturity_node_share`, `maturity_node_albedo` and `MATURITY_NODES`; in `bake`,
+    `TerrainLayers::maturity`, `encode_maturity` and `decode_maturity`; in `worker`,
+    `WorkerFields::maturity_nodes` (`DrawnNodes`: `level`, `parent`), `ClassMapClass::nodes` and
+    `ClassMapTexel::maturity`; in the module, `maturityNodeCount()`, `BakedTerrain.maturity()` (a
+    `Uint16Array`), `SurfaceFields.maturityNodes(system, body, palette, level)` (8 × 2 × 16 × 3
+    values) and `ClassMapAnswer.maturity()` and `.nodes()`.
+  - _Deviations:_
+    - The codes are unorm16, the ruling's fallback: unorm8 drew up to 1.57% off on fresh ground
+      against the bound of 0.25%, and 16 bits hold 0.064% (the mean's bias 1.5 × 10⁻⁷): 16,900 B a
+      patch.
+    - K = 16, not the lean's 8: the least K that meets 0.5% at c = 1 (1.7% at 8, 0.77% at 12,
+      0.42% at 16). Node j sits at m_body (1 − (1 − u³)²), u = j ÷ 15, graded towards both ends,
+      and the nodes are interpolated linearly in T over u = ∛(1 − r), r the code ÷ 65,535, so the
+      shader needs neither m_body nor a square root.
+    - The clamp corner, a known miss (main, 2026-10-22: recorded, K kept at 16). Where c carries a
+      material's V to its range's end the error is 0.86% at the 3.5 Gyr world's haloed c and
+      0.495% at the fixture's, but up to 2.19% at K = 16 for c from 1.0 to 1.8 on the Moon-like
+      palette (1.73% at K = 20, 1.44% at 24, 1.07% at 32). It is pinned at 1.2% for the tested
+      scales, and test 9 takes 1.2% + 0.25% on the fixture (deferred finding 8).
+    - The nodes are an export of their own beside an unchanged `photometry` (stride 5), in place
+      of a longer `photometry(…, level)`.
+    - The morph is on the parent's grid: the n − 1 term is the bilinear mean over the parent's
+      quad, on its even vertices, so that μ = 1 draws the parent's field everywhere, with explicit
+      ends at μ ≤ 0 and μ ≥ 1.
+    - A flag a slot (word 5 of its law) in place of a no-maturity flag a patch: without a layer
+      every packed byte is as before. `packClassLaws` gains only the flag; the nodes go through
+      `packClassNodes`.
+    - The slot: the class layers are 54,028 B (the codes 16,900 B, the nodes 3,072 B), not the
+      ruling's about 44,044. A slot is 178,908 B low (375 slots, from 422: −11.1%), 330,996 B high
+      (1,208, from 1,286: −6.1%) and 229,596 B on high's fallback (1,742); the binding ceiling is
+      1,323 slots, 437,907,708 B. Low's replay passes its slots in 242 of 723 frames (110 before),
+      and high's pins peak at 832 (887). Two bindings of `resources.test.ts` move from 128,000,000
+      to 115,000,000 B. Main (2026-10-22): the ruling's deferred finding 5, a budget trade for the
+      UHD 620 pass (deferred finding 14).
+    - The disc: the codes in six more layers of the class map (the high byte in r, the low in g);
+      the nodes in the record from row 52, `DISC_ROWS` 308 for every disc (4,928 B, from 832 B);
+      row 25's w the map's flag and node 0's w a class's. A class's A is Σ b T_c(x) ÷ Σ b over the
+      shares' own surveyed corners (the product form), the shares untouched; the law's A is node
+      15, T_0,c(m_body).
+    - The point: each entry gains three `f32` factors, T_c(m_e) ÷ T_c(m_body), in `sharesSteps`
+      (the one loop of the sliced and the synchronous builds), and the sums are per channel: 12 B
+      more an entry (7.4 MB at 614,400), the level-8 build 637 → 715 slices (+12%), an evaluation
+      0.99 → 1.30 ms a light (provisional, load 1.08). `addLawSums` branches inside its element
+      loop on a constant check, so no geometry code is duplicated, and its loop without a maturity
+      is as it was. A channel whose node 15 is not above 0 takes a factor of 1 (a stated limit).
+    - The class map's texel holds the code of the point rule at band 0; a partly surveyed texel
+      takes the mean m at its surveyed cells' centres, as its weights do.
+    - The fixture, `TEST MOON` weathered: p_V 0.12, the Moon's (D. R. Williams, NASA NSSDCA Moon
+      Fact Sheet, updated 2024-01-11), with B and R in the weathered crust regolith's ratios (main
+      accepted it in place of the terrain test's 0.20): c 1.22997, 0.46% of the named ground
+      clamped, a halo excess of 5.76%. At 0.20 every named ground clamps (c 3.552, a residual of
+      −8%, a halo excess of 9 × 10⁻⁶). The golden's `crust_albedo` (the crust's T_0(m_body)) is the
+      scene's `elsewhere` (`terrainMoonPhotometry`). The check's world is `TERRAIN TEST WEATHERED`;
+      the scene stays `TERRAIN TEST` and its moon `TEST MOON`, the same body ID.
+    - The check: `--weathered` is refused without `--terrain`; the results are
+      `<date>-<machine>-<setting>-{terrain,handover}-weathered.{json,md}`, and the run block
+      carries `fixture` only on a weathered run.
+    - Kept as they were: `terrainReflectance`'s signature (the maturity reaches it through
+      `terrainTexelLaws(…, at)`). `ClassMapClass` is no longer `Copy`.
+    - After the review's fix pass: a bake whose header carries no maturity or no rate skips the
+      layer at the header check, before its directions are kept, and does no added work, its bytes
+      identical (tested); the class map's texel sums take no flag.
+  - _The tests, as built_ (§2.5's numbers):
+    - test 5, the interpolation: worst 0.4228% at c = 1 and 0.86% where a range clamps; the
+      TypeScript twin is the Rust interpolation's to 10⁻¹², and 0.400% from the exact T on
+      `maturity_layer.golden`;
+    - test 6, the codes: 0.0639% on the albedo, the mean's bias 1.5 × 10⁻⁷;
+    - test 8, the drawn mean (ignored): against the same sampled ground's mean over the body's mix,
+      Σ a E[clamp(c W(m_local))] with a each slot's sampled share, the body's own Σ a E over its
+      class fractions printed beside it, since the sample's classes stray from the body's; at each
+      world's haloed scale after the fix pass, so that a range clamps. At the haloed scale (3.5 Gyr,
+      c 1.235448; 1 Gyr, c 1.229967), against the same ground at levels 8 / 10 / 12 / 14: −0.063 /
+      +0.092 / +0.462 / +0.287% and +0.133 / −0.234 / +0.422 / −0.780%, the class maps +0.0019% and
+      +0.0016%, all within 1%; the body's Σ a E is p, 0.120000, and the 64-patch samples miss it by
+      up to 2.05% (+1.85 / −1.03 / +1.63 / −0.84% and +2.05 / −1.36 / +1.59 / −1.90%), their classes
+      straying from the body's fractions, while the whole-body class map lands within 0.002%
+      (recorded, deferred finding 17). The first run, at c = 1: within 1% at levels 8–14 (worst
+      −0.84%, the 1 Gyr world at level 14), the class maps +0.002%;
+    - test 9, the drawn finest albedo against the material query: worst 0.30% at c = 1 and 0.29%
+      on the fixture;
+    - test 11, the point: also on a synthetic matured Iapetus, within 0.3% of an `f64` brute force
+      (worst 5.9 × 10⁻⁴, surveyed whole on the spheroid, its haloes moving the light by up to
+      3.3%); on the fixture's class map 6.4 × 10⁻⁵, its maturity moving the point by 2 × 10⁻⁷;
+    - the identity without a maturity, against the base's module, was checked in scratch (448
+      geometries, 10⁶ share directions, 12 disc cases), not in a committed test.
+  - _The cost, quiet_ (QUIET WINDOW 11, 2026-10-22 02:13–02:24, the desktop's Ryzen 7 3700X, the
+    heavy lock held, `HEAVY_CPU_QUOTA=1200%`, the 1-minute load 1.04–1.14; log
+    `.git/rm45-scratch/r10-maturity/quiet/quiet.log`). The weathered Moon-like worlds at 4.4 Gyr
+    (N(>1 km) 0.05 per km²), 3.5 Gyr (4.8 × 10⁻³) and 1 Gyr (8.4 × 10⁻⁴), maturity 1 and rate 1,
+    at the probe's place (0.3, 1, 0.2); the band limit's level is 17, and the cut keeps 5, 9, 13
+    and 14 octaves (15 at 17 on the 1 Gyr world). The measurement test runs at the dev profile's
+    opt-level 2. The time the layer adds a patch, in ms, at 4.4 / 3.5 / 1 Gyr:
+
+    | Added a patch, ms                     | Level 6            | Level 10           | Level 14           | Level 17           |
+    | ------------------------------------- | ------------------ | ------------------ | ------------------ | ------------------ |
+    | Bench `bake/patch_65`, native release | 0.89 / 0.88 / 0.75 | 1.45 / 1.73 / 1.03 | 1.97 / 1.68 / 2.02 | 2.04 / 2.20 / 2.18 |
+    | Measurement test, native dev, warm    | 1.14 / 0.87 / 0.87 | 1.75 / 1.49 / 1.17 | 1.57 / 1.87 / 1.69 | 1.41 / 2.28 / 1.94 |
+    | The same, cold                        | 1.14 / 0.64 / 0.66 | 2.74 / 2.32 / 1.24 | 3.19 / 2.98 / 3.01 | 2.30 / 2.19 / 2.12 |
+    | Measurement test, wasip1, warm        | 1.30 / 1.16 / 1.32 | 1.53 / 1.85 / 1.74 | 1.62 / 1.29 / 1.74 | 2.55 / 1.97 / 2.62 |
+    | The same, cold                        | 1.47 / 0.87 / 0.64 | 2.22 / 2.30 / 1.40 | 3.42 / 3.10 / 2.91 | 2.75 / 2.08 / 2.03 |
+
+    Every figure is under the ruling's 10 ms target, the most 3.42 ms (wasip1, cold, 4.4 Gyr at
+    level 14). The whole bake with the layer: 40.1–67.7 ms (bench), 45.7–80.5 ms (dev) and
+    62.3–126.6 ms (wasip1); the gather alone 0.41–1.26 ms warm and 0.56–5.40 ms cold. The crater
+    cache: no clear over 80 bakes (64 level-14 patches and their 16 parents) with the layer or
+    without, at most 830 cells held with it and 295 without (its cap 16,384). Without a maturity
+    the layer is skipped at the header check, its bytes identical (tested); it was not timed
+    against a base build, so the ruling's ≤ 0.1 ms is met by construction (after the fix pass the
+    bake keeps no directions and calls nothing), not measured. Once a body: the unresolved
+    terms 28.5, 34.5 and 38.0 ms native (dev) and 26.9, 31.3 and 34.3 ms on wasip1; a palette's 8
+    slots' nodes at a level 0.19–0.38 ms with each material's albedo made, 0.08–0.21 ms with every
+    value kept.
+
+  - _The look_ (§3; 2026-10-22 08:54–09:56 CDT, the desktop's RTX 3080, Electron 44.4.3 on
+    Vulkan, hidden, each launch under `just _locked` and the GPU lock in an 8G scope, the 1-minute
+    load at the starts 2.5–5.3: provisional, a shared machine and no presentation; harness and logs
+    `.git/rm45-scratch/r10-maturity/harness/`, after T10.g's). On subtask 4's tree before the
+    review's fix pass and the merge of 23, neither of which moves a drawn value (23 changes the
+    fixture's blocks only by their version byte).
+    - A smoke of run 2 on high: pass.
+    - Run 1, `--terrain --weathered`: pass on both settings
+      (`docs/measurements/terrain-check/2026-10-22-effect-{high,low}-terrain-weathered.{json,md}`;
+      the console's 15 errors are the hidden run's pass-time reads, as T16.d's).
+    - Run 2, `--terrain --handover --weathered`: pass on both settings, every judged cell within
+      1/3 stop at 30° and 90° (48 of 48 at each switch, none over; the worst +0.016 / −0.043 stop
+      on high, +0.039 / −0.011 on low), the terminator recorded (worst +0.210 high, −0.138 low)
+      (`…-{high,low}-handover-weathered.{json,md}`).
+    - Run 3, `--terrain --handover` on TEST MOON as it is: each look's and switch's survey change
+      within 0.0009 stop (high) and 0.0015 stop (low) of T10.g's `2026-10-21-effect-*-handover`
+      (the bound 0.01); its files stay in the harness's `results/`.
+    - By eye, run 1's captures (`target/views-check/terrain/captures-20261022T135639` high and
+      `…T140842` low): soft bright spots of 10–15 px ring the survey's small craters at 250 km
+      (about 230 m a pixel), the haloes of craters too small to resolve as relief, as the cut
+      intends, but no capture centres a resolved young crater close in with the sun behind, so the
+      ring itself is not seen (by hand, pending: such a frame on both moons); the brightening fades
+      with altitude with no speckle; stills cannot show a pop, which run 2's cells carry; no seam,
+      no dark or bright cell, nothing of the harness. The weathered moon meters 0.7 stop darker than
+      TEST MOON as it is (locked EV100 14.5 / 12.9 / 12.8 against 15.2 / 13.6 / 13.5 on high), as
+      its p_V 0.12 against 0.20 gives (log₂ 0.20 / 0.12 = 0.74), and is browner, the weathered
+      crust's ratios. Seen, and not this change's: the graticule's meridian through the ground where
+      it dips below the datum (descent-100s, dark on high, light on low), the low sun ahead washing
+      the ground out from track-205s on (the run's design), and low's hard terminator edge on the
+      disc's frames, in run 3 too.
+  - _Gate:_ the lane's smart-ci over the batch's final tree, its log
+    `.git/rm45-scratch/r10-maturity/smart-ci-final.log`; its verdict, its merge-base and the
+    browser split's three calls' times (`material::weights::`, the rest of `material::`, the rest
+    of the library) are in the lane's handoff (`handoff-r10-maturity.md`), for main's docs batch.
+  - _Acceptance, as built:_ the brief's commands (`cargo test -p hyperion-surface` with
+    `material::maturity`, `--lib bake::`, `--lib worker::tests`, `--lib material::golden` or
+    `--test panics maturity`; `cargo test -p hyperion-sim --lib modifiers_nothing_on_the_record`;
+    `cargo test -p hyperion-server albedo_scale`; `just test-wasm-fast`;
+    `just bench -- bake/patch_65`, quiet; the Vitest files of every file touched), and those its
+    filters miss:
+    `cargo test -p hyperion-surface --lib worker::golden` (the two goldens), and the ignored
+    `maturity_drawn_mean_is_the_body_s_mix_mean` (test 8), `maturity_layer_s_time_per_patch` and
+    `maturity_nodes_s_time` (the cost), each run as
+    `cargo test -p hyperion-surface --lib <name> -- --ignored`.
+- **Deferred findings (2026-10-13 rule) (R10.T1.c's client half)** (recorded, not ruled but where
+  stated; each leaves the algorithm and the contracts as built): the ruling's seven, 1–7, then
+  the lane's, 8–19.
+  1. L(0) and the phase row stay the background's at every node; under D2's stand-in fresh rows a
+     fresh node can pass A 0.60, where L(0) would fall below 1 (T49.i's whole-soil rows keep a
+     Moon's fresh ejecta under 0.4).
+  2. Coarse craters are always resolved, even at levels whose 4 s exceeds a small coarse crater's
+     halo.
+  3. The disc samples coarse haloes at texel centres, the point rule at each texel's point.
+  4. The unresolved octaves are drawn at their expectation, not their realisation: a coarse level
+     shows no clustering of small fresh craters (the halo follow-up's finding 2).
+  5. The slot grows, by 19,972 B as built rather than about 10 KB, and 6.1–11.1% fewer patches are
+     resident rather than 4–5% (finding 14). Counted, not re-ruled.
+  6. No maturity (OMAT-like) readout row is built.
+  7. The probe's figures were provisional; the layer's own are now quiet (the cost, above), the
+     point's still provisional.
+  8. The clamp corner's error depends on c: 0.86% at the 3.5 Gyr world's haloed c, 0.495% at the
+     fixture's and up to 2.19% at K = 16 for c 1.0–1.8 on the Moon-like palette, against the ruled
+     0.5%; pinned at 1.2% for the tested scales (main, 2026-10-22: K kept). The levers: K = 32
+     (1.07%), or a clamp-corner node of each slot's own, the only one that meets 0.5%.
+  9. A partly surveyed texel draws T at the mean m of its cells, not the mean of T: slightly dark,
+     W being convex, and only near young coarse craters (with finding 3).
+  10. Linear in u is one-sided near m_body at the finest levels (the interpolant never below the
+      law in the last interval): the drawn mean leans bright, by an estimated under 0.1% (low
+      confidence), within test 8's 1%.
+  11. The disc's record is 4,928 B for every disc, with a maturity or without (about 99 KB a frame
+      at 20 discs). The lever: a static node buffer a map.
+  12. The point's memory and build: 12 B more an entry (7.4 MB at 614,400), the level-8 build
+      637 → 715 slices (+12%) and an evaluation 0.99 → 1.30 ms a light (provisional, load 1.08).
+  13. The fixture's survey, 48 texels, barely moves the point (2 × 10⁻⁷); a larger survey would
+      test the fold.
+  14. Fewer slots: low 422 → 375 (−11.1%), high 1,286 → 1,208 (−6.1%), and low's replay past its
+      slots in 242 of 723 frames (110 before). Main (2026-10-22): a budget trade for the UHD 620
+      pass, whose first lever is the n − 1 codes at the even vertices only (about 6,272 B a slot
+      back).
+  15. The terrain fragment's GPU cost is unmeasured: per drawn slot, 24 node reads at a morph's
+      end and 48 between. For T14's A/B on the UHD 620.
+  16. The class map's six code layers use only r and g, so a map of four classes or fewer doubles
+      its texture. The lever: two faces' codes a layer.
+  17. Test 8's 64-patch samples miss p by up to 2.05% at the haloed scale (their classes stray from
+      the body's fractions), while each sample is within 0.78% of its own ground's mix mean and the
+      whole-body class map within 0.002% of p.
+  18. The look's close-range halo is not seen in the terrain check's captures: none centres a
+      resolved young crater close in with the sun behind. By hand, pending: such a frame on both
+      moons, which would also show the morph across a switch over time.
+  19. The weathered fixture's survey and the check's frames show the graticule's meridian through
+      the ground where it dips below the datum (descent-100s); the graticule's, not this change's,
+      for the overlay's own task.
 - **Deviations in T5, as built** (2026-10-13; lane r10-readings, begun on R09.T8 and R10.T3 at
   `627e9b35` and finished on R09.T9 and R10.T1.a at `4474e781`; the findings and the interface
   ruled in `decision-r10-t5-closed-forms.md`).
@@ -6638,6 +6889,8 @@ shareAtPhase = l0)`; `PhaseTemplate.lommelSeeligerCurve` on `moon`, `mercury`, `
     a stage, left for T8.b's horizon map; T10.c's survey mask must then join a buffer or take a
     texture. _Ruled 2026-10-15 (main's ruling for R10.T10.b): neither; the bindings take per-stage
     visibility (T10.c), and the mask and the horizon map keep their own storage fields._
+    _After R10.T1.c's client half: 54,028 B, the maturity codes (16,900 B) and nodes (3,072 B)
+    after the laws, a slot drawn from its nodes flagged in its law's word 5._
     `TerrainShading` (`"spike" | "lit"`) adds the field to
     `terrainSlotFields(terrain, shading)` for a body baked with its weights alone, so R05's test
     planet, the spike and their slot counts are unchanged (T14 sizes). The bindings: R05's 0–5,
@@ -7671,7 +7924,8 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
     where it reflects nothing: a line one pixel wide at most.
   - _The cache's slots._ The `survey-mask` field takes 4,228 B a lit slot: 158,936 B, 422 slots in
     64 MiB on the low setting, against Design note 15's rule of 430; 311,024 B, 1,286 slots in
-    400 MB on the high one. T14.
+    400 MB on the high one. T14. _After R10.T1.c's client half: 178,908 B, 375 slots, and
+    330,996 B, 1,208._
   - _The mark sits at the ground's own depth_ (the batch review, 2026-10-19). Once the terrain's
     depth is in the symbology's pass, a tick towards the camera sinks into the nearer ground, and
     the line on the step's rim z-fights with the higher surface. The lever: the ticks' ends on the
@@ -8253,7 +8507,9 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     map's), so that the texture and its CPU copy travel as one value and `pointFlux` reads the map
     from `body.surface`. An additive change to R07's Provides shape, now `kind`, `weights`,
     `texels`, `laws` and `elsewhere` (asked below; a pointer in R07's "Deviations in T8.b, as
-    built"). `rasteriseDisc` still takes the texels as its argument, as T10.d built it.
+    built"). `rasteriseDisc` still takes the texels as its argument, as T10.d built it. _After
+    R10.T1.c's client half: `texels` also carries an optional `maturity` (`ClassMapMaturity`: the
+    classes' band-0 nodes and which are drawn from them), the codes in six more texture layers._
   - _The integral_ (the lane lead's decision). `classMapReflectionRatio(figure, surface, light,
 observer)`, in the body-fixed axes (`classMapPointReflection` takes the galactic directions in
     by `rotateToBodyFixed`): over the lit (μ₀ > 0) and visible (μ > 0) elements of the spheroid
@@ -8269,7 +8525,9 @@ observer)`, in the body-fixed axes (`classMapPointReflection` takes the galactic
     the terminator cancels in the ratio, a weighted mean of the classes' reflectances over
     `elsewhere`'s and bounded by them; it is 1 in a channel where `elsewhere` alone reflects nothing
     by the elements (none lit and visible, at the extreme of phase). Each star and each
-    planetshine secondary goes through its own integral, from its own direction.
+    planetshine secondary goes through its own integral, from its own direction. _After R10.T1.c's
+    client half: under a map's maturity each entry's share carries three factors on its law's A,
+    T_c(m_e) ÷ T_c(m_body), and each law's two sums are taken per channel._
   - _The elements' rule._ A texel's face cell cut into n × n in (s, t), n = ⌈128 ÷ N⌉, 2 at R10's
     N = 64: 98,304 elements on the sphere, each at its centre in (s, t) (a texel's quarter points,
     inside whose quarters the reconstruction is bilinear between the four nearest texel centres),
@@ -8283,7 +8541,8 @@ observer)`, in the body-fixed axes (`classMapPointReflection` takes the galactic
     held with its texels, 300 ms (95 ms at n = 1); an evaluation, one pass over the elements, two
     dot products each and a multiply-add per share of the lit and visible ones, 1.65 ms a light
     (0.43 ms); the elements' directions and solid angles 3.1 MB once, each map's shares 1–2 MB
-    (deferred below).
+    (deferred below). _After R10.T1.c's client half: under a maturity an evaluation is about a
+    third longer (0.99 to 1.30 ms a light in a provisional run) and the shares 12 B an entry more._
   - _The eclipse_ (the lane lead's decision, literal to the plan and R07.T10.b). Each star keeps
     its `discEclipseVisible` term, with the photometry's limb share (`elsewhere`'s), on its own
     integral: tested, the share an eclipse leaves under the map equals the uniform body's to 10⁻¹²
@@ -8409,7 +8668,8 @@ observer)`, in the body-fixed axes (`classMapPointReflection` takes the galactic
     cheaper loop and the merge not built (T14.f's record)._
   - _Memory._ The elements' geometry, 3.1 MB once, and each map's shares 1–2 MB, against its
     texture's 104–418 KB. The lever: directions found per face from tabulated (u, v), or `f32`
-    stores.
+    stores. _After R10.T1.c's client half: under a maturity the shares take 12 B an entry more,
+    and the texture with its six code layers is 209–523 KB._
   - _T10.e's q for the Mars-like world is not closed by the point integral_ (T10.e's deferred "The
     classes' q is the Regolith row's, not plan 14's"). The integral is linear in the map, so
     averaged over orientations it gives T10.e's closed form Σ aᵢ pᵢ qᵢ ÷ Σ aᵢ pᵢ exactly and adds
@@ -8448,7 +8708,9 @@ observer)`, in the body-fixed axes (`classMapPointReflection` takes the galactic
     `handoverPairing.ts` and `handoverCheckRun.ts` (new), `ViewsCheckRunner.tsx`, `terrainProbe.ts`
     (`checkScenes`, `readSceneTarget`, `coverageCells(body?)`) and `viewsCheckRun.ts`;
     `main/fixtures/handoverRecord.ts` (a passing record); `view/terrain/handover.ts` (its
-    documentation). Tests beside each. No wire format, payload or golden changes.
+    documentation). Tests beside each. No wire format, payload or golden changes. _After
+    R10.T1.c's client half: row 25's w is the class map's maturity flag beside row 24's, and the
+    record is 308 rows for every disc (`DISC_ROWS`, 4,928 B), the maturity nodes from row 52._
   - _The presented pixel_ (§13's lever). `planLitBodies` measures the hand-over, both ways, at the
     presented width's centre pixel, `pixelAngleRad(camera, options.presentedPx)`, the canvas's
     device px that `ViewFrameDrawer` gives beside the internal viewport (`PhotorealInputs` and
@@ -8517,7 +8779,11 @@ observer)`, in the body-fixed axes (`classMapPointReflection` takes the galactic
     Mercury template against the classes' Regolith row (T10.e's q finding), and at the roots'
     first draw 10.4% of the survey's area is the reference surface, law 0 on the datum. Decision
     §1's "symmetric relief only darkens" holds for slopes of zero mean; this survey's mean slope is
-    a tilt of about 1.6° towards the sun. Scratch: `rm45-scratch/r10-handover/trace/`.
+    a tilt of about 1.6° towards the sun. Scratch: `rm45-scratch/r10-handover/trace/`. _After
+    R10.T1.c's client half: this holds on TERRAIN TEST; on `TEST MOON` weathered the albedos differ
+    by design, each class drawing its maturity nodes (the terrain at each vertex's code at its
+    level, the disc at band 0's), and `terrainMoonPhotometry` takes `elsewhere`'s A from the
+    golden's `crust_albedo`._
   - _The check_ (`--views-check --terrain --handover`, both settings, or `--setting`): three
     check-only kept scenes, `HAND-OVER 30°`, `HAND-OVER 90°` and `HAND-OVER TERMINATOR`, offered on
     that launch alone, `TERRAIN TEST`'s bodies with the moon held still, the clock at 1 s/s and both
@@ -8532,7 +8798,9 @@ observer)`, in the body-fixed axes (`classMapPointReflection` takes the galactic
     survey's means on both their own and their shared pixels (deviation: the stricter), within
     1/3 stop at 30° and 90°; the terminator's recorded; the run exits 0 only with a passing record,
     `<date>-<machine>-<setting>-handover.{json,md}` beside the terrain run's. The world is a
-    parameter (`HandoverWorld`) for T15's served one, not built. Beyond the brief (each the
+    parameter (`HandoverWorld`) for T15's served one, not built. _After R10.T1.c's client half: it
+    also takes `TEST MOON` weathered (`--weathered`, as `TERRAIN TEST WEATHERED`), whose results
+    are `…-handover-weathered`, the terrain run's `…-terrain-weathered`._ Beyond the brief (each the
     smallest reversible choice): a frame fails the camera model's check at 5% of its body's pixels
     off the datum (`HANDOVER_MISS_LIMIT`; the limb's ring is about 2%); the exposure counts as
     settled within 0.15 EV for 3 s; read-backs cover the disc's region and 4 px about it, at most 3
@@ -8636,7 +8904,8 @@ observer)`, in the body-fixed axes (`classMapPointReflection` takes the galactic
   - _The normal map's GPU cost_ is unmeasured: per shaded point of a class-map disc with a map,
     one cube-face lookup, five `textureLoad`s and decodes, a renormalisation and a second
     `preciseAtan2` a star (uniform discs and the cells pass return at the flag). For T14's A/B in
-    a quiet window.
+    a quiet window. _After R10.T1.c's client half: it now also holds the maturity codes' loads,
+    the nodes' reads and the 308-row record (T1.c's client-half deferred findings 11 and 15)._
   - _`TERRAIN: STREAMING` at mid-hold_: still standing about 13 s after the hand-over on both
     settings, in every look.
   - _The results' writer_ prints `-0.000` for a change under 5 × 10⁻⁴ stop, and its files are not
@@ -8669,7 +8938,9 @@ observer)`, in the body-fixed axes (`classMapPointReflection` takes the galactic
     more at level 6 and 31 ms at level 8 a query), and a fully surveyed level-8 world's normal map
     is remade whole at every block that surveys a cell (about 0.3 s native, extrapolated); the CPU
     copy (1.52 MiB at level 8) is not counted under `coarse-field-gpu`. The levers: one combined
-    export, an incremental remake, the copy counted.
+    export, an incremental remake, the copy counted. _After R10.T1.c's client half: under a
+    maturity each query also reads `maturity_at_level` at each texel's points, and a body's
+    unresolved terms cost about 27–38 ms once (T1.c's client-half record)._
   - _The terminator's noise_: in the terminator's band the horizon term's tangential part carries
     a normal's half-float noise into the light (a map of datum normals moves terminator texels by up
     to 13 times the smoke's texel tolerance on the twin); physical, as the terrain's own bakes.
@@ -10750,6 +11021,9 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     `face-differences` and 139,428 B on `baked-offsets`; R05's spike's 51,756, 203,844 and
     102,444 B. Low lit on `baked-offsets` is 260,336 B, 257 slots in 64 MiB: the note's "not with
     `BakedOffsets`". The slot counts as built: 422 low lit, 1,286 high lit, 520 for the wireframe.
+    _After R10.T1.c's client half: `class-layers` is 54,028 B (+19,972, the maturity codes and
+    nodes), a slot 178,908 B low lit, 330,996 B high lit and 229,596 B on high's fallback, the
+    wireframe's unchanged; 375 low lit and 1,208 high lit slots, 520 for the wireframe._
 
   - _The premise's deviations._ The vertical field of view follows from the aspect, as the engine's
     projection takes it: 2 atan(tan 30° × 9 ÷ 16) = 36.0°, not the note's 34°, which scales the
@@ -11059,7 +11333,9 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
   - _The replay_ (test 6, `cache.test.ts`; re-pinned). The forced peak is 71 in each case and no
     forced insert is refused, as before. Low lit: pins peak at 422 of 422 slots, past them in 107
     frames (before 136). High lit: 887 of 1,286 (before 884), never past: the budget the culled
-    patches free refines elsewhere. The wireframe: 520 of 520, past in 4, unchanged.
+    patches free refines elsewhere. The wireframe: 520 of 520, past in 4, unchanged. _After
+    R10.T1.c's client half (and R09.T8.d's 110): low lit 375 of 375, past them in 242 frames; high
+    lit 832 of 1,208; the forced peak as it was._
   - _The fourteen descent windows_ (`demandRecord.test.ts`; re-pinned with a dated sentence). All
     14 hashes moved, none kept: every window's selected bounds changed. Mean / most patches a
     frame, and the measured demand ÷ D:
@@ -11654,6 +11930,10 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     | Low photorealistic, wireframe (38,028 B) | 1,369; 52,060,332 B                        | 1,362           | 1,369                  | 1,369       | 520; 19,774,560 B    |
     | Low wireframe (38,028 B)                 | 6,509; 247,524,252 B                       | 5,498           | 3,623; 137,775,444 B   | 6,509       | 520; 19,774,560 B    |
 
+    _After R10.T1.c's client half: the lit slots are 330,996 B on high (1,208 held in the same
+    400,000,000 B) and 178,908 B on low (375 in 64 MiB); the table's bytes are at the slots before
+    it._
+
     The frustum term governs in every case (3 F∪ against 1.3 AR∪: 8,559 against 5,191 on high
     photorealistic). Against T14.e's model at τ_sel at 100 m on an Earth (high 2,790 / 500–506,
     low 490 / 92–105, wireframe 352 / 88–91, the boxes; 2,741, 462 and 319 all round on the exact
@@ -11806,11 +12086,13 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     on high while its all-round set is never resident, capped at 2 GB on the RTX 3080's driver
     figure for high in both styles and 1 GB on the UHD 620's for low, the timed run passing the GPU
     rows with the lit draws counted; where a cap binds, the cap's figure, the excess recorded; in
-    whole MiB and wireframe slots.
+    whole MiB and wireframe slots. _After R10.T1.c's client half: the same bytes hold 1,208 high
+    lit and 375 low lit slots, a draw budget (⌊slots ÷ 2⌋) of 604 and 187._
 
   - _`BakedOffsets` on the high setting holds_ (§5): at 1,286 slots its offsets, 130,400,400 B,
     bind in every default binding (134,217,728 B); at 8,666 slots they would bind only at a raised
-    limit such as the RTX 3080's 1 GiB (878,732,400 B), the clamp below covering the rest.
+    limit such as the RTX 3080's 1 GiB (878,732,400 B), the clamp below covering the rest. _After
+    R10.T1.c's client half: at 1,208 slots, 122,491,200 B._
   - _The binding's clamp_ (§4; T14.d's "High's lit layout has no working fallback"). `fitLayout`
     (`gpu/resources.ts`) keeps the layout as before where every storage field binds at the
     setting's own path and slot count
@@ -11824,7 +12106,9 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     engages at the RTX 3080's limits or at WebGPU's defaults (1,286 ≤ 1,323, 520 ≤ 1,323,
     422 ≤ 1,948): it makes T14.d's dead fallback work (high lit at its 1,286 slots on a
     128,000,000 B binding keeps them on `face-differences`, where it threw) and the re-size a
-    constants-only change. One move: R05's spike shading on high at WebGPU's default limits keeps
+    constants-only change. _After R10.T1.c's client half: 1,208 ≤ 1,323 and 375 ≤ 1,948; the
+    test's binding is 115,000,000 B, under the 1,208 slots' offsets._ One move: R05's spike
+    shading on high at WebGPU's default limits keeps
     its 1,962 slots on `face-differences`, where it took 3,904. `materialSet.test.ts`' bindings for
     each refused path are re-chosen (at 10⁸ B high's lit, depth and shadow materials now take
     `face-differences` and the wireframe `baked-offsets`). The spike's binding block carries each
@@ -11839,7 +12123,8 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
   - _The caches hold a seventh of the hard bound's demand_ (decision-r10-t14b-constants §6). Low
     lit 2,996 slots measured against 422 held (×7.1), high lit 8,666 against 1,286 (×6.7), the
     wireframe 3,764 and low's two views 3,623 against 520 (×7.2, ×7.0): neither 64 MiB nor about
-    400 MB holds the as-built selection's demand on a generated world. Levers: R10.T4.b's
+    400 MB holds the as-built selection's demand on a generated world (_after R10.T1.c's client
+    half: against 375 held, ×8.0, and 1,208, ×7.2_). Levers: R10.T4.b's
     min(hard, 4σ) (×2–3); R09's (ii) and decision-r09-t8d-reach §5's per-view occluder, for the tall
     boxes; a draw budget apart from the slots; the pool's per-pass share (below); bake throughput
     (below). The re-size above is pre-ruled.
@@ -11878,7 +12163,8 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
   - _The forced region_ (§8 (h)): its lead before touchdown was 23–32 s with every forced patch
     resident at touchdown, though low's "all resident" lapsed after 1,168–1,169 s as new forced
     patches entered. No forced insert can have been refused: the forced pins peaked at 108 against
-    422–1,286 slots, and the cache evicts any unforced patch before refusing one.
+    422–1,286 slots, and the cache evicts any unforced patch before refusing one. _After
+    R10.T1.c's client half: 375–1,208 slots._
     `FORCED_REGION_RESIDENCY_S` stays as it is.
   - _A turn's restream on the hard bound_ (§2): 2,853 ÷ 2.2–9.3 bakes a second is 5–22 min for the
     high setting's frustum set. No cache size makes a turn cheap; only the bound does.
@@ -11942,7 +12228,8 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     nothing of its own held so near, is still found on the frame: the body's first frame as a point
     under a map made before, which must meet the disc it switches with (R07's 1%). The
     evaluation's loop is a plain function over a range of elements (`addLawSums`): as a generator
-    it was 0.2–0.6 ms slower a miss.
+    it was 0.2–0.6 ms slower a miss. _After R10.T1.c's client half: under a map's maturity an
+    evaluation is about a third longer (0.99 to 1.30 ms a light, provisional, load 1.08)._
   - _T10.f's cache bound past δ._ Between δ and the stale angle the drawn ratio is the held one
     while the fresh one is found, a refresh at level 8 taking about three slices a light: under fast
     time acceleration the point's light curve lags the turn by those frames, by up to 0.33 of the
@@ -11997,7 +12284,9 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     Iapetus's 99,488 entries, 5.9 MB for the eight-class map's 614,400); its normals, `f32`, 1.2 MB
     at levels 5 and 6, 4.7 MB at 7 and 18.9 MB at 8. While a remake's build runs, the stand-in's
     elements stay beside the new build's, up to about twice a map's (some 50 MB at level 8 with
-    eight classes).
+    eight classes). _After R10.T1.c's client half: under a maturity 21 B an entry, its three `f32`
+    factors 12 B (7.4 MB more for the eight-class map's 614,400), and a level-8 build 637 → 715
+    slices (+12%, provisional)._
   - _Not built._ The optional quarter-point path decoding each normal texel once (T10.g's lever),
     and T10.f's cheaper reconstruction loop and merged uniform texels: they would shorten the
     build, not the slices. The optional hidden RTX 3080 run reading T14.d's gap probe across the
@@ -12018,7 +12307,8 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     for four lights on the body's first frame as a point under a map made before, within R05's
     50 ms hitch row and over the entry's 4 ms a light. The lever: a provisional ratio from the
     disc's own light at the switch, or the evaluation begun in the slices while the body is a disc
-    near the switch.
+    near the switch. _After R10.T1.c's client half: about a third longer under a map's maturity
+    (T1.c's client-half deferred finding 12)._
   - _A remake's memory_: the stand-in's elements beside the new build's, up to about twice a map's.
   - _Slices past 2.2 ms_: one of 5.21 ms in the quiet run (the first level-7 build), a collection
     or a compile; provisional loaded runs before the block copy reached 27 ms.

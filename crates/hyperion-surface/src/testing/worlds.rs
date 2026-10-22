@@ -1065,9 +1065,14 @@ fn moon_like() -> CoarseField {
 }
 
 /// The Moon-like world's crater contract at the lunar-equivalent density `n_1km` above 1 km: its
-/// own at 0.05 km⁻², and R10.T1.c's variants' at a younger surface's (`maturity` tests).
+/// own at 0.05 km⁻², and R10.T1.c's variants' at a younger surface's (`maturity` tests, the bake's
+/// bench): 4.8 × 10⁻³ km⁻² on a 3.5 Gyr surface and 8.4 × 10⁻⁴ km⁻² on a 1 Gyr one.
+///
+/// # Panics
+///
+/// If `n_1km` is negative or not finite, which [`CraterParams::new`] refuses.
 #[must_use]
-pub(crate) fn moon_like_crater_params(n_1km: PerSquareKilometre) -> CraterParams {
+pub fn moon_like_crater_params(n_1km: PerSquareKilometre) -> CraterParams {
     CraterParams::new(CraterParamsParts {
         n_1km,
         screening: Screening::None,
@@ -1083,9 +1088,14 @@ pub(crate) fn moon_like_crater_params(n_1km: PerSquareKilometre) -> CraterParams
 }
 
 /// The Moon-like world's builder, its craters included: what [`SyntheticWorld::MoonLike`] builds,
-/// and what R10.T1.c's tests weather and vary (a maturity and a rate, a younger surface).
+/// and what R10.T1.c's tests and the bake's bench weather and vary (a maturity and a rate, a
+/// younger surface with [`moon_like_crater_params`]).
+///
+/// # Panics
+///
+/// Only on a bug: its figure, palette and craters are constants the builder accepts.
 #[must_use]
-pub(crate) fn moon_like_builder() -> FieldBuilder {
+pub fn moon_like_builder() -> FieldBuilder {
     // The highlands are a feldspathic crust and the maria an iron-rich basalt
     // (science-composition-crusts.md §2 and §7). Water ice lies in the Moon's cold traps (Li et al.
     // 2018, PNAS 115, 8907), an entry no cell's share names until P14.T51.f states the area and

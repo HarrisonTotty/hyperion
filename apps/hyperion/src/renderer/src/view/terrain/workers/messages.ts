@@ -121,6 +121,33 @@ export interface TerrainLayers {
    * substance.
    */
   readonly photometry: Float32Array;
+  /**
+   * The ground's maturity at the patch's band level and its parent's, with the albedo nodes it is
+   * drawn through (R10.T1.c's client half); absent where the bake has no maturity layer: a body
+   * whose header carries no maturity, or a bake without weights.
+   */
+  readonly maturity?: TerrainMaturity;
+}
+
+/**
+ * A baked patch's maturity layer and its palette's albedo nodes (R10.T1.c's client half;
+ * `src/wasm.rs`'s `BakedTerrain.maturity` and `SurfaceFields.maturityNodes`).
+ */
+export interface TerrainMaturity {
+  /**
+   * Each vertex's two maturity codes, vertex (x, y) at `2 (65 y + x)`: the code at the patch's band
+   * level n, then at its parent's, n − 1 (n itself at a root), each the unorm16 code of the deficit
+   * ratio √(1 − m ÷ m_body) (`bake::encode_maturity`; 0 the body's background, 65,535 fresh
+   * ground); 2 × 65 × 65.
+   */
+  readonly codes: Uint16Array;
+  /**
+   * The albedo nodes of each slot of the patch's palette at its band level and its parent's
+   * (`SurfaceFields.maturityNodes`): 8 slots × 2 levels × K nodes × 3, slot k at `6 K k`, level n's
+   * K nodes then n − 1's, each node's normal albedo in the Johnson B, V and R bands under the
+   * field's albedo scale; all 0 for an empty slot or one whose palette names no substance.
+   */
+  readonly nodes: Float32Array;
 }
 
 /** The values a palette slot's photometry takes in {@link TerrainLayers.photometry}. */
@@ -244,6 +271,32 @@ export interface ClassMapAnswer {
    * the field does not hold yet, which leaves that cell out until a later block.
    */
   readonly normalsComplete: boolean;
+  /**
+   * Each texel's maturity and each class's albedo nodes at band level 0 (R10.T1.c's client half);
+   * absent where the body's header carries no maturity.
+   */
+  readonly maturity?: ClassMapMaturityAnswer;
+}
+
+/**
+ * A class map's maturity, as a worker answers it (R10.T1.c's client half; `src/wasm.rs`'s
+ * `ClassMapAnswer.maturity` and `nodes`, the crate's `ClassMapTexel::maturity` and
+ * `ClassMapClass::nodes`).
+ */
+export interface ClassMapMaturityAnswer {
+  /**
+   * Each texel's maturity code at the map's band level, one a texel in
+   * {@link ClassMapAnswer.texels}' order: the unorm16 code of the deficit ratio √(1 − m ÷ m_body)
+   * (`bake::encode_maturity`; 0 the body's background, 65,535 fresh ground), the point rule's at
+   * the points the texel's weights are read at.
+   */
+  readonly codes: Uint16Array;
+  /**
+   * Each class's albedo nodes at band level 0, K × 3 values a class in its order, class c's node j
+   * at `3 (K c + j)`: its normal albedo in the Johnson B, V and R bands under the field's albedo
+   * scale (`maturityNodes.ts`' grading); all 0 for a class whose palette names no substance.
+   */
+  readonly nodes: Float32Array;
 }
 
 /** A point of a face, in the cube's face coordinates (`hyperion_surface::cube::FaceUv`). */
@@ -533,6 +586,10 @@ export function bakeTransferables(bake: BakedPatch): Transferable[] {
       horizonFar.buffer,
       horizonRefusedCells.buffer,
     );
+    const { maturity } = bake.layers;
+    if (maturity !== undefined) {
+      buffers.push(maturity.codes.buffer, maturity.nodes.buffer);
+    }
   }
   return buffers;
 }
@@ -544,17 +601,23 @@ export function blockTransferables(block: FieldBlockAnswer | null): Transferable
     : [block.newlySurveyed.buffer, block.newlyHeld.buffer, block.levels.buffer];
 }
 
-/** The buffers a worker transfers with a class map and its normal map. */
+/** The buffers a worker transfers with a class map and its normal map, its maturity's with them. */
 export function classMapTransferables(map: ClassMapAnswer | null): Transferable[] {
-  return map === null
-    ? []
-    : [
-        map.classes.buffer,
-        map.photometry.buffer,
-        map.texels.buffer,
-        map.fractions.buffer,
-        map.weights.buffer,
-        map.normalCells.buffer,
-        map.normalPairs.buffer,
-      ];
+  if (map === null) {
+    return [];
+  }
+  const buffers: Transferable[] = [
+    map.classes.buffer,
+    map.photometry.buffer,
+    map.texels.buffer,
+    map.fractions.buffer,
+    map.weights.buffer,
+    map.normalCells.buffer,
+    map.normalPairs.buffer,
+  ];
+  const { maturity } = map;
+  if (maturity !== undefined) {
+    buffers.push(maturity.codes.buffer, maturity.nodes.buffer);
+  }
+  return buffers;
 }

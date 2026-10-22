@@ -9,9 +9,9 @@
  * bundle.
  */
 
-import type { ViewsCheckLaunch, ViewsCheckRunKind } from "./api";
+import type { ViewsCheckLaunch, ViewsCheckRunKind, ViewsCheckTerrainFixture } from "./api";
 
-export type { ViewsCheckLaunch, ViewsCheckRunKind } from "./api";
+export type { ViewsCheckLaunch, ViewsCheckRunKind, ViewsCheckTerrainFixture } from "./api";
 
 /** The switch carrying the options. */
 const VIEWS_CHECK_SWITCH = "--hyperion-views-check=";
@@ -28,22 +28,35 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 /** The runs a launch may make. */
 const RUN_KINDS: ReadonlyArray<ViewsCheckRunKind> = ["several-views", "terrain", "handover"];
 
-/** `value` as the check's options, or `null` if it is not one: every field present and of its type. */
+/** The fields a terrain run may be served. */
+const TERRAIN_FIXTURES: ReadonlyArray<ViewsCheckTerrainFixture> = [
+  "terrain-test",
+  "terrain-test-weathered",
+];
+
+/**
+ * `value` as the check's options, or `null` if it is not one: every field present and of its type,
+ * and the weathered fixture on a terrain run or its hand-over check alone (T20's run serves no
+ * field, so its launch names `TERRAIN TEST`'s, the default).
+ */
 export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
   if (!isRecord(value)) {
     return null;
   }
   const { setting, smoke, out } = value;
   const run = RUN_KINDS.find((each) => each === value["run"]) ?? null;
+  const fixture = TERRAIN_FIXTURES.find((each) => each === value["fixture"]) ?? null;
   if (
     (setting !== "high" && setting !== "low") ||
     typeof smoke !== "boolean" ||
     !(out === null || (typeof out === "string" && out.length > 0)) ||
-    run === null
+    run === null ||
+    fixture === null ||
+    (run === "several-views" && fixture !== "terrain-test")
   ) {
     return null;
   }
-  return { setting, smoke, out, run };
+  return { setting, smoke, out, run, fixture };
 }
 
 /**

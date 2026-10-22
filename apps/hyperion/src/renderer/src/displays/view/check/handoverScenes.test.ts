@@ -4,7 +4,11 @@ import { norm, normalise, scale, sub } from "../../../geometry/vec3";
 import { rotate } from "../../../view/camera/quaternion";
 import { rotateToBody } from "../../../view/coords/rotation";
 import { limbDistanceM } from "../../../view/terrain/handover";
-import { terrainMoon, terrainTestGolden } from "../../../view/scenes/terrainScene";
+import {
+  terrainMoon,
+  terrainMoonPhotometry,
+  terrainTestGolden,
+} from "../../../view/scenes/terrainScene";
 import { SCENE_OPTIONS } from "../viewRun";
 import { HANDOVER_APPROACH, HANDOVER_LOOKS, type HandoverLook } from "./handoverGeometry";
 import { handoverRangeAtM, HandoverScenes, terrainTestHandoverWorld } from "./handoverScenes";
@@ -68,6 +72,39 @@ describe("TERRAIN TEST's hand-over world", () => {
       6,
       48,
     ]);
+  });
+});
+
+describe("TEST MOON weathered's hand-over world (R10.T1.c)", () => {
+  const WEATHERED = "terrain-test-weathered";
+
+  it("is TERRAIN TEST WEATHERED: the weathered golden's moon, relief, level and survey", () => {
+    const world = terrainTestHandoverWorld(WEATHERED);
+    const { body, header } = terrainTestGolden(WEATHERED);
+    expect([world.name, world.body, world.reliefM, world.cellLevel, world.surveyedCells]).toEqual([
+      "TERRAIN TEST WEATHERED",
+      body,
+      header.realised_relief_m,
+      header.level,
+      terrainTestHandoverWorld().surveyedCells,
+    ]);
+  });
+
+  it("draws each look's moon with the weathered field's photometry, from its crust_albedo", () => {
+    const made = new HandoverScenes(
+      terrainTestHandoverWorld(WEATHERED),
+      HANDOVER_APPROACH.full,
+      PROVISIONAL_M,
+    );
+    const { header, maturity } = terrainTestGolden(WEATHERED);
+    const moons = made.sceneOptions.map(
+      (option) =>
+        option
+          .make()
+          .sceneAt(0)
+          .bodies.find((body) => body.id === terrainMoon(WEATHERED))?.appearance?.photometry,
+    );
+    expect(moons).toEqual(LOOK_SCENES.map(() => terrainMoonPhotometry(header, maturity)));
   });
 });
 

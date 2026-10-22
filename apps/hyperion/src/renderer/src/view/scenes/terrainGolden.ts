@@ -12,9 +12,13 @@
  * member or an `FeO_T` not modelled as `-`, left out as the wire leaves it out; the coverage at each revision (`survey`); each payload's
  * revision and `have_revision` (`payload`), its answer's coverage (`cover`) and its blocks
  * (`block`, hexadecimal); and what each block of the first payload and the delta changes in a
- * worker's field (`change`, `held`). The server crate's test holds the header lines and covers to
- * the server's own conversion, so the answers built here are the server's. The reader is pure, and
- * throws on any line it cannot read, naming it: the file is committed, so a failure is a bug.
+ * worker's field (`change`, `held`). Where the header carries a maturity, as `TEST MOON`
+ * weathered's (`terrain_test_weathered.golden`, R10.T1.c's client half) does, five lines follow:
+ * the primary crust's drawn albedo (`crust_albedo`), three patches' maturity layers and nodes as
+ * digests (`maturity_patch`) and the class map's (`class_map_maturity`). The server crate's test
+ * holds the header lines and covers to the server's own conversion, so the answers built here are
+ * the server's. The reader is pure, and throws on any line it cannot read, naming the file and the
+ * line: the file is committed, so a failure is a bug.
  */
 import type {
   BodyIdHex,
@@ -27,6 +31,8 @@ import type {
   PrecipitationSourceDto,
   SurfaceHeaderDto,
 } from "@hyperion/protocol";
+
+import type { Face, PatchKey } from "../terrain/patchKey";
 
 /** One payload of the field: R09.T19.b's answer to one `surface_field`. */
 export interface TerrainGoldenPayload {
@@ -48,6 +54,41 @@ export interface TerrainGoldenChange {
   readonly held: ReadonlyArray<readonly [number, number]>;
 }
 
+/**
+ * A patch whose maturity layer the golden pins (R10.T1.c's client half): baked with the weights at
+ * the fixture's seed over payloads 1 and 2's blocks.
+ */
+export interface TerrainGoldenMaturityPatch {
+  /** The patch holding the second survey's point at band level 8, 13 or the band limit's. */
+  readonly key: PatchKey;
+  /**
+   * The FNV-1a digest of the bake's maturity codes (`BakedTerrain.maturity()`), each as an `f64`:
+   * `f64Digest(Float64Array.from(codes))`.
+   */
+  readonly codesDigest: bigint;
+  /**
+   * The FNV-1a digest of `SurfaceFields.maturityNodes` for the bake's own palette and level, over
+   * its `Float32Array`'s bits (`f32Digest`).
+   */
+  readonly nodesDigest: bigint;
+}
+
+/** What the golden pins of a field whose header carries a maturity (R10.T1.c's client half). */
+export interface TerrainGoldenMaturity {
+  /**
+   * The primary crust's regolith's drawn normal albedo at the body's background maturity at band
+   * level 0, in the Johnson B, V and R bands: the ground the class map leaves to `elsewhere`.
+   */
+  readonly crustAlbedoBvr: readonly [number, number, number];
+  /** The patches, at band levels 8 and 13 and at the band limit's, in that order. */
+  readonly patches: ReadonlyArray<TerrainGoldenMaturityPatch>;
+  /**
+   * The class map's (at the fixture's seed) maturity: its texels' codes' digest, as a patch's, and
+   * its classes' band-0 nodes' (`ClassMapAnswer.nodes()`, `f32Digest`).
+   */
+  readonly classMap: { readonly codesDigest: bigint; readonly nodesDigest: bigint };
+}
+
 /** `TERRAIN TEST`'s field as the golden holds it. */
 export interface TerrainGolden {
   /** The generator version the file was blessed at (its header). */
@@ -67,6 +108,8 @@ export interface TerrainGolden {
   readonly payloads: ReadonlyArray<TerrainGoldenPayload>;
   /** What each block of the first payload, then of the delta, changed, in the order posted. */
   readonly changes: ReadonlyArray<TerrainGoldenChange>;
+  /** The maturity's lines; absent for a field whose header carries none, as `TERRAIN TEST`'s. */
+  readonly maturity?: TerrainGoldenMaturity;
 }
 
 const HEADER_PREFIX = "# generator_version = ";
@@ -92,9 +135,9 @@ const PALETTE_ROLES: ReadonlyArray<PaletteRoleDto> = [
   "bulk",
 ];
 
-/** A line the reader could not read. */
+/** A line the reader could not read (`parseTerrainGolden` names the file). */
 function refused(line: number, why: string): Error {
-  return new Error(`terrain_test.golden, line ${String(line)}: ${why}`);
+  return new Error(`line ${String(line)}: ${why}`);
 }
 
 /** A float from its golden form, `0x` and 16 lowercase hexadecimal digits of its bits. */
@@ -105,6 +148,26 @@ function floatOf(token: string | undefined, line: number): number {
   const view = new DataView(new ArrayBuffer(8));
   view.setBigUint64(0, BigInt(token));
   return view.getFloat64(0);
+}
+
+/** A 64-bit digest from its golden form, `0x` and 16 lowercase hexadecimal digits. */
+function digestOf(token: string | undefined, line: number): bigint {
+  if (token === undefined || !/^0x[0-9a-f]{16}$/u.test(token)) {
+    throw refused(line, `${String(token)} is not a digest's 64 bits`);
+  }
+  return BigInt(token);
+}
+
+const FACES: ReadonlyArray<Face> = [0, 1, 2, 3, 4, 5];
+
+/** A cube face's index, 0 to 5. */
+function faceOf(token: string | undefined, line: number): Face {
+  const index = wholeOf(token, line);
+  const face = FACES.find((f) => f === index);
+  if (face === undefined) {
+    throw refused(line, `${String(token)} is not a face`);
+  }
+  return face;
 }
 
 /** A whole number of at least 0, in decimal. */
@@ -221,7 +284,7 @@ function headerOf(parts: HeaderParts): SurfaceHeaderDto {
   const member = (key: string): MemberToken => {
     const token = scalars.get(key);
     if (token === undefined) {
-      throw new Error(`terrain_test.golden: the header has no ${key}`);
+      throw new Error(`the header has no ${key}`);
     }
     used.add(key);
     return token;
@@ -268,7 +331,7 @@ function headerOf(parts: HeaderParts): SurfaceHeaderDto {
   };
   const unread = [...scalars.keys()].filter((key) => !used.has(key));
   if (unread.length > 0) {
-    throw new Error(`terrain_test.golden: the header has unknown members ${unread.join(", ")}`);
+    throw new Error(`the header has unknown members ${unread.join(", ")}`);
   }
   return header;
 }
@@ -276,9 +339,22 @@ function headerOf(parts: HeaderParts): SurfaceHeaderDto {
 /**
  * The terrain test's field from the golden's text.
  *
- * @throws Error naming the first line it cannot read, or a member, payload or block missing.
+ * @param file - The golden's file name, which every refusal names: `TERRAIN TEST`'s by default.
+ * @throws Error naming the file and the first line it cannot read, or a member, payload or block
+ *   missing.
  */
-export function parseTerrainGolden(text: string): TerrainGolden {
+export function parseTerrainGolden(text: string, file = "terrain_test.golden"): TerrainGolden {
+  try {
+    return parsedGolden(text);
+  } catch (error: unknown) {
+    throw new Error(`${file}: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
+  }
+}
+
+/** The field from the golden's text, its refusals naming no file ({@link parseTerrainGolden}). */
+function parsedGolden(text: string): TerrainGolden {
   let generatorVersion: number | null = null;
   let body: string | null = null;
   let seed: string | null = null;
@@ -294,6 +370,11 @@ export function parseTerrainGolden(text: string): TerrainGolden {
     surveyed: Array<readonly [number, number]> | null;
     held: Array<readonly [number, number]> | null;
   }> = [];
+  let maturity: {
+    crustAlbedoBvr: readonly [number, number, number];
+    patches: TerrainGoldenMaturityPatch[];
+    classMap: TerrainGoldenMaturity["classMap"] | null;
+  } | null = null;
   // A checkout with CRLF line ends (Git for Windows' default) reads as one with LF
   // (decision-r10-t16d-part1, cross-platform).
   const lines = text.split(/\r?\n/u);
@@ -377,22 +458,76 @@ export function parseTerrainGolden(text: string): TerrainGolden {
         }
         break;
       }
+      case "crust_albedo": {
+        if (maturity !== null || third === undefined || rest.length > 0) {
+          throw refused(line, "one crust_albedo line, <B> <V> <R>, starts the maturity's lines");
+        }
+        maturity = {
+          crustAlbedoBvr: [floatOf(first, line), floatOf(second, line), floatOf(third, line)],
+          patches: [],
+          classMap: null,
+        };
+        break;
+      }
+      case "maturity_patch": {
+        const [face, level, i, j, codes, nodes, ...more] = tokens.slice(1);
+        if (
+          maturity === null ||
+          maturity.classMap !== null ||
+          nodes === undefined ||
+          more.length > 0
+        ) {
+          throw refused(
+            line,
+            "a maturity_patch is <face> <level> <i> <j> <codes> <nodes>, between the crust_albedo and class_map_maturity lines",
+          );
+        }
+        maturity.patches.push({
+          key: {
+            face: faceOf(face, line),
+            level: wholeOf(level, line),
+            i: wholeOf(i, line),
+            j: wholeOf(j, line),
+          },
+          codesDigest: digestOf(codes, line),
+          nodesDigest: digestOf(nodes, line),
+        });
+        break;
+      }
+      case "class_map_maturity": {
+        if (maturity === null || maturity.classMap !== null || third !== undefined) {
+          throw refused(line, "one class_map_maturity line, <codes> <nodes>, ends the maturity's");
+        }
+        maturity.classMap = {
+          codesDigest: digestOf(first, line),
+          nodesDigest: digestOf(second, line),
+        };
+        break;
+      }
       default:
         throw refused(line, `${kind} is not a line of the terrain test's format`);
     }
   }
   if (generatorVersion === null || body === null || seed === null) {
-    throw new Error("terrain_test.golden: its header, body or seed is missing");
+    throw new Error("its header, body or seed is missing");
+  }
+  const header = headerOf(parts);
+  if ((header.maturity !== undefined) !== (maturity !== null)) {
+    throw new Error("the maturity's lines follow a header with a maturity, and only one");
+  }
+  const classMap = maturity?.classMap ?? null;
+  if (maturity !== null && (classMap === null || maturity.patches.length === 0)) {
+    throw new Error("the maturity's lines have no patch or no class map's");
   }
   return {
     generatorVersion,
     body,
     seed,
-    header: headerOf(parts),
+    header,
     surveys,
     payloads: payloads.map((payload, n) => {
       if (payload.coverage === null || payload.blocksHex.length === 0) {
-        throw new Error(`terrain_test.golden: payload ${String(n + 1)} has no cover or no block`);
+        throw new Error(`payload ${String(n + 1)} has no cover or no block`);
       }
       return {
         revision: payload.revision,
@@ -403,10 +538,19 @@ export function parseTerrainGolden(text: string): TerrainGolden {
     }),
     changes: changes.map((change, n) => {
       if (change.surveyed === null || change.held === null) {
-        throw new Error(`terrain_test.golden: change ${String(n)} has no held runs`);
+        throw new Error(`change ${String(n)} has no held runs`);
       }
       return { surveyed: change.surveyed, held: change.held };
     }),
+    ...(maturity === null || classMap === null
+      ? {}
+      : {
+          maturity: {
+            crustAlbedoBvr: maturity.crustAlbedoBvr,
+            patches: maturity.patches,
+            classMap,
+          },
+        }),
   };
 }
 

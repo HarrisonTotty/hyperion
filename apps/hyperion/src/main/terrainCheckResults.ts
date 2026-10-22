@@ -1,7 +1,9 @@
 /**
  * The views check's terrain run's results file and its summary (plan R10, R10.T16.d;
  * decision-r10-t16-contracts §6): what the renderer measured of each phase on `TERRAIN TEST`,
- * judged against what the hidden run holds.
+ * judged against what the hidden run holds. A `--weathered` run (R10.T1.c's client half) is served
+ * `TEST MOON` weathered's field in its place, which its run block ({@link fixtureRecord}), its
+ * summary and its file's name record; a run on `TERRAIN TEST`'s own writes the file it wrote before.
  *
  * @remarks
  * The run holds, and each is a finding here with its verdict:
@@ -59,6 +61,7 @@ import type {
   TerrainCheckSessionRecord,
   TerrainCheckSpanRecord,
   ViewsCheckStyle,
+  ViewsCheckTerrainFixture,
   ViewsCheckViewName,
 } from "../preload/api";
 import type { GraphicsLaunchMode } from "../preload/api";
@@ -168,12 +171,45 @@ export interface TerrainCheckRunInput {
   readonly launchMode: GraphicsLaunchMode;
   readonly setting: SpikeSetting;
   readonly smoke: boolean;
+  /** The field the run was served: the launch's (`ViewsCheckLaunch.fixture`; R10.T1.c). */
+  readonly fixture: ViewsCheckTerrainFixture;
   readonly switches: ReadonlyArray<string>;
   readonly shown: boolean;
   /** The window's content size when the run ended, DIP. */
   readonly window: { readonly widthDip: number; readonly heightDip: number };
   /** Where the page's captures were saved, or why none were. */
   readonly captures: Measured<string>;
+}
+
+/**
+ * A served field as a results file's run block records it (plan R10, R10.T1.c's client half): the
+ * weathered fixture by name, and nothing for `TERRAIN TEST`'s, so that a run on it writes the file
+ * it wrote before the option.
+ */
+export function fixtureRecord(fixture: ViewsCheckTerrainFixture): {
+  readonly fixture?: Exclude<ViewsCheckTerrainFixture, "terrain-test">;
+} {
+  return fixture === "terrain-test" ? {} : { fixture };
+}
+
+/**
+ * What a results file's name and summary add for its run block's recorded field: `-weathered`
+ * and a line naming `TEST MOON` weathered for the weathered fixture, nothing for `TERRAIN TEST`'s.
+ */
+export function fixtureNaming(
+  fixture: Exclude<ViewsCheckTerrainFixture, "terrain-test"> | undefined,
+): {
+  readonly stem: string;
+  readonly lines: ReadonlyArray<string>;
+} {
+  return fixture === undefined
+    ? { stem: "", lines: [] }
+    : {
+        stem: "-weathered",
+        lines: [
+          `- **Field:** \`${fixture}\`, TEST MOON weathered (\`terrain_test_weathered.golden\`), served in TERRAIN TEST's place`,
+        ],
+      };
 }
 
 /** Everything the results are built from. */
@@ -272,6 +308,8 @@ export interface TerrainCheckResults {
     readonly launchMode: GraphicsLaunchMode;
     readonly setting: SpikeSetting;
     readonly smoke: boolean;
+    /** The weathered fixture on a `--weathered` run; absent on `TERRAIN TEST`'s ({@link fixtureRecord}). */
+    readonly fixture?: Exclude<ViewsCheckTerrainFixture, "terrain-test">;
     readonly switches: ReadonlyArray<string>;
     readonly shown: boolean;
     readonly window: TerrainCheckRunInput["window"];
@@ -747,6 +785,7 @@ export function buildTerrainCheckResults(input: TerrainCheckInput): TerrainCheck
       launchMode: run.launchMode,
       setting: run.setting,
       smoke: run.smoke,
+      ...fixtureRecord(run.fixture),
       switches: run.switches,
       shown: run.shown,
       window: run.window,
@@ -824,6 +863,7 @@ export function terrainCheckMarkdown(results: TerrainCheckResults): string {
     `- **Machine:** ${run.machine.cpu}, ${String(run.machine.logicalCores)} threads; GPU ${textOf(run.machine.gpu, (gpu) => gpu.description ?? `${String(gpu.vendorId)}:${String(gpu.deviceId)}`)}; governor ${textOf(run.machine.governor, (governor) => governor)}; load average ${keepsLoadAverage(run.platform) ? run.machine.loadAverage.map((value) => value.toFixed(2)).join(", ") : "none"} (${run.provisional})`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
     `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}`,
+    ...fixtureNaming(run.fixture).lines,
     `- **Captures (not committed):** ${textOf(run.captures, (dir) => `\`${dir}\``)}`,
     "",
     "## The hidden run's checks",
@@ -897,8 +937,9 @@ const NODE_FILES: ResultsFiles = {
 
 /**
  * Writes the results and their summary into `dir` as `<date>-<machine>-<setting>-terrain.json` and
- * `.md` (`-smoke` before the extension for a smoke run), adding `-2`, `-3` and so on where a run of
- * the same name is there, and warns of a file over the repository's limit for added files.
+ * `.md` (`-terrain-weathered` for a run on the weathered fixture, R10.T1.c; `-smoke` before the
+ * extension for a smoke run), adding `-2`, `-3` and so on where a run of the same name is there,
+ * and warns of a file over the repository's limit for added files.
  *
  * @throws Error if the day's names are used up.
  */
@@ -908,7 +949,7 @@ export async function writeTerrainResults(
   files: ResultsFiles = NODE_FILES,
 ): Promise<{ readonly json: string; readonly markdown: string }> {
   await files.mkdir(dir);
-  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-terrain${results.run.smoke ? "-smoke" : ""}`;
+  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-terrain${fixtureNaming(results.run.fixture).stem}${results.run.smoke ? "-smoke" : ""}`;
   const candidates = Array.from({ length: MAX_RUNS_A_DAY }, (_, i) =>
     i === 0 ? stem : `${stem}-${String(i + 1)}`,
   );

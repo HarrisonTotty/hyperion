@@ -32,6 +32,9 @@
 //! version its own tests were written against, as it does `generatorVersion()`: a change to the
 //! test planet bumps only that, so a stale module would otherwise go unseen.
 //!
+//! `maturityNodeCount()` is K, the albedo nodes a material carries a level ([`MATURITY_NODES`]),
+//! which `maturityNodes` and a class map's `nodes()` lay out (below).
+//!
 //! `omittedSigmaM(level, ridges)` is `σ_n`, the RMS height of the octaves the level omits,
 //! metres: 0 from the finest level on, smaller with ridges on where a ridged octave is omitted
 //! (T6; decisions-r05.md item 6). A statistical figure for `min(ε_n, 4σ_n)`, never a bound.
@@ -77,7 +80,11 @@
 //!   `palette()`, a `Uint8Array` of 8 × 2, each slot its class code then its entry (255 for no
 //!   entry; both 255 for an empty slot); `weights()`, a `Uint8Array` of 65 × 65 × 8, vertex (x, y)
 //!   at `8 (65 y + x)`, each byte over the palette's slot of its place, empty when skipped;
-//!   `surveyMask()`, a `Uint8Array` of 65 × 65, 255 surveyed and 0 not; `boundM` and `sigmaM`,
+//!   `maturity()`, a `Uint16Array` of 65 × 65 × 2, vertex (x, y) at `2 (65 y + x)`: its
+//!   maturity's code at the patch's band level n, then at n − 1 (R10.T1.c's client half;
+//!   [`TerrainLayers::maturity`], each value c the unorm16 code of r = √(D ÷ `m_body`), so that m =
+//!   `m_body` (1 − (c ÷ 65,535)²)), empty where the header carries no maturity or the weights are
+//!   skipped; `surveyMask()`, a `Uint8Array` of 65 × 65, 255 surveyed and 0 not; `boundM` and `sigmaM`,
 //!   metres; `complete`; `unsurveyedCells()`, a `Uint32Array` of the cell indices its mask holds
 //!   unsurveyed, rising ([`BodyBake::unsurveyed_cells`]); and the horizon map (R10.T8.a's layout,
 //!   `bake::horizon`): `horizonNear()`, a `Uint32Array` of 65 × 65 × 4 words, vertex (x, y) at
@@ -118,6 +125,19 @@
 //!   substance. It returns `undefined` where no field of the body is held, and throws for a
 //!   palette of another length, a class code no class has, an entry no palette holds, or one past
 //!   the body's palette.
+//! - `maturityNodes(system, body, palette, level)` takes a bake's `palette()` and its patch's band
+//!   level (0 to 24) and returns a `Float32Array` of 8 × 2 × K × 3, K = `maturityNodeCount()`
+//!   ([`MATURITY_NODES`], 16), slot k at `2 K 3 k`: the albedo nodes the lit terrain draws its
+//!   material with at the patch's level n, then at n − 1 (level 0's own at 0), each level's K
+//!   nodes in order, each its normal albedo in B, V and R under the field's albedo scale
+//!   ([`WorkerFields::maturity_nodes`], R10.T1.c's client half); all 0 for an empty slot or one
+//!   whose palette names no substance; every node the slot's `photometry` albedo where the
+//!   header carries no maturity. Node j lies at `m_j` = `m_body` (1 − (1 − u³)²), u = j ÷ (K − 1)
+//!   ([`maturity_node_share`](crate::material::maturity_node_share)), and the albedo at a vertex of
+//!   code c is the nodes interpolated at u = ∛(1 − c ÷ 65,535): t = (K − 1) u, i = min(⌊t⌋, K − 2),
+//!   f = t − i, (1 − f) Tᵢ + f Tᵢ₊₁, node 0 where `m_body` is 0
+//!   ([`maturity_node_albedo`](crate::material::maturity_node_albedo)). It returns `undefined` and
+//!   throws as `photometry` does, and throws for a level above 24 too.
 //! - `classMap(system, body, seed)` returns a `ClassMapAnswer`, the body's coarse class map for
 //!   R07's disc ([`WorkerFields::class_map`], plan R10, T10.d), or `undefined` where no field of the
 //!   body is held: its `level` (6, 64 texels along a face's side) and `fieldLevel`; `classes()`, a
@@ -125,7 +145,11 @@
 //!   `photometry()`, a `Float32Array` of 5 a class as `photometry`'s; `texels()`, a `Uint32Array`
 //!   of the cell index at `level` of each texel the survey touches, rising; `fractions()`, a
 //!   `Float32Array` of each texel's surveyed share; `weights()`, a `Uint8Array` of each texel's
-//!   bytes over the classes, texel t's at `classes · t`; and `complete`, `false` where some texel's
+//!   bytes over the classes, texel t's at `classes · t`; `maturity()`, a `Uint16Array` of each
+//!   texel's maturity code at band level 0, one value a texel in `texels()`' order, coded as a
+//!   bake's `maturity()`, empty where the header carries no maturity; `nodes()`, a `Float32Array`
+//!   of K × 3 a class, its albedo nodes at band level 0 as `maturityNodes` lays out one level's,
+//!   all 0 where the palette names no substance; and `complete`, `false` where some texel's
 //!   weights read a cell the field does not hold yet.
 //! - `normalMap(system, body, seed)` returns a `NormalMapAnswer`, the body's normal map for R07's
 //!   disc ([`WorkerFields::normal_map`], plan R10, T10.g), or `undefined` where no field of the
@@ -144,10 +168,11 @@ use crate::bake::{HorizonLayer, TerrainBakeOptions, TerrainLayers, WeightsLayer}
 use crate::cube::{Face, FaceUv, PatchKey};
 use crate::field::{BodyRef, FieldView, cell_index};
 use crate::geometry::{BAND_LIMIT_M, FINEST_SPACING_M};
-use crate::material::{MAX_CLASSES, Material, MaterialClass, MaterialProperties};
+use crate::material::{MATURITY_NODES, MAX_CLASSES, Material, MaterialClass, MaterialProperties};
 use crate::noise::LatticeCache;
 use crate::patch::{BakeOptions, NormalScale, PatchBake, VertexPath};
 use crate::reading::{LineOfSight, SlantRange, SurveyedReading};
+use crate::synth::BandLevel;
 use crate::test_planet::{Ridges, TEST_PLANET};
 use crate::worker::{
     BodyBake, CLASS_MAP_LEVEL, ClassMap, DrawnPhotometry, GroundAtSight, GroundProperties,
@@ -185,6 +210,14 @@ pub fn finest_spacing_m() -> f64 {
 #[must_use]
 pub fn test_planet_version() -> u32 {
     crate::TEST_PLANET_VERSION
+}
+
+/// K, the albedo nodes a material carries a level ([`MATURITY_NODES`]; see the module
+/// documentation's `maturityNodes`).
+#[wasm_bindgen(js_name = maturityNodeCount)]
+#[must_use]
+pub fn maturity_node_count() -> u32 {
+    u32::try_from(MATURITY_NODES).expect("K is a small count")
 }
 
 /// The vertex path, as the client names it.
@@ -516,6 +549,13 @@ const NONE_BYTE: u8 = 255;
 /// The values `photometry` gives a palette slot: `A_N` in B, V and R, the law's code and L(0).
 const PHOTOMETRY_STRIDE: usize = 5;
 
+/// The values one level's albedo nodes take: K nodes of B, V and R.
+const LEVEL_NODES_STRIDE: usize = 3 * MATURITY_NODES;
+
+/// The values `maturityNodes` gives a palette slot: its nodes at the patch's level, then at its
+/// parent's.
+const NODES_STRIDE: usize = 2 * LEVEL_NODES_STRIDE;
+
 /// The client's fields, one a body ([`WorkerFields`]; see the module documentation).
 #[wasm_bindgen(js_name = SurfaceFields)]
 #[derive(Debug, Default)]
@@ -649,6 +689,13 @@ impl BakedTerrain {
     #[must_use]
     pub fn weights(&self) -> Vec<u8> {
         self.layers.weights().iter().flatten().copied().collect()
+    }
+
+    /// Each vertex's two maturity codes, at the patch's level then its parent's, empty without a
+    /// layer ([`TerrainLayers::maturity`]).
+    #[must_use]
+    pub fn maturity(&self) -> Vec<u16> {
+        self.layers.maturity().as_flattened().to_vec()
     }
 
     /// Each vertex's survey mask, 255 surveyed and 0 not.
@@ -1503,6 +1550,60 @@ impl JsSurfaceFields {
         Ok(Some(out))
     }
 
+    /// The albedo nodes of each slot of a bake's `palette` on the body, at band level `level` and
+    /// at its parent's (see the module documentation).
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` naming the problem if the body index is above 65,535, the palette is not 8 × 2
+    /// bytes, the level is above 24, or a slot's class code names no class, its entry is one no
+    /// palette holds, or past the body's palette.
+    #[wasm_bindgen(js_name = maturityNodes)]
+    pub fn maturity_nodes(
+        &mut self,
+        system: u64,
+        body: u32,
+        palette: &[u8],
+        level: u32,
+    ) -> Result<Option<Vec<f32>>, JsError> {
+        let body = body_ref(system, body)?;
+        if palette.len() != 2 * MAX_CLASSES {
+            return Err(JsError::new(&format!(
+                "a palette of {} bytes, not {MAX_CLASSES} slots of 2",
+                palette.len()
+            )));
+        }
+        let level = BandLevel::new(byte_of(level, "level")?)
+            .map_err(|_| JsError::new(&format!("level {level} is above 24")))?;
+        // Checked first, so that a palette of empty slots alone answers `undefined` too.
+        if self.fields.field(body).is_none() {
+            return Ok(None);
+        }
+        let mut out = vec![0.0_f32; NODES_STRIDE * MAX_CLASSES];
+        for (values, &[class, entry]) in out
+            .as_chunks_mut::<NODES_STRIDE>()
+            .0
+            .iter_mut()
+            .zip(palette.as_chunks::<2>().0)
+        {
+            if entry == NONE_BYTE {
+                continue;
+            }
+            let class = MaterialClass::try_from(class)
+                .map_err(|_| JsError::new(&format!("class code {class} names no class")))?;
+            let material = Material::new(class, entry)
+                .ok_or_else(|| JsError::new(&format!("entry {entry} is one no palette holds")))?;
+            let nodes = self
+                .fields
+                .maturity_nodes(body, material, level)
+                .map_err(|e| JsError::new(&e.to_string()))?;
+            let (at_level, at_parent) = values.split_at_mut(LEVEL_NODES_STRIDE);
+            at_level.copy_from_slice(&node_values(nodes.level()));
+            at_parent.copy_from_slice(&node_values(nodes.parent()));
+        }
+        Ok(Some(out))
+    }
+
     /// The body's class map for R07's disc (see the module documentation), or `undefined` where no
     /// field of the body is held.
     ///
@@ -1560,6 +1661,22 @@ fn photometry_values(drawn: &DrawnPhotometry) -> [f32; PHOTOMETRY_STRIDE] {
         drawn.limb_parameter() as f32,
     ];
     narrowed
+}
+
+/// A level's albedo nodes as the `maturityNodes` and `classMap` exports give them: node by node,
+/// each its B, V and R, narrowed to `f32`.
+#[must_use]
+fn node_values(nodes: &[[f64; 3]; MATURITY_NODES]) -> [f32; LEVEL_NODES_STRIDE] {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the shader reads f32; a normal albedo of at most 1.35 narrows far inside its range"
+    )]
+    let narrow = |x: f64| x as f32;
+    let mut out = [0.0_f32; LEVEL_NODES_STRIDE];
+    for (values, node) in out.as_chunks_mut::<3>().0.iter_mut().zip(nodes) {
+        *values = node.map(narrow);
+    }
+    out
 }
 
 /// A body's class map for R07's disc ([`ClassMap`]; see the module documentation).
@@ -1656,6 +1773,30 @@ impl ClassMapAnswer {
             out.extend_from_slice(&t.weights()[..classes]);
         }
         out
+    }
+
+    /// Each texel's maturity code at the map's band level, one a texel in
+    /// [`texels`](Self::texels)' order, empty where the header carries no maturity
+    /// ([`ClassMapTexel::maturity`](crate::worker::ClassMapTexel::maturity)).
+    #[must_use]
+    pub fn maturity(&self) -> Vec<u16> {
+        self.map
+            .texels()
+            .iter()
+            .filter_map(crate::worker::ClassMapTexel::maturity)
+            .collect()
+    }
+
+    /// Each class's albedo nodes at the map's band level, K × 3 values a class (node by node, each
+    /// its B, V and R), in [`classes`](Self::classes)' order; all 0 where the palette names no
+    /// substance ([`ClassMapClass::nodes`](crate::worker::ClassMapClass::nodes)).
+    #[must_use]
+    pub fn nodes(&self) -> Vec<f32> {
+        self.map
+            .classes()
+            .iter()
+            .flat_map(|class| class.nodes().map_or([0.0; LEVEL_NODES_STRIDE], node_values))
+            .collect()
     }
 
     /// Whether every texel the survey touches was answered ([`ClassMap::is_complete`]).
