@@ -1,6 +1,7 @@
 use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
+use crate::substance::by_key;
 
 /// The row whose key is `key`.
 fn row(key: &str) -> SubstanceId {

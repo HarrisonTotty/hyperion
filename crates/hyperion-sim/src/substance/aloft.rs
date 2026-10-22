@@ -20,7 +20,7 @@
 //!   log₁₀ `x₀`) ÷ B. Each law here holds its paper's curve at 1 bar and solar metallicity to
 //!   within 10 K with its stated `x₀` (the tests).
 //! - **The row's own saturation curve** ([`SaturationLaw::Diagram`]): every row with a
-//!   [`PhaseDiagram`](super::PhaseDiagram) (water, methane, ammonia, hydrogen sulphide, carbon
+//!   [`PhaseDiagram`] (water, methane, ammonia, hydrogen sulphide, carbon
 //!   dioxide, nitrogen and the rest, [`condensables`](super::condensables)), whose vapour is the
 //!   row itself, over its solid below the triple point and its liquid above, and never at or above
 //!   its critical temperature. The volatile decks take it rather than a closed form: the closed
@@ -45,8 +45,8 @@
 //! # Not modelled
 //!
 //! Four condensate rows have no law ([`NOT_MODELLED`]): sodium chloride, iron sulphide and
-//! graphite, each for a stated reason, and S₈, the photochemical haze P14.T52.b makes. Two laws are stated but give no deck of a gas that holds
-//! the condensate that displaces them ([`LawAloft::displaced_by`]): quartz, whose silicon goes to
+//! graphite, each for a stated reason, and S₈, the photochemical haze P14.T52.b makes. Two laws
+//! are stated but give no deck of a gas that holds the condensate that displaces them ([`LawAloft::displaced_by`]): quartz, whose silicon goes to
 //! enstatite wherever enstatite can form (Visscher, Lodders and Fegley 2010, §5.1), and titanium
 //! dioxide, whose titanium first condenses as calcium titanates (Lodders 2002, through Wakeford et
 //! al. 2017; Lodders and Fegley 2006). A closed set, for the composition audit.
@@ -55,8 +55,8 @@
 //!
 //! The vapour laws were fitted over \[M/H\] −0.5 to +0.5 (Visscher et al. 2006, 2010; Morley et
 //! al. 2012) or −1 to +1 (Morley et al. 2024), and over about 10⁻⁶–10⁴ bar and a few hundred to
-//! 3,000 K ([`LawAloft::fitted`] states each). A sub-Neptune's envelope at 100 times solar or more is an extrapolation, which
-//! P14.T52.c's decks state. Corundum is the first aluminium condensate only below about 0.1 bar
+//! 3,000 K ([`LawAloft::fitted`] states each). A sub-Neptune's envelope at 100 times solar or
+//! more is an extrapolation, which P14.T52.c's decks state. Corundum is the first aluminium condensate only below about 0.1 bar
 //! (Wakeford et al. 2017, §3.1) or 3 × 10⁻³ bar (Lodders and Fegley 2006, §1.5.2), and perovskite
 //! the first titanium condensate only below about 0.03 bar (Lodders and Fegley 2006, §1.5.2); at
 //! 1 bar hibonite and Ca₄Ti₃O₁₀ come first, within 10 K of them, so their laws stand in, a
@@ -82,7 +82,7 @@
 //! Nothing on the record reads these laws before P14.T54.b wires P14.T52.c's loop
 //! (decision-bump-plan-after-22 §1.3), so no generated output moves with them.
 
-use super::{Basis, Element, Source, SubstanceId, SubstanceKey, by_key, ids};
+use super::{Basis, Element, PhaseDiagram, Source, SubstanceId, SubstanceKey, ids};
 use crate::math;
 use crate::units::{Kelvin, Pascals};
 
@@ -93,7 +93,7 @@ const PASCALS_PER_BAR: f64 = 1.0e5;
 const PASCALS_PER_ATMOSPHERE: f64 = 101_325.0;
 
 /// The vapour a law reads: an element's whole gas, or one species.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Vapour {
     /// Every gas species that carries the element, by its atoms: a metal's vapour, as the papers
     /// write its abundance (Mg for forsterite, Si as SiO for enstatite, Ti as TiO for perovskite).
@@ -103,7 +103,7 @@ pub enum Vapour {
 }
 
 /// A vapour of a condensate's reaction and its count in one formula unit of the condensate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Reactant {
     vapour: Vapour,
     count: u16,
@@ -188,6 +188,8 @@ pub const KULMALA_LAAKSONEN: KulmalaLaaksonenConstants = KulmalaLaaksonenConstan
 };
 
 /// The constants of Kulmala and Laaksonen 1990's curve ([`KULMALA_LAAKSONEN`]).
+///
+/// The fields are plain data with no invariant between them, so they are public.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KulmalaLaaksonenConstants {
     /// Ayers et al.'s ln p at 1 ÷ T = 0, p in atmospheres.
@@ -231,6 +233,8 @@ pub struct LawAloft {
     fitted: Option<Fitted>,
     reference: Option<Reference>,
     sources: &'static [Source],
+    /// The row's phase diagram, for [`SaturationLaw::Diagram`].
+    diagram: Option<&'static PhaseDiagram>,
 }
 
 /// The metallicities, total pressures and temperatures a law was fitted over, or its data span:
@@ -353,10 +357,7 @@ impl LawAloft {
             SaturationLaw::KulmalaLaaksonen => {
                 KULMALA_LAAKSONEN.ln_atm(t) + math::ln(PASCALS_PER_ATMOSPHERE)
             }
-            SaturationLaw::Diagram => by_key(self.condensate.as_str())?
-                .substance()
-                .phase_diagram()?
-                .ln_saturation_pressure(temperature)?,
+            SaturationLaw::Diagram => self.diagram?.ln_saturation_pressure(temperature)?,
         })
     }
 
@@ -369,7 +370,8 @@ impl LawAloft {
     /// [`saturation_temperature`](super::PhaseDiagram::saturation_temperature), and Kulmala and
     /// Laaksonen's curve, which rises monotonically, by 64 bisections over 50–905 K. `None` where
     /// no temperature saturates it: a mole fraction or a pressure that is not finite and positive,
-    /// a row's curve beyond its critical point, or the acid outside 50–905 K.
+    /// a metallicity that is not finite, a row's curve beyond its critical point, or the acid
+    /// outside 50–905 K.
     #[must_use]
     pub fn condensation_temperature(
         &self,
@@ -378,7 +380,12 @@ impl LawAloft {
         metallicity_dex: f64,
     ) -> Option<Kelvin> {
         let p = total_pressure.value();
-        if !(p.is_finite() && p > 0.0 && vapour.is_finite() && vapour > 0.0) {
+        if !(p.is_finite()
+            && p > 0.0
+            && vapour.is_finite()
+            && vapour > 0.0
+            && metallicity_dex.is_finite())
+        {
             return None;
         }
         let bars = p / PASCALS_PER_BAR;
@@ -393,9 +400,8 @@ impl LawAloft {
                 let denominator = a - math::log10(vapour * bars * bars);
                 (denominator > 0.0).then(|| Kelvin::new(b / denominator))
             }
-            SaturationLaw::Diagram => by_key(self.condensate.as_str())?
-                .substance()
-                .phase_diagram()?
+            SaturationLaw::Diagram => self
+                .diagram?
                 .saturation_temperature(Pascals::new(vapour * p)),
             SaturationLaw::KulmalaLaaksonen => {
                 let target = math::ln(vapour * p / PASCALS_PER_ATMOSPHERE);
@@ -500,6 +506,7 @@ const LAWS: [LawAloft; 14] = [
              31, whose curve, eq. 32, gives 204.5 K. Kelley's data span 4.2–44.4 °C",
             Basis::Fact,
         )],
+        diagram: None,
     },
     LawAloft {
         condensate: SubstanceKey::new_const("H2SO4"),
@@ -527,6 +534,7 @@ const LAWS: [LawAloft; 14] = [
                 Basis::Adopted,
             ),
         ],
+        diagram: None,
     },
     LawAloft {
         condensate: SubstanceKey::new_const("KCl"),
@@ -546,6 +554,7 @@ const LAWS: [LawAloft; 14] = [
              limits it, and KCl must be K's dominant gas at the base (after eq. 18)",
             Basis::Fact,
         )],
+        diagram: None,
     },
     LawAloft {
         condensate: SubstanceKey::new_const("ZnS"),
@@ -564,6 +573,7 @@ const LAWS: [LawAloft; 14] = [
              648, 1181, §3.2.3, eqs. 29–30)",
             Basis::Fact,
         )],
+        diagram: None,
     },
     LawAloft {
         condensate: SubstanceKey::new_const("Na2S"),
@@ -582,6 +592,7 @@ const LAWS: [LawAloft; 14] = [
              27–28)",
             Basis::Fact,
         )],
+        diagram: None,
     },
     LawAloft {
         condensate: SubstanceKey::new_const("MnS"),
@@ -600,6 +611,7 @@ const LAWS: [LawAloft; 14] = [
              25–26)",
             Basis::Fact,
         )],
+        diagram: None,
     },
     LawAloft {
         condensate: SubstanceKey::new_const("Cr"),
@@ -618,6 +630,7 @@ const LAWS: [LawAloft; 14] = [
              (Lodders and Fegley 2006, §1.5.3)",
             Basis::Fact,
         )],
+        diagram: None,
     },
     LawAloft {
         condensate: SubstanceKey::new_const("Fe"),
@@ -638,6 +651,7 @@ const LAWS: [LawAloft; 14] = [
              x₀ = 57.8 ppm the law lands 15 K above the curve",
             Basis::Fact,
         )],
+        diagram: None,
     },
     LawAloft {
         condensate: SubstanceKey::new_const("MgSiO3"),
@@ -659,6 +673,7 @@ const LAWS: [LawAloft; 14] = [
              grains (Visscher, Lodders and Fegley 2010, ApJ 716, 1060, §4.1, eqs. 19–20, §5.1)",
             Basis::Fact,
         )],
+        diagram: None,
     },
     LawAloft {
         condensate: SubstanceKey::new_const("Mg2SiO4"),
@@ -680,6 +695,7 @@ const LAWS: [LawAloft; 14] = [
              (§5.1)",
             Basis::Fact,
         )],
+        diagram: None,
     },
     LawAloft {
         condensate: SubstanceKey::new_const("SiO2"),
@@ -700,6 +716,7 @@ const LAWS: [LawAloft; 14] = [
              enstatite suppressed; a gas poor in Mg (Burningham et al. 2021) is not modelled",
             Basis::Fact,
         )],
+        diagram: None,
     },
     LawAloft {
         condensate: SubstanceKey::new_const("Al2O3"),
@@ -721,6 +738,7 @@ const LAWS: [LawAloft; 14] = [
              (2,001 K at 1 bar) and grossite above (Wakeford et al. 2017, §3.1)",
             Basis::Fact,
         )],
+        diagram: None,
     },
     LawAloft {
         condensate: SubstanceKey::new_const("CaTiO3"),
@@ -742,6 +760,7 @@ const LAWS: [LawAloft; 14] = [
              §1.5.2)",
             Basis::Fact,
         )],
+        diagram: None,
     },
     LawAloft {
         condensate: SubstanceKey::new_const("TiO2"),
@@ -762,13 +781,14 @@ const LAWS: [LawAloft; 14] = [
              perovskite's law this one gives no deck",
             Basis::Fact,
         )],
+        diagram: None,
     },
 ];
 
 /// A condensate row with no law aloft, and why (the [module](self)'s documentation).
 ///
 /// The fields are plain data with no invariant between them, so they are public.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NotModelledAloft {
     /// The row's key.
     pub key: &'static str,
@@ -859,6 +879,7 @@ pub fn law_aloft(id: SubstanceId) -> Option<LawAloft> {
         fitted: None,
         reference: None,
         sources: &DIAGRAM,
+        diagram: row.phase_diagram(),
     })
 }
 

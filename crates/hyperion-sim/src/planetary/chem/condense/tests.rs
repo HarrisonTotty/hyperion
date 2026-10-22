@@ -1,4 +1,5 @@
 use hyperion_testkit::float::assert_same_bits;
+use hyperion_testkit::order::assert_order_independent;
 
 use super::*;
 use crate::planetary::chem::equilibrium::Network;
@@ -18,6 +19,24 @@ fn bar(bar: f64) -> Pascals {
 /// The row whose key is `key`.
 fn row(key: &str) -> SubstanceId {
     by_key(key).unwrap_or_else(|| panic!("{key} is a row"))
+}
+
+/// Ackerman and Marley's baseline for every deck.
+fn baseline(_: SubstanceId) -> Sedimentation {
+    Sedimentation::BASELINE
+}
+
+/// `f_sed` `efficiency` at `σ_g` 2 for every deck.
+fn with(efficiency: f64) -> impl Fn(SubstanceId) -> Sedimentation {
+    let sedimentation = Sedimentation::new(efficiency, 2.0).expect("a valid f_sed");
+    move |_| sedimentation
+}
+
+/// The gas's amount of `vapour` left at `pressure`.
+fn left(condensation: &Condensation, vapour: Vapour, pressure: Pascals) -> f64 {
+    condensation
+        .remaining(vapour, pressure)
+        .expect("a finite, positive pressure")
 }
 
 /// The protosolar gas (Lodders 2010, the element registry's), every element heavier than helium
@@ -127,20 +146,14 @@ fn base_bar(condensation: &Condensation, key: &str) -> f64 {
 }
 
 fn jupiter_clouds() -> Condensation {
-    Condensation::derive(
-        jupiter_gas(),
-        jupiter,
-        &jupiter_column(),
-        Sedimentation::BASELINE,
-        1.0,
-    )
-    .expect("Jupiter's clouds")
+    Condensation::derive(jupiter_gas(), jupiter, &jupiter_column(), baseline, 1.0)
+        .expect("Jupiter's clouds")
 }
 
 /// Jupiter's ammonia deck lies at 0.5–1 bar (plan 14; Sudarsky et al. 2000, §6, "~ 0.7 bar"),
 /// under it the ammonium hydrosulphide near 2.3–2.4 bar (Visscher et al. 2006, §3.2.4: "near the
 /// 220 K, 2.4 bar level"; Bjoraker et al. 2018) and the water near 6 bar at three times solar.
-/// As built: NH₃ 0.75 bar, NH₄SH 2.46 bar, H₂O 5.70 bar.
+/// As built: NH₃ 0.75 bar, NH₄SH 2.46 bar, H₂O 5.81 bar.
 #[test]
 fn jupiter_s_ammonia_deck_lies_at_half_to_one_bar() {
     let clouds = jupiter_clouds();
@@ -157,8 +170,8 @@ fn jupiter_s_ammonia_deck_lies_at_half_to_one_bar() {
     assert!(!has_deck(&clouds, "H2S"));
     let sulphide = Vapour::Species(SubstanceKey::new_const("H2S"));
     let (aloft, deep) = (
-        clouds.remaining(sulphide, bar(1.0)),
-        clouds.remaining(sulphide, bar(10.0)),
+        left(&clouds, sulphide, bar(1.0)),
+        left(&clouds, sulphide, bar(10.0)),
     );
     assert!(aloft < 1e-4 * deep, "H2S {aloft} at 1 bar of {deep}");
     // Hottest base first.
@@ -197,12 +210,12 @@ fn uranus_gas() -> Vec<(SubstanceId, f64)> {
 /// their Table 2's 1.4–1.5 bar) and its H₂S layer below 5 bar ("based at p > 5–7 bar"). As built:
 /// CH₄ 1.38 bar, H₂S 5.74 bar.
 #[test]
-fn uranus_s_methane_layer_and_hydrogen_sulphide_below_5_bar() {
+fn an_ice_giant_s_methane_condenses_at_1_to_2_bar_over_its_hydrogen_sulphide() {
     let clouds = Condensation::derive(
         uranus_gas(),
         uranus,
         &column(8.87, 2.64, 1e3, 30.0, 0.05, 50.0),
-        Sedimentation::BASELINE,
+        baseline,
         1.0,
     )
     .expect("Uranus's clouds");
@@ -227,7 +240,7 @@ fn warm_giant_clouds() -> Condensation {
         gas,
         warm_giant,
         &column(25.0, 2.33, 1e3, 1.0, 1e-3, 30.0),
-        Sedimentation::BASELINE,
+        baseline,
         1.0,
     )
     .expect("the giant's clouds")
@@ -254,7 +267,7 @@ fn a_1200_k_giant_has_iron_and_silicates_below_its_photosphere_and_no_ices() {
     assert!(!has_deck(&clouds, "NH3") && !has_deck(&clouds, "H2O"));
     // Forsterite leaves enstatite about half the silicon (Visscher et al. 2010, §5.1).
     let silicon = deck(&clouds, "MgSiO3").vapour_below();
-    let deep = clouds.remaining(Vapour::Element(Element::Si), bar(30.0));
+    let deep = left(&clouds, Vapour::Element(Element::Si), bar(30.0));
     assert!(
         (0.4..0.6).contains(&(silicon / deep)),
         "{silicon} of {deep}"
@@ -280,13 +293,13 @@ fn sub_neptune(p: Pascals) -> Kelvin {
 /// 0.04–0.15 bar, as the lane digitised them). As built: KCl 0.073 bar, ZnS 0.103 bar, Na₂S
 /// 0.27 bar.
 #[test]
-fn kcl_and_zns_on_a_600_k_sub_neptune_at_high_metallicity() {
+fn a_metal_rich_sub_neptune_s_highest_decks_are_kcl_over_zns() {
     let gas = speciated(&protosolar(50.0), 2_800.0, bar(10.0));
     let clouds = Condensation::derive(
         gas,
         sub_neptune,
         &column(8.9, 4.0, 1e3, 50.0, 1e-4, 10.0),
-        Sedimentation::new(0.1, 2.0).expect("Morley et al.'s f_sed"),
+        with(0.1),
         1.0,
     )
     .expect("the sub-Neptune's clouds");
@@ -295,8 +308,8 @@ fn kcl_and_zns_on_a_600_k_sub_neptune_at_high_metallicity() {
         base_bar(&clouds, "ZnS"),
         base_bar(&clouds, "Na2S"),
     );
-    assert!((0.02..0.15).contains(&kcl), "KCl at {kcl} bar");
-    assert!((0.04..0.2).contains(&zns), "ZnS at {zns} bar");
+    assert!((0.02..0.11).contains(&kcl), "KCl at {kcl} bar");
+    assert!((0.04..0.15).contains(&zns), "ZnS at {zns} bar");
     assert!(na2s > zns && zns > kcl, "Na2S {na2s}, ZnS {zns}, KCl {kcl}");
     assert!(
         deck(&clouds, "KCl").extrapolated(),
@@ -324,14 +337,14 @@ fn tio_is_cold_trapped_where_catio3_forms_below_it() {
         gas,
         piecewise(&HOT_JUPITER),
         &column(9.4, 2.33, 1e3, 1.0, 1e-5, 1e3),
-        Sedimentation::BASELINE,
+        baseline,
         1.0,
     )
     .expect("the hot Jupiter's clouds");
     let titanate = deck(&clouds, "CaTiO3");
     let titanium = Vapour::Element(Element::Ti);
-    let deep = clouds.remaining(titanium, bar(1e3));
-    let aloft = clouds.remaining(titanium, bar(1e-4));
+    let deep = left(&clouds, titanium, bar(1e3));
+    let aloft = left(&clouds, titanium, bar(1e-4));
     assert!(titanate.base().value() > bar(1.0).value());
     assert!(aloft < 1e-6 * deep, "Ti {aloft} aloft of {deep}");
     // At 1 mbar the inversion's 1,845 K is above perovskite's condensation for the deep gas's
@@ -349,15 +362,73 @@ fn tio_is_cold_trapped_where_catio3_forms_below_it() {
     )));
 }
 
-/// Every base that crosses lies on its law's saturation curve to 10⁻⁶ in pressure.
+/// The tests' columns, by name, with their metallicities in dex.
+const CASES: [(&str, f64); 7] = [
+    ("Jupiter", 0.477_121_254_719_662_44),
+    ("Ackerman and Marley's Jupiter", 0.477_121_254_719_662_44),
+    ("Uranus", 1.477_121_254_719_662_4),
+    ("a 1,200 K giant", 0.0),
+    ("a 600 K sub-Neptune", 1.698_970_004_336_018_7),
+    ("a hot Jupiter", 0.0),
+    ("a Venus-like air", 0.0),
+];
+
+/// The condensation of the test column `name` (one of [`CASES`]).
+fn case(name: &str) -> Condensation {
+    match name {
+        "Jupiter" => jupiter_clouds(),
+        "Ackerman and Marley's Jupiter" => Condensation::derive(
+            ackerman_and_marley_gas(),
+            jupiter,
+            &jupiter_column(),
+            baseline,
+            1.0,
+        )
+        .expect("the cloud"),
+        "Uranus" => Condensation::derive(
+            uranus_gas(),
+            uranus,
+            &column(8.87, 2.64, 1e3, 30.0, 0.05, 50.0),
+            baseline,
+            1.0,
+        )
+        .expect("Uranus's clouds"),
+        "a 1,200 K giant" => warm_giant_clouds(),
+        "a 600 K sub-Neptune" => Condensation::derive(
+            speciated(&protosolar(50.0), 2_800.0, bar(10.0)),
+            sub_neptune,
+            &column(8.9, 4.0, 1e3, 50.0, 1e-4, 10.0),
+            with(0.1),
+            1.0,
+        )
+        .expect("the sub-Neptune's clouds"),
+        "a hot Jupiter" => Condensation::derive(
+            speciated(&protosolar(1.0), 2_400.0, bar(100.0)),
+            piecewise(&HOT_JUPITER),
+            &column(9.4, 2.33, 1e3, 1.0, 1e-5, 1e3),
+            baseline,
+            0.5,
+        )
+        .expect("the hot Jupiter's clouds"),
+        "a Venus-like air" => venus_clouds(),
+        _ => panic!("{name} is no case"),
+    }
+}
+
+/// The tests' columns: each case's name, its condensation and its metallicity in dex.
+fn cases() -> Vec<(&'static str, Condensation, f64)> {
+    CASES
+        .iter()
+        .map(|&(name, metallicity)| (name, case(name), metallicity))
+        .collect()
+}
+
+/// Every base that crosses lies on its law's saturation curve to 10⁻⁶ in pressure, in every
+/// test column: the vapour laws, the product law, the rows' own curves and the acid's.
 #[test]
 fn each_base_lies_on_its_saturation_curve() {
-    let cases = [
-        (jupiter_clouds(), math::log10(3.0)),
-        (warm_giant_clouds(), 0.0),
-    ];
     let mut checked = 0;
-    for (clouds, metallicity) in &cases {
+    for (name, clouds, metallicity) in &cases() {
         for d in clouds.decks() {
             if d.bound() != DeckBound::Crossing {
                 continue;
@@ -369,83 +440,101 @@ fn each_base_lies_on_its_saturation_curve() {
             let ln_vapour = match law.law() {
                 SaturationLaw::Product { .. } => {
                     let other = law.others()[0].vapour();
-                    let first = clouds.remaining(law.limiting().vapour(), d.base());
-                    let second = clouds.remaining(other, d.base());
+                    let first = left(clouds, law.limiting().vapour(), d.base());
+                    let second = left(clouds, other, d.base());
                     math::ln(first * second * d.base().value() * d.base().value())
                 }
                 _ => math::ln(d.vapour_below() * d.base().value()),
             };
             assert!(
                 (ln_vapour - ln_sat).abs() < 1e-6,
-                "{}: {ln_vapour} against {ln_sat}",
+                "{name} {}: {ln_vapour} against {ln_sat}",
                 d.condensate().substance().key().as_str()
             );
             checked += 1;
         }
     }
-    assert!(checked >= 8, "{checked} bases checked");
+    assert!(checked >= 30, "{checked} bases checked");
 }
 
-/// The traps conserve each element: at every level the gas's amount, with what each deck has drawn
-/// (its condensing vapour's loss times the vapour's ratio, held at what was left), is the deep
-/// gas's, and lies between none and all of it; and at a deck's top the gas keeps no more of its
-/// limiting vapour than the deck leaves. (The vapour itself may rise again above a cold minimum,
-/// where the balance's lofted condensate evaporates into a warmer layer: its total never does.)
+/// The traps conserve what they draw on: at every level, for each vapour a deck draws (an
+/// element's atoms, or a species), the gas's amount with what the decks have drawn of it is the
+/// deep gas's, and lies between none and all of it. Each deck's draws are recomputed here from its
+/// public vapours: its limiting vapour gives what it can of the deck's loss, and each other vapour
+/// its count's share of what that gave, each held at what is left. At a deck's top the gas keeps
+/// no more of its limiting vapour than the deck leaves. (The vapour itself may rise again above a
+/// cold minimum, where the balance's lofted condensate evaporates into a warmer layer.)
 #[test]
 fn the_limiting_element_is_conserved_through_the_traps() {
-    let clouds = warm_giant_clouds();
-    for element in [
-        Element::Mg,
-        Element::Si,
-        Element::Fe,
-        Element::Ti,
-        Element::Al,
-        Element::Ca,
-    ] {
-        let vapour = Vapour::Element(element);
-        let deep = amount(vapour, &clouds.gas);
-        for k in 0..=300 {
-            let p = bar(30.0 * math::exp(-0.05 * f64::from(k)));
-            let left = clouds.remaining(vapour, p);
-            let mut drawn = 0.0;
-            let mut gas = deep;
+    for (name, clouds, _) in &cases() {
+        let mut vapours: Vec<Vapour> = clouds.draws.iter().flatten().map(|&(v, _)| v).collect();
+        vapours.sort();
+        vapours.dedup();
+        let deep: Vec<f64> = vapours.iter().map(|&v| amount(v, &clouds.gas)).collect();
+        let place = |v: Vapour| vapours.iter().position(|w| *w == v).expect("a vapour");
+        let bottom = clouds
+            .decks()
+            .iter()
+            .map(|d| d.base().value())
+            .fold(0.0, f64::max);
+        for k in 0..=400 {
+            let p = Pascals::new(bottom * math::exp(-0.05 * f64::from(k)));
+            let mut gas = deep.clone();
+            let mut drawn = vec![0.0; vapours.len()];
             for (d, draws) in clouds.decks().iter().zip(&clouds.draws) {
                 let loss = if p.value() >= d.base().value() {
                     0.0
                 } else {
-                    (d.vapour_below() - d.vapour_at(p)).max(0.0)
+                    (d.vapour_below() - d.vapour_at(p).expect("a positive pressure")).max(0.0)
                 };
-                for &(v, ratio) in draws {
-                    if v == vapour {
-                        let take = (ratio * loss).min(gas);
-                        gas -= take;
-                        drawn += take;
-                    }
+                let limiting = place(draws[0].0);
+                let given = loss.min(gas[limiting]);
+                gas[limiting] -= given;
+                drawn[limiting] += given;
+                for &(v, ratio) in &draws[1..] {
+                    let at = place(v);
+                    let taken = (ratio * given).min(gas[at]);
+                    gas[at] -= taken;
+                    drawn[at] += taken;
                 }
             }
+            for (at, &vapour) in vapours.iter().enumerate() {
+                let kept = left(clouds, vapour, p);
+                assert!(
+                    (kept + drawn[at] - deep[at]).abs() <= 1e-12 * deep[at],
+                    "{name} {vapour:?} at {} Pa: {kept} + {} against {}",
+                    p.value(),
+                    drawn[at],
+                    deep[at]
+                );
+                assert!(
+                    (0.0..=deep[at] * (1.0 + 1e-12)).contains(&kept),
+                    "{name} {vapour:?}: {kept} of {}",
+                    deep[at]
+                );
+            }
+        }
+        for d in clouds.decks() {
+            let law = law_aloft(d.condensate()).expect("a law");
+            if law.vapour_share() < 1.0 || matches!(law.law(), SaturationLaw::Product { .. }) {
+                continue;
+            }
+            // To rounding in the deep gas's amount, which the gas left is a difference from.
+            let kept = left(clouds, law.limiting().vapour(), d.top());
             assert!(
-                (left + drawn - deep).abs() <= 1e-12 * deep,
-                "{element:?} at {} Pa: {left} + {drawn} against {deep}",
-                p.value()
-            );
-            assert!(
-                (0.0..=deep * (1.0 + 1e-12)).contains(&left),
-                "{element:?}: {left} of {deep}"
+                kept <= d.vapour_above() + 1e-12 * d.vapour_below(),
+                "{name} {}: {kept} above {}",
+                d.condensate().substance().key().as_str(),
+                d.vapour_above()
             );
         }
     }
-    for d in clouds.decks() {
-        let law = law_aloft(d.condensate()).expect("a law");
-        if law.vapour_share() < 1.0 || matches!(law.law(), SaturationLaw::Product { .. }) {
-            continue;
-        }
-        let kept = clouds.remaining(law.limiting().vapour(), d.top());
-        assert!(
-            kept <= d.vapour_above() * (1.0 + 1e-9),
-            "{kept} above {}",
-            d.vapour_above()
-        );
-    }
+}
+
+/// Ackerman and Marley's Jupiter gas: 3 × 10⁻⁵ of ammonia below the cloud (Kunde et al. 1982's
+/// NEB value at 0.6 bar, their §5) in H₂ and He.
+fn ackerman_and_marley_gas() -> Vec<(SubstanceId, f64)> {
+    vec![(row("H2"), 0.864), (row("He"), 0.136), (row("NH3"), 3e-5)]
 }
 
 /// Ackerman and Marley's own Jupiter: 3 × 10⁻⁵ of ammonia below the cloud, `f_sed` 3 and `σ_g` 2,
@@ -456,16 +545,10 @@ fn the_limiting_element_is_conserved_through_the_traps() {
 /// expected to thicken it, their stable layer's L < H not modelled). As built: base 0.53 bar and
 /// 137 K, `r_eff` 44 µm, 105 g m⁻², τ 4.4 by the geometric limit.
 #[test]
-fn ackerman_and_marley_s_jupiter_ammonia_cloud() {
+fn the_ammonia_cloud_s_size_and_column_follow_ackerman_and_marley() {
     let gas = vec![(row("H2"), 0.864), (row("He"), 0.136), (row("NH3"), 3e-5)];
-    let clouds = Condensation::derive(
-        gas,
-        jupiter,
-        &jupiter_column(),
-        Sedimentation::BASELINE,
-        1.0,
-    )
-    .expect("the cloud");
+    let clouds =
+        Condensation::derive(gas, jupiter, &jupiter_column(), baseline, 1.0).expect("the cloud");
     let ammonia = deck(&clouds, "NH3");
     let mode = ammonia.modes()[0];
     let size = mode.size().expect("a size");
@@ -485,10 +568,10 @@ fn ackerman_and_marley_s_jupiter_ammonia_cloud() {
     assert!((1.0..8.0).contains(&tau.value()), "τ {}", tau.value());
     // A larger f_sed rains more out: a thinner column of larger particles.
     let rainier = Condensation::derive(
-        vec![(row("H2"), 0.864), (row("He"), 0.136), (row("NH3"), 3e-5)],
+        ackerman_and_marley_gas(),
         jupiter,
         &jupiter_column(),
-        Sedimentation::new(5.0, 2.0).expect("valid"),
+        with(5.0),
         1.0,
     )
     .expect("the cloud");
@@ -506,20 +589,7 @@ fn ackerman_and_marley_s_jupiter_ammonia_cloud() {
 /// its bulk CO₂ is labelled rather than trapped. Venus's deck itself is P14.T24.g's to assert.
 #[test]
 fn a_venus_like_air_forms_the_acid_deck_and_labels_its_bulk() {
-    let gas = vec![
-        (row("CO2"), 0.965),
-        (row("N2"), 0.035),
-        (row("SO2"), 1.3e-4),
-    ];
-    let venus = piecewise(&[(92.0, 737.0), (1.0, 350.0), (0.1, 260.0), (0.01, 230.0)]);
-    let clouds = Condensation::derive(
-        gas,
-        venus,
-        &column(8.87, 43.4, 1e3, 1.0, 1e-3, 92.0),
-        Sedimentation::BASELINE,
-        1.0,
-    )
-    .expect("Venus's clouds");
+    let clouds = venus_clouds();
     let acid = deck(&clouds, "H2SO4");
     assert_eq!(acid.phase(), CondensedPhase::Liquid);
     assert_same_bits(acid.vapour_below(), 0.06 * 1.3e-4);
@@ -530,129 +600,262 @@ fn a_venus_like_air_forms_the_acid_deck_and_labels_its_bulk() {
     );
 }
 
-/// The loop is pure: the same inputs give the same bits.
+/// A Venus-like air: 96.5% CO₂ and 3.5% N₂ with 130 ppm of SO₂, on a test profile of 737 K at
+/// 92 bar, 350 K at 1 bar, 260 K at 0.1 bar and 230 K at 10 mbar.
+fn venus_clouds() -> Condensation {
+    let gas = vec![
+        (row("CO2"), 0.965),
+        (row("N2"), 0.035),
+        (row("SO2"), 1.3e-4),
+    ];
+    let venus = piecewise(&[(92.0, 737.0), (1.0, 350.0), (0.1, 260.0), (0.01, 230.0)]);
+    Condensation::derive(
+        gas,
+        venus,
+        &column(8.87, 43.4, 1e3, 1.0, 1e-3, 92.0),
+        baseline,
+        1.0,
+    )
+    .expect("Venus's clouds")
+}
+
+/// The loop is pure and its order is its own: every case gives the same condensation, to the
+/// bit, whatever was derived before it, and the gas given in reverse gives the same as in order.
 #[test]
-fn the_condensation_is_the_same_bits_twice() {
-    let (a, b) = (warm_giant_clouds(), warm_giant_clouds());
-    assert_eq!(a.decks().len(), b.decks().len());
-    for (x, y) in a.decks().iter().zip(b.decks()) {
-        assert_eq!(x.condensate(), y.condensate());
-        assert_same_bits(x.base().value(), y.base().value());
-        assert_same_bits(x.column_mass().value(), y.column_mass().value());
-        assert_same_bits(x.vapour_above(), y.vapour_above());
+fn the_condensation_is_independent_of_order() {
+    let names: Vec<&str> = CASES.iter().map(|&(name, _)| name).collect();
+    assert_order_independent(&names, |name| format!("{:?}", case(name)));
+    let forward = jupiter_gas();
+    let mut backward = forward.clone();
+    backward.reverse();
+    let derive = |gas: Vec<(SubstanceId, f64)>| {
+        Condensation::derive(gas, jupiter, &jupiter_column(), baseline, 1.0).expect("the clouds")
+    };
+    assert_eq!(
+        format!("{:?}", derive(forward)),
+        format!("{:?}", derive(backward))
+    );
+}
+
+/// A deck takes its own sedimentation: a larger `f_sed` on the ammonia alone thins its deck and
+/// leaves the others as they were.
+#[test]
+fn each_deck_takes_its_own_sedimentation() {
+    let ammonia = row("NH3");
+    let rainier = |id: SubstanceId| {
+        let efficiency = if id == ammonia { 6.0 } else { 3.0 };
+        Sedimentation::new(efficiency, 2.0).expect("valid")
+    };
+    let base = jupiter_clouds();
+    let varied = Condensation::derive(jupiter_gas(), jupiter, &jupiter_column(), rainier, 1.0)
+        .expect("the clouds");
+    let (thin, thick) = (deck(&varied, "NH3"), deck(&base, "NH3"));
+    assert!(thin.column_mass().value() < thick.column_mass().value());
+    assert_same_bits(thin.sedimentation(), 6.0);
+    assert_same_bits(thin.modes()[0].profile().exponent(), 6.0);
+    for key in ["H2O", "NH4SH"] {
+        assert_same_bits(
+            deck(&varied, key).column_mass().value(),
+            deck(&base, key).column_mass().value(),
+        );
     }
+}
+
+/// A gas whose most abundant species has no collision constants gives its modes no size, labelled,
+/// and its decks their column all the same: ammonia in krypton.
+#[test]
+fn a_background_without_collision_constants_gives_no_size() {
+    let gas = vec![(row("Kr"), 0.9), (row("He"), 0.0997), (row("NH3"), 3e-4)];
+    let clouds =
+        Condensation::derive(gas, jupiter, &jupiter_column(), baseline, 1.0).expect("the clouds");
+    let ammonia = deck(&clouds, "NH3");
+    assert!(ammonia.column_mass().value() > 0.0);
+    assert_eq!(
+        ammonia.modes()[0].size(),
+        Err(SizeModeError::NoCollisionConstants {
+            key: SubstanceKey::new_const("Kr")
+        })
+    );
+}
+
+/// A mode built for a rule takes its τ(550) as the loop's do, and its inputs are checked.
+#[test]
+fn a_rule_s_mode_takes_its_optics_as_the_loop_s() {
+    let clouds = jupiter_clouds();
+    let ammonia = deck(&clouds, "NH3");
+    let loop_mode = ammonia.modes()[0];
+    let rebuilt = Mode::new(
+        loop_mode.material(),
+        loop_mode.phase(),
+        loop_mode.deck(),
+        loop_mode.size().expect("a size"),
+        loop_mode.column_mass(),
+        loop_mode.profile(),
+        loop_mode.coverage(),
+        ammonia.base_temperature(),
+    )
+    .expect("a mode");
+    assert_eq!(rebuilt, loop_mode);
+    let well_mixed = ModeProfile::new(bar(0.7), bar(0.3), 0.0).expect("a profile");
+    assert_same_bits(well_mixed.exponent(), 0.0);
+    assert!(matches!(
+        ModeProfile::new(bar(0.3), bar(0.7), 0.0),
+        Err(BuildModeError::Profile { .. })
+    ));
+    assert!(matches!(
+        ModeProfile::new(bar(0.7), bar(0.3), -1.0),
+        Err(BuildModeError::Profile { .. })
+    ));
+    let size = loop_mode.size().expect("a size");
+    let mass = KilogramsPerSquareMetre::new(-1.0);
+    let bad = Mode::new(
+        loop_mode.material(),
+        CondensedPhase::Solid,
+        loop_mode.deck(),
+        size,
+        mass,
+        well_mixed,
+        1.0,
+        Kelvin::new(150.0),
+    );
+    assert_eq!(bad, Err(BuildModeError::ColumnMass { column_mass: mass }));
+}
+
+/// Nothing on the record reaches the loop or the laws aloft before P14.T54.b wires them
+/// (decision-bump-plan-after-22 §1.3): no code of the crate's `src/` outside the two modules and
+/// their tests names them, comments and the modules' own declarations left out. **P14.T54.b
+/// deletes this tripwire** with `substance::aerosol`'s.
+#[test]
+fn nothing_on_the_record_calls_the_condensation_yet() {
+    fn walk(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+        let mut entries: Vec<_> = std::fs::read_dir(dir)
+            .expect("a source directory")
+            .map(|e| e.expect("an entry").path())
+            .collect();
+        entries.sort();
+        for path in entries {
+            if path.is_dir() {
+                walk(&path, files);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                files.push(path);
+            }
+        }
+    }
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    walk(&src, &mut files);
+    assert!(files.len() > 100, "the walk found the crate's sources");
+    let own = ["planetary/chem/condense", "substance/aloft"];
+    let patterns = [
+        "chem::condense",
+        "condense::",
+        "substance::aloft",
+        "aloft::",
+    ];
+    let declarations = ["pub mod condense;", "pub mod aloft;"];
+    let mut found = Vec::new();
+    for path in &files {
+        let relative = path
+            .strip_prefix(&src)
+            .expect("under src")
+            .to_string_lossy()
+            .replace('\\', "/");
+        if own.iter().any(|o| relative.starts_with(o)) {
+            continue;
+        }
+        let text = std::fs::read_to_string(path).expect("a readable source");
+        for (n, line) in text.lines().enumerate() {
+            let code = line.trim_start();
+            if code.starts_with("//") || declarations.contains(&code) {
+                continue;
+            }
+            if patterns.iter().any(|p| code.contains(p)) {
+                found.push(format!("{relative}:{}: {code}", n + 1));
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "nothing on the record calls them before P14.T54.b: {found:#?}"
+    );
 }
 
 /// Its inputs are checked.
 #[test]
 fn the_inputs_are_checked() {
     let h2 = row("H2");
-    let bad = Condensation::derive(
-        [(h2, f64::NAN)],
-        jupiter,
-        &jupiter_column(),
-        Sedimentation::BASELINE,
-        1.0,
-    );
+    let column = jupiter_column();
+    let bad = Condensation::derive([(h2, f64::NAN)], jupiter, &column, baseline, 1.0);
     assert!(matches!(bad, Err(DeriveCondensationError::Amount { .. })));
-    let twice = Condensation::derive(
-        [(h2, 0.5), (h2, 0.5)],
-        jupiter,
-        &jupiter_column(),
-        Sedimentation::BASELINE,
-        1.0,
-    );
+    let twice = Condensation::derive([(h2, 0.5), (h2, 0.5)], jupiter, &column, baseline, 1.0);
     assert_eq!(twice, Err(DeriveCondensationError::Repeated { id: h2 }));
-    let cover = Condensation::derive(
-        [(h2, 1.0)],
-        jupiter,
-        &jupiter_column(),
-        Sedimentation::BASELINE,
-        1.5,
-    );
+    let cover = Condensation::derive([(h2, 1.0)], jupiter, &column, baseline, 1.5);
     assert!(matches!(
         cover,
         Err(DeriveCondensationError::Coverage { .. })
     ));
     let mut inverted = jupiter_column();
     inverted.top = bar(1e3);
-    let column = Condensation::derive(
-        [(h2, 1.0)],
-        jupiter,
-        &inverted,
-        Sedimentation::BASELINE,
-        1.0,
-    );
+    let refused = Condensation::derive([(h2, 1.0)], jupiter, &inverted, baseline, 1.0);
     assert!(matches!(
-        column,
+        refused,
         Err(DeriveCondensationError::Column { field: "top", .. })
     ));
-    let cold = Condensation::derive(
-        [(h2, 1.0)],
-        |_| Kelvin::new(0.0),
-        &jupiter_column(),
-        Sedimentation::BASELINE,
-        1.0,
-    );
+    let cold = Condensation::derive([(h2, 1.0)], |_| Kelvin::new(0.0), &column, baseline, 1.0);
     assert!(matches!(cold, Err(DeriveCondensationError::Profile { .. })));
-    assert!(Sedimentation::new(0.0, 2.0).is_err());
-    assert!(Sedimentation::new(3.0, 1.0).is_err());
+    assert_eq!(
+        Sedimentation::new(0.0, 2.0),
+        Err(BuildSedimentationError::Efficiency { efficiency: 0.0 })
+    );
+    for width in [1.0, 2.5, f64::NAN] {
+        assert!(matches!(
+            Sedimentation::new(3.0, width),
+            Err(BuildSedimentationError::Width { .. })
+        ));
+    }
+    let clouds = jupiter_clouds();
+    let ammonia = Vapour::Species(SubstanceKey::new_const("NH3"));
+    assert_eq!(clouds.remaining(ammonia, Pascals::new(f64::NAN)), None);
+    assert_eq!(clouds.remaining(ammonia, Pascals::new(0.0)), None);
+    assert_eq!(deck(&clouds, "NH3").vapour_at(Pascals::new(-1.0)), None);
 }
 
-/// The decks of the tests' columns are pinned: each deck's base, top, temperature, vapours,
-/// column, size and τ(550), in placing order, and each row not formed.
+/// The laws aloft and the decks of the tests' columns are pinned: each law's condensation
+/// temperature at three pressures, and each deck's base, top, temperature, vapours, the gas's
+/// vapour left at its base and top, its column, size and τ(550), in placing order, and each row
+/// not formed.
 #[test]
 fn the_condensation_is_pinned() {
     use crate::GENERATOR_VERSION;
+    use crate::substance::aloft::laws_aloft;
     use hyperion_testkit::golden;
     use hyperion_testkit::golden::GoldenWriter;
 
     let mut w = GoldenWriter::new();
     w.header(GENERATOR_VERSION.get());
-    let uranus_clouds = Condensation::derive(
-        uranus_gas(),
-        uranus,
-        &column(8.87, 2.64, 1e3, 30.0, 0.05, 50.0),
-        Sedimentation::BASELINE,
-        1.0,
-    )
-    .expect("Uranus's clouds");
-    let sub_neptune_clouds = Condensation::derive(
-        speciated(&protosolar(50.0), 2_800.0, bar(10.0)),
-        sub_neptune,
-        &column(8.9, 4.0, 1e3, 50.0, 1e-4, 10.0),
-        Sedimentation::new(0.1, 2.0).expect("valid"),
-        1.0,
-    )
-    .expect("the sub-Neptune's clouds");
-    let hot_jupiter_clouds = Condensation::derive(
-        speciated(&protosolar(1.0), 2_400.0, bar(100.0)),
-        piecewise(&HOT_JUPITER),
-        &column(9.4, 2.33, 1e3, 1.0, 1e-5, 1e3),
-        Sedimentation::BASELINE,
-        0.5,
-    )
-    .expect("the hot Jupiter's clouds");
-    let ackerman_and_marley = Condensation::derive(
-        vec![(row("H2"), 0.864), (row("He"), 0.136), (row("NH3"), 3e-5)],
-        jupiter,
-        &jupiter_column(),
-        Sedimentation::BASELINE,
-        1.0,
-    )
-    .expect("the cloud");
-    let cases = [
-        ("Jupiter", jupiter_clouds()),
-        ("Ackerman and Marley's Jupiter", ackerman_and_marley),
-        ("Uranus", uranus_clouds),
-        ("a 1,200 K giant", warm_giant_clouds()),
-        ("a 600 K sub-Neptune", sub_neptune_clouds),
-        ("a hot Jupiter", hot_jupiter_clouds),
-    ];
-    for (name, clouds) in &cases {
+    for (id, law) in laws_aloft() {
+        let key = id.substance().key();
+        let key = key.as_str();
+        let vapour = law.reference().map_or(1e-6, |r| r.solar_mole_fraction);
+        w.line(&format!(
+            "{key} law: {:?}, limiting {:?}, others {:?}, share {}",
+            law.law(),
+            law.limiting(),
+            law.others(),
+            law.vapour_share()
+        ));
+        for p in [1e-3, 1.0, 100.0] {
+            match law.condensation_temperature(bar(p), vapour, 0.0) {
+                Some(t) => w.f64(&format!("{key} law at {p} bar"), t.value()),
+                None => w.line(&format!("{key} law at {p} bar: none")),
+            }
+        }
+    }
+    for (name, clouds, _) in &cases() {
         for d in clouds.decks() {
             let key = d.condensate().substance().key();
             let key = key.as_str();
+            let law = law_aloft(d.condensate()).expect("a law");
             w.line(&format!("{name} {key}: {:?} {:?}", d.bound(), d.phase()));
             w.f64(&format!("{name} {key} base"), d.base().value());
             w.f64(
@@ -662,6 +865,12 @@ fn the_condensation_is_pinned() {
             w.f64(&format!("{name} {key} top"), d.top().value());
             w.f64(&format!("{name} {key} vapour below"), d.vapour_below());
             w.f64(&format!("{name} {key} vapour above"), d.vapour_above());
+            for (at, p) in [("base", d.base()), ("top", d.top())] {
+                w.f64(
+                    &format!("{name} {key} gas left at its {at}"),
+                    left(clouds, law.limiting().vapour(), p),
+                );
+            }
             w.f64(
                 &format!("{name} {key} column mass"),
                 d.column_mass().value(),

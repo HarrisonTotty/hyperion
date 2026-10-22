@@ -25387,3 +25387,152 @@ the_rayleigh_floor_lifts`; the two measurements by name with `-- --ignored --exa
   - _Seiff et al.'s 166.1 K at 1 bar_ (Jupiter's test profile) was not read in the source; Seiff
     et al.'s abstract gives 429 K at 22 bar against VMS10's 427.7 K (an exponent of 0.307 against
     0.306).
+- **Deviations in P14.T49.b, as built: step 2, part 2, its last piece, the laws aloft (`p14-condense`,
+  under P14.T52.c, 2026-10-22; main's ruling).** T49.b's last piece was never built. Main ruled
+  that T52.c's lane builds it, in `substance/aloft.rs`, under P14.T52.c's ID.
+  `GENERATOR_VERSION` stays 23, and nothing on the record reads the laws before P14.T54.b.
+  - _The research_ is p14-registry's for this piece (2026-10-14). It is kept outside the
+    repository: its data, its notes, its checks and 18 papers, each with its SHA-256. A science
+    check of the laws, with T52.c's, found no blockers, and its record items are in the docs.
+  - _The forms._ There are fourteen closed forms:
+    - eleven vapour laws in the plan's form, log₁₀ p = A − B ÷ T − C [M] − D log₁₀ P_T, for KCl,
+      ZnS, Na₂S, MnS, Cr, Fe, MgSiO₃, Mg₂SiO₄, SiO₂, Al₂O₃ and CaTiO₃;
+    - TiO₂'s law (Batalha et al. 2025, Table 2);
+    - NH₄SH's product law, log₁₀(p_NH₃ p_H₂S) = 14.89 − 4732 ÷ T (Kelley 1937, via Lodders and
+      Fegley 2024), a form the plan does not name;
+    - H₂SO₄'s Kulmala–Laaksonen curve. It is in atmospheres, as Vehkamäki et al. 2002, eq. 8,
+      write it; that settles T24.g's "check at build". Its vapour is T24.g's ε_v = 0.06 of the
+      SO₂, and the deck's assertion stays T24.g's.
+  - _Each law_ carries its condensate's reaction as `Reactant`s. The limiting vapour is an
+    element's whole gas or one species, and the others go with their counts. Each law also states
+    what it was fitted over (metallicity, pressure and temperature), and the sources of every
+    coefficient by equation number.
+  - _The sources beyond the plan's four:_
+    - Morley et al. 2024 (Diamondback), Batalha et al. 2025 (Virga), Grant et al. 2023 and Gao
+      et al. 2020 give the laws;
+    - Visscher et al. 2006 and 2010 and Wakeford et al. 2017 give the curves they are checked
+      against;
+    - Al₂O₃ takes Gao et al.'s linear law, not Wakeford et al.'s quadratic.
+  - _The 10 K test_ holds for the twelve laws with a paper's curve; the largest miss is Fe's,
+    +6.2 K. NH₄SH holds Lodders and Fegley 2024's Table 2 within 0.5 K over 10⁻⁴–10² bar. The acid
+    holds its six check values. TiO₂ and the rows' own curves have no paper's curve to check.
+  - _The fourteen phase-diagram rows_ are laws through their own saturation curves (lean c). The
+    closed forms of Lodders and Fegley 2002 and Lewis 1969 for water and ammonia could not be
+    read.
+  - _Limiting elements:_ MgSiO₃'s is Si, as SiO, after forsterite takes the Mg (Diamondback's
+    choice; lean b).
+  - _Not modelled_, a closed set for the composition audit: NaCl, FeS and graphite, each with its
+    reason, and S₈, T52.b's photochemical haze. Graphite means a giant richer in carbon than
+    oxygen forms no graphite deck, though T52.a accepts C/O above 1.
+  - _Displaced:_ SiO₂ by MgSiO₃ where the gas holds magnesium (Visscher et al. 2010, §5.1), and
+    TiO₂ by CaTiO₃ where it holds calcium.
+  - _Approximations, recorded:_
+    - At 1 bar, corundum stands in for hibonite and perovskite for Ca₄Ti₃O₁₀. Each is within
+      10 K, but is the first condensate only below about 0.1 and 0.03 bar.
+    - Kelley's NH₄SH data span 277–318 K, so every planetary base, at 150–250 K, extrapolates it
+      in temperature.
+  - _Golden:_ there is no `[aloft]` section in `registry.golden`, because V3.6's file order puts
+    P14.T52.a's commit B first there. The laws are pinned in T52.c's `planetary/condense` instead,
+    each by its condensation temperature at 10⁻³, 1 and 100 bar and its reactants.
+  - _Molten S₈'s measured liquid density_, the piece's third item, stays out of this lane (main)
+    and is still open.
+- **Deviations in P14.T52.c, as built (`p14-condense`, 2026-10-22).** `GENERATOR_VERSION` stays
+  at 23. The module is pure: nothing on the record calls it until P14.T54.b. Its new golden,
+  `planetary/condense`, is at header 23, an extension. It adds no draw and no domain tag.
+  - _The interface_ (its first commit, so that T24.c with T24.g can start on it):
+    `Condensation::derive(gas, profile, &MixingColumn, sedimentation, coverage)`.
+    - `gas` is the deep gas's mole fractions: T52.a's or T52.b's at a level the caller picks,
+      `HeldAtFloor` included, or T24.a's at a surface's ground. The loop sorts it into registry
+      order, so its sums do not depend on the order given.
+    - `profile` is T(p) as a closure (lean a). It is read at the scan levels, and as their power
+      law between them. The loop never calls T52.a per layer (decision-p14-t52a-rows).
+    - `MixingColumn` is T52.b's: gravity, molar mass, a constant K_zz, metallicity and range.
+    - `sedimentation` is a `Sedimentation` (f_sed and σ_g, AM01's baseline 3 and 2) for each
+      deck's condensate, so that T52.d and T24.c can state f_sed by class (the serve-gate item
+      below). σ_g is held to 1.25–2, the log-normal variances T49.e's grid holds.
+    - `coverage` is the caller's: T51.b's cloud fraction, or 1 for an envelope.
+  - _What it returns._ `Deck`s, hottest base first. Each has:
+    - its base and its bound (`Crossing`, or `Bottom` for a vapour already saturated at the
+      column's bottom, whose condensate from below is not counted);
+    - its top, where its condensate falls under 10⁻⁶ of the vapour below;
+    - its vapour below and above (the cold trap's);
+    - its column mass, f_sed and `extrapolated`;
+    - one `Mode`.
+  - _A mode_ carries its material, phase, deck, log-normal size, column mass, τ(550), coverage,
+    and a `ModeProfile` (base, top, exponent). `Mode::new` and `ModeProfile::new` build a rule's
+    modes, such as T24.g's well-mixed acid modes, with τ(550) by the same optics.
+  - _The gas above:_ the loop also returns `not_formed()` (`BulkGas`, `Displaced`) and
+    `remaining(vapour, p)`, the gas left above the decks. "Whose range meets the profile" is the
+    `extrapolated` flag, not a filter.
+  - _The base:_ a scan in steps of 0.05 in ln p, then 40 Newton steps kept in their bracket. Each
+    base lies on its law's curve to 10⁻⁶ in every test column.
+  - _The traps_ (lean b):
+    - Each deck draws its limiting vapour's loss, and its other vapours their stoichiometric share
+      of what that gave, each held at what is left. An element is therefore conserved to rounding.
+    - Enstatite's mass counts its formula's Mg, which forsterite has already taken, so the
+      silicates' total is about 20% above stoichiometric at solar Mg/Si (Diamondback's and Virga's
+      convention).
+    - A law needs every vapour of its reaction in the gas.
+    - Decks below the column are ordered by the temperature at which they would condense at its
+      bottom.
+    - A condensable holding at least half the gas is `NotFormed::BulkGas` (lean c).
+  - _The column, the size and τ_ (lean e):
+    - AM01's eq. 4 balance with L = H (as Diamondback and Virga take it). Their stable layers'
+      L < H is not modelled.
+    - The log-normal's r_g follows their eq. 13, with α fitted over [r_w, σ_g r_w]. That interval
+      reproduces their Jupiter numbers; their text says [r_w ÷ σ_g, r_w].
+    - The fall speed is Ohno and Okuzumi 2017's eq. 23, with Davies's slip factor.
+    - The viscosity is Chapman–Enskog's, with Neufeld et al. 1972's collision integral, in place
+      of AM01's Rosner form, which overstates it for air that is not H₂ (the science check's
+      should-fix). It uses Svehla 1962's Lennard-Jones constants for a closed set of eleven
+      background gases.
+    - A deck keeps its base's phase and the grain density at its base's temperature.
+    - τ(550) is T49.e's, or AM01's geometric scatterers above the table's grid, labelled.
+  - _The acid_ (lean d; V4.2): the loop finds only H₂SO₄'s base. T24.g's top, σ_d τ, modes and
+    vapour above replace the loop's.
+  - _Not this loop's:_ the surface's coupled condensables are P14.T51.g's (main's R2,
+    2026-10-22). Titan's ethane cloud and seas are P14.T55.m's: no air carries C₂H₆, since
+    nothing produces it, so no ethane deck forms.
+  - _Files beyond the plan's list:_
+    - `substance/aloft.rs` and its tests;
+    - `substance/mod.rs` and `chem/mod.rs`;
+    - `crates/hyperion-sim/clippy.toml`, for the formulas' doc identifiers;
+    - `substance/aerosol.rs`, whose tripwire's `HELD` list names the loop, a pure module. T54.b
+      deletes it with the tripwire.
+  - _Its own tripwire_, `nothing_on_the_record_calls_the_condensation_yet`, holds that nothing
+    else names the two modules.
+  - _Tests_ (`cargo test -p hyperion-sim planetary::chem::condense`):
+    - Jupiter's NH₃ deck at 0.75 bar, above NH₄SH at 2.46 bar and H₂O at 5.81 bar;
+    - Uranus's CH₄ at 1.38 bar and H₂S at 5.74 bar;
+    - a 1,200 K giant's Fe at 2.22 bar, Mg₂SiO₄ at 1.60 and MgSiO₃ at 1.26, all below its
+      photosphere at 0.475 bar, and no NH₃ or H₂O;
+    - a GJ 1214b-like sub-Neptune at 50× solar: KCl at 0.073 and ZnS at 0.103 bar, Na₂S deeper
+      (Morley et al. 2013's Fig. 1, digitised by the lane);
+    - TiO cold-trapped under CaTiO₃ through a Spiegel et al. 2009-like inversion;
+    - a Venus-like air's acid deck, which is stated only;
+    - bases on their curves, conservation through the traps, order independence, per-deck f_sed,
+      the inputs' checks, and the pinned golden.
+  - _Deferred: τ(550) is not yet fit to serve_ (main, 2026-10-22; on 24's serve-gate list as a
+    must-fix).
+    - From the deep vapour at f_sed 3, Jupiter's NH₃ deck has τ 68 (1.64 kg m⁻²), against about
+      2–10 observed. Uranus's CH₄ deck has τ 2.2 × 10⁵ from 4% methane (773 kg m⁻²), which would
+      be physically absurd once served.
+    - The cross-check against AM01's own Jupiter, 3 × 10⁻⁵ NH₃ at f_sed 3: τ 4.4 and
+      105 g m⁻² here, against their 2.1 and 52. The rest is their stable layer's L < H.
+    - The cause is the model's inputs, the vapour below each deck and f_sed, not the loop.
+    - T52.d and T24.c state f_sed, K and the deep humidity by class, and T54.b serves no deck
+      until its τ is plausible.
+    - With this goes the radius's shape conversion. The loop's r_eff is AM01's settling radius.
+      T24.c's volume-to-area radius r = Ψ r_V by shape class (Ψ 0.71 for `nonSphericalMineral`)
+      is not applied, so the silicates' τ is low by about 1 ÷ Ψ until T24.c converts it.
+  - _Deferred: missing grain densities_ (P14.T49.n's scope, main). Liquid Fe, Mg₂SiO₄, MgSiO₃,
+    Al₂O₃ and CaTiO₃, and solid H₂S, have none. Those decks carry a labelled `NoDensity` mode,
+    with its column mass but no size or τ: the 1,200 K giant's liquid iron, the sub-Neptune's
+    melts, and Uranus's H₂S.
+  - _Deferred: one K_zz per column and no shape classes on the registry_, each the caller's or
+    T24.c's.
+  - _Cost:_ unmeasured on a quiet machine, for P14.T33.a's `body_detail`. The tests' seven
+    columns derive in tens of milliseconds unoptimised.
+  - _Landing:_ after P14.T52.a's commit B and P14.T52.b, whose `Network` and `MixingColumn` it
+    reads. Then the golden is re-blessed by its exact name, and the commits are picked as a linear
+    series.

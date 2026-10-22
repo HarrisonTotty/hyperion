@@ -4,9 +4,9 @@
 //!
 //! # The loop
 //!
-//! [`Condensation::derive`] walks every registry row with a law aloft
-//! ([`laws_aloft`]: the closed forms of `substance::aloft` and every row's own saturation curve)
-//! whose limiting vapour the gas holds:
+//! [`Condensation::derive`] walks every registry row with a law aloft ([`laws_aloft`]: the closed
+//! forms of [`substance::aloft`](crate::substance::aloft) and every row's own saturation curve)
+//! whose reaction's vapours the gas holds:
 //!
 //! - **The base** of each is the deepest level, going up from the column's bottom, at which its
 //!   vapour reaches saturation along the profile: x P = `p_sat`(T(p), P) for the vapour's mole
@@ -15,17 +15,19 @@
 //!   in ln p, each kept inside its bracket (a step that leaves it bisects instead), so that the
 //!   base lies on its saturation curve to 10⁻⁶ in pressure. A vapour already saturated at the
 //!   bottom has its base there ([`DeckBound::Bottom`]); one that never saturates forms no deck.
-//! - **The cold traps** take the decks hottest base first, ties by [`SubstanceId`] (Spiegel,
+//! - **The cold traps** take the decks hottest base first, ties by [`SubstanceId`], a deck below
+//!   the column by the temperature it would condense at the column's bottom (Spiegel,
 //!   Silverio and Burrows 2009, ApJ 699, 1487: "Without macroscopic mixing, fTiO = 0 at the top of
 //!   the atmosphere"). Each deck's vapour above its base is what its column leaves (below), and
 //!   the gas loses the rest of it, and of the reaction's other vapours in proportion (their
-//!   [`Reactant`](crate::substance::aloft::Reactant) counts), each held at no more than the gas has left of it. Every later base is
-//!   found in the gas the earlier decks leave: forsterite takes the magnesium and half the silicon,
-//!   so that enstatite condenses from the silicon it leaves, about 29 ppm at solar (Morley et al.
-//!   2024; Batalha et al. 2025), and ammonium hydrosulphide takes the sulphur below Jupiter's
-//!   ammonia deck. An element is conserved through the traps to rounding: what the gas holds at
-//!   a level plus what the decks below have taken is what the deep gas held
-//!   ([`Condensation::remaining`]).
+//!   [`Reactant`](crate::substance::aloft::Reactant) counts), each held at no more than the gas
+//!   has left of it. Every later base is found in the gas the earlier decks leave: forsterite
+//!   takes the magnesium and half the silicon, so that enstatite condenses from the silicon it
+//!   leaves, about 29 ppm at solar (Morley et al. 2024; Batalha et al. 2025), and ammonium
+//!   hydrosulphide takes the sulphur below Jupiter's ammonia deck. An element is conserved
+//!   through the traps to rounding: what the gas holds at a level plus what the decks below have
+//!   taken is what the deep gas held ([`Condensation::remaining`]). A law whose reaction needs a
+//!   vapour the gas lacks (perovskite without calcium) forms no deck.
 //! - **The column** of each deck is Ackerman and Marley's (2001, ApJ 556, 872, eq. 4) balance of
 //!   mixing against sedimentation, −K ∂`q_t`/∂z − `f_sed` w* `q_c` = 0, with w* = K ÷ L and the
 //!   mixing length L the scale height H (as Morley et al. 2024's Diamondback and Batalha et al.
@@ -83,8 +85,9 @@
 //! - **The bulk gas** ([`NotFormed::BulkGas`]): a condensable that holds at least
 //!   [`BULK_BOUND`] of the gas (a Mars's or a Venus's CO₂, a Triton's N₂) sets the profile by its
 //!   own condensation, which the trace balance here does not; it is labelled, never trapped.
-//! - **A displaced law** ([`NotFormed::Displaced`]): quartz, where enstatite can take its silicon,
-//!   and titanium dioxide, where perovskite takes its titanium (`substance::aloft`).
+//! - **A displaced law** ([`NotFormed::Displaced`]): quartz, where enstatite can take its silicon
+//!   (where the gas holds magnesium), and titanium dioxide, where perovskite takes its titanium
+//!   (where it holds calcium; [`substance::aloft`](crate::substance::aloft)).
 //! - **One phase a deck**, its base's: a deck that rises through its condensate's melting point
 //!   (a water deck through 273 K) keeps the phase it formed in, and the grain density of its
 //!   base's temperature.
@@ -99,7 +102,7 @@
 //!   Ackerman and Marley's K from the convective flux (their eq. 5) is the caller's to state.
 //! - **The co-reactants' own depletion** in a law's metallicity term: the papers' C \[M\] assumes
 //!   every co-reactant enriched uniformly, which a deck below (forsterite's oxygen) breaks a little
-//!   (`substance::aloft`).
+//!   ([`substance::aloft`](crate::substance::aloft)).
 //! - **Enstatite's magnesium**: forsterite takes the magnesium above its base, so enstatite's draw
 //!   of it is held at what is left, about none, while its mass counts its formula's (Diamondback's
 //!   and Virga's convention): the silicates' total is about 20% above their stoichiometric mass at
@@ -127,7 +130,8 @@ use std::fmt;
 use super::quench::MixingColumn;
 use crate::math;
 use crate::substance::aerosol::{
-    ExtinctionBasis, ResolveAerosolError, SizeDistribution, aerosol_optics, density_variant,
+    BuildSizeDistributionError, ExtinctionBasis, ResolveAerosolError, SizeDistribution,
+    aerosol_optics, density_variant,
 };
 use crate::substance::aloft::{LawAloft, SaturationLaw, Vapour, laws_aloft};
 use crate::substance::{CondensedPhase, MOLAR_GAS_CONSTANT, SubstanceId, SubstanceKey};
@@ -137,6 +141,10 @@ use crate::units::{Kelvin, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metr
 /// The scan's step in ln p: the column is evaluated at levels this far apart, from its bottom to
 /// its top, where each base is bracketed and each deck's vapour is kept.
 pub const SCAN_STEP_LN_P: f64 = 0.05;
+
+/// The most scan levels a column takes: a column deeper than [`SCAN_STEP_LN_P`] times this in
+/// ln p (about 435 decades of pressure) is scanned in longer steps.
+const MAX_LEVELS: usize = 20_000;
 
 /// The integration steps of a deck's column to each scan step.
 pub const SUBSTEPS: u32 = 5;
@@ -189,17 +197,23 @@ impl Sedimentation {
     ///
     /// # Errors
     ///
-    /// [`BuildSedimentationError`] unless `f_sed` is finite and positive and `σ_g` finite and
-    /// above 1.
+    /// [`BuildSedimentationError`] unless `f_sed` is finite and positive and `σ_g` lies within
+    /// [`WIDTH_RANGE`](Self::WIDTH_RANGE).
     pub fn new(efficiency: f64, width: f64) -> Result<Self, BuildSedimentationError> {
         if !(efficiency.is_finite() && efficiency > 0.0) {
             return Err(BuildSedimentationError::Efficiency { efficiency });
         }
-        if !(width.is_finite() && width > 1.0) {
+        let (narrowest, widest) = Self::WIDTH_RANGE;
+        if !(narrowest..=widest).contains(&width) {
             return Err(BuildSedimentationError::Width { width });
         }
         Ok(Self { efficiency, width })
     }
+
+    /// The widths `σ_g` a deck may take: those whose effective variance, exp(ln²`σ_g`) − 1, lies
+    /// within P14.T49.e's log-normal grid, 0.04–0.65 (0.051 at 1.25, 0.617 at 2), so that its
+    /// τ(550) is the table's.
+    pub const WIDTH_RANGE: (f64, f64) = (1.25, 2.0);
 
     /// `f_sed`, the ratio of the mass-weighted sedimentation velocity to w*.
     #[must_use]
@@ -222,7 +236,7 @@ pub enum BuildSedimentationError {
         /// The value given.
         efficiency: f64,
     },
-    /// `σ_g` is not finite and above 1.
+    /// `σ_g` is outside [`Sedimentation::WIDTH_RANGE`].
     Width {
         /// The value given.
         width: f64,
@@ -239,7 +253,7 @@ impl fmt::Display for BuildSedimentationError {
                 )
             }
             Self::Width { width } => {
-                write!(f, "log-normal width {width} is not finite and above 1")
+                write!(f, "log-normal width {width} is outside 1.25 to 2")
             }
         }
     }
@@ -281,6 +295,7 @@ pub const COLLISION_CONSTANTS: [CollisionConstants; 11] = [
 ];
 
 /// The constants of `key`, of diameter `angstroms` Å and well depth `well_k` kelvin.
+#[must_use]
 const fn collision(key: &'static str, angstroms: f64, well_k: f64) -> CollisionConstants {
     CollisionConstants {
         key,
@@ -300,7 +315,7 @@ pub enum DeckBound {
 }
 
 /// Why a row with a law aloft whose vapour the gas holds forms no deck.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum NotFormed {
     /// The vapour holds at least [`BULK_BOUND`] of the gas: its condensation is the profile's,
     /// not modelled here.
@@ -314,7 +329,7 @@ pub enum NotFormed {
 }
 
 /// What a mode's τ(550) rests on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum OpticalDepthBasis {
     /// P14.T49.e's mass extinction, on its basis.
     Table(ExtinctionBasis),
@@ -364,6 +379,8 @@ pub enum SizeModeError {
     },
     /// The deck's column holds no condensate at any scan level (a deck thinner than a step).
     NoCondensate,
+    /// The levels' sizes give no log-normal: an effective radius that is not finite and positive.
+    Distribution(BuildSizeDistributionError),
 }
 
 impl fmt::Display for SizeModeError {
@@ -386,11 +403,19 @@ impl fmt::Display for SizeModeError {
                 )
             }
             Self::NoCondensate => write!(f, "the deck holds no condensate at any scan level"),
+            Self::Distribution(error) => write!(f, "the mode's log-normal: {error}"),
         }
     }
 }
 
-impl Error for SizeModeError {}
+impl Error for SizeModeError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Distribution(error) => Some(error),
+            Self::NoDensity { .. } | Self::NoCollisionConstants { .. } | Self::NoCondensate => None,
+        }
+    }
+}
 
 /// A mode's τ(550) could not be found.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -419,8 +444,122 @@ impl Error for ResolveOpticalDepthError {
     }
 }
 
-/// A deck's particles: one population of one material in one phase, with its size, its column
-/// and its τ(550), the shape P14.T24.c's aerosol inventory carries.
+/// A mode's vertical profile (P14.T24.c): its base and its top, between which its mixing ratio
+/// goes as (p ÷ `p_base`)^f, f its exponent, 0 for a well-mixed layer (P14.T24.g's modes). The
+/// loop's modes take their deck's base and top and its `f_sed`.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct ModeProfile {
+    base: Pascals,
+    top: Pascals,
+    exponent: f64,
+}
+
+impl ModeProfile {
+    /// The profile from `base` up to `top`, its mixing ratio going as (p ÷ `p_base`)^`exponent`.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildModeError::Profile`] unless the top is finite and positive and no deeper than the
+    /// base, which is finite, and the exponent is finite and non-negative.
+    pub fn new(base: Pascals, top: Pascals, exponent: f64) -> Result<Self, BuildModeError> {
+        let (b, t) = (base.value(), top.value());
+        if !(t.is_finite() && t > 0.0 && b.is_finite() && t <= b && exponent.is_finite())
+            || exponent < 0.0
+        {
+            return Err(BuildModeError::Profile {
+                base,
+                top,
+                exponent,
+            });
+        }
+        Ok(Self {
+            base,
+            top,
+            exponent,
+        })
+    }
+
+    /// The base's pressure.
+    #[must_use]
+    pub const fn base(&self) -> Pascals {
+        self.base
+    }
+
+    /// The top's pressure.
+    #[must_use]
+    pub const fn top(&self) -> Pascals {
+        self.top
+    }
+
+    /// The exponent f of the mixing ratio above the base.
+    #[must_use]
+    pub const fn exponent(&self) -> f64 {
+        self.exponent
+    }
+}
+
+/// [`Mode::new`] or [`ModeProfile::new`] refused its inputs.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BuildModeError {
+    /// The profile's top is not finite and positive and no deeper than its finite base, or its
+    /// exponent is not finite and non-negative.
+    Profile {
+        /// The base given.
+        base: Pascals,
+        /// The top given.
+        top: Pascals,
+        /// The exponent given.
+        exponent: f64,
+    },
+    /// The column mass is not finite and non-negative.
+    ColumnMass {
+        /// The value given.
+        column_mass: KilogramsPerSquareMetre,
+    },
+    /// The coverage is not within 0 to 1.
+    Coverage {
+        /// The value given.
+        coverage: f64,
+    },
+    /// The temperature its optics are taken at is not finite and positive.
+    Temperature {
+        /// The value given.
+        temperature: Kelvin,
+    },
+}
+
+impl fmt::Display for BuildModeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Profile {
+                base,
+                top,
+                exponent,
+            } => write!(
+                f,
+                "a profile from {} Pa up to {} Pa of exponent {exponent} is not one",
+                base.value(),
+                top.value()
+            ),
+            Self::ColumnMass { column_mass } => write!(
+                f,
+                "column mass {} kg m⁻² is not finite and non-negative",
+                column_mass.value()
+            ),
+            Self::Coverage { coverage } => write!(f, "coverage {coverage} is not within 0 to 1"),
+            Self::Temperature { temperature } => write!(
+                f,
+                "temperature {} K is not finite and positive",
+                temperature.value()
+            ),
+        }
+    }
+}
+
+impl Error for BuildModeError {}
+
+/// A deck's particles: one population of one material in one phase, with its size, its column,
+/// its τ(550) and its vertical profile, the shape P14.T24.c's aerosol inventory carries.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Mode {
     material: SubstanceId,
@@ -429,10 +568,59 @@ pub struct Mode {
     size: Result<SizeDistribution, SizeModeError>,
     column_mass: KilogramsPerSquareMetre,
     optical_depth: Result<OpticalDepth, ResolveOpticalDepthError>,
+    profile: ModeProfile,
     coverage: f64,
 }
 
 impl Mode {
+    /// A mode of `material` in `phase`, of deck `deck` (by its condensate), of size `size` and
+    /// column mass `column_mass`, between its `profile`'s base and top, covering `coverage` of
+    /// the sky, its τ(550) from P14.T49.e's mass extinction at `temperature` (or above the
+    /// table's grid the geometric limit), as the loop's are: for a rule's modes (P14.T24.g's acid
+    /// modes, well mixed between fractions of the deck's span).
+    ///
+    /// # Errors
+    ///
+    /// [`BuildModeError`] for a column mass that is not finite and non-negative, a coverage
+    /// outside 0 to 1, or a temperature that is not finite and positive. A τ(550) that is not
+    /// modelled is the mode's [`optical_depth`](Self::optical_depth), not an error.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a mode's eight columns, each checked, as P14.T24.c lists them"
+    )]
+    pub fn new(
+        material: SubstanceId,
+        phase: CondensedPhase,
+        deck: SubstanceId,
+        size: SizeDistribution,
+        column_mass: KilogramsPerSquareMetre,
+        profile: ModeProfile,
+        coverage: f64,
+        temperature: Kelvin,
+    ) -> Result<Self, BuildModeError> {
+        let mass = column_mass.value();
+        if !(mass.is_finite() && mass >= 0.0) {
+            return Err(BuildModeError::ColumnMass { column_mass });
+        }
+        if !(0.0..=1.0).contains(&coverage) {
+            return Err(BuildModeError::Coverage { coverage });
+        }
+        let t = temperature.value();
+        if !(t.is_finite() && t > 0.0) {
+            return Err(BuildModeError::Temperature { temperature });
+        }
+        Ok(Self {
+            material,
+            phase,
+            deck,
+            size: Ok(size),
+            column_mass,
+            optical_depth: optical_depth(material, phase, Ok(size), column_mass, t),
+            profile,
+            coverage,
+        })
+    }
+
     /// Its material, a registry row.
     #[must_use]
     pub const fn material(&self) -> SubstanceId {
@@ -474,6 +662,12 @@ impl Mode {
     /// [`ResolveOpticalDepthError`] where it is not modelled.
     pub const fn optical_depth(&self) -> Result<OpticalDepth, ResolveOpticalDepthError> {
         self.optical_depth
+    }
+
+    /// Its vertical profile.
+    #[must_use]
+    pub const fn profile(&self) -> ModeProfile {
+        self.profile
     }
 
     /// The share of the sky it covers, the caller's: the snapshot path's cloud fraction, or 1.
@@ -573,7 +767,7 @@ impl Deck {
     }
 
     /// Whether its law is applied outside the metallicities or the pressures it was fitted over
-    /// (`substance::aloft::Fitted`).
+    /// ([`Fitted`](crate::substance::aloft::Fitted)).
     #[must_use]
     pub const fn extrapolated(&self) -> bool {
         self.extrapolated
@@ -586,10 +780,21 @@ impl Deck {
     }
 
     /// The deck's own vapour's mole fraction at `pressure`: the vapour below at and below the base,
-    /// and above it what the column leaves.
+    /// and above it what the column leaves; `None` for a pressure that is not finite and positive.
     #[must_use]
-    pub fn vapour_at(&self, pressure: Pascals) -> f64 {
-        math::exp(self.ln_vapour_at(ln(pressure.value())))
+    pub fn vapour_at(&self, pressure: Pascals) -> Option<f64> {
+        let p = pressure.value();
+        (p.is_finite() && p > 0.0).then(|| math::exp(self.ln_vapour_at(ln(p))))
+    }
+
+    /// The condensing vapour the deck has taken from the gas at ln p `u`: none at or below its
+    /// base. [`Condensation::remaining`] and the loop's own cold traps both read it.
+    #[must_use]
+    fn removal(&self, u: f64) -> f64 {
+        if u >= self.base_ln_p {
+            return 0.0;
+        }
+        (self.vapour_below - math::exp(self.ln_vapour_at(u))).max(0.0)
     }
 
     /// ln `q_v` at ln p `u`, through [`Grid`]'s levels, linear in ln p.
@@ -706,17 +911,20 @@ struct Grid {
 
 impl Grid {
     /// ln p of level `i`.
+    #[must_use]
     fn u(&self, i: usize) -> f64 {
         self.bottom - self.step * index_f64(i)
     }
 
     /// The levels' count.
+    #[must_use]
     fn len(&self) -> usize {
         self.temperatures.len()
     }
 
     /// The temperature at ln p `ln_p` between the levels, ln T linear in ln p (a power law
     /// between them, as P14.T24.e's nodes are read).
+    #[must_use]
     fn temperature(&self, ln_p: f64) -> f64 {
         let last = self.len() - 1;
         let offset = ((self.bottom - ln_p) / self.step).max(0.0);
@@ -735,6 +943,8 @@ impl Grid {
 struct Candidate {
     id: SubstanceId,
     law: LawAloft,
+    /// The condensate's molar mass, g mol⁻¹.
+    molar_mass: f64,
     /// The limiting vapour's place, and for a product law the second reactant's.
     limiting: usize,
     second: Option<usize>,
@@ -753,24 +963,17 @@ struct Base {
     u: f64,
     temperature: f64,
     bound: DeckBound,
+    /// The temperature the decks are taken in order of, hottest first: the base's, or for a
+    /// deck below the column its condensation temperature at the column's bottom, at which its
+    /// base below would lie.
+    order: f64,
 }
 
 /// A placed deck's draw on the pool: its removal of its condensing vapour by level, through its
-/// [`Deck`], and its vapours with their ratios.
+/// [`Deck`]'s `removal`, and its vapours with their ratios.
 struct Placed {
     deck: Deck,
     draws: Vec<(usize, f64)>,
-}
-
-impl Placed {
-    /// The condensing vapour the deck has taken from the gas at ln p `u`: none at or below its
-    /// base.
-    fn removal(&self, u: f64) -> f64 {
-        if u >= self.deck.base_ln_p {
-            return 0.0;
-        }
-        (self.deck.vapour_below - math::exp(self.deck.ln_vapour_at(u))).max(0.0)
-    }
 }
 
 /// The vapours the laws draw on, with the deep gas's amount of each.
@@ -790,23 +993,38 @@ impl Pool {
         self.vapours.len() - 1
     }
 
-    /// The gas's amount of vapour `j` at ln p `u` once the decks `placed` have drawn on it, in
-    /// their order, each draw held at what is left.
-    fn left(&self, j: usize, u: f64, placed: &[Placed]) -> f64 {
-        let mut left = self.deep[j];
+    /// The gas's amount of each vapour at ln p `u` once the decks `placed` have drawn on it
+    /// ([`draw`]).
+    #[must_use]
+    fn left(&self, u: f64, placed: &[Placed]) -> Vec<f64> {
+        let mut left = self.deep.clone();
         for p in placed {
-            for &(k, ratio) in &p.draws {
-                if k == j {
-                    left -= (ratio * p.removal(u)).min(left);
-                }
-            }
+            draw(&mut left, p.deck.removal(u), &p.draws);
         }
         left
     }
 }
 
+/// One deck's draw on the gas `left` (each vapour's amount, by place), of its condensing vapour's
+/// loss `removal` and its vapours `draws` (the limiting one first, each with its count over the
+/// limiting one's): the limiting vapour gives what it can of the loss, and each other vapour its
+/// count's share of what the limiting one gave, each held at what is left of it, so that every
+/// vapour's amount and draws sum to the deep gas's.
+fn draw(left: &mut [f64], removal: f64, draws: &[(usize, f64)]) {
+    let Some((&(limiting, _), others)) = draws.split_first() else {
+        return;
+    };
+    let given = removal.min(left[limiting]);
+    left[limiting] -= given;
+    for &(place, ratio) in others {
+        let taken = (ratio * given).min(left[place]);
+        left[place] -= taken;
+    }
+}
+
 /// The amount of `vapour` in `gas`: its mole fraction for a species, its atoms per molecule of
 /// gas for an element, summed in the gas's order.
+#[must_use]
 fn amount(vapour: Vapour, gas: &[(SubstanceId, f64)]) -> f64 {
     match vapour {
         Vapour::Species(key) => gas
@@ -863,8 +1081,10 @@ impl Condensation {
     /// and P14.T52.b give it at the level the caller picks, or P14.T24.a's fractions at a
     /// surface's ground) along the temperature profile `profile`, T(p), in `column` (its gravity,
     /// mean molar mass, `K_zz`, metallicity as a multiple of solar, and the levels from its
-    /// `bottom` up to its `top`), each deck with `sedimentation` and covering `coverage` of the
-    /// sky.
+    /// `bottom` up to its `top`), each condensate's deck with the [`Sedimentation`] that
+    /// `sedimentation` gives it (P14.T52.d and P14.T24.c state it by class; Ackerman and
+    /// Marley's [`Sedimentation::BASELINE`] for all is `|_| Sedimentation::BASELINE`), covering
+    /// `coverage` of the sky.
     ///
     /// # Errors
     ///
@@ -896,8 +1116,12 @@ impl Condensation {
     ///     top: Pascals::new(1e3),
     ///     bottom: Pascals::new(1e7),
     /// };
-    /// let clouds = Condensation::derive(gas, jupiter, &column, Sedimentation::BASELINE, 1.0)?;
-    /// let deck = |key: &str| clouds.decks().iter().find(|d| d.condensate().substance().key().as_str() == key);
+    /// let baseline = |_| Sedimentation::BASELINE;
+    /// let clouds = Condensation::derive(gas, jupiter, &column, baseline, 1.0)?;
+    /// let deck = |key: &str| {
+    ///     let id = by_key(key)?;
+    ///     clouds.decks().iter().find(|d| d.condensate() == id)
+    /// };
     /// let ammonia = deck("NH3").ok_or("an ammonia deck")?.base().value() / 1e5;
     /// let salt = deck("NH4SH").ok_or("a salt deck")?.base().value() / 1e5;
     /// assert!((0.5..1.0).contains(&ammonia) && (1.5..3.0).contains(&salt));
@@ -908,7 +1132,7 @@ impl Condensation {
         gas: impl IntoIterator<Item = (SubstanceId, f64)>,
         profile: impl Fn(Pascals) -> Kelvin,
         column: &MixingColumn,
-        sedimentation: Sedimentation,
+        sedimentation: impl Fn(SubstanceId) -> Sedimentation,
         coverage: f64,
     ) -> Result<Self, DeriveCondensationError> {
         check(column, coverage)?;
@@ -922,6 +1146,9 @@ impl Condensation {
             }
             mixture.push((id, x));
         }
+        // The gas in registry order, so that its sums, and the background's ties, do not depend on
+        // the order it was given in.
+        mixture.sort_by_key(|&(id, _)| id);
         let grid = grid(&profile, column)?;
         let metallicity = math::log10(column.metallicity);
         let mut pool = Pool {
@@ -929,35 +1156,33 @@ impl Condensation {
             deep: Vec::new(),
         };
         let mut not_formed = Vec::new();
-        let mut candidates = Vec::new();
-        let laws: Vec<(SubstanceId, LawAloft)> = laws_aloft().collect();
-        for &(id, law) in &laws {
-            let Some(candidate) = candidate(id, law, &mut pool, &mixture) else {
-                continue;
-            };
-            if let Some(by) = law.displaced_by()
-                && laws.iter().any(|&(other, other_law)| {
-                    other.substance().key().as_str() == by.as_str()
-                        && amount(other_law.limiting().vapour(), &mixture) > 0.0
-                })
+        let all: Vec<Candidate> = laws_aloft()
+            .filter_map(|(id, law)| candidate(id, law, &mut pool, &mixture))
+            .collect();
+        let held: Vec<SubstanceKey> = all.iter().map(|c| c.id.substance().key()).collect();
+        let mut candidates = Vec::with_capacity(all.len());
+        for candidate in all {
+            // A law is displaced only where its displacing law can form: quartz in a gas with
+            // magnesium, titanium dioxide in one with calcium.
+            if let Some(by) = candidate.law.displaced_by()
+                && held.contains(&by)
             {
-                not_formed.push((id, NotFormed::Displaced { by }));
+                not_formed.push((candidate.id, NotFormed::Displaced { by }));
                 continue;
             }
-            if let Vapour::Species(_) = law.limiting().vapour()
+            if let Vapour::Species(_) = candidate.law.limiting().vapour()
                 && pool.deep[candidate.limiting] >= BULK_BOUND
             {
-                not_formed.push((id, NotFormed::BulkGas));
+                not_formed.push((candidate.id, NotFormed::BulkGas));
                 continue;
             }
             candidates.push(candidate);
         }
         let context = Context {
-            profile: &profile,
             column,
             grid: &grid,
             metallicity,
-            sedimentation,
+            sedimentation: &sedimentation,
             coverage,
             background: background(&mixture),
         };
@@ -970,7 +1195,7 @@ impl Condensation {
                     candidate.fresh = true;
                 }
                 if let Some(base) = candidate.base
-                    && best.is_none_or(|(_, hottest)| base.temperature > hottest.temperature)
+                    && best.is_none_or(|(_, hottest)| base.order > hottest.order)
                 {
                     best = Some((i, base));
                 }
@@ -1018,36 +1243,44 @@ impl Condensation {
     }
 
     /// The gas's amount of `vapour` at `pressure` once every deck below it has drawn on it, in the
-    /// decks' order, each draw held at what is left: a species' mole fraction, or an element's
-    /// atoms per molecule of gas. With what the decks have drawn, it sums to the gas's amount
-    /// below them, to rounding.
+    /// decks' order: each deck's limiting vapour gives what it can of the deck's loss, and each
+    /// other vapour its share of what that gave, each held at what is left. A species' mole
+    /// fraction, or an element's atoms per molecule of gas. With what the decks have drawn, it sums to the gas's amount
+    /// below them, to rounding. `None` for a pressure that is not finite and positive.
     #[must_use]
-    pub fn remaining(&self, vapour: Vapour, pressure: Pascals) -> f64 {
-        let u = ln(pressure.value());
-        let mut left = amount(vapour, &self.gas);
-        for (deck, draws) in self.decks.iter().zip(&self.draws) {
-            let removal = if u >= deck.base_ln_p {
-                0.0
-            } else {
-                (deck.vapour_below - math::exp(deck.ln_vapour_at(u))).max(0.0)
-            };
-            for &(v, ratio) in draws {
-                if v == vapour {
-                    left -= (ratio * removal).min(left);
-                }
-            }
+    pub fn remaining(&self, vapour: Vapour, pressure: Pascals) -> Option<f64> {
+        let p = pressure.value();
+        if !(p.is_finite() && p > 0.0) {
+            return None;
         }
-        left
+        let u = ln(p);
+        let mut vapours: Vec<Vapour> = vec![vapour];
+        let mut places: Vec<Vec<(usize, f64)>> = Vec::with_capacity(self.decks.len());
+        for draws in &self.draws {
+            let mut deck_places = Vec::with_capacity(draws.len());
+            for &(drawn, ratio) in draws {
+                let place = vapours.iter().position(|v| *v == drawn).unwrap_or_else(|| {
+                    vapours.push(drawn);
+                    vapours.len() - 1
+                });
+                deck_places.push((place, ratio));
+            }
+            places.push(deck_places);
+        }
+        let mut left: Vec<f64> = vapours.iter().map(|&v| amount(v, &self.gas)).collect();
+        for (deck, draws) in self.decks.iter().zip(&places) {
+            draw(&mut left, deck.removal(u), draws);
+        }
+        Some(left[0])
     }
 }
 
 /// What every base and deck of one derivation reads.
-struct Context<'a, F: Fn(Pascals) -> Kelvin> {
-    profile: &'a F,
+struct Context<'a> {
     column: &'a MixingColumn,
     grid: &'a Grid,
     metallicity: f64,
-    sedimentation: Sedimentation,
+    sedimentation: &'a dyn Fn(SubstanceId) -> Sedimentation,
     coverage: f64,
     background: Option<SubstanceId>,
 }
@@ -1059,7 +1292,7 @@ fn grid(
 ) -> Result<Grid, DeriveCondensationError> {
     let (bottom, top) = (ln(column.bottom.value()), ln(column.top.value()));
     let steps = ((bottom - top) / SCAN_STEP_LN_P).ceil();
-    let count = offset_index(steps, usize::MAX).max(1);
+    let count = offset_index(steps, MAX_LEVELS).max(1);
     let step = (bottom - top) / index_f64(count);
     let mut temperatures = Vec::with_capacity(count + 1);
     for i in 0..=count {
@@ -1082,36 +1315,44 @@ fn grid(
 }
 
 /// The loop's candidate for the row `id`'s law `law`, with its vapours placed in `pool`; `None`
-/// where the gas lacks its limiting vapour, or for a product law either reactant, or where the
-/// condensate has no molar mass.
+/// where the gas lacks any vapour of its reaction, or where the condensate has no molar mass.
+#[must_use]
 fn candidate(
     id: SubstanceId,
     law: LawAloft,
     pool: &mut Pool,
     gas: &[(SubstanceId, f64)],
 ) -> Option<Candidate> {
-    id.substance().molar_mass_g_per_mol()?;
+    let molar_mass = id.substance().molar_mass_g_per_mol()?;
     let limiting = law.limiting();
-    if amount(limiting.vapour(), gas) <= 0.0 {
+    // Every vapour of the reaction must be in the gas: perovskite needs calcium, enstatite
+    // magnesium.
+    if amount(limiting.vapour(), gas) <= 0.0
+        || law
+            .others()
+            .iter()
+            .any(|other| amount(other.vapour(), gas) <= 0.0)
+    {
         return None;
     }
-    let lim = pool.place(limiting.vapour(), gas);
-    let mut draws = vec![(lim, 1.0)];
+    let first = pool.place(limiting.vapour(), gas);
+    let mut draws = vec![(first, 1.0)];
     let mut second = None;
     for other in law.others() {
-        let j = pool.place(other.vapour(), gas);
+        let place = pool.place(other.vapour(), gas);
         if matches!(law.law(), SaturationLaw::Product { .. }) {
-            if pool.deep[j] <= 0.0 {
-                return None;
-            }
-            second = Some(j);
+            second = Some(place);
         }
-        draws.push((j, f64::from(other.count()) / f64::from(limiting.count())));
+        draws.push((
+            place,
+            f64::from(other.count()) / f64::from(limiting.count()),
+        ));
     }
     Some(Candidate {
         id,
         law,
-        limiting: lim,
+        molar_mass,
+        limiting: first,
         second,
         draws,
         base: None,
@@ -1119,8 +1360,9 @@ fn candidate(
     })
 }
 
-/// The gas's most abundant species, first in its order on a tie: the background whose viscosity
-/// sizes the particles.
+/// The gas's most abundant species, the first in registry order on a tie: the background whose
+/// viscosity sizes the particles.
+#[must_use]
 fn background(gas: &[(SubstanceId, f64)]) -> Option<SubstanceId> {
     let mut best: Option<(SubstanceId, f64)> = None;
     for &(id, x) in gas {
@@ -1134,23 +1376,26 @@ fn background(gas: &[(SubstanceId, f64)]) -> Option<SubstanceId> {
 /// The condensing vapour's mole fraction available at ln p `u` to the candidate `c`, after the
 /// decks `placed`: the limiting vapour times its share; for a product law, (the scarcer
 /// reactant's, the other's).
+#[must_use]
 fn available(c: &Candidate, u: f64, pool: &Pool, placed: &[Placed]) -> (f64, f64) {
-    let first = pool.left(c.limiting, u, placed);
+    let left = pool.left(u, placed);
+    let first = left[c.limiting];
     match c.second {
-        Some(j) => (first, pool.left(j, u, placed)),
+        Some(j) => (first, left[j]),
         None => (c.law.vapour_share() * first, f64::INFINITY),
     }
 }
 
 /// How far the candidate's vapour at ln p `ln_p` and `temperature` kelvin is past saturation, in
 /// ln: ln(x P) − ln `p_sat` (for a product law, ln(x₁ x₂ P²) − ln K); −∞ where it cannot condense.
-fn supersaturation<F: Fn(Pascals) -> Kelvin>(
+#[must_use]
+fn supersaturation(
     candidate: &Candidate,
     ln_p: f64,
     temperature: f64,
     pool: &Pool,
     placed: &[Placed],
-    context: &Context<'_, F>,
+    context: &Context<'_>,
 ) -> f64 {
     let (first, second) = available(candidate, ln_p, pool, placed);
     if first <= 0.0 || second <= 0.0 {
@@ -1171,11 +1416,12 @@ fn supersaturation<F: Fn(Pascals) -> Kelvin>(
 
 /// The candidate `c`'s base in the gas the decks `placed` leave: the scan's first saturated level
 /// from the bottom up, refined between it and the level below (the [module](self)'s documentation).
-fn find_base<F: Fn(Pascals) -> Kelvin>(
+#[must_use]
+fn find_base(
     candidate: &Candidate,
     pool: &Pool,
     placed: &[Placed],
-    context: &Context<'_, F>,
+    context: &Context<'_>,
 ) -> Option<Base> {
     let grid = context.grid;
     let at_level = |level: usize| {
@@ -1183,15 +1429,31 @@ fn find_base<F: Fn(Pascals) -> Kelvin>(
         supersaturation(candidate, grid.u(level), temperature, pool, placed, context)
     };
     if at_level(0) >= 0.0 {
+        // Saturated at the bottom already: of two such decks the one that condenses hotter there
+        // lies the deeper below the column, and is taken first.
+        let (first, second) = available(candidate, grid.u(0), pool, placed);
+        let vapour = match candidate.second {
+            Some(_) => first * second,
+            None => first,
+        };
+        let bottom = Pascals::new(math::exp(grid.u(0)));
+        let order = candidate
+            .law
+            .condensation_temperature(bottom, vapour, context.metallicity)
+            .map_or(grid.temperatures[0], |t| {
+                t.value().max(grid.temperatures[0])
+            });
         return Some(Base {
             u: grid.u(0),
             temperature: grid.temperatures[0],
             bound: DeckBound::Bottom,
+            order,
         });
     }
     let level = (1..grid.len()).find(|&level| at_level(level) >= 0.0)?;
+    // Between the levels the profile is the grid's power law, as the column reads it.
     let exact = |ln_p: f64| {
-        let temperature = (context.profile)(Pascals::new(math::exp(ln_p))).value();
+        let temperature = grid.temperature(ln_p);
         supersaturation(candidate, ln_p, temperature, pool, placed, context)
     };
     // The bracket: `deep` unsaturated, `shallow` saturated (ln p falls upward).
@@ -1213,11 +1475,12 @@ fn find_base<F: Fn(Pascals) -> Kelvin>(
             f64::midpoint(deep, shallow)
         };
     }
-    let temperature = (context.profile)(Pascals::new(math::exp(ln_p))).value();
+    let temperature = grid.temperature(ln_p);
     Some(Base {
         u: ln_p,
         temperature,
         bound: DeckBound::Crossing,
+        order: temperature,
     })
 }
 
@@ -1227,6 +1490,7 @@ const DIFFERENCE_STEP: f64 = 1e-7;
 /// The saturated mole fraction of the deck's condensing vapour at ln p `ln_p` and `temperature`:
 /// `p_sat` ÷ P, or for a product law the scarcer reactant's that holds the product at K with the
 /// other at its excess `excess` over it; +∞ where it cannot condense.
+#[must_use]
 fn saturated(
     law: &LawAloft,
     ln_p: f64,
@@ -1265,6 +1529,7 @@ struct Column {
 /// ln p is `saturation`, from the scan level `first`, with `f_sed` `efficiency` and `epsilon`
 /// kilograms of condensate per kilogram of gas per unit of the vapour's mole fraction, under
 /// `gravity` (the [module](self)'s documentation).
+#[must_use]
 fn integrate(
     base: Base,
     below: f64,
@@ -1309,7 +1574,11 @@ fn integrate(
             saturated_from = saturated_end;
         }
         column.mass += level_mass;
-        column.vapour_ln.push(math::ln(total.min(saturated_from)));
+        // A vapour whose saturation underflows (alumina at 110 K) is held at the smallest normal
+        // fraction, so that its logarithm, which the levels interpolate, stays finite.
+        column
+            .vapour_ln
+            .push(math::ln(total.min(saturated_from).max(f64::MIN_POSITIVE)));
         column.condensate.push((total - saturated_from).max(0.0));
         column.level_masses.push(level_mass);
         from = to;
@@ -1319,16 +1588,18 @@ fn integrate(
 
 /// The deck of the candidate at its base `base`, in the gas the decks `placed` leave: its column
 /// by Ackerman and Marley's balance, its vapour above, and its mode.
-fn place<F: Fn(Pascals) -> Kelvin>(
+#[must_use]
+fn place(
     candidate: &Candidate,
     base: Base,
     pool: &Pool,
     placed: &[Placed],
-    context: &Context<'_, F>,
+    context: &Context<'_>,
 ) -> Deck {
     let grid = context.grid;
     let air = context.column;
-    let efficiency = context.sedimentation.efficiency();
+    let sedimentation = (context.sedimentation)(candidate.id);
+    let efficiency = sedimentation.efficiency();
     let (first_amount, second_amount) = available(candidate, base.u, pool, placed);
     let (below, excess) = match candidate.second {
         Some(_) => (
@@ -1338,13 +1609,9 @@ fn place<F: Fn(Pascals) -> Kelvin>(
         None => (first_amount, None),
     };
     let law = candidate.law;
-    let molar_mass = candidate
-        .id
-        .substance()
-        .molar_mass_g_per_mol()
-        .unwrap_or(0.0);
     // Mass of condensate per mole of condensing vapour, over the gas's molar mass.
-    let epsilon = molar_mass / f64::from(law.limiting().count()) / air.molar_mass_g_per_mol;
+    let epsilon =
+        candidate.molar_mass / f64::from(law.limiting().count()) / air.molar_mass_g_per_mol;
     let saturation = |ln_p: f64| {
         saturated(
             &law,
@@ -1407,6 +1674,11 @@ fn place<F: Fn(Pascals) -> Kelvin>(
             size,
             column_mass,
             optical_depth,
+            profile: ModeProfile {
+                base: Pascals::new(math::exp(base.u)),
+                top: Pascals::new(math::exp(top)),
+                exponent: efficiency,
+            },
             coverage: context.coverage,
         }],
         base_ln_p: base.u,
@@ -1419,6 +1691,7 @@ fn place<F: Fn(Pascals) -> Kelvin>(
 
 /// Whether `law` is applied at `base` in a gas of `metallicity` dex outside what it was fitted
 /// over.
+#[must_use]
 fn extrapolated(law: &LawAloft, base: Base, metallicity: f64) -> bool {
     law.fitted().is_some_and(|fitted| {
         let (low, high) = fitted.metallicity_dex;
@@ -1444,6 +1717,7 @@ struct Levels<'a> {
 
 /// The phase the condensate `id` forms in at `temperature`: liquid at or above its first melt (a
 /// phase diagram's triple point), solid below; solid for a row with neither.
+#[must_use]
 fn phase_of(id: SubstanceId, temperature: f64) -> CondensedPhase {
     let row = id.substance();
     let melt = row
@@ -1463,12 +1737,12 @@ fn phase_of(id: SubstanceId, temperature: f64) -> CondensedPhase {
 /// `r_eff` by Ackerman and Marley's eq. 13 at the radius `r_w` whose fall speed is w*, for the grain
 /// density at the base's temperature `base_temperature`, and their harmonic mean weighted by
 /// `weights`, the levels' column masses (the [module](self)'s documentation).
-fn size<F: Fn(Pascals) -> Kelvin>(
+fn size(
     id: SubstanceId,
     phase: CondensedPhase,
     base_temperature: f64,
     levels: &Levels<'_>,
-    context: &Context<'_, F>,
+    context: &Context<'_>,
 ) -> Result<SizeDistribution, SizeModeError> {
     let key = id.substance().key();
     let background = context
@@ -1488,9 +1762,10 @@ fn size<F: Fn(Pascals) -> Kelvin>(
             phase,
             temperature: Kelvin::new(base_temperature),
         })?;
-    let sigma = context.sedimentation.width();
+    let sedimentation = (context.sedimentation)(id);
+    let sigma = sedimentation.width();
     let ln_sigma_squared = math::ln(sigma) * math::ln(sigma);
-    let efficiency = context.sedimentation.efficiency();
+    let efficiency = sedimentation.efficiency();
     let (mut mass, mut area) = (0.0, 0.0);
     for (offset, (&condensate, &level_mass)) in
         levels.condensate.iter().zip(levels.masses).enumerate()
@@ -1502,7 +1777,7 @@ fn size<F: Fn(Pascals) -> Kelvin>(
         let temperature = context.grid.temperatures[level];
         let pressure = math::exp(context.grid.u(level));
         let air = Air::at(temperature, pressure, context.column, constants);
-        let w_star = context.column.eddy_diffusion.square_metres_per_second() / air.scale_height;
+        let w_star = context.column.eddy_diffusion.square_metres_per_second() / air.scale_height_m;
         let r_w = air.radius_falling_at(w_star, density);
         let fit = sigma.max(ALPHA_FIT_WIDTH);
         let alpha = math::ln(air.fall_speed(fit * r_w, density) / air.fall_speed(r_w, density))
@@ -1518,21 +1793,27 @@ fn size<F: Fn(Pascals) -> Kelvin>(
         return Err(SizeModeError::NoCondensate);
     }
     SizeDistribution::log_normal(Metres::new(mass / area), math::exp(ln_sigma_squared) - 1.0)
-        .map_err(|_| SizeModeError::NoCondensate)
+        .map_err(SizeModeError::Distribution)
 }
 
 /// A level's gas, as the fall speed reads it.
 struct Air {
-    gravity: f64,
-    density: f64,
-    viscosity: f64,
-    free_path: f64,
-    scale_height: f64,
+    /// The gravity, m s⁻².
+    gravity_m_s2: f64,
+    /// The gas's density, kg m⁻³.
+    density_kg_m3: f64,
+    /// Its dynamic viscosity, Pa s.
+    viscosity_pa_s: f64,
+    /// Its mean free path, m.
+    free_path_m: f64,
+    /// Its pressure scale height, m.
+    scale_height_m: f64,
 }
 
 impl Air {
     /// The gas at `temperature` kelvin and `pressure` pascals in `column`, of the background
     /// `constants`.
+    #[must_use]
     fn at(
         temperature: f64,
         pressure: f64,
@@ -1549,29 +1830,32 @@ impl Air {
             / (collision_area * collision_integral(temperature / constants.well_depth_k));
         let gravity = column.gravity.value();
         Self {
-            gravity,
-            density: pressure * molar_kg / (MOLAR_GAS_CONSTANT * temperature),
-            viscosity,
-            free_path: thermal / (core::f64::consts::SQRT_2 * collision_area * pressure),
-            scale_height: MOLAR_GAS_CONSTANT * temperature / (molar_kg * gravity),
+            gravity_m_s2: gravity,
+            density_kg_m3: pressure * molar_kg / (MOLAR_GAS_CONSTANT * temperature),
+            viscosity_pa_s: viscosity,
+            free_path_m: thermal / (core::f64::consts::SQRT_2 * collision_area * pressure),
+            scale_height_m: MOLAR_GAS_CONSTANT * temperature / (molar_kg * gravity),
         }
     }
 
     /// The fall speed of a particle of radius `radius` m and density `density`, m s⁻¹ (the
     /// [module](self)'s documentation).
+    #[must_use]
     fn fall_speed(&self, radius: f64, density: KilogramsPerCubicMetre) -> f64 {
         let particle = density.value();
-        let knudsen = self.free_path / radius;
+        let knudsen = self.free_path_m / radius;
         let slip = 1.0 + knudsen * (1.257 + 0.4 * math::exp(-1.1 / knudsen));
-        let viscosity = self.viscosity;
-        let stokes = 2.0 * slip * self.gravity * radius * radius * particle / (9.0 * viscosity);
-        let inertia = 0.45 * self.gravity * radius * radius * radius * self.density * particle
+        let viscosity = self.viscosity_pa_s;
+        let gravity = self.gravity_m_s2;
+        let stokes = 2.0 * slip * gravity * radius * radius * particle / (9.0 * viscosity);
+        let inertia = 0.45 * gravity * radius * radius * radius * self.density_kg_m3 * particle
             / (54.0 * viscosity * viscosity);
         stokes * math::powf(1.0 + math::powf(inertia, 0.4), -1.25)
     }
 
     /// The radius whose fall speed is `speed`, by bisection in ln r over [`RADIUS_RANGE_M`], held
     /// at its ends.
+    #[must_use]
     fn radius_falling_at(&self, speed: f64, density: KilogramsPerCubicMetre) -> f64 {
         let (mut small, mut large) = (math::ln(RADIUS_RANGE_M.0), math::ln(RADIUS_RANGE_M.1));
         for _ in 0..RADIUS_BISECTIONS {
@@ -1588,13 +1872,21 @@ impl Air {
 
 /// Neufeld, Janzen and Aziz 1972's fit to the Lennard-Jones collision integral Ω^(2,2)* at the
 /// reduced temperature `reduced` = k T ÷ ε (J. Chem. Phys. 57, 1100; Poling, Prausnitz and
-/// O'Connell 2001, eq. 9-4.3), for 0.3 ≤ T* ≤ 100: 1.16145 T*^−0.14874 + 0.52487 e^(−0.77320 T*) +
-/// 2.16178 e^(−2.43787 T*).
+/// O'Connell 2001, eq. 9-4.3): 1.16145 T*^−0.14874 + 0.52487 e^(−0.77320 T*) + 2.16178
+/// e^(−2.43787 T*), within 0.1% for 0.3 ≤ T* ≤ 100 ([`REDUCED_TEMPERATURE_RANGE`]), and held at
+/// its ends beyond them (an H₂O background below 243 K, SO₂ below 101 K, He above 1,022 K).
+#[must_use]
 fn collision_integral(reduced: f64) -> f64 {
+    let (low, high) = REDUCED_TEMPERATURE_RANGE;
+    let reduced = reduced.clamp(low, high);
     1.161_45 * math::powf(reduced, -0.148_74)
         + 0.524_87 * math::exp(-0.773_20 * reduced)
         + 2.161_78 * math::exp(-2.437_87 * reduced)
 }
+
+/// The reduced temperatures over which Neufeld, Janzen and Aziz 1972 fit Ω^(2,2)*, "0.3 ≤ T* ≤
+/// 100" (their abstract).
+const REDUCED_TEMPERATURE_RANGE: (f64, f64) = (0.3, 100.0);
 
 /// The τ(550) of a mode of `id` in `phase` of size `size` and column mass `mass` at `temperature`:
 /// P14.T49.e's, or above its grid the geometric scatterers'.
@@ -1638,6 +1930,7 @@ fn optical_depth(
 const GEOMETRIC_FROM_M: f64 = 1e-6;
 
 /// ln of a positive value.
+#[must_use]
 fn ln(x: f64) -> f64 {
     math::ln(x)
 }
@@ -1657,6 +1950,7 @@ fn index_f64(i: usize) -> f64 {
     clippy::cast_sign_loss,
     reason = "the offset is non-negative and held at `last` before the cast"
 )]
+#[must_use]
 fn offset_index(offset: f64, last: usize) -> usize {
     let floor = offset.floor();
     if floor >= index_f64(last) {
@@ -1667,6 +1961,7 @@ fn offset_index(offset: f64, last: usize) -> usize {
 }
 
 /// A phase's name, as messages write it.
+#[must_use]
 const fn phase_name(phase: CondensedPhase) -> &'static str {
     match phase {
         CondensedPhase::Solid => "solid",
