@@ -5,23 +5,40 @@ use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
 use crate::planetary::chem::partition::Basins;
+use crate::planetary::chem::solar_magnesium_to_silicon;
 use crate::planetary::derive::DerivedBody;
 use crate::planetary::derive::MassFractions;
 use crate::planetary::derive::atmosphere::SurfaceMaterial;
+use crate::planetary::derive::atmosphere::spun_read::{self, SpunRead};
+use crate::planetary::derive::pass_record::{
+    ContextTide, PassBulk, PassContext, PassRecord, PassRecordOf, RecordCrust, RecordSpin,
+};
+use crate::planetary::derive::photometry::area_mix::{Regolith, sun_bands};
 use crate::planetary::derive::solar::SOLAR_AGE;
+use crate::planetary::derive::solar::{
+    derive_historic, historic_sun, placed_about_the_sun, solar_disc, table_bodies,
+};
+use crate::planetary::derive::{BodyHosts, PassDriver, Under, derive_body_driven};
+use crate::planetary::hooks::crust::CrustOrigin;
 use crate::planetary::hooks::figures::relief::{
     EARTH_CONTINENTAL_FRACTION, Population, Relief, ReliefInputs,
 };
 use crate::planetary::hooks::figures::tests::{
     europa, figures_from, figures_table, inputs_of, measured_europa,
 };
+use crate::planetary::hooks::figures::{CraterInputs, pass_figures};
 use crate::planetary::hooks::figures::{
     FiguresInputs, GlobalFigures, TectonicRegime, VolatileHistory,
 };
 use crate::planetary::hooks::surface::tests::{inputs_of as surface_inputs_of, spin_of};
+use crate::planetary::hooks::surface::{HourCosines, ZonalInsolation};
 use crate::planetary::hooks::surface::{OceanWeight, SeasonalSpin, SurfaceInputs, area_below};
+use crate::stellar::Composition;
+use crate::time::UniverseTime;
 use crate::units::consts::SECONDS_PER_DAY;
+use crate::units::consts::SOLAR_MASS_KG;
 use crate::units::{Degrees, MetresPerSecondSquared, PerSquareKilometre, Radians, Seconds, Years};
+use crate::units::{Dex, Megayears};
 
 /// The conditions of the table's body `name`, derived as `body`, at the figures `figures`' heat
 /// flow and ocean weight under the spin `spin`, as `hooks_at` takes them.
@@ -722,4 +739,284 @@ fn the_passes_and_the_record_fill_one_layer() {
         );
         assert!(own.is_finite(), "{name}");
     }
+}
+
+// P14.T54.a, Batch E's D1: the table's Earth and Mars over a record (decision-pre-23-review items
+// 2, 13, 27 and 31).
+
+/// The Solar System table's body `name` over a record, with no system about it (P14.T54.a;
+/// decision-pre-23-review items 2, 13, 27 and 31): its passes take its own climate under its
+/// measured spin ([`spin_of`]) and its obliquity's insolation table; each reads the context of the
+/// pass before, K(P), the figures' first stage of that pass's own air at the table's figure
+/// inputs ([`inputs_of`]: its sidereal day, its craters about the Sun, Earth's measured continents,
+/// no tide) over its own bulk; and its crust's basis is a planet's about a host of solar Mg/Si at
+/// \[α/Fe\] and \[Fe/H\] 0, formed at a 3 Myr disc's end, as `hooks/crust/tests.rs`'s planets are.
+/// So its basins, cold profile, lid and water share are its own, the generator's real inputs, as a
+/// system's record gives them (`PrimaryPasses`), but for the continents, given rather than grown,
+/// and the formation time, the crust tests' rather than P14.T28.a's draw.
+struct TableRecord<'a> {
+    /// The table's name.
+    name: &'static str,
+    /// Its derivation over the passes' stand-in, whose figure inputs the table's are.
+    stand_in: &'a DerivedBody,
+    /// Its measured spin.
+    spin: SeasonalSpin,
+    /// Its obliquity's insolation table.
+    table: ZonalInsolation,
+}
+
+impl PassRecordOf for TableRecord<'_> {
+    fn spin(&self, bulk: &PassBulk) -> RecordSpin<'_> {
+        RecordSpin {
+            spin: self.spin,
+            table: &self.table,
+            surface_gravity: bulk.surface_gravity,
+            radius: Metres::from(bulk.radius),
+            material: SurfaceMaterial::of(&bulk.fractions),
+        }
+    }
+
+    fn context(&self, bulk: &PassBulk, air: &Atmosphere, _: Kelvin) -> PassContext {
+        let table = inputs_of(self.stand_in, self.name);
+        let inputs = FiguresInputs {
+            atmosphere: air,
+            mass: bulk.mass,
+            radius: Metres::from(bulk.radius),
+            surface_gravity: bulk.surface_gravity,
+            class: bulk.class,
+            fractions: bulk.fractions,
+            inventory_water: bulk.inventory_water,
+            craters: CraterInputs {
+                density: bulk.density,
+                ..table.craters
+            },
+            ..table
+        };
+        // A refusal is the crater contract's screening of a dense air: no figures in K, as the
+        // record's `PrimaryPasses` reads it.
+        let first = pass_figures(&inputs).ok().flatten();
+        PassContext::of(first.as_ref(), ContextTide::Untided)
+    }
+
+    fn crust(&self, bulk: &PassBulk) -> Option<RecordCrust> {
+        Some(RecordCrust {
+            origin: CrustOrigin::Planet,
+            formation: Megayears::new(3.0),
+            snow_line_side: None,
+            host_magnesium_to_silicon: solar_magnesium_to_silicon(),
+            alpha_fe: Dex::new(0.0),
+            fe_h: Dex::new(0.0),
+            radius: Metres::from(bulk.radius),
+            mass: bulk.mass,
+            fractions: bulk.fractions,
+        })
+    }
+}
+
+/// The table's body `name` about the present Sun with its history at its age, derived over the
+/// passes' stand-in and over its record ([`TableRecord`]), with its published pass's publication
+/// run again at its published albedo and context (rule (f)): what its area mix read.
+fn over_its_record(name: &'static str) -> (DerivedBody, DerivedBody, SpunRead) {
+    let disc = solar_disc();
+    let &(_, kg, km, a, e) = table_bodies().find(|(n, ..)| *n == name).unwrap();
+    let placed = placed_about_the_sun(&disc, (kg, km, a, e));
+    let stand_in = derive_historic(&placed, &disc, SOLAR_AGE);
+    let spin = spin_of(name);
+    let record = TableRecord {
+        name,
+        stand_in: &stand_in,
+        spin,
+        table: ZonalInsolation::of(spin.obliquity, &HourCosines::new()),
+    };
+    let lights = [historic_sun()];
+    let hosts = BodyHosts::new(
+        Kilograms::new(SOLAR_MASS_KG),
+        Composition::SOLAR,
+        &lights,
+        &[],
+    )
+    .unwrap();
+    let derive = |driver| {
+        derive_body_driven(
+            driver,
+            &placed,
+            &hosts,
+            &disc,
+            SOLAR_AGE,
+            UniverseTime::EPOCH,
+            PassRecord::Record(&record),
+        )
+        .unwrap()
+    };
+    let derived = derive(PassDriver::Solve);
+    let (again, read) = spun_read::capture(|| derive(PassDriver::Again(Under::Read)));
+    assert_eq!(
+        format!("{:?}", again.atmosphere()),
+        format!("{:?}", derived.atmosphere()),
+        "{name}"
+    );
+    (
+        stand_in,
+        derived,
+        read.expect("a solid surface's pass publishes its partition"),
+    )
+}
+
+/// The terms of a table body's Bond albedo over its record, as its published pass's area mix read
+/// them: its state and cloud, its lid's row with that row's Bond albedo about the Sun under its
+/// state, and each condensate entry's substance, phase, area and frost or sea albedo.
+fn terms_of(derived: &DerivedBody, read: &SpunRead) -> String {
+    let air = derived.atmosphere();
+    let material = SurfaceMaterial::of(&derived.fractions());
+    let lid = derived.crust_lid().map(|lid| {
+        let row = Regolith::with_lid(lid.row(), material).bond(air.state(), &sun_bands());
+        format!("{} at {:.4}", lid.lithology().key(), row.bond)
+    });
+    let entries: Vec<String> = read
+        .condensates
+        .entries()
+        .iter()
+        .map(|e| {
+            format!(
+                "{} {:?} over {:.5}",
+                e.substance().substance().key(),
+                e.phase(),
+                e.area_fraction()
+            )
+        })
+        .collect();
+    format!(
+        "{:?}, Bond albedo {:.5} under {:.5} of cloud, T_eq {:.3} K, T_s {:.3} K at {:.1} Pa, lid \
+         {lid:?}, {} passes ({:?}); entries {entries:?}",
+        air.state(),
+        derived.albedo().value(),
+        air.cloud_fraction(),
+        derived.equilibrium_temperature().value(),
+        air.surface_temperature().value(),
+        air.surface_pressure()
+            .map_or(0.0, crate::units::Pascals::value),
+        derived.atmosphere_passes(),
+        derived.convergence(),
+    )
+}
+
+/// Decision-pre-23-review items 2 and 27: the table's Earth over its record, its passes reading its
+/// basins, its cold profile, its lid and its water share, holds 288 ± 2 K, with nothing refitted
+/// (decision-p14-t57a-fits §1.5); its Bond albedo is stated against NASA's 0.294 with its terms;
+/// and its condensates hold `H2O` (P14.T54.a's test list): a sea with a reservoir, a layer and an
+/// area. Its passes settle. A miss of 288 ± 2 K goes to main with its terms before the bless.
+#[test]
+fn the_table_s_earth_over_its_record_holds_288_k() {
+    use crate::planetary::chem::partition::CondensatePhase;
+    use crate::planetary::derive::passes::Convergence;
+    let (stand_in, earth, read) = over_its_record("Earth");
+    let air = earth.atmosphere();
+    let t_s = air.surface_temperature().value();
+    eprintln!(
+        "the table's Earth over its record: {}; against 0.294 and 288 K; over the stand-in: Bond \
+         albedo {:.5}, T_eq {:.3} K, T_s {:.3} K at {:.1} Pa",
+        terms_of(&earth, &read),
+        stand_in.albedo().value(),
+        stand_in.equilibrium_temperature().value(),
+        stand_in.surface_temperature().value(),
+        stand_in
+            .atmosphere()
+            .surface_pressure()
+            .map_or(0.0, crate::units::Pascals::value),
+    );
+    assert_eq!(air.state(), SurfaceState::Temperate);
+    assert_eq!(earth.convergence(), Convergence::Converged);
+    let sea = read
+        .condensates
+        .entry(Gas::Water.substance(), CondensatePhase::Liquid)
+        .expect("an Earth's condensates hold its sea");
+    assert!(
+        sea.reservoir().value() > 0.0
+            && sea.reservoir_gel().is_some_and(|gel| gel.value() > 0.0)
+            && sea.area_fraction() > 0.0,
+        "{sea:?}"
+    );
+    assert!((t_s - 288.0).abs() <= 2.0, "the table's Earth at {t_s} K");
+}
+
+/// Decision-pre-23-review items 13 and 31 (decision-p14-t51-batch E3): the table's Mars over its
+/// record. Its water ice in its passes, its published pass's `H2O` solid entry, which its area mix
+/// read, is the record's, T24.b's ice over the ground and the conditions rule (f) builds the
+/// record on (its published pass's context: its basins, water share, heat flow, θ and lid), to the
+/// bit, and lies in T24.b's 0.005–0.02. Its Bond albedo is stated against NASA's 0.250 with its
+/// terms, item 13's pre-answer: its lid `basalt_fe` near 0.34, its water ice, its cloud under
+/// 0.01 (Mars blesses at 0.33–0.36 with those terms; any other goes to main). Its passes settle.
+#[test]
+fn the_table_s_mars_over_its_record_takes_the_record_s_ice_in_its_passes() {
+    use crate::planetary::chem::partition::{CondensatePhase, CrustWater};
+    use crate::planetary::derive::pass_record::WaterGate;
+    use crate::planetary::derive::passes::Convergence;
+    let (stand_in, mars, read) = over_its_record("Mars");
+    let air = mars.atmosphere();
+    eprintln!(
+        "the table's Mars over its record: {}; against 0.250; over the stand-in: Bond albedo \
+         {:.5}, T_eq {:.3} K, T_s {:.3} K at {:.1} Pa",
+        terms_of(&mars, &read),
+        stand_in.albedo().value(),
+        stand_in.equilibrium_temperature().value(),
+        stand_in.surface_temperature().value(),
+        stand_in
+            .atmosphere()
+            .surface_pressure()
+            .map_or(0.0, crate::units::Pascals::value),
+    );
+    assert_eq!(mars.convergence(), Convergence::Converged);
+    let spun = mars.spun().expect("derived over its record");
+    let context = spun.context();
+    // The record's basis by rule (f): its published pass's context's ground, heat flow, θ and lid.
+    let material = SurfaceMaterial::of(&mars.fractions());
+    let radius = Metres::from(mars.radius());
+    let water = WaterGate::of_air(
+        air,
+        mars.inventory().water(),
+        (radius, mars.surface_gravity()),
+    );
+    let lid = mars
+        .crust_lid()
+        .map(crate::planetary::hooks::crust::CrustLid::lithology);
+    let ground =
+        context.partition_ground(air, &water, material, CrustWater::of_record(material, lid));
+    let conditions = SurfaceConditions::derive(&SurfaceInputs {
+        atmosphere: air,
+        equilibrium_temperature: mars.equilibrium_temperature(),
+        surface_gravity: mars.surface_gravity(),
+        radius,
+        material,
+        lid: context.lid().map(|lid| lid.lithology),
+        stellar_flux: WattsPerSquareMetre::from(mars.flux()),
+        xuv_flux: mars.xuv_flux(),
+        spin: spin_of("Mars"),
+        heat_flow: context.heat_flow(),
+        ocean_weight: spun.ocean_weight(),
+    })
+    .expect("Mars has a surface");
+    let pass = read
+        .conditions
+        .as_ref()
+        .expect("Mars's pass reads its climate");
+    assert_same_bits(
+        conditions.mean_surface_temperature().value(),
+        pass.mean_surface_temperature().value(),
+    );
+    let record = ice_fraction(&IceInputs {
+        conditions: &conditions,
+        state: air.state(),
+        crust: ground.crust,
+        surface_water: ground.surface_water,
+    });
+    let ice = read
+        .condensates
+        .entry(Gas::Water.substance(), CondensatePhase::Solid)
+        .map_or(
+            0.0,
+            crate::planetary::chem::partition::CondensateEntry::area_fraction,
+        );
+    eprintln!("Mars's water ice: {ice:.6} in its passes, {record:.6} the record's");
+    assert_same_bits(ice, record);
+    assert!((0.005..=0.02).contains(&ice), "{ice}");
 }

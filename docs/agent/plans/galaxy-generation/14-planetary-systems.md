@@ -23627,3 +23627,121 @@ planetary::record` (624 tests at T57.a's commit).
       `just gen-protocol` (206 passed); Clippy `--workspace --all-targets` with `-D warnings`;
       rustdoc with `-D warnings` (`just doc-check`); rustfmt and Prettier. Batch D's gate follows
       the tip's merge.
+  - _Batch E's D1, the re-check by class, the states census and T54.a's sim tests_
+    (decision-p14-t54a-passes, the Batch C relay's "The re-check counts" and "Q1 tests: The
+    sample", and "C2's guards and the CH₄ Snowballs (2026-10-21)"; decision-pre-23-review items 2,
+    13, 22, 26, 27, 30, 31 and 33; decision-p14-t54a-states §6.3–6.4 and §7;
+    decision-p14-t54a-water-consistency, "Batch B follow-up" §F.1; design-batch-c §4). Test code
+    only (`#[cfg(test)]`), a checkpoint at 22: `GENERATOR_VERSION` stays 22 and no golden moves.
+    - _Two test-only pass drivers_ beside `PassDriver::T51b` (`derive/mod.rs`): `From(albedo)`,
+      the solve from a given first albedo in place of 0.3, over the stand-in or a record (item 26's
+      second start); and `Traced`, the solve over a record with every pass, plain and bracketed,
+      recorded in order (`traced`, `TracedPass`: the albedo and context read, T_eq, the air and the
+      lid). Both through `solved_from`, the generator's solve but for its start, so that
+      `record_passes` keeps its line count; `Traced` over the stand-in is unreachable, as `T51b`
+      over a record is.
+    - _The re-check by class_ (`under_the_batch_the_photometry_states_the_derivation_s_albedo`):
+      each body's traced solve is its derivation to the bit, one traced pass a pass counted. Each
+      jump across the diagonal is classed by what differs between its bracket's ends under the
+      frozen context, the published pass and the nearest traced pass on the other side of the
+      diagonal (design-batch-c §4): the state (the state edge), else the lid row (a lid flip), else
+      the capped set (an onset: a condensable whose airborne weight lies below its inventory's, the
+      greenhouse gain's own test), else a cover flip; each context jump by the key's members that
+      differ; and, listed and not counted, every settled body whose context's key changed during
+      its passes from the third pass's context on (a lid first taken aside) or whose capped set
+      changed from pass to pass (items 17 and 22). The sample's 5 planets and 1 moon across the
+      diagonal: 4 state edges (three at the 100 Pa line, 02000b2ca0000001.1100,
+      02000b2cdfff0000.0d00 and the moon 02000b2ca0000001.0d02; one a CO₂ collapse,
+      01ffeb2c20000000.0100, a runaway at 381 K under 9.5 bar against an airless 156 K with its CO₂
+      frozen out) and 2 cover flips (01ffeb2c20000000.0800, 02001b2c5ffe0000.0700, `Snowball`s
+      under 28 and 35 bar); no lid flip or onset among them; no context jump. Settled with a
+      discrete change: 56, of which 39 only between passes 1 and 2 (C₀ to the first K) and 17
+      later (the craters' crust class 7, the unresurfaced test 4, C3's two lid flips, 8 onsets
+      after pass 2), each settled. E2 (item 30): no body's area mix at its clamp
+      (`LARGEST_BOND_ALBEDO`), and the area mix's bands more than three (a `const` assertion), which
+      T51.b's anchors' tests read. The cover rule with the water check runs over each published
+      pass's partition (the record's by rule (f)).
+    - _The guards, confirmed and run by name_ (main's G1 and G2): G1,
+      `the_passes_endings_over_the_whole_sample_are_recorded` asserts the 400 systems' planets
+      jumping at most 2%: 17 of 1,568 (1.08%), 50 bracketed (3.19%); members 3,751 (7, 2), moons
+      1,185 (6, 3); all 6,504, 63 bracketed (0.97%) and 22 jumping (0.34%); the sample's pin stays
+      at its 5 of 226. G2, `a_moon_s_law_is_held_after_at_most_two_rounds`: 426 moons, 275 held
+      after round 1 and 151 after round 2 (142 captures, 9 giant-impact moons, no regular moon),
+      no flip or oscillation, each round 2 round 1's law to the bit, so §2.4's τ discrepancy is 0
+      by construction; Q2's test 1 for round 2 stands from Batch D's fix commit (PD-2).
+    - _The water follow-up check_ (`check_cover_rule`, its new `partition` argument;
+      `liquid_stability` and `phase_there`, `condensed_phase_at` written again from the registry's
+      diagram as its oracle): every liquid entry with an area lies where its substance is liquid,
+      p_s ≥ p_sat at the temperature its condensate lies at (the warmest zone's for the liquid part
+      of a reservoir that lies solid) and below its critical temperature, asserted; every phase
+      `condensate_of`'s fallback set is listed with its entries, p_s and p_sat. The snapshot walk
+      (`the_record_s_surface_holds_its_published_condensates`) passes no partition.
+    - _The census_ (`the_states_and_the_dark_thick_airs_are_recorded`, ignored, run by name), over
+      every present planet, member and moon with a surface of the first 60 whole systems and of the
+      15 golden systems (`golden_systems`, `GOLDEN_SYSTEMS`: `tests/planetary_golden.rs`'s pinned
+      IDs in its Milky Way fixture at its seed, generated whole): the dark-thick-air census (G3),
+      the states census (§6.4: the snowballs by set and host phase, each above 273.15 K with its τ
+      terms; the iced Temperates; the dry melts; the runaways outside the present runaway limit,
+      Σ F ÷ S_eff,runaway at the present luminosities, `runaway_now`; `Airless` with pressure; the
+      under-ice guard's cases), item 26's second starts (§6.3: hot `Snowball`s from 0.50, iced
+      `Temperate`s from 0.294, runaways from the melt's 0.10), and the cover rule with the water
+      check over the published passes' partitions, asserted; the rulings' escalations listed, not
+      failed, and a `CENSUS` line a body, which the bless note joins with 22 (P14.T57.a's held
+      column for the sample, the goldens at 446a06e4) and C1.
+    - _The table's Earth and Mars over a record_ (`hooks/figures/cover/tests.rs`, `TableRecord`, a
+      test-only `PassRecordOf`): the table's body under its measured spin and insolation table, K
+      the figures' first stage of each pass's own air at the table's figure inputs over its own
+      bulk, and a planet's crust basis about a solar host (solar Mg/Si, \[α/Fe\] and \[Fe/H\] 0,
+      formed at 3 Myr, the crust tests' convention), with no system about it.
+      `the_table_s_earth_over_its_record_holds_288_k` asserts 287.155 K inside 288 ± 2 K, its
+      passes settled and its condensates holding `H2O` (a sea over 0.7316 with a layer), and states
+      its Bond albedo 0.29882 against 0.294 with its terms;
+      `the_table_s_mars_over_its_record_takes_the_record_s_ice_in_its_passes` asserts its water ice
+      in its passes (0.011453, the published pass's `H2O` solid, which the area mix read) equal to
+      the record's to the bit, T24.b's ice over the ground and conditions rule (f) builds the record
+      on, and inside 0.005–0.02, and states its Bond albedo 0.34421 against 0.250 with item 13's
+      terms (`basalt_fe` 0.3385, the ice, cloud 0.0021).
+    - _Plan 14's T54.a list_: `every_present_planet_s_keyed_members_hold_registry_keys_only` (165
+      planets with a surface over the 60 systems, 1,373 keys: condensates, liquids, ices, gases
+      and crust rows, each resolving by its key to itself);
+      `a_second_start_at_the_first_s_albedo_is_the_solve` (`From(0.3)` is the solve to the bit
+      over the first 5 systems). The published lid equal to the last pass's (C3's test 11) holds.
+    - _Deviations and lane choices_ (each the lane's lean, recorded):
+      - The jump's other end is the nearest traced pass on the other side of the diagonal under
+        the frozen context, not the solver's own end, which `Solved` does not carry
+        (design-batch-c §4's `Solved::ends` and `held_at_cap` are non-test code, not built): the
+        bisection leaves no pass inside its last interval, so it is that end, or one nearer the
+        edge.
+      - Item 26's re-check reruns every runaway greenhouse from 0.10, not only the four that were
+        magma oceans at 22, and runs over the goldens too (subgiant .0402 is the goldens'); the
+        four are named by P14.T57.a's held column.
+      - The states census's 22 values for the sample are P14.T57.a's held column (its run at 22's
+        rules, `p14-t57a/new-run2.log`), there being no 22 build of the sample.
+      - The table's record takes the table's given continents (Earth's 0.405) and the crust tests'
+        3 Myr formation, not a system's grown continents and P14.T28.a's draw; E3's "the record's"
+        ice is rule (f)'s, rebuilt from the published pass's context, the table's bodies having no
+        record of their own.
+      - The water check reads each liquid's condensate's `lies_at`; the record's `Surface` carries
+        no partition, so it runs where the published pass's is at hand (the re-check, the census),
+        not in the snapshot walk.
+    - _Findings_ (recorded, not blockers): 15 runaway greenhouses outside the present runaway
+      limit in the sample, all about substellar hosts (brown dwarfs at 1,184–2,811 K, Σ F ÷ S_eff
+      now 0.0075–0.55, 12 at 64–135 K), against item 33's "1 of 954, post-main-sequence hosts
+      only": the same history-set runaway (a host's youth), none inside the present limit (no
+      escalation), for P14.T53.b's present-insolation rule. The dark-thick-air class is 4 golden
+      bodies at C3 (13 at C2): C3's brighter lids lifted 9 above 0.1, still below their Rayleigh
+      layers. `condensate_of`'s 23 fallback phases are solids on airless bodies whose partial
+      pressures are 10⁻¹⁵⁶–10⁻³¹⁶ Pa, some subnormal (a value read on no wire; recorded for the
+      determinism review).
+    - _Moved goldens_: none (`golden_diff.py`: "No golden files changed").
+    - _Files:_ `planetary/derive/mod.rs` (its `#[cfg(test)]` drivers), `planetary/system/tests.rs`,
+      `planetary/hooks/figures/cover/tests.rs`.
+    - _Checks:_ by name on the final tree (`d1/final.log`, 9 passed): the re-check, the condensates
+      walk, the two table tests, the second start, the registry keys, the census (ignored, by
+      name), `a_body_that_settles_keeps_t51b_s_bits` and `the_greenhouse_constants_are_their_fits`;
+      earlier, by name, `an_enceladus_takes_its_fresh_frost_near_0_8` and
+      `a_pluto_and_a_triton_given_their_ices_take_their_bond_albedos` (E2's anchors), and G1 and G2
+      (`the_passes_endings_over_the_whole_sample_are_recorded`, ignored, and
+      `a_moon_s_law_is_held_after_at_most_two_rounds`; `d1/g1g2.log`); Clippy `-p hyperion-sim
+--lib --tests -D warnings` (clean); rustfmt; `golden_diff.py` ("No golden files changed").
+      Not run: the slow tier, the gate (the lane's).

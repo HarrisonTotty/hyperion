@@ -678,7 +678,7 @@ fn the_record_s_surface_holds_its_published_condensates() {
             };
             let id = record.identity().id();
             let condensates = check_record_condensates(id, surface, &mut tally);
-            check_cover_rule(id, surface, &mut cover);
+            check_cover_rule(id, surface, None, &mut cover);
             check_ice_bulk(id, surface, &mut ice_bulks);
             if let Some(sea) = condensates.entry(water, CondensatePhase::Liquid) {
                 eprintln!(
@@ -830,12 +830,14 @@ fn check_ice_bulk(id: crate::id::BodyId, surface: &Surface, tally: &mut IceBulkT
 
 /// What [`check_cover_rule`] counts for the bless note: the surfaces whose ices take T24.b's water
 /// ice with an area and no `H2O` solid entry (W3 (a)), whose liquids take a `Snowball`'s ocean
-/// under its ice (W3 (b)), and the lists scaled to the surface (W2).
+/// under its ice (W3 (b)), and the lists scaled to the surface (W2); and, where it reads the
+/// partition, the water follow-up check's ([`liquid_stability`]).
 #[derive(Debug, Default)]
 struct CoverRuleTally {
     crust_ice: u32,
     under_ice: u32,
     scaled: u32,
+    liquids: LiquidTally,
 }
 
 /// Decision-p14-t54a-water-consistency §4.2: `surface`'s liquids and ices, the record of `id`, are
@@ -852,7 +854,16 @@ struct CoverRuleTally {
 ///   water on an ice-rich crust or under a `Snowball`'s cover, which T24.b does not cap, and an
 ///   entry with no layer, whose density is not read.
 /// - **W5.** Each list sums to at most 1.
-fn check_cover_rule(id: crate::id::BodyId, surface: &Surface, tally: &mut CoverRuleTally) {
+/// - **The water follow-up check** (decision-p14-t54a-water-consistency, "Batch B follow-up"),
+///   given the partition `partition` the condensates were published from, the published pass's
+///   (rule (f)): every liquid entry is liquid where it lies, and every phase `condensate_of`'s
+///   fallback set is listed ([`liquid_stability`]).
+fn check_cover_rule(
+    id: crate::id::BodyId,
+    surface: &Surface,
+    partition: Option<&crate::planetary::chem::partition::Partition>,
+    tally: &mut CoverRuleTally,
+) {
     use crate::planetary::chem::partition::{Basins, CondensatePhase};
     use crate::planetary::hooks::figures::cover;
     let water = Gas::Water.substance();
@@ -949,6 +960,179 @@ fn check_cover_rule(id: crate::id::BodyId, surface: &Surface, tally: &mut CoverR
         (other_area - filled).abs() <= 1e-12,
         "{id}: the other liquids cover {other_area}, their layers fill {filled}"
     );
+    if let Some(partition) = partition {
+        liquid_stability(&id.to_string(), surface, partition, &mut tally.liquids);
+    }
+}
+
+/// What [`liquid_stability`] counts and lists: the liquid entries checked, the phases
+/// `condensate_of`'s fallback set (each with its body, `p_s` and `p_sat`), and the liquid entries
+/// with an area that would boil or lie at or above their critical temperature
+/// (decision-p14-t54a-water-consistency, "Batch B follow-up", §F.1).
+#[derive(Debug, Default)]
+struct LiquidTally {
+    liquids: u32,
+    fallbacks: Vec<String>,
+    boiling: Vec<String>,
+}
+
+/// The phase a reservoir of the substance of `diagram`, whose frozen assemblage first melts at
+/// `first_melt` and whose partial pressure is `partial`, takes at `temperature` under the surface
+/// pressure `pressure`, or `None` where it cannot lie condensed there: `chem::partition`'s
+/// `condensed_phase_at`, written again from the registry's diagram as the check's oracle.
+fn phase_there(
+    diagram: &crate::substance::diagram::PhaseDiagram,
+    first_melt: Kelvin,
+    temperature: Kelvin,
+    (pressure, partial): (crate::units::Pascals, crate::units::Pascals),
+) -> Option<crate::planetary::chem::partition::CondensatePhase> {
+    use crate::planetary::chem::partition::CondensatePhase;
+    if temperature >= diagram.critical_temperature() {
+        return (partial >= diagram.critical_pressure()).then_some(CondensatePhase::Supercritical);
+    }
+    let triple = diagram.triple_temperature();
+    match diagram
+        .phase_at(temperature, pressure)
+        .and_then(CondensatePhase::of)
+    {
+        Some(CondensatePhase::Solid)
+            if first_melt < triple && temperature >= first_melt && temperature < triple =>
+        {
+            Some(CondensatePhase::Liquid)
+        }
+        phase => phase,
+    }
+}
+
+/// Decision-p14-t54a-water-consistency, "Batch B follow-up" §F.1 (the bless note's
+/// water-consistency follow-up): on `surface`, the record of `what`, whose condensates its
+/// partition `partition` published (rule (f): its published pass's), every liquid entry with an
+/// area lies where its substance is liquid at the temperature it lies at and the surface
+/// pressure, `p_s` ≥ `p_sat`(T) with T below its critical temperature; the liquid part of a
+/// reservoir that lies solid lies at the warmest zone, where it melts. Every condensate whose phase
+/// `condensate_of`'s fallback set (none at the temperature it lies at: the coldest zone's, else its
+/// first melt's rule) is listed with its entries' areas, `p_s` and `p_sat`.
+fn liquid_stability(
+    what: &str,
+    surface: &Surface,
+    partition: &crate::planetary::chem::partition::Partition,
+    tally: &mut LiquidTally,
+) {
+    use crate::planetary::chem::partition::CondensatePhase;
+    let p_s = partition.surface_pressure();
+    for c in partition.condensates() {
+        let Some(diagram) = c.substance().substance().phase_diagram() else {
+            continue;
+        };
+        if c.phase() == CondensatePhase::Supercritical || c.reservoir().value() <= 0.0 {
+            continue;
+        }
+        let partial = partition.of(c.substance()).map_or(
+            crate::units::Pascals::ZERO,
+            crate::planetary::chem::partition::Partitioned::partial_pressure,
+        );
+        let its = |e: &&crate::planetary::chem::partition::CondensateEntry| {
+            e.substance() == c.substance() || e.substance() == c.liquid()
+        };
+        let t = c.lies_at();
+        if phase_there(diagram, c.first_melt(), t, (p_s, partial)).is_none() {
+            let entries: Vec<String> = surface
+                .condensates()
+                .entries()
+                .iter()
+                .filter(its)
+                .map(|e| format!("{:?} over {:.6}", e.phase(), e.area_fraction()))
+                .collect();
+            tally.fallbacks.push(format!(
+                "{what}: {} {:?} (its liquid {}), lies at {:.2} K, coldest {:.2} K, p_s {:.6e} \
+                 Pa, p_sat {:.6e} Pa there; entries {entries:?}",
+                c.substance().substance().key(),
+                c.phase(),
+                c.liquid().substance().key(),
+                t.value(),
+                partition.climate().coldest().value(),
+                p_s.value(),
+                diagram.saturation_pressure(t).value(),
+            ));
+        }
+        let liquids = surface.condensates().entries().iter().filter(its);
+        for e in liquids.filter(|e| e.phase() == CondensatePhase::Liquid) {
+            tally.liquids += 1;
+            let at = if c.phase() == CondensatePhase::Liquid {
+                t
+            } else {
+                partition.climate().warmest()
+            };
+            let p_sat = diagram.saturation_pressure(at);
+            let liquid = p_s >= p_sat && at < diagram.critical_temperature();
+            if !liquid && e.area_fraction() > 0.0 {
+                tally.boiling.push(format!(
+                    "{what}: {} over {:.6} at {:.2} K, p_s {:.6e} Pa against p_sat {:.6e} Pa, T_c \
+                     {:.2} K",
+                    e.substance().substance().key(),
+                    e.area_fraction(),
+                    at.value(),
+                    p_s.value(),
+                    p_sat.value(),
+                    diagram.critical_temperature().value(),
+                ));
+            }
+            if what == "01ffeb2ce0000000.0400" && e.substance() == Gas::Water.substance() {
+                eprintln!(
+                    "{what}: water's sea over {:.6} lies at {:.3} K under p_s {:.4} bar against \
+                     p_sat {:.4} bar there (water's p_sat at 573.8 K by the registry: {:.4} bar; \
+                     86.67 bar by IAPWS-95)",
+                    e.area_fraction(),
+                    at.value(),
+                    p_s.value() / 1e5,
+                    p_sat.value() / 1e5,
+                    diagram.saturation_pressure(Kelvin::new(573.8)).value() / 1e5,
+                );
+            }
+        }
+    }
+}
+
+/// The condensables the air `air` holds at their cap: each gas with a phase diagram whose airborne
+/// weight lies below its inventory's, some of it condensed, by P14.T24.a's greenhouse gain's own
+/// test (`greenhouse_gain`'s `Ordering::Less`). A change of the set between passes is an onset
+/// (decision-pre-23-review item 22).
+fn capped_gases(air: &crate::planetary::derive::Atmosphere) -> Vec<Gas> {
+    Gas::ALL
+        .into_iter()
+        .filter(|&gas| {
+            gas.substance().substance().phase_diagram().is_some()
+                && matches!(
+                    air.partial_pressures()
+                        .of(gas)
+                        .partial_cmp(&air.inventory_weights().of(gas)),
+                    Some(core::cmp::Ordering::Less)
+                )
+        })
+        .collect()
+}
+
+/// The members of the discrete key that differ between `a` and `b` (decision-p14-t54a-passes
+/// §1.5): the figures present, the basins' shape, the water share's outgassing branch, the regime,
+/// the craters' crust class, a moon's tide branch, the inertia lid and `lid_of`'s unresurfaced
+/// test.
+fn key_members(
+    a: &crate::planetary::derive::pass_record::PassContextKey,
+    b: &crate::planetary::derive::pass_record::PassContextKey,
+) -> Vec<&'static str> {
+    [
+        ("figures", a.figures != b.figures),
+        ("basins", a.basins != b.basins),
+        ("water share", a.volcanic != b.volcanic),
+        ("regime", a.regime != b.regime),
+        ("crust class", a.crust != b.crust),
+        ("tide branch", a.tide != b.tide),
+        ("lid", a.lid != b.lid),
+        ("resurfacing", a.unresurfaced != b.unresurfaced),
+    ]
+    .into_iter()
+    .filter_map(|(member, differs)| differs.then_some(member))
+    .collect()
 }
 
 /// R09's coarse inputs of `record` (`CoarseInputs::from_record`), with a basalt lid and an entry
@@ -4726,6 +4910,21 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
 ///   inputs.
 /// - **A column with nothing that condenses** reads no climate in its pass, and its θ is 0 to the
 ///   bit (R2-8).
+/// - **The per-pass trace** (§1.8; P14.T54.a's Batch E, D1): every body's solve, run again with each
+///   pass recorded (`PassDriver::Traced`), is its derivation to the bit, one traced pass a pass.
+///   Each jump across the diagonal is listed by class, by what differs between its bracket's ends
+///   under the frozen context (design-batch-c §4): the state (the state edge), the lid row (a lid
+///   flip), the capped set (an onset, decision-pre-23-review item 22), else a cover flip. Each
+///   context jump is listed by the key's members that differ. The settled bodies whose context's
+///   key changed during their passes, from the third pass's context on (a lid first taken aside),
+///   or whose capped set changed from pass to pass, are listed by member, not counted (items 17
+///   and 22).
+/// - **E2** (decision-pre-23-review item 30): no body's area mix at its clamp,
+///   `LARGEST_BOND_ALBEDO`, and the area mix weights more than three bands, which T51.b's anchors'
+///   tests read.
+/// - **The cover rule and the water follow-up check** ([`check_cover_rule`] over the published
+///   pass's partition, the record's by rule (f)): every liquid entry with an area is liquid where
+///   it lies; the phases `condensate_of`'s fallback set are listed.
 #[test]
 #[expect(
     clippy::too_many_lines,
@@ -4737,15 +4936,115 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     use hyperion_surface::field::ClimateModelKind;
 
     use crate::planetary::chem::partition::{Basins, Condensates};
+    use crate::planetary::derive::atmosphere::LARGEST_BOND_ALBEDO;
     use crate::planetary::derive::atmosphere::spun_read::{self, SpunRead};
     use crate::planetary::derive::passes::{
         Context, ContextFit, Convergence, JUMP_RESIDUAL, MOST_PASSES, floats_agree,
     };
-    use crate::planetary::derive::{DerivedBody, Under, equilibrium_temperature};
+    use crate::planetary::derive::photometry::area_mix::OPTICS_BANDS;
+    use crate::planetary::derive::{
+        DerivedBody, TracedPass, Under, equilibrium_temperature, traced,
+    };
     use crate::planetary::hooks::crust::{CrustLid, CrustLithology, LidCrust};
     use crate::planetary::hooks::figures::cover::water_surface_share;
     use crate::planetary::hooks::surface::OceanWeight;
     use crate::planetary::surface::steps::climate::regolith_inertia_j_per_m2_k_sqrt_s;
+
+    /// What changed discretely during the passes of a settled body's trace `trace` (§1.8's listed,
+    /// not counted; decision-pre-23-review items 17 and 22): its context's key from the third
+    /// pass's context on, C₀ and the first K aside, a lid first taken no change; and its capped set
+    /// from pass to pass, an onset. The members that changed, and each change with the pass that
+    /// read or gave it.
+    fn settled_moves(trace: &[TracedPass]) -> (Vec<&'static str>, Vec<String>) {
+        let (mut members, mut moves) = (Vec::new(), Vec::new());
+        for (n, pair) in trace.windows(2).enumerate().skip(1) {
+            let (a, b) = (pair[0].context.key(), pair[1].context.key());
+            for member in key_members(&a, &b) {
+                if member == "lid" && a.lid.is_none() {
+                    continue;
+                }
+                if !members.contains(&member) {
+                    members.push(member);
+                }
+                moves.push(format!("{member} read at pass {}", n + 2));
+            }
+        }
+        for (n, pair) in trace.windows(2).enumerate() {
+            let (a, b) = (capped_gases(&pair[0].air), capped_gases(&pair[1].air));
+            if a != b {
+                if !members.contains(&"onset") {
+                    members.push("onset");
+                }
+                moves.push(format!("capped {a:?} → {b:?} at pass {}", n + 2));
+            }
+        }
+        (members, moves)
+    }
+
+    /// One traced pass, described.
+    fn described_pass(p: &TracedPass) -> String {
+        format!(
+            "read {:.10}, gives {:.10}, T_eq {:.3} K, {:?} at {:.2} K under {:.4e} Pa, lid {:?}, \
+             capped {:?}",
+            p.read.value(),
+            p.air.albedo().value(),
+            p.equilibrium.value(),
+            p.air.state(),
+            p.air.surface_temperature().value(),
+            p.air
+                .surface_pressure()
+                .map_or(0.0, crate::units::Pascals::value),
+            p.lid.map(|lid| lid.lithology()),
+            capped_gases(&p.air),
+        )
+    }
+
+    /// The class of a jump across the diagonal (design-batch-c §4, decision-p14-t54a-passes §1.8):
+    /// what differs between the bracket's ends under its frozen context `context`, the published
+    /// pass at the albedo `published` and the nearest pass of `trace` under that context on the
+    /// other side of the diagonal: the state (the 100 Pa edge, the melt's), else the lid row (a lid
+    /// flip), else the capped set (an onset), else a cover flip. With both ends described.
+    fn jump_class(
+        trace: &[TracedPass],
+        published: BondAlbedo,
+        context: &PassContext,
+    ) -> (&'static str, String) {
+        let rises = |p: &TracedPass| p.air.albedo().value() - p.read.value() >= 0.0;
+        let under = |p: &&TracedPass| p.context.rank(context).is_eq();
+        let Some(end) = trace
+            .iter()
+            .filter(under)
+            .find(|p| p.read.value().total_cmp(&published.value()).is_eq())
+        else {
+            return ("unresolved", format!("no traced pass at {published:?}"));
+        };
+        let apart = |p: &TracedPass| (p.read.value() - published.value()).abs();
+        let Some(other) = trace
+            .iter()
+            .filter(under)
+            .filter(|p| rises(p) != rises(end))
+            .min_by(|a, b| apart(a).total_cmp(&apart(b)))
+        else {
+            return ("unresolved", described_pass(end));
+        };
+        let class = if end.air.state() != other.air.state() {
+            "state edge"
+        } else if end.lid.map(|lid| lid.row()) != other.lid.map(|lid| lid.row()) {
+            "lid flip"
+        } else if capped_gases(&end.air) != capped_gases(&other.air) {
+            "onset"
+        } else {
+            "cover flip"
+        };
+        (
+            class,
+            format!(
+                "published {}; the other end {}",
+                described_pass(end),
+                described_pass(other)
+            ),
+        )
+    }
 
     /// The lithologies a body's passes took, in order, each change kept once: its lid flips.
     fn lid_changes(lids: &[Option<CrustLid>]) -> Vec<Option<CrustLithology>> {
@@ -4851,13 +5150,21 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     let (mut lids, mut airless, mut radiative, mut deferred) = (0_u32, 0_u32, 0_u32, 0_u32);
     let (mut settled_flips, mut bracketed_flips) = (Vec::<String>::new(), Vec::<String>::new());
     let (mut airless_apart, mut thin_apart) = (Vec::<String>::new(), Vec::<String>::new());
+    // The per-pass trace's lists (§1.8): the jumps across the diagonal by class, the context
+    // jumps by member, the settled bodies whose context changed discretely during their passes by
+    // member (listed, not counted); and the cover rule with the water follow-up check.
+    let mut jumps_by: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
+    let mut context_jumps: Vec<String> = Vec::new();
+    let mut settled_members: BTreeMap<&'static str, u32> = BTreeMap::new();
+    let mut settled_changes: Vec<String> = Vec::new();
+    let mut cover = CoverRuleTally::default();
     // Tallies a derivation of the kind `kind`, re-run once at its published albedo and context as
-    // `again` re-runs it, its record's surface `surface`.
+    // `again` re-runs it, its record's surface `surface`, the record of `id`.
     let mut tally =
         |kind: &'static str,
          derived: &DerivedBody,
          what: String,
-         surface: Option<&Surface>,
+         (id, surface): (crate::id::BodyId, Option<&Surface>),
          again: &dyn Fn(PassDriver) -> (DerivedBody, Option<SpunRead>)| {
             let tally = tallies.entry(kind).or_default();
             tally.bodies += 1;
@@ -4880,7 +5187,21 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
                 "{what}"
             );
             assert_eq!(once.spun().map(|s| *s.next()), Some(*spun.next()), "{what}");
+            // The per-pass trace (§1.8): the solve once more with each pass recorded, its outcome
+            // the solve's to the bit, one traced pass for each pass counted.
+            let ((traced_body, _), trace) = traced(|| again(PassDriver::Traced));
+            assert_eq!(format!("{traced_body:?}"), format!("{derived:?}"), "{what}");
+            assert_eq!(trace.len(), usize::try_from(passes).unwrap(), "{what}");
+            // E2 (decision-pre-23-review item 30): no body's area mix at its clamp.
+            assert!(
+                derived.albedo().value() < LARGEST_BOND_ALBEDO
+                    && derived.atmosphere().albedo().value() < LARGEST_BOND_ALBEDO,
+                "{what}: an area mix at its clamp"
+            );
             if let (Some(surface), Some(read)) = (surface, &read) {
+                // The cover rule and the water follow-up check over the published pass's
+                // partition, the record's by rule (f).
+                check_cover_rule(id, surface, Some(&read.partition), &mut cover);
                 crusts += u32::from(same_publication(&what, surface, read));
                 if read.conditions.is_none() {
                     climates_unread += 1;
@@ -4976,6 +5297,13 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
                             "{what}: the record's figures against {spun:?}"
                         );
                     }
+                    let (members, moves) = settled_moves(&trace);
+                    if !moves.is_empty() {
+                        for member in members {
+                            *settled_members.entry(member).or_default() += 1;
+                        }
+                        settled_changes.push(format!("{what}: {}", moves.join("; ")));
+                    }
                 }
                 Convergence::Bracketed {
                     residual,
@@ -4991,8 +5319,15 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
                         (joint.atmosphere().albedo().value() - derived.albedo().value()).abs();
                     tally.second_round += u32::from(context != ContextFit::FirstRound);
                     let class = if residual > JUMP_RESIDUAL {
+                        let (by, ends) = jump_class(&trace, derived.albedo(), spun.context());
+                        jumps_by
+                            .entry(by)
+                            .or_default()
+                            .push(format!("{what}: {ends}"));
                         Class::Jump
                     } else if context == ContextFit::Jump {
+                        let members = key_members(&spun.context().key(), &spun.next().key());
+                        context_jumps.push(format!("{what}: {members:?}"));
                         Class::ContextJump
                     } else if derived.albedo().value() > 1.0 - 1e-6 {
                         Class::Frost
@@ -5071,7 +5406,7 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
                     derived.atmosphere().surface_temperature().value(),
                     derived.fractions().water(),
                 ),
-                surface,
+                (record.identity().id(), surface),
                 &again,
             );
             for child in system.children(body.index) {
@@ -5117,7 +5452,7 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
                         derived.equilibrium_temperature().value(),
                         derived.atmosphere().surface_temperature().value(),
                     ),
-                    surface,
+                    (record.identity().id(), surface),
                     &again,
                 );
             }
@@ -5176,6 +5511,43 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
         airless_apart.join("\n  "),
         thin_apart.join("\n  "),
     );
+    eprintln!(
+        "the jumps across the diagonal by class (state edge, lid flip, onset, cover flip):\n  {}\n\
+         context jumps by member {}:\n  {}\nsettled bodies whose context changed discretely \
+         during their passes (listed, not counted; items 17 and 22) {}, by member \
+         {settled_members:?}:\n  {}",
+        jumps_by
+            .iter()
+            .map(|(class, list)| format!("{} {class}:\n    {}", list.len(), list.join("\n    ")))
+            .collect::<Vec<_>>()
+            .join("\n  "),
+        context_jumps.len(),
+        context_jumps.join("\n  "),
+        settled_changes.len(),
+        settled_changes.join("\n  "),
+    );
+    eprintln!(
+        "the cover rule over the published passes' partitions: W3 (a) {}, W3 (b) {}, scaled {}; \
+         {} liquid entries, each liquid where it lies; phases condensate_of's fallback set {}:\n  \
+         {}",
+        cover.crust_ice,
+        cover.under_ice,
+        cover.scaled,
+        cover.liquids.liquids,
+        cover.liquids.fallbacks.len(),
+        cover.liquids.fallbacks.join("\n  "),
+    );
+    // The water follow-up check (decision-p14-t54a-water-consistency, "Batch B follow-up" §F.1):
+    // no liquid entry with an area would boil at its surface pressure.
+    assert!(
+        cover.liquids.boiling.is_empty(),
+        "{:?}",
+        cover.liquids.boiling
+    );
+    // E2: T51.b's anchors are active, the area mix weighting more than three bands
+    // (`an_enceladus_takes_its_fresh_frost_near_0_8`,
+    // `a_pluto_and_a_triton_given_their_ices_take_their_bond_albedos`).
+    const { assert!(OPTICS_BANDS > 3, "the anchors read more than three bands") };
     // PD-1: R09's airless model reads its record's Γ on every airless body, bracketed ones too.
     assert!(airless_apart.is_empty(), "{airless_apart:?}");
     // The ruling's measures, over all bodies (decision-p14-t54a-passes §1.8 and item 5): at most
@@ -6579,4 +6951,623 @@ fn generation_s_dead_derivations_move_no_bit_of_the_sample() {
     eprintln!("checked: {checked:?}");
     assert_eq!(checked.records, 60, "{checked:?}");
     assert!(checked.members > 400 && checked.parents > 50, "{checked:?}");
+}
+
+// P14.T54.a, Batch E's D1: the states census, the dark-thick-air census and item 26's re-check over
+// the sample and the golden systems.
+
+/// The universe the golden systems are pinned in: `tests/planetary_golden.rs`'s `SYSTEMS_SEED`.
+const GOLDEN_SYSTEMS_SEED: u64 = 0x5eed_0000_0014_0032;
+
+/// The golden systems of `tests/planetary_golden.rs` (its `GOLDEN_SYSTEMS`, P14.T32) by name and
+/// pinned ID, whose `planetary/systems` goldens pin them: the census's fixtures.
+const GOLDEN_SYSTEMS: [(&str, u64); 15] = [
+    ("m_dwarf_resonant_chain", 0x0200_2b2c_a000_0000),
+    ("hot_jupiter", 0x41fc_ecba_0000_0006),
+    ("solar_like", 0x4200_6cba_0000_0009),
+    ("eccentric_giant", 0x4200_acaa_0000_000a),
+    ("halo_star", 0x0202_5b2b_e000_0001),
+    ("close_binary", 0x4200_2cb2_0000_0009),
+    ("wide_binary", 0x41ff_ecae_0000_0004),
+    ("hierarchical_triple", 0x4200_2cb2_0000_0003),
+    ("subgiant", 0x4200_6c9a_0000_0004),
+    ("red_giant", 0x4200_ecd2_0000_0003),
+    ("fallback_black_hole", 0x8200_b2e0_0000_000a),
+    ("filler_a", 0x01ff_fb2c_6000_0000),
+    ("filler_b", 0x2200_1659_8000_0000),
+    ("filler_c", 0x4200_2cb2_0000_0000),
+    ("t_tauri", 0x41fe_2c96_0000_000c),
+];
+
+/// The golden systems ([`GOLDEN_SYSTEMS`]) in the Milky Way fixture at their seed, generated whole
+/// as `golden_systems_are_pinned` generates them, once.
+fn golden_systems() -> &'static [(&'static str, SystemContext, PlanetarySystem)] {
+    static SYSTEMS: OnceLock<Vec<(&'static str, SystemContext, PlanetarySystem)>> = OnceLock::new();
+    SYSTEMS.get_or_init(|| {
+        let galaxy = crate::galaxy::Galaxy::from_params(
+            Seed::new(GOLDEN_SYSTEMS_SEED),
+            crate::galaxy::params::GalaxyParams::milky_way_like(),
+        )
+        .expect("the Milky Way fixture's gas is mostly neutral");
+        GOLDEN_SYSTEMS
+            .iter()
+            .map(|&(name, id)| {
+                let id = SystemId::from_raw(id).expect("a pinned ID is well formed");
+                let ctx =
+                    SystemContext::for_system(&galaxy, id).expect("a pinned ID names a system");
+                let system = generate(galaxy.seed(), &ctx);
+                (name, ctx, system)
+            })
+            .collect()
+    })
+}
+
+/// A body derived again under a driver, with its published pass's publication.
+type DerivedAgain<'a> = &'a dyn Fn(
+    PassDriver,
+) -> (
+    DerivedBody,
+    Option<crate::planetary::derive::atmosphere::spun_read::SpunRead>,
+);
+
+/// A present planet, member or moon with a surface, as the census walks it ([`census_walk`]).
+struct CensusCase<'a> {
+    /// "sample", or the golden system's name.
+    set: &'a str,
+    /// P14.T57.a's key, `SystemId(…) BodyIndex(…)`, with " moon" for a moon.
+    key: String,
+    /// "planets", "members" or "moons".
+    kind: &'static str,
+    /// Its record at the epoch.
+    record: &'a BodyRecord,
+    /// Its record's surface.
+    surface: &'a Surface,
+    /// Its derivation over its record.
+    derived: &'a DerivedBody,
+    /// Its zone's stars at the time: each one's phase and effective temperature.
+    hosts: String,
+    /// Its zone's stars' phases.
+    phases: String,
+    /// Σ Fᵢ ÷ `S_eff,i` at the runaway-greenhouse limit at the hosts' present luminosities
+    /// ([`runaway_now`]): 1 or more inside the present runaway limit.
+    runaway_now: f64,
+    /// It derived again under a driver.
+    again: DerivedAgain<'a>,
+}
+
+/// The phases and effective temperatures of the stars of `zone` at `t`.
+fn zone_hosts(ctx: &SystemContext, zone: &OrbitZone, t: UniverseTime) -> (String, String) {
+    let states: Vec<_> = zone
+        .members()
+        .map(|member| ctx.stars()[usize::from(member)].state_at(t))
+        .collect();
+    let hosts = states
+        .iter()
+        .map(|state| {
+            state.map_or_else(
+                || "unformed".to_owned(),
+                |s| format!("{:?} {:.0} K", s.phase(), s.effective_temperature().value()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" + ");
+    let phases = states
+        .iter()
+        .map(|state| state.map_or_else(|| "unformed".to_owned(), |s| format!("{:?}", s.phase())))
+        .collect::<Vec<_>>()
+        .join(" + ");
+    (hosts, phases)
+}
+
+/// Σ Fᵢ ÷ `S_eff,i` at the runaway-greenhouse limit (Kopparapu et al. 2013, P14.T12.b) at the
+/// present luminosities of the stars `zone`'s bodies orbit, along `orbit`, and of the companions,
+/// along their pairs' orbits: `Sky::of`'s sum, at the luminosities now rather than at their
+/// largest past (decision-pre-23-review item 33). 1 or more inside the present runaway limit.
+fn runaway_now(epoch: &Epoch<'_>, zone: &OrbitZone, orbit: &KeplerElements) -> f64 {
+    use crate::planetary::derive::habitable_zone::HabitableLimit;
+    let share = |light: &HostLight, (a, e): (crate::units::Metres, f64)| {
+        if light.luminosity().value() > 0.0 {
+            luminosity_flux(light.luminosity(), a, e).value()
+                / HabitableLimit::RunawayGreenhouse
+                    .flux(light.effective_temperature())
+                    .value()
+        } else {
+            0.0
+        }
+    };
+    let along = (orbit.semi_major_axis(), orbit.eccentricity().value());
+    let orbited: f64 = epoch
+        .lights(zone)
+        .unwrap_or_default()
+        .iter()
+        .map(|light| share(light, along))
+        .sum();
+    let companions: f64 = epoch
+        .companions(zone)
+        .unwrap_or_default()
+        .iter()
+        .map(|c| share(c.host(), (c.semi_major_axis(), c.eccentricity())))
+        .sum();
+    orbited + companions
+}
+
+/// Every present planet, member and moon of `system` with a surface and a derivation at the epoch,
+/// in body order, each given to `visit` ([`CensusCase`]).
+fn census_walk(
+    set: &str,
+    ctx: &SystemContext,
+    system: &PlanetarySystem,
+    visit: &mut dyn FnMut(&CensusCase<'_>),
+) {
+    use crate::planetary::derive::atmosphere::spun_read;
+    let t = UniverseTime::EPOCH;
+    if ctx.age_at_epoch().value() <= 0.0 {
+        return;
+    }
+    let epoch = Epoch::new(system, ctx, t).with_shades();
+    let cosines = HourCosines::new();
+    for body in system.bodies() {
+        let kind = match body.part {
+            Part::Planet(_) => "planets",
+            Part::Member(_) => "members",
+            Part::Moon(_) | Part::Ring(_) => continue,
+        };
+        let zone = system.zone_of(body);
+        let host = fate_host(ctx, zone);
+        let fate = system.fate_of(body, &host);
+        let at = fate.at(t);
+        let (hosts, phases) = zone_hosts(ctx, zone, t);
+        let runaway = at
+            .orbit()
+            .map_or(f64::NAN, |orbit| runaway_now(&epoch, zone, orbit));
+        let label = label::label(system, body.index).unwrap();
+        let (record, now) = system.primary_record(&epoch, &cosines, body, label, &fate);
+        if let (Section::Ok(surface), Some(derived)) = (record.surface(), now.derived.as_ref()) {
+            let again = |driver| {
+                let ((derived, _, _), read) = spun_read::capture(|| {
+                    system.primary_derived(&epoch, &cosines, (body, &fate), &at, driver)
+                });
+                (derived, read)
+            };
+            visit(&CensusCase {
+                set,
+                key: format!("{:?} {:?}", ctx.id(), body.index),
+                kind,
+                record: &record,
+                surface,
+                derived,
+                hosts: hosts.clone(),
+                phases: phases.clone(),
+                runaway_now: runaway,
+                again: &again,
+            });
+        }
+        for child in system.children(body.index) {
+            if !matches!(child.part, Part::Moon(_)) {
+                continue;
+            }
+            let label = label::label(system, child.index).unwrap();
+            let record = system.satellite_record(&epoch, &cosines, child, label, &now, &fate);
+            let Some(moon) = system.record_moon(&epoch, child, (&now, &fate)) else {
+                continue;
+            };
+            let Section::Ok(surface) = record.surface() else {
+                continue;
+            };
+            let again = |driver| {
+                let (derived, read) = spun_read::capture(|| {
+                    system.record_moon_driven(&epoch, child, (&now, &fate), driver)
+                });
+                (*derived.unwrap().body(), read)
+            };
+            visit(&CensusCase {
+                set,
+                key: format!("{:?} {:?} moon", ctx.id(), child.index),
+                kind: "moons",
+                record: &record,
+                surface,
+                derived: moon.body(),
+                hosts: hosts.clone(),
+                phases: phases.clone(),
+                runaway_now: runaway,
+                again: &again,
+            });
+        }
+    }
+}
+
+/// What the census tallies and lists ([`the_states_and_the_dark_thick_airs_are_recorded`]).
+#[derive(Default)]
+struct Census {
+    bodies: std::collections::BTreeMap<String, u32>,
+    dark: Vec<String>,
+    dark_by_kind: std::collections::BTreeMap<String, u32>,
+    snowballs: std::collections::BTreeMap<String, u32>,
+    hot: Vec<String>,
+    iced: Vec<String>,
+    dry_melts: Vec<String>,
+    outside_runaway: Vec<String>,
+    airless_with_pressure: std::collections::BTreeMap<String, (u32, f64)>,
+    under_ice: Vec<String>,
+    second_starts: Vec<String>,
+    escalations: Vec<String>,
+    cover: CoverRuleTally,
+}
+
+impl Census {
+    /// Tallies and lists the body `case`.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one body's census across the rulings' classes, each listed"
+    )]
+    fn visit(&mut self, case: &CensusCase<'_>) {
+        use crate::planetary::chem::partition::CondensatePhase;
+        use crate::planetary::derive::Under;
+        use crate::planetary::derive::atmosphere::GreenhouseConstants;
+        use crate::planetary::hooks::figures::cover::UNDER_ICE_MELTING_POINT;
+        let (surface, derived) = (case.surface, case.derived);
+        let group = if case.set == "sample" {
+            "sample"
+        } else {
+            "goldens"
+        };
+        let index = case.record.index().get();
+        let name = if case.set == "sample" {
+            format!("{} ({})", case.record.identity().id(), case.key)
+        } else {
+            format!("{} {index:04x}", case.set)
+        };
+        let state = surface.state();
+        let (conditions, figures) = (surface.conditions(), surface.figures());
+        let t_s = conditions.mean_surface_temperature().value();
+        let p = conditions.surface_pressure().value();
+        let (bond, t_eq) = (
+            derived.albedo().value(),
+            derived.equilibrium_temperature().value(),
+        );
+        let g = derived.surface_gravity().value();
+        let (ice, ocean) = (figures.ice_fraction(), figures.ocean_fraction());
+        let terms = GreenhouseConstants::FITTED.terms(
+            derived.atmosphere().partial_pressures(),
+            derived.equilibrium_temperature(),
+        );
+        let largest = terms
+            .iter()
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .copied()
+            .expect("three terms");
+        *self
+            .bodies
+            .entry(format!("{group} {}", case.kind))
+            .or_default() += 1;
+        let line = format!(
+            "{name}: {} {state:?}, T_s {t_s:.2} K, p_s {:.4} bar, T_eq {t_eq:.2} K, A {bond:.4}, \
+             ice {ice:.4}, ocean {ocean:.4}, g {g:.3} m s⁻², τ {terms:?}, host {}",
+            case.kind,
+            p / 1e5,
+            case.hosts,
+        );
+        eprintln!(
+            "CENSUS | {} | {} | {} | {index:04x} | {} | {state:?} | {t_s:.6} | {p:.6e} | \
+             {t_eq:.6} | {bond:.6} | {ice:.6} | {ocean:.6} | {g:.6} | {:?} | {}",
+            case.set,
+            case.key,
+            case.record.identity().id(),
+            case.kind,
+            largest.0,
+            case.phases,
+        );
+        // G3: the dark-thick-air census (decision-p14-t54a-passes §G3.6).
+        if state != SurfaceState::MagmaOcean && p >= 1e5 && bond < 0.1 {
+            *self
+                .dark_by_kind
+                .entry(format!("{group} {}", case.kind))
+                .or_default() += 1;
+            self.dark.push(format!(
+                "{line}; p_s ÷ g {:.2} of Earth's",
+                (p / g) / (101_325.0 / 9.806_65)
+            ));
+        }
+        // Decision-p14-t54a-states §6.4: the states.
+        match state {
+            SurfaceState::Snowball => {
+                *self
+                    .snowballs
+                    .entry(format!("{group} {}", case.phases))
+                    .or_default() += 1;
+                if t_s > 273.15 {
+                    self.hot
+                        .push(format!("{line}; its largest τ term {largest:?}"));
+                    if largest.0 != Gas::CarbonDioxide {
+                        self.escalations.push(format!(
+                            "a hot Snowball whose largest τ term is not CO₂'s: {line}"
+                        ));
+                    }
+                }
+                let liquid = surface
+                    .condensates()
+                    .entry(Gas::Water.substance(), CondensatePhase::Liquid)
+                    .is_some();
+                let layer = figures.surface_water().value();
+                let melting = UNDER_ICE_MELTING_POINT.value();
+                if t_s >= melting
+                    && figures.heat_flow().value() > 0.0
+                    && (t_s > melting || layer > 0.0)
+                {
+                    self.under_ice.push(format!(
+                        "{line}; its surface water {layer:.4e} kg m⁻², an H2O liquid entry \
+                         {liquid}, so the guard {}",
+                        if liquid {
+                            "moved nothing"
+                        } else {
+                            "removed an ocean under ice"
+                        }
+                    ));
+                }
+            }
+            SurfaceState::Temperate if ice >= 0.5 => self.iced.push(line.clone()),
+            SurfaceState::MagmaOcean if p <= 0.0 => self.dry_melts.push(line.clone()),
+            SurfaceState::RunawayGreenhouse => {
+                if case.runaway_now < 1.0 {
+                    self.outside_runaway.push(format!(
+                        "{line}; Σ F ÷ S_eff,runaway now {:.4}",
+                        case.runaway_now
+                    ));
+                } else if t_s < 373.15 {
+                    self.escalations.push(format!(
+                        "a RunawayGreenhouse below 373.15 K inside the present runaway limit \
+                         ({:.4}): {line}",
+                        case.runaway_now
+                    ));
+                }
+            }
+            SurfaceState::Airless if p > 0.0 => {
+                let entry = self
+                    .airless_with_pressure
+                    .entry(group.to_owned())
+                    .or_default();
+                entry.0 += 1;
+                entry.1 = entry.1.max(p);
+                if p >= 100.0 {
+                    self.escalations
+                        .push(format!("an Airless body at or above 100 Pa: {line}"));
+                }
+            }
+            SurfaceState::Temperate
+            | SurfaceState::MagmaOcean
+            | SurfaceState::Airless
+            | SurfaceState::GasEnvelope => {}
+        }
+        // Item 26's re-check (decision-p14-t54a-states §6.3): the second start, T13.c's table
+        // albedo of the other branch.
+        let start = match state {
+            SurfaceState::Snowball if t_s > 273.15 => Some(0.50),
+            SurfaceState::Temperate if ice >= 0.5 => Some(0.294),
+            SurfaceState::RunawayGreenhouse => {
+                Some(SurfaceState::MagmaOcean.albedo(surface.material()).value())
+            }
+            SurfaceState::Snowball
+            | SurfaceState::Temperate
+            | SurfaceState::MagmaOcean
+            | SurfaceState::Airless
+            | SurfaceState::GasEnvelope => None,
+        };
+        if let Some(start) = start {
+            let (second, _) = (case.again)(PassDriver::From(BondAlbedo::from_fraction(start)));
+            let described = |d: &DerivedBody| {
+                format!(
+                    "{:?} at {:.2} K, A {:.6} ({} passes, {:?})",
+                    d.atmosphere().state(),
+                    d.atmosphere().surface_temperature().value(),
+                    d.albedo().value(),
+                    d.atmosphere_passes(),
+                    d.convergence(),
+                )
+            };
+            let same = second.atmosphere().state() == state
+                && (second.albedo().value() - bond).abs() < 1e-6;
+            self.second_starts.push(format!(
+                "{name}: from 0.3, the generator's start, which chose the published, {}; from \
+                 {start} {}: {}",
+                described(derived),
+                described(&second),
+                if same { "single-branch" } else { "bistable" },
+            ));
+        }
+        // The cover rule and the water follow-up check over the published pass's partition (rule
+        // (f): the record's), where the pass published one (not a melt's).
+        let (_, read) = (case.again)(PassDriver::Again(Under::Read));
+        check_cover_rule(
+            case.record.identity().id(),
+            surface,
+            read.as_ref().map(|read| &read.partition),
+            &mut self.cover,
+        );
+    }
+}
+
+/// A measurement for the bless note, run by name (decision-p14-t54a-passes §G3.6;
+/// decision-p14-t54a-states §6.3–6.4 and §7; decision-pre-23-review item 26;
+/// decision-p14-t54a-water-consistency, "Batch B follow-up"), over every present planet, member
+/// and moon with a surface of the first 60 whole systems and of the 15 golden systems at the
+/// epoch:
+///
+/// - **the dark-thick-air census:** every body not molten under at least 1 bar with a Bond albedo
+///   below 0.1, by kind, with `p_s`, g, `p_s` ÷ g against Earth's, the Bond albedo, `T_s` and its
+///   hosts;
+/// - **the states census:** the snowballs by set and by their hosts' phase, each above 273.15 K
+///   with `T_s`, p, `T_eq`, A, ice, ocean and its τ terms; the Temperate worlds whose ices cover at
+///   least half the surface; the `MagmaOcean` worlds with no volatile air; the runaway greenhouses
+///   outside the present runaway limit; the `Airless` bodies with pressure; and the under-ice
+///   guard's cases (the Snowballs at or above 273.15 K with a heat flow, where the unguarded shell
+///   term would have listed an ocean under their ice);
+/// - **item 26's re-check:** every such hot `Snowball` from 0.50, every such iced `Temperate` from
+///   0.294 and every runaway greenhouse from the melt's 0.10 (T13.c's table albedos,
+///   `PassDriver::From`): what each settles to, and whether it is bistable or single-branch, the
+///   generator's start, 0.3, having chosen the published;
+/// - **the cover rule and the water follow-up check** ([`check_cover_rule`]) over the published
+///   pass's partition: every liquid entry with an area liquid where it lies, asserted, and every
+///   phase `condensate_of`'s fallback set listed.
+///
+/// The rulings' escalations are listed, not failed: a hot snowball whose largest τ term is not
+/// CO₂'s, an `Airless` body at or above 100 Pa, a runaway greenhouse below 373.15 K inside the
+/// present runaway limit. Each body also prints a `CENSUS` line, which the bless note joins with
+/// version 22's figures (P14.T57.a's run over the sample; the goldens at 22): more than 3 sample
+/// snowballs below 273.15 K at 22 and above at 23 go to main.
+#[test]
+#[ignore = "a measurement for the bless note, run by name"]
+fn the_states_and_the_dark_thick_airs_are_recorded() {
+    let mut census = Census::default();
+    for (ctx, system) in whole().iter().take(60) {
+        census_walk("sample", ctx, system, &mut |case| census.visit(case));
+    }
+    for (name, ctx, system) in golden_systems() {
+        census_walk(name, ctx, system, &mut |case| census.visit(case));
+    }
+    let list = |items: &[String]| items.join("\n  ");
+    let cover = &census.cover;
+    eprintln!("bodies with a surface: {:?}", census.bodies);
+    eprintln!(
+        "the dark-thick-air census (not molten, p_s ≥ 1 bar, Bond < 0.1) by kind {:?}:\n  {}",
+        census.dark_by_kind,
+        list(&census.dark)
+    );
+    eprintln!(
+        "snowballs by set and host phase {:?}; above 273.15 K {}:\n  {}",
+        census.snowballs,
+        census.hot.len(),
+        list(&census.hot)
+    );
+    eprintln!(
+        "Temperate with ices ≥ 0.5: {}:\n  {}",
+        census.iced.len(),
+        list(&census.iced)
+    );
+    eprintln!(
+        "MagmaOcean with no volatile air: {}:\n  {}",
+        census.dry_melts.len(),
+        list(&census.dry_melts)
+    );
+    eprintln!(
+        "runaway greenhouses outside the present runaway limit: {}:\n  {}",
+        census.outside_runaway.len(),
+        list(&census.outside_runaway)
+    );
+    eprintln!(
+        "Airless with pressure (bodies, the most, Pa): {:?}",
+        census.airless_with_pressure
+    );
+    eprintln!(
+        "the under-ice guard's cases: {}:\n  {}",
+        census.under_ice.len(),
+        list(&census.under_ice)
+    );
+    eprintln!(
+        "item 26's second starts: {}:\n  {}",
+        census.second_starts.len(),
+        list(&census.second_starts)
+    );
+    eprintln!(
+        "the cover rule: W3 (a) {}, W3 (b) {}, scaled {}; liquid entries checked {}; phases \
+         condensate_of's fallback set {}:\n  {}\nliquid entries that would boil {}:\n  {}",
+        cover.crust_ice,
+        cover.under_ice,
+        cover.scaled,
+        cover.liquids.liquids,
+        cover.liquids.fallbacks.len(),
+        list(&cover.liquids.fallbacks),
+        cover.liquids.boiling.len(),
+        list(&cover.liquids.boiling)
+    );
+    eprintln!(
+        "ESCALATIONS (to the lane): {}:\n  {}",
+        census.escalations.len(),
+        list(&census.escalations)
+    );
+    assert!(
+        cover.liquids.boiling.is_empty(),
+        "{:?}",
+        cover.liquids.boiling
+    );
+}
+
+/// The bistability re-check's driver from the generator's own first albedo, 0.3, is the solve to
+/// the bit (`PassDriver::From`; decision-pre-23-review item 26): over the first 5 whole systems'
+/// present planets, members and moons with a surface, over their records at the epoch.
+#[test]
+fn a_second_start_at_the_first_s_albedo_is_the_solve() {
+    let mut bodies = 0;
+    for (ctx, system) in whole().iter().take(5) {
+        census_walk("sample", ctx, system, &mut |case| {
+            let (from, _) = (case.again)(PassDriver::From(BondAlbedo::BEFORE_ATMOSPHERES));
+            assert_eq!(
+                format!("{from:?}"),
+                format!("{:?}", case.derived),
+                "{}",
+                case.key
+            );
+            bodies += 1;
+        });
+    }
+    assert!(bodies > 20, "{bodies}");
+}
+
+/// P14.T54.a's test list: every present planet's keyed members hold registry keys only, over the
+/// first 60 whole systems at the epoch. Each substance its surface section names (its condensates'
+/// entries, its liquids and ices, its air's gases and its crust's rows) is a row of the substance
+/// registry whose key resolves to it.
+#[test]
+fn every_present_planet_s_keyed_members_hold_registry_keys_only() {
+    use crate::substance::SubstanceId;
+    let resolves = |id: SubstanceId, what: &str| {
+        let key = id.substance().key();
+        assert_eq!(
+            crate::substance::by_key(key.as_str()),
+            Some(id),
+            "{what}: {key:?}"
+        );
+    };
+    let (mut planets, mut keys) = (0_u32, 0_u32);
+    for (ctx, system) in whole().iter().take(60) {
+        for record in system.snapshot_at(ctx, UniverseTime::EPOCH).bodies() {
+            let identity = record.identity();
+            if identity.kind() != BodyKind::Planet || identity.state() != BodyState::Present {
+                continue;
+            }
+            let Section::Ok(surface) = record.surface() else {
+                continue;
+            };
+            let what = identity.id().to_string();
+            let figures = surface.figures();
+            let mut named: Vec<SubstanceId> = surface
+                .condensates()
+                .entries()
+                .iter()
+                .map(crate::planetary::chem::partition::CondensateEntry::substance)
+                .collect();
+            named.extend(figures.surface_liquids().iter().map(|&(id, _)| id));
+            named.extend(figures.surface_ices().iter().map(|&(id, _)| id));
+            named.extend(surface.conditions().gases().iter().map(|&(id, _)| id));
+            if let Some(crust) = surface.crust().ok() {
+                named.extend(
+                    [
+                        crust.primary(),
+                        crust.secondary(),
+                        crust.tertiary(),
+                        crust.bulk(),
+                    ]
+                    .into_iter()
+                    .flatten(),
+                );
+                named.push(crust.provinces());
+            }
+            for id in named {
+                resolves(id, &what);
+                keys += 1;
+            }
+            planets += 1;
+        }
+    }
+    eprintln!("{planets} present planets with a surface, {keys} keys, each the registry's");
+    assert!(planets > 50 && keys > 500, "{planets} {keys}");
 }

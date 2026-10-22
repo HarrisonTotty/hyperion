@@ -1270,6 +1270,17 @@ pub(crate) enum PassDriver {
     /// the published albedo.
     #[cfg(test)]
     Again(Under),
+    /// The solve from the albedo given in place of [`BondAlbedo::BEFORE_ATMOSPHERES`], over the
+    /// stand-in or a record, its outcome its own: the bistability re-check's second start
+    /// (decision-pre-23-review item 26; decision-p14-t54a-states §6.3), T13.c's table albedo of
+    /// the other branch.
+    #[cfg(test)]
+    From(BondAlbedo),
+    /// The solve over a record, every pass it takes recorded in order on the thread's trace
+    /// ([`traced`]), its outcome the solve's to the bit: the convergence re-check's per-pass trace
+    /// (decision-p14-t54a-passes §1.8).
+    #[cfg(test)]
+    Traced,
 }
 
 /// Which context [`PassDriver::Again`]'s pass reads (the tests').
@@ -1865,6 +1876,28 @@ impl PassBody<'_> {
                     ..solved
                 }
             }
+            #[cfg(test)]
+            PassDriver::From(start) => {
+                let solved = passes::solve(
+                    start,
+                    |albedo| self.pass(surface, albedo),
+                    |&(_, _, air, _): &PassOut| air.albedo(),
+                    settled,
+                );
+                let (irradiated, heated, air, crust_lid) = solved.pass;
+                Passes {
+                    albedo: solved.albedo,
+                    irradiated,
+                    heated,
+                    air,
+                    count: solved.count,
+                    convergence: solved.convergence,
+                    spun: None,
+                    crust_lid,
+                }
+            }
+            #[cfg(test)]
+            PassDriver::Traced => unreachable!("the re-check traces a record's passes"),
         }
     }
 
@@ -1956,6 +1989,12 @@ impl PassBody<'_> {
                     let out = pass(albedo, &context);
                     (albedo, out, context, next(&out), count + 1, convergence)
                 }
+                #[cfg(test)]
+                PassDriver::From(start) => solved_from(start, pass, next),
+                #[cfg(test)]
+                PassDriver::Traced => {
+                    solved_from(BondAlbedo::BEFORE_ATMOSPHERES, tracing(pass), next)
+                }
             };
         let water = WaterGate::of_air(&air, self.pass_bulk.inventory_water, record.bulk());
         let ocean_weight = context.ocean_weight(&water, air.partial_pressures().of(Gas::Water));
@@ -2025,6 +2064,105 @@ pub(crate) fn without_crust<R>(run: impl FnOnce() -> R) -> R {
     let result = run();
     NO_CRUST.with(|cell| cell.set(before));
     result
+}
+
+/// What [`PassBody::record_passes`] reads of a solve: the albedo and the pass published, the
+/// context it read and the one its own air gives, the count and how the passes ended.
+#[cfg(test)]
+type RecordSolved = (
+    BondAlbedo,
+    PassOut,
+    PassContext,
+    PassContext,
+    u32,
+    Convergence,
+);
+
+/// The solve over a record of the passes `pass`, each pass's context the one `next` gives of the
+/// pass before, from the albedo `start` ([`PassDriver::From`], [`PassDriver::Traced`]): the
+/// generator's solve but for its first albedo, as [`PassBody::record_passes`] reads it.
+#[cfg(test)]
+#[must_use]
+fn solved_from(
+    start: BondAlbedo,
+    pass: impl Fn(BondAlbedo, &PassContext) -> PassOut,
+    next: impl Fn(&PassOut) -> PassContext,
+) -> RecordSolved {
+    let solved = passes::solve_in_context(
+        start,
+        PassContext::NONE,
+        pass,
+        |&(_, _, air, _): &PassOut| air.albedo(),
+        next,
+        settled,
+    );
+    (
+        solved.albedo,
+        solved.pass,
+        solved.context,
+        solved.next,
+        solved.count,
+        solved.convergence,
+    )
+}
+
+/// The passes `pass`, each recorded on the thread's trace as it is taken ([`PassDriver::Traced`]),
+/// each one `pass`'s to the bit.
+#[cfg(test)]
+fn tracing(
+    pass: impl Fn(BondAlbedo, &PassContext) -> PassOut,
+) -> impl Fn(BondAlbedo, &PassContext) -> PassOut {
+    move |read, context| {
+        let out = pass(read, context);
+        let (equilibrium, _, air, lid) = out;
+        PASS_TRACE.with(|trace| {
+            trace.borrow_mut().push(TracedPass {
+                read,
+                context: *context,
+                equilibrium,
+                air,
+                lid,
+            });
+        });
+        out
+    }
+}
+
+/// One pass of a traced solve ([`PassDriver::Traced`]): the albedo and the context it read, and
+/// what it gave: its equilibrium temperature, its atmosphere, whose albedo the next pass reads,
+/// and its lid.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TracedPass {
+    /// The albedo it read.
+    pub(crate) read: BondAlbedo,
+    /// The context it read.
+    pub(crate) context: PassContext,
+    /// Its equilibrium temperature, at the albedo it read.
+    pub(crate) equilibrium: Kelvin,
+    /// Its atmosphere, with the albedo it gives.
+    pub(crate) air: Atmosphere,
+    /// The lid it took, if any.
+    pub(crate) lid: Option<CrustLid>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The passes the traced solves on this thread took, in order, a test's own.
+    static PASS_TRACE: core::cell::RefCell<Vec<TracedPass>> =
+        const { core::cell::RefCell::new(Vec::new()) };
+}
+
+/// `run`'s result and the passes every traced solve it ran took ([`PassDriver::Traced`]), in
+/// order: the convergence re-check's per-pass trace (decision-p14-t54a-passes §1.8). The trace is
+/// emptied before and taken after.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn traced<R>(run: impl FnOnce() -> R) -> (R, Vec<TracedPass>) {
+    PASS_TRACE.with(|trace| trace.borrow_mut().clear());
+    let result = run();
+    let trace = PASS_TRACE.with(|trace| core::mem::take(&mut *trace.borrow_mut()));
+    (result, trace)
 }
 
 /// Whether the pass `now` has settled against the pass `last` before it, by P14.T51.b's test: its
