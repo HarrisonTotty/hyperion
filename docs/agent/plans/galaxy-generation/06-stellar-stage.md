@@ -5120,6 +5120,47 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
   - _Recorded (R4)._ The 1.7 M☉ edge comes from a Z = 0.014 grid and is held at every Z
     (provisional). Götberg et al. find absorption-line spectra up to 2.3 M☉ at Z = 0.006 and 0.002
     (§4.3), so at low Z the edge is likely higher; not a blocker (2026-10-20 rule).
+  - _The layout fix (its own commit; `decision-stripped-star-class.md`, "Compact OBSERVED and
+    STRIPPED HELIUM STAR", 2026-10-21)._ Measured hidden on look-72's harness (LOOK72, E-141 at
+    20,000 ly), the circle's seventh kind gave the compact `LOCAL CHART`'s legend a seventh line
+    in `OBSERVED` at 1280 × 720: the stage fell from 240 to 222 px and the column ended 10 px past
+    its foot, over the furniture's text (13 overlaps), a blocker. The narrow `SYSTEMS` list also
+    cut `He-sdO3` to read `He-sdC`, another.
+    - _The fix, as ruled._ The camera's angles and keys leave the column for the presets' row's
+      end, a 1rem line each, the keys 1rem down; the furniture's lines are 1rem. The list's wide
+      class column is 12.5ch, for the longest class, `B1.5Ia+ LBV` (11 characters); its container
+      query turns at 42rem, the longest designation's room; the narrow rows' gaps are 0.25rem and
+      the class is set in 0.5rem, so it holds seven characters; a longer class is cut with an
+      ellipsis (B612 Mono has U+2026). Guards: the first tests of
+      `LocalChartPanel.compact.test.tsx`, rewritten (the column, the presets' row, the 1rem lines,
+      the DOM order by a render test), `SystemList.layout.test.ts`, and an at-rule lookup,
+      `stylesheetRuleIn`, in `test/stylesheet.ts`.
+    - _Deviation: ruling 134.9's floor lowered._ The compact stage keeps at least 14rem at 80 × 45
+      rem (it was 15rem), a design floor in both modes. `LocalChartPanel.tsx`'s doc still says the
+      angles and keys stand in the column and that the stage keeps 15rem; that file is #73's until
+      it lands, so P12.T11.c corrects both sentences if this lane's landing does not.
+    - _Measured, final tree._ At 1280 × 720, 100%: `NOW` stage 262 px, column 52 px clear;
+      `OBSERVED` 228 px (14.25rem), 18 px clear; 0 overlaps in every common state; one refused
+      entry 4 px past the foot, inside the furniture's top margin, 0 overlaps. The angles (x
+      655–831, y 178–194) and the keys (507–831, 194–210) stand clear of the presets (33–386) and
+      of each other. `He-sdO3` (63.8 px of B612 Mono at 9.11 px a character) stands whole in the
+      narrow list's class cell, 68 px after its set-in, and every designation whole (347 px); a
+      nine-character class is cut there with an ellipsis. At 1920 × 1080, 100%: stages 509 and
+      469 px as before the fix, 0 overlaps, the wide list's class 114 px, which held a
+      nine-character class (measured) and holds `B1.5Ia+ LBV`'s 100 px (arithmetic). In the
+      narrow rows the range stands 0.125rem off the mass's unit, which the 0.25rem gaps had
+      joined to it (`11.0 M☉IN`; the UX review). At 150% (80 × 45 rem: a 1920 × 1081 window at a page zoom of 1.5,
+      device pixel ratio 1.5, since the harness's device scale factor left the offscreen page at
+      1): `NOW` 266 px, 57 px clear; `OBSERVED` 232 px, 23 px clear; 0 overlaps; one refusal 2 px
+      clear; `He-sdO3` whole (82 px).
+    - _Recorded, not blockers._ In the narrow list (1280 × 720) classes of eight to eleven
+      characters are cut with an ellipsis, rare (an LBV, a half-subtype stripped helium star, and
+      perhaps a Be, Bp, Ap or Am star whose gravity gives it III, `B2.5IIIe`, not counted), and
+      the selected system's `CLASS` reading shows them whole; a later list layout is P05's or
+      P06's. The list's head stands about 17 px right of its rows, for the scroll bar (before this
+      lane). The mode toggle now rescales the compact chart by 11% (6% before); the scale bar
+      states it. The furniture's 1rem and the legend's 1.125rem lines differ, each comment says
+      why.
 
 ### Asked by rendering plan R06
 

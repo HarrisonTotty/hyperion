@@ -1,13 +1,20 @@
 /**
- * The compact `LOCAL CHART` page's room for plan 12's mode (P12.T11): at 1280 × 720 the column of
- * what the chart is asked for must end above the stage's foot in `NOW` and in `OBSERVED`, or its
- * last rows are drawn over the chart's furniture. jsdom lays nothing out, so these tests hold the
- * stylesheet's rules the fit rests on; the fit itself was measured on the real client, hidden, at
- * landing (look-72; the figures are in `styles.css` above `.local-chart--compact`).
+ * The compact `LOCAL CHART` page's room for plan 12's mode (P12.T11) and for the legend's seventh
+ * circle kind (P06.T24.c): at 1280 × 720 the column of what the chart is asked for must end above
+ * the stage's foot in `NOW` and in `OBSERVED`, or its last rows are drawn over the chart's
+ * furniture, and the stage keeps 14rem (ruling 134.9, as lowered on 2026-10-21). jsdom lays nothing
+ * out, so these tests hold the stylesheet's rules the fit rests on, and the order the view's parts
+ * stand in; the fit itself was measured on the real client, hidden, at landing (look-72), and again
+ * for the stripped helium star's entry (stripped-class's look on look-72's harness; the figures are
+ * in `styles.css` above `.local-chart--compact`).
  */
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { localFrameAt } from "../../geometry/frame";
+import { vec3 } from "../../geometry/vec3";
+import { SpatialView } from "../../spatial/SpatialView";
+import { stubCanvas } from "../../test/RecordingContext2D";
 import { stylesheetRule } from "../../test/stylesheet";
 import { StarShapeLegend } from "./StarShapeLegend";
 
@@ -22,15 +29,76 @@ const CIRCLE_KINDS = [
   "BROWN DWARF",
 ];
 
+/** A spatial view as the chart draws it, with one system, for the order of its parts. */
+function renderView(): void {
+  stubCanvas();
+  render(
+    <SpatialView
+      scene={{
+        frame: localFrameAt(vec3(26_000, 0, 0)),
+        points: [],
+        spheres: [{ radius: 10, role: "data_edge", label: "QUERY EDGE 10 ly" }],
+        plane: { spacing: 5, extent: 10, rings: [] },
+        selectedId: null,
+        destinationId: null,
+      }}
+      fitRadius={10}
+      formatLength={(length) => `${length} ly`}
+      frameName="GALACTIC"
+      centre={[{ label: "RADIUS", value: "26,000.0", unit: "ly", widthCh: 9 }]}
+      time={{ label: "UT", value: "+0.00", unit: "yr", widthCh: 9 }}
+      coreDistance={{ value: "26,000.0", unit: "ly" }}
+      accessibleName="Local chart"
+      stale={false}
+      onSelect={() => undefined}
+    />,
+  );
+}
+
+/** Whether `later` comes after `earlier` in the document, and so in the reading order. */
+function follows(earlier: Element, later: Element): boolean {
+  return (earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}
+
 describe("the compact LOCAL CHART page's room", () => {
-  it("lays the camera's angles and keys on one row beside the chart, in their order", () => {
-    expect(stylesheetRule(".local-chart--compact")).not.toMatch(/"stage\s+keys"/u);
-    expect(stylesheetRule(".local-chart--compact .spatial-view__angles")).toMatch(
-      /grid-area: angles;[^}]*justify-self: start;/u,
+  it("keeps the column beside the stage for what the chart is asked for alone", () => {
+    const page = stylesheetRule(".local-chart--compact");
+
+    expect(page).toMatch(/"stage\s+controls"/u);
+    expect(page).not.toMatch(/"stage\s+angles"/u);
+    expect(page).not.toMatch(/"stage\s+keys"/u);
+    // Seven rows, of which the stage's gives way.
+    expect(page).toMatch(/grid-template-rows: auto auto minmax\(0, 1fr\) auto auto auto auto;/u);
+  });
+
+  it("stands the camera's angles and keys at the end of the presets' row, in their order, as the stacked page does", () => {
+    expect(stylesheetRule(".local-chart--compact .preset-buttons")).toMatch(
+      /grid-area: presets;[^}]*justify-self: start;/u,
     );
-    expect(stylesheetRule(".local-chart--compact .spatial-view__keys")).toMatch(
-      /grid-area: angles;[^}]*justify-self: end;/u,
-    );
+    const angles = stylesheetRule(".local-chart--compact .spatial-view__angles");
+    expect(angles).toMatch(/grid-area: presets;/u);
+    expect(angles).toMatch(/align-self: start;/u);
+    expect(angles).toMatch(/justify-self: end;/u);
+    expect(angles).toMatch(/line-height: 1rem;/u);
+    // The keys a line down, so that the pair sets its own height.
+    const keys = stylesheetRule(".local-chart--compact .spatial-view__keys");
+    expect(keys).toMatch(/grid-area: presets;/u);
+    expect(keys).toMatch(/align-self: start;/u);
+    expect(keys).toMatch(/justify-self: end;/u);
+    expect(keys).toMatch(/margin-top: 1rem;/u);
+    expect(keys).toMatch(/line-height: 1rem;/u);
+  });
+
+  it("reads the presets, the angles, the keys and then the chart, in the stacked page's order", () => {
+    renderView();
+    const presets = screen.getByRole("button", { name: "T TOP" });
+    const angles = screen.getByText("AZM", { selector: "dt" });
+    const keys = screen.getByText("ARROWS ROTATE");
+    const canvas = screen.getByRole("application", { name: "Local chart" });
+
+    expect(follows(presets, angles)).toBe(true);
+    expect(follows(angles, keys)).toBe(true);
+    expect(follows(keys, canvas)).toBe(true);
   });
 
   it("takes the choices' bottom margin off in the column, as the fields have none", () => {
@@ -48,13 +116,19 @@ describe("the compact LOCAL CHART page's room", () => {
     );
   });
 
+  it("sets the furniture's lines 1rem apart, so that the stage keeps its 14rem", () => {
+    expect(stylesheetRule(".local-chart--compact .spatial-view__furniture")).toMatch(
+      /line-height: 1rem;/u,
+    );
+  });
+
   it("sets the scale bar the readings' 0.75rem before the mode that follows it (P12.T11.d)", () => {
     const bar = stylesheetRule(".local-chart--compact .spatial-view__furniture > .scale-bar");
     expect(bar).toMatch(/display: inline-flex;/u);
     expect(bar).toMatch(/margin-right: 0\.75rem;/u);
   });
 
-  it("runs the legend on as one text at the furniture's line height", () => {
+  it("runs the legend on as one text, its lines 1.125rem apart to hold its marks", () => {
     const legend = stylesheetRule(".local-chart--compact > .symbol-legend");
     expect(legend).toMatch(/display: block;/u);
     expect(legend).toMatch(/line-height: 1\.125rem;/u);

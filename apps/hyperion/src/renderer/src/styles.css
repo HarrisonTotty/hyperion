@@ -1586,10 +1586,10 @@ body {
 
 /*
  * A page too short to stack them (the orchestrator's rulings 134.9 and 149.1, at 1280 x 720): the
- * preset views across the page; the chart, with the camera's angles and keys on one row and what
- * the chart is asked for in a column beside it; then, across the page, the chart's frame, centre,
- * time and scale, the census line and its toggle, the census's hint, and the legend, which is on
- * show in every state.
+ * preset views across the page, with the camera's angles and keys on the presets' row, as the
+ * stacked page sets them, here at its end; the chart, with what the chart is asked for in a column
+ * beside it; then, across the page, the chart's frame, centre, time and scale, the census line and
+ * its toggle, the census's hint, and the legend, which is on show in every state.
  * Shown, the census table takes the place of the query controls in the column, which keeps one
  * width, the table's, so that nothing but the two moves when the toggle is pressed. The spatial
  * view, its row of controls and the census are no boxes of their own here, so that their parts take
@@ -1597,19 +1597,23 @@ body {
  *
  * The column must end above the stage's foot, or its last rows are drawn over the furniture. Plan
  * 12's mode row (P12.T11) made it 2rem taller, and observed mode puts the observer in the furniture
- * and two entries in the legend under the stage. So the angles and keys share a row, the column's
- * choices drop their bottom margin, the link's reason stands beside QUERY RADIUS, the readings sit
- * closer so that the furniture keeps two lines in `NOW` and three in `OBSERVED`, and the legend
- * runs on as one text (look-72's ruling). Measured hidden at 1280 x 720, 100%: in `NOW` the stage
- * is 258 px tall and the column ends 26 px above its foot; in `OBSERVED` the stage is 240 px,
- * ruling 134.9's 15rem, and the column ends 8 px above its foot. The stale slots after the
- * furniture's values (P12.T11.d) add no line, by reckoning, since the scale bar follows the time
- * and the mode the scale bar: the frame and the centre fill the first line, the time, the scale bar
- * and in `NOW` the mode the second, and observed mode's `MODE OBSERVED FROM` and the observer the
- * third (plan 12's ruling of 2026-10-22, recorded under P12.T11.d). A refused entry stands in
- * its field's hint's place, on the field's own row, and never wraps, and the mode and the command
- * that moves the observer keep one row while a chart is on show, so that no refusal, nor two at
- * once, adds a line to the column (P12.T11.c).
+ * and two entries in the legend under the stage. So the column's choices drop their bottom margin,
+ * the link's reason stands beside QUERY RADIUS, the readings sit closer so that the furniture keeps
+ * two lines in `NOW` and three in `OBSERVED`, and the legend runs on as one text (look-72's
+ * ruling). The stale slots after the furniture's values (P12.T11.d) add no line, by reckoning,
+ * since the scale bar follows the time and the mode the scale bar: the frame and the centre fill
+ * the first line, the time, the scale bar and in `NOW` the mode the second, and observed mode's
+ * `MODE OBSERVED FROM` and the observer the third (plan 12's ruling of 2026-10-22, recorded under
+ * P12.T11.d). A refused entry stands in its field's hint's place, on the field's own row, and
+ * never wraps, and the mode and the command that moves the observer keep one row while a chart is
+ * on show, so that no refusal, nor two at once, adds a line to the column (P12.T11.c). The
+ * circle's seventh kind, `STRIPPED HELIUM STAR` (P06.T24.c), gave the legend a seventh line in
+ * `OBSERVED`, so the angles and keys left the column for the presets' row and the furniture's
+ * lines are 1rem: the stage keeps at least 14rem at 80 x 45 rem, ruling 134.9's 15rem lowered for
+ * the legend's seventh line (decision-stripped-star-class.md, 2026-10-21). Measured hidden at
+ * 1280 x 720, 100%: in `NOW` the stage is 262 px tall and the column ends 52 px above its foot; in
+ * `OBSERVED` 228 px and 18 px; with one refused entry in `OBSERVED` the column ends 4 px past the
+ * foot, inside the furniture's top margin, over no text.
  */
 .local-chart--compact {
   /*
@@ -1631,14 +1635,13 @@ body {
   grid-template-areas:
     "note    note"
     "presets presets"
-    "stage   angles"
     "stage   controls"
     "furn    furn"
     "census  census"
     "hint    hint"
     "legend  legend";
   grid-template-columns: minmax(0, 1fr) max(24rem, var(--census-table-width));
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto auto auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto auto;
   gap: 0 1rem;
 }
 
@@ -1654,35 +1657,46 @@ body {
 
 .local-chart--compact .preset-buttons {
   grid-area: presets;
-  margin-bottom: 0.25rem;
-}
-
-/*
- * The camera's angles at the start of the column's first row and its keys at the end, in their
- * order: `AZM 030° ELV +30°` and `ARROWS ROTATE +/- ZOOM Z FIT` measure 174 px and 323 px of the
- * column's 526 at 1280 x 720, in rem and ch, so they share the row at every scale.
- */
-.local-chart--compact .spatial-view__angles {
-  grid-area: angles;
   justify-self: start;
   margin-bottom: 0.25rem;
 }
 
-.local-chart--compact .spatial-view__keys {
-  grid-area: angles;
+/*
+ * The camera's angles and keys at the end of the presets' row, one 1rem line each, in their order:
+ * `AZM 030° ELV +30°` over `ARROWS ROTATE +/- ZOOM Z FIT`, which measure 176 px and 324 px at
+ * 1280 x 720, 121 px clear of the presets' 353 px of the page's 798. The keys stand 1rem down, so
+ * that the pair sets its own height rather than lean on the preset buttons' 2rem.
+ */
+.local-chart--compact .spatial-view__angles {
+  grid-area: presets;
+  align-self: start;
   justify-self: end;
+  line-height: 1rem;
+}
+
+.local-chart--compact .spatial-view__keys {
+  grid-area: presets;
+  align-self: start;
+  justify-self: end;
+  margin-top: 1rem;
   margin-bottom: 0.25rem;
+  line-height: 1rem;
 }
 
 .local-chart--compact .spatial-view__stage {
   grid-area: stage;
 }
 
+/*
+ * The furniture's lines 1rem apart, as the narrow systems list's rows are, so that the stage keeps
+ * its 14rem; the legend keeps 1.125rem, which holds its 1rem marks.
+ */
 .local-chart--compact .spatial-view__furniture {
   display: block;
   grid-area: furn;
   align-self: start;
   margin-top: 0.25rem;
+  line-height: 1rem;
 }
 
 /*
@@ -1845,10 +1859,11 @@ body {
 }
 
 /*
- * The legend runs on as one text, as the furniture does, its lines 1.125rem apart, the furniture's
- * own, which hold its 1rem marks (the bracket's 1.5rem line stands taller): six lines in both modes
- * at 1280 x 720. Each entry stays whole but one of several kinds (the circle's, the ringed
- * circle's), which breaks only after a comma, never after its mark, each kind kept whole.
+ * The legend runs on as one text, as the furniture does, its lines 1.125rem apart, which hold its
+ * 1rem marks (the bracket's 1.5rem line stands taller): six lines in `NOW` and seven in `OBSERVED`
+ * at 1280 x 720 since the circle's seventh kind (P06.T24.c). Each entry stays whole but one of
+ * several kinds (the circle's, the ringed circle's), which breaks only after a comma, never after
+ * its mark, each kind kept whole.
  */
 .local-chart--compact > .symbol-legend {
   display: block;
@@ -2432,9 +2447,12 @@ body {
 
 /*
  * Columns shared by the head and every row: designation, spectral class, star count, distance,
- * mass, and range in words. The class is sized for the longest the server writes, seven characters
- * (`B9.5Iab`, `esdM9.5`), in the monospaced figures, with room for their being wider than the row's
- * own `ch`. The count takes its header's width with its letter spacing. The range, `IN` or `OUT`
+ * mass, and range in words. The class is sized for the longest the server writes, eleven
+ * characters (`B1.5Ia+ LBV`: a luminous blue variable's class is written to the half subtype with
+ * `Ia+` and ` LBV` after it; P06.T24.c's stripped helium stars run to nine, `He-sdO5.5`), in the
+ * monospaced figures, with room for their being wider than the row's own `ch`; one that does not
+ * fit is cut with an ellipsis, never silently, so that a cut `He-sdO3` cannot read as `He-sdC`.
+ * The count takes its header's width with its letter spacing. The range, `IN` or `OUT`
  * under a header that names the setting, wraps that header onto two lines as `INIT MASS` does and
  * is as wide as its longer word, `RANGE`, with its letter spacing: ruling 115.5's 4ch holds `OUT`
  * but not the header's words, which ran past the panel's edge at both sizes. A fixed width, since
@@ -2446,7 +2464,7 @@ body {
 .system-list__head,
 .system-list__row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 8ch 6ch 7ch 8.5ch 6.5ch;
+  grid-template-columns: minmax(0, 1fr) 12.5ch 6ch 7ch 8.5ch 6.5ch;
   align-items: center;
   gap: 0 0.375rem;
 }
@@ -2455,12 +2473,23 @@ body {
  * In a narrow list, as the SYSTEMS column is at 1280 x 720, six columns leave the designation too
  * little room to read, so it takes a line of its own across the row and the other five share the
  * second line under it, each row still 2 rem tall (the UX reviewer's should-fix, ruled by the
- * orchestrator: the designation wraps onto its own line rather than being cut to `9G…`).
+ * orchestrator: the designation wraps onto its own line rather than being cut to `9G…`). The
+ * breakpoint is the longest designation's: `STREAM 4095 E-16383-63.63-8191`, about 251 px, beside
+ * the five fixed columns' 40.5ch of the row's B612 (9.1 px each at 0.875rem), their five 0.375rem
+ * gaps, the rows' 0.25rem padding and about 15 px of scroll bar, 669 px or 41.8rem, so 42rem, and
+ * a wide row cuts no designation. In the narrow rows the gaps are 0.25rem and the second line is
+ * set in 0.5rem, so that the class holds seven characters whole (`He-sdO3`, `B9.5Iab`, `esdM9.5`)
+ * and the range stands an eighth of a rem off the mass's unit. A longer class is cut with an
+ * ellipsis: the designation is the row's identity and keeps its line, no split of two lines holds
+ * the longest designation and the longest class, and a third line would break the list's four rows
+ * at its least; the selected system's `CLASS` reading shows it whole
+ * (decision-stripped-star-class.md, 2026-10-21).
  */
-@container (max-width: 30rem) {
+@container (max-width: 42rem) {
   .system-list__head,
   .system-list__row {
     grid-template-columns: minmax(0, 1fr) 6ch 7ch 8.5ch 6.5ch;
+    gap: 0 0.25rem;
   }
 
   .system-list__row {
@@ -2477,7 +2506,12 @@ body {
   /* The second line set in under the designation, so that each two-line row reads as one. */
   .system-list__head > :nth-child(2),
   .system-list__row > :nth-child(2) {
-    padding-left: 1rem;
+    padding-left: 0.5rem;
+  }
+
+  /* The range kept apart from the mass's unit, which the closer gaps would join to it. */
+  .system-list__row > .system-list__range {
+    padding-left: 0.125rem;
   }
 }
 
@@ -2549,6 +2583,7 @@ body {
   overflow: hidden;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
