@@ -3,8 +3,12 @@
 //! (plan R10, T6.b), a fixture field's payload blocks and what [`WorkerFields`] answers over them,
 //! `tests/golden/worker/terrain_test.golden` (R10.T16.d; decision-r10-t16-contracts §4), the
 //! payloads of the client's kept scene `TERRAIN TEST` with the answers R09.T19.b gives with them,
-//! and `tests/golden/worker/earth_like.golden` (R10.T12), an Earth-like survey whose field holds a
-//! finest-level patch of three classes, with the worker's material at each of its vertices.
+//! `tests/golden/worker/earth_like.golden` (R10.T12), an Earth-like survey whose field holds a
+//! finest-level patch of three classes, with the worker's material at each of its vertices,
+//! `tests/golden/worker/terrain_test_weathered.golden` (R10.T1.c's client half;
+//! decision-r10-t1c-client-scope §3), the same scene's payloads over `TEST MOON` weathered, with its
+//! maturity's digests, and `tests/golden/worker/maturity_layer.golden` (the same ruling's §4), the
+//! maturity layer, the albedo nodes and the class map's maturity on two weathered worlds.
 //!
 //! The client's worker test (`apps/hyperion/.../workers/fieldsWasm.test.ts`) reads the first: it
 //! posts the blocks to the client's module, through the worker's own answers, and asks the module's
@@ -122,6 +126,54 @@
 //!   same bytes at either revision (a test holds it);
 //! - `change <ordinal> <runs>` and `held <ordinal> <runs>` for each block of payloads 1 and 2
 //!   posted in turn, as the Moon-like file's.
+//!
+//! Where the header carries a maturity, as `TEST MOON` weathered's does and `TERRAIN TEST`'s does
+//! not, five lines follow, each over a worker holding payloads 1 and 2's blocks, every digest `0x`
+//! and 16 lowercase hexadecimal digits (R10.T1.c's client half):
+//!
+//! - `crust_albedo <B> <V> <R>  # <b> <v> <r>`: the primary crust's regolith's drawn normal albedo
+//!   at `m_body` at band level 0, its band-0 node K − 1 ([`WorkerFields::maturity_nodes`]), the
+//!   ground the class map leaves to `elsewhere`, in B, V and R;
+//! - three `maturity_patch <face> <level> <i> <j> <codes> <nodes>` lines, the patches holding the
+//!   point (1, 0.99, 0.62) at band levels 8 and 13 and at the band limit's, each baked with the
+//!   weights (whatever the vertex path and normals, which move neither digest), at the fixture's
+//!   seed: `<codes>` the digest of the bake's `maturity()`, its unorm16 codes each as an `f64`
+//!   (`code_digest`, as `byte_digest` takes the weights' bytes: TypeScript's
+//!   `f64Digest(Float64Array.from(codes))`), and `<nodes>` the FNV-1a digest of
+//!   `maturityNodes(system, body, palette, level)`'s `Float32Array` for the bake's own palette and
+//!   level (`f32_digest`);
+//! - `class_map_maturity <codes> <nodes>`: the class map's (at the fixture's seed) `maturity()`
+//!   codes' digest, as the bake's codes', and its `nodes()` `Float32Array`'s.
+//!
+//! # The maturity layer's format
+//!
+//! After the header, every float as `0x` and its 16 lowercase hexadecimal digits of bits, for each
+//! of two worlds, the 3.5 Gyr Moon-like world at a scale of 1 (`moon_like_3.5_gyr`) and `TEST MOON`
+//! weathered (`terrain_test_weathered`), each over a worker holding a 2 × 2 survey about (0.3, 1,
+//! 0.2) at 50 m with its margin:
+//!
+//! - `world <name>: m_body <bits>, scale <bits or ->, <n> octaves expose, band limit level <L>`;
+//! - for each band level n from 0 to L, `mix <n> <octaves left out> <nodes> <atom> <mean deficit>`:
+//!   the level's [`unresolved_mix`], the weight of its node at `m_body` (0 where it has none) and
+//!   its mean deficit Σ w (`m_body` − μ);
+//! - for the patches holding (0.3, 1, 0.2) at levels 10, 14 and L + 1, baked at the low setting
+//!   with the weights: `patch <face> <level> <i> <j>: palette <slots>` (as the Moon-like file's
+//!   palette line), `codes <digest>` (the layer's codes, as `code_digest` takes them), `row <y>
+//!   <pairs>` for rows 0, 32 and 64, each vertex's codes at n and n − 1 as eight hexadecimal digits,
+//!   four each,
+//!   and for each named slot `slot <k> <class>:<entry>: level <digest> parent <digest>` (the
+//!   `f64_digest`s of its nodes at n and at n − 1, node by node, B, V, R) with `node <j> <B> <V> <R>
+//!   <B> <V> <R>` for nodes 0 and K − 1, at n then at n − 1;
+//! - `class_map <texels> texels <classes> classes`, then `texel <cell index> <code>`, the code in four
+//!   hexadecimal digits, and `class <class>:<entry>: <digest> <B> <V> <R>` (its band-0 nodes'
+//!   `f64_digest` and node K − 1) or `class <class>:<entry>: none`.
+//!
+//! Then the TypeScript twin's cases, the 3.5 Gyr world's basalt regolith (`1:1`) at band levels 0
+//! and 10: `twin moon_like_3.5_gyr 1:1 level <n>: m_body <bits>`, its K nodes as `node <j> <x>
+//! <B> <V> <R>` (x = `m_j` ÷ `m_body`, [`maturity_node_share`]), and 33 `sample <x> <B> <V> <R> <B>
+//! <V> <R>` lines at x = 1 − (1 − u³)², u = k ÷ 32: the nodes' own law T(m) = Σ w G(min(m, μ))
+//! over the level's mix, then [`maturity_node_albedo`]'s interpolation, at m = x `m_body` (`m_body`
+//! is 1, so m is x).
 
 use hyperion_testkit::float::bits;
 use hyperion_testkit::golden;
@@ -130,15 +182,17 @@ use hyperion_testkit::golden::{GoldenWriter, f32_digest, f64_digest};
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
 use super::tests::{
-    MESH, WORLD, cell, earth_fixture, earth_worker, face_uv, fixture, lit, payload_cover, probes,
-    sight_lines, terrain_fixture, vertex_point,
+    MESH, TerrainFixture, WORLD, band_limit_level, cell, earth_fixture, earth_worker, face_uv,
+    fixture, lit, middle_weathered_world, payload_cover, probes, sight_lines, surveyed_about,
+    terrain_fixture, terrain_fixture_of, vertex_point, weathered_terrain_world,
 };
 use super::*;
 use crate::bake::WeightsLayer;
 use crate::field::{
-    ClimateModelKind, Cover, FieldHeader, FieldHeaderParts, PaletteEntry, PaletteRole,
+    ClimateModelKind, CoarseField, Cover, FieldHeader, FieldHeaderParts, PaletteEntry, PaletteRole,
     PrecipitationSource,
 };
+use crate::material::{MaterialClass, MaturityNode, maturity_node_albedo, maturity_node_share};
 use crate::patch::{NormalScale, VertexPath};
 use crate::synth::test_support::{SEED, world};
 
@@ -146,6 +200,12 @@ use crate::synth::test_support::{SEED, world};
 /// R10.T6.a's goldens take it.
 fn byte_digest(bytes: impl IntoIterator<Item = u8>) -> u64 {
     f64_digest(&bytes.into_iter().map(f64::from).collect::<Vec<_>>())
+}
+
+/// A digest of a maturity layer's unorm16 `codes` in the golden's form: each as an `f64`, which
+/// holds it exactly, as [`byte_digest`] takes bytes.
+fn code_digest(codes: impl IntoIterator<Item = u16>) -> u64 {
+    f64_digest(&codes.into_iter().map(f64::from).collect::<Vec<_>>())
 }
 
 /// `values`' bits, each as 16 lowercase hexadecimal digits, spaced.
@@ -256,20 +316,7 @@ fn write_bake(out: &mut GoldenWriter, name: &str, opts: &TerrainBakeOptions, bak
     out.f64("highest", f64::from(p.height_range_m.1));
     out.f64("bounding_radius", p.bounding_radius_m);
     out.f64("skirt_depth", p.skirt_depth_m);
-    let palette: Vec<String> = l
-        .palette()
-        .iter()
-        .map(|slot| {
-            slot.map_or_else(
-                || "none".to_owned(),
-                |m| {
-                    let entry = m.entry().map_or_else(|| "-".to_owned(), |e| e.to_string());
-                    format!("{}:{entry}", u8::from(m.class()))
-                },
-            )
-        })
-        .collect();
-    out.line(&format!("palette {}", palette.join(" ")));
+    out.line(&format!("palette {}", palette_words(&l.palette())));
     out.u64_hex(
         "weights",
         byte_digest(l.weights().iter().flatten().copied()),
@@ -279,6 +326,22 @@ fn write_bake(out: &mut GoldenWriter, name: &str, opts: &TerrainBakeOptions, bak
     out.f64("sigma", l.sigma().value());
     out.line(&format!("complete {}", l.is_complete()));
     out.line(&format!("unsurveyed {}", indices(bake.unsurveyed_cells())));
+}
+
+/// A bake's palette in the golden's form: each slot `<class code>:<entry>` (`-` for no entry), or
+/// `none`.
+fn palette_words(palette: &[Option<GroundMaterial>]) -> String {
+    let words: Vec<String> = palette
+        .iter()
+        .map(|slot| slot.map_or_else(|| "none".to_owned(), ground_word))
+        .collect();
+    words.join(" ")
+}
+
+/// A ground material in the golden's form: `<class code>:<entry>`, `-` for no entry.
+fn ground_word(m: GroundMaterial) -> String {
+    let entry = m.entry().map_or_else(|| "-".to_owned(), |e| e.to_string());
+    format!("{}:{entry}", u8::from(m.class()))
 }
 
 /// The golden's points: two in the surveys, one in the margin and one not held.
@@ -673,7 +736,20 @@ fn coded_runs(cover: &Cover) -> String {
 
 /// `TERRAIN TEST`'s golden.
 fn terrain_text() -> String {
-    let f = terrain_fixture();
+    terrain_text_of(&terrain_fixture(), world(WORLD))
+}
+
+/// `TEST MOON` weathered's golden (decision-r10-t1c-client-scope §3): `TERRAIN TEST`'s surveys
+/// and payloads over [`weathered_terrain_world`], with its maturity's lines.
+fn terrain_weathered_text() -> String {
+    let field = weathered_terrain_world();
+    terrain_text_of(&terrain_fixture_of(field), field)
+}
+
+/// The terrain test's golden of the fixture `f` of `field`: its header, surveys, payloads and the
+/// changes its blocks make in turn, and, where the header carries a maturity, its maturity's lines
+/// ([`write_maturity`]).
+fn terrain_text_of(f: &TerrainFixture, field: &CoarseField) -> String {
     let mut out = GoldenWriter::new();
     out.header(crate::generator_version());
     out.line(&format!(
@@ -682,7 +758,7 @@ fn terrain_text() -> String {
         f.body.body_index()
     ));
     out.line(&format!("seed {:016x}", SEED.get()));
-    write_dto(&mut out, world(WORLD).header());
+    write_dto(&mut out, field.header());
     for (revision, survey) in (1..).zip(&f.surveys) {
         out.line(&format!("survey {revision} {}", coded_runs(survey)));
     }
@@ -710,12 +786,344 @@ fn terrain_text() -> String {
         out.line(&format!("change {ordinal} {}", runs(change.runs())));
         out.line(&format!("held {ordinal} {}", runs(change.held_runs())));
     }
+    if field.header().maturity().is_some() {
+        write_maturity(&mut out, &mut fields, f.body, field);
+    }
     out.finish()
 }
 
 #[test]
 fn worker_matches_its_terrain_test_golden() {
     golden!("worker/terrain_test", &terrain_text());
+}
+
+#[test]
+fn worker_matches_its_weathered_terrain_test_golden() {
+    golden!("worker/terrain_test_weathered", &terrain_weathered_text());
+}
+
+/// The patches whose maturity layer and nodes `TEST MOON` weathered's golden pins: those holding
+/// a point of the second survey, (1, 0.99, 0.62), some 0.3° from its centre, at band levels 8 and
+/// 13 and at the band limit's.
+fn weathered_patches(field: &CoarseField) -> [PatchKey; 3] {
+    let dir = unit_dir([1.0, 0.99, 0.62]);
+    [8, 13, band_limit_level(field)]
+        .map(|level| PatchKey::containing(level, dir).expect("a band level is a quadtree level"))
+}
+
+/// `values` narrowed to `f32`, as the client module's exports narrow them.
+fn narrowed(values: impl IntoIterator<Item = f64>) -> Vec<f32> {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the exports' narrowing: a normal albedo of at most 1.35 narrows far inside f32"
+    )]
+    let narrow = |x: f64| x as f32;
+    values.into_iter().map(narrow).collect()
+}
+
+/// What the client module's `maturityNodes` answers for `bake`'s palette at the bake's level on
+/// `body`: each slot's nodes at the level, then at its parent's, each node's B, V and R, narrowed
+/// to `f32`; all 0 for an empty slot or one whose palette names no substance.
+fn export_nodes(fields: &mut WorkerFields, body: BodyRef, bake: &BodyBake) -> Vec<f32> {
+    let level = band(bake.terrain().patch().key.level());
+    let mut out = Vec::new();
+    for slot in bake.terrain().layers().palette() {
+        match slot.and_then(GroundMaterial::material) {
+            Some(m) => {
+                let nodes = fields.maturity_nodes(body, m, level).expect("held");
+                let values = nodes.level().iter().chain(nodes.parent()).flatten();
+                out.extend(narrowed(values.copied()));
+            }
+            None => out.extend(std::iter::repeat_n(0.0_f32, 2 * 3 * MATURITY_NODES)),
+        }
+    }
+    out
+}
+
+/// What the client module's class map answers of its maturity: `maturity()`, each texel's code,
+/// and `nodes()`, each class's band-0 nodes narrowed to `f32`, all 0 for an unnamed class.
+fn export_class_map(map: &ClassMap) -> (Vec<u16>, Vec<f32>) {
+    let codes = map
+        .texels()
+        .iter()
+        .filter_map(ClassMapTexel::maturity)
+        .collect();
+    let mut nodes = Vec::new();
+    for class in map.classes() {
+        match class.nodes() {
+            Some(n) => nodes.extend(narrowed(n.iter().flatten().copied())),
+            None => nodes.extend(std::iter::repeat_n(0.0_f32, 3 * MATURITY_NODES)),
+        }
+    }
+    (codes, nodes)
+}
+
+/// Writes `TEST MOON` weathered's maturity lines (the module documentation's terrain test format),
+/// `fields` holding the blocks of payloads 1 and 2 of `field`, the body `body`'s.
+fn write_maturity(
+    out: &mut GoldenWriter,
+    fields: &mut WorkerFields,
+    body: BodyRef,
+    field: &CoarseField,
+) {
+    let header = field.header();
+    let crust = header
+        .palette()
+        .entries()
+        .iter()
+        .position(|entry| entry.role == PaletteRole::PrimaryCrust)
+        .expect("the Moon-like palette has a primary crust");
+    let regolith = Material::new(
+        MaterialClass::Regolith,
+        u8::try_from(crust).expect("a palette holds at most 15 entries"),
+    )
+    .expect("a palette's index is an entry");
+    let nodes = fields
+        .maturity_nodes(body, regolith, band(CLASS_MAP_BAND))
+        .expect("held");
+    let [b, v, r] = nodes.level()[MATURITY_NODES - 1];
+    out.line(&format!(
+        "crust_albedo {} {} {}  # {b:?} {v:?} {r:?}",
+        float(b),
+        float(v),
+        float(r)
+    ));
+    for key in weathered_patches(field) {
+        let bake = fields.bake(body, SEED, key, &MESH).expect("held");
+        let codes = code_digest(bake.terrain().layers().maturity().iter().flatten().copied());
+        let nodes = f32_digest(&export_nodes(fields, body, &bake));
+        out.line(&format!(
+            "maturity_patch {} {} {} {} 0x{codes:016x} 0x{nodes:016x}",
+            key.face().index(),
+            key.level(),
+            key.i(),
+            key.j()
+        ));
+    }
+    let map = fields.class_map(body, SEED).expect("held");
+    let (codes, nodes) = export_class_map(&map);
+    out.line(&format!(
+        "class_map_maturity 0x{:016x} 0x{:016x}",
+        code_digest(codes),
+        f32_digest(&nodes)
+    ));
+}
+
+/// The layer golden's worlds (decision-r10-t1c-client-scope §4): the 3.5 Gyr Moon-like world at a
+/// scale of 1, and `TEST MOON` weathered, on its 1 Gyr surface at its haloed scale.
+fn layer_worlds() -> [(&'static str, &'static CoarseField); 2] {
+    [
+        ("moon_like_3.5_gyr", middle_weathered_world()),
+        ("terrain_test_weathered", weathered_terrain_world()),
+    ]
+}
+
+/// The nodes' own law at `m` of a material of drawn albedo `g` over `mix`: Σ w G(min(m, μ)), band
+/// by band in node order from +0, as [`maturity_nodes`] sums each node.
+fn node_law(mix: &crate::material::UnresolvedMix, g: impl Fn(f64) -> [f64; 3], m: f64) -> [f64; 3] {
+    let mut sum = [0.0; 3];
+    for node in mix.nodes() {
+        let at = if m < node.maturity() {
+            m
+        } else {
+            node.maturity()
+        };
+        for (total, band) in sum.iter_mut().zip(g(at)) {
+            *total += node.weight() * band;
+        }
+    }
+    sum
+}
+
+/// Bits of B, V and R, spaced, in the terrain test's float form.
+fn bvr_floats(bvr: [f64; 3]) -> String {
+    bvr.map(float).join(" ")
+}
+
+/// The maturity layer's golden (decision-r10-t1c-client-scope §4; the module documentation).
+fn maturity_layer_text() -> String {
+    let mut out = GoldenWriter::new();
+    out.header(crate::generator_version());
+    for (name, field) in layer_worlds() {
+        write_layer_world(&mut out, name, field);
+    }
+    write_twin(&mut out);
+    out.finish()
+}
+
+/// Writes the layer golden's lines of the world `field`, named `name`: its levels' mixes, three
+/// patches' layers and nodes, and its class map's maturity, over a 2 × 2 survey.
+fn write_layer_world(out: &mut GoldenWriter, name: &str, field: &CoarseField) {
+    let header = field.header();
+    let body = header.body();
+    let m_body = header.maturity().expect("the world carries a maturity");
+    let terms = unresolved_terms(header).expect("the world carries a maturity and a rate");
+    let limit = band_limit_level(field);
+    let scale = header.albedo_scale().map_or_else(|| "-".to_owned(), float);
+    out.line(&format!(
+        "world {name}: m_body {}, scale {scale}, {} octaves expose, band limit level {limit}",
+        float(m_body),
+        terms.octaves().len()
+    ));
+    for level in 0..=limit {
+        let mix = unresolved_mix(&terms, band(level));
+        let atom = mix
+            .nodes()
+            .first()
+            .filter(|node| node.maturity().total_cmp(&m_body).is_eq())
+            .map_or(0.0, MaturityNode::weight);
+        let mean = mix.nodes().iter().fold(0.0, |sum, node| {
+            sum + node.weight() * (m_body - node.maturity())
+        });
+        out.line(&format!(
+            "mix {level} {} {} {} {}",
+            mix.unresolved_octaves(),
+            mix.nodes().len(),
+            float(atom),
+            float(mean)
+        ));
+    }
+    let dir = unit_dir([0.3, 1.0, 0.2]);
+    let (mut fields, _) = surveyed_about(field, dir);
+    for level in [10, 14, limit + 1] {
+        let key = PatchKey::containing(level, dir).expect("a band level is a quadtree level");
+        write_layer_patch(out, &mut fields, body, key);
+    }
+    let map = fields.class_map(body, SEED).expect("held");
+    out.line(&format!(
+        "class_map {} texels {} classes",
+        map.texels().len(),
+        map.classes().len()
+    ));
+    for texel in map.texels() {
+        let code = texel.maturity().expect("the world carries a maturity");
+        out.line(&format!("texel {} {code:04x}", cell_index(texel.cell())));
+    }
+    for class in map.classes() {
+        match class.nodes() {
+            Some(nodes) => out.line(&format!(
+                "class {}: 0x{:016x} {}",
+                ground_word(class.material()),
+                node_digest(nodes),
+                bvr_floats(nodes[MATURITY_NODES - 1])
+            )),
+            None => out.line(&format!("class {}: none", ground_word(class.material()))),
+        }
+    }
+}
+
+/// The `f64_digest` of `nodes`, node by node, each its B, V and R.
+fn node_digest(nodes: &[[f64; 3]; MATURITY_NODES]) -> u64 {
+    f64_digest(&nodes.iter().flatten().copied().collect::<Vec<_>>())
+}
+
+/// Writes the layer golden's lines of the patch `key` of `body`, baked at the low setting with the
+/// weights through `fields`: its palette, its codes' digest and three rows, and each named slot's
+/// nodes at its level and its parent's.
+fn write_layer_patch(
+    out: &mut GoldenWriter,
+    fields: &mut WorkerFields,
+    body: BodyRef,
+    key: PatchKey,
+) {
+    let bake = fields.bake(body, SEED, key, &MESH).expect("held");
+    let layers = bake.terrain().layers();
+    out.line(&format!(
+        "patch {} {} {} {}: palette {}",
+        key.face().index(),
+        key.level(),
+        key.i(),
+        key.j(),
+        palette_words(&layers.palette())
+    ));
+    let codes = layers.maturity();
+    out.line(&format!(
+        "codes 0x{:016x}",
+        code_digest(codes.iter().flatten().copied())
+    ));
+    for y in [0_usize, 32, 64] {
+        let row: Vec<String> = codes[65 * y..65 * (y + 1)]
+            .iter()
+            .map(|[n, p]| format!("{n:04x}{p:04x}"))
+            .collect();
+        out.line(&format!("row {y} {}", row.join(" ")));
+    }
+    for (k, slot) in layers.palette().iter().enumerate() {
+        let Some(ground) = *slot else {
+            continue;
+        };
+        let Some(m) = ground.material() else {
+            continue;
+        };
+        let nodes = fields
+            .maturity_nodes(body, m, band(key.level()))
+            .expect("held");
+        out.line(&format!(
+            "slot {k} {}: level 0x{:016x} parent 0x{:016x}",
+            ground_word(ground),
+            node_digest(nodes.level()),
+            node_digest(nodes.parent())
+        ));
+        for j in [0, MATURITY_NODES - 1] {
+            out.line(&format!(
+                "node {j} {} {}",
+                bvr_floats(nodes.level()[j]),
+                bvr_floats(nodes.parent()[j])
+            ));
+        }
+    }
+}
+
+/// Writes the TypeScript twin's cases: the 3.5 Gyr world's basalt regolith's nodes at band levels
+/// 0 and 10, and the nodes' own law and the interpolation at 33 maturities graded as the nodes are.
+fn write_twin(out: &mut GoldenWriter) {
+    let field = middle_weathered_world();
+    let header = field.header();
+    let m_body = header.maturity().expect("the world carries a maturity");
+    let terms = unresolved_terms(header).expect("the world carries a maturity and a rate");
+    let basalt = Material::new(MaterialClass::Regolith, 1).expect("entry 1 is a palette index");
+    let g = |m: f64| {
+        let exposed = exposed_properties(
+            basalt,
+            header.palette(),
+            GroundExposure::of_header(header).with_maturity(m),
+        )
+        .expect("entry 1 is the palette's");
+        scaled_normal_albedo(&exposed, header.albedo_scale().unwrap_or(1.0))
+    };
+    for level in [0, 10] {
+        let mix = unresolved_mix(&terms, band(level));
+        let nodes = maturity_nodes(&mix, g);
+        out.line(&format!(
+            "twin moon_like_3.5_gyr {} level {level}: m_body {}",
+            ground_word(GroundMaterial::of(MaterialClass::Regolith, Some(1))),
+            float(m_body)
+        ));
+        for (j, node) in nodes.iter().enumerate() {
+            out.line(&format!(
+                "node {j} {} {}",
+                float(maturity_node_share(j)),
+                bvr_floats(*node)
+            ));
+        }
+        for k in 0..=32_u32 {
+            let u = f64::from(k) / 32.0;
+            let fresh = 1.0 - u * u * u;
+            let x = 1.0 - fresh * fresh;
+            let m = x * m_body;
+            out.line(&format!(
+                "sample {} {} {}",
+                float(x),
+                bvr_floats(node_law(&mix, g, m)),
+                bvr_floats(maturity_node_albedo(&nodes, m_body, m))
+            ));
+        }
+    }
+}
+
+#[test]
+fn worker_matches_its_maturity_layer_golden() {
+    golden!("worker/maturity_layer", &maturity_layer_text());
 }
 
 /// Block 0 of the terrain test's first payload carries the Moon-like world's header, which its
@@ -741,10 +1149,12 @@ mod native_only {
 
     /// The files of `tests/golden/worker/`, each one a test writes and compares
     /// (decision-r10-t16-contracts §4): a stray file fails the test below, as before.
-    const WORKER_GOLDENS: [&str; 3] = [
+    const WORKER_GOLDENS: [&str; 5] = [
         "earth_like.golden",
+        "maturity_layer.golden",
         "moon_like.golden",
         "terrain_test.golden",
+        "terrain_test_weathered.golden",
     ];
 
     /// The largest the terrain test's golden may be, bytes: `cube_sphere.golden`'s, the crate's
@@ -761,7 +1171,7 @@ mod native_only {
     }
 
     /// Every golden file of `tests/golden/worker/` carries `GENERATOR_VERSION`, and they are the
-    /// three the tests write.
+    /// five the tests write.
     #[test]
     fn every_worker_golden_carries_the_generator_version() {
         let expected = format!("# generator_version = {}", crate::generator_version());
@@ -793,15 +1203,20 @@ mod native_only {
         );
     }
 
-    /// The terrain test's golden is within its cap, the crate's largest golden of its writing.
+    /// The terrain test's goldens, `TERRAIN TEST`'s and `TEST MOON` weathered's, are each within
+    /// their cap, the crate's largest golden of their writing, since the client's kept scene ships
+    /// them.
     #[test]
-    fn the_terrain_test_golden_is_within_its_size_cap() {
-        let bytes = std::fs::metadata(worker_dir().join("terrain_test.golden"))
-            .expect("the terrain test's golden is blessed")
-            .len();
-        assert!(
-            bytes <= TERRAIN_TEST_MAX_BYTES,
-            "{bytes} B, past {TERRAIN_TEST_MAX_BYTES} B"
-        );
+    fn the_terrain_test_goldens_are_within_their_size_cap() {
+        for name in ["terrain_test.golden", "terrain_test_weathered.golden"] {
+            let bytes = std::fs::metadata(worker_dir().join(name))
+                .expect("the terrain test's golden is blessed")
+                .len();
+            eprintln!("{name}: {bytes} B of {TERRAIN_TEST_MAX_BYTES} B");
+            assert!(
+                bytes <= TERRAIN_TEST_MAX_BYTES,
+                "{name}: {bytes} B, past {TERRAIN_TEST_MAX_BYTES} B"
+            );
+        }
     }
 }

@@ -25,7 +25,7 @@ pub const UNSURVEYED: u8 = 0;
 pub struct TerrainLayers {
     pub(super) palette: [Option<GroundMaterial>; MAX_CLASSES],
     pub(super) weights: Vec<[u8; MAX_CLASSES]>,
-    pub(super) maturity: Vec<[u8; 2]>,
+    pub(super) maturity: Vec<[u16; 2]>,
     pub(super) survey_mask: Vec<u8>,
     pub(super) horizon: HorizonMap,
     pub(super) bound: Metres,
@@ -66,7 +66,7 @@ impl TerrainLayers {
     /// no maturity or no weathering rate, as no body's does until P14.T54.b, or where the weights
     /// are not baked ([`WeightsLayer::Skipped`](super::WeightsLayer::Skipped)).
     #[must_use]
-    pub fn maturity(&self) -> &[[u8; 2]] {
+    pub fn maturity(&self) -> &[[u16; 2]] {
         &self.maturity
     }
 
@@ -125,21 +125,24 @@ impl TerrainLayers {
 
 /// The code of the maturity `maturity` on ground of background maturity `background` (`m_body`),
 /// both dimensionless, `maturity` in [0, `background`] and `background` in [0, 1]: the unsigned
-/// normalised 8-bit code of r = √(D ÷ `m_body`), D = `m_body` − m the deficit below the
-/// background, 255 r rounded to the nearest integer (decision-r10-t1c-client-scope §1.4): 0 at the
-/// background and 255 on fresh ground, m = 0. Every code is 0 where `m_body` is 0.
+/// normalised 16-bit code of r = √(D ÷ `m_body`), D = `m_body` − m the deficit below the
+/// background, 65,535 r rounded to the nearest integer (decision-r10-t1c-client-scope §1.4): 0 at
+/// the background and 65,535 on fresh ground, m = 0. Every code is 0 where `m_body` is 0.
 ///
 /// The square root spends the codes where the deficits are small, as they are over most of an old
 /// surface: decoded ([`decode_maturity`]), D = `m_body` r², so the code's first step is a deficit
-/// of 1.5 × 10⁻⁵ `m_body` and its last one of 0.8% of it, half of either step the most a code
-/// is off.
+/// of 2.3 × 10⁻¹⁰ `m_body` and its last one of 3.1 × 10⁻⁵ of it, half of either step the most a
+/// code is off. The ruling's lean, unorm8, whose last step is 0.8% of `m_body`, carried a drawn
+/// albedo up to 1.6% off on fresh ground against its bound of 0.25%; 16 bits hold it within 0.064%
+/// (`maturity_codes_hold_the_drawn_albedo`), so the ruling's alternative is taken: 16,900 B a
+/// patch.
 ///
 /// # Panics
 ///
 /// If `background` is outside [0, 1] or NaN, or `maturity` is outside [0, `background`] or NaN:
 /// the layer's maturities lie between 0 and the header's validated `m_body`.
 #[must_use]
-pub fn encode_maturity(maturity: f64, background: f64) -> u8 {
+pub fn encode_maturity(maturity: f64, background: f64) -> u16 {
     check_background(background);
     assert!(
         (0.0..=background).contains(&maturity),
@@ -151,9 +154,9 @@ pub fn encode_maturity(maturity: f64, background: f64) -> u8 {
         #[expect(
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,
-            reason = "an integer in [0, 255], exact in a u8"
+            reason = "an integer in [0, 65,535], exact in a u16"
         )]
-        let code = (UNORM8_MAX * ratio).round() as u8;
+        let code = (UNORM16_MAX * ratio).round() as u16;
         code
     } else {
         0
@@ -162,25 +165,25 @@ pub fn encode_maturity(maturity: f64, background: f64) -> u8 {
 
 /// The maturity that the code `code` of [`encode_maturity`] holds on ground of background maturity
 /// `background` (`m_body`, dimensionless in [0, 1]), dimensionless in [0, `m_body`]: `m_body` (1 −
-/// r²) with r = `code` ÷ 255, so `m_body` itself at code 0 and +0 at 255, and +0 at every code
-/// where `m_body` is 0.
+/// r²) with r = `code` ÷ 65,535, so `m_body` itself at code 0 and +0 at 65,535, and +0 at every
+/// code where `m_body` is 0.
 ///
 /// # Panics
 ///
 /// If `background` is outside [0, 1] or NaN.
 #[must_use]
-pub fn decode_maturity(code: u8, background: f64) -> f64 {
+pub fn decode_maturity(code: u16, background: f64) -> f64 {
     check_background(background);
     if background > 0.0 {
-        let ratio = f64::from(code) / UNORM8_MAX;
+        let ratio = f64::from(code) / UNORM16_MAX;
         background * (1.0 - ratio * ratio)
     } else {
         0.0
     }
 }
 
-/// An unsigned normalised 8-bit code's largest value, 255, as an `f64`.
-const UNORM8_MAX: f64 = 255.0;
+/// An unsigned normalised 16-bit code's largest value, 65,535, as an `f64`.
+const UNORM16_MAX: f64 = 65_535.0;
 
 /// Refuses a background maturity outside [0, 1] or NaN.
 fn check_background(background: f64) {

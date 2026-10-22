@@ -171,6 +171,24 @@
 //! block of the patch, in falling rim deficit to an exact exit. That costs about 1 ms a warm patch
 //! where the point rule at each vertex costs 0.7–0.8 s (provisional).
 //!
+//! # The octaves a level leaves out, and the albedo nodes
+//!
+//! The small craters' octaves are independent Poisson fields under the largest-deficit rule, so at
+//! a point the level draws, `m_local` = min(`m_res`, `m_body` − `D_u`), `m_res` the resolved
+//! maturity and `D_u` the deficit of the octaves the level leaves out, independent of it, with
+//! P(`D_u` ≤ d) = exp(−`Λ_u`(d)) (decision-r10-t1c-client-scope §1.4). A material drawn at a resolved maturity m
+//! is then T(m) = E[G(min(m, `m_body` − `D_u`))], G its drawn albedo, clamp(c W):
+//!
+//! - [`unresolved_terms`] keeps each octave's `Λ_k` at the body's mix's 52 edges and 51 midpoints,
+//!   by the mix's own quadrature ([`UnresolvedTerms`], [`OctaveTerms`]), once a body;
+//! - [`unresolved_mix`] sums the octaves a level leaves out and cuts `F_u` = exp(−`Λ_u`) by the mix's
+//!   scheme ([`UnresolvedMix`]): band level 0 leaves out every one of a Moon's, the mix less its
+//!   coarse list, and from the band limit's level none, the atom at `m_body`;
+//! - [`maturity_nodes`] gives a material's [`MATURITY_NODES`] nodes T(`m_j`) at the maturities
+//!   [`maturity_node_share`] grades towards both ends, and [`maturity_node_albedo`] interpolates
+//!   them, the formula the client's shader and its TypeScript twin evaluate, so that no client code
+//!   reads the law.
+//!
 //! # The body's maturity mix
 //!
 //! A body drawn at each point's `m_local` is brighter than one drawn at `m_body`, so the server's
@@ -270,7 +288,7 @@ use crate::spheroid::Spheroid;
 use crate::substance_key::{SubstanceKey, SubstanceKeyForm};
 use crate::synth::craters::rims::kept_relief;
 use crate::synth::craters::{
-    CraterCache, CraterOctave, CraterWear, SmallCrater, cell_area, relief_factor,
+    CraterCache, CraterOctave, CraterOctaves, CraterWear, SmallCrater, cell_area, relief_factor,
 };
 use crate::synth::levels::shortest_wavelength;
 use crate::synth::{BandLevel, QueryHeightError, SmallCraters, SynthCache, Synthesiser};
@@ -849,7 +867,14 @@ pub fn maturity_cut(figure: &Spheroid, level: BandLevel) -> Metres {
 /// cut. The octaves fall in diameter from the largest, so a level keeps the first of them.
 #[must_use]
 pub fn maturity_keeps_octave(octave: &CraterOctave, cut: Metres) -> bool {
-    octave.smallest().value() >= cut.value()
+    keeps_smallest(octave.smallest(), cut)
+}
+
+/// [`maturity_keeps_octave`]'s rule on an octave's smallest kept diameter `smallest`: the one
+/// comparison the point rule, the gather and a level's unresolved mix ([`unresolved_mix`]) take.
+#[must_use]
+fn keeps_smallest(smallest: Metres, cut: Metres) -> bool {
+    smallest.value() >= cut.value()
 }
 
 /// The maturity at `at` as band level `level` draws its resolved craters, dimensionless in [0,
@@ -1935,13 +1960,36 @@ struct HaloLaw {
     coarse: Option<CoarseHaloes>,
 }
 
-/// An octave's part of `Λ_s`: its kept density and its nodes in diameter and age.
+/// An octave's part of `Λ_s`: its smallest kept diameter, its kept density and its nodes in
+/// diameter and age.
 #[derive(Debug, Clone, PartialEq)]
 struct OctaveHaloes {
+    /// Its smallest kept diameter ([`CraterOctave::smallest`]), which a level's cut is held to
+    /// ([`maturity_keeps_octave`]).
+    smallest: Metres,
     /// The craters it keeps per square metre ([`CraterOctave::density`]).
     density_per_m2: f64,
     /// Its (diameter, age) nodes of a positive rim deficit, diameters outer and ages inner.
     haloes: Vec<SmallHalo>,
+}
+
+impl OctaveHaloes {
+    /// The octave's `Λ_k`(`deficit`), the expected number of its craters whose deficit at a point
+    /// exceeds `deficit`, a small crater's halo of [`halo_opening`] `opening`: its kept density
+    /// times its nodes' π (R x*)² summed in order from +0, each counted where its rim deficit is
+    /// above `deficit` (strictly). The one term [`HaloLaw::cumulative`] and the unresolved terms
+    /// ([`unresolved_terms`]) both sum.
+    #[must_use]
+    fn rate(&self, deficit: f64, opening: f64) -> f64 {
+        let mut mean = 0.0;
+        for halo in &self.haloes {
+            if deficit < halo.deficit {
+                let x = reach_at(deficit / halo.deficit, opening);
+                mean += halo.disc_m2 * x * x;
+            }
+        }
+        self.density_per_m2 * mean
+    }
 }
 
 /// One (diameter, age) node of an octave: its crater's rim deficit and its weight.
@@ -1987,17 +2035,7 @@ impl HaloLaw {
         if deficit >= self.body {
             return 1.0;
         }
-        let mut rate = 0.0;
-        for octave in &self.octaves {
-            let mut mean = 0.0;
-            for halo in &octave.haloes {
-                if deficit < halo.deficit {
-                    let x = reach_at(deficit / halo.deficit, self.small_opening);
-                    mean += halo.disc_m2 * x * x;
-                }
-            }
-            rate += octave.density_per_m2 * mean;
-        }
+        let rate = self.small_rate(deficit);
         let free = self.coarse.as_ref().map_or(1.0, |coarse| {
             let mut covered = 0.0;
             for halo in &coarse.haloes {
@@ -2010,6 +2048,16 @@ impl HaloLaw {
             if share < 1.0 { 1.0 - share } else { 0.0 }
         });
         free * math::exp(-rate)
+    }
+
+    /// `Λ_s`(`deficit`): each octave's [`OctaveHaloes::rate`] summed in octave order from +0.
+    #[must_use]
+    fn small_rate(&self, deficit: f64) -> f64 {
+        let mut rate = 0.0;
+        for octave in &self.octaves {
+            rate += octave.rate(deficit, self.small_opening);
+        }
+        rate
     }
 }
 
@@ -2068,6 +2116,70 @@ fn mix_with(synth: &Synthesiser<'_, CoarseField>, scheme: &MixScheme<'_>) -> Opt
 fn halo_law(synth: &Synthesiser<'_, CoarseField>, scheme: &MixScheme<'_>) -> Option<HaloLaw> {
     let field = synth.field();
     let header = field.header();
+    let SmallHaloes {
+        body,
+        rate,
+        octaves,
+    } = small_haloes(header, synth.craters().octaves(), scheme)?;
+    let params = header.craters();
+    let surface_age = header.surface_age();
+    let mut coarse = Vec::new();
+    for crater in field.craters() {
+        let fresh = kept_relief(crater) * excavated_share(surface_age, crater.age, crater.diameter);
+        let deficit = deficit_of(body, crater.age, rate, fresh);
+        if deficit > 0.0 {
+            let shape = crater_shape(params, crater.diameter);
+            let rim_m = 0.5 * shape.diameter().value();
+            coarse.push(CoarseHalo {
+                deficit,
+                disc_m2: core::f64::consts::PI * rim_m * rim_m,
+                opening: halo_opening(1.0 + shape.exterior_width()),
+            });
+        }
+    }
+    let coarse = (!coarse.is_empty()).then(|| {
+        let level = header.level();
+        let figure = header.figure();
+        let area_m2 = (0..level.cell_count()).fold(0.0, |sum, index| {
+            let cell =
+                cell_at_index(level.get(), index).expect("every index below the count is a cell");
+            sum + cell_area(cell, &figure).value()
+        });
+        CoarseHaloes {
+            haloes: coarse,
+            area_m2,
+        }
+    });
+    Some(HaloLaw {
+        body,
+        small_opening: halo_opening(HALO_EXTENT_RIM_RADII),
+        octaves,
+        coarse,
+    })
+}
+
+/// The small craters' part of a body's deficit law ([`small_haloes`]).
+struct SmallHaloes {
+    /// The background maturity, `m_body`.
+    body: f64,
+    /// The weathering rate k.
+    rate: f64,
+    /// The octaves that can expose fresh ground, from the largest.
+    octaves: Vec<OctaveHaloes>,
+}
+
+/// The small craters' part of the deficit law of the body of `header`, whose crater octaves are
+/// `octaves` ([`CraterOctaves::new`] of the header, what its synthesis's
+/// [`SmallCraters::octaves`] holds), under `scheme`: each octave that can expose fresh ground, from
+/// the largest, with its nodes in diameter and age; or `None` without a maturity and a rate. The one
+/// computation the body's mix ([`maturity_mix`]) and its unresolved terms ([`unresolved_terms`])
+/// share, so that the two sum the same `Λ_k` to the bit.
+#[must_use]
+fn small_haloes(
+    header: &FieldHeader,
+    octaves: &CraterOctaves,
+    scheme: &MixScheme<'_>,
+) -> Option<SmallHaloes> {
     let (Some(body), Some(rate)) = (header.maturity(), header.weathering_rate()) else {
         return None;
     };
@@ -2075,8 +2187,8 @@ fn halo_law(synth: &Synthesiser<'_, CoarseField>, scheme: &MixScheme<'_>) -> Opt
     let system = params.system_age();
     let surface_age = header.surface_age();
     let shares = age_nodes(scheme.age_parts);
-    let mut octaves = Vec::new();
-    for octave in synth.craters().octaves().octaves() {
+    let mut exposing = Vec::new();
+    for octave in octaves.octaves() {
         if !can_expose(octave, surface_age) {
             continue;
         }
@@ -2119,43 +2231,16 @@ fn halo_law(synth: &Synthesiser<'_, CoarseField>, scheme: &MixScheme<'_>) -> Opt
                 }
             }
         }
-        octaves.push(OctaveHaloes {
+        exposing.push(OctaveHaloes {
+            smallest: octave.smallest(),
             density_per_m2: octave.density().value() * 1e-6,
             haloes,
         });
     }
-    let mut coarse = Vec::new();
-    for crater in field.craters() {
-        let fresh = kept_relief(crater) * excavated_share(surface_age, crater.age, crater.diameter);
-        let deficit = deficit_of(body, crater.age, rate, fresh);
-        if deficit > 0.0 {
-            let shape = crater_shape(params, crater.diameter);
-            let rim_m = 0.5 * shape.diameter().value();
-            coarse.push(CoarseHalo {
-                deficit,
-                disc_m2: core::f64::consts::PI * rim_m * rim_m,
-                opening: halo_opening(1.0 + shape.exterior_width()),
-            });
-        }
-    }
-    let coarse = (!coarse.is_empty()).then(|| {
-        let level = header.level();
-        let figure = header.figure();
-        let area_m2 = (0..level.cell_count()).fold(0.0, |sum, index| {
-            let cell =
-                cell_at_index(level.get(), index).expect("every index below the count is a cell");
-            sum + cell_area(cell, &figure).value()
-        });
-        CoarseHaloes {
-            haloes: coarse,
-            area_m2,
-        }
-    });
-    Some(HaloLaw {
+    Some(SmallHaloes {
         body,
-        small_opening: halo_opening(HALO_EXTENT_RIM_RADII),
-        octaves,
-        coarse,
+        rate,
+        octaves: exposing,
     })
 }
 
@@ -2228,12 +2313,30 @@ fn cut(law: &HaloLaw, parts: u32) -> Vec<MaturityNode> {
     let body = law.body;
     let deficits: Vec<f64> = deficit_edges(parts).into_iter().map(|e| body * e).collect();
     let below: Vec<f64> = deficits.iter().map(|&d| law.cumulative(d)).collect();
+    cut_cumulative(body, &deficits, &below, |k| {
+        law.cumulative(f64::midpoint(deficits[k], deficits[k + 1]))
+    })
+}
+
+/// [`cut`]'s scheme on a distribution's values: `m_body` `body` less each deficit edge of
+/// `deficits`, ascending from 0, with the atom `below[0]` = F(0) at the first and each bin's mass
+/// P = F(b) − F(a), from `below` (F at each edge), shared between its two edges by F at its
+/// midpoint, `middle(k)` for bin k, so that its mean deficit is kept; the zero weights dropped.
+/// `middle` is asked only of a bin of positive mass. The one cut of the body's mix and of a level's
+/// unresolved mix ([`unresolved_mix`]).
+#[must_use]
+fn cut_cumulative(
+    body: f64,
+    deficits: &[f64],
+    below: &[f64],
+    mut middle: impl FnMut(usize) -> f64,
+) -> Vec<MaturityNode> {
     let mut weights = vec![0.0; deficits.len()];
     weights[0] = below[0];
     for k in 0..deficits.len() - 1 {
         let mass = below[k + 1] - below[k];
         if mass > 0.0 {
-            let middle = law.cumulative(f64::midpoint(deficits[k], deficits[k + 1]));
+            let middle = middle(k);
             // Never −0: the numerator is a positive mass plus a difference of at least −mass to
             // rounding, which rounds to +0 where it cancels.
             let towards = ((mass + 4.0 * (below[k + 1] - middle)) / (6.0 * mass)).clamp(0.0, 1.0);
@@ -2250,6 +2353,343 @@ fn cut(law: &HaloLaw, parts: u32) -> Vec<MaturityNode> {
             weight,
         })
         .collect()
+}
+
+/// The small craters' part of a body's deficit law, octave by octave (R10.T1.c's client half;
+/// decision-r10-t1c-client-scope §1.4): its background maturity `m_body`, the mix's 52 deficit
+/// edges and their 51 bins' midpoints, and for each octave that can expose fresh ground, from the
+/// largest, its smallest kept diameter and its `Λ_k` at each edge and midpoint ([`OctaveTerms`]).
+///
+/// It is the body's maturity mix's own quadrature ([`maturity_mix`]: the same octaves, nodes and
+/// sums), without the coarse list, which every level resolves: so `Λ_s` at an edge or midpoint is
+/// the octaves' `Λ_k` summed in their order from +0, to the bit. A level's unresolved mix
+/// ([`unresolved_mix`]) sums the octaves the level leaves out. Built once a body (some tens of
+/// milliseconds, the mix's cost), it is a function of the header alone ([`unresolved_terms`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnresolvedTerms {
+    body: f64,
+    figure: Spheroid,
+    deficits: Vec<f64>,
+    middles: Vec<f64>,
+    octaves: Vec<OctaveTerms>,
+}
+
+impl UnresolvedTerms {
+    /// The body's background maturity, `m_body`, dimensionless in [0, 1].
+    #[must_use]
+    pub const fn body(&self) -> f64 {
+        self.body
+    }
+
+    /// The mix's 52 deficit edges, dimensionless and ascending from 0 to `m_body`: `m_body` times
+    /// 0, 2⁻²⁴, 2⁻²³, …, 2⁻⁵, then 2/32, 3/32, …, 1 (the module documentation's nodes).
+    #[must_use]
+    pub fn deficits(&self) -> &[f64] {
+        &self.deficits
+    }
+
+    /// The 51 bins' midpoints, `f64::midpoint` of each pair of [`deficits`](Self::deficits).
+    #[must_use]
+    pub fn middles(&self) -> &[f64] {
+        &self.middles
+    }
+
+    /// The octaves that can expose fresh ground, from the largest.
+    #[must_use]
+    pub fn octaves(&self) -> &[OctaveTerms] {
+        &self.octaves
+    }
+}
+
+/// One octave's part of a body's [`UnresolvedTerms`]: its smallest kept diameter and its `Λ_k`, the
+/// expected number of its craters whose deficit at a point exceeds d, at the mix's edges and
+/// midpoints.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OctaveTerms {
+    smallest: Metres,
+    at_edges: Vec<f64>,
+    at_middles: Vec<f64>,
+}
+
+impl OctaveTerms {
+    /// Its smallest kept diameter ([`CraterOctave::smallest`]), metres: a level whose cut is at
+    /// most it draws the octave crater by crater ([`maturity_keeps_octave`]).
+    #[must_use]
+    pub const fn smallest(&self) -> Metres {
+        self.smallest
+    }
+
+    /// `Λ_k` at each of [`UnresolvedTerms::deficits`], dimensionless and at least 0.
+    #[must_use]
+    pub fn at_edges(&self) -> &[f64] {
+        &self.at_edges
+    }
+
+    /// `Λ_k` at each of [`UnresolvedTerms::middles`], dimensionless and at least 0.
+    #[must_use]
+    pub fn at_middles(&self) -> &[f64] {
+        &self.at_middles
+    }
+}
+
+/// The unresolved terms of the body of `header` ([`UnresolvedTerms`]), or `None` where the header
+/// carries no maturity or no weathering rate (R10.T1.c's client half; decision-r10-t1c-client-scope
+/// §1.4).
+///
+/// The octaves are [`CraterOctaves::new`]'s of the header, which is what a synthesis's
+/// [`SmallCraters::octaves`] holds whatever its detail seed, so a worker builds them from the
+/// field's header alone; each octave's (diameter, age) nodes are the body's mix's own, by the one
+/// computation [`maturity_mix`] takes them by. Nothing is drawn.
+///
+/// # Panics
+///
+/// As [`maturity_mix`], for a header whose values the field validated (a bug).
+#[must_use]
+pub fn unresolved_terms(header: &FieldHeader) -> Option<UnresolvedTerms> {
+    let octaves = CraterOctaves::new(header);
+    let SmallHaloes { body, octaves, .. } = small_haloes(header, &octaves, &MixScheme::RULED)?;
+    let opening = halo_opening(HALO_EXTENT_RIM_RADII);
+    let deficits: Vec<f64> = deficit_edges(1).into_iter().map(|e| body * e).collect();
+    let middles: Vec<f64> = deficits
+        .windows(2)
+        .map(|pair| f64::midpoint(pair[0], pair[1]))
+        .collect();
+    let octaves = octaves
+        .iter()
+        .map(|octave| OctaveTerms {
+            smallest: octave.smallest,
+            at_edges: deficits.iter().map(|&d| octave.rate(d, opening)).collect(),
+            at_middles: middles.iter().map(|&d| octave.rate(d, opening)).collect(),
+        })
+        .collect();
+    Some(UnresolvedTerms {
+        body,
+        figure: header.figure(),
+        deficits,
+        middles,
+        octaves,
+    })
+}
+
+/// A band level's unresolved maturity mix (R10.T1.c's client half; decision-r10-t1c-client-scope
+/// §1.4): the distribution over the ground of the deficit `D_u` that the small craters of the octaves
+/// the level does not draw leave, cut at nodes of falling maturity whose weights sum to 1.
+///
+/// A point's maturity as the level draws it is `m_local` = min(`m_res`, `m_body` − `D_u`), `m_res`
+/// the resolved maturity ([`maturity_at_level`], [`patch_maturity`]) and `D_u` independent of it
+/// (the octaves are independent Poisson fields under the largest-deficit rule), with P(`D_u` ≤ d) =
+/// exp(−`Λ_u`(d)) below `m_body`, `Λ_u` the left-out octaves' `Λ_k` summed. So a material's albedo
+/// at a resolved maturity m is the mix's mean of its albedo at min(m, μ) ([`maturity_nodes`]). From
+/// the band limit's level, where every octave is drawn, the mix is one node, `m_body`, of weight 1.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnresolvedMix {
+    body: f64,
+    unresolved: usize,
+    nodes: Vec<MaturityNode>,
+}
+
+impl UnresolvedMix {
+    /// The body's background maturity, `m_body`: the first node's maturity.
+    #[must_use]
+    pub const fn body(&self) -> f64 {
+        self.body
+    }
+
+    /// How many of the octaves that can expose fresh ground the level leaves to the mix.
+    #[must_use]
+    pub const fn unresolved_octaves(&self) -> usize {
+        self.unresolved
+    }
+
+    /// The nodes (μ, w), in falling maturity from `m_body`, each of a positive weight, the weights
+    /// summing to 1 to rounding.
+    #[must_use]
+    pub fn nodes(&self) -> &[MaturityNode] {
+        &self.nodes
+    }
+}
+
+/// Band level `level`'s unresolved mix on the body of `terms` ([`UnresolvedMix`]): `Λ_u`, the
+/// `Λ_k` of the octaves the level's cut does not keep ([`maturity_cut`],
+/// [`maturity_keeps_octave`]) summed in octave order from +0 at each of the mix's edges and
+/// midpoints; `F_u` = exp(−`Λ_u`), and 1 from `m_body` on; cut by the body's mix's own scheme (its
+/// atom and Simpson shares; the module documentation's nodes).
+///
+/// It is the body's maturity mix ([`maturity_mix`]) without its coarse list where the level keeps
+/// no octave, as band level 0 keeps none of a Moon's, and the atom at `m_body` where it keeps
+/// every one, from the band limit's level on.
+#[must_use]
+pub fn unresolved_mix(terms: &UnresolvedTerms, level: BandLevel) -> UnresolvedMix {
+    let body = terms.body;
+    let cut = maturity_cut(&terms.figure, level);
+    let left: Vec<&OctaveTerms> = terms
+        .octaves
+        .iter()
+        .filter(|octave| !keeps_smallest(octave.smallest, cut))
+        .collect();
+    let below_at = |deficit: f64, at: &dyn Fn(&OctaveTerms) -> f64| {
+        if deficit >= body {
+            return 1.0;
+        }
+        let mut rate = 0.0;
+        for octave in &left {
+            rate += at(octave);
+        }
+        math::exp(-rate)
+    };
+    let below: Vec<f64> = terms
+        .deficits
+        .iter()
+        .enumerate()
+        .map(|(k, &d)| below_at(d, &|octave| octave.at_edges[k]))
+        .collect();
+    let nodes = cut_cumulative(body, &terms.deficits, &below, |k| {
+        below_at(terms.middles[k], &|octave| octave.at_middles[k])
+    });
+    UnresolvedMix {
+        body,
+        unresolved: left.len(),
+        nodes,
+    }
+}
+
+/// The albedo nodes a material carries for the client a level, K: 16, at the maturities `m_body`
+/// times [`maturity_node_share`] of 0 to K − 1 (R10.T1.c's client half; decision-r10-t1c-client-scope
+/// §1.4, whose lean was 8).
+///
+/// The ruling bounds the interpolation ([`maturity_node_albedo`]) within 0.5% of the nodes' own law
+/// ([`maturity_nodes`] at the maturity itself) in each band at every maturity. On the `testing`
+/// worlds' materials, weathered at maturity 1 and drawn at a scale of 1, over the unresolved mixes
+/// of levels 0 to the band limit's on the 4.4, 3.5 and 1 Gyr Moon-like worlds, this grading's worst
+/// error is 0.77% at K = 12, 0.42% at 16, 0.27% at 20 and 0.19% at 24 (the sin² grading's 1.6% at
+/// 12, u²'s 0.65% at 16, each linear in T; linear in ln T moves none by more than 0.05 points): 16
+/// is the least K that meets it. Where a scale carries a material's V to its range's end
+/// ([`scaled_normal_albedo`](super::scaled_normal_albedo)), its drawn albedo has a corner in m,
+/// which no fixed nodes follow; there the error is 0.86–1.37% at K of 12 to 24, 0.86% at 16
+/// (recorded in plan R10's Risks).
+pub const MATURITY_NODES: usize = 16;
+
+/// Node `node`'s maturity as a share of `m_body`, dimensionless in [0, 1]: q = 1 − (1 − u³)² with u =
+/// j ÷ (K − 1) for node j of K = [`MATURITY_NODES`], 0 at the first and 1 at the last, each exact.
+///
+/// The nodes are graded towards both ends, where a material's drawn albedo bends most: towards
+/// fresh ground, where the weathering law is steepest in B (q ≈ 2u³), and towards `m_body`, where
+/// the unresolved mix's small deficits fold its albedo's slope (q ≈ 1 − 9 (1 − u)²). The inverse
+/// is closed, u = ∛(1 − √(1 − q)), and in the layer's code r (÷ 65,535,
+/// [`decode_maturity`](crate::bake::decode_maturity)'s q = 1 − r²) it is u = ∛(1 − r): the nodes
+/// are uniform in the cube root of one less the code ([`maturity_node_albedo`]).
+///
+/// # Panics
+///
+/// If `node` is not below [`MATURITY_NODES`].
+#[must_use]
+pub fn maturity_node_share(node: usize) -> f64 {
+    assert!(
+        node < MATURITY_NODES,
+        "a maturity node is one of {MATURITY_NODES}, got {node}"
+    );
+    let u = node_index(node) / node_index(MATURITY_NODES - 1);
+    let fresh = 1.0 - u * u * u;
+    1.0 - fresh * fresh
+}
+
+/// A node index as an `f64`.
+#[must_use]
+fn node_index(node: usize) -> f64 {
+    f64::from(u32::try_from(node).expect("a node index is below MATURITY_NODES"))
+}
+
+/// A material's albedo nodes at a level whose unresolved mix is `mix`, each in B, V and R: node j's
+/// T(`m_j`) = Σ w G(min(`m_j`, μ)) over the mix's nodes (μ, w) in their order from +0, band by
+/// band, at `m_j` = `m_body` × [`maturity_node_share`] of j (R10.T1.c's client half;
+/// decision-r10-t1c-client-scope §1.4).
+///
+/// `g` is the material's drawn albedo at a maturity in [0, `m_body`]: the worker's
+/// [`scaled_normal_albedo`](super::scaled_normal_albedo) of its [`exposed_properties`] at that
+/// maturity under the header's scale, clamp(c W(m)). It is asked only at the nodes' maturities
+/// and the mix's (min returns one of its two), so a caller may keep its values. T is the expectation
+/// over the unresolved octaves of the drawn albedo at a resolved maturity m, so that a texel's
+/// albedo is the mean of W over its ground (finding 8), never W of a mean maturity; with the mix one
+/// node, `m_body` of weight 1, node j is G(`m_j`) to the bit.
+#[must_use]
+pub fn maturity_nodes(
+    mix: &UnresolvedMix,
+    mut g: impl FnMut(f64) -> [f64; 3],
+) -> [[f64; 3]; MATURITY_NODES] {
+    std::array::from_fn(|j| {
+        let at = mix.body * maturity_node_share(j);
+        let mut sum = [0.0; 3];
+        for node in &mix.nodes {
+            let m = if at < node.maturity {
+                at
+            } else {
+                node.maturity
+            };
+            let value = g(m);
+            for (total, band) in sum.iter_mut().zip(value) {
+                *total += node.weight * band;
+            }
+        }
+        sum
+    })
+}
+
+/// The albedo in B, V and R a material of nodes `nodes` ([`maturity_nodes`]) is drawn with at
+/// maturity `maturity` on ground of background maturity `body` (`m_body`): the node table
+/// interpolated piecewise linearly in the node coordinate u, the formula the terrain's shader and
+/// its TypeScript twin evaluate (R10.T1.c's client half).
+///
+/// With K = [`MATURITY_NODES`] and q = `maturity` ÷ `body`:
+///
+/// 1. u = ∛(1 − √(1 − q)), the inverse of [`maturity_node_share`]; from the layer's unorm16 code
+///    c (r = c ÷ 65,535, [`decode_maturity`](crate::bake::decode_maturity)'s q = 1 − r²) it is
+///    u = ∛(1 − r);
+/// 2. t = (K − 1) u, at most K − 1;
+/// 3. i = min(⌊t⌋, K − 2) and f = t − i;
+/// 4. the albedo is (1 − f) Tᵢ + f Tᵢ₊₁ in each band, T the nodes in their order.
+///
+/// So q = 0, fresh ground, draws node 0 and q = 1, `m_body`, node K − 1, each to the bit, and each
+/// node's own maturity draws the node to rounding. Where `body` is 0 every node is the fresh
+/// ground's (each `m_j` is 0) and t is 0: node 0, whatever the code.
+///
+/// # Panics
+///
+/// If `body` is outside [0, 1] or NaN, or `maturity` outside [0, `body`] or NaN: a layer's
+/// maturities lie between 0 and the header's validated `m_body`.
+#[must_use]
+pub fn maturity_node_albedo(
+    nodes: &[[f64; 3]; MATURITY_NODES],
+    body: f64,
+    maturity: f64,
+) -> [f64; 3] {
+    check_unit("a background maturity", body);
+    assert!(
+        (0.0..=body).contains(&maturity),
+        "a maturity must be in [0, {body}], its background's, got {maturity}"
+    );
+    let last = node_index(MATURITY_NODES - 1);
+    let t = if body > 0.0 {
+        // In [0, 1]: a quotient of a maturity no larger than its divisor.
+        let below = 1.0 - maturity / body;
+        let u = math::cbrt(1.0 - below.sqrt());
+        let t = last * u;
+        if t < last { t } else { last }
+    } else {
+        0.0
+    };
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "t lies in [0, K − 1], so its floor is a node index"
+    )]
+    let floor = t.floor() as usize;
+    let i = if floor < MATURITY_NODES - 2 {
+        floor
+    } else {
+        MATURITY_NODES - 2
+    };
+    let f = t - node_index(i);
+    std::array::from_fn(|band| (1.0 - f) * nodes[i][band] + f * nodes[i + 1][band])
 }
 
 #[cfg(test)]
@@ -2271,6 +2711,7 @@ mod tests {
     use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::*;
+    use crate::bake::{decode_maturity, encode_maturity};
     use crate::craters::{cumulative_density, lunar_chronology};
     use crate::cube::{Face, MAX_LEVEL, st_to_uv, xyz_to_face_uv};
     use crate::field::{BVR_EFFECTIVE_WAVELENGTHS_NM, CoarseCrater, CoarseField, MechanicsFamily};
@@ -4853,6 +5294,491 @@ mod tests {
         }
     }
 
+    // ---- R10.T1.c's client half: the unresolved mix and the nodes
+    // (decision-r10-t1c-client-scope §1.4 and §2.5's tests 4, 5, 6 and 8) ----
+
+    /// The drawn albedo G(m) in B, V and R of `material` on `palette` exposed as `exposure`, at
+    /// maturity m, under the scale `scale`: what the worker draws a material with.
+    fn drawn(
+        material: Material,
+        palette: &MaterialPalette,
+        exposure: GroundExposure,
+        scale: f64,
+    ) -> impl Fn(f64) -> [f64; 3] + '_ {
+        move |m| {
+            let exposed = exposed_properties(material, palette, exposure.with_maturity(m))
+                .expect("the material's entry is the palette's");
+            scaled_normal_albedo(&exposed, scale)
+        }
+    }
+
+    /// The nodes' own law T(m) = Σ w G(min(m, μ)) over `mix`, from G at m, `at_m`, and G at each of
+    /// the mix's nodes, `at_nodes`, band by band in node order from +0.
+    fn node_law(mix: &UnresolvedMix, at_m: [f64; 3], at_nodes: &[[f64; 3]], m: f64) -> [f64; 3] {
+        let mut sum = [0.0; 3];
+        for (node, at_node) in mix.nodes().iter().zip(at_nodes) {
+            let value = if m < node.maturity() { at_m } else { *at_node };
+            for (total, band) in sum.iter_mut().zip(value) {
+                *total += node.weight() * band;
+            }
+        }
+        sum
+    }
+
+    /// The materials of `palette`, every form of every entry, less those whose drawn albedo under
+    /// `g_of` is another's at three maturities of `body` (their nodes are the same).
+    fn distinct_materials<'p, G: Fn(f64) -> [f64; 3]>(
+        palette: &MaterialPalette,
+        body: f64,
+        g_of: impl Fn(Material) -> G + 'p,
+    ) -> Vec<Material> {
+        let mut seen = BTreeSet::new();
+        let mut kept = Vec::new();
+        for entry in 0..u8::try_from(palette.len()).expect("a palette holds at most 15 entries") {
+            for &class in MaterialClass::ALL {
+                let material = Material::new(class, entry).expect("entry is a palette index");
+                let g = g_of(material);
+                let probe: Vec<u64> = [0.0, 0.37, 1.0]
+                    .iter()
+                    .flat_map(|&x| g(x * body).map(bits))
+                    .collect();
+                if seen.insert(probe) {
+                    kept.push(material);
+                }
+            }
+        }
+        kept
+    }
+
+    /// The maturities, as shares of `m_body`, at which test 5 and test 6 compare: `n` + 1 uniform in
+    /// x, `n` + 1 uniform in the node coordinate u, and `n` ÷ 5 + 1 within 2⁻⁰ to 2⁻²⁵ of 1, where
+    /// the unresolved mix bends a material's mean.
+    fn compared_shares(n: u32) -> Vec<f64> {
+        let uniform = (0..=n).map(move |k| f64::from(k) / f64::from(n));
+        let graded = (0..=n).map(move |k| {
+            let u = f64::from(k) / f64::from(n);
+            let fresh = 1.0 - u * u * u;
+            1.0 - fresh * fresh
+        });
+        let near = n / 5;
+        let top = (0..=near).map(move |k| 1.0 - math::exp2(-25.0 * f64::from(k) / f64::from(near)));
+        uniform.chain(graded).chain(top).collect()
+    }
+
+    /// A mix's nodes' bits: each node's maturity and weight.
+    fn mix_bits(nodes: &[MaturityNode]) -> Vec<(u64, u64)> {
+        nodes
+            .iter()
+            .map(|n| (bits(n.maturity()), bits(n.weight())))
+            .collect()
+    }
+
+    /// Test 4's first half (decision-r10-t1c-client-scope §2.5): on the three weathered Moon-like
+    /// worlds the unresolved terms are the body's mix's own octaves, their `Λ_k` summed in order
+    /// from +0 its `Λ_s` to the bit at every edge and midpoint, and band level 0, which keeps none
+    /// of a Moon's octaves, is the mix less its coarse list to the bit; the young single crater,
+    /// which draws no small crater, has no octave and every level's mix is the atom; and a header
+    /// with no maturity has no terms.
+    #[test]
+    fn maturity_unresolved_terms_are_the_halo_mix_s_octaves() {
+        for world in &halo_worlds()[..3] {
+            let (name, field) = (world.name, world.field);
+            let header = field.header();
+            let synth = Synthesiser::new(field, SEED);
+            let terms = unresolved_terms(header).expect("the field carries a maturity");
+            let law = halo_law(&synth, &MixScheme::RULED).expect("the field carries a maturity");
+            assert_same_bits(terms.body(), header.maturity().unwrap());
+            assert_eq!(terms.octaves().len(), law.octaves.len(), "{name}");
+            for (octave, haloes) in terms.octaves().iter().zip(&law.octaves) {
+                assert_same_bits(octave.smallest().value(), haloes.smallest.value());
+            }
+            assert_eq!((terms.deficits().len(), terms.middles().len()), (52, 51));
+            let sum_at = |k: usize, at: fn(&OctaveTerms) -> &[f64]| {
+                terms
+                    .octaves()
+                    .iter()
+                    .fold(0.0, |sum, octave| sum + at(octave)[k])
+            };
+            for (k, &d) in terms.deficits().iter().enumerate() {
+                assert_same_bits(sum_at(k, OctaveTerms::at_edges), law.small_rate(d));
+            }
+            for (k, &d) in terms.middles().iter().enumerate() {
+                assert_same_bits(sum_at(k, OctaveTerms::at_middles), law.small_rate(d));
+            }
+            let zero = unresolved_mix(&terms, BandLevel::new(0).unwrap());
+            assert_eq!(zero.unresolved_octaves(), terms.octaves().len(), "{name}");
+            let mut free = law.clone();
+            free.coarse = None;
+            assert_eq!(mix_bits(zero.nodes()), mix_bits(&cut(&free, 1)), "{name}");
+        }
+        let field = young_crater();
+        let terms = unresolved_terms(field.header()).unwrap();
+        assert!(
+            terms.octaves().is_empty(),
+            "the single crater draws no small crater"
+        );
+        let body = field.header().maturity().unwrap();
+        for level in [0, 7, 24] {
+            let mix = unresolved_mix(&terms, BandLevel::new(level).unwrap());
+            assert_eq!(mix.unresolved_octaves(), 0);
+            assert_eq!(mix_bits(mix.nodes()), [(bits(body), bits(1.0))]);
+        }
+        assert!(unresolved_terms(world(SyntheticWorld::MoonLike).header()).is_none());
+    }
+
+    /// Test 4's second half (decision-r10-t1c-client-scope §2.5): on the three weathered Moon-like
+    /// worlds each level's mix is a distribution over [0, `m_body`] whose left-out octaves never
+    /// grow as the level deepens, printed; and from the band limit's level the mix is the atom at
+    /// `m_body`, so every material's nodes are its drawn albedo at the nodes' maturities to the
+    /// bit, at a scale of 1 and at the haloed one.
+    #[test]
+    fn maturity_unresolved_mix_ends_in_the_atom_where_the_nodes_are_the_drawn_albedo() {
+        for world in &halo_worlds()[..3] {
+            let (name, field) = (world.name, world.field);
+            let header = field.header();
+            let terms = unresolved_terms(header).expect("the field carries a maturity");
+            let body = terms.body();
+            let band = |level: u8| BandLevel::new(level).unwrap();
+            let limit = band_limit_level(field);
+            let mut left = terms.octaves().len();
+            let mut counts = Vec::new();
+            for level in 0..=MAX_LEVEL {
+                let mix = unresolved_mix(&terms, band(level));
+                assert_same_bits(mix.body(), body);
+                assert!(mix.unresolved_octaves() <= left, "{name}: level {level}");
+                left = mix.unresolved_octaves();
+                let total = mix.nodes().iter().fold(0.0, |sum, n| sum + n.weight());
+                assert!(
+                    (total - 1.0).abs() < 1e-12,
+                    "{name}: level {level}: {total}"
+                );
+                assert!(
+                    mix.nodes()
+                        .windows(2)
+                        .all(|pair| pair[0].maturity() > pair[1].maturity())
+                );
+                for node in mix.nodes() {
+                    assert!((0.0..=body).contains(&node.maturity()) && node.weight() > 0.0);
+                }
+                if level >= limit {
+                    assert_eq!(mix_bits(mix.nodes()), [(bits(body), bits(1.0))], "{level}");
+                }
+                counts.push(format!(
+                    "{level}:{}/{}",
+                    mix.unresolved_octaves(),
+                    mix.nodes().len()
+                ));
+            }
+            eprintln!(
+                "{name}: left-out octaves/nodes by level {}",
+                counts.join(" ")
+            );
+            let atom = unresolved_mix(&terms, band(limit));
+            let palette = header.palette();
+            let exposure = GroundExposure::of_header(header);
+            for scale in [1.0, world.haloed.scale()] {
+                for entry in 0..u8::try_from(palette.len()).unwrap() {
+                    for &class in MaterialClass::ALL {
+                        let material = Material::new(class, entry).unwrap();
+                        let g = drawn(material, palette, exposure, scale);
+                        let nodes = maturity_nodes(&atom, &g);
+                        for (j, node) in nodes.iter().enumerate() {
+                            let want = g(body * maturity_node_share(j));
+                            assert_eq!(node.map(bits), want.map(bits), "{name} {class:?} {j}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The node grading: K nodes from 0 to 1, rising, each exact at both ends, its inverse in the
+    /// interpolation drawing each node at its own maturity to rounding and the ends to the bit, and
+    /// a body of maturity 0 drawing node 0 whatever the maturity asked.
+    #[test]
+    fn maturity_nodes_are_graded_from_fresh_to_m_body_and_drawn_at_their_own_maturities() {
+        assert_same_bits(maturity_node_share(0), 0.0);
+        assert_same_bits(maturity_node_share(MATURITY_NODES - 1), 1.0);
+        let shares: Vec<f64> = (0..MATURITY_NODES).map(maturity_node_share).collect();
+        assert!(
+            shares.windows(2).all(|pair| pair[0] < pair[1]),
+            "{shares:?}"
+        );
+        eprintln!("the node shares: {shares:.6?}");
+        let nodes: [[f64; 3]; MATURITY_NODES] = std::array::from_fn(|j| {
+            let x = node_index(j);
+            [0.1 + x, 0.2 + 2.0 * x, 0.3 + 3.0 * x]
+        });
+        for body in [1.0, 0.7, 0.123] {
+            assert_eq!(
+                maturity_node_albedo(&nodes, body, 0.0).map(bits),
+                nodes[0].map(bits)
+            );
+            assert_eq!(
+                maturity_node_albedo(&nodes, body, body).map(bits),
+                nodes[MATURITY_NODES - 1].map(bits)
+            );
+            for (j, &share) in shares.iter().enumerate() {
+                let m = body * share;
+                let got = maturity_node_albedo(&nodes, body, if m < body { m } else { body });
+                for (g, w) in got.iter().zip(&nodes[j]) {
+                    assert!(
+                        (g - w).abs() < 1e-9,
+                        "{body} {j}: {got:?} against {:?}",
+                        nodes[j]
+                    );
+                }
+            }
+        }
+        for m in [0.0, -0.0] {
+            assert_eq!(
+                maturity_node_albedo(&nodes, 0.0, m).map(bits),
+                nodes[0].map(bits)
+            );
+        }
+    }
+
+    /// One case of test 5 and test 6: a palette exposed as `exposure`, whose unresolved terms are
+    /// `terms`, drawn at the scale `scale`, and whether the scale carries some material to its
+    /// range's end.
+    struct NodeCase<'a> {
+        name: String,
+        palette: &'a MaterialPalette,
+        exposure: GroundExposure,
+        terms: &'a UnresolvedTerms,
+        scale: f64,
+        clamped: bool,
+    }
+
+    /// The cases test 5 holds: every material of the three weathered Moon-like worlds at a scale of
+    /// 1; every other `testing` world's palette weathered at maturity 1 over the 1 Gyr world's
+    /// terms, at a scale of 1; and, where a range clamps, the 3.5 and 1 Gyr worlds at their haloed
+    /// scales, the 1 Gyr one's that of the weathered fixture, `TEST MOON` weathered, whose solve
+    /// for p in V, 0.12, is the same. On the wasm targets, the 1 Gyr world alone, at both scales.
+    fn node_cases(terms: &[UnresolvedTerms]) -> Vec<NodeCase<'_>> {
+        let worlds = halo_worlds();
+        let wasm = cfg!(target_arch = "wasm32");
+        let mut cases = Vec::new();
+        for (k, world) in worlds[..3].iter().enumerate() {
+            if wasm && k != 2 {
+                continue;
+            }
+            let header = world.field.header();
+            cases.push(NodeCase {
+                name: format!("{} at c 1", world.name),
+                palette: header.palette(),
+                exposure: GroundExposure::of_header(header),
+                terms: &terms[k],
+                scale: 1.0,
+                clamped: false,
+            });
+        }
+        if !wasm {
+            for &w in SyntheticWorld::ALL {
+                let header = world(w).header();
+                cases.push(NodeCase {
+                    name: format!("{w:?}'s palette at m_body 1, c 1"),
+                    palette: header.palette(),
+                    exposure: GroundExposure::NONE.with_maturity(1.0),
+                    terms: &terms[2],
+                    scale: 1.0,
+                    clamped: false,
+                });
+            }
+        }
+        for k in [1, 2] {
+            if wasm && k != 2 {
+                continue;
+            }
+            let header = worlds[k].field.header();
+            cases.push(NodeCase {
+                name: format!("{} at its haloed scale", worlds[k].name),
+                palette: header.palette(),
+                exposure: GroundExposure::of_header(header),
+                terms: &terms[k],
+                scale: worlds[k].haloed.scale(),
+                clamped: true,
+            });
+        }
+        cases
+    }
+
+    /// The levels tests 5 and 6 hold each case at: 0, 4, 6, 8, 10, 12, 14 and the band limit's
+    /// (0, 8 and the band limit's on the wasm targets).
+    fn node_levels(limit: u8) -> Vec<u8> {
+        if cfg!(target_arch = "wasm32") {
+            vec![0, 8, limit]
+        } else {
+            vec![0, 4, 6, 8, 10, 12, 14, limit]
+        }
+    }
+
+    /// The worst relative error over each band of `got` against `want`, where `want` is positive.
+    fn worst_of(worst: &mut (f64, String), got: [f64; 3], want: [f64; 3], at: impl Fn() -> String) {
+        for (g, w) in got.iter().zip(&want) {
+            if *w > 0.0 {
+                let error = (g / w - 1.0).abs();
+                if error > worst.0 {
+                    *worst = (error, at());
+                }
+            }
+        }
+    }
+
+    /// Test 5 (decision-r10-t1c-client-scope §1.4 and §2.5): a material's interpolated nodes
+    /// ([`maturity_node_albedo`]) are within 0.5% of the nodes' own law, T(m) = Σ w G(min(m, μ)),
+    /// in each band at every compared maturity in [0, `m_body`] (some 4,400 natively), at each
+    /// level, on every material of the three weathered Moon-like worlds and of every other
+    /// `testing` world's palette weathered at maturity 1, at a scale of 1; printed with where
+    /// each is worst. Where a scale carries a material's V to its range's end its drawn albedo has a
+    /// corner the fixed nodes cannot follow: there the figure is pinned as it stands, a known miss
+    /// (recorded in plan R10's Risks).
+    #[test]
+    fn maturity_nodes_interpolate_within_half_a_percent() {
+        let worlds = halo_worlds();
+        let terms: Vec<UnresolvedTerms> = worlds[..3]
+            .iter()
+            .map(|w| unresolved_terms(w.field.header()).unwrap())
+            .collect();
+        let shares = compared_shares(if cfg!(target_arch = "wasm32") {
+            200
+        } else {
+            2_000
+        });
+        let limit = band_limit_level(worlds[2].field);
+        let (mut plain, mut clamped) = ((0.0, String::new()), (0.0, String::new()));
+        for case in node_cases(&terms) {
+            let body = case.terms.body();
+            let g_of = |material| drawn(material, case.palette, case.exposure, case.scale);
+            let mut worst = (0.0, String::new());
+            for material in distinct_materials(case.palette, body, g_of) {
+                let g = g_of(material);
+                let at_shares: Vec<[f64; 3]> = shares.iter().map(|&x| g(x * body)).collect();
+                for &level in &node_levels(limit) {
+                    let mix = unresolved_mix(case.terms, BandLevel::new(level).unwrap());
+                    let at_nodes: Vec<[f64; 3]> =
+                        mix.nodes().iter().map(|n| g(n.maturity())).collect();
+                    let nodes = maturity_nodes(&mix, &g);
+                    for (&x, &at_m) in shares.iter().zip(&at_shares) {
+                        let m = x * body;
+                        let want = node_law(&mix, at_m, &at_nodes, m);
+                        let got = maturity_node_albedo(&nodes, body, m);
+                        worst_of(&mut worst, got, want, || {
+                            format!("{material:?} level {level} m {x:.5} m_body")
+                        });
+                    }
+                }
+            }
+            eprintln!(
+                "{}: the interpolation's worst error {:.4}% ({})",
+                case.name,
+                100.0 * worst.0,
+                worst.1
+            );
+            let into = if case.clamped {
+                &mut clamped
+            } else {
+                &mut plain
+            };
+            if worst.0 > into.0 {
+                *into = (worst.0, format!("{}, {}", case.name, worst.1));
+            }
+        }
+        eprintln!(
+            "K {MATURITY_NODES}: the worst error at a scale of 1 {:.4}% ({}); where a range clamps \
+             {:.4}% ({})",
+            100.0 * plain.0,
+            plain.1,
+            100.0 * clamped.0,
+            clamped.1
+        );
+        assert!(plain.0 <= 0.005, "{plain:?}");
+        // Known miss, pinned as built: a range's corner between two nodes (the bound is 0.5%).
+        assert!(clamped.0 <= 0.012, "{clamped:?}");
+    }
+
+    /// Test 6 (decision-r10-t1c-client-scope §1.4 and §2.5): the layer's unorm16 codes against
+    /// the albedo they draw, on the three weathered Moon-like worlds' materials at a scale of 1
+    /// and at each world's haloed scale. At every compared maturity the albedo interpolated at the
+    /// decoded maturity is within 0.25% of the albedo interpolated at the maturity itself, in each
+    /// band; and the drawn mean's bias over the ground of each level's resolved maturity, the
+    /// body's mix restricted to the octaves the level keeps, its coarse list included, is within
+    /// 0.1% for every material and level; both printed with where each is worst.
+    #[test]
+    fn maturity_codes_hold_the_drawn_albedo() {
+        let worlds = halo_worlds();
+        let terms: Vec<UnresolvedTerms> = worlds[..3]
+            .iter()
+            .map(|w| unresolved_terms(w.field.header()).unwrap())
+            .collect();
+        let shares = compared_shares(if cfg!(target_arch = "wasm32") {
+            200
+        } else {
+            2_000
+        });
+        let limit = band_limit_level(worlds[2].field);
+        let levels: Vec<u8> = node_levels(limit);
+        let (mut coding, mut bias) = ((0.0, String::new()), (0.0, String::new()));
+        for (k, world) in worlds[..3].iter().enumerate() {
+            if cfg!(target_arch = "wasm32") && k != 2 {
+                continue;
+            }
+            let header = world.field.header();
+            let body = header.maturity().unwrap();
+            let (palette, exposure) = (header.palette(), GroundExposure::of_header(header));
+            let synth = Synthesiser::new(world.field, SEED);
+            let law = halo_law(&synth, &MixScheme::RULED).unwrap();
+            let figure = header.figure();
+            for scale in [1.0, world.haloed.scale()] {
+                let g_of = |material| drawn(material, palette, exposure, scale);
+                for material in distinct_materials(palette, body, g_of) {
+                    let g = g_of(material);
+                    for &level in &levels {
+                        let band = BandLevel::new(level).unwrap();
+                        let nodes = maturity_nodes(&unresolved_mix(&terms[k], band), &g);
+                        let draw = |m: f64| maturity_node_albedo(&nodes, body, m);
+                        let coded = |m: f64| draw(decode_maturity(encode_maturity(m, body), body));
+                        let at = |x: f64| {
+                            format!(
+                                "{} c {scale:.3} {material:?} level {level} m {x:.6}",
+                                world.name
+                            )
+                        };
+                        for &x in &shares {
+                            let m = x * body;
+                            worst_of(&mut coding, coded(m), draw(m), || at(x));
+                        }
+                        // The ground's resolved maturity at the level: the mix over the octaves it
+                        // keeps and the coarse list.
+                        let cut_m = maturity_cut(&figure, band);
+                        let mut resolved = law.clone();
+                        resolved
+                            .octaves
+                            .retain(|octave| keeps_smallest(octave.smallest, cut_m));
+                        let (mut through, mut plain) = ([0.0; 3], [0.0; 3]);
+                        for node in cut(&resolved, 1) {
+                            let (back, exact) = (coded(node.maturity()), draw(node.maturity()));
+                            for b in 0..3 {
+                                through[b] += node.weight() * back[b];
+                                plain[b] += node.weight() * exact[b];
+                            }
+                        }
+                        worst_of(&mut bias, through, plain, || at(f64::NAN));
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "the codes' worst error {:.5}% ({}); the drawn mean's worst bias {:.6}% ({})",
+            100.0 * coding.0,
+            coding.1,
+            100.0 * bias.0,
+            bias.1
+        );
+        assert!(coding.0 <= 0.0025, "{coding:?}");
+        assert!(bias.0 <= 0.001, "{bias:?}");
+    }
+
     /// The tests that read the clock, which the browser target cannot.
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     mod native_only {
@@ -4864,6 +5790,7 @@ mod tests {
         use crate::field::{Cover, CoverRange, PartialField, ResolutionCode, cell_index};
         use crate::patch::{BakeOptions, NormalScale, VertexPath};
         use crate::wire::{decode_payload, encode_payload};
+        use crate::worker::WorkerFields;
 
         /// The bench's `bake/patch_65` cases' bake: the low setting, the weights, no horizon map.
         const LOW: TerrainBakeOptions = TerrainBakeOptions {
@@ -5048,6 +5975,324 @@ mod tests {
                      cells held",
                     keys.len(),
                     1e3 * start.elapsed().as_secs_f64()
+                );
+            }
+        }
+
+        /// `bytes`, a payload, cut into its blocks at each block's length, the `u32` at offset 6 of
+        /// its frame, as the worker's tests cut them.
+        fn blocks_of(bytes: &[u8]) -> Vec<Vec<u8>> {
+            let mut blocks = Vec::new();
+            let mut rest = bytes;
+            while !rest.is_empty() {
+                let length = u32::from_le_bytes(rest[6..10].try_into().unwrap());
+                let (block, after) = rest.split_at(usize::try_from(length).unwrap());
+                blocks.push(block.to_vec());
+                rest = after;
+            }
+            blocks
+        }
+
+        /// The whole of `field`'s cells surveyed at 10 m.
+        fn whole_cover(field: &CoarseField) -> Cover {
+            let code = ResolutionCode::from_resolution(Metres::new(10.0)).unwrap();
+            let cells = field.header().level().cell_count();
+            Cover::from_ranges([CoverRange::new(0, cells, code).unwrap()]).unwrap()
+        }
+
+        /// A client's field of the whole of `field`, every cell surveyed ([`whole_cover`]).
+        fn whole_view(field: &CoarseField) -> PartialField {
+            let blocks = decode_payload(&encode_payload(field, &whole_cover(field), None)).unwrap();
+            let mut view = PartialField::new(blocks[0].header().unwrap().clone());
+            for block in &blocks {
+                view.insert(block).unwrap();
+            }
+            view
+        }
+
+        /// A worker holding `field`'s payload of `cover` (block 0 alone where it is empty).
+        fn worker_of(field: &CoarseField, cover: &Cover) -> WorkerFields {
+            let body = field.header().body();
+            let mut fields = WorkerFields::new();
+            let blocks = blocks_of(&encode_payload(field, cover, None));
+            fields.init(body, &blocks[0]).unwrap();
+            for block in &blocks[1..] {
+                fields.chunk(body, block).unwrap();
+            }
+            fields
+        }
+
+        /// The mean over a quad of the product of two fields bilinear on it, each given at its
+        /// corners (0, 0), (1, 0), (0, 1) and (1, 1): Σ f(a) g(b) m(a, b), m the product of the
+        /// unit interval's mass matrix's entries along each axis, ⅓ on its diagonal and ⅙ off it.
+        fn bilinear_product_mean(f: [f64; 4], g: [f64; 4]) -> f64 {
+            const CORNERS: [(u8, u8); 4] = [(0, 0), (1, 0), (0, 1), (1, 1)];
+            let mass = |a: u8, b: u8| if a == b { 1.0 / 3.0 } else { 1.0 / 6.0 };
+            let mut sum = 0.0;
+            for (fa, &(ax, ay)) in f.iter().zip(&CORNERS) {
+                for (gb, &(bx, by)) in g.iter().zip(&CORNERS) {
+                    sum += fa * gb * mass(ax, bx) * mass(ay, by);
+                }
+            }
+            sum
+        }
+
+        /// A direction uniform on the sphere from `rng`.
+        fn uniform_dir(rng: &mut Lcg) -> [f64; 3] {
+            let z = 2.0 * rng.next_f64() - 1.0;
+            let (s, c) = math::sin_cos(core::f64::consts::TAU * rng.next_f64());
+            let across = (1.0 - z * z).sqrt();
+            [across * c, across * s, z]
+        }
+
+        /// The quad of `key` whose least corner is vertex (`x`, `y`): its four vertices' indices,
+        /// (x, y), (x + 1, y), (x, y + 1) and (x + 1, y + 1), and its area on `figure` by its
+        /// diagonals, square metres.
+        fn quad_of(key: PatchKey, figure: &Spheroid, x: usize, y: usize) -> ([usize; 4], f64) {
+            let point = |x: usize, y: usize| {
+                let (x, y) = (u8::try_from(x).unwrap(), u8::try_from(y).unwrap());
+                figure.point(key.vertex_dir(x, y))
+            };
+            let (p00, p10, p01, p11) = (
+                point(x, y),
+                point(x + 1, y),
+                point(x, y + 1),
+                point(x + 1, y + 1),
+            );
+            let d1 = [0, 1, 2].map(|k| p11[k] - p00[k]);
+            let d2 = [0, 1, 2].map(|k| p10[k] - p01[k]);
+            let cross = [
+                d1[1] * d2[2] - d1[2] * d2[1],
+                d1[2] * d2[0] - d1[0] * d2[2],
+                d1[0] * d2[1] - d1[1] * d2[0],
+            ];
+            let area =
+                0.5 * (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
+            let n = [
+                65 * y + x,
+                65 * y + x + 1,
+                65 * (y + 1) + x,
+                65 * (y + 1) + x + 1,
+            ];
+            (n, area)
+        }
+
+        /// A patch's area-weighted mean drawn normal albedo in V, as the terrain's shader draws it
+        /// (test 8), and the same ground's over the body's maturity mix, from its `bake`: each
+        /// named slot's nodes at the bake's level from `nodes_of`, interpolated at each vertex's
+        /// decoded level-n code, the weights and the albedos each bilinear over a quad; and each
+        /// slot's mean over the body's mix from `mean_of`, by the quad's mean weight.
+        fn patch_means(
+            bake: &crate::bake::TerrainBake,
+            (body, figure): (f64, &Spheroid),
+            nodes_of: &mut impl FnMut(Material) -> [[f64; 3]; MATURITY_NODES],
+            mean_of: &mut impl FnMut(Material) -> f64,
+        ) -> (f64, f64) {
+            let key = bake.patch().key;
+            let layers = bake.layers();
+            let (weights, codes) = (layers.weights(), layers.maturity());
+            assert_eq!(codes.len(), 65 * 65);
+            let mut slots = Vec::new();
+            for (k, slot) in layers.palette().iter().enumerate() {
+                let Some(material) = slot.and_then(GroundMaterial::material) else {
+                    continue;
+                };
+                let nodes = nodes_of(material);
+                let albedo: Vec<f64> = codes
+                    .iter()
+                    .map(|code| {
+                        maturity_node_albedo(&nodes, body, decode_maturity(code[0], body))[1]
+                    })
+                    .collect();
+                slots.push((k, albedo, mean_of(material)));
+            }
+            let (mut drawn, mut want, mut area_sum) = (0.0, 0.0, 0.0);
+            for y in 0..64 {
+                for x in 0..64 {
+                    let (n, area) = quad_of(key, figure, x, y);
+                    area_sum += area;
+                    for (k, albedo, mean) in &slots {
+                        let w = n.map(|v| f64::from(weights[v][*k]) / 255.0);
+                        let a = n.map(|v| albedo[v]);
+                        drawn += area * bilinear_product_mean(w, a);
+                        want += area * 0.25 * (w[0] + w[1] + w[2] + w[3]) * mean;
+                    }
+                }
+            }
+            (drawn / area_sum, want / area_sum)
+        }
+
+        /// The class map's area-weighted mean drawn normal albedo in V over its texels (test 8),
+        /// each texel drawn at its code and its classes' band-0 nodes by its weights, and the same
+        /// ground's over the body's maturity mix from `mean_of`, on the body of `figure` and
+        /// background maturity `body`.
+        fn class_map_means(
+            map: &crate::worker::ClassMap,
+            (body, figure): (f64, &Spheroid),
+            mean_of: &mut impl FnMut(Material) -> f64,
+        ) -> (f64, f64) {
+            let (mut drawn, mut want, mut area_sum) = (0.0, 0.0, 0.0);
+            for texel in map.texels() {
+                let area = cell_area(texel.cell(), figure).value();
+                let m = decode_maturity(texel.maturity().unwrap(), body);
+                area_sum += area;
+                for (class, &byte) in map.classes().iter().zip(&texel.weights()) {
+                    let (Some(nodes), Some(material)) =
+                        (class.nodes(), class.material().material())
+                    else {
+                        continue;
+                    };
+                    let w = f64::from(byte) / 255.0;
+                    drawn += area * w * maturity_node_albedo(nodes, body, m)[1];
+                    want += area * w * mean_of(material);
+                }
+            }
+            (drawn / area_sum, want / area_sum)
+        }
+
+        /// Test 8 (decision-r10-t1c-client-scope §2.5; the halo ruling's item 3): on the 3.5 and
+        /// 1 Gyr Moon-like worlds, the mean drawn normal albedo in V, as the terrain's shader draws
+        /// it (each vertex's level-n code decoded, its slots' nodes at level n interpolated there,
+        /// the weights and the albedos each bilinear over a quad, the morph 0), over 64 patches
+        /// sampled uniformly in area at each of levels 8, 10, 12 and 14, each patch's mean taken by
+        /// area, is within 1% of the same ground's mean drawn over the body's maturity mix, Σ a
+        /// E[clamp(c W(`m_local`))] with a each slot's sampled share; and the class map's texels,
+        /// each by its area, drawn at its code and its classes' band-0 nodes, are within 1% of the
+        /// same over their weights. Each is printed, beside the body's own Σ a E over its class
+        /// fractions, from which the sample's classes stray.
+        #[test]
+        #[ignore = "slow: 512 weathered patches baked and two whole class maps, drawn as the shader draws them"]
+        fn maturity_drawn_mean_is_the_body_s_mix_mean() {
+            let worlds = halo_worlds();
+            for world in [&worlds[1], &worlds[2]] {
+                let field = world.field;
+                let header = field.header();
+                let body = header.maturity().unwrap();
+                let (palette, exposure) = (header.palette(), GroundExposure::of_header(header));
+                let scale = header.albedo_scale().unwrap_or(1.0);
+                let figure = header.figure();
+                let terms = unresolved_terms(header).unwrap();
+                let mut means = BTreeMap::new();
+                let mut mean_of = |material: Material| {
+                    *means.entry(material).or_insert_with(|| {
+                        let g = drawn(material, palette, exposure, scale);
+                        world
+                            .mix
+                            .nodes()
+                            .iter()
+                            .fold(0.0, |sum, n| sum + n.weight() * g(n.maturity())[1])
+                    })
+                };
+                let (mut sum, mut named) = (0.0, 0.0);
+                for &(ground, a) in world.fractions.shares() {
+                    if let Some(m) = ground.material() {
+                        sum += a * mean_of(m);
+                        named += a;
+                    }
+                }
+                let body_mean = sum / named;
+                let view = whole_view(field);
+                let synth = Synthesiser::new(&view, SEED);
+                let mut cache = SynthCache::new();
+                let mut rng = Lcg::new(0x6472_6177_6e00_0008);
+                for level in [8_u8, 10, 12, 14] {
+                    let mix = unresolved_mix(&terms, BandLevel::new(level).unwrap());
+                    let mut kept = BTreeMap::new();
+                    let mut nodes_of = |material: Material| {
+                        *kept.entry(material).or_insert_with(|| {
+                            maturity_nodes(&mix, drawn(material, palette, exposure, scale))
+                        })
+                    };
+                    let (mut drawn_sum, mut want_sum) = (0.0, 0.0);
+                    for _ in 0..64 {
+                        let key = PatchKey::containing(level, uniform_dir(&mut rng)).unwrap();
+                        let bake = bake_terrain(&synth, &mut cache, key, &LOW, &[]).unwrap();
+                        let (drawn_patch, want_patch) =
+                            patch_means(&bake, (body, &figure), &mut nodes_of, &mut mean_of);
+                        drawn_sum += drawn_patch;
+                        want_sum += want_patch;
+                    }
+                    let gap = drawn_sum / want_sum - 1.0;
+                    eprintln!(
+                        "{}: level {level}, {} octaves left out: the drawn mean V {:.6}, the mix's \
+                         over the same ground {:.6}, {:+.4}%; the body's Σ a E {body_mean:.6}",
+                        world.name,
+                        mix.unresolved_octaves(),
+                        drawn_sum / 64.0,
+                        want_sum / 64.0,
+                        100.0 * gap
+                    );
+                    assert!(gap.abs() < 0.01, "{}: level {level}: {gap}", world.name);
+                }
+                let mut fields = worker_of(field, &whole_cover(field));
+                let map = fields.class_map(header.body(), SEED).unwrap();
+                assert!(map.is_complete());
+                let (drawn_mean, want_mean) = class_map_means(&map, (body, &figure), &mut mean_of);
+                let gap = drawn_mean / want_mean - 1.0;
+                eprintln!(
+                    "{}: the class map's {} texels: the drawn mean V {drawn_mean:.6}, the mix's \
+                     over the same ground {want_mean:.6}, {:+.4}%; the body's Σ a E \
+                     {body_mean:.6}",
+                    world.name,
+                    map.texels().len(),
+                    100.0 * gap
+                );
+                assert!(gap.abs() < 0.01, "{}: the class map: {gap}", world.name);
+            }
+        }
+
+        /// Test 13's one-off cost (decision-r10-t1c-client-scope §1.4: "about the mix's 62–79
+        /// ms"): on the three weathered Moon-like worlds, the body's unresolved terms; then through
+        /// a worker holding the header alone, a material's first nodes at levels 14 and 13 (the
+        /// terms and its drawn albedo made), a bake palette's eight slots' nodes at a level once
+        /// the terms are kept (each material's albedo made), and the same again (every value
+        /// kept); each the best of several, printed.
+        #[test]
+        #[ignore = "measurement, run by hand with --nocapture: the albedo nodes' one-off cost"]
+        fn maturity_nodes_s_time() {
+            for (name, field) in weathered_worlds() {
+                let header = field.header();
+                let terms = best_of(3, || assert!(unresolved_terms(header).is_some()));
+                let body = header.body();
+                let materials: Vec<Material> = [
+                    MaterialClass::Regolith,
+                    MaterialClass::Bedrock,
+                    MaterialClass::Sand,
+                    MaterialClass::Dust,
+                ]
+                .into_iter()
+                .flat_map(|class| (0..2).map(move |entry| Material::new(class, entry).unwrap()))
+                .collect();
+                let (level, other) = (BandLevel::new(14).unwrap(), BandLevel::new(10).unwrap());
+                let empty = Cover::from_ranges([]).unwrap();
+                let first = (0..3)
+                    .map(|_| {
+                        let mut fields = worker_of(field, &empty);
+                        let start = Instant::now();
+                        assert!(fields.maturity_nodes(body, materials[0], level).is_ok());
+                        start.elapsed().as_secs_f64()
+                    })
+                    .fold(f64::INFINITY, |a, b| if b < a { b } else { a });
+                let mut fields = worker_of(field, &empty);
+                assert!(fields.maturity_nodes(body, materials[0], other).is_ok());
+                let palette_cold = best_of(1, || {
+                    for &m in &materials {
+                        assert!(fields.maturity_nodes(body, m, level).is_ok());
+                    }
+                });
+                let palette_warm = best_of(5, || {
+                    for &m in &materials {
+                        assert!(fields.maturity_nodes(body, m, level).is_ok());
+                    }
+                });
+                eprintln!(
+                    "{name}: unresolved_terms {:.1} ms; a material's first nodes, the terms \
+                     included, {:.1} ms; a palette's 8 slots at a level {:.2} ms with each \
+                     material's albedo made, {:.3} ms with every value kept",
+                    1e3 * terms,
+                    1e3 * first,
+                    1e3 * palette_cold,
+                    1e3 * palette_warm
                 );
             }
         }

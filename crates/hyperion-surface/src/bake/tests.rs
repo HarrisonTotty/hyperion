@@ -956,7 +956,7 @@ fn bake_maturity_without_a_maturity_is_empty_and_moves_no_other_byte() {
     let with = bake(weathered, &MESH);
     let without = bake(plain, &MESH);
     assert_eq!(with.layers().maturity().len(), 65 * 65);
-    assert_eq!(without.layers().maturity(), [] as [[u8; 2]; 0]);
+    assert_eq!(without.layers().maturity(), [] as [[u16; 2]; 0]);
     let mut stripped = with.clone();
     stripped.layers.maturity.clear();
     assert_eq!(bake_bits(&stripped), bake_bits(&without));
@@ -965,7 +965,7 @@ fn bake_maturity_without_a_maturity_is_empty_and_moves_no_other_byte() {
         ..MESH
     };
     let unweighted = bake(weathered, &skipped);
-    assert_eq!(unweighted.layers().maturity(), [] as [[u8; 2]; 0]);
+    assert_eq!(unweighted.layers().maturity(), [] as [[u16; 2]; 0]);
     assert_eq!(unweighted.patch(), with.patch());
     assert_eq!(unweighted.layers().horizon(), with.layers().horizon());
     for &w in SyntheticWorld::ALL {
@@ -1027,20 +1027,20 @@ fn bake_maturity_is_each_vertex_s_point_rule_at_its_level_and_its_parent_s() {
     );
 }
 
-/// The layer's codes ([`encode_maturity`], [`decode_maturity`]): 0 at the background and 255 on
-/// fresh ground, each held to the bit; a code within half a step of r = √(D ÷ `m_body`), falling
+/// The layer's codes ([`encode_maturity`], [`decode_maturity`]): 0 at the background and 65,535
+/// on fresh ground, each held to the bit; a code within half a step of r = √(D ÷ `m_body`), falling
 /// as the maturity rises; every code's maturity encoding to the code again; and every code 0, each
 /// holding +0, on a background of 0.
 #[test]
 fn bake_maturity_codes_round_trip_and_hold_their_ends() {
     for background in [1.0, 0.75, 0.3, 1e-6] {
         assert_eq!(encode_maturity(background, background), 0);
-        assert_eq!(encode_maturity(0.0, background), 255);
+        assert_eq!(encode_maturity(0.0, background), u16::MAX);
         assert_same_bits(decode_maturity(0, background), background);
-        assert_same_bits(decode_maturity(255, background), 0.0);
-        let mut previous = u8::MAX;
-        for k in 0..=1_000_u32 {
-            let m = background * f64::from(k) / 1_000.0;
+        assert_same_bits(decode_maturity(u16::MAX, background), 0.0);
+        let mut previous = u16::MAX;
+        for k in 0..=100_000_u32 {
+            let m = background * f64::from(k) / 100_000.0;
             let code = encode_maturity(m, background);
             assert!(
                 code <= previous,
@@ -1050,11 +1050,11 @@ fn bake_maturity_codes_round_trip_and_hold_their_ends() {
             let r = ((background - m) / background).sqrt();
             let back = ((background - decode_maturity(code, background)) / background).sqrt();
             assert!(
-                (back - r).abs() <= 0.5 / 255.0 + 1e-12,
+                (back - r).abs() <= 0.5 / 65_535.0 + 1e-12,
                 "{background}: {m} encodes to {code}, r {back} against {r}"
             );
         }
-        for code in 0..=255_u8 {
+        for code in 0..=u16::MAX {
             let m = decode_maturity(code, background);
             assert!(
                 (0.0..=background).contains(&m),
@@ -1066,7 +1066,7 @@ fn bake_maturity_codes_round_trip_and_hold_their_ends() {
     for m in [0.0, -0.0] {
         assert_eq!(encode_maturity(m, 0.0), 0);
     }
-    for code in [0, 1, 128, 255] {
+    for code in [0, 1, 128, 255, 32_768, u16::MAX] {
         assert_same_bits(decode_maturity(code, 0.0), 0.0);
     }
 }

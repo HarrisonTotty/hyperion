@@ -243,7 +243,7 @@ fn maturity_layer<F: SurveyView>(
     cache: &mut SynthCache,
     key: PatchKey,
     taken: &[Option<[f64; 3]>],
-) -> Result<Vec<[u8; 2]>, QueryHeightError> {
+) -> Result<Vec<[u16; 2]>, QueryHeightError> {
     let Some(pairs) = patch_maturity(synth, cache, key, taken)? else {
         return Ok(Vec::new());
     };

@@ -3,7 +3,9 @@
 //! over it R10's bake ([`bake_terrain`]), readings ([`surveyed_reading`], [`slant_range`]),
 //! material ([`material_at`] with its [`exposed_properties`] at the point's maturity,
 //! [`maturity_at`]), the photometry the lit terrain draws a bake's palette with
-//! ([`WorkerFields::photometry`], R10.T10.b, at the header's maturity; R10.T1.c), and the whole of a
+//! ([`WorkerFields::photometry`], R10.T10.b, at the header's maturity; R10.T1.c) and its albedo
+//! nodes at a patch's level, which the terrain interpolates at each vertex's maturity
+//! ([`WorkerFields::maturity_nodes`], R10.T1.c's client half), and the whole of a
 //! view's terrain readout where its line of sight meets the ground ([`WorkerFields::ground_readout`],
 //! R10.T12: the slant range, the reading, the material and the ground's two properties, the bearing
 //! capacity and the pad friction, with the month's temperature the friction is taken at).
@@ -70,7 +72,9 @@
 //! [`WorkerFields::class_map`] answers R07's disc with the body's coarse class weights over the
 //! survey: a texel a cell of [`CLASS_MAP_LEVEL`] (64 × 64 a face), each texel touched by the
 //! survey with its weights over the body's classes, at most [`CLASS_MAP_CLASSES`], and the share of
-//! it surveyed. The render thread packs it into R07's map (`view/terrain/classMap.ts`).
+//! it surveyed. The render thread packs it into R07's map (`view/terrain/classMap.ts`). Where the
+//! header carries a maturity, each texel has its ground's maturity at the map's band level and
+//! each class its albedo nodes there (R10.T1.c's client half).
 //!
 //! # The disc's normal map (plan R10, T10.g)
 //!
@@ -97,7 +101,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::{Kelvin, Metres, Pascals, Radians};
 
-use crate::bake::{TerrainBake, TerrainBakeOptions, UNSURVEYED, bake_terrain};
+use crate::bake::{TerrainBake, TerrainBakeOptions, UNSURVEYED, bake_terrain, encode_maturity};
 use crate::cube::{FaceUv, MAX_LEVEL, PATCH_QUADS, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir};
 use crate::field::{
     BodyRef, FieldHeader, FieldView, InsertBlockError, PartialField, ResolutionCode, cell_at_index,
@@ -105,9 +109,11 @@ use crate::field::{
 };
 use crate::geometry::vertex_spacing;
 use crate::material::{
-    FrictionModel, GroundExposure, GroundMaterial, Material, MaterialProperties, PhaseLaw,
-    ResolvePropertiesError, WEIGHT_TOTAL, bearing_capacity_on_slope, exposed_properties,
-    interface_friction, lapse_drop_k, material_at, maturity_at, scaled_normal_albedo, weights_at,
+    FrictionModel, GroundExposure, GroundMaterial, MATURITY_NODES, Material, MaterialProperties,
+    PhaseLaw, ResolvePropertiesError, UnresolvedTerms, WEIGHT_TOTAL, bearing_capacity_on_slope,
+    exposed_properties, interface_friction, lapse_drop_k, material_at, maturity_at,
+    maturity_at_level, maturity_nodes, scaled_normal_albedo, unresolved_mix, unresolved_terms,
+    weights_at,
 };
 use crate::num;
 use crate::patch::normals::{encode_octahedral_f32, surface_normal};
@@ -145,6 +151,81 @@ struct BodyField {
     /// because the field never drops a cell ([`SynthCache`]'s rule): a change that evicts cells
     /// must start it afresh with them.
     cache: SynthCache,
+    /// What the body's albedo nodes are made from, kept from the field's start to its release: a
+    /// function of the header alone, which a block never changes.
+    nodes: NodeCache,
+}
+
+/// What a body's field keeps for its materials' albedo nodes ([`WorkerFields::maturity_nodes`];
+/// R10.T1.c's client half): the body's unresolved terms, built on the first ask, and each
+/// material's drawn albedo at each maturity a level's nodes have read.
+///
+/// The nodes read a material's albedo only at the K node maturities and the mix's 52 edge
+/// maturities (`maturity_nodes`), the same fractions of `m_body` at every level, so a material holds
+/// at most 68 values, and a level's nodes are weighted sums of them.
+#[derive(Debug, Clone, Default)]
+struct NodeCache {
+    /// The body's unresolved terms ([`unresolved_terms`]), once asked.
+    terms: BodyTerms,
+    /// Each material's drawn albedo in B, V and R at each maturity read, in rising maturity.
+    drawn: BTreeMap<Material, Vec<(f64, [f64; 3])>>,
+}
+
+/// A body's unresolved terms as its field keeps them.
+#[derive(Debug, Clone, Default)]
+enum BodyTerms {
+    /// Not asked yet.
+    #[default]
+    Unasked,
+    /// None: the header carries no maturity or no weathering rate.
+    Absent,
+    /// The terms, built at the first ask.
+    Built(UnresolvedTerms),
+}
+
+impl BodyTerms {
+    /// The terms of the body of `header`, built at the first ask and kept, or `None` where the
+    /// header carries none.
+    fn of(&mut self, header: &FieldHeader) -> Option<&UnresolvedTerms> {
+        if matches!(self, Self::Unasked) {
+            *self = unresolved_terms(header).map_or(Self::Absent, Self::Built);
+        }
+        match self {
+            Self::Built(terms) => Some(terms),
+            Self::Unasked | Self::Absent => None,
+        }
+    }
+}
+
+/// The drawn albedo G(`maturity`) of `material` on the body of `header`: [`scaled_normal_albedo`]
+/// of its [`exposed_properties`] at the header's exposure at `maturity`, under the header's scale
+/// (1 where it holds none), as [`WorkerFields::photometry`] draws it at `m_body`.
+///
+/// # Panics
+///
+/// If `material`'s entry is past the header's palette, which the callers have checked.
+fn drawn_albedo(header: &FieldHeader, material: Material, maturity: f64) -> [f64; 3] {
+    let exposure = GroundExposure::of_header(header).with_maturity(maturity);
+    let exposed = exposed_properties(material, header.palette(), exposure)
+        .expect("the material's entry is the palette's, as its photometry found");
+    scaled_normal_albedo(&exposed, header.albedo_scale().unwrap_or(1.0))
+}
+
+/// The albedo `values` holds at `maturity`, or `draw`'s, kept in its place: `values` rises by
+/// maturity, each once, as [`f64::total_cmp`] orders them.
+fn drawn_at(
+    values: &mut Vec<(f64, [f64; 3])>,
+    maturity: f64,
+    draw: impl FnOnce() -> [f64; 3],
+) -> [f64; 3] {
+    match values.binary_search_by(|(m, _)| m.total_cmp(&maturity)) {
+        Ok(at) => values[at].1,
+        Err(at) => {
+            let value = draw();
+            values.insert(at, (maturity, value));
+            value
+        }
+    }
 }
 
 impl BodyField {
@@ -372,6 +453,33 @@ impl DrawnPhotometry {
     }
 }
 
+/// A material's albedo nodes at a patch's band level and at its parent's, as the lit terrain draws
+/// them (R10.T1.c's client half; [`WorkerFields::maturity_nodes`]): [`MATURITY_NODES`] each, node j
+/// at the maturity `m_body` × [`maturity_node_share`](crate::material::maturity_node_share) of j,
+/// each its normal albedo in B, V and R under the header's scale, the level's unresolved octaves
+/// in expectation ([`maturity_nodes`]). The shader interpolates them at each vertex's maturity
+/// ([`maturity_node_albedo`](crate::material::maturity_node_albedo)).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DrawnNodes {
+    level: [[f64; 3]; MATURITY_NODES],
+    parent: [[f64; 3]; MATURITY_NODES],
+}
+
+impl DrawnNodes {
+    /// The nodes at the patch's band level n, each dimensionless in B, V and R.
+    #[must_use]
+    pub const fn level(&self) -> &[[f64; 3]; MATURITY_NODES] {
+        &self.level
+    }
+
+    /// The nodes at its parent's, n − 1 (level 0's own at level 0), each dimensionless in B, V
+    /// and R.
+    #[must_use]
+    pub const fn parent(&self) -> &[[f64; 3]; MATURITY_NODES] {
+        &self.parent
+    }
+}
+
 /// Why a worker could not give a material's photometry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResolvePhotometryError {
@@ -465,10 +573,11 @@ pub const CLASS_MAP_BAND: u8 = CLASS_MAP_LEVEL - 6;
 pub const CLASS_MAP_CLASSES: usize = 16;
 
 /// One class of a [`ClassMap`]: a form of a palette entry, with the photometry it is drawn with.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ClassMapClass {
     material: GroundMaterial,
     photometry: Option<DrawnPhotometry>,
+    nodes: Option<[[f64; 3]; MATURITY_NODES]>,
 }
 
 impl ClassMapClass {
@@ -484,6 +593,16 @@ impl ClassMapClass {
     pub const fn photometry(&self) -> Option<DrawnPhotometry> {
         self.photometry
     }
+
+    /// Its albedo nodes at the map's band level, [`CLASS_MAP_BAND`] ([`DrawnNodes::level`] of
+    /// [`WorkerFields::maturity_nodes`] there; R10.T1.c's client half), which the disc interpolates
+    /// at each texel's maturity ([`ClassMapTexel::maturity`]): each node its
+    /// [`photometry`](Self::photometry)'s albedo where the header carries no maturity, and `None`
+    /// where the palette names no substance.
+    #[must_use]
+    pub const fn nodes(&self) -> Option<&[[f64; 3]; MATURITY_NODES]> {
+        self.nodes.as_ref()
+    }
 }
 
 /// One texel of a [`ClassMap`] that the survey touches.
@@ -493,6 +612,7 @@ pub struct ClassMapTexel {
     surveyed: u32,
     cells: u32,
     weights: [u8; CLASS_MAP_CLASSES],
+    maturity: Option<u16>,
 }
 
 impl ClassMapTexel {
@@ -528,6 +648,17 @@ impl ClassMapTexel {
     pub const fn weights(&self) -> [u8; CLASS_MAP_CLASSES] {
         self.weights
     }
+
+    /// Its ground's space-weathering maturity at the map's band level, [`CLASS_MAP_BAND`]
+    /// (R10.T1.c's client half), as the layer's code ([`encode_maturity`] against the header's
+    /// `m_body`): the point rule at that level ([`maturity_at_level`]) at the points its weights are
+    /// read at, their mean where several; `None` where the header carries no maturity or no
+    /// weathering rate. Band level 0 draws the coarse craters' haloes and leaves a Moon's small
+    /// craters to its classes' [`nodes`](ClassMapClass::nodes).
+    #[must_use]
+    pub const fn maturity(&self) -> Option<u16> {
+        self.maturity
+    }
 }
 
 /// A body's coarse class map for R07's disc (plan R10, T10.d; Design note 8), from its field.
@@ -540,7 +671,9 @@ impl ClassMapTexel {
 /// - its weights over the map's classes: [`weights_at`] at the texel's centre at band level
 ///   [`CLASS_MAP_BAND`] where the field's cell holding the centre is surveyed, and otherwise the
 ///   mean of [`weights_at`] at the centres of the field's surveyed cells under it, at that band
-///   level, as bytes summing to 255 by the largest remainder (ties to the earlier class).
+///   level, as bytes summing to 255 by the largest remainder (ties to the earlier class);
+/// - its maturity ([`ClassMapTexel::maturity`]), the mean of [`maturity_at_level`] at the same
+///   points and band level, where the header carries one (R10.T1.c's client half).
 ///
 /// The classes are the materials the texels' weights name, in [`GroundMaterial`]'s order: a form
 /// of a palette entry, or a form whose palette names no substance. Past [`CLASS_MAP_CLASSES`] the
@@ -662,13 +795,14 @@ impl NormalMap {
     }
 }
 
-/// A texel's surveyed cells and its weight bytes, per material, as means: before the map's
-/// classes are chosen.
+/// A texel's surveyed cells and its weight bytes, per material, as means, and its maturity's code:
+/// before the map's classes are chosen.
 struct TexelReading {
     cell: PatchKey,
     surveyed: u32,
     cells: u32,
     weights: BTreeMap<GroundMaterial, f64>,
+    maturity: Option<u16>,
 }
 
 /// A class map's classes from its texels' readings ([`ClassMap`]): every material they name, in
@@ -719,6 +853,39 @@ fn field_cells_of(texel: PatchKey, level: u8, cells: &mut Vec<PatchKey>) {
                 }),
         );
     }
+}
+
+/// A class-map texel's readings at `points`, each at band level `band`: each material's weight
+/// bytes summed over the points, and, `with_maturity`, their maturities ([`maturity_at_level`])
+/// summed, 0 otherwise, each in the points' order from +0.
+///
+/// # Errors
+///
+/// [`QueryHeightError::NotSurveyed`] for a read past the cells held.
+///
+/// # Panics
+///
+/// If `with_maturity` is asked of a header that carries no maturity or no weathering rate (a bug),
+/// and as [`weights_at`].
+fn texel_sums(
+    synth: &Synthesiser<'_, PartialField>,
+    cache: &mut SynthCache,
+    points: &[FaceUv],
+    band: BandLevel,
+    with_maturity: bool,
+) -> Result<(BTreeMap<GroundMaterial, f64>, f64), QueryHeightError> {
+    let mut weights = BTreeMap::<GroundMaterial, f64>::new();
+    let mut maturity = 0.0;
+    for &at in points {
+        for (material, byte) in weights_at(synth, cache, at, band)?.iter() {
+            *weights.entry(material).or_insert(0.0) += f64::from(byte);
+        }
+        if with_maturity {
+            maturity += maturity_at_level(synth, cache, at, band)?
+                .expect("the header carries a maturity and a rate");
+        }
+    }
+    Ok((weights, maturity))
 }
 
 /// The centre of `cell` in face coordinates.
@@ -1152,6 +1319,7 @@ impl WorkerFields {
             field,
             elevation_mm: None,
             cache: SynthCache::new(),
+            nodes: NodeCache::default(),
         };
         held.hold_elevations(&block);
         self.bodies.insert(body, held);
@@ -1447,19 +1615,64 @@ impl WorkerFields {
             .ok_or(ResolvePhotometryError::NotStarted(body))?
             .field
             .header();
-        let resolved = exposed_properties(
-            material,
-            header.palette(),
-            GroundExposure::of_header(header),
-        )
-        .map_err(ResolvePhotometryError::Properties)?;
-        let normal_albedo_bvr =
-            scaled_normal_albedo(&resolved, header.albedo_scale().unwrap_or(1.0));
-        let phase_law = resolved.phase_law();
-        Ok(DrawnPhotometry {
-            normal_albedo_bvr,
-            phase_law,
-            limb_parameter: phase_law.limb_parameter(normal_albedo_bvr[1]),
+        drawn_photometry(header, material).map_err(ResolvePhotometryError::Properties)
+    }
+
+    /// The albedo nodes `material` is drawn with on `body` at band level `level` and at its
+    /// parent's ([`DrawnNodes`]; R10.T1.c's client half, decision-r10-t1c-client-scope §1.4).
+    ///
+    /// At each level, node j is [`maturity_nodes`]' over the level's [`unresolved_mix`]: the mean
+    /// over the octaves the level leaves out of the material's drawn albedo, G(m) =
+    /// [`scaled_normal_albedo`] of its [`exposed_properties`] at the header's exposure
+    /// ([`GroundExposure::of_header`]) at maturity m, under the header's scale (1 where it holds
+    /// none), the clamp [`photometry`](Self::photometry) takes, at min(`m_j`, μ). The parent of
+    /// level 0 is level 0. Where the header carries no maturity or no weathering rate, as every
+    /// header does before P14.T54.b, every node of both is `photometry`'s albedo to the bit.
+    ///
+    /// The body's unresolved terms ([`unresolved_terms`], some tens of milliseconds) are built on
+    /// the first ask and kept with the field, and each material's G at the maturities read, so that
+    /// a level's nodes are weighted sums. It reads the header alone, so it answers wherever the
+    /// body's field is held, surveyed or not, and needs no detail seed: the small craters' octaves
+    /// are the header's.
+    ///
+    /// # Errors
+    ///
+    /// [`ResolvePhotometryError::NotStarted`] where no field of `body` is held, and
+    /// [`ResolvePhotometryError::Properties`] for an entry past its palette.
+    pub fn maturity_nodes(
+        &mut self,
+        body: BodyRef,
+        material: Material,
+        level: BandLevel,
+    ) -> Result<DrawnNodes, ResolvePhotometryError> {
+        let BodyField { field, nodes, .. } = self
+            .bodies
+            .get_mut(&body)
+            .ok_or(ResolvePhotometryError::NotStarted(body))?;
+        let header = field.header();
+        let at_body = drawn_photometry(header, material)
+            .map_err(ResolvePhotometryError::Properties)?
+            .normal_albedo_bvr();
+        let NodeCache { terms, drawn } = nodes;
+        let Some(terms) = terms.of(header) else {
+            let repeated = [at_body; MATURITY_NODES];
+            return Ok(DrawnNodes {
+                level: repeated,
+                parent: repeated,
+            });
+        };
+        let parent = band(level.get().saturating_sub(1));
+        let values = drawn.entry(material).or_default();
+        let mut g = |maturity: f64| {
+            drawn_at(values, maturity, || {
+                drawn_albedo(header, material, maturity)
+            })
+        };
+        let level_nodes = maturity_nodes(&unresolved_mix(terms, level), &mut g);
+        let parent_nodes = maturity_nodes(&unresolved_mix(terms, parent), &mut g);
+        Ok(DrawnNodes {
+            level: level_nodes,
+            parent: parent_nodes,
         })
     }
 
@@ -1484,7 +1697,12 @@ impl WorkerFields {
         seed: DetailSeed,
     ) -> Result<ClassMap, QueryBodyError> {
         let BodyField { field, cache, .. } = self.held(body)?;
-        let level = field.header().level().get();
+        let header = field.header();
+        let level = header.level().get();
+        // The texels' maturity, against `m_body`, where the header carries a maturity and a rate.
+        let background = header
+            .maturity()
+            .filter(|_| header.weathering_rate().is_some());
         let band = BandLevel::new(CLASS_MAP_BAND).expect("band level 0 is a band level");
         let synth = Synthesiser::new(&*field, seed);
         let texel_count = 6_u32 << (2 * u32::from(CLASS_MAP_LEVEL));
@@ -1519,34 +1737,30 @@ impl WorkerFields {
             } else {
                 points.extend(surveyed.iter().map(|&cell| centre_of(cell)));
             }
-            let mut weights = BTreeMap::<GroundMaterial, f64>::new();
-            let mut answered = true;
-            for &at in &points {
-                match weights_at(&synth, cache, at, band) {
-                    Ok(at_point) => {
-                        for (material, byte) in at_point.iter() {
-                            *weights.entry(material).or_insert(0.0) += f64::from(byte);
-                        }
-                    }
+            let (mut weights, maturity) =
+                match texel_sums(&synth, cache, &points, band, background.is_some()) {
+                    Ok(sums) => sums,
                     Err(QueryHeightError::NotSurveyed(_)) => {
                         // A read past the cells held: the texel waits for a later block.
-                        answered = false;
-                        break;
+                        complete = false;
+                        continue;
                     }
-                }
-            }
-            if !answered {
-                complete = false;
-                continue;
-            }
+                };
+            let points_read = f64::from(count(points.len()));
             for value in weights.values_mut() {
-                *value /= f64::from(count(points.len()));
+                *value /= points_read;
             }
             readings.push(TexelReading {
                 cell: texel,
                 surveyed: count(surveyed.len()),
                 cells: count(cells.len()),
                 weights,
+                maturity: background.map(|body| {
+                    // The mean of maturities no higher than `m_body`, held there against the sum's
+                    // rounding; one point's own value where one is read.
+                    let mean = maturity / points_read;
+                    encode_maturity(if mean < body { mean } else { body }, body)
+                }),
             });
         }
         let kept = kept_classes(&readings);
@@ -1562,19 +1776,11 @@ impl WorkerFields {
                     surveyed: reading.surveyed,
                     cells: reading.cells,
                     weights: bytes_by_largest_remainder(&values[..kept.len()]),
+                    maturity: reading.maturity,
                 }
             })
             .collect();
-        let classes = kept
-            .into_iter()
-            .map(|material| ClassMapClass {
-                material,
-                photometry: material.material().map(|m| {
-                    self.photometry(body, m)
-                        .expect("the classifier names only entries of the body's palette")
-                }),
-            })
-            .collect();
+        let classes = self.class_map_classes(body, kept, band);
         Ok(ClassMap {
             field_level: level,
             classes,
@@ -1637,12 +1843,70 @@ impl WorkerFields {
         })
     }
 
+    /// A class map's classes on `body`, the materials `kept`, each with its photometry and its
+    /// nodes at band level `band`, where its palette names its substance.
+    ///
+    /// # Panics
+    ///
+    /// If no field of `body` is held, or a material names an entry past the body's palette: the
+    /// class map has read the field, and the classifier names only the palette's entries.
+    fn class_map_classes(
+        &mut self,
+        body: BodyRef,
+        kept: Vec<GroundMaterial>,
+        band: BandLevel,
+    ) -> Vec<ClassMapClass> {
+        let mut classes = Vec::with_capacity(kept.len());
+        for material in kept {
+            let named = material.material();
+            let photometry = named.map(|m| {
+                self.photometry(body, m)
+                    .expect("the classifier names only entries of the body's palette")
+            });
+            let nodes = named.map(|m| {
+                *self
+                    .maturity_nodes(body, m, band)
+                    .expect("the classifier names only entries of the body's palette")
+                    .level()
+            });
+            classes.push(ClassMapClass {
+                material,
+                photometry,
+                nodes,
+            });
+        }
+        classes
+    }
+
     /// The body's field and what is kept with it.
     fn held(&mut self, body: BodyRef) -> Result<&mut BodyField, QueryBodyError> {
         self.bodies
             .get_mut(&body)
             .ok_or(QueryBodyError::NotStarted(body))
     }
+}
+
+/// [`WorkerFields::photometry`]'s answer for `material` on the body of `header`.
+///
+/// # Errors
+///
+/// [`ResolvePropertiesError::EntryNotInPalette`] for an entry past the header's palette.
+fn drawn_photometry(
+    header: &FieldHeader,
+    material: Material,
+) -> Result<DrawnPhotometry, ResolvePropertiesError> {
+    let resolved = exposed_properties(
+        material,
+        header.palette(),
+        GroundExposure::of_header(header),
+    )?;
+    let normal_albedo_bvr = scaled_normal_albedo(&resolved, header.albedo_scale().unwrap_or(1.0));
+    let phase_law = resolved.phase_law();
+    Ok(DrawnPhotometry {
+        normal_albedo_bvr,
+        phase_law,
+        limb_parameter: phase_law.limb_parameter(normal_albedo_bvr[1]),
+    })
 }
 
 /// The cell of `field`'s level that holds the point `at`.

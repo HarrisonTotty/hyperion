@@ -2,23 +2,29 @@
 //! of two small surveys, cut into blocks small enough that each payload is several.
 
 use std::collections::BTreeSet;
+use std::sync::OnceLock;
 
+use hyperion_base::units::{Gigayears, PerSquareKilometre};
 use hyperion_testkit::float::{bits, bits_f32};
 use hyperion_testkit::order::assert_order_independent;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
 use super::*;
-use crate::bake::{HorizonLayer, SURVEYED, WeightsLayer};
+use crate::bake::{HorizonLayer, SURVEYED, WeightsLayer, decode_maturity};
 use crate::cube::{Face, st_to_uv};
 use crate::field::{
-    CoarseField, CoarseLevel, Cover, CoverRange, ResolutionCode, SYNTHESIS_MARGIN_CELLS,
-    SynthesisCell,
+    CoarseField, CoarseLevel, Cover, CoverRange, PaletteRole, ResolutionCode,
+    SYNTHESIS_MARGIN_CELLS, SynthesisCell,
 };
-use crate::material::{MaterialClass, properties};
+use crate::geometry::BAND_LIMIT_M;
+use crate::material::{
+    AlbedoScale, ClassFractions, MaterialClass, MaturityMix, class_fractions, haloed_albedo_scale,
+    maturity_cut, maturity_mix, maturity_node_albedo, maturity_node_share, properties,
+};
 use crate::patch::{BakeOptions, NormalScale, VertexPath};
 use crate::synth::test_support::{SEED, world};
-use crate::testing::{SyntheticWorld, moon_like_builder};
+use crate::testing::{FieldBuilder, SyntheticWorld, moon_like_builder, moon_like_crater_params};
 use crate::wire::{BLOCK_HEADER_BYTES, decode_payload, encode_within};
 
 /// The fixture's world: the Moon-like, at level 6.
@@ -240,10 +246,10 @@ impl TerrainFixture {
     }
 }
 
-/// The cells of the Moon-like world's level whose centres lie within the angle whose cosine is
-/// `dot` of the direction `centre`.
-fn cells_about(centre: [f64; 3], dot: f64) -> BTreeSet<PatchKey> {
-    let level = world(WORLD).header().level();
+/// The cells of `field`'s level whose centres lie within the angle whose cosine is `dot` of the
+/// direction `centre`.
+fn cells_about(field: &CoarseField, centre: [f64; 3], dot: f64) -> BTreeSet<PatchKey> {
+    let level = field.header().level();
     let towards = unit_dir(centre);
     (0..level.cell_count())
         .map(|index| cell_at_index(level.get(), index).expect("an index below the count"))
@@ -256,9 +262,14 @@ fn cells_about(centre: [f64; 3], dot: f64) -> BTreeSet<PatchKey> {
 
 /// `TERRAIN TEST`'s fixture.
 pub(super) fn terrain_fixture() -> TerrainFixture {
-    let field: &CoarseField = world(WORLD);
-    let first = cells_about(TERRAIN_FIRST_CENTRE, TERRAIN_SURVEY_DOT);
-    let second = cells_about(TERRAIN_SECOND_CENTRE, TERRAIN_SURVEY_DOT);
+    terrain_fixture_of(world(WORLD))
+}
+
+/// `TERRAIN TEST`'s surveys and payloads over `field`, a Moon-like world of the fixture's level:
+/// [`terrain_fixture`]'s of `field` ([`weathered_terrain_world`]'s for `TEST MOON` weathered).
+pub(super) fn terrain_fixture_of(field: &CoarseField) -> TerrainFixture {
+    let first = cells_about(field, TERRAIN_FIRST_CENTRE, TERRAIN_SURVEY_DOT);
+    let second = cells_about(field, TERRAIN_SECOND_CENTRE, TERRAIN_SURVEY_DOT);
     let first_cover = cover(&first, |_| code(50.0));
     let both: BTreeSet<PatchKey> = first.union(&second).copied().collect();
     let both_cover = cover(&both, |c| {
@@ -1815,6 +1826,7 @@ fn worker_class_map_keeps_the_heaviest_classes_past_sixteen() {
             surveyed: 1,
             cells: 1,
             weights: BTreeMap::from([(m, f64::from(u8::try_from(k + 1).unwrap()))]),
+            maturity: None,
         })
         .collect();
     readings.push(TexelReading {
@@ -1822,6 +1834,7 @@ fn worker_class_map_keeps_the_heaviest_classes_past_sixteen() {
         surveyed: 1,
         cells: 4,
         weights: BTreeMap::from([(materials[0], 4.0)]),
+        maturity: None,
     });
     // Material 0 now weighs 1 + 1, the same as material 1, and the lighter by the order is left
     // out: of the two at 2, material 1, the later.
@@ -2050,7 +2063,10 @@ fn worker_normal_map_of_a_survey_without_its_margin_waits_for_the_margin() {
 
 /// A worker holding a survey of the 2 × 2 cells of `field`'s level about the direction `dir`, at
 /// 50 m, with its margin, and the cells.
-fn surveyed_about(field: &CoarseField, dir: [f64; 3]) -> (WorkerFields, BTreeSet<PatchKey>) {
+pub(super) fn surveyed_about(
+    field: &CoarseField,
+    dir: [f64; 3],
+) -> (WorkerFields, BTreeSet<PatchKey>) {
     let level = field.header().level().get();
     let home = PatchKey::containing(level, dir).unwrap();
     let (i, j) = (home.i() & !1, home.j() & !1);
@@ -2660,5 +2676,492 @@ fn worker_ground_readout_reads_a_one_month_year_s_month_with_no_season() {
             (None, None)
         );
         assert!(!properties.friction_on_temperature());
+    }
+}
+
+// ---- R10.T1.c's client half: the albedo nodes and the class map's maturity
+// (decision-r10-t1c-client-scope §2.1 and §2.5's tests 3, 7 and 9) ----
+
+/// The terrain test's geometric albedo in B, V and R, the p `TEST MOON` weathered is solved for:
+/// the Moon-like palette's primary crust's normal albedo, 0.20 in each band, which the client's
+/// `terrainMoonPhotometry` takes as p (p = A (2 + L(0)) ÷ 3 at L(0) = 1).
+pub(super) fn terrain_test_p() -> [f64; 3] {
+    world(WORLD)
+        .header()
+        .palette()
+        .entries()
+        .iter()
+        .find(|entry| entry.role == PaletteRole::PrimaryCrust)
+        .expect("the Moon-like palette has a primary crust")
+        .normal_albedo_bvr
+}
+
+/// `TEST MOON` weathered's world before its scale: the Moon-like world on a 1 Gyr surface, its
+/// crater contract's N(>1 km) 8.4 × 10⁻⁴ per km², at maturity 1 and the Moon's rate, with its
+/// class fractions and maturity mix, the haloed solve's inputs: built once per test process.
+fn weathered_terrain_inputs() -> &'static (CoarseField, ClassFractions, MaturityMix) {
+    static INPUTS: OnceLock<(CoarseField, ClassFractions, MaturityMix)> = OnceLock::new();
+    INPUTS.get_or_init(|| {
+        let field = moon_like_builder()
+            .surface_age(Gigayears::new(1.0))
+            .crater_params(moon_like_crater_params(PerSquareKilometre::new(8.4e-4)))
+            .maturity(1.0)
+            .weathering_rate(1.0)
+            .build();
+        let synth = Synthesiser::new(&field, SEED);
+        let fractions = class_fractions(&synth, &mut SynthCache::new())
+            .expect("a coarse field holds every cell");
+        let mix = maturity_mix(&synth).expect("the field carries a maturity");
+        (field, fractions, mix)
+    })
+}
+
+/// The haloed solve ([`haloed_albedo_scale`]) of `TEST MOON` weathered's world for the geometric
+/// albedo `p`.
+fn weathered_terrain_solve(p: [f64; 3]) -> AlbedoScale {
+    let (field, fractions, mix) = weathered_terrain_inputs();
+    let header = field.header();
+    haloed_albedo_scale(
+        fractions,
+        header.palette(),
+        GroundExposure::of_header(header),
+        mix,
+        p,
+    )
+    .expect("the world names its ground")
+}
+
+/// The primary crust's regolith on the Moon-like palette.
+fn crust_regolith() -> Material {
+    let entry = world(WORLD)
+        .header()
+        .palette()
+        .entries()
+        .iter()
+        .position(|entry| entry.role == PaletteRole::PrimaryCrust)
+        .expect("the Moon-like palette has a primary crust");
+    Material::new(MaterialClass::Regolith, u8::try_from(entry).unwrap()).unwrap()
+}
+
+/// The geometric albedo in B, V and R `TEST MOON` weathered is solved for (decision-r10-t1c-client-
+/// scope §3): in V 0.12, the Moon's geometric albedo ("Geometric albedo 0.12", D. R. Williams,
+/// NASA NSSDCA Moon Fact Sheet, last updated 11 January 2024, read), and in B and R in the ratios
+/// of the primary crust's regolith's own albedo at the header's `m_body`, its weathered colour,
+/// which the solve, holding V alone, reads only into its residuals.
+///
+/// Its haloed solve gives c = 1.22997, 0.46% of the named ground held at its range's top in V, a
+/// relative residual of −1.2 × 10⁻¹⁶ in V, +0.011 in B and −0.0044 in R (the maria's colour), and
+/// a halo excess in V of 5.76%, the ruling's 1 Gyr ground's 5.7%; where the terrain test's own p
+/// ([`terrain_test_p`]), the fresh crust's 0.20, gives c = 3.552 with every named ground held at
+/// its range's top, a residual of −8.0% in V and a halo excess of 9 × 10⁻⁶, the weathered palette
+/// being too dark for it
+/// (`worker_the_weathered_fixture_s_p_is_the_moon_s_and_shows_its_haloes`).
+pub(super) fn weathered_terrain_test_p() -> [f64; 3] {
+    let (field, ..) = weathered_terrain_inputs();
+    let header = field.header();
+    let [b, v, r] = exposed_properties(
+        crust_regolith(),
+        header.palette(),
+        GroundExposure::of_header(header),
+    )
+    .expect("the crust is the palette's")
+    .normal_albedo_bvr();
+    let p_v = 0.12;
+    [p_v * b / v, p_v, p_v * r / v]
+}
+
+/// `TEST MOON` weathered (decision-r10-t1c-client-scope §3): [`weathered_terrain_inputs`]' world
+/// with its header's albedo scale the haloed solve for [`weathered_terrain_test_p`]: built once
+/// per test process.
+pub(super) fn weathered_terrain_world() -> &'static CoarseField {
+    static FIELD: OnceLock<CoarseField> = OnceLock::new();
+    FIELD.get_or_init(|| {
+        let scale = weathered_terrain_solve(weathered_terrain_test_p()).scale();
+        weathered_terrain_inputs()
+            .0
+            .clone()
+            .with_albedo_scale(Some(scale))
+            .expect("a solved scale is finite and positive")
+    })
+}
+
+/// The weathered fixture's p is the Moon's, and its haloes show: at [`weathered_terrain_test_p`]
+/// the haloed solve meets p in V, clamps under 1% of the ground and states a halo excess above
+/// 5%, where at the terrain test's own p, the fresh crust's, every named ground is held at its
+/// range's top and the haloes add under 10⁻⁴; printed.
+#[test]
+fn worker_the_weathered_fixture_s_p_is_the_moon_s_and_shows_its_haloes() {
+    for (name, p) in [
+        ("the Moon's p", weathered_terrain_test_p()),
+        ("the terrain test's p", terrain_test_p()),
+    ] {
+        let s = weathered_terrain_solve(p);
+        eprintln!(
+            "{name} {p:?}: c {:.6}, clamped high {:.5}, low {:.5}, relative residual {:?}, halo \
+             excess {:.5}",
+            s.scale(),
+            s.clamped_high_share(),
+            s.clamped_low_share(),
+            s.relative_residual(),
+            s.halo_excess_v()
+        );
+    }
+    let moon = weathered_terrain_solve(weathered_terrain_test_p());
+    assert!(moon.relative_residual()[1].abs() < 1e-9, "{moon:?}");
+    assert!(moon.clamped_high_share() < 0.01, "{moon:?}");
+    assert!(moon.halo_excess_v() > 0.05, "{moon:?}");
+    let fresh = weathered_terrain_solve(terrain_test_p());
+    assert!(fresh.clamped_high_share() > 0.99, "{fresh:?}");
+    assert!(fresh.halo_excess_v() < 1e-4, "{fresh:?}");
+    assert_eq!(
+        weathered_terrain_world().header().albedo_scale().map(bits),
+        Some(bits(moon.scale()))
+    );
+}
+
+/// The Moon-like world weathered on its 3.5 Gyr surface (N(>1 km) 4.8 × 10⁻³ per km²), at maturity
+/// 1 and the Moon's rate, with no albedo scale: built once per test process.
+pub(super) fn middle_weathered_world() -> &'static CoarseField {
+    static FIELD: OnceLock<CoarseField> = OnceLock::new();
+    FIELD.get_or_init(|| {
+        moon_like_builder()
+            .surface_age(Gigayears::new(3.5))
+            .crater_params(moon_like_crater_params(PerSquareKilometre::new(4.8e-3)))
+            .maturity(1.0)
+            .weathering_rate(1.0)
+            .build()
+    })
+}
+
+/// The shallowest band level of `field` whose shortest wavelength is the band limit, where every
+/// octave is drawn crater by crater.
+pub(super) fn band_limit_level(field: &CoarseField) -> u8 {
+    let figure = field.header().figure();
+    (0..=MAX_LEVEL)
+        .find(|&n| maturity_cut(&figure, band(n)).value() <= 0.5 * BAND_LIMIT_M)
+        .expect("a body's finest levels reach the band limit")
+}
+
+/// The drawn albedo G(m) of `material` on the body of `header`: its exposed properties at the
+/// header's exposure at maturity m, under the header's scale.
+fn drawn_on(header: &FieldHeader, material: Material) -> impl Fn(f64) -> [f64; 3] + '_ {
+    move |m| {
+        let exposed = exposed_properties(
+            material,
+            header.palette(),
+            GroundExposure::of_header(header).with_maturity(m),
+        )
+        .unwrap();
+        scaled_normal_albedo(&exposed, header.albedo_scale().unwrap_or(1.0))
+    }
+}
+
+/// A list of nodes' bits.
+fn node_bits(nodes: &[[f64; 3]; MATURITY_NODES]) -> Vec<[u64; 3]> {
+    nodes.iter().map(|node| node.map(bits)).collect()
+}
+
+/// Test 3, the identity (decision-r10-t1c-client-scope §2.5): on every synthetic world, whose
+/// header carries no maturity, every node at every level and its parent's repeats the material's
+/// photometry's albedo to the bit, the photometry as built; the class map's texels carry no
+/// maturity and each named class's nodes repeat its photometry's albedo, an unnamed one's none;
+/// and a bake's layer is empty.
+#[test]
+fn worker_nodes_repeat_the_photometry_without_a_maturity_on_every_world() {
+    for &w in SyntheticWorld::ALL {
+        let field = world(w);
+        let header = field.header();
+        assert_eq!(header.maturity(), None);
+        let (mut fields, _) = surveyed_about(field, unit_dir([0.3, 1.0, 0.2]));
+        let body = header.body();
+        let palette = header.palette();
+        for entry in 0..u8::try_from(palette.len()).unwrap() {
+            for &class in MaterialClass::ALL {
+                let m = Material::new(class, entry).unwrap();
+                let albedo = fields.photometry(body, m).unwrap().normal_albedo_bvr();
+                for level in [0, 7, 14, MAX_LEVEL] {
+                    let nodes = fields.maturity_nodes(body, m, band(level)).unwrap();
+                    let repeated = node_bits(&[albedo; MATURITY_NODES]);
+                    assert_eq!(node_bits(nodes.level()), repeated, "{w:?} {m:?} {level}");
+                    assert_eq!(node_bits(nodes.parent()), repeated, "{w:?} {m:?} {level}");
+                }
+            }
+        }
+        let map = fields.class_map(body, SEED).unwrap();
+        assert!(map.texels().iter().all(|t| t.maturity().is_none()), "{w:?}");
+        for class in map.classes() {
+            match class.photometry() {
+                Some(p) => assert_eq!(
+                    class.nodes().map(node_bits),
+                    Some(node_bits(&[p.normal_albedo_bvr(); MATURITY_NODES]))
+                ),
+                None => assert_eq!(class.nodes(), None),
+            }
+        }
+        let key = PatchKey::containing(10, unit_dir([0.3, 1.0, 0.2])).unwrap();
+        let bake = fields.bake(body, SEED, key, &MESH).unwrap();
+        assert!(bake.terrain().layers().maturity().is_empty(), "{w:?}");
+    }
+    let past = Material::new(MaterialClass::Regolith, 9).unwrap();
+    let f = fixture();
+    let mut fields = f.worker();
+    assert_eq!(
+        fields.maturity_nodes(f.body, past, band(3)),
+        Err(ResolvePhotometryError::Properties(
+            ResolvePropertiesError::EntryNotInPalette {
+                entry: 9,
+                len: world(WORLD).header().palette().len()
+            }
+        ))
+    );
+    let other = BodyRef::new(f.body.raw_system_id(), f.body.body_index() ^ 1);
+    assert_eq!(
+        fields.maturity_nodes(other, past, band(3)),
+        Err(ResolvePhotometryError::NotStarted(other))
+    );
+}
+
+/// The worker's nodes on `TEST MOON` weathered and on the 3.5 Gyr world: at each level they are
+/// `maturity_nodes` over the level's unresolved mix of the material's drawn albedo, made afresh,
+/// to the bit, asked in any order and again; a level's parent nodes are the level below's own;
+/// the band limit's are the drawn albedo at each node's maturity, the last the photometry's; and
+/// band level 0's coarser mix brightens a weathered material's nodes at `m_body`.
+#[test]
+fn worker_nodes_are_each_level_s_unresolved_mean_of_the_drawn_albedo() {
+    for field in [weathered_terrain_world(), middle_weathered_world()] {
+        let header = field.header();
+        let body = header.body();
+        let m_body = header.maturity().unwrap();
+        let terms = unresolved_terms(header).unwrap();
+        let limit = band_limit_level(field);
+        let materials: Vec<Material> = [MaterialClass::Regolith, MaterialClass::Melt]
+            .into_iter()
+            .flat_map(|class| (0..2).map(move |entry| Material::new(class, entry).unwrap()))
+            .collect();
+        let levels = [limit, 0, 9, limit + 1, 14, 1, 9];
+        let ask = |fields: &mut WorkerFields, order: &[u8]| -> Vec<(u8, Material, DrawnNodes)> {
+            let mut answers = Vec::new();
+            for &level in order {
+                for &m in &materials {
+                    answers.push((
+                        level,
+                        m,
+                        fields.maturity_nodes(body, m, band(level)).unwrap(),
+                    ));
+                }
+            }
+            answers.sort_by_key(|&(level, m, _)| (level, m));
+            answers
+        };
+        let (mut fields, _) = surveyed_about(field, unit_dir([0.3, 1.0, 0.2]));
+        let answers = ask(&mut fields, &levels);
+        let mut reversed: Vec<u8> = levels.to_vec();
+        reversed.reverse();
+        let (mut again, _) = surveyed_about(field, unit_dir([0.3, 1.0, 0.2]));
+        assert_eq!(ask(&mut again, &reversed), answers);
+        for (level, m, nodes) in &answers {
+            let g = drawn_on(header, *m);
+            let at = |n: u8| maturity_nodes(&unresolved_mix(&terms, band(n)), &g);
+            assert_eq!(
+                node_bits(nodes.level()),
+                node_bits(&at(*level)),
+                "{m:?} {level}"
+            );
+            let parent = level.saturating_sub(1);
+            assert_eq!(
+                node_bits(nodes.parent()),
+                node_bits(&at(parent)),
+                "{m:?} {level}"
+            );
+            if *level >= limit {
+                for (j, node) in nodes.level().iter().enumerate() {
+                    assert_eq!(node.map(bits), g(m_body * maturity_node_share(j)).map(bits));
+                }
+                let photometry = fields.photometry(body, *m).unwrap().normal_albedo_bvr();
+                assert_eq!(
+                    nodes.level()[MATURITY_NODES - 1].map(bits),
+                    photometry.map(bits)
+                );
+            }
+        }
+        let regolith = Material::new(MaterialClass::Regolith, 0).unwrap();
+        let coarse = fields.maturity_nodes(body, regolith, band(0)).unwrap();
+        let finest = fields.maturity_nodes(body, regolith, band(limit)).unwrap();
+        let last = MATURITY_NODES - 1;
+        assert!(
+            coarse.level()[last][1] > finest.level()[last][1],
+            "the unresolved haloes brighten the background: {:?} against {:?}",
+            coarse.level()[last],
+            finest.level()[last]
+        );
+    }
+}
+
+/// Test 7 (decision-r10-t1c-client-scope §2.5; decision-r10-t1c-maturity §5, test 4): on `TEST
+/// MOON` weathered, each texel's maturity is the code of the point rule at band level 0 at its
+/// centre, to the bit, and each class's nodes are the worker's at band level 0; and on a weathered
+/// field of level 7, whose texels each read their four surveyed cells' centres, it is the code of
+/// those points' mean.
+#[test]
+fn worker_class_map_texel_maturity_is_the_point_rule_at_band_zero() {
+    let field = weathered_terrain_world();
+    let header = field.header();
+    let body = header.body();
+    let m_body = header.maturity().unwrap();
+    let (mut fields, cells) = surveyed_about(field, unit_dir([0.3, 1.0, 0.2]));
+    let map = fields.class_map(body, SEED).unwrap();
+    assert_eq!(map.texels().len(), cells.len());
+    let held = fields.field(body).unwrap().clone();
+    let synth = Synthesiser::new(&held, SEED);
+    let mut immature = 0;
+    for texel in map.texels() {
+        let at = face_uv(texel.cell(), 0.5, 0.5);
+        let m = maturity_at_level(&synth, &mut SynthCache::new(), at, band(CLASS_MAP_BAND))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            texel.maturity(),
+            Some(encode_maturity(m, m_body)),
+            "{:?}",
+            texel.cell()
+        );
+        immature += usize::from(m < m_body);
+    }
+    eprintln!(
+        "{immature} of {} texels below m_body at band 0",
+        map.texels().len()
+    );
+    for class in map.classes() {
+        let Some(m) = class.material().material() else {
+            assert_eq!(class.nodes(), None);
+            continue;
+        };
+        let want = *fields.maturity_nodes(body, m, band(0)).unwrap().level();
+        assert_eq!(class.nodes().map(node_bits), Some(node_bits(&want)));
+    }
+    // A weathered field of level 7, four cells a texel: a whole texel reads its centre, and one
+    // with three of its four cells surveyed, not its centre's, reads their centres, in the halo of
+    // a young coarse crater a texel beyond it.
+    let part = texel(22, 20);
+    let deeper = FieldBuilder::new(Metres::new(3.39e6))
+        .maturity(0.6)
+        .weathering_rate(1.0)
+        .crater(
+            point(texel(23, 20), 0.5, 0.5),
+            Metres::new(150_000.0),
+            Gigayears::new(0.05),
+            0,
+        )
+        .build();
+    let level = deeper.header().level().get();
+    assert_eq!(level, CLASS_MAP_LEVEL + 1);
+    let centre_cell = PatchKey::containing(level, point(part, 0.5, 0.5)).unwrap();
+    let mut surveyed: BTreeSet<PatchKey> = texel(20, 20).children().into_iter().collect();
+    surveyed.extend(part.children().into_iter().filter(|&c| c != centre_cell));
+    let blocks = split(&encode_within(
+        &deeper,
+        &cover(&surveyed, |_| code(50.0)),
+        None,
+        SYNTHESIS_MARGIN_CELLS,
+        FIXTURE_BLOCK_BYTES,
+    ));
+    let body = deeper.header().body();
+    let mut fields = WorkerFields::new();
+    fields.init(body, &blocks[0]).unwrap();
+    for block in &blocks[1..] {
+        fields.chunk(body, block).unwrap();
+    }
+    let map = fields.class_map(body, SEED).unwrap();
+    let held = fields.field(body).unwrap().clone();
+    let synth = Synthesiser::new(&held, SEED);
+    let at_level = |at: FaceUv| {
+        maturity_at_level(&synth, &mut SynthCache::new(), at, band(CLASS_MAP_BAND))
+            .unwrap()
+            .unwrap()
+    };
+    let texels: Vec<PatchKey> = map.texels().iter().map(ClassMapTexel::cell).collect();
+    assert_eq!(texels, [texel(20, 20), part]);
+    let whole = at_level(face_uv(texel(20, 20), 0.5, 0.5));
+    assert_eq!(
+        map.texels()[0].maturity(),
+        Some(encode_maturity(whole, 0.6))
+    );
+    let read: Vec<f64> = surveyed
+        .iter()
+        .filter(|c| part.children().contains(c))
+        .map(|&c| at_level(face_uv(c, 0.5, 0.5)))
+        .collect();
+    assert_eq!(read.len(), 3);
+    let mean = read.iter().fold(0.0, |sum, m| sum + m) / 3.0;
+    let mean = if mean < 0.6 { mean } else { 0.6 };
+    eprintln!("the part's three maturities {read:?}, mean {mean}");
+    assert!(
+        read.iter().any(|&m| m < 0.6),
+        "the part lies in the crater's halo"
+    );
+    assert_eq!(map.texels()[1].maturity(), Some(encode_maturity(mean, 0.6)));
+}
+
+/// Test 9 (decision-r10-t1c-client-scope §2.4 and §2.5): at each vertex of a band-limit-level
+/// patch whose weights name one slot whole, the albedo the terrain draws there (its level-n code
+/// decoded, the slot's level nodes interpolated) is the worker's material query's albedo there
+/// under the header's scale, within the interpolation's and the codes' stated errors (tests 5 and
+/// 6: 0.5% at a scale of 1 and 1.2% where a range clamps, plus the unorm16 code's 0.25%), on the
+/// 3.5 Gyr world at a scale of 1 and on `TEST MOON` weathered at its haloed scale; printed.
+#[test]
+fn worker_drawn_albedo_at_a_vertex_is_the_material_query_s() {
+    for (field, interpolation) in [
+        (middle_weathered_world(), 0.005),
+        (weathered_terrain_world(), 0.012),
+    ] {
+        let header = field.header();
+        let body = header.body();
+        let m_body = header.maturity().unwrap();
+        let scale = header.albedo_scale().unwrap_or(1.0);
+        let limit = band_limit_level(field);
+        let dir = unit_dir([0.3, 1.0, 0.2]);
+        let (mut fields, _) = surveyed_about(field, dir);
+        let key = PatchKey::containing(limit, dir).unwrap();
+        let bake = fields.bake(body, SEED, key, &MESH).unwrap();
+        let layers = bake.terrain().layers().clone();
+        let (mut worst, mut compared, mut immature) = (0.0_f64, 0, 0);
+        let step = if cfg!(target_arch = "wasm32") { 8 } else { 2 };
+        for y in (0..=PATCH_QUADS).step_by(step) {
+            for x in (0..=PATCH_QUADS).step_by(step) {
+                let n = usize::try_from(y * (PATCH_QUADS + 1) + x).unwrap();
+                let Some(slot) = layers.weights()[n].iter().position(|&w| w == WEIGHT_TOTAL) else {
+                    continue;
+                };
+                let Some(material) = layers.palette()[slot].and_then(GroundMaterial::material)
+                else {
+                    continue;
+                };
+                let answer = fields
+                    .material(body, SEED, vertex_point(key, x, y))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(answer.ground().material(), Some(material), "({x}, {y})");
+                let want = scaled_normal_albedo(answer.properties().unwrap(), scale);
+                let nodes = *fields
+                    .maturity_nodes(body, material, band(limit))
+                    .unwrap()
+                    .level();
+                let code = layers.maturity()[n][0];
+                let got = maturity_node_albedo(&nodes, m_body, decode_maturity(code, m_body));
+                for (g, w) in got.iter().zip(&want) {
+                    let error = (g / w - 1.0).abs();
+                    worst = if error > worst { error } else { worst };
+                }
+                compared += 1;
+                immature += usize::from(code > 0);
+            }
+        }
+        eprintln!(
+            "{key:?}: {compared} vertices compared, {immature} below m_body; the worst drawn \
+             albedo against the material query's {:.4}%",
+            100.0 * worst
+        );
+        assert!(compared > 0);
+        assert!(worst <= interpolation + 0.0025, "{worst}");
     }
 }
