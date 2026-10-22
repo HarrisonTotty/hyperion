@@ -1806,8 +1806,9 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     value in the spatial furniture and on the HR page, and once a block in the census line, the
     list, the readout and the panels' titles (`Systems`, `Orbit map`, `Bodies`), where the guide's
     "Data states" says each state "looks the same everywhere"; the blocks are outside this task.
-    _Closed by P05.T14, but for the `Bodies` panel, the star list's captions and the census table
-    (plan 05's record)._ (2) The guide says the console's own values are never stale only of
+    _Closed by P05.T14, but for the `Bodies` panel and the star list's captions, which keep their
+    marks per block, and the census table, muted under the census line's marks (plan 05's
+    record)._ (2) The guide says the console's own values are never stale only of
     `BASELINE` and `PAD WIDTH`; its `DISPLAY TIME` row could say so of the display time, which
     main's ruling now leaves unmarked and unmuted (UX review; the brief allows no other guide
     edit). _Closed by P12.T11.e._ (3) Under a `STARS` filter a stale `SYSTEMS` count reads

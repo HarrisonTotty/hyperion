@@ -7365,6 +7365,9 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
     step away from the edge. At ρ = 0, H infinite, R07's term alone is ∞ × 0, NaN, so the shadow
     code takes H at most 10¹⁸ (`terrain_star_distance_radii`, `MAX_STAR_DISTANCE_RADII`; ρ of
     10⁻¹⁸ rad, H² finite in `f32`), R07 unchanged, and `litFraction` takes ρ = 0 as the step.
+    _Settled by R07.T6.d (`61e156b3`): R07's term forms no H², so it is finite at every finite H
+    and the step at H = ∞ where infinities are kept; the cap stays, holding 1 ÷ H inside WGSL's
+    division bound (R07's Risks, "Deviations in T6.d, as built", "ρ = 0")._
   - _The grid azimuth at a fragment._ The vertex stage passes each vertex's cell coordinates (s, t)
     from its slot record (s₀ + (x − 32) step, linear across a quad, a skirt's its edge vertex's) and
     its face (from the record's centre axis); the fragment forms p and the tangents on the patch's
@@ -7533,8 +7536,11 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
   - _R07's horizon term in WGSL's trigonometry._ Under T8.b's conversion φ cancels from the cut,
     and the arccos of the visible share costs at most 2.2 × 10⁻⁵ at WGSL's 6.77 × 10⁻⁵, and ρ =
     asin(1/H) at most 0.47% of the share at asin's 6.81 × 10⁻⁵ (2 × 10⁻¹⁰ on Mesa). The exposure is
-    Howell's partial branch, whose terms (h² ÷ π) arctan z and x sin φ √(1 − y²) ÷ π cancel to
-    1/68 of themselves at 1 au (H ÷ π), so `atan`'s relative error is amplified 68-fold. Mesa's
+    Howell's partial branch, whose terms (h² ÷ π) arctan z and x sin φ √(1 − y²) ÷ π are each
+    about H ÷ π of face-on, 68 at 1 au, and cancel to about 2 ÷ (3H²) of themselves at 90°, so a
+    relative error ε in `atan` arrives as (H ÷ π) ε of face-on, 68-fold (_restated after R07's
+    Risks, "Deviations in T6.d, as built": "1/68 of themselves" was this gain, in units of
+    face-on_). Mesa's
     `nir_atan` (ANV, the UHD 620's Linux driver; RADV; lavapipe; leading coefficient 0.99997931)
     takes 1.42 × 10⁻³ of face-on off: R07's smooth terminator at 90° reads −4.4 × 10⁻⁴ against
     9.87 × 10⁻⁴, and a flat element's shadow edge errs by 8.1%, 1.6% and 0.25% of its light at
@@ -10798,14 +10804,26 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     ship has not surveyed, where the image shows the reference surface, and not over its surveyed
     ground, where the image draws the terrain in the reference surface's place. Surveyed ground is
     told by the survey edge, not by where the graticule ends."
+    _Signed off 2026-10-22 by main's UX sign-off, amended to both styles and to what a dark image
+    shows, and applied under the guide's survey edge ("Views": "The datum's lines, …"), with the
+    wireframe's `_The graticule._` sub-bullet amended to match._
 - **Deferred findings (2026-10-13 rule) (R10.T16.f)** (recorded, not ruled; each leaves the
   algorithm and the contracts as built).
   - _No line of the body over surveyed ground in the image._ On a dark side, at `TERRAIN TEST`'s
     sunset, or while `LIGHTING: PENDING` holds, the image now shows black surveyed ground with no
     line of the body; the wireframe draws its contours and its graticule on the terrain there. A
-    graticule on the terrain's height in the image is new scope (main's triage).
+    graticule on the terrain's height in the image is new scope (main's triage). _Ruled
+    2026-10-22 (main's UX sign-off): no cue now. The image is data, and a dark side is dark; the
+    survey edge, the tripod, `GROUND AT LINE OF SIGHT`, the list's `SURVEY EDGE` note and the
+    wireframe style still tell the ground, and the guide's survey-edge bullet says so. If a look
+    on a served world (R10.T15.b's, or a descent look) finds surveyed ground unreadable on a night
+    side in the photorealistic style, main scopes a graticule draped on the terrain then, as an
+    R10 subtask._
   - _The limb gives way too_, as in the wireframe: it is one of the body's own batches. Main's
-    ruling names the graticule; for the sign-off agent to confirm with the draft above.
+    ruling names the graticule; for the sign-off agent to confirm with the draft above. _Ruled
+    2026-10-22 (main's UX sign-off): accepted as built. The limb is the datum's outline, and over
+    surveyed ground below the datum it would float, as the graticule did; one rule for both
+    styles._
   - _High's "No view stopped" on a loaded machine._ The terrain run on high fails it with
     page-wide gaps of 0.5 to 1.7 s between animation frames at a start load of 1 to 9 with other
     lanes' work beside it, with this change and without it (the captures, above); low passes. The
