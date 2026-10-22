@@ -44,7 +44,7 @@ fn column(haze: Option<Haze>) -> f64 {
 #[test]
 fn sulphur_dioxide_follows_tsai_et_al() {
     let plenty = 1e-2;
-    for (t, want) in SULPHUR_DIOXIDE_BY_TEMPERATURE {
+    for (t, want) in SULPHUR_DIOXIDE_BY_TEMPERATURE_K {
         let got = dioxide(t, 10.0, plenty, plenty);
         assert!((got / want - 1.0).abs() < 1e-12, "{t} K: {got}");
     }
@@ -135,7 +135,7 @@ fn the_sulphur_haze_s_column_is_gao_et_al_s_estimate() {
     let haze = sulphur_haze(&air, sulphur(1.0))
         .expect("in range")
         .expect("a haze");
-    let molecules_per_cm2 = column(Some(haze)) / (256.48e-3 / 6.022_140_76e23) * 1e-4;
+    let molecules_per_cm2 = column(Some(haze.clone())) / (256.48e-3 / 6.022_140_76e23) * 1e-4;
     assert!(
         (molecules_per_cm2 / 6e18 - 1.0).abs() < 0.1,
         "{molecules_per_cm2}"
@@ -189,7 +189,7 @@ fn the_soot_s_column_is_the_methane_s_carbon() {
         .expect("in range")
         .expect("a haze");
     let want = 4e-4 * 12.011 / 2.3 * 0.1 / 10.0;
-    assert!((column(Some(haze)) / want - 1.0).abs() < 1e-12);
+    assert!((column(Some(haze.clone())) / want - 1.0).abs() < 1e-12);
     match haze.profile() {
         HazeProfile::Layer {
             base,
@@ -212,7 +212,7 @@ fn the_soot_s_column_is_the_methane_s_carbon() {
 fn the_ice_giant_haze_lies_above_the_methane_layer() {
     for bar in [1.2, 1.6, 2.1] {
         let layer = Pascals::new(bar * PASCALS_PER_BAR);
-        let haze = ice_giant_haze(layer).expect("a haze");
+        let haze = ice_giant_haze(layer).expect("in range").expect("a haze");
         assert_eq!(haze.rule(), HazeRule::IceGiant);
         assert_eq!(haze.material(), by_key("ice_giant_haze").expect("a row"));
         match haze.profile() {
@@ -236,6 +236,8 @@ fn the_ice_giant_haze_lies_above_the_methane_layer() {
         );
         assert!((haze.size().effective_radius().value() - 5e-8).abs() < 1e-20);
     }
+    assert_eq!(ice_giant_haze(Pascals::new(50.0)), Ok(None));
+    assert_eq!(ice_giant_haze(Pascals::new(100.0)), Ok(None));
 }
 
 /// The cold giants' chromophore no deeper than about 0.2 bar (Braude et al. 2020): its peak at
@@ -270,9 +272,9 @@ fn printed(text: &str) -> (f64, f64) {
     (value, math::powi(10.0, exponent - decimals) / 2.0)
 }
 
-/// Parmentier et al.'s (2018) fit is transcribed as the lane's independent evaluation of their
-/// Table 1 gives it (`research/eval_parmentier.out`), each value within half a unit of its last
-/// printed digit: the share left at 2,000, 2,500, 3,000, 3,500 and 4,000 K, of H₂O at 1 mbar,
+/// Parmentier et al.'s (2018) fit is transcribed as an independent evaluation of their Table 1
+/// and eq. 1 (the lane's, in Python, from arXiv:1805.00096v2) gives it, each value within half a
+/// unit of its last printed digit: the share left at 2,000, 2,500, 3,000, 3,500 and 4,000 K, of H₂O at 1 mbar,
 /// 0.1 bar and 1 bar, and of TiO and VO at 1 mbar.
 #[test]
 fn parmentier_s_fit_is_transcribed() {
@@ -321,49 +323,64 @@ fn parmentier_s_fit_is_transcribed() {
     }
 }
 
-/// P14.T52.a's network dissociates water as Parmentier et al.'s fit does: over 2,500–4,000 K and
-/// 1 mbar to 1 bar, where the fit leaves between 10⁻³ and 0.9 of the water, the network's H₂O over
-/// its own at 2,000 K and 10 bar (Parmentier et al. "fix the volume mixing ratio of water to its
-/// abundance at 10 bar") agrees with the fit within 0.3 dex, the fit's own scatter about their CEA
-/// map (their Fig. 12, read cell by cell by the lane: 133 of 141 cells within 0.3 dex). As built,
-/// at nine points, within 0.15 dex: the farthest +0.14 dex at 3,000 K and 10 mbar, where OH, not
-/// carried (P14.T52.e), would hold some of the oxygen.
+/// P14.T52.a's network dissociates H₂O, TiO and VO as Parmentier et al.'s fit does, each within its
+/// stated tolerance: over 2,500–4,000 K and 1 mbar to 1 bar, where the fit leaves between 10⁻³ and
+/// 0.9 of the molecule, the network's mole fraction over its own at 2,000 K and 10 bar (Parmentier
+/// et al. "fix the volume mixing ratio of water to its abundance at 10 bar") against the fit.
+///
+/// - **H₂O within 0.3 dex**, the fit's own scatter about their CEA map (their Fig. 12, read cell by
+///   cell by the lane: 133 of 141 cells within 0.3 dex). As built, at nine points, within 0.15 dex:
+///   the farthest +0.14 dex at 3,000 K and 10 mbar, where OH, not carried (P14.T52.e), would hold
+///   some of the oxygen.
+/// - **TiO within 0.5 dex**: the network dissociates it more, by 0.15–0.45 dex at eight points (the
+///   farthest −0.45 dex at 3,500 K and 1 bar), its thermochemistry against CEA's in Parmentier et
+///   al.'s grid, with TiO₂ not carried; a recorded figure.
+/// - **VO within 1.1 dex**: more again, by 0.50–1.02 dex at nine points (the farthest −1.02 dex at
+///   3,500 K and 1 bar), the network's CEA record of VO (Gurvich 1982) being about 19 kJ mol⁻¹ less
+///   bound than FastChem's JANAF fit (P14.T52.a's recorded finding); a recorded figure.
 #[test]
-fn the_network_dissociates_water_as_parmentier_s_fit_does() {
+fn the_network_dissociates_as_parmentier_s_fit_does() {
     let network = Network::registry().expect("the registry's network builds");
     let gas: Vec<(Element, f64)> = Element::ALL
         .iter()
         .map(|&e| (e, e.protosolar_abundance_per_hydrogen()))
         .collect();
-    let water = by_key("H2O").expect("a row");
-    let solve = |t: f64, p: f64| {
-        network
-            .solve(gas.iter().copied(), Kelvin::new(t), Pascals::new(p))
-            .expect("solved")
-            .mole_fraction(water)
-            .expect("carried")
-    };
-    let deep = solve(2_000.0, 10.0 * PASCALS_PER_BAR);
-    let mut compared = 0;
-    for t in [2_500.0, 3_000.0, 3_500.0, 4_000.0] {
-        for bar in [1e-3, 1e-2, 0.1, 1.0] {
-            let p = bar * PASCALS_PER_BAR;
-            let fit = Dissociating::Water
-                .remaining(Kelvin::new(t), Pascals::new(p))
-                .expect("in range");
-            if !(1e-3..=0.9).contains(&fit) {
-                continue;
+    for (molecule, tolerance) in [
+        (Dissociating::Water, 0.3),
+        (Dissociating::TitaniumOxide, 0.5),
+        (Dissociating::VanadiumOxide, 1.1),
+    ] {
+        let id = by_key(molecule.key()).expect("a row");
+        let solve = |t: f64, p: f64| {
+            network
+                .solve(gas.iter().copied(), Kelvin::new(t), Pascals::new(p))
+                .expect("solved")
+                .mole_fraction(id)
+                .expect("carried")
+        };
+        let deep = solve(2_000.0, 10.0 * PASCALS_PER_BAR);
+        let mut compared = 0;
+        for t in [2_500.0, 3_000.0, 3_500.0, 4_000.0] {
+            for bar in [1e-3, 1e-2, 0.1, 1.0] {
+                let p = bar * PASCALS_PER_BAR;
+                let fit = molecule
+                    .remaining(Kelvin::new(t), Pascals::new(p))
+                    .expect("in range");
+                if !(1e-3..=0.9).contains(&fit) {
+                    continue;
+                }
+                let network_share = solve(t, p) / deep;
+                let dex = math::log10(network_share / fit);
+                assert!(
+                    dex.abs() < tolerance,
+                    "{} at {t} K, {bar} bar: {network_share} against {fit}",
+                    molecule.key()
+                );
+                compared += 1;
             }
-            let network_share = solve(t, p) / deep;
-            let dex = math::log10(network_share / fit);
-            assert!(
-                dex.abs() < 0.3,
-                "{t} K, {bar} bar: {network_share} against {fit}"
-            );
-            compared += 1;
         }
+        assert!(compared >= 6, "{}: {compared}", molecule.key());
     }
-    assert!(compared >= 6, "{compared}");
 }
 
 /// Each rule is continuous in its inputs: in steps of 0.1 K of `T_eq` and the stratosphere's
@@ -440,6 +457,7 @@ fn each_rule_is_continuous_in_its_inputs() {
     };
     scan("the chromophore's peak", &peak, 3.0, 5.5, 0.001);
     let base = |dex: f64| match ice_giant_haze(Pascals::new(math::exp10(dex)))
+        .expect("in range")
         .expect("a haze")
         .profile()
     {
@@ -497,7 +515,9 @@ fn each_refusal_names_its_cause() {
             },
             1e-4
         ),
-        Err(EvaluateRuleError::Gravity(-1.0))
+        Err(EvaluateRuleError::Gravity(MetresPerSecondSquared::new(
+            -1.0
+        )))
     );
     assert_eq!(
         soot(
@@ -507,7 +527,9 @@ fn each_refusal_names_its_cause() {
             },
             1e-4
         ),
-        Err(EvaluateRuleError::MolarMass(f64::INFINITY))
+        Err(EvaluateRuleError::MolarMass {
+            molar_mass_g_per_mol: f64::INFINITY
+        })
     );
     assert_eq!(
         sulphur_dioxide(&good, 1.5, 1e-3),
@@ -515,7 +537,7 @@ fn each_refusal_names_its_cause() {
     );
     assert_eq!(
         chromophore(Pascals::new(0.0)),
-        Err(EvaluateRuleError::Pressure(0.0))
+        Err(EvaluateRuleError::Pressure(Pascals::new(0.0)))
     );
     assert_eq!(
         ice_giant_haze(Pascals::new(f64::NAN)).map_err(|e| e.to_string()),
@@ -523,7 +545,7 @@ fn each_refusal_names_its_cause() {
     );
     assert_eq!(
         Dissociating::Water.remaining(Kelvin::new(-5.0), Pascals::new(1.0)),
-        Err(EvaluateRuleError::Temperature(-5.0))
+        Err(EvaluateRuleError::Temperature(Kelvin::new(-5.0)))
     );
 }
 
@@ -561,7 +583,7 @@ fn the_rules_are_pinned() {
         let haze = sulphur_haze(&air, sulphur(m)).expect("in range");
         w.f64(
             &format!("S8 at {t} K, {stratosphere} K, {m}x"),
-            column(haze),
+            column(haze.clone()),
         );
         if let Some(Haze {
             profile: HazeProfile::Layer { top, .. },
@@ -590,7 +612,13 @@ fn the_rules_are_pinned() {
             );
         }
     }
-    let size = log_normal(SULPHUR_HAZE_PARTICLES.0, SULPHUR_HAZE_PARTICLES.1).expect("a size");
+    for t in [300.0, 500.0] {
+        w.f64(
+            &format!("S8 vapour pressure at {t} K"),
+            sulphur_saturation_pressure(Kelvin::new(t)).value(),
+        );
+    }
+    let size = log_normal(SULPHUR_HAZE_PARTICLES.0, SULPHUR_HAZE_PARTICLES.1);
     w.f64("S8 r_eff", size.effective_radius().value());
     w.f64("S8 v_eff", size.effective_variance());
     golden!("planetary/photochem", w.as_str());

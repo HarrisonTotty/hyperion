@@ -96,7 +96,7 @@ fn cgs(cm2_per_s: f64) -> EddyDiffusion {
     EddyDiffusion::from_square_metres_per_second(cm2_per_s * 1e-4)
 }
 
-/// The gas at `p` along `profile`, quenched.
+/// The gas at `p` along `profile`: its local equilibrium, and quenched.
 fn quenched_at(
     network: &Network,
     gas: &[(Element, f64)],
@@ -107,7 +107,9 @@ fn quenched_at(
     let local = network
         .solve(gas.iter().copied(), profile(p), p)
         .unwrap_or_else(|e| panic!("{} Pa: {e}", p.value()));
-    let quenched = quench.apply(&local).expect("the network's own gas");
+    let quenched = quench
+        .apply(network, profile(p), p)
+        .unwrap_or_else(|e| panic!("{} Pa: {e}", p.value()));
     (local, quenched)
 }
 
@@ -254,8 +256,9 @@ fn transition(network: &Network, eddy_diffusion: EddyDiffusion) -> f64 {
 /// "If vertical mixing is like Jupiter's, the transition from methane to CO occurs at 500 K in a
 /// planet. Sluggish vertical mixing can raise this to 600 K; but clouds or more vigorous vertical
 /// mixing could lower this to 400 K"): on [`self_luminous`]'s profiles, quenched CO equals CH₄
-/// within 400–600 K at `K_zz` = 10⁷ cm² s⁻¹, and the transition moves up with sluggish mixing and
-/// down with vigorous. ZM14's 600 K planet, by their §3.1: at `K_zz` = 10¹⁰ cm² s⁻¹ strong mixing
+/// within 450–550 K at `K_zz` = 10⁷ cm² s⁻¹, and the transition moves up with sluggish mixing and
+/// down with vigorous (ZM14 do not say which `K_zz` their 600 K and 400 K are for, so only the order
+/// is asserted at 10⁴ and 10¹⁰). ZM14's 600 K planet, by their §3.1: at `K_zz` = 10¹⁰ cm² s⁻¹ strong mixing
 /// "maintains fCO ≫ fCH4" (here CO over ten times CH₄); at 10⁷ "the 600 K planet (g = 10^3
 /// cm/s2) has abundant CO and relatively little CH4"; and at 10⁴ its quench point is "cool
 /// enough, barely, to fall into the CH4 field, so that fCH4 > fCO". As built: the transition at
@@ -267,8 +270,11 @@ fn the_methane_to_co_transition_is_near_500_k_for_jupiter_like_mixing() {
     let jupiter_like = transition(&network, EddyDiffusion::JUPITER_LIKE);
     let sluggish = transition(&network, cgs(1e4));
     let vigorous = transition(&network, cgs(1e10));
-    assert!((400.0..600.0).contains(&jupiter_like), "{jupiter_like} K");
-    assert!(sluggish > jupiter_like && jupiter_like > vigorous);
+    assert!((450.0..550.0).contains(&jupiter_like), "{jupiter_like} K");
+    assert!(
+        sluggish > jupiter_like && jupiter_like > vigorous,
+        "{sluggish} K > {jupiter_like} K > {vigorous} K"
+    );
     let (teff, ..) = ANCHOR;
     let strong = carbon_ratio(&network, teff, cgs(1e10));
     let moderate = carbon_ratio(&network, teff, EddyDiffusion::JUPITER_LIKE);
@@ -518,9 +524,9 @@ fn per_hydrogen_atom(fractions: impl Iterator<Item = (SubstanceId, f64)>, id: Su
 }
 
 /// Below the CO–CH₄ level CO₂ is the local equilibrium's; between it and CO₂'s own level it obeys
-/// K (CO + H₂O ⇌ CO₂ + H₂) with the quenched CO and H₂O and the local H₂ at the local temperature
-/// (ZM14 §6's procedure), and above, at CO₂'s level's temperature, each to 10⁻¹² per hydrogen
-/// atom; the quenched CO₂ lies far above the local equilibrium's there.
+/// K (CO + H₂O ⇌ CO₂ + H₂) with the quenched CO, H₂O and H₂ at the local temperature (ZM14 §6's
+/// procedure), and above, at CO₂'s level's temperature, each to 10⁻¹² per hydrogen atom; the
+/// quenched CO₂ lies far above the local equilibrium's there.
 #[test]
 fn carbon_dioxide_quenches_against_the_quenched_carbon_monoxide() {
     let network = network();
@@ -528,8 +534,8 @@ fn carbon_dioxide_quenches_against_the_quenched_carbon_monoxide() {
     let profile = self_luminous(700.0);
     let column = self_luminous_column(EddyDiffusion::JUPITER_LIKE);
     let quench = Quench::derive(&network, &gas, &profile, &column).expect("a quench");
-    let carbon = *quench.level(QuenchedSystem::CarbonMonoxide);
-    let dioxide = *quench.level(QuenchedSystem::CarbonDioxide);
+    let carbon = quench.level(QuenchedSystem::CarbonMonoxide);
+    let dioxide = quench.level(QuenchedSystem::CarbonDioxide);
     assert_eq!(dioxide.bound(), QuenchBound::Crossing);
     assert!(dioxide.pressure().value() < carbon.pressure().value());
     let k = |t: Kelvin| {
@@ -542,11 +548,11 @@ fn carbon_dioxide_quenches_against_the_quenched_carbon_monoxide() {
     };
     let places = quench.places;
     let frozen = &quench.frozen[0];
-    let (co2, h2) = (row("CO2"), row("H2"));
+    let co2 = row("CO2");
     let check = |p: Pascals, t: Kelvin| {
         let (local, quenched) = quenched_at(&network, &gas, &quench, &profile, p);
-        let want = k(t) * frozen[places.carbon_monoxide] * frozen[places.water]
-            / per_hydrogen_atom(local.mole_fractions(), h2);
+        let want =
+            k(t) * frozen[places.carbon_monoxide] * frozen[places.water] / frozen[places.hydrogen];
         let got = per_hydrogen_atom(quenched.mole_fractions(), co2);
         assert!(
             (got / want - 1.0).abs() < 1e-12,
@@ -604,7 +610,7 @@ fn each_refusal_names_its_cause() {
             gravity: MetresPerSecondSquared::new(0.0),
             ..good
         }),
-        FindQuenchLevelError::Gravity(0.0)
+        FindQuenchLevelError::Gravity(MetresPerSecondSquared::new(0.0))
     );
     assert_eq!(
         refused(MixingColumn {
@@ -619,7 +625,7 @@ fn each_refusal_names_its_cause() {
             eddy_diffusion: EddyDiffusion::from_square_metres_per_second(-1.0),
             ..good
         }),
-        FindQuenchLevelError::EddyDiffusion(-1.0)
+        FindQuenchLevelError::EddyDiffusion(EddyDiffusion::from_square_metres_per_second(-1.0))
     );
     assert_eq!(
         refused(MixingColumn {
@@ -653,7 +659,28 @@ fn each_refusal_names_its_cause() {
     );
     let network = network();
     let error = Quench::derive(&network, &protosolar(1.0), broken, &good).expect_err("refused");
-    assert!(matches!(error, DeriveQuenchError::Level(_)), "{error}");
+    assert!(
+        matches!(
+            error,
+            DeriveQuenchError::Level(FindQuenchLevelError::Temperature { .. })
+        ),
+        "{error}"
+    );
+    let no_hydrogen = [(Element::He, 0.1), (Element::C, 1e-4)];
+    assert_eq!(
+        Quench::derive(&network, &no_hydrogen, jupiter, &good),
+        Err(DeriveQuenchError::Equilibrium {
+            system: QuenchedSystem::CarbonMonoxide,
+            error: SolveEquilibriumError::NoHydrogen
+        })
+    );
+    let quench = Quench::derive(&network, &protosolar(1.0), jupiter, &good).expect("a quench");
+    assert_eq!(
+        quench.apply(&network, Kelvin::new(7_000.0), bar(1.0)),
+        Err(ApplyQuenchError::Equilibrium(
+            SolveEquilibriumError::AboveRecords(Kelvin::new(7_000.0))
+        ))
+    );
 }
 
 /// The same inputs give the same bits, and one network and quench serve levels in any order.
@@ -686,9 +713,12 @@ fn the_quench_is_deterministic() {
 }
 
 /// The quench pinned bit for bit: each system's level on Jupiter's profile and on the
-/// self-luminous planet's at 700 K, and the quenched gas at 1 bar and 10 mbar. Nothing on the
-/// record calls the quench at generator version 22, so this golden is re-blessed with the rules
-/// it pins, and with P14.T52.a's, at the version in force, until P14.T54.b.
+/// self-luminous planet's at 700 K, and the quenched gas at 1 bar, 0.5 bar (on the planet, between
+/// its CO–CH₄ and CO₂ levels) and 10 mbar. Nothing on the record calls the quench at generator
+/// version 22, so this golden is re-blessed with the rules it pins, and with P14.T52.a's, at the
+/// version in force, until P14.T54.b, with no bump (main's ruling of 2026-10-13 in common.md, as
+/// for P14.T52.a's golden, decision-p14-t52a-rows "The golden at 23"); a commit that moves its
+/// values names that ruling.
 #[test]
 fn the_quench_is_pinned() {
     use crate::GENERATOR_VERSION;
@@ -728,7 +758,7 @@ fn the_quench_is_pinned() {
                 level.temperature().value(),
             );
         }
-        for p in [1.0, 0.01] {
+        for p in [1.0, 0.5, 0.01] {
             let (_, quenched) = quenched_at(&network, gas, &quench, profile, bar(p));
             for (id, x) in quenched.mole_fractions() {
                 w.f64(

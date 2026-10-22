@@ -20,7 +20,7 @@
 //!   exp(B ÷ T) (their eq. 10), p in bar, T in K, m the metallicity as a multiple of solar
 //!   ([`ChemicalTime`], [`QuenchedSystem::chemical_time`]):
 //!
-//!   | System | A, s | b | c | B, K | ZM14 |
+//!   | System | A, s bar^b | b | c | B, K | ZM14 |
 //!   | --- | --- | --- | --- | --- | --- |
 //!   | CO–CH₄, warm | 1.5 × 10⁻⁶ | 1 | 0.7 | 42,000 | eq. 12 |
 //!   | CO–CH₄, cold | 40 | 2 | 0 | 25,000 | eq. 13 |
@@ -44,7 +44,8 @@
 //!   the step that crosses. A system that is slow at the range's bottom is quenched there
 //!   ([`QuenchBound::Bottom`]), and one fast to its top is in equilibrium throughout
 //!   ([`QuenchBound::Top`]). A profile with a second crossing higher up (ZM14 §8: "the atmosphere
-//!   can have a second quench point in the stratosphere") keeps the first.
+//!   can have a second quench point in the stratosphere") keeps the first, so that the gas stays
+//!   frozen through an irradiated giant's inversion, where the chemistry may be fast again.
 //!
 //! # `K_zz`, the stated law
 //!
@@ -54,18 +55,18 @@
 //! "more Jupiter-like Kzz = 10^7 cm2/s" (§3.1), with which "the transition from methane to CO
 //! occurs at 500 K in a planet. Sluggish vertical mixing can raise this to 600 K; but clouds or
 //! more vigorous vertical mixing could lower this to 400 K" (their abstract). ZM14 give no source
-//! for calling it Jupiter's; estimates of Jupiter's own deep `K_zz` run 4 × 10⁷ to 10⁹ cm² s⁻¹
-//! (Visscher, Moses and Saslow 2010, Icarus 209, 602, §2.2), and ZM14's free-convection law, `K_zz`
-//! = (H ÷ 3)(R `F_conv` ÷ (μ ρ `c_p`))^(1/3) (their eq. 3), gives 10⁹–10¹¹ cm² s⁻¹ in a self-luminous
-//! planet's convecting zone, which ZM14 regard "with some skepticism". The constant is the law
-//! the plan states; a law by the body's own convective flux is the recorded alternative.
+//! for calling it Jupiter's; Visscher, Moses and Saslow (2010, Icarus 209, 602, §2.2) explore
+//! 4 × 10⁷ to 10⁹ cm² s⁻¹ for Jupiter's deep troposphere, and ZM14's free-convection law, `K_zz` =
+//! (H ÷ 3)(R `F_conv` ÷ (μ ρ `c_p`))^(1/3) (their eq. 3), gives 10⁹–10¹¹ cm² s⁻¹ in a self-luminous
+//! planet's convecting zone, which ZM14 regard "with some skepticism". The constant is the law the
+//! plan states; a law by the body's own convective flux is the recorded alternative.
 //!
 //! # The gas above the quench levels ([`Quench::apply`])
 //!
 //! [`Quench::derive`] finds the four levels and solves P14.T52.a's equilibrium at three: those of
-//! CO–CH₄, NH₃–N₂ and HCN. At a level above a system's (at a lower pressure), its species take
-//! their mole fractions there, each per hydrogen atom, which mixing preserves; at or below it, the
-//! local equilibrium's:
+//! CO–CH₄, NH₃–N₂ and HCN. [`Quench::apply`] solves the network at the level asked for and, above
+//! each system's level (at a lower pressure), gives that system's species their mole fractions
+//! there, each per hydrogen atom, which mixing preserves; at or below it, the local equilibrium's:
 //!
 //! - **CO–CH₄**: CO and CH₄ ("fCO, fCH4 above that level = equilibrium at (Tq, pq)").
 //! - **NH₃–N₂**: NH₃; N₂ takes the nitrogen the others leave (decision-p14-t52a-rows, "For main":
@@ -75,14 +76,15 @@
 //!   not yet appear to be a consensus on what the quench chemistry of HCN actually is", §8), and
 //!   the network's is the whole gas's.
 //! - **CO₂** "quenches with respect to the disequilibrium (quenched) abundance of CO" (ZM14 §6):
-//!   above the CO–CH₄ level it is in equilibrium with the quenched CO and H₂O, CO + H₂O ⇌ CO₂ +
+//!   above the CO–CH₄ level it is in equilibrium with the quenched CO, H₂O and H₂, CO + H₂O ⇌ CO₂ +
 //!   H₂ at the local temperature, until its own level, above which it holds that level's value
 //!   ("CO2 quenching is pinned at the altitude where the equilibrium defined by Eq 43 breaks
 //!   down"). Its search starts at the CO–CH₄ level, so it is never deeper
 //!   ([`QuenchBound::Pinned`]). The reaction's K is the registry's own (P14.T49.d's records),
 //!   which the network's CO₂ obeys, rather than ZM14's fit, eq. 43, K = 18.3 exp(−2,376 ÷ T −
 //!   (932 ÷ T)²) for the reverse, so that the two agree at the CO–CH₄ level; the tests compare
-//!   them.
+//!   them. Outside the records' range K is held at its floor or ceiling, as the network holds its
+//!   gas.
 //!
 //! Each element is then balanced by one carrier, so that every element is conserved: carbon by
 //! CO and CH₄ together, in proportion to their values; nitrogen by N₂; oxygen by H₂O (ZM14 freeze
@@ -104,20 +106,22 @@
 //! - The levels' gas is P14.T52.a's, gas only and ideal: the search's range should stay within
 //!   its ideal gas, about 1 kbar ([`equilibrium`](super::equilibrium)'s validation).
 //!
-//! # Determinism
+//! # Determinism and cost
 //!
 //! The scan and the halvings are fixed counts from the caller's range; every sum runs in the
-//! network's order, and every transcendental goes through [`math`]. The cost is a scan of at most
-//! ln(bottom ÷ top) ÷ [`SCAN_STEP_LN_P`] + 1 steps and [`BISECTIONS`] halvings a system, each one
-//! profile evaluation and three logarithms, and three solves of the network (decision-p14-t52a-rows
-//! bounds a section at one to three; P14.T33.a times it).
+//! network's order, and every transcendental goes through [`math`]. A quench costs a scan of at
+//! most ln(bottom ÷ top) ÷ [`SCAN_STEP_LN_P`] + 1 steps and [`BISECTIONS`] halvings a system, each
+//! one profile evaluation and three logarithms, and three solves of the network; each level
+//! [`Quench::apply`] serves costs one more. A section quenched at its 1-bar level and its
+//! photosphere is five solves, against decision-composition §1.3's one to three (a recorded
+//! finding; P14.T33.a times it).
 
 use std::error::Error;
 use std::fmt;
 
 use crate::math;
 use crate::substance::phase::MOLAR_GAS_CONSTANT;
-use crate::substance::{BalanceReactionError, Element, Reaction, SubstanceId, by_key};
+use crate::substance::{Element, Reaction, SubstanceId, by_key};
 use crate::units::{Kelvin, Metres, MetresPerSecondSquared, Pascals, Seconds};
 
 use super::equilibrium::{GasEquilibrium, Network, SolveEquilibriumError};
@@ -137,76 +141,98 @@ pub const SCAN_STEP_LN_P: f64 = 0.5;
 /// the level's pressure.
 pub const BISECTIONS: u32 = 40;
 
-/// An Arrhenius-like chemical time, t = A p^−b m^−c exp(B ÷ T) (ZM14, eq. 10): "It is reasonable
-/// to hope that the net reaction has an Arrhenius-like rate ... where possible pressure and
-/// metallicity dependencies are written as power laws", p in bar, T in K and m the metallicity as
-/// a multiple of solar.
+/// An Arrhenius-like chemical time, t = A p^−b m^−c exp(B ÷ T) (ZM14, eq. 10), p in bar, T in K
+/// and m the metallicity as a multiple of solar.
+///
+/// ZM14: "It is reasonable to hope that the net reaction has an Arrhenius-like rate ... where
+/// possible pressure and metallicity dependencies are written as power laws".
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct ChemicalTime {
-    /// A, in s bar^b.
-    pub prefactor_s: f64,
-    /// b, the power of the pressure in bar.
-    pub pressure_power: f64,
-    /// c, the power of the metallicity.
-    pub metallicity_power: f64,
-    /// B, the barrier in K.
-    pub barrier_k: f64,
+    prefactor: f64,
+    pressure_power: f64,
+    metallicity_power: f64,
+    barrier: Kelvin,
 }
 
 impl ChemicalTime {
+    /// A, in s bar^b.
+    #[must_use]
+    pub const fn prefactor(&self) -> f64 {
+        self.prefactor
+    }
+
+    /// b, the power of the pressure in bar.
+    #[must_use]
+    pub const fn pressure_power(&self) -> f64 {
+        self.pressure_power
+    }
+
+    /// c, the power of the metallicity.
+    #[must_use]
+    pub const fn metallicity_power(&self) -> f64 {
+        self.metallicity_power
+    }
+
+    /// B, the barrier.
+    #[must_use]
+    pub const fn barrier(&self) -> Kelvin {
+        self.barrier
+    }
+
     /// ln t, t in seconds, at `t` kelvin, `p_bar` bar and metallicity `m`.
+    #[must_use]
     fn ln_time(&self, t: f64, p_bar: f64, m: f64) -> f64 {
-        math::ln(self.prefactor_s)
+        math::ln(self.prefactor)
             - self.pressure_power * math::ln(p_bar)
             - self.metallicity_power * math::ln(m)
-            + self.barrier_k / t
+            + self.barrier.value() / t
     }
 }
 
-/// CO–CH₄ where CO is plentiful, t₁ = 1.5 × 10⁻⁶ p⁻¹ m^−0.7 exp(42,000 ÷ T) s (ZM14, eq. 12, "the
-/// iterated rate"; it sets the time above about 1,000 K at 1 bar).
+/// CO–CH₄ where CO is plentiful, t₁ = 1.5 × 10⁻⁶ p⁻¹ m^−0.7 exp(42,000 ÷ T) s (ZM14, eq. 12, the
+/// corrected fit, by their Fig. 6; it sets the time above about 1,000 K at 1 bar).
 pub const CARBON_MONOXIDE_WARM: ChemicalTime = ChemicalTime {
-    prefactor_s: 1.5e-6,
+    prefactor: 1.5e-6,
     pressure_power: 1.0,
     metallicity_power: 0.7,
-    barrier_k: 42_000.0,
+    barrier: Kelvin::new(42_000.0),
 };
 
-/// CO–CH₄ where CO is scarce, t₂ = 40 p⁻² exp(25,000 ÷ T) s (ZM14, eq. 13: "The models fit by Eq
-/// 13 are those with very low quench temperatures Tq and very little CO. We have no such models
-/// with m = 3").
+/// CO–CH₄ where CO is scarce, t₂ = 40 p⁻² exp(25,000 ÷ T) s (ZM14, eq. 13, "where we have given the
+/// iterated rate": "The models fit by Eq 13 are those with very low quench temperatures Tq and very
+/// little CO. We have no such models with m = 3").
 pub const CARBON_MONOXIDE_COLD: ChemicalTime = ChemicalTime {
-    prefactor_s: 40.0,
+    prefactor: 40.0,
     pressure_power: 2.0,
     metallicity_power: 0.0,
-    barrier_k: 25_000.0,
+    barrier: Kelvin::new(25_000.0),
 };
 
 /// NH₃–N₂, t = 1.0 × 10⁻⁷ p⁻¹ exp(52,000 ÷ T) s (ZM14, eq. 32: "This particular choice presumes
 /// that the energy barrier is set by N2 + H2 → NNH + H").
 pub const AMMONIA: ChemicalTime = ChemicalTime {
-    prefactor_s: 1.0e-7,
+    prefactor: 1.0e-7,
     pressure_power: 1.0,
     metallicity_power: 0.0,
-    barrier_k: 52_000.0,
+    barrier: Kelvin::new(52_000.0),
 };
 
 /// HCN, t = 1.5 × 10⁻⁴ p⁻¹ m^−0.7 exp(36,000 ÷ T) s (ZM14, eq. 40: "This expression seems to work
 /// well for all cases we have considered"; it "overestimates HCN, especially in cool worlds").
 pub const HYDROGEN_CYANIDE: ChemicalTime = ChemicalTime {
-    prefactor_s: 1.5e-4,
+    prefactor: 1.5e-4,
     pressure_power: 1.0,
     metallicity_power: 0.7,
-    barrier_k: 36_000.0,
+    barrier: Kelvin::new(36_000.0),
 };
 
 /// CO₂, t = 1.0 × 10⁻¹⁰ p^−0.5 exp(38,000 ÷ T) s (ZM14, eq. 44: "unlike the CO-CH4 system there
 /// is no discernible dependence on metallicity").
 pub const CARBON_DIOXIDE: ChemicalTime = ChemicalTime {
-    prefactor_s: 1.0e-10,
+    prefactor: 1.0e-10,
     pressure_power: 0.5,
     metallicity_power: 0.0,
-    barrier_k: 38_000.0,
+    barrier: Kelvin::new(38_000.0),
 };
 
 /// One of the four systems ZM14 give a quench relation for.
@@ -243,6 +269,7 @@ impl QuenchedSystem {
     }
 
     /// The system's place in [`ALL`](Self::ALL).
+    #[must_use]
     const fn index(self) -> usize {
         match self {
             Self::CarbonMonoxide => 0,
@@ -254,6 +281,9 @@ impl QuenchedSystem {
 
     /// The system's chemical time at `temperature` and total pressure `pressure` in a gas of
     /// metallicity `metallicity` times solar (the [module](self)'s table).
+    ///
+    /// Each input is to be finite and positive; one that is not gives a time that is not either
+    /// (a zero metallicity gives NaN, even for a time that does not depend on it).
     ///
     /// # Examples
     ///
@@ -287,6 +317,7 @@ impl QuenchedSystem {
 
     /// ln of [`chemical_time`](Self::chemical_time), in seconds, at `t` K, `p_bar` bar and
     /// metallicity `m`.
+    #[must_use]
     fn ln_chemical_time(self, t: f64, p_bar: f64, m: f64) -> f64 {
         match self {
             Self::CarbonMonoxide => {
@@ -338,7 +369,8 @@ impl EddyDiffusion {
 /// The column a quench is found in, as plain values: its gravity and mean molar mass, which set
 /// the scale height, its mixing, its metallicity and the range of pressures searched.
 ///
-/// The fields are public, as P14.T50.b's inputs are; [`quench_level`] checks them.
+/// The fields are public, as P14.T50.b's inputs are; [`quench_level`] and [`Quench::derive`]
+/// check them.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct MixingColumn {
     /// The gravity, taken as constant over the column.
@@ -415,13 +447,16 @@ impl QuenchLevel {
 /// [`quench_level`] could not find a level.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FindQuenchLevelError {
-    /// The gravity is not finite and positive, m s⁻².
-    Gravity(f64),
-    /// The molar mass is not finite and positive, g mol⁻¹.
-    MolarMass(f64),
-    /// The eddy diffusion coefficient is not finite and positive, m² s⁻¹.
-    EddyDiffusion(f64),
-    /// The metallicity is not finite and positive.
+    /// The gravity is not finite and positive.
+    Gravity(MetresPerSecondSquared),
+    /// The molar mass is not finite and positive.
+    MolarMass {
+        /// The molar mass as given, g mol⁻¹.
+        molar_mass_g_per_mol: f64,
+    },
+    /// The eddy diffusion coefficient is not finite and positive.
+    EddyDiffusion(EddyDiffusion),
+    /// The metallicity, a multiple of solar, is not finite and positive.
     Metallicity(f64),
     /// The range is not two finite, positive pressures with the top above (below) the bottom.
     Range {
@@ -442,11 +477,18 @@ pub enum FindQuenchLevelError {
 impl fmt::Display for FindQuenchLevelError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Gravity(g) => write!(f, "gravity {g} m/s² is not finite and positive"),
-            Self::MolarMass(m) => write!(f, "molar mass {m} g/mol is not finite and positive"),
-            Self::EddyDiffusion(k) => {
-                write!(f, "eddy diffusion {k} m²/s is not finite and positive")
-            }
+            Self::Gravity(g) => write!(f, "gravity {} m/s² is not finite and positive", g.value()),
+            Self::MolarMass {
+                molar_mass_g_per_mol,
+            } => write!(
+                f,
+                "molar mass {molar_mass_g_per_mol} g/mol is not finite and positive"
+            ),
+            Self::EddyDiffusion(k) => write!(
+                f,
+                "eddy diffusion {} m²/s is not finite and positive",
+                k.square_metres_per_second()
+            ),
             Self::Metallicity(m) => write!(f, "metallicity {m} is not finite and positive"),
             Self::Range { top, bottom } => write!(
                 f,
@@ -471,9 +513,12 @@ impl Error for FindQuenchLevelError {}
 
 /// The pressure scale height H = R T ÷ (μ g) at `temperature` in `column`.
 ///
+/// `temperature` and `column`'s gravity and molar mass are to be finite and positive, as
+/// [`quench_level`] holds them; otherwise H is not either.
+///
 /// # Examples
 ///
-/// About 27 km at Jupiter's 1-bar level (166 K, 24.8 m s⁻², 2.3 g mol⁻¹):
+/// About 24 km at Jupiter's 1-bar level (166 K, 24.8 m s⁻², 2.3 g mol⁻¹):
 ///
 /// ```
 /// use hyperion_sim::planetary::chem::quench::{EddyDiffusion, MixingColumn, scale_height};
@@ -500,6 +545,9 @@ pub fn scale_height(temperature: Kelvin, column: &MixingColumn) -> Metres {
 
 /// The mixing time `t_mix` = H² ÷ `K_zz` at `temperature` in `column`, the mixing length a scale
 /// height (ZM14's L = H).
+///
+/// Its inputs are to be finite and positive, as [`quench_level`] holds them; otherwise the time
+/// is not either.
 #[must_use]
 pub fn mixing_time(temperature: Kelvin, column: &MixingColumn) -> Seconds {
     let h = scale_height(temperature, column).value();
@@ -510,14 +558,15 @@ pub fn mixing_time(temperature: Kelvin, column: &MixingColumn) -> Seconds {
 fn check(column: &MixingColumn) -> Result<(), FindQuenchLevelError> {
     let positive = |x: f64| x.is_finite() && x > 0.0;
     if !positive(column.gravity.value()) {
-        return Err(FindQuenchLevelError::Gravity(column.gravity.value()));
+        return Err(FindQuenchLevelError::Gravity(column.gravity));
     }
     if !positive(column.molar_mass_g_per_mol) {
-        return Err(FindQuenchLevelError::MolarMass(column.molar_mass_g_per_mol));
+        return Err(FindQuenchLevelError::MolarMass {
+            molar_mass_g_per_mol: column.molar_mass_g_per_mol,
+        });
     }
-    let k = column.eddy_diffusion.square_metres_per_second();
-    if !positive(k) {
-        return Err(FindQuenchLevelError::EddyDiffusion(k));
+    if !positive(column.eddy_diffusion.square_metres_per_second()) {
+        return Err(FindQuenchLevelError::EddyDiffusion(column.eddy_diffusion));
     }
     if !positive(column.metallicity) {
         return Err(FindQuenchLevelError::Metallicity(column.metallicity));
@@ -663,14 +712,19 @@ struct Places {
 const MOVED: [&str; 8] = ["H2", "H2O", "CH4", "CO", "CO2", "N2", "NH3", "HCN"];
 
 impl Places {
-    /// The places of [`MOVED`]'s species among `species`, the network's.
-    fn of(species: &[SubstanceId]) -> Result<Self, DeriveQuenchError> {
-        let mut place = [0; MOVED.len()];
-        for (slot, key) in place.iter_mut().zip(MOVED) {
-            *slot = by_key(key)
+    /// The places of [`MOVED`]'s species among `species`, the registry network's.
+    ///
+    /// # Panics
+    ///
+    /// Never with the registry's network: every one of them is a gas row with a record, which
+    /// the network carries (P14.T52.a's `the_registry_s_network_builds` holds it so).
+    #[must_use]
+    fn of(species: &[SubstanceId]) -> Self {
+        let place = MOVED.map(|key| {
+            by_key(key)
                 .and_then(|id| species.iter().position(|&s| s == id))
-                .ok_or(DeriveQuenchError::MissingSpecies { key })?;
-        }
+                .expect("the quenched species are gas rows with records, so in the network")
+        });
         let [
             hydrogen,
             water,
@@ -681,7 +735,7 @@ impl Places {
             ammonia,
             hydrogen_cyanide,
         ] = place;
-        Ok(Self {
+        Self {
             hydrogen,
             water,
             methane,
@@ -690,7 +744,7 @@ impl Places {
             nitrogen,
             ammonia,
             hydrogen_cyanide,
-        })
+        }
     }
 }
 
@@ -698,6 +752,7 @@ impl Places {
 const BALANCED: [Element; 4] = [Element::H, Element::C, Element::N, Element::O];
 
 /// Each of `species`' atoms of [`BALANCED`]'s elements.
+#[must_use]
 fn balanced_atoms(species: &[SubstanceId]) -> Vec<[f64; 4]> {
     species
         .iter()
@@ -725,13 +780,6 @@ pub enum DeriveQuenchError {
         /// Why.
         error: SolveEquilibriumError,
     },
-    /// A species the quench moves is not in the network.
-    MissingSpecies {
-        /// Its key.
-        key: &'static str,
-    },
-    /// CO + H₂O ⇌ CO₂ + H₂ could not be built.
-    Reaction(BalanceReactionError),
 }
 
 impl fmt::Display for DeriveQuenchError {
@@ -741,8 +789,6 @@ impl fmt::Display for DeriveQuenchError {
             Self::Equilibrium { system, error } => {
                 write!(f, "the equilibrium at the {} level: {error}", system.name())
             }
-            Self::MissingSpecies { key } => write!(f, "{key} is not in the network"),
-            Self::Reaction(error) => write!(f, "CO + H2O = CO2 + H2: {error}"),
         }
     }
 }
@@ -755,32 +801,29 @@ impl From<FindQuenchLevelError> for DeriveQuenchError {
     }
 }
 
-/// [`Quench::apply`] could not quench a level's gas.
+/// [`Quench::apply`] could not give a level's gas.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ApplyQuenchError {
-    /// The gas is not of the network the quench was derived on.
-    Network,
-    /// CO + H₂O ⇌ CO₂ + H₂ has no equilibrium constant at the temperature.
-    NoRecord(Kelvin),
+    /// The network could not solve the gas at the level.
+    Equilibrium(SolveEquilibriumError),
 }
 
 impl fmt::Display for ApplyQuenchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Network => f.write_str("the gas is not of the quench's network"),
-            Self::NoRecord(t) => {
-                write!(f, "CO + H2O = CO2 + H2 has no record at {} K", t.value())
-            }
+            Self::Equilibrium(error) => write!(f, "the equilibrium at the level: {error}"),
         }
     }
 }
 
 impl Error for ApplyQuenchError {}
 
-/// An envelope's quench: its four systems' levels and the equilibria at three of them, from which
-/// [`apply`](Self::apply) gives any level's gas (the [module](self)'s documentation).
+/// An envelope's quench: its gas, its four systems' levels and the equilibria at three of them,
+/// from which [`apply`](Self::apply) gives any level's gas (the [module](self)'s documentation).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Quench {
+    /// The gas's element abundances, as [`derive`](Self::derive) was given them.
+    abundances: Vec<(Element, f64)>,
     /// Each system's level, in [`QuenchedSystem::ALL`]'s order.
     levels: [QuenchLevel; 4],
     /// The equilibria at the CO–CH₄, NH₃–N₂ and HCN levels, each per hydrogen atom, in the
@@ -793,23 +836,20 @@ pub struct Quench {
     places: Places,
     /// CO + H₂O ⇌ CO₂ + H₂.
     carbon_dioxide: Reaction,
-    /// The network's floor, below which the reaction is held at the floor's K, as the network
+    /// The network's floor and ceiling, between which the reaction's K is held, as the network
     /// holds its gas.
     floor: Kelvin,
+    ceiling: Kelvin,
 }
 
 /// `gas`'s mole fractions per hydrogen atom, in the network's order: x ÷ Σ (H atoms × x).
-fn per_hydrogen(fractions: &[f64], atoms: &[[f64; 4]]) -> Vec<f64> {
+#[must_use]
+fn per_hydrogen(gas: &GasEquilibrium, atoms: &[[f64; 4]]) -> Vec<f64> {
     let mut hydrogen = 0.0;
-    for (x, a) in fractions.iter().zip(atoms) {
+    for ((_, x), a) in gas.mole_fractions().zip(atoms) {
         hydrogen += a[0] * x;
     }
-    fractions.iter().map(|x| x / hydrogen).collect()
-}
-
-/// `gas`'s mole fractions, in the network's order.
-fn fractions_of(gas: &GasEquilibrium) -> Vec<f64> {
-    gas.mole_fractions().map(|(_, x)| x).collect()
+    gas.mole_fractions().map(|(_, x)| x / hydrogen).collect()
 }
 
 impl Quench {
@@ -819,10 +859,13 @@ impl Quench {
     ///
     /// # Errors
     ///
-    /// [`DeriveQuenchError::Level`] as [`quench_level`] refuses; [`DeriveQuenchError::Equilibrium`]
-    /// if the network cannot solve the gas at a level; [`DeriveQuenchError::MissingSpecies`] or
-    /// [`DeriveQuenchError::Reaction`] for a network without the species the quench moves, which
-    /// the registry's has.
+    /// [`DeriveQuenchError::Level`] as [`quench_level`] refuses, and
+    /// [`DeriveQuenchError::Equilibrium`] if the network cannot solve the gas at a system's level:
+    /// a gas it refuses, or a level above its ceiling.
+    ///
+    /// # Panics
+    ///
+    /// Never with the registry's network, which carries every species the quench moves.
     ///
     /// # Examples
     ///
@@ -858,7 +901,7 @@ impl Quench {
     /// let quench = Quench::derive(&network, &gas, jupiter, &column)?;
     /// let one_bar = Pascals::new(1e5);
     /// let local = network.solve(gas.iter().copied(), jupiter(one_bar), one_bar)?;
-    /// let quenched = quench.apply(&local)?;
+    /// let quenched = quench.apply(&network, jupiter(one_bar), one_bar)?;
     /// let co = by_key("CO").ok_or("a row")?;
     /// assert!(quenched.mole_fraction(co) > local.mole_fraction(co).map(|x| x * 1e10));
     /// # Ok(())
@@ -872,7 +915,7 @@ impl Quench {
     ) -> Result<Self, DeriveQuenchError> {
         check(column)?;
         let species: Vec<SubstanceId> = network.species().collect();
-        let places = Places::of(&species)?;
+        let places = Places::of(&species);
         let atoms = balanced_atoms(&species);
         let reaction = Reaction::new(&[
             (species[places.carbon_monoxide], -1),
@@ -880,7 +923,7 @@ impl Quench {
             (species[places.carbon_dioxide], 1),
             (species[places.hydrogen], 1),
         ])
-        .map_err(DeriveQuenchError::Reaction)?;
+        .expect("CO + H2O = CO2 + H2 balances, and each is a gas row with a record");
 
         let (top, bottom) = (column.top, column.bottom);
         let carbon = find(
@@ -890,7 +933,7 @@ impl Quench {
             top,
             bottom,
         )?;
-        let nitrogen_level = find(QuenchedSystem::Ammonia, &profile, column, top, bottom)?;
+        let nitrogen = find(QuenchedSystem::Ammonia, &profile, column, top, bottom)?;
         let cyanide = find(
             QuenchedSystem::HydrogenCyanide,
             &profile,
@@ -930,75 +973,85 @@ impl Quench {
                     system: level.system,
                     error,
                 })?;
-            Ok(per_hydrogen(&fractions_of(&gas), &atoms))
+            Ok(per_hydrogen(&gas, &atoms))
         };
-        let frozen = [solve(&carbon)?, solve(&nitrogen_level)?, solve(&cyanide)?];
+        let frozen = [solve(&carbon)?, solve(&nitrogen)?, solve(&cyanide)?];
         Ok(Self {
-            levels: [carbon, nitrogen_level, cyanide, dioxide],
+            abundances: abundances.to_vec(),
+            levels: [carbon, nitrogen, cyanide, dioxide],
             frozen,
             species,
             atoms,
             places,
             carbon_dioxide: reaction,
             floor: network.floor(),
+            ceiling: network.ceiling(),
         })
     }
 
     /// The level of `system`.
     #[must_use]
-    pub const fn level(&self, system: QuenchedSystem) -> &QuenchLevel {
-        &self.levels[system.index()]
+    pub const fn level(&self, system: QuenchedSystem) -> QuenchLevel {
+        self.levels[system.index()]
     }
 
-    /// The gas at the level of `local`, the network's equilibrium there (P14.T52.a), with each
-    /// system quenched above its level (the [module](self)'s documentation).
+    /// The gas at `temperature` and `pressure`: `network`'s equilibrium there (P14.T52.a, solved
+    /// for the gas [`derive`](Self::derive) was given), with each system quenched above its level
+    /// (the [module](self)'s documentation).
     ///
-    /// `local` is taken at the profile's temperature at its pressure, as [`derive`](Self::derive)'s
-    /// levels are, so that the gas is continuous across each quench level.
+    /// `network` is the one the quench was derived over, the registry's; `temperature` is the
+    /// profile's at `pressure`, as `derive`'s levels are, so that the gas is continuous across each
+    /// quench level.
     ///
     /// # Errors
     ///
-    /// [`ApplyQuenchError::Network`] if `local` is not of the quench's network, and
-    /// [`ApplyQuenchError::NoRecord`] if CO + H₂O ⇌ CO₂ + H₂ has no equilibrium constant at the
-    /// temperature, which the network's range excludes.
-    pub fn apply(&self, local: &GasEquilibrium) -> Result<QuenchedGas, ApplyQuenchError> {
-        if local.mole_fractions().len() != self.species.len()
-            || local
-                .mole_fractions()
-                .zip(&self.species)
-                .any(|((id, _), &s)| id != s)
-        {
-            return Err(ApplyQuenchError::Network);
-        }
-        let p = local.pressure().value();
+    /// [`ApplyQuenchError::Equilibrium`] if the network cannot solve the gas at the level: a
+    /// temperature or pressure that is not finite and positive, or a temperature above its
+    /// ceiling.
+    ///
+    /// # Panics
+    ///
+    /// Never: CO + H₂O ⇌ CO₂ + H₂'s records hold over the network's range, to which its
+    /// temperature is held.
+    pub fn apply(
+        &self,
+        network: &Network,
+        temperature: Kelvin,
+        pressure: Pascals,
+    ) -> Result<QuenchedGas, ApplyQuenchError> {
+        let local = network
+            .solve(self.abundances.iter().copied(), temperature, pressure)
+            .map_err(ApplyQuenchError::Equilibrium)?;
+        let p = pressure.value();
         let quenched = self.levels.map(|level| p < level.pressure.value());
-        let mut y = per_hydrogen(&fractions_of(local), &self.atoms);
+        let mut y = per_hydrogen(&local, &self.atoms);
         let totals = self.totals(&y);
         let places = self.places;
         let [carbon, nitrogen, cyanide] = &self.frozen;
         if quenched[QuenchedSystem::CarbonMonoxide.index()] {
             y[places.carbon_monoxide] = carbon[places.carbon_monoxide];
             y[places.methane] = carbon[places.methane];
-            // CO₂ against the quenched CO and H₂O, at the local temperature up to its own level
-            // and at that level's above it.
-            let dioxide = self.level(QuenchedSystem::CarbonDioxide);
+            // CO₂ against the quenched CO, H₂O and H₂, at the local temperature up to its own
+            // level and at that level's above it.
             let t = if quenched[QuenchedSystem::CarbonDioxide.index()] {
-                dioxide.temperature
+                self.level(QuenchedSystem::CarbonDioxide).temperature
             } else {
-                local.temperature()
+                temperature
             };
             let t = if t.value() < self.floor.value() {
                 self.floor
+            } else if t.value() > self.ceiling.value() {
+                self.ceiling
             } else {
                 t
             };
             let log_k = self
                 .carbon_dioxide
                 .log10_equilibrium_constant(t)
-                .ok_or(ApplyQuenchError::NoRecord(t))?;
+                .expect("the reaction's records hold over the network's range");
             y[places.carbon_dioxide] =
                 math::exp10(log_k) * carbon[places.carbon_monoxide] * carbon[places.water]
-                    / y[places.hydrogen];
+                    / carbon[places.hydrogen];
         }
         if quenched[QuenchedSystem::Ammonia.index()] {
             y[places.ammonia] = nitrogen[places.ammonia];
@@ -1012,8 +1065,8 @@ impl Quench {
             sum += v;
         }
         Ok(QuenchedGas {
-            temperature: local.temperature(),
-            pressure: local.pressure(),
+            temperature,
+            pressure,
             quenched,
             fractions: self
                 .species
@@ -1025,6 +1078,7 @@ impl Quench {
     }
 
     /// The atoms of each of [`BALANCED`]'s elements in `y`, per hydrogen atom.
+    #[must_use]
     fn totals(&self, y: &[f64]) -> [f64; 4] {
         let mut totals = [0.0; 4];
         for (v, a) in y.iter().zip(&self.atoms) {
@@ -1036,6 +1090,7 @@ impl Quench {
     }
 
     /// The atoms of element `e` (its place in [`BALANCED`]) in `y` but in the species at `skip`.
+    #[must_use]
     fn others(&self, y: &[f64], e: usize, skip: &[usize]) -> f64 {
         let mut held = 0.0;
         for (i, (v, a)) in y.iter().zip(&self.atoms).enumerate() {

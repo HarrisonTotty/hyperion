@@ -30,11 +30,11 @@
 //!   production below the 0.01 mbar level ceased and Sx ... is more favoured. For Teq ≳ 1600 K, SH
 //!   becomes the predominant sulphur-bearing molecular" (Methods). The mole fraction is their
 //!   Extended Data Fig. 10b's average between 10 and 0.01 mbar at 10 × solar, read by the lane
-//!   ([`SULPHUR_DIOXIDE_BY_TEMPERATURE`]), times their Fig. 4a's metallicity dependence
+//!   ([`SULPHUR_DIOXIDE_BY_TEMPERATURE_K`]), times their Fig. 4a's metallicity dependence
 //!   ([`SULPHUR_DIOXIDE_BY_METALLICITY`]), at most the gas's sulphur and half its water.
 //! - **The S₈ haze** (P. Gao et al., "Sulfur hazes in giant exoplanet atmospheres: impacts on
-//!   reflected light spectra", AJ 153, 139, 2017, arXiv:1701.00318v2, after Zahnle et al. 2016,
-//!   ApJ 824, 137): "For temperate (250 K < Teq < 700 K) Jupiter–mass planets, photochemical
+//!   reflected light spectra", AJ 153, 139, 2017, arXiv:1701.00318v2, after K. J. Zahnle et al.,
+//!   ApJ 824, 137, 2016): "For temperate (250 K < Teq < 700 K) Jupiter–mass planets, photochemical
 //!   destruction of H2S results in the production of ∼1 ppmv of S8 between 100 and 0.1 mbar, which,
 //!   if cool enough, will condense to form a haze". Two conditions, kept apart: the vapour by
 //!   `T_eq`, and its condensation by the stratosphere's temperature against S₈'s vapour pressure
@@ -54,42 +54,43 @@
 //!   from MUSE/VLT: retrieving a universal chromophore", Icarus 338, 113589, 2020,
 //!   arXiv:1912.00918v1): "We retrieved this chromophore to be located no deeper than 0.2 ± 0.1
 //!   bars in the Great Red Spot and 0.7 ± 0.1 bars elsewhere on Jupiter", a Gaussian layer in ln p
-//!   above the ammonia cloud; Braude et al. retrieve it on Jupiter alone, and the rule takes any
-//!   giant with an ammonia layer for a cold giant like it.
+//!   above the ammonia cloud. Braude et al. retrieve it on Jupiter alone; the rule takes any giant
+//!   with an ammonia layer for a cold giant like it, with the Great Red Spot's depth (the plan's
+//!   "no deeper than about 0.2 bar") and column, Jupiter's reddest ([`CHROMOPHORE_COLUMN`]).
 //! - **Thermal dissociation** (V. Parmentier et al., "From thermal dissociation to condensation in
 //!   the atmospheres of ultra hot Jupiters: WASP-121b in context", A&A 617, A110, 2018,
 //!   arXiv:1805.00096v2; J. D. Lothringer, T. Barman and T. Koskinen, "Extremely irradiated hot
 //!   Jupiters: non-oxide inversions, H− opacity, and thermal dissociation of molecules", ApJ 866,
 //!   27, 2018): Parmentier et al.'s fit to NASA CEA of the share of H₂O, TiO and VO left on an
 //!   ultra-hot dayside. P14.T52.a's network dissociates them itself, in its own equilibrium to
-//!   6,000 K (its atoms and ions), so the fit is never applied to its gas: it is the rule's closed
-//!   form, for a consumer that needs the share without a solve, and the check the tests hold the
-//!   network to.
+//!   6,000 K (its atoms and ions), so the fit is never applied to its gas, which would count the
+//!   dissociation twice: it is the rule's closed form, for a consumer that needs the share without a
+//!   solve, and the check the tests hold the network to.
 //!
 //! # What is not modelled
 //!
 //! Each rule gives only what its source states. Tsai et al.'s other products in the SO₂ layer (S,
 //! S₂, SO and SH; the S atom joins the registry with P14.T52.a's commit B) are not written: the rest
-//! of the layer's sulphur stays H₂S. Hazes' microphysics (growth, settling,
-//! coagulation) is not modelled: each haze's amount is its source's, or for soot and S₈ the
-//! closed estimate each rule states. Photochemistry's dependence on the host's ultraviolet is not
-//! read: Tsai et al. find that "a 10x UV reduction has almost no effect" on the SO₂, Gao et al.
-//! (2017) that S₈'s mixing ratio "is largely independent of stellar UV fluxes", and Gao et al.
-//! (2020) that the diffusion-limited supply "is always lower than the photon-limited production
-//! rate" on their grid.
+//! of the layer's sulphur stays in its gases as P14.T52.d has them. Hazes' microphysics (growth,
+//! settling, coagulation) is not modelled: each haze's amount is its source's, or for soot and S₈
+//! the closed estimate each rule states. Photochemistry's dependence on the host's ultraviolet is
+//! not read: in Tsai et al.'s models "the resulting sulphur species abundances are almost identical
+//! when the UV flux is reduced by a factor of 10" (Methods), Gao et al. (2017) find S₈'s mixing
+//! ratio "largely independent of stellar UV fluxes", and Gao et al. (2020) that the
+//! diffusion-limited supply "is always lower than the photon-limited production rate" on their
+//! grid.
 //!
 //! # Determinism
 //!
-//! Closed forms, every transcendental through [`math`], every table read in its order: the same
-//! bits on every target.
+//! Closed forms, every transcendental through [`math`], every table read in its order, every
+//! minimum an explicit comparison (so that no signed zero is the target's choice): the same bits on
+//! every target.
 
 use std::error::Error;
 use std::fmt;
 
 use crate::math;
-use crate::substance::{
-    BuildSizeDistributionError, CondensedPhase, Element, SizeDistribution, SubstanceId, by_key,
-};
+use crate::substance::{CondensedPhase, Element, SizeDistribution, SubstanceId, by_key};
 use crate::units::{
     Kelvin, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared, Micrometres, Pascals,
 };
@@ -102,7 +103,7 @@ const METRES_PER_MICROMETRE: f64 = 1.0e-6;
 
 /// An envelope's upper atmosphere, as plain values: what the rules read of the body and its air.
 ///
-/// The fields are public, as P14.T50.b's inputs are; each rule checks those it reads.
+/// The fields are public, as P14.T50.b's inputs are; each rule that takes it checks every one.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct UpperAtmosphere {
     /// The body's equilibrium temperature, at full redistribution and its Bond albedo, which the
@@ -120,71 +121,72 @@ pub struct UpperAtmosphere {
     pub molar_mass_g_per_mol: f64,
 }
 
-/// A rule could not be evaluated.
+/// A rule could not be evaluated: an input is out of its range.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EvaluateRuleError {
-    /// A temperature is not finite and positive, K.
-    Temperature(f64),
-    /// The metallicity is not finite and positive.
+    /// A temperature is not finite and positive.
+    Temperature(Kelvin),
+    /// The metallicity, a multiple of solar, is not finite and positive.
     Metallicity(f64),
-    /// The gravity is not finite and positive, m s⁻².
-    Gravity(f64),
-    /// The molar mass is not finite and positive, g mol⁻¹.
-    MolarMass(f64),
-    /// A pressure is not finite and positive, Pa.
-    Pressure(f64),
+    /// The gravity is not finite and positive.
+    Gravity(MetresPerSecondSquared),
+    /// The molar mass is not finite and positive.
+    MolarMass {
+        /// The molar mass as given, g mol⁻¹.
+        molar_mass_g_per_mol: f64,
+    },
+    /// A pressure is not finite and positive.
+    Pressure(Pascals),
     /// A mole fraction is not finite and within 0–1.
     MoleFraction(f64),
-    /// A row the rule names is not in the registry.
-    MissingRow {
-        /// Its key.
-        key: &'static str,
-    },
-    /// The haze's size distribution could not be built, which the rules' constants exclude.
-    Size(BuildSizeDistributionError),
 }
 
 impl fmt::Display for EvaluateRuleError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Temperature(t) => write!(f, "temperature {t} K is not finite and positive"),
+            Self::Temperature(t) => {
+                write!(f, "temperature {} K is not finite and positive", t.value())
+            }
             Self::Metallicity(m) => write!(f, "metallicity {m} is not finite and positive"),
-            Self::Gravity(g) => write!(f, "gravity {g} m/s² is not finite and positive"),
-            Self::MolarMass(m) => write!(f, "molar mass {m} g/mol is not finite and positive"),
-            Self::Pressure(p) => write!(f, "pressure {p} Pa is not finite and positive"),
+            Self::Gravity(g) => write!(f, "gravity {} m/s² is not finite and positive", g.value()),
+            Self::MolarMass {
+                molar_mass_g_per_mol,
+            } => write!(
+                f,
+                "molar mass {molar_mass_g_per_mol} g/mol is not finite and positive"
+            ),
+            Self::Pressure(p) => write!(f, "pressure {} Pa is not finite and positive", p.value()),
             Self::MoleFraction(x) => write!(f, "mole fraction {x} is not within 0 to 1"),
-            Self::MissingRow { key } => write!(f, "{key} is not a registry row"),
-            Self::Size(error) => write!(f, "the haze's size distribution: {error}"),
         }
     }
 }
 
 impl Error for EvaluateRuleError {}
 
-/// Checks a temperature.
+/// Checks a temperature, giving its value in K.
 fn check_temperature(t: Kelvin) -> Result<f64, EvaluateRuleError> {
-    let t = t.value();
-    if t.is_finite() && t > 0.0 {
-        Ok(t)
+    let value = t.value();
+    if value.is_finite() && value > 0.0 {
+        Ok(value)
     } else {
         Err(EvaluateRuleError::Temperature(t))
     }
 }
 
-/// Checks a pressure.
+/// Checks a pressure, giving its value in Pa.
 fn check_pressure(p: Pascals) -> Result<f64, EvaluateRuleError> {
-    let p = p.value();
-    if p.is_finite() && p > 0.0 {
-        Ok(p)
+    let value = p.value();
+    if value.is_finite() && value > 0.0 {
+        Ok(value)
     } else {
         Err(EvaluateRuleError::Pressure(p))
     }
 }
 
-/// Checks a mole fraction.
+/// Checks a mole fraction, giving a zero as +0 so that no −0 reaches a comparison.
 fn check_mole_fraction(x: f64) -> Result<f64, EvaluateRuleError> {
     if x.is_finite() && (0.0..=1.0).contains(&x) {
-        Ok(x)
+        Ok(if x == 0.0 { 0.0 } else { x })
     } else {
         Err(EvaluateRuleError::MoleFraction(x))
     }
@@ -200,30 +202,35 @@ impl UpperAtmosphere {
             return Err(EvaluateRuleError::Metallicity(self.metallicity));
         }
         if !positive(self.gravity.value()) {
-            return Err(EvaluateRuleError::Gravity(self.gravity.value()));
+            return Err(EvaluateRuleError::Gravity(self.gravity));
         }
         if !positive(self.molar_mass_g_per_mol) {
-            return Err(EvaluateRuleError::MolarMass(self.molar_mass_g_per_mol));
+            return Err(EvaluateRuleError::MolarMass {
+                molar_mass_g_per_mol: self.molar_mass_g_per_mol,
+            });
         }
         Ok(())
     }
+}
 
-    /// The gas's column mass between pressures `top` and `base` (`top` ≤ `base`), kg m⁻²: (base −
-    /// top) ÷ g, hydrostatic.
-    fn column(&self, top: f64, base: f64) -> f64 {
-        (base - top) / self.gravity.value()
-    }
+/// The smaller of `a` and `b`, by an explicit comparison: `a` where they are equal, so that a
+/// pair of zeros of opposite sign gives `a`'s on every target.
+#[must_use]
+fn smaller(a: f64, b: f64) -> f64 {
+    if a <= b { a } else { b }
 }
 
 /// 0 at `from` rising linearly to 1 at `to` (either order), held at each end: a positive zero
 /// there, never the −0 a quotient of (`from` − `from`) and a negative width gives.
+#[must_use]
 fn ramp(x: f64, from: f64, to: f64) -> f64 {
     let s = (x - from) / (to - from);
-    if s > 0.0 { s.min(1.0) } else { 0.0 }
+    if s > 0.0 { smaller(s, 1.0) } else { 0.0 }
 }
 
 /// Linear interpolation of log₁₀ y in `x` through `nodes` (x ascending), held at the end values
 /// outside them.
+#[must_use]
 fn log_interpolate(nodes: &[(f64, f64)], x: f64) -> f64 {
     let (first, last) = (nodes[0], nodes[nodes.len() - 1]);
     if x <= first.0 {
@@ -244,16 +251,24 @@ fn log_interpolate(nodes: &[(f64, f64)], x: f64) -> f64 {
     value
 }
 
-/// The registry row `key`.
-fn row(key: &'static str) -> Result<SubstanceId, EvaluateRuleError> {
-    by_key(key).ok_or(EvaluateRuleError::MissingRow { key })
+/// The registry row `key`, one of the rules' materials.
+///
+/// # Panics
+///
+/// If `key` is not a row: the rules name only `S8`, `soot`, `ice_giant_haze` and `chromophore`,
+/// each a registry row (P14.T49.b), which the tests read.
+#[must_use]
+fn row(key: &'static str) -> SubstanceId {
+    by_key(key).expect("the rules' materials are registry rows")
 }
 
-/// Photochemical SO₂'s mole fraction at 10 × solar, by `T_eq` (K, SO₂): Tsai et al.'s (2023)
-/// Extended Data Fig. 10b, its average between 10 and 0.01 mbar on their grid of `T_eq` with
-/// WASP-39's ultraviolet (`T_int` 100 K, g = 10 m s⁻²), read by the lane (to about 0.2–0.3 dex),
+/// Photochemical SO₂'s mole fraction at 10 × solar by `T_eq` (K, SO₂): Tsai et al.'s (2023)
+/// Extended Data Fig. 10b.
+///
+/// It is their average between 10 and 0.01 mbar on their grid of `T_eq` with WASP-39's
+/// ultraviolet (`T_int` 100 K, g = 10 m s⁻²), read by the lane (to about 0.1–0.3 dex) and
 /// interpolated in log₁₀ x; "SO2 drops below 1e-9 between 1000 and 900 K" (the lane's reading).
-pub const SULPHUR_DIOXIDE_BY_TEMPERATURE: [(f64, f64); 6] = [
+pub const SULPHUR_DIOXIDE_BY_TEMPERATURE_K: [(f64, f64); 6] = [
     (1_000.0, 4.5e-6),
     (1_200.0, 5.0e-6),
     (1_400.0, 2.5e-6),
@@ -262,27 +277,35 @@ pub const SULPHUR_DIOXIDE_BY_TEMPERATURE: [(f64, f64); 6] = [
     (2_000.0, 1.7e-7),
 ];
 
-/// Where photochemical SO₂ goes to zero, `T_eq` K: from none at 900 K to the table's first node at
-/// 1,000 K (Tsai et al.'s grid point at 800 K has under 10⁻⁹), and from its last node at 2,000 K, the
-/// grid's last, to none at 2,500 K, the builder's extrapolation, where H₂O, the oxidant's source,
-/// is half dissociated at 1 mbar ([`Dissociating::Water`]).
+/// Where photochemical SO₂ goes to zero in `T_eq`, the builder's tapers: from none at 900 K to
+/// [`SULPHUR_DIOXIDE_BY_TEMPERATURE_K`]'s first node at 1,000 K, and from its last at 2,000 K to
+/// none at 2,500 K.
+///
+/// Tsai et al.'s grid point at 800 K has under 10⁻⁹, and 2,000 K is their grid's last; at 2,500 K
+/// H₂O, the oxidant's source, is half dissociated at 1 mbar ([`Dissociating::Water`]).
 pub const SULPHUR_DIOXIDE_EDGES: (Kelvin, Kelvin) = (Kelvin::new(900.0), Kelvin::new(2_500.0));
 
 /// SO₂'s mole fraction against metallicity relative to its value at 10 × solar: Tsai et al.'s
-/// (2023) Fig. 4a, the 10–0.01 mbar average for WASP-39b, about 8 × 10⁻⁸, 1.2 × 10⁻⁵ and 9 × 10⁻⁵ at
-/// 5, 10 and 20 × solar (read by the lane): "the increase in the SO2 feature amplitude between 5×
-/// and 20× solar metallicity is much greater than that of CO2 and H2O". Interpolated in log–log;
+/// (2023) Fig. 4a.
+///
+/// Their 10–0.01 mbar average for WASP-39b is about 8 × 10⁻⁸, 1.2 × 10⁻⁵ and 9 × 10⁻⁵ at 5, 10 and
+/// 20 × solar (read by the lane): "the increase in the SO2 feature amplitude between 5× and 20×
+/// solar metallicity is much greater than that of CO2 and H2O". It is interpolated in log–log;
 /// above 20 × solar held, and below 5 × extrapolated on the 5–10 × slope, so that SO₂ falls away
 /// with the metals (both outside their range, the builder's).
 pub const SULPHUR_DIOXIDE_BY_METALLICITY: [(f64, f64); 3] =
     [(5.0, 8.0e-8 / 1.2e-5), (10.0, 1.0), (20.0, 9.0e-5 / 1.2e-5)];
 
-/// The SO₂ layer, the pressures between which [`SULPHUR_DIOXIDE_BY_TEMPERATURE`] is Tsai et al.'s
+/// The SO₂ layer, the pressures between which [`SULPHUR_DIOXIDE_BY_TEMPERATURE_K`] is Tsai et al.'s
 /// average: 10 to 0.01 mbar (its peak "around 0.1 mbar").
 pub const SULPHUR_DIOXIDE_LAYER: (Pascals, Pascals) = (Pascals::new(1.0e3), Pascals::new(1.0));
 
 /// A layer of photochemical SO₂ ([`sulphur_dioxide`]): a constant mole fraction between a base and
-/// a top pressure, its sulphur taken from the H₂S there.
+/// a top pressure.
+///
+/// Its sulphur is taken from the layer's sulphur gases (H₂S, or the S atom where the network holds
+/// it there), and by the net reaction H₂S + 2 H₂O → SO₂ + 3 H₂ each mole of SO₂ also takes two of
+/// H₂O and gives three of H₂; P14.T52.d books them.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct SulphurDioxideLayer {
     base: Pascals,
@@ -303,7 +326,7 @@ impl SulphurDioxideLayer {
         self.top
     }
 
-    /// SO₂'s mole fraction in the layer; the H₂S there loses as much.
+    /// SO₂'s mole fraction in the layer.
     #[must_use]
     pub const fn mole_fraction(&self) -> f64 {
         self.mole_fraction
@@ -350,16 +373,14 @@ pub fn sulphur_dioxide(
     let (sulphur, water) = (check_mole_fraction(sulphur)?, check_mole_fraction(water)?);
     let t = air.equilibrium_temperature.value();
     let (cold, hot) = SULPHUR_DIOXIDE_EDGES;
-    let (first, last) = (
-        SULPHUR_DIOXIDE_BY_TEMPERATURE[0],
-        SULPHUR_DIOXIDE_BY_TEMPERATURE[SULPHUR_DIOXIDE_BY_TEMPERATURE.len() - 1],
-    );
+    let nodes = SULPHUR_DIOXIDE_BY_TEMPERATURE_K;
+    let (first, last) = (nodes[0], nodes[nodes.len() - 1]);
     let by_temperature = if t < first.0 {
         first.1 * ramp(t, cold.value(), first.0)
     } else if t > last.0 {
         last.1 * ramp(t, hot.value(), last.0)
     } else {
-        log_interpolate(&SULPHUR_DIOXIDE_BY_TEMPERATURE, t)
+        log_interpolate(&nodes, t)
     };
     let by_metallicity = {
         let [low, middle, _] = SULPHUR_DIOXIDE_BY_METALLICITY;
@@ -370,9 +391,10 @@ pub fn sulphur_dioxide(
             log_interpolate(&SULPHUR_DIOXIDE_BY_METALLICITY, air.metallicity)
         }
     };
-    let mole_fraction = (by_temperature * by_metallicity)
-        .min(sulphur)
-        .min(water / 2.0);
+    let mole_fraction = smaller(
+        smaller(by_temperature * by_metallicity, sulphur),
+        water / 2.0,
+    );
     if mole_fraction > 0.0 {
         let (base, top) = SULPHUR_DIOXIDE_LAYER;
         Ok(Some(SulphurDioxideLayer {
@@ -437,7 +459,7 @@ pub enum HazeAmount {
 }
 
 /// A haze a photochemical rule forms: its material, phase, particles, extent and amount.
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct Haze {
     rule: HazeRule,
     material: SubstanceId,
@@ -484,16 +506,18 @@ impl Haze {
     }
 }
 
-/// The `T_eq` window of S₈'s photochemical production, K: "temperate (250 K < Teq < 700 K)
-/// Jupiter–mass planets" (Gao et al. 2017, after Zahnle et al. 2016). Below, "NH4SH clouds are
-/// expected to form at temperatures <200 K ... which removes H2S from the atmosphere and arrests
-/// the photochemical production of S8"; above, "The growth of elemental sulphur allotropes beyond
-/// S2 effectively stops for temperatures higher than ∼ 750 K" (Tsai et al. 2023).
+/// The `T_eq` window of S₈'s photochemical production: "temperate (250 K < Teq < 700 K)
+/// Jupiter–mass planets" (Gao et al. 2017, after Zahnle et al. 2016).
+///
+/// Below, "NH4SH clouds are expected to form at temperatures <200 K ... which removes H2S from the
+/// atmosphere and arrests the photochemical production of S8"; above, "The growth of elemental
+/// sulphur allotropes beyond S2 effectively stops for temperatures higher than ∼ 750 K" (Tsai et
+/// al. 2023).
 pub const SULPHUR_HAZE_RANGE: (Kelvin, Kelvin) = (Kelvin::new(250.0), Kelvin::new(700.0));
 
 /// The width inside each edge of [`SULPHUR_HAZE_RANGE`] over which the S₈ vapour tapers to zero,
 /// K: the builder's.
-pub const SULPHUR_HAZE_TAPER: f64 = 50.0;
+pub const SULPHUR_HAZE_TAPER_K: f64 = 50.0;
 
 /// S₈'s mole fraction in its layer at solar metallicity: "∼1 ppmv", robust to "within a factor
 /// of 2" over the ultraviolet and the mixing (Gao et al. 2017, §2, after Zahnle et al. 2016), and
@@ -509,35 +533,51 @@ pub const SULPHUR_HAZE_LAYER: (Pascals, Pascals) = (Pascals::new(1.0e4), Pascals
 /// to 0.1 µm", `r_g`, with σ = 2, the geometric standard deviation.
 pub const SULPHUR_HAZE_PARTICLES: (Micrometres, f64) = (Micrometres::new(0.1), 2.0);
 
-/// S₈'s saturation vapour pressure over its solid at `temperature` (Zahnle et al. 2016, as Gao et
-/// al. 2017's eq. 1 gives it): exp(20 − 11,800 ÷ T) below 413 K and exp(9.6 − 7,510 ÷ T) above, in
-/// bar (their units are not stated; with bar, 1 ppmv saturates at 0.1 bar near 327 K, Gao et al.'s
-/// "<325K", the lane's check). The two branches cross at 412.5 K, (11,800 − 7,510) ÷ (20 − 9.6),
-/// and the lower is taken, so that the curve is continuous.
+/// S₈'s saturation vapour pressure over its solid at `temperature`: exp(20 − 11,800 ÷ T) bar below
+/// 413 K and exp(9.6 − 7,510 ÷ T) bar above (Zahnle et al. 2016, eq. 4, "where the vapor pressure
+/// is in bars"; Gao et al. 2017, eq. 1).
+///
+/// Zahnle et al.'s curve over the solid "is extended to higher temperature until it intersects
+/// the reported vapor pressure over the liquid": the branches cross at 412.5 K, (11,800 − 7,510) ÷
+/// (20 − 9.6), and the lower is taken, so that the curve is continuous. Their "coldest datum is at
+/// ∼310 K", below which the curve is extrapolated. With it, 1 ppmv saturates at 0.1 bar near 327 K,
+/// Gao et al.'s "<325K". `temperature` is to be finite and positive.
 #[must_use]
 pub fn sulphur_saturation_pressure(temperature: Kelvin) -> Pascals {
     let t = temperature.value();
-    let low = 20.0 - 11_800.0 / t;
-    let high = 9.6 - 7_510.0 / t;
-    Pascals::new(math::exp(low.min(high)) * PASCALS_PER_BAR)
+    let solid = 20.0 - 11_800.0 / t;
+    let liquid = 9.6 - 7_510.0 / t;
+    Pascals::new(math::exp(smaller(solid, liquid)) * PASCALS_PER_BAR)
 }
 
-/// The log-normal of geometric mean radius `r_g` µm and geometric standard deviation `sigma`, by
-/// Hansen and Travis's (1974) `v_eff` = exp(ln² σ) − 1 and `r_eff` = `r_g` (1 + `v_eff`)^(5/2).
-fn log_normal(r_g: Micrometres, sigma: f64) -> Result<SizeDistribution, EvaluateRuleError> {
+/// The log-normal of geometric mean radius `r_g` and geometric standard deviation `sigma`, by
+/// Hansen and Travis's (1974, Space Sci. Rev. 16, 527) `v_eff` = exp(ln² σ) − 1 and `r_eff` =
+/// `r_g` (1 + `v_eff`)^(5/2).
+///
+/// # Panics
+///
+/// Never for the rules' constant particles, whose radius and variance are positive.
+#[must_use]
+fn log_normal(r_g: Micrometres, sigma: f64) -> SizeDistribution {
     let ln_sigma = math::ln(sigma);
     let variance = math::exp(ln_sigma * ln_sigma) - 1.0;
     let radius = r_g.value() * math::powf(1.0 + variance, 2.5) * METRES_PER_MICROMETRE;
-    SizeDistribution::log_normal(Metres::new(radius), variance).map_err(EvaluateRuleError::Size)
+    SizeDistribution::log_normal(Metres::new(radius), variance)
+        .expect("the S8 haze's radius and variance are positive")
 }
 
-/// The gamma distribution of effective radius `radius` µm and effective variance `variance`.
-fn gamma(radius: Micrometres, variance: f64) -> Result<SizeDistribution, EvaluateRuleError> {
+/// The gamma distribution of effective radius `radius` and effective variance `variance`.
+///
+/// # Panics
+///
+/// Never for the rules' constant particles, each of variance 0.05, within the gamma's (0, 0.5).
+#[must_use]
+fn gamma(radius: Micrometres, variance: f64) -> SizeDistribution {
     SizeDistribution::gamma(
         Metres::new(radius.value() * METRES_PER_MICROMETRE),
         variance,
     )
-    .map_err(EvaluateRuleError::Size)
+    .expect("the rules' gamma particles are positive with v_eff 0.05, within (0, 0.5)")
 }
 
 /// The S₈ haze of an envelope with upper atmosphere `air` whose gas holds sulphur atoms at mole
@@ -552,6 +592,10 @@ fn gamma(radius: Micrometres, variance: f64) -> Result<SizeDistribution, Evaluat
 /// # Errors
 ///
 /// [`EvaluateRuleError`] for a field of `air` out of its range, or a mole fraction not within 0–1.
+///
+/// # Panics
+///
+/// Never: `S8` is a registry row with its molar mass (P14.T49.b), which the tests read.
 ///
 /// # Examples
 ///
@@ -583,9 +627,11 @@ pub fn sulphur_haze(
     let sulphur = check_mole_fraction(sulphur)?;
     let t = air.equilibrium_temperature.value();
     let (cold, hot) = (SULPHUR_HAZE_RANGE.0.value(), SULPHUR_HAZE_RANGE.1.value());
-    let window =
-        ramp(t, cold, cold + SULPHUR_HAZE_TAPER).min(ramp(t, hot, hot - SULPHUR_HAZE_TAPER));
-    let vapour = (SULPHUR_HAZE_VAPOUR * air.metallicity).min(sulphur / 8.0) * window;
+    let window = smaller(
+        ramp(t, cold, cold + SULPHUR_HAZE_TAPER_K),
+        ramp(t, hot, hot - SULPHUR_HAZE_TAPER_K),
+    );
+    let vapour = smaller(SULPHUR_HAZE_VAPOUR * air.metallicity, sulphur / 8.0) * window;
     if vapour <= 0.0 {
         return Ok(None);
     }
@@ -597,11 +643,11 @@ pub fn sulphur_haze(
         return Ok(None);
     }
     let condensed = vapour * (base - top) - saturation * math::ln(base / top);
-    let material = row("S8")?;
+    let material = row("S8");
     let molar_mass = material
         .substance()
         .molar_mass_g_per_mol()
-        .ok_or(EvaluateRuleError::MissingRow { key: "S8" })?;
+        .expect("S8 carries its molar mass");
     let column = condensed / air.gravity.value() * molar_mass / air.molar_mass_g_per_mol;
     if column <= 0.0 {
         return Ok(None);
@@ -610,7 +656,7 @@ pub fn sulphur_haze(
     Ok(Some(Haze {
         rule: HazeRule::Sulphur,
         material,
-        size: log_normal(r_g, sigma)?,
+        size: log_normal(r_g, sigma),
         profile: HazeProfile::Layer {
             base: Pascals::new(base),
             top: Pascals::new(top),
@@ -620,11 +666,14 @@ pub fn sulphur_haze(
     }))
 }
 
-/// Where the upper atmosphere's aerosol opacity passes from hydrocarbon haze to silicate cloud,
-/// `T_eq` K: Gao et al.'s (2020) 950 K, and the width below it over which the haze's share falls
-/// from 1 to 0, the builder's 100 K (their Fig. 2a, read by the lane at 10 × solar and 10 m s⁻²:
-/// about 0.55 near 890 K and none by about 990 K).
-pub const HYDROCARBON_EDGE: (Kelvin, f64) = (Kelvin::new(950.0), 100.0);
+/// Where the upper atmosphere's aerosol opacity passes from hydrocarbon haze to silicate cloud in
+/// `T_eq`: Gao et al.'s (2020) 950 K.
+pub const HYDROCARBON_EDGE: Kelvin = Kelvin::new(950.0);
+
+/// The width below [`HYDROCARBON_EDGE`] over which the haze's share falls from 1 to 0, K: the
+/// builder's 100 K (Gao et al.'s Fig. 2a, read by the lane at 10 × solar and 10 m s⁻², gives about
+/// 0.55 near 890 K and none by about 990 K).
+pub const HYDROCARBON_WIDTH_K: f64 = 100.0;
 
 /// The pressure at which the soot haze forms: 1 µbar (Gao et al. 2020, Methods: "We set the
 /// pressure of haze formation to 1 μbar, consistent with previous exoplanet photochemical and haze
@@ -638,14 +687,15 @@ pub const SOOT_PARTICLES: (Micrometres, f64) = (Micrometres::new(0.05), 0.05);
 
 /// The share of an upper atmosphere's aerosol opacity that is hydrocarbon haze at equilibrium
 /// temperature `equilibrium_temperature`, the rest P14.T52.c's silicate cloud: 1 up to 850 K,
-/// falling linearly to 0 at 950 K and above ([`HYDROCARBON_EDGE`]; Gao et al. 2020).
+/// falling linearly to 0 at 950 K and above ([`HYDROCARBON_EDGE`], [`HYDROCARBON_WIDTH_K`]; Gao et
+/// al. 2020).
 #[must_use]
 pub fn hydrocarbon_share(equilibrium_temperature: Kelvin) -> f64 {
-    let (edge, width) = HYDROCARBON_EDGE;
+    let edge = HYDROCARBON_EDGE.value();
     ramp(
         equilibrium_temperature.value(),
-        edge.value(),
-        edge.value() - width,
+        edge,
+        edge - HYDROCARBON_WIDTH_K,
     )
 }
 
@@ -654,12 +704,14 @@ pub fn hydrocarbon_share(equilibrium_temperature: Kelvin) -> f64 {
 /// et al. 2020).
 ///
 /// Gao et al. produce it at the diffusion-limited supply of methane at [`SOOT_FORMATION`], N `K_zz`
-/// `f_CH4` ÷ H (their eq. 3). Held for a mixing time over a scale height, H² ÷ `K_zz` (the builder's),
-/// its column is the methane's carbon over that scale height, `f_CH4` (M(C) ÷ μ) p ÷ g, whatever the
-/// mixing, times [`hydrocarbon_share`], a well-mixed slab from the formation level down a scale
-/// height. Its trigger is theirs: "The formation of hydrocarbon hazes below ∼950 K is also expected
-/// due to the transition of the primary carbon reservoir from carbon monoxide to methane", which
-/// the methane carries.
+/// `f_CH4` ÷ H (their eq. 3). Held for a mixing time over a scale height, H² ÷ `K_zz` (the
+/// builder's), its column is the methane's carbon over that scale height, `f_CH4` (M(C) ÷ μ) p ÷ g,
+/// whatever the mixing, times [`hydrocarbon_share`], a well-mixed slab from the formation level down
+/// a scale height. A haze that survives below its first scale height accumulates more, so this is
+/// a lower bound, perhaps a decade low (the lane's science check, against Adams et al. 2019, ApJ
+/// 874, 61, whose 10⁸–10¹¹ CH₄ cm⁻² s⁻¹ at 1 µbar the rate here meets). Its trigger is Gao et al.'s:
+/// "The formation of hydrocarbon hazes below ∼950 K is also expected due to the transition of the
+/// primary carbon reservoir from carbon monoxide to methane", which the methane carries.
 ///
 /// # Errors
 ///
@@ -691,15 +743,16 @@ pub fn soot(air: &UpperAtmosphere, methane: f64) -> Result<Option<Haze>, Evaluat
     let formation = SOOT_FORMATION.value();
     let column = share * methane * Element::C.standard_atomic_weight_g_per_mol()
         / air.molar_mass_g_per_mol
-        * air.column(0.0, formation);
+        * formation
+        / air.gravity.value();
     if column <= 0.0 {
         return Ok(None);
     }
     let (radius, variance) = SOOT_PARTICLES;
     Ok(Some(Haze {
         rule: HazeRule::Soot,
-        material: row("soot")?,
-        size: gamma(radius, variance)?,
+        material: row("soot"),
+        size: gamma(radius, variance),
         profile: HazeProfile::Layer {
             base: Pascals::new(formation * core::f64::consts::E),
             top: SOOT_FORMATION,
@@ -709,11 +762,13 @@ pub fn soot(air: &UpperAtmosphere, methane: f64) -> Result<Option<Haze>, Evaluat
     }))
 }
 
-/// The ice giants' haze above the methane layer, Irwin et al.'s (2022) Aerosol-3: its base at the
-/// methane layer (theirs "fixed at 1.6 bar", Uranus's methane condensing near 1.5 bar and
-/// Neptune's Aerosol-2 at 2.0–2.1), a fractional scale height of 2.0, so that its mixing ratio goes
-/// as (p ÷ `p_base`)^(1 ÷ 2 − 1), to the builder's top at 1 mbar (above which a haze of that
-/// scale height holds about 2.5% of its optical depth).
+/// The ice giants' haze's profile above the methane layer, Irwin et al.'s (2022) Aerosol-3: the
+/// power of p ÷ `p_base` its mixing ratio goes as, and its top.
+///
+/// Its base is the methane layer (theirs "1.6 bar (fixed)", their Table 2, Uranus's methane
+/// condensing near 1.5 bar and Neptune's Aerosol-2 at 2.0–2.1); its fractional scale height of 2.0
+/// makes the mixing ratio go as (p ÷ `p_base`)^(1 ÷ 2 − 1); its top is the builder's 1 mbar, above
+/// which a haze of that scale height holds about 2.5% of its optical depth.
 pub const ICE_GIANT_HAZE_PROFILE: (f64, Pascals) = (-0.5, Pascals::new(100.0));
 
 /// The ice giants' haze's optical depth at 0.8 µm: 0.035, between Irwin et al.'s 0.03 ± 0.01 for
@@ -725,7 +780,8 @@ pub const ICE_GIANT_HAZE_DEPTH: (f64, Micrometres) = (0.035, Micrometres::new(0.
 pub const ICE_GIANT_HAZE_PARTICLES: (Micrometres, f64) = (Micrometres::new(0.05), 0.05);
 
 /// The haze above an ice giant's methane layer, whose base (the methane's condensation level,
-/// P14.T52.c's deck) lies at `methane_layer` (Irwin et al. 2022).
+/// P14.T52.c's deck) lies at `methane_layer`, or `None` where that layer is no deeper than the
+/// haze's top (Irwin et al. 2022).
 ///
 /// # Errors
 ///
@@ -737,26 +793,24 @@ pub const ICE_GIANT_HAZE_PARTICLES: (Micrometres, f64) = (Micrometres::new(0.05)
 /// use hyperion_sim::planetary::chem::photochem::{HazeProfile, ice_giant_haze};
 /// use hyperion_sim::units::Pascals;
 ///
-/// # fn main() -> Result<(), hyperion_sim::planetary::chem::photochem::EvaluateRuleError> {
-/// let haze = ice_giant_haze(Pascals::new(1.5e5))?;
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let haze = ice_giant_haze(Pascals::new(1.5e5))?.ok_or("a haze")?;
 /// assert!(matches!(haze.profile(), HazeProfile::Layer { exponent, .. } if exponent < 0.0));
 /// # Ok(())
 /// # }
 /// ```
-pub fn ice_giant_haze(methane_layer: Pascals) -> Result<Haze, EvaluateRuleError> {
+pub fn ice_giant_haze(methane_layer: Pascals) -> Result<Option<Haze>, EvaluateRuleError> {
     let base = check_pressure(methane_layer)?;
     let (exponent, top) = ICE_GIANT_HAZE_PROFILE;
-    let top = if top.value() < base {
-        top
-    } else {
-        Pascals::new(base)
-    };
+    if base <= top.value() {
+        return Ok(None);
+    }
     let (optical_depth, wavelength) = ICE_GIANT_HAZE_DEPTH;
     let (radius, variance) = ICE_GIANT_HAZE_PARTICLES;
-    Ok(Haze {
+    Ok(Some(Haze {
         rule: HazeRule::IceGiant,
-        material: row("ice_giant_haze")?,
-        size: gamma(radius, variance)?,
+        material: row("ice_giant_haze"),
+        size: gamma(radius, variance),
         profile: HazeProfile::Layer {
             base: methane_layer,
             top,
@@ -766,13 +820,15 @@ pub fn ice_giant_haze(methane_layer: Pascals) -> Result<Haze, EvaluateRuleError>
             optical_depth,
             wavelength,
         },
-    })
+    }))
 }
 
 /// The deepest the chromophore's peak lies, 0.2 bar: the plan's "no deeper than about 0.2 bar",
 /// Braude et al.'s (2020) Great Red Spot, "no deeper than 0.2 ± 0.1 bars" (peak 0.19 ± 0.02 bar in
-/// 2018, their Table 5); elsewhere on Jupiter they place it no deeper than 0.6–0.7 bar, and at 0.30
-/// and 0.35 bar in the Equatorial Zone and the North Temperate Belts.
+/// 2018, their Table 5).
+///
+/// Elsewhere on Jupiter they place it no deeper than 0.6–0.7 bar, and at 0.30 and 0.35 bar in the
+/// Equatorial Zone and the North Temperate Belts.
 pub const CHROMOPHORE_DEEPEST: Pascals = Pascals::new(2.0e4);
 
 /// The chromophore layer's width in ln p, Braude et al.'s ∆c = 0.25 ("Little information can be
@@ -782,6 +838,10 @@ pub const CHROMOPHORE_WIDTH: f64 = 0.25;
 
 /// The chromophore's column, kg m⁻²: Braude et al.'s Great Red Spot in 2018, (6.3 ± 0.3) × 10⁻⁵
 /// g cm⁻² (their Table 4), for a particle density of 0.87 g cm⁻³.
+///
+/// It is Jupiter's reddest feature; Sromovsky et al. (2017, Icarus 291, 232) find 18–30 µg cm⁻²
+/// for most of Jupiter's features and 10–13 µg cm⁻² in the Equatorial Zone, the recorded
+/// disc-typical alternative.
 pub const CHROMOPHORE_COLUMN: KilogramsPerSquareMetre = KilogramsPerSquareMetre::new(6.3e-4);
 
 /// The chromophore's particles: Braude et al.'s selected `r_c` = 0.05 µm, a gamma distribution of
@@ -806,7 +866,10 @@ pub const CHROMOPHORE_PARTICLES: (Micrometres, f64) = (Micrometres::new(0.05), 0
 ///
 /// # fn main() -> Result<(), hyperion_sim::planetary::chem::photochem::EvaluateRuleError> {
 /// let haze = chromophore(Pascals::new(7e4))?;
-/// assert!(matches!(haze.profile(), HazeProfile::Gaussian { peak, .. } if (peak.value() - 2e4).abs() < 1e-9));
+/// assert!(matches!(
+///     haze.profile(),
+///     HazeProfile::Gaussian { peak, .. } if (peak.value() - 2e4).abs() < 1e-9
+/// ));
 /// # Ok(())
 /// # }
 /// ```
@@ -820,8 +883,8 @@ pub fn chromophore(ammonia_layer: Pascals) -> Result<Haze, EvaluateRuleError> {
     let (radius, variance) = CHROMOPHORE_PARTICLES;
     Ok(Haze {
         rule: HazeRule::Chromophore,
-        material: row("chromophore")?,
-        size: gamma(radius, variance)?,
+        material: row("chromophore"),
+        size: gamma(radius, variance),
         profile: HazeProfile::Gaussian {
             peak,
             width: CHROMOPHORE_WIDTH,
@@ -831,12 +894,50 @@ pub fn chromophore(ammonia_layer: Pascals) -> Result<Haze, EvaluateRuleError> {
 }
 
 /// The temperatures and pressures Parmentier et al.'s (2018) fit is stated for: "Valid for a
-/// solar-composition gas with 2000 K < T < 4000 K and 200 bar < P < 1µ bar" (their Table 1's note,
-/// the bounds printed in reverse). Beyond them the closed form runs on, smooth and monotonic.
+/// solar-composition gas with 2000 K < T < 4000 K and 200 bar < P < 1µ bar".
+///
+/// Their Table 1's note prints the pressure bounds in reverse. Beyond them the closed form runs
+/// on, smooth and monotonic.
 pub const DISSOCIATION_RANGE: ((Kelvin, Kelvin), (Pascals, Pascals)) = (
     (Kelvin::new(2_000.0), Kelvin::new(4_000.0)),
     (Pascals::new(0.1), Pascals::new(2.0e7)),
 );
+
+/// One molecule's coefficients in Parmentier et al.'s (2018) fit, their Table 1 (transcribed from
+/// arXiv:1805.00096v2; the table prints 10⁻⁴ β).
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct DissociationFit {
+    alpha: f64,
+    beta: Kelvin,
+    gamma: f64,
+    log10_deep: f64,
+}
+
+impl DissociationFit {
+    /// α, the power of the pressure in bar.
+    #[must_use]
+    pub const fn alpha(&self) -> f64 {
+        self.alpha
+    }
+
+    /// β, the coefficient of 1 ÷ T.
+    #[must_use]
+    pub const fn beta(&self) -> Kelvin {
+        self.beta
+    }
+
+    /// γ, the constant, taken as −γ (the [`Dissociating::remaining`] documentation).
+    #[must_use]
+    pub const fn gamma(&self) -> f64 {
+        self.gamma
+    }
+
+    /// log₁₀ `A_0`, the deep, undissociated volume mixing ratio at solar composition.
+    #[must_use]
+    pub const fn log10_deep(&self) -> f64 {
+        self.log10_deep
+    }
+}
 
 /// A molecule whose thermal dissociation Parmentier et al. (2018) fit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -863,24 +964,30 @@ impl Dissociating {
         }
     }
 
-    /// Parmentier et al.'s (2018) Table 1 coefficients (α, β in K, γ, log₁₀ `A_0`), transcribed
-    /// from arXiv:1805.00096v2 (the table prints 10⁻⁴ β): H₂O (2, 48,300, 15.9, −3.3), TiO (1.6,
-    /// 59,400, 23.0, −7.1), VO (1.5, 54,000, 23.8, −9.2).
+    /// Parmentier et al.'s (2018) Table 1 coefficients for the molecule: H₂O (α 2, β 48,300 K, γ
+    /// 15.9, log₁₀ `A_0` −3.3), TiO (1.6, 59,400 K, 23.0, −7.1), VO (1.5, 54,000 K, 23.8, −9.2).
     #[must_use]
-    pub const fn coefficients(self) -> (f64, f64, f64, f64) {
-        match self {
+    pub const fn fit(self) -> DissociationFit {
+        let (alpha, beta, gamma, log10_deep) = match self {
             Self::Water => (2.0, 48_300.0, 15.9, -3.3),
             Self::TitaniumOxide => (1.6, 59_400.0, 23.0, -7.1),
             Self::VanadiumOxide => (1.5, 54_000.0, 23.8, -9.2),
+        };
+        DissociationFit {
+            alpha,
+            beta: Kelvin::new(beta),
+            gamma,
+            log10_deep,
         }
     }
 
     /// The share of the molecule's deep abundance left at `temperature` and total pressure
-    /// `pressure`, A ÷ `A_0` (Parmentier et al. 2018, their eq. 1 and Table 1's note): 1 ÷ √A = 1 ÷
-    /// √`A_0` + 1 ÷ √`A_d`, with log₁₀ `A_d` = α log₁₀ p + β ÷ T − γ, p in bar, so that A ÷ `A_0` =
-    /// (1 + √(`A_0` ÷ `A_d`))⁻². Their eq. 2 prints "+ γ", with which nothing dissociates anywhere; the
-    /// note's 10^−γ reproduces their own CEA curves, and Gandhi, Madhusudhan and Mandell (2020, AJ
-    /// 159, 232, eq. 2) apply it so.
+    /// `pressure`, A ÷ `A_0` (Parmentier et al. 2018, their eq. 1 and Table 1's note).
+    ///
+    /// 1 ÷ √A = 1 ÷ √`A_0` + 1 ÷ √`A_d`, with log₁₀ `A_d` = α log₁₀ p + β ÷ T − γ, p in bar, so that
+    /// A ÷ `A_0` = (1 + √(`A_0` ÷ `A_d`))⁻². Their eq. 2 prints "+ γ", with which nothing dissociates
+    /// anywhere; the note's 10^−γ reproduces their own CEA curves, and Gandhi, Madhusudhan and
+    /// Mandell (2020, AJ 159, 232, eq. 2) apply it so.
     ///
     /// P14.T52.a's network dissociates the molecule in its own equilibrium: this is the rule's
     /// closed form, never applied to that gas (the [module](self)'s documentation).
@@ -913,9 +1020,9 @@ impl Dissociating {
     ) -> Result<f64, EvaluateRuleError> {
         let t = check_temperature(temperature)?;
         let p = check_pressure(pressure)? / PASCALS_PER_BAR;
-        let (alpha, beta, gamma, log_deep) = self.coefficients();
-        let log_dissociated = alpha * math::log10(p) + beta / t - gamma;
-        let half = (log_deep - log_dissociated) / 2.0;
+        let fit = self.fit();
+        let log_dissociated = fit.alpha * math::log10(p) + fit.beta.value() / t - fit.gamma;
+        let half = (fit.log10_deep - log_dissociated) / 2.0;
         let root = 1.0 + math::exp10(half);
         Ok(1.0 / (root * root))
     }
