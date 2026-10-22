@@ -100,6 +100,17 @@ function reading(label: string): string {
   return term?.nextElementSibling?.textContent ?? "";
 }
 
+/** A value of the orbit map's furniture, the row under its canvas, by its term's label. */
+function furnitureValue(label: string): HTMLElement {
+  const value = within(mapPanel()).getByText(label, {
+    selector: ".spatial-view__furniture dt",
+  }).nextElementSibling;
+  if (!(value instanceof HTMLElement)) {
+    throw new Error(`the orbit map's furniture has no ${label} value`);
+  }
+  return value;
+}
+
 /** Where each of the pinned binary's stars is drawn on the 400 × 300 canvas at the opening camera. */
 function anchorsOfPinnedBinary() {
   const result = toSystemModel(aSystemSummary(), aSystemTarget().designation);
@@ -208,6 +219,23 @@ describe("SystemView's requests", () => {
     expect(screen.getByRole("application", { name: "Orbit map, stale" })).toBeInTheDocument();
     expect(within(mapPanel()).getByRole("heading", { name: "Orbit map stale" })).toBeVisible();
     expect(reading("CLASS")).toBe("DA9.2");
+  });
+
+  it("marks each of the map's furniture values stale, but not the display time (plan 12, P12.T11.d)", async () => {
+    const { socket } = renderView();
+    await answer(socket);
+    await server(() => {
+      socket.close();
+    });
+
+    for (const label of ["RADIUS", "ANGLE", "HEIGHT"]) {
+      expect(furnitureValue(label)).toHaveTextContent(/S\s*stale$/u);
+    }
+    // The display time is the console's own, which `RUN` and `HOLD` move: no slot and no mark.
+    const time = furnitureValue("DISPLAY TIME UT");
+    expect(time).not.toHaveTextContent(/stale/u);
+    expect(time.querySelector(".spatial-reading__stale-slot")).toBeNull();
+    expect(time.parentElement).toHaveClass("spatial-reading--own");
   });
 
   it("reads a system not yet born as NOT YET FORMED, drawing nothing", async () => {

@@ -13,8 +13,10 @@ import { type CameraAngles, PRESETS, project, viewBasis } from "./camera";
 import { easeOut, TRANSITION_MS, tweenCamera } from "./transition";
 import { localFrameAt, planeFrame } from "../geometry/frame";
 import type { PointMark, SpatialScene } from "./marks";
+import type { SpatialMode } from "./ModeReading";
 import type { ScaleUnit } from "./scale";
 import { SpatialView, type SpatialViewProps } from "./SpatialView";
+import { stylesheetRule } from "../test/stylesheet";
 import { textSizeRem } from "./labels";
 import { add, dot, scale, vec3, type Vec3 } from "../geometry/vec3";
 import { statusLine } from "../test/statusLine";
@@ -1483,6 +1485,205 @@ describe("SpatialView's scale bar, frame, centre and time", () => {
 
     expect(readout("ANGLE")).toBe("—");
     expect(screen.getByText("—")).toHaveClass("readout__missing");
+  });
+});
+
+/** The observer the furniture's tests observe from, written as the centre is. */
+const OBSERVED_FROM: SpatialMode = {
+  name: "OBSERVED FROM",
+  from: [
+    { label: "RADIUS", value: "10,000.0", unit: "ly", widthCh: 9 },
+    { label: "ANGLE", value: "036.9°", unit: "", widthCh: 6 },
+    { label: "HEIGHT", value: "-12.3", unit: "ly", widthCh: 9 },
+  ],
+};
+
+/** A centre on the galactic axis, whose `ANGLE` is missing. */
+const CENTRE_ON_AXIS: SpatialViewProps["centre"] = [
+  { label: "RADIUS", value: "0.0", unit: "ly", widthCh: 9 },
+  { label: "ANGLE", value: null, unit: "", widthCh: 6 },
+  { label: "HEIGHT", value: "+100.0", unit: "ly", widthCh: 9 },
+];
+
+/** The view's furniture, the row under its canvas, which its `FRAME` reading opens. */
+function furniture(): HTMLElement {
+  const row = screen.getByText("FRAME", { selector: "dt" }).closest(".spatial-view__furniture");
+  if (!(row instanceof HTMLElement)) {
+    throw new Error("the view has no furniture");
+  }
+  return row;
+}
+
+/** A reading's value in the furniture, by its term's label, the `n`th where the label repeats. */
+function furnitureValue(label: string, n = 0): HTMLElement {
+  const value = screen.getAllByText(label, { selector: ".spatial-view__furniture dt" })[n]
+    ?.nextElementSibling;
+  if (!(value instanceof HTMLElement)) {
+    throw new Error(`the furniture has no ${label} value`);
+  }
+  return value;
+}
+
+/** A value's stale slot, or `null` where it has none. */
+function slotOf(value: HTMLElement): Element | null {
+  return value.querySelector(":scope > .spatial-reading__stale-slot");
+}
+
+describe("SpatialView's stale furniture, one S per value (plan 12, P12.T11.d)", () => {
+  function setup(props: Partial<SpatialViewProps> = {}): void {
+    fakeFramesAndTimeouts();
+    stubLayout(400, 300);
+    stubCanvas();
+    render(viewOf(props));
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("trails an S after each of the centre's values and the time while stale", () => {
+    setup({ stale: true });
+
+    for (const label of ["RADIUS", "ANGLE", "HEIGHT", "UT"]) {
+      expect(slotOf(furnitureValue(label))).toHaveTextContent(/^S\s*stale$/u);
+    }
+  });
+
+  it("trails an S after each of the observer's values in observed mode", () => {
+    setup({ stale: true, mode: OBSERVED_FROM });
+
+    for (const label of ["RADIUS", "ANGLE", "HEIGHT"]) {
+      // The observer's are the second of each label, nested in the mode's value.
+      expect(slotOf(furnitureValue(label, 1))).toHaveTextContent(/^S\s*stale$/u);
+    }
+    // The centre's three, the time and the observer's three: seven marks, and no others.
+    expect(screen.getAllByText("stale")).toHaveLength(7);
+  });
+
+  it("marks neither the frame's name nor the mode's name, which are words", () => {
+    setup({ stale: true, mode: OBSERVED_FROM });
+
+    expect(furnitureValue("FRAME")).toHaveTextContent(/^GALACTIC$/u);
+    expect(furnitureValue("MODE").firstChild?.textContent).toBe("OBSERVED FROM");
+  });
+
+  it("keeps an em dash's slot empty while stale", () => {
+    setup({ stale: true, centre: CENTRE_ON_AXIS });
+
+    expect(furnitureValue("ANGLE")).toHaveTextContent(/^—$/u);
+    expect(slotOf(furnitureValue("ANGLE"))).toBeEmptyDOMElement();
+  });
+
+  it("marks nothing in the scale bar, which is the camera's", () => {
+    setup({ stale: true, mode: OBSERVED_FROM });
+
+    expect(within(scaleBarElement()).queryByText("stale")).not.toBeInTheDocument();
+  });
+
+  it("leaves no mark outside a value's slot, after the scale bar or anywhere else", () => {
+    setup({ stale: true, mode: OBSERVED_FROM });
+
+    for (const mark of furniture().querySelectorAll(".stale-mark")) {
+      expect(mark.closest(".spatial-reading__stale-slot")).not.toBeNull();
+    }
+  });
+
+  it("keeps each value's slot, empty, while live", () => {
+    setup({ mode: OBSERVED_FROM });
+
+    for (const [label, n] of [
+      ["RADIUS", 0],
+      ["ANGLE", 0],
+      ["HEIGHT", 0],
+      ["UT", 0],
+      ["RADIUS", 1],
+      ["ANGLE", 1],
+      ["HEIGHT", 1],
+    ] as const) {
+      const slot = slotOf(furnitureValue(label, n));
+      expect(slot).not.toBeNull();
+      expect(slot).toBeEmptyDOMElement();
+    }
+    expect(screen.queryByText("stale")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["live", false],
+    ["stale", true],
+  ])("gives the camera's AZM and ELV no slot and no mark while %s", (_, stale) => {
+    setup({ stale });
+
+    for (const label of ["AZM", "ELV"]) {
+      const value = screen.getByText(label, { selector: "dt" }).nextElementSibling;
+      expect(value).toHaveTextContent(/^[+\-\d]+°$/u);
+      expect(value?.querySelector(".spatial-reading__stale-slot")).toBeNull();
+    }
+  });
+
+  it("stands the scale bar after the time and before the mode, in a dl of its own", () => {
+    setup({ mode: OBSERVED_FROM });
+
+    const time = furnitureValue("UT").parentElement;
+    const mode = furnitureValue("MODE").closest("dl");
+    const bar = scaleBarElement();
+    if (time === null || mode === null) {
+      throw new Error("the furniture has no time or no mode");
+    }
+    expect(time.compareDocumentPosition(bar)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(bar.compareDocumentPosition(mode)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(mode).toHaveClass("spatial-view__readings");
+    expect(mode.parentElement).toBe(furniture());
+    expect(mode.children).toHaveLength(1);
+  });
+
+  it("keeps one dl, then the scale bar, on a view with no mode", () => {
+    setup();
+
+    const lists = furniture().querySelectorAll(":scope > dl");
+    expect(lists).toHaveLength(1);
+    expect([...(lists[0]?.querySelectorAll("dt") ?? [])].map((term) => term.textContent)).toEqual([
+      "FRAME",
+      "RADIUS",
+      "ANGLE",
+      "HEIGHT",
+      "UT",
+    ]);
+    expect(lists[0]?.nextElementSibling).toBe(scaleBarElement());
+  });
+
+  it("gives a time the console keeps itself no slot and no S while stale, marked as its own", () => {
+    setup({
+      stale: true,
+      time: { label: "DISPLAY TIME UT", value: "+0 yr 000/00:00:00", unit: "", widthCh: 21 },
+      timeIsOwn: true,
+    });
+
+    const time = furnitureValue("DISPLAY TIME UT");
+    expect(time).toHaveTextContent(/^\+0 yr 000\/00:00:00$/u);
+    expect(slotOf(time)).toBeNull();
+    expect(time.parentElement).toHaveClass("spatial-reading--own");
+    // The centre's values are the answer's, and stay marked.
+    expect(slotOf(furnitureValue("HEIGHT"))).toHaveTextContent(/^S\s*stale$/u);
+  });
+
+  it("keeps a time the console keeps itself in --text while the view is stale", () => {
+    expect(stylesheetRule(".spatial-view--stale .spatial-reading--own")).toMatch(
+      /color: var\(--text\);/u,
+    );
+  });
+
+  it("still names its canvas stale", () => {
+    setup({ stale: true, mode: OBSERVED_FROM });
+
+    expect(screen.getByRole("application", { name: "Local chart, stale" })).toBeInTheDocument();
+  });
+
+  it("still mutes the furniture's readings, both lists of them, while stale", () => {
+    expect(
+      stylesheetRule(
+        ".spatial-view--stale :is(.spatial-view__readings, .spatial-view__labels),\n.census-readout--stale,\n.systems-panel--stale :is(.system-list, .system-readout)",
+      ),
+    ).toMatch(/color: var\(--text-muted\);/u);
   });
 });
 

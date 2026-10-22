@@ -19,8 +19,10 @@ import type { ChartSystem, QueryMode } from "../../lib/galaxy/model";
 import { useElementSize } from "../../lib/useElementSize";
 import { LegendReticle } from "../../spatial/LegendReticle";
 import { LegendSymbol } from "../../spatial/LegendSymbol";
+import { FrameReading } from "../../spatial/FrameReading";
+import { ModeReading } from "../../spatial/ModeReading";
 import { type ColourTokens, paint, readTokens, sameTokens, staleTokens } from "../../spatial/paint";
-import type { SpatialReading } from "../../spatial/Reading";
+import { Reading } from "../../spatial/Reading";
 import { SIZE_CLASS_REM } from "../../spatial/symbols";
 import { shownCountText, type StarFilter } from "./chartModel";
 import { CHART_FRAME_NAME, modeReading, timeReading } from "./chartReadings";
@@ -83,7 +85,15 @@ interface CountsProps {
   readonly underHeading?: boolean;
 }
 
-/** A line of the caption's counts, each a label and its value. */
+/**
+ * A line of the caption's counts, each a label and its value.
+ *
+ * @remarks
+ * Every count is read from the answer, so every one is stale with it. Each keeps a slot after its
+ * value for its `S`, 2 ch in its monospaced figures, while the answer is live as well
+ * (`hr-diagram__count-slot`), so that a stale answer moves no count (plan 12, P12.T11.d), as the
+ * chart's readings keep theirs.
+ */
 function Counts({ rows, stale, underHeading = false }: CountsProps) {
   return (
     <dl
@@ -97,95 +107,10 @@ function Counts({ rows, stale, underHeading = false }: CountsProps) {
           <dt>{label}</dt>
           <dd>
             {text}
-            {/* Every count is read from the answer, so every one is stale with it. */}
-            {stale ? <StaleMark /> : null}
+            <span className="hr-diagram__count-slot">{stale ? <StaleMark /> : null}</span>
           </dd>
         </div>
       ))}
-    </dl>
-  );
-}
-
-/** Props of {@link LineReading}. */
-interface LineReadingProps {
-  readonly reading: SpatialReading;
-  readonly stale: boolean;
-}
-
-/**
- * One labelled value of the mode line, written as the chart's `Reading` writes it, in its classes,
- * with a slot after it for the stale mark.
- *
- * @remarks
- * `Reading` itself has no room for the mark, and a mark beside its `div` would stand in the `dl`
- * outside any term's group. The slot is kept in every state, so that the mark's coming moves
- * nothing on the line; a missing value, the em dash, takes none.
- */
-function LineReading({ reading, stale }: LineReadingProps) {
-  return (
-    <div className="field spatial-reading">
-      <dt className="field__label">{reading.label}</dt>{" "}
-      <dd className="field__value">
-        <span className="spatial-reading__value" style={{ minWidth: `${reading.widthCh}ch` }}>
-          {reading.value ?? <span className="readout__missing">—</span>}
-        </span>
-        {reading.unit.length > 0 && reading.value !== null ? (
-          <>
-            {" "}
-            <span className="spatial-reading__unit">{reading.unit}</span>
-          </>
-        ) : null}
-        <span className="hr-diagram__stale-slot">
-          {stale && reading.value !== null ? <StaleMark /> : null}
-        </span>
-      </dd>
-    </div>
-  );
-}
-
-/** Props of {@link ModeLine}. */
-interface ModeLineProps {
-  readonly mode: QueryMode;
-  readonly timeYr: number;
-  readonly stale: boolean;
-}
-
-/**
- * The answer's time and mode, as the chart's furniture writes them (plan 12, P12.T11.b): `UT` and
- * `MODE NOW`; or `FRAME GALACTIC`, `UT` and `MODE OBSERVED FROM`, the observer's `RADIUS`, `ANGLE`
- * and `HEIGHT` nested in it as the furniture nests them.
- *
- * @remarks
- * A `dl` of readings in the furniture's own classes, so that it is set as the furniture is: wrapping
- * between readings and never inside one, each value right-aligned in its slot. The diagram plots no
- * positions, so in `NOW` it names no frame; observed, the frame names the heading the observer's
- * coordinates stand under. Each value read from a stale answer trails its `S` (the guide's "Data
- * states"), the time and each coordinate; the mode's name, a word, does not.
- */
-function ModeLine({ mode, timeYr, stale }: ModeLineProps) {
-  const shown = modeReading(mode);
-  return (
-    <dl className="hr-diagram__readings spatial-view__readings">
-      {mode.kind === "observed" ? (
-        <div className="field spatial-reading">
-          <dt className="field__label">FRAME</dt> <dd>{CHART_FRAME_NAME}</dd>
-        </div>
-      ) : null}
-      <LineReading reading={timeReading(timeYr)} stale={stale} />
-      <div className="field spatial-reading spatial-view__mode">
-        <dt className="field__label">MODE</dt>{" "}
-        {/* A word, as the frame's `GALACTIC` is; the observer's coordinates are figures. */}
-        <dd>
-          {shown.name}
-          {shown.from.length === 0 ? null : (
-            <dl className="spatial-view__observer">
-              {shown.from.map((reading) => (
-                <LineReading key={reading.label} reading={reading} stale={stale} />
-              ))}
-            </dl>
-          )}
-        </dd>
-      </div>
     </dl>
   );
 }
@@ -235,10 +160,13 @@ export interface HrDiagramProps {
  * out (ruling 115.4).
  *
  * Under the plot, before the counts, where the chart's furniture stands, the answer's time and mode
- * are read as the furniture reads them (plan 12, P12.T11.b): `UT` and `MODE NOW`, or `FRAME
- * GALACTIC`, `UT` and `MODE OBSERVED FROM` with the observer, since in observed mode each point is
- * the primary its light shows, when the light left. They follow the answer's mode, never the mode
- * being chosen, and are stale with the answer.
+ * are read as the furniture reads them, in the furniture's own readings (plan 12, P12.T11.b and
+ * P12.T11.d): `UT` and `MODE NOW`, or `FRAME GALACTIC`, `UT` and `MODE OBSERVED FROM` with the
+ * observer, since in observed mode each point is the primary its light shows, when the light left.
+ * The diagram plots no positions, so in `NOW` the line names no frame; observed, the frame names
+ * the one the observer's coordinates are given in. The line follows the answer's mode, never the
+ * mode being chosen, and is stale with the answer: the time and each coordinate trail their `S` in
+ * the slot each keeps while live, and the frame's and the mode's names, words, take none.
  *
  * A click selects the point within 1 rem, which selects the system everywhere. The canvas is an
  * image with an accessible name and is not focusable: keyboard access is through the shared list in
@@ -404,7 +332,12 @@ export function HrDiagram({
       <p className="hr-diagram__axis-label hr-diagram__axis-label--x">
         EFFECTIVE TEMPERATURE K, LOG SCALE
       </p>
-      <ModeLine mode={mode} timeYr={timeYr} stale={stale} />
+      {/* In the furniture's own classes too, so that the line is set as the chart's furniture is. */}
+      <dl className="hr-diagram__readings spatial-view__readings">
+        {mode.kind === "observed" ? <FrameReading frameName={CHART_FRAME_NAME} /> : null}
+        <Reading reading={timeReading(timeYr)} stale={stale} />
+        <ModeReading mode={modeReading(mode)} stale={stale} />
+      </dl>
       <Counts rows={plottedRows} stale={stale} />
       <h3 className="hr-diagram__counts-heading">NOT PLOTTED</h3>
       <Counts rows={notPlottedRows} stale={stale} underHeading />

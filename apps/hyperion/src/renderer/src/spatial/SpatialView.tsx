@@ -24,11 +24,11 @@ import {
   type Viewport,
   zoomLimits,
 } from "./camera";
-import { StaleMark } from "../components/StaleMark";
 import { StatusText } from "../components/StatusText";
 import { AxisTriad } from "./AxisTriad";
 import { AXIS_FALLBACK_MESSAGE, CoreArrow } from "./CoreArrow";
 import { buildDrawList, observerBoxPx, type ScreenPoint } from "./drawList";
+import { FrameReading } from "./FrameReading";
 import {
   type BoxPx,
   coreArrowBoxes,
@@ -45,6 +45,7 @@ import {
 import { chooseLabels, markLabelTransform, placeLabels } from "./labels";
 import type { LocalFrame } from "../geometry/frame";
 import type { SpatialScene } from "./marks";
+import { ModeReading, type SpatialMode } from "./ModeReading";
 import { type ColourTokens, paint, readTokens, sameTokens, staleTokens } from "./paint";
 import { pick } from "./pick";
 import { PRESET_CONTROLS, PresetButtons } from "./PresetButtons";
@@ -152,14 +153,6 @@ function viewKeyMove(key: string): CameraMove | null {
   }
 }
 
-/** A display's mode, as its spatial view shows it beside the frame and the time. */
-export interface SpatialMode {
-  /** The mode's name: `NOW` or `OBSERVED FROM`. */
-  readonly name: string;
-  /** Where the mode observes from, written as the centre is; empty for `NOW`. */
-  readonly from: ReadonlyArray<SpatialReading>;
-}
-
 /** Props of {@link SpatialView}. */
 export interface SpatialViewProps {
   /** What to draw, in scene units about the view centre. */
@@ -196,9 +189,17 @@ export interface SpatialViewProps {
   /** The time the scene shows, labelled with its time system: `UT +0.00 yr`. */
   readonly time: SpatialReading;
   /**
-   * The display's mode, shown after the frame, the centre and the time, as the guide asks of a
-   * display with more than one (plan 12, P12.T11): `NOW`, or `OBSERVED FROM` and the observer's
-   * coordinates. None when absent, as on a display with the one mode.
+   * Whether {@link time} is one the console keeps itself, as the orbit map's display time is, which
+   * `RUN` and `HOLD` move, rather than the time the scene's source gave: it is then never stale,
+   * taking no slot and no `S`, and its value stays in `--text` while the view is stale (plan 12,
+   * P12.T11.d). The source's time when absent, as on the star chart.
+   */
+  readonly timeIsOwn?: boolean | undefined;
+  /**
+   * The display's mode, shown after the frame, the centre, the time and the scale bar, as the guide
+   * asks of a display with more than one (plan 12, P12.T11 and P12.T11.d): `NOW`, or
+   * `OBSERVED FROM` and the observer's coordinates. None when absent, as on a display with the one
+   * mode.
    */
   readonly mode?: SpatialMode | undefined;
   /**
@@ -217,7 +218,10 @@ export interface SpatialViewProps {
   readonly accessibleName: string;
   /**
    * Whether the scene is a snapshot its source no longer backs, as after the link is lost: it is
-   * then drawn in `--text-muted` with a trailing `S`, the guide's stale state.
+   * then drawn and read in `--text-muted`, the guide's stale state, and each value of the furniture
+   * the source gave, the centre's, the time's and the observer's, trails its `S` in a slot it keeps
+   * while live (plan 12, P12.T11.d). The frame's and the mode's names and the scale bar, which is
+   * the camera's, take none.
    */
   readonly stale: boolean;
   /** Called with the mark the operator picks on the canvas. */
@@ -251,12 +255,15 @@ export interface SpatialViewProps {
  *
  * Around the canvas, as the guide's 3D conventions require: the azimuth and elevation (`AZM 030°`,
  * `ELV +30°`), changing at most four times a second and not announced as they change; over the
- * canvas, the axis triad, the core arrow, a 1-2-5 scale bar, and the labels of the chosen marks
- * and of the spheres and rings, all DOM text, since the canvas carries none (D15); and below it,
- * in the same place on every spatial view, the frame, the centre and the time, and after them the
- * mode where the display has one (`MODE NOW`, or `MODE OBSERVED FROM` and where from). The labels are
- * hidden from assistive technology, since the list and the readout beside the view carry the same
- * text. The canvas takes focus and is described by the visible key legend.
+ * canvas, the axis triad, the core arrow, and the labels of the chosen marks and of the spheres and
+ * rings, all DOM text, since the canvas carries none (D15); and below it, in the same place on
+ * every spatial view, the frame, the centre and the time, then a 1-2-5 scale bar, and after it the
+ * mode where the display has one (`MODE NOW`, or `MODE OBSERVED FROM` and where from), in a `dl`
+ * of its own (plan 12, P12.T11.d). While the view is stale each value there that the scene's
+ * source gave, the centre's, the time's and the observer's, trails its own `S`, in a slot each
+ * keeps while live, so that nothing moves as the marks come. The labels are hidden from assistive
+ * technology, since the list and the readout beside the view carry the same text. The canvas takes
+ * focus and is described by the visible key legend.
  *
  * The camera, the plane, the grid, the stalks, the fill rule and the preset views all follow
  * `scene.frame`. The triad and the core arrow follow `axes` where it is given, and so does the
@@ -272,6 +279,7 @@ export function SpatialView({
   frameName,
   centre,
   time,
+  timeIsOwn = false,
   mode,
   coreDistance,
   axes,
@@ -620,29 +628,11 @@ export function SpatialView({
       </div>
       <div className="spatial-view__furniture">
         <dl className="spatial-view__readings">
-          <div className="field spatial-reading">
-            <dt className="field__label">FRAME</dt> <dd>{frameName}</dd>
-          </div>
+          <FrameReading frameName={frameName} />
           {centre.map((reading) => (
-            <Reading key={reading.label} reading={reading} />
+            <Reading key={reading.label} reading={reading} stale={stale} />
           ))}
-          <Reading reading={time} />
-          {mode === undefined ? null : (
-            <div className="field spatial-reading spatial-view__mode">
-              <dt className="field__label">MODE</dt>{" "}
-              {/* A word, as the frame's `GALACTIC` is; the observer's coordinates are figures. */}
-              <dd>
-                {mode.name}
-                {mode.from.length === 0 ? null : (
-                  <dl className="spatial-view__observer">
-                    {mode.from.map((reading) => (
-                      <Reading key={reading.label} reading={reading} />
-                    ))}
-                  </dl>
-                )}
-              </dd>
-            </div>
-          )}
+          {timeIsOwn ? <Reading reading={time} own /> : <Reading reading={time} stale={stale} />}
         </dl>
         {camera === null || viewport === null ? null : (
           <ScaleBar
@@ -652,7 +642,14 @@ export function SpatialView({
             units={scaleUnits}
           />
         )}
-        {stale ? <StaleMark /> : null}
+        {/* After the scale bar, so that on the compact chart the time and the bar share a line,
+            which observed mode's long reading then follows on a line of its own (plan 12,
+            P12.T11.d's ruling). */}
+        {mode === undefined ? null : (
+          <dl className="spatial-view__readings">
+            <ModeReading mode={mode} stale={stale} />
+          </dl>
+        )}
         {shownAxes.onAxis ? (
           <p className="spatial-view__axis-note">
             <StatusText text={AXIS_FALLBACK_MESSAGE} />

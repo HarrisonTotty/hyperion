@@ -18,7 +18,7 @@ import type { CentreLy, QueryMode } from "../../lib/galaxy/model";
 import { AXIS_TOLERANCE_LY, cylindrical } from "../../geometry/frame";
 import { vec3 } from "../../geometry/vec3";
 import type { SpatialReading } from "../../spatial/Reading";
-import type { SpatialMode } from "../../spatial/SpatialView";
+import type { SpatialMode } from "../../spatial/ModeReading";
 
 /** The frame the chart's places are given in, as the furniture's `FRAME` names it. */
 export const CHART_FRAME_NAME = "GALACTIC";
@@ -91,8 +91,9 @@ export function timeReading(timeYr: number): SpatialReading {
 }
 
 /**
- * The mode of the chart on show, as its furniture writes it beside the frame and the time (plan 12,
- * P12.T11): `NOW`, or `OBSERVED FROM` and the observer, written as the centre is.
+ * The mode of the chart on show, as its furniture writes it after the frame, the time and the scale
+ * bar (plan 12, P12.T11 and P12.T11.d): `NOW`, or `OBSERVED FROM` and the observer, written as the
+ * centre is.
  *
  * @param mode - The mode the answer on show was given in, as `answeredMode` reads it, never the
  * mode being chosen.

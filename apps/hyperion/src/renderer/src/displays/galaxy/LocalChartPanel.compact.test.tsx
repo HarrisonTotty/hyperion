@@ -38,13 +38,19 @@ describe("the compact LOCAL CHART page's room", () => {
     );
   });
 
-  it("sets the furniture's readings 0.75rem apart, so that UT ends the first line", () => {
+  it("sets the furniture's readings 0.75rem apart, so that it keeps two lines in NOW and three observed", () => {
     expect(
       stylesheetRule(".local-chart--compact .spatial-view__readings > .spatial-reading"),
     ).toMatch(/margin-right: 0\.75rem;/u);
     expect(stylesheetRule(".local-chart--compact .spatial-view__observer")).toMatch(
       /gap: 0 0\.75rem;[^}]*margin-left: 0\.75rem;/u,
     );
+  });
+
+  it("sets the scale bar the readings' 0.75rem before the mode that follows it (P12.T11.d)", () => {
+    const bar = stylesheetRule(".local-chart--compact .spatial-view__furniture > .scale-bar");
+    expect(bar).toMatch(/display: inline-flex;/u);
+    expect(bar).toMatch(/margin-right: 0\.75rem;/u);
   });
 
   it("runs the legend on as one text at the furniture's line height", () => {

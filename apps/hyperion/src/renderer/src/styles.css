@@ -1466,13 +1466,24 @@ body {
 
 /*
  * A chart the link no longer backs is a stale snapshot: every value read from the answer is muted,
- * as the guide's "Data states" asks, and the trailing `S` in each block says so in a mark as well.
- * The camera's own angles and the controls are live and are left alone.
+ * as the guide's "Data states" asks, and a trailing `S` says so in a mark as well: in the view's
+ * furniture one after each value, in the slot each keeps while live (plan 12, P12.T11.d), and in
+ * the census, the list and the readout one in each block. The camera's own angles, a time the
+ * console keeps itself and the controls are live and are left alone.
  */
 .spatial-view--stale :is(.spatial-view__readings, .spatial-view__labels),
 .census-readout--stale,
 .systems-panel--stale :is(.system-list, .system-readout) {
   color: var(--text-muted);
+}
+
+/*
+ * A time the console keeps itself, the orbit map's display time, which `RUN` and `HOLD` move, is
+ * live while the answer it is shown with is stale: its value takes no `S` and stays in `--text`.
+ * Its label and unit stay muted, as every label and unit is (plan 12, P12.T11.d's ruling).
+ */
+.spatial-view--stale .spatial-reading--own {
+  color: var(--text);
 }
 
 /* The accent marking what is within the drive range is not live either once the answer is stale. */
@@ -1588,10 +1599,14 @@ body {
  * 12's mode row (P12.T11) made it 2rem taller, and observed mode puts the observer in the furniture
  * and two entries in the legend under the stage. So the angles and keys share a row, the column's
  * choices drop their bottom margin, the link's reason stands beside QUERY RADIUS, the readings sit
- * closer so that `UT` ends the first furniture line and the observer takes the line `UT` left, and
- * the legend runs on as one text (look-72's ruling). Measured hidden at 1280 x 720, 100%: in `NOW`
- * the stage is 258 px tall and the column ends 26 px above its foot; in `OBSERVED` the stage is
- * 240 px, ruling 134.9's 15rem, and the column ends 8 px above its foot. A refused entry stands in
+ * closer so that the furniture keeps two lines in `NOW` and three in `OBSERVED`, and the legend
+ * runs on as one text (look-72's ruling). Measured hidden at 1280 x 720, 100%: in `NOW` the stage
+ * is 258 px tall and the column ends 26 px above its foot; in `OBSERVED` the stage is 240 px,
+ * ruling 134.9's 15rem, and the column ends 8 px above its foot. The stale slots after the
+ * furniture's values (P12.T11.d) add no line, by reckoning, since the scale bar follows the time
+ * and the mode the scale bar: the frame and the centre fill the first line, the time, the scale bar
+ * and in `NOW` the mode the second, and observed mode's `MODE OBSERVED FROM` and the observer the
+ * third (plan 12's ruling of 2026-10-22, recorded under P12.T11.d). A refused entry stands in
  * its field's hint's place, on the field's own row, and never wraps, and the mode and the command
  * that moves the observer keep one row while a chart is on show, so that no refusal, nor two at
  * once, adds a line to the column (P12.T11.c).
@@ -1670,15 +1685,20 @@ body {
   margin-top: 0.25rem;
 }
 
-/* The frame, the centre, the time and the scale bar run on as one text, so that none waits a line. */
+/*
+ * The frame, the centre, the time, the scale bar and the mode run on as one text, so that none
+ * waits a line.
+ */
 .local-chart--compact .spatial-view__readings {
   display: inline;
 }
 
 /*
- * 0.75rem apart, so that `UT` ends the first line after the frame and the centre's fixed slots (it
- * reaches 823 px of the page's 831 at 1280 x 720, where 1rem wrapped it), and observed mode's
- * `MODE OBSERVED FROM` and the observer take its line rather than add one.
+ * 0.75rem apart, so that the frame and the centre, each value with its stale slot, fill the first
+ * line (`HEIGHT` ends near 718 px of the page's 831 at 1280 x 720; with `UT` the five readings come
+ * to 802 px with no gap, past the line's 798), the time, the scale bar and `MODE NOW` share the
+ * second, and observed mode's `MODE OBSERVED FROM` and the observer, near 729 px, take the third
+ * (P12.T11.d).
  */
 .local-chart--compact .spatial-view__readings > .spatial-reading {
   display: inline-flex;
@@ -1690,8 +1710,10 @@ body {
   margin-left: 0.75rem;
 }
 
+/* The scale bar stands between the time and the mode, the readings' own 0.75rem from the mode. */
 .local-chart--compact .spatial-view__furniture > .scale-bar {
   display: inline-flex;
+  margin-right: 0.75rem;
   vertical-align: bottom;
 }
 
@@ -1955,20 +1977,20 @@ body {
 
 /*
  * The answer's time and mode under the plot, where the chart's furniture stands (plan 12,
- * P12.T11.b). The line takes the furniture's own classes as well, so that it is set as the
+ * P12.T11.b). The line is the furniture's own readings in its own classes, so that it is set as the
  * furniture is: wrapping between readings and never inside one, each value right-aligned in its
- * slot.
+ * slot and trailed by its stale slot (P12.T11.d).
  */
 .hr-diagram__readings {
   flex: none;
 }
 
 /*
- * Room after each value for its stale `S`, a space and the mark in the value's monospaced figures,
- * kept while the answer is live, so that the mark's coming moves nothing on the line (the guide's
- * "Numbers": a field is sized for its longest value and its status marks).
+ * Room after each count for its stale `S`, as after each reading (`.spatial-reading__stale-slot`):
+ * a space and the mark in the count's monospaced figures, kept while the answer is live, so that a
+ * stale answer moves no count (P12.T11.d).
  */
-.hr-diagram__stale-slot {
+.hr-diagram__count-slot {
   display: inline-block;
   min-width: 2ch;
   text-align: right;
@@ -2932,8 +2954,21 @@ body {
 }
 
 /*
+ * Room after a value read from a source that can go stale, for the guide's trailing `S`: a space
+ * and the mark in the value's monospaced figures, after its unit. It is kept while the value is
+ * live, so that the mark's coming moves nothing after it (the guide's "Numbers": a field is sized
+ * for its longest value and its status marks), and the em dash keeps it too (plan 12, P12.T11.d).
+ */
+.spatial-reading__stale-slot {
+  display: inline-block;
+  min-width: 2ch;
+  text-align: right;
+}
+
+/*
  * Below the view, in the same place on every spatial display: the frame, the centre and the time,
- * the scale bar, and on the galactic axis why the directions are undefined.
+ * the scale bar, the mode where the display has one, and on the galactic axis why the directions
+ * are undefined.
  */
 .spatial-view__furniture {
   display: flex;

@@ -242,6 +242,21 @@ describe("the HR DIAGRAM page's mode (plan 12, P12.T11.b)", () => {
     expect({ mode: valueOn(hrPage(), "MODE"), time: valueOn(hrPage(), "UT") }).toEqual(chart);
   });
 
+  it("reads the same stale time and observer, each with its S, as the chart's furniture (P12.T11.d)", async () => {
+    const rendered = renderDisplay();
+    await observeOffAxis(rendered);
+    await server(() => {
+      rendered.socket.close();
+    });
+    const chart = { mode: valueOn(chartPage(), "MODE"), time: valueOn(chartPage(), "UT") };
+    expect(chart.time).toMatch(/^\+0\.00 yr S\s*stale$/u);
+    expect(chart.mode).toMatch(/^OBSERVED FROM.*HEIGHT -12\.0 ly S\s*stale$/u);
+
+    await showPage(rendered, "HR DIAGRAM");
+
+    expect({ mode: valueOn(hrPage(), "MODE"), time: valueOn(hrPage(), "UT") }).toEqual(chart);
+  });
+
   it("keeps the answer's OBSERVED FROM while NOW is chosen and not yet answered", async () => {
     const rendered = renderDisplay();
     await observeOffAxis(rendered);

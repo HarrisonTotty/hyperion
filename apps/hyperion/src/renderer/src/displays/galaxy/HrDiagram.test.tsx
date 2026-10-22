@@ -96,6 +96,11 @@ function count(label: string): string {
   return screen.getByText(label, { selector: "dt" }).nextElementSibling?.textContent ?? "";
 }
 
+/** The last element of a count's value: its stale slot. */
+function countSlot(label: string): Element | null {
+  return screen.getByText(label, { selector: "dt" }).nextElementSibling?.lastElementChild ?? null;
+}
+
 /**
  * The text of every label matching `selector`, in document order: by class, since the labels are
  * hidden from assistive technology (the canvas's name stands for the picture) and their order along
@@ -279,6 +284,36 @@ describe("HrDiagram", () => {
     }
   });
 
+  it("keeps an empty slot after every count while the answer is live (plan 12, P12.T11.d)", () => {
+    renderDiagram({ starFilter: "living" });
+
+    // jsdom lays nothing out, so the room is held by the slot after each count and its rule.
+    for (const label of [
+      "SYSTEMS",
+      "PLOTTED",
+      "OFF SCALE",
+      "NEUTRON STAR",
+      "BLACK HOLE",
+      "NO REMNANT",
+      "NOT YET FORMED",
+    ]) {
+      const slot = countSlot(label);
+      expect(slot).toHaveClass("hr-diagram__count-slot");
+      expect(slot).toBeEmptyDOMElement();
+    }
+    expect(stylesheetRule(".hr-diagram__count-slot")).toMatch(
+      /display: inline-block;[^}]*min-width: 2ch;[^}]*text-align: right;/u,
+    );
+  });
+
+  it("puts each count's stale mark in its slot", () => {
+    renderDiagram({ stale: true });
+
+    for (const label of ["PLOTTED", "OFF SCALE", "NEUTRON STAR", "NOT YET FORMED"]) {
+      expect(countSlot(label)).toHaveTextContent(/^S\s*stale$/u);
+    }
+  });
+
   it("selects the system whose point is clicked", async () => {
     const user = userEvent.setup();
     const { onSelect } = renderDiagram();
@@ -447,10 +482,10 @@ describe("HrDiagram's mode line (plan 12, P12.T11.b)", () => {
     // jsdom lays nothing out, so the room is held by the slot after each value and its rule.
     for (const label of ["UT", "RADIUS", "ANGLE", "HEIGHT"]) {
       expect(lineTerm(label).nextElementSibling?.lastElementChild).toHaveClass(
-        "hr-diagram__stale-slot",
+        "spatial-reading__stale-slot",
       );
     }
-    expect(stylesheetRule(".hr-diagram__stale-slot")).toMatch(/min-width: 2ch;/u);
+    expect(stylesheetRule(".spatial-reading__stale-slot")).toMatch(/min-width: 2ch;/u);
   });
 
   it("mutes the line with the rest of a stale diagram", () => {
