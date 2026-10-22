@@ -2646,7 +2646,8 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
     the guard, the primary keeping the not-modelled note while no open instrument's line shows it.
     By hand, hidden, never on `:0`, with the lane's `page/run.sh` (capped, through the GPU lock): at
     1280 × 720, none, one and two instruments, `PRECISION TEST` and `PHASE TEST`, wireframe and
-    photorealistic; at 1920 × 1080 and at the full layout's least box (98.5 × 45.75rem), two
+    photorealistic; at 1920 × 1080 and at the full layout's least box (98.5 × 45.75rem then;
+    99 × 49.5rem since R06.T13.j and R10.T12.a), two
     instruments; in each, every block's line in each state as composed, passing when no block runs
     past the stage and nothing overflows, each block's spare recorded beside the final's; and a
     server-scene capture, if the harness can reach one. R07.T19.f was editing `ViewLabelBlock.tsx`
@@ -3937,7 +3938,8 @@ cube, peak, faceSizePx, path }`, and `bakeSkyCubeOnCpu`, `releaseBakedCube`, `pa
     block beside the slots set the 13ch run 2.5 px past its plate. Boxes from 98.5 to 99 rem
     (about 8 px of window width) are compact, which already serves every narrower box.
     `PRIMARY_LABEL_MIN_REM` stays 14. Stated limit: below the guide's least size the limit's run
-    may pass its plate. R07's 98.5 rem is corrected by the desktop.
+    may pass its plate. R07's 98.5 rem is corrected by the desktop. _Done: R07.T19.b's entry gives
+    99rem._
   - **The leading dot on `STARS` readings** (Q3, ruled for this reading alone). `readingParts`
     takes `ReadingOptions.dotsLead`, off by default. With it on, each middle dot is set at the
     head of the part after it, inside that part's box, on one nowrap run with the part's first

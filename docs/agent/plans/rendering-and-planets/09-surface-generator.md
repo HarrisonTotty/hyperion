@@ -892,13 +892,19 @@ every timing below is provisional and is re-measured on a quiet machine by the t
      month"._
    - Each month's record is the mean over its span of the six-hour steps of the converged orbit.
 
-   Plan 14's figures are imposed on the component that defines
-   each: the equator–pole contrast by setting the annual field's P₂(sin φ) coefficient to −⅔ of
-   it, since the contrast T(0°) − T(90°) is −(3/2) T₂ (the sign carries a warm pole; T10's science
-   review, 2026-10-09), a locked world's day–night contrast by P₁(cos γ), and the mean by a
-   constant added last to the surface temperature after the lapse term; ice goes coldest first, by
-   the cell's annual maximum, until its area matches plan 14's fraction, which also places a locked
-   nightside and an equatorial belt. Precipitation stays labelled `PrecipitationSource::Heuristic`:
+   Plan 14's figures are imposed on the field as plan 14 defines them
+   (decision-r09-t13d-normalisation). The equator–pole contrast is the annual field's T(0°) less
+   its poles' mean, by a correction shaped like P₂(sin φ). On a field shaped like P₂ that sets the
+   coefficient to −⅔ of the contrast, since T(0°) − T(90°) is −(3/2) T₂ (the sign carries a warm
+   pole; T10's science review, 2026-10-09). A locked world's day–night contrast is the μ-weighted
+   means of its day and night, by P₁(cos γ), whose coefficient is then ¾ of it. The mean is a
+   constant: added last to the surface temperature after the lapse term on the energy-balance and
+   isothermal models, and solved with the two contrasts on the radiative model. The radiative
+   model's figures are brightness temperatures of its emitted flux, less the night floor's for the
+   mean and the equator–pole contrast, as plan 14's are; the other models' are arithmetic. Ice goes
+   per condensate, most volatile first, on the cells coldest by their annual radiative mean,
+   ⟨T⁴⟩^¼, until its area matches plan 14's fraction. That also places a locked nightside and an
+   equatorial belt. Precipitation stays labelled `PrecipitationSource::Heuristic`:
    Siler et al.'s Hadley-cell partition gives E − P with the rain band on the energy-flux equator
    (our extension centres it there each month, capped at the ascending branch's latitude after
    Guendelman and Kaspi 2019, ApJ 881, 67, doi:10.3847/1538-4357/ab2a06 (arXiv:1906.05748), §4.4,
@@ -2126,24 +2132,37 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
     `just fit-check`; `just gen-surface` leaves `hyperion_surface_bg.wasm` unchanged byte for
     byte.
 - **R09.T7.g The plains from ray-traced surfaces** (a T7 follow-up; science-r09-drainage.md
-  §8.13; drafted). After T7.f. It is not needed before the 23 → 24 batch, but lands before any
-  caller relies on supervolatile or rough-plains cold traps.
+  §8.13; signed off 2026-10-19, `signoff-12.md` item 13). After T7.f, after RM5's close. Until it
+  lands the plains' two fits stand, labelled (Risks, "Cold traps"): they match the ray traces at
+  σ_s 5.7°, Hayne et al.'s lunar fit and the slope P14.T51.f's tests take, and on rougher plains
+  they overstate cold-trap area (water up to 2.9 times at 27°, CO₂ up to 9 times at 11°) and, at
+  D 10–20°, permanent shadow (up to 15 times). R09.T13.f places its ice with that overstatement.
+  Landing later, T7.g moves P14.T51.f's published areas and R09.T16's goldens, so it rides a
+  generator bump.
   - **The table:** a new `hyperion-fit` task, `rough_plains_cold_traps`, ray traces Gaussian
     surfaces built as Hayne et al. 2021's Methods D builds them:
     - random phases on the task's own seeded stream;
     - Fourier amplitudes |k|^−(1+H), H 0.9, between two cut-offs;
-    - heights scaled to a directional RMS slope w; periodic; horizons by rays at fixed azimuths; a
-      point star;
-    - each permanently shadowed pixel's peak absorbed flux from the sunlit terrain it sees.
+    - heights scaled to a directional RMS slope w; periodic (Hayne et al. strip a margin instead);
+      horizons by rays at fixed azimuths; a point star;
+    - each permanently shadowed pixel's peak irradiance from the sunlit facets it sees (their
+      direct flux weighted by view factor), to first order, as §8.13's tracer computes it, with no
+      albedo or emissivity in it.
 
-    Over w 0.05–0.6, the colatitude and D = δ + α, it tabulates the permanent shadow and the
-    shares of it whose peak absorbed flux lies below fixed fractions of S sin e.
+    Over w 0.05–1 (`Terrain`'s 45°), in colatitude ÷ w and D ÷ w (D = δ + α) so that a slope
+    below 0.05 reads the 0.05 slice, it tabulates the permanent shadow and the shares of it whose
+    peak irradiance lies below fixed fractions of S sin e.
 
   - **Its use:** `cold_trap`'s plains read it in place of the half-normal bowls,
-    `PLAINS_DEPTH_SCALE` and `PLAINS_SURROUNDINGS`. The threshold's flux, less the heat flow's,
-    over S sin e picks the share.
-  - _Tests:_ its instantaneous shadow is within 10% of Smith 1967's at sun elevations up to 4°. It
-    reproduces science-r09-drainage.md §8.13's ray-traced bands within their surfaces' spread.
+    `PLAINS_DEPTH_SCALE` and `PLAINS_SURROUNDINGS`. The share is picked by εσT⁴ at the
+    threshold, less the heat flow, over (1 − A)(A + ε) S sin e, the body's own A and ε: the
+    shadow's absorbed flux to first order (the lit facets' scattered light and their thermal
+    emission). None is cold where that is not positive.
+  - _Tests:_ its instantaneous shadow is within 15% of Smith 1967's at sun elevations up to 4° (the
+    science check's tracer, 2° azimuths: 12%; Hayne et al.'s, 1°: 5%). Its permanent shadow is
+    within the ray-traced surfaces' spread at σ_s 5.7° and 16.7°, and within 15% at 11.3° and
+    26.6°; its water cold traps are within 15% of §8.13's, and its CO₂ within a factor of two. A
+    body of another albedo and emissivity reads the same table.
     T7.d's band, Ceres and CO₂ tests hold.
 - **R09.T7.h The kept craters' sharpening in the closed forms** (a T7 follow-up, after R10.T5;
   decision-r10-t5-closed-forms.md). `synth/craters.rs`: the small craters' closed forms count what
@@ -2672,7 +2691,14 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   its months differ.
 - **R09.T13.c The other regimes.** `steps/climate/{airless,isothermal}.rs`: radiative equilibrium
   with thermal inertia for airless and thin-atmosphere worlds, and the isothermal surface for a
-  Venus. On a locked lava world, cells above the transition temperature of their own crust entry
+  Venus. _As built since P14.T54.a, the radiative model's Γ is the record's
+  (`CoarseInputs::ground_inertia_j_per_m2_k_sqrt_s`): P14.T49.j's law at the crust's lid,
+  `substance::thermal::reference_regolith_thermal_inertia` (the lid's family's reference form),
+  at the body's equilibrium temperature, with P14.T24.a's 55 and 20 J m⁻² K⁻¹ s^−½ as its
+  fallback alone. P14.T49.j's `regolith_thermal_inertia` with `RegolithForm::new` takes a layer
+  of a caller's own porosity and grain size, which no R09 task passes yet (galaxy plan 14's
+  Risks, "Deviations in P14.T54.a, as built", "One Γ")._ On a locked lava world, cells above the
+  transition temperature of their own crust entry
   are melt, from this task's per-cell temperature, not from the global state; the body's
   `melt_area_fraction` is the lid's crust's, the crust P14.T51.c's `lid` names (`CrustInputs::lid`,
   R09.T10.d; science-composition-crusts.md §5, which replaces "the secondary's, or the primary's
@@ -5118,7 +5144,7 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
       and 15 times the ray traces' shadow.
     - Their shadows take the bowl's temperature plus 0.0035 S sin e from beyond the hollow. At
       σ_s 5.7° this matches the ray traces' water and CO₂ cold traps. On rougher plains it still
-      overstates them: water by 1.3, 1.9 and 2.8 times at σ_s 11°, 17° and 27°, and CO₂ by 1.4–9
+      overstates them: water by 1.3, 1.9 and 2.9 times at σ_s 11°, 17° and 27°, and CO₂ by 1.4–9
       times, since a rough surface's shadows see more sunlit terrain. R09.T7.g replaces both fits.
     - Hayne et al.'s eq. 5 overstates a spherical bowl's shadow (off-centre transects are not
       similar), so the exact transect form replaces it.

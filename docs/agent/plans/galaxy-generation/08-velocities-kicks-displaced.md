@@ -2011,7 +2011,7 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
     and `resolve`. A placement golden shows that only if it pins a cell holding such a death. For
     P09.T35: check that one does, or add one (the cell (200, 203, 0) that
     `resolve_refuses_a_record_whose_recent_death_is_claimed` finds is such a cell), so that the
-    switch cannot land without moving a golden.
+    switch cannot land without moving a golden. _Carried into P09.T35's tests (galaxy plan 09)._
   - T13's tests say about one layer-E cell in 28 near the solar circle holds a death in the
     interval (`site.rs`'s `a_record_with_a_site`, and the hook test's comment, now corrected). The
     hook test's 160 cells hold one, and T13's own count around the Sun is 2 in 2,048 cells. The

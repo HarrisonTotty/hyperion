@@ -1280,7 +1280,11 @@ follow-up, which lands before P08.T12.c or this task, whichever is first. It mea
 suite before and after setting the claim, and benches the hook at the Sun-like point, on a young arm
 ridge and at the centre (with P08.T16, which should bench an arm ridge too). Tests: the
 complementarity test of P09.T38 for sampled candidates; a grid star due to die at +1,500 yr is still
-a grid star, dies in place and has a shell when evaluated then.
+a grid star, dies in place and has a shell when evaluated then; and a placement golden that pins a
+layer-E cell holding a death the claim takes, so that setting the claim cannot land without moving
+a golden: check that one does, or add one, such as the cell (200, 203, 0) that
+`resolve_refuses_a_record_whose_recent_death_is_claimed` (`galaxy/placement/resolve.rs`) finds
+(galaxy plan 08's Risks, "Deferred findings (2026-10-13 rule) (P08.T13.b)").
 
 > **From P08.T13: the interval predicate is part of the one shared test** (main's ruling,
 > 2026-10-15).

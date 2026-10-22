@@ -2887,7 +2887,8 @@ and frame follow-ups are two subtasks (decision-r07-t19-layout).
     the legend is one line, and both instruments still open. The camera's worst state (`PHASE TEST`,
     `FOV` at its narrowest, the rate at its lowest, reduced motion), with `CONTROLS` on `PRIMARY` and
     on `INSTRUMENT 1`, at 1280 × 720 and 1920 × 1080 at 150%: the column's `scrollHeight` equal to
-    its `clientHeight` with the 0.5 rem probe. At the full layout's least height, a 732 px box,
+    its `clientHeight` with the 0.5 rem probe. At the full layout's least height, a 732 px box
+    then (792 px, 49.5 rem, since R10.T12.a),
     column A's worst fits with the list at two rows.
   - **Acceptance.** `pnpm --filter hyperion` lint, typecheck and tests; the console-ux skill's
     scripts; `just ci`.
@@ -4301,6 +4302,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     tallest state, which then passes 732 px. T19.d re-measures and raises `FULL_MIN_HEIGHT_REM`,
     within 52.5 rem. Re-measured by T19.d: the note adds 3 px, and the least height stays
     45.75 rem (see "Deviations in T19.d, as built").
+    _Raised since: to 47 rem by P05.T13, and to 49.5 rem by R10.T12.a's `BASELINE` row (galaxy
+    plan 05's "P05.T13" record; R10's Risks, "Deviations in R10.T12.a, as built"), within the
+    52.5 rem bound; `FULL_MIN_HEIGHT_REM`'s TSDoc gives the parts._
   - **Targets' floor in the full layout.** `.view-targets`' 10 rem floor is under two rows when
     the head takes two lines (173 px). From the least height up, the list keeps two rows by
     construction: at the least height, `Targets` stands at 176 px in the camera's worst. Below it
