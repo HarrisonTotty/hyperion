@@ -125,15 +125,16 @@ fn sourceAt(
 }
 
 // The scattering angle between a ray and each of the view's sources, constant along a straight
-// ray, `dirs` the sources' directions in the frame the ray's is given in.
+// ray, `dirs` the sources' directions in the frame the ray's is given in, the kernel's own
+// variable, read in place (R08.T8.d, `viewSourcesAt`).
 fn sourceAngles(
   dir : vec3f,
-  dirs : array<vec3f, MAX_SKY_SOURCES>,
+  dirs : ptr<function, array<vec3f, MAX_SKY_SOURCES>>,
   count : u32,
 ) -> array<ScatteringAngle, MAX_SKY_SOURCES> {
   var angles : array<ScatteringAngle, MAX_SKY_SOURCES>;
   for (var k = 0u; k < count; k++) {
-    angles[k] = scatteringAngle(dir, dirs[k]);
+    angles[k] = scatteringAngle(dir, (*dirs)[k]);
   }
   return angles;
 }
@@ -143,13 +144,22 @@ fn sourceAngles(
 // curves (`viewMarchStep`). `dirs` are the sources' directions and `up` the unit normal the
 // sample's zenith cosines are taken against, both in the march's frame; `bodyDirs` the sources'
 // directions body-fixed, which the lookups take from the sample's start (R08.T6.f).
+//
+// `dirs`, `bodyDirs` and `angles` are the kernel's own variables, written once a pixel and read here
+// in place (plan R08, R08.T8.d; `decision-r08-t8-leans.md` section 8). Passed by value, each was
+// copied whole into the invocation's memory at every step, since Tint keeps an array argument
+// indexed by a loop variable in a function-scope variable of its own (the SPIR-V's OpVariable and
+// whole-array OpStore at the callee's entry): on the RTX 3080 that made each step of the ray march
+// about 2.6 times its cost and the sky view's about 3.7 (20.99 ms against 8.13 ms for the
+// atmosphere's passes at 1920 x 1080 from 400 km, read-backs unchanged to the bit). R05.T14's
+// `Medium` by value was the same mechanism.
 fn viewSourcesAt(
   body : OblateBody,
   start : LookupStart,
   up : vec3f,
-  dirs : array<vec3f, MAX_SKY_SOURCES>,
-  bodyDirs : array<vec3f, MAX_SKY_SOURCES>,
-  angles : array<ScatteringAngle, MAX_SKY_SOURCES>,
+  dirs : ptr<function, array<vec3f, MAX_SKY_SOURCES>>,
+  bodyDirs : ptr<function, array<vec3f, MAX_SKY_SOURCES>>,
+  angles : ptr<function, array<ScatteringAngle, MAX_SKY_SOURCES>>,
   local : SampleMedium,
 ) -> array<vec3f, MAX_SKY_LIGHT_SLOTS> {
   var shares : array<vec3f, MAX_SKY_LIGHT_SLOTS>;
@@ -158,12 +168,13 @@ fn viewSourcesAt(
   for (var k = 0u; k < count; k++) {
     let source = view.sources[k];
     let slot = skySlotOf(source);
-    let muSun = dot(dirs[k], up);
-    let light = sourceLightAt(body, start, bodyDirs[k], slot);
-    var phased = phasedScatteringOf(local, angles[k]);
+    let muSun = dot((*dirs)[k], up);
+    let light = sourceLightAt(body, start, (*bodyDirs)[k], slot);
+    let angle = (*angles)[k];
+    var phased = phasedScatteringOf(local, angle);
     if (lobes) {
       // The forward lobes' higher orders, at the stored optical depth along the source (R08.T7).
-      phased += lobeOrdersOf(local, angles[k], light.depth);
+      phased += lobeOrdersOf(local, angle, light.depth);
     }
     let one = sourceAt(body, start, light, muSun, slot, local, phased);
     shares[slot] += source.weight.rgb * one;

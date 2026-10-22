@@ -36,7 +36,10 @@
 // camera's s, its horizon split β its own (`oblate.wgsl`'s skyViewColumnOf), and its layer edges at
 // e over the camera's s; each sample's medium at its h* = s h, s at the latitude of the sample's
 // own place on the datum, and its sources through the sliced lookup and the bands
-// (`source.wgsl`), as `tablesCpu.ts`'s oblateSkyViewTexelsTwin marches them.
+// (`source.wgsl`), as `tablesCpu.ts`'s oblateSkyViewTexelsTwin marches them. Changes (plan R08,
+// R08.T8.d; `decision-r08-t8-leans.md` section 8): the sources' directions and angles reach each
+// step by pointer, not in `SkyRay` by value (`viewSourcesAt` in source.wgsl), the arithmetic
+// unchanged.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -56,7 +59,9 @@
 
 // A texel's ray: its column's sphere R_α, the camera's height on it and its point there, the ray's
 // direction in the sky frame and body-fixed, with S of the latter, the camera's place on the sphere,
-// body-fixed, with its S and its ground quadric, the ray's zenith cosine, and the sources' directions in the sky frame and body-fixed with their scattering angles.
+// body-fixed, with its S and its ground quadric, and the ray's zenith cosine. The sources'
+// directions and their scattering angles are the kernel's own variables, read in place by each
+// step (`viewSourcesAt`, R08.T8.d), never held here.
 struct SkyRay {
   bottomM : f32,
   heightM : f32,
@@ -68,20 +73,22 @@ struct SkyRay {
   cameraPlace : vec3f,
   cameraScaled : vec3f,
   cameraQuadric : f32,
-  sources : array<vec3f, MAX_SKY_SOURCES>,
-  bodySources : array<vec3f, MAX_SKY_SOURCES>,
-  angles : array<ScatteringAngle, MAX_SKY_SOURCES>,
 }
 
 // One step of the march, at its midpoint: its height on the column's sphere and the normal there,
 // its body-fixed place, the camera's place on the sphere plus t along the ray, whose datum point
-// gives s; the medium at h* = s h, its sources and their in-scattering.
+// gives s; the medium at h* = s h, its sources and their in-scattering. `sources`, `bodySources`
+// and `angles` are `main`'s, the sources in the sky frame and body-fixed and their scattering
+// angles, written once a texel and read in place (R08.T8.d).
 fn skyViewStep(
   march : ptr<function, ViewMarch>,
   ray : SkyRay,
   body : OblateBody,
   frame : SkyFrame,
   stepAt : MarchStep,
+  sources : ptr<function, array<vec3f, MAX_SKY_SOURCES>>,
+  bodySources : ptr<function, array<vec3f, MAX_SKY_SOURCES>>,
+  angles : ptr<function, array<ScatteringAngle, MAX_SKY_SOURCES>>,
 ) {
   let t = stepAt.tM;
   let p = ray.origin + t * ray.dir;
@@ -100,7 +107,7 @@ fn skyViewStep(
   }
   let local = sampleMediumAt(s * sampleHeightM);
   let start = sampleStartOf(body, place, quadric, sampleHeightM, normal, latitudeNormal, s, local);
-  let shares = viewSourcesAt(body, start, up, ray.sources, ray.bodySources, ray.angles, local);
+  let shares = viewSourcesAt(body, start, up, sources, bodySources, angles, local);
   viewMarchStep(march, local, shares, stepAt.dtM);
 }
 
@@ -140,7 +147,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     sources[k] = vec3f(dot(s, frame.x), dot(s, frame.y), dot(s, frame.z));
     bodySources[k] = s;
   }
-  let angles = sourceAngles(dir, sources, count);
+  var angles = sourceAngles(dir, &sources, count);
 
   let origin = vec3f(0.0, 0.0, r);
   let tMax = shellMaxDistance(bottom, atmosphereM, heightM, viewZenithCos);
@@ -159,7 +166,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
       + lift * dot(scaledNormal, scaledNormal));
   let ray = SkyRay(
     bottom, heightM, viewZenithCos, origin, dir, bodyDir, oblateScaled(body, bodyDir), cameraPlace,
-    oblateScaled(body, cameraPlace), cameraQuadric, sources, bodySources, angles
+    oblateScaled(body, cameraPlace), cameraQuadric
   );
   var march = viewMarchStart();
   // A medium with no layer edge takes R05.T12.e's steps as they were, and declares no walk; the
@@ -168,7 +175,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let edgeCount = min(u32(layerEdges.count.x), MARCH_EDGES_MAX);
   if (edgeCount == 0u) {
     for (var i = 0u; i < samples; i++) {
-      skyViewStep(&march, ray, body, frame, marchStep(split, i));
+      skyViewStep(&march, ray, body, frame, marchStep(split, i), &sources, &bodySources, &angles);
     }
   } else {
     var walk : MarchWalk;
@@ -180,7 +187,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     }
     marchWalkReady(&walk);
     for (var i = 0u; i < samples; i++) {
-      skyViewStep(&march, ray, body, frame, marchWalkStep(&walk, i));
+      skyViewStep(&march, ray, body, frame, marchWalkStep(&walk, i), &sources, &bodySources, &angles);
     }
   }
   textureStore(skyViewOut, id.xy, vec4f(march.luminance, 1.0));

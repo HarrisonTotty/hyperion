@@ -878,7 +878,9 @@ describe("the atmosphere's WGSL", () => {
     expect(source).toMatch(/var<storage, read> terms : array<Term, MAX_TERMS>;/);
     expect(source).toMatch(/var densityTables : texture_2d_array<f32>;/);
     expect(source).toMatch(/var phaseTables : texture_2d_array<f32>;/);
-    expect(source).toMatch(/let angles = sourceAngles\(dir, sources, count\);/);
+    // The sources' directions and angles are the kernel's own variables, read in place by each step
+    // (R08.T8.d).
+    expect(source).toMatch(/var angles = sourceAngles\(dir, &sources, count\);/);
   });
 
   it("keeps the composite's code clear of the medium, which it does not declare", () => {

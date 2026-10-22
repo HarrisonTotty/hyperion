@@ -69,7 +69,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   for (var k = 0u; k < count; k++) {
     sources[k] = view.sources[k].direction.xyz;
   }
-  let angles = sourceAngles(dir, sources, count);
+  var angles = sourceAngles(dir, &sources, count);
   var march = viewMarchStart();
   for (var slice = 0u; slice < slices; slice++) {
     for (var step = 0u; step < perSlice; step++) {
@@ -90,7 +90,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
       }
       let local = sampleMediumAt(s * heightM);
       let start = sampleStartOf(body, place, quadric, heightM, up, latitudeNormal, s, local);
-      let shares = viewSourcesAt(body, start, up, sources, sources, angles, local);
+      let shares = viewSourcesAt(body, start, up, &sources, &sources, &angles, local);
       viewMarchStep(&march, local, shares, dt);
     }
     textureStore(aerialOut, vec3u(id.xy, slice), vec4f(march.luminance, viewMeanTransmittance(march)));

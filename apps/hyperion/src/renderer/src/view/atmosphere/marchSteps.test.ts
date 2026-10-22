@@ -465,10 +465,10 @@ describe("the kernels' WGSL", () => {
       /fn rayMarchWalkStepOf\([^)]*\) -> MarchStep \{\s*if \(evenSky\) \{\s*return marchWalkEvenStep\(walk, i\);\s*\}\s*return marchWalkStep\(walk, i\);/,
     );
     expect(rayMarchWgsl).toMatch(
-      /for \(var i = 0u; i < samples; i\+\+\) \{\s*rayMarchStep\(&march, ray, body, rayMarchStepOf\(split, i, evenSky, warp\)\);/,
+      /for \(var i = 0u; i < samples; i\+\+\) \{\s*rayMarchStep\(&march, ray, body, rayMarchStepOf\(split, i, evenSky, warp\)(, &\w+)*\);/,
     );
     expect(rayMarchWgsl).toMatch(
-      /if \(evenSky\) \{\s*marchWalkEvenReady\(&walk, warp\);\s*\} else \{\s*marchWalkReady\(&walk\);\s*\}\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*rayMarchStep\(&march, ray, body, rayMarchWalkStepOf\(&walk, i, evenSky\)\);/,
+      /if \(evenSky\) \{\s*marchWalkEvenReady\(&walk, warp\);\s*\} else \{\s*marchWalkReady\(&walk\);\s*\}\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*rayMarchStep\(&march, ray, body, rayMarchWalkStepOf\(&walk, i, evenSky\)(, &\w+)*\);/,
     );
     // The sky view and the multiple-scattering kernel keep R05.T12.e's placement.
     for (const wgsl of [skyViewWgsl, multiScatteringWgsl]) {
@@ -496,13 +496,14 @@ describe("the kernels' WGSL", () => {
       expect(wgsl).toMatch(/var<uniform> layerEdges : LayerEdges;/);
       expect(wgsl).toMatch(/let edgeCount = min\(u32\(layerEdges\.count\.x\), MARCH_EDGES_MAX\);/);
       // No edge: R05.T12.e's steps, and no walk declared; edges: the walk, made ready first. The
-      // ray march chooses each step in its loop, its two-sided sky segments' warped (R08.T8).
+      // ray march chooses each step in its loop, its two-sided sky segments' warped (R08.T8). The
+      // sources' directions and angles follow by pointer (R08.T8.d).
       expect(wgsl).toMatch(
-        /if \(edgeCount == 0u\) \{\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(&march, ray, (body, (frame, )?)?(marchStep\(split, i\)|rayMarchStepOf\(split, i, evenSky, warp\))\);/,
+        /if \(edgeCount == 0u\) \{\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(&march, ray, (body, (frame, )?)?(marchStep\(split, i\)|rayMarchStepOf\(split, i, evenSky, warp\))(, &\w+)*\);/,
       );
       expect(wgsl).toMatch(/var walk : MarchWalk;\s*marchWalkStart\(&walk, split\);/);
       expect(wgsl).toMatch(
-        /marchWalkReady\(&walk\);\s*(\}\s*)?for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(&march, ray, (body, (frame, )?)?(marchWalkStep\(&walk, i\)|rayMarchWalkStepOf\(&walk, i, evenSky\))\);/,
+        /marchWalkReady\(&walk\);\s*(\}\s*)?for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(&march, ray, (body, (frame, )?)?(marchWalkStep\(&walk, i\)|rayMarchWalkStepOf\(&walk, i, evenSky\))(, &\w+)*\);/,
       );
     }
     expect(skyViewWgsl).toMatch(/marchWalkCrossSphere\(/);
