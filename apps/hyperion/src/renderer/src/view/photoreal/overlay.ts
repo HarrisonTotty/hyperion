@@ -17,8 +17,21 @@
  * under symbology (Design notes 16 and 17; decision-r07-t16a, item 3; R07.T16.e). Its windows are
  * in no mesh, and hide nothing. The star sprites are left out: the image holds the stars. The
  * occluders stay, so that a mark behind a body or a hull stays hidden.
+ *
+ * A body the frame's plan hands over to its terrain with its survey's coverage mask has its datum
+ * give way over the image as its reference surface does in the image (plan R10, R10.T16.f; R10's
+ * Design note 12): its occluder sphere and its own lines, its limb and graticule, are drawn with
+ * R10.T11's `occluderSphereSurveyed` and `linesSurveyed`, discarded over every cell the mask holds
+ * surveyed ({@link surveyedDatumsOf}), so that no datum line is drawn over a surveyed valley and
+ * the sphere hides no mark in one. There the graticule is not drawn, where the image draws the
+ * terrain in the reference surface's place (main's ruling for R10.T16.f; a graticule on the
+ * terrain's height in the image is not built).
  */
 import type { ColourTokens } from "../../spatial/paint";
+import type { BodyFigure } from "../appearance/fromWire";
+import type { DiscRecord } from "../bodies/discShading";
+import { coverageOf, type MeshBodyPlan } from "../bodies/draw";
+import { rotationColumns } from "../bodies/smoothMesh";
 import type { Viewport } from "../camera/projection";
 import type { FrameSubmission } from "../engine/types";
 import {
@@ -28,7 +41,7 @@ import {
   type OccluderMesh,
   type WireframeDrawList,
 } from "../wireframe/drawList";
-import type { WireframeRenderer } from "../wireframe/submit";
+import type { SurveyedDatumFrame, WireframeRenderer } from "../wireframe/submit";
 import { PHOTOREAL_PASS_LABELS } from "./passes";
 
 /**
@@ -71,6 +84,10 @@ export function overlayDrawList(
  * @param tokens - The tokens the list was built with ({@link overlayDrawList}).
  * @param viewport - The canvas's size, px: the symbology is drawn at the display's resolution,
  *   never at the scene target's internal one.
+ * @param surveyed - The bodies whose datum gives way over their surveyed ground, from the frame's
+ *   plan ({@link surveyedDatumsOf}; plan R10, R10.T16.f): each one's occluder sphere and own lines
+ *   packed as R10.T11's wireframe packs them over its terrain (`packWireframe`'s `surveyed`),
+ *   binding its mask; an empty map draws every datum whole.
  */
 export function overlaySubmission(
   renderer: Pick<WireframeRenderer, "frame">,
@@ -78,10 +95,61 @@ export function overlaySubmission(
   tokens: Pick<ColourTokens, "surface0">,
   camera: DrawCamera,
   viewport: Viewport,
+  surveyed: ReadonlyMap<string, SurveyedDatumFrame>,
 ): FrameSubmission {
   return {
-    ...renderer.frame(overlayDrawList(list, tokens), camera, viewport),
+    // No terrain draws: the photorealistic renderer draws the terrain's depth before the pass.
+    ...renderer.frame(overlayDrawList(list, tokens), camera, viewport, [], { draws: [], surveyed }),
     label: PHOTOREAL_PASS_LABELS.symbology,
     colourLoad: "load",
   };
+}
+
+/** What {@link surveyedDatumsOf} reads of a frame's lit-body plan. */
+export interface SurveyedPlan {
+  /** The bodies drawn as meshes, each with its role (`MeshBodyPlan.role`). */
+  readonly meshes: ReadonlyArray<Pick<MeshBodyPlan, "index" | "role">>;
+  /** The records, by which a mesh names its body (`BodyFramePlan.discs`). */
+  readonly discs: ReadonlyArray<Pick<DiscRecord, "body">>;
+}
+
+/** What {@link surveyedDatumsOf} reads of a lit body (`LitBodyInput`'s). */
+export interface SurveyedBody {
+  readonly id: string;
+  /** Its figure, whose a ÷ c stretches the mask's direction along its pole. */
+  readonly figure: Pick<BodyFigure, "equatorialRadiusM" | "polarRadiusM">;
+}
+
+/**
+ * The datums that give way over a photorealistic frame's image (plan R10, R10.T16.f; R10's Design
+ * note 12), from the frame's plan: each body it hands over to terrain with a coverage mask
+ * (`MeshBodyRole` `handed-over`), read with the mask and in the rotation that discard its reference
+ * surface (`coverageOf` its role, the figure's own), so that its datum gives way exactly where that
+ * surface does; and its figure's equatorial radius over its polar, a ÷ c, by which the mask's direction is
+ * stretched along its pole, as the figure's own discard stretches it (`smoothMesh.wgsl`). None for
+ * a body promoted to a mesh, or handed over without a mask, whose figure is drawn whole.
+ *
+ * @param bodies - The lit bodies the plan was made from, by which each figure is found.
+ */
+export function surveyedDatumsOf(
+  plan: SurveyedPlan,
+  bodies: ReadonlyArray<SurveyedBody>,
+): ReadonlyMap<string, SurveyedDatumFrame> {
+  const figures = new Map(bodies.map((body) => [body.id, body.figure]));
+  const surveyed = new Map<string, SurveyedDatumFrame>();
+  for (const mesh of plan.meshes) {
+    // The mask that discards its figure, or none where the figure is whole.
+    const coverage = coverageOf(mesh.role);
+    const body = plan.discs[mesh.index]?.body;
+    const figure = body === undefined ? undefined : figures.get(body);
+    if (coverage === null || body === undefined || figure === undefined) {
+      continue;
+    }
+    surveyed.set(body, {
+      mask: coverage.mask,
+      axes: rotationColumns(coverage.rotation),
+      stretch: figure.equatorialRadiusM / figure.polarRadiusM,
+    });
+  }
+  return surveyed;
 }

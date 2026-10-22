@@ -10,16 +10,19 @@ import {
   DISC_CELLS_PASS,
   type LitBodyInput,
 } from "../bodies/draw";
+import { rotationColumns } from "../bodies/smoothMesh";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import type { Viewport } from "../camera/projection";
+import { rotation3FromRows } from "../coords/rotation";
 import { TIMING_FRAMES_IN_FLIGHT } from "../engine/webgpu/timing";
-import type { DrawItem, FrameSubmission, RenderView } from "../engine/types";
+import type { DrawItem, FrameSubmission, RenderView, TextureHandle } from "../engine/types";
 import { AU_M } from "../scenes/kept";
 import { BloomChain } from "../post/bloomChain";
 import { histogramParams, histogramWorkgroups } from "../post/histogram";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { limbDistanceM, pixelAngleRad } from "../terrain/handover";
-import { type PhotorealFrame, PhotorealRenderer } from "./renderer";
+import type { SurveyedDatumFrame } from "../wireframe/submit";
+import { type PhotorealFrame, type PhotorealOverlay, PhotorealRenderer } from "./renderer";
 import { PHOTOREAL_PASS_LABELS, SKY_PASS_LABEL } from "./passes";
 
 const VIEWPORT = { widthPx: 64, heightPx: 36 };
@@ -285,6 +288,78 @@ function drawOf(material: string): DrawItem {
   };
 }
 
+/** An empty symbology pass, as `overlaySubmission` labels it. */
+const SYMBOLOGY: FrameSubmission = {
+  label: PHOTOREAL_PASS_LABELS.symbology,
+  viewRotation: new Float32Array(16),
+  projection: new Float32Array(16),
+  draws: [],
+  postProcesses: [],
+};
+
+/** A coverage mask's handle, as `CoverageMask.texture` gives it. */
+const MASK: TextureHandle = { kind: "texture", name: "coverage mask" };
+
+/** A rotation with no axis in common with the galactic ones but z: a quarter turn about it. */
+const QUARTER_TURN = rotation3FromRows([vec3(0, 1, 0), vec3(-1, 0, 0), vec3(0, 0, 1)]);
+
+/**
+ * The frame's planet, oblate (a ÷ c = 1.0034) and turning by {@link QUARTER_TURN}, its relief 4 px
+ * at its limb 10⁸ m off, so that it is handed over to terrain; with its survey's mask in that
+ * rotation unless `coverage` is false.
+ */
+function handedOverFrame(coverage = true): PhotorealFrame {
+  const frame = frameWith([]);
+  const [planet] = frame.bodies;
+  if (planet === undefined) {
+    throw new Error("no body");
+  }
+  const { equatorialRadiusM } = planet.figure;
+  const body: LitBodyInput = {
+    ...planet,
+    figure: { ...planet.figure, polarRadiusM: equatorialRadiusM / 1.0034 },
+    rotation: QUARTER_TURN,
+    handoverReliefM:
+      4 * limbDistanceM(1e8, equatorialRadiusM) * pixelAngleRad(frame.camera, VIEWPORT),
+  };
+  return {
+    ...frame,
+    bodies: [coverage ? { ...body, surveyCoverage: { mask: MASK, rotation: QUARTER_TURN } } : body],
+  };
+}
+
+/**
+ * Renders `frame` with an overlay that records the datums the renderer builds it with, and gives
+ * the plan, whether the overlay was drawn, and the datums.
+ */
+async function overlayDatums(
+  frame: PhotorealFrame,
+  prepared = true,
+): Promise<{
+  readonly plan: BodyFramePlan | null;
+  readonly symbology: boolean;
+  readonly given: ReadonlyArray<ReadonlyMap<string, SurveyedDatumFrame>>;
+}> {
+  const engine = await countingRenderEngine();
+  const view = new RecordingView();
+  const renderer = new PhotorealRenderer(engine, "test view");
+  if (prepared) {
+    await renderer.prepare(VIEWPORT, "high", "eye", frame.camera);
+  }
+  const given: Array<ReadonlyMap<string, SurveyedDatumFrame>> = [];
+  const overlay: PhotorealOverlay = (surveyed) => {
+    given.push(surveyed);
+    return SYMBOLOGY;
+  };
+  const plan = renderer.render(view, { ...frame, overlay });
+  renderer.dispose();
+  return {
+    plan,
+    symbology: view.frames.some((f) => f.label === PHOTOREAL_PASS_LABELS.symbology),
+    given,
+  };
+}
+
 describe("the photorealistic renderer's overlay", () => {
   it("loads the tone-mapped image for the symbology", async () => {
     const engine = await countingRenderEngine();
@@ -294,13 +369,7 @@ describe("the photorealistic renderer's overlay", () => {
       orientation: IDENTITY_QUATERNION,
       fovXRad: Math.PI / 3,
     });
-    const overlay = {
-      label: PHOTOREAL_PASS_LABELS.symbology,
-      viewRotation: new Float32Array(16),
-      projection: new Float32Array(16),
-      draws: [],
-      postProcesses: [],
-    };
+    const overlay = (): FrameSubmission => SYMBOLOGY;
     renderer.render(view, { ...frameWith([]), overlay });
     expect(view.frames.map((f) => [f.label, f.colourLoad])).toEqual([
       ["tonemap", undefined],
@@ -317,13 +386,10 @@ describe("the photorealistic renderer's overlay", () => {
       orientation: IDENTITY_QUATERNION,
       fovXRad: Math.PI / 3,
     });
-    const overlay = {
-      label: PHOTOREAL_PASS_LABELS.symbology,
-      viewRotation: new Float32Array(16),
-      projection: new Float32Array(16),
+    const overlay = (): FrameSubmission => ({
+      ...SYMBOLOGY,
       draws: [drawOf("occluderSphere"), drawOf("lines")],
-      postProcesses: [],
-    };
+    });
     const terrain = {
       surveyCoverage: () => null,
       draws: () => [],
@@ -336,6 +402,45 @@ describe("the photorealistic renderer's overlay", () => {
         ?.draws.map((draw) => draw.material.name),
     ).toEqual(["terrain-depth-baked-offsets", "occluderSphere", "lines"]);
     renderer.dispose();
+  });
+
+  it("builds the symbology from its plan, a body handed over with its mask giving way in the plan's rotation and figure (R10.T16.f)", async () => {
+    const frame = handedOverFrame();
+    const { plan, symbology, given } = await overlayDatums(frame);
+    const [planet] = frame.bodies;
+    const role = plan?.meshes[0]?.role;
+    expect([
+      role?.kind,
+      role?.kind === "handed-over" ? role.coverage?.mask : null,
+      symbology,
+    ]).toEqual(["handed-over", MASK, true]);
+    expect(given).toEqual([
+      new Map([
+        [
+          planet?.id,
+          {
+            mask: MASK,
+            axes: rotationColumns(QUARTER_TURN),
+            stretch: 6.371e6 / (6.371e6 / 1.0034),
+          },
+        ],
+      ]),
+    ]);
+  });
+
+  it("gives no datum for a body drawn whole: a disc, or one handed over without a mask (R10.T16.f)", async () => {
+    const disc = await overlayDatums(frameWith([]));
+    const unmasked = await overlayDatums(handedOverFrame(false));
+    expect([
+      disc.plan?.meshes.length,
+      unmasked.plan?.meshes[0]?.role,
+      [...disc.given.map((each) => each.size), ...unmasked.given.map((each) => each.size)],
+    ]).toEqual([0, { kind: "handed-over", coverage: null }, [0, 0]]);
+  });
+
+  it("builds no symbology while its pipelines are being made (R10.T16.f)", async () => {
+    const { plan, symbology, given } = await overlayDatums(handedOverFrame(), false);
+    expect([plan, symbology, given]).toEqual([null, false, []]);
   });
 });
 
@@ -637,13 +742,7 @@ describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
         return { viewport, role, renderer, canvas: new RecordingView() };
       }),
     );
-    const overlay = {
-      label: PHOTOREAL_PASS_LABELS.symbology,
-      viewRotation: new Float32Array(16),
-      projection: new Float32Array(16),
-      draws: [],
-      postProcesses: [],
-    };
+    const overlay = (): FrameSubmission => SYMBOLOGY;
     for (const view of drawn) {
       view.renderer.render(view.canvas, {
         ...frameOfDiscs(smallDiscs(view.viewport), view.viewport),

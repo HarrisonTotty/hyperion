@@ -17,7 +17,9 @@
  * chain over the light above the display's range, the tone-mapping pass with each host disc's glare
  * source, encoded and dithered in the pass (`encoding: "in-pass"`), and a second canvas pass that
  * loads it for the cased symbology (`colourLoad: "load"`, decisions-r06-r07 item 6), the terrain
- * drawn into its depth first, so that nearer ground hides the marks behind it (R10.T16.c). Each frame
+ * drawn into its depth first, so that nearer ground hides the marks behind it (R10.T16.c), the
+ * symbology built once the plan is made, so that a body handed over has its datum give way over its
+ * surveyed ground as its reference surface does (R10.T16.f; {@link PhotorealOverlay}). Each frame
  * that carries a meter takes the scene target's exposure histogram under it (R07.T12), read back
  * for the view's `AutoExposure` ({@link PhotorealRenderer.takeHistogram}); a frame of a view that
  * meters nothing, an instrument's, takes none (R07.T19.c). R08's, R10's and R11's passes join
@@ -75,7 +77,8 @@ import { DEFAULT_EYE_OBSERVER } from "../sky/eye";
 import { toHalfArray } from "../sky/half";
 import { SKY_SPRITE_HDR_MATERIAL } from "../sky/spriteHdr";
 import type { SpriteRecord } from "../wireframe/drawList";
-import { WIREFRAME_MESHES } from "../wireframe/submit";
+import { type SurveyedDatumFrame, WIREFRAME_MESHES } from "../wireframe/submit";
+import { surveyedDatumsOf } from "./overlay";
 import { PHOTOREAL_PASS_LABELS, SKY_PASS_LABEL } from "./passes";
 import { createSceneTarget } from "./sceneTarget";
 
@@ -122,6 +125,24 @@ export interface FrameTerrain {
   symbologyDepth(): ReadonlyArray<DrawItem>;
 }
 
+/**
+ * The symbology's canvas pass over a photorealistic frame (`overlaySubmission`), built by
+ * {@link PhotorealRenderer.render} once it has made the frame's plan (plan R10, R10.T16.f; R10's
+ * Design note 12), from the datums of the bodies the plan hands over to terrain with a coverage mask
+ * (`surveyedDatumsOf`): each one's occluder sphere and own lines, its limb and graticule, discarded
+ * wherever the mask that discards its reference surface holds a cell surveyed.
+ *
+ * @remarks
+ * R10.T16.f changed R07's `PhotorealFrame.overlay`, a `FrameSubmission` built before the plan, to
+ * this, and left T10.e's and T16.c's `FrameTerrain` as it was: the plan's own role holds the mask
+ * and the rotation its reference surface was discarded with, so that the datum gives way on the
+ * same mask, where the frame terrain's `surveyCoverage`, read again after its draws, might answer
+ * otherwise.
+ */
+export type PhotorealOverlay = (
+  surveyed: ReadonlyMap<string, SurveyedDatumFrame>,
+) => FrameSubmission;
+
 /** What one photorealistic frame draws. */
 export interface PhotorealFrame {
   readonly camera: ProjectionCamera;
@@ -163,8 +184,11 @@ export interface PhotorealFrame {
    * handed over is drawn as a mesh body is.
    */
   readonly terrain?: FrameTerrain | undefined;
-  /** The symbology's canvas pass, drawn loading the tone-mapped image, or `null`. */
-  readonly overlay: FrameSubmission | null;
+  /**
+   * The symbology's canvas pass, built after the plan and drawn loading the tone-mapped image, or
+   * `null` (R10.T16.f).
+   */
+  readonly overlay: PhotorealOverlay | null;
   /**
    * The operator's meter, whose weights the frame's histogram takes (Design note 10), or `null` for
    * a view that is not the exposure's source, whose frame takes no histogram (Design note 11).
@@ -566,11 +590,14 @@ export class PhotorealRenderer {
       encoding: "in-pass",
     });
     if (frame.overlay !== null) {
-      // The terrain's depth first, so that nearer ground hides the marks drawn after it (R10.T16.c).
+      // Each handed-over body's datum gives way where its reference surface did (R10.T16.f), and
+      // the terrain's depth goes first, so that nearer ground hides the marks drawn after it
+      // (R10.T16.c).
+      const overlay = frame.overlay(surveyedDatumsOf(plan, frame.bodies));
       const depth = frame.terrain?.symbologyDepth() ?? [];
       view.render({
-        ...frame.overlay,
-        draws: depth.length === 0 ? frame.overlay.draws : [...depth, ...frame.overlay.draws],
+        ...overlay,
+        draws: depth.length === 0 ? overlay.draws : [...depth, ...overlay.draws],
         colourLoad: "load",
       });
     }

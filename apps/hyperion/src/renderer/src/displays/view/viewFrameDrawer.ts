@@ -556,9 +556,11 @@ export class ViewFrameDrawer {
           classMaps: inputs.classMaps,
           reliefs: inputs.reliefs,
           terrain,
-          // The marks cased over the tone-mapped image at the canvas's resolution (R07.T16.a), and
-          // the craft on their silhouettes (R07.T16.e).
-          overlay: overlaySubmission(this.#wireframe, list, tokens, camera, viewport),
+          // The marks cased over the tone-mapped image at the canvas's resolution (R07.T16.a), the
+          // craft on their silhouettes (R07.T16.e), and each handed-over body's datum giving way
+          // over its surveyed ground, built once the renderer has the plan (R10.T16.f).
+          overlay: (surveyed) =>
+            overlaySubmission(this.#wireframe, list, tokens, camera, viewport, surveyed),
         }),
       );
       if (plan === null) {

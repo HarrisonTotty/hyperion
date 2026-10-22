@@ -44,6 +44,7 @@ import type { DrawItem, MaterialHandle, TextureHandle } from "../engine/types";
 import { DISC_ANNULI_HIGH } from "../lighting/annuli";
 import { sunLikeHostDisc } from "../lighting/hostDisc";
 import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
+import { surveyedDatumsOf } from "../photoreal/overlay";
 import type { ViewScene } from "../scene/model";
 import { AU_M } from "../scenes/kept";
 import type { DrawCamera } from "../wireframe/drawList";
@@ -592,6 +593,45 @@ describe("a view's frame terrain (R10.T16.c)", () => {
       uniforms: { ...DRAW.uniforms, occluderSlopePx: new Float32Array([3]) },
     });
     expect([withDepth.symbologyDepth().length, withoutDepth.symbologyDepth()]).toEqual([1, []]);
+  });
+});
+
+describe("a view's frame terrain and the datum over the image (R10.T16.f)", () => {
+  /** The plan of the body handed over with the mask `terrain` gives, in its rotation, if any. */
+  function handedWith(terrain: LiveFrameTerrain): ReturnType<typeof handed> {
+    const mask = terrain.surveyCoverage(BODY);
+    return handed(mask === null ? {} : { surveyCoverage: { mask, rotation: ROTATION } });
+  }
+
+  it("gives way on the mask the frame terrain gave the plan, in the plan's rotation, whatever the pass says after the draws", () => {
+    let ready = true;
+    const { source } = fakeSource();
+    const pass = source.pass(BODY);
+    const terrain = frameTerrain({
+      ...source,
+      pass: (id) =>
+        pass === null || id !== BODY
+          ? null
+          : { ...pass, maskReadyFor: (view) => ready && pass.maskReadyFor(view) },
+    });
+    const { plan, body } = handedWith(terrain);
+    terrain.draws(plan, [body]);
+    // The pass withholds the mask after the draws: the reference surface was discarded with it.
+    ready = false;
+    expect([terrain.surveyCoverage(BODY), surveyedDatumsOf(plan, [body])]).toEqual([
+      null,
+      new Map([[BODY, { mask: MASK, axes: rotationColumns(ROTATION), stretch: 1 }]]),
+    ]);
+  });
+
+  it("gives no way while the frame terrain withholds the mask, the reference surface whole", () => {
+    const terrain = frameTerrain(fakeSource({ ready: false }).source);
+    const { plan, body } = handedWith(terrain);
+    terrain.draws(plan, [body]);
+    expect([plan.meshes[0]?.role, surveyedDatumsOf(plan, [body]).size]).toEqual([
+      { kind: "handed-over", coverage: null },
+      0,
+    ]);
   });
 });
 

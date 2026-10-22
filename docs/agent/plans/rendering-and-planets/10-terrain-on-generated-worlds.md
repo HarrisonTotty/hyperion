@@ -2439,6 +2439,69 @@ src/tools`; `just views-check --hidden --smoke --terrain` (exit 0); the console-
   single throw does not; a views-check launch's header reads `MEASUREMENT` on every display; a
   terrain fault fails the run's verdict; the console-ux checks.
 
+- **R10.T16.f The image's datum gives way over surveyed ground** (new, 2026-10-22, from main's
+  graticule triage at `aa8e63e8`; a blocker, low in severity: a visibly wrong picture).
+  - **The cause.** In the photorealistic style the symbology's overlay draws a body's own lines,
+    its limb and graticule, at the datum's height without T11's give-way. `viewFrameDrawer.ts`
+    built the overlay before the plan, `overlaySubmission` with no terrain, so
+    `WireframeRenderer.frame` fell back to `NO_WIREFRAME_TERRAIN`: the lines took `lines`, not
+    `linesSurveyed`, and the occluder sphere stayed whole. T16.c's terrain depth, drawn before the
+    lines (`renderer.ts`), hides the line where the ground stands above the datum and not where it
+    lies below it; `terrainDepth.wgsl`'s push-back (`occluderSlopePx` plus 2⁻¹⁶ of the depth) lets
+    it show over ground a few hundred metres above the datum too. Seen in r10-maturity's look
+    (R10.T1.c's finding 19): descent-150s and lowest-180s show a long line over the low plain,
+    descent-100s dashes.
+  - **The rules it breaks.** Design note 12's "no reference surface shows through a surveyed
+    valley"; T11's give-way, built for the wireframe alone; the guide's graticule sentence speaks
+    of the wireframe only.
+  - **The fix.** The overlay is packed with each handed-over body's surveyed datum: the mask, the
+    axes (`rotationColumns` of the rotation the plan drew the body with) and the stretch (its
+    equatorial radius over its polar), so that its lines take `linesSurveyed` and its occluder
+    `occluderSphereSurveyed`, as the wireframe's do. The overlay is built after the plan:
+    `PhotorealFrame.overlay` becomes a builder of the datums (`PhotorealOverlay`), which
+    `PhotorealRenderer.render` calls with `surveyedDatumsOf(plan, bodies)` once it has made the
+    plan. `FrameTerrain` stays as T10.e and T16.c built it. Of the two shapes the triage named
+    (this, or a `FrameTerrain.surveyedDatums()` beside `symbologyDepth()` with the renderer packing
+    the overlay), this changes R07's interface least: one field's type, against a new method on
+    `FrameTerrain` and the same deferred overlay. And it reads the mask the reference surface was
+    discarded with: each handed-over `MeshBodyPlan`'s own `role.coverage` (its mask and rotation,
+    read from `surveyCoverage` before the plan), so that the datum gives way exactly where the
+    figure does, where a `surveyCoverage` read again after the frame terrain's draws might answer
+    otherwise (main, 2026-10-22).
+  - **The decision** (main's triage). With the give-way the graticule simply disappears over
+    surveyed ground in the image, as the reference surface does. Drawing it on the terrain's height
+    there is new scope and is not built (recorded in the Risks' deferred findings for T16.f).
+  - **The side benefit.** The datum's occluder sphere no longer hides marks in surveyed valleys
+    below the datum, such as a craft's outline on a crater floor.
+  - **Files.** `view/photoreal/overlay.ts` (`overlaySubmission`'s `surveyed`, `surveyedDatumsOf`),
+    `view/photoreal/renderer.ts` (`PhotorealOverlay`), `view/bodies/draw.ts` (`coverageOf`
+    exported), `displays/view/photorealFrame.ts`, `displays/view/viewFrameDrawer.ts`,
+    `smoke/terrainFrame.ts`.
+  - **Tests:**
+    - `overlay.test.ts`: a surveyed body's own lines, casing and stroke, are drawn with
+      `linesSurveyed` and its occluder with `occluderSphereSurveyed`, each binding its mask and
+      taking its stretch, every other line R02's and still cased; with no body surveyed no draw is
+      surveyed; `surveyedDatumsOf` gives a body handed over with a mask the role's mask, its
+      rotation's columns and its figure's a ÷ c, several bodies each their own, and none for a body
+      promoted, handed over without a mask, or missing from the bodies;
+    - `renderer.test.ts`: the renderer builds the symbology from its plan, a body handed over with
+      its mask giving way in the plan's rotation and figure; no datum for a disc or a body handed
+      over without a mask; no symbology built while its pipelines are being made; the earlier
+      overlay tests through the builder;
+    - `frameTerrain.test.ts`: through the live path, the datum gives way on the mask the frame
+      terrain gave the plan, in the plan's rotation, even where the pass withholds the mask after
+      the draws; none while the frame terrain withholds it;
+    - `viewFrameDrawer.test.ts`: a photorealistic frame of `VIEW` handing a body over with its mask
+      binds that mask to the symbology's `linesSurveyed` and `occluderSphereSurveyed` draws;
+    - the smoke harness's `R10.T16 the frame` (part 7): over the image, a line of the body's own on
+      the datum over the surveyed ground gives way, and one beyond the survey's edge stands; drawn
+      again with no datum giving way (the overlay as built before), both stand.
+  - **Acceptance.** `pnpm --filter hyperion test` (its files reach `view/photoreal`,
+    `view/terrain`, `view/bodies` and `displays/view`); `just test-render` (part 7's new check);
+    before and after captures, hidden and offscreen under `just _locked` and the GPU lock, of TEST
+    MOON weathered at descent-100s, descent-150s and lowest-180s on high and low
+    (`viewsCheck.sh --hidden --terrain --weathered`), the line gone over the surveyed plain.
+
 ### R10.T11 The wireframe's terrain
 
 Depth-only terrain in the wireframe style at τ = 4 px from the same bounds and bakes (heights and
@@ -5550,7 +5613,8 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
       moons, which would also show the morph across a switch over time.
   19. The weathered fixture's survey and the check's frames show the graticule's meridian through
       the ground where it dips below the datum (descent-100s); the graticule's, not this change's,
-      for the overlay's own task.
+      for the overlay's own task. _Taken up by R10.T16.f (2026-10-22): over the image the datum
+      gives way over surveyed ground._
 - **Deviations in T5, as built** (2026-10-13; lane r10-readings, begun on R09.T8 and R10.T3 at
   `627e9b35` and finished on R09.T9 and R10.T1.a at `4474e781`; the findings and the interface
   ruled in `decision-r10-t5-closed-forms.md`).
@@ -10669,6 +10733,84 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     (`wireframeTerrainOf`, R10.T11's guarded call) takes a `TerrainFailureGuard` of its own beside
     the survey edges', so that its failure lasting `ANNUNCIATION_ONSET_MS` faults the terrain too,
     by §8's reasons (a view drawing on with a stopped terrain and nothing on its plate).
+- **Deviations in T16.f, as built** (2026-10-22; lane r10-t16f, on `rendering-and-planets` at
+  `00105e04`; main's brief `brief-r10-t16f.md`, and main's acceptance of the shape, 2026-10-22).
+  - _The interface._ `FrameTerrain` is as T10.e and T16.c built it, where the brief had "either way
+    R07's `FrameTerrain` interface changes". What changes is R07's `PhotorealFrame.overlay`, and
+    `PhotorealInputs.overlay` with it: from `FrameSubmission | null` to `PhotorealOverlay | null`,
+    `(surveyed: ReadonlyMap<string, SurveyedDatumFrame>) => FrameSubmission`, which
+    `PhotorealRenderer.render` calls once a drawn frame, after `planLitBodies`, and not at all while
+    its resources are being made. The drawer used to build the overlay every frame, writing the
+    wireframe renderer's buffers even for a frame that then drew the wireframe.
+  - _The mask's source._ Each handed-over `MeshBodyPlan`'s own coverage, through `draw.ts`'
+    `coverageOf`, now exported, which the figure's discard reads too, so that a new role kind is a
+    compile error in both: the brief's `surveyCoverage`, read once before the plan
+    (`photorealFrame.ts`' `litBodyOf`). The datum gives way on the mask the figure was discarded
+    with, even where the pass withholds the mask after the draws (`frameTerrain.test.ts`).
+  - _The stretch_ is the lit body's figure's a ÷ c (`BodyFigure`), as `smoothMesh.wgsl`'s discard
+    stretches the mask; T11's wireframe takes the field header's (`wireframeTerrainOf`). Design
+    note 12's one datum makes the two agree.
+  - _`overlaySubmission`_ takes `surveyed` as a required last argument (the TypeScript review's
+    consider item, so that a caller that drops it fails to compile; an empty map draws every datum
+    whole, as R07 built the pass), and hands R02's `frame` a `WireframeTerrain` with no draws: the
+    photorealistic renderer draws the terrain's depth before the pass itself (T16.c), so that a
+    hull's silhouette is depth-tested against nearer ground, as before.
+  - _`surveyedDatumsOf`_ takes a `SurveyedPlan` (the meshes' `index` and `role`, the records'
+    `body`) and `SurveyedBody`s (`id`, `figure`), and skips a mesh whose figure is whole, or whose
+    record or body is missing.
+  - _The smoke check_ (`R10.T16 the frame`, part 7). `drawFrame` takes its marks, whether the
+    terrain's depth and the give-way are drawn, and the points it reads. The new check draws the
+    body's occluder sphere of its polar radius (`occluderRadius`, as the draw list makes it) and two
+    lines tagged `LineBatch.body` on the datum along the survey's rows: one over the surveyed column
+    (i 47.75), whose ground lies a few hundred metres under the datum about there, and one past the
+    +i edge (`BEYOND`, i 48.25). The control keeps the terrain's depth and gives no datum. The
+    rotation there is the identity; the unit tests turn it. Both variants pass (2026-10-22, hidden,
+    SwiftShader, `just _locked just _test-render-run --part=7` at a load of 1.7): the surveyed line
+    at (24.0, 36.1) px gone and the one beyond at (25.3, 25.4) shown, both shown in the control; the
+    group's wall 30.8 and 31.0 s (T16.c's record: about 32 s).
+  - _The captures_ (the acceptance's before and after; 2026-10-22, the development machine's RTX
+    3080, hidden and offscreen, vulkan, `viewsCheck.sh` with `--hidden --setting <s> --terrain` and
+    `--weathered`, under `just _locked` and the GPU lock). Before: r10-maturity's look of the same
+    field and script (its tree's client differs from `00105e04`'s in the atmosphere alone, which
+    airless TEST MOON does not draw), in its worktree's `target/views-check/terrain/`,
+    `captures-20261022T135639` (high) and `captures-20261022T140842` (low). After: this lane's, in
+    its worktree's, `captures-20261022T193030` and `captures-20261022T200354` (high) and
+    `captures-20261022T195206` (low). At descent-150s and lowest-180s the long line over the low
+    plain is gone (high; on low the label blocks cover it), and at descent-100s the meridian's
+    dashes inside the survey are gone on both settings, the meridian ending at the survey's edge;
+    the graticule over unsurveyed ground, the survey edge, the tripod and the hull's outline stand
+    as before. The runs' checks: low passes (start load 0.48); both high runs fail one check, "No
+    view stopped", alone: page-wide gaps between animation frames of 0.72 and 1.67 s (start load
+    1.13; QW17's runs began during it) and 0.95 and 1.27 s (6.07), at script times unrelated to the
+    captures, with the main thread's longest frame 120 ms. A control high run at `00105e04`, without
+    this change, in a scratch worktree, fails the same check the same way (gaps of 0.52 and 1.38 s;
+    start load 8.57, a gate's suites running beside it), so the gaps are the shared machine's, not
+    this change's (r10-maturity's high run passed it at a start load of 2.47). Every other check
+    passes on every run: every frame drawn and finite, the terrain drawn once handed over, no
+    terrain fault, the loss and restore, the teardown.
+  - _Tests_ as the entry lists them; besides, `viewFrameDrawer.test.ts`'s case holds the drawer's
+    one line that hands the datums on (the reviews' finding: no other test reached it).
+  - _The guide_ is untouched. Its graticule sentence (`_The graticule._`, under the wireframe's
+    contours) still speaks of the wireframe only, which the change does not contradict (the UX
+    review). Drafted for main's sign-off agent, not in the guide, a bullet after it: "In the
+    photorealistic style the image draws a body's surveyed terrain, and no contours are drawn over
+    it. The body's limb and graticule stand on the `DATUM`, so they are drawn over the ground the
+    ship has not surveyed, where the image shows the reference surface, and not over its surveyed
+    ground, where the image draws the terrain in the reference surface's place. Surveyed ground is
+    told by the survey edge, not by where the graticule ends."
+- **Deferred findings (2026-10-13 rule) (R10.T16.f)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _No line of the body over surveyed ground in the image._ On a dark side, at `TERRAIN TEST`'s
+    sunset, or while `LIGHTING: PENDING` holds, the image now shows black surveyed ground with no
+    line of the body; the wireframe draws its contours and its graticule on the terrain there. A
+    graticule on the terrain's height in the image is new scope (main's triage).
+  - _The limb gives way too_, as in the wireframe: it is one of the body's own batches. Main's
+    ruling names the graticule; for the sign-off agent to confirm with the draft above.
+  - _High's "No view stopped" on a loaded machine._ The terrain run on high fails it with
+    page-wide gaps of 0.5 to 1.7 s between animation frames at a start load of 1 to 9 with other
+    lanes' work beside it, with this change and without it (the captures, above); low passes. The
+    renderer process keeps about three cores busy on high (its height workers). For main: a check
+    that may need a quiet machine, or a cause in the GPU process to find.
 - **Deviations in T11, as built** (2026-10-20; lane r10-wireframe, on `rendering-and-planets` at
   `8a7378d6`, on T16's session).
   - _Files._ New: `view/terrain/terrainWire.ts` (`contourStepM`, `contourInterval`,

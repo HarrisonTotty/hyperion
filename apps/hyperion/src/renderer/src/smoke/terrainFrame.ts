@@ -22,10 +22,14 @@
  * - the whole frame through `PhotorealRenderer` onto a canvas, its plan handing the body over, with
  *   two marks in its symbology: one 15 km under the surveyed ground, which the terrain's depth in
  *   the symbology's pass hides, and one 2 km over it, which stands; drawn again with no terrain
- *   depth, both stand.
+ *   depth, both stand;
+ * - the whole frame again, its symbology the body's occluder sphere and two lines of its own on the
+ *   datum, as its graticule is: the one over the surveyed ground gives way to the terrain, and the
+ *   one beyond the survey's edge stands (R10.T16.f); drawn again with no datum giving way, as the
+ *   overlay was built before R10.T16.f, both stand.
  */
 
-import { add, scale, sub, type Vec3 } from "../geometry/vec3";
+import { add, norm, scale, sub, type Vec3 } from "../geometry/vec3";
 import { PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
 import {
   type BodyFrameOptions,
@@ -37,13 +41,14 @@ import {
 import { project } from "../view/camera/projection";
 import { viewId } from "../view/camera/state";
 import { IDENTITY_ROTATION } from "../view/coords/rotation";
+import { occluderRadius } from "../view/depth/depth";
 import type { RenderEngine } from "../view/engine/types";
 import { DISC_ANNULI_HIGH } from "../view/lighting/annuli";
 import { sunLikeHostDisc } from "../view/lighting/hostDisc";
 import { PLANETSHINE_SOURCES_HIGH } from "../view/lighting/planetshine";
 import { overlaySubmission } from "../view/photoreal/overlay";
 import { PHOTOREAL_PASS_LABELS } from "../view/photoreal/passes";
-import { PhotorealRenderer } from "../view/photoreal/renderer";
+import { type PhotorealOverlay, PhotorealRenderer } from "../view/photoreal/renderer";
 import { TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
 import { AU_M } from "../view/scenes/kept";
 import { CoverageMask } from "../view/terrain/coverage";
@@ -53,11 +58,17 @@ import {
   terrainViewOf,
 } from "../view/terrain/frameTerrain";
 import { handoverTauPx, limbDistanceM, pixelAngleRad } from "../view/terrain/handover";
+import type { PatchKey } from "../view/terrain/patchKey";
 import { planetGeometry } from "../view/terrain/planet";
 import { SurveyedCells } from "../view/terrain/surveyLookup";
 import { TerrainPass, type TerrainPool } from "../view/terrain/terrainPass";
 import { HeightWorkerPool, type HeightWorkerLane } from "../view/terrain/workers/pool";
-import { emptyDrawList, type LineBatch, viewStrokesAt } from "../view/wireframe/drawList";
+import {
+  emptyDrawList,
+  type LineBatch,
+  viewStrokesAt,
+  type WireframeDrawList,
+} from "../view/wireframe/drawList";
 import { WireframeRenderer, WIREFRAME_MATERIALS } from "../view/wireframe/submit";
 import { moonLikeFixture } from "../test/moonLikeFixture";
 import { addCanvas } from "./frames";
@@ -90,6 +101,12 @@ const MOON_LIKE_FIGURE = { ...MOON_LIKE, pole: null };
 
 /** The colour of the check's marks, as `readTokens` would read a token: magenta, which no ground is. */
 const MARK = "#ff00ff";
+
+/** The tokens the overlay takes: the marks' casing colour. */
+const TOKENS = { surface0: "#000000" };
+
+/** The patch past the survey's +i edge from {@link OVER}: column 48, in its unsurveyed cell 24. */
+const BEYOND: PatchKey = { ...OVER, i: OVER.i + 1 };
 
 /** A lane of the pool whose bakes are laid on the datum before the pass takes them. */
 function onTheDatumLane(lane: HeightWorkerLane): TerrainPool {
@@ -421,16 +438,21 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
       },
       fovXRad: pose.camera.fovXRad,
     };
-    // The frame drawn, its marks' pixels read: with the terrain's depth in the symbology's pass,
-    // and, the control, with none.
+    // The frame drawn with `marks` in its symbology, read at the pixels of `at`, from the camera:
+    // with or without the terrain's depth in the symbology's pass, and with or without the datum
+    // of the body the plan hands over giving way (R10.T16.f), the control as the overlay was built
+    // before it, its datum whole.
     const drawFrame = async (
-      withDepth: boolean,
+      marks: WireframeDrawList,
+      options: { readonly withDepth: boolean; readonly giveWay: boolean },
+      at: ReadonlyArray<Vec3>,
     ): Promise<{
       readonly handedOver: boolean;
       readonly depthDraws: number;
-      readonly under: boolean;
-      readonly over: boolean;
+      readonly datums: number;
+      readonly shown: ReadonlyArray<boolean>;
     }> => {
+      const { withDepth, giveWay } = options;
       const frame = liveFrame(relief, mask, pose, performance.now());
       const terrain = withDepth
         ? frame.terrain
@@ -439,6 +461,14 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
             draws: (...args: Parameters<LiveFrameTerrain["draws"]>) => frame.terrain.draws(...args),
             symbologyDepth: () => [],
           };
+      // The datums the renderer packs the overlay with, from its plan.
+      let datums = 0;
+      const overlay: PhotorealOverlay = (surveyed) => {
+        datums = surveyed.size;
+        return giveWay
+          ? overlaySubmission(wireframe, marks, TOKENS, camera, VIEWPORT, surveyed)
+          : overlaySubmission(wireframe, marks, TOKENS, camera, VIEWPORT, new Map());
+      };
       const plan = photoreal.render(canvas, {
         camera: pose.camera,
         viewport: VIEWPORT,
@@ -457,7 +487,7 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
         depthWriters: [],
         previousRegimes: new Map([[frame.body.id, "terrain"]]),
         terrain,
-        overlay: overlaySubmission(wireframe, list, { surface0: "#000000" }, camera, VIEWPORT),
+        overlay,
         meter: null,
       });
       // Read in the task that drew it (`checkPhotorealFrame`'s note).
@@ -465,21 +495,72 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
       return {
         handedOver: plan?.regimes.get(frame.body.id) === "terrain",
         depthDraws: terrain.symbologyDepth().length,
-        under: markedNear(read, project(midpoint(under), pose.camera, VIEWPORT)),
-        over: markedNear(read, project(midpoint(over), pose.camera, VIEWPORT)),
+        datums,
+        shown: at.map((point) => markedNear(read, project(point, pose.camera, VIEWPORT))),
       };
     };
-    const withDepth = await drawFrame(true);
-    const without = await drawFrame(false);
+    const marksAt = [midpoint(under), midpoint(over)];
+    const withDepth = await drawFrame(list, { withDepth: true, giveWay: true }, marksAt);
+    const without = await drawFrame(list, { withDepth: false, giveWay: true }, marksAt);
+    const [underShown, overShown] = withDepth.shown;
+    const [underBare, overBare] = without.shown;
     checks.check(
       "R10.T16.c over the image the terrain's depth hides a mark under the surveyed ground, and one over it stands",
       withDepth.handedOver &&
         withDepth.depthDraws === 1 &&
-        !withDepth.under &&
-        withDepth.over &&
-        without.under &&
-        without.over,
-      `handed over ${String(withDepth.handedOver)}; with the terrain's ${String(withDepth.depthDraws)} depth draw: the mark under the ground shown ${String(withDepth.under)}, the mark over it ${String(withDepth.over)}; with none: under ${String(without.under)}, over ${String(without.over)}`,
+        underShown === false &&
+        overShown === true &&
+        underBare === true &&
+        overBare === true,
+      `handed over ${String(withDepth.handedOver)}; with the terrain's ${String(withDepth.depthDraws)} depth draw: the mark under the ground shown ${String(underShown)}, the mark over it ${String(overShown)}; with none: under ${String(underBare)}, over ${String(overBare)}`,
+    );
+
+    // R10.T16.f: two lines of the body's own on the datum, as its graticule is, each along the
+    // survey's rows: one over the surveyed column (i 47.75), whose ground stands a few hundred
+    // metres under the datum about there, so that its depth leaves the line in sight, and one
+    // beyond the survey's +i edge (i 48.25), over the reference surface; with the body's occluder
+    // sphere, of its polar radius as the draw list makes it, whose centre places the lines' reads
+    // of the mask.
+    const datumFromCamera = (key: PatchKey, x: number, y: number): Vec3 =>
+      sub(datumAt(key, x, y).p, pose.cameraM);
+    const surveyedLine = [datumFromCamera(OVER, 48, 15), datumFromCamera(OVER, 48, 27)] as const;
+    const beyondLine = [datumFromCamera(BEYOND, 16, 15), datumFromCamera(BEYOND, 16, 27)] as const;
+    const moon = bodyOf(pose);
+    const distanceM = norm(moon.centreM);
+    const sphereM = occluderRadius(MOON_LIKE.polarRadiusM, distanceM);
+    const datumList: WireframeDrawList = {
+      ...emptyDrawList(viewStrokesAt(1)),
+      occluderSpheres: [
+        {
+          id: moon.id,
+          centreF32: Float32Array.from([moon.centreM.x, moon.centreM.y, moon.centreM.z]),
+          radiusM: sphereM,
+          altitudeM: distanceM - sphereM,
+        },
+      ],
+      lines: [
+        { ...markBatch(`body:${moon.id}:surveyed`, ...surveyedLine), body: moon.id },
+        { ...markBatch(`body:${moon.id}:beyond`, ...beyondLine), body: moon.id },
+      ],
+    };
+    const linesAt = [midpoint(surveyedLine), midpoint(beyondLine)];
+    const givingWay = await drawFrame(datumList, { withDepth: true, giveWay: true }, linesAt);
+    const whole = await drawFrame(datumList, { withDepth: true, giveWay: false }, linesAt);
+    const [surveyedShown, beyondShown] = givingWay.shown;
+    const [surveyedWhole, beyondWhole] = whole.shown;
+    const pixelOf = (point: Vec3): string => {
+      const p = project(point, pose.camera, VIEWPORT);
+      return `(${p.xPx.toFixed(1)}, ${p.yPx.toFixed(1)})`;
+    };
+    checks.check(
+      "R10.T16.f over the image the datum's line gives way over surveyed ground, and stands beyond the survey's edge",
+      givingWay.handedOver &&
+        givingWay.datums === 1 &&
+        surveyedShown === false &&
+        beyondShown === true &&
+        surveyedWhole === true &&
+        beyondWhole === true,
+      `handed over ${String(givingWay.handedOver)}, ${String(givingWay.datums)} datum giving way: the lines over the surveyed ground and beyond its edge, at ${linesAt.map(pixelOf).join(" and ")} px, shown ${String(surveyedShown)} and ${String(beyondShown)}; with no datum giving way, ${String(surveyedWhole)} and ${String(beyondWhole)}`,
     );
   } finally {
     canvas.dispose();

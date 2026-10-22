@@ -12,12 +12,17 @@ import { viewId } from "../../view/camera/state";
 import { relativeToCamera } from "../../view/coords/relative";
 import { IDENTITY_ROTATION, rotateToBodyFixed } from "../../view/coords/rotation";
 import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
+import { PHOTOREAL_PASS_LABELS } from "../../view/photoreal/passes";
 import { sceneOrigins } from "../../view/scene/model";
 import { PHASE_GIANT, PHASE_PLANETS, phaseScene } from "../../view/scenes/phaseScene";
 import { CoverageView, fieldCellIndex } from "../../view/terrain/coverage";
 import { ANNUNCIATION_ONSET_MS } from "../../view/terrain/annunciation";
 import { handoverTauPx, limbDistanceM, pixelAngleRad } from "../../view/terrain/handover";
-import type { ViewTerrainSession, ViewTerrainSource } from "../../view/terrain/frameTerrain";
+import type {
+  FrameTerrainPass,
+  ViewTerrainSession,
+  ViewTerrainSource,
+} from "../../view/terrain/frameTerrain";
 import { PoseIntervals } from "../../view/terrain/poseInterval";
 import type { ResidentHeightsView } from "../../view/terrain/residentHeights";
 import type { TerrainViewFrameInput } from "../../view/terrain/terrainPass";
@@ -781,6 +786,45 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
   it("binds the body's coverage mask to its datum's draws, which give way to its terrain", async () => {
     const { frame } = await wireframeOf(wireSource().source);
     expect(frame?.draws.some((draw) => draw.textures["coverageMask"] === MASK)).toBe(true);
+  });
+
+  it("gives the datum way over the image too, the symbology binding the mask its plan handed the body over with (R10.T16.f)", async () => {
+    // The lit pass of the 90° planet, which gives its mask, beside the wireframe's.
+    const pass: FrameTerrainPass = {
+      maskReadyFor: () => true,
+      symbologyDepthMaterial: null,
+      heights: DATUM,
+      viewIds: new Set([VIEW]),
+      faulted: false,
+    };
+    const { source } = wireSource(DATUM, { pass: (body) => (body === HANDED ? pass : null) });
+    // Relief enough that every planet with a rotation is handed over.
+    const inputs = { ...inputsOver(source, "photorealistic"), reliefs: { reliefM: () => 1e9 } };
+    const engine = await countingRenderEngine();
+    const view = new RecordingView("view");
+    const drawer = new ViewFrameDrawer(engine, view, "view");
+    // The first photorealistic frame draws the wireframe while its pipelines compile.
+    drawer.draw(inputs);
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    const drawn = drawer.draw(inputs);
+    drawer.dispose();
+    const symbology = view.frames.findLast(
+      (frame) => frame.label === PHOTOREAL_PASS_LABELS.symbology,
+    );
+    const surveyed = (symbology?.draws ?? []).filter((draw) =>
+      draw.material.name.endsWith("Surveyed"),
+    );
+    expect([
+      drawn?.drawnStyle,
+      [...new Set(surveyed.map((draw) => draw.material.name))].toSorted(),
+      surveyed.every((draw) => draw.textures["coverageMask"] === MASK),
+    ]).toEqual([
+      "photorealistic",
+      ["wireframe:linesSurveyed", "wireframe:occluderSphereSurveyed"],
+      true,
+    ]);
   });
 
   it("gives the contour interval its terrain was drawn at, and the terrain's annunciation", async () => {

@@ -250,8 +250,13 @@ export type MeshBodyRole =
   | { readonly kind: "promoted" }
   | { readonly kind: "handed-over"; readonly coverage: MeshBodyCoverage | null };
 
-/** The coverage mask that discards a mesh body's figure: a handed-over body's, a promoted one none. */
-function coverageOf(role: MeshBodyRole): MeshBodyCoverage | null {
+/**
+ * The coverage mask that discards a mesh body's figure: a handed-over body's, a promoted one none.
+ *
+ * @remarks
+ * Over the image its datum gives way on the same mask (plan R10, R10.T16.f; `surveyedDatumsOf`).
+ */
+export function coverageOf(role: MeshBodyRole): MeshBodyCoverage | null {
   let coverage: MeshBodyCoverage | null;
   switch (role.kind) {
     case "promoted":

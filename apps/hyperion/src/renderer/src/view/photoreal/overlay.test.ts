@@ -4,7 +4,11 @@ import { normalise, vec3 } from "../../geometry/vec3";
 import type { ColourTokens } from "../../spatial/paint";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { aMarkedViewScene, FIXTURE_PLANET, OFF_PLANET_CAMERA } from "../../test/viewFixtures";
+import { rotationColumns } from "../bodies/smoothMesh";
+import { lookAlong, rotationRows } from "../camera/quaternion";
 import type { Viewport } from "../camera/projection";
+import { IDENTITY_ROTATION, rotation3FromRows } from "../coords/rotation";
+import type { TextureHandle } from "../engine/types";
 import type { ViewScene } from "../scene/model";
 import {
   buildWireframeDrawList,
@@ -12,8 +16,8 @@ import {
   viewStrokesAt,
   type WireframeDrawList,
 } from "../wireframe/drawList";
-import { linearColour, WireframeRenderer } from "../wireframe/submit";
-import { overlayDrawList, overlaySubmission } from "./overlay";
+import { linearColour, type SurveyedDatumFrame, WireframeRenderer } from "../wireframe/submit";
+import { overlayDrawList, overlaySubmission, type SurveyedPlan, surveyedDatumsOf } from "./overlay";
 
 /** The guide's tokens, as `readTokens` reads them from the stylesheet. */
 const TOKENS: ColourTokens = {
@@ -126,7 +130,7 @@ describe("the photorealistic overlay's draw list (R07.T16.a)", () => {
 describe("the symbology's canvas pass (R07.T16.a)", () => {
   it("is labelled for the pass timer and loads the tone-mapped image beneath it", async () => {
     const renderer = new WireframeRenderer(await countingRenderEngine());
-    const pass = overlaySubmission(renderer, wireframeList(), TOKENS, CAMERA, VIEWPORT);
+    const pass = overlaySubmission(renderer, wireframeList(), TOKENS, CAMERA, VIEWPORT, new Map());
     expect([pass.label, pass.colourLoad, pass.encoding]).toEqual(["symbology", "load", undefined]);
     renderer.dispose();
   });
@@ -134,7 +138,7 @@ describe("the symbology's canvas pass (R07.T16.a)", () => {
   it("strokes each batch's --surface-0 casing, two casings wider, before the batch itself", async () => {
     const renderer = new WireframeRenderer(await countingRenderEngine());
     const list = wireframeList();
-    const pass = overlaySubmission(renderer, list, TOKENS, CAMERA, VIEWPORT);
+    const pass = overlaySubmission(renderer, list, TOKENS, CAMERA, VIEWPORT, new Map());
     const lines = pass.draws.filter((draw) => draw.material.name === "wireframe:lines");
     const casing = [...linearColour(TOKENS.surface0)];
     // Each batch with a segment is drawn twice, its casing then its stroke, in the list's order.
@@ -157,7 +161,7 @@ describe("the symbology's canvas pass (R07.T16.a)", () => {
 
   it("draws the bodies' occluder spheres, then the silhouettes, then every line (R07.T16.e)", async () => {
     const renderer = new WireframeRenderer(await countingRenderEngine());
-    const pass = overlaySubmission(renderer, wireframeList(), TOKENS, CAMERA, VIEWPORT);
+    const pass = overlaySubmission(renderer, wireframeList(), TOKENS, CAMERA, VIEWPORT, new Map());
     const kinds = pass.draws.map((draw) => draw.material.name);
     // The order of each kind's first and last draw.
     const span = (name: string): readonly [number, number] => [
@@ -173,5 +177,161 @@ describe("the symbology's canvas pass (R07.T16.a)", () => {
       true,
     ]);
     renderer.dispose();
+  });
+});
+
+/** A coverage mask's handle, as `CoverageMask.texture` gives it. */
+const MASK: TextureHandle = { kind: "texture", name: "coverage mask" };
+
+/** A rotation with no axis in common with the galactic ones. */
+const TURNED = rotation3FromRows(rotationRows(lookAlong(normalise(vec3(1, 2, 3)), vec3(0, 0, 1))));
+
+describe("the symbology's canvas pass over a surveyed body (R10.T16.f)", () => {
+  const datum: SurveyedDatumFrame = { mask: MASK, axes: rotationColumns(TURNED), stretch: 1.0034 };
+
+  it("draws the body's own lines, casing and stroke, with linesSurveyed and its occluder with occluderSphereSurveyed, each binding its mask", async () => {
+    const renderer = new WireframeRenderer(await countingRenderEngine());
+    const list = wireframeList();
+    const pass = overlaySubmission(
+      renderer,
+      list,
+      TOKENS,
+      CAMERA,
+      VIEWPORT,
+      new Map([[FIXTURE_PLANET, datum]]),
+    );
+    const own = list.lines.filter(
+      (line) => line.body === FIXTURE_PLANET && line.segments.length > 0,
+    ).length;
+    const surveyed = pass.draws.filter((draw) => draw.material.name.endsWith("Surveyed"));
+    const named = (name: string): number =>
+      surveyed.filter((draw) => draw.material.name === name).length;
+    expect({
+      own: own > 0,
+      lines: named("wireframe:linesSurveyed"),
+      spheres: named("wireframe:occluderSphereSurveyed"),
+      masks: [...new Set(surveyed.map((draw) => draw.textures["coverageMask"]))],
+      stretch: [...new Set(surveyed.map((draw) => draw.uniforms["coverageStretch"]?.[0]))],
+    }).toEqual({
+      own: true,
+      lines: 2 * own,
+      spheres: 1,
+      masks: [MASK],
+      stretch: [Math.fround(1.0034)],
+    });
+    renderer.dispose();
+  });
+
+  it("draws every datum whole with no body surveyed, as R07 built the pass", async () => {
+    const renderer = new WireframeRenderer(await countingRenderEngine());
+    const pass = overlaySubmission(renderer, wireframeList(), TOKENS, CAMERA, VIEWPORT, new Map());
+    expect(
+      pass.draws.filter(
+        (draw) => draw.material.name.endsWith("Surveyed") || Object.keys(draw.textures).length > 0,
+      ),
+    ).toEqual([]);
+    renderer.dispose();
+  });
+
+  it("keeps the casing over the image of the surveyed body's lines, and every other line R02's", async () => {
+    const renderer = new WireframeRenderer(await countingRenderEngine());
+    const list = wireframeList();
+    const surveyed = new Map([[FIXTURE_PLANET, datum]]);
+    const lines = overlaySubmission(
+      renderer,
+      list,
+      TOKENS,
+      CAMERA,
+      VIEWPORT,
+      surveyed,
+    ).draws.filter((draw) => draw.material.name.startsWith("wireframe:lines"));
+    const casing = [...linearColour(TOKENS.surface0)];
+    const drawn = list.lines.filter((line) => line.segments.length > 0);
+    expect(
+      drawn.map((_, i) => [
+        lines[2 * i]?.material.name,
+        [...(lines[2 * i]?.uniforms["colour"] ?? [])],
+        lines[2 * i + 1]?.material.name,
+      ]),
+    ).toEqual(
+      drawn.map((line) => {
+        const material =
+          line.body === FIXTURE_PLANET ? "wireframe:linesSurveyed" : "wireframe:lines";
+        return [material, casing, material];
+      }),
+    );
+    renderer.dispose();
+  });
+});
+
+/** Three bodies' IDs. */
+const A = "0200080020000000.0301";
+const B = "0200080020000000.0302";
+const C = "0200080020000000.0303";
+
+/** A second mask, the third body's. */
+const OTHER_MASK: TextureHandle = { kind: "texture", name: "another coverage mask" };
+
+describe("the datums that give way over the image, from the frame's plan (R10.T16.f)", () => {
+  const figure = { equatorialRadiusM: 2.44e6, polarRadiusM: 2.43e6 };
+
+  it("gives a body handed over with a mask its role's mask, its rotation's columns and its figure's a ÷ c", () => {
+    const plan: SurveyedPlan = {
+      meshes: [
+        { index: 1, role: { kind: "handed-over", coverage: { mask: MASK, rotation: TURNED } } },
+      ],
+      discs: [{ body: B }, { body: A }],
+    };
+    expect(surveyedDatumsOf(plan, [{ id: A, figure }])).toEqual(
+      new Map([[A, { mask: MASK, axes: rotationColumns(TURNED), stretch: 2.44e6 / 2.43e6 }]]),
+    );
+  });
+
+  it("gives none for a body promoted to a mesh, one handed over without a mask, or one not among the bodies", () => {
+    const plan: SurveyedPlan = {
+      meshes: [
+        { index: 0, role: { kind: "promoted" } },
+        { index: 1, role: { kind: "handed-over", coverage: null } },
+        {
+          index: 2,
+          role: {
+            kind: "handed-over",
+            coverage: { mask: OTHER_MASK, rotation: IDENTITY_ROTATION },
+          },
+        },
+        { index: 3, role: { kind: "handed-over", coverage: { mask: MASK, rotation: TURNED } } },
+      ],
+      discs: [{ body: A }, { body: B }, { body: C }],
+    };
+    expect([
+      ...surveyedDatumsOf(plan, [
+        { id: A, figure },
+        { id: B, figure },
+      ]).keys(),
+    ]).toEqual([]);
+  });
+
+  it("gives each of several bodies handed over its own mask and rotation", () => {
+    const plan: SurveyedPlan = {
+      meshes: [
+        { index: 0, role: { kind: "handed-over", coverage: { mask: MASK, rotation: TURNED } } },
+        {
+          index: 1,
+          role: {
+            kind: "handed-over",
+            coverage: { mask: OTHER_MASK, rotation: IDENTITY_ROTATION },
+          },
+        },
+      ],
+      discs: [{ body: A }, { body: C }],
+    };
+    const datums = surveyedDatumsOf(plan, [
+      { id: C, figure: { equatorialRadiusM: 1e6, polarRadiusM: 1e6 } },
+      { id: A, figure },
+    ]);
+    expect([...datums].map(([id, each]) => [id, each.mask, [...each.axes], each.stretch])).toEqual([
+      [A, MASK, [...rotationColumns(TURNED)], 2.44e6 / 2.43e6],
+      [C, OTHER_MASK, [...rotationColumns(IDENTITY_ROTATION)], 1],
+    ]);
   });
 });

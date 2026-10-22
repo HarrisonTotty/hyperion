@@ -28,10 +28,10 @@ import type { LitBodyInput } from "../../view/bodies/draw";
 import type { LitRegime } from "../../view/bodies/regime";
 import { type ProjectionCamera, project, type Viewport } from "../../view/camera/projection";
 import type { CameraPose } from "../../view/camera/pose";
-import type { DrawItem, FrameSubmission } from "../../view/engine/types";
+import type { DrawItem } from "../../view/engine/types";
 import { hostLights, placeLights, sceneHostDiscs } from "../../view/lighting/hostLights";
 import { isLitBody, type LitBodyLighting, lightingFramesOf } from "../../view/lighting/retarded";
-import type { FrameTerrain, PhotorealFrame } from "../../view/photoreal/renderer";
+import type { FrameTerrain, PhotorealFrame, PhotorealOverlay } from "../../view/photoreal/renderer";
 import type { MeterMode } from "../../view/post/meter";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
 import { sceneOrigins, type ViewScene } from "../../view/scene/model";
@@ -73,8 +73,11 @@ export interface PhotorealInputs {
   /** R06's baked cube's HDR draw, or `null` before it is baked. */
   readonly cube: DrawItem | null;
   readonly previousRegimes: ReadonlyMap<BodyIdHex, LitRegime>;
-  /** The symbology's canvas pass, or `null`. */
-  readonly overlay: FrameSubmission | null;
+  /**
+   * The symbology's canvas pass, which the renderer builds once it has the frame's plan (R10.T16.f),
+   * or `null`.
+   */
+  readonly overlay: PhotorealOverlay | null;
   /** The operator's meter where the view is the exposure's source, or `null` (no histogram). */
   readonly meter: MeterMode | null;
   /**
