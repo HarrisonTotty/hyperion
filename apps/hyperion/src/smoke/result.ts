@@ -37,6 +37,51 @@ export const SMOKE_RESULT_CHANNEL = "smoke:result";
 /** The exit codes of Design note 17. */
 export const SMOKE_EXIT = { pass: 0, failed: 1, setup: 2, watchdog: 3 } as const;
 
+/** How long a run of the page's checks may take before the watchdog ends it, ms: its hang detector. */
+export const SMOKE_WATCHDOG_BASE_MS = 180_000;
+
+/**
+ * What part 1's watchdog gains when the captures are asked for, ms: twice the capture groups'
+ * measured total, rounded up to the minute (the 2026-10-22 infra ruling, item 3). The captures
+ * are part 1's, beside its checks, and alone they overran its 180 s.
+ *
+ * @remarks
+ * Measured 2026-10-22 on the development machine (SwiftShader, both variants side by side as
+ * `just test-render` runs them, under the heavy-test and GPU locks, in a quiet window at a 1-minute
+ * load of 0.3 at the start), default / no-subgroups: the comparison 131.5 / 131.9 s, R08.T8.b's
+ * ascent 143.4 / 140.0 s, the terrain 3.0 / 3.5 s, the spike 80.3 / 81.7 s, the occultation
+ * 23.5 / 23.2 s and the eclipse 28.8 / 28.7 s: 410.5 / 409.0 s in all, and part 1 489.6 / 489.2 s.
+ * Twice 410.5 s is 821 s, 14 minutes rounded up. The ruling named five groups, before R08.T8.b
+ * added the ascent (267.1 / 269.0 s without it).
+ *
+ * `scripts/testRender.sh` adds the same allowance to its outer limit, as `captures_allowance_s`,
+ * so that the outer limit stays 120 s over the watchdog; `result.test.ts` holds the two equal.
+ */
+export const CAPTURES_WATCHDOG_MS = 840_000;
+
+/** What sets a run's watchdog: the main process's switches. */
+export interface SmokeWatchdogInputs {
+  /** `--smoke-part`'s value: `1` to `7`, or `all`. */
+  readonly part: string;
+  /** Whether `--smoke-captures` asks for the capture frames. */
+  readonly captures: boolean;
+  /** `--smoke-soak`'s seconds, 0 for none. */
+  readonly soakSeconds: number;
+  /** `--smoke-child`'s seconds, 0 for none. */
+  readonly childSeconds: number;
+}
+
+/**
+ * A run's watchdog, ms: {@link SMOKE_WATCHDOG_BASE_MS}, plus the soak's and the child window's
+ * seconds, plus {@link CAPTURES_WATCHDOG_MS} where the captures are asked for and the run takes
+ * part 1, whose groups they are (part 1 or all of them).
+ */
+export function smokeWatchdogMs(inputs: SmokeWatchdogInputs): number {
+  const { part, captures, soakSeconds, childSeconds } = inputs;
+  const capturesMs = captures && (part === "1" || part === "all") ? CAPTURES_WATCHDOG_MS : 0;
+  return SMOKE_WATCHDOG_BASE_MS + (soakSeconds + childSeconds) * 1000 + capturesMs;
+}
+
 /** Whether a URL may load in the harness: the built page and inline data only. */
 export function isOfflineUrl(url: string): boolean {
   return url.startsWith("file:") || url.startsWith("data:");

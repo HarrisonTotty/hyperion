@@ -41,6 +41,7 @@ import {
   readSmokeResult,
   SMOKE_EXIT,
   SMOKE_RESULT_CHANNEL,
+  smokeWatchdogMs,
 } from "./result";
 import { isOwnPage } from "../main/ipcSender";
 import { describeMachine, nodeMachineSources } from "../main/results";
@@ -170,8 +171,13 @@ const childSwitches =
 // Before `ready`: Chromium reads its switches when the GPU process starts.
 applyGraphicsSwitches(app.commandLine, childSwitches);
 
-/** How long a run may take before the watchdog ends it. */
-const WATCHDOG_MS = 180_000 + (soakSeconds + childSeconds) * 1000;
+/** How long a run may take before the watchdog ends it: part 1's grows with the captures. */
+const WATCHDOG_MS = smokeWatchdogMs({
+  part,
+  captures: capturesDir !== "",
+  soakSeconds,
+  childSeconds,
+});
 
 /** A display as the child-window run records it. */
 function displayInfo(display: Electron.Display): DisplayInfo {

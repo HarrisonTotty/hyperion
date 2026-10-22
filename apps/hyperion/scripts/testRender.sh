@@ -23,9 +23,12 @@
 # 2 (2026-10-21).
 # --part=N runs that part alone (every part by default).
 #
-# --captures=DIR also renders the capture frames (R05.T12.c's atmosphere comparison, R05.T11.c's
-# terrain, R05.T13.b's spike, R07.T9's occultation, R07.T10.c's eclipse scene) and saves them in
-# DIR as PNGs, each named for its variant; they are part 1's.
+# --captures=DIR also renders the capture frames (R05.T12.c's atmosphere comparison, R08.T8.b's
+# ascent, R05.T11.c's terrain, R05.T13.b's spike, R07.T9's occultation, R07.T10.c's eclipse scene)
+# and saves them in DIR as PNGs, each named for its variant; they are part 1's, and they scale part
+# 1's watchdog (`src/smoke/result.ts`'s `smokeWatchdogMs`): it gains `CAPTURES_WATCHDOG_MS`, and
+# part 1's outer limit below gains the same `captures_allowance_s`, so that it stays 120 s over the
+# watchdog. Alone the captures overran part 1's 180 s (2026-10-21).
 #
 # --drop-adapter-switches removes only `--enable-unsafe-webgpu` and `--use-webgpu-adapter`, keeping
 # the headless Ozone, ANGLE and Vulkan switches, so that Electron starts and finds no adapter.
@@ -70,6 +73,12 @@ fi
 if [[ ${#parts[@]} -eq 0 ]]; then
     parts=(1 2 3 4 5 6 7)
 fi
+
+# Each run's outer limit, s: 120 s over its watchdog (`src/smoke/result.ts`'s
+# `SMOKE_WATCHDOG_BASE_MS`, 180 s), and over part 1's with the captures, which gains
+# `CAPTURES_WATCHDOG_MS` (`result.test.ts` holds the allowance equal to it).
+outer_limit_s=300
+captures_allowance_s=840
 
 # Milliseconds since the epoch: GNU date's `%3N`, or Perl's clock where date has no `%N` (macOS).
 now_ms() {
@@ -135,13 +144,17 @@ logs="$(mktemp -d "${TMPDIR:-/tmp}/hyperion-smoke-logs.XXXXXX")"
 for part in "${parts[@]}"; do
     start=$(now_ms)
     first=${#run_parts[@]}
+    limit_s=$outer_limit_s
+    if [[ ${#captures[@]} -gt 0 && "$part" == 1 ]]; then
+        limit_s=$((outer_limit_s + captures_allowance_s))
+    fi
     for variant in "${variants[@]}"; do
         i=${#run_parts[@]}
         run_parts[i]=$part
         run_variants[i]=$variant
         profiles[i]="$(mktemp -d "${TMPDIR:-/tmp}/hyperion-smoke.XXXXXX")"
         env -u DISPLAY -u WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent \
-            setsid timeout --kill-after=10 300 "$electron" \
+            setsid timeout --kill-after=10 "$limit_s" "$electron" \
             ${adapter_switches[@]+"${adapter_switches[@]}"} "${headless_switches[@]}" \
             "--user-data-dir=${profiles[i]}" "$here/out/main/smoke.js" --smoke-variant="$variant" \
             --smoke-part="$part" --smoke-fixture="$fixture" ${captures[@]+"${captures[@]}"} \
