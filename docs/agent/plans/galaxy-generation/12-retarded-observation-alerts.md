@@ -2015,8 +2015,9 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   Client and plan only: no Rust, protocol, binding, server, sim, GPU, golden or guide change.
   Nothing on screen changes: the DOM text is the same live, stale, own and missing, the slot keeps
   its three declarations in the font of the same `dd`, and every class but the slot's is the same.
-  The lane's base is `origin/rendering-and-planets` at `1177743a`, with no merge since. Closes
-  T11.d's deferred finding (4).
+  The lane's base is `origin/rendering-and-planets` at `1177743a`, and its last merge of it is
+  `b7415c5d` (R08.T8.d, which touches none of this task's files). Closes T11.d's deferred finding
+  (4).
   - _Names._ In `spatial/Reading.tsx`: `ReadingState`, `"live" | "stale" | "own"`; `SourceState`,
     `Exclude<ReadingState, "own">`, the state of a value from a source that can go stale (the
     brief's "or a named alias"), which `sourceState(stale: boolean)` returns for the callers that
