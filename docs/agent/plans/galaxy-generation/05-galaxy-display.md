@@ -1546,7 +1546,10 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
   - a label held inside the view where neither side has room (the orchestrator's ruling 149.1)
     can stand over its own mark; _since R07.T16.j it is held 0.25 rem inside the view's edges
     (decision-r07-quality-and-destination, addendum D, D5), and a selection's label that yields to
-    the destination's never takes its other side held back across its own mark;_
+    the destination's never takes its other side held back across its own mark;_ _Mended by
+    P12.T11.e (plan 12): a label whose mark is in view is no longer held back across it; where
+    neither side has room it is not drawn, the selection's too, and only a pinned label whose mark
+    lies outside the view is still held inside._
   - a destination's reticle, when one is drawn, stands 0.25 rem inside its label's box. _Mended by
     R07.T16.h: the destination is four chevrons, and its label stands beyond them._ _Since
     T16.h's follow-up (addendum B) it stands above or below the whole set instead._

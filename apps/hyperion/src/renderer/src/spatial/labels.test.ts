@@ -22,6 +22,7 @@ import {
   placeIsRight,
   placeIsUpper,
   SIZE_CLASS_REM,
+  squareBoxPx,
 } from "./symbols";
 import { vec3 } from "../geometry/vec3";
 import { stylesheetRule } from "../test/stylesheet";
@@ -248,19 +249,32 @@ describe("placeLabels", () => {
     expect((label?.leftPx ?? 0) + (label?.widthPx ?? 0)).toBeCloseTo(380 - 6 - OFFSET_AT_TWO_PX, 9);
   });
 
-  it("keeps a label whole and 0.25 rem inside a view too narrow for it on either side of its mark", () => {
+  it("draws no label for a mark in a view too narrow for it on either side, rather than hold it back across the mark", () => {
+    // "9FG 567Z04 B-3", 121.52 px wide, its box 14.75 px from its mark's centre: at the right it
+    // would end at 216.27 px, past 156, and at the left start at -56.27, short of 4 (P12.T11.e).
+    const narrow: Viewport = { widthPx: 160, heightPx: 100, remPx: 16 };
+
+    expect(
+      placeLabels([mark("a", 1, "9FG 567Z04 B-3")], [anchor("a", 80, 50)], narrow, AT_TWO, null),
+    ).toEqual([]);
+  });
+
+  it("holds a label 0.25 rem inside the top edge beside its mark, where one side has room", () => {
     const narrow: Viewport = { widthPx: 160, heightPx: 100, remPx: 16 };
     const [label] = placeLabels(
       [mark("a", 1, "9FG 567Z04 B-3")],
-      [anchor("a", 80, 4)],
+      [anchor("a", 10, 4)],
       narrow,
       AT_TWO,
       null,
     );
 
-    expect(label?.leftPx).toBeGreaterThanOrEqual(4);
+    expect([label?.side, label?.leftPx, label?.topPx]).toEqual([
+      "right",
+      10 + 6 + OFFSET_AT_TWO_PX,
+      4,
+    ]);
     expect((label?.leftPx ?? 0) + (label?.widthPx ?? 0)).toBeLessThanOrEqual(156);
-    expect(label?.topPx).toBe(4);
   });
 
   it("drops a lesser label that overlaps one already placed", () => {
@@ -1012,5 +1026,129 @@ describe("placeLabels off the observer's eye (plan 12, P12.T11.c)", () => {
     expect(
       placeLabels(chosen, anchors, VIEWPORT, AT_TWO, "b", { pinnedIds: ["a"], observer: null }),
     ).toEqual(placeLabels(chosen, anchors, VIEWPORT, AT_TWO, "b", { pinnedIds: ["a"] }));
+  });
+});
+
+describe("placeLabels on the compact chart's 256 px stage (plan 12, P12.T11.e)", () => {
+  /** The compact `LOCAL CHART`'s stage at 1280 × 720 and 100%. */
+  const STAGE: Viewport = { widthPx: 256, heightPx: 262, remPx: 16 };
+  const AT_ONE = reticleStrokesCssPx(1);
+  /** A 16-character designation, 138.88 px wide at 0.62 em a character. */
+  const DESIGNATION = "GDG 0E0V00 E-141";
+  /** A class-4 symbol's radius, 0.5 rem: its label's box starts 18 px from its centre at 1. */
+  const RADIUS_PX = 8;
+
+  /** The selection's bracket's box about `at` at a ratio of 1, to its line's outer edge. */
+  function bracketBoxAbout(at: Anchor): BoxPx {
+    return squareBoxPx(at, bracketPx(AT_ONE, at) + AT_ONE.markStrokePx / 2);
+  }
+
+  it("draws no label for a centred selection whose label fits on neither side, and none over its bracket", () => {
+    // Held inside the stage its label would run from 4 to 142.88 px across, over the mark at 128.
+    const at = anchor("s", 128, 131, RADIUS_PX);
+    const placed = placeLabels(
+      [mark("s", 1, DESIGNATION), mark("n", 0, "N1")],
+      [at, anchor("n", 40, 40)],
+      STAGE,
+      AT_ONE,
+      null,
+      { pinnedIds: ["s"] },
+    );
+
+    expect([
+      placed.map((label) => label.id),
+      placed.every((label) => boxGapPx(label, bracketBoxAbout(at)) > 0),
+    ]).toEqual([["n"], true]);
+  });
+
+  it("draws no label for an unselected mark at the stage's middle", () => {
+    expect(
+      placeLabels(
+        [mark("m", 1, DESIGNATION)],
+        [anchor("m", 128, 131, RADIUS_PX)],
+        STAGE,
+        AT_ONE,
+        null,
+      ),
+    ).toEqual([]);
+  });
+
+  it.each([
+    [1, 95, "right"],
+    [1, 96, null],
+    [1, 128, null],
+    [1, 160, null],
+    [1, 161, "left"],
+    [1.5, 96, "right"],
+    [1.5, 97, null],
+    [1.5, 159, null],
+    [1.5, 160, "left"],
+  ] as const)(
+    "at a ratio of %s labels a 16-character designation about a class-4 mark %s px across on its side with room: %s",
+    (ratio, xPx, side) => {
+      // Its box starts 18 px out at 1 and 16.75 at 1.5, so it has no side from 95.12 to 160.88 px
+      // across at 1 and from 96.37 to 159.63 at 1.5.
+      const [label] = placeLabels(
+        [mark("m", 1, DESIGNATION)],
+        [anchor("m", xPx, 131, RADIUS_PX)],
+        STAGE,
+        reticleStrokesCssPx(ratio),
+        null,
+      );
+
+      expect(label?.side ?? null).toBe(side);
+    },
+  );
+
+  it("keeps the selection's label on the right 2 rem from the left edge, as before", () => {
+    const [label] = placeLabels(
+      [mark("s", 1, DESIGNATION)],
+      [anchor("s", 32, 131, RADIUS_PX)],
+      STAGE,
+      AT_ONE,
+      null,
+      { pinnedIds: ["s"] },
+    );
+
+    expect([label?.side, label?.leftPx]).toEqual(["right", 32 + 18]);
+  });
+
+  it("draws no label for a selection held back on both sides, and places the destination's as with no selection", () => {
+    // The selection's label, held inside, would stand far from the destination's, so only the
+    // hold's refusal drops it.
+    const points = [mark("d", 0, "DEST"), mark("s", -1, DESIGNATION)];
+    const anchors = [anchor("d", 60, 60), anchor("s", 128, 131, RADIUS_PX)];
+    const placed = (selectedId: string | null): ReadonlyArray<PlacedLabel> =>
+      placeLabels(chooseLabels(points, selectedId, "d", 0), anchors, STAGE, AT_ONE, "d", {
+        pinnedIds: [selectedId, "d"].filter((id): id is string => id !== null),
+        unselectedIds: new Set(chooseLabels(points, null, "d", 0).map((point) => point.id)),
+      });
+
+    const selected = placed("s");
+
+    expect([selected.map((label) => label.id), labelOf(selected, "d")]).toEqual([
+      ["d"],
+      labelOf(placed(null), "d"),
+    ]);
+  });
+
+  it("takes no account of a chosen label that would be held back across its own mark, which is never drawn", () => {
+    // Held inside, the label of the mark at (140, 100) would run from 4 to 142.88 px across and
+    // 91.25 to 108.75 px down, over both of the destination's upper places, from 97.31 to 114.81 px
+    // down; it is not drawn, and the destination keeps the upper right.
+    const at = anchor("a", 60, 140);
+    const placed = placeLabels(
+      [mark("m", 9, DESIGNATION), mark("a", 1, "DEST")],
+      [anchor("m", 140, 100, 0), at],
+      STAGE,
+      AT_ONE,
+      "a",
+      { pinnedIds: ["a"] },
+    );
+
+    expect([placed.map((label) => label.id), placeOf(labelOf(placed, "a"), at)]).toEqual([
+      ["a"],
+      "upper-right",
+    ]);
   });
 });

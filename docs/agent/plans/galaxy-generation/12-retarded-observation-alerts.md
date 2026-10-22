@@ -726,6 +726,23 @@ summary.
   the chart's and the orbit map's stale furniture, both pages' stale text, and the compact scale
   bar's rule. Acceptance: `pnpm test`, `just ci`, and main's look at 1920 × 1080, 1280 × 720 and
   150%, live and stale.
+- **P12.T11.e No label held back across its own mark, and the age on its own row in both modes**
+  (added 2026-10-22 by main's UX decision on the series' remaining follow-ups; built in
+  `lane/80-p12-t11e-followups`, recorded at the end of Risks). Main's looks at T11.c's and T11.d's
+  landings found that the compact chart's 256 px stage has no room on either side of a centred
+  selection's mark for its label, which ruling 149.1's hold then set back across its own mark and
+  bracket, and that the readout's `AGE … · AT UT +0.00 yr` fills its half row at 1920 × 1080, so
+  that a chart time of 10 yr or more, or a five-character age, wraps it after `AT`. A label whose
+  mark is in view is now drawn only beside its mark, else not at all, the selection's too, and the
+  hold stands for a pinned mark out of the view alone; `AGE` takes the readout's row in both modes,
+  its chart time in `NOW` right-aligned in `TIME_WIDTH_CH`'s slot; and the guide's `DISPLAY TIME`
+  cell says the display time is the console's own and never stale (main's edit). Files: under
+  `apps/hyperion/src/renderer/src/`: `spatial/labels.ts` and `displays/galaxy/SystemReadout.tsx`,
+  tests; the guide's `DISPLAY TIME` row; plan 05's note on labels beside reticles. Tests: Vitest
+  for no label where neither side has room, the selection's and the rest's, on a 256 px stage and
+  in a view, the top edge's hold, the destination's label as with no selection, and the age's row
+  and slot in both modes and at the clock window's edges. Acceptance: `pnpm test`, `just ci`, and
+  main's look at 1920 × 1080, 1280 × 720 and 150%.
 
 ### P12.T12 Client: alert list and chart marks
 
@@ -1662,7 +1679,8 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     its refusal's words, would follow § Numbers as `DRIVE RANGE`'s now does (UX review; the brief
     kept it). (2) In `NOW` the time after `AT` has no fixed slot, so `yr` moves as `CHART TIME`
     changes; an 8 ch slot would make the reading as long as its longest, which the UX review
-    reckons wraps after `AT` in its half row at 1920 × 1080; main's look measures. (3) The guide's
+    reckons wraps after `AT` in its half row at 1920 × 1080; main's look measures. _Closed by
+    P12.T11.e._ (3) The guide's
     grouping bullet credits the thin space to the SI Brochure's §5.4.4, which says "a space"; the
     thin, fixed space is NIST SP 811's (§10.5.3; science check). (4) The guide's observer bullet
     says marks' labels keep off the eye "as they keep off the core arrow", but the selection's
@@ -1788,7 +1806,8 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     "Data states" says each state "looks the same everywhere"; the blocks are outside this task.
     (2) The guide says the console's own values are never stale only of `BASELINE` and
     `PAD WIDTH`; its `DISPLAY TIME` row could say so of the display time, which main's ruling now
-    leaves unmarked and unmuted (UX review; the brief allows no other guide edit). (3) Under a
+    leaves unmarked and unmuted (UX review; the brief allows no other guide edit). _Closed by
+    P12.T11.e._ (3) Under a
     `STARS` filter a stale `SYSTEMS` count reads `… SHOWN: REMNANTS S`, its `S` after the filter's
     name, the console's own live choice, as look-73 found `2 ly S` after the scale; the marks could
     follow the figures instead (UX review; the place is P06.T37's and the brief's §5 A4 kept it).
@@ -1796,3 +1815,154 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     which renders as `own` alone; one union prop (a source that is the answer's, stale or not, or
     the console's own) would rule the pair out, but renames the brief's `stale` (TypeScript review;
     main's call).
+- **P12.T11.e as built (`lane/80-p12-t11e-followups`, 2026-10-22, at `GENERATOR_VERSION` 23).**
+  Client, guide and plan only: no Rust, protocol, binding, server, sim, GPU or golden change, and
+  nothing generated moves. P06.T24.c and the 23 bump are on the base, and the lane's last merge of
+  `origin/rendering-and-planets` is `174d583c` (P14.T52.a, nothing under `apps/`). Main's UX
+  decision of 2026-10-22 found none of the series' twelve remaining items a blocker: it had the
+  two built here, the hold and the `NOW` slot, made the guide's `DISPLAY TIME` cell its own edit,
+  made here as main wrote it, and recorded the other nine itself. Closes T11.c's and T11.d's
+  deferred findings (2).
+  - _Names._ No export is added or renamed. In `spatial/labels.ts`, inside `placeLabels`, the
+    private `inPlace(label, anchor)`: whether a label on its mark's line stands beside its mark
+    (`besideItsMark`) or its mark is out of the view; `lineLabels` now holds only the labels in
+    place. The docs of `lineLabel`, `besideItsMark`, `LabelSurroundings.pinnedIds` and
+    `placeLabels`' remarks say what is now true. In `displays/galaxy/SystemReadout.tsx`, `AtTime`
+    sets its time in a `system-readout__value--fixed` slot in both modes, `TIME_WIDTH_CH` (from
+    `chartReadings.ts`) in `NOW` and `EMITTED_WIDTH_CH` as observed, and the age's `Reading` is
+    always `wide`, so the private `ageReading` no longer returns the `formed` it was read for. The
+    docs of `destinationLabel`'s `others` and `placeLabels`' remarks name the labels the
+    destination's is placed against. The guide's `DISPLAY TIME` cell is main's, word for word;
+    Prettier re-padded no other line.
+  - _A, the hold._ As briefed. A label whose mark is in view is drawn only where `besideItsMark`
+    holds: the rest are dropped; the selection's, held back on its first side, tries its other
+    side under the conditions it takes it under where it yields (clear of the destination's label
+    and chevrons and of the eye, and beside its mark), else is not drawn; the destination's own
+    rule is unchanged. A pinned mark out of the view keeps the 0.25 rem hold, and the hold at the
+    top and bottom edges, which leaves a label beside its mark, stands. For a mark in view the
+    first side is held back only where both are, since `lineLabel` flips to the left only where
+    the right would run past the right edge, and the right never runs past the left edge for a
+    mark at x ≥ 0; so the other side never rescues it, and the code tries it anyway, as briefed.
+  - _Choice: the destination's label avoids no label held back._ A chosen label that would be held
+    back across its own mark in view is left out of the labels the destination's is placed
+    against, as a label whose mark is out of view already was (R07.T16.j), since with no selection
+    it is never drawn (addendum C, C1: placed "as though no mark were selected"). So the
+    destination's label may now take a place that such a label's held box covered. Its own places
+    and rule are unchanged, and selecting still never moves it.
+  - _A's reckoning_ (estimated boxes, as `placeLabels` reckons them; the stage 256 px wide, its
+    edge clearance 4 px). A 16-character designation is 138.88 px wide (16 × 0.62 em at
+    0.875 rem). Its near edge stands the mark's radius, 0.5 rem and 2.00 px out at a ratio of 1,
+    and 0.75 px at 1.5, where δ is 0 and the outline 1.5 px. About a class-4 mark (radius 8 px:
+    18 px out at 1, 16.75 at 1.5) the right side fits to x 95.12 and the left from x 160.88 at 1,
+    and to 96.37 and from 159.63 at 1.5: so marks from 95.12 to 160.88 px across (65.76 px, about
+    the stage's middle quarter) now have no label at 1, and from 96.37 to 159.63 (63.26 px) at 1.5.
+    About a class-0 mark (radius 4 px) the band is 99.12–156.88 (57.76 px) at 1 and 100.37–155.63
+    (55.26 px) at 1.5. A label of n characters whose box starts d px out has no side over a band
+    2d + 17.36n − 248 px wide, so about a class-4 mark at 1 no label of 12 characters or fewer
+    loses its side. A stage wider than 2 × (18 + 138.88 + 4) = 321.76 px always has a side for the
+    16-character label, so the stacked page's 1036 px stage and the orbit map's 787 px are
+    unchanged. The tests pin both ratios' edges (95 and 96, 160 and 161 px at 1; 96 and 97, 159
+    and 160 at 1.5).
+  - _B, the age._ As briefed. The age's reading is `wide` in both modes, so at 1920 × 1080 `MASS`
+    stands alone on its row in `NOW` as it does as observed, and the two modes set the readout's
+    rows alike but for the rows `AS OBSERVED` adds; with nothing selected the age's em dash takes
+    the row too. Its time stands right-aligned in a fixed slot in both modes: in `NOW`
+    `TIME_WIDTH_CH`, 9 ch, the furniture's `UT` slot, so that the chart time takes one width
+    wherever it stands (`-1000.00` and `+1000.00` are 8 characters, the furniture's 1 ch to spare
+    kept); as observed `EMITTED_WIDTH_CH`, 11 ch, as before. `UT <time> yr` stays whole and `· AT`
+    does not, in both modes. No comment in `styles.css` goes false: those of
+    `.system-readout__value--fixed` and `.system-readout__beside .system-readout__value` hold in
+    both modes, and the file is unchanged.
+  - _B's reckoning_ (from look-74's figures; a `ch` of the readout's figures is 9.1 px). At
+    1920 × 1080 the age's reading in `NOW` takes the row from observed's left edge, the wide `dd`
+    starting in the first value column, with a slot 2 ch (18.2 px) shorter: for the same age text
+    it ends at 1541 − 18.2 = 1522.8 px, 345.2 px inside the readout's edge at 1868, on one line.
+    Look-74's two figures agree on the left edges: with `+0.00`'s 5 ch the half row's reading ends
+    at 1867.2 and observed's ends at 1541 with 11 ch, so the half row starts 380.8 px right of the
+    row, about half the readout, as its two-column grid sets it. The slot is fixed, so
+    `UT -1000.00 yr` (8 of its 9 ch) ends where `UT +0.00 yr` does, and the longest `NOW` reading
+    is set by the age alone: a five-character age, `0.150 Myr` at `UT -1000.00 yr`, ends at 1531.9
+    (336.1 inside). The formatter writes a younger age with more figures (`0.0150 Myr`, six, 1541.0;
+    `0.00150 Myr`, seven, 1550.1), and the row holds 37 characters more than a four-character age
+    (345.2 ÷ 9.1), so every `NOW` reading stands on one line. At 1280 × 720 and 150%, one reading
+    to a line, the reading breaks after `AT` as before: its first line is unchanged, and its time
+    line is 4 ch (36.4 px) longer than the unslotted `UT +0.00 yr` and 2 ch shorter than
+    observed's in its 11 ch slot, which look-74 found inside the column (53.8 and 59.4 px to
+    spare), so it fits with at least 72.0 and 77.6 px, at one width for every chart time.
+  - _Tests (21 new, 2 changed, as run)._ `spatial/labels.test.ts` (543 to 558): "keeps a label
+    whole and 0.25 rem inside a view too narrow for it on either side of its mark", which pinned
+    the hold for a mark in view, is now two: in its 160 px view the mark at x 80 draws no label,
+    and a label at the top edge is held 0.25 rem inside it beside its mark; and a new block,
+    "placeLabels on the compact chart's 256 px stage" (14): the centred selection with no label
+    and none over its bracket, an unselected mark at the middle, the side or none at nine places
+    on both ratios' edges, the selection 2 rem from the left edge on the right as before, the
+    selection held back on both sides beside a destination whose label stands as with no
+    selection (C1), and the destination's label taking no account of a label that would be held
+    back. `spatial/SpatialView.test.tsx` (2, in a block of their own): a selection at the view's
+    centre has no label element in a 256 px stage and its label in a 1036 px one.
+    `displays/galaxy/SystemReadout.observed.test.tsx` (17 to 21): "keeps the age's slot in now,
+    its time after a middle dot in no fixed slot" becomes "takes the readout's row for the age in
+    now, its time in the chart time's slot", its text unchanged; new: the chart time at the clock
+    window's edges, `-1000.00` and `+1000.00`, within `TIME_WIDTH_CH` (2), `NOT YET FORMED` taking
+    the row, and a row without its observation, asked observed, in `NOW`'s slot. Every other
+    existing test passes unchanged, among them "draws no label for a selection at the view's right
+    edge whose other side would be held back across its own mark", "starts a pinned label held
+    inside at the left 0.25 rem in", "draws no label for the selection where its other side is not
+    clear either" and "keeps the age's time whole with its system's label and its unit" in both
+    modes; no other test pinned the hold for a mark in view. Against the base's code the 11
+    refusals (10 in `labels.test.ts`, the 256 px case in `SpatialView.test.tsx`) and the 4 slot
+    tests fail, and the rest pass. The `spatial` and `displays/galaxy` suites: 56 files, 2391
+    tests; the gate's other planned files (`App`, `displays/system`, `lib/serverLink`,
+    `view/engine/engineBoundary`, `wasm/surfaceImports`): 20 files, 348 tests.
+  - _Review._ TypeScript: a test asserted a label present with `queryAllBy*`, now `getBy*` through
+    `overlayLabel` in a test of its own; `ageReading`'s unread `formed` removed. UX: the top and
+    bottom edges, deferred finding (1), asked on the issue; two guide sentences proposed, deferred
+    findings (2) and (3); and, before this task, (4) and (5); the `DISPLAY TIME` cell checked true
+    against the code. Plan conformance: the galactic-axis case carried into the look below; the
+    docs of the labels the destination's is placed against, and two phrases here, reworded.
+  - _Deferred findings (2026-10-13 rule)._ (1) A selection whose centre lies just past the top or
+    bottom edge, up to about 14 px for a class-4 mark at a ratio of 1, inside the band where
+    neither side has room, keeps the hold, since `inView` reads the centre; and the canvas still
+    draws the part of its symbol and bracket inside the view, which the held label runs across: at
+    (128, -2) on the 256 × 262 px stage the label stands at x 4–142.88, y 4–21.5, the bracket's
+    box at x 114–142, y -16–12, and the label cuts in and out as the mark crosses the edge. The
+    left and right edges are safe, where a mark whose bracket reaches into the view always has a
+    side. The brief keeps the hold for a mark outside the view by `inView`, so it is asked on the
+    issue; the lane's lean is to hold only a mark whose bracket lies wholly outside the view (UX
+    review's must-fix). (2) The guide's spatial-display bullets do not say that a label with room
+    on neither side is not drawn, as its Views paragraph says of a view's; the UX review proposes
+    "A mark's label that has room on neither side of its mark is not drawn, the selection's too,
+    and the bracket, the list and the readout still name the mark; only the label of a selection
+    whose bracket lies wholly outside the view is held `0.25rem` inside its edge" (main decides).
+    (3) § Data states says "Loss of the server link makes every live value on the console stale at
+    once", and only the rows of `DISPLAY TIME`, `BASELINE` and `PAD WIDTH` except the console's own
+    values; the UX review proposes "A value the console keeps itself, such as the `DISPLAY TIME`,
+    `BASELINE` or `PAD WIDTH`, is not a live value: it never goes stale, and on loss of the link
+    stays in `--text` with no `S`" (main decides). (4) The age's value has no fixed slot, from 3 to
+    7 characters (`123`, `4.57`, `0.150`, `0.00150`), so the time's slot still moves between
+    selections, and in `NOW` as a young system's age crosses 0.1 or 1 Myr while the chart time
+    steps (§ Numbers: "A field has a fixed width sized for its longest possible value"; before
+    this task; UX review). (5) `formatAge` writes ages below 1 Myr in `Myr` (`0.150 Myr`), where
+    § Numbers says "ages are in `kyr`, `Myr` and `Gyr`" (before this task; UX review). (6) A
+    selection centred on the 256 px stage, as after centring the chart on it, now has no label on
+    the chart; a place above or below its bracket, as the destination's has, would keep it named
+    there (plan-conformance review; main's ruling chose not drawn). (7) The selection's other side
+    never rescues a first side held back for a mark in view (A above); kept as briefed, it could be
+    dropped from that path (TypeScript and plan-conformance reviews).
+  - _For main's look._ The compact `LOCAL CHART` at 1280 × 720 and 150%, in `NOW` and `OBSERVED`:
+    the chart centred on its selection, its bracket drawn and no label over its own mark or
+    bracket; a label coming back as a cut once its mark leaves the band (95.12–160.88 px across at
+    1 for a 16-character designation about a class-4 mark); every label of a mark with a side as
+    in look-75; a selection in the band crossing the top or bottom edge (deferred finding (1)); the
+    observer moved to the centre on the selection, the eye in the bracket with no label beside it
+    (item 7); a destination beside a mark whose label has no side, which may now take a place that
+    label's held box covered; the stage's heights, unchanged, against P06.T24.c's figures (262 and
+    228 px at 100%, 266 and 232 at 150%), and its galactic-axis case (the chart centred on
+    [0, 0, 3000] ly, 212 px in `OBSERVED` at 100% and 216 at 150%, from plan 06's P06.T24.c
+    record); and B612's real widths against the 0.62 em estimate the band's edges rest on. The
+    stacked page at 1920 × 1080: every label as in look-75. The readout at 1920 × 1080: `AGE` on
+    its own row in `NOW` at `CHART TIME` +0.00 and -1000, one line, its time in its 9 ch slot,
+    reckoned to end near 1523 for a four-character age, and a young system's longer age; `MASS`
+    alone on its row, with nothing selected too; as observed, unchanged. The readout at
+    1280 × 720 and 150%: the break after `AT` as before, the time's line one width, and no
+    sideways scroll.
