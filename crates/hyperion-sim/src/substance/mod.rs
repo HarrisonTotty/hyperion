@@ -36,6 +36,8 @@
 //! which [`liquid_properties`] resolves into a palette's liquid record). [`formation`] gives each
 //! gas row's equilibrium constant of formation by temperature, from NASA's CEA records (P14.T49.d),
 //! and [`rayleigh`] each measured gas row's Rayleigh cross section at 550 nm (P14.T24.h.a).
+//! [`aloft`] gives each condensate's law aloft, where its vapour saturates in an air or an envelope
+//! (P14.T49.b's last piece, built with P14.T52.c).
 //! Every value names its sources and their licence basis ([`Source`], [`Basis`];
 //! decision-composition §5). P14.T49.b adds the later rows, the gases' molecular constants, the
 //! phase diagrams and the condensed columns; P14.T49.c–e the condensed optics, the thermochemistry
@@ -57,6 +59,7 @@
 //! rule yet produces is reachable data, labelled so where a reader meets it.
 
 pub mod aerosol;
+pub mod aloft;
 pub mod condensed;
 pub mod diagram;
 pub mod element;

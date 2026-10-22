@@ -875,8 +875,12 @@ mod tests {
     use crate::substance::{by_key, ids};
 
     /// The files outside this module and its tables whose reads of its API sit behind a named
-    /// hold, each with it: none yet. **P14.T54.b deletes this list** with the tripwire below.
-    const HELD: [(&str, &str); 0] = [];
+    /// hold, each with it: P14.T52.c's loop, a pure module. **P14.T54.b deletes this list** with
+    /// the tripwire below.
+    const HELD: [(&str, &str); 1] = [(
+        "planetary/chem/condense.rs",
+        "P14.T52.c's condensation loop, which nothing on the record calls before P14.T54.b",
+    )];
 
     /// The forms by which other code would read this module's extinction or its tables: its calls,
     /// its paths and its types, and the tables' name.
@@ -970,8 +974,8 @@ mod tests {
     /// (decision-bump-plan-after-22 §1.3): no code of the crate's `src/` outside this module and
     /// its seven tables names [`API_PATTERNS`], every file read in sorted order by the substance
     /// tripwires' walk (`substance::thermal`'s tests'), but each inline test module, every file an
-    /// out-of-line test module declares, [`DECLARATIONS`] and [`HELD`]'s files (none). **P14.T54.b
-    /// deletes this tripwire** when P14.T52.c and T24.c first read it.
+    /// out-of-line test module declares, [`DECLARATIONS`] and [`HELD`]'s files (P14.T52.c's
+    /// loop). **P14.T54.b deletes this tripwire** when P14.T52.c and T24.c first read it.
     #[test]
     fn substance_aerosol_nothing_on_the_record_reads_the_extinction_yet() {
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");

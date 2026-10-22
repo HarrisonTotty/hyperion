@@ -17,6 +17,10 @@
 //!   chromophore hazes, and the thermal dissociation of H₂O, TiO and VO on ultra-hot daysides
 //!   (P14.T52.b), each rule with its source and range, on the Surface path; nothing on the record
 //!   reads them until P14.T54.b.
+//! - [`condense`]: condensation aloft ([`Condensation`](condense::Condensation), P14.T52.c): each
+//!   condensate's deck along a gas's temperature profile, over the registry's laws aloft, its
+//!   cold trap, its column by Ackerman and Marley's (2001) sedimentation and its mode of particles,
+//!   on the Surface path; nothing on the record reads it until P14.T54.b.
 //! - [`quench`]: where an envelope's CO, CH₄, NH₃, HCN and CO₂ stop following the equilibrium
 //!   as the gas rises ([`Quench`](quench::Quench), P14.T52.b), by Zahnle and Marley's (2014)
 //!   relations, and the gas above those levels, on the Surface path; nothing on the record reads
@@ -71,6 +75,7 @@
 //! Grevesse's (2021) photospheric 0.59 ± 0.08 is the recorded alternative (plan 14's Risks).
 //! Both are scales on which a relative \[C/O\] is laid, which is what the surveys measure.
 
+pub mod condense;
 pub mod envelope_abundances;
 pub mod equilibrium;
 pub mod inventory;
