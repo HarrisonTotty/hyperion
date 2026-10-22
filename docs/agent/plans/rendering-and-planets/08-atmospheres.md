@@ -7956,6 +7956,13 @@ it rides a bump.
       `tablesCpu.test.ts` 163 s (its three gate runs), `marchBand.test.ts` 113 s,
       `limbColour.test.ts` 8.9 s, `marchSteps.test.ts` 10.4 s, `precision.test.ts` 2.7 s. A finding
       for the suite's time: `marchGate.test.ts` could move to the slow tier if `pnpm test` needs it.
+    - _Split by medium_ (2026-10-22, main's infra ruling; not a plan task). The gate's three media
+      are three files, which Vitest runs side by side: `marchGate.test.ts` (R05's Earth, and the
+      rays' count), `marchGateMeasured.test.ts` (the measured Earth) and `marchGateSlab.test.ts`
+      (the slab Earth), on the machinery in `test/marchGate.ts`. Every test, record and bound is
+      unchanged. At 4 workers (8 threads, 1-minute load 4.6–6.0 from another lane's four-thread
+      run): the three together 228 s, each alone 112, 153 and 177 s, against 398 s for the one file
+      before. Every medium stays in `just ci`; the slow tier was not taken.
   - _The smoke_ (`smoke/atmosphere.ts`'s `checkMarchBand`, "R08.T8.a the march band", part 6 after
     R08.T9.b's groups). On R08.T6.f's Earth (WGS 84, `EARTH_GRAVITY`, R05's Earth; the oblate twins),
     in a 64 × 32 frame from inside the air along the horizon (`bandCamera`: 0.5° under the visible
