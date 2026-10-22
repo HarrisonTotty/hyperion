@@ -356,6 +356,55 @@ describe("HillaireAtmosphere", () => {
     expect(draw.textures["sceneDepth"]).toBe(SCENE.depth);
   });
 
+  // From the march band's upper edge up the composite reads neither the sky view nor the aerial
+  // perspective, so each waits for a reader (lever 2 of `decision-r08-t8-leans.md` §8, R08.T8.d).
+  it("from the march band's upper edge up dispatches the ray march alone, and each other table at its reader's ask, once", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    const orbit: AtmosphereCamera = { ...CAMERA, positionM: pointAt(0, 400_000) };
+    engine.dispatched.length = 0;
+    atmosphere.drawFrame(orbit, [NOON], SCENE);
+    expect(engine.dispatched.map((d) => d.kernel)).toEqual(["atmosphere ray march"]);
+    atmosphere.skyView(orbit);
+    atmosphere.skyView(orbit);
+    expect(atmosphere.aerialPerspective(orbit)).not.toBeNull();
+    expect(atmosphere.frameTables.aerial.name).toBe("atmosphere aerial perspective");
+    expect(engine.dispatched.map((d) => d.kernel)).toEqual([
+      "atmosphere ray march",
+      "atmosphere sky view",
+      "atmosphere aerial perspective",
+    ]);
+    // A reader's late table takes its own frame's view: the view uniform the ray march took.
+    const [march, sky, aerial] = engine.dispatched;
+    expect(sky?.bindings.uniforms["view"]).toEqual(march?.bindings.uniforms["view"]);
+    expect(aerial?.bindings.uniforms["view"]).toEqual(march?.bindings.uniforms["view"]);
+    // The next frame drops what the last one left unread.
+    engine.dispatched.length = 0;
+    atmosphere.drawFrame(orbit, [DUSK], SCENE);
+    atmosphere.drawFrame(CAMERA, [DUSK], SCENE);
+    expect(engine.dispatched.map((d) => d.kernel)).toEqual([
+      "atmosphere ray march",
+      "atmosphere sky view",
+      "atmosphere aerial perspective",
+      "atmosphere ray march",
+    ]);
+    atmosphere.skyView(CAMERA);
+    expect(engine.dispatched).toHaveLength(4);
+  });
+
+  it("from the march band's upper edge up still makes the kernel arm's three tables, and leaves the frame's own waiting", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    const orbit: AtmosphereCamera = { ...CAMERA, positionM: pointAt(0, 400_000) };
+    atmosphere.drawFrame(orbit, [NOON], SCENE);
+    engine.dispatched.length = 0;
+    atmosphere.drawKernelArm(orbit, [NOON], SCENE);
+    expect(engine.dispatched).toHaveLength(3);
+    atmosphere.skyView(orbit);
+    expect(engine.dispatched.at(-1)?.kernel).toBe("atmosphere sky view");
+    expect(engine.dispatched).toHaveLength(4);
+  });
+
   it("makes nothing new after the first frame, and grows the ray-march target only past its size", async () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
