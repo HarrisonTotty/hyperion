@@ -378,8 +378,8 @@ throttling in 35,900 s of uptime.
    with `source: "descent-spike"`, and the other plans' benchmarks recorded in their "as built"
    notes become `plan-benchmark` records by hand, each citing its plan and task (T8.a). The
    directory is not in `.claude/CLAUDE.md`'s documentation layout, and adding it is the owner's
-   decision (README, "Awaiting the owner"): T1.c drafts the line and the owner signs off; nothing
-   in this plan edits `.claude/`.
+   decision (README, "Awaiting the owner"): T1.c drafts the line, ruled 2026-10-19
+   (`signoff-12.md`, item 34), and the owner applies it; nothing in this plan edits `.claude/`.
 
 2. **What "replaced" means for the brainstorm.** The brainstorm says the implementing plan should
    replace its estimates with measured figures and keep them under version control. The record and
@@ -1124,9 +1124,12 @@ generator version it ran at. The plan reserves nothing in the generator.
 - **Memory categories named by their owners.** The five names this plan asked for are now in the
   owning plans' tasks: `height-cache` (R05.T11.a), `atmosphere-tables` (R05.T12.b) and
   `atmosphere-view` (R05.T12.c), which R08 keeps for its widened, per-sun and thick tables (R08
-  Consumes R05); and `coarse-field-gpu` (R10.T7, T10.d) and `shadows` (R10.T9.b). The coarse
-  field's GPU copy is R10's coverage mask and class map, and R09 allocates nothing on the GPU, so
-  R09 names none. T3.a only checks that `MEMORY_ITEMS` maps them.
+  Consumes R05); and `coarse-field-gpu` (R10.T7, T10.d, T10.g) and `shadows` (R10.T9.b). The
+  coarse field's GPU copy is R10's coverage mask, class map and, since R10.T10.g, the disc's normal
+  map (1,597,536 B, about 1.52 MiB, at level 8), and R09 allocates nothing on the GPU, so R09 names
+  none. The normal map's CPU copy on the render thread, as large, is not counted under
+  `coarse-field-gpu` (R10's Risks, "Deferred findings (2026-10-13 rule) (R10.T10.g)"). T3.a only
+  checks that `MEMORY_ITEMS` maps them.
 - **R05's memory run and R12's differ on purpose.** R05's criterion row keeps the brainstorm's 15 MB
   synthetic field (R05 Risks, "The coarse field's size"); `arrival-memory` measures a real field,
   about 12 MB for an Earth (R09 Design note 17).

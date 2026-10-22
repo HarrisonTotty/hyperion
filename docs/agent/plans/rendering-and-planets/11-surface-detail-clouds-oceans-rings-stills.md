@@ -1337,13 +1337,15 @@ ejecta-block population), shape parameter or authoritative dip opens a new tag a
       derived or stand-in;
     - every member that is not modelled is absent, never 0;
     - an R09 follow-up adds it to R09's `PaletteEntry` before the serve gate opens (galaxy plan
-      14's Generator version).
+      14's Generator version). _Built by R09.T2.e: `PaletteEntry.liquid` and `LiquidProperties`
+      in the surface crate's `field/palette.rs`, b as `scattering_per_m`._
     - R11.T8 never enters its own scattering b (main's ruling for R09.T2.e, 2026-10-15). The
       re-validation writes the deep-water body term (Morel and Prieur 1977, from a and b) to read b
       from the palette record, and tests the absent-b path as labelled: Beer–Lambert alone, the
       member Missing. Galaxy plan 14's P14.T49.h fills b in the testing worlds' and the reference
       Earth's records before the serve gate; if R11.T8.b is briefed before that has landed, its
-      deep-water test waits on T49.h, a stated dependency.
+      deep-water test waits on T49.h, a stated dependency. _Met: P14.T49.h's step 2 (`f27d0248`)
+      filled b in the testing worlds' and the reference Earth's water and methane records._
   - `liquids.ts`'s four rows become the registry's test values, and a CH₄–C₂H₆–N₂ liquid's index
     follows its composition (from memory, checked then).
   - R11.T4's rock k_base is by (class, entry).
