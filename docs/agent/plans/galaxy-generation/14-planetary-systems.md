@@ -15496,6 +15496,13 @@ tables::gauss_legendre`.
   - _The cover._ `coverShown` leaves out the parts at 0 and sorts the rest largest first by the
     stable `toSorted`, so that ties keep the wire's order, each share to three significant figures
     through `sharePercentage`; `NONE` where no part is left.
+  - _An older server's cover_ (main's answer on issue #79, 2026-10-22; the `fix(client)` commit).
+    Where `condensates` is not modelled, as every server before P14.T54.a sends it, `LIQUID COVER`
+    and `ICE COVER` read `NOT YET MODELLED`, by one condition in `surfaceRows`. Such a server's
+    cover lists hold its water alone (the sim's cover rule with no condensates), so its Titan would
+    read `LIQUID COVER NONE`, and the guide's rule that `NOT YET MODELLED` is never read as none
+    decides it: an older server still connects at the same protocol version. This amends the
+    decision's "rows 4–5 read from every server"; the UX review's must-fix.
   - _The `CRUST` reading's join._ `PART_JOIN` with plain spaces, as the view's `MATERIAL` reading
     joins its parts (`view/terrain/readouts.ts`), so that a narrow column may break it at any of
     its spaces.
@@ -15525,7 +15532,7 @@ tables::gauss_legendre`.
     - The Earth: `CRUST SECONDARY · BASALT`, `MANTLE REDOX OXIDISED`, `MELT COVER NONE`,
       `LIQUID COVER H2O 71.0 %`, `ICE COVER H2O 3.00 %`, and no `COLD TRAPS`.
     - e101: `MELT COVER 100 %`.
-  - _Tests._ `SystemView.bodies.test.tsx`, 20 new cases, with the helpers `rowsBetween`, `crustOf`
+  - _Tests._ `SystemView.bodies.test.tsx`, 21 new cases, with the helpers `rowsBetween`, `crustOf`
     and `earthWithCrust`:
     - the entry's nine, with the brief's two that keep `COLD TRAPS` (condensates not modelled, or
       with no trapped share);
@@ -15534,9 +15541,12 @@ tables::gauss_legendre`.
       (`UNDIFFERENTIATED · CI CHONDRITE`, `MANTLE REDOX INTERMEDIATE`); condensates computed as
       none;
     - the Earth and a Titan with no `COLD TRAPS` row, in an `it.each` apart from their readings,
-      so that each test has one reason to fail (the TypeScript review).
+      so that each test has one reason to fail (the TypeScript review);
+    - a Titan as a server before P14.T54.a sends it, with no condensates or crust and its water
+      alone in its cover lists: `LIQUID COVER NOT YET MODELLED`, `ICE COVER NOT YET MODELLED`
+      (main's answer).
 
-    `bodyWords.test.ts`: 6 new cases. The two files: 105 tests.
+    `bodyWords.test.ts`: 6 new cases. The two files: 106 tests.
 
   - _Two helpers and two assertions._ `e101Earth` sets its crust's melt area to 1, as the sim's
     `melt_area` gives every `MagmaOcean`. Beyond the brief, it also empties its cover and its
@@ -15550,17 +15560,18 @@ tables::gauss_legendre`.
     `COLD TRAPS` absence apart); one consider applied (the narrowed checks), one deferred below.
     Plan conformance: no must-fix or should-fix; two considers applied (`e101Earth`'s cover, the
     stale lines deferred below), one deferred below. UX: one must-fix against the decision's data
-    state, asked on the issue and deferred below; one should-fix and one consider on the guide's
-    wording, for main (below); two considers deferred below. The UX review judges the crust's
-    `PRIMARY` no breach of "One name per thing": two things that share a word, never on one
-    display, as `FULL` is a detail level and the GPU timer's state.
+    state, asked on the issue and applied as main answered; one should-fix and one consider on the
+    guide's wording, for main (below); two considers deferred below. The UX review judges the
+    crust's `PRIMARY` no breach of "One name per thing": two things that share a word, never on
+    one display, as `FULL` is a detail level and the GPU timer's state. The `fix(client)` commit's
+    own review: UX, no findings; TypeScript, one should-fix applied (the new test reads the cover
+    alone) and one consider applied (`surfaceRows`' `NOT YET MODELLED` rows share one reading).
   - _Pending:_ the visual check at 1920×1080 and 1280×720, main's at landing.
 - **Deferred findings (2026-10-13 rule)**, from P14.T43.g:
-  - A server before 23 sends no condensates, and its cover lists hold water alone (the sim's
-    cover rule, `condensates: None`), so its Titan reads `LIQUID COVER NONE` and its Pluto
-    `ICE COVER H2O …` as all the ice it holds. The UX review's must-fix, against the guide's Data
-    states. Asked on issue #79, with the lean to read both rows `NOT YET MODELLED` where the
-    condensates are not modelled; built as the decision rules it meanwhile.
+  - For a later readout pass (main's answer on issue #79): the UX review's composed form for an
+    older server's cover, its modelled water share kept beside a note of what is not modelled
+    (`LIQUID COVER H2O 71.0 % · OTHER LIQUIDS: NOT YET MODELLED`), in place of this task's
+    `NOT YET MODELLED` for both rows. It needs new wording, which main left for then.
   - From P14.T54.b, `COLD TRAPS NOT YET MODELLED` would stand on an airless body whose condensates
     are an empty list, its traps modelled and empty, since the rule reads the entries' trapped
     shares. For T54.b's follow-up: a state of the traps' own on the wire (UX review).
@@ -15583,7 +15594,9 @@ tables::gauss_legendre`.
     the wire divides each list by its total where that passes 1, so only the two rows together
     can pass `100 %`; and "each perennial ice": the sim's `surface_ices` takes every solid entry,
     seasonal ones included. The `CRUST` row names no `CRUST NONE`, which the readout reads for a
-    crust computed as none, while `UNDIFFERENTIATED` is glossed "no crust".
+    crust computed as none, while `UNDIFFERENTIATED` is glossed "no crust". The same row names no
+    `NOT YET MODELLED` reading, which the cover rows take from an older server (main's answer
+    added no wording, the guide included).
 - **Deviations in P14.T49.j, as built (`lane/34-p14-t49j-thermal-columns`, 2026-10-16).** The
   condensed phases' thermal columns and the airless regolith's thermal-inertia law, a pure module,
   `substance::thermal` (`substance/thermal.rs`; its rows in `substance/thermal/rows.rs`, its tests

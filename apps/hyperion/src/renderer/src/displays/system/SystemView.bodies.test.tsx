@@ -894,7 +894,7 @@ describe("SystemView's body readout", () => {
     expect(reading("CRUST")).toBe("NOT YET MODELLED");
     expect(terms("MANTLE REDOX")).toHaveLength(0);
     expect(terms("MELT COVER")).toHaveLength(0);
-    // The cover reads beside it: its lists are on the wire from every server.
+    // Its condensates are modelled, so its cover reads beside it.
     expect(reading("LIQUID COVER")).toBe(partsReading("H2O 71.0 %"));
   });
 
@@ -978,6 +978,30 @@ describe("SystemView's body readout", () => {
 
     expect(reading("LIQUID COVER")).toBe(read);
     expect(reading("ICE COVER")).toBe(read);
+  });
+
+  it("reads a cover as NOT YET MODELLED where the condensates are not modelled, its lists water alone", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    // The fixture's Titan as a server before P14.T54.a sends it: no `condensates` or `crust` key,
+    // and its cover lists its water alone, the lakes of methane not computed.
+    await answerDetail(
+      socket,
+      earthWithSurface(() => {
+        const { condensates: _condensates, crust: _crust, ...older } = surfaceOf(titanDetail());
+        return {
+          ...older,
+          surface_liquids: [{ substance: "H2O", area_fraction: 0 }],
+          ocean_fraction: 0,
+          surface_ices: [{ substance: "H2O", area_fraction: 0.99 }],
+          ice_fraction: 0.99,
+        };
+      }),
+    );
+
+    expect(reading("LIQUID COVER")).toBe("NOT YET MODELLED");
+    expect(reading("ICE COVER")).toBe("NOT YET MODELLED");
   });
 
   it("names a crust and a cover the console does not know as UNLISTED MATERIAL, never by its key", async () => {
