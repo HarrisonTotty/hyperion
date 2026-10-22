@@ -23900,3 +23900,101 @@ planetary::record` (624 tests at T57.a's commit).
       - `cargo clippy -p hyperion-sim --lib --tests -- -D warnings` and
         `cargo clippy -p hyperion-server --all-targets -- -D warnings`: clean;
       - `just doc-check` and `cargo fmt --all -- --check`: clean.
+  - _Batch E's D2, the crust on the wire_ (plan 14's T54.a bullet "The server's conversion fills
+    `condensates` and `crust` on the wire"; decision-bump-plan-after-22, "Contracts that freeze at
+    23", `BodySurfaceDto`'s `crust` shape; the lane's ruling on D2's `mantle_redox_iw`, 2026-10-22).
+    A checkpoint at 22: `GENERATOR_VERSION` stays 22, and no golden moves. `CrustCompositionDto`'s
+    shape is unchanged, the nine members P14.T35.e declared.
+    - _The record's ΔIW_ (the lane's ruling): the record's crust had no value for the wire's
+      `mantle_redox_iw`, a required `f64`. Nothing on `BodyRecord` held the mantle's ΔIW; only the
+      server-only hooks' `BulkComposition` did. T51.c's "For P14.T54.a" note says the wire's member
+      "comes from T50.a's inventory". `CrustLid` now carries the crust basis's input
+      `delta_iw` (`derive/mod.rs`'s `ElementInventory::mantle_delta_iw`), and `CrustComposition`
+      carries it as `mantle_delta_iw: Dex` with its accessor `mantle_delta_iw()`. Its doc gives the
+      unit, dex relative to the iron–wüstite buffer, and the source. It is what the `redox` class
+      bands, and the type's guarantee now says so. The unstaged reference in `hooks/crust/tests.rs`
+      sets it from `inputs.delta_iw`. The change is pure: no generated value moves, and
+      `crust.golden` and the systems goldens write named accessors, not `Debug`.
+    - _The conversion_ (`convert/planetary.rs`, `crust`): `surface`'s `crust` is
+      `later(surface.crust(), …)` in place of C3's `Modelled::NotModelled` literal. Each member is
+      the record's:
+      - `primary`, `secondary`, `tertiary`, `bulk` and `provinces` by registry key (`null` for
+        none);
+      - `lid` and `redox` by exhaustive matches;
+      - `mantle_redox_iw` the record's `mantle_delta_iw().value()`;
+      - `melt_area_fraction` as recorded.
+        A body whose record holds no crust (its passes took no lid) sends it absent.
+    - _Labelled omission_ (the lane's ruling): the record's `thermal_history` and
+      `peak_central_temperature` have no DTO member and are not sent at 23. They are what decided
+      the crusts, not surface data, and the peak is the conductive sphere's threshold, "not a
+      temperature the body reached" (Batch D's S3-2). The conversion's doc and
+      `CrustCompositionDto`'s doc say so. An optional member could be added later if a reader
+      needs them.
+    - _The protocol's docs_ (no shape change): `CrustCompositionDto`'s doc said "Absent from the
+      wire until P14.T51.c, which may reshape it". It now says the crust is sent from P14.T54.a's
+      batch, which fixed its shape, and names the two members the wire does not carry. It also
+      states the type's third guarantee: no `tertiary` without a `secondary`. `redox` is "the
+      banding of `mantle_redox_iw`". `BodySurfaceDto.crust` says when it is sent and when absent.
+      The module doc lists the crust beside the condensates as sent from the batch. The bindings
+      were regenerated (`just gen-protocol`): `CrustCompositionDto.ts` and `BodySurfaceDto.ts`,
+      docs only.
+    - _Tests_ (the server's `convert::planetary`):
+      - `the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed` no longer counts
+        the crust among the absent members.
+      - `every_solid_surface_sends_its_record_s_crust`: every golden `ok` surface's record holds a
+        crust, and the wire sends it member for member, the figures to the bit. The wire keeps the
+        record's guarantees: a `bulk` alone, a `tertiary` only with a `secondary`, a `lid` that
+        names a present member, the class `RedoxClass::of` the ΔIW, and the melt in `[0, 1]`
+        (1 under `magma_ocean`, otherwise 0 on an `H2O` lid). It covers 341 crusts: 8 with a melt
+        pool in (0, 1) and 149 `H2O` lids.
+      - `a_crust_s_mantle_redox_is_its_element_inventory_s`: on every solid surface of the close
+        binary, the subgiant and the third filler (planets, belt members and regular moons), the
+        sent ΔIW equals `hooks_at`'s `BulkComposition::element_inventory().mantle_delta_iw()` to
+        the bit.
+      - `a_crust_s_wire_form_is_pinned` (rust-dev's wire-form rule): every sent crust's JSON is
+        the nine members, keys or `null`, the two snake-case names and two numbers, and reads back
+        equal. The close binary's e201, a locked airless lava world with a dayside pool (melt
+        0.2500, `basalt_reduced`, `reduced`, ΔIW −6.5), is pinned whole.
+      - `every_key_the_server_sends_is_a_registry_key` takes the crust's keys.
+      - The golden systems hold the test's names: a re-pin of the systems re-pins e201's literal
+        strings.
+    - _Shared with D4_ (`d2/fixture-crust.md`): the crusts as sent for the close binary's e201
+      (the lava world), the third filler's 0200 (the only golden Earth: 282 K, 5.3 bar, oceans
+      0.877, `komatiite` under `granite`, `oxidised`), and two Titan-like forms with an `H2O` lid
+      and melt 0. No golden moon has air over an `H2O` lid. The golden moons with an `H2O` lid are
+      airless, and the three regular moons with air (the subgiant's 0402, 0503 and 0504) have
+      silicate lids. So the forms are the third filler's e201, a Titan-sized dwarf planet with
+      CH₄ air and `ch4_c2h6_n2` seas (`komatiite` buried under its `H2O` shell), and the triple's
+      regular moon 1101 (`H2O` alone). The lane took two of D2's findings for D4's fixture. The
+      fixture's Earth takes the sim's `CrustComposition::derive` example's crust: `basalt` ocean
+      floor and provinces, `granite`, buried `ultramafic`, `oxidised`, ΔIW 3.55. The generated
+      0200's `komatiite` is a hot young mantle's lava, not present-day Earth's MORB. The Titan
+      takes 1101's form, `H2O` with no secondary. The generator's `komatiite` under a Titan-sized
+      shell is T51.c's deferred finding (the conductive sphere melts large icy bodies' rock). The
+      real Titan's moment of inertia, 0.3414 (Iess et al. 2010), points to incomplete
+      differentiation.
+    - _The protocol's fixture tests_ (D4's patch, applied here; the files are D2's):
+      `record/surface.rs`'s tests gain `earth_crust()`, the fixture Earth's crust, re-exported in
+      `record.rs`. `requests.rs`'s `every_shared_fixture_is_exactly_a_wire_form` counts 13
+      messages (D4's lava world and Titan), and
+      `the_shared_slice_fixture_holds_the_wire_forms_pinned_here` sets the slice Earth's crust.
+    - _Moved goldens:_ none. `planetary_golden` (10 passed, 1 ignored, the search), `crust.golden`
+      (`the_crust_values_are_pinned`), and the server's `system_bodies`, `systems_in_range` and
+      `--lib scene` pass unblessed. No server golden holds a surface section; the crust reaches
+      `body_detail` alone. golden_diff over the tree: see `d2/golden_diff.txt`.
+    - _Files:_ `planetary/hooks/crust.rs` and `hooks/crust/tests.rs` (the ΔIW field and accessor
+      only, by the lane's ruling), `crates/hyperion-protocol/src/planetary/record/surface.rs`
+      (docs and the tests' `earth_crust`), `planetary/record.rs` and `planetary/requests.rs`
+      (tests), `packages/protocol/src/generated/{CrustCompositionDto,BodySurfaceDto}.ts`
+      (regenerated), and `crates/hyperion-server/src/convert/planetary.rs`.
+    - _Checks:_ the server's `cargo test -p hyperion-server convert` (76 passed, 1 ignored, in `--lib`;
+      the integration targets hold no `convert` test), `--test system_bodies` (2), `--test
+systems_in_range` (3) and `--lib scene` (37 passed, 2 ignored); `cargo test -p
+hyperion-protocol` (481 and 10 doctests); the sim's `--lib planetary::hooks::crust` (38,
+      `the_crust_values_are_pinned` among them) and `--test planetary_golden` (10 passed, 1
+      ignored); the bindings' check over the protocol (`_gen-protocol-check-for -p
+hyperion-protocol`, clean after `just gen-protocol`); Clippy `--all-targets` on the server
+      and the protocol, and `--lib --tests` on the sim, which is clean in D2's files (its five
+      failures were in D1's edits in progress, relayed); rustdoc with `-D warnings` on the sim,
+      the protocol and the server; rustfmt; golden_diff (no golden changed). Not run: the slow
+      tier, the gate.

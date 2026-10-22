@@ -4,11 +4,13 @@ import type { RedoxClassDto } from "./RedoxClassDto";
 
 /**
  * A body's crust by substance (plan 14, P14.T51.c): its crusts, buried or not, the one at the
- * surface, its provinces and its redox. Absent from the wire until P14.T51.c, which may reshape
- * it.
+ * surface, its provinces and its redox. Sent from P14.T54.a's batch, which fixed its shape
+ * (decision-bump-plan-after-22, "Contracts that freeze at 23"). The thermal history that decided
+ * the crusts, and the peak central temperature it read, stay on the generator's record and are
+ * not sent.
  *
  * Either `bulk` is present alone, or at least one of `primary` and `secondary` is, and `lid`
- * names a present member.
+ * names a present member. No `tertiary` is present without a `secondary`.
  */
 export type CrustCompositionDto = { 
 /**
@@ -36,7 +38,7 @@ lid: CrustLidDto,
  */
 provinces: string, 
 /**
- * The redox class.
+ * The redox class, the banding of `mantle_redox_iw`.
  */
 redox: RedoxClassDto, 
 /**

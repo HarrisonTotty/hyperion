@@ -23,10 +23,11 @@
 //! with no condensable's `condensable`, a world never wet's `wet_epoch`, a body computed to hold no
 //! subsurface ocean's `subsurface_ocean`. A member this generator version does not compute is
 //! absent ([`Modelled::NotModelled`]), and a reader takes it as not modelled, never as none. The
-//! members whose tasks land later (P14.T24.c, T24.e, T51.c, T51.d, T53.d and T55.b) are absent
-//! until they do, and each task may reshape its own member's type while no build has sent a value
-//! of it; once a build has, a change bumps [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION). The
-//! condensates (P14.T51.a) are sent from P14.T54.a's batch, so their shape is now fixed.
+//! members whose tasks land later (P14.T24.c, T24.e, T51.d, T53.d and T55.b) are absent until
+//! they do, and each task may reshape its own member's type while no build has sent a value of it;
+//! once a build has, a change bumps [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION). The
+//! condensates (P14.T51.a) and the crust (P14.T51.c) are sent from P14.T54.a's batch, so their
+//! shapes are now fixed.
 //!
 //! # Closed classes
 //!
@@ -588,11 +589,13 @@ pub struct SurfaceCondensateDto {
 }
 
 /// A body's crust by substance (plan 14, P14.T51.c): its crusts, buried or not, the one at the
-/// surface, its provinces and its redox. Absent from the wire until P14.T51.c, which may reshape
-/// it.
+/// surface, its provinces and its redox. Sent from P14.T54.a's batch, which fixed its shape
+/// (decision-bump-plan-after-22, "Contracts that freeze at 23"). The thermal history that decided
+/// the crusts, and the peak central temperature it read, stay on the generator's record and are
+/// not sent.
 ///
 /// Either `bulk` is present alone, or at least one of `primary` and `secondary` is, and `lid`
-/// names a present member.
+/// names a present member. No `tertiary` is present without a `secondary`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct CrustCompositionDto {
@@ -608,7 +611,7 @@ pub struct CrustCompositionDto {
     pub lid: CrustLidDto,
     /// The lithology of the lid's volcanic provinces, a key.
     pub provinces: String,
-    /// The redox class.
+    /// The redox class, the banding of `mantle_redox_iw`.
     pub redox: RedoxClassDto,
     /// The mantle's oxygen fugacity relative to the iron–wüstite buffer, ΔIW, log₁₀ units, finite
     /// and of either sign: below 0 more reduced than the buffer.
@@ -804,7 +807,9 @@ pub struct BodySurfaceDto {
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<Vec<SurfaceCondensateDto>>>", optional)]
     pub condensates: Modelled<Vec<SurfaceCondensateDto>>,
-    /// The crust by substance (P14.T51.c); absent until that task.
+    /// The crust by substance (P14.T51.c). Sent from P14.T54.a's batch for every surface whose
+    /// generator computes it; absent from a server whose generator does not model it, and for a
+    /// body whose record holds none.
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<CrustCompositionDto>>", optional)]
     pub crust: Modelled<CrustCompositionDto>,

@@ -14,12 +14,13 @@ use hyperion_protocol::{
     BodyGrantDto, BodyHooksDto, BodyIdHex, BodyKindDto, BodyOrbitDto, BodyPhotometryDto,
     BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto, BodySurfaceDto,
     BulkPropertiesDto, ClimateForcingDto, ClimateRegimeDto, CometaryHaloDto, CraterContractDto,
-    CraterScreeningDto, CraterTargetClassDto, DestructionCauseDto, DetailLevelDto, DetailSeedHex,
-    ErrorCode, FigureDatumDto, FigureLawDto, GasShareDto, HabitableZoneDto, MagneticFieldClassDto,
-    MassFractionsDto, Modelled, MoonOriginDto, OceanFloorDto, OrbitDriftDto, OrbitHostDto,
-    PhaseTemplateDto, PlanetClassDto, PopulationDto, RadiationClassDto, RequestError, RingDto,
-    RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto, SceneSystemDto, SectionDto,
-    SeenPositionDto, SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto,
+    CraterScreeningDto, CraterTargetClassDto, CrustCompositionDto, CrustLidDto,
+    DestructionCauseDto, DetailLevelDto, DetailSeedHex, ErrorCode, FigureDatumDto, FigureLawDto,
+    GasShareDto, HabitableZoneDto, MagneticFieldClassDto, MassFractionsDto, Modelled,
+    MoonOriginDto, OceanFloorDto, OrbitDriftDto, OrbitHostDto, PhaseTemplateDto, PlanetClassDto,
+    PopulationDto, RadiationClassDto, RedoxClassDto, RequestError, RingDto, RingGapDto,
+    RingKindDto, RingMaterialDto, SceneBodyDto, SceneSystemDto, SectionDto, SeenPositionDto,
+    SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto,
     SurfaceCondensateDto, SurfaceMaterialDto, SurfaceStateDto, SystemBodiesDto,
     SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest, TectonicRegimeDto,
     ThermalRegimeDto, WetEpochDto, ZoneDto,
@@ -30,6 +31,7 @@ use hyperion_sim::id::SystemId;
 use hyperion_sim::planetary::architecture::{ArchitectureClass, HostMultiplicity};
 use hyperion_sim::planetary::belts::{BeltComposition, BeltSite};
 use hyperion_sim::planetary::chem::partition::{CondensatePhase, Condensates};
+use hyperion_sim::planetary::chem::redox::RedoxClass;
 use hyperion_sim::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use hyperion_sim::planetary::derive::figure::{BodyFigure, Datum, FigureLaw};
 use hyperion_sim::planetary::derive::photometry::{Bands, BodyPhotometry, PhaseTemplate};
@@ -38,6 +40,7 @@ use hyperion_sim::planetary::derive::{HabitableZone, PlanetClass};
 use hyperion_sim::planetary::disc::snow_line;
 use hyperion_sim::planetary::fate::{BodyState, DestructionCause};
 use hyperion_sim::planetary::frames::BodyFixedFrame;
+use hyperion_sim::planetary::hooks::crust::{CrustComposition, LidCrust};
 use hyperion_sim::planetary::hooks::figures::WetEpoch;
 use hyperion_sim::planetary::hooks::surface::regime::{Forcing, ThermalRegime};
 use hyperion_sim::planetary::hooks::{
@@ -952,6 +955,37 @@ fn condensates(condensates: &Condensates) -> Vec<SurfaceCondensateDto> {
         .collect()
 }
 
+/// A surface's crust as the wire carries it (P14.T51.c, sent from P14.T54.a): its crusts and its
+/// provinces by registry key, its lid, its redox class and the mantle's ΔIW that class bands
+/// (P14.T50.a's inventory's, [`CrustComposition::mantle_delta_iw`]), and its melt area, each the
+/// record's to the bit.
+///
+/// The record's thermal history and peak central temperature, which decided the crusts, are not
+/// sent: the wire's crust, whose shape froze at generator version 23, has no member for them
+/// (decision-bump-plan-after-22, "Contracts that freeze at 23").
+#[must_use]
+fn crust(crust: &CrustComposition) -> CrustCompositionDto {
+    CrustCompositionDto {
+        primary: crust.primary().map(key),
+        secondary: crust.secondary().map(key),
+        tertiary: crust.tertiary().map(key),
+        bulk: crust.bulk().map(key),
+        lid: match crust.lid() {
+            LidCrust::Primary => CrustLidDto::Primary,
+            LidCrust::Secondary => CrustLidDto::Secondary,
+            LidCrust::Bulk => CrustLidDto::Bulk,
+        },
+        provinces: key(crust.provinces()),
+        redox: match crust.redox() {
+            RedoxClass::Reduced => RedoxClassDto::Reduced,
+            RedoxClass::Intermediate => RedoxClassDto::Intermediate,
+            RedoxClass::Oxidised => RedoxClassDto::Oxidised,
+        },
+        mantle_redox_iw: crust.mantle_delta_iw().value(),
+        melt_area_fraction: crust.melt_area_fraction(),
+    }
+}
+
 /// A member of the surface section that a later task fills, as the wire carries it (P14.T35.e):
 /// absent while this generator version does not model it, and once it does, its value converted
 /// by `value`, which is `None` for a member computed as none, sent `null`.
@@ -967,7 +1001,8 @@ fn later<T, U>(member: RecordModelled<&T>, value: impl FnOnce(&T) -> Option<U>) 
 /// [`Surface`] in its unit and every substance by its registry key.
 ///
 /// The members of later tasks are absent, as the record holds them not modelled; each task fills
-/// its own here when it lands, as P14.T54.a fills the condensates. The melt's own vapour,
+/// its own here when it lands, as P14.T54.a fills the condensates and the crust, which is absent
+/// only where the record holds none (a body whose passes took no lid). The melt's own vapour,
 /// `silicate_vapour`, has no member in the record and is sent absent from every surface until
 /// P14.T55.b.
 #[must_use]
@@ -1022,9 +1057,7 @@ fn surface(surface: &Surface) -> BodySurfaceDto {
         ),
         aerosols: later(surface.aerosols(), |aerosols| match *aerosols {}),
         condensates: Modelled::Value(condensates(surface.condensates())),
-        // On the sim's record from P14.T54.a's C3; its conversion is that task's wire subtask's,
-        // so it is sent absent until then.
-        crust: Modelled::NotModelled,
+        crust: later(surface.crust(), |composition| Some(crust(composition))),
         modifiers: later(surface.modifiers(), |modifiers| match *modifiers {}),
         biosphere: later(surface.biosphere(), |biosphere| match *biosphere {}),
         // P14.T55.b's: the record holds no such member, so every server sends it absent until
@@ -1278,6 +1311,8 @@ mod tests {
     use hyperion_sim::galaxy::Galaxy;
     use hyperion_sim::galaxy::params::GalaxyParams;
     use hyperion_sim::substance;
+    use hyperion_sim::units::Dex;
+    use serde_json::json;
 
     use super::*;
 
@@ -1306,16 +1341,21 @@ mod tests {
         0x41fe_2c96_0000_000c,
     ];
 
+    /// The golden systems' galaxy, the Milky Way fixture at [`GOLDEN_SEED`].
+    static GOLDEN_GALAXY: LazyLock<Galaxy> = LazyLock::new(|| {
+        Galaxy::from_params(Seed::new(GOLDEN_SEED), GalaxyParams::milky_way_like())
+            .expect("the Milky Way fixture's gas is mostly neutral")
+    });
+
     /// Every golden system's records at the epoch at the `full` level, each beside its wire form.
     static GOLDEN_RECORDS: LazyLock<Vec<(BodyRecord, BodyRecordDto)>> = LazyLock::new(|| {
-        let galaxy = Galaxy::from_params(Seed::new(GOLDEN_SEED), GalaxyParams::milky_way_like())
-            .expect("the Milky Way fixture's gas is mostly neutral");
+        let galaxy = &*GOLDEN_GALAXY;
         GOLDEN_SYSTEMS
             .iter()
             .flat_map(|&raw| {
                 let id = SystemId::from_raw(raw).expect("a pinned ID is a system ID");
                 let ctx =
-                    SystemContext::for_system(&galaxy, id).expect("a pinned ID names a system");
+                    SystemContext::for_system(galaxy, id).expect("a pinned ID names a system");
                 let planets = hyperion_sim::planetary::generate(galaxy.seed(), &ctx);
                 let snapshot = planets
                     .snapshot_at(&ctx, UniverseTime::EPOCH)
@@ -1460,7 +1500,8 @@ mod tests {
     /// P14.T35.e: the members of later tasks are absent, as the record holds them, with
     /// P14.T35.f's `silicate_vapour`, which the record does not hold, and a subsurface ocean is
     /// computed for a regular moon alone, an object or `null`, until P14.T51.g. The condensates
-    /// are sent from P14.T54.a (`every_surface_sends_its_record_s_condensates`).
+    /// and the crust are sent from P14.T54.a (`every_surface_sends_its_record_s_condensates`,
+    /// `every_solid_surface_sends_its_record_s_crust`).
     #[test]
     fn the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed() {
         let mut moons = 0;
@@ -1469,13 +1510,12 @@ mod tests {
                 [
                     dto.vertical_structure.is_not_modelled(),
                     dto.aerosols.is_not_modelled(),
-                    dto.crust.is_not_modelled(),
                     dto.modifiers.is_not_modelled(),
                     dto.biosphere.is_not_modelled(),
                     dto.silicate_vapour.is_not_modelled(),
                 ],
-                [true; 6],
-                "{}: the structure, aerosols, crust, modifiers, biosphere and silicate vapour",
+                [true; 5],
+                "{}: the structure, aerosols, modifiers, biosphere and silicate vapour",
                 wire.id
             );
             let regular = wire.kind
@@ -1576,6 +1616,258 @@ mod tests {
         assert!(
             surfaces > 50 && entries > 50 && earths > 0,
             "{surfaces} {entries} {earths}"
+        );
+    }
+
+    /// The member of a sent crust that lies at the surface, by its key.
+    fn lid_key(crust: &CrustCompositionDto) -> Option<&str> {
+        match crust.lid {
+            CrustLidDto::Primary => crust.primary.as_deref(),
+            CrustLidDto::Secondary => crust.secondary.as_deref(),
+            CrustLidDto::Bulk => crust.bulk.as_deref(),
+        }
+    }
+
+    /// P14.T54.a: every `ok` surface sends its record's crust (P14.T51.c), and every golden solid
+    /// surface's record holds one: each crust and the provinces by registry key, the lid, the
+    /// redox class, the mantle's ΔIW and the melt area, the record's to the bit. The wire keeps
+    /// the record's guarantees: `bulk` alone or at least one of `primary` and `secondary`, no
+    /// `tertiary` without a `secondary`, a `lid` naming a present member, the redox class the
+    /// ΔIW's ([`RedoxClass::of`]), and the melt area in `[0, 1]`: 1 in the magma-ocean state, and
+    /// otherwise 0 on an `H2O` lid, whose liquid is a condensate.
+    #[test]
+    fn every_solid_surface_sends_its_record_s_crust() {
+        let (mut surfaces, mut pools, mut ice_lids) = (0, 0, 0);
+        for (sim, dto, wire) in ok_surfaces() {
+            let id = wire.id.as_str();
+            let RecordModelled::Ok(record) = sim.crust() else {
+                panic!("{id}: a golden solid surface's record holds its crust");
+            };
+            let Modelled::Value(sent) = &dto.crust else {
+                panic!("{id}: the crust is sent");
+            };
+            let keys = [
+                record.primary(),
+                record.secondary(),
+                record.tertiary(),
+                record.bulk(),
+                Some(record.provinces()),
+            ]
+            .map(|substance| substance.map(key));
+            assert_eq!(
+                [
+                    sent.primary.clone(),
+                    sent.secondary.clone(),
+                    sent.tertiary.clone(),
+                    sent.bulk.clone(),
+                    Some(sent.provinces.clone()),
+                ],
+                keys,
+                "{id}"
+            );
+            let lid = match record.lid() {
+                LidCrust::Primary => CrustLidDto::Primary,
+                LidCrust::Secondary => CrustLidDto::Secondary,
+                LidCrust::Bulk => CrustLidDto::Bulk,
+            };
+            let redox = |class: RedoxClass| match class {
+                RedoxClass::Reduced => RedoxClassDto::Reduced,
+                RedoxClass::Intermediate => RedoxClassDto::Intermediate,
+                RedoxClass::Oxidised => RedoxClassDto::Oxidised,
+            };
+            assert_eq!((sent.lid, sent.redox), (lid, redox(record.redox())), "{id}");
+            assert_eq!(
+                (
+                    sent.mantle_redox_iw.to_bits(),
+                    sent.melt_area_fraction.to_bits()
+                ),
+                (
+                    record.mantle_delta_iw().value().to_bits(),
+                    record.melt_area_fraction().to_bits()
+                ),
+                "{id}"
+            );
+            if sent.bulk.is_some() {
+                assert_eq!(
+                    (&sent.primary, &sent.secondary, &sent.tertiary),
+                    (&None, &None, &None),
+                    "{id}: a bulk lies alone"
+                );
+            } else {
+                assert!(
+                    sent.primary.is_some() || sent.secondary.is_some(),
+                    "{id}: {sent:?}"
+                );
+            }
+            assert!(
+                sent.tertiary.is_none() || sent.secondary.is_some(),
+                "{id}: {sent:?}"
+            );
+            let Some(lid_key) = lid_key(sent) else {
+                panic!("{id}: the lid names no present member: {sent:?}");
+            };
+            assert!(sent.mantle_redox_iw.is_finite(), "{id}: {sent:?}");
+            assert_eq!(
+                sent.redox,
+                redox(RedoxClass::of(Dex::new(sent.mantle_redox_iw))),
+                "{id}: the class is the ΔIW's"
+            );
+            let melt = sent.melt_area_fraction;
+            assert!((0.0..=1.0).contains(&melt), "{id}: {melt}");
+            if dto.state == SurfaceStateDto::MagmaOcean {
+                assert_eq!(melt.to_bits(), 1.0_f64.to_bits(), "{id}");
+            } else if lid_key == "H2O" {
+                assert_eq!(
+                    melt.to_bits(),
+                    0.0_f64.to_bits(),
+                    "{id}: an ice lid melts no rock"
+                );
+                ice_lids += 1;
+            }
+            pools += usize::from(melt > 0.0 && melt < 1.0);
+            surfaces += 1;
+        }
+        eprintln!("{surfaces} crusts, {pools} with a melt pool, {ice_lids} H2O lids");
+        assert!(
+            surfaces > 50 && pools > 0 && ice_lids > 0,
+            "{surfaces} {pools} {ice_lids}"
+        );
+    }
+
+    /// P14.T54.a: a crust's `mantle_redox_iw` is T50.a's inventory's ΔIW, the body's bulk
+    /// composition's that the server-only hooks repeat
+    /// ([`PlanetarySystem::hooks_at`](hyperion_sim::planetary::PlanetarySystem::hooks_at)), to
+    /// the bit, on every solid surface of three golden systems with planets, belt members and
+    /// regular moons: the close binary, the subgiant and the third filler.
+    #[test]
+    fn a_crust_s_mantle_redox_is_its_element_inventory_s() {
+        let (mut checked, mut moons) = (0, 0);
+        for raw in [
+            0x4200_2cb2_0000_0009_u64,
+            0x4200_6c9a_0000_0004,
+            0x4200_2cb2_0000_0000,
+        ] {
+            let id = SystemId::from_raw(raw).expect("a pinned ID is a system ID");
+            let ctx =
+                SystemContext::for_system(&GOLDEN_GALAXY, id).expect("a pinned ID names a system");
+            let planets = hyperion_sim::planetary::generate(GOLDEN_GALAXY.seed(), &ctx);
+            let snapshot = planets
+                .snapshot_at(&ctx, UniverseTime::EPOCH)
+                .degrade(DetailLevel::Full);
+            for record in snapshot.bodies() {
+                let SectionDto::Ok(surface) = body_record(record).surface else {
+                    continue;
+                };
+                let Modelled::Value(sent) = surface.crust else {
+                    continue;
+                };
+                let hooks = planets
+                    .hooks_at(&ctx, record.index(), UniverseTime::EPOCH)
+                    .expect("a body of the snapshot resolves")
+                    .expect("a body with a surface has hooks");
+                let Section::Ok(bulk) = hooks.bulk() else {
+                    panic!(
+                        "{:?}: a body with a crust has a bulk composition",
+                        record.index()
+                    );
+                };
+                assert_eq!(
+                    sent.mantle_redox_iw.to_bits(),
+                    bulk.element_inventory().mantle_delta_iw().value().to_bits(),
+                    "{:?}: sent {} against the inventory's {}",
+                    record.index(),
+                    sent.mantle_redox_iw,
+                    bulk.element_inventory().mantle_delta_iw().value()
+                );
+                checked += 1;
+                moons += usize::from(matches!(record.identity().kind(), BodyKind::Moon(_)));
+            }
+        }
+        assert!(checked > 20 && moons > 0, "{checked} crusts, {moons} moons");
+    }
+
+    /// P14.T54.a, rust-dev's wire-form rule: a sent crust is an object of its nine members, the
+    /// crusts and the provinces registry keys or `null`, `lid` and `redox` their snake-case
+    /// names and the two figures numbers, read back as sent. The close binary's belt member
+    /// `e201`, a locked airless lava world with a dayside pool, is pinned whole.
+    #[test]
+    fn a_crust_s_wire_form_is_pinned() {
+        let members = [
+            "primary",
+            "secondary",
+            "tertiary",
+            "bulk",
+            "lid",
+            "provinces",
+            "redox",
+            "mantle_redox_iw",
+            "melt_area_fraction",
+        ];
+        let e201 = BodyIdHex::from_parts(0x4200_2cb2_0000_0009, 0xe201);
+        let mut pinned = None;
+        for (sim, dto, wire) in ok_surfaces() {
+            let id = wire.id.as_str();
+            let Modelled::Value(sent) = &dto.crust else {
+                panic!("{id}: the crust is sent");
+            };
+            let surface = serde_json::to_value(dto).expect("a surface section serializes");
+            let form = &surface["crust"];
+            let fields = form.as_object().expect("a crust is an object");
+            let mut names: Vec<&str> = fields.keys().map(String::as_str).collect();
+            names.sort_unstable();
+            let mut expected = members;
+            expected.sort_unstable();
+            assert_eq!(names, expected, "{id}");
+            for member in ["primary", "secondary", "tertiary", "bulk"] {
+                assert!(
+                    form[member].is_null() || form[member].is_string(),
+                    "{id}: {member} {form}"
+                );
+            }
+            assert!(form["provinces"].is_string(), "{id}: {form}");
+            assert!(
+                ["primary", "secondary", "bulk"].contains(&form["lid"].as_str().unwrap_or("")),
+                "{id}: {form}"
+            );
+            assert!(
+                ["reduced", "intermediate", "oxidised"]
+                    .contains(&form["redox"].as_str().unwrap_or("")),
+                "{id}: {form}"
+            );
+            for member in ["mantle_redox_iw", "melt_area_fraction"] {
+                assert!(form[member].is_f64(), "{id}: {member} {form}");
+            }
+            let read: CrustCompositionDto =
+                serde_json::from_value(form.clone()).expect("a sent crust reads back");
+            assert_eq!(&read, sent, "{id}");
+            if wire.id == e201 {
+                pinned = Some((sim, form.clone()));
+            }
+        }
+        let Some((sim, form)) = pinned else {
+            panic!("{e201} has no ok surface: a re-pin of the golden systems re-pins this test");
+        };
+        let RecordModelled::Ok(record) = sim.crust() else {
+            panic!("{e201}: its record holds its crust");
+        };
+        assert_eq!(
+            form,
+            json!({
+                "primary": null,
+                "secondary": "basalt_reduced",
+                "tertiary": null,
+                "bulk": null,
+                "lid": "secondary",
+                "provinces": "basalt_reduced",
+                "redox": "reduced",
+                "mantle_redox_iw": record.mantle_delta_iw().value(),
+                "melt_area_fraction": record.melt_area_fraction(),
+            })
+        );
+        let melt = record.melt_area_fraction();
+        assert!(
+            sim.state() == SurfaceState::Airless && melt > 0.0 && melt < 1.0,
+            "{e201}: an airless dayside pool, {melt}"
         );
     }
 
@@ -1825,6 +2117,20 @@ mod tests {
             }
             if let Modelled::Value(condensates) = &dto.condensates {
                 keys.extend(condensates.iter().map(|c| c.substance.clone()));
+            }
+            if let Modelled::Value(crust) = &dto.crust {
+                keys.extend(
+                    [
+                        &crust.primary,
+                        &crust.secondary,
+                        &crust.tertiary,
+                        &crust.bulk,
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .cloned(),
+                );
+                keys.push(crust.provinces.clone());
             }
         }
         assert!(keys.len() > 100, "{} keys", keys.len());

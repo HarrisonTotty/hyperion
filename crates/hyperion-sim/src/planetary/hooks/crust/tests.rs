@@ -1815,6 +1815,7 @@ mod unstaged {
             lid,
             provinces: provinces.substance(),
             redox,
+            mantle_delta_iw: inputs.delta_iw,
             melt_area_fraction: melt_area(inputs, lid_lithology),
             thermal_history,
             peak_central_temperature: peak,

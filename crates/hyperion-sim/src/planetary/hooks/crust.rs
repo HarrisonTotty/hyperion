@@ -1116,12 +1116,13 @@ impl fmt::Display for DeriveCrustError {
 impl Error for DeriveCrustError {}
 
 /// A solid body's crust by substance (the [module](self)'s model): its crusts or its `bulk`
-/// material, its lid and provinces, its redox class, its melt area, and the thermal history that
-/// decided between them.
+/// material, its lid and provinces, its redox class and the mantle ΔIW it bands, its melt area,
+/// and the thermal history that decided between them.
 ///
 /// Built only by [`CrustComposition::derive`], which guarantees that `bulk` is present alone or
 /// at least one of `primary` and `secondary` is, that no `tertiary` is present without a
-/// `secondary`, that `lid` names a present member, and that the melt area lies in [0, 1].
+/// `secondary`, that `lid` names a present member, that the redox class is the ΔIW's
+/// ([`RedoxClass::of`]), and that the melt area lies in [0, 1].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CrustComposition {
     primary: Option<SubstanceId>,
@@ -1131,6 +1132,7 @@ pub struct CrustComposition {
     lid: LidCrust,
     provinces: SubstanceId,
     redox: RedoxClass,
+    mantle_delta_iw: Dex,
     melt_area_fraction: f64,
     thermal_history: ThermalHistory,
     peak_central_temperature: Option<Kelvin>,
@@ -1299,6 +1301,7 @@ impl CrustComposition {
             lid: lid.lid,
             provinces: provinces.substance(),
             redox: lid.redox,
+            mantle_delta_iw: lid.delta_iw,
             melt_area_fraction: melt_area(lid.state, record.surface, lid.lithology),
             thermal_history: lid.thermal_history,
             peak_central_temperature: lid.peak,
@@ -1348,6 +1351,17 @@ impl CrustComposition {
     #[must_use]
     pub const fn redox(&self) -> RedoxClass {
         self.redox
+    }
+
+    /// The mantle's oxygen fugacity, ΔIW, in dex relative to the iron–wüstite buffer: finite and
+    /// of either sign, below 0 more reduced than the buffer. It is the crust basis's input
+    /// [`CrustCompositionInputs::delta_iw`], P14.T50.a's
+    /// [`ElementInventory::mantle_delta_iw`](crate::planetary::chem::inventory::ElementInventory::mantle_delta_iw),
+    /// which the [`redox`](Self::redox) class bands; the wire sends it as `mantle_redox_iw`
+    /// (P14.T54.a).
+    #[must_use]
+    pub const fn mantle_delta_iw(&self) -> Dex {
+        self.mantle_delta_iw
     }
 
     /// The share of the surface above a silicate lid's solidus, 0 to 1; 0 for an ice lid, whose
@@ -1658,6 +1672,7 @@ impl CrustBasis {
             lid,
             lithology,
             redox: self.redox,
+            delta_iw: self.inputs.delta_iw,
             thermal_history,
             peak,
             state: at.state,
@@ -1676,14 +1691,15 @@ impl CrustBasis {
 }
 
 /// A body's crust at a pass's climate (P14.T54.a; [`CrustBasis::lid`]): its crusts, its lid and
-/// the lithology the lid names, with its redox class, its thermal history and its state, all that
-/// the record's crust reads beyond [`CrustRecord`] ([`CrustComposition::of`]).
+/// the lithology the lid names, with its redox class and the ΔIW it bands, its thermal history and
+/// its state, all that the record's crust reads beyond [`CrustRecord`] ([`CrustComposition::of`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct CrustLid {
     crusts: Crusts,
     lid: LidCrust,
     lithology: CrustLithology,
     redox: RedoxClass,
+    delta_iw: Dex,
     thermal_history: ThermalHistory,
     peak: Option<Kelvin>,
     state: SurfaceState,

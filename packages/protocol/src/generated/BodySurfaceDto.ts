@@ -199,7 +199,9 @@ aerosols?: AerosolInventoryDto | null,
  */
 condensates?: Array<SurfaceCondensateDto> | null, 
 /**
- * The crust by substance (P14.T51.c); absent until that task.
+ * The crust by substance (P14.T51.c). Sent from P14.T54.a's batch for every surface whose
+ * generator computes it; absent from a server whose generator does not model it, and for a
+ * body whose record holds none.
  */
 crust?: CrustCompositionDto | null, 
 /**
