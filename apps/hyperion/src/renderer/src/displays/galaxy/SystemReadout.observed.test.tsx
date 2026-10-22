@@ -55,6 +55,7 @@ function renderReadout(
   stars: SystemModel | null = null,
   starsAt: UniverseTime | null = null,
   timeYr = CHART_TIME_YR,
+  stale = false,
 ) {
   render(
     <SystemReadout
@@ -64,6 +65,7 @@ function renderReadout(
       timeYr={timeYr}
       distanceDecimals={2}
       stars={stars}
+      stale={stale}
       starsStale={false}
       starsAt={starsAt}
       extinction={null}
@@ -315,5 +317,76 @@ describe("SystemReadout as observed (plan 12, P12.T11)", () => {
     expect(valueOf(readout, "KIND")).toBe("SUPERGIANT");
     expect(valueOf(readout, "DIES IN")).toBe("1000 yr");
     expect(within(readout).queryByText("DIED")).toBeNull();
+  });
+});
+
+describe("SystemReadout as observed, stale (plan 05, P05.T14)", () => {
+  it("gives AGE its two marks in order, the age's after its unit and the emitted time's after yr", () => {
+    const age = ageOf(renderReadout(anOldLightSystem(), null, null, CHART_TIME_YR, true));
+
+    expect(age.textContent).toBe("22.7 Myr Sstale· AT UT -229,000.00 yr Sstale");
+    expect(age.querySelector(".system-readout__whole")).toHaveTextContent(
+      /^UT -229,000\.00 yr S\s*stale$/u,
+    );
+  });
+
+  it("marks the emitted time and not NOT YET FORMED, a status in the age's place", () => {
+    const age = ageOf(
+      renderReadout(anObservedSystem({ ageMyr: 0.01 }), null, null, CHART_TIME_YR, true),
+    );
+
+    expect(age.textContent).toBe("NOT YET FORMED· AT UT -49,987.50 yr Sstale");
+    // The status is muted with its stale answer all the same, though it takes no mark.
+    expect(age.querySelector(".stale")?.textContent).toMatch(/^NOT YET FORMED·/u);
+  });
+
+  it("keeps an empty slot after every value of the observed rows while live", () => {
+    const readout = renderReadout(anObservedSystem());
+
+    // The light's age, the emitted time, the curvature bound and the velocity's em dashes among
+    // them: a reading that forgot its flag, its slot and its mark with it, fails here.
+    const values = readout.querySelectorAll("dd");
+    expect(values.length).toBeGreaterThan(0);
+    for (const value of values) {
+      const slots = value.querySelectorAll(".stale-slot");
+      expect([value.previousElementSibling?.textContent, slots.length > 0]).toEqual([
+        value.previousElementSibling?.textContent,
+        true,
+      ]);
+      for (const slot of slots) {
+        expect(slot).toBeEmptyDOMElement();
+      }
+    }
+  });
+
+  it("keeps both slots of the age empty while live, so that the mark moves nothing", () => {
+    const slots = ageOf(renderReadout(anOldLightSystem())).querySelectorAll(".stale-slot");
+
+    expect(slots).toHaveLength(2);
+    for (const slot of slots) {
+      expect(slot).toBeEmptyDOMElement();
+    }
+  });
+
+  it("marks each part of the curvature bound, and the light's age and when it left", () => {
+    const readout = renderReadout(anObservedSystem(), null, null, CHART_TIME_YR, true);
+
+    expect(valueOf(readout, CURVATURE_BOUND_LABEL)).toBe("0.632 AU Sstale · 0.00150″ Sstale");
+    expect(valueOf(readout, "LIGHT AGE")).toBe("50,000.00 yr Sstale");
+    expect(valueOf(readout, EMITTED_LABEL)).toBe("-49,987.50 yr Sstale");
+    expect(valueOf(readout, "DIST")).toBe("~5.00 ly Sstale");
+  });
+
+  it("puts no S after AS OBSERVED, a state, nor after the velocity's em dashes", () => {
+    const readout = renderReadout(anObservedSystem(), null, null, CHART_TIME_YR, true);
+
+    expect(within(readout).getByText(AS_OBSERVED)).toHaveTextContent(/^AS OBSERVED$/u);
+    expect(
+      screen
+        .getAllByText(AS_OBSERVED)
+        .map((line) => line.textContent)
+        .every((text) => text === AS_OBSERVED),
+    ).toBe(true);
+    expect(valueOf(readout, "VEL")).toBe("—");
   });
 });

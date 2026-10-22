@@ -96,7 +96,10 @@ function count(label: string): string {
   return screen.getByText(label, { selector: "dt" }).nextElementSibling?.textContent ?? "";
 }
 
-/** The last element of a count's value: its stale slot. */
+/**
+ * The last element of a count's value: its stale slot, which only the `SYSTEMS` count's filter
+ * words, text and no element, follow.
+ */
 function countSlot(label: string): Element | null {
   return screen.getByText(label, { selector: "dt" }).nextElementSibling?.lastElementChild ?? null;
 }
@@ -298,12 +301,31 @@ describe("HrDiagram", () => {
       "NOT YET FORMED",
     ]) {
       const slot = countSlot(label);
-      expect(slot).toHaveClass("hr-diagram__count-slot");
+      // The shared slot (plan 05, P05.T14), whose rule the guard below reads.
+      expect(slot).toHaveClass("stale-slot");
       expect(slot).toBeEmptyDOMElement();
     }
-    expect(stylesheetRule(".hr-diagram__count-slot")).toMatch(
+    expect(stylesheetRule(".stale-slot")).toMatch(
       /display: inline-block;[^}]*min-width: 2ch;[^}]*text-align: right;/u,
     );
+  });
+
+  it("sets a stale SYSTEMS count's S after its figure and before the filter's words (plan 05, P05.T14)", () => {
+    // The white dwarf alone passes `REMNANTS` of the five.
+    renderDiagram({ systems: SYSTEMS.slice(1, 2), total: 5, starFilter: "remnants", stale: true });
+
+    expect(count("SYSTEMS")).toMatch(/^1 OF 5 S\s*stale SHOWN: REMNANTS$/u);
+    expect(countSlot("SYSTEMS")).toHaveTextContent(/^S\s*stale$/u);
+  });
+
+  it("keeps the SYSTEMS count's slot empty before the filter's words while live, so the words stay put", () => {
+    renderDiagram({ systems: SYSTEMS.slice(1, 2), total: 5, starFilter: "remnants" });
+
+    const slot = countSlot("SYSTEMS");
+    expect(slot).toBeEmptyDOMElement();
+    // The words follow the slot, not the figure, live as stale.
+    expect(slot?.previousSibling?.textContent).toBe("1 OF 5");
+    expect(slot?.nextSibling?.textContent).toBe(" SHOWN: REMNANTS");
   });
 
   it("puts each count's stale mark in its slot", () => {

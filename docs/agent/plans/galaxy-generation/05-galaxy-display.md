@@ -1363,6 +1363,59 @@ item 40).
   (decision-gg-port-a2 §7, signoff-11 item 24); this task's as-built record with the measurements.
 - Commit: `style(client): P05.T13 One form for a status with its cause`.
 
+### P05.T14 One stale S per value in the census, the systems list and the readout
+
+**P05.T14** (main's UX decision on the P12.T11 series' follow-ups, 2026-10-22, after P06.T24.c's
+list columns). The guide has one form for a stale value, per value: the last value in
+`--text-muted` with a trailing `S` ("Data states"), each state looking the same everywhere. Since
+P12.T11.d the spatial furniture and the `HR DIAGRAM` page mark each value; the rest of the
+`GALAXY` display marked once a block (T11 ruling (8)). Per value is the guide's form and the
+blocks are the deviation, so this task converts them, each in the form main ruled from its fit at
+1280 × 720.
+
+- **The shared kept slot.** `components/StaleSlot.tsx`: `StaleSlot({ stale })`, a `span.stale-slot`
+  holding `StaleMark` while stale and empty while live, its rule beside `.stale, .stale-mark`
+  (`display: inline-block; min-width: 2ch; text-align: right`). The HR counts use it, and
+  `.hr-diagram__count-slot` goes. `spatial/Reading.tsx` and `.spatial-reading__stale-slot` stay.
+- **The shown count's parts.** `chartModel.ts`'s `shownCount(shown, total, filter)` gives the
+  figure (`9 OF 88`, or `88` under `ALL`) and the filter's words (`SHOWN: REMNANTS`, or none)
+  apart, so that the `S` follows the figure and comes before the console's own words:
+  `SYSTEMS 9 OF 88 S SHOWN: REMNANTS`, on the HR page and in the census alike.
+- **The forms, as main ruled them:**
+  - _The readout_ (`SystemReading` and everything drawn with it): a kept slot after each value,
+    after its unit and before the words beside it, and after the em dash and before its reason.
+    `AGE`'s time keeps its own slot inside the part kept whole, and `CURVATURE BOUND` one after
+    each part. The chart's readings take `stale`; the summary's (`MASS`, `[Fe/H]` but a
+    free-floating planet's, `STAR A`'s readings and the star list) `stale || starsStale`.
+  - _The HR page's `SYSTEMS` count:_ its kept slot moves before the filter's words.
+  - _The census:_ an unkept mark after each value, while stale only (`COMPLETE ABOVE 0.08 M☉ S`,
+    `SYSTEMS 9 OF 88 S SHOWN: REMNANTS`, `IN RANGE 88 S`): its counts keep no fixed width, and
+    kept slots would push `CENSUS BY LAYER` onto a second line whenever `PENDING` shows in
+    compact.
+  - _The systems list:_ one kept slot per row, at the right edge of its `DRIVE RANGE` cell, which
+    stands for each of the row's values; a stale row's name ends `, stale`. A slot per column
+    would take 72.8 px of the class column's 76.2 px at 1280 × 720.
+  - _The titles:_ `Systems` and `Orbit map` lose their `S`, and `STAR A` its.
+  - _Left out:_ the `Bodies` panel (plan 14's, a fit of its own), the star list's captions (their
+    columns are set to the readout's width, ruling 130.5) and the census's by-layer table (its
+    compact columns set the column's width, ruling 149.1). Each keeps its mark per block.
+  - Words that are values take the mark (a kind, a class, a phase, a population, `PLANET`,
+    `NONE`, `IN RANGE`, `DESIG`, `ID`); a status in a value's place (`NOT YET FORMED`,
+    `NOT YET MODELLED`) and the em dash keep their slot and take none; headings, `AS OBSERVED`,
+    the request lines and `NOTHING FITS: …` take none.
+- **Tests.** `StaleSlot.test.tsx`; `chartModel.test.ts` (`shownCount`); `HrDiagram.test.tsx`
+  (the `SYSTEMS` order, its slot live, the shared class); `CensusReadout.test.tsx` (three marks,
+  the filtered order, none after `NOTHING FITS`, none live); `SystemList.test.tsx` (the row's
+  slot live and stale, its name, the range cell's rule); `SystemReadout*.test.tsx` (each flag,
+  the kept slots, no mark after a status, the em dash, a heading or `AS OBSERVED`, `AGE`'s two
+  marks); `LocalChartPanel.test.tsx` (the region `Systems`, a row and a reading marked, and the
+  census and the HR page reading the same stale `SYSTEMS`); the integration test's `STAR A`;
+  `SystemView.test.tsx` and `TimeControl.test.tsx` (the heading `Orbit map`).
+- **Records:** ruling (8)'s narrowing below; this task's as-built record with §3's figures
+  re-checked; plan 12's P12.T11.d findings (1) and (3) closed.
+- Commit: `fix(galaxy): P05.T14 One stale S per value in the census, the systems list and the
+readout`.
+
 ## Verification
 
 Automated: every task's tests, `just ci`, and the integration test of T12.a. The pure core of the
@@ -1517,7 +1570,7 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
 - **Orchestrator's rulings for the owner, applied with T11.** (1) _The chart is the third page of the shared panel, and its list and readout take the second column._ Measured in headless Chromium with the bundled B612 (the display's DOM from jsdom under the real stylesheet; harness outside the tree), the second column cannot hold the chart at 1280 × 688: the work area is 604 px, `.galaxy` 572 px, and with `CURSOR` at 166 px the chart's panel gets 390 px, 372 px inside, while the view's own controls row (76 px), stage floor (12 rem) and furniture row (84 px) need 360 px in a 22.9 rem column before any control, census, list or readout. So `GalaxyPages` gains a third page, `LOCAL CHART`, beside `PARAMETERS` and `GALAXY MAP` — which is where T6.d's sketch put the chart's view, in the display's wide column — and the second column holds `CURSOR` above the new `SYSTEMS` panel, the list and readout of T6.d's fourth column. `CENTRE CHART` and `C` show the chart page, the object they act on, so that the query's `PENDING` and any failure are seen where they are answered; the map is chosen again to read the chart-centre mark on it (five tests in `GalaxyDisplay.test.tsx` and `App.test.tsx` updated for that). The page selector and the chart's state therefore move up to `GalaxyDisplay`, which already holds the cursor and the centre. Measured as built: at 1280 × 688 the chart page is 798 × 448 px, its stage 798 × 170, the controls 72, the census line 28 and the legend 42; the `SYSTEMS` panel is 400 × 390, its list 82 px (2 rows, scrolling) above a 172 px readout; nothing clips or scrolls but the lists. At 1920 × 1080 the stage is 1,036 × 628 and the list 510 px. With no universe open the second column is empty and `UNIVERSE`, shown whole, says `NO UNIVERSE OPEN`. (2) _The census table folds._ `CENSUS BY LAYER` is a display control led by `DisclosureGlyph`, folded by default, since the page cannot hold both the table and the chart at 1280 px; the census line, the hint and the counts, which the brainstorm requires beside every chart, are always shown. Shown, the table takes the chart's height: the chart's stage keeps a floor of 4 rem instead of the view's 12 rem and the table scrolls past 6 rem, so that the page never clips, and at 1280 × 688 the stage falls to 74 px while the table is open. (3) _The legend is compact and under the chart._ It reads `SYMBOLS NOT TO SCALE`, then `INIT MASS M☉ 0.08` with the five marks and `150`, then the fill, colour and reticle keys with a drawn sample each, as one wrapping row of two lines under the census; one line per band would take five lines the page does not have, and each band's edges are in the census table and each system's mass in the readout. It is not drawn over the canvas: over a 170 px stage it covered the picture. (4) _`OUT` and `OUT OF RANGE`._ The list says `IN RANGE` or `OUT` in a 5 rem column and the readout `IN RANGE` or `OUT OF RANGE`, as T11.e and T11.f ask; both are statements about the chart centre, never `REACHABLE` (D9). (5) _Known by-eye points for T12.b:_ the chart at 1280 × 688 is a 798 × 170 letterbox, and 798 × 74 while the census table is open.
 - **Fixed in validation (T11, the triad's clipping).** The implementer's T11 note that the overlay hides 11 px of the triad at 1280 × 688 and 107 px with the census table open was wrong in both figures and in the first case in kind. Re-measured in headless Chromium with the bundled B612, by the same method (the display's DOM from jsdom under the real stylesheet, `document.fonts` checked, the layout viewport verified at exactly 1280 × 688 and 1920 × 1080): with the table folded the stage is 798 × 170 and **nothing is hidden** (the triad's 240 × 128 px box has 42 px of headroom); with the table open the stage is 798 × 74 and **54 px** of the box is clipped, which takes all three direction labels, the north axis's end symbol and part of two axis lines, so the view showed no orientation at all — the guide's "the view always shows an axis triad". Every other figure of ruling (1) and of T8.e was reproduced exactly (chart page 798 × 448, controls 72, census 28, legend 42, `SYSTEMS` 400 × 390, list 82, readout 172; 1,036 × 628 and a 510 px list at 1920 × 1080; nothing clips or scrolls but the lists, at either window), except that the "controls row 72 px" is `ChartControls`; the view's own controls row is 54 px, since it wraps to two lines at 798 px. The fix is general, in the view rather than in the chart's CSS: `furniture.ts` gains `triadBoxRem(viewport)` and `TriadBoxRem`, and `triadLayout` and `triadFootprintPx` take the box, so a stage shorter than 15 × 8 rem gets a triad of the stage's own size with its axes shortened to leave room for a label beyond each end (`axisReachRem`); `AxisTriad` takes `boxRem` as a required prop and `SpatialView` passes it. It is a no-op on any stage with the room for the usual box, so the chart at 1920 × 1080 and every later 3D display are unchanged. Re-measured after the fix: **nothing is hidden past the overlay in any of the four states**, the tightest clearance being `COREWARD`'s 8.15 px, and the only boxes that scroll anywhere are the system list (+14 px at 1280) and the census table (+12 px). The 2 rem toggle takes 4 px from the stage, so the chart's heights now read: at 1280 × 688 stage 166 px folded and 70 px with the table open (the triad's box clamping to 15 × 4.375 rem), census 32 and 128, controls 72, legend 42, page 448; at 1920 × 1080 stage 624 and 528, page 840. Two by-eye points for T12.b: in a 70 px stage the shortened axes put the three end symbols close enough to read as one blob, which is the price of the table and the 688 px window; and at every size `COREWARD`'s label still overprints the north axis's end symbol, which `triadLayout` does not check for (it avoids label-label collisions only) and which predates T11. _Fixed by R07.T16.j: every label stands 0.125 rem clear of every axis's end symbol and line (decision-r07-quality-and-destination, Q6 (b), addendum D, D8)._
 - **Fixed in validation (T11.g, the chart's keys on another page).** The pages stay mounted so that none asks the server again, but `SpatialView`'s single keys are a `document` listener (D3), so `T`, `S`, `F`, `O`, `Z`, `+` and `-` turned and zoomed the hidden chart's camera while `PARAMETERS` or `GALAXY MAP` was on show, invisibly: pressing `t` on the map left the chart at `TOP` on return. The chart page's content is now wrapped in `Activity` (D1's mechanism, which T10 already wrote the view for: it tears the effects down and keeps the state), so the view's keys, frames and observers belong to the page on show. Tested in `LocalChartPanel.test.tsx`.
-- **Orchestrator's further rulings for the owner, applied in validation (T11).** (6) _`HEIGHT` is the `GALACTIC` frame's z and nothing else._ The guide reserves `RADIUS`, `ANGLE` and `HEIGHT` for that frame's coordinates ("Voice and nomenclature"), and `CURSOR` and the view's furniture row already use `HEIGHT` that way, so `SystemReadout` keeps those words for the system's own place and its T11.f `Z` becomes `HEIGHT`; the offset from the chart's reference plane, which T11.f called `HEIGHT`, becomes `NORTH`, the guide's name for +z, beside the `COREWARD` and `SPINWARD` offsets it belongs with and matching the legend's `FILLED NORTH OF PLANE`. The readout therefore reads `NORTH -3.20 ly` where T11.f wrote `HEIGHT -3.20 ly`, and `Z` is gone from the console. (7) _An answer the client cannot chart is a fault, not a crash._ `layerBands` returns `null` instead of throwing, and the new `chartDataFault(result)` gives the cause in words (`census incomplete` when the census does not list the five layers once each, `query radius unusable` when the radius is not a positive length), which `useLocalChart` exposes as `fault` and withholds the answer for. `LocalChartPanel` reads `CHART DATA INVALID: <cause>` in `--status-caution` with `RETRY`, the galaxy map's `MAP DATA INVALID` path (T8.d) through the same `StatusLine`, and `SYSTEMS` says `CHART DATA INVALID: retry on the LOCAL CHART page`. The wire is decoded but not validated and the renderer has no error boundary, so this is the difference between a reported fault and a blank console. (8) _A chart the link no longer backs is stale, as a kept map picture is._ `useLocalChart` gives `stale` (an answer on show with the link down), and it applies T10's ruling (3) convention: `paint.ts` gains `--text-muted` to its `ColourTokens` and `staleTokens`, which draws every mark, circle and reticle in `--text-muted` and leaves the `--line` grid and the background; `SpatialView` takes a required `stale` prop, paints with that set, names its canvas `Local chart, stale` and puts the guide's trailing `S` in its furniture row; the census, the list and the readout are muted with a trailing `S` in each block, `SYSTEMS` being named `Systems stale`; and the camera's own `AZM`/`ELV` and the controls, which are live, are left alone. `StaleMark` moves from `GalaxyMapView` to `components/StaleMark.tsx`, shared by both. This narrows D4's "data already shown … is not marked stale" to "is kept, and marked stale", which is what the guide's "loss of the server link makes every live value on the console stale at once" asks. _Narrowed for the furniture by P12.T11.d (plan 12): it marks each value it reads from the answer with its own `S`, the centre's, the answer's time and the observer's, in a slot kept while live, and no longer one `S` for the row; the frame's word, the mode's name, the scale bar and a time the console keeps itself, the orbit map's `DISPLAY TIME`, take none, and that time is not muted. The scale bar now stands after the time and before the mode. The census's, the list's and the readout's marks are unchanged._ (9) _The chart keeps its stage and the census gives way._ Measured with the census table open and the link down at 1280 × 688, the chart's stage was pinned at its 4 rem floor while `ChartControls` grew by the `NO CARRIER` line, so the view's content overflowed its flex box by 10 px and the furniture row overprinted the controls — the scale bar under `NO CARRIER`. Any full-width line that can appear on the page costs the same, and only 8 px were spare, so a smaller table cap was not a fix. `.local-chart` now has a shrink chain instead: the view is `flex: 1 0 auto` and never shrinks below its own content, the controls and the legend are `flex: none`, and `.census-readout` is a column (`.census-readout__row` carries the old wrapping row) whose `.census-readout__by-layer` and the table's scroller inside it are shrinkable to nothing. The deficit is therefore taken from the table, which scrolls and says so. Measured after the fix, at 1280 × 688: with the table folded the stage is 166 px; open, 72 px with the table at 72; open with `NO CARRIER`, the stage holds 64 px and the table gives the 10 px (62); with the hint as well, 44; with the axis note as well — three extra lines at once, the worst state — the view stands at its 210 px minimum, the table at 40, and the furniture row clears the controls by 4 px, with about 40 px of give left. At 1920 × 1080 the stage absorbs it all and the table keeps its 72 px. The `SYSTEMS` panel had no such chain and its list overflowed its box by 8 px into the gap above the readout in those states, so `.system-list__scroll`'s floor is 2 rem, one row, which its position line makes honest. (10) _The census table shows its position and total._ It scrolls at every window size, not only the shortest, so `CensusByLayer` measures the box with `useScrollMetrics` and reads `1-5 of 5` beneath it through `windowRange` and `formatListPosition`, rows are a fixed 1.25 rem so that the position can be read from the offset, and the column headers are sticky, so no row is read without them. The table is `table-layout: fixed` with `ch` column widths, so a new answer never moves the columns, and `EXP`, which the request's limit does not bound, is written to one decimal below 10,000 and in E notation from there (`1.00E4`), the guide's form for a value outside its field's ladder (D7); T11.d's "one decimal" is kept only where it fits.
+- **Orchestrator's further rulings for the owner, applied in validation (T11).** (6) _`HEIGHT` is the `GALACTIC` frame's z and nothing else._ The guide reserves `RADIUS`, `ANGLE` and `HEIGHT` for that frame's coordinates ("Voice and nomenclature"), and `CURSOR` and the view's furniture row already use `HEIGHT` that way, so `SystemReadout` keeps those words for the system's own place and its T11.f `Z` becomes `HEIGHT`; the offset from the chart's reference plane, which T11.f called `HEIGHT`, becomes `NORTH`, the guide's name for +z, beside the `COREWARD` and `SPINWARD` offsets it belongs with and matching the legend's `FILLED NORTH OF PLANE`. The readout therefore reads `NORTH -3.20 ly` where T11.f wrote `HEIGHT -3.20 ly`, and `Z` is gone from the console. (7) _An answer the client cannot chart is a fault, not a crash._ `layerBands` returns `null` instead of throwing, and the new `chartDataFault(result)` gives the cause in words (`census incomplete` when the census does not list the five layers once each, `query radius unusable` when the radius is not a positive length), which `useLocalChart` exposes as `fault` and withholds the answer for. `LocalChartPanel` reads `CHART DATA INVALID: <cause>` in `--status-caution` with `RETRY`, the galaxy map's `MAP DATA INVALID` path (T8.d) through the same `StatusLine`, and `SYSTEMS` says `CHART DATA INVALID: retry on the LOCAL CHART page`. The wire is decoded but not validated and the renderer has no error boundary, so this is the difference between a reported fault and a blank console. (8) _A chart the link no longer backs is stale, as a kept map picture is._ `useLocalChart` gives `stale` (an answer on show with the link down), and it applies T10's ruling (3) convention: `paint.ts` gains `--text-muted` to its `ColourTokens` and `staleTokens`, which draws every mark, circle and reticle in `--text-muted` and leaves the `--line` grid and the background; `SpatialView` takes a required `stale` prop, paints with that set, names its canvas `Local chart, stale` and puts the guide's trailing `S` in its furniture row; the census, the list and the readout are muted with a trailing `S` in each block, `SYSTEMS` being named `Systems stale`; and the camera's own `AZM`/`ELV` and the controls, which are live, are left alone. `StaleMark` moves from `GalaxyMapView` to `components/StaleMark.tsx`, shared by both. This narrows D4's "data already shown … is not marked stale" to "is kept, and marked stale", which is what the guide's "loss of the server link makes every live value on the console stale at once" asks. _Narrowed for the furniture by P12.T11.d (plan 12): it marks each value it reads from the answer with its own `S`, the centre's, the answer's time and the observer's, in a slot kept while live, and no longer one `S` for the row; the frame's word, the mode's name, the scale bar and a time the console keeps itself, the orbit map's `DISPLAY TIME`, take none, and that time is not muted. The scale bar now stands after the time and before the mode. The census's, the list's and the readout's marks are unchanged._ _Narrowed again by P05.T14: the readout marks each value it reads from the answer, in a slot kept while live, and the list each row once, at its end, in a slot kept while live; the census marks each value with an `S` while stale only, since its counts keep no fixed width; the `SYSTEMS` panel is named `Systems`, and the orbit map's title takes no mark. The `Bodies` panel, the star list's captions and the census table keep their marks per block._ (9) _The chart keeps its stage and the census gives way._ Measured with the census table open and the link down at 1280 × 688, the chart's stage was pinned at its 4 rem floor while `ChartControls` grew by the `NO CARRIER` line, so the view's content overflowed its flex box by 10 px and the furniture row overprinted the controls — the scale bar under `NO CARRIER`. Any full-width line that can appear on the page costs the same, and only 8 px were spare, so a smaller table cap was not a fix. `.local-chart` now has a shrink chain instead: the view is `flex: 1 0 auto` and never shrinks below its own content, the controls and the legend are `flex: none`, and `.census-readout` is a column (`.census-readout__row` carries the old wrapping row) whose `.census-readout__by-layer` and the table's scroller inside it are shrinkable to nothing. The deficit is therefore taken from the table, which scrolls and says so. Measured after the fix, at 1280 × 688: with the table folded the stage is 166 px; open, 72 px with the table at 72; open with `NO CARRIER`, the stage holds 64 px and the table gives the 10 px (62); with the hint as well, 44; with the axis note as well — three extra lines at once, the worst state — the view stands at its 210 px minimum, the table at 40, and the furniture row clears the controls by 4 px, with about 40 px of give left. At 1920 × 1080 the stage absorbs it all and the table keeps its 72 px. The `SYSTEMS` panel had no such chain and its list overflowed its box by 8 px into the gap above the readout in those states, so `.system-list__scroll`'s floor is 2 rem, one row, which its position line makes honest. (10) _The census table shows its position and total._ It scrolls at every window size, not only the shortest, so `CensusByLayer` measures the box with `useScrollMetrics` and reads `1-5 of 5` beneath it through `windowRange` and `formatListPosition`, rows are a fixed 1.25 rem so that the position can be read from the offset, and the column headers are sticky, so no row is read without them. The table is `table-layout: fixed` with `ch` column widths, so a new answer never moves the columns, and `EXP`, which the request's limit does not bound, is written to one decimal below 10,000 and in E notation from there (`1.00E4`), the guide's form for a value outside its field's ladder (D7); T11.d's "one decimal" is kept only where it fits.
 - **Owner points left open from T11.** (a) The drive range's plane ring is labelled `PLANE 50 ly` (D13), the one place the operator-set value is drawn without `SET`, where the range sphere reads `RANGE 50 ly SET` and the field `DRIVE RANGE SET`. D9 asks that every place that repeats the value say `SET`; either D13's label gains it or D9 is narrowed to the readings that could be taken for measurements. (b) Nothing announces a new answer: the census line, the hint and the counts are plain `p` and `dl` elements, so an operator using a screen reader is told a query started (the `PENDING` in an `output`) and never that it finished or what came back; the same holds for a field refusal raised when the focus has already left the field. T8.f's cursor readout solved this with polite, atomic live regions, at the cost of announcing on every change. Whether the chart should do likewise is a verbosity judgement for the owner. **Both points are now ruled: see the T12.a rulings, the last bullet of this list.**
 - **Also fixed in validation (T11).** A field held back with `aria-disabled` now reads as inert, as a held-back `.control` does (`.form-field__input[aria-disabled="true"]`): `QUERY RADIUS` and the two entry fields took a gesture and discarded it with no change of appearance, against the guide's "a control shows … disabled" distinctly. `CENSUS BY LAYER` keeps `.control`'s 2 rem pointer target instead of overriding it with 1.75 rem. `SystemList`'s spacer is `role="presentation"`, so the options stay the listbox's own children. `GALAXY_PAGES` is module-private again (it was exported without TSDoc and used nowhere else). Tests added or tightened: `distanceDecimalsFor` and `formatBandMsun` in `chartModel.test.ts`; `OVER CELL BUDGET` in the census table, for which `aSystemsInRange` gains `overCellBudget` (the status word was named in a test that only checked `OVER LIMIT`); the exact window size and the last row's `aria-posinset` in `SystemList.test.tsx`; the list's rows staying on show while a new query is pending.
 - **Deviations in T12.a, as built.** `GalaxyDisplay.integration.test.tsx` renders `App`, not `GalaxyDisplay`, since the script's first and last steps are `F2` and `F1`. The script is a list of step functions and `playTo(stage)` plays it up to a step; each step's `it` calls `playTo` for its own stage and then reads the console, so a step is written once and a failure names the step that broke. Frames and `setTimeout` are faked for the whole script through `test/fakeFramesAndTimeouts.ts`, so the `t` step can let the turn's frames and the angle readouts' 250 ms hold pass instead of racing them. The centre is the point three quarters of the way down the face-on picture and half way across, (32,768, 0, 12) ly with the height typed, which is off the galactic axis so that the named directions are defined; the query radius is the default 50 ly, since the drive range is. The forty systems are 1 to 24 ly out in layers B to E and then sixteen of layer A from 30 ly, the layer-A systems last so that raising the floor to 0.5 M☉ drops a suffix and every system kept keeps the ID and designation it was answered with, as a real server's would; the census line then goes from `COMPLETE ABOVE 0.08` to `COMPLETE ABOVE 0.50` and `SYSTEMS` from 40 to 24. "`Tab` to the list" is one `Tab` from the last `CURSOR` field, the control before it in the tab order, and the step asserts the focus landed on the list. The last step also asserts that a visit to `LINK` and back sends no request again and opens no second socket. **One shared file changed:** `apps/hyperion/vitest.config.mts` gains `testTimeout: 15_000`. The heaviest display tests (the local chart's, and this script's later steps) take about 2 s each with the suite's workers on eight cores, and Vitest's default of 5 s failed them whenever another build shared the machine — a flake, not a finding. Measured: `pnpm test` for the app is 24–26 s on an idle machine and 35–60 s while two lanes build, against the task's one minute.
@@ -1750,3 +1803,159 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
     `MeterControl`, `StyleControl` and `ViewLabelBlock`. The console-ux lint on the changed files:
     0 errors, 12 checks, all on lines the diff does not touch (the ux-reviewer's pass confirmed
     each).
+
+- **P05.T14, as built (`lane/81-p05-t14-stale-per-value`, 2026-10-22, at version 23).** Built on
+  `rendering-and-planets` 1d1a0bef and brought up to 314737bc (P14.T24.h.a, a fast-forward: Rust,
+  goldens, fixtures and plans, and under `apps/` only an atmosphere test), to main's UX decision
+  on the P12.T11 series' follow-ups (2026-10-22) and its scope ruling for this task. The client
+  and plans 05 and 12 only: no Rust, protocol, binding, server, sim, GPU, golden or guide change,
+  `GENERATOR_VERSION` 23 and `PROTOCOL_VERSION` 3 as they were, before the merge and after it.
+  - _What changed, and the names._
+    - `components/StaleSlot.tsx`: `StaleSlot({ stale })`, a `span.stale-slot` holding `StaleMark`
+      while stale and empty while live. `.stale-slot` (`display: inline-block; min-width: 2ch;
+text-align: right`) stands beside `.stale, .stale-mark`; `.hr-diagram__count-slot` is gone.
+      `spatial/Reading.tsx` and `.spatial-reading__stale-slot` are as they were.
+    - `chartModel.ts`: `shownCount(shown, total, filter): ShownCount`, `{ figure, filterWords }`
+      (`9 OF 88` and `SHOWN: REMNANTS`; `88` and `null` under `ALL`). `shownCountText` and its
+      test are gone, since nothing read it after this task (plan 06's P06.T37 record still names
+      it, as history).
+    - `HrDiagram.tsx`: the private `CountRow` gains `filterWords?: string`, set after the slot as
+      text with its leading space, so that the slot stays the count's last element.
+    - `CensusReadout.tsx`: a `StaleMark` after the complete line's mass and its drawn unit, after
+      the `SYSTEMS` figure and before the filter's words, and after `IN RANGE`'s count, all while
+      stale only; none after `NOTHING FITS: …`.
+    - `SystemList.tsx`: a required `stale`; each row's range cell holds `IN` or `OUT`, then a
+      `StaleSlot`, the cell `display: flex` and its slot `margin-left: auto`; a stale row's
+      `aria-label` ends `, stale`.
+    - `SystemReading.tsx`: `stale?: boolean | undefined`, as the task gives it: given, the reading
+      keeps a slot after its unit and before `beside`, or after the em dash and before
+      `missingWhy`, holding the mark while `stale` holds and the value exists; absent, none. And
+      `status?: boolean` (below).
+    - `SystemReadout.tsx`: a required `stale`, the chart answer's, with `summaryStale` =
+      `stale || starsStale`; `AtTime` and `CurvatureBoundReading` take the flag, `AtTime`'s slot
+      inside `.system-readout__whole`; `ageReading` returns a `kind` union (`missing`, `status`,
+      `value`); `STAR A`'s heading takes no mark. `PrimaryReadings` passes its flag to every
+      reading, the em dashes too, and `StarList` gets `summaryStale` (`components/StarList.tsx`
+      unchanged).
+    - The titles `Systems` (`SystemsPanel.tsx`) and `Orbit map` (`OrbitMapPanel.tsx`) take no
+      mark, and their `StaleMark` imports are gone. `BodiesPanel.tsx` is unchanged.
+    - `styles.css`'s stale comment says what is now marked how. No colour rule changed.
+  - _§3's figures, re-checked_ against the stylesheet at 1d1a0bef, which the merge left alone,
+    and the bundled B612 WOFFs'
+    advances (their `hmtx`, at 0.875 rem, 14 px): `0` 9.10, a space 4.90, `S` 7.70, `O` 11.20,
+    `U` 9.80, `T` 8.40, `I` 4.20, `N` 10.50, every B612 Mono glyph 9.10; so 1 ch is 9.1 px and a
+    2 ch slot 18.2 px. Each figure below is reckoned, not measured: no GPU or Electron here.
+    - _The list._ The range cell is 6.5 ch, 59.15 px; the narrow rows' 0.125 rem padding-left
+      leaves 57.15 px. `OUT` at its 0.1 em tracking is 29.4 + 3 × 1.4 = 33.6 px and `IN`
+      17.5 px; with the 18.2 px slot, 51.8 px and 35.7 px: 7.35 px spare in the wide rows and
+      5.35 px in the narrow. At 1280 × 720 a row's content is 366 − 15 − 2 × 2 = 347 px and the
+      class column 347 − 28 ch (254.8) − 4 × 4 = 76.2 px, so a slot per column (72.8 px) would
+      leave it 3.4 px. At 1920 × 1080, 768.3 − 19 = 749.3 px: the designation 749.3 − 40.5 ch
+      (368.55) − 5 × 6 = 350.75 px, the class 12.5 ch, 113.75 px. No column, gap or padding
+      changed.
+    - _The census row_ (compact, 798 px; `.local-chart`'s 0.875 rem, the counts in B612 Mono).
+      The counts under `ALL` with four-digit counts are 75.6 + 12 + 36.4 + 12 + 82.6 + 12 + 36.4
+      = 267.0 px, as main has them. The line's ` S`, at its 0.15 em tracking, is 16.8 px; each
+      count's, in mono, 18.2 px: 53.2 px for the three (main's 54.6 counts each at 18.2). Stale
+      under `ALL`: 711.9 + 53.2 = 765.1 of 798 px, 32.9 px spare. Under `REMNANTS` the summary is
+      233.1 + 16 + 75.6 + 12 + 109.2 + 145.6 + 12 + 82.6 + 12 + 36.4 = 734.5 px live, as main
+      has it, and 787.7 px stale, 10.3 px spare; the toggle stands on its own line, as live. The
+      line's 233.1 px and the toggle's 179.8 px are main's: their drawn `☉` and disclosure glyph
+      are SVG, which the advances do not give. While stale no state words join the summary: an
+      `ok` answer stays `ok` through a link loss (`useServerRequest`), so no `PENDING` or link
+      state stands beside it. Five-digit counts would add 36.4 px under `ALL`, 801.5 px, and put
+      the toggle on a second line while stale; they are beyond the census limit of 4,000.
+    - _The readout._ `ID`'s 16 figures, 145.6 px, and its slot are 163.8 px of about 217 px in
+      the first `dl`. A long designation still wraps at its spaces:
+      `STREAM 4095 E-16383-63.63-8191`'s last line, `E-16383-63.63-8191`, is 163.8 px, 182 px
+      with its slot. `AGE` as observed: its second line, 1174.2 at #74's look, ends at about
+      1192.4 with its slot, of the readings' 1228; at 1920 × 1080 about 1523 + 36.4 = 1559.4 of
+      1868 px. `CURVATURE BOUND` still takes two lines. These figures are main's boxes, with the
+      slots added; none re-measured.
+  - _What was chosen._
+    - **A status is muted with its source, but takes no mark.** The task has a status in a
+      value's place given `false`; built so, `STARS NOT YET FORMED` lost the muting it has at the
+      base while only the summary lags (the UX review's should-fix), against the task's "muted
+      (`.stale`) while `stale` holds, as today". So `SystemReading` takes `status`: the reading
+      gets its source's flag, keeps its slot empty and is muted while that flag holds. `STARS`
+      takes `summaryStale`, `BULK` and `STATE` `stale`, and `AGE` `stale` with `status` for
+      `NOT YET FORMED`.
+    - **`AGE`'s time is marked beside a status.** It is the answer's time, a value:
+      `NOT YET FORMED · AT UT -49,987.50 yr S`.
+    - **`CURVATURE BOUND`'s two parts share one `.stale` span**, as a reading's value does, so
+      that it mutes outside the panel too.
+    - **`FROM CHART CENTRE`'s four readings take the chart's `stale`**, as the task has them.
+    - **No caller leaves the flag out**, so `SystemReading`'s no-slot branch is unused for now.
+      The TypeScript review asked that `stale` be required; it stays optional, as the task gives
+      it, and tests over every reading's `dd` (a system of stars, a free-floating planet, one not
+      yet formed, a living star's and a white dwarf's summaries, and the observed rows) fail on a
+      reading that loses its flag.
+    - **Ruling (8)'s note is the task's own text.** It does not say that `STAR A`'s heading lost
+      its mark or that the HR `SYSTEMS` slot moved before the filter's words; both are here.
+  - _Tests_ (Vitest, 38 files and 1109 tests in the task's run, 1073 at the base; per touched
+    file, with this task's new cases): `StaleSlot.test.tsx` 3 (new); `chartModel.test.ts` 46
+    (`shownCount`'s two cases replace `shownCountText`'s); `HrDiagram.test.tsx` 31 (+2: the stale
+    `SYSTEMS` order and its live slot; the slot test names `.stale-slot` and its rule);
+    `CensusReadout.test.tsx` 36 (+3, and the stale case rewritten for three marks);
+    `SystemList.test.tsx` 22 (+4); `SystemReadout.test.tsx` 28 (+10);
+    `SystemReadout.summary.test.tsx` 29 (+7; `STAR A` is named `STAR A`);
+    `SystemReadout.observed.test.tsx` 25 (+6); `SystemReadout.extinction.test.tsx` 15 (the region
+    is `Systems`); `LocalChartPanel.test.tsx` 25 (+1, the census and the HR page reading the same
+    stale `SYSTEMS`; the stale case finds the region `Systems`, a row named `, stale` and a
+    reading marked); `GalaxyDisplay.integration.test.tsx` 21 (`STAR A` unmarked, `CLASS` and
+    `MASS` marked); `SystemView.test.tsx` 24 and
+    `TimeControl.test.tsx` 13 (the heading `Orbit map`; the canvas's name and a furniture mark say
+    stale). `SystemList.layout.test.ts` and every other test pass unchanged.
+  - _Deviations from the guide_ ("Data states": each state looks the same everywhere), each as
+    main ruled it (§2.6 of the task's brief):
+    - **The census marks each value only while stale**, keeping no slot: its counts keep no fixed
+      width live either, so a kept slot would buy no stillness, and in compact kept slots would
+      push `CENSUS BY LAYER` onto a second line whenever `PENDING` shows. Against "Numbers"' field
+      sized for its status marks.
+    - **The list marks each row once**, at the end of its range cell, the `S` standing for each of
+      the row's values: a slot per column would take 72.8 px of the class column's 76.2 px at
+      1280 × 720.
+    - **Three blocks are left out:** the `Bodies` panel (plan 14's, a fit of its own), the star
+      list's captions (their columns are set to the readout's width, ruling 130.5) and the census
+      table (its compact columns set the column's width, ruling 149.1).
+  - _Deferred findings (2026-10-13 rule)._ Each leaves the algorithm and every contract as they
+    are.
+    1. **The census table has no `S` of its own now.** At the base the census's one `S`, after
+       `IN RANGE`, stood for the block, the table among it; it is now `IN RANGE`'s. The table is
+       muted with `.census-readout--stale`, read under the census line's marks. Ruling (8)'s note
+       and plan 12's closing mark, written as the task gives them, say the table keeps its mark
+       per block. Lean: record it as muted only; a block mark would need a place, since its
+       position line is the console's own and a heading takes none (plan-conformance review;
+       main's call).
+    2. **The list's one `S` a row** reads against "Data states" to the UX review: a stale row's
+       class, stars, distance and mass are muted with no `S` of their own, while the readout under
+       it marks the same class, distance and mass each. As main ruled; main's call.
+    3. **The census counts' marks move the row:** unkept, each `S` widens its count and moves
+       `IN RANGE` and `CENSUS BY LAYER` along the row, against "Numbers" (UX review). As main
+       ruled, since the counts are `max-content` live as well; main's call.
+    4. **Five-digit census counts** would put the toggle on a second line while stale (above).
+       Beyond the census limit; record only.
+    5. **The list's position line**, `1-2 of 40`: its total is the answer's count, which the
+       census's `SYSTEMS` now marks, and with the title's `S` gone only the muting marks it
+       stale (UX review; main's call whether it is a value).
+    6. **A slot can begin a line.** A slot is an atomic inline, so a line may break before it,
+       and in a narrow column an `S`, or an empty slot, could start a line after a value that
+       fills its own. `AtTime` keeps its slot in its part kept whole; no other reading is held,
+       since a `nowrap` round a value and its unit would stop a long designation wrapping at its
+       spaces (UX review; for main's look).
+    7. **An orbit map that shows only a status** (`NOT YET FORMED`, `NO BODIES`) draws no canvas,
+       so with its title unmarked nothing in its panel but its note's muting says the answer is
+       stale; a status takes no mark by the guide, and the `Bodies` panel's title still marks the
+       display. Lean: leave.
+    8. **The live regions.** The readout's and the census summary's atomic regions are read
+       again on the link's loss with a `stale` word after each value, as the readout already was
+       while its summary lagged. Kept, as the task asks; no review called it noisy, and the UX
+       review left a screen reader's reading of it to main's look.
+  - _Records._ This entry; the task's section above; ruling (8)'s narrowing; plan 12's P12.T11.d
+    findings (1) and (3) closed, (4) open. The console-ux lint on the changed renderer files: 0
+    errors and 14 checks, all on `styles.css` lines the diff does not touch (the UX review
+    confirmed). The review: TypeScript (two should-fix: `ageReading`'s union, done, and
+    `SystemReading`'s optional `stale`, kept as above; one consider, `filterWords`, done), UX
+    (one must-fix and one should-fix against main's ruling, findings 2 and 3; one should-fix,
+    the status's muting, done; two considers, findings 5 and 6) and plan conformance (all built;
+    finding 1; the long lines rewrapped; the `starsStale` doc corrected).

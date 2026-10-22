@@ -255,7 +255,8 @@ describe("TimeControl", () => {
       });
     });
 
-    expect(screen.getByRole("heading", { name: "Orbit map stale" })).toBeInTheDocument();
+    // The title takes no mark; the canvas's name says it (plan 05, P05.T14).
+    expect(screen.getByRole("heading", { name: "Orbit map" })).toBeInTheDocument();
     expect(screen.getByRole("application", { name: "Orbit map, stale" })).toBeInTheDocument();
   });
 

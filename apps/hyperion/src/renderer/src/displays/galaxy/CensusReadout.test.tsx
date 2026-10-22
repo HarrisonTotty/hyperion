@@ -386,11 +386,40 @@ describe("CensusReadout", () => {
     expect(rowText(rows, 2)).toEqual(["C", "0.75 – 2.5", "1.4", "1", "INCLUDED"]);
   });
 
-  it("marks the answer stale once the link no longer backs it", () => {
+  it("marks the answer stale once the link no longer backs it, one S after each value", () => {
     renderReadout(TWO_SYSTEMS, undefined, { stale: true });
 
-    expect(screen.getByText("IN RANGE").nextElementSibling).toHaveTextContent("1 S");
-    expect(screen.getByText("stale")).toBeInTheDocument();
+    // After the complete line's mass and its drawn unit, whose letter is `M` before the drawn sign,
+    // and after each count (plan 05, P05.T14).
+    expect(screen.getByText(/COMPLETE ABOVE/u)).toHaveTextContent(
+      /^COMPLETE ABOVE [\d.]+ M S\s*stale$/u,
+    );
+    expect(screen.getByText("SYSTEMS").nextElementSibling).toHaveTextContent(/^2 S\s*stale$/u);
+    expect(screen.getByText("IN RANGE").nextElementSibling).toHaveTextContent(/^1 S\s*stale$/u);
+    expect(within(summary()).getAllByText("stale")).toHaveLength(3);
+  });
+
+  it("sets a stale filtered count's S after its figure and before the filter's words", () => {
+    renderReadout(TWO_SYSTEMS, undefined, { stale: true, starFilter: "remnants" });
+
+    expect(screen.getByText("SYSTEMS").nextElementSibling).toHaveTextContent(
+      /^0 OF 2 S\s*stale SHOWN: REMNANTS$/u,
+    );
+  });
+
+  it("puts no S after NOTHING FITS, a caution and not a value", () => {
+    renderReadout(aChart({ overLimit: ["a", "b", "c", "d", "e"] }), undefined, { stale: true });
+
+    expect(screen.getByText(statusLine("NOTHING FITS: reduce radius"))).not.toHaveTextContent(
+      /stale/u,
+    );
+  });
+
+  it("puts no S anywhere while the answer is live", () => {
+    renderReadout(TWO_SYSTEMS, undefined, { starFilter: "remnants" });
+
+    expect(within(summary()).queryByText("stale")).not.toBeInTheDocument();
+    expect(within(summary()).queryByText("S")).not.toBeInTheDocument();
   });
 
   it("shows no census before the first answer", () => {

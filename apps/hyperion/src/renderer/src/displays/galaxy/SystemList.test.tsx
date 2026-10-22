@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChartSystem } from "../../lib/galaxy/model";
 import { toChartResult } from "../../lib/galaxy/wire";
 import { aStellarBrief, aSystemsInRange } from "../../test/galaxyFixtures";
+import { stylesheetRule } from "../../test/stylesheet";
 import { SystemList } from "./SystemList";
 
 const CENTRE = [26_000, 0, 0] as const;
@@ -37,7 +38,8 @@ function renderList(
   {
     selectedId = null,
     driveRangeLy = 50,
-  }: { selectedId?: SystemIdHex | null; driveRangeLy?: number } = {},
+    stale = false,
+  }: { selectedId?: SystemIdHex | null; driveRangeLy?: number; stale?: boolean } = {},
 ) {
   const onSelect = vi.fn<(id: SystemIdHex) => void>();
   const view = render(
@@ -47,6 +49,7 @@ function renderList(
       onSelect={onSelect}
       driveRangeLy={driveRangeLy}
       distanceDecimals={2}
+      stale={stale}
     />,
   );
   const rerenderWith = (id: SystemIdHex | null): void => {
@@ -57,6 +60,7 @@ function renderList(
         onSelect={onSelect}
         driveRangeLy={driveRangeLy}
         distanceDecimals={2}
+        stale={stale}
       />,
     );
   };
@@ -299,6 +303,7 @@ describe("SystemList", () => {
         onSelect={onSelect}
         driveRangeLy={50}
         distanceDecimals={2}
+        stale={false}
       />,
     );
     expect(firstOption()).toHaveTextContent("12.00");
@@ -309,10 +314,64 @@ describe("SystemList", () => {
         onSelect={onSelect}
         driveRangeLy={50}
         distanceDecimals={2}
+        stale={false}
       />,
     );
     expect(firstOption()).toHaveTextContent("13.00");
     expect(firstOption()).not.toHaveTextContent("12.00");
+  });
+});
+
+/** The stale slot at the end of a row's range cell. */
+function rangeSlot(row: HTMLElement): Element | null {
+  return row.querySelector(".system-list__range > .stale-slot:last-child");
+}
+
+describe("SystemList's stale rows (plan 05, P05.T14)", () => {
+  it("keeps an empty slot at the end of each row's range cell while the chart is live", () => {
+    stubViewport();
+    renderList(manySystems(60), { driveRangeLy: 10 });
+
+    const options = screen.getAllByRole("option");
+    expect(options.length).toBeGreaterThan(0);
+    for (const row of options) {
+      // jsdom lays nothing out, so the room is held by the slot and its rule.
+      expect(rangeSlot(row)).toBeEmptyDOMElement();
+      expect(row).not.toHaveAccessibleName(/stale/u);
+    }
+  });
+
+  it("trails each row with one S, in its range cell's slot, while the chart is stale", () => {
+    stubViewport();
+    renderList(manySystems(60), { driveRangeLy: 10, stale: true });
+
+    const options = screen.getAllByRole("option");
+    expect(options.length).toBeGreaterThan(0);
+    for (const row of options) {
+      expect(rangeSlot(row)).toHaveTextContent(/^S\s*stale$/u);
+      // One mark to a row, which stands for each of its values.
+      expect(row.querySelectorAll(".stale-mark")).toHaveLength(1);
+    }
+    // The range's words stand before the slot, `IN` and `OUT` alike.
+    expect(options[0]?.querySelector(".system-list__range")).toHaveTextContent(/^IN S\s*stale$/u);
+    expect(options[20]?.querySelector(".system-list__range")).toHaveTextContent(/^OUT S\s*stale$/u);
+  });
+
+  it("names a stale row so, since its name hides the mark's word", () => {
+    stubViewport();
+    renderList(manySystems(1), { stale: true });
+
+    expect(
+      screen.getByRole("option", {
+        name: "H7K 4C0RFZ A-1, DWARF M3V, 1 star, 1.00 ly, 0.29 solar masses, IN RANGE, stale",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("sets the slot at the range cell's right edge, so that the marks line up down the list", () => {
+    // jsdom applies no stylesheet: the rules are read as written.
+    expect(stylesheetRule(".system-list__range")).toMatch(/display: flex;/u);
+    expect(stylesheetRule(".system-list__range > .stale-slot")).toMatch(/margin-left: auto;/u);
   });
 });
 

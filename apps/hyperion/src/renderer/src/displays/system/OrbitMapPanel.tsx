@@ -1,7 +1,6 @@
 import { type ReactNode, useEffect, useId, useMemo } from "react";
 
 import { RequestStatus } from "../../components/RequestStatus";
-import { StaleMark } from "../../components/StaleMark";
 import { StatusLine } from "../../components/StatusLine";
 import {
   formatBearingDeg,
@@ -105,9 +104,10 @@ export interface OrbitMapPanelProps {
  * down or the newer request its display time asked for refused or timed out, is drawn and read as
  * stale, each of the centre's values trailing its `S`; the display time in the furniture is the
  * console's own, which `RUN` and `HOLD` move, and so is neither marked nor muted (plan 12,
- * P12.T11.d). The chosen zoom preset is pressed while the view shows it: a zoom by hand releases it,
- * since the view no longer matches it, and `Z`, which fits the view to its radius again, presses it
- * once more (the orchestrator's ruling 59.6). The grid still covers its radius. While the display
+ * P12.T11.d). The panel's title takes no mark: the values carry their own, and the map's canvas
+ * is named `Orbit map, stale` (plan 05, P05.T14). The chosen zoom preset is pressed while the view
+ * shows it: a zoom by hand releases it, since the view no longer matches it, and `Z`, which fits
+ * the view to its radius again, presses it once more (the orchestrator's ruling 59.6). The grid still covers its radius. While the display
  * time runs, the map follows it at each frame, which is the one thing on the display that does:
  * the readings and the time in the view's furniture change at the guide's 4 Hz. Under the map
  * stand the legend and the system note, a line naming what this generator version does not model
@@ -242,7 +242,7 @@ export function OrbitMapPanel({ view }: OrbitMapPanelProps) {
     >
       <div className="orbit-map__head">
         <h2 className="panel__title" id={titleId}>
-          Orbit map{stale ? <StaleMark /> : null}
+          Orbit map
         </h2>
         <span className="orbit-map__system">{target.designation}</span>
         {drawn ? (

@@ -2,7 +2,7 @@ import type { SystemIdHex } from "@hyperion/protocol";
 import { type MouseEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { SolarUnit } from "../../components/SolarUnit";
-import { StaleMark } from "../../components/StaleMark";
+import { StaleSlot } from "../../components/StaleSlot";
 import { formatNumber, formatSci } from "../../lib/format";
 import {
   HR_LOG_L_TICKS,
@@ -24,7 +24,7 @@ import { ModeReading } from "../../spatial/ModeReading";
 import { type ColourTokens, paint, readTokens, sameTokens, staleTokens } from "../../spatial/paint";
 import { Reading } from "../../spatial/Reading";
 import { SIZE_CLASS_REM } from "../../spatial/symbols";
-import { shownCountText, type StarFilter } from "./chartModel";
+import { shownCount, type StarFilter } from "./chartModel";
 import { CHART_FRAME_NAME, modeReading, timeReading } from "./chartReadings";
 import { StarShapeLegend } from "./StarShapeLegend";
 
@@ -75,6 +75,11 @@ function at(xPx: number, yPx: number, remPx: number): string {
 interface CountRow {
   readonly label: string;
   readonly text: string;
+  /**
+   * Words after the value and its slot that are not the answer's, the `STARS` filter's
+   * `SHOWN: REMNANTS`, which take no mark (plan 05, P05.T14); none when absent.
+   */
+  readonly filterWords?: string;
 }
 
 /** Props of {@link Counts}. */
@@ -91,8 +96,9 @@ interface CountsProps {
  * @remarks
  * Every count is read from the answer, so every one is stale with it. Each keeps a slot after its
  * value for its `S`, 2 ch in its monospaced figures, while the answer is live as well
- * (`hr-diagram__count-slot`), so that a stale answer moves no count (plan 12, P12.T11.d), as the
- * chart's readings keep theirs.
+ * ({@link StaleSlot}), so that a stale answer moves no count (plan 12, P12.T11.d), as the chart's
+ * readings keep theirs. The `SYSTEMS` count's slot follows its figure and comes before the
+ * filter's words, the console's own choice: `9 OF 88 S SHOWN: REMNANTS` (plan 05, P05.T14).
  */
 function Counts({ rows, stale, underHeading = false }: CountsProps) {
   return (
@@ -102,12 +108,13 @@ function Counts({ rows, stale, underHeading = false }: CountsProps) {
         underHeading ? "hr-diagram__counts hr-diagram__counts--under" : "hr-diagram__counts"
       }
     >
-      {rows.map(({ label, text }) => (
+      {rows.map(({ label, text, filterWords }) => (
         <div className="hr-diagram__count" key={label}>
           <dt>{label}</dt>
           <dd>
             {text}
-            <span className="hr-diagram__count-slot">{stale ? <StaleMark /> : null}</span>
+            <StaleSlot stale={stale} />
+            {filterWords === undefined ? null : ` ${filterWords}`}
           </dd>
         </div>
       ))}
@@ -243,12 +250,19 @@ export function HrDiagram({
   };
 
   const { counts } = projection;
+  const shownSystems = shownCount(systems.length, total, starFilter);
   const accessibleName = "Hertzsprung-Russell diagram";
   // What the filter hides, then what is plotted, the pegged among them (ruling 115.3).
   const plottedRows: ReadonlyArray<CountRow> = [
     ...(starFilter === "all"
       ? []
-      : [{ label: "SYSTEMS", text: shownCountText(systems.length, total, starFilter) }]),
+      : [
+          {
+            label: "SYSTEMS",
+            text: shownSystems.figure,
+            ...(shownSystems.filterWords === null ? {} : { filterWords: shownSystems.filterWords }),
+          },
+        ]),
     { label: "PLOTTED", text: formatNumber(counts.plotted, 0) },
     { label: "OFF SCALE", text: formatNumber(counts.offScale, 0) },
   ];

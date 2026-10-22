@@ -1806,17 +1806,18 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     value in the spatial furniture and on the HR page, and once a block in the census line, the
     list, the readout and the panels' titles (`Systems`, `Orbit map`, `Bodies`), where the guide's
     "Data states" says each state "looks the same everywhere"; the blocks are outside this task.
-    (2) The guide says the console's own values are never stale only of `BASELINE` and
-    `PAD WIDTH`; its `DISPLAY TIME` row could say so of the display time, which main's ruling now
-    leaves unmarked and unmuted (UX review; the brief allows no other guide edit). _Closed by
-    P12.T11.e._ (3) Under a
-    `STARS` filter a stale `SYSTEMS` count reads `… SHOWN: REMNANTS S`, its `S` after the filter's
-    name, the console's own live choice, as look-73 found `2 ly S` after the scale; the marks could
-    follow the figures instead (UX review; the place is P06.T37's and the brief's §5 A4 kept it).
-    (4) `Reading`'s `stale` and `own` are two optional props, so the type admits both at once,
-    which renders as `own` alone; one union prop (a source that is the answer's, stale or not, or
-    the console's own) would rule the pair out, but renames the brief's `stale` (TypeScript review;
-    main's call).
+    _Closed by P05.T14, but for the `Bodies` panel, the star list's captions and the census table
+    (plan 05's record)._ (2) The guide says the console's own values are never stale only of
+    `BASELINE` and `PAD WIDTH`; its `DISPLAY TIME` row could say so of the display time, which
+    main's ruling now leaves unmarked and unmuted (UX review; the brief allows no other guide
+    edit). _Closed by P12.T11.e._ (3) Under a `STARS` filter a stale `SYSTEMS` count reads
+    `… SHOWN: REMNANTS S`, its `S` after the filter's name, the console's own live choice, as
+    look-73 found `2 ly S` after the scale; the marks could follow the figures instead (UX review;
+    the place is P06.T37's and the brief's §5 A4 kept it). _Closed by P05.T14._ (4) `Reading`'s
+    `stale` and `own` are two optional props, so the type admits both at once, which renders as
+    `own` alone; one union prop (a source that is the answer's, stale or not, or the console's
+    own) would rule the pair out, but renames the brief's `stale` (TypeScript review; main's
+    call).
 - **P12.T11.e as built (`lane/80-p12-t11e-followups`, 2026-10-22, at `GENERATOR_VERSION` 23).**
   Client, guide and plan only: no Rust, protocol, binding, server, sim, GPU or golden change, and
   nothing generated moves. P06.T24.c and the 23 bump are on the base, and the lane's last merge of

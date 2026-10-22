@@ -440,10 +440,11 @@ describe("LocalChartPanel", { timeout: 120_000 }, () => {
   });
 
   it("marks the chart stale when the link no longer backs it", async () => {
-    const { socket } = await renderChart();
+    const { user, socket } = await renderChart();
     expect(
       within(chartPage()).getByRole("application", { name: "Local chart" }),
     ).toBeInTheDocument();
+    await user.click(options()[1] ?? canvas());
 
     await act(async () => {
       socket.close();
@@ -451,7 +452,8 @@ describe("LocalChartPanel", { timeout: 120_000 }, () => {
     });
 
     // The guide's stale state: named so, muted, and marked with a trailing S, in the furniture after
-    // each value (P12.T11.d) and in each block beside it.
+    // each value (P12.T11.d), and in the panel beside it each row once and each reading after its
+    // value, so that the panel's title takes none (plan 05, P05.T14).
     expect(
       within(chartPage()).getByRole("application", { name: "Local chart, stale" }),
     ).toBeInTheDocument();
@@ -465,7 +467,44 @@ describe("LocalChartPanel", { timeout: 120_000 }, () => {
       within(chartPage()).getByText("FRAME", { selector: ".spatial-view__furniture dt" })
         .nextElementSibling,
     ).toHaveTextContent(/^GALACTIC$/u);
-    expect(screen.getByRole("region", { name: "Systems stale" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Systems" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Systems" })).toHaveTextContent(/^Systems$/u);
+    expect(options()[1]).toHaveAccessibleName(/^H7K 4C0RFZ A-2, .*, stale$/u);
+    expect(options()[1]?.querySelector(".system-list__range")).toHaveTextContent(/S\s*stale$/u);
+    expect(reading("DESIG")).toBe("H7K 4C0RFZ A-2 Sstale");
+  });
+
+  it("reads the same stale SYSTEMS count on the census and the HR page under a STARS filter", async () => {
+    const { user, socket } = await renderChart({ answered: false });
+    await server(() => {
+      socket.serverAnswers("systems_in_range", (body) =>
+        aSystemsInRange({
+          centreLy: CENTRE,
+          radiusLy: 80,
+          minLayer: body.min_layer,
+          systems: [
+            { relLy: [1, 0, 0], layer: "c" },
+            { relLy: [2, 0, 0], layer: "c", stellar: aStellarBrief("c", "white_dwarf") },
+            { relLy: [3, 0, 0], layer: "a" },
+          ],
+        }),
+      );
+    });
+    // LIVING, then REMNANTS, which the white dwarf alone passes.
+    await user.keyboard("kk");
+    await act(async () => {
+      socket.close();
+      await Promise.resolve();
+    });
+
+    // The S after the figure and before the filter's words, the console's own (plan 05, P05.T14).
+    const census = within(chartPage()).getByText("SYSTEMS", { selector: "dt" }).nextElementSibling;
+    expect(census).toHaveTextContent(/^1 OF 3 S\s*stale SHOWN: REMNANTS$/u);
+    await user.click(screen.getByRole("tab", { name: "HR DIAGRAM" }));
+    const hr = within(screen.getByRole("tabpanel", { name: "HR DIAGRAM" })).getByText("SYSTEMS", {
+      selector: "dt",
+    }).nextElementSibling;
+    expect(hr?.textContent).toBe(census?.textContent);
   });
 
   it("reports a census it cannot read as a fault and asks again on RETRY", async () => {

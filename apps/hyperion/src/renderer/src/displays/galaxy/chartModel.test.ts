@@ -24,7 +24,7 @@ import {
   nextStarFilter,
   passesStarFilter,
   queryRadiusForDriveRange,
-  shownCountText,
+  shownCount,
   STAR_FILTERS,
   starFilterLabel,
   SUBSTELLAR_FLOORS,
@@ -484,14 +484,20 @@ describe("the STARS filter", () => {
   });
 });
 
-describe("shownCountText", () => {
-  it("says what a filter hides, digits grouped from five", () => {
-    expect(shownCountText(412, 1630, "living")).toBe("412 OF 1630 SHOWN: LIVING");
-    expect(shownCountText(9, 12_480, "remnants")).toBe("9 OF 12,480 SHOWN: REMNANTS");
+describe("shownCount", () => {
+  it("gives the figure apart from the words saying what each filter hides, digits grouped from five", () => {
+    expect(shownCount(412, 1630, "living")).toEqual({
+      figure: "412 OF 1630",
+      filterWords: "SHOWN: LIVING",
+    });
+    expect(shownCount(9, 12_480, "remnants")).toEqual({
+      figure: "9 OF 12,480",
+      filterWords: "SHOWN: REMNANTS",
+    });
   });
 
-  it("gives the total alone under ALL", () => {
-    expect(shownCountText(1630, 1630, "all")).toBe("1630");
+  it("gives the total alone under ALL, with no words after it", () => {
+    expect(shownCount(1630, 1630, "all")).toEqual({ figure: "1630", filterWords: null });
   });
 });
 
