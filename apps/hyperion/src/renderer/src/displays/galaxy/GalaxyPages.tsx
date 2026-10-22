@@ -2,6 +2,7 @@ import { Activity, type KeyboardEvent, useId, useLayoutEffect, useRef } from "re
 
 import { StatusText } from "../../components/StatusText";
 import type { CentreLy } from "../../lib/galaxy/model";
+import { answeredMode } from "./chartModel";
 import { GalaxyMapPanel } from "./GalaxyMapPanel";
 import { HrDiagram } from "./HrDiagram";
 import { LocalChartPanel } from "./LocalChartPanel";
@@ -249,6 +250,9 @@ export function GalaxyPages({
               onSelect={chart.select}
               driveRangeLy={chart.driveRangeLy}
               stale={chart.stale}
+              // The mode and time of the answer on show, as the chart's furniture reads them.
+              mode={answeredMode(chart.result)}
+              timeYr={chart.result.timeYr}
             />
           )}
         </Activity>

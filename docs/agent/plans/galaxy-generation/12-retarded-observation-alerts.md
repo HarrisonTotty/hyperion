@@ -676,6 +676,21 @@ ignores `mode` and answers `now`, so the readout never labels a row `AS OBSERVED
 carries `observed`, whatever was asked. The one system's stars as observed come from T6.b's
 summary.
 
+- **P12.T11.b The HR page's mode** (added 2026-10-21 by main's scoping, from T11's deferred
+  finding (2); built in `lane/73-p12-t11b-hr-mode`, recorded at the end of Risks). The `HR DIAGRAM`
+  page plots the briefs of the chart on show, which in observed mode are the primaries when the
+  light left, and did not say so. Under its plot, before the counts, where the chart's furniture
+  stands, it now reads the answer's time and mode as the furniture does, stale with the answer:
+  `UT` and `MODE NOW`, or `FRAME GALACTIC`, `UT` and `MODE OBSERVED FROM` with the observer's
+  `RADIUS`, `ANGLE` and `HEIGHT`, from `answeredMode` and the result's `timeYr` through the
+  readings the two pages now share (`chartReadings.ts`), and never from the mode being chosen.
+  Files: under `apps/hyperion/src/renderer/src/`: `displays/galaxy/`'s `chartReadings.ts`,
+  `HrDiagram.tsx`, `GalaxyPages.tsx` and `LocalChartPanel.tsx`, `styles.css`'s `.hr-diagram`
+  block, tests. Tests: Vitest for the shared readings, for the page's line in both modes, on the
+  galactic axis and stale, and for the display's page across `OBSERVED` and `NOW` and for an
+  answer asked observed whose rows came without their observation. Acceptance: `pnpm test`,
+  `just ci`, and main's look at 1920 × 1080 and 1280 × 720.
+
 ### P12.T12 Client: alert list and chart marks
 
 `useAlerts` (subscribe on mount, move the observer with the display's time and observer, handle
@@ -1390,11 +1405,12 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     dust the observed light crossed, which would be the observer to the apparent position at the
     emitted time. (2) The `HR DIAGRAM` page plots the briefs of the chart on show, which in
     observed mode are the primaries when the light left, and does not name the mode; it could carry
-    the chart's `MODE` reading. (3) The legend's dashed sample relies on `stroke-dasharray` at
-    `--line-scale` in a non-scaling-stroke SVG, which only the look at landing can check. (4) The
-    legend names no selected joiner (`--text`, 2 px), as the orbit map's does its selected orbit.
-    (5) `OBSERVER TO CENTRE` shares `CENTRE` with `CENTRE CHART`; `OBSERVE FROM CENTRE` was weighed
-    and left, since it reads as a choice of the mode; the nomenclature row decides.
+    the chart's `MODE` reading. _Closed by P12.T11.b._ (3) The legend's dashed sample relies on
+    `stroke-dasharray` at `--line-scale` in a non-scaling-stroke SVG, which only the look at
+    landing can check. (4) The legend names no selected joiner (`--text`, 2 px), as the orbit
+    map's does its selected orbit. (5) `OBSERVER TO CENTRE` shares `CENTRE` with `CENTRE CHART`;
+    `OBSERVE FROM CENTRE` was weighed and left, since it reads as a choice of the mode; the
+    nomenclature row decides.
 - **The observed brief reads the summary's primary (P12.T2 fix, lane `observed-class`,
   2026-10-21, at `GENERATOR_VERSION` 22).** P12.T11's landing look (look-72) found one system at
   one emitted instant reading two classes on one screen: GDG 0E0V00 E-141 of LOOK72
@@ -1446,3 +1462,72 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     single one gets. (5) The pin collapses the helium star at about 0.7 of its helium main
     sequence (Hurley et al. 2000, eq. 79, gives 3.4–3.6 Myr at 2.25–2.37 M☉, against the 2.53 Myr
     to the pin), not after core-helium depletion.
+- **P12.T11.b as built (`lane/73-p12-t11b-hr-mode`, 2026-10-21, at `GENERATOR_VERSION` 22).**
+  Client only: no Rust, protocol, binding, server, sim, GPU or golden change, nothing generated
+  moves, and the guide is not edited. The `HR DIAGRAM` page names the mode and time of the answer
+  it plots, as the chart's furniture does, and closes T11's deferred finding (2).
+  - _Names._ Under `apps/hyperion/src/renderer/src/displays/galaxy/`: the new `chartReadings.ts`,
+    the one writer of the chart's readings, exports `CHART_FRAME_NAME` (`GALACTIC`, the
+    furniture's `frameName` literal before), `RADIUS_WIDTH_CH` (9), `ANGLE_WIDTH_CH` (6),
+    `HEIGHT_WIDTH_CH` (9), `TIME_WIDTH_CH` (9), `CENTRE_DECIMALS` (1), `radiusReading`,
+    `placeReadings`, `timeReading(timeYr)` and `modeReading(mode)`, each with TSDoc. The constants
+    and the three functions are moved from `LocalChartPanel.tsx`, and the time reading's
+    construction is made `timeReading`; the panel imports them and its furniture reads exactly as
+    before. `HrDiagramProps` gains `mode: QueryMode` and `timeYr`; `HrDiagram.tsx` gains the
+    private `ModeLine` and `LineReading`. `GalaxyPages` passes `answeredMode(chart.result)` and
+    `chart.result.timeYr`; its empty state is unchanged. In `styles.css`'s `.hr-diagram` block:
+    `.hr-diagram__readings`, `.hr-diagram__stale-slot`, and the line added to
+    `.hr-diagram--stale`'s muted rule.
+  - _Deviation: the line's own reading._ The brief named the chart's `Reading`
+    (`spatial/Reading.tsx`), but it has no room for a stale mark, a mark beside its `div` would
+    stand in the `dl` outside any term's group, and `spatial/` is outside the lane's files.
+    `LineReading` writes `Reading`'s markup in `Reading`'s classes (`field spatial-reading`,
+    `field__value`, `spatial-reading__value` in its `ch` slot, `spatial-reading__unit`,
+    `readout__missing`) and adds after the unit a slot, `hr-diagram__stale-slot`, 2 ch wide in the
+    value's monospaced figures. The labels, slots and precisions are the shared module's, as the
+    chart's are. Posted to the lane's issue.
+  - _§5 a, where the line stands._ As leaned: a `dl` under the plot, after the temperature axis's
+    label and before the counts. It is in the furniture's own classes as well
+    (`spatial-view__readings`, and `spatial-view__mode` and `spatial-view__observer` within it), so
+    that it wraps between readings and never inside one as the furniture does, with no selector
+    added outside the `.hr-diagram` block. `.hr-diagram__readings` adds only `flex: none`.
+  - _§5 b, the time and the frame._ As leaned: `UT` at `TIME_WIDTH_CH`, then `MODE`. In observed
+    mode `FRAME GALACTIC` stands before `UT` and is the heading the observer's `RADIUS`, `ANGLE`
+    and `HEIGHT` stand under, as on the chart's furniture; no second `GALACTIC` is written. In
+    `NOW` there is no `FRAME`, since the diagram plots no positions.
+  - _§5 c, read from the answer._ As leaned: the page reads `answeredMode(chart.result)` and the
+    result's `timeYr`, so a choice not yet answered leaves it as its answer reads, and an answer
+    asked observed whose rows all came without their observation reads `MODE NOW`.
+  - _§5 d, stale._ As leaned: the line joins `.hr-diagram--stale`'s muted rule, and the time and
+    each coordinate trail `StaleMark`'s `S` in their slot; `NOW`, `OBSERVED FROM`, `GALACTIC` and
+    an em dash take none. The slot is kept while the answer is live, so that the mark's coming
+    moves nothing on the line. The chart's own single furniture `S` is unchanged.
+  - _§5 e–g._ As leaned: the canvas's accessible name stays `Hertzsprung-Russell diagram` (and
+    `…, stale`), the line being DOM text in the figure after the plot; no new words; no
+    `AS OBSERVED` line.
+  - _Tests (22 new, as run)._ `displays/galaxy/chartReadings.test.ts` (7: the frame's name, a
+    place's readings at 0.1 ly in the chart's 9, 6 and 9 ch slots, the axis's missing `ANGLE`, the
+    radius, the time in its 9 ch slot, `NOW`, and `OBSERVED FROM` with the observer as a place);
+    `displays/galaxy/HrDiagram.test.tsx`'s new block (10: `NOW` with `UT` and no `FRAME` or
+    observer; the line's place in the figure, between the axis's label and the counts; observed,
+    `FRAME GALACTIC` and the observer at the chart's precisions nested in `MODE`; the axis's
+    `ANGLE —`; the accessible name unchanged; four stale marks, on the time and each coordinate and
+    on no word; the time stale but not `NOW`; no mark on the em dash; the slots' room; and the
+    line in the stale rule); `displays/galaxy/GalaxyDisplay.observed.test.tsx`'s new block (5,
+    with an off-axis centre typed into `CURSOR` and observed: the `HR DIAGRAM` page reads
+    `OBSERVED FROM` and the observer; it reads the chart furniture's `MODE` and `UT` text; it keeps
+    `OBSERVED FROM` while `NOW` is chosen and not yet answered; it reads `MODE NOW` once answered;
+    and an answer asked observed whose rows came without `observed` reads `MODE NOW`). The existing
+    `HrDiagram` tests pass with only the new props added, and every chart furniture test passes
+    unchanged.
+  - _Deferred findings (2026-10-13 rule)._ (1) The two pages mark a stale answer differently: the
+    chart's furniture trails one `S` for the whole block (plan 05's ruling (8), applied in its T11
+    validation), the HR page's line one after each value, as its counts do, so the same answer's
+    `UT` reads `+0.00 yr` beside the block's one `S` on one page and `+0.00 yr S` on the other;
+    main decides. (2) A `stale` prop on `Reading`, and a shared `FRAME` and `MODE` reading, in plan
+    05's `spatial/`, would let the HR page's line use the chart's own markup rather than write it
+    again in `LineReading` and `ModeLine`; outside this lane. (3) The guide's `MODE` row places
+    the reading in a spatial view's furniture only; the `HR DIAGRAM` page, a graph, now carries it
+    under its plot, which the row could name (UX review; the guide is main's). (4) The page's
+    existing counts keep no room for their `S` (P06.T37), so a stale answer moves them while the
+    new line keeps its place: the page now behaves two ways (UX review).
