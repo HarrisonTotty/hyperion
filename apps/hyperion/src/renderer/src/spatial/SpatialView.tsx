@@ -28,7 +28,7 @@ import { StaleMark } from "../components/StaleMark";
 import { StatusText } from "../components/StatusText";
 import { AxisTriad } from "./AxisTriad";
 import { AXIS_FALLBACK_MESSAGE, CoreArrow } from "./CoreArrow";
-import { buildDrawList, type ScreenPoint } from "./drawList";
+import { buildDrawList, observerBoxPx, type ScreenPoint } from "./drawList";
 import {
   type BoxPx,
   coreArrowBoxes,
@@ -409,10 +409,14 @@ export function SpatialView({
         );
   // Marks' labels, placed last, keep off the core arrow and 0.5 rem from the other text: the triad,
   // the core arrow's label and the curve labels (decision-r07-quality-and-destination, addendum D,
-  // D4; R07.T16.j).
+  // D4; R07.T16.j); in observed mode they keep off the observer's eye too (plan 12, P12.T11.c).
   const coreLabel = coreArrow === null || coreArrow.kind === "undefined" ? [] : [coreArrow.label];
   const markLabels =
-    drawList === null || viewport === null || triadBox === null || coreArrow === null
+    drawList === null ||
+    camera === null ||
+    viewport === null ||
+    triadBox === null ||
+    coreArrow === null
       ? []
       : placeLabels(
           chosenMarks,
@@ -427,6 +431,7 @@ export function SpatialView({
             ),
             texts: [triadBox, ...coreLabel, ...curveLabels],
             unselectedIds,
+            observer: observerBoxPx(scene, camera, viewport),
           },
         );
 

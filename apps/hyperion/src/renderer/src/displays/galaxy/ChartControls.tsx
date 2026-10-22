@@ -65,7 +65,10 @@ interface NumberFieldProps {
   readonly name: string;
   /** The value on show, formatted without its unit. */
   readonly text: string;
-  /** The format the field expects, shown under it: `0.01-500 ly`. */
+  /**
+   * The format the field expects, shown beside it: `0.01 to 500 ly`, a span written with "to", as
+   * inside a sentence (§ Numbers).
+   */
   readonly hint: string;
   /** What the operator may enter, in words, for a refusal: `enter 0.01 to 500 ly`. */
   readonly valid: string;
@@ -82,6 +85,25 @@ interface NumberFieldProps {
 }
 
 /**
+ * A refusal's part, with the field's name and the space after it in an element of its own where the
+ * part starts with them (`DRIVE RANGE ` of `DRIVE RANGE INVALID:`), which the compact layout hides
+ * from sight alone, in the `.visually-hidden` pattern: there the refusal stands on the field's own
+ * row, whose label already names the field (plan 12, P12.T11.c). Any other part is set as it stands.
+ */
+function refusalPart(part: string, name: string): ReactNode {
+  const named = `${name} `;
+  if (!part.startsWith(named)) {
+    return part;
+  }
+  return (
+    <>
+      <span className="chart-controls__error-name">{named}</span>
+      {part.slice(named.length)}
+    </>
+  );
+}
+
+/**
  * One number the operator sets: entered when the field is left or with `Enter`, never at each
  * keystroke, so that a chart is not queried for every digit typed on the way.
  *
@@ -90,6 +112,14 @@ interface NumberFieldProps {
  * shows the value again, selected so that typing replaces it (decision-r07-t19b-exposure-fit,
  * item 6), and `Enter` on the field emptied does the same; left emptied, it shows the value.
  * Neither is refused.
+ *
+ * A refusal reads `<NAME> INVALID: <what is valid>` and describes the input after the hint. On the
+ * stacked page it takes a line of its own under the field. On the compact page it stands in the
+ * hint's place on the field's own row, never wrapping: the hint gives way (`display: none`, which
+ * the input's description still reaches) and the name is hidden from sight alone
+ * ({@link refusalPart}), so that no refusal, nor two at once, adds a line to the column (plan 12,
+ * P12.T11.c). Its text, and so the input's description and what a screen reader says, is the same
+ * on both.
  */
 function NumberField({
   label,
@@ -147,7 +177,13 @@ function NumberField({
   };
 
   return (
-    <div className="form-field chart-controls__field">
+    <div
+      className={
+        refused
+          ? "form-field chart-controls__field chart-controls__field--refused"
+          : "form-field chart-controls__field"
+      }
+    >
       <label className="form-field__label" htmlFor={fieldId}>
         {label}
       </label>
@@ -193,7 +229,10 @@ function NumberField({
       </span>
       {refused ? (
         <p className="form-field__error chart-controls__error" id={errorId}>
-          <StatusText text={`${name} INVALID: ${valid}`} />
+          <StatusText
+            text={`${name} INVALID: ${valid}`}
+            renderPart={(part) => refusalPart(part, name)}
+          />
         </p>
       ) : null}
     </div>
@@ -217,10 +256,11 @@ export interface ChartModeControls {
 }
 
 /**
- * The command that moves the observer to the centre of the chart on show: named for what it moves,
- * so that it is not taken for `CENTRE CHART`, which moves the chart (§ Controls).
+ * The command that moves the observer to the centre of the chart on show: named for what it moves
+ * and where to, so that it is not taken for `CENTRE CHART`, which moves the chart (§ Controls), and
+ * its `CENTRE` is the chart's (P12.T11.c).
  */
-export const MOVE_OBSERVER_LABEL = "OBSERVER TO CENTRE";
+export const MOVE_OBSERVER_LABEL = "OBSERVER TO CHART CENTRE";
 
 interface ChartControlsProps {
   /** The radius the operator chose, or `null` while it follows the drive range. */
@@ -319,8 +359,11 @@ const LOWEST_FLOOR: MassLayer = "rogue_planet";
  * Last, the chart's mode (plan 12, P12.T11): `NOW` or `OBSERVED` ({@link ModeControl}, its key `M`,
  * live while the controls are hidden as `K` is), held back with the link as every control that
  * asks the server is, and `OBSERVED` with no chart on show to observe from. Beside it, in either
- * mode, `OBSERVER TO CENTRE` moves the observer to the centre of the chart on show, held back with
- * the link and with no chart on show; in `NOW` it sets where the next `OBSERVED` observes from.
+ * mode, `OBSERVER TO CHART CENTRE` moves the observer to the centre of the chart on show, held back
+ * with the link and with no chart on show; in `NOW` it sets where the next `OBSERVED` observes from.
+ * On the compact page the two keep one row while no held-back reason of theirs stands, which is
+ * while a chart is on show; the row is marked `chart-controls__modes--reason` while one does, and
+ * may then wrap (P12.T11.c).
  */
 export function ChartControls({
   radiusChoiceLy,
@@ -471,7 +514,7 @@ export function ChartControls({
         label="DRIVE RANGE"
         name="DRIVE RANGE"
         text={formatChartLengthLy(driveRangeLy)}
-        hint={`${formatNumber(DRIVE_RANGE_MIN_LY, 2)}-${formatNumber(DRIVE_RANGE_MAX_LY, 0)} ly`}
+        hint={`${formatNumber(DRIVE_RANGE_MIN_LY, 2)} to ${formatNumber(DRIVE_RANGE_MAX_LY, 0)} ly`}
         valid={`enter ${formatNumber(DRIVE_RANGE_MIN_LY, 2)} to ${formatNumber(DRIVE_RANGE_MAX_LY, 0)} ly`}
         unit="ly"
         decimals={DRIVE_RANGE_DECIMALS}
@@ -493,7 +536,14 @@ export function ChartControls({
         heldBackId={held}
       />
       {modes === undefined ? null : (
-        <div className="chart-controls__modes">
+        <div
+          className={
+            // Either reason stands only with the link up and no chart on show: `NO CHART`.
+            held === null && (modes.observedHeldBack !== null || modes.moveHeldBack !== null)
+              ? "chart-controls__modes chart-controls__modes--reason"
+              : "chart-controls__modes"
+          }
+        >
           <ModeControl
             mode={modes.mode}
             onMode={modes.onMode}

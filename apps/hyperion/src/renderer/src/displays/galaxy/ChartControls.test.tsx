@@ -1,18 +1,23 @@
 import type { MassLayer } from "@hyperion/protocol";
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { aCensus } from "../../test/galaxyFixtures";
 import { ChartControls } from "./ChartControls";
 import { layerBands, type StarFilter } from "./chartModel";
-import { statusLine } from "../../test/statusLine";
+import { describedText, statusLine } from "../../test/statusLine";
 
 const BANDS = layerBands(aCensus().layers);
 
 type ControlsProps = Parameters<typeof ChartControls>[0];
 
-function renderControls(overrides: Partial<ControlsProps> = {}) {
+/**
+ * Renders the controls, inside a page of `pageClass` where one is given (`local-chart
+ * local-chart--compact`), as the `LOCAL CHART` page holds them.
+ */
+function renderControls(overrides: Partial<ControlsProps> = {}, pageClass?: string) {
   const onQueryRadius = vi.fn<(radiusLy: number) => void>();
   const onMinLayer = vi.fn<(layer: MassLayer) => void>();
   const onDriveRange = vi.fn<(rangeLy: number) => void>();
@@ -34,10 +39,12 @@ function renderControls(overrides: Partial<ControlsProps> = {}) {
     heldBack: null,
     ...overrides,
   };
-  const { rerender } = render(<ChartControls {...props} />);
+  const page = (controls: ReactElement): ReactElement =>
+    pageClass === undefined ? controls : <div className={pageClass}>{controls}</div>;
+  const { rerender } = render(page(<ChartControls {...props} />));
   /** Renders the controls again with some props changed, as the display would. */
   const update = (changes: Partial<ControlsProps>): void => {
-    rerender(<ChartControls {...props} {...changes} />);
+    rerender(page(<ChartControls {...props} {...changes} />));
   };
   return { onQueryRadius, onMinLayer, onDriveRange, onTime, onStarFilter, update };
 }
@@ -376,5 +383,100 @@ describe("ChartControls", () => {
 
     expect(onStarFilter).toHaveBeenCalledWith("living");
     expect(screen.getByRole("radio", { name: "LIVING" })).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("writes DRIVE RANGE's hint as a span in words", () => {
+    renderControls();
+
+    expect(describedText(numberField("DRIVE RANGE"))).toBe("0.01 to 500 ly");
+  });
+});
+
+/** The two number fields, which can refuse an entry. */
+const NUMBER_FIELDS = ["DRIVE RANGE", "CHART TIME"] as const;
+
+type NumberFieldName = (typeof NUMBER_FIELDS)[number];
+
+/** Each field's refusal: what is typed, the hint, and what the refusal says is valid. */
+const REFUSALS: Readonly<
+  Record<NumberFieldName, { readonly typed: string; readonly hint: string; readonly says: string }>
+> = {
+  "DRIVE RANGE": { typed: "900", hint: "0.01 to 500 ly", says: "enter 0.01 to 500 ly" },
+  "CHART TIME": { typed: "1001", hint: "±1000 yr", says: "enter -1000 to 1000 yr" },
+};
+
+/** Refuses an entry in both number fields, so that both refusals stand at once. */
+async function refuseBoth(pageClass?: string): Promise<void> {
+  const user = userEvent.setup();
+  renderControls({}, pageClass);
+  // One field after the other, as the operator types: the second's focus leaves the first refused.
+  await user.clear(numberField("DRIVE RANGE"));
+  await user.type(numberField("DRIVE RANGE"), `${REFUSALS["DRIVE RANGE"].typed}{Enter}`);
+  await user.clear(numberField("CHART TIME"));
+  await user.type(numberField("CHART TIME"), `${REFUSALS["CHART TIME"].typed}{Enter}`);
+}
+
+/** The field a number input stands in: its label, input, unit, hint and any refusal. */
+function fieldOf(name: NumberFieldName): HTMLElement {
+  const field = numberField(name).closest<HTMLElement>(".chart-controls__field");
+  if (field === null) {
+    throw new Error(`${name} stands in no field`);
+  }
+  return field;
+}
+
+describe("ChartControls' refusals (plan 12, P12.T11.c)", () => {
+  it.each(NUMBER_FIELDS)(
+    "shows %s's refusal in its own field while both stand, describing its own input",
+    async (name) => {
+      await refuseBoth();
+      const { hint, says } = REFUSALS[name];
+
+      expect(
+        within(fieldOf(name)).getByText(statusLine(`${name} INVALID: ${says}`)),
+      ).toBeInTheDocument();
+      expect(describedText(numberField(name))).toBe(`${hint} ${name} INVALID: ${says}`);
+      expect(fieldOf(name)).toHaveClass("chart-controls__field--refused");
+    },
+  );
+
+  it.each(NUMBER_FIELDS)(
+    "holds %s's name, with its trailing space, in an element the compact layout hides",
+    async (name) => {
+      await refuseBoth();
+
+      const named = within(fieldOf(name)).getByText(
+        (_, element) => element?.classList.contains("chart-controls__error-name") === true,
+      );
+      expect(named.textContent).toBe(`${name} `);
+      expect(named.closest(".status-text__state")?.textContent).toBe(`${name} INVALID:`);
+    },
+  );
+
+  it("says the same refusals and descriptions on a compact page as on a stacked one", async () => {
+    const read = (): string[] =>
+      NUMBER_FIELDS.flatMap((name) => [
+        fieldOf(name).querySelector(".chart-controls__error")?.textContent ?? "",
+        describedText(numberField(name)),
+      ]);
+    await refuseBoth("local-chart");
+    const stacked = read();
+    cleanup();
+
+    await refuseBoth("local-chart local-chart--compact");
+
+    expect(read()).toEqual(stacked);
+    expect(stacked).toContain("DRIVE RANGE INVALID: enter 0.01 to 500 ly");
+  });
+
+  it("drops the refused mark with the refusal, so that the hint comes back", async () => {
+    const user = userEvent.setup();
+    renderControls();
+    await user.clear(numberField("DRIVE RANGE"));
+    await user.type(numberField("DRIVE RANGE"), "900{Enter}");
+
+    await user.keyboard("{Escape}");
+
+    expect(fieldOf("DRIVE RANGE")).not.toHaveClass("chart-controls__field--refused");
   });
 });

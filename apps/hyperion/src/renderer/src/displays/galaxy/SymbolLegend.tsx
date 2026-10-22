@@ -47,19 +47,26 @@ function ObserverSample() {
 /**
  * An apparent position as the chart draws it: the dashed joiner, 1 px with a predicted path's dash,
  * and the tick across its end, at the line scale.
+ *
+ * @remarks
+ * 2.75 rem long, 16 of its units a rem, so that the joiner's 42 units show two whole dashes and the
+ * gap between them at every line factor in use, up to 2.56 at a device-pixel ratio of 0.78125:
+ * (6 + 4 + 6) px × 2.56 = 41 px (P12.T11.c). The joiner is drawn from the tick out, so that its
+ * dash pattern starts there and a dash meets the tick, which is the chart's 0.5 rem
+ * (`SEGMENT_TICK_REM`).
  */
 function ApparentSample() {
   return (
     <svg
       className="symbol-legend__mark symbol-legend__apparent"
-      style={{ width: "1.5rem", height: "0.5rem" }}
-      viewBox="0 0 24 8"
+      style={{ width: "2.75rem", height: "0.5rem" }}
+      viewBox="0 0 44 8"
       aria-hidden="true"
       focusable="false"
     >
-      <path className="symbol-legend__joiner" d="M 0 4 H 22" />
-      {/* 4 of the box's 16 units a rem: the chart's 0.25 rem. */}
-      <path className="symbol-legend__tick" d="M 22 2 V 6" />
+      <path className="symbol-legend__joiner" d="M 42 4 H 0" />
+      {/* 8 of the box's 16 units a rem: the chart's 0.5 rem. */}
+      <path className="symbol-legend__tick" d="M 42 0 V 8" />
     </svg>
   );
 }

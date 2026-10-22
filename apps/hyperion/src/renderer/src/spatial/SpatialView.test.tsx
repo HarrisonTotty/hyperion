@@ -1850,6 +1850,43 @@ function drawnAt(position: Vec3) {
   );
 }
 
+describe("SpatialView's labels off the observer's eye (plan 12, P12.T11.c)", () => {
+  beforeEach(() => {
+    stubLayout(1200, 900);
+  });
+
+  // A mark 40 px left of the view's centre, its label running right across the centre, from about
+  // 576 to 654 px, where the eye stands: unlabelled, so that only the eye's box can drop the label.
+  const near = aMark("m", { position: onPlaneAt(560, 450), label: "MARK NEAR" });
+  const eye = { position: onPlaneAt(600, 450), label: "" };
+
+  it("drops a system's label that would cover the eye", () => {
+    renderView({ scene: aScene({ points: [near], observer: eye }) });
+
+    expect(screen.queryByText("MARK NEAR")).toBeNull();
+  });
+
+  it("puts the selection's label on its other side, clear of the eye", () => {
+    renderView({ scene: aScene({ points: [near], selectedId: "m", observer: eye }) });
+
+    expect(placement(overlayLabel("MARK NEAR"))).toContain("- 100%");
+  });
+
+  it("labels the system as before in now, with no observer", () => {
+    renderView({ scene: aScene({ points: [near], selectedId: "m" }) });
+
+    expect(placement(overlayLabel("MARK NEAR"))).not.toContain("- 100%");
+  });
+
+  it("labels the system as before with the observer outside the view", () => {
+    renderView({
+      scene: aScene({ points: [near], observer: { position: onPlaneAt(-200, 450), label: "" } }),
+    });
+
+    expect(screen.getByText("MARK NEAR")).toBeInTheDocument();
+  });
+});
+
 describe("SpatialView's furniture text clear of the marks (R07.T16.j)", () => {
   beforeEach(() => {
     stubLayout(1200, 900);
