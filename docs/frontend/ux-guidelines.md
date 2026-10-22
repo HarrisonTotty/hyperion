@@ -273,7 +273,12 @@ never use them for decoration, branding, chart series or hover effects.
   thin space, never a comma, since many languages write the comma as the decimal marker. The
   console's decimal marker is always the point, so a comma can only be a group's; neither face
   holds a thin space, and a full space in a monospaced field would read as two numbers.
-- A field has a fixed width sized for its longest possible value and its status marks.
+- A field has a fixed width sized for its longest possible value and its status marks. The one
+  exception is the local chart's census summary, its census line and its counts
+  (`COMPLETE ABOVE 0.08 M☉ S`, `SYSTEMS 9 OF 88 S SHOWN: REMNANTS`, `IN RANGE 88 S`): running
+  text, each value at its own width, which changes only with a new answer or a setting the
+  operator changes. A stale value's `S` follows it there with no place kept, and the summary may
+  reflow as its answer goes stale.
 - Angles are degrees with a degree sign, `000°` to `359°` for bearings, zero-padded. The one
   exception is a small angle on the sky, the bound on an apparent position (`CURVATURE BOUND`),
   which is in arcseconds, `″`, the astronomers' unit (SI Brochure, 9th edition, Table 8), set
@@ -398,6 +403,13 @@ A live value is always in exactly one of these states, and each looks the same e
 
 - A value becomes stale when its source has not updated within twice its expected period.
   Loss of the server link makes every live value on the console stale at once.
+- A row of a list whose values all come from one answer, and so go stale together, may carry one
+  `S` for them all, at every window size, where a place kept after each value would leave a column
+  too narrow for its longest value at 1280×720, as the system list's rows do. Its values are
+  muted, the `S` stands in a place kept at the end of its last cell, and its accessible name ends
+  ", stale". It is the one form besides a mark per value: the readout of the selected row still
+  marks each of its values, and a row whose values come from more than one answer marks each
+  value.
 - Elements with states or modes always show the current one. Automation always shows its
   level (`AUTO`, `MAN`, `INHIBITED`) and who is in control of a system.
 - **Exposure is an instrument.** A view's camera exposure is a value with its unit, `EV100`, and
@@ -916,6 +928,13 @@ Four classes, shared by the whole ship:
     - Unsurveyed ground shows the body's reference surface, the `DATUM`, with no terrain, contours
       or reading claimed there. A skirt in the reference surface's appearance joins the two where
       their heights differ.
+    - The datum's lines, the body's limb and graticule on its `DATUM`, are drawn over ground the
+      ship has not surveyed and give way over its surveyed ground in both styles, as the reference
+      surface does, so that none floats over a surveyed valley. The wireframe draws its graticule
+      on the terrain there instead (below). The photorealistic style draws none of them there,
+      where the image draws the terrain in the reference surface's place, so that surveyed ground
+      on a night side, or drawn black under a `LIGHTING:` annunciation, shows none of them.
+      Surveyed ground is told by the survey edge, not by where the datum's lines end.
     - The edge is drawn along the surveyed terrain's border, as the chart's query edge marks where
       fetched data ends: a solid `--text` line `1px` wide with short ticks pointing into the
       unsurveyed side. Each tick is `0.25rem` long, one every `1rem` of the drawn line, and none is
@@ -962,8 +981,9 @@ Four classes, shared by the whole ship:
     - _Scale._ With the field of view, the interval is the wireframe's statement of scale in place
       of the 1-2-5 scale bar. The field of view gives the picture's angular scale, and the interval
       its vertical one.
-    - _The graticule._ The graticule is still drawn over surveyed terrain, and is told from the
-      contours by its geometry: it crosses contours, which never cross one another.
+    - _The graticule._ Over surveyed terrain the graticule is drawn on the terrain, at its height,
+      in place of the datum's (see the survey edge, above), and is told from the contours by its
+      geometry: it crosses contours, which never cross one another.
 
 - A view cannot carry the 1-2-5 scale bar, since a perspective picture has no single scale. In its
   place the view states its horizontal field of view in degrees (`FOV 60°`) and its reference
