@@ -708,6 +708,24 @@ summary.
   refusals at once on a compact and a stacked page, the stylesheet's compact rules, the command,
   the tick, the sample's dashes, the labels about the eye, `AGE` in both modes and the hint.
   Acceptance: `pnpm test`, `just ci`, and main's look at 1920 × 1080 and 1280 × 720.
+- **P12.T11.d One stale S per value on the spatial furniture** (added 2026-10-22 by main's UX
+  decision on T11.b's landing look; built in `lane/75-p12-t11d-stale-per-value`, recorded at the
+  end of Risks). The look found the chart's furniture marking a stale answer with one `S` after the
+  scale bar, read `2 ly S` as if the camera's live scale were stale, while the `HR DIAGRAM` page's
+  line, in its own copies of the furniture's readings, marked each value, and the page's counts
+  moved as their `S` came. `Reading` now keeps a 2 ch slot for its `S` where its value can go
+  stale, shared `FRAME` and `MODE` readings serve the furniture and the HR line, the furniture marks
+  each value it reads from the answer and not the frame's or the mode's name, the scale bar or the
+  orbit map's own display time, the scale bar stands between the time and the mode so that the
+  compact chart keeps its lines, and the counts keep a slot too; the guide's `MODE` row names the
+  graph's line. Files: under `apps/hyperion/src/renderer/src/`: `spatial/`'s `Reading.tsx`, the new
+  `FrameReading.tsx` and `ModeReading.tsx`, and `SpatialView.tsx`; `displays/galaxy/`'s
+  `HrDiagram.tsx` and `chartReadings.ts`; `displays/system/OrbitMapPanel.tsx`; `styles.css`; tests;
+  the guide; plan 05's ruling (8). Tests: Vitest for the reading's slot and mark, the shared
+  readings, the furniture's marks per value, its order and its own time, the HR line and counts,
+  the chart's and the orbit map's stale furniture, both pages' stale text, and the compact scale
+  bar's rule. Acceptance: `pnpm test`, `just ci`, and main's look at 1920 × 1080, 1280 × 720 and
+  150%, live and stale.
 
 ### P12.T12 Client: alert list and chart marks
 
@@ -1542,13 +1560,14 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     chart's furniture trails one `S` for the whole block (plan 05's ruling (8), applied in its T11
     validation), the HR page's line one after each value, as its counts do, so the same answer's
     `UT` reads `+0.00 yr` beside the block's one `S` on one page and `+0.00 yr S` on the other;
-    main decides. (2) A `stale` prop on `Reading`, and a shared `FRAME` and `MODE` reading, in plan
-    05's `spatial/`, would let the HR page's line use the chart's own markup rather than write it
-    again in `LineReading` and `ModeLine`; outside this lane. (3) The guide's `MODE` row places
-    the reading in a spatial view's furniture only; the `HR DIAGRAM` page, a graph, now carries it
-    under its plot, which the row could name (UX review; the guide is main's). (4) The page's
-    existing counts keep no room for their `S` (P06.T37), so a stale answer moves them while the
-    new line keeps its place: the page now behaves two ways (UX review).
+    main decides. _Closed by P12.T11.d._ (2) A `stale` prop on `Reading`, and a shared `FRAME` and
+    `MODE` reading, in plan 05's `spatial/`, would let the HR page's line use the chart's own markup
+    rather than write it again in `LineReading` and `ModeLine`; outside this lane. _Closed by
+    P12.T11.d._ (3) The guide's `MODE` row places the reading in a spatial view's furniture only;
+    the `HR DIAGRAM` page, a graph, now carries it under its plot, which the row could name (UX
+    review; the guide is main's). _Closed by P12.T11.d._ (4) The page's existing counts keep no
+    room for their `S` (P06.T37), so a stale answer moves them while the new line keeps its place:
+    the page now behaves two ways (UX review). _Closed by P12.T11.d._
 - **P12.T11.c as built (`lane/74-p12-t11c-compact-refusals`, 2026-10-22, at `GENERATOR_VERSION`
   22).** Client and guide only: no Rust, protocol, binding, server, sim, GPU or golden change, and
   nothing generated moves. P06.T24.c was not on `origin/rendering-and-planets` at the lane's last
@@ -1651,3 +1670,124 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     two read as one. (8) Putting the eye's box on the `DrawList` would project the observer once
     (TypeScript review); left, since the smoke harness's and the HR projection's draw lists, outside
     this lane, build the type, and both paths already share `observerCentre`.
+- **P12.T11.d as built (`lane/75-p12-t11d-stale-per-value`, 2026-10-22, at `GENERATOR_VERSION`
+  22).** Client, guide and plan only: no Rust, protocol, binding, server, sim, GPU or golden
+  change, and nothing generated moves. Neither P06.T24.c nor the `GENERATOR_VERSION` 23 bump was on
+  `origin/rendering-and-planets` at the lane's last merge (`a324a05a`), so the reckoning is at the
+  base's figures. Main's ruling on the fit came before Part A was committed, so Parts A and B are
+  one commit. Closes T11.b's deferred findings (1) to (4).
+  - _Names._ `spatial/Reading.tsx`: `ReadingProps.stale?: boolean | undefined`, the brief's shape,
+    and `ReadingProps.own?: boolean | undefined`; the slot `span.spatial-reading__stale-slot`,
+    whose rule (`.hr-diagram__stale-slot`'s: `inline-block`, `min-width: 2ch`, right-aligned) now
+    stands beside `.spatial-reading__unit`; the modifier `spatial-reading--own`. The new
+    `spatial/FrameReading.tsx` (`FrameReading`, `FrameReadingProps.frameName`) and
+    `spatial/ModeReading.tsx` (`ModeReading`, `ModeReadingProps.mode` and `.stale?`, and
+    `SpatialMode`, moved from `SpatialView.tsx`, which `chartReadings.ts` now imports from there).
+    `SpatialViewProps.timeIsOwn?: boolean | undefined`. In `HrDiagram.tsx` `LineReading` and
+    `ModeLine` are gone: the line is a `dl` of `FrameReading`, `Reading` and `ModeReading` written
+    in place, and each count's `dd` ends in `span.hr-diagram__count-slot`. In `styles.css`:
+    `.hr-diagram__count-slot`, `.spatial-view--stale .spatial-reading--own` (`color: var(--text)`)
+    after the muting rule, and the compact scale bar's `margin-right: 0.75rem`.
+  - _§3, the fit._ The lane's reckoning from look-73's boxes agrees with main's. With a 2 ch slot
+    (18.2 px) after `RADIUS`, `ANGLE`, `HEIGHT` and `UT` (191.4, 136.2, 192.1 and 152.9 px) and
+    after the observer's three (the mode 728.9 px), line 1's five readings come to 802.4 px with no
+    gap, more than the 798 px line, so in today's order `UT` wraps (it would end at 883.4) and
+    compact `OBSERVED` takes a fourth line, its stage 222 px against its 240 px floor. Main's ruling
+    of 2026-10-22, on the lane's issue, replaced the brief's stop: the furniture holds a first `dl`
+    (`FRAME`, the centre and the time), the scale bar, then, only where `mode` is given, a second
+    `dl.spatial-view__readings` holding the mode alone; the compact scale bar takes the readings'
+    0.75 rem as `margin-right`; nothing else in the layout changes; and the orbit map's
+    `DISPLAY TIME UT`, the console's own clock, takes no mark and is not muted. As built, reckoned
+    at 1280 × 720 and 100% (at 150% every edge within 0.5 px, the furniture from 32.7 px):
+    - `NOW`: line 1 ends after `HEIGHT` at 718.5; line 2 holds `UT` (33–185.9), the bar
+      (197.9–384.9) and `MODE NOW` (396.9–488.2). Two lines, as before; the stage 258 px (264.6 at
+      150%) over its 240.
+    - `OBSERVED`: line 1 the same; line 2 `UT` and the bar, to 384.9, the mode not fitting after
+      them (it would end at 1125.8); line 3 the mode, 33–761.9. Three lines, as before; the stage
+      240 px (248 at 150%), at its floor. Line 3 is the tightest: the mode's box ends 69 px inside
+      the page's 831, and with its 0.75 rem margin, which the line holds as the base's `UT` held
+      its own (823 of 831), 57.1 px inside (the UX review's figure; main's ruling gave 69); every
+      wrap is certain, `UT` by 52.4 px past line 1's end and the mode by 294.8 past line 2's.
+    - At 150%, main's figures: line 1 ends at 718.1; line 2 at 487.9 in `NOW` and 384.6 observed;
+      line 3 32.7–761.5. With P06.T24.c, not in this tree, main's figures: the same edges at 100%
+      (about 718, 488, 385 and 762 at 150%), and the stages 262 px in `NOW` and 228 observed at
+      100%, 266 and 232 at 150%, against its 224 px floor.
+    - Live and stale alike, since every slot is kept and the own time has none; no reading wraps
+      inside itself, each being `nowrap` and the longest, the mode, 728.9 px of the line's 798.
+    - The stacked page (1920 × 1080, the furniture to 1068.7, its readings 1.25 rem apart and its
+      parts 1.5 rem): line 1 the first `dl`, to 915.4; line 2 the bar (33–220) and the mode
+      (244–335.3 in `NOW`; 244–996.9 observed, the observer 1.25 rem apart). Two lines in both
+      modes, where `OBSERVED` had three, so its stage gains a line, about 22 px.
+    - The orbit map has no mode, so one `dl` and the bar, as before: its centre's three readings
+      grow 54.6 px and the display time not at all. By estimate only (B612's tracked capitals at
+      about 10.7 px, from look-73's boxes, and the `SYSTEM` grid's 2fr column): at 1280 × 720
+      `FRAME SYSTEM BARYCENTRIC` to `HEIGHT` comes to about 794 px of a map about 785 wide, so
+      `HEIGHT` may now open the display time's line (the two about 564 px), three lines either way;
+      at 1920 × 1080 the five readings, about 1166 px, still share one line of about 1210, and the
+      bar takes the second.
+    - The HR counts each grow 18.2 px live, so stale moves none: `OFF SCALE` stands at 167.6 in
+      both states, look-73's stale place. `NOT PLOTTED`'s row, from 49 with one-digit counts:
+      `NEUTRON STAR` to 215.2, `BLACK HOLE` 231.2–372.2, and by estimate `NO REMNANT` to about 526
+      and `NOT YET FORMED` to about 718, inside 831; a `PLANET` count would end near 833 and a
+      `DATA INVALID` count alone near 893, so either may now wrap the row where before only both
+      together did, and more digits wrap it sooner. The first row under a `STARS` filter
+      (`SYSTEMS 1,630 OF 1,630 SHOWN: REMNANTS`, `PLOTTED 1,630`, `OFF SCALE 0`) ends near 713.
+      A wrap there is a watch item: the HR stage has 204 px over its 128 px floor at 1280 × 720.
+  - _Choices._ (a) The own time is a second optional prop on `Reading`, `own`, rather than a third
+    state of `stale`, so that `stale` keeps the brief's shape; `SpatialView` gives the own time
+    `own` and no `stale`, and `own` overrides any `stale` given with it, so that an own reading has
+    no slot and no mark whatever `stale` says (deferred finding (4)). (b) The shared readings are
+    components in files of their own, since the TypeScript rules give each exported component its
+    own file, and `SpatialMode` moved with `ModeReading`, which reads it. (c) The counts' slot has
+    a rule of its own at the reading's 2 ch, not a second selector on the reading's, so that
+    `stylesheetRule` holds each by its selector. (d) The HR line keeps no private wrapper. (e)
+    `LocalChartPanel.tsx`'s stale sentence, "drawn and read as stale, in `--text-muted` with a
+    trailing `S`", still holds and is unchanged.
+  - _Deviations, by main's ruling._ On a display with a mode the furniture's order is now the
+    frame, the centre, the time, the scale bar, then the mode in a second
+    `dl.spatial-view__readings`; with none, the one `dl` and the order are as before. `SpatialView`
+    gains `timeIsOwn` and the stylesheet the own time's rule, and `OrbitMapPanel` sets `timeIsOwn`,
+    its one code change. The guide's `MODE` cell is the brief's, with "after the time and the scale
+    bar" for "after the time". The "furniture tests that count one `S`" were none: no test counted
+    the row's one `S`, and `LocalChartPanel.test.tsx`'s stale test, which counted the page's
+    `stale` marks, now reads each value's.
+  - _Tests (38 new, 3 changed, as run)._ `spatial/Reading.test.tsx` (9: no slot without `stale`,
+    an empty slot live, the mark after the unit, after a value with no unit, the em dash's empty
+    slot, the slot's rule, the own reading's class and no slot, no mark on an own reading given
+    `stale`, no other reading's class); `spatial/FrameReading.test.tsx` (2);
+    `spatial/ModeReading.test.tsx` (7: `NOW`, the observer nested, marks on the observer's values
+    only, the axis's em dash, `NOW` never marked, empty slots live, none without `stale`);
+    `spatial/SpatialView.test.tsx`, in a block of its own after the furniture's, "SpatialView's
+    stale furniture, one S per value" (15: the centre's and the time's marks, the observer's, none
+    on the frame's or the mode's name, the em dash's empty slot, none in the bar, no mark outside a
+    slot, empty slots live, `AZM` and `ELV` bare live and stale (two cases), the order by
+    `compareDocumentPosition`, one `dl` with no mode, the own time, its colour rule, the canvas's
+    stale name, the muting rule); `HrDiagram.test.tsx` (2: an empty slot after each count live,
+    `SYSTEMS` among them, and each count's mark in its slot); `GalaxyDisplay.observed.test.tsx` (1:
+    stale, both pages read `+0.00 yr S` and the same observer with its marks);
+    `SystemView.test.tsx` (1, beside the unchanged stale test: the centre's values marked,
+    `DISPLAY TIME UT` not); `LocalChartPanel.compact.test.tsx` (1: the compact scale bar's margin).
+    Changed: the HR line's slot test names the shared slot and its rule; the chart's stale test
+    reads each furniture value's `S` and `GALACTIC` bare; the compact guard that said `UT` ends the
+    first line is renamed. Every other existing test passes unchanged.
+  - _For main's look._ The order (the time, the bar, then the mode); compact `OBSERVED`'s line 3,
+    57.1 px inside the page with its margin (69 to its box), and its stage at the 240 px floor (228
+    against 224 with P06.T24.c); line 2's right edge (384.9 observed, 488.2 in `NOW`); the stacked
+    page's `OBSERVED` furniture on two lines; the orbit map's first line at 1280 × 720, where
+    `HEIGHT` may wrap, and its `DISPLAY TIME UT` in `--text` with no `S` while stale; the HR counts'
+    second row with a `PLANET` or `DATA INVALID` count; `OFF SCALE` at its live x; and `AZM` and
+    `ELV` unchanged.
+  - _Deferred findings (2026-10-13 rule)._ (1) The console now marks a stale answer two ways: each
+    value in the spatial furniture and on the HR page, and once a block in the census line, the
+    list, the readout and the panels' titles (`Systems`, `Orbit map`, `Bodies`), where the guide's
+    "Data states" says each state "looks the same everywhere"; the blocks are outside this task.
+    (2) The guide says the console's own values are never stale only of `BASELINE` and
+    `PAD WIDTH`; its `DISPLAY TIME` row could say so of the display time, which main's ruling now
+    leaves unmarked and unmuted (UX review; the brief allows no other guide edit). (3) Under a
+    `STARS` filter a stale `SYSTEMS` count reads `… SHOWN: REMNANTS S`, its `S` after the filter's
+    name, the console's own live choice, as look-73 found `2 ly S` after the scale; the marks could
+    follow the figures instead (UX review; the place is P06.T37's and the brief's §5 A4 kept it).
+    (4) `Reading`'s `stale` and `own` are two optional props, so the type admits both at once,
+    which renders as `own` alone; one union prop (a source that is the answer's, stale or not, or
+    the console's own) would rule the pair out, but renames the brief's `stale` (TypeScript review;
+    main's call).

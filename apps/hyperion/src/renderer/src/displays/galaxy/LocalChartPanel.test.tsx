@@ -450,11 +450,21 @@ describe("LocalChartPanel", { timeout: 120_000 }, () => {
       await Promise.resolve();
     });
 
-    // The guide's stale state: named so, muted, and marked with a trailing S in each block.
+    // The guide's stale state: named so, muted, and marked with a trailing S, in the furniture after
+    // each value (P12.T11.d) and in each block beside it.
     expect(
       within(chartPage()).getByRole("application", { name: "Local chart, stale" }),
     ).toBeInTheDocument();
-    expect(within(chartPage()).getAllByText("stale").length).toBeGreaterThan(0);
+    for (const label of ["RADIUS", "ANGLE", "HEIGHT", "UT"]) {
+      expect(
+        within(chartPage()).getByText(label, { selector: ".spatial-view__furniture dt" })
+          .nextElementSibling,
+      ).toHaveTextContent(/S\s*stale$/u);
+    }
+    expect(
+      within(chartPage()).getByText("FRAME", { selector: ".spatial-view__furniture dt" })
+        .nextElementSibling,
+    ).toHaveTextContent(/^GALACTIC$/u);
     expect(screen.getByRole("region", { name: "Systems stale" })).toBeInTheDocument();
   });
 
