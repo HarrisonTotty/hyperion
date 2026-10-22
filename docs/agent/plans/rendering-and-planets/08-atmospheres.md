@@ -1933,11 +1933,13 @@ The order:
   from R06's fixture) follows T6.h and may run beside T6.i; T6.e follows T6.i and T3.d; T6.f
   follows T6.e (`decision-r08-t6d-findings.md`).
 - T7 (several suns, the sky's extinction) and T8 (other bodies from outside) follow T6.i and T6.j,
-  so that their marches start from the pieces and their sources from R06's fixture; T9.a (aerial
-  perspective) follows T6.d; T9.b (surface lighting, by band) follows T6.f.
+  so that their marches start from the pieces and their sources from R06's fixture; T8's subtasks
+  run in order, T8.a, T8.b and T8.c, and T8.c (the far limb integrated across the texel,
+  `decision-r08-t8-leans.md` §6) precedes T10.b and T16.b; T9.a (aerial perspective) follows T6.d;
+  T9.b (surface lighting, by band) follows T6.f.
 - T10.a assembles the medium from a body and needs T2–T6 (T5 for the aerosol terms); T10.b draws
-  it in the photorealistic view and follows T10.a and T7. T11 records the thin benchmarks and needs
-  T7–T10.
+  it in the photorealistic view and follows T10.a, T7 and T8.c. T11 records the thin benchmarks
+  and needs T7–T10.
 - T12.a (the tracer) needs nothing of this plan and can start at once. T12.c (its benchmarks) and
   T12.d (the spheroid mode) follow it; T12.c's cases whose matrices come from R08's Mie
   (Kokhanovsky's aerosol and cloud, IPRT's spheres) also wait on T5.b, and its other cases do not.
@@ -4250,8 +4252,9 @@ two suns, and its timings are taken with T11's.
 
 ### R08.T8 Views from outside and other bodies
 
-In two subtasks (split on implementation, 2026-10-21, as `decision-next-lane-2026-10-21.md` §2
-suggests; T8.b also waits on `view/bodies/` and `view/spike/` being free):
+In three subtasks (split on implementation, 2026-10-21, as `decision-next-lane-2026-10-21.md` §2
+suggests; T8.b also waits on `view/bodies/` and `view/spike/` being free; T8.c added the same day
+by `decision-r08-t8-leans.md` §6):
 
 - **R08.T8.a The march from inside and outside the air, and the switch band.** The march's N terms
   and several sources (built by R08.T6.b and R08.T7, no source skipped outside the air), the switch
@@ -4261,8 +4264,59 @@ suggests; T8.b also waits on `view/bodies/` and `view/spike/` being free):
   2026-10-21_ (Risks, "Deviations in T8.a, as built").
 - **R08.T8.b Bodies seen from outside, and the far limb.** A body's atmosphere at its `apparentM`
   and its camera formed in `f64` relative to it, the `apparentM` test below, the far limb's twin
-  checks and its fidelity, and the ascent by hand. Acceptance: `pnpm test` and `just test-render`
-  pass, and the ascent below.
+  checks and its fidelity, and the ascent by hand. Also (`decision-r08-t8-leans.md` §6.2) low's
+  half-resolution pick breaks depth ties by the texel nearest the pixel's centre, with a GPU check.
+  Acceptance: `pnpm test` and `just test-render` pass, and the ascent below. _Built 2026-10-22_
+  (Risks, "Deviations in T8.b, as built"); the far limb from about one scale height a texel is a
+  known blocker owned by T8.c.
+- **R08.T8.c The far limb integrated across the texel** (`decision-r08-t8-leans.md` §6.1). From
+  above the top the composite takes the march alone, one ray a texel, and from about one scale
+  height a texel that ray cannot stand for its footprint: the limb breaks into specks and gaps
+  that flicker as the body moves by a fraction of a pixel. R07's disc draws no air and does not
+  take over. In the ray march a texel whose footprint meets the shell takes the mean over its
+  footprint, across the limb:
+  - along the screen direction in which the tangent height changes, weighted by the footprint's
+    projection on it;
+  - the footprint cut at the top and at the datum's edge, the shell piece taking up to 8
+    Gauss–Legendre nodes, the ground piece 2 and space none, each weighted by its share of the
+    footprint (fewer nodes at small spans if the lane records its schedule);
+  - what lies behind the limb taking the same mean: `transmittanceFromAbove`'s per-channel
+    transmittance, and the march's alpha for drawn surfaces;
+  - blended in by w_L = clamp((s − 0.6) ÷ 0.4, 0, 1), s the texel's span in tangent height (its
+    angular height times its ray's distance to the tangent point) over the local scale height at
+    the tangent point: (1 − w_L) × the centre ray + w_L × the mean, for the in-scatter and the
+    transmittance alike, continuous in the camera, with no hysteresis. Texels wholly on the face
+    or wholly in space keep the centre ray. Per-frame constants are formed in `f64` (Design note
+    18). The shader (`rayMarch.wgsl`) and its twin (`rayMarchTexelTwin`, or a footprint twin
+    beside it) change in one commit.
+
+  T8.c is accepted when:
+  1. `farLimb.test.ts`'s reference becomes the footprint mean converged across the limb, doubled
+     until within `CONVERGED` as the gate's references are.
+  2. On high every limb-set pixel is within 5% of it at 10⁸ and 10⁹ m on R05's Earth, the measured
+     Earth and the Saturn-class figure, and at the blend's upper edge (s = 1) on R05's Earth. The
+     90°/0° image, inside Design note 10's 3°, is recorded, not held. A miss is pinned as a named
+     miss to the 0.01 point and reported to "main" (§4.3's rule).
+  3. No flicker: with the limb swept across one texel in eight steps of pitch at 10⁸ and 10⁹ m,
+     each column's summed radiance over the limb stays within 5% of its mean on high, for every sun
+     but 90°/0°; on low it never falls below half its mean, its figures recorded.
+  4. In the twin the output equals the centre ray at s = 0.6 and the mean at s = 1, to rounding.
+  5. Low is re-measured against the converged footprint of each output pixel and recorded, its
+     half-resolution trade included. A limb-set pixel drawn as 0 where the converged mean is above
+     the floor goes to "main" as a blocker.
+  6. The smoke's GPU-against-twin agreement holds, with a far-limb frame at 10⁸ m added on each
+     setting.
+  7. Frames at 10⁷ m, at s = 1 and at 10⁸ m are timed beside the 400 km frame in R08.T11's rows;
+     one over the orbit frame beyond noise is reported to "main".
+  8. Optional, by eye: a hidden capture at 10⁸ and 10⁹ m, before and after.
+
+  It also re-measures the far limb's twin-check envelope share at 10⁷ m once the footprint mean is
+  in, and drops or tightens T8.b's named miss `FAR_LIMB_NEAR_SHARE_MISS` (7%; Risks, "Deviations
+  in T8.b, as built", _The far limb's twin checks_).
+
+  It follows T8.b and precedes R08.T10.b (other bodies' atmospheres in the view) and R08.T16.b
+  (whose 10⁹ m agreement with the full passes needs the limb right). `pnpm test` and
+  `just test-render` pass.
 
 Widen R05's ray march to N terms and several sources: each body's list of Design note 7 (its stars
 and its planetshine sources), with no source skipped outside the air. The march draws any body's
@@ -4283,7 +4337,8 @@ a ÷ 2. At the far limb this task delivers:
 - the far limb's fidelity under Design note 10's 5%: per distance, the march's limb pixels at the
   output resolution against the twin's mean over each pixel's footprint (8 × 8 sub-rays), on Design
   note 10's limb set. A pixel over 5% is reported to "main" for a ruling: integration across the
-  limb, or R07's disc taking over sooner for that body.
+  limb, or R07's disc taking over sooner for that body (_ruled 2026-10-21, integration across the
+  texel: R08.T8.c, `decision-r08-t8-leans.md` §6.1_).
 
 Tests (no GPU):
 
@@ -4400,7 +4455,9 @@ photorealistic view at all): T10.a assembles and caches the medium, and T10.b dr
 - **R08.T10.a The medium and its cache.** Described below, with its tests. Acceptance:
   `pnpm --filter hyperion exec vitest run view/atmosphere/assemble view/atmosphere/AtmosphereCache`
   and `pnpm test` pass.
-- **R08.T10.b In the photorealistic view.** It needs T10.a and T7. The paragraph "This task also
+- **R08.T10.b In the photorealistic view.** It needs T10.a, T7 and T8.c, and forms each body's
+  atmosphere camera with R08.T8.b's `bodyAtmosphereCamera` (`view/atmosphere/bodyCamera.ts`). The
+  paragraph "This task also
   draws" below. Tests: `photorealisticPasses`' `atmosphere` entry is built and carries the passes'
   labels; `PhotorealRenderer` submits them after the discs and before R11's slots, and none for a
   view whose bodies have no medium (R05's counting fake, `test/countingRenderEngine.ts`); a
@@ -5739,7 +5796,9 @@ it rides a bump.
   - _Open._
     - The far limb of another body, from 10⁷–10⁹ m, is T8's. It is held under Design note 18's rule
       for texels the twin cannot resolve, and against each pixel's footprint mean under the 5%
-      metric (`decision-r08-f32.md` §10.4).
+      metric (`decision-r08-f32.md` §10.4). _Measured in T8.b_ ("Deviations in T8.b, as built",
+      _The far limb's twin checks_ and _The far limb's fidelity_); from about one scale height a
+      texel it is R08.T8.c's (`decision-r08-t8-leans.md` §6.1).
     - R07's `litBody.wgsl` takes built-in trigonometry that R10's terrain lighting calls, with "main"
       (`decision-r08-f32.md` §7, §9).
     - The air below the datum is with "main" too (§9). Every density reads a negative height as the
@@ -7922,9 +7981,10 @@ it rides a bump.
     transmittance from above the top through the sliced lookup at the ray's entry to the top's
     shell, in the composite and its twin, as its first item, and does not land without it; checked
     by eye in a hidden capture of an orbital sunset, the disc's colour reported before and after.
+    _Fixed in T8.b_ (below, "Deviations in T8.b, as built", _The composite from above the top_).
   - _The sky view's night side from high cameras._ Its "high limb" family (60–100 km) takes suns at
     30° and 90° only; under V1 at 75 steps the night side is unmeasured (§4.3). Open for R08.T8.b's
-    far-limb work.
+    far-limb work. _Closed in T8.b_ (below, _The sky view's night side from high cameras_; §6.3).
   - _The band on other bodies._ Measured on R05's Earth, and recorded on the drawn Earth beside it;
     a share of each body's top stands in for a row's span in its local scale heights (_Generality_,
     above). R08.T8.b's far-limb checks run at 10⁷–10⁹ m, where w = 1 and the sky view is never read,
@@ -7942,6 +8002,353 @@ it rides a bump.
     limb, 99.999 km, tangent 0.84 km, sun 90°/0°" 5.25%), new to `marchGate.test.ts` but already
     over 5% under §4's even steps, and _daylight with the Sun behind_ under the warp (low at 80 km
     3.76% → 11.55%): recorded above, reported to "main".
+
+- **Deviations in T8.b, as built** (2026-10-21–22). `shaders/composite.wgsl`, `tablesCpu.ts`, a
+  new `bodyCamera.ts`, `smoke/atmosphere.ts`, `smoke/page.ts`, `smoke/harness.ts` and
+  `smoke/ordered.ts` (`later` returns its work's result), `test/atmosphereGate.ts` (`sunAt` and
+  `sphereHits` exported); tests in new
+  `compositeTransmittance.test.ts`, `bodyCamera.test.ts`, `farLimb.test.ts` and
+  `highLimbNight.test.ts`, and the glow's pin in `marchBand.test.ts`; plan 05's T12.c record. No
+  golden, version, wire or table layout moves.
+  - _The composite from above the top_ (T8.a's known blocker). What lies behind a sky pixel, and
+    each disc the composite draws, take their transmittance to space per channel from above the
+    top too: the sliced lookup from the ray's entry into the top's shell (`transmittanceFromAbove`),
+    the quadric (a + H ÷ s_e, c + H ÷ s_p) the ray march clips the air by, found as the march finds
+    it (`topEntryOf`: its constant `view.exact.y`, formed in `f64`, its discriminant from
+    Lagrange's identity beyond a ÷ 2, the roots that do not cancel), the camera's own start where it
+    lies within the shell, 1 where the ray misses it. The entry's ground quadric is the shell's,
+    H_e (2a + H_e) + (k − k_t)(k + k_t) z², with k − k_t = (a H_p − c H_e) ÷ (c (c + H_p)), so no
+    difference of radii forms it (Design note 18); its height and normal are its datum point's, and
+    a body of several bands places the fit by the local scale height the body's table holds there,
+    as the lit passes read it (R08.T9.b), since the composite declares no medium. The march's alpha,
+    slot 0's mean over the channels, which the composite used before, still dims drawn surfaces
+    (below, _Deferred findings_). The twins are `tablesCpu.ts`'s `compositeTransmittanceTwin`
+    (a sphere) and `oblateCompositeTransmittanceTwin` (the sliced lookup; the tabulated scale
+    height `tabulatedScaleHeightM`, now shared with `surfaceLightingTwin`). On the drawn Earth on a
+    sphere from 400 km (`compositeTransmittance.test.ts`), against the converged march's own
+    per-channel transmittance (4,096 placed steps), the lookup's optical depth along the limb set's
+    chords is off by 0.74%, 1.08%, 0.04%, 0.08% and 1.2 × 10⁻⁸ of max(1, τ) at 0.1, 0.3, 1, 3 and
+    10 H (τ 11.8, 16.5, 29.0 at 0.1 H; 2.67, 3.41, 6.66 at 1 H, red, green, blue), the table's
+    bilinear read at the top, held under 2%. One scale height up the limb red passes 50 times
+    blue's share, where the mean drew one grey; 1 m under and 1 m over the top the lookup agrees to
+    2 × 10⁻³ in every channel, so the colour no longer steps there; a ray that misses the air takes
+    1, one the ground stops 0.
+  - _By eye_ (the task's check): R08.T8.b's hidden captures, `captureOrbitalSunsets` in
+    `captureAtmosphere`: the drawn Earth on WGS 84 with Earth's gravity from 400 km over the
+    equator, the view centred on the Sun's disc through the limb, the ray to its centre 12 km up at
+    its tangent point (the disc spanning about 2 to 22 km), in frames 2° high (the disc 48 rows
+    across, the exposure set by the disc; `r08-orbital-sunset-earth-400km-disc`) and 20° high
+    (`r08-orbital-sunset-earth-400km`). Taken 2026-10-21 under the GPU lock by
+    `just _locked just _test-render-run --part=1 --variant=default --captures=DIR` (SwiftShader,
+    headless, hidden), the other capture groups held back for the run (below). The disc's mean
+    sRGB codes, before and after:
+
+    | Disc                  | Before (the march's mean) | After (per channel) |
+    | --------------------- | ------------------------- | ------------------- |
+    | Whole disc            | (229, 227, 226)           | (240, 221, 198)     |
+    | Upper third           | (249, 249, 248)           | (247, 249, 248)     |
+    | Middle third          | (238, 237, 236)           | (245, 237, 213)     |
+    | Lower third           | (194, 190, 188)           | (224, 167, 122)     |
+    | Lower limb, 4 rows in | (124, 120, 118)           | (164, 61, 29)       |
+    | Lower limb, 2 rows in | (52, 48, 46)              | (65, 0, 0)          |
+
+    Before, a grey disc dimming towards its lower limb; after, white over its upper third through
+    cream and orange to red at its lower limb. The 20° frame's disc is 5 rows across and blown out
+    either way, the limb about it unchanged. The colours are geometric: refraction is a non-goal
+    (Scope and non-goals). Refraction raises a grazing ray's image, by about N(r₀) √(2π r₀ ÷ H)
+    (the grazing ray's bending; 0.28° at 13 km on the drawn column, N₀ = 2.77 × 10⁻⁴), so a real
+    disc from 400 km would stand higher and flattened, at about 13–24 km of tangent height, its
+    lowest rows orange; the geometric frame's deep-red rows would hold no Sun. The
+    science check reproduced the limb's optical depths above to about 1% from a model of the drawn
+    Earth (Bodhaine et al. 1999 eq. 29; the AFGL ozone profile at 300 DU through the Sun's curve of
+    growth; Serdyuchenko et al. 2014's cross-sections as Bruneton's `demo.cc` bins them): at 3 H
+    red's 1.17 is ozone's Chappuis band (1.07 of it) and blue's 0.49 Rayleigh's, so red is the
+    more dimmed there, and the disc's top a faint cyan under the disc-set exposure.
+
+  - _Bodies at their `apparentM`_ (`bodyCamera.ts`). `bodyAtmosphereCamera` (of the scene, the
+    body, the pose, the scene's origins and the view's projection) forms a body's `AtmosphereCamera`
+    about its drawn centre, `ViewBody.centreM` (R03's rule, `fromServer.ts`: the ship's local body
+    at its `geometricM`, every other body at its `apparentM`, a free camera's own local body
+    included), through `relativeToCamera` in `f64`, turned into the body-fixed axes by
+    `ViewBody.rotation`, or where that is `null` by the axes about the figure's pole
+    (`atmosphereAxesOf`: R07's `figurePole` and `poleAxes`, +z without a pole, as the disc and the
+    smooth mesh place it), the camera's orientation turned with it; `null` for a
+    contact (`ViewBody.retarded === null`). `bodyCamera.test.ts` holds it on the slice's scene with
+    the ship 10,000 km from its Earth: a free camera 2 × 10⁸ m from Jupiter as drawn, inside its
+    Hill sphere (its frame Jupiter's), draws Jupiter's air about its `apparentM` (to 10⁻³ m, and
+    over 10³ m from its `geometricM`), the Earth's, the ship's local body, about its `geometricM`;
+    the view's direction turns with it; a body with no rotation takes its figure's pole; a contact
+    draws none. Nothing calls it yet: R08.T10.b draws a body's atmosphere in the view.
+  - _The ascent by hand_ (the task's acceptance; `captureAscent` in `smoke/atmosphere.ts`, the group
+    "R08.T8.b the ascent captures" in part 1 under `--captures`). R05's test planet (WGS 84 with
+    Earth's normal gravity and R05's Earth medium), a vertical ascent over the equator looking north
+    along the horizon (`bandCamera`'s framing, 0.5° under the visible horizon's dip to 3° over the
+    horizontal), nothing drawn, on high and on low, under two suns: _day_, 20° up at 90° from the
+    view, one direction at every height, and _last light_, 0.5° over the camera's own visible
+    horizon at 150° from the view, set at each height. Frames for the eye at 320 × 180 at h\* 2 m
+    and 10 km, the setting's band edges and middle (30, 40 and 50 km on high, 20, 25 and 30 km on
+    low), h\* 99.9 and 100.1 km about the top, and 400 km, 10⁷ m and 10⁸ m up; and for the numbers,
+    pairs of 64 × 32 frames 50 m under and over (in h\*) the band's lower and upper edges and the
+    top, beside two references away from any edge (the band's middle and h\* 10 km), each pair's
+    worst relative change (floor 6 × 10⁻³ of its brightest) and its largest change in 8-bit codes,
+    both frames at the first's exposure. The last light is pre-exposed at EV₁₀₀ 3, AUTO's level for
+    a mean of 1 cd/m² (at the smoke's EV 15 it falls in rgba16float's subnormals, 0–16 steps, and
+    the frames posterise); the day at EV 15. Taken 2026-10-22 under the GPU lock by
+    `just _locked just _test-render-run --part=1 --variant=default --captures=DIR` (SwiftShader,
+    headless, hidden; part 1's other groups held back in the working tree for the run, not
+    committed): the group 107 s (113 s on no-subgroups, the figures the same), 40 captures a
+    variant (80 frames drawn). The frames and the log are kept for the ruling below in
+    `.git/rm45-scratch/r08-t8b/ascent/` (`captures/`, `run-default.log`). Each pair's relative
+    change and largest code change:
+
+    | Pair (±50 m in h\*)      | High, day | High, last light | Low, day | Low, last light |
+    | ------------------------ | --------- | ---------------- | -------- | --------------- |
+    | The band's lower edge    | 1.21%, 1  | 2.87%, 2         | 1.25%, 1 | 2.38%, 1        |
+    | The band's upper edge    | 1.23%, 1  | 3.49%, 2         | 1.17%, 1 | 3.08%, 2        |
+    | The top                  | 0.81%, 1  | **100%, 131**    | 0.83%, 1 | **100%, 117**   |
+    | The band's middle (ref.) | 1.25%, 1  | 1.93%, 1         | 1.24%, 1 | 2.58%, 2        |
+    | h\* 10 km (ref.)         | 1.13%, 1  | 4.79%, 3         | 1.16%, 1 | 5.12%, 3        |
+
+    No step at the switch: at the band's edges each pair's change lies within the references',
+    and by day no channel moves 2 codes. The horizontal at last light, its step across the
+    horizontal less the sky's own row-to-row step over it (codes, the median over columns, R, G, B):
+    0 at 2 m and 10 km on both settings, within ±1 at the band's edges and middle on both, −3, −2,
+    −1 at 99.9 km on high and 7, 3, 7 on low, where low's rows pair up on one march texel and the
+    horizontal fell on a texel's boundary; by eye no line at the horizontal in any frame. By eye
+    the band's frames are smooth under both suns; the line near the bottom of the last-light frames
+    from 30–50 km is the visible horizon, the datum's edge; 400 km by day shows the blue limb; from
+    10⁷ and 10⁸ m `bandCamera`'s framing holds a sliver of the planet (the far limb from there is
+    R08.T8.c's). _The top at last light_ does pop, at the medium's top, not the switch (below,
+    _Deferred findings_; `decision-r08-t8-leans.md` §7).
+
+  - _The captures and the watchdog._ `just test-render --part=1 --captures=DIR` overran part 1's
+    180 s watchdog before any capture was saved (2026-10-21, a load of 1–5): the comparison captures
+    took 115 s, the spike's 72 s and the occultation's 19 s beside part 1's checks (about 70 s).
+    The before and after frames above were taken with the other capture groups held back in the
+    working tree for the two runs (not committed). An infra finding, not a T8.b item (§6.3): the
+    captures want a part of their own, or a watchdog scaled to the groups asked for; main has it
+    queued, and the by-eye evidence stands as taken. Since T8.b, part 1 under `--captures` also
+    runs the orbital sunsets and the ascent (107 s): part 1's checks (71.5 s) and the ascent alone
+    come to about 178 s.
+  - _The far limb's fidelity under Design note 10's 5%_ (`farLimb.test.ts`, CPU). Per distance, the
+    march's limb pixel (`rayMarchTexelTwin` along the ray the composite draws the pixel from, at
+    the setting's own count: the pixel's centre on high, low's picked half-resolution texel, of
+    either parity) against the same twin's mean over the pixel's footprint (8 × 8 sub-rays), so
+    that e is what one ray misses of the light across the pixel; the quadrature's own error is e_q,
+    recorded beside it. Output 1920 × 1080 on high and 1280 × 720 on low, 60° across
+    (`DEFAULT_FOV_DEG`); Design note 10's limb set (0.1, 0.3, 1, 3 and 10 H) and seven suns at the
+    grazing ray's tangent point (30° at 0°, 90° and 180°; 90° and 100° at 0° and 180°), each image
+    one distance, sun and setting, its floor 6 × 10⁻³ of its brightest mean. R05's Earth and the
+    measured Earth on a 6,378,137 m sphere, the Saturn-class medium on Saturn's 60,268 km at 10⁸
+    and 10⁹ m. A pixel spans 0.55 H (high) and 0.82 H (low) of Earth's tangent height at 10⁷ m,
+    7.1 and 10.7 H at 10⁸ m, 71 and 107 H at 10⁹ m; the Saturn-class figure's 0.96 and 1.45 H at
+    10⁸ m, 12 and 18 H at 10⁹ m. Worst, median and pixels over 5% of each row's 35, low after
+    §6.2's tie-break (below, _Low's half-resolution pick_):
+
+    | Medium, distance      | High                | Low, even pixel  | Low, odd pixel  |
+    | --------------------- | ------------------- | ---------------- | --------------- |
+    | R05's Earth, 10⁷ m    | 94.8%, 0.78%, 6     | 99.7%, 22.3%, 30 | 678%, 21.3%, 30 |
+    | R05's Earth, 10⁸ m    | 176%, 53.9%, 35     | 997%, 100%, 35   | 170%, 97.8%, 35 |
+    | R05's Earth, 10⁹ m    | 19,070%, 145%, 35   | 260%, 100%, 35   | 100%, 100%, 35  |
+    | Measured Earth, 10⁷ m | 95.6%, 0.74%, 6     | 99.7%, 22.2%, 23 | 751%, 25.4%, 24 |
+    | Measured Earth, 10⁸ m | 186%, 46.8%, 35     | 1,350%, 100%, 35 | 100%, 98.7%, 35 |
+    | Measured Earth, 10⁹ m | 49,954%, 99.99%, 35 | 270%, 100%, 35   | 100%, 100%, 35  |
+    | Saturn-class, 10⁸ m   | 56.6%, 1.06%, 7     | 99.2%, 42.5%, 24 | 610%, 31.8%, 26 |
+    | Saturn-class, 10⁹ m   | 323%, 51.8%, 35     | 804%, 99.9%, 35  | 100%, 99.8%, 35 |
+
+    Before the tie-break the even pixel read the texel 1.5 px up the limb: 6,054%, 53.1%, 35 (R05's
+    Earth, 10⁷ m), 8,797%, 58.0%, 30 (the measured Earth) and 19,581%, 64.9%, 35 (the
+    Saturn-class figure, 10⁸ m), and from 10⁸ m on Earth and 10⁹ m on Saturn a texel above the top
+    (100% at every pixel). The odd pixel's texel, 0.5 px up the limb, did not move. From 10⁹ m the
+    8 × 8 reference is itself not converged: its rows lie 8.9 H apart, one or none in a 12 H air,
+    and on the ruling's probe it is off a footprint mean converged across the limb by up to 87%
+    (median 5.9%; 14.7% at 10⁸ m), so that high's worst at 10⁹ m on R05's Earth is 2,771% against
+    the converged mean, not 19,070% (`decision-r08-t8-leans.md` §6.1). R08.T8.c replaces the
+    reference.
+
+    The air alone (the ground's light left out) moves only the medians at 10⁸ and 10⁹ m on high,
+    and on low the even pixel's worst too (R05's Earth 9.973 → 9.989 at 10⁸ m, 2.601 → 2.636 at
+    10⁹ m; the measured Earth 2.705 → 2.815 at 10⁹ m). On high
+    at the nearest distance every pixel over 5% has the Sun beyond the limb: at 10⁷ m, 90°/0° at
+    0.1, 0.3 and 1 H 85.3%, 33.3% and 9.9% (measured Earth 81.9%, 34.2%, 13.7%) and 100°/0° 94.8%,
+    69.5% and 22.9% (95.6%, 72.9%, 31.8%), the footprint's lower part on the night-side ground or
+    in its shadow (at 90°/0° the Sun's centre is on the limb, inside Design note 10's 3°); on the
+    Saturn-class figure at 10⁸ m 12.3%, 23.2% and 20.8% (90°/0°) and 12.4%, 42.3%, 56.6% and,
+    at 3 H, 12.2% (100°/0°). Low's figures are its half-resolution footprint's, 0.82 H a pixel from
+    10⁷ m. e_q, the centre ray at the kernel's count against a converged
+    march (every reference converged at 2,048 steps, to 1.8 × 10⁻⁵): R05's Earth 4.65% on high
+    (100°/180°, 0.1 H), 24.04% on low (9 rays over 5%); the measured Earth 4.42% and 22.17%; the
+    Saturn-class figure 1.30% and 31.86%. The pixels over 5% were ruled on in
+    `decision-r08-t8-leans.md` §6.1: from about one scale height a texel, a known blocker owned by
+    R08.T8.c (below, _Deferred findings_), and at 10⁷ m on high a recorded trade.
+
+  - _Low's half-resolution pick_ (`composite.wgsl`'s `rayMarched`, R05.T12.c's upsample;
+    `decision-r08-t8-leans.md` §6.2). Of the four texels nearest the pixel's centre the composite
+    keeps the one whose source pixel's depth is nearest the pixel's and now, of those that tie, the
+    one whose centre is nearest the pixel's (the squared distance in output pixels), where the
+    strict `<` had kept the first. With every depth 0 (the sky and the limb from above the top, and
+    the march's sky in the band) each texel k ≥ 1 had been drawn on pixels 2k + 1 and 2k + 2, low's
+    whole march layer one output pixel (about 0.05°) down and right of the scene, texel 0 on the
+    first three rows and columns; it is drawn on pixels 2k and 2k + 1. The pixel centre's ½ alone
+    would have changed nothing (trunc(p ÷ 2 − ¼) = trunc(p ÷ 2 − ½) for every p to 1,280), so the
+    base is kept. Surfaces whose depths differ pick as before. `farLimb.test.ts`'s pick is
+    ⌊x ÷ 2⌋ and low's rows are re-measured (above). The GPU check (`checkLowPick`, "R08.T8.b low's
+    half-resolution pick", part 1): on low from 400 km over the limb, nothing drawn, each of the
+    64 × 32 frame's 2,048 pixels equals the march target's texel (⌊x ÷ 2⌋, ⌊y ÷ 2⌋) to half an
+    rgba16float step (worst 0; the composite's factor is 1, the tables holding pre-exposed light),
+    where the old pick puts 1,010 over; and with a surface 2,000 km ahead over columns 33 on and
+    rows 17 on (`harness.ts`'s new `rectangleMesh`; its edges on odd pixel boundaries, so that the
+    depth rule moves picks), every pixel matches a CPU emulation of the pick, depth first and then
+    the nearest centre (worst 0.936 of the bound; of the 184 pixels within two rows or columns of
+    the edge, 47 keep a depth-nearest texel that is not the nearest, which the nearest would have
+    drawn wrong). With the old condition restored for one build both checks failed (1,010 and 988
+    pixels over). Low's composite moves wherever
+    the four depths tie; no golden, version, table or wire moves, and no smoke check pinned a pixel.
+
+  - _The far limb's twin checks_ (`checkFarLimb`, "R08.T8.b the far limb", part 4 after R08.T7).
+    R08.T6.f's Earth (WGS 84 with its normal gravity, R05's Earth medium, the oblate twins), on
+    high, from 10⁷, 10⁸ and 10⁹ m from the centre (each beyond a ÷ 2, the closest-approach form),
+    the 64 × 32 frame narrowed to rows of 240 m of tangent height, five to the medium's lowest
+    exponential scale height (the aerosol's 1,200 m, `lowestScaleHeightM`), centred 3.6 km up, at
+    longitude 1 rad (`limbCamera`'s new `LimbFrame`: every earlier limb view stands at longitude 0,
+    on an axis, where the 2ε|P| rounding of the camera's position goes untested), the sun 20° and
+    −2° at the tangent point. Each view's arms as R08.T6.g's (`checkViewArms`): the sky view and
+    the march with their envelopes (`decision-r08-f32.md` §10.3), the aerial volume outright, the
+    composite finite. The ray march's channels that pass by the envelope (pooled, and by sun and
+    arm, 20° stored and kernel, −2° stored and kernel), their half-widths' median and largest, the
+    worst plain error over its bound (at most 1.000) and the worst within its envelope:
+
+    | Distance | Share  | By sun and arm              | Half-widths, 10⁻³ | Worst | In env. |
+    | -------- | ------ | --------------------------- | ----------------- | ----- | ------- |
+    | 10⁷ m    | 5.13%  | 3.59, 5.88, 4.52, 6.54%     | 7.59, 16.3        | 0.999 | 0.57    |
+    | 10⁸ m    | 44.92% | 27.17, 29.08, 62.16, 61.28% | 10.9, 212         | 1.000 | 0.68    |
+    | 10⁹ m    | 80.41% | 65.43, 66.41, 94.51, 95.31% | 53.9, 3,690       | 1.000 | 0.89    |
+
+    _The 1% cap at 10⁷ m is missed_, a named miss (`FAR_LIMB_NEAR_SHARE_MISS`, 7%, the worst
+    view's 6.54% rounded up; reported to "main" 2026-10-22, which accepted it by message the same
+    day, R08.T8.c to re-measure it): the narrowed frame puts its rows on
+    the limb's lowest 3 km, rows 17–30 (tangent 3.24 down to 0.12 km), 2 to 60 channels a row,
+    where the texels need the envelope, half-widths rising from 1.9 to 16.3 × 10⁻³. Every channel
+    is within 10⁻³ or within its envelope; the envelope is the march's alone, the sky view's none.
+    At 10⁸ and 10⁹ m the share is recorded, not capped, as the task asks; some march channels
+    there stand at 1.000 of the bound. From 10⁸ and 10⁹ m, and from 10⁷ m with the sun at −2°, the
+    sky view's and the aerial volume's twins are 0, so those arms pass without testing anything:
+    the march alone carries those views. The kernel arm's floor is f32's smallest subnormal, 2⁻¹⁴⁹
+    (`F32_SUBNORMAL_SPACING`), as the stored arm's is the half's 2⁻²⁴: from 10⁷ m with the sun at
+    20° `oblateAerialPerspectiveTwin`, which marches e^(−h/H) with no clip at the top, gives
+    10⁻²⁰⁰ to 10⁻¹⁹⁴ where f32 holds 0 (65,536 channels carried); no other check can move by it (a
+    channel moves only where its table's largest is under about 1.4 × 10⁻³⁶). Accepted by "main"
+    by message, 2026-10-22: `decision-r08-f32.md` §10.4 adds no tolerance, and this floor moves no
+    other check. In the same group, _the
+    composite from above the top, per channel_ (`checkDiscFromAbove`): from 400 km at longitude
+    1 rad, the frame 0.20° high centred on the Sun's disc through the limb at a 12 km tangent, every
+    pixel inside the disc, over a black scene: (composite − the stored march) ÷ the disc against
+    `oblateCompositeTransmittanceTwin`'s T along each pixel's ray, within 1% of max(T, 10⁻³) plus
+    the output's rounding: worst 0.045 of the bound (0.048%). T runs 0.245–0.426 in red,
+    0.031–0.107 in green and 0.00137–0.070 in blue across the frame, red over blue 6.1 on the top
+    row and 179 on the lowest. Part 4 alone 126.5 s (default) and 121.8 s (no-subgroups) at a load
+    of 5–7, the group 30.6–33.4 s; part 1 71.5 s and 71.2 s with the pick's group (10–11.5 s).
+
+  - _The envelope's record by row._ Where a check's envelope share is over the 1% cap and is
+    recorded or a named miss (the far limb), `recordHeights` lists its channels row by row
+    (`envelopeRows`: each row's median tangent height, its count, and its median and largest
+    half-width) in place of each channel's row, column, tangent height and spread
+    (`decision-r08-f32.md` §10.3 item 5): from 10⁸ and 10⁹ m some thousands of channels pass by the
+    envelope. Checks within the cap list each channel as before.
+  - _A body of several bands on the GPU._ `transmittanceFromAbove` places the entry's fit by the
+    local scale height the body's table holds there, a branch only a body of several bands takes;
+    the twin's branch is held on the CPU (`compositeTransmittance.test.ts`: on the Saturn-class
+    body of four bands from 1,000 km over the equator, looking east and north, against
+    `spheroidOpticalDepth` from the ray's entry under max(0.01, 2 × 10⁻³ τ), worst 0.898 of the
+    bound; its tables at 8 rows, every read from above landing on the top row; and the oblate twin
+    on a sphere of one band against `compositeTransmittanceTwin` to 10⁻¹² in optical depth). The
+    Saturn-class air is isothermal, so its table's local scale height equals the medium's own and
+    the test cannot tell which the branch read. Every GPU check of T8.b stands on one band;
+    R08.T10.b checks it on the Saturn-class figure. The composite from above the top now does one
+    sliced lookup per sky pixel and a second inside a disc; T8.b does not time it, so R08.T8.c's
+    timing (its acceptance 7) takes its "before" from T8.b's tree.
+
+  - _The sky view's night side from high cameras_ (`highLimbNight.test.ts`; T8.a's open item,
+    decision §4.3). The gate's harness and metric over the high cameras (60, 80 and 99.999 km),
+    tangents 0.84, 2.5, 8.4 and 25 km, suns at 90°, 95°, 100° and 105° from the zenith at the
+    tangent point, azimuths 0° and 180°, with the 30° rays for a floor; the sky view under V1 at its
+    own counts and the march under the warp. Worst by the Sun's zenith angle (R05's Earth, then
+    the measured Earth):
+
+    | Kernel, steps          | 30°         | 90°         | 95°         | 100°        | 105°        |
+    | ---------------------- | ----------- | ----------- | ----------- | ----------- | ----------- |
+    | Sky view, high (75)    | 0.31, 0.21% | 1.28, 1.30% | 0.91, 0.69% | 1.55, 1.85% | 0.60, 0.06% |
+    | Sky view, low (16)     | 7.85, 7.93% | 18.6, 23.7% | 27.3, 33.3% | 39.2, 44.9% | 4.39, 1.22% |
+    | March, high (36, warp) | 0.59, 0.53% | 4.32, 3.29% | 1.78, 1.61% | 4.69, 4.47% | 0.65, 0.06% |
+    | March, low (16, warp)  | 3.15, 2.91% | 24.0, 18.2% | 12.1, 13.0% | 22.3, 22.4% | 3.13, 0.42% |
+
+    On high no ray is over 5% in either kernel on either medium: the night side under V1 at 75
+    steps holds, worst 1.85% (the measured Earth, Sun at 100°). On low the sky view stays inside
+    `skyViewHigh`'s 49.5%; the march has one ray over `LOW_TWIN_WORST.rayMarch`'s 0.240 twilight
+    (below). This closes §4.3's open item, and no family is added to the gate (§6.3).
+
+  - _The band on other bodies_ stays R08.T10.b's (T8.a's deferred lean): the far limb stands at
+    w = 1 and never reads the sky view, so it cannot see a misplaced band. R05's Earth's band is
+    3.6–5.9 local scale heights on high, the Saturn-class figure's 4.8–8.0.
+- **Deferred findings (2026-10-13 rule)** (R08.T8.b).
+  - _Drawn surfaces from above the top, and beyond the volume's reach, still take the march's
+    mean transmittance_ (`composite.wgsl`'s surface paths, `colour * marched.a`): terrain and
+    clouds seen through the limb from orbit are dimmed grey, where at 1 H the mean is twice red's
+    own dimming and 27 times blue's. Their transmittance to the surface is not a lookup to space;
+    a per-channel transmittance needs the march to write it (a second target) or a ratio of two
+    lookups where the segment does not graze. Not a T8.b item; reported to "main".
+  - _**A known blocker, owned by R08.T8.c**_ (`decision-r08-t8-leans.md` §6.1). From above the top
+    the composite takes the march alone, one ray a texel, and from about one scale height a texel
+    (at 1080p s reaches 0.6 at about 1.06 × 10⁷ m from an Earth's centre and 1 at 1.54 × 10⁷ m; the
+    Saturn-class figure's onset at 10⁸ m)
+    that ray cannot stand for the texel's footprint: from 10⁸ m on Earth the whole air is about
+    1.7 px and every limb pixel is off (193% worst on the ruling's probe), and from 10⁹ m the ring
+    breaks into bright specks and gaps that flicker as the body moves by a fraction of a pixel.
+    R07's disc draws no air, so it does not take over. R08.T8.c integrates the march across each
+    texel's footprint, blended in by the texel's span; it precedes R08.T10.b, the first view to draw
+    other bodies' atmospheres from afar. T8.b does not make it worse; it dates from R05.T12.c's
+    march from orbit.
+  - _The top at the camera's last light: recorded_ (`decision-r08-t8-leans.md` §7). From h\* 99.9 km
+    to 100.1 km the glow over the horizontal and down to 0.32° under it goes black: 100% and 131
+    codes on high, 117 on low. By day the same pair moves 0.81% and 1 code. Both frames stand at
+    w = 1. It is the medium's hard top (Design note 3's p_s × 10⁻⁷; R05's 100 km), not the switch
+    or the march. It predates T8: since R05.T12.c the sky view drew under the top and the march
+    over it. A near-horizontal chord through the topmost air shrinks as √(top − h), from about
+    72 km at 100 m under the top to none at it. From Δ over the top, the rays within
+    √(2Δ ÷ (R + h)) under the horizontal miss the shell. Every steady view over the top lacks the
+    tail's light too. From 100 m over the top the shell's limb is a crisp edge with black above.
+    From 10 km over it the edge is a ramp of a scale height's 30–40 px at 1080p. It shows only
+    where the lit air in view is the topmost air: the camera within about a scale height of the top
+    at its last light, looking away from the Sun, or the deep-twilight limb. Its light is
+    2 × 10⁻⁴ to 4 × 10⁻³ cd/m² on R05's test planet, and about 25 times less on the drawn Earth. By
+    day it is about 10⁻⁶ of the limb's brightest (T8.a's record). Not a blocker: the picture is
+    correct for the medium drawn, and the light it lacks is of the order of the airglow the plan
+    leaves out (Scope). See Risks, "The medium ends at a hard top". Pinned in `marchBand.test.ts`
+    ("records the glow from just under the top"): the horizontal ray from 1, 10 and 100 m under
+    the top on high, under the ascent's two suns, is recorded per channel, and from 1 m over the
+    top it is null; by day the light from 100 m under the top is 10.08 times that from 1 m under it
+    in every channel, the √(top − h) law to 1% (at the last light 7.3, 5.5 and 4.7, the Sun lower
+    the higher the camera).
+  - _The six pixels at 10⁷ m on high: a recorded trade_ (§6.1). All on the backlit and terminator
+    limb (the Sun 90° and 100° at 0°): the silhouette row and the row above it (0.1 and 0.3 H)
+    33–96% off, and the 1 H row 10–32%, where the Earth's shadow cuts the chord across the pixel.
+    One or two rows, the edge's aliasing, not a band; T8.c's blend leaves them (s = 0.55,
+    w_L = 0). Integrating them (4 nodes held them at 0.54% on the probe) is a perf-lane candidate.
+  - _Low's half-resolution pick_ (`composite.wgsl`'s `rayMarched`): with every sky depth tied the
+    first candidate won, so each texel k ≥ 1 was drawn on pixels 2k + 1 and 2k + 2, low's whole
+    march layer one output pixel (about 0.05°) down and right of the scene. _Fixed in T8.b_ (above,
+    _Low's half-resolution pick_; §6.2).
+  - _`LOW_TWIN_WORST.rayMarch` on the night-side high limb:_ R05's Earth from 80 km, tangent
+    0.84 km, the Sun 90°/0°, the march at 16 steps under the warp, 24.005% at low against the
+    bound's 0.240. Recorded with no re-pin (§6.3): the bound's rule (§4.2) covers the gate's march
+    families, and this ray is in "high limb", a sky-view family held to the sky view's bound. The
+    march draws those pixels on both settings (w = 1 above 50 km on high, 30 km on low);
+    re-classing the family per setting is figure-matching, deferred to R08.T17's verification pass.
+  - _The Saturn-class figure on low:_ its e_q of 31.86% (1 H, Sun 100°/0°) is over the 24.0%
+    `LOW_TWIN_WORST.rayMarch` was measured at on Earth's media, as §4.4 foresaw for other bodies.
+    Recorded, not a blocker (§6.3): a static bias on the backlit limb at low quality, the class of
+    §4.1's 23.94%. High's 1.30% holds; `LOW_TWIN_WORST` stays Earth's, and R08.T10.b records each
+    drawn body's low e_q beside it.
 
 - **Deviations in T6.e, as built** (2026-10-13). `tablesCpu.ts`, `oblate.ts` and `hillaire.ts`;
   tests in a new `tablesCpuOblate.test.ts` (inside the acceptance's `view/atmosphere/tablesCpu`
@@ -8708,6 +9115,26 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
   haze heating, until R&C 2012's term follows P14.T24.c. Until P14.T24.e lands the isothermal seam
   stands, 3× wrong in scale height at Venus's cloud tops; the gate cannot catch it, because the
   reference traces the same column.
+- **The medium ends at a hard top** (`decision-r08-t8-leans.md` §7, 2026-10-22). A column ends at
+  p_s × 10⁻⁷ (Design note 3). R05's Earth ends at 100 km, at e^(−11.86) of its ground's density
+  (Hillaire's and Bruneton's top). The air is cut there, not thinned, and nothing above it
+  scatters. So the light of a real atmosphere's tail is missing in two places. One is the glow of
+  the air over a camera near the top, which falls as √(top − h) to nothing at the top. The other
+  is the limb's light at tangent heights near and over the top. By day it is about 10⁻⁶ of the
+  limb's brightest. It shows at the camera's last light within about a scale height of the top,
+  and on the deep-twilight limb, as 10⁻⁴ to a few 10⁻³ cd/m². That is the order of the airglow
+  this plan does not draw. A thermosphere above the render column is the flight model's (Scope).
+  There are two candidate fixes, for when that model arrives, or if a frame shows the cut by day
+  or with the Sun more than 3° over the camera's visible horizon:
+  - a tail: a top at p_s × 10⁻¹⁰, 6.9 scale heights higher, puts the cut about 10³ times fainter,
+    below the night sky's own light;
+  - a taper over the last one or two scale heights: the fade spreads over kilometres and the edge
+    softens, at the cost of real air.
+
+  Either moves the medium on which every R05 and R08 gate, table and reference is measured, and
+  the march band (a share of the top, `decision-r08-t8-leans.md` §1). It is a medium task with
+  its own re-measure, and no task owns it yet.
+
 - **The bake's cost is an operation count, not a measurement.** If R08.T14 exceeds `BAKE_CEILING_S`,
   the fallback is a family of tables computed at development time. The research lean is that a
   family over (τ, ω, g, H/R) cannot represent a layered Venus, so it would need its own gate and

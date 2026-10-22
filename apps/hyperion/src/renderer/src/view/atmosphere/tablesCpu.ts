@@ -57,8 +57,10 @@
  * R08.T6.f, and a sphere with ω = 0 gives its tables to 10⁻¹².
  *
  * Not twinned: the composite, a full-screen material whose only read of the medium is the
- * transmittance table along the view (`composite.wgsl`'s `transmittanceToSpace`), and the GPU's
- * `rgba16float` rounding.
+ * transmittance table along the view, and the GPU's `rgba16float` rounding; that read, from the
+ * camera inside the air and from the ray's entry into the top's shell above it (`composite.wgsl`'s
+ * `transmittanceToSpace` and `transmittanceFromAbove`, R08.T8.b), is
+ * {@link compositeTransmittanceTwin} and {@link oblateCompositeTransmittanceTwin}.
  *
  * Built on `opticalDepth.ts` (the shell's geometry and the transmittance table's mapping: Bruneton
  * 2017's `GetTransmittanceTextureUvFromRMu` in precomputed_atmospheric_scattering's
@@ -69,7 +71,7 @@
  * (MIT), whose notices are in `shaders/common.wgsl` and `shaders/multiScattering.wgsl`.
  */
 
-import { scale, type Vec3 } from "../../geometry/vec3";
+import { add, scale, type Vec3 } from "../../geometry/vec3";
 import { rotate } from "../camera/quaternion";
 import type { ViewSize } from "../engine/types";
 import type { Rgb } from "../photometry/toneCurve";
@@ -4219,6 +4221,25 @@ interface SurfacePlace {
   readonly east: Vec3;
 }
 
+/**
+ * The local scale height at h\* = `scaledHeightM` as a reader that declares no medium takes it from
+ * the body's table (`oblate.wgsl`'s `oblateScaleHeightAt`; R08.T9.b): linear between the two of
+ * `scaleHeightsM`'s heights about it (`tables.ts`'s `packedScaleHeightsM`, h\*_i = top i ÷
+ * (OBLATE_SCALE_HEIGHTS − 1)), held in [0, top], and at least the fit's floor.
+ */
+function tabulatedScaleHeightM(
+  scaleHeightsM: ArrayLike<number>,
+  topM: number,
+  scaledHeightM: number,
+): number {
+  const last = OBLATE_SCALE_HEIGHTS - 1;
+  const x = Math.min(Math.max(scaledHeightM / topM, 0), 1) * last;
+  const i = Math.min(Math.floor(x), last - 1);
+  const below = scaleHeightsM[i] ?? Number.NaN;
+  const above = scaleHeightsM[i + 1] ?? Number.NaN;
+  return Math.max(below + (x - i) * (above - below), FIT_SCALE_FLOOR_M);
+}
+
 /** A geodetic latitude held to [−π ÷ 2, π ÷ 2], as `surfaceLighting.wgsl` holds it. */
 function clampLatitude(latitudeRad: number): number {
   return Math.min(Math.max(latitudeRad, -Math.PI / 2), Math.PI / 2);
@@ -4278,14 +4299,8 @@ export function surfaceLightingTwin(
   const a = figure.equatorialRadiusM;
   const c = figure.polarRadiusM;
   const e2 = ((a - c) * (a + c)) / (a * a);
-  const scaleHeightAt = (scaledHeightM: number): number => {
-    const last = OBLATE_SCALE_HEIGHTS - 1;
-    const x = Math.min(Math.max(scaledHeightM / topM, 0), 1) * last;
-    const i = Math.min(Math.floor(x), last - 1);
-    const below = scaleHeightsM[i] ?? Number.NaN;
-    const above = scaleHeightsM[i + 1] ?? Number.NaN;
-    return Math.max(below + (x - i) * (above - below), FIT_SCALE_FLOOR_M);
-  };
+  const scaleHeightAt = (scaledHeightM: number): number =>
+    tabulatedScaleHeightM(scaleHeightsM, topM, scaledHeightM);
   const placeOf = (altitudeM: number, latitudeRad: number): SurfacePlace => {
     const latitude = clampLatitude(latitudeRad);
     const sinL = Math.sin(latitude);
@@ -4525,7 +4540,7 @@ export function spheroidOpticalDepth(
   const columns = new Float64Array(ABSORBER_SLOTS);
   const pieces = Math.max(Math.ceil(endM / pieceM), 1);
   const lengthM = endM / pieces;
-  const add = (at: number, weight: number): void => {
+  const addNode = (at: number, weight: number): void => {
     sampleInto(terms, null, null, heightsAt(at)[0], sample);
     for (const c of CHANNELS) {
       depth[c] += weight * (sample[3 + c] ?? Number.NaN);
@@ -4539,8 +4554,8 @@ export function spheroidOpticalDepth(
     for (const [i, node] of GAUSS_8_NODES.entries()) {
       const offset = 0.5 * lengthM * node;
       const weight = 0.5 * lengthM * (GAUSS_8_WEIGHTS[i] ?? Number.NaN);
-      add(middle - offset, weight);
-      add(middle + offset, weight);
+      addNode(middle - offset, weight);
+      addNode(middle + offset, weight);
     }
   }
   return { opticalDepth: [depth[0], depth[1], depth[2]], columns, lengthM: endM, hitsGround };
@@ -5049,4 +5064,128 @@ export function oblateRayMarchTwin(
     }
   }
   return { widthTexels: w, heightTexels: h, texels };
+}
+
+// --- The composite's transmittance to space (R08.T8.b) -------------------------------------------
+
+/**
+ * The distance along the unit `direction` from `originM` to its entry into the spheroid of radii
+ * (a, a, c), 0 from within it, or `null` where the ray misses it or it lies behind:
+ * `composite.wgsl`'s `topEntryOf` in `f64`.
+ */
+function spheroidEntryM(originM: Vec3, direction: Vec3, a: number, c: number): number | null {
+  const [near, far] = spheroidHits(originM, direction, a, c);
+  return far > 0 ? Math.max(near, 0) : null;
+}
+
+/**
+ * What the composite multiplies what lies behind a sky pixel by, and a source's disc, on a sphere
+ * (`composite.wgsl`; R08.T7, R08.T8.b): light slot `slot`'s transmittance to space along the unit
+ * `direction`, per channel, from the camera inside the air (`transmittanceToSpace`), and from above
+ * the top from the ray's entry into the top's sphere a + H (`transmittanceFromAbove`), the ray
+ * carrying nothing before it; (1, 1, 1) where the ray misses the air, and (0, 0, 0) where the ground
+ * hides space.
+ *
+ * @remarks
+ * Before R08.T8.b the composite took the march's mean over the channels from above the top, which
+ * drew a sun seen through the limb grey. The viewer in space moved to the top along the view ray is
+ * Bruneton 2017's (`functions.glsl`'s `GetSkyRadiance`).
+ *
+ * @param sources - The planet's table reads ({@link tableSources}).
+ * @param topHeightM - The medium's top, m.
+ * @param view - The frame's view, on a sphere (a = c).
+ */
+export function compositeTransmittanceTwin(
+  sources: TwinSources,
+  topHeightM: number,
+  view: TwinView,
+  direction: Vec3,
+  slot = 0,
+): Rgb {
+  const a = view.figure.equatorialRadiusM;
+  let heightM = view.heightM;
+  let normal = view.normal;
+  if (view.heightM >= topHeightM) {
+    const entryM = spheroidEntryM(view.cameraM, direction, a + topHeightM, a + topHeightM);
+    if (entryM === null) {
+      return [1, 1, 1];
+    }
+    if (entryM > 0) {
+      const p = add(view.cameraM, scale(direction, entryM));
+      const r = Math.hypot(p.x, p.y, p.z);
+      heightM = r - a;
+      normal = scale(p, 1 / r);
+    }
+  }
+  const mu = direction.x * normal.x + direction.y * normal.y + direction.z * normal.z;
+  if (groundShadows(sources.bottomRadiusM, heightM, mu)) {
+    return [0, 0, 0];
+  }
+  const out: TwinRgb = [0, 0, 0];
+  sources.sunTransmittance(heightM, mu, out, slot);
+  return [out[0], out[1], out[2]];
+}
+
+/**
+ * {@link compositeTransmittanceTwin} on an oblate body (R08.T6.f, R08.T8.b): the sliced lookup
+ * along the unit `direction` from the camera inside the air, and from above the top (the camera's
+ * h\* = s h at or over it) from the ray's entry into the top's shell (a + H ÷ s_e, c + H ÷ s_p), as
+ * the ray march clips the air, the camera's own where it lies within the shell; (1, 1, 1) where the
+ * ray misses the shell, (0, 0, 0) where the ground hides space.
+ *
+ * @remarks
+ * A body of several bands places the fit at the entry by the local scale height the body's table
+ * holds there (`scaleHeightsM`), as the composite, which declares no medium, reads it; the
+ * camera's is the medium's own, as the composite takes it from `view.exact`.
+ *
+ * @param scaleHeightsM - The local scale heights the body's table holds; the medium's own by
+ *   default.
+ * @throws RangeError as {@link oblatePlanetTwin}'s curves, for a slot they do not hold.
+ */
+export function oblateCompositeTransmittanceTwin(
+  planet: OblatePlanetTwin,
+  view: TwinView,
+  direction: Vec3,
+  slot = 0,
+  scaleHeightsM: ArrayLike<number> = packedScaleHeightsM(planet.medium),
+): Rgb {
+  const reader = oblateReaderOf(planet);
+  const { figure, gravity } = planet.body;
+  const topM = planet.medium.topHeightM;
+  let start = view.cameraM;
+  let scaleHeightM: number | null = null;
+  if (oblateCameraOf(planet, view).gravityRatio * view.heightM >= topM) {
+    const [equatorial, polar] = shellScalesOf(planet);
+    const entryM = spheroidEntryM(
+      view.cameraM,
+      direction,
+      figure.equatorialRadiusM + topM * equatorial,
+      figure.polarRadiusM + topM * polar,
+    );
+    if (entryM === null) {
+      return [1, 1, 1];
+    }
+    if (entryM > 0) {
+      start = add(view.cameraM, scale(direction, entryM));
+      if (planet.bands.length > 1) {
+        const g = geodeticOf(start, figure);
+        scaleHeightM = tabulatedScaleHeightM(
+          scaleHeightsM,
+          topM,
+          gravityRatio(gravity, g.latitudeRad) * g.heightM,
+        );
+      }
+    }
+  }
+  const ray = reader.rayOf(start, geodeticOf(start, figure), direction, "fitted", scaleHeightM);
+  if (ray.shadowed) {
+    return [0, 0, 0];
+  }
+  const depth: TwinRgb = [0, 0, 0];
+  const absorbed = reader.opticalDepthInto(ray, slot, depth);
+  return [
+    Math.exp(-(depth[0] + absorbed[0])),
+    Math.exp(-(depth[1] + absorbed[1])),
+    Math.exp(-(depth[2] + absorbed[2])),
+  ];
 }

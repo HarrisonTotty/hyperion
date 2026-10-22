@@ -865,6 +865,61 @@ describe("the ray march across the top, and the limb outside it (R08.T8)", () =>
       recorded.map(() => expect.closeTo(1, 2)),
     );
   });
+
+  // The medium ends at a hard top (`decision-r08-t8-leans.md` §7, plan R08's Risks, "The medium
+  // ends at a hard top"): the horizontal ray from Δ under it crosses only the air between the
+  // camera and the top, a chord of √(2 (R + h) Δ) each way, so its light shrinks as √(top − h) to
+  // none at the top, and from over the top the ray misses the shell. The ascent's suns
+  // (`smoke/atmosphere.ts`'s `captureAscent`): by day 20° up at 90° from the view, and at the
+  // camera's last light 0.5° over its own visible horizon at 150°.
+  const glowSunsAt = (heightM: number): readonly SunState[] => [
+    sunAtCamera(20, 90),
+    sunAtCamera(0.5 - dipDeg(heightM), 150),
+  ];
+  /** The horizontal ray's light from `heightM` on high, unit light; `null` where it misses. */
+  const glowAt = (heightM: number, sun: SunState): Rgb | null => {
+    const view = twinView(columnCamera(heightM, -1, 1), sun, SPHERE, 0.1);
+    const marched = rayMarchRayAlongTwin(
+      R05_EARTH_REFERENCE,
+      view,
+      view.cameraM,
+      atElevation(0),
+      Number.POSITIVE_INFINITY,
+    );
+    return marched === null
+      ? null
+      : rgbOf(rayMarchTexelTwin(earthTwin(), view, TABLE_SIZES.high, marched));
+  };
+  const noGlow: Rgb = [Number.NaN, Number.NaN, Number.NaN];
+
+  it("misses the shell from just over the top", () => {
+    expect(glowSunsAt(TOP_M + 1).map((sun) => glowAt(TOP_M + 1, sun))).toEqual([null, null]);
+  });
+
+  // Recorded, not capped (measured 2026-10-22), on high, unit light, per channel.
+  it("records the glow from just under the top", () => {
+    // Day then last light at 1, 10 and 100 m under the top, red, green and blue.
+    const values = [1, 10, 100].flatMap((underM) =>
+      glowSunsAt(TOP_M - underM).flatMap((sun) => glowAt(TOP_M - underM, sun) ?? noGlow),
+    );
+    const recorded = [
+      8.301e-9, 2e-8, 5.323e-8, 3.711e-9, 1.399e-9, 3.952e-10, 2.627e-8, 6.328e-8, 1.684e-7,
+      1.106e-8, 3.889e-9, 9.758e-10, 8.367e-8, 2.016e-7, 5.365e-7, 2.715e-8, 7.723e-9, 1.862e-9,
+    ];
+    expect(values.map((value, i) => value / (recorded[i] ?? Number.NaN))).toEqual(
+      recorded.map(() => expect.closeTo(1, 2)),
+    );
+  });
+
+  // By day the light from 100 m under the top should be about √100 = 10 times that from 1 m
+  // under the top. Measured 2026-10-22: 10.08 in every channel, the √(top − h) law to 1%. At the
+  // last light the Sun sets lower the higher the camera, and the ratio falls short (7.3, 5.5 and
+  // 4.7).
+  it("falls as √(top − h) toward the top by day", () => {
+    const day = (underM: number): Rgb => glowAt(TOP_M - underM, sunAtCamera(20, 90)) ?? noGlow;
+    const ratios = [0, 1, 2].map((c) => (day(100)[c] ?? Number.NaN) / (day(1)[c] ?? Number.NaN));
+    expect(ratios).toEqual([10.08, 10.08, 10.08].map((ratio) => expect.closeTo(ratio, 1)));
+  });
 });
 
 /** The horizontal's cameras, m: in and above each setting's band. */

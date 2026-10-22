@@ -19,7 +19,7 @@ import { Checks } from "./harness";
 /** One piece of work, its checks, and its end. */
 interface Slot {
   readonly checks: Checks;
-  readonly done: Promise<void>;
+  readonly done: Promise<unknown>;
 }
 
 /** The slots of one group's work, in the order begun. */
@@ -44,10 +44,13 @@ export class OrderedChecks {
    * Begins `work` at once, its checks recorded in a slot of its own; it runs until it awaits, and
    * the group's sequence goes on meanwhile.
    *
+   * @returns The work's result, marked handled ({@link handled}): its failure is the slot's, which
+   *   {@link OrderedChecks.settle} rethrows in order, so a caller with no use for the result
+   *   discards it with `void`.
    * @throws Error once a slot has failed, so that the group's sequence stops there: the slots after
    *   the failed one are dropped, so the work would be wasted.
    */
-  later(work: (checks: Checks) => Promise<void>): void {
+  later<T>(work: (checks: Checks) => Promise<T>): Promise<T> {
     this.#goOn();
     const checks = new Checks();
     const done = work(checks);
@@ -56,6 +59,7 @@ export class OrderedChecks {
       this.#failed = true;
     });
     this.#slots.push({ checks, done });
+    return done;
   }
 
   /** Stops the group's sequence once a slot has failed. */

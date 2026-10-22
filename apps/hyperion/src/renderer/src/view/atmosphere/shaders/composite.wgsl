@@ -43,6 +43,11 @@
 // volume's reach, as from above the top; between them each is blended linearly with the march by
 // the march's share, `view.exact.w`, formed in f64. Inside the air what lies behind the sky, and each
 // disc, keeps the camera's own transmittance to space.
+// Changes (plan R08, R08.T8.b): from above the top what lies behind the sky, and each disc, takes
+// the transmittance to space per channel, the sliced lookup's from the ray's entry into the top's
+// shell (`transmittanceFromAbove`), in place of the march's mean over the channels, which dimmed a
+// sun seen through the limb grey where the air reddens it, and stepped in colour at the top. Low's
+// half-resolution march is read from the nearest of the texels whose depths tie (`rayMarched`).
 
 struct Draw {
   offsetFromCameraM : vec3f,
@@ -134,17 +139,23 @@ fn viewOf() -> AtmosphereView {
   );
 }
 
-// A light's transmittance from the camera along `dir` to space, per channel: the sliced lookup's
-// from the camera (R08.T6.f; `oblate.wgsl`), the slices' optical depth, absorber columns and
-// pressure-weighted columns over s, with light slot `slot`'s curves of growth (R08.T6.c, R08.T4.d;
-// each light's own since R08.T7), exponentiated in f32, so that a disc's light is never a stored
-// half float; 0 where the ground hides space.
-fn transmittanceToSpace(v : AtmosphereView, body : OblateBody, dir : vec3f, slot : u32) -> vec3f {
+// The sliced lookup's start at the camera (R08.T6.f; `oblate.wgsl`): its place, its ground quadric
+// and local scale height formed in f64 (`view.exact`), its height, the datum's normal under it, and
+// s and h* there.
+fn cameraLookupStart(v : AtmosphereView, body : OblateBody) -> LookupStart {
   let n = v.up.xyz;
-  let start = LookupStart(
+  return LookupStart(
     v.camera.xyz, oblateScaled(body, v.camera.xyz), v.exact.x, v.camera.w, n, n.z, length(n.xy),
     v.curvature.z, v.camera.w * v.curvature.z, v.exact.z
   );
+}
+
+// A light's transmittance to space along `dir` from the lookup's `start`, per channel: the sliced
+// lookup's (R08.T6.f; `oblate.wgsl`), the slices' optical depth, absorber columns and
+// pressure-weighted columns over s, with light slot `slot`'s curves of growth (R08.T6.c, R08.T4.d;
+// each light's own since R08.T7), exponentiated in f32, so that a disc's light is never a stored
+// half float; 0 where the ground hides space.
+fn transmittanceFrom(body : OblateBody, start : LookupStart, dir : vec3f, slot : u32) -> vec3f {
   let ray = slicedRayOf(body, oblateBody, start, dir);
   if (ray.shadowed) {
     return vec3f(0.0);
@@ -160,6 +171,92 @@ fn transmittanceToSpace(v : AtmosphereView, body : OblateBody, dir : vec3f, slot
   return exp(-(stored.depth + absorbed));
 }
 
+// A light's transmittance from the camera along `dir` to space, per channel
+// (`transmittanceFrom` at the camera's start): inside the air.
+fn transmittanceToSpace(v : AtmosphereView, body : OblateBody, dir : vec3f, slot : u32) -> vec3f {
+  return transmittanceFrom(body, cameraLookupStart(v, body), dir, slot);
+}
+
+// The distance along the unit `dir` from a camera above the top to the ray's entry into the top's
+// shell, the quadric (a + H / s_e, c + H / s_p) the ray march clips the air by (R08.T6.f), 0 where
+// the camera lies within it, and -1 where the ray misses it or it lies behind (R08.T8.b). As
+// `rayMarch.wgsl`'s `rayQuadric` and `quadricHits` take it: in space scaled to a sphere, its
+// constant formed in f64 (`view.exact.y`), its discriminant from Lagrange's identity beyond
+// h0 = a / 2, and its roots in the forms that do not cancel.
+fn topEntryOf(v : AtmosphereView, body : OblateBody, dir : vec3f) -> f32 {
+  let a = v.figure.x;
+  let topA = draw.shell.x * body.scales.z;
+  let radius = a + topA;
+  let scale = vec3f(1.0, 1.0, radius / (v.figure.y + draw.shell.x * body.scales.w));
+  let o = v.camera.xyz * scale;
+  let d = dir * scale;
+  let qa = dot(d, d);
+  let qb = dot(o, d);
+  let qc = v.exact.y;
+  var disc = qb * qb - qa * qc;
+  if (v.camera.w > 0.5 * a) {
+    let across = cross(o, d);
+    disc = qa * (radius * radius) - dot(across, across);
+  }
+  if (disc < 0.0) {
+    return -1.0;
+  }
+  let root = sqrt(disc);
+  let s = -(qb + select(-root, root, qb >= 0.0));
+  if (s == 0.0) {
+    return -1.0;
+  }
+  let first = s / qa;
+  let second = qc / s;
+  if (max(first, second) <= 0.0) {
+    return -1.0;
+  }
+  return max(min(first, second), 0.0);
+}
+
+// A light's transmittance to space along `dir` from a camera above the top, per channel (R08.T8.b):
+// 1 where the ray misses the air; the sliced lookup's from the camera where it lies within the
+// top's shell; and otherwise from the ray's entry into it, the camera's ray carrying nothing
+// before it, so that its transmittance to space is the table's from the entry to the top
+// (Bruneton 2017, precomputed_atmospheric_scattering's `functions.glsl`: `GetSkyRadiance` moves a
+// viewer in space to the top boundary along the view ray, 1 where the ray misses the air and 0
+// where it meets the ground, and `ComputeTransmittanceToTopAtmosphereBoundary` defines the table).
+// The entry's ground quadric Q = |S p|^2 - a^2 is the shell's, H_e (2a + H_e) + (k - k_t)(k + k_t)
+// z^2, with H_e = H / s_e, H_p = H / s_p, k_t = (a + H_e) / (c + H_p) and k - k_t =
+// (a H_p - c H_e) / (c (c + H_p)), which no difference of radii forms (Design note 18); its
+// height and normal are its datum point's, s and h* there, and, on a body of several bands, the
+// local scale height the body's table holds at that h*, since the composite declares no medium.
+fn transmittanceFromAbove(v : AtmosphereView, body : OblateBody, dir : vec3f, slot : u32) -> vec3f {
+  let entryM = topEntryOf(v, body, dir);
+  if (entryM < 0.0) {
+    return vec3f(1.0);
+  }
+  if (entryM == 0.0) {
+    return transmittanceToSpace(v, body, dir, slot);
+  }
+  let a = v.figure.x;
+  let c = v.figure.y;
+  let topA = draw.shell.x * body.scales.z;
+  let topC = draw.shell.x * body.scales.w;
+  let k = body.scales.x;
+  let kTop = (a + topA) / (c + topC);
+  let kGap = (a * topC - c * topA) / (c * (c + topC));
+  let p = v.camera.xyz + entryM * dir;
+  let quadricM2 = topA * (2.0 * a + topA) + kGap * (k + kTop) * p.z * p.z;
+  let datum = datumPointOf(body, p, quadricM2);
+  let s = gravityRatioAt(body, datum.normal.z * datum.normal.z);
+  let z = s * datum.heightM;
+  var scaleM = 0.0;
+  if (oblateBandCount(body) > 1u) {
+    scaleM = oblateScaleHeightAt(body, oblateBody, z);
+  }
+  let start = LookupStart(
+    p, oblateScaled(body, p), quadricM2, datum.heightM, datum.normal, datum.normal.z,
+    length(datum.normal.xy), s, z, scaleM
+  );
+  return transmittanceFrom(body, start, dir, slot);
+}
+
 // Whether a ray falls within a source's disc: |d x s| <= sin(rho) with d . s > 0, sin(rho) formed
 // in f64 (Design note 18), and no disc where it is 0.
 fn withinDisc(dir : vec3f, source : SkySource) -> bool {
@@ -169,7 +266,10 @@ fn withinDisc(dir : vec3f, source : SkySource) -> bool {
 }
 
 // The ray march's texel for this pixel: at full resolution its own; at half, of the four nearest,
-// the one whose source pixel's depth is closest to this pixel's.
+// the one whose source pixel's depth is closest to this pixel's, and of those that tie, the one
+// whose centre is nearest the pixel's (R08.T8.b, `decision-r08-t8-leans.md` §6.2). Without the
+// tie-break every sky and limb pixel, whose four depths are all 0, took the first candidate, so the
+// half-resolution layer stood one output pixel down and right of the scene.
 fn rayMarched(pixel : vec2u, depth : f32) -> vec4f {
   let scale = draw.output.z;
   if (scale >= 1.0) {
@@ -179,15 +279,22 @@ fn rayMarched(pixel : vec2u, depth : f32) -> vec4f {
   let size = vec2u(ceil(draw.output.xy * scale));
   let full = vec2u(draw.output.xy);
   let base = vec2i(vec2f(pixel) * scale - 0.5);
+  let centre = vec2f(pixel) + 0.5;
   var best = vec4f(0.0, 0.0, 0.0, 1.0);
   var bestError = 3.4e38;
+  var bestDistance = 3.4e38;
   for (var j = 0; j < 2; j++) {
     for (var i = 0; i < 2; i++) {
       let t = vec2u(clamp(base + vec2i(i, j), vec2i(0), vec2i(size) - 1));
       let source = min(vec2u((vec2f(t) + 0.5) / scale), full - 1u);
       let error = abs(textureLoad(sceneDepth, source, 0) - depth);
-      if (error < bestError) {
+      // A tie of depths goes to the texel nearest the pixel's centre, the one the full-resolution
+      // scene lines up with: the squared distance between their centres in output pixels.
+      let offset = (vec2f(t) + 0.5) / scale - centre;
+      let distance = dot(offset, offset);
+      if (error < bestError || (error == bestError && distance < bestDistance)) {
         bestError = error;
+        bestDistance = distance;
         best = textureLoad(rayMarch, t, 0);
       }
     }
@@ -226,12 +333,11 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
     }
     var inscattered : vec3f;
     var behind : vec3f;
-    var marchedAlpha = 1.0;
     if (aboveTop) {
-      let marched = rayMarched(pixel, depth);
-      inscattered = marched.rgb;
-      marchedAlpha = marched.a;
-      behind = vec3f(marched.a);
+      // What lies behind takes its transmittance to space per channel from the ray's entry into the
+      // air (R08.T8.b), not the march's mean over the channels.
+      inscattered = rayMarched(pixel, depth).rgb;
+      behind = transmittanceFromAbove(v, body, dir, slotHere);
     } else {
       // Inside the air: from the march band's upper edge up the march's sky, below its lower edge
       // the sky view's, and between them the two blended by the march's share (R08.T8). What lies
@@ -267,8 +373,10 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
     for (var k = 0u; k < count; k++) {
       let source = v.sources[k];
       if (withinDisc(dir, source) && dot(source.disc.rgb, vec3f(1.0)) > 0.0) {
-        var toSpace = vec3f(marchedAlpha);
-        if (!aboveTop) {
+        var toSpace : vec3f;
+        if (aboveTop) {
+          toSpace = transmittanceFromAbove(v, body, dir, skySlotOf(source));
+        } else {
           toSpace = transmittanceToSpace(v, body, dir, skySlotOf(source));
         }
         luminance += min(source.disc.rgb * toSpace * factor, vec3f(HALF_MAX));

@@ -153,6 +153,46 @@ export function fullScreenMesh(engine: RenderEngine, name: string, zM = -1): Mes
   });
 }
 
+/**
+ * A rectangle in view space from its lower left corner (x₀, y₀) to its upper right (x₁, y₁), m,
+ * as two counter-clockwise triangles at `zM` (negative is ahead): a surface over part of a view,
+ * its edges where the caller puts them (plan R08, R08.T8.b's depth edge).
+ */
+export function rectangleMesh(
+  engine: RenderEngine,
+  name: string,
+  corners: readonly [number, number, number, number],
+  zM: number,
+): MeshHandle {
+  const [x0, y0, x1, y1] = corners;
+  return engine.createMesh({
+    name,
+    positions: new Float32Array([
+      x0,
+      y0,
+      zM,
+      x1,
+      y0,
+      zM,
+      x1,
+      y1,
+      zM,
+      x0,
+      y0,
+      zM,
+      x1,
+      y1,
+      zM,
+      x0,
+      y1,
+      zM,
+    ]),
+    indices: null,
+    topology: "triangle-list",
+    attributes: {},
+  });
+}
+
 /** A counter-clockwise triangle in view space, at 1 m ahead unless `zM` says otherwise. */
 export function triangleMesh(
   engine: RenderEngine,

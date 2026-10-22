@@ -266,7 +266,7 @@ function march(o: Vec3, d: Vec3, s: Vec3, steps: readonly MarchStep[]): { l: Rgb
 }
 
 /** The near and far distances along a ray to a sphere about the centre, or null if missed. */
-function sphereHits(o: Vec3, d: Vec3, radiusM: number): readonly [number, number] | null {
+export function sphereHits(o: Vec3, d: Vec3, radiusM: number): readonly [number, number] | null {
   const b = dot(o, d);
   const disc = b * b - (dot(o, o) - radiusM * radiusM);
   if (disc < 0) {
@@ -326,10 +326,10 @@ export const kernelOf = (ray: GateRay): "rayMarch" | "skyView" =>
 export const skySegmentOf = (ray: GateRay): boolean => kernelOf(ray) === "rayMarch" && !ray.ground;
 
 /**
- * A sun at a zenith angle and an azimuth from the ray's own, at a point `q`; a vertical ray takes
- * its azimuths from any horizontal axis.
+ * A sun at a zenith angle and an azimuth from the ray's own, at a point `q`, azimuth 0 ahead along
+ * the ray; a vertical ray takes its azimuths from any horizontal axis.
  */
-function sunAt(q: Vec3, d: Vec3, zenithDeg: number, azimuthDeg: number): Vec3 {
+export function sunAt(q: Vec3, d: Vec3, zenithDeg: number, azimuthDeg: number): Vec3 {
   const n = normalise(q);
   const horizontalOf = (v: Vec3): Vec3 => along(v, n, -dot(v, n));
   const towards = horizontalOf(d);

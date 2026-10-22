@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { Checks } from "./harness";
-import { attempt, inOrder } from "./ordered";
+import { attempt, inOrder, OrderedChecks } from "./ordered";
 
 /** A promise and its resolver, so that a test settles work in the order it chooses. */
 function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
@@ -30,7 +30,7 @@ describe("checks in the order their work began", () => {
     const first = deferred();
     const second = deferred();
     const run = inOrder(checks, async (ordered) => {
-      ordered.later(async (slot) => {
+      void ordered.later(async (slot) => {
         await first.promise;
         slot.check("first a", true, "");
         slot.check("first b", true, "");
@@ -38,7 +38,7 @@ describe("checks in the order their work began", () => {
       ordered.now((slot) => {
         slot.check("between", true, "");
       });
-      ordered.later(async (slot) => {
+      void ordered.later(async (slot) => {
         await second.promise;
         slot.check("second", true, "");
       });
@@ -57,12 +57,12 @@ describe("checks in the order their work began", () => {
       ordered.now((slot) => {
         slot.check("before", true, "");
       });
-      ordered.later(async (slot) => {
+      void ordered.later(async (slot) => {
         await Promise.resolve();
         slot.check("its own", true, "");
         throw new RangeError("the twin refused");
       });
-      ordered.later(async (slot) => {
+      void ordered.later(async (slot) => {
         await Promise.resolve();
         slot.check("after", true, "");
       });
@@ -75,7 +75,7 @@ describe("checks in the order their work began", () => {
   it("records every slot begun before the group's own throw, then fails with that throw", async () => {
     const checks = new Checks();
     const run = inOrder(checks, async (ordered) => {
-      ordered.later(async (slot) => {
+      void ordered.later(async (slot) => {
         await Promise.resolve();
         slot.check("begun", true, "");
       });
@@ -89,7 +89,7 @@ describe("checks in the order their work began", () => {
   it("fails with a slot's throw over the group's later one, as the sequence would have", async () => {
     const checks = new Checks();
     const run = inOrder(checks, async (ordered) => {
-      ordered.later(async () => {
+      void ordered.later(async () => {
         await Promise.resolve();
         throw new Error("the earlier twin");
       });
@@ -103,7 +103,7 @@ describe("checks in the order their work began", () => {
     const checks = new Checks();
     let steps = 0;
     const run = inOrder(checks, async (ordered) => {
-      ordered.later(async () => {
+      void ordered.later(async () => {
         await Promise.resolve();
         throw new Error("the first twin");
       });
@@ -122,6 +122,25 @@ describe("checks in the order their work began", () => {
     await expect(run).rejects.toThrow("the first twin");
     expect(steps).toBe(0);
     expect(names(checks)).toEqual([]);
+  });
+
+  it("gives the work's result to whoever awaits it", async () => {
+    const ordered = new OrderedChecks();
+    const result = ordered.later(async (slot) => {
+      await Promise.resolve();
+      slot.check("its own", true, "");
+      return 7;
+    });
+    await expect(result).resolves.toBe(7);
+  });
+
+  it("rejects with the work's throw where its result is awaited", async () => {
+    const ordered = new OrderedChecks();
+    const result = ordered.later(async () => {
+      await Promise.resolve();
+      throw new RangeError("the twin refused");
+    });
+    await expect(result).rejects.toThrow(new RangeError("the twin refused"));
   });
 
   it("turns a computation's throw into a rejection read where it is awaited", async () => {

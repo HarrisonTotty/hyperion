@@ -5757,6 +5757,11 @@ medium, sizes, figure)`.
         process logs any image it rejects or fails to save, without losing the judged checks.
   - _Left as found._ At half resolution, a far-surface pixel whose four nearest ray-march texels
     are all sky gets no haze: a one-pixel fringe on silhouettes, on the low setting only.
+  - _R08.T8.b (2026-10-21, `decision-r08-t8-leans.md` §6.2)._ The upsample's pick kept the first
+    of the four candidates wherever their depths tie (every sky and limb pixel, whose depths are
+    all 0), so low's whole march layer stood one output pixel down and right of the scene. Since
+    R08.T8.b a tie goes to the texel whose centre is nearest the pixel's; surfaces whose depths
+    differ pick as before. Plan 08's Risks, "Deviations in T8.b, as built", has the check.
   - _By hand, for the owner._ The comparison with Hillaire 2020's published images (CGF 39(4), DOI
     10.1111/cgf.14050) confirms the work but blocks nothing (decisions-r05.md item 7). The images
     are kept local and untracked (decisions-r05.md item 4).

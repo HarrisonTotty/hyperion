@@ -32,9 +32,19 @@
  * tabulated terms' forward-lobe orders, so R08.T6.b's tabulated medium holds them too. R08.T8.a
  * holds the ray march's sky from inside the air, in the march band where it takes over from the sky
  * view, to its twin in both arms, and the composite's blend of the two (`checkMarchBand`).
+ * R08.T8.b's ascent by hand, from 2 m to 10⁸ m, takes frames for the eye and figures across the
+ * band's edges and the top, when the run is asked for captures (`captureAscent`).
  */
 
-import { add, normalise, scale, type Vec3 } from "../geometry/vec3";
+import {
+  add,
+  cross as crossProduct,
+  dot,
+  norm,
+  normalise,
+  scale,
+  type Vec3,
+} from "../geometry/vec3";
 import { quaternion, quaternionFromRows, rotate } from "../view/camera/quaternion";
 import { hydrostaticColumn } from "../view/atmosphere/column";
 import {
@@ -50,7 +60,9 @@ import {
   type AtmosphereCamera,
   atmosphereInputs,
   bodyOfFigure,
+  curveSlotOf,
   type FrameOutputs,
+  frameSourcesOf,
   HillaireAtmosphere,
   type MarchBand,
   marchWeightOf,
@@ -96,6 +108,7 @@ import {
 import {
   frameTwinView,
   type OblatePlanetTwin,
+  oblateCompositeTransmittanceTwin,
   oblateRayMarchRayAlongTwin,
   oblateRayMarchRayTwin,
   oblateRayMarchTexelTwin,
@@ -128,6 +141,7 @@ import {
   venusClassMedium,
 } from "../test/atmosphereFixtures";
 import {
+  type DrawItem,
   PresentationOnlyReadback,
   type RenderEngine,
   type RenderTarget,
@@ -146,6 +160,7 @@ import {
   fullScreenMesh,
   halfTexels,
   NEAR_M,
+  rectangleMesh,
   show,
   texel,
   triangleMesh,
@@ -321,8 +336,11 @@ function sunAt(elevationDeg: number): SunState {
 /** The grey a check surface is drawn in, pre-exposed. */
 const SURFACE_GREY = 0.02;
 
-/** The pre-exposure the smoke's frames are drawn at, EV100 15. */
-const SMOKE_EXPOSURE_SCALE = exposureScale(15);
+/** The exposure the smoke's frames are drawn at, EV100: 15. */
+const SMOKE_EV100 = 15;
+
+/** The pre-exposure the smoke's frames are drawn at, {@link SMOKE_EV100}'s. */
+const SMOKE_EXPOSURE_SCALE = exposureScale(SMOKE_EV100);
 
 /**
  * The twins' view of a frame `atmosphere` draws for `suns` at {@link SMOKE_EXPOSURE_SCALE}: each
@@ -347,17 +365,32 @@ function frameViewOf(
   );
 }
 
+/** A surface a composite frame's scene draws, made for the frame's viewport when it draws. */
+type SceneSurface = (size: ViewSize) => DrawItem;
+
+/** How {@link drawComposite} draws its frame's scene. */
+interface CompositeScene {
+  /** What its targets and frames are named after: `<label> scene`, `<label> output`. */
+  readonly label: string;
+  /** Its surface, if any, drawn {@link SURFACE_GREY}; black at depth 0 elsewhere. */
+  readonly surface: SceneSurface | null;
+  /** The frame's pre-exposure. */
+  readonly preExposure: number;
+}
+
 /**
- * Renders one composite frame for `suns` (R08.T7's sky sources) over a scene whose surface, if any,
- * stands `surfaceM` ahead.
+ * Draws one composite frame for `suns` (R08.T7's sky sources) over `scene`'s surface, if any, and
+ * reads it back through `read` while its targets live: the output's, and the scene's, whose colour
+ * a check may read beside it.
  */
-async function compositeFrame(
+async function drawComposite<T>(
   engine: RenderEngine,
   atmosphere: HillaireAtmosphere,
   camera: AtmosphereCamera,
   suns: ReadonlyArray<SunState>,
-  surfaceM: number | null,
-): Promise<Float32Array> {
+  scene: CompositeScene,
+  read: (output: RenderTarget, sceneTarget: RenderTarget) => Promise<T>,
+): Promise<T> {
   const size = camera.viewport;
   const aspect = size.widthPx / size.heightPx;
   const target = (name: string): RenderTarget =>
@@ -369,32 +402,55 @@ async function compositeFrame(
       depth: true,
       category: "render-targets",
     });
-  const scene = target("atmosphere scene");
-  const output = target("atmosphere output");
+  const sceneTarget = target(`${scene.label} scene`);
+  const output = target(`${scene.label} output`);
   try {
-    const draws =
-      surfaceM === null
-        ? []
-        : [
-            drawOf(
-              fullScreenMesh(engine, "atmosphere surface", -surfaceM),
-              engine.createMaterial(flatSpec("atmosphere surface")),
-              [SURFACE_GREY, SURFACE_GREY, SURFACE_GREY, 1],
-            ),
-          ];
-    scene.render(frameOf("atmosphere scene", draws, aspect));
+    const draws = scene.surface === null ? [] : [scene.surface(size)];
+    sceneTarget.render(frameOf(`${scene.label} scene`, draws, aspect));
     const composite = atmosphere.drawFrame(camera, suns, {
-      colour: scene.colour,
-      depth: requireDepth(scene.depth),
+      colour: sceneTarget.colour,
+      depth: requireDepth(sceneTarget.depth),
       nearM: NEAR_M,
-      exposureScale: SMOKE_EXPOSURE_SCALE,
+      exposureScale: scene.preExposure,
     });
-    output.render(frameOf("atmosphere composite", [composite], aspect));
-    return halfTexels(await engine.readTexture(output.colour));
+    output.render(frameOf(`${scene.label} composite`, [composite], aspect));
+    return await read(output, sceneTarget);
   } finally {
-    scene.dispose();
+    sceneTarget.dispose();
     output.dispose();
   }
+}
+
+/**
+ * Renders one composite frame for `suns` (R08.T7's sky sources) over a scene whose surface, if any,
+ * stands `surfaceM` ahead, pre-exposed by `preExposure` ({@link SMOKE_EXPOSURE_SCALE} unless
+ * given).
+ */
+async function compositeFrame(
+  engine: RenderEngine,
+  atmosphere: HillaireAtmosphere,
+  camera: AtmosphereCamera,
+  suns: ReadonlyArray<SunState>,
+  surfaceM: number | null,
+  preExposure: number = SMOKE_EXPOSURE_SCALE,
+): Promise<Float32Array> {
+  const surface: SceneSurface | null =
+    surfaceM === null
+      ? null
+      : () =>
+          drawOf(
+            fullScreenMesh(engine, "atmosphere surface", -surfaceM),
+            engine.createMaterial(flatSpec("atmosphere surface")),
+            [SURFACE_GREY, SURFACE_GREY, SURFACE_GREY, 1],
+          );
+  return drawComposite(
+    engine,
+    atmosphere,
+    camera,
+    suns,
+    { label: "atmosphere", surface, preExposure },
+    async (output) => halfTexels(await engine.readTexture(output.colour)),
+  );
 }
 
 function requireDepth(depth: TextureHandle | null): TextureHandle {
@@ -905,6 +961,20 @@ const TWIN_FLOOR = 1e-6;
 const HALF_SUBNORMAL_SPACING = 2 ** -24;
 
 /**
+ * `f32`'s spacing below its least normal, its smallest subnormal: 2⁻¹⁴⁹ (about 1.4 × 10⁻⁴⁵), the
+ * kernel arm's floor as {@link HALF_SUBNORMAL_SPACING} is the stored arm's (R08.T8.b): a twin value
+ * under what `f32` holds is a correct 0 on the GPU.
+ *
+ * @remarks
+ * It is there for the far limb from 10⁷ m, where `oblateAerialPerspectiveTwin` marches e^(−h ÷ H)
+ * with no clip at the top and holds 10⁻²⁰⁰ to 10⁻¹⁹⁴ about a camera 3,600 km up, which `f32`
+ * underflows to 0. It moves no other check: a channel it carries is off by at most 2⁻¹⁴⁹ yet by
+ * more than 10⁻³ of max(|L₀|, 10⁻⁶ L_max), which needs a table whose largest value L_max is under
+ * 10⁹ × 2⁻¹⁴⁹, about 1.4 × 10⁻³⁶.
+ */
+const F32_SUBNORMAL_SPACING = 2 ** -149;
+
+/**
  * The absorber amount u ÷ U below which a stored amount is held to 10⁻³ of this floor, 10⁻⁵ of U,
  * rather than of itself (R08.T6.c): 10⁻².
  *
@@ -933,21 +1003,38 @@ interface TwinAgreement {
   /** The channels compared. */
   readonly channels: number;
   /** The channels that passed by the twin's envelope (`decision-r08-f32.md` §10.3), recorded. */
-  readonly envelope: readonly string[];
+  readonly envelope: readonly EnvelopeChannel[];
   /**
    * The channels that passed by an envelope holding the split the kernel may take at its rounding
    * ({@link TexelEnvelope.split}), recorded apart and outside §10.3's cap (R08.T6.f).
    */
-  readonly split: readonly string[];
+  readonly split: readonly EnvelopeChannel[];
   /** The worst envelope channel's distance from its envelope's middle, of its half-width. */
   readonly worstInEnvelope: number;
+}
+
+/** One channel that passed by its texel's twin envelope (`decision-r08-f32.md` §10.3). */
+interface EnvelopeChannel {
+  /** The texel, `(x, y)`, or `(x, y, z)` in a volume. */
+  readonly where: string;
+  /** The texel's row in its table. */
+  readonly row: number;
+  readonly channel: number;
+  /** The texel's nominal ray's tangent height, m. */
+  readonly tangentHeightM: number;
+  /**
+   * The envelope's half-width, (greatest − least) ÷ 2 over the twin's values, as a fraction of
+   * max(|L₀|, floor), L₀ the twin's nominal value (R08.T8.b).
+   */
+  readonly halfWidth: number;
 }
 
 /** How a readback is held (R08.T6.g, `decision-r08-t6b-floor.md` §4, `decision-r08-f32.md` §10). */
 interface TwinOptions {
   /**
    * `stored`: an `rgba16float` table, with the format's floor of 2⁻²⁴; `kernel`: a kernel's own
-   * `rgba32float` output (the kernel arm), with none.
+   * `rgba32float` output (the kernel arm), with `f32`'s, 2⁻¹⁴⁹ ({@link F32_SUBNORMAL_SPACING}),
+   * since R08.T8.b.
    */
   readonly arm: "stored" | "kernel";
   /** The channels that hold absorber amounts u ÷ U, floored at {@link ABSORBER_AMOUNT_FLOOR}. */
@@ -971,8 +1058,9 @@ interface ChannelCheck {
 
 /**
  * A readback against its twin, texel for texel: each channel's |GPU − twin| against
- * max(10⁻³ · max(|twin|, 10⁻⁶ · largest), 2⁻²⁴) for a stored table, and without the 2⁻²⁴ for a
- * kernel's own output, the largest taken over the colour channels, and over alpha apart when
+ * max(10⁻³ · max(|twin|, 10⁻⁶ · largest), 2⁻²⁴) for a stored table, and with `f32`'s 2⁻¹⁴⁹ in
+ * place of the 2⁻²⁴ for a kernel's own output (R08.T8.b; {@link F32_SUBNORMAL_SPACING}), the
+ * largest taken over the colour channels, and over alpha apart when
  * `alpha` holds a quantity of its own (a mean transmittance, or an absorber amount). The channels
  * `options.amountChannels` names hold absorber amounts, floored at {@link ABSORBER_AMOUNT_FLOOR}
  * of their own unit as well.
@@ -1003,7 +1091,7 @@ function twinAgreement(
   const colourLargest = largest([0, 1, 2]);
   const colourFloor = TWIN_FLOOR * colourLargest;
   const alphaFloor = TWIN_FLOOR * largest([3]);
-  const halfFloor = options.arm === "stored" ? HALF_SUBNORMAL_SPACING : 0;
+  const formatFloor = options.arm === "stored" ? HALF_SUBNORMAL_SPACING : F32_SUBNORMAL_SPACING;
   const amountChannels = options.amountChannels ?? [];
   const perSlice = twin.widthTexels * twin.heightTexels;
   const count = texels.length / 4;
@@ -1013,11 +1101,12 @@ function twinAgreement(
   let over = 0;
   let floorCarried = 0;
   let worstInEnvelope = 0;
-  const envelope: string[] = [];
-  const split: string[] = [];
+  const envelope: EnvelopeChannel[] = [];
+  const split: EnvelopeChannel[] = [];
+  const rowOf = (i: number): number => Math.floor(i / twin.widthTexels) % twin.heightTexels;
   const where = (i: number): string => {
     const x = i % twin.widthTexels;
-    const y = Math.floor(i / twin.widthTexels) % twin.heightTexels;
+    const y = rowOf(i);
     const z = Math.floor(i / perSlice);
     return perSlice === count ? `(${x}, ${y})` : `(${x}, ${y}, ${z})`;
   };
@@ -1030,7 +1119,7 @@ function twinAgreement(
         ? Math.max(tableFloor, ABSORBER_AMOUNT_FLOOR)
         : tableFloor;
       const relative = TWIN_TOLERANCE * Math.max(Math.abs(expected), floor);
-      const allowed = Math.max(relative, halfFloor);
+      const allowed = Math.max(relative, formatFloor);
       const delta = Math.abs(actual - expected);
       floorCarried += delta > relative && delta <= allowed ? 1 : 0;
       above += Math.abs(expected) >= floor ? 1 : 0;
@@ -1052,9 +1141,13 @@ function twinAgreement(
             worstInEnvelope,
             Math.abs(actual - (low + high) / 2) / (half + tolerance),
           );
-          (texelEnvelope.split ? split : envelope).push(
-            `${where(i)} c${c} at ${(texelEnvelope.tangentHeightM / 1_000).toFixed(2)} km, spread ${(((high - low) / Math.max(Math.abs(expected), floor)) * 1e3).toFixed(2)} × 10⁻³`,
-          );
+          (texelEnvelope.split ? split : envelope).push({
+            where: where(i),
+            row: rowOf(i),
+            channel: c,
+            tangentHeightM: texelEnvelope.tangentHeightM,
+            halfWidth: half / Math.max(Math.abs(expected), floor),
+          });
           continue;
         }
       }
@@ -1459,7 +1552,7 @@ async function checkPlanetTwins(
     // back while the twin is computed, and its check reads it after the checks that came before it.
     const kernelArm =
       entry.scope === "tables" ? handled(readMultiScatteringArm(engine, tables)) : null;
-    ordered.later(async (checks) => {
+    void ordered.later(async (checks) => {
       // The per-planet tables alone are held over the GPU's transmittance, in both arms: their own
       // multiple-scattering twin, end to end, is not formed (R08.T6.d, for the smoke's watchdog).
       const twin = await ownTwin;
@@ -1848,7 +1941,7 @@ async function checkFrameTwins(
         frame,
         twins,
       );
-      ordered.later(async (checks) => {
+      void ordered.later(async (checks) => {
         const result = await agreements();
         const label = `${medium.name}, ${setting}, ${frame.name}`;
         recordAgreement(checks, `${label}: the sky view`, result.skyView);
@@ -1978,7 +2071,7 @@ async function checkLightLayers(
     const layerTwins = Array.from({ length: layers }, (_, slot) =>
       twins.multiScattering(read, EARTH_MEAN_RADIUS_M, stored, slot),
     );
-    ordered.later(async (checks) => {
+    void ordered.later(async (checks) => {
       const texels = layersOf(gpu.multiScattering, layers);
       checks.check(
         `R08.T7 ${medium.name}: the multiple-scattering table has one layer a light`,
@@ -2059,7 +2152,7 @@ async function checkBinaryFrames(
         frame,
         twins,
       );
-      ordered.later(async (checks) => {
+      void ordered.later(async (checks) => {
         const result = await agreements();
         const label = `${medium.name}, ${setting}, ${frame.name}`;
         const record = (what: string, held: TwinAgreement): void => {
@@ -2565,43 +2658,103 @@ const LIMB_CENTRE_M = 50_000;
 const LIMB_HALF_SPAN_M = 150_000;
 
 /**
- * A camera `distanceM` from the centre on the equator, looking along the equatorial limb at the
- * tangent height {@link LIMB_CENTRE_M}, its frame spanning ±{@link LIMB_HALF_SPAN_M} of tangent
- * height, so that the air and the space beyond it fill rows of the 64 × 32 frame. Nothing is drawn
- * in front of it, so the scene's own projection is not read.
+ * Where a {@link limbCamera}'s frame looks, and where the camera stands (R08.T8.b): each member
+ * absent takes R08.T6.g's limb frame, at longitude 0.
  */
-function limbCamera(distanceM: number, figure: SpheroidFigure): AtmosphereCamera {
-  const tangentM = figure.equatorialRadiusM + LIMB_CENTRE_M;
+interface LimbFrame {
+  /** The tangent height the frame is centred on, m; {@link LIMB_CENTRE_M} where absent. */
+  readonly centreM?: number;
+  /**
+   * The frame's half-span of tangent height at the tangent point, m, so that a row of the frame
+   * spans 2 ÷ its height in rows of it (a sixteenth of it in the 64 × 32 frame);
+   * {@link LIMB_HALF_SPAN_M} where absent.
+   */
+  readonly halfSpanM?: number;
+  /**
+   * The camera's longitude, rad: its position, its axes and the sun turned about the pole by it;
+   * 0 where absent, where the camera lies on the x axis.
+   */
+  readonly longitudeRad?: number;
+}
+
+/** `v` turned about the pole (+z) by `angleRad`, from +x towards +y. */
+function aboutPole(v: Vec3, angleRad: number): Vec3 {
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+  return { x: v.x * cos - v.y * sin, y: v.x * sin + v.y * cos, z: v.z };
+}
+
+/**
+ * The distance from a {@link limbCamera} `distanceM` from the centre to the tangent point its
+ * `frame` is centred on, m: the length its half-span of tangent height is seen across.
+ */
+function limbTangentDistanceM(
+  distanceM: number,
+  figure: SpheroidFigure,
+  frame: LimbFrame = {},
+): number {
+  const sin = (figure.equatorialRadiusM + (frame.centreM ?? LIMB_CENTRE_M)) / distanceM;
+  return distanceM * Math.sqrt(1 - sin * sin);
+}
+
+/**
+ * A camera `distanceM` from the centre on the equator, looking along the equatorial limb at the
+ * tangent height {@link LIMB_CENTRE_M}, its frame (64 × 32 unless `viewport` is given) spanning
+ * ±{@link LIMB_HALF_SPAN_M} of tangent height, so that the air and the space beyond it fill its
+ * rows, or at the centre, half-span and longitude `frame` gives. Nothing is drawn in front of it,
+ * so the scene's own projection is not read.
+ */
+function limbCamera(
+  distanceM: number,
+  figure: SpheroidFigure,
+  frame: LimbFrame = {},
+  viewport: ViewSize = FRAME_SIZE,
+): AtmosphereCamera {
+  const longitudeRad = frame.longitudeRad ?? 0;
+  const tangentM = figure.equatorialRadiusM + (frame.centreM ?? LIMB_CENTRE_M);
   const sin = tangentM / distanceM;
   const cos = Math.sqrt(1 - sin * sin);
-  const forward = { x: -cos, y: sin, z: 0 };
-  const up = { x: sin, y: cos, z: 0 };
+  // At longitude 0 the camera stands on +x, the limb ahead in the plane z = 0.
+  const forward = aboutPole({ x: -cos, y: sin, z: 0 }, longitudeRad);
+  const up = aboutPole({ x: sin, y: cos, z: 0 }, longitudeRad);
   const right = { x: 0, y: 0, z: -1 };
-  const tanY = LIMB_HALF_SPAN_M / (distanceM * cos);
-  const aspect = FRAME_SIZE.widthPx / FRAME_SIZE.heightPx;
+  const toTangentM = limbTangentDistanceM(distanceM, figure, frame);
+  const tanY = (frame.halfSpanM ?? LIMB_HALF_SPAN_M) / toTangentM;
+  const aspect = viewport.widthPx / viewport.heightPx;
   return {
-    positionM: { x: distanceM, y: 0, z: 0 },
+    positionM: aboutPole({ x: distanceM, y: 0, z: 0 }, longitudeRad),
     orientation: quaternionFromRows([
       { x: right.x, y: up.x, z: -forward.x },
       { x: right.y, y: up.y, z: -forward.y },
       { x: right.z, y: up.z, z: -forward.z },
     ]),
     fovXRad: 2 * Math.atan(aspect * tanY),
-    viewport: FRAME_SIZE,
+    viewport,
   };
 }
 
-/** The sun at an elevation above the horizon of a {@link limbCamera}'s tangent point, ahead. */
-function limbSun(distanceM: number, figure: SpheroidFigure, elevationDeg: number): SunState {
-  const sin = (figure.equatorialRadiusM + LIMB_CENTRE_M) / distanceM;
+/**
+ * The sun at an elevation above the horizon of a {@link limbCamera}'s tangent point, ahead, for the
+ * camera `frame` places.
+ */
+function limbSun(
+  distanceM: number,
+  figure: SpheroidFigure,
+  elevationDeg: number,
+  frame: LimbFrame = {},
+): SunState {
+  const sin = (figure.equatorialRadiusM + (frame.centreM ?? LIMB_CENTRE_M)) / distanceM;
   const cos = Math.sqrt(1 - sin * sin);
   const e = (elevationDeg * Math.PI) / 180;
   return {
-    directionBodyFixed: {
-      x: Math.cos(e) * -cos + Math.sin(e) * sin,
-      y: Math.cos(e) * sin + Math.sin(e) * cos,
-      z: 0,
-    },
+    directionBodyFixed: aboutPole(
+      {
+        x: Math.cos(e) * -cos + Math.sin(e) * sin,
+        y: Math.cos(e) * sin + Math.sin(e) * cos,
+        z: 0,
+      },
+      frame.longitudeRad ?? 0,
+    ),
     illuminanceLx: SUN_ILLUMINANCE_LX,
     angularRadiusRad: SUN_ANGULAR_RADIUS_RAD,
   };
@@ -2687,12 +2840,69 @@ function northSunAt(latitudeRad: number, elevationDeg: number): SunState {
   };
 }
 
+/**
+ * How a check's channels that pass by the twin's envelope count (`decision-r08-f32.md` §10.3 and
+ * §10.4): `capped`, at most {@link ENVELOPE_SHARE_CAP} of the check's channels; `missed`, at most
+ * {@link FAR_LIMB_NEAR_SHARE_MISS}, a named miss of that cap (R08.T8.b's far limb from 10⁷ m);
+ * `recorded`, their share recorded and not capped, every channel still within 10⁻³ or within its
+ * envelope.
+ */
+type EnvelopeShare = "capped" | "missed" | "recorded";
+
+/** The most of a check's channels that may pass by the envelope as `share` counts them. */
+function envelopeCapOf(share: EnvelopeShare): number {
+  let cap: number;
+  switch (share) {
+    case "capped":
+      cap = ENVELOPE_SHARE_CAP;
+      break;
+    case "missed":
+      cap = FAR_LIMB_NEAR_SHARE_MISS;
+      break;
+    case "recorded":
+      cap = Number.POSITIVE_INFINITY;
+      break;
+  }
+  return cap;
+}
+
+/** How a check's detail names the count of its envelope's channels. */
+function describeEnvelopeShare(share: EnvelopeShare): string {
+  let text: string;
+  switch (share) {
+    case "capped":
+      text = `capped at ${percentOf(ENVELOPE_SHARE_CAP, ROUND_PERCENT)}`;
+      break;
+    case "missed":
+      text = `capped at ${percentOf(FAR_LIMB_NEAR_SHARE_MISS, ROUND_PERCENT)}, a named miss of the`;
+      text += ` ${percentOf(ENVELOPE_SHARE_CAP, ROUND_PERCENT)} cap`;
+      break;
+    case "recorded":
+      text = "recorded, not capped";
+      break;
+  }
+  return text;
+}
+
 /** One view of R08.T6.g's checks. */
 interface HeightsView {
   readonly name: string;
   readonly camera: AtmosphereCamera;
   readonly sun: SunState;
+  /**
+   * The sun's elevation as the view's name gives it, deg: over the camera's horizon, or over its
+   * tangent point's for a limb.
+   */
+  readonly sunElevationDeg: number;
   readonly surfaceM: number | null;
+  /**
+   * How the ray march's envelope channels count; `capped` where absent. `recorded` only for
+   * R08.T8.b's far limb from 10⁸ and 10⁹ m (§10.4), where the tangent height's own resolution in
+   * the march, 2ε|P| ≈ 12–120 m, is a sizeable share of the 1.2 km aerosol's scale height; `missed`
+   * only for it from 10⁷ m ({@link FAR_LIMB_NEAR_SHARE_MISS}). The sky view's envelope stays capped
+   * in every view: its texels' resolution does not depend on |P|.
+   */
+  readonly marchEnvelopeShare?: EnvelopeShare;
 }
 
 /**
@@ -2711,6 +2921,7 @@ function heightsViews(body: HeightsBody, setting: QualitySetting): HeightsView[]
         name: `${heightM} m, the sun ${elevationDeg}°, a surface 60 km ahead`,
         camera: equatorCamera(heightM, FRAME_SIZE, body.figure),
         sun: sunAt(elevationDeg),
+        sunElevationDeg: elevationDeg,
         surfaceM: 60_000,
       });
     }
@@ -2722,6 +2933,7 @@ function heightsViews(body: HeightsBody, setting: QualitySetting): HeightsView[]
           name: `the limb from ${(distanceM - body.figure.equatorialRadiusM).toExponential(2)} m, the sun ${elevationDeg}° at its tangent point`,
           camera: limbCamera(distanceM, body.figure),
           sun: limbSun(distanceM, body.figure, elevationDeg),
+          sunElevationDeg: elevationDeg,
           surfaceM: null,
         });
       }
@@ -2808,11 +3020,107 @@ async function drawArms(
   }
 }
 
+/** How {@link recordHeights} names a check and counts its envelope channels. */
+interface HeightsRecord {
+  /** The arm as the check names it; `the stored arm` or `the kernel arm` where absent. */
+  readonly label?: string;
+  /** How the envelope channels count; `capped` where absent. */
+  readonly envelopeShare?: EnvelopeShare;
+}
+
+/** The median of some values, NaN for none. */
+function medianOf(values: readonly number[]): number {
+  const sorted = values.toSorted((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) {
+    return sorted[middle] ?? Number.NaN;
+  }
+  return ((sorted[middle - 1] ?? Number.NaN) + (sorted[middle] ?? Number.NaN)) / 2;
+}
+
+/** A share of the twin's value, as the envelope's records give it: in units of 10⁻³. */
+function perMille(share: number): string {
+  return `${(share * 1e3).toPrecision(3)} × 10⁻³`;
+}
+
+/** How {@link percentOf} rounds: to `digits` decimal places, or to `digits` significant figures. */
+interface PercentForm {
+  readonly kind: "places" | "figures";
+  readonly digits: number;
+}
+
+/**
+ * A share as a percentage, as the checks' details give it: to two places unless `form` says
+ * otherwise (a constant's round share to its one figure, a change that may be under 0.01%).
+ */
+function percentOf(share: number, form: PercentForm = { kind: "places", digits: 2 }): string {
+  const percent = share * 100;
+  const text =
+    form.kind === "places" ? percent.toFixed(form.digits) : percent.toPrecision(form.digits);
+  return `${text}%`;
+}
+
+/** {@link percentOf}'s form for a constant's round share: one significant figure. */
+const ROUND_PERCENT: PercentForm = { kind: "figures", digits: 1 };
+
+/** Envelope half-widths as the records give them: their median and the largest. */
+function spreadOf(halfWidths: readonly number[]): string {
+  if (halfWidths.length === 0) {
+    return "no half-widths";
+  }
+  const median = perMille(medianOf(halfWidths));
+  return `half-widths median ${median}, largest ${perMille(Math.max(...halfWidths))}`;
+}
+
+/** An envelope channel as its check records it: its texel, channel, tangent height and spread. */
+function describeEnvelopeChannel(entry: EnvelopeChannel): string {
+  return `${entry.where} c${entry.channel} at ${(entry.tangentHeightM / 1_000).toFixed(2)} km, spread ${(entry.halfWidth * 2 * 1e3).toFixed(2)} × 10⁻³`;
+}
+
+/**
+ * Envelope channels summed up row by row, for a check whose share is over the cap (R08.T8.b): each
+ * row's median tangent height, its count of channels, and its median and largest half-width
+ * ({@link spreadOf}), so that a band shows without each channel's record.
+ */
+function envelopeRows(entries: readonly EnvelopeChannel[]): string {
+  const rows = new Map<number, EnvelopeChannel[]>();
+  for (const entry of entries) {
+    const row = rows.get(entry.row);
+    if (row === undefined) {
+      rows.set(entry.row, [entry]);
+    } else {
+      row.push(entry);
+    }
+  }
+  return [...rows.entries()]
+    .toSorted(([a], [b]) => a - b)
+    .map(([row, held]) => {
+      const widths = held.map((entry) => entry.halfWidth);
+      const tangentKm = medianOf(held.map((entry) => entry.tangentHeightM)) / 1_000;
+      return `row ${row} (${tangentKm.toFixed(2)} km): ${held.length}, ${spreadOf(widths)}`;
+    })
+    .join("; ");
+}
+
+/**
+ * Whether one arm's agreement holds as R08.T6.g's checks hold it: every channel within the bound or
+ * its envelope, some above the floor, and the envelope channels' share within the cap `counting`
+ * sets ({@link envelopeCapOf}).
+ */
+function heightsHeld(result: TwinAgreement, counting: EnvelopeShare): boolean {
+  return (
+    result.worst <= 1 &&
+    result.above > 0 &&
+    result.envelope.length / result.channels <= envelopeCapOf(counting)
+  );
+}
+
 /**
  * Records one arm's agreement as `task`'s check (R08.T6.g's, or R08.T6.i's on the slab Earth), with
- * its largest value and its floor's count.
- *
- * @param label - The arm as the check names it; `the stored arm` or `the kernel arm` by default.
+ * its largest value and its floor's count. Its envelope channels are recorded with their share, the
+ * median and largest of their half-widths and the worst channel's place within its envelope, then
+ * each channel while their share is within {@link ENVELOPE_SHARE_CAP}, or row by row
+ * ({@link envelopeRows}) whenever it is over it, however they count (`decision-r08-f32.md` §10.4).
  */
 function recordHeights(
   checks: Checks,
@@ -2820,22 +3128,35 @@ function recordHeights(
   name: string,
   result: TwinAgreement,
   arm: TwinOptions["arm"],
-  label = `the ${arm} arm`,
+  record: HeightsRecord = {},
 ): void {
+  const label = record.label ?? `the ${arm} arm`;
+  const counting = record.envelopeShare ?? "capped";
   const limited = arm === "stored" && result.largest < FORMAT_LIMITED ? ", format-limited" : "";
   const share = result.envelope.length / result.channels;
+  const widths = result.envelope.map((entry) => entry.halfWidth);
+  const listed =
+    share <= ENVELOPE_SHARE_CAP
+      ? result.envelope.map(describeEnvelopeChannel).join("; ")
+      : `by row, ${envelopeRows(result.envelope)}`;
   const envelope =
     result.envelope.length === 0
-      ? "none by the envelope"
-      : `${result.envelope.length} by the envelope (${(share * 100).toFixed(2)}% of ${result.channels}; worst at ${result.worstInEnvelope.toFixed(2)} of its half-width): ${result.envelope.join("; ")}`;
+      ? `none by the envelope${counting === "capped" ? "" : ` (${describeEnvelopeShare(counting)})`}`
+      : `${result.envelope.length} by the envelope (${percentOf(share)} of ${result.channels}, ${describeEnvelopeShare(counting)}; ${spreadOf(widths)}; worst at ${result.worstInEnvelope.toFixed(2)} of its half-width): ${listed}`;
   const split =
     result.split.length === 0
       ? ""
-      : `; ${result.split.length} by the split's rounding (${((result.split.length / result.channels) * 100).toFixed(2)}%): ${result.split.join("; ")}`;
+      : `; ${result.split.length} by the split's rounding (${percentOf(result.split.length / result.channels)}): ${result.split.map(describeEnvelopeChannel).join("; ")}`;
+  // The kernel arm's floor is f32's own since R08.T8.b: say so where it carries a channel.
+  const f32Floor =
+    arm === "kernel" && result.floorCarried > 0
+      ? " (f32's subnormal spacing, 2⁻¹⁴⁹: twin values under what f32 holds, as the aerial twin's" +
+        " e^(−h ÷ H) unclipped at the top, 10⁻²⁰⁰ to 10⁻¹⁹⁴ from 10⁷ m, are a correct 0)"
+      : "";
   checks.check(
     `${task} ${name}, ${label}, agrees with the CPU twin to 10⁻³`,
-    result.worst <= 1 && result.above > 0 && share <= ENVELOPE_SHARE_CAP,
-    `worst ${result.at}; largest ${show([result.largest])}${limited}; ${result.above} channels above 10⁻⁶ of the largest, ${result.over} over the bound, ${result.floorCarried} carried by the floor; ${envelope}${split}`,
+    heightsHeld(result, counting),
+    `worst ${result.at}; largest ${show([result.largest])}${limited}; ${result.above} channels above 10⁻⁶ of the largest, ${result.over} over the bound, ${result.floorCarried} carried by the floor${f32Floor}; ${envelope}${split}`,
   );
 }
 
@@ -2886,7 +3207,7 @@ async function checkPlanetArms(
   // The kernel arm is drawn and read back while the twins are computed, and its checks read it
   // after the twins, as they came in sequence.
   const armReadback = handled(readKernelArmTables(engine, atmosphere.tables));
-  ordered.later(async (checks) => {
+  void ordered.later(async (checks) => {
     const transmittance = await transmittanceOfMedium;
     const multiScattering = await multiScatteringOverGpu;
     const { transmittance: armTransmittance, multiScattering: armMultiScattering } =
@@ -3021,7 +3342,7 @@ async function checkOblatePlanetArms(
   // The kernel arm is drawn and read back while the twins are computed, and its checks read it
   // after the twins, as they came in sequence.
   const armReadback = handled(readKernelArmTables(engine, tables));
-  ordered.later(async (checks) => {
+  void ordered.later(async (checks) => {
     const arm = await armReadback;
     const label = `${body.name}: the per-planet`;
     const slices = plan.kappa.length;
@@ -3089,6 +3410,20 @@ async function checkOblatePlanetArms(
   return { kind: "oblate", twin: planet };
 }
 
+/** One arm's ray march against its twin in one view, as {@link checkViewArms} recorded it. */
+interface MarchArm {
+  /** The view's sun's elevation, deg ({@link HeightsView.sunElevationDeg}). */
+  readonly sunElevationDeg: number;
+  readonly arm: TwinOptions["arm"];
+  readonly result: TwinAgreement;
+}
+
+/** What {@link checkViewArms} leaves its caller (R08.T8.b's far limb records them by distance). */
+interface ViewArms {
+  /** The view's ray-march agreements, each arm's, once its twins are in and its checks recorded. */
+  readonly marches: Promise<readonly MarchArm[]>;
+}
+
 /** One view's three per-frame kernels against their twins, in each arm the frame drew. */
 async function checkViewArms(
   engine: RenderEngine,
@@ -3100,13 +3435,14 @@ async function checkViewArms(
   setting: QualitySetting,
   view: HeightsView,
   twins: TwinPool,
-): Promise<void> {
+): Promise<ViewArms> {
   // The view's twins begin on the twin workers, and the frame draws while they run.
   const twin = frameViewOf(atmosphere, view.camera, [view.sun], body.figure);
   const surfaceDepth = view.surfaceM === null ? 0 : NEAR_M / view.surfaceM;
   const frameTwins = frameTwinsOf(twins, planet, twin, sizes, surfaceDepth);
   const frame = await drawArms(engine, atmosphere, view, setting === "high");
-  ordered.later(async (checks) => {
+  const record = async (checks: Checks): Promise<readonly MarchArm[]> => {
+    const held: MarchArm[] = [];
     const label = `${body.name}, ${setting}, ${view.name}`;
     checks.check(
       `${body.task} ${label}: the composite's frame is finite and within rgba16float`,
@@ -3150,21 +3486,21 @@ async function checkViewArms(
           twinAgreement(floats.aerial, aerial, true, { arm }),
           arm,
         );
-        recordHeights(
-          checks,
-          body.task,
-          `${label}: the ray march`,
-          twinAgreement(
-            floats.rayMarch,
-            rayMarch,
-            true,
-            marchEnvelope === undefined ? { arm } : { arm, envelope: marchEnvelope },
-          ),
-          arm,
+        const march = twinAgreement(
+          floats.rayMarch,
+          rayMarch,
+          true,
+          marchEnvelope === undefined ? { arm } : { arm, envelope: marchEnvelope },
         );
+        recordHeights(checks, body.task, `${label}: the ray march`, march, arm, {
+          envelopeShare: view.marchEnvelopeShare ?? "capped",
+        });
+        held.push({ sunElevationDeg: view.sunElevationDeg, arm, result: march });
       }
     }
-  });
+    return held;
+  };
+  return { marches: ordered.later(record) };
 }
 
 /**
@@ -3274,12 +3610,14 @@ function layerEdgeViews(): HeightsView[] {
       name: `${heightM} m, the sun 20°, a surface 60 km ahead`,
       camera: equatorCamera(heightM, FRAME_SIZE, SLAB_EARTH.figure),
       sun: sunAt(20),
+      sunElevationDeg: 20,
       surfaceM: 60_000,
     })),
     ...SLAB_EARTH.limbsM.map((distanceM) => ({
       name: `the limb from ${(distanceM - SLAB_EARTH.figure.equatorialRadiusM).toExponential(2)} m, the sun 20° at its tangent point`,
       camera: limbCamera(distanceM, SLAB_EARTH.figure),
       sun: limbSun(distanceM, SLAB_EARTH.figure, 20),
+      sunElevationDeg: 20,
       surfaceM: null,
     })),
   ];
@@ -3391,12 +3729,14 @@ function slicesSaturn(): HeightsBody {
         name: "the limb over the pole from above the air, the sun 20° at its tangent point",
         camera: polarLimbCamera(polarLimbM, figure),
         sun: polarLimbSun(20),
+        sunElevationDeg: 20,
         surfaceM: null,
       },
       {
         name: "2 km at 45°, the sun 20° up towards the north, a surface 60 km ahead",
         camera: latitudeCamera(figure, SATURN_MID_LATITUDE_RAD, 2_000),
         sun: northSunAt(SATURN_MID_LATITUDE_RAD, 20),
+        sunElevationDeg: 20,
         surfaceM: 60_000,
       },
     ],
@@ -3513,18 +3853,31 @@ const BAND_FRAME_BELOW_DIP_RAD = 0.5 * DEGREE_RAD;
 const BAND_FRAME_ABOVE_RAD = 3 * DEGREE_RAD;
 
 /**
- * A camera `heightM` above the equator at longitude 0 of `figure`, looking north along the
- * horizon, pitched so that its 64 × 32 frame spans from {@link BAND_FRAME_BELOW_DIP_RAD} below the
- * visible horizon's dip to {@link BAND_FRAME_ABOVE_RAD} above the horizontal: the ground's last
- * rows, the limb's rays, which pass below the camera and climb out, and the sky above. Nothing is
- * drawn in front of it, so the scene's own projection is not read.
+ * The dip below the horizontal of the datum's visible horizon in the meridian plane, rad, from a
+ * camera `heightM` above the equator of `figure`.
  */
-function bandCamera(heightM: number, figure: SpheroidFigure): AtmosphereCamera {
+function meridianDipRad(heightM: number, figure: SpheroidFigure): number {
   const a = figure.equatorialRadiusM;
-  // The datum's horizon in the meridian plane: the ellipse x²/a² + z²/c² = 1 touched by the line
-  // from the camera at (a + h, 0), whose dip below the horizontal has tan = √(h (2a + h)) ÷ c.
-  const dipRad = Math.atan(Math.sqrt(heightM * (2 * a + heightM)) / figure.polarRadiusM);
-  const bottomRad = -(dipRad + BAND_FRAME_BELOW_DIP_RAD);
+  // The ellipse x²/a² + z²/c² = 1 touched by the line from the camera at (a + h, 0), whose dip
+  // below the horizontal has tan = √(h (2a + h)) ÷ c.
+  return Math.atan(Math.sqrt(heightM * (2 * a + heightM)) / figure.polarRadiusM);
+}
+
+/**
+ * A camera `heightM` above the equator at longitude 0 of `figure`, looking north along the
+ * horizon, pitched so that its frame (64 × 32 unless `viewport` is given) spans from
+ * {@link BAND_FRAME_BELOW_DIP_RAD} below the visible horizon's dip ({@link meridianDipRad}) to
+ * {@link BAND_FRAME_ABOVE_RAD} above the horizontal: the ground's last rows, the limb's rays, which
+ * pass below the camera and climb out, and the sky above. Nothing is drawn in front of it, so the
+ * scene's own projection is not read.
+ */
+function bandCamera(
+  heightM: number,
+  figure: SpheroidFigure,
+  viewport: ViewSize = FRAME_SIZE,
+): AtmosphereCamera {
+  const a = figure.equatorialRadiusM;
+  const bottomRad = -(meridianDipRad(heightM, figure) + BAND_FRAME_BELOW_DIP_RAD);
   const pitchRad = (BAND_FRAME_ABOVE_RAD + bottomRad) / 2;
   const tanY = Math.tan((BAND_FRAME_ABOVE_RAD - bottomRad) / 2);
   // Body +x is up and +z north at the camera: forward and up pitched by `pitchRad`, east (+y) to
@@ -3532,7 +3885,7 @@ function bandCamera(heightM: number, figure: SpheroidFigure): AtmosphereCamera {
   const forward = { x: Math.sin(pitchRad), y: 0, z: Math.cos(pitchRad) };
   const up = { x: Math.cos(pitchRad), y: 0, z: -Math.sin(pitchRad) };
   const right = { x: 0, y: 1, z: 0 };
-  const aspect = FRAME_SIZE.widthPx / FRAME_SIZE.heightPx;
+  const aspect = viewport.widthPx / viewport.heightPx;
   return {
     positionM: { x: a + heightM, y: 0, z: 0 },
     orientation: quaternionFromRows([
@@ -3541,7 +3894,7 @@ function bandCamera(heightM: number, figure: SpheroidFigure): AtmosphereCamera {
       { x: right.z, y: up.z, z: -forward.z },
     ]),
     fovXRad: 2 * Math.atan(aspect * tanY),
-    viewport: FRAME_SIZE,
+    viewport,
   };
 }
 
@@ -3561,21 +3914,31 @@ function bandMiddle(setting: QualitySetting): BandPlace {
 }
 
 /**
- * One R08.T8.a view: a {@link bandCamera} on the equator at `place`'s h\*, the sun ahead at an
- * elevation above the horizontal, nothing drawn, so that every pixel is sky.
+ * s = g ÷ g_ref on `body`'s equator (Design note 17), where every {@link bandCamera} stands: a
+ * camera there at h\* stands h\* ÷ s above the datum.
  */
-function bandView(place: BandPlace, elevationDeg: number): HeightsView {
-  const { figure, gravity } = BAND_EARTH;
-  // s at the equator, where the camera stands at every height: its geodetic height is h* ÷ s.
-  const s = atmosphereInputs(
+function equatorGravityRatio(body: HeightsBody): number {
+  const { figure, gravity } = body;
+  return atmosphereInputs(
     { positionM: { x: figure.equatorialRadiusM, y: 0, z: 0 } },
     figure,
     gravity,
   ).gravityRatio;
+}
+
+/**
+ * One R08.T8.a view: a {@link bandCamera} on the equator at `place`'s h\*, the sun ahead at an
+ * elevation above the horizontal, nothing drawn, so that every pixel is sky.
+ */
+function bandView(place: BandPlace, elevationDeg: number): HeightsView {
+  const { figure } = BAND_EARTH;
+  // s at the equator, where the camera stands at every height: its geodetic height is h* ÷ s.
+  const s = equatorGravityRatio(BAND_EARTH);
   return {
     name: `h* ${(place.heightStarM / 1_000).toFixed(1)} km (${place.label}), the sun ${elevationDeg}°, the sky from inside`,
     camera: bandCamera(place.heightStarM / s, figure),
     sun: sunAt(elevationDeg),
+    sunElevationDeg: elevationDeg,
     surfaceM: null,
   };
 }
@@ -3839,6 +4202,821 @@ export async function checkMarchBand(
   });
 }
 
+// --- R08.T8.b: low's pick, the composite from above the top, and the far limb -------------------
+
+/**
+ * The factor the composite multiplies the march's rgb and each disc by (`composite.wgsl`'s
+ * `view.sky.w`): 1, since the per-view tables hold pre-exposed luminance (R08.T7;
+ * `HillaireAtmosphere.drawFrame` sets it so, and {@link frameViewOf} weights the twins' sources by
+ * the pre-exposure to match).
+ */
+const COMPOSITE_FACTOR = 1;
+
+/**
+ * Half an `rgba16float` step as a share of a normal value it rounds, 2⁻¹¹, and below 2⁻¹⁴ half
+ * the subnormals' spacing, 2⁻²⁵: the output's rounding to nearest.
+ */
+const HALF_ROUNDING = 2 ** -11;
+const HALF_SUBNORMAL_ROUNDING = HALF_SUBNORMAL_SPACING / 2;
+
+/** `f32`'s two roundings of colour × alpha + rgb, as a share of |colour × alpha| + |rgb|: 2⁻²³. */
+const F32_TWO_ROUNDINGS = 2 ** -23;
+
+/** Low's pick's camera, m above the equator: R08.T6.g's limb from 400 km. */
+const PICK_HEIGHT_M = 400_000;
+
+/** A surface over the lower right of a frame: the pixels from a column and a row on. */
+interface PickSurface {
+  /** The first column it covers, px: its left edge on the boundary before it. */
+  readonly fromXPx: number;
+  /** The first row it covers, px: its top edge on the boundary before it. */
+  readonly fromYPx: number;
+  /** How far ahead it stands, m, perpendicular to the view: one depth over all of it. */
+  readonly distanceM: number;
+}
+
+/**
+ * The depth edge's surface (R08.T8.b): from column 33 and row 17 of the 64 × 32 frame, its edges
+ * on odd boundaries, so that the pixel before each edge (column 32, row 16), whose nearest texel's
+ * source pixel (33, or 17) is covered, keeps an uncovered texel, the depth-nearest; 2,000 km ahead,
+ * past the limb rays' entry into the air, so that its texels carry light and an alpha under 1.
+ */
+const PICK_SURFACE: PickSurface = { fromXPx: 33, fromYPx: 17, distanceM: 2_000_000 };
+
+/** Whether a surface covers pixel (x, y) of a frame. */
+type Coverage = (xPx: number, yPx: number) => boolean;
+
+/** The coverage of a frame with nothing drawn. */
+function uncovered(): boolean {
+  return false;
+}
+
+/** A march texel's place, (x, y). */
+type TexelPlace = readonly [number, number];
+
+/**
+ * The view-space rectangle at `surface`'s distance whose left and top edges fall on the pixel
+ * boundaries before its first column and row under the harness's projection (`harness.ts`,
+ * tan(fov_y ÷ 2) = 1: x_ndc = x ÷ (aspect · d), y_ndc = y ÷ d), reaching past the frame's right
+ * and bottom: corners (lower left, upper right), m.
+ */
+function pickRectangle(
+  surface: PickSurface,
+  size: ViewSize,
+): readonly [number, number, number, number] {
+  const d = surface.distanceM;
+  const aspect = size.widthPx / size.heightPx;
+  const left = ((2 * surface.fromXPx) / size.widthPx - 1) * aspect * d;
+  const top = (1 - (2 * surface.fromYPx) / size.heightPx) * d;
+  return [left, -4 * d, 4 * aspect * d, top];
+}
+
+/** A frame of low's pick's checks, read back: the composite, the scene's colour and the march. */
+interface PickFrame {
+  readonly composite: Float32Array;
+  readonly scene: Float32Array;
+  readonly march: Float32Array;
+}
+
+/**
+ * Draws one composite frame for `suns` over a scene that is black at depth 0 but for `surface`,
+ * if any, drawn {@link SURFACE_GREY}, and reads back the output, the scene's colour and the march
+ * target.
+ */
+async function pickFrame(
+  engine: RenderEngine,
+  atmosphere: HillaireAtmosphere,
+  camera: AtmosphereCamera,
+  suns: ReadonlyArray<SunState>,
+  surface: PickSurface | null,
+): Promise<PickFrame> {
+  const drawn: SceneSurface | null =
+    surface === null
+      ? null
+      : (size) =>
+          drawOf(
+            rectangleMesh(
+              engine,
+              "atmosphere pick surface",
+              pickRectangle(surface, size),
+              -surface.distanceM,
+            ),
+            engine.createMaterial(flatSpec("atmosphere pick surface")),
+            [SURFACE_GREY, SURFACE_GREY, SURFACE_GREY, 1],
+          );
+  return drawComposite(
+    engine,
+    atmosphere,
+    camera,
+    suns,
+    { label: "atmosphere pick", surface: drawn, preExposure: SMOKE_EXPOSURE_SCALE },
+    async (output, scene) => {
+      const { rayMarch } = atmosphere.frameTables;
+      if (rayMarch === null) {
+        throw new Error("the ray march drew no target");
+      }
+      return {
+        composite: halfTexels(await engine.readTexture(output.colour)),
+        scene: halfTexels(await engine.readTexture(scene.colour)),
+        march: halfTexels(await engine.readTexture(rayMarch, 0, undefined, "tolerance")),
+      };
+    },
+  );
+}
+
+/**
+ * The march texel `composite.wgsl`'s `rayMarched` reads for pixel (x, y) at the scale `marchScale`
+ * under 1 (low's ½), emulated in `f64`, where it is exact: of the candidates base and base + 1 on
+ * each axis, base = trunc(p · scale − ½), each clamped to the target, the one whose source pixel
+ * min(⌊(t + ½) ÷ scale⌋, full − 1) has the depth nearest the pixel's, then of those that tie the
+ * one whose centre (t + ½) ÷ scale is nearest the pixel's centre p + ½, and of those the first in
+ * the shader's order (rows, then columns), its comparisons strict. A depth's error is 0 where the
+ * source pixel is covered as the pixel is and above 0 elsewhere, since every covered pixel holds
+ * the surface's one depth and every other 0.
+ */
+function pickedTexel(
+  xPx: number,
+  yPx: number,
+  viewport: ViewSize,
+  marchScale: number,
+  covered: Coverage,
+): TexelPlace {
+  const { widthPx: w, heightPx: h } = viewport;
+  const sizeX = Math.ceil(w * marchScale);
+  const sizeY = Math.ceil(h * marchScale);
+  const baseX = Math.trunc(xPx * marchScale - 0.5);
+  const baseY = Math.trunc(yPx * marchScale - 0.5);
+  const own = covered(xPx, yPx);
+  let best: TexelPlace = [0, 0];
+  let bestError = Number.POSITIVE_INFINITY;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let j = 0; j < 2; j += 1) {
+    for (let i = 0; i < 2; i += 1) {
+      const tx = Math.min(Math.max(baseX + i, 0), sizeX - 1);
+      const ty = Math.min(Math.max(baseY + j, 0), sizeY - 1);
+      const sourceX = Math.min(Math.floor((tx + 0.5) / marchScale), w - 1);
+      const sourceY = Math.min(Math.floor((ty + 0.5) / marchScale), h - 1);
+      const error = covered(sourceX, sourceY) === own ? 0 : 1;
+      const dx = (tx + 0.5) / marchScale - (xPx + 0.5);
+      const dy = (ty + 0.5) / marchScale - (yPx + 0.5);
+      const distance = dx * dx + dy * dy;
+      if (error < bestError || (error === bestError && distance < bestDistance)) {
+        best = [tx, ty];
+        bestError = error;
+        bestDistance = distance;
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * The texel R05.T12.c's pick took wherever the four depths tie, the first candidate: trunc(p ·
+ * scale − ½) on each axis, clamped (`decision-r08-t8-leans.md` §6.2).
+ */
+function firstCandidate(
+  xPx: number,
+  yPx: number,
+  viewport: ViewSize,
+  marchScale: number,
+): TexelPlace {
+  const clamped = (p: number, full: number): number =>
+    Math.min(Math.max(Math.trunc(p * marchScale - 0.5), 0), Math.ceil(full * marchScale) - 1);
+  return [clamped(xPx, viewport.widthPx), clamped(yPx, viewport.heightPx)];
+}
+
+/** The texel whose centre is nearest pixel (x, y)'s: ⌊p · scale⌋ on each axis. */
+function nearestTexel(xPx: number, yPx: number, marchScale: number): TexelPlace {
+  return [Math.floor(xPx * marchScale), Math.floor(yPx * marchScale)];
+}
+
+/** A frame's pixels against the march texels a pick names, each channel within its bound. */
+interface PickAgreement {
+  readonly pixels: number;
+  /** The pixels with a colour channel over its bound. */
+  readonly over: number;
+  /** The worst |output − expected| as a fraction of its bound. */
+  readonly worst: number;
+  readonly at: string;
+}
+
+/** One pixel against its march texel ({@link pickedPixel}). */
+interface PickedPixel {
+  /** The worst channel's |output − expected| as a fraction of its bound. */
+  readonly ratio: number;
+  /** That channel, its output and what the texel draws. */
+  readonly text: string;
+}
+
+/**
+ * Whether pixel `k`'s colour channels agree with what the composite draws from above the top
+ * from march texel `t` (`composite.wgsl`'s fragment): over the sky, depth 0, the scene's colour
+ * (black) times the transmittance plus rgb × the factor; over a surface, its colour × alpha +
+ * rgb × the factor. Each channel is held to half an `rgba16float` step of its value
+ * ({@link HALF_ROUNDING}, 2⁻²⁵ among the subnormals), plus `f32`'s two roundings of a surface's
+ * terms.
+ */
+function pickedPixel(
+  frame: PickFrame,
+  marchWidth: number,
+  k: number,
+  t: TexelPlace,
+  surface: boolean,
+): PickedPixel {
+  const m = (t[1] * marchWidth + t[0]) * 4;
+  const alpha = frame.march[m + 3] ?? Number.NaN;
+  let ratio = 0;
+  let text = "";
+  for (let c = 0; c < 3; c += 1) {
+    const rgb = (frame.march[m + c] ?? Number.NaN) * COMPOSITE_FACTOR;
+    const colour = surface ? (frame.scene[k * 4 + c] ?? Number.NaN) * alpha : 0;
+    const expected = colour + rgb;
+    const terms = surface ? F32_TWO_ROUNDINGS * (Math.abs(colour) + Math.abs(rgb)) : 0;
+    const bound = HALF_ROUNDING * Math.abs(expected) + HALF_SUBNORMAL_ROUNDING + terms;
+    const actual = frame.composite[k * 4 + c] ?? Number.NaN;
+    const off = Math.abs(actual - expected) / bound;
+    const channelRatio = Number.isNaN(off) ? Number.POSITIVE_INFINITY : off;
+    if (channelRatio >= ratio) {
+      ratio = channelRatio;
+      const drawn = `texel (${t[0]}, ${t[1]})'s ${precise(expected)}`;
+      text = `channel ${c}: output ${precise(actual)}, ${drawn}`;
+    }
+  }
+  return { ratio, text };
+}
+
+/**
+ * A frame's pixels against the march texel `pick` names for each, from above the top, over the
+ * pixels `within` keeps ({@link pickedPixel}).
+ */
+function pickAgreement(
+  frame: PickFrame,
+  viewport: ViewSize,
+  marchScale: number,
+  covered: Coverage,
+  pick: (xPx: number, yPx: number) => TexelPlace,
+  within: (xPx: number, yPx: number) => boolean = () => true,
+): PickAgreement {
+  const marchWidth = Math.ceil(viewport.widthPx * marchScale);
+  let pixels = 0;
+  let over = 0;
+  let worst = 0;
+  let at = "none";
+  for (let y = 0; y < viewport.heightPx; y += 1) {
+    for (let x = 0; x < viewport.widthPx; x += 1) {
+      if (within(x, y)) {
+        const k = y * viewport.widthPx + x;
+        const { ratio, text } = pickedPixel(frame, marchWidth, k, pick(x, y), covered(x, y));
+        pixels += 1;
+        over += ratio > 1 ? 1 : 0;
+        if (ratio > worst) {
+          worst = ratio;
+          at = `pixel (${x}, ${y}) ${text}`;
+        }
+      }
+    }
+  }
+  return { pixels, over, worst, at };
+}
+
+/** Whether a pixel stands within two rows or columns of a surface's edge: both sides in reach. */
+function nearEdge(covered: Coverage, viewport: ViewSize): (xPx: number, yPx: number) => boolean {
+  return (xPx, yPx) => {
+    let some = false;
+    let none = false;
+    for (let y = Math.max(yPx - 2, 0); y <= Math.min(yPx + 2, viewport.heightPx - 1); y += 1) {
+      for (let x = Math.max(xPx - 2, 0); x <= Math.min(xPx + 2, viewport.widthPx - 1); x += 1) {
+        if (covered(x, y)) {
+          some = true;
+        } else {
+          none = true;
+        }
+      }
+    }
+    return some && none;
+  };
+}
+
+/** The pixels whose scene colour shows their coverage: grey where covered, black elsewhere. */
+function coverageShown(scene: Float32Array, viewport: ViewSize, covered: Coverage): number {
+  let shown = 0;
+  for (let y = 0; y < viewport.heightPx; y += 1) {
+    for (let x = 0; x < viewport.widthPx; x += 1) {
+      const red = scene[(y * viewport.widthPx + x) * 4] ?? Number.NaN;
+      shown += (covered(x, y) ? red > 0 : red === 0) ? 1 : 0;
+    }
+  }
+  return shown;
+}
+
+/** The march texels with a lit colour channel. */
+function litTexels(march: Float32Array): number {
+  let lit = 0;
+  for (let i = 0; i < march.length; i += 4) {
+    lit += (march[i] ?? 0) > 0 || (march[i + 1] ?? 0) > 0 || (march[i + 2] ?? 0) > 0 ? 1 : 0;
+  }
+  return lit;
+}
+
+/**
+ * R08.T8.b: low's half-resolution march as the composite reads it (`composite.wgsl`'s
+ * `rayMarched`; `decision-r08-t8-leans.md` §6.2), a regression check of its tie-break.
+ *
+ * @remarks
+ * On low ({@link TABLE_SIZES}, the march at ½), R08.T6.f's Earth (WGS 84 with its normal gravity,
+ * R05's Earth medium), from 400 km looking along the limb ({@link limbCamera}'s frame, the march's
+ * texels changing down it), the sun 20° above the tangent point's horizon and out of the frame.
+ * Over a black scene at depth 0 every output pixel (x, y) must be the march target's texel
+ * (⌊x ÷ 2⌋, ⌊y ÷ 2⌋), read back, times the composite's factor, to half an `rgba16float` step: from
+ * above the top a sky pixel is the march's rgb alone. The pick of before, the first candidate
+ * (trunc(x ÷ 2 − ½) on each axis), is counted against the same bound and must fail somewhere, so
+ * that the check fails before the fix. Then a surface over the lower right ({@link PICK_SURFACE}),
+ * its edges on pixel boundaries: every pixel must be the texel the shader's pick takes by its
+ * depths and then its distance ({@link pickedTexel}), the surface's colour × alpha + rgb where
+ * covered; the pixels within two rows or columns of its edge whose depth-nearest texel is not the
+ * nearest are counted, and must include some that the nearest would draw wrong.
+ */
+export async function checkLowPick(engine: RenderEngine, checks: Checks): Promise<void> {
+  const body = SLICES_EARTH;
+  const sizes = TABLE_SIZES.low;
+  const marchScale = sizes.rayMarchScale;
+  const atmosphere = new HillaireAtmosphere(
+    engine,
+    body.medium,
+    sizes,
+    body.figure,
+    body.curves,
+    body.gravity,
+  );
+  try {
+    const distanceM = body.figure.equatorialRadiusM + PICK_HEIGHT_M;
+    const camera = limbCamera(distanceM, body.figure);
+    const suns = [limbSun(distanceM, body.figure, 20)];
+    const viewport = camera.viewport;
+    const texels =
+      Math.ceil(viewport.widthPx * marchScale) * Math.ceil(viewport.heightPx * marchScale);
+    const name = "R08.T8.b low's half-resolution pick";
+    const bound = "half an rgba16float step, 2⁻¹¹ of the value (2⁻²⁵ among the subnormals)";
+
+    const sky = await pickFrame(engine, atmosphere, camera, suns, null);
+    const nearest = pickAgreement(sky, viewport, marchScale, uncovered, (x, y) =>
+      nearestTexel(x, y, marchScale),
+    );
+    const first = pickAgreement(sky, viewport, marchScale, uncovered, (x, y) =>
+      firstCandidate(x, y, viewport, marchScale),
+    );
+    const black = coverageShown(sky.scene, viewport, uncovered);
+    checks.check(
+      `${name}: each sky pixel reads its nearest texel`,
+      sky.march.length === texels * 4 &&
+        black === nearest.pixels &&
+        nearest.worst <= 1 &&
+        first.over > 0,
+      [
+        `${nearest.pixels} pixels against texel (⌊x ÷ 2⌋, ⌊y ÷ 2⌋) × ${COMPOSITE_FACTOR}`,
+        `${nearest.over} over ${bound}`,
+        `worst ${nearest.worst.toFixed(3)} of it at ${nearest.at}`,
+        `the first candidate, trunc(x ÷ 2 − ½): ${first.over} pixels over the same bound`,
+        `worst ${first.worst.toExponential(2)} of it at ${first.at}`,
+        `${sky.march.length / 4} texels read back of ${texels}, ${litTexels(sky.march)} lit`,
+        `${black} pixels of the scene black`,
+      ].join("; "),
+    );
+
+    const edge = await pickFrame(engine, atmosphere, camera, suns, PICK_SURFACE);
+    const { fromXPx, fromYPx } = PICK_SURFACE;
+    const surfaceKm = PICK_SURFACE.distanceM / 1_000;
+    const covered: Coverage = (x, y) => x >= fromXPx && y >= fromYPx;
+    const picked = (x: number, y: number): TexelPlace =>
+      pickedTexel(x, y, viewport, marchScale, covered);
+    const near = nearEdge(covered, viewport);
+    const moved = (x: number, y: number): boolean => {
+      const [px, py] = picked(x, y);
+      const [nx, ny] = nearestTexel(x, y, marchScale);
+      return near(x, y) && (px !== nx || py !== ny);
+    };
+    const whole = pickAgreement(edge, viewport, marchScale, covered, picked);
+    const atEdge = pickAgreement(edge, viewport, marchScale, covered, picked, near);
+    const kept = pickAgreement(edge, viewport, marchScale, covered, picked, moved);
+    const nearestThere = pickAgreement(
+      edge,
+      viewport,
+      marchScale,
+      covered,
+      (x, y) => nearestTexel(x, y, marchScale),
+      moved,
+    );
+    const shown = coverageShown(edge.scene, viewport, covered);
+    checks.check(
+      `${name}: a surface's edge keeps the depth-nearest texel`,
+      edge.march.length === texels * 4 &&
+        shown === whole.pixels &&
+        whole.worst <= 1 &&
+        kept.pixels > 0 &&
+        nearestThere.over > 0,
+      [
+        `a surface ${surfaceKm} km ahead from column ${fromXPx} and row ${fromYPx}`,
+        `${shown} of ${whole.pixels} pixels covered as drawn`,
+        `${whole.pixels} pixels against the shader's pick by depth, then distance, emulated`,
+        `${whole.over} over ${bound}, plus f32's 2⁻²³ of a surface's terms`,
+        `worst ${whole.worst.toFixed(3)} of it at ${whole.at}`,
+        `${atEdge.pixels} within two rows or columns of the edge, ${atEdge.over} over`,
+        `${kept.pixels} of them keep a depth-nearest texel not the nearest, ${kept.over} over`,
+        `the nearest would put ${nearestThere.over} of those over`,
+        `worst ${nearestThere.worst.toExponential(2)} of the bound at ${nearestThere.at}`,
+        `${litTexels(edge.march)} of ${edge.march.length / 4} texels lit`,
+      ].join("; "),
+    );
+  } finally {
+    atmosphere.dispose();
+  }
+}
+
+/**
+ * The composite-from-above check's frame (R08.T8.b), at longitude 1 rad ({@link
+ * FAR_LIMB_LONGITUDE_RAD}): from {@link ORBITAL_SUNSET_HEIGHT_M}, centred on the ray whose tangent
+ * point stands {@link ORBITAL_SUNSET_TANGENT_M} up, ±4 km of tangent height about it (0.20° high,
+ * 0.41° across), so that the 64 × 32 frame's farthest pixel centre lies at 0.84 of the Sun's
+ * angular radius from its centre and every pixel is inside the disc.
+ */
+function discFrame(): LimbFrame {
+  return {
+    centreM: ORBITAL_SUNSET_TANGENT_M,
+    halfSpanM: 4_000,
+    longitudeRad: FAR_LIMB_LONGITUDE_RAD,
+  };
+}
+
+/**
+ * The share of the twin's transmittance a disc's is held to, 1%, of it or of
+ * {@link DISC_TRANSMITTANCE_FLOOR} where it is below that.
+ */
+const DISC_TRANSMITTANCE_SHARE = 0.01;
+const DISC_TRANSMITTANCE_FLOOR = 1e-3;
+
+/** The unit ray through pixel (x, y)'s centre of a view, as `view.wgsl`'s `rayThrough` forms it. */
+function pixelRay(view: TwinView, xPx: number, yPx: number): Vec3 {
+  const nx = ((xPx + 0.5) / view.viewport.widthPx) * 2 - 1;
+  const ny = 1 - ((yPx + 0.5) / view.viewport.heightPx) * 2;
+  return normalise(add(view.forward, add(scale(view.right, nx), scale(view.upRay, ny))));
+}
+
+/** Each colour channel's least and greatest of some values. */
+interface ChannelRange {
+  readonly low: [number, number, number];
+  readonly high: [number, number, number];
+}
+
+/** A range that holds nothing yet. */
+function emptyRange(): ChannelRange {
+  const inf = Number.POSITIVE_INFINITY;
+  return { low: [inf, inf, inf], high: [-inf, -inf, -inf] };
+}
+
+/** `range` widened to hold `value` in channel `c`. */
+function widen(range: ChannelRange, c: 0 | 1 | 2, value: number): void {
+  range.low[c] = Math.min(range.low[c], value);
+  range.high[c] = Math.max(range.high[c], value);
+}
+
+/** A range as its check records it, channel by channel. */
+function describeRange(range: ChannelRange): string {
+  return (["red", "green", "blue"] as const)
+    .map((name, c) => `${name} ${show([range.low[c] ?? Number.NaN, range.high[c] ?? Number.NaN])}`)
+    .join(", ");
+}
+
+/**
+ * R08.T8.b's composite from above the top, per channel (`composite.wgsl`'s
+ * `transmittanceFromAbove`): one frame through the limb at the Sun's disc ({@link discFrame}),
+ * nothing drawn, each pixel's (composite − the stored march's rgb × the factor) ÷ (the disc × the
+ * factor) against its twin, `oblateCompositeTransmittanceTwin` over the GPU's tables along the
+ * pixel's ray.
+ *
+ * @remarks
+ * The scene is black, so the composite is the march's rgb plus the disc through its transmittance
+ * per channel, each term clamped at `rgba16float`'s largest after the factor; no channel may reach
+ * it. Each channel is held to 1% of the twin's T (of 10⁻³ where T is below it) plus the output's
+ * rounding, half an `rgba16float` step of it, over the disc. The disc is `frameSourcesOf`'s at
+ * {@link SMOKE_EXPOSURE_SCALE}, narrowed to `f32` as the uniform holds it.
+ */
+async function checkDiscFromAbove(
+  engine: RenderEngine,
+  ordered: OrderedChecks,
+  atmosphere: HillaireAtmosphere,
+  planet: SmokePlanet,
+  body: HeightsBody,
+): Promise<void> {
+  if (planet.kind !== "oblate") {
+    throw new Error(`R08.T8.b's ${body.name} stands on the oblate twins`);
+  }
+  const figure = body.figure;
+  const frame = discFrame();
+  const distanceM = figure.equatorialRadiusM + ORBITAL_SUNSET_HEIGHT_M;
+  const camera = limbCamera(distanceM, figure, frame);
+  const sun = limbSun(distanceM, figure, 0, frame);
+  const composite = await compositeFrame(engine, atmosphere, camera, [sun], null);
+  const { rayMarch } = atmosphere.frameTables;
+  if (rayMarch === null) {
+    throw new Error("the ray march drew no target");
+  }
+  const march = halfTexels(await engine.readTexture(rayMarch, 0, undefined, "tolerance"));
+  const tables = atmosphere.tables;
+  const [source] = frameSourcesOf(
+    [sun],
+    SMOKE_EXPOSURE_SCALE,
+    absorberCount(tables.medium) > 0,
+    tables.curves.length,
+  );
+  if (source === undefined) {
+    throw new Error("the frame has its sun");
+  }
+  const disc = [0, 1, 2].map((c) => Math.fround(source.disc[c] ?? Number.NaN) * COMPOSITE_FACTOR);
+  const view = frameViewOf(atmosphere, camera, [sun], figure);
+  ordered.now((checks) => {
+    const { widthPx: w, heightPx: h } = camera.viewport;
+    const s = sun.directionBodyFixed;
+    const sinRadius = Math.sin(sun.angularRadiusRad);
+    const twinRange = emptyRange();
+    const gpuRange = emptyRange();
+    let worst = 0;
+    let at = "none";
+    let outside = 0;
+    let farthest = 0;
+    let brightest = 0;
+    let saturated = 0;
+    const ratios: number[][] = Array.from({ length: h }, () => []);
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        const k = y * w + x;
+        const d = pixelRay(view, x, y);
+        const share = norm(crossProduct(d, s)) / sinRadius;
+        farthest = Math.max(farthest, share);
+        outside += share <= 1 && dot(d, s) > 0 ? 0 : 1;
+        const t = oblateCompositeTransmittanceTwin(planet.twin, view, d, curveSlotOf(sun));
+        ratios[y]?.push(t[0] / t[2]);
+        for (const c of [0, 1, 2] as const) {
+          const out = composite[k * 4 + c] ?? Number.NaN;
+          const dc = disc[c] ?? Number.NaN;
+          const gpu = (out - (march[k * 4 + c] ?? Number.NaN) * COMPOSITE_FACTOR) / dc;
+          const rounding = (HALF_ROUNDING * Math.abs(out) + HALF_SUBNORMAL_ROUNDING) / dc;
+          const bound =
+            DISC_TRANSMITTANCE_SHARE * Math.max(t[c], DISC_TRANSMITTANCE_FLOOR) + rounding;
+          const off = Math.abs(gpu - t[c]) / bound;
+          const ratio = Number.isNaN(off) ? Number.POSITIVE_INFINITY : off;
+          widen(twinRange, c, t[c]);
+          widen(gpuRange, c, gpu);
+          brightest = Math.max(brightest, out);
+          saturated += out >= HALF_FLOAT_MAX || dc * t[c] >= HALF_FLOAT_MAX ? 1 : 0;
+          if (ratio > worst) {
+            worst = ratio;
+            const apart = percentOf((gpu - t[c]) / t[c], { kind: "places", digits: 3 });
+            const values = `GPU ${precise(gpu)}, twin ${precise(t[c])}, ${apart}`;
+            at = `pixel (${x}, ${y}) channel ${c}: ${values}`;
+          }
+        }
+      }
+    }
+    const rowMedian = (y: number): string => show([medianOf(ratios[y] ?? [])]);
+    checks.check(
+      "R08.T8.b the composite from above the top: each disc through the limb, per channel",
+      worst <= 1 && outside === 0 && saturated === 0 && march.length === w * h * 4,
+      [
+        `worst ${worst.toFixed(3)} of the bound at ${at}`,
+        `the bound ${percentOf(DISC_TRANSMITTANCE_SHARE, ROUND_PERCENT)} of max(T, 10⁻³), plus` +
+          " the output's rounding, 2⁻¹¹ of it, over the disc",
+        `T, the twin's: ${describeRange(twinRange)}; the GPU's: ${describeRange(gpuRange)}`,
+        `red ÷ blue, a row's median: ${rowMedian(0)} on the top, ${rowMedian(h - 1)} the lowest`,
+        `${w * h - outside} of ${w * h} pixels inside the disc`,
+        `the farthest at ${farthest.toFixed(3)} of sin ρ`,
+        `the disc ${show(disc)}, pre-exposed at EV100 ${SMOKE_EV100}` +
+          `, the factor ${COMPOSITE_FACTOR}`,
+        `the brightest output ${show([brightest])}, ${saturated} channels at rgba16float's largest`,
+      ].join("; "),
+    );
+  });
+}
+
+/**
+ * R08.T8.b's far limb's Earth: R08.T6.f's ({@link SLICES_EARTH}), WGS 84 with its normal gravity
+ * on the oblate twins and R05's Earth medium, its views the far limb's ({@link farLimbViews}).
+ */
+const FAR_LIMB_EARTH: HeightsBody = {
+  ...SLICES_EARTH,
+  task: "R08.T8.b",
+  heightsM: [],
+  limbsM: [],
+  moreViews: [],
+};
+
+/** The far limb's cameras' distances from the centre, m: all beyond a ÷ 2. */
+const FAR_LIMB_DISTANCES_M = [1e7, 1e8, 1e9] as const;
+
+/**
+ * The distance from which the far limb's ray-march envelope share is recorded rather than capped,
+ * m (`decision-r08-f32.md` §10.4): there 2ε|P|, 12 to 120 m, is a sizeable share of the aerosol's
+ * 1.2 km.
+ */
+const FAR_LIMB_RECORDED_FROM_M = 1e8;
+
+/**
+ * The far limb's ray-march envelope share from 10⁷ m, at most: 7%, the plan's 1% cap at 10⁷ m
+ * missed (measured 2026-10-22, by view and arm 3.59%, 5.88%, 4.52% and 6.54% on both variants,
+ * the worst rounded up to the next point); the narrowed frame puts its rows on the limb's lowest
+ * 3 km, where the texels need the envelope (half-widths 1.9 to 16 × 10⁻³); reported to "main".
+ */
+const FAR_LIMB_NEAR_SHARE_MISS = 0.07;
+
+/** The far limb's suns, deg above the horizon of the frame's centre's tangent point. */
+const FAR_LIMB_SUNS_DEG = [20, -2] as const;
+
+/**
+ * The far limb's cameras' longitude, rad: off every axis, so that the camera's position in `f32`
+ * carries the 2ε|P| rounding the envelope stands for; R08.T6.g's and R08.T6.f's limbs stand at 0.
+ */
+const FAR_LIMB_LONGITUDE_RAD = 1;
+
+/** Texels a row of the far limb's frames gives the medium's lowest scale height: 5, at least 4. */
+const FAR_LIMB_ROWS_PER_SCALE_HEIGHT = 5;
+
+/** The far limb's frames' centre, in the medium's lowest scale heights above the datum. */
+const FAR_LIMB_CENTRE_SCALE_HEIGHTS = 3;
+
+/**
+ * The least scale height of a medium's exponential terms, m: R05's Earth's aerosol's, 1,200 m.
+ *
+ * @throws Error for a medium with no exponential term.
+ */
+function lowestScaleHeightM(medium: AtmosphereMedium): number {
+  let lowest = Number.POSITIVE_INFINITY;
+  for (const term of medium.terms) {
+    const density = term.density;
+    switch (density.kind) {
+      case "exponential":
+        lowest = Math.min(lowest, density.scaleHeightM);
+        break;
+      case "tent":
+      case "tabulated":
+        break;
+    }
+  }
+  if (!Number.isFinite(lowest)) {
+    throw new Error(`${medium.name} has no exponential term to narrow the far limb by`);
+  }
+  return lowest;
+}
+
+/**
+ * The far limb's frame (`decision-r08-f32.md` §10.4, views narrowed so that the limb's lowest
+ * scale height spans at least four texels): {@link limbCamera}'s rows each span its half-span ÷ 16
+ * of tangent height, so {@link FAR_LIMB_ROWS_PER_SCALE_HEIGHT} rows a scale height, 240 m on R05's
+ * Earth (half-span 3,840 m), about {@link FAR_LIMB_CENTRE_SCALE_HEIGHTS} scale heights (3.6 km), at
+ * longitude {@link FAR_LIMB_LONGITUDE_RAD}.
+ */
+function farLimbFrame(medium: AtmosphereMedium): LimbFrame {
+  const scaleHeightM = lowestScaleHeightM(medium);
+  const rowM = scaleHeightM / FAR_LIMB_ROWS_PER_SCALE_HEIGHT;
+  return {
+    centreM: FAR_LIMB_CENTRE_SCALE_HEIGHTS * scaleHeightM,
+    halfSpanM: (rowM * FRAME_SIZE.heightPx) / 2,
+    longitudeRad: FAR_LIMB_LONGITUDE_RAD,
+  };
+}
+
+/**
+ * The far limb's views from `distanceM` from the centre on high: {@link farLimbFrame}'s, the sun
+ * at each of {@link FAR_LIMB_SUNS_DEG}, nothing drawn; the ray march's envelope share recorded,
+ * not capped, from {@link FAR_LIMB_RECORDED_FROM_M}, and under it held to the named miss
+ * {@link FAR_LIMB_NEAR_SHARE_MISS}.
+ */
+function farLimbViews(distanceM: number): HeightsView[] {
+  const { figure, medium } = FAR_LIMB_EARTH;
+  const frame = farLimbFrame(medium);
+  const rowM = (frame.halfSpanM ?? Number.NaN) / (FRAME_SIZE.heightPx / 2);
+  const share: EnvelopeShare = distanceM >= FAR_LIMB_RECORDED_FROM_M ? "recorded" : "missed";
+  const centreKm = ((frame.centreM ?? Number.NaN) / 1_000).toFixed(1);
+  const place = `rows of ${rowM} m about ${centreKm} km, longitude ${FAR_LIMB_LONGITUDE_RAD} rad`;
+  const from = `the far limb from ${distanceM.toExponential(0)} m (${place})`;
+  return FAR_LIMB_SUNS_DEG.map((elevationDeg) => ({
+    name: `${from}, the sun ${elevationDeg}° at its tangent point`,
+    camera: limbCamera(distanceM, figure, frame),
+    sun: limbSun(distanceM, figure, elevationDeg, frame),
+    sunElevationDeg: elevationDeg,
+    surfaceM: null,
+    marchEnvelopeShare: share,
+  }));
+}
+
+/**
+ * Records the far limb's ray march from one distance over its views and both arms
+ * (`decision-r08-f32.md` §10.4: "the median and largest envelope half-widths are recorded per
+ * distance"): each check's own verdict, as {@link recordHeights} gave it ({@link heightsHeld}), and
+ * their envelope channels together, their share, the median and largest half-width and the worst
+ * place within an envelope.
+ */
+function recordFarLimbDistance(
+  checks: Checks,
+  distanceM: number,
+  share: EnvelopeShare,
+  marches: readonly MarchArm[],
+): void {
+  const channels = marches.reduce((sum, { result }) => sum + result.channels, 0);
+  const envelope = marches.flatMap(({ result }) => result.envelope);
+  const widths = envelope.map((entry) => entry.halfWidth);
+  const held = marches.every(({ result }) => heightsHeld(result, share));
+  const each = marches.map(({ sunElevationDeg, arm, result }) => {
+    const own = result.envelope.map((entry) => entry.halfWidth);
+    const sun = `the sun ${sunElevationDeg}° at its tangent point`;
+    const ownShare = percentOf(own.length / Math.max(result.channels, 1));
+    const byEnvelope = `${ownShare} by the envelope, ${spreadOf(own)}`;
+    return `${sun}, the ${arm} arm: worst ${result.worst.toFixed(3)}, ${byEnvelope}`;
+  });
+  const worstInEnvelope = Math.max(0, ...marches.map(({ result }) => result.worstInEnvelope));
+  const counted = describeEnvelopeShare(share);
+  const from = `R08.T8.b the far limb from ${distanceM.toExponential(0)} m`;
+  checks.check(
+    `${from}: the ray march over its suns and arms, its envelope ${counted}`,
+    held && marches.length > 0,
+    [
+      `${marches.length} checks, ${channels} channels`,
+      `${envelope.length} by the envelope (${percentOf(envelope.length / Math.max(channels, 1))})`,
+      spreadOf(widths),
+      `the worst at ${worstInEnvelope.toFixed(2)} of its half-width`,
+      ...each,
+    ].join("; "),
+  );
+}
+
+/**
+ * R08.T8.b's far limb (plan R08, R08.T8; `decision-r08-f32.md` §10.4): the per-frame kernels
+ * against their twins from 10⁷, 10⁸ and 10⁹ m, and the composite from above the top per channel
+ * ({@link checkDiscFromAbove}).
+ *
+ * @remarks
+ * On {@link FAR_LIMB_EARTH}, on high, in R08.T6.g's two arms ({@link checkViewArms}), from each
+ * distance with the sun 20° up and 2° below the horizon of the frame's centre's tangent point
+ * ({@link farLimbViews}), each frame narrowed to five rows a scale height of the medium's lowest
+ * ({@link farLimbFrame}) at longitude 1 rad: every limb view before them stands at longitude 0, on
+ * an axis, where the camera's 2ε|P| rounding goes untested. The sky view's envelope is capped at
+ * 1% in every view (its texels' resolution does not depend on |P|), the aerial perspective held
+ * outright (the kernel arm on `f32`'s floor, {@link F32_SUBNORMAL_SPACING}), and the ray march's
+ * envelope share from 10⁷ m held to {@link FAR_LIMB_NEAR_SHARE_MISS}, a named miss of the plan's 1%
+ * cap there, and recorded, not capped, from 10⁸ and 10⁹ m, where every texel stays within 10⁻³ or
+ * within its envelope; each distance's envelope half-widths are recorded together
+ * ({@link recordFarLimbDistance}). The twins run on the page's twin workers beside the GPU's work,
+ * the checks recorded in the order they were in sequence (`ordered.ts`).
+ */
+export async function checkFarLimb(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  const body = FAR_LIMB_EARTH;
+  const read = kernelMedium(body.medium);
+  const sizes = twinSizes(TABLE_SIZES.high);
+  await inOrder(checks, async (ordered) => {
+    const atmosphere = new HillaireAtmosphere(
+      engine,
+      body.medium,
+      sizes,
+      body.figure,
+      body.curves,
+      body.gravity,
+    );
+    try {
+      const planet = await planetOf(engine, atmosphere, read, body.figure);
+      for (const distanceM of FAR_LIMB_DISTANCES_M) {
+        const views = farLimbViews(distanceM);
+        const marches: Array<Promise<readonly MarchArm[]>> = [];
+        for (const view of views) {
+          // The harness's GPU work runs in order: each frame is read back before the next draws.
+          // oxlint-disable-next-line no-await-in-loop
+          const arms = await checkViewArms(
+            engine,
+            ordered,
+            atmosphere,
+            planet,
+            body,
+            sizes,
+            "high",
+            view,
+            twins,
+          );
+          marches.push(arms.marches);
+        }
+        const share = views[0]?.marchEnvelopeShare ?? "capped";
+        void ordered.later(async (slot) => {
+          recordFarLimbDistance(slot, distanceM, share, (await Promise.all(marches)).flat());
+        });
+      }
+      // Its twin runs on the page, while the far limb's run on the workers.
+      await checkDiscFromAbove(engine, ordered, atmosphere, planet, body);
+    } finally {
+      atmosphere.dispose();
+    }
+  });
+}
+
 // --- R08.T9.b: surface lighting ------------------------------------------------------------------
 
 /** One body of R08.T9.b's smoke: its figure and gravity, its medium and curves, its lit heights. */
@@ -4065,7 +5243,7 @@ async function checkSurfaceLighting(
       // The lookups through the probe, with the body's stored tables bound.
       const cases = surfaceLightingCases(surface.heightsM);
       const lookups = await probeSurfaceLighting(engine, cases, surfaceLightingTablesOf(tables));
-      ordered.later(async (later) => {
+      void ordered.later(async (later) => {
         for (const [index, pending] of twinsOverGpu.entries()) {
           // The layers' twins are awaited in order, each after the one before it.
           // oxlint-disable-next-line no-await-in-loop
@@ -4078,7 +5256,7 @@ async function checkSurfaceLighting(
             name,
             twinAgreement(layerOf(irradiance, layers, index), twin, false, { arm: "kernel" }),
             "kernel",
-            "stored in rgba32float, the kernel's own output",
+            { label: "stored in rgba32float, the kernel's own output" },
           );
         }
         const planet = oblatePlanetOf(gpu, tables, read, surface.body);
@@ -4151,17 +5329,29 @@ export function srgb8(linear: number): number {
 }
 
 /**
- * A frame as 8-bit sRGB: exposed so that its mean luminance sits at AgX's middle grey, 0.18, then
- * R02's tone curve.
+ * The exposure a capture is encoded at ({@link toRgba8}): the factor that sets the frame's mean
+ * luminance (Rec. 709's weights) at AgX's middle grey, 0.18, or 1 for a black frame.
  */
-function toRgba8(texels: Float32Array): Uint8Array {
+function exposureOf(texels: Float32Array): number {
   let luminance = 0;
   for (let i = 0; i < texels.length; i += 4) {
     luminance +=
       0.2126 * (texels[i] ?? 0) + 0.7152 * (texels[i + 1] ?? 0) + 0.0722 * (texels[i + 2] ?? 0);
   }
   const mean = luminance / (texels.length / 4);
-  const k = mean > 0 ? 0.18 / mean : 1;
+  return mean > 0 ? 0.18 / mean : 1;
+}
+
+/**
+ * A frame as 8-bit sRGB: exposed so that its mean luminance sits at AgX's middle grey, 0.18
+ * ({@link exposureOf}), then R02's tone curve.
+ */
+function toRgba8(texels: Float32Array): Uint8Array {
+  return rgba8At(texels, exposureOf(texels));
+}
+
+/** A frame as 8-bit sRGB at the exposure `k`, through R02's tone curve, as {@link toRgba8}. */
+function rgba8At(texels: Float32Array, k: number): Uint8Array {
   const out = new Uint8Array(texels.length);
   for (let i = 0; i < texels.length; i += 4) {
     const [r, g, b] = toneCurve([
@@ -4258,6 +5448,7 @@ export async function captureAtmosphere(engine: RenderEngine): Promise<CapturedI
   return [
     ...images,
     ...(await captureSunsets(engine)),
+    ...(await captureOrbitalSunsets(engine)),
     ...(await captureBinarySky(engine)),
     ...(await captureSaturnLimbs(engine)),
   ];
@@ -4538,4 +5729,603 @@ async function captureSunsets(engine: RenderEngine): Promise<CapturedImage[]> {
     }
   }
   return images;
+}
+
+/** The orbital sunset captures' camera, m above the equator. */
+const ORBITAL_SUNSET_HEIGHT_M = 400_000;
+
+/** The tangent height of the ray to the sun's centre in the orbital sunset captures, m. */
+const ORBITAL_SUNSET_TANGENT_M = 12_000;
+
+/**
+ * The orbital sunset captures' fields, rad: 2° high, so that the sun's 0.53° disc spans 48 rows and
+ * sets the frame's exposure, and 20°, the limb about it.
+ */
+const ORBITAL_SUNSET_SHOTS = [
+  { name: "r08-orbital-sunset-earth-400km-disc", fovYRad: 2 * DEGREE_RAD },
+  { name: "r08-orbital-sunset-earth-400km", fovYRad: 20 * DEGREE_RAD },
+] as const;
+
+/**
+ * R08.T8.b's by-hand captures: an orbital sunset, Earth's medium on WGS 84 with Earth's gravity,
+ * from 400 km over the equator, the view centred on the sun's disc seen through the limb, the ray
+ * to its centre 12 km above the datum at its tangent point (the disc spanning about 2 to 22 km),
+ * for a person to see the disc redden towards its lower limb.
+ *
+ * @remarks
+ * Until R08.T8.b the composite dimmed what lies behind the sky from above the top, and each disc,
+ * by the march's mean transmittance over the channels, which drew the disc grey there and stepped
+ * its colour at the top; since, by the transmittance per channel from the ray's entry into the air
+ * (`composite.wgsl`'s `transmittanceFromAbove`).
+ */
+async function captureOrbitalSunsets(engine: RenderEngine): Promise<CapturedImage[]> {
+  const figure = WGS84;
+  const atmosphere = new HillaireAtmosphere(
+    engine,
+    EARTH_REFERENCE,
+    TABLE_SIZES.high,
+    figure,
+    EARTH_REFERENCE_CURVES,
+    EARTH_GRAVITY,
+  );
+  const distanceM = figure.equatorialRadiusM + ORBITAL_SUNSET_HEIGHT_M;
+  // The view and the sun's centre along the ray tangent 12 km up, the frame's up that tangent
+  // point's vertical (`limbCamera`'s and `limbSun`'s, the sun 0° over its horizon).
+  const centre: LimbFrame = { centreM: ORBITAL_SUNSET_TANGENT_M };
+  const sun = limbSun(distanceM, figure, 0, centre);
+  const toTangentM = limbTangentDistanceM(distanceM, figure, centre);
+  const images: CapturedImage[] = [];
+  try {
+    for (const shot of ORBITAL_SUNSET_SHOTS) {
+      // The shot's field as the half-span of tangent height it spans at the tangent point.
+      const frame = { ...centre, halfSpanM: Math.tan(shot.fovYRad / 2) * toTangentM };
+      const camera = limbCamera(distanceM, figure, frame, CAPTURE_SIZE);
+      // Each capture reads the GPU back before the next frame draws.
+      // oxlint-disable-next-line no-await-in-loop
+      const texels = await compositeFrame(engine, atmosphere, camera, [sun], null);
+      images.push({
+        name: shot.name,
+        width: CAPTURE_SIZE.widthPx,
+        height: CAPTURE_SIZE.heightPx,
+        rgba: base64Of(toRgba8(texels)),
+      });
+    }
+  } finally {
+    atmosphere.dispose();
+  }
+  return images;
+}
+
+// --- R08.T8.b: the ascent by hand ----------------------------------------------------------------
+
+/** The ascent's two suns: the day's, the same direction at every height, and the last light. */
+type AscentSun = "day" | "lastlight";
+
+/** The ascent's suns, in the order its frames are drawn. */
+const ASCENT_SUNS: readonly AscentSun[] = ["day", "lastlight"];
+
+/** The ascent's day sun over the horizontal, deg, 90° to the right of the view (east). */
+const ASCENT_DAY_ELEVATION_DEG = 20;
+
+/** The day sun's azimuth from the view's, deg, clockwise seen from above. */
+const ASCENT_DAY_AZIMUTH_DEG = 90;
+
+/**
+ * The ascent's last light over the camera's own visible horizon, deg: inside
+ * `decision-r08-t8-leans.md` §5.1's window (the Sun 0–1.5° over that horizon, 90–180° from the
+ * view's azimuth), where the march's seam at the horizontal was found and T8.a's warp fixed it.
+ */
+const ASCENT_LAST_LIGHT_OVER_HORIZON_DEG = 0.5;
+
+/** The last light's azimuth from the view's, deg, clockwise seen from above: behind, right. */
+const ASCENT_LAST_LIGHT_AZIMUTH_DEG = 150;
+
+/** How far below and above its place, in h\*, each frame of the ascent's pairs stands, m. */
+const ASCENT_PAIR_OFFSET_M = 50;
+
+/** The floor of a pair's relative change, a share of its brightest channel: Design note 10's. */
+const ASCENT_FLOOR_SHARE = 6e-3;
+
+/**
+ * The last light's pre-exposure, EV100: `AUTO`'s for a frame whose mean is 1 cd/m² (EV100 =
+ * log₂(L̄ S ÷ K), S = 100, K = 12.5), about the band's at the last light.
+ *
+ * @remarks
+ * At the smoke's EV100 15 the last light from the top (some 0.04 cd/m² at its brightest) falls in
+ * `rgba16float`'s subnormals, one step of 2⁻²⁴ about 6% of the frame's brightest, which a frame's
+ * own exposure turns into bands a hundred codes apart. The day's frames keep the smoke's
+ * {@link SMOKE_EXPOSURE_SCALE}.
+ */
+const ASCENT_LAST_LIGHT_EV100 = 3;
+
+/** The pre-exposure the ascent's frames under `sun` are drawn at. */
+function ascentPreExposure(sun: AscentSun): number {
+  let preExposure: number;
+  switch (sun) {
+    case "day":
+      preExposure = SMOKE_EXPOSURE_SCALE;
+      break;
+    case "lastlight":
+      preExposure = exposureScale(ASCENT_LAST_LIGHT_EV100);
+      break;
+  }
+  return preExposure;
+}
+
+/**
+ * A sun at `elevationDeg` over the horizontal of a {@link bandCamera} and `azimuthDeg` from its
+ * view's azimuth (north), clockwise seen from above, the Sun's disc at 1 au.
+ */
+function ascentSun(elevationDeg: number, azimuthDeg: number): SunState {
+  const e = elevationDeg * DEGREE_RAD;
+  const a = azimuthDeg * DEGREE_RAD;
+  // At the camera body +x is up, +z north and +y east, the view's right.
+  return {
+    directionBodyFixed: {
+      x: Math.sin(e),
+      y: Math.cos(e) * Math.sin(a),
+      z: Math.cos(e) * Math.cos(a),
+    },
+    illuminanceLx: SUN_ILLUMINANCE_LX,
+    angularRadiusRad: SUN_ANGULAR_RADIUS_RAD,
+  };
+}
+
+/**
+ * The ascent's `sun` for a camera `heightM` above the equator's datum: the day sun's fixed
+ * direction, or the last light {@link ASCENT_LAST_LIGHT_OVER_HORIZON_DEG} over the visible horizon
+ * whose dip the frame takes ({@link meridianDipRad}).
+ */
+function ascentSunAt(sun: AscentSun, heightM: number): SunState {
+  let state: SunState;
+  switch (sun) {
+    case "day":
+      state = ascentSun(ASCENT_DAY_ELEVATION_DEG, ASCENT_DAY_AZIMUTH_DEG);
+      break;
+    case "lastlight": {
+      // The meridian's dip, the frame's: toward 150° the datum's own is within 0.02° of it at every
+      // height here (its tan δ 0.084% smaller), against the 0.5° the sun stands over it.
+      const dipDeg = meridianDipRad(heightM, SLICES_EARTH.figure) / DEGREE_RAD;
+      state = ascentSun(ASCENT_LAST_LIGHT_OVER_HORIZON_DEG - dipDeg, ASCENT_LAST_LIGHT_AZIMUTH_DEG);
+      break;
+    }
+  }
+  return state;
+}
+
+/** One height of the ascent's frames for the eye. */
+interface AscentPlace {
+  /** The height in a capture's name, as `040km` or `1e8m`. */
+  readonly tag: string;
+  /** What the height is, for a check's detail. */
+  readonly label: string;
+  /** The camera's geodetic height above the equator's datum, m. */
+  readonly heightM: number;
+  /** Its h\*, the height the medium is read at, m: s times the geodetic height. */
+  readonly heightStarM: number;
+}
+
+/**
+ * A height as a capture's name gives it: kilometres to three whole digits, and any tenth after a
+ * `p`, since the harness saves only names of `a`–`z`, `0`–`9` and `-` (`src/smoke/result.ts`).
+ */
+function kmTag(heightM: number): string {
+  const tenths = Math.round(heightM / 100);
+  const whole = String(Math.floor(tenths / 10)).padStart(3, "0");
+  return tenths % 10 === 0 ? `${whole}km` : `${whole}p${tenths % 10}km`;
+}
+
+/** A height in kilometres to three decimals, for a check's detail. */
+function kmText(heightM: number): string {
+  return `${(heightM / 1_000).toFixed(3)} km`;
+}
+
+/**
+ * The ascent's heights for the eye on `setting`: in h\* 2 m, 10 km, the band's lower edge, middle
+ * and upper edge, and 100 m under and over the top; then 400 km, 10⁷ m and 10⁸ m above the datum,
+ * geodetic, where the march draws everything at any s.
+ */
+function ascentEyePlaces(setting: QualitySetting): AscentPlace[] {
+  const body = SLICES_EARTH;
+  const topM = body.medium.topHeightM;
+  const { lowerShareOfTop, upperShareOfTop } = TABLE_SIZES[setting].marchBand;
+  const s = equatorGravityRatio(body);
+  const star = (label: string, heightStarM: number, tag = kmTag(heightStarM)): AscentPlace => ({
+    tag,
+    label: `h* ${kmText(heightStarM)} (${label})`,
+    heightM: heightStarM / s,
+    heightStarM,
+  });
+  const geodetic = (label: string, heightM: number, tag: string): AscentPlace => ({
+    tag,
+    label: `${label} geodetic`,
+    heightM,
+    heightStarM: heightM * s,
+  });
+  return [
+    star("the ground", 2, "2m"),
+    star("under the band", 10_000),
+    star("the band's lower edge", lowerShareOfTop * topM),
+    star("the band's middle", ((lowerShareOfTop + upperShareOfTop) / 2) * topM),
+    star("the band's upper edge", upperShareOfTop * topM),
+    star("100 m under the top", topM - 100),
+    star("100 m over the top", topM + 100),
+    geodetic("400 km", 400_000, "400km"),
+    geodetic("10⁷ m", 1e7, "1e7m"),
+    geodetic("10⁸ m", 1e8, "1e8m"),
+  ];
+}
+
+/** A place of the ascent's figures, a pair of frames {@link ASCENT_PAIR_OFFSET_M} either side. */
+interface AscentPair {
+  readonly label: string;
+  /** Whether the frame changes its regime there (an edge of the band, or the top). */
+  readonly edge: boolean;
+  /** The place's h\*, m. */
+  readonly heightStarM: number;
+}
+
+/**
+ * The ascent's pairs on `setting`: the band's lower and upper edges and the top, where a step at
+ * the switch would stand, and two references away from any edge, the band's middle and h\* 10 km.
+ */
+function ascentPairs(setting: QualitySetting): AscentPair[] {
+  const topM = SLICES_EARTH.medium.topHeightM;
+  const { lowerShareOfTop, upperShareOfTop } = TABLE_SIZES[setting].marchBand;
+  return [
+    { label: "the band's lower edge", edge: true, heightStarM: lowerShareOfTop * topM },
+    { label: "the band's upper edge", edge: true, heightStarM: upperShareOfTop * topM },
+    { label: "the medium's top", edge: true, heightStarM: topM },
+    {
+      label: "the band's middle",
+      edge: false,
+      heightStarM: ((lowerShareOfTop + upperShareOfTop) / 2) * topM,
+    },
+    { label: "h* 10 km", edge: false, heightStarM: 10_000 },
+  ];
+}
+
+/** A pair's change from its lower frame to its upper. */
+interface PairChange {
+  /** The worst |c₂ − c₁| ÷ max(c₁, floor) over every pixel and colour channel. */
+  readonly relative: number;
+  readonly relativeAt: string;
+  /** The largest change in 8-bit sRGB codes, both frames encoded at the lower frame's exposure. */
+  readonly codes: number;
+  readonly codesAt: string;
+  /** The pair's brightest colour channel, pre-exposed: the floor's base. */
+  readonly brightest: number;
+  /** The colour channels that change by 2 codes or more, §5's visibility line. */
+  readonly stepped: number;
+  /** The first and last rows, from the top, of those channels; `null` for none. */
+  readonly steppedRows: readonly [number, number] | null;
+}
+
+/** The codes a pair's channels step by from which `decision-r08-t8-leans.md` §5 calls it seen. */
+const VISIBLE_STEP_CODES = 2;
+
+/**
+ * `below` against `above`, two frames of one size: the relative change at Design note 10's floor,
+ * {@link ASCENT_FLOOR_SHARE} of the pair's brightest colour channel, and the change in codes at one
+ * exposure, `below`'s ({@link exposureOf}), so that the frame's own metering hides no step.
+ */
+function pairChange(below: Float32Array, above: Float32Array, widthPx: number): PairChange {
+  if (below.length !== above.length) {
+    const at = `${below.length / 4} and ${above.length / 4} texels read back`;
+    return {
+      relative: Number.POSITIVE_INFINITY,
+      relativeAt: at,
+      codes: 255,
+      codesAt: at,
+      brightest: Number.NaN,
+      // Every colour channel of the lower frame, its alpha (the meter class) left out.
+      stepped: (below.length / 4) * 3,
+      steppedRows: null,
+    };
+  }
+  let brightest = 0;
+  for (const frame of [below, above]) {
+    for (let i = 0; i < frame.length; i += 1) {
+      // Alpha carries the scene's meter class (R08.T7), not light.
+      brightest = i % 4 === 3 ? brightest : Math.max(brightest, frame[i] ?? 0);
+    }
+  }
+  const floor = ASCENT_FLOOR_SHARE * brightest;
+  const k = exposureOf(below);
+  const codesBelow = rgba8At(below, k);
+  const codesAbove = rgba8At(above, k);
+  let relative = 0;
+  let relativeAt = "no channel changes";
+  let codes = 0;
+  let codesAt = "no code changes";
+  let stepped = 0;
+  let steppedRows: readonly [number, number] | null = null;
+  const rowOf = (i: number): number => Math.floor(i / 4 / widthPx);
+  const where = (i: number): string => `(${Math.floor(i / 4) % widthPx}, ${rowOf(i)}) c${i % 4}`;
+  for (let i = 0; i < below.length; i += 1) {
+    if (i % 4 === 3) {
+      continue;
+    }
+    const c1 = below[i] ?? Number.NaN;
+    const c2 = above[i] ?? Number.NaN;
+    const denominator = Math.max(c1, floor);
+    const change = Math.abs(c2 - c1);
+    const share =
+      denominator > 0 ? change / denominator : change === 0 ? 0 : Number.POSITIVE_INFINITY;
+    if (Number.isNaN(share) || share > relative) {
+      relative = Number.isNaN(share) ? Number.POSITIVE_INFINITY : share;
+      relativeAt = `${where(i)}, ${show([c1])} → ${show([c2])}`;
+    }
+    const step = Math.abs((codesAbove[i] ?? 0) - (codesBelow[i] ?? 0));
+    if (step > codes) {
+      codes = step;
+      const linear = `${show([c1])} → ${show([c2])}`;
+      codesAt = `${where(i)}, ${codesBelow[i] ?? 0} → ${codesAbove[i] ?? 0} (${linear})`;
+    }
+    if (step >= VISIBLE_STEP_CODES) {
+      const row = rowOf(i);
+      stepped += 1;
+      steppedRows =
+        steppedRows === null
+          ? [row, row]
+          : [Math.min(steppedRows[0], row), Math.max(steppedRows[1], row)];
+    }
+  }
+  return { relative, relativeAt, codes, codesAt, brightest, stepped, steppedRows };
+}
+
+/** The step across the horizontal in a frame for the eye, against the sky's own over it. */
+interface HorizontalStep {
+  /** The rows just over and just under the horizontal, from the top. */
+  readonly overRow: number;
+  readonly underRow: number;
+  /** Their centre rays' elevations over the horizontal, deg. */
+  readonly overDeg: number;
+  readonly underDeg: number;
+  /** Per colour channel, the median over the columns of |Δcode| from the row over to the next. */
+  readonly across: readonly number[];
+  /** Per colour channel, the same median between the two rows over the horizontal. */
+  readonly own: readonly number[];
+}
+
+/**
+ * The step across the horizontal in `codes`, a {@link bandCamera}'s frame for the eye in 8-bit
+ * sRGB, the horizontal found from the camera's own geometry (its rows' centre rays against the
+ * datum's normal at it), or `null` where fewer than two rows lie over it or none under it.
+ *
+ * @remarks
+ * The camera has no roll, its right horizontal, so a pixel's elevation has its row's sign in every
+ * column: the horizontal falls between the same two rows across the frame.
+ */
+function horizontalStep(
+  codes: Uint8Array,
+  camera: AtmosphereCamera,
+  figure: SpheroidFigure,
+): HorizontalStep | null {
+  const { widthPx, heightPx } = camera.viewport;
+  const normal = atmosphereInputs(camera, figure).normal;
+  const forward = rotate(camera.orientation, { x: 0, y: 0, z: -1 });
+  const up = rotate(camera.orientation, { x: 0, y: 1, z: 0 });
+  const tanY = Math.tan(camera.fovXRad / 2) / (widthPx / heightPx);
+  const elevationDeg = (row: number): number => {
+    const v = 1 - (2 * (row + 0.5)) / heightPx;
+    return Math.asin(dot(normalise(add(forward, scale(up, v * tanY))), normal)) / DEGREE_RAD;
+  };
+  let overRow = -1;
+  for (let row = 0; row < heightPx && elevationDeg(row) > 0; row += 1) {
+    overRow = row;
+  }
+  const underRow = overRow + 1;
+  if (overRow < 1 || underRow >= heightPx) {
+    return null;
+  }
+  const code = (row: number, column: number, channel: number): number =>
+    codes[(row * widthPx + column) * 4 + channel] ?? 0;
+  const medianStep = (from: number, to: number, channel: number): number =>
+    medianOf(
+      Array.from({ length: widthPx }, (_, column) =>
+        Math.abs(code(to, column, channel) - code(from, column, channel)),
+      ),
+    );
+  return {
+    overRow,
+    underRow,
+    overDeg: elevationDeg(overRow),
+    underDeg: elevationDeg(underRow),
+    across: [0, 1, 2].map((c) => medianStep(overRow, underRow, c)),
+    own: [0, 1, 2].map((c) => medianStep(overRow - 1, overRow, c)),
+  };
+}
+
+/** A {@link HorizontalStep} as the ascent's check records it, the excess its own figure. */
+function describeHorizontal(tag: string, step: HorizontalStep | null): string {
+  if (step === null) {
+    return `${tag}: no horizontal between two rows over it and one under it`;
+  }
+  const excess = step.across.map((a, c) => a - (step.own[c] ?? 0));
+  const rows = `rows ${step.overRow}/${step.underRow}`;
+  const elevations = `${step.overDeg.toFixed(4)}°, ${step.underDeg.toFixed(4)}°`;
+  return [
+    `${tag}: ${rows} (${elevations}), across ${step.across.join(", ")}`,
+    `the sky's own ${step.own.join(", ")}`,
+    `excess ${excess.join(", ")}`,
+  ].join(", ");
+}
+
+/** How the ascent's sun stands, for a check's detail. */
+function describeAscentSun(sun: AscentSun): string {
+  let text: string;
+  switch (sun) {
+    case "day":
+      text = `the day sun (${ASCENT_DAY_ELEVATION_DEG}° over the horizontal`;
+      text += `, ${ASCENT_DAY_AZIMUTH_DEG}° right of the view`;
+      text += `, pre-exposed at the smoke's EV100 ${SMOKE_EV100})`;
+      break;
+    case "lastlight":
+      text = `the last light (${ASCENT_LAST_LIGHT_OVER_HORIZON_DEG}° over the visible horizon`;
+      text += `, ${ASCENT_LAST_LIGHT_AZIMUTH_DEG}° right of the view`;
+      text += `, pre-exposed at EV100 ${ASCENT_LAST_LIGHT_EV100})`;
+      break;
+  }
+  return text;
+}
+
+/** A time in seconds to a tenth, for a check's detail. */
+function secondsOf(ms: number): string {
+  return `${(ms / 1_000).toFixed(1)} s`;
+}
+
+/**
+ * R08.T8.b's ascent by hand (plan R08, R08.T8's acceptance: "by hand an ascent from R05's test
+ * planet to 10⁸ m shows no step at the switch"): R05's test planet ({@link SLICES_EARTH}, WGS 84
+ * with its normal gravity, R05's Earth medium), a vertical ascent over the equator at longitude 0
+ * looking north along the horizon ({@link bandCamera}), on high and on low, under a day sun and at
+ * the camera's last light ({@link ascentSunAt}).
+ *
+ * @remarks
+ * Frames for the eye at 320 × 180 ({@link ascentEyePlaces}), each at its own exposure as every
+ * capture, named `r08-ascent-<setting>-<sun>-<height>`. Figures at 64 × 32 from pairs of frames
+ * {@link ASCENT_PAIR_OFFSET_M} under and over the band's edges, the top and two references
+ * ({@link ascentPairs}): the worst relative change at Design note 10's floor and the largest
+ * change in codes at the lower frame's exposure ({@link pairChange}), where a step at the switch
+ * would show as an edge's figure far above the references'. In each frame for the eye at the last
+ * light from inside the air, the step across the horizontal in codes beside the sky's own over it
+ * ({@link horizontalStep}; `decision-r08-t8-leans.md` §5's line, 2 codes sustained along the
+ * row). The frames are pre-exposed at the smoke's EV100 15 by day and at
+ * {@link ASCENT_LAST_LIGHT_EV100} at the last light, whose sky EV100 15 puts in `rgba16float`'s
+ * subnormals. One check per setting holds every frame finite and within `rgba16float`, and records
+ * the figures in its detail: they are judged by hand, not held.
+ */
+export async function captureAscent(
+  engine: RenderEngine,
+  checks: Checks,
+): Promise<CapturedImage[]> {
+  const body = SLICES_EARTH;
+  const topM = body.medium.topHeightM;
+  const s = equatorGravityRatio(body);
+  const images: CapturedImage[] = [];
+  for (const setting of ["high", "low"] as const) {
+    const sizes = TABLE_SIZES[setting];
+    const weightOf = (heightStarM: number): number =>
+      marchWeightOf(heightStarM, topM, sizes.marchBand);
+    const atmosphere = new HillaireAtmosphere(
+      engine,
+      body.medium,
+      sizes,
+      body.figure,
+      body.curves,
+      body.gravity,
+    );
+    // A frame `heightM` above the datum (geodetic), the sun as it stands for that height.
+    const frameAt = (
+      heightM: number,
+      camera: AtmosphereCamera,
+      sun: AscentSun,
+    ): Promise<Float32Array> =>
+      compositeFrame(
+        engine,
+        atmosphere,
+        camera,
+        [ascentSunAt(sun, heightM)],
+        null,
+        ascentPreExposure(sun),
+      );
+    let inRange = true;
+    let frames = 0;
+    const sections: string[] = [];
+    const horizontals: string[] = [];
+    let pairMs = 0;
+    let eyeMs = 0;
+    try {
+      for (const sun of ASCENT_SUNS) {
+        const edges: string[] = [];
+        const references: string[] = [];
+        const pairsStart = performance.now();
+        for (const pair of ascentPairs(setting)) {
+          const belowStarM = pair.heightStarM - ASCENT_PAIR_OFFSET_M;
+          const aboveStarM = pair.heightStarM + ASCENT_PAIR_OFFSET_M;
+          const belowM = belowStarM / s;
+          const aboveM = aboveStarM / s;
+          // Each frame reads the GPU back before the next draws.
+          // oxlint-disable-next-line no-await-in-loop
+          const below = await frameAt(belowM, bandCamera(belowM, body.figure), sun);
+          // The pair's upper frame draws once the lower one is read back.
+          // oxlint-disable-next-line no-await-in-loop
+          const above = await frameAt(aboveM, bandCamera(aboveM, body.figure), sun);
+          frames += 2;
+          inRange = inRange && withinHalfRange(below) && withinHalfRange(above);
+          const change = pairChange(below, above, FRAME_SIZE.widthPx);
+          const weights = [weightOf(belowStarM), weightOf(aboveStarM)] as const;
+          (pair.edge ? edges : references).push(describePair(pair, weights, change));
+        }
+        pairMs += performance.now() - pairsStart;
+        const sides = `the edges: ${edges.join("; ")}; the references: ${references.join("; ")}`;
+        sections.push(`${describeAscentSun(sun)}: ${sides}`);
+        const eyeStart = performance.now();
+        for (const place of ascentEyePlaces(setting)) {
+          const camera = bandCamera(place.heightM, body.figure, CAPTURE_SIZE);
+          // Each frame for the eye reads the GPU back before the next draws.
+          // oxlint-disable-next-line no-await-in-loop
+          const texels = await frameAt(place.heightM, camera, sun);
+          frames += 1;
+          inRange = inRange && withinHalfRange(texels);
+          const rgba = toRgba8(texels);
+          images.push({
+            name: `r08-ascent-${setting}-${sun}-${place.tag}`,
+            width: CAPTURE_SIZE.widthPx,
+            height: CAPTURE_SIZE.heightPx,
+            rgba: base64Of(rgba),
+          });
+          if (sun === "lastlight" && place.heightStarM < topM) {
+            horizontals.push(
+              describeHorizontal(place.label, horizontalStep(rgba, camera, body.figure)),
+            );
+          }
+        }
+        eyeMs += performance.now() - eyeStart;
+      }
+    } finally {
+      atmosphere.dispose();
+    }
+    const band = sizes.marchBand;
+    const lowerM = band.lowerShareOfTop * topM;
+    const edgesM = `h* ${kmText(lowerM)} to ${kmText(band.upperShareOfTop * topM)}`;
+    const pairsHeading =
+      `the pairs at 64 × 32 (relative at a floor of ${ASCENT_FLOOR_SHARE} of the pair's ` +
+      "brightest channel, codes at the lower frame's exposure)";
+    const horizontalHeading =
+      "the horizontal at the last light (320 × 180, each frame at its own exposure, the median " +
+      "over the columns of |Δcode|, R, G, B)";
+    checks.check(
+      `R08.T8.b the ascent, ${setting}: no step at the switch`,
+      inRange,
+      [
+        `${frames} frames finite and within rgba16float: ${String(inRange)}`,
+        `s ${s.toFixed(6)} at the equator; the band ${bandOf(band)} (${edgesM})`,
+        `${pairsHeading}: ${sections.join(" | ")}`,
+        `${horizontalHeading}: ${horizontals.join("; ")}`,
+        `times: the pairs ${secondsOf(pairMs)}, the frames for the eye ${secondsOf(eyeMs)}`,
+      ].join(" || "),
+    );
+  }
+  return images;
+}
+
+/** One of the ascent's pairs as its check records it: its place, w at both frames, its change. */
+function describePair(
+  pair: AscentPair,
+  weights: readonly [number, number],
+  change: PairChange,
+): string {
+  const place = `h* ${kmText(pair.heightStarM)} ± ${ASCENT_PAIR_OFFSET_M} m`;
+  const w = `w ${show([weights[0]])} → ${show([weights[1]])}`;
+  const relativeShare = percentOf(change.relative, { kind: "figures", digits: 3 });
+  const relative = `${relativeShare} at ${change.relativeAt}`;
+  const rows = change.steppedRows === null ? "" : ` on rows ${change.steppedRows.join("–")}`;
+  const codes = [
+    `${change.codes} codes at ${change.codesAt}`,
+    `${change.stepped} channels by ${VISIBLE_STEP_CODES} codes or more${rows}`,
+    `brightest ${show([change.brightest])}`,
+  ].join(", ");
+  return `${pair.label} (${place}, ${w}): ${relative}; ${codes}`;
 }
