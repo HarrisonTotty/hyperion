@@ -139,10 +139,10 @@ mod sun;
 #[cfg(test)]
 mod tests;
 
-/// The airless model's regolith inertia (P14.T54.a), which the sample's tests hold to the
-/// record's conditions' to the bit.
+/// The Γ R09's radiative model reads for a body's inputs (P14.T54.a), which the sample's tests
+/// hold to the record's conditions' to the bit.
 #[cfg(test)]
-pub(crate) use airless::regolith_inertia_j_per_m2_k_sqrt_s;
+pub(crate) use airless::regolith_inertia_of;
 mod transport;
 mod wind;
 

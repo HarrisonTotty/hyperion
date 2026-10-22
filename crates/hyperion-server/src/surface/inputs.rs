@@ -59,12 +59,16 @@ pub trait InputsSource: fmt::Debug + Send + Sync {
 /// The production source: the body's record, with a moon's planet's, read by
 /// [`CoarseInputs::for_body`], behind the serve gate (`GENERATED_SURFACES_FROM`, 24).
 ///
-/// It answers as `for_body` does, a body whose surface section is not applicable, a giant's,
-/// [`SurfaceInputsError::NoSolidSurface`], and a moon's missing or wrong planet's record its
-/// refusal; but until the gate's version every body `for_body` reads, every generated body with
-/// a solid surface, answers [`SurfaceInputsError::NotModelled`] naming
-/// [`RecordSection::Surface`], in [`ReadCoarseInputsError::Section`], as it did before plan 14's
-/// surface section was inhabited (P14.T24, P14.T48 and P14.T54.a).
+/// From the gate's version it answers as `for_body` does. Until then it answers as generator
+/// version 22 did, whose reading stopped at the crust, which the record did not model: the
+/// surface section's tag's refusal ([`SurfaceInputsError::NoSolidSurface`] for a section that is
+/// not applicable, a giant's, and [`SurfaceInputsError::NotModelled`] or
+/// [`SurfaceInputsError::NotResolved`] naming [`RecordSection::Surface`]), and a moon's missing
+/// or wrong planet's record its refusal ([`ReadCoarseInputsError::PlanetMissing`],
+/// [`ReadCoarseInputsError::NotItsPlanet`]). Every other answer, every generated body with a solid
+/// surface that `for_body` reads and every refusal 22 never gave (another section's, a record
+/// not at the record's time, inputs the builder refuses), is [`SurfaceInputsError::NotModelled`]
+/// naming [`RecordSection::Surface`], in [`ReadCoarseInputsError::Section`] (P14.T54.a).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RecordInputs;
 
@@ -75,15 +79,41 @@ impl InputsSource for RecordInputs {
         planet: Option<&BodyRecord>,
         ctx: &SystemContext,
     ) -> Result<CoarseInputs, ReadCoarseInputsError> {
-        let inputs = CoarseInputs::for_body(record, planet, ctx)?;
+        let read = CoarseInputs::for_body(record, planet, ctx);
         if GENERATOR_VERSION < GENERATED_SURFACES_FROM {
             // The serve gate (P14.T54.a): the reading is the sim's, but no generated field is
-            // served until the gate's version.
-            return Err(ReadCoarseInputsError::Section(
-                SurfaceInputsError::NotModelled(RecordSection::Surface),
-            ));
+            // served until the gate's version, and no refusal 22 never gave.
+            return Err(behind_the_gate(&read));
         }
-        Ok(inputs)
+        read
+    }
+}
+
+/// What [`RecordInputs`] answers behind the serve gate for `for_body`'s reading `read`: its
+/// refusal where generator version 22 gave it, the surface section's tag's and a moon's planet's,
+/// which `for_body` checks before the crust; otherwise not modelled, naming the surface section.
+fn behind_the_gate(read: &Result<CoarseInputs, ReadCoarseInputsError>) -> ReadCoarseInputsError {
+    let not_modelled =
+        ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(RecordSection::Surface));
+    match read {
+        Err(
+            refused @ (ReadCoarseInputsError::Section(
+                SurfaceInputsError::NoSolidSurface
+                | SurfaceInputsError::NotModelled(RecordSection::Surface)
+                | SurfaceInputsError::NotResolved(RecordSection::Surface),
+            )
+            | ReadCoarseInputsError::PlanetMissing(_)
+            | ReadCoarseInputsError::NotItsPlanet { .. }),
+        ) => *refused,
+        Ok(_)
+        | Err(
+            ReadCoarseInputsError::Section(
+                SurfaceInputsError::NotModelled(_) | SurfaceInputsError::NotResolved(_),
+            )
+            | ReadCoarseInputsError::NotAtRecordTime
+            | ReadCoarseInputsError::SeasonalOrbit(_)
+            | ReadCoarseInputsError::Build(_),
+        ) => not_modelled,
     }
 }
 
@@ -167,5 +197,61 @@ mod tests {
             }
         }
         panic!("15 Sun-like systems hold {rocky} rocky planets the sim reads and {giant} giants");
+    }
+
+    /// Behind the gate only the refusals generator version 22 gave pass, the surface section's
+    /// tag's and a moon's planet's; every other refusal `for_body` can give from 23, another
+    /// section's, a record not at the record's time or inputs the builder refuses, answers that
+    /// the surface is not modelled, as 22's reading, which stopped at the crust, did.
+    #[test]
+    fn behind_the_gate_only_22_s_refusals_pass() {
+        use hyperion_sim::planetary::surface::BuildCoarseInputsError;
+
+        let ctx = SystemContext::builder()
+            .system(
+                CellKey::new(Layer::C, [0, 812, 0])
+                    .expect("a cell in range")
+                    .candidate_id(1)
+                    .expect("an index in range"),
+            )
+            .star(SolarMasses::new(1.0))
+            .fe_h(Dex::ZERO)
+            .age_at_epoch(Years::new(4.57e9))
+            .build()
+            .expect("a Sun-like context");
+        let system = generate(Seed::new(0x5eed_0009_0010), &ctx);
+        let snapshot = system.snapshot_at(&ctx, RECORD_TIME);
+        let body = snapshot
+            .bodies()
+            .first()
+            .expect("a Sun-like system holds a body")
+            .identity()
+            .id();
+        let section = ReadCoarseInputsError::Section;
+        let not_modelled = section(SurfaceInputsError::NotModelled(RecordSection::Surface));
+        for passes in [
+            section(SurfaceInputsError::NoSolidSurface),
+            not_modelled,
+            section(SurfaceInputsError::NotResolved(RecordSection::Surface)),
+            ReadCoarseInputsError::PlanetMissing(body),
+            ReadCoarseInputsError::NotItsPlanet {
+                planet: Some(body),
+                given: body,
+            },
+            ReadCoarseInputsError::NotItsPlanet {
+                planet: None,
+                given: body,
+            },
+        ] {
+            assert_eq!(behind_the_gate(&Err(passes)), passes);
+        }
+        for held in [
+            section(SurfaceInputsError::NotModelled(RecordSection::Bulk)),
+            section(SurfaceInputsError::NotResolved(RecordSection::Orbit)),
+            ReadCoarseInputsError::NotAtRecordTime,
+            ReadCoarseInputsError::Build(BuildCoarseInputsError::Missing("palette")),
+        ] {
+            assert_eq!(behind_the_gate(&Err(held)), not_modelled, "{held:?}");
+        }
     }
 }

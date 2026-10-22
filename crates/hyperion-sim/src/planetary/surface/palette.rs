@@ -44,6 +44,10 @@
 //! - **A crust** lies at the record's mean surface temperature, held at most its first melt: a
 //!   rock's grain density is one value at every temperature, and an ice shell's is ice Ih's there.
 //!
+//! The record's mean surface temperature is finite and positive wherever `for_body` resolves a
+//! palette: it refuses an unlit body, whose record states 0 K, first. [`resolve`] itself reads
+//! such a record's warmest in its place, for its tests.
+//!
 //! A row whose solid has no grain density where it lies is not resolved: solid argon's, whose
 //! density the registry has not read (P14.T49.b's `ARGON` diagram), on the coldest airless
 //! members, and one phase of solid oxygen's. `for_body` answers such a body not modelled, a
@@ -186,6 +190,13 @@ pub(crate) fn resolve(
     surface: &Surface,
     crust: &CrustComposition,
 ) -> Result<MaterialPalette, ResolveBodyPaletteError> {
+    /// The substances of `shares` that lie on the ground, with an area above zero.
+    fn on_the_ground(shares: &[(SubstanceId, f64)]) -> impl Iterator<Item = SubstanceId> + '_ {
+        shares
+            .iter()
+            .filter(|&&(_, area_fraction)| area_fraction > 0.0)
+            .map(|&(id, _)| id)
+    }
     let conditions = surface.conditions();
     let mut entries: BTreeMap<(PaletteRole, SubstanceKey), PaletteEntry> = BTreeMap::new();
     let lid = match crust.lid() {
@@ -212,13 +223,6 @@ pub(crate) fn resolve(
         entries.insert((role, entry.substance), entry);
     }
     let figures = surface.figures();
-    let on_the_ground = |shares: &[(SubstanceId, f64)]| {
-        shares
-            .iter()
-            .filter(|&&(_, area_fraction)| area_fraction > 0.0)
-            .map(|&(id, _)| id)
-            .collect::<Vec<_>>()
-    };
     let condensates = surface.condensates().entries();
     let in_phase = |phase: CondensatePhase| {
         condensates
@@ -282,7 +286,8 @@ fn crust_roles(crust: &CrustComposition) -> Vec<(PaletteRole, SubstanceId)> {
 
 /// The record's mean surface temperature, K, where it is finite and positive; otherwise, on an
 /// unlit body whose record states 0 K, the warmest of its climate's range, which its night floor
-/// holds above zero.
+/// holds above zero. `for_body` refuses such a body before it resolves the palette (a recorded
+/// gap), so only a direct call, a test's, reads the fallback.
 #[must_use]
 fn mean_temperature(conditions: &SurfaceConditions) -> Kelvin {
     let mean = conditions.mean_surface_temperature();
@@ -438,6 +443,12 @@ fn in_range(id: SubstanceId, temperature: Kelvin) -> Result<LiquidProperties, Re
 /// The record of the melt of the crust row `id`, whose solidus is `solidus`, under the climate
 /// `conditions` (the [module](self)'s "A melt's record"); `None` for a row with no melt model, or
 /// a member its record needs not modelled.
+///
+/// # Panics
+///
+/// Never: the record is asked at the row's reference composition, at or above its solidus, the
+/// first melt of its range, and [`in_range`] holds a temperature at or above a critical point
+/// inside the range.
 #[must_use]
 fn melt_record(
     id: SubstanceId,
@@ -462,9 +473,186 @@ fn melt_record(
     } else {
         solidus
     };
-    let mut record = in_range(id, temperature).ok()?;
+    let mut record = match in_range(id, temperature) {
+        Ok(record) => record,
+        // A row with no melt model (graphite's), or a member its record needs not modelled: the
+        // entry is drawn solid, a recorded limitation (the module's "A melt's record").
+        Err(ResolveLiquidError::NotALiquid { .. } | ResolveLiquidError::NotModelled { .. }) => {
+            return None;
+        }
+        Err(
+            refused @ (ResolveLiquidError::OutOfRange { .. }
+            | ResolveLiquidError::CompositionNotModelled { .. }
+            | ResolveLiquidError::ComponentNotModelled { .. }
+            | ResolveLiquidError::CompositionOutOfRange { .. }),
+        ) => unreachable!(
+            "a melt's record is asked at its reference composition, at or above its solidus, the \
+             first melt of its range, a temperature at a critical point held inside it: {refused}"
+        ),
+    };
     if ruled {
         record.basis = record.basis.max(LiquidBasis::Derived);
     }
     Some(record)
+}
+
+#[cfg(test)]
+mod tests {
+    use hyperion_testkit::float::assert_same_bits;
+
+    use super::*;
+    use crate::planetary::hooks::crust::tests::{mars, moon, table_conditions};
+    use crate::substance::by_key;
+
+    /// The registry's row of `key`, which a test knows to be one.
+    fn row(key: &str) -> SubstanceId {
+        by_key(key).unwrap()
+    }
+
+    /// A liquid whose record's temperature lies above its boiling point at the surface pressure is
+    /// held at it, on its liquid saturation branch: water under the table's Venus, its mean surface
+    /// temperature above water's boiling point at its surface pressure, which lies below water's
+    /// critical pressure.
+    #[test]
+    fn a_liquid_above_its_boiling_point_is_held_at_it() {
+        let venus = table_conditions("Venus");
+        let water = row("H2O");
+        let boiling = water
+            .substance()
+            .phase_diagram()
+            .and_then(|diagram| diagram.saturation_temperature(venus.surface_pressure()))
+            .expect("water boils under Venus's air, below its critical pressure");
+        assert!(
+            venus.mean_surface_temperature() > boiling,
+            "{:?} against {boiling:?}",
+            venus.mean_surface_temperature()
+        );
+        let record = liquid_record(water, &venus).unwrap();
+        assert_same_bits(record.temperature.value(), boiling.value());
+        eprintln!(
+            "water under Venus's {:.4e} Pa, {:.2} K: held at its boiling point, {:.3} K, {:.1} kg m⁻³",
+            venus.surface_pressure().value(),
+            venus.mean_surface_temperature().value(),
+            boiling.value(),
+            record.density_kg_m3
+        );
+    }
+
+    /// A liquid's record outside its range is held inside it: a part in a million below its
+    /// critical point at or above it (methane at 250 K and at its critical point), there too where
+    /// its row states no saturation branch to hold it at its boiling point first (Titan's
+    /// solution under the table's Earth, at or above the lowest critical point of its components,
+    /// nitrogen's); and at its first melt below it (water at 200 K).
+    #[test]
+    fn a_liquid_beyond_its_range_is_held_inside_it() {
+        let methane = row("CH4");
+        let Err(ResolveLiquidError::OutOfRange {
+            below: Some(critical),
+            ..
+        }) = liquid_properties(methane, Kelvin::new(250.0), Composition::Reference)
+        else {
+            panic!("methane at 250 K lies above its critical point");
+        };
+        let held = critical.value() * (1.0 - BELOW_CRITICAL);
+        for temperature in [Kelvin::new(250.0), critical] {
+            let record = in_range(methane, temperature).unwrap();
+            assert_same_bits(record.temperature.value(), held);
+        }
+        let earth = table_conditions("Earth");
+        let seas = row("ch4_c2h6_n2");
+        assert!(
+            seas.substance().phase_diagram().is_none(),
+            "a solution's row states no saturation branch"
+        );
+        let Err(ResolveLiquidError::OutOfRange {
+            below: Some(lowest_critical),
+            ..
+        }) = liquid_properties(
+            seas,
+            earth.mean_surface_temperature(),
+            Composition::Reference,
+        )
+        else {
+            panic!("Titan's seas at Earth's temperature lie above nitrogen's critical point");
+        };
+        let record = liquid_record(seas, &earth).unwrap();
+        assert_same_bits(
+            record.temperature.value(),
+            lowest_critical.value() * (1.0 - BELOW_CRITICAL),
+        );
+        let water = row("H2O");
+        let Err(ResolveLiquidError::OutOfRange { lowest, .. }) =
+            liquid_properties(water, Kelvin::new(200.0), Composition::Reference)
+        else {
+            panic!("water at 200 K lies below its first melt");
+        };
+        let record = in_range(water, Kelvin::new(200.0)).unwrap();
+        assert_same_bits(record.temperature.value(), lowest.value());
+    }
+
+    /// An ice lies at the lower of its coldest zone's temperature and its frost point at its
+    /// partial pressure in the air: carbon dioxide under the table's Mars at its frost point where
+    /// the coldest zone is warmer, and at the coldest zone's where it is colder; an ice that is no
+    /// gas of the air lies at its coldest zone's.
+    #[test]
+    fn an_ice_lies_at_its_frost_point_or_its_coldest_zone() {
+        let mars = table_conditions("Mars");
+        let co2 = row("CO2");
+        let &(_, x) = mars
+            .gases()
+            .iter()
+            .find(|&&(gas, _)| gas == co2)
+            .expect("Mars's air holds carbon dioxide");
+        let partial = Pascals::new(x * mars.surface_pressure().value());
+        let frost = co2
+            .substance()
+            .phase_diagram()
+            .and_then(|diagram| diagram.saturation_temperature(partial))
+            .expect("carbon dioxide has a frost point under Mars's air");
+        // On its sublimation branch, below its triple point's 216.59 K (Span and Wagner 1996), at
+        // the table's partial pressure of carbon dioxide, far below the triple point's 518 kPa.
+        assert!(
+            frost.value() > 0.0 && frost.value() < 216.59,
+            "{frost:?} at {partial:?}"
+        );
+        let warm = Kelvin::new(frost.value() + 50.0);
+        assert_same_bits(ice_temperature(co2, warm, &mars).value(), frost.value());
+        let cold = Kelvin::new(frost.value() - 30.0);
+        assert_same_bits(ice_temperature(co2, cold, &mars).value(), cold.value());
+        let absent = ["NH3", "SO2", "CH4"]
+            .map(row)
+            .into_iter()
+            .find(|&id| mars.gases().iter().all(|&(gas, _)| gas != id))
+            .expect("one of three is no gas of Mars's air");
+        assert_same_bits(ice_temperature(absent, warm, &mars).value(), warm.value());
+    }
+
+    /// A secondary crust that is the provinces' lithology takes the provinces' role alone where it
+    /// is not the lid, as the Moon's maria do, and its own role alone where it is, as Mars's basalt
+    /// does: one entry either way, and no second entry for the provinces.
+    #[test]
+    fn a_secondary_crust_of_the_provinces_takes_their_role_off_the_lid() {
+        let moon_surface = table_conditions("Moon");
+        let moon = CrustComposition::derive(&moon(&moon_surface)).unwrap();
+        assert_eq!(moon.lid(), LidCrust::Primary);
+        assert_eq!(moon.secondary(), Some(moon.provinces()));
+        assert_eq!(
+            crust_roles(&moon),
+            [
+                (PaletteRole::PrimaryCrust, moon.primary().unwrap()),
+                (PaletteRole::Province, moon.provinces()),
+            ]
+        );
+        let mars_surface = table_conditions("Mars");
+        let mars = CrustComposition::derive(&mars(&mars_surface)).unwrap();
+        assert_eq!(mars.lid(), LidCrust::Secondary);
+        assert_eq!(mars.secondary(), Some(mars.provinces()));
+        assert_eq!(
+            crust_roles(&mars),
+            [
+                (PaletteRole::PrimaryCrust, mars.primary().unwrap()),
+                (PaletteRole::SecondaryCrust, mars.provinces()),
+            ]
+        );
+    }
 }

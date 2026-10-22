@@ -629,8 +629,8 @@ const fn material_inertia_j_per_m2_k_sqrt_s(material: SurfaceMaterial) -> f64 {
 /// Under air the law is a vacuum lower bound, with no pore gas: gas in the pores raises a
 /// regolith's conductivity well above the vacuum's, which P14.T49.l's pore-gas conductivity adds
 /// (decision-pre-23-review item 7). Mars's measured 180–250 (Mellon et al. 2000, Icarus 148, 437;
-/// Putzig et al. 2005, Icarus 173, 325; neither re-read) lies against its `basalt_fe` lid's 48
-/// here, and Titan's about 236 (MacKenzie et al. 2019, JGR Planets 124, 1728, as Batch D's science
+/// Putzig et al. 2005, Icarus 173, 325; neither re-read) lies against its `basalt_fe` lid's about
+/// 47 here at its `T_eq` (46.91 at the reference Mars's 206.9 K), and Titan's about 236 (MacKenzie et al. 2019, JGR Planets 124, 1728, as Batch D's science
 /// check gave it; not re-read: P14.T49.l re-reads MacKenzie 2019's tables before asserting it)
 /// against its ice's 57.
 ///

@@ -785,21 +785,27 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
     expect(surface.silicateVapour).toEqual({ kind: "not_modelled" });
   });
 
-  it("reads a Titan's lakes as its one condensate, a ch4_c2h6_n2 liquid, over an H2O lid with no melt (P14.T54.a)", () => {
+  it("reads a Titan's lakes as its one condensate, a ch4_c2h6_n2 liquid, and its surface liquid (P14.T54.a)", () => {
     const surface = okSection(
       recordOf(toBodyDetail(titanDetail(), FIXTURE_SYSTEM, DESIGNATION)).surface,
     );
     const lakes = condensatesIn(surface.condensates);
-    if (surface.crust.kind !== "value") {
-      throw new Error(`expected the Titan's crust, got ${surface.crust.kind}`);
-    }
 
     expect(lakes.map(({ substance, phase }) => [substance, phase])).toEqual([
       ["ch4_c2h6_n2", "liquid"],
     ]);
     expect(lakes[0]?.areaFraction).toBe(0.01);
     expect(surface.surfaceLiquids).toEqual([{ substance: "ch4_c2h6_n2", areaFraction: 0.01 }]);
-    expect(surface.gases.map((gas) => gas.species)).toEqual(["N2", "CH4"]);
+  });
+
+  it("reads a Titan's crust as an H2O lid whose melt area is 0 (P14.T54.a)", () => {
+    const surface = okSection(
+      recordOf(toBodyDetail(titanDetail(), FIXTURE_SYSTEM, DESIGNATION)).surface,
+    );
+    if (surface.crust.kind !== "value") {
+      throw new Error(`expected the Titan's crust, got ${surface.crust.kind}`);
+    }
+
     expect(surface.crust.value.primary).toBe("H2O");
     expect(surface.crust.value.lid).toBe("primary");
     expect(surface.crust.value.meltAreaFraction).toBe(0);

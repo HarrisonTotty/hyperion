@@ -281,6 +281,8 @@ describe("body_detail", () => {
 
     expect([surface.state, surface.surface_pressure_pa, surface.gases]).toEqual(["airless", 0, []]);
     expect(surface.crust?.melt_area_fraction).toBeGreaterThan(0);
+    // A world locked 1:1 whose night lies below its lid's solidus melts its dayside at most, half
+    // the surface (the sim's eyeball, `SurfaceConditions::cold_area`).
     expect(surface.crust?.melt_area_fraction).toBeLessThanOrEqual(0.5);
     // Every server before P14.T55.b leaves the melt's own vapour out.
     expect("silicate_vapour" in surface).toBe(false);
@@ -511,8 +513,8 @@ const HUYGENS_SURFACE_PA_ERROR = 100;
  * (Niemann et al. 2010, JGR 115, E12006, abstract; the Huygens Gas Chromatograph Mass
  * Spectrometer).
  */
-const NEAR_SURFACE_CH4 = 0.0565;
-const NEAR_SURFACE_CH4_ERROR = 0.0018;
+const NEAR_SURFACE_CH4_MOLE_FRACTION = 0.0565;
+const NEAR_SURFACE_CH4_MOLE_FRACTION_ERROR = 0.0018;
 
 /**
  * The share of Titan's surface under liquid, its lakes and seas alone: 0.85–1.07% (Hayes 2016,
@@ -521,11 +523,6 @@ const NEAR_SURFACE_CH4_ERROR = 0.0018;
  * decision-p14-t51a-part2's table). Lacustrine terrain, filled and empty, covers about 1.1%.
  */
 const LAKES_AREA_FRACTION = { min: 0.0085, max: 0.0107 };
-
-/** Whether `value` lies within `error` of `measured`. */
-function isWithin(value: number, measured: number, error: number): boolean {
-  return Math.abs(value - measured) <= error;
-}
 
 describe("body_detail's Titan, with its lakes (P14.T54.a)", () => {
   const titan = () => response("body_detail_titan", "body_detail").record;
@@ -545,12 +542,12 @@ describe("body_detail's Titan, with its lakes (P14.T54.a)", () => {
   it("holds the Huygens site's measured surface temperature and pressure", () => {
     const surface = okValue(titan().surface);
 
-    expect(
-      isWithin(surface.mean_surface_temperature_k, HUYGENS_SURFACE_K, HUYGENS_SURFACE_K_ERROR),
-    ).toBe(true);
-    expect(
-      isWithin(surface.surface_pressure_pa, HUYGENS_SURFACE_PA, HUYGENS_SURFACE_PA_ERROR),
-    ).toBe(true);
+    expect(Math.abs(surface.mean_surface_temperature_k - HUYGENS_SURFACE_K)).toBeLessThanOrEqual(
+      HUYGENS_SURFACE_K_ERROR,
+    );
+    expect(Math.abs(surface.surface_pressure_pa - HUYGENS_SURFACE_PA)).toBeLessThanOrEqual(
+      HUYGENS_SURFACE_PA_ERROR,
+    );
   });
 
   it("holds an air of N2 with the measured near-surface CH4, summing to 1", () => {
@@ -559,7 +556,9 @@ describe("body_detail's Titan, with its lakes (P14.T54.a)", () => {
     const sum = gases.reduce((total, gas) => total + gas.mole_fraction, 0);
 
     expect(gases.map((gas) => gas.species)).toEqual(["N2", "CH4"]);
-    expect(isWithin(methane, NEAR_SURFACE_CH4, NEAR_SURFACE_CH4_ERROR)).toBe(true);
+    expect(Math.abs(methane - NEAR_SURFACE_CH4_MOLE_FRACTION)).toBeLessThanOrEqual(
+      NEAR_SURFACE_CH4_MOLE_FRACTION_ERROR,
+    );
     expect(Math.abs(sum - 1)).toBeLessThanOrEqual(1e-9);
   });
 
@@ -570,7 +569,8 @@ describe("body_detail's Titan, with its lakes (P14.T54.a)", () => {
     expect(others).toEqual([]);
     expect([lakes?.substance, lakes?.phase]).toEqual(["ch4_c2h6_n2", "liquid"]);
     const area = lakes?.area_fraction ?? Number.NaN;
-    expect(area >= LAKES_AREA_FRACTION.min && area <= LAKES_AREA_FRACTION.max).toBe(true);
+    expect(area).toBeGreaterThanOrEqual(LAKES_AREA_FRACTION.min);
+    expect(area).toBeLessThanOrEqual(LAKES_AREA_FRACTION.max);
     expect(surface.surface_liquids).toEqual([{ substance: "ch4_c2h6_n2", area_fraction: area }]);
     expect(surface.ocean_fraction).toBe(area);
     expect(surface.climate_regime.condensable).toBe("CH4");

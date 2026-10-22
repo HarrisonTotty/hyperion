@@ -344,7 +344,11 @@ const PHYLLOSILICATE: Substance = Substance {
 /// safety cards give 851 °C; science-composition-crusts.md §4).
 ///
 /// Its normal albedo is the registry's, 1.092 in V, a stand-in (splib07a's trona GDS148),
-/// against its hand 0.65 before P14.T54.a.
+/// against its hand 0.65 before P14.T54.a. An `A_N` above 1 is physical for a bright
+/// backscattering regolith with an opposition surge, whose geometric albedos "approximate or
+/// exceed unity" (Verbiscer et al. 2007, Science 315, 815, as Batch E's science check gave it; not
+/// re-read), and lies under R10's ceiling of 1.35, its spherical energy albedo 0.907; it is the
+/// lunar fit's (single-scattering albedo w 0.12–0.33) extrapolated to w 0.998.
 const SODIUM_CARBONATE: Substance = Substance {
     key: SubstanceKey::new_const("Na2CO3"),
     grain_density_kg_m3: 2_540.0,
@@ -1216,7 +1220,7 @@ pub(crate) fn builder_of(inputs: &CoarseInputs) -> CoarseInputsBuilder {
         builder = builder.cold_trap_inputs(*group);
     }
     if let Some(inertia) = inputs.ground_inertia_j_per_m2_k_sqrt_s() {
-        builder = builder.ground_inertia(inertia);
+        builder = builder.ground_inertia_j_per_m2_k_sqrt_s(inertia);
     }
     builder
 }

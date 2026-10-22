@@ -1860,8 +1860,11 @@ mod tests {
                 "lid": "secondary",
                 "provinces": "basalt_reduced",
                 "redox": "reduced",
-                "mantle_redox_iw": record.mantle_delta_iw().value(),
-                "melt_area_fraction": record.melt_area_fraction(),
+                // The record's values at generator version 22, as literals, the protocol's
+                // fixture's (`body_detail_lava_world`), so that the pin does not read back what it
+                // pins.
+                "mantle_redox_iw": -6.5,
+                "melt_area_fraction": 0.249_954_828_560_677_97,
             })
         );
         let melt = record.melt_area_fraction();

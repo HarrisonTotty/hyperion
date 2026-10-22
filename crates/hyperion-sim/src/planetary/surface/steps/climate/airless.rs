@@ -305,6 +305,14 @@ impl Regolith {
     }
 }
 
+/// The thermal inertia Γ, J m⁻² K⁻¹ s^−½, that R09's radiative model reads for the body of
+/// `inputs` ([`Regolith::of`]'s), for the tests outside this module.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn regolith_inertia_of(inputs: &CoarseInputs) -> f64 {
+    Regolith::of(inputs).inertia_j_per_m2_k_sqrt_s
+}
+
 /// The thermal inertia Γ of a regolith whose crust's lid is `lid` on a bulk of `material`, at the
 /// temperature `temperature`, J m⁻² K⁻¹ s^−½ (P14.T54.a; decision-pre-23-review item 7): plan
 /// 14's ground's rule, P14.T49.j's law at the lid's row with P14.T24.a's constants as the fallback
@@ -2355,7 +2363,7 @@ mod tests {
         );
         // Inputs that carry a record's Γ take it, whatever their lid and temperature.
         let carried = reference::builder_of(&mars)
-            .ground_inertia(123.0)
+            .ground_inertia_j_per_m2_k_sqrt_s(123.0)
             .build()
             .unwrap();
         assert_same_bits(Regolith::of(&carried).inertia_j_per_m2_k_sqrt_s, 123.0);

@@ -4899,15 +4899,14 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
 ///   is the published pass's re-run (Batch D's review, D3-3). Where a pass's lid built its
 ///   record's conditions for its cometary test, reading none of its own, their warmest is its
 ///   record's, to the bit (D3-2).
-/// - **The radiative ground** (the six points' item 5; Batch D's review, D3-1 and PD-1): every
-///   airless body's record's mean surface temperature is its equilibrium temperature to the bit.
-///   Every body whose climate regime takes R09's radiative model
-///   (`ClimateModelKind::RadiativeEquilibrium`, airless and thin airs alike) has R09's regolith
-///   inertia at its record's crust's lid and mean surface temperature compared with its record's
-///   conditions' ground's: the same bits on every airless body (asserted), bracketed ones
-///   included; a thin air's, which R09 reads at its mean surface temperature and the record at
-///   `T_eq`, listed, not failed, until P14.T54.a's wire subtask carries the record's Γ into R09's
-///   inputs.
+/// - **The radiative ground** (the six points' item 5; Batch D's review, D3-1 and PD-1; Batch E's
+///   review, I1): every airless body's record's mean surface temperature is its equilibrium
+///   temperature to the bit. Every body whose climate regime takes R09's radiative model
+///   (`ClimateModelKind::RadiativeEquilibrium`, airless and thin airs alike) and whose inputs
+///   `for_body` reads has the Γ R09's model reads of them (`Regolith::of`) its record's
+///   conditions' ground's, the same bits (asserted), bracketed ones included: since Batch E's D3
+///   the inputs carry the record's Γ. The bodies `for_body` answers not modelled (no crust, an
+///   unlit record, an ice the registry has no density of) are counted.
 /// - **A column with nothing that condenses** reads no climate in its pass, and its θ is 0 to the
 ///   bit (R2-8).
 /// - **The per-pass trace** (§1.8; P14.T54.a's Batch E, D1): every body's solve, run again with each
@@ -4948,7 +4947,8 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     use crate::planetary::hooks::crust::{CrustLid, CrustLithology, LidCrust};
     use crate::planetary::hooks::figures::cover::water_surface_share;
     use crate::planetary::hooks::surface::OceanWeight;
-    use crate::planetary::surface::steps::climate::regolith_inertia_j_per_m2_k_sqrt_s;
+    use crate::planetary::surface::steps::climate::regolith_inertia_of;
+    use crate::planetary::surface::{CoarseInputs, ReadCoarseInputsError, SurfaceInputsError};
 
     /// What changed discretely during the passes of a settled body's trace `trace` (§1.8's listed,
     /// not counted; decision-pre-23-review items 17 and 22): its context's key from the third
@@ -5145,11 +5145,12 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     let (mut icy, mut crusts, mut climates_unread) = (0_u32, 0_u32, 0_u32);
     let mut differing_figures: Vec<String> = Vec::new();
     // The lid (C3): bodies with a lid, their lid flips settled and bracketed, the airless bodies
-    // and the radiative ones checked, those whose R09 inertia is not their record's (airless,
-    // asserted none; thin airs, listed), and the deferred warmest checked.
+    // and the radiative ones checked, those `for_body` reads (airless and under a thin air, each
+    // R09's Γ its record's, asserted) and those it answers not modelled (counted), and the deferred
+    // warmest checked.
     let (mut lids, mut airless, mut radiative, mut deferred) = (0_u32, 0_u32, 0_u32, 0_u32);
     let (mut settled_flips, mut bracketed_flips) = (Vec::<String>::new(), Vec::<String>::new());
-    let (mut airless_apart, mut thin_apart) = (Vec::<String>::new(), Vec::<String>::new());
+    let (mut airless_read, mut thin_read, mut radiative_unread) = (0_u32, 0_u32, 0_u32);
     // The per-pass trace's lists (§1.8): the jumps across the diagonal by class, the context
     // jumps by member, the settled bodies whose context changed discretely during their passes by
     // member (listed, not counted); and the cover rule with the water follow-up check.
@@ -5159,13 +5160,15 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     let mut settled_changes: Vec<String> = Vec::new();
     let mut cover = CoverRuleTally::default();
     // Tallies a derivation of the kind `kind`, re-run once at its published albedo and context as
-    // `again` re-runs it, its record's surface `surface`, the record of `id`.
+    // `again` re-runs it, its record's surface `surface`, the record of `id`, whose inputs
+    // `for_body` reads as `read_inputs` reads them.
     let mut tally =
         |kind: &'static str,
          derived: &DerivedBody,
          what: String,
          (id, surface): (crate::id::BodyId, Option<&Surface>),
-         again: &dyn Fn(PassDriver) -> (DerivedBody, Option<SpunRead>)| {
+         again: &dyn Fn(PassDriver) -> (DerivedBody, Option<SpunRead>),
+         read_inputs: &dyn Fn() -> Result<CoarseInputs, ReadCoarseInputsError>| {
             let tally = tallies.entry(kind).or_default();
             tally.bodies += 1;
             let passes = derived.atmosphere_passes();
@@ -5259,31 +5262,37 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
                     assert_same_bits(mean.value(), derived.equilibrium_temperature().value());
                     airless += 1;
                 }
-                // D3-1: R09's radiative model, airless or under a thin air, takes Γ at its crust's
-                // lid (the published pass's) and its mean T_s; the record's ground at the context's
-                // lid and T_eq.
+                // D3-1 and Batch E's review, I1: R09's radiative model, airless or under a thin
+                // air, reads the Γ of its inputs from `for_body`, the record's (D3's one Γ), on
+                // every body `for_body` reads; one it answers not modelled reads no inputs.
                 let model = conditions.climate_regime().map(|regime| regime.model());
                 if model == Some(ClimateModelKind::RadiativeEquilibrium) {
                     radiative += 1;
-                    let r09 = regolith_inertia_j_per_m2_k_sqrt_s(
-                        lid.map(|lid| lid.lithology()),
-                        surface.material(),
-                        mean,
-                    );
-                    let record = conditions.ground().inertia_j_per_m2_k_sqrt_s();
-                    if r09.total_cmp(&record).is_ne() {
-                        let listed = format!(
-                            "{what}: {:?}, R09's Γ {r09:.3} against the record's {record:.3}, \
-                             lids {:?} and the context's {:?}, {:?}",
-                            surface.state(),
-                            lid.map(|lid| lid.lithology()),
-                            spun.context().lid().map(|lid| lid.lithology),
-                            derived.convergence(),
-                        );
-                        if is_airless {
-                            airless_apart.push(listed);
-                        } else {
-                            thin_apart.push(listed);
+                    match read_inputs() {
+                        Ok(inputs) => {
+                            let r09 = regolith_inertia_of(&inputs);
+                            let record = conditions.ground().inertia_j_per_m2_k_sqrt_s();
+                            assert!(
+                                r09.total_cmp(&record).is_eq(),
+                                "{what}: {:?}, R09's Γ {r09} against the record's {record}, {:?}",
+                                surface.state(),
+                                derived.convergence(),
+                            );
+                            if is_airless {
+                                airless_read += 1;
+                            } else {
+                                thin_read += 1;
+                            }
+                        }
+                        Err(error) => {
+                            assert_eq!(
+                                error,
+                                ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(
+                                    RecordSection::Surface
+                                )),
+                                "{what}"
+                            );
+                            radiative_unread += 1;
                         }
                     }
                 }
@@ -5408,7 +5417,9 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
                 ),
                 (record.identity().id(), surface),
                 &again,
+                &|| CoarseInputs::for_body(&record, None, ctx),
             );
+            let parent = &record;
             for child in system.children(body.index) {
                 if !matches!(child.part, Part::Moon(_)) {
                     continue;
@@ -5454,6 +5465,7 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
                     ),
                     (record.identity().id(), surface),
                     &again,
+                    &|| CoarseInputs::for_body(&record, Some(parent), ctx),
                 );
             }
         }
@@ -5499,17 +5511,14 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     eprintln!(
         "lids: {lids} bodies with a lid on their record; lid flips during the passes, settled {} \
          (listed, not counted):\n  {}\nbracketed {}:\n  {}\n{airless} airless bodies, their mean \
-         T_s their T_eq to the bit; {radiative} under R09's radiative model, {} airless and {} \
-         under a thin air whose R09 inertia is not their record's:\n  {}\n  {}\n{deferred} \
-         published passes' lids read their record's warmest, deferred",
+         T_s their T_eq to the bit; {radiative} under R09's radiative model: {airless_read} \
+         airless and {thin_read} under a thin air read by `for_body`, R09's Γ their record's, \
+         and {radiative_unread} it answers not modelled; {deferred} published passes' lids read \
+         their record's warmest, deferred",
         settled_flips.len(),
         settled_flips.join("\n  "),
         bracketed_flips.len(),
         bracketed_flips.join("\n  "),
-        airless_apart.len(),
-        thin_apart.len(),
-        airless_apart.join("\n  "),
-        thin_apart.join("\n  "),
     );
     eprintln!(
         "the jumps across the diagonal by class (state edge, lid flip, onset, cover flip):\n  {}\n\
@@ -5548,8 +5557,14 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     // (`an_enceladus_takes_its_fresh_frost_near_0_8`,
     // `a_pluto_and_a_triton_given_their_ices_take_their_bond_albedos`).
     const { assert!(OPTICS_BANDS > 3, "the anchors read more than three bands") };
-    // PD-1: R09's airless model reads its record's Γ on every airless body, bracketed ones too.
-    assert!(airless_apart.is_empty(), "{airless_apart:?}");
+    // PD-1 and I1: R09's radiative model read its record's Γ on every body `for_body` reads,
+    // bracketed ones too, airless and under a thin air (asserted body by body above).
+    assert!(
+        airless_read > 0
+            && thin_read > 0
+            && airless_read + thin_read + radiative_unread == radiative,
+        "{airless_read} airless, {thin_read} thin, {radiative_unread} not modelled of {radiative}"
+    );
     // The ruling's measures, over all bodies (decision-p14-t54a-passes §1.8 and item 5): at most
     // 1% jumping, a diagonal or a context jump, at most 3% bracketed. Above either goes to main.
     assert!(100 * jumps <= total, "{jumps} of {total} jump");
@@ -6960,7 +6975,9 @@ fn generation_s_dead_derivations_move_no_bit_of_the_sample() {
 const GOLDEN_SYSTEMS_SEED: u64 = 0x5eed_0000_0014_0032;
 
 /// The golden systems of `tests/planetary_golden.rs` (its `GOLDEN_SYSTEMS`, P14.T32) by name and
-/// pinned ID, whose `planetary/systems` goldens pin them: the census's fixtures.
+/// pinned ID, whose `planetary/systems` goldens pin them: the census's fixtures. A copy, since an
+/// integration test's items are not the library's; `the_golden_systems_are_the_golden_test_s`
+/// holds it to the original, in order.
 const GOLDEN_SYSTEMS: [(&str, u64); 15] = [
     ("m_dwarf_resonant_chain", 0x0200_2b2c_a000_0000),
     ("hot_jupiter", 0x41fc_ecba_0000_0006),
@@ -7000,6 +7017,58 @@ fn golden_systems() -> &'static [(&'static str, SystemContext, PlanetarySystem)]
             })
             .collect()
     })
+}
+
+/// Batch E's review, R9: [`GOLDEN_SYSTEMS`] and [`GOLDEN_SYSTEMS_SEED`] are the golden test's own,
+/// `tests/planetary_golden.rs`'s `GOLDEN_SYSTEMS` (each name and pinned ID, in order) and
+/// `SYSTEMS_SEED`, as its source states them.
+#[test]
+fn the_golden_systems_are_the_golden_test_s() {
+    let source = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/planetary_golden.rs"
+    ));
+    // A pinned ID as the source writes it, in groups of four hexadecimal digits.
+    let literal = |value: u64| {
+        let hex = format!("{value:016x}");
+        format!(
+            "0x{}_{}_{}_{}",
+            &hex[0..4],
+            &hex[4..8],
+            &hex[8..12],
+            &hex[12..16]
+        )
+    };
+    let seed = format!(
+        "const SYSTEMS_SEED: u64 = {};",
+        literal(GOLDEN_SYSTEMS_SEED)
+    );
+    assert!(source.contains(&seed), "{seed}");
+    let (_, list) = source
+        .split_once("const GOLDEN_SYSTEMS: [GoldenSystem; 15] = [")
+        .expect("the golden test's list");
+    let (list, _) = list.split_once("\n];").expect("the list's end");
+    let found: Vec<(String, String)> = list
+        .split("GoldenSystem {")
+        .skip(1)
+        .map(|entry| {
+            let field = |name: &str| {
+                entry
+                    .lines()
+                    .find_map(|line| line.trim().strip_prefix(name))
+                    .map_or_else(
+                        || panic!("an entry without its {name}: {entry}"),
+                        |value| value.trim_end_matches(',').to_owned(),
+                    )
+            };
+            (field("name: "), field("id: "))
+        })
+        .collect();
+    let expected: Vec<(String, String)> = GOLDEN_SYSTEMS
+        .iter()
+        .map(|&(name, id)| (format!("\"{name}\""), literal(id)))
+        .collect();
+    assert_eq!(found, expected);
 }
 
 /// A body derived again under a driver, with its published pass's publication.

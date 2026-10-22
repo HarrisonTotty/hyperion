@@ -171,7 +171,7 @@
 pub mod history;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 pub use crate::planetary::surface::LidCrust;
 pub use history::{

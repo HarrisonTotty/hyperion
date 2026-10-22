@@ -6827,8 +6827,13 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - R09's `for_body` reads `crust`, `condensates` and the palette's sources (T49.b–c's rows, R11's
     liquid members included) from the record, on R09.T10.e's reading of the other sections, with
     R09.T10.f's signature, `for_body(record, planet, ctx)`, frozen at 23 (decision-backlog-2 §3). It
-    answers `Ok` for generated solid bodies. Both records are taken at `RECORD_TIME`, the epoch, the
-    sim's constant since R09.T10.e, so the record's time is settled (decision-backlog-2 §3).
+    answers `Ok` on 85.5% of the 400 systems' solid bodies (5,109 of 5,978); the rest refuse,
+    labelled: 850 hold an `Ar` ice (the registry's fcc phase has no density read), 1 an `O2` ice at
+    23.9 K (a solid phase with no density), 18 unlit records with a mean T_s of 0 K (already so at
+    22). Main's ruling (2026-10-22): a labelled refusal is a valid state at 23; the follow-ups,
+    P14.T49.b's rows (solid Ar's measured density, O₂'s missing phase) and the unlit 0 K mean, are
+    on 24's serve-gate list. Both records are taken at `RECORD_TIME`, the epoch, the sim's constant
+    since R09.T10.e, so the record's time is settled (decision-backlog-2 §3).
     An airless body's palette carries no cold-trapped `Ice` entry until P14.T51.f, wired by T54.b,
     since no condensate on the record names one. The bless note records it, the census (T33.c)
     lists cold-trapped `H2O` and `CO2` as unreached until then, and where a console row shows an
@@ -6858,12 +6863,12 @@ feeding back into p_s, T_s, the albedo or the bulk.
     `header_pressure` already writes, so `for_body` need not; a `Tenuous` body keeps its positive
     pressure once P14.T53.c gives that state (decision-r11-palette-liquids §2 item 5; rendering plan
     R09's Risks, "Deviations in T2.e, as built").
-  - _The serve gate._ At 23 `for_body` is `Ok` in the sim, but the server's `RecordInputs` keeps
-    answering generated bodies `not_modelled` until the gate's version. T54.a adds the gate, a
-    constant with a tripwire in `crates/hyperion-server/src/surface/inputs.rs` (for example
-    `GENERATED_SURFACES_FROM` = 24). It opens at the first bump after R09.T16 has landed and
-    R11's liquid members are in the codec, expected to be 24; otherwise the wiring lane raises the
-    constant to the next bump. "Main" may open it at an earlier bump if an R10 task needs a
+  - _The serve gate._ At 23 `for_body` is `Ok` in the sim (but for the labelled refusals above),
+    but the server's `RecordInputs` keeps answering generated bodies `not_modelled` until the
+    gate's version. T54.a adds the gate, a constant with a tripwire in
+    `crates/hyperion-server/src/surface/inputs.rs` (for example `GENERATED_SURFACES_FROM` = 24).
+    It opens at the first bump after R09.T16 has landed and R11's liquid members are in the codec,
+    expected to be 24; otherwise the wiring lane raises the constant to the next bump. "Main" may open it at an earlier bump if an R10 task needs a
     generated world served sooner. Until it opens, R09 and R10 changes re-bless at the version in
     force with no bump (Generator version, the serve gate's bullet).
   - `saturation` and `substance_albedo` are restamped `--since 23` with the fit tool, and
@@ -6892,7 +6897,17 @@ feeding back into p_s, T_s, the albedo or the bulk.
     `planetary/surface/inputs.rs`, `planetary/moons/mod.rs`,
     `planetary/derive/{mod, atmosphere}.rs`, `crates/hyperion-base/src/version.rs`, and the goldens.
   - _Accept:_ `cargo test -p hyperion-sim planetary::record`; `cargo test -p hyperion-server convert`;
-    `just gen-protocol-check`; the golden tests.
+    `just gen-protocol-check`; the golden tests. Batch E's tests (P14.T54.a's D1–D4 and their
+    review fixes) by these filters: `cargo test -p hyperion-sim --lib planetary::surface`,
+    `cargo test -p hyperion-sim --lib planetary::system` and
+    `cargo test -p hyperion-sim --lib planetary::hooks::figures::cover`;
+    `cargo test -p hyperion-server surface::inputs` and `cargo test -p hyperion-server convert`;
+    the ignored tests by name, G1 (`the_passes_endings_over_the_whole_sample_are_recorded`) and
+    the census (`the_states_and_the_dark_thick_airs_are_recorded`), with G2
+    (`a_moon_s_law_is_held_after_at_most_two_rounds`, under `planetary::system`); and the client's
+    vitest files `apps/hyperion/src/renderer/src/displays/system/SystemView.bodies.test.tsx`,
+    `apps/hyperion/src/renderer/src/lib/system/bodiesWire.test.ts` and
+    `packages/protocol/src/planetary.test.ts`.
 - **P14.T54.b The 23 → 24 batch on the record, and its bump.** As T54.a, for T51.d's
   `modifiers`, T51.e's types, T51.f's cold-trapped condensates (each giving its body's palette an
   `Ice` entry, removing T54.a's label), T51.g's `subsurface_ocean` for every body (deleting
@@ -7419,7 +7434,8 @@ it:
     through `condensate_extinction` and so bumps, from 24; before 24 the table is refitted with no
     bump, since nothing on the record reads it (updated 2026-10-15).
   - The serve gate (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15). At 23 R09's
-    `for_body` is `Ok` in the sim, but the server's `RecordInputs` keeps answering generated
+    `for_body` is `Ok` in the sim (but for P14.T54.a's labelled refusals, main's ruling of
+    2026-10-22), but the server's `RecordInputs` keeps answering generated
     bodies `not_modelled` until the gate's version, a constant with a tripwire in
     `crates/hyperion-server/src/surface/inputs.rs` that P14.T54.a adds (for example
     `GENERATED_SURFACES_FROM` = 24). It opens at the first bump after R09.T16 has landed and R11's
@@ -23279,7 +23295,10 @@ planetary::record` (624 tests at T57.a's commit).
         `for_body` (D3) carries the record's Γ into R09's inputs, so that the two read one Γ (§3.5).
         From Batch D's fix commit the test takes every body under R09's radiative model
         (`ClimateModelKind::RadiativeEquilibrium`), asserts the airless ones' Γ the record's and
-        lists the thin airs' (D3-1, PD-1).
+        lists the thin airs' (D3-1, PD-1). From Batch E's review fixes (I1) it reads each such
+        body's inputs from `for_body` and asserts the Γ R09's model reads of them (`Regolith::of`)
+        its record's on every one `for_body` reads, airless and thin airs alike, no longer listing
+        the thin airs, and counts those `for_body` answers not modelled.
       - The guards, re-based by main on C2's escalation: planets jumping, 5 of the sample's 226
         (C2's 5), is pinned at it, and the 2% guard is asserted over the 400 systems
         (`the_passes_endings_over_the_whole_sample_are_recorded`);
@@ -23570,7 +23589,8 @@ planetary::record` (624 tests at T57.a's commit).
         (`ClimateModelKind::RadiativeEquilibrium`, airless and thin airs alike), asserts the airless
         ones' Γ the record's, bracketed ones included (PD-1), and lists the thin airs', which R09
         reads at its mean T_s and the record at T_eq; `regolith_inertia_j_per_m2_k_sqrt_s`'s doc
-        says so, and C3's deviations record the lid's two readings.
+        says so, and C3's deviations record the lid's two readings (since Batch E's I1 the test
+        reads `for_body`'s inputs and asserts the thin airs too).
       - D3-2: `spun_read` traces beside each pass's lid the warmest it built of its record's
         conditions where it read none of its own, and test 11 holds the published pass's to its
         record's `climate_range().1`, to the bit.
@@ -23724,11 +23744,27 @@ planetary::record` (624 tests at T57.a's commit).
       - The water check reads each liquid's condensate's `lies_at`; the record's `Surface` carries
         no partition, so it runs where the published pass's is at hand (the re-check, the census),
         not in the snapshot walk.
+      - The census's escalations, none tripped: nine `Snowball`s above 273.15 K, 3 in the sample
+        and 6 in the goldens, each CO₂-led; none of the sample's 3 was cold at 22, and one golden,
+        subgiant .0402, went from 121.39 to 291.60 K; no `Airless` at or above 100 Pa.
+      - Item 26's 77 second starts: 4 bistable, the four magma oceans at 22 that publish
+        `RunawayGreenhouse`, each of which settles a `MagmaOcean` at 1,434–1,456 K from 0.10 where
+        the generator's 0.3 picks the runaway; 73 single-branch, subgiant .0402 among them.
+      - E2's Pluto, 0.846, lies at or above its range's top (`AtOrAboveItsTop`), item 19's
+        recorded miss.
+      - The table's air: Mars under 109.9 hPa, against the measured 6.36 mb (NASA's Mars fact
+        sheet), and Earth under 0.7685 bar; not this batch's.
+      - The census's golden systems are a test-only copy of `tests/planetary_golden.rs`'s list,
+        since an integration test's items are not the library's; Batch E's review fixes (R9) hold
+        it to the original, in order (`the_golden_systems_are_the_golden_test_s`).
     - _Findings_ (recorded, not blockers): 15 runaway greenhouses outside the present runaway
       limit in the sample, all about substellar hosts (brown dwarfs at 1,184–2,811 K, Σ F ÷ S_eff
       now 0.0075–0.55, 12 at 64–135 K), against item 33's "1 of 954, post-main-sequence hosts
       only": the same history-set runaway (a host's youth), none inside the present limit (no
-      escalation), for P14.T53.b's present-insolation rule. The dark-thick-air class is 4 golden
+      escalation), for P14.T53.b's present-insolation rule. For the brown dwarfs S_eff is held at
+      the 2,600 K end of Kopparapu et al. 2013's fit, whose range is 2,600–7,200 K; extrapolated,
+      the top ratio would rise from 0.547 to 0.638, still outside. Item 33 goes to P14.T53.b
+      (main). The dark-thick-air class is 4 golden
       bodies at C3 (13 at C2): C3's brighter lids lifted 9 above 0.1, still below their Rayleigh
       layers. `condensate_of`'s 23 fallback phases are solids on airless bodies whose partial
       pressures are 10⁻¹⁵⁶–10⁻³¹⁶ Pa, some subnormal (a value read on no wire; recorded for the
@@ -23742,9 +23778,9 @@ planetary::record` (624 tests at T57.a's commit).
       earlier, by name, `an_enceladus_takes_its_fresh_frost_near_0_8` and
       `a_pluto_and_a_triton_given_their_ices_take_their_bond_albedos` (E2's anchors), and G1 and G2
       (`the_passes_endings_over_the_whole_sample_are_recorded`, ignored, and
-      `a_moon_s_law_is_held_after_at_most_two_rounds`; `d1/g1g2.log`); Clippy `-p hyperion-sim
---lib --tests -D warnings` (clean); rustfmt; `golden_diff.py` ("No golden files changed").
-      Not run: the slow tier, the gate (the lane's).
+      `a_moon_s_law_is_held_after_at_most_two_rounds`; `d1/g1g2.log`); Clippy
+      `-p hyperion-sim --lib --tests -D warnings` (clean); rustfmt; `golden_diff.py` ("No golden
+      files changed"). Not run: the slow tier, the gate (the lane's).
   - _Batch E's D3, `for_body` on the record, the palette's resolution, R09's rows, one Γ and the
     serve gate_ (batch-e-briefs "D3"; plan 14's T54.a bullets "R09's `for_body` reads …", "The
     palette resolution fills each `Liquid` entry's record, …", "The header's `surface_pressure`"
@@ -23757,9 +23793,10 @@ planetary::record` (624 tests at T57.a's commit).
       provinces, the melt area). `From<&CondensateEntry> for Condensate`, with
       `From<partition::CondensatePhase>`, takes every published condensate. `palette::resolve`
       gives the palette. All three go to `from_record` with the record's seasons. It answers `Ok`
-      for every generated body with a solid surface but the recorded gaps below, which answer
-      `NotModelled(Surface)`, the body's own state: a crust not modelled, a record whose mean T_s
-      is not positive, and a substance the registry does not resolve. `ctx` stays unread. Its doc
+      on 85.5% of the 400 systems' solid bodies (5,109 of 5,978). The rest, the recorded gaps
+      below, answer `NotModelled(Surface)`, labelled, the body's own state: a crust not modelled,
+      a record whose mean T_s is not positive, and a substance the registry does not resolve. Main's
+      ruling (2026-10-22): a labelled refusal is a valid state at 23. `ctx` stays unread. Its doc
       example, which showed `NotModelled(Surface)`, now reads the moon `Ok`; `from_record`'s
       example ends with `for_body` `Ok`.
     - _The palette's resolution_ (new `planetary/surface/palette.rs`, crate-private):
@@ -23796,7 +23833,8 @@ planetary::record` (624 tests at T57.a's commit).
         solidus, else the warmest. Either way it is held at or above the solidus.
       - Phase rows 0–2 only. `FeO_T` is not modelled (decision-pre-23-review item 36).
     - _One Γ_: `CoarseInputs` gains `ground_inertia_j_per_m2_k_sqrt_s` (an `Option`, set by the
-      builder's `ground_inertia` and checked positive).
+      builder's `ground_inertia`, `ground_inertia_j_per_m2_k_sqrt_s` since Batch E's R5, and
+      checked finite and positive).
       - `from_record` fills it from the record's conditions' ground (`SurfaceConditions::ground`;
         its `expect(dead_code)` is gone, a lane-approved edit to `hooks/surface.rs`).
       - `Regolith::of` reads it, so R09's Γ is the record's by construction on every body, thin
@@ -23804,7 +23842,9 @@ planetary::record` (624 tests at T57.a's commit).
       - Hand-built inputs (no record's Γ) take T49.j's law at their lid at their equilibrium
         temperature (`equilibrium_temperature`: `irradiation::equilibrium_temperature` at the
         state's albedo, the one `Regolith` takes).
-      - `regolith_inertia_j_per_m2_k_sqrt_s` keeps its signature, since D1's listing calls it.
+      - `regolith_inertia_j_per_m2_k_sqrt_s` keeps its signature, since D1's listing called it
+        (since Batch E's I1 the listing reads `Regolith::of` through the test-only
+        `regolith_inertia_of`).
       - The reference Mars's Γ moves from 48.082 (the law at its mean, 214.00 K) to 46.913 (at its
         T_eq, 206.91 K). The Moon's 46.526 at 270.35 K is unchanged to the bit, its mean being its
         T_eq; so is Ceres's.
@@ -23821,8 +23861,9 @@ planetary::record` (624 tests at T57.a's commit).
       airless bodies in its 40 systems).
     - _The serve gate_ (`crates/hyperion-server/src/surface/inputs.rs`): `GENERATED_SURFACES_FROM` =
       24, crate-private. `RecordInputs` answers as `for_body` does but turns its `Ok` into
-      `NotModelled(Surface)` below the gate's version, so the server's answers are 22's. Its
-      tripwire is `the_serve_gate_holds_until_its_version`.
+      `NotModelled(Surface)` below the gate's version, so the server's answers are 22's (from
+      Batch E's DE3, every refusal 22 never gave too). Its tripwire is
+      `the_serve_gate_holds_until_its_version`.
     - _Deviations and lane choices_ (the lane's ruling, Batch E):
       - **Not modelled where the registry or the record does not model.** Over the 400 systems of
         `system::tests::whole` at `RECORD_TIME`, 5,978 bodies have a surface section, every crust
@@ -23833,12 +23874,13 @@ planetary::record` (624 tests at T57.a's commit).
         - 1: an `O2` ice at 23.9 K, in a solid phase whose density was not read;
         - 18: a record whose mean T_s is 0 K, an unlit body's T_eq, below its own night floor
           (its range 12–20 K). This is pre-existing at 22 (the lane: fallback_black_hole e101 at
-          446a06e4), and goes to main as deferred.
+          446a06e4).
 
         No stand-in densities. The label is the palette's refusal
         (`ResolveBodyPaletteError::Solid` naming the substance and `DensityNotModelled`), since
-        `for_body`'s error type carries no cause. The follow-up is the registry's (P14.T49.b's
-        rows): solid argon's density and O₂'s missing phase.
+        `for_body`'s error type carries no cause. Main's ruling (2026-10-22): a labelled refusal is
+        a valid state at 23; the follow-ups, P14.T49.b's rows (solid Ar's measured density, O₂'s
+        missing phase) and the unlit 0 K mean, are on 24's serve-gate list.
 
       - The liquids' and melts' temperature rules are as above. The record gives no liquid's own
         area-mean temperature, and no eruption temperature (P14.T51.c).
@@ -23847,6 +23889,24 @@ planetary::record` (624 tests at T57.a's commit).
       - The sample: liquid seas of `H2O` on 52 bodies, `N2` on 42, `O2` on 33 and `ch4_c2h6_n2` on
         171, each resolved. 72 melting lids carry melt records: `ultramafic` 69, `basalt_reduced`
         2 and `basalt` 1.
+      - The melt's ruled temperature reads the climate range's warmest, while T51.c's melt area
+        reads the cold profile at the solidus. Where they disagree the record is held at the
+        solidus: the sample's `basalt_reduced` pool, its warmest 1,403.9 K against a 1,473.2 K
+        solidus, about 7 K low against the pool's own area mean (the science check: negligible).
+      - The partition's own temperature for a condensate (`Partitioned::lies_at`) is not on the
+        record's `CondensateEntry`, so each liquid takes the record's mean T_s.
+      - `for_body`'s refusal carries no cause, its enum frozen at 23; the palette's refusal names
+        it (`palette_not_modelled` since Batch E's R1, which also answers a palette of more
+        substances than `MaterialPalette::MAX_ENTRIES` not modelled, a documented gap).
+      - `RecordInputs` behind the serve gate answers only the refusals 22 gave, the surface tag's
+        and the planet's, and every other answer `NotModelled(Surface)` (Batch E's DE3).
+      - R09's reference `Substance` rows keep their hand figures as dead fields
+        (`expect(dead_code)` outside the tests).
+      - Water ice's transition is now the registry's 273.16 K (the row's 273.15 K; the test's
+        tolerance 0.011 K), and CO₂ ice's density at 150 K 1,621.4 kg m⁻³ against the row's
+        1,621.
+      - The reference Mars's Γ moves from 48.08 to 46.91 at its T_eq, 206.9 K: a vacuum lower bound
+        against Mars's measured 180–250 (Mellon et al. 2000; Putzig et al. 2005; not re-read).
     - _Tests_:
       - `a_generated_rocky_body_reads_its_record_and_a_giant_or_sub_neptune_has_no_solid_surface`
         (was `…_is_not_modelled_…`) now pins `Ok`. Its crust, condensates and Γ are the record's
@@ -23954,7 +24014,9 @@ planetary::record` (624 tests at T57.a's commit).
       - `a_crust_s_wire_form_is_pinned` (rust-dev's wire-form rule): every sent crust's JSON is
         the nine members, keys or `null`, the two snake-case names and two numbers, and reads back
         equal. The close binary's e201, a locked airless lava world with a dayside pool (melt
-        0.2500, `basalt_reduced`, `reduced`, ΔIW −6.5), is pinned whole.
+        0.2500, `basalt_reduced`, `reduced`, ΔIW −6.5), is pinned whole. Since Batch E's I3 its
+        ΔIW and melt area are pinned as literals, the record's at 22 and the fixture's, −6.5 and
+        0.24995482856067797, not read back from the record.
       - `every_key_the_server_sends_is_a_registry_key` takes the crust's keys.
       - The golden systems hold the test's names: a re-pin of the systems re-pins e201's literal
         strings.
@@ -23971,40 +24033,37 @@ planetary::record` (624 tests at T57.a's commit).
       0200's `komatiite` is a hot young mantle's lava, not present-day Earth's MORB. The Titan
       takes 1101's form, `H2O` with no secondary. The generator's `komatiite` under a Titan-sized
       shell is T51.c's deferred finding (the conductive sphere melts large icy bodies' rock). The
-      real Titan's moment of inertia, 0.3414 (Iess et al. 2010), points to incomplete
-      differentiation.
-    - _The protocol's fixture tests_ (D4's patch, applied here; the files are D2's):
-      `record/surface.rs`'s tests gain `earth_crust()`, the fixture Earth's crust, re-exported in
-      `record.rs`. `requests.rs`'s `every_shared_fixture_is_exactly_a_wire_form` counts 13
-      messages (D4's lava world and Titan), and
-      `the_shared_slice_fixture_holds_the_wire_forms_pinned_here` sets the slice Earth's crust.
+      real Titan's moment of inertia factor, about 0.34 (Iess et al. 2010's abstract), points to
+      incomplete differentiation.
     - _Moved goldens:_ none. `planetary_golden` (10 passed, 1 ignored, the search), `crust.golden`
       (`the_crust_values_are_pinned`), and the server's `system_bodies`, `systems_in_range` and
       `--lib scene` pass unblessed. No server golden holds a surface section; the crust reaches
       `body_detail` alone. golden_diff over the tree: see `d2/golden_diff.txt`.
     - _Files:_ `planetary/hooks/crust.rs` and `hooks/crust/tests.rs` (the ΔIW field and accessor
       only, by the lane's ruling), `crates/hyperion-protocol/src/planetary/record/surface.rs`
-      (docs and the tests' `earth_crust`), `planetary/record.rs` and `planetary/requests.rs`
-      (tests), `packages/protocol/src/generated/{CrustCompositionDto,BodySurfaceDto}.ts`
-      (regenerated), and `crates/hyperion-server/src/convert/planetary.rs`.
-    - _Checks:_ the server's `cargo test -p hyperion-server convert` (76 passed, 1 ignored, in `--lib`;
-      the integration targets hold no `convert` test), `--test system_bodies` (2), `--test
-systems_in_range` (3) and `--lib scene` (37 passed, 2 ignored); `cargo test -p
-hyperion-protocol` (481 and 10 doctests); the sim's `--lib planetary::hooks::crust` (38,
-      `the_crust_values_are_pinned` among them) and `--test planetary_golden` (10 passed, 1
-      ignored); the bindings' check over the protocol (`_gen-protocol-check-for -p
-hyperion-protocol`, clean after `just gen-protocol`); Clippy `--all-targets` on the server
-      and the protocol, and `--lib --tests` on the sim, which is clean in D2's files (its five
-      failures were in D1's edits in progress, relayed); rustdoc with `-D warnings` on the sim,
-      the protocol and the server; rustfmt; golden_diff (no golden changed). Not run: the slow
-      tier, the gate.
+      (docs), `packages/protocol/src/generated/{CrustCompositionDto,BodySurfaceDto}.ts`
+      (regenerated), and `crates/hyperion-server/src/convert/planetary.rs`. The protocol's
+      fixture tests D2 changed to match D4's fixture (`record.rs`, `requests.rs` and
+      `record/surface.rs`'s `earth_crust()`) are in D4's commit, 8b42db3f (D4's sub-bullet).
+    - _Checks:_ the server's `cargo test -p hyperion-server convert` (76 passed, 1 ignored, in
+      `--lib`; the integration targets hold no `convert` test), `--test system_bodies` (2),
+      `--test systems_in_range` (3) and `--lib scene` (37 passed, 2 ignored);
+      `cargo test -p hyperion-protocol` (481 and 10 doctests); the sim's
+      `--lib planetary::hooks::crust` (38, `the_crust_values_are_pinned` among them) and
+      `--test planetary_golden` (10 passed, 1 ignored); the bindings' check over the protocol
+      (`_gen-protocol-check-for -p hyperion-protocol`, clean after `just gen-protocol`); Clippy
+      `--all-targets` on the server and the protocol, and `--lib --tests` on the sim, which is
+      clean in D2's files (its five failures were in D1's edits in progress, relayed); rustdoc
+      with `-D warnings` on the sim, the protocol and the server; rustfmt; golden_diff (no golden
+      changed). Not run: the slow tier, the gate.
   - _Batch E's D4, the client's melt rule and the fixture's Titan and crusts_ (plan 14's T54.a
     bullets "_The client's melt rule_" and _Tests_' "the protocol fixture gains a Titan with its
     lakes"; decision-pre-23-review, "T54.a's brief items", item 4's last two). TypeScript and the
     shared fixture only; no golden moves.
     - _The rule_ (`displays/system/BodyRecordReadings.tsx`, `holdsMelt`): a surface holds melt in
-      the state `magma_ocean` or where its crust is on the wire with a `melt_area_fraction` above 0. A crust not modelled (every server before the batch) adds no melt, and an ice lid's 0
-      adds none. T51.c's locked lava world, `airless` with a dayside pool, reads
+      the state `magma_ocean` or where its crust is on the wire with a `melt_area_fraction`
+      above 0. A crust not modelled (every server before the batch) adds no melt, and an ice
+      lid's 0 adds none. T51.c's locked lava world, `airless` with a dayside pool, reads
       `SURFACE PRESSURE —`, `MOLE FRACTION —` and `SILICATE VAPOUR NOT YET MODELLED` beside
       `EXOSPHERE NOT YET MODELLED`, each on its own line; with its vapour computed as none it
       reads `NONE` twice and `EXOSPHERE` alone. `steam_envelope` stays P14.T53.b's. The doc
@@ -24029,9 +24088,10 @@ hyperion-protocol`, clean after `just gen-protocol`); Clippy `--all-targets` on 
         mass, state, empty air and mean surface temperature of the golden lava world (899 km,
         9.29 × 10²¹ kg, `airless`, 1,238.7 K): its mean the emission mean, its T_eq at a Bond
         albedo of 0.11, which puts it at 0.0476 au, below the silicate solidus's 1,394 K
-        (Hirschmann 2000), its substellar point √2 times that, 1,751.8 K; its contrasts the
-        eyeball's (equator–pole 727.7 K, day–night 1,351.4 K at a 50 K night floor); no
-        condensates, no `silicate_vapour` key, and its crust's melt area 0.2500.
+        (Hirschmann 2000), its substellar point √2 times that, 1,751.8 K; its contrasts golden
+        close_binary `…e201`'s at the epoch (equator–pole 358.6407831931724 K, day–night
+        1,561.5814796652073 K; since Batch E's review fixes, T5, below), not a by-hand eyeball's;
+        no condensates, no `silicate_vapour` key, and its crust's melt area 0.2500.
       - `body_detail_titan` (id 31), `…0601`, a regular moon of a Saturn (`…0600`) the slice does
         not list, at 9.5826 au: `snowball`, `ice`, its surface at the Huygens site's measured
         93.65 ± 0.25 K and 1,467 ± 1 hPa (Fulchignoni et al. 2005, Nature 438, 785, abstract,
@@ -24061,6 +24121,11 @@ hyperion-protocol`, clean after `just gen-protocol`); Clippy `--all-targets` on 
       crust and the lava world, pins the Titan's figures within their stated errors, each
       constant citing its source, and pins its crust's lack of a melted-rock member beside Iess
       et al. 2010's moment of inertia.
+    - _The protocol's fixture pins_ (D4's `d4/protocol-tests-for-d2.patch`, applied by D2, in
+      this commit): `record/surface.rs`'s tests gain `earth_crust()`, the fixture Earth's crust,
+      re-exported in `record.rs`; `requests.rs`'s `every_shared_fixture_is_exactly_a_wire_form`
+      counts 13 messages (the lava world and the Titan), and
+      `the_shared_slice_fixture_holds_the_wire_forms_pinned_here` sets the slice Earth's crust.
     - _Deviations and lane choices:_
       - The client's surface tests read the lava world's and the Titan's surface sections on the
         Earth's row, the existing `e101Earth` pattern, rather than listing the two bodies in the
@@ -24068,11 +24133,14 @@ hyperion-protocol`, clean after `just gen-protocol`); Clippy `--all-targets` on 
         (`useSystemView`), and listing the Titan needs a Saturn in the answer.
       - `packages/protocol/src/planetary.test.ts` is no lane's by the ownership list; D4 edited it
         with the fixture it reads.
-      - The protocol crate's fixture tests are D2's files, and D2 changed them to match:
-        `every_shared_fixture_is_exactly_a_wire_form` counts 13 messages, and
-        `the_shared_slice_fixture_holds_the_wire_forms_pinned_here` pins the Earth's crust
-        (`earth_crust()` in `record/surface.rs`'s tests), from D4's
-        `d4/protocol-tests-for-d2.patch`.
+      - The protocol crate's fixture tests are D2's files by the ownership list; D2 changed them
+        to match, from D4's `d4/protocol-tests-for-d2.patch`, and they are committed here with
+        the fixture they read (the fixture pins above).
+      - No console row reads the condensates at 23, so the airless cold-trap label (T54.a's
+        bullet "R09's `for_body` reads …") has no row yet; P14.T43.b's `SURFACE` rows carry it
+        once they read the condensates.
+      - UX's two items for main's sign-off agent, 24's riders: what `AIRLESS` means beside a
+        dayside melt pool, and a name for the melt-area reading.
       - R08's view note (Design note 12, and R08.T10.a's text) reads the same rule: "Holds melt"
         is `magma_ocean` or, from P14.T54.a, a `crust.melt_area_fraction` above 0, and the note
         stands on its own line beside `EXOSPHERE: NOT YET MODELLED` on an `airless` body with a
@@ -24080,10 +24148,12 @@ hyperion-protocol`, clean after `just gen-protocol`); Clippy `--all-targets` on 
         guide's `SILICATE VAPOUR` rows say "as a `MAGMA OCEAN`'s does", an example, and its view
         row already names the airless pool; no guide edit.
     - _Moved goldens:_ none.
-    - _Files:_ `apps/hyperion/src/renderer/src/displays/system/{BodyRecordReadings.tsx,
-SystemView.bodies.test.tsx}`, `lib/system/bodiesWire.test.ts`, `test/planetaryFixture.ts`
-      (`lavaWorldDetail`, `titanDetail`), `packages/protocol/fixtures/planetary.json`,
-      `packages/protocol/src/planetary.test.ts`.
+    - _Files:_ under `apps/hyperion/src/renderer/src/`, `displays/system/BodyRecordReadings.tsx`
+      and `SystemView.bodies.test.tsx`, `lib/system/bodiesWire.test.ts` and
+      `test/planetaryFixture.ts` (`lavaWorldDetail`, `titanDetail`);
+      `packages/protocol/fixtures/planetary.json`, `packages/protocol/src/planetary.test.ts`; and
+      the protocol's fixture pins, `crates/hyperion-protocol/src/planetary/record.rs`,
+      `record/surface.rs` (its tests' `earth_crust()`) and `planetary/requests.rs`.
     - _Checks_ (on the final fixture, after the lane's ruling and D2's `earth_crust()`):
       `pnpm typecheck` from a clean cache and `pnpm lint` (oxlint, type-aware, deny warnings)
       clean; `packages/protocol`'s `planetary.test.ts` 30 passed; the client's 25 vitest files
@@ -24093,3 +24163,146 @@ SystemView.bodies.test.tsx}`, `lib/system/bodiesWire.test.ts`, `test/planetaryFi
       the new; Prettier clean on the six files; `cargo test -p hyperion-protocol` 481 passed and
       its 10 doctests passed, every one of the 13 messages round-tripping exactly.
       `golden_diff.py` over the tree: "No golden files changed", GENERATOR_VERSION 22.
+    - _Batch E's review fixes (T1–T5, the client's tests and the fixture):_ the lava world's
+      contrasts are golden close_binary `…e201`'s at the epoch
+      (`crates/hyperion-sim/tests/golden/planetary/systems/close_binary.golden`, header 22),
+      equator–pole 358.6407831931724 K and day–night 1,561.5814796652073 K, in place of the by-hand
+      eyeball's 727.7 and 1,351.4 K (0.8 T_ss less a 50 K night floor), which by the sim's
+      locked eyeball (`SurfaceConditions::cold_area`: a dayside flux E_n + (3/2)(E_d − E_n)μ, a
+      night E_n) melt 0.093 of the surface at `basalt_reduced`'s 1,473.15 K solidus, not the
+      crust's 0.2500, and give an emission mean of 1,096.7 K, not 1,238.7 K. With the golden's
+      the record agrees with itself (the lane's check, `efix-ts/eyeball.py`): its day–night and
+      its mean 1,238.71 K put the μ-weighted dayside at 1,582.9 K over a night of 21.3 K (the
+      golden's heat flow, 0.0112 W m⁻², alone holds 21.1 K), its substellar point at 1,751.8 K
+      (√2 T_eq, the fixture's distance) and its pool at 0.249954828560678, the crust's melt area
+      to fifteen figures. The fixture's description names the golden body, and D4's fixture script
+      (`d4/scripts/fixture_edit.py`) holds the two literals; no test read the old figures.
+      `bodiesWire.test.ts`'s Titan case is two, its lakes (the condensate and
+      `surfaceLiquids`) and its `H2O` lid with melt 0, without the gas list
+      `planetary.test.ts` checks; `SystemView.bodies.test.tsx`'s is two, the ice lid's rows
+      (`SNOWBALL`, no `SILICATE VAPOUR`) and the air's figures (`T SURF`, `SURFACE PRESSURE`,
+      `MOLE FRACTION`, no `EXOSPHERE`). `packages/protocol/src/planetary.test.ts`:
+      `NEAR_SURFACE_CH4` and its error are `NEAR_SURFACE_CH4_MOLE_FRACTION{,_ERROR}`; the range
+      checks assert on the value (`Math.abs(value − measured)` at most the error, the lakes'
+      area against its min and max), so a failure prints it, and `isWithin` is gone; the lava
+      world's 0.5 bound says why (a world locked 1:1 whose night lies below its lid's solidus
+      melts its dayside at most, half the surface). _Checks:_ `pnpm typecheck` from a clean
+      cache and `pnpm lint` (oxlint, type-aware, deny warnings) clean; Prettier clean on the
+      four files; the client's 25 vitest files that read the fixture (directly or through
+      `planetaryFixture.ts` and `sceneFixture.ts`) 974 passed, the two split cases among them;
+      `packages/protocol`'s `planetary.test.ts` 30 passed; `cargo test -p hyperion-protocol`
+      481 passed and its 10 doctests passed, `every_shared_fixture_is_exactly_a_wire_form` and
+      `the_shared_slice_fixture_holds_the_wire_forms_pinned_here` among them.
+  - _Batch E's review fixes_ (the review of D1–D4, `batch-e-fixes`: the Rust, determinism,
+    TypeScript, UX, science and plan-conformance reviews, 2026-10-22; no must-fix). A checkpoint
+    at 22: `GENERATOR_VERSION` stays 22, and one golden is added at header 22, an extension.
+    - _The code_ (the Rust and determinism reviews' R, DE and I items):
+      - R1: `for_body`'s palette refusal reads by variant (`palette_not_modelled`). A solid's, a
+        liquid's and a liquid's with no condensed columns, each a substance the registry does not
+        resolve, answer `NotModelled(Surface)`, and so does a palette of more substances than
+        `MaterialPalette::MAX_ENTRIES` (15), a gap its `# Errors` documents. Every other
+        `BuildPaletteError` is a broken invariant, `unreachable!` with its reason (its `# Panics`:
+        never). The frozen enum gains no variant, and the comment that cited "the palette's tests"
+        names `unread_cause`, inputs.rs's tests'.
+      - R2: `melt_record` maps `NotALiquid` and `NotModelled` to `None` with its reason (the entry
+        drawn solid), and the other `ResolveLiquidError`s are invariants (`unreachable!`).
+      - R3: `palette.rs` has its tests: the boiling-point hold (water under the table's Venus);
+        the hold a part in a million below the critical point (methane at and above its critical
+        point, and `ch4_c2h6_n2`, whose row states no branch, under the table's Earth), with the
+        first-melt hold (water at 200 K); an ice at its frost point, or at its coldest zone where
+        that is colder (CO₂ under the table's Mars, its frost point there 119.7 K at the table's
+        3.9 Pa of CO₂); and a secondary that is the provinces' in the `Province` role off the lid
+        (the crust tests' Moon) and in its own on it (their Mars). The crust tests'
+        `table_conditions`, `moon` and `mars` are `pub(crate)` for them.
+      - R4: `the_builder_refuses_values_out_of_range` refuses a ground inertia of 0, −1 and NaN,
+        `OutOfRange { part: "ground inertia", .. }` with the value's bits.
+      - R5: the builder's setter is `ground_inertia_j_per_m2_k_sqrt_s`.
+      - R6: `on_the_ground` is a nested `fn` that returns an iterator, with no `Vec`.
+      - R7: the palette module's doc and `mean_temperature`'s say that `for_body` refuses a mean
+        T_s that is not positive first, so that only a direct call, a test's, reads the fallback.
+      - R8: `a_lava_world_s_lid_entry_carries_a_melt_record` asserts both the magma ocean and the
+        partial melt (`first_magma_ocean`, `first_partial_melt`).
+      - R9: `system/tests.rs`'s `GOLDEN_SYSTEMS` stays a copy, named as one: the integration
+        test's items are not the library's, and a list behind the `testing` feature would hide
+        `planetary_golden` from a `-p hyperion-sim` run. `the_golden_systems_are_the_golden_test_s`
+        reads `tests/planetary_golden.rs`'s source (`include_str!`) and holds every name and
+        pinned ID, in order, and the seed, to it.
+      - DE1: `the_record_s_coarse_inputs_are_pinned` (`planetary/surface_inputs`, new) pins
+        `for_body`'s inputs on the sample's first Titan-like, Earth-like, magma-ocean,
+        partial-melt and airless bodies, those its tests find (`first_titan_like`,
+        `first_earth_like`, `first_magma_ocean`, `first_partial_melt`, `first_airless`): each
+        palette entry (role, key, mechanics family, phase row, the three normal albedos, grain
+        density, transition, and a liquid's or a melt's temperature, density and basis), the Γ the
+        inputs carry and every condensate (substance, phase, persistence, reservoir, area). 15
+        entries, 5 Γ and 7 condensates in 151 lines:
+        - Titan-like 01ffeb2c20000000.0900, a `Snowball` at 87.28 K under 2.86 bar: an `H2O`
+          primary lid over a buried `basalt`, its `H2O` ice (on the whole surface), and three
+          liquids: `H2O` (its figures' share 0.5, under the ice) held at its first melt, 273.16 K
+          (`Measured`), and `N2` and `ch4_c2h6_n2` at the mean T_s (`Derived`); Γ 57.26;
+        - Earth-like 01ffeb2c60020002.0300, `Temperate` at 283.63 K under 3.40 bar: `ultramafic`
+          under `komatiite`, its sea `Measured` at the mean T_s; Γ 69.11;
+        - magma ocean 02001b2c5ffe0001.0400 at 1,599.35 K: its `ultramafic` and `basalt` melts at
+          its locked dayside's 1,611.44 K (`StandIn`); Γ 79.21;
+        - partial melt 42002cb200000002.e104, `Airless` at 1,051.09 K: its `basalt_reduced` melt
+          held at its solidus, 1,473.15 K (`StandIn`); Γ 190.27;
+        - airless 02000b2c5fff0000.0100 at 597.18 K, solid: Γ 118.49.
+      - DE2: `for_body_does_not_depend_on_the_order_it_reads` (`assert_order_independent`): the
+        bodies `for_body` reads in the Titan-like body's system and the partial melt's, A then B,
+        B then A, in a permutation and each alone, and B's again from its system generated alone,
+        each palette's floats, Γ and condensates compared by their bits (pinned as the golden pins
+        them): 10 bodies of 01ffeb2c20000000 and 16 of 42002cb200000002.
+      - DE3: `RecordInputs`, behind the serve gate, answers only the refusals 22 gave
+        (`behind_the_gate`): the surface section's tag's (`NoSolidSurface`, and `NotModelled` or
+        `NotResolved` naming the surface) and a moon's planet's (`PlanetMissing`, `NotItsPlanet`).
+        Every other answer, `Ok` and every refusal 22 never gave (another section's, a record not
+        at the record's time, a seasonal orbit, the builder's), is `NotModelled(Surface)`, by an
+        exhaustive match. The reading stays the sim's, so `for_body`'s order of checks holds. The
+        tripwire and its test stand; `behind_the_gate_only_22_s_refusals_pass` is new.
+      - I1: the re-check's item 5 (`under_the_batch_the_photometry_states_the_derivation_s_albedo`)
+        reads each radiative body's inputs from `for_body` and asserts the Γ R09's model reads of
+        them (`Regolith::of`, through the test-only `regolith_inertia_of`) its record's, the same
+        bits, on every body `for_body` reads, airless and thin airs alike, bracketed ones included;
+        it counts those `for_body` answers not modelled. Of 786 bodies under the model over the 60
+        systems, 683 airless and 2 under a thin air read the record's Γ, and 101 answer not
+        modelled. Its doc and C3's and Batch D's sentences say so.
+      - I3: `a_crust_s_wire_form_is_pinned` pins e201's ΔIW and melt area as literals, −6.5 and
+        0.24995482856067797, the record's at 22 and the fixture's.
+    - _The docs_: S1, `ground_inertia`'s doc: Mars's `basalt_fe` lid's Γ about 47 at its T_eq
+      (46.91 at the reference Mars's 206.9 K), not 48. S3, the `Na2CO3` row's doc (`reference.rs`):
+      an `A_N` above 1 is physical for a bright backscattering regolith with an opposition surge,
+      whose geometric albedos "approximate or exceed unity" (Verbiscer et al. 2007, Science 315,
+      815, as the science check gave it; not re-read), under R10's ceiling of 1.35, its spherical
+      energy albedo 0.907, the lunar fit's (w 0.12–0.33) extrapolated to w 0.998. I2: the server's
+      `surface/mod.rs` and `config.rs` say that `RecordInputs` answers not modelled until the serve
+      gate opens (`GENERATED_SURFACES_FROM`, 24), not "until plan 14's surface section is
+      inhabited".
+    - _The client's tests and the fixture_ (T1–T5, the TypeScript fixer's): in D4's sub-bullet,
+      its "Batch E's review fixes".
+    - _The record_ (P1–P4): `for_body`'s coverage and main's ruling (2026-10-22) in T54.a's
+      bullet, its serve gate's, the Generator version's serve-gate bullet and D3's sub-bullet;
+      T54.a's `_Accept_` names Batch E's filters; D2's protocol fixture tests move to D4's
+      sub-bullet (they are in D4's commit, 8b42db3f), with the lines the appends lost re-wrapped
+      (D1's and D2's _Checks_, D4's rule and _Files:_); and the deviations the records did not
+      state, in D1's, D2's, D3's and D4's sub-bullets.
+    - _Moved goldens_: none. `planetary/surface_inputs.golden` is new, at header 22, an extension
+      (golden_diff: one new golden, nothing changed, GENERATOR_VERSION 22 → 22). The planetary
+      golden targets hold unblessed: the sim's 15 lib goldens (DE1's among them) and its 24
+      golden integration targets, and the server's `systems_in_range`, `system_bodies` and
+      `--lib` `convert`, `scene` and `requests` (28 runs, `efix-rust/goldens.log`).
+    - _Files:_ the sim's `planetary/surface/{inputs, palette, reference}.rs`,
+      `surface/steps/climate/{airless, mod}.rs`, `planetary/hooks/surface.rs` (S1's doc),
+      `hooks/crust.rs` and `hooks/crust/tests.rs` (the test helpers' visibility) and
+      `planetary/system/tests.rs`; the new `tests/golden/planetary/surface_inputs.golden`; the
+      server's `surface/{inputs, mod}.rs`, `config.rs` and `convert/planetary.rs`; the TypeScript
+      fixer's `SystemView.bodies.test.tsx`, `bodiesWire.test.ts`,
+      `packages/protocol/fixtures/planetary.json` and `packages/protocol/src/planetary.test.ts`;
+      this plan.
+    - _Checks:_ the sim's `--lib` tests of `planetary::surface`, `planetary::system` and
+      `planetary::hooks` (830 passed, 54 ignored); `cargo test -p hyperion-server -- surface convert`
+      (122 and 2 passed); every planetary golden target unblessed (28 runs, exit 0) and the new
+      `surface_inputs.golden` blessed at 22; `golden_diff.py` (one new golden, nothing changed);
+      Clippy on the sim (`--lib --tests`), the server (`--all-targets`) and the workspace with
+      `-D warnings`; `just doc-check`; rustfmt and Prettier; the client's typecheck and oxlint, the
+      25 vitest files that read the fixture (974 passed), the protocol package's
+      `planetary.test.ts` (30) and `cargo test -p hyperion-protocol` (481). The final gate follows
+      the bump.

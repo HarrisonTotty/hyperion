@@ -695,23 +695,35 @@ describe("SystemView's body readout", () => {
     expect(terms("SILICATE VAPOUR")).toHaveLength(0);
   });
 
-  it("reads a Titan's N2 and CH4 air at its measured surface, with no SILICATE VAPOUR row over its ice lid", async () => {
+  it("shows no SILICATE VAPOUR row over a Titan's ice lid, whose melt area is 0", async () => {
     const { user, socket } = renderView();
     await answer(socket);
     await selectRow(user, /\/768/);
-    // The fixture's Titan's surface section: Huygens's 93.65 K and 146.7 kPa, CH4 5.65 % by mole,
-    // and an `H2O` lid whose melt area is 0, since its lakes are a condensate
-    // (`packages/protocol/src/planetary.test.ts` cites each figure).
+    // The fixture's Titan's surface section: an `H2O` lid whose melt area is 0, since its lakes
+    // are a condensate, not a melt of its crust.
     await answerDetail(
       socket,
       earthWithSurface(() => surfaceOf(titanDetail())),
     );
 
     expect(reading("SURFACE")).toBe("SNOWBALL");
+    expect(terms("SILICATE VAPOUR")).toHaveLength(0);
+  });
+
+  it("reads a Titan's N2 and CH4 air at its measured surface, with no EXOSPHERE row", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    // The fixture's Titan's surface section: Huygens's 93.65 K and 146.7 kPa, and CH4 5.65 % by
+    // mole near the surface (`packages/protocol/src/planetary.test.ts` cites each figure).
+    await answerDetail(
+      socket,
+      earthWithSurface(() => surfaceOf(titanDetail())),
+    );
+
     expect(reading("T SURF")).toBe("94 K");
     expect(reading("SURFACE PRESSURE")).toBe("147 kPa");
     expect(reading("MOLE FRACTION")).toBe(partsReading("N2 94.4 %", "CH4 5.65 %"));
-    expect(terms("SILICATE VAPOUR")).toHaveLength(0);
     expect(terms("EXOSPHERE")).toHaveLength(0);
   });
 

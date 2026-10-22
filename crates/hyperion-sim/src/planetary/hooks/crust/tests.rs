@@ -22,7 +22,7 @@ use crate::units::{Degrees, Radians, Seconds};
 /// The surface conditions of the Solar System table's body `name`, as
 /// [`SurfaceConditions::derive`] gives them from its derivation about the present Sun with its own
 /// spin (the surface module's table).
-fn table_conditions(name: &str) -> SurfaceConditions {
+pub(crate) fn table_conditions(name: &str) -> SurfaceConditions {
     table()
         .into_iter()
         .find(|(n, ..)| *n == name)
@@ -150,7 +150,7 @@ fn mercury(surface: &SurfaceConditions) -> CrustCompositionInputs<'_> {
 /// nothing has resurfaced its highlands since its magma ocean, so its surface age is its age
 /// (T24.b's for the table's Moon), and its maria make its volcanism level positive (P14.T48.a's
 /// for the table's Moon, 0.0009).
-fn moon(surface: &SurfaceConditions) -> CrustCompositionInputs<'_> {
+pub(crate) fn moon(surface: &SurfaceConditions) -> CrustCompositionInputs<'_> {
     CrustCompositionInputs {
         origin: CrustOrigin::ImpactMoon(ParentSurface::Rocky),
         molten_until: None,
@@ -206,7 +206,7 @@ fn venus(surface: &SurfaceConditions) -> CrustCompositionInputs<'_> {
 /// (Khan et al. 2023, as Sossi et al. 2025, Table 1, gives it; Stähler et al.'s 2021 core of
 /// 1,830 km made it about 0.24), at T50.a's table ΔIW, IW+0.01, its Noachian surface 3.9 Gyr old,
 /// its volcanism level P14.T48.a's unit, 1.
-fn mars(surface: &SurfaceConditions) -> CrustCompositionInputs<'_> {
+pub(crate) fn mars(surface: &SurfaceConditions) -> CrustCompositionInputs<'_> {
     CrustCompositionInputs {
         radius: Metres::new(3.389_5e6),
         mass: earths(0.641_69e24),
