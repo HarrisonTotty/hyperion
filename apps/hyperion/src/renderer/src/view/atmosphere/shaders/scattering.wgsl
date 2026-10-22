@@ -15,8 +15,8 @@
 // multiScattering.wgsl). Changes: the phase functions are the medium's own terms', per channel, a
 // tabulated one among them (R08.T6.b); each term's density is evaluated once a sample (R05.T12.e);
 // the scattering angle is taken without f32's cancellation near the forward peak (R08.T6.g); the
-// densities are held a member a term (`TermDensities`), not in an array, so that no step of the
-// per-frame marches indexes one (R08.T8.d; source.wgsl's header).
+// densities are held a member a term (`TermDensities`), selected by a switch, not in an array
+// (R08.T8.d; source.wgsl's header).
 
 // The angle a ray scatters the sun's light through towards the eye: its cosine, which the closed
 // forms take; u = sqrt(theta / pi), the phase tables' coordinate (`medium.ts`'s `PhaseTable`); and

@@ -6740,9 +6740,10 @@ interface FarLimbFrameTimes {
 
 /**
  * A timed frame's passes from its resolve: the {@link ATMOSPHERE_VIEW_PASS} passes by their place
- * (the sky view, the aerial perspective, the ray march, then any more) and the composite's by its
- * label, any other pass (an `atmosphere tables` build's) left out; `null` for a resolve without
- * the three kernels' passes and exactly one composite's.
+ * (the sky view, the aerial perspective, the ray march, then any more; the ray march's alone where
+ * the frame left the other two unread) and the composite's by its label, any other pass (an
+ * `atmosphere tables` build's) left out; `null` for a resolve without the kernels' passes and
+ * exactly one composite's.
  *
  * @remarks
  * From the march band's upper edge up, where every far-limb camera stands, the frame makes the
@@ -6792,7 +6793,10 @@ interface FarLimbTimedPlace {
   readonly frames: readonly FarLimbFrameTimes[];
   /** Timed frames whose times never arrived (a resolve the timer dropped, or a late one). */
   readonly missing: number;
-  /** Timed frames whose resolve lacked a kernel's pass or held other than one composite's. */
+  /**
+   * Timed frames whose resolve lacked a kernel's pass (the ray march's, or with it either other's)
+   * or held other than one composite's.
+   */
   readonly malformed: number;
 }
 
@@ -6802,7 +6806,7 @@ interface FarLimbTimedSetting {
   readonly timers: ReadonlySet<GpuTimer>;
   /** The timed frames' pass times that are not multiples of {@link QUANTIZED_TIMESTAMP_NS}. */
   readonly offGrid: number;
-  /** The timed frames' pass times, in all. */
+  /** The timed frames' pass times, in all: the passes that ran, a pass left unread counting none. */
   readonly times: number;
 }
 

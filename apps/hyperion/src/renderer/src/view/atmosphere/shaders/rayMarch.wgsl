@@ -80,10 +80,11 @@
 // for its footprint, and the limb broke into specks and gaps that flickered as the body moved by a
 // fraction of a pixel. A ray's march is `marchRay`, once for the centre and once a node.
 //
-// Changes (plan R08, R08.T8.d; `decision-r08-t8-leans.md` section 8): no step holds an array or
-// takes one by value (source.wgsl's header): `MarchRay` holds neither the sources nor their angles,
+// Changes (plan R08, R08.T8.d; `decision-r08-t8-leans.md` section 8): no step takes or returns an
+// array by value (source.wgsl's header): `MarchRay` holds neither the sources nor their angles,
 // each step reading them from the view (`viewSourcesAt`), and the ground's bounce takes its slot's
-// throughput through `viewThroughputOf`; the arithmetic unchanged.
+// throughput through `viewThroughputOf`; the footprint's nodes are formed as each is marched
+// (`farLimbNodeOf`), not held; the arithmetic unchanged.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;

@@ -1263,6 +1263,11 @@ export class HillaireAtmosphere {
    * {@link HillaireAtmosphere.drawFrame} built, the target `null` before the first frame, for the
    * smoke page's agreement checks (R05.T12.e, R08.T6.b). Their kernels are presentation-only, so
    * only a tolerance read-back reads them.
+   *
+   * @remarks
+   * From the march band's upper edge up the frame leaves its sky view and aerial perspective
+   * undone until asked (R08.T8.d; {@link HillaireAtmosphere.drawFrame}), and this read asks for
+   * both: it may submit their dispatches, once a frame.
    */
   get frameTables(): {
     readonly skyView: TextureHandle;
@@ -1284,6 +1289,11 @@ export class HillaireAtmosphere {
    * transmittance tables; on `terrain` (low) `null`, the one deferred composite applying it to the
    * terrain alone. Widens R05's `aerialPerspectiveVolume()`.
    *
+   * @remarks
+   * From the march band's upper edge up the frame makes its volume only when asked (R08.T8.d): the
+   * first call a frame submits its dispatch, so a caller asks each frame before it encodes the pass
+   * that samples the volume.
+   *
    * @throws Error, on the `scene` scope, if the latest frame was not drawn for `view` (the same
    *   position, orientation, field of view and size), or none has been since the frame's resources
    *   were made or the medium was set: a caller's bug, which would read another view's tables,
@@ -1301,6 +1311,11 @@ export class HillaireAtmosphere {
   /**
    * The sky-view table {@link HillaireAtmosphere.drawFrame} built for `view` this frame, with what
    * reads it (R08.T9.a), on both settings: for R11's sky reflected in the ocean.
+   *
+   * @remarks
+   * From the march band's upper edge up the frame makes its sky view only when asked (R08.T8.d): the
+   * first call a frame submits its dispatch, so a caller asks each frame before it encodes the pass
+   * that samples the table.
    *
    * @throws Error if the latest frame was not drawn for `view`, as
    *   {@link HillaireAtmosphere.aerialPerspective} does.
@@ -1372,6 +1387,13 @@ export class HillaireAtmosphere {
    * grow with the sources. Each source's light takes its own light slot's absorber curves along
    * its path to each scattering point and along the view's own path, and its own
    * multiple-scattering layer under a medium with an absorber (`decision-r08-t6b-floor.md` §8).
+   *
+   * From the march band's upper edge up (the march's share 1) the composite reads neither the sky
+   * view nor the aerial perspective, so the frame dispatches the ray march alone and leaves the two
+   * tables to a reader that asks this frame ({@link HillaireAtmosphere.skyView},
+   * {@link HillaireAtmosphere.aerialPerspective}, {@link HillaireAtmosphere.frameTables}): lever 2
+   * of `decision-r08-t8-leans.md` §8, R08.T8.d. The next frame, a new medium, a restore or
+   * {@link HillaireAtmosphere.dispose} drops what is left unread.
    *
    * @param suns - The drawn sources, at most {@link MAX_SKY_SOURCES}: `sources.ts`'s `skySources`
    *   for a body, or a caller's own; none draws a sky of nothing but what lies behind it.
@@ -1462,11 +1484,14 @@ export class HillaireAtmosphere {
   }
 
   /**
-   * Stops following the engine's restores, and releases the kernel arm's targets if it drew one
-   * (the smoke's, R08.T6.g). The frame's own textures are left to the engine, as before.
+   * Stops following the engine's restores, drops the latest frame's publication and any table it
+   * left unread (R08.T8.d), and releases the kernel arm's targets if it drew one (the smoke's,
+   * R08.T6.g). The frame's own textures are left to the engine, as before.
    */
   dispose(): void {
     this.#offRestored();
+    this.#unread = NO_UNREAD_TABLES;
+    this.#drawn = null;
     this.#tables.dispose();
     const arm = this.#arm;
     if (arm !== null) {

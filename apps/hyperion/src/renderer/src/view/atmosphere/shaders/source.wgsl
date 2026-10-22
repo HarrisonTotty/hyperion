@@ -37,7 +37,8 @@
 // from the sample along the source (`oblate.wgsl`), its stored optical depth over s; the multiple
 // scattering from the latitude bands about the sample's s; the ground's shadow the lookup's.
 // Changes (plan R08, R08.T8.d; `decision-r08-t8-leans.md` section 8): no step of the three
-// per-frame marches holds an array or takes one by value. Tint keeps an array value indexed by a
+// per-frame marches takes or returns an array by value, nor holds one but slots 1 to 3 of the
+// march, indexed only where the view tracks them. Tint keeps an array value indexed by a
 // loop variable in a function-scope variable of its own, stored whole at each call (the SPIR-V's
 // OpVariable and whole-array OpStore at the callee's entry), and a function-scope array indexed by
 // a variable lives in the invocation's local memory: the sources' directions and angles passed by
@@ -48,10 +49,10 @@
 // apart, held by pointer (`ViewMarch`), which keeps the registers of the march that every view
 // takes its steps' own; each source's direction is read from the view at each step and its
 // scattering angle formed there, as the kernels formed both once a pixel before; and the forward
-// lobes' test is the kernel's, taken once a pixel. The arithmetic is unchanged: read-backs are
-// byte-identical on SwiftShader, and on the RTX 3080 only its fused multiply-adds, which follow the
-// code's shape, move a half-float ulp in a few values (plan R08's Risks, "Deviations in T8.d, as
-// built").
+// lobes' test is the kernel's, taken once a ray (or texel). The arithmetic is unchanged:
+// read-backs are byte-identical on SwiftShader, and on the RTX 3080 only its fused multiply-adds,
+// which follow the code's shape, move a half-float ulp in a few values (plan R08's Risks,
+// "Deviations in T8.d, as built").
 
 // A march's absorber path one step `dtM` on, through the sample `local` (`absorberStep`): the
 // view's own path under light slot `slot`'s curves, since what it carries is that light's
@@ -141,7 +142,7 @@ fn sourceAt(
 }
 
 // The view's sources at a sample summed by light slot, a member a slot (MAX_SKY_LIGHT_SLOTS of
-// them), so that no step indexes an array (R08.T8.d).
+// them), selected by a switch, so that no step holds them in an array (R08.T8.d).
 struct ViewShares {
   slot0 : vec3f,
   slot1 : vec3f,
@@ -190,8 +191,8 @@ fn viewShareOf(shares : ViewShares, slot : u32) -> vec3f {
 }
 
 // The kernel's drawn sources and the light slots its marches track a path for, read from its own
-// `view` in place, never through the whole view by value (`view.wgsl`'s skySourceCount and
-// skyPathCount, R08.T8.d).
+// `view` in place, never through the whole view by value (as `view.wgsl`'s skySourceCount reads a
+// view's count, R08.T8.d).
 fn viewSourceCount() -> u32 {
   return min(u32(view.sky.x), MAX_SKY_SOURCES);
 }
@@ -277,10 +278,10 @@ fn skySourcesAt(
 }
 
 // A march along a ray so far: the light it has gathered, and per light slot its throughput and its
-// own absorber path (R08.T7), slot 0's throughput the views' mean transmittance. Slot 0, which every
-// march steps, is a member of its own; slots 1 to MAX_SKY_LIGHT_SLOTS - 1, which only a medium with
-// absorbers lit by several stars' lights steps, stand apart in arrays, which a march holds by
-// pointer and its steps index only where the view has those slots (R08.T8.d).
+// own absorber path (R08.T7), slot 0's throughput the views' mean transmittance. Slot 0, which
+// every march steps, is a member of its own; slots 1 to MAX_SKY_LIGHT_SLOTS - 1, which only a
+// medium with absorbers lit by several stars' lights steps, stand apart in arrays, which a march
+// holds by pointer and its steps index only where the view has those slots (R08.T8.d).
 struct ViewMarch {
   luminance : vec3f,
   throughput0 : vec3f,

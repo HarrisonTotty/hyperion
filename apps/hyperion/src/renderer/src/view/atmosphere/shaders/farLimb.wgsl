@@ -28,8 +28,6 @@
 
 const FAR_LIMB_BLEND_FROM : f32 = 0.6;
 const FAR_LIMB_BLEND_WIDTH : f32 = 0.4;
-// The ground piece's nodes and the shell piece's, at most.
-const FAR_LIMB_NODES : u32 = 10u;
 // The projection's narrower width under which it is taken as a box, texels.
 const FAR_LIMB_BOX_WIDTH : f32 = 1e-4;
 
@@ -271,11 +269,14 @@ fn farLimbFootprintOf(
     origin, dir, a + topM * body.scales.z, c + topM * body.scales.w
   ).x;
   // A bound on the texel's span from the centre ray alone (R08.T8.d), so that a texel that cannot
-  // reach the shell keeps its centre ray without forming its edges' four rays: the tangent height
-  // moves by at most |S o| k |Δd| as the unit ray turns by |Δd|, k = a ÷ c, and across the texel
-  // the ray through its edges' midpoints turns by at most 2 |right| ÷ size.x and 2 |upRay| ÷ size.y
-  // (|forward| = 1); widened by 1% and by 10⁻⁵ |S o| for f32's rounding of the span itself (about
-  // 5 × 10⁻⁷ |S o|), so that it passes every texel the span's own test below passes.
+  // reach the shell keeps its centre ray without forming its edges' four rays. Along the straight
+  // path between two unnormalised rays w = forward + x right + y upRay, |w| >= 1 (|forward| = 1,
+  // right and upRay perpendicular to it), so the scaled unit ray turns by at most k |Δw|, k = a ÷ c
+  // (a >= c: no prolate figure is drawn), and the tangent height moves by at most |S o| k |Δw|;
+  // across the texel's edges' midpoints |Δw| is 2 |right| ÷ size.x and 2 |upRay| ÷ size.y.
+  // Widened by 1% and by 10⁻⁵ |S o| for f32's rounding of the span itself (a few 10⁻⁶ |S o| at
+  // WGSL's bounds, about 5 × 10⁻⁷ typically), so that it passes every texel the span's own test
+  // below passes.
   let scaledOrigin = origin * vec3f(1.0, 1.0, a / c);
   let reachM = length(scaledOrigin) * (a / c) * 2.0
     * (length(rays.right) / size.x + length(rays.upRay) / size.y);

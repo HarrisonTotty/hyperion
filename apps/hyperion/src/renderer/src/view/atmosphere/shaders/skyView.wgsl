@@ -37,7 +37,7 @@
 // e over the camera's s; each sample's medium at its h* = s h, s at the latitude of the sample's
 // own place on the datum, and its sources through the sliced lookup and the bands
 // (`source.wgsl`), as `tablesCpu.ts`'s oblateSkyViewTexelsTwin marches them. Changes (plan R08,
-// R08.T8.d; `decision-r08-t8-leans.md` section 8): no step holds an array or takes one by value
+// R08.T8.d; `decision-r08-t8-leans.md` section 8): no step takes or returns an array by value
 // (source.wgsl's header): `SkyRay` holds neither the sources nor their angles, each step taking
 // them from the view into the sky frame (`skySourcesAt`); the arithmetic unchanged.
 
