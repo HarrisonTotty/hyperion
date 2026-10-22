@@ -734,15 +734,17 @@ summary.
   bracket, and that the readout's `AGE … · AT UT +0.00 yr` fills its half row at 1920 × 1080, so
   that a chart time of 10 yr or more, or a five-character age, wraps it after `AT`. A label whose
   mark is in view is now drawn only beside its mark, else not at all, the selection's too, and the
-  hold stands for a pinned mark out of the view alone; `AGE` takes the readout's row in both modes,
-  its chart time in `NOW` right-aligned in `TIME_WIDTH_CH`'s slot; and the guide's `DISPLAY TIME`
-  cell says the display time is the console's own and never stale (main's edit). Files: under
+  hold stands for a pinned mark whose bracket lies wholly outside the view alone, by main's answer
+  on the lane's issue; `AGE` takes the readout's row in both modes, its chart time in `NOW`
+  right-aligned in `TIME_WIDTH_CH`'s slot; and the guide's `DISPLAY TIME` cell says the display
+  time is the console's own and never stale (main's edit). Files: under
   `apps/hyperion/src/renderer/src/`: `spatial/labels.ts` and `displays/galaxy/SystemReadout.tsx`,
   tests; the guide's `DISPLAY TIME` row; plan 05's note on labels beside reticles. Tests: Vitest
   for no label where neither side has room, the selection's and the rest's, on a 256 px stage and
-  in a view, the top edge's hold, the destination's label as with no selection, and the age's row
-  and slot in both modes and at the clock window's edges. Acceptance: `pnpm test`, `just ci`, and
-  main's look at 1920 × 1080, 1280 × 720 and 150%.
+  in a view, the top edge's hold, a selection just past the top or bottom edge with its bracket in
+  part drawn and once it lies outside, the destination's label as with no selection, and the
+  age's row and slot in both modes and at the clock window's edges. Acceptance: `pnpm test`,
+  `just ci`, and main's look at 1920 × 1080, 1280 × 720 and 150%.
 
 ### P12.T12 Client: alert list and chart marks
 
@@ -1825,8 +1827,12 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   deferred findings (2).
   - _Names._ No export is added or renamed. In `spatial/labels.ts`, inside `placeLabels`, the
     private `inPlace(label, anchor)`: whether a label on its mark's line stands beside its mark
-    (`besideItsMark`) or its mark is out of the view; `lineLabels` now holds only the labels in
-    place. The docs of `lineLabel`, `besideItsMark`, `LabelSurroundings.pinnedIds` and
+    (`besideItsMark`), or its mark is out of the view and the held label clear of its bracket; and
+    beside `besideItsMark` the private
+    `clearOfItsBracket(label, anchor, viewport, reticles): boolean`, whether a held label stands
+    `LABEL_TEXT_CLEARANCE_REM` clear of the bracket's box, to its line's outer edge, as `paint`
+    draws it. `lineLabels` now holds only the labels in place. The docs of `lineLabel`,
+    `besideItsMark`, `LabelSurroundings.pinnedIds` and
     `placeLabels`' remarks say what is now true. In `displays/galaxy/SystemReadout.tsx`, `AtTime`
     sets its time in a `system-readout__value--fixed` slot in both modes, `TIME_WIDTH_CH` (from
     `chartReadings.ts`) in `NOW` and `EMITTED_WIDTH_CH` as observed, and the age's `Reading` is
@@ -1838,11 +1844,33 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     holds: the rest are dropped; the selection's, held back on its first side, tries its other
     side under the conditions it takes it under where it yields (clear of the destination's label
     and chevrons and of the eye, and beside its mark), else is not drawn; the destination's own
-    rule is unchanged. A pinned mark out of the view keeps the 0.25 rem hold, and the hold at the
-    top and bottom edges, which leaves a label beside its mark, stands. For a mark in view the
-    first side is held back only where both are, since `lineLabel` flips to the left only where
-    the right would run past the right edge, and the right never runs past the left edge for a
-    mark at x ≥ 0; so the other side never rescues it, and the code tries it anyway, as briefed.
+    rule is unchanged. A pinned mark out of the view keeps the 0.25 rem hold where its bracket
+    lies wholly outside the view (below), and the hold at the top and bottom edges, which leaves a
+    label beside its mark, stands. For a mark in view the first side is held back only where both
+    are, since `lineLabel` flips to the left only where the right would run past the right edge,
+    and the right never runs past the left edge for a mark at x ≥ 0; so the other side never
+    rescues it, and the code tries it anyway, as briefed.
+  - _Deviation, by main's answer on the lane's issue (2026-10-22): the hold needs the bracket out
+    of the view._ The brief reads "inside the view" as `inView`, the mark's centre, and kept the
+    hold for every pinned mark outside it. But the canvas culls no mark and draws the selection's
+    bracket wherever it stands, so a selection whose centre lies just past the top or bottom edge
+    showed part of its symbol and bracket with its held label across them (the UX review's
+    must-fix): at (128, -2) on the 256 × 262 px stage, a 16-character designation about a class-4
+    mark at a ratio of 1, the label stood at x 4–142.88, y 4–21.5, the bracket's box at x 114–142,
+    y -16–12, and the label cut in and out as the mark crossed the edge. Main accepted the lane's
+    lean: a held label is drawn only where it stands 0.25 rem clear of the bracket's box
+    (`clearOfItsBracket`), main's second wording; else it is not drawn, as for a mark in view with
+    no room. Where the held label spans the bracket across, as one with room on neither side does,
+    that is once the bracket lies wholly outside the view, main's first wording: about a class-4
+    mark at 1 the bracket reaches 14 px from the centre, so the hold returns from 14 px past the
+    edge (the tests pin 13 and 14 px past each edge). The gap is a straight line, so a held label
+    beside the bracket's corner, not across it, may stand 0.25 rem clear while the bracket still
+    reaches 1 px into the view (a 22-character label about a mark at (211.96, -13): 3 px across
+    and 3 px down, 4.24 px; UX re-review); the guide's 0.25 rem holds there. The left and right
+    edges need no change: there a mark whose bracket reaches into the view has its label beside it
+    wherever the label is no wider than the view less its offset and the 0.25 rem edge (234 px on
+    the 256 px stage about a class-4 mark). Plan 05's note keeps main's words, "only a pinned
+    label whose mark lies outside the view is still held inside", the mark read whole.
   - _Choice: the destination's label avoids no label held back._ A chosen label that would be held
     back across its own mark in view is left out of the labels the destination's is placed
     against, as a label whose mark is out of view already was (R07.T16.j), since with no selection
@@ -1889,17 +1917,21 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     line is 4 ch (36.4 px) longer than the unslotted `UT +0.00 yr` and 2 ch shorter than
     observed's in its 11 ch slot, which look-74 found inside the column (53.8 and 59.4 px to
     spare), so it fits with at least 72.0 and 77.6 px, at one width for every chart time.
-  - _Tests (21 new, 2 changed, as run)._ `spatial/labels.test.ts` (543 to 558): "keeps a label
+  - _Tests (29 new, 2 changed, as run)._ `spatial/labels.test.ts` (543 to 566): "keeps a label
     whole and 0.25 rem inside a view too narrow for it on either side of its mark", which pinned
     the hold for a mark in view, is now two: in its 160 px view the mark at x 80 draws no label,
     and a label at the top edge is held 0.25 rem inside it beside its mark; and a new block,
-    "placeLabels on the compact chart's 256 px stage" (14): the centred selection with no label
+    "placeLabels on the compact chart's 256 px stage" (22): the centred selection with no label
     and none over its bracket, an unselected mark at the middle, the side or none at nine places
-    on both ratios' edges, the selection 2 rem from the left edge on the right as before, the
-    selection held back on both sides beside a destination whose label stands as with no
-    selection (C1), and the destination's label taking no account of a label that would be held
-    back. `spatial/SpatialView.test.tsx` (2, in a block of their own): a selection at the view's
-    centre has no label element in a 256 px stage and its label in a 1036 px one.
+    on both ratios' edges, by main's answer a selection just past the top and the bottom edge with
+    no label while its held label would stand within 0.25 rem of its bracket, at y -2, -13, 263
+    and 275, and its label held 0.25 rem inside once the bracket lies outside the view, at y -14,
+    -15, 276 and 277 (x 128), the selection 2 rem from the left edge
+    on the right as before, the selection held back on both sides beside a destination whose
+    label stands as with no selection (C1), and the destination's label taking no account of a
+    label that would be held back. `spatial/SpatialView.test.tsx` (2, in a block of their own): a
+    selection at the view's centre has no label element in a 256 px stage and its label in a
+    1036 px one.
     `displays/galaxy/SystemReadout.observed.test.tsx` (17 to 21): "keeps the age's slot in now,
     its time after a middle dot in no fixed slot" becomes "takes the readout's row for the age in
     now, its time in the chart time's slot", its text unchanged; new: the chart time at the clock
@@ -1911,49 +1943,48 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     clear either" and "keeps the age's time whole with its system's label and its unit" in both
     modes; no other test pinned the hold for a mark in view. Against the base's code the 11
     refusals (10 in `labels.test.ts`, the 256 px case in `SpatialView.test.tsx`) and the 4 slot
-    tests fail, and the rest pass. The `spatial` and `displays/galaxy` suites: 56 files, 2391
+    tests fail, and the rest pass; against the lane's first commit the edge refusals at -2 and 263
+    fail and the edge holds pass. The `spatial` and `displays/galaxy` suites: 56 files, 2399
     tests; the gate's other planned files (`App`, `displays/system`, `lib/serverLink`,
     `view/engine/engineBoundary`, `wasm/surfaceImports`): 20 files, 348 tests.
   - _Review._ TypeScript: a test asserted a label present with `queryAllBy*`, now `getBy*` through
     `overlayLabel` in a test of its own; `ageReading`'s unread `formed` removed. UX: the top and
-    bottom edges, deferred finding (1), asked on the issue; two guide sentences proposed, deferred
-    findings (2) and (3); and, before this task, (4) and (5); the `DISPLAY TIME` cell checked true
-    against the code. Plan conformance: the galactic-axis case carried into the look below; the
-    docs of the labels the destination's is placed against, and two phrases here, reworded.
-  - _Deferred findings (2026-10-13 rule)._ (1) A selection whose centre lies just past the top or
-    bottom edge, up to about 14 px for a class-4 mark at a ratio of 1, inside the band where
-    neither side has room, keeps the hold, since `inView` reads the centre; and the canvas still
-    draws the part of its symbol and bracket inside the view, which the held label runs across: at
-    (128, -2) on the 256 × 262 px stage the label stands at x 4–142.88, y 4–21.5, the bracket's
-    box at x 114–142, y -16–12, and the label cuts in and out as the mark crosses the edge. The
-    left and right edges are safe, where a mark whose bracket reaches into the view always has a
-    side. The brief keeps the hold for a mark outside the view by `inView`, so it is asked on the
-    issue; the lane's lean is to hold only a mark whose bracket lies wholly outside the view (UX
-    review's must-fix). (2) The guide's spatial-display bullets do not say that a label with room
-    on neither side is not drawn, as its Views paragraph says of a view's; the UX review proposes
-    "A mark's label that has room on neither side of its mark is not drawn, the selection's too,
-    and the bracket, the list and the readout still name the mark; only the label of a selection
-    whose bracket lies wholly outside the view is held `0.25rem` inside its edge" (main decides).
-    (3) § Data states says "Loss of the server link makes every live value on the console stale at
-    once", and only the rows of `DISPLAY TIME`, `BASELINE` and `PAD WIDTH` except the console's own
-    values; the UX review proposes "A value the console keeps itself, such as the `DISPLAY TIME`,
-    `BASELINE` or `PAD WIDTH`, is not a live value: it never goes stale, and on loss of the link
-    stays in `--text` with no `S`" (main decides). (4) The age's value has no fixed slot, from 3 to
-    7 characters (`123`, `4.57`, `0.150`, `0.00150`), so the time's slot still moves between
-    selections, and in `NOW` as a young system's age crosses 0.1 or 1 Myr while the chart time
-    steps (§ Numbers: "A field has a fixed width sized for its longest possible value"; before
-    this task; UX review). (5) `formatAge` writes ages below 1 Myr in `Myr` (`0.150 Myr`), where
-    § Numbers says "ages are in `kyr`, `Myr` and `Gyr`" (before this task; UX review). (6) A
-    selection centred on the 256 px stage, as after centring the chart on it, now has no label on
-    the chart; a place above or below its bracket, as the destination's has, would keep it named
-    there (plan-conformance review; main's ruling chose not drawn). (7) The selection's other side
-    never rescues a first side held back for a mark in view (A above); kept as briefed, it could be
-    dropped from that path (TypeScript and plan-conformance reviews).
+    bottom edges' must-fix, asked on the issue and built by main's answer (the deviation above);
+    two guide sentences proposed, deferred findings (1) and (2); and, before this task, (3) and
+    (4); the `DISPLAY TIME` cell checked true against the code. Plan conformance: the
+    galactic-axis case carried into the look below; the docs of the labels the destination's is
+    placed against, and two phrases here, reworded. Re-review of main's answer as built:
+    TypeScript, `{@link LABEL_TEXT_CLEARANCE_REM}` in `clearOfItsBracket`'s doc, the issue named
+    there, the boundary pairs at 13 and 14 px past each edge, and two comments that still scoped
+    the refusal to a mark in view; UX, no defect, the same comments and pairs, and the
+    straight-line gap's corner case recorded with the deviation above.
+  - _Deferred findings (2026-10-13 rule)._ (1) The guide's spatial-display bullets do not say that
+    a label with room on neither side is not drawn, as its Views paragraph says of a view's; the
+    UX review proposes "A mark's label that has room on neither side of its mark is not drawn, the
+    selection's too, and the bracket, the list and the readout still name the mark; only the label
+    of a selection whose bracket lies wholly outside the view is held `0.25rem` inside its edge"
+    (main decides). (2) § Data states says "Loss of the server link makes every live value on the
+    console stale at once", and only the rows of `DISPLAY TIME`, `BASELINE` and `PAD WIDTH` except
+    the console's own values; the UX review proposes "A value the console keeps itself, such as
+    the `DISPLAY TIME`, `BASELINE` or `PAD WIDTH`, is not a live value: it never goes stale, and on
+    loss of the link stays in `--text` with no `S`" (main decides). (3) The age's value has no
+    fixed slot, from 3 to 7 characters (`123`, `4.57`, `0.150`, `0.00150`), so the time's slot
+    still moves between selections, and in `NOW` as a young system's age crosses 0.1 or 1 Myr
+    while the chart time steps (§ Numbers: "A field has a fixed width sized for its longest
+    possible value"; before this task; UX review). (4) `formatAge` writes ages below 1 Myr in
+    `Myr` (`0.150 Myr`), where § Numbers says "ages are in `kyr`, `Myr` and `Gyr`" (before this
+    task; UX review). (5) A selection centred on the 256 px stage, as after centring the chart on
+    it, now has no label on the chart; a place above or below its bracket, as the destination's
+    has, would keep it named there (plan-conformance review; main's ruling chose not drawn).
+    (6) The selection's other side never rescues a first side held back for a mark in view
+    (A above); kept as briefed, it could be dropped from that path (TypeScript and
+    plan-conformance reviews).
   - _For main's look._ The compact `LOCAL CHART` at 1280 × 720 and 150%, in `NOW` and `OBSERVED`:
     the chart centred on its selection, its bracket drawn and no label over its own mark or
     bracket; a label coming back as a cut once its mark leaves the band (95.12–160.88 px across at
     1 for a 16-character designation about a class-4 mark); every label of a mark with a side as
-    in look-75; a selection in the band crossing the top or bottom edge (deferred finding (1)); the
+    in look-75; a selection in the band crossing the top or bottom edge, unlabelled until its
+    bracket has left the view, then held inside as a cut (the deviation above); the
     observer moved to the centre on the selection, the eye in the bracket with no label beside it
     (item 7); a destination beside a mark whose label has no side, which may now take a place that
     label's held box covered; the stage's heights, unchanged, against P06.T24.c's figures (262 and
