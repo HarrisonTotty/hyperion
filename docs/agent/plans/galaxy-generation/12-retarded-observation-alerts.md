@@ -745,6 +745,18 @@ summary.
   part drawn and once it lies outside, the destination's label as with no selection, and the
   age's row and slot in both modes and at the clock window's edges. Acceptance: `pnpm test`,
   `just ci`, and main's look at 1920 × 1080, 1280 × 720 and 150%.
+- **P12.T11.f One state prop for a spatial reading, its slot the shared `StaleSlot`** (added
+  2026-10-22 by main's ruling on T11.d's deferred finding (4); built in
+  `lane/84-p12-t11f-reading-state`, recorded at the end of Risks). `Reading`'s optional `stale`
+  and `own` admitted both at once. They are now one `state`, `live`, `stale` or `own`, absent for
+  a reading with no slot, which `ModeReading`, `SpatialView` and the HR page's line pass, and the
+  reading's slot is P05.T14's `StaleSlot`, whose `.stale-slot` replaces
+  `.spatial-reading__stale-slot`. Nothing on screen changes. Files: under
+  `apps/hyperion/src/renderer/src/`: `spatial/`'s `Reading.tsx`, `ModeReading.tsx` and
+  `SpatialView.tsx`, `displays/galaxy/HrDiagram.tsx`, `components/StaleSlot.tsx`'s doc,
+  `styles.css`, tests. Tests: Vitest for the reading's four forms, the type's refusal of the old
+  pair, and the shared class wherever a test read the old one. Acceptance: `pnpm test` and
+  `just smart-ci`; no look, since nothing on screen changes.
 
 ### P12.T12 Client: alert list and chart marks
 
@@ -1818,7 +1830,7 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     `stale` and `own` are two optional props, so the type admits both at once, which renders as
     `own` alone; one union prop (a source that is the answer's, stale or not, or the console's
     own) would rule the pair out, but renames the brief's `stale` (TypeScript review; main's
-    call).
+    call). _Closed by P12.T11.f._
 - **P12.T11.e as built (`lane/80-p12-t11e-followups`, 2026-10-22, at `GENERATOR_VERSION` 23).**
   Client, guide and plan only: no Rust, protocol, binding, server, sim, GPU or golden change, and
   nothing generated moves. P06.T24.c and the 23 bump are on the base, and the lane's last merge of
@@ -1999,3 +2011,59 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     alone on its row, with nothing selected too; as observed, unchanged. The readout at
     1280 × 720 and 150%: the break after `AT` as before, the time's line one width, and no
     sideways scroll.
+- **P12.T11.f as built (`lane/84-p12-t11f-reading-state`, 2026-10-22, at `GENERATOR_VERSION` 23).**
+  Client and plan only: no Rust, protocol, binding, server, sim, GPU, golden or guide change.
+  Nothing on screen changes: the DOM text is the same live, stale, own and missing, the slot keeps
+  its three declarations in the font of the same `dd`, and every class but the slot's is the same.
+  The lane's base is `origin/rendering-and-planets` at `1177743a`, with no merge since. Closes
+  T11.d's deferred finding (4).
+  - _Names._ In `spatial/Reading.tsx`: `ReadingState`, `"live" | "stale" | "own"`; `SourceState`,
+    `Exclude<ReadingState, "own">`, the state of a value from a source that can go stale (the
+    brief's "or a named alias"), which `sourceState(stale: boolean)` returns for the callers that
+    hold a boolean (the brief's `readingState`, renamed by the TypeScript review for its return
+    type); and `ReadingProps.state?: ReadingState | undefined` in place of `stale` and `own`. The
+    private `formOf(state): ReadingForm` tells the four forms apart in one exhaustive `switch`, in
+    the repository's assign-and-break form (a `switch` that returns fails oxlint's
+    `consistent-return`), into `own` (the class), `slot` and `marked`; so a new state fails the
+    build until all three are decided for it. `ModeReadingProps.state?: SourceState | undefined`
+    replaces its `stale`. `SpatialView`'s centre and mode and the HR page's line pass
+    `sourceState(stale)`, the time `timeIsOwn ? "own" : sourceState(stale)` in one `Reading`, and
+    `AZM` and `ELV` no state.
+  - _The slot._ `Reading`'s own `span.spatial-reading__stale-slot` is now P05.T14's `StaleSlot`,
+    `span.stale-slot`, after the unit or the value as before, holding the mark where `marked`
+    holds and the value is not missing: the brief's
+    `stale={state === "stale" && reading.value !== null}`, read through `formOf`.
+    `.spatial-reading__stale-slot`'s rule and comment are gone, and `.stale-slot`'s comment names
+    the spatial readings and the em dash's empty slot. The two rules held the same declarations, and
+    no other rule reaches the slot inside a reading (`.system-list__range > .stale-slot` is the
+    system list's), so the cascade is the old one. `StaleSlot`'s TSDoc names the spatial readings.
+  - _Tests (as run)._ Changed in selectors, props and names only, but for one replaced test and
+    one added assertion. `spatial/Reading.test.tsx` (9, as before): "never marks a value the
+    console keeps itself stale, even if given stale" is now "admits no reading that is both the
+    console's own and stale", a `@ts-expect-error` before one call that gives `own` and `stale`
+    together; without the directive `pnpm --filter hyperion typecheck` fails (TS2353, `own` not in
+    `ReadingProps`). Of the other eight, six pass `state` and seven read `.stale-slot` (the rule
+    test its rule), the first is named "when no state is given", and the live slot's test also
+    asserts the class `stale-slot`. `spatial/ModeReading.test.tsx` (7): `state` and
+    `.stale-slot`, and "no state" in a name; `spatial/SpatialView.test.tsx` (145; 3 selectors),
+    `spatial/FrameReading.test.tsx` (2; 1), `displays/system/SystemView.test.tsx` (24; 1) and
+    `displays/galaxy/HrDiagram.test.tsx` (31; the class and the rule): `.stale-slot`. No assertion
+    on text, a count, another class or an order changed.
+  - _Deviation: the type-level guard's test keeps the old test's two assertions_ (no slot, and
+    `26,000.0 ly` with no `S`), where the brief drops the run-time test: oxlint's
+    `vitest(expect-expect)` fails a test with no assertion (tried), and the repository's other
+    directives in tests each come before a run-time assertion. They now pin that the old props, if
+    given, are not read.
+  - _Review._ TypeScript: `ModeReadingProps.state`'s doc repeated its type, cut; `AZM` and `ELV`
+    called "live" beside the `live` state (the UX review too), reworded; `readingState` renamed
+    `sourceState`; a shared-class test that could fail only with the live slot's, folded into it
+    as the brief's one assertion; the directive, which covers its whole line, kept on the one line
+    the brief gives rather than on the `own` property's. UX: no finding but the wording above; the
+    DOM in each form, the cascade, the comments and the TSDoc checked true. Plan conformance: the
+    "nor with `own`" clause dropped; one `switch` for the four forms (`formOf`), where the first
+    build's decided the slot alone; this record's tests, deviation and base lines corrected.
+  - _Deferred findings (2026-10-13 rule)._ (1) Only the `stale` form is tested for having no
+    `spatial-reading--own`; the absent and `live` forms are not (before this task; plan-conformance
+    review). (2) Plan 05's P05.T14 text and record say `.spatial-reading__stale-slot` stays, true
+    as built then; a note there could point to this task (plan-conformance review; the brief keeps
+    plan 05's record as written).

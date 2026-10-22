@@ -1526,7 +1526,7 @@ function furnitureValue(label: string, n = 0): HTMLElement {
 
 /** A value's stale slot, or `null` where it has none. */
 function slotOf(value: HTMLElement): Element | null {
-  return value.querySelector(":scope > .spatial-reading__stale-slot");
+  return value.querySelector(":scope > .stale-slot");
 }
 
 describe("SpatialView's stale furniture, one S per value (plan 12, P12.T11.d)", () => {
@@ -1584,7 +1584,7 @@ describe("SpatialView's stale furniture, one S per value (plan 12, P12.T11.d)", 
     setup({ stale: true, mode: OBSERVED_FROM });
 
     for (const mark of furniture().querySelectorAll(".stale-mark")) {
-      expect(mark.closest(".spatial-reading__stale-slot")).not.toBeNull();
+      expect(mark.closest(".stale-slot")).not.toBeNull();
     }
   });
 
@@ -1616,7 +1616,7 @@ describe("SpatialView's stale furniture, one S per value (plan 12, P12.T11.d)", 
     for (const label of ["AZM", "ELV"]) {
       const value = screen.getByText(label, { selector: "dt" }).nextElementSibling;
       expect(value).toHaveTextContent(/^[+\-\d]+°$/u);
-      expect(value?.querySelector(".spatial-reading__stale-slot")).toBeNull();
+      expect(value?.querySelector(".stale-slot")).toBeNull();
     }
   });
 

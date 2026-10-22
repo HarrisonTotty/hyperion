@@ -72,7 +72,7 @@ describe("ModeReading (plan 12, P12.T11.d)", () => {
   });
 
   it("marks each of the observer's values stale, and not the mode's name", () => {
-    renderMode({ mode: OBSERVED, stale: true });
+    renderMode({ mode: OBSERVED, state: "stale" });
 
     for (const label of ["RADIUS", "ANGLE", "HEIGHT"]) {
       expect(definition(label)).toHaveTextContent(/S\s*stale$/u);
@@ -83,32 +83,32 @@ describe("ModeReading (plan 12, P12.T11.d)", () => {
   });
 
   it("marks no missing coordinate stale", () => {
-    renderMode({ mode: OBSERVED_ON_AXIS, stale: true });
+    renderMode({ mode: OBSERVED_ON_AXIS, state: "stale" });
 
     expect(definition("ANGLE")).toHaveTextContent(/^—$/u);
     expect(within(definition("MODE")).getAllByText("stale")).toHaveLength(2);
   });
 
   it("marks NOW, a word, never stale", () => {
-    renderMode({ mode: NOW, stale: true });
+    renderMode({ mode: NOW, state: "stale" });
 
     expect(definition("MODE")).toHaveTextContent(/^NOW$/u);
     expect(screen.queryByText("stale")).not.toBeInTheDocument();
   });
 
   it("keeps an empty slot after each of the observer's values while live", () => {
-    renderMode({ mode: OBSERVED, stale: false });
+    renderMode({ mode: OBSERVED, state: "live" });
 
     for (const label of ["RADIUS", "ANGLE", "HEIGHT"]) {
-      const slot = definition(label).querySelector(".spatial-reading__stale-slot");
+      const slot = definition(label).querySelector(".stale-slot");
       expect(slot).not.toBeNull();
       expect(slot).toBeEmptyDOMElement();
     }
   });
 
-  it("gives the observer's readings no slot when no stale is given", () => {
+  it("gives the observer's readings no slot when no state is given", () => {
     renderMode({ mode: OBSERVED });
 
-    expect(definition("MODE").querySelector(".spatial-reading__stale-slot")).toBeNull();
+    expect(definition("MODE").querySelector(".stale-slot")).toBeNull();
   });
 });

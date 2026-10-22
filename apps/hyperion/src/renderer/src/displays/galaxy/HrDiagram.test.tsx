@@ -503,11 +503,9 @@ describe("HrDiagram's mode line (plan 12, P12.T11.b)", () => {
 
     // jsdom lays nothing out, so the room is held by the slot after each value and its rule.
     for (const label of ["UT", "RADIUS", "ANGLE", "HEIGHT"]) {
-      expect(lineTerm(label).nextElementSibling?.lastElementChild).toHaveClass(
-        "spatial-reading__stale-slot",
-      );
+      expect(lineTerm(label).nextElementSibling?.lastElementChild).toHaveClass("stale-slot");
     }
-    expect(stylesheetRule(".spatial-reading__stale-slot")).toMatch(/min-width: 2ch;/u);
+    expect(stylesheetRule(".stale-slot")).toMatch(/min-width: 2ch;/u);
   });
 
   it("mutes the line with the rest of a stale diagram", () => {
