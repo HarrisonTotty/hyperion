@@ -1066,6 +1066,13 @@ describe("the per-frame marches' steps (R08.T8.d)", () => {
       "array<AbsorberPath, MAX_SKY_LIGHT_SLOTS - 1u>",
     ]);
   });
+
+  // SwiftShader inlines every call, and with the march's steps emitted twice in one entry point its
+  // GPU process segfaults (R08.T8.d): the centre ray and the footprint's nodes share one call.
+  it("calls the march from one place in the ray-march kernel's entry point", () => {
+    const main = wgslFunctions(RAY_MARCH_KERNEL.reference).get("main");
+    expect(main?.body.match(/\bmarchRay\(/gu)).toHaveLength(1);
+  });
 });
 
 describe("the transmittance read as optical depth (R08.T6.c)", () => {
