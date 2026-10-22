@@ -458,7 +458,8 @@ reference-world tests live beside this plan's `surface_coarse_golden.rs` in
 `crates/hyperion-sim/tests/` (`surface_material_worlds`, `surface_weights_worlds`,
 `surface_ground_worlds`, `level_bound_worlds`, `surface_reading_worlds`, `surface_albedo_worlds`),
 over a shared `tests/common/surface_worlds.rs` that runs `reference::*` through the pass once per
-binary; T16 creates that file with its own goldens so that R10 extends it.
+binary (under nextest, within one test: R09.T16's note); T16 creates that file with its own goldens
+so that R10 extends it.
 
 ## Consumes
 
@@ -3262,7 +3263,12 @@ the serve gate allows (decision-r09-t14-choices F2).
 `crates/hyperion-sim/tests/common/surface_worlds.rs` that runs `reference::*` through the pass once
 per binary and that R10's world tests reuse: the quantised fields of the reference Ceres
 and Moon (fast, so they run on native and wasip1 under R04's recipes) and of the reference Earth
-and Mars (slow). The coarse goldens pin each reference world's palette. On a world wet now the
+and Mars (slow). Under nextest each test runs in a process of its own (`.config/nextest.toml`), so
+"once per binary" holds within one test. The checks that share a world's pass are one test, or the
+field comes from a file that one process of the run writes, as `sky::testing::shared` does. The
+surface module's order tests (`planetary::surface::tests`) stay where they are: their property
+needs each pass computed in several orders (decision-r09-t13-test-cost). The coarse goldens pin
+each reference world's palette. On a world wet now the
 coarse land hypsometry is its construction's by rule (decision-r09-t14-choices, T14.c follow-up 2
 §2), so a golden or check of land hypsometry after erosion reads T12.a's bands. Bench `coarse/pass`
 per level 5–8, beside T14's `coarse/erosion_l8` in
@@ -4380,7 +4386,8 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
   - _No record carries scattering._ Einstein–Smoluchowski–Cabannes is P14.T49.h's, and R08.T5.g
     added no scattering column. _Ruled 2026-10-15 (main's ruling for R09.T2.e): absent until
     P14.T49.h, which fills the testing worlds' and the reference Earth's records before the serve
-    gate._
+    gate._ _Filled by P14.T49.h's step 2 (`f27d0248`): b in the testing worlds' and the reference
+    Earth's water and methane records, each held to the bit by a test._
   - _The Earth-like world's runoff keeps 999.84 kg m⁻³._ Its sea's grain density becomes the
     record's 997.047 (the rule: a `Liquid` entry's grain density is its record's to the bit), and
     `RUNOFF_WATER_DENSITY_KG_M3` (999.84, the conversion the illustration was built with) keeps

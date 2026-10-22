@@ -2154,7 +2154,9 @@ Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::
     `test/galaxyFixtures.ts`'s `anUnknownUnit`, documented as the decoder's own trust at the wire.
   - _Ruling 2 (§2.2)._ The group is `GAS AND DUST`, built to D0 §2.4 (f)'s draft of the guide's
     groups row, pending the owner's sign-off (the sign-off queue's item for the galaxy map's
-    extinction names); the guide is not edited here. `gas.molecular_mass` reads
+    extinction names); the guide is not edited here. _Signed off since, (f) as drafted, on
+    2026-10-16 (`signoff-11.md`, item 22), and applied to the guide's `PARAMETERS` groups row._
+    `gas.molecular_mass` reads
     `MOLECULAR DISC MASS` and `gas.pressure_speed` `VELOCITY DISPERSION`; the other sixteen labels
     are 5b1c3285's.
   - _Ruling 5 (§5)._ `SIGHTLINE_QUALITY` (`Budget(256)`) is the sim's,

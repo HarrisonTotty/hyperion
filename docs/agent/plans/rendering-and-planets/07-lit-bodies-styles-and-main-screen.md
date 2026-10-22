@@ -922,7 +922,10 @@ and `--port`.
    wireframe has none; decisions-r06-r07, item 1).** In order:
    R06's sky; the small discs' cells (a compute pass, R07.T8.d); mesh bodies (opaque, depth); host
    discs, disc bodies and point bodies in one painter order (Design note 2); R08's,
-   R10's and R11's passes in their places when they exist; the histogram; bloom of the light above
+   R10's and R11's passes in their places when they exist (_as built, R10's two: `terrain shadows`,
+   the shadow cascades' four depth-only caster passes, between the small discs' cells and mesh
+   bodies, which `FrameTerrain.draws` submits on the high setting alone (R10.T9.b), and `terrain`
+   after mesh bodies; `photoreal/passes.ts`_); the histogram; bloom of the light above
    the display's range; the tone-mapping pass with the analytic glare, upscale, encoding and
    dither; symbology cased over the result; DOM readouts on plates. A style owns no scene, camera or
    projection, so switching is a change of pass list, and a body projects to the same pixel in both
@@ -7072,6 +7075,11 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `UniformDiscSurface` in `appearance/bodyAppearance.ts`, Provides' shape unchanged (`weights`,
     `laws`, `elsewhere`). _R10.T10.f adds `texels`, the texture's CPU copy, which `classMapSurface`
     and R10's store set and the point integrates (R10's Risks, "Deviations in T10.f, as built")._
+    _R10.T10.g adds `normals` (`DiscNormalMap`), the field's shading normals over its surveyed cells
+    (`bodies/discNormals.ts`, `rg16float`), which `bodyDisc.wgsl` binds at 14, flagged by row 24's
+    w: the disc takes μ₀, μ, each star's horizon term and planetshine on the map's normal, and the
+    hit, the limb, the projected area and R08's lookups on the datum's (R10's Risks, "Deviations in
+    T10.g, as built")._
   - **The map's layout**, which the plan left open: a 2D array of `rgba8unorm`, N × N texels a face
     of R05's cube sphere. Texel (i, j) of face f is the cell s ∈ [i ÷ N, (i + 1) ÷ N),
     t ∈ [j ÷ N, (j + 1) ÷ N) of `xyzToFaceUv`'s (u, v) under `uvToSt`, so with N = 2^L it is the
@@ -7825,7 +7833,12 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       the mesh plan's coverage; R10.T10.e reads the mask only for a body handed over (the mesh
       plan's `role`, `MeshBodyRole`: `promoted`, or `handed-over` with its coverage) and adds
       `LitBodyInput.handoverReliefM` and `PhotorealFrame.terrain`, drawn in the `bodies` pass after
-      the figures (R10's Risks, T10.c and T10.e as built)._
+      the figures (R10's Risks, T10.c and T10.e as built)._ _R10.T10.g adds the required
+      `BodyFrameOptions.presentedPx`, with `PhotorealInputs.presentedPx` and
+      `PhotorealFrame.presentedPx`, the canvas's device pixels: `planLitBodies` measures the
+      hand-over to terrain, both ways, at the presented width's centre pixel, so that neither the
+      resolution controller's scale nor low's 720-row cap moves it; R07's 3 px switch stays on the
+      frame's own pixels (R10's Risks, "Deviations in T10.g, as built")._
     - `PhotorealFrame` gains `depthWriters`. The view passes none: nothing in a view writes depth
       yet (R10's terrain, lit craft), so the live client never promotes and draws as before. This
       replaces T8.a part 2's "Promotion … is not called".

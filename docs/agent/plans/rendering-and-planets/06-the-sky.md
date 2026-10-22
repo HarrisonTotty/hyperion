@@ -558,7 +558,10 @@ SharedSightlineCache}`) was on `origin/galaxy-generation` only, not on `main` (r
   (`hierarchy()`); and the rule that every star's mass is at most the pair's total (Design note
   8). **P11.T11 is built** (version 16): `SystemStars::state_at(t) -> Option<SystemState>` gives
   every star's state from its pair's timeline where the engine ran one (a merged-away star is
-  `NoRemnant`, so the list keeps its length), while `stars()` and `brief_at` stay single-star. The
+  `NoRemnant`, so the list keeps its length), while `stars()` and `brief_at` stay single-star
+  (_since P11.T11.a, `85d3e054`, `brief_at` is the summary's primary, from its pair's state where
+  the engine changed it, and the range brief keeps galaxy plan 06's single-star model only where a
+  gate certifies it; galaxy plan 11's Risks, "P11.T11.a as built"_). The
   census therefore reads `SystemState::stars()` for each star's state, and R06.T16.b is due now
   (its ordering note). P11.T6 and T8–T10 are not built and move no star's mass.
 - **Galaxy plan 12:** `observe::{Observer, retarded, Drift::of_record, Retardation,
@@ -3095,7 +3098,9 @@ draft, and the owner's sign-off recorded in this plan.
   notes 8 and 10). Re-validated 2026-10-02: P11.T11 has done that wiring (version 16; the pair
   timelines reach `SystemStars::state_at`), and P11.T6 and T8–T10 move no star's mass, so this
   subtask runs straight after T8.e. The brief (`brief_at`) is the primary's single-star model and
-  cannot tell whether a multiple system has interacted, and P11's `can_interact` is crate-private
+  cannot tell whether a multiple system has interacted (_since P11.T11.a, `85d3e054`, the brief
+  reads the pair, but only by generating the system wherever its gate does not certify the
+  single-star model, so the decision below stands_), and P11's `can_interact` is crate-private
   and reads the models' tracks, which need `SystemStars::generate`. Decided 2026-10-02
   (decision record item 2): for n ≥ 2 the bound is n × F_env at `max_star_mass(m₁)` over ages
   from zero; n × F₁ only for single stars. No ask of plan 11 unless T17 finds the multiple-system

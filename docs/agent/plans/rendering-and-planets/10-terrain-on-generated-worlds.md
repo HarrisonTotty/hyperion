@@ -429,6 +429,10 @@ alone and never on the sim, by R04's entry in `.claude/rules/rust-dev.md`):
   file is R09.T16's to create, and until R09.T11–T15 fill the coarse pass's steps the reference
   worlds come out as T10's no-op pass leaves them, a smooth dry sphere with no fine relief (R09's
   "Deviations in T10, as built"). The order of tasks says what waits on it.
+  Under nextest each test runs in a process of its own, so "once per test binary" holds within one
+  test (R09.T16's note). On a world wet now the coarse land hypsometry is its construction's by
+  rule (decision-r09-t14-choices, T14.c follow-up 2 §2), so a test here that checks land
+  hypsometry after erosion reads R09.T12.a's bands.
 
 ## Consumes
 
@@ -975,7 +979,10 @@ targets at header 21 (below).
     (πρ), so a quantisation error δ_q moves it by at most 2 δ_q ÷ (πρ), 0.33% for the Sun at 1 au
     (under 1/255). A star is drawn with a soft penumbra only when ρ is at least 20″, about two steps
     (at 32″, a Sun at 30 au, the error is at most 10%, over a band a few centimetres wide); smaller
-    stars take a hard step. The terrain's own sampling and the eight azimuths' interpolation err far
+    stars take a hard step (_not built: R10.T8.b keeps R07's soft edge at every size, which
+    converges to the step under 20″, by main's ruling of 2026-10-16; Risks, "Deviations in T8.b, as
+    built", "No hard step under 20″"_). The terrain's own sampling and the eight azimuths'
+    interpolation err far
     more in rough ground; the rule governs banding only. The near field is marched from the patch's
     own 65 × 65 heights, about 2.2 M compares, an estimated 2–6 ms in WebAssembly (provisional; T8.a
     measures it), or by Timonen and Westerholm 2010's convex-hull line sweep, O(n) per direction, if
@@ -1031,18 +1038,25 @@ targets at header 21 (below).
     max(2 km, 20 × height above ground)), continuous in that height. Each cascade is fitted to a
     bounding sphere of its frustum slice, whose radius does not change as the camera turns, snapped
     to whole texels (Valient 2008), with every light matrix built camera-relative in `f64` and
-    narrowed to `f32`, since snapping at planetary coordinates would jitter. An orthographic light
+    narrowed to `f32`, since snapping at planetary coordinates would jitter. _As built by R10.T9.b,
+    the cascades' light is the sun's disc's top edge, not its centre (decision-r10-t9b-penumbra):
+    a receiver is in their shadow only where the disc's top edge is hidden, where m has reached 0,
+    so min(m, c′) is m across the whole penumbra; the receiver's N·L, its offset and its shading
+    keep the true sun (Risks, "Deviations in T9.b, as built")._ An orthographic light
     projection has linear depth, so reversed-Z buys nothing there: the maps are `depth32float`,
     whose worst step over a 50 km range is about 3 mm, and keep the project's greater-equal
     convention for uniformity only, which the code says so that no one tunes bias expecting
     precision. Casters in front of the near plane are pancaked through `primitive.unclippedDepth`
     where the adapter offers `depth-clip-control` (the UHD 620 offers it under the forced switches,
-    by R01's probe of 2026-09-29, and SwiftShader does not; cascades are the high setting's alone;
+    by R01's probe of 2026-09-29, and so does SwiftShader, as R10.T9.b found, whose smoke withholds
+    it on the `no-subgroups` variant so that both paths run; cascades are the high setting's alone;
     decision-r10-t9-split), and otherwise the near plane is pulled towards the sun by
     Δh ÷ sin(e_sun), capped. Acne is held by slope-scaled bias (`depthBias`,
     `depthBiasSlopeScale`, `depthBiasClamp`) and a normal offset of 1–1.5 texels of the cascade's
     world-space size; filtering is 2 × 2
-    hardware PCF through `textureSampleCompare` with a few Poisson taps, since the Sun's penumbra at
+    hardware PCF through `textureSampleCompare` (_as built `textureSampleCompareLevel`: the
+    receiver runs in non-uniform control flow, where WGSL allows only that form_) with a few
+    Poisson taps, since the Sun's penumbra at
     10 m from an occluder is about 9 cm and PCSS is unneeded. Four 2,048² `depth32float` layers are
     64 MiB, the brainstorm's figure. Zhang et al.'s formula, Valient's snapping and the bias recipes
     are from memory in the research and are checked against the sources in T9.a.
@@ -1234,7 +1248,8 @@ targets at header 21 (below).
 T1–T5 are `hyperion-surface` code and run in order after R09's synthesis lands; T6 moves R05's bake
 onto it. T7 (the client's field store) needs only R09's chunks and R05's workers and can run beside
 T1–T5, though its worker tests need T6.b's entry points. T8 (horizon maps) needs T6.a. T9 (cascades)
-is independent of T8 but lands after it, so the high setting has its horizon map to combine with.
+is split (decision-r10-t9-split): T9.a, pure, needs nothing; T9.b follows T9.a, T11, T12 and
+R10.T8.c, so the high setting has its horizon map to combine with.
 T10 (lit terrain) needs T2, T6 and T7, and its shadow term from T8 and T9; T10.f needs T10.d. T11
 (the wireframe) needs T6 and T7. T12 (readouts) needs T5, T6.b and T7. T13 (guide drafts) is docs
 only, can be written at any time, and lands before T11 and T12, which are built to the drafts; it
@@ -1701,7 +1716,8 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   (decision-r10-t10b-r09-t2e §5). The sun's elevation is π ÷ 2 less its zenith angle
   `preciseAtan2(|s × ν|, s·ν)`, since as built `preciseAtan2(y, x)` takes y ≥ 0 and returns
   [0, π] (R08 Design note 18); R07's function keeps WGSL's built-ins, a deferred correction to R07
-  (decision-r10-t8b §2). R08 draws no refraction yet, so the sun's direction is the geometric one.
+  (decision-r10-t8b §2; _settled by R07.T6.d, `61e156b3`_). R08 draws no refraction yet, so the
+  sun's direction is the geometric one.
   R07's clamp of a negative horizon then takes the element's own plane, exactly, where that hides
   more. WGSL's `asin` inherits atan2's 4,096 ULP, about 50″ at 30°, so no elevation here is formed
   by it. Files: `shadows/horizon.wgsl`, `shadows/litFraction.ts`, and the call in
@@ -3734,6 +3750,15 @@ pass.
   `bake/horizon`'s WebAssembly figure (main's ruling for R10.T8.a, 2026-10-15), patches a second
   sustained against the brainstorm's demand of (200 · v + 290 · |ḣ|) ÷ h, the level bound per level
   from T4.a, and pops or cracks seen; every golden of this plan asserted on the three targets.
+  The brightness check is T10.g's hand-over check (`--views-check --terrain --handover`) with the
+  served world as its `HandoverWorld`, which T10.g left unbuilt, judged as T10.g's except that
+  its per-texel bound leaves out each cell where the disc's μ floor binds at the cell's centre
+  (n′ · v < ½ μ_ν) and counts those cells in the record, the body's and the survey's means still
+  judged over every pixel. Its terminator look is recorded, not judged. If it shows a line of
+  terminator cells over 1/3 stop, a new R10.T10.h builds the lever, in this order: trace T10.g's
+  cell 7810; then a coarse shadow term in the disc from the field's horizon toward the star; then
+  the cross-fade over the hysteresis band, for what those two leave (decision-r10-t16-leans,
+  "R10.T10.g terminator cross-fade"; T10.g's record and deferred findings).
   Acceptance: the lane's `just smart-ci` and `just test-wasm-fast`, this plan's slow binaries by
   name (`just test-slow -E 'binary(…)'`) and `just bench -- bake/` complete, and the descent's
   figures are recorded; `just ci` and the slow pass are the orchestrator's.
