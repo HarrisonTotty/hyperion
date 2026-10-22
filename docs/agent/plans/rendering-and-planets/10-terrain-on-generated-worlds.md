@@ -2618,10 +2618,34 @@ Acceptance:
 
 _From R10.T16 (`decision-r10-live-path.md`, D10): the readings (T6.b's `reading`, `slantRange` and
 `material`) are asked of the session's pool, whose workers hold the body's field, through a query of
-the pool's beside `classMap`, at 4 Hz for each view's line of sight; `SurveyLine` reads the session's
-survey of the view's `FRAME` body (the store's status, coverage and header, stale while the link is
-down), with the refused field's state as signed off (decision-r10-t16-leans §12). Its by-hand checks
-may take T16.d's `TERRAIN TEST`._
+the pool's beside `classMap`, at 4 Hz for each view's line of sight (the primary's in T12;
+decision-r10-t12-leans §3); `SurveyLine` reads the session's survey of the view's `FRAME` body
+(the store's status, coverage and header, stale while the link is down), with the refused field's
+state as signed off (decision-r10-t16-leans §12). Its by-hand checks may take T16.d's
+`TERRAIN TEST`._
+
+_Ruled (decision-r10-t12-leans):_
+
+- `SLOPE` at `BASELINE 2 m` alone; its selector is R10.T12.a's (§1).
+- The capacity stands beside `PAD FRICTION` on any slope below φ, its row stating that it takes the
+  pad as holding (§2).
+- The primary alone states the survey line, `DATUM`, readout, tripod and list note. The pool's
+  readout query takes the view, and an instrument in its slot states none (§3, R10.T12.a).
+- The stale forms (§4).
+- No readout, `DATUM` or tripod under `TERRAIN NOT AVAILABLE`, the readout's queries guarded as
+  T16.e's (§5).
+- `AT`'s month from the seasonal orbit's mean anomaly at the time the view lights the body, through
+  `lib/orbit.ts`'s phase (§6).
+- The readout from the field header's first answer, `NONE` included (§7).
+- The slope capacities' golden under `material/` at the version in force (§8).
+
+The by-hand look at 1280 × 720 adds both slots at 16 rem, the primary's tripod between them, and
+the primary's block's height with zero, one and two slots open (§3).
+
+_Ruled (decision-r10-view-block-room §3, §4):_ the survey line, `DATUM` and the readout stand on
+the label block's lower plate, which R10.T12.b builds, as its groups with their yield lines, and
+T12 lands after R10.T12.b; its by-hand look is that ruling's §12, in place of the 1280 × 720 look
+above.
 
 - **R10.T12.a The readout's `BASELINE` selector, its line where no line of sight forms, and its
   labels kept whole** (new; decision-r10-t12-leans §1, decision-r10-t12a-scope). Three of R10.T12's
@@ -6485,7 +6509,8 @@ Option<Pascals>` sit beside the level `bearing_capacity` and `ultimate_bearing_c
      (1 − 2ζ tan β ÷ B)^1.8, or B′ = B − 2e.
   2. _Sliding first._ The inclination factors assume the pad holds. On regolith the pad friction
      is 0.20 (about 11°), so the pad slides first. Whether the capacity yields to the em dash past
-     `PAD FRICTION` is R10.T12's question.
+     `PAD FRICTION` is R10.T12's question. _Ruled (decision-r10-t12-leans §2): no yield; the row
+     states that the capacity takes the pad as holding._
   3. _Cohesive slopes past φ_ can stand, but no source in hand gives their capacity, so the em
      dash stands.
   4. _`z_γ`'s fit._ It was fitted in plane strain at φ 30°–40°, and is used here at 18°–54° on a
@@ -9231,8 +9256,9 @@ hyperion typecheck` from a clean cache, `pnpm lint` (type-aware oxlint) and Pret
   - _The `GRAPHICS` panel_ lists `GRAPHICS VIEW REFUSED` beside the label block; whether it lists
     the terrain fault too is R12's settings ladder's, or the next plan's to touch the panel.
   - _For T12:_ with every worker lost, the readings cannot be made (lean: Missing, the em dash, the
-    fault line standing as the cause); the survey line's state for a refused field is T12's, its
-    T16.d draft going to the sign-off queue.
+    fault line standing as the cause. _Ruled (decision-r10-t12-leans §5): no readout, `DATUM` or
+    tripod while the fault stands, not the em dash._); the survey line's state for a refused field
+    is T12's, its T16.d draft going to the sign-off queue.
 - **Deviations in T16.b, as built** (2026-10-19; lane r10-live, on `rendering-and-planets` at
   `b021342b`, after T16.a's `63e31fe4`).
   - _Files._ New: `view/terrain/surveyLookup.ts` (`SurveyedCells`) with `surveyLookup.test.ts` and
@@ -12851,6 +12877,15 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
      (a range's σ of 0.31 km reads `± 0.4 km`).
   5. _Vesić's inclination factors_ were not read in a primary here (the science check could not
      reach Vesić 1975 or EM 1110-1-1905); the slope ruling read them.
+  6. _For R11, a server month at a time._ `KeplerElements::mean_anomaly_at` omits the drift's
+     ½ ṅ Δt², which `drifting_state_at` adds. A server reader of a month at a time (`month_blend`'s
+     "a reader finds the mean anomaly at the scene's time") must take the drifting phase, as the
+     client's `meanAnomalyAt` does, or the two part on an evolving orbit (decision-r10-t12-leans
+     §6).
+  7. _For the plan that gives the own ship's hull its pads._ It owns a landing-site assessment that
+     states the governing mode, sliding, bearing, settlement or tip-over. It takes the pads, the
+     legs, the load and the pads' embedment, which the readout's two figures cannot
+     (decision-r10-t12-leans §2).
 - **Leans for commit 3's rulings** (main rules them with its §12 look):
   1. In `CHASE` the tripod stands over the own ship's hull at the centre: the give-way list names
      no hull outline. Lean: a hull outline within 0.5 rem also makes it give way. _Ruled

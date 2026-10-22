@@ -2673,7 +2673,12 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   scaling, on the grid Design note 8 names, the rotation and pressure factors tabulated from Kaspi
   and Showman 2015 (T0.b's transport law). Tests: an Earth-like input converges within the fixed
   orbit count and its annual-mean zonal temperature lies within 5 K of Siler et al.'s Fig. 2b
-  (ERA-Interim); with seasons off, the equator–pole contrast, scaled so that the 1 Ω⊕, 1 bar run
+  (ERA-Interim; _amended since, by decision-r09-t13i's §2.4 follow-up §3 and follow-up 2 §2, as the
+  first of R09.T13.i's batch-1 tests states it: on the Earth with its land at the sea level, each
+  band's departure from 58.75° S northward, less the solid-angle mean of those departures, lies
+  within 5 K, or 7 K in the ice edge's tier from 61.25° N to 71.25° N, and that mean within 3 K;
+  each band south of 58.75° S lies within 12 K of ERA-Interim (T13.a's record); every band is
+  printed_); with seasons off, the equator–pole contrast, scaled so that the 1 Ω⊕, 1 bar run
   reads their 40 K (Fig. 8a) or 42 K (Fig. 15c), matches Kaspi and Showman's figures to 2 K over
   Ω⊕ ÷ 24 to 12 Ω⊕ and 0.2–50 bar; the scheme is stable at Venus's rotation and
   at a six-hour step for every rotation in the reference set; the months are twelve equal spans of
