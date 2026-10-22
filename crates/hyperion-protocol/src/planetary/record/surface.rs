@@ -1558,6 +1558,23 @@ pub(crate) mod tests {
         ]
     }
 
+    /// The shared fixture's Earth's crust (`packages/protocol/fixtures/planetary.json`) in the
+    /// form the server sends (P14.T54.a): the sim's `CrustComposition::derive` example's Earth,
+    /// basalt ocean floor and granite continents over a buried ultramafic crust, its melt area 0.
+    pub(crate) fn earth_crust() -> CrustCompositionDto {
+        CrustCompositionDto {
+            primary: Some("ultramafic".to_owned()),
+            secondary: Some("basalt".to_owned()),
+            tertiary: Some("granite".to_owned()),
+            bulk: None,
+            lid: CrustLidDto::Secondary,
+            provinces: "basalt".to_owned(),
+            redox: RedoxClassDto::Oxidised,
+            mantle_redox_iw: 3.55,
+            melt_area_fraction: 0.0,
+        }
+    }
+
     fn condensates_json() -> Value {
         json!([{
             "substance": "CO2",

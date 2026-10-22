@@ -28,7 +28,9 @@ type ResponseName =
   | "body_detail_response"
   | "body_detail_jupiter"
   | "body_detail_mass_and_orbit"
-  | "body_detail_contact";
+  | "body_detail_contact"
+  | "body_detail_lava_world"
+  | "body_detail_titan";
 
 /** The fixture's system, which every body ID extends. */
 export const FIXTURE_SYSTEM = "0200080020000000";
@@ -65,7 +67,8 @@ export function populatedBodies(): ResponseFor<"system_bodies"> {
 
 /**
  * The slice's Earth at the `full` level: its surface `ok` (P14.T35.e, illustrative values), with
- * its condensates (P14.T54.a, illustrative values), and its envelope not applicable.
+ * its condensates (P14.T54.a, illustrative values) and its crust in the server's form (P14.T54.a),
+ * the sim's present Earth's, whose melt area is 0, and its envelope not applicable.
  */
 export function earthDetail(): ResponseFor<"body_detail"> {
   return response("body_detail_response", "body_detail");
@@ -98,6 +101,26 @@ export function earthContact(): ResponseFor<"body_detail"> {
  */
 export function jupiterDetail(): ResponseFor<"body_detail"> {
   return response("body_detail_jupiter", "body_detail");
+}
+
+/**
+ * A locked lava world inside the slice's Earth at the `full` level (P14.T54.a): `airless`, with no
+ * volatile air, its crust as the server sends one whose melt area, its dayside pool, is above 0,
+ * and no `silicate_vapour` key, as every server sends it before P14.T55.b.
+ */
+export function lavaWorldDetail(): ResponseFor<"body_detail"> {
+  return response("body_detail_lava_world", "body_detail");
+}
+
+/**
+ * A Titan, a regular moon of a Saturn beyond the slice's Jupiter, at the `full` level (P14.T54.a):
+ * its N2–CH4 air at the Huygens probe's measured surface figures, its lakes a `ch4_c2h6_n2` liquid
+ * condensate on about 1% of the surface, and its crust as the server sends one, an `H2O` lid whose
+ * melt area is 0 over no melted-rock crust. `packages/protocol/src/planetary.test.ts` cites each
+ * measured figure.
+ */
+export function titanDetail(): ResponseFor<"body_detail"> {
+  return response("body_detail_titan", "body_detail");
 }
 
 /** The slice's answer with its bodies changed by `change`, as a later generator might send it. */

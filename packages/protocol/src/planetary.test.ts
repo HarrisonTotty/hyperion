@@ -228,7 +228,6 @@ describe("body_detail", () => {
       "subsurface_ocean",
       "vertical_structure",
       "aerosols",
-      "crust",
       "modifiers",
       "biosphere",
       "silicate_vapour",
@@ -259,6 +258,32 @@ describe("body_detail", () => {
         seasonal: false,
       },
     ]);
+  });
+
+  it("decodes an Earth's crust as the server sends it, its melt area 0 (P14.T54.a)", () => {
+    const surface = okValue(response("body_detail_response", "body_detail").record.surface);
+
+    expect(surface.crust).toEqual({
+      primary: "ultramafic",
+      secondary: "basalt",
+      tertiary: "granite",
+      bulk: null,
+      lid: "secondary",
+      provinces: "basalt",
+      redox: "oxidised",
+      mantle_redox_iw: 3.55,
+      melt_area_fraction: 0,
+    });
+  });
+
+  it("decodes a locked lava world: airless, no volatile air, its crust's dayside pool above 0 (P14.T54.a)", () => {
+    const surface = okValue(response("body_detail_lava_world", "body_detail").record.surface);
+
+    expect([surface.state, surface.surface_pressure_pa, surface.gases]).toEqual(["airless", 0, []]);
+    expect(surface.crust?.melt_area_fraction).toBeGreaterThan(0);
+    expect(surface.crust?.melt_area_fraction).toBeLessThanOrEqual(0.5);
+    // Every server before P14.T55.b leaves the melt's own vapour out.
+    expect("silicate_vapour" in surface).toBe(false);
   });
 
   it("reads a melt's own vapour absent as not modelled and null as none (P14.T35.f)", () => {
@@ -467,6 +492,107 @@ describe("body_detail", () => {
 
     expect(message.error.code).toBe("unknown_body");
     expect(message.error.field).toBe("body");
+  });
+});
+
+/**
+ * Titan's surface at the Huygens landing site, K and Pa, with their uncertainties: "At the surface,
+ * the temperature was 93.65 ± 0.25 K, and the pressure was 1,467 ± 1 hPa" (Fulchignoni et al. 2005,
+ * Nature 438, 785, abstract; the Huygens Atmospheric Structure Instrument).
+ */
+const HUYGENS_SURFACE_K = 93.65;
+const HUYGENS_SURFACE_K_ERROR = 0.25;
+const HUYGENS_SURFACE_PA = 146_700;
+const HUYGENS_SURFACE_PA_ERROR = 100;
+
+/**
+ * Titan's methane mole fraction near the surface, with its uncertainty: "(5.65 ± 0.18) × 10⁻² near
+ * the surface (6.7 km to the surface)", against (1.48 ± 0.09) × 10⁻² in the lower stratosphere
+ * (Niemann et al. 2010, JGR 115, E12006, abstract; the Huygens Gas Chromatograph Mass
+ * Spectrometer).
+ */
+const NEAR_SURFACE_CH4 = 0.0565;
+const NEAR_SURFACE_CH4_ERROR = 0.0018;
+
+/**
+ * The share of Titan's surface under liquid, its lakes and seas alone: 0.85–1.07% (Hayes 2016,
+ * Annu. Rev. Earth Planet. Sci. 44, 57, as Birch, Hayes and Perron 2025, "Titan's fluvial and
+ * lacustrine landscapes", in _Titan After Cassini-Huygens_, Elsevier, 287, cite it; read through
+ * decision-p14-t51a-part2's table). Lacustrine terrain, filled and empty, covers about 1.1%.
+ */
+const LAKES_AREA_FRACTION = { min: 0.0085, max: 0.0107 };
+
+/** Whether `value` lies within `error` of `measured`. */
+function isWithin(value: number, measured: number, error: number): boolean {
+  return Math.abs(value - measured) <= error;
+}
+
+describe("body_detail's Titan, with its lakes (P14.T54.a)", () => {
+  const titan = () => response("body_detail_titan", "body_detail").record;
+
+  it("is a regular moon, icy, of a planet of the fixture's system", () => {
+    const record = titan();
+
+    expect(parseBodyId(record.id)).toEqual({ system: SYSTEM, bodyIndex: 0x0601 });
+    expect(record.kind).toEqual({ type: "moon", origin: "regular" });
+    expect(record.parent).toEqual({
+      type: "body",
+      id: formatBodyId({ system: SYSTEM, bodyIndex: 0x0600 }),
+    });
+    expect(okValue(record.bulk).class).toBe("icy");
+  });
+
+  it("holds the Huygens site's measured surface temperature and pressure", () => {
+    const surface = okValue(titan().surface);
+
+    expect(
+      isWithin(surface.mean_surface_temperature_k, HUYGENS_SURFACE_K, HUYGENS_SURFACE_K_ERROR),
+    ).toBe(true);
+    expect(
+      isWithin(surface.surface_pressure_pa, HUYGENS_SURFACE_PA, HUYGENS_SURFACE_PA_ERROR),
+    ).toBe(true);
+  });
+
+  it("holds an air of N2 with the measured near-surface CH4, summing to 1", () => {
+    const { gases } = okValue(titan().surface);
+    const methane = gases.find((gas) => gas.species === "CH4")?.mole_fraction ?? Number.NaN;
+    const sum = gases.reduce((total, gas) => total + gas.mole_fraction, 0);
+
+    expect(gases.map((gas) => gas.species)).toEqual(["N2", "CH4"]);
+    expect(isWithin(methane, NEAR_SURFACE_CH4, NEAR_SURFACE_CH4_ERROR)).toBe(true);
+    expect(Math.abs(sum - 1)).toBeLessThanOrEqual(1e-9);
+  });
+
+  it("holds its lakes as a ch4_c2h6_n2 liquid condensate on the measured share of the surface", () => {
+    const surface = okValue(titan().surface);
+    const [lakes, ...others] = surface.condensates ?? [];
+
+    expect(others).toEqual([]);
+    expect([lakes?.substance, lakes?.phase]).toEqual(["ch4_c2h6_n2", "liquid"]);
+    const area = lakes?.area_fraction ?? Number.NaN;
+    expect(area >= LAKES_AREA_FRACTION.min && area <= LAKES_AREA_FRACTION.max).toBe(true);
+    expect(surface.surface_liquids).toEqual([{ substance: "ch4_c2h6_n2", area_fraction: area }]);
+    expect(surface.ocean_fraction).toBe(area);
+    expect(surface.climate_regime.condensable).toBe("CH4");
+  });
+
+  it("holds an H2O lid whose melt area is 0, its liquid a condensate and not a melt", () => {
+    const surface = okValue(titan().surface);
+
+    expect([surface.state, surface.material]).toEqual(["snowball", "ice"]);
+    expect(surface.crust?.lid).toBe("primary");
+    expect(surface.crust?.primary).toBe("H2O");
+    expect(surface.crust?.melt_area_fraction).toBe(0);
+  });
+
+  it("holds no melted-rock crust under its ice, as its moment of inertia implies", () => {
+    const { crust } = okValue(titan().surface);
+
+    // "The inferred moment of inertia factor is about 0.34, implying incomplete differentiation"
+    // (Iess et al. 2010, Science 327, 1367, abstract; Cassini's gravity field): the rock never
+    // melted to a crust of its own, so the server's form is a regular icy moon's whose rock did
+    // not melt, an `H2O` primary crust and no other.
+    expect([crust?.secondary, crust?.tertiary, crust?.bulk]).toEqual([null, null, null]);
   });
 });
 

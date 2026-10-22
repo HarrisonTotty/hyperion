@@ -222,14 +222,20 @@ function pressureShown(pressurePa: number): Shown {
 
 /**
  * Whether a surface holds melt, where a vapour of its own, the melt's silicate vapour, lies over
- * it: the state `magma_ocean`, which the wire states (P14.T35.f).
+ * it, as the wire states it: the state `magma_ocean` (P14.T35.f), or a crust whose
+ * `melt_area_fraction` is above 0 (P14.T54.a), as a locked lava world's dayside pool is under the
+ * state `airless`.
  *
  * @remarks
- * P14.T54.a's client follow-up adds a `crust.melt_area_fraction` above 0, and P14.T53.b decides
- * `steam_envelope`; neither is read here.
+ * A crust not modelled, as every server before P14.T54.a sends it, adds no melt, and an ice lid's
+ * melt area is 0, since its liquid is a condensate, not a melt of the crust. P14.T53.b decides
+ * `steam_envelope`, which is not read here.
  */
 function holdsMelt(surface: BodySurface): boolean {
-  return surface.state === "magma_ocean";
+  return (
+    surface.state === "magma_ocean" ||
+    (surface.crust.kind === "value" && surface.crust.value.meltAreaFraction > 0)
+  );
 }
 
 /** What a melt's own vapour, as the wire sends it, lets its surface's rows read. */
@@ -271,22 +277,25 @@ function vapourReading(vapour: Modelled<SilicateVapour>): VapourReading {
  * The temperature and the pressure take a line each, so that `SURFACE PRESSURE`, the section's
  * longest label, stays in the first label track rather than widening the second.
  *
- * An airless body's air is computed, with none in it: its pressure and its gases read `NONE`, and
- * its exosphere, a quantity of its own that the generator does not yet compute (P14.T55.c), reads
- * `NOT YET MODELLED`, so that `NONE` is never read as a body known to be clear of gas (the guide's
- * Data states). The note follows the `airless` state, as the view's `EXOSPHERE: NOT YET MODELLED`
- * does (rendering plan R08, R08.T10.a). The section's other members (its material, climate regime
- * and global figures) are on the wire and not yet read here.
+ * An airless body's air is computed, with none in it: its pressure and its gases read `NONE`
+ * unless it holds melt (below), and its exosphere, a quantity of its own that the generator does
+ * not yet compute (P14.T55.c), reads `NOT YET MODELLED`, so that `NONE` is never read as a body
+ * known to be clear of gas (the guide's Data states). The note follows the `airless` state, as the
+ * view's `EXOSPHERE: NOT YET MODELLED` does (rendering plan R08, R08.T10.a). The section's other
+ * members (its material, climate regime, global figures, condensates, and its crust but for the
+ * crust's melt area) are on the wire and not yet read here.
  *
- * A surface holding melt, the state `magma_ocean` (P14.T35.f), has a vapour of its own, the melt's
- * silicate vapour, which no rule computes before P14.T55.b. While the wire leaves it out, its row
- * reads `SILICATE VAPOUR NOT YET MODELLED`, and an empty volatile air reads its pressure and gases
- * Missing, the em dash, never `NONE`, since the pressure over a melt is at least the melt's own
- * vapour pressure (the guide's Data states; decision-backlog-2 §2.4, decision-triton-and-e101
- * §2.3). A volatile air it holds, a young magma ocean's steam and CO2, reads its figures beside the
- * row; a vapour computed as none reads `NONE` as an airless body's air does. `SILICATE VAPOUR` is
- * signed off (signoff-12, item 27), as one name with the view's
- * `SILICATE VAPOUR: NOT YET MODELLED` note, which R08.T10.a adds.
+ * A surface holding melt, the state `magma_ocean` (P14.T35.f) or a crust's melt area above 0
+ * (P14.T54.a), has a vapour of its own, the melt's silicate vapour, which no rule computes before
+ * P14.T55.b. While the wire leaves it out, its row reads `SILICATE VAPOUR NOT YET MODELLED`, and an
+ * empty volatile air reads its pressure and gases Missing, the em dash, never `NONE`, since the
+ * pressure over a melt is at least the melt's own vapour pressure (the guide's Data states;
+ * decision-backlog-2 §2.4, decision-triton-and-e101 §2.3). A volatile air it holds, a young magma
+ * ocean's steam and CO2, reads its figures beside the row; a vapour computed as none reads `NONE` as
+ * an airless body's air does. A locked lava world, `airless` with a dayside pool, reads both notes,
+ * `EXOSPHERE` and `SILICATE VAPOUR` each on its own line, as the view does (rendering plan R08,
+ * Design note 12). `SILICATE VAPOUR` is signed off (signoff-12, item 27), as one name with the
+ * view's `SILICATE VAPOUR: NOT YET MODELLED` note, which R08.T10.a adds.
  *
  * A vapour the wire sends as a value, which no server does before P14.T55.b, reads its empty
  * volatile air as Missing too, and has no row: its figures are T55.b's to read.

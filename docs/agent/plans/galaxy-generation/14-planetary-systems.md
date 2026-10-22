@@ -23998,3 +23998,98 @@ hyperion-protocol`, clean after `just gen-protocol`); Clippy `--all-targets` on 
       failures were in D1's edits in progress, relayed); rustdoc with `-D warnings` on the sim,
       the protocol and the server; rustfmt; golden_diff (no golden changed). Not run: the slow
       tier, the gate.
+  - _Batch E's D4, the client's melt rule and the fixture's Titan and crusts_ (plan 14's T54.a
+    bullets "_The client's melt rule_" and _Tests_' "the protocol fixture gains a Titan with its
+    lakes"; decision-pre-23-review, "T54.a's brief items", item 4's last two). TypeScript and the
+    shared fixture only; no golden moves.
+    - _The rule_ (`displays/system/BodyRecordReadings.tsx`, `holdsMelt`): a surface holds melt in
+      the state `magma_ocean` or where its crust is on the wire with a `melt_area_fraction` above 0. A crust not modelled (every server before the batch) adds no melt, and an ice lid's 0
+      adds none. T51.c's locked lava world, `airless` with a dayside pool, reads
+      `SURFACE PRESSURE —`, `MOLE FRACTION —` and `SILICATE VAPOUR NOT YET MODELLED` beside
+      `EXOSPHERE NOT YET MODELLED`, each on its own line; with its vapour computed as none it
+      reads `NONE` twice and `EXOSPHERE` alone. `steam_envelope` stays P14.T53.b's. The doc
+      comments of `holdsMelt` and `surfaceRows` say so.
+    - _The fixture_ (`packages/protocol/fixtures/planetary.json`, 11 → 13 messages): the Earth's
+      full record gains its crust (melt area 0), and two full records join it, each illustrative
+      but for its crust and its cited figures. The crusts are in the server's form
+      (`d2/fixture-crust.md`; the lane's ruling on D2's review, 2026-10-22):
+      - the Earth's is the sim's present Earth, `CrustComposition::derive`'s doc example
+        (`hooks/crust.rs`, `delta_iw` 3.55, its lid asserted `Secondary`), with crust.golden's
+        Earth row's provinces: `ultramafic` primary, a `basalt` lid (MORB), `granite`, provinces
+        `basalt`, oxidised (ΔIW 3.55, FMQ − 0.04 at `fmq_above_iw()`'s 3.593), melt 0. The golden
+        Earth-like `…0200` D2 offered has a `komatiite` floor, an Archean lava, so it was not taken;
+      - the lava world's is the server's for the close binary's `…e201` (a `basalt_reduced` lid,
+        reduced, ΔIW −6.5, melt 0.24995…);
+      - the Titan's is D2's form 3b, the server's for the regular icy moon `…1101` of the
+        hierarchical triple: an `H2O` primary lid with no secondary, tertiary or bulk, oxidised,
+        ΔIW 3.9306…, melt 0. Titan's rock never melted to a crust: "The inferred moment of
+        inertia factor is about 0.34, implying incomplete differentiation" (Iess et al. 2010,
+        Science 327, 1367, abstract, read 2026-10-22 through PubMed).
+      - `body_detail_lava_world` (id 30), `…0100`, a small rocky planet locked 1:1 with the size,
+        mass, state, empty air and mean surface temperature of the golden lava world (899 km,
+        9.29 × 10²¹ kg, `airless`, 1,238.7 K): its mean the emission mean, its T_eq at a Bond
+        albedo of 0.11, which puts it at 0.0476 au, below the silicate solidus's 1,394 K
+        (Hirschmann 2000), its substellar point √2 times that, 1,751.8 K; its contrasts the
+        eyeball's (equator–pole 727.7 K, day–night 1,351.4 K at a 50 K night floor); no
+        condensates, no `silicate_vapour` key, and its crust's melt area 0.2500.
+      - `body_detail_titan` (id 31), `…0601`, a regular moon of a Saturn (`…0600`) the slice does
+        not list, at 9.5826 au: `snowball`, `ice`, its surface at the Huygens site's measured
+        93.65 ± 0.25 K and 1,467 ± 1 hPa (Fulchignoni et al. 2005, Nature 438, 785, abstract,
+        read 2026-10-22 through PubMed); its air N₂ with the measured (5.65 ± 0.18) × 10⁻² of CH₄
+        by mole "near the surface (6.7 km to the surface)" (Niemann et al. 2010, JGR 115, E12006,
+        abstract, read 2026-10-22 through Crossref), a two-gas air with H₂ (about 0.1%) and Ar
+        left out; μ and c_p ÷ R from the registry's molar masses and the ideal gases' 7/2 and 4;
+        its lakes the one condensate, a `ch4_c2h6_n2` liquid on 0.01 of the surface, inside the
+        measured 0.85–1.07% (Hayes 2016, Annu. Rev. Earth Planet. Sci. 44, 57, as Birch, Hayes and
+        Perron 2025, "Titan's fluvial and lacustrine landscapes", Titan After Cassini-Huygens,
+        Elsevier, 287, cite it: decision-p14-t51a-part2's table, [F, secondary]; Hayes 2016's own
+        abstract gives no figure, checked 2026-10-22), their layer 0.840 m, over 7 × 10⁴ km³ (that
+        table's lower bound) over 4π (2,574.73 km)², at the registry's 518.9 kg m⁻³ at 93.65 K,
+        436.0 kg m⁻²; no `H2O` solid entry, since Titan loses its water to T13.b's retention at 23
+        (decision-p14-t51a-part2 §4.2), and `surface_ices` the ice-rich crust's own `H2O` on 0.99;
+        a subsurface ocean, as a regular moon's is computed; no `aerosols` member, so that
+        R08.T19's τ(550) hold (`view/atmosphere/parity.test.ts`) stands; and an `H2O` lid whose
+        melt area is 0, over no melted-rock crust.
+      - The description says what each record is and where its figures come from.
+    - _Tests:_ `SystemView.bodies.test.tsx` gains four cases, the lava world's (the brief's case,
+      which fails on the old rule), its vapour computed as none, the Titan's air with no
+      `SILICATE VAPOUR` row, and an older server's airless world with no crust; the airless
+      world's case is renamed for its crust's melt area of 0. Each answers the Earth's row with
+      the other body's surface section, as `e101Earth` does. `bodiesWire.test.ts` reads the
+      Earth's crust, the lava world's melt and the Titan's lakes and lid, and the "later members"
+      case no longer lists `crust`. `packages/protocol/src/planetary.test.ts` decodes the Earth's
+      crust and the lava world, pins the Titan's figures within their stated errors, each
+      constant citing its source, and pins its crust's lack of a melted-rock member beside Iess
+      et al. 2010's moment of inertia.
+    - _Deviations and lane choices:_
+      - The client's surface tests read the lava world's and the Titan's surface sections on the
+        Earth's row, the existing `e101Earth` pattern, rather than listing the two bodies in the
+        slice's answer: the readout shows a record only for the row selected
+        (`useSystemView`), and listing the Titan needs a Saturn in the answer.
+      - `packages/protocol/src/planetary.test.ts` is no lane's by the ownership list; D4 edited it
+        with the fixture it reads.
+      - The protocol crate's fixture tests are D2's files, and D2 changed them to match:
+        `every_shared_fixture_is_exactly_a_wire_form` counts 13 messages, and
+        `the_shared_slice_fixture_holds_the_wire_forms_pinned_here` pins the Earth's crust
+        (`earth_crust()` in `record/surface.rs`'s tests), from D4's
+        `d4/protocol-tests-for-d2.patch`.
+      - R08's view note (Design note 12, and R08.T10.a's text) reads the same rule: "Holds melt"
+        is `magma_ocean` or, from P14.T54.a, a `crust.melt_area_fraction` above 0, and the note
+        stands on its own line beside `EXOSPHERE: NOT YET MODELLED` on an `airless` body with a
+        pool. No code of R08.T10.a's exists yet (no `silicateVapourNotYetModelled` key). The
+        guide's `SILICATE VAPOUR` rows say "as a `MAGMA OCEAN`'s does", an example, and its view
+        row already names the airless pool; no guide edit.
+    - _Moved goldens:_ none.
+    - _Files:_ `apps/hyperion/src/renderer/src/displays/system/{BodyRecordReadings.tsx,
+SystemView.bodies.test.tsx}`, `lib/system/bodiesWire.test.ts`, `test/planetaryFixture.ts`
+      (`lavaWorldDetail`, `titanDetail`), `packages/protocol/fixtures/planetary.json`,
+      `packages/protocol/src/planetary.test.ts`.
+    - _Checks_ (on the final fixture, after the lane's ruling and D2's `earth_crust()`):
+      `pnpm typecheck` from a clean cache and `pnpm lint` (oxlint, type-aware, deny warnings)
+      clean; `packages/protocol`'s `planetary.test.ts` 30 passed; the client's 25 vitest files
+      that read the fixture (directly or through `planetaryFixture.ts` and `sceneFixture.ts`),
+      `SystemView.bodies.test.tsx`, `bodiesWire.test.ts` and `view/atmosphere/parity.test.ts`
+      among them, 972 passed; the lava world's case fails on the old `holdsMelt` and passes on
+      the new; Prettier clean on the six files; `cargo test -p hyperion-protocol` 481 passed and
+      its 10 doctests passed, every one of the 13 messages round-tripping exactly.
+      `golden_diff.py` over the tree: "No golden files changed", GENERATOR_VERSION 22.

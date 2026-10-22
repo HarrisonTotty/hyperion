@@ -24,11 +24,13 @@ import {
   FIXTURE_JUPITER,
   FIXTURE_SYSTEM,
   jupiterDetail,
+  lavaWorldDetail,
   populatedBodies,
   populatedBodiesWith,
   sliceBodies,
   sliceBodiesWith,
   tiltedPole,
+  titanDetail,
   withBodyRotation,
 } from "../../test/planetaryFixture";
 import { stubCanvas } from "../../test/RecordingContext2D";
@@ -167,18 +169,26 @@ function earthWithDetailSeed(detailSeed: SectionDto<string>): ResponseFor<"body_
   };
 }
 
-/** The fixture's Earth with its `ok` surface changed by `change`. */
+/** The `ok` surface section of the fixture's record `detail`. */
+function surfaceOf(detail: ResponseFor<"body_detail">): BodySurfaceDto {
+  const { surface } = detail.record;
+  if (surface.state !== "ok") {
+    throw new Error(`the fixture's ${detail.record.id} has a surface`);
+  }
+  return surface.value;
+}
+
+/**
+ * The fixture's Earth with its `ok` surface changed by `change`, which may give it another body's
+ * surface section of the fixture, as the readout reads that body's surface rows.
+ */
 function earthWithSurface(
   change: (surface: BodySurfaceDto) => BodySurfaceDto,
 ): ResponseFor<"body_detail"> {
   const detail = earthDetail();
-  const { surface } = detail.record;
-  if (surface.state !== "ok") {
-    throw new Error("the fixture's Earth has a surface");
-  }
   return {
     ...detail,
-    record: { ...detail.record, surface: { state: "ok", value: change(surface.value) } },
+    record: { ...detail.record, surface: { state: "ok", value: change(surfaceOf(detail)) } },
   };
 }
 
@@ -198,7 +208,10 @@ function earthWithMassFractions(massFractions: MassFractionsDto): ResponseFor<"b
   };
 }
 
-/** The fixture's Earth made airless, as the server sends such a body: no air, its figures none. */
+/**
+ * The fixture's Earth made airless, as the server sends such a body: no air, its figures none, and
+ * its crust's melt area 0.
+ */
 function airlessEarth(): ResponseFor<"body_detail"> {
   return earthWithSurface((surface) => ({
     ...surface,
@@ -614,7 +627,7 @@ describe("SystemView's body readout", () => {
     expect(terms("SILICATE VAPOUR")).toHaveLength(0);
   });
 
-  it("shows no SILICATE VAPOUR row for an airless world, whose air still reads NONE", async () => {
+  it("shows no SILICATE VAPOUR row for an airless world whose crust holds no melt, its air still NONE", async () => {
     const { user, socket } = renderView();
     await answer(socket);
     await selectRow(user, /\/768/);
@@ -623,6 +636,83 @@ describe("SystemView's body readout", () => {
     expect(reading("SURFACE PRESSURE")).toBe("NONE");
     expect(reading("MOLE FRACTION")).toBe("NONE");
     expect(terms("SILICATE VAPOUR")).toHaveLength(0);
+  });
+
+  it("shows no SILICATE VAPOUR row for an older server's airless world, which sends no crust", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      earthWithSurface(() => {
+        const { crust: _crust, ...older } = surfaceOf(airlessEarth());
+        return older;
+      }),
+    );
+
+    expect(reading("SURFACE PRESSURE")).toBe("NONE");
+    expect(reading("MOLE FRACTION")).toBe("NONE");
+    expect(reading("EXOSPHERE")).toBe("NOT YET MODELLED");
+    expect(terms("SILICATE VAPOUR")).toHaveLength(0);
+  });
+
+  it("reads a locked lava world's empty air over its dayside pool as the em dash, beside its exosphere and its silicate vapour NOT YET MODELLED", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    // The surface section of T51.c's locked lava world as the server sends it (P14.T54.a):
+    // `airless`, its crust's melt area, its dayside pool, above 0, and no `silicate_vapour` key.
+    await answerDetail(
+      socket,
+      earthWithSurface(() => surfaceOf(lavaWorldDetail())),
+    );
+
+    expect(reading("SURFACE")).toBe("AIRLESS");
+    for (const label of ["SURFACE PRESSURE", "MOLE FRACTION"]) {
+      expect(reading(label)).toBe("—");
+      expect(within(readingOf(label)).getByText("—")).toHaveClass("readout__missing");
+    }
+    expect(within(readout()).queryByText("NONE")).not.toBeInTheDocument();
+    // Each on its own line (rendering plan R08, Design note 12).
+    expect(terms("EXOSPHERE")).toHaveLength(1);
+    expect(reading("EXOSPHERE")).toBe("NOT YET MODELLED");
+    expect(terms("SILICATE VAPOUR")).toHaveLength(1);
+    expect(reading("SILICATE VAPOUR")).toBe("NOT YET MODELLED");
+  });
+
+  it("reads a lava world's empty air as NONE where its silicate vapour is computed as none", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      earthWithSurface(() => ({ ...surfaceOf(lavaWorldDetail()), silicate_vapour: null })),
+    );
+
+    expect(reading("SURFACE PRESSURE")).toBe("NONE");
+    expect(reading("MOLE FRACTION")).toBe("NONE");
+    expect(reading("EXOSPHERE")).toBe("NOT YET MODELLED");
+    expect(terms("SILICATE VAPOUR")).toHaveLength(0);
+  });
+
+  it("reads a Titan's N2 and CH4 air at its measured surface, with no SILICATE VAPOUR row over its ice lid", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    // The fixture's Titan's surface section: Huygens's 93.65 K and 146.7 kPa, CH4 5.65 % by mole,
+    // and an `H2O` lid whose melt area is 0, since its lakes are a condensate
+    // (`packages/protocol/src/planetary.test.ts` cites each figure).
+    await answerDetail(
+      socket,
+      earthWithSurface(() => surfaceOf(titanDetail())),
+    );
+
+    expect(reading("SURFACE")).toBe("SNOWBALL");
+    expect(reading("T SURF")).toBe("94 K");
+    expect(reading("SURFACE PRESSURE")).toBe("147 kPa");
+    expect(reading("MOLE FRACTION")).toBe(partsReading("N2 94.4 %", "CH4 5.65 %"));
+    expect(terms("SILICATE VAPOUR")).toHaveLength(0);
+    expect(terms("EXOSPHERE")).toHaveLength(0);
   });
 
   it("names a gas the console does not know as UNLISTED MATERIAL, never by its key", async () => {

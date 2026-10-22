@@ -29,11 +29,13 @@ import {
   FIXTURE_RING_NORMAL,
   FIXTURE_SYSTEM,
   jupiterDetail,
+  lavaWorldDetail,
   populatedBodies,
   populatedBodiesWith,
   sliceBodies,
   sliceBodiesWith,
   tiltedPole,
+  titanDetail,
   withoutRingNormal,
   withRingNormal,
 } from "../../test/planetaryFixture";
@@ -49,7 +51,7 @@ import {
   toBodyDetailRequest,
   toSystemBodiesModel,
 } from "./bodiesWire";
-import type { Section, SurfaceCondensate } from "./model";
+import type { Modelled, Section, SurfaceCondensate } from "./model";
 
 const DESIGNATION = "H7K 4C0RFZ D-7";
 
@@ -682,17 +684,25 @@ function surfaceFault(change: Partial<BodySurfaceDto>): string {
   return result.kind === "fault" ? result.fault : "no fault";
 }
 
+/** A surface's condensates, which must be on the record. */
+function condensatesIn(
+  condensates: Modelled<ReadonlyArray<SurfaceCondensate>>,
+): ReadonlyArray<SurfaceCondensate> {
+  if (condensates.kind !== "value") {
+    throw new Error(`expected condensates, got ${condensates.kind}`);
+  }
+  return condensates.value;
+}
+
 /** The condensates the Earth reads as with its surface's list `condensates`, which must be usable. */
 function condensatesOf(
   condensates: ReadonlyArray<SurfaceCondensateDto>,
 ): ReadonlyArray<SurfaceCondensate> {
-  const read = okSection(
-    recordOf(earthWithSurface({ ...earthSurface(), condensates: [...condensates] })).surface,
-  ).condensates;
-  if (read.kind !== "value") {
-    throw new Error(`expected condensates, got ${read.kind}`);
-  }
-  return read.value;
+  return condensatesIn(
+    okSection(
+      recordOf(earthWithSurface({ ...earthSurface(), condensates: [...condensates] })).surface,
+    ).condensates,
+  );
 }
 
 /** The fault the Jupiter reads as with its envelope changed by `change`. */
@@ -733,13 +743,66 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
       surface.subsurfaceOcean,
       surface.verticalStructure,
       surface.aerosols,
-      surface.crust,
       surface.modifiers,
       surface.biosphere,
       surface.silicateVapour,
     ];
 
     expect(later).toEqual(Array.from({ length: later.length }, () => ({ kind: "not_modelled" })));
+  });
+
+  it("reads the Earth's crust as the server sends it, its melt area 0 (P14.T54.a)", () => {
+    const surface = okSection(
+      recordOf(toBodyDetail(earthDetail(), FIXTURE_SYSTEM, DESIGNATION)).surface,
+    );
+
+    expect(surface.crust).toEqual({
+      kind: "value",
+      value: {
+        primary: "ultramafic",
+        secondary: "basalt",
+        tertiary: "granite",
+        bulk: null,
+        lid: "secondary",
+        provinces: "basalt",
+        redox: "oxidised",
+        mantleRedoxIw: 3.55,
+        meltAreaFraction: 0,
+      },
+    });
+  });
+
+  it("reads a locked lava world's crust, whose dayside pool holds melt (P14.T54.a)", () => {
+    const surface = okSection(
+      recordOf(toBodyDetail(lavaWorldDetail(), FIXTURE_SYSTEM, DESIGNATION)).surface,
+    );
+    if (surface.crust.kind !== "value") {
+      throw new Error(`expected the lava world's crust, got ${surface.crust.kind}`);
+    }
+
+    expect(surface.state).toBe("airless");
+    expect(surface.crust.value.meltAreaFraction).toBeGreaterThan(0);
+    expect(surface.silicateVapour).toEqual({ kind: "not_modelled" });
+  });
+
+  it("reads a Titan's lakes as its one condensate, a ch4_c2h6_n2 liquid, over an H2O lid with no melt (P14.T54.a)", () => {
+    const surface = okSection(
+      recordOf(toBodyDetail(titanDetail(), FIXTURE_SYSTEM, DESIGNATION)).surface,
+    );
+    const lakes = condensatesIn(surface.condensates);
+    if (surface.crust.kind !== "value") {
+      throw new Error(`expected the Titan's crust, got ${surface.crust.kind}`);
+    }
+
+    expect(lakes.map(({ substance, phase }) => [substance, phase])).toEqual([
+      ["ch4_c2h6_n2", "liquid"],
+    ]);
+    expect(lakes[0]?.areaFraction).toBe(0.01);
+    expect(surface.surfaceLiquids).toEqual([{ substance: "ch4_c2h6_n2", areaFraction: 0.01 }]);
+    expect(surface.gases.map((gas) => gas.species)).toEqual(["N2", "CH4"]);
+    expect(surface.crust.value.primary).toBe("H2O");
+    expect(surface.crust.value.lid).toBe("primary");
+    expect(surface.crust.value.meltAreaFraction).toBe(0);
   });
 
   it("reads the Earth's condensates in the display's units, in the server's order (P14.T54.a)", () => {
