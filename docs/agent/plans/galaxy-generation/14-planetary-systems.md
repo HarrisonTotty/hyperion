@@ -2881,6 +2881,117 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
   - _Files:_ `planetary/hooks/{sulphur, aerosols, mod}.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::sulphur`.
 
+- **P14.T24.h The air's own scattering in the snapshot path's Bond albedo** (decision-p14-t51-batch
+  §7, E1, and §9.4, 2026-10-19; split in two by decision-p14-t54a-passes §G3.5, 2026-10-21;
+  amends T51.b's area mix and its Earth cloud calibration, and T13.c's nitrogen fit). T51.b's area
+  mix has no Rayleigh term and no haze, so a thick air's Bond albedo is its surface's alone and
+  Titan-like worlds keep about twice theirs. T24.h.a, the floor, is an anchor of 24; T24.h.b, the
+  rest, follows T24.c.
+  - **P14.T24.h.a The Rayleigh floor** (23 → 24, an anchor; after 23 has landed and before
+    P14.T53.a's refit commit; independent of T24.c and of 24's chemistry chain; lane
+    `p14-gate-24`; a condition of the serve gate; decision-p14-t54a-passes §G3.5;
+    decision-bump-plan-after-22, "Version-24 lanes after 23", V3.2, 2026-10-22).
+    - _Why._ At 23 a Bond albedo under several bar can be physically impossible. filler_c e201
+      publishes 0.046 under 23.0 bar, where τ_R(550) is about 9–34 and a clear column holds at
+      least about 0.25–0.3, and VIEW shades such a disc coal-dark from its p. The class is the
+      fixtures' 13 dark thick airs of decision-p14-t54a-passes §G3.3: 4 still below 0.1 at 23
+      (close_binary .0900 and .0a00, filler_c .0400 and e201), and 9 that T51.c's lids lifted
+      above 0.1 but that stay dark against their own Rayleigh layer.
+    - Each gas row's Rayleigh cross section in the registry, from the same sources as the
+      client's `rayleigh.ts` rows and held to them by R08.T19's parity check.
+    - τ_R in each of the optics' twelve bins from the column p_s ÷ (g m̄), at λ^−4.08.
+    - The air's own Bond albedo over a black surface: the bin-weighted conservative two-stream
+      reflectance under the host's shares (`HostShade`'s bands), its closure stated and cited.
+    - The snapshot path's Bond albedo is the larger of the area mix and that floor. The floor is a
+      sound lower bound, since a conservative layer over any surface reflects at least what it
+      reflects over a black one, and it is continuous in the passes' map, as a max of continuous
+      functions. It binds only where an air is darker than its own Rayleigh layer: Earth's air
+      alone gives about 0.05 against its 0.294.
+    - _Order._ It lands before P14.T53.a's refit commit, so that the greenhouse chain (N₂ on
+      Titan, CO₂ on Venus, water on Earth, then D⊕ and Φ⊕; decision-pre-23-review item 20) is
+      refitted once, on the floored Bond albedo. Whichever of the two lands second re-runs the
+      chain, and `the_greenhouse_constants_are_their_fits` stays green. Its `substance/` rows and
+      `registry.golden` follow P14.T52.a's second commit and come before P14.T49.n's and T49.k's.
+    - _Open at its start:_ the Rayleigh column and `substances.json`, whose schema froze at 23
+      (lean: an additive column, which no reader breaks on, with R08.T19's parity check
+      extended).
+    - _Held_ at 24 with a tripwire, as the batch's members are (decision-bump-plan-after-22 §6);
+      P14.T54.b deletes the hold. The serve gate does not open on a bump without it, unless
+      "main" rules otherwise with the class listed.
+    - _Tests:_
+      - a stub, a cloud-free N₂ column over a black surface: its Bond albedo equals the closed
+        form (stated), and Earth's column gives τ_R(550) of 0.097 ± 0.002 (Bodhaine et al. 1999);
+      - the fixtures' 13 bodies: each Bond albedo at least its floor, stated with p_s ÷ g and the
+        host, and filler_c e201 at 0.25 or more under its F8 host;
+      - Earth keeps 0.294 to the bit, since the floor does not bind there; Titan, Mars, Venus and
+        the Moon move by under 0.005 (stated);
+      - over the sample, no body with air has a Bond albedo below its floor, and
+        decision-p14-t54a-passes's guards hold (at most 3% bracketed, 1% jumping, planets 2% and
+        flips 1%).
+    - _Files:_ `planetary/derive/photometry/area_mix.rs`; the gas rows in `substance/` and
+      `tests/golden/substance/registry.golden`; their tests.
+    - _Accept:_ `cargo test -p hyperion-sim planetary::derive`;
+      `cargo test -p hyperion-sim substance`.
+  - **P14.T24.h.b The adding rule, the haze, the clouds and the refits** (after T24.h.a and T24.c;
+    its envelopes after T52.d; rides 24 if landed when P14.T54.b's wiring starts, else the next
+    planetary-moving train; decision-p14-t51-batch §9.4; decision-pre-23-review items 14, 15 and
+    19, 2026-10-20; decision-p14-t54a-ganymede §2–3, 2026-10-20;
+    decision-p14-t54a-water-consistency F.4, 2026-10-20).
+    - **Rayleigh, added.** T24.h.a's conservative layer is combined with the area mix by the adding
+      rule, R_tot = R + (1 − R)² A ÷ (1 − A R), R the layer's reflectance over black and A the
+      area mix's, replacing T24.h.a's max.
+    - **Haze.** T24.c's haze column, where its methane rule gives one, as an absorbing layer at the
+      haze's single-scattering albedo, a closed form. Its shortwave absorption enters T13.c's
+      greenhouse as the anti-greenhouse (McKay, Pollack and Courtin 1991, to be read).
+    - **A non-water condensable's cloud cover.** Titan's tropospheric methane clouds cover 0.2–0.6%
+      of the globe (Bouchez and Brown 2005; outbursts about 10% or less, Schaller et al. 2006),
+      which replaces the 0.67 that water's reference column gives any minor condensable.
+    - **The organic sediment under a hazy air,** from the haze's fallout: Titan's surface is dark
+      organic sediment (Tomasko et al. 2005), not frost.
+    - **An envelope's own Bond albedo** from its decks and hazes (T52.d, T24.c with T24.g), after
+      T52.d, replacing T51.b's class table and its two stand-ins, class I's hazy 0.48 about G2V
+      and the ice giants' 0.32 (decision-p14-t54a-ganymede §2–3).
+    - **The ocean weight at the sea's own density.** θ reads the potential ocean at the liquid's
+      ρ_l at the previous pass's T_s, not at 999.79 kg m⁻³. On close_binary .0800 it is 0.443
+      against the 0.592 its published sea gives; on Earth the two densities differ by 7 × 10⁻⁴.
+    - **The refits.** Earth's cloud is re-split: its Rayleigh share separated, and the 0.004 of
+      anthropogenic brightening in its 2000s 0.294 (AR6's aerosol and land-use terms) stated.
+      `GREENHOUSE_NITROGEN` and `NITROGEN_REFERENCE_TEMPERATURE` are refitted on Titan at its
+      measured state with the haze in place, in T57.a's order of fits.
+    - _Tests:_
+      - Titan's Bond albedo 0.265 ± 0.03 (Li et al. 2011, read) and its surface 94 ± 3 K;
+      - Earth's 0.294 kept;
+      - a cloud-free 10-bar N₂ world's Bond albedo exceeds its surface's by its Rayleigh layer
+        (stated);
+      - the Moon and Mars move by under 0.005;
+      - the giants: Jupiter 0.503 ± 0.012 (Li et al. 2018), Saturn 0.41 ± 0.02 (Wang et al. 2024),
+        Uranus 0.349 ± 0.016 (Irwin et al. 2025) and Neptune 0.290 ± 0.067 (Pearl and Conrath
+        1991), and the table's Jupiter's T_eff within 2 K of 125.57 K, its cooling's internal
+        flux stated.
+    - _Files:_ `planetary/derive/photometry/area_mix.rs`, `planetary/derive/atmosphere.rs`,
+      `planetary/derive/atmosphere/tests.rs`.
+    - _Accept:_ `cargo test -p hyperion-sim planetary::derive`.
+- **P14.T24.i An unlit body's mean surface temperature** (23 → 24, before the serve gate; lane
+  `p14-gate-24`, with P14.T56.f, one gate; behind a hold at 24 with a tripwire;
+  decision-bump-plan-after-22, "Version-24 lanes after 23", V3.3, 2026-10-22).
+  - At 23 a record with no host light publishes T_s = T_eq = 0 K, under its own night floor of
+    12–20 K: 18 records of the 400-system sample, already so at 22, which `for_body` refuses
+    (P14.T54.a's labelled refusals).
+  - Its mean T_s becomes the larger of T_eq and `hooks::surface::night_floor` at its heat flow,
+    (T_CMB⁴ + F ÷ ε_r σ)^¼. A max of continuous functions is continuous.
+  - The flux sum (T_eq⁴ + T_floor⁴)^¼ for lit bodies is recorded as a later refinement, since it
+    moves every airless body.
+  - It moves those records' T_s and what reads it.
+  - _Tests:_
+    - the 18 records read at least their floor, and `for_body` answers `Ok` on them;
+    - a body whose T_eq is above its floor is unchanged to the bit;
+    - the sample's count of moved bodies is stated.
+  - _Files:_ where the record's mean T_s is T_eq (`planetary/derive/atmosphere.rs`, the airless
+    arms of `state_and_greenhouse`), reading `planetary/hooks/surface.rs`'s `night_floor`; their
+    tests.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::derive::atmosphere`;
+    `cargo test -p hyperion-sim planetary::surface`.
+
 #### P14.T25 Habitability assessment
 
 `hooks/habitability.rs`. `HabitabilityAssessment { class, limits }`: class one of `Hostile`,
@@ -5710,6 +5821,108 @@ rows' values.
     worlds' and the reference Earth's liquid records, and the goldens.
   - _Accept:_ `cargo test -p hyperion-sim substance::liquid`;
     `cargo test -p hyperion-fit liquid_optics`; `cargo run -p hyperion-fit -- check`.
+- **P14.T49.k The crystalline rows' darkening** (23 → 24, a rider; lane `p14-gate-24`, after
+  P14.T49.n's rows; before P14.T54.b's Mars check and before T54.b lifts the 0.11 cap on
+  `basalt_reduced`, else T54.b states both; decision-pre-23-review §5 and items 3, 13, 16 and
+  34, 2026-10-20).
+  - T49.i's crystalline rows are clean-separates upper bounds, fresh and unweathered. At 23 the
+    generated Mars's `basalt_fe` lid gives it a Bond albedo of 0.344 against the measured 0.250,
+    and Mercury's fresh `basalt_reduced` row is 0.53 about the Sun, held at 0.11 only by the
+    airless cap.
+  - It re-derives `basalt_fe`, `ferric`, `komatiite` and `basalt_reduced` with their fine opaque
+    or carbon phases in T49.i's two-size mixture (decision-p14-t49i-rock-mixtures (b)), or from
+    licensed whole-rock spectra:
+    - `basalt_reduced` with Mercury's carbon as fine graphite at 1–3 wt% (Peplowski et al. 2016;
+      Klima et al. 2018);
+    - `basalt_fe` with its ilmenite at a cited fine fraction.
+  - It covers the crystalline silicate rows only (decision-p14-t54a-ganymede §1.3); the icy lids
+    are P14.T49.m's. The darkening is this task's rows and P14.T54.b's weathering, and the two
+    never darken `basalt_fe` twice.
+  - It is a value change: the registry's `[albedo]` re-blesses, and the record moves at its bump.
+    It lands pure or held, as the batch's members do (decision-bump-plan-after-22 §6).
+  - _Tests:_ the bands, undusted basaltic Mars 0.10–0.20 (Ruff and Christensen 2002; Kieffer et
+    al. 1977) for `basalt_fe` and Mercury's 0.068–0.088 for `basalt_reduced`. For P14.T54.b, the
+    0.088's source is re-verified: the check found no bolometric Bond albedo in Mallama et al.
+    2017, and NASA's 0.068 is V-band spherical.
+  - _Files:_ the four rows in `substance/` and `tests/golden/substance/registry.golden`.
+  - _Accept:_ `cargo test -p hyperion-sim substance`.
+- **P14.T49.l The regolith's pore gas, and the airless ice's inertia** (rides 24 if ready, else the
+  next planetary-moving train; joined to T49.j's law, which R09.T13.c reuses;
+  decision-pre-23-review §5 and item 7, 2026-10-20; the `H2O` form's follow-up, "main",
+  2026-10-21).
+  - **The pore gas.** Gas conduction in the pores as a function of pressure and grain size
+    (Presley and Christensen 1997; Piqueux and Christensen 2009), joined to T49.j's law. From 23
+    T24.a reads that law at every lid, labelled a vacuum lower bound under air (P14.T54.a): Mars's
+    `basalt_fe` 48.08 at 214 K and R09's reference Mars 46.91, against 180–250, and Titan 57.34,
+    against about 236. At Titan's pressure the conductivity no longer depends on grain size.
+  - **The airless `H2O` form.** T49.j's law gives airless `H2O` lids Γ about 57, above every
+    measured airless icy body: Ganymede 20–40 (Bockelée-Morvan et al. 2024, A&A 681, A27), the
+    trans-Neptunian mean 2.5 ± 0.5 (Santos-Sanz et al. 2017, A&A 604, A95) and 8P/Tuttle below
+    about 10 (Boissier et al. 2011), with only Europa's about 70 near (Rathbun et al. 2010). At 23
+    it moved 176 airless nights by up to +23.4 K. The likely cause is the `H2O` reference form,
+    crystalline conductivity at a moderate porosity, against the outer system's fluffy or
+    amorphous ice: this task revisits that form's porosity and conductivity.
+  - It lands pure or held, as the batch's members do (decision-bump-plan-after-22 §6).
+  - _Tests,_ in J m⁻² K⁻¹ s^−½:
+    - Mars's global mode within 180–250 (Mellon et al. 2000; Putzig et al. 2005);
+    - Titan's sand about 236 (MacKenzie et al. 2019), its tables re-read before it is asserted;
+    - the `H2O` form against Ganymede's 20–40 and the trans-Neptunian 2.5 ± 0.5;
+    - T49.j's other tests hold.
+  - _Files:_ `substance/{thermal, thermal/rows}.rs` and `tests/golden/substance/thermal.golden`;
+    the law's callers (`planetary/hooks/surface.rs`'s ground inertia).
+  - _Accept:_ `cargo test -p hyperion-sim substance::thermal`;
+    `cargo test -p hyperion-sim --features testing --test thermal_golden`.
+- **P14.T49.m The icy lid's regolith** (before P14.T54.b wires the cold traps onto the regolith's
+  albedo, P14.T51.i, else T54.b states the icy moons' traps; decision-p14-t54a-ganymede §1.5,
+  2026-10-20).
+  - An `H2O` lid's regolith row as ice with its non-ice fraction, by T49.i's two-size mixture
+    (decision-p14-t49i-rock-mixtures (b)). The fraction comes from the body's rock and a cited lag
+    or exogenic share, and fresh frost is kept where resurfacing outruns it.
+  - T49.i's 0.832 frost is right for fresh 100 µm frost about the Sun; the miss is its use as
+    every icy lid's regolith. Measured icy satellites run from 0.10 to 0.76, set by their non-ice
+    fraction, radiolysis and resurfacing: Callisto 0.11 ± 0.02, Ganymede 0.35 ± 0.03 and Europa
+    0.64 ± 0.06; Saturn's mid-sized moons 0.43–0.68 (Buratti et al. 2022); the Uranian moons
+    0.10–0.23 in the visible (Karkoschka 2001). No single value is physical: keyed on size or
+    density it is not (Enceladus and Ganymede are both about 60% rock), and keyed on exposure age
+    it is a weathering law, T54.b's kind.
+  - At 23 the frost puts Ganymede at T_eq 78.2 K against 109.6 K at its measured 0.35, and
+    Callisto at 78.2 K against 118.6 K at its 0.11.
+  - It lands pure or held, as the batch's members do (decision-bump-plan-after-22 §6).
+  - _Tests:_ Ganymede 0.32–0.38, Callisto 0.09–0.13, Europa 0.58–0.70, and Enceladus inside
+    P14.T54.a's asserted 0.7–0.9 (decision-p14-t51-batch E2).
+  - _Files:_ the `H2O` lid's regolith row (`planetary/derive/photometry/area_mix.rs`'s
+    `Regolith`) and its tests.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::derive`.
+- **P14.T49.n The registry's unread densities** (23 → 24, before the serve gate; lane
+  `p14-gate-24`, after T24.h.a's rows; rides 24 if ready, else the next planetary bump;
+  decision-p14-t54a-water-consistency §6 and its Batch B follow-up, 2026-10-20;
+  decision-bump-plan-after-22, addendum of 2026-10-22 and "Version-24 lanes after 23", V3.9).
+  - **The solid densities** the registry has not read: solid Ar (fcc; Peterson, Batchelder and
+    Simmons 1966; Dobbs and Jones 1957, to read); β-O₂ (23.14–43.78 K) and β-CO
+    (61.585–68.16 K); H₂S and C₂H₆, once they are `Gas` rows; liquid S₈ (Meyer 1976).
+    - At 23 an argon ice is sent with no layer, 115 of the sample's 441 condensate entries (26%),
+      and its capped area uses the liquid's triple-point density, 1,416.7 kg m⁻³, against a solid
+      of about 1,620 at T_t and 1,771 near 0 K, so those areas are about 14% large.
+    - `for_body` refuses 850 of the 400-system sample's solid bodies for an `Ar` ice and 1 for an
+      `O2` ice at 23.9 K, in β-O₂ (P14.T54.a's labelled refusals). Solid Ar's and β-O₂'s rows
+      are on 24's serve-gate list.
+  - **The liquids' compression:** water's from IAPWS-95, or a stated compressed-liquid law by
+    row, moving the layer, the area and the palette together, since all three read one ρ_l(T).
+    The registry's ρ_l is the saturated liquid's: at close_binary .0800's 225 bar and 596 K the
+    compressed liquid is 4.6% denser (NIST), which would give its sea 0.406 against 0.419.
+  - **It moves** `registry.golden`'s `[condensed]` section, `substances.json`'s density pieces
+    (the schema already allows them), those ices' capped areas, at the solid's density in place of
+    the liquid's, and the wire's layers, absent → present, inside the frozen shape. It lands pure
+    or held, as the batch's members do (decision-bump-plan-after-22 §6).
+  - _Science check:_ that argon ice is retained on the 15–19 K airless bodies that hold it.
+  - _Tests:_
+    - decision-p14-t51a-part2 §3.4's registry test, that every partition condensable has a solid
+      density over its solid range, is asserted;
+    - the grain-density ruling's `NoDensity` list and its stated list (§2.6) shrink;
+    - the sample's `for_body` refusals for `Ar` and `O2` ices are stated, before and after.
+  - _Files:_ the rows in `substance/rows/diagrams.rs`; `tests/golden/substance/registry.golden`;
+    `packages/protocol/fixtures/substances.json`; the liquids' density law and its readers.
+  - _Accept:_ `cargo test -p hyperion-sim substance`; `cargo test -p hyperion-sim planetary`.
 
 #### P14.T50 Elements and redox
 
@@ -6353,7 +6566,10 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
     - **Callisto** (2,410.3 km, 1.076 × 10²³ kg, 0.45, 125 K, 4.0 mW m⁻²): under 95–135 km, `IceV`,
       `nh3_h2o`.
     - **Titan** (2,574.7 km, 1.345 × 10²³ kg, 0.42, 93.7 K): under 110–150 km at 4.6 mW m⁻² and
-      55–80 km at 9.9, both inside 50–200 km (Mitri et al. 2014).
+      55–80 km at 9.9, both inside 50–200 km (Mitri et al. 2014). Its k₂ on T56.d's branch, with
+      its ocean's density and its shell, is at least 0.55, or stated: 0.410 at 23 under pure water,
+      against 0.616 ± 0.067 (Durante et al. 2019) and 0.55–0.6 for an ocean of 1,200–1,300 kg m⁻³
+      (Baland et al. 2014; decision-pre-23-review item 11).
     - **Enceladus** (252.1 km, 1.08 × 10²⁰ kg, 0.40, 75 K): under 20–35 km at 22 GW, floor `Rock`;
       `None` at its radiogenic heat alone.
     - **Pluto** (1,188.3 km, 1.303 × 10²² kg, 0.32, 40 K): absent at 2.45 mW m⁻²; at 3.09 an
@@ -6532,6 +6748,24 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
   - _Files:_ `planetary/hooks/modifiers.rs`; the protocol's surface-modifiers DTO; the client's
     reader.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::modifiers`; `just gen-protocol-check`.
+
+- **P14.T51.k The mantle's mass balance with its minor oxides** (a later planetary bump; amends
+  T51.c's bulk iron; decision-pre-23-review §5 and item 8, 2026-10-20).
+  - `bulk_iron_mass_fraction` (`planetary/hooks/crust.rs`) counts the solids as Fe, MgO and SiO₂
+    only, which gives Mars 31.4 wt% iron and a mantle FeO of 22.8 wt%, against 13.7 ± 0.4 (Khan et
+    al. 2022) and 17.9 (Dreibus and Wänke 1985). It gains CaO, Al₂O₃, Na₂O, Ni and S, chondritic:
+    about 28 wt% iron for Mars, at which its mantle FeO would be about 17.5 wt%.
+  - The core fraction is right: Mars's 0.204 lies inside InSight's 0.19–0.21 (Samuel et al. 2023;
+    Khan et al. 2023). Earth's anchor, 7.3 against 8.05 wt%, rests on the same simplification.
+  - The generated Venus, at 12.5 wt% and a core of 0.288, sits just above the 12 wt% edge and
+    takes `basalt_fe`, where Venera's 7.7–9.3 wt% basalts favour `basalt`.
+  - The doc's and its test's "InSight 13.8 ± 1.0" is Sossi et al. 2025's compilation; this task
+    cites Khan et al. 2022's 13.7 ± 0.4.
+  - It changes the algorithm but no contract.
+  - _Tests:_ Earth's mantle FeO 8.05 ± 1 wt%; Mars's within 13.7–17.9 (Khan et al. 2022; Dreibus
+    and Wänke 1985); Venus below the 12 wt% edge (Venera's 7.7–9.3).
+  - _Files:_ `planetary/hooks/crust.rs` and its tests; `tests/golden/planetary/crust.golden`.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::crust`.
 
 #### P14.T52 Atmospheric chemistry
 
@@ -7003,6 +7237,10 @@ Each is labelled "not yet modelled" where a console could show it:
     value over melt. It gives `SilicateVapourDto` its members.
   - Its first send leaves no older console reading the volatiles' zero as `NONE`
     (decision-backlog-2 §2.3).
+  - It gives a volcanic lid its active-lava share, from its volcanic power over ε σ T⁴ at its
+    eruption temperature (Davies et al. 2024; Veeder et al. 2012), which T51.c's `NOT_MODELLED`
+    names. At 23 Io's melt area is 0, read from starlight alone; by its volcanic power the share
+    is 2 × 10⁻⁵ to 2 × 10⁻⁴ (decision-pre-23-review item 10).
   - A small hot body's vapour is unbound: `e101`'s λ is 0.17–0.32 for Na, O₂, K and SiO at
     1,684 K. Such vapour is an evaporating outflow over the melt, not a bound air's weight.
   - Whether such a body survives its system's age is this subtask's question too: Perez-Becker
@@ -7033,6 +7271,10 @@ Each is labelled "not yet modelled" where a console could show it:
   - liquid under high-pressure ice, and shells with an ice-II base (Journaux et al. 2020; Hammond
     et al. 2016), which T51.g leaves absent;
   - sulphate (`brine_mgso4`) oceans by redox, and methanol with carbon's carriers (T55.d);
+  - the crust history's rock: the ocean pins the core's top near 270–300 K and the ice convects,
+    so Callisto's rock stays unmelted (Anderson et al. 2001), where at 23 the conductive history
+    melts large icy bodies' rock, Pluto's centre peaking at 2,099 K (decision-pre-23-review,
+    item 9);
   - with T55.j, a moon's k₂ read from its published ocean.
 
   All but Hammond et al. 2016 are from memory.
@@ -7284,6 +7526,68 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
     would; regular moons' ocean flags turn on where their whole heat flow keeps an ocean; heated
     rocky moons' heat and every planet are unchanged; every `planetary/systems` golden with moons,
     and `planetary/moons`'s derived values.
+- **P14.T56.e Tidal heat in a porous rock core** (after P14.T56.d and P14.T51.g, in T51.g's lane,
+  since all three edit `moons/`, and after its own science ruling; behind `OCEAN_VERSION` = 24 if
+  it has landed when P14.T54.b's wiring starts, else the next bump; decision-p14-t56d-membrane
+  §2.4, 2026-10-16; decision-pre-23-review item 4, 2026-10-20).
+  - At 23 Enceladus is cold: its shell's own hot root is 0.41 mW m⁻² (0.33 GW), and its conductive
+    shell holds no ocean. That is the literature's result for a shell (Beuthe 2019: it "cannot
+    explain the whole conductive flux, whatever the dissipation enhancement"). Dione and Mimas are
+    cold too, against their inferred oceans.
+  - It replaces T56.d's rigid mantle with Beuthe's (2015) general membrane formula (his eqs.
+    57–59 and 104), whose k°₂ is an incompressible, viscoelastic rock core's under a surface
+    ocean.
+  - The core's complex rigidity is that of a porous, water-saturated, unconsolidated core where
+    its pressure leaves it porous: Choblet et al. (2017, Nature Astronomy 1, 841), with an
+    effective shear modulus of 10⁷–10⁸ Pa and a dissipation function of 0.2–0.8 at 20–30%
+    porosity. A compacted core stays rigid.
+  - It is calibrated on Enceladus's heat: 15.8 ± 3.1 GW from the south polar terrain (Howett et
+    al. 2011), and 25–40 GW conducted in all (Hemingway and Mittal 2019).
+  - Its ruling also weighs the rival explanation, dissipation at the shell's base (Hemingway and
+    Mittal 2019).
+  - _Tests:_ Enceladus on the ocean branch at 10–40 GW; Ganymede's, Titan's and Callisto's tides
+    unchanged, their cores compacted; Dione and Mimas recorded.
+  - _Files:_ `planetary/moons/{tides, regular}.rs`, `planetary/params.rs`.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::moons`.
+- **P14.T56.f A capture's bulk by its birthplace** (23 → 24, before the serve gate; lane
+  `p14-gate-24`, with P14.T24.i, one gate; amends T19's capture bulk; decision-p14-t54a-ganymede
+  §C3.2, 2026-10-21, with decision-bump-plan-after-22's addendum of 2026-10-21).
+  - Every capture's bulk is 37.5% ice: `stated_moon_bulk`'s capture arm (`planetary/system.rs`)
+    takes `water = ice_fraction_of(density)` at `CAPTURED_DENSITY`, 1,700 kg m⁻³, whatever its
+    birthplace, as published since 22. A small capture beside a rocky belt formed inside the snow
+    line by `MoonBirth::formed` (the Phobos and Deimos rule), so from 23 its lid is an ordinary
+    chondrite while its bulk stays `Icy`: close_binary 0602 went from Bond 0.924 to 0.11 and T_eq
+    136.7 to 253.0 K, and filler_c 0201 from 0.851 to 0.11 and 161.5 to 252.5 K.
+  - The lid is right and the bulk is the wrong side: Phobos's and Deimos's low densities (1,861
+    and 1,465 kg m⁻³) are macroporosity, about 30% for chondritic grains (Andert et al. 2010;
+    Rosenblatt 2011), and their spectra show no water ice. The lid does not read the bulk.
+  - The capture arm reads the same `MoonBirth::formed` the crust reads, with its neighbouring
+    belt, passed in from where `moon_craters` computes it:
+    - formed `Beyond`: `water = ice_fraction_of(density)`, as now;
+    - formed `Inside`: `MassFractions::solid(0.0, 1.0, 0.0)`, the 1,700 kg m⁻³ read as a rubble
+      pile's porosity.
+  - Its scope includes the ~660 K captures with a 37.5% ice bulk about main-sequence and subgiant
+    hosts, all from `CAPTURED_DENSITY`: wide_binary 0101–0104 (14–120 km), about a 0.557 L☉ host
+    for 2.3 Gyr, and subgiant 0101–0304, at about 700 K or more on the main sequence. Their bulk
+    water cannot survive (free sublimation about 4 km a year at 253 K), and they are labelled
+    `Reduced` with 37.5% water. wide_binary's orbit an ice giant, whose captures
+    `MoonBirth::formed` puts beyond the snow line, so the birthplace rule alone leaves them icy:
+    the lane takes the rule for them to "main", with its lean, before it builds.
+  - It blocks the serve gate: from 24 R09 reads `SurfaceMaterial::Ice`, which gives a Phobos-like
+    body R09's ice relief branch and the `AirlessIce` phase template.
+  - It lands pure or held, as the batch's members do (decision-bump-plan-after-22 §6).
+  - _Tests:_
+    - a small capture of a Mars-like planet beside a rocky belt is `Rocky` with no water;
+    - one beside an icy belt, and a giant's irregulars, are unchanged to the bit;
+    - the sample's count of such captures is stated (2 in the systems goldens), with the ~660 K
+      captures' classes.
+  - _Files:_ `planetary/system.rs` (`stated_moon_bulk`, `moon_craters`) and its tests, reading
+    `planetary/hooks/figures.rs`'s `MoonBirth::formed`.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::system`;
+    `cargo test -p hyperion-sim planetary::moons`.
+  - _Moves at 24 (estimated):_ those captures' fractions, class (`Icy` → `Rocky`), surface
+    material, photometry template, inventory and tidal material; their T_eq stays near 253 K under
+    the same lid.
 
 #### P14.T57 The greenhouse's calibration (decision-p14-moons, 2026-10-10)
 

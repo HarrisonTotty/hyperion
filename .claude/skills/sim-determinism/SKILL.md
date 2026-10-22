@@ -180,7 +180,13 @@ moved.
    R09.T19 first sends a payload, a change to the codec's layout or to the `testing` worlds
    re-blesses `tests/golden/wire/` at the current version with neither `GENERATOR_VERSION` nor
    `SURFACE_PAYLOAD_FORMAT` bumped (ruling of 2026-10-09): the script's "not bumped" problem is
-   then expected, the commit names it, and the exception covers no other golden. The change must
+   then expected, the commit names it, and the exception covers no other golden. A second
+   exception, as narrow: until galaxy-generation plan 14's P14.T54.b wires its 23 → 24 batch onto
+   the record, a P14.T52 chemistry module that nothing on the record calls (`planetary/chem/`;
+   P14.T52.a's and T52.b's goldens first) re-blesses its own goldens, each by its exact test
+   name, at the current version with no bump. The "not bumped" problem is then expected for
+   those goldens alone, and the commit names it; from T54.b's bump on, they move only with a bump.
+   The change must
    explain each changed value. A change it can't explain is a leak: something moved that shouldn't
    have, so go back to step 1 for it. An extension isn't automatically safe: if a
    new label pins a value the base already generated, and its computation changed, that is moved
