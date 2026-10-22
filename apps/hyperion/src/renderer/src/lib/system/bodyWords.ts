@@ -12,10 +12,12 @@ import type {
   ArchitectureClassDto,
   BeltCompositionDto,
   BeltSiteDto,
+  CrustLidDto,
   DestructionCauseDto,
   DetailLevelDto,
   MoonOriginDto,
   PlanetClassDto,
+  RedoxClassDto,
   RingKindDto,
   RingMaterialDto,
   SurfaceStateDto,
@@ -181,6 +183,53 @@ export function surfaceStateLabel(state: SurfaceStateDto): string {
       break;
     case "tenuous":
       label = "TENUOUS ATMOSPHERE";
+      break;
+  }
+  return label;
+}
+
+/**
+ * Which crust lies at a body's surface (plan 14, P14.T51.c, read by P14.T43.g's `CRUST` row), in
+ * words: `PRIMARY`, `SECONDARY`, `UNDIFFERENTIATED`.
+ *
+ * @remarks
+ * Planetary science's classes of crust by how each formed: the first, from the body's first
+ * melting or freezing; one from later melting of the mantle; and none, the body's own unsorted
+ * material at the surface, which is the wire's `bulk`. Never `BULK`, the name of the record's
+ * `BULK` section (decision-ux-23-surface-rows).
+ */
+export function crustLidLabel(lid: CrustLidDto): string {
+  let label: string;
+  switch (lid) {
+    case "primary":
+      label = "PRIMARY";
+      break;
+    case "secondary":
+      label = "SECONDARY";
+      break;
+    case "bulk":
+      label = "UNDIFFERENTIATED";
+      break;
+  }
+  return label;
+}
+
+/**
+ * A body's mantle redox class (plan 14, P14.T51.c, read by P14.T43.g's `MANTLE REDOX` row), by its
+ * oxygen fugacity relative to the iron–wüstite buffer, in words: `REDUCED`, `INTERMEDIATE`,
+ * `OXIDISED`.
+ */
+export function redoxClassLabel(redox: RedoxClassDto): string {
+  let label: string;
+  switch (redox) {
+    case "reduced":
+      label = "REDUCED";
+      break;
+    case "intermediate":
+      label = "INTERMEDIATE";
+      break;
+    case "oxidised":
+      label = "OXIDISED";
       break;
   }
   return label;
