@@ -46,6 +46,7 @@ import type {
   SurfaceReading,
   SurfaceSlantRange,
   TerrainLayers,
+  TerrainMaturity,
   TestPlanetRidges,
   WeightsLayerSetting,
 } from "./messages";
@@ -107,6 +108,11 @@ export interface WasmBakedTerrain extends WasmBakedPatch {
   horizonNear(): Uint32Array;
   horizonFar(): Uint32Array;
   horizonRefusedCells(): Uint32Array;
+  /**
+   * Each vertex's two maturity codes, at the patch's band level then its parent's (R10.T1.c's
+   * client half; `TerrainMaturity.codes`); empty without a maturity layer.
+   */
+  maturity(): Uint16Array;
   readonly boundM: number;
   readonly sigmaM: number;
   readonly complete: boolean;
@@ -301,6 +307,20 @@ export interface WasmSurfaceFields {
    *   or no entry of the body's palette).
    */
   photometry(system: bigint, body: number, palette: Uint8Array): Float32Array | undefined;
+  /**
+   * The albedo nodes of each slot of a bake's palette at band level `level` and at its parent's
+   * (R10.T1.c's client half; `TerrainMaturity.nodes`), 8 × 2 × K × 3; each node repeating the
+   * slot's photometry albedo where the body's header carries no maturity; `undefined` where no
+   * field of the body is held.
+   *
+   * @throws Error as {@link photometry} does, and for a level above 24.
+   */
+  maturityNodes(
+    system: bigint,
+    body: number,
+    palette: Uint8Array,
+    level: number,
+  ): Float32Array | undefined;
   /**
    * The body's coarse class map for R07's disc (R10.T10.d); `undefined` where no field of the body
    * is held.
@@ -581,8 +601,10 @@ export class WorkerFields {
 
   /**
    * Bakes `key` of `source`'s body over its field (no extra skirt margin), with R10's layers, the
-   * horizon map with the weights ({@link WASM_HORIZON_LAYER}); `null` where the field cannot make
-   * it yet: none is held, or a surveyed vertex reads a cell still to come.
+   * horizon map with the weights ({@link WASM_HORIZON_LAYER}), and, where the bake made a maturity
+   * layer, its codes with the palette's nodes at the key's level (`TerrainLayers.maturity`,
+   * R10.T1.c's client half); `null` where the field cannot make it yet: none is held, or a
+   * surveyed vertex reads a cell still to come.
    *
    * @throws Whatever the module throws for a key out of range.
    */
@@ -619,6 +641,17 @@ export class WorkerFields {
       if (photometry === undefined) {
         throw new Error(`the field of ${source.body} went before its bake's photometry`);
       }
+      // The maturity layer's codes, and only with them its palette's nodes at the patch's level
+      // and its parent's (R10.T1.c's client half), from the same field.
+      const codes = baked.maturity();
+      let maturity: TerrainMaturity | null = null;
+      if (codes.length > 0) {
+        const nodes = this.#module.maturityNodes(...bodyArgs(source.body), palette, key.level);
+        if (nodes === undefined) {
+          throw new Error(`the field of ${source.body} went before its bake's maturity nodes`);
+        }
+        maturity = { codes, nodes };
+      }
       return patchOf(baked, key, generation, {
         palette,
         weights: baked.weights(),
@@ -633,6 +666,7 @@ export class WorkerFields {
         horizonFar: baked.horizonFar(),
         horizonComplete: baked.horizonComplete,
         horizonRefusedCells: baked.horizonRefusedCells(),
+        ...(maturity === null ? {} : { maturity }),
       });
     } finally {
       baked.free();

@@ -16,7 +16,8 @@
  * tells the owner of the cache to start again.
  *
  * A lit layout (R10.T10.b, `slotLayout.ts`' `TerrainShading`) adds each slot's class weights and
- * class laws, the frame's lights (`terrainMaterial.ts`' `packTerrainLighting`) and the terrain's
+ * class laws, with its maturity codes and nodes where its bake has them (R10.T1.c), the frame's
+ * lights (`terrainMaterial.ts`' `packTerrainLighting`) and the terrain's
  * phase table, whose rows (`TerrainPhaseRows`) the slots' class laws name: kept across a device
  * restore, so that a row's index never changes, and uploaded again whenever one is added. It also
  * holds each slot's survey mask and draws the lit material's own mesh, whose skirts and fins join
@@ -56,6 +57,9 @@ import { bindingCeilingSlots } from "../cacheBudget";
 import type { PatchKey } from "../patchKey";
 import type { CascadeIndex } from "../shadows/cascadeShadow";
 import {
+  CLASS_LAWS_BYTES,
+  CLASS_MATURITY_BYTES,
+  CLASS_NODES_BYTES,
   CLASS_WEIGHTS_BYTES,
   DOUBLE_NORMALS_PER_SIDE,
   HORIZON_FAR_SIDE,
@@ -77,6 +81,7 @@ import {
   classRowLaw,
   PHASE_LAW,
   packClassLaws,
+  packClassNodes,
   packTerrainLighting,
   TERRAIN_LIGHT_ROWS,
   type TerrainLighting,
@@ -1081,7 +1086,10 @@ export class TerrainResources {
    * record and its normals tile with the gutter filled from the tile's edge.
    *
    * On a lit layout it also writes the slot's class layers, its class weights (zeros where the
-   * bake skipped them) then its class laws, adding their rows to the phase table, its horizon
+   * bake skipped them) then its class laws, adding their rows to the phase table, and, where the
+   * bake carries a maturity layer (R10.T1.c's client half), its codes and its nodes
+   * (`packClassNodes`), with each named slot's law flagged as drawn from them; a bake without one
+   * writes exactly its weights and laws, unflagged. Then its horizon
    * map, the near field's words then the far field's (R10.T8.b), or words of no horizon where the
    * bake skipped it, and its survey mask with the code of its survey's cell size
    * ({@link packSurveyMask}, R10.T10.c). On the wireframe's layout (R10.T11) it writes the heights,
@@ -1092,8 +1100,9 @@ export class TerrainResources {
    * before a restore re-derived it ({@link TerrainResources.onRebuilt}), whose slot is past the new
    * count or whose offsets the new vertex path does not take; or, on a lit or wireframe layout, a
    * bake without R10's layers; else `uploaded`.
-   * @throws RangeError also for class weights, a horizon map or a survey mask of another size than
-   * a slot's, or a field level that is not an integer, before any write.
+   * @throws RangeError also for class weights, a maturity layer's codes or nodes, a horizon map or
+   * a survey mask of another size than a slot's, or a field level that is not an integer, before
+   * any write.
    * @throws RangeError if an array's length is not the layout's, which no bake of the setting gives.
    */
   upload(patch: SlotUpload): SlotUploadResult {
@@ -1114,6 +1123,19 @@ export class TerrainResources {
     if (this.#made.lit !== null && weightsBytes !== 0 && weightsBytes !== CLASS_WEIGHTS_BYTES) {
       throw new RangeError(
         `class weights of ${String(weightsBytes)} B, where a slot holds ${String(CLASS_WEIGHTS_BYTES)} B`,
+      );
+    }
+    const maturity = layers?.maturity;
+    if (
+      this.#made.lit !== null &&
+      maturity !== undefined &&
+      (maturity.codes.byteLength !== CLASS_MATURITY_BYTES ||
+        maturity.nodes.byteLength !== CLASS_NODES_BYTES)
+    ) {
+      throw new RangeError(
+        `a maturity layer of ${String(maturity.codes.byteLength)} B of codes and ` +
+          `${String(maturity.nodes.byteLength)} B of nodes, where a slot holds ` +
+          `${String(CLASS_MATURITY_BYTES)} B and ${String(CLASS_NODES_BYTES)} B`,
       );
     }
     const horizonBytes =
@@ -1164,7 +1186,9 @@ export class TerrainResources {
     const lit = this.#made.lit;
     if (lit !== null && layers !== null) {
       const { weights } = layers;
-      // The slot's class layers: its weights (zeros where the bake skipped them), then its laws.
+      // The slot's class layers: its weights (zeros where the bake skipped them), then its laws,
+      // then, with a maturity layer, its codes and its nodes. Without one nothing more is written:
+      // the laws' flags are clear, so a reused slot's stale codes and nodes are never read.
       this.#writeField(
         "class-layers",
         slot,
@@ -1174,9 +1198,25 @@ export class TerrainResources {
       this.#writeField(
         "class-layers",
         slot,
-        packClassLaws(layers.photometry, this.#rows, c / a),
+        packClassLaws(layers.photometry, this.#rows, c / a, maturity !== undefined),
         CLASS_WEIGHTS_BYTES,
       );
+      if (maturity !== undefined) {
+        // Little-endian, as every target of the client is: vertex v's word holds its code at n in
+        // its low half and at n − 1 in its high half, as `unpack2x16unorm` reads them.
+        this.#writeField(
+          "class-layers",
+          slot,
+          maturity.codes,
+          CLASS_WEIGHTS_BYTES + CLASS_LAWS_BYTES,
+        );
+        this.#writeField(
+          "class-layers",
+          slot,
+          packClassNodes(maturity.nodes, layers.photometry, c / a),
+          CLASS_WEIGHTS_BYTES + CLASS_LAWS_BYTES + CLASS_MATURITY_BYTES,
+        );
+      }
       this.#writeTable(lit);
       this.#writeHorizon(slot, layers);
     }

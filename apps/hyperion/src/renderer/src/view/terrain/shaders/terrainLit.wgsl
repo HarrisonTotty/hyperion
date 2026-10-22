@@ -9,13 +9,15 @@
 // neighbours' planetshine through `atmosphere_source_transmittance`. The aerial perspective is no
 // part of this shader: the lit terrain is drawn into the `AtmosphereScene` that
 // `HillaireAtmosphere.drawFrame` composites.
-// The TypeScript twin of the blend is `terrainMaterial.ts`' `terrainReflectance`.
+// The TypeScript twin of the blend is `terrainMaterial.ts`' `terrainReflectance`, and of a class's
+// albedo drawn from its maturity nodes `texelClassAlbedo`.
 //
 // Composed after frame.wgsl, patchVertex.wgsl, R08's surface lighting (`SURFACE_LIGHTING_WGSL`:
 // preciseTrig.wgsl, common.wgsl, oblate.wgsl, surfaceLighting.wgsl), R07's litBody.wgsl,
-// terrainPatch.wgsl, the horizon map's lookup (`shadows/horizon.wgsl`, R10.T8.b) and the survey's
-// placement and discard (`terrainSurvey.wgsl`, which the wireframe's terrain shares, R10.T11),
-// then a `Draw` and a fragment stage: the lit material's own (`terrainLitShade.wgsl`, with the
+// terrainPatch.wgsl, the horizon map's lookup (`shadows/horizon.wgsl`, R10.T8.b), the survey's
+// placement and discard (`terrainSurvey.wgsl`, which the wireframe's terrain shares, R10.T11) and
+// the maturity nodes' formula (`shaders/maturityNodes.wgsl`, R10.T1.c), then a `Draw` and a
+// fragment stage: the lit material's own (`terrainLitShade.wgsl`, with the
 // shadow cascades' receiver, `shadows/cascadeShadow.wgsl`, R10.T9.b), the terrain's depth alone for
 // the symbology's pass over the image (`terrainDepth.wgsl`, R10.T16.c), or the terrain as a caster
 // into the shadow cascades (`terrainShadow.wgsl`, R10.T9.b), each over this module's vertices and
@@ -70,9 +72,10 @@
 // disc draws the reference surface. Every patch's edge has its skirt's foot strip, which inside
 // the survey fills the cracks between patches; seen through one, it stands in for the terrain, so
 // its lip, the strip within `skirt_lip_m` of its edge, shades as the grid at its edge vertex: its
-// shading normal, its class weights and its horizon map (R10.T8.c). A crack's depth is under the
-// lip (a T-junction's sagitta, a rounding), so a skirt seen through one is never lit inside the
-// terrain's shadow; the survey edge's wall below the lip keeps the reference surface's appearance.
+// shading normal, its class weights and maturity and its horizon map (R10.T8.c). A crack's depth
+// is under the lip (a T-junction's sagitta, a rounding), so a skirt seen through one is never lit
+// inside the terrain's shadow; the survey edge's wall below the lip keeps the reference surface's
+// appearance.
 
 // Each slot's class layers, CLASS_LAYER_WORDS words (`slotLayout.ts`' `class-layers` field): first
 // each vertex's eight class-weight bytes over its patch's palette, two words a vertex (the bake's
@@ -81,8 +84,15 @@
 // two `vec4f` as `f32` words: A = c A_N per display channel (r, g, b), scaled for the figure as
 // law 0's is (R10.T10.e), and its L(0); its row of
 // `phase_factor_table`, −1 for a slot with no law (empty, or of an unnamed substance), whose
-// weight goes to law 0. One buffer for both. Read by the fragment stage alone, as the lights and
-// the horizon map are, the vertex stage reading R05's five (decision-r10-t10b-r09-t2e §5).
+// weight goes to law 0; then 1 where the slot is drawn from its maturity nodes, else 0, and two
+// words unread. Then, from word CLASS_MATURITY_WORD, each vertex's maturity codes, one word a
+// vertex, the unorm16 code at the patch's band level n in its low half and at its parent's, n − 1,
+// in its high half (`TerrainLayers.maturity`, R10.T1.c); and from word CLASS_NODE_WORD the
+// palette's albedo nodes (`terrainMaterial.ts`' `packClassNodes`), slot k's level ℓ (0 n, 1 n − 1)
+// node j at 3 (MATURITY_NODES (2k + ℓ) + j), r, g, b, scaled for the figure as A is. Codes and nodes
+// are written only for a patch with a maturity layer, and read only for a slot flagged as drawn
+// from them. One buffer for all. Read by the fragment stage alone, as the lights and the horizon
+// map are, the vertex stage reading R05's five (decision-r10-t10b-r09-t2e §5).
 @group(2) @binding(6) var<storage, read> class_layers : array<u32>;
 
 // The frame's phase table (`litBody.wgsl`): row 0 the body's uniform law, `elsewhere`, then one row
@@ -115,9 +125,12 @@
 // and one per slot.
 const TERRAIN_CLASSES : u32 = 8u;
 const TERRAIN_LAWS : u32 = 9u;
-// A slot's class layers in words: 65 × 65 × 2 of weights, then 8 × 2 × 4 of laws.
+// A slot's class layers in words: 65 × 65 × 2 of weights, 8 × 2 × 4 of laws, 65 × 65 of maturity
+// codes, then 8 × 2 × MATURITY_NODES × 3 of nodes.
 const CLASS_LAW_WORD : u32 = 8450u;
-const CLASS_LAYER_WORDS : u32 = 8514u;
+const CLASS_MATURITY_WORD : u32 = 8514u;
+const CLASS_NODE_WORD : u32 = 12739u;
+const CLASS_LAYER_WORDS : u32 = 13507u;
 const FIRST_TERRAIN_LIGHT_ROW : u32 = 3u;
 const TERRAIN_LIGHT_ROWS_EACH : u32 = 8u;
 const FIRST_TERRAIN_OCCLUDER_ROW : u32 = 19u;
@@ -363,11 +376,142 @@ fn terrain_shares(slot : u32, patch_uv : vec2f) -> array<f32, TERRAIN_LAWS> {
   return shares;
 }
 
+// Whether palette slot k of `slot` is drawn from its maturity nodes (R10.T1.c; word 5 of its law,
+// `packClassLaws`' flag): set for each named slot of a patch with a maturity layer, clear otherwise,
+// where the slot's A is its law's.
+fn class_drawn_from_nodes(slot : u32, k : u32) -> bool {
+  return bitcast<f32>(class_layers[slot * CLASS_LAYER_WORDS + CLASS_LAW_WORD + 8u * k + 5u]) > 0.5;
+}
+
+// The deficit ratios r of vertex (x, y) of `slot`'s maturity codes, at the patch's band level n
+// (x) and at its parent's, n − 1 (y): code ÷ 65,535.
+fn vertex_maturity(slot : u32, x : u32, y : u32) -> vec2f {
+  return unpack2x16unorm(class_layers[slot * CLASS_LAYER_WORDS + CLASS_MATURITY_WORD + y * VERTICES_PER_SIDE + x]);
+}
+
+// Node j of palette slot k of `slot` at `level` (0 the patch's band level n, 1 its parent's), per
+// display channel (r, g, b), scaled for the figure.
+fn class_node(slot : u32, k : u32, level : u32, j : u32) -> vec3f {
+  let at = slot * CLASS_LAYER_WORDS + CLASS_NODE_WORD + 3u * (MATURITY_NODES * (2u * k + level) + j);
+  return bitcast<vec3f>(vec3u(class_layers[at], class_layers[at + 1u], class_layers[at + 2u]));
+}
+
+// One level's quad of a texel's maturity: each corner's segment of the node table, corners (0, 0),
+// (1, 0), (0, 1) and (1, 1) in that order, and the texel's bilinear fractions within the quad.
+struct MaturityQuad {
+  nodes : vec4u,
+  fractions : vec4f,
+  at : vec2f,
+}
+
+// The quad of corner `corner` and side `span` vertices of `slot` (1 the patch's own quad, 2 the
+// parent's on the even vertices), each corner's code at `level` (0 n, 1 n − 1) as its segment.
+fn maturity_quad(slot : u32, corner : vec2u, span : u32, level : u32, at : vec2f) -> MaturityQuad {
+  var quad : MaturityQuad;
+  quad.at = at;
+  for (var c = 0u; c < 4u; c = c + 1u) {
+    let ratios = vertex_maturity(slot, corner.x + span * (c & 1u), corner.y + span * (c >> 1u));
+    let segment = maturity_segment(ratios[level]);
+    quad.nodes[c] = segment.node;
+    quad.fractions[c] = segment.fraction;
+  }
+  return quad;
+}
+
+// A texel's maturity quads at `patch_uv` of `slot` (R10.T1.c): its own quad's four vertices at n,
+// and the parent's quad, the even vertices about it, at n − 1, so that a bilinear field on the
+// parent's grid is the parent's own on the child's; each only where the morph factor `morph` draws
+// it (`terrain_class_albedo`'s ends). The node table's grading is every slot's, so a fragment
+// takes its segments once for all its slots.
+struct TexelMaturity {
+  own : MaturityQuad,
+  parent : MaturityQuad,
+}
+
+fn texel_maturity(slot : u32, patch_uv : vec2f, morph : f32) -> TexelMaturity {
+  let s = patch_uv * 64.0;
+  var out : TexelMaturity;
+  if (!(morph >= 1.0)) {
+    let base = min(vec2u(floor(max(s, vec2f(0.0)))), vec2u(63u));
+    let f = clamp(s - vec2f(base), vec2f(0.0), vec2f(1.0));
+    out.own = maturity_quad(slot, base, 1u, 0u, f);
+  }
+  if (morph > 0.0) {
+    let base = min(2u * vec2u(floor(max(s, vec2f(0.0)) / 2.0)), vec2u(62u));
+    let f = clamp((s - vec2f(base)) / 2.0, vec2f(0.0), vec2f(1.0));
+    out.parent = maturity_quad(slot, base, 2u, 1u, f);
+  }
+  return out;
+}
+
+// Palette slot k's albedo over `quad` at `level`: each corner's two nodes mixed by its segment
+// (`maturity_mix`), then the corners bilinearly.
+fn maturity_quad_albedo(slot : u32, k : u32, level : u32, quad : MaturityQuad) -> vec3f {
+  var corners : array<vec3f, 4>;
+  for (var c = 0u; c < 4u; c = c + 1u) {
+    let j = quad.nodes[c];
+    corners[c] = maturity_mix(class_node(slot, k, level, j), class_node(slot, k, level, j + 1u), quad.fractions[c]);
+  }
+  return mix(mix(corners[0], corners[1], quad.at.x), mix(corners[2], corners[3], quad.at.x), quad.at.y);
+}
+
+// Palette slot k's A at the texel of maturity `maturity` and morph factor `morph`, drawn from its
+// nodes (R10.T1.c; decision-r10-t1c-client-scope §1.4): (1 − μ) times its own quad's bilinear mean
+// of T_n at its vertices' maturities at n, plus μ times the parent's quad's of T_{n−1} at n − 1,
+// with explicit ends, so that μ ≤ 0 draws the patch's field and μ ≥ 1 the parent's exactly, as the
+// height, the shading normal and the horizon blend to the parent's (`texelClassAlbedo`). Each end
+// reads its own quad's nodes alone; one call of each quad's albedo, so that a compiler that inlines
+// every call takes one copy of each.
+fn terrain_class_albedo(slot : u32, k : u32, maturity : TexelMaturity, morph : f32) -> vec3f {
+  var own = vec3f(0.0);
+  var parent = vec3f(0.0);
+  if (!(morph >= 1.0)) {
+    own = maturity_quad_albedo(slot, k, 0u, maturity.own);
+  }
+  if (morph > 0.0) {
+    parent = maturity_quad_albedo(slot, k, 1u, maturity.parent);
+  }
+  if (!(morph > 0.0)) {
+    return own;
+  }
+  if (morph >= 1.0) {
+    return parent;
+  }
+  return (1.0 - morph) * own + morph * parent;
+}
+
+// Each of a texel's laws' A by their shares: law 0's, then each slot's, its law's or, where the
+// slot is drawn from its maturity nodes, `terrain_class_albedo`'s (R10.T1.c); a slot of no share
+// skipped before its flag or nodes are read, its A left 0. The texel's maturity quads are read once,
+// at the first slot drawn from its nodes.
+fn terrain_albedos(in : LitVertexOut, shares : array<f32, TERRAIN_LAWS>) -> array<vec3f, TERRAIN_LAWS> {
+  var albedos : array<vec3f, TERRAIN_LAWS>;
+  albedos[0] = terrain_row(1u).xyz;
+  var maturity : TexelMaturity;
+  var gathered = false;
+  for (var k = 0u; k < TERRAIN_CLASSES; k = k + 1u) {
+    if (!(shares[k + 1u] > 0.0)) {
+      continue;
+    }
+    if (class_drawn_from_nodes(in.slot, k)) {
+      if (!gathered) {
+        maturity = texel_maturity(in.slot, in.patchUv, in.morph);
+        gathered = true;
+      }
+      albedos[k + 1u] = terrain_class_albedo(in.slot, k, maturity, in.morph);
+    } else {
+      albedos[k + 1u] = class_law(in.slot, k).law.a;
+    }
+  }
+  return albedos;
+}
+
 // The reflectance I/F of a texel's laws by their shares lit by one source of irradiance factor
-// `h` (`litBody.wgsl`'s `lit_disc_term`), each law's f and L(α) from its own row, a zero share
-// skipped (`bodyDisc.wgsl`'s `surface_reflectance`).
+// `h` (`litBody.wgsl`'s `lit_disc_term`), each law's A from `albedos` (`terrain_albedos`) and its f
+// and L(α) from its own row, a zero share skipped (`bodyDisc.wgsl`'s `surface_reflectance`).
 fn terrain_reflectance(
   shares : array<f32, TERRAIN_LAWS>,
+  albedos : array<vec3f, TERRAIN_LAWS>,
   slot : u32,
   h : f32,
   mu0 : f32,
@@ -384,7 +528,7 @@ fn terrain_reflectance(
     let law = terrain_law(slot, m);
     let row = phase_row(law.table_row, alpha);
     let disc_term = lit_disc_term(row.a, h, mu0, mu, source_radius);
-    reflectance = reflectance + share * law.a * row.rgb * disc_term;
+    reflectance = reflectance + share * albedos[m] * row.rgb * disc_term;
   }
   return reflectance;
 }
@@ -442,11 +586,14 @@ fn shade_terrain(
   } else {
     shares = terrain_shares(in.slot, in.patchUv);
   }
+  // Each law's A at the texel, its maturity's where a slot is drawn from its nodes (R10.T1.c); a
+  // reference fragment's law 0 alone, its slots' shares being 0.
+  let albedos = terrain_albedos(in, shares);
   // The texel's mean A, for R08's sky light on the Lambert share's flat term.
   var mean_a = vec3f(0.0);
   for (var m = 0u; m < TERRAIN_LAWS; m = m + 1u) {
     if (shares[m] > 0.0) {
-      mean_a = mean_a + shares[m] * terrain_law(in.slot, m).a;
+      mean_a = mean_a + shares[m] * albedos[m];
     }
   }
   mean_a = mean_a * decoration.albedo;
@@ -521,7 +668,7 @@ fn shade_terrain(
     }
     let alpha = angle_between(towards, -ray);
     let reflectance =
-      terrain_reflectance(shares, in.slot, horizon, mu0, mu, alpha, star_radius) * decoration.albedo;
+      terrain_reflectance(shares, albedos, in.slot, horizon, mu0, mu, alpha, star_radius) * decoration.albedo;
     let transmitted = atmosphere_sun_transmittance(
       height, mu_datum, local.latitude, local_azimuth(local, towards), j
     );
@@ -558,7 +705,7 @@ fn shade_terrain(
     let alpha = angle_between(towards, -ray);
     let source_radius = angular_radius(source.w, distance);
     let reflectance =
-      terrain_reflectance(shares, in.slot, irradiance, mu0, mu, alpha, source_radius) * decoration.albedo;
+      terrain_reflectance(shares, albedos, in.slot, irradiance, mu0, mu, alpha, source_radius) * decoration.albedo;
     let transmitted = atmosphere_source_transmittance(
       height, mu_datum, local.latitude, local_azimuth(local, towards), source_radius, 0u
     );

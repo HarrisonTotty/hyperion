@@ -15,6 +15,8 @@ import { lawFor } from "../../appearance/phase";
 import {
   CLASS_LAWS_BYTES,
   CLASS_LAYERS_BYTES,
+  CLASS_MATURITY_BYTES,
+  CLASS_NODES_BYTES,
   CLASS_WEIGHTS_BYTES,
   DOUBLE_NORMALS_BYTES,
   HEIGHTS_BYTES,
@@ -28,7 +30,7 @@ import {
 } from "../slotLayout";
 import { bindingStages } from "../../../test/wgslStages";
 import { materialBindings, storageBuffersPerStage } from "../../engine/webgpu/materials";
-import { terrainLitMaterialSpec } from "../terrainMaterial";
+import { packClassNodes, terrainLitMaterialSpec } from "../terrainMaterial";
 import { terrainWireMaterialSpec, wireframeTerrainSettings } from "../terrainWire";
 import { terrainMaterialSpec } from "./material";
 import type { TerrainLayers } from "../workers/messages";
@@ -122,6 +124,17 @@ function mappedLayers(): TerrainLayers {
     horizonComplete: false,
     horizonRefusedCells: Uint32Array.of(5),
   };
+}
+
+/**
+ * A lit bake's layers without a maturity layer, palette slots 0 and 2 named (a regolith of L(0) 1
+ * and a frost of L(0) 0.72), for the maturity layer's uploads (R10.T1.c).
+ */
+function maturityLayers(): TerrainLayers {
+  const photometry = new Float32Array(40);
+  photometry.set([0.1, 0.12, 0.14, 1, 1], 0);
+  photometry.set([0.8, 0.82, 0.84, 2, 0.72], 10);
+  return { ...mappedLayers(), photometry };
 }
 
 describe("the shared patch mesh", () => {
@@ -593,8 +606,9 @@ describe("a terrain layout past the device's storage binding (decision-r10-t14b-
     readonly shading: TerrainShading;
     readonly slots: number;
   }> = [
-    { cache: "low lit", terrain: LOW, shading: "lit", slots: 422 },
-    { cache: "high lit", terrain: HIGH, shading: "lit", slots: 1_286 },
+    // 422 and 1,286 before R10.T1.c's maturity layer grew the lit slot.
+    { cache: "low lit", terrain: LOW, shading: "lit", slots: 375 },
+    { cache: "high lit", terrain: HIGH, shading: "lit", slots: 1_208 },
     {
       cache: "low wireframe",
       terrain: wireframeTerrainSettings("low"),
@@ -669,24 +683,26 @@ describe("a terrain layout past the device's storage binding (decision-r10-t14b-
     expect(bindsWithin(layout, DEFAULT_LIMITS.maxStorageBufferBindingSize)).toBe(true);
   });
 
-  it("lays high lit's own 1,286 slots out on face-differences under a binding below their offsets, which it refused before", () => {
-    const bindingBytes = 128_000_000;
-    // The offsets, 130,400,400 B, pass the binding; so did the horizon map of the fallback's count
-    // as its bytes gave it, 1,908 slots.
-    expect(1_286 * OFFSETS_BYTES).toBeGreaterThan(bindingBytes);
+  it("lays high lit's own 1,208 slots out on face-differences under a binding below their offsets, which it refused before", () => {
+    // Below 128,000,000 B since R10.T1.c's maturity layer, whose bigger slot leaves 1,208 slots
+    // whose offsets fit it.
+    const bindingBytes = 115_000_000;
+    // The offsets, 122,491,200 B, pass the binding; so did the horizon map of the fallback's count
+    // as its bytes gave it, 1,742 slots.
+    expect(1_208 * OFFSETS_BYTES).toBeGreaterThan(bindingBytes);
     expect(
       terrainSlotLayout({ ...HIGH, vertexPath: "face-differences" }, "lit").slotCount *
         HORIZON_MAP_BYTES,
     ).toBeGreaterThan(bindingBytes);
     const layout = terrainLayout(HIGH, bindingOf(bindingBytes), "lit");
-    expect(fitOf(layout)).toEqual(["face-differences", "binding-limit", 1_286, 1_286]);
+    expect(fitOf(layout)).toEqual(["face-differences", "binding-limit", 1_208, 1_208]);
     expect(bindsWithin(layout, bindingBytes)).toBe(true);
   });
 
   it("clamps a setting already on face-differences to that path's ceiling", () => {
     // ⌊20,000,000 ÷ 68,896⌋: the horizon map binds first.
     const layout = terrainLayout(LOW, bindingOf(20_000_000), "lit");
-    expect(fitOf(layout)).toEqual(["face-differences", "binding-limit", 422, 290]);
+    expect(fitOf(layout)).toEqual(["face-differences", "binding-limit", 375, 290]);
     expect(normalsAtlasOf(layout)).toEqual(
       normalsAtlasLayout(65, 290, DEFAULT_LIMITS.maxTextureDimension2D, MAX_TEXTURE_ARRAY_LAYERS),
     );
@@ -889,16 +905,16 @@ describe("the terrain's resources", () => {
     });
     const resources = new TerrainResources(engine, HIGH, WGS84, "lit");
     expect(resources.layout.vertexPath).toBe("baked-offsets");
-    // Below the offsets' 130,400,400 B, where the layout threw before (R10.T14.d's finding).
+    // Below the offsets' 122,491,200 B, where the layout threw before (R10.T14.d's finding).
     const lesser = await fakeDevice({
-      maxStorageBufferBindingSize: 128_000_000,
+      maxStorageBufferBindingSize: 115_000_000,
       maxBufferSize: 2 ** 28,
     });
     expect(() => {
       engine.restore(lesser);
     }).not.toThrow();
-    expect(fitOf(resources.layout)).toEqual(["face-differences", "binding-limit", 1_286, 1_286]);
-    expect(resources.field("horizon-map")?.bytes).toBe(1_286 * HORIZON_MAP_BYTES);
+    expect(fitOf(resources.layout)).toEqual(["face-differences", "binding-limit", 1_208, 1_208]);
+    expect(resources.field("horizon-map")?.bytes).toBe(1_208 * HORIZON_MAP_BYTES);
     resources.dispose();
   });
 
@@ -976,6 +992,64 @@ describe("the terrain's resources", () => {
     );
     const table = engine.textureWritten.findLast((w) => w.texture === "terrain phase table");
     expect(table?.size).toEqual({ width: PHASE_TABLE_SAMPLES, height: 3 });
+    resources.dispose();
+  });
+
+  it("write a bake's maturity codes and nodes after its laws, its named slots flagged as drawn from them (R10.T1.c)", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit");
+    const codes = Uint16Array.from({ length: 2 * 65 * 65 }, (_, n) => (n * 7_919) % 65_536);
+    const nodes = Float32Array.from({ length: CLASS_NODES_BYTES / 4 }, (_, n) => 0.05 + n * 1e-4);
+    const layers: TerrainLayers = { ...maturityLayers(), maturity: { codes, nodes } };
+    expect(resources.upload({ ...upload(3, 65, false), layers }).kind).toBe("uploaded");
+    const writes = engine.writes.filter((w) => w.buffer === "terrain class-layers");
+    // The weights at 0, the laws at 33,800, the codes at 34,056 and the nodes at 50,956 of the slot.
+    expect(writes.map((w) => [w.offsetBytes - 3 * CLASS_LAYERS_BYTES, w.bytes])).toEqual([
+      [0, CLASS_WEIGHTS_BYTES],
+      [33_800, CLASS_LAWS_BYTES],
+      [34_056, CLASS_MATURITY_BYTES],
+      [50_956, CLASS_NODES_BYTES],
+    ]);
+    const [, laws, codeWrite, nodeWrite] = writes;
+    const words = new Float32Array(laws?.data.slice().buffer ?? new ArrayBuffer(0));
+    expect(Array.from({ length: 8 }, (_, k) => words[8 * k + 5])).toEqual([1, 0, 1, 0, 0, 0, 0, 0]);
+    // The codes as the bake gives them: little-endian, vertex v's word its code at n in the low half.
+    expect(codeWrite?.data).toEqual(new Uint8Array(codes.buffer));
+    const cOverA = WGS84.polarRadiusM / WGS84.equatorialRadiusM;
+    expect(nodeWrite?.data).toEqual(
+      new Uint8Array(packClassNodes(nodes, layers.photometry, cOverA).buffer),
+    );
+    resources.dispose();
+  });
+
+  it("write a bake without a maturity layer as before: its weights and its laws, unflagged", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit");
+    const layers = maturityLayers();
+    expect(resources.upload({ ...upload(1, 65, false), layers }).kind).toBe("uploaded");
+    const writes = engine.writes.filter((w) => w.buffer === "terrain class-layers");
+    expect(writes.map((w) => w.bytes)).toEqual([CLASS_WEIGHTS_BYTES, CLASS_LAWS_BYTES]);
+    const words = new Float32Array(writes[1]?.data.slice().buffer ?? new ArrayBuffer(0));
+    expect(Array.from({ length: 8 }, (_, k) => words[8 * k + 5])).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+    // Its named slots' laws are there, rows 1 and 2 after the body's uniform law.
+    expect([words[4], words[8 + 4], words[16 + 4]]).toEqual([1, -1, 2]);
+    resources.dispose();
+  });
+
+  it("refuse a maturity layer of another size than a slot's before any write", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit");
+    const codes = new Uint16Array(2 * 65 * 65);
+    const nodes = new Float32Array(CLASS_NODES_BYTES / 4);
+    for (const maturity of [
+      { codes: codes.subarray(1), nodes },
+      { codes, nodes: nodes.subarray(3) },
+    ]) {
+      const layers: TerrainLayers = { ...maturityLayers(), maturity };
+      const before = engine.writes.length;
+      expect(() => resources.upload({ ...upload(2, 65, false), layers })).toThrow(RangeError);
+      expect(engine.writes.length).toBe(before);
+    }
     resources.dispose();
   });
 

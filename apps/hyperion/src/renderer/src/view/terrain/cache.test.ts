@@ -878,18 +878,20 @@ describe("the cache at its sizes over R05's descent (plan R10, R10.T14.a)", () =
   // from 136, and high's pins peaking at 887, from 884, its freed budget refining elsewhere; the
   // forced peak and the wireframe's case are as they were. R09.T8.d's boxes, over the subtree's
   // range with its skirts, moved it again (2026-10-20): low past its slots in 110 frames, from 107;
-  // the rest as it was.
+  // the rest as it was. R10.T1.c's maturity layer, which grows the lit slot by 19,972 B, moved it
+  // again (2026-10-22): low past its 375 slots (422 before) in 242 frames, from 110, and high's pins
+  // peaking at 832 of its 1,208 slots (1,286 before), from 887; the forced peak as it was.
   const REPLAYS = [
     replayed("the low setting's lit", terrainSlotLayout(TERRAIN_SETTINGS.low, "lit"), low.view, {
       frames: 723,
       peakForced: 71,
-      peakPins: 422,
-      exceededFrames: 110,
+      peakPins: 375,
+      exceededFrames: 242,
     }),
     replayed("the high setting's lit", terrainSlotLayout(TERRAIN_SETTINGS.high, "lit"), high.view, {
       frames: 723,
       peakForced: 71,
-      peakPins: 887,
+      peakPins: 832,
       exceededFrames: 0,
     }),
     replayed(

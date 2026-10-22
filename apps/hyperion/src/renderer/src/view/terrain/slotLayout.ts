@@ -14,6 +14,7 @@
  */
 
 import type { TerrainSettings } from "../quality/qualitySetting";
+import { MATURITY_NODES } from "./maturityNodes";
 
 /** Vertices along one side of a patch: 64 quads, 65 vertices (`hyperion_surface::PATCH_QUADS` + 1). */
 export const PATCH_VERTICES_PER_SIDE = 65;
@@ -66,10 +67,27 @@ export const CLASS_WEIGHTS_BYTES = VERTICES * 8;
 export const CLASS_LAWS_BYTES = 8 * 2 * 16;
 
 /**
- * Bytes of a patch's class layers (R10.T10.b): its class weights, then its class laws, 34,056 B,
- * one storage buffer for both so that the lit material keeps a storage binding free.
+ * Bytes of a patch's maturity codes (R10.T1.c's client half): 65 × 65 vertices of two unorm16
+ * codes, at the patch's band level n then at its parent's, n − 1, one `u32` word a vertex, n's code
+ * in its low half (`TerrainLayers.maturity`'s `codes`, little-endian as uploaded), 16,900 B.
  */
-export const CLASS_LAYERS_BYTES = CLASS_WEIGHTS_BYTES + CLASS_LAWS_BYTES;
+export const CLASS_MATURITY_BYTES = VERTICES * 2 * 2;
+
+/**
+ * Bytes of a patch's maturity nodes (R10.T1.c's client half): its palette's 8 slots × 2 levels
+ * (n, n − 1) × {@link MATURITY_NODES} nodes × 3 channels as `f32`, 3,072 B
+ * (`terrainMaterial.ts`' `packClassNodes`).
+ */
+export const CLASS_NODES_BYTES = 8 * 2 * MATURITY_NODES * 3 * F32_BYTES;
+
+/**
+ * Bytes of a patch's class layers (R10.T10.b; R10.T1.c's client half): its class weights, its class
+ * laws, its maturity codes and its maturity nodes, 54,028 B, one storage buffer for all four so
+ * that the lit material keeps a storage binding free. A patch without a maturity layer writes its
+ * weights and laws alone, and its laws' flags keep the rest unread.
+ */
+export const CLASS_LAYERS_BYTES =
+  CLASS_WEIGHTS_BYTES + CLASS_LAWS_BYTES + CLASS_MATURITY_BYTES + CLASS_NODES_BYTES;
 
 /** `u32` words a horizon-map texel takes: eight azimuths, two to a word (R10.T8.a). */
 export const HORIZON_WORDS_PER_TEXEL = 4;
@@ -238,7 +256,7 @@ export function slotLayout(fields: ReadonlyArray<SlotField>, budgetBytes: number
  * This plan's fields for a terrain setting: heights and morph targets, the offsets on the
  * `baked-offsets` path, the normals at the setting's resolution, and the horizon map; with R10's
  * lit shading, the horizon map at {@link HORIZON_MAP_BYTES} (R10.T8.b), the class layers, weights
- * and laws (R10.T10.b), and the survey mask at {@link SURVEY_MASK_BYTES} (R10.T10.c), and the
+ * and laws (R10.T10.b) with the maturity codes and nodes (R10.T1.c), and the survey mask at {@link SURVEY_MASK_BYTES} (R10.T10.c), and the
  * horizon map at zero bytes on R05's spike shading, which draws no shadow and no survey, so that
  * R05's test planet and its spike keep their slots. The wireframe's (R10.T11) holds the heights,
  * the offsets on their path and the survey mask alone: it draws depth and its contours from the

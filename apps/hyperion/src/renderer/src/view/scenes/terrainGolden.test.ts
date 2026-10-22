@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import terrainGoldenText from "../../../../../../../crates/hyperion-surface/tests/golden/worker/terrain_test.golden?raw";
+import weatheredGoldenText from "../../../../../../../crates/hyperion-surface/tests/golden/worker/terrain_test_weathered.golden?raw";
 import { BLOCK_MAGIC } from "../terrain/coarseFieldStore";
 import { blockBytes, parseTerrainGolden } from "./terrainGolden";
 import { terrainTestGolden } from "./terrainScene";
@@ -76,6 +77,61 @@ describe("the terrain golden (R10.T16.d)", () => {
     const posted = (payloads[0]?.blocksHex.length ?? 0) + (payloads[1]?.blocksHex.length ?? 0);
     expect(changes).toHaveLength(posted);
     expect(changes.some(({ surveyed }) => surveyed.length > 0)).toBe(true);
+  });
+
+  it("gives TERRAIN TEST's field, whose header carries no maturity, no maturity's lines", () => {
+    expect(Object.hasOwn(parseTerrainGolden(terrainGoldenText), "maturity")).toBe(false);
+  });
+
+  it("reads TEST MOON weathered's maturity: its crust's albedo, three patches' digests and the class map's (R10.T1.c)", () => {
+    const golden = parseTerrainGolden(weatheredGoldenText);
+    expect([golden.body, golden.header.maturity, golden.header.weathering_rate]).toEqual([
+      "5e5e000000000000.0003",
+      1,
+      1,
+    ]);
+    const { maturity } = golden;
+    // The line's comment, which the reader does not read, gives the same values in decimal.
+    expect(maturity?.crustAlbedoBvr).toEqual([
+      0.099776827272101, 0.12322632988308144, 0.13121348331486257,
+    ]);
+    expect(maturity?.patches.map(({ key }) => key)).toEqual([
+      { face: 0, level: 8, i: 255, j: 216 },
+      { face: 0, level: 13, i: 8_161, j: 6_926 },
+      { face: 0, level: 17, i: 130_579, j: 110_831 },
+    ]);
+    expect([maturity?.patches[0]?.codesDigest, maturity?.classMap.nodesDigest]).toEqual([
+      0x726e2b8a01c7c42en,
+      0x7fd95ce487df8338n,
+    ]);
+    // The weathered field's payloads are TERRAIN TEST's own surveys over another world.
+    expect(golden.payloads.map(({ revision, have }) => [revision, have])).toEqual(
+      terrainTestGolden().payloads.map(({ revision, have }) => [revision, have]),
+    );
+  });
+
+  it("refuses a maturity line out of its place or form, and a header's maturity without its lines", () => {
+    const head = "# generator_version = 22\nbody 1\nseed 2\n";
+    const digest = "0x0123456789abcdef";
+    expect(() => parseTerrainGolden(`${head}maturity_patch 0 8 1 2 ${digest} ${digest}\n`)).toThrow(
+      "line 4: a maturity_patch is <face> <level> <i> <j> <codes> <nodes>",
+    );
+    expect(() =>
+      parseTerrainGolden(
+        `${head}crust_albedo 0x3fb999999999999a 0x3fb999999999999a 0x3fb999999999999a\n` +
+          `maturity_patch 6 8 1 2 ${digest} ${digest}\n`,
+      ),
+    ).toThrow("line 5: 6 is not a face");
+    expect(() =>
+      parseTerrainGolden(
+        `${head}crust_albedo 0x3fb999999999999a 0x3fb999999999999a 0x3fb999999999999a\n` +
+          `class_map_maturity ${digest} 0x12\n`,
+      ),
+    ).toThrow("line 5: 0x12 is not a digest's 64 bits");
+    const unlined = weatheredGoldenText.slice(0, weatheredGoldenText.indexOf("crust_albedo"));
+    expect(() => parseTerrainGolden(unlined)).toThrow(
+      "the maturity's lines follow a header with a maturity, and only one",
+    );
   });
 
   it("refuses a line it cannot read, naming it", () => {

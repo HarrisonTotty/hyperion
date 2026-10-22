@@ -9,20 +9,24 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import earthFixture from "../../../../../../../../crates/hyperion-surface/tests/golden/worker/earth_like.golden?raw";
 import fixture from "../../../../../../../../crates/hyperion-surface/tests/golden/worker/moon_like.golden?raw";
+import weatheredFixture from "../../../../../../../../crates/hyperion-surface/tests/golden/worker/terrain_test_weathered.golden?raw";
 import {
   bakePatch,
   HorizonLayer,
   initSync,
   LineOfSightKind,
+  maturityNodeCount,
   SurfaceFields,
   testPlanetVersion,
   WeightsLayer,
 } from "../../../generated/surface/hyperion_surface";
 import wasmDataUrl from "../../../generated/surface/hyperion_surface_bg.wasm?inline";
 import { classWeightsAt } from "../../bodies/discSurface";
+import { parseTerrainGolden } from "../../scenes/terrainGolden";
 import { CLASS_MAP_LEVEL, classMapTexelsOf } from "../classMap";
 import { fieldCellAt } from "../coverage";
 import { faceUvToXyz, stToUv } from "../cube";
+import { MATURITY_NODES } from "../maturityNodes";
 import type { Face, PatchKey } from "../patchKey";
 import { decodeOctahedral } from "../shadingNormal";
 import { dominantSlot } from "../terrainMaterial";
@@ -1305,6 +1309,146 @@ describe("the height worker's fields on the real module", () => {
         : `${String(material.classCode)}:${material.entry === null ? "-" : String(material.entry)}`;
     });
     expect(asked).toEqual(sample.map((v) => EARTH.materials[v]));
+  });
+
+  describe("the maturity layer and its nodes (R10.T1.c's client half)", () => {
+    it("counts the module's nodes a level as the twin does", () => {
+      expect(maturityNodeCount()).toBe(MATURITY_NODES);
+    });
+
+    it("bakes no layer where the header carries no maturity, posts none, and repeats each slot's photometry at every node (test 3)", () => {
+      const fields = heldFields();
+      const { direct, args, seed } = directFields();
+      for (const record of recordsOf("patch")) {
+        const [, name, face, level, i, j, path, normals, weights] = record.head;
+        const key = { face: faceOf(face), level: Number(level), i: Number(i), j: Number(j) };
+        const weightsLayer = lookup(WEIGHTS, weights);
+        const settings: BakeSettings = {
+          vertexPath: lookup(VERTEX_PATHS, path),
+          normals: lookup(NORMALS, normals),
+          source: {
+            kind: "body",
+            body: FIXTURE.body,
+            detailSeed: FIXTURE.seed,
+            weights: weightsLayer,
+          },
+        };
+        const { reply } = answerRequest(
+          module,
+          { kind: "bake", id: 3, key, generation: 5, settings },
+          fields,
+        );
+        if (reply.kind !== "baked" || reply.bake.layers === null) {
+          throw new Error(`${String(name)} was not baked: ${JSON.stringify(reply)}`);
+        }
+        const { layers } = reply.bake;
+        expect([name, Object.hasOwn(layers, "maturity")]).toEqual([name, false]);
+        const raw = direct.bake(
+          ...args,
+          seed,
+          key.face,
+          key.level,
+          key.i,
+          key.j,
+          WASM_VERTEX_PATH[settings.vertexPath],
+          WASM_NORMAL_SCALE[settings.normals],
+          WASM_WEIGHTS_LAYER[weightsLayer],
+          WASM_HORIZON_LAYER[weightsLayer],
+          0,
+        );
+        expect([name, raw?.maturity().length]).toEqual([name, 0]);
+        raw?.free();
+        const nodes = direct.maturityNodes(...args, layers.palette, key.level);
+        expect(nodes).toHaveLength(8 * 2 * MATURITY_NODES * 3);
+        const misses: unknown[] = [];
+        for (let k = 0; k < 8; k += 1) {
+          for (let at = 0; at < 2 * MATURITY_NODES; at += 1) {
+            for (let c = 0; c < 3; c += 1) {
+              const node = nodes?.[6 * MATURITY_NODES * k + 3 * at + c];
+              if (node !== layers.photometry[PHOTOMETRY_STRIDE * k + c]) {
+                misses.push([name, k, at, c, node]);
+              }
+            }
+          }
+        }
+        expect(misses).toEqual([]);
+      }
+      direct.free();
+    });
+
+    describe("on TEST MOON weathered (decision-r10-t1c-client-scope §2.5, test 10)", () => {
+      const WEATHERED = parseTerrainGolden(weatheredFixture);
+
+      /** A worker's fields holding payloads 1 and 2's blocks, posted in turn as the native writer. */
+      function weatheredFields(): WorkerFields {
+        const fields = new WorkerFields(module);
+        const blocks = WEATHERED.payloads.slice(0, 2).flatMap(({ blocksHex }) => blocksHex);
+        blocks.forEach((hex, n) => {
+          const block = bytesOf(hex);
+          const request: HeightWorkerRequest =
+            n === 0
+              ? { kind: "field-init", id: n, body: WEATHERED.body, block, form: "payload" }
+              : { kind: "field-chunk", id: n, body: WEATHERED.body, block };
+          const { reply } = answerRequest(module, request, fields);
+          if (reply.kind !== "field-held") {
+            throw new Error(`block ${String(n)} was refused: ${JSON.stringify(reply)}`);
+          }
+        });
+        return fields;
+      }
+
+      it("bakes each pinned patch's codes and nodes as the native bake does, bit for bit, both transferred", () => {
+        const patches = WEATHERED.maturity?.patches ?? [];
+        expect(patches.map(({ key }) => key.level)).toEqual([8, 13, 17]);
+        const fields = weatheredFields();
+        const digests = patches.map(({ key }) => {
+          const { reply, transfer } = answerRequest(
+            module,
+            {
+              kind: "bake",
+              id: 7,
+              key,
+              generation: 1,
+              settings: {
+                vertexPath: "face-differences",
+                normals: "mesh",
+                source: {
+                  kind: "body",
+                  body: WEATHERED.body,
+                  detailSeed: WEATHERED.seed,
+                  weights: "baked",
+                },
+              },
+            },
+            fields,
+          );
+          if (reply.kind !== "baked") {
+            throw new Error(`level ${String(key.level)} was not baked: ${JSON.stringify(reply)}`);
+          }
+          const maturity = reply.bake.layers?.maturity;
+          if (maturity === undefined) {
+            throw new Error(`level ${String(key.level)} was baked without its maturity layer`);
+          }
+          expect([maturity.codes.length, maturity.nodes.length]).toEqual([
+            2 * 65 * 65,
+            8 * 2 * MATURITY_NODES * 3,
+          ]);
+          expect(transfer).toEqual(
+            expect.arrayContaining([maturity.codes.buffer, maturity.nodes.buffer]),
+          );
+          return [
+            digestHex(f64Digest(Float64Array.from(maturity.codes))),
+            digestHex(f32Digest(maturity.nodes)),
+          ];
+        });
+        expect(digests).toEqual(
+          patches.map(({ codesDigest, nodesDigest }) => [
+            digestHex(codesDigest),
+            digestHex(nodesDigest),
+          ]),
+        );
+      });
+    });
   });
 });
 

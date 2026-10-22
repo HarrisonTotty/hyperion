@@ -22,6 +22,7 @@ import {
 } from "../engine/webgpu/uniforms";
 import { annulusEdges } from "../lighting/annuli";
 import { bindingStages } from "../../test/wgslStages";
+import maturityNodesWgsl from "../shaders/maturityNodes.wgsl?raw";
 import occluderWgsl from "../shaders/occluder.wgsl?raw";
 import terrainDepthWgsl from "./shaders/terrainDepth.wgsl?raw";
 import terrainLitWgsl from "./shaders/terrainLit.wgsl?raw";
@@ -34,8 +35,16 @@ import horizonWgsl from "./shadows/horizon.wgsl?raw";
 import { LIT_VERTEX_CODE } from "./gpu/resources";
 import { PATH_SOURCES } from "./gpu/material";
 import {
+  MATURITY_NODES,
+  maturityCodeRatio,
+  maturityNodeAlbedo,
+  maturitySegment,
+} from "./maturityNodes";
+import {
   CLASS_LAWS_BYTES,
   CLASS_LAYERS_BYTES,
+  CLASS_MATURITY_BYTES,
+  CLASS_NODES_BYTES,
   CLASS_WEIGHTS_BYTES,
   SURVEY_CELL_CODE_BYTE,
   SURVEY_MASK_BYTES,
@@ -49,6 +58,7 @@ import {
   classTexelLaw,
   dominantSlot,
   packClassLaws,
+  packClassNodes,
   packTerrainLighting,
   SHADOW_CASCADES_TEXTURE,
   SHADOW_COMPARE_SAMPLER,
@@ -66,6 +76,8 @@ import {
   terrainReflectance,
   terrainShadowMaterialSpec,
   terrainShares,
+  terrainTexelLaws,
+  texelClassAlbedo,
   texelLawOf,
   texelWeights,
 } from "./terrainMaterial";
@@ -800,6 +812,332 @@ describe("a texel's blend (R10.T10.b; Design note 8)", () => {
     expect(middle[0]).toBeCloseTo(0.75, 12);
     expect(middle[1]).toBeCloseTo(0.25, 12);
     expect(texelWeights(new Uint8Array(), 0.5, 0.5)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+  });
+});
+
+/** The text of WGSL function `name` in `source`, from its `fn` to its closing brace. */
+function wgslFunction(source: string, name: string): string {
+  const start = source.indexOf(`fn ${name}(`);
+  const end = source.indexOf("\n}\n", start);
+  if (start === -1 || end === -1) {
+    throw new Error(`the source has no function ${name}`);
+  }
+  return source.slice(start, end + 2);
+}
+
+/** Vertices along a patch's side. */
+const SIDE = 65;
+
+/**
+ * A maturity layer's codes for the twin's tests: each vertex's code at n and at n − 1 from a
+ * pattern of their own, spread over unorm16's range.
+ */
+const CODES = Uint16Array.from({ length: 2 * SIDE * SIDE }, (_, n) => {
+  const v = Math.floor(n / 2);
+  const x = v % SIDE;
+  const y = Math.floor(v / SIDE);
+  return n % 2 === 0 ? (x * 997 + y * 6_151) % 65_536 : (x * 3_001 + y * 211 + 17) % 65_536;
+});
+
+/**
+ * A patch's maturity nodes as the module lays them out, each node's B, V and R: slot k's level ℓ's
+ * node j at `3 (K (2k + ℓ) + j)`, rising with j, and distinct by band, slot and level.
+ */
+const MODULE_NODES = Float32Array.from({ length: CLASS_NODES_BYTES / 4 }, (_, n) => {
+  const band = n % 3;
+  const node = Math.floor(n / 3) % MATURITY_NODES;
+  const level = Math.floor(n / (3 * MATURITY_NODES)) % 2;
+  const slot = Math.floor(n / (6 * MATURITY_NODES));
+  return 0.05 + 0.01 * node + 0.002 * band + 0.1 * slot + 0.03 * level;
+});
+
+/** Slots 0 and 2 named, a limb-darkening slot 2; slot 1 empty. */
+const MATURITY_PHOTOMETRY = photometryOf([
+  [0.1, 0.12, 0.14, 1, 1],
+  [0, 0, 0, 0, 0],
+  [0.8, 0.85, 0.9, 2, 0.6],
+]);
+
+/** Vertex (x, y)'s albedo at `level` (0 n, 1 n − 1) over packed nodes, its own code's. */
+function vertexAlbedo(
+  packed: Float32Array,
+  slot: number,
+  level: 0 | 1,
+  x: number,
+  y: number,
+): [number, number, number] {
+  const code = CODES[2 * (SIDE * y + x) + level] ?? Number.NaN;
+  const first = 3 * MATURITY_NODES * (2 * slot + level);
+  return maturityNodeAlbedo(packed, first, maturitySegment(maturityCodeRatio(code)));
+}
+
+/** The largest difference between two colours' channels. */
+function largestDifference(a: ReadonlyArray<number>, b: ReadonlyArray<number>): number {
+  return Math.max(...a.map((value, c) => Math.abs(value - (b[c] ?? Number.NaN))));
+}
+
+/** A phase table's rows of their own, row 0 a Lambert law. */
+function freshRows(): TerrainPhaseRows {
+  return new TerrainPhaseRows(classRowLaw(3, 0));
+}
+
+/** Each slot's "drawn from its nodes" flag in packed class laws, word 5 of its 8. */
+function nodeFlags(laws: Float32Array): number[] {
+  return Array.from({ length: TERRAIN_CLASSES }, (_, k) => laws[8 * k + 5] ?? Number.NaN);
+}
+
+/** The calls of WGSL function `name` in `source`, its definition aside. */
+function wgslCalls(source: string, name: string): number {
+  return source.split(`${name}(`).length - 2;
+}
+
+describe("a class's albedo drawn from its maturity nodes (R10.T1.c's client half)", () => {
+  const cOverA = 0.9;
+  const packed = packClassNodes(MODULE_NODES, MATURITY_PHOTOMETRY, cOverA);
+
+  it("carries the maturity layer's words after the laws: a word of codes a vertex, then the nodes", () => {
+    expect([CLASS_MATURITY_BYTES, CLASS_NODES_BYTES]).toEqual([
+      SIDE * SIDE * 4,
+      8 * 2 * MATURITY_NODES * 3 * 4,
+    ]);
+    expect(CLASS_WEIGHTS_BYTES + CLASS_LAWS_BYTES + CLASS_MATURITY_BYTES + CLASS_NODES_BYTES).toBe(
+      CLASS_LAYERS_BYTES,
+    );
+    expect(terrainLitWgsl).toContain(
+      `const CLASS_MATURITY_WORD : u32 = ${String((CLASS_WEIGHTS_BYTES + CLASS_LAWS_BYTES) / 4)}u;`,
+    );
+    expect(terrainLitWgsl).toContain(
+      `const CLASS_NODE_WORD : u32 = ${String(
+        (CLASS_WEIGHTS_BYTES + CLASS_LAWS_BYTES + CLASS_MATURITY_BYTES) / 4,
+      )}u;`,
+    );
+    for (const read of [
+      // Both codes of a vertex from its word, n's in the low half (`unpack2x16unorm`'s x).
+      "unpack2x16unorm(class_layers[slot * CLASS_LAYER_WORDS + CLASS_MATURITY_WORD + y * VERTICES_PER_SIDE + x])",
+      "bitcast<f32>(class_layers[slot * CLASS_LAYER_WORDS + CLASS_LAW_WORD + 8u * k + 5u]) > 0.5",
+      "slot * CLASS_LAYER_WORDS + CLASS_NODE_WORD + 3u * (MATURITY_NODES * (2u * k + level) + j)",
+    ]) {
+      expect(terrainLitWgsl).toContain(read);
+    }
+  });
+
+  it("composes the nodes' library before terrainLit.wgsl in every terrain module", () => {
+    const specs = [
+      ...TERRAIN_LIT_MATERIALS,
+      ...TERRAIN_DEPTH_MATERIALS,
+      ...TERRAIN_SHADOW_MATERIALS,
+    ];
+    const misplaced = specs.filter(({ vertexWgsl }) => {
+      const library = vertexWgsl.indexOf(maturityNodesWgsl);
+      return !(library >= 0 && library < vertexWgsl.indexOf(terrainLitWgsl));
+    });
+    expect(misplaced.map(({ name }) => name)).toEqual([]);
+  });
+
+  it("flags each named slot drawn from its nodes in word 5 of its law, and packs as before without a layer", () => {
+    const without = packClassLaws(MATURITY_PHOTOMETRY, freshRows(), cOverA);
+    const flagged = packClassLaws(MATURITY_PHOTOMETRY, freshRows(), cOverA, true);
+    expect([nodeFlags(without), nodeFlags(flagged)]).toEqual([
+      [0, 0, 0, 0, 0, 0, 0, 0],
+      [1, 0, 1, 0, 0, 0, 0, 0],
+    ]);
+    const unflagged = flagged.slice();
+    for (let k = 0; k < TERRAIN_CLASSES; k += 1) {
+      unflagged[8 * k + 5] = 0;
+    }
+    expect(unflagged).toEqual(without);
+    expect(packClassLaws(MATURITY_PHOTOMETRY, freshRows(), cOverA, false)).toEqual(without);
+  });
+
+  it("packs the nodes as r, g, b, each scaled for the figure as its law's A is, zeros for a slot with none", () => {
+    expect(packed).toHaveLength(CLASS_NODES_BYTES / 4);
+    const slotValues = 6 * MATURITY_NODES;
+    const factors = [oblateAlbedoScale(1, cOverA), 0, oblateAlbedoScale(Math.fround(0.6), cOverA)];
+    expect(factors[2]).not.toBe(1);
+    for (let k = 0; k < TERRAIN_CLASSES; k += 1) {
+      const factor = factors[k] ?? 0;
+      const expected = Array.from({ length: slotValues }, (_, n) => {
+        const node = slotValues * k + n - (n % 3);
+        return Math.fround((MODULE_NODES[node + 2 - (n % 3)] ?? Number.NaN) * factor);
+      });
+      expect([...packed.subarray(slotValues * k, slotValues * (k + 1))]).toEqual(expected);
+    }
+    expect(() => packClassNodes(new Float32Array(10), MATURITY_PHOTOMETRY, cOverA)).toThrow(
+      RangeError,
+    );
+  });
+
+  it("packs nodes that repeat the photometry's albedo as its law's packed A, to the bit", () => {
+    const repeating = Float32Array.from({ length: CLASS_NODES_BYTES / 4 }, (_, n) => {
+      const slot = Math.floor(n / (6 * MATURITY_NODES));
+      return MATURITY_PHOTOMETRY[5 * slot + (n % 3)] ?? Number.NaN;
+    });
+    const nodes = packClassNodes(repeating, MATURITY_PHOTOMETRY, cOverA);
+    const laws = packClassLaws(
+      MATURITY_PHOTOMETRY,
+      new TerrainPhaseRows(classRowLaw(3, 0)),
+      cOverA,
+    );
+    for (const k of [0, 2]) {
+      const a = [...laws.subarray(8 * k, 8 * k + 3)];
+      for (let at = 6 * MATURITY_NODES * k; at < 6 * MATURITY_NODES * (k + 1); at += 3) {
+        expect([...nodes.subarray(at, at + 3)]).toEqual(a);
+      }
+    }
+  });
+
+  it("draws a vertex's own albedo at its code at n where the morph is 0", () => {
+    for (const [x, y] of [
+      [0, 0],
+      [3, 4],
+      [63, 17],
+      [64, 64],
+    ] as const) {
+      for (const slot of [0, 2]) {
+        expect(texelClassAlbedo(CODES, packed, slot, x / 64, y / 64, 0)).toEqual(
+          vertexAlbedo(packed, slot, 0, x, y),
+        );
+      }
+    }
+    // Below 0 it is the patch's own field as well.
+    expect(texelClassAlbedo(CODES, packed, 0, 0.5, 0.5, -0.25)).toEqual(
+      vertexAlbedo(packed, 0, 0, 32, 32),
+    );
+  });
+
+  it("draws the parent's field at a morph of 1, bilinear on its even vertices, at every child vertex", () => {
+    const parentAt = (x: number, y: number): [number, number, number] => {
+      // The even vertices about (x, y), each corner its own code at n − 1, and their mean.
+      const xs = x % 2 === 0 ? [x] : [x - 1, x + 1];
+      const ys = y % 2 === 0 ? [y] : [y - 1, y + 1];
+      const corners = ys.flatMap((cy) => xs.map((cx) => vertexAlbedo(packed, 2, 1, cx, cy)));
+      const mean = (c: 0 | 1 | 2): number =>
+        corners.reduce((sum, corner) => sum + corner[c], 0) / corners.length;
+      return [mean(0), mean(1), mean(2)];
+    };
+    let worst = 0;
+    for (let y = 0; y < SIDE; y += 3) {
+      for (let x = 0; x < SIDE; x += 1) {
+        const drawn = texelClassAlbedo(CODES, packed, 2, x / 64, y / 64, 1);
+        worst = Math.max(worst, largestDifference(drawn, parentAt(x, y)));
+      }
+    }
+    expect(worst).toBeLessThan(1e-15);
+    // Past 1 it is the parent's field as well.
+    expect(texelClassAlbedo(CODES, packed, 2, 0.3, 0.7, 1.5)).toEqual(
+      texelClassAlbedo(CODES, packed, 2, 0.3, 0.7, 1),
+    );
+  });
+
+  it("mixes the two levels' fields as (1 − μ) T_n + μ T_(n−1) between the ends", () => {
+    const [u, v] = [0.371, 0.629];
+    const own = texelClassAlbedo(CODES, packed, 0, u, v, 0);
+    const parent = texelClassAlbedo(CODES, packed, 0, u, v, 1);
+    for (const morph of [0.25, 0.5, 0.9]) {
+      expect(texelClassAlbedo(CODES, packed, 0, u, v, morph)).toEqual(
+        own.map((value, c) => (1 - morph) * value + morph * (parent[c] ?? Number.NaN)),
+      );
+    }
+  });
+
+  it("draws uniform codes as the nodes there, wherever the texel and whatever the morph", () => {
+    const code = 20_000;
+    const uniform = new Uint16Array(2 * SIDE * SIDE).fill(code);
+    const segment = maturitySegment(maturityCodeRatio(code));
+    const levelA = (level: 0 | 1): [number, number, number] =>
+      maturityNodeAlbedo(packed, 3 * MATURITY_NODES * (2 * 2 + level), segment);
+    for (const [u, v] of [
+      [0, 0],
+      [0.123, 0.987],
+      [1, 0.5],
+    ] as const) {
+      expect(
+        largestDifference(texelClassAlbedo(uniform, packed, 2, u, v, 0), levelA(0)),
+      ).toBeLessThan(1e-15);
+      expect(
+        largestDifference(texelClassAlbedo(uniform, packed, 2, u, v, 1), levelA(1)),
+      ).toBeLessThan(1e-15);
+    }
+  });
+
+  it("refuses codes too short for the texel's quad", () => {
+    expect(() => texelClassAlbedo(new Uint16Array(8), packed, 0, 0.5, 0.5, 0)).toThrow(RangeError);
+  });
+
+  it("replaces each named slot's A alone where a texel has a maturity layer, as the twin draws it", () => {
+    const elsewhere: PhotometricLaw = { ...classRowLaw(1, 1), a: [0.11, 0.12, 0.13] };
+    const maturity = { codes: CODES, nodes: MODULE_NODES };
+    const at = { maturity, u: 0.4, v: 0.6, morph: 0.35 };
+    const plain = terrainTexelLaws(MATURITY_PHOTOMETRY, elsewhere, cOverA);
+    const drawn = terrainTexelLaws(MATURITY_PHOTOMETRY, elsewhere, cOverA, at);
+    expect([drawn[0], drawn[2], drawn.slice(4)]).toEqual([plain[0], null, plain.slice(4)]);
+    for (const slot of [0, 2]) {
+      expect(drawn[slot + 1]).toEqual({
+        a: texelClassAlbedo(CODES, packed, slot, at.u, at.v, at.morph),
+        table: plain[slot + 1]?.table,
+      });
+    }
+    // Without a layer each slot's A is its law's, scaled for the figure.
+    const law = classPhotometryOf(MATURITY_PHOTOMETRY, 2);
+    expect(plain[3]?.a).toEqual(law === null ? null : classTexelLaw(law, cOverA).a);
+  });
+});
+
+describe("the lit terrain's term of a class drawn from its maturity nodes (R10.T1.c's client half)", () => {
+  it("draws μ ≤ 0 from the patch's quad alone and μ ≥ 1 from the parent's, mixing between", () => {
+    const albedo = wgslFunction(terrainLitWgsl, "terrain_class_albedo");
+    for (const line of [
+      "if (!(morph >= 1.0)) {\n    own = maturity_quad_albedo(slot, k, 0u, maturity.own);",
+      "if (morph > 0.0) {\n    parent = maturity_quad_albedo(slot, k, 1u, maturity.parent);",
+      "if (!(morph > 0.0)) {\n    return own;\n  }",
+      "if (morph >= 1.0) {\n    return parent;\n  }",
+      "return (1.0 - morph) * own + morph * parent;",
+    ]) {
+      expect(albedo).toContain(line);
+    }
+  });
+
+  it("takes the patch's quad as the weights' and the parent's on the even vertices, as the twin does", () => {
+    const quads = wgslFunction(terrainLitWgsl, "texel_maturity");
+    for (const line of [
+      "let base = min(vec2u(floor(max(s, vec2f(0.0)))), vec2u(63u));",
+      "let f = clamp(s - vec2f(base), vec2f(0.0), vec2f(1.0));",
+      "out.own = maturity_quad(slot, base, 1u, 0u, f);",
+      "let base = min(2u * vec2u(floor(max(s, vec2f(0.0)) / 2.0)), vec2u(62u));",
+      "let f = clamp((s - vec2f(base)) / 2.0, vec2f(0.0), vec2f(1.0));",
+      "out.parent = maturity_quad(slot, base, 2u, 1u, f);",
+    ]) {
+      expect(quads).toContain(line);
+    }
+    expect(wgslFunction(terrainLitWgsl, "maturity_quad_albedo")).toContain(
+      "return mix(mix(corners[0], corners[1], quad.at.x), mix(corners[2], corners[3], quad.at.x), quad.at.y);",
+    );
+  });
+
+  it("skips a slot of no share before its flag or nodes are read, and gathers the texel's segments once", () => {
+    const albedos = wgslFunction(terrainLitWgsl, "terrain_albedos");
+    const skip = albedos.indexOf("if (!(shares[k + 1u] > 0.0)) {\n      continue;\n    }");
+    expect(skip).toBeGreaterThan(0);
+    expect(skip).toBeLessThan(albedos.indexOf("class_drawn_from_nodes(in.slot, k)"));
+    expect(albedos).toContain("albedos[0] = terrain_row(1u).xyz;");
+    expect(albedos).toContain("albedos[k + 1u] = class_law(in.slot, k).law.a;");
+    // One call each in the source, so that a compiler inlining every call takes one copy.
+    expect([
+      wgslCalls(terrainLitWgsl, "texel_maturity"),
+      wgslCalls(terrainLitWgsl, "terrain_class_albedo"),
+      wgslCalls(terrainLitWgsl, "maturity_quad"),
+      wgslCalls(terrainLitWgsl, "maturity_quad_albedo"),
+    ]).toEqual([1, 1, 2, 2]);
+  });
+
+  it("weighs each law's A from the texel's albedos in the reflectance and the sky light's mean", () => {
+    expect(wgslFunction(terrainLitWgsl, "terrain_reflectance")).toContain(
+      "reflectance = reflectance + share * albedos[m] * row.rgb * disc_term;",
+    );
+    const shade = wgslFunction(terrainLitWgsl, "shade_terrain");
+    expect(shade).toContain("let albedos = terrain_albedos(in, shares);");
+    expect(shade).toContain("mean_a = mean_a + shares[m] * albedos[m];");
+    expect(shade).not.toContain("terrain_law(in.slot, m).a");
   });
 });
 
