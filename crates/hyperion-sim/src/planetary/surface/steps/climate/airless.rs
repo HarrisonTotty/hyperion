@@ -17,14 +17,17 @@
 //! times its share of skin depths and a pair's conductance Γ √(π ÷ P) over their spacing, so the
 //! column needs no density or heat capacity of its own (research-c §2.2).
 //!
-//! Γ is plan 14's ground's, P14.T49.j's law at the body's crust's lid at its mean surface
-//! temperature, with P14.T24.a's constants ([`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`],
+//! Γ is plan 14's ground's, the record's conditions' own, which the inputs carry
+//! ([`CoarseInputs::ground_inertia_j_per_m2_k_sqrt_s`]): P14.T49.j's law at the body's crust's
+//! lid at its equilibrium temperature, with P14.T24.a's constants
+//! ([`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`],
 //! [`ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`]) as its fallback alone (P14.T54.a;
 //! [`regolith_inertia_j_per_m2_k_sqrt_s`]; under a thin air a vacuum lower bound, with no pore
-//! gas), ε plan 14's
-//! regolith's ([`REGOLITH_EMISSIVITY`]), so that the
-//! climate's nights are plan 14's, and A plan 14's Bond albedo of the body's surface state on its
-//! material ([`SurfaceState::albedo`]), the one its mean temperature is computed with. The nodes
+//! gas), so that this model and the record read one Γ (decision-p14-t54a-passes §3.5); inputs
+//! built by hand take the same law at their own lid at their equilibrium temperature. ε is plan
+//! 14's regolith's ([`REGOLITH_EMISSIVITY`]), so that the climate's nights are plan 14's, and A
+//! plan 14's Bond albedo of the body's surface state on its material ([`SurfaceState::albedo`]),
+//! the one its mean temperature is computed with. The nodes
 //! lie on Hayne et al.'s geometric grid (eqs. A32–A33), the first spacing a fifth of the skin depth
 //! of the shorter of the solar day and the year ([`FIRST_SPACING_SKIN_DEPTHS`]), each next 4/3 of
 //! the last ([`SPACING_GROWTH`]), down to six skin depths of the solar day or two of the year,
@@ -117,6 +120,7 @@ use super::sun::{Daylight, HostTrack, orbit_at, reduced};
 use crate::math;
 use crate::orbit::Eccentricity;
 use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
+use crate::planetary::derive::irradiation;
 use crate::planetary::hooks::crust::CrustLithology;
 use crate::planetary::hooks::surface::{
     COSMIC_BACKGROUND_TEMPERATURE, GroundInertia, REGOLITH_EMISSIVITY, night_floor,
@@ -128,7 +132,7 @@ use crate::planetary::hooks::surface::{
 use crate::planetary::surface::inputs::{CoarseInputs, CrustInputs, Forcing, LidCrust};
 use crate::substance::by_key;
 use crate::units::consts::STEFAN_BOLTZMANN;
-use crate::units::{Kelvin, Pascals, Radians};
+use crate::units::{EarthFluxes, Kelvin, Pascals, Radians};
 
 /// The steps of a solar day: 48 (`Adopted`; research-c §2.2, its `runs/e2b_steps.py`). With the
 /// surface solved exactly each step, the lunar equator's noon, predawn and mean at 48 steps lie
@@ -239,21 +243,28 @@ pub(super) struct Regolith {
 }
 
 impl Regolith {
-    /// The regolith of the body of `inputs`: plan 14's emissivity, its inertia at its crust's lid
-    /// ([`regolith_inertia_j_per_m2_k_sqrt_s`]), its Bond albedo for the surface state on its
-    /// material, and the
-    /// heat flow, a heat flow that is not positive taken as none, as [`night_floor`] takes it.
+    /// The regolith of the body of `inputs`: plan 14's emissivity; the inputs' ground inertia,
+    /// the record's ([`CoarseInputs::ground_inertia_j_per_m2_k_sqrt_s`]), or for inputs built by
+    /// hand the law at their crust's lid at their equilibrium temperature
+    /// ([`regolith_inertia_j_per_m2_k_sqrt_s`], [`equilibrium_temperature`]); its Bond albedo for
+    /// the surface state on its material; and the heat flow, a heat flow that is not positive
+    /// taken as none, as [`night_floor`] takes it.
     #[must_use]
     pub(super) fn of(inputs: &CoarseInputs) -> Self {
         let material = inputs.surface_material();
         let heat = inputs.heat_flow().value();
+        let inertia = inputs
+            .ground_inertia_j_per_m2_k_sqrt_s()
+            .unwrap_or_else(|| {
+                regolith_inertia_j_per_m2_k_sqrt_s(
+                    lid_lithology(inputs.crust()),
+                    material,
+                    equilibrium_temperature(inputs),
+                )
+            });
         Self {
             emissivity: REGOLITH_EMISSIVITY,
-            inertia_j_per_m2_k_sqrt_s: regolith_inertia_j_per_m2_k_sqrt_s(
-                lid_lithology(inputs.crust()),
-                material,
-                inputs.mean_surface_temperature(),
-            ),
+            inertia_j_per_m2_k_sqrt_s: inertia,
             albedo: albedo_of(inputs.surface_state(), material),
             heat_flow_w_m2: if heat > 0.0 { heat } else { 0.0 },
         }
@@ -295,15 +306,16 @@ impl Regolith {
 }
 
 /// The thermal inertia Γ of a regolith whose crust's lid is `lid` on a bulk of `material`, at the
-/// body's mean surface temperature `mean_surface_temperature`, J m⁻² K⁻¹ s^−½ (P14.T54.a;
-/// decision-pre-23-review item 7): plan 14's ground's, P14.T49.j's law at the lid's row with
-/// P14.T24.a's constants as the fallback alone, the one the record's conditions read
-/// (`GroundInertia`), so that this model's nights are plan 14's. On an airless body the record's
-/// mean surface temperature is its equilibrium temperature (decision-p14-t54a-passes §3.5, which
-/// the sample's tests hold to the bit), at which plan 14 takes its ground's. Under a thin air the
-/// law is a vacuum lower bound, with no pore gas (P14.T49.l's), and this model reads it at its own
-/// mean surface temperature where the record's conditions read it at the equilibrium temperature:
-/// P14.T54.a's wire subtask carries the record's Γ into these inputs, so that the two read one
+/// temperature `temperature`, J m⁻² K⁻¹ s^−½ (P14.T54.a; decision-pre-23-review item 7): plan
+/// 14's ground's rule, P14.T49.j's law at the lid's row with P14.T24.a's constants as the fallback
+/// alone, the one the record's conditions read at the body's equilibrium temperature
+/// (`GroundInertia`). Under a thin air the law is a vacuum lower bound, with no pore gas
+/// (P14.T49.l's).
+///
+/// [`Regolith::of`] reads it for inputs built by hand alone, at their equilibrium temperature
+/// ([`equilibrium_temperature`]), as the record takes its ground's: inputs read from the record
+/// carry the record's own Γ ([`CoarseInputs::ground_inertia_j_per_m2_k_sqrt_s`]), so that this
+/// model's nights and the record's read one on every body, airless or under a thin air
 /// (decision-p14-t54a-passes §3.5; Batch D's review, D3-1).
 ///
 /// A lid outside T51.c's closed set (a test world's key, `mars_dust`, say) is read as no lid
@@ -314,10 +326,22 @@ impl Regolith {
 pub(crate) fn regolith_inertia_j_per_m2_k_sqrt_s(
     lid: Option<CrustLithology>,
     material: SurfaceMaterial,
-    mean_surface_temperature: Kelvin,
+    temperature: Kelvin,
 ) -> f64 {
-    GroundInertia::at_equilibrium(lid, material, mean_surface_temperature)
-        .inertia_j_per_m2_k_sqrt_s()
+    GroundInertia::at_equilibrium(lid, material, temperature).inertia_j_per_m2_k_sqrt_s()
+}
+
+/// The equilibrium temperature of the body of `inputs`, K: plan 14's
+/// `derive::irradiation::equilibrium_temperature`, ((1 − A) S ÷ 4σ)^¼, under its hosts' light S
+/// at the Bond albedo A of its surface state on its material ([`SurfaceState::albedo`], the one
+/// [`Regolith::of`] takes). An airless reference world's mean surface temperature is this, to the
+/// bit (`reference`'s `airless_rock_temperature`).
+#[must_use]
+fn equilibrium_temperature(inputs: &CoarseInputs) -> Kelvin {
+    irradiation::equilibrium_temperature(
+        EarthFluxes::from(inputs.host_flux()),
+        inputs.surface_state().albedo(inputs.surface_material()),
+    )
 }
 
 /// The lithology of the crust or bulk material `crust`'s lid names ([`CrustInputs::lid`]):
@@ -2223,6 +2247,9 @@ mod tests {
 
         let moon = reference::moon_like();
         let mean = moon.mean_surface_temperature();
+        // Built by hand, it carries no record's Γ, and its mean is its equilibrium temperature.
+        assert_eq!(moon.ground_inertia_j_per_m2_k_sqrt_s(), None);
+        assert_same_bits(mean.value(), equilibrium_temperature(&moon).value());
         assert_eq!(moon.crust().lid, LidCrust::Primary);
         assert_eq!(
             lid_lithology(moon.crust()),
@@ -2296,6 +2323,121 @@ mod tests {
             );
         }
         assert_eq!(CrustLithology::of_key("mars_dust"), None);
+    }
+
+    /// P14.T54.a (decision-p14-t54a-passes §3.5): inputs built by hand take P14.T49.j's law at
+    /// their lid at their equilibrium temperature, as the record takes its ground's, and inputs
+    /// that carry a record's Γ take it. The thin-aired reference Mars's `T_eq` lies below its
+    /// mean.
+    #[test]
+    fn hand_built_inputs_take_the_law_at_their_equilibrium_temperature() {
+        use hyperion_testkit::float::assert_same_bits;
+
+        use crate::substance::thermal::reference_regolith_thermal_inertia;
+
+        let mars = reference::mars_like();
+        let t_eq = equilibrium_temperature(&mars);
+        let law =
+            reference_regolith_thermal_inertia(CrustLithology::IronRichBasalt.substance(), t_eq)
+                .expect("the iron-rich basalt takes the law at Mars's equilibrium temperature")
+                .inertia_j_per_m2_k_sqrt_s();
+        assert_same_bits(Regolith::of(&mars).inertia_j_per_m2_k_sqrt_s, law);
+        let at_mean = regolith_inertia_j_per_m2_k_sqrt_s(
+            Some(CrustLithology::IronRichBasalt),
+            SurfaceMaterial::Rock,
+            mars.mean_surface_temperature(),
+        );
+        eprintln!(
+            "the reference Mars's lid's Γ {law:.3} at its T_eq {:.2} K, {at_mean:.3} at its mean \
+             {:.2} K",
+            t_eq.value(),
+            mars.mean_surface_temperature().value()
+        );
+        // Inputs that carry a record's Γ take it, whatever their lid and temperature.
+        let carried = reference::builder_of(&mars)
+            .ground_inertia(123.0)
+            .build()
+            .unwrap();
+        assert_same_bits(Regolith::of(&carried).inertia_j_per_m2_k_sqrt_s, 123.0);
+    }
+
+    /// One Γ (decision-p14-t54a-passes §3.5; Batch D's review, D3-1): on every body of the
+    /// sample whose record names R09's radiative model, airless or under a thin air, bracketed
+    /// or not, the regolith of its inputs from `for_body` takes its record's ground inertia, to
+    /// the bit. A body `for_body` answers not modelled (no crust, an unlit record, an ice the
+    /// registry has no density of) reads no inputs, and is counted.
+    #[test]
+    fn the_radiative_model_reads_its_record_s_inertia_on_every_body() {
+        use hyperion_surface::field::{ClimateModelKind, PaletteRole};
+        use hyperion_testkit::float::assert_same_bits;
+
+        use crate::planetary::record::{Modelled, RecordSection, Section};
+        use crate::planetary::surface::palette::{self, ResolveBodyPaletteError};
+        use crate::planetary::surface::{
+            CoarseInputs, RECORD_TIME, ReadCoarseInputsError, SurfaceInputsError,
+        };
+        use crate::planetary::system::tests::whole;
+        use crate::substance::ResolvePaletteEntryError;
+
+        let (mut airless, mut thin, mut unread) = (0_u32, 0_u32, 0_u32);
+        for (ctx, system) in whole().iter().take(60) {
+            let snapshot = system.snapshot_at(ctx, RECORD_TIME);
+            let records = snapshot.bodies();
+            for record in records {
+                let Section::Ok(surface) = record.surface() else {
+                    continue;
+                };
+                if surface.climate_regime().model() != ClimateModelKind::RadiativeEquilibrium {
+                    continue;
+                }
+                let planet = CoarseInputs::planet_of(record)
+                    .and_then(|index| records.iter().find(|r| r.index() == index));
+                let inputs = match CoarseInputs::for_body(record, planet, ctx) {
+                    Ok(inputs) => inputs,
+                    Err(error) => {
+                        assert_eq!(
+                            error,
+                            ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(
+                                RecordSection::Surface
+                            ))
+                        );
+                        // The recorded gaps: no crust, an unlit record's 0 K, or an ice whose
+                        // solid density the registry has not read.
+                        let mean = surface.conditions().mean_surface_temperature().value();
+                        let gap = match surface.crust() {
+                            Modelled::NotModelled => true,
+                            Modelled::Ok(_) if !(mean.is_finite() && mean > 0.0) => true,
+                            Modelled::Ok(crust) => matches!(
+                                palette::resolve(surface, crust),
+                                Err(ResolveBodyPaletteError::Solid {
+                                    role: PaletteRole::Ice,
+                                    cause: ResolvePaletteEntryError::DensityNotModelled,
+                                    ..
+                                })
+                            ),
+                        };
+                        assert!(gap, "{:?}: {error:?}", record.index());
+                        unread += 1;
+                        continue;
+                    }
+                };
+                let record_gamma = surface.conditions().ground().inertia_j_per_m2_k_sqrt_s();
+                assert_same_bits(
+                    Regolith::of(&inputs).inertia_j_per_m2_k_sqrt_s,
+                    record_gamma,
+                );
+                if surface.state() == SurfaceState::Airless {
+                    airless += 1;
+                } else {
+                    thin += 1;
+                }
+            }
+        }
+        eprintln!(
+            "one Γ: {airless} airless and {thin} under a thin air read their record's; {unread} \
+             answered not modelled read no inputs"
+        );
+        assert!(airless > 0 && thin > 0, "{airless} airless, {thin} thin");
     }
 
     /// One step from a profile that varies with depth conserves the column's energy: the change

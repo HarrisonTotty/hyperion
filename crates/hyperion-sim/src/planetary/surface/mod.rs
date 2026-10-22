@@ -27,8 +27,9 @@
 //!
 //! # What is built
 //!
-//! R09.T10 built the frame: the inputs and their builder, [`CoarseInputs::for_body`] (which answers
-//! [`SurfaceInputsError::NotModelled`] until plan 14's surface section carries values), the cell
+//! R09.T10 built the frame: the inputs and their builder, [`CoarseInputs::for_body`] (which
+//! answered [`SurfaceInputsError::NotModelled`] until P14.T54.a put the crust and condensates on
+//! the record, and read them with the palette's resolution from the registry), the cell
 //! graph, the quantiser, the six steps as no-ops and, behind the crate's `testing` feature,
 //! `reference`'s four reference worlds. R09.T10.b added the palette's sources: the inputs carry the
 //! body's palette, whose entries' values the server resolves from plan 14's registry, and the
@@ -99,10 +100,12 @@
 //! | 14 | the record | [`BodyRecord`](crate::planetary::record::BodyRecord)'s surface section's tag, [`RecordSection`](crate::planetary::record::RecordSection) |
 //! | 14 | the surface state and material | [`SurfaceState`](crate::planetary::derive::atmosphere::SurfaceState), [`SurfaceMaterial`](crate::planetary::derive::atmosphere::SurfaceMaterial) |
 //! | 14 | the surface section's members (P14.T48.e) and the bulk, figure, rotation and orbit sections | [`Surface`](crate::planetary::record::Surface)'s state, material, regime, [`SurfaceConditions`](crate::planetary::hooks::surface::SurfaceConditions) and [`GlobalFigures`](crate::planetary::hooks::figures::GlobalFigures); [`BulkProperties`](crate::planetary::record::BulkProperties), [`BodyFigure`](crate::planetary::derive::figure::BodyFigure), [`BodyFixedFrame`](crate::planetary::frames::BodyFixedFrame) with [`SeasonalSpin::of`](crate::planetary::hooks::surface::SeasonalSpin::of), [`BodyOrbit`](crate::planetary::record::BodyOrbit) and its drift |
-//! | 14 | the crust, the condensates and the palette's sources | builder arguments, and [`CoarseInputs::from_record`]'s, until P14.T54.a puts them on the record |
+//! | 14 | the crust, the condensates and the palette's sources | [`Surface`](crate::planetary::record::Surface)'s `crust` and `condensates` (P14.T54.a), and the registry's rows of the substances they name ([`resolve_palette_entry`](crate::substance::resolve_palette_entry), [`liquid_properties`](crate::substance::liquid_properties)), read by [`CoarseInputs::for_body`]; builder arguments, and [`CoarseInputs::from_record`]'s, for the tests' own |
+//! | 14 | the ground's thermal inertia | the record's [`SurfaceConditions`](crate::planetary::hooks::surface::SurfaceConditions)' ground (P14.T54.a), [`CoarseInputs::ground_inertia_j_per_m2_k_sqrt_s`] |
 
 pub mod grid;
 pub mod inputs;
+mod palette;
 pub mod quantise;
 #[cfg(any(test, feature = "testing"))]
 pub mod reference;

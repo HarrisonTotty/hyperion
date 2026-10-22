@@ -12,30 +12,30 @@
 //! its crust and condensates by substance and its palette: the substances its field names, each
 //! with the values the server resolves from plan 14's registry, its deposits among them.
 //!
-//! Plan 14's record does not carry all of these to the pass yet: `record::Surface`, the section
-//! they arrive in, carries the conditions and figures from P14.T48.e, and from P14.T54.a its
-//! batch's P14.T51.a condensates and T51.c crust, but their reading into these inputs, with the
-//! palette's sources, is P14.T54.a's wire subtask's. Until it lands
-//! [`CoarseInputs::for_body`] answers [`SurfaceInputsError::NotModelled`] (in
-//! [`ReadCoarseInputsError::Section`]) for every body that has a solid surface, once it has
-//! checked a moon's planet's record (R09.T10.f), and every test, the reference worlds among them,
-//! builds its inputs with [`CoarseInputsBuilder`], each value a plain argument (Design note 3,
-//! "Until an ask lands").
-//! [`CoarseInputs::from_record`] is the reading of the rest (R09.T10.e): every other value from
-//! the record's sections at [`RECORD_TIME`], a moon's seasons from its planet's record, with the
-//! crust, condensates and palette given as arguments, which P14.T54.a connects to the section's
-//! members and the palette's resolution, so that `for_body` answers with it from then.
-//! The types here are the pass's own
-//! vocabulary for those values, each named after the plan-14 task that will supply it; the
-//! reading of the record replaces the builder's arguments one for one when the section is
-//! inhabited, and wherever the pass computes a figure plan 14 also states, the result is
-//! constrained to plan 14's value.
+//! Plan 14's record carries all of these to the pass from P14.T54.a: `record::Surface`, the
+//! section they arrive in, carries the conditions and figures from P14.T48.e, and P14.T51.a's
+//! condensates and P14.T51.c's crust from P14.T54.a. [`CoarseInputs::for_body`] reads them, with
+//! the palette's resolution from the registry's rows of the substances they name (P14.T49.b–c,
+//! T49.h and T49.i; the `palette` module), and answers `Ok` for every generated body with a solid
+//! surface, once it has checked a moon's planet's record (R09.T10.f), but the recorded gaps,
+//! which it answers not modelled: a crust the record does not model, an unlit record's mean
+//! surface temperature of 0 K, and a substance whose entry the registry does not resolve (solid
+//! argon's density, which it has not read). [`CoarseInputs::from_record`] is the reading of the
+//! rest (R09.T10.e): every other value from the record's sections at [`RECORD_TIME`], a moon's
+//! seasons from its planet's record, with the crust, condensates and palette given as arguments,
+//! the record's own from `for_body`.
+//! The tests and the reference worlds build their inputs with [`CoarseInputsBuilder`], each value
+//! a plain argument (Design note 3, "Until an ask lands"). The server serves no generated body's
+//! field until its serve gate opens (P14.T54.a's `GENERATED_SURFACES_FROM`, expected at 24), so
+//! that R09's and R10's changes re-bless at the version in force until then.
+//! The types here are the pass's own vocabulary for those values, each named after the plan-14
+//! task that supplies it, and wherever the pass computes a figure plan 14 also states, the result
+//! is constrained to plan 14's value.
 //!
 //! Every substance is named by its registry key, [`SubstanceKey`] (decision-composition §1.1),
-//! the key the field's palette carries. The record will name substances by P14.T49.a's
-//! `SubstanceId`, which is not built; P14.T54.a, which reads the record here, turns each into its
-//! row's key, or moves these inputs onto `SubstanceId` with the palette's keys resolved from it
-//! (R09's Risks, "Deviations in T10, as built").
+//! the key the field's palette carries. The record names substances by P14.T49.a's
+//! [`SubstanceId`], and the reading turns each into its row's key (R09's Risks, "Deviations in
+//! T10, as built").
 
 use core::f64::consts::{FRAC_PI_2, TAU};
 use core::num::FpCategory;
@@ -47,16 +47,21 @@ use hyperion_surface::field::{BodyRef, ClimateModelKind, Crust, MaterialPalette,
 use hyperion_surface::spheroid::Spheroid;
 use hyperion_surface::substance_key::SubstanceKey;
 
+use super::palette;
 use crate::galaxy::consts::YEARS_PER_GIGAYEAR;
 use crate::id::BodyId;
 use crate::math;
 use crate::orbit::{BuildOrbitError, Eccentricity, KeplerElements, Orientation, seconds_between};
+use crate::planetary::chem::partition::{self, CondensateEntry};
 use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use crate::planetary::frames::BodyFixedFrame;
 use crate::planetary::hooks::cold_traps::trap_threshold;
+use crate::planetary::hooks::crust::CrustComposition;
 use crate::planetary::hooks::surface::{SeasonalSpin, SeasonsFrom};
 use crate::planetary::placement::OrbitHost;
-use crate::planetary::record::{BodyKind, BodyOrbit, BodyRecord, Modelled, RecordSection, Section};
+use crate::planetary::record::{
+    BodyKind, BodyOrbit, BodyRecord, Modelled, RecordSection, Section, Surface,
+};
 use crate::planetary::{BodyIndex, SystemContext};
 use crate::substance::{SubstanceId, by_key};
 use crate::time::UniverseTime;
@@ -356,6 +361,38 @@ pub struct Condensate {
     pub persistence: Persistence,
 }
 
+impl From<partition::CondensatePhase> for CondensatePhase {
+    /// Plan 14's phase (P14.T51.a) in the pass's vocabulary.
+    fn from(phase: partition::CondensatePhase) -> Self {
+        match phase {
+            partition::CondensatePhase::Solid => Self::Solid,
+            partition::CondensatePhase::Liquid => Self::Liquid,
+            partition::CondensatePhase::Supercritical => Self::Supercritical,
+        }
+    }
+}
+
+impl From<&CondensateEntry> for Condensate {
+    /// Plan 14's published condensate (P14.T51.a) in the pass's vocabulary, as
+    /// [`CoarseInputs::for_body`] reads the record from P14.T54.a: its substance by its row's key,
+    /// its phase, its reservoir and its area to the bit, and seasonal where the record says so,
+    /// perennial otherwise. Its cold-trapped part is not read: the record carries none until
+    /// P14.T54.b ([`CoarseInputs::cold_traps`]).
+    fn from(entry: &CondensateEntry) -> Self {
+        Self {
+            substance: entry.substance().substance().key(),
+            phase: CondensatePhase::from(entry.phase()),
+            reservoir: entry.reservoir(),
+            area_fraction: entry.area_fraction(),
+            persistence: if entry.is_seasonal() {
+                Persistence::Seasonal
+            } else {
+                Persistence::Perennial
+            },
+        }
+    }
+}
+
 /// What a body's cold traps read of its star and its ground beyond the other inputs (P14.T51.f;
 /// R09.T13.f): the star's angular radius at periapsis and the bare ground's Bond albedo. The
 /// greatest declination, the flux at periapsis and the heat flow come from
@@ -390,8 +427,8 @@ const GRAVITY_TOLERANCE: f64 = 1e-12;
 /// Everything the coarse pass reads of a body (Design note 3), validated.
 ///
 /// Built by [`CoarseInputs::builder`] (every test, and the reference worlds of `reference`, behind
-/// the crate's `testing` feature) or by [`CoarseInputs::for_body`] from plan 14's record, once its
-/// surface section carries values. [`coarse_pass`](super::coarse_pass)'s example builds one.
+/// the crate's `testing` feature) or by [`CoarseInputs::for_body`] from plan 14's record.
+/// [`coarse_pass`](super::coarse_pass)'s example builds one.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoarseInputs {
     body: BodyRef,
@@ -427,6 +464,7 @@ pub struct CoarseInputs {
     crust_palette: [Option<u8>; 4],
     lid_entry: u8,
     main_liquid: Option<u8>,
+    ground_inertia_j_per_m2_k_sqrt_s: Option<f64>,
 }
 
 /// Why a record's sections cannot give a body's inputs: the surface section's tag, or a section
@@ -589,8 +627,8 @@ impl CoarseInputs {
     /// record, whose orbit sets the moon's seasons and whose bulk and photometry its planetshine
     /// and eclipses will read (R09.T13). Every other body takes `None`. `ctx` is not read, the
     /// hosts' light coming from the record's conditions; a companion star's own cycle will read
-    /// it (R09.T13), and it is kept so that this signature, frozen from the serve gate's bump
-    /// (decision-bump-plan-after-22 §1.4), need not grow.
+    /// it (R09.T13), and it is kept so that this signature, frozen at generator version 23
+    /// (decision-bump-plan-after-22, "Contracts that freeze at 23"), need not grow.
     ///
     /// The surface section is decided from its tag alone, never from the body's class: a body
     /// whose surface is [`Section::NotApplicable`] has no solid surface, whatever its class
@@ -598,16 +636,24 @@ impl CoarseInputs {
     /// (P14.T48.e) carries the surface state and material, the conditions with their climate
     /// regime, which reads into the pass's vocabulary by
     /// `From<&hooks::surface::ClimateRegime>` (each substance by its registry row's key), and
-    /// the global figures. The inputs come from it with the record's `bulk` (gravity), `figure`
-    /// (the spheroid), `rotation` (the spin) and `orbit` sections, a moon's planet's `orbit`,
-    /// and the hosts' light, at [`RECORD_TIME`], as [`from_record`](Self::from_record) reads them
-    /// (R09.T10.e), and the palette's entries from the registry's rows of the substances the
-    /// section names (P14.T49.b–c). The section's crust (P14.T51.c) is on the record from
-    /// P14.T54.a's C3, and its condensates (P14.T51.a) from its B4; their reading into the pass's
-    /// inputs, with the palette's resolution, is P14.T54.a's wire subtask's, which settles the
-    /// record's time (decision-bump-plan-after-22 §1.2 and §1.5). Until it lands an `Ok` section
-    /// answers [`SurfaceInputsError::NotModelled`] once the planet is checked, its crust modelled
-    /// or not.
+    /// the global figures, and from P14.T54.a its condensates (P14.T51.a) and its crust
+    /// (P14.T51.c). The inputs come from it with the record's `bulk` (gravity), `figure` (the
+    /// spheroid), `rotation` (the spin) and `orbit` sections, a moon's planet's `orbit`, the hosts'
+    /// light and the ground's thermal inertia, at [`RECORD_TIME`], as
+    /// [`from_record`](Self::from_record) reads them (R09.T10.e), with:
+    ///
+    /// - **the crust**, the section's to the bit, each crust and the bulk material by its row's
+    ///   key, its lid, provinces and melt area;
+    /// - **the condensates**, the section's every entry, by `From<&CondensateEntry>`;
+    /// - **the palette**, resolved from the registry's rows of the substances the section names
+    ///   (P14.T49.b–c, T49.h and T49.i; decision-r11-palette-liquids §1.7): an entry for each
+    ///   crust and the provinces, each ice and each liquid, the liquids with their records and a
+    ///   melting crust with its melt's, by the `palette` module's rules. An airless body's palette
+    ///   carries no cold-trapped `Ice` entry until P14.T51.f, wired by P14.T54.b, since no
+    ///   condensate on the record names one.
+    ///
+    /// Both records are taken at [`RECORD_TIME`], the epoch, which settles the record's time
+    /// (decision-backlog-2 §3; decision-bump-plan-after-22 §1.2 and §1.5).
     ///
     /// # Errors
     ///
@@ -623,10 +669,12 @@ impl CoarseInputs {
     ///   planet's (another body's, or a body's of another system), or one given for a body that
     ///   is not a moon;
     /// - [`ReadCoarseInputsError::Section`] with [`SurfaceInputsError::NotModelled`] naming
-    ///   [`RecordSection::Surface`] for an [`Section::Ok`] section with a member the pass reads
-    ///   not modelled, which is every surface section of this generator version.
-    ///
-    /// From P14.T54.a, also those of [`from_record`](Self::from_record).
+    ///   [`RecordSection::Surface`] for an [`Section::Ok`] section whose crust is not modelled (a
+    ///   body whose passes took no lid), whose mean surface temperature is not positive (an unlit
+    ///   body's, its equilibrium temperature of 0 K), or naming a substance of which the registry
+    ///   does not resolve the palette's entry (its optics, its grain density where it lies, which
+    ///   solid argon's lacks, or a liquid's record);
+    /// - those of [`from_record`](Self::from_record).
     ///
     /// # Examples
     ///
@@ -637,10 +685,8 @@ impl CoarseInputs {
     /// use hyperion_sim::Seed;
     /// use hyperion_sim::galaxy::placement::CellKey;
     /// use hyperion_sim::id::Layer;
-    /// use hyperion_sim::planetary::record::{RecordSection, Section};
-    /// use hyperion_sim::planetary::surface::{
-    ///     CoarseInputs, RECORD_TIME, ReadCoarseInputsError, SurfaceInputsError,
-    /// };
+    /// use hyperion_sim::planetary::record::Section;
+    /// use hyperion_sim::planetary::surface::{CoarseInputs, RECORD_TIME, ReadCoarseInputsError};
     /// use hyperion_sim::planetary::{SystemContext, generate};
     /// use hyperion_sim::units::{Dex, SolarMasses, Years};
     ///
@@ -670,14 +716,12 @@ impl CoarseInputs {
     /// let planet = CoarseInputs::planet_of(&moon)
     ///     .map(|index| system.body_at(&ctx, index, RECORD_TIME))
     ///     .transpose()?;
-    /// // With it, the reading stops at the crust, which it does not read until P14.T54.a's wire
-    /// // subtask; without it, the moon's seasons, its planet's orbit's, cannot be read.
-    /// assert_eq!(
-    ///     CoarseInputs::for_body(&moon, planet.as_ref(), &ctx),
-    ///     Err(ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(
-    ///         RecordSection::Surface
-    ///     )))
-    /// );
+    /// // With it, the moon's inputs read its record's crust, condensates and palette; without
+    /// // it, the moon's seasons, its planet's orbit's, cannot be read.
+    /// let inputs = CoarseInputs::for_body(&moon, planet.as_ref(), &ctx)?;
+    /// let lid = inputs.palette().get(inputs.lid_entry()).ok_or("the lid has an entry")?;
+    /// assert!(lid.normal_albedo_bvr.iter().all(|a| *a > 0.0));
+    /// assert!(inputs.seasonal_orbit().is_some());
     /// assert!(matches!(
     ///     CoarseInputs::for_body(&moon, None, &ctx),
     ///     Err(ReadCoarseInputsError::PlanetMissing(_))
@@ -691,19 +735,31 @@ impl CoarseInputs {
     ) -> Result<Self, ReadCoarseInputsError> {
         let surface = surface_of(record)?;
         let seasons = checked_seasons(record, planet)?;
-        let crust = match surface.crust() {
-            Modelled::Ok(crust) => crust,
-            Modelled::NotModelled => {
-                return Err(SurfaceInputsError::NotModelled(RecordSection::Surface).into());
-            }
+        let Modelled::Ok(crust) = surface.crust() else {
+            return Err(SurfaceInputsError::NotModelled(RecordSection::Surface).into());
         };
-        // The record holds its crust from P14.T54.a's C3; its reading into the pass's crust and
-        // condensates, with the palette's resolution, passed with `seasons` to `from_record`, is
-        // P14.T54.a's wire subtask's. Until it lands a modelled crust is not read, and the section
-        // answers not modelled. `from_record` takes the hosts' light from the record's
-        // conditions, so the context is not read.
-        let _ = (seasons, ctx, crust);
-        Err(SurfaceInputsError::NotModelled(RecordSection::Surface).into())
+        // An unlit body's record states its mean surface temperature as its equilibrium
+        // temperature, 0 K, which gives the pass no climate to impose: not modelled.
+        let mean = surface.conditions().mean_surface_temperature().value();
+        let lit = mean.is_finite() && mean > 0.0;
+        if !lit {
+            return Err(SurfaceInputsError::NotModelled(RecordSection::Surface).into());
+        }
+        // A substance whose entry the registry does not resolve is a member of the section this
+        // version does not model, the body's own state: the cause is the registry's, which the
+        // palette's tests name.
+        let palette = palette::resolve(surface, crust)
+            .map_err(|_| SurfaceInputsError::NotModelled(RecordSection::Surface))?;
+        // `from_record` takes the hosts' light from the record's conditions, so the context is
+        // not read; it is kept for a companion star's own cycle (R09.T13).
+        let _ = ctx;
+        Self::from_record(
+            record,
+            seasons,
+            crust_inputs(crust),
+            condensates_of(surface),
+            palette,
+        )
     }
 
     /// The planet whose record [`for_body`](Self::for_body) takes with this body's, in the body's
@@ -741,7 +797,7 @@ impl CoarseInputs {
 
     /// The inputs of the body of `record`, read from its record's sections, with the crust,
     /// condensates and palette given (R09.T10.e; decision-bump-plan-after-22 §1.5): the reading
-    /// [`for_body`](Self::for_body) answers with once P14.T54.a puts those three on the record.
+    /// [`for_body`](Self::for_body) answers with, giving it the record's own three (P14.T54.a).
     ///
     /// `record`, and the planet's record in `seasons`, are their bodies' records at
     /// [`RECORD_TIME`], at which the reading takes the spin and the seasonal orbit. `seasons` is
@@ -755,9 +811,11 @@ impl CoarseInputs {
     ///   the signed contrasts, the pressure and the gases, and the hosts' light, P14.T12's sum of
     ///   L ÷ (4π a² √(1 − e²)) over the hosts at the record's time, the orbit average that the
     ///   pass draws over the seasonal orbit, a companion's and a planet's shares with it, as
-    ///   [`host_flux`](Self::host_flux) says), and its figures (`σ_h`, the liquids and ices with
-    ///   an area, the tectonic regime and continental fraction, the volcanism level, the heat
-    ///   flow, the surface age, the crater contract and the wet epoch);
+    ///   [`host_flux`](Self::host_flux) says, and the ground's thermal inertia Γ its night read,
+    ///   [`ground_inertia_j_per_m2_k_sqrt_s`](Self::ground_inertia_j_per_m2_k_sqrt_s)), and its
+    ///   figures (`σ_h`, the liquids and ices with an area, the tectonic regime and continental
+    ///   fraction, the volcanism level, the heat flow, the surface age, the crater contract and the
+    ///   wet epoch);
     /// - **the bulk section**'s gravity and **the figure section**'s spheroid;
     /// - **the rotation section**'s body-fixed frame: the spin at [`RECORD_TIME`] under the
     ///   seasonal orbit ([`SeasonalSpin::of`], as the record's conditions were derived), with the
@@ -769,8 +827,9 @@ impl CoarseInputs {
     /// (decision-r11-palette-liquids §2, item 5), and every other state keeps the record's. A
     /// liquid or an ice whose area is zero lies nowhere on the ground (the record lists water at
     /// a zero share on a dry world, P14.T24.b), so it is not one of the inputs' liquids or ices,
-    /// and it needs no palette entry. The surface section's crust and condensates are not read:
-    /// `crust` and `condensates` stand for them, and `palette` for their resolution.
+    /// and it needs no palette entry. The surface section's crust and condensates are not read
+    /// here: `crust` and `condensates` stand for them, and `palette` for their resolution, which
+    /// [`for_body`](Self::for_body) gives from the record.
     ///
     /// It gives no cold traps: [`cold_traps`](Self::cold_traps) is empty and
     /// [`cold_trap_inputs`](Self::cold_trap_inputs) `None`, until P14.T54.b puts P14.T51.f's cold
@@ -799,20 +858,20 @@ impl CoarseInputs {
     ///
     /// # Examples
     ///
-    /// A generated dry rocky planet's inputs, with a crust and palette of the example's own while
-    /// the record's crust is not modelled. The palette must name each ice that lies on the ground,
-    /// as the record's figures list them; a planet with a sea would also need the liquid's entry,
-    /// with its optical record (`PaletteEntry::liquid`, R11's), which a dry planet does without:
+    /// A generated dry rocky planet's inputs, with a crust and palette of the example's own in
+    /// place of the record's, which [`for_body`](Self::for_body) reads. The palette must name each
+    /// ice that lies on the ground, as the record's figures list them; a planet with a sea would
+    /// also need the liquid's entry, with its optical record (`PaletteEntry::liquid`, R11's), which
+    /// a dry planet does without:
     ///
     /// ```
     /// use hyperion_sim::Seed;
     /// use hyperion_sim::galaxy::placement::CellKey;
     /// use hyperion_sim::id::Layer;
     /// use hyperion_sim::planetary::derive::PlanetClass;
-    /// use hyperion_sim::planetary::record::{BodyKind, RecordSection, Section};
+    /// use hyperion_sim::planetary::record::{BodyKind, Section};
     /// use hyperion_sim::planetary::surface::{
-    ///     CoarseInputs, CrustInputs, LidCrust, RECORD_TIME, ReadCoarseInputsError,
-    ///     SeasonsFromRecord, SurfaceInputsError,
+    ///     CoarseInputs, CrustInputs, LidCrust, RECORD_TIME, SeasonsFromRecord,
     /// };
     /// use hyperion_sim::planetary::{SystemContext, generate};
     /// use hyperion_sim::units::{Dex, Kelvin, SolarMasses, Years};
@@ -880,15 +939,12 @@ impl CoarseInputs {
     /// let bulk = rocky.bulk().ok().ok_or("a rocky planet has a bulk section")?;
     /// assert_eq!(inputs.gravity(), bulk.surface_gravity());
     /// assert!(inputs.seasonal_orbit().is_some());
-    /// // `for_body` still stops at the record's crust, which it does not read yet; a planet takes
-    /// // no planet's record (`CoarseInputs::planet_of` is `None`).
+    /// // `for_body` reads the record's own crust, condensates and palette, and the same other
+    /// // sections; a planet takes no planet's record (`CoarseInputs::planet_of` is `None`).
     /// assert_eq!(CoarseInputs::planet_of(&rocky), None);
-    /// assert_eq!(
-    ///     CoarseInputs::for_body(&rocky, None, &ctx),
-    ///     Err(ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(
-    ///         RecordSection::Surface
-    ///     )))
-    /// );
+    /// let own = CoarseInputs::for_body(&rocky, None, &ctx)?;
+    /// assert_eq!(own.gravity(), inputs.gravity());
+    /// assert_eq!(own.seasonal_orbit(), inputs.seasonal_orbit());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn from_record(
@@ -958,7 +1014,10 @@ impl CoarseInputs {
             .climate(ClimateRegime::from(surface.climate_regime()))
             .crust(crust)
             .condensates(condensates)
-            .palette(palette);
+            .palette(palette)
+            // The record's Γ, which its conditions' night read, so that R09's radiative model
+            // reads it too (decision-p14-t54a-passes §3.5).
+            .ground_inertia(conditions.ground().inertia_j_per_m2_k_sqrt_s());
         if let Some(epoch) = figures.wet_epoch() {
             builder = builder.wet_epoch(WetEpoch::from(epoch));
         }
@@ -1265,6 +1324,23 @@ impl CoarseInputs {
         self.main_liquid
     }
 
+    /// The ground's thermal inertia Γ, J m⁻² K⁻¹ s^−½, finite and positive, where the inputs
+    /// carry plan 14's: the record's conditions' ground (P14.T54.a), P14.T49.j's law at the lid
+    /// the record's published pass's context read, at the body's equilibrium temperature, with
+    /// P14.T24.a's constants as its fallback alone (decision-pre-23-review item 7), which
+    /// [`from_record`](Self::from_record) reads. `None` for inputs built by hand (the reference
+    /// worlds), whose radiative model takes the law at their own lid at their equilibrium
+    /// temperature.
+    ///
+    /// R09's radiative model reads it (R09.T13.c), so that its nights and the record's read one Γ
+    /// on every body it runs on, airless or under a thin air (decision-p14-t54a-passes §3.5;
+    /// Batch D's review, D3-1). Under air the law is a vacuum lower bound, with no pore gas
+    /// (P14.T49.l's).
+    #[must_use]
+    pub const fn ground_inertia_j_per_m2_k_sqrt_s(&self) -> Option<f64> {
+        self.ground_inertia_j_per_m2_k_sqrt_s
+    }
+
     /// The months of the field's year: 1 for a world with no seasonal forcing, a circular
     /// seasonal orbit with no obliquity to it, or no orbit at all; 12 otherwise, each a twelfth of
     /// the seasonal orbit in eccentric anomaly (`decision-r09-t2.md` item 1, Design note 8).
@@ -1306,12 +1382,32 @@ fn check_craters(
     Ok(())
 }
 
+/// The pass's crust of the record's `crust` (P14.T51.c), to the bit: each crust and the bulk
+/// material by its row's key, the lid, the provinces and the melt area.
+#[must_use]
+fn crust_inputs(crust: &CrustComposition) -> CrustInputs {
+    let key = |id: SubstanceId| id.substance().key();
+    CrustInputs {
+        primary: crust.primary().map(key),
+        secondary: crust.secondary().map(key),
+        tertiary: crust.tertiary().map(key),
+        bulk: crust.bulk().map(key),
+        lid: crust.lid(),
+        provinces: key(crust.provinces()),
+        melt_area_fraction: crust.melt_area_fraction(),
+    }
+}
+
+/// The pass's condensates of the record's surface section `surface`: every published entry
+/// (P14.T51.a), in the pass's vocabulary (`From<&CondensateEntry>`).
+fn condensates_of(surface: &Surface) -> impl Iterator<Item = Condensate> + '_ {
+    surface.condensates().entries().iter().map(Condensate::from)
+}
+
 /// The surface section of `record`, decided from its tag alone (decision-p14-t35e-wire §2.4):
 /// a section that does not apply has no solid surface, and one not modelled or withheld names
 /// the surface.
-fn surface_of(
-    record: &BodyRecord,
-) -> Result<&crate::planetary::record::Surface, SurfaceInputsError> {
+fn surface_of(record: &BodyRecord) -> Result<&Surface, SurfaceInputsError> {
     match record.surface() {
         Section::Ok(surface) => Ok(surface),
         Section::NotApplicable => Err(SurfaceInputsError::NoSolidSurface),
@@ -1718,7 +1814,8 @@ impl Error for BuildCoarseInputsError {}
 ///
 /// Every value is required, the palette among them, but the body (by default
 /// [`BodyRef::default`]) and the lists and optional parts, whose default is none: no liquid, ice,
-/// cold-trapped share, gas or condensate, no cold-trap inputs, no seasonal orbit and no wet epoch.
+/// cold-trapped share, gas or condensate, no cold-trap inputs, no seasonal orbit, no wet epoch and
+/// no ground inertia of plan 14's.
 /// The cold-trap inputs are required where a cold-trapped share is above zero.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CoarseInputsBuilder {
@@ -1752,6 +1849,7 @@ pub struct CoarseInputsBuilder {
     crust: Option<CrustInputs>,
     condensates: Vec<Condensate>,
     palette: Option<MaterialPalette>,
+    ground_inertia_j_per_m2_k_sqrt_s: Option<f64>,
 }
 
 /// `value`, or [`BuildCoarseInputsError::Missing`] naming `part`.
@@ -2111,8 +2209,9 @@ impl CoarseInputsBuilder {
 
     /// The body's palette, as the server resolves it from plan 14's registry.
     ///
-    /// Its entries' values are the registry rows' (P14.T49.b–c; a builder argument until
-    /// P14.T54.a reads them from the record). It must hold an [`PaletteRole::Ice`] entry for every
+    /// Its entries' values are the registry rows' (P14.T49.b–c, T49.h and T49.i), which
+    /// [`CoarseInputs::for_body`] resolves for the record's substances (P14.T54.a). It must hold an
+    /// [`PaletteRole::Ice`] entry for every
     /// ice and solid condensate, a [`PaletteRole::Liquid`] entry for every liquid and liquid
     /// condensate, and an entry for every lithology of the crust, a buried primary crust's and the
     /// bulk material's among them, as [`CoarseInputs::crust_palette`] finds them; it may hold
@@ -2122,6 +2221,16 @@ impl CoarseInputsBuilder {
     #[must_use]
     pub fn palette(mut self, palette: MaterialPalette) -> Self {
         self.palette = Some(palette);
+        self
+    }
+
+    /// The ground's thermal inertia Γ, J m⁻² K⁻¹ s^−½, finite and positive: plan 14's, the
+    /// record's conditions' ([`CoarseInputs::ground_inertia_j_per_m2_k_sqrt_s`]). None by
+    /// default: inputs built by hand take P14.T49.j's law at their lid at their equilibrium
+    /// temperature where the radiative model reads it.
+    #[must_use]
+    pub const fn ground_inertia(mut self, inertia_j_per_m2_k_sqrt_s: f64) -> Self {
+        self.ground_inertia_j_per_m2_k_sqrt_s = Some(inertia_j_per_m2_k_sqrt_s);
         self
     }
 
@@ -2145,6 +2254,10 @@ impl CoarseInputsBuilder {
     /// material beside a crust ([`BuildCoarseInputsError::BulkBesideCrust`]) or with a lid naming
     /// a crust or bulk material it does not have ([`BuildCoarseInputsError::LidAbsent`]), or a
     /// substance the palette has no entry for.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one value's rule a line, in the order the errors list them"
+    )]
     pub fn build(self) -> Result<CoarseInputs, BuildCoarseInputsError> {
         let figure = required(self.figure, "figure")?;
         let Spheroid {
@@ -2212,6 +2325,9 @@ impl CoarseInputsBuilder {
         let palette = required(self.palette, "palette")?;
         let main_liquid = check_on_the_ground(&palette, &liquids, &ices, &condensates)?;
         let (crust_palette, lid_entry) = crust_palette(&palette, &crust, lid)?;
+        if let Some(inertia) = self.ground_inertia_j_per_m2_k_sqrt_s {
+            check_positive("ground inertia", inertia)?;
+        }
         Ok(CoarseInputs {
             body: self.body,
             figure,
@@ -2246,6 +2362,7 @@ impl CoarseInputsBuilder {
             crust_palette,
             lid_entry,
             main_liquid,
+            ground_inertia_j_per_m2_k_sqrt_s: self.ground_inertia_j_per_m2_k_sqrt_s,
         })
     }
 }
@@ -3816,33 +3933,64 @@ mod tests {
         panic!("63 Sun-like systems hold no rocky planet, gas giant and sub-Neptune");
     }
 
+    /// P14.T54.a: a generated rocky planet's inputs are `Ok`, its crust, condensates and ground
+    /// inertia its record's to the bit, and every other value as `from_record` reads it.
     #[test]
-    fn a_generated_rocky_body_is_not_modelled_and_a_giant_or_sub_neptune_has_no_solid_surface() {
+    fn a_generated_rocky_body_reads_its_record_and_a_giant_or_sub_neptune_has_no_solid_surface() {
         let [
             (rocky_ctx, rocky),
             (giant_ctx, giant),
             (sub_ctx, sub_neptune),
         ] = rocky_giant_and_sub_neptune();
         // The rocky planet's section carries its conditions and figures (P14.T48.e), and from
-        // P14.T54.a's C3 its crust, which the reading does not read until P14.T54.a's wire
-        // subtask: the section still answers not modelled.
+        // P14.T54.a its crust and condensates, which the reading reads.
         let Section::Ok(surface) = rocky.surface() else {
             panic!(
                 "a generated rocky planet's surface is {:?}",
                 rocky.surface()
             );
         };
-        assert!(
-            matches!(surface.crust(), Modelled::Ok(_)),
-            "{:?}",
-            surface.crust()
+        let Modelled::Ok(crust) = surface.crust() else {
+            panic!("{:?}", surface.crust());
+        };
+        let inputs = CoarseInputs::for_body(&rocky, None, &rocky_ctx)
+            .unwrap_or_else(|e| panic!("a generated rocky planet reads into inputs: {e:?}"));
+        assert_eq!(*inputs.crust(), crust_inputs(crust));
+        let key = |id: Option<SubstanceId>| id.map(|id| id.substance().key());
+        assert_eq!(inputs.crust().secondary, key(crust.secondary()));
+        assert_eq!(inputs.crust().lid, crust.lid());
+        assert_same_bits(
+            inputs.crust().melt_area_fraction,
+            crust.melt_area_fraction(),
         );
+        let mut condensates: Vec<Condensate> = condensates_of(surface).collect();
+        condensates.sort_by(|a, b| {
+            b.reservoir
+                .value()
+                .total_cmp(&a.reservoir.value())
+                .then_with(|| a.substance.cmp(&b.substance))
+                .then_with(|| a.phase.cmp(&b.phase))
+        });
+        assert_eq!(inputs.condensates(), condensates.as_slice());
         assert_eq!(
-            CoarseInputs::for_body(&rocky, None, &rocky_ctx),
-            Err(ReadCoarseInputsError::Section(
-                SurfaceInputsError::NotModelled(RecordSection::Surface)
+            inputs
+                .ground_inertia_j_per_m2_k_sqrt_s()
+                .map(hyperion_testkit::float::bits),
+            Some(hyperion_testkit::float::bits(
+                surface.conditions().ground().inertia_j_per_m2_k_sqrt_s()
             ))
         );
+        // The rest is `from_record`'s reading, with the record's own three.
+        let palette = palette::resolve(surface, crust).unwrap();
+        let read = CoarseInputs::from_record(
+            &rocky,
+            SeasonsFromRecord::Own,
+            crust_inputs(crust),
+            condensates_of(surface),
+            palette,
+        )
+        .unwrap();
+        assert_eq!(inputs, read);
         // The pass's regime is the record's, its condensable by key.
         let regime = ClimateRegime::from(surface.climate_regime());
         assert_eq!(regime.model, surface.climate_regime().model());
@@ -4241,13 +4389,11 @@ mod tests {
             "{:?} against the star's {light:?}",
             inputs.host_flux()
         );
-        // `for_body` still stops at the record's crust: nothing generated moves.
-        assert_eq!(
-            CoarseInputs::for_body(&rocky, None, &ctx),
-            Err(ReadCoarseInputsError::Section(
-                SurfaceInputsError::NotModelled(RecordSection::Surface)
-            ))
-        );
+        // `for_body` reads the same seasons and light, with the record's own crust.
+        let own = CoarseInputs::for_body(&rocky, None, &ctx).unwrap();
+        assert_eq!(own.seasonal_orbit(), inputs.seasonal_orbit());
+        assert_eq!(own.spin(), inputs.spin());
+        assert_eq!(own.host_flux(), inputs.host_flux());
     }
 
     /// The first moon with a surface section in the Sun-like systems 1, 2, … of
@@ -4342,12 +4488,9 @@ mod tests {
                 given: body_id_of(&planet),
             })
         );
-        assert_eq!(
-            CoarseInputs::for_body(&moon, Some(&planet), &ctx),
-            Err(ReadCoarseInputsError::Section(
-                SurfaceInputsError::NotModelled(RecordSection::Surface)
-            ))
-        );
+        let own = CoarseInputs::for_body(&moon, Some(&planet), &ctx).unwrap();
+        assert_eq!(own.seasonal_orbit(), inputs.seasonal_orbit());
+        assert_eq!(own.spin(), inputs.spin());
     }
 
     /// The first belt's member with a surface section in the Sun-like systems 1, 2, … of
@@ -4369,17 +4512,17 @@ mod tests {
     }
 
     /// R09.T10.f (decision-backlog-2 §3): `for_body` takes a moon's planet's record, the one
-    /// `planet_of` names, and checks it after the surface section's tag and before the crust.
+    /// `planet_of` names, and checks it after the surface section's tag and before the crust;
+    /// from P14.T54.a a body that passes reads `Ok`.
     #[test]
     fn for_body_checks_a_moon_s_planet_before_the_crust() {
-        let not_modelled =
-            ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(RecordSection::Surface));
         let (ctx, moon, planet) = generated_moon();
-        // A moon given its planet passes the check, and stops at the crust.
+        // A moon given its planet passes the check, and reads its crust.
         assert_eq!(CoarseInputs::planet_of(&moon), Some(planet.index()));
-        assert_eq!(
-            CoarseInputs::for_body(&moon, Some(&planet), &ctx),
-            Err(not_modelled)
+        assert!(
+            CoarseInputs::for_body(&moon, Some(&planet), &ctx).is_ok(),
+            "{:?}",
+            CoarseInputs::for_body(&moon, Some(&planet), &ctx)
         );
         // Without it, or with another body, the planet is refused before the crust is reached.
         assert_eq!(
@@ -4396,10 +4539,7 @@ mod tests {
         // A planet takes none, and is refused one.
         let [(rocky_ctx, rocky), (giant_ctx, giant), _] = rocky_giant_and_sub_neptune();
         assert_eq!(CoarseInputs::planet_of(&rocky), None);
-        assert_eq!(
-            CoarseInputs::for_body(&rocky, None, &rocky_ctx),
-            Err(not_modelled)
-        );
+        assert!(CoarseInputs::for_body(&rocky, None, &rocky_ctx).is_ok());
         assert_eq!(
             CoarseInputs::for_body(&rocky, Some(&planet), &rocky_ctx),
             Err(ReadCoarseInputsError::NotItsPlanet {
@@ -4420,10 +4560,22 @@ mod tests {
             Some(OrbitHost::Body(belt.index()))
         );
         assert_eq!(CoarseInputs::planet_of(&member), None);
-        assert_eq!(
-            CoarseInputs::for_body(&member, None, &member_ctx),
-            Err(not_modelled)
-        );
+        // It passes the planet's check: it reads, or stops at its surface's own state (a cold
+        // member's argon ice, whose solid density the registry has not read).
+        let Section::Ok(surface) = member.surface() else {
+            unreachable!("the finder took a member with a surface");
+        };
+        let read = CoarseInputs::for_body(&member, None, &member_ctx);
+        match unread_cause(surface) {
+            None => assert!(read.is_ok(), "{read:?}"),
+            Some(cause) => assert_eq!(
+                read,
+                Err(ReadCoarseInputsError::Section(
+                    SurfaceInputsError::NotModelled(RecordSection::Surface)
+                )),
+                "{cause}"
+            ),
+        }
         assert_eq!(
             CoarseInputs::for_body(&member, Some(&belt), &member_ctx),
             Err(ReadCoarseInputsError::NotItsPlanet {
@@ -4679,11 +4831,18 @@ mod tests {
     const CENSUS: usize = 40;
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one walk of the census's bodies, each reading checked and tallied"
+    )]
     fn every_generated_solid_body_reads_into_inputs_the_builder_takes() {
         let contexts = sample_contexts(CENSUS, SEED, SampleFilter::ALL).unwrap();
         let (mut bodies, mut moons, mut airless, mut aired, mut drifting, mut dry) =
             (0, 0, 0, 0, 0, 0);
         let mut zeroed = 0;
+        let (mut read_ok, mut melting, mut seas) = (0, 0, 0);
+        let mut unread: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
         for (ctx, records) in records_at_record_time(&contexts) {
             for record in &records {
                 // `planet_of` is the reading's rule, on every body: a moon's planet, by its kind.
@@ -4745,8 +4904,8 @@ mod tests {
                         elements.orientation(),
                     );
                 }
-                // `for_body` takes the planet `planet_of` names, as the server fetches it, and the
-                // reading accepts the same: no generated body's inputs are served yet.
+                // `for_body` takes the planet `planet_of` names, as the server fetches it, and
+                // reads every generated body whose crust the record models (P14.T54.a).
                 let planet = CoarseInputs::planet_of(record).map(|index| {
                     records
                         .iter()
@@ -4758,24 +4917,444 @@ mod tests {
                     SeasonsFromRecord::Planet(planet) => Some(planet.index()),
                 };
                 assert_eq!(planet.map(BodyRecord::index), seasonal_planet);
-                assert_eq!(
-                    CoarseInputs::for_body(record, planet, &ctx),
-                    Err(ReadCoarseInputsError::Section(
-                        SurfaceInputsError::NotModelled(RecordSection::Surface)
-                    ))
+                let own = match CoarseInputs::for_body(record, planet, &ctx) {
+                    Ok(own) => own,
+                    Err(error) => {
+                        assert_eq!(
+                            error,
+                            ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(
+                                RecordSection::Surface
+                            )),
+                            "{:?}",
+                            record.index()
+                        );
+                        let cause = unread_cause(surface).unwrap_or_else(|| {
+                            panic!("{:?} reads no inputs for no cause", record.index())
+                        });
+                        *unread.entry(cause).or_default() += 1;
+                        continue;
+                    }
+                };
+                assert_eq!(unread_cause(surface), None, "{:?}", record.index());
+                read_ok += 1;
+                check_record_palette(&own);
+                melting += usize::from(
+                    own.palette()
+                        .entries()
+                        .iter()
+                        .any(|e| e.role != PaletteRole::Liquid && e.liquid.is_some()),
                 );
+                seas += usize::from(own.main_liquid().is_some());
+                // The header's pressure is exactly 0 on an airless body (R09.T2.e).
+                let header = super::super::quantise::header_pressure(&own).value();
+                if surface.state() == SurfaceState::Airless {
+                    assert_same_bits(own.surface_pressure().value(), 0.0);
+                    assert_same_bits(header, 0.0);
+                }
             }
         }
         eprintln!(
             "census: {bodies} bodies: {moons} moons, {airless} airless ({zeroed} with a tenuous \
              air zeroed), {aired} with air, {drifting} on drifting seasonal orbits, {dry} listing \
-             a share with no area"
+             a share with no area; {read_ok} read by `for_body` ({seas} with a sea, {melting} \
+             with a melting crust entry); not modelled: {unread:?}"
         );
         assert!(
             moons > 0 && airless > 0 && aired > 0 && bodies > moons && dry > 0,
             "{bodies} bodies: {moons} moons, {airless} airless, {aired} with air, \
              {drifting} on drifting orbits, {dry} listing a share with no area"
         );
+        let unmodelled: usize = unread.values().sum();
+        assert!(
+            read_ok > 0 && read_ok + unmodelled == bodies,
+            "{read_ok} of {bodies}"
+        );
+        // The recorded gaps alone: no crust, an unlit record's 0 K, and the ices whose solid
+        // density the registry has not read (argon's, a phase of oxygen's).
+        for cause in unread.keys() {
+            let known = cause == NO_CRUST
+                || cause == UNLIT
+                || ["Ar Ice", "O2 Ice"]
+                    .iter()
+                    .any(|ice| cause == &format!("{ice}: DensityNotModelled"));
+            assert!(known, "{cause}");
+        }
+    }
+
+    /// What `unread_cause` names a body whose crust the record does not model.
+    const NO_CRUST: &str = "no crust";
+
+    /// What `unread_cause` names an unlit body, whose record's mean surface temperature is 0 K.
+    const UNLIT: &str = "unlit";
+
+    /// Why `for_body` reads no inputs for a body whose surface section is `surface`, or `None`
+    /// where it reads them: its crust not modelled, its mean surface temperature not positive, or
+    /// the first palette entry the registry does not resolve, as `"<key> <role>: <cause>"`.
+    fn unread_cause(surface: &Surface) -> Option<String> {
+        let Modelled::Ok(crust) = surface.crust() else {
+            return Some(NO_CRUST.to_owned());
+        };
+        let mean = surface.conditions().mean_surface_temperature().value();
+        let lit = mean.is_finite() && mean > 0.0;
+        if !lit {
+            return Some(UNLIT.to_owned());
+        }
+        match palette::resolve(surface, crust) {
+            Ok(_) => None,
+            Err(palette::ResolveBodyPaletteError::Solid {
+                substance,
+                role,
+                cause,
+            }) => Some(format!("{substance} {role:?}: {cause:?}")),
+            Err(other) => Some(format!("{other:?}")),
+        }
+    }
+
+    /// Checks the palette `for_body` resolved for a body, its inputs `inputs` (the palette
+    /// resolution's rules, P14.T54.a): an entry for each crust and the provinces, each
+    /// condensate as its phase's, each ice and liquid on the ground, and nothing else; each solid
+    /// entry its registry row's, phase row 1 or 2, with no `FeO_T`; each liquid its record's, its
+    /// grain density the record's density, its albedo its Fresnel reflectance, phase row 0; each
+    /// record's temperature in its liquid's range; and every phase row 0 to 2
+    /// (decision-r11-palette-liquids §2 item 6).
+    fn check_record_palette(inputs: &CoarseInputs) {
+        use crate::substance::by_key;
+        let palette = inputs.palette();
+        let crust = inputs.crust();
+        let lithologies = [crust.primary, crust.secondary, crust.tertiary, crust.bulk]
+            .into_iter()
+            .flatten()
+            .chain([crust.provinces]);
+        let mut named: std::collections::BTreeSet<(bool, SubstanceKey)> =
+            lithologies.map(|key| (true, key)).collect();
+        for condensate in inputs.condensates() {
+            if condensate.phase != CondensatePhase::Supercritical {
+                named.insert((false, condensate.substance));
+            }
+        }
+        for share in inputs.ices().iter().chain(inputs.liquids()) {
+            named.insert((false, share.substance));
+        }
+        for entry in palette.entries() {
+            let key = entry.substance;
+            assert!(entry.phase_row <= 2, "{key}: phase row {}", entry.phase_row);
+            assert_eq!(entry.feo_mass_fraction, None, "{key}");
+            let crust_role = entry.role.is_crust();
+            assert!(
+                named.contains(&(crust_role, key)),
+                "{key} in {:?} is not named by the record",
+                entry.role
+            );
+            let row = by_key(key.as_str()).unwrap();
+            match entry.role {
+                PaletteRole::Liquid => {
+                    let record = entry.liquid.as_ref().expect("a liquid carries its record");
+                    assert_same_bits(entry.grain_density_kg_m3, record.density_kg_m3);
+                    let fresnel = record.fresnel_normal_albedo_bvr();
+                    for (held, f) in entry.normal_albedo_bvr.iter().zip(fresnel) {
+                        assert_same_bits(*held, f);
+                    }
+                    assert_eq!(entry.phase_row, 0, "{key}");
+                    let first_melt = row.substance().condensed().unwrap().transition();
+                    assert!(
+                        record.temperature >= first_melt.temperature(),
+                        "{key}: {:?}",
+                        record.temperature
+                    );
+                }
+                PaletteRole::Ice
+                | PaletteRole::PrimaryCrust
+                | PaletteRole::SecondaryCrust
+                | PaletteRole::TertiaryCrust
+                | PaletteRole::Province
+                | PaletteRole::Bulk
+                | PaletteRole::Cover
+                | PaletteRole::Deposit => {
+                    let optics = row.substance().condensed_optics().unwrap();
+                    for (held, a) in entry
+                        .normal_albedo_bvr
+                        .iter()
+                        .zip(optics.normal_albedo_bvr())
+                    {
+                        assert_same_bits(*held, a);
+                    }
+                    let condensed = row.substance().condensed().unwrap();
+                    assert_eq!(entry.phase_row, u8::from(condensed.phase_law()), "{key}");
+                    assert!((1..=2).contains(&entry.phase_row), "{key}");
+                    if let Some(melt) = &entry.liquid {
+                        assert!(crust_role, "{key}: a melt record on {:?}", entry.role);
+                        assert!(melt.temperature >= entry.transition, "{key}: {melt:?}");
+                    }
+                }
+            }
+        }
+        // The melt rule: the lid's entry melts where the crust gives a melt area, and its row has
+        // a melt model.
+        let lid = palette.get(inputs.lid_entry()).unwrap();
+        if crust.melt_area_fraction > 0.0 {
+            let modelled = crate::substance::liquid_properties(
+                by_key(lid.substance.as_str()).unwrap(),
+                Kelvin::new(lid.transition.value() + 1.0),
+                crate::substance::Composition::Reference,
+            )
+            .is_ok();
+            let ice = matches!(
+                lid.mechanics,
+                MechanicsFamily::WaterIce | MechanicsFamily::VolatileIce
+            );
+            assert_eq!(
+                lid.liquid.is_some(),
+                modelled && !ice,
+                "{}: melt area {}",
+                lid.substance,
+                crust.melt_area_fraction
+            );
+        }
+    }
+
+    /// The first body of the plan-14 sample's systems (`system::tests::whole`, in order), at
+    /// [`RECORD_TIME`], whose surface section `wanted` picks among those whose crust is modelled,
+    /// with its system's context and its inputs from `for_body`; `None` where none is.
+    fn first_generated(
+        wanted: impl Fn(&Surface) -> bool,
+    ) -> Option<(SystemContext, BodyRecord, CoarseInputs)> {
+        for (ctx, system) in crate::planetary::system::tests::whole() {
+            let snapshot = system.snapshot_at(ctx, RECORD_TIME);
+            let records = snapshot.bodies();
+            for record in records {
+                let Section::Ok(surface) = record.surface() else {
+                    continue;
+                };
+                if matches!(surface.crust(), Modelled::NotModelled) || !wanted(surface) {
+                    continue;
+                }
+                let planet = planet_of(record, records);
+                let inputs = CoarseInputs::for_body(record, planet, ctx)
+                    .unwrap_or_else(|e| panic!("{:?} reads no inputs: {e:?}", record.index()));
+                return Some((ctx.clone(), record.clone(), inputs));
+            }
+        }
+        None
+    }
+
+    /// The entry of `key` in `role` in `inputs`' palette.
+    fn entry_of<'a>(inputs: &'a CoarseInputs, role: PaletteRole, key: &str) -> &'a PaletteEntry {
+        let at = inputs
+            .palette()
+            .find(role, SubstanceKey::new(key).unwrap())
+            .unwrap_or_else(|| panic!("no {role:?} entry of {key}: {:?}", inputs.palette()));
+        inputs.palette().get(at).unwrap()
+    }
+
+    /// Whether `surface` holds a liquid condensate of `key` over some of its area.
+    fn has_liquid(surface: &Surface, key: &str) -> bool {
+        surface.condensates().entries().iter().any(|entry| {
+            entry.phase() == partition::CondensatePhase::Liquid
+                && entry.substance().substance().key().as_str() == key
+                && entry.area_fraction() > 0.0
+        })
+    }
+
+    /// P14.T54.a's tests (decision-r11-palette-liquids §4): a Titan-like generated body's
+    /// `ch4_c2h6_n2` sea carries its record, P14.T49.h's at the record's temperature and
+    /// reference composition to the bit, every member without a source absent and every present
+    /// one positive, never 0; its temperature in the solution's range, its basis at least
+    /// `Derived`.
+    #[test]
+    fn a_titan_like_body_s_sea_carries_its_record() {
+        use crate::substance::{Composition, by_key, liquid_properties};
+        // Titan-like: its mean surface temperature near Titan's 93.65 K (Huygens).
+        let (_, record, inputs) = first_generated(|surface| {
+            let t = surface.conditions().mean_surface_temperature().value();
+            has_liquid(surface, "ch4_c2h6_n2") && (85.0..=100.0).contains(&t)
+        })
+        .expect("the sample holds a Titan-like body with a ch4_c2h6_n2 sea");
+        let sea = entry_of(&inputs, PaletteRole::Liquid, "ch4_c2h6_n2");
+        let held = sea.liquid.as_ref().expect("a sea carries its record");
+        let solution = by_key("ch4_c2h6_n2").unwrap();
+        let resolved =
+            liquid_properties(solution, held.temperature, Composition::Reference).unwrap();
+        assert_eq!(held, &resolved, "{:?}", record.index());
+        assert!(held.basis >= LiquidBasis::Derived, "{:?}", held.basis);
+        let positive = |values: &[f64]| values.iter().all(|v| *v > 0.0);
+        assert!(positive(&held.refractive_index));
+        assert!(held.density_kg_m3 > 0.0);
+        for bins in [held.absorption_per_m, held.scattering_per_m]
+            .into_iter()
+            .flatten()
+        {
+            assert!(positive(&bins), "{bins:?}");
+        }
+        for scalar in [held.surface_tension_n_per_m, held.viscosity_pa_s]
+            .into_iter()
+            .flatten()
+        {
+            assert!(scalar > 0.0, "{held:?}");
+        }
+        let Section::Ok(surface) = record.surface() else {
+            unreachable!("the finder read its surface");
+        };
+        eprintln!(
+            "{:?}: {:?}, T_s {:.2} K, the sea's record at {:.2} K, {:?}, absorption {}, \
+             scattering {}, surface tension {:?}, viscosity {:?}",
+            record.index(),
+            surface.state(),
+            surface.conditions().mean_surface_temperature().value(),
+            held.temperature.value(),
+            held.basis,
+            held.absorption_per_m.is_some(),
+            held.scattering_per_m.is_some(),
+            held.surface_tension_n_per_m,
+            held.viscosity_pa_s,
+        );
+    }
+
+    /// P14.T54.a's tests: a generated Earth-like body's sea record is water's, `Measured`, at its
+    /// mean surface temperature inside water's checked windows.
+    #[test]
+    fn an_earth_like_body_s_sea_record_is_measured() {
+        let (_, record, inputs) = first_generated(|surface| {
+            let t = surface.conditions().mean_surface_temperature().value();
+            surface.state() == SurfaceState::Temperate
+                && has_liquid(surface, "H2O")
+                && (275.0..=305.0).contains(&t)
+        })
+        .expect("the sample holds a temperate body with a water sea");
+        let sea = entry_of(&inputs, PaletteRole::Liquid, "H2O");
+        let held = sea.liquid.as_ref().expect("a sea carries its record");
+        assert_eq!(
+            held.basis,
+            LiquidBasis::Measured,
+            "{:?}: {held:?}",
+            record.index()
+        );
+        assert_same_bits(
+            held.temperature.value(),
+            inputs.mean_surface_temperature().value(),
+        );
+        assert_eq!(
+            inputs.main_liquid(),
+            inputs.palette().find(PaletteRole::Liquid, sea.substance)
+        );
+        // A pure fluid's grain density is its saturated liquid's at the record's temperature.
+        let rho = crate::substance::by_key("H2O")
+            .unwrap()
+            .substance()
+            .grain_density(crate::substance::CondensedPhase::Liquid, held.temperature)
+            .unwrap();
+        assert_same_bits(sea.grain_density_kg_m3, rho.value());
+    }
+
+    /// P14.T54.a's tests: a lava world's lid crust entry carries its melt's record, at or above
+    /// its solidus, at least `Derived` (a melt's members are stand-ins): a magma ocean's, the
+    /// whole surface melt, and a solid world's whose crust gives a partial melt area (a locked
+    /// world's dayside pool), the first of each in the sample where it holds one.
+    #[test]
+    fn a_lava_world_s_lid_entry_carries_a_melt_record() {
+        let ocean = first_generated(|surface| {
+            surface.state() == SurfaceState::MagmaOcean
+                && surface
+                    .crust()
+                    .ok()
+                    .is_some_and(|crust| crust.melt_area_fraction() > 0.0)
+        });
+        let pool = first_generated(|surface| {
+            surface.state() != SurfaceState::MagmaOcean
+                && surface
+                    .crust()
+                    .ok()
+                    .is_some_and(|crust| crust.melt_area_fraction() > 0.0)
+        });
+        assert!(
+            ocean.is_some() || pool.is_some(),
+            "the sample holds a body whose crust gives a melt area"
+        );
+        for (_, record, inputs) in ocean.iter().chain(&pool) {
+            let lid = inputs.palette().get(inputs.lid_entry()).unwrap();
+            let melt = lid.liquid.as_ref().unwrap_or_else(|| {
+                panic!(
+                    "{:?}: the lid {} carries no melt",
+                    record.index(),
+                    lid.substance
+                )
+            });
+            assert!(melt.temperature >= lid.transition, "{melt:?}");
+            assert!(melt.basis >= LiquidBasis::Derived, "{melt:?}");
+            let Section::Ok(surface) = record.surface() else {
+                unreachable!("the finder read its surface");
+            };
+            eprintln!(
+                "{:?}: {:?}, the lid {} melts over {:.3}, its melt at {:.1} K (solidus {:.1} K, \
+                 T_s {:.1} K, warmest {:.1} K), {:?}",
+                record.index(),
+                surface.state(),
+                lid.substance,
+                inputs.crust().melt_area_fraction,
+                melt.temperature.value(),
+                lid.transition.value(),
+                surface.conditions().mean_surface_temperature().value(),
+                surface.conditions().climate_range().1.value(),
+                melt.basis,
+            );
+        }
+    }
+
+    /// The recorded gaps, each answered not modelled (the lane's ruling, Batch E): a body whose
+    /// palette names an ice the registry has no solid density of, solid argon's on the coldest
+    /// airless members (P14.T49.b's `ARGON` diagram reads none), names the substance and the
+    /// cause in its palette's refusal; and an unlit body, whose record states its mean surface
+    /// temperature as its equilibrium temperature, 0 K, is not read.
+    #[test]
+    fn a_surface_the_registry_or_the_record_does_not_model_answers_not_modelled() {
+        use crate::substance::ResolvePaletteEntryError;
+        let not_modelled = Err(ReadCoarseInputsError::Section(
+            SurfaceInputsError::NotModelled(RecordSection::Surface),
+        ));
+        let (mut argon, mut unlit) = (None, None);
+        'systems: for (ctx, system) in crate::planetary::system::tests::whole() {
+            let snapshot = system.snapshot_at(ctx, RECORD_TIME);
+            let records = snapshot.bodies();
+            for record in records {
+                let Section::Ok(surface) = record.surface() else {
+                    continue;
+                };
+                let Modelled::Ok(crust) = surface.crust() else {
+                    continue;
+                };
+                let mean = surface.conditions().mean_surface_temperature().value();
+                let read = || CoarseInputs::for_body(record, planet_of(record, records), ctx);
+                if unlit.is_none() && mean <= 0.0 {
+                    assert_eq!(read(), not_modelled, "{:?}", record.index());
+                    unlit = Some(record.index());
+                } else if argon.is_none()
+                    && mean > 0.0
+                    && palette::resolve(surface, crust)
+                        == Err(palette::ResolveBodyPaletteError::Solid {
+                            substance: key("Ar"),
+                            role: PaletteRole::Ice,
+                            cause: ResolvePaletteEntryError::DensityNotModelled,
+                        })
+                {
+                    assert_eq!(read(), not_modelled, "{:?}", record.index());
+                    let ar = crate::substance::by_key("Ar").unwrap().substance();
+                    assert!(
+                        ar.condensed_optics().is_some(),
+                        "argon's optics are modelled"
+                    );
+                    eprintln!(
+                        "{:?}: {:?} at T_s {mean:.1} K holds argon ice, whose solid density the \
+                         registry has not read",
+                        record.index(),
+                        surface.state()
+                    );
+                    argon = Some(record.index());
+                }
+                if argon.is_some() && unlit.is_some() {
+                    break 'systems;
+                }
+            }
+        }
+        assert!(argon.is_some() && unlit.is_some(), "{argon:?}, {unlit:?}");
     }
 
     /// The surface tests' methane sea carries the registry's scattering, to the bit: its copy, as

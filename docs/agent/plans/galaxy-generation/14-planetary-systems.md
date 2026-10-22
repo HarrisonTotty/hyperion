@@ -23745,3 +23745,158 @@ planetary::record` (624 tests at T57.a's commit).
       `a_moon_s_law_is_held_after_at_most_two_rounds`; `d1/g1g2.log`); Clippy `-p hyperion-sim
 --lib --tests -D warnings` (clean); rustfmt; `golden_diff.py` ("No golden files changed").
       Not run: the slow tier, the gate (the lane's).
+  - _Batch E's D3, `for_body` on the record, the palette's resolution, R09's rows, one Γ and the
+    serve gate_ (batch-e-briefs "D3"; plan 14's T54.a bullets "R09's `for_body` reads …", "The
+    palette resolution fills each `Liquid` entry's record, …", "The header's `surface_pressure`"
+    and "The serve gate"; decision-pre-23-review "For main → T54.a's brief items" 4, 6 and 34 B;
+    decision-p14-t54a-passes §3.5; decision-p14-t49c-split §4). A checkpoint at 22:
+    `GENERATOR_VERSION` stays 22, and `COLD_TRAPS_VERSION` (24) and every other 24 hold stand.
+    - _`for_body`_ (`planetary/surface/inputs.rs`), its signature as frozen at 23: after the surface
+      tag and the planet's check, as before, it reads the record. `crust_inputs` takes
+      `record::Surface::crust` to the bit (each crust and the bulk by its row's key, the lid, the
+      provinces, the melt area). `From<&CondensateEntry> for Condensate`, with
+      `From<partition::CondensatePhase>`, takes every published condensate. `palette::resolve`
+      gives the palette. All three go to `from_record` with the record's seasons. It answers `Ok`
+      for every generated body with a solid surface but the recorded gaps below, which answer
+      `NotModelled(Surface)`, the body's own state: a crust not modelled, a record whose mean T_s
+      is not positive, and a substance the registry does not resolve. `ctx` stays unread. Its doc
+      example, which showed `NotModelled(Surface)`, now reads the moon `Ok`; `from_record`'s
+      example ends with `for_body` `Ok`.
+    - _The palette's resolution_ (new `planetary/surface/palette.rs`, crate-private):
+      - _The entries:_
+        - the crust's: the primary, secondary, tertiary and bulk crusts, and the provinces where
+          they are none of those. A secondary that is the provinces' lithology but not the lid
+          takes the `Province` role alone, as the reference Moon's maria do. A lid's secondary
+          that is theirs keeps its own role, as the reference Mars's does.
+        - an `Ice` entry for each solid condensate and each ice on the ground;
+        - a `Liquid` entry for each liquid condensate and each liquid on the ground.
+
+        One entry a (role, key). Seas of one key at two compositions would share one: recorded,
+        and unreached.
+
+      - _Solids_ are `resolve_palette_entry` where they lie, each held at most its first melt
+        (science-composition-crusts.md §3.2 item 3):
+        - an ice at the lower of its coldest zone's annual mean (the cold profile's coldest point,
+          a locked world's night) and its frost point at its partial pressure;
+        - a crust at the mean T_s, or the warmest of the range where the record's mean is not
+          positive.
+      - _Liquids_ are P14.T49.h's `liquid_properties` at the record's mean T_s, since the record
+        gives no liquid's own area-mean yet:
+        - held at most the boiling point at the surface pressure on T49.b's saturation branch,
+          and into the range where the row states no branch or the temperature lies beyond (its
+          first melt, or a part in a million below its critical point);
+        - at the reference composition, since the record carries none; the supercooled stand-in
+          is `liquid_properties`' own;
+        - the entry's density the record's, its albedo the record's Fresnel reflectance, phase
+          row 0.
+      - _Melts_: a melting crust entry carries its melt's record. That is the lid where the crust
+        gives a melt area, and any non-ice crust entry whose transition lies below the climate's
+        warmest. The temperature is a locked world's dayside mean where it lies above the
+        solidus. Otherwise a rule gives it, at least `Derived`: the mean T_s where above the
+        solidus, else the warmest. Either way it is held at or above the solidus.
+      - Phase rows 0–2 only. `FeO_T` is not modelled (decision-pre-23-review item 36).
+    - _One Γ_: `CoarseInputs` gains `ground_inertia_j_per_m2_k_sqrt_s` (an `Option`, set by the
+      builder's `ground_inertia` and checked positive).
+      - `from_record` fills it from the record's conditions' ground (`SurfaceConditions::ground`;
+        its `expect(dead_code)` is gone, a lane-approved edit to `hooks/surface.rs`).
+      - `Regolith::of` reads it, so R09's Γ is the record's by construction on every body, thin
+        airs and bracketed bodies included.
+      - Hand-built inputs (no record's Γ) take T49.j's law at their lid at their equilibrium
+        temperature (`equilibrium_temperature`: `irradiation::equilibrium_temperature` at the
+        state's albedo, the one `Regolith` takes).
+      - `regolith_inertia_j_per_m2_k_sqrt_s` keeps its signature, since D1's listing calls it.
+      - The reference Mars's Γ moves from 48.082 (the law at its mean, 214.00 K) to 46.913 (at its
+        T_eq, 206.91 K). The Moon's 46.526 at 270.35 K is unchanged to the bit, its mean being its
+        T_eq; so is Ceres's.
+    - _R09's reference rows on the registry_ (`planetary/surface/reference.rs`):
+      - every solid entry is `resolve_palette_entry` of its row where it lies
+        (`Substance::entry(role, temperature)`). The hand albedo field is gone; each row's doc
+        keeps its hand value beside the registry's and labels the stand-ins.
+      - the water entry (`water_entry`) takes its record's exact Fresnel reflectance and the
+        registry's transition.
+      - Mars's CO₂ ice resolves at 150 K (`CARBON_DIOXIDE_FROST_K`).
+      - The bless note's A_N table is the test's (`the_reference_rows_resolve_from_the_registry`).
+    - _The header's pressure_: R09.T2.e's `header_pressure` already gives exactly 0 for
+      `Airless`. The census asserts it on every generated airless body it reads (527 of 568
+      airless bodies in its 40 systems).
+    - _The serve gate_ (`crates/hyperion-server/src/surface/inputs.rs`): `GENERATED_SURFACES_FROM` =
+      24, crate-private. `RecordInputs` answers as `for_body` does but turns its `Ok` into
+      `NotModelled(Surface)` below the gate's version, so the server's answers are 22's. Its
+      tripwire is `the_serve_gate_holds_until_its_version`.
+    - _Deviations and lane choices_ (the lane's ruling, Batch E):
+      - **Not modelled where the registry or the record does not model.** Over the 400 systems of
+        `system::tests::whole` at `RECORD_TIME`, 5,978 bodies have a surface section, every crust
+        modelled. 5,109 read `Ok`. 869 answer `NotModelled(Surface)`:
+        - 850: an `Ar` ice, whose solid density the registry has not read (`ARGON`'s fcc phase,
+          `density: None`), on cold airless members (the first two listed at a mean T_s of 15–16
+          K);
+        - 1: an `O2` ice at 23.9 K, in a solid phase whose density was not read;
+        - 18: a record whose mean T_s is 0 K, an unlit body's T_eq, below its own night floor
+          (its range 12–20 K). This is pre-existing at 22 (the lane: fallback_black_hole e101 at
+          446a06e4), and goes to main as deferred.
+
+        No stand-in densities. The label is the palette's refusal
+        (`ResolveBodyPaletteError::Solid` naming the substance and `DensityNotModelled`), since
+        `for_body`'s error type carries no cause. The follow-up is the registry's (P14.T49.b's
+        rows): solid argon's density and O₂'s missing phase.
+
+      - The liquids' and melts' temperature rules are as above. The record gives no liquid's own
+        area-mean temperature, and no eruption temperature (P14.T51.c).
+      - An ice crust (an ice shell's `H2O`) never carries a melt record: its liquid is its
+        condensate's own entry (decision-pre-23-review item 10).
+      - The sample: liquid seas of `H2O` on 52 bodies, `N2` on 42, `O2` on 33 and `ch4_c2h6_n2` on
+        171, each resolved. 72 melting lids carry melt records: `ultramafic` 69, `basalt_reduced`
+        2 and `basalt` 1.
+    - _Tests_:
+      - `a_generated_rocky_body_reads_its_record_and_a_giant_or_sub_neptune_has_no_solid_surface`
+        (was `…_is_not_modelled_…`) now pins `Ok`. Its crust, condensates and Γ are the record's
+        to the bit, and `for_body` equals `from_record` of the record's three.
+      - `every_generated_solid_body_reads_into_inputs_the_builder_takes`, the census: every body
+        reads `Ok` or `NotModelled(Surface)` for one recorded gap, and each palette is checked by
+        `check_record_palette`. Of 657 bodies, 527 read `Ok` and 130 have argon ice.
+      - `a_titan_like_body_s_sea_carries_its_record`: the first body with a `ch4_c2h6_n2` sea at a
+        mean T_s of 85–100 K is a Snowball at 87.28 K. Its record is P14.T49.h's there to the
+        bit, `Derived`, with scattering, a surface tension of 0.0166 N m⁻¹ and a viscosity of
+        2.47 × 10⁻⁴ Pa s, and its absorption absent (a component lacks it), never 0.
+      - `an_earth_like_body_s_sea_record_is_measured`.
+      - `a_lava_world_s_lid_entry_carries_a_melt_record`: a magma ocean and a partial melt, the
+        first of each in the sample.
+        - The magma ocean's `basalt` melts at 1,611.4 K, from its locked dayside, against a
+          solidus of 1,253.2 K.
+        - The airless partial melt is `basalt_reduced` over 0.018 of the surface. Its melt is held
+          at its solidus, 1,473.2 K, since the climate's warmest is 1,403.9 K.
+
+        Both records are `StandIn`.
+
+      - `a_surface_the_registry_or_the_record_does_not_model_answers_not_modelled`: an argon body
+        and an unlit one.
+      - `for_body_checks_a_moon_s_planet_before_the_crust` and the seasons tests pin `Ok`.
+      - `the_reference_rows_resolve_from_the_registry`.
+      - `airless::tests::the_regolith_reads_its_crust_s_lid`: Mars at T_eq, and a carried Γ.
+      - `the_radiative_model_reads_its_record_s_inertia_on_every_body`, the one-Γ sample test
+        over `whole().take(60)`: 683 airless bodies and 2 under a thin air read their record's Γ
+        to the bit, and 101 answer not modelled.
+      - The server's `the_serve_gate_holds_until_its_version` and
+        `a_generated_body_the_sim_reads_is_not_served_behind_the_gate`.
+    - _Moved goldens_: none. golden_diff against d9ae6cd2: "No golden files changed", GENERATOR_VERSION
+      22 → 22, "Nothing to reconcile". No golden pins a reference world's field before R09.T16, and
+      the record is unchanged.
+    - _Files_:
+      - `crates/hyperion-sim/src/planetary/surface/{inputs, palette (new), reference, mod}.rs`;
+      - `surface/steps/climate/airless.rs`;
+      - `planetary/hooks/surface.rs` (the one attribute);
+      - `crates/hyperion-server/src/surface/inputs.rs`.
+    - _Checks_, each through the lane lock and build-slot:
+      - the sim's `planetary::surface::` lib tests: 447 passed, 45 ignored (1,271 s);
+      - after the last code edits, the D3 tests by name (`inputs`, `reference` and `airless`)
+        with the slow Mars tests they reach (`erosion::tests::mars`'s four and
+        `craters::tests::cost::pass_mars`): 74 passed;
+      - the surface module's doc tests: 4 passed (`for_body`'s and `from_record`'s examples);
+      - R10's reference-world integration tests under `testing`: `surface_albedo_worlds` 2,
+        `surface_material_worlds` 2 and `surface_ground_worlds` 1 passed (`surface_reading_worlds`
+        has one ignored slow test, not run);
+      - `cargo test -p hyperion-server surface`: 58 + 2 passed; `surface_knowledge` and
+        `surface_service` whole: 2 + 2 passed;
+      - `cargo clippy -p hyperion-sim --lib --tests -- -D warnings` and
+        `cargo clippy -p hyperion-server --all-targets -- -D warnings`: clean;
+      - `just doc-check` and `cargo fmt --all -- --check`: clean.

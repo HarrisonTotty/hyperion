@@ -1139,11 +1139,9 @@ impl SurfaceConditions {
     }
 
     /// The ground's thermal inertia its night read (P14.T54.a): P14.T49.j's law at its lid, or
-    /// P14.T24.a's constant as its fallback ([`SurfaceInputs::lid`]).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the tests hold R09's airless inertia to it")
-    )]
+    /// P14.T24.a's constant as its fallback ([`SurfaceInputs::lid`]). Rendering plan R09's
+    /// `CoarseInputs` carries it from the record to its radiative model, so that the two read one
+    /// Γ (decision-p14-t54a-passes §3.5).
     #[must_use]
     pub(crate) const fn ground(&self) -> GroundInertia {
         self.ground

@@ -18,9 +18,18 @@
 //! The substances are plan 14's registry keys ([`SubstanceKey`], decision-composition §1.1), and
 //! a test holds every key these worlds and R09's synthetic ones use to a registry row, and each
 //! reference row's figures to its row's condensed columns (P14.T49.b). Each world's palette
-//! (decision-composition §1.7) carries the values the server will resolve from those rows
-//! (P14.T49.c's resolution, not built): each substance's figures are the ones its row below
-//! states with their sources. They began as R09.T2's synthetic palettes'
+//! (decision-composition §1.7) carries the values the server resolves from those rows: from
+//! P14.T54.a every solid entry is the registry's resolution of its row
+//! ([`resolve_palette_entry`]: P14.T49.c's and T49.i's normal albedo at the row's reference form,
+//! its family's phase law, its grain density where it lies, its transition and family;
+//! decision-p14-t49c-split §4), as a generated body's palette takes it, and the liquid water its
+//! record's Fresnel reflectance (decision-r11-palette-liquids §2, item 7). Each row below states
+//! the hand normal albedo it carried before, the registry's in V beside it, and whether the
+//! registry's optics are a stand-in (`CondensedOptics::is_stand_in`). A crystalline row's albedo
+//! is its fresh, clean grains', an upper bound until P14.T54.b's weathering and P14.T49.k's
+//! darkening agents, and R10.T10.a's `field_albedo_scale` rescales the rendered mean to the body's
+//! photometry. The other figures (densities, transitions, families) are the registry's to the
+//! bit, which a test holds, with their sources here. They began as R09.T2's synthetic palettes'
 //! (`hyperion_surface::testing`) and are kept apart from them, so that a correction to either set
 //! moves only its own output (the wire goldens pin the synthetic fields' palettes, and R09.T16's
 //! coarse goldens will pin these). A science review of 2026-10-10 read their basalt solidus,
@@ -67,7 +76,7 @@ use crate::planetary::hooks::SurfaceSeed;
 use crate::planetary::hooks::figures::wet_epoch::{
     MARS_EFFECTIVE_FLOW, PAST_EPOCH_RUNOFF_M_PER_YEAR, WET_WORLD_RUNOFF_M_PER_YEAR,
 };
-use crate::substance;
+use crate::substance::{self, resolve_palette_entry};
 use crate::units::consts::{SECONDS_PER_DAY, SOLAR_CONSTANT_W_PER_M2};
 use crate::units::{
     EarthFluxes, Gigayears, Kelvin, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metres,
@@ -101,63 +110,88 @@ const FELDSPATHIC_KEY: SubstanceKey = SubstanceKey::new_const("feldspathic");
 /// A phyllosilicate-rich rock (P14.T49.b's lithologies).
 const PHYLLOSILICATE_KEY: SubstanceKey = SubstanceKey::new_const("phyllosilicate");
 
-/// A substance of the reference palettes with its figures: what a [`PaletteEntry`] holds but its
-/// role, as the server would resolve it from the substance's registry row (P14.T49.b–c).
+/// A substance of the reference palettes with its figures and their sources: what a
+/// [`PaletteEntry`] holds but its role, its normal albedo and its phase row, which the registry's
+/// row gives (P14.T49.b–c and T49.i; [`Substance::entry`]).
 ///
-/// The normal albedos are the same in B, V and R: a band's value is P14.T49.c's to resolve from
-/// spectra, so each row takes one visible figure, the midpoint of R10's Design note 8's range for
-/// its class (researched there, mostly from memory, and to be settled in R10.T1.a), but the
-/// feldspathic crust's, the top of its range, the phyllosilicate's, Ceres's measured albedo, and
-/// liquid water's, the Fresnel reflectance of its surface at normal incidence in each band. Every
-/// phase row is 0 until R10 assigns its rows. Every density is a grain density, the porosity being
-/// how a material lies, which R10's forms carry (science-r09-drainage.md §3): a rock's or a
-/// mineral's solid over its own volume, and an ice's crystal density or a liquid's density at the
-/// temperature its row states.
+/// Every density is a grain density, the porosity being how a material lies, which R10's forms
+/// carry (science-r09-drainage.md §3): a rock's or a mineral's solid over its own volume, and an
+/// ice's crystal density or a liquid's density at the temperature its row states. Each is the
+/// registry's to the bit, as are the transition and the family, which a test holds.
+///
+/// Until P14.T54.a each row took one hand normal albedo, the same in B, V and R, the midpoint of
+/// R10's Design note 8's range for its class (researched there, mostly from memory), but the
+/// feldspathic crust's, the top of its range, and the phyllosilicate's, Ceres's measured albedo;
+/// and every phase row was 0. Each row's documentation keeps its hand value beside the registry's.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the figures are the sources' record, which the rows' tests hold to the registry"
+    )
+)]
 struct Substance {
     key: SubstanceKey,
-    normal_albedo_bvr: [f64; 3],
     grain_density_kg_m3: f64,
     transition_k: f64,
     mechanics: MechanicsFamily,
 }
 
 impl Substance {
-    /// The entry of the substance in `role`, with no liquid record and no `FeO_T`, which P14.T54.b
-    /// fills from the registry (decision-p14-t51d-weathering §1.6).
+    /// The entry of the solid substance in `role` where it lies at `temperature`: its registry
+    /// row's resolution ([`resolve_palette_entry`]), as a generated body's palette takes it
+    /// (P14.T54.a; decision-p14-t49c-split §4), with no liquid record and no `FeO_T`, which
+    /// P14.T54.b fills from the registry (decision-p14-t51d-weathering §1.6). A rock's grain
+    /// density is one value at every temperature, and an ice's its crystal density there.
+    ///
+    /// # Panics
+    ///
+    /// Never: every reference row is a registry row whose optics and solid density are modelled
+    /// where its worlds put it, as a test builds each world.
     #[must_use]
-    const fn entry(&self, role: PaletteRole) -> PaletteEntry {
-        PaletteEntry {
-            substance: self.key,
-            role,
-            normal_albedo_bvr: self.normal_albedo_bvr,
-            phase_row: 0,
-            grain_density_kg_m3: self.grain_density_kg_m3,
-            transition: Kelvin::new(self.transition_k),
-            mechanics: self.mechanics,
-            liquid: None,
-            feo_mass_fraction: None,
-        }
+    fn entry(&self, role: PaletteRole, temperature: Kelvin) -> PaletteEntry {
+        let id = substance::by_key(self.key.as_str()).expect("a reference row is a registry row");
+        resolve_palette_entry(id, role, temperature)
+            .expect("a reference row's solid resolves from the registry where it lies")
     }
 
-    /// The substance's [`PaletteRole::Liquid`] entry with its record `liquid`, whose density is
-    /// the substance's grain density.
-    #[must_use]
-    fn liquid_entry(&self, liquid: LiquidProperties) -> PaletteEntry {
-        PaletteEntry {
-            liquid: Some(liquid),
-            ..self.entry(PaletteRole::Liquid)
-        }
-    }
-
-    /// The substance's [`PaletteRole::Ice`] entry with ice Ih's density at `temperature`, where the
-    /// ice lies on its body ([`substance::ice_ih_density`]): ice Ih's, so it serves [`WATER_ICE`]
-    /// alone (science-composition-crusts.md §3).
+    /// The substance's [`PaletteRole::Ice`] entry where the ice lies on its body, at `temperature`
+    /// (science-composition-crusts.md §3): water ice Ih's density there for [`WATER_ICE`]
+    /// ([`substance::ice_ih_density`], the registry's).
     #[must_use]
     fn ice_entry_at(&self, temperature: Kelvin) -> PaletteEntry {
-        PaletteEntry {
-            grain_density_kg_m3: substance::ice_ih_density(temperature).value(),
-            ..self.entry(PaletteRole::Ice)
-        }
+        self.entry(PaletteRole::Ice, temperature)
+    }
+}
+
+/// Liquid water's [`PaletteRole::Liquid`] entry, with its record [`WATER_RECORD`]: its normal
+/// albedo the record's Fresnel reflectance at normal incidence in B, V and R, a specular
+/// surface's ([`LiquidProperties::fresnel_normal_albedo_bvr`]; decision-r11-palette-liquids §2,
+/// item 7), as a generated body's sea takes it: ((n − 1) ÷ (n + 1))² from the record's n at the
+/// bands' 0.44, 0.55 and 0.64 µm, 0.021 092, 0.020 500 and 0.020 210, where the entry took them
+/// to four places before P14.T54.a. Its grain density is the record's density, 997.047 kg m⁻³ at
+/// 25 °C and 100 kPa (IAPWS-95, Wagner and Pruß 2002, J. Phys. Chem. Ref. Data 31, 387); its
+/// transition and family water's row's (its frozen form's); and its phase row 0, no particulate
+/// law.
+///
+/// # Panics
+///
+/// Never: water's row has condensed columns.
+#[must_use]
+fn water_entry() -> PaletteEntry {
+    let water = substance::by_key(H2O.as_str())
+        .and_then(|id| id.substance().condensed())
+        .expect("water's row has condensed columns");
+    PaletteEntry {
+        substance: H2O,
+        role: PaletteRole::Liquid,
+        normal_albedo_bvr: WATER_RECORD.fresnel_normal_albedo_bvr(),
+        phase_row: 0,
+        grain_density_kg_m3: WATER_RECORD.density_kg_m3,
+        transition: water.transition().temperature(),
+        mechanics: water.mechanics(),
+        liquid: Some(WATER_RECORD),
+        feo_mass_fraction: None,
     }
 }
 
@@ -203,9 +237,10 @@ const CHONDRITIC_SOLIDUS_K: f64 = 1_423.15;
 /// mean of eight Alae lava lake tholeiites, 2,920–3,040 (Peck 1978, USGS Professional Paper
 /// 935-B, p. B20; science-r09-drainage.md §3): a terrestrial tholeiite's; an iron-rich basalt is
 /// [`BASALT_FE`].
+///
+/// Its normal albedo is the registry's, 0.093 in V, against its hand 0.10 before P14.T54.a.
 const BASALT: Substance = Substance {
     key: BASALT_KEY,
-    normal_albedo_bvr: [0.10; 3],
     grain_density_kg_m3: 3_010.0,
     transition_k: BASALT_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
@@ -224,9 +259,12 @@ const BASALT: Substance = Substance {
 /// rises with `TiO₂` (Kiefer et al. 2012, GRL 39, L07201, abstract and Table 1; a high-titanium
 /// row waits for a second province lithology, science-composition-crusts.md §2); and
 /// [`BASALT_FE_SOLIDUS_K`].
+///
+/// Its normal albedo is the registry's, 0.410 in V, a stand-in (a mixture of five laboratory
+/// parts, its mode adopted), against its hand 0.10 before P14.T54.a: the clean grains' upper
+/// bound, which a Mars-like lid shows (decision-pre-23-review item 13; P14.T49.k darkens it).
 const BASALT_FE: Substance = Substance {
     key: BASALT_FE_KEY,
-    normal_albedo_bvr: [0.10; 3],
     grain_density_kg_m3: 3_310.0,
     transition_k: BASALT_FE_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
@@ -238,9 +276,12 @@ const BASALT_FE: Substance = Substance {
 /// 2,635–2,671 across their ranges; science-composition-crusts.md §4) and a dry solidus at 1 atm
 /// of about 960 °C (from memory; the dry haplogranite solidus's primary source is Huang and
 /// Wyllie 1975, J. Geol. 83, 737, not read; low confidence).
+///
+/// Its normal albedo is the registry's, 0.818 in V, a stand-in (a mixture of five laboratory
+/// parts, its mode adopted), against its hand 0.275 before P14.T54.a: the clean grains' upper
+/// bound.
 const GRANITE: Substance = Substance {
     key: GRANITE_KEY,
-    normal_albedo_bvr: [0.275; 3],
     grain_density_kg_m3: 2_650.0,
     transition_k: 1_233.15,
     mechanics: MechanicsFamily::Silicate,
@@ -263,9 +304,12 @@ const GRANITE: Substance = Substance {
 /// L07201, Table 1), and what 75–78 per cent An₉₅ plagioclase gives with low-calcium pyroxene and
 /// olivine of Mg# 66–72, 2,880–2,910 (science-composition-crusts.md §10.1), against a pure
 /// anorthosite's about 2,790 (P14.T49.b's row); and [`PLAGIOCLASE_ROCK_SOLIDUS_K`].
+///
+/// Its normal albedo is the registry's, 0.667 in V, a stand-in (a mixture of three laboratory
+/// parts), against its hand 0.20 before P14.T54.a: the clean grains' upper bound, which the
+/// weathered highlands lie well below.
 const FELDSPATHIC: Substance = Substance {
     key: FELDSPATHIC_KEY,
-    normal_albedo_bvr: [0.20; 3],
     grain_density_kg_m3: 2_900.0,
     transition_k: PLAGIOCLASE_ROCK_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
@@ -279,9 +323,12 @@ const FELDSPATHIC: Substance = Substance {
 /// et al., Handbook of Mineralogy), not Ceres's crust's bulk, 1,287 (+70/−87) kg m⁻³ with its ice
 /// and salts (Ermakov et al. 2017, JGR Planets 122, 2267, §5.4), which is the body's mixture, not
 /// a substance's; and, for its dehydrated residue's solidus, [`CHONDRITIC_SOLIDUS_K`].
+///
+/// Its normal albedo is the registry's, 0.770 in V, a stand-in (a mixture of two laboratory
+/// parts, its mode adopted), against its hand 0.094, Ceres's measured albedo, before
+/// P14.T54.a: the clean grains' upper bound, which Ceres's dark surface lies well below.
 const PHYLLOSILICATE: Substance = Substance {
     key: PHYLLOSILICATE_KEY,
-    normal_albedo_bvr: [0.094; 3],
     grain_density_kg_m3: 2_500.0,
     transition_k: CHONDRITIC_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
@@ -295,9 +342,11 @@ const PHYLLOSILICATE: Substance = Substance {
 /// 2,575 at 110 K by Dusek et al.'s colder cell, a 1.5 per cent change; and its melting point,
 /// 850 °C, where NIST-JANAF's solid ends and its liquid begins (Chase 1998, via the NIST WebBook;
 /// safety cards give 851 °C; science-composition-crusts.md §4).
+///
+/// Its normal albedo is the registry's, 1.092 in V, a stand-in (splib07a's trona GDS148),
+/// against its hand 0.65 before P14.T54.a.
 const SODIUM_CARBONATE: Substance = Substance {
     key: SubstanceKey::new_const("Na2CO3"),
-    normal_albedo_bvr: [0.65; 3],
     grain_density_kg_m3: 2_540.0,
     transition_k: 1_123.15,
     mechanics: MechanicsFamily::Salt,
@@ -309,9 +358,11 @@ const SODIUM_CARBONATE: Substance = Substance {
 /// bulk, 1,200 kg m⁻³ (p. 126 and Table 37), being a form's (science-r09-drainage.md §3);
 /// iron-rich and basaltic, so [`BASALT_FE_SOLIDUS_K`] (an assumption: no measurement of the dust
 /// was found; its chlorides melt first and are minor; science-composition-crusts.md §4).
+///
+/// Its normal albedo is the registry's, 0.351 in V, a stand-in (from `mars-dust.json`),
+/// against its hand 0.215 before P14.T54.a.
 const MARS_DUST: Substance = Substance {
     key: SubstanceKey::new_const("mars_dust"),
-    normal_albedo_bvr: [0.215; 3],
     grain_density_kg_m3: 2_600.0,
     transition_k: BASALT_FE_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
@@ -340,23 +391,12 @@ fn coldest_zone(mean: Kelvin, equator_pole_contrast_k: f64) -> Kelvin {
 /// ([`substance::ice_ih_density`]; 916.72 kg m⁻³ at its melting point, the row's figure, IAPWS
 /// R10-06(2009), Table 6: 916.721 463 kg m⁻³), each world's entry taking it where its ice lies
 /// ([`Substance::ice_entry_at`]; science-composition-crusts.md §3).
+///
+/// Its normal albedo is the registry's, 0.949 in V (fresh snow of 100 µm grains), against its
+/// hand 0.965 before P14.T54.a and R10's `FRESH_SNOW_V`, 0.97.
 const WATER_ICE: Substance = Substance {
     key: H2O,
-    normal_albedo_bvr: [0.965; 3],
     grain_density_kg_m3: 916.72,
-    transition_k: WATER_MELTING_K,
-    mechanics: MechanicsFamily::WaterIce,
-};
-
-/// Liquid water at 25 °C, its record's temperature ([`WATER_RECORD`]): the Fresnel reflectance at
-/// normal incidence, ((n − 1) ÷ (n + 1))², from its record's n at the bands' 0.44, 0.55 and
-/// 0.64 µm, 0.021 092, 0.020 500 and 0.020 210, to four places, a specular surface's, never a
-/// Lambertian albedo (decision-r11-palette-liquids §2, item 7); its record's density, 997.047 kg
-/// m⁻³ at 25 °C and 100 kPa (IAPWS-95, Wagner and Pruß 2002, J. Phys. Chem. Ref. Data 31, 387).
-const WATER: Substance = Substance {
-    key: H2O,
-    normal_albedo_bvr: [0.021_1, 0.020_5, 0.020_2],
-    grain_density_kg_m3: WATER_RECORD.density_kg_m3,
     transition_k: WATER_MELTING_K,
     mechanics: MechanicsFamily::WaterIce,
 };
@@ -375,8 +415,8 @@ const WATER: Substance = Substance {
 ///   1997's (Appl. Opt. 36, 8710) at 22 °C over 500–725 nm and Kou, Labrie and Chýlek 1993's
 ///   (Appl. Opt. 32, 3531) at 22 °C over 730–780 nm. The client's
 ///   `view/atmosphere/materials/paletteLiquids.test.ts` holds these bins to the file's means, so
-///   that a change to the file fails it; taking the change here, with [`WATER`]'s normal albedo,
-///   re-blesses at the version in force.
+///   that a change to the file fails it; taking the change here, which moves [`water_entry`]'s
+///   normal albedo with it, re-blesses at the version in force.
 /// - **Density:** IAPWS-95's 997.047 kg m⁻³ at 298.15 K and 100 kPa (IAPWS R6-95(2018)).
 /// - **Surface tension:** IAPWS R1-76(2014)'s 0.071 97 N m⁻¹ at 298.15 K.
 /// - **Viscosity:** IAPWS R12-08's 8.900 × 10⁻⁴ Pa s at 298.15 K and 100 kPa (Huber et al. 2009,
@@ -436,13 +476,20 @@ const WATER_RECORD: LiquidProperties = LiquidProperties {
     viscosity_pa_s: Some(8.900e-4),
 };
 
+/// The temperature the reference Mars's CO₂ ice entry takes its density at: 150 K, a Mars-like
+/// frost's, near its frost point at Mars's partial pressure (science-composition-crusts.md §3.2,
+/// item 4: "Its CO₂ stays 1,621 at 150 K, near its frost point").
+const CARBON_DIOXIDE_FROST_K: f64 = 150.0;
+
 /// CO₂ ice: Design note 8's carbon dioxide frost, 0.4–0.8; its density at 150 K, a Mars-like
 /// frost's temperature, 1,621 kg m⁻³ (Mangan et al. 2017, Icarus 294, 201, whose fit over 80–195
 /// K is ρ = 1.723 91 − 2.53 × 10⁻⁴ T − 2.87 × 10⁻⁶ T² g cm⁻³); and its triple point, 216.592 K,
 /// where it can first melt (Span and Wagner 1996, J. Phys. Chem. Ref. Data 25, 1509).
+///
+/// Its normal albedo is the registry's, 0.955 in V, pure frost, against its hand 0.6 before
+/// P14.T54.a: Mars's caps are dusty, and a dust cover is not modelled.
 const CARBON_DIOXIDE_ICE: Substance = Substance {
     key: CO2,
-    normal_albedo_bvr: [0.6; 3],
     grain_density_kg_m3: 1_621.0,
     transition_k: 216.592,
     mechanics: MechanicsFamily::VolatileIce,
@@ -751,10 +798,10 @@ pub fn earth_like() -> CoarseInputs {
             melt_area_fraction: 0.0,
         })
         .palette(palette(vec![
-            BASALT.entry(PaletteRole::SecondaryCrust),
-            GRANITE.entry(PaletteRole::TertiaryCrust),
+            BASALT.entry(PaletteRole::SecondaryCrust, mean),
+            GRANITE.entry(PaletteRole::TertiaryCrust, mean),
             WATER_ICE.ice_entry_at(coldest_zone(mean, contrast)),
-            WATER.liquid_entry(WATER_RECORD),
+            water_entry(),
         ]))
         .condensates([
             condensate(
@@ -894,10 +941,10 @@ pub fn mars_like() -> CoarseInputs {
             melt_area_fraction: 0.0,
         })
         .palette(palette(vec![
-            BASALT_FE.entry(PaletteRole::SecondaryCrust),
-            CARBON_DIOXIDE_ICE.entry(PaletteRole::Ice),
+            BASALT_FE.entry(PaletteRole::SecondaryCrust, mean),
+            CARBON_DIOXIDE_ICE.ice_entry_at(Kelvin::new(CARBON_DIOXIDE_FROST_K)),
             WATER_ICE.ice_entry_at(coldest_zone(mean, contrast)),
-            MARS_DUST.entry(PaletteRole::Deposit),
+            MARS_DUST.entry(PaletteRole::Deposit, mean),
         ]))
         .condensates([
             condensate(
@@ -948,12 +995,13 @@ pub fn moon_like() -> CoarseInputs {
     let rotation = Seconds::new(27.3217 * SECONDS_PER_DAY);
     let surface_age = Gigayears::new(4.4);
     let flux = orbit_mean_flux(1.0, 0.0167);
+    let mean = airless_rock_temperature(flux);
     CoarseInputs::builder()
         .body(BodyRef::new(0, 3))
         .figure(figure(1_737.4e3, 0.0012))
         .gravity(gravity)
         .sigma_h(Metres::new(2_239.0))
-        .mean_surface_temperature(airless_rock_temperature(flux))
+        .mean_surface_temperature(mean)
         .equator_pole_contrast_k(120.0)
         .day_night_contrast_k(200.0)
         .spin(Spin {
@@ -1001,8 +1049,8 @@ pub fn moon_like() -> CoarseInputs {
             melt_area_fraction: 0.0,
         })
         .palette(palette(vec![
-            FELDSPATHIC.entry(PaletteRole::PrimaryCrust),
-            BASALT_FE.entry(PaletteRole::Province),
+            FELDSPATHIC.entry(PaletteRole::PrimaryCrust, mean),
+            BASALT_FE.entry(PaletteRole::Province, mean),
             WATER_ICE.ice_entry_at(Kelvin::new(COLD_TRAP_H2O_K)),
         ]))
         .build()
@@ -1038,12 +1086,13 @@ pub fn ceres_like() -> CoarseInputs {
     let rotation = Seconds::new(9.074_17 * 3_600.0);
     let surface_age = Gigayears::new(4.0);
     let flux = orbit_mean_flux(a_au, 0.0758);
+    let mean = airless_rock_temperature(flux);
     CoarseInputs::builder()
         .body(BodyRef::new(0, 4))
         .figure(figure(469.7e3, 0.075))
         .gravity(gravity)
         .sigma_h(Metres::new(2_077.0))
-        .mean_surface_temperature(airless_rock_temperature(flux))
+        .mean_surface_temperature(mean)
         .equator_pole_contrast_k(55.0)
         .day_night_contrast_k(100.0)
         .spin(Spin {
@@ -1091,9 +1140,9 @@ pub fn ceres_like() -> CoarseInputs {
             melt_area_fraction: 0.0,
         })
         .palette(palette(vec![
-            PHYLLOSILICATE.entry(PaletteRole::PrimaryCrust),
+            PHYLLOSILICATE.entry(PaletteRole::PrimaryCrust, mean),
             WATER_ICE.ice_entry_at(Kelvin::new(COLD_TRAP_H2O_K)),
-            SODIUM_CARBONATE.entry(PaletteRole::Deposit),
+            SODIUM_CARBONATE.entry(PaletteRole::Deposit, mean),
         ]))
         .build()
         .expect("the reference Ceres's inputs are valid")
@@ -1165,6 +1214,9 @@ pub(crate) fn builder_of(inputs: &CoarseInputs) -> CoarseInputsBuilder {
     builder = builder.cold_traps(inputs.cold_traps().iter().copied());
     if let Some(group) = inputs.cold_trap_inputs() {
         builder = builder.cold_trap_inputs(*group);
+    }
+    if let Some(inertia) = inputs.ground_inertia_j_per_m2_k_sqrt_s() {
+        builder = builder.ground_inertia(inertia);
     }
     builder
 }
@@ -1609,6 +1661,82 @@ mod tests {
             co2.condensed().unwrap().mechanics(),
             CARBON_DIOXIDE_ICE.mechanics
         );
+    }
+
+    /// P14.T54.a (decision-pre-23-review item 34 B; decision-p14-t49c-split §4): every solid entry
+    /// of the reference palettes is its registry row's resolution, its normal albedo the row's
+    /// optics' and its phase row its family's law's, 1 or 2, never 3; the liquid water's albedo is
+    /// its record's Fresnel reflectance and its phase row 0. The rows' V albedos are the bless
+    /// note's, each beside its hand value of version 22, and the stand-ins are the six the note
+    /// labels.
+    #[test]
+    fn the_reference_rows_resolve_from_the_registry() {
+        use hyperion_testkit::float::assert_same_bits;
+        // The registry's A_N in V, to three places, and the hand value it replaced.
+        let rows = [
+            ("basalt", 0.093, 0.10, false),
+            ("basalt_fe", 0.410, 0.10, true),
+            ("granite", 0.818, 0.275, true),
+            ("feldspathic", 0.667, 0.20, true),
+            ("phyllosilicate", 0.770, 0.094, true),
+            ("Na2CO3", 1.092, 0.65, true),
+            ("mars_dust", 0.351, 0.215, true),
+            ("H2O", 0.949, 0.965, false),
+            ("CO2", 0.955, 0.6, false),
+        ];
+        let mut seen = std::collections::BTreeSet::new();
+        for world in [earth_like(), mars_like(), moon_like(), ceres_like()] {
+            for entry in world.palette().entries() {
+                let key = entry.substance.as_str();
+                let row = substance::by_key(key).unwrap().substance();
+                let condensed = row.condensed().unwrap();
+                assert_same_bits(
+                    entry.transition.value(),
+                    condensed.transition().temperature().value(),
+                );
+                assert_eq!(entry.mechanics, condensed.mechanics(), "{key}");
+                assert_eq!(entry.feo_mass_fraction, None, "{key}");
+                if entry.role == PaletteRole::Liquid {
+                    let record = entry.liquid.as_ref().unwrap();
+                    let fresnel = record.fresnel_normal_albedo_bvr();
+                    for (held, f) in entry.normal_albedo_bvr.iter().zip(fresnel) {
+                        assert_same_bits(*held, f);
+                    }
+                    assert_eq!(entry.phase_row, 0, "{key}");
+                    continue;
+                }
+                let optics = row.condensed_optics().unwrap();
+                for (held, a) in entry
+                    .normal_albedo_bvr
+                    .iter()
+                    .zip(optics.normal_albedo_bvr())
+                {
+                    assert_same_bits(*held, a);
+                }
+                assert_eq!(entry.phase_row, u8::from(condensed.phase_law()), "{key}");
+                assert!(
+                    (1..=2).contains(&entry.phase_row),
+                    "{key}: {}",
+                    entry.phase_row
+                );
+                assert!(entry.liquid.is_none(), "{key}");
+                let (_, v, hand, stand_in) = rows
+                    .iter()
+                    .copied()
+                    .find(|&(k, ..)| k == key)
+                    .unwrap_or_else(|| panic!("{key} is a reference row"));
+                let a_v = optics.normal_albedo_bvr()[1];
+                assert!((a_v - v).abs() < 5e-4, "{key}: A_N {a_v} in V");
+                assert_eq!(optics.is_stand_in(), stand_in, "{key}");
+                if seen.insert(key.to_owned()) {
+                    eprintln!(
+                        "{key}: A_N in V {a_v:.3}, the hand value {hand}{}",
+                        if stand_in { ", a stand-in" } else { "" }
+                    );
+                }
+            }
+        }
+        assert_eq!(seen.len(), rows.len(), "{seen:?}");
     }
 
     #[test]
