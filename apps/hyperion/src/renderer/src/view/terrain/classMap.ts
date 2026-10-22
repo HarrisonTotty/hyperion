@@ -18,6 +18,12 @@
  *   shades with `elsewhere`, as the lit terrain's law 0 takes such a slot ({@link classMapLawsOf}).
  *   `elsewhere` is R07's uniform `lawFor(p, q, template)`, the body's photometry's law. R07's disc
  *   scales every law's A for its figure (`oblateAlbedoScale`), the classes' included, as it did.
+ * - **The maturity** (R10.T1.c's client half; decision-r10-t1c-client-scope §2.3) comes in the same
+ *   answer where the body's header carries one: each texel's band-0 code and each class's band-0
+ *   albedo nodes. The texels carry both ({@link classMapTexelsOf}), so that the disc draws each
+ *   named class's A from its nodes at the texels' codes and the point folds them into its elements'
+ *   shares; the class's law takes its node K − 1, its albedo at the body's background maturity
+ *   ({@link classMapLawsOf}).
  * - **The normal map** (R10.T10.g; decision-r10-t16-leans §1, remedy 1) comes in the same answer:
  *   each surveyed cell of the field's own level with the shading normal the coarsest terrain gives
  *   its centre, packed as R07's disc reads it (`bodies/discNormals.ts`' `packNormalMap`,
@@ -40,6 +46,7 @@ import type { PhotometricLaw } from "../appearance/law";
 import { cancelClassMapPoint, queueClassMapPoint } from "../bodies/classMapPoint";
 import { type NormalMapTexels, normalMapTexture, packNormalMap } from "../bodies/discNormals";
 import {
+  type ClassMapTexel,
   type ClassMapTexels,
   classMapSurface,
   MAX_DISC_CLASSES,
@@ -47,9 +54,11 @@ import {
 } from "../bodies/discSurface";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import type { RenderEngine, TextureHandle } from "../engine/types";
+import type { Rgb } from "../photometry/toneCurve";
 import { fieldCellAt } from "./coverage";
+import { MATURITY_NODES } from "./maturityNodes";
 import { classPhotometryOf, classRowLaw, PHASE_LAW } from "./terrainMaterial";
-import type { ClassMapAnswer } from "./workers/messages";
+import type { ClassMapAnswer, ClassMapMaturityAnswer } from "./workers/messages";
 import { PHOTOMETRY_STRIDE } from "./workers/messages";
 import type { FieldChange, HeightWorkerPool } from "./workers/pool";
 
@@ -76,9 +85,12 @@ function classCount(answer: ClassMapAnswer): number {
 /**
  * The laws of an answered map's classes, one per class in its order: each class's photometry on its
  * law's row law, a distinct object, or `null` for a class whose palette names no substance (law
- * code 0), which shades with `elsewhere`.
+ * code 0), which shades with `elsewhere`. Where the map carries its maturity (R10.T1.c's client
+ * half), a class's A is its node K − 1, T₀(m_body), the albedo at the body's background maturity
+ * from which its texels' nodes draw it; its row and L(0) are its photometry's either way.
  *
- * @throws Error for photometry that is not five values a class, or a law code no law has.
+ * @throws Error for photometry that is not five values a class, nodes that are not K × 3 a class,
+ *   or a law code no law has.
  */
 export function classMapLawsOf(answer: ClassMapAnswer): ReadonlyArray<PhotometricLaw | null> {
   const classes = classCount(answer);
@@ -87,21 +99,56 @@ export function classMapLawsOf(answer: ClassMapAnswer): ReadonlyArray<Photometri
       `a class map of ${String(classes)} classes has ${String(answer.photometry.length)} photometry values`,
     );
   }
+  const nodes = answer.maturity === undefined ? null : displayNodesOf(answer.maturity, classes);
   return Array.from({ length: classes }, (_, k): PhotometricLaw | null => {
     const photometry = classPhotometryOf(answer.photometry, k);
-    return photometry === null
-      ? null
-      : { ...classRowLaw(photometry.code, photometry.l0), a: photometry.a };
+    if (photometry === null) {
+      return null;
+    }
+    // With a maturity, A is the class's albedo at the body's background maturity, its node K − 1
+    // (R10.T1.c's client half), which its nodes' factors are taken against at the point.
+    const at = 3 * (MATURITY_NODES * k + MATURITY_NODES - 1);
+    const a: Rgb =
+      nodes === null
+        ? photometry.a
+        : [nodes[at] ?? Number.NaN, nodes[at + 1] ?? Number.NaN, nodes[at + 2] ?? Number.NaN];
+    return { ...classRowLaw(photometry.code, photometry.l0), a };
   });
+}
+
+/**
+ * An answered map's nodes in the display channels, as its texels carry them: each class's K nodes,
+ * node j of class c at 3 (K c + j), the module's B, V and R turned to r, g and b as
+ * `classPhotometryOf` turns a law's A.
+ *
+ * @throws Error for nodes that are not K × 3 a class.
+ */
+function displayNodesOf(maturity: ClassMapMaturityAnswer, classes: number): Float32Array {
+  const values = 3 * MATURITY_NODES * classes;
+  if (maturity.nodes.length !== values) {
+    throw new Error(
+      `a class map of ${String(classes)} classes has ${String(values)} node values, not ${String(maturity.nodes.length)}`,
+    );
+  }
+  const out = new Float32Array(values);
+  for (let at = 0; at < values; at += 3) {
+    out[at] = maturity.nodes[at + 2] ?? 0;
+    out[at + 1] = maturity.nodes[at + 1] ?? 0;
+    out[at + 2] = maturity.nodes[at] ?? 0;
+  }
+  return out;
 }
 
 /**
  * An answered map packed as R07's disc reads it (`packClassMap`, with its gutter): each texel the
  * survey touches its weights byte ÷ 255 times its surveyed share, every other texel `null`; `null`
- * for a map of no class, which draws as the uniform law.
+ * for a map of no class, which draws as the uniform law. Where the answer carries its maturity
+ * (R10.T1.c's client half), each texel's code and the classes' nodes in the display channels, a
+ * class drawn from its nodes where its palette names a substance (a law of its own).
  *
  * @throws Error for an answer at another level than {@link CLASS_MAP_LEVEL}, of more than
- *   `MAX_DISC_CLASSES` classes, or whose texels, shares and weights do not agree in number.
+ *   `MAX_DISC_CLASSES` classes, or whose texels, shares, weights and maturity codes do not agree in
+ *   number, or whose nodes are not K × 3 a class.
  */
 export function classMapTexelsOf(answer: ClassMapAnswer): ClassMapTexels | null {
   const classes = classCount(answer);
@@ -128,8 +175,10 @@ export function classMapTexelsOf(answer: ClassMapAnswer): ClassMapTexels | null 
     const cell = fieldCellAt(CLASS_MAP_LEVEL, answer.texels[t] ?? 0);
     byTexel.set((cell.face * n + cell.j) * n + cell.i, t);
   }
-  return packClassMap(n, classes, ({ face, i, j }) => {
-    const t = byTexel.get((face * n + j) * n + i);
+  const indexOf = ({ face, i, j }: ClassMapTexel): number | undefined =>
+    byTexel.get((face * n + j) * n + i);
+  const weightsOf = (texel: ClassMapTexel): number[] | null => {
+    const t = indexOf(texel);
     if (t === undefined) {
       return null;
     }
@@ -138,6 +187,23 @@ export function classMapTexelsOf(answer: ClassMapAnswer): ClassMapTexels | null 
       { length: classes },
       (_, k) => ((answer.weights[t * classes + k] ?? 0) / BYTE_MAX) * share,
     );
+  };
+  const { maturity } = answer;
+  if (maturity === undefined) {
+    return packClassMap(n, classes, weightsOf);
+  }
+  if (maturity.codes.length !== count) {
+    throw new Error(
+      `a class map's ${String(count)} texels have ${String(maturity.codes.length)} maturity codes`,
+    );
+  }
+  return packClassMap(n, classes, weightsOf, {
+    codeOf: (texel) => maturity.codes[indexOf(texel) ?? -1] ?? Number.NaN,
+    nodes: displayNodesOf(maturity, classes),
+    drawn: Array.from(
+      { length: classes },
+      (_, k) => classPhotometryOf(answer.photometry, k) !== null,
+    ),
   });
 }
 

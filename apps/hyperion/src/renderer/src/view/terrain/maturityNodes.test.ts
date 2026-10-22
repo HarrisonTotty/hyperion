@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import layerGolden from "../../../../../../../crates/hyperion-surface/tests/golden/worker/maturity_layer.golden?raw";
+import { collapseWhitespace } from "../../test/wgslText";
 import maturityNodesWgsl from "../shaders/maturityNodes.wgsl?raw";
 import {
   MATURITY_CODE_MAX,
@@ -238,8 +239,8 @@ describe("the shader's library, maturityNodes.wgsl, against the twin (R10.T1.c)"
   });
 
   it("mixes a segment's two nodes linearly in the albedo, (1 − f) Tᵢ + f Tᵢ₊₁", () => {
-    expect(maturityNodesWgsl).toContain(
-      "fn maturity_mix(lo : vec3f, hi : vec3f, fraction : f32) -> vec3f {\n  return (1.0 - fraction) * lo + fraction * hi;\n}",
+    expect(collapseWhitespace(maturityNodesWgsl)).toContain(
+      "fn maturity_mix(lo : vec3f, hi : vec3f, fraction : f32) -> vec3f { return (1.0 - fraction) * lo + fraction * hi; }",
     );
   });
 

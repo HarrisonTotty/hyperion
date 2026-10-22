@@ -6,7 +6,8 @@
 # photorealistic and a wireframe instrument, and alone), then writes the results file and its
 # summary. No server is needed.
 #
-#   viewsCheck.sh [--hidden] [--setting high|low] [--smoke] [--out <dir>] [--terrain [--handover]]
+#   viewsCheck.sh [--hidden] [--setting high|low] [--smoke] [--out <dir>]
+#                 [--terrain [--handover] [--weathered]]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
 # --hidden never shows the window (offscreen rendering): no presentation times and no question,
@@ -30,6 +31,12 @@
 # surveyed cell's brightness compared. Both settings by default, as --terrain; it writes
 # <date>-<machine>-<setting>-handover.json and .md beside the terrain run's, and exits 1 unless
 # every judged cell is within 1/3 stop. --handover without --terrain is refused by the client.
+#
+# --terrain --weathered, with or without --handover, serves the run TEST MOON weathered's field in
+# TERRAIN TEST's place (plan R10, R10.T1.c; decision-r10-t1c-client-scope §3): the same moon on a
+# 1 Gyr surface, its young craters ringed by haloes of fresh regolith. The files are named
+# <date>-<machine>-<setting>-terrain-weathered and -handover-weathered, and the run block names
+# the fixture. --weathered without --terrain is refused by the client; the script passes it on.
 #
 # Each launch gets a fresh `--user-data-dir`, removed afterwards; Electron runs in a process group
 # of its own under `timeout`, killed when the launch ends or the script ends for any reason. The

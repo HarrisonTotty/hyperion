@@ -94,7 +94,13 @@ function session(overrides: Partial<ViewsCheckSessionDeps> = {}): {
   const terrainWritten: TerrainCheckResults[] = [];
   const handoverWritten: HandoverCheckResults[] = [];
   const deps: ViewsCheckSessionDeps = {
-    launch: { setting: "high", smoke: false, out: null, run: "several-views" },
+    launch: {
+      setting: "high",
+      smoke: false,
+      out: null,
+      run: "several-views",
+      fixture: "terrain-test",
+    },
     describe: () =>
       Promise.resolve({
         startedAt: new Date("2026-10-05T12:00:00Z"),
@@ -156,7 +162,7 @@ function terrainSession(
   overrides: Partial<ViewsCheckSessionDeps> = {},
 ): ReturnType<typeof session> {
   return session({
-    launch: { setting: "high", smoke: false, out: null, run: "terrain" },
+    launch: { setting: "high", smoke: false, out: null, run: "terrain", fixture: "terrain-test" },
     ...overrides,
   });
 }
@@ -166,7 +172,7 @@ function handoverSession(
   overrides: Partial<ViewsCheckSessionDeps> = {},
 ): ReturnType<typeof session> {
   return session({
-    launch: { setting: "high", smoke: false, out: null, run: "handover" },
+    launch: { setting: "high", smoke: false, out: null, run: "handover", fixture: "terrain-test" },
     ...overrides,
   });
 }
@@ -352,6 +358,25 @@ describe("the views check's session on a terrain launch (R10.T16.d)", () => {
     expect(terrainWritten[0]?.run.captures.value).toBe("target/views-check/terrain/captures-x");
   });
 
+  it("records the weathered fixture of a --weathered launch, and none of TERRAIN TEST's (R10.T1.c)", async () => {
+    const plain = terrainSession();
+    const weathered = terrainSession({
+      launch: {
+        setting: "high",
+        smoke: false,
+        out: null,
+        run: "terrain",
+        fixture: "terrain-test-weathered",
+      },
+    });
+    await plain.session.writeTerrainResults(TERRAIN_RECORD);
+    await weathered.session.writeTerrainResults(TERRAIN_RECORD);
+    expect([
+      Object.hasOwn(plain.terrainWritten[0]?.run ?? {}, "fixture"),
+      weathered.terrainWritten[0]?.run.fixture,
+    ]).toEqual([false, "terrain-test-weathered"]);
+  });
+
   it("ends with 0 when its results pass", async () => {
     const { session: run, deps } = terrainSession();
     await run.writeTerrainResults(TERRAIN_RECORD);
@@ -403,6 +428,25 @@ describe("a hand-over check's session (R10.T10.g)", () => {
     const { session: run, handoverWritten } = handoverSession();
     await run.writeHandoverResults(HANDOVER_RECORD);
     expect(handoverWritten[0]?.overall).toBe("pass");
+  });
+
+  it("records the weathered fixture of a --weathered launch, and none of TERRAIN TEST's (R10.T1.c)", async () => {
+    const plain = handoverSession();
+    const weathered = handoverSession({
+      launch: {
+        setting: "high",
+        smoke: false,
+        out: null,
+        run: "handover",
+        fixture: "terrain-test-weathered",
+      },
+    });
+    await plain.session.writeHandoverResults(HANDOVER_RECORD);
+    await weathered.session.writeHandoverResults(HANDOVER_RECORD);
+    expect([
+      Object.hasOwn(plain.handoverWritten[0]?.run ?? {}, "fixture"),
+      weathered.handoverWritten[0]?.run.fixture,
+    ]).toEqual([false, "terrain-test-weathered"]);
   });
 
   it("records its captures from the repository's root", async () => {

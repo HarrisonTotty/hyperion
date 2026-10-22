@@ -342,7 +342,7 @@ fn terrain_law(slot : u32, m : u32) -> LunarLambert {
 // interpolated bilinearly between the quad's four vertices, the slots with a law kept, scaled down
 // to sum to 1 where they sum to more, and law 0 (`elsewhere`) what they leave: the share of an
 // unnamed substance's slot and of the vertices with no weights, outside the survey, as R07's disc
-// gives `elsewhere` what its class map leaves (`surface_shares`).
+// gives `elsewhere` what its class map leaves (`surface_at`).
 fn terrain_shares(slot : u32, patch_uv : vec2f) -> array<f32, TERRAIN_LAWS> {
   let s = patch_uv * 64.0;
   let base = min(vec2u(floor(max(s, vec2f(0.0)))), vec2u(63u));

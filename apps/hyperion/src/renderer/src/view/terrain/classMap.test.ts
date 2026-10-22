@@ -14,7 +14,12 @@ import {
   stepClassMapPoints,
 } from "../bodies/classMapPoint";
 import { packNormalMap } from "../bodies/discNormals";
-import { classMapSide, classWeightsAt } from "../bodies/discSurface";
+import {
+  classMapMaturityLayer,
+  classMapSide,
+  type ClassMapTexels,
+  classWeightsAt,
+} from "../bodies/discSurface";
 import { bodyReflection } from "../bodies/oblate";
 import { IDENTITY_ROTATION } from "../coords/rotation";
 import type { AllocationEvent, TextureSpec } from "../engine/memory";
@@ -30,6 +35,7 @@ import {
 } from "./classMap";
 import { fieldCellIndex } from "./coverage";
 import { faceUvToXyz, stToUv } from "./cube";
+import { MATURITY_NODES } from "./maturityNodes";
 import type { Face } from "./patchKey";
 import type { BodyFigure } from "./planet";
 import { classRowLaw, PHASE_LAW } from "./terrainMaterial";
@@ -803,5 +809,164 @@ describe("the class-map store's points (R10.T14.f)", () => {
     await remade(pool);
     expect(pointOf(surfaceOf(store))).toEqual(drawnFirst);
     store.dispose();
+  });
+});
+
+// --- The map's maturity (plan R10, R10.T1.c's client half) ---------------------------------------
+
+/**
+ * `answer` with a maturity, as a worker answers it: each texel's code `codeOf` its cell index, and
+ * each named class's 16 nodes in B, V and R, node j's band b 0.1 (c + 1) + 0.01 b + 0.001 j; the
+ * unnamed class's 0.
+ */
+function maturedAnswer(
+  answer: ClassMapAnswer,
+  codeOf: (index: number) => number = (index) => index % 65_536,
+): ClassMapAnswer {
+  const classes = answer.classes.length / 2;
+  const nodes = new Float32Array(3 * MATURITY_NODES * classes);
+  for (let c = 0; c < classes; c += 1) {
+    if (answer.classes[2 * c + 1] === PALETTE_NONE) {
+      continue;
+    }
+    for (let j = 0; j < MATURITY_NODES; j += 1) {
+      for (let b = 0; b < 3; b += 1) {
+        nodes[3 * (MATURITY_NODES * c + j) + b] = 0.1 * (c + 1) + 0.01 * b + 0.001 * j;
+      }
+    }
+  }
+  return {
+    ...answer,
+    maturity: { codes: Uint16Array.from(answer.texels, codeOf), nodes },
+  };
+}
+
+/** Class c's node K − 1 in band b of {@link maturedAnswer}'s nodes, as `f32` holds it. */
+function background(c: number, b: number): number {
+  return Math.fround(0.1 * (c + 1) + 0.01 * b + 0.001 * (MATURITY_NODES - 1));
+}
+
+/** The code at face texel (i, j) of `face` of a packed map, as the layout documents it. */
+function codeAt(map: ClassMapTexels, face: Face, i: number, j: number): number {
+  const side = classMapSide(map.faceTexels);
+  const at = ((classMapMaturityLayer(face, map.classes) * side + j + 1) * side + i + 1) * 4;
+  return (map.data[at] ?? Number.NaN) * 256 + (map.data[at + 1] ?? Number.NaN);
+}
+
+describe("a class map's maturity from a worker's answer (R10.T1.c)", () => {
+  it("packs each answered texel's code, and none elsewhere", () => {
+    const answer = maturedAnswer(answerOf(TEXELS), (index) => (index * 37) % 65_536);
+    const map = classMapTexelsOf(answer);
+    if (map === null) {
+      throw new Error("no map");
+    }
+    expect(TEXELS.map((t) => codeAt(map, t.face, t.i, t.j))).toEqual(
+      TEXELS.map(
+        (t) =>
+          (fieldCellIndex({ face: t.face, level: CLASS_MAP_LEVEL, i: t.i, j: t.j }) * 37) % 65_536,
+      ),
+    );
+    expect([codeAt(map, 2, 13, 11), codeAt(map, 0, 0, 0)]).toEqual([0, 0]);
+  });
+
+  it("carries the classes' nodes in the display channels, each named class drawn from them", () => {
+    const answer = maturedAnswer(answerOf(TEXELS));
+    const map = classMapTexelsOf(answer);
+    const answered = answer.maturity?.nodes ?? new Float32Array();
+    const expected = Float32Array.from(
+      answered,
+      (_, at) => answered[at - (at % 3) + 2 - (at % 3)] ?? 0,
+    );
+    expect([sameValues(map?.maturity?.nodes, expected), map?.maturity?.drawn]).toEqual([
+      true,
+      [true, true, false],
+    ]);
+  });
+
+  it("packs no maturity for an answer without one, as before", () => {
+    const map = classMapTexelsOf(answerOf(TEXELS));
+    expect(map === null ? null : Object.hasOwn(map, "maturity")).toBe(false);
+  });
+
+  it.each([
+    {
+      name: "whose codes are not one a texel",
+      change: (answer: ClassMapAnswer): ClassMapAnswer => ({
+        ...answer,
+        maturity: {
+          codes: new Uint16Array(3),
+          nodes: answer.maturity?.nodes ?? new Float32Array(),
+        },
+      }),
+      message: /4 texels have 3 maturity codes/u,
+    },
+    {
+      name: "whose nodes are not K × 3 a class",
+      change: (answer: ClassMapAnswer): ClassMapAnswer => ({
+        ...answer,
+        maturity: {
+          codes: answer.maturity?.codes ?? new Uint16Array(),
+          nodes: new Float32Array(3 * MATURITY_NODES * 2),
+        },
+      }),
+      message: /3 classes has 144 node values, not 96/u,
+    },
+  ])("refuses an answer $name", ({ change, message }) => {
+    expect(() => classMapTexelsOf(change(maturedAnswer(answerOf(TEXELS))))).toThrow(message);
+  });
+
+  it("takes no law of nodes that are not K × 3 a class", () => {
+    const answer = maturedAnswer(answerOf(TEXELS));
+    expect(() =>
+      classMapLawsOf({
+        ...answer,
+        maturity: {
+          codes: answer.maturity?.codes ?? new Uint16Array(),
+          nodes: new Float32Array(3 * MATURITY_NODES * 2),
+        },
+      }),
+    ).toThrow(/3 classes has 144 node values, not 96/u);
+  });
+
+  it("takes a named class's A as its node K − 1, in the display channels, its row and L(0) its photometry's", () => {
+    const [regolith, frost, unnamed] = classMapLawsOf(maturedAnswer(answerOf(TEXELS)));
+    expect(regolith).toEqual(
+      lawOf(PHASE_LAW.regolith, 1, [background(0, 2), background(0, 1), background(0, 0)]),
+    );
+    expect(frost).toEqual(
+      lawOf(PHASE_LAW.ice, Math.fround(0.6), [
+        background(1, 2),
+        background(1, 1),
+        background(1, 0),
+      ]),
+    );
+    expect(unnamed).toBeNull();
+  });
+
+  it("files a matured map's texture with six more layers, and hands out its texels with their maturity", async () => {
+    const engine = await countingRenderEngine();
+    const pool = new ScriptedPool();
+    const store = new ClassMapStore(engine, pool);
+    // Disposed however the test ends, so that the point build it queues never outlives it.
+    try {
+      store.want(MOON, SEED);
+      const answer = maturedAnswer(answerOf(TEXELS));
+      pool.asked[0]?.resolve(answer);
+      await settle();
+      expect(engine.textureSpecs.at(-1)?.size).toEqual({
+        width: 66,
+        height: 66,
+        depthOrArrayLayers: 12,
+      });
+      const surface = store.classMapOf(MOON, ELSEWHERE);
+      expect(sameValues(surface?.texels.data, classMapTexelsOf(answer)?.data ?? [])).toBe(true);
+      expect(surface?.texels.maturity?.drawn).toEqual([true, true, false]);
+      expect(surface?.laws.slice(0, 2)).toEqual(classMapLawsOf(answer).slice(0, 2));
+      // Its point's elements queued as any map's (R10.T14.f), and cancelled with the store.
+      expect(surface === null ? null : classMapPointState(surface)).toBe("queued");
+    } finally {
+      store.dispose();
+    }
+    expect(classMapPointWork()).toEqual({ builds: 0, refreshes: 0 });
   });
 });

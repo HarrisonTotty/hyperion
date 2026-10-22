@@ -29,8 +29,11 @@ function emptyBlock(): WasmFieldBlock {
   };
 }
 
-/** The fake module's class map: one texel of one class, wholly surveyed; `free` names it in `freed`. */
-function oneTexelMap(freed: string[]): WasmClassMap {
+/**
+ * The fake module's class map: one texel of one class, wholly surveyed, with `codes` its maturity
+ * (none by default) and then K × 3 nodes rising from 0.01; `free` names it in `freed`.
+ */
+function oneTexelMap(freed: string[], codes: Uint16Array = new Uint16Array()): WasmClassMap {
   return {
     level: 6,
     fieldLevel: 6,
@@ -39,6 +42,8 @@ function oneTexelMap(freed: string[]): WasmClassMap {
     texels: () => Uint32Array.from([7]),
     fractions: () => Float32Array.from([1]),
     weights: () => Uint8Array.from([255]),
+    maturity: () => codes.slice(),
+    nodes: () => Float32Array.from({ length: 16 * 3 }, (_, k) => 0.01 * (k + 1)),
     complete: true,
     free: () => {
       freed.push("class map");
@@ -145,7 +150,10 @@ function fakeBaked(codes: Uint16Array): WasmBakedTerrain {
  * nothing unless given `bake`, whose bake a held body's fields answer with its photometry and
  * nodes, the bake tests being otherwise `heightWasm.test.ts`'s and `fieldsWasm.test.ts`'s.
  */
-function fakeModule(bake?: FakeBake): {
+function fakeModule(
+  bake?: FakeBake,
+  classMapCodes: Uint16Array = new Uint16Array(),
+): {
   module: HeightModule;
   held: Map<string, number>;
   /** The module's class and normal maps freed, in order. */
@@ -201,7 +209,7 @@ function fakeModule(bake?: FakeBake): {
       if (seed === 0xffffn) {
         throw new WebAssembly.RuntimeError("unreachable");
       }
-      return held.has(key(system, body)) ? oneTexelMap(freed) : undefined;
+      return held.has(key(system, body)) ? oneTexelMap(freed, classMapCodes) : undefined;
     },
     // A held body's normal map of the class map's cell; seed 0xbeef, a broken module's, none.
     normalMap: (system, body, seed) =>
@@ -232,13 +240,16 @@ function fakeModule(bake?: FakeBake): {
   };
 }
 
-/** A class-map query's answer from {@link fakeModule} holding a field, and what it freed. */
-function classMapAnswered(): {
+/**
+ * A class-map query's answer from {@link fakeModule} holding a field, its map's maturity `codes`
+ * (none by default), and what it freed.
+ */
+function classMapAnswered(codes: Uint16Array = new Uint16Array()): {
   readonly map: ClassMapAnswer;
   readonly transfer: ReadonlyArray<Transferable>;
   readonly freed: ReadonlyArray<string>;
 } {
-  const { module, freed } = fakeModule();
+  const { module, freed } = fakeModule(undefined, codes);
   const fields = new WorkerFields(module);
   answerRequest(
     module,
@@ -447,6 +458,26 @@ describe("a height worker's fields", () => {
 
     it("frees both of the module's answers", () => {
       expect(classMapAnswered().freed).toEqual(["class map", "normal map"]);
+    });
+
+    it("answers no maturity where the module's map carries none (R10.T1.c)", () => {
+      const { map } = classMapAnswered();
+      expect(Object.hasOwn(map, "maturity")).toBe(false);
+    });
+
+    it("answers each texel's maturity code and each class's nodes where the module's map carries them, both transferred (R10.T1.c)", () => {
+      const { map, transfer } = classMapAnswered(Uint16Array.from([40_000]));
+      const { maturity } = map;
+      if (maturity === undefined) {
+        throw new Error("the map was answered without its maturity");
+      }
+      expect([
+        [...maturity.codes],
+        maturity.nodes.length,
+        maturity.nodes[0],
+        maturity.nodes[47],
+      ]).toEqual([[40_000], 48, Math.fround(0.01), Math.fround(0.01 * 48)]);
+      expect(transfer.slice(-2)).toEqual([maturity.codes.buffer, maturity.nodes.buffer]);
     });
   });
 

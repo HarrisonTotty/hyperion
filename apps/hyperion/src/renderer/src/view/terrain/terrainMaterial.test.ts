@@ -22,6 +22,7 @@ import {
 } from "../engine/webgpu/uniforms";
 import { annulusEdges } from "../lighting/annuli";
 import { bindingStages } from "../../test/wgslStages";
+import { wgslFunction } from "../../test/wgslText";
 import maturityNodesWgsl from "../shaders/maturityNodes.wgsl?raw";
 import occluderWgsl from "../shaders/occluder.wgsl?raw";
 import terrainDepthWgsl from "./shaders/terrainDepth.wgsl?raw";
@@ -815,16 +816,6 @@ describe("a texel's blend (R10.T10.b; Design note 8)", () => {
   });
 });
 
-/** The text of WGSL function `name` in `source`, from its `fn` to its closing brace. */
-function wgslFunction(source: string, name: string): string {
-  const start = source.indexOf(`fn ${name}(`);
-  const end = source.indexOf("\n}\n", start);
-  if (start === -1 || end === -1) {
-    throw new Error(`the source has no function ${name}`);
-  }
-  return source.slice(start, end + 2);
-}
-
 /** Vertices along a patch's side. */
 const SIDE = 65;
 
@@ -1087,10 +1078,10 @@ describe("the lit terrain's term of a class drawn from its maturity nodes (R10.T
   it("draws μ ≤ 0 from the patch's quad alone and μ ≥ 1 from the parent's, mixing between", () => {
     const albedo = wgslFunction(terrainLitWgsl, "terrain_class_albedo");
     for (const line of [
-      "if (!(morph >= 1.0)) {\n    own = maturity_quad_albedo(slot, k, 0u, maturity.own);",
-      "if (morph > 0.0) {\n    parent = maturity_quad_albedo(slot, k, 1u, maturity.parent);",
-      "if (!(morph > 0.0)) {\n    return own;\n  }",
-      "if (morph >= 1.0) {\n    return parent;\n  }",
+      "if (!(morph >= 1.0)) { own = maturity_quad_albedo(slot, k, 0u, maturity.own); }",
+      "if (morph > 0.0) { parent = maturity_quad_albedo(slot, k, 1u, maturity.parent); }",
+      "if (!(morph > 0.0)) { return own; }",
+      "if (morph >= 1.0) { return parent; }",
       "return (1.0 - morph) * own + morph * parent;",
     ]) {
       expect(albedo).toContain(line);
@@ -1114,9 +1105,66 @@ describe("the lit terrain's term of a class drawn from its maturity nodes (R10.T
     );
   });
 
+  it("places a quad's corner c at (x + s (c & 1), y + s (c >> 1)) and takes its code at the quad's level, as the twin does", () => {
+    expect(wgslFunction(terrainLitWgsl, "maturity_quad")).toContain(
+      "for (var c = 0u; c < 4u; c = c + 1u) { " +
+        "let ratios = vertex_maturity(slot, corner.x + span * (c & 1u), corner.y + span * (c >> 1u)); " +
+        "let segment = maturity_segment(ratios[level]); " +
+        "quad.nodes[c] = segment.node; " +
+        "quad.fractions[c] = segment.fraction; }",
+    );
+    // The twin's `maturityQuad` inside a quad, the patch's (s 1) at n and the parent's (s 2) at
+    // n − 1: corner c's albedo at vertex (x + s (c & 1), y + s (c >> 1)) at its own code at the
+    // level, by its bilinear weight; fx ≠ fy, so that a corner put on the other axis is seen.
+    const packed = packClassNodes(MODULE_NODES, MATURITY_PHOTOMETRY, 0.9);
+    const misses = (
+      [
+        { level: 0, span: 1, x: 5, y: 9, fx: 0.25, fy: 0.625 },
+        { level: 1, span: 2, x: 10, y: 4, fx: 0.375, fy: 0.75 },
+      ] as const
+    ).map(({ level, span, x, y, fx, fy }) => {
+      const weights = [(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy];
+      const corners = weights.map((_, c) =>
+        vertexAlbedo(packed, 2, level, x + span * (c & 1), y + span * (c >> 1)),
+      );
+      const expected = ([0, 1, 2] as const).map((ch) =>
+        corners.reduce((sum, corner, c) => sum + (weights[c] ?? 0) * corner[ch], 0),
+      );
+      const u = (x + span * fx) / 64;
+      const v = (y + span * fy) / 64;
+      return largestDifference(texelClassAlbedo(CODES, packed, 2, u, v, level), expected);
+    });
+    expect(Math.max(...misses)).toBeLessThan(1e-15);
+  });
+
+  it("mixes each corner's nodes j and j + 1 of its slot's table at the quad's level by its segment, as the twin does", () => {
+    expect(wgslFunction(terrainLitWgsl, "maturity_quad_albedo")).toContain(
+      "for (var c = 0u; c < 4u; c = c + 1u) { " +
+        "let j = quad.nodes[c]; " +
+        "corners[c] = maturity_mix(class_node(slot, k, level, j), class_node(slot, k, level, j + 1u), quad.fractions[c]); }",
+    );
+    // The twin's `maturityQuadAlbedo` at a vertex, at n (μ 0) and at n − 1 (μ 1, an even vertex):
+    // (1 − f) Tⱼ + f Tⱼ₊₁ of slot k's nodes at level ℓ, from 3 (K (2k + ℓ) + j) of the packed
+    // nodes, as `class_node` reads them, j and f the segment of the vertex's code at ℓ.
+    const packed = packClassNodes(MODULE_NODES, MATURITY_PHOTOMETRY, 0.9);
+    for (const [slot, level, x, y] of [
+      [0, 0, 7, 11],
+      [2, 1, 12, 30],
+    ] as const) {
+      const code = CODES[2 * (SIDE * y + x) + level] ?? Number.NaN;
+      const { node, fraction } = maturitySegment(maturityCodeRatio(code));
+      const at = (j: number, ch: number): number =>
+        packed[3 * (MATURITY_NODES * (2 * slot + level) + j) + ch] ?? Number.NaN;
+      expect([fraction > 0, texelClassAlbedo(CODES, packed, slot, x / 64, y / 64, level)]).toEqual([
+        true,
+        [0, 1, 2].map((ch) => (1 - fraction) * at(node, ch) + fraction * at(node + 1, ch)),
+      ]);
+    }
+  });
+
   it("skips a slot of no share before its flag or nodes are read, and gathers the texel's segments once", () => {
     const albedos = wgslFunction(terrainLitWgsl, "terrain_albedos");
-    const skip = albedos.indexOf("if (!(shares[k + 1u] > 0.0)) {\n      continue;\n    }");
+    const skip = albedos.indexOf("if (!(shares[k + 1u] > 0.0)) { continue; }");
     expect(skip).toBeGreaterThan(0);
     expect(skip).toBeLessThan(albedos.indexOf("class_drawn_from_nodes(in.slot, k)"));
     expect(albedos).toContain("albedos[0] = terrain_row(1u).xyz;");

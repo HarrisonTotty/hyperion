@@ -17,8 +17,8 @@
  * the primary crust's drawn albedo (`crust_albedo`), three patches' maturity layers and nodes as
  * digests (`maturity_patch`) and the class map's (`class_map_maturity`). The server crate's test
  * holds the header lines and covers to the server's own conversion, so the answers built here are
- * the server's. The reader is pure, and throws on any line it cannot read, naming it: the file is
- * committed, so a failure is a bug.
+ * the server's. The reader is pure, and throws on any line it cannot read, naming the file and the
+ * line: the file is committed, so a failure is a bug.
  */
 import type {
   BodyIdHex,
@@ -135,9 +135,9 @@ const PALETTE_ROLES: ReadonlyArray<PaletteRoleDto> = [
   "bulk",
 ];
 
-/** A line the reader could not read. */
+/** A line the reader could not read (`parseTerrainGolden` names the file). */
 function refused(line: number, why: string): Error {
-  return new Error(`terrain_test.golden, line ${String(line)}: ${why}`);
+  return new Error(`line ${String(line)}: ${why}`);
 }
 
 /** A float from its golden form, `0x` and 16 lowercase hexadecimal digits of its bits. */
@@ -284,7 +284,7 @@ function headerOf(parts: HeaderParts): SurfaceHeaderDto {
   const member = (key: string): MemberToken => {
     const token = scalars.get(key);
     if (token === undefined) {
-      throw new Error(`terrain_test.golden: the header has no ${key}`);
+      throw new Error(`the header has no ${key}`);
     }
     used.add(key);
     return token;
@@ -331,7 +331,7 @@ function headerOf(parts: HeaderParts): SurfaceHeaderDto {
   };
   const unread = [...scalars.keys()].filter((key) => !used.has(key));
   if (unread.length > 0) {
-    throw new Error(`terrain_test.golden: the header has unknown members ${unread.join(", ")}`);
+    throw new Error(`the header has unknown members ${unread.join(", ")}`);
   }
   return header;
 }
@@ -339,9 +339,22 @@ function headerOf(parts: HeaderParts): SurfaceHeaderDto {
 /**
  * The terrain test's field from the golden's text.
  *
- * @throws Error naming the first line it cannot read, or a member, payload or block missing.
+ * @param file - The golden's file name, which every refusal names: `TERRAIN TEST`'s by default.
+ * @throws Error naming the file and the first line it cannot read, or a member, payload or block
+ *   missing.
  */
-export function parseTerrainGolden(text: string): TerrainGolden {
+export function parseTerrainGolden(text: string, file = "terrain_test.golden"): TerrainGolden {
+  try {
+    return parsedGolden(text);
+  } catch (error: unknown) {
+    throw new Error(`${file}: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
+  }
+}
+
+/** The field from the golden's text, its refusals naming no file ({@link parseTerrainGolden}). */
+function parsedGolden(text: string): TerrainGolden {
   let generatorVersion: number | null = null;
   let body: string | null = null;
   let seed: string | null = null;
@@ -496,17 +509,15 @@ export function parseTerrainGolden(text: string): TerrainGolden {
     }
   }
   if (generatorVersion === null || body === null || seed === null) {
-    throw new Error("terrain_test.golden: its header, body or seed is missing");
+    throw new Error("its header, body or seed is missing");
   }
   const header = headerOf(parts);
   if ((header.maturity !== undefined) !== (maturity !== null)) {
-    throw new Error(
-      "terrain_test.golden: the maturity's lines follow a header with a maturity, and only one",
-    );
+    throw new Error("the maturity's lines follow a header with a maturity, and only one");
   }
   const classMap = maturity?.classMap ?? null;
   if (maturity !== null && (classMap === null || maturity.patches.length === 0)) {
-    throw new Error("terrain_test.golden: the maturity's lines have no patch or no class map's");
+    throw new Error("the maturity's lines have no patch or no class map's");
   }
   return {
     generatorVersion,
@@ -516,7 +527,7 @@ export function parseTerrainGolden(text: string): TerrainGolden {
     surveys,
     payloads: payloads.map((payload, n) => {
       if (payload.coverage === null || payload.blocksHex.length === 0) {
-        throw new Error(`terrain_test.golden: payload ${String(n + 1)} has no cover or no block`);
+        throw new Error(`payload ${String(n + 1)} has no cover or no block`);
       }
       return {
         revision: payload.revision,
@@ -527,7 +538,7 @@ export function parseTerrainGolden(text: string): TerrainGolden {
     }),
     changes: changes.map((change, n) => {
       if (change.surveyed === null || change.held === null) {
-        throw new Error(`terrain_test.golden: change ${String(n)} has no held runs`);
+        throw new Error(`change ${String(n)} has no held runs`);
       }
       return { surveyed: change.surveyed, held: change.held };
     }),

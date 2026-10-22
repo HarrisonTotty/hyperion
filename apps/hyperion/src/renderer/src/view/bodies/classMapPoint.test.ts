@@ -26,7 +26,9 @@ import type { PlacedLight } from "../lighting/hostLights";
 import type { LightingBody } from "../lighting/occluders";
 import { PLANETSHINE_SOURCES_HIGH, type SecondarySource } from "../lighting/planetshine";
 import { AU_M } from "../scenes/kept";
+import type { Rgb } from "../photometry/toneCurve";
 import { faceUvToXyz, stToUv } from "../terrain/cube";
+import { MATURITY_NODES } from "../terrain/maturityNodes";
 import type { Face } from "../terrain/patchKey";
 import type { BodyFigure } from "../terrain/planet";
 import { classRowLaw, PHASE_LAW, type PhaseLawCode } from "../terrain/terrainMaterial";
@@ -53,6 +55,8 @@ import {
   viewRay,
 } from "./discShading";
 import {
+  classMapAlbedoAt,
+  type ClassMapTexel,
   type ClassMapTexels,
   classMapSharesAt,
   classMapSurface,
@@ -267,7 +271,8 @@ function latticeShares(map: ClassMapTexels): number[][] {
  * The brute force: the light reflected towards a distant observer over the illuminance and
  * (a ÷ Δ)², (1 ÷ π) Σ `discReflectance` μ dS over the lattice's directions on the spheroid (R05's
  * point of d at (d_x, d_y, d_z c ÷ a), its area 4π ÷ count × c ÷ a |(d_x, d_y, d_z a ÷ c)|), in
- * `f64`, body-fixed, not normalised.
+ * `f64`, body-fixed, not normalised; under a map's maturity each direction's laws' A `albedos`'s
+ * (R10.T1.c), its laws' own where none is given.
  */
 function bruteForce(
   surface: ClassMapDiscSurface,
@@ -275,6 +280,7 @@ function bruteForce(
   shares: ReadonlyArray<ReadonlyArray<number>>,
   light: Vec3,
   observer: Vec3,
+  albedos: ReadonlyArray<ReadonlyArray<Rgb | null> | null> = [],
 ): [number, number, number] {
   const laws = discSurfaceLaws(surface);
   const count = LATTICE.length / 3;
@@ -291,7 +297,15 @@ function bruteForce(
       continue;
     }
     const area = ((4 * Math.PI) / count) * cOverA * length;
-    const reflectance = discReflectance(laws, cOverA, shares[n] ?? [], mu0, mu, alpha);
+    const reflectance = discReflectance(
+      laws,
+      cOverA,
+      shares[n] ?? [],
+      mu0,
+      mu,
+      alpha,
+      albedos[n] ?? undefined,
+    );
     for (const c of [0, 1, 2] as const) {
       out[c] += (reflectance[c] * mu * area) / Math.PI;
     }
@@ -1181,4 +1195,281 @@ describe("the class-mapped point's first frame, off the render thread (R10.T14.f
     slicesToDrain();
     expect(errors()).toBe(1);
   });
+});
+
+// --- The point under a class map's maturity (plan R10, R10.T1.c's client half; test 11) ----------
+
+/**
+ * Each class's nodes for the matured Iapetus, `f32` as the module gives them: the dark lag's
+ * background (0.045, 0.04, 0.035) and its fresh ground four times it, the ice's (0.58, 0.55, 0.52)
+ * and its fresh ground 1.3 times it, linear in j ÷ 15 from node 0 to the background at node K − 1.
+ */
+const MATURED_NODES = ((): Float32Array => {
+  const nodes = new Float32Array(3 * MATURITY_NODES * 2);
+  const classes = [
+    { background: [0.045, 0.04, 0.035], fresh: 4 },
+    { background: [0.58, 0.55, 0.52], fresh: 1.3 },
+  ] as const;
+  classes.forEach(({ background, fresh }, c) => {
+    for (let j = 0; j < MATURITY_NODES; j += 1) {
+      const brightening = 1 + (fresh - 1) * (1 - j / (MATURITY_NODES - 1));
+      for (const ch of [0, 1, 2] as const) {
+        nodes[3 * (MATURITY_NODES * c + j) + ch] = background[ch] * brightening;
+      }
+    }
+  });
+  return nodes;
+})();
+
+/** Class c's node K − 1, its A at the body's background maturity, as the store's laws take it. */
+function maturedBackground(c: number): [number, number, number] {
+  const at = 3 * (MATURITY_NODES * c + MATURITY_NODES - 1);
+  return [MATURED_NODES[at] ?? 0, MATURED_NODES[at + 1] ?? 0, MATURED_NODES[at + 2] ?? 0];
+}
+
+/** The matured Iapetus's laws: the Iapetus's rows, each A its class's node K − 1. */
+const MATURED_LAWS: ReadonlyArray<PhotometricLaw> = [
+  { ...classRowLaw(PHASE_LAW.regolith, 1), a: maturedBackground(0) },
+  { ...classRowLaw(PHASE_LAW.ice, 1), a: maturedBackground(1) },
+];
+
+/** Two young craters' haloes: on the bright trailing side and on the dark cap, each its radius, rad. */
+const HALOES = [
+  { centre: normalise(vec3(0.3, -0.8, 0.5)), radiusRad: 0.5 },
+  { centre: normalise(vec3(-0.4, 0.85, -0.2)), radiusRad: 0.35 },
+] as const;
+
+/**
+ * A texel's code under {@link HALOES}: fresh at each halo's centre, falling as 1 − (θ ÷ ρ)² to the
+ * background at its edge, the fresher of the two where they meet; `young` false gives every texel
+ * the background's code, 0.
+ */
+function haloCode(d: Vec3, young: boolean): number {
+  if (!young) {
+    return 0;
+  }
+  const fresh = Math.max(
+    ...HALOES.map(({ centre, radiusRad }) => {
+      const theta = Math.acos(Math.min(1, Math.max(-1, dot(d, centre))));
+      return Math.max(0, 1 - (theta / radiusRad) ** 2);
+    }),
+  );
+  return Math.round(65_535 * fresh);
+}
+
+/**
+ * The synthetic Iapetus with its haloes (or every code 0, `young` false), surveyed whole or where
+ * `surveyed` holds, every class drawn from {@link MATURED_NODES}; a fresh map each call.
+ */
+function maturedIapetusMap(
+  surveyed: (direction: Vec3) => boolean = () => true,
+  young = true,
+): ClassMapTexels {
+  const weightsOf = ({ face, i, j }: ClassMapTexel): number[] | null => {
+    const d = texelCentre(face, i, j, 64);
+    if (!surveyed(d)) {
+      return null;
+    }
+    return dot(d, APEX) > Math.cos(CAP_RAD) ? [1, 0] : [0, 1];
+  };
+  return packClassMap(64, 2, weightsOf, {
+    codeOf: ({ face, i, j }) => haloCode(texelCentre(face, i, j, 64), young),
+    nodes: MATURED_NODES,
+    drawn: [true, true],
+  });
+}
+
+/** Half the Iapetus surveyed, as {@link HALF_IAPETUS}. */
+const halfSurveyed = (d: Vec3): boolean => d.x + 0.3 * d.z > 0.1;
+
+const MATURED = maturedIapetusMap();
+const HALF_MATURED = maturedIapetusMap(halfSurveyed);
+
+/** A surface over a matured map under {@link MATURED_LAWS}, its point's elements made at once. */
+function maturedSurfaceOf(map: ClassMapTexels): ClassMapDiscSurface {
+  return surfaceOf(map, MATURED_LAWS);
+}
+
+/** Each lattice direction's laws' A where its class is drawn from its nodes, `elsewhere` first. */
+function latticeAlbedos(
+  map: ClassMapTexels,
+  shares: ReadonlyArray<ReadonlyArray<number>>,
+): Array<ReadonlyArray<Rgb | null> | null> {
+  return Array.from({ length: LATTICE.length / 3 }, (_, n) => {
+    const albedo = classMapAlbedoAt(
+      map,
+      [LATTICE[3 * n] ?? 0, LATTICE[3 * n + 1] ?? 0, LATTICE[3 * n + 2] ?? 0],
+      shares[n] ?? [],
+    );
+    return albedo === null ? null : [null, ...albedo];
+  });
+}
+
+describe("the point under a class map's maturity (R10.T1.c, test 11)", () => {
+  afterEach(() => {
+    // Each test cancels or drains what it queues, so that none steps another's.
+    const { builds, refreshes } = classMapPointWork();
+    if (builds !== 0 || refreshes !== 0) {
+      throw new Error(`a test left ${String(builds)} builds and ${String(refreshes)} refreshes`);
+    }
+  });
+
+  it("equals an f64 brute force with each direction's albedos to 0.3%, surveyed whole or in half, on a sphere and a spheroid", () => {
+    const worst: number[] = [];
+    for (const map of [MATURED, HALF_MATURED]) {
+      const surface = maturedSurfaceOf(map);
+      const shares = latticeShares(map);
+      const albedos = latticeAlbedos(map, shares);
+      for (const figure of [SPHERE, OBLATE]) {
+        const cOverA = figure.polarRadiusM / figure.equatorialRadiusM;
+        for (const [, observer, across] of VIEWS) {
+          for (const phaseDeg of PHASES_DEG) {
+            const light = lightAt(observer, across, phaseDeg * RAD);
+            const point = classMapPointReflection(
+              figure,
+              surface,
+              IDENTITY_ROTATION,
+              light,
+              observer,
+            );
+            const exact = bruteForce(surface, cOverA, shares, light, observer, albedos);
+            worst.push(worstRatio(point, exact));
+          }
+        }
+      }
+    }
+    expect(Math.max(...worst)).toBeLessThan(0.003);
+    // About 6 s here (2026-10-22, a load of 12): ten times that, rounded up.
+  }, 60_000);
+
+  it("brightens the point by its haloes, against the same map at the background's codes", () => {
+    const young = maturedSurfaceOf(MATURED);
+    const old = maturedSurfaceOf(maturedIapetusMap(() => true, false));
+    // The trailing side's halo faces the observer.
+    const observer = vec3(0, -1, 0);
+    const light = lightAt(observer, vec3(1, 0, 0), 30 * RAD);
+    const brighter = classMapReflectionRatio(SPHERE, young, light, observer).map(
+      (r, c) => r / (classMapReflectionRatio(SPHERE, old, light, observer)[c] ?? Number.NaN),
+    );
+    expect(Math.min(...brighter)).toBeGreaterThan(1.01);
+  });
+
+  it("gives the ratio of its laws without a maturity, to 10⁻¹², where every code is the background's", () => {
+    const misses: number[] = [];
+    for (const surveyed of [() => true, halfSurveyed]) {
+      const matured = maturedSurfaceOf(maturedIapetusMap(surveyed, false));
+      const plain = surfaceOf(iapetusMap(surveyed), MATURED_LAWS);
+      for (const figure of [SPHERE, OBLATE]) {
+        for (const [, observer, across] of VIEWS) {
+          for (const phaseDeg of [0, 60, 120, 150]) {
+            const light = lightAt(observer, across, phaseDeg * RAD);
+            misses.push(
+              worstRatio(
+                classMapReflectionRatio(figure, matured, light, observer),
+                classMapReflectionRatio(figure, plain, light, observer),
+              ),
+            );
+          }
+        }
+      }
+    }
+    expect(Math.max(...misses)).toBeLessThan(1e-12);
+  });
+
+  it("refuses, on either path, a surface whose class drawn from its nodes has an A other than its node K − 1", () => {
+    // The ice's A its fresh ground's, node 0, 1.3 times its node K − 1: the point's factors on it
+    // would draw the ice 1.3 times as bright as the disc does.
+    const fresh = 3 * MATURITY_NODES;
+    const laws: ReadonlyArray<PhotometricLaw> = [
+      { ...classRowLaw(PHASE_LAW.regolith, 1), a: maturedBackground(0) },
+      {
+        ...classRowLaw(PHASE_LAW.ice, 1),
+        a: [
+          MATURED_NODES[fresh] ?? 0,
+          MATURED_NODES[fresh + 1] ?? 0,
+          MATURED_NODES[fresh + 2] ?? 0,
+        ],
+      },
+    ];
+    const surface = classMapSurface(UNREAD_TEXTURES, "misdrawn", MATURED, laws, ELSEWHERE);
+    const observer = vec3(0, -1, 0);
+    const light = lightAt(observer, vec3(1, 0, 0), 30 * RAD);
+    const refusal =
+      /class 1 of a matured class map is drawn from its nodes, so its law's A must be its node K − 1/u;
+    expect(() => classMapReflectionRatio(SPHERE, surface, light, observer)).toThrow(refusal);
+    expect(() =>
+      classMapPointReflection(SPHERE, surface, IDENTITY_ROTATION, light, observer),
+    ).toThrow(refusal);
+  });
+
+  it("takes an A that is its node K − 1 once rounded to f32, and any A for a class not drawn from its nodes or a map without a maturity", () => {
+    // The f64 backgrounds the nodes were made from, each its f32 node K − 1 only once rounded.
+    const unrounded: ReadonlyArray<PhotometricLaw> = [
+      { ...classRowLaw(PHASE_LAW.regolith, 1), a: [0.045, 0.04, 0.035] },
+      { ...classRowLaw(PHASE_LAW.ice, 1), a: [0.58, 0.55, 0.52] },
+    ];
+    expect(unrounded[1]?.a).not.toEqual(maturedBackground(1));
+    // A dark lag and an ice whose A is not their nodes' K − 1.
+    const otherwise = [DARK, BRIGHT];
+    const undrawn = packClassMap(64, 2, () => [0.5, 0.5], {
+      codeOf: () => 0,
+      nodes: MATURED_NODES,
+      drawn: [false, false],
+    });
+    const surfaces = [
+      classMapSurface(UNREAD_TEXTURES, "unrounded", maturedIapetusMap(), unrounded, ELSEWHERE),
+      classMapSurface(UNREAD_TEXTURES, "undrawn", undrawn, otherwise, ELSEWHERE),
+      classMapSurface(UNREAD_TEXTURES, "plain", iapetusMap(), otherwise, ELSEWHERE),
+    ];
+    const observer = vec3(0, -1, 0);
+    const light = lightAt(observer, vec3(1, 0, 0), 30 * RAD);
+    const points = surfaces.map((surface) => {
+      const point = classMapPointReflection(SPHERE, surface, IDENTITY_ROTATION, light, observer);
+      cancelClassMapPoint(surface.texels);
+      return point;
+    });
+    // Each the uniform point while its elements are unmade.
+    expect(points).toEqual(surfaces.map(() => uniformAt(light, observer)));
+  });
+
+  for (const [name, observer, across] of VIEWS) {
+    it(`meets the CPU rasteriser's disc at the 3 px switch to 1%, facing ${name} at 60°`, () => {
+      const surface = maturedSurfaceOf(MATURED);
+      const { body, hosts } = iapetusAt(surface, observer, across, 60 * RAD, POINT_BELOW_PX);
+      const point = pointFlux(body, hosts, [], DISC_ANNULI_HIGH);
+      expect(worstRatio(discFlux(body, hosts, SWITCH_SAMPLES), point)).toBeLessThan(0.01);
+    });
+  }
+
+  for (const normals of [null, 6] as const) {
+    it(`draws, once the slices have made a matured map's elements, the synchronous path's ratio bit for bit${normals === null ? "" : `, under a level-${String(normals)} normal map`}`, () => {
+      const normalMap = normals === null ? null : checkerNormalMap(normals, 12 * RAD);
+      const unmade = (): ClassMapDiscSurface =>
+        classMapSurface(
+          UNREAD_TEXTURES,
+          "unmade matured",
+          maturedIapetusMap(halfSurveyed),
+          MATURED_LAWS,
+          ELSEWHERE,
+          normalMap === null
+            ? null
+            : unreadNormalMap({ faceTexels: normalMap.faceTexels, data: normalMap.data.slice() }),
+        );
+      const sliced = unmade();
+      const synchronous = unmade();
+      queueClassMapPoint(sliced.texels, sliced.normals?.texels ?? null, null);
+      const slices = slicesToDrain();
+      const wrong = VIEWS.flatMap(([viewName, viewer, side]) =>
+        PHASES_DEG.filter((phaseDeg) => {
+          const light = lightAt(viewer, side, phaseDeg * RAD);
+          const ratio = classMapReflectionRatio(SPHERE, synchronous, light, viewer);
+          const expected = uniformAt(light, viewer).map((u, c) => u * (ratio[c] ?? Number.NaN));
+          return classMapPointReflection(SPHERE, sliced, IDENTITY_ROTATION, light, viewer).some(
+            (value, c) => !Object.is(value, expected[c]),
+          );
+        }).map((phaseDeg) => `${viewName} at ${String(phaseDeg)}°`),
+      );
+      expect([wrong, slices > 1]).toEqual([[], true]);
+    }, 60_000);
+  }
 });

@@ -124,6 +124,7 @@ describe("the client's command line", () => {
       String(DEFAULT_PORT),
       ENV_SERVER_ADDR,
       ENV_SERVER_PORT,
+      "--weathered",
     ]) {
       expect(text).toContain(mention);
     }
@@ -344,6 +345,7 @@ describe("the several-views check's options", () => {
       smoke: false,
       out: null,
       run: "several-views",
+      fixture: "terrain-test",
     });
     expect(args.spike).toBeUndefined();
   });
@@ -351,19 +353,60 @@ describe("the several-views check's options", () => {
   it("takes the setting, the smoke and the directory it shares with the spike", () => {
     expect(
       parse(["--views-check", "--setting", "low", "--smoke", "--out", "/data/out"]).viewsCheck,
-    ).toEqual({ setting: "low", smoke: true, out: "/data/out", run: "several-views" });
+    ).toEqual({
+      setting: "low",
+      smoke: true,
+      out: "/data/out",
+      run: "several-views",
+      fixture: "terrain-test",
+    });
   });
 
   it("takes --terrain, the terrain run (R10.T16.d), at its setting", () => {
     expect(parse(["--views-check", "--terrain", "--setting", "low", "--smoke"]).viewsCheck).toEqual(
-      { setting: "low", smoke: true, out: null, run: "terrain" },
+      { setting: "low", smoke: true, out: null, run: "terrain", fixture: "terrain-test" },
     );
   });
 
   it("takes --handover, the terrain run's hand-over check (R10.T10.g), beside --terrain", () => {
     expect(
       parse(["--views-check", "--terrain", "--handover", "--setting", "low"]).viewsCheck,
-    ).toEqual({ setting: "low", smoke: false, out: null, run: "handover" });
+    ).toEqual({
+      setting: "low",
+      smoke: false,
+      out: null,
+      run: "handover",
+      fixture: "terrain-test",
+    });
+  });
+
+  it.each([
+    [["--views-check", "--terrain", "--weathered"], "terrain"],
+    [["--views-check", "--terrain", "--handover", "--weathered"], "handover"],
+  ] as const)(
+    "takes --weathered, TEST MOON weathered's field (R10.T1.c), beside --terrain: %j",
+    (args, run) => {
+      expect(parse(args).viewsCheck).toEqual({
+        setting: "high",
+        smoke: false,
+        out: null,
+        run,
+        fixture: "terrain-test-weathered",
+      });
+    },
+  );
+
+  it.each([
+    [["--views-check", "--weathered"]],
+    [["--views-check", "--weathered", "--smoke"]],
+    [["--weathered"]],
+    [["--descent-spike", "--weathered"]],
+  ])("refuses --weathered without --terrain: %j", (args) => {
+    const error = refusal(args);
+    expect([error.exitCode, error.message]).toEqual([
+      1,
+      "error: --weathered is an option of --terrain, which was not given",
+    ]);
   });
 
   it.each([

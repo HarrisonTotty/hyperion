@@ -44,6 +44,7 @@ import type {
   HandoverSwitchName,
   HandoverTexelRecord,
   TerrainCheckFault,
+  ViewsCheckTerrainFixture,
 } from "../preload/api";
 import { keepsLoadAverage, QUIET_RULE_UNCHECKED, quietOf } from "./machineLoad";
 import {
@@ -53,7 +54,7 @@ import {
   type ResultsFiles,
   type Verdict,
 } from "./results";
-import type { TerrainCheckRunInput } from "./terrainCheckResults";
+import { fixtureNaming, fixtureRecord, type TerrainCheckRunInput } from "./terrainCheckResults";
 
 /** The file's schema name. */
 export const HANDOVER_CHECK_SCHEMA = "hyperion.views-check.handover-results";
@@ -209,6 +210,8 @@ export interface HandoverCheckResults {
     readonly launchMode: TerrainCheckRunInput["launchMode"];
     readonly setting: TerrainCheckRunInput["setting"];
     readonly smoke: boolean;
+    /** The weathered fixture on a `--weathered` run; absent on `TERRAIN TEST`'s (`fixtureRecord`). */
+    readonly fixture?: Exclude<ViewsCheckTerrainFixture, "terrain-test">;
     readonly switches: ReadonlyArray<string>;
     readonly shown: boolean;
     readonly window: TerrainCheckRunInput["window"];
@@ -468,6 +471,7 @@ export function buildHandoverCheckResults(input: HandoverCheckInput): HandoverCh
       launchMode: run.launchMode,
       setting: run.setting,
       smoke: run.smoke,
+      ...fixtureRecord(run.fixture),
       switches: run.switches,
       shown: run.shown,
       window: run.window,
@@ -570,6 +574,7 @@ export function handoverCheckMarkdown(results: HandoverCheckResults): string {
     `- **Machine:** ${run.machine.cpu}, ${String(run.machine.logicalCores)} threads; GPU ${textOf(run.machine.gpu, (gpu) => gpu.description ?? `${String(gpu.vendorId)}:${String(gpu.deviceId)}`)}; load average ${keepsLoadAverage(run.platform) ? run.machine.loadAverage.map((value) => value.toFixed(2)).join(", ") : "none"} (${run.provisional})`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
     `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}`,
+    ...fixtureNaming(run.fixture).lines,
     `- **World:** ${results.world}; the primary ${String(results.canvas.widthPx)} × ${String(results.canvas.heightPx)} px presented, its scene target ${String(results.target.widthPx)} × ${String(results.target.heightPx)} px; the hand-over range ${(results.rangeM / 1000).toFixed(0)} km (relief ${results.reliefM.toFixed(0)} m at τ ${String(results.tauPx)} px, ${results.radPerPx.toExponential(4)} rad a pixel); cells of level ${String(results.cellLevel)}`,
     `- **The line:** ${(results.approach.ratePerS * 100).toFixed(0)}% of the limb distance a second, from ${String(results.approach.startRatio)} to ${String(results.approach.closestRatio)} of the range, a ${String(results.approach.holdS)} s hold, out to ${String(results.approach.endRatio)}`,
     `- **Bounds:** ${results.bounds.stops.toFixed(3)} stop at every switch, cells of ${String(results.bounds.minSharedPixels)} shared pixels or more judged, no floor; at most ${String(results.bounds.missLimit * 100)}% of a frame's body pixels off the datum`,
@@ -625,8 +630,9 @@ const NODE_FILES: ResultsFiles = {
 
 /**
  * Writes the results and their summary into `dir` as `<date>-<machine>-<setting>-handover.json`
- * and `.md` (`-smoke` before the extension for a smoke run), adding `-2`, `-3` and so on where a
- * run of the same name is there, and warns of a file over the repository's limit for added files.
+ * and `.md` (`-handover-weathered` for a run on the weathered fixture, R10.T1.c; `-smoke` before
+ * the extension for a smoke run), adding `-2`, `-3` and so on where a run of the same name is
+ * there, and warns of a file over the repository's limit for added files.
  *
  * @throws Error if the day's names are used up.
  */
@@ -636,7 +642,7 @@ export async function writeHandoverResults(
   files: ResultsFiles = NODE_FILES,
 ): Promise<{ readonly json: string; readonly markdown: string }> {
   await files.mkdir(dir);
-  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-handover${results.run.smoke ? "-smoke" : ""}`;
+  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-handover${fixtureNaming(results.run.fixture).stem}${results.run.smoke ? "-smoke" : ""}`;
   const candidates = Array.from({ length: MAX_RUNS_A_DAY }, (_, i) =>
     i === 0 ? stem : `${stem}-${String(i + 1)}`,
   );

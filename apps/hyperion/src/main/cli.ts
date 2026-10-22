@@ -45,7 +45,12 @@
  * it runs the terrain run's check-only hand-over variant in its place: three looks at the survey
  * of `TERRAIN TEST`'s moon across its hand-over, at 30° and 90° of phase and near the terminator,
  * each frame either side of each switch read back and judged per cell; `--handover` is refused
- * without `--terrain`.
+ * without `--terrain`. With `--weathered` (plan R10, R10.T1.c's client half;
+ * decision-r10-t1c-client-scope §3) the terrain run, or its hand-over check, is served `TEST MOON`
+ * weathered's field (`terrain_test_weathered.golden`: the moon on a 1 Gyr surface, its young
+ * craters ringed by haloes of fresh regolith) in `TERRAIN TEST`'s place (`ViewsCheckLaunch.fixture`),
+ * and its results are named `…-terrain-weathered` or `…-handover-weathered`; `--weathered` is
+ * refused without `--terrain`, as `--handover` is.
  *
  * The variables name the *server*, not this process, so they are not the server's own
  * `HYPERION_ADDR` and `HYPERION_PORT`: an address to listen on and an address to connect to are
@@ -222,6 +227,12 @@ export function buildCommand(version: string): Command {
         "the terrain run's hand-over check (plan R10): its photometry across the hand-over, three looks",
       ),
     )
+    .addOption(
+      new Option(
+        "--weathered",
+        "the terrain run, or its hand-over check, on TEST MOON weathered (plan R10): haloed young craters",
+      ),
+    )
     .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))
     .addOption(new Option("--smoke", "a short hidden spike or check run that exits with a status"))
     .addOption(
@@ -290,6 +301,9 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   }
   if (options["handover"] === true && options["terrain"] !== true) {
     command.error("error: --handover is an option of --terrain, which was not given");
+  }
+  if (options["weathered"] === true && options["terrain"] !== true) {
+    command.error("error: --weathered is an option of --terrain, which was not given");
   }
   if (options["terrain"] === true && options["viewsCheck"] !== true) {
     command.error("error: --terrain is an option of --views-check, which was not given");
@@ -381,13 +395,14 @@ function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCh
     setting: settingOf(options),
     smoke: options["smoke"] === true,
     out: typeof out === "string" ? out : null,
-    // `--handover` is refused without `--terrain` before this is reached.
+    // `--handover` and `--weathered` are refused without `--terrain` before this is reached.
     run:
       options["terrain"] !== true
         ? "several-views"
         : options["handover"] === true
           ? "handover"
           : "terrain",
+    fixture: options["weathered"] === true ? "terrain-test-weathered" : "terrain-test",
   };
 }
 

@@ -33,6 +33,7 @@ function input(overrides: Partial<TerrainCheckInput> = {}): TerrainCheckInput {
       launchMode: "vulkan",
       setting: "high",
       smoke: false,
+      fixture: "terrain-test",
       switches: [],
       shown: false,
       window: { widthDip: 1926, heightDip: 1086 },
@@ -603,5 +604,67 @@ describe("the terrain run's summary and its files", () => {
       overall: "pass",
       findings: { terrainFaults: { verdict: "pass", reasons: [], record: [] } },
     });
+  });
+
+  it("names a weathered run's files -terrain-weathered, its run block and summary naming its field (R10.T1.c)", async () => {
+    const written = new Map<string, string>();
+    const files: ResultsFiles = {
+      mkdir: () => Promise.resolve(),
+      exists: (path) => Promise.resolve(written.has(path)),
+      writeFile: (path, text) => {
+        written.set(path, text);
+        return Promise.resolve();
+      },
+    };
+    const weathered = (smoke: boolean): TerrainCheckInput => ({
+      ...input(),
+      run: { ...input().run, smoke, fixture: "terrain-test-weathered" },
+    });
+    const full = await writeTerrainResults(
+      "/out",
+      buildTerrainCheckResults(weathered(false)),
+      files,
+    );
+    const smoke = await writeTerrainResults(
+      "/out",
+      buildTerrainCheckResults(weathered(true)),
+      files,
+    );
+    expect([full.json, smoke.markdown]).toEqual([
+      "/out/2026-10-19-effect-high-terrain-weathered.json",
+      "/out/2026-10-19-effect-high-terrain-weathered-smoke.md",
+    ]);
+    expect(JSON.parse(written.get(full.json) ?? "null")).toMatchObject({
+      run: { smoke: false, fixture: "terrain-test-weathered" },
+    });
+    expect(written.get(full.markdown)).toContain(
+      "- **Field:** `terrain-test-weathered`, TEST MOON weathered (`terrain_test_weathered.golden`), served in TERRAIN TEST's place",
+    );
+  });
+
+  it("keeps TERRAIN TEST's run block, and its summary, as before the option (R10.T1.c)", () => {
+    const results = buildTerrainCheckResults(input());
+    expect([
+      Object.keys(results.run),
+      terrainCheckMarkdown(results).includes("**Field:**"),
+    ]).toEqual([
+      [
+        "startedAt",
+        "machine",
+        "versions",
+        "platform",
+        "launchMode",
+        "setting",
+        "smoke",
+        "switches",
+        "shown",
+        "window",
+        "devicePixelRatio",
+        "timer",
+        "captures",
+        "provisional",
+      ],
+      false,
+    ]);
   });
 });

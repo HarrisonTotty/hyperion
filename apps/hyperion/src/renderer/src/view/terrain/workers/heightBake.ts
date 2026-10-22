@@ -176,6 +176,13 @@ export interface WasmClassMap {
   texels(): Uint32Array;
   fractions(): Float32Array;
   weights(): Uint8Array;
+  /**
+   * Each texel's maturity code at band level 0, one a texel in `texels()`' order (R10.T1.c's
+   * client half; `ClassMapMaturityAnswer.codes`); empty where the header carries no maturity.
+   */
+  maturity(): Uint16Array;
+  /** Each class's band-0 albedo nodes, K × 3 a class, B, V, R (`ClassMapMaturityAnswer.nodes`). */
+  nodes(): Float32Array;
   readonly complete: boolean;
   free(): void;
 }
@@ -802,8 +809,9 @@ export class WorkerFields {
   /**
    * `body`'s coarse class map for R07's disc over its field, with its detail seed (R10.T10.d,
    * `WorkerFields::class_map`), and its normal map (R10.T10.g, `WorkerFields::normal_map`), its
-   * pairs rounded to half floats as a bake's are ({@link packNormals}), copied out; `null` where no
-   * payload field of it is held (none, or a stand-in's, which holds no ground).
+   * pairs rounded to half floats as a bake's are ({@link packNormals}), with the texels' maturity
+   * and the classes' nodes where the header carries a maturity (R10.T1.c's client half), copied
+   * out; `null` where no payload field of it is held (none, or a stand-in's, which holds no ground).
    *
    * @throws Error where the module answers a class map but no normal map, which holds where the
    *   other does (a broken module).
@@ -823,6 +831,8 @@ export class WorkerFields {
       if (normals === undefined) {
         throw new Error(`the module answered ${body}'s class map but no normal map`);
       }
+      // The texels' maturity, and only with it the classes' nodes (R10.T1.c's client half).
+      const codes = map.maturity();
       return {
         level: map.level,
         fieldLevel: map.fieldLevel,
@@ -836,6 +846,7 @@ export class WorkerFields {
         normalCells: normals.cells(),
         normalPairs: packNormals(normals.pairs()),
         normalsComplete: normals.complete,
+        ...(codes.length === 0 ? {} : { maturity: { codes, nodes: map.nodes() } }),
       };
     } finally {
       map.free();

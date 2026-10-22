@@ -944,7 +944,21 @@ export interface ViewsCheckLaunch {
   readonly out: string | null;
   /** The run the launch makes ({@link ViewsCheckRunKind}). */
   readonly run: ViewsCheckRunKind;
+  /**
+   * The field the terrain run or its hand-over check is served ({@link ViewsCheckTerrainFixture}):
+   * `terrain-test` on every launch but a `--terrain --weathered` one; T20's run serves none.
+   */
+  readonly fixture: ViewsCheckTerrainFixture;
 }
+
+/**
+ * The terrain golden a terrain run's kept scene serves in the server's place: `TERRAIN TEST`'s
+ * own (`terrain-test`, `terrain_test.golden`), or `TEST MOON` weathered's (`terrain-test-weathered`,
+ * `terrain_test_weathered.golden`, `--weathered`; plan R10, R10.T1.c's client half;
+ * decision-r10-t1c-client-scope §3): the same moon on a 1 Gyr surface whose young craters' haloes
+ * of fresh regolith the maturity draws, which no generated body carries before generator version 24.
+ */
+export type ViewsCheckTerrainFixture = "terrain-test" | "terrain-test-weathered";
 
 /**
  * The run a views-check launch makes: T20's phases on `PHASE TEST` (`several-views`, plan R07,

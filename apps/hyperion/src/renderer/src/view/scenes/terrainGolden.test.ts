@@ -134,6 +134,14 @@ describe("the terrain golden (R10.T16.d)", () => {
     );
   });
 
+  it("names the file it refuses: TERRAIN TEST's by default, or the one it is given", () => {
+    const text = "# generator_version = 22\nbody 1\nseed 2\nshape 3\n";
+    expect(() => parseTerrainGolden(text)).toThrow("terrain_test.golden: line 4: shape");
+    expect(() => parseTerrainGolden(text, "terrain_test_weathered.golden")).toThrow(
+      "terrain_test_weathered.golden: line 4: shape",
+    );
+  });
+
   it("refuses a line it cannot read, naming it", () => {
     expect(() => parseTerrainGolden("# generator_version = 22\nbody 1\nseed 2\nshape 3\n")).toThrow(
       "line 4: shape is not a line of the terrain test's format",
