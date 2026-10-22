@@ -332,7 +332,7 @@ fn parmentier_s_fit_is_transcribed() {
 ///   cell by the lane: 133 of 141 cells within 0.3 dex). As built, at nine points, within 0.15 dex:
 ///   the farthest +0.14 dex at 3,000 K and 10 mbar, where OH, not carried (P14.T52.e), would hold
 ///   some of the oxygen.
-/// - **TiO within 0.5 dex**: the network dissociates it more, by 0.15–0.45 dex at eight points (the
+/// - **TiO within 0.5 dex**: the network dissociates it more, by 0.14–0.45 dex at eight points (the
 ///   farthest −0.45 dex at 3,500 K and 1 bar), its thermochemistry against CEA's in Parmentier et
 ///   al.'s grid, with TiO₂ not carried; a recorded figure.
 /// - **VO within 1.1 dex**: more again, by 0.50–1.02 dex at nine points (the farthest −1.02 dex at
@@ -549,9 +549,9 @@ fn each_refusal_names_its_cause() {
     );
 }
 
-/// The rules pinned bit for bit at a few inputs each. Nothing on the record calls them at
-/// generator version 22, so this golden is re-blessed with the rules it pins, at the version in
-/// force, until P14.T54.b.
+/// The rules pinned bit for bit at a few inputs each. Nothing on the record calls them before
+/// P14.T54.b, so this golden is re-blessed with the rules it pins, at the version in force (22,
+/// then 23), until then, with no bump (the sim-determinism skill's chemistry exception).
 #[test]
 fn the_rules_are_pinned() {
     use crate::GENERATOR_VERSION;

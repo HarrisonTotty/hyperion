@@ -714,11 +714,11 @@ fn the_quench_is_deterministic() {
 
 /// The quench pinned bit for bit: each system's level on Jupiter's profile and on the
 /// self-luminous planet's at 700 K, and the quenched gas at 1 bar, 0.5 bar (on the planet, between
-/// its CO–CH₄ and CO₂ levels) and 10 mbar. Nothing on the record calls the quench at generator
-/// version 22, so this golden is re-blessed with the rules it pins, and with P14.T52.a's, at the
-/// version in force, until P14.T54.b, with no bump (main's ruling of 2026-10-13 in common.md, as
-/// for P14.T52.a's golden, decision-p14-t52a-rows "The golden at 23"); a commit that moves its
-/// values names that ruling.
+/// its CO–CH₄ and CO₂ levels) and 10 mbar. Nothing on the record calls the quench before
+/// P14.T54.b, so this golden is re-blessed with the rules it pins, and with P14.T52.a's, at the
+/// version in force (22, then 23), until then, with no bump (the sim-determinism skill's chemistry
+/// exception, main's ruling of 2026-10-13, as for P14.T52.a's golden); a commit that moves its
+/// values names that exception.
 #[test]
 fn the_quench_is_pinned() {
     use crate::GENERATOR_VERSION;

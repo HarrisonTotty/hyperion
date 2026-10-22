@@ -6835,11 +6835,14 @@ feeding back into p_s, T_s, the albedo or the bulk.
     - bit-identical natively and under `wasm32-wasip1` (the sim's slow wasip1 suite).
   - _Files:_ `planetary/chem/equilibrium.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::chem::equilibrium`.
-- **P14.T52.b Quench and photochemical rules** (23 → 24, updated 2026-10-15).
+- **P14.T52.b Quench and photochemical rules** (23 → 24, updated 2026-10-15, and 2026-10-22 by
+  decision-p14-t52a-rows and decision-bump-plan-after-22's R2, "Rulings before T53.a lands").
   - `chem/{quench, photochem}.rs`:
     - Zahnle and Marley 2014's quench relations for CO, CH₄, NH₃, HCN and CO₂, with a stated
       K_zz law ("If vertical mixing is like Jupiter's, the transition from methane to CO occurs at
       500 K in a planet"; 400–600 K by mixing);
+    - above the NH₃–N₂ level, N₂ takes the nitrogen that NH₃'s quench leaves, so that the held
+      floor's N₂ never reaches the record above the quench level (decision-p14-t52a-rows);
     - rules, each with its source and range:
       - photochemical SO₂ from H₂S on warm giants (Tsai et al. 2023);
       - S₈ haze at 250–700 K (Gao et al. 2017);
@@ -6850,6 +6853,9 @@ feeding back into p_s, T_s, the albedo or the bulk.
         Lothringer, Barman and Koskinen 2018).
   - T24.c's ozone and methane-haze rules stay T24.c's. A desiccated world's CO + O₂ is T53.a's
     (snapshot path).
+  - Titan's photochemical ethane and the CH₄–C₂H₆–N₂ trace producer are not T52.b's: both are the
+    producer of a Titan-like sea's composition, new P14.T55.m's, recorded, not in 24 (R2). The
+    surface's coupled condensables are P14.T51.g's.
   - _Tests:_
     - Jupiter's CO above its equilibrium value at 1 bar, by the quench;
     - the CH₄ → CO transition near 500 K for Jupiter-like mixing;
@@ -18730,7 +18736,8 @@ tables::gauss_legendre`.
   - _The solution's key._ N₂ as the largest other gas is narrower than the mechanism the doc gives
     (ethane survives where the hydrogen escapes): a methane sea under an air of methane alone, or
     of helium or argon, would also melt first at the binary's eutectic, but lies as pure CH₄ here.
-    For P14.T49.h or T52.b.
+    For P14.T55.m (assigned 2026-10-22, after decision-bump-plan-after-22's R2: ethane decides
+    the sea's row, and T55.m produces it).
   - _The record's partition_ is solved again over the record's range, which equals the passes'
     last step to their convergence (10⁻⁹), not to the bit; T54.a may carry the passes' last
     partition instead.
@@ -25220,3 +25227,163 @@ the_rayleigh_floor_lifts`; the two measurements by name with `-- --ignored --exa
     - The floor's moves feed back through the passes: close_binary 0700 207 → 59 bar, filler_c
       e201 23.0 → 6.09 bar, subgiant 0402 7.85 → 0.13 bar (a moon whose air condenses as it
       brightens). The state changes and the jumps above are the passes' designed outcomes.
+- **Deviations in P14.T52.b, as built: quench and photochemical rules (`p14-quench`, 2026-10-21
+  and 2026-10-22; on P14.T52.a's network).** `GENERATOR_VERSION` stays 23 and no generated value
+  moves: `planetary::chem::{quench, photochem}` are pure modules that nothing on the record calls
+  until P14.T54.b (P14.T52.d calls them); they open no stream and draw nothing. Built at 22 on
+  T52.a's commit A, it lands linearly on 23 after B, as three commits: the rules, the review's
+  fixes, and the goldens re-blessed on B's rows with this record. Two goldens are new,
+  `planetary/quench` (the levels and the quenched gas on Jupiter and a 700 K self-luminous planet)
+  and `planetary/photochem` (each rule at a few inputs), at 23. They are re-blessed by exact name
+  with the rules and with T52.a's, at the version in force until T54.b, with no bump (the
+  sim-determinism skill's chemistry exception, as for `planetary/equilibrium`; a commit that moves
+  their values names it).
+  - _Added public items_ (`hyperion_sim::planetary::chem::quench`): `Quench`
+    (`derive(network, abundances, profile, column)`, `level(system)`,
+    `apply(network, temperature, pressure)`), `QuenchedGas` (`temperature()`, `pressure()`,
+    `is_quenched(system)`, `mole_fractions()`, `mole_fraction(id)`, `per_hydrogen(element)`),
+    `QuenchedSystem` (`CarbonMonoxide`, `Ammonia`, `HydrogenCyanide`, `CarbonDioxide`; `ALL`,
+    `name()`, `chemical_time(T, p, m)`), `QuenchLevel` (`system()`, `pressure()`,
+    `temperature()`, `bound()`), `QuenchBound` (`Crossing`, `Bottom`, `Top`, `Pinned`),
+    `MixingColumn` (public fields: gravity, molar mass, eddy diffusion, metallicity, top, bottom),
+    `EddyDiffusion` (`JUPITER_LIKE`, `from_square_metres_per_second`,
+    `square_metres_per_second()`), `ChemicalTime` and its five constants (`CARBON_MONOXIDE_WARM`,
+    `CARBON_MONOXIDE_COLD`, `AMMONIA`, `HYDROGEN_CYANIDE`, `CARBON_DIOXIDE`), `quench_level`,
+    `scale_height`, `mixing_time`, `SCAN_STEP_LN_P` (0.5), `BISECTIONS` (40),
+    `FindQuenchLevelError`, `DeriveQuenchError`, `ApplyQuenchError`. (`...::photochem`):
+    `UpperAtmosphere` (public fields), `sulphur_dioxide` and `SulphurDioxideLayer`,
+    `sulphur_haze`, `sulphur_saturation_pressure`, `soot`, `hydrocarbon_share`, `ice_giant_haze`,
+    `chromophore`, `Haze`, `HazeRule`, `HazeProfile` (`Layer`, `Gaussian`), `HazeAmount`
+    (`ColumnMass`, `OpticalDepth`), `Dissociating` (`Water`, `TitaniumOxide`, `VanadiumOxide`;
+    `ALL`, `key()`, `fit()`, `remaining(T, p)`), `DissociationFit`, `EvaluateRuleError`, each
+    rule's constants, and the getters of `SulphurDioxideLayer`, `Haze`, `DissociationFit` and
+    `ChemicalTime`. No Provides entry named them.
+  - _The quench._ Zahnle and Marley 2014 (ApJ 797, 41, arXiv:1408.6283v2): eqs. 12 and 13 summed
+    harmonically (eq. 14) for CO–CH₄, eq. 32 for NH₃–N₂, eq. 40 for HCN, eq. 44 for CO₂ (eq. 11,
+    the uncorrected fit, not used); t_mix = H² ÷ K_zz with L = H, to which their fits are
+    calibrated; the level the deepest crossing from the caller's bottom, by an upward scan of 0.5 in
+    ln p and 40 halvings (fixed counts), with `Bottom`, `Top` and `Pinned` bounds; a second,
+    stratospheric crossing is not taken, so the gas stays frozen through an inversion (ZM14 §8).
+    Above a system's level its species keep their mole fractions there per hydrogen atom.
+  - _The K_zz law_ is a constant, `EddyDiffusion::JUPITER_LIKE` = 10⁷ cm² s⁻¹, ZM14's
+    "Jupiter-like" (§3.1), the mixing the plan quotes; ZM14's free-convection eq. 3 is the recorded
+    alternative.
+  - _Three solves of T52.a_ at the CO–CH₄, NH₃–N₂ and HCN levels (ZM14 give each system its own
+    level; on Jupiter CO–CH₄ quenches at 356 bar and 1,002 K), and `apply` solves each level it
+    serves itself, so that the gas it quenches is the gas `derive` was given: a section quenched
+    at its 1-bar level and its photosphere is five solves against decision-composition §1.3's one to
+    three (a deferred cost finding, below).
+  - _CO₂_ is held against the quenched CO, H₂O and H₂ (ZM14 §6) by the registry's own K for CO +
+    H₂O ⇌ CO₂ + H₂, which the network's CO₂ obeys, rather than ZM14's eq. 43 (the two agree within
+    10% over 800–2,000 K): at the local temperature between the CO–CH₄ and CO₂ levels, at CO₂'s
+    level's above it; its search starts at the CO–CH₄ level; K is held between the network's floor
+    and ceiling.
+  - _The element balance is by carriers:_ carbon by CO and CH₄ in proportion, nitrogen by N₂ (the
+    nitrogen NH₃'s quench leaves, decision-p14-t52a-rows), oxygen by H₂O, hydrogen by H₂, each held
+    at zero or above; every other species is the local equilibrium's, so the charge is unchanged;
+    every element is conserved to 10⁻¹² on the tests' cases (Jupiter, 10 and 100 × solar, C/O 1.5).
+  - _HCN_ takes the whole network's equilibrium at its own level (ZM14 §8: no consensus on its
+    quench chemistry; Moses et al. 2010 quench it against the quenched CH₄ and NH₃, not done).
+  - _Dissociation_ is Parmentier et al.'s (2018, A&A 617, A110) fit as a closed form
+    (`Dissociating::remaining`, Table 1's note's 10^−γ, not eq. 2's printed +γ), never applied to
+    T52.a's gas, which dissociates H₂O, TiO and VO itself to 6,000 K: applying both would count it
+    twice. It is the rule's closed form and the network's check (below).
+  - _The rules' edges_ are the builder's linear tapers, inside each source's range, so that each
+    rule holds only in its range and never jumps: SO₂ from none at 900 K to 1,000 K and from 2,000 K
+    to none at 2,500 K (water half dissociated at 1 mbar there); the S₈ vapour over 50 K inside
+    250–700 K; the hydrocarbon share from 1 at 850 K to 0 at 950 K.
+  - _SO₂_ (Tsai et al. 2023, Nature 617, 483): their Extended Data Fig. 10b's 10–0.01 mbar average
+    at 10 × solar by `T_eq` times their Fig. 4a's metallicity dependence (both read by the lane,
+    to about 0.1–0.3 dex, and checked by the science check), interpolated in log; held above
+    20 × solar, extrapolated below 5 × on the 5–10 × slope; capped by the gas's sulphur and half its
+    water; a constant layer 10–0.01 mbar. Their S, S₂, SO and SH products are not written.
+  - _The S₈ haze_ (Gao et al. 2017, AJ 153, 139): the 250–700 K window sets the vapour (1 ppmv times
+    the metallicity, at most an eighth of the sulphur); its condensation is a second condition, the
+    stratosphere's temperature against Zahnle et al.'s (2016, ApJ 824, 137, eq. 4, in bar) vapour
+    pressure, its branches joined at their crossing, 412.5 K; the column is all the supersaturated
+    vapour, condensed, Gao et al.'s own estimate (6 × 10¹⁸ cm⁻² reproduced within 10%).
+  - _Soot_ (Gao et al. 2020, Nat. Astron. 4, 951): formed at 1 µbar; its column f_CH₄ (M_C ÷ μ)
+    p ÷ g, their eq. 3's diffusion-limited supply held for a mixing time over one scale height, in
+    which K_zz cancels. "Silicates above" is T52.c's decks; `hydrocarbon_share` reports the split.
+  - _The ice giants' haze_ (Irwin et al. 2022, JGR Planets 127, e2022JE007189, Aerosol-3): based at
+    the CH₄ layer the caller gives (theirs "1.6 bar (fixed)"), fractional scale height 2 (mixing
+    ratio ∝ (p ÷ p_base)^−0.5), the builder's top at 1 mbar, 0.05 µm particles, its amount an
+    optical depth, 0.035 at 0.8 µm, not a column mass.
+  - _The chromophore_ (Braude et al. 2020, Icarus 338, 113589): a Gaussian in ln p of width 0.25,
+    peaked at the NH₃ layer or 0.2 bar, whichever is higher, with the Great Red Spot's 2018 column,
+    6.3 × 10⁻⁴ kg m⁻²; generalised to any giant with an NH₃ layer.
+  - _The host's ultraviolet_ is not read: each source finds its result insensitive to it.
+  - _Tests, with their values_, re-measured on B's rows (each as at 22 to the precision given, but
+    TiO's lower bound). Jupiter's CO at 1 bar 1.5 × 10⁻⁹ by the quench (Bézard et al. 2002's
+    (1.0 ± 0.2) × 10⁻⁹, asserted within a factor of 3), against 1.5 × 10⁻³⁰ in the floor's held
+    equilibrium; the CH₄ → CO transition at 494 K for Jupiter-like mixing (asserted 450–550 K),
+    689 K at 10⁴ and 363 K at 10¹⁰ cm² s⁻¹ (order asserted; ZM14 do not say which mixing their
+    600 K and 400 K are for), and ZM14 §3.1's 600 K planet CO ÷ CH₄ 40, 4.0 and 0.35 at 10¹⁰, 10⁷
+    and 10⁴ (their "fCO ≫ fCH4", "abundant CO", "barely ... fCH4 > fCO"); t_CO ÷ t_mix 0.83 at
+    ZM14's quench point (1.5 bar, 1,280 K); S₈ haze only at 250–700 K and only below about 327 K of
+    stratosphere at solar, 349 K at 10 ×; soot only below 950 K; each rule continuous (0.1 K and
+    0.001 dex steps); the network's dissociation against the fit within 0.15 dex for H₂O (nine
+    points), 0.14–0.45 for TiO (eight; 0.15–0.45 at 22, B's atoms moving its 4,000 K and 0.1 bar
+    point by 0.002 dex) and 0.50–1.02 for VO (nine), asserted within 0.3, 0.5 and 1.1 dex. The
+    test profiles are not T24.d's: Jupiter's a power-law adiabat through Seiff et al. 1998's
+    166.1 K at 1 bar (from memory) and 427.7 K at 22 bar; ZM14's planet an adiabat at R ÷ c_p 0.29
+    through their §3.1 quench point, homologous in T_eff.
+  - _Files beyond the task's:_ `chem/mod.rs` (two module lines and doc bullets),
+    `chem/{quench, photochem}/tests.rs` (the chem directory's convention), the two goldens.
+  - _The goldens on B's rows_ (re-blessed at 23 by exact name):
+    - `planetary/quench`: 18 lines new, S, N and C in the six quenched gases (Jupiter and the
+      700 K planet, each at 1 bar, 0.5 bar and 10 mbar), and 180 changed.
+    - Every level (each system's bound, pressure and temperature) is bit-identical, and so is
+      Jupiter's CO.
+    - Jupiter's NH₃, N₂ and HCN move by at most 3.2 × 10⁻¹⁴ of their values: NH₃ by
+      +3.8 × 10⁻¹⁵ and HCN by −3.2 × 10⁻¹⁵, the network's last bits at their levels since B's
+      start, and N₂ by −3.2 × 10⁻¹⁴, their carrier's balance. Its other species are bit-identical.
+    - The 700 K planet's 57 species at each height move by under 10⁻¹⁰ of their values (the
+      solves' last bits, and the S atom's hydrogen), but H₂S and SO₂, by 5.2 × 10⁻⁷ at 1 bar and
+      2.1 × 10⁻⁹ at 0.5 bar: the S atom's share, as in T52.a's own golden at 1,000 K.
+    - `planetary/photochem` moves no value: it reads no network. Its header is the only line
+      changed from the build at 22.
+  - _Not T52.b's_ (decision-bump-plan-after-22's R2, "Rulings before T53.a lands"):
+    - Titan's photochemical ethane and the CH₄–C₂H₆–N₂ trace producer are one figure, the producer
+      of a Titan-like sea's composition on its `ch4_c2h6_n2` entry. Both go to new P14.T55.m,
+      recorded, not in 24: T52.b's rules are the envelopes', and ethane needs its own science
+      check. Until T55.m, every Titan-like sea takes Ligeia Mare's reference composition, basis
+      `Derived`, clamped at N₂'s 126.19 K, and no supercritical N₂ trace is made at 24. No air
+      carries C₂H₆ (an envelope's equilibrium holds a trace of it, 2 × 10⁻¹⁸ in Jupiter's quenched
+      gas and at most 2 × 10⁻¹¹ in the 700 K planet's, `planetary/quench`).
+    - The surface's coupled condensables ("T52.b–c with T51.g") are P14.T51.g's.
+    - So the earlier records' "a photochemical product of the Surface path (P14.T52.b)" (T51.a's
+      deferral, the ethane) and "T52.b's at 24" (the supercritical N₂ trace) are P14.T55.m's.
+    - T51.a part 2's "_The solution's key_" (which liquid row a methane sea takes where ethane
+      survives; it read "For P14.T49.h or T52.b") is not built and not T52.b's. R2 named no owner;
+      main assigned it to P14.T55.m (2026-10-22), since ethane decides the sea's row.
+- **Deferred findings (2026-10-13 rule)**, from P14.T52.b:
+  - _Cost:_ five solves of T52.a a quenched section (three quench levels, the 1-bar level and the
+    photosphere) against §1.3's one to three; a cheaper path, one solve at the CO–CH₄ level with
+    NH₃–N₂ and HCN by single-reaction K's at their own levels, would trade a small discontinuity
+    where a level crosses the evaluated one. P14.T33.a times it.
+  - _The K_zz law_ is one constant for every envelope; Jupiter's own deep K_zz is explored at
+    4 × 10⁷–10⁹ cm² s⁻¹ (Visscher, Moses and Saslow 2010), and a law by the convective flux (ZM14
+    eq. 3) would differ by body.
+  - _VO and TiO:_ the network dissociates VO 0.50–1.02 dex and TiO 0.14–0.45 dex more than
+    Parmentier et al.'s fit (CEA's VO record, Gurvich 1982, about 19 kJ mol⁻¹ less bound than
+    JANAF's, P14.T52.a's finding; TiO₂ not carried, P14.T52.e).
+  - _The soot column_ is a one-scale-height lower bound, perhaps a decade low as a steady state (the
+    science check, against Adams et al. 2019, ApJ 874, 61); its photon limit (Gao et al. 2020 eq. 4)
+    is not read, which distant giants may reach.
+  - _The chromophore_ takes the Great Red Spot's depth (0.2 bar, the plan's) and column, Jupiter's
+    reddest, for every cold giant; elsewhere on Jupiter Braude et al. find 0.30–0.6 bar, and
+    Sromovsky et al. 2017 (Icarus 291, 232) 18–30 µg cm⁻² for most features.
+  - _SO₂ above 20 × solar_ is held, where Tsai et al.'s Fig. 4a still rises as about m^2.9; below
+    5 × it is extrapolated on the steep 5–10 × slope.
+  - _Tsai et al.'s other sulphur products_ (S, S₂, SO, SH) are not written into the layer. The S
+    atom is a row since T52.a's commit B, which T52.a's record names as the row such a product
+    would go into; S₂ and SO are not rows, and SH is P14.T52.e's. Not built: the source's split
+    among them is not read, and P14.T52.d books the layer's sulphur.
+  - _The hazes' onset:_ the ice giants' haze and the chromophore appear at full strength with their
+    deck (continuous in its pressure, not in its existence); T52.d records the deck's onset as a
+    state change, or tapers them by the deck's column.
+  - _The S₈ vapour pressure_ is extrapolated below Zahnle et al.'s coldest datum, about 310 K.
+  - _Seiff et al.'s 166.1 K at 1 bar_ (Jupiter's test profile) was not read in the source; Seiff
+    et al.'s abstract gives 429 K at 22 bar against VMS10's 427.7 K (an exponent of 0.307 against
+    0.306).

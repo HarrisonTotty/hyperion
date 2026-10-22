@@ -70,15 +70,15 @@
 //! # What is not modelled
 //!
 //! Each rule gives only what its source states. Tsai et al.'s other products in the SO₂ layer (S,
-//! S₂, SO and SH; the S atom joins the registry with P14.T52.a's commit B) are not written: the rest
-//! of the layer's sulphur stays in its gases as P14.T52.d has them. Hazes' microphysics (growth,
-//! settling, coagulation) is not modelled: each haze's amount is its source's, or for soot and S₈
-//! the closed estimate each rule states. Photochemistry's dependence on the host's ultraviolet is
-//! not read: in Tsai et al.'s models "the resulting sulphur species abundances are almost identical
-//! when the UV flux is reduced by a factor of 10" (Methods), Gao et al. (2017) find S₈'s mixing
-//! ratio "largely independent of stellar UV fluxes", and Gao et al. (2020) that the
-//! diffusion-limited supply "is always lower than the photon-limited production rate" on their
-//! grid.
+//! S₂, SO and SH; of them only the S atom is a registry row, since P14.T52.a's commit B) are not
+//! written: the rest of the layer's sulphur stays in its gases as P14.T52.d has them. Hazes'
+//! microphysics (growth, settling, coagulation) is not modelled: each haze's amount is its
+//! source's, or for soot and S₈ the closed estimate each rule states. Photochemistry's dependence
+//! on the host's ultraviolet is not read: in Tsai et al.'s models "the resulting sulphur species
+//! abundances are almost identical when the UV flux is reduced by a factor of 10" (Methods), Gao et
+//! al. (2017) find S₈'s mixing ratio "largely independent of stellar UV fluxes", and Gao et al.
+//! (2020) that the diffusion-limited supply "is always lower than the photon-limited production
+//! rate" on their grid.
 //!
 //! # Determinism
 //!
