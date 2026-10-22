@@ -13,6 +13,14 @@
 //!   ([`Network`](equilibrium::Network) and [`GasEquilibrium`](equilibrium::GasEquilibrium),
 //!   P14.T52.a), on the Surface path, from the element abundances at one temperature and pressure;
 //!   nothing on the record reads it until P14.T54.b.
+//! - [`photochem`]: an envelope's photochemical SO₂, its sulphur, soot, ice-giant and
+//!   chromophore hazes, and the thermal dissociation of H₂O, TiO and VO on ultra-hot daysides
+//!   (P14.T52.b), each rule with its source and range, on the Surface path; nothing on the record
+//!   reads them until P14.T54.b.
+//! - [`quench`]: where an envelope's CO, CH₄, NH₃, HCN and CO₂ stop following the equilibrium
+//!   as the gas rises ([`Quench`](quench::Quench), P14.T52.b), by Zahnle and Marley's (2014)
+//!   relations, and the gas above those levels, on the Surface path; nothing on the record reads
+//!   it until P14.T54.b.
 //! - [`partition`]: the condensate partition at the ground (P14.T51.a), how much of each
 //!   condensable a body's air holds over its climate, how much lies on its surface, and in which
 //!   phase.
@@ -67,6 +75,8 @@ pub mod envelope_abundances;
 pub mod equilibrium;
 pub mod inventory;
 pub mod partition;
+pub mod photochem;
+pub mod quench;
 pub mod redox;
 
 use crate::Seed;
