@@ -250,6 +250,12 @@ identity 110 chondrite_e: lithology, charge 0, elements []
 identity 110 chondrite_e: molar_mass_g_per_mol none
 identity 111 cometary: lithology, charge 0, elements []
 identity 111 cometary: molar_mass_g_per_mol none
+identity 112 S: atom, charge 0, elements [S 1]
+identity 112 S: molar_mass_g_per_mol = 0x404007ae147ae148  # 32.06
+identity 113 N: atom, charge 0, elements [N 1]
+identity 113 N: molar_mass_g_per_mol = 0x402c0395810624dd  # 14.007
+identity 114 C: atom, charge 0, elements [C 1]
+identity 114 C: molar_mass_g_per_mol = 0x402805a1cac08312  # 12.011
 [optics]
 optics 0 H2: rayleigh true, absorber true, aerosol_material false
 optics 1 He: rayleigh true, absorber true, aerosol_material false
@@ -363,6 +369,9 @@ optics 108 chondrite_l: rayleigh false, absorber false, aerosol_material false
 optics 109 chondrite_ll: rayleigh false, absorber false, aerosol_material false
 optics 110 chondrite_e: rayleigh false, absorber false, aerosol_material false
 optics 111 cometary: rayleigh false, absorber false, aerosol_material false
+optics 112 S: rayleigh false, absorber false, aerosol_material false
+optics 113 N: rayleigh false, absorber false, aerosol_material false
+optics 114 C: rayleigh false, absorber false, aerosol_material false
 [gas]
 gas 0 H2: rotation InLevels
 gas 0 H2: level set 0, term (0, 0) cm = 0x40a0f4bf8bac710c  # 2170.3741124999997
@@ -1051,6 +1060,38 @@ gas 65 Cr: heat_capacity_over_r at 1000 K = 0x40040c183fd1423d  # 2.505905626843
 gas 65 Cr: heat_capacity_over_r at 2000 K = 0x4007823445db87a8  # 2.9385762651081286
 gas 65 Cr: enthalpy_over_r_k at 298.15 K = 0x40874b000000000e  # 745.3750000000016
 gas 65 Cr: entropy_over_r at 298.15 K = 0x4030309d69d51020  # 16.189901937978107
+gas 112 S: rotation None
+gas 112 S: level set 0, 4 levels, digest fc22238da385492c, weight = 0x3ff0000000000000  # 1.0
+gas 112 S: heat_capacity_over_r at 30 K = 0x40040000a3b2fded  # 2.500001219653987
+gas 112 S: heat_capacity_over_r at 100 K = 0x40048c6a200c8278  # 2.5685617927377358
+gas 112 S: heat_capacity_over_r at 200 K = 0x400680d8e2261268  # 2.8129136722439405
+gas 112 S: heat_capacity_over_r at 298.15 K = 0x4006c73162e38a35  # 2.847262165612188
+gas 112 S: heat_capacity_over_r at 500 K = 0x4005e16983fbf830  # 2.7350645362157806
+gas 112 S: heat_capacity_over_r at 1000 K = 0x4004ad381421266f  # 2.5845796177498452
+gas 112 S: heat_capacity_over_r at 2000 K = 0x4004789a8b0017d9  # 2.5588885173228673
+gas 112 S: enthalpy_over_r_k at 298.15 K = 0x4089059a781b6711  # 800.7004243985012
+gas 112 S: entropy_over_r at 298.15 K = 0x403022aec5f8971a  # 16.13547932929132
+gas 113 N: rotation None
+gas 113 N: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 113 N: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 113 N: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 113 N: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 113 N: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 113 N: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 113 N: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 113 N: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 113 N: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 114 C: rotation None
+gas 114 C: level set 0, 4 levels, digest f5177acfb259f88c, weight = 0x3ff0000000000000  # 1.0
+gas 114 C: heat_capacity_over_r at 30 K = 0x400874d1c0e9432c  # 3.0570406981645615
+gas 114 C: heat_capacity_over_r at 100 K = 0x40047787bf1c5bf8  # 2.5583643847016866
+gas 114 C: heat_capacity_over_r at 200 K = 0x40041d160525ed8f  # 2.514202156276674
+gas 114 C: heat_capacity_over_r at 298.15 K = 0x40040ce8cec2a3e0  # 2.506303420367189
+gas 114 C: heat_capacity_over_r at 500 K = 0x40040487d3f6b32f  # 2.5022121963178487
+gas 114 C: heat_capacity_over_r at 1000 K = 0x4004013aa95bdf75  # 2.5006001692926767
+gas 114 C: heat_capacity_over_r at 2000 K = 0x400428dff8f53264  # 2.5199584436252724
+gas 114 C: enthalpy_over_r_k at 298.15 K = 0x408890cfed63ce6a  # 786.1015270039909
+gas 114 C: entropy_over_r at 298.15 K = 0x403070273ffba9ee  # 16.4380989064611
 equilibrium hydrogen: heat_capacity_over_r at 30 K = 0x400b73d05d523960  # 3.4315497675626574
 equilibrium hydrogen: heat_capacity_over_r at 100 K = 0x400b16be9808b2f6  # 3.3861057164816613
 equilibrium hydrogen: heat_capacity_over_r at 200 K = 0x400a693162e0e507  # 3.3013637280352017

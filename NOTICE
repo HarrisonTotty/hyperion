@@ -283,11 +283,12 @@ is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND
 implied. See the License for the specific language governing permissions and limitations under the
 License.
 
-The 111 species records of data/thermo.inp that galaxy plan 14's P14.T49.d reads (B. J. McBride,
-M. J. Zehe and S. Gordon 2002, NASA Glenn Coefficients for Calculating Thermodynamic Properties of
-Individual Species, NASA/TP-2002-211556) are kept verbatim, with the file's header and CRLF line
-ends, in crates/hyperion-fit/data/nasa_cea_thermo/thermo.inp (a tool input, not shipped), beside
-the repository's LICENSE.txt; crates/hyperion-fit/data/nasa_cea_thermo/reduce.py extracts them.
+The 113 species records of data/thermo.inp that galaxy plan 14's P14.T49.d and P14.T52.a read
+(B. J. McBride, M. J. Zehe and S. Gordon 2002, NASA Glenn Coefficients for Calculating
+Thermodynamic Properties of Individual Species, NASA/TP-2002-211556) are kept verbatim, with the
+file's header and CRLF line ends, in crates/hyperion-fit/data/nasa_cea_thermo/thermo.inp (a tool
+input, not shipped), beside the repository's LICENSE.txt;
+crates/hyperion-fit/data/nasa_cea_thermo/reduce.py extracts them.
 Changes: only the selection of records. Their coefficients are re-emitted interval by interval,
 unmodified, into crates/hyperion-sim/src/tables/thermo.rs, and the reference states' switches to
 their gases are computed from them there.

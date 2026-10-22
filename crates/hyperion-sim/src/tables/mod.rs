@@ -382,7 +382,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "thermo_equilibrium",
         revision: 0,
-        since_generator_version: 22,
+        since_generator_version: 23,
         provisional: false,
     },
     TableInfo {

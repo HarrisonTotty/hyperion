@@ -92,7 +92,7 @@ const SWITCH_STEPS: u32 = 200;
 /// CEA writes `AL`, `AL+` and `HCL` in its capitals, and acetylene's record is `C2H2,acetylene`
 /// (not vinylidene); HCN is `HCN` (not `HNC`). The rows without a record are the sim's
 /// [`NOT_MODELLED`].
-pub const ROWS: [(&str, &str); 57] = [
+pub const ROWS: [(&str, &str); 60] = [
     ("H2", "H2"),
     ("He", "He"),
     ("H2O", "H2O"),
@@ -150,6 +150,9 @@ pub const ROWS: [(&str, &str); 57] = [
     ("Zn+", "Zn+"),
     ("HCl", "HCL"),
     ("Cr", "Cr"),
+    ("S", "S"),
+    ("N", "N"),
+    ("C", "C"),
 ];
 
 /// The reference gases that are not registry rows: chlorine's, sulphur's and phosphorus's.
@@ -243,9 +246,8 @@ pub const CONDENSED: [(Element, &[&str]); 16] = [
 
 /// The cross-checks' records that are neither rows nor references: each item, its phase, and its
 /// CEA records.
-pub const CROSS_CHECKS: [(&str, Phase, &[&str]); 8] = [
+pub const CROSS_CHECKS: [(&str, Phase, &[&str]); 7] = [
     ("SO3", Phase::Gas, &["SO3"]),
-    ("C", Phase::Gas, &["C"]),
     ("C2", Phase::Gas, &["C2"]),
     ("C3", Phase::Gas, &["C3"]),
     ("C4", Phase::Gas, &["C4"]),
@@ -285,7 +287,7 @@ pub const JANAF_GAS_FROM_K: [(Element, f64, &str); 15] = [
 /// The table's items, in order: the rows in registry order, the three other reference gases, the
 /// condensed references in [`Element::ALL`]'s order each with its switch, then the cross-checks'
 /// records.
-pub const ITEMS: [&str; 99] = [
+pub const ITEMS: [&str; 101] = [
     "H2",
     "HE",
     "H2O",
@@ -343,6 +345,9 @@ pub const ITEMS: [&str; 99] = [
     "ZN_PLUS",
     "HCL",
     "CR",
+    "S",
+    "N",
+    "C",
     "CL2",
     "S2",
     "P2",
@@ -378,7 +383,6 @@ pub const ITEMS: [&str; 99] = [
     "ZN_CONDENSED",
     "ZN_BOILING_K",
     "SO3",
-    "C",
     "C2",
     "C3",
     "C4",
@@ -1621,7 +1625,7 @@ END PRODUCTS\r\nEND REACTANTS\r\n";
     #[test]
     fn thermo_equilibrium_the_library_holds_every_item() {
         let library = library();
-        assert_eq!(library.len(), 111);
+        assert_eq!(library.len(), 113);
         let fitted = fit(&library).unwrap();
         let names: Vec<&str> = fitted.items().iter().map(Item::name).collect();
         assert_eq!(names, ITEMS);

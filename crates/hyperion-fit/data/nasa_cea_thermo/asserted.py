@@ -46,7 +46,7 @@ def rust(value):
     return f"{sign}{whole}.{fraction}" + (f"e{int(exponent)}" if exponent else "")
 
 
-print("const CEA: [(&str, [f64; 3], [f64; 3]); 57] = [")
+print("const CEA: [(&str, [f64; 3], [f64; 3]); 60] = [")
 for key, name in kf.ROWS:
     s = kf.species_of(name)
     temps = temperatures(name)

@@ -231,6 +231,31 @@ fn hydrogen_sulphide_is_the_dominant_sulphur_gas() {
     }
 }
 
+/// The S atom is the dominant sulphur gas past Visscher, Lodders and Fegley's (2006, §3.1) eq. 7,
+/// where log p < 4.80 − 14,522 ÷ T (SH = S, above their triple point at about 1,509 K), away from
+/// SH's field between it and eq. 4: at 3,000 K and 10 mbar and at 5,000 K and 1 bar, each about
+/// two decades past the line (eq. 7's K₅ is fitted over 800–2,500 K; CEA's records put the line
+/// at log p 2.0 at 5,000 K, against eq. 7's 1.9, so the point stays two decades past it). FastChem 4.0.3's full network there (the asserted cases' version,
+/// data and command, [`Case`]: its `logK.dat`, the 25 elements at protosolar abundances, Lodders
+/// 2010) gives S 0.953 and 0.985 of the sulphur, SH, not carried (P14.T52.e), 4.5% and 1.4%, and
+/// H₂S 7 × 10⁻⁴ and 5 × 10⁻⁵. SH's sulphur goes to S and H₂S here in their own ratio, so S's share
+/// is held over FastChem's rounded down, 0.95 and 0.98 (0.9992 and 0.9999 here), and H₂S's under
+/// 0.01: H₂S as the carrier, as a network without the S atom would publish it, fails both by far.
+#[test]
+fn atomic_sulphur_is_the_dominant_sulphur_gas_past_its_line() {
+    let network = network();
+    let g = gas(1.0, None, None);
+    for (t, bar, least) in [(3_000.0_f64, 0.01_f64, 0.95), (5_000.0, 1.0, 0.98)] {
+        assert!(
+            t > 1_509.0 && math::log10(bar) < 4.80 - 14_522.0 / t - 1.0,
+            "{t} K, {bar} bar is not a decade past eq. 7's line, above the triple point"
+        );
+        let got = solve_at(&network, &g, t, bar);
+        assert!(share(&got, row("S"), Element::S) > least, "{t} K");
+        assert!(share(&got, row("H2S"), Element::S) < 0.01, "{t} K");
+    }
+}
+
 /// Iron is monatomic above its cloud (Visscher, Lodders and Fegley 2010, ApJ 716, 1060: "Monatomic
 /// Fe is the most abundant Fe-bearing gas throughout the atmospheres of EGPs and L dwarfs"): above
 /// its condensation temperature, 10⁴ ÷ T = 5.44 − 0.48 log p (their eq. 2; 1,838 K at 1 bar),
@@ -259,8 +284,9 @@ fn iron_is_monatomic_above_its_cloud() {
 /// (Lodders 2010), written as A(X) = log₁₀(N ÷ `N_H`) + 12, times the case's metallicity for
 /// every element heavier than helium, carbon at the case's C/O times the oxygen where it has one.
 ///
-/// Each entry is a species holding at least 1% of one of its elements in FastChem's run, with
-/// FastChem's mole fraction and the relative tolerance asserted.
+/// Each entry is a species holding at least 1% of one of its elements in FastChem's run, or, on
+/// the 4,600 K dayside, the electrons and H⁻, with FastChem's mole fraction and the relative
+/// tolerance asserted.
 struct Case {
     label: &'static str,
     metallicity: f64,
@@ -321,21 +347,24 @@ const CHONS: [Element; 6] = [
 ///   "accurate at the ∼1% level"; the misses here, at most 1.9% (CO at 1,100 K and 1 bar), are the
 ///   two thermochemistries', CEA's records and FastChem's fits.
 /// - **Network-matched** (`logK.dat`'s entries for this network's species alone, cut from it by
-///   the lane's scratch script, every element but Ni, P and Cl), at points where FastChem's atoms
-///   of S, N and C, which this network does not carry, hold under 0.3% of their element: each
-///   carrier holding most of its element within 1% (2% for H₂O and CO at 2,500 K and 100 bar,
-///   where the S atom holds 0.26% of the sulphur), the rest within the thermochemistries'
-///   difference, entry by entry: NH₃, CO, CO₂, CH₄ and TiO 5% where they hold a minor share, HCN
-///   20%, CH₄ beside CO 30% at 2,500 K, Ti 25%; and vanadium, whose VO record differs most
-///   (CEA's K for VO is 0.10–0.41 of FastChem's at 1,000–2,500 K), VO 20–80% and the V atom up to
-///   4.5 times.
+///   the lane's scratch script, every element but Ni, P and Cl; FastChem adds every element's
+///   atom, so the species are this network's but CH₃OH and C₂H₆, which its data does not hold and
+///   which hold under 0.2% of the carbon on the grid here): each carrier holding most of its
+///   element within 1% (2% for H₂O and CO at 2,500 K and 100 bar), the rest within the
+///   thermochemistries' difference, entry by entry: NH₃, CO, CO₂, CH₄ and TiO 5% where they hold a
+///   minor share, HCN 20%, CH₄ beside CO 30% at 2,500 K, Ti 25%; on the 4,600 K dayside the
+///   iron's ionisation, CEA's K for Fe ⇌ Fe⁺ + e⁻ being 0.92 of FastChem's there (the two runs'
+///   x(Fe⁺) x(e⁻) ÷ x(Fe)): Fe⁺ 5% though it holds 56–82% of the iron, Fe 10%, the electrons and
+///   H⁻, which carry it, 2%, and Mg and Si⁺, each the minor state of its metal, 2%; and vanadium,
+///   whose VO record differs most (CEA's K for VO is 0.10–0.41 of FastChem's at 1,000–2,500 K),
+///   VO 20–80% and the V atom up to 4.5 times.
 ///
 /// The runs: `fastchem_run.py <site-packages> <logK file> <cases.json> <work dir> <out.json>`, a
 /// scratch driver that writes each case's abundance file (`e-` at 0, then A(X) per element), builds
 /// `pyfastchem.FastChem(abundance file, logK file, 0)`, sets the case's parameters, calls
 /// `calcDensities` over its (T, p) points in bar, and writes each species' number density over the
 /// sum of all of them, electrons included; every point's flag was `FASTCHEM_SUCCESS`.
-const CASES: [Case; 10] = [
+const CASES: [Case; 12] = [
     Case {
         label: "Heng and Tsai, protosolar, 1,100 K, 1 bar",
         metallicity: 1.0,
@@ -531,6 +560,62 @@ const CASES: [Case; 10] = [
             ("K+", 1.716_930e-8, 0.01),
         ],
     },
+    Case {
+        label: "network-matched, protosolar, 4,600 K, 10 mbar",
+        metallicity: 1.0,
+        c_to_o: None,
+        elements: &NETWORK_MATCHED,
+        temperature: 4_600.0,
+        bar: 0.01,
+        species: &[
+            ("H", 9.101_264e-1, 0.01),
+            ("He", 8.822_768e-2, 0.01),
+            ("O", 4.704_315e-4, 0.01),
+            ("C", 1.723_650e-4, 0.01),
+            ("CO", 7.859_521e-5, 0.01),
+            ("N", 7.330_713e-5, 0.01),
+            ("N2", 3.782_238e-7, 0.01),
+            ("S", 1.477_763e-5, 0.01),
+            ("Mg+", 3.290_739e-5, 0.01),
+            ("Mg", 3.367_398e-6, 0.02),
+            ("Si", 1.925_706e-5, 0.01),
+            ("Si+", 1.617_827e-5, 0.02),
+            ("Fe+", 2.407_293e-5, 0.05),
+            ("Fe", 5.412_325e-6, 0.1),
+            ("Ca+", 2.131_321e-6, 0.01),
+            ("Na+", 2.038_386e-6, 0.01),
+            ("e-", 8.119_206e-5, 0.02),
+            ("H-", 2.589_810e-9, 0.02),
+        ],
+    },
+    Case {
+        label: "network-matched, protosolar, 4,600 K, 50 mbar",
+        metallicity: 1.0,
+        c_to_o: None,
+        elements: &NETWORK_MATCHED,
+        temperature: 4_600.0,
+        bar: 0.05,
+        species: &[
+            ("H", 9.079_423e-1, 0.01),
+            ("He", 8.842_236e-2, 0.01),
+            ("O", 3.862_262e-4, 0.01),
+            ("CO", 1.639_335e-4, 0.01),
+            ("C", 8.758_006e-5, 0.01),
+            ("N", 7.070_789e-5, 0.01),
+            ("N2", 1.759_390e-6, 0.01),
+            ("S", 1.481_023e-5, 0.01),
+            ("Mg+", 2.666_307e-5, 0.01),
+            ("Mg", 9.691_755e-6, 0.02),
+            ("Si", 2.866_397e-5, 0.01),
+            ("Si+", 6.779_337e-6, 0.02),
+            ("Fe+", 1.642_934e-5, 0.05),
+            ("Fe", 1.312_098e-5, 0.1),
+            ("Ca+", 2.124_105e-6, 0.01),
+            ("Na+", 2.039_069e-6, 0.01),
+            ("e-", 5.768_125e-5, 0.02),
+            ("H-", 9.177_311e-9, 0.02),
+        ],
+    },
 ];
 
 #[test]
@@ -545,6 +630,114 @@ fn every_asserted_case_is_within_its_tolerance() {
                 (have / want - 1.0).abs() < tolerance,
                 "{}: {key} {have:e} against FastChem's {want:e}",
                 case.label
+            );
+        }
+    }
+}
+
+/// A level of the KELT-9b-like dayside at 4,600 K: its pressure, bar; FastChem's mole fractions
+/// of H, S, N and O, the electrons and H⁻, each with its relative tolerance; and FastChem's share
+/// of the carbon in the C atom.
+struct DaysideLevel {
+    bar: f64,
+    species: [(&'static str, f64, f64); 6],
+    carbon_atom: f64,
+}
+
+/// The KELT-9b-like dayside's levels: 4,600 K, Gaudi et al.'s (2017, Nature 546, 514) dayside of
+/// about 4,600 K and science-r08-unowned-absorbers §2.2's reference at 0.05 bar, at 10, 30 and
+/// 50 mbar. FastChem 4.0.3's full network (the asserted cases' version, data and command,
+/// [`Case`]: its `logK.dat`, gas only, `accuracyChem` 10⁻⁸), the 25 elements at protosolar
+/// abundances (Lodders 2010); every point's flag was `FASTCHEM_SUCCESS`. Each tolerance is stated
+/// against what FastChem holds there in species not carried:
+///
+/// - **H**, 0.1%: they hold under 3 × 10⁻⁶ of the hydrogen (H⁺ and OH the most).
+/// - **S**, 1%: S⁺ and SH hold 0.20–0.28% of the sulphur, which goes to S here (S +0.21% to
+///   +0.28%).
+/// - **N**, 1%: NH, CN and NO hold 0.04–0.16% of the nitrogen (N +0.05% to +0.16%).
+/// - **O**, 1%: OH holds 0.09–0.37% of the oxygen, which goes to O here (O +0.14% to +0.50%).
+/// - **The electrons and H⁻**, 4%: H⁺, C⁺ and S⁺, not carried, are 0.35–0.91% of FastChem's
+///   cations, and its Ni⁺ record (`NETWORK_MATCHED`'s reason for leaving Ni out) ionises 99% of
+///   the nickel where CEA's records ionise 33–63%, a further 0.8–2.0% of the electrons; the
+///   electrons are 1.8–2.5% low here, and H⁻, at K p(H) p(e⁻), with them. Without Ni, P and Cl
+///   (the network-matched cases at 4,600 K) both are within 0.8%.
+/// - **The C : CO split**: C's share of the carbon within 0.01 of FastChem's (0.687, 0.455 and
+///   0.349, so the atom holds the carbon at 10 mbar and CO from 30 mbar; about 0.001 here), C⁺,
+///   CH and CN holding under 0.06% of it and CEA's K for C + O ⇌ CO being 0.5% below FastChem's
+///   (the network-matched runs); and C and CO together over 0.999 of it (FastChem's
+///   0.9994–0.9995).
+const KELT_9B_DAYSIDE: [DaysideLevel; 3] = [
+    DaysideLevel {
+        bar: 0.01,
+        species: [
+            ("H", 9.101_218e-1, 0.001),
+            ("S", 1.473_683e-5, 0.01),
+            ("N", 7.327_507e-5, 0.01),
+            ("O", 4.700_093e-4, 0.01),
+            ("e-", 8.326_568e-5, 0.04),
+            ("H-", 2.655_939e-9, 0.04),
+        ],
+        carbon_atom: 0.6867,
+    },
+    DaysideLevel {
+        bar: 0.03,
+        species: [
+            ("H", 9.090_457e-1, 0.001),
+            ("S", 1.476_392e-5, 0.01),
+            ("N", 7.188_567e-5, 0.01),
+            ("O", 4.114_881e-4, 0.01),
+            ("e-", 6.688_316e-5, 0.04),
+            ("H-", 6.392_582e-9, 0.04),
+        ],
+        carbon_atom: 0.4550,
+    },
+    DaysideLevel {
+        bar: 0.05,
+        species: [
+            ("H", 9.079_383e-1, 0.001),
+            ("S", 1.477_458e-5, 0.01),
+            ("N", 7.060_189e-5, 0.01),
+            ("O", 3.845_165e-4, 0.01),
+            ("e-", 5.911_495e-5, 0.04),
+            ("H-", 9.405_378e-9, 0.04),
+        ],
+        carbon_atom: 0.3490,
+    },
+];
+
+/// A KELT-9b-like dayside (decision-p14-t52a-rows) is held in atoms and ions as FastChem's full
+/// network holds it ([`KELT_9B_DAYSIDE`]): H, S, N, O, the electrons and H⁻ within their
+/// tolerances, the C : CO split, and Fe⁺ above Fe and Ca⁺ above Ca at every level (FastChem's
+/// Fe⁺ 0.81, 0.64 and 0.55 of the iron, Ca⁺ 0.99 of the calcium).
+#[test]
+fn a_kelt_9b_like_dayside_is_atomic_and_ionised() {
+    let network = network();
+    let g = gas(1.0, None, None);
+    for level in &KELT_9B_DAYSIDE {
+        let got = solve_at(&network, &g, 4_600.0, level.bar);
+        for &(key, want, tolerance) in &level.species {
+            let have = got.mole_fraction(row(key)).unwrap();
+            assert!(
+                (have / want - 1.0).abs() < tolerance,
+                "{} bar: {key} {have:e} against FastChem's {want:e}",
+                level.bar
+            );
+        }
+        let atom = share(&got, row("C"), Element::C);
+        let monoxide = share(&got, row("CO"), Element::C);
+        assert!(
+            (atom - level.carbon_atom).abs() < 0.01,
+            "{} bar: C holds {atom} of the carbon",
+            level.bar
+        );
+        assert!(atom + monoxide > 0.999, "{} bar", level.bar);
+        for (ion, neutral) in [("Fe+", "Fe"), ("Ca+", "Ca")] {
+            let ionised = got.mole_fraction(row(ion)).unwrap();
+            let held = got.mole_fraction(row(neutral)).unwrap();
+            assert!(
+                ionised > held,
+                "{} bar: {ion} {ionised:e} against {neutral} {held:e}",
+                level.bar
             );
         }
     }
@@ -999,4 +1192,69 @@ fn the_speciation_is_pinned() {
         }
     }
     golden!("planetary/equilibrium", w.as_str());
+}
+
+/// The start takes each major element's atom at the start's p(H₂) (`State::atom_ratio`, and
+/// `pair_root`'s linear share): `pair_root` solves total = linear a + 2 κ a², and gives total ÷
+/// linear at κ = 0. Where the atoms hold the sulphur, the nitrogen and most of the carbon (3,000 K
+/// at 10 mbar; the KELT-9b-like dayside at 4,600 K, 10 and 50 mbar; 5,750 K at 10 mbar, where
+/// the start without the atoms stalled at every metallicity; 6,000 K at 10⁻⁴ bar), the start's
+/// ln p of H₂, CH₄, NH₃, H₂O and H₂S and of the hydrogen nuclei lies within 0.25 of the
+/// solution's (0.12 at most, CH₄ and H₂O at 3,000 K), where H₂S taken all-in lay 7 to 31 off.
+#[test]
+fn the_start_takes_the_major_elements_atoms() {
+    for (total, linear, kappa) in [
+        (1e-3, 1.0, 0.0),
+        (1e-3, 50.0, 0.0),
+        (2e-4, 3.0, 1e6),
+        (1e-5, 1e8, 1e12),
+    ] {
+        let a = pair_root(total, linear, kappa);
+        let back = linear * a + 2.0 * kappa * a * a;
+        assert!(
+            (back / total - 1.0).abs() < 1e-12,
+            "{total} {linear} {kappa}: {back}"
+        );
+        if kappa == 0.0 {
+            assert!((a * linear / total - 1.0).abs() < 1e-15, "{linear}");
+        }
+    }
+    let network = network();
+    let mut per_hydrogen = [0.0; Element::ALL.len()];
+    for (e, x) in gas(1.0, None, None) {
+        per_hydrogen[element_index(e)] = x;
+    }
+    let gas = Gas::new(&network, &per_hydrogen);
+    for (t, bar) in [
+        (3_000.0, 0.01),
+        (4_600.0, 0.01),
+        (4_600.0, 0.05),
+        (5_750.0, 0.01),
+        (6_000.0, 1e-4),
+    ] {
+        let log_k: Vec<f64> = network
+            .species
+            .iter()
+            .map(|s| {
+                s.formation.as_ref().map_or(0.0, |(r, per)| {
+                    r.log10_equilibrium_constant(Kelvin::new(t)).unwrap()
+                        * core::f64::consts::LN_10
+                        * per
+                })
+            })
+            .collect();
+        let state = State::new(&network, &gas, &log_k, bar);
+        let start = state.start();
+        let (solved, _) = state.refine(start, Stop::AtFixedPoint);
+        for k in [0, 1, 2, 3, 4, NUCLEI] {
+            assert!(
+                (start[k] - solved[k]).abs() < 0.25,
+                "{t} K, {bar} bar: unknown {k} starts at {} against {}",
+                start[k],
+                solved[k]
+            );
+        }
+        let all_in = math::ln(gas.majors[4]) + start[NUCLEI];
+        assert!(all_in - solved[4] > 5.0, "{t} K, {bar} bar");
+    }
 }

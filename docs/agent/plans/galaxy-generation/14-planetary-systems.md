@@ -6796,17 +6796,19 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
 Surface path, `planetary/chem/`. Built only with a `surface` or `envelope` section, and never
 feeding back into p_s, T_s, the albedo or the bulk.
 
-- **P14.T52.a Equilibrium speciation, hydrogen-dominated** (23 → 24, updated 2026-10-15; after
-  T49.d and T50.b).
+- **P14.T52.a Equilibrium speciation, hydrogen-dominated** (23 → 24, updated 2026-10-15 and
+  2026-10-22 by decision-p14-t52a-rows; after T49.d and T50.b).
   - `chem/equilibrium.rs`: at the 1-bar level, the quench level and the photosphere of an envelope
     (or a thin H₂ air once T53.a keeps one), Heng and Tsai 2016's analytic C–H–O–N solution
     ("accurate at the ∼1% level for temperatures from 500 to 3000 K", gas phase), on T49.d's K(T),
     with:
-    - H₂S carrying the sulphur (Visscher, Lodders and Fegley 2006);
+    - H₂S carrying the sulphur in its field and S beyond it (Visscher, Lodders and Fegley 2006,
+      §3.1, eqs. 4, 7 and 10); SH not carried (P14.T52.e);
     - the trace elements (Na, K, Ti, V, Fe, Mg, Si, Ca, Al, P, Cl, Cr, Mn, Ni, Zn) in closed form
       from the major solution, each metal as its neutral atom and its first ion. Second ions are
-      under 10⁻³ of the first below 5,000 K, and H⁺ is under 10⁻⁶ of H, so neither is carried. The
-      builder states every species it lists, each a T49.b row
+      under 10⁻³ of the first below 5,000 K, and H⁺ is under 10⁻⁶ of H at 4,600 K and 0.05 bar, so
+      neither is carried; above about 5,000 K at 10 mbar or less H⁺ gives most of the electrons
+      (P14.T52.e). The builder states every species it lists, each a T49.b row
       (science-r08-unowned-absorbers);
     - e⁻ and H⁻ by Saha's closed form, the charge balanced over the metals' first ions. Above
       Heng and Tsai's 3,000 K, the closed form is extended to atoms and ions (T52.b's
@@ -6904,6 +6906,37 @@ feeding back into p_s, T_s, the albedo or the bulk.
     - continuous in time, but at recorded state changes.
   - _Files:_ `planetary/hooks/{envelope_atmosphere, mod}.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::envelope_atmosphere`.
+- **P14.T52.e The equilibrium network's further carriers** (a rider of 24, optional; after T52.a;
+  decision-p14-t52a-rows, 2026-10-21). It boards T54.b if it has landed when T54.b's wiring
+  starts, and otherwise takes the next planetary bump. It never holds T54.b.
+  - _Rows_, each with T49.b's gas columns and a CEA record where CEA holds one (a row without one
+    is `formation::NOT_MODELLED`'s, as `FeH` is). First the members of T52.a's `NOT_CARRIED` that
+    hold over 10% of an element, SH, OH, S⁺ and C⁺, and H⁺ for the electrons it gives; then N⁺
+    and O⁺, the phosphorus network (P, P₂, PO, PH₂), Cl, SiS, TiO₂ and VO₂. Scoping the rest of
+    `NOT_CARRIED` is this task's.
+  - _P and Cl become solved elements_ before P₂ or a chloride gas (NaCl, KCl and the others)
+    joins: a gas row holding two trace atoms makes `Network::registry` refuse
+    (`BuildNetworkError::TwoTraceAtoms`), this task's tripwire.
+  - _The refit_: `thermo_equilibrium`'s rows and the committed CEA subset gain each row's record.
+    Before 24 the goldens are re-blessed extension-only; after 24 the rows are a
+    `GENERATOR_VERSION` change, since T52.a's network is every gas row with a record.
+  - `NOT_CARRIED` loses each entry as its row joins (its tripwire test).
+  - _The asserted cases are rerun with condensation_ (FastChem's condensation mode, or GGchem,
+    Woitke et al. 2018, A&A 614, A1, from memory), by hand outside the repository under
+    decision-composition §5, in place of T52.a's gas-only values.
+  - The rows' client answers are R08.T4.i's; their flags turn on at the first bump after they are
+    answered.
+  - _Tests:_
+    - SH's field between Visscher, Lodders and Fegley 2006's eqs. 4 and 7;
+    - OH's share at 3,000 K and 10 mbar;
+    - e⁻ at 6,000 K and 10 mbar against the run;
+    - phosphorus at a hot-Jupiter photosphere carried as the run carries it.
+  - _Files:_ `substance/{rows, thermo, formation}.rs`, `planetary/chem/equilibrium.rs`;
+    `hyperion-fit`'s `tasks/thermo_equilibrium.rs` and `data/nasa_cea_thermo/`; the goldens
+    `tests/golden/substance/{registry, formation}.golden` and
+    `tests/golden/planetary/equilibrium.golden`, and `packages/protocol/fixtures/substances.json`.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::chem::equilibrium`;
+    `cargo test -p hyperion-sim substance::`; `just fit-check`.
 
 #### P14.T53 Escape, special states and life
 
@@ -7180,7 +7213,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
     with T24.g → T24.d with T52.d, each after what Tasks, "Order and parallelism", names.
   - _Riders_ board if they have landed when its wiring starts, and otherwise take the next bump,
     renumbering their hold: T51.f; T51.i (held at 24 with T51.f); T51.j (pure); T51.d → T51.e →
-    T51.g; T48.g; T53.a → T53.b → T53.c; T53.d; and T31.a → T31.b → T31.c. T33.c follows T54.b.
+    T51.g; T48.g; T53.a → T53.b → T53.c; T53.d; and T31.a → T31.b → T31.c. T52.e, after T52.a, is
+    an optional rider that never holds T54.b (decision-p14-t52a-rows). T33.c follows T54.b.
   - _It adds_ `vertical_structure` (T24.e), `aerosols` (T24.c with T24.g) and `record::Envelope`
     (T24.d with T52.d, replacing `match envelope {}`). With them come the protocol fixture's
     hot-Jupiter envelope and a Jupiter whose envelope is `Ok` with an NH₃ deck (both from T54.a),
@@ -13867,7 +13901,8 @@ tables::gauss_legendre`.
     - C₂H₆ at 100 K is 4.298, against Chao, Wilhoit and Zwolinski 1973's 4.287, read, and
       Gurvich's 4.294 [M].
     - CH₃OH is 4.438, Chen et al.'s.
-  - _The rows._ Rows 9–111 are appended in the plan's order. T52.a has listed no further species.
+  - _The rows._ Rows 9–111 are appended in the plan's order. T52.a has listed no further species
+    (it later appended `S`, `N` and `C` as rows 112–114: "Deviations in P14.T52.a, as built").
     Their kinds:
     - `NH4SH`, the salts, sulphides, oxides, silicates, `SiC` and `graphite` (key `graphite`,
       stoichiometry C) are minerals; `H2SO4` and `S8` are molecules;
@@ -19331,11 +19366,14 @@ tables::gauss_legendre`.
   - _JANAF's log K_f_ differs from CEA's by up to 1.7 × 10⁻³ (water at 298.15 K).
   - _Below 300 K_ only H₂, H₂O, NH₃, N₂, O₂, Ar, H and O have a K_f (to 200 K), and e⁻, H⁻, Mg⁺,
     Si⁺ and Ca⁺ to 298.15 K: CEA's 2021 update reset most ranges to 300 K. T52.a takes its major
-    carriers as all-in below 500 K (its plan), so it should not need them there.
+    carriers as all-in below 500 K (its plan), so it should not need them there. (As built, N's
+    record reaches 200 K too, and T52.a holds its 300 K floor's equilibrium below it,
+    `Regime::HeldAtFloor`, reading no record below 300 K.)
   - _Above 6,000 K_ nothing is emitted, though CEA's atoms and ions reach 20,000 K.
   - _Not registry rows_: OH, the P and Cl atoms and P⁺ and Cl⁺, which T52.a's closed form names
     (its trace elements "each … as its neutral atom and its first ion"); CEA holds each, and a row
-    added later takes its record by a refit (for T52.a).
+    added later takes its record by a refit (for T52.a). S, N and C joined as rows at P14.T52.a
+    (decision-p14-t52a-rows); OH, P, Cl, P⁺ and Cl⁺ are P14.T52.e's.
   - _`FeH`_: no thermochemistry anywhere in the sim (P14.T52.d's).
   - _CEA's empty intervals_: `Si(cr)`'s and `Ca(a)`'s first intervals (300 → 298.15 K) are a defect
     of the 2021 range update, dropped here.
@@ -24788,3 +24826,282 @@ planetary::record` (624 tests at T57.a's commit).
       25 vitest files that read the fixture (974 passed), the protocol package's
       `planetary.test.ts` (30) and `cargo test -p hyperion-protocol` (481). The final gate follows
       the bump.
+- **Deviations in P14.T52.a, as built: equilibrium speciation of a hydrogen-dominated gas
+  (`p14-chem`, 2026-10-21 and 2026-10-22; decision-p14-t52a-rows).** `GENERATOR_VERSION` stays
+  23: nothing on the record calls `planetary::chem::equilibrium` until P14.T54.b. It lands as two
+  commits, linearly on 23: A, the solver over the registry's rows (built at 22, replayed onto
+  23), and B, the atoms S, N and C appended as registry rows with their thermochemistry, the
+  start extended to them, and the high-temperature tests. One new golden, `planetary/equilibrium`,
+  pins the output for the wasip1 comparison. B's three rows re-bless `registry.golden`,
+  `formation.golden` and the client's `substances.json` extension-only, and refit
+  `thermo_equilibrium` with no bump; P14.T54.b restamps it `--since 24`.
+  - _Added public items_ (`hyperion_sim::planetary::chem::equilibrium`): `Network` (`registry()`,
+    `species()`, `floor()`, `ceiling()`, `solve(abundances, temperature, pressure)`),
+    `GasEquilibrium` (`temperature()`, `pressure()`, `regime()`, `mole_fractions()`,
+    `mole_fraction(id)`, `partial_pressure(id)`, `per_hydrogen(element)`, `charge_imbalance()`),
+    `Regime` (`Equilibrium`, `HeldAtFloor`), `BuildNetworkError`, `SolveEquilibriumError`,
+    `NotCarried` and `NOT_CARRIED` (62 entries), and the constants `MAJOR_ELEMENTS`,
+    `NEWTON_STEPS` (60), `STEP_LIMIT` (8), `BACKTRACKS` (12), `CONVERGED` (10⁻¹³) and
+    `HYDROGEN_DOMINANCE_BOUND` (0.5).
+  - _The model._ The network is every registry gas row with a CEA record (60 of the 61 gas rows;
+    `FeH` is `formation::NOT_MODELLED`'s), in registry order, chosen by no name.
+    - The major elements H, C, N, O and S are solved for, on the basis H₂, CH₄, NH₃, H₂O and H₂S
+      with the electron. Every other element is a trace element whose species hold one atom of it
+      (each metal's atom and first ion, SiO, TiO, VO, PH₃, HCl, the noble gases), shared in closed
+      form given the majors and differentiated with them.
+    - Each species' K is its formation from the basis (`Reaction`, from the species' own Gibbs
+      energies; doubled where H₂'s ν is a half).
+    - **Seven unknowns**, not the plan's "five element potentials": the natural logarithms of the
+      five basis pressures, of the electrons' and of the hydrogen nuclei's, a superset that carries
+      the charge and the total pressure. The equations are each major element's balance, the
+      charge's and the total pressure's, each a difference of logarithms.
+    - The start is the leading pairs' closed forms (Heng, Lyons and Tsai 2016; Heng and Tsai
+      2016): H₂ against H over the helium and traces; CO against CH₄ and C with H₂O and O; the
+      excess carbon between CH₄, C and C₂H₂; NH₃ and N against N₂; H₂S against S; the electrons
+      by Saha's closed form. B added the three atoms to it (below).
+    - Then damped Newton steps on all the equations: an exact Jacobian, each step at most e⁸ in
+      any unknown with no major species above the total, halved up to 12 times until it lowers the
+      squared residuals. It stops when no halving does, and refuses a residual above 10⁻¹³
+      (`NotConverged`). Above 6,000 K it refuses (`AboveRecords`).
+    - _Where it stops_: a gas is solved while its all-in hydrides would take at most half its
+      hydrogen (`HYDROGEN_DOMINANCE_BOUND`). At protosolar ratios they take 2.58 × 10⁻³ of it, so
+      the bound is an enrichment of about 194 (metals 0.24 per H atom), which T50.b's E(M)
+      reaches near 4.1–4.7 M⊕ about a host of solar metallicity, and at about twice the mass at
+      \[Fe/H\] = +0.3. Beyond it `solve` refuses (`NotHydrogenDominated`), the record's speciation
+      is not modelled (P14.T52.d), and P14.T53.a's hybrid airs take the gas.
+  - _The floor_ (decision-p14-t52a-rows, "Changes to decision-composition §1.3", ruling 1:
+    accepted).
+    - The floor is 300 K, where every species' record holds, not the plan's 500 K. Below it the
+      composition is `Regime::HeldAtFloor`: the floor's equilibrium at the same pressure, the same
+      bits, continuous at 300 K (the continuity test runs from 200 K in 10 K steps).
+    - 300–500 K is solved exactly, where the plan said all-in. At a bar or more the held floor is
+      all-in in the plan's sense: CH₄ holds over 0.999 999 of the carbon and NH₃ over 0.999 of the
+      nitrogen at 300 K and 1 bar. An all-in switch would jump at low pressure, where N₂ holds 9%
+      of the nitrogen at 10⁻⁴ bar.
+    - T52.d's cold-giant levels read the held floor: Jupiter's 1 bar at 166 K, and the ice
+      giants' 50–80 K at 0.1–1 bar. Its gas is an input to T52.b and T52.c and is never published
+      alone. The condensation of H₂O, NH₃, NH₄SH, H₂S and CH₄ is T52.c's, which cold-traps the deep
+      mixing ratio the floor gives all-in, and the quench is T52.b's. The module doc says so
+      beside its metals sentence.
+  - _The refinement_ (ruling 2: accepted).
+    - It is §1.3's conditional branch, taken everywhere because its condition holds everywhere.
+      Heng and Tsai's form (2n_H₂ = n_H, no helium, no oxygen in the metals) meets the plan's
+      10⁻¹² conservation and charge nowhere. The plan's own extension above 3,000 K, and B's S, N
+      and C atoms, have no closed form in that solution. So it departs from the plan's "added
+      only if" wording, not from §1.3.
+    - It is deterministic: a fixed start, at most 60 steps and 12 halvings, each accepted by a
+      strict f64 comparison. Sums run in network order and transcendentals go through `math`;
+      otherwise only `sqrt` and `f64::midpoint`. There is no `HashMap`, `mul_add` or f32.
+    - The early stop is a bitwise fixed point. A refused step leaves the unknowns, the residuals
+      and the Jacobian as they are, so every later step is refused too, and the result is the
+      60-step count's to the bit (`stopping_at_the_fixed_point_gives_the_fixed_count_s_bits`, six
+      levels).
+    - `NotConverged` occurs nowhere over the tested domain: the conservation test's 200 K held and
+      300–6,000 K, 10⁻⁸–10⁴ bar, a hundredth of protosolar to the dominance bound, C/O 0.3–2.
+    - B's development sweep found none in 62,790 points: 300–6,000 K by 50 K × 10⁻⁸–10⁴ bar by
+      decade × seven metallicities from 0.01 to 150 × C/O protosolar and 0.3–2. The sweep's only
+      refusals were hydrogen dominance's.
+    - Under `wasm32-wasip1`: `the_speciation_is_pinned` runs in the fast wasip1 suite
+      (`test-wasm-fast`, which `ci` and smart-ci run), not the plan's slow suite, so the golden is
+      compared on both targets at every gate. It passed at B's gate (smart-ci, 2026-10-22): the
+      same bits on both targets.
+  - _The network's three consequences_ (ruling 3: accepted). Each is caught by
+    `the_registry_s_network_builds`, the golden and T49.d's fingerprint.
+    - After T54.b, any gas row added with a CEA record, for any reason (R08's absorber rows and
+      T52.e's included), moves T52.a's output, a `GENERATOR_VERSION` change.
+    - The floor and ceiling are the records' common range. A row whose record starts above 300 K
+      or stops below 6,000 K moves them, and the test pins both.
+    - A gas row holding two trace atoms (P₂, gaseous NaCl or KCl, the other chlorides) makes
+      `Network::registry` refuse (`TwoTraceAtoms`). P and Cl must become solved elements first,
+      which is T52.e's work, and the refusal is its tripwire.
+  - _Validation_. FastChem 4.0.3 (pyfastchem from PyPI under CPython 3.14, data at the FastChem
+    repository's tag v4.0.3, ae67cbd559bc64a3233a1cee6030b8e6b50520de; gas phase, `accuracyChem`
+    10⁻⁸) was run by hand outside the repository, and its values are asserted only
+    (decision-composition §5). The module doc gives each figure.
+    - In Heng and Tsai's domain (C, H, O, N and He; 500–3,000 K, 10⁻²–100 bar; 1, 10 and 100
+      times protosolar; C/O 1 and 1.5; FastChem's full network), every species holding 1% of an
+      element or more agrees within 7% at C/O 1 or less. The worst is CO₂ at +6.6% (2,500 K,
+      10 mbar, a hundred times protosolar). Four cases are asserted at 2.5%, the worst CO at
+      1,100 K and 1 bar (+1.9%).
+    - Network-matched: FastChem given this network's species, every element but Ni, P and Cl,
+      300–6,000 K × 10⁻⁶–10⁴ bar. Since B, its species are this network's but CH₃OH and C₂H₆.
+      Every carrier holding 90% of its element or more agrees within 1% but CO (−2.7%), TiO, N₂,
+      CH₄, Ti and Si (1.1–1.6%), and vanadium. A split between two carriers carries their K's
+      difference: within 5% to 100 bar at C/O 1 or less, but for the exceptions the module doc
+      lists (up to 9.4%, and Ti 16% at C/O 1.5). CO misses by up to −30% at 10⁴ bar.
+    - On a KELT-9b-like dayside (4,600 K, 10–50 mbar; FastChem's full network over the 25
+      elements), the atoms H, C, N, O and S agree within 0.6%. The electrons and H⁻ are 1.8–2.5%
+      low: H⁺, C⁺ and S⁺ are not carried, and FastChem's Ni⁺ record ionises 99% of the nickel.
+  - _Tests, with their values_ (21 in the module).
+    - **CH₄ = CO** at 1,145 K at 1 bar and 1,421 K at 10 bar, against Lodders and Fegley 2002's
+      ~1,125 and ~1,390 K (+1.8% and +2.2%; tolerance 2.5%).
+    - **NH₃ = N₂** at 559, 705 and 941 K at 0.1, 1 and 10 bar, against 559, 697 and 925 K read
+      from their Fig. 18b (+0.0%, +1.1% and +1.7%; tolerance 3%).
+    - **H₂S in its field**: 1.000 of the sulphur at 1,000 K and 1 bar, and 0.9987 at 1,500 K and
+      10 mbar (bounds 0.99 and 0.95, VLF2006's eq. 3 with SH not carried).
+    - **S past eq. 7** (B): 0.9992 of the sulphur at 3,000 K and 10 mbar and 0.9999 at 5,000 K and
+      1 bar. FastChem gives 0.953 and 0.985 beside SH's 4.5% and 1.4%; the bounds are 0.95 and
+      0.98, and H₂S is under 0.01 at both.
+    - **Fe monatomic** above Visscher et al. 2010's cloud: over 0.999 99 of the iron at 2,000 K
+      (1 bar and 10 mbar) and 2,500 K and 1 bar (bound 0.99).
+    - **A KELT-9b-like dayside** (B; 4,600 K at 10, 30 and 50 mbar), against the full run:
+      - H within 0.1% (+0.0002% at most);
+      - S, N and O within 1% (+0.28%, +0.16% and +0.50% at most);
+      - the electrons and H⁻ within 4% (−2.45% at most);
+      - C's share of the carbon within 0.01 of FastChem's 0.687, 0.455 and 0.349 (0.6877, 0.4556
+        and 0.3491), and C and CO together over 0.999 of it;
+      - Fe⁺ above Fe (0.80, 0.63 and 0.54 of the iron) and Ca⁺ above Ca (0.99).
+    - **Twelve asserted cases**: four in Heng and Tsai's domain and eight network-matched, two of
+      them B's at 4,600 K, at 10 and 50 mbar. The 4,600 K cases' tolerances: carriers 1% (worst
+      +0.26%); Mg, Si⁺, the electrons and H⁻ 2% (worst −0.76%); Fe⁺ 5% (−3.38%); Fe 10% (+6.66%,
+      CEA's K for Fe ⇌ Fe⁺ + e⁻ being 0.92 of FastChem's there). B moved the earlier cases' values
+      by under 2 × 10⁻⁶, but H₂S's by up to 0.25%.
+    - **Conservation**: the elements and the charge to 10⁻¹², with each metal's atom and ion
+      summing to its abundance, over the domain above.
+    - The rest: the held floor; C/O above 1 accepted; refusals past hydrogen dominance, each
+      refusal naming its cause; an absent element's species at zero; continuity in temperature;
+      determinism; order independence; the fixed point's bits; an unbuildable network refused;
+      no `NOT_CARRIED` species a registry gas row (T52.e's tripwire); and the golden.
+  - _The golden_ `planetary/equilibrium` (1,160 lines, 89,774 bytes). It was new at 22 in A's
+    first build, with 1,103 lines and 85,399 bytes.
+    - It was re-blessed at 23 with its header the only line moved, since 23 moved no gas row with
+      a record.
+    - Then it was re-blessed at 23 with B's rows: 57 lines new (S, N and C at the 19 levels) and
+      656 changed.
+    - The cold levels (166 K, 300 K, and 700 K at 100 bar), the gas without carbon or nitrogen,
+      and hydrogen alone are bit-identical. 800 K at 10 bar moves in its last bits.
+    - At 1,000 K and 1 bar, H₂S and SO₂ move by 6 × 10⁻¹¹: the S atom's share.
+    - The hot levels move with the atoms. At 3,000 K and 10 mbar H₂S falls by 99.9%. At 4,600 K
+      N₂ falls by 95% and CO by 35%. At 6,000 K and 10⁻⁴ bar, CO, CH₄ and N₂ fall to nothing.
+  - _The rows_ (B; decision-p14-t52a-rows (c)): rows 112–114, `S`, `N` and `C`, kind `Atom`.
+    - Their electronic levels below 15,000 cm⁻¹ come from NIST ASD v5.12's compilations:
+      - S I: ³P₂,₁,₀ and ¹D₂ (Civiš et al. 2024; Martin, Zalubas and Musgrove 1990), with g as
+        2J + 1;
+      - C I: ³P₀,₁,₂ and ¹D₂ (Haris and Kramida 2017);
+      - N I: its ⁴S₃/₂ ground alone (Moore 1993). Its `c_p` runs 0.85% below CEA's at 3,000 K and
+        11.4% below at 5,000 K, recorded in its citation.
+    - Molar masses are 32.06, 14.007 and 12.011.
+    - All three client flags are false (`AWAITING_CLIENT_OPTICS`), owed to R08.T4.i. The client
+      is not edited, since `parity.test.ts` checks flagged rows only.
+    - NASA Glenn's `c_p` check gains the three. `formation`'s `RECORDS`, `CEA` and `NAMED` go to
+      60, 60 and 54 entries, and N joins the 200 K list. `NOT_CARRIED` loses neutral C, N and S
+      (65 → 62).
+  - _The refit_ (B), by the first-emission path (decision-p14-t49h-liquids §5), `--since 23`.
+    - `thermo_equilibrium`'s `ROWS` goes to 60, `CROSS_CHECKS` to 7 (C is now the row's record,
+      and graphite's sublimation still reads it) and `ITEMS` to 101.
+    - The committed subset holds 113 records: 79,513 bytes, SHA-256
+      2a0daa6f8e8a167f7abdda246e3ec44e0c9655edb325f4342cf59295939c8f52, from the same pinned raw
+      file. `PROVENANCE.toml`, `kf.py`, `asserted.py`, `reduce.py` and NOTICE follow it.
+    - The fingerprint gains 112, 0, 11, 1, 113, 0, 3, 1, 114, 0, 2, 1. The acceptance reads "60
+      of the registry's 61 gas rows (`FeH` not modelled), 86 items of 198 intervals".
+    - Only the S and N items are new, and C moved. The switches and both cross-checks are
+      unchanged (MgSO₄ 1,375.44 K, graphite 3,973.32 K).
+    - `tables.lock` goes since 22 → 23, revision 0, and `fit-check` is clean.
+    - Extension-only re-blesses: `registry.golden` +41 lines (4,365 → 4,406), `formation.golden`
+      +114 (2,202 → 2,316), and `substances.json` +3 entries (indices 112–114).
+  - _Files beyond the task's:_
+    - `chem/equilibrium/tests.rs` and the golden;
+    - `chem/mod.rs` (module line, doc bullet);
+    - `substance/formation.rs` (T49.d's tripwire deleted, its doc's first reader, B's records);
+    - `crates/hyperion-sim/clippy.toml` (FastChem, CPython, PyPI and the mixed-case formulas as
+      valid doc idents);
+    - B's `substance/{rows, mod, thermo}.rs` and `tables/{thermo, mod}.rs`;
+    - `hyperion-fit`'s `tasks/thermo_equilibrium.rs`, `tables.lock` and `data/nasa_cea_thermo/`;
+    - NOTICE, the two substance goldens and `packages/protocol/fixtures/substances.json`.
+  - _Deviations, with their reasons._
+    - **The refinement always runs**, with the closed forms as its start (above).
+    - **The floor is 300 K, held** (above).
+    - **The network is data-driven**: every gas row with a record (above).
+    - **The start takes the major elements' atoms** (B). Without them, A's start put all the
+      sulphur in H₂S, and all the nitrogen and carbon in their molecules, where the atoms hold
+      them. Newton then stalled (residuals 8–40) at 57 of 9,072 points over 2,000–6,000 K: at
+      Z 150 and 10⁻⁶ bar or less, and at 5,750 K and 10 mbar for every metallicity. With them,
+      none stalls (the sweep above).
+    - **A golden beyond the plan's files**, for the wasip1 bit comparison.
+    - **The wasip1 comparison is in the fast suite**, not the plan's slow one: the module's tests
+      are fast, so its bits are checked at every gate.
+    - **C's CEA cross-check is now the row's own record** (`CROSS_CHECKS` 8 → 7): graphite's
+      sublimation still reads it, at 3,973.32 K, unchanged, which keeps the ruling's "keep its
+      cross-check" in substance.
+    - **`NOT_CARRIED`'s follow-up is the set's, not each entry's**: every entry is P14.T52.e's, so
+      the type's documentation says so once; each entry's `element` is the one it holds the
+      largest share of.
+    - **Three rows appended by T52.a** (S, N, C; decision-p14-t52a-rows), their client flags false,
+      owed to R08.T4.i.
+    - **H₂S's test scoped** to Visscher, Lodders and Fegley's H₂S field, with S's test beyond it.
+- **Deferred findings (2026-10-13 rule)**, from P14.T52.a:
+  - _NOT_CARRIED's shares_ (its documentation gives the run's grid and inputs), for P14.T52.e,
+    with S, N and C carried:
+    - SH holds up to 48% of the sulphur (4,000 K, 100 bar) inside its field between VLF2006's
+      eqs. 4 and 7, where H₂S and S are each overstated by up to its share;
+    - OH holds up to 21% of the oxygen (6,000 K, 100 bar), 15% at 4,000 K and 1 bar, and 12% at
+      3,000 K and 10 mbar;
+    - NH and NH₂ hold up to 14% of the nitrogen (6,000 K, 100 bar);
+    - C⁺ holds up to 6% of the carbon at 10 mbar or more;
+    - below 10⁻⁴ bar at 5,000 K and above, S⁺ and C⁺ take over: 75% of the sulphur and 42% of the
+      carbon at 6,000 K and 10⁻⁴ bar;
+    - TiO₂ and VO₂ hold most of Ti and V below 1,500 K, under T52.c's CaTiO₃ trap;
+    - P₂, PO, PH₂ and P, and Cl and the chlorides, carry P and Cl beyond PH₃'s and HCl's ranges.
+  - _The reach_ (decision-p14-t52a-rows; FastChem 4.0.3, gas only, the 25 elements at
+    protosolar abundances, Lodders 2010, 300–6,000 K × 10⁻⁶–100 bar, by the asserted cases'
+    driver; the module doc's "Where it stops"):
+    - _The electrons and H⁻_ are valid where H⁺ and the non-metals' ions give under 10% of the
+      electrons: to 4,000 K at 10⁻⁴ bar or more, to 5,000 K at 10 mbar or more, and at 6,000 K
+      only at 100 bar.
+    - _Phosphorus_: PH₃ holds half the phosphorus or more only at 1 bar or more to 1,200 K, and at
+      100 bar to 1,500 K. Elsewhere it is published beyond its validity, a stated miss for a trace
+      element.
+    - _Chlorine_: HCl holds half of it or more roughly from 1,200 to 3,000 K at the middle
+      pressures. Above that, Cl atoms carry it; below, the chloride gases (gas only).
+    - _Ti and V_: TiO and VO are overstated by up to about 2× at 1,500 K (TiO₂ 27–42% of the
+      titanium, VO₂ 53–68% of the vanadium there), and by more below, under T52.c's CaTiO₃ trap.
+    - _S⁺ and C⁺ at 10 mbar or more_ hold over 10% of their element only at 6,000 K (21% and 6% at
+      10 mbar).
+    - _Gas-only artefacts_: below their metals' decks, the hydroxides, sulphides and chlorides of
+      the metals, and SiS, are flagged `condensed` in `NOT_CARRIED`; T52.c's cold traps remove
+      them.
+  - _H⁺'s bound_, against the plan's "under 10⁻⁶ of H". H⁺ is 6.9 × 10⁻⁹ of the hydrogen at
+    4,000 K and 10 mbar, and 2.0 × 10⁻⁷ at 4,600 K and 0.05 bar. But it is 1.0 × 10⁻⁵ at 5,000 K
+    and 10 mbar, and above about 5,000 K at 10 mbar or less it gives most of the electrons, so
+    they come out low by about 6× at 6,000 K and 10 mbar. For P14.T52.e and R08's Risks (H⁻).
+  - _Second ions_ are not carried: Ca²⁺ is 1.3% of Ca⁺ at 6,000 K and 10 mbar, and 14% at
+    10⁻⁴ bar.
+  - _The held floor's N₂._ At 300 K, N₂'s share of the nitrogen scales as 1 ÷ p² (N₂ + 3H₂ ⇌
+    2NH₃).
+    - From 9% at 10⁻⁴ bar, that is about 0.1% at 10⁻³ bar, 10⁻⁵ at 10 mbar and under 10⁻⁸ at
+      0.3 bar.
+    - By the same scaling (not run), it is most of the nitrogen by 10⁻⁶ bar, where cold
+      equilibrium would give NH₃.
+    - That lies above every §1.3 level of a cold giant. N₂ has no visible opacity and does not
+      condense, and where T52.b quenches nitrogen it replaces this N₂.
+  - _Gas only_: a rerun of the asserted cases with condensation is P14.T52.e's, and graphite is
+    not modelled.
+  - _The ideal gas_ holds to about 1 kbar (H₂'s compressibility is 1.2 at 1,000 K: Leachman et
+    al. 2009, through NIST's WebBook), though the arithmetic holds to 10⁴ bar.
+  - _Carbon-rich gases_: C₂H, CN and HNC lie outside `NOT_CARRIED`'s protosolar scope. At C/O 1.5
+    and 10 mbar, C₂H holds 9% of the carbon at 2,500 K and 13% at 3,000 K, CN 7% of the nitrogen,
+    and HNC 3–5%.
+  - _The thermochemistries_:
+    - CEA's HCN runs 15–45% above FastChem's JANAF-based fit at 700–1,500 K, and its C₂H₂ 15–29%
+      below.
+    - CH₄ beside CO runs 10–36% above at 2,000–2,500 K.
+    - CEA's VO K is 0.10–0.41 of FastChem's at 1,000–2,500 K (Gurvich 1982's record is about
+      19 kJ mol⁻¹ less bound).
+    - CEA's K for Fe ⇌ Fe⁺ + e⁻ is 0.92 of FastChem's at 4,600 K.
+    - FastChem 4.0.3's Ni⁺ record gives K 108–247 times Fe⁺'s over 1,500–6,000 K, against 0.42–1.97
+      over the same range (0.4–0.6 from 3,000 K) from the ionisation energies and partition
+      functions, as CEA's records give.
+  - _Photochemistry_: hot-Jupiter photochemistry turns H₂S into S, SH and S₂ aloft (Zahnle et al.
+    2009, ApJ 701, L20, from memory). The S row is what P14.T52.b would write such a product into.
+  - _Cost_: unmeasured in release.
+    - A level costs one log K per species (about 60 reactions), and 1 + (accepted steps) + 12
+      evaluations at the fixed point. Each evaluation is about 100 `exp` and `ln` calls, and the
+      worst case is 1 + 60 × 12 = 721 evaluations.
+    - By operation count (8 ns a `math::exp` under load, T28.b), a typical level costs some tens
+      of µs. So a section of 1–3 levels probably exceeds §1.3's 10–25 µs, which T48.e already
+      found about ten times low for the whole section.
+    - The debug build took about 0.08 ms a solve over B's 62,790-point sweep (4.8 s on one thread
+      of the shared machine; provisional).
+    - The bound holds only at §1.3's 1–3 levels a section: consumers build the `Network` once,
+      and never call `solve` per profile layer or inside their own Newton steps.
+    - T33.a's (v) and (vi), re-run after T54.b, time the section.

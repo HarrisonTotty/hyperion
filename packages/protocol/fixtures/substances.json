@@ -1623,6 +1623,45 @@
         { "from_k": null, "to_k": null, "temperatures_k": [293.0], "densities_kg_per_m3": [2000.0] }
       ],
       "liquid_grain_density": null
+    },
+    {
+      "index": 112,
+      "key": "S",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 32.06,
+      "heat_capacity_over_r_298k": 2.847262165612188,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false,
+      "grain_density_variant": null,
+      "solid_grain_density": null,
+      "liquid_grain_density": null
+    },
+    {
+      "index": 113,
+      "key": "N",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 14.007,
+      "heat_capacity_over_r_298k": 2.5,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false,
+      "grain_density_variant": null,
+      "solid_grain_density": null,
+      "liquid_grain_density": null
+    },
+    {
+      "index": 114,
+      "key": "C",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 12.011,
+      "heat_capacity_over_r_298k": 2.506303420367189,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false,
+      "grain_density_variant": null,
+      "solid_grain_density": null,
+      "liquid_grain_density": null
     }
   ]
 }

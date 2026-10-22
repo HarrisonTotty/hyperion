@@ -54,7 +54,7 @@
 //!   Gibbs energy: `K_f(Na⁺)` is that of Na(ref) → Na⁺ + e⁻.
 //!
 //! So `K_f` is continuous in temperature, and holds over the species' record and its elements'
-//! references together: from 300 K for most rows (200 K for H₂, H₂O, NH₃, N₂, O₂, Ar, H and O;
+//! references together: from 300 K for most rows (200 K for H₂, H₂O, NH₃, N₂, O₂, Ar, H, O and N;
 //! 298.15 K for e⁻, H⁻ and the ions of Mg, Si and Ca) to 6,000 K.
 //!
 //! # What is not modelled
@@ -96,7 +96,7 @@ pub const NOT_MODELLED: [(&str, &str); 1] = [(
 )];
 
 /// Each gas row's record, by key, in registry order: every gas row but [`NOT_MODELLED`]'s.
-const RECORDS: [(&str, &[Interval]); 57] = [
+const RECORDS: [(&str, &[Interval]); 60] = [
     ("H2", &table::H2),
     ("He", &table::HE),
     ("H2O", &table::H2O),
@@ -154,6 +154,9 @@ const RECORDS: [(&str, &[Interval]); 57] = [
     ("Zn+", &table::ZN_PLUS),
     ("HCl", &table::HCL),
     ("Cr", &table::CR),
+    ("S", &table::S),
+    ("N", &table::N),
+    ("C", &table::C),
 ];
 
 /// G ÷ RT of piecewise `intervals` at `t` kelvin, from the first interval that holds it (the lower
@@ -604,7 +607,7 @@ mod tests {
     /// byte for byte. A metal's atom has `K_f` = 1 by definition above its switch, so it is taken
     /// below it: at 500 K, at its switch rounded down to 100 K, and midway; every other row at
     /// 500, 2,500 and 5,000 K.
-    const CEA: [(&str, [f64; 3], [f64; 3]); 57] = [
+    const CEA: [(&str, [f64; 3], [f64; 3]); 60] = [
         ("H2", [500.0, 2_500.0, 5_000.0], [0.0, 0.0, 0.0]),
         ("He", [500.0, 2_500.0, 5_000.0], [0.0, 0.0, 0.0]),
         (
@@ -1046,6 +1049,33 @@ mod tests {
                 -0.107_440_118_547_725_06,
             ],
         ),
+        (
+            "S",
+            [500.0, 2_500.0, 5_000.0],
+            [
+                -21.952_150_153_450_003,
+                -1.361_545_829_073_428_8,
+                0.931_355_209_717_572_2,
+            ],
+        ),
+        (
+            "N",
+            [500.0, 2_500.0, 5_000.0],
+            [
+                -46.339_401_231_356_04,
+                -6.534_666_564_012_318,
+                -1.479_849_225_268_838,
+            ],
+        ),
+        (
+            "C",
+            [500.0, 2_500.0, 5_000.0],
+            [
+                -66.849_548_240_525_66,
+                -6.779_122_969_547_523,
+                0.632_436_910_023_108_6,
+            ],
+        ),
     ];
 
     /// Three values per species to 10⁻⁴ in log K (the plan's test): CEA's records as the
@@ -1083,12 +1113,13 @@ mod tests {
 
     /// The gas rows P14.T52.a and P14.T52.b name: the C–H–O–N network of Heng and Tsai 2016 and
     /// H₂S, T52.a's trace metals as neutral atoms and first ions, H, H⁻ and e⁻, T52.b's quenched and
-    /// photolysed gases, and T52.d's oxides and hydride.
-    const NAMED: [&str; 51] = [
+    /// photolysed gases, T52.d's oxides and hydride, and the S, N and C atoms P14.T52.a appends
+    /// (decision-p14-t52a-rows).
+    const NAMED: [&str; 54] = [
         "H2", "He", "H2O", "CH4", "CO", "CO2", "NH3", "N2", "HCN", "C2H2", "C2H4", "H2S", "SO2",
         "H", "H-", "e-", "Na", "K", "Ti", "V", "Fe", "Mg", "Si", "Ca", "Al", "P", "Cl", "Cr", "Mn",
         "Ni", "Zn", "Na+", "K+", "Ti+", "V+", "Fe+", "Mg+", "Si+", "Ca+", "Al+", "P+", "Cl+",
-        "Cr+", "Mn+", "Ni+", "Zn+", "TiO", "VO", "SiO", "FeH", "OH",
+        "Cr+", "Mn+", "Ni+", "Zn+", "TiO", "VO", "SiO", "FeH", "OH", "S", "N", "C",
     ];
 
     /// The species T52.a may want that are not registry rows: CEA holds each, and a row added
@@ -1268,7 +1299,8 @@ mod tests {
         }
     }
 
-    /// The species of a cross-check that are not rows, from the table: (record, elements).
+    /// The species of a cross-check, from the table: (record, elements). Every one but C, a row's
+    /// record since P14.T52.a, is not a row.
     fn cross(name: &str) -> (&'static [Interval], &'static [(Element, u16)]) {
         match name {
             "SO3" => (&table::SO3, &[(Element::S, 1), (Element::O, 3)]),

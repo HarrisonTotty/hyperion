@@ -13,9 +13,11 @@
 //!
 //! P14.T49.b appends rows 9–111 in its plan's order and gives every gas row its molecular
 //! constants ([`MolecularConstants`]), over which [`thermo`](super::thermo) sums its heat
-//! capacity. P14.T54.a's switch retired the `c_p` ÷ R classes rows 0–8 held for generator version
-//! 22, and turned on the `absorber` flags held until then: `H2`'s, `He`'s, `N2`'s and `CO2`'s, for
-//! their collision-induced and band absorption, and those of the fifteen rows
+//! capacity. P14.T52.a appends rows 112–114, the S, N and C atoms its equilibrium speciation
+//! carries (decision-p14-t52a-rows), whose client optics R08.T4.i owes. P14.T54.a's switch
+//! retired the `c_p` ÷ R classes rows 0–8 held for generator version 22, and turned on the
+//! `absorber` flags held until then: `H2`'s, `He`'s, `N2`'s and `CO2`'s, for their
+//! collision-induced and band absorption, and those of the fifteen rows
 //! science-r08-unowned-absorbers adds, which R08.T4.h answered (decision-p14-t54a-grain-density
 //! §5).
 //!
@@ -50,7 +52,7 @@ use super::thermo::{
 use super::{Basis, ClientOptics, Element, Source, Substance, SubstanceKey, SubstanceKind};
 
 /// The rows, in registry order.
-pub(super) static ROWS: [Substance; 112] = [
+pub(super) static ROWS: [Substance; 115] = [
     HYDROGEN,
     HELIUM,
     WATER,
@@ -163,6 +165,9 @@ pub(super) static ROWS: [Substance; 112] = [
     CHONDRITE_LL,
     CHONDRITE_E,
     COMETARY,
+    ATOMIC_SULPHUR,
+    ATOMIC_NITROGEN,
+    ATOMIC_CARBON,
 ];
 
 /// The molar masses' source: P14.T13's `Gas::molar_mass_g_per_mol` for rows 0–8, and for every
@@ -304,6 +309,17 @@ const AEROSOL_ONLY: ClientOptics = ClientOptics {
 /// The client optics of a surface material, which the client draws by none of its atmospheric
 /// optics.
 const NO_CLIENT_OPTICS: ClientOptics = ClientOptics {
+    rayleigh: false,
+    absorber: false,
+    aerosol_material: false,
+};
+
+/// The client optics of a gas row whose answers R08 owes (R08.T4.i; decision-p14-t52a-rows): the
+/// S, N and C atoms P14.T52.a appends. The client neither scatters nor absorbs by them until
+/// R08.T4.i gives their Rayleigh scattering from their static polarisabilities and their
+/// absorption from their atomic lines; their flags turn on at the first bump after that
+/// (P14.T54.b's, if in time).
+const AWAITING_CLIENT_OPTICS: ClientOptics = ClientOptics {
     rayleigh: false,
     absorber: false,
     aerosol_material: false,
@@ -1041,6 +1057,24 @@ const CHROMIUM_LEVELS: [Level; 7] = [
     level(7927.441, 5.0),
     level(8095.1842, 7.0),
     level(8307.5753, 9.0),
+];
+
+/// The S atom's levels below 15,000 cm⁻¹, `(energy, 2J + 1)` with the energy in cm⁻¹
+/// above the ground (Civiš et al. 2024, ApJS 274, 32, and Martin, Zalubas and Musgrove 1990, J. Phys. Chem. Ref. Data 19, 821, as Kramida's compilation for NIST's Atomic Spectra Database v5.12 lists them): the ³P₂, ³P₁ and ³P₀ ground term and ¹D₂, with ¹S₀ above the cut at 22,179.9542 cm⁻¹. The degeneracies are 2J + 1, not the g column ASD's page prints for them (4, 2, 1 and 4).
+const ATOMIC_SULPHUR_LEVELS: [Level; 4] = [
+    level(0.0, 5.0),
+    level(396.056_48, 3.0),
+    level(573.595_73, 1.0),
+    level(9238.609, 5.0),
+];
+
+/// The C atom's levels below 15,000 cm⁻¹, `(energy, 2J + 1)` with the energy in cm⁻¹
+/// above the ground (Haris and Kramida 2017, ApJS 233, 16, as NIST's Atomic Spectra Database v5.12 lists them): the ³P₀, ³P₁ and ³P₂ ground term and ¹D₂, with ¹S₀ above the cut at 21,648.030 cm⁻¹.
+const ATOMIC_CARBON_LEVELS: [Level; 4] = [
+    level(0.0, 1.0),
+    level(16.416_713, 3.0),
+    level(43.413_456_7, 5.0),
+    level(10_192.657, 5.0),
 ];
 
 /// Row 9, neon, a noble gas R08 measures.
@@ -3172,6 +3206,90 @@ const COMETARY: Substance = Substance {
     condensed: Some(condensed::COMETARY),
     optics: NO_CLIENT_OPTICS,
     sources: &[COMETARY_IDENTITY],
+};
+
+/// Row 112, atomic sulphur, the sulphur gas of ultra-hot daysides beyond H₂S's and SH's fields
+/// (Visscher, Lodders and Fegley 2006, ApJ 648, 1181, §3.1; P14.T52.a, decision-p14-t52a-rows).
+const ATOMIC_SULPHUR: Substance = Substance {
+    key: SubstanceKey::new_const("S"),
+    kind: SubstanceKind::Atom,
+    elements: &[(Element::S, 1)],
+    charge: 0,
+    molar_mass_g_per_mol: Some(32.06),
+    gas: Some(GasColumns {
+        molecular: MolecularConstants {
+            rotation: Rotation::None,
+            vibrations: &[],
+            levels: &[LevelSet::Listed {
+                weight: 1.0,
+                levels: &ATOMIC_SULPHUR_LEVELS,
+            }],
+        },
+        sources: &[Source {
+            covers: "electronic levels",
+            citation: "its 4 levels below 15,000 cm⁻¹ (Civiš et al. 2024, ApJS 274, 32; Martin, Zalubas and Musgrove 1990, J. Phys. Chem. Ref. Data 19, 821; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values, its degeneracies taken as 2J + 1). The cut holds `c_p` within 0.02 per cent of CEA's to 3,000 K, and runs 0.52 per cent below it at 5,000 K and 1.3 per cent at 6,000 K, where the levels above the cut, ¹S₀ first, are populated",
+            basis: Basis::Fact,
+        }],
+    }),
+    diagram: None,
+    condensed: None,
+    optics: AWAITING_CLIENT_OPTICS,
+    sources: IDENTITY,
+};
+
+/// Row 113, atomic nitrogen, which takes N₂'s nitrogen on the hottest daysides (P14.T52.a,
+/// decision-p14-t52a-rows).
+const ATOMIC_NITROGEN: Substance = Substance {
+    key: SubstanceKey::new_const("N"),
+    kind: SubstanceKind::Atom,
+    elements: &[(Element::N, 1)],
+    charge: 0,
+    molar_mass_g_per_mol: Some(14.007),
+    gas: Some(GasColumns {
+        molecular: MolecularConstants {
+            rotation: Rotation::None,
+            vibrations: &[],
+            levels: &[],
+        },
+        sources: &[Source {
+            covers: "electronic levels",
+            citation: "its ground level alone below 15,000 cm⁻¹, so its `c_p` ÷ R is 5/2 (Moore 1993, CRC Series in Evaluated Data in Atomic Physics (Tables of Spectra of H, C, N and O); NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values: its ⁴S₃/₂ ground, with ²D at 19,224.464 and 19,233.177 cm⁻¹ above the cut). A recorded miss: the ground alone runs 0.85 per cent below CEA's `c_p` at 3,000 K, 11.4 per cent below it at 5,000 K and 18.5 per cent at 6,000 K, where ²D, above the cut, is populated",
+            basis: Basis::Fact,
+        }],
+    }),
+    diagram: None,
+    condensed: None,
+    optics: AWAITING_CLIENT_OPTICS,
+    sources: IDENTITY,
+};
+
+/// Row 114, atomic carbon, which takes CO's carbon on the hottest daysides (P14.T52.a,
+/// decision-p14-t52a-rows).
+const ATOMIC_CARBON: Substance = Substance {
+    key: SubstanceKey::new_const("C"),
+    kind: SubstanceKind::Atom,
+    elements: &[(Element::C, 1)],
+    charge: 0,
+    molar_mass_g_per_mol: Some(12.011),
+    gas: Some(GasColumns {
+        molecular: MolecularConstants {
+            rotation: Rotation::None,
+            vibrations: &[],
+            levels: &[LevelSet::Listed {
+                weight: 1.0,
+                levels: &ATOMIC_CARBON_LEVELS,
+            }],
+        },
+        sources: &[Source {
+            covers: "electronic levels",
+            citation: "its 4 levels below 15,000 cm⁻¹ (Haris and Kramida 2017, ApJS 233, 16; NIST's Atomic Spectra Database v5.12, Kramida et al. 2024, as the finding aid, NIST holding the compilations' values). The cut holds `c_p` within 0.01 per cent of CEA's to 3,000 K, and runs 0.41 per cent below it at 5,000 K and 1.0 per cent at 6,000 K, where the levels above the cut, ¹S₀ first, are populated",
+            basis: Basis::Fact,
+        }],
+    }),
+    diagram: None,
+    condensed: None,
+    optics: AWAITING_CLIENT_OPTICS,
+    sources: IDENTITY,
 };
 
 /// What a material with no single formula is, and where the generator takes it from: its identity's

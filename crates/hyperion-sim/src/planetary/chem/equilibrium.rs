@@ -20,8 +20,9 @@
 //!   Gibbs energies ([`Reaction`]). These are Heng and Tsai's (2016, ApJ 829, 104, §2.1, their
 //!   eq. 1) nine C–H–O–N molecules and their six reactions, with H₂S carrying the sulphur
 //!   (Visscher, Lodders and Fegley 2006, ApJ 648, 1181: "Hydrogen sulfide (H₂S) is the dominant
-//!   S-bearing gas throughout substellar atmospheres") in its field (the reach, below), and every
-//!   other registry gas of these elements: H, H⁻, O, O₂, O₃, N₂O, SO₂, CH₃OH and C₂H₆.
+//!   S-bearing gas throughout substellar atmospheres") in its field and the S atom beyond it (the
+//!   reach, below), and every other registry gas of these elements: the atoms H, C, N, O and S,
+//!   H⁻, O₂, O₃, N₂O, SO₂, CH₃OH and C₂H₆.
 //! - **The trace elements**, every other element, each in species that hold one atom of it and no
 //!   other trace element: each metal as its neutral atom and its first ion, with SiO, TiO and VO;
 //!   phosphorus as PH₃, chlorine as HCl, the noble gases as their atoms. Given the major
@@ -50,10 +51,12 @@
 //!
 //! - **The start** is the closed form of each network's leading pair at the hydrogen's pressure
 //!   (Heng, Lyons and Tsai 2016, ApJ 816, 96, §4; Heng and Tsai 2016, §3): H₂ against H over the
-//!   helium and the trace elements, a quadratic in √p(H₂); CO against CH₄ with H₂O and O, a
-//!   quadratic in p(CO), whatever the C/O; the carbon left over shared between CH₄ and C₂H₂, and
-//!   NH₃ against N₂, each a quadratic; H₂S holding all the sulphur; and the electrons by Saha's
-//!   closed form, every ion a minor share of its element.
+//!   helium and the trace elements, a quadratic in √p(H₂); CO against CH₄ and C with H₂O and O, a
+//!   quadratic in p(CO), whatever the C/O; the carbon left over shared between CH₄, C and C₂H₂,
+//!   and NH₃ and N against N₂, each a quadratic; H₂S against S; and the electrons by Saha's
+//!   closed form, every ion a minor share of its element. Each atom of a major element is taken at
+//!   the start's p(H₂), so that where the atoms hold their element (on an ultra-hot dayside) the
+//!   start lies near them.
 //! - **The refinement**: Newton's method on all the equations at once, at most [`NEWTON_STEPS`]
 //!   steps, each with its exact Jacobian (the trace elements' closed forms differentiated with
 //!   them), each at most [`STEP_LIMIT`] in any logarithm, none taking a major species above the
@@ -84,9 +87,12 @@
 //! of the nitrogen at 300 K and 1 bar), and lower still the equilibrium would be more so; at low
 //! pressure the floor keeps some N₂ (9% of the nitrogen at 10⁻⁴ bar in FastChem's run), which
 //! colder equilibrium would turn to NH₃. There the composition is the quench level's in any case,
-//! deeper and hotter (P14.T52.b), and the cold traps (P14.T52.c) remove the metals far below. Above
-//! the records' ceiling, 6,000 K, nothing is extrapolated: the solution refuses
-//! ([`SolveEquilibriumError::AboveRecords`]).
+//! deeper and hotter (P14.T52.b), and the cold traps (P14.T52.c) remove the metals far below. The
+//! held gas is an input to P14.T52.b and P14.T52.c and is never published alone: at a cold
+//! giant's levels it can be supersaturated in H₂O, NH₃, NH₄SH, H₂S or CH₄, and their
+//! condensation is P14.T52.c's, which cold-traps the deep mixing ratio the floor gives all-in
+//! (decision-p14-t52a-rows). Above the records' ceiling, 6,000 K, nothing
+//! is extrapolated: the solution refuses ([`SolveEquilibriumError::AboveRecords`]).
 //!
 //! # Validation
 //!
@@ -106,22 +112,44 @@
 //!   all) hold 2–11% of an element, and CH₄ and C₂H₂ miss by up to 63% and 50%.
 //! - **Network-matched** (FastChem given this network's species alone, every element but Ni, P
 //!   and Cl, 300–6,000 K × 10⁻⁶–10⁴ bar at a hundredth to a hundred times protosolar and C/O 1
-//!   and 1.5, at the points where FastChem's atoms of S, N and C, not carried here, hold under
-//!   0.3% of their element), every carrier holding at least half of its element agrees within 1%
-//!   but vanadium and the edges of the domain (CH₄ 8.8% and CO 6.7% at 10⁴ bar and
-//!   2,500–3,000 K; the water-starved Ti at C/O 1 and 1.5): with one network, one set of
-//!   abundances and an ideal gas, the equilibrium is unique, so what differs is the
-//!   thermochemistry. Vanadium differs most: CEA's VO record (Gurvich 1982) is about 19 kJ mol⁻¹
-//!   less bound than FastChem's JANAF fit, so its K is 0.10–0.41 of FastChem's at 1,000–2,500 K,
-//!   VO misses by up to −42% where it holds most of the vanadium, and the V atom is 1.1–10 times
+//!   and 1.5; its data holds no CH₃OH or C₂H₆, which hold under 0.2% of the carbon here): with one
+//!   network, one set of abundances and an ideal gas, the equilibrium is unique, so what differs
+//!   is the thermochemistry. Vanadium apart (below), every carrier holding 90% or more of its
+//!   element agrees within 1% but CO (−2.7% at 4,000 K and 100 bar), TiO (+1.6%), N₂ (−1.5% at
+//!   10⁻⁶ bar), CH₄ (+1.2% at 10⁴ bar), Ti and Si (1.1%). Where two carriers share an element, each
+//!   holding half to 90% of it, the split carries the difference of their K: within 5% to 100 bar
+//!   at C/O 1 or less (H₂S beside S +3.1% at 4,000 K and 100 bar; Fe beside Fe⁺ +4.1%, CEA's K for
+//!   Fe ⇌ Fe⁺ + e⁻ being 0.92 of FastChem's at 4,600 K; SiO −4.9%, TiO +4.8%) but Zn and Zn⁺
+//!   (+6.3% and −6.6%), CO and CH₄ at 100 bar and 2,500–3,000 K (−9.4% and +6.6%, a hundredth of
+//!   protosolar) and the water-starved Ti (−7.5% at C/O 1); at C/O 1.5 also N₂ beside HCN
+//!   (−8.5%), Si (+6.0%), HCN (+5.6%) and Ti (−16%); and at 10⁴ bar CO by up to −30%, H₂O +21%,
+//!   CH₄ +13% and NH₃ +5.5% (4,000–6,000 K; CH₄ 8.8% and CO 6.7% at 2,500–3,000 K). Vanadium
+//!   differs most: CEA's VO record (Gurvich 1982) is about 19 kJ mol⁻¹ less bound than FastChem's
+//!   JANAF fit, so its K is 0.10–0.41 of FastChem's at 1,000–2,500 K, VO misses by up to −46%
+//!   where it holds most of the vanadium (−59% at C/O 1), and the V atom is 1.1–10 times
 //!   FastChem's.
+//! - **On a KELT-9b-like dayside** (4,600 K, the dayside of Gaudi et al. 2017, Nature 546, 514,
+//!   at 10–50 mbar; FastChem's full network over the 25 elements at protosolar abundances), the
+//!   atoms H, C, N, O and S hold their elements as FastChem's do, each within 0.6% (the species
+//!   not carried, OH, SH, S⁺, NH, CN and CH, hold under 0.4% of any of them): C 0.69 of the
+//!   carbon at 10 mbar and 0.35 at 50 mbar, CO the rest; Fe⁺ 55–81% of the iron, Ca⁺ 99% of the
+//!   calcium. The electrons and H⁻ are 1.8–2.5% low: H⁺, C⁺ and S⁺, not carried, are 0.35–0.9% of
+//!   FastChem's cations, and FastChem's Ni⁺ record (a JANAF fit whose K is 108–247 times Fe⁺'s
+//!   over 1,500–6,000 K, CEA's 0.42–1.97) ionises 99% of the nickel where CEA's ionise 33–63%;
+//!   network-matched, they are within 0.8%.
 //!
-//! The tests assert ten such cases: in Heng and Tsai's domain every carrier within 2.5% (CO at
+//! The tests assert twelve such cases: in Heng and Tsai's domain every carrier within 2.5% (CO at
 //! 1,100 K and 1 bar the farthest, 1.9%); in the network-matched ones each carrier holding most of
-//! its element within 1% (2% for H₂O and CO at 2,500 K and 100 bar) but vanadium, and the rest
-//! within their thermochemistries' difference, stated entry by entry (5% for minor CO, CO₂, CH₄,
-//! NH₃ and TiO, HCN 20%, CH₄ beside CO 30% at 2,500 K, Ti 25%, VO 20–80% and the V atom up to 4.5
-//! times). The gas is ideal: the solution's arithmetic holds to 10⁴ bar, but its physics only to
+//! its element within 1% (2% for H₂O and CO at 2,500 K and 100 bar) but vanadium and Fe⁺ at
+//! 4,600 K (5%), and the rest within their thermochemistries' difference, stated entry by entry
+//! (5% for minor CO, CO₂, CH₄, NH₃ and TiO, HCN 20%, CH₄ beside CO 30% at 2,500 K, Ti 25%, at
+//! 4,600 K Fe 10% and Mg, Si⁺, the electrons and H⁻ 2%, VO 20–80% and the V atom up to 4.5
+//! times). Beside them, the S atom is asserted the sulphur's carrier past Visscher, Lodders and
+//! Fegley's eq. 7 (over 0.95 of it at 3,000 K and 10 mbar and over 0.98 at 5,000 K and 1 bar,
+//! where FastChem gives it 0.953 and 0.985 beside SH's 4.5% and 1.4%), and the KELT-9b-like
+//! dayside against FastChem's full network: H within 0.1%, S, N and O within 1%, the electrons
+//! and H⁻ within 4%, C's share of the carbon within 0.01 of FastChem's, and Fe⁺ above Fe and Ca⁺
+//! above Ca. The gas is ideal: the solution's arithmetic holds to 10⁴ bar, but its physics only to
 //! about 1 kbar, where H₂'s compressibility reaches 1.2 at 1,000 K (Leachman et al. 2009, through
 //! NIST's WebBook) and FastChem's own tests stop.
 //!
@@ -144,11 +172,18 @@
 //! - **Sulphur**: H₂S holds the sulphur in Visscher, Lodders and Fegley's H₂S field (§3.1: SH
 //!   takes over where log p < 6.82 − 17,570 ÷ T, their eq. 4, and S where log p < 4.80 −
 //!   14,522 ÷ T, eq. 7, and below the triple point at about 1,509 K where log p < 5.81 − 16,046 ÷
-//!   T, eq. 10): to about 1,990 K at 10 mbar and 2,580 K at 1 bar. Beyond it the network has no
-//!   S or SH, and H₂S holds what they would.
+//!   T, eq. 10): to about 1,990 K at 10 mbar and 2,580 K at 1 bar. The S atom holds it beyond
+//!   eq. 7's line, from about 2,140 K at 10 mbar and 3,030 K at 1 bar (eq. 7's K₅ is fitted over
+//!   800–2,500 K and extrapolated above; CEA's records put the line at 2,143 K and 3,011 K). SH, not carried, holds up
+//!   to 48% of the sulphur between the two (4,000 K, 100 bar), where H₂S and S are each overstated
+//!   by up to its share (P14.T52.e).
 //! - **Nitrogen and carbon**: N₂ and CO hold their element to 3,000 K at 10 mbar or more; above,
-//!   the atoms N and C, not carried, take over (N₂ holds 26% of the nitrogen at 4,000 K and
-//!   10 mbar, CO 4.9% of the carbon at 5,000 K).
+//!   the atoms N and C take over (N₂ holds 26% of the nitrogen at 4,000 K and 10 mbar, CO 4.9% of
+//!   the carbon at 5,000 K). Not carried: NH and NH₂, up to 14% of the nitrogen (6,000 K,
+//!   100 bar), and C⁺, up to 6% of the carbon at 10 mbar or more (6,000 K).
+//! - **The non-metals' ions**: below 10⁻⁴ bar at 5,000 K and above, S⁺ and C⁺, not carried, take
+//!   over (75% of the sulphur and 42% of the carbon at 6,000 K and 10⁻⁴ bar); at 10 mbar or more
+//!   they hold over 10% of their element only at 6,000 K (S⁺ 21%, C⁺ 6% at 10 mbar).
 //! - **Oxygen**: OH, not carried, holds up to 21% of it (6,000 K, 100 bar), 15% at 4,000 K and
 //!   1 bar, 12% at 3,000 K and 10 mbar; H₂O and O hold it here.
 //! - **Phosphorus and chlorine**: PH₃ is the carrier only where FastChem gives it half the
@@ -284,7 +319,7 @@ pub struct NotCarried {
 /// cases (the tests' documentation). FeH, a registry row with no record, is
 /// [`formation::NOT_MODELLED`](crate::substance::formation::NOT_MODELLED)'s, not this set's; it
 /// holds at most 2.8% of the iron (5,000 K, 100 bar).
-pub const NOT_CARRIED: [NotCarried; 65] = [
+pub const NOT_CARRIED: [NotCarried; 62] = [
     NotCarried {
         formula: "Al2O",
         isomer: None,
@@ -342,16 +377,6 @@ pub const NOT_CARRIED: [NotCarried; 65] = [
         element: Element::Ar,
         largest_share: 0.011,
         temperature: Kelvin::new(6000.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-    NotCarried {
-        formula: "C",
-        isomer: None,
-        charge: 0,
-        element: Element::C,
-        largest_share: 0.98,
-        temperature: Kelvin::new(4000.0),
         pressure: Pascals::new(1e-1),
         condensed: false,
     },
@@ -758,16 +783,6 @@ pub const NOT_CARRIED: [NotCarried; 65] = [
     NotCarried {
         formula: "N",
         isomer: None,
-        charge: 0,
-        element: Element::N,
-        largest_share: 1.0,
-        temperature: Kelvin::new(4000.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-    NotCarried {
-        formula: "N",
-        isomer: None,
         charge: 1,
         element: Element::N,
         largest_share: 0.045,
@@ -888,16 +903,6 @@ pub const NOT_CARRIED: [NotCarried; 65] = [
     NotCarried {
         formula: "S",
         isomer: None,
-        charge: 0,
-        element: Element::S,
-        largest_share: 1.0,
-        temperature: Kelvin::new(3000.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-    NotCarried {
-        formula: "S",
-        isomer: None,
         charge: 1,
         element: Element::S,
         largest_share: 0.97,
@@ -985,6 +990,9 @@ struct StartSpecies {
     oxygen_atom: Option<usize>,
     nitrogen: Option<usize>,
     acetylene: Option<usize>,
+    carbon_atom: Option<usize>,
+    nitrogen_atom: Option<usize>,
+    sulphur_atom: Option<usize>,
 }
 
 /// The equilibrium network: every gas row of the registry with a thermochemical record (the
@@ -1407,6 +1415,9 @@ impl Network {
             oxygen_atom: find("O"),
             nitrogen: find("N2"),
             acetylene: find("C2H2"),
+            carbon_atom: find("C"),
+            nitrogen_atom: find("N"),
+            sulphur_atom: find("S"),
         };
         Ok(Self {
             species,
@@ -1439,6 +1450,11 @@ impl Network {
     /// The gas of element abundances `abundances`, each element by number relative to hydrogen
     /// (normalised by hydrogen's own value; an element not given is absent), at `temperature`
     /// and total pressure `pressure`, speciated over the network (the [module](self)'s model).
+    ///
+    /// A solve costs one K per species and up to 721 evaluations of the network: build the
+    /// network once, and solve a section at its few levels (decision-composition §1.3's one to
+    /// three: the 1-bar level, the quench level, the photosphere), never per profile layer nor
+    /// inside another solver's steps.
     ///
     /// # Errors
     ///
@@ -1981,6 +1997,18 @@ impl<'a> State<'a> {
         slot.map(|i| self.log_k[i])
     }
 
+    /// The pressure of the major element's atom at `slot` over its basis species', at p(H₂) =
+    /// e^`log_hydrogen` (K p(H₂)^ν, ν the atom's H₂ coefficient: −2 for C, −3/2 for N, −1 for
+    /// S), its exponent held under [`START_LOG_BOUND`]; zero where the network or the gas has no
+    /// such atom.
+    #[must_use]
+    fn atom_ratio(&self, slot: Option<usize>, log_hydrogen: f64) -> f64 {
+        slot.filter(|&i| self.present[i]).map_or(0.0, |i| {
+            let nu = self.network.species[i].nu[0];
+            math::exp((self.log_k[i] + nu * log_hydrogen).min(START_LOG_BOUND))
+        })
+    }
+
     /// The closed-form start (the [module](self)'s documentation).
     #[must_use]
     fn start(&self) -> [f64; UNKNOWNS] {
@@ -1996,14 +2024,18 @@ impl<'a> State<'a> {
             y[3] = math::ln(water);
         }
         if self.active[2] {
-            // NH₃ against N₂: N = a + 2 κ a², κ = K ÷ p(H₂)³.
+            // NH₃ against N₂ and the atom: N = a (1 + η) + 2 κ a², κ = K ÷ p(H₂)³ and
+            // p(N) = η p(NH₃).
             let kappa = self
                 .log_k_of(self.network.start.nitrogen)
                 .map_or(0.0, |lk| bounded_exp(lk - 3.0 * log_hydrogen));
-            y[2] = math::ln(pair_root(self.gas.majors[2] * nuclei, kappa));
+            let atom = self.atom_ratio(self.network.start.nitrogen_atom, log_hydrogen);
+            y[2] = math::ln(pair_root(self.gas.majors[2] * nuclei, 1.0 + atom, kappa));
         }
         if self.active[4] {
-            y[4] = math::ln(self.gas.majors[4] * nuclei);
+            // H₂S against the atom: S = p(H₂S) (1 + σ), p(S) = σ p(H₂S).
+            let atom = self.atom_ratio(self.network.start.sulphur_atom, log_hydrogen);
+            y[4] = math::ln(self.gas.majors[4] * nuclei / (1.0 + atom));
         }
         if self.active[CHARGE] {
             y[CHARGE] = self.start_electrons(&y, nuclei);
@@ -2027,10 +2059,11 @@ impl<'a> State<'a> {
     }
 
     /// CO against CH₄ and H₂O at p(H₂) = e^`log_hydrogen` and hydrogen nuclei `nuclei`, bar:
-    /// p(CO) = κ p(CH₄) p(H₂O)', with p(H₂O)' the oxygen in water and atoms (p(O) = λ p(H₂O),
-    /// λ = K ÷ p(H₂)) and κ = K ÷ (p(H₂)³ (1 + λ)), whatever the C/O; then the carbon not in CO
-    /// shared between CH₄ and C₂H₂, e = m + 2 κ m² with κ = K ÷ p(H₂)³, which holds a carbon-rich
-    /// gas's excess where the hydrogen is dissociated. p(CH₄) and p(H₂O), bar.
+    /// p(CO) = κ p(CH₄)' p(H₂O)', with p(H₂O)' the oxygen in water and atoms (p(O) = λ p(H₂O),
+    /// λ = K ÷ p(H₂)), p(CH₄)' the carbon in methane and atoms (p(C) = μ p(CH₄), μ = K ÷ p(H₂)²)
+    /// and κ = K ÷ (p(H₂)³ (1 + λ) (1 + μ)), whatever the C/O; then the carbon not in CO shared
+    /// between CH₄, C and C₂H₂, e = m (1 + μ) + 2 κ m² with κ = K ÷ p(H₂)³, which holds a
+    /// carbon-rich gas's excess where the hydrogen is dissociated. p(CH₄) and p(H₂O), bar.
     #[must_use]
     fn start_carbon_and_oxygen(&self, log_hydrogen: f64, nuclei: f64) -> (f64, f64) {
         let start = &self.network.start;
@@ -2039,9 +2072,10 @@ impl<'a> State<'a> {
         let lambda = self.log_k_of(start.oxygen_atom).map_or(0.0, |lk| {
             math::exp((lk - log_hydrogen).min(START_LOG_BOUND))
         });
+        let mu = self.atom_ratio(start.carbon_atom, log_hydrogen);
         let (methane, water) = if self.active[1] && self.active[3] {
             let kappa = self.log_k_of(start.carbon_monoxide).map_or(0.0, |lk| {
-                bounded_exp(lk - 3.0 * log_hydrogen - math::ln_1p(lambda))
+                bounded_exp(lk - 3.0 * log_hydrogen - math::ln_1p(lambda) - math::ln_1p(mu))
             });
             let sum = carbon + oxygen;
             let difference = carbon - oxygen;
@@ -2065,7 +2099,7 @@ impl<'a> State<'a> {
         let kappa = self
             .log_k_of(start.acetylene)
             .map_or(0.0, |lk| bounded_exp(lk - 3.0 * log_hydrogen));
-        (pair_root(methane, kappa), water)
+        (pair_root(methane, 1.0 + mu, kappa), water)
     }
 
     /// The electrons by Saha's closed form, each ion a minor share of its element: p(e⁻)² (1 + K'
@@ -2118,10 +2152,11 @@ fn bounded_exp(x: f64) -> f64 {
 }
 
 /// The smaller member's pressure of a pair sharing `total` of an element, the larger holding two
-/// of its atoms at κ times the square: `total` = a + 2 κ a², by the stable root.
+/// of its atoms at κ times the square and the smaller's own share `linear` times it (1, or 1 plus
+/// the element's atom over it): `total` = `linear` a + 2 κ a², by the stable root.
 #[must_use]
-fn pair_root(total: f64, kappa: f64) -> f64 {
-    2.0 * total / (1.0 + (1.0 + 8.0 * kappa * total).sqrt())
+fn pair_root(total: f64, linear: f64, kappa: f64) -> f64 {
+    2.0 * total / (linear + (linear * linear + 8.0 * kappa * total).sqrt())
 }
 
 /// The sum of the squared residuals, the measure a Newton step must lower; infinite where one is

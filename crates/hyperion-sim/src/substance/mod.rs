@@ -473,16 +473,17 @@ mod tests {
             assert_same_bits(gas.molar_mass_g_per_mol(), t13[i]);
             assert_same_bits(id.substance().molar_mass_g_per_mol().unwrap(), t13[i]);
         }
-        assert_eq!(ids().len(), 112);
-        assert_eq!(SubstanceId::from_index(112), None);
+        assert_eq!(ids().len(), 115);
+        assert_eq!(SubstanceId::from_index(115), None);
         assert_eq!(SubstanceId::from_index(9).and_then(SubstanceId::gas), None);
     }
 
     /// The keys of P14.T49.b's rows 9–111, in its plan's order: the gases R08 measures, the
     /// gases of the chemistry, the atoms of T50.b's metals, their first ions and `HCl`, the
     /// condensates aloft, the hazes and dusts, then the solutions, lithologies, salts, organics
-    /// and undifferentiated bodies' materials, in the order this builder lists them.
-    const APPENDED: [&str; 103] = [
+    /// and undifferentiated bodies' materials, in the order this builder lists them; then
+    /// P14.T52.a's rows 112–114, the S, N and C atoms (decision-p14-t52a-rows).
+    const APPENDED: [&str; 106] = [
         "Ne",
         "Kr",
         "Xe",
@@ -586,9 +587,12 @@ mod tests {
         "chondrite_ll",
         "chondrite_e",
         "cometary",
+        "S",
+        "N",
+        "C",
     ];
 
-    /// P14.T49.b's rows follow rows 0–8 in [`APPENDED`]'s order.
+    /// P14.T49.b's and P14.T52.a's rows follow rows 0–8 in [`APPENDED`]'s order.
     #[test]
     fn substance_rows_9_onward_are_the_plan_s_in_order() {
         let keys: Vec<SubstanceKey> = ids().skip(9).map(|id| id.substance().key()).collect();
@@ -616,7 +620,9 @@ mod tests {
     /// adds too, since R08.T4.h answered them), and every gas row but the electron, H⁻ and the
     /// ions scatters; the condensates aloft and the hazes are aerosol materials and nothing else;
     /// a surface material is none of the three. Of rows 0–8, P14.T54.a's switch turned on
-    /// `absorber` for H₂, He, N₂ and CO₂ (decision-p14-t54a-grain-density §5).
+    /// `absorber` for H₂, He, N₂ and CO₂ (decision-p14-t54a-grain-density §5). P14.T52.a's S, N
+    /// and C atoms neither scatter nor absorb until R08.T4.i answers them
+    /// (decision-p14-t52a-rows).
     #[test]
     fn substance_client_flags_follow_the_ruling() {
         for id in ids().skip(9) {
@@ -626,8 +632,17 @@ mod tests {
             let optics = row.optics();
             if row.gas().is_some() {
                 let noble = matches!(key, "Ne" | "Kr" | "Xe");
-                assert_eq!(optics.absorber(), !noble, "{key}");
-                assert_eq!(optics.rayleigh(), row.kind() != SubstanceKind::Ion, "{key}");
+                // The atoms P14.T52.a appends wait for R08.T4.i's answers.
+                let awaiting = matches!(key, "S" | "N" | "C");
+                assert_eq!(optics.absorber(), !noble && !awaiting, "{key}");
+                assert_eq!(
+                    optics.rayleigh(),
+                    row.kind() != SubstanceKind::Ion && !awaiting,
+                    "{key}"
+                );
+                if awaiting {
+                    assert_eq!(optics, ClientOptics::default(), "{key}");
+                }
             } else {
                 assert!(!optics.rayleigh() && !optics.absorber(), "{key}");
             }
