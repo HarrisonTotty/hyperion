@@ -279,7 +279,7 @@ fn transmittanceAcrossFromAbove(
   }
   var mean = vec3f((*footprint).spaceShare);
   for (var i = 0u; i < (*footprint).count; i++) {
-    let node = (*footprint).nodes[i];
+    let node = farLimbNodeOf(footprint, i);
     mean += node.z * transmittanceFromAbove(v, body, rayThrough(v, node.xy), slot);
   }
   if (blend >= 1.0) {
@@ -365,13 +365,12 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
     var inscattered : vec3f;
     var behind : vec3f;
     // The pixel's far-limb footprint from above the top (R08.T8.c), w_L 0 elsewhere.
-    var footprint : FarLimbFootprint;
-    footprint.blend = 0.0;
+    var footprint = farLimbNone();
     if (aboveTop) {
       // What lies behind takes its transmittance to space per channel from the ray's entry into the
       // air (R08.T8.b), not the march's mean over the channels, and across the pixel's footprint
       // (R08.T8.c).
-      footprint = farLimbFootprintOf(v, body, oblateBody, uv, v.output.xy);
+      footprint = farLimbFootprintOf(farLimbRaysOf(v), body, oblateBody, uv, v.output.xy);
       inscattered = rayMarched(pixel, depth).rgb;
       behind = transmittanceAcrossFromAbove(v, body, &footprint, dir, slotHere);
     } else {

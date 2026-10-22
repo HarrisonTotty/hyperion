@@ -980,6 +980,18 @@ describe("the per-frame marches' steps (R08.T8.d)", () => {
         "viewMarchStep",
       ],
     ],
+    // The far limb's footprint (R08.T8.c), whose nodes are formed as each is marched or read, not
+    // held (R08.T8.d).
+    [
+      "the ray-march kernel's footprint",
+      RAY_MARCH_KERNEL.reference,
+      ["farLimbFootprintOf", "farLimbNodeOf"],
+    ],
+    [
+      "the composite's footprint",
+      COMPOSITE_MATERIAL.fragmentWgsl,
+      ["farLimbFootprintOf", "farLimbNodeOf"],
+    ],
   ] as const)(
     "%s's per-step helpers take and return no array, nor a struct that holds one, by value",
     (_name, source, roots) => {
