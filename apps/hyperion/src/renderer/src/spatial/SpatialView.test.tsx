@@ -2088,6 +2088,32 @@ describe("SpatialView's labels off the observer's eye (plan 12, P12.T11.c)", () 
   });
 });
 
+describe("SpatialView's labels with no side beside their mark (plan 12, P12.T11.e)", () => {
+  const DESIGNATION = "GDG 0E0V00 E-141";
+  // At the view's centre, a class-4 symbol whose 16-character label, 138.88 px from 18 px out, has
+  // room on neither side in the compact chart's 256 px stage, and on the right in the stacked one.
+  const centred = aMark("s", { position: vec3(0, 0, 0), sizeClass: 4, label: DESIGNATION });
+
+  it("gives the selection at the view's centre no label in the compact chart's 256 px stage", () => {
+    stubLayout(256, 262);
+    renderView({ scene: aScene({ points: [centred], selectedId: "s" }) });
+
+    expect(
+      screen.queryAllByText(
+        (_text, element) =>
+          element instanceof HTMLSpanElement && element.textContent === DESIGNATION,
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("gives the selection at the view's centre its label in the stacked page's 1036 px stage", () => {
+    stubLayout(1036, 600);
+    renderView({ scene: aScene({ points: [centred], selectedId: "s" }) });
+
+    expect(overlayLabel(DESIGNATION)).toBeInTheDocument();
+  });
+});
+
 describe("SpatialView's furniture text clear of the marks (R07.T16.j)", () => {
   beforeEach(() => {
     stubLayout(1200, 900);

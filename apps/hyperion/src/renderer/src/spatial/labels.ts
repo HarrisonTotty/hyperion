@@ -193,6 +193,13 @@ function labelSizePx(
  * room on neither side, or at the top or bottom edge (the orchestrator's ruling 149.1;
  * decision-r07-quality-and-destination, addendum D, D5).
  *
+ * @remarks
+ * Held inside on neither side, the box runs back across its own mark and bracket.
+ * {@link placeLabels} draws it only for a pinned mark out of the view, so that an off-view
+ * selection's name stays on show, and never for a mark in view (plan 12, P12.T11.e;
+ * {@link besideItsMark}). The hold at the top and bottom edges leaves the label beside its mark,
+ * and stands.
+ *
  * @param side - The side to stand on, as a label made by the selection takes its other side to
  *   yield to the destination's (addendum C, C1); the right, flipped at the edge, when absent.
  */
@@ -223,6 +230,11 @@ function lineLabel(
 /**
  * Whether a label on its mark's line stands at its own place beside its mark, its near edge
  * {@link labelOffsetPx} out, and has not been held inside the view back across its bracket.
+ *
+ * @remarks
+ * Only the left and right hold moves the near edge; one held at the top or bottom edge still
+ * stands beside its mark. A label whose mark is in view is drawn only where this holds, on either
+ * side (plan 12, P12.T11.e).
  */
 function besideItsMark(
   label: PlacedLabel,
@@ -259,7 +271,9 @@ function destinationApexPx(anchor: Anchor, remPx: number, reticles: ReticleStrok
  * the destination's label (addendum C, C1).
  *
  * @param others - The labels it is placed against, each at its place on its mark's line: those
- *   `chooseLabels` would choose with no selection.
+ *   `chooseLabels` would choose with no selection, and of them only the ones a chart with no
+ *   selection draws: none whose mark is out of view, and none that would be held back across its
+ *   own mark (P12.T11.e).
  * @param obstacles - Furniture it never covers.
  * @param texts - Other text over the view: 0.5 rem off at its first choice, never covered.
  */
@@ -354,8 +368,9 @@ function inView(anchor: Anchor, viewport: Viewport): boolean {
 export interface LabelSurroundings {
   /**
    * Marks whose labels are never dropped for a neighbour, furniture, other text or a mark out of
-   * view: the selection and the destination. The selection's still yields to the destination's and
-   * keeps off the observer's eye (`observer`).
+   * view: the selection and the destination. The selection's still yields to the destination's,
+   * keeps off the observer's eye (`observer`) and, while its mark is in view, is never held back
+   * across it (plan 12, P12.T11.e).
    */
   readonly pinnedIds?: ReadonlyArray<string>;
   /** Furniture over the view that a label must not cover: the core arrow's mark. */
@@ -384,10 +399,14 @@ export interface LabelSurroundings {
  *
  * @remarks
  * Each label goes to the right of its symbol and flips to the left where it would end within 0.25
- * rem of the right edge of the view; where it has room on neither side, or at the top or bottom
- * edge, it is moved 0.25 rem inside the view, so that no label stands on the canvas's focus ring
- * (decision-r07-quality-and-destination, addendum D, D5). One whose box overlaps furniture, or
- * stands within 0.5 rem of a label already placed or of other text over the view (D4), or whose
+ * rem of the right edge of the view; at the top or bottom edge it is moved 0.25 rem inside the
+ * view, so that no label stands on the canvas's focus ring (decision-r07-quality-and-destination,
+ * addendum D, D5). Where it has room on neither side, held inside the view it would run back across
+ * its own mark and bracket, so while its mark is in view it is not drawn, the selection's too
+ * (below): the bracket, the readout and the list still name the mark (plan 12, P12.T11.e). Only the
+ * label of a pinned mark out of the view, the selection's, is still moved 0.25 rem inside it (the
+ * orchestrator's ruling 149.1), so that its name stays on show. One whose box overlaps furniture,
+ * or stands within 0.5 rem of a label already placed or of other text over the view (D4), or whose
  * mark is out of view, is dropped. The selection's label is never dropped for those (`pinnedIds`),
  * but yields to the destination's and keeps off the observer's eye (below).
  *
@@ -405,13 +424,16 @@ export interface LabelSurroundings {
  *
  * The destination's label is placed first, as though no mark were selected (addendum C, C1;
  * R07.T16.j): against the other marks and against the labels `chooseLabels` would choose with no
- * selection (`unselectedIds`), at their places on their lines, so that selecting never moves it.
- * The selection's label comes next. Where it stands within 0.5 rem of the destination's label or
- * 0.25 rem of its chevron set, it takes its other side, and where that is not clear either it is
- * not drawn: the bracket, the readout and the list still name the selection. The rest follow in
- * order. A lesser label within 0.5 rem of the destination's, or within 0.25 rem of its chevron set,
- * is dropped, so that no other name stands nearer the destination's than its own, or runs through
- * its chevrons. The labels are returned in the order given.
+ * selection (`unselectedIds`), at their places on their lines, so that selecting never moves it;
+ * of those, only the labels a chart with no selection draws, none whose mark is out of view and
+ * none that would be held back across its own mark (P12.T11.e). The selection's label comes next.
+ * Where it stands within 0.5 rem of the destination's label or 0.25 rem of its chevron set, or
+ * would be held back across its own mark, it takes its other side, and where that is not clear
+ * either, or not beside its mark, it is not drawn: the bracket, the readout and the list still name
+ * the selection. The rest follow in order. A lesser label within 0.5 rem of the destination's, or
+ * within 0.25 rem of its chevron set, is dropped, so that no other name stands nearer the
+ * destination's than its own, or runs through its chevrons. The labels are returned in the order
+ * given.
  *
  * In observed mode the observer's eye (`observer`) is furniture to every label, the selection's
  * too (plan 12, P12.T11.c): a label over it is dropped, as one over the core arrow is, and the
@@ -449,8 +471,14 @@ export function placeLabels(
     const anchor = anchorOf.get(id);
     return anchor !== undefined && inView(anchor, viewport);
   };
-  // Every other chosen label that can be drawn, at its place on its line: its mark in view, or
-  // pinned. A label whose mark is out of view is dropped, so the destination's never avoids it.
+  // Whether a label on its mark's line may be drawn where it stands: beside its mark, or held
+  // inside the view for a mark out of it, as a pinned one's is; never held back across its own
+  // mark in view (P12.T11.e).
+  const inPlace = (label: PlacedLabel, anchor: Anchor): boolean =>
+    !inView(anchor, viewport) || besideItsMark(label, anchor, viewport, reticles);
+  // Every other chosen label that can be drawn, at its place on its line: beside its mark in view,
+  // or held inside the view for a pinned mark out of it. Another mark out of view has none, and a
+  // label held back across its own mark in view is not drawn, so the destination's avoids neither.
   const lineLabels = new Map<string, PlacedLabel>();
   for (const mark of chosen) {
     const anchor = anchorOf.get(mark.id);
@@ -459,7 +487,10 @@ export function placeLabels(
       mark.id !== destinationId &&
       (inView(anchor, viewport) || pinnedIds.includes(mark.id))
     ) {
-      lineLabels.set(mark.id, lineLabel(mark, anchor, viewport, reticles));
+      const label = lineLabel(mark, anchor, viewport, reticles);
+      if (inPlace(label, anchor)) {
+        lineLabels.set(mark.id, label);
+      }
     }
   }
   // Those the destination's label is placed against: with no selection, a label is drawn only where
@@ -507,15 +538,15 @@ export function placeLabels(
   }
   // Whether the selection's label must leave its place: for the destination's, or off the eye.
   const yields = (label: BoxPx): boolean => nearDestination(label) || coversEye(label);
-  // The selection's label, which yields to the destination's and keeps off the observer's eye:
-  // its other side, or none.
+  // The selection's label, which yields to the destination's and keeps off the observer's eye, and
+  // is never held back across its own mark in view: its other side, or none.
   for (const mark of chosen) {
     const anchor = anchorOf.get(mark.id);
     if (anchor === undefined || mark.id === destinationId || !pinnedIds.includes(mark.id)) {
       continue;
     }
     const label = lineLabels.get(mark.id) ?? lineLabel(mark, anchor, viewport, reticles);
-    if (!yields(label)) {
+    if (inPlace(label, anchor) && !yields(label)) {
       placed.set(mark.id, label);
       continue;
     }
@@ -539,10 +570,11 @@ export function placeLabels(
       continue;
     }
     const label = lineLabels.get(mark.id) ?? lineLabel(mark, anchor, viewport, reticles);
-    // Apart from every label placed and every other text by the destination's clearance, since
-    // touching labels read as one (addendum D, D4).
+    // In view and beside its mark, and apart from every label placed and every other text by the
+    // destination's clearance, since touching labels read as one (addendum D, D4).
     const blocked =
       !inView(anchor, viewport) ||
+      !besideItsMark(label, anchor, viewport, reticles) ||
       [...placed.values(), ...texts].some(
         (other) => overlaps(label, other) || boxGapPx(label, other) < neighbourPx,
       ) ||

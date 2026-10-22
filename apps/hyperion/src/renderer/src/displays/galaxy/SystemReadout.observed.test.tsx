@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { localFrameAt } from "../../geometry/frame";
 import { vec3 } from "../../geometry/vec3";
-import type { ChartSystem, QueryMode } from "../../lib/galaxy/model";
+import { type ChartSystem, CLOCK_WINDOW_YR, type QueryMode } from "../../lib/galaxy/model";
 import { toChartResult } from "../../lib/galaxy/wire";
 import { EMITTED_WIDTH_CH } from "../../lib/galaxy/observation";
 import type { SystemModel } from "../../lib/system/model";
@@ -12,11 +12,13 @@ import { toSystemModel } from "../../lib/system/wire";
 import { anObservation, aSystemsInRange, type RelativeSystemSpec } from "../../test/galaxyFixtures";
 import { stylesheetRule } from "../../test/stylesheet";
 import { aRedSupergiant, aSingleStarSummary } from "../../test/systemFixtures";
+import { TIME_WIDTH_CH } from "./chartReadings";
 import { AS_OBSERVED, CURVATURE_BOUND_LABEL, EMITTED_LABEL, SystemReadout } from "./SystemReadout";
 
 const CENTRE = [26_000, 0, 0] as const;
 const FRAME = localFrameAt(vec3(CENTRE[0], CENTRE[1], CENTRE[2]));
 const OBSERVED: QueryMode = { kind: "observed", observerLy: [26_000, 0, 0] };
+const NOW: QueryMode = { kind: "now" };
 const CHART_TIME_YR = 12.5;
 
 /** One system of layer E 3 ly coreward and 4 ly spinward-ish of the centre, as the adapter builds it. */
@@ -52,13 +54,14 @@ function renderReadout(
   system: ChartSystem,
   stars: SystemModel | null = null,
   starsAt: UniverseTime | null = null,
+  timeYr = CHART_TIME_YR,
 ) {
   render(
     <SystemReadout
       system={system}
       frame={FRAME}
       driveRangeLy={50}
-      timeYr={CHART_TIME_YR}
+      timeYr={timeYr}
       distanceDecimals={2}
       stars={stars}
       starsStale={false}
@@ -92,6 +95,15 @@ function ageOf(readout: HTMLElement): Element {
     throw new Error("AGE has no value");
   }
   return value;
+}
+
+/** The fixed slot the age's time stands in, which there must be. */
+function timeSlotOf(age: Element): HTMLElement {
+  const time = age.querySelector(".system-readout__value--fixed");
+  if (!(time instanceof HTMLElement)) {
+    throw new Error("the age's time stands in no fixed slot");
+  }
+  return time;
 }
 
 /** The `nth` value read beside a label in the readout. */
@@ -187,12 +199,41 @@ describe("SystemReadout as observed (plan 12, P12.T11)", () => {
     ).toMatch(/color: var\(--text-muted\);/u);
   });
 
-  it("keeps the age's slot in now, its time after a middle dot in no fixed slot", () => {
-    const age = ageOf(renderReadout(aSystem()));
+  it("takes the readout's row for the age in now, its time in the chart time's slot", () => {
+    const age = ageOf(renderReadout(aSystem({}, NOW)));
 
-    expect(age.textContent).toBe("0.150 Myr· AT UT +12.50 yr");
-    expect(age).not.toHaveClass("system-readout__wide");
-    expect(age.querySelector(".system-readout__value--fixed")).toBeNull();
+    expect([age.textContent, age.classList.contains("system-readout__wide")]).toEqual([
+      "0.150 Myr· AT UT +12.50 yr",
+      true,
+    ]);
+    expect(timeSlotOf(age).style.minWidth).toBe(`${String(TIME_WIDTH_CH)}ch`);
+  });
+
+  it.each([
+    [-CLOCK_WINDOW_YR, "-1000.00"],
+    [CLOCK_WINDOW_YR, "+1000.00"],
+  ] as const)(
+    "holds the chart time at the clock window's edge, %s yr, in its slot in now",
+    (timeYr, text) => {
+      const time = timeSlotOf(ageOf(renderReadout(aSystem({}, NOW), null, null, timeYr)));
+
+      expect([time.textContent, time.textContent.length <= TIME_WIDTH_CH]).toEqual([text, true]);
+    },
+  );
+
+  it("takes the readout's row for NOT YET FORMED as observed", () => {
+    expect(ageOf(renderReadout(anObservedSystem({ ageMyr: 0.01 })))).toHaveClass(
+      "system-readout__wide",
+    );
+  });
+
+  it("stands the time of a row without its observation, asked observed, in now's slot", () => {
+    const time = timeSlotOf(ageOf(renderReadout(aSystem())));
+
+    expect([time.textContent, time.style.minWidth]).toEqual([
+      "+12.50",
+      `${String(TIME_WIDTH_CH)}ch`,
+    ]);
   });
 
   it("states the present position as Estimated, with the stated bound after it", () => {

@@ -38,6 +38,7 @@ import {
   localFrameAt,
   toLocal,
 } from "../../geometry/frame";
+import { TIME_WIDTH_CH } from "./chartReadings";
 import { PrimaryReadings } from "./PrimaryReadings";
 import type { LineExtinction } from "./useExtinction";
 import { SystemReading as Reading } from "./SystemReading";
@@ -148,7 +149,10 @@ function estimatedIf(estimated: boolean, text: string | null): string | null {
 interface AtTimeProps {
   /** The universe time the age is given at, in years from the epoch. */
   readonly timeYr: number;
-  /** Whether the age is read as observed, in the readout's wide slot. */
+  /**
+   * Whether the time is the emitted time of a system read as observed, in
+   * {@link EMITTED_WIDTH_CH}'s slot; else it is the chart time, in {@link TIME_WIDTH_CH}'s.
+   */
   readonly observed: boolean;
 }
 
@@ -160,29 +164,28 @@ interface AtTimeProps {
  * @remarks
  * Its figures are a value's, in `--text` and untracked, its words and unit muted beside them. The
  * time keeps its system's label and its unit on one line, `UT -20,012.75 yr`, so that a narrow
- * column breaks the reading after `AT` rather than run it past its edge. Read as observed, the age
- * takes the readout's row and the time stands right-aligned in {@link EMITTED_WIDTH_CH}'s slot,
- * which holds any emitted time to the source horizon's, `-229,000.00` among them, so that the
- * reading keeps one width and stands on one line wherever the row holds it (§ Numbers: a field has
- * a fixed width sized for its longest value).
+ * column breaks the reading after `AT` rather than run it past its edge. The age takes the
+ * readout's row in both modes, and the time stands right-aligned in a slot that holds its longest
+ * (§ Numbers: a field has a fixed width sized for its longest value): the chart time in
+ * {@link TIME_WIDTH_CH}'s, the furniture's `UT` slot, which holds the clock window's `-1000.00`
+ * and `+1000.00`, so that the chart time takes one width wherever it stands; the emitted time, as
+ * observed, in {@link EMITTED_WIDTH_CH}'s, which holds any emitted time to the source horizon's,
+ * `-229,000.00` among them (P12.T11.c). So the time keeps one width as it changes, and the reading
+ * stands on one line wherever the row holds it (plan 12, P12.T11.e).
  */
 function AtTime({ timeYr, observed }: AtTimeProps) {
-  const time = formatUniverseTimeYr(timeYr);
+  const widthCh = observed ? EMITTED_WIDTH_CH : TIME_WIDTH_CH;
   return (
     <>
       · AT{" "}
       <span className="system-readout__whole">
         {TIME_SYSTEM_LABEL}{" "}
-        {observed ? (
-          <span
-            className="system-readout__value system-readout__value--fixed"
-            style={{ minWidth: `${EMITTED_WIDTH_CH}ch` }}
-          >
-            {time}
-          </span>
-        ) : (
-          <span className="system-readout__value">{time}</span>
-        )}{" "}
+        <span
+          className="system-readout__value system-readout__value--fixed"
+          style={{ minWidth: `${widthCh}ch` }}
+        >
+          {formatUniverseTimeYr(timeYr)}
+        </span>{" "}
         yr
       </span>
     </>
@@ -193,17 +196,16 @@ function AtTime({ timeYr, observed }: AtTimeProps) {
 function ageReading(system: ChartSystem | null): {
   readonly value: string | null;
   readonly unit: string | undefined;
-  readonly formed: boolean;
 } {
   if (system === null) {
-    return { value: null, unit: undefined, formed: true };
+    return { value: null, unit: undefined };
   }
   const then = observedAgeMyr(system);
   if (then !== null && then < 0) {
-    return { value: "NOT YET FORMED", unit: undefined, formed: false };
+    return { value: "NOT YET FORMED", unit: undefined };
   }
   const age = formatAge(then ?? system.ageMyr);
-  return { value: age.value, unit: age.unit, formed: true };
+  return { value: age.value, unit: age.unit };
 }
 
 /**
@@ -223,8 +225,11 @@ function ageReading(system: ChartSystem | null): {
  * heading, as the guide groups them, after the system's own readings; the angle is missing on the
  * galactic axis, where it is undefined. The age is the age at the chart time, which is given beside
  * it after a middle dot ({@link AtTime}: `AGE 22.7 Myr · AT UT +0.00 yr`), since a query at another
- * time gives another age. Whether the system is within the drive
- * range is in words, never colour alone. With nothing selected every value is an em dash.
+ * time gives another age; it takes a row of its own, the chart time in the furniture's `UT` slot,
+ * so that the time keeps one width and the reading one line as the chart time changes (P12.T11.e),
+ * and where the readout sets two readings to a row `MASS` stands alone before it. Whether the
+ * system is within the drive range is in words, never colour alone. With nothing selected every
+ * value is an em dash.
  *
  * `VEL` is the system's speed at the epoch, and the next list gives its velocity's `COREWARD`,
  * `SPINWARD` and `NORTH` components, signed, in km/s, along the named directions at the system's
@@ -257,8 +262,8 @@ function ageReading(system: ChartSystem | null): {
  * above whatever was asked. Then the system's `LIGHT AGE`, in
  * `yr`, and the time that light left it, `EMITTED UT`, follow its ID, each in a slot that holds the
  * oldest light of the source horizon; its `AGE` is its age then, an Observed value, given at the
- * emitted time, or `NOT YET FORMED` before it formed (the port ruling, §6.2), on a row of its own,
- * the time in a slot that holds the earliest (P12.T11.c); its present position,
+ * emitted time, or `NOT YET FORMED` before it formed (the port ruling, §6.2), on a row of its own
+ * as in now, the time in a slot that holds the earliest (P12.T11.c); its present position,
  * `DIST`, the offsets and `RADIUS`, `ANGLE` and `HEIGHT`, is Estimated, `~`, with the stated
  * `CURVATURE BOUND` on where it appears after them, in the distance ladder and, after a middle
  * dot, in `″`; and `VEL`
@@ -437,8 +442,9 @@ export function SystemReadout({
               value={age.value}
               unit={age.unit}
               beside={atTime}
-              // As observed it takes the row, so that its emitted time never wraps it (P12.T11.c).
-              wide={observed || !age.formed}
+              // It takes the row in both modes, so that its time in its slot never wraps it
+              // (P12.T11.c as observed; P12.T11.e in now).
+              wide
             />
             <Reading
               label="POPULATION"
