@@ -121,7 +121,10 @@ function throughTheWire<K extends RequestKind>(body: ResponseFor<K>, kind: K): R
  * answer on to the readout, is the business of the tests through `App`, the living star's
  * ({@link selectAnswered}) and the request's, refusal's, stale and superseded answers'.
  */
-function renderAnswered(summary: SystemSummaryDto): void {
+function renderAnswered(
+  summary: SystemSummaryDto,
+  { stale = false, starsStale = false }: { stale?: boolean; starsStale?: boolean } = {},
+): void {
   const chart = toChartResult(throughTheWire(aChartAnswer(), "systems_in_range"));
   const system = chart.systems.find(({ designation }) => designation === "H7K 4C0RFZ C-1");
   if (system === undefined) {
@@ -151,7 +154,8 @@ function renderAnswered(summary: SystemSummaryDto): void {
       timeYr={chart.timeYr}
       distanceDecimals={distanceDecimalsFor(chart.radiusLy)}
       stars={answer.model}
-      starsStale={false}
+      stale={stale}
+      starsStale={starsStale}
       extinction={null}
     />,
   );
@@ -268,6 +272,83 @@ describe("the GALAXY readout's stars", () => {
     );
 
     expect(valueOf("DIES IN")).toBe("312 yr");
+  });
+
+  it("sets a stale death's S after its unit and before AGO (plan 05, P05.T14)", () => {
+    const at = universeTimeFromYears(CHART_TIME_YR);
+    renderAnswered(
+      aSingleStarSummary(
+        aSunlikeStar({ death_time: { seconds: at.seconds - 312 * 31_557_600, nanos: at.nanos } }),
+      ),
+      { starsStale: true },
+    );
+
+    expect(valueOf("DIED")).toBe("312 yr SstaleAGO");
+  });
+
+  it("marks the summary's readings with the chart's answer once the link no longer backs it", () => {
+    renderAnswered(aSingleStarSummary(aSunlikeStar()), { stale: true });
+
+    for (const [label, value] of [
+      ["KIND", "DWARF Sstale"],
+      ["PHASE", "MAIN SEQUENCE Sstale"],
+      ["CLASS", "G2V Sstale"],
+      ["MASS", "1.00 M Sstale"],
+      ["[Fe/H]", "-0.13 dex Sstale"],
+      ["T EFF", "5772 K Sstale"],
+      // The em dash has no last value, and takes none.
+      ["ROTATION", "—"],
+    ] as const) {
+      expect([label, valueOf(label)]).toEqual([label, value]);
+    }
+    // The star list's captions are marked with the summary's values, and the heading is not.
+    expect(within(readout()).getByRole("table", { name: "STARS stale" })).toBeInTheDocument();
+    expect(within(readout()).getByRole("heading", { name: "STAR A" })).toBeInTheDocument();
+  });
+
+  it("marks the summary's readings, and not the chart's, while only the summary lags the chart", () => {
+    renderAnswered(aSingleStarSummary(aSunlikeStar()), { starsStale: true });
+
+    expect(valueOf("CLASS")).toBe("G2V Sstale");
+    expect(valueOf("MASS")).toBe("1.00 M Sstale");
+    expect(valueOf("DIST")).not.toMatch(/stale/u);
+    expect(valueOf("INIT MASS")).not.toMatch(/stale/u);
+  });
+
+  it.each([
+    ["a living star", aSunlikeStar],
+    ["a white dwarf", aWhiteDwarf],
+  ] as const)(
+    "keeps an empty slot after every value of %s's readout while live (plan 05, P05.T14)",
+    (_, star) => {
+      renderAnswered(aSingleStarSummary(star()));
+
+      // Every reading, the summary's and the primary's em dashes among them, keeps its slot, so a
+      // reading that forgot its flag, and with it its slot and its mark, fails here.
+      const values = readout().querySelectorAll("dd");
+      expect(values.length).toBeGreaterThan(0);
+      for (const value of values) {
+        const slots = value.querySelectorAll(".stale-slot");
+        expect([value.previousElementSibling?.textContent, slots.length > 0]).toEqual([
+          value.previousElementSibling?.textContent,
+          true,
+        ]);
+        for (const slot of slots) {
+          expect(slot).toBeEmptyDOMElement();
+        }
+      }
+    },
+  );
+
+  it.each([
+    ["the link no longer backs the chart", { stale: true }],
+    ["the summary alone lags the chart", { starsStale: true }],
+  ] as const)("reads STARS NOT YET FORMED, a status, muted with no mark while %s", (_, flags) => {
+    renderAnswered(aNotYetBornSummary(), flags);
+
+    expect(valueOf("STARS")).toBe("NOT YET FORMED");
+    // Muted with its source, so that a stale answer's words never read as live.
+    expect(within(readout()).getByText("NOT YET FORMED").closest(".stale")).not.toBeNull();
   });
 
   it("reads a white dwarf's remnant and cooling age", () => {
@@ -420,7 +501,8 @@ describe("the GALAXY readout's stars", () => {
     });
 
     expect(valueOf("CLASS")).toBe("G2V Sstale");
-    expect(within(readout()).getByRole("heading", { name: "STAR A stale" })).toBeInTheDocument();
+    // A heading, which takes no mark: its readings carry their own (plan 05, P05.T14).
+    expect(within(readout()).getByRole("heading", { name: "STAR A" })).toBeInTheDocument();
     expect(within(readout()).getByRole("table", { name: "STARS stale" })).toBeInTheDocument();
 
     await server(() => {

@@ -237,8 +237,9 @@ describe("the GALAXY readout's extinction", () => {
       socket.close();
     });
 
-    // The chart on show is stale once the link drops, and the panel's name says so.
-    const panel = screen.getByRole("region", { name: "Systems stale" });
+    // The chart on show is stale once the link drops; its values say so, and the panel's name is
+    // its title's, which takes no mark (plan 05, P05.T14).
+    const panel = screen.getByRole("region", { name: "Systems" });
     expect(within(panel).getAllByText(/NO CARRIER/)).toHaveLength(1);
   });
 

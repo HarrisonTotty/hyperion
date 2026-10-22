@@ -706,9 +706,13 @@ describe("the GALAXY display, end to end", { timeout: 300_000 }, () => {
     await session.user.click(within(chartPage()).getByRole("button", { name: "OBSERVED" }));
     await answerQuery(session);
 
-    expect(within(readout).getByRole("heading", { name: "STAR A stale" })).toBeInTheDocument();
+    // The heading takes no mark; the summary's values each carry theirs (plan 05, P05.T14).
+    expect(within(readout).getByRole("heading", { name: "STAR A" })).toBeInTheDocument();
+    expect(reading("CLASS")).toMatch(/ S\s*stale$/u);
+    expect(reading("MASS")).toMatch(/ S\s*stale$/u);
     await answerSummary(session);
     expect(within(readout).getByRole("heading", { name: "STAR A" })).toBeInTheDocument();
+    expect(reading("CLASS")).not.toMatch(/stale/u);
   });
 
   it("asks without the mode once NOW is chosen again, and reads the selection in now", async () => {

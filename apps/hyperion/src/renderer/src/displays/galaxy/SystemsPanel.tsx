@@ -2,7 +2,6 @@ import { universeTimeFromYears } from "@hyperion/protocol";
 import { type ReactNode, useId, useState } from "react";
 
 import { RequestStatus } from "../../components/RequestStatus";
-import { StaleMark } from "../../components/StaleMark";
 import { StatusLine } from "../../components/StatusLine";
 import { StatusText } from "../../components/StatusText";
 import { NOW_MODE, sameQueryMode } from "../../lib/galaxy/model";
@@ -34,8 +33,11 @@ interface SystemsPanelProps {
  * the chart, in the column under `CURSOR`, and a selection made in either place is shown in both.
  * One panel holds both the list and the readout, since the column's height at 1280 px does not run
  * to two sets of panel chrome. Before the first answer it says so, and an answer the client cannot
- * chart says where the fault is read. An answer the link no longer backs is muted and named stale,
- * with the guide's trailing `S`, as the chart and a kept map picture are.
+ * chart says where the fault is read. An answer the link no longer backs is muted, and its values
+ * carry the guide's trailing `S` themselves, so the panel's title takes none, as `LOCAL CHART`'s
+ * and `HR DIAGRAM`'s take none: each row of the list trails one `S` at its end and is named stale,
+ * and the readout marks each value it reads from the answer, the summary's with them (plan 05,
+ * P05.T14).
  *
  * `OPEN SYSTEM` follows the readout, outside its live region, since a control inside one would be
  * announced with every selection and a live region holds text only (the orchestrator's rulings 13
@@ -144,7 +146,7 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
       aria-labelledby={titleId}
     >
       <h2 className="panel__title" id={titleId}>
-        Systems{stale ? <StaleMark /> : null}
+        Systems
       </h2>
       {result === null ? (
         <p className="panel__empty">
@@ -163,6 +165,7 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
           onSelect={chart.select}
           driveRangeLy={chart.driveRangeLy}
           distanceDecimals={chart.distanceDecimals}
+          stale={stale}
         />
       )}
       <SystemReadout
@@ -172,6 +175,7 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
         timeYr={result?.timeYr ?? chart.timeYr}
         distanceDecimals={chart.distanceDecimals}
         stars={stars}
+        stale={stale}
         starsStale={starsStale}
         starsAt={summary.shownEmitted}
         extinction={answer.kind === "line" ? answer.line : null}

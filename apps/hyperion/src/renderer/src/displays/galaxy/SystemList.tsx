@@ -11,6 +11,7 @@ import {
 
 import { EarthMassUnit } from "../../components/EarthMassUnit";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
+import { StaleSlot } from "../../components/StaleSlot";
 import { formatLengthLy, formatListPosition, formatSubstellarMass } from "../../lib/format";
 import { type ChartSystem, isFormedPlanet } from "../../lib/galaxy/model";
 import { objectKindLabel } from "../../lib/system/words";
@@ -81,6 +82,11 @@ interface SystemListProps {
   readonly driveRangeLy: number;
   /** Decimals every distance on this chart is written with (plan 05, design note D21). */
   readonly distanceDecimals: number;
+  /**
+   * Whether the chart is a snapshot the link no longer backs: each row then trails one `S` and is
+   * named stale.
+   */
+  readonly stale: boolean;
 }
 
 /**
@@ -111,6 +117,15 @@ interface SystemListProps {
  * A row the chart was answered in observed mode carries its present distance as an Estimated
  * value, `~2.00`, as the readout does (plan 12, P12.T11), and its class and stars are its brief's,
  * the primary when the light left; the `DIST ly` column is as wide as that reading with its `~`.
+ *
+ * A chart the link no longer backs is muted, as its panel has it, and each row trails one `S`, at
+ * the right edge of its `DRIVE RANGE` cell, which stands for each of the row's values: the
+ * designation, the class, the stars, the distance, the mass and the range. One slot to a row,
+ * kept while the chart is live ({@link StaleSlot}), so that the mark moves nothing and the marks
+ * line up down the list: a slot after each value would take 4 × 2 ch of the class column's 76.2 px
+ * at 1280 × 720 and cut `He-sdO3`, while one fits in the range cell beside `OUT` with no column
+ * changed (plan 05, P05.T14). A stale row's accessible name, which stands for its content, ends
+ * `, stale`.
  */
 export function SystemList({
   systems,
@@ -118,6 +133,7 @@ export function SystemList({
   onSelect,
   driveRangeLy,
   distanceDecimals,
+  stale,
 }: SystemListProps) {
   const baseId = useId();
   const { ref: measureRef, metrics } = useScrollMetrics();
@@ -292,6 +308,8 @@ export function SystemList({
                   `${distance} ly`,
                   `${mass.value} ${massName}`,
                   rangeName(inRange),
+                  // The name hides the row's content, its `S` and that mark's word with it.
+                  stale ? "stale" : null,
                 ]
                   .filter((part) => part !== null)
                   .join(", ")}
@@ -318,7 +336,10 @@ export function SystemList({
                 <span className="system-list__number">
                   {mass.value} {mass.unit === "mearth" ? <EarthMassUnit /> : <SolarMassUnit />}
                 </span>
-                <span className="system-list__range">{rangeWords(inRange)}</span>
+                <span className="system-list__range">
+                  {rangeWords(inRange)}
+                  <StaleSlot stale={stale} />
+                </span>
               </div>
             );
           })}

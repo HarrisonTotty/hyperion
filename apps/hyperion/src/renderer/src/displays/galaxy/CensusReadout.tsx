@@ -25,7 +25,7 @@ import {
   censusLinesLightestFirst,
   formatBandMsun,
   inRangeCount,
-  shownCountText,
+  shownCount,
   type StarFilter,
 } from "./chartModel";
 import { usePageTabFocus } from "./pageTabFocus";
@@ -212,7 +212,10 @@ interface CensusReadoutProps {
   readonly state: RequestState<"systems_in_range">;
   /** The range the counts are taken against (plan 05, design note D9). */
   readonly driveRangeLy: number;
-  /** Whether the answer is a snapshot the link no longer backs: then muted, with a trailing `S`. */
+  /**
+   * Whether the answer is a snapshot the link no longer backs: then muted, with an `S` after each
+   * of its values, the complete line's mass, `SYSTEMS` and `IN RANGE`, but none after a caution.
+   */
   readonly stale: boolean;
   /** Sends the query again after a failure; the readout moves the focus off `RETRY` first. */
   readonly onRetry: () => void;
@@ -240,7 +243,13 @@ interface CensusReadoutProps {
  * (`412 OF 1630 SHOWN: LIVING`), and both count the systems shown. The per-layer table, which is
  * how placement is checked against the fields by eye, folds: the chart's column cannot hold both it and the chart at 1280 px. While a
  * newer query is in flight its `PENDING` stands beside the census and the answer on show stays. An
- * answer the link no longer backs reads as stale: muted, with the guide's trailing `S`.
+ * answer the link no longer backs reads as stale: muted, with the guide's trailing `S` after each
+ * value, `COMPLETE ABOVE 0.08 M☉ S`, `SYSTEMS 9 OF 88 S SHOWN: REMNANTS` (its `S` after the figure
+ * and before the filter's words, which are the console's own, as the HR page has it) and
+ * `IN RANGE 88 S`; `NOTHING FITS: …` is a caution, not a value, and takes none. The marks come
+ * with the stale answer only and keep no slot while it is live: the counts keep no fixed width,
+ * so a kept slot would buy no stillness, and in the compact layout the slots would push
+ * `CENSUS BY LAYER` onto a line of its own whenever `PENDING` shows (plan 05, P05.T14).
  *
  * The summary is a live region holding text only — the census line, the request's state in words
  * and the counts — read as a whole when it changes, so that a query given from the keyboard
@@ -269,6 +278,8 @@ export function CensusReadout({
   const line = result === null ? null : censusLine(result.census);
   const hint = result === null ? null : censusHint(result.layers);
   const shown = annunciation(state);
+  const shownSystems =
+    result === null ? null : shownCount(systems.length, result.systems.length, starFilter);
 
   return (
     <div className={stale ? "census-readout census-readout--stale" : "census-readout"}>
@@ -310,6 +321,7 @@ export function CensusReadout({
               {line.kind === "complete" ? (
                 <>
                   {line.text} <MassWithUnit mass={line.above} />
+                  {stale ? <StaleMark /> : null}
                 </>
               ) : (
                 <StatusText text={line.text} />
@@ -328,10 +340,14 @@ export function CensusReadout({
               <StatusText text={shown.text} />
             </p>
           )}
-          {result === null ? null : (
+          {shownSystems === null ? null : (
             <dl className="readout census-readout__counts">
               <dt>SYSTEMS</dt>
-              <dd>{shownCountText(systems.length, result.systems.length, starFilter)}</dd>
+              <dd>
+                {shownSystems.figure}
+                {stale ? <StaleMark /> : null}
+                {shownSystems.filterWords === null ? null : ` ${shownSystems.filterWords}`}
+              </dd>
               <dt>IN RANGE</dt>
               <dd>
                 {formatNumber(inRangeCount(systems, driveRangeLy), 0)}

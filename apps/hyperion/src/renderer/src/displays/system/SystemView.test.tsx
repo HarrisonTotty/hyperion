@@ -217,7 +217,13 @@ describe("SystemView's requests", () => {
     });
 
     expect(screen.getByRole("application", { name: "Orbit map, stale" })).toBeInTheDocument();
-    expect(within(mapPanel()).getByRole("heading", { name: "Orbit map stale" })).toBeVisible();
+    // The title takes no mark: the canvas's name and the furniture's values say it (plan 05,
+    // P05.T14).
+    expect(within(mapPanel()).getByRole("heading", { name: "Orbit map" })).toBeVisible();
+    expect(
+      within(mapPanel()).getByText("RADIUS", { selector: ".spatial-view__furniture dt" })
+        .nextElementSibling,
+    ).toHaveTextContent(/S\s*stale$/u);
     expect(reading("CLASS")).toBe("DA9.2");
   });
 

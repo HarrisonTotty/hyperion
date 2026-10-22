@@ -80,6 +80,11 @@ interface ReadingProps {
   readonly wide?: boolean;
 }
 
+/**
+ * One of the primary's readings: its value, or the em dash with why. Each is given `stale`, the
+ * em dash too, so that each keeps its slot for the `S`, which the em dash, having no last value,
+ * leaves empty (plan 05, P05.T14).
+ */
 function Reading({ label, reading, stale, wide = false }: ReadingProps) {
   return reading.kind === "value" ? (
     <SystemReading
@@ -94,6 +99,7 @@ function Reading({ label, reading, stale, wide = false }: ReadingProps) {
       label={label}
       value={null}
       wide={wide}
+      stale={stale}
       {...(reading.why === undefined ? {} : { missingWhy: reading.why })}
     />
   );
@@ -191,7 +197,10 @@ export interface PrimaryReadingsProps {
   readonly host: HostBody;
   /** The time the summary describes, from which a death is counted. */
   readonly at: UniverseTime;
-  /** Whether the answer is a stale snapshot, for a time the chart has left or a failed request. */
+  /**
+   * Whether the answer is a stale snapshot: one the link no longer backs, for a time the chart has
+   * left, or kept after a failed request.
+   */
   readonly stale: boolean;
 }
 
@@ -210,7 +219,9 @@ export interface PrimaryReadingsProps {
  * remnant has nothing whose light or size could be read, so those rows are left out. A death inside
  * the clock window reads `DIES IN 312 yr`, or `DIED 312 yr AGO` for one before the time shown. Its
  * mass now stands in the system's rows beside its initial mass. A stale answer's values are muted
- * and trail the guide's `S`.
+ * and each trails the guide's `S`, words that are values among them (a kind, a phase, a class,
+ * `NONE`), in the slot each reading keeps while live, after its unit and before the words beside
+ * it (`DIED 312 yr S AGO`); the em dash keeps its slot and takes none (plan 05, P05.T14).
  *
  * `NEBULA RADIUS` is the planetary nebula's, read always, the em dash where it is not modelled and
  * `NONE` where the star lights none (the orchestrator's ruling 149.4), but for a neutron star or a

@@ -1465,11 +1465,26 @@ body {
 }
 
 /*
+ * Room after a value for its stale `S` (`StaleSlot`): a space and the mark, 2 ch of the value's
+ * figures, the mark set at the slot's right. It is kept while the value is live, empty, so that the
+ * mark's coming moves nothing after it (the guide's "Numbers": a field is sized for its longest
+ * value and its status marks; plan 05, P05.T14).
+ */
+.stale-slot {
+  display: inline-block;
+  min-width: 2ch;
+  text-align: right;
+}
+
+/*
  * A chart the link no longer backs is a stale snapshot: every value read from the answer is muted,
- * as the guide's "Data states" asks, and a trailing `S` says so in a mark as well: in the view's
- * furniture one after each value, in the slot each keeps while live (plan 12, P12.T11.d), and in
- * the census, the list and the readout one in each block. The camera's own angles, a time the
- * console keeps itself and the controls are live and are left alone.
+ * as the guide's "Data states" asks, and a trailing `S` says so in a mark as well. The view's
+ * furniture (plan 12, P12.T11.d), the HR page's counts and the system readout mark each value, in
+ * the slot each keeps while live; the system list marks each row once, at the end of its range
+ * cell, in a slot kept while live; the census marks each value with an `S` while stale only, since
+ * its counts keep no fixed width (plan 05, P05.T14). The `Bodies` panel and the star list's
+ * captions still mark once a block. The camera's own angles, a time the console keeps itself and
+ * the controls are live and are left alone.
  */
 .spatial-view--stale :is(.spatial-view__readings, .spatial-view__labels),
 .census-readout--stale,
@@ -2000,17 +2015,6 @@ body {
  */
 .hr-diagram__readings {
   flex: none;
-}
-
-/*
- * Room after each count for its stale `S`, as after each reading (`.spatial-reading__stale-slot`):
- * a space and the mark in the count's monospaced figures, kept while the answer is live, so that a
- * stale answer moves no count (P12.T11.d).
- */
-.hr-diagram__count-slot {
-  display: inline-block;
-  min-width: 2ch;
-  text-align: right;
 }
 
 .hr-diagram__counts {
@@ -2577,8 +2581,19 @@ body {
   white-space: nowrap;
 }
 
+/*
+ * The range in words, then the row's one stale slot at the cell's right edge, so that the rows'
+ * marks line up down the list (plan 05, P05.T14): `OUT` with its tracking, about 33.6 px, and the
+ * 2 ch slot, 18.2 px, stand in the 6.5 ch cell, 59.15 px, and in the 57.15 px the narrow rows'
+ * padding leaves it, with no column, gap or padding changed.
+ */
 .system-list__range {
+  display: flex;
   letter-spacing: 0.1em;
+}
+
+.system-list__range > .stale-slot {
+  margin-left: auto;
 }
 
 .system-list__class {

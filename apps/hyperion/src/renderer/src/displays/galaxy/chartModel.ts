@@ -207,16 +207,32 @@ export function filterSystems(
   return filter === "all" ? systems : systems.filter((system) => passesStarFilter(system, filter));
 }
 
+/** How many of a chart's systems are shown, in its two parts: {@link shownCount}'s. */
+export interface ShownCount {
+  /** The count, a value of the answer: `412 OF 1630`, or the total alone under `ALL`, `1630`. */
+  readonly figure: string;
+  /** What the filter hides, the console's own choice in words, `SHOWN: LIVING`; none under `ALL`. */
+  readonly filterWords: string | null;
+}
+
 /**
  * How many of a chart's systems are shown, saying what the filter hides: the total alone under
  * `ALL`, and `412 OF 1630 SHOWN: LIVING` otherwise (the guide's honest-data rule; a colon, not the
  * plan's em dash, which is the Missing state: the owner's draft, r9 D2.3).
+ *
+ * @remarks
+ * The figure and the filter's words are given apart, since a stale answer's `S` follows the figure
+ * and comes before the words, `9 OF 88 S SHOWN: REMNANTS`: the filter is the console's own choice,
+ * not a value of the answer (plan 05, P05.T14). The census and the HR page read the same parts.
  */
-export function shownCountText(shown: number, total: number, filter: StarFilter): string {
+export function shownCount(shown: number, total: number, filter: StarFilter): ShownCount {
   if (filter === "all") {
-    return formatNumber(total, 0);
+    return { figure: formatNumber(total, 0), filterWords: null };
   }
-  return `${formatNumber(shown, 0)} OF ${formatNumber(total, 0)} SHOWN: ${starFilterLabel(filter)}`;
+  return {
+    figure: `${formatNumber(shown, 0)} OF ${formatNumber(total, 0)}`,
+    filterWords: `SHOWN: ${starFilterLabel(filter)}`,
+  };
 }
 
 /** What a chart's scene is built from besides the query's answer. */
