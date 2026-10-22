@@ -297,6 +297,33 @@ describe("the GALAXY readout's stars", () => {
     expect(valueOf("SPIN")).toBe("—");
   });
 
+  it.each([
+    ["neutron star", aNeutronStar],
+    ["black hole", aBlackHole],
+  ] as const)(
+    "reads no planetary nebula's radius under STAR A for a %s, which never lights one (P09.T44)",
+    (_, remnant) => {
+      renderAnswered(aSingleStarSummary(remnant()));
+
+      expect(valuesOf("NEBULA RADIUS")).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["neutron star", aNeutronStar],
+    ["black hole", aBlackHole],
+  ] as const)("still reads EVENTS under STAR A for a %s (P09.T44)", (_, remnant) => {
+    renderAnswered(aSingleStarSummary(remnant()));
+
+    expect(valueOf("EVENTS")).toBe("—");
+  });
+
+  it("keeps a white dwarf's nebula radius, the remnant a planetary nebula leaves (P09.T44)", () => {
+    renderAnswered(aSingleStarSummary(aWhiteDwarf()));
+
+    expect(valueOf("NEBULA RADIUS")).toBe("—");
+  });
+
   it("reads a star that left no remnant with no light or size, and its mass as the em dash", () => {
     renderAnswered(
       aSingleStarSummary(

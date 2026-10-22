@@ -1425,6 +1425,25 @@ readout gives distances in light-years to four decimals or in AU below 0.01 ly, 
 is shown at every step. A `BLACK HOLE` readout shows mass and luminosity at the chart's time. Tests:
 selector steps, unit switching, formatting under the guide's number rules.
 
+#### P09.T44 Client: a core-collapse remnant's nebula rows
+
+Added 2026-10-21 by main's decision on a young neutron star's `NEBULA RADIUS NONE`, from P12.T11's
+landing look, where next to a Vela-age pulsar it read as no nebula at all, though such a star
+almost always has a supernova shell. The rows are the planetary nebula's, which comes only from a
+star that leaves a white dwarf, so both system readouts, `GALAXY`'s `STAR A` and the `SYSTEM`
+display's host readout, leave out `NEBULA RADIUS` and the four rows after it (`NEBULA AGE`,
+`NEBULA EXPANSION`, `IONISED MASS`, `EXCITATION CLASS`) for a `neutron_star` or `black_hole` host,
+as they are left out for `no_remnant`: the guide's Not applicable state. This amends the
+orchestrator's ruling 149.4's "`NEBULA RADIUS` always" for those two kinds only; `EVENTS` stays, and
+a white dwarf and a living star keep the rows, with `—` or `NONE`. P09.T41.c's remnant rows (the
+shell's radius, phase and emission, and the pulsar wind nebula) are to take the place. Files: under
+`apps/hyperion/src/renderer/src/`: `displays/galaxy/PrimaryReadings.tsx`,
+`displays/system/HostReadings.tsx`, tests; the guide's `NEBULA RADIUS` row. Tests: Vitest for a
+neutron-star and a black-hole host in both readouts, and a white dwarf and a Sun-like star keeping
+the row. Acceptance: `pnpm test`, `just ci`. No `GENERATOR_VERSION` change.
+
+_Done (issue #74, 2026-10-22, at `GENERATOR_VERSION` 22): see Risks, "P09.T44 as built"._
+
 ## Verification
 
 - `just ci` green after every task; `just test-slow` holds P09.T3.c, T6, T11, T14, T15.b, T31, T38
@@ -2939,3 +2958,39 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _A shared power-law sampler._ `flares::power_law_quantile` is this module's own, beside
     P06.T28.a's private inverse transform; one helper in `crate::events` would change T28.a's file.
     Lean: share it when a third kind needs one.
+- **P09.T44 as built** (issue #74, lane `lane/74-p12-t11c-compact-refusals`, 2026-10-22, at
+  `GENERATOR_VERSION` 22). Client and guide only: no Rust, protocol, binding, server, sim or golden
+  change, nothing generated moves, and no version changes.
+  - _Names._ Under `apps/hyperion/src/renderer/src/`: `displays/system/HostReadings.tsx`'s private
+    `radiusInKm` becomes `isCoreCollapseRemnant(host)`, a neutron star or a black hole, read at
+    both its uses, the radius's unit and the nebula's rows; its private `nebulaReadings` takes the
+    host rather than its nebula and gives nothing for such a host. `PrimaryReadings` names its
+    inline test of the same two kinds `collapsed` and reads it for the radius and for
+    `NEBULA RADIUS`. No helper is shared between the two files: no file of this task's scope is
+    one both import, and each tests the kind as it already did for the radius in `km`.
+  - _As briefed._ The rows are left out by the host's kind, whatever nebula the answer carries, so
+    a star read as observed keeps them by the kind its light shows. `EVENTS` stays. The docs of
+    `PrimaryReadings`, `HostReadings` and `nebulaReadings` say so; `PrimaryReadings`' and
+    `isCoreCollapseRemnant`'s cite Kwitter and Henry (2022, PASP 134, 022001, §1) for a planetary
+    nebula's coming only from a star of 0.8–8 M☉ that leaves a white dwarf, and Smartt (2009, ARA&A
+    47, 63) for core collapse above about 8 M☉ (science check: both hold; Kwitter and Henry imply
+    the exclusion rather than state it). The guide's `NEBULA RADIUS` row reads as the brief gives
+    it. P09.T41.c's entry is not edited to point back here: a task's text changes only through a
+    re-validation, and this record and T44's entry say what T41.c's rows take.
+  - _Tests (11 new, as run)._ `displays/system/HostReadings.test.tsx` (6: a neutron-star and a
+    black-hole host read none of the five rows, and each still reads `EVENTS NONE`; a neutron-star
+    host reads none of them even where the answer carries a nebula; a white dwarf that lights none
+    still reads `NEBULA RADIUS NONE`); `displays/galaxy/SystemReadout.summary.test.tsx` (5: no
+    `NEBULA RADIUS` under `STAR A` for `aNeutronStar` and `aBlackHole`, each still reading `EVENTS`,
+    and `aWhiteDwarf`'s `—`). The Sun-like star's `—` the brief names is the existing test of what
+    this version does not model, so the new one is the white dwarf's, which separates the remnants
+    (TypeScript review). Every other existing test passes unchanged, the white dwarf's nebula and
+    the living star's `NONE` and `—` among them.
+  - _Deferred findings (2026-10-13 rule)._ (1) § Data states has the server set a section's state
+    and the console never infer it; here the console leaves the rows out from `host.kind`, which is
+    the server's, so a contradictory answer (a neutron star carrying a nebula) is hidden without a
+    sign. Whether a row left out by a server-sent kind counts as set by the server, or Not
+    applicable should come on the wire with P09.T41.c's rows, is the owner's (UX review). (2) The
+    one kind test now sets the radius's unit and the nebula's rows in two files (`collapsed`,
+    `isCoreCollapseRemnant`); one predicate in `lib/system/`, outside this lane, would keep the two
+    displays from drifting apart (UX review).
