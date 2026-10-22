@@ -1,4 +1,4 @@
-# generator_version = 22
+# generator_version = 23
 moon transition = 0x40d28e0000000000  # 19000.0
 moon own N(>1 km) = 0x3f926e978d4fdf3b  # 0.018
 moon N(>1e-3 m) = 0x429daba898a13400  # 8155776297037.0

@@ -1,4 +1,4 @@
-# generator_version = 22
+# generator_version = 23
 world mars_like
 body
 radius = 0x4149dc1e00000000  # 3389500.0

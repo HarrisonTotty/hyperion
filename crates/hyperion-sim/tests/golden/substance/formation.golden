@@ -1,4 +1,4 @@
-# generator_version = 22
+# generator_version = 23
 [switches]
 NA_BOILING_K = 0x409249b572515e3b  # 1170.4271939004673
 MG_BOILING_K = 0x40955098199c2882  # 1364.1485351943707

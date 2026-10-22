@@ -1,4 +1,4 @@
-# generator_version = 22
+# generator_version = 23
 mercury_surface_state = Airless
 mercury_surface_temperature = 0x407b4dc2a967e989  # 436.86002483931276
 mercury_partial_pressure_hydrogen = 0x0000000000000000  # 0.0

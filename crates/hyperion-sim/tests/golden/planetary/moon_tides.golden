@@ -1,4 +1,4 @@
-# generator_version = 22
+# generator_version = 23
 moon_branch = Cold
 moon_non_tidal_heat_flow = 0x3f8694f3069ef4e5  # 0.01102628578143556
 moon_k2 = 0x3f8ffc5b8b77e126  # 0.015618052667364223

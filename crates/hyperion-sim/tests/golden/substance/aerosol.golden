@@ -1,4 +1,4 @@
-# generator_version = 22
+# generator_version = 23
 [gamma]
 Al2O3 solid gamma r_eff 1.05e-9 m v_eff 0.0415: basis sphere fallback, stand-in false
 Al2O3 solid gamma r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x3f61a8c3f5740602  # 0.002155668956789426

@@ -7494,6 +7494,32 @@ it:
     and no class factor, as built").
   - The bump commit adds no draw or domain tag; the batch's new streams are T48.a's
     `body.continents` and R09.T1.b's reading of `body.surface.detail`, both declared before it.
+- **Version 23, the 22 → 23 batch, "the surface", as built** (lane `p14-wire-23`, 2026-10-22;
+  decision-bump-plan-after-22 §1.2, its membership closed). It carries T49.b–c, T50.a, T50.c,
+  T51.a–c, T56.a, T56.c, T56.d and T57.a, wired on the record by P14.T54.a. No commit of the batch
+  lands alone.
+  - The batch's commits before the bump are checkpoints blessed at header 22, each with its
+    goldens in its message and its record in P14.T54.a's as-built bullets below (Risks,
+    "Deviations in P14.T54.a, as built"): the first checkpoint (Mercury's lid and the ice lid's
+    melt area, P14.T51.c's ID), then Batches A–E, each with its review fixes. The bump commit
+    raises the version and blesses every golden of the workspace once at 23, under the heavy lock:
+    193 goldens change their header alone, `galaxy_parameters` (the server's) its
+    generator-version value, and R10's three `worker/` goldens the version field of their blocks'
+    headers; no other value moves (`golden_diff.py`: consistent). The test planet's 6 goldens keep
+    `TEST_PLANET_VERSION` 2.
+  - In the same commit `saturation_curves` and `substance_albedos` are restamped `since 22` → 23,
+    the version they are first read at, by the tool's new-table path (decision-displaced-since's
+    procedure): only the three `since` fields move each, the bodies unchanged. `liquid_optics`
+    keeps `since 22`. `fit-check`: 41 fresh, the 6 provisional warnings of earlier versions, no
+    failure; no stellar table flagged, `space_weathering` fresh.
+  - Its cost (decision-p14-t54a-passes §C.6, on the lane's probe, release, one CPU under the
+    heavy lock, medians of three, 22 rebuilt in the same window): `generate` 2.05× of 22 (bound
+    2.5×), `snapshot_at` 2.61× (bound 3.0×), its 400-system stage 2.79× (bound 3.0×), with no
+    value-moving lever; P14.T33.a's bench (ii) 2.44× and (v) 2.90×. P14.T33.b 1,290 s, 7.5% over
+    "main"'s 20 minutes (its cost line, P14.T33.b's as built).
+  - The bump commit adds no draw or domain tag; the batch's new streams, `system.abundances`,
+    `body.formation` and `body.cold_traps`, and words 3–5 of `planet.volatiles`, were declared
+    before it (the Phase L bullet above).
 
 - Parameters that belong to the generator version and are named constants in one place
   (`planetary/params.rs`): the class weight table, the spacing floors, ring probabilities, the
@@ -13410,6 +13436,10 @@ tables::gauss_legendre`.
       Inside "main"'s 20 minutes, so the test keeps `snapshot_at` and the slow pass carries it;
       the time is in its `#[ignore]` reason. It was not timed under `just test-slow`'s
       `slow-test` profile, which builds at release speed, and has no nextest priority yet.
+      At 23 (P14.T54.a's bump tree, 2026-10-22): 1,290 s (21.5 min) under nextest's `slow-test`
+      profile, one thread, under the heavy lock on the Ryzen 7 3700X, passing; 7.5% over "main"'s
+      20 minutes, recorded with no re-rule ("main", 2026-10-22). The cost is `snapshot_at`'s,
+      2.6–2.8× of 22's (P14.T54.a's budget, §C.6).
     - _Its provisional window, re-pinned at 22._ Small planets at −0.8 against solar: 0.9334,
       unchanged (78 hosts at 0.756 small planets inside 100 days each, 3,512 at 0.810), so the
       pin stays at 0.80–1.07.

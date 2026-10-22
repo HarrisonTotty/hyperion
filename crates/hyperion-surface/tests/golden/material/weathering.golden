@@ -1,4 +1,4 @@
-# generator_version = 22
+# generator_version = 23
 constants
 regolith_host_index = 0x3ffb333333333333  # 1.7
 ice_host_index = 0x3ff4f5c28f5c28f6  # 1.31

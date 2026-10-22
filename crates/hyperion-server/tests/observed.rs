@@ -479,7 +479,8 @@ async fn resolve_system_names_the_system_or_the_time_it_cannot_use() {
 /// is a grid record's.
 #[tokio::test]
 async fn the_central_black_hole_is_refused_until_its_orbit_is_built() {
-    assert_eq!(GENERATOR_VERSION.get(), 22, "the version this was seen at");
+    // Seen at 22; seen again at 23 by P14.T54.a's bump, which moves no galaxy member.
+    assert_eq!(GENERATOR_VERSION.get(), 23, "the version this was seen at");
     let server = TestServer::start().await;
     let mut client = server.connected().await;
     let universe = client.create_universe("Parallax", SEED).await;

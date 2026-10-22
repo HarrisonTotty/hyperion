@@ -6,7 +6,7 @@
 //! manifest: crates/hyperion-fit/manifests/saturation_curves.toml
 //! data: none
 //! sim-fingerprint: 33d930884bca5bbdbe5491ae440fc310ceea32d21adf60531a3079b060ea7f63
-//! since-generator-version: 22
+//! since-generator-version: 23
 //! source: each condensable's reference equation of state's ancillary vapour-pressure equation
 //!   and its published sublimation equations (IAPWS SR1-86 and R14-08; Setzmann and Wagner 1991;
 //!   Span et al. 2000; Span and Wagner 1996; Tegeler et al. 1999; Stewart et al. 1991; Gao et al.

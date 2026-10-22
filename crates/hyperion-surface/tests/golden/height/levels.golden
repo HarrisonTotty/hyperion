@@ -1,4 +1,4 @@
-# generator_version = 22
+# generator_version = 23
 world earth_like
 L0 = shortest 0x4124bd9a4dce76c7 relief - channels - craters - bound 0x40f5b4ac8756d49f range 0x8000000000000000 0x0000000000000000
 L1 = shortest 0x4114bd9a4dce76c7 relief - channels - craters - bound 0x40f5b4ac8756d49f range 0x8000000000000000 0x0000000000000000

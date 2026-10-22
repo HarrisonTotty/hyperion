@@ -280,7 +280,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "saturation_curves",
         revision: 0,
-        since_generator_version: 22,
+        since_generator_version: 23,
         provisional: false,
     },
     TableInfo {
@@ -376,7 +376,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "substance_albedos",
         revision: 1,
-        since_generator_version: 22,
+        since_generator_version: 23,
         provisional: false,
     },
     TableInfo {

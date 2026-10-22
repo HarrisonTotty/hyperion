@@ -27,7 +27,9 @@
 //! 22 (2026-10-14: one thread, the test profile of `cargo test -p hyperion-sim --features testing
 //! --test planetary_end_to_end -- --ignored`, under the heavy-test lock on an i7-8665U at a load
 //! average of 1.0–1.5), inside the 20 minutes for which the slow pass carries `snapshot_at`
-//! rather than a count that skips the surface ("main"'s ruling for P14.T33's port).
+//! rather than a count that skips the surface ("main"'s ruling for P14.T33's port). At 23 it took
+//! 1,290 s (2026-10-22: one thread, nextest's `slow-test` profile, under the heavy-test lock on a
+//! Ryzen 7 3700X), 7.5% over those 20 minutes, recorded with no re-rule ("main", 2026-10-22).
 //!
 //! The file needs the crate's `testing` feature, which a workspace build turns on through
 //! `hyperion-fit`; built for this crate alone without it, it holds no test.
@@ -538,7 +540,8 @@ fn population_report(
 ///   inside 2,000 days.
 #[test]
 #[ignore = "slow: generates 70,000 whole systems of the Milky Way's parameters, surfaces \
-            included, 338 s at generator version 22 (one thread, test profile, i7-8665U)"]
+            included, 338 s at generator version 22 (one thread, test profile, i7-8665U), \
+            1,290 s at 23 (one thread, slow-test profile, Ryzen 7 3700X)"]
 fn planets_per_star_end_to_end() {
     let galaxy = Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
         .expect("the Milky Way fixture's gas is mostly neutral");

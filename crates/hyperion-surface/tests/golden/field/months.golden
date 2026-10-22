@@ -1,4 +1,4 @@
-# generator_version = 22
+# generator_version = 23
 e 0e0 edge[0] = 0x0000000000000000  # 0.0
 e 0e0 edge[1] = 0x3fe0c152382d7366  # 0.5235987755982989
 e 0e0 edge[2] = 0x3ff0c152382d7366  # 1.0471975511965979

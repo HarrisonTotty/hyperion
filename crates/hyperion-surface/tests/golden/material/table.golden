@@ -1,4 +1,4 @@
-# generator_version = 22
+# generator_version = 23
 constants
 cliff_slope_rad = 0x3fe657184ae74487  # 0.6981317007977318
 transition_half_width_rad = 0x3fb657184ae74487  # 0.08726646259971647
