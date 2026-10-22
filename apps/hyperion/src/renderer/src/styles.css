@@ -1591,8 +1591,10 @@ body {
  * closer so that `UT` ends the first furniture line and the observer takes the line `UT` left, and
  * the legend runs on as one text (look-72's ruling). Measured hidden at 1280 x 720, 100%: in `NOW`
  * the stage is 258 px tall and the column ends 26 px above its foot; in `OBSERVED` the stage is
- * 240 px, ruling 134.9's 15rem, and the column ends 8 px above its foot. A refused entry's line in
- * `OBSERVED` still overruns it, by 14 px, recorded for a later task.
+ * 240 px, ruling 134.9's 15rem, and the column ends 8 px above its foot. A refused entry stands in
+ * its field's hint's place, on the field's own row, and never wraps, and the mode and the command
+ * that moves the observer keep one row while a chart is on show, so that no refusal, nor two at
+ * once, adds a line to the column (P12.T11.c).
  */
 .local-chart--compact {
   /*
@@ -1702,6 +1704,56 @@ body {
 /* The fields carry no bottom margin, and here neither do the choices, MIN MASS and STARS. */
 .local-chart--compact .chart-controls > .form-choice {
   margin-bottom: 0;
+}
+
+/*
+ * A refused entry stands in its field's format hint's place, on the field's own row, and the hint
+ * gives way while it stands (`display: none`, which the input's `aria-describedby` still reaches):
+ * `DRIVE RANGE [ 9999 ] ly INVALID: enter 0.01 to 500 ly` (P12.T11.c). It never wraps, so that no
+ * refusal, nor two at once, adds a line to the column: at 1280 x 720, reckoned, the refusal ends
+ * near 775 px across the page for DRIVE RANGE and 801 px for CHART TIME, inside the column, which
+ * ends at 831.
+ */
+.local-chart--compact .chart-controls__field--refused > .chart-controls__hint {
+  display: none;
+}
+
+.local-chart--compact .chart-controls__error {
+  flex-basis: auto;
+  margin: 0;
+  white-space: nowrap;
+}
+
+/*
+ * The refusal's field name, which the row's label already shows, hidden from sight alone, in the
+ * `.visually-hidden` pattern, so that the refusal's text, and what a screen reader says, keep it.
+ */
+.local-chart--compact .chart-controls__error-name {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/*
+ * The mode and `OBSERVER TO CHART CENTRE` 0.5rem apart, a field's own gap, which leaves some 5-8 px
+ * of the column's 526 at 1280 x 720, reckoned, room for the command's 3 px focus ring (P12.T11.c),
+ * and on one row, unshrunk, while a chart is on show. With none on show their held-back reasons,
+ * `NO CHART: centre one to observe from it`, may still wrap under them, as there is then no stage
+ * to run over.
+ */
+.local-chart--compact .chart-controls__modes {
+  gap: 0 0.5rem;
+}
+
+.local-chart--compact .chart-controls__modes:not(.chart-controls__modes--reason) {
+  flex-wrap: nowrap;
+}
+
+.local-chart--compact .chart-controls__modes:not(.chart-controls__modes--reason) > * {
+  flex: none;
 }
 
 /*
@@ -2628,6 +2680,26 @@ body {
   margin-left: 0.5rem;
   color: var(--text-muted);
   letter-spacing: 0.1em;
+}
+
+/*
+ * A value inside the words beside a reading, such as the time after `AGE`'s `· AT UT`, is set as a
+ * value is, in `--text` and untracked, so that a slot in `ch` holds its longest, its words and unit
+ * staying muted (plan 12, P12.T11.c). A stale answer's readout mutes it with the rest.
+ */
+.system-readout__beside .system-readout__value {
+  color: var(--text);
+  letter-spacing: 0;
+}
+
+.systems-panel--stale .system-readout__beside .system-readout__value,
+.stale .system-readout__beside .system-readout__value {
+  color: var(--text-muted);
+}
+
+/* A time beside a reading kept whole with its system's label and its unit: `UT -20,012.75 yr`. */
+.system-readout__whole {
+  white-space: nowrap;
 }
 
 /* The CURSOR panel: the cursor's coordinates to enter, CENTRE CHART, and its GALACTIC reading. */

@@ -6,9 +6,11 @@ import { localFrameAt } from "../../geometry/frame";
 import { vec3 } from "../../geometry/vec3";
 import type { ChartSystem, QueryMode } from "../../lib/galaxy/model";
 import { toChartResult } from "../../lib/galaxy/wire";
+import { EMITTED_WIDTH_CH } from "../../lib/galaxy/observation";
 import type { SystemModel } from "../../lib/system/model";
 import { toSystemModel } from "../../lib/system/wire";
 import { anObservation, aSystemsInRange, type RelativeSystemSpec } from "../../test/galaxyFixtures";
+import { stylesheetRule } from "../../test/stylesheet";
 import { aRedSupergiant, aSingleStarSummary } from "../../test/systemFixtures";
 import { AS_OBSERVED, CURVATURE_BOUND_LABEL, EMITTED_LABEL, SystemReadout } from "./SystemReadout";
 
@@ -67,6 +69,31 @@ function renderReadout(
   return screen.getByRole("status", { name: "Selected system" });
 }
 
+/**
+ * A system seen 229,012.5 years back from the chart's +12.50, so emitted at -229,000.00, an
+ * 11-character time, and 22.93 Myr less its light's age, 22.7 Myr, old then.
+ */
+function anOldLightSystem(): ChartSystem {
+  return anObservedSystem({
+    ageMyr: 22.929_012_5,
+    observed: {
+      lightAgeYr: 229_012.5,
+      apparentRelLy: [-3.01, 4.02, 0.005],
+      boundLy: 1e-5,
+      boundArcsec: 1.5e-3,
+    },
+  });
+}
+
+/** The `AGE` reading's value element, its `dd`. */
+function ageOf(readout: HTMLElement): Element {
+  const value = within(readout).getByText("AGE", { exact: true }).nextElementSibling;
+  if (value === null) {
+    throw new Error("AGE has no value");
+  }
+  return value;
+}
+
 /** The `nth` value read beside a label in the readout. */
 function valueOf(readout: HTMLElement, label: string, nth = 0): string | null {
   const term = within(readout).getAllByText(label, { exact: true })[nth];
@@ -100,13 +127,72 @@ describe("SystemReadout as observed (plan 12, P12.T11)", () => {
     const readout = renderReadout(anObservedSystem());
 
     // 0.15 Myr now, less 50,000 years: 0.100 Myr, with no `~`.
-    expect(valueOf(readout, "AGE")).toBe("0.100 MyrAT UT -49,987.50 yr");
+    expect(valueOf(readout, "AGE")).toBe("0.100 Myr· AT UT -49,987.50 yr");
   });
 
   it("reads NOT YET FORMED for a system younger than its light", () => {
     const readout = renderReadout(anObservedSystem({ ageMyr: 0.01 }));
 
-    expect(valueOf(readout, "AGE")).toBe("NOT YET FORMEDAT UT -49,987.50 yr");
+    expect(valueOf(readout, "AGE")).toBe("NOT YET FORMED· AT UT -49,987.50 yr");
+  });
+
+  it("takes the readout's row for the age as observed", () => {
+    const age = ageOf(renderReadout(anOldLightSystem()));
+
+    expect(age.textContent).toBe("22.7 Myr· AT UT -229,000.00 yr");
+    expect(age).toHaveClass("system-readout__wide");
+  });
+
+  it("stands the age's emitted time in a slot that holds it", () => {
+    const time = ageOf(renderReadout(anOldLightSystem())).querySelector(
+      ".system-readout__value--fixed",
+    );
+    if (!(time instanceof HTMLElement)) {
+      throw new Error("the age's time stands in no fixed slot");
+    }
+
+    expect(time.style.minWidth).toBe(`${String(EMITTED_WIDTH_CH)}ch`);
+    expect(time.textContent.length).toBeLessThanOrEqual(EMITTED_WIDTH_CH);
+  });
+
+  it.each([
+    ["as observed", anOldLightSystem, "UT -229,000.00 yr"],
+    ["in now", () => aSystem(), "UT +12.50 yr"],
+  ] as const)(
+    "keeps the age's time whole with its system's label and its unit %s",
+    (_, system, whole) => {
+      expect(
+        ageOf(renderReadout(system())).querySelector(".system-readout__whole")?.textContent,
+      ).toBe(whole);
+    },
+  );
+
+  it("keeps a time whole with its label and unit, in the stylesheet jsdom does not apply", () => {
+    expect(stylesheetRule(".system-readout__whole")).toMatch(/white-space: nowrap;/u);
+  });
+
+  it("sets the age's time as a value, in --text and untracked, so that its slot in ch holds it", () => {
+    const rule = stylesheetRule(".system-readout__beside .system-readout__value");
+
+    expect(rule).toMatch(/color: var\(--text\);/u);
+    expect(rule).toMatch(/letter-spacing: 0;/u);
+  });
+
+  it("mutes the age's time with the rest of a stale readout", () => {
+    expect(
+      stylesheetRule(
+        ".systems-panel--stale .system-readout__beside .system-readout__value,\n" +
+          ".stale .system-readout__beside .system-readout__value",
+      ),
+    ).toMatch(/color: var\(--text-muted\);/u);
+  });
+
+  it("keeps the age's slot in now, its time after a middle dot in no fixed slot", () => {
+    const age = ageOf(renderReadout(aSystem()));
+
+    expect(age.textContent).toBe("0.150 Myr· AT UT +12.50 yr");
+    expect(age).not.toHaveClass("system-readout__wide");
+    expect(age.querySelector(".system-readout__value--fixed")).toBeNull();
   });
 
   it("states the present position as Estimated, with the stated bound after it", () => {
@@ -155,7 +241,7 @@ describe("SystemReadout as observed (plan 12, P12.T11)", () => {
     expect(within(readout).queryByText("LIGHT AGE")).toBeNull();
     expect(within(readout).queryByText(CURVATURE_BOUND_LABEL)).toBeNull();
     expect(valueOf(readout, "DIST")).toBe("5.00 ly");
-    expect(valueOf(readout, "AGE")).toBe("0.150 MyrAT UT +12.50 yr");
+    expect(valueOf(readout, "AGE")).toBe("0.150 Myr· AT UT +12.50 yr");
     expect(valueOf(readout, "VEL")).toMatch(/^\d+\.\d km\/s$/u);
   });
 

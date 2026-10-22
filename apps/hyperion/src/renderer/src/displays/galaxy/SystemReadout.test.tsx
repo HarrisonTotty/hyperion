@@ -134,7 +134,7 @@ describe("SystemReadout", () => {
   it("reads an age of 4,600 Myr in gigayears, at the chart time", () => {
     const readout = renderReadout(aSystem([1, 0, 0]), { timeYr: 12.5 });
 
-    expect(valueOf(readout, "AGE")).toBe("4.60 GyrAT UT +12.50 yr");
+    expect(valueOf(readout, "AGE")).toBe("4.60 Gyr· AT UT +12.50 yr");
   });
 
   it("names the population in upper case", () => {

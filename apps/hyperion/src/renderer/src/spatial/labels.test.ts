@@ -926,3 +926,91 @@ describe("placeLabels apart and off the edges (R07.T16.j; addendum D, D4 and D5)
     },
   );
 });
+
+describe("placeLabels off the observer's eye (plan 12, P12.T11.c)", () => {
+  /** The eye's 1 rem box about a point, as `observerBoxPx` gives it. */
+  function eyeAt(xPx: number, yPx: number): BoxPx {
+    const halfPx = VIEWPORT.remPx / 2;
+    return { leftPx: xPx - halfPx, topPx: yPx - halfPx, widthPx: 2 * halfPx, heightPx: 2 * halfPx };
+  }
+
+  // `SOL-1` beside a mark at (100, 100) runs from 114.75 to 158.15 px across at a ratio of 2.
+  const COVERED_EYE = eyeAt(136, 100);
+
+  it("drops a label that would cover the eye, as one over the core arrow is", () => {
+    const placed = placeLabels(
+      [mark("a", 1, "SOL-1"), mark("b", 0, "SOL-2")],
+      [anchor("a", 100, 100), anchor("b", 100, 200)],
+      VIEWPORT,
+      AT_TWO,
+      null,
+      { observer: COVERED_EYE },
+    );
+
+    expect(placed.map((label) => label.id)).toEqual(["b"]);
+  });
+
+  it("keeps the label of the mark the eye stands on, which starts outside the eye's box", () => {
+    const chosen = [mark("a", 1, "SOL-1")];
+    const anchors = [anchor("a", 100, 100)];
+
+    expect(
+      placeLabels(chosen, anchors, VIEWPORT, AT_TWO, null, { observer: eyeAt(100, 100) }),
+    ).toEqual(placeLabels(chosen, anchors, VIEWPORT, AT_TWO, null));
+  });
+
+  it("puts the selection's label on its other side where it would cover the eye", () => {
+    const [label] = placeLabels(
+      [mark("a", 1, "SOL-1")],
+      [anchor("a", 100, 100)],
+      VIEWPORT,
+      AT_TWO,
+      null,
+      { pinnedIds: ["a"], observer: COVERED_EYE },
+    );
+
+    expect(label?.side).toBe("left");
+    expect((label?.leftPx ?? 0) + (label?.widthPx ?? 0)).toBeCloseTo(100 - 6 - OFFSET_AT_TWO_PX, 9);
+  });
+
+  it("draws no label for the selection where its other side is not clear either", () => {
+    // At 20 px across, the left side would be held inside the view back across the bracket.
+    const placed = placeLabels(
+      [mark("a", 1, "SOL-1")],
+      [anchor("a", 20, 100)],
+      VIEWPORT,
+      AT_TWO,
+      null,
+      { pinnedIds: ["a"], observer: eyeAt(56, 100) },
+    );
+
+    expect(placed).toEqual([]);
+  });
+
+  it("moves the destination's label off the eye to another of its places", () => {
+    const at = anchor("d", 200, 150);
+    const chosen = [mark("d", 1, "DEST")];
+    const [first] = placeLabels(chosen, [at], VIEWPORT, AT_TWO, "d", { pinnedIds: ["d"] });
+    if (first === undefined) {
+      throw new Error("the destination has no label to move");
+    }
+    const eye = eyeAt(first.leftPx + first.widthPx / 2, first.topPx + first.heightPx / 2);
+
+    const [moved] = placeLabels(chosen, [at], VIEWPORT, AT_TWO, "d", {
+      pinnedIds: ["d"],
+      observer: eye,
+    });
+
+    expect(moved).toBeDefined();
+    expect(boxGapPx(moved ?? first, eye)).toBeGreaterThan(0);
+  });
+
+  it("places every label as before where no eye is drawn", () => {
+    const chosen = [mark("a", 2, "SOL-1"), mark("b", 1, "SOL-2"), mark("c", 0, "SOL-3")];
+    const anchors = [anchor("a", 100, 100), anchor("b", 130, 108), anchor("c", 380, 200)];
+
+    expect(
+      placeLabels(chosen, anchors, VIEWPORT, AT_TWO, "b", { pinnedIds: ["a"], observer: null }),
+    ).toEqual(placeLabels(chosen, anchors, VIEWPORT, AT_TWO, "b", { pinnedIds: ["a"] }));
+  });
+});

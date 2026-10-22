@@ -690,6 +690,24 @@ summary.
   galactic axis and stale, and for the display's page across `OBSERVED` and `NOW` and for an
   answer asked observed whose rows came without their observation. Acceptance: `pnpm test`,
   `just ci`, and main's look at 1920 × 1080 and 1280 × 720.
+- **P12.T11.c The observed chart's look follow-ups** (added 2026-10-21 by main's UX decision on
+  T11's landing look; built in `lane/74-p12-t11c-compact-refusals`, recorded at the end of Risks).
+  The look found a refused entry on the compact page pushing the mode row onto the furniture in
+  `OBSERVED`, and smaller findings: `OBSERVER TO CENTRE` sharing `CENTRE` with `CENTRE CHART`, a
+  0.25 rem tick no wider than the selected joiner, a legend sample too short for two dashes, a
+  system's label over the observer's eye, `AGE`'s `AT UT` wrapping at 1920 × 1080, and the
+  `0.01-500 ly` hint. On the compact page a refusal now stands in its field's hint's place on the
+  field's row, its name hidden from sight alone, and never wraps; the command is
+  `OBSERVER TO CHART CENTRE`, on one row with the mode while a chart is on show; the tick is
+  0.5 rem and the sample 2.75 rem; marks' labels keep off the eye; `AGE` reads
+  `· AT UT <time> yr`, wide as observed with its time in a fixed slot; and the hint reads
+  `0.01 to 500 ly`; with the guide's sentences on angles, grouping, the observer's mark, `AT` and
+  the command. Files: under `apps/hyperion/src/renderer/src/`: `displays/galaxy/`'s
+  `ChartControls.tsx`, `SymbolLegend.tsx` and `SystemReadout.tsx`, `spatial/`'s `drawList.ts`,
+  `labels.ts` and `SpatialView.tsx`, `styles.css`, tests; the guide. Tests: Vitest for both
+  refusals at once on a compact and a stacked page, the stylesheet's compact rules, the command,
+  the tick, the sample's dashes, the labels about the eye, `AGE` in both modes and the hint.
+  Acceptance: `pnpm test`, `just ci`, and main's look at 1920 × 1080 and 1280 × 720.
 
 ### P12.T12 Client: alert list and chart marks
 
@@ -1407,10 +1425,10 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     observed mode are the primaries when the light left, and does not name the mode; it could carry
     the chart's `MODE` reading. _Closed by P12.T11.b._ (3) The legend's dashed sample relies on
     `stroke-dasharray` at `--line-scale` in a non-scaling-stroke SVG, which only the look at
-    landing can check. (4) The legend names no selected joiner (`--text`, 2 px), as the orbit
-    map's does its selected orbit. (5) `OBSERVER TO CENTRE` shares `CENTRE` with `CENTRE CHART`;
-    `OBSERVE FROM CENTRE` was weighed and left, since it reads as a choice of the mode; the
-    nomenclature row decides.
+    landing can check. _Closed by P12.T11.c._ (4) The legend names no selected joiner (`--text`,
+    2 px), as the orbit map's does its selected orbit. (5) `OBSERVER TO CENTRE` shares `CENTRE`
+    with `CENTRE CHART`; `OBSERVE FROM CENTRE` was weighed and left, since it reads as a choice of
+    the mode; the nomenclature row decides. _Closed by P12.T11.c._
 - **The observed brief reads the summary's primary (P12.T2 fix, lane `observed-class`,
   2026-10-21, at `GENERATOR_VERSION` 22).** P12.T11's landing look (look-72) found one system at
   one emitted instant reading two classes on one screen: GDG 0E0V00 E-141 of LOOK72
@@ -1531,3 +1549,105 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     under its plot, which the row could name (UX review; the guide is main's). (4) The page's
     existing counts keep no room for their `S` (P06.T37), so a stale answer moves them while the
     new line keeps its place: the page now behaves two ways (UX review).
+- **P12.T11.c as built (`lane/74-p12-t11c-compact-refusals`, 2026-10-22, at `GENERATOR_VERSION`
+  22).** Client and guide only: no Rust, protocol, binding, server, sim, GPU or golden change, and
+  nothing generated moves. P06.T24.c was not on `origin/rendering-and-planets` at the lane's last
+  merge, so the compact comment's figures are look-72's and `LocalChartPanel.tsx`'s doc is
+  unchanged. Closes T11's deferred findings (3) and (5).
+  - _Names._ Under `apps/hyperion/src/renderer/src/`: `spatial/drawList.ts` exports
+    `SEGMENT_TICK_REM` (0.5, private before) and
+    `observerBoxPx(scene, camera, viewport): ScreenBoxPx | null`, the eye's 1 rem square where it
+    is drawn, else `null`, which shares the private `observerCentre` with `observerOps`.
+    `spatial/labels.ts`: `LabelSurroundings.observer` (`BoxPx | null`, optional), which
+    `SpatialView` fills. `ChartControls.tsx`: `MOVE_OBSERVER_LABEL` is `OBSERVER TO CHART CENTRE`;
+    the private `refusalPart`, through `StatusText`'s `renderPart`; the classes
+    `chart-controls__field--refused`, `chart-controls__error-name` and
+    `chart-controls__modes--reason`. `SystemReadout.tsx`: the private `AtTime`. `styles.css`: the
+    compact rules for the three classes, after the choices' bottom margin, and
+    `.system-readout__beside .system-readout__value`, its stale form and `.system-readout__whole`.
+  - _A2.1, the refusals._ As briefed. The field is marked `--refused` while its refusal stands,
+    and the compact page hides its hint then; the refusal takes `flex-basis: auto`, no margin and
+    `nowrap`, and its name, with its trailing space, the `.visually-hidden` pattern, whose
+    declarations a guard test holds the rule to. "Never wraps" rests on the row's room, since the
+    field keeps `flex-wrap: wrap`: reckoned, the refusals end near 775 and 801 px of the page,
+    inside the column that ends at 831 (the UX review reckons 461 and 499 px of their rows, the
+    same). The stacked page is unchanged.
+  - _A2.2, the command._ The 0.5 rem gap, and `nowrap` with `flex: none` on the row's parts while
+    the row is not marked `--reason`, which it is only with the link up and a `NO CHART` reason on
+    show. Reckoned, the row ends some 5–8 px inside the column at 1280 × 720 (the lane 6–8, the
+    UX review 5), room for the 3 px focus ring, so the 0.25 rem padding fallback is not built and
+    `.control` is untouched. Unshrunk, a row the look finds short runs past the column rather than
+    wraps onto the furniture.
+  - _A2.3 and A2.4, the tick and the sample._ As briefed: the sample is 2.75 rem, 44 units, the
+    joiner `M 42 4 H 0` drawn from the tick, (6 + 4 + 6) px × 2.56 = 40.96 of its 42; the tick 8
+    units, 0.5 rem. The compact legend keeps six lines in both modes by the UX review's reckoning,
+    the observed last line ending near 768 px.
+  - _Deviation: the eye is its own surrounding._ The eye's box is `LabelSurroundings.observer`
+    rather than one of `obstacles`, and `placeLabels` adds it to the obstacles for the destination's
+    label and the rest, since furniture never moves the selection's label and the eye must (its
+    other side, or none, as where it yields to the destination's).
+  - _Deviation: the eye at a system's point._ A label beside the mark the eye stands on starts
+    `labelOffsetPx` out, the mark's radius, 0.5 rem and 0.75 px + 5δ, outside the eye's 0.5 rem
+    half-width, so it never covers the eye and is kept, the selection's too: the brief's tests
+    "the observer at an unselected system's point drops that system's label" and "at the selected
+    system's point puts its label on its other side, or none" contradict its rule that a label that
+    would cover the eye is dropped. The tests put the eye under the label instead, look-72's case
+    (a system's label at the centre), and one pins that the label of the mark the eye stands on is
+    kept. Only a label held inside the view back across its own mark covers the eye there.
+  - _A2.6, `AGE`._ `· AT UT <time> yr` in both modes, the time's figures a value's, in `--text`
+    and untracked, muted with a stale readout, as `EMITTED UT`'s are and as the terrain readout's
+    `· AT 243 K` sets its figure (UX review); its words and unit stay muted. `.readout dd` already
+    set the figures in B612 Mono, so only their tracking and colour changed. As observed the
+    reading is wide and the time stands in `EMITTED_WIDTH_CH`'s 11 ch slot. `UT <time> yr` is kept
+    whole (`nowrap`) in both modes and `· AT` is not, so that the readings' one column at 1280 × 720
+    breaks the reading after `AT` rather than run it 19–34 px past its edge (the UX review's
+    must-fix, against a first build that kept `· AT UT <time> yr` whole); in the wide row at
+    1920 × 1080 it stands on one line.
+  - _A2.7 and A2.8._ As briefed, `CHART TIME`'s `±1000 yr` kept. The guide's sentences are written
+    as given but one: the angle bullet's last sentence names the picoarcsecond too, "The
+    milliarcsecond, microarcsecond and picoarcsecond, which Table 8's note gives for astronomy, are
+    not used", since Table 8's note gives all three (SI Brochure, 9th edition, V4.01 (2026), note
+    (a), p. 141; note (b) in V1.08 to V3.02). Table 8's degree, minute and second, and §5.4.3's
+    "no space is left between the numerical value and the unit symbol" for `°`, `′` and `″`, held
+    as written (science check).
+  - _Left as written._ T11's record keeps `OBSERVER TO CENTRE` and plan 05's records `0.01-500 ly`:
+    they say what was built then.
+  - _Tests (44 new, as run)._ `displays/galaxy/ChartControls.test.tsx` (7: the hint in words; each
+    field's refusal in its own field while both stand, described by its own; each name, with its
+    trailing space, in its element; the same refusals and descriptions inside a compact and a
+    stacked page, which pins that the markup does not depend on the page; the refused mark dropped
+    with the refusal); `ChartControls.modes.test.tsx` (4: the row's `--reason` mark with both
+    reasons, with the command's alone, with a chart on show and with the link down);
+    `LocalChartPanel.compact.test.tsx` (8 stylesheet guards: the refusal's row, the hint giving
+    way, the hidden name, the stacked rules; the row's gap, its `nowrap` and `flex: none`, its
+    wrapping reasons, `.control` untouched); `SymbolLegend.observed.test.tsx` (4: the dash, two
+    dashes and the gap at 2.56, a dash meeting the tick, the tick's 0.5 rem);
+    `spatial/drawList.segments.test.ts` (3: `observerBoxPx` inside the view, in `now` and outside
+    it); `spatial/labels.test.ts` (6: a label over the eye dropped, the label beside the mark the
+    eye stands on kept, the selection's other side, the selection's none, the destination's next
+    place, and no eye placing every label as before); `spatial/SpatialView.test.tsx` (4: dropped,
+    the selection's other side, `now`, the observer outside the view);
+    `displays/galaxy/SystemReadout.observed.test.tsx` (8: wide as observed, the 11 ch slot, the
+    time whole with its label and unit in both modes, the stylesheet's `nowrap`, `--text` and
+    untracked, stale muted, `now`'s slot). Updated for the words: the tick's ends (0.5 rem), the
+    command's name in the mode and integration tests, and `· AT UT` in four readout tests and the
+    integration test, which now reads `AGE` by its term. Every other existing test passes
+    unchanged.
+  - _Deferred findings (2026-10-13 rule)._ (1) `CHART TIME`'s hint `±1000 yr` sets a limit with
+    the sign the guide's `±` row keeps for an Estimated value's uncertainty; `-1000 to 1000 yr`,
+    its refusal's words, would follow § Numbers as `DRIVE RANGE`'s now does (UX review; the brief
+    kept it). (2) In `NOW` the time after `AT` has no fixed slot, so `yr` moves as `CHART TIME`
+    changes; an 8 ch slot would make the reading as long as its longest, which the UX review
+    reckons wraps after `AT` in its half row at 1920 × 1080; main's look measures. (3) The guide's
+    grouping bullet credits the thin space to the SI Brochure's §5.4.4, which says "a space"; the
+    thin, fixed space is NIST SP 811's (§10.5.3; science check). (4) The guide's observer bullet
+    says marks' labels keep off the eye "as they keep off the core arrow", but the selection's
+    label, which the core arrow never moves, takes its other side or none (plan-conformance
+    review). (5) The beside's words, `AT UT`, `yr` and `AGO`, inherit `.readout dd`'s B612 Mono,
+    where § Typography gives labels B612 (UX review; before this task). (6) The guide's
+    `1/8,000 s` (its exposure row) groups a four-digit whole part, which the clearer grouping rule
+    now rules out (UX review; before this task). (7) The eye standing on a centred system's mark
+    is left as both true positions, the eye drawn after every mark; main's look judges whether the
+    two read as one. (8) Putting the eye's box on the `DrawList` would project the observer once
+    (TypeScript review); left, since the smoke harness's and the HR projection's draw lists, outside
+    this lane, build the type, and both paths already share `observerCentre`.

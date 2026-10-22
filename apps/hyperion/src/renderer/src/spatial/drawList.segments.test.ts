@@ -9,6 +9,7 @@ import {
   type DrawOp,
   type LineOp,
   OBSERVER_MARK_ID,
+  observerBoxPx,
   SEGMENT_DASH_PX,
 } from "./drawList";
 import type { PointMark, SegmentMark, SpatialScene } from "./marks";
@@ -195,9 +196,9 @@ describe("a scene's segments (plan 12, P12.T11)", () => {
 
     expectPoint(joiner?.from, 400 + radiusPx, 300);
     expectPoint(joiner?.to, 420, 300);
-    // A quarter rem long, square to the joiner on the screen, and centred on its end.
-    expectPoint(tick?.from, 420, 302);
-    expectPoint(tick?.to, 420, 298);
+    // Half a rem long, square to the joiner on the screen, and centred on its end (P12.T11.c).
+    expectPoint(tick?.from, 420, 304);
+    expectPoint(tick?.to, 420, 296);
     expect(tick).not.toHaveProperty("dashPx");
   });
 
@@ -336,5 +337,29 @@ describe("a scene's observer (plan 12, P12.T11)", () => {
 
     expect(addedOps(observed(local(0, 100, 0)))).toEqual([]);
     expect(list.curveLabels.some((label) => label.key === "observer")).toBe(false);
+  });
+});
+
+describe("the observer's eye's box, which the marks' labels keep off (plan 12, P12.T11.c)", () => {
+  const observed = (position: Vec3): SpatialScene =>
+    sceneOf({ observer: { position, label: "OBSERVER" } });
+
+  it("is the 1 rem square about the eye where it is drawn", () => {
+    const { xPx, yPx } = onScreen(10, -4);
+
+    expect(observerBoxPx(observed(local(10, -4, 0)), TOP, VIEWPORT)).toEqual({
+      leftPx: xPx - VIEWPORT.remPx / 2,
+      topPx: yPx - VIEWPORT.remPx / 2,
+      widthPx: VIEWPORT.remPx,
+      heightPx: VIEWPORT.remPx,
+    });
+  });
+
+  it("is none in now, which has no observer", () => {
+    expect(observerBoxPx(sceneOf({}), TOP, VIEWPORT)).toBeNull();
+  });
+
+  it("is none for an observer outside the view, where no eye is drawn", () => {
+    expect(observerBoxPx(observed(local(0, 100, 0)), TOP, VIEWPORT)).toBeNull();
   });
 });

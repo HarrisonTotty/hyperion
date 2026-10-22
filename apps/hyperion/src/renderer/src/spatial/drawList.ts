@@ -18,7 +18,7 @@ import {
   type SymbolShape,
 } from "./marks";
 import { gridLines, ringPolyline } from "./plane";
-import { SIZE_CLASS_REM, SYMBOL_STROKE_PX } from "./symbols";
+import { type ScreenBoxPx, SIZE_CLASS_REM, squareBoxPx, SYMBOL_STROKE_PX } from "./symbols";
 import { type LocalFrame, planeFrame } from "../geometry/frame";
 import { add, dot, norm, scale, sub, type Vec3 } from "../geometry/vec3";
 
@@ -837,8 +837,17 @@ function markCurveLabels(
  */
 export const SEGMENT_DASH_PX: DashPx = { onPx: 6, offPx: 4 };
 
-/** The length of the tick across a segment's `to` end, in `rem` (§ Accessibility: sizes in rem). */
-const SEGMENT_TICK_REM = 0.25;
+/**
+ * The length of the tick across a segment's `to` end, in `rem` (§ Accessibility: sizes in rem).
+ *
+ * @remarks
+ * Half a rem, so that it reads as a bar across the joiner rather than a dot on its end: drawn at
+ * the line scale, the selected system's 2 px joiner is 4 CSS px wide at a device-pixel ratio of 1,
+ * and a 0.25 rem tick there was a 4 × 4 px square (P12.T11.c, from P12.T11's landing look). A
+ * mark sized in `rem` is not scaled by the line scale, so the tick is 8 px long at 100% at every
+ * ratio, and the legend's sample draws it at this length.
+ */
+export const SEGMENT_TICK_REM = 0.5;
 
 /**
  * The `markId` of the observer's stalk, so that the labels keep clear of it as they do of a mark's
@@ -1035,6 +1044,43 @@ function eyePoints(centre: ScreenPoint, halfWidthPx: number): ScreenPoint[] {
 }
 
 /**
+ * Where the observer's eye stands on the screen, CSS px from the view's top left, where the scene
+ * has an observer and it lies inside the view, the only place it is drawn; `null` elsewhere.
+ */
+function observerCentre(
+  scene: SpatialScene,
+  basis: ViewBasis,
+  camera: Camera,
+  viewport: Viewport,
+): ScreenPoint | null {
+  if (scene.observer === undefined) {
+    return null;
+  }
+  const at = project(scene.observer.position, basis, camera, viewport);
+  const inside =
+    at.xPx >= 0 && at.xPx <= viewport.widthPx && at.yPx >= 0 && at.yPx <= viewport.heightPx;
+  return inside ? screen(at) : null;
+}
+
+/**
+ * The observer's eye's box, 1 rem square about it, CSS px from the view's top left, where the eye
+ * is drawn; `null` where it is not, as in `now` or with the observer outside the view.
+ *
+ * @remarks
+ * The marks' labels keep off it, as they keep off the core arrow (plan 12, P12.T11.c; the
+ * `observer` of `placeLabels`' surroundings): with the observer at the chart's centre, as the first
+ * `OBSERVED` puts it, a system's label there covered the eye.
+ */
+export function observerBoxPx(
+  scene: SpatialScene,
+  camera: Camera,
+  viewport: Viewport,
+): ScreenBoxPx | null {
+  const centre = observerCentre(scene, viewBasis(scene.frame, camera), camera, viewport);
+  return centre === null ? null : squareBoxPx(centre, OBSERVER_HALF_WIDTH_REM * viewport.remPx);
+}
+
+/**
  * The observer's stalk and mark, and its label, where it lies inside the view (plan 12, P12.T11):
  * the stalk to its foot on the reference plane in `--text`, as a mark's is, and the open eye at a
  * mark's outline. Neither gives an anchor, so the observer is never picked.
@@ -1046,18 +1092,12 @@ function observerOps(
   viewport: Viewport,
 ): { readonly ops: ReadonlyArray<DrawOp>; readonly labels: ReadonlyArray<CurveLabel> } {
   const observer = scene.observer;
-  if (observer === undefined) {
-    return { ops: [], labels: [] };
-  }
-  const at = project(observer.position, basis, camera, viewport);
-  const inside =
-    at.xPx >= 0 && at.xPx <= viewport.widthPx && at.yPx >= 0 && at.yPx <= viewport.heightPx;
-  if (!inside) {
+  const centre = observerCentre(scene, basis, camera, viewport);
+  if (observer === undefined || centre === null) {
     return { ops: [], labels: [] };
   }
   const north = scene.frame.north;
   const foot = sub(observer.position, scale(north, dot(observer.position, north)));
-  const centre = screen(at);
   const outerHalfWidthPx = OBSERVER_HALF_WIDTH_REM * viewport.remPx;
   return {
     ops: [

@@ -354,7 +354,8 @@ function inView(anchor: Anchor, viewport: Viewport): boolean {
 export interface LabelSurroundings {
   /**
    * Marks whose labels are never dropped for a neighbour, furniture, other text or a mark out of
-   * view: the selection and the destination. The selection's still yields to the destination's.
+   * view: the selection and the destination. The selection's still yields to the destination's and
+   * keeps off the observer's eye (`observer`).
    */
   readonly pinnedIds?: ReadonlyArray<string>;
   /** Furniture over the view that a label must not cover: the core arrow's mark. */
@@ -371,6 +372,11 @@ export interface LabelSurroundings {
    * nothing is selected.
    */
   readonly unselectedIds?: ReadonlySet<string>;
+  /**
+   * The observer's eye's 1 rem box where it is drawn (`observerBoxPx`; plan 12, P12.T11.c), which
+   * every mark's label keeps off, the selection's included; `null` or absent where it is not drawn.
+   */
+  readonly observer?: BoxPx | null;
 }
 
 /**
@@ -383,7 +389,7 @@ export interface LabelSurroundings {
  * (decision-r07-quality-and-destination, addendum D, D5). One whose box overlaps furniture, or
  * stands within 0.5 rem of a label already placed or of other text over the view (D4), or whose
  * mark is out of view, is dropped. The selection's label is never dropped for those (`pinnedIds`),
- * but yields to the destination's (below).
+ * but yields to the destination's and keeps off the observer's eye (below).
  *
  * A label's text starts 0.25 rem outside the outer edge of the selection's bracket about its mark,
  * as on every display ({@link labelOffsetPx}; decision-r07-quality-and-destination, Q3 and addendum
@@ -407,10 +413,17 @@ export interface LabelSurroundings {
  * is dropped, so that no other name stands nearer the destination's than its own, or runs through
  * its chevrons. The labels are returned in the order given.
  *
+ * In observed mode the observer's eye (`observer`) is furniture to every label, the selection's
+ * too (plan 12, P12.T11.c): a label over it is dropped, as one over the core arrow is, and the
+ * destination's takes the next of its places; the selection's takes its other side where that is
+ * clear, and where it is not, it is not drawn, as where it yields to the destination's. A label
+ * beside the mark the eye stands on starts outside the eye's box, so it is kept: both are true
+ * positions, and the eye is drawn after every mark.
+ *
  * @param reticles - The marks' strokes at the display's ratio, CSS px (`reticleStrokesCssPx`).
  * @param destinationId - The destination, whose label stands above or below its chevrons, or `null`.
- * @param surroundings - The pinned marks, the furniture and the other text the labels are placed
- *   among, and the labels chosen with no selection; none of them when absent.
+ * @param surroundings - The pinned marks, the furniture, the observer's eye and the other text the
+ *   labels are placed among, and the labels chosen with no selection; none of them when absent.
  */
 export function placeLabels(
   chosen: ReadonlyArray<PointMark>,
@@ -420,7 +433,17 @@ export function placeLabels(
   destinationId: string | null,
   surroundings: LabelSurroundings = {},
 ): ReadonlyArray<PlacedLabel> {
-  const { pinnedIds = [], obstacles = [], texts = [], unselectedIds } = surroundings;
+  const {
+    pinnedIds = [],
+    obstacles: furniture = [],
+    texts = [],
+    unselectedIds,
+    observer = null,
+  } = surroundings;
+  // The eye is furniture to every label; the selection's, which furniture does not move, keeps off
+  // it alone (`coversEye`).
+  const obstacles = observer === null ? furniture : [...furniture, observer];
+  const coversEye = (label: BoxPx): boolean => observer !== null && overlaps(label, observer);
   const anchorOf = new Map(anchors.map((anchor) => [anchor.id, anchor]));
   const isInView = (id: string): boolean => {
     const anchor = anchorOf.get(id);
@@ -482,14 +505,17 @@ export function placeLabels(
   if (destination !== null) {
     placed.set(destination.id, destination);
   }
-  // The selection's label, which yields to the destination's: its other side, or none.
+  // Whether the selection's label must leave its place: for the destination's, or off the eye.
+  const yields = (label: BoxPx): boolean => nearDestination(label) || coversEye(label);
+  // The selection's label, which yields to the destination's and keeps off the observer's eye:
+  // its other side, or none.
   for (const mark of chosen) {
     const anchor = anchorOf.get(mark.id);
     if (anchor === undefined || mark.id === destinationId || !pinnedIds.includes(mark.id)) {
       continue;
     }
     const label = lineLabels.get(mark.id) ?? lineLabel(mark, anchor, viewport, reticles);
-    if (!nearDestination(label)) {
+    if (!yields(label)) {
       placed.set(mark.id, label);
       continue;
     }
@@ -502,7 +528,7 @@ export function placeLabels(
     );
     // Its other side only where it stands there in full, not held inside the view back across its
     // own bracket (the UX review's must-fix).
-    if (!nearDestination(other) && besideItsMark(other, anchor, viewport, reticles)) {
+    if (!yields(other) && besideItsMark(other, anchor, viewport, reticles)) {
       placed.set(mark.id, other);
     }
   }

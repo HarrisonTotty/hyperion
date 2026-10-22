@@ -636,9 +636,10 @@ describe("the GALAXY display, end to end", { timeout: 300_000 }, () => {
       universeTimeFromYears(CHART_TIME_YR),
     );
     expect(chartReading("UT")).toBe("+12.50 yr");
-    expect(
-      within(screen.getByRole("status", { name: "Selected system" })).getByText("AT UT +12.50 yr"),
-    ).toBeInTheDocument();
+    const age = within(screen.getByRole("status", { name: "Selected system" })).getByText("AGE", {
+      selector: "dt",
+    }).nextElementSibling;
+    expect(age?.textContent).toMatch(/· AT UT \+12\.50 yr$/u);
   });
 
   it("keeps the chart, its camera and its selection across a visit to LINK", async () => {
@@ -835,10 +836,12 @@ describe(
       );
     });
 
-    it("moves the observer to the chart's centre on OBSERVER TO CENTRE, and asks from there", async () => {
+    it("moves the observer to the chart's centre on OBSERVER TO CHART CENTRE, and asks from there", async () => {
       const { user, socket } = await chartFarFromTheObserver();
 
-      await user.click(within(chartPage()).getByRole("button", { name: "OBSERVER TO CENTRE" }));
+      await user.click(
+        within(chartPage()).getByRole("button", { name: "OBSERVER TO CHART CENTRE" }),
+      );
 
       expect(socket.requestsOfKind("systems_in_range").at(-1)?.body).toEqual(
         aRangeRequest({

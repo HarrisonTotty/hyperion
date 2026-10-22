@@ -145,6 +145,50 @@ function estimatedIf(estimated: boolean, text: string | null): string | null {
   return text === null || !estimated ? text : `~${text}`;
 }
 
+interface AtTimeProps {
+  /** The universe time the age is given at, in years from the epoch. */
+  readonly timeYr: number;
+  /** Whether the age is read as observed, in the readout's wide slot. */
+  readonly observed: boolean;
+}
+
+/**
+ * The universe time an age is given at, after a middle dot, as a reading's parts are joined (the
+ * guide's `AT`): `· AT UT +0.00 yr`, the chart time, or the emitted time for a system read as
+ * observed (plan 12, P12.T11.c).
+ *
+ * @remarks
+ * Its figures are a value's, in `--text` and untracked, its words and unit muted beside them. The
+ * time keeps its system's label and its unit on one line, `UT -20,012.75 yr`, so that a narrow
+ * column breaks the reading after `AT` rather than run it past its edge. Read as observed, the age
+ * takes the readout's row and the time stands right-aligned in {@link EMITTED_WIDTH_CH}'s slot,
+ * which holds any emitted time to the source horizon's, `-229,000.00` among them, so that the
+ * reading keeps one width and stands on one line wherever the row holds it (§ Numbers: a field has
+ * a fixed width sized for its longest value).
+ */
+function AtTime({ timeYr, observed }: AtTimeProps) {
+  const time = formatUniverseTimeYr(timeYr);
+  return (
+    <>
+      · AT{" "}
+      <span className="system-readout__whole">
+        {TIME_SYSTEM_LABEL}{" "}
+        {observed ? (
+          <span
+            className="system-readout__value system-readout__value--fixed"
+            style={{ minWidth: `${EMITTED_WIDTH_CH}ch` }}
+          >
+            {time}
+          </span>
+        ) : (
+          <span className="system-readout__value">{time}</span>
+        )}{" "}
+        yr
+      </span>
+    </>
+  );
+}
+
 /** The age reading: the age then, `NOT YET FORMED` before the system formed, or the age now. */
 function ageReading(system: ChartSystem | null): {
   readonly value: string | null;
@@ -178,7 +222,8 @@ function ageReading(system: ChartSystem | null): {
  * `GALACTIC` frame, whose coordinates the guide names in those words, and stand under that
  * heading, as the guide groups them, after the system's own readings; the angle is missing on the
  * galactic axis, where it is undefined. The age is the age at the chart time, which is given beside
- * it, since a query at another time gives another age. Whether the system is within the drive
+ * it after a middle dot ({@link AtTime}: `AGE 22.7 Myr · AT UT +0.00 yr`), since a query at another
+ * time gives another age. Whether the system is within the drive
  * range is in words, never colour alone. With nothing selected every value is an em dash.
  *
  * `VEL` is the system's speed at the epoch, and the next list gives its velocity's `COREWARD`,
@@ -212,7 +257,8 @@ function ageReading(system: ChartSystem | null): {
  * above whatever was asked. Then the system's `LIGHT AGE`, in
  * `yr`, and the time that light left it, `EMITTED UT`, follow its ID, each in a slot that holds the
  * oldest light of the source horizon; its `AGE` is its age then, an Observed value, given at the
- * emitted time, or `NOT YET FORMED` before it formed (the port ruling, §6.2); its present position,
+ * emitted time, or `NOT YET FORMED` before it formed (the port ruling, §6.2), on a row of its own,
+ * the time in a slot that holds the earliest (P12.T11.c); its present position,
  * `DIST`, the offsets and `RADIUS`, `ANGLE` and `HEIGHT`, is Estimated, `~`, with the stated
  * `CURVATURE BOUND` on where it appears after them, in the distance ladder and, after a middle
  * dot, in `″`; and `VEL`
@@ -254,7 +300,7 @@ export function SystemReadout({
   const onAxis = galactic !== null && !(galactic.radiusLy > AXIS_TOLERANCE_LY);
   const age = ageReading(system);
   // The age is given at the time it describes: when the light left, as observed.
-  const atTime = `AT ${TIME_SYSTEM_LABEL} ${formatUniverseTimeYr(observation?.emittedYr ?? timeYr)} yr`;
+  const atTime = <AtTime timeYr={observation?.emittedYr ?? timeYr} observed={observed} />;
   const formed = stars !== null && stars.formed ? stars : null;
   const primary = formed?.hosts[0] ?? null;
   const initialMass =
@@ -391,7 +437,8 @@ export function SystemReadout({
               value={age.value}
               unit={age.unit}
               beside={atTime}
-              wide={!age.formed}
+              // As observed it takes the row, so that its emitted time never wraps it (P12.T11.c).
+              wide={observed || !age.formed}
             />
             <Reading
               label="POPULATION"

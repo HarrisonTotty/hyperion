@@ -78,3 +78,71 @@ describe("the compact LOCAL CHART page's room", () => {
     expect(entry?.children).toHaveLength(2);
   });
 });
+
+describe("the compact LOCAL CHART page's refusals (plan 12, P12.T11.c)", () => {
+  it("stands a refusal on its field's row, taking no line of its own and never wrapping", () => {
+    const refusal = stylesheetRule(".local-chart--compact .chart-controls__error");
+
+    expect(refusal).toMatch(/flex-basis: auto;/u);
+    expect(refusal).toMatch(/margin: 0;/u);
+    expect(refusal).toMatch(/white-space: nowrap;/u);
+  });
+
+  it("gives the hint way while a refusal stands, with display none, which the description still reaches", () => {
+    expect(
+      stylesheetRule(
+        ".local-chart--compact .chart-controls__field--refused > .chart-controls__hint",
+      ),
+    ).toMatch(/display: none;/u);
+  });
+
+  it("hides the refusal's field name from sight alone, as .visually-hidden does", () => {
+    const hidden = stylesheetRule(".local-chart--compact .chart-controls__error-name");
+
+    for (const declaration of stylesheetRule(".visually-hidden")
+      .trim()
+      .split(/\s*\n\s*/u)) {
+      expect(hidden).toContain(declaration);
+    }
+    expect(hidden).not.toMatch(/display: none|visibility: hidden/u);
+  });
+
+  it("keeps the stacked page's refusal on a line of its own under its field", () => {
+    expect(stylesheetRule(".chart-controls__error")).toMatch(/flex-basis: 100%;/u);
+    expect(stylesheetRule(".chart-controls__hint")).not.toMatch(/display:/u);
+  });
+});
+
+describe("the compact LOCAL CHART page's mode row (plan 12, P12.T11.c)", () => {
+  it("sets the mode and the command 0.5rem apart, a field's own gap", () => {
+    expect(stylesheetRule(".local-chart--compact .chart-controls__modes")).toMatch(
+      /gap: 0 0\.5rem;/u,
+    );
+    expect(stylesheetRule(".chart-controls__field")).toMatch(/gap: 0 0\.5rem;/u);
+  });
+
+  it("keeps the row on one line, its parts unshrunk, while no held-back reason of its own stands", () => {
+    expect(
+      stylesheetRule(
+        ".local-chart--compact .chart-controls__modes:not(.chart-controls__modes--reason)",
+      ),
+    ).toMatch(/flex-wrap: nowrap;/u);
+    expect(
+      stylesheetRule(
+        ".local-chart--compact .chart-controls__modes:not(.chart-controls__modes--reason) > *",
+      ),
+    ).toMatch(/flex: none;/u);
+  });
+
+  it("lets the row wrap its reasons under it with no chart on show, as the stacked page does", () => {
+    expect(stylesheetRule(".chart-controls__modes")).toMatch(/flex-wrap: wrap;/u);
+    expect(stylesheetRule(".local-chart--compact .chart-controls__modes")).not.toMatch(
+      /flex-wrap/u,
+    );
+  });
+
+  it("leaves the controls' own padding and letter spacing alone, every station's", () => {
+    expect(stylesheetRule(".control")).toMatch(/padding: 0 0\.5rem;/u);
+    expect(stylesheetRule(".control")).toMatch(/letter-spacing: 0\.15em;/u);
+  });
+});
