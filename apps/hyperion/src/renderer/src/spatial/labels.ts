@@ -392,18 +392,19 @@ function inView(anchor: Anchor, viewport: Viewport): boolean {
 /** What a spatial display's mark labels are placed among, besides the marks ({@link placeLabels}). */
 export interface LabelSurroundings {
   /**
-   * Marks whose labels are never dropped for a neighbour, furniture, other text or a mark out of
-   * view: the selection and the destination. The selection's still yields to the destination's,
-   * keeps off the observer's eye (`observer`) and is never held back across its own mark or
-   * bracket (plan 12, P12.T11.e).
+   * Marks whose labels are never dropped for a neighbour, furniture or a mark out of view: the
+   * selection and the destination. The selection's still yields to the destination's, keeps off
+   * the observer's eye (`observer`) and off the other text over the view (`texts`), which it never
+   * overlaps, and is never held back across its own mark or bracket (plan 12, P12.T11.e).
    */
   readonly pinnedIds?: ReadonlyArray<string>;
   /** Furniture over the view that a label must not cover: the core arrow's mark. */
   readonly obstacles?: ReadonlyArray<BoxPx>;
   /**
    * Other text over the view, which a label that may be dropped stands 0.5 rem from, as from
-   * another mark's label (decision-r07-quality-and-destination, addendum D, D4; R07.T16.j): the
-   * triad's footprint, the core arrow's label and the curve labels.
+   * another mark's label (decision-r07-quality-and-destination, addendum D, D4; R07.T16.j), and
+   * which the selection's label never overlaps (plan 12, P12.T11.e): the triad's footprint, the
+   * core arrow's label and the curve labels.
    */
   readonly texts?: ReadonlyArray<BoxPx>;
   /**
@@ -435,7 +436,7 @@ export interface LabelSurroundings {
  * just past the top or bottom edge; else it is not drawn either. One whose box overlaps furniture,
  * or stands within 0.5 rem of a label already placed or of other text over the view (D4), or whose
  * mark is out of view, is dropped. The selection's label is never dropped for those (`pinnedIds`),
- * but yields to the destination's and keeps off the observer's eye (below).
+ * but yields to the destination's and keeps off the observer's eye and the other text (below).
  *
  * A label's text starts 0.25 rem outside the outer edge of the selection's bracket about its mark,
  * as on every display ({@link labelOffsetPx}; decision-r07-quality-and-destination, Q3 and addendum
@@ -455,9 +456,11 @@ export interface LabelSurroundings {
  * of those, only the labels a chart with no selection draws, none whose mark is out of view and
  * none that would be held back across its own mark or bracket (P12.T11.e). The selection's label
  * comes next. Where it stands within 0.5 rem of the destination's label or 0.25 rem of its chevron
- * set, or would be held back across its own mark or bracket, it takes its other side, and where
+ * set, overlaps other text over the view (`texts`: the triad's, the core arrow's label, a curve
+ * label), or would be held back across its own mark or bracket, it takes its other side, and where
  * that is not clear either, or not beside its mark, it is not drawn: the bracket, the readout and
- * the list still name the selection. The rest follow in order. A lesser label within 0.5 rem of
+ * the list still name the selection (P12.T11.e: text over text is a wrong picture, so the
+ * selection's label yields to the other text where a lesser label is dropped 0.5 rem from it). The rest follow in order. A lesser label within 0.5 rem of
  * the destination's, or within 0.25 rem of its chevron set, is dropped, so that no other name
  * stands nearer the destination's than its own, or runs through its chevrons. The labels are
  * returned in the order given.
@@ -490,9 +493,11 @@ export function placeLabels(
     observer = null,
   } = surroundings;
   // The eye is furniture to every label; the selection's, which furniture does not move, keeps off
-  // it alone (`coversEye`).
+  // it alone (`coversEye`), and off the other text over the view, so that no text stands over
+  // another (`coversText`; P12.T11.e).
   const obstacles = observer === null ? furniture : [...furniture, observer];
   const coversEye = (label: BoxPx): boolean => observer !== null && overlaps(label, observer);
+  const coversText = (label: BoxPx): boolean => texts.some((other) => overlaps(label, other));
   const anchorOf = new Map(anchors.map((anchor) => [anchor.id, anchor]));
   const isInView = (id: string): boolean => {
     const anchor = anchorOf.get(id);
@@ -565,10 +570,12 @@ export function placeLabels(
   if (destination !== null) {
     placed.set(destination.id, destination);
   }
-  // Whether the selection's label must leave its place: for the destination's, or off the eye.
-  const yields = (label: BoxPx): boolean => nearDestination(label) || coversEye(label);
-  // The selection's label, which yields to the destination's and keeps off the observer's eye, and
-  // is never held back across its own mark or bracket: its other side, or none.
+  // Whether the selection's label must leave its place: for the destination's, off the eye, or off
+  // the other text over the view.
+  const yields = (label: BoxPx): boolean =>
+    nearDestination(label) || coversEye(label) || coversText(label);
+  // The selection's label, which yields to the destination's and keeps off the observer's eye and
+  // the other text, and is never held back across its own mark or bracket: its other side, or none.
   for (const mark of chosen) {
     const anchor = anchorOf.get(mark.id);
     if (anchor === undefined || mark.id === destinationId || !pinnedIds.includes(mark.id)) {

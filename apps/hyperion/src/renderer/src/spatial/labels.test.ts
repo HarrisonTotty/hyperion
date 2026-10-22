@@ -1199,3 +1199,57 @@ describe("placeLabels on the compact chart's 256 px stage (plan 12, P12.T11.e)",
     ]);
   });
 });
+
+/** A text box over the view from its edges, as `SpatialView` gives `texts`. */
+function textBox(leftPx: number, topPx: number, rightPx: number, bottomPx: number): BoxPx {
+  return { leftPx, topPx, widthPx: rightPx - leftPx, heightPx: bottomPx - topPx };
+}
+
+describe("placeLabels: the selection's label off the other text over the view (plan 12, P12.T11.e)", () => {
+  it("draws no label for a selection whose one side lies over the core arrow's label, on the compact stage at 150%", () => {
+    // Main's landing look at #79 to #81, 1920 x 1080 at 150%, OBSERVED: the 256.67 x 232 px stage,
+    // `GDG 75DY08 A-3` selected at (145.5, 47.7) beside `CORE 8914.7 ly` (4 to 128.6 px across,
+    // 37 to 54.5 px down). Its right side has no room, and its left ran across the core label.
+    const stage: Viewport = { widthPx: 256.66668701171875, heightPx: 232, remPx: 16 };
+    const strokes = reticleStrokesCssPx(1.5);
+    const chosen = [mark("s", 1, "GDG 75DY08 A-3")];
+    const anchors = [anchor("s", 145.5, 47.7, 4)];
+    const core = textBox(4, 37, 128.6, 54.5);
+
+    const alone = placeLabels(chosen, anchors, stage, strokes, null, { pinnedIds: ["s"] });
+    const beside = placeLabels(chosen, anchors, stage, strokes, null, {
+      pinnedIds: ["s"],
+      texts: [core],
+    });
+
+    expect([alone.map((label) => label.side), beside]).toEqual([["left"], []]);
+  });
+
+  it("puts the selection's label on its other side where it would lie over other text", () => {
+    // `SOL-1` beside a mark at (200, 150) runs from 214.75 to 258.15 px across on its right.
+    const [label] = placeLabels(
+      [mark("a", 1, "SOL-1")],
+      [anchor("a", 200, 150)],
+      VIEWPORT,
+      AT_TWO,
+      null,
+      { pinnedIds: ["a"], texts: [textBox(230, 140, 300, 160)] },
+    );
+
+    expect(label?.side).toBe("left");
+    expect((label?.leftPx ?? 0) + (label?.widthPx ?? 0)).toBeCloseTo(200 - 6 - OFFSET_AT_TWO_PX, 9);
+  });
+
+  it("draws no label for the selection where both of its sides lie over other text", () => {
+    const chosen = [mark("a", 1, "SOL-1")];
+    const anchors = [anchor("a", 200, 150)];
+    const texts = [textBox(230, 140, 300, 160), textBox(100, 140, 170, 160)];
+
+    const [free] = placeLabels(chosen, anchors, VIEWPORT, AT_TWO, null, { pinnedIds: ["a"] });
+
+    expect([
+      free?.side,
+      placeLabels(chosen, anchors, VIEWPORT, AT_TWO, null, { pinnedIds: ["a"], texts }),
+    ]).toEqual(["right", []]);
+  });
+});
