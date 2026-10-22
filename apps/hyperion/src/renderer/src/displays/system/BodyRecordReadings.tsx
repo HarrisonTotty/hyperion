@@ -22,10 +22,12 @@ import {
   beltSiteLabel,
   bodyKindLabel,
   bodyStateLabel,
+  crustLidLabel,
   destructionCauseLabel,
   detailLevelLabel,
   moonOriginLabel,
   planetClassLabel,
+  redoxClassLabel,
   ringKindLabel,
   ringMaterialLabel,
   sectionStateLabel,
@@ -36,11 +38,14 @@ import type {
   BodyRecord,
   BodySurface,
   BulkProperties,
+  CrustComposition,
   GasShare,
   Modelled,
   Population,
   Section,
   SilicateVapour,
+  SubstanceArea,
+  SurfaceCondensate,
   SystemBody,
 } from "../../lib/system/model";
 import { formatBodyIdHex } from "../../lib/seed";
@@ -123,10 +128,10 @@ function percent(fraction: number): string {
 }
 
 /**
- * A mole fraction as a percentage to the guide's three significant figures, without its unit:
- * `0.934`, and `1.00E-4` below 0.001 %.
+ * A fraction as a percentage to the guide's three significant figures, without its unit: a mole
+ * fraction's `0.934`, a share of the surface's `71.0`, and `1.00E-4` below 0.001 %.
  */
-function gasPercent(fraction: number): string {
+function significantPercent(fraction: number): string {
   return formatSignificant(fraction * 100);
 }
 
@@ -202,7 +207,7 @@ function gasesShown(gases: ReadonlyArray<GasShare>): Shown {
         sharesReading(
           gases.map((gas) => ({
             name: substanceName(gas.species, "upper"),
-            percentage: sharePercentage(gas.moleFraction, gasPercent),
+            percentage: sharePercentage(gas.moleFraction, significantPercent),
           })),
         ),
       );
@@ -269,9 +274,122 @@ function vapourReading(vapour: Modelled<SilicateVapour>): VapourReading {
 }
 
 /**
+ * The registry key of the crust that lies at the surface, the member its lid names.
+ *
+ * @throws Error where the lid names a member that is `null`, which the wire's contract forbids and
+ * the decoder (`bodiesWire.ts`'s `toCrust`) refuses, so that only a broken client reaches it.
+ */
+function lidSubstance(crust: CrustComposition): string {
+  let key: string | null;
+  switch (crust.lid) {
+    case "primary":
+      key = crust.primary;
+      break;
+    case "secondary":
+      key = crust.secondary;
+      break;
+    case "bulk":
+      key = crust.bulk;
+      break;
+  }
+  if (key === null) {
+    throw new Error(`the crust's lid names its ${crust.lid} member, which is null`);
+  }
+  return key;
+}
+
+/**
+ * The melt's share of the surface as `MELT COVER` reads it: its percentage to three significant
+ * figures with its unit (`25.0 %`), in E notation below 0.001 %, `ABOVE 99.9 %` for a share below
+ * the whole that would round to it, `100 %` only for the whole, and `NONE` for 0, which is data.
+ */
+function meltCoverShown(meltAreaFraction: number): Shown {
+  return meltAreaFraction === 0
+    ? value("NONE")
+    : value(sharePercentage(meltAreaFraction, significantPercent), "%");
+}
+
+/**
+ * The rows of a surface's crust: `CRUST`, which crust lies at the surface and its substance, joined
+ * by a middle dot as the view's `MATERIAL` reading is (`SECONDARY · REDUCED BASALT`); then
+ * `MANTLE REDOX` and `MELT COVER`. A crust not modelled reads `CRUST NOT YET MODELLED`, and one
+ * computed as none `CRUST NONE`, once, in place of the three.
+ */
+function crustRows(crust: Modelled<CrustComposition>): ReactNode {
+  let rows: ReactNode;
+  switch (crust.kind) {
+    case "not_modelled":
+      rows = <ReadoutRow label="CRUST" shown={value(sectionStateLabel("not_modelled"))} wide />;
+      break;
+    case "none":
+      rows = <ReadoutRow label="CRUST" shown={value("NONE")} wide />;
+      break;
+    case "value": {
+      const composition = crust.value;
+      const substance = substanceName(lidSubstance(composition), "upper");
+      rows = (
+        <>
+          <ReadoutRow
+            label="CRUST"
+            shown={value(`${crustLidLabel(composition.lid)}${PART_JOIN}${substance}`)}
+            wide
+          />
+          <ReadoutRow label="MANTLE REDOX" shown={value(redoxClassLabel(composition.redox))} wide />
+          <ReadoutRow
+            label="MELT COVER"
+            shown={meltCoverShown(composition.meltAreaFraction)}
+            wide
+          />
+        </>
+      );
+      break;
+    }
+  }
+  return rows;
+}
+
+/**
+ * A cover by substance, the surface's liquids or its ices, as one reading of shares: largest first,
+ * ties in the wire's order, each named by {@link substanceName} in a label's case with no phase
+ * word, since the row's label names the phase, and its share at `MELT COVER`'s precision; a part at
+ * 0 left out, and `NONE` where no part is above 0, which is data.
+ *
+ * @remarks
+ * Sorted here, by a stable sort, since the wire orders the cover by the reservoirs' mass, not by
+ * area.
+ */
+function coverShown(areas: ReadonlyArray<SubstanceArea>): Shown {
+  const parts = areas
+    .filter((area) => area.areaFraction > 0)
+    .toSorted((a, b) => b.areaFraction - a.areaFraction);
+  return parts.length === 0
+    ? value("NONE")
+    : value(
+        sharesReading(
+          parts.map((area) => ({
+            name: substanceName(area.substance, "upper"),
+            percentage: sharePercentage(area.areaFraction, significantPercent),
+          })),
+        ),
+      );
+}
+
+/**
+ * Whether the wire states the ice in a surface's cold traps: some condensate carries its trapped
+ * share, which no server sends before P14.T54.b.
+ */
+function coldTrapsKnown(condensates: Modelled<ReadonlyArray<SurfaceCondensate>>): boolean {
+  return (
+    condensates.kind === "value" &&
+    condensates.value.some((condensate) => condensate.trappedAreaFraction.kind === "value")
+  );
+}
+
+/**
  * The rows of a surface section (plan 14, P14.T43.b, _Amended for T35.e_): its state in words under
  * the section's own name, so that `SURFACE` keeps its place whether the section is shown or stands
- * in; the mean surface temperature; the surface pressure; and the air's gases by mole fraction.
+ * in; the mean surface temperature; the surface pressure; the air's gases by mole fraction; and then
+ * the ground's crust and cover (P14.T43.g).
  *
  * @remarks
  * The temperature and the pressure take a line each, so that `SURFACE PRESSURE`, the section's
@@ -281,9 +399,7 @@ function vapourReading(vapour: Modelled<SilicateVapour>): VapourReading {
  * unless it holds melt (below), and its exosphere, a quantity of its own that the generator does
  * not yet compute (P14.T55.c), reads `NOT YET MODELLED`, so that `NONE` is never read as a body
  * known to be clear of gas (the guide's Data states). The note follows the `airless` state, as the
- * view's `EXOSPHERE: NOT YET MODELLED` does (rendering plan R08, R08.T10.a). The section's other
- * members (its material, climate regime, global figures, condensates, and its crust but for the
- * crust's melt area) are on the wire and not yet read here.
+ * view's `EXOSPHERE: NOT YET MODELLED` does (rendering plan R08, R08.T10.a).
  *
  * A surface holding melt, the state `magma_ocean` (P14.T35.f) or a crust's melt area above 0
  * (P14.T54.a), has a vapour of its own, the melt's silicate vapour, which no rule computes before
@@ -299,6 +415,22 @@ function vapourReading(vapour: Modelled<SilicateVapour>): VapourReading {
  *
  * A vapour the wire sends as a value, which no server does before P14.T55.b, reads its empty
  * volatile air as Missing too, and has no row: its figures are T55.b's to read.
+ *
+ * After the air's rows come the ground's, in this order (P14.T43.g, decision-ux-23-surface-rows):
+ * the crust's rows ({@link crustRows}), `CRUST`, `MANTLE REDOX`, the mantle's class and not the
+ * ground's, which may be more oxidised, and `MELT COVER`, the crust's melt area; then the cover by
+ * substance, `LIQUID COVER` and `ICE COVER` ({@link coverShown}), read from every server, as the
+ * decision rules, though a server before P14.T54.a, which models no condensates, sends its water
+ * alone (plan 14, P14.T43.g's deferred findings); and, on an `airless` surface,
+ * `COLD TRAPS NOT YET MODELLED` unless a condensate carries its trapped share
+ * ({@link coldTrapsKnown}), as T54.a labels an airless body's cold traps, so that its `ICE COVER` is
+ * never read as all the ice it holds.
+ *
+ * The section's other members are on the wire and not yet read here: its material, climate regime
+ * and global figures; the crusts that do not lie at the surface and the crust's provinces, which
+ * the view's `MATERIAL` reading names point by point once the terrain is served; the mantle's redox
+ * figure ({@link CrustComposition.mantleRedoxIw}), which waits on a name the guide does not have;
+ * and the condensates' own figures, their reservoirs, layers and seasons.
  */
 function surfaceRows(surface: BodySurface): ReactNode {
   const vapour = holdsMelt(surface) ? vapourReading(surface.silicateVapour) : null;
@@ -328,6 +460,12 @@ function surfaceRows(surface: BodySurface): ReactNode {
       ) : null}
       {vapour?.notModelledRow === true ? (
         <ReadoutRow label="SILICATE VAPOUR" shown={value(sectionStateLabel("not_modelled"))} wide />
+      ) : null}
+      {crustRows(surface.crust)}
+      <ReadoutRow label="LIQUID COVER" shown={coverShown(surface.surfaceLiquids)} wide />
+      <ReadoutRow label="ICE COVER" shown={coverShown(surface.surfaceIces)} wide />
+      {surface.state === "airless" && !coldTrapsKnown(surface.condensates) ? (
+        <ReadoutRow label="COLD TRAPS" shown={value(sectionStateLabel("not_modelled"))} wide />
       ) : null}
     </>
   );
@@ -562,7 +700,9 @@ export interface BodyRecordReadingsProps {
  * radius in `km`, density, gravity, equilibrium temperature and its layers' mass fractions; its
  * moons and rings, counted; for a ring, a belt or the cometary halo, what the population is and
  * where it lies; and, from the whole record only, its surface (its state, mean temperature,
- * pressure and gases, and, over a melt, its own vapour's state), a gas-envelope body's envelope in
+ * pressure and gases, and, over a melt, its own vapour's state; then the crust at the surface, the
+ * mantle's redox class, the melt's share of the surface, the liquids and ices that cover it by
+ * substance, and, on an airless body, its cold traps' state), a gas-envelope body's envelope in
  * the surface's place, read as its `ATMOSPHERE` (its gases), and its hooks, whose detail seed is
  * the one hook the wire carries, the em dash until the server derives it. A section withheld or not
  * modelled reads so, once, in place of its rows; one that does not apply is left out. A server

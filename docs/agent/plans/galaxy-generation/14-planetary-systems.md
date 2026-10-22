@@ -4210,6 +4210,30 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
     rock alone reads `ROCK 100.0 %`.
   - _Accept:_ `pnpm test`; the console-ux skill's lint on the changed files; a ux-reviewer pass.
   - _Commit:_ `fix(client): P14.T43.f The mass fraction's whole`.
+- **P14.T43.g The surface's crust and cover in the readout** (decision-ux-23-surface-rows,
+  2026-10-22; bump plan §5, "For 23", last bullet; a display change only, with no wire, output
+  or protocol change; after P14.T43.e and T54.a's melt rule, 1886a506).
+  - `displays/system/BodyRecordReadings.tsx`'s `surfaceRows`: after the air's rows, `CRUST`,
+    `MANTLE REDOX`, `MELT COVER`, `LIQUID COVER`, `ICE COVER` and, on an `airless` surface,
+    `COLD TRAPS NOT YET MODELLED`, with the readings, precision and data states the decision
+    gives. `CRUST NOT YET MODELLED` stands in for the first three where the crust is not
+    modelled. Shares use `sharePercentage` and `formatSignificant`, and the cover lists are
+    sorted largest first. `surfaceRows`' TSDoc drops "condensates, and its crust but for the
+    crust's melt area … not yet read here", and names what stays unread.
+  - _Tests_ (`SystemView.bodies.test.tsx`, on the fixture):
+    - the lava world's twelve rows, as listed;
+    - Titan's crust, cover and `MELT COVER NONE`, with no `COLD TRAPS`;
+    - the Earth's crust and cover;
+    - e101's `MELT COVER 100 %`;
+    - a crust not modelled reads `CRUST NOT YET MODELLED` once, with no `MANTLE REDOX` or
+      `MELT COVER`;
+    - a melt share of 0.99996 reads `ABOVE 99.9 %`;
+    - a cover list out of order is read largest first, and a part at 0 is left out;
+    - an unknown key reads `UNLISTED MATERIAL`;
+    - an airless body whose condensate carries a trapped share has no `COLD TRAPS` row.
+  - _Accept:_ `pnpm test`; the console-ux skill's lint on the changed files; a ux-reviewer pass.
+    The visual check at 1920×1080 and 1280×720 is pending, as for T43.e.
+  - _Commit:_ `feat(client): P14.T43.g The surface's crust and cover in the readout`.
 
 #### P14.T44 Time control
 
@@ -15449,6 +15473,117 @@ tables::gauss_legendre`.
     T55.b above); and the signed-off `SURFACE PRESSURE` row, "The pressure at a body's surface",
     does not say that it leaves out a melt's own vapour, as the drafted `SILICATE VAPOUR` row
     does, so that the two may be made to agree.
+- **Deviations in P14.T43.g, as built (`lane/79-p14-t43g-crust-cover-readout`, 2026-10-22).** The
+  surface's crust and cover in the readout (decision-ux-23-surface-rows), in the client, the guide
+  and this plan only: no wire, protocol or output moves, `GENERATOR_VERSION` stays 23 and
+  `PROTOCOL_VERSION` 2, and no binding, fixture, golden or style changes.
+  - _The rows._ After `SILICATE VAPOUR`, `surfaceRows` reads `crustRows` (`CRUST`,
+    `MANTLE REDOX`, `MELT COVER`), then `LIQUID COVER` and `ICE COVER` (`coverShown`), then, on an
+    `airless` surface, `COLD TRAPS NOT YET MODELLED` unless `coldTrapsKnown` holds: the
+    condensates a value with some entry's `trappedAreaFraction` a value, of any phase, as the
+    decision gives it. Each is a wide row, as `EXOSPHERE` is. A crust not modelled reads
+    `CRUST NOT YET MODELLED`, and one computed as none `CRUST NONE`, once, with no `MANTLE REDOX`
+    or `MELT COVER`. `holdsMelt`, `vapourReading`, `sectionRows` and `sharesReading` are
+    unchanged.
+  - _The words._ `crustLidLabel` and `redoxClassLabel`, in `lib/system/bodyWords.ts`: exhaustive
+    switches with no `default`, tested by `it.each` in `bodyWords.test.ts`. Both files are beyond
+    the entry's list and in the brief's scope. The lid `bulk` reads `UNDIFFERENTIATED`, never
+    `BULK`.
+  - _`MELT COVER`'s unit._ `meltCoverShown` sets the `%` in the row's unit slot, as the readout's
+    single values carry theirs (`T SURF`'s `K`): `25.0 %`, `100 %`, `1.00E-4 %`, and
+    `ABOVE 99.9 %` with a no-break space after `ABOVE`; `NONE`, with no unit, at exactly 0. A
+    cover's parts keep their `%` inside the reading, as `sharesReading` sets every part.
+  - _The cover._ `coverShown` leaves out the parts at 0 and sorts the rest largest first by the
+    stable `toSorted`, so that ties keep the wire's order, each share to three significant figures
+    through `sharePercentage`; `NONE` where no part is left.
+  - _The `CRUST` reading's join._ `PART_JOIN` with plain spaces, as the view's `MATERIAL` reading
+    joins its parts (`view/terrain/readouts.ts`), so that a narrow column may break it at any of
+    its spaces.
+  - _The lid's broken contract._ `lidSubstance` throws an `Error` that names it, as "the crust's
+    lid names its secondary member, which is null" for a `secondary` lid, rather than read
+    `UNLISTED MATERIAL`, which would name a material the wire did not send. The decoder's
+    `lidPresent` already refuses such a crust ("crust unusable"), so only a broken client reaches
+    it.
+  - _A rename._ `gasPercent` is `significantPercent`, since it now reads the melt's and the
+    cover's shares too; `gasesShown`'s readings are unchanged. T43.f's record above keeps the old
+    name.
+  - _The docs._ `surfaceRows`' TSDoc drops the sentence on the members not read, names the new
+    rows, and names what stays unread: the material, climate regime and global figures; the crusts
+    not at the surface and the provinces; `mantleRedoxIw`; the condensates' reservoirs, layers and
+    seasons. `BodyRecordReadings`' remarks name the crust, the redox class, the melt's share, the
+    cover and the cold traps' state.
+  - _The guide._ Edited as the brief gives it: the surface-state row's two clauses,
+    `SILICATE VAPOUR`'s opening, and seven rows between `SILICATE VAPOUR` and `ATMOSPHERE`.
+    Prettier kept the table's widths, since no new cell is the widest of its column.
+  - _The readings the tests pin._
+    - The lava world, in order: `SURFACE AIRLESS`, `T SURF 1239 K`, `SURFACE PRESSURE —`,
+      `MOLE FRACTION —`, `EXOSPHERE NOT YET MODELLED`, `SILICATE VAPOUR NOT YET MODELLED`,
+      `CRUST SECONDARY · REDUCED BASALT`, `MANTLE REDOX REDUCED`, `MELT COVER 25.0 %` (from
+      0.24995…), `LIQUID COVER NONE`, `ICE COVER NONE`, `COLD TRAPS NOT YET MODELLED`.
+    - Titan: `CRUST PRIMARY · H2O`, `MANTLE REDOX OXIDISED`, `MELT COVER NONE`,
+      `LIQUID COVER CH4–C2H6–N2 MIXTURE 1.00 %`, `ICE COVER H2O 99.0 %`, and no `COLD TRAPS`.
+    - The Earth: `CRUST SECONDARY · BASALT`, `MANTLE REDOX OXIDISED`, `MELT COVER NONE`,
+      `LIQUID COVER H2O 71.0 %`, `ICE COVER H2O 3.00 %`, and no `COLD TRAPS`.
+    - e101: `MELT COVER 100 %`.
+  - _Tests._ `SystemView.bodies.test.tsx`, 20 new cases, with the helpers `rowsBetween`, `crustOf`
+    and `earthWithCrust`:
+    - the entry's nine, with the brief's two that keep `COLD TRAPS` (condensates not modelled, or
+      with no trapped share);
+    - beyond them: `CRUST NONE`; melts at 0.9994 (`99.9 %`) and 1e-6 (`1.00E-4 %`); equal shares
+      in the wire's order; a cover all at 0 (`NONE`); an undifferentiated crust
+      (`UNDIFFERENTIATED · CI CHONDRITE`, `MANTLE REDOX INTERMEDIATE`); condensates computed as
+      none;
+    - the Earth and a Titan with no `COLD TRAPS` row, in an `it.each` apart from their readings,
+      so that each test has one reason to fail (the TypeScript review).
+
+    `bodyWords.test.ts`: 6 new cases. The two files: 105 tests.
+
+  - _Two helpers and two assertions._ `e101Earth` sets its crust's melt area to 1, as the sim's
+    `melt_area` gives every `MagmaOcean`. Beyond the brief, it also empties its cover and its
+    condensates, since no water lies liquid or frozen at 1,684 K, so that e101 never reads an
+    ocean beside a whole melt (the conformance review). The lava world's and e101's readout-wide
+    `NONE` checks now read the air's rows, `SURFACE` to `SILICATE VAPOUR`, rather than the two air
+    rows alone, whose em dash already rules `NONE` out (the TypeScript review).
+  - _The lint._ The console-ux lint: `0 error(s), 0 check(s) in 2 file(s) scanned` (it skips the
+    test files).
+  - _Reviews._ TypeScript, UX and plan conformance. TypeScript: one should-fix, applied (the
+    `COLD TRAPS` absence apart); one consider applied (the narrowed checks), one deferred below.
+    Plan conformance: no must-fix or should-fix; two considers applied (`e101Earth`'s cover, the
+    stale lines deferred below), one deferred below. UX: one must-fix against the decision's data
+    state, asked on the issue and deferred below; one should-fix and one consider on the guide's
+    wording, for main (below); two considers deferred below. The UX review judges the crust's
+    `PRIMARY` no breach of "One name per thing": two things that share a word, never on one
+    display, as `FULL` is a detail level and the GPU timer's state.
+  - _Pending:_ the visual check at 1920×1080 and 1280×720, main's at landing.
+- **Deferred findings (2026-10-13 rule)**, from P14.T43.g:
+  - A server before 23 sends no condensates, and its cover lists hold water alone (the sim's
+    cover rule, `condensates: None`), so its Titan reads `LIQUID COVER NONE` and its Pluto
+    `ICE COVER H2O …` as all the ice it holds. The UX review's must-fix, against the guide's Data
+    states. Asked on issue #79, with the lean to read both rows `NOT YET MODELLED` where the
+    condensates are not modelled; built as the decision rules it meanwhile.
+  - From P14.T54.b, `COLD TRAPS NOT YET MODELLED` would stand on an airless body whose condensates
+    are an empty list, its traps modelled and empty, since the rule reads the entries' trapped
+    shares. For T54.b's follow-up: a state of the traps' own on the wire (UX review).
+  - A name may break at its own hyphen or en dash near the column's edge at 1280×720:
+    `SECONDARY · Fe-RICH BASALT` as `Fe-` / `RICH BASALT`, `NH3–H2O MIXTURE` as `NH3–` /
+    `H2O MIXTURE`. A `nowrap` span around each such word would hold it, every one 11 characters
+    or fewer (UX review). For main's look at landing.
+  - `lidSubstance` repeats the decoder's `lidPresent` switch and keeps a throw that no decoded
+    crust reaches, in a render with no error boundary. `toCrust` could resolve the lid's key once,
+    as a member of `CrustComposition` (TypeScript review); `model.ts` and `bodiesWire.ts` are
+    beyond this lane.
+  - The twelve-row test ends at the fixture Earth's `GENERATOR INPUTS` stand-in; once the
+    fixture's hooks are `ok`, it is to end at `DETAIL SEED` (conformance review).
+  - For a docs batch: T54.a's bullet "where a console row shows an airless body's condensates it
+    labels its cold traps NOT YET MODELLED (P14.T43.b's `SURFACE` rows …)", and its record's "No
+    console row reads the condensates at 23 …" and "UX's two items for main's sign-off agent,
+    24's riders …", are closed at 23 by this task (conformance review).
+  - For main, on the guide's wording, written as given (UX review). The `LIQUID COVER`,
+    `ICE COVER` row's "ices may share their cold ground, so the shares may sum above `100 %`":
+    the wire divides each list by its total where that passes 1, so only the two rows together
+    can pass `100 %`; and "each perennial ice": the sim's `surface_ices` takes every solid entry,
+    seasonal ones included. The `CRUST` row names no `CRUST NONE`, which the readout reads for a
+    crust computed as none, while `UNDIFFERENTIATED` is glossed "no crust".
 - **Deviations in P14.T49.j, as built (`lane/34-p14-t49j-thermal-columns`, 2026-10-16).** The
   condensed phases' thermal columns and the airless regolith's thermal-inertia law, a pure module,
   `substance::thermal` (`substance/thermal.rs`; its rows in `substance/thermal/rows.rs`, its tests

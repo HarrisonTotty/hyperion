@@ -5,10 +5,13 @@
 import type {
   BodyEnvelopeDto,
   BodySurfaceDto,
+  CrustCompositionDto,
   GasShareDto,
   MassFractionsDto,
   ResponseFor,
   SectionDto,
+  SubstanceAreaDto,
+  SurfaceCondensateDto,
 } from "@hyperion/protocol";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -131,6 +134,22 @@ function readingOf(label: string): HTMLElement {
   return value;
 }
 
+/**
+ * The readout's rows in order, each its label and its reading, from the one labelled `first` up
+ * to, and not including, the one labelled `next`.
+ */
+function rowsBetween(first: string, next: string): Array<readonly [string, string]> {
+  const rows = within(readout())
+    .queryAllByRole("term")
+    .map((term) => [term.textContent, term.nextElementSibling?.textContent ?? ""] as const);
+  const start = rows.findIndex(([label]) => label === first);
+  const end = rows.findIndex(([label]) => label === next);
+  if (start < 0 || end < start) {
+    throw new Error(`the readout reads ${first}, then ${next}`);
+  }
+  return rows.slice(start, end);
+}
+
 /** The populated answer's planet `A b`, whose moon `A b I` is `/257`. */
 const PLANET_ID = `${FIXTURE_SYSTEM}.0100`;
 
@@ -223,10 +242,32 @@ function airlessEarth(): ResponseFor<"body_detail"> {
   }));
 }
 
+/** The crust the fixture's `ok` surface `surface` sends. */
+function crustOf(surface: BodySurfaceDto): CrustCompositionDto {
+  const { crust } = surface;
+  if (crust === undefined || crust === null) {
+    throw new Error("the fixture's surface sends a crust");
+  }
+  return crust;
+}
+
+/** The fixture's Earth with its surface's crust changed by `change`. */
+function earthWithCrust(
+  change: (crust: CrustCompositionDto) => CrustCompositionDto | null,
+): ResponseFor<"body_detail"> {
+  return earthWithSurface((surface) => ({ ...surface, crust: change(crustOf(surface)) }));
+}
+
 /**
  * The fixture's Earth sent as `close_binary`'s dwarf planet `e101` is (P14.T35.f): a magma ocean at
  * 1,684 K whose volatiles are gone, its volatile air empty and its mixture figures none, and no
  * `silicate_vapour` key; then changed by `change`.
+ *
+ * @remarks
+ * It keeps the Earth's crust, with its melt area set to 1, the whole, as the server sends every
+ * magma ocean's (the sim's `melt_area` returns 1 for `MagmaOcean`), so that it reads
+ * `MELT COVER 100 %`. Its molten surface holds no condensate, so its cover is empty, as no water
+ * lies liquid or frozen at 1,684 K.
  */
 function e101Earth(
   change: (surface: BodySurfaceDto) => BodySurfaceDto = (surface) => surface,
@@ -243,6 +284,12 @@ function e101Earth(
       gases: [],
       mean_molar_mass_g_per_mol: null,
       heat_capacity_over_r: null,
+      crust: { ...crustOf(surface), melt_area_fraction: 1 },
+      condensates: [],
+      surface_liquids: [],
+      ocean_fraction: 0,
+      surface_ices: [],
+      ice_fraction: 0,
     });
   });
 }
@@ -560,7 +607,8 @@ describe("SystemView's body readout", () => {
       expect(reading(label)).toBe("—");
       expect(within(readingOf(label)).getByText("—")).toHaveClass("readout__missing");
     }
-    expect(within(readout()).queryByText("NONE")).not.toBeInTheDocument();
+    // None of the air's rows reads NONE; the ground's after them may (P14.T43.g).
+    expect(rowsBetween("SURFACE", "CRUST").map(([, read]) => read)).not.toContain("NONE");
     expect(reading("SILICATE VAPOUR")).toBe("NOT YET MODELLED");
     expect(terms("EXOSPHERE")).toHaveLength(0);
   });
@@ -672,7 +720,8 @@ describe("SystemView's body readout", () => {
       expect(reading(label)).toBe("—");
       expect(within(readingOf(label)).getByText("—")).toHaveClass("readout__missing");
     }
-    expect(within(readout()).queryByText("NONE")).not.toBeInTheDocument();
+    // None of the air's rows reads NONE; its empty cover, after them, does (P14.T43.g).
+    expect(rowsBetween("SURFACE", "CRUST").map(([, read]) => read)).not.toContain("NONE");
     // Each on its own line (rendering plan R08, Design note 12).
     expect(terms("EXOSPHERE")).toHaveLength(1);
     expect(reading("EXOSPHERE")).toBe("NOT YET MODELLED");
@@ -726,6 +775,272 @@ describe("SystemView's body readout", () => {
     expect(reading("MOLE FRACTION")).toBe(partsReading("N2 94.4 %", "CH4 5.65 %"));
     expect(terms("EXOSPHERE")).toHaveLength(0);
   });
+
+  // P14.T43.g (decision-ux-23-surface-rows): the ground's rows after the air's.
+  it("reads a locked lava world's twelve surface rows in order, its crust, melt and cover after its air", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      earthWithSurface(() => surfaceOf(lavaWorldDetail())),
+    );
+
+    // The fixture Earth's record reads its hooks next, as `GENERATOR INPUTS NOT YET MODELLED`, its
+    // envelope not applying.
+    expect(rowsBetween("SURFACE", "GENERATOR INPUTS")).toEqual([
+      ["SURFACE", "AIRLESS"],
+      ["T SURF", "1239 K"],
+      ["SURFACE PRESSURE", "—"],
+      ["MOLE FRACTION", "—"],
+      ["EXOSPHERE", "NOT YET MODELLED"],
+      ["SILICATE VAPOUR", "NOT YET MODELLED"],
+      ["CRUST", "SECONDARY · REDUCED BASALT"],
+      ["MANTLE REDOX", "REDUCED"],
+      // Its melt area, 0.24995…, to three figures; the `%` in the unit slot.
+      ["MELT COVER", "25.0 %"],
+      ["LIQUID COVER", "NONE"],
+      ["ICE COVER", "NONE"],
+      ["COLD TRAPS", "NOT YET MODELLED"],
+    ]);
+  });
+
+  it("reads a Titan's ice crust, its lakes and its ice, and MELT COVER NONE", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      earthWithSurface(() => surfaceOf(titanDetail())),
+    );
+
+    expect(reading("CRUST")).toBe("PRIMARY · H2O");
+    expect(reading("MANTLE REDOX")).toBe("OXIDISED");
+    expect(reading("MELT COVER")).toBe("NONE");
+    // A name of several words may break before its figure; the figure keeps its `%`.
+    expect(reading("LIQUID COVER")).toBe("CH4–C2H6–N2 MIXTURE 1.00\u00A0%");
+    expect(reading("ICE COVER")).toBe(partsReading("H2O 99.0 %"));
+  });
+
+  it("reads the Earth's crust, its mantle's redox class and its cover", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, earthDetail());
+
+    expect(reading("CRUST")).toBe("SECONDARY · BASALT");
+    expect(reading("MANTLE REDOX")).toBe("OXIDISED");
+    expect(reading("MELT COVER")).toBe("NONE");
+    expect(reading("LIQUID COVER")).toBe(partsReading("H2O 71.0 %"));
+    expect(reading("ICE COVER")).toBe(partsReading("H2O 3.00 %"));
+  });
+
+  it.each<readonly [string, () => ResponseFor<"body_detail">]>([
+    ["the Earth", earthDetail],
+    ["a Titan", () => earthWithSurface(() => surfaceOf(titanDetail()))],
+  ])("shows no COLD TRAPS row for %s, a world with air", async (_name, detail) => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, detail());
+
+    expect(terms("COLD TRAPS")).toHaveLength(0);
+  });
+
+  it("reads e101's melt over the whole surface as MELT COVER 100 %", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, e101Earth());
+
+    expect(reading("MELT COVER")).toBe("100 %");
+  });
+
+  // `ABOVE` keeps its figure across a no-break space; the `%` is in the unit slot.
+  it.each<readonly [string, number, string]>([
+    [
+      "reads a melt below the whole whose figures round to 100 as ABOVE 99.9 %",
+      0.99996,
+      "ABOVE\u00A099.9 %",
+    ],
+    ["reads a melt just below the edge of the whole at its three figures", 0.9994, "99.9 %"],
+    ["reads a melt below 0.001 % in E notation", 1e-6, "1.00E-4 %"],
+  ])("%s", async (_name, meltAreaFraction, meltCover) => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      earthWithCrust((crust) => ({ ...crust, melt_area_fraction: meltAreaFraction })),
+    );
+
+    expect(reading("MELT COVER")).toBe(meltCover);
+  });
+
+  it("reads a crust not modelled as CRUST NOT YET MODELLED once, with no MANTLE REDOX or MELT COVER row", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    // As every server before P14.T54.a sends it: no `crust` key.
+    await answerDetail(
+      socket,
+      earthWithSurface((surface) => {
+        const { crust: _crust, ...older } = surface;
+        return older;
+      }),
+    );
+
+    expect(terms("CRUST")).toHaveLength(1);
+    expect(reading("CRUST")).toBe("NOT YET MODELLED");
+    expect(terms("MANTLE REDOX")).toHaveLength(0);
+    expect(terms("MELT COVER")).toHaveLength(0);
+    // The cover reads beside it: its lists are on the wire from every server.
+    expect(reading("LIQUID COVER")).toBe(partsReading("H2O 71.0 %"));
+  });
+
+  it("reads a crust computed as none as CRUST NONE, with no MANTLE REDOX or MELT COVER row", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      earthWithCrust(() => null),
+    );
+
+    expect(terms("CRUST")).toHaveLength(1);
+    expect(reading("CRUST")).toBe("NONE");
+    expect(terms("MANTLE REDOX")).toHaveLength(0);
+    expect(terms("MELT COVER")).toHaveLength(0);
+  });
+
+  it("reads an undifferentiated body's crust by its own material, never as BULK", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      earthWithCrust((crust) => ({
+        ...crust,
+        primary: null,
+        secondary: null,
+        tertiary: null,
+        bulk: "chondrite_ci",
+        lid: "bulk",
+        provinces: "chondrite_ci",
+        redox: "intermediate",
+      })),
+    );
+
+    expect(reading("CRUST")).toBe("UNDIFFERENTIATED · CI CHONDRITE");
+    expect(reading("MANTLE REDOX")).toBe("INTERMEDIATE");
+  });
+
+  it.each<readonly [string, ReadonlyArray<SubstanceAreaDto>, string]>([
+    [
+      "reads a cover sent out of order largest first, and leaves out a part at 0",
+      [
+        { substance: "H2O", area_fraction: 0.1 },
+        { substance: "ch4_c2h6_n2", area_fraction: 0 },
+        { substance: "CO2", area_fraction: 0.3 },
+      ],
+      partsReading("CO2 30.0 %", "H2O 10.0 %"),
+    ],
+    [
+      "reads a cover's equal shares in the wire's order",
+      [
+        { substance: "N2", area_fraction: 0.05 },
+        { substance: "CH4", area_fraction: 0.2 },
+        { substance: "CO", area_fraction: 0.05 },
+      ],
+      partsReading("CH4 20.0 %", "N2 5.00 %", "CO 5.00 %"),
+    ],
+    [
+      "reads a cover whose every part is 0 as NONE",
+      [{ substance: "H2O", area_fraction: 0 }],
+      "NONE",
+    ],
+  ])("%s", async (_name, cover, read) => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    // Each list's total is the section's own, which the decoder checks it against.
+    const total = cover.reduce((sum, area) => sum + area.area_fraction, 0);
+    await answerDetail(
+      socket,
+      earthWithSurface((surface) => ({
+        ...surface,
+        surface_liquids: [...cover],
+        ocean_fraction: total,
+        surface_ices: [...cover],
+        ice_fraction: total,
+      })),
+    );
+
+    expect(reading("LIQUID COVER")).toBe(read);
+    expect(reading("ICE COVER")).toBe(read);
+  });
+
+  it("names a crust and a cover the console does not know as UNLISTED MATERIAL, never by its key", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      earthWithSurface((surface) => ({
+        ...surface,
+        crust: { ...crustOf(surface), secondary: "novel_rock" },
+        surface_liquids: [{ substance: "novel_liquid", area_fraction: 0.71 }],
+      })),
+    );
+
+    expect(reading("CRUST")).toBe("SECONDARY · UNLISTED MATERIAL");
+    expect(reading("LIQUID COVER")).toBe("UNLISTED MATERIAL 71.0\u00A0%");
+    expect(within(readout()).queryByText(/novel_/)).not.toBeInTheDocument();
+  });
+
+  it("shows no COLD TRAPS row for an airless world whose condensate carries its trapped share", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    // The Earth's ice condensate sends `trapped_area_fraction: 0.0`, a value.
+    await answerDetail(socket, airlessEarth());
+
+    expect(terms("COLD TRAPS")).toHaveLength(0);
+  });
+
+  it.each<readonly [string, (surface: BodySurfaceDto) => BodySurfaceDto]>([
+    [
+      "are not modelled",
+      (surface) => {
+        const { condensates: _condensates, ...older } = surface;
+        return older;
+      },
+    ],
+    ["are computed as none", (surface) => ({ ...surface, condensates: null })],
+    [
+      "carry no trapped share",
+      (surface) => ({
+        ...surface,
+        condensates: (surface.condensates ?? []).map(
+          ({ trapped_area_fraction: _trapped, ...condensate }): SurfaceCondensateDto => condensate,
+        ),
+      }),
+    ],
+  ])(
+    "keeps the COLD TRAPS row for an airless world whose condensates %s",
+    async (_name, change) => {
+      const { user, socket } = renderView();
+      await answer(socket);
+      await selectRow(user, /\/768/);
+      await answerDetail(
+        socket,
+        earthWithSurface(() => change(surfaceOf(airlessEarth()))),
+      );
+
+      expect(terms("COLD TRAPS")).toHaveLength(1);
+      expect(reading("COLD TRAPS")).toBe("NOT YET MODELLED");
+    },
+  );
 
   it("names a gas the console does not know as UNLISTED MATERIAL, never by its key", async () => {
     const { user, socket } = renderView();
