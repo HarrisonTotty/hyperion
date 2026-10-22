@@ -25531,6 +25531,12 @@ the_rayleigh_floor_lifts`; the two measurements by name with `-- --ignored --exa
     melts, and Uranus's H₂S.
   - _Deferred: one K_zz per column and no shape classes on the registry_, each the caller's or
     T24.c's.
+  - _The deep gas's level is the caller's._ A reaction's co-reactants are species: H₂S for the
+    sulphides and NH₄SH, H₂O for the silicates, the oxides and titanates. A gas speciated hotter
+    than the decks puts some of the sulphur in S and SH, and some of the oxygen in OH and CO,
+    which those draws do not see. T52.d should pass T52.a's gas at the level its decks' carriers
+    hold, such as the 1-bar or the quench level, or recombine it. The tests' hot fixtures are
+    speciated at 2,400–3,000 K.
   - _Cost:_ unmeasured on a quiet machine, for P14.T33.a's `body_detail`. The tests' seven
     columns derive in tens of milliseconds unoptimised.
   - _Landing:_ after P14.T52.a's commit B and P14.T52.b, whose `Network` and `MixingColumn` it
