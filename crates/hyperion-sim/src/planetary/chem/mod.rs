@@ -17,8 +17,10 @@
 //!   ratios, until plan 06 carries them on the star. Plan 06 may adopt the stream without moving
 //!   a value: it is keyed by the system and named for what it holds.
 //!
-//! Nothing on the record reads this module until P14.T54.a wires it in the 22 → 23 batch, so no
-//! generated output moves with it.
+//! P14.T54.a's 22 → 23 batch wires it to the record: every derived body's inventory and its bulk
+//! composition, the partition's published condensates, and through the crust (its Batch D's C3)
+//! the mantle's ΔIW and the host's Mg/Si ([`HostAbundances`]), which the crust's basis reads.
+//! [`envelope_abundances`] waits for P14.T54.b.
 //!
 //! # The host's ratios
 //!

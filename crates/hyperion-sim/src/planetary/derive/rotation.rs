@@ -1085,6 +1085,33 @@ impl BodyRotation {
     /// [`DeriveRotationError::Law`] for a locking time that is not positive, which a primary of
     /// positive mass never gives.
     pub fn derive(inputs: &SpinInputs) -> Result<Self, DeriveRotationError> {
+        let (period, tilt, locking_time, frame) = Self::spun(inputs, |body, period| {
+            tidal_locking_time(
+                body,
+                period,
+                inputs.orbit.semi_major_axis(),
+                inputs.primary_mass,
+            )
+        })?;
+        Ok(Self {
+            obliquity_law: inputs.obliquity_law,
+            primordial_period: period,
+            obliquity: tilt,
+            locking_time,
+            frame,
+        })
+    }
+
+    /// What [`derive`](Self::derive) and [`locked_frame`](Self::locked_frame) build alike of the
+    /// body `inputs` describe, its despinning time from `locking_time` of the body and its
+    /// primordial period: the body, for its refusals and their order; the period, floored at the
+    /// break-up period; the obliquity; the despinning time; and the frame. One setup, so that the
+    /// locked frame's pole, obliquity and period are the law's by construction (Batch D's review,
+    /// R2-7).
+    fn spun(
+        inputs: &SpinInputs,
+        locking_time: impl FnOnce(&SpinningBody, Seconds) -> Seconds,
+    ) -> Result<(Seconds, Radians, Seconds, BodyFixedFrame), DeriveRotationError> {
         let body = SpinningBody::with_tides(
             inputs.mass,
             inputs.radius,
@@ -1096,12 +1123,7 @@ impl BodyRotation {
         let floor = breakup_period(inputs.mass, inputs.radius);
         let period = Seconds::new(drawn.value().max(floor.value()));
         let tilt = obliquity(inputs.obliquity_law, inputs.draws.obliquity_rank);
-        let locking_time = tidal_locking_time(
-            &body,
-            period,
-            inputs.orbit.semi_major_axis(),
-            inputs.primary_mass,
-        );
+        let locking_time = locking_time(&body, period);
         let frame = BodyFixedFrame::new(
             &inputs.orbit,
             &FrameSpin {
@@ -1113,20 +1135,16 @@ impl BodyRotation {
             },
             inputs.age_at_epoch,
         )?;
-        Ok(Self {
-            obliquity_law: inputs.obliquity_law,
-            primordial_period: period,
-            obliquity: tilt,
-            locking_time,
-            frame,
-        })
+        Ok((period, tilt, locking_time, frame))
     }
 
     /// The frame of the body `inputs` describe with its lock reached from its birth (P14.T54.a;
     /// decision-p14-t54a-passes §2.3, a moon's locked spin): [`derive`](Self::derive)'s frame,
-    /// its pole, obliquity and primordial period the same, at a despinning time of the least
-    /// positive `f64` second, so that it is locked at every time its system has lived, in the
-    /// resonance its orbit's eccentricity sets. Its tides and their τ are not read.
+    /// its pole, obliquity and primordial period the same (one setup), at a despinning time of
+    /// [`f64::MIN_POSITIVE`] seconds, the smallest positive normal `f64` (a normal value, not a
+    /// subnormal, which a flush-to-zero target would read as 0), so that it is locked at every
+    /// time its system has lived, in the resonance its orbit's eccentricity sets. Its tides and
+    /// their τ are not read.
     ///
     /// The spin a frame gives a moon ([`SeasonalSpin::of`](crate::planetary::hooks::surface::SeasonalSpin::of))
     /// reads its pole, and its rate and state at the time: locked, the rate is the orbit's
@@ -1138,29 +1156,8 @@ impl BodyRotation {
     /// [`DeriveRotationError::Body`] for a mass or radius that is not positive and finite, and
     /// [`DeriveRotationError::Law`] never: the despinning time is positive.
     pub(crate) fn locked_frame(inputs: &SpinInputs) -> Result<BodyFixedFrame, DeriveRotationError> {
-        // The body as `derive` builds it, for its refusals and their order.
-        SpinningBody::with_tides(
-            inputs.mass,
-            inputs.radius,
-            inputs.class,
-            &inputs.fractions,
-            inputs.tides,
-        )?;
-        let drawn = primordial_period(SpinFamily::of(inputs.class), inputs.draws.period_rank);
-        let floor = breakup_period(inputs.mass, inputs.radius);
-        let period = Seconds::new(drawn.value().max(floor.value()));
-        let tilt = obliquity(inputs.obliquity_law, inputs.draws.obliquity_rank);
-        Ok(BodyFixedFrame::new(
-            &inputs.orbit,
-            &FrameSpin {
-                obliquity: tilt,
-                pole_azimuth: inputs.draws.pole_azimuth,
-                primordial_period: period,
-                locking_time: Seconds::new(f64::MIN_POSITIVE),
-                phase_at_epoch: inputs.draws.phase,
-            },
-            inputs.age_at_epoch,
-        )?)
+        let (.., frame) = Self::spun(inputs, |_, _| Seconds::new(f64::MIN_POSITIVE))?;
+        Ok(frame)
     }
 
     /// How the obliquity was drawn.

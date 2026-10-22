@@ -12,9 +12,10 @@
 //! its crust and condensates by substance and its palette: the substances its field names, each
 //! with the values the server resolves from plan 14's registry, its deposits among them.
 //!
-//! Plan 14's record does not carry all of these yet: `record::Surface`, the section they arrive
-//! in, carries the conditions and figures from P14.T48.e, but P14.T51.a's condensates, T51.c's
-//! crust and the palette's sources are declared not modelled until P14.T54.a, so
+//! Plan 14's record does not carry all of these to the pass yet: `record::Surface`, the section
+//! they arrive in, carries the conditions and figures from P14.T48.e, and from P14.T54.a its
+//! batch's P14.T51.a condensates and T51.c crust, but their reading into these inputs, with the
+//! palette's sources, is P14.T54.a's wire subtask's. Until it lands
 //! [`CoarseInputs::for_body`] answers [`SurfaceInputsError::NotModelled`] (in
 //! [`ReadCoarseInputsError::Section`]) for every body that has a solid surface, once it has
 //! checked a moon's planet's record (R09.T10.f), and every test, the reference worlds among them,

@@ -92,7 +92,7 @@ use crate::planetary::derive::atmosphere::{Atmosphere, SurfaceState, VolatileDra
 #[cfg(doc)]
 use crate::planetary::derive::derive_body;
 use crate::planetary::derive::pass_record::{
-    PassBulk, PassContext, PassRecord, PassRecordOf, PassTide, RecordCrust, RecordSpin,
+    ContextTide, PassBulk, PassContext, PassRecord, PassRecordOf, PassTide, RecordCrust, RecordSpin,
 };
 use crate::planetary::derive::photometry::area_mix::ShadeBook;
 use crate::planetary::derive::rotation::{
@@ -1655,7 +1655,7 @@ pub(crate) trait MoonRecordOf {
 /// [`DerivedMoon::radius`], [`DerivedMoon::density`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct MoonShape {
-    /// Its mass fraction of water ice.
+    /// Its mass fraction of water ice, 0 to 1.
     pub(crate) ice_fraction: f64,
     /// Its radius ([`moon_radius`]).
     pub(crate) radius: Metres,
@@ -1910,7 +1910,7 @@ impl PassRecordOf for MoonPassRecord<'_> {
         };
         PassContext::of(
             self.record.figures(&self.shape, bulk, air, &at).as_ref(),
-            Some(PassTide {
+            ContextTide::Moon(PassTide {
                 branch: tide.tides.branch(),
                 ocean: matches!(tide.subsurface, Subsurface::Ocean(_)),
                 heat_flux: tide.heat_flux,

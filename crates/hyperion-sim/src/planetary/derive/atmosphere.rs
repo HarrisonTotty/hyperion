@@ -318,6 +318,15 @@ impl Retention {
         self.0 & (1 << gas.index()) != 0
     }
 
+    /// Whether `gas` passes the bulk-air test under this retention on a body whose ice holds
+    /// `ice_held`: retained, and not by its ice alone. The one expression of
+    /// [`Atmosphere::retains_against_escape`] and of the passes' surface water at each greenhouse
+    /// step (Batch D's review, R2-7).
+    #[must_use]
+    pub(crate) const fn retains_against_escape(self, ice_held: Self, gas: Gas) -> bool {
+        self.retains(gas) && !ice_held.retains(gas)
+    }
+
     /// This retention with methane's bit set to nitrogen's: on a cold body methane lies in the
     /// air of its surface reservoir and is kept where nitrogen, the bulk gas, is (P14.T24.f).
     /// Methane, the lighter, never passes Jeans's test where nitrogen fails it.
@@ -1518,7 +1527,7 @@ impl Atmosphere {
     /// it whose surface water fills basins, weighs the climate's ocean and opens a wet epoch.
     #[must_use]
     pub(crate) const fn retains_against_escape(&self, gas: Gas) -> bool {
-        self.retention.retains(gas) && !self.ice_held.retains(gas)
+        self.retention.retains_against_escape(self.ice_held, gas)
     }
 
     /// The exobase temperature the retention was judged at.
@@ -2076,13 +2085,12 @@ impl<'a> StepClimate<'a> {
                     heat_flow: spun.context.heat_flow(),
                     inventory: column,
                 },
-                water: WaterGate {
+                water: WaterGate::new(
                     state,
                     retained,
-                    water: inputs.inventory.water(),
-                    radius: spun.record.radius,
-                    surface_gravity: spun.record.surface_gravity,
-                },
+                    inputs.inventory.water(),
+                    spun.record.bulk(),
+                ),
                 context: &spun.context,
             },
         }
@@ -2360,7 +2368,7 @@ fn state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) ->
         );
     };
     let column = airborne.column_weights(weight);
-    let retained = retention.retains(Gas::Water) && !ice_held.retains(Gas::Water);
+    let retained = retention.retains_against_escape(ice_held, Gas::Water);
     let step = StepClimate::of(surface, inputs, column, (climate, retained));
     let climate_of = |t: Kelvin, partials: &PartialPressures| step.at(t, partials);
     let (mut t, mut partials, tau) =

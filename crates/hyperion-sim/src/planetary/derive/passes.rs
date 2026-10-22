@@ -102,7 +102,11 @@ pub(crate) const CONTEXT_AGREEMENT: f64 = 1e-9;
 
 /// Whether the float members `a` and `b` of two contexts agree (≡; decision-p14-t54a-passes §1.2):
 /// the same bits, or both finite with |a − b| ≤ [`CONTEXT_AGREEMENT`] max(|a|, |b|); never where
-/// either is a NaN, so that a NaN never settles, and an infinity only with itself.
+/// either is a NaN, so that a NaN never settles.
+///
+/// An infinity agrees only with itself, by the same-bits test: the lane's extension of the
+/// ruling's formula, which as written refuses it, since in IEEE 754 |∞ − ∞| is a NaN and no
+/// comparison with a NaN holds (the C1 review's DD3).
 #[must_use]
 pub(crate) fn floats_agree(a: f64, b: f64) -> bool {
     if a.is_nan() || b.is_nan() {
@@ -131,13 +135,15 @@ pub(crate) trait Context: Copy {
     fn agrees(&self, other: &Self) -> bool;
 
     /// A total order on contexts, for the frozen context's last tie: the key's `Ord`, then each
-    /// float member's `total_cmp` in a fixed order. `Equal` exactly where every member is the
-    /// same bits, which the 2-cycle stop and the reuse of an end read: a pass reads nothing of a
-    /// context but its members.
+    /// float member's `total_cmp` in a fixed order. `Equal` exactly where every ranked member, the
+    /// key's and the floats', is the same bits, which the 2-cycle stop and the reuse of an end
+    /// read: so a pass may read nothing of a context but its ranked members (the planetary
+    /// context's ride-along first stage is read only through K(P*), by the record; Batch D's
+    /// review, D2-2).
     ///
     /// `total_cmp` orders a NaN by its sign bit, which is not portable across targets (the
-    /// sim-determinism skill), so a context holds no NaN: the planetary context debug-asserts its
-    /// floats finite where K builds it
+    /// sim-determinism skill), so a context holds no NaN: the planetary context asserts its floats
+    /// finite where K builds it, in every build
     /// ([`PassContext::of`](crate::planetary::derive::pass_record::PassContext::of)).
     #[must_use]
     fn rank(&self, other: &Self) -> Ordering;
@@ -169,7 +175,7 @@ pub(crate) enum Convergence {
         /// 10⁻⁹ at a fixed point, and above [`JUMP_RESIDUAL`] at a jump across the diagonal.
         residual: f64,
         /// Whether the published pass's own context fits the one it read (P14.T54.a).
-        context: ContextFit,
+        fit: ContextFit,
     },
 }
 
@@ -204,8 +210,8 @@ impl Convergence {
     #[must_use]
     pub(crate) fn is_jump(self) -> bool {
         match self {
-            Self::Bracketed { residual, context } => {
-                residual > JUMP_RESIDUAL || context == ContextFit::Jump
+            Self::Bracketed { residual, fit } => {
+                residual > JUMP_RESIDUAL || fit == ContextFit::Jump
             }
             Self::Converged => false,
         }
@@ -475,7 +481,7 @@ fn solve_with<C: Context, P: Copy>(
         count,
         convergence: Convergence::Bracketed {
             residual: published.g.abs(),
-            context: fit,
+            fit,
         },
     }
 }
@@ -606,23 +612,20 @@ mod tests {
 
     /// The context fit of a bracketed outcome.
     fn fit_of(convergence: Convergence) -> ContextFit {
-        let Convergence::Bracketed { context, .. } = convergence else {
+        let Convergence::Bracketed { fit, .. } = convergence else {
             panic!("{convergence:?}");
         };
-        context
+        fit
     }
 
     /// Whether two outcomes are the same, a bracketed one's residual by its bits.
     fn assert_same_outcome(one: Convergence, two: Convergence) {
         match (one, two) {
             (
-                Convergence::Bracketed {
-                    residual,
-                    context: fit,
-                },
+                Convergence::Bracketed { residual, fit },
                 Convergence::Bracketed {
                     residual: other,
-                    context: other_fit,
+                    fit: other_fit,
                 },
             ) => {
                 assert_same_bits(residual, other);

@@ -4710,11 +4710,22 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
 ///   albedo and context, whose row its regolith read, and its record's crust's lid row, to the
 ///   bit. Every body whose lid changed between its passes after its first (under C₀, which takes
 ///   none) is listed, settled or bracketed (§1.8: a lid flip).
-/// - **The airless ground** (the six points' item 5): every airless body's record's mean surface
-///   temperature is its equilibrium temperature to the bit, and R09's airless model's regolith
-///   inertia at its record's crust's lid and mean surface temperature is its record's conditions'
-///   ground's, to the bit, for every converged body; a bracketed body whose context's lid is not
-///   its own is listed.
+///   The trace's last pass is `PassDriver::Again`'s, at the published albedo under the published
+///   context after every round the solve ran, a context jump's second round included, so its lid
+///   is the published pass's re-run (Batch D's review, D3-3). Where a pass's lid built its
+///   record's conditions for its cometary test, reading none of its own, their warmest is its
+///   record's, to the bit (D3-2).
+/// - **The radiative ground** (the six points' item 5; Batch D's review, D3-1 and PD-1): every
+///   airless body's record's mean surface temperature is its equilibrium temperature to the bit.
+///   Every body whose climate regime takes R09's radiative model
+///   (`ClimateModelKind::RadiativeEquilibrium`, airless and thin airs alike) has R09's regolith
+///   inertia at its record's crust's lid and mean surface temperature compared with its record's
+///   conditions' ground's: the same bits on every airless body (asserted), bracketed ones
+///   included; a thin air's, which R09 reads at its mean surface temperature and the record at
+///   `T_eq`, listed, not failed, until P14.T54.a's wire subtask carries the record's Γ into R09's
+///   inputs.
+/// - **A column with nothing that condenses** reads no climate in its pass, and its θ is 0 to the
+///   bit (R2-8).
 #[test]
 #[expect(
     clippy::too_many_lines,
@@ -4722,6 +4733,8 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
 )]
 fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     use std::collections::BTreeMap;
+
+    use hyperion_surface::field::ClimateModelKind;
 
     use crate::planetary::chem::partition::{Basins, Condensates};
     use crate::planetary::derive::atmosphere::spun_read::{self, SpunRead};
@@ -4731,7 +4744,8 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     use crate::planetary::derive::{DerivedBody, Under, equilibrium_temperature};
     use crate::planetary::hooks::crust::{CrustLid, CrustLithology, LidCrust};
     use crate::planetary::hooks::figures::cover::water_surface_share;
-    use crate::planetary::surface::steps::climate::regolith_inertia;
+    use crate::planetary::hooks::surface::OceanWeight;
+    use crate::planetary::surface::steps::climate::regolith_inertia_j_per_m2_k_sqrt_s;
 
     /// The lithologies a body's passes took, in order, each change kept once: its lid flips.
     fn lid_changes(lids: &[Option<CrustLid>]) -> Vec<Option<CrustLithology>> {
@@ -4832,10 +4846,11 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     let (mut icy, mut crusts, mut climates_unread) = (0_u32, 0_u32, 0_u32);
     let mut differing_figures: Vec<String> = Vec::new();
     // The lid (C3): bodies with a lid, their lid flips settled and bracketed, the airless bodies
-    // checked, and those whose R09 inertia is not their record's (bracketed only).
-    let (mut lids, mut airless) = (0_u32, 0_u32);
+    // and the radiative ones checked, those whose R09 inertia is not their record's (airless,
+    // asserted none; thin airs, listed), and the deferred warmest checked.
+    let (mut lids, mut airless, mut radiative, mut deferred) = (0_u32, 0_u32, 0_u32, 0_u32);
     let (mut settled_flips, mut bracketed_flips) = (Vec::<String>::new(), Vec::<String>::new());
-    let mut airless_apart: Vec<String> = Vec::new();
+    let (mut airless_apart, mut thin_apart) = (Vec::<String>::new(), Vec::<String>::new());
     // Tallies a derivation of the kind `kind`, re-run once at its published albedo and context as
     // `again` re-runs it, its record's surface `surface`.
     let mut tally =
@@ -4867,7 +4882,23 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
             assert_eq!(once.spun().map(|s| *s.next()), Some(*spun.next()), "{what}");
             if let (Some(surface), Some(read)) = (surface, &read) {
                 crusts += u32::from(same_publication(&what, surface, read));
-                climates_unread += u32::from(read.conditions.is_none());
+                if read.conditions.is_none() {
+                    climates_unread += 1;
+                    // R2-8: no condensed water fills a sea, so θ is 0's to the bit.
+                    assert_same_bits(
+                        spun.ocean_weight().get(),
+                        OceanWeight::of_potential_ocean(0.0).get(),
+                    );
+                }
+                // D3-2: the warmest the published pass's lid built of its record's conditions, where
+                // it read none of its own, is its record's.
+                if let Some(warmest) = read.deferred.last().copied().flatten() {
+                    assert_same_bits(
+                        warmest.value(),
+                        surface.conditions().climate_range().1.value(),
+                    );
+                    deferred += 1;
+                }
                 if !figures_agree(surface.figures(), spun.context()) {
                     differing_figures.push(format!("{what}: {:?}", derived.convergence()));
                 }
@@ -4877,6 +4908,7 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
             let lid = derived.crust_lid().copied();
             assert_eq!(once.crust_lid().copied(), lid, "{what}");
             if let Some(read) = &read {
+                // The trace's last pass is the re-run's, after every round of the solve (D3-3).
                 assert_eq!(read.lids.last().copied().flatten(), lid, "{what}");
                 let changes = lid_changes(&read.lids);
                 if changes.len() > 1 {
@@ -4898,24 +4930,41 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
                 });
                 assert_eq!(record_lid, lid.map(|lid| lid.row()), "{what}");
                 lids += u32::from(lid.is_some());
-                // The six points' item 5: an airless body's record's mean T_s is its T_eq, and
-                // R09's inertia at its record's lid and mean T_s its record's ground's.
-                if surface.state() == SurfaceState::Airless {
-                    let conditions = surface.conditions();
-                    let mean = conditions.mean_surface_temperature();
+                // The six points' item 5: an airless body's record's mean T_s is its T_eq.
+                let conditions = surface.conditions();
+                let mean = conditions.mean_surface_temperature();
+                let is_airless = surface.state() == SurfaceState::Airless;
+                if is_airless {
                     assert_same_bits(mean.value(), derived.equilibrium_temperature().value());
-                    let r09 =
-                        regolith_inertia(lid.map(|lid| lid.lithology()), surface.material(), mean);
+                    airless += 1;
+                }
+                // D3-1: R09's radiative model, airless or under a thin air, takes Γ at its crust's
+                // lid (the published pass's) and its mean T_s; the record's ground at the context's
+                // lid and T_eq.
+                let model = conditions.climate_regime().map(|regime| regime.model());
+                if model == Some(ClimateModelKind::RadiativeEquilibrium) {
+                    radiative += 1;
+                    let r09 = regolith_inertia_j_per_m2_k_sqrt_s(
+                        lid.map(|lid| lid.lithology()),
+                        surface.material(),
+                        mean,
+                    );
                     let record = conditions.ground().inertia_j_per_m2_k_sqrt_s();
                     if r09.total_cmp(&record).is_ne() {
-                        assert_ne!(
+                        let listed = format!(
+                            "{what}: {:?}, R09's Γ {r09:.3} against the record's {record:.3}, \
+                             lids {:?} and the context's {:?}, {:?}",
+                            surface.state(),
+                            lid.map(|lid| lid.lithology()),
+                            spun.context().lid().map(|lid| lid.lithology),
                             derived.convergence(),
-                            Convergence::Converged,
-                            "{what}: R09's Γ {r09} against the record's {record}"
                         );
-                        airless_apart.push(format!("{what}: R09's Γ {r09:.3} against {record:.3}"));
+                        if is_airless {
+                            airless_apart.push(listed);
+                        } else {
+                            thin_apart.push(listed);
+                        }
                     }
-                    airless += 1;
                 }
             }
             match derived.convergence() {
@@ -4928,7 +4977,10 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
                         );
                     }
                 }
-                Convergence::Bracketed { residual, context } => {
+                Convergence::Bracketed {
+                    residual,
+                    fit: context,
+                } => {
                     assert!(
                         residual.is_finite() && residual >= 0.0,
                         "{what}: {residual}"
@@ -5112,14 +5164,20 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     eprintln!(
         "lids: {lids} bodies with a lid on their record; lid flips during the passes, settled {} \
          (listed, not counted):\n  {}\nbracketed {}:\n  {}\n{airless} airless bodies, their mean \
-         T_s their T_eq to the bit; {} whose R09 inertia is not their record's (bracketed):\n  {}",
+         T_s their T_eq to the bit; {radiative} under R09's radiative model, {} airless and {} \
+         under a thin air whose R09 inertia is not their record's:\n  {}\n  {}\n{deferred} \
+         published passes' lids read their record's warmest, deferred",
         settled_flips.len(),
         settled_flips.join("\n  "),
         bracketed_flips.len(),
         bracketed_flips.join("\n  "),
         airless_apart.len(),
+        thin_apart.len(),
         airless_apart.join("\n  "),
+        thin_apart.join("\n  "),
     );
+    // PD-1: R09's airless model reads its record's Γ on every airless body, bracketed ones too.
+    assert!(airless_apart.is_empty(), "{airless_apart:?}");
     // The ruling's measures, over all bodies (decision-p14-t54a-passes §1.8 and item 5): at most
     // 1% jumping, a diagonal or a context jump, at most 3% bracketed. Above either goes to main.
     assert!(100 * jumps <= total, "{jumps} of {total} jump");
@@ -5134,7 +5192,10 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
         "{planet_jumps} of {} planets jump",
         planets.bodies
     );
-    assert!(lids > 100 && airless > 100, "{lids} {airless}");
+    assert!(
+        lids > 100 && airless > 100 && radiative >= airless,
+        "{lids} {airless} {radiative}"
+    );
     assert!(
         tallies["planets"].bodies + tallies["members"].bodies > 100
             && tallies["moons"].bodies > 10
@@ -5153,7 +5214,11 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
 /// - **Round 2** takes every moon round 1 left unlocked: each is listed with its state and τ
 ///   under both rounds, its record's tides' τ and law, and whether it oscillates (unlocked after
 ///   round 1 and locked after round 2, or a round-2 law whose record's tides give the other
-///   state). At most 1% of the moons take it (a guard; above it goes to main).
+///   state). Its record is round 2's derivation to the bit where round 2 gave round 1's law to the
+///   bit, as every one does (test 1 for round 2; decision-p14-t54a-passes, main's G2).
+/// - **The guards**, as main restated them on C2's escalation (G2): the moons whose state differs
+///   between the rounds, with the oscillations, at most 1% of the moons; the regular moons in round
+///   2 at most 1% of the regular moons; and the round-2 count pinned at its measured 151.
 #[test]
 #[expect(
     clippy::too_many_lines,
@@ -5232,7 +5297,7 @@ fn a_moon_s_law_is_held_after_at_most_two_rounds() {
                         fate: &fate,
                     };
                     let round_one = system
-                        .moon_derived(
+                        .moon_derived_with(
                             &epoch,
                             &cosines,
                             &case,
@@ -5246,6 +5311,32 @@ fn a_moon_s_law_is_held_after_at_most_two_rounds() {
                 MoonRound::Second { first: law } => {
                     regular_second += usize::from(is_regular);
                     repeated += usize::from(*law == held.law);
+                    // Test 1 for round 2 (G2): where round 2 gave round 1's law to the bit, its
+                    // record, derived under the held law, is round 2's derivation, under round 1's.
+                    if *law == held.law {
+                        let case = MoonNow {
+                            body,
+                            moon,
+                            orbit,
+                            parent: &now,
+                            fate: &fate,
+                        };
+                        let round_two = system
+                            .moon_derived_with(
+                                &epoch,
+                                &cosines,
+                                &case,
+                                Some(SeasonalSpin::of(
+                                    law.frame(),
+                                    t,
+                                    &seasonal,
+                                    SeasonsFrom::Planet,
+                                )),
+                                PassDriver::Solve,
+                            )
+                            .unwrap();
+                        assert_eq!(record, round_two, "{index:?}");
+                    }
                     let oscillates = matches!(state(&held.law), SpinState::Locked(_))
                         || state(&record_law) != state(&held.law);
                     // A flip: round 2's law in another state than round 1's.
@@ -5297,6 +5388,199 @@ fn a_moon_s_law_is_held_after_at_most_two_rounds() {
         second.len() <= 151 && repeated == second.len(),
         "{} of {moons} took round 2, {repeated} repeating round 1's law",
         second.len()
+    );
+}
+
+/// Decision-p14-t54a-ganymede §C3.1 (Batch D's fix commit, RG1): over the first 60 whole systems
+/// at the epoch, the record lists an ice bulk's crust water as its `H2O` solid only where its lid is
+/// `H2O` (or not known). Against C3's rule, its crust water listed by the material alone
+/// (`with_crust_water_by_material`), every ice bulk under another lid that listed the entry lists
+/// none (counted, by lid: the ruling's 31 that listed it over some of their surface, and 3 more at
+/// no area), and nothing else of any record moves: its photometry,
+/// bulk, state, conditions (its climate regime among them) and crust to the bit, its other
+/// condensates in their order, and its figures to the bit but for the ice cover, which takes
+/// T24.b's water ice at the cover's ice area where the entry was, appended after the condensates'
+/// ices (the figures' rule where the condensates hold no `H2O` solid): the same items, a list the
+/// surface scales moving in its last bits by its total's new order (listed, with its sum).
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of the sample's records against C3's rule, each section compared"
+)]
+fn an_ice_bulk_under_a_dark_lid_lists_no_crust_water() {
+    use std::collections::BTreeMap;
+
+    use crate::planetary::chem::partition::CondensatePhase;
+    use hyperion_testkit::float;
+
+    use crate::planetary::hooks::crust::{CrustLithology, LidCrust};
+
+    let water = Gas::Water.substance();
+    let rendered = |entries: &[crate::planetary::chem::partition::CondensateEntry]| {
+        entries.iter().map(|e| format!("{e:?}")).collect::<Vec<_>>()
+    };
+    let (mut surfaces, mut dark, mut delisted, mut truncated) = (0_u32, 0_u32, 0_u32, 0_u32);
+    let mut at_no_area: Vec<String> = Vec::new();
+    let (mut ulp_covers, mut ulp_sums) = (0_u32, 0_u32);
+    let mut by_lid: BTreeMap<String, u32> = BTreeMap::new();
+    let mut covers: Vec<String> = Vec::new();
+    for (ctx, system) in whole().iter().take(60) {
+        let now = system.snapshot_at(ctx, UniverseTime::EPOCH);
+        let c3 = with_crust_water_by_material(|| system.snapshot_at(ctx, UniverseTime::EPOCH));
+        assert_eq!(now.bodies().len(), c3.bodies().len());
+        for (record, before) in now.bodies().iter().zip(c3.bodies()) {
+            let what = format!("{:?} {:?}", ctx.id(), record.index());
+            assert_eq!(
+                format!("{:?}", record.photometry()),
+                format!("{:?}", before.photometry()),
+                "{what}"
+            );
+            assert_eq!(
+                format!("{:?}", record.bulk()),
+                format!("{:?}", before.bulk()),
+                "{what}"
+            );
+            let (Section::Ok(surface), Section::Ok(old)) = (record.surface(), before.surface())
+            else {
+                assert_eq!(
+                    format!("{:?}", record.surface()),
+                    format!("{:?}", before.surface()),
+                    "{what}"
+                );
+                continue;
+            };
+            surfaces += 1;
+            assert_eq!(surface.state(), old.state(), "{what}");
+            assert_eq!(surface.material(), old.material(), "{what}");
+            assert_eq!(
+                format!("{:?}", surface.conditions()),
+                format!("{:?}", old.conditions()),
+                "{what}: the conditions, the climate regime among them"
+            );
+            assert_eq!(
+                format!("{:?}", surface.crust()),
+                format!("{:?}", old.crust()),
+                "{what}"
+            );
+            let lid = surface.crust().ok().map(|crust| {
+                match crust.lid() {
+                    LidCrust::Primary => crust.primary(),
+                    LidCrust::Secondary => crust.secondary(),
+                    LidCrust::Bulk => crust.bulk(),
+                }
+                .expect("a crust's lid names a crust it has")
+            });
+            let is_dark = surface.material() == SurfaceMaterial::Ice
+                && lid.is_some_and(|row| row != CrustLithology::Water.substance());
+            dark += u32::from(is_dark);
+            let listed = old
+                .condensates()
+                .entry(water, CondensatePhase::Solid)
+                .is_some();
+            let (entries, old_entries) = (
+                rendered(surface.condensates().entries()),
+                rendered(old.condensates().entries()),
+            );
+            if !(is_dark && listed) {
+                assert_eq!(entries, old_entries, "{what}");
+                assert_eq!(
+                    format!("{:?}", surface.figures()),
+                    format!("{:?}", old.figures()),
+                    "{what}"
+                );
+                continue;
+            }
+            // De-listed: the entry is gone, the others as they were, and an entry the list had
+            // truncated may follow them.
+            assert!(
+                surface
+                    .condensates()
+                    .entry(water, CondensatePhase::Solid)
+                    .is_none(),
+                "{what}"
+            );
+            let kept: Vec<String> = old
+                .condensates()
+                .entries()
+                .iter()
+                .filter(|e| !(e.substance() == water && e.phase() == CondensatePhase::Solid))
+                .map(|e| format!("{e:?}"))
+                .collect();
+            assert_eq!(entries[..kept.len()], kept[..], "{what}");
+            assert!(entries.len() <= kept.len() + 1, "{what}");
+            truncated += u32::from(entries.len() > kept.len());
+            delisted += 1;
+            if old
+                .condensates()
+                .entry(water, CondensatePhase::Solid)
+                .is_some_and(|e| e.area_fraction() <= 0.0)
+            {
+                at_no_area.push(what.clone());
+            }
+            let key = lid.map_or_else(
+                || "none".to_owned(),
+                |row| row.substance().key().as_str().to_owned(),
+            );
+            *by_lid.entry(key.clone()).or_default() += 1;
+            // The cover: the liquids as they were; the ices the same items, T24.b's water ice at
+            // the entry's area appended after the condensates' own.
+            let (figures, old_figures) = (surface.figures(), old.figures());
+            assert_eq!(
+                format!("{:?}", figures.surface_liquids()),
+                format!("{:?}", old_figures.surface_liquids()),
+                "{what}"
+            );
+            // The same substances, each once, each area within a few ulps of its own: a list the
+            // surface scales sums its total in the new order (`within_the_surface`).
+            let (ices, old_ices) = (figures.surface_ices(), old_figures.surface_ices());
+            assert_eq!(ices.len(), old_ices.len(), "{what}");
+            let mut moved_bits = false;
+            for &(id, area) in ices {
+                let &(_, was) = old_ices
+                    .iter()
+                    .find(|(other, _)| *other == id)
+                    .unwrap_or_else(|| panic!("{what}: {id:?} not in {old_ices:?}"));
+                assert!(
+                    (area - was).abs() <= 4.0 * f64::EPSILON * area.abs().max(was.abs()),
+                    "{what}: {id:?} {area:e} against {was:e}"
+                );
+                moved_bits |= float::bits(area) != float::bits(was);
+            }
+            assert_eq!(ices.last().map(|(id, _)| *id), Some(water), "{what}");
+            let sum_moved =
+                float::bits(figures.ice_fraction()) != float::bits(old_figures.ice_fraction());
+            ulp_covers += u32::from(moved_bits);
+            ulp_sums += u32::from(sum_moved);
+            covers.push(format!(
+                "{what}: lid {key}, ices {ices:?} (was {old_ices:?}), sum {:e} (was {:e}){}",
+                figures.ice_fraction(),
+                old_figures.ice_fraction(),
+                if moved_bits {
+                    ", areas moved in their last bits"
+                } else {
+                    ""
+                },
+            ));
+        }
+    }
+    eprintln!(
+        "{surfaces} surfaces, {dark} ice bulks under a non-H2O lid; {delisted} de-listed their H2O \
+         solid ({truncated} with a truncated entry back, {} at no area: {at_no_area:?}), by lid \
+         {by_lid:?}; {ulp_covers} ice covers moved in their last bits, {ulp_sums} sums:\n  {}",
+        at_no_area.len(),
+        covers.join("\n  ")
+    );
+    // The ruling's count (§C3.1) is the 31 that listed the entry over some of their surface. The
+    // same rule de-lists 3 more, whose entry lay at no area (61ffd9680000000c's 0201 and 0202 and
+    // 42002cb1ffc00004's 0401, under `chondrite_h`, `chondrite_ll` and `basalt_fe` lids), which
+    // C3's count of entries over the surface left out.
+    assert_eq!(
+        (
+            delisted - u32::try_from(at_no_area.len()).expect("a few bodies"),
+            at_no_area.len()
+        ),
+        (31, 3),
+        "{by_lid:?}"
     );
 }
 
@@ -6278,6 +6562,11 @@ fn every_host_shade_off_its_book_is_its_own_to_the_bit() {
 /// each checked as it is read (`PassFree::Checked`); and the generated systems (every law,
 /// Laplace frame, satellite, ring and moon) and their snapshots at the epoch are the same, bit for
 /// bit, with the lever and without it (`PassFree::Unlevered`).
+///
+/// (e1) and (e2) are checked against paths of their own. (e3) is a structural move with no
+/// independent check (Batch D's review, RD1): `primary_record` builds its record on
+/// `primary_now_under`, which the record-free read's `primary_now` wraps, so its oracle is that
+/// function again, and its count is the reads' count alone.
 #[test]
 fn generation_s_dead_derivations_move_no_bit_of_the_sample() {
     let (read, checked) = with_pass_free(PassFree::Checked, sixty_rendered);

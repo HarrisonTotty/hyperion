@@ -359,8 +359,10 @@ fn class_bonds(host: Kelvin) -> ([f64; SUDARSKY_CLASSES], f64) {
 /// ([`liquid_shares`]), each of its whole spectrum, weighted by its flux at the body, its
 /// gas-envelope albedos by class flux-weighted ([`class_bonds`]), the water cloud's albedo
 /// calibrated on Earth ([`water_cloud_albedo`]) and the reference cloud column
-/// ([`reference_cloud_column`]), built once per body before its passes ([`HostShadeSum`]) and never
-/// across bodies. A call chain's [`ShadeBook`] holds what its bodies' shades share.
+/// ([`reference_cloud_column`]), summed once per body before its passes ([`HostShadeSum`]), its
+/// own hosts' fluxes never shared across bodies. What those sums read alike, the two constants and
+/// each luminous host's light at its effective temperature, a call chain's [`ShadeBook`] computes
+/// once for all its bodies (lever (d)), where it holds one.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct HostShade {
     bands: [f64; OPTICS_BANDS],
@@ -488,13 +490,13 @@ impl ShadeBook {
         book
     }
 
-    /// The same book with the light of one more host of effective temperature `host`, a moon's
-    /// planet's own glow, if it is not in it already (and is positive and finite).
+    /// The book with the light of one more host of effective temperature `host`, a moon's
+    /// planet's own glow, if it is not in it already (and is positive and finite). It takes the
+    /// book, so that the caller decides where a copy is made.
     #[must_use]
-    pub(crate) fn with_host(&self, host: Kelvin) -> Self {
-        let mut book = self.clone();
-        book.add(host);
-        book
+    pub(crate) fn with_host(mut self, host: Kelvin) -> Self {
+        self.add(host);
+        self
     }
 
     /// Adds the light of a host of effective temperature `host` unless it holds it already or the
@@ -1139,7 +1141,10 @@ fn moon_bond() -> f64 {
 /// silicate body against today's value, and it lets an intrinsically dark row go darker. Labelled
 /// ([`StandIn::SpaceWeathering`]); P14.T54.b deletes it and weathers the area mix with R10.T1.d's
 /// law over P14.T51.d's maturity and rate, through [`Regolith::weathered`]
-/// (decision-p14-t51d-weathering).
+/// (decision-p14-t51d-weathering), but only for the lids whose rows carry their darkening agent
+/// (decision-pre-23-review item 16), and not on `basalt_reduced` before P14.T49.k's graphite-bearing
+/// reduced basalt lands (item 3: its fresh row, 0.53 about a Sun, weathered alone would leave a
+/// Mercury about five times too bright).
 #[must_use]
 pub(crate) fn airless_silicate_stand_in(row: f64) -> f64 {
     let cap = moon_bond();
@@ -1381,8 +1386,9 @@ const REFERENCE_CLOUD_TEMPERATURE_K: f64 = 273.15;
 /// water's at P14.T24.c's surface humidity and its saturation at 273.15 K over Earth's gravity,
 /// h `p_sat` ÷ g = 0.77 × 611 Pa ÷ 9.82 m s⁻² ≈ 47.9 kg m⁻², in the model's own measure (the
 /// registry's T49.b curve), so that the generated Earth, whose column is some 130 kg m⁻², keeps a
-/// full cover with margin and a Mars-like dry world falls near none. Computed once a body, into
-/// its [`HostShade`].
+/// full cover with margin and a Mars-like dry world falls near none. Computed once a call chain,
+/// into its [`ShadeBook`] (lever (d)), or once a body where none is held, and carried into each
+/// body's [`HostShade`].
 ///
 /// # Panics
 ///

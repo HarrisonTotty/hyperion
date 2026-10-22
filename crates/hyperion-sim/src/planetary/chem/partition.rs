@@ -69,6 +69,7 @@ use crate::math;
 use crate::planetary::derive::atmosphere::{
     Gas, METHANE_RELATIVE_HUMIDITY, MOLAR_GAS_CONSTANT, SurfaceMaterial, SurfaceState,
 };
+use crate::planetary::hooks::crust::CrustLithology;
 #[cfg(doc)]
 use crate::planetary::hooks::figures::cover::{
     self, AIRLESS_ICE_TEMPERATURE, DRY_SURFACE_WATER_SHARE,
@@ -1767,29 +1768,62 @@ pub struct WaterCover {
 }
 
 /// Whether water's solid entry lists an ice bulk's crust where the surface water holds none
-/// ([`WaterCover::crust_water`]; decision-p14-t54a-ganymede, C1 follow-up §C1.4).
+/// ([`WaterCover::crust_water`]; decision-p14-t54a-ganymede, C1 follow-up §C1.4, as §C3.1
+/// amended it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum CrustWater {
-    /// Listed: the record's, on a body whose bulk is ice ([`SurfaceMaterial::Ice`]), whose crust
-    /// is its water. Its entry is then the partition's whole frozen water, the crust's ice-held
-    /// water, shell and deeper ice, at [`WaterCover::ice_fraction`], until P14.T53.c divides it;
-    /// the surface water, the water free to pool, stays P14.T13.b's, on water's Jeans verdict.
+    /// Listed: the record's, on a body whose bulk is ice ([`SurfaceMaterial::Ice`]) whose lid is
+    /// `H2O` (or not known), whose crust is its water. Its entry is then the partition's whole
+    /// frozen water, the crust's ice-held water, shell and deeper ice, at
+    /// [`WaterCover::ice_fraction`], until P14.T53.c divides it; the surface water, the water free
+    /// to pool, stays P14.T13.b's, on water's Jeans verdict.
     ///
     /// [`SurfaceMaterial::Ice`]: crate::planetary::derive::atmosphere::SurfaceMaterial::Ice
     Listed,
-    /// Not listed: off an ice bulk, and in T13.c's passes, whose area mix reads an ice bulk's
-    /// crust as its regolith.
+    /// Not listed: off an ice bulk; on an ice bulk under any other lid (`cometary`, a chondrite,
+    /// `phyllosilicate`, a silicate), whose crust's water stays in the bulk, unlisted, until
+    /// P14.T53.c divides it (decision-p14-t54a-ganymede §C3.1): the lid's row is the surface the
+    /// albedo reads, and the cover's ice area under it is the ice table beneath the lag, which the
+    /// record does not publish; and in T13.c's passes, whose area mix reads an ice bulk's crust as
+    /// its regolith.
     Unlisted,
 }
 
 impl CrustWater {
-    /// The record's, on a body whose bulk is of `material`: [`Listed`](Self::Listed) on an ice bulk
-    /// ([`SurfaceMaterial::Ice`]), [`Unlisted`](Self::Unlisted) on rock.
+    /// The record's, on a body whose bulk is of `material` under the lid `lid`, its published
+    /// pass's own, whose row its regolith read (decision-p14-t54a-ganymede §C3.1):
+    /// [`Listed`](Self::Listed) on an ice bulk ([`SurfaceMaterial::Ice`]) whose lid is
+    /// [`CrustLithology::Water`] or not known (`None`: the passes' stand-in, or a basis refused,
+    /// whose regolith is the material's stand-in row, `H2O` on an ice bulk), so that the entry is
+    /// listed exactly where the row the albedo read is `H2O`; [`Unlisted`](Self::Unlisted) on rock
+    /// and under any other lid.
     #[must_use]
-    pub(crate) const fn of_record(material: SurfaceMaterial) -> Self {
-        match material {
-            SurfaceMaterial::Ice => Self::Listed,
-            SurfaceMaterial::Rock => Self::Unlisted,
+    pub(crate) const fn of_record(material: SurfaceMaterial, lid: Option<CrustLithology>) -> Self {
+        match (material, lid) {
+            (SurfaceMaterial::Ice, None | Some(CrustLithology::Water)) => Self::Listed,
+            (
+                SurfaceMaterial::Ice,
+                Some(
+                    CrustLithology::Graphite
+                    | CrustLithology::Feldspathic
+                    | CrustLithology::Basalt
+                    | CrustLithology::IronRichBasalt
+                    | CrustLithology::Komatiite
+                    | CrustLithology::ReducedBasalt
+                    | CrustLithology::Granite
+                    | CrustLithology::Ultramafic
+                    | CrustLithology::Phyllosilicate
+                    | CrustLithology::ChondriteCi
+                    | CrustLithology::ChondriteCm
+                    | CrustLithology::ChondriteCv
+                    | CrustLithology::ChondriteH
+                    | CrustLithology::ChondriteL
+                    | CrustLithology::ChondriteLl
+                    | CrustLithology::ChondriteE
+                    | CrustLithology::Cometary,
+                ),
+            )
+            | (SurfaceMaterial::Rock, _) => Self::Unlisted,
         }
     }
 }
@@ -1970,10 +2004,12 @@ fn ice_line(
 /// share of the substance's reservoir, its global equivalent layer, the area it covers and whether
 /// it is seasonal ([`Partition::publish`]).
 ///
-/// On an ice-bulk body the `H2O` solid entry is the crust's ice-held frozen water, all of it
-/// (shell and deeper ice), at the cover's ice area, until P14.T53.c divides it; T24.b's surface
-/// water, the water free to pool, is T13.b's (decision-p14-t54a-ganymede, C1 follow-up §C1.4;
-/// [`WaterCover::crust_water`]).
+/// On an ice-bulk body whose lid is `H2O` (or not known) the `H2O` solid entry is the crust's
+/// ice-held frozen water, all of it (shell and deeper ice), at the cover's ice area, until
+/// P14.T53.c divides it; under any other lid (`cometary`, a chondrite, `phyllosilicate`, a
+/// silicate) the crust's water stays in the bulk, unlisted, until P14.T53.c divides it. T24.b's
+/// surface water, the water free to pool, is T13.b's (decision-p14-t54a-ganymede, C1 follow-up
+/// §C1.4, as §C3.1 amended it; [`WaterCover::crust_water`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CondensateEntry {
     substance: SubstanceId,
@@ -2435,10 +2471,11 @@ fn water_parts(
 
 /// The solid of an ice bulk's crust, water's condensate `c` under its cover `water` where the
 /// surface water holds none ([`WaterCover::crust_water`]; decision-p14-t54a-ganymede, C1 follow-up
-/// §C1.4): the partition's whole frozen water, the crust's ice-held water, at T24.b's ice area,
-/// its layer at the cover's ice density. None off an ice bulk, and none for water that does not
-/// lie as ice: a sea is T24.b's surface water, on water's Jeans verdict. Its seasonal flag is its
-/// solid's.
+/// §C1.4): on an ice bulk whose lid is `H2O` (or not known), the partition's whole frozen water,
+/// the crust's ice-held water, at T24.b's ice area, its layer at the cover's ice density. None off
+/// an ice bulk, and none under any other lid, where the crust's water stays in the bulk, unlisted,
+/// until P14.T53.c divides it (§C3.1); none for water that does not lie as ice: a sea is T24.b's
+/// surface water, on water's Jeans verdict. Its seasonal flag is its solid's.
 #[must_use]
 fn crust_ice(c: &Condensate, water: &WaterCover) -> Option<Part> {
     let mass = c.reservoir.value();

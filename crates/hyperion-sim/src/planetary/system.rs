@@ -107,11 +107,12 @@ use crate::planetary::chem::inventory::ElementInventory;
 use crate::planetary::chem::partition::{Condensates, CrustWater, Partition};
 use crate::planetary::chem::{AbundanceDraws, HostAbundances};
 use crate::planetary::context::{SystemContext, XuvHistory};
-use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceMaterial, VolatileDraws};
+use crate::planetary::derive::atmosphere::{Atmosphere, SurfaceMaterial, VolatileDraws};
 use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
 use crate::planetary::derive::irradiation::{BondAlbedo, luminosity_flux};
 use crate::planetary::derive::pass_record::{
-    PassBulk, PassContext, PassRecord, PassRecordOf, RecordCrust, RecordSpin, WaterGate,
+    ContextTide, PassBulk, PassContext, PassRecord, PassRecordOf, RecordCrust, RecordSpin,
+    WaterGate,
 };
 use crate::planetary::derive::photometry::area_mix::ShadeBook;
 use crate::planetary::derive::photometry::{BodyPhotometry, PhotometryInputs};
@@ -133,8 +134,8 @@ use crate::planetary::halo::{
 };
 use crate::planetary::hooks::cold_traps::{self, ColdTrapRules, ColdTrapSky, RecordColdTraps};
 use crate::planetary::hooks::crust::{
-    CrustComposition, CrustLid, CrustOrigin, CrustRecord, FormationWindow, ParentSurface,
-    formation_time,
+    CrustComposition, CrustLid, CrustLithology, CrustOrigin, CrustRecord, FormationWindow,
+    ParentSurface, formation_time,
 };
 use crate::planetary::hooks::figures::{
     BeltMembership, Continents, CraterInputs, FiguresInputs, HostOrbit, HostOrbiter, ImpactorOrbit,
@@ -2009,7 +2010,13 @@ impl PlanetarySystem {
             .iter()
             .zip(&fates)
             .map(|(body, fate)| {
-                let fate = fate.as_ref()?;
+                match body.part {
+                    Part::Planet(_) | Part::Member(_) => {}
+                    Part::Moon(_) | Part::Ring(_) => return None,
+                }
+                let fate = fate
+                    .as_ref()
+                    .expect("every planet and member orbits one of its system's zones");
                 let at = fate.at(epoch.t);
                 match at.state() {
                     BodyState::Present => {}
@@ -2054,6 +2061,24 @@ impl PlanetarySystem {
         placed: &PlacedBody,
         host_mass: SolarMasses,
     ) -> DerivedBulk {
+        self.with_hosts(epoch, zone, host_mass, |disc, hosts| {
+            derive_bulk(placed, hosts, disc, epoch.ctx.age_at_epoch(), epoch.t).expect(
+                "a present body's system is born, and a placed planet lies below 13 Jupiter masses",
+            )
+        })
+    }
+
+    /// `read` of the disc the present planet or member of `zone` formed in and its hosts at the
+    /// epoch's time, of total mass `host_mass`, with the epoch's book of shades: the one setup of
+    /// [`derive`](Self::derive) and [`derive_before_passes`](Self::derive_before_passes), so that
+    /// the rotation pass's hosts are the record's by construction (Batch D's review, RD2).
+    fn with_hosts<R>(
+        &self,
+        epoch: &Epoch<'_>,
+        zone: &OrbitZone,
+        host_mass: SolarMasses,
+        read: impl FnOnce(&DiscProfile, &BodyHosts<'_>) -> R,
+    ) -> R {
         let disc = self
             .host(zone.host())
             .and_then(|host| host.disc.profile())
@@ -2072,9 +2097,7 @@ impl PlanetarySystem {
         )
         .expect("a present body orbits a positive mass and at least one star")
         .with_shades(epoch.shades.as_ref());
-        derive_bulk(placed, &hosts, disc, epoch.ctx.age_at_epoch(), epoch.t).expect(
-            "a present body's system is born, and a placed planet lies below 13 Jupiter masses",
-        )
+        read(disc, &hosts)
     }
 
     /// The record of body `index` at `t`, at [`DetailLevel::Full`](crate::planetary::record::DetailLevel::Full)
@@ -2114,8 +2137,7 @@ impl PlanetarySystem {
         index: BodyIndex,
         t: UniverseTime,
     ) -> Result<BodyRecord, ResolveBodyError> {
-        let epoch = Epoch::new(self, ctx, t).with_shades();
-        let cosines = HourCosines::new();
+        let epoch = Epoch::new(self, ctx, t);
         let label = label::label(self, index).ok_or(ResolveBodyError::NoSuchBody)?;
         if let Some(belt) = self.belt(index) {
             return Ok(self.belt_record(&epoch, belt, label));
@@ -2123,6 +2145,9 @@ impl PlanetarySystem {
         if let Some(halo) = self.halo.as_ref().filter(|halo| halo.halo.index() == index) {
             return Ok(self.halo_record(&epoch, halo, label));
         }
+        // A planet's, member's or satellite's record derives its bodies: their shades' book.
+        let epoch = epoch.with_shades();
+        let cosines = HourCosines::new();
         let body = self.body(index).ok_or(ResolveBodyError::NoSuchBody)?;
         match body.host {
             OrbitHost::Body(parent) => {
@@ -2362,7 +2387,7 @@ impl PlanetarySystem {
                         fate: &fate,
                     };
                     let spin = Self::moon_spin(body, &fate, t);
-                    match self.moon_derived(&epoch, &cosines, &at, spin, PassDriver::Solve) {
+                    match self.moon_derived_with(&epoch, &cosines, &at, spin, PassDriver::Solve) {
                         Some(derived) => {
                             let properties = Self::moon_bulk_of(moon, &derived, &now);
                             bulk_composition(
@@ -2393,9 +2418,10 @@ impl PlanetarySystem {
     }
 
     /// The surface section of the planet, member or moon `body` at the epoch's time
-    /// (P14.T24.a–b, T48.a–d, P14.T48.e), whose primary, itself or a moon's planet, goes round its
-    /// hosts as `fate` tells, read as `of` describes it ([`published_surface`]), under the spin
-    /// `spin` its record computed once for its passes and its surface (P14.T54.a):
+    /// (P14.T24.a–b, T48.a–d, P14.T48.e), read as `of` describes it ([`published_surface`]), under
+    /// the spin `spun` its record computed once for its passes and its surface, with its insolation
+    /// table and its frame, which holds what its primary, itself or a moon's planet, reads of its
+    /// hosts (P14.T54.a; Batch D's review, R2-3):
     /// [`Section::NotModelled`] for a body with no rotation law, every body [`generate_planets`]
     /// makes, before anything else is read.
     ///
@@ -2418,23 +2444,21 @@ impl PlanetarySystem {
     #[must_use]
     fn surface_section(
         &self,
-        epoch: &Epoch<'_>,
-        cosines: &HourCosines,
-        (body, fate): (&Body, &BodyFate<'_>),
+        body: &Body,
         of: SurfaceOf<'_>,
-        spin: Option<SeasonalSpin>,
+        spun: BodySpin<'_>,
     ) -> Section<Surface> {
-        let Some(spin) = spin else {
-            return Section::NotModelled;
+        let SpunBody { spin, table, frame } = match spun {
+            BodySpin::Spun(spun) => spun,
+            BodySpin::StandIn => return Section::NotModelled,
         };
-        let frame = self.surface_frame(epoch, body, fate);
         let time = SurfaceTime {
             past: &frame.past,
             spin,
             seasonal: frame.seasonal.as_ref(),
             fe_h: frame.fe_h,
             age: frame.age,
-            cosines,
+            table,
         };
         let case = match of {
             SurfaceOf::Body { derived, bulk } => SurfaceCase {
@@ -2485,7 +2509,7 @@ impl PlanetarySystem {
     fn surface_frame<'s>(
         &'s self,
         epoch: &Epoch<'s>,
-        body: &Body,
+        body: &'s Body,
         fate: &'s BodyFate<'s>,
     ) -> SurfaceFrame<'s> {
         let (ctx, t) = (epoch.ctx, epoch.t);
@@ -2493,9 +2517,7 @@ impl PlanetarySystem {
             OrbitHost::Body(parent) => self
                 .body(parent)
                 .expect("a satellite's parent is a body of its system"),
-            OrbitHost::Star(_) | OrbitHost::Pair(_) | OrbitHost::Barycentre => self
-                .body(body.index)
-                .expect("a body is a body of its system"),
+            OrbitHost::Star(_) | OrbitHost::Pair(_) | OrbitHost::Barycentre => body,
         };
         let id = body.index.body_id(self.system);
         SurfaceFrame {
@@ -2906,36 +2928,55 @@ impl PlanetarySystem {
             &before.bulk.fractions(),
             now,
         ));
-        let law_of = |spin: SeasonalSpin| {
-            let derived =
-                self.moon_derived(epoch, cosines, &case, Some(spin), PassDriver::Solve)?;
+        // Its surface's frame once for both rounds, which read no spin of it (Batch D's review,
+        // R2-3).
+        let frame = self.surface_frame(epoch, body, fate);
+        let law_of = |spin: SeasonalSpin, table: &ZonalInsolation| {
+            let spun = BodySpin::Spun(SpunBody {
+                spin,
+                table,
+                frame: &frame,
+            });
+            let derived = self.moon_derived(epoch, &case, spun, PassDriver::Solve)?;
             self.rotation_from(ctx, body, &orbit, bulk, body.mass(), derived.spin_tides())
         };
         // Round 1, under the locked spin.
         let inputs =
             self.spin_inputs(ctx, body, &orbit, (bulk, body.mass()), SpinTides::OfClass)?;
-        let locked = BodyRotation::locked_frame(&inputs).ok()?;
+        let locked = BodyRotation::locked_frame(&inputs).expect(
+            "a present moon's record has a positive mass and radius, and the despinning time is \
+             positive",
+        );
         let locked = SeasonalSpin::of(&locked, t, &seasonal, SeasonsFrom::Planet);
-        let first = law_of(locked)?;
+        let table = ZonalInsolation::of(locked.obliquity, cosines);
+        let first = law_of(locked, &table)?;
         if matches!(first.frame().state_at(t), SpinState::Locked(_)) {
             return Some(HeldMoonLaw {
                 law: first,
+                #[cfg(test)]
                 round: MoonRound::First,
+                #[cfg(test)]
                 locked,
             });
         }
-        // Round 2, under round 1's law.
-        let second = law_of(SeasonalSpin::of(
-            first.frame(),
-            t,
-            &seasonal,
-            SeasonsFrom::Planet,
-        ))?;
+        // Round 2, under round 1's law, whose pole is the locked spin's: its table is round 1's
+        // where its obliquity is the same bits, as it is wherever the pole is (R2-3).
+        let spin = SeasonalSpin::of(first.frame(), t, &seasonal, SeasonsFrom::Planet);
+        let built;
+        let table = if table.is_at(spin.obliquity) {
+            &table
+        } else {
+            built = ZonalInsolation::of(spin.obliquity, cosines);
+            &built
+        };
+        let second = law_of(spin, table)?;
         Some(HeldMoonLaw {
             law: second,
+            #[cfg(test)]
             round: MoonRound::Second {
                 first: Box::new(first),
             },
+            #[cfg(test)]
             locked,
         })
     }
@@ -3095,7 +3136,8 @@ impl PlanetarySystem {
         match &body.part {
             Part::Planet(planet) => Some(planet.fate.formation().formed_at()),
             Part::Member(_) => {
-                let window = FormationWindow::disc(self.disc_lifetime(body)?).ok()?;
+                let window = FormationWindow::disc(self.disc_lifetime(body)?)
+                    .expect("a disc profile's lifetime is positive and finite");
                 Some(formation_time(
                     self.seed,
                     body.index.body_id(self.system),
@@ -3164,8 +3206,16 @@ impl PlanetarySystem {
         host: CrustHost,
     ) -> Option<CrustOf> {
         let craters = self.moon_craters(primary, moon, ice_fraction, orbit)?;
-        let ImpactorOrbit::Moon { formed, .. } = craters.orbit else {
-            return None;
+        let formed = match craters.orbit {
+            ImpactorOrbit::Moon { formed, .. } => formed,
+            ImpactorOrbit::Host(_) => {
+                debug_assert!(
+                    false,
+                    "{:?}: a moon's craters go round its parent",
+                    body.index
+                );
+                return None;
+            }
         };
         let lifetime = self.disc_lifetime(primary)?;
         let drawn = |window: FormationWindow| {
@@ -3174,6 +3224,8 @@ impl PlanetarySystem {
         let (origin, formation) = match moon.satellite.moon() {
             SatelliteMoon::Regular(_) => {
                 let formed_at = primary.formation()?.formed_at();
+                // A giant formed after its disc's end has no window for its regular moons: no crust
+                // (the doc's `None`), not a bug.
                 let window = FormationWindow::new(formed_at, lifetime).ok()?;
                 (CrustOrigin::RegularMoon, drawn(window))
             }
@@ -3189,7 +3241,10 @@ impl PlanetarySystem {
             }
             SatelliteMoon::Captured(_) => (
                 CrustOrigin::CapturedMoon,
-                drawn(FormationWindow::disc(lifetime).ok()?),
+                drawn(
+                    FormationWindow::disc(lifetime)
+                        .expect("a disc profile's lifetime is positive and finite"),
+                ),
             ),
         };
         Some(CrustOf {
@@ -3264,7 +3319,12 @@ impl PlanetarySystem {
         fate: &BodyFate<'_>,
     ) -> (BodyRecord, ParentNow) {
         let at = fate.at(epoch.t);
-        let now = self.primary_now(epoch, cosines, body, fate, &at);
+        // Its spin with its insolation table and its surface's frame, once a body, which its
+        // passes and its surface read (P14.T54.a; Batch D's review, R2-3).
+        let spin = Self::primary_spin(body, &at, epoch.t);
+        let owned = self.spin_frame(epoch, cosines, (body, fate), spin);
+        let body_spin = BodySpin::of(owned.as_ref());
+        let now = self.primary_now_under(epoch, (body, fate), &at, body_spin);
         let identity = BodyIdentity::new(
             self.system,
             body.index,
@@ -3302,7 +3362,7 @@ impl PlanetarySystem {
                         bulk: &bulk,
                     };
                     (
-                        self.surface_section(epoch, cosines, (body, fate), of, now.spin),
+                        self.surface_section(body, of, body_spin),
                         Section::NotApplicable,
                     )
                 } else {
@@ -3342,13 +3402,14 @@ impl PlanetarySystem {
 
     /// The planet or member `body` as its satellites read it at the epoch's time, where its
     /// history `fate` puts it `at` then: its state and next change, and for a body present then its
-    /// position, its derivation, its spin, its moons' sky, nursery and shades' book. It is what
-    /// [`primary_record`](Self::primary_record) builds its record on, and what [`parent_now`]
-    /// gives without the record (lever (e3)).
+    /// position, its derivation, its moons' sky, nursery and shades' book. It is what
+    /// [`parent_now`] gives without the record (lever (e3)), and what
+    /// [`primary_record`](Self::primary_record) builds its record on
+    /// ([`primary_now_under`](Self::primary_now_under), with the spin it builds once for both).
     ///
     /// A body with a held law is derived over its record (P14.T54.a): its spin under its law and
-    /// its own orbit then, computed once here for its passes and its record's surface, with its
-    /// insolation table over the call chain's hour angles' cosines `cosines`. One with none keeps
+    /// its own orbit then ([`primary_spin`](Self::primary_spin)), with its insolation table over
+    /// the call chain's hour angles' cosines `cosines` and its surface's frame. One with none keeps
     /// the passes' stand-in (no rotation law, no basins, the bulk material's regolith).
     ///
     /// [`parent_now`]: Self::parent_now
@@ -3361,12 +3422,26 @@ impl PlanetarySystem {
         fate: &BodyFate<'_>,
         at: &FateAt,
     ) -> ParentNow {
+        let spin = Self::primary_spin(body, at, epoch.t);
+        let owned = self.spin_frame(epoch, cosines, (body, fate), spin);
+        self.primary_now_under(epoch, (body, fate), at, BodySpin::of(owned.as_ref()))
+    }
+
+    /// [`primary_now`](Self::primary_now) of `body` under the spin `spun` its caller built once
+    /// for it ([`spin_frame`](Self::spin_frame)), the stand-in where it holds no law.
+    #[must_use]
+    fn primary_now_under(
+        &self,
+        epoch: &Epoch<'_>,
+        (body, fate): (&Body, &BodyFate<'_>),
+        at: &FateAt,
+        spun: BodySpin<'_>,
+    ) -> ParentNow {
         let mut now = ParentNow {
             state: at.state(),
             changes_at: at.changes_at(),
             position: None,
             derived: None,
-            spin: None,
             sky: None,
             nursery: None,
             shades: None,
@@ -3374,20 +3449,19 @@ impl PlanetarySystem {
         match at.state() {
             BodyState::Present => {
                 let zone = self.zone_of(body);
-                let (derived, sky, spin) =
-                    self.primary_derived(epoch, cosines, (body, fate), at, PassDriver::Solve);
+                let (derived, sky) =
+                    self.primary_derived_under(epoch, (body, fate), at, spun, PassDriver::Solve);
                 let position = epoch.position(
                     zone,
                     at.trajectory().expect("a present body has a trajectory"),
                 );
                 now.position = Some(position);
                 now.derived = Some(derived);
-                now.spin = spin;
                 // Its moons' shades read the epoch's book with its own glow in it (lever (d)).
-                now.shades = sky
-                    .as_ref()
-                    .zip(epoch.shades.as_ref())
-                    .map(|(sky, book)| book.with_host(sky.planet_light().effective_temperature()));
+                now.shades = sky.as_ref().zip(epoch.shades.as_ref()).map(|(sky, book)| {
+                    book.clone()
+                        .with_host(sky.planet_light().effective_temperature())
+                });
                 now.sky = sky;
                 now.nursery = self.nursery(epoch.ctx, body);
             }
@@ -3396,11 +3470,100 @@ impl PlanetarySystem {
         now
     }
 
+    /// The spin at `t` of the planet or member `body`, where its history puts it `at` then: its
+    /// held law's under its own orbit then, its seasons' ([`SeasonalSpin::of`],
+    /// [`SeasonsFrom::Own`]; P14.T54.a). `None` for a body with no law, or not present then.
+    #[must_use]
+    fn primary_spin(body: &Body, at: &FateAt, t: UniverseTime) -> Option<SeasonalSpin> {
+        match at.state() {
+            BodyState::Present => {}
+            BodyState::NotYetFormed | BodyState::Destroyed { .. } | BodyState::Unbound { .. } => {
+                return None;
+            }
+        }
+        let orbit = at.orbit().expect("a present body has an orbit");
+        let rotation = body.rotation.as_ref()?;
+        Some(SeasonalSpin::of(
+            rotation.frame(),
+            t,
+            orbit,
+            SeasonsFrom::Own,
+        ))
+    }
+
+    /// What the passes and the record's surface of `body`, whose primary goes round its hosts as
+    /// `fate` tells, read of its spin `spin`, built once (P14.T54.a; Batch D's review, R2-3): the
+    /// spin, its obliquity's insolation table over the call chain's hour angles' cosines
+    /// `cosines`, and its surface's frame ([`surface_frame`](Self::surface_frame)). `None` with no
+    /// spin, the stand-in's.
+    #[must_use]
+    fn spin_frame<'s>(
+        &'s self,
+        epoch: &Epoch<'s>,
+        cosines: &HourCosines,
+        (body, fate): (&'s Body, &'s BodyFate<'s>),
+        spin: Option<SeasonalSpin>,
+    ) -> Option<SpinFrame<'s>> {
+        let spin = spin?;
+        Some(SpinFrame {
+            spin,
+            table: ZonalInsolation::of(spin.obliquity, cosines),
+            frame: self.surface_frame(epoch, body, fate),
+        })
+    }
+
     /// The derivation of the planet or member `body`, present at the epoch's time where its
-    /// history `fate` puts it `at`, its passes driven by `driver`, with its moons' sky and the
-    /// spin it was derived under ([`primary_now`](Self::primary_now)): over its record where it
-    /// holds a law, its spin computed once here, and over the passes' stand-in where it holds
-    /// none.
+    /// history `fate` puts it `at`, its passes driven by `driver`, with its moons' sky
+    /// ([`primary_now`](Self::primary_now)): over its record under the spin `spun` where it holds
+    /// a law, its spin, table and frame built once by its caller, and over the passes' stand-in
+    /// where it holds none.
+    #[must_use]
+    fn primary_derived_under(
+        &self,
+        epoch: &Epoch<'_>,
+        (body, fate): (&Body, &BodyFate<'_>),
+        at: &FateAt,
+        spun: BodySpin<'_>,
+        driver: PassDriver,
+    ) -> (DerivedBody, Option<MoonSky>) {
+        let zone = self.zone_of(body);
+        let orbit = at.orbit().expect("a present body has an orbit");
+        let placed = Self::placed_now(body, orbit, at.mass());
+        let host_mass = fate.host_mass(epoch.t);
+        let SpunBody { spin, table, frame } = match spun {
+            BodySpin::Spun(spun) => spun,
+            BodySpin::StandIn => {
+                return self.derive(
+                    epoch,
+                    body,
+                    zone,
+                    &placed,
+                    host_mass,
+                    (PassRecord::StandIn, driver),
+                );
+            }
+        };
+        let passes = PrimaryPasses {
+            frame,
+            spin,
+            table,
+            body,
+            craters: self.body_craters(body),
+            crust: self.primary_crust(epoch.ctx, body),
+        };
+        self.derive(
+            epoch,
+            body,
+            zone,
+            &placed,
+            host_mass,
+            (PassRecord::Record(&passes), driver),
+        )
+    }
+
+    /// [`primary_derived_under`](Self::primary_derived_under) of the present `body` with its spin,
+    /// table and frame built here over `cosines` (the tests'), and the spin it was derived under.
+    #[cfg(test)]
     #[must_use]
     fn primary_derived(
         &self,
@@ -3410,45 +3573,16 @@ impl PlanetarySystem {
         at: &FateAt,
         driver: PassDriver,
     ) -> (DerivedBody, Option<MoonSky>, Option<SeasonalSpin>) {
-        let zone = self.zone_of(body);
-        let orbit = at.orbit().expect("a present body has an orbit");
-        let placed = Self::placed_now(body, orbit, at.mass());
-        let host_mass = fate.host_mass(epoch.t);
-        // Its spin, once a body: its held law's under its own orbit then, its seasons' (P14.T54.a).
-        let spin = body
-            .rotation
-            .as_ref()
-            .map(|rotation| SeasonalSpin::of(rotation.frame(), epoch.t, orbit, SeasonsFrom::Own));
-        let Some(spin) = spin else {
-            let (derived, sky) = self.derive(
-                epoch,
-                body,
-                zone,
-                &placed,
-                host_mass,
-                (PassRecord::StandIn, driver),
-            );
-            return (derived, sky, None);
-        };
-        let frame = self.surface_frame(epoch, body, fate);
-        let table = ZonalInsolation::of(spin.obliquity, cosines);
-        let passes = PrimaryPasses {
-            frame: &frame,
-            spin,
-            table: &table,
-            body,
-            craters: self.body_craters(body),
-            crust: self.primary_crust(epoch.ctx, body),
-        };
-        let (derived, sky) = self.derive(
+        let spin = Self::primary_spin(body, at, epoch.t);
+        let owned = self.spin_frame(epoch, cosines, (body, fate), spin);
+        let (derived, sky) = self.primary_derived_under(
             epoch,
-            body,
-            zone,
-            &placed,
-            host_mass,
-            (PassRecord::Record(&passes), driver),
+            (body, fate),
+            at,
+            BodySpin::of(owned.as_ref()),
+            driver,
         );
-        (derived, sky, Some(spin))
+        (derived, sky, spin)
     }
 
     /// The hooks section of the record of body `index`, a planet, moon or dwarf planet present at
@@ -3547,10 +3681,13 @@ impl PlanetarySystem {
                     parent,
                     fate,
                 };
-                // Its spin, once a moon: its held law's under its planet's orbit then, which its
-                // passes and its surface read (P14.T54.a).
-                let spin = Self::moon_spin(body, fate, t);
-                let derived = self.moon_derived(epoch, cosines, &now, spin, PassDriver::Solve);
+                // Its spin, once a moon: its held law's under its planet's orbit then, with its
+                // insolation table and its surface's frame, which its passes and its surface read
+                // (P14.T54.a; Batch D's review, R2-3).
+                let owned =
+                    self.spin_frame(epoch, cosines, (body, fate), Self::moon_spin(body, fate, t));
+                let spun = BodySpin::of(owned.as_ref());
+                let derived = self.moon_derived(epoch, &now, spun, PassDriver::Solve);
                 let bulk = derived
                     .as_ref()
                     .map(|derived| (Self::moon_bulk_of(moon, derived, parent), derived));
@@ -3569,10 +3706,7 @@ impl PlanetarySystem {
                                 bulk: &bulk,
                                 orbit: &orbit,
                             };
-                            (
-                                self.surface_section(epoch, cosines, (body, fate), of, spin),
-                                Section::NotApplicable,
-                            )
+                            (self.surface_section(body, of, spun), Section::NotApplicable)
                         } else {
                             (Section::NotApplicable, Section::NotModelled)
                         }
@@ -3653,7 +3787,7 @@ impl PlanetarySystem {
             fate,
         };
         let spin = Self::moon_spin(body, fate, epoch.t);
-        self.moon_derived(epoch, &HourCosines::new(), &case, spin, driver)
+        self.moon_derived_with(epoch, &HourCosines::new(), &case, spin, driver)
     }
 
     /// The spin at `t` of the moon `body` under its held law and its planet's orbit then, as its
@@ -3677,18 +3811,17 @@ impl PlanetarySystem {
     /// ([`moon_own_bulk`](Self::moon_own_bulk); T56.c's follow-up and P14.T56.d); `None` where
     /// this generator version does not compute it.
     ///
-    /// Its passes are over its record under the spin `spin` (P14.T54.a): its held law's, or for
+    /// Its passes are over its record under the spin `spun` (P14.T54.a): its held law's, or for
     /// its law's rounds the locked spin or the first round's ([`moon_law`](Self::moon_law)), with
-    /// its insolation table over the call chain's hour angles' cosines `cosines`; with no spin,
-    /// the passes' stand-in (no rotation law, no basins, the bulk material's regolith). `driver`
-    /// drives them.
+    /// its insolation table and its surface's frame, built once by its caller; under the
+    /// stand-in, the passes' stand-in (no rotation law, no basins, the bulk material's regolith).
+    /// `driver` drives them.
     #[must_use]
     fn moon_derived(
         &self,
         epoch: &Epoch<'_>,
-        cosines: &HourCosines,
         now: &MoonNow<'_>,
-        spin: Option<SeasonalSpin>,
+        spun: BodySpin<'_>,
         driver: PassDriver,
     ) -> Option<DerivedMoon> {
         let (moon, parent) = (now.moon, now.parent);
@@ -3699,24 +3832,20 @@ impl PlanetarySystem {
             return None;
         };
         let inputs = Self::moon_inputs(moon, &now.orbit, parent);
-        let frame;
-        let table;
         let passes;
-        let record: Option<&dyn MoonRecordOf> = match spin {
-            Some(spin) => {
-                frame = self.surface_frame(epoch, now.body, now.fate);
-                table = ZonalInsolation::of(spin.obliquity, cosines);
+        let record: Option<&dyn MoonRecordOf> = match spun {
+            BodySpin::Spun(SpunBody { spin, table, frame }) => {
                 passes = SatellitePasses {
                     system: self,
-                    frame: &frame,
+                    frame,
                     spin,
-                    table: &table,
+                    table,
                     now,
                     host: self.crust_host(epoch.ctx),
                 };
                 Some(&passes)
             }
-            None => None,
+            BodySpin::StandIn => None,
         };
         // As above: the derivation refuses only inputs the generator never makes, so its error
         // carries nothing a caller could act on.
@@ -3730,6 +3859,22 @@ impl PlanetarySystem {
             MoonPasses { record, driver },
         )
         .ok()
+    }
+
+    /// [`moon_derived`](Self::moon_derived) under the spin `spin`, its insolation table over the
+    /// call chain's hour angles' cosines `cosines` and its surface's frame built here, or the
+    /// stand-in with no spin: for a caller that derives the moon once.
+    #[must_use]
+    fn moon_derived_with(
+        &self,
+        epoch: &Epoch<'_>,
+        cosines: &HourCosines,
+        now: &MoonNow<'_>,
+        spin: Option<SeasonalSpin>,
+        driver: PassDriver,
+    ) -> Option<DerivedMoon> {
+        let owned = self.spin_frame(epoch, cosines, (now.body, now.fate), spin);
+        self.moon_derived(epoch, now, BodySpin::of(owned.as_ref()), driver)
     }
 
     /// The moon `now` describes derived before its passes (lever (e); [`moon_before_passes`]):
@@ -3749,6 +3894,8 @@ impl PlanetarySystem {
             (epoch.ctx.age_at_epoch(), epoch.t),
             parent.shades.as_ref(),
         )
+        // As `moon_derived`: the derivation refuses only inputs the generator never makes, so its
+        // error carries nothing a caller could act on, and the moon's law is not computed.
         .ok()
     }
 
@@ -4053,34 +4200,19 @@ impl PlanetarySystem {
         host_mass: SolarMasses,
         (record, driver): (PassRecord<'_>, PassDriver),
     ) -> (DerivedBody, Option<MoonSky>) {
-        let disc = self
-            .host(zone.host())
-            .and_then(|host| host.disc.profile())
-            .expect("a host with planets has a disc");
-        let orbited = epoch
-            .lights(zone)
-            .expect("a present body's host stars have formed");
-        let companions = epoch
-            .companions(zone)
-            .expect("a system's stars are coeval, so every one has formed");
-        let hosts = BodyHosts::new(
-            Kilograms::from(host_mass),
-            *epoch.ctx.composition(),
-            &orbited,
-            &companions,
-        )
-        .expect("a present body orbits a positive mass and at least one star")
-        .with_shades(epoch.shades.as_ref());
-        let age = epoch.ctx.age_at_epoch();
-        let derived = derive_body_driven(driver, placed, &hosts, disc, age, epoch.t, record)
-            .expect(
-                "a present body's system is born, and a placed planet lies below 13 Jupiter masses",
-            );
-        let has_moons = self.children(body.index).next().is_some();
-        let sky = has_moons
-            .then(|| MoonSky::new(&derived, placed.orbit_now(), &hosts).ok())
-            .flatten();
-        (derived, sky)
+        self.with_hosts(epoch, zone, host_mass, |disc, hosts| {
+            let age = epoch.ctx.age_at_epoch();
+            let derived = derive_body_driven(driver, placed, hosts, disc, age, epoch.t, record)
+                .expect(
+                    "a present body's system is born, and a placed planet lies below 13 Jupiter \
+                     masses",
+                );
+            let has_moons = self.children(body.index).next().is_some();
+            let sky = has_moons
+                .then(|| MoonSky::new(&derived, placed.orbit_now(), hosts).ok())
+                .flatten();
+            (derived, sky)
+        })
     }
 }
 
@@ -4193,7 +4325,8 @@ struct SurfaceFrame<'a> {
     seasonal: Option<KeplerElements>,
     /// The impactors' sources about the primary's host.
     sources: Option<ImpactorSources>,
-    /// Its continental asymptote f∞ (P14.T48.a), word 0 of its `body.continents` stream.
+    /// Its continental asymptote f∞ (P14.T48.a), a fraction of the surface in (0.2, 0.7), from
+    /// word 0 of its `body.continents` stream (`relief::continental_asymptote`).
     continental_asymptote: f64,
     /// What its cold traps read beyond its sky (P14.T51.f).
     cold_traps: ColdTrapCase,
@@ -4306,6 +4439,11 @@ impl FiguresOf<'_> {
         air: &Atmosphere,
         tide: (WattsPerSquareMetre, Subsurface),
     ) -> Option<PassFigures> {
+        // A refusal is the crater contract's screening of an air of too great a surface pressure
+        // (the C1 review's RC1-a; `PassFigures`): no figures in K, a key change, as the record's
+        // not modelled is. The record's own figures are the published pass's K(P*), and
+        // `published_surface` debug-asserts that its air's are not refused, so no record reads a
+        // refusal dropped here.
         pass_figures(&self.inputs(air, tide)).ok().flatten()
     }
 }
@@ -4387,7 +4525,7 @@ impl PassRecordOf for PrimaryPasses<'_> {
                     (WattsPerSquareMetre::new(0.0), Subsurface::NotComputed),
                 )
         });
-        PassContext::of(figures.as_ref(), None)
+        PassContext::of(figures.as_ref(), ContextTide::Untided)
     }
 }
 
@@ -4477,16 +4615,20 @@ impl MoonRecordOf for SatellitePasses<'_> {
     }
 }
 
-/// A moon's held rotation law, the round of [`PlanetarySystem::moon_law`] that held it, and the
-/// locked spin its first round read.
+/// A moon's held rotation law, with, for the tests, the round of [`PlanetarySystem::moon_law`]
+/// that held it and the locked spin its first round read (no allocation outside them; Batch D's
+/// review, R2-9).
 #[derive(Debug, Clone, PartialEq)]
 struct HeldMoonLaw {
     law: BodyRotation,
+    #[cfg(test)]
     round: MoonRound,
+    #[cfg(test)]
     locked: SeasonalSpin,
 }
 
-/// Which round held a moon's law (decision-p14-t54a-passes §2.3).
+/// Which round held a moon's law (decision-p14-t54a-passes §2.3; the tests').
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 enum MoonRound {
     /// Round 1's, locked at the time under the locked spin.
@@ -4642,9 +4784,6 @@ struct ParentNow {
     changes_at: Option<UniverseTime>,
     position: Option<SystemPosition>,
     derived: Option<DerivedBody>,
-    /// The spin its derivation's passes read, its held law's under its own orbit then, which its
-    /// record's surface reads too (P14.T54.a): `None` for a body not present or with no law.
-    spin: Option<SeasonalSpin>,
     sky: Option<MoonSky>,
     nursery: Option<MoonNursery>,
     /// What its moons' shades share (lever (d)): its epoch's book with its own glow in it, if its
@@ -4763,9 +4902,9 @@ impl SurfaceInterior {
 /// ([`published_surface`]): the hosts' light over the past up to it as the primary's orbit sees
 /// it, which the volatile history reads (P14.T48.b; a moon's its planet's), the body's spin, which
 /// its record computed once for its passes and its surface (P14.T54.a), its seasonal orbit then
-/// (`None` where this version does not compute it), the system's \[Fe/H\] and age, and the hour
-/// angles' cosines of the call chain that asks, which every body's zonal insolation table reads
-/// (lever (h)).
+/// (`None` where this version does not compute it), the system's \[Fe/H\] and age, and its spin's
+/// insolation table over the hour angles' cosines of the call chain that asks (lever (h)), built
+/// once a body for its passes and its surface alike (Batch D's review, R2-3).
 #[derive(Debug, Clone, Copy)]
 struct SurfaceTime<'a> {
     past: &'a PastSky<'a>,
@@ -4773,7 +4912,48 @@ struct SurfaceTime<'a> {
     seasonal: Option<&'a KeplerElements>,
     fe_h: Dex,
     age: Years,
-    cosines: &'a HourCosines,
+    table: &'a ZonalInsolation,
+}
+
+/// The spin a body's passes and its record's surface take (P14.T54.a; Batch D's review, R2-4).
+#[derive(Clone, Copy)]
+enum BodySpin<'a> {
+    /// No rotation law: the passes' stand-in (no rotation law, no basins, the bulk material's
+    /// regolith), and a surface not modelled.
+    StandIn,
+    /// A law's spin with what its passes and its surface read of it, built once a body.
+    Spun(SpunBody<'a>),
+}
+
+impl<'a> BodySpin<'a> {
+    /// The spin `owned` holds, the stand-in for none.
+    #[must_use]
+    fn of(owned: Option<&'a SpinFrame<'a>>) -> Self {
+        match owned {
+            Some(owned) => Self::Spun(SpunBody {
+                spin: owned.spin,
+                table: &owned.table,
+                frame: &owned.frame,
+            }),
+            None => Self::StandIn,
+        }
+    }
+}
+
+/// A body's spin under a law, its held law's or for a moon's rounds the locked spin or round 1's,
+/// with its obliquity's insolation table and its surface's frame ([`BodySpin::Spun`]).
+#[derive(Clone, Copy)]
+struct SpunBody<'a> {
+    spin: SeasonalSpin,
+    table: &'a ZonalInsolation,
+    frame: &'a SurfaceFrame<'a>,
+}
+
+/// What [`SpunBody`] borrows, built once a body ([`PlanetarySystem::spin_frame`]).
+struct SpinFrame<'a> {
+    spin: SeasonalSpin,
+    table: ZonalInsolation,
+    frame: SurfaceFrame<'a>,
 }
 
 /// What [`PlanetarySystem::surface_section`] reads of a body beyond its record's place: a planet's
@@ -4804,7 +4984,8 @@ struct SurfaceCase<'a> {
     interior: SurfaceInterior,
     craters: Option<SurfaceCraters>,
     sources: Option<&'a ImpactorSources>,
-    /// Its continental asymptote f∞ (P14.T48.a), word 0 of its `body.continents` stream.
+    /// Its continental asymptote f∞ (P14.T48.a), a fraction of the surface in (0.2, 0.7), from
+    /// word 0 of its `body.continents` stream (`relief::continental_asymptote`).
     continental_asymptote: f64,
     /// What its cold traps read beyond its sky (P14.T51.f).
     cold_traps: ColdTrapCase,
@@ -5011,13 +5192,13 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
     let Some(conditions) = SurfaceConditions::derive(&inputs) else {
         return Section::NotApplicable;
     };
-    let table = ZonalInsolation::of(spin.obliquity, time.cosines);
+    let table = time.table;
     let (conditions, (partition, published, ice)) = with_partition(
         &figures,
         case,
         (&spin, seasonal),
         conditions,
-        (&table, &basis.ground),
+        (table, &basis.ground),
     );
     // The second stage: the volatile history reads the conditions' liquid-water flag, the hosts'
     // light over the body's past and its outgassing then (P14.T48.b), and the ocean and the ice
@@ -5033,7 +5214,7 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         outgassing: |age: Years| past_outgassing(&figure_inputs, age),
     });
     // T24.b's ice is the partition's cover's, read off the profile it built (lever (a)).
-    let figures = figures.with_surface_under(&conditions, history, Some(&published), &table, ice);
+    let figures = figures.with_surface_under(&conditions, history, Some(&published), table, ice);
     // Step 10, the climate regime (P14.T48.d): it reads the cover, which reads no regime (an ice
     // belt's band is the profile's cold equator, science-p14-t24b-laws §4.3), so it follows the
     // second stage with no loop.
@@ -5102,15 +5283,16 @@ fn surface_basis(
         };
     };
     let air = sky.atmosphere;
-    let water = WaterGate {
-        state: air.state(),
-        retained: air.retains_against_escape(Gas::Water),
-        water: case.interior.inventory_water,
-        radius: Metres::from(bulk.radius()),
-        surface_gravity: bulk.surface_gravity(),
-    };
+    let water = WaterGate::of_air(
+        air,
+        case.interior.inventory_water,
+        (Metres::from(bulk.radius()), bulk.surface_gravity()),
+    );
     let context = spun.context();
-    let ground = context.partition_ground(air, &water, material, CrustWater::of_record(material));
+    // The record's lid, its published pass's own, whose row its regolith read: an ice bulk's crust
+    // water is listed only where that row is `H2O` (decision-p14-t54a-ganymede §C3.1).
+    let lid = sky.crust_lid.map(CrustLid::lithology);
+    let ground = context.partition_ground(air, &water, material, record_crust_water(material, lid));
     // The θ its published pass carried is its partition's own, the one expression.
     debug_assert!(
         spun.ocean_weight()
@@ -5127,6 +5309,36 @@ fn surface_basis(
         ocean_weight: spun.ocean_weight(),
         lid: context.lid().map(|lid| lid.lithology),
     }
+}
+
+/// The record's [`CrustWater`] on a bulk of `material` under its published pass's lid `lid`
+/// ([`CrustWater::of_record`]); under the tests' switch ([`with_crust_water_by_material`]) Batch
+/// D's C3 rule, by the material alone, the oracle of §C3.1's test.
+#[must_use]
+fn record_crust_water(material: SurfaceMaterial, lid: Option<CrustLithology>) -> CrustWater {
+    #[cfg(test)]
+    if CRUST_WATER_BY_MATERIAL.with(core::cell::Cell::get) {
+        return CrustWater::of_record(material, None);
+    }
+    CrustWater::of_record(material, lid)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Whether the record lists an ice bulk's crust water by its material alone (C3's rule), on
+    /// this thread: the tests' oracle of decision-p14-t54a-ganymede §C3.1.
+    static CRUST_WATER_BY_MATERIAL: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// `run`'s result with every record listing an ice bulk's crust water by its material alone,
+/// whatever its lid (Batch D's C3 rule): a test-only switch, set back after.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn with_crust_water_by_material<R>(run: impl FnOnce() -> R) -> R {
+    let before = CRUST_WATER_BY_MATERIAL.with(|cell| cell.replace(true));
+    let result = run();
+    CRUST_WATER_BY_MATERIAL.with(|cell| cell.set(before));
+    result
 }
 
 /// The conditions `conditions` of the body `case` describes, of figures `figures`, spin and seasonal

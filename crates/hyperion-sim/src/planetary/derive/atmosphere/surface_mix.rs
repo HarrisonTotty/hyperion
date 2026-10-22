@@ -303,7 +303,7 @@ fn given_partition(
 #[must_use]
 fn spun_ground(air: &Atmosphere, spun: &SpunClimate<'_>) -> PartitionGround {
     let record = &spun.record;
-    let water = WaterGate::of_air(air, spun.inventory_water, record);
+    let water = WaterGate::of_air(air, spun.inventory_water, record.bulk());
     spun.context
         .partition_ground(air, &water, record.material, CrustWater::Unlisted)
 }
@@ -379,7 +379,7 @@ fn spun_partition(
         partition: solved,
         profile,
         water,
-    } = partition_over(air, &conditions, &ground, spun.record.table);
+    } = partition_over((air, &inventory), &conditions, &ground, spun.record.table);
     let cold_area = |t: Kelvin| profile.area_below(t);
     let published = solved.publish(&Cover {
         cold_area: &cold_area,
@@ -415,14 +415,18 @@ fn spun_lid(
         surface_age,
         tidal: spun.context.tidal(),
     };
-    let warmest = || match conditions {
-        Some(conditions) => conditions.climate_range().1,
-        None => {
-            spun_conditions(air, inputs, spun, &spun_ground(air, spun))
-                .expect("the lid refuses the gas-envelope state before it reads its range")
-                .climate_range()
-                .1
+    let warmest = || {
+        if let Some(conditions) = conditions {
+            return conditions.climate_range().1;
         }
+        let warmest = spun_conditions(air, inputs, spun, &spun_ground(air, spun))
+            .expect("the lid refuses the gas-envelope state before it reads its range")
+            .climate_range()
+            .1;
+        // The deferred warmest, which the sample test holds to its record's (the review's D3-2).
+        #[cfg(test)]
+        spun_read::deferred(warmest);
+        warmest
     };
     let lid = basis.lid_at(&at, warmest);
     // The figures' surface age lies in [0, the age], and the area mix asks no gas envelope's lid:
@@ -566,6 +570,7 @@ pub(crate) mod spun_read {
     use crate::planetary::chem::partition::{Condensates, Partition};
     use crate::planetary::hooks::crust::CrustLid;
     use crate::planetary::hooks::surface::SurfaceConditions;
+    use crate::units::Kelvin;
 
     /// What one spun pass published.
     #[derive(Debug, Clone, PartialEq)]
@@ -581,6 +586,10 @@ pub(crate) mod spun_read {
         /// The lid every spun pass of the capture took, in order, a magma ocean's among them,
         /// which publishes no partition: the re-check's lid flips (decision-p14-t54a-passes §1.8).
         pub(crate) lids: Vec<Option<CrustLid>>,
+        /// Beside each of `lids`, the warmest of the record's conditions that pass's lid built for
+        /// its cometary test where the pass read no conditions of its own (`spun_lid`'s deferred
+        /// range), `None` where it built none.
+        pub(crate) deferred: Vec<Option<Kelvin>>,
     }
 
     thread_local! {
@@ -590,13 +599,26 @@ pub(crate) mod spun_read {
         static LAST: RefCell<Option<SpunRead>> = const { RefCell::new(None) };
         /// The lids of the spun passes since the capture began, a test's own.
         static LIDS: RefCell<Vec<Option<CrustLid>>> = const { RefCell::new(Vec::new()) };
+        /// The deferred warmest the pass now running built for its lid, if any.
+        static DEFERRED: Cell<Option<Kelvin>> = const { Cell::new(None) };
+        /// Beside each of `LIDS`, the deferred warmest its pass built.
+        static DEFERREDS: RefCell<Vec<Option<Kelvin>>> = const { RefCell::new(Vec::new()) };
     }
 
-    /// Records the lid a spun pass took, where a test asks for it.
+    /// Records the lid a spun pass took, with the deferred warmest it built for it, where a test
+    /// asks for it.
     pub(crate) fn trace(lid: Option<&CrustLid>) {
+        let deferred = DEFERRED.with(Cell::take);
         if ON.with(Cell::get) {
             LIDS.with(|lids| lids.borrow_mut().push(lid.copied()));
+            DEFERREDS.with(|all| all.borrow_mut().push(deferred));
         }
+    }
+
+    /// Records the warmest a spun pass's lid built of its record's conditions, where it read none
+    /// of its own.
+    pub(crate) fn deferred(warmest: Kelvin) {
+        DEFERRED.with(|cell| cell.set(Some(warmest)));
     }
 
     /// Records a spun pass's publication as the thread's last, where a test asks for it.
@@ -616,6 +638,7 @@ pub(crate) mod spun_read {
                 condensates: condensates.clone(),
                 lid: lid.copied(),
                 lids: Vec::new(),
+                deferred: Vec::new(),
             });
         });
     }
@@ -627,10 +650,20 @@ pub(crate) mod spun_read {
         let before = ON.with(|on| on.replace(true));
         LAST.with(|last| last.borrow_mut().take());
         LIDS.with(|lids| lids.borrow_mut().clear());
+        DEFERREDS.with(|all| all.borrow_mut().clear());
+        DEFERRED.with(Cell::take);
         let result = run();
         ON.with(|on| on.set(before));
         let lids = LIDS.with(|lids| core::mem::take(&mut *lids.borrow_mut()));
+        let deferred = DEFERREDS.with(|all| core::mem::take(&mut *all.borrow_mut()));
         let read = LAST.with(|last| last.borrow_mut().take());
-        (result, read.map(|read| SpunRead { lids, ..read }))
+        (
+            result,
+            read.map(|read| SpunRead {
+                lids,
+                deferred,
+                ..read
+            }),
+        )
     }
 }

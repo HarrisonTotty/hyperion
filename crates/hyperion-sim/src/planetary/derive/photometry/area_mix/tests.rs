@@ -437,12 +437,12 @@ fn a_shade_off_its_book_is_its_own_to_the_bit() {
         assert_same_shade(&shade_of(sky, Some(&book)), &own.finish());
         assert_same_shade(&shade_of(sky, None), &own.finish());
     }
-    let glow = book.with_host(kelvin(110.0));
+    let glow = book.clone().with_host(kelvin(110.0));
     assert_eq!(glow.hosts.len(), hosts.len() + 1);
     assert_eq!(glow.hosts[..hosts.len()], book.hosts[..]);
     let moon = [(1.0, hosts[3]), (4.0e-6, kelvin(110.0))];
     assert_same_shade(&shade_of(&moon, Some(&glow)), &shade_of(&moon, None));
-    assert_eq!(book.with_host(hosts[2]), book);
+    assert_eq!(book.clone().with_host(hosts[2]), book);
 }
 
 /// Every one of Sudarsky, Burrows and Pinto's Fiducial albedos is reproduced at its tabled host and

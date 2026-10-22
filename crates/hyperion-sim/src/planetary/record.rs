@@ -694,8 +694,8 @@ impl Surface {
     }
 
     /// What its conditions and condensates were built on (rule (f)); `None` for a surface built
-    /// apart from a record.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the tests of rule (f) read it"))]
+    /// apart from a record. The tests of rule (f) read it.
+    #[cfg(test)]
     #[must_use]
     pub(crate) const fn basis(&self) -> Option<&SurfaceBasis> {
         self.basis.as_ref()
@@ -783,10 +783,13 @@ impl Surface {
     /// The crust by substance (P14.T51.c, on the record from P14.T54.a): its primary, secondary
     /// and tertiary crusts or its bulk material, which of them lies at the surface (its lid) and
     /// its provinces' lithology, its mantle's redox class, its melt area and the thermal history
-    /// that decided them. Its lid is the one its last pass took at its own climate, whose row its
-    /// regolith read, to the bit (decision-pre-23-review item 17). Not modelled for a body whose
-    /// passes took no lid: one derived over the passes' stand-in, with no rotation law, or one
-    /// with no crust's basis (one seen before its formation window ends).
+    /// that decided them, with the peak central temperature that history read: the conductive
+    /// sphere's `T_c,max`, a threshold test with no convection, latent heat or melt loss, so that
+    /// above the solidus it is not a temperature the body reached. Its lid is the one its last
+    /// pass took at its own climate, whose row its regolith read, to the bit
+    /// (decision-pre-23-review item 17). Not modelled for a body whose passes took no lid: one
+    /// derived over the passes' stand-in, with no rotation law, or one with no crust's basis (one
+    /// seen before its formation window ends).
     #[must_use]
     pub const fn crust(&self) -> Modelled<&CrustComposition> {
         self.crust.as_ref()

@@ -130,7 +130,8 @@ use crate::planetary::derive::habitable_zone::HabitableLimit;
 use crate::planetary::derive::irradiation::luminosity_flux;
 use crate::planetary::derive::limits::TidalPlanet;
 use crate::planetary::derive::pass_record::{
-    InertiaLid, PassBulk, PassContext, PassRecord, PassRecordOf, RecordCrust, WaterGate,
+    InertiaLid, PassBulk, PassContext, PassRecord, PassRecordOf, RecordCrust, Resurfacing,
+    WaterGate,
 };
 use crate::planetary::derive::passes::Convergence;
 use crate::planetary::derive::photometry::area_mix::{
@@ -138,7 +139,9 @@ use crate::planetary::derive::photometry::area_mix::{
 };
 use crate::planetary::derive::rotation::tides;
 use crate::planetary::disc::DiscProfile;
-use crate::planetary::hooks::crust::{AmmoniaIce, CrustBasis, CrustBasisInputs, CrustLid};
+use crate::planetary::hooks::crust::{
+    AmmoniaIce, CrustBasis, CrustBasisInputs, CrustLid, DeriveCrustError,
+};
 use crate::planetary::hooks::surface::{COSMIC_BACKGROUND_TEMPERATURE, OceanWeight};
 use crate::planetary::params::{
     GAS_GIANT_ENVELOPE_FRACTION, ICE_GIANT_MASS, ICY_WATER_FRACTION, THIN_ENVELOPE_FRACTION,
@@ -514,14 +517,26 @@ impl GivenFractions {
 /// The system's composition is the one a giant's cooling reads (plan 13's `giant_cooling`).
 ///
 /// Inside the crate, the hosts may also carry what the shades of their call chain's bodies share
-/// (lever (d), `with_shades`), which moves no value.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// (lever (d), `with_shades`), which moves no value: so their equality ignores it (two hosts that
+/// differ only in a book give every body the same bits), while their `Debug` shows it.
+#[derive(Debug, Clone, Copy)]
 pub struct BodyHosts<'a> {
     primary_mass: Kilograms,
     composition: Composition,
     orbited: &'a [HostLight],
     companions: &'a [Illumination],
     shades: Option<&'a ShadeBook>,
+}
+
+impl PartialEq for BodyHosts<'_> {
+    /// Equal where every value a body reads is: the book of shades, which moves none, is not
+    /// compared (Batch D's review, RD2).
+    fn eq(&self, other: &Self) -> bool {
+        self.primary_mass == other.primary_mass
+            && self.composition == other.composition
+            && self.orbited == other.orbited
+            && self.companions == other.companions
+    }
 }
 
 impl<'a> BodyHosts<'a> {
@@ -557,7 +572,7 @@ impl<'a> BodyHosts<'a> {
 
     /// The same hosts, whose body's shade reads its call chain's book `shades` where there is one
     /// (lever (d), decision-p14-t54a-passes, "Cost escalation (after Batch B)" §C.3): the same bits
-    /// as without it.
+    /// as without it, and equal to them.
     #[must_use]
     pub(crate) const fn with_shades(self, shades: Option<&'a ShadeBook>) -> Self {
         Self { shades, ..self }
@@ -1746,7 +1761,19 @@ impl PassBody<'_> {
             fe_h: record.fe_h,
             formation_temperature,
         };
-        CrustBasis::derive(&inputs).ok()
+        let basis = CrustBasis::derive(&inputs);
+        // A formation time after the age is the one refusal a record's basis meets (a body seen
+        // before its own window ends), which takes no crust; any other is a bug (a flux that is
+        // not a number past the 2.725 K floor, say), which the debug builds catch, and which then
+        // takes no crust too (Batch D's review, R3-3).
+        debug_assert!(
+            matches!(
+                basis,
+                Ok(_) | Err(DeriveCrustError::FormationOutsideAge { .. })
+            ),
+            "a record's crust's basis refuses only a formation after its age: {basis:?}"
+        );
+        basis.ok()
     }
 
     /// The passes, from the 0.3 of [`BondAlbedo::BEFORE_ATMOSPHERES`], each taking the albedo the
@@ -1881,7 +1908,7 @@ impl PassBody<'_> {
             let unresurfaced = basis
                 .as_ref()
                 .zip(context.surface_age())
-                .map(|(basis, age)| basis.unresurfaced(age));
+                .map(|(basis, age)| Resurfacing::of(basis.unresurfaced(age)));
             context.with_lid(lid.as_ref().map(InertiaLid::of), unresurfaced)
         };
         let solve = || {
@@ -1930,7 +1957,7 @@ impl PassBody<'_> {
                     (albedo, out, context, next(&out), count + 1, convergence)
                 }
             };
-        let water = WaterGate::of_air(&air, self.pass_bulk.inventory_water, &record);
+        let water = WaterGate::of_air(&air, self.pass_bulk.inventory_water, record.bulk());
         let ocean_weight = context.ocean_weight(&water, air.partial_pressures().of(Gas::Water));
         Passes {
             albedo,

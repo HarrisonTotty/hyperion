@@ -1363,9 +1363,11 @@ impl CrustComposition {
         self.thermal_history
     }
 
-    /// Its peak central temperature `T_c,max` ([`peak_central_temperature`]); `None` where a rule
-    /// decided its class without it (a planet, a rocky parent's impact moon, a tidally volcanic
-    /// body).
+    /// Its peak central temperature `T_c,max` ([`peak_central_temperature`]), K: the conductive
+    /// sphere's, a threshold test with no convection, latent heat or melt loss, so that above the
+    /// solidus it is not a temperature the body reached (Batch D's science check, S3-2); `None`
+    /// where a rule decided its class without it (a planet, a rocky parent's impact moon, a
+    /// tidally volcanic body).
     #[must_use]
     pub const fn peak_central_temperature(&self) -> Option<Kelvin> {
         self.peak_central_temperature
@@ -1375,42 +1377,18 @@ impl CrustComposition {
 /// Refuses the inputs out of range ([`CrustComposition::derive`]'s errors), in the order its
 /// `# Errors` lists them.
 fn validate(inputs: &CrustCompositionInputs<'_>) -> Result<(), DeriveCrustError> {
-    let positive = |x: f64| x.is_finite() && x > 0.0;
     if inputs.state == SurfaceState::GasEnvelope {
         return Err(DeriveCrustError::NoSolidSurface);
     }
-    if !positive(inputs.radius.value()) {
-        return Err(DeriveCrustError::RadiusNotPositive(inputs.radius));
-    }
-    if !positive(inputs.mass.value()) {
-        return Err(DeriveCrustError::MassNotPositive(inputs.mass));
-    }
-    if !positive(inputs.age.value()) {
-        return Err(DeriveCrustError::AgeNotPositive(inputs.age));
-    }
-    if !positive(inputs.formation_temperature.value()) {
-        return Err(DeriveCrustError::TemperatureNotPositive(
-            inputs.formation_temperature,
-        ));
-    }
-    if !positive(inputs.host_magnesium_to_silicon) {
-        return Err(DeriveCrustError::MagnesiumToSiliconNotPositive(
-            inputs.host_magnesium_to_silicon,
-        ));
-    }
-    let f = inputs.fractions;
-    let parts = [f.iron(), f.rock(), f.water(), f.envelope()];
-    let sum = parts.iter().fold(0.0, |sum, &x| sum + x);
-    if !(parts.iter().all(|x| (0.0..=1.0).contains(x)) && (sum - 1.0).abs() <= 1e-9) {
-        return Err(DeriveCrustError::FractionsNotNormalised(sum));
-    }
-    let formed = Years::from(inputs.formation).value();
-    if !(formed >= 0.0 && formed <= inputs.age.value()) {
-        return Err(DeriveCrustError::FormationOutsideAge {
-            formation: inputs.formation,
-            age: inputs.age,
-        });
-    }
+    validate_body(&BodyChecked {
+        radius: inputs.radius,
+        mass: inputs.mass,
+        age: inputs.age,
+        formation_temperature: inputs.formation_temperature,
+        host_magnesium_to_silicon: inputs.host_magnesium_to_silicon,
+        fractions: inputs.fractions,
+        formation: inputs.formation,
+    })?;
     let finite = [
         (inputs.delta_iw.value(), CrustInput::DeltaIw),
         (inputs.alpha_fe.value(), CrustInput::AlphaFe),
@@ -1732,42 +1710,71 @@ impl CrustLid {
     }
 }
 
-/// Refuses the pass-invariant inputs out of range ([`CrustBasis::derive`]), in
-/// [`CrustComposition::derive`]'s order.
-fn validate_basis(inputs: &CrustBasisInputs) -> Result<(), DeriveCrustError> {
+/// What [`validate`] and [`validate_basis`] check alike, the body's pass-invariant scalars in
+/// [`CrustComposition::derive`]'s order (one helper, so that the stages' refusals are the
+/// derivation's by construction; Batch D's review, RC1-c).
+struct BodyChecked {
+    radius: Metres,
+    mass: EarthMasses,
+    age: Years,
+    formation_temperature: Kelvin,
+    host_magnesium_to_silicon: f64,
+    fractions: MassFractions,
+    formation: Megayears,
+}
+
+/// Refuses the body's scalars `body` out of range, in [`CrustComposition::derive`]'s order: the
+/// radius, the mass, the age, the formation temperature and the host's Mg/Si, each positive and
+/// finite; the fractions normalised; and the formation time within the age.
+fn validate_body(body: &BodyChecked) -> Result<(), DeriveCrustError> {
     let positive = |x: f64| x.is_finite() && x > 0.0;
-    if !positive(inputs.radius.value()) {
-        return Err(DeriveCrustError::RadiusNotPositive(inputs.radius));
+    if !positive(body.radius.value()) {
+        return Err(DeriveCrustError::RadiusNotPositive(body.radius));
     }
-    if !positive(inputs.mass.value()) {
-        return Err(DeriveCrustError::MassNotPositive(inputs.mass));
+    if !positive(body.mass.value()) {
+        return Err(DeriveCrustError::MassNotPositive(body.mass));
     }
-    if !positive(inputs.age.value()) {
-        return Err(DeriveCrustError::AgeNotPositive(inputs.age));
+    if !positive(body.age.value()) {
+        return Err(DeriveCrustError::AgeNotPositive(body.age));
     }
-    if !positive(inputs.formation_temperature.value()) {
+    if !positive(body.formation_temperature.value()) {
         return Err(DeriveCrustError::TemperatureNotPositive(
-            inputs.formation_temperature,
+            body.formation_temperature,
         ));
     }
-    if !positive(inputs.host_magnesium_to_silicon) {
+    if !positive(body.host_magnesium_to_silicon) {
         return Err(DeriveCrustError::MagnesiumToSiliconNotPositive(
-            inputs.host_magnesium_to_silicon,
+            body.host_magnesium_to_silicon,
         ));
     }
-    let f = inputs.fractions;
+    let f = body.fractions;
     let parts = [f.iron(), f.rock(), f.water(), f.envelope()];
     let sum = parts.iter().fold(0.0, |sum, &x| sum + x);
     if !(parts.iter().all(|x| (0.0..=1.0).contains(x)) && (sum - 1.0).abs() <= 1e-9) {
         return Err(DeriveCrustError::FractionsNotNormalised(sum));
     }
-    let formed = Years::from(inputs.formation).value();
-    if !(formed >= 0.0 && formed <= inputs.age.value()) {
+    let formed = Years::from(body.formation).value();
+    if !(formed >= 0.0 && formed <= body.age.value()) {
         return Err(DeriveCrustError::FormationOutsideAge {
-            formation: inputs.formation,
-            age: inputs.age,
+            formation: body.formation,
+            age: body.age,
         });
     }
+    Ok(())
+}
+
+/// Refuses the pass-invariant inputs out of range ([`CrustBasis::derive`]), in
+/// [`CrustComposition::derive`]'s order.
+fn validate_basis(inputs: &CrustBasisInputs) -> Result<(), DeriveCrustError> {
+    validate_body(&BodyChecked {
+        radius: inputs.radius,
+        mass: inputs.mass,
+        age: inputs.age,
+        formation_temperature: inputs.formation_temperature,
+        host_magnesium_to_silicon: inputs.host_magnesium_to_silicon,
+        fractions: inputs.fractions,
+        formation: inputs.formation,
+    })?;
     let finite = [
         (inputs.delta_iw.value(), CrustInput::DeltaIw),
         (inputs.alpha_fe.value(), CrustInput::AlphaFe),

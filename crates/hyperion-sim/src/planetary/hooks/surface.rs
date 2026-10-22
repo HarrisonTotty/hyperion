@@ -496,7 +496,8 @@ pub const REGOLITH_EMISSIVITY: f64 = 0.95;
 /// Hayne et al. give "55 ± 2" over the Moon's top 4–7 cm. Mercury's is of the same order: under
 /// 50 over most of Mariner 10's transect, 19 at the surface and 71 at depth (Bandfield, Osterloo
 /// and Holsclaw 2019, LPSC 50, abstract 2653, read). A vacuum value: pore gas raises a real
-/// regolith's under air (Mars's some 250, not re-read; science-p14-t24a-climate.md §2).
+/// regolith's under air (Mars's measured 180–250, Mellon et al. 2000, Icarus 148, 437,
+/// and Putzig et al. 2005, Icarus 173, 325, neither re-read; science-p14-t24a-climate.md §2).
 ///
 /// From P14.T54.a it is a fallback alone (decision-pre-23-review item 7): a ground's inertia is
 /// P14.T49.j's law at its crust's lid, and this constant stands only where that lid is not known
@@ -560,7 +561,7 @@ impl GroundInertia {
     #[must_use]
     pub(crate) const fn of_material(material: SurfaceMaterial) -> Self {
         Self {
-            gamma: material_inertia(material),
+            gamma: material_inertia_j_per_m2_k_sqrt_s(material),
             source: InertiaSource::NoLid,
         }
     }
@@ -581,7 +582,7 @@ impl GroundInertia {
             ground_inertia(lid, material, equilibrium)
         } else {
             Self {
-                gamma: material_inertia(material),
+                gamma: material_inertia_j_per_m2_k_sqrt_s(material),
                 source: InertiaSource::Unlit,
             }
         }
@@ -601,10 +602,10 @@ impl GroundInertia {
     }
 }
 
-/// P14.T24.a's constant of a regolith of `material`: rock's or ice's, the fallback alone
-/// ([`GroundInertia`]).
+/// P14.T24.a's constant of a regolith of `material`, J m⁻² K⁻¹ s^−½: rock's 55 or ice's 20, the
+/// fallback alone ([`GroundInertia`]).
 #[must_use]
-const fn material_inertia(material: SurfaceMaterial) -> f64 {
+const fn material_inertia_j_per_m2_k_sqrt_s(material: SurfaceMaterial) -> f64 {
     match material {
         SurfaceMaterial::Rock => ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
         SurfaceMaterial::Ice => ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
@@ -626,9 +627,12 @@ const fn material_inertia(material: SurfaceMaterial) -> f64 {
 ///   the bulk material's constant, with a `debug_assert`.
 ///
 /// Under air the law is a vacuum lower bound, with no pore gas: gas in the pores raises a
-/// regolith's conductivity well above the vacuum's (Mars's measured 180–250 against its
-/// `basalt_fe` lid's 48 here; Titan's sand about 236 against its ice's 57;
-/// decision-pre-23-review item 7), which P14.T49.l's pore-gas conductivity adds.
+/// regolith's conductivity well above the vacuum's, which P14.T49.l's pore-gas conductivity adds
+/// (decision-pre-23-review item 7). Mars's measured 180–250 (Mellon et al. 2000, Icarus 148, 437;
+/// Putzig et al. 2005, Icarus 173, 325; neither re-read) lies against its `basalt_fe` lid's 48
+/// here, and Titan's about 236 (MacKenzie et al. 2019, JGR Planets 124, 1728, as Batch D's science
+/// check gave it; not re-read: P14.T49.l re-reads MacKenzie 2019's tables before asserting it)
+/// against its ice's 57.
 ///
 /// The lid is a [`CrustLithology`], T51.c's closed set, every row of which has condensed columns
 /// and takes its own family's form: so the law's refusal of a row with none, or of a form of
@@ -637,16 +641,16 @@ const fn material_inertia(material: SurfaceMaterial) -> f64 {
 /// `temperature` is the ground's, K, positive and finite: P14.T24.a's column's equilibrium
 /// temperature, or R09.T13.c's mean surface temperature. Each row's thermal columns hold their
 /// end values beyond their own valid range (P14.T49.j), and above the lid row's transition the
-/// row has no solid ([`InertiaSource::NoSolid`]).
+/// row has no solid ([`InertiaSource::NoSolid`]). Its one way in is
+/// [`GroundInertia::at_equilibrium`], which passes only a positive, finite temperature (an unlit
+/// column takes [`InertiaSource::Unlit`] before it), and its tests.
 ///
-/// # Panics
-///
-/// In a debug build, where `temperature` is not positive and finite, or where the lid's row has no
-/// condensed columns, which no [`CrustLithology`] lacks (the inertia's tests hold every one): the
-/// fallback's [`InertiaSource::Unreachable`], whose Γ is the bulk material's constant in every
+/// In a debug build it panics on the fallback's [`InertiaSource::Unreachable`] (a temperature
+/// that is not positive and finite, which only its tests pass; or a lid row with no condensed
+/// columns, which no [`CrustLithology`] lacks), whose Γ is the bulk material's constant in every
 /// build.
 #[must_use]
-pub(crate) fn ground_inertia(
+fn ground_inertia(
     lid: Option<CrustLithology>,
     material: SurfaceMaterial,
     temperature: Kelvin,
@@ -686,9 +690,10 @@ pub(crate) fn ground_inertia(
         }
         EvaluateRegolithInertiaError::Temperature { .. }
         | EvaluateRegolithInertiaError::NotCondensed { .. }
-        | EvaluateRegolithInertiaError::FamilyMismatch { .. } => {
-            (material_inertia(material), InertiaSource::Unreachable)
-        }
+        | EvaluateRegolithInertiaError::FamilyMismatch { .. } => (
+            material_inertia_j_per_m2_k_sqrt_s(material),
+            InertiaSource::Unreachable,
+        ),
     };
     debug_assert_ne!(
         source,
@@ -2789,7 +2794,7 @@ impl ZonalInsolation {
 
     /// Whether it is the table of the obliquity `obliquity`, bit for bit.
     #[must_use]
-    fn is_at(&self, obliquity: Radians) -> bool {
+    pub(crate) fn is_at(&self, obliquity: Radians) -> bool {
         self.obliquity.value().total_cmp(&obliquity.value()).is_eq()
     }
 }

@@ -1782,10 +1782,6 @@ heat_flow_w_m2 = 0x3f31d108e58e2384  # 0.0002718588562449708
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fd0526336bb3cba  # 0.2550285372244151
-condensate: H2O, Solid, seasonal true
-reservoir_kg_m2 = 0x417e2cf5b3797ee7  # 31641435.21716204
-reservoir_gel_m = 0x40e091335e02f332  # 33929.605226016036
-area_fraction = 0x3fd0526336bb3cba  # 0.2550285372244151
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk chondrite_cv; provinces chondrite_cv; Oxidised, IceMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x40929882e249a0ad  # 1190.1278163437194
@@ -1874,10 +1870,6 @@ heat_flow_w_m2 = 0x3f24716110b3dca7  # 0.00015596685293648335
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fccf9b9ae3cef20  # 0.22637101180759434
-condensate: H2O, Solid, seasonal true
-reservoir_kg_m2 = 0x4171542820eaf59b  # 18170498.057363134
-reservoir_gel_m = 0x40d30769016680b6  # 19485.640710473723
-area_fraction = 0x3fccf9b9ae3cef20  # 0.22637101180759434
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk cometary; provinces cometary; Oxidised, Unmelted
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x4070ea07bd452816  # 270.62688948644916
@@ -1966,10 +1958,6 @@ heat_flow_w_m2 = 0x3f241b3508a7c68f  # 0.00015339872727753278
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fca4ac7b14220e0  # 0.20540710597220535
-condensate: H2O, Solid, seasonal true
-reservoir_kg_m2 = 0x41710b28305af734  # 17871491.022208408
-reservoir_gel_m = 0x40d2b73f7fbc55ae  # 19164.992171367332
-area_fraction = 0x3fca4ac7b14220e0  # 0.20540710597220535
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk cometary; provinces cometary; Oxidised, Unmelted
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x4069aa5f8481414c  # 205.3241598629487
@@ -2058,10 +2046,6 @@ heat_flow_w_m2 = 0x3f20c15bd5619cad  # 0.00012783285154969096
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fcc789847914fd0  # 0.22243026251328368
-condensate: H2O, Solid, seasonal true
-reservoir_kg_m2 = 0x416c684dd61f94fb  # 14893678.69135522
-reservoir_gel_m = 0x40cf31d37517dfb7  # 15971.65201090263
-area_fraction = 0x3fcc789847914fd0  # 0.22243026251328368
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk cometary; provinces cometary; Oxidised, Unmelted
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x40692c14a06d0100  # 201.3775179032309
@@ -2522,10 +2506,6 @@ heat_flow_w_m2 = 0x3f304b3459d330d0  # 0.00024862316224695275
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
-condensate: H2O, Solid, seasonal true
-reservoir_kg_m2 = 0x417b9d6a2bfeb4f7  # 28956322.7496843
-reservoir_gel_m = 0x40de49e77cd4fa64  # 31015.61699413731
-area_fraction = 0x3ff0000000000000  # 1.0
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk cometary; provinces cometary; Oxidised, Unmelted
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x4074f1e939cf6e62  # 335.1194398978024
@@ -2614,10 +2594,6 @@ heat_flow_w_m2 = 0x3f0e8113e752a634  # 5.818216315252e-5
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
-condensate: H2O, Solid, seasonal true
-reservoir_kg_m2 = 0x4159e5ee8b9e4e80  # 6789050.181537271
-reservoir_gel_m = 0x40bc67de6a2bc9f8  # 7271.868807541665
-area_fraction = 0x3ff0000000000000  # 1.0
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk cometary; provinces cometary; Oxidised, IceMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x40848639c69638d9  # 656.7782108055209
@@ -2706,10 +2682,6 @@ heat_flow_w_m2 = 0x3f0a5a4cfbf92f0c  # 5.026385724401895e-5
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
-condensate: H2O, Solid, seasonal true
-reservoir_kg_m2 = 0x41565fca01793058  # 5865256.02302178
-reservoir_gel_m = 0x40b88a607f4df8a9  # 6282.376942513664
-area_fraction = 0x3ff0000000000000  # 1.0
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk cometary; provinces cometary; Oxidised, Unmelted
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x405907f4a1d11aae  # 100.12430615825971
@@ -2798,10 +2770,6 @@ heat_flow_w_m2 = 0x3f03e193ca349889  # 3.7920305908920966e-5
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
-condensate: H2O, Solid, seasonal true
-reservoir_kg_m2 = 0x4150e156932c2d2b  # 4425050.299571316
-reservoir_gel_m = 0x40b283bf6bcc2ebb  # 4739.7477386106575
-area_fraction = 0x3ff0000000000000  # 1.0
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk cometary; provinces cometary; Oxidised, IceMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x408d5e33fe45e100  # 939.7753873309412
@@ -6673,10 +6641,6 @@ heat_flow_w_m2 = 0x3f31d108c5683def  # 0.00027185882700650384
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fd052632f195318  # 0.25502853011612237
-condensate: H2O, Solid, seasonal true
-reservoir_kg_m2 = 0x417e2cf5b3709242  # 31641435.214983232
-reservoir_gel_m = 0x40e091335dfee4a0  # 33929.60522408155
-area_fraction = 0x3fd052632f195318  # 0.25502853011612237
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk chondrite_cv; provinces chondrite_cv; Oxidised, IceMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x40929882e25ba8cc  # 1190.127816612413
@@ -6765,10 +6729,6 @@ heat_flow_w_m2 = 0x3f247160ebdef41e  # 0.00015596683618737754
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fccf9b9a1a99b78  # 0.22637100595167303
-condensate: H2O, Solid, seasonal true
-reservoir_kg_m2 = 0x4171542820da4c76  # 18170498.053295575
-reservoir_gel_m = 0x40d3076901553707  # 19485.640706351984
-area_fraction = 0x3fccf9b9a1a99b78  # 0.22637100595167303
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk cometary; provinces cometary; Oxidised, Unmelted
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x4070ea07bd8ac2d6  # 270.6268897457461
@@ -6857,10 +6817,6 @@ heat_flow_w_m2 = 0x3f241b34e46e5802  # 0.0001533987108046087
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fca4ac7a0dd7c34  # 0.20540709833855575
-condensate: H2O, Solid, seasonal true
-reservoir_kg_m2 = 0x41710b28304a4d86  # 17871491.01814034
-reservoir_gel_m = 0x40d2b73f7fab072a  # 19164.992167241093
-area_fraction = 0x3fca4ac7a0dd7c34  # 0.20540709833855575
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk cometary; provinces cometary; Oxidised, Unmelted
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x4069aa5f850e2c3e  # 205.32416012542848
@@ -6949,10 +6905,6 @@ heat_flow_w_m2 = 0x3f20c15bb73362de  # 0.00012783283782515689
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fcc78983a1ecff0  # 0.22243025625141355
-condensate: H2O, Solid, seasonal true
-reservoir_kg_m2 = 0x416c684dd5fe396d  # 14893678.687283242
-reservoir_gel_m = 0x40cf31d374f4e526  # 15971.652006732835
-area_fraction = 0x3fcc78983a1ecff0  # 0.22243025625141355
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk cometary; provinces cometary; Oxidised, Unmelted
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x40692c14a0f8628a  # 201.37751816284828
@@ -7413,10 +7365,6 @@ heat_flow_w_m2 = 0x3f304b343c6f780f  # 0.00024862313551732377
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
-condensate: H2O, Solid, seasonal true
-reservoir_kg_m2 = 0x417b9d6a2bfeb4f7  # 28956322.7496843
-reservoir_gel_m = 0x40de49e77cd54017  # 31015.61699420222
-area_fraction = 0x3ff0000000000000  # 1.0
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk cometary; provinces cometary; Oxidised, Unmelted
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x4074f1e939fb6f7a  # 335.1194400617311
@@ -7505,10 +7453,6 @@ heat_flow_w_m2 = 0x3f0e8113b065f968  # 5.818215690832595e-5
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
-condensate: H2O, Solid, seasonal true
-reservoir_kg_m2 = 0x4159e5ee8b9e4e80  # 6789050.181537271
-reservoir_gel_m = 0x40bc67de6a2c0b55  # 7271.868807556883
-area_fraction = 0x3ff0000000000000  # 1.0
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk cometary; provinces cometary; Oxidised, IceMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x40848639c6a9237d  # 656.7782109464603
@@ -7597,10 +7541,6 @@ heat_flow_w_m2 = 0x3f0a5a4ccc8668d0  # 5.0263851849767526e-5
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
-condensate: H2O, Solid, seasonal true
-reservoir_kg_m2 = 0x41565fca01793058  # 5865256.02302178
-reservoir_gel_m = 0x40b88a607f4e3122  # 6282.376942526813
-area_fraction = 0x3ff0000000000000  # 1.0
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk cometary; provinces cometary; Oxidised, Unmelted
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x405907f4a27c66c4  # 100.12430631779267
@@ -7689,10 +7629,6 @@ heat_flow_w_m2 = 0x3f03e193a66910a3  # 3.792030183949579e-5
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3ff0000000000000  # 1.0
-condensate: H2O, Solid, seasonal true
-reservoir_kg_m2 = 0x4150e156932c2d2b  # 4425050.299571316
-reservoir_gel_m = 0x40b283bf6bcc5956  # 4739.747738620577
-area_fraction = 0x3ff0000000000000  # 1.0
 crust: lid Bulk; primary none, secondary none, tertiary none, bulk cometary; provinces cometary; Oxidised, IceMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x408d5e33fe5f231e  # 939.7753875191299

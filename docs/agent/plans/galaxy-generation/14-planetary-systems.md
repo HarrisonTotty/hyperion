@@ -22495,7 +22495,9 @@ planetary::record` (624 tests at T57.a's commit).
         their appended T24.b item was; the sample's other 435 crust entries lie on ice-rich crusts.
         An ice bulk's crust is its ice whatever `Crust::of` says. Main accepted this as recorded
         (2026-10-21): the disagreement of `SurfaceMaterial` and `Crust::of` is deferred to
-        P14.T53.c, with no uncapped-area rule now.
+        P14.T53.c, with no uncapped-area rule now. Closed by Batch D's fix commit (RG1,
+        decision-p14-t54a-ganymede "§C3.1 The count is 34"): under their non-`H2O` lids the three
+        no longer list it.
       - _Further reading:_ Malamud and Perets's third paper (2017, doi:10.3847/1538-4357/aa8df5)
         carries the same model to dwarf planets and moons of hundreds of kilometres, e605's size,
         and finds some water nearly always kept. The code cites the ruling's two sources.
@@ -22770,11 +22772,14 @@ planetary::record` (624 tests at T57.a's commit).
         epoch are the same with the book and without.
       - `generation_s_dead_derivations_move_no_bit_of_the_sample`: over the same sample, each
         system's records at `parent_time` (60), each member as its moons' parent (585) and each
-        parent as its moons read it (77) are the unlevered path's, and the generated systems
-        (every law, Laplace frame, satellite, ring and moon) and their snapshots at the epoch are
-        the same with the lever and without. Its first run caught the records' mass, which the
-        lever had read off the history (`FateAt::mass`, before escape) and not off the
-        derivation.
+        parent as its moons read it (77) are the unlevered path's, and the generated systems (every
+        law, Laplace frame, satellite, ring and moon) and their snapshots at the epoch are the same
+        with the lever and without. Its first run caught the records' mass, which the lever had read
+        off the history (`FateAt::mass`, before escape) and not off the derivation. (e3)'s check is
+        structural, with no independent reference: `primary_record` builds its record on
+        `primary_now_under`, which the record-free read's `primary_now` wraps, so its 77 compare
+        that function with itself
+        (Batch D's review, RD1; the test's doc says so).
       - On stubs: `a_shade_off_its_book_is_its_own_to_the_bit` (seven hosts from 2,600 to 40,000 K
         and invalid ones: the book's entries, its constants, six skies of one to three hosts, one
         of them a host the book does not hold and two lit by none, and a planet's glow) and
@@ -22818,9 +22823,11 @@ planetary::record` (624 tests at T57.a's commit).
       order that is `Equal` exactly at the same bits. `solve` is it at C = (), its signature as
       before.
       - The plain passes are lagged: pass n reads Cₙ = K(Pₙ₋₁), pass 1 the caller's labelled C₀.
-      - Settled: T51.b's test, Cₙ₋₁ ≡ Cₙ and Cₙ ≡ K(Pₙ). On a float, ≡ is `floats_agree`: the
-        same bits, or both finite within `CONTEXT_AGREEMENT` (10⁻⁹) of the larger. A NaN never
-        agrees, and an infinity only with itself, since |∞ − ∞| ≤ 10⁻⁹ ∞ would hold.
+      - Settled: T51.b's test, Cₙ₋₁ ≡ Cₙ and Cₙ ≡ K(Pₙ). On a float, ≡ is `floats_agree`: the same
+        bits, or both finite within `CONTEXT_AGREEMENT` (10⁻⁹) of the larger. A NaN never agrees,
+        and an infinity only with itself, by the same-bits test: the lane's choice, since the
+        ruling's formula as written refuses it (in IEEE 754 |∞ − ∞| is a NaN, against which no
+        comparison holds; the C1 review's DD3).
       - The 2-cycle stop is on (A, C) two passes back, bit for bit (`rank`'s `Equal`).
       - The frozen context `C_f` is the one read by the lower of the last two plain passes in the
         canonical order: the albedo read (`total_cmp`), then the albedo given, then `rank` (the
@@ -22973,7 +22980,7 @@ planetary::record` (624 tests at T57.a's commit).
     - _Q2, the moons' rounds_ (`moon_law`): round 1 derives the moon over its record under the
       locked spin, `SeasonalSpin::of` of `BodyRotation::locked_frame` of its own `SpinInputs` (its
       bulk the record's rule on `moon_before_passes`; the frame `derive`'s, its pole, obliquity
-      and period the same, at a despinning time of the least positive `f64` second, locked from
+      and period the same, at a despinning time of `f64::MIN_POSITIVE` seconds, the smallest positive normal `f64`, locked from
       birth), and holds the law its tides give if it is locked at `parent_time`; otherwise round 2
       derives it under that law and holds the law its tides give. `moon_rotations` and
       `derive_rotation`'s moon arm both call it (`parent_now` takes the call chain's cosines and
@@ -22985,20 +22992,23 @@ planetary::record` (624 tests at T57.a's commit).
     - _The C1 review's items:_ RC1-a, `PassFigures`' doc names the surface pressure its crater
       contract's screening reads; a first stage refused (the screening's) is no figures in K, C₀'s,
       a key change ("figures present"), as the record's `NotModelled` is. DD1, `PassContext::of`
-      debug-asserts its floats finite, which `Context::rank`'s doc states. DD2,
+      asserts its floats finite, which `Context::rank`'s doc states: a debug assertion here, a
+      release `assert!` from Batch D's fix commit (D2-1), its 11 floats a pass. DD2,
       `a_context_ranks_equal_exactly_at_the_same_members` and the sample run with every end
       re-evaluated (`with_ends_evaluated`).
     - _Deviations and lane choices_ (each the lane's lean, recorded):
       - The record lists an ice bulk's crust as its `H2O` solid (decision-p14-t54a-ganymede, C1
         follow-up §C1.4), which the pass's area mix reads as its regolith (`CrustWater::Unlisted`):
         the record's condensates are the last pass's but for that entry.
-      - A column with nothing that condenses: the pass reads no climate (L2), and the record
-        builds its own conditions at the context's heat flow and θ (computed, 0), never the
-        stand-in span. Its partition's climate field is the pass's isothermal one, read by nothing.
+      - A column with nothing that condenses: the pass reads no climate (L2), and the record builds
+        its own conditions at the context's heat flow and θ (computed, 0), never the stand-in span.
+        It still solves a partition, over the mean's isothermal span, whose climate field nothing
+        reads (recorded).
       - The context carries the whole first stage so that the record reuses K(P*); tested against
         computing it again.
-      - θ's gate is step 3's state at a greenhouse step and the air's at the published partition
-        and on the record.
+      - The record and `SpunPasses` carry the published partition's θ, gated by the published air's
+        own state, not step 3's: the lane's choice. A greenhouse step's θ is gated by step 3's
+        state, the climate's division, which no step's partition moves.
       - `parent_now` derives the parent over its record, though its moons read no pass value of
         it, so that it is `primary_record`'s `ParentNow` to the bit.
       - The window entry stays a pass's own (no lever).
@@ -23072,29 +23082,59 @@ planetary::record` (624 tests at T57.a's commit).
         gains N₂ and CH₄ ices.
       - `planetary/systems/` close_binary, eccentric_giant, fallback_black_hole, filler_b, filler_c,
         hierarchical_triple, hot_jupiter, m_dwarf_resonant_chain, solar_like, subgiant and
-        wide_binary (1,116 values): T_eq, the photometry, the surface section and the condensates.
-        By class (scratch `c2/bodies.txt`):
+        wide_binary (1,103 values changed, and 92 condensate labels relabelled: 92 new, 92 gone):
+        T_eq, the photometry, the surface section and the condensates. By class (scratch
+        `c2/bodies.txt`):
         - Seas over known basins: a pass now sees the liquids its record published, which its
-          stand-in's unknown basins covered with none. Cold `Snowball`s under a global
-          CH₄–C₂H₆–N₂ sea darken and warm: filler_c's icy member e201, Bond 0.851 → 0.046, T_eq
-          106.6 → 169.5 K, T_s 110 → 172 K and 0.89 → 23 bar, and its planet 0400, 0.814 → 0.046
-          and 91 → 137 K; wide_binary's 0700, 0.655 → 0.381; m_dwarf_resonant_chain's 0500, T_s
-          110 → 151 K, above N₂'s critical point, so its N₂ is airborne, 15 → 148 bar, its
-          condensable CH₄.
-        - The real climate span and cold profile: airless icy members' frosts cover more of
-          their surface and brighten (filler_b e201–e208, hot_jupiter e101–e104, eccentric_giant
-          e101, close_binary e807: Bond about 0.70–0.83 → 0.87–0.97, T_eq 3–8 K colder); CH₄
-          solids seasonal → not on filler_b and hot_jupiter; wide_binary's climate model
-          `Isothermal` → `EnergyBalance`; solar_like's cold temperate 0300's cloud, Bond 0.216 →
-          0.141, T_eq +5.4 K.
+          stand-in's unknown basins covered with none. Cold `Snowball`s under a global CH₄–C₂H₆–N₂
+          sea darken and warm: filler_c's icy member e201, Bond 0.851 → 0.046, T_eq 106.6 → 169.5 K,
+          T_s 110 → 172 K and 0.89 → 23 bar, and its planet 0400, 0.814 → 0.046, T_eq 91 → 137 K,
+          T_s 93.4 → 138.6 K and 0.17 → 5.7 bar; wide_binary's 0700, 0.655 → 0.381;
+          m_dwarf_resonant_chain's 0500, T_s 110 → 151 K, above N₂'s critical point, so its N₂ is
+          airborne, 15 → 148 bar, its condensable CH₄.
+          - Out of range, recorded (Batch D's science check, S2-1): m_dwarf_resonant_chain 0500's
+            liquid CH₄–C₂H₆–N₂ sea (3.42 × 10⁷ kg m⁻²) under about 143 bar of N₂ at 150.5 K lies
+            beyond the N₂–CH₄ critical line (Peng–Robinson: two phases only below about 47 bar at
+            150 K, about 56 bar at the sea's reference ethane share; N₂ + C₂H₆ to 180–480 bar;
+            medium confidence, no measured critical line read). It is an existing ideal-mixture
+            limit (`chem/partition.rs`'s `AIR_SOLUTIONS`, no Henry's constants) that C2 exposes,
+            routed to P14.T49.h: a labelled guard could flag a dissolved-solution liquid above the
+            binary's critical pressure. Not a blocker (FEATURES FIRST); for the bless note.
+          - E1's gap (owned; main's G3), recorded (S2-2): e201 and 0400 at Bond 0.046 hold dense
+            CH₄-rich airs whose Rayleigh scattering the area mix does not read. e201: g 2.458 m s⁻²,
+            a column of 3.51 × 10²⁷ cm⁻², CH₄ about 1,300 km-amagat, τ_R(550 nm) about 35–45, so an
+            estimated Bond 0.2–0.45 (central 0.3) and a T_eq 7–22 K below the published; 0400: g
+            1.702, 1.26 × 10²⁷ cm⁻², about 470 km-amagat, τ_R 13–16, Bond 0.2–0.45 (Sneep and Ubachs
+            2005, via PICASO; N₂'s 4.6 × 10⁻²⁷ cm²; as the check gave them). For main's docs batch:
+            a CH₄-dominated dense air like e201 among T24.h.a's tests.
+          - Recorded for P14.T24.h, T49.h and T53.c (S2-3, a consider): CH₄ has no greenhouse term
+            (`atmosphere.rs`; τ about 0.06 at 23 bar, where its collision-induced absorption, ∝ p²,
+            and its 7.7 µm band would be large); the sea's properties at Titan's reference
+            composition are clamped at 126.19 K (density 518.9 kg m⁻³ against NIST's 306 for CH₄ at
+            171.6 K, so its depth is 1.7× too shallow; n about 1.19, not 1.27, and the sea's albedo
+            about 0.035, not 0.046); and a sea that is not water takes no moist transport and no
+            cloud.
+        - The real climate span and cold profile: airless icy members' frosts cover more of their
+          surface and brighten (filler_b e201–e208, hot_jupiter e101–e104, eccentric_giant e101,
+          close_binary e807 and filler_c e305: Bond about 0.70–0.93 → 0.87–0.97, T_eq 1.6–8.0 K
+          colder; e305 0.856 → 0.884, 2.0 K colder); an airless rocky moon's frost, which the
+          stand-in's cover spread over its surface, reads the record's cover in its passes and
+          darkens (filler_b 0403, Bond 0.168 → 0.123, T_eq 0.6 K warmer, its frost on 0.43% of its
+          surface; S2-4); CH₄ solids seasonal → not on filler_b and hot_jupiter; wide_binary's
+          climate model `Isothermal` → `EnergyBalance`; solar_like's cold temperate 0300's cloud,
+          Bond 0.216 → 0.141, T_eq +5.4 K.
         - θ at each step and the context's heat flow: the remaining last-digit moves.
-        - None: no surface state flips in the systems goldens, and no rotation, orbit or bulk
-          value moved, moons' laws included.
+        - None: no surface state flips in the systems goldens, and no rotation or orbit value moved,
+          nor any mass, radius, density, gravity or mass fraction, moons' laws included. T_eq moved
+          with the albedo (`t_eq_k`), an expected pass output, which the commit message's "no
+          rotation, orbit or bulk value moved" left aside (D2-3).
       - The rest hold: the sim's other 13 lib goldens and its 24 golden integration targets, and
         the server's `systems_in_range`, `system_bodies` and `--lib` `convert`, `scene` and
         `requests`.
     - _Its cost_ (indicative, no timed probe): the sample test 5.2 s, the fast-tier continuity test
-      (`planetary_properties`, the stand-in's) 26.5 s; no HEAD figures taken.
+      (`planetary_properties`, the stand-in's) 26.5 s; no HEAD figures taken. Pending before the
+      blessing message: §C.6's budget on the probe, G2's timing of `generate`, and item 17's crust
+      share of `snapshot_at` (P14.T33.a's (ii) and (v) against 22's 3.47 ms and 173 µs) (PD-3).
     - _Files:_ `planetary/derive/pass_record.rs` (new), `derive/mod.rs`, `derive/passes.rs`,
       `derive/atmosphere.rs`, `derive/atmosphere/surface_mix.rs`, `derive/rotation.rs`,
       `hooks/figures.rs`, `hooks/figures/cover.rs`, `hooks/surface.rs`, `hooks/cold_traps.rs`'s doc,
@@ -23111,10 +23151,11 @@ planetary::record` (624 tests at T57.a's commit).
   - _Batch D's C3, the lid in the passes and on the record, with T49.j's inertia_
     (decision-p14-t54a-passes, "For main → Relay to p14-wire-23 (Batch C)", Q1 items 5 and 6, the
     sample test 11 and the six points 3–6, with §1.1, §1.5 and §3.3–3.6; decision-pre-23-review
-    items 3, 7, 13, 16, 17 and 34 A; design-batch-c §3 and §5's commit 3, as the ruling corrected
-    them). A checkpoint at 22: `GENERATOR_VERSION` stays 22, and the goldens it moves re-bless at
-    header 22 in the same commit. `COLD_TRAPS_VERSION` (24), its arm and its tripwire, the aerosol
-    tripwire and the formation tripwire stand.
+    items 3, 7, 13, 16, 17 and 34 A's tripwire deletion (its two restamps are brief item 7's);
+    design-batch-c §3 and §5's commit 3, as the ruling corrected them). A checkpoint at 22:
+    `GENERATOR_VERSION` stays 22, and the goldens it moves re-bless at header 22 in the same commit.
+    `COLD_TRAPS_VERSION` (24), its arm and its tripwire, the aerosol tripwire and the formation
+    tripwire stand.
     - _The basis, once a body_ (`PassBody::crust_basis`, before any pass, in `record_passes`): the
       record gives `RecordCrust` (`PassRecordOf::crust`; `MoonRecordOf::crust`): the origin, the
       formation time (a planet's `formed_at`; a member's and a capture's word 0 of
@@ -23146,10 +23187,15 @@ planetary::record` (624 tests at T57.a's commit).
       T_eq (`ClimateBody::ground`, `GroundInertia::at_equilibrium`, once a pass).
     - _The regolith and the cap_: a pass with a lid reads `Regolith::with_lid` of its row (its
       `expect(dead_code)` gone); `Regolith::bond`'s space-weathering cap keys on `capped_lid`, an
-      airless body whose lid row's family is `Silicate` (the six points' item 4), the one
-      predicate for the passes, the record's photometry and T51.i's `regolith_albedo`, which is now
-      the published pass's lid's. The unknown-lid arms (a first pass, the stand-in, a body with no
-      basis) keep the material rule. `StandIn`'s labels say so.
+      airless body whose lid row's family is `Silicate` (the six points' item 4), the one predicate
+      for the passes, the record's photometry and T51.i's `regolith_albedo`, which is now the
+      published pass's lid's. The unknown-lid arms (a first pass, the stand-in, a body with no
+      basis) keep the material rule. `StandIn`'s labels say so. Against the measured Bond albedos
+      (Batch D's science check, S3-4; for the bless note): Ceres's Bond is 0.037 ± 0.002 (Li et al.
+      2019; its 0.09 is geometric), Vesta's bolometric Bond 0.18 ± 0.01 (Li et al. 2013; its 0.4 is
+      geometric), Mercury's 0.068 (NASA) to 0.088 ± 0.003 (Mallama 2017, spherical bolometric). So
+      the cap's 0.11 leaves dark bodies too bright (Ceres about 3×, its T_eq 2.0% low) and HED-like
+      ones too dark (Vesta 39%, its T_eq 2.1% high).
     - _On the record_: `DerivedBody::crust_lid` (and `DerivedMoon::crust_lid`) is the published
       pass's lid stage; `published_surface` builds `CrustComposition::of` of it with the figures'
       volcanism and continental fraction and the final conditions (`record_crust`), so that the
@@ -23199,42 +23245,63 @@ planetary::record` (624 tests at T57.a's commit).
       - R09's `a_diurnal_cycle_converges_to_its_period` reproduces research-c's prototype at its
         own Γ, the rock constant's 55, a check of the scheme: the reference Moon's `feldspathic`
         lid gives 46.53, whose predawn is 92.70 K against the prototype's 96.1 K.
+      - A ground under no light (its T_eq not positive and finite) takes its material's constant
+        (`InertiaSource::Unlit`) before the law is called, so no `Temperature` debug assertion
+        fires; §3.5's table has no such row, and its climate stores nothing there (PD-4).
+      - The thermal tripwire's held file, R09.T12.c's ice-lid T_e reading `H2O`'s conductivity
+        (`relief/provinces.rs`), went with it: the serve gate keeps R09's coarse field off the
+        record.
+      - A giant-impact moon's parent is icy or rocky by the moon's own `MoonBirth::formed` side, not
+        by the parent's bulk.
+      - R09's radiative model reads the lid on the record's crust, the published pass's own, while
+        the record's ground reads the published pass's context's lid: equal on the sample (test 11),
+        not guaranteed at a context jump. The wire subtask (Batch E's `for_body`) may carry the
+        record's Γ and lid into R09's inputs (Batch D's review, D3-1).
     - _Its tests._
       - `under_the_batch_the_photometry_states_the_derivation_s_albedo`, the re-check over the 60
         whole systems (954 bodies): planets 226, members 567, moons 161; bracketed 10 (1.05%):
-        planets 9 (5 jumps across the diagonal and 4 fixed points, the largest joint residual
-        5.1 × 10⁻¹⁰), a moon 1 (a diagonal jump); no context jump, no frost; jumping 6 (0.63%);
-        one took the second round (02000b2cdfff0000.0d00, a diagonal jump in the end). Passes:
-        planets {3: 22, 4: 105, 5: 23, 6: 10, 7: 13, 8: 7, 10: 5, 11: 4, 12: 3, 13: 2, 14: 2,
-        15: 3, 16: 5, 17: 6, 18: 4, 19: 1, 20: 1, 22: 1, 38: 2, 41: 1, 44: 1, 47: 1, 56: 1, 57: 1,
-        58: 1, 77: 1}, members {4: 503, 5: 38, 6: 11, 7: 5, 8: 7, 9: 1, 10: 2}, moons {4: 144,
-        5: 14, 7: 2, 41: 1}: 4,897 passes against C2's 4,398. Test 11: every body's `crust_lid` is
-        the lid its published pass takes again, whose row its regolith read, and its record's
-        crust's lid row, to the bit (893 bodies with a lid on their record). Lid flips during the
-        passes: two settled moons (42002cae0000000a.0203 and 21fff6597ff00000.0702, `cometary` →
-        `chondrite_cv` as their darker lid warmed their warmest past 110 K), none bracketed; every
-        bracketed body's context and K(P*) agree in the lid. The six points' item 5: every one of
-        the 783 airless bodies' record mean T_s is its T_eq to the bit, and R09's
-        `regolith_inertia` at its record's lid and mean T_s is its record's conditions' Γ to the
-        bit, so R09 reads the record's mean T_s, not T_eq.
+        planets 9 (5 jumps across the diagonal and 4 fixed points, the largest joint residual 5.1 ×
+        10⁻¹⁰), a moon 1 (a diagonal jump); no context jump, no frost; jumping 6 (0.63%); one took
+        the second round (02000b2cdfff0000.0d00, a diagonal jump in the end). Passes: planets {3:
+        22, 4: 105, 5: 23, 6: 10, 7: 13, 8: 7, 10: 5, 11: 4, 12: 3, 13: 2, 14: 2, 15: 3, 16: 5, 17:
+        6, 18: 4, 19: 1, 20: 1, 22: 1, 38: 2, 41: 1, 44: 1, 47: 1, 56: 1, 57: 1, 58: 1, 77: 1},
+        members {4: 503, 5: 38, 6: 11, 7: 5, 8: 7, 9: 1, 10: 2}, moons {4: 144, 5: 14, 7: 2, 41: 1}:
+        4,897 passes against C2's 4,398. Test 11: every body's `crust_lid` is the lid its published
+        pass takes again, whose row its regolith read, and its record's crust's lid row, to the bit
+        (893 bodies with a lid on their record). Lid flips during the passes: two settled moons
+        (42002cae0000000a.0203 and 21fff6597ff00000.0702, `cometary` → `chondrite_cv` as their
+        darker lid warmed their warmest past 110 K), none bracketed; every bracketed body's context
+        and K(P*) agree in the lid. The six points' item 5: every one of the 783 airless bodies'
+        record mean T_s is its T_eq to the bit, and R09's `regolith_inertia` at its record's lid and
+        mean T_s is its record's conditions' Γ to the bit (on every airless body, bracketed ones
+        included), so on an airless body R09 reads the record's mean T_s, not T_eq. Under a thin air
+        R09's radiative model reads Γ at its mean T_s and the record's conditions at T_eq: Batch E's
+        `for_body` (D3) carries the record's Γ into R09's inputs, so that the two read one Γ (§3.5).
+        From Batch D's fix commit the test takes every body under R09's radiative model
+        (`ClimateModelKind::RadiativeEquilibrium`), asserts the airless ones' Γ the record's and
+        lists the thin airs' (D3-1, PD-1).
       - The guards, re-based by main on C2's escalation: planets jumping, 5 of the sample's 226
         (C2's 5), is pinned at it, and the 2% guard is asserted over the 400 systems
-        (`the_passes_endings_over_the_whole_sample_are_recorded`); `a_moon_s_law_is_held_after_at_most_two_rounds`
-        asserts the flips and oscillations at most 1% of the moons (0 of 426) and the regular moons
-        in round 2 at most 1% (0 of 90), and keeps the round-2 pin at 151 (C2's 151).
+        (`the_passes_endings_over_the_whole_sample_are_recorded`);
+        `a_moon_s_law_is_held_after_at_most_two_rounds` asserts the flips and oscillations at most
+        1% of the moons (0 of 426) and the regular moons in round 2 at most 1% (0 of 90), and keeps
+        the round-2 pin at 151 (C2's 151). From Batch D's fix commit test 1 extends to round 2
+        (main's G2): each round-2 moon's record, under its held law, is round 2's derivation, under
+        round 1's law, to the bit, since round 2 gave round 1's law to the bit on every one (PD-2).
       - `the_lid_s_moves_from_the_stand_in_are_recorded` (ignored, run by name), the bless note's
         lists over the same 60 systems with and without the lid (`without_crust`): 893 surfaces,
         each with a lid. By lid lithology, rows changed from the stand-in and their T_eq moves:
-        `H2O` 447 (14 changed, −38.0 to +0.1 K), `basalt` 92 (66, 0 to +8.5 K), `basalt_fe` 109
-        (31, −20.4 to +98.9 K), `basalt_reduced` 84 (21, 0 to +168.2 K), `chondrite_ci` 5 (5,
-        +37.1 to +151.9 K), `chondrite_cv` 9 (9, +27.4 to +146.1 K), `chondrite_e` 6 (none),
-        `chondrite_h` 1 (1, +1.3 K), `chondrite_l` 2 (none), `chondrite_ll` 17 (4, +1.3 to
-        +59.5 K), `cometary` 35 (35, 0 to +70.8 K), `feldspathic` 5 (none), `komatiite` 49 (24,
-        −20.1 to +86.0 K), `phyllosilicate` 3 (2, +0.7 to +11.0 K), `ultramafic` 29 (14, −28.8 to
-        0 K). Airless nights the inertia alone moved (T_eq held to the bit): 212 of 324 moved, `H2O`
-        176 (+0.02 to +23.4 K), `basalt_reduced` 18, `basalt_fe` 10, `feldspathic` 2, `chondrite_ll`
-        2, and one each of `chondrite_l`, `komatiite`, `phyllosilicate` and `ultramafic`. Capped
-        (an airless `Silicate` lid): 319.
+        `H2O` 447 (14 changed, −38.0 to +0.1 K), `basalt` 92 (66, 0 to +8.5 K), `basalt_fe` 109 (31,
+        −20.4 to +98.9 K), `basalt_reduced` 84 (21, 0 to +168.2 K), `chondrite_ci` 5 (5, +37.1 to
+        +151.9 K), `chondrite_cv` 9 (9, +27.4 to +146.1 K), `chondrite_e` 6 (none), `chondrite_h` 1
+        (1, +1.3 K), `chondrite_l` 2 (none), `chondrite_ll` 17 (4, +1.3 to +59.5 K), `cometary` 35
+        (35, 0 to +70.8 K), `feldspathic` 5 (none), `komatiite` 49 (24, −20.1 to +86.0 K),
+        `phyllosilicate` 3 (2, +0.7 to +11.0 K), `ultramafic` 29 (14, −28.8 to 0 K). Airless nights
+        moved: 324, 212 of them by the inertia alone (T_eq held to the bit): `H2O` 176 (+0.02 to
+        +23.4 K), `basalt_reduced` 18 (−0.4 to +8.0 K), `basalt_fe` 10 (−5.0 to +1.6 K),
+        `feldspathic` 2 (−6.9 to −4.1 K), `chondrite_ll` 2 (−6.1 to −4.1 K), and one each of
+        `chondrite_l` (+0.8 K), `komatiite` (+7.5 K), `phyllosilicate` (−0.1 K) and `ultramafic`
+        (−3.2 K). Capped (an airless `Silicate` lid): 319 of the 783 airless.
       - The inertia (`hooks/surface/tests.rs`, moved from `substance/thermal/tests.rs`):
         `the_ground_s_inertia_is_the_law_at_its_lid_with_its_fallbacks` (Mars's `basalt_fe` 48.08
         at 214 K and 44.06 at the table's 189.9 K, against 180–250 measured; Titan's `H2O` 57.34 at
@@ -23259,25 +23326,60 @@ planetary::record` (624 tests at T57.a's commit).
       ≤ 3%, jumping 0.63% ≤ 1%, a fixed point's joint residual 5.1 × 10⁻¹⁰ ≤ 10⁻³; planets
       jumping over the 400 systems 1.08% ≤ 2%; round 2's flips and oscillations 0 of 426 moons,
       and no regular moon in round 2.
-    - _A finding, for main_ (not built, it amends decision-p14-t54a-ganymede C1 follow-up §C1.4):
-      the record lists an ice bulk's crust's water as its `H2O` solid whatever its lid. Of the
-      sample's 893 surfaces 77 are ice bulks whose lid is not `H2O`, and 31 of them publish an
-      `H2O` solid entry over their surface (25 `cometary`, 2 `chondrite_ll` and 2 `phyllosilicate`
-      over all of it, and 2 `chondrite_cv`, one over all of it and one over 0.061) beside an
-      albedo that read their lid's row. Lean: list the crust's water only where the lid's row is `H2O`, §C1.4's premise ("an
-      ice crust's water is its surface"). No view reads the condensates at 23.
-    - _A finding, recorded_ (upstream of the crust, which reads it as given): a small capture
-      beside a rocky belt takes an icy bulk by its orbit in its parent's nursery (P14.T17.b's
-      `place_moon`) and a birthplace inside the snow line by `MoonBirth::formed`, so its lid is an
-      ordinary chondrite on a 35–50% ice bulk: `close_binary`'s 0602, frost 0.924 → its
-      `chondrite_ll` lid's 0.11, T_eq 136.7 → 253.0 K.
-    - _Moved goldens_, re-blessed at header 22 (`golden_diff.py`, scratch `c3/golden_diff.txt`
-      and `c3/classified.txt`: 12 changed, 3 extended only; its "not bumped" problem the
-      checkpoint's; no surface state flips, and no rotation, orbit or bulk value moved):
+    - _A finding, for main_ (it amends decision-p14-t54a-ganymede C1 follow-up §C1.4; ruled there,
+      §C3.1, and built in Batch D's fix commit, RG1): the record lists an ice bulk's crust's water
+      as its `H2O` solid whatever its lid. Of the sample's 893 surfaces 77 are ice bulks whose lid
+      is not `H2O`, and 31 of them publish an `H2O` solid entry over their surface (25 `cometary`, 2
+      `chondrite_ll` and 2 `phyllosilicate` over all of it, and 2 `chondrite_cv`, one over all of it
+      and one over 0.061) beside an albedo that read their lid's row. Lean: list the crust's water
+      only where the lid's row is `H2O`, §C1.4's premise ("an ice crust's water is its surface"). No
+      view reads the condensates at 23.
+    - _A finding, recorded_ (upstream of the crust, which reads it as given): every capture's bulk
+      is 37.5% ice, `stated_moon_bulk`'s `ice_fraction_of(CAPTURED_DENSITY)`, whatever its
+      birthplace, as published since 22 (close_binary 0602 and filler_c 0201 both carry 0.374875),
+      not its orbit's (main's ruling, decision-p14-t54a-ganymede §C3.2, correcting the cause first
+      recorded here). A small capture beside a rocky belt formed inside the snow line by
+      `MoonBirth::formed` (the Phobos and Deimos rule), so its lid is an ordinary chondrite:
+      close_binary's 0602, Bond 0.924 → its `chondrite_ll` lid's 0.11, T_eq 136.7 → 253.0 K, and
+      filler_c's 0201, 0.851 → 0.11 and 161.5 → 252.5 K. The swing is the albedo's (1 − A)^¼, ×1.85,
+      and it is the correction: a 2 km body at T₀ 260 K cannot keep a 0.92 frost. The lid is right
+      and the bulk is the wrong side, P14.T56.f's at 24, before the serve gate. The same upstream
+      state, widened (Batch D's science check, S3-3): hot airless ice bulks cannot hold their water,
+      wide_binary's 0101–0104 (14–120 km, 37.5% water) at about 660 K about a main-sequence host of
+      0.557 L☉ for 2.3 Gyr, and subgiant's 0101–0304, at about 700 K or more on the main sequence
+      (free sublimation about 4 km a year at 253 K); and they are labelled `Reduced` with 37.5%
+      water (wide_binary 0101 a `Reduced` `chondrite_ci`).
+    - _Recorded from Batch D's science check:_ S3-1 (lean: keep the ruled law; main told), `H2O`
+      lids under T49.j's law take Γ about 57 on airless bodies, above every measured airless icy
+      body: Ganymede 20–40 (Bockelée-Morvan et al. 2024, A&A 681, A27), the trans-Neptunian mean 2.5
+      ± 0.5 (Santos-Sanz et al. 2017, A&A 604, A95), 8P/Tuttle below about 10 (Boissier et al.
+      2011); only Europa's 70 is near (Rathbun et al. 2010; as the check gave them). Likely the
+      `H2O` reference form (crystalline conductivity, moderate porosity) against the fluffy or
+      amorphous ice of the outer system: a P14.T49.j or T49.l follow-up, the `H2O` form's porosity
+      and conductivity, with the Ganymede and trans-Neptunian checks; no value changes (for the
+      bless note). S3-2, the record's `peak_central_temperature_k` is the conductive sphere's
+      T_c,max, a threshold test with no convection, latent heat or melt loss, so that above the
+      solidus it is not a temperature reached (the goldens hold up to 14,864 K, wide_binary e401,
+      and subgiant 0101's 9,985 K): `CrustComposition::peak_central_temperature`'s and
+      `Surface::crust`'s docs say so. S3-5, the docs cite Mellon et al. 2000 (Icarus 148, 437) and
+      Putzig et al. 2005 (Icarus 173, 325) for Mars's 180–250, not re-read, and MacKenzie et al.
+      2019 (JGR Planets 124, 1728) for Titan's about 236, not re-read (P14.T49.l re-reads its tables
+      before asserting it); the rock constant's "some 250" now agrees with 180–250. S3-6 (a
+      consider), the formation stand-in, the present T_eq at 0.3, is about 4× the main-sequence T_eq
+      about the red giant, and makes the boundary alone melt ice labelled `Radiogenic` (wide_binary
+      0101's T_c,max 743 K over a boundary of about 620 K); the disc's `formation_temperature` would
+      be the better stand-in, for a later bump (§3.3 rules 0.3's T_eq at 23).
+    - _Moved goldens_, re-blessed at header 22 (`golden_diff.py`, scratch `c3/golden_diff.txt`: 12
+      changed, 3 extended only, its "not bumped" problem the checkpoint's; the counts below are
+      `c3/classified.txt`'s, which leave out condensate entries relabelled or gone, so golden_diff
+      counts eccentric_giant's 96 and filler_b's 255; no surface state flips, and no rotation,
+      orbit, mass, radius, density, gravity or mass fraction moved, T_eq with the albedo):
       - `planetary/surface_conditions_published` (273 values): the climate of the bodies whose
         ground's inertia moved (the warmest 40, the day–night contrast 37, the coldest 35) and of
-        those whose regolith row moved T_eq (the mean T_s and the equator–pole contrast 23 each,
-        the column 35), with their pressures, mole fractions, ices and craters' target density.
+        those whose regolith row moved T_eq (the mean T_s and the equator–pole contrast 23 each, the
+        column 35), with their pressures, mole fractions, ices and craters' target density; besides,
+        `volcanism` 2, `relief_constructional` 4, `target_density` 9, `cloud_fraction` 2 and
+        `ocean_weight` 1 (D3-4).
       - `planetary/systems/` close_binary (406 values), eccentric_giant (66), filler_a (2),
         filler_b (187), filler_c (200), hierarchical_triple (258), m_dwarf_resonant_chain (33),
         red_giant (188), solar_like (69), subgiant (218) and wide_binary (231); fallback_black_hole,
@@ -23288,11 +23390,11 @@ planetary::record` (624 tests at T57.a's commit).
           this alone), an `H2O` lid's about 57 against ice's 20 and a silicate's about 44–118
           against rock's 55.
         - The regolith's row (62 bodies' Bond albedos moved by more than 0.02): icy moons and
-          members whose frost stand-in (0.59–0.92) became a dark lid (eccentric_giant's
-          0101–0103, `chondrite_cv` and `chondrite_ci`, T_eq 140.8 → 206.0–208.1 K; filler_b's
-          and hierarchical_triple's `cometary` and `chondrite_ci` moons, T_eq +30–36%; close_binary's
-          0602 above), among them hot airless ice bulks about evolved hosts, whose frost at
-          400–600 K the lid replaces with rock at the cap (subgiant's 0101, `basalt_reduced`, T_eq
+          members whose frost stand-in (0.59–0.92) became a dark lid (eccentric_giant's 0101–0103,
+          `chondrite_cv` and `chondrite_ci`, T_eq 140.8 → 206.0–208.1 K; filler_b's and
+          hierarchical_triple's `cometary` and `chondrite_ci` moons, T_eq +30–36%; close_binary's
+          0602 above), among them hot airless ice bulks about hot or evolved hosts, whose frost at
+          321–612 K the lid replaces with rock at the cap (subgiant's 0101, `basalt_reduced`, T_eq
           612.3 → 863.1 K; wide_binary's 0101–0104 and red_giant's 0503–0508 alike); water-ice lids
           on rocky bulks keeping their frost (wide_binary's e104, e401 and e403, 0.11 → 0.72–0.81,
           T_eq 25–32% colder); and rocky bodies under air whose lid is brighter than the `basalt`
@@ -23300,12 +23402,17 @@ planetary::record` (624 tests at T57.a's commit).
           its belt members e303–e501, T_eq 6.5% colder; solar_like's 0400 and wide_binary's 0600,
           `basalt_fe`, 0.056–0.059 → 0.343–0.363).
         - What follows: the condensates (frosts lost on warmed bodies, filler_b's and
-          eccentric_giant's), their reservoirs and ice fractions, and σ_h where T_s moved.
+          eccentric_giant's), their reservoirs and ice fractions, three bodies' ocean fractions
+          (close_binary's 0800, 0.476 → 0.562, and 0900; filler_c's 0200), surface pressures where
+          T_s moved a condensable's saturation (20), and σ_h where T_s moved; and 2 seasonal flags
+          flipped and 6 condensate entries gone (D3-4).
       - The rest hold: the sim's other 13 lib goldens and its other golden integration targets,
         and the server's `systems_in_range`, `system_bodies` and `--lib` `convert`, `scene` and
         `requests` (the crust is sent absent). R09's coarse pass has no golden of its own.
     - _Its cost_ (indicative, no timed probe): the sample test 5.39 s against C2's 5.2 s, for 11%
-      more passes (members settle at 4, C2's 3).
+      more passes (members settle at 4, C2's 3). Pending before the blessing message: §C.6's budget
+      on the probe, G2's timing of `generate`, and item 17's crust share of `snapshot_at`
+      (P14.T33.a's (ii) and (v) against 22's 3.47 ms and 173 µs) (PD-3).
     - _Files:_ `planetary/hooks/surface.rs` (the ground's inertia, moved from `substance/thermal.rs`,
       and `SurfaceInputs::lid`), `hooks/crust.rs`, `derive/pass_record.rs`, `derive/atmosphere.rs`,
       `derive/atmosphere/surface_mix.rs`, `derive/mod.rs`, `derive/photometry/area_mix.rs`,
@@ -23326,3 +23433,197 @@ planetary::record` (624 tests at T57.a's commit).
       changed items' doctests (26 passed); Clippy `--lib --tests` on the sim and `--lib` on the
       server; rustdoc with `-D warnings`; rustfmt and Prettier. Not run: the slow tier (R09's 44
       ignored among them), the gate.
+  - _Batch D's review fixes_ (the review of L3, C1, C2 and C3, `batch-d-fixes`;
+    decision-p14-t54a-ganymede §C3 and "§C3.1 The count is 34"). A checkpoint at 22:
+    `GENERATOR_VERSION` stays 22, and the goldens it moves re-bless at header 22 in the same commit.
+    - _RG1_ (decision-p14-t54a-ganymede §C3.1, the count confirmed in "§C3.1 The count is 34"):
+      `CrustWater::of_record(material, lid)` lists the H₂O solid only on an ice bulk whose lid is
+      `H2O` or not known. 34 entries leave the record. 31 are C3's with an area: 25 `cometary`, 2
+      `chondrite_ll`, 2 `phyllosilicate` and 2 `chondrite_cv`. 3 are at zero area:
+      61ffd9680000000c.0201 (`chondrite_h`), .0202 (`chondrite_ll`) and 42002cb1ffc00004.0401
+      (`basalt_fe`), C0c's recorded three, now closed. No state, regime, Bond albedo, T_eq, bulk,
+      crust or other condensate moves (asserted over the 60 systems), and Ganymede, Callisto and
+      Titan keep `H2O` lids. The cover's H₂O ice moves to the end of `surface_ices` as W3 (a)'s
+      item, at the same area. 42002cb1ffc00009.0305's scaled ices move in their last bits and sum to
+      0.9999999999999999, within W5, as 14 golden records at c9e48fab already do.
+      - Built: `surface_basis` passes the record's lid, its sky's `crust_lid` (the published pass's,
+        whose row its regolith read), through `record_crust_water`;
+        `GlobalFigures::partition_ground`, the stand-in's and the tests', passes `None`, unchanged.
+      - Its tests: `an_ice_bulk_under_a_dark_lid_lists_no_crust_water` (`system/tests.rs`) walks the
+        first 60 whole systems at the epoch against C3's rule, forced through the test-only switch
+        `with_crust_water_by_material`, and pins the de-listed at 31 with an area and 3 at no area.
+        Every record's photometry and bulk, and every surface's state, material, conditions (its
+        regime among them) and crust, are the same bits; a de-listed surface keeps its other
+        condensates in their order and its liquids, and its ices are the same items within a few
+        ulps, the H₂O last; every other surface's condensates and figures are the same bits.
+        `the_record_lists_an_ice_bulk_s_crust_water_only_under_an_h2o_lid`
+        (`chem/partition/tests.rs`) holds `of_record`'s four cases, and every other lid of T51.c's
+        closed set on ice and on rock. §C1.4's Ganymede, Callisto and Titan tests stand unchanged.
+      - C0c's tally (`the_record_s_surface_holds_its_published_condensates`): of the sample's 510
+        ice bulks, 397 list their crust's frozen water as `H2O` solid, 11 T24.b's surface water and
+        102 none (98 `Airless`, 4 `RunawayGreenhouse`), against C2's 438, 11 and 61 (57 and 4). The
+        ruling expected 404 and 95. Beyond RG1's 34, 7 more list none: airless ice bulks at 142–147 K
+        (21fff6587ff80001.0704 and .0707, 220016597ff80000.0203, .0204 and .0206, and
+        42002cae0000000a.0104 and .0105), whose ice's vapour escapes since C3 put them under dark
+        lids (`cometary` and chondrites): C3's re-check counted 431 listing, C2's 438 less these 7
+        (scratch `c3/sample2.log`), and the fix commit's other edits move no bit of the sample.
+        Stated, not a come-back (the ruling).
+      - The docs on `CrustWater` (its variants and `of_record`), `crust_ice`, the sim's `H2O` solid
+        sentence (`CondensateEntry`), the protocol's (`SurfaceCondensateDto`, `record/surface.rs`)
+        and `hooks/figures.rs`'s cover (`with_surface_under`, the ruling's doc fix, and
+        `partition_ground`'s `None`) say so.
+      - RG2, the captures' cause corrected (every capture's 37.5% ice is `stated_moon_bulk`'s, not
+        its orbit's), is in C3's "_A finding, recorded_" (§C3.2).
+      - Recorded only (main's ruling, item 6): `hooks/surface/regime.rs`'s `ice < 1.0` at an ulp
+        under 1 goes to the docs batch (P14.T53.c); W3 (a)'s H₂O ice under dark lids, still in
+        `surface_ices`, is checked at 24 before the serve gate.
+    - _The code_ (the Rust reviews' RD, RC1, R2 and R3; the determinism audits' DD, D2 and D3):
+      - RD1: (e3) of `generation_s_dead_derivations_move_no_bit_of_the_sample` is a structural move
+        with no independent check, as its doc and L3's sub-bullet now say; no frozen copy of the old
+        `ParentNow` was kept.
+      - RD2: `ShadeBook::with_host` takes the book, and `primary_now_under` clones it;
+        `area_mix.rs`'s two stale docs say that a call chain's book computes the constants and each
+        host's light once for its bodies; `records_before_passes` expects a planet's or member's
+        fate where it returned `None` (a moon or ring takes none); `BodyHosts`' `PartialEq` ignores
+        the book, which moves no value, and its `Debug` shows it, as its doc says; `body_at` builds
+        the book after the belt and halo returns; and `derive` and `derive_before_passes` share
+        `with_hosts`, so that the rotation pass's hosts are the record's by construction.
+      - DD3: `floats_agree`'s doc, and C1's sub-bullet, call an infinity's agreement with itself, by
+        the same-bits test, the lane's extension: the ruling's formula as written refuses it, since
+        |∞ − ∞| is a NaN.
+      - RC1-c: `Convergence::Bracketed`'s `context` is `fit`; `validate` and `validate_basis` share
+        `validate_body` (`BodyChecked`: the radius, mass, age, formation temperature, Mg/Si,
+        fractions and formation time, in `derive`'s order), while the finite checks stay each
+        stage's own, since `derive`'s one list orders them across the stages (`validate_climate` and
+        `validate_record` unchanged); and `each_single_refusal_is_the_stages_own` names each case's
+        refusal by its variant. Done earlier: the lid an `Option<CrustLithology>`, beside its
+        constants and linking them (C3), and `SurfaceWaterInputs::share`'s 0 to 1 (C2). Not taken: a
+        frozen copy of the old first stage for `the_figures_first_stage_is_the_record_s_to_the_bit`,
+        which the goldens carry, as the review noted.
+      - RC1-a, RC1-b, DD1 and DD2 were done at C2 and C3 (their "_The C1 review's items_"). RC1-a's
+        refusal is now stated where `FiguresOf` drops it (R2-1), DD1's assertion is D2-1's, and
+        RC1-b's `# Panics` is R3-6's sentence.
+      - R2-1: `moon_law` expects `BodyRotation::locked_frame` ("a present moon's record has a
+        positive mass and radius, and the despinning time is positive"); `moon_bulk_before_passes`'s
+        `.ok()` gives `moon_derived`'s reason, and `FiguresOf`'s `pass_figures(..).ok().flatten()`
+        its own: a refusal is the crater contract's screening of a dense air, no figures in K, a key
+        change, and `published_surface` debug-asserts that the record's air is not refused.
+      - R2-2: `BasinsShape::of` matches `Hypsometry::{One, TwoPopulations}` exhaustively, and
+        `floats` and `CONTEXT_FLOATS` take their count from `BasinsShape::floats` and the four
+        others (`CONTEXT_OTHER_FLOATS`), debug-asserted
+        (`a_context_s_float_count_is_its_basins_shape_s`).
+      - R2-3: `spin_frame` builds a body's spin, its `ZonalInsolation` and its `surface_frame` once,
+        in `primary_record` and `satellite_record`, and `moon_law` builds its frame once for both
+        rounds, round 2 reusing round 1's table where `ZonalInsolation::is_at` its obliquity; the
+        passes and `surface_section` borrow them (`SpunBody`, through `primary_now_under`,
+        `primary_derived_under` and `moon_derived`; `moon_derived_with` builds them for a caller
+        that derives a moon once). `ParentNow::spin` is gone, `primary_derived` is test-only, and
+        `surface_frame` takes `&'s Body`, its re-lookup `expect` gone.
+      - R2-4: `BodySpin::{StandIn, Spun}` for `moon_derived`, `surface_section` and
+        `primary_derived_under`, and `ContextTide::{Untided, Moon}` for `PassContext::of`.
+      - R2-5: `partition_over` takes the air with its `ColumnInventory`, which `spun_partition`
+        builds once and reads beside it.
+      - R2-6: `locked_frame`'s doc: `f64::MIN_POSITIVE`, the smallest positive normal `f64`, kept
+        normal since a flush-to-zero target reads a subnormal as 0; `PassContext::surface_water`'s
+        potential ocean and `MoonShape::ice_fraction` are 0 to 1.
+      - R2-7: one function each: `WaterGate::new`, a greenhouse step's (`StepClimate::of`) and
+        through `WaterGate::of_air` a pass's and the record's (`surface_basis` among them);
+        `Retention::retains_against_escape`, which `Atmosphere::retains_against_escape` and
+        `state_and_greenhouse` read; and `BodyRotation::spun`, the setup `derive` and `locked_frame`
+        share, so that the locked frame's pole, obliquity and period are the law's by construction.
+      - R2-8: test 11 asserts θ = `OceanWeight::of_potential_ocean(0.0)`, to the bit, on every body
+        whose pass read no climate.
+      - R2-9: `HeldMoonLaw::{round, locked}` and `MoonRound` are `#[cfg(test)]`, so that no `Box` is
+        built outside the tests; `Surface::basis` is `#[cfg(test)]`, its `expect(dead_code)` gone.
+      - D2-1: `PassContext::of` asserts its floats finite in every build, 11 a pass
+        (`a_context_with_a_float_that_is_not_finite_is_refused`); `Context::rank`'s doc and C2's DD1
+        line say so.
+      - D2-2: `Context::rank`'s doc: `Equal` exactly where every ranked member is the same bits, so
+        that a pass reads nothing of a context but its ranked members; the planetary context's
+        ride-along first stage is read only through K(P*), by the record.
+      - D2-3: the commit message's "no … bulk value moved" is corrected in C2's "None" line
+        (`t_eq_k` moved with the albedo, an expected pass output). fallback_black_hole's 16 values
+        at C2 are the last bits, 1–2 ulp, of three airless rocky bodies' geometric B, V and R and
+        Bond albedos, nothing else of theirs moving: belt member e101's and planet 0200's (with its
+        Bond ratio) at the golden's first time, and belt member e201's at both (scratch
+        `dfix/fbh_c1.golden` against `fbh_c2.golden`); their cause is not traced (a nit, recorded): all three are unlit (T_eq 0 about the black
+        hole), and a scratch trace of the unlit bodies over the sample's first 60 whole systems
+        found none to compare.
+      - R3-1: `crust_formation` and `moon_crust` expect `FormationWindow::disc` ("a disc profile's
+        lifetime is positive and finite"); a regular moon's `FormationWindow::new(..).ok()?` keeps
+        its `None`, now with its reason (a giant formed after its disc's end has no window for its
+        regular moons).
+      - R3-2: `material_inertia_j_per_m2_k_sqrt_s` (rock's 55 or ice's 20, its unit in its doc) and
+        R09's `regolith_inertia_j_per_m2_k_sqrt_s`.
+      - R3-3: `PassBody::crust_basis` gives `None` for `FormationOutsideAge` and debug-asserts that
+        no other refusal reaches it.
+      - R3-4: `the_regolith_reads_its_crust_s_lid` (`airless.rs`): the reference Moon's
+        `feldspathic` primary lid gives T49.j's law at its mean T_s to the bit (about 46.5); each
+        `LidCrust` arm names its own crust; `mars_dust` and a lid that names no crust take the
+        material's constant on rock and on ice; and `CrustLithology::of_key` reads every lithology's
+        key back as itself.
+      - R3-6: `ground_inertia` is private, `GroundInertia::at_equilibrium` its one way in, its
+        `# Panics` a sentence of its doc; the unresurfaced test is `Option<Resurfacing>`, ordered as
+        the `bool` was; and `moon_crust` matches `ImpactorOrbit` exhaustively, its `Host` arm a
+        `debug_assert!` and `None`.
+      - D3-1: test 11's item 5 takes every body under R09's radiative model
+        (`ClimateModelKind::RadiativeEquilibrium`, airless and thin airs alike), asserts the airless
+        ones' Γ the record's, bracketed ones included (PD-1), and lists the thin airs', which R09
+        reads at its mean T_s and the record at T_eq; `regolith_inertia_j_per_m2_k_sqrt_s`'s doc
+        says so, and C3's deviations record the lid's two readings.
+      - D3-2: `spun_read` traces beside each pass's lid the warmest it built of its record's
+        conditions where it read none of its own, and test 11 holds the published pass's to its
+        record's `climate_range().1`, to the bit.
+      - D3-3: test 11's doc and comment say that the trace's last pass is `PassDriver::Again`'s
+        re-run at the published albedo and context, after every round of the solve, a context jump's
+        second round included.
+      - PD-1 and PD-2: test 11 asserts `airless_apart` empty;
+        `a_moon_s_law_is_held_after_at_most_two_rounds` holds each round-2 moon's record to round
+        2's derivation (G2's test 1), its doc's guard now G2's restated one; both recorded in C3's
+        tests.
+    - _The docs_ (beside the code's above): R3-5, `lunar_regolith`'s (its `feldspathic` lid's law,
+      about 46.5, where research-c's prototype took the rock constant's 55), `surface/inputs.rs`'s
+      module doc (the record carries the condensates and crust from P14.T54.a; their reading into
+      R09's inputs is the wire subtask's) and `chem/mod.rs`'s (the record reads it, `HostAbundances`
+      through the crust's basis; `envelope_abundances` waits for P14.T54.b). PD-5,
+      `derive/atmosphere/tests.rs`'s Moon line (the stand-in's 0.11 where no lid is known, a known
+      `Silicate` lid capped at it), `airless_silicate_stand_in`'s deletion (only for the lids whose
+      rows carry their darkening agent, item 16, and not on `basalt_reduced` before P14.T49.k, item
+      3), and R09's key outside T51.c's set read as no lid known (`InertiaSource::NoLid`'s, the Γ
+      alone read). R2-6's plan side: C2's Q2 line's "least positive `f64` second" now reads
+      `f64::MIN_POSITIVE` seconds, the smallest positive normal `f64`; `SurfaceFrame`'s
+      `continental_asymptote` states its range, (0.2, 0.7). C3's record names R09's
+      `regolith_inertia`, now `regolith_inertia_j_per_m2_k_sqrt_s` (R3-2), and `ground_inertia`'s
+      `# Panics`, now a sentence (R3-6). S3-2's and S3-5's docs are recorded in C3's "_Recorded from
+      Batch D's science check_"; S3-5's citation puts `MacKenzie` in the sim's `doc-valid-idents`.
+    - _The record_: PD-1…PD-4, PD-7, D3-1, D3-4, D2-3's T_eq wording, R2's two spec notes and the
+      science items (S2-1…S2-4, S3-1…S3-6) are in C2's and C3's sub-bullets above, DD3 in C1's and
+      RD1 in L3's (each by its ID). G1's 2% guard over the 400 systems and G2's restated guards are
+      C3's (its tests), G2's test 1 for round 2 this commit's (PD-2), and G3 is recorded at 23 with
+      no patch (C2's S2-2 line); their bless-note lines, with §C3.3's, are the blessing message's.
+      PD-6, R09's ignored airless and thin-air tests, runs with the gate's surface slow tests.
+    - _Moved goldens_, re-blessed at header 22 (golden_diff: 4 changed, 1 reordered; its "not
+      bumped" problem the checkpoint's): `planetary/systems/` filler_b, filler_c,
+      hierarchical_triple and m_dwarf_resonant_chain lose 32 `H2O` solid entries, 16 bodies at the
+      golden's two times (filler_b 0304, 0306, 0307, 0404, 0405 and e283; filler_c 0502;
+      hierarchical_triple 1103–1106 and 1204–1207; m_dwarf_resonant_chain 0501), nothing else in
+      them moving; `planetary/surface_conditions_published` reorders two zero-area `surface_ice_H2O`
+      lines after their `surface_ice_N2` (61ffd9680000000c.0201 and .0202), no value moved. Every
+      other golden target holds: with C3's rule forced, every other edit of the fix commit is
+      bit-identical on all 28 golden targets (the sim's lib, with its 14 planetary goldens, its 24
+      golden integration targets and the server's three; 253 tests).
+    - _Files:_ `planetary/system.rs`, `derive/pass_record.rs`, `derive/passes.rs`, `derive/mod.rs`,
+      `derive/rotation.rs`, `derive/atmosphere.rs`, `derive/atmosphere/surface_mix.rs`,
+      `derive/photometry/area_mix.rs`, `chem/partition.rs`, `hooks/crust.rs`, `hooks/figures.rs`,
+      `hooks/surface.rs`, `moons/regular.rs`, `record.rs`, `surface/steps/climate/airless.rs` and
+      `climate/mod.rs`; docs in `chem/mod.rs`, `surface/inputs.rs` and the protocol's
+      `planetary/record/surface.rs`; the sim's `clippy.toml` (`MacKenzie` in `doc-valid-idents`);
+      the tests in `system/tests.rs`, `chem/partition/tests.rs`, `hooks/crust/tests.rs`,
+      `derive/atmosphere/tests.rs` (a doc), `derive/photometry/area_mix/tests.rs`, and
+      `pass_record.rs`'s and `airless.rs`'s own; the goldens above; the protocol's binding
+      `SurfaceCondensateDto.ts` (`just gen-protocol`, its doc only); this plan.
+    - _Checks:_ the sim's `--lib` tests of `planetary` and `substance` (1,753 passed, 56 ignored);
+      RG1's and C0c's sample tests by name, printed; every golden target above, blessed (28 runs);
+      `just gen-protocol` (206 passed); Clippy `--workspace --all-targets` with `-D warnings`;
+      rustdoc with `-D warnings` (`just doc-check`); rustfmt and Prettier. Batch D's gate follows
+      the tip's merge.

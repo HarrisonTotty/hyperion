@@ -20,7 +20,8 @@
 //! Γ is plan 14's ground's, P14.T49.j's law at the body's crust's lid at its mean surface
 //! temperature, with P14.T24.a's constants ([`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`],
 //! [`ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`]) as its fallback alone (P14.T54.a;
-//! [`regolith_inertia`]; under a thin air a vacuum lower bound, with no pore gas), ε plan 14's
+//! [`regolith_inertia_j_per_m2_k_sqrt_s`]; under a thin air a vacuum lower bound, with no pore
+//! gas), ε plan 14's
 //! regolith's ([`REGOLITH_EMISSIVITY`]), so that the
 //! climate's nights are plan 14's, and A plan 14's Bond albedo of the body's surface state on its
 //! material ([`SurfaceState::albedo`]), the one its mean temperature is computed with. The nodes
@@ -239,7 +240,8 @@ pub(super) struct Regolith {
 
 impl Regolith {
     /// The regolith of the body of `inputs`: plan 14's emissivity, its inertia at its crust's lid
-    /// ([`regolith_inertia`]), its Bond albedo for the surface state on its material, and the
+    /// ([`regolith_inertia_j_per_m2_k_sqrt_s`]), its Bond albedo for the surface state on its
+    /// material, and the
     /// heat flow, a heat flow that is not positive taken as none, as [`night_floor`] takes it.
     #[must_use]
     pub(super) fn of(inputs: &CoarseInputs) -> Self {
@@ -247,7 +249,7 @@ impl Regolith {
         let heat = inputs.heat_flow().value();
         Self {
             emissivity: REGOLITH_EMISSIVITY,
-            inertia_j_per_m2_k_sqrt_s: regolith_inertia(
+            inertia_j_per_m2_k_sqrt_s: regolith_inertia_j_per_m2_k_sqrt_s(
                 lid_lithology(inputs.crust()),
                 material,
                 inputs.mean_surface_temperature(),
@@ -299,10 +301,17 @@ impl Regolith {
 /// (`GroundInertia`), so that this model's nights are plan 14's. On an airless body the record's
 /// mean surface temperature is its equilibrium temperature (decision-p14-t54a-passes §3.5, which
 /// the sample's tests hold to the bit), at which plan 14 takes its ground's. Under a thin air the
-/// law is a vacuum lower bound, with no pore gas (P14.T49.l's). A lid outside T51.c's closed set,
-/// or a temperature that is not positive, takes the material's constant.
+/// law is a vacuum lower bound, with no pore gas (P14.T49.l's), and this model reads it at its own
+/// mean surface temperature where the record's conditions read it at the equilibrium temperature:
+/// P14.T54.a's wire subtask carries the record's Γ into these inputs, so that the two read one
+/// (decision-p14-t54a-passes §3.5; Batch D's review, D3-1).
+///
+/// A lid outside T51.c's closed set (a test world's key, `mars_dust`, say) is read as no lid
+/// known: the material's constant, which [`GroundInertia`] labels `InertiaSource::NoLid`, its
+/// fallback's label for a lid not known; only the Γ is read here. A temperature that is not
+/// positive takes the material's constant too (`InertiaSource::Unlit`).
 #[must_use]
-pub(crate) fn regolith_inertia(
+pub(crate) fn regolith_inertia_j_per_m2_k_sqrt_s(
     lid: Option<CrustLithology>,
     material: SurfaceMaterial,
     mean_surface_temperature: Kelvin,
@@ -2188,10 +2197,105 @@ mod tests {
     /// The Moon's synodic month, s: 29.5306 days (Hayne et al. 2017, Table A1, read).
     const LUNAR_DAY_S: f64 = 29.5306 * SECONDS_PER_DAY;
 
-    /// The lunar regolith of research-c's prototype: plan 14's rock (Γ 55, ε 0.95) under the
-    /// airless Bond albedo 0.11 and the reference Moon's heat flow, 0.018 W m⁻².
+    /// The reference Moon's regolith: ε 0.95, its `feldspathic` lid's inertia at its mean surface
+    /// temperature (P14.T49.j's law, about 46.5; research-c's prototype took plan 14's rock
+    /// constant, Γ 55, before P14.T54.a), under the airless Bond albedo 0.11 and its heat flow,
+    /// 0.018 W m⁻².
     fn lunar_regolith() -> Regolith {
         Regolith::of(&reference::moon_like())
+    }
+
+    /// Batch D's review, R3-4: the regolith reads its crust's lid. The reference Moon's
+    /// `feldspathic` primary lid gives P14.T49.j's law at its mean surface temperature, to the bit;
+    /// each of `LidCrust`'s arms names its own crust; a key outside T51.c's closed set (`mars_dust`)
+    /// and a lid that names no crust take the bulk material's constant; and every lithology's key
+    /// reads back as itself.
+    #[test]
+    fn the_regolith_reads_its_crust_s_lid() {
+        use hyperion_surface::substance_key::SubstanceKey;
+        use hyperion_testkit::float::assert_same_bits;
+
+        use crate::planetary::hooks::surface::{
+            ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+            ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+        };
+        use crate::substance::thermal::reference_regolith_thermal_inertia;
+
+        let moon = reference::moon_like();
+        let mean = moon.mean_surface_temperature();
+        assert_eq!(moon.crust().lid, LidCrust::Primary);
+        assert_eq!(
+            lid_lithology(moon.crust()),
+            Some(CrustLithology::Feldspathic)
+        );
+        let law = reference_regolith_thermal_inertia(CrustLithology::Feldspathic.substance(), mean)
+            .expect("the feldspathic row takes the law at the Moon's mean")
+            .inertia_j_per_m2_k_sqrt_s();
+        assert_same_bits(Regolith::of(&moon).inertia_j_per_m2_k_sqrt_s, law);
+        eprintln!(
+            "the reference Moon's lid's Γ {law:.3} at {:.2} K",
+            mean.value()
+        );
+        // Each arm names its own crust.
+        let key = |lithology: CrustLithology| SubstanceKey::new_const(lithology.key());
+        let crust = CrustInputs {
+            primary: Some(key(CrustLithology::Feldspathic)),
+            secondary: Some(key(CrustLithology::IronRichBasalt)),
+            tertiary: None,
+            bulk: Some(key(CrustLithology::ChondriteCv)),
+            lid: LidCrust::Primary,
+            provinces: key(CrustLithology::IronRichBasalt),
+            melt_area_fraction: 0.0,
+        };
+        for (lid, expected) in [
+            (LidCrust::Primary, CrustLithology::Feldspathic),
+            (LidCrust::Secondary, CrustLithology::IronRichBasalt),
+            (LidCrust::Bulk, CrustLithology::ChondriteCv),
+        ] {
+            assert_eq!(
+                lid_lithology(&CrustInputs { lid, ..crust }),
+                Some(expected),
+                "{lid:?}"
+            );
+        }
+        // A key outside the closed set, and a lid that names no crust, take the material's
+        // constant.
+        let dust = CrustInputs {
+            bulk: Some(SubstanceKey::new_const("mars_dust")),
+            lid: LidCrust::Bulk,
+            ..crust
+        };
+        let none = CrustInputs {
+            secondary: None,
+            lid: LidCrust::Secondary,
+            ..crust
+        };
+        for unknown in [&dust, &none] {
+            assert_eq!(lid_lithology(unknown), None, "{unknown:?}");
+            for (material, constant) in [
+                (
+                    SurfaceMaterial::Rock,
+                    ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+                ),
+                (
+                    SurfaceMaterial::Ice,
+                    ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+                ),
+            ] {
+                assert_same_bits(
+                    regolith_inertia_j_per_m2_k_sqrt_s(lid_lithology(unknown), material, mean),
+                    constant,
+                );
+            }
+        }
+        for lithology in CrustLithology::ALL {
+            assert_eq!(
+                CrustLithology::of_key(lithology.key()),
+                Some(lithology),
+                "{lithology:?}"
+            );
+        }
+        assert_eq!(CrustLithology::of_key("mars_dust"), None);
     }
 
     /// One step from a profile that varies with depth conserves the column's energy: the change

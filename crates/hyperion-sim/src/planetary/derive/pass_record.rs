@@ -41,6 +41,7 @@ use crate::planetary::hooks::crust::{
     CrustLid, CrustLithology, CrustOrigin, LidCrust, TidalVolcanism,
 };
 use crate::planetary::hooks::figures::cover::{self, SurfaceWaterInputs};
+use crate::planetary::hooks::figures::relief::Hypsometry;
 use crate::planetary::hooks::figures::{Crust, PartitionGround, PassFigures, TectonicRegime};
 use crate::planetary::hooks::surface::{OceanWeight, SeasonalSpin, ZonalInsolation};
 use crate::planetary::moons::tides::TidalBranch;
@@ -88,6 +89,15 @@ pub(crate) struct RecordSpin<'a> {
     pub(crate) radius: Metres,
     /// The material of its record's bulk ([`SurfaceMaterial::of`] of its fractions).
     pub(crate) material: SurfaceMaterial,
+}
+
+impl RecordSpin<'_> {
+    /// Its record's bulk's mean radius and surface gravity, which its surface water reads
+    /// ([`WaterGate`]).
+    #[must_use]
+    pub(crate) const fn bulk(&self) -> (Metres, MetresPerSecondSquared) {
+        (self.radius, self.surface_gravity)
+    }
 }
 
 /// What a body's passes read of its record (P14.T54.a): implemented by the system's records of a
@@ -198,6 +208,40 @@ pub(crate) struct PassTide {
     pub(crate) heat_flux: WattsPerSquareMetre,
 }
 
+/// The tide a pass's context holds ([`PassContext::of`]): none for a planet or a member, which no
+/// parent tides, or a moon's at that pass.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum ContextTide {
+    /// A planet's or a member's: no tide.
+    Untided,
+    /// A moon's tide at the pass.
+    Moon(PassTide),
+}
+
+/// Whether a body's surface is unresurfaced since its primary crust formed, `lid_of`'s test on a
+/// surface age ([`CrustBasis::unresurfaced`](crate::planetary::hooks::crust::CrustBasis::unresurfaced)),
+/// which chooses the next pass's lid: a key member of the context. Ordered as the test's `bool`
+/// was, resurfaced first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Resurfacing {
+    /// Resurfaced since: the test false.
+    Resurfaced,
+    /// Unresurfaced: the test true.
+    Unresurfaced,
+}
+
+impl Resurfacing {
+    /// The test's verdict `unresurfaced`.
+    #[must_use]
+    pub(crate) const fn of(unresurfaced: bool) -> Self {
+        if unresurfaced {
+            Self::Unresurfaced
+        } else {
+            Self::Resurfaced
+        }
+    }
+}
+
 /// The context a pass reads beside its albedo (P14.T54.a; decision-p14-t54a-passes §1.1): the
 /// figures' first stage of the previous pass's own air ([`PassFigures`]), K(P), with a moon's tide
 /// at that pass.
@@ -215,7 +259,7 @@ pub(crate) struct PassTide {
 /// | craters' crust class | the impactors' ([`Crust`]) | key |
 /// | tide | a moon's branch and ocean flag, and its tidal heat | key; float |
 /// | inertia lid | the pass's own lid ([`InertiaLid`]), whose row the next pass's ground reads | key |
-/// | `lid_of`'s unresurfaced test | the surface age against the time since the magma ocean, which the next pass's lid takes | key |
+/// | `lid_of`'s unresurfaced test | the surface age against the time since the magma ocean, which the next pass's lid takes ([`Resurfacing`]) | key |
 ///
 /// Every member a pass reads is ranked: the lid a pass takes reads the surface age (a float), the
 /// tide's branch, the unresurfaced test and the basis, which no pass moves; its ground reads the
@@ -229,12 +273,16 @@ pub(crate) struct PassContext {
     basins: Basins,
     tide: Option<PassTide>,
     lid: Option<InertiaLid>,
-    unresurfaced: Option<bool>,
+    unresurfaced: Option<Resurfacing>,
 }
 
-/// How many float members a context holds at most: two populations' weight, mean and width, the
-/// full-ocean layer, the water share, the heat flow, the surface age and the tidal heat.
-const CONTEXT_FLOATS: usize = 11;
+/// How many float members a context holds beside its basins': the water share, the heat flow, the
+/// surface age and the tidal heat.
+const CONTEXT_OTHER_FLOATS: usize = 4;
+
+/// How many float members a context holds at most: two populations' basins
+/// ([`BasinsShape::floats`]) and the four others.
+const CONTEXT_FLOATS: usize = BasinsShape::Two.floats() + CONTEXT_OTHER_FLOATS;
 
 /// The shape of a context's basins, its key's part.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -245,6 +293,29 @@ pub(crate) enum BasinsShape {
     One,
     /// Two populations, a mobile lid's.
     Two,
+}
+
+impl BasinsShape {
+    /// The shape of `basins`: by their hypsometry's populations where they are known.
+    #[must_use]
+    fn of(basins: &Basins) -> Self {
+        match basins.known() {
+            None => Self::Unknown,
+            Some((Hypsometry::One(_), _)) => Self::One,
+            Some((Hypsometry::TwoPopulations(_), _)) => Self::Two,
+        }
+    }
+
+    /// How many float members basins of this shape hold: each population's weight, mean and
+    /// width, and the full-ocean layer where they are known.
+    #[must_use]
+    const fn floats(self) -> usize {
+        match self {
+            Self::Unknown => 0,
+            Self::One => 3 + 1,
+            Self::Two => 2 * 3 + 1,
+        }
+    }
 }
 
 /// The discrete key of a [`PassContext`] (decision-p14-t54a-passes §1.5): every member that is not
@@ -267,7 +338,7 @@ pub(crate) struct PassContextKey {
     pub(crate) lid: Option<InertiaLid>,
     /// `lid_of`'s unresurfaced test on its surface age, where the body has a crust's basis and
     /// the context a surface age.
-    pub(crate) unresurfaced: Option<bool>,
+    pub(crate) unresurfaced: Option<Resurfacing>,
 }
 
 impl PassContext {
@@ -284,28 +355,31 @@ impl PassContext {
         unresurfaced: None,
     };
 
-    /// The context of the first stage `figures` and a moon's tide `tide` (K(P)), with no lid yet
-    /// ([`with_lid`](Self::with_lid)).
+    /// The context of the first stage `figures` and the tide `tide`, a moon's or none (K(P)), with
+    /// no lid yet ([`with_lid`](Self::with_lid)).
     ///
     /// # Panics
     ///
-    /// In a debug build, if a float member is not finite: [`Context::rank`] orders floats by
-    /// `total_cmp`, whose order of a NaN, by its sign, is not portable across targets, so the
-    /// planetary context holds none (the C1 review's DD1).
+    /// If a float member is not finite, in every build: [`Context::rank`] orders floats by
+    /// `total_cmp`, whose order of a NaN, by its sign, is not portable across targets (x86-64,
+    /// 64-bit Arm and WebAssembly differ), so the planetary context holds none (the C1 review's DD1;
+    /// a release assertion from Batch D's review, D2-1, its 11 floats a pass). The first stage's
+    /// and the tide's floats are finite on every body the generator makes.
     #[must_use]
-    pub(crate) fn of(figures: Option<&PassFigures>, tide: Option<PassTide>) -> Self {
+    pub(crate) fn of(figures: Option<&PassFigures>, tide: ContextTide) -> Self {
         let context = Self {
             basins: figures.map_or(Basins::UNKNOWN, PassFigures::basins),
             figures: figures.copied(),
-            tide,
+            tide: match tide {
+                ContextTide::Untided => None,
+                ContextTide::Moon(tide) => Some(tide),
+            },
             lid: None,
             unresurfaced: None,
         };
-        debug_assert!(
-            {
-                let (floats, n) = context.floats();
-                floats[..n].iter().all(|x| x.is_finite())
-            },
+        let (floats, n) = context.floats();
+        assert!(
+            floats[..n].iter().all(|x| x.is_finite()),
             "a context's floats are finite: {context:?}"
         );
         context
@@ -324,7 +398,7 @@ impl PassContext {
     pub(crate) const fn with_lid(
         self,
         lid: Option<InertiaLid>,
-        unresurfaced: Option<bool>,
+        unresurfaced: Option<Resurfacing>,
     ) -> Self {
         Self {
             lid,
@@ -406,10 +480,10 @@ impl PassContext {
         )
     }
 
-    /// The surface water and the potential ocean it fills of an air whose water vapour is
-    /// `vapour`, gated by `water` ([`cover::water_under`]) over this context's basins and water
-    /// share: the one expression a greenhouse step's θ, a pass's published partition and the
-    /// record's read (decision-p14-t54a-passes §3.1).
+    /// The surface water, kg m⁻², and the potential ocean it fills, a share of the surface 0 to 1,
+    /// of an air whose water vapour is `vapour`, gated by `water` ([`cover::water_under`]) over
+    /// this context's basins and water share: the one expression a greenhouse step's θ, a pass's
+    /// published partition and the record's read (decision-p14-t54a-passes §3.1).
     #[must_use]
     pub(crate) fn surface_water(
         &self,
@@ -464,7 +538,8 @@ impl PassContext {
     /// The float members in their fixed order, and how many there are: the basins' populations'
     /// weight, mean and width and their full-ocean layer where known, then the water share, the
     /// heat flow, the surface age (0 with none) and the tidal heat (0 with none). Two contexts of
-    /// one key hold the same count.
+    /// one key hold the same count, the basins' shape's ([`BasinsShape::floats`]) and the four
+    /// others.
     #[must_use]
     fn floats(&self) -> ([f64; CONTEXT_FLOATS], usize) {
         let mut floats = [0.0; CONTEXT_FLOATS];
@@ -474,7 +549,11 @@ impl PassContext {
             n += 1;
         };
         if let Some((hypsometry, full_ocean)) = self.basins.known() {
-            for population in hypsometry.populations() {
+            let populations = match hypsometry {
+                Hypsometry::One(population) => core::slice::from_ref(population),
+                Hypsometry::TwoPopulations(populations) => &populations[..],
+            };
+            for population in populations {
                 push(population.weight());
                 push(population.mean().value());
                 push(population.width().value());
@@ -485,6 +564,11 @@ impl PassContext {
         push(self.heat_flow().value());
         push(self.surface_age().map_or(0.0, Years::value));
         push(self.tide.map_or(0.0, |tide| tide.heat_flux.value()));
+        debug_assert_eq!(
+            n,
+            BasinsShape::of(&self.basins).floats() + CONTEXT_OTHER_FLOATS,
+            "a context's float count is its basins' shape's"
+        );
         (floats, n)
     }
 }
@@ -496,13 +580,7 @@ impl Context for PassContext {
         let figures = self.figures.as_ref();
         PassContextKey {
             figures: figures.is_some(),
-            basins: match self.basins.known() {
-                None => BasinsShape::Unknown,
-                Some((hypsometry, _)) => match hypsometry.populations().len() {
-                    1 => BasinsShape::One,
-                    _ => BasinsShape::Two,
-                },
-            },
+            basins: BasinsShape::of(&self.basins),
             volcanic: figures.is_none_or(PassFigures::volcanic_greenhouse),
             regime: figures.map(PassFigures::tectonic_regime),
             crust: figures.map(PassFigures::crust),
@@ -559,17 +637,42 @@ pub(crate) struct WaterGate {
 }
 
 impl WaterGate {
-    /// The gate of the atmosphere `air`, its own state and retention, of a body whose
-    /// inventory's water is `water`, of the record's bulk's radius and gravity in `spin`.
+    /// The gate of a body in the state `state`, keeping its water against escape where
+    /// `retained`, whose inventory's water is `water`, of its record's bulk's radius and gravity
+    /// `bulk`: the one constructor, a greenhouse step's (its state step 3's), a pass's and the
+    /// record's alike (Batch D's review, R2-7).
     #[must_use]
-    pub(crate) fn of_air(air: &Atmosphere, water: Kilograms, spin: &RecordSpin<'_>) -> Self {
+    pub(crate) const fn new(
+        state: SurfaceState,
+        retained: bool,
+        water: Kilograms,
+        (radius, surface_gravity): (Metres, MetresPerSecondSquared),
+    ) -> Self {
         Self {
-            state: air.state(),
-            retained: air.retains_against_escape(Gas::Water),
+            state,
+            retained,
             water,
-            radius: spin.radius,
-            surface_gravity: spin.surface_gravity,
+            radius,
+            surface_gravity,
         }
+    }
+
+    /// The gate of the atmosphere `air`, its own state and retention
+    /// ([`Atmosphere::retains_against_escape`]), of a body whose inventory's water is `water`, of
+    /// its record's bulk's radius and gravity `bulk` ([`RecordSpin::bulk`]): a pass's published
+    /// partition's and the record's.
+    #[must_use]
+    pub(crate) fn of_air(
+        air: &Atmosphere,
+        water: Kilograms,
+        bulk: (Metres, MetresPerSecondSquared),
+    ) -> Self {
+        Self::new(
+            air.state(),
+            air.retains_against_escape(Gas::Water),
+            water,
+            bulk,
+        )
     }
 }
 
@@ -588,7 +691,7 @@ mod tests {
         let tide = |branch, ocean, heat: f64| {
             PassContext::of(
                 None,
-                Some(PassTide {
+                ContextTide::Moon(PassTide {
                     branch,
                     ocean,
                     heat_flux: WattsPerSquareMetre::new(heat),
@@ -610,5 +713,38 @@ mod tests {
         // A tide 10⁻⁸ apart is not the same context.
         let far = tide(TidalBranch::Ocean, true, 0.01 * (1.0 + 1e-8));
         assert!(!a.agrees(&far));
+    }
+
+    /// Batch D's review, D2-1: a context with a float member that is not finite is refused in
+    /// every build, so that `rank`'s `total_cmp` never orders a NaN by its sign, which differs
+    /// across targets.
+    #[test]
+    #[should_panic(expected = "a context's floats are finite")]
+    fn a_context_with_a_float_that_is_not_finite_is_refused() {
+        let _ = PassContext::of(
+            None,
+            ContextTide::Moon(PassTide {
+                branch: TidalBranch::Heated,
+                ocean: false,
+                heat_flux: WattsPerSquareMetre::new(f64::NAN),
+            }),
+        );
+    }
+
+    /// Batch D's review, R2-2: the basins' shape is their hypsometry's, and the float count is the
+    /// shape's beside the four others, at every shape.
+    #[test]
+    fn a_context_s_float_count_is_its_basins_shape_s() {
+        assert_eq!(CONTEXT_FLOATS, 11);
+        let none = PassContext::NONE;
+        assert_eq!(BasinsShape::of(&none.basins), BasinsShape::Unknown);
+        assert_eq!(none.floats().1, CONTEXT_OTHER_FLOATS);
+        assert_eq!(BasinsShape::One.floats(), 4);
+        assert_eq!(BasinsShape::Two.floats(), 7);
+        assert!(BasinsShape::Unknown < BasinsShape::One && BasinsShape::One < BasinsShape::Two);
+        assert!(
+            Resurfacing::of(false) < Resurfacing::of(true),
+            "ordered as the test's bool"
+        );
     }
 }

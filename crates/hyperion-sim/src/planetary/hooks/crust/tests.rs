@@ -1593,86 +1593,159 @@ fn derive_is_its_stages_composition_to_the_bit() {
 /// Each single refusal of the error tests is the stages' own, and the frozen derivation's
 /// (`unstaged`): each stage refuses its own inputs, in `derive`'s order.
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one table of single refusals, each named by its variant (Batch D's review, RC1-c)"
+)]
 fn each_single_refusal_is_the_stages_own() {
     let surface = table_conditions("Earth");
     let base = earth(&surface);
     let nan = f64::NAN;
-    for inputs in [
-        CrustCompositionInputs {
-            radius: Metres::new(0.0),
-            ..base
-        },
-        CrustCompositionInputs {
-            mass: EarthMasses::new(-1.0),
-            ..base
-        },
-        CrustCompositionInputs {
-            age: Years::new(0.0),
-            ..base
-        },
-        CrustCompositionInputs {
-            formation_temperature: Kelvin::new(0.0),
-            ..base
-        },
-        CrustCompositionInputs {
-            host_magnesium_to_silicon: 0.0,
-            ..base
-        },
-        CrustCompositionInputs {
-            fractions: MassFractions::solid(0.3, 0.6, 0.0),
-            ..base
-        },
-        CrustCompositionInputs {
-            formation: Megayears::new(5_000.0),
-            ..base
-        },
-        CrustCompositionInputs {
-            state: SurfaceState::GasEnvelope,
-            ..base
-        },
-        CrustCompositionInputs {
-            surface_age: Years::new(5e9),
-            ..base
-        },
-        CrustCompositionInputs {
-            volcanism: -0.1,
-            ..base
-        },
-        CrustCompositionInputs {
-            continental_fraction: 1.5,
-            ..base
-        },
-        CrustCompositionInputs {
-            delta_iw: Dex::new(nan),
-            ..base
-        },
-        CrustCompositionInputs {
-            alpha_fe: Dex::new(nan),
-            ..base
-        },
-        CrustCompositionInputs {
-            fe_h: Dex::new(nan),
-            ..base
-        },
-        CrustCompositionInputs {
-            surface_age: Years::new(nan),
-            ..base
-        },
-        CrustCompositionInputs {
-            molten_until: Some(Years::new(nan)),
-            ..base
-        },
-        CrustCompositionInputs {
-            volcanism: nan,
-            ..base
-        },
-        CrustCompositionInputs {
-            continental_fraction: nan,
-            ..base
-        },
+    // Each case's refusal by its variant (its payload aside: the fractions' sum is the
+    // validation's own fold).
+    for (inputs, expected) in [
+        (
+            CrustCompositionInputs {
+                radius: Metres::new(0.0),
+                ..base
+            },
+            DeriveCrustError::RadiusNotPositive(Metres::new(0.0)),
+        ),
+        (
+            CrustCompositionInputs {
+                mass: EarthMasses::new(-1.0),
+                ..base
+            },
+            DeriveCrustError::MassNotPositive(EarthMasses::new(-1.0)),
+        ),
+        (
+            CrustCompositionInputs {
+                age: Years::new(0.0),
+                ..base
+            },
+            DeriveCrustError::AgeNotPositive(Years::new(0.0)),
+        ),
+        (
+            CrustCompositionInputs {
+                formation_temperature: Kelvin::new(0.0),
+                ..base
+            },
+            DeriveCrustError::TemperatureNotPositive(Kelvin::new(0.0)),
+        ),
+        (
+            CrustCompositionInputs {
+                host_magnesium_to_silicon: 0.0,
+                ..base
+            },
+            DeriveCrustError::MagnesiumToSiliconNotPositive(0.0),
+        ),
+        (
+            CrustCompositionInputs {
+                fractions: MassFractions::solid(0.3, 0.6, 0.0),
+                ..base
+            },
+            DeriveCrustError::FractionsNotNormalised(0.9),
+        ),
+        (
+            CrustCompositionInputs {
+                formation: Megayears::new(5_000.0),
+                ..base
+            },
+            DeriveCrustError::FormationOutsideAge {
+                formation: Megayears::new(5_000.0),
+                age: base.age,
+            },
+        ),
+        (
+            CrustCompositionInputs {
+                state: SurfaceState::GasEnvelope,
+                ..base
+            },
+            DeriveCrustError::NoSolidSurface,
+        ),
+        (
+            CrustCompositionInputs {
+                surface_age: Years::new(5e9),
+                ..base
+            },
+            DeriveCrustError::SurfaceAgeOutsideAge {
+                surface_age: Years::new(5e9),
+                age: base.age,
+            },
+        ),
+        (
+            CrustCompositionInputs {
+                volcanism: -0.1,
+                ..base
+            },
+            DeriveCrustError::VolcanismNegative(-0.1),
+        ),
+        (
+            CrustCompositionInputs {
+                continental_fraction: 1.5,
+                ..base
+            },
+            DeriveCrustError::ContinentalFractionOutsideUnit(1.5),
+        ),
+        (
+            CrustCompositionInputs {
+                delta_iw: Dex::new(nan),
+                ..base
+            },
+            DeriveCrustError::NotFinite(CrustInput::DeltaIw),
+        ),
+        (
+            CrustCompositionInputs {
+                alpha_fe: Dex::new(nan),
+                ..base
+            },
+            DeriveCrustError::NotFinite(CrustInput::AlphaFe),
+        ),
+        (
+            CrustCompositionInputs {
+                fe_h: Dex::new(nan),
+                ..base
+            },
+            DeriveCrustError::NotFinite(CrustInput::FeH),
+        ),
+        (
+            CrustCompositionInputs {
+                surface_age: Years::new(nan),
+                ..base
+            },
+            DeriveCrustError::NotFinite(CrustInput::SurfaceAge),
+        ),
+        (
+            CrustCompositionInputs {
+                molten_until: Some(Years::new(nan)),
+                ..base
+            },
+            DeriveCrustError::NotFinite(CrustInput::MoltenUntil),
+        ),
+        (
+            CrustCompositionInputs {
+                volcanism: nan,
+                ..base
+            },
+            DeriveCrustError::NotFinite(CrustInput::Volcanism),
+        ),
+        (
+            CrustCompositionInputs {
+                continental_fraction: nan,
+                ..base
+            },
+            DeriveCrustError::NotFinite(CrustInput::ContinentalFraction),
+        ),
     ] {
         let refused = CrustComposition::derive(&inputs);
-        assert!(refused.is_err(), "{inputs:?}");
+        let error = refused
+            .as_ref()
+            .expect_err("a single input out of range is refused");
+        assert_eq!(
+            core::mem::discriminant(error),
+            core::mem::discriminant(&expected),
+            "{inputs:?}: {error:?} against {expected:?}"
+        );
         let basis = CrustBasis::derive(&CrustBasisInputs::of(&inputs));
         assert_eq!(by_stages(basis, &inputs), refused);
         assert_eq!(unstaged::derive(&inputs), refused);

@@ -1983,3 +1983,45 @@ fn a_solve_stops_at_its_bit_exact_fixed_point() {
     assert!(least < u64::from(PARTITION_SWEEPS), "{sweeps:?}");
     assert_eq!(sweeps.values().sum::<u32>(), u32::try_from(solves).unwrap());
 }
+
+/// Decision-p14-t54a-ganymede §C3.1 (Batch D's fix commit, RG1): the record lists an ice bulk's
+/// crust water where the row its albedo read is `H2O`, its lid `H2O` or not known, and nowhere
+/// else: the ruling's four cases, and every other lid of T51.c's closed set on ice and on rock.
+#[test]
+fn the_record_lists_an_ice_bulk_s_crust_water_only_under_an_h2o_lid() {
+    use crate::planetary::hooks::crust::CrustLithology;
+
+    assert_eq!(
+        CrustWater::of_record(SurfaceMaterial::Ice, None),
+        CrustWater::Listed
+    );
+    assert_eq!(
+        CrustWater::of_record(SurfaceMaterial::Ice, Some(CrustLithology::Water)),
+        CrustWater::Listed
+    );
+    assert_eq!(
+        CrustWater::of_record(SurfaceMaterial::Ice, Some(CrustLithology::Cometary)),
+        CrustWater::Unlisted
+    );
+    assert_eq!(
+        CrustWater::of_record(SurfaceMaterial::Rock, Some(CrustLithology::Water)),
+        CrustWater::Unlisted
+    );
+    assert_eq!(
+        CrustWater::of_record(SurfaceMaterial::Rock, None),
+        CrustWater::Unlisted
+    );
+    for lid in CrustLithology::ALL {
+        let listed = lid == CrustLithology::Water;
+        assert_eq!(
+            CrustWater::of_record(SurfaceMaterial::Ice, Some(lid)) == CrustWater::Listed,
+            listed,
+            "{lid:?}"
+        );
+        assert_eq!(
+            CrustWater::of_record(SurfaceMaterial::Rock, Some(lid)),
+            CrustWater::Unlisted,
+            "{lid:?}"
+        );
+    }
+}

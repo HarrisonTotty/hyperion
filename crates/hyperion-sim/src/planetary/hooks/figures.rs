@@ -127,8 +127,8 @@ use crate::planetary::belts::{
     MEMBER_INCLINATION_WIDTH_DEG, SCATTERED_ECCENTRICITY_WIDTH, SCATTERED_INCLINATION_WIDTH_DEG,
 };
 use crate::planetary::chem::partition::{
-    Basins, ClimateSpan, CondensatePhase, Condensates, Cover, CrustWater, Ground, Partition,
-    WaterCover, partition,
+    Basins, ClimateSpan, ColumnInventory, CondensatePhase, Condensates, Cover, CrustWater, Ground,
+    Partition, WaterCover, partition,
 };
 use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
@@ -2245,9 +2245,10 @@ impl GlobalFigures {
     /// - The ices are the condensates' ([`Condensates::surface_ices`]), in the entries' order, with
     ///   T24.b's water ice ([`cover::ice_fraction`]) appended where they hold none, as a
     ///   `Snowball`'s cover is, whose water the partition does not hold, or an ice-rich crust whose
-    ///   bulk is not ice (decision-p14-t51a-partition §2; W3 (a)). An ice bulk's crust is its
-    ///   condensates' own `H2O` solid at that area ([`WaterCover::crust_water`]), wherever its
-    ///   partition holds frozen water.
+    ///   bulk is not ice (decision-p14-t51a-partition §2; W3 (a)). An ice bulk's crust under an
+    ///   `H2O` lid (or none known) is its condensates' own `H2O` solid at that area
+    ///   ([`WaterCover::crust_water`]); under any other lid its ice is this appended item
+    ///   (decision-p14-t54a-ganymede §C3.1).
     /// - Each list is divided by its total, its appended item included, where that total exceeds
     ///   the whole surface (W2): ices of several substances compete for the same cold zones.
     ///
@@ -2402,7 +2403,12 @@ impl GlobalFigures {
             partition: solved,
             profile,
             water,
-        } = partition_over(atmosphere, conditions, ground, table);
+        } = partition_over(
+            (atmosphere, &atmosphere.column_inventory()),
+            conditions,
+            ground,
+            table,
+        );
         let cold_area = |t: Kelvin| profile.area_below(t);
         let ice = WaterIce::Covered(CoveredIce {
             ice: water.ice_fraction,
@@ -2455,7 +2461,9 @@ impl GlobalFigures {
     /// ([`PartitionGround`]): their relief's basins ([`Basins::of`]), the water's surface share at
     /// their outgassing ([`cover::water_surface_share`]), their surface water and potential ocean,
     /// their craters' crust, and on a body whose bulk is ice its crust listed
-    /// ([`CrustWater::Listed`]; decision-p14-t54a-ganymede, C1 follow-up §C1.4).
+    /// ([`CrustWater::Listed`]; decision-p14-t54a-ganymede, C1 follow-up §C1.4): no lid is known
+    /// here (the passes' stand-in and the tests), so the regolith is the material's stand-in row,
+    /// `H2O` on an ice bulk ([`CrustWater::of_record`] of `None`, §C3.1).
     #[must_use]
     pub(crate) fn partition_ground(&self, gravity: MetresPerSecondSquared) -> PartitionGround {
         PartitionGround {
@@ -2467,7 +2475,7 @@ impl GlobalFigures {
             surface_water: self.surface_water,
             potential_ocean: self.potential_ocean,
             crust: self.impactors.crust(),
-            crust_water: CrustWater::of_record(self.material),
+            crust_water: CrustWater::of_record(self.material, None),
         }
     }
 
@@ -2735,26 +2743,27 @@ pub(crate) struct PartitionOver {
     pub(crate) water: WaterCover,
 }
 
-/// P14.T51.a's partition of the body whose atmosphere is `atmosphere` and whose conditions are
-/// `conditions`, on the ground `ground`, with its cold profile off the body's insolation table
-/// `table` and water's cover (P14.T54.a, rule (f)): the one computation a pass's area mix and the
-/// record publish their condensates over.
+/// P14.T51.a's partition of the body whose atmosphere is `atmosphere`, of inventory before
+/// condensation `inventory`, and whose conditions are `conditions`, on the ground `ground`, with
+/// its cold profile off the body's insolation table `table` and water's cover (P14.T54.a, rule
+/// (f)): the one computation a pass's area mix and the record publish their condensates over.
 ///
-/// The partition is of the atmosphere's inventory before condensation
-/// ([`Atmosphere::column_inventory`]), over the conditions' climate (their range about their
-/// mean, [`ClimateSpan::about`]), on the ground. The profile is the conditions'
+/// The partition is of `inventory`, the atmosphere's own ([`Atmosphere::column_inventory`], which
+/// the caller builds once and may read beside it: the pass's area mix asks whether anything
+/// condenses first), over the conditions' climate (their range about their mean,
+/// [`ClimateSpan::about`]), on the ground. The profile is the conditions'
 /// ([`SurfaceConditions::cold_profile_over`]), one for every solid's cold area, and water's cover
 /// is [`water_cover_over`]'s.
 #[must_use]
 pub(crate) fn partition_over(
-    atmosphere: &Atmosphere,
+    (atmosphere, inventory): (&Atmosphere, &ColumnInventory),
     conditions: &SurfaceConditions,
     ground: &PartitionGround,
     table: &ZonalInsolation,
 ) -> PartitionOver {
     let (coldest, warmest) = conditions.climate_range();
     let climate = ClimateSpan::about((coldest, warmest), conditions.mean_surface_temperature());
-    let solved = partition(&climate, &ground.ground, &atmosphere.column_inventory());
+    let solved = partition(&climate, &ground.ground, inventory);
     let profile = conditions.cold_profile_over(table);
     let water = water_cover_over(ground, atmosphere.state(), conditions, &profile);
     PartitionOver {

@@ -2445,9 +2445,11 @@ fn the_regolith_albedo_is_the_batch_s_bare_ground() {
 ///
 /// - Venus keeps its 0.76 exactly, by its full deck;
 /// - the Moon keeps its 0.11 exactly, by the space-weathering stand-in: an airless rocky body whose
-///   lid the passes do not know takes the Moon's 0.11 until P14.T54.a passes T51.c's lid, so Mercury
-///   and Ceres keep 0.11 too (recorded), where `basalt`'s fresh row is 0.0519 about a Sun;
-///   Mercury's 0.088 and its 0.068 in V are P14.T54.b's (decision-p14-t51d-weathering §3);
+///   lid the passes do not know, as on the stand-in, takes the Moon's 0.11 (the material's rule,
+///   which P14.T54.a keeps where no lid is known; a known lid of the `Silicate` family is capped at
+///   it as well), so Mercury and Ceres keep 0.11 too (recorded), where `basalt`'s fresh row is
+///   0.0519 about a Sun; Mercury's 0.088 and its 0.068 in V are P14.T54.b's
+///   (decision-p14-t51d-weathering §3);
 /// - Earth takes its area mix within 0.02 of 0.294 under Earth's 0.67 of cloud, its value
 ///   recorded: with no basins its water fills no sea, and its land is `basalt`'s;
 /// - Jupiter, class I of Sudarsky, Burrows and Pinto about a Sun under its hazes, lies within 0.05

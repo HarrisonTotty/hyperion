@@ -7,9 +7,12 @@ import type { SubstancePhaseDto } from "./SubstancePhaseDto";
  * covers, the part of that area in cold traps and whether it is seasonal. Sent from P14.T54.a's
  * batch (decision-p14-t54a-water-consistency §5).
  *
- * On an ice-bulk body the `H2O` solid entry is the crust's ice-held frozen water, all of it
- * (shell and deeper ice), at the cover's ice area, until P14.T53.c divides it; P14.T24.b's surface
- * water, the water free to pool, is P14.T13.b's (decision-p14-t54a-ganymede, C1 follow-up §C1.4).
+ * On an ice-bulk body whose lid is `H2O` (or not known) the `H2O` solid entry is the crust's
+ * ice-held frozen water, all of it (shell and deeper ice), at the cover's ice area, until
+ * P14.T53.c divides it; under any other lid (`cometary`, a chondrite, `phyllosilicate`, a
+ * silicate) the crust's water stays in the bulk, unlisted, until P14.T53.c divides it.
+ * P14.T24.b's surface water, the water free to pool, is P14.T13.b's (decision-p14-t54a-ganymede,
+ * C1 follow-up §C1.4, as §C3.1 amended it).
  */
 export type SurfaceCondensateDto = { 
 /**
