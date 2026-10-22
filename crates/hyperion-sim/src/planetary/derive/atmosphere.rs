@@ -57,6 +57,8 @@
 mod surface_mix;
 
 #[cfg(test)]
+pub(crate) use surface_mix::floor_read;
+#[cfg(test)]
 pub(crate) use surface_mix::spun_read;
 pub(crate) use surface_mix::{
     LARGEST_BOND_ALBEDO, PassClimate, PassLight, PassSurface, SpunClimate,

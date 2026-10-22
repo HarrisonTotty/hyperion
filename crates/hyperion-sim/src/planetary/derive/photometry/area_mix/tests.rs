@@ -991,3 +991,270 @@ fn an_enceladus_takes_its_fresh_frost_near_0_8() {
         frost.bond
     );
 }
+
+/// E₁ by its series, −γ − ln x − Σ (−x)ᵏ ÷ (k k!) (Abramowitz and Stegun 1964, 5.1.11), summed to
+/// convergence: an independent order to hold the floor's `E_n` to, by the recurrence n `E_{n+1}`(x)
+/// = e^(−x) − x `E_n`(x) (5.1.14).
+fn e1_by_series(x: f64) -> f64 {
+    let (mut sum, mut term) = (0.0, 1.0);
+    for k in 1..400 {
+        let k = f64::from(k);
+        term *= -x / k;
+        let add = term / k;
+        sum += add;
+        if add.abs() < 1e-18 * sum.abs() {
+            break;
+        }
+    }
+    -core::f64::consts::EULER_GAMMA - math::ln(x) - sum
+}
+
+/// The floor's exponential integrals hold Abramowitz and Stegun's table at x = 1 (Table 5.1:
+/// `E₃`(1) = 0.109 691 967, `E₄`(1) = 0.086 062 491, from `E₁`(1) = 0.219 383 934 by 5.1.14) and the
+/// recurrence from an independent E₁ over 0.01–8, on both sides of the forms' switch at x = 1;
+/// `E_n`(0) is 1 ÷ (n − 1), and both fall to 0 far out.
+#[test]
+fn the_floor_s_exponential_integrals_hold_their_table_and_recurrence() {
+    use ExponentialOrder::{Four, Three};
+    let (e3, e4) = (
+        exponential_integral(Three, 1.0),
+        exponential_integral(Four, 1.0),
+    );
+    assert!((e3 - 0.109_691_967).abs() < 1e-9, "E₃(1) = {e3}");
+    assert!((e4 - 0.086_062_491).abs() < 1e-9, "E₄(1) = {e4}");
+    assert_same_bits(exponential_integral(Three, 0.0), 0.5);
+    assert_same_bits(exponential_integral(Four, 0.0), 1.0 / 3.0);
+    assert_same_bits(exponential_integral(Three, 800.0), 0.0);
+    for i in 1..=800 {
+        let x = f64::from(i) * 0.01;
+        let e = math::exp(-x);
+        let e2 = e - x * e1_by_series(x);
+        let e3 = (e - x * e2) / 2.0;
+        let e4 = (e - x * e3) / 3.0;
+        for (n, by_recurrence) in [(Three, e3), (Four, e4)] {
+            let ours = exponential_integral(n, x);
+            // The recurrence loses digits as x grows (each step subtracts nearly equal numbers),
+            // so the bound is absolute, against values of order e^(−x) ÷ x.
+            assert!(
+                (ours - by_recurrence).abs() < 1e-11,
+                "E_{}({x}): {ours} against {by_recurrence}",
+                n.n()
+            );
+        }
+    }
+}
+
+/// R(μ₀) of the Eddington conservative layer over black (Meador and Weaver 1980), the integrand of
+/// [`conservative_spherical_albedo`].
+fn eddington_reflectance(tau: f64, mu: f64) -> f64 {
+    (0.75 * tau + (0.5 - 0.75 * mu) * (1.0 - math::exp(-tau / mu))) / (1.0 + 0.75 * tau)
+}
+
+/// The conservative layer's spherical albedo is its reflectance's sphere-weighted integral,
+/// 2 ∫₀¹ R(μ₀) μ₀ dμ₀, by a fine midpoint sum, from thin to deep; it is τ in a thin layer, rises
+/// with τ, and goes to 1 − 1 ÷ (¾τ) at depth.
+#[test]
+fn the_conservative_layer_s_albedo_is_its_reflectance_over_the_sphere() {
+    let mut last = 0.0;
+    for tau in [
+        1e-4, 1e-3, 0.01, 0.0971, 0.3, 1.0, 3.0, 9.3, 34.0, 100.0, 1e3,
+    ] {
+        let closed = conservative_spherical_albedo(tau);
+        let summed = cosine_weighted(|mu| eddington_reflectance(tau, mu), 200_000);
+        assert!(
+            (closed - summed).abs() < 1e-7 * closed.max(1e-3),
+            "τ {tau}: {closed} against {summed}"
+        );
+        assert!(closed > last, "rises with τ at {tau}");
+        last = closed;
+    }
+    let thin = conservative_spherical_albedo(1e-6);
+    assert!((thin / 1e-6 - 1.0).abs() < 1e-4, "{thin}");
+    let deep = conservative_spherical_albedo(1e4);
+    assert!((deep - (1.0 - 1.0 / 7.5e3)).abs() < 1e-6, "{deep}");
+    assert_same_bits(conservative_spherical_albedo(0.0), 0.0);
+    assert_same_bits(conservative_spherical_albedo(f64::NAN), 0.0);
+    assert_same_bits(conservative_spherical_albedo(f64::INFINITY), 1.0);
+}
+
+/// An air given by its gases' partial pressures, Pa, the rest none.
+fn air(pressures: &[(Gas, f64)]) -> PartialPressures {
+    PartialPressures::from_fn(|gas| {
+        Pascals::new(
+            pressures
+                .iter()
+                .find(|&&(g, _)| g == gas)
+                .map_or(0.0, |&(_, p)| p),
+        )
+    })
+}
+
+/// Earth's air at sea level, 101,325 Pa: N₂, O₂ and Ar at their dry mole fractions with 360 ppm
+/// of CO₂ (Bodhaine et al. 1999's), under 9.806 65 m s⁻².
+fn earth_air() -> PartialPressures {
+    let p = 101_325.0 / (0.780_84 + 0.209_46 + 0.009_34 + 0.000_36);
+    air(&[
+        (Gas::Nitrogen, 0.780_84 * p),
+        (Gas::Oxygen, 0.209_46 * p),
+        (Gas::Argon, 0.009_34 * p),
+        (Gas::CarbonDioxide, 0.000_36 * p),
+    ])
+}
+
+/// P14.T24.h.a's first test: a cloud-free N₂ column over a black surface takes the closed form, each
+/// bin's depth at its longest wavelength by λ^−4.08 from N₂'s cross section at 550 nm over the
+/// column p ÷ (g m), bin-weighted by the Sun's light, and none in the last bin; and Earth's column
+/// gives `τ_R`(550) = 0.097 ± 0.002 (Bodhaine et al. 1999).
+#[test]
+fn a_cloud_free_nitrogen_column_over_black_takes_the_closed_form() {
+    use crate::substance::rayleigh::rayleigh_cross_section;
+    let g = MetresPerSecondSquared::new(9.806_65);
+    let earth = rayleigh_optical_depth(&earth_air(), g);
+    eprintln!("Earth's dry air at sea level: τ_R(550) = {earth:.5}");
+    assert!((earth - 0.097).abs() <= 0.002, "{earth}");
+
+    let sun = HostShade::sun();
+    for bar in [0.1, 1.0, 10.0, 23.0, 100.0] {
+        let p = bar * 1e5;
+        let nitrogen = air(&[(Gas::Nitrogen, p)]);
+        let sigma = rayleigh_cross_section(Gas::Nitrogen.substance())
+            .unwrap()
+            .cross_section()
+            .value();
+        let tau = p / (g.value() * Gas::Nitrogen.molecular_mass().value()) * sigma;
+        let ratio = rayleigh_optical_depth(&nitrogen, g) / tau;
+        assert!((ratio - 1.0).abs() < 1e-14, "{bar} bar: {ratio}");
+        let (mut sum, mut weight) = (0.0, 0.0);
+        for (bin, &light) in sun.bands.iter().enumerate() {
+            let depth = if bin + 1 == OPTICS_BANDS {
+                0.0
+            } else {
+                tau * math::powf(550.0 / SPECTRAL_BIN_EDGES_NM[bin + 1], 4.08)
+            };
+            sum += light * cosine_weighted(|mu| eddington_reflectance(depth, mu), 20_000);
+            weight += light;
+        }
+        let by_hand = sum / weight;
+        let floor = rayleigh_floor(&nitrogen, g, &sun);
+        eprintln!(
+            "{bar} bar of N₂ at 1 g about the Sun: τ_R(550) {tau:.4}, its own Bond {floor:.4}"
+        );
+        assert!((floor - by_hand).abs() < 1e-6, "{floor} against {by_hand}");
+    }
+    let earth_floor = rayleigh_floor(&earth_air(), g, &sun);
+    eprintln!("Earth's air alone about the Sun: {earth_floor:.4}");
+    assert!((0.03..0.07).contains(&earth_floor), "{earth_floor}");
+}
+
+/// The floor is a lower bound across each bin: with every bin's depth at its shortest wavelength in
+/// place of its longest (the first bin's at 300 nm), the same column reflects more, at every depth;
+/// and an air of no pressure, or under no gravity, has none.
+#[test]
+fn the_floor_lies_below_its_bins_shortest_wavelengths_and_is_none_without_air() {
+    let sun = HostShade::sun();
+    let g = MetresPerSecondSquared::new(9.806_65);
+    for bar in [0.01, 0.3, 3.0, 30.0, 300.0] {
+        let methane = air(&[(Gas::Methane, bar * 1e5)]);
+        let tau = rayleigh_optical_depth(&methane, g);
+        let upper: Vec<f64> = (0..OPTICS_BANDS)
+            .map(|bin| {
+                conservative_spherical_albedo(
+                    tau * math::powf(550.0 / SPECTRAL_BIN_EDGES_NM[bin], 4.08),
+                )
+            })
+            .collect();
+        let floor = rayleigh_floor(&methane, g, &sun);
+        assert!(floor < band_weighted(&upper, &sun.bands), "{bar} bar");
+    }
+    assert_same_bits(rayleigh_floor(&air(&[]), g, &sun), 0.0);
+    let nitrogen = air(&[(Gas::Nitrogen, 1e5)]);
+    assert_same_bits(
+        rayleigh_floor(&nitrogen, MetresPerSecondSquared::new(0.0), &sun),
+        0.0,
+    );
+}
+
+/// The floor's pieces pinned to the bit (`planetary/rayleigh_floor.golden`), so that no rewrite
+/// moves 24's Bond albedos unseen before P14.T54.b reads them: `E₃` and `E₄` on both sides of the
+/// forms' switch at x = 1, the conservative layer's albedo over the tests' depths, and the optical
+/// depth and the floor of Earth's air and of N₂ and CH₄ columns at 1 bar and 23 bar under 2.458
+/// m s⁻² (`filler_c` e201's gravity), about a Sun and an F8 host (6,142 K). New at 23, an extension.
+#[test]
+fn the_floor_s_pieces_are_pinned() {
+    use hyperion_testkit::golden;
+    use hyperion_testkit::golden::GoldenWriter;
+
+    use crate::GENERATOR_VERSION;
+
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    for x in [0.0, 1e-3, 0.1, 0.5, 1.0, 1.5, 4.0, 30.0, 700.0] {
+        w.f64(
+            &format!("E3({x})"),
+            exponential_integral(ExponentialOrder::Three, x),
+        );
+        w.f64(
+            &format!("E4({x})"),
+            exponential_integral(ExponentialOrder::Four, x),
+        );
+    }
+    for tau in [1e-4, 0.0971, 1.0, 9.3, 34.0, 1e3] {
+        w.f64(
+            &format!("conservative_spherical_albedo({tau})"),
+            conservative_spherical_albedo(tau),
+        );
+    }
+    let earth_g = MetresPerSecondSquared::new(9.806_65);
+    let e201_g = MetresPerSecondSquared::new(2.458);
+    let airs = [
+        ("Earth's air at 1 g", earth_air(), earth_g),
+        ("1 bar of N2 at 2.458", air(&[(Gas::Nitrogen, 1e5)]), e201_g),
+        (
+            "23 bar of N2 at 2.458",
+            air(&[(Gas::Nitrogen, 2.3e6)]),
+            e201_g,
+        ),
+        (
+            "23 bar of CH4 at 2.458",
+            air(&[(Gas::Methane, 2.3e6)]),
+            e201_g,
+        ),
+    ];
+    let hosts = [
+        ("a Sun", HostShade::sun()),
+        ("an F8", HostShade::of_host(kelvin(6_142.0))),
+    ];
+    for (name, partials, g) in &airs {
+        w.f64(
+            &format!("{name}: rayleigh_optical_depth"),
+            rayleigh_optical_depth(partials, *g),
+        );
+        for (host, shade) in &hosts {
+            w.f64(
+                &format!("{name} about {host}: rayleigh_floor"),
+                rayleigh_floor(partials, *g, shade),
+            );
+        }
+    }
+    golden!("planetary/rayleigh_floor", w.as_str());
+}
+
+/// The floor is held until P14.T54.b's bump: below it the rules are the area mix's alone, and the
+/// tests' switch reaches the floor ahead of it.
+#[test]
+fn the_rayleigh_floor_is_held_only_until_the_24_bump() {
+    assert!(
+        GENERATOR_VERSION < RAYLEIGH_FLOOR_VERSION,
+        "the 23 → 24 bump (P14.T54.b) puts the Rayleigh floor on the record: every body with a \
+         surface takes the larger of its area mix and its air's own Rayleigh layer \
+         (P14.T24.h.a). Delete `RAYLEIGH_FLOOR_VERSION`, `RayleighFloorRules` with its `Held` \
+         arm, `with_rayleigh_floor` and its thread's rules, the `Held` branch of \
+         `surface_mix::floored`, and this test; the floor's tests then run as the generator's"
+    );
+    assert_eq!(RayleighFloorRules::in_force(), RayleighFloorRules::Held);
+    assert_eq!(
+        with_rayleigh_floor(RayleighFloorRules::Floored, RayleighFloorRules::in_force),
+        RayleighFloorRules::Floored
+    );
+    assert_eq!(RayleighFloorRules::in_force(), RayleighFloorRules::Held);
+}

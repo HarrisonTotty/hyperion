@@ -73,6 +73,19 @@
 //! rocky body whose lid is not known the Moon's 0.11, a known lid's airless silicate
 //! regolith at most 0.11, any other lid not known a row by its material; a body with no luminous
 //! host a Sun's light.
+//!
+//! # The Rayleigh floor (P14.T24.h.a; decision-p14-t54a-passes §G3.5)
+//!
+//! The area mix has no Rayleigh term, so a thick air's Bond albedo is its surface's alone, which
+//! under several bar can be physically impossible (`filler_c` e201's 0.046 under 23 bar at 23).
+//! [`rayleigh_floor`] is the air's own Bond albedo over a black surface: its Rayleigh optical depth
+//! at 550 nm from each gas row's cross section in the registry
+//! ([`rayleigh`](crate::substance::rayleigh)) over the column `p_s` ÷ (g m̄), taken to each of the
+//! optics' twelve bins at λ^−4.08, and each bin's conservative layer in the Eddington closure
+//! ([`conservative_spherical_albedo`]), weighted by the hosts' light ([`HostShade::bands`]). The
+//! snapshot path's Bond albedo is the larger of the area mix and the floor
+//! (`surface_mix::floored`), held at 24 ([`RAYLEIGH_FLOOR_VERSION`]). P14.T24.h.b replaces the max
+//! with the adding rule, and adds the haze and the absorbers.
 
 use hyperion_surface::field::{LIQUID_BINS, LiquidProperties, MechanicsFamily};
 
@@ -81,9 +94,10 @@ use crate::planetary::chem::partition::{
     Condensate, CondensateEntry, CondensatePhase, Condensates, Partition, WATER_SURFACE_HUMIDITY,
 };
 use crate::planetary::derive::PlanetClass;
-use crate::planetary::derive::atmosphere::{Gas, SurfaceMaterial, SurfaceState};
+use crate::planetary::derive::atmosphere::{Gas, PartialPressures, SurfaceMaterial, SurfaceState};
 use crate::planetary::hooks::surface::regime::climate_condensable;
 use crate::substance::optics::{SPECTRAL_BIN_EDGES_NM, SPECTRAL_BINS};
+use crate::substance::rayleigh::{RAYLEIGH_REFERENCE_WAVELENGTH_NM, gas_cross_section};
 use crate::substance::{
     Composition, LIQUID_BIN_EDGES_NM, ResolveLiquidError, SubstanceId, by_key, diagram,
     liquid_properties,
@@ -91,6 +105,7 @@ use crate::substance::{
 use crate::tables::gauss_legendre::{GL8_NODES, GL8_WEIGHTS};
 use crate::units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K;
 use crate::units::{EarthFluxes, Kelvin, KilogramsPerSquareMetre, MetresPerSecondSquared, Pascals};
+use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 #[cfg(test)]
 mod tests;
@@ -1545,4 +1560,279 @@ pub(crate) fn water_cloud_albedo() -> f64 {
 #[must_use]
 pub(crate) fn under_cloud(surface: f64, cloud: f64, cloud_albedo: f64) -> f64 {
     cloud * cloud_albedo + (1.0 - cloud) * surface
+}
+
+/// The generator version from which the snapshot path's Bond albedo is floored at its air's own
+/// Rayleigh layer's ([`rayleigh_floor`]): 24, the 23 → 24 batch's bump, P14.T54.b (P14.T24.h.a, an
+/// anchor of 24; decision-p14-t54a-passes §G3.5; decision-bump-plan-after-22 §6).
+///
+/// Below it [`RayleighFloorRules::in_force`] is [`RayleighFloorRules::Held`], so that every Bond
+/// albedo is the area mix's bit for bit. P14.T54.b deletes this hold, [`RayleighFloorRules`] with
+/// its `Held` arm and the tests' switch, and its tripwire
+/// (`the_rayleigh_floor_is_held_only_until_the_24_bump`).
+pub(crate) const RAYLEIGH_FLOOR_VERSION: GeneratorVersion = GeneratorVersion::new(24);
+
+/// Whether the snapshot path's Bond albedo is floored at its air's own Rayleigh layer's (the
+/// floor's hold, [`RAYLEIGH_FLOOR_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum RayleighFloorRules {
+    /// Versions 23's and before: the area mix's Bond albedo, unfloored.
+    Held,
+    /// The 23 → 24 batch's: the larger of the area mix's and the air's own ([`rayleigh_floor`]).
+    Floored,
+}
+
+impl RayleighFloorRules {
+    /// The rules this generator version gives: the floor from [`RAYLEIGH_FLOOR_VERSION`], none
+    /// below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_rayleigh_floor`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = FLOOR_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= RAYLEIGH_FLOOR_VERSION {
+            Self::Floored
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The floor's rules a test sets on its thread, `None` for the version's: tests run on threads
+    /// of one process.
+    static FLOOR_RULES: core::cell::Cell<Option<RayleighFloorRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the floor's rules `rules` on this thread, for the tests to reach 24's Bond
+/// albedo ahead of the bump; the version's rules are set back after. P14.T54.b deletes it with
+/// the hold.
+#[cfg(test)]
+pub(crate) fn with_rayleigh_floor<R>(rules: RayleighFloorRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops, a panic in `run` included.
+    struct Restore(Option<RayleighFloorRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            FLOOR_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(FLOOR_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
+/// The exponent of a Rayleigh optical depth's fall with wavelength, τ ∝ λ^−4.08: the local slope
+/// of Hansen and Travis's (1974, Space Sci. Rev. 16, 527, eq. 2.30, p. 544) fit to Earth's air at
+/// 1,013.25 mb, τ = 0.008569 λ⁻⁴ (1 + 0.0113 λ⁻² + 0.00013 λ⁻⁴) with λ in µm (0.0973 at 0.55 µm),
+/// at 550 nm, −d ln τ ÷ d ln λ = 4.077. The
+/// sixteen measured gases' own slopes over 500–600 nm run from He's 4.03 to H₂S's 4.16 (the
+/// registry's sources, [`rayleigh`](crate::substance::rayleigh)); one exponent serves every air,
+/// as decision-p14-t54a-passes §G3.5 rules.
+pub(crate) const RAYLEIGH_WAVELENGTH_EXPONENT: f64 = 4.08;
+
+/// The Eddington closure's γ₁ (= γ₂) for conservative scattering with no asymmetry, g = 0, which
+/// Rayleigh's phase function has: [7 − ω(4 + 3g)] ÷ 4 = 3/4 at ω = 1, from I = I₀ + μI₁ under the
+/// phase function 1 + 3gμμ′ (the closure's table in Meador and Weaver 1980, J. Atmos. Sci. 37,
+/// 630, and Toon et al. 1989, J. Geophys. Res. 94, 16287, Table 1, from memory: neither paper's
+/// text was read; the science check derived both coefficients).
+const EDDINGTON_GAMMA_1: f64 = 0.75;
+
+/// The Eddington closure's γ₃, the share of the singly scattered direct beam sent back up:
+/// (2 − 3gμ₀) ÷ 4 = 1/2 at g = 0, whatever μ₀ (derived as [`EDDINGTON_GAMMA_1`] is).
+const EDDINGTON_GAMMA_3: f64 = 0.5;
+
+/// The orders of the exponential integral the conservative layer's spherical albedo takes
+/// ([`exponential_integral`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExponentialOrder {
+    /// `E₃`.
+    Three,
+    /// `E₄`.
+    Four,
+}
+
+impl ExponentialOrder {
+    /// The order n.
+    const fn n(self) -> u32 {
+        match self {
+            Self::Three => 3,
+            Self::Four => 4,
+        }
+    }
+}
+
+/// The exponential integral `E_n`(x) = ∫₁^∞ e^(−xt) t^(−n) dt of order `order` at x ≥ 0 (Abramowitz
+/// and Stegun 1964, §5.1): its series below x = 1 and Lentz's continued fraction above it, each to
+/// the double's precision (Press, Teukolsky, Vetterling and Flannery 2007, _Numerical Recipes_,
+/// 3rd ed., §6.3, `expint`), with the Euler–Mascheroni constant of the series' digamma term from
+/// `core` (Abramowitz and Stegun 1964, 6.1.3). `E_n`(0) = 1 ÷ (n − 1); 0 at +∞, and at any x whose
+/// e^(−x) underflows.
+#[must_use]
+fn exponential_integral(order: ExponentialOrder, x: f64) -> f64 {
+    /// The most terms either form takes; both converge in under 60 for n ≤ 4.
+    const MOST_TERMS: u32 = 200;
+    let n = order.n();
+    let order = f64::from(n);
+    let below = order - 1.0;
+    if x.is_nan() || x <= 0.0 {
+        return 1.0 / below;
+    }
+    if x.is_infinite() {
+        return 0.0;
+    }
+    if x > 1.0 {
+        // Lentz's method for the continued fraction 1 ÷ (x + n −) 1·n ÷ (x + n + 2 −) 2(n + 1) ÷ …
+        let mut denominator = x + order;
+        let mut upper = 1.0 / f64::MIN_POSITIVE;
+        let mut lower = 1.0 / denominator;
+        let mut fraction = lower;
+        for i in 1..=MOST_TERMS {
+            let fi = f64::from(i);
+            let numerator = -fi * (below + fi);
+            denominator += 2.0;
+            lower = 1.0 / (numerator * lower + denominator);
+            upper = denominator + numerator / upper;
+            let step = upper * lower;
+            fraction *= step;
+            if (step - 1.0).abs() <= f64::EPSILON {
+                break;
+            }
+        }
+        return fraction * math::exp(-x);
+    }
+    let mut sum = 1.0 / below;
+    let mut factor = 1.0;
+    for i in 1..=MOST_TERMS {
+        let fi = f64::from(i);
+        factor *= -x / fi;
+        let term = if i == n - 1 {
+            let digamma = (1..n).fold(-core::f64::consts::EULER_GAMMA, |psi, k| {
+                psi + 1.0 / f64::from(k)
+            });
+            factor * (digamma - math::ln(x))
+        } else {
+            -factor / (fi - below)
+        };
+        sum += term;
+        if term.abs() <= sum.abs() * f64::EPSILON {
+            break;
+        }
+    }
+    sum
+}
+
+/// The spherical (Bond) albedo, 0 to 1, of a conservatively scattering layer of optical depth `tau`
+/// with no asymmetry over a black surface, in the Eddington closure: its reflectance of a beam at
+/// μ₀, the solution of Meador and Weaver's (1980) two-stream equations at ω = 1, γ₁ = γ₂, with no
+/// diffuse light down at the top, F↓(0) = 0, and none up from the black ground, F↑(τ) = 0,
+///
+/// R(μ₀) = [γ₁τ + (γ₃ − γ₁μ₀)(1 − e^(−τ ÷ μ₀))] ÷ (1 + γ₁τ),
+///
+/// weighted over the sphere, 2 ∫₀¹ R(μ₀) μ₀ dμ₀ = [γ₁τ + γ₃(1 − 2`E₃`(τ)) − γ₁(⅔ − 2`E₄`(τ))] ÷
+/// (1 + γ₁τ), with γ₁ = ¾ and γ₃ = ½ ([`EDDINGTON_GAMMA_1`], [`EDDINGTON_GAMMA_3`]) and `E_n` the
+/// exponential integrals ([`exponential_integral`]). It is 0 at τ = 0, τ (γ₃'s 2γ₃ = 1) in a thin
+/// layer, which is single scattering's τ ÷ 2μ₀ over the sphere, and goes to 1 as the layer
+/// deepens, 1 − 1 ÷ (γ₁τ) at depth. It rises with τ. Zero for a depth that is not a number or not
+/// positive; one at +∞.
+///
+/// The closure runs low: it gives a conservative g = 0 layer's spherical albedo 0 to 0.008 below
+/// the exact value, most near τ ≈ 1–2 (0.4397 against 0.4469 at τ = 1), under 0.001 above τ ≈ 10
+/// and below τ ≈ 0.1 (the science check's doubling solution with Rayleigh's polarised phase
+/// matrix; Eddington's extrapolation length ⅔ lies below the exact 0.7104), so it keeps the
+/// floor a lower bound.
+#[must_use]
+pub(crate) fn conservative_spherical_albedo(tau: f64) -> f64 {
+    if tau.is_nan() || tau <= 0.0 {
+        return 0.0;
+    }
+    if tau.is_infinite() {
+        return 1.0;
+    }
+    let (g1, g3) = (EDDINGTON_GAMMA_1, EDDINGTON_GAMMA_3);
+    let numerator = g1 * tau
+        + g3 * (1.0 - 2.0 * exponential_integral(ExponentialOrder::Three, tau))
+        - g1 * (2.0 / 3.0 - 2.0 * exponential_integral(ExponentialOrder::Four, tau));
+    (numerator / (1.0 + g1 * tau)).clamp(0.0, 1.0)
+}
+
+/// The Rayleigh optical depth at 550 nm of an air of partial pressures `partials` under the surface
+/// gravity `gravity`: τ = Σᵢ `N_i` σᵢ over its gases, each gas's column `N_i` = `x_i` `p_s` ÷ (g m̄)
+/// molecules per square metre, with m̄ = Σ `x_i` `m_i` the mean molecular mass, so τ = `p_s` Σ `p_i` σᵢ
+/// ÷ (g Σ `p_i` `m_i`), summed in [`Gas::ALL`]'s order, and σᵢ each row's cross section
+/// ([`gas_cross_section`]). Zero for an air of no pressure, or a gravity that is not positive and
+/// finite.
+#[must_use]
+pub(crate) fn rayleigh_optical_depth(
+    partials: &PartialPressures,
+    gravity: MetresPerSecondSquared,
+) -> f64 {
+    let (mut pressure, mut mass, mut scattering) = (0.0, 0.0, 0.0);
+    for gas in Gas::ALL {
+        let p = partials.of(gas).value();
+        let sigma = gas_cross_section(gas).value();
+        pressure += p;
+        mass += p * gas.molecular_mass().value();
+        scattering += p * sigma;
+    }
+    let g = gravity.value();
+    if !(pressure > 0.0 && mass > 0.0 && g.is_finite() && g > 0.0) {
+        return 0.0;
+    }
+    pressure * scattering / (g * mass)
+}
+
+/// The air's own Bond albedo over a black surface (P14.T24.h.a; decision-p14-t54a-passes §G3.5),
+/// the floor under the snapshot path's: an air of partial pressures `partials` under the surface
+/// gravity `gravity`, under the light `shade`.
+///
+/// Its Rayleigh optical depth at 550 nm ([`rayleigh_optical_depth`]) is taken to each of the
+/// optics' twelve bins at λ^−4.08 ([`RAYLEIGH_WAVELENGTH_EXPONENT`]), at the bin's longest
+/// wavelength, where the bin's air is thinnest, and none in the last bin, which stands for all
+/// the light beyond 3,500 nm. Each bin's albedo is that depth's conservative layer's
+/// ([`conservative_spherical_albedo`]), and the bins are weighted by the hosts' light in them
+/// ([`band_weighted`], [`HostShade::bands`]).
+///
+/// It is a lower bound on the clear air's own Bond albedo, as far as its gases scatter without
+/// absorbing:
+///
+/// - each bin's depth is the least in the bin for air's dispersion (Hansen and Travis's eq. 2.30
+///   lies at or above the λ^−4.08 law at every bin's long edge), and below the bin's mean for any
+///   of the sixteen gases, whose slopes run 4.03–4.16 against a rise of 1.5–2.9 times across a bin;
+/// - the reflectance rises with depth, and the closure runs low
+///   ([`conservative_spherical_albedo`]);
+/// - a gas the registry holds no cross section of scatters nothing.
+///
+/// A conservative layer over any surface reflects at least what it reflects over a black one, and
+/// at least what the surface does: `R_tot` = R + (1 − R)² A ÷ (1 − AR) ≥ R, and 1 − `R_tot` =
+/// (1 − R)(1 − A) ÷ (1 − AR) ≤ 1 − A. So the larger of it and the area mix is a lower bound on the
+/// body's, continuous in the passes' map as a max of continuous functions.
+///
+/// It neglects the gases' own absorption (CH₄'s red and near-infrared bands, H₂O's and CO₂'s
+/// near-infrared bands). Under an absorbing air the floor can exceed the air's own Bond albedo by
+/// up to the share of the hosts' light it reflects beyond the absorbers' edge: about 0.13–0.21 for
+/// `filler_c` e201's CH₄ column (decision-p14-t54a-passes §G3.2's bound is 0.25). Recorded for
+/// P14.T24.h.b, whose adding rule and absorbers take it up.
+#[must_use]
+pub(crate) fn rayleigh_floor(
+    partials: &PartialPressures,
+    gravity: MetresPerSecondSquared,
+    shade: &HostShade,
+) -> f64 {
+    let tau = rayleigh_optical_depth(partials, gravity);
+    if tau.is_nan() || tau <= 0.0 {
+        return 0.0;
+    }
+    let mut albedos = [0.0; OPTICS_BANDS];
+    for (bin, albedo) in albedos.iter_mut().enumerate().take(OPTICS_BANDS - 1) {
+        let longest = SPECTRAL_BIN_EDGES_NM[bin + 1];
+        let thinned = math::powf(
+            RAYLEIGH_REFERENCE_WAVELENGTH_NM / longest,
+            RAYLEIGH_WAVELENGTH_EXPONENT,
+        );
+        *albedo = conservative_spherical_albedo(tau * thinned);
+    }
+    band_weighted(&albedos, shade.bands())
 }

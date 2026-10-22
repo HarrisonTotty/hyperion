@@ -4,7 +4,8 @@
 //! - `tests/golden/substance/registry.golden` pins every row's values by their bits, at the
 //!   generator version: the elements' order, each row's identity (index, key, kind, charge,
 //!   stoichiometry and molar mass), its client optics, its gas columns (the molecular constants,
-//!   and `c_p` ÷ R, H̃ and S̃ at fixed temperatures; P14.T49.b), its phase
+//!   and `c_p` ÷ R, H̃ and S̃ at fixed temperatures; P14.T49.b, and the Rayleigh cross section at
+//!   550 nm, P14.T24.h.a), its phase
 //!   diagram (its points, anchors, curve, densities and enthalpies at fixed fractions of its triple
 //!   and critical temperatures; P14.T49.b), and its condensed columns (grain density, transition
 //!   and mechanics family; P14.T49.b), and its condensed optics (each modelled row's reference
@@ -14,7 +15,8 @@
 //!   nothing on the record reads the condensed and albedo sections, which re-bless at the version
 //!   in force.
 //! - `packages/protocol/fixtures/substances.json` mirrors the rows for the client (index, key,
-//!   kind, molar mass, `heat_capacity_over_r_298k`, the three optics flags, and the grain
+//!   kind, molar mass, `heat_capacity_over_r_298k`, the three optics flags with a gas row's
+//!   Rayleigh cross section at 550 nm after its `rayleigh` flag (P14.T24.h.a), and the grain
 //!   density's `grain_density_variant`, `solid_grain_density` and `liquid_grain_density`), which
 //!   rendering plan R08's parity check and P14.T35.e's decode tests read. `just bless`
 //!   (`HYPERION_BLESS=1`) writes it, and otherwise this test holds it to the registry byte for
@@ -38,6 +40,7 @@ use std::path::{Path, PathBuf};
 use hyperion_sim::GENERATOR_VERSION;
 use hyperion_sim::substance::aerosol::{self, FileVariant};
 use hyperion_sim::substance::optics::{EndMember, GrainScaling, LabSpectrum, OpticsInput};
+use hyperion_sim::substance::rayleigh::rayleigh_cross_section;
 use hyperion_sim::substance::{
     self, CondensedColumns, CondensedPhase, EQUILIBRIUM_HYDROGEN, Element, GrainDensity, LevelSet,
     MolecularConstants, PhaseDiagram, SolidDensity, Substance, TransitionKind,
@@ -154,6 +157,11 @@ fn gas_section(w: &mut GoldenWriter) {
             );
         }
         pin_sums(w, &label, molecular);
+        f64_or_none(
+            w,
+            &format!("{label}: rayleigh_cross_section_550nm_m2"),
+            rayleigh_cross_section(id).map(|row| row.cross_section().value()),
+        );
     }
     // Row 0 is normal hydrogen; the recorded other bound, equilibrium hydrogen, is pinned too.
     pin_sums(w, "equilibrium hydrogen", &EQUILIBRIUM_HYDROGEN);
@@ -810,6 +818,12 @@ const FIXTURE_DESCRIPTION: &str = "The substance registry's public mirror (galax
      heat_capacity_over_r_298k (a gas row's ideal-gas c_p/R at 298.15 K, the sum over its \
      molecular constants, for display and cross-check only; null for a row with no gas columns), \
      the client optics the sim may ask of it, and its grain density without pore space. \
+     rayleigh_cross_section_550nm_m2 is a gas row's Rayleigh scattering cross-section per molecule \
+     at 550 nm in vacuum (m2; P14.T24.h.a), from its measured refractivity at its formula's \
+     reference state, reduced with the real gas's number density there, and its King factor; null \
+     where the registry holds no measured dispersion, so that the sim's Rayleigh floor counts no \
+     scattering by it (no optics, not zero optics). The client's rayleigh.ts holds it within 1e-3 \
+     (relative). \
      grain_density_variant names the index-file variant whose composition the densities are \
      (null: the substance itself). solid_grain_density and liquid_grain_density are each null, \
      where none was read at any temperature, or pieces of nodes: temperatures_k (K) strictly \
@@ -844,7 +858,8 @@ fn fixture() -> String {
         rows.push(format!(
             "    {{\n      \"index\": {},\n      \"key\": \"{}\",\n      \"kind\": \"{}\",\n      \
              \"molar_mass_g_per_mol\": {},\n      \"heat_capacity_over_r_298k\": {},\n      \
-             \"rayleigh\": {},\n      \"absorber\": {},\n      \"aerosol_material\": {},\n      \
+             \"rayleigh\": {},\n      \"rayleigh_cross_section_550nm_m2\": {},\n      \"absorber\": {},\n      \
+             \"aerosol_material\": {},\n      \
              \"grain_density_variant\": {variant},\n      \"solid_grain_density\": {},\n      \
              \"liquid_grain_density\": {}\n    }}",
             id.index(),
@@ -856,6 +871,7 @@ fn fixture() -> String {
                 Kelvin::new(STANDARD_TEMPERATURE)
             )),
             optics.rayleigh(),
+            json_number(rayleigh_cross_section(id).map(|row| row.cross_section().value())),
             optics.absorber(),
             optics.aerosol_material(),
             pieces_json(solid.as_deref()),

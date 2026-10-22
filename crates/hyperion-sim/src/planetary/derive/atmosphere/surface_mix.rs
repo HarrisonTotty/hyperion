@@ -38,7 +38,9 @@ use crate::planetary::chem::partition::{
 };
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::derive::pass_record::{PassContext, RecordSpin, WaterGate};
-use crate::planetary::derive::photometry::area_mix::{self, HostShade, Regolith};
+use crate::planetary::derive::photometry::area_mix::{
+    self, HostShade, RayleighFloorRules, Regolith,
+};
 use crate::planetary::hooks::crust::{CrustBasis, CrustLid, LidAt};
 use crate::planetary::hooks::figures::{PartitionGround, PartitionOver, cover, partition_over};
 use crate::planetary::hooks::surface::{OceanWeight, SurfaceConditions, SurfaceInputs};
@@ -50,6 +52,9 @@ use crate::units::{
 
 #[cfg(doc)]
 use super::atmosphere_under;
+
+#[cfg(test)]
+mod tests;
 
 /// The regolith of a body whose bulk is of a material: the pass's regolith provider (P14.T51.b;
 /// [`PassSurface::regolith`]).
@@ -466,7 +471,9 @@ fn bond_albedo(value: f64, state: SurfaceState, material: SurfaceMaterial) -> Bo
 /// - a magma ocean the melt's 0.10 ([`area_mix::melt_bond`]), cloudless, whatever its lid;
 /// - every other state the area mix over the condensates its pass publishes and its regolith, its
 ///   lid's row where it takes one, with the cloud fraction of its state and condensable at its
-///   cloud's albedo ([`area_mix::under_cloud`]).
+///   cloud's albedo ([`area_mix::under_cloud`]);
+/// - and every state but a gas envelope floored at its air's own Rayleigh layer's, from
+///   [`RAYLEIGH_FLOOR_VERSION`](area_mix::RAYLEIGH_FLOOR_VERSION) (P14.T24.h.a; [`floored`]).
 #[must_use]
 pub(super) fn area_mixed(
     air: Atmosphere,
@@ -503,12 +510,80 @@ pub(super) fn area_mixed(
     if let PassClimate::Spun(_) = surface.climate {
         spun_read::trace(lid.as_ref());
     }
+    let albedo = floored(albedo, &air, inputs, shade);
     let air = Atmosphere {
         albedo: bond_albedo(albedo, air.state, inputs.material),
         cloud_fraction,
         ..air
     };
     (air, lid)
+}
+
+/// The surface gravity of the body `inputs` describe, G M ÷ R², `None` for a body of no mass or
+/// radius.
+#[must_use]
+fn surface_gravity(inputs: &AtmosphereInputs) -> Option<MetresPerSecondSquared> {
+    let (m, r) = (inputs.mass.value(), inputs.radius.value());
+    (m.is_finite() && m > 0.0 && r.is_finite() && r > 0.0)
+        .then(|| MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r)))
+}
+
+/// The Bond albedo `albedo` of the atmosphere `air` of the body `inputs` describe, under the light
+/// `shade`, floored at its air's own Rayleigh layer's (P14.T24.h.a; [`area_mix::rayleigh_floor`]):
+/// the larger of the two where the floor's rules are in force ([`RayleighFloorRules`], held at 24),
+/// on every body with a surface, a gas envelope's class albedo excepted, and `albedo` itself
+/// otherwise, or where it is not a number (which [`bond_albedo`] labels) or the body has no mass
+/// or radius. The floor binds only where an air is darker than its own Rayleigh layer: a max of
+/// continuous functions, continuous in the passes' map, and `albedo` to the bit wherever it is at
+/// least the floor.
+#[must_use]
+fn floored(albedo: f64, air: &Atmosphere, inputs: &AtmosphereInputs, shade: &HostShade) -> f64 {
+    let surface = match air.state {
+        SurfaceState::GasEnvelope => false,
+        SurfaceState::MagmaOcean
+        | SurfaceState::Airless
+        | SurfaceState::RunawayGreenhouse
+        | SurfaceState::Temperate
+        | SurfaceState::Snowball => true,
+    };
+    if !surface || albedo.is_nan() || RayleighFloorRules::in_force() == RayleighFloorRules::Held {
+        return albedo;
+    }
+    let Some(gravity) = surface_gravity(inputs) else {
+        return albedo;
+    };
+    let floor = area_mix::rayleigh_floor(&air.partials, gravity, shade);
+    #[cfg(test)]
+    floor_read::record(floor);
+    if floor > albedo { floor } else { albedo }
+}
+
+/// The floor the last floored pass on a thread read (P14.T24.h.a's tests): the published pass's,
+/// when a test re-runs it last ([`PassDriver::Again`](crate::planetary::derive::PassDriver)).
+#[cfg(test)]
+pub(crate) mod floor_read {
+    use core::cell::Cell;
+
+    thread_local! {
+        /// The last floor read on this thread, a test's own.
+        static LAST: Cell<Option<f64>> = const { Cell::new(None) };
+    }
+
+    /// Records a pass's floor as the thread's last.
+    pub(crate) fn record(floor: f64) {
+        LAST.with(|last| last.set(Some(floor)));
+    }
+
+    /// The last floor read on this thread since the last take, if any.
+    #[must_use]
+    pub(crate) fn take() -> Option<f64> {
+        LAST.with(Cell::take)
+    }
+
+    /// Forgets the thread's last floor, so that the next [`take`] reads only a pass run after it.
+    pub(crate) fn clear() {
+        LAST.with(|last| last.set(None));
+    }
 }
 
 /// The area-mix Bond albedo and cloud fraction of a body with a surface, the atmosphere `air` of
@@ -529,12 +604,10 @@ fn surface_and_cloud(
         .bond(air.state, shade.bands())
         .bond
     };
-    let (m, r) = (inputs.mass.value(), inputs.radius.value());
-    if !(m.is_finite() && m > 0.0 && r.is_finite() && r > 0.0) {
+    let Some(gravity) = surface_gravity(inputs) else {
         // A body of no mass or radius holds nothing, and takes no lid.
         return (regolith_of(None), 0.0, None);
-    }
-    let gravity = MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r));
+    };
     let ((solved, published, _), lid) = match surface.climate {
         PassClimate::Given(climate_of) => (
             given_partition(air, inputs, surface, (climate_of, gravity)),

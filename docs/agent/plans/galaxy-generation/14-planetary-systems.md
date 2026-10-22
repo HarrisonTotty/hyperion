@@ -25105,3 +25105,118 @@ planetary::record` (624 tests at T57.a's commit).
     - The bound holds only at §1.3's 1–3 levels a section: consumers build the `Network` once,
       and never call `solve` per profile layer or inside their own Newton steps.
     - T33.a's (v) and (vi), re-run after T54.b, time the section.
+- **Deviations in P14.T24.h.a, as built (`p14-gate-24`, 2026-10-22).** The Rayleigh floor, behind
+  its own hold at 24 (`RAYLEIGH_FLOOR_VERSION`, `RayleighFloorRules`, with the tripwire
+  `the_rayleigh_floor_is_held_only_until_the_24_bump`; the tests reach the floor through
+  `with_rayleigh_floor`, a test-only switch on the thread). It is built on P14.T52.a's commit B
+  (174d583c), as its _Order_ asks. At 23 no value on the record moves: `registry.golden` gains one
+  line per gas row (61, its cross section or `none`), `substances.json` one member per row (115),
+  and the new `planetary/rayleigh_floor.golden` pins the floor's pieces, each at header 23 as an
+  extension.
+  - _The column_ (decision-bump-plan-after-22, "p14-gate-24's questions" G1, which closes "Open
+    at its start"). §1.4 as G1 reads it: the existing members' names, types and meanings, the row
+    identities and the density rule are frozen; a member may be added, nullable, defined in the
+    description and checked by a reader. Each row's `rayleigh_cross_section_550nm_m2` sits right
+    after its `"rayleigh"` line, and the description gains G1's sentence; the fixture less those
+    115 lines and that sentence is 23's byte for byte. 16 rows are non-null (the client's measured
+    gases, `GASES`) and 99 null, the S, N and C atoms of commit B among them.
+    - _The Z rule:_ each σ is `rayleigh.ts`'s `rayleighCrossSectionM2(gas, 550)` to the bit, its
+      measured refractivity with the real gas's reference density and its King factor. Bodhaine et
+      al. 1999's and Sneep and Ubachs 2005's ideal-gas tables, 1 ÷ Z² high (CO₂ and Xe 1.4%), are
+      checks, not values.
+    - _No estimated row:_ the 27 rows the client only estimates (SO₂, O₃, HCN and the rest) stay
+      null, so the floor counts no scattering by them, which can only lower τ. The passes' air is
+      `Gas::ALL`'s nine gases, each non-null, so no floored body has air with more than 1% by
+      number in null-σ gases (0 bodies).
+    - The values are a table of their own, `substance/rayleigh.rs`, not a column of the rows in
+      `substance/rows.rs`: commit B was in flight in the rows, and a gas row's σ is read by key
+      (`rayleigh_cross_section`) or, for the passes' nine, by `Gas` (`gas_cross_section`), whose
+      order a test holds to the registry's rows 0–8.
+    - R08.T19's parity check gains condition 6, both ways: a non-null row is a measured gas within
+      10⁻³ of the client's, and every measured gas the fixture holds is non-null (plan 08's
+      as-built line). On the Rust side a non-null row is flagged `rayleigh` and has gas columns.
+  - _The floor_ (`area_mix::rayleigh_floor`): τ(550) = `p_s` Σ `p_i` σᵢ ÷ (g Σ `p_i` `m_i`) over
+    `Gas::ALL`; each bin's τ at its longest wavelength by λ^−4.08 (the local slope at 550 nm of
+    Hansen and Travis 1974's eq. 2.30), none in the last bin (3.5 µm to +∞), so the floor is a lower
+    bound across each bin (the plan's "τ_R in each of the twelve bins": eleven taken at their long
+    edges, the last none); each bin's albedo the Eddington closure's conservative spherical albedo
+    over black, [¾τ − E₃(τ) + 1.5 E₄(τ)] ÷ (1 + ¾τ) (Meador and Weaver's two-stream equations at
+    ω = 1; E_n by Numerical Recipes §6.3), weighted by `HostShade::bands`.
+    - `surface_mix::floored` takes the larger of it and the area mix on every state with a
+      surface, a gas envelope's class albedo excepted: an airless body's floor is 0, and a magma
+      ocean's is read. This widens decision-p14-t54a-passes §G3.3's class, the non-molten thick airs,
+      to every body with air, as test 4's "no body with air below its floor" reads (main accepted
+      it, 2026-10-22). A NaN area mix is left to `bond_albedo`'s label.
+    - A published Bond albedo may lie up to 10⁻⁶ of its floor below it (`FLOOR_SETTLING`), the
+      passes' settling, since the floor is read again at the published albedo.
+  - _Files beyond the plan's list:_ `substance/rayleigh.rs` (new) and `substance/mod.rs`;
+    `packages/protocol/fixtures/substances.json` and `tests/substance_golden.rs`;
+    `derive/atmosphere/surface_mix.rs` (`floored`, `surface_gravity`, the test-only `floor_read`)
+    with its new `surface_mix/tests.rs`; `derive/atmosphere.rs` (one test-only re-export);
+    `tests/golden/planetary/rayleigh_floor.golden` (new); `system/tests.rs`
+    (`golden_systems_afresh`, `floored_census`, `DARK_THICK_AIRS`, the floor's two tests, and G2's
+    walk `moon_laws_are_held_after_at_most_two_rounds` taken out of its test, so that it also runs
+    under the floor); the client's `view/atmosphere/parity.test.ts`; plan 08 (R08.T19's line).
+  - _Tests_ (the plan's four):
+    1. `a_cloud_free_nitrogen_column_over_black_takes_the_closed_form`: 0.1–100 bar of N₂ at 1 g
+       about the Sun against the closed form by hand (0.1 bar 0.0079, 1 bar 0.0602, 10 bar
+       0.2601, 100 bar 0.5687); Earth's dry air τ_R(550) = 0.0968 (Bodhaine et al. 1999:
+       0.0971); Earth's air alone 0.058.
+    2. `the_rayleigh_floor_lifts_the_golden_systems_dark_thick_airs`: §G3.3's 13 by name. At 23
+       only close_binary 0900 and 0a00 and filler_c 0400 and e201 are still below 0.1. The floor
+       binds on 11 of the 13; wide_binary 0600 (0.3627 against its 0.3518) and subgiant 0402
+       (whose air condenses from 7.85 to 0.13 bar) stay above it. filler_c e201: 0.046 → 0.589
+       under its F8 host, 23.0 → 6.09 bar.
+    3. `earth_keeps_its_bond_to_the_bit_and_the_other_measured_bodies_move_by_under_0_005`: none of
+       the table's eight bodies (Mercury, Venus, Earth, Mars, the Moon, Ganymede, Titan and Ceres)
+       moves. The table's Earth is 0.2798 at 23 under 0.77 bar; the reference Earth's 0.294, the
+       water cloud's calibration, reads no floor.
+    4. `the_rayleigh_floor_holds_over_the_sample_and_the_passes_guards_with_it` (run by name), over
+       the first 60 whole systems' 893 bodies with a surface, generated afresh under the floor:
+       - no body but a jump publishes below its floor;
+       - 9 bracketed (1.01%) and 6 jumping (0.67%), as many as under the area mix alone but not the
+         same bodies: 02001b2ca0000000.0400, a 12,883-bar Snowball at 192.6 K, is new (Bond 0.7476
+         against its pass's floor 0.8321; 0.5200 and no jump under the area mix alone), and
+         02001b2c5ffe0000.0700 no longer jumps;
+       - 5 change state (0.56%): four `MagmaOcean` → `RunawayGreenhouse` (02001b2c5ffe0001.0500,
+         02001b2c5ffe0000.0200, 01ffeb2ce0000000.0100, 21ffd6587ff80001.0500), the brighter disc
+         cooling the melt, and one `Snowball` → `Airless` (02001b2c5ffe0000.0700), its air
+         condensing;
+       - the floor moves 12 Bond albedos (planets: 4 runaway, 4 snowball, 3 magma ocean, 1
+         airless) and leaves no dark thick air;
+       - over all 400 whole systems, 23 of 1,568 planets jump (1.47%, from 23's 15, 0.96%; G1's
+         guard 2%), 8 of them below their own floor, by 0.0006–0.20. A jump publishes the lower
+         albedo of its bistable pair (P14.T51.h), so it is listed with its floor and not asserted
+         (main accepted it, 2026-10-22).
+
+       G2's guard, under the floor (`a_moon_s_law_is_held_after_at_most_two_rounds_under_the_
+rayleigh_floor`, run by name, the same 150 systems generated afresh): 426 moons, 151 in
+       round 2, none regular, none flipping or oscillating, as without the floor.
+  - _Order:_ the greenhouse chain's fits read the measured albedos (`at_measured_albedo`) and
+    none of the table's bodies moves under the floor (test 3), so P14.T53.a's refit does not
+    depend on the floor, whichever of the two lands second.
+  - _Accept, as built:_ `cargo test -p hyperion-sim --lib -- planetary::derive substance
+the_rayleigh_floor_lifts`; the two measurements by name with `-- --ignored --exact`; and the
+    client's `pnpm --filter hyperion exec vitest run view/atmosphere/parity`.
+  - _Science check_ (the science-checker, 2026-10-22): the closed form, γ₁ and γ₃ derived and
+    confirmed; E_n to 10⁻¹⁴ of quadrature; 4.08 is Hansen and Travis's eq. 2.30 (p. 544, corrected
+    from 2.29); the Eddington closure runs 0–0.008 below an exact doubling solution (most near τ ≈
+    1–2), so the bound stands; Bodhaine et al. 1999's Table 3 confirmed (τ 0.097069 at 0.550 µm).
+    Meador and Weaver's and Toon et al.'s tables were not readable: cited from memory and derived.
+    The Sneep and Ubachs plausibility check is replaced by Bodhaine's air and He et al. 2021's
+    measured CH₄ (Table 2).
+  - _Deferred findings (2026-10-13 rule):_
+    - The floor is conservative: it neglects the gases' absorption (CH₄'s red and near-infrared
+      bands; H₂O's and CO₂'s near-infrared). Under an absorbing air it can exceed the air's own Bond
+      albedo by up to the share of the light it reflects beyond the absorbers' edge, about
+      0.13–0.21 for filler_c e201's CH₄ column (about 350 km-amagat): its 0.589 against a likely
+      clear sky near 0.4 (low confidence), above §G3.2's 0.25 either way. close_binary 0700's CO₂
+      0.75 and solar_like 0400's 0.57 are plausible (0.54–0.71 and about 0.45–0.5 with the
+      infrared absorbed). Not absurd; for P14.T24.h.b's adding rule and absorbers. A
+      steam-dominated member under a G or K host could be about 0.3 too bright; the bless note
+      lists each floored body's composition and host.
+    - The registry's CO₂ cross section scaled to 532 nm is 1.4% below He et al. 2021's 13.32 ×
+      10⁻²⁷ cm² (n-based; 13.3 measured): the client's Bideau-Mehu row, for plan R08.
+    - The floor's moves feed back through the passes: close_binary 0700 207 → 59 bar, filler_c
+      e201 23.0 → 6.09 bar, subgiant 0402 7.85 → 0.13 bar (a moon whose air condenses as it
+      brightens). The state changes and the jumps above are the passes' designed outcomes.

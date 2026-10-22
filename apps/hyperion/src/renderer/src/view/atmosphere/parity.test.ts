@@ -6,9 +6,9 @@
  * The fixture holds the registry's rows in index order, append-only, each with the client optics
  * the sim may ask of it (decision-composition §1.1 and §1.9). The client's optics are keyed by the
  * sim's strings, every look-up returns a provenance, and the fallback never drops a species. This
- * check reads each row's key, its molar mass, its three flags and its grain density: never
- * `heat_capacity_over_r_298k`, which is for display and cross-check only (science-r08-gases-2 §1.4,
- * which drops the c_p row). It fails if:
+ * check reads each row's key, its molar mass, its three flags, its Rayleigh cross section at
+ * 550 nm and its grain density: never `heat_capacity_over_r_298k`, which is for display and
+ * cross-check only (science-r08-gases-2 §1.4, which drops the c_p row). It fails if:
  *
  * 1. a row flagged `rayleigh` has neither measured nor estimated Rayleigh optics;
  * 2. a row flagged `absorber` has no cross-sections (H⁻'s closed form among them), no committed
@@ -21,7 +21,12 @@
  *    a key in both;
  * 5. an index file of an `aerosol_material` row has no grain density of its phase and variant at
  *    any temperature (`grainDensity.ts`), unless it is one of the sim's stated refusals
- *    (decision-p14-t54a-grain-density §2.6): condition 3's density analogue.
+ *    (decision-p14-t54a-grain-density §2.6): condition 3's density analogue;
+ * 6. a row's `rayleigh_cross_section_550nm_m2` (P14.T24.h.a, the sim's Rayleigh floor) is given
+ *    for a gas this client does not measure, or differs from its `rayleighCrossSectionM2` at
+ *    550 nm by more than 10⁻³ of it, or is null for a gas it measures (decision-bump-plan-after-22,
+ *    "p14-gate-24's questions" Q1). The sim reduces each from `rayleigh.ts`'s formula, reference
+ *    state and King factor, so the bound covers the constant's printed digits alone.
  *
  * R08.T19's fifth row, the client's τ(550) against the record's within 1%, is held
  * (decision-bump-plan-after-22): see its tripwire below.
@@ -39,9 +44,18 @@ import { committedLineSpecies } from "./absorbers/kDistribution";
 import { NO_VISIBLE_ABSORPTION, PENDING_ABSORBERS } from "./absorbers/transparency";
 import { type GrainDensityRow, grainDensityKgPerM3, memberOf } from "./grainDensity";
 import { MATERIAL_FILES, type MaterialPhase, resolveMaterial } from "./materials/materials";
-import { GAS_MOLAR_MASS_G_PER_MOL, GASES, rayleighOf } from "./rayleigh";
+import {
+  GAS_MOLAR_MASS_G_PER_MOL,
+  type Gas,
+  GASES,
+  rayleighCrossSectionM2,
+  rayleighOf,
+} from "./rayleigh";
 
-/** A fixture row as this check reads it: its key, its molar mass and its three optics flags. */
+/**
+ * A fixture row as this check reads it: its key, its molar mass, its three optics flags and its
+ * Rayleigh cross section.
+ */
 interface RegistryRow {
   readonly key: string;
   /** g mol⁻¹, or `null` for a row with no definite formula. */
@@ -49,6 +63,8 @@ interface RegistryRow {
   readonly rayleigh: boolean;
   readonly absorber: boolean;
   readonly aerosolMaterial: boolean;
+  /** m² per molecule at 550 nm in vacuum, or `null` where the sim holds none (P14.T24.h.a). */
+  readonly rayleighCrossSection550nmM2: number | null;
 }
 
 /** The fixture's rows, in its order. */
@@ -58,6 +74,7 @@ const ROWS: ReadonlyArray<RegistryRow> = registry.substances.map((row) => ({
   rayleigh: row.rayleigh,
   absorber: row.absorber,
   aerosolMaterial: row.aerosol_material,
+  rayleighCrossSection550nmM2: row.rayleigh_cross_section_550nm_m2,
 }));
 
 /** The keys of the rows with a flag set, in the fixture's order. */
@@ -202,6 +219,48 @@ describe("the registry's aerosol materials' grain densities (decision-p14-t54a-g
 
   it("state a reason for each refusal", () => {
     expect(NO_GRAIN_DENSITY.filter(({ reason }) => reason.length === 0)).toEqual([]);
+  });
+});
+
+/** The bound on condition 6's relative difference: the sim's constants' digits. */
+const RAYLEIGH_PARITY_TOLERANCE = 1e-3;
+
+/** Whether a key is one of this client's measured gases. */
+function isMeasuredGas(key: string): key is Gas {
+  return GASES.some((gas) => gas === key);
+}
+
+describe("the registry's Rayleigh cross sections at 550 nm (P14.T24.h.a)", () => {
+  /** The measured gases the fixture gives a cross section, each with it, m². */
+  const given = ROWS.flatMap(({ key, rayleighCrossSection550nmM2: crossSectionM2 }) =>
+    isMeasuredGas(key) && crossSectionM2 !== null ? [{ gas: key, crossSectionM2 }] : [],
+  );
+
+  it("are given for some rows", () => {
+    expect(given.length).toBeGreaterThan(0);
+  });
+
+  it("are given only for this client's measured gases", () => {
+    const unmeasured = ROWS.filter(
+      ({ key, rayleighCrossSection550nmM2 }) =>
+        rayleighCrossSection550nmM2 !== null && !isMeasuredGas(key),
+    ).map(({ key }) => key);
+    expect(unmeasured).toEqual([]);
+  });
+
+  it.each(given)("give $gas its cross section within 10⁻³", ({ gas, crossSectionM2 }) => {
+    const clientM2 = rayleighCrossSectionM2(gas, 550);
+    expect(Math.abs(crossSectionM2 - clientM2) / clientM2).toBeLessThanOrEqual(
+      RAYLEIGH_PARITY_TOLERANCE,
+    );
+  });
+
+  it("are given for every measured gas the fixture holds", () => {
+    const missing = ROWS.filter(
+      ({ key, rayleighCrossSection550nmM2 }) =>
+        isMeasuredGas(key) && rayleighCrossSection550nmM2 === null,
+    ).map(({ key }) => key);
+    expect(missing).toEqual([]);
   });
 });
 

@@ -17,7 +17,8 @@
 //!   row serves every phase of its substance, so a phase is never part of a key. The key type lives
 //!   in `hyperion-surface`, whose field header carries keys; the rows here use it.
 //! - **The registry's public mirror** is `packages/protocol/fixtures/substances.json` (index, key,
-//!   kind, molar mass, `c_p` ÷ R at 298.15 K, the client's three optics flags, and the grain
+//!   kind, molar mass, `c_p` ÷ R at 298.15 K, the client's three optics flags with a gas row's
+//!   Rayleigh cross section at 550 nm ([`rayleigh`]), and the grain
 //!   density's variant and its solid and liquid tables, linear in temperature, from
 //!   [`Substance::grain_density`]), which the client's tests read, and
 //!   `crates/hyperion-sim/tests/golden/substance/registry.golden` pins the rows' values. A test
@@ -33,7 +34,8 @@
 //! ([`CondensedColumns`]: a solid's or a liquid's grain density, its transition and its mechanics
 //! family) and the liquid columns ([`LiquidColumns`]: a surface liquid's optics and transport,
 //! which [`liquid_properties`] resolves into a palette's liquid record). [`formation`] gives each
-//! gas row's equilibrium constant of formation by temperature, from NASA's CEA records (P14.T49.d).
+//! gas row's equilibrium constant of formation by temperature, from NASA's CEA records (P14.T49.d),
+//! and [`rayleigh`] each measured gas row's Rayleigh cross section at 550 nm (P14.T24.h.a).
 //! Every value names its sources and their licence basis ([`Source`], [`Basis`];
 //! decision-composition §5). P14.T49.b adds the later rows, the gases' molecular constants, the
 //! phase diagrams and the condensed columns; P14.T49.c–e the condensed optics, the thermochemistry
@@ -64,6 +66,7 @@ pub mod liquid;
 pub mod mix;
 pub mod optics;
 pub mod phase;
+pub mod rayleigh;
 mod rows;
 pub mod thermal;
 pub mod thermo;

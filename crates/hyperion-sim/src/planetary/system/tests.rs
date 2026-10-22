@@ -29,7 +29,7 @@ use crate::planetary::testing::{SampleFilter, sample_contexts, synthetic_binary,
 use crate::stellar::Phase;
 use crate::stellar::multiplicity::star_positions_at;
 use crate::time::{CLOCK_WINDOW_H, ClockWindow, Span};
-use crate::units::{AstronomicalUnits, Dex, Kelvin, Years};
+use crate::units::{AstronomicalUnits, Dex, Kelvin, Pascals, Years};
 
 /// The universe every test generates in.
 pub(crate) const SEED: Seed = Seed::new(0x5eed_0014_0030);
@@ -5607,11 +5607,32 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
 ///   between the rounds, with the oscillations, at most 1% of the moons; the regular moons in round
 ///   2 at most 1% of the regular moons; and the round-2 count pinned at its measured 151.
 #[test]
+fn a_moon_s_law_is_held_after_at_most_two_rounds() {
+    moon_laws_are_held_after_at_most_two_rounds(&whole()[..150]);
+}
+
+/// P14.T24.h.a's guard G2 under the Rayleigh floor (decision-p14-t54a-passes §G3.5, test 4's
+/// "flips ≤ 1%"), a measurement run by name: [`a_moon_s_law_is_held_after_at_most_two_rounds`]'s
+/// walk and guards over the same 150 whole systems, generated afresh under the floor.
+#[test]
+#[ignore = "a measurement for the bless note, run by name"]
+fn a_moon_s_law_is_held_after_at_most_two_rounds_under_the_rayleigh_floor() {
+    use crate::planetary::derive::photometry::area_mix::{RayleighFloorRules, with_rayleigh_floor};
+    with_rayleigh_floor(RayleighFloorRules::Floored, || {
+        let systems: Vec<(SystemContext, PlanetarySystem)> = sample()[..150]
+            .iter()
+            .map(|ctx| (ctx.clone(), generate(SEED, ctx)))
+            .collect();
+        moon_laws_are_held_after_at_most_two_rounds(&systems);
+    });
+}
+
+/// [`a_moon_s_law_is_held_after_at_most_two_rounds`]'s walk and guards over `systems`.
 #[expect(
     clippy::too_many_lines,
     reason = "one walk of the sample's moons, each round checked and listed"
 )]
-fn a_moon_s_law_is_held_after_at_most_two_rounds() {
+fn moon_laws_are_held_after_at_most_two_rounds(systems: &[(SystemContext, PlanetarySystem)]) {
     use std::collections::BTreeMap;
 
     let spin_bits = |spin: &SeasonalSpin| {
@@ -5626,7 +5647,7 @@ fn a_moon_s_law_is_held_after_at_most_two_rounds() {
     let mut states: BTreeMap<String, usize> = BTreeMap::new();
     let mut second: Vec<String> = Vec::new();
     let (mut regular_second, mut flips_or_oscillations) = (0_usize, 0_usize);
-    for (ctx, system) in whole().iter().take(150) {
+    for (ctx, system) in systems {
         let t = parent_time(ctx);
         let epoch = Epoch::new(system, ctx, t).with_shades();
         let cosines = HourCosines::new();
@@ -7000,23 +7021,26 @@ const GOLDEN_SYSTEMS: [(&str, u64); 15] = [
 /// as `golden_systems_are_pinned` generates them, once.
 fn golden_systems() -> &'static [(&'static str, SystemContext, PlanetarySystem)] {
     static SYSTEMS: OnceLock<Vec<(&'static str, SystemContext, PlanetarySystem)>> = OnceLock::new();
-    SYSTEMS.get_or_init(|| {
-        let galaxy = crate::galaxy::Galaxy::from_params(
-            Seed::new(GOLDEN_SYSTEMS_SEED),
-            crate::galaxy::params::GalaxyParams::milky_way_like(),
-        )
-        .expect("the Milky Way fixture's gas is mostly neutral");
-        GOLDEN_SYSTEMS
-            .iter()
-            .map(|&(name, id)| {
-                let id = SystemId::from_raw(id).expect("a pinned ID is well formed");
-                let ctx =
-                    SystemContext::for_system(&galaxy, id).expect("a pinned ID names a system");
-                let system = generate(galaxy.seed(), &ctx);
-                (name, ctx, system)
-            })
-            .collect()
-    })
+    SYSTEMS.get_or_init(golden_systems_afresh)
+}
+
+/// The golden systems ([`GOLDEN_SYSTEMS`]) generated afresh, under the rules in force on the
+/// calling thread (a test's switch among them, which a system generated once would not read).
+fn golden_systems_afresh() -> Vec<(&'static str, SystemContext, PlanetarySystem)> {
+    let galaxy = crate::galaxy::Galaxy::from_params(
+        Seed::new(GOLDEN_SYSTEMS_SEED),
+        crate::galaxy::params::GalaxyParams::milky_way_like(),
+    )
+    .expect("the Milky Way fixture's gas is mostly neutral");
+    GOLDEN_SYSTEMS
+        .iter()
+        .map(|&(name, id)| {
+            let id = SystemId::from_raw(id).expect("a pinned ID is well formed");
+            let ctx = SystemContext::for_system(&galaxy, id).expect("a pinned ID names a system");
+            let system = generate(galaxy.seed(), &ctx);
+            (name, ctx, system)
+        })
+        .collect()
 }
 
 /// Batch E's review, R9: [`GOLDEN_SYSTEMS`] and [`GOLDEN_SYSTEMS_SEED`] are the golden test's own,
@@ -7557,6 +7581,380 @@ fn the_states_and_the_dark_thick_airs_are_recorded() {
         cover.liquids.boiling.is_empty(),
         "{:?}",
         cover.liquids.boiling
+    );
+}
+
+/// How far below its published pass's Rayleigh floor a body's published Bond albedo may lie: the
+/// passes' own settling, 10⁻⁶ of the floor, since the published albedo is the solve's fixed point
+/// and the floor is read again at it (P14.T24.h.a's tests).
+const FLOOR_SETTLING: f64 = 1e-6;
+
+/// What one body of a census walk under the Rayleigh floor publishes against its published pass's
+/// floor ([`floored_census`]).
+struct FlooredCase {
+    /// The golden system's name and the body's index, as the dark-thick-air census names it, or
+    /// the sample's record ID and key.
+    name: String,
+    /// "planets", "members" or "moons".
+    kind: &'static str,
+    /// Its published Bond albedo.
+    bond: f64,
+    /// Its published pass's floor, read by running that pass again.
+    floor: f64,
+    /// Its state.
+    state: SurfaceState,
+    /// Its surface pressure.
+    pressure: Pascals,
+    /// Its surface gravity.
+    gravity: MetresPerSecondSquared,
+    /// Its mean surface temperature.
+    surface_temperature: Kelvin,
+    /// How its passes ended.
+    convergence: crate::planetary::derive::passes::Convergence,
+    /// Its zone's stars.
+    hosts: String,
+}
+
+/// Every body with a surface of `system`, walked as [`census_walk`] walks it, each with its
+/// published pass's floor, read by running that pass again (`PassDriver::Again`), under the
+/// floor's rules where the caller sets them.
+fn floored_census(set: &str, ctx: &SystemContext, system: &PlanetarySystem) -> Vec<FlooredCase> {
+    use crate::planetary::derive::atmosphere::floor_read;
+    use crate::planetary::derive::{PassDriver, Under};
+    let mut cases = Vec::new();
+    census_walk(set, ctx, system, &mut |case| {
+        // The pass is run again only for the floor it reads; its derivation is the case's own.
+        floor_read::clear();
+        let (_again, _read) = (case.again)(PassDriver::Again(Under::Read));
+        let floor = floor_read::take().expect("a body with a surface reads its floor");
+        let conditions = case.surface.conditions();
+        let name = if case.set == "sample" {
+            format!("{} ({})", case.record.identity().id(), case.key)
+        } else {
+            format!("{} {:04x}", case.set, case.record.index().get())
+        };
+        cases.push(FlooredCase {
+            name,
+            kind: case.kind,
+            bond: case.derived.albedo().value(),
+            floor,
+            state: case.surface.state(),
+            pressure: conditions.surface_pressure(),
+            gravity: case.derived.surface_gravity(),
+            surface_temperature: conditions.mean_surface_temperature(),
+            convergence: case.derived.convergence(),
+            hosts: case.hosts.clone(),
+        });
+    });
+    cases
+}
+
+/// Whether a body is one of the dark-thick-air census's (decision-p14-t54a-passes §G3.6): not
+/// molten, under at least 1 bar, with a Bond albedo below 0.1.
+fn dark_thick(state: SurfaceState, pressure: Pascals, bond: f64) -> bool {
+    state != SurfaceState::MagmaOcean && pressure.value() >= 1e5 && bond < 0.1
+}
+
+/// decision-p14-t54a-passes §G3.3's 13 dark thick airs of the golden systems, by name and index:
+/// the 4 still below a Bond albedo of 0.1 at 23 (`close_binary` 0900 and 0a00, `filler_c` 0400 and
+/// e201) and the 9 that P14.T51.c's lids lifted above it, which stay dark against their own
+/// Rayleigh layer.
+const DARK_THICK_AIRS: [&str; 13] = [
+    "close_binary 0700",
+    "close_binary 0900",
+    "close_binary 0a00",
+    "close_binary e303",
+    "close_binary e304",
+    "close_binary e401",
+    "close_binary e402",
+    "close_binary e501",
+    "filler_c 0400",
+    "filler_c e201",
+    "solar_like 0400",
+    "subgiant 0402",
+    "wide_binary 0600",
+];
+
+/// P14.T24.h.a's second test (decision-p14-t54a-passes §G3.5): §G3.3's 13 dark thick airs of the
+/// golden systems ([`DARK_THICK_AIRS`]) each take at least their air's own Rayleigh layer's Bond
+/// albedo under the floor, stated with `p_s` ÷ g against Earth's and the hosts, and `filler_c`
+/// e201's is at least 0.25 under its F8 host (§G3.2's bound, with CH₄ black beyond 0.6 µm). Every
+/// body with a surface of those systems publishes at least its published pass's floor, to the
+/// passes' settling ([`FLOOR_SETTLING`]), and those the area mix alone leaves dark under 1 bar or
+/// more are among the 13.
+#[test]
+fn the_rayleigh_floor_lifts_the_golden_systems_dark_thick_airs() {
+    use std::collections::BTreeMap;
+
+    use crate::planetary::derive::photometry::area_mix::{RayleighFloorRules, with_rayleigh_floor};
+
+    let mut held = BTreeMap::new();
+    for (name, ctx, system) in golden_systems() {
+        census_walk(name, ctx, system, &mut |case| {
+            let bond = case.derived.albedo().value();
+            let pressure = case.surface.conditions().surface_pressure();
+            let key = format!("{name} {:04x}", case.record.index().get());
+            if dark_thick(case.surface.state(), pressure, bond) {
+                assert!(
+                    DARK_THICK_AIRS.contains(&key.as_str()),
+                    "{key} is dark and thick"
+                );
+            }
+            held.insert(key, (bond, pressure));
+        });
+    }
+    let earth_column_kg_m2 = 101_325.0 / 9.806_65;
+    let cases: Vec<FlooredCase> = with_rayleigh_floor(RayleighFloorRules::Floored, || {
+        golden_systems_afresh()
+            .iter()
+            .flat_map(|(name, ctx, system)| floored_census(name, ctx, system))
+            .collect()
+    });
+    let mut lifted = Vec::new();
+    for case in &cases {
+        assert!(
+            case.bond >= case.floor * (1.0 - FLOOR_SETTLING),
+            "{}: Bond {} under its floor {}",
+            case.name,
+            case.bond,
+            case.floor
+        );
+        if !DARK_THICK_AIRS.contains(&case.name.as_str()) {
+            continue;
+        }
+        let (bond, pressure) = held[&case.name];
+        let (p_pa, g_m_s2) = (case.pressure.value(), case.gravity.value());
+        lifted.push(format!(
+            "{}: {} {:?}, p_s {:.3} → {:.3} bar, g {g_m_s2:.3} m s⁻², p_s ÷ g {:.2} of Earth's, \
+             Bond {bond:.4} → {:.4} (floor {:.4}{}), T_s {:.2} K, {:?}, host {}",
+            case.name,
+            case.kind,
+            case.state,
+            pressure.value() / 1e5,
+            p_pa / 1e5,
+            p_pa / g_m_s2 / earth_column_kg_m2,
+            case.bond,
+            case.floor,
+            if case.floor >= case.bond * (1.0 - FLOOR_SETTLING) {
+                ", binding"
+            } else {
+                ""
+            },
+            case.surface_temperature.value(),
+            case.convergence,
+            case.hosts,
+        ));
+        if case.name == "filler_c e201" {
+            assert!(case.bond >= 0.25, "filler_c e201's Bond {}", case.bond);
+        }
+    }
+    eprintln!(
+        "§G3.3's dark thick airs under the floor ({} bodies with a surface):\n  {}",
+        cases.len(),
+        lifted.join("\n  ")
+    );
+    assert_eq!(lifted.len(), DARK_THICK_AIRS.len(), "{lifted:#?}");
+}
+
+/// P14.T24.h.a's fourth test, a measurement run by name (decision-p14-t54a-passes §G3.5): over
+/// every present planet, member and moon with a surface of the first 60 whole systems at the
+/// epoch, generated afresh under the floor, no body publishes a Bond albedo below its published
+/// pass's floor ([`FLOOR_SETTLING`]) but a jump, which publishes the lower albedo of its bistable
+/// pair (P14.T51.h) and is listed with its floor, and the passes' guards hold: at most 3% of the bodies
+/// bracketed, 1% jumping, and 1% changing their state against the area mix alone; over all 400
+/// whole systems, at most 2% of the planets jumping (G1's population). It states how many bodies
+/// the floor moves, by kind and state, and the dark thick airs it leaves.
+#[test]
+#[ignore = "a measurement for the bless note, run by name"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of the sample under the floor, against the area mix alone, with the guards"
+)]
+fn the_rayleigh_floor_holds_over_the_sample_and_the_passes_guards_with_it() {
+    use std::collections::BTreeMap;
+
+    use crate::planetary::derive::photometry::area_mix::{RayleighFloorRules, with_rayleigh_floor};
+
+    let mut held = BTreeMap::new();
+    for (ctx, system) in whole().iter().take(60) {
+        census_walk("sample", ctx, system, &mut |case| {
+            held.insert(
+                format!("{} ({})", case.record.identity().id(), case.key),
+                (
+                    case.surface.state(),
+                    case.derived.albedo().value(),
+                    case.derived.convergence(),
+                ),
+            );
+        });
+    }
+    let (cases, planets, below_jumps): (Vec<FlooredCase>, (u32, u32), Vec<String>) =
+        with_rayleigh_floor(RayleighFloorRules::Floored, || {
+            use crate::planetary::derive::atmosphere::floor_read;
+            use crate::planetary::derive::{PassDriver, Under};
+            let mut cases = Vec::new();
+            let (mut planets, mut jumping) = (0_u32, 0_u32);
+            let mut below_jumps = Vec::new();
+            for (i, ctx) in sample().iter().enumerate() {
+                let system = generate(SEED, ctx);
+                if i < 60 {
+                    cases.extend(floored_census("sample", ctx, &system));
+                }
+                if ctx.age_at_epoch().value() <= 0.0 {
+                    continue;
+                }
+                let t = UniverseTime::EPOCH;
+                let epoch = Epoch::new(&system, ctx, t).with_shades();
+                let cosines = HourCosines::new();
+                for body in system.bodies() {
+                    if !matches!(body.part, Part::Planet(_)) {
+                        continue;
+                    }
+                    let host = fate_host(ctx, system.zone_of(body));
+                    let fate = system.fate_of(body, &host);
+                    let at = fate.at(t);
+                    let now = system.primary_now(&epoch, &cosines, body, &fate, &at);
+                    let Some(derived) = now.derived else {
+                        continue;
+                    };
+                    planets += 1;
+                    if !derived.convergence().is_jump() {
+                        continue;
+                    }
+                    jumping += 1;
+                    // A jump's published pass, run again, reads its floor.
+                    floor_read::clear();
+                    let _again = system.primary_derived(
+                        &epoch,
+                        &cosines,
+                        (body, &fate),
+                        &at,
+                        PassDriver::Again(Under::Read),
+                    );
+                    if let Some(floor) = floor_read::take()
+                        && derived.albedo().value() < floor * (1.0 - FLOOR_SETTLING)
+                    {
+                        below_jumps.push(format!(
+                            "{}: Bond {:.4} under its floor {floor:.4}",
+                            body.index.body_id(ctx.id()),
+                            derived.albedo().value()
+                        ));
+                    }
+                }
+            }
+            (cases, (planets, jumping), below_jumps)
+        });
+    let (mut below, mut bracketed, mut jumps, mut flips) = (Vec::new(), 0_u32, 0_u32, Vec::new());
+    let (mut held_bracketed, mut held_jumps, mut jumpers) = (0_u32, 0_u32, Vec::new());
+    let mut unjumped = Vec::new();
+    let mut moved: BTreeMap<String, u32> = BTreeMap::new();
+    let mut dark = Vec::new();
+    for case in &cases {
+        let (state, bond, convergence) = held
+            .get(&case.name)
+            .copied()
+            .unwrap_or_else(|| panic!("{} has a surface under the area mix alone", case.name));
+        held_bracketed += u32::from(matches!(
+            convergence,
+            crate::planetary::derive::passes::Convergence::Bracketed { .. }
+        ));
+        held_jumps += u32::from(convergence.is_jump());
+        if convergence.is_jump() && !case.convergence.is_jump() {
+            unjumped.push(case.name.clone());
+        }
+        if case.convergence.is_jump() {
+            // A jump publishes the lower albedo of its bistable pair (P14.T51.h), not a pass's
+            // own: its published pass reads the floor at that albedo, and its output is the
+            // other end. Listed, with its floor, not asserted.
+            jumpers.push(format!(
+                "{}: {} {:?}, p_s {:.4} bar, T_s {:.2} K, Bond {:.4} (floor {:.4}; held {:.4}, \
+                 {}a jump there)",
+                case.name,
+                case.kind,
+                case.state,
+                case.pressure.value() / 1e5,
+                case.surface_temperature.value(),
+                case.bond,
+                case.floor,
+                bond,
+                if convergence.is_jump() { "" } else { "not " },
+            ));
+        } else if case.bond < case.floor * (1.0 - FLOOR_SETTLING) {
+            below.push(format!(
+                "{}: {} {:?}, p_s {:.4} bar, T_s {:.2} K, {:?}: Bond {} under its floor {}",
+                case.name,
+                case.kind,
+                case.state,
+                case.pressure.value() / 1e5,
+                case.surface_temperature.value(),
+                case.convergence,
+                case.bond,
+                case.floor
+            ));
+        }
+        bracketed += u32::from(matches!(
+            case.convergence,
+            crate::planetary::derive::passes::Convergence::Bracketed { .. }
+        ));
+        jumps += u32::from(case.convergence.is_jump());
+        if state != case.state {
+            flips.push(format!("{}: {state:?} → {:?}", case.name, case.state));
+        }
+        if bond.total_cmp(&case.bond).is_ne() {
+            *moved
+                .entry(format!("{} {:?}", case.kind, case.state))
+                .or_default() += 1;
+        }
+        if dark_thick(case.state, case.pressure, case.bond) {
+            dark.push(format!(
+                "{}: {:?}, p_s {:.3} bar, Bond {:.4} (floor {:.4})",
+                case.name,
+                case.state,
+                case.pressure.value() / 1e5,
+                case.bond,
+                case.floor
+            ));
+        }
+    }
+    let bodies = u32::try_from(cases.len()).expect("the sample has fewer than 2³² bodies");
+    let share = |n: u32| 100.0 * f64::from(n) / f64::from(bodies);
+    let flipped = u32::try_from(flips.len()).expect("fewer than 2³² flips");
+    eprintln!(
+        "under the floor, {bodies} bodies with a surface: {bracketed} bracketed ({:.2}%), {jumps} \
+         jumping ({:.2}%), {flipped} changing state ({:.2}%):\n  {}\nunder the area mix alone, \
+         {held_bracketed} bracketed and {held_jumps} jumping, of which no longer jumping {unjumped:?}\n\
+         the jumps under the floor:\n  {}\n\
+         moved Bond by kind and state {moved:?}\ndark thick airs left {}:\n  {}\nthe 400's planets: \
+         {} jumping of {} ({:.2}%), {} of them under their floor:\n  {}",
+        share(bracketed),
+        share(jumps),
+        share(flipped),
+        flips.join("\n  "),
+        jumpers.join("\n  "),
+        dark.len(),
+        dark.join("\n  "),
+        planets.1,
+        planets.0,
+        100.0 * f64::from(planets.1) / f64::from(planets.0),
+        below_jumps.len(),
+        below_jumps.join("\n  "),
+    );
+    assert!(below.is_empty(), "{below:?}");
+    assert!(bodies > 100, "{bodies}");
+    assert!(
+        100 * bracketed <= 3 * bodies,
+        "{bracketed} of {bodies} bracketed"
+    );
+    assert!(100 * jumps <= bodies, "{jumps} of {bodies} jumping");
+    assert!(
+        100 * flipped <= bodies,
+        "{flipped} of {bodies} change state"
+    );
+    assert!(
+        50 * planets.1 <= planets.0,
+        "{} of {} planets jump",
+        planets.1,
+        planets.0
     );
 }
 

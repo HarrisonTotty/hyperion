@@ -5294,6 +5294,14 @@ JSON import, and fails if:
 - once P14.T54.b ships τ(550), with P14.T24.c's aerosols and P14.T49.e's `condensate_extinction`,
   both wired at 24 (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15), the client's
   τ(550) for the protocol fixture's modes differs from the record's by more than 1%.
+- _As built, condition 6 (P14.T24.h.a, lane `p14-gate-24`, 2026-10-22;
+  decision-bump-plan-after-22, "p14-gate-24's questions" G1):_ the fixture's nullable
+  `rayleigh_cross_section_550nm_m2`, the sim's Rayleigh floor's σ at 550 nm, is held both ways. A
+  non-null row is a measured gas (`GASES`) within 10⁻³ of `rayleighCrossSectionM2(gas, 550)`, and
+  every measured gas the fixture holds is non-null: 16 of 115 rows at 23, each the client's value to
+  the bit. The bound covers the constant's digits only: the sim reduces σ from this plan's formula
+  with the real gas's reference density, against which Bodhaine et al. 1999's and Sneep and Ubachs
+  2005's ideal-gas tables run 1 ÷ Z² high.
 
 Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/parity`.
 
