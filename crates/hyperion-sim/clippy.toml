@@ -3,9 +3,11 @@
 # everything this crate needs of it.
 
 # Author names, journal abbreviations, supernova types, a mission's name (InSight), a dataset's
-# (GlobSed, Straume et al. 2019's sediment grid) and the units
-# MeV, GPa and MPa that `doc_markdown` would otherwise take for code; ".." keeps Clippy's defaults.
-doc-valid-idents = ["McMillan", "McConnell", "McCord", "McKee", "McKay", "McDonough", "McDonald", "McElroy", "McCray", "McEwen", "McLennan", "McGovern", "McNutt", "McCubbin", "McCammon", "McBride", "McGehee", "McGetchin", "McSween", "McDaniel", "McMahon", "MacKenzie", "GlobSed", "InSight", "MeV", "GPa", "MPa", "IJspeert", "JeongAhn", "ApJ", "ApJS", "IIb", "WebBook", "CoolProp", ".."]
+# (GlobSed, Straume et al. 2019's sediment grid), the units MeV, GPa and MPa, the programs and
+# index of P14.T52.a's validation (FastChem, CPython, PyPI) and the chemical formulas that read as
+# mixed case (HCl, NaCl, FeH, SiO, TiO, TiO₂, CaTiO₃), that `doc_markdown` would otherwise take for
+# code; ".." keeps Clippy's defaults.
+doc-valid-idents = ["McMillan", "McConnell", "McCord", "McKee", "McKay", "McDonough", "McDonald", "McElroy", "McCray", "McEwen", "McLennan", "McGovern", "McNutt", "McCubbin", "McCammon", "McBride", "McGehee", "McGetchin", "McSween", "McDaniel", "McMahon", "MacKenzie", "GlobSed", "InSight", "MeV", "GPa", "MPa", "IJspeert", "JeongAhn", "ApJ", "ApJS", "IIb", "WebBook", "CoolProp", "FastChem", "PyPI", "CPython", "HCl", "NaCl", "FeH", "SiO", "TiO", "TiO₂", "CaTiO₃", ".."]
 
 # Every transcendental function goes through `hyperion_sim::math` (`hyperion_base::math`), which
 # wraps the exactly pinned `libm`. The platform's own versions differ between operating systems and

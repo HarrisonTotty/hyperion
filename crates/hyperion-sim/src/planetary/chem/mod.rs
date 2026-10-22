@@ -9,6 +9,10 @@
 //! - [`envelope_abundances`]: a gas envelope's elements relative to hydrogen
 //!   ([`EnvelopeAbundances`](envelope_abundances::EnvelopeAbundances), P14.T50.b), on the Surface
 //!   path, which nothing on the record reads until P14.T54.b.
+//! - [`equilibrium`]: the equilibrium speciation of a hydrogen-dominated gas
+//!   ([`Network`](equilibrium::Network) and [`GasEquilibrium`](equilibrium::GasEquilibrium),
+//!   P14.T52.a), on the Surface path, from the element abundances at one temperature and pressure;
+//!   nothing on the record reads it until P14.T54.b.
 //! - [`partition`]: the condensate partition at the ground (P14.T51.a), how much of each
 //!   condensable a body's air holds over its climate, how much lies on its surface, and in which
 //!   phase.
@@ -60,6 +64,7 @@
 //! Both are scales on which a relative \[C/O\] is laid, which is what the surveys measure.
 
 pub mod envelope_abundances;
+pub mod equilibrium;
 pub mod inventory;
 pub mod partition;
 pub mod redox;
