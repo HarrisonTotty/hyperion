@@ -217,3 +217,63 @@ describe("HostReadings' planetary nebula and events (ruling 149.4)", () => {
     expect(screen.queryByText("EVENTS")).toBeNull();
   });
 });
+
+/** The planetary nebula's five rows, which only a nebula brings but its radius. */
+const NEBULA_ROWS = [
+  "NEBULA RADIUS",
+  "NEBULA AGE",
+  "NEBULA EXPANSION",
+  "IONISED MASS",
+  "EXCITATION CLASS",
+] as const;
+
+describe("HostReadings for a core-collapse remnant (plan 09, P09.T44)", () => {
+  it.each(["neutron_star", "black_hole"] as const)(
+    "leaves the planetary nebula's rows out for a %s host, which never lights one",
+    (kind) => {
+      renderStar({ ...SUN, kind, planetaryNebula: { kind: "none" } });
+
+      for (const row of NEBULA_ROWS) {
+        expect(screen.queryByText(row)).toBeNull();
+      }
+    },
+  );
+
+  it.each(["neutron_star", "black_hole"] as const)("keeps EVENTS for a %s host", (kind) => {
+    renderStar({
+      ...SUN,
+      kind,
+      planetaryNebula: { kind: "none" },
+      activeEvents: { kind: "value", value: [] },
+    });
+
+    expect(reading("EVENTS").text).toBe("NONE");
+  });
+
+  it("leaves them out by the host's kind, whatever nebula the answer carries", () => {
+    renderStar({
+      ...SUN,
+      kind: "neutron_star",
+      planetaryNebula: {
+        kind: "value",
+        value: {
+          radiusLy: 0.412,
+          ageYr: 13_720,
+          expansionSpeedKmS: 28.44,
+          ionisedMassMsun: 0.00501,
+          excitationClass: 6,
+        },
+      },
+    });
+
+    for (const row of NEBULA_ROWS) {
+      expect(screen.queryByText(row)).toBeNull();
+    }
+  });
+
+  it("keeps a white dwarf's nebula radius, NONE where it lights none", () => {
+    renderStar({ ...SUN, kind: "white_dwarf", planetaryNebula: { kind: "none" } });
+
+    expect(reading("NEBULA RADIUS").text).toBe("NONE");
+  });
+});
