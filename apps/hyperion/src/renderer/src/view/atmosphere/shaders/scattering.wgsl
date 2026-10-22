@@ -14,7 +14,9 @@
 // common.wgsl) and checked against sebh's IntegrateScatteredLuminance (MIT; the notice is in
 // multiScattering.wgsl). Changes: the phase functions are the medium's own terms', per channel, a
 // tabulated one among them (R08.T6.b); each term's density is evaluated once a sample (R05.T12.e);
-// the scattering angle is taken without f32's cancellation near the forward peak (R08.T6.g).
+// the scattering angle is taken without f32's cancellation near the forward peak (R08.T6.g); the
+// densities are held a member a term (`TermDensities`), selected by a switch, not in an array
+// (R08.T8.d; source.wgsl's header).
 
 // The angle a ray scatters the sun's light through towards the eye: its cosine, which the closed
 // forms take; u = sqrt(theta / pi), the phase tables' coordinate (`medium.ts`'s `PhaseTable`); and
@@ -71,6 +73,81 @@ fn phaseOf(i : u32, term : Term, angle : ScatteringAngle) -> vec3f {
   return mix(below, above, x - f32(k));
 }
 
+// Each term's density at a sample, a member a term (MAX_TERMS of them), so that no step indexes an
+// array (R08.T8.d).
+struct TermDensities {
+  d0 : f32,
+  d1 : f32,
+  d2 : f32,
+  d3 : f32,
+  d4 : f32,
+  d5 : f32,
+  d6 : f32,
+  d7 : f32,
+}
+
+// Term `i`'s density, `i` under MAX_TERMS.
+fn termDensity(densities : TermDensities, i : u32) -> f32 {
+  switch (i) {
+    case 0u: {
+      return densities.d0;
+    }
+    case 1u: {
+      return densities.d1;
+    }
+    case 2u: {
+      return densities.d2;
+    }
+    case 3u: {
+      return densities.d3;
+    }
+    case 4u: {
+      return densities.d4;
+    }
+    case 5u: {
+      return densities.d5;
+    }
+    case 6u: {
+      return densities.d6;
+    }
+    default: {
+      return densities.d7;
+    }
+  }
+}
+
+// `densities` with term `i`'s set to `d`.
+fn withTermDensity(densities : TermDensities, i : u32, d : f32) -> TermDensities {
+  var out = densities;
+  switch (i) {
+    case 0u: {
+      out.d0 = d;
+    }
+    case 1u: {
+      out.d1 = d;
+    }
+    case 2u: {
+      out.d2 = d;
+    }
+    case 3u: {
+      out.d3 = d;
+    }
+    case 4u: {
+      out.d4 = d;
+    }
+    case 5u: {
+      out.d5 = d;
+    }
+    case 6u: {
+      out.d6 = d;
+    }
+    default: {
+      out.d7 = d;
+    }
+  }
+  return out;
+}
+
 // The medium at a sample, each term's density evaluated once (R05.T12.e): the scattering and the
 // extinction, m^-1, the absorbers' columns per metre (R08.T6.c), the same times the pressure
 // ratio there (R08.T4.d), and each term's density, from which each source's scattering towards
@@ -80,7 +157,7 @@ struct SampleMedium {
   extinction : vec3f,
   columns : AbsorberColumns,
   pressureColumns : AbsorberColumns,
-  densities : array<f32, MAX_TERMS>,
+  densities : TermDensities,
 }
 
 // The medium at a height above the datum.
@@ -88,17 +165,22 @@ fn sampleMediumAt(heightM : f32) -> SampleMedium {
   var scattering = vec3f(0.0);
   var extinction = vec3f(0.0);
   var columns = AbsorberColumns(0.0, vec4f(0.0));
-  var densities : array<f32, MAX_TERMS>;
+  var densities = TermDensities(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
   let count = min(u32(medium.termCount), MAX_TERMS);
   for (var i = 0u; i < count; i++) {
     let term = terms[i];
     let d = densityOf(i, term.profile, heightM);
-    densities[i] = d;
+    densities = withTermDensity(densities, i, d);
     scattering += term.scattering.rgb * d;
     extinction += (term.scattering.rgb + term.absorption.rgb) * d;
     columns = addColumns(columns, termColumns(term, d), 1.0);
   }
-  let pressureColumns = pressureColumnsOf(columns, lineSlots(), pressureBarAt(heightM));
+  // A medium with no absorber has no column to weight: its pressure-weighted columns are the zeros
+  // `pressureColumnsOf` would give (R08.T8.d).
+  var pressureColumns = AbsorberColumns(0.0, vec4f(0.0));
+  if (absorberCount() > 0u) {
+    pressureColumns = pressureColumnsOf(columns, lineSlots(), pressureBarAt(heightM));
+  }
   return SampleMedium(scattering, extinction, columns, pressureColumns, densities);
 }
 
@@ -109,7 +191,7 @@ fn phasedScatteringOf(local : SampleMedium, angle : ScatteringAngle) -> vec3f {
   let count = min(u32(medium.termCount), MAX_TERMS);
   for (var i = 0u; i < count; i++) {
     let term = terms[i];
-    let scattered = term.scattering.rgb * local.densities[i];
+    let scattered = term.scattering.rgb * termDensity(local.densities, i);
     phased += scattered * phaseOf(i, term, angle);
   }
   return phased;
@@ -184,7 +266,7 @@ fn lobeOrdersOf(local : SampleMedium, angle : ScatteringAngle, depth : vec3f) ->
   for (var i = 0u; i < count; i++) {
     let term = terms[i];
     if (hasLobe(term)) {
-      lobeScattering += term.scattering.rgb * local.densities[i];
+      lobeScattering += term.scattering.rgb * termDensity(local.densities, i);
     }
   }
   let x = depth * lobeScattering / max(local.extinction, vec3f(1e-30));
@@ -194,7 +276,7 @@ fn lobeOrdersOf(local : SampleMedium, angle : ScatteringAngle, depth : vec3f) ->
     if (!hasLobe(term)) {
       continue;
     }
-    let scattered = term.scattering.rgb * local.densities[i];
+    let scattered = term.scattering.rgb * termDensity(local.densities, i);
     let boost = exp(min(x * term.phase.xyz, vec3f(80.0)));
     let phase = phaseOf(i, term, angle);
     orders += scattered * boost * lobeOrdersAt(i, angle.u, x, term.phase.xyz, phase);

@@ -6,7 +6,13 @@ import {
   lineAbsorberMedium,
   SATURN_SPHEROID,
 } from "../../test/atmosphereFixtures";
-import { forbiddenIn, wgslCode } from "../../test/atmosphereWgsl";
+import {
+  arraysByValueFrom,
+  forbiddenIn,
+  wgslCode,
+  wgslFunctions,
+  wgslStructs,
+} from "../../test/atmosphereWgsl";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { quaternion } from "../camera/quaternion";
 import type { TextureHandle } from "../engine/types";
@@ -54,6 +60,7 @@ import oblateWgsl from "./shaders/oblate.wgsl?raw";
 import viewWgsl from "./shaders/view.wgsl?raw";
 import {
   KERNEL_ARM_FORMAT,
+  MAX_TERMS,
   MULTI_SCATTERING_KERNEL,
   NO_ABSORBER_CURVES,
   TRANSMITTANCE_KERNEL,
@@ -347,6 +354,106 @@ describe("HillaireAtmosphere", () => {
     ]);
     expect(draw.material.name).toBe("atmosphere composite");
     expect(draw.textures["sceneDepth"]).toBe(SCENE.depth);
+  });
+
+  // From the march band's upper edge up the composite reads neither the sky view nor the aerial
+  // perspective, so each waits for a reader (lever 2 of `decision-r08-t8-leans.md` §8, R08.T8.d).
+  describe("from the march band's upper edge up (R08.T8.d)", () => {
+    const orbit: AtmosphereCamera = { ...CAMERA, positionM: pointAt(0, 400_000) };
+    const at = async (
+      sizes = TABLE_SIZES.high,
+    ): Promise<{
+      engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+      atmosphere: HillaireAtmosphere;
+    }> => {
+      const engine = await countingRenderEngine();
+      return {
+        engine,
+        atmosphere: new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, sizes, WGS84),
+      };
+    };
+
+    it("dispatches the ray march alone", async () => {
+      const { engine, atmosphere } = await at();
+      engine.dispatched.length = 0;
+      atmosphere.drawFrame(orbit, [NOON], SCENE);
+      expect(engine.dispatched.map((d) => d.kernel)).toEqual(["atmosphere ray march"]);
+    });
+
+    it("makes each other table at its reader's first ask, once a frame", async () => {
+      const { engine, atmosphere } = await at();
+      atmosphere.drawFrame(orbit, [NOON], SCENE);
+      engine.dispatched.length = 0;
+      atmosphere.skyView(orbit);
+      atmosphere.skyView(orbit);
+      expect(atmosphere.aerialPerspective(orbit)).not.toBeNull();
+      expect(atmosphere.frameTables.aerial.name).toBe("atmosphere aerial perspective");
+      expect(engine.dispatched.map((d) => d.kernel)).toEqual([
+        "atmosphere sky view",
+        "atmosphere aerial perspective",
+      ]);
+    });
+
+    it("makes a late table on its own frame's view, though the kernel arm drew another since", async () => {
+      const { engine, atmosphere } = await at();
+      atmosphere.drawFrame(orbit, [NOON], SCENE);
+      const march = engine.dispatched.at(-1)?.bindings.uniforms["view"];
+      atmosphere.drawKernelArm({ ...orbit, positionM: pointAt(0, 500_000) }, [DUSK], SCENE);
+      const arm = engine.dispatched.at(-1)?.bindings.uniforms["view"];
+      atmosphere.skyView(orbit);
+      const sky = engine.dispatched.at(-1);
+      expect(sky?.kernel).toBe("atmosphere sky view");
+      expect(sky?.bindings.uniforms["view"]).toEqual(march);
+      expect(sky?.bindings.uniforms["view"]).not.toEqual(arm);
+    });
+
+    it("still makes the kernel arm's three tables", async () => {
+      const { engine, atmosphere } = await at();
+      atmosphere.drawFrame(orbit, [NOON], SCENE);
+      engine.dispatched.length = 0;
+      atmosphere.drawKernelArm(orbit, [NOON], SCENE);
+      expect(engine.dispatched).toHaveLength(3);
+    });
+
+    it.each([
+      [
+        "the next frame",
+        (a: HillaireAtmosphere): void => {
+          a.drawFrame(CAMERA, [DUSK], SCENE);
+        },
+      ],
+      ["a new medium", (a: HillaireAtmosphere): void => a.setMedium(HILLAIRE_REFERENCE)],
+      ["disposal", (a: HillaireAtmosphere): void => a.dispose()],
+    ] as const)("drops what the frame left unread at %s", async (_name, after) => {
+      const { engine, atmosphere } = await at();
+      atmosphere.drawFrame(orbit, [NOON], SCENE);
+      after(atmosphere);
+      engine.dispatched.length = 0;
+      expect(atmosphere.frameTables.skyView.name).toBe("atmosphere sky view");
+      expect(engine.dispatched).toEqual([]);
+    });
+
+    it("drops what the frame left unread at a device restore", async () => {
+      const { engine, atmosphere } = await at();
+      atmosphere.drawFrame(orbit, [NOON], SCENE);
+      engine.restore();
+      engine.dispatched.length = 0;
+      expect(atmosphere.frameTables.skyView.name).toBe("atmosphere sky view");
+      expect(engine.dispatched).toEqual([]);
+    });
+
+    it("on low, where the composite alone reads the volume, publishes none and makes it only for the smoke's read", async () => {
+      const { engine, atmosphere } = await at(TABLE_SIZES.low);
+      atmosphere.drawFrame(orbit, [NOON], SCENE);
+      engine.dispatched.length = 0;
+      expect(atmosphere.aerialPerspective(orbit)).toBeNull();
+      expect(engine.dispatched).toEqual([]);
+      expect(atmosphere.frameTables.aerial.name).toBe("atmosphere aerial perspective");
+      expect(engine.dispatched.map((d) => d.kernel)).toEqual([
+        "atmosphere sky view",
+        "atmosphere aerial perspective",
+      ]);
+    });
   });
 
   it("makes nothing new after the first frame, and grows the ray-march target only past its size", async () => {
@@ -878,12 +985,93 @@ describe("the atmosphere's WGSL", () => {
     expect(source).toMatch(/var<storage, read> terms : array<Term, MAX_TERMS>;/);
     expect(source).toMatch(/var densityTables : texture_2d_array<f32>;/);
     expect(source).toMatch(/var phaseTables : texture_2d_array<f32>;/);
-    expect(source).toMatch(/let angles = sourceAngles\(dir, sources, count\);/);
+    // Each source's direction is read from the view at each step and its angle formed there
+    // (R08.T8.d), as the kernels formed them once a pixel before.
+    expect(source).toMatch(/let source = view\.sources\[k\];/);
+    expect(source).toMatch(/let angle = scatteringAngle\(ray, dir\);/);
+    expect(source).not.toMatch(/\bsourceAngles\b/);
   });
 
   it("keeps the composite's code clear of the medium, which it does not declare", () => {
     const code = COMPOSITE_MATERIAL.fragmentWgsl.replaceAll(/\/\/[^\n]*/gu, "");
     expect(code).not.toMatch(/\b(medium|terms|densityTables|phaseTables)\b/);
+  });
+});
+
+describe("the per-frame marches' steps (R08.T8.d)", () => {
+  // An array held by value and indexed by a loop variable is copied whole into each invocation at
+  // every call, and a function-scope array indexed by a variable lives in local memory: the
+  // sources' directions and angles passed to each step so, with the slots' and terms' arrays,
+  // made the ray march's step about 7 times R05's on the RTX 3080 (`decision-r08-t8-leans.md` §8),
+  // R05.T14's `Medium` by value over again. No helper a step reaches takes or returns one, nor a
+  // struct that holds one; pointers are allowed.
+  it.each([
+    [
+      "the ray-march kernel",
+      RAY_MARCH_KERNEL.reference,
+      ["rayMarchStep", "rayMarchStepOf", "rayMarchWalkStepOf"],
+    ],
+    [
+      "the sky-view kernel",
+      SKY_VIEW_KERNEL.reference,
+      ["skyViewStep", "marchStep", "marchWalkStep"],
+    ],
+    [
+      "the aerial-perspective kernel",
+      AERIAL_PERSPECTIVE_KERNEL.reference,
+      [
+        "shellHeightAlong",
+        "quadricAlong",
+        "oblateNeedsLatitude",
+        "datumPointOf",
+        "gravityRatioAt",
+        "sampleMediumAt",
+        "sampleStartOf",
+        "viewSourcesAt",
+        "viewMarchStep",
+      ],
+    ],
+    // The far limb's footprint (R08.T8.c), whose nodes are formed as each is marched or read, not
+    // held (R08.T8.d).
+    [
+      "the ray-march kernel's footprint",
+      RAY_MARCH_KERNEL.reference,
+      ["farLimbFootprintOf", "farLimbNodeOf"],
+    ],
+    [
+      "the composite's footprint",
+      COMPOSITE_MATERIAL.fragmentWgsl,
+      ["farLimbFootprintOf", "farLimbNodeOf"],
+    ],
+  ] as const)(
+    "%s's per-step helpers take and return no array, nor a struct that holds one, by value",
+    (_name, source, roots) => {
+      // The roots are the step's own: each is declared.
+      const declared = wgslFunctions(source);
+      expect(roots.filter((root) => !declared.has(root))).toEqual([]);
+      expect(arraysByValueFrom(source, roots)).toEqual([]);
+    },
+  );
+
+  it("gives each light slot's share and each term's density a member of its own, and the march's slot 0", () => {
+    const structs = wgslStructs(RAY_MARCH_KERNEL.reference);
+    expect(structs.get("ViewShares")).toHaveLength(MAX_SKY_LIGHT_SLOTS);
+    expect(structs.get("TermDensities")).toHaveLength(MAX_TERMS);
+    // The luminance and slot 0's throughput and path, then the other slots', held by pointer.
+    expect(structs.get("ViewMarch")).toEqual([
+      "vec3f",
+      "vec3f",
+      "AbsorberPath",
+      "array<vec3f, MAX_SKY_LIGHT_SLOTS - 1u>",
+      "array<AbsorberPath, MAX_SKY_LIGHT_SLOTS - 1u>",
+    ]);
+  });
+
+  // SwiftShader inlines every call, and with the march's steps emitted twice in one entry point its
+  // GPU process segfaults (R08.T8.d): the centre ray and the footprint's nodes share one call.
+  it("calls the march from one place in the ray-march kernel's entry point", () => {
+    const main = wgslFunctions(RAY_MARCH_KERNEL.reference).get("main");
+    expect(main?.body.match(/\bmarchRay\(/gu)).toHaveLength(1);
   });
 });
 

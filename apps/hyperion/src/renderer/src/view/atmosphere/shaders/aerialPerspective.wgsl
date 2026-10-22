@@ -25,7 +25,10 @@
 // 17, _Per-view marches_): each froxel's ray is marched on its own osculating sphere R_α at the
 // camera, each sample's medium at its h* = s h, s at the latitude of the sample's own place on the
 // datum, and its sources through the sliced lookup and the bands (`source.wgsl`), as
-// `tablesCpu.ts`'s oblateAerialPerspectiveTwin marches them.
+// `tablesCpu.ts`'s oblateAerialPerspectiveTwin marches them. Changes (plan R08, R08.T8.d;
+// `decision-r08-t8-leans.md` section 8): no step takes or returns an array by value
+// (source.wgsl's header): the sources and their angles are formed at each step from the view
+// (`viewSourcesAt`), not held a froxel; the arithmetic unchanged.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -64,13 +67,8 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let slices = size.z;
   let perSlice = max(u32(view.tables.w), 1u);
   let dt = view.tables.y / f32(slices * perSlice);
-  let count = skySourceCount(view);
-  var sources : array<vec3f, MAX_SKY_SOURCES>;
-  for (var k = 0u; k < count; k++) {
-    sources[k] = view.sources[k].direction.xyz;
-  }
-  let angles = sourceAngles(dir, sources, count);
   var march = viewMarchStart();
+  let lobes = hasForwardLobes();
   for (var slice = 0u; slice < slices; slice++) {
     for (var step = 0u; step < perSlice; step++) {
       let t = (f32(slice * perSlice + step) + 0.5) * dt;
@@ -90,9 +88,9 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
       }
       let local = sampleMediumAt(s * heightM);
       let start = sampleStartOf(body, place, quadric, heightM, up, latitudeNormal, s, local);
-      let shares = viewSourcesAt(body, start, up, sources, sources, angles, local);
+      let shares = viewSourcesAt(body, start, up, dir, lobes, local);
       viewMarchStep(&march, local, shares, dt);
     }
-    textureStore(aerialOut, vec3u(id.xy, slice), vec4f(march.luminance, viewMeanTransmittance(march)));
+    textureStore(aerialOut, vec3u(id.xy, slice), vec4f(march.luminance, viewMeanTransmittance(&march)));
   }
 }

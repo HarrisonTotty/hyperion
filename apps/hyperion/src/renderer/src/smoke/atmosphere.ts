@@ -6740,14 +6740,23 @@ interface FarLimbFrameTimes {
 
 /**
  * A timed frame's passes from its resolve: the {@link ATMOSPHERE_VIEW_PASS} passes by their place
- * (the sky view, the aerial perspective, the ray march, then any more) and the composite's by its
- * label, any other pass (an `atmosphere tables` build's) left out; `null` for a resolve without
- * the three kernels' passes and exactly one composite's.
+ * (the sky view, the aerial perspective, the ray march, then any more; the ray march's alone where
+ * the frame left the other two unread) and the composite's by its label, any other pass (an
+ * `atmosphere tables` build's) left out; `null` for a resolve without the kernels' passes and
+ * exactly one composite's.
+ *
+ * @remarks
+ * From the march band's upper edge up, where every far-limb camera stands, the frame makes the
+ * ray march alone (lever 2 of `decision-r08-t8-leans.md` §8, R08.T8.d: the sky view and the aerial
+ * perspective wait for a reader, and none asks here), so a resolve with one view pass holds the
+ * ray march's, the other two 0.
  */
 function farLimbFrameTimes(times: PassTimes): FarLimbFrameTimes | null {
   const views = times.passes.filter((pass) => pass.label === ATMOSPHERE_VIEW_PASS);
   const composites = times.passes.filter((pass) => pass.label === FAR_LIMB_TIMING_COMPOSITE_PASS);
-  const [skyView, aerial, rayMarch, ...more] = views;
+  const unread = { label: ATMOSPHERE_VIEW_PASS, ns: 0, bracketed: false };
+  const [skyView, aerial, rayMarch, ...more] =
+    views.length === 1 ? [unread, unread, ...views] : views;
   const [composite] = composites;
   if (
     composites.length !== 1 ||
@@ -6784,7 +6793,10 @@ interface FarLimbTimedPlace {
   readonly frames: readonly FarLimbFrameTimes[];
   /** Timed frames whose times never arrived (a resolve the timer dropped, or a late one). */
   readonly missing: number;
-  /** Timed frames whose resolve lacked a kernel's pass or held other than one composite's. */
+  /**
+   * Timed frames whose resolve lacked a kernel's pass (the ray march's, or with it either other's)
+   * or held other than one composite's.
+   */
   readonly malformed: number;
 }
 
@@ -6794,7 +6806,7 @@ interface FarLimbTimedSetting {
   readonly timers: ReadonlySet<GpuTimer>;
   /** The timed frames' pass times that are not multiples of {@link QUANTIZED_TIMESTAMP_NS}. */
   readonly offGrid: number;
-  /** The timed frames' pass times, in all. */
+  /** The timed frames' pass times, in all: the passes that ran, a pass left unread counting none. */
   readonly times: number;
 }
 
@@ -6992,8 +7004,11 @@ async function timeFarLimbSetting(
         continue;
       }
       frames.push(frame);
-      // A sum of quantized times is on the grid too, so more view passes count as one time.
-      const own = [frame.skyViewNs, frame.aerialNs, frame.rayMarchNs, frame.compositeNs];
+      // A sum of quantized times is on the grid too, so more view passes count as one time; a pass
+      // the frame left unread (R08.T8.d's lever 2) is none.
+      const own = [frame.skyViewNs, frame.aerialNs, frame.rayMarchNs, frame.compositeNs].filter(
+        (ns) => ns > 0,
+      );
       for (const ns of frame.morePasses > 0 ? [...own, frame.moreNs] : own) {
         times += 1;
         offGrid += ns % QUANTIZED_TIMESTAMP_NS === 0 ? 0 : 1;

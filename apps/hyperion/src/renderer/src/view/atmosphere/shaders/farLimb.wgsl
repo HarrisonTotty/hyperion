@@ -28,8 +28,6 @@
 
 const FAR_LIMB_BLEND_FROM : f32 = 0.6;
 const FAR_LIMB_BLEND_WIDTH : f32 = 0.4;
-// The ground piece's nodes and the shell piece's, at most.
-const FAR_LIMB_NODES : u32 = 10u;
 // The projection's narrower width under which it is taken as a box, texels.
 const FAR_LIMB_BOX_WIDTH : f32 = 1e-4;
 
@@ -49,13 +47,78 @@ const FAR_LIMB_GAUSS_8 = array<vec2f, 8>(
   vec2f(0.980144928248768, 0.050614268145188),
 );
 
-// A texel's footprint: w_L (0 for the centre ray alone), the share above the top, and its nodes,
-// each the output's coordinates of its ray (xy) and its weight (z).
+// The footprint's projection on the unit screen direction (gx, gy): a sum of uniforms of widths
+// |gx| and |gy| texels, hi the wider and lo the narrower.
+struct FarLimbProjection {
+  hi : f32,
+  lo : f32,
+  halfWidth : f32,
+}
+
+// Node i of the `count`-node rule above, 2 or 8 (`farLimbAddPiece` before R08.T8.d held both rules
+// in arrays it indexed by a loop variable, which Tint copies whole into each invocation): each read
+// by a constant index.
+fn farLimbGaussNode(count : u32, i : u32) -> vec2f {
+  if (count == 2u) {
+    if (i == 0u) {
+      return FAR_LIMB_GAUSS_2[0];
+    }
+    return FAR_LIMB_GAUSS_2[1];
+  }
+  switch (i) {
+    case 0u: {
+      return FAR_LIMB_GAUSS_8[0];
+    }
+    case 1u: {
+      return FAR_LIMB_GAUSS_8[1];
+    }
+    case 2u: {
+      return FAR_LIMB_GAUSS_8[2];
+    }
+    case 3u: {
+      return FAR_LIMB_GAUSS_8[3];
+    }
+    case 4u: {
+      return FAR_LIMB_GAUSS_8[4];
+    }
+    case 5u: {
+      return FAR_LIMB_GAUSS_8[5];
+    }
+    case 6u: {
+      return FAR_LIMB_GAUSS_8[6];
+    }
+    default: {
+      return FAR_LIMB_GAUSS_8[7];
+    }
+  }
+}
+
+// A piece [lowXi, highXi] of a footprint, texels along its screen direction from its centre: its
+// nodes' count (0 for a piece left out), its share of the footprint, and its nodes' densities
+// summed, from which each node's weight is formed when asked (`farLimbNodeOf`).
+struct FarLimbPiece {
+  lowXi : f32,
+  highXi : f32,
+  count : u32,
+  share : f32,
+  total : f32,
+}
+
+// A texel's footprint: w_L (0 for the centre ray alone), the share above the top, its nodes' count,
+// and what forms each node (`farLimbNodeOf`): the projection, the centre `uv`, the unit screen
+// direction `g` in which h rises, the target's size, and the ground piece and the shell piece, in
+// that order. No node is held (R08.T8.d): an array of them, held across the march of each, kept
+// the ray march's registers from its steps.
 struct FarLimbFootprint {
   blend : f32,
   spaceShare : f32,
   count : u32,
-  nodes : array<vec3f, FAR_LIMB_NODES>,
+  projection : FarLimbProjection,
+  uv : vec2f,
+  g : vec2f,
+  size : vec2f,
+  ground : FarLimbPiece,
+  shell : FarLimbPiece,
 }
 
 // The height of a line's closest approach over the spheroid of radii (a, a, c), m (x), negative
@@ -70,17 +133,30 @@ fn farLimbApproach(origin : vec3f, dir : vec3f, a : f32, c : f32) -> vec2f {
   return vec2f(sqrt(dot(across, across) / qa) - a, -dot(o, d) / qa);
 }
 
-// The tangent height over the datum of the ray through `uv`.
-fn farLimbHeightAt(v : AtmosphereView, uv : vec2f) -> f32 {
-  return farLimbApproach(v.camera.xyz, rayThrough(v, uv), v.figure.x, v.figure.y).x;
+// What a footprint takes from the view: the camera, its ray basis and the datum's radii, so that no
+// footprint helper takes the whole view, with its sources' array, by value (R08.T8.d).
+struct FarLimbRays {
+  camera : vec3f,
+  right : vec3f,
+  upRay : vec3f,
+  forward : vec3f,
+  a : f32,
+  c : f32,
 }
 
-// The footprint's projection on the unit screen direction (gx, gy): a sum of uniforms of widths
-// |gx| and |gy| texels, hi the wider and lo the narrower.
-struct FarLimbProjection {
-  hi : f32,
-  lo : f32,
-  halfWidth : f32,
+fn farLimbRaysOf(v : AtmosphereView) -> FarLimbRays {
+  return FarLimbRays(v.camera.xyz, v.right.xyz, v.upRay.xyz, v.forward.xyz, v.figure.x, v.figure.y);
+}
+
+// The unit ray through `uv`, as `view.wgsl`'s rayThrough forms it.
+fn farLimbRayThrough(rays : FarLimbRays, uv : vec2f) -> vec3f {
+  let ndc = vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+  return normalize(rays.forward + ndc.x * rays.right + ndc.y * rays.upRay);
+}
+
+// The tangent height over the datum of the ray through `uv`.
+fn farLimbHeightAt(rays : FarLimbRays, uv : vec2f) -> f32 {
+  return farLimbApproach(rays.camera, farLimbRayThrough(rays, uv), rays.a, rays.c).x;
 }
 
 fn farLimbProjectionOf(g : vec2f) -> FarLimbProjection {
@@ -124,82 +200,96 @@ fn farLimbShareBelow(p : FarLimbProjection, xi : f32) -> f32 {
   return 1.0 - farLimbShareUnder(p, -t);
 }
 
-// Adds a piece [lowXi, highXi] of the footprint, texels along the unit `g` from the centre `uv`, to
-// the footprint's nodes: `count` Gauss-Legendre nodes (2 or 8), each weighted by the projection's
-// density there, the piece's weights scaled to its share.
-fn farLimbAddPiece(
-  footprint : ptr<function, FarLimbFootprint>,
-  p : FarLimbProjection,
-  lowXi : f32,
-  highXi : f32,
-  count : u32,
-  uv : vec2f,
-  g : vec2f,
-  size : vec2f,
-) {
+// A piece [lowXi, highXi] of the footprint: `count` Gauss-Legendre nodes (2 or 8), each weighted by
+// the projection's density there, the piece's weights scaled to its share; no nodes, and so no
+// piece, where it is empty or holds no share.
+fn farLimbPieceOf(p : FarLimbProjection, lowXi : f32, highXi : f32, count : u32) -> FarLimbPiece {
   let share = farLimbShareBelow(p, highXi) - farLimbShareBelow(p, lowXi);
   if (!(highXi > lowXi) || !(share > 0.0)) {
-    return;
+    return FarLimbPiece(lowXi, highXi, 0u, share, 0.0);
   }
-  var rule2 = FAR_LIMB_GAUSS_2;
-  var rule8 = FAR_LIMB_GAUSS_8;
-  var raw : array<f32, 8>;
   var total = 0.0;
   for (var i = 0u; i < count; i++) {
-    var node = rule8[i];
-    if (count == 2u) {
-      node = rule2[i];
-    }
+    let node = farLimbGaussNode(count, i);
     let xi = lowXi + node.x * (highXi - lowXi);
-    raw[i] = node.y * farLimbDensity(p, xi);
-    total += raw[i];
+    let raw = node.y * farLimbDensity(p, xi);
+    total += raw;
   }
-  for (var i = 0u; i < count; i++) {
-    var node = rule8[i];
-    if (count == 2u) {
-      node = rule2[i];
-    }
-    let xi = lowXi + node.x * (highXi - lowXi);
-    var weight = share * node.y;
-    if (total > 0.0) {
-      weight = share * raw[i] / total;
-    }
-    (*footprint).nodes[(*footprint).count] = vec3f(uv + xi * g / size, weight);
-    (*footprint).count += 1u;
+  return FarLimbPiece(lowXi, highXi, count, share, total);
+}
+
+// A footprint with none: the centre ray alone.
+fn farLimbNone() -> FarLimbFootprint {
+  var footprint : FarLimbFootprint;
+  footprint.blend = 0.0;
+  footprint.spaceShare = 0.0;
+  footprint.count = 0u;
+  return footprint;
+}
+
+// Node n of the footprint, n under its count, the ground piece's first: the output's coordinates of
+// its ray (xy) and its weight (z), as `farLimbAddPiece` formed and held it before R08.T8.d.
+fn farLimbNodeOf(footprint : ptr<function, FarLimbFootprint>, n : u32) -> vec3f {
+  var piece = (*footprint).ground;
+  var i = n;
+  if (n >= piece.count) {
+    i = n - piece.count;
+    piece = (*footprint).shell;
   }
+  let node = farLimbGaussNode(piece.count, i);
+  let xi = piece.lowXi + node.x * (piece.highXi - piece.lowXi);
+  var weight = piece.share * node.y;
+  if (piece.total > 0.0) {
+    let raw = node.y * farLimbDensity((*footprint).projection, xi);
+    weight = piece.share * raw / piece.total;
+  }
+  return vec3f((*footprint).uv + xi * (*footprint).g / (*footprint).size, weight);
 }
 
 // The footprint of the texel whose centre is `uv` in a target of `size` texels, the camera above
 // the top (the caller's test): w_L 0 where the texel keeps its centre ray.
 fn farLimbFootprintOf(
-  v : AtmosphereView,
+  rays : FarLimbRays,
   body : OblateBody,
   table : texture_2d<f32>,
   uv : vec2f,
   size : vec2f,
 ) -> FarLimbFootprint {
-  var footprint : FarLimbFootprint;
-  footprint.blend = 0.0;
-  footprint.spaceShare = 0.0;
-  footprint.count = 0u;
-  let origin = v.camera.xyz;
-  let a = v.figure.x;
-  let c = v.figure.y;
+  var footprint = farLimbNone();
+  let origin = rays.camera;
+  let a = rays.a;
+  let c = rays.c;
   let topM = body.counts.w;
-  let dir = rayThrough(v, uv);
+  let dir = farLimbRayThrough(rays, uv);
   let centre = farLimbApproach(origin, dir, a, c);
   if (!(centre.y > 0.0)) {
     return footprint;
   }
-  let halfTexel = 0.5 / size;
-  let gx = farLimbHeightAt(v, uv + vec2f(halfTexel.x, 0.0))
-    - farLimbHeightAt(v, uv - vec2f(halfTexel.x, 0.0));
-  let gy = farLimbHeightAt(v, uv + vec2f(0.0, halfTexel.y))
-    - farLimbHeightAt(v, uv - vec2f(0.0, halfTexel.y));
-  let spanM = abs(gx) + abs(gy);
   let topHeightM = farLimbApproach(
     origin, dir, a + topM * body.scales.z, c + topM * body.scales.w
   ).x;
+  // A bound on the texel's span from the centre ray alone (R08.T8.d), so that a texel that cannot
+  // reach the shell keeps its centre ray without forming its edges' four rays. Along the straight
+  // path between two unnormalised rays w = forward + x right + y upRay, |w| >= 1 (|forward| = 1,
+  // right and upRay perpendicular to it), so the scaled unit ray turns by at most k |Δw|, k = a ÷ c
+  // (a >= c: no prolate figure is drawn), and the tangent height moves by at most |S o| k |Δw|;
+  // across the texel's edges' midpoints |Δw| is 2 |right| ÷ size.x and 2 |upRay| ÷ size.y.
+  // Widened by 1% and by 10⁻⁵ |S o| for f32's rounding of the span itself (a few 10⁻⁶ |S o| at
+  // WGSL's bounds, about 5 × 10⁻⁷ typically), so that it passes every texel the span's own test
+  // below passes.
+  let scaledOrigin = origin * vec3f(1.0, 1.0, a / c);
+  let reachM = length(scaledOrigin) * (a / c) * 2.0
+    * (length(rays.right) / size.x + length(rays.upRay) / size.y);
+  let boundM = reachM * 1.01 + 1e-5 * length(scaledOrigin);
+  if (!(centre.x + 0.5 * boundM > 0.0) || !(topHeightM - 0.5 * boundM < 0.0)) {
+    return footprint;
+  }
+  let halfTexel = 0.5 / size;
+  let gx = farLimbHeightAt(rays, uv + vec2f(halfTexel.x, 0.0))
+    - farLimbHeightAt(rays, uv - vec2f(halfTexel.x, 0.0));
+  let gy = farLimbHeightAt(rays, uv + vec2f(0.0, halfTexel.y))
+    - farLimbHeightAt(rays, uv - vec2f(0.0, halfTexel.y));
+  let spanM = abs(gx) + abs(gy);
   if (!(centre.x + 0.5 * spanM > 0.0) || !(topHeightM - 0.5 * spanM < 0.0) || !(spanM > 0.0)) {
     return footprint;
   }
@@ -221,7 +311,12 @@ fn farLimbFootprintOf(
   let topXi = clamp(-topHeightM / gLength, groundXi, p.halfWidth);
   footprint.blend = blend;
   footprint.spaceShare = 1.0 - farLimbShareBelow(p, topXi);
-  farLimbAddPiece(&footprint, p, -p.halfWidth, groundXi, 2u, uv, g, size);
-  farLimbAddPiece(&footprint, p, groundXi, topXi, 8u, uv, g, size);
+  footprint.projection = p;
+  footprint.uv = uv;
+  footprint.g = g;
+  footprint.size = size;
+  footprint.ground = farLimbPieceOf(p, -p.halfWidth, groundXi, 2u);
+  footprint.shell = farLimbPieceOf(p, groundXi, topXi, 8u);
+  footprint.count = footprint.ground.count + footprint.shell.count;
   return footprint;
 }

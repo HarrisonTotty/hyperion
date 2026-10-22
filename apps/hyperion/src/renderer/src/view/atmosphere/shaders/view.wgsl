@@ -84,11 +84,6 @@ fn skySourceCount(v : AtmosphereView) -> u32 {
   return min(u32(v.sky.x), MAX_SKY_SOURCES);
 }
 
-// How many light slots the view's marches track a path for, at least 1.
-fn skyPathCount(v : AtmosphereView) -> u32 {
-  return clamp(u32(v.sky.y), 1u, MAX_SKY_LIGHT_SLOTS);
-}
-
 // A source's light slot: its path, its absorber curves and its multiple-scattering layer.
 fn skySlotOf(source : SkySource) -> u32 {
   return min(u32(source.weight.w), MAX_SKY_LIGHT_SLOTS - 1u);

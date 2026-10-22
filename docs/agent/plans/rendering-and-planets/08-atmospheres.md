@@ -1934,12 +1934,12 @@ The order:
   follows T6.e (`decision-r08-t6d-findings.md`).
 - T7 (several suns, the sky's extinction) and T8 (other bodies from outside) follow T6.i and T6.j,
   so that their marches start from the pieces and their sources from R06's fixture; T8's subtasks
-  run in order, T8.a, T8.b, T8.c and T8.d; T8.c (the far limb integrated across the texel,
-  `decision-r08-t8-leans.md` §6) precedes T10.b and T16.b, and T8.d (the march's cost from orbit,
-  `decision-r08-t8-leans.md` §8) precedes T10.b; T9.a (aerial perspective) follows T6.d;
-  T9.b (surface lighting, by band) follows T6.f.
+  run in order, T8.a, T8.b, T8.c, T8.d and T8.e; T8.c (the far limb integrated across the texel,
+  `decision-r08-t8-leans.md` §6) precedes T10.b and T16.b, and T8.e (the march's sources and
+  steps from outside the air, `decision-r08-t8-leans.md` §9) precedes T10.b; T9.a (aerial
+  perspective) follows T6.d; T9.b (surface lighting, by band) follows T6.f.
 - T10.a assembles the medium from a body and needs T2–T6 (T5 for the aerosol terms); T10.b draws
-  it in the photorealistic view and follows T10.a, T7 and T8.d. T11 records the thin benchmarks
+  it in the photorealistic view and follows T10.a, T7 and T8.e. T11 records the thin benchmarks
   and needs T7–T10.
 - T12.a (the tracer) needs nothing of this plan and can start at once. T12.c (its benchmarks) and
   T12.d (the spheroid mode) follow it; T12.c's cases whose matrices come from R08's Mie
@@ -4253,9 +4253,10 @@ two suns, and its timings are taken with T11's.
 
 ### R08.T8 Views from outside and other bodies
 
-In four subtasks (split on implementation, 2026-10-21, as `decision-next-lane-2026-10-21.md` §2
+In five subtasks (split on implementation, 2026-10-21, as `decision-next-lane-2026-10-21.md` §2
 suggests; T8.b also waits on `view/bodies/` and `view/spike/` being free; T8.c added the same day
-by `decision-r08-t8-leans.md` §6; T8.d added on 2026-10-22 by `decision-r08-t8-leans.md` §8):
+by `decision-r08-t8-leans.md` §6; T8.d added on 2026-10-22 by `decision-r08-t8-leans.md` §8; T8.e
+added on 2026-10-22 by `decision-r08-t8-leans.md` §9):
 
 - **R08.T8.a The march from inside and outside the air, and the switch band.** The march's N terms
   and several sources (built by R08.T6.b and R08.T7, no source skipped outside the air), the switch
@@ -4337,14 +4338,41 @@ by `decision-r08-t8-leans.md` §6; T8.d added on 2026-10-22 by `decision-r08-t8-
   4. early exit on transmittance, last.
 
   Half resolution on high and 32 steps are not levers (R05's ruling; "Deviations in T8.a, as
-  built"). It is accepted when, in the smoke's timing frames on the RTX 3080, hidden, with
-  `nvidia-smi` clocks at 100 ms: high's atmosphere from 400 km at one source is at most 4.0 ms
-  median and 4.5 ms p95; every far-limb camera is at most the 400 km frame; low's 400 km sum is
-  recorded, with the UHD 620 estimate for the owner's run (over 0.6 ms median goes to "main");
-  and the setting's count and `MAX_SKY_SOURCES` are recorded in R08.T11's rows (high over 6 ms
-  p95 at 2 + 2 goes to "main"). If levers 1–3 miss, the lane reports to "main" before lever 4 or
-  any half resolution. If lever 1 confirms the mechanism, `hillaire.test.ts` gains a static check
-  beside R05's. It follows T8.c and precedes R08.T10.b. `pnpm test` and `just test-render` pass.
+  built"). Since `decision-r08-t8-leans.md` §9 it takes only what moves no pixel: lever 1, on
+  T8.c's footprint and composite too, lever 2, and one more bit-identical round; lever 3 moves to
+  T8.e. It is accepted when every read-back is byte-identical to T8.c's kernel (the RTX 3080 and
+  SwiftShader; both settings; every far-limb camera; R05's Earth, `EARTH_REFERENCE` and the slab
+  Earth; 1, the setting's count and 6 sources), and its timings, with `nvidia-smi` clocks at
+  100 ms, are in R08.T11's rows. The 4.0 / 4.5 ms figure for high at 400 km and one source is a
+  recorded target there, not a hold. If lever 1 confirms the mechanism, `hillaire.test.ts` gains a
+  static check beside R05's. It follows T8.c and precedes R08.T10.b. `pnpm test` and
+  `just test-render` pass. _Built 2026-10-22_ (Risks, "Deviations in T8.d, as built").
+
+- **R08.T8.e The march's sources and steps from outside the air** (`decision-r08-t8-leans.md`
+  §9). At the setting's count the march is a blocker for R08.T10.b: from 400 km on high, after
+  T8.d, about 14.8–16.7 ms at three sources on `EARTH_REFERENCE` and 18.5–20.7 ms at four
+  (estimated from T8.d's rows), past R05's 0.8 T row and the frame. A one-star body with a moon
+  marches three on high, since `planetshineSources` keeps the two brightest neighbours and
+  nothing is skipped outside the air. In order:
+  1. Design note 7's two skips, also outside the air: the twilight limit as written, and the
+     negligible skip against the brightest source standing at least acos(R ÷ r_c) above the
+     camera's horizontal (on the ground, its horizon);
+  2. at most `atmosphereView.marchSourceCap` sources in the march (2 on both settings), the
+     brightest first; the sky view, the aerial perspective and the surfaces keep every source
+     the skips leave; recorded in `ATMOSPHERE_QUALITY_LIMITS`;
+  3. if a row still misses, T8.d's lever 3 (§8), through R05.T12.e's gate at 1 and 6 sources on
+     all three media at no wider tolerance, the top's step under 0.2%, shader and twin together;
+  4. if a far-limb camera still misses, T8.c's fewer nodes at small spans, through T8.c's
+     acceptance 2–5;
+  5. otherwise the lane reports to "main" before lever 4, a tile cull or half resolution.
+
+  It is accepted when, in the smoke's timing frames on the RTX 3080, hidden, with `nvidia-smi`
+  clocks at 100 ms, the atmosphere's sum is at most 10.0 ms p95 at 400 km and at every far-limb
+  camera, on high at 1920 × 1080, at the setting's count after the skips and the cap, on R05's
+  Earth, `EARTH_REFERENCE` and the slab Earth (R05 Design note 21's 0.8 T, less terrain from
+  orbit and the frame's other passes). One source and `MAX_SKY_SOURCES` are recorded beside it,
+  and low with the UHD 620 estimate. `pnpm test` and `just test-render` pass. It follows T8.d
+  and precedes R08.T10.b.
 
 Widen R05's ray march to N terms and several sources: each body's list of Design note 7 (its stars
 and its planetshine sources), with no source skipped outside the air. The march draws any body's
@@ -4483,7 +4511,7 @@ photorealistic view at all): T10.a assembles and caches the medium, and T10.b dr
 - **R08.T10.a The medium and its cache.** Described below, with its tests. Acceptance:
   `pnpm --filter hyperion exec vitest run view/atmosphere/assemble view/atmosphere/AtmosphereCache`
   and `pnpm test` pass.
-- **R08.T10.b In the photorealistic view.** It needs T10.a, T7 and T8.d, and forms each body's
+- **R08.T10.b In the photorealistic view.** It needs T10.a, T7 and T8.e, and forms each body's
   atmosphere camera with R08.T8.b's `bodyAtmosphereCamera` (`view/atmosphere/bodyCamera.ts`). The
   paragraph "This task also
   draws" below. Tests: `photorealisticPasses`' `atmosphere` entry is built and carries the passes'
@@ -4707,7 +4735,13 @@ the budget ([Performance budget](../../brainstorming/rendering-and-planets.md#pe
 
 R08.T8.c's far-limb timings (from 400 km to 10⁸ m on both settings, before and after its kernel;
 Risks, "Deviations in T8.c, as built", _Acceptance 7_) are this task's first rows and R08.T8.d's
-baseline. R05's `just descent-spike` runs with the generalised atmosphere, and its percentiles are
+baseline. R08.T8.d's follow them (Risks, "Deviations in T8.d, as built", _The rows_: the same
+cameras on both settings at one source, the setting's count and `MAX_SKY_SOURCES`, on R05's Earth,
+`EARTH_REFERENCE` and the slab Earth, with `nvidia-smi` clocks), and answer two of the items above
+on the RTX 3080: one slice against WGS 84 costs about 1% (W1, 7.73 against 7.80 ms), and the slab
+Earth costs what `EARTH_REFERENCE` does (W2, 10.17 against 10.15 ms; W5, 11.07 against 11.07 ms).
+§8's 4.0 / 4.5 ms target for high at 400 km and one source stands there against the measured 7.14
+/ 7.20 ms. R05's `just descent-spike` runs with the generalised atmosphere, and its percentiles are
 recorded against R05's. Where the low setting misses, `TABLE_SIZES` changes here. Acceptance: the
 record is here, and `pnpm test` passes.
 
@@ -8682,6 +8716,197 @@ it rides a bump.
   - _A footprint array live across the node marches._ `FarLimbFootprint` holds 10 `vec3f`, indexed
     by a loop variable and live across `marchRay`, outside the per-step path but the pattern §8
     suspects, and register pressure on every texel above the top: for T8.d's baseline.
+
+- **Deviations in T8.d, as built** (2026-10-22). `shaders/source.wgsl`, `scattering.wgsl`,
+  `rayMarch.wgsl`, `skyView.wgsl`, `aerialPerspective.wgsl`, `farLimb.wgsl`, `composite.wgsl` and
+  `view.wgsl` (`skyPathCount` and `FAR_LIMB_NODES`, unused since, removed); `hillaire.ts` (lever 2)
+  and `smoke/atmosphere.ts` (T8.c's timing group reads a frame with the ray march's pass alone);
+  `test/atmosphereWgsl.ts` (`wgslFunctions`, `wgslStructs`, `arraysByValueFrom`; `wgslCode` strips
+  both kinds of comment in one pass) with a new `test/atmosphereWgsl.test.ts`; tests in
+  `hillaire.test.ts` and `marchSteps.test.ts`. Seven commits and this record, landed as a linear
+  series on T8.c. No golden, version, wire, table layout or twin moves. SwiftShader's read-backs are
+  byte-identical to T8.c's kernel; the RTX 3080's move by one half-float ulp where its compiler
+  contracts the new code differently (main's ruling, below).
+  - _The cause_ (§8's hypothesis, confirmed). Tint keeps an array value indexed by a loop variable
+    in a function-scope variable of its own, stored whole at each call: the SPIR-V (Dawn's
+    `dump_shaders` on SwiftShader) shows three OpVariables with whole-array OpStores at
+    `viewSourcesAt`'s entry (the sources' directions twice and their angles, 54 floats), one at
+    `viewMarchStep`'s (the shares) and one each at `phasedScatteringOf`'s and `lobeOrdersOf`'s (the
+    densities), all once a step; and a function-scope array indexed by a variable lives in the
+    invocation's local memory. R05.T14's `Medium` by value was the same mechanism.
+  - _Lever 1_, in three commits. (1) The sources' directions and angles reach each step by
+    pointer, not in `MarchRay` and `SkyRay` by value: on T8.b's kernels the march fell from 19.38 to
+    7.46 ms and the sky view from 1.27 to 0.35 ms (high, 400 km, W1). (2) No step holds an array:
+    each light slot's share and each term's density a member of its own, selected by a switch
+    (`ViewShares`, `TermDensities`), each source's direction read from the view at each step and
+    its angle formed there, the counts read in place (7.41 → 7.08 ms, W2). The share's multiply and
+    its add stay in one statement (`viewShareAdd`): split across the switch, the RTX 3080's fused
+    multiply-add moved one half-float ulp in up to 11 values at 4 and 6 sources (W2's b1–b4). Of
+    §8's other variants, the slot loops unrolled to their constant bound cost 5% (7.80 against
+    7.45 ms, W1), the source loop's gained nothing (7.79) and the medium by pointer cost 64%
+    (12.23 ms); none is taken. (3) On T8.c's footprint (§9 ruling 3): no node array held
+    (`farLimbNodeOf` forms each node as it is marched or read), the Gauss–Legendre rules read by
+    constant indices, the footprint's helpers taking the view's rays (`FarLimbRays`) rather than
+    the view by value, and a bound on the texel's span from the centre ray (|S o| k |Δd|, widened
+    1% and 10⁻⁵ |S o| for f32's rounding) that returns the centre ray before the four edge rays
+    wherever the span's own test would (the composite 0.37 → 0.28 ms from 400 km, W3). The march's
+    entry point calls `marchRay` once, the centre ray and then each node in one loop (below, _One
+    march call site_).
+  - _Lever 2._ From the march band's upper edge up the composite reads neither the sky view nor the
+    aerial perspective, so `drawFrame` leaves both undone there and makes each at its first
+    reader's ask (`skyView(view)`, `aerialPerspective(view)`, the smoke's `frameTables`), once a
+    frame, on that frame's uniforms; the kernel arm makes all three, and the next frame, a new
+    medium, a restore or `dispose()` drops what was left unread. From orbit it saves 0.33 and
+    0.21 ms on high and 0.07 and 0.11 ms on low (W2). T8.c's timing group reads a frame with the ray
+    march's pass alone, the other two 0.
+  - _(b), one round_ (§9 ruling 3, item 4): the march's slot 0 a member of its own, slots 1–3 in
+    arrays held by pointer (only absorbing media lit by several stars' lights step them); the
+    forward lobes' test taken once a pixel; no pressure-weighted columns for a medium without an
+    absorber. From 400 km on high it took the march from 9.38 to 6.84 ms on R05's Earth and from
+    12.98 to 10.77 ms on `EARTH_REFERENCE` (W3).
+  - _Bit-identity._ The arithmetic is unchanged. On SwiftShader every read-back (the composite's
+    output, the march target and the sky view) is byte-identical to the kernels before, T8.b's for
+    W1's and W2's forms and T8.c's landed kernel for the final form (2026-10-22 17:04,
+    `.git/rm45-scratch/r08-t8d/all-z1.log`): both settings, every far-limb camera of T8.c's timings
+    at an eighth of each output, so that the footprint blends where the texels are large, R05's
+    Earth, `EARTH_REFERENCE` and the slab Earth, at 1, the setting's count (4 on high, 3 on low)
+    and 6 sources; the intermediate forms at a quarter of each output (W1's) or a twentieth (on
+    high, W2's and W3's). On the RTX 3080 (W5, full outputs, the same matrix) the final form moves
+    single half floats by one ulp each (worst 1.03 × 10⁻³ relative, a half near the subnormals),
+    where the RTX's compiler forms its fused multiply-adds after the code's new shape: on R05's
+    Earth up to 8 halves of the output and 1–3 of the march target at 10⁷, 1.54 × 10⁷ and
+    2.55 × 10⁷ m on high, at 10⁷ and 1.54 × 10⁷ m on low and at 400 km on low (1, 3 and 6
+    sources), 400 km on high at every count, 2.55 × 10⁷ m on low and every 10⁸ m frame
+    byte-identical; on the slab Earth and `EARTH_REFERENCE` 248–264 halves of the march target at
+    400 km on high at each count (W3's 248 alpha halves among them), 1–51 elsewhere, and up to 20
+    halves of the output; and one half of `EARTH_REFERENCE`'s sky view at 10⁸ m (4 sources on high,
+    6 on low). Main's ruling of 2026-10-22: one ulp of the RTX's contraction is not a moved pixel
+    (§8's contraction clause), so these stand, recorded. W4 (the two call sites) moved counts
+    within 4 of these per read-back; W5 had no GPU error. On the RTX the production smoke, every
+    part hidden under both locks, gives with this series what it gives with T8.c's renderer
+    (174d583c's files, the same build otherwise; 2026-10-22 17:46 and 17:53, `rtx-smoke2-part*.log`
+    and `rtx-smoke-base-part*.log`): its 995 check lines are identical, figures and all, but for the
+    nine parts' wall times and two: one twin check's worst moves from 0.970 to 0.972 × 10⁻³
+    (R08.T7's aerial perspective over three sources on four absorbers, still 0 over the bound) and
+    one settle time by 0.1 s. Its 38 failing checks fail alike with both, the RTX's
+    own and not T8.d's: the twins' 10⁻³ bounds, most at texels near 10⁻⁵ and below (R08.T6.b's,
+    T6.f's, T6.g's and T6.i's tables and kernels, T8.a's, T8.b's, T8.c's and T7's), R08.T8.b's
+    far-limb envelopes, R07.T16.f's stroke contrast and R10.T9.b's cascades; for R08.T11, which
+    runs the smoke on both machines.
+  - _One march call site, a SwiftShader constraint_ (main's ruling of 2026-10-22). With T8.c's two
+    `marchRay` call sites (the centre ray, then the nodes' loop) and (b)'s march, SwiftShader's GPU
+    process segfaulted at the kernel's first frame (`exit_code=139`, a write to address 0x18 at the
+    same instruction of `libvk_swiftshader.so` each time), in all of nine runs, at loads from 0.4
+    to 15, with the kernel alone, one atmosphere a page and its frames spaced. The series' march
+    with T8.c's composite crashed and T8.c's march with the series' composite ran clean, so the
+    march was the cause: SwiftShader inlines every call, and the march's steps were emitted twice
+    in one entry point. One call site, the centre ray at j = 0 and then the nodes through the same
+    call, is the same arithmetic and runs clean; `hillaire.test.ts` pins it ("calls the march from
+    one place in the ray-march kernel's entry point"), and `rayMarch.wgsl` says why, so that no
+    later change splits it again. On the RTX it costs 2.1% at 400 km on high (W5's one call site,
+    7.14 ms, against W4's two, 6.99 ms; the two runs' T8.c rows there within 0.1%, and within 0.6%
+    on high elsewhere), 0.9–1.4% at the far cameras, 1.5% on `EARTH_REFERENCE` and 4.4% at 10⁸ m,
+    and it brings a tail to low's p95
+    (deferred findings). Apart from that, T8.c's kernel lost the GPU process once in the scratch
+    harness's back-to-back frames (`exit_code=512`, as once at a load of 31 before T8.d), a harness
+    effect: it ran clean with its frames spaced.
+  - _The static check_ (`hillaire.test.ts`, "the per-frame marches' steps (R08.T8.d)"): no helper
+    the three kernels' steps reach, nor the footprint's helpers in the ray march and the
+    composite, takes or returns an array, or a struct that holds one, by value
+    (`arraysByValueFrom` over the call graph from each kernel's roots); the kernels before T8.d
+    fail it. The ray march's entry point calls the march once (above). Locals are not counted:
+    `curveDepth`'s four-row `ys` (fixed bounds) and the walk's crossings (`MarchWalk`, by pointer,
+    read at each piece's entry) stand (deferred findings).
+  - _The runs._ Hidden, offscreen, under both locks and a cap, in main's quiet windows, with
+    `nvidia-smi` at 100 ms: W1 05:32 (quiet window 14), W2 08:20 (15), W3 11:03 (16), W4 14:46
+    (17, the two call sites) and W5 17:43 (18, the final form, load 1.17, 83 s); the busy P0
+    samples at 1,800–1,995 MHz, at least 99.0% of each run's at 90% or more of 2,115 MHz (W5's
+    99.4%, 50–66 °C), so no row carries the low-clock note; `rtx-w1.log` to `rtx-w5.log` with
+    their `.clocks.csv` in `.git/rm45-scratch/r08-t8d/`. Each variant is its own atmosphere on its
+    own tables, every camera and variant once a round, 10 warm-up and 60 timed rounds, timer full
+    (no row on the 65,536 ns grid).
+  - _The rows_ (W5; R05's Earth; high 1920 × 1080, low 1280 × 720 with the march at ½; T8.c's
+    cameras and Sun, the further sources a second star 40° from the Sun at a tenth of its light and
+    the rest at 25° steps and 10⁻⁶ of it, all on the Sun's absorber curves; median ms, T8.c's
+    kernel → the final form, p95 in the log). Sums are the march's and the composite's: from the
+    band up lever 2 leaves the sky view and the aerial perspective out of both arms (T8.c's own rows
+    carry them, about 1.27–1.31 and 0.19 ms on high).
+
+    | Camera, sources | High: march   | High: composite | High: sum     | Low: march  | Low: sum    |
+    | --------------- | ------------- | --------------- | ------------- | ----------- | ----------- |
+    | 400 km, 1       | 21.66 → 6.86  | 0.37 → 0.28     | 22.03 → 7.14  | 1.81 → 0.77 | 2.01 → 0.92 |
+    | 10⁷ m, 1        | 22.88 → 7.43  | 0.41 → 0.30     | 23.29 → 7.72  | 1.72 → 0.82 | 1.93 → 0.99 |
+    | 1.54 × 10⁷ m, 1 | 17.64 → 6.40  | 0.41 → 0.29     | 18.06 → 6.69  | 1.51 → 0.84 | 1.72 → 1.01 |
+    | 2.55 × 10⁷ m, 1 | 12.07 → 4.72  | 0.40 → 0.26     | 12.47 → 4.99  | 1.24 → 0.76 | 1.44 → 0.91 |
+    | 10⁸ m, 1        | 3.64 → 2.03   | 0.38 → 0.22     | 4.02 → 2.25   | 0.93 → 0.63 | 1.11 → 0.75 |
+    | 400 km, 4 / 3   | 26.81 → 17.23 | 0.50 → 0.45     | 27.31 → 17.68 | 2.25 → 1.44 | 2.49 → 1.65 |
+    | 400 km, 6       | 33.36 → 24.31 | 0.61 → 0.58     | 33.97 → 24.89 | 3.40 → 2.54 | 3.70 → 2.82 |
+    | 10⁸ m, 4 / 3    | 5.65 → 4.29   | 0.48 → 0.38     | 6.13 → 4.67   | 1.50 → 1.18 | 1.71 → 1.34 |
+    | 10⁸ m, 6        | 7.21 → 5.83   | 0.54 → 0.51     | 7.75 → 6.34   | 2.41 → 2.03 | 2.68 → 2.28 |
+
+    High at 400 km, the sum's median / p95, T8.c's kernel → the final form: R05's Earth 22.03 /
+    22.15 → 7.14 / 7.20 at one source, 27.31 → 17.68 / 17.86 at four and 33.97 → 24.89 / 25.17 at
+    six; `EARTH_REFERENCE` 26.79 → 11.07 / 11.20, 38.75 → 27.46 / 28.93 and 50.39 → 38.67 / 43.85;
+    the slab Earth 26.92 → 11.07 / 11.19, 38.08 → 26.68 / 28.29 and 49.12 → 37.54 / 38.64.
+
+  - _What the rest of a step costs_ (W2's ablations of the named form on T8.b's kernels, high from
+    400 km, the march 7.08 ms): with no source the march takes 2.66 ms, about R05's whole march
+    scaled to this frame (1.31–1.40 ms at 1,398 × 793 px); without the light lookup 4.99 ms (the
+    lookup about 2.1), without the multiple-scattering read 6.33 (0.75), without the angle formed
+    at each step 6.88 (0.2). The widening is per-source work, not a defect (§9).
+  - _Bands, recorded_ (§9 ruling 3, acceptance 3; W5, one source unless named):
+    - the 400 km march plus composite against W2's final form: high 7.14 ms against 7.23 (1.2%
+      under, inside the 2%); low 0.92 ms against 0.49 (89% over), T8.c's own work there: its
+      footprint blends low's ground rows from 400 km (s 1.3–1.75) and its composite's test takes
+      0.15 ms, not 0.08;
+    - each far camera against 400 km: on high 7.72 ms at 10⁷ m (8% over, inside §9's estimate of
+      7–9 ms, the footprint's work at the onset band), 6.69 at 1.54 × 10⁷ m, 4.99 at 2.55 × 10⁷ m
+      and 2.25 at 10⁸ m; on low 0.99 at 10⁷ m and 1.01 at 1.54 × 10⁷ m (8% and 10% over), 0.91
+      and 0.75;
+    - low's 400 km sum against §8's 0.6 ms: 0.92 ms median, over (lever 2 took its 0.18 ms; T8.c's
+      march on low, 0.41 → 0.77 ms against W2, stays), its p95 the tail's (deferred findings);
+    - the one-source 400 km sum against §8's 4.0 / 4.5 ms: 7.14 / 7.20 ms, over by 3.1 / 2.7 ms,
+      and 0.6–1.3 ms over §9's estimate after lever 2 and (b) (5.8–6.5 ms): T8.c's added work and
+      the one call site's 2%.
+- **Deferred findings (2026-10-13 rule)** (R08.T8.d).
+  - _The orbit frame against its budget_ (`decision-r08-t8-leans.md` §9). High at 400 km, one
+    source: 7.14 ms median, 7.20 ms p95, against §8's 4.0 / 4.5 ms, a recorded target. With terrain
+    from orbit (about 1.5 ms), Design note 21's 6 ms row is exceeded by about 2.6 ms. The frame's
+    percentiles and its 0.8 T row hold. The widening is per-source work: with no source the march
+    takes about what R05's did. For R12.T10, which replaces the brainstorm's estimates.
+  - _For R08.T8.e: the several sources measured._ From 400 km on high at four sources the sum is
+    27.46 / 28.93 ms on `EARTH_REFERENCE` and 26.68 / 28.29 on the slab Earth, above T8.e's entry's
+    first estimate for `EARTH_REFERENCE` of 18.5–20.7 ms at four, and 17.68 / 17.86 on R05's Earth
+    (W5); each source past the first adds about 5.5 ms to `EARTH_REFERENCE`'s march and 3.5 to
+    R05's Earth's. Two sources
+    after its skips and cap would be about 16.5 ms on `EARTH_REFERENCE`, past its 10.0 ms hold, so
+    T8.e needs its lever 3 and the footprint's nodes as well (main's amendment of §9).
+  - _Absorbing media._ (b) took 27% off R05's Earth's march and 17% off `EARTH_REFERENCE`'s (W3);
+    the media with an absorber stay about 1.55 times R05's Earth at one source (11.07 against
+    7.14 ms), the slab Earth's edges costing nothing beside `EARTH_REFERENCE` (11.07 against
+    11.07 ms). The absorber's per-step light lookups and pressure-weighted columns are the rest;
+    for T8.e's lever 3 and R08.T11.
+  - _Low's p95 on the final form_ (for R08.T8.e, R08.T11 and the UHD 620 pass). With one march
+    call site low's frames have a tail: in W5 R05's Earth at 400 km takes 0.92 ms median and
+    4.99 ms p95 (the slab Earth 1.63 / 7.86, `EARTH_REFERENCE` 1.60 / 7.27), 0.99 / 4.13 at 10⁷ m,
+    1.01 / 3.34 at 1.54 × 10⁷ m and 0.91 / 2.83 at 2.55 × 10⁷ m, while T8.c's kernel in the same
+    rounds is tight (2.01 / 2.06 ms at 400 km) and so was W4's two-call-site form (0.90 / 0.92).
+    W3's one-call-site forms had it too, at three and six sources (sums' p95s of 2.6–23.0 ms
+    against medians of 1.4–5.5 ms). On high R05's Earth's p95s stay within 0.9 ms of their
+    medians; the absorbing media's spread wider with T8.c's kernel too (`EARTH_REFERENCE` at six
+    sources 38.67 / 43.85 ms, T8.c's 50.39 / 61.38). The clocks were
+    steady, so it follows the shape, a non-uniform loop around `marchRay`; the harness kept no
+    per-frame times, so a steady tail is not told from warm-up. For R08.T8.e, which reshapes the
+    march; for R08.T11's quiet run, with per-frame times; and for the UHD 620 pass, where a tail
+    like it matters most.
+  - _The UHD 620_ (§9 ruling 4's ratio, 25–68 times the RTX 3080's time for this work). Low at
+    400 km: 0.92 ms at one source (median), about 23–63 ms on the laptop (§9 expected 12–33 ms
+    after lever 2, before T8.c's low cost was known), and 1.65 ms at three, about 41–112 ms; the
+    tail above, if the laptop shows it, scales the same way. The owner's run decides; low's knobs
+    are R08.T11's.
+  - _Arrays left in locals._ `curveDepth`'s four-row `ys` and `MarchWalk`'s crossings are
+    function-scope arrays the static check does not count (fixed bounds; held by pointer). Neither
+    showed in W1–W3's variants; for T8.e if a profile points there.
 
 - **Deviations in T6.e, as built** (2026-10-13). `tablesCpu.ts`, `oblate.ts` and `hillaire.ts`;
   tests in a new `tablesCpuOblate.test.ts` (inside the acceptance's `view/atmosphere/tablesCpu`

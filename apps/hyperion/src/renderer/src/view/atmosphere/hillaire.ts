@@ -1108,6 +1108,17 @@ function frameTexture(
   });
 }
 
+/**
+ * A frame's sky-view and aerial-perspective dispatches waiting for a reader (R08.T8.d), `null` for
+ * one made already or not deferred.
+ */
+interface UnreadTables {
+  readonly skyView: (() => void) | null;
+  readonly aerial: (() => void) | null;
+}
+
+const NO_UNREAD_TABLES: UnreadTables = { skyView: null, aerial: null };
+
 function createFrameResources(engine: RenderEngine, sizes: TableSizes): FrameResources {
   return {
     skyView: frameTexture(
@@ -1199,6 +1210,12 @@ export class HillaireAtmosphere {
    * medium is set, until the next.
    */
   #drawn: DrawnFrame | null = null;
+  /**
+   * The latest frame's sky-view and aerial-perspective dispatches, left undone where the march
+   * draws every pixel (lever 2 of `decision-r08-t8-leans.md` §8, R08.T8.d): each is made at its
+   * first reader's ask (`#read`), and dropped at the next frame, a new medium or a restore.
+   */
+  #unread: UnreadTables = NO_UNREAD_TABLES;
 
   /**
    * Makes the tables and the per-frame resources for `medium` on `figure`.
@@ -1232,6 +1249,7 @@ export class HillaireAtmosphere {
       this.#frame = createFrameResources(engine, tables);
       this.#arm = null;
       this.#drawn = null;
+      this.#unread = NO_UNREAD_TABLES;
     });
   }
 
@@ -1245,12 +1263,19 @@ export class HillaireAtmosphere {
    * {@link HillaireAtmosphere.drawFrame} built, the target `null` before the first frame, for the
    * smoke page's agreement checks (R05.T12.e, R08.T6.b). Their kernels are presentation-only, so
    * only a tolerance read-back reads them.
+   *
+   * @remarks
+   * From the march band's upper edge up the frame leaves its sky view and aerial perspective
+   * undone until asked (R08.T8.d; {@link HillaireAtmosphere.drawFrame}), and this read asks for
+   * both: it may submit their dispatches, once a frame.
    */
   get frameTables(): {
     readonly skyView: TextureHandle;
     readonly aerial: TextureHandle;
     readonly rayMarch: TextureHandle | null;
   } {
+    this.#read("skyView");
+    this.#read("aerial");
     return {
       skyView: this.#frame.skyView,
       aerial: this.#frame.aerial,
@@ -1264,6 +1289,11 @@ export class HillaireAtmosphere {
    * transmittance tables; on `terrain` (low) `null`, the one deferred composite applying it to the
    * terrain alone. Widens R05's `aerialPerspectiveVolume()`.
    *
+   * @remarks
+   * From the march band's upper edge up the frame makes its volume only when asked (R08.T8.d): the
+   * first call a frame submits its dispatch, so a caller asks each frame before it encodes the pass
+   * that samples the volume.
+   *
    * @throws Error, on the `scene` scope, if the latest frame was not drawn for `view` (the same
    *   position, orientation, field of view and size), or none has been since the frame's resources
    *   were made or the medium was set: a caller's bug, which would read another view's tables,
@@ -1273,18 +1303,39 @@ export class HillaireAtmosphere {
     if (this.#sizes.aerialPerspectiveScope === "terrain") {
       return null;
     }
-    return this.#drawnFor(view).aerial;
+    const drawn = this.#drawnFor(view);
+    this.#read("aerial");
+    return drawn.aerial;
   }
 
   /**
    * The sky-view table {@link HillaireAtmosphere.drawFrame} built for `view` this frame, with what
    * reads it (R08.T9.a), on both settings: for R11's sky reflected in the ocean.
    *
+   * @remarks
+   * From the march band's upper edge up the frame makes its sky view only when asked (R08.T8.d): the
+   * first call a frame submits its dispatch, so a caller asks each frame before it encodes the pass
+   * that samples the table.
+   *
    * @throws Error if the latest frame was not drawn for `view`, as
    *   {@link HillaireAtmosphere.aerialPerspective} does.
    */
   skyView(view: AtmosphereCamera): SkyViewTable {
-    return this.#drawnFor(view).skyView;
+    const drawn = this.#drawnFor(view);
+    this.#read("skyView");
+    return drawn.skyView;
+  }
+
+  /**
+   * Makes the latest frame's `table` if its dispatch waits for a reader (`#unread`), once: each is
+   * submitted when asked for, after the frame's ray march and before any pass that reads it.
+   */
+  #read(table: keyof UnreadTables): void {
+    const dispatch = this.#unread[table];
+    if (dispatch !== null) {
+      this.#unread = { ...this.#unread, [table]: null };
+      dispatch();
+    }
   }
 
   /** The latest frame's publication, if it was drawn for `view`. */
@@ -1313,6 +1364,7 @@ export class HillaireAtmosphere {
    */
   setMedium(medium: AtmosphereMedium, curves: AbsorberCurveSlots = NO_ABSORBER_CURVES): void {
     this.#drawn = null;
+    this.#unread = NO_UNREAD_TABLES;
     this.#tables.setMedium(medium, tableRadiusM(this.#figure), curves, this.#body());
   }
 
@@ -1336,6 +1388,13 @@ export class HillaireAtmosphere {
    * its path to each scattering point and along the view's own path, and its own
    * multiple-scattering layer under a medium with an absorber (`decision-r08-t6b-floor.md` §8).
    *
+   * From the march band's upper edge up (the march's share 1) the composite reads neither the sky
+   * view nor the aerial perspective, so the frame dispatches the ray march alone and leaves the two
+   * tables to a reader that asks this frame ({@link HillaireAtmosphere.skyView},
+   * {@link HillaireAtmosphere.aerialPerspective}, {@link HillaireAtmosphere.frameTables}): lever 2
+   * of `decision-r08-t8-leans.md` §8, R08.T8.d. The next frame, a new medium, a restore or
+   * {@link HillaireAtmosphere.dispose} drops what is left unread.
+   *
    * @param suns - The drawn sources, at most {@link MAX_SKY_SOURCES}: `sources.ts`'s `skySources`
    *   for a body, or a caller's own; none draws a sky of nothing but what lies behind it.
    * @throws RangeError as {@link frameSourcesOf}: too many sources, a light slot the medium's
@@ -1354,6 +1413,7 @@ export class HillaireAtmosphere {
       view,
       suns,
       scene,
+      true,
     );
     this.#drawn = this.#published(view, suns, scene, inputs, curvature);
     return {
@@ -1419,16 +1479,19 @@ export class HillaireAtmosphere {
       arm.rayMarchSize = view.viewport;
     }
     const outputs = { skyView: arm.skyView, aerial: arm.aerial, rayMarch: arm.rayMarch };
-    this.#dispatchFrame(arm.kernels, outputs, view, suns, scene);
+    this.#dispatchFrame(arm.kernels, outputs, view, suns, scene, false);
     return outputs;
   }
 
   /**
-   * Stops following the engine's restores, and releases the kernel arm's targets if it drew one
-   * (the smoke's, R08.T6.g). The frame's own textures are left to the engine, as before.
+   * Stops following the engine's restores, drops the latest frame's publication and any table it
+   * left unread (R08.T8.d), and releases the kernel arm's targets if it drew one (the smoke's,
+   * R08.T6.g). The frame's own textures are left to the engine, as before.
    */
   dispose(): void {
     this.#offRestored();
+    this.#unread = NO_UNREAD_TABLES;
+    this.#drawn = null;
     this.#tables.dispose();
     const arm = this.#arm;
     if (arm !== null) {
@@ -1511,6 +1574,7 @@ export class HillaireAtmosphere {
     view: AtmosphereCamera,
     suns: ReadonlyArray<SunState>,
     scene: AtmosphereScene,
+    deferUnread: boolean,
   ): { readonly inputs: AtmosphereInputs; readonly curvature: ViewCurvature } {
     const engine = this.#engine;
     const sizes = this.#sizes;
@@ -1535,26 +1599,43 @@ export class HillaireAtmosphere {
       },
     };
     const viewUniforms = this.#viewBlock();
-    engine.dispatch(
-      kernels.skyView,
-      {
-        ...common,
-        uniforms: { medium: perFrameMedium, view: viewUniforms, layerEdges: tables.layerEdges },
-        storage: { skyViewOut: { texture: outputs.skyView, level: 0 } },
-      },
-      groups8(sizes.skyView.widthTexels, sizes.skyView.heightTexels),
-      "atmosphere view",
-    );
-    engine.dispatch(
-      kernels.aerial,
-      {
-        ...common,
-        uniforms: { medium: perFrameMedium, view: viewUniforms },
-        storage: { aerialOut: { texture: outputs.aerial, level: 0 } },
-      },
-      groups8(sizes.aerialPerspective.widthTexels, sizes.aerialPerspective.heightTexels),
-      "atmosphere view",
-    );
+    const skyView = (): void => {
+      engine.dispatch(
+        kernels.skyView,
+        {
+          ...common,
+          uniforms: { medium: perFrameMedium, view: viewUniforms, layerEdges: tables.layerEdges },
+          storage: { skyViewOut: { texture: outputs.skyView, level: 0 } },
+        },
+        groups8(sizes.skyView.widthTexels, sizes.skyView.heightTexels),
+        "atmosphere view",
+      );
+    };
+    const aerial = (): void => {
+      engine.dispatch(
+        kernels.aerial,
+        {
+          ...common,
+          uniforms: { medium: perFrameMedium, view: viewUniforms },
+          storage: { aerialOut: { texture: outputs.aerial, level: 0 } },
+        },
+        groups8(sizes.aerialPerspective.widthTexels, sizes.aerialPerspective.heightTexels),
+        "atmosphere view",
+      );
+    };
+    // From the march band's upper edge up the composite reads neither the sky view nor the aerial
+    // perspective (`composite.wgsl`: both only where the march's share, `view.exact.w` in f32 as
+    // read here, is under 1), so each waits for a reader that asks, and none moves a pixel (lever 2
+    // of `decision-r08-t8-leans.md` §8, R08.T8.d). The kernel arm makes all three, for its
+    // read-backs, and leaves the frame's own waiting.
+    const marchesAll = deferUnread && (this.#uniforms["exact"]?.[3] ?? 0) >= 1;
+    if (deferUnread) {
+      this.#unread = marchesAll ? { skyView, aerial } : NO_UNREAD_TABLES;
+    }
+    if (!marchesAll) {
+      skyView();
+      aerial();
+    }
     engine.dispatch(
       kernels.rayMarch,
       {
