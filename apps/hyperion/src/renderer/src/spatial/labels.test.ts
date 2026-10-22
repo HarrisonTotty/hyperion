@@ -1100,6 +1100,53 @@ describe("placeLabels on the compact chart's 256 px stage (plan 12, P12.T11.e)",
     },
   );
 
+  it.each([
+    ["top", -2],
+    ["top", -13],
+    ["bottom", 263],
+    ["bottom", 275],
+  ] as const)(
+    "draws no label for a selection just past the %s edge, at %s px, whose held label would stand within 0.25 rem of what is drawn of its bracket",
+    (_, yPx) => {
+      // At (128, -2) the held label would stand from 4 to 142.88 px across and 4 to 21.5 px down,
+      // over the bracket's box, from 114 to 142 px across and -16 to 12 px down, and the symbol;
+      // at -13 and 275 the bracket's box still reaches 1 px into the view, 3 px from the label.
+      expect(
+        placeLabels(
+          [mark("s", 1, DESIGNATION)],
+          [anchor("s", 128, yPx, RADIUS_PX)],
+          STAGE,
+          AT_ONE,
+          null,
+          { pinnedIds: ["s"] },
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["top", -14, 4],
+    ["top", -15, 4],
+    ["bottom", 276, 262 - 4 - 17.5],
+    ["bottom", 277, 262 - 4 - 17.5],
+  ] as const)(
+    "holds the selection's label 0.25 rem inside the %s edge once its bracket lies wholly outside the view, at %s px",
+    (_, yPx, topPx) => {
+      // The bracket reaches 14 px from the mark's centre, so 14 px past the edge its box meets the
+      // view's edge, the held label 0.25 rem clear of it, and 15 px past it 5 px clear.
+      const placed = placeLabels(
+        [mark("s", 1, DESIGNATION)],
+        [anchor("s", 128, yPx, RADIUS_PX)],
+        STAGE,
+        AT_ONE,
+        null,
+        { pinnedIds: ["s"] },
+      );
+
+      expect(placed.map((label) => [label.leftPx, label.topPx])).toEqual([[4, topPx]]);
+    },
+  );
+
   it("keeps the selection's label on the right 2 rem from the left edge, as before", () => {
     const [label] = placeLabels(
       [mark("s", 1, DESIGNATION)],

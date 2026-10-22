@@ -195,10 +195,10 @@ function labelSizePx(
  *
  * @remarks
  * Held inside on neither side, the box runs back across its own mark and bracket.
- * {@link placeLabels} draws it only for a pinned mark out of the view, so that an off-view
- * selection's name stays on show, and never for a mark in view (plan 12, P12.T11.e;
- * {@link besideItsMark}). The hold at the top and bottom edges leaves the label beside its mark,
- * and stands.
+ * {@link placeLabels} draws it only for a pinned mark out of the view whose bracket it stands
+ * 0.25 rem clear of, so that an off-view selection's name stays on show, and never for a mark in
+ * view (plan 12, P12.T11.e; {@link besideItsMark}, {@link clearOfItsBracket}). The hold at the top
+ * and bottom edges leaves the label beside its mark, and stands.
  *
  * @param side - The side to stand on, as a label made by the selection takes its other side to
  *   yield to the destination's (addendum C, C1); the right, flipped at the edge, when absent.
@@ -246,6 +246,31 @@ function besideItsMark(
   const nearEdgePx = label.side === "right" ? label.leftPx : label.leftPx + label.widthPx;
   const placePx = label.side === "right" ? anchor.xPx + offsetPx : anchor.xPx - offsetPx;
   return Math.abs(nearEdgePx - placePx) < 1e-9;
+}
+
+/**
+ * Whether a label held inside the view stands at least {@link LABEL_TEXT_CLEARANCE_REM} clear of
+ * its mark's bracket's box, to the outer edge of its line, as `paint` draws it.
+ *
+ * @remarks
+ * The canvas draws every mark and the selection's bracket wherever they stand, so a mark whose
+ * centre lies just past the view's top or bottom edge still shows part of both. A label held
+ * inside the view about a mark out of it is drawn only where it stands this far clear of the
+ * bracket, and never where it would run across what is drawn of them (plan 12, P12.T11.e; main's
+ * answer on #80). Where the held label spans the bracket across, as a label with room on neither
+ * side does, that is once the bracket lies wholly outside the view.
+ */
+function clearOfItsBracket(
+  label: BoxPx,
+  anchor: Anchor,
+  viewport: Viewport,
+  reticles: ReticleStrokesCss,
+): boolean {
+  const bracket = squareBoxPx(
+    anchor,
+    bracketDrawnPx(anchor, viewport.remPx, reticles) + reticles.markStrokePx / 2,
+  );
+  return boxGapPx(label, bracket) > LABEL_TEXT_CLEARANCE_REM * viewport.remPx - 1e-9;
 }
 
 /** The destination's chevron set's apex distance about its mark, as `paint` draws it, CSS px. */
@@ -369,8 +394,8 @@ export interface LabelSurroundings {
   /**
    * Marks whose labels are never dropped for a neighbour, furniture, other text or a mark out of
    * view: the selection and the destination. The selection's still yields to the destination's,
-   * keeps off the observer's eye (`observer`) and, while its mark is in view, is never held back
-   * across it (plan 12, P12.T11.e).
+   * keeps off the observer's eye (`observer`) and is never held back across its own mark or
+   * bracket (plan 12, P12.T11.e).
    */
   readonly pinnedIds?: ReadonlyArray<string>;
   /** Furniture over the view that a label must not cover: the core arrow's mark. */
@@ -405,7 +430,9 @@ export interface LabelSurroundings {
  * its own mark and bracket, so while its mark is in view it is not drawn, the selection's too
  * (below): the bracket, the readout and the list still name the mark (plan 12, P12.T11.e). Only the
  * label of a pinned mark out of the view, the selection's, is still moved 0.25 rem inside it (the
- * orchestrator's ruling 149.1), so that its name stays on show. One whose box overlaps furniture,
+ * orchestrator's ruling 149.1), so that its name stays on show, and only where it then stands
+ * 0.25 rem clear of the mark's bracket, which the canvas draws in part while the mark's centre is
+ * just past the top or bottom edge; else it is not drawn either. One whose box overlaps furniture,
  * or stands within 0.5 rem of a label already placed or of other text over the view (D4), or whose
  * mark is out of view, is dropped. The selection's label is never dropped for those (`pinnedIds`),
  * but yields to the destination's and keeps off the observer's eye (below).
@@ -426,14 +453,14 @@ export interface LabelSurroundings {
  * R07.T16.j): against the other marks and against the labels `chooseLabels` would choose with no
  * selection (`unselectedIds`), at their places on their lines, so that selecting never moves it;
  * of those, only the labels a chart with no selection draws, none whose mark is out of view and
- * none that would be held back across its own mark (P12.T11.e). The selection's label comes next.
- * Where it stands within 0.5 rem of the destination's label or 0.25 rem of its chevron set, or
- * would be held back across its own mark, it takes its other side, and where that is not clear
- * either, or not beside its mark, it is not drawn: the bracket, the readout and the list still name
- * the selection. The rest follow in order. A lesser label within 0.5 rem of the destination's, or
- * within 0.25 rem of its chevron set, is dropped, so that no other name stands nearer the
- * destination's than its own, or runs through its chevrons. The labels are returned in the order
- * given.
+ * none that would be held back across its own mark or bracket (P12.T11.e). The selection's label
+ * comes next. Where it stands within 0.5 rem of the destination's label or 0.25 rem of its chevron
+ * set, or would be held back across its own mark or bracket, it takes its other side, and where
+ * that is not clear either, or not beside its mark, it is not drawn: the bracket, the readout and
+ * the list still name the selection. The rest follow in order. A lesser label within 0.5 rem of
+ * the destination's, or within 0.25 rem of its chevron set, is dropped, so that no other name
+ * stands nearer the destination's than its own, or runs through its chevrons. The labels are
+ * returned in the order given.
  *
  * In observed mode the observer's eye (`observer`) is furniture to every label, the selection's
  * too (plan 12, P12.T11.c): a label over it is dropped, as one over the core arrow is, and the
@@ -472,13 +499,15 @@ export function placeLabels(
     return anchor !== undefined && inView(anchor, viewport);
   };
   // Whether a label on its mark's line may be drawn where it stands: beside its mark, or held
-  // inside the view for a mark out of it, as a pinned one's is; never held back across its own
-  // mark in view (P12.T11.e).
+  // inside the view for a mark out of it, as a pinned one's is, 0.25 rem clear of its bracket;
+  // never held back across its own mark or bracket (P12.T11.e).
   const inPlace = (label: PlacedLabel, anchor: Anchor): boolean =>
-    !inView(anchor, viewport) || besideItsMark(label, anchor, viewport, reticles);
-  // Every other chosen label that can be drawn, at its place on its line: beside its mark in view,
-  // or held inside the view for a pinned mark out of it. Another mark out of view has none, and a
-  // label held back across its own mark in view is not drawn, so the destination's avoids neither.
+    besideItsMark(label, anchor, viewport, reticles) ||
+    (!inView(anchor, viewport) && clearOfItsBracket(label, anchor, viewport, reticles));
+  // Every other chosen label that can be drawn, at its place on its line: beside its mark, or held
+  // inside the view for a pinned mark out of it, 0.25 rem clear of its bracket. Another mark out of
+  // view has none, and a label held back across its own mark or bracket is not drawn, so the
+  // destination's avoids neither.
   const lineLabels = new Map<string, PlacedLabel>();
   for (const mark of chosen) {
     const anchor = anchorOf.get(mark.id);
@@ -539,7 +568,7 @@ export function placeLabels(
   // Whether the selection's label must leave its place: for the destination's, or off the eye.
   const yields = (label: BoxPx): boolean => nearDestination(label) || coversEye(label);
   // The selection's label, which yields to the destination's and keeps off the observer's eye, and
-  // is never held back across its own mark in view: its other side, or none.
+  // is never held back across its own mark or bracket: its other side, or none.
   for (const mark of chosen) {
     const anchor = anchorOf.get(mark.id);
     if (anchor === undefined || mark.id === destinationId || !pinnedIds.includes(mark.id)) {
