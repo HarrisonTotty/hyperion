@@ -419,9 +419,10 @@ function coldTrapsKnown(condensates: Modelled<ReadonlyArray<SurfaceCondensate>>)
  * After the air's rows come the ground's, in this order (P14.T43.g, decision-ux-23-surface-rows):
  * the crust's rows ({@link crustRows}), `CRUST`, `MANTLE REDOX`, the mantle's class and not the
  * ground's, which may be more oxidised, and `MELT COVER`, the crust's melt area; then the cover by
- * substance, `LIQUID COVER` and `ICE COVER` ({@link coverShown}), read from every server, as the
- * decision rules, though a server before P14.T54.a, which models no condensates, sends its water
- * alone (plan 14, P14.T43.g's deferred findings); and, on an `airless` surface,
+ * substance, `LIQUID COVER` and `ICE COVER` ({@link coverShown}), each `NOT YET MODELLED` where the
+ * condensates are not modelled, as every server before P14.T54.a sends them, whose cover lists hold
+ * its water alone, so that a lake or an ice the generator does not compute is never read as none
+ * (the guide's Data states; plan 14, P14.T43.g's record); and, on an `airless` surface,
  * `COLD TRAPS NOT YET MODELLED` unless a condensate carries its trapped share
  * ({@link coldTrapsKnown}), as T54.a labels an airless body's cold traps, so that its `ICE COVER` is
  * never read as all the ice it holds.
@@ -437,6 +438,10 @@ function surfaceRows(surface: BodySurface): ReactNode {
   // Ruled on the empty gases, not on the pressure (decision-backlog-2 §2.4): only a vapour computed
   // as none lets the volatile air's zero read as `NONE` over a melt.
   const airMissing = vapour !== null && vapour.emptyAirMissing && surface.gases.length === 0;
+  // A server that models no condensates, as every one before P14.T54.a, sends its water alone in
+  // the cover's lists, so they are not the whole cover and never read as it.
+  const coverModelled = surface.condensates.kind !== "not_modelled";
+  const notModelled = value(sectionStateLabel("not_modelled"));
   return (
     <>
       <ReadoutRow label="SURFACE" shown={value(surfaceStateLabel(surface.state))} wide />
@@ -456,16 +461,24 @@ function surfaceRows(surface: BodySurface): ReactNode {
         wide
       />
       {surface.state === "airless" ? (
-        <ReadoutRow label="EXOSPHERE" shown={value(sectionStateLabel("not_modelled"))} wide />
+        <ReadoutRow label="EXOSPHERE" shown={notModelled} wide />
       ) : null}
       {vapour?.notModelledRow === true ? (
-        <ReadoutRow label="SILICATE VAPOUR" shown={value(sectionStateLabel("not_modelled"))} wide />
+        <ReadoutRow label="SILICATE VAPOUR" shown={notModelled} wide />
       ) : null}
       {crustRows(surface.crust)}
-      <ReadoutRow label="LIQUID COVER" shown={coverShown(surface.surfaceLiquids)} wide />
-      <ReadoutRow label="ICE COVER" shown={coverShown(surface.surfaceIces)} wide />
+      <ReadoutRow
+        label="LIQUID COVER"
+        shown={coverModelled ? coverShown(surface.surfaceLiquids) : notModelled}
+        wide
+      />
+      <ReadoutRow
+        label="ICE COVER"
+        shown={coverModelled ? coverShown(surface.surfaceIces) : notModelled}
+        wide
+      />
       {surface.state === "airless" && !coldTrapsKnown(surface.condensates) ? (
-        <ReadoutRow label="COLD TRAPS" shown={value(sectionStateLabel("not_modelled"))} wide />
+        <ReadoutRow label="COLD TRAPS" shown={notModelled} wide />
       ) : null}
     </>
   );
