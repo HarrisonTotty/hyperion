@@ -153,8 +153,9 @@ export interface TableSizes {
    * The ray march's count scaled by each segment's optical depth (plan R08, R08.T8.e; lever 3 of
    * `decision-r08-t8-leans.md` §8, §9's Ruling 2, item 3; `marchSteps.ts`'s
    * {@link MarchDepthSteps} and `marchSamplesOf`): at most {@link TableSizes.rayMarchSamples}, the
-   * bare ground down to the floors R05.T12.e's gate sets, the sky and drawn surfaces at the setting's
-   * count; `null` where every segment takes the setting's count.
+   * bare ground down to the floors R05.T12.e's gate sets and a thin sky segment at its own count
+   * (§10, Ruling 4, item 2), other sky segments and drawn surfaces at the setting's count; `null`
+   * where every segment takes the setting's count.
    */
   readonly marchDepthSteps: MarchDepthSteps | null;
 }
@@ -256,11 +257,12 @@ export function marchWeightOf(heightStarM: number, topHeightM: number, band: Mar
  * High's march scales the bare ground's count by its optical depth since R08.T8.e (lever 3 of
  * `decision-r08-t8-leans.md` §8, §9's Ruling 2, item 3; {@link TableSizes.marchDepthSteps}): the
  * bare ground takes 20 steps, 4 more for each of the medium's march edges, climbing back to 36 in
- * even steps from a green optical depth of 2 to 8; the sky and a drawn surface keep 36 (12 steps on
- * a thin sky broke the far limb's flicker and the band's seam, `marchSteps.ts`'s
- * `MarchDepthSteps`). R05.T12.e's gate holds every ray within its tolerance at one source and at six
- * on R05's Earth, the measured Earth and the slab Earth, the slab's named misses unmoved. Low keeps
- * its 16.
+ * even steps from a green optical depth of 2 to 8; a sky segment whose green optical depth, summed
+ * from its lowest point along each side, is under 0.05 takes 28 (§10's floor, searched from 16 up:
+ * under 28 the band's last-light window broke, and 12 broke the far limb's flicker and the band's
+ * seam; `marchSteps.ts`'s `MarchDepthSteps`); a drawn surface keeps 36. R05.T12.e's gate holds
+ * every ray within its tolerance at one source and at six on R05's Earth, the measured Earth and
+ * the slab Earth, the slab's named misses unmoved. Low keeps its 16.
  */
 export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
   high: {
@@ -280,6 +282,7 @@ export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
       groundFloor: 20,
       groundFloorPerEdge: 4,
       groundRampDepths: [2, 8],
+      thinSky: { samples: 28, depthG: 0.05 },
     },
   },
   low: {
@@ -833,6 +836,7 @@ const VIEW_MEMBERS = [
   "exact",
   "curvature",
   "marchGround",
+  "marchSky",
   ...SOURCE_MEMBERS,
 ] as const;
 
@@ -1921,6 +1925,10 @@ export class HillaireAtmosphere {
             ground.groundRampDepths[1],
           ],
     );
+    // A thin sky segment's count and the depth under which it takes it (R08.T8.e, lever 3), a
+    // count of 0 where every sky segment takes the setting's.
+    const thinSky = ground?.thinSky ?? null;
+    set("marchSky", thinSky === null ? [0, 0, 0, 0] : [thinSky.samples, thinSky.depthG, 0, 0]);
     // The composite's own: the atmosphere's height, formed in f64 (R08.T6.g), how many of the
     // medium's terms are absorbers, whose columns its transmittance to space reads (R08.T6.c), and
     // its line slots, whose pressure channels the read takes (R08.T4.d).

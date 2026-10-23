@@ -240,6 +240,9 @@ describe("the far limb swept across a texel (R08.T8.c)", () => {
   // tall), where the centre ray's falls to 0. The Saturn-class figure from 10⁸ m (s 0.96, w_L 0.91)
   // holds within 0.8% with the centre ray alone too; since R08.T8.e's count on the bare ground (its
   // face in the footprint, high) 0.76% drawn and 0.81% centre, from 0.75% and 0.79% (2026-10-22).
+  // Its thin sky at 28 steps (2026-10-23) moves the drawn worst on high from 10⁸ m to 1.35% on
+  // R05's Earth and 2.39% on the measured one (1.12% and 1.99%), and from 10⁹ m on the
+  // Saturn-class figure to 2.31% (2.48%).
   it("records each place's worst spread and least share, drawn and of the centre ray alone", () => {
     const record = Object.fromEntries(
       [...sweeps.entries()].flatMap(([key, columns]) => {
@@ -260,10 +263,10 @@ describe("the far limb swept across a texel (R08.T8.c)", () => {
     );
     expect(record).toEqual(
       asRecorded({
-        "R05's Earth, 10⁸ m, high, centre, least": 0.20071,
-        "R05's Earth, 10⁸ m, high, centre, worst": 0.85507,
-        "R05's Earth, 10⁸ m, high, drawn, least": 0.98908,
-        "R05's Earth, 10⁸ m, high, drawn, worst": 0.01118,
+        "R05's Earth, 10⁸ m, high, centre, least": 0.19678,
+        "R05's Earth, 10⁸ m, high, centre, worst": 0.85497,
+        "R05's Earth, 10⁸ m, high, drawn, least": 0.98851,
+        "R05's Earth, 10⁸ m, high, drawn, worst": 0.01349,
         "R05's Earth, 10⁸ m, high, drawn, worst on the limb": 0.0546,
         "R05's Earth, 10⁸ m, low, centre, least": 0,
         "R05's Earth, 10⁸ m, low, centre, worst": 4.60316,
@@ -291,9 +294,9 @@ describe("the far limb swept across a texel (R08.T8.c)", () => {
         "Saturn-class, 10⁸ m, low, drawn, worst": 0.02556,
         "Saturn-class, 10⁸ m, low, drawn, worst on the limb": 0.00505,
         "Saturn-class, 10⁹ m, high, centre, least": 0.02369,
-        "Saturn-class, 10⁹ m, high, centre, worst": 2.05894,
-        "Saturn-class, 10⁹ m, high, drawn, least": 0.97523,
-        "Saturn-class, 10⁹ m, high, drawn, worst": 0.02477,
+        "Saturn-class, 10⁹ m, high, centre, worst": 2.0617,
+        "Saturn-class, 10⁹ m, high, drawn, least": 0.97685,
+        "Saturn-class, 10⁹ m, high, drawn, worst": 0.02315,
         "Saturn-class, 10⁹ m, high, drawn, worst on the limb": 0.09196,
         "Saturn-class, 10⁹ m, low, centre, least": 0,
         "Saturn-class, 10⁹ m, low, centre, worst": 6.31948,
@@ -301,9 +304,9 @@ describe("the far limb swept across a texel (R08.T8.c)", () => {
         "Saturn-class, 10⁹ m, low, drawn, worst": 0.02731,
         "Saturn-class, 10⁹ m, low, drawn, worst on the limb": 0.09713,
         "the measured Earth, 10⁸ m, high, centre, least": 0.10438,
-        "the measured Earth, 10⁸ m, high, centre, worst": 1.33958,
-        "the measured Earth, 10⁸ m, high, drawn, least": 0.98008,
-        "the measured Earth, 10⁸ m, high, drawn, worst": 0.01992,
+        "the measured Earth, 10⁸ m, high, centre, worst": 1.34023,
+        "the measured Earth, 10⁸ m, high, drawn, least": 0.97606,
+        "the measured Earth, 10⁸ m, high, drawn, worst": 0.02394,
         "the measured Earth, 10⁸ m, high, drawn, worst on the limb": 0.03496,
         "the measured Earth, 10⁸ m, low, centre, least": 0,
         "the measured Earth, 10⁸ m, low, centre, worst": 5.78242,

@@ -6,8 +6,8 @@
  * light, and the gate's other sky families from cameras at or above each setting's march band's
  * lower edge, which the ray march draws there, marched as the kernel marches a sky pixel (nothing
  * drawn: its two-sided segments under the sun-aware warp, its one-sided ones about the lowest
- * point), at the setting's march count, the bare ground's scaled since R08.T8.e by its optical depth
- * as the kernel scales it (`TableSizes`' `marchDepthSteps`, high's; `atmosphereGate.ts`'s
+ * point), at the setting's march count, the bare ground's and the thin sky's scaled since R08.T8.e by
+ * their optical depth as the kernel scales it (`TableSizes`' `marchDepthSteps`, high's; `atmosphereGate.ts`'s
  * `gateMarchSamples`); the references R05.T12.e's placed steps. The floor is each kernel's family
  * group's brightest reference over the setting's rays.
  *
@@ -135,7 +135,7 @@ const marchedAsSky = (ray: GateRay): boolean => kernelOf(ray) === "skyView" || s
  * sun-aware warp by its first source, the ray's sun, and a drawn surface's camera side toward the
  * camera), or even steps, each cut at the medium's layer edges as the kernels cut them; the gate's
  * lit ground through the ray's transmittance, each source's light on it. Under the kernel's rule the
- * bare ground's count is scaled by its optical depth where the scheme gives a rule (R08.T8.e;
+ * bare ground's and the thin sky's count is scaled by its optical depth where the scheme gives a rule (R08.T8.e;
  * `gateMarchSamples`), read through the twin's own transmittance.
  */
 function pixelOf(medium: AtmosphereMedium, sources: TwinSources, count: SourceCount) {
@@ -203,7 +203,7 @@ export function raysOf(setting: QualitySetting): GateRay[] {
 
 /**
  * The setting's counts as the ray march takes them: its march count for every ray here, the bare
- * ground's scaled by its optical depth under the setting's rule (R08.T8.e).
+ * ground's and the thin sky's scaled by their optical depth under the setting's rule (R08.T8.e).
  */
 function marchScheme(setting: QualitySetting): Scheme {
   const scheme = setting === "high" ? HIGH : LOW;

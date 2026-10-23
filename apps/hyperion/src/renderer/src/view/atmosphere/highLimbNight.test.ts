@@ -117,8 +117,8 @@ type Kernel = "sky view" | "march";
  * A ray's pixel through the twin of `medium`, as `tablesCpu.test.ts`'s `twinPixel` and
  * `marchGate.test.ts`'s `pixelOf` take it: the references' R05.T12.e placement, and the kernel's
  * for the schemes, the sky view's V1 (the camera side toward the camera) or the ray march's sky
- * (the sun-aware warp), each cut at the medium's layer edges, the ray march's count on the bare
- * ground scaled by its optical depth where its scheme gives a rule (R08.T8.e; these sky rays keep
+ * (the sun-aware warp), each cut at the medium's layer edges, the ray march's count scaled by the
+ * segment's optical depth where its scheme gives a rule (R08.T8.e; these thick sky rays keep
  * theirs).
  *
  * @throws Error for even steps, which no scheme here takes.
@@ -161,7 +161,7 @@ function pixelOf(medium: AtmosphereMedium, sources: TwinSources, kernel: Kernel)
 
 /**
  * A setting's counts as the ray march takes them: its march count for every ray here, under the
- * setting's rule for the bare ground (R08.T8.e).
+ * setting's rule by optical depth (R08.T8.e).
  */
 const marchScheme = (scheme: Scheme): Scheme => ({
   ...scheme,

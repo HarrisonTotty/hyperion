@@ -1127,6 +1127,9 @@ describe("the ray march across the horizontal from inside the band (R08.T8)", ()
   // even-stepped ray under the horizontal erred by 47.5% and the one over it by 3.2%; the warp puts
   // that ray's steps where the light is, at the chord's start, as the ray over it. From 1 m under
   // the top the march is its reference's, its step the sky's own (11.2% at ±10⁻⁴, 93.3% at ±10⁻³).
+  // Since R08.T8.e's thin sky at 28 steps (2026-10-23) the quadrature's own step on high is 0.26%
+  // from 40 km and 0.06% from 50 km (0.05% and 0.04% at 36), where a thin ray up meets a thick one
+  // down.
   it("records the march's step across the horizontal, and the quadrature's own part of it", () => {
     const figures = Object.fromEntries(
       QUALITY_SETTINGS.flatMap((setting) =>
@@ -1150,10 +1153,10 @@ describe("the ray march across the horizontal from inside the band (R08.T8)", ()
     expect(figures).toEqual({
       "high, 30000 m, ±0.0001 rad": recorded(0.00444, 0.00056),
       "high, 30000 m, ±0.001 rad": recorded(0.03984, 0.0008),
-      "high, 40000 m, ±0.0001 rad": recorded(0.00486, 0.00054),
-      "high, 40000 m, ±0.001 rad": recorded(0.04345, 0.00055),
-      "high, 50000 m, ±0.0001 rad": recorded(0.00477, 0.00037),
-      "high, 50000 m, ±0.001 rad": recorded(0.04359, 0.00037),
+      "high, 40000 m, ±0.0001 rad": recorded(0.00504, 0.00258),
+      "high, 40000 m, ±0.001 rad": recorded(0.04362, 0.00263),
+      "high, 50000 m, ±0.0001 rad": recorded(0.00499, 0.00059),
+      "high, 50000 m, ±0.001 rad": recorded(0.04381, 0.00059),
       "high, 99999 m, ±0.0001 rad": recorded(0.11231, 0),
       "high, 99999 m, ±0.001 rad": recorded(0.93284, 0),
       "low, 20000 m, ±0.0001 rad": recorded(0.00692, 0.00286),
@@ -1317,16 +1320,19 @@ const WINDOW_MEDIA: ReadonlyArray<{
   {
     name: "R05's Earth",
     twinOf: earthTwin,
+    // Since R08.T8.e's thin sky at 28 steps (2026-10-23) the seam from 40 km is 0.29 codes on high
+    // (0.06 at 36) and the window from 80 km 1.26 codes (1.21); at 24 steps the window from 99.999 km
+    // stood at 2.27 codes, which is why the floor is 28 (`marchSteps.ts`'s `MarchDepthSteps`).
     // The ruling's probe (§5.4) had the warp's worst at 1.7 codes on high and 12.2 on low over a
     // finer sweep of suns from 1.5° under to 2.5° over the visible horizon; §4's even steps were off
     // by 45–124 codes (63–97%) here, under a seam of 2–36 codes.
     record: {
       "high, 30000 m": windowRecorded(0.11961, 0.88884, 0.02034),
-      "high, 40000 m": windowRecorded(0.06393, 1.09378, 0.02443),
-      "high, 50000 m": windowRecorded(0.11714, 1.22619, 0.02659),
-      "high, 60000 m": windowRecorded(0.10593, 1.203, 0.02515),
-      "high, 80000 m": windowRecorded(0.13953, 1.21127, 0.02479),
-      "high, 95000 m": windowRecorded(0.21545, 1.67771, 0.03425),
+      "high, 40000 m": windowRecorded(0.28683, 1.09378, 0.02443),
+      "high, 50000 m": windowRecorded(0.13172, 1.22619, 0.02659),
+      "high, 60000 m": windowRecorded(0.07402, 1.203, 0.02515),
+      "high, 80000 m": windowRecorded(0.08881, 1.25961, 0.02561),
+      "high, 95000 m": windowRecorded(0.09302, 1.67771, 0.03425),
       "high, 99999 m": windowRecorded(0.00112, 1.5817, 0.03453),
       "low, 25000 m": windowRecorded(0.4684, 5.56011, 0.12738),
       "low, 30000 m": windowRecorded(0.26533, 7.34617, 0.1599),
@@ -1345,11 +1351,11 @@ const WINDOW_MEDIA: ReadonlyArray<{
     // off by 26–91 codes (§5.3).
     record: {
       "high, 30000 m": windowRecorded(0.09985, 0.8803, 0.02294),
-      "high, 40000 m": windowRecorded(0.0882, 1.004, 0.0263),
-      "high, 50000 m": windowRecorded(0.09524, 1.04099, 0.02761),
+      "high, 40000 m": windowRecorded(0.22324, 1.004, 0.0263),
+      "high, 50000 m": windowRecorded(0.14154, 1.04099, 0.02761),
       "high, 60000 m": windowRecorded(0.07771, 1.0115, 0.02492),
-      "high, 80000 m": windowRecorded(0.09977, 1.18896, 0.03086),
-      "high, 95000 m": windowRecorded(0.1267, 1.32125, 0.04389),
+      "high, 80000 m": windowRecorded(0.06082, 1.18896, 0.03086),
+      "high, 95000 m": windowRecorded(0.04481, 1.32125, 0.04389),
       "high, 99999 m": windowRecorded(0.0004, 1.47518, 0.04648),
       "low, 25000 m": windowRecorded(0.10405, 4.32373, 0.12171),
       "low, 30000 m": windowRecorded(0.10137, 6.43979, 0.16593),

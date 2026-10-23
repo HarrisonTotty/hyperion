@@ -3174,7 +3174,8 @@ export function rayMarchRayAlongTwin(
 
 /**
  * The ray march's settings: `TableSizes`' scale, steps, reach and march band (R08.T8), and its
- * count by the bare ground's optical depth (R08.T8.e), `null` for the setting's count everywhere.
+ * count by a segment's optical depth, the bare ground's and a thin sky's (R08.T8.e), `null` for the
+ * setting's count everywhere.
  */
 export type RayMarchSettings = Pick<
   TableSizes,
@@ -3187,9 +3188,10 @@ export type RayMarchSettings = Pick<
  * seen from above lit by the sun, and (0, 0, 0, 1) where the kernel marches nothing (`null`), its
  * steps as the kernel places them (a two-sided sky segment's under the sun-aware warp since R08.T8), cut at the
  * medium's layer edges on their shell quadrics ({@link piecedSteps}, R08.T6.i), and since R08.T8.e
- * on the bare ground as many as its optical depth asks under the settings' `marchDepthSteps`
- * (`marchSteps.ts`'s `marchSamplesOf`; the light's from its ground point along −d), the sky and a
- * drawn surface the setting's count. The smoke marches a texel's ray
+ * on the bare ground and on a thin sky as many as its optical depth asks under the settings'
+ * `marchDepthSteps` (`marchSteps.ts`'s `marchSamplesOf`; the bare ground's light from its ground
+ * point along −d, the sky's from its lowest point along each side), a drawn surface the setting's
+ * count. The smoke marches a texel's ray
  * again, turned or moved, through it (R08.T6.g).
  *
  * @throws RangeError for a medium with a tabulated term that ends below its top at a density
@@ -3218,7 +3220,7 @@ interface RayMarchContext {
   readonly geometry: MarchGeometry;
   readonly view: TwinView;
   readonly samples: number;
-  /** The count by the bare ground's optical depth (R08.T8.e), or `null` for `samples` everywhere. */
+  /** The count by a segment's optical depth (R08.T8.e), or `null` for `samples` everywhere. */
   readonly depthSteps: MarchDepthSteps | null;
 }
 
@@ -3253,24 +3255,21 @@ function rayMarchTexelInto(
     return;
   }
   const { ray, bareGroundM } = marched;
-  // The bare ground's count by its optical depth (R08.T8.e), as `rayMarch.wgsl`'s `marchRay` takes
-  // it: nothing drawn along the ray, and it ends on the bare ground.
+  // The count by the segment's optical depth (R08.T8.e), as `rayMarch.wgsl`'s `marchRay` takes it:
+  // nothing drawn along the ray, it ends on the bare ground or in the sky.
   let kind: MarchSegmentKind = "surface";
   if (ray.skySegment === true) {
     kind = bareGroundM === null ? "sky" : "ground";
   }
-  const samples = marchSamplesOf(
-    kind,
-    depthSteps !== null && kind === "ground"
-      ? bareGroundDepthG(
-          (placeM, direction) => lightDepthGOf(reads, geometry, placeM, direction),
-          ray,
-        )
-      : Number.NaN,
-    context.samples,
-    edgesM.length,
-    depthSteps,
-  );
+  const depthAlong = (placeM: Vec3, direction: Vec3): number =>
+    lightDepthGOf(reads, geometry, placeM, direction);
+  let depthG = Number.NaN;
+  if (depthSteps !== null && kind === "ground") {
+    depthG = bareGroundDepthG(depthAlong, ray);
+  } else if (kind === "sky" && depthSteps !== null && depthSteps.thinSky !== null) {
+    depthG = skyDepthG(depthAlong, ray);
+  }
+  const samples = marchSamplesOf(kind, depthG, context.samples, edgesM.length, depthSteps);
   const marcher = new Marcher(terms, pressureBarOf, reads, geometry, ray);
   for (const { tM, dtM } of piecedSteps(ray, samples, edgesM, geometry)) {
     marcher.step(tM, dtM);
@@ -3421,6 +3420,50 @@ function bareGroundDepthG(
   const o = ray.originM;
   const d = ray.direction;
   return depthAlong(add(o, scale(d, ray.tEndM)), { x: -d.x, y: -d.y, z: -d.z });
+}
+
+/**
+ * A sky segment's green optical depth as the ray march's count reads it (plan R08, R08.T8.e;
+ * `marchSteps.ts`'s `marchSamplesOf`): the sum of `depthAlong` (−ln T.g from a place along a unit
+ * direction to the top) from the split's lowest point t\* = clamp(−o·d, t_start, t_end), along −d
+ * where the side before it is longer than 0 and along +d where the side after it is, each read at
+ * the lowest point's own place: from inside the air the camera's side counts the air above the
+ * camera too, so the depth errs high there, and it is the same 1 m under the top as 1 m over it.
+ */
+function skyDepthG(
+  depthAlong: (placeM: Vec3, direction: Vec3) => number,
+  ray: TwinSegment,
+): number {
+  const o = ray.originM;
+  const d = ray.direction;
+  const lowestM = Math.min(Math.max(-(o.x * d.x + o.y * d.y + o.z * d.z), ray.tStartM), ray.tEndM);
+  const lowest = add(o, scale(d, lowestM));
+  let depth = 0;
+  if (lowestM - ray.tStartM > 0) {
+    depth += depthAlong(lowest, { x: -d.x, y: -d.y, z: -d.z });
+  }
+  if (ray.tEndM - lowestM > 0) {
+    depth += depthAlong(lowest, d);
+  }
+  return depth;
+}
+
+/**
+ * A sky segment's green optical depth as the ray march's count reads it (plan R08, R08.T8.e) on a
+ * sphere's tables, `transmittanceAt` read at light slot 0: each side's from the lowest point, at its
+ * height and cosine on `geometry` as {@link rayMarchTexelTwin} takes them ({@link skyDepthG}).
+ * R05.T12.e's gate reads its sky rays' counts through it (`test/atmosphereGate.ts`).
+ */
+export function sphereSkyDepthG(
+  transmittanceAt: TwinSources["sunTransmittance"],
+  geometry: MarchGeometry,
+  ray: TwinSegment,
+): number {
+  return skyDepthG((placeM, direction) => {
+    const out: TwinRgb = [0, 0, 0];
+    sphereLightInto(transmittanceAt, geometry, placeM, direction, out);
+    return -Math.log(out[1]);
+  }, ray);
 }
 
 /**

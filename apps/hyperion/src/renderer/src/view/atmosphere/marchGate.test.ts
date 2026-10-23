@@ -35,7 +35,8 @@ describeMarchGate({
   // (4.32%); the last light's is 0.79%, where even steps put it at 12.47%. Since R08.T8.e high's
   // count on the bare ground is scaled by its optical depth: the march's ordinary worst is the disc
   // at 20 steps, ground zenith 60°, sun 80°/0° (1.43%; 0.45% at 36 steps throughout), measured
-  // 2026-10-22. On low the high limb
+  // 2026-10-22; the thin sky at 28 steps puts the sky's ordinary worst at six sources at 0.12%
+  // (0.07%), measured 2026-10-23. On low the high limb
   // from 80 km at tangent 0.84 km, sun 90°/0°, sets the sky's (24.00%, against even steps' 46.37%
   // on the band from 50 km), and no ray stands over `LOW_TWIN_WORST`: the two band rays from 50 km
   // that stood over the sky view's bound in even steps (19.44% and 46.37%) fall under it.
@@ -62,7 +63,7 @@ describeMarchGate({
         kernel: {
           march: 0.01076,
           marchTwilight: 0.00597,
-          sky: 0.00074,
+          sky: 0.00125,
           skyTwilight: 0.00634,
           lastLight: 0.00457,
         },

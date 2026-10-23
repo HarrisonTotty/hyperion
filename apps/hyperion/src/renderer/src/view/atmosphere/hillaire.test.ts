@@ -692,8 +692,8 @@ function memberOf(block: unknown, index: number): number[] {
   return [...block.subarray(index * 4, index * 4 + 4)];
 }
 
-/** The view's members before its sources: camera, up, sky, skyAxis, …, curvature, marchGround. */
-const VIEW_HEAD_MEMBERS = 13;
+/** The view's members before its sources: camera, up, sky, skyAxis, …, marchGround, marchSky. */
+const VIEW_HEAD_MEMBERS = 14;
 
 /** The place of the view's `sky` member. */
 const SKY_MEMBER = 2;
@@ -1393,7 +1393,7 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
 
   it("gives the view's members in one order to the kernels and the composite, the sources last (R08.T7)", () => {
     const view = vec4Members(viewWgsl, "AtmosphereView");
-    expect(view.slice(-3)).toEqual(["exact", "curvature", "marchGround"]);
+    expect(view.slice(-4)).toEqual(["exact", "curvature", "marchGround", "marchSky"]);
     expect(vec4Members(viewWgsl, "SkySource")).toEqual(["direction", "weight", "disc"]);
     expect(viewWgsl).toMatch(/sources : array<SkySource, MAX_SKY_SOURCES>,\s*\}/u);
     const sources = Array.from({ length: MAX_SKY_SOURCES }, (_, i) =>
@@ -1493,20 +1493,23 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
     expect([...(draw.uniforms["exact"] ?? [])]).toEqual(expected);
     expect([...(draw.uniforms["shell"] ?? [])]).toEqual([100_000, 0, 0, 0]);
     // The kernels' view block: the members in order, `exact` the eleventh, `curvature` the twelfth
-    // (R08.T6.f), `marchGround` the thirteenth (R08.T8.e), the sources after them.
+    // (R08.T6.f), `marchGround` and `marchSky` the thirteenth and fourteenth (R08.T8.e), the
+    // sources after them.
     const block = engine.dispatched.find((d) => d.kernel === "atmosphere sky view")?.bindings
       .uniforms["view"];
     expect(Array.from(block ?? []).slice(40, 44)).toEqual(expected);
     expect(Array.from(block ?? []).slice(44, 48)).toEqual([...(draw.uniforms["curvature"] ?? [])]);
     expect(Array.from(block ?? []).slice(48, 52)).toEqual([20, 4, 2, 8]);
-    expect(block).toHaveLength((13 + 3 * 6) * 4);
+    expect(Array.from(block ?? []).slice(52, 56)).toEqual([28, Math.fround(0.05), 0, 0]);
+    expect(block).toHaveLength((14 + 3 * 6) * 4);
   });
 
-  it("gives the march no ground rule on low, so every ray takes its 16 steps (R08.T8.e)", async () => {
+  it("gives the march no ground or sky rule on low, so every ray takes its 16 steps (R08.T8.e)", async () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.low, WGS84);
     const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     expect([...(draw.uniforms["marchGround"] ?? [])]).toEqual([0, 0, 0, 0]);
+    expect([...(draw.uniforms["marchSky"] ?? [])]).toEqual([0, 0, 0, 0]);
   });
 
   it.each(["high", "low"] as const)(
