@@ -3616,8 +3616,9 @@ hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/s
     (`crates/hyperion-protocol/src/modelled.rs`: absent is not modelled, `null` is computed and
     none, otherwise the value). Today that is T24.e's `vertical_structure`, T24.c's `aerosols`,
     and Phase L's `condensates`, `crust`, `modifiers` and `biosphere`. The envelope's members are
-    plain fields, since the whole section is `not_modelled` until T24.d. A body with no internal
-    heat, which T24.d states, has a T_int of 0 K, not an absent member. Each closed enum declared
+    plain fields, since the whole section is `not_modelled` until T24.d. Every envelope has a
+    positive T_int, the record's internal heat or T24.d's cooling law
+    (decision-p14-t24d-profile §3), never an absent member. Each closed enum declared
     here is a physics class and carries every variant the drafted tasks name, and those this plan
     reserves: `SurfaceState` gains `SteamEnvelope` (T53.b) and `Tenuous` (T53.c), and the tectonic
     regime gains `HeatPipe`, `Episodic` and `IceShell`, each produced by no rule until its task.
@@ -7996,7 +7997,10 @@ feeding back into p_s, T_s, the albedo or the bulk.
       substance's composition is not modelled or its albedo is an observed, weathered value.
 
     It weathers the area mix with R10.T1.d's law at m_body, each regolith component's spherical
-    albedo in every band the optics carry, and deletes T51.b's space-weathering stand-in. If
+    albedo in every band the optics carry, and deletes T51.b's space-weathering stand-in but on
+    `basalt_reduced`, which keeps it past P14.T49.k (decision-p14-t49k Q5): its graphite-bearing
+    row stays above 0.11, and R10.T1.d's law, npFe per FeO_T, does not weather an Fe-poor,
+    carbon-bearing regolith (Shackelford et al. 2025, PSJ 6, 254), a deferred finding. If
     R10.T1.d has not landed, the stand-in stays and the weathering takes the next bump. Wiring the
     law, it restamps the surface crate's `space_weathering` table `--since 24`, which R10.T1.d
     stamped since 22 while nothing read it (main's ruling, 2026-10-19). The generated Moon at the
@@ -8006,10 +8010,12 @@ feeding back into p_s, T_s, the albedo or the bulk.
     (decision-p14-t51d-weathering, addendum 2026-10-19, D1–D3; decision-r10-t1d-anchor-colour §3).
 
     _Tests:_
-    - Mercury's Bond albedo 0.088 ± 0.003 (Mallama 2017, arXiv:1703.02670, the spherical
-      bolometric albedo over 0–4 µm), within a tolerance stated for a generated Mercury, with the
-      band coverage stated;
-    - its V-band spherical albedo against 0.068 (p_V q_V, 0.142 × 0.478, Mallama et al. 2002);
+    - Mercury's Bond albedo against 0.088 ± 0.003 (Mallama 2017, arXiv:1703.02670, the spherical
+      bolometric albedo over 0–4 µm, a preprint; Domingue et al. 2011's refereed 0.081 over the
+      band 0.43–1.01 µm beside it), within the allowance of 1.25 (0.070–0.114): the generated
+      Mercury at the cap's 0.11, with the band coverage stated;
+    - its V-band spherical albedo beside 0.068 (p_V q_V, 0.142 × 0.478, Mallama et al. 2002),
+      stated while the cap holds;
     - the Moon's 0.11 kept;
     - Europa's normal reflectances within 0.48–0.85;
     - the server's albedo scale solved on the weathered albedos.
@@ -8041,6 +8047,188 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - _The escape valve._ If T52.c still cannot start when every other member of 24 has landed,
     T54.b leaves without T52.c, T24.c with T24.g, T24.d with T52.d, T53.c and T53.d. Their members
     stay `NotModelled`, and those tasks take the next planetary bump.
+  - _The cost at 24_ (decision-24-cost D5, which restates decision-p14-t54a-passes §C.6 for 24).
+    - At the blessing message, on §C.6's probe against the released 23 tree in the same window,
+      with 22's ratios beside: `generate` ≤ 1.8× of 23 (20 systems, ≤ 209 ms); `snapshot_at`
+      ≤ 2.0× (≤ 543 ms, and the 400-system stage ≤ 8.72 s). A reference, recorded, never holding
+      the bless.
+    - The bless note gives:
+      - the stage table;
+      - each hold's share, where the probe can still switch it;
+      - T33.a's (ii) and (v) against 13.8 ms and 683 µs;
+      - T33.b's and `radius_valley_emerges`' times;
+      - the slowest system's `snapshot_at`.
+    - That slowest system at or above 3 s, a tenth of the client's `REQUEST_TIMEOUT_MS`, blocks.
+    - A miss of the reference queues the open pure levers (the crust's own zonal insolation table
+      first) after the bless, and P14.T51.l first in 25.
+    - §C.7's split is pre-authorised for any fast-tier property or statistical test that 24 pushes
+      above 120 s native, never a golden, determinism, order-independence or pinned-constant test.
+      Each is listed.
+  - _The split_ (decision-p14-t54b-open, 2026-10-23). Twelve subtasks in four batches, one gate a
+    batch and a fresh agent each. Every commit before P14.T54.b.l is a checkpoint at 23 that moves no
+    golden (`golden_diff.py`: 0 moved), its wiring behind a hold at 24 with a tripwire:
+    - `AIR_SECTIONS_VERSION` for the new members;
+    - its own hold, or an arm of the tests' switch, for each subtask that moves a published value
+      (e, f).
+
+    A batch lands when its gate passes, linear and re-cut onto the tip (decision-bump-plan-after-22
+    V3.7). Riders board until P14.T54.b.i's commit and the MUST-FIX members until P14.T54.b.l's
+    blessing message; later ones take the next bump, their hold renumbered (V3.4). A member this task
+    first puts on the record that the audit finds physically absurd stays `NotModelled` at 24 and
+    takes the next bump. The wire types under `hyperion-protocol`'s `planetary/record/` are this
+    lane's until the bump.
+    - **P14.T54.b.a The vertical structure on the record and the wire** (B1).
+      - `record::VerticalStructure`'s placeholder becomes `hooks::VerticalStructure`. It is filled in
+        `system.rs`'s surface section from
+        `RadiativeConvective::derive(&StructureInputs::of_surface(…))`, behind
+        `AIR_SECTIONS_VERSION`.
+      - An airless body's member is computed none: `DeriveStructureError::NoAir` → `null`.
+      - The member converts to `VerticalStructureDto { alpha, skin_temperature_k, adiabat }`, as
+        declared (P14.T24.e's "Held for P14.T54.b" list).
+      - T24.e's 300–370 K Venus at 1 bar is re-checked on T57.a's Venus under the tests' switch and
+        stated. `the_venus_test_is_rechecked_at_the_23_to_24_bump` goes at P14.T54.b.l.
+      - _Tests:_ the table's Earth, Venus and Titan under the switch; an airless body's `null`;
+        absent on every golden body at 23.
+    - **P14.T54.b.b The aerosol and absorber inventory on the record and the wire** (B1; after
+      P14.T54.b.a, whose structure it reads).
+      - `record::Surface`'s `aerosols` holds `AerosolInventory::derive(&AerosolInputs)`, assembled at
+        the record from:
+        - the state, p_s, gases, μ and g;
+        - P14.T54.b.a's structure;
+        - the snapshot path's cloud fraction;
+        - the brightest host's T_eff;
+        - the liquids' cover, O and the liquid-water flag.
+
+        T24.g's case is taken as T24.g takes it, until P14.T54.b.g.
+
+      - The DTOs take their final shape before 24's first send. That is no change to
+        `PROTOCOL_VERSION`, since no build has sent one (decision-p14-t54b-open §2). The rules:
+        - a member the sim does not model (a mode's size, column mass or τ) is absent, never
+          `null` and never 0, with one closed reason;
+        - `deck` is `null` for a mode of no condensate deck (the dust, the haze, a sulphate layer);
+        - each mode adds `coverage`, its τ's basis and `temperature_k` (the temperature its optics
+          were taken at; decision-p14-t54a-grain-density §3);
+        - each deck adds its phase, base, base temperature, top, vapour below, `f_sed` and
+          `extrapolated`;
+        - the inventory lists its condensates not formed, with their reasons;
+        - every new enum is closed, with all its variants at the first send.
+      - The client's decoder and model follow in the same commit. An independent R08 review of the
+        shapes is signed before P14.T54.b.l.
+      - _Tests:_
+        - continuity of the inventory in time and across state changes, on the record (T24.c's
+          record);
+        - no generated liquid mode above 0.99 T_c (decision-p14-t54a-grain-density F4);
+        - the supercooled water modes counted, with F1's choice stated;
+        - Titan's disc-mean cloud stated beside Huygens's "no optically thick cloud";
+        - the wire form of each new type and enum string;
+        - absent on every golden body at 23.
+      - `hooks::aerosols`' and `chem::condense`'s tripwires (and `substance::aerosol`'s, if this
+        commit names its API) take this commit's files in their `HELD` lists
+        (decision-p14-t54b-open §3).
+    - **P14.T54.b.c The modifiers, the header's parts and the palette's FeO_T, `ferric` and
+      `tholin`** (B1).
+      - `record::Surface`'s `modifiers` comes from P14.T51.d and T51.j, with
+        `ModifierInputs::lid` from `CrustComposition::lid()`, `gases` from the partial pressures,
+        and `water` from T24.a's flag and T48.b's `WetEpoch::end`.
+      - `SurfaceModifiersDto` is converted.
+      - R09's header fills `maturity`, `organic_cover` and `weathering_rate`, with their
+        `SurfaceHeaderDto` mirrors.
+      - Each palette entry takes `feo_mass_fraction` from the registry's FeO_T: `None` where the
+        composition is not modelled or the albedo is an observed, weathered value.
+      - The palette gains a `Deposit` entry `ferric` and, where the organic cover is above 0, a
+        `Cover` entry `tholin`.
+      - The modifiers' tripwire takes this commit's files in its `HELD` list.
+    - **P14.T54.b.d The envelope's `supercritical` member, and P14.T53.b part 2's sections in the
+      conversion** (B1).
+      - `BodyEnvelopeDto.supercritical`: `null` for an H₂/He envelope, else the condensable's key.
+      - The conversion and the client accept a solid-class body whose surface is `not_applicable`
+        and envelope `not_modelled`; the conversion's `unreachable!` is replaced.
+      - The console shows no `SURFACE` section and `ATMOSPHERE NOT YET MODELLED` for it
+        (decision-absurd-states-24 R2.3; a vitest case).
+      - If part 2 lands first, the commit is re-cut on its tag change.
+    - **P14.T54.b.e The weathered area mix** (B2; after R10.T1.d, landed in 96965d76, and after
+      P14.T49.n's `area_mix.rs` hunk, or re-cut on it; its own hold).
+      - R10.T1.d's law weathers the area mix at m_body: each regolith component's spherical albedo,
+        in every band the optics carry.
+      - T51.b's 0.11 stand-in is deleted, but on `basalt_reduced`, which keeps it past P14.T49.k
+        (decision-p14-t49k Q5).
+      - `ferric`'s area is added to the area mix at its optics (T51.j).
+      - _Tests:_ T54.b's five, Mercury's at the cap's 0.11 within the allowance as T54.b's
+        weathering tests say (decision-p14-t49k); the Moon's recorded miss, stated and not
+        asserted; Mars 0.20–0.30 with `ferric` stated at 24 unless P14.T49.k rides 24 (then the
+        bless swaps `ferric`'s and `basalt_reduced`'s rows, restamps `substance_albedo` and
+        refits `space_weathering` with Λ checked to the bit); `basalt_fe` never darkened twice.
+    - **P14.T54.b.f The cold traps in the passes** (B2; `COLD_TRAPS_VERSION`).
+      - It does what T54.b's "From P14.T51.i and T51.j" bullet says:
+        - `publish_over` over one `ColdTrapField` a body;
+        - `condensates_under` reads it, with one build a body;
+        - R09's `cold_traps()` and `cold_trap_inputs()`, and R09's tripwire deleted;
+        - the placed-plus-undrawn test.
+      - After P14.T49.m, else it states the icy moons' traps.
+      - Its open question (a field a body against the passes' heat flow and a regolith albedo known
+        after them) is ruled at its start, on the B2 agent's lean.
+    - **P14.T54.b.h The escape, steam and tenuous wiring** (B2; after P14.T53.a; T53.b's parts and
+      T53.c as landed).
+      - What p14-escape leaves for the record and the wire, cut at h's start from T53.a's record:
+        - the `Tenuous` state and its gas list (every `Airless` body's list empty);
+        - part 2's section tags with P14.T54.b.d;
+        - T53.a's He/H after fractionation, for P14.T54.b.i.
+      - `ESCAPE_VERSION` goes at P14.T54.b.l.
+    - **P14.T54.b.g T24.g's case from the published state and deck** (B3; after p14-chem's R3,
+      which lands with P14.T24.d + T52.d, and P14.T53.b part 1 (b)).
+      - P14.T54.b.b's inventory takes `case_of(state, deck)`, so a deckless runaway takes case 2's
+        dry branch. Venus and the median Venus stay case 1 to the bit.
+      - _Test:_ over the sample and LOOK72, none with Venus's deck below T24.g's cycling
+        temperature (V3.9's MUST-FIX (b)).
+    - **P14.T54.b.i The envelope** (B3; after P14.T24.d with T52.d and P14.T53.b part 2).
+      - `record::Envelope` replaces `match envelope {}`. Its decks and modes are in
+        P14.T54.b.b's shapes.
+      - T50.b's inputs, as listed above.
+      - `supercritical` is `null` on every envelope unless P14.T53.b part 3 has landed by this
+        commit.
+      - The fixture gains a hot-Jupiter envelope and a Jupiter `Ok` with an NH₃ deck, at the sim's
+        values. Neptune's deck τ is stated (G3).
+      - `GuillotProfileDto` gains `optical_depth_exponent` (n, 2 for every envelope) and reads
+        `thermal_opacity_m2_per_kg` at 1 bar; `BodyEnvelopeDto`'s T_int, T_irr, join and adiabat
+        docs take decision-p14-t24d-profile §2's text; the fixtures and the client follow.
+      - R08's review takes a second pass on the envelope's shape before P14.T54.b.l.
+      - This commit closes the riders' membership.
+    - **P14.T54.b.j The riders** (B3; each landed by P14.T54.b.i's commit).
+      - T51.e's types.
+      - T51.g's `subsurface_ocean` for every body, with T56.d's ocean k₂; `OCEAN_VERSION` goes at
+        P14.T54.b.l.
+      - T48.g's belt moments and impact velocities. If the Moon moves by more than 0.1 km/s,
+        `LUNAR_IMPACT_VELOCITY` and R09's reference worlds follow.
+      - T53.c; T53.d's member, absent; T53.b part 3.
+      - T52.e, T50.d, T49.l, T24.h.b and T56.e, as landed.
+      - P14.T31's event goldens, else at 25 (V3.5).
+    - **P14.T54.b.k The audit and the cost** (B3; after P14.T54.b.i and .j, every hold still
+      switchable).
+      - The MUST-FIX asserts of `brief-notes-24`, over the sample, the goldens and LOOK72, with the
+        holds off in scratch.
+      - The counts (i)–(v) of decision-absurd-states-24 and decision-24-cost, and (vi) of
+        decision-thick-acid-decks (every case-1 acid deck with its p_s, g, x_SO₂, Δp ÷ p_s, τ(550)
+        and column mass; the bodies at the SO₂ cap; the largest deck τ, for R08).
+      - Each hold's cost share (D5).
+      - §C.7's splits, listed.
+      - Per-hold attribution of every moved value: `golden_diff` after each hold's deletion, in a
+        fixed order, in scratch.
+      - R09's coarse field's move through `ebm.rs`'s greenhouse constants, listed.
+    - **P14.T54.b.l The bump** (B4, alone; after B3's gate and R08's sign-off).
+      - It deletes every hold at 24 with its tripwire, the four source scans with their `HELD`
+        lists, and `OCEAN_VERSION`.
+      - It restamps `thermo_equilibrium`, `condensate_extinction` ×7 and the surface crate's
+        `space_weathering` `--since 24`, with whatever `fit-check` flags. No stellar table may be
+        stale.
+      - SO₂'s flag stays off unless R08's SO₂ ice file has landed (V6 item 4).
+      - `GENERATED_SURFACES_FROM` opens at 24 only if every V3.9 item is met, else it is raised to
+        25 and the note says so.
+      - It re-blesses `prebless-24-list.md`'s goldens.
+      - `surface.rs`'s module doc lists the members first sent at 24 as fixed.
+      - `PROTOCOL_VERSION` stays 3.
+      - The bless runs once through the `sim-determinism` skill under the heavy lock. The bless note
+        follows §6 and D5, with the stage table measured at the blessing message.
+      - P14.T33.c follows.
 
 #### P14.T55 Later composition (unscheduled)
 
@@ -14344,7 +14532,9 @@ tables::gauss_legendre`.
     `log_normal` or `aggregate`
     (`monomer_count` a number, `fractal_dimension` in [1, 2.5]); `condensates` a list;
     `modifiers` `{ maturity, organic_cover, resurfacing_m_per_yr }`; the envelope's Guillot
-    parameters `{ thermal_opacity_m2_per_kg, opacity_ratio, redistribution_factor }`.
+    parameters `{ thermal_opacity_m2_per_kg, opacity_ratio, redistribution_factor }`
+    (reshaped before 24's first send, decision-p14-t24d-profile §2: `optical_depth_exponent`, n,
+    is added and `thermal_opacity_m2_per_kg` is read at 1 bar).
   - _The server._ `body_summary` now builds the list entry itself and `body_record` adds the
     surface, envelope and hooks to it, so that the list converts no surface it would drop. A
     later member is converted through `later`, whose closure gives `None` for a member computed as
