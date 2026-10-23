@@ -257,6 +257,25 @@ impl HelmholtzIdeal {
 /// four, as a test holds.
 const NEWTON_STEPS: usize = 4;
 
+/// The Newton steps [`HelmholtzResidual::compressed_density`] takes from the saturated liquid, a
+/// fixed count (P14.T49.n), which a test holds to meet the pressure to rounding over every row's
+/// liquid range up to [`COMPRESSION_CEILING`]: the most any of its cases needs is 10, a part in a
+/// thousand below a critical point under the ceiling, where the liquid is about three times its
+/// saturated density.
+pub(crate) const COMPRESSION_STEPS: usize = 16;
+
+/// The largest step [`HelmholtzResidual::compressed_density`] takes, relative to the density it
+/// steps from.
+pub(crate) const COMPRESSION_STEP_LIMIT: f64 = 0.25;
+
+/// The highest pressure at which a liquid's compression is evaluated, Pa: 1,000 MPa, the upper
+/// bound of IAPWS-95's range of validity (IAPWS R6-95(2018); Wagner and Pruß 2002, J. Phys. Chem.
+/// Ref. Data 31, 387). The registry's other reference equations are evaluated up to it too, past
+/// the pressures some of them were fitted to, a stated extrapolation (CoolProp's files state 80 MPa
+/// for oxygen's and 50 MPa for nitrous oxide's, as their rows record); a liquid under a heavier air
+/// takes its density at the ceiling, a stated hold (P14.T49.n).
+pub(crate) const COMPRESSION_CEILING: Pascals = Pascals::new(1e9);
+
 /// The residual part of a fluid's dimensionless Helmholtz energy, φʳ(δ, τ), with its reducing
 /// parameters and the gas constant its coefficients were fitted with.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -576,6 +595,68 @@ impl HelmholtzResidual {
             density = KilogramsPerCubicMetre::new(density.value() + step);
         }
         density
+    }
+
+    /// The compressed liquid's density at `pressure` and `temperature`, from `saturated`, the
+    /// equation's own saturated liquid at `temperature` (the liquids' compression, P14.T49.n), for
+    /// a `pressure` above the saturated liquid's: [`COMPRESSION_STEPS`] Newton steps along the
+    /// isotherm, ρ ← ρ + (p − p(ρ, T)) ρ `κ_T`(ρ, T) as in
+    /// [`density_at_pressure`](Self::density_at_pressure), each held to at most
+    /// [`COMPRESSION_STEP_LIMIT`] of ρ.
+    ///
+    /// Above the saturated liquid p(ρ) rises along the isotherm and is convex, so a step from below
+    /// the root passes it, and every step from above falls back toward it without passing it, never
+    /// toward the spinodal below the saturated liquid. The limit keeps the first steps from a
+    /// liquid near its critical point, whose `κ_T` is large, inside the equation's dense liquid.
+    /// A step that is not finite, from a stiffness ∂p ÷ ∂ρ of zero or not a number near a
+    /// spinodal, ends the iteration at the density it would step from, so that a finite start
+    /// never gives a density that is not a number.
+    #[must_use]
+    pub(crate) fn compressed_density(
+        &self,
+        saturated: KilogramsPerCubicMetre,
+        pressure: Pascals,
+        temperature: Kelvin,
+    ) -> KilogramsPerCubicMetre {
+        self.compressed_density_in(saturated, pressure, temperature, COMPRESSION_STEPS)
+    }
+
+    /// [`compressed_density`](Self::compressed_density) in `steps` steps, for the tests that
+    /// compare the count with more.
+    #[must_use]
+    pub(crate) fn compressed_density_in(
+        &self,
+        saturated: KilogramsPerCubicMetre,
+        pressure: Pascals,
+        temperature: Kelvin,
+        steps: usize,
+    ) -> KilogramsPerCubicMetre {
+        let mut density = saturated.value();
+        let rt = self.gas_constant_j_per_kg_k * temperature.value();
+        for _ in 0..steps {
+            let delta = density / self.reducing_density.value();
+            let derivatives =
+                self.density_derivatives(KilogramsPerCubicMetre::new(density), temperature);
+            let here = density * rt * (1.0 + delta * derivatives.first);
+            let stiffness =
+                rt * (1.0 + 2.0 * delta * derivatives.first + delta * delta * derivatives.second);
+            // (p − p(ρ)) ρ κ_T, with κ_T = 1 ÷ (ρ ∂p ÷ ∂ρ), held to the limit either way; by
+            // comparison rather than `clamp`, which would panic on a limit that is not a number.
+            let step = (pressure.value() - here) / stiffness;
+            // Zero or not-a-number stiffness near a spinodal: keep the last finite density.
+            if !step.is_finite() {
+                break;
+            }
+            let limit = COMPRESSION_STEP_LIMIT * density;
+            density += if step > limit {
+                limit
+            } else if step < -limit {
+                -limit
+            } else {
+                step
+            };
+        }
+        KilogramsPerCubicMetre::new(density)
     }
 }
 

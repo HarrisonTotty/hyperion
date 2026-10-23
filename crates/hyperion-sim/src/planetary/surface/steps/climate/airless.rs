@@ -2369,13 +2369,22 @@ mod tests {
         assert_same_bits(Regolith::of(&carried).inertia_j_per_m2_k_sqrt_s, 123.0);
     }
 
-    /// One Γ (decision-p14-t54a-passes §3.5; Batch D's review, D3-1): on every body of the
-    /// sample whose record names R09's radiative model, airless or under a thin air, bracketed
-    /// or not, the regolith of its inputs from `for_body` takes its record's ground inertia, to
-    /// the bit. A body `for_body` answers not modelled (no crust, an unlit record, an ice the
-    /// registry has no density of) reads no inputs, and is counted.
-    #[test]
-    fn the_radiative_model_reads_its_record_s_inertia_on_every_body() {
+    /// One Γ (decision-p14-t54a-passes §3.5; Batch D's review, D3-1) over the systems `systems`,
+    /// read under the rules in force on the calling thread: on every body whose record names R09's
+    /// radiative model, airless or under a thin air, bracketed or not, the regolith of its inputs
+    /// from `for_body` takes its record's ground inertia, to the bit. A body `for_body` answers
+    /// not modelled reads no inputs, and is counted; its gap is asserted one of the recorded: no
+    /// crust, an unlit record, or, under the held densities (23's rules,
+    /// `ReadDensitiesRules::Held`), an ice the registry has no density of. Gives the airless, the
+    /// thin-aired and the unread bodies.
+    fn one_gamma<'a>(
+        systems: impl Iterator<
+            Item = (
+                &'a crate::planetary::context::SystemContext,
+                &'a crate::planetary::PlanetarySystem,
+            ),
+        >,
+    ) -> (u32, u32, u32) {
         use hyperion_surface::field::{ClimateModelKind, PaletteRole};
         use hyperion_testkit::float::assert_same_bits;
 
@@ -2384,11 +2393,11 @@ mod tests {
         use crate::planetary::surface::{
             CoarseInputs, RECORD_TIME, ReadCoarseInputsError, SurfaceInputsError,
         };
-        use crate::planetary::system::tests::whole;
-        use crate::substance::ResolvePaletteEntryError;
+        use crate::substance::{ReadDensitiesRules, ResolvePaletteEntryError};
 
+        let density_gap = ReadDensitiesRules::in_force() == ReadDensitiesRules::Held;
         let (mut airless, mut thin, mut unread) = (0_u32, 0_u32, 0_u32);
-        for (ctx, system) in whole().iter().take(60) {
+        for (ctx, system) in systems {
             let snapshot = system.snapshot_at(ctx, RECORD_TIME);
             let records = snapshot.bodies();
             for record in records {
@@ -2409,20 +2418,24 @@ mod tests {
                                 RecordSection::Surface
                             ))
                         );
-                        // The recorded gaps: no crust, an unlit record's 0 K, or an ice whose
-                        // solid density the registry has not read.
+                        // The recorded gaps: no crust, an unlit record's 0 K, or under 23's rules
+                        // an ice whose solid density the registry has not read (P14.T49.n's,
+                        // held until 24).
                         let mean = surface.conditions().mean_surface_temperature().value();
                         let gap = match surface.crust() {
                             Modelled::NotModelled => true,
                             Modelled::Ok(_) if !(mean.is_finite() && mean > 0.0) => true,
-                            Modelled::Ok(crust) => matches!(
-                                palette::resolve(surface, crust),
-                                Err(ResolveBodyPaletteError::Solid {
-                                    role: PaletteRole::Ice,
-                                    cause: ResolvePaletteEntryError::DensityNotModelled,
-                                    ..
-                                })
-                            ),
+                            Modelled::Ok(crust) => {
+                                density_gap
+                                    && matches!(
+                                        palette::resolve(surface, crust),
+                                        Err(ResolveBodyPaletteError::Solid {
+                                            role: PaletteRole::Ice,
+                                            cause: ResolvePaletteEntryError::DensityNotModelled,
+                                            ..
+                                        })
+                                    )
+                            }
                         };
                         assert!(gap, "{:?}: {error:?}", record.index());
                         unread += 1;
@@ -2441,9 +2454,45 @@ mod tests {
                 }
             }
         }
+        (airless, thin, unread)
+    }
+
+    /// One Γ ([`one_gamma`]) over the sample's first 60 systems under 23's rules, whose gaps
+    /// include an ice the registry has no density of.
+    #[test]
+    fn the_radiative_model_reads_its_record_s_inertia_on_every_body() {
+        use crate::planetary::system::tests::whole;
+
+        let systems = whole().iter().take(60).map(|(ctx, system)| (ctx, system));
+        let (airless, thin, unread) = one_gamma(systems);
         eprintln!(
             "one Γ: {airless} airless and {thin} under a thin air read their record's; {unread} \
              answered not modelled read no inputs"
+        );
+        assert!(airless > 0 && thin > 0, "{airless} airless, {thin} thin");
+    }
+
+    /// One Γ ([`one_gamma`]) over the same 60 systems generated and read under P14.T49.n's
+    /// densities, held until 24 (`READ_DENSITIES_VERSION`): no body is refused for an ice's
+    /// density, solid argon's and β-O2's being read, so its only gaps are no crust and an unlit
+    /// record's 0 K, and it reads the bodies 23's rules refused for their ice.
+    #[test]
+    fn under_24_s_densities_the_radiative_model_reads_its_record_s_inertia_on_every_body() {
+        use crate::planetary::system::tests::{SEED, sample};
+        use crate::planetary::{PlanetarySystem, generate};
+        use crate::substance::{ReadDensitiesRules, with_read_densities};
+
+        let (airless, thin, unread) = with_read_densities(ReadDensitiesRules::Read, || {
+            let systems: Vec<(_, PlanetarySystem)> = sample()
+                .iter()
+                .take(60)
+                .map(|ctx| (ctx, generate(SEED, ctx)))
+                .collect();
+            one_gamma(systems.iter().map(|(ctx, system)| (*ctx, system)))
+        });
+        eprintln!(
+            "one Γ under 24's densities: {airless} airless and {thin} under a thin air read their \
+             record's; {unread} answered not modelled read no inputs"
         );
         assert!(airless > 0 && thin > 0, "{airless} airless, {thin} thin");
     }

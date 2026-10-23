@@ -59,9 +59,11 @@
 //!   `r_eff`), since ⟨V⟩ ÷ ⟨A⟩ = 4 `r_eff` ÷ 3 for every distribution, the relation P14.T24.c's τ(550)
 //!   = (3 ÷ 4) `Q̄_ext` M ÷ (ρ `r_eff`) writes. A compact particle's density is its row's grain density
 //!   (science-r09-drainage.md §3), so a row whose density depends on temperature, or is not read
-//!   at all, is served the same way: a phase whose density was not read at that temperature (solid
-//!   `Ar`, solid `H2S`, β-`CO`, β-`O2`, liquid `S8`) is refused, labelled
-//!   ([`ResolveAerosolError::NoDensity`]).
+//!   at all, is served the same way: a phase whose density was not read at that temperature is
+//!   refused, labelled ([`ResolveAerosolError::NoDensity`]): β-`CO` and `H2S`'s phase II. Solid
+//!   `Ar`, β-`O2`, `H2S`'s phases I and III, solid `C2H6` and liquid `S8` are read at generator
+//!   version 24 (P14.T49.n) and refused until then, the registry's hold
+//!   (`READ_DENSITIES_VERSION`).
 //! - **A variant's density.** The row's grain density is its reference composition's. A file of
 //!   another variant (the 84.5 wt% acid, seawater at S = 35) has a table entry but no density yet;
 //!   the 75 wt% acid's `75wt%` is `H2SO4`'s reference ([`density_variant`]).
@@ -872,7 +874,7 @@ mod tests {
         before_inline_tests, names, out_of_line_test_modules, rust_files,
     };
     use super::*;
-    use crate::substance::{by_key, ids};
+    use crate::substance::{ReadDensitiesRules, by_key, ids, with_read_densities};
 
     /// The files outside this module and its tables whose reads of its API sit behind a named
     /// hold, each with it: P14.T52.c's loop, a pure module. **P14.T54.b deletes this list** with
@@ -1285,7 +1287,9 @@ mod tests {
 
     /// Each refusal is its own: a row that is no aerosol material, a phase or variant with no
     /// file, a file whose density is not the row's or not read, a size off the grid, and a
-    /// temperature that is not finite.
+    /// temperature that is not finite. Solid argon, solid hydrogen sulphide in its phase I and
+    /// liquid sulphur are refused under the registry's hold and resolve under 24's rules
+    /// (P14.T49.n); hydrogen sulphide's phase II is refused under both.
     #[test]
     fn substance_aerosol_refuses_what_it_cannot_serve() {
         let mode = gamma(1e-6, 0.1);
@@ -1318,14 +1322,21 @@ mod tests {
                 "{key} {phase:?} {variant:?}"
             );
         }
-        for (key, phase, variant, temperature) in [
+        // Refused at 23 and 24: a variant whose density is not the row's, water's solid above
+        // its triple point, and hydrogen sulphide's phase II, whose density is not read.
+        let never = [
             ("H2SO4", liquid, Some("84.5wt%"), 250.0),
             ("H2O", liquid, Some("S35"), 290.0),
+            ("H2O", solid, None, 300.0),
+            ("H2S", solid, None, 110.0),
+        ];
+        // Read at 24 (P14.T49.n), refused under the hold.
+        let read_at_24 = [
             ("Ar", solid, None, 60.0),
             ("H2S", solid, None, 150.0),
             ("S8", liquid, None, 400.0),
-            ("H2O", solid, None, 300.0),
-        ] {
+        ];
+        let refused = |(key, phase, variant, temperature): (&str, _, Option<&str>, f64)| {
             assert!(
                 matches!(
                     resolve(key, phase, variant, &mode, Kelvin::new(temperature)),
@@ -1333,7 +1344,19 @@ mod tests {
                 ),
                 "{key} {phase:?} {variant:?}"
             );
-        }
+        };
+        with_read_densities(ReadDensitiesRules::Held, || {
+            never.into_iter().chain(read_at_24).for_each(refused);
+        });
+        with_read_densities(ReadDensitiesRules::Read, || {
+            never.into_iter().for_each(refused);
+            for (key, phase, variant, temperature) in read_at_24 {
+                let optics = resolve(key, phase, variant, &mode, Kelvin::new(temperature))
+                    .unwrap_or_else(|e| panic!("{key} {phase:?} resolves at 24: {e:?}"));
+                let kappa = optics.mass_extinction_m2_per_kg();
+                assert!(kappa.is_finite() && kappa > 0.0, "{key} {phase:?}: {kappa}");
+            }
+        });
         for off in [
             gamma(0.5e-9, 0.1),
             gamma(150e-6, 0.1),

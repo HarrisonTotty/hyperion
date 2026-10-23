@@ -9,6 +9,7 @@ use super::*;
 use crate::planetary::chem::partition::{
     ClimateSpan, ColumnInventory, Cover, CrustWater, Ground, WaterCover, partition,
 };
+use crate::substance::liquid_properties;
 use crate::units::{KilogramsPerCubicMetre, MetresPerSecondSquared};
 
 fn id(key: &str) -> SubstanceId {
@@ -837,13 +838,13 @@ fn a_solution_takes_its_own_record_or_its_solvent_s_and_an_unrecorded_liquid_nit
     let solved = liquid_entry_bond(seas, &titan, &sun.bins);
     assert_eq!(solved.stand_in, None);
     let lies_at = titan.condensate(id("CH4")).unwrap().lies_at();
-    let own = liquid_record(id("ch4_c2h6_n2"), lies_at)
+    let own = liquid_record(id("ch4_c2h6_n2"), lies_at, titan.surface_pressure())
         .in_range()
         .unwrap();
     assert_same_bits(solved.bond, liquid_bond(&own, &sun.bins));
     // The solvent's record remains the stand-in for a solution without one of its own.
     assert!(matches!(
-        liquid_record(id("brine_naclo4"), kelvin(250.0)),
+        liquid_record(id("brine_naclo4"), kelvin(250.0), Pascals::ZERO),
         LiquidRecord::Unrecorded
     ));
     let sea = partitioned(
@@ -863,14 +864,18 @@ fn a_solution_takes_its_own_record_or_its_solvent_s_and_an_unrecorded_liquid_nit
     let own_sea = liquid_entry_bond(carbon_dioxide, &sea, &sun.bins);
     assert_eq!(own_sea.stand_in, None);
     let lies_at = sea.condensate(id("CO2")).unwrap().lies_at();
-    let record = liquid_record(id("CO2"), lies_at).in_range().unwrap();
+    let record = liquid_record(id("CO2"), lies_at, sea.surface_pressure())
+        .in_range()
+        .unwrap();
     assert_same_bits(own_sea.bond, liquid_bond(&record, &sun.bins));
     // A liquid without a record takes liquid nitrogen's index at its normal boiling point.
     let stood = unrecorded_liquid_bond();
     assert!((0.04..0.05).contains(&stood), "{stood}");
     let boiling = nitrogen_normal_boiling_point();
     assert!((boiling.value() - 77.355).abs() < 0.01, "{boiling:?}");
-    let nitrogen = liquid_record(id("N2"), boiling).in_range().unwrap();
+    let nitrogen = liquid_record(id("N2"), boiling, Pascals::ZERO)
+        .in_range()
+        .unwrap();
     let index = nitrogen.refractive_index_at(STAND_IN_INDEX_WAVELENGTH_NM);
     assert_same_bits(stood, diffuse_fresnel_reflectance(index));
     eprintln!(
@@ -906,14 +911,14 @@ fn a_liquid_s_record_is_held_into_its_range_by_name() {
             continue;
         };
         for below in [lowest - 10.0, f64::NEG_INFINITY] {
-            let held = liquid_record(id(key), kelvin(below));
+            let held = liquid_record(id(key), kelvin(below), Pascals::ZERO);
             assert!(
                 matches!(held, LiquidRecord::InRange(_)),
                 "{key} at {below} K"
             );
             same(&held, &at_lowest);
         }
-        let nan = liquid_record(id(key), kelvin(f64::NAN));
+        let nan = liquid_record(id(key), kelvin(f64::NAN), Pascals::ZERO);
         assert!(matches!(nan, LiquidRecord::AtFirstMelt(_)), "{key}");
         same(&nan, &at_lowest);
         // The range's upper bound as the record states it: the row's critical point, or for a
@@ -925,7 +930,7 @@ fn a_liquid_s_record_is_held_into_its_range_by_name() {
         if let Some(critical) = critical {
             let near = record(key, critical.value() * (1.0 - 1e-6)).unwrap();
             for above in [critical.value(), critical.value() + 50.0, f64::INFINITY] {
-                let held = liquid_record(id(key), kelvin(above));
+                let held = liquid_record(id(key), kelvin(above), Pascals::ZERO);
                 assert!(
                     matches!(held, LiquidRecord::InRange(_)),
                     "{key} at {above} K"
@@ -933,7 +938,7 @@ fn a_liquid_s_record_is_held_into_its_range_by_name() {
                 same(&held, &near);
             }
         } else {
-            let infinite = liquid_record(id(key), kelvin(f64::INFINITY));
+            let infinite = liquid_record(id(key), kelvin(f64::INFINITY), Pascals::ZERO);
             assert!(matches!(infinite, LiquidRecord::AtFirstMelt(_)), "{key}");
             same(&infinite, &at_lowest);
             beyond_no_critical_point += 1;
@@ -941,14 +946,17 @@ fn a_liquid_s_record_is_held_into_its_range_by_name() {
     }
     eprintln!("liquids with a record and no critical point: {beyond_no_critical_point}");
     let inside = record("H2O", 288.0).unwrap();
-    same(&liquid_record(id("H2O"), kelvin(288.0)), &inside);
+    same(
+        &liquid_record(id("H2O"), kelvin(288.0), Pascals::ZERO),
+        &inside,
+    );
     // Rows with no liquid record (P14.T49.h's melts leave these out).
     for (key, t) in [
         ("ca_al_residue", 1_500.0),
         ("iron_nickel", 2_000.0),
         ("ca_al_residue", f64::NAN),
     ] {
-        let none = liquid_record(id(key), kelvin(t));
+        let none = liquid_record(id(key), kelvin(t), Pascals::ZERO);
         assert!(matches!(none, LiquidRecord::Unrecorded), "{key} at {t} K");
         assert!(none.in_range().is_none(), "{key} at {t} K");
     }
@@ -1257,4 +1265,175 @@ fn the_rayleigh_floor_is_held_only_until_the_24_bump() {
         RayleighFloorRules::Floored
     );
     assert_eq!(RayleighFloorRules::in_force(), RayleighFloorRules::Held);
+}
+
+/// P14.T49.n's compression, held until 24 (`COMPRESSED_LIQUIDS_VERSION`): the area mix reads a
+/// sea's record at the temperature its condensate lies at under its partition's surface pressure,
+/// so that from 24 the Bond albedo's liquid and the partition's layer read one `ρ_l`(T, p)
+/// (decision-p14-t54a-water-consistency's W4). By hand, a water sea at about 288 K under 20 bar of
+/// nitrogen: under 23's rules its Bond albedo is the saturated record's, to the bit; under 24's its
+/// record's density is the registry's law at its condensate's temperature and the surface
+/// pressure, the density its published layer reads, to the bit, about 9 × 10⁻⁴ above the
+/// saturated liquid's (`κ_T` Δp), and its Bond albedo that record's.
+#[test]
+fn under_compression_the_area_mix_s_sea_reads_its_layer_s_density() {
+    use crate::substance::{CompressedLiquidsRules, with_compressed_liquids};
+
+    let compressed = CompressedLiquidsRules::Compressed;
+    let water = id("H2O");
+    let sun = HostShade::sun();
+    // By hand: Earth's water column under 20 bar of nitrogen, its sea Earth's surface water.
+    let earth_column = |kg: f64| kg * 9.82 / (4.0 * core::f64::consts::PI * 6.371e6 * 6.371e6);
+    let profile = |t: Kelvin| ((t.value() - 270.0) / 60.0).clamp(0.0, 1.0);
+    let cover = Cover {
+        cold_area: &profile,
+        state: SurfaceState::Temperate,
+        water: WaterCover {
+            surface_water: KilogramsPerSquareMetre::new(2.7e6),
+            potential_ocean: 0.7,
+            ice_fraction: 0.0,
+            ice_density: KilogramsPerCubicMetre::new(917.0),
+            crust_water: CrustWater::Unlisted,
+        },
+    };
+    let by_hand = || {
+        let world = partitioned(
+            (280.0, 288.0, 300.0),
+            vec![
+                (water, Pascals::new(earth_column(1.4e21))),
+                (id("N2"), Pascals::new(2e6)),
+            ],
+            9.82,
+        );
+        let sea = *world
+            .publish(&cover)
+            .entry(water, CondensatePhase::Liquid)
+            .expect("the world holds a sea");
+        let lies_at = world.condensate(water).unwrap().lies_at();
+        let pressure = world.surface_pressure();
+        let bond = liquid_entry_bond(&sea, &world, &sun.bins);
+        let record = liquid_record(water, lies_at, pressure).in_range().unwrap();
+        (sea, (lies_at, pressure), bond, record)
+    };
+    let (_, (t, p), held, held_record) = by_hand();
+    let (sea, state, moved, record) = with_compressed_liquids(compressed, by_hand);
+    assert_eq!(
+        held_record,
+        liquid_properties(water, t, Composition::Reference).unwrap()
+    );
+    assert_same_bits(held.bond, liquid_bond(&held_record, &sun.bins));
+    assert_same_bits(state.0.value(), t.value());
+    assert_same_bits(state.1.value(), p.value());
+    let law = water
+        .substance()
+        .compressed_liquid_density(t, p)
+        .unwrap()
+        .value();
+    assert_same_bits(record.density_kg_m3, law);
+    assert_same_bits(
+        sea.reservoir_gel().unwrap().value(),
+        sea.reservoir().value() / law,
+    );
+    assert_same_bits(moved.bond, liquid_bond(&record, &sun.bins));
+    assert_eq!((held.stand_in, moved.stand_in), (None, None));
+    assert!(
+        (moved.bond - held.bond).abs() > 1e-6,
+        "{moved:?} against {held:?}"
+    );
+    let relative = record.density_kg_m3 / held_record.density_kg_m3 - 1.0;
+    assert!((5e-4..2e-3).contains(&relative), "{relative:e}");
+    eprintln!(
+        "a water sea at {:.2} K under {:.0} Pa: ρ {:.4} → {:.4} kg m⁻³ ({relative:.3e}), Bond \
+         albedo {:.9} → {:.9}",
+        t.value(),
+        p.value(),
+        held_record.density_kg_m3,
+        record.density_kg_m3,
+        held.bond,
+        moved.bond
+    );
+}
+
+/// P14.T49.n's compression, held until 24 (`COMPRESSED_LIQUIDS_VERSION`): the area mix's sea
+/// record is the one the palette's liquid entry reads (`liquid_properties_at_pressure`), so that
+/// from 24 the Bond albedo's liquid and the palette's read one `ρ_l`(T, p) at one state (W4). On
+/// the record, `close_binary`'s `.0800`, a steam world's sea under 213 bar at about 583 K (the
+/// partition's record test's body): read inside the switch, the palette's liquid entry's grain
+/// density and the area mix's record at the entry's temperature under the record's surface pressure
+/// are the same bits, and so is the whole record, more than 2% above the saturated liquid's; under
+/// 23's rules both are the saturated liquid's. Each reader keeps its own temperature, the area mix
+/// its condensate's `lies_at` and the palette the record's mean held at the boiling point
+/// (decision-p14-t54a-water-consistency's Batch B follow-up), and its own surface pressure, the
+/// partition's and the record's conditions'.
+#[test]
+fn under_compression_the_area_mix_s_sea_reads_the_palette_s_density() {
+    use hyperion_surface::field::PaletteRole;
+
+    use crate::Seed;
+    use crate::galaxy::Galaxy;
+    use crate::galaxy::params::GalaxyParams;
+    use crate::id::SystemId;
+    use crate::planetary::context::SystemContext;
+    use crate::planetary::surface::{CoarseInputs, RECORD_TIME};
+    use crate::planetary::system::generate;
+    use crate::substance::{CompressedLiquidsRules, CondensedPhase, with_compressed_liquids};
+
+    let compressed = CompressedLiquidsRules::Compressed;
+    let water = id("H2O");
+    // tests/planetary_golden.rs's `SYSTEMS_SEED` and close_binary's pinned ID.
+    let galaxy = Galaxy::from_params(
+        Seed::new(0x5eed_0000_0014_0032),
+        GalaxyParams::milky_way_like(),
+    )
+    .expect("the Milky Way fixture's gas is mostly neutral");
+    let system = SystemId::from_raw(0x4200_2cb2_0000_0009).expect("a pinned ID is well formed");
+    let ctx = SystemContext::for_system(&galaxy, system).expect("a pinned ID names a system");
+    let on_the_record = || {
+        let snapshot = generate(galaxy.seed(), &ctx).snapshot_at(&ctx, RECORD_TIME);
+        let record = snapshot
+            .bodies()
+            .iter()
+            .find(|record| record.index().get() == 0x0800)
+            .expect("close_binary holds its .0800");
+        let surface = record.surface().ok().expect(".0800 has a surface");
+        let pressure = surface.conditions().surface_pressure();
+        let inputs = CoarseInputs::for_body(record, None, &ctx).expect(".0800 reads its inputs");
+        let entry = inputs
+            .palette()
+            .entries()
+            .iter()
+            .find(|e| e.role == PaletteRole::Liquid && e.substance.as_str() == "H2O")
+            .expect(".0800's palette holds its sea")
+            .clone();
+        let sea = entry.liquid.expect("a sea carries its record");
+        let area_mix = liquid_record(water, sea.temperature, pressure)
+            .in_range()
+            .expect("the entry's temperature lies in water's range");
+        (entry.grain_density_kg_m3, sea, area_mix, pressure)
+    };
+    let (held_grain, held_sea, held_mix, _) = on_the_record();
+    let (grain, sea, mix, pressure) = with_compressed_liquids(compressed, on_the_record);
+    let saturated = water
+        .substance()
+        .grain_density(CondensedPhase::Liquid, held_sea.temperature)
+        .unwrap()
+        .value();
+    for (grain, sea, mix) in [(held_grain, &held_sea, &held_mix), (grain, &sea, &mix)] {
+        assert_same_bits(mix.density_kg_m3, grain);
+        assert_eq!(mix, sea);
+    }
+    assert_same_bits(held_grain, saturated);
+    let law = water
+        .substance()
+        .compressed_liquid_density(sea.temperature, pressure)
+        .unwrap()
+        .value();
+    assert_same_bits(grain, law);
+    assert!(grain > 1.02 * saturated, "{grain} against {saturated}");
+    eprintln!(
+        "close_binary .0800 under {:.4} bar: the palette's sea at {:.3} K and the area mix's \
+         record there, ρ {held_grain:.4} → {grain:.4} kg m⁻³",
+        pressure.value() / 1e5,
+        sea.temperature.value()
+    );
 }

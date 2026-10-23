@@ -86,6 +86,8 @@
 //! snapshot path's Bond albedo is the larger of the area mix and the floor
 //! (`surface_mix::floored`), held at 24 ([`RAYLEIGH_FLOOR_VERSION`]). P14.T24.h.b replaces the max
 //! with the adding rule, and adds the haze and the absorbers.
+//!
+//! [`liquid_properties`]: crate::substance::liquid_properties
 
 use hyperion_surface::field::{LIQUID_BINS, LiquidProperties, MechanicsFamily};
 
@@ -100,7 +102,7 @@ use crate::substance::optics::{SPECTRAL_BIN_EDGES_NM, SPECTRAL_BINS};
 use crate::substance::rayleigh::{RAYLEIGH_REFERENCE_WAVELENGTH_NM, gas_cross_section};
 use crate::substance::{
     Composition, LIQUID_BIN_EDGES_NM, ResolveLiquidError, SubstanceId, by_key, diagram,
-    liquid_properties,
+    liquid_properties_at_pressure,
 };
 use crate::tables::gauss_legendre::{GL8_NODES, GL8_WEIGHTS};
 use crate::units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K;
@@ -1000,7 +1002,7 @@ impl LiquidRecord {
     }
 }
 
-/// The record of the liquid `id` at `temperature` at its reference composition
+/// The record of the liquid `id` at `temperature` at its reference composition under `pressure`
 /// ([`LiquidRecord`]), each case named so that a row with a record is never read as having none:
 ///
 /// - in its liquid range, its record there;
@@ -1010,21 +1012,32 @@ impl LiquidRecord {
 ///   record at its first melt, labelled ([`StandIn::RecordAtItsFirstMelt`]);
 /// - for a row not modelled as a liquid, a member its record needs not modelled (there, or at the
 ///   bound), or a composition not modelled, none.
+///
+/// Each record is the one the palette's liquid entry reads (`liquid_properties_at_pressure`):
+/// [`liquid_properties`]' saturated record to the bit until generator version 24, and from it a
+/// pure liquid's compressed to `pressure`, Pa, its index, scattering and viscosity at that density
+/// (P14.T49.n's hold, `COMPRESSED_LIQUIDS_VERSION`), so that the Bond albedo's liquid and the
+/// palette's read one `ρ_l`(T, p) at one state (decision-p14-t54a-water-consistency's W4). A
+/// pressure at or under the liquid's vapour's, zero included, gives the saturated record.
+///
+/// [`liquid_properties`]: crate::substance::liquid_properties
 #[must_use]
-fn liquid_record(id: SubstanceId, temperature: Kelvin) -> LiquidRecord {
-    let (lowest, below) = match liquid_properties(id, temperature, Composition::Reference) {
-        Ok(record) => return LiquidRecord::InRange(record),
-        Err(ResolveLiquidError::OutOfRange { lowest, below, .. }) => (lowest, below),
-        // The row has no record at this temperature, and holding it elsewhere would not give one.
-        // A component's errors cannot occur at the reference composition, which names none.
-        Err(
-            ResolveLiquidError::NotALiquid { .. }
-            | ResolveLiquidError::NotModelled { .. }
-            | ResolveLiquidError::CompositionNotModelled { .. }
-            | ResolveLiquidError::ComponentNotModelled { .. }
-            | ResolveLiquidError::CompositionOutOfRange { .. },
-        ) => return LiquidRecord::Unrecorded,
-    };
+fn liquid_record(id: SubstanceId, temperature: Kelvin, pressure: Pascals) -> LiquidRecord {
+    let (lowest, below) =
+        match liquid_properties_at_pressure(id, temperature, Composition::Reference, pressure) {
+            Ok(record) => return LiquidRecord::InRange(record),
+            Err(ResolveLiquidError::OutOfRange { lowest, below, .. }) => (lowest, below),
+            // The row has no record at this temperature, and holding it elsewhere would not give
+            // one. A component's errors cannot occur at the reference composition, which names
+            // none.
+            Err(
+                ResolveLiquidError::NotALiquid { .. }
+                | ResolveLiquidError::NotModelled { .. }
+                | ResolveLiquidError::CompositionNotModelled { .. }
+                | ResolveLiquidError::ComponentNotModelled { .. }
+                | ResolveLiquidError::CompositionOutOfRange { .. },
+            ) => return LiquidRecord::Unrecorded,
+        };
     let t = temperature.value();
     let (held, in_range) = match below {
         _ if t < lowest.value() => (lowest, true),
@@ -1033,7 +1046,7 @@ fn liquid_record(id: SubstanceId, temperature: Kelvin) -> LiquidRecord {
         // Not a number, or above a range with no critical point: no bound holds it.
         Some(_) | None => (lowest, false),
     };
-    match liquid_properties(id, held, Composition::Reference) {
+    match liquid_properties_at_pressure(id, held, Composition::Reference, pressure) {
         Ok(record) if in_range => LiquidRecord::InRange(record),
         Ok(record) => LiquidRecord::AtFirstMelt(record),
         // `NotModelled`: a member the record needs (its density) is not modelled at the bound's
@@ -1078,7 +1091,9 @@ fn nitrogen_normal_boiling_point() -> Kelvin {
 const STAND_IN_INDEX_WAVELENGTH_NM: f64 = 550.0;
 
 /// The Bond albedo of a liquid with no record: `r_d` at liquid nitrogen's index at 550 nm, read from
-/// its record ([`StandIn::IndexForAnUnrecordedLiquid`]), with no body term.
+/// its record ([`StandIn::IndexForAnUnrecordedLiquid`]), with no body term: its saturated record,
+/// at its normal boiling point the liquid under its own vapour's one atmosphere, under either rule
+/// of P14.T49.n's compression.
 ///
 /// # Panics
 ///
@@ -1086,18 +1101,19 @@ const STAND_IN_INDEX_WAVELENGTH_NM: f64 = 550.0;
 #[must_use]
 fn unrecorded_liquid_bond() -> f64 {
     let nitrogen = Gas::Nitrogen.substance();
-    let record = liquid_record(nitrogen, nitrogen_normal_boiling_point())
+    let record = liquid_record(nitrogen, nitrogen_normal_boiling_point(), Pascals::ZERO)
         .in_range()
         .expect("nitrogen's row has a liquid record at its normal boiling point (P14.T49.h)");
     diffuse_fresnel_reflectance(record.refractive_index_at(STAND_IN_INDEX_WAVELENGTH_NM))
 }
 
 /// The liquid entry `entry`'s Bond albedo under the light `bins` ([`liquid_shares`]), from its
-/// P14.T49.h record at the temperature its condensate lies at in `partition` ([`liquid_record`]):
-/// at a temperature no bound of its range holds, its record at its first melt
-/// ([`StandIn::RecordAtItsFirstMelt`]); a solution without a record takes its solvent's
-/// ([`StandIn::SolventForASolution`]), and a row without one `r_d` at liquid nitrogen's index
-/// ([`StandIn::IndexForAnUnrecordedLiquid`]).
+/// P14.T49.h record at the temperature its condensate lies at in `partition`, under its surface
+/// pressure ([`liquid_record`]: compressed to it from generator version 24, P14.T49.n): at a
+/// temperature no bound of its range holds, its record at its first melt
+/// ([`StandIn::RecordAtItsFirstMelt`]); a solution without a record takes its solvent's, under the
+/// same pressure ([`StandIn::SolventForASolution`]), and a row without one `r_d` at liquid
+/// nitrogen's index ([`StandIn::IndexForAnUnrecordedLiquid`]).
 #[must_use]
 pub(crate) fn liquid_entry_bond(
     entry: &CondensateEntry,
@@ -1110,7 +1126,8 @@ pub(crate) fn liquid_entry_bond(
         .iter()
         .find(|c| c.liquid() == liquid);
     let temperature = condensate.map_or(partition.climate().mean(), Condensate::lies_at);
-    match liquid_record(liquid, temperature) {
+    let pressure = partition.surface_pressure();
+    match liquid_record(liquid, temperature, pressure) {
         LiquidRecord::InRange(record) => {
             return Component {
                 bond: liquid_bond(&record, bins),
@@ -1128,7 +1145,7 @@ pub(crate) fn liquid_entry_bond(
     let solvent = condensate
         .map(Condensate::substance)
         .filter(|&solvent| solvent != liquid);
-    match solvent.map(|solvent| liquid_record(solvent, temperature)) {
+    match solvent.map(|solvent| liquid_record(solvent, temperature, pressure)) {
         Some(LiquidRecord::InRange(record) | LiquidRecord::AtFirstMelt(record)) => Component {
             bond: liquid_bond(&record, bins),
             stand_in: Some(StandIn::SolventForASolution),
@@ -1511,15 +1528,24 @@ const REFERENCE_EARTH_TEMPERATURE_K: f64 = 288.0;
 /// perennial ice ([`REFERENCE_EARTH_ICE`]) at `H2O`'s frost, and the rest, its bare land, at T49.c's
 /// `basalt` regolith (under air, as it is), all under a 5,772 K Planck curve.
 ///
+/// Its ocean is the saturated liquid's under either rule of P14.T49.n's compression: a
+/// calibration's reference, not a body. Compressed to one atmosphere it would be about
+/// 4.6 × 10⁻⁵ denser (`κ_T` Δp), its index some 1.5 × 10⁻⁵ higher and `A_clear` a few parts in a
+/// million brighter, below the calibration's figures' precision; a recorded refinement.
+///
 /// # Panics
 ///
 /// Never: water's row has a liquid record at 288 K (P14.T49.h).
 #[must_use]
 pub(crate) fn reference_earth_clear_sky() -> f64 {
     let sun = sun_light();
-    let ocean = liquid_record(water(), Kelvin::new(REFERENCE_EARTH_TEMPERATURE_K))
-        .in_range()
-        .expect("water's row has a liquid record at 288 K (P14.T49.h)");
+    let ocean = liquid_record(
+        water(),
+        Kelvin::new(REFERENCE_EARTH_TEMPERATURE_K),
+        Pascals::ZERO,
+    )
+    .in_range()
+    .expect("water's row has a liquid record at 288 K (P14.T49.h)");
     let land = Regolith::of_material(SurfaceMaterial::Rock).bond(SurfaceState::Temperate, &sun.0);
     let rest = 1.0 - REFERENCE_EARTH_OCEAN - REFERENCE_EARTH_ICE;
     REFERENCE_EARTH_OCEAN * liquid_bond(&ocean, &sun.1)

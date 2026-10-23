@@ -37,7 +37,7 @@ use super::{
 };
 use crate::math;
 use crate::units::consts::BOLTZMANN_CONSTANT;
-use crate::units::{Kelvin, KilogramsPerCubicMetre};
+use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
 
 /// The slack, dimensionless, a given mole fraction may lie outside its model's range by and still
 /// be evaluated: [`LiquidComposition::new`]'s 10⁻⁹, the tolerance a composition's sum is held to,
@@ -674,7 +674,8 @@ fn component_state(
             supercooled_state(row, columns, diagram, temperature)
         }
         _ => {
-            let record = pure_record(row, columns, temperature)?;
+            // A solution is incompressible (P14.T49.n): its components at their saturated state.
+            let record = pure_record(row, columns, temperature, Pascals::ZERO)?;
             let density = KilogramsPerCubicMetre::new(record.density_kg_m3);
             Ok(ComponentState {
                 density,

@@ -2612,3 +2612,445 @@ fn a_liquid_without_a_specific_heat_has_none() {
         "{mixed} between {water} and {ammonia}"
     );
 }
+
+// P14.T49.n: the liquids' compression (decision-p14-t54a-water-consistency, its Batch B follow-up
+// of 2026-10-20, F.1 and C), held until the 23 → 24 bump.
+
+/// The rows whose liquid the compression's law reads a reference equation of state for, in
+/// registry order.
+fn compressible_rows() -> Vec<SubstanceId> {
+    let mut rows: Vec<SubstanceId> = super::super::rows::liquids::LIQUIDS
+        .iter()
+        .map(|(key, _)| row(key.as_str()))
+        .filter(|id| equation_of_state(id.substance()).is_some())
+        .collect();
+    rows.sort_unstable();
+    rows
+}
+
+/// The liquids' compression is held until P14.T54.b's bump: below it every reader takes the
+/// saturated liquid, and the tests' switch reaches 24's compressed liquids ahead of it.
+#[test]
+fn the_compressed_liquids_are_held_only_until_the_24_bump() {
+    assert!(
+        crate::GENERATOR_VERSION < COMPRESSED_LIQUIDS_VERSION,
+        "the 23 → 24 bump (P14.T54.b) compresses the record's liquids to their body's surface \
+         pressure (P14.T49.n). Delete `COMPRESSED_LIQUIDS_VERSION`, `CompressedLiquidsRules` with \
+         its `Saturated` arm, `with_compressed_liquids` and its thread's rules (and the switch in \
+         every test that sets it), the `Saturated` arms of `Substance::liquid_density_at_pressure` \
+         and `liquid_properties_at_pressure`, this test and \
+         `a_panic_inside_the_compressed_liquids_switch_sets_the_rules_back`. Re-bless the goldens \
+         it moves: \
+         tests/golden/planetary/systems/*.golden (every sea's layer and area, a pure liquid's \
+         compressed to its body's surface pressure: close_binary's and m_dwarf_resonant_chain's \
+         water, subgiant's nitrogen; through the area mix's sea records, which read the \
+         compressed record (planetary/derive/photometry/area_mix.rs's `liquid_record`, its \
+         reference Earth's ocean left saturated), every body's Bond albedo over a pure liquid \
+         sea and so every quantity the passes give it; and, through the own-ocean weight's \
+         dominance pull, every quantity of a body with a dominant pure liquid, methane's under \
+         Titan's seas included), tests/golden/planetary/partition.golden, \
+         tests/golden/planetary/surface_conditions_published.golden and \
+         tests/golden/planetary/surface_inputs.golden (the palette's liquid entries: their \
+         grain density, index, scattering and viscosity at the compressed density). \
+         tests/golden/substance/liquids.golden does not move (`liquid_properties` stays the \
+         saturated record). Then settle the record tests that read the saturated liquid: \
+         `an_earth_like_body_s_sea_record_is_measured` (surface/inputs.rs, \"a pure fluid's grain \
+         density is its saturated liquid's\"); and the tests that set the switch, whose held \
+         halves read 23's saturated liquid: \
+         `under_compression_earth_s_sea_reads_one_density`, \
+         `under_compression_a_carbon_dioxide_sea_and_its_ocean_weight_read_one_density` and \
+         `close_binary_s_sea_shrinks_under_its_compressed_water` (partition/tests.rs), \
+         `a_liquid_s_entry_reads_its_record_compressed_to_the_surface_pressure` (palette.rs), \
+         `under_compression_the_area_mix_s_sea_reads_its_layer_s_density` and \
+         `under_compression_the_area_mix_s_sea_reads_the_palette_s_density` \
+         (derive/photometry/area_mix/tests.rs) and \
+         `the_record_at_a_pressure_reads_the_compressed_density` (liquid/tests.rs)"
+    );
+    assert_eq!(
+        CompressedLiquidsRules::in_force(),
+        CompressedLiquidsRules::Saturated
+    );
+    assert_eq!(
+        with_compressed_liquids(
+            CompressedLiquidsRules::Compressed,
+            CompressedLiquidsRules::in_force
+        ),
+        CompressedLiquidsRules::Compressed
+    );
+    assert_eq!(
+        CompressedLiquidsRules::in_force(),
+        CompressedLiquidsRules::Saturated
+    );
+}
+
+/// A panic inside the tests' switch sets the rules back. Skipped, not failed, where panics abort
+/// (wasm32-wasip1), since `catch_unwind` would abort the whole test binary there; the other CI
+/// architectures run it.
+#[test]
+#[cfg(panic = "unwind")]
+fn a_panic_inside_the_compressed_liquids_switch_sets_the_rules_back() {
+    let failed = std::panic::catch_unwind(|| {
+        with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
+            panic!("a test fails inside")
+        });
+    });
+    assert!(failed.is_err());
+    assert_eq!(
+        CompressedLiquidsRules::in_force(),
+        CompressedLiquidsRules::Saturated,
+        "a panic inside the switch sets the rules back"
+    );
+}
+
+/// The law's rows are the pure liquids with a reference equation of state, each a diagram row:
+/// the thirteen with a scattering equation, sulphur dioxide (none) and every solution and melt
+/// left incompressible.
+#[test]
+fn the_compressible_liquids_are_the_pure_rows_with_an_equation_of_state() {
+    let keys: Vec<String> = compressible_rows()
+        .iter()
+        .map(|id| id.substance().key().as_str().to_owned())
+        .collect();
+    let mut expected = [
+        "H2O", "CH4", "NH3", "N2", "O2", "CO2", "Ar", "Kr", "Xe", "N2O", "CO", "H2S", "C2H6",
+    ]
+    .map(row);
+    expected.sort_unstable();
+    let expected: Vec<String> = expected
+        .iter()
+        .map(|id| id.substance().key().as_str().to_owned())
+        .collect();
+    assert_eq!(keys, expected);
+    for id in compressible_rows() {
+        let substance = id.substance();
+        assert!(
+            matches!(
+                substance.condensed().unwrap().grain_density(),
+                GrainDensity::OfDiagram
+            ),
+            "{}",
+            substance.key()
+        );
+    }
+}
+
+/// Water against NIST's isotherms (the NIST Chemistry WebBook, SRD 69, its evaluation of
+/// IAPWS-95; decision-p14-t54a-water-consistency's Batch B follow-up, F.1): at 596.41 K, 690.48
+/// kg m⁻³ under 22.5 MPa against 658.85 saturated at 11.78 MPa (+4.8%), and at 546.30 K, 765.86
+/// under 8.25 MPa against 762.165 saturated (+0.48%), the law within 0.05% of each, the
+/// registry's saturated liquid within 0.03% of NIST's and the compression's ratio within 0.03%
+/// of NIST's; the diagram's vapour pressure at 596.41 K within 0.2% of NIST's 11.78 MPa.
+#[test]
+fn water_s_compressed_liquid_meets_nist_s_isotherms() {
+    let water = row("H2O").substance();
+    let diagram = water.phase_diagram().unwrap();
+    for (t, p, nist, nist_saturated, nist_vapour) in [
+        (596.41, 22.5e6, 690.48, 658.85, Some(11.78e6)),
+        (546.30, 8.25e6, 765.86, 762.165, None),
+    ] {
+        let temperature = Kelvin::new(t);
+        let saturated = water
+            .grain_density(CondensedPhase::Liquid, temperature)
+            .unwrap()
+            .value();
+        let compressed = water
+            .compressed_liquid_density(temperature, Pascals::new(p))
+            .unwrap()
+            .value();
+        let vapour = diagram.saturation_pressure(temperature).value();
+        let ratio = compressed / saturated;
+        eprintln!(
+            "water at {t} K: saturated {saturated:.3} kg m⁻³ (NIST {nist_saturated}) at {:.4} MPa \
+             (NIST {nist_vapour:?} Pa); under {:.2} MPa {compressed:.3} (NIST {nist}, miss \
+             {:.2e}), ×{ratio:.6} (NIST ×{:.6})",
+            vapour / 1e6,
+            p / 1e6,
+            compressed / nist - 1.0,
+            nist / nist_saturated,
+        );
+        assert!(
+            (compressed / nist - 1.0).abs() < 5e-4,
+            "{t} K: {compressed}"
+        );
+        assert!((saturated / nist_saturated - 1.0).abs() < 3e-4, "{t} K");
+        assert!(
+            (ratio / (nist / nist_saturated) - 1.0).abs() < 3e-4,
+            "{t} K"
+        );
+        if let Some(nist_vapour) = nist_vapour {
+            assert!(
+                (vapour / nist_vapour - 1.0).abs() < 2e-3,
+                "{t} K: {vapour} Pa"
+            );
+        }
+    }
+}
+
+/// Earth's sea at 288.15 K under one atmosphere is denser than the saturated liquid by `κ_T` Δp,
+/// about 4.6 × 10⁻⁵ (`κ_T` = 4.67 × 10⁻¹⁰ Pa⁻¹, Δp = 101,325 − 1,705 Pa; Millero et al. 1980's
+/// secant bulk modulus, as `water_s_compressibility_is_millero_s` reads it), within 2 × 10⁻⁶.
+#[test]
+fn earth_s_sea_is_compressed_by_its_air() {
+    let water = row("H2O").substance();
+    let t = Kelvin::new(288.15);
+    let saturated = water
+        .grain_density(CondensedPhase::Liquid, t)
+        .unwrap()
+        .value();
+    let sea = water
+        .compressed_liquid_density(t, Pascals::new(101_325.0))
+        .unwrap()
+        .value();
+    let relative = sea / saturated - 1.0;
+    eprintln!("Earth's sea at 288.15 K and 1 atm: {sea:.6} against {saturated:.6}, {relative:.4e}");
+    assert!((relative - 4.6e-5).abs() < 2e-6, "{relative:e}");
+}
+
+/// The law never expands a liquid and is the registry's saturated liquid to the bit where it does
+/// not compress it: at and below each row's vapour pressure, at no pressure, at a pressure that
+/// is not a number, at the critical temperature and for every liquid with no equation of state at
+/// any pressure; above the vapour pressure it is denser, rising with the pressure, and held above
+/// the ceiling.
+#[test]
+fn the_law_compresses_and_never_expands() {
+    for id in compressible_rows() {
+        let substance = id.substance();
+        let key = substance.key();
+        let diagram = substance.phase_diagram().unwrap();
+        let (triple, critical) = (
+            diagram.triple_temperature().value(),
+            diagram.critical_temperature().value(),
+        );
+        for k in 0..=10_u32 {
+            let t = Kelvin::new(triple + (critical - triple) * f64::from(k) / 10.0);
+            let saturated = substance
+                .grain_density(CondensedPhase::Liquid, t)
+                .unwrap()
+                .value();
+            let vapour = diagram.saturation_pressure(t).value();
+            for p in [0.0, -1.0, f64::NAN, vapour * 0.5, vapour] {
+                let law = substance
+                    .compressed_liquid_density(t, Pascals::new(p))
+                    .unwrap();
+                assert_same_bits(law.value(), saturated);
+            }
+            if k == 10 {
+                continue;
+            }
+            let mut last = saturated;
+            for p in [vapour * 1.001 + 1.0, vapour + 1e6, vapour + 2e7, 1e8, 1e9] {
+                let law = substance
+                    .compressed_liquid_density(t, Pascals::new(p))
+                    .unwrap()
+                    .value();
+                assert!(
+                    law.is_finite() && law > last,
+                    "{key} at {t:?} under {p} Pa: {law}"
+                );
+                last = law;
+            }
+            let held = substance
+                .compressed_liquid_density(t, Pascals::new(f64::INFINITY))
+                .unwrap()
+                .value();
+            assert_same_bits(held, last);
+        }
+    }
+    for key in [
+        "SO2",
+        "brine_nacl",
+        "nh3_h2o",
+        "ch4_c2h6_n2",
+        "H2SO4",
+        "basalt",
+    ] {
+        let substance = row(key).substance();
+        let t = Kelvin::new(300.0);
+        let stated = substance.grain_density(CondensedPhase::Liquid, t);
+        for p in [0.0, 1e5, 1e8] {
+            let law = substance.compressed_liquid_density(t, Pascals::new(p));
+            match (law, stated) {
+                (Some(law), Some(stated)) => assert_same_bits(law.value(), stated.value()),
+                (None, None) => {}
+                (law, stated) => panic!("{key} under {p} Pa: {law:?} against {stated:?}"),
+            }
+        }
+    }
+}
+
+/// The compression's fixed count meets the pressure to rounding: on every compressible row, over
+/// its liquid range to a part in a thousand below its critical point and from just above its
+/// vapour pressure to the ceiling, [`COMPRESSION_STEPS`] steps leave the pressure within 10⁻⁹ of
+/// the target, or within 10⁻³ Pa, the rounding of a dense liquid's pressure (whose `ρRT` is about
+/// 10⁸ Pa), and are where eight more steps leave them, within 10⁻¹², denser than the saturated
+/// liquid. Each row prints the most steps any case needed to come within 10⁻¹³ of where 64 leave
+/// it.
+#[test]
+fn the_compression_converges_over_every_row_s_liquid_range() {
+    use super::super::helmholtz::COMPRESSION_STEPS;
+    // The steps the iteration takes to come within 10⁻¹³ of where 64 leave it.
+    let steps_needed = |equation: &HelmholtzResidual, start, target, t| {
+        let mut sequence = vec![start];
+        for _ in 0..64 {
+            let last = *sequence.last().unwrap();
+            sequence.push(equation.compressed_density_in(last, target, t, 1));
+        }
+        let settled: KilogramsPerCubicMetre = sequence[64];
+        sequence
+            .iter()
+            .position(|rho| (rho.value() / settled.value() - 1.0).abs() < 1e-13)
+            .unwrap()
+    };
+    for id in compressible_rows() {
+        let substance = id.substance();
+        let key = substance.key();
+        let (equation, diagram) = equation_of_state(substance).unwrap();
+        let (triple, critical) = (
+            diagram.triple_temperature().value(),
+            diagram.critical_temperature().value(),
+        );
+        let mut worst = (0, 0.0, 0.0, 0.0);
+        let mut worst_miss: f64 = 0.0;
+        for fraction in [
+            0.0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.98, 0.99, 0.995, 0.999,
+        ] {
+            let t = Kelvin::new(triple + (critical - triple) * fraction);
+            let saturated = substance.grain_density(CondensedPhase::Liquid, t).unwrap();
+            let vapour = diagram.saturation_pressure(t);
+            let at_vapour = equation.density_at_pressure(saturated, vapour, t);
+            for p in [
+                vapour.value() * 1.01 + 1e3,
+                vapour.value() + 1e5,
+                vapour.value() + 1e6,
+                vapour.value() + 1e7,
+                22.5e6_f64.max(vapour.value() * 1.5),
+                1e8,
+                3e8,
+                1e9,
+            ] {
+                let target = Pascals::new(p);
+                let rho = equation.compressed_density(at_vapour, target, t);
+                let more =
+                    equation.compressed_density_in(at_vapour, target, t, COMPRESSION_STEPS + 8);
+                let off = equation.pressure(rho, t).value() - p;
+                let miss = off / p;
+                let settled = rho.value() / more.value() - 1.0;
+                assert!(
+                    (miss.abs() < 1e-9 || off.abs() < 1e-3) && settled.abs() < 1e-12,
+                    "{key} at {t:?} under {p} Pa: ρ {rho:?}, p miss {miss:e}, {settled:e} from \
+                     {more:?}"
+                );
+                assert!(rho > at_vapour, "{key} at {t:?} under {p} Pa");
+                let needed = steps_needed(equation, at_vapour, target, t);
+                if needed > worst.0 {
+                    worst = (needed, t.value(), p, rho.value() / at_vapour.value());
+                }
+                worst_miss = worst_miss.max(miss.abs());
+            }
+        }
+        eprintln!(
+            "{key}: at most {} of {COMPRESSION_STEPS} steps (at {:.3} K under {:.3e} Pa, ×{:.4}), \
+             pressure miss at most {worst_miss:.1e}",
+            worst.0, worst.1, worst.2, worst.3
+        );
+    }
+}
+
+/// A step that is not finite ends the compression at the density it would step from, rather than
+/// carrying a density that is not a number onto the record: at a temperature that is not a
+/// number every step is, and water's compression gives back its start to the bit.
+#[test]
+fn a_step_that_is_not_finite_ends_the_compression_at_its_last_density() {
+    let (equation, _) = equation_of_state(row("H2O").substance()).unwrap();
+    let start = KilogramsPerCubicMetre::new(997.0);
+    let rho = equation.compressed_density(start, Pascals::new(1e7), Kelvin::new(f64::NAN));
+    assert_same_bits(rho.value(), start.value());
+}
+
+/// The record at a pressure is [`liquid_properties`]' to the bit under 23's rules, for a pure
+/// liquid, a solution and a melt at any pressure; under 24's, a pure liquid's density is the
+/// law's at the record's temperature to the bit (W4: the palette reads the partition's density),
+/// its index carried to it, its scattering's `κ_T` there and its viscosity there, and a
+/// solution's and a melt's record are unchanged.
+#[test]
+fn the_record_at_a_pressure_reads_the_compressed_density() {
+    let cases = [
+        ("H2O", 288.15, 101_325.0),
+        ("H2O", 596.41, 22.5e6),
+        ("CH4", 93.65, 1.5e5),
+        ("N2", 64.2, 1.52e4),
+        ("CO2", 250.0, 5e6),
+        ("ch4_c2h6_n2", 93.65, 1.5e5),
+        ("brine_nacl", 280.0, 1e7),
+        ("basalt", 1_500.0, 1e7),
+    ];
+    for (key, t, p) in cases {
+        let id = row(key);
+        let temperature = Kelvin::new(t);
+        let pressure = Pascals::new(p);
+        let saturated = liquid_properties(id, temperature, Composition::Reference).unwrap();
+        let held = liquid_properties_at_pressure(id, temperature, Composition::Reference, pressure)
+            .unwrap();
+        assert_eq!(held, saturated, "{key}");
+        let compressed = with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
+            liquid_properties_at_pressure(id, temperature, Composition::Reference, pressure)
+        })
+        .unwrap();
+        if equation_of_state(id.substance()).is_none() {
+            assert_eq!(compressed, saturated, "{key}");
+            continue;
+        }
+        let law = id
+            .substance()
+            .compressed_liquid_density(temperature, pressure)
+            .unwrap();
+        assert_same_bits(compressed.density_kg_m3, law.value());
+        let held_density = with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
+            id.substance()
+                .liquid_density_at_pressure(temperature, pressure)
+        })
+        .unwrap();
+        assert_same_bits(held_density.value(), law.value());
+        assert!(compressed.density_kg_m3 > saturated.density_kg_m3, "{key}");
+        let carried = carry_index(
+            &saturated.refractive_index,
+            KilogramsPerCubicMetre::new(saturated.density_kg_m3),
+            law,
+        );
+        for (ours, theirs) in compressed.refractive_index.iter().zip(carried) {
+            assert!(
+                (ours / theirs - 1.0).abs() < 1e-12,
+                "{key}: {ours} against {theirs}"
+            );
+        }
+        let columns = id.substance().liquid().unwrap();
+        let equation = columns.scattering().unwrap().equation();
+        let kappa = equation.isothermal_compressibility_per_pa(law, temperature);
+        let saturated_kappa = equation.isothermal_compressibility_per_pa(
+            KilogramsPerCubicMetre::new(saturated.density_kg_m3),
+            temperature,
+        );
+        assert!(
+            kappa < saturated_kappa,
+            "{key}: κ_T falls as the liquid is compressed"
+        );
+        if let Some(viscosity) = columns.viscosity() {
+            let (mu, _) = viscosity.viscosity_pa_s(temperature, law);
+            assert_same_bits(compressed.viscosity_pa_s.unwrap(), mu);
+        }
+        eprintln!(
+            "{key} at {t} K under {p:.4e} Pa: ρ {:.4} → {:.4} kg m⁻³, n(545 nm) {:.6} → {:.6}, \
+             b(380–405 nm) {:?} → {:?}, μ {:?} → {:?}, {:?} → {:?}",
+            saturated.density_kg_m3,
+            compressed.density_kg_m3,
+            saturated.refractive_index[6],
+            compressed.refractive_index[6],
+            saturated.scattering_per_m.map(|b| b[0]),
+            compressed.scattering_per_m.map(|b| b[0]),
+            saturated.viscosity_pa_s,
+            compressed.viscosity_pa_s,
+            saturated.basis,
+            compressed.basis,
+        );
+    }
+}

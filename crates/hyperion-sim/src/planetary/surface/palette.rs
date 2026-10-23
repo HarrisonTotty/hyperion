@@ -66,10 +66,17 @@
 //! - **the composition:** its row's reference composition, since P14.T51.a's entry carries none
 //!   yet, basis `Derived` for a solution; between a solution's first melt and its reference
 //!   composition's liquidus the record is that composition's supercooled liquid, a stated
-//!   stand-in, basis `Derived` ([`liquid_properties`]' own rule).
+//!   stand-in, basis `Derived` ([`liquid_properties`]' own rule);
+//! - **the pressure:** the record's surface pressure, to which a pure liquid with a reference
+//!   equation of state is compressed from generator version 24 (P14.T49.n's hold,
+//!   `COMPRESSED_LIQUIDS_VERSION`; `Substance::compressed_liquid_density`'s law), so that its
+//!   density, its index, its scattering and its viscosity read the density the partition's layer
+//!   and area read at the same state (decision-p14-t54a-water-consistency's W4); until then the
+//!   saturated liquid's. A solution and a melt are incompressible under either.
 //!
 //! Its entry's grain density is the record's density, P14.T49.h's at the record's temperature and
-//! composition, which for a pure fluid is the row's saturated liquid's there; its normal albedo
+//! composition, which for a pure fluid is the row's saturated liquid's there until generator
+//! version 24, and from it that liquid compressed to the surface pressure; its normal albedo
 //! the record's Fresnel reflectance ([`LiquidProperties::fresnel_normal_albedo_bvr`],
 //! decision-r11-palette-liquids §2 item 7), a specular surface's; its phase row 0, no particulate
 //! law; its transition and mechanics its row's condensed columns' (its frozen form's family). No
@@ -88,6 +95,8 @@
 //! at or above the solidus, a melt's range having no upper end; P14.T51.c states no eruption
 //! temperature. A row with no melt model (graphite's) carries none: the entry is drawn solid, a
 //! recorded limitation.
+//!
+//! [`liquid_properties`]: crate::substance::liquid_properties
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -106,8 +115,8 @@ use crate::planetary::hooks::crust::CrustComposition;
 use crate::planetary::hooks::surface::{ColdProfile, SurfaceConditions};
 use crate::planetary::record::Surface;
 use crate::substance::{
-    Composition, ResolveLiquidError, ResolvePaletteEntryError, SubstanceId, liquid_properties,
-    resolve_palette_entry,
+    Composition, ResolveLiquidError, ResolvePaletteEntryError, SubstanceId,
+    liquid_properties_at_pressure, resolve_palette_entry,
 };
 use crate::units::{Kelvin, Pascals};
 
@@ -394,13 +403,15 @@ fn liquid(
 
 /// The record of the liquid `id` at its reference composition under the climate `conditions`: at
 /// the record's mean surface temperature held at most its boiling point at the surface pressure,
-/// and, outside its range, at the range's bound the temperature lies beyond (the [module](self)'s
-/// "A liquid's record").
+/// and, outside its range, at the range's bound the temperature lies beyond, under the surface
+/// pressure (the [module](self)'s "A liquid's record").
 ///
 /// # Errors
 ///
 /// [`liquid_properties`]' refusal: the row is no liquid, a member its record needs is not modelled
 /// (there or at the bound), or the range has no bound that holds the temperature.
+///
+/// [`liquid_properties`]: crate::substance::liquid_properties
 fn liquid_record(
     id: SubstanceId,
     conditions: &SurfaceConditions,
@@ -414,18 +425,26 @@ fn liquid_record(
         Some(boiling) if mean > boiling => boiling,
         Some(_) | None => mean,
     };
-    in_range(id, temperature)
+    in_range(id, temperature, conditions.surface_pressure())
 }
 
 /// The record of the liquid `id` at its reference composition at `temperature`, or, outside its
 /// range, at the bound `temperature` lies beyond: its first melt below it, a part in a million
-/// below its critical point above it.
+/// below its critical point above it; under `pressure`, the body's surface pressure, to which a
+/// pure liquid is compressed from generator version 24 (`liquid_properties_at_pressure`,
+/// P14.T49.n's hold; its saturated record, [`liquid_properties`]', until then).
 ///
 /// # Errors
 ///
 /// [`liquid_properties`]' refusal, there or at the bound.
-fn in_range(id: SubstanceId, temperature: Kelvin) -> Result<LiquidProperties, ResolveLiquidError> {
-    match liquid_properties(id, temperature, Composition::Reference) {
+///
+/// [`liquid_properties`]: crate::substance::liquid_properties
+fn in_range(
+    id: SubstanceId,
+    temperature: Kelvin,
+    pressure: Pascals,
+) -> Result<LiquidProperties, ResolveLiquidError> {
+    match liquid_properties_at_pressure(id, temperature, Composition::Reference, pressure) {
         Err(ResolveLiquidError::OutOfRange { lowest, below, .. }) => {
             let held = match below {
                 Some(critical) if temperature >= critical => {
@@ -434,7 +453,7 @@ fn in_range(id: SubstanceId, temperature: Kelvin) -> Result<LiquidProperties, Re
                 // Below the first melt, or a temperature that is not a number.
                 Some(_) | None => lowest,
             };
-            liquid_properties(id, held, Composition::Reference)
+            liquid_properties_at_pressure(id, held, Composition::Reference, pressure)
         }
         answer => answer,
     }
@@ -473,7 +492,7 @@ fn melt_record(
     } else {
         solidus
     };
-    let mut record = match in_range(id, temperature) {
+    let mut record = match in_range(id, temperature, conditions.surface_pressure()) {
         Ok(record) => record,
         // A row with no melt model (graphite's), or a member its record needs not modelled: the
         // entry is drawn solid, a recorded limitation (the module's "A melt's record").
@@ -502,7 +521,9 @@ mod tests {
 
     use super::*;
     use crate::planetary::hooks::crust::tests::{mars, moon, table_conditions};
-    use crate::substance::by_key;
+    use crate::substance::{
+        CompressedLiquidsRules, CondensedPhase, by_key, liquid_properties, with_compressed_liquids,
+    };
 
     /// The registry's row of `key`, which a test knows to be one.
     fn row(key: &str) -> SubstanceId {
@@ -538,6 +559,87 @@ mod tests {
         );
     }
 
+    /// P14.T49.n's compression, held until 24 (`COMPRESSED_LIQUIDS_VERSION`): under 23's rules a
+    /// pure liquid's entry is its saturated liquid's at the record's temperature, to the bit; under
+    /// 24's its grain density is the registry's law at the record's temperature and surface
+    /// pressure to the bit, the density the partition's layer and area read at the same state
+    /// (W4), and its record is the record at that pressure, its index, scattering and viscosity at
+    /// that density: water under the table's Earth, about 3.5 × 10⁻⁵ denser under its 0.77 bar
+    /// (`κ_T` Δp, as Earth's sea's 4.6 × 10⁻⁵ at one atmosphere). Water held at its
+    /// boiling point under the table's Venus lies at its vapour pressure, so it is compressed by
+    /// no more than rounding, and a solution's entry (Titan's seas under the table's Earth, held
+    /// below their critical point) is unchanged.
+    #[test]
+    fn a_liquid_s_entry_reads_its_record_compressed_to_the_surface_pressure() {
+        let compressed = |id: SubstanceId, conditions: &SurfaceConditions| {
+            with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
+                liquid(id, conditions)
+            })
+            .unwrap()
+        };
+        let water = row("H2O");
+        let earth = table_conditions("Earth");
+        let held = liquid(water, &earth).unwrap();
+        let record = held.liquid.as_ref().unwrap();
+        let t = record.temperature;
+        let saturated = water
+            .substance()
+            .grain_density(CondensedPhase::Liquid, t)
+            .unwrap();
+        assert_same_bits(held.grain_density_kg_m3, saturated.value());
+        assert_eq!(
+            record,
+            &liquid_properties(water, t, Composition::Reference).unwrap()
+        );
+        let sea = compressed(water, &earth);
+        let law = water
+            .substance()
+            .compressed_liquid_density(t, earth.surface_pressure())
+            .unwrap();
+        assert_same_bits(sea.grain_density_kg_m3, law.value());
+        let sea_record = sea.liquid.as_ref().unwrap();
+        assert_same_bits(sea_record.density_kg_m3, law.value());
+        assert_same_bits(sea_record.temperature.value(), t.value());
+        let at_pressure = with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
+            liquid_properties_at_pressure(
+                water,
+                t,
+                Composition::Reference,
+                earth.surface_pressure(),
+            )
+        })
+        .unwrap();
+        assert_eq!(sea_record, &at_pressure);
+        assert_eq!(
+            sea.normal_albedo_bvr,
+            at_pressure.fresnel_normal_albedo_bvr()
+        );
+        let relative = sea.grain_density_kg_m3 / held.grain_density_kg_m3 - 1.0;
+        assert!(
+            relative > 3e-5 && relative < 6e-5,
+            "{relative:e} under {:?} at {t:?}",
+            earth.surface_pressure()
+        );
+        assert!(sea_record.refractive_index[6] > record.refractive_index[6]);
+        eprintln!(
+            "water under the table's Earth, {:.2} K and {:.0} Pa: ρ {:.6} → {:.6} kg m⁻³ \
+             ({relative:.3e}), n(545 nm) {:.8} → {:.8}",
+            t.value(),
+            earth.surface_pressure().value(),
+            held.grain_density_kg_m3,
+            sea.grain_density_kg_m3,
+            record.refractive_index[6],
+            sea_record.refractive_index[6],
+        );
+        let venus = table_conditions("Venus");
+        let boiling = liquid(water, &venus).unwrap();
+        let boiling_compressed = compressed(water, &venus);
+        let moved = boiling_compressed.grain_density_kg_m3 / boiling.grain_density_kg_m3 - 1.0;
+        assert!(moved.abs() < 1e-12, "{moved:e}");
+        let seas = row("ch4_c2h6_n2");
+        assert_eq!(compressed(seas, &earth), liquid(seas, &earth).unwrap());
+    }
+
     /// A liquid's record outside its range is held inside it: a part in a million below its
     /// critical point at or above it (methane at 250 K and at its critical point), there too where
     /// its row states no saturation branch to hold it at its boiling point first (Titan's
@@ -555,7 +657,7 @@ mod tests {
         };
         let held = critical.value() * (1.0 - BELOW_CRITICAL);
         for temperature in [Kelvin::new(250.0), critical] {
-            let record = in_range(methane, temperature).unwrap();
+            let record = in_range(methane, temperature, Pascals::ZERO).unwrap();
             assert_same_bits(record.temperature.value(), held);
         }
         let earth = table_conditions("Earth");
@@ -586,7 +688,7 @@ mod tests {
         else {
             panic!("water at 200 K lies below its first melt");
         };
-        let record = in_range(water, Kelvin::new(200.0)).unwrap();
+        let record = in_range(water, Kelvin::new(200.0), Pascals::ZERO).unwrap();
         assert_same_bits(record.temperature.value(), lowest.value());
     }
 
