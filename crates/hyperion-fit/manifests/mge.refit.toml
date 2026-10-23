@@ -1,9 +1,11 @@
-# The refit of the Gaussian expansions with free widths (plan 15, P15.T3.a): `MGE_EXP`,
-# `MGE_HOLED_EXP` and `MGE_BAR`, their widths polished by Levenberg–Marquardt and their weights by
-# non-negative least squares (`src/tasks/mge/refit.rs`). Run with `--manifest` and `--out` to a
-# scratch path; plan 15's P15.T3.c swaps it in, moving these parameters into `mge.toml` and bumping
-# the task's revision. `widths` and the bar's shape are fixed by the tables and the profile; the
-# task refuses other values.
+# The refit of the Gaussian expansions with free widths (plan 15, P15.T3.a and P15.T3.b):
+# `MGE_EXP`, `MGE_HOLED_EXP` and `MGE_BAR`, their widths polished by Levenberg–Marquardt and their
+# weights by non-negative least squares (`src/tasks/mge/refit.rs`), and the boxy bulge's
+# `MGE_BOXY`, its terms' weights, widths and axis ratios polished together (the `boxy_*` keys,
+# `src/tasks/mge/boxy.rs`). Run with `--manifest` and `--out` to a scratch path; plan 15's
+# P15.T3.c swaps it in, moving these parameters into `mge.toml` and bumping the task's revision.
+# `widths`, `boxy_terms` and the bar's shape are fixed by the tables and the profile; the task
+# refuses other values.
 task = "mge"
 
 [params]
@@ -28,3 +30,17 @@ bar_start_widths = [0.04, 0.8]
 bar_minimax_scales = [0.03, 0.003, 0.05]
 minimax_iterations = 300
 bar_rounds = 6
+boxy_terms = 16
+boxy_boxiness = [3.0, 3.5, 4.0]
+boxy_range = [0.001, 40.0]
+boxy_radii = 48
+boxy_angles = 12
+boxy_monopole_weight = 3.0
+boxy_force_weight = 10.0
+boxy_monopole_reach = 12.0
+boxy_centre_weight = 1.0
+boxy_mass_weight = 3.0
+boxy_widths = [0.001, 40.0]
+boxy_axis_ratios = [0.05, 20.0]
+boxy_split = 1.1
+boxy_iterations = 300

@@ -112,10 +112,13 @@ hyperion_fit::emit::{RustTable, TableItem, Header, HeaderKind, Workspace, Destin
                      write_table, EmitTableError}
 hyperion_fit::parallel::map_reduce_chunks                      // deterministic reduction
 hyperion_fit::optimise::{golden_section, nelder_mead}          // P15.T8.a's
-hyperion_fit::optimise::{nnls, levenberg_marquardt, LeastSquaresFit}  // P15.T3.a's, as built:
+hyperion_fit::optimise::{nnls, least_squares, levenberg_marquardt, LeastSquaresFit}
+    // P15.T3.a's, as built (T3.b added `upper` and `least_squares`):
     // nnls<R: AsRef<[f64]>>(rows: &[R], rhs: &[f64]) -> Vec<f64>
+    // least_squares<R: AsRef<[f64]>>(rows: &[R], rhs: &[f64]) -> Option<Vec<f64>>
     // levenberg_marquardt(model: impl FnMut(&[f64], &mut [f64], Option<&mut [f64]>),
-    //     start: &[f64], lower: &[f64], residuals: usize, iterations: u32) -> LeastSquaresFit
+    //     start: &[f64], lower: &[f64], upper: &[f64], residuals: usize, iterations: u32)
+    //     -> LeastSquaresFit
     // LeastSquaresFit { params: Vec<f64>, sum_of_squares: f64, steps: u32 }
 hyperion_fit::data::{Dataset, Provenance, load_dataset, LoadDatasetError}
 hyperion_fit::check::{check, CheckReport}
@@ -2148,3 +2151,128 @@ fit-check`; review-changes on this lane's diff.
     `the_bessel_functions_match_their_tables_and_their_wronskian`. All are fast, under nextest in
     the dev profile on 4 test threads at load 4–6: the four that refit take 4.0–4.6 s, the
     determinism test 8.2 s (two refits), the others under 0.2 s.
+  - _Method (T3.b)._ `tasks::mge::boxy`, run with the one-dimensional refit from the same
+    manifest. For each c of 3.0, 3.5 and 4.0 it fits the unit body exp(−(R^c + |z|^c)^(1 ÷ c)),
+    R and z in its scale lengths (the ruling's point 8), with 16 terms of free weight, width and
+    q.
+    - The grid is 48 log-spaced spherical radii on [0.001, 40] by 12 latitudes at the
+      Gauss–Legendre nodes of [0, π ÷ 2] (rule computed by Newton's method on Pₙ).
+    - The residuals, in order: the density in relative error weighted by each grid point's
+      share of the mass; the latitude average (the monopole) of each radius out to 12, in
+      relative error, weighted 3; the inward pull in the plane at 0.25, 0.5, 1, 2, 4 and 8 scale
+      lengths, in relative error, weighted 10; the central density Σw against 1, weighted 1; and
+      the whole mass Σ w (2π)^(3÷2) σ³ q against the body's, weighted 3. The force and mass rows
+      are the ruling of 2026-10-23 (issue #94): weight the fit towards the enclosed mass and the
+      force at six radii.
+    - The seed is the refit's `MGE_EXP` at q = 1, the c = 2 body, its 14 weights solved by
+      `nnls` on the residuals; then the two terms carrying the most mass (w σ³) are each split
+      into two of half the weight at q = 1.1 and 1 ÷ 1.1, so that all 16 start with weight.
+    - Levenberg–Marquardt moves the weights, ln widths and ln q together, 300 iterations, with
+      an analytic Jacobian for the density rows and forward differences of 10⁻⁶ for the forces.
+      The weights are held at 0 or above by the projected step, the widths within [0.001, 40]
+      and q within [0.05, 20]. At the end the terms are sorted by width.
+    - The references: the body's mass inside a sphere by a direct integral in latitude of the
+      radial γ(3, N r) ÷ N³, which the tests hold to the spherical exponential's closed form at
+      c = 2 to 10⁻¹²; its whole mass the same at infinity, held to 3! V(c) with the sim's
+      `BoxyBulge::unit_volume` to 10⁻¹²; and its midplane pull by the multipole expansion of its
+      potential (Binney and Tremaine 2008, §2.4) to order 64, which the tests hold to a
+      brute-force integral of the force over all space along rays from the field point
+      (`boxy::midplane_force`) to 10⁻⁶ at c = 3, 3.5 and 4, and both rules to the closed form at
+      c = 2 (10⁻⁶ and 10⁻⁸).
+  - _Figures (T3.b), on the refit, per c = 3, 3.5 and 4._
+    - Mass-weighted rms relative density error: 13.3%, 17.5% and 20.7%, against plan 15's 3%.
+      Missed: the ruled structural miss (below). The best a 1,250-term dictionary reaches on the
+      same metric is 12.8% and 19.2% at c = 3 and 4.
+    - Mass inside spheres of 0.5, 1, 2 and 4 scale lengths: within 0.136%, 0.197% and 0.249%
+      at worst (1%); the whole mass within 0.136%, 0.192% and 0.245%.
+    - Midplane force at the six radii: within 0.19%, 0.27% and 0.34% at worst (2%); held within
+      2% at 17 more radii between 0.2 and 12 scale lengths.
+    - Plan 02's checks for each row: every weight positive, widths strictly ascending, q
+      positive (0.05–20).
+    - The scratch header is `@provisional` by P15.T3.b, its acceptance line stating every figure
+      and the miss.
+  - _Deviations (T3.b)._
+    1. **The density's 3% is out of reach** of a non-negative sum of axis-aligned centred Gaussians.
+       Such a sum is log-convex in (R², z²), so on each circle r = const its ln ρ̂ at the diagonal
+       is at most the mean of its two axis values, while the body's exceeds that mean by r (1 −
+       2^(1/c − 1/2)) for every c > 2 (and is concave along the circle for 2 < c ≤ 4). Main ruled it
+       a structural miss on 2026-10-23 (issue #94): weights stay non-negative, the `nonzero` reader
+       and plan 02's non-negative test stay as they are, the fit leans towards the mass and the
+       force, and `MGE_BOXY` is judged on those figures and on T3.c's two Milky Way checks.
+    2. **Rows beyond the 48 × 12 grid's**: the monopole, the six forces, the central density and
+       the whole mass. Without the last two, a first fit hid a spike of 16,000 times the central
+       density inside the grid's first radius and a term of width 4 × 10¹⁰ outside its last; the
+       whole mass is what T3.c's normalisation reads. The grid reaches 40 scale lengths so that
+       the mass-weighted density rows hold back any faint excess out there.
+    3. **Levenberg–Marquardt gains upper bounds** (`upper`, a changed signature, Provides above),
+       for the boxy terms' widths and q, which a term with zero weight could otherwise send off
+       to 10⁴⁷. **`optimise::least_squares`** is new and public. The one-dimensional polish's
+       Jacobian now takes each shifted residual by `least_squares` on the columns NNLS left free
+       at the point, the variable-projection derivative, instead of a fresh NNLS: the run fell
+       from 6.2 s to 4.3 s, and every T3.a figure is the same to its printed digits (the bodies
+       move). T3.a's note that the body at 100 iterations differed in the seventh digit was
+       made before this change; `the_refit_meets_plan_fifteen_s_figures` still holds that the
+       polish stops before its cap.
+    4. **The references live in `tasks::mge::boxy`**, not in the test, so that the run's
+       acceptance line can state every T3.b figure; the tests hold them to closed forms and to
+       each other. The run reads the multipole rule, about 1 ms a point; the brute-force one
+       takes about 0.2 s a point and is read by the tests alone.
+    5. **The 300 iterations bind** for each boxy row. At 600 the figures move in their fourth
+       digit and the run takes 8.1 s.
+    6. **The seed splits after its weights are solved.** Solved after the split, the two halves
+       of each split term, nearly the same column, left one at weight 0, whose width and q then
+       had no gradient and stayed put: two of each row's 16 terms did nothing. Now every term
+       carries weight.
+    7. **A bound binds.** At c = 3.5 and 4 the narrowest term rests on the width floor, 0.001
+       (with q 10.0 and 8.6), so those rows depend on `boxy_widths`; their flattest terms, q 0.053
+       and 0.051, sit near the 0.05 floor.
+    8. **The force's 2% is held against the multipole rule** at 1.9%, and the multipole rule to
+       the brute-force integral at 10⁻⁶, so the plan's 2% against the brute force holds.
+  - _The run (T3.a–b)._ `run mge` with `--manifest crates/hyperion-fit/manifests/mge.refit.toml`
+    and `--out` to a scratch path under `target/` takes 4.3 s in the dev profile (8-thread
+    laptop at load 5.7, shared). Its body is 8,849 bytes with SHA-256
+    `b650018948a5ca7bf2144a0aa07d9a6f1173877e427a1c69565c9a4235d3a0f6`, the same in two runs.
+    Its header is `@provisional` by P15.T3.b.
+  - _Tests (T3.b)._ In `tests/mge.rs`, all fast, timed under nextest in the dev profile on 4 test
+    threads at load 4.5–5.7: `the_boxy_references_hold_to_their_closed_forms_and_to_each_other` (5.2
+    s), `mge_boxy_meets_plan_fifteen_s_mass_and_force_figures_and_holds_its_density_miss` (6.7 s),
+    `mge_boxy_is_deterministic` (4.7 s; the boxiest row twice, compared as `Debug` text so that a
+    zero's sign counts), and `the_refit_manifest_runs_end_to_end`, now with `MGE_BOXY`'s 48 terms,
+    its `use` line and the header provisional by P15.T3.b (6.0 s).
+    `the_refit_refuses_values_out_of_range` gains seven boxy cases: another number of terms, falling
+    boxinesses, a split of q below 1 or outside the axis ratios, too few latitudes (two would leave
+    fewer residuals than parameters) and a grid past 100 scale lengths. The T3.a tests now take
+    2.4–4.9 s. In `optimise.rs`: the lower and upper bounds, and `least_squares` refusing a
+    dependent or a zero column. `just fit-check` gives `41 fresh, 6 warnings, 0 failures` at the
+    base and at the head, `mge` still provisional since 11.
+  - _Deferred findings (2026-10-13 rule)._
+    - The boxy grid's monopole, force and mass weights (3, 10, 3) trade the mass figure
+      against the force figure: at 1, 3 and 10 for the force the worst force is 1.4%, 0.94% and
+      0.33% and the worst mass 0.04%, 0.15% and 0.25% (c = 4). The values are the manifest's;
+      T3.c's Milky Way checks may prefer another balance.
+    - `MGE_EXP`'s smallest width is 0.0024 scale lengths. With T3.c's thin disc that puts a
+      term near 20 ly, which the potential's quadrature takes, but nothing tests that narrow a
+      term there yet. `MGE_BOXY`'s narrowest terms are 0.0010–0.0016 scale lengths, 2–3 ly at
+      the Milky Way's s ≈ 1,907 ly, and its flattest reach q h ÷ s ≈ 0.02, a sheet about 10 ly
+      thick; their mass is negligible, but nothing tests T3.c's quadrature on terms that narrow.
+  - _For T3.c._
+    - Move the refit's parameters from `mge.refit.toml` into `mge.toml`, `method` included, and
+      bump the task's revision (Design note 6), so that the committed table is the refit's.
+    - Add `MGE_BOXY` to `items()` (after `MGE_BAR`); the emitted body already starts with
+      `use crate::galaxy::potential::mge::BoxyTerm;`.
+    - Define `BoxyTerm { pub weight: f64, pub width: f64, pub q: f64 }` in
+      `galaxy/potential/mge.rs`, its fields public, since the table builds it as a literal.
+    - Build the bulge from `MGE_BOXY`, interpolating linearly in c between rows by the density,
+      not term by term: the rows are sorted by width, so term k of one row has no counterpart in
+      the next. Take both bracketing rows, their weights scaled by 1 − t and t, 32 Gaussians,
+      each of width σ s and axis ratio q h ÷ s (the ruling's point 8), read through `nonzero`,
+      and normalised to the bulge's mass.
+    - Run plan 02's table tests on the new file. Its non-negative and ascending test,
+      `the_expansions_have_non_negative_weights_and_ascending_widths`, gains `MGE_BOXY`; its
+      1%, 0.1%, 3%, 0.5% and 7% checks hold on the refit's tables by
+      `the_refit_passes_plan_two_s_table_tests`.
+    - Make `mge_table_is_reproduced` reproduce the refit (it then runs the boxy fit as well,
+      about 4 s), and keep `the_refit_*` tests or fold them into it.
+    - The two Milky Way checks: the rotation curve against `bulge_spheroid`'s within 3% and
+      `the_fixture_s_enclosed_masses_are_the_milky_ways`; the boxy figures here suggest the
+      enclosed mass moves well under 1%.

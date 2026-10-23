@@ -8,11 +8,12 @@
 //! unspecified, so a fitted table comes out the same everywhere.
 //!
 //! - [`golden_section`] and [`nelder_mead`] (P15.T8.a): derivative-free minima.
-//! - [`nnls`] (P15.T3.a): non-negative linear least squares, after Lawson and Hanson (1974).
-//! - [`levenberg_marquardt`] (P15.T3.a): non-linear least squares with lower bounds, after
+//! - [`nnls`] (P15.T3.a) and [`least_squares`] (P15.T3.b): linear least squares with
+//!   non-negative coefficients, after Lawson and Hanson (1974), and without.
+//! - [`levenberg_marquardt`] (P15.T3.a): non-linear least squares within bounds, after
 //!   Levenberg (1944) and Marquardt (1963).
 //!
-//! The last two solve their linear problems by Householder QR (Lawson and Hanson 1974, ch. 10),
+//! The last three solve their linear problems by Householder QR (Lawson and Hanson 1974, ch. 10),
 //! never through the normal equations, whose condition number is the square of the problem's: a
 //! basis of Gaussians whose widths differ by a few per cent is all but dependent.
 
@@ -99,6 +100,45 @@ fn solve_on(columns: &[Vec<f64>], norms: &[f64], free: &[usize], rhs: &[f64]) ->
     let diagonal = householder(&mut work, &mut qtb);
     let scale: Vec<f64> = free.iter().map(|&j| norms[j]).collect();
     back_substitute(&work, &diagonal, &qtb, &scale)
+}
+
+/// The least-squares solution: the `x` that minimises `‖A x − b‖₂`, with `A`'s rows `rows` and `b`
+/// = `rhs`, by Householder QR (Lawson and Hanson 1974, ch. 11); `None` if a column depends on the
+/// ones before it, a diagonal of `R` under 2⁻⁴⁰ of its column's norm.
+///
+/// # Panics
+///
+/// If `rows` is empty, its rows are empty or of differing lengths or longer than there are rows,
+/// or `rhs` has another length.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_fit::optimise::least_squares;
+///
+/// // The line through (0, 1), (1, 2) and (2, 4) closest in least squares: y = 0.833… + 1.5 x.
+/// let x = least_squares(&[[1.0, 0.0], [1.0, 1.0], [1.0, 2.0]], &[1.0, 2.0, 4.0])
+///     .expect("the three points' columns are independent");
+/// assert!((x[0] - 5.0 / 6.0).abs() < 1e-15 && (x[1] - 1.5).abs() < 1e-15);
+/// ```
+#[must_use]
+pub fn least_squares<R: AsRef<[f64]>>(rows: &[R], rhs: &[f64]) -> Option<Vec<f64>> {
+    let m = rows.len();
+    assert!(
+        m > 0 && rhs.len() == m,
+        "least squares needs rows and a right-hand side of the same length"
+    );
+    let n = rows[0].as_ref().len();
+    assert!(
+        n > 0 && n <= m && rows.iter().all(|r| r.as_ref().len() == n),
+        "least squares needs rows of one non-zero length, no longer than there are rows"
+    );
+    let columns: Vec<Vec<f64>> = (0..n)
+        .map(|j| rows.iter().map(|r| r.as_ref()[j]).collect())
+        .collect();
+    let norms: Vec<f64> = columns.iter().map(|c| norm(c)).collect();
+    let all: Vec<usize> = (0..n).collect();
+    solve_on(&columns, &norms, &all, rhs)
 }
 
 /// The non-negative least-squares solution: the `x ≥ 0` that minimises `‖A x − b‖₂`, with `A`'s
@@ -258,7 +298,7 @@ pub struct LeastSquaresFit {
     pub steps: u32,
 }
 
-/// The parameters `p ≥ lower` that minimise `Σ rᵢ(p)²` from `start`, by Levenberg's (1944, Q.
+/// The parameters `lower ≤ p ≤ upper` that minimise `Σ rᵢ(p)²` from `start`, by Levenberg's (1944, Q.
 /// Appl. Math. 2, 164) and Marquardt's (1963, J. SIAM 11, 431) damped Gauss–Newton method, over at
 /// most `iterations` iterations.
 ///
@@ -272,12 +312,12 @@ pub struct LeastSquaresFit {
 /// Springer, 105–116) keeps it and MINPACK's `lmder` implements it. The trial point is `p + δ`
 /// projected onto the bounds. A trial that
 /// lowers the sum is taken and `λ` divided by 10; otherwise `λ` is multiplied by 10 and the step
-/// solved again, from 10⁻³ between the limits 10⁻¹² and 10¹². A parameter on its bound whose
+/// solved again, from 10⁻³ between the limits 10⁻¹² and 10¹². A parameter on a bound whose
 /// descent direction points out of the box is held for the iteration, so that the others' step
 /// does not assume it moves: Bertsekas's set `I⁺(x)` (1982, SIAM J. Control Optim. 20, 221,
-/// Prop. 1), without his ε-enlargement of it. A
-/// value at or below its bound becomes the bound itself, so a bound of `0.0` is met by `+0.0`
-/// whatever the sign of a zero step.
+/// Prop. 1), with the upper bounds added and without his ε-enlargement. A value at or past a
+/// bound becomes the bound itself, so a bound of `0.0` is met by `+0.0` whatever the sign of a
+/// zero step; an infinite bound is no bound.
 ///
 /// The run ends when the iterations are spent, or when no step lowers the sum even at the largest
 /// damping: every later iteration would then repeat the same failed trial, so stopping changes no
@@ -285,8 +325,8 @@ pub struct LeastSquaresFit {
 ///
 /// # Panics
 ///
-/// If `start` is empty, `lower` has another length, or there are fewer residuals than
-/// parameters.
+/// If `start` is empty, `lower` or `upper` has another length, a lower bound is above its upper
+/// one, or there are fewer residuals than parameters.
 ///
 /// # Examples
 ///
@@ -308,6 +348,7 @@ pub struct LeastSquaresFit {
 ///     },
 ///     &[1.0, 1.0],
 ///     &[f64::NEG_INFINITY; 2],
+///     &[f64::INFINITY; 2],
 ///     4,
 ///     100,
 /// );
@@ -322,19 +363,22 @@ pub fn levenberg_marquardt(
     mut model: impl FnMut(&[f64], &mut [f64], Option<&mut [f64]>),
     start: &[f64],
     lower: &[f64],
+    upper: &[f64],
     residuals: usize,
     iterations: u32,
 ) -> LeastSquaresFit {
     let n = start.len();
     let m = residuals;
     assert!(
-        n > 0 && lower.len() == n && m >= n,
-        "Levenberg–Marquardt needs bounds for each parameter and as many residuals"
+        n > 0
+            && lower.len() == n
+            && upper.len() == n
+            && lower.iter().zip(upper).all(|(l, u)| l <= u)
+            && m >= n,
+        "Levenberg–Marquardt needs ordered bounds for each parameter and as many residuals"
     );
-    let mut p: Vec<f64> = start
-        .iter()
-        .zip(lower)
-        .map(|(&s, &l)| if s > l { s } else { l })
+    let mut p: Vec<f64> = (0..n)
+        .map(|k| clamp(start[k], lower[k], upper[k]))
         .collect();
     let mut r = vec![0.0; m];
     let mut jacobian = vec![0.0; m * n];
@@ -353,7 +397,10 @@ pub fn levenberg_marquardt(
         }
         let column = |k: usize| &jacobian[k * m..(k + 1) * m];
         let free: Vec<usize> = (0..n)
-            .filter(|&k| !(p[k] <= lower[k] && dot(column(k), &r) > 0.0))
+            .filter(|&k| {
+                let gradient = dot(column(k), &r);
+                !((p[k] <= lower[k] && gradient > 0.0) || (p[k] >= upper[k] && gradient < 0.0))
+            })
             .collect();
         for (k, s) in scale.iter_mut().enumerate() {
             *s = s.max(norm(column(k)));
@@ -390,12 +437,7 @@ pub fn levenberg_marquardt(
             if let Some(delta) = step {
                 trial.copy_from_slice(&p);
                 for (&k, d) in free.iter().zip(delta) {
-                    let moved_to = p[k] + d;
-                    trial[k] = if moved_to > lower[k] {
-                        moved_to
-                    } else {
-                        lower[k]
-                    };
+                    trial[k] = clamp(p[k] + d, lower[k], upper[k]);
                 }
                 model(&trial, &mut r_trial, None);
                 let trial_sum = dot(&r_trial, &r_trial);
@@ -423,6 +465,17 @@ pub fn levenberg_marquardt(
         params: p,
         sum_of_squares: sum,
         steps,
+    }
+}
+
+/// `v` within `[lo, hi]` by explicit comparisons, not `f64::max` and `f64::min`, whose sign at a
+/// signed zero is unspecified: a value at or past a bound is the bound itself, and NaN is `lo`.
+#[must_use]
+fn clamp(v: f64, lo: f64, hi: f64) -> f64 {
+    if v > lo {
+        if v < hi { v } else { hi }
+    } else {
+        lo
     }
 }
 
@@ -596,6 +649,22 @@ mod tests {
         }
     }
 
+    /// A column that repeats another, or is zero, is refused rather than solved.
+    #[test]
+    fn least_squares_refuses_a_dependent_or_zero_column() {
+        let rhs = [1.0, 2.0, 3.0];
+        assert_eq!(
+            least_squares(&[[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]], &rhs),
+            None
+        );
+        assert_eq!(
+            least_squares(&[[1.0, 0.0], [2.0, 0.0], [3.0, 0.0]], &rhs),
+            None
+        );
+        let x = least_squares(&[[1.0], [2.0], [3.0]], &rhs).unwrap();
+        assert!((x[0] - 1.0).abs() < 1e-15, "{x:?}");
+    }
+
     #[test]
     fn nnls_gives_the_least_squares_solution_when_it_is_positive() {
         let rows = [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, -1.0]];
@@ -666,6 +735,10 @@ mod tests {
         assert_eq!(nnls(&rows, &rhs), x);
     }
 
+    /// No lower bounds, and no upper bounds, for two parameters.
+    const FREE: [f64; 2] = [f64::NEG_INFINITY; 2];
+    const OPEN: [f64; 2] = [f64::INFINITY; 2];
+
     /// Rosenbrock's function as least squares, `r = (10 (y − x²), 1 − x)`, from Moré, Garbow and
     /// Hillstrom's (1981, ACM TOMS 7, 17, problem 1) standard start.
     fn rosenbrock(p: &[f64], r: &mut [f64], jacobian: Option<&mut [f64]>) {
@@ -678,7 +751,7 @@ mod tests {
 
     #[test]
     fn levenberg_marquardt_finds_rosenbrock_s_minimum() {
-        let fit = levenberg_marquardt(rosenbrock, &[-1.2, 1.0], &[f64::NEG_INFINITY; 2], 2, 200);
+        let fit = levenberg_marquardt(rosenbrock, &[-1.2, 1.0], &FREE, &OPEN, 2, 200);
         assert!(
             (fit.params[0] - 1.0).abs() < 1e-12 && (fit.params[1] - 1.0).abs() < 1e-12,
             "{fit:?}"
@@ -699,11 +772,24 @@ mod tests {
                 j.copy_from_slice(&[1.0, 0.0, 1.0, 0.0, 1.0, 1.0]);
             }
         };
-        let fit = levenberg_marquardt(model, &[3.0, -4.0], &[0.0, f64::NEG_INFINITY], 3, 100);
+        let fit = levenberg_marquardt(
+            model,
+            &[3.0, -4.0],
+            &[0.0, f64::NEG_INFINITY],
+            &OPEN,
+            3,
+            100,
+        );
         assert!(fit.params[0].total_cmp(&0.0).is_eq(), "{fit:?}");
         assert!((fit.params[1] - 1.5).abs() < 1e-8, "{fit:?}");
         assert!((fit.sum_of_squares - 1.5).abs() < 1e-15, "{fit:?}");
-        let free = levenberg_marquardt(model, &[3.0, -4.0], &[f64::NEG_INFINITY; 2], 3, 100);
+        let free = levenberg_marquardt(model, &[3.0, -4.0], &FREE, &OPEN, 3, 100);
+        // Held at an upper bound instead: x ≤ −2 gives (−2, 2.5), where the gradient in x
+        // points up and out of the box.
+        let capped =
+            levenberg_marquardt(model, &[3.0, -4.0], &FREE, &[-2.0, f64::INFINITY], 3, 100);
+        assert!(capped.params[0].total_cmp(&-2.0).is_eq(), "{capped:?}");
+        assert!((capped.params[1] - 2.5).abs() < 1e-8, "{capped:?}");
         assert!(
             (free.params[0] + 1.0).abs() < 1e-12 && (free.params[1] - 2.0).abs() < 1e-12,
             "{free:?}"
@@ -712,7 +798,7 @@ mod tests {
 
     #[test]
     fn levenberg_marquardt_is_deterministic() {
-        let run = || levenberg_marquardt(rosenbrock, &[-1.2, 1.0], &[f64::NEG_INFINITY; 2], 2, 40);
+        let run = || levenberg_marquardt(rosenbrock, &[-1.2, 1.0], &FREE, &OPEN, 2, 40);
         assert_eq!(run(), run());
     }
 
@@ -730,7 +816,7 @@ mod tests {
                 j[0] = 2.0 * p[0];
             }
         };
-        let fit = levenberg_marquardt(model, &[1.0], &[f64::NEG_INFINITY], 1, 100);
+        let fit = levenberg_marquardt(model, &[1.0], &FREE[..1], &OPEN[..1], 1, 100);
         assert!((fit.params[0] - 3.0).abs() < 1e-12, "{fit:?}");
         assert!(fit.sum_of_squares.is_finite(), "{fit:?}");
     }
@@ -766,7 +852,7 @@ mod tests {
             assert_same_bits(got, want);
         }
         // Twelve iterations stop Rosenbrock's fit half-way, where every step's bits still count.
-        let fit = levenberg_marquardt(rosenbrock, &[-1.2, 1.0], &[f64::NEG_INFINITY; 2], 2, 12);
+        let fit = levenberg_marquardt(rosenbrock, &[-1.2, 1.0], &FREE, &OPEN, 2, 12);
         assert_same_bits(fit.params[0], 0.593_736_058_611_009_4);
         assert_same_bits(fit.params[1], 0.348_491_381_232_140_85);
         assert_same_bits(fit.sum_of_squares, 0.166_675_387_806_331_8);
