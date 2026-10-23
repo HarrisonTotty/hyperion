@@ -146,7 +146,8 @@ pub fn all_stars_fraction_below(mf: &dyn MassFunction, model: &MultiplicityModel
     m: SolarMasses) -> f64;
 pub fn mean_companion_mass_per_system(mf: &dyn MassFunction, model: &MultiplicityModel)
     -> SolarMasses;
-pub fn stripped_share(model: &MultiplicityModel, m1: SolarMasses, comp: &Composition) -> f64;
+pub fn stripped_share(model: &MultiplicityModel, m1: SolarMasses, comp: &Composition,
+    interacting_periastron: impl Fn(SolarMasses, f64, &Composition) -> Metres) -> f64;
 
 pub struct SystemHierarchy { /* nodes: Vec<HierarchyNode>, stars: Vec<StarSlot> */ }
 pub enum HierarchyNode { Star(StarIndex), Pair { inner: NodeIndex, outer: NodeIndex,
@@ -280,10 +281,10 @@ pub const CLASS_SHARES: ClassShareTable;
 The reader types over them are `stellar::binary::ia::IaExplosionMark` and
 `stellar::binary::sampler::ClassSampler`. `AWD_SAMPLER` serves both accreting white dwarf classes:
 the recurrence period is one of its marks and the split is a test on it. Until P15.T9.b and
-P15.T10.b land, the constants hold the scratch values of Design note 13. `tables::MANIFEST` does not
-exist yet (plan 15's P15.T2 builds it and registers the tables already committed), so until then
-the file says it is provisional in its header, under the README's header convention, as
-`tables/mge.rs` does; once the manifest exists it lists them with `provisional: true`.
+P15.T10.b land, the constants hold the scratch values of Design note 13. `tables::MANIFEST` exists
+since plan 15's P15.T2, but it lists only the tables that `hyperion-fit` writes, so it does not list
+`tables::binary`, whose values are written by hand: the file says it is provisional in its header
+(`@provisional`, in plan 15's grammar) until plan 15's task for it exists.
 
 ### Domain tags (never renamed)
 
@@ -4189,7 +4190,8 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       ≳ 34 M☉ to ≳ 67.5 M☉ (the complements of Table 1's neutron-star ranges, at Z = 0.0142; case
       B also has a black-hole island at about 31.5–34 M☉, where the trend runs the other way).
     - Finding F13: plan 06's remnant law should read the stripped mark, as its kick law does.
-      Routed to P15.T5.c, with its own bump.
+      Recorded as a deferred correction in plan 06's Risks, with no task and no bump
+      (decision-p15-revalidation Q5, 2026-10-23); P15.T5.c does not wait on it.
 - **Finding F14 (ruling p11-t4k-faults): wide bound double neutron stars.**
   - 115 bound per 12,000 layer-E prior pairs (7.2 × 10⁻⁵ per M☉ formed) is about 4.4 times
     COMPAS's (Vigna-Gómez et al. 2018).

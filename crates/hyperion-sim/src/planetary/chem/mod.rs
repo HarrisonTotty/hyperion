@@ -28,6 +28,8 @@
 //! - [`partition`]: the condensate partition at the ground (P14.T51.a), how much of each
 //!   condensable a body's air holds over its climate, how much lies on its surface, and in which
 //!   phase.
+//! - [`escape`]: escape by regime and fractionation (P14.T53.a, in progress), held with the
+//!   greenhouse's refits at generator version 24.
 //! - Here, the host's C/O and Mg/Si ([`HostAbundances`]), drawn per system on
 //!   `system.abundances` ([`AbundanceDraws`]), since a star's planets share its photospheric
 //!   ratios, until plan 06 carries them on the star. Plan 06 may adopt the stream without moving
@@ -78,6 +80,7 @@
 pub mod condense;
 pub mod envelope_abundances;
 pub mod equilibrium;
+pub mod escape;
 pub mod inventory;
 pub mod partition;
 pub mod photochem;

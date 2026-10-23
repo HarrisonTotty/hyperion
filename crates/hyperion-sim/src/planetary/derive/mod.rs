@@ -116,11 +116,12 @@ pub use radius::{
 pub use rotation::tidal_locking_time;
 
 use crate::orbit::KeplerElements;
+use crate::planetary::chem::escape::{moon_impact_speed, planet_impact_speed};
 use crate::planetary::chem::inventory::{ElementInventory, InventoryInputs, element_inventory};
 use crate::planetary::derive::atmosphere::{
-    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Gas, Insolation, PassLight, PassSurface,
-    SpunClimate, SurfaceMaterial, VolatileDraws, VolatileInventory, atmosphere_and_lid,
-    energy_limited_loss, formation_temperature, nitrogen_boosted,
+    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, EnvelopeHistory, Gas, Insolation, PassLight,
+    PassSurface, SpunClimate, SurfaceMaterial, VolatileDraws, VolatileInventory,
+    atmosphere_and_lid, energy_limited_loss, formation_temperature, helium_left, nitrogen_boosted,
 };
 use crate::planetary::derive::composition::{
     SolveCompositionError, dry_composition, formed_with_envelope,
@@ -150,11 +151,11 @@ use crate::stellar::Composition;
 use crate::stellar::draws::UnitUniform;
 use crate::stellar::substellar::{EvaluateGiantCoolingError, giant_cooling};
 use crate::time::UniverseTime;
-use crate::units::consts::GM_EARTH;
+use crate::units::consts::{GM_EARTH, GRAVITATIONAL_CONSTANT};
 use crate::units::{
     EarthFluxes, EarthMasses, EarthRadii, Gigayears, JoulesPerSquareMetre, JupiterMasses, Kelvin,
-    Kilograms, KilogramsPerCubicMetre, Metres, MetresPerSecondSquared, Seconds, SolarMasses, Watts,
-    WattsPerSquareMetre, Years,
+    Kilograms, KilogramsPerCubicMetre, Metres, MetresPerSecond, MetresPerSecondSquared, Seconds,
+    SolarMasses, Watts, WattsPerSquareMetre, Years,
 };
 
 /// A body as the derivation reads it: its mass and orbit, where it formed, and its one drawn
@@ -526,6 +527,7 @@ pub struct BodyHosts<'a> {
     orbited: &'a [HostLight],
     companions: &'a [Illumination],
     shades: Option<&'a ShadeBook>,
+    parent_orbital_speed: Option<MetresPerSecond>,
 }
 
 impl PartialEq for BodyHosts<'_> {
@@ -536,6 +538,7 @@ impl PartialEq for BodyHosts<'_> {
             && self.composition == other.composition
             && self.orbited == other.orbited
             && self.companions == other.companions
+            && self.parent_orbital_speed == other.parent_orbital_speed
     }
 }
 
@@ -567,6 +570,7 @@ impl<'a> BodyHosts<'a> {
             orbited,
             companions,
             shades: None,
+            parent_orbital_speed: None,
         })
     }
 
@@ -576,6 +580,17 @@ impl<'a> BodyHosts<'a> {
     #[must_use]
     pub(crate) const fn with_shades(self, shades: Option<&'a ShadeBook>) -> Self {
         Self { shades, ..self }
+    }
+
+    /// The same hosts, of a moon whose planet orbits its star at `speed` (its circular orbital
+    /// speed there, √(G M ÷ a)), which the moon's mean impact speed reads (P14.T53.a;
+    /// [`AtmosphereInputs::impact_speed`]): a planet's and a member's hosts carry none.
+    #[must_use]
+    pub(crate) const fn with_parent_orbital_speed(self, speed: MetresPerSecond) -> Self {
+        Self {
+            parent_orbital_speed: Some(speed),
+            ..self
+        }
     }
 
     /// The mass the body orbits.
@@ -1359,6 +1374,7 @@ pub(crate) fn derive_body_driven(
         fractions,
         inventory_water: bulk.elements.volatiles().water(),
     };
+    let history = envelope_history(&bulk, &escape);
     let passes = PassBody {
         placed,
         sky: &sky,
@@ -1370,6 +1386,9 @@ pub(crate) fn derive_body_driven(
         radius: Metres::new(r),
         age: age_now,
         formed,
+        impact_speed: impact_speed(placed, hosts, (bulk.mass, bulk.radius)),
+        envelope_history: history,
+        envelope_helium: helium_before_passes(history, &bulk, &sky, age_now),
     }
     .passes(driver, record);
     let (passes, regolith_albedo) = passes;
@@ -1504,6 +1523,71 @@ fn moon_limit(
     ))
 }
 
+/// The history of the envelope of a body whose air reads the bulk `bulk` and whose envelope's
+/// escape is `escape` (P14.T53.a, [`AtmosphereInputs::envelope_history`]): its envelope at
+/// formation the one it holds now plus the mass escape took, f M + ΔM, which is the formation
+/// solve's share of the formation mass where the body has one (`Escape`'s own balance), and a
+/// giant's envelope where it has none.
+#[must_use]
+fn envelope_history(bulk: &AirBulk, escape: &Escape) -> EnvelopeHistory {
+    let lost = Kilograms::from(escape.lost);
+    EnvelopeHistory {
+        initial: Kilograms::new(bulk.fractions.envelope() * bulk.mass.value() + lost.value()),
+        lost,
+    }
+}
+
+/// The helium the envelope of history `history` of the body of bulk `bulk` under the sky `sky`
+/// keeps by `age`, taken once before its passes, which do not move it, under the escape's batch
+/// rules ([`AtmosphereInputs::envelope_helium`]); none under its hold, which reads none.
+#[must_use]
+fn helium_before_passes(
+    history: EnvelopeHistory,
+    bulk: &AirBulk,
+    sky: &Sky,
+    age: Years,
+) -> Option<crate::planetary::chem::escape::EnvelopeHelium> {
+    use crate::planetary::chem::escape::{EscapeRules, XuvExposure};
+    match EscapeRules::in_force() {
+        EscapeRules::Held => None,
+        EscapeRules::Batch => helium_left(
+            history,
+            (bulk.mass, bulk.radius),
+            &XuvExposure::new(sky.saturated_xuv_flux, sky.xuv_saturation_time),
+            age,
+        ),
+    }
+}
+
+/// The mean speed at which the body `placed` about `hosts` is struck, its air weighed at the mass
+/// and radius `bulk` (P14.T53.a, read by the cosmic shoreline's impact term under the escape's
+/// batch rules, [`AtmosphereInputs::impact_speed`]): its escape speed √(2 G M ÷ R) against its
+/// circular orbital speed √(G `M_p` ÷ a) about the mass `M_p` its hosts give it, at its present
+/// semi-major axis; for a moon, whose hosts carry its planet's orbital speed about its star
+/// ([`BodyHosts::with_parent_orbital_speed`]), Zahnle et al.'s (2003) eq. 1
+/// ([`moon_impact_speed`]), and otherwise Zahnle and Catling's (2017) eq. 41 at `v_enc` = `v_orb`
+/// ([`planet_impact_speed`]). A speed that is not finite and positive counts as none.
+#[must_use]
+fn impact_speed(
+    placed: &PlacedBody,
+    hosts: &BodyHosts<'_>,
+    (mass, radius): (Kilograms, Metres),
+) -> MetresPerSecond {
+    let speed = |squared: f64| {
+        let v = squared.sqrt();
+        MetresPerSecond::new(if v.is_finite() && v > 0.0 { v } else { 0.0 })
+    };
+    let escape = speed(2.0 * GRAVITATIONAL_CONSTANT * mass.value() / radius.value());
+    let orbit = speed(
+        GRAVITATIONAL_CONSTANT * hosts.primary_mass.value()
+            / placed.orbit_now.semi_major_axis().value(),
+    );
+    match hosts.parent_orbital_speed {
+        Some(parent) => moon_impact_speed(orbit, parent, escape),
+        None => planet_impact_speed(orbit, escape),
+    }
+}
+
 /// A body's bulk as [`derive_body`] gives it, derived before its passes and without them (lever
 /// (e), decision-p14-t54a-passes, "Cost escalation (after Batch B)" §C.3): its mass, radius, mass
 /// fractions and class at the time, and P14.T15's largest surviving moon, none of which a pass
@@ -1629,7 +1713,9 @@ pub(crate) const ATMOSPHERE_CONVERGENCE: f64 = 1e-9;
 /// What each of T12's and T13's passes reads of a body (P14.T13.c): its placement, its sky, the
 /// bulk its air reads, its bulk at the time (which its record's bulk rule reads, P14.T54.a), its
 /// class (which a gas envelope's albedo reads), its crust, its own luminosity and radius, its age,
-/// and the side of the snow line it formed on (which its crust's basis reads, P14.T54.a).
+/// the side of the snow line it formed on (which its crust's basis reads, P14.T54.a), and what
+/// P14.T53.a's escape reads under its batch rules: its mean impact speed and its envelope's
+/// history.
 #[derive(Debug, Clone, Copy)]
 struct PassBody<'a> {
     placed: &'a PlacedBody,
@@ -1642,6 +1728,11 @@ struct PassBody<'a> {
     radius: Metres,
     age: Years,
     formed: SnowLineSide,
+    impact_speed: MetresPerSecond,
+    envelope_history: EnvelopeHistory,
+    /// The helium its envelope's escape left, taken once before the passes under the escape's
+    /// batch rules ([`AtmosphereInputs::envelope_helium`]); `None` under its hold, which reads none.
+    envelope_helium: Option<crate::planetary::chem::escape::EnvelopeHelium>,
 }
 
 /// What the passes leave (P14.T13.c, P14.T51.b, P14.T51.h): the albedo the published pass read,
@@ -1733,6 +1824,12 @@ impl PassBody<'_> {
             molten_for: self.placed.molten_until.unwrap_or(Years::ZERO),
             age: self.age,
             hottest_host: sky.hottest,
+            impact_speed: self.impact_speed,
+            xuv_saturation_time: sky.xuv_saturation_time,
+            envelope_history: self.envelope_history,
+            flux: sky.flux,
+            maximum_greenhouse_flux_ratio: sky.maximum_greenhouse_flux_ratio,
+            envelope_helium: self.envelope_helium,
         };
         let (air, lid) = atmosphere_and_lid(&inputs, surface);
         (irradiated, heated, air, lid)
@@ -2189,8 +2286,17 @@ struct Sky {
     /// The X-ray and ultraviolet flux received while each host is saturated, along the same
     /// orbits as the fluence (P14.T24.f).
     saturated_xuv_flux: WattsPerSquareMetre,
+    /// How long the hosts stay saturated, as one: their saturation times weighted by their
+    /// saturated fluxes at the body, Σ `F_s,i` `t_sat,i` ÷ Σ `F_s,i` (P14.T53.a's exposure,
+    /// [`AtmosphereInputs::xuv_saturation_time`]; the lane's), so that the exposure's saturated
+    /// fluence, Σ `F_s,i` `t_sat,i`, and its whole history's, 3 Σ `F_s,i` `t_sat,i`, are the hosts'
+    /// sums exactly.
+    xuv_saturation_time: Years,
     /// Where the body lies against the hosts' habitable zone.
     insolation: Insolation,
+    /// Σ Fᵢ ÷ `S_eff,max`(`T_eff,i`) now, the sum the insolation's maximum-greenhouse limit reads:
+    /// beyond it below 1 ([`AtmosphereInputs::maximum_greenhouse_flux_ratio`]).
+    maximum_greenhouse_flux_ratio: f64,
     /// The hottest effective temperature among the luminous hosts; zero if none shines.
     hottest: Kelvin,
     /// The hosts' light by band as the area mix reads it (P14.T51.b).
@@ -2241,6 +2347,7 @@ impl Sky {
             xuv_fluence: JoulesPerSquareMetre::ZERO,
             xuv_flux: WattsPerSquareMetre::ZERO,
             saturated_xuv_flux: WattsPerSquareMetre::ZERO,
+            saturated_fluence_w_yr_per_m2: 0.0,
             hottest: Kelvin::ZERO,
             shade: HostShadeSum::EMPTY,
         };
@@ -2258,6 +2365,8 @@ impl Sky {
             sums.xuv_flux = WattsPerSquareMetre::new(sums.xuv_flux.value() + xuv.value());
             sums.saturated_xuv_flux =
                 WattsPerSquareMetre::new(sums.saturated_xuv_flux.value() + saturated.value());
+            sums.saturated_fluence_w_yr_per_m2 +=
+                saturated.value() * host.xuv().saturation_time().value();
             if host.luminosity().value() > 0.0 {
                 let t_eff = host.effective_temperature();
                 runaway += peak.value() / HabitableLimit::RunawayGreenhouse.flux(t_eff).value();
@@ -2288,7 +2397,9 @@ impl Sky {
             xuv_fluence: sums.xuv_fluence,
             xuv_flux: sums.xuv_flux,
             saturated_xuv_flux: sums.saturated_xuv_flux,
+            xuv_saturation_time: sums.saturation_time(),
             insolation,
+            maximum_greenhouse_flux_ratio: maximum,
             hottest: sums.hottest,
             shade: sums.shade.finish_from(book),
         }
@@ -2303,8 +2414,26 @@ struct SkySums {
     xuv_fluence: JoulesPerSquareMetre,
     xuv_flux: WattsPerSquareMetre,
     saturated_xuv_flux: WattsPerSquareMetre,
+    /// Σ `F_s,i` `t_sat,i`, W m⁻² yr: each host's saturated flux at the body times its saturation
+    /// time, the saturated fluence in those units.
+    saturated_fluence_w_yr_per_m2: f64,
     hottest: Kelvin,
     shade: HostShadeSum,
+}
+
+impl SkySums {
+    /// The hosts' saturation time as one, Σ `F_s,i` `t_sat,i` ÷ Σ `F_s,i` ([`Sky`]'s
+    /// `xuv_saturation_time`): a dark host's where no host's saturated flux reaches the body.
+    #[must_use]
+    fn saturation_time(&self) -> Years {
+        let flux = self.saturated_xuv_flux.value();
+        let time = self.saturated_fluence_w_yr_per_m2 / flux;
+        if flux > 0.0 && time.is_finite() {
+            Years::new(time)
+        } else {
+            crate::planetary::context::XuvHistory::DARK.saturation_time()
+        }
+    }
 }
 
 /// What energy-limited escape leaves of a body's envelope (P14.T13.b).
@@ -3408,6 +3537,74 @@ mod tests {
         assert!(
             (ratio - crate::math::powf(2.0, 0.25)).abs() < 1e-12,
             "{ratio}"
+        );
+    }
+
+    /// The hosts' saturation time as one is theirs weighted by their saturated fluxes at the body,
+    /// Σ `F_s,i` `t_sat,i` ÷ Σ `F_s,i` (`SkySums::saturation_time`), summed in their order; a host
+    /// whose saturated flux is zero weighs nothing; and a sky no host's saturated flux reaches
+    /// takes a dark host's.
+    #[test]
+    fn the_hosts_saturation_times_are_weighted_by_their_saturated_fluxes() {
+        use crate::planetary::context::XuvHistory;
+        use crate::units::{SolarLuminosities, SolarMasses, SolarRadii};
+
+        let body = placed(EARTH_MASS_KG, 0.3, 0.1, 0.5);
+        // An M dwarf of 0.2 M☉, saturated 10⁹ yr, beside the Sun's 10⁸ yr.
+        let dwarf = HostLight::new(
+            SolarLuminosities::new(0.005),
+            Kelvin::new(3200.0),
+            SolarRadii::new(0.2),
+        )
+        .unwrap()
+        .with_history(
+            XuvHistory::new(SolarMasses::new(0.2), SolarLuminosities::new(0.004)),
+            SolarLuminosities::new(0.005),
+        );
+        let sky_of = |lights: &[HostLight]| {
+            let hosts = BodyHosts::new(
+                Kilograms::new(SOLAR_MASS_KG),
+                Composition::SOLAR,
+                lights,
+                &[],
+            )
+            .unwrap();
+            Sky::of(&body, &hosts, SOLAR_AGE)
+        };
+        let (a, e) = (
+            body.orbit.semi_major_axis(),
+            body.orbit.eccentricity().value(),
+        );
+        let lights = [historic_sun(), dwarf];
+        let (flux, fluence) = lights.iter().fold((0.0, 0.0), |(flux, fluence), host| {
+            let saturated = host.xuv().saturated_flux(a, e).value();
+            (
+                flux + saturated,
+                fluence + saturated * host.xuv().saturation_time().value(),
+            )
+        });
+        let (sun_time, dwarf_time) = (
+            lights[0].xuv().saturation_time().value(),
+            lights[1].xuv().saturation_time().value(),
+        );
+        assert!(
+            flux > 0.0 && sun_time < dwarf_time,
+            "{sun_time} {dwarf_time}"
+        );
+        let sky = sky_of(&lights);
+        assert_same_bits(sky.saturated_xuv_flux.value(), flux);
+        let time = sky.xuv_saturation_time.value();
+        assert_same_bits(time, fluence / flux);
+        assert!(sun_time < time && time < dwarf_time, "{time}");
+        // The present Sun of no history: its saturated flux is zero, and the dwarf's time stands.
+        let time = sky_of(&[sun(), dwarf]).xuv_saturation_time.value();
+        assert!((time / dwarf_time - 1.0).abs() < 1e-15, "{time}");
+        // No saturated flux at all: a dark host's time, not 0 ÷ 0.
+        let dark = sky_of(&[sun()]);
+        assert_same_bits(dark.saturated_xuv_flux.value(), 0.0);
+        assert_same_bits(
+            dark.xuv_saturation_time.value(),
+            XuvHistory::DARK.saturation_time().value(),
         );
     }
 

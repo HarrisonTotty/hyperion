@@ -3080,6 +3080,12 @@ draft, and the owner's sign-off recorded in this plan.
        findings). A query in the disc visits every feature whose reach touches it, a nursery's
        1,750 ly included. Before this subtask lands, the census near the Sun is benched with
        members against T17's budget.
+    3. **Helium-rich members** (decision-p15-revalidation Q7, 2026-10-23). Feature members are
+       the only stars with a helium excess. The phase envelope bounds them by its brightest value.
+       The brightness envelope reads no composition: if P15.T7.b's fitted `tables::helium` has
+       landed, this subtask refits `sky_envelope` with helium-excess nodes in its build, up to
+       `HELIUM_EXCESS_MAX`, and a ΔY > 0 fingerprint probe; if it has not, P15.T7.b's swap does.
+       The dense bound test gains helium-rich tracks.
   - **The label.** `CLUSTERS` leaves the label's composed `NOT YET MODELLED` note once neither
     `feature_members` nor `centre_members` is listed. `CLUSTERS: NOT YET MODELLED` is then
     withdrawn, and `CLUSTERS AND WHITE DWARFS: NOT YET MODELLED` becomes
@@ -4853,8 +4859,10 @@ ages)` as sketched; the envelope is one for every component (layer and component
   - **Science check (2026-10-04).** The extremes bound this generator, not nature. The −12.85 at
     150 M☉ and about −5.7 for old stars of at most 1 M☉ likely come from the tracks'
     super-Eddington excursions after the main sequence and the η = 0 late giants. Both are 2–3 mag
-    brighter than observed steady stars. A refit is due when P06.T39's wind lands, and when
-    P15.T7 fits `tables::helium` (the envelope is built at ΔY = 0).
+    brighter than observed steady stars. A refit is due when P06.T39's wind lands. The envelope
+    is built at ΔY = 0 and reads no composition, so whichever of P15.T7.b's swap and R06.T16.a
+    lands second refits it with helium-excess nodes in its build, in the same 198 × 193 storage,
+    and adds a ΔY > 0 probe to its fingerprint (decision-p15-revalidation Q7, 2026-10-23).
   - **Loose but still a bound.** The envelope is about 2 mag loose for 0.1–0.19 M☉ at
     3.5–28 Myr. Each long phase is cut into parts equal in linear age, so its first part carries
     its young end's magnitude for some 15 Myr. That costs only skip efficiency. Cutting in log age
@@ -6831,9 +6839,11 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   - **Helium excess.** The table is built at ΔY = 0, as `sky_envelope` is, and reads a
     composition by its clamped Z alone. `tables::helium` (P06.T17) is the identity today, so it
     bounds every star; the ruled bracket would refuse any ΔY ≠ 0. A star with a helium excess reads
-    the table's brightest value, which skips nothing. When P15.T7 fits `tables::helium`, the table
-    must be refitted with helium-excess nodes. That axis would grow the table past the approved
-    ceiling, so its storage needs a ruling before P15.T7 lands.
+    the table's brightest value, which skips nothing, and so stays bounded under any fitted
+    `tables::helium`. Ruled 2026-10-23 (decision-p15-revalidation Q7): the table gains no helium
+    axis and is not refitted for P15.T7.b, so its storage needs no ruling. Only feature members
+    carry a helium excess, R06.T16.a brings them in, and its cost bench shows what the rule costs
+    them, a deferred finding if it matters.
   - **The mass axis.** Format 1 stores no masses. It reads `tables::sky_envelope::MASSES`, checked
     by count in `fitted()`, by value in `every_cell_of_the_fitted_table_covers_every_bin`, and by
     the fingerprint's `mass_nodes` probes (count, ends and sum). A refit of `sky_envelope` on new

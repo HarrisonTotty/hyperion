@@ -199,8 +199,10 @@ no star it need not.
   statistical helpers (chi-square, Kolmogorov–Smirnov, Poisson interval checks), hand-written, with
   fixed seeds, in a dev-only workspace crate, `hyperion-testkit`.
 - Random streams are opened with `Stream::open(Seed, DomainTag, ObjectKey)`. Every domain tag is an
-  entry in plan 01's single registry, `rng/tags.rs`, and each plan's tasks add their own entries
-  there, so the collision test covers them all.
+  entry in one of three registries, each declared with `domain_tags!` (rendering plan R04's Design
+  note 4): the sim's `rng/tags.rs`, where each plan's tasks add their own entries, the foundation's
+  `hyperion_base::rng::tags` and the surface crate's `hyperion_surface::tags`. The sim's registry
+  asserts the three disjoint, so the collision check covers them all.
 - Slow statistical tests and Milky Way comparisons run under `just test-slow`, which `just ci-slow`
   runs and `just ci` does not. Plan 01 defines how they are marked.
 - Benchmarks use Criterion as a dev-dependency and run under `just bench`. The brainstorm's targets
