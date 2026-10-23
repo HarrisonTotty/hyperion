@@ -9,7 +9,8 @@ sections. This file covers the parts you write.
 - **One line on what and why**, first. Say whether the task is docs only, test only, or touches
   a contract.
 - **Where it is.** Give the plan file, the line numbers at the base commit (the parent task, the
-  task, the subtasks it hands over to, the Risks records), and the extractor command. Name the
+  task, the subtasks it hands over to, the records: Risks bullets, or the task's record file in a
+  split plan), and the extractor command (`plan_task.py <ID> --records` for the records). Name the
   code files and symbols to read first.
 - **What to build,** condensed from the plan in its own words: inputs, outputs, files, names to
   keep. Name what is out of scope ("Don't start T4.e"). Tell the worker to list a needed change

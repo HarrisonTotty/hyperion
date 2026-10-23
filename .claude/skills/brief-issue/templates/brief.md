@@ -6,7 +6,7 @@ This is a brief for the issue-working agent. It is self-contained: you need only
 - Branch from `${remote}/${base}` at **${base_commit}** or later, as `${lane}`. The `work-issue` skill's `start` step does this.
 ${setup}
 ### The task
-[[FILL: what to build and why. Say where it is: the plan file and its line numbers at the base commit, or the files involved. Paste every ruling and record the task needs, condensed: the worker cannot read the orchestrator's files. End with the acceptance criteria and their commands.]]
+[[FILL: what to build and why. Say where it is: the plan file and its line numbers at the base commit, and the task's record file if the plan is split, or the files involved. Say where its records go: the plan's Risks, or its record file. Paste every ruling and record the task needs, condensed: the worker cannot read the orchestrator's files. End with the acceptance criteria and their commands.]]
 
 ### Gate
 - Run `${gate_command}`; its log must end `exit 0`. The `work-issue` skill's `gate run` stamps the log with the tree it ran on.

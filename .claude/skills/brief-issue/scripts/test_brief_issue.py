@@ -77,6 +77,26 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(meta, {"slug": "r10-t13", "base": "trunk", "base_commit": head, "task": "R10.T13",
                                 "scope": ["docs/*"]})
 
+    def test_a_scope_naming_the_plan_gains_the_tasks_record_files(self) -> None:
+        plan = "docs/agent/plans/rendering-and-planets/10-terrain-on-generated-worlds.md"
+        records = "docs/agent/plans/rendering-and-planets/10-terrain-on-generated-worlds/records"
+        out = self.scaffold("--scope", "crates/x/*", "--scope", plan)
+        meta = [d for k, d in gc.find_markers(out) if k == "brief"][0]
+        # R10.T13 has subtasks, whose files sit beside its own.
+        self.assertEqual(meta["scope"], ["crates/x/*", plan, f"{records}/R10.T13.md", f"{records}/R10.T13.*.md"])
+        self.assertTrue(gc.in_scope(f"{records}/R10.T13.b.md", meta["scope"]))
+        self.assertEqual(bi.record_scope("R10.T13.b", [plan]), [f"{records}/R10.T13.b.md"])
+        self.assertEqual(bi.record_scope("R10.T13.b.i", [plan]), [f"{records}/R10.T13.b.md"])
+        self.assertEqual(bi.record_scope("P10.T13", [plan]), [])  # galaxy plan 10 is another file
+        self.assertEqual(bi.record_scope("R10.T13", ["docs/agent/plans/**"]), [])  # covered already
+        # A marker written by hand without it is warned about.
+        text = gc.MARKER_RE.sub("", fill_in(self.scaffold())) + "\n" + gc.make_marker(
+            "brief", {"slug": "r10-t13", "base": "trunk", "base_commit": meta["base_commit"], "task": "R10.T13",
+                      "scope": [plan]})
+        self.draft.write_text(text, encoding="utf-8")
+        code, out, _ = self.check()
+        self.assertIn("the scope names the task's plan but not its record file", out)
+
     def test_the_scaffold_refuses_a_bad_slug_and_an_unpushed_base(self) -> None:
         code, _, err = run(self.ctx, "scaffold", "--title", "x", "--slug", "../trunk")
         self.assertEqual(code, gc.EXIT_USAGE)

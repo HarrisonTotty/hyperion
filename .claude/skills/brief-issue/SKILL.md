@@ -34,7 +34,8 @@ Brief for <task>:
 1. **Gather.**
    - For a plan task, run `python3 -I .claude/skills/implement-task/scripts/plan_task.py <ID> --context`.
      Note the plan file, the line numbers at the base commit, the design notes it cites and the
-     Risks records that bind it.
+     records that bind it (`--records` prints them: Risks bullets, or in a split plan the task's
+     record file, `<plan-stem>/records/<KEY>.md`).
    - Collect every ruling, decision and measurement the task depends on from your own records.
      They get pasted, condensed.
 2. **Scaffold.** Run `brief_issue.py scaffold --title "<ID> <summary>" --slug <id-or-short-name> [--task <ID>]`
@@ -42,6 +43,10 @@ Brief for <task>:
    - The base commit defaults to the integration branch's remote head, which must be pushed.
      Name another with `--base-commit`.
    - `--scope <glob>` (repeatable) limits the paths the lane may change; `land-issue` enforces it.
+     For a plan task, name its plan file: the scaffold then adds the task's record file
+     (`<plan-stem>/records/<KEY>.md`, and `<KEY>.*.md` for a task with subtasks), where its
+     records go once the plan is split, whichever layout it lands in. `check` warns when a
+     marker's scope names the plan without it.
    - The draft holds the standard Base, Gate, Rules and Report sections from the configuration,
      `[[FILL: …]]` placeholders, and a hidden brief marker (slug, base, task, scope). Keep the
      marker.

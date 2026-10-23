@@ -46,10 +46,34 @@ from typing import Any, Dict, List, Optional, Sequence
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "gh-collab"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "implement-task" / "scripts"))
 
 import ghcollab as gc  # noqa: E402  (the shared module's directory is put on the path first)
+import plan_task as pt  # noqa: E402  (the plans' layout: record_key, the plan sets)
 
 TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "brief.md"
+PLAN_FILE_RE = re.compile(r"docs/agent/plans/([^/*?\[]+)/(\d{2})-[^/*?\[]+\.md")
+
+
+def record_scope(task: str, scope: List[str]) -> List[str]:
+    """The task's record files, for a plan task whose scope names its plan file: the records are
+    split out beside the plan, `<plan-dir>/<plan-stem>/records/<KEY>.md` (plan_task.record_key), so
+    the lane may write its own file (and, for a task with subtasks, theirs), whichever layout the
+    plan is in when it lands. The globs the scope does not already cover."""
+    m = pt.ID_RE.fullmatch(pt.record_key(task)) if task else None
+    if m is None:
+        return []
+    plan_set = pt.PREFIX_SETS.get(m.group(1))
+    key = pt.record_key(task)
+    found: List[str] = []
+    for entry in scope:
+        f = PLAN_FILE_RE.fullmatch(entry)
+        if f is None or f.group(1) != plan_set or f.group(2) != m.group(2):
+            continue
+        folder = f"{entry[: -len('.md')]}/{pt.RECORDS_DIR}"
+        wanted = [f"{folder}/{key}.md"] + ([f"{folder}/{key}.*.md"] if m.group(4) is None else [])
+        found += [w for w in wanted if not gc.in_scope(w.replace("*", "a"), scope) and w not in found]
+    return found
 DEFAULT_REPORT = ["the branch and its commit hashes", "the gate's exit line",
                   "deviations, and deferred findings, one line each", "any open question, with your lean"]
 TOP_LEVEL_PATH_RE = re.compile(r"`([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.@-]+)+/?)`")
@@ -102,7 +126,7 @@ def scaffold(ctx: gc.Ctx, title: str, slug: str, task: str, given_base: str, sco
     if task:
         meta["task"] = task
     if scope:
-        meta["scope"] = scope
+        meta["scope"] = scope + record_scope(task, scope)
     values = {
         "title": title,
         "remote": cfg["remote"],
@@ -137,7 +161,7 @@ def with_marker(ctx: gc.Ctx, body: str, slug: str, task: str, given_base: str, s
     if task:
         meta["task"] = task
     if scope:
-        meta["scope"] = scope
+        meta["scope"] = scope + record_scope(task, scope)
     return body.rstrip() + "\n\n" + gc.make_marker("brief", meta) + "\n"
 
 
@@ -204,6 +228,11 @@ def check(ctx: gc.Ctx, body: str, title: str, labels: List[str], milestone: str,
             err(str(e))
         if task not in title:
             warn(f"the title does not name the task {task}")
+        scope = meta.get("scope") or []
+        missing = record_scope(task, scope) if isinstance(scope, list) else []
+        if missing:
+            warn("the scope names the task's plan but not its record file: add "
+                 + " ".join(f"--scope {m}" for m in missing) + " (scaffold adds it)")
     headings = [h.lower() for h in re.findall(r"^#{2,4}\s+(.+)$", body, re.M)]
     for section in cfg["brief"].get("required_sections", []):
         if not any(section.lower() in h for h in headings):
