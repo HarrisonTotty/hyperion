@@ -30,6 +30,9 @@
 //!   condensate decks from P14.T52.c's loop, its hazes and dust as modes of particles and its
 //!   absorbers. It is pure until P14.T54.b, the 23 → 24 bump, puts it in the record's surface
 //!   section.
+//! - [`sulphur`]: a body's sulphur (P14.T24.g), the acid deck of a runaway greenhouse, the
+//!   sulphate layer of a temperate or snowball world and SO₂ as an absorber, which
+//!   [`aerosols`] calls. It is pure until P14.T54.b.
 //! - [`cold_traps`]: an airless body's cold traps (P14.T51.f): the exposed fraction of their ice,
 //!   `f_x`, drawn once a body on `body.cold_traps`, the zonal annual maximum and the cold-trap
 //!   fraction of each condensable, which the record's published condensates take behind a hold at
@@ -57,6 +60,7 @@ pub mod figures;
 pub mod modifiers;
 pub mod seed;
 pub mod structure;
+pub mod sulphur;
 pub mod surface;
 
 pub use crust::{CrustComposition, CrustCompositionInputs, CrustLithology, DeriveCrustError};

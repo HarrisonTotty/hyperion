@@ -69,6 +69,8 @@ fn inputs_of<'a>(
             f.with_surface(conditions, VolatileHistory::NONE)
                 .ocean_fraction()
         }),
+        outgassing: table_figures(body).map_or(0.0, |f| f.outgassing()),
+        liquid_water: conditions.liquid_water(),
     }
 }
 
@@ -138,6 +140,8 @@ impl HandAir {
             cloud_fraction: 0.5,
             star_temperature: Some(Kelvin::new(5_772.0)),
             surface_liquid_cover: 0.0,
+            outgassing: 0.0,
+            liquid_water: false,
         }
     }
 
@@ -247,9 +251,10 @@ fn a_deck_s_sedimentation_is_its_supply_s() {
     let molar = row("H2O").substance().molar_mass_g_per_mol().unwrap();
     let supply = molar / mu * water.vapour_below() * water.base().value() / g;
     let h = MOLAR_GAS_CONSTANT * water.base_temperature().value() / (mu / 1e3 * g);
-    let expected =
-        SEDIMENTATION_SPEED_AT_UNIT_SUPPLY * math::powf(supply, SEDIMENTATION_SUPPLY_EXPONENT) * h
-            / 10.0;
+    let expected = SEDIMENTATION_SPEED_AT_UNIT_SUPPLY.value()
+        * math::powf(supply, SEDIMENTATION_SUPPLY_EXPONENT)
+        * h
+        / 10.0;
     let rule = sedimentation_for_supply(water, &column).unwrap();
     assert!(
         (rule.efficiency() / expected - 1.0).abs() < 1e-4,
@@ -295,9 +300,9 @@ fn an_unsaturated_or_airless_body_holds_no_aerosols() {
     );
 }
 
-/// The inputs are checked.
+/// The inventory refuses bad inputs by their variants: its cloud fraction, gravity and molar mass.
 #[test]
-fn the_inputs_are_checked() {
+fn bad_inputs_are_refused_by_their_variants() {
     let air = HandAir::new(
         &[("N2", 0.9869), ("H2O", 0.0131)],
         Some("H2O"),
@@ -319,6 +324,106 @@ fn the_inputs_are_checked() {
             field: "gravity",
             ..
         })
+    ));
+    let mut inputs = air.inputs(SurfaceState::Temperate);
+    inputs.mean_molar_mass_g_per_mol = f64::NAN;
+    assert!(matches!(
+        AerosolInventory::derive(&inputs),
+        Err(DeriveAerosolsError::Column {
+            field: "molar mass",
+            ..
+        })
+    ));
+}
+
+/// An absorber's column and layer, a rule's τ and coverage, and a deck's sedimentation of no finite
+/// supply are refused by their variants.
+#[test]
+fn bad_absorbers_modes_and_sedimentation_are_refused() {
+    let air = HandAir::new(
+        &[("N2", 0.9869), ("H2O", 0.0131)],
+        Some("H2O"),
+        288.0,
+        1e5,
+        214.0,
+    );
+    let so2 = row("SO2");
+    let (deep, shallow) = (Pascals::new(1e5), Pascals::new(1e3));
+    assert_eq!(
+        Absorber::slab(so2, -1.0, deep, shallow),
+        Err(BuildAbsorberError::Column(-1.0))
+    );
+    assert_eq!(
+        Absorber::slab(so2, 1e20, shallow, deep),
+        Err(BuildAbsorberError::Layer)
+    );
+    assert_eq!(
+        Absorber::profile(so2, 1e20, [(shallow, 1.0), (deep, 1.0)]),
+        Err(BuildAbsorberError::Layer)
+    );
+    assert_eq!(
+        Absorber::profile(so2, 1e20, [(deep, 1.0)]),
+        Err(BuildAbsorberError::Layer)
+    );
+    let dust = row("mars_dust");
+    let size = SizeDistribution::gamma(DUST_EFFECTIVE_RADIUS, DUST_EFFECTIVE_VARIANCE).unwrap();
+    let profile = ModeProfile::new(deep, shallow, 0.0).unwrap();
+    let rule = |tau: f64, coverage: f64| {
+        AerosolMode::of_rule(
+            dust,
+            CondensedPhase::Solid,
+            ShapeClass::NonSphericalMineral,
+            dust,
+            size,
+            tau,
+            profile,
+            coverage,
+            Kelvin::new(210.0),
+        )
+    };
+    assert_eq!(
+        rule(-1.0, 1.0),
+        Err(BuildModeError::OpticalDepth {
+            optical_depth: -1.0
+        })
+    );
+    assert_eq!(
+        rule(0.5, 1.5),
+        Err(BuildModeError::Coverage { coverage: 1.5 })
+    );
+    let tholin = row("tholin");
+    let haze = Aggregate::new(TITAN_HAZE_MONOMER_RADIUS, 3_000.0, 2.0).unwrap();
+    assert_eq!(
+        AerosolMode::aggregate(tholin, tholin, haze, 1.0, profile, 1.5),
+        Err(BuildModeError::Coverage { coverage: 1.5 })
+    );
+    assert!(matches!(
+        AerosolMode::aggregate(tholin, tholin, haze, f64::NAN, profile, 1.0),
+        Err(BuildModeError::OpticalDepth { .. })
+    ));
+    // A deck in a column of no finite gravity has no finite f_sed.
+    let column = MixingColumn {
+        gravity: MetresPerSecondSquared::new(9.81),
+        molar_mass_g_per_mol: air.mu,
+        eddy_diffusion: CLOUD_EDDY_DIFFUSION,
+        metallicity: 1.0,
+        top: Pascals::new(1e2),
+        bottom: Pascals::new(1e5),
+    };
+    let clouds = Condensation::derive(
+        air.gases.iter().copied(),
+        |p| air.structure.temperature_at(p),
+        &column,
+        |_| Sedimentation::BASELINE,
+        1.0,
+    )
+    .unwrap();
+    let water = &clouds.decks()[0];
+    let mut broken = column;
+    broken.gravity = MetresPerSecondSquared::new(f64::NAN);
+    assert!(matches!(
+        sedimentation_for_supply(water, &broken),
+        Err(BuildSedimentationError::Efficiency { .. })
     ));
 }
 
@@ -494,10 +599,15 @@ fn nothing_on_the_record_calls_the_inventory_yet() {
     let mut files = Vec::new();
     walk(&src, &mut files);
     assert!(files.len() > 100, "the walk found the crate's sources");
-    let own = ["planetary/hooks/aerosols"];
+    let own = ["planetary/hooks/aerosols", "planetary/hooks/sulphur"];
     // The record's own `AerosolInventory` is its placeholder, which P14.T54.b replaces with this.
-    let patterns = ["hooks::aerosols", "aerosols::"];
-    let declarations = ["pub mod aerosols;"];
+    let patterns = [
+        "hooks::aerosols",
+        "aerosols::",
+        "hooks::sulphur",
+        "sulphur::",
+    ];
+    let declarations = ["pub mod aerosols;", "pub mod sulphur;"];
     let mut found = Vec::new();
     for path in &files {
         let relative = path
@@ -830,8 +940,8 @@ fn anchors() -> Vec<Anchor> {
 /// modes converted by shape; the fit, decision-bump-plan-after-22, "The decks' `f_sed`, K and
 /// humidity", G2–G3): Mars, Earth, Jupiter, Saturn and Uranus inside their ranges, Neptune's
 /// methane below R08's cloud-deck split of 10 and within 3 times its range's top (G3's record for
-/// P14.T52.d), and Titan's, a check, inside 0.3–30. As built: Mars 1.01, Earth 2.59, Jupiter 2.58,
-/// Saturn 0.84, Uranus 4.1, Neptune 5.8, Titan 1.4.
+/// P14.T52.d), and Titan's, a check, inside 0.3–30. As built: Mars 1.01, Earth 2.61, Jupiter 2.59,
+/// Saturn 0.87, Uranus 4.15, Neptune 5.82, Titan 1.39.
 #[test]
 fn the_measured_decks_take_their_observed_optical_depths() {
     for anchor in anchors() {
@@ -991,6 +1101,194 @@ fn the_ozone_profile_is_earth_s_on_earth_s_column() {
     }
 }
 
+/// The golden's lines of `inventory`, under the name `name`.
+fn pin(w: &mut hyperion_testkit::golden::GoldenWriter, name: &str, inventory: &AerosolInventory) {
+    for d in inventory.decks() {
+        let key = d.condensate().substance().key();
+        let key = key.as_str();
+        w.line(&format!("{name} deck {key}: {:?}", d.phase()));
+        w.f64(&format!("{name} deck {key} base"), d.base().value());
+        w.f64(
+            &format!("{name} deck {key} base temperature"),
+            d.base_temperature().value(),
+        );
+        w.f64(&format!("{name} deck {key} top"), d.top().value());
+        w.f64(&format!("{name} deck {key} vapour below"), d.vapour_below());
+        w.f64(&format!("{name} deck {key} vapour above"), d.vapour_above());
+        w.f64(&format!("{name} deck {key} f_sed"), d.sedimentation());
+    }
+    for (i, m) in inventory.modes().iter().enumerate() {
+        let key = m.material().substance().key();
+        let tag = format!("{name} mode {i} {}", key.as_str());
+        w.line(&format!(
+            "{tag}: {:?} {} of deck {}",
+            m.phase(),
+            m.shape().name(),
+            m.deck().substance().key().as_str()
+        ));
+        match m.size() {
+            Ok(ParticleSize::Distribution(size)) => {
+                w.line(&format!("{tag} size: {}", size.kind().name()));
+                w.f64(&format!("{tag} r_eff"), size.effective_radius().value());
+                w.f64(&format!("{tag} v_eff"), size.effective_variance());
+            }
+            Ok(ParticleSize::Aggregate(a)) => {
+                w.f64(&format!("{tag} monomer radius"), a.monomer_radius().value());
+                w.f64(&format!("{tag} monomers"), a.monomers());
+                w.f64(&format!("{tag} fractal dimension"), a.fractal_dimension());
+            }
+            Err(error) => w.line(&format!("{tag} size: {error}")),
+        }
+        match m.column_mass() {
+            Some(mass) => w.f64(&format!("{tag} column mass"), mass.value()),
+            None => w.line(&format!("{tag} column mass: not modelled")),
+        }
+        match m.optical_depth() {
+            Ok(depth) => {
+                w.line(&format!("{tag} tau basis: {:?}", depth.basis()));
+                w.f64(&format!("{tag} tau"), depth.value());
+            }
+            Err(error) => w.line(&format!("{tag} tau: {error}")),
+        }
+        w.f64(&format!("{tag} base"), m.profile().base().value());
+        w.f64(&format!("{tag} top"), m.profile().top().value());
+        w.f64(&format!("{tag} exponent"), m.profile().exponent());
+        w.f64(&format!("{tag} coverage"), m.coverage());
+    }
+    for a in inventory.absorbers() {
+        let key = a.species().substance().key();
+        let tag = format!("{name} absorber {}", key.as_str());
+        w.f64(&format!("{tag} column"), a.column_per_m2());
+        match a.layer() {
+            AbsorberLayer::Slab { base, top } => {
+                w.f64(&format!("{tag} base"), base.value());
+                w.f64(&format!("{tag} top"), top.value());
+            }
+            AbsorberLayer::Profile(nodes) => {
+                for (k, node) in nodes.iter().enumerate() {
+                    w.f64(&format!("{tag} node {k} pressure"), node.pressure().value());
+                    w.f64(
+                        &format!("{tag} node {k} mixing ratio"),
+                        node.relative_mixing_ratio(),
+                    );
+                }
+            }
+        }
+    }
+    for (id, why) in inventory.not_formed() {
+        w.line(&format!(
+            "{name} not formed: {} {why:?}",
+            id.substance().key().as_str()
+        ));
+    }
+}
+
+/// The inventories of the Solar System table's Earth, Venus, Mars and Titan (at their own
+/// outgassing, the whole sky covered) and of an Earth at 1 PAL of O₂, pinned: each deck's base,
+/// top, vapours and `f_sed`, each mode's material, phase, shape, size, column, τ(550), profile and
+/// coverage, and each absorber's column and layer. Floats are their bits with Rust's shortest
+/// round-trip decimal beside.
+#[test]
+fn the_inventory_is_pinned() {
+    use hyperion_testkit::golden;
+    use hyperion_testkit::golden::GoldenWriter;
+
+    let mut w = GoldenWriter::new();
+    w.header(crate::GENERATOR_VERSION.get());
+    w.line("# P14.T24.c's aerosol and absorber inventory, with P14.T24.g's sulphur");
+    w.line("# (hyperion_sim::planetary::hooks::aerosols): the Solar System table's Earth, Venus,");
+    w.line(
+        "# Mars and Titan at their own outgassing under a whole sky's coverage, and an Earth at",
+    );
+    w.line("# 1 PAL of O2. Pure until P14.T54.b; nothing on the record reads it. The measured");
+    w.line("# Mars, by hand, carries its dust.");
+    for (name, inventory) in golden_cases() {
+        pin(&mut w, name, &inventory);
+    }
+    golden!("planetary/aerosols", w.as_str());
+}
+
+/// The golden's inventories, by name: the table's Earth, Venus, Mars and Titan at their own
+/// outgassing under a whole sky, an Earth at 1 PAL of O₂, and the measured Mars's dust.
+fn golden_cases() -> Vec<(&'static str, AerosolInventory)> {
+    let mut cases = Vec::new();
+    for (name, key) in [
+        ("earth", "Earth"),
+        ("venus", "Venus"),
+        ("mars", "Mars"),
+        ("titan", "Titan"),
+    ] {
+        let (body, conditions, structure) = table_air(key);
+        let inputs = inputs_of(&body, &conditions, &structure, 1.0);
+        cases.push((name, AerosolInventory::derive(&inputs).unwrap()));
+    }
+    cases.push((
+        "oxygenated earth",
+        oxygenated(1.0).inventory(SurfaceState::Temperate),
+    ));
+    cases.push(("measured mars", measured_mars_inventory()));
+    cases
+}
+
+/// The measured Mars's inventory (its anchor's air, a dry ground, no outgassing).
+fn measured_mars_inventory() -> AerosolInventory {
+    let mars = anchors()
+        .into_iter()
+        .find(|a| a.name == "Mars")
+        .expect("Mars's anchor");
+    let AnchorProfile::Air(air) = &mars.profile else {
+        panic!("Mars's air");
+    };
+    AerosolInventory::derive(&AerosolInputs {
+        state: SurfaceState::Temperate,
+        surface_pressure: Pascals::new(636.0),
+        gases: &mars.gas,
+        mean_molar_mass_g_per_mol: mars.molar_mass(),
+        gravity: MetresPerSecondSquared::new(3.71),
+        structure: air,
+        cloud_fraction: 0.1,
+        star_temperature: Some(Kelvin::new(5_772.0)),
+        surface_liquid_cover: 0.0,
+        outgassing: 0.0,
+        liquid_water: false,
+    })
+    .unwrap()
+}
+
+/// The same inputs give the same bits twice, over every rule (the golden's cases: decks, the acid
+/// deck and the sulphate layer, the haze, ozone and the dust).
+#[test]
+fn the_inventory_is_the_same_bits_twice() {
+    for ((name, a), (_, b)) in golden_cases().into_iter().zip(golden_cases()) {
+        assert_eq!(format!("{a:?}"), format!("{b:?}"), "{name}");
+    }
+}
+
+/// Each deck's base lies on its law's saturation curve along T24.e's profile, to 10⁻⁶ in pressure,
+/// in the inventory's own column (two passes, the top two decades above the tropopause): the
+/// table's Earth's, Mars's and Titan's decks.
+#[test]
+fn each_deck_s_base_lies_on_its_saturation_curve() {
+    let mut checked = 0;
+    for name in ["Earth", "Mars", "Titan"] {
+        let inventory = table_inventory(name, 1.0);
+        for deck in inventory.decks() {
+            let law = law_aloft(deck.condensate()).expect("a law aloft");
+            let ln_sat = law
+                .ln_saturation_pressure(deck.base_temperature(), deck.base(), 0.0)
+                .expect("a saturation at the base");
+            let ln_vapour = math::ln(deck.vapour_below() * deck.base().value());
+            assert!(
+                (ln_vapour - ln_sat).abs() < 1e-6,
+                "{name}'s {}: {ln_vapour} against {ln_sat}",
+                deck.condensate().substance().key().as_str()
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked >= 3, "{checked} decks");
+}
+
 /// The methane haze forms just above each threshold and not below it: on an N₂–CH₄ world above
 /// 10⁻⁵ of CH₄ (Trainer et al. 2006's least), on a CO₂ world above CH₄ ÷ CO₂ 0.2 (Arney et al.
 /// 2016's thick haze); its τ is continuous through 0 there and rises with the methane to Titan's.
@@ -1081,6 +1379,8 @@ fn a_mars_like_world_carries_dust_and_an_ocean_world_none() {
         cloud_fraction: 0.1,
         star_temperature: Some(Kelvin::new(5_772.0)),
         surface_liquid_cover: 0.0,
+        outgassing: 0.0,
+        liquid_water: false,
     };
     let inventory = AerosolInventory::derive(&inputs).unwrap();
     let dust: Vec<&AerosolMode> = inventory
@@ -1112,7 +1412,15 @@ fn a_mars_like_world_carries_dust_and_an_ocean_world_none() {
             .all(|m| m.material() != row("mars_dust"))
     );
     // Continuous through the thin-air limit and the lifting threshold.
-    let at = |p: f64| dust_optical_depth(p, 210.0, 43.34, 3.71, 0.0);
+    let at = |p: f64| {
+        dust_optical_depth(
+            Pascals::new(p),
+            Kelvin::new(210.0),
+            43.34,
+            MetresPerSecondSquared::new(3.71),
+            0.0,
+        )
+    };
     assert_same_bits(at(DUST_AIR_LIMIT.value()), 0.0);
     assert!(at(DUST_AIR_LIMIT.value() * (1.0 - 1e-9)) < 1e-8);
     assert!((at(636.0) / MARS_DUST_OPTICAL_DEPTH - 1.0).abs() < 1e-9);

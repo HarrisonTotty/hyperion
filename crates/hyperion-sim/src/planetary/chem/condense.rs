@@ -40,15 +40,14 @@
 //!   so that a large `f_sed`'s condensate follows s `q_s` ÷ (`f_sed` − s) to any `f_sed` (P14.T24.c's
 //!   precipitating decks, `f_sed` up to 10⁴ and more); elsewhere (a saturation that rises with
 //!   height, or a vapour not yet saturated at the step's start) it relaxes toward the saturation
-//!   held at its ends' geometric mean. Where `f_sed` > 2 s (away from `f_sed` ≈ s, where the closed
-//!   form's two terms would cancel; it is exact for any `f_sed` ≠ s) the step's condensate, `q_c` = A
-//!   e^(−`f_sed` x) + B e^(−s x) with B = s `q_s0` ÷ (`f_sed` − s), is integrated against p in closed
-//!   form, so that a base's first step, whose condensate rises from 0 within 1 ÷ `f_sed` in ln p,
-//!   is counted exactly; elsewhere by the trapezoid. (Corrected 2026-10-22 under P14.T24.c: the
-//!   relaxation alone floored the column at about s Δ ÷ 2 of its vapour above `f_sed` ≈ 100, and
-//!   the trapezoid at a base under-counted it by about Δ (1 + s) ÷ 2; the exact step moves an
-//!   `f_sed` 3 column by under 1%, decision-bump-plan-after-22, "The decks' `f_sed`, K and humidity",
-//!   G4.) The deck's
+//!   held at its ends' geometric mean. In such a cloud the step's condensate, `q_c` = `q_c0`
+//!   e^(−`f_sed` x) + s `q_s0` (e^(−s x) − e^(−`f_sed` x)) ÷ (`f_sed` − s), is integrated against p in
+//!   closed form (its divided difference taken at its limit within 10⁻⁴ of `f_sed` = s), so that a
+//!   base's first step, whose condensate rises from 0 within 1 ÷ `f_sed` in ln p, is counted
+//!   exactly; elsewhere by the trapezoid. (Corrected 2026-10-22 under P14.T24.c: the relaxation
+//!   alone floored the column at about s Δ ÷ 2 of its vapour above `f_sed` ≈ 100, and the trapezoid
+//!   at a base under-counted it by about Δ (1 + s) ÷ 2; the exact step moves an `f_sed` 3 column by
+//!   under 1%, decision-bump-plan-after-22, "The decks' `f_sed`, K and humidity", G4.) The deck's
 //!   column mass is ∫ ε `q_c` dp ÷ g, ε the condensate's molar mass per limiting vapour over the
 //!   gas's; its top is the shallowest level at which `q_c` still holds [`TOP_FRACTION`] of the
 //!   vapour below, or the column's top; above it the deck's mixing ratio goes as about
@@ -540,6 +539,11 @@ pub enum BuildModeError {
         /// The value given.
         temperature: Kelvin,
     },
+    /// A rule's τ(550) is not finite and non-negative (P14.T24.c's rule modes).
+    OpticalDepth {
+        /// The value given, dimensionless.
+        optical_depth: f64,
+    },
 }
 
 impl fmt::Display for BuildModeError {
@@ -565,6 +569,10 @@ impl fmt::Display for BuildModeError {
                 f,
                 "temperature {} K is not finite and positive",
                 temperature.value()
+            ),
+            Self::OpticalDepth { optical_depth } => write!(
+                f,
+                "optical depth {optical_depth} is not finite and non-negative"
             ),
         }
     }
@@ -1604,18 +1612,14 @@ fn integrate(
                 // exact solution for q_s falling exponentially at the rate `fall` (the module's
                 // documentation).
                 let fall = math::ln(saturated_from / saturated_end) / step;
-                if efficiency > 2.0 * fall {
-                    // q_c = A e^(−f x) + B e^(−s x): the transient that a base's first step holds
-                    // and the steady state, each integrated over the step exactly against p.
-                    let steady = fall * saturated_from / (efficiency - fall);
-                    let transient = total - saturated_from - steady;
-                    exact_load = Some(
-                        pressure_start
-                            * step
-                            * (transient * mean_decay((1.0 + efficiency) * step)
-                                + steady * mean_decay((1.0 + fall) * step)),
-                    );
-                }
+                // q_c = q_c0 e^(−f x) + s q_s0 (e^(−s x) − e^(−f x)) ÷ (f − s), integrated over
+                // the step exactly against p = p_start e^(−x): a base's first step's transient and
+                // the steady state alike.
+                exact_load = Some(
+                    pressure_start
+                        * ((total - saturated_from) * decay_integral(efficiency, step)
+                            + fall * saturated_from * decay_difference(fall, efficiency, step)),
+                );
                 total = total * math::exp(-efficiency * step)
                     + efficiency * step * saturated_end * mean_decay((efficiency - fall) * step);
             } else {
@@ -1646,6 +1650,30 @@ fn integrate(
         from = to;
     }
     column
+}
+
+/// ∫₀^Δ e^(−(1 + a) x) dx over a step `step` long, for a decay rate `rate` a: Δ (1 − e^(−(1+a)Δ))
+/// ÷ ((1 + a) Δ), the weight of a term e^(−a x) of a step's condensate against p ∝ e^(−x).
+#[must_use]
+fn decay_integral(rate: f64, step: f64) -> f64 {
+    step * mean_decay((1.0 + rate) * step)
+}
+
+/// The divided difference (I(s) − I(f)) ÷ (f − s) of [`decay_integral`]'s I in its rate, for the
+/// saturation's rate `fall` s and `efficiency` f over a step `step` long: the weight of a step's
+/// steady condensate. Within 10⁻⁴ of each other in (f − s) Δ it is −dI/da at their midpoint,
+/// ((1 − e^(−kΔ)) − kΔ e^(−kΔ)) ÷ k² with k = 1 + a, its limit, the two forms agreeing to about
+/// 10⁻⁸ there.
+#[must_use]
+fn decay_difference(fall: f64, efficiency: f64, step: f64) -> f64 {
+    let gap = efficiency - fall;
+    if (gap * step).abs() > 1e-4 {
+        (decay_integral(fall, step) - decay_integral(efficiency, step)) / gap
+    } else {
+        let k = 1.0 + f64::midpoint(fall, efficiency);
+        let decayed = math::exp(-k * step);
+        ((1.0 - decayed) - k * step * decayed) / (k * k)
+    }
 }
 
 /// The mean of e^(−u) over u from 0 to `delta`, (1 − e^(−δ)) ÷ δ, and 1 at δ = 0: the weight of

@@ -68,6 +68,9 @@
 //!   Titan's column.
 //! - **Dust** ([`dust_optical_depth`]): `mars_dust` on a dry, thin and liftable ground, calibrated on
 //!   Mars's background column.
+//! - **Sulphur** (P14.T24.g, [`sulphur`](super::sulphur)): a runaway world's four-mode acid deck,
+//!   whose base the loop finds from its SO₂, a temperate or snowball world's sulphate layer, and SO₂
+//!   as an absorber.
 //!
 //! # What is not modelled
 //!
@@ -98,12 +101,16 @@ use crate::planetary::chem::condense::{
 use crate::planetary::chem::quench::{EddyDiffusion, MixingColumn};
 use crate::planetary::derive::atmosphere::SurfaceState;
 use crate::planetary::hooks::structure::RadiativeConvective;
+use crate::planetary::hooks::sulphur::{DeriveSulphurError, Sulphur, SulphurCycle, SulphurInputs};
 use crate::substance::aloft::law_aloft;
 use crate::substance::{
     CondensedPhase, ExtinctionBasis, MOLAR_GAS_CONSTANT, SizeDistribution, SubstanceId,
     SubstanceKind,
 };
-use crate::units::{Kelvin, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared, Pascals};
+use crate::units::{
+    Kelvin, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metres, MetresPerSecond,
+    MetresPerSecondSquared, Pascals,
+};
 
 /// The cloud layer's eddy diffusion, m² s⁻¹: 10, Ackerman and Marley's `K_min`, 10⁵ cm² s⁻¹ (2001,
 /// §2: "an eddy diffusion coefficient no less than a prescribed minimum value (`K_min` = 10⁵ cm²
@@ -125,9 +132,9 @@ pub const CLOUD_EDDY_DIFFUSION: EddyDiffusion = EddyDiffusion::from_square_metre
 /// | Deck | `M_vap` (kg m⁻²) | v (m s⁻¹) | `f_sed` | τ(550) | Observed range (centre) | Residual (dex) |
 /// | --- | --- | --- | --- | --- | --- | --- |
 /// | Mars H₂O | 0.00909 | 0.0050 | 5.1 | 1.01 | 0.2–2 (0.6) | +0.23 |
-/// | Earth H₂O | 73.7 | 0.85 | 708 | 2.59 | 2.5–10 (3.7) | −0.16 |
+/// | Earth H₂O | 73.7 | 0.85 | 708 | 2.61 | 2.5–10 (3.7) | −0.15 |
 /// | Jupiter NH₃ | 6.08 | 0.21 | 441 | 2.58 | 0.8–5 (1.5) | +0.24 |
-/// | Saturn NH₃ | 30.2 | 0.51 | 2,674 | 0.84 | 0.5–5 (1.5) | −0.25 |
+/// | Saturn NH₃ | 30.2 | 0.51 | 2,674 | 0.87 | 0.5–5 (1.5) | −0.24 |
 /// | Uranus CH₄ | 2,549 | 6.4 | 18,320 | 4.1 | 1–5 (2.5) | +0.22 |
 /// | Neptune CH₄ | 2,936 | 7.0 | 15,860 | 5.8 | 0.5–4 (1.5) | +0.59 |
 ///
@@ -135,9 +142,10 @@ pub const CLOUD_EDDY_DIFFUSION: EddyDiffusion = EddyDiffusion::from_square_metre
 /// 3 times its range's top: G3's record for P14.T52.d, not a serve-gate item. No pair puts all six
 /// inside their ranges (the equal-weight best, v₁ 0.087 and 0.585, leaves Earth at 1.8); this one
 /// is the least-squares point with Mars, Earth, Jupiter and Saturn inside by a 5% margin before
-/// rounding (Earth's 2.59 after it, 3.6% inside) and the ice giants under G3. Titan, a check: 1.4
-/// in the cloud, inside 0.3–30.
-pub const SEDIMENTATION_SPEED_AT_UNIT_SUPPLY: f64 = 0.0735;
+/// rounding (Earth's 2.59 after it, 3.6% inside; 2.61 on the loop's final mass integral, as
+/// tabled) and the ice giants under G3, accepted by main (2026-10-22). Titan, a check: 1.4 in the
+/// cloud, inside 0.3–30.
+pub const SEDIMENTATION_SPEED_AT_UNIT_SUPPLY: MetresPerSecond = MetresPerSecond::new(0.0735);
 
 /// The exponent of the effective sedimentation speed in the condensate's supply, its vapour column
 /// above its base: 0.57, fitted with [`SEDIMENTATION_SPEED_AT_UNIT_SUPPLY`] (its table). `Adopted`.
@@ -161,8 +169,9 @@ pub const DECK_WIDTH: f64 = 2.0;
 ///
 /// # Errors
 ///
-/// [`BuildSedimentationError`] where the deck's inputs give no finite `f_sed` (a gas of no molar
-/// mass, a column of no gravity).
+/// [`BuildSedimentationError::Efficiency`] where the deck's inputs give no finite `f_sed`: a
+/// condensate or a gas of no molar mass, a column of no or not finite gravity or eddy diffusion.
+/// The floor applies to a finite `f_sed` only.
 pub fn sedimentation_for_supply(
     deck: &Deck,
     column: &MixingColumn,
@@ -176,12 +185,22 @@ pub fn sedimentation_for_supply(
         .molar_mass_g_per_mol()
         .map_or(f64::NAN, |m| m / per_vapour / mu);
     let supply = epsilon * deck.vapour_below() * deck.base().value() / g;
-    let speed = SEDIMENTATION_SPEED_AT_UNIT_SUPPLY
-        * math::powf(supply.max(0.0), SEDIMENTATION_SUPPLY_EXPONENT);
+    let speed = if supply.is_finite() && supply >= 0.0 {
+        SEDIMENTATION_SPEED_AT_UNIT_SUPPLY.value()
+            * math::powf(supply, SEDIMENTATION_SUPPLY_EXPONENT)
+    } else {
+        f64::NAN
+    };
     let scale_height =
         MOLAR_GAS_CONSTANT * deck.base_temperature().value() / (mu / GRAMS_PER_KILOGRAM * g);
     let efficiency = speed * scale_height / column.eddy_diffusion.square_metres_per_second();
-    Sedimentation::new(efficiency.max(LEAST_SEDIMENTATION_EFFICIENCY), DECK_WIDTH)
+    // A finite f_sed takes the floor; anything else is refused by `Sedimentation::new`.
+    let efficiency = if efficiency.is_finite() {
+        efficiency.max(LEAST_SEDIMENTATION_EFFICIENCY)
+    } else {
+        efficiency
+    };
+    Sedimentation::new(efficiency, DECK_WIDTH)
 }
 
 /// Grams per kilogram.
@@ -309,7 +328,7 @@ pub const OZONE_BY_STAR: [(f64, f64); 4] = [
 /// 103, 18035, Fig. 3) tried in N₂ (0.001%), at which they still made haze (their production rises
 /// with the CH₄ and peaks "near 0.02% CH₄"): the lowest concentration tried, not a measured
 /// threshold. They found none in N₂–CH₄ mixtures, so the plan's "CH₄ ≳ 10⁻³" stands unsourced and
-/// this floor replaces it (recorded, for main's ruling).
+/// this floor replaces it (recorded; accepted by main, 2026-10-22).
 pub const HAZE_METHANE_FLOOR: f64 = 1e-5;
 
 /// The CH₄ to CO₂ ratio at which a CO₂ world's haze is thick: 0.2, Arney et al. 2016's ("a 'thick'
@@ -329,11 +348,18 @@ pub const TITAN_HAZE_OPTICAL_DEPTH: f64 = 8.1;
 /// haze's index reaches Titan's own.
 pub const TITAN_SURFACE_METHANE: f64 = 0.0565;
 
-/// The haze's aggregates (Tomasko et al. 2008, as P14.T24.c and R08.T5.c take them): 3,000
-/// monomers of radius 0.05 µm, the fractal dimension 2 ("not constrained by observations and is
-/// set to 2"). Hörst 2017 (JGR Planets 122, 432) quotes 4,000 monomers of 0.04 µm from Tomasko et
-/// al. 2008 and 2009: recorded.
-pub const TITAN_HAZE_MONOMERS: (f64, f64, f64) = (0.05e-6, 3_000.0, 2.0);
+/// The radius of the haze's monomers (Tomasko et al. 2008, as P14.T24.c and R08.T5.c take them):
+/// 0.05 µm, 3,000 of them ([`TITAN_HAZE_MONOMERS`]) at the fractal dimension
+/// [`TITAN_HAZE_FRACTAL_DIMENSION`]. Hörst 2017 (JGR Planets 122, 432) quotes 4,000 monomers of
+/// 0.04 µm from Tomasko et al. 2008 and 2009: recorded.
+pub const TITAN_HAZE_MONOMER_RADIUS: Metres = Metres::new(0.05e-6);
+
+/// The number of the haze's monomers: 3,000 ([`TITAN_HAZE_MONOMER_RADIUS`]).
+pub const TITAN_HAZE_MONOMERS: f64 = 3_000.0;
+
+/// The haze's fractal dimension: 2, Tomasko et al. 2008's ("not constrained by observations and is
+/// set to 2").
+pub const TITAN_HAZE_FRACTAL_DIMENSION: f64 = 2.0;
 
 /// The haze's top over the ground's pressure: four decades, well mixed between (Titan's particles
 /// reach from the surface to its ionosphere; its extinction's 65 km scale height above 80 km,
@@ -347,10 +373,13 @@ pub const HAZE_TOP_RATIO: f64 = 1e-4;
 /// visible".
 pub const MARS_DUST_OPTICAL_DEPTH: f64 = 0.5;
 
-/// The dust's mode: rendering plan R08's Mars dust (science-r08-mmf.md §3), a gamma distribution of
-/// the volume-to-area radius, `r_eff` 0.8974 µm and `v_eff` 0.3 (Wolff et al. 2009's sizes in R08's
+/// The dust's effective radius: rendering plan R08's Mars dust (science-r08-mmf.md §3), a gamma
+/// distribution of the volume-to-area radius, `r_eff` 0.8974 µm (Wolff et al. 2009's sizes in R08's
 /// convention), of `mars_dust`.
-pub const DUST_MODE: (f64, f64) = (0.8974e-6, 0.3);
+pub const DUST_EFFECTIVE_RADIUS: Metres = Metres::new(0.8974e-6);
+
+/// The dust's effective variance, `v_eff` 0.3, with [`DUST_EFFECTIVE_RADIUS`].
+pub const DUST_EFFECTIVE_VARIANCE: f64 = 0.3;
 
 /// The dust's top over the ground's pressure: e⁻³, about three scale heights, well mixed between
 /// (Mars's dust reaches 1–5 scale heights, Conrath 1975's profile; 50–75 km in a global storm).
@@ -375,9 +404,13 @@ const MARS_AIR: (f64, f64, f64, f64) = (636.0, 210.0, 43.34, 3.71);
 /// density ρₚ 2,650 kg m⁻³, under gravity `g` in air of density `air`: about 1.9 m s⁻¹ on Mars and
 /// 0.2 on Earth (Kok et al.'s Table 2.3: 1.5 and 0.2).
 #[must_use]
-pub fn saltation_threshold(air: f64, g: f64) -> f64 {
+pub fn saltation_threshold(
+    air: KilogramsPerCubicMetre,
+    g: MetresPerSecondSquared,
+) -> MetresPerSecond {
     let (a_n, gamma, diameter, grain) = (0.111, 3e-4, 75e-6, 2_650.0);
-    a_n * (grain * g * diameter / air + gamma / (air * diameter)).sqrt()
+    let (air, g) = (air.value(), g.value());
+    MetresPerSecond::new(a_n * (grain * g * diameter / air + gamma / (air * diameter)).sqrt())
 }
 
 /// The value at `x` of the curve through `nodes` ((x, y), x rising, every value positive), linear
@@ -440,6 +473,10 @@ pub fn ozone_star_factor(star: Kelvin) -> f64 {
 /// layer forms at a fixed overhead O₂ column, to first order, Chapman 1930), the nodes below the
 /// ground dropped and a node at the ground taken between the two about it; `None` with no O₂, no
 /// star, or no node left above the ground.
+///
+/// # Panics
+///
+/// Never: `O3` is a registry row.
 fn ozone(inputs: &AerosolInputs<'_>, oxygen: f64) -> Result<Option<Absorber>, BuildAbsorberError> {
     let Some(star) = inputs.star_temperature else {
         return Ok(None);
@@ -476,7 +513,7 @@ fn ozone(inputs: &AerosolInputs<'_>, oxygen: f64) -> Result<Option<Absorber>, Bu
     if nodes.len() < 2 || column <= 0.0 {
         return Ok(None);
     }
-    let ozone = crate::substance::by_key("O3").ok_or(BuildAbsorberError::Layer)?;
+    let ozone = crate::substance::by_key("O3").expect("O3 is a registry row");
     Absorber::profile(ozone, column, nodes).map(Some)
 }
 
@@ -706,7 +743,7 @@ pub enum DepthBasis {
 }
 
 /// A mode's column optical depth at 550 nm, and what it rests on.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct ModeDepth {
     value: f64,
     basis: DepthBasis,
@@ -808,11 +845,12 @@ impl AerosolMode {
     ///
     /// # Errors
     ///
-    /// [`BuildModeError`] for a coverage outside 0 to 1, a temperature that is not finite and
-    /// positive, or a τ that is not finite and non-negative.
+    /// [`BuildModeError::OpticalDepth`] for a τ that is not finite and non-negative, and as
+    /// [`Mode::new`] for a coverage outside 0 to 1 or a temperature that is not finite and positive.
     #[expect(
         clippy::too_many_arguments,
-        reason = "a rule's mode, its eight columns and the temperature its optics are taken at"
+        reason = "a mode's columns as P14.T24.c lists them, each a different quantity, and the \
+                  temperature its optics are taken at: a builder would only rename them"
     )]
     pub fn of_rule(
         material: SubstanceId,
@@ -826,9 +864,7 @@ impl AerosolMode {
         temperature: Kelvin,
     ) -> Result<Self, BuildModeError> {
         if !(optical_depth.is_finite() && optical_depth >= 0.0) {
-            return Err(BuildModeError::ColumnMass {
-                column_mass: KilogramsPerSquareMetre::new(optical_depth),
-            });
+            return Err(BuildModeError::OpticalDepth { optical_depth });
         }
         let unit = Mode::new(
             material,
@@ -866,8 +902,7 @@ impl AerosolMode {
     /// # Errors
     ///
     /// [`BuildModeError::Coverage`] for a coverage outside 0 to 1, and
-    /// [`BuildModeError::ColumnMass`] (its depth, as a mass would be) for a τ that is not finite and
-    /// non-negative.
+    /// [`BuildModeError::OpticalDepth`] for a τ that is not finite and non-negative.
     pub fn aggregate(
         material: SubstanceId,
         deck: SubstanceId,
@@ -880,9 +915,7 @@ impl AerosolMode {
             return Err(BuildModeError::Coverage { coverage });
         }
         if !(optical_depth.is_finite() && optical_depth >= 0.0) {
-            return Err(BuildModeError::ColumnMass {
-                column_mass: KilogramsPerSquareMetre::new(optical_depth),
-            });
+            return Err(BuildModeError::OpticalDepth { optical_depth });
         }
         Ok(Self {
             material,
@@ -918,7 +951,9 @@ impl AerosolMode {
         self.shape
     }
 
-    /// The deck it belongs to, by the deck's condensate (a rule's mode, its own material).
+    /// The deck it belongs to, by the deck's condensate. A rule's mode names its own material: the
+    /// dust `mars_dust`, the haze `tholin`, a sulphate layer `H2SO4`, none of which has an
+    /// [`AerosolDeck`] of its own (P14.T54.b's wire field states it).
     #[must_use]
     pub const fn deck(&self) -> SubstanceId {
         self.deck
@@ -972,11 +1007,11 @@ fn rebuilt(size: &SizeDistribution, radius: Metres) -> SizeDistribution {
             SizeDistribution::log_normal(radius, variance)
         }
     };
-    built.unwrap_or(*size)
+    built.expect("a radius scaled by a sphericity in (0, 1] stays finite and positive")
 }
 
 /// A condensate's deck as the inventory states it (the [module](self)'s documentation).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct AerosolDeck {
     condensate: SubstanceId,
     phase: CondensedPhase,
@@ -1006,33 +1041,28 @@ impl AerosolDeck {
         }
     }
 
-    /// A deck of a rule's own (P14.T24.g's acid): its condensate and phase, its base and top, its
-    /// vapour below and above, and the exponent of its modes' profiles, 0 for well-mixed modes.
+    /// The deck a rule makes of the loop's `found` (P14.T24.g's acid): its condensate, base, base
+    /// temperature, vapour below and `extrapolated` flag the loop's, its phase `phase`, its top
+    /// `top` (no deeper than the base: the caller's), its vapour above `vapour_above`, and the
+    /// exponent of its modes' profiles `sedimentation`, 0 for well-mixed modes.
     #[must_use]
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "a deck's eight columns, as P14.T24.c lists them"
-    )]
-    pub const fn new(
-        condensate: SubstanceId,
+    pub(crate) const fn of_rule(
+        found: &Deck,
         phase: CondensedPhase,
-        base: Pascals,
-        base_temperature: Kelvin,
         top: Pascals,
-        vapour_below: f64,
         vapour_above: f64,
         sedimentation: f64,
     ) -> Self {
         Self {
-            condensate,
+            condensate: found.condensate(),
             phase,
-            base,
-            base_temperature,
+            base: found.base(),
+            base_temperature: found.base_temperature(),
             top,
-            vapour_below,
+            vapour_below: found.vapour_below(),
             vapour_above,
             sedimentation,
-            extrapolated: false,
+            extrapolated: found.extrapolated(),
         }
     }
 
@@ -1093,7 +1123,7 @@ impl AerosolDeck {
 }
 
 /// An absorber's layer (P14.T24.c).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum AbsorberLayer {
     /// A constant mixing ratio between a base and a top pressure.
     Slab {
@@ -1132,7 +1162,7 @@ impl AbsorberNode {
 
 /// A gas that absorbs, listed apart from P14.T24.a's well-mixed gases (P14.T24.c): ozone, and SO₂
 /// by P14.T24.g.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct Absorber {
     species: SubstanceId,
     column_per_m2: f64,
@@ -1286,6 +1316,11 @@ pub struct AerosolInputs<'a> {
     /// The share of the ground its surface liquids cover, 0 to 1 (P14.T24.b's `surface_liquids`,
     /// summed), whose dry rest lifts the dust.
     pub surface_liquid_cover: f64,
+    /// P14.T24.b's present outgassing O, relative to Earth's, which P14.T24.g's SO₂ reads.
+    pub outgassing: f64,
+    /// Whether the surface holds liquid water (P14.T24.a's flag), which sets SO₂'s life on a
+    /// temperate or snowball world (P14.T24.g).
+    pub liquid_water: bool,
 }
 
 /// [`AerosolInventory::derive`] refused its inputs.
@@ -1308,6 +1343,14 @@ pub enum DeriveAerosolsError {
     Mode(BuildModeError),
     /// An absorber could not be built.
     Absorber(BuildAbsorberError),
+    /// P14.T24.g's sulphur could not build a mode or its absorber.
+    Sulphur(DeriveSulphurError),
+}
+
+impl From<DeriveSulphurError> for DeriveAerosolsError {
+    fn from(error: DeriveSulphurError) -> Self {
+        Self::Sulphur(error)
+    }
 }
 
 impl From<BuildAbsorberError> for DeriveAerosolsError {
@@ -1329,6 +1372,7 @@ impl fmt::Display for DeriveAerosolsError {
             Self::Sedimentation(error) => write!(f, "a deck's sedimentation: {error}"),
             Self::Mode(error) => write!(f, "a mode: {error}"),
             Self::Absorber(error) => write!(f, "an absorber: {error}"),
+            Self::Sulphur(error) => write!(f, "the sulphur: {error}"),
         }
     }
 }
@@ -1340,6 +1384,7 @@ impl Error for DeriveAerosolsError {
             Self::Sedimentation(error) => Some(error),
             Self::Mode(error) => Some(error),
             Self::Absorber(error) => Some(error),
+            Self::Sulphur(error) => Some(error),
             Self::CloudFraction(_) | Self::Column { .. } => None,
         }
     }
@@ -1393,8 +1438,60 @@ impl AerosolInventory {
     ///
     /// # Errors
     ///
-    /// [`DeriveAerosolsError`] for a cloud fraction outside 0 to 1, a molar mass or a gravity that
-    /// is not finite and positive, or a gas the condensation loop refuses.
+    /// - [`DeriveAerosolsError::CloudFraction`] for a cloud fraction outside 0 to 1;
+    /// - [`DeriveAerosolsError::Column`] for a molar mass or a gravity that is not finite and
+    ///   positive;
+    /// - [`DeriveAerosolsError::Condensation`] for a gas or a profile the condensation loop refuses;
+    /// - [`DeriveAerosolsError::Sedimentation`] where a deck's supply gives no finite `f_sed`;
+    /// - [`DeriveAerosolsError::Mode`], [`DeriveAerosolsError::Absorber`] and
+    ///   [`DeriveAerosolsError::Sulphur`] where a rule's mode or absorber is not one: unreachable
+    ///   from finite inputs that pass the checks above, kept as errors rather than panics.
+    ///
+    /// # Examples
+    ///
+    /// An Earth-like air by hand, 1.3% of water at 288 K under a 214 K skin, makes a water deck
+    /// whose vapour below is the air's:
+    ///
+    /// ```
+    /// use hyperion_sim::planetary::derive::atmosphere::SurfaceState;
+    /// use hyperion_sim::planetary::hooks::aerosols::{AerosolInputs, AerosolInventory};
+    /// use hyperion_sim::planetary::hooks::structure::{RadiativeConvective, StructureInputs};
+    /// use hyperion_sim::substance::by_key;
+    /// use hyperion_sim::units::{Kelvin, MetresPerSecondSquared, Pascals};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let (n2, h2o) = (by_key("N2").ok_or("a row")?, by_key("H2O").ok_or("a row")?);
+    /// let gases = [(n2, 0.987), (h2o, 0.013)];
+    /// let structure = RadiativeConvective::derive(&StructureInputs {
+    ///     surface_temperature: Kelvin::new(288.0),
+    ///     surface_pressure: Pascals::new(1.0e5),
+    ///     gases: &gases,
+    ///     condensable: Some(h2o),
+    ///     skin_temperature: Kelvin::new(214.0),
+    /// })?;
+    /// let inventory = AerosolInventory::derive(&AerosolInputs {
+    ///     state: SurfaceState::Temperate,
+    ///     surface_pressure: Pascals::new(1.0e5),
+    ///     gases: &gases,
+    ///     mean_molar_mass_g_per_mol: 0.987 * 28.0134 + 0.013 * 18.015,
+    ///     gravity: MetresPerSecondSquared::new(9.81),
+    ///     structure: &structure,
+    ///     cloud_fraction: 0.67,
+    ///     star_temperature: Some(Kelvin::new(5_772.0)),
+    ///     surface_liquid_cover: 0.7,
+    ///     outgassing: 0.0,
+    ///     liquid_water: true,
+    /// })?;
+    /// let water = inventory
+    ///     .decks()
+    ///     .iter()
+    ///     .find(|d| d.condensate() == h2o)
+    ///     .ok_or("a water deck")?;
+    /// assert!((water.vapour_below() - 0.013).abs() < 1e-12);
+    /// assert!(inventory.deck_optical_depth(h2o).is_some_and(|tau| tau > 0.0));
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn derive(inputs: &AerosolInputs<'_>) -> Result<Self, DeriveAerosolsError> {
         let fraction = inputs.cloud_fraction;
         if !(0.0..=1.0).contains(&fraction) {
@@ -1412,7 +1509,22 @@ impl AerosolInventory {
             }
         }
         let mut inventory = Self::empty();
-        inventory.add_decks(inputs)?;
+        let sulphur_inputs = sulphur_inputs(inputs);
+        let sulphur = Sulphur::derive(&sulphur_inputs);
+        let acid_top = inventory.add_decks(inputs, &sulphur)?;
+        if let Some(layer) = sulphur
+            .sulphate_layer(&sulphur_inputs)
+            .map_err(DeriveAerosolsError::Sulphur)?
+        {
+            inventory.modes.push(layer);
+        }
+        let so2_top = acid_top.unwrap_or_else(|| inputs.structure.tropopause_pressure());
+        if let Some(so2) = sulphur
+            .absorber(inputs.surface_pressure, so2_top)
+            .map_err(DeriveAerosolsError::Sulphur)?
+        {
+            inventory.absorbers.push(so2);
+        }
         let fraction_of = |key: &str| {
             crate::substance::by_key(key).map_or(0.0, |id| {
                 inputs
@@ -1437,7 +1549,11 @@ impl AerosolInventory {
     }
 
     /// The decks of the loop, each of its supply's sedimentation, and their modes, converted.
-    fn add_decks(&mut self, inputs: &AerosolInputs<'_>) -> Result<(), DeriveAerosolsError> {
+    fn add_decks(
+        &mut self,
+        inputs: &AerosolInputs<'_>,
+        sulphur: &Sulphur,
+    ) -> Result<Option<Pascals>, DeriveAerosolsError> {
         let structure = inputs.structure;
         let column = MixingColumn {
             gravity: inputs.gravity,
@@ -1450,7 +1566,13 @@ impl AerosolInventory {
             bottom: inputs.surface_pressure,
         };
         let profile = |p: Pascals| structure.temperature_at(p);
-        let gas = inputs.gases.iter().copied();
+        // A cycling world's SO₂, which T24.a's fractions do not list, joins the loop's gas as the
+        // acid's vapour (P14.T24.g); a once-through world's makes no deck.
+        let acid = crate::substance::by_key("H2SO4");
+        let dioxide = crate::substance::by_key("SO2")
+            .filter(|_| sulphur.cycle() == SulphurCycle::Cycling && sulphur.mole_fraction() > 0.0)
+            .map(|id| (id, sulphur.mole_fraction()));
+        let gas = inputs.gases.iter().copied().chain(dioxide);
         // Two passes: the first finds each deck's base and vapour, from which its supply's
         // sedimentation follows; the second forms the decks with it.
         let first = Condensation::derive(
@@ -1472,7 +1594,20 @@ impl AerosolInventory {
                 .map_or(Sedimentation::BASELINE, |&(_, s)| s)
         };
         let clouds = Condensation::derive(gas, profile, &column, of, inputs.cloud_fraction)?;
+        let mut acid_top = None;
         for deck in clouds.decks() {
+            if Some(deck.condensate()) == acid {
+                // The acid's deck is P14.T24.g's: the loop finds its base, the rule the rest.
+                let sulphur_inputs = sulphur_inputs(inputs);
+                if let Some((acid_deck, modes)) =
+                    sulphur.acid_deck(&sulphur_inputs, deck, inputs.cloud_fraction)?
+                {
+                    acid_top = Some(acid_deck.top());
+                    self.decks.push(acid_deck);
+                    self.modes.extend(modes);
+                }
+                continue;
+            }
             self.decks.push(AerosolDeck::of(deck));
             for mode in deck.modes() {
                 self.modes
@@ -1480,7 +1615,7 @@ impl AerosolInventory {
             }
         }
         self.not_formed.extend_from_slice(clouds.not_formed());
-        Ok(())
+        Ok(acid_top)
     }
 
     /// The decks, hottest base first.
@@ -1507,8 +1642,9 @@ impl AerosolInventory {
         &self.not_formed
     }
 
-    /// The τ(550) of the deck of `condensate`, the sum of its modes' that are modelled; `None` where
-    /// it has no deck or none of its modes has a τ.
+    /// The τ(550) of the modes that name `condensate` as their deck, the sum of those modelled: a
+    /// deck's, or a rule's layer's (Earth's sulphate layer names `H2SO4` with no deck); `None` where
+    /// no mode names it or none of them has a τ.
     #[must_use]
     pub fn deck_optical_depth(&self, condensate: SubstanceId) -> Option<f64> {
         let mut total = None;
@@ -1534,6 +1670,20 @@ pub fn haze_index(methane: f64, carbon_dioxide: f64) -> f64 {
 /// monotonic. The rule takes the methane reservoir as resupplied, as P14.T24.f does: its carbon is
 /// photolysed methane (science-p14-t24f §4's sink, photolysis to hydrocarbons, not escape), whose
 /// outcome P14.T53.a records.
+///
+/// # Examples
+///
+/// Titan's methane makes Titan's haze, and a trace at the floor none:
+///
+/// ```
+/// use hyperion_sim::planetary::hooks::aerosols::{
+///     HAZE_METHANE_FLOOR, TITAN_HAZE_OPTICAL_DEPTH, haze_index, haze_optical_depth,
+/// };
+///
+/// let titan = haze_optical_depth(haze_index(0.0565, 1e-8));
+/// assert!((titan / TITAN_HAZE_OPTICAL_DEPTH - 1.0).abs() < 1e-3);
+/// assert!(haze_optical_depth(haze_index(HAZE_METHANE_FLOOR, 0.0)) <= 0.0);
+/// ```
 #[must_use]
 pub fn haze_optical_depth(index: f64) -> f64 {
     if !(index.is_finite() && index > 1.0) {
@@ -1544,7 +1694,7 @@ pub fn haze_optical_depth(index: f64) -> f64 {
 }
 
 /// The methane haze of the air `inputs` describe (P14.T24.c): a fractal-aggregate mode of `tholin`
-/// with Titan's monomers ([`TITAN_HAZE_MONOMERS`]), its τ(550) [`haze_optical_depth`], well mixed
+/// with Titan's monomers ([`TITAN_HAZE_MONOMER_RADIUS`]), its τ(550) [`haze_optical_depth`], well mixed
 /// from the ground to [`HAZE_TOP_RATIO`] of its pressure over the whole sky; `None` with no star,
 /// whose ultraviolet photolyses the methane, or an index at most 1.
 ///
@@ -1563,40 +1713,81 @@ fn methane_haze(
     if tau <= 0.0 {
         return Ok(None);
     }
-    let (radius, count, dimension) = TITAN_HAZE_MONOMERS;
-    let aggregate = Aggregate::new(Metres::new(radius), count, dimension)
-        .expect("Titan's monomers are an aggregate");
+    let aggregate = Aggregate::new(
+        TITAN_HAZE_MONOMER_RADIUS,
+        TITAN_HAZE_MONOMERS,
+        TITAN_HAZE_FRACTAL_DIMENSION,
+    )
+    .expect("Titan's monomers are an aggregate");
     let tholin = crate::substance::by_key("tholin").expect("tholin is a registry row");
     let ground = inputs.surface_pressure;
     let profile = ModeProfile::new(ground, Pascals::new(ground.value() * HAZE_TOP_RATIO), 0.0)?;
     AerosolMode::aggregate(tholin, tholin, aggregate, tau, profile, 1.0).map(Some)
 }
 
-/// The dust's τ(550) of an air of surface pressure `pressure` pascals, temperature `temperature`
-/// kelvin and molar mass `mu` g mol⁻¹ under gravity `g` m s⁻², over a ground whose liquids cover
-/// `liquid_cover` of it (P14.T24.c's dust on arid, windy, thin-aired worlds; a stated rule):
+/// The dust's τ(550) of an air of surface pressure `pressure`, temperature `temperature` and molar
+/// mass `molar_mass_g_per_mol` under `gravity`, over a ground whose liquids cover `liquid_cover`
+/// of it, 0 to 1 (P14.T24.c's dust on arid, windy, thin-aired worlds; a stated rule):
 /// Mars's background [`MARS_DUST_OPTICAL_DEPTH`] times the ground's dry share, times a thin-air
 /// weight falling as ln p from 1 at Mars's 636 Pa (and below) to 0 at [`DUST_AIR_LIMIT`], times a
 /// lifting weight falling as ln u*ₜ from 1 at Mars's [`saltation_threshold`] (and below) to 0 at
 /// twice it. Each weight is continuous. The winds are taken as Mars's, which can lift its dust:
 /// the rule reads the threshold from the plan's pressure and gravity alone, and no rotation (no
-/// citable rule found; recorded).
+/// citable rule found; recorded). The ground's dry share is continuous where the plan's "no surface
+/// liquid of any substance" is a step, so that a partly wet ground keeps some dust.
+///
+/// # Examples
+///
+/// Mars's own air holds its background dust; an Earth's, too thick, holds none:
+///
+/// ```
+/// use hyperion_sim::planetary::hooks::aerosols::{MARS_DUST_OPTICAL_DEPTH, dust_optical_depth};
+/// use hyperion_sim::units::{Kelvin, MetresPerSecondSquared, Pascals};
+///
+/// let mars = dust_optical_depth(
+///     Pascals::new(636.0),
+///     Kelvin::new(210.0),
+///     43.34,
+///     MetresPerSecondSquared::new(3.71),
+///     0.0,
+/// );
+/// assert!((mars - MARS_DUST_OPTICAL_DEPTH).abs() < 1e-12);
+/// let earth = dust_optical_depth(
+///     Pascals::new(101_325.0),
+///     Kelvin::new(288.0),
+///     28.96,
+///     MetresPerSecondSquared::new(9.81),
+///     0.0,
+/// );
+/// assert_eq!(earth.to_bits(), 0.0_f64.to_bits());
+/// ```
 #[must_use]
 pub fn dust_optical_depth(
-    pressure: f64,
-    temperature: f64,
-    mu: f64,
-    g: f64,
+    pressure: Pascals,
+    temperature: Kelvin,
+    molar_mass_g_per_mol: f64,
+    gravity: MetresPerSecondSquared,
     liquid_cover: f64,
 ) -> f64 {
     let limit = DUST_AIR_LIMIT.value();
+    let pressure = pressure.value();
     if !(pressure.is_finite() && pressure > 0.0 && pressure < limit) {
         return 0.0;
     }
-    let density = |p: f64, t: f64, m: f64| p * m / GRAMS_PER_KILOGRAM / (MOLAR_GAS_CONSTANT * t);
+    let density = |p: f64, t: f64, m: f64| {
+        KilogramsPerCubicMetre::new(p * m / GRAMS_PER_KILOGRAM / (MOLAR_GAS_CONSTANT * t))
+    };
     let (mars_p, mars_t, mars_mu, mars_g) = MARS_AIR;
-    let mars_threshold = saltation_threshold(density(mars_p, mars_t, mars_mu), mars_g);
-    let threshold = saltation_threshold(density(pressure, temperature, mu), g);
+    let mars_threshold = saltation_threshold(
+        density(mars_p, mars_t, mars_mu),
+        MetresPerSecondSquared::new(mars_g),
+    )
+    .value();
+    let threshold = saltation_threshold(
+        density(pressure, temperature.value(), molar_mass_g_per_mol),
+        gravity,
+    )
+    .value();
     let thin = (math::ln(limit / pressure) / math::ln(limit / mars_p)).clamp(0.0, 1.0);
     let lifting = (math::ln(2.0 * mars_threshold / threshold) / math::ln(2.0)).clamp(0.0, 1.0);
     let dry = (1.0 - liquid_cover).clamp(0.0, 1.0);
@@ -1605,28 +1796,27 @@ pub fn dust_optical_depth(
 }
 
 /// The dust of the air `inputs` describe: a non-spherical mineral mode of `mars_dust`
-/// ([`DUST_MODE`]), its τ(550) [`dust_optical_depth`], well mixed from the ground to e^[`DUST_TOP_LN_RATIO`]
+/// ([`DUST_EFFECTIVE_RADIUS`]), its τ(550) [`dust_optical_depth`], well mixed from the ground to e^[`DUST_TOP_LN_RATIO`]
 /// of its pressure over the whole sky; `None` where it is 0.
 ///
 /// # Panics
 ///
-/// Never: `mars_dust` is a registry row, and [`DUST_MODE`] a gamma distribution.
+/// Never: `mars_dust` is a registry row, and [`DUST_EFFECTIVE_RADIUS`] a gamma distribution.
 fn dust(inputs: &AerosolInputs<'_>) -> Result<Option<AerosolMode>, BuildModeError> {
     let ground = inputs.surface_pressure;
     let temperature = inputs.structure.surface_temperature();
     let tau = dust_optical_depth(
-        ground.value(),
-        temperature.value(),
+        ground,
+        temperature,
         inputs.mean_molar_mass_g_per_mol,
-        inputs.gravity.value(),
+        inputs.gravity,
         inputs.surface_liquid_cover,
     );
     if tau <= 0.0 {
         return Ok(None);
     }
     let material = crate::substance::by_key("mars_dust").expect("mars_dust is a registry row");
-    let (radius, variance) = DUST_MODE;
-    let size = SizeDistribution::gamma(Metres::new(radius), variance)
+    let size = SizeDistribution::gamma(DUST_EFFECTIVE_RADIUS, DUST_EFFECTIVE_VARIANCE)
         .expect("the dust's mode is a gamma distribution");
     let top = Pascals::new(ground.value() * math::exp(DUST_TOP_LN_RATIO));
     let profile = ModeProfile::new(ground, top, 0.0)?;
@@ -1642,6 +1832,21 @@ fn dust(inputs: &AerosolInputs<'_>) -> Result<Option<AerosolMode>, BuildModeErro
         temperature,
     )
     .map(Some)
+}
+
+/// What P14.T24.g's sulphur reads of the inventory's inputs.
+#[must_use]
+const fn sulphur_inputs<'a>(inputs: &AerosolInputs<'a>) -> SulphurInputs<'a> {
+    SulphurInputs {
+        state: inputs.state,
+        outgassing: inputs.outgassing,
+        starlit: inputs.star_temperature.is_some(),
+        liquid_water: inputs.liquid_water,
+        surface_pressure: inputs.surface_pressure,
+        mean_molar_mass_g_per_mol: inputs.mean_molar_mass_g_per_mol,
+        gravity: inputs.gravity,
+        structure: inputs.structure,
+    }
 }
 
 /// Whether the inputs describe an air that can hold aerosols: a state with a surface and an air,

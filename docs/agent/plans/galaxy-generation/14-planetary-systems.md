@@ -25579,15 +25579,18 @@ the_rayleigh_floor_lifts`; the two measurements by name with `-- --ignored --exa
     its vapour above `f_sed` ≈ 100 (Earth's at 0.26 kg m⁻² for every `f_sed` ≥ 300), where
     P14.T24.c's supply rule puts `f_sed` at 10²–10⁵. In a cloud whose saturation falls across a
     step, the step is now the linear balance's own solution for `q_s` falling exponentially
-    between its ends, with its limit at `f_sed` ≈ s; where `f_sed` > 2 s the step's condensate is
-    integrated against p in closed form, so that a base's first step, whose condensate rises within
-    1 ÷ `f_sed` in ln p, is counted exactly (the trapezoid under-counted it by about Δ (1 + s) ÷ 2).
-    The relaxation is kept at an inversion and where the vapour is not yet saturated.
-    - The column now falls as 1 ÷ `f_sed` to 0.4% over 10³–10⁵ (Uranus's methane), twice the
-      substeps move a column by under 10⁻³ at `f_sed` 3 and 10⁴, and the `f_sed` 3 columns move by
-      under 1% (`the_exact_step_moves_the_baseline_s_columns_under_a_percent`).
-    - `planetary/condense` is re-blessed at 23 by its exact name: 100 of its 519 float lines move,
-      the largest by 8.2 × 10⁻⁴ (Jupiter's CaTiO₃ column), and no deck's top or base moves.
+    between its ends, with its limit at `f_sed` ≈ s; and its condensate is integrated against p in
+    closed form (a divided difference, at its limit within 10⁻⁴ of `f_sed` = s), so that a base's
+    first step, whose condensate rises within 1 ÷ `f_sed` in ln p, is counted exactly (the
+    trapezoid under-counted it by about Δ (1 + s) ÷ 2). The relaxation and the trapezoid are kept at
+    an inversion and where the vapour is not yet saturated.
+    - The column now falls as 1 ÷ `f_sed` to 0.4% over 10³–10⁵ (Uranus's methane); halving the
+      substeps (5 to 2, the nearest whole half) and doubling them each move a column by under
+      10⁻³ at `f_sed` 3 and 10⁴; and the `f_sed` 3 columns move by under 1%
+      (`the_exact_step_moves_the_baseline_s_columns_under_a_percent`).
+    - `planetary/condense` is re-blessed at 23 by its exact name: 101 of its 519 float lines move,
+      the largest by 3.3 × 10⁻³ (Jupiter's CaTiO₃ column, 10⁻⁷⁵ kg m⁻²; Uranus's NH₄SH by 4.9 ×
+      10⁻⁴), and no deck's base moves.
     - The loop's `derive` keeps its signature; a private `derive_in` takes the substep count for
       the convergence test.
 - **Deviations in P14.T56.f, as built (`p14-gate-24`, 2026-10-22).** A moon's bulk by its
@@ -25771,8 +25774,10 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
       substep, P14.T52.c's correction) at K 10 and `σ_g` 2, on six measured decks given by hand,
       equal weights in log₁₀(τ ÷ centre): Mars H₂O 1.01 (0.2–2), Earth H₂O 2.59 (2.5–10), Jupiter
       NH₃ 2.58 (0.8–5), Saturn NH₃ 0.84 (0.5–5), Uranus CH₄ 4.1 (1–5), Neptune CH₄ 5.8 (0.5–4);
-      RMS 0.31 dex. Titan's methane, a check, 1.4 in the cloud (0.3–30). Venus stays on T24.g's
-      `σ_d`. The anchors' states and sources are in the module's tests (`anchors`, held by
+      RMS 0.31 dex. (On the loop's final closed-form mass integral, P14.T24.g's commit: Earth
+      2.61, Jupiter 2.59, Saturn 0.87, Uranus 4.15, Neptune 5.82, Titan 1.39; RMS 0.31.) Titan's
+      methane, a check, 1.4 in the cloud (0.3–30). Venus stays on T24.g's `σ_d`. The anchors'
+      states and sources are in the module's tests (`anchors`, held by
       `the_measured_decks_take_their_observed_optical_depths`).
     - **Why not the equal-weight optimum.** That one (v₁ 0.087, β 0.585, RMS 0.27) leaves Earth at
       1.83. No (v₁, β) holds all six inside their ranges (a grid over β 0.2–1.2 and v₁ 10⁻⁴–10).
@@ -25831,8 +25836,8 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
       **The plan's "CH₄ ≳ 10⁻³" has no source** (Trainer et al. found no threshold in N₂–CH₄);
       the floor replaces it.
     - τ = 8.1 min(1, ln s ÷ ln s_Titan), s_Titan = 5.65% ÷ 10⁻⁵: 0 at the onset, Titan's at
-      Titan's. 8.1 is Tomasko et al. 2008's column at 550 nm by Bazzon, Schmid and Buenzli 2014's fit
-      to their Fig. 47; Tomasko et al. 2005's "4–5 at 531 nm" may be the haze above 80 km alone.
+      Titan's. 8.1 is Tomasko et al. 2008's column at 550 nm by Bazzon, Schmid and Buenzli 2014's
+      fit to their Fig. 47; Tomasko et al. 2005's "4–5 at 531 nm" may be the haze above 80 km alone.
       The table's Titan carries it within a factor of two (the plan's test).
     - The carbon is photolysed methane and the reservoir is taken as resupplied, as P14.T24.f does;
       P14.T53.a records its outcome.
@@ -25853,10 +25858,9 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
       m⁻³ (1.9 m s⁻¹ on Mars, 0.2 on Earth).
     - Each weight is continuous. **Windiness:** the winds are taken as Mars's; the rule reads the
       plan's pressure and gravity, and **no rotation** (no citable rule was found; recorded).
-  - _Tests_ (`cargo test -p hyperion-sim planetary::hooks::aerosols`, 16, and the golden with
-    P14.T24.g): the table's Earth's
-    water decks, its ground vapour T24.a's to 10⁻¹², no ozone; the table's decks' τ and sizes
-    (Earth, Mars, Titan); the measured decks' fit; a deck's `f_sed` is its rule's; an unsaturated
+  - _Tests_ (`cargo test -p hyperion-sim planetary::hooks::aerosols`, 16; 20 with the review's
+    and the golden, which land with P14.T24.g): the table's Earth's water decks, its ground vapour
+    T24.a's to 10⁻¹², no ozone; the table's decks' τ and sizes (Earth, Mars, Titan); the measured decks' fit; a deck's `f_sed` is its rule's; an unsaturated
     or airless air holds none; the inputs checked; the settling mode's conversion; the shape
     classes against R08's files; an aggregate's checks; determinism and continuity; the ozone
     column against O₂ and its profile on Earth's column; the haze's thresholds and Titan's haze;
@@ -25875,5 +25879,75 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
     - T51.b's cloud fraction is the snapshot path's stand-in: Titan's methane decks take its 0.67,
       against about 1% observed (T54.b states Titan's disc mean beside Huygens's "no optically
       thick cloud").
+  - _The review's additions (2026-10-22, landed with P14.T24.g's commit):_
+    - _Dust's aridity_ is a continuous weight, 1 less the liquids' cover, not T24.b's
+      `surface_liquids` being empty, so that the column stays continuous. The table's Mars, above
+      0.1 bar of N₂ until P14.T53.a, carries no dust; the golden pins the measured Mars's.
+    - _The haze needs a star_, whose ultraviolet photolyses the methane; so does the ozone.
+    - _Tests held by construction:_ a mode's phase by `CondensedPhase`, and `D_f` by
+      `Aggregate::new`. Continuity is tested in the inputs; continuity in time and across state
+      changes is P14.T54.b's, on the record. Mode ranges are checked on the table's Earth, Mars
+      and Titan and the measured anchors.
+    - The record field's doc comment and its protocol binding go to P14.T54.b with the member.
+    - A rule's mode names its own material as its deck (the dust `mars_dust`, the haze `tholin`, a
+      sulphate layer `H2SO4`) with no `AerosolDeck`; `deck_optical_depth` sums every mode naming a
+      condensate, a layer's included. P14.T54.b's wire field states it.
+    - The 10⁻⁵ haze floor, in place of the plan's unsourced 10⁻³, was accepted by main.
+    - Each deck's base on its law's curve in the inventory's own column, to 10⁻⁶
+      (`each_deck_s_base_lies_on_its_saturation_curve`), and the same bits twice over every rule
+      (`the_inventory_is_the_same_bits_twice`).
+    - The sim-determinism skill's no-bump exception names `planetary/chem/`'s goldens; the
+      inventory's `planetary/aerosols` under `hooks/` is pure as they are, and a refit of v₁
+      before P14.T54.b would re-bless it at 23 by the same reasoning (for main's docs batch).
   - _Cost:_ two loop derivations a body, tens of milliseconds unoptimised; unmeasured on a quiet
     machine.
+- **Deviations in P14.T24.g, as built (`p14-chem`, 2026-10-22).** `GENERATOR_VERSION` stays 23.
+  `planetary/hooks/sulphur.rs` (+ `sulphur/tests.rs`) is pure, called by P14.T24.c's inventory;
+  nothing on the record calls either until P14.T54.b. No draw, no domain tag, no hold at 24.
+  - _The interface:_ `Sulphur::derive(&SulphurInputs)` gives the cycle (`SulphurCycle`: cycling,
+    once through, none), the SO₂ flux, column and mole fraction; `acid_deck` builds case 1's deck
+    from the loop's `H2SO4` deck (its base), `sulphate_layer` case 2's mode, `absorber` the SO₂
+    slab. The inventory adds a cycling world's SO₂ to the loop's gas, so that the loop finds the
+    acid's base (`ε_v` 0.06 of the SO₂ by the law aloft), and replaces the loop's acid deck with
+    T24.g's; a once-through world's SO₂ is not given to the loop, so it forms no deck.
+  - _The inputs:_ T13.c's state, T24.b's outgassing, whether a star lights the body (the
+    inventory's `star_temperature`), T24.a's liquid-water flag, the surface pressure, molar mass,
+    gravity and T24.e's structure. The host kind is the star's presence.
+  - _Constants:_
+    - Φ⊕ 1.34 × 10¹³ m⁻² s⁻¹ (Carn et al. 2017's 23 Tg yr⁻¹, checked to 0.3%);
+    - t_dry fixed on Venus: `VENUS_OUTGASSING` = 0.36347, T24.b's O for the table's Venus (a test
+      holds the table to it), and `VENUS_AIR_COLUMN` = 1.445 × 10³¹ m⁻² from P14.T57.a's measured
+      inventory, so that t_dry = 4.4 Myr ÷ `O_V` = 12.2 Myr;
+    - **σ_d = 1.3511 × 10⁻²⁴ m², `Adopted`**, fitted so that Venus given its measured state by hand
+      (the inventory's 4.69 × 10²⁰ kg of CO₂ and 1.08 × 10¹⁹ kg of N₂, 735 K, 8.87 m s⁻², the skin
+      of its 226.6 K black-body temperature) carries 34.5 along T24.e's profile on T49.b's
+      `c_p`(T): its deck from 1.313 bar at 365.8 K to the tropopause's 0.0556 bar, against VIRA's
+      1.38 and 0.037 bar. The cited 1.27 × 10⁻²⁴ stands 6% below.
+    - **The shares as tabled sum to 0.99**: each is taken over their sum, so that the four modes'
+      τ sum to the deck's (the plan's "its shares as tabled" holds over the sum).
+  - _The table's Venus_ (735 K, 57.8 bar): a deck of four modes from 1.256 bar at 371.7 K to
+    0.0507 bar, τ(550) 52.9 at O 0.363 (signoff-3.md computed about 2.22–0.057 bar and τ 50 at
+    T57.a's 694.5 K, before the c_p(T) refit). The table's Earth: no deck, a sulphate layer
+    0.135–0.027 bar at τ 0.00324, its SO₂ under 1 ppb (14 ppt computed).
+  - _Plan corrections, recorded (the research subagent, 2026-10-22):_
+    - Hu, Seager and Bains 2013's eq. 7 is τ at 500 nm for N₂ and CO₂ **anoxic** atmospheres,
+      with a V_DEP term the plan drops; an oxic Earth is outside it, and its constant spans about
+      an order of magnitude. Taken as written (τ(550), the low end 0.1).
+    - Marcq et al. 2008's 31 ± 2 ppmv is Venus's water and 130 ± 50 ppmv its SO₂, as the plan
+      takes them (checked).
+    - Deshler et al. 2003's abstract gives no r_g or σ_g; the layer's 0.08 µm and 1.65 stay from
+      memory, and the Junge layer's 15–25 km is supported only by Deshler's layer bands.
+    - Pollack et al. 1993's modes and Haus et al. 2016's 34.5 were not read in the primaries
+      (closed access); VIRA's 1.38 and 0.037 bar remain from memory.
+  - _The review's additions:_ d_p 0.18 µm is the mode's number mean; Hu et al. 2013's surface-area
+    mean is 0.206 µm (τ 0.0029), and main kept 0.18. "T24.a's fractions unchanged" holds by the
+    unchanged surface goldens (the rule writes no fraction). `acid_uv_absorber` arises only in
+    `acid_deck`. The acid deck keeps the loop deck's `extrapolated` flag (the Kulmala curve is
+    fitted over 338–445 K). The table's Venus's SO₂ is 209 ppm, as signoff-3.md computed.
+  - _Tests_ (`cargo test -p hyperion-sim planetary::hooks::sulphur`, 11): the measured Venus's four
+    modes (SO₂ 130 ppm to 10⁻⁶, vapour 7.8 ppm, τ 34.5 to 10⁻⁶, shares to 10⁻⁹, base 345–390 K,
+    top at the skin level); Pollack's sizes; the table's Venus above τ 10, its base under 3 bar;
+    the table's Earth's layer; no sulphur on the Moon, Mercury, Mars and Titan, nor with no star;
+    τ monotonic in O and gone by T_eq 400 K; no deck on a temperate or snowball world to O 10³,
+    its layer under 1, and no `acid_uv_absorber` there; the source and t_dry; continuity; the
+    column as the flux times its life in each case; the same bits twice.

@@ -723,8 +723,8 @@ fn a_rule_s_mode_takes_its_optics_as_the_loop_s() {
 
 /// Nothing on the record reaches the loop or the laws aloft before P14.T54.b wires them
 /// (decision-bump-plan-after-22 §1.3): no code of the crate's `src/` outside the two modules,
-/// their tests and P14.T24.c's inventory (`hooks/aerosols`, pure itself until P14.T54.b) names
-/// them, comments and the modules' own declarations left out.
+/// their tests and P14.T24.c's and T24.g's rules (`hooks/aerosols` and `hooks/sulphur`, pure
+/// themselves until P14.T54.b) names them, comments and the modules' own declarations left out.
 /// **P14.T54.b deletes this tripwire** with `substance::aerosol`'s.
 #[test]
 fn nothing_on_the_record_calls_the_condensation_yet() {
@@ -750,6 +750,7 @@ fn nothing_on_the_record_calls_the_condensation_yet() {
         "planetary/chem/condense",
         "substance/aloft",
         "planetary/hooks/aerosols",
+        "planetary/hooks/sulphur",
     ];
     let patterns = [
         "chem::condense",
@@ -932,10 +933,11 @@ fn a_large_sedimentation_s_column_falls_as_its_inverse() {
     }
 }
 
-/// Twice the substeps move a deck's column by under 10⁻³ of itself at `f_sed` 3 and at 10⁴: the
-/// exact step converges (decision-bump-plan-after-22, "The decks' `f_sed`, K and humidity", G4).
+/// Halving the substeps (to 2 of [`SUBSTEPS`]' 5, the nearest whole half) and doubling them each
+/// move a deck's column by under 10⁻³ of itself at `f_sed` 3 and at 10⁴: the exact step converges
+/// (decision-bump-plan-after-22, "The decks' `f_sed`, K and humidity", G4).
 #[test]
-fn twice_the_substeps_move_a_column_under_a_thousandth() {
+fn halving_the_substeps_moves_a_column_under_a_thousandth() {
     for efficiency in [3.0, 1e4] {
         let at = |substeps: u32| {
             let clouds = Condensation::derive_in(
@@ -949,12 +951,14 @@ fn twice_the_substeps_move_a_column_under_a_thousandth() {
             .expect("Uranus's clouds");
             ["CH4", "H2S"].map(|key| deck(&clouds, key).column_mass().value())
         };
-        let (coarse, fine) = (at(SUBSTEPS), at(2 * SUBSTEPS));
-        for (a, b) in coarse.iter().zip(&fine) {
-            assert!(
-                (a / b - 1.0).abs() < 1e-3,
-                "f_sed {efficiency}: {a} against {b}"
-            );
+        let (half, built, double) = (at(SUBSTEPS / 2), at(SUBSTEPS), at(2 * SUBSTEPS));
+        for other in [half, double] {
+            for (a, b) in other.iter().zip(&built) {
+                assert!(
+                    (a / b - 1.0).abs() < 1e-3,
+                    "f_sed {efficiency}: {a} against {b}"
+                );
+            }
         }
     }
 }
