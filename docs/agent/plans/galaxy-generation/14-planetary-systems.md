@@ -15786,6 +15786,13 @@ tables::gauss_legendre`.
   - Until P14.T53.c ends the appended item, the terrain (plan R09) draws a Snowball's seas from
     the wire's list, divided with the ocean's item, while the readout reads them at their own
     extents (main's ruling on issue #90, §2.1: recorded, not a blocker).
+  - Ruled (decision-p14-t43h-review, 2026-10-23). The `SNOWBALL` clause now reads "with an
+    ocean under the ice read as `SUBSURFACE OCEAN` where that row stands", true of the fixture's
+    Titan now and once a moon's ocean is read. Rule 2's fallback stands unchanged: the server's
+    `the_wire_s_cover_is_its_condensates_by_their_rule` holds every item but the appended `H2O`
+    to an entry, since the cover is built from the condensates after their cut to eight. The
+    no-unit test is kept, as the sign-off asks. Reading a regular moon's `subsurface_ocean`
+    under the row is P14.T43.i, briefed to the laptop.
 - **Deviations in P14.T49.j, as built (`lane/34-p14-t49j-thermal-columns`, 2026-10-16).** The
   condensed phases' thermal columns and the airless regolith's thermal-inertia law, a pure module,
   `substance::thermal` (`substance/thermal.rs`; its rows in `substance/thermal/rows.rs`, its tests
