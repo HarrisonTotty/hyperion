@@ -179,8 +179,13 @@ decision:
 
 The galaxy roadmap's
 [Conventions every plan follows](../galaxy-generation/README.md#conventions-every-plan-follows) bind
-these plans: the ten-section plan layout, the code shape, the generator version, the tests and the
-Figures rule. Only what differs is stated here.
+these plans: the ten-section plan layout, the records as built, the code shape, the generator
+version, the tests and the Figures rule. Only what differs is stated here.
+
+- **Records as built** follow the galaxy roadmap's
+  [Records as built](../galaxy-generation/README.md#records-as-built): inline in Risks until a plan
+  is split, then one file per task beside the plan, such as
+  `08-atmospheres/records/R08.T8.e.md`, linked from the task's entry.
 
 - **Task IDs** are `R<nn>.T<n>`, with subtasks `R05.T3.a`. Galaxy tasks keep `P<nn>.T<n>` and are
   cited as "galaxy plan 14" or `P14.T23`. The `implement-task` and `validate` skills' scripts

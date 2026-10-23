@@ -166,7 +166,37 @@ Each plan has these sections in this order:
    checks by eye.
 9. **Generator version**: whether the plan changes generated output, and what it reserves so that
    later plans need not.
-10. **Risks and open points.**
+10. **Risks and open points**: the open points, and the records as built (below).
+
+### Records as built
+
+Each task leaves records when it lands: its deviations from the plan, as-built figures and
+measurements, the rulings applied to it and its deferred findings. A plan keeps them in one of two
+layouts, which the tools read alike (`implement-task`'s `plan_task.py`, with `--records` for a
+task's, and `plan_split.py` beside it).
+
+- **Inline**: top-level bullets of the plan's **Risks and open points**, each new one at the end.
+  Every plan starts this way.
+- **Split**, once `plan_split.py` has split the plan: each task's records in a file of its own,
+  `<plan-dir>/<plan-stem>/records/<KEY>.md`, such as `14-planetary-systems/records/P14.T53.b.md`.
+  KEY is the task's ID cut to one subtask letter: a sub-subtask (P14.T54.b.i) is recorded in its
+  subtask's file, a subtask's parts and steps in the subtask's, and a task added as built with no
+  entry under Tasks in its parent's. The task's entry links its file with a `Records:` line, and
+  the Risks section opens with a line pointing at the folder.
+- A split plan's Risks keeps the open points and the records of no one task: rulings across
+  tasks, re-validations of the plan (whose titles open "Re-validated"), a phase's validation. A
+  record whose title names several tasks ("Deviations in T4 and T5, as built") is the first
+  named's.
+- A record names its task by full ID in its bold title, as in
+  `**Deviations in P14.T53.b, as built (…).**`, and a deferred finding in its first sentence, as in
+  `**Deferred findings (2026-10-13 rule)**, from P14.T53.b:`. That is how the split files it.
+- Records keep their text, headings and dates as written, oldest first. A new one goes at the end
+  of its task's file; to start a task's file, append the record to Risks and run
+  `python3 -I .claude/skills/implement-task/scripts/plan_split.py <plan> --write`, which files it
+  with the file's header and the task's link line. `--check` writes nothing and says whether a
+  record is left to file.
+- Citations name a record by its task's ID and its heading text, which the split keeps, so a
+  citation written before a plan was split still finds it.
 
 ### Code shape
 
