@@ -152,6 +152,14 @@ export interface AnnulusMark {
    * absent.
    */
   readonly selected?: boolean | undefined;
+  /**
+   * The ID of the mark the band is drawn about, a ring's planet, whose bracket's box its label
+   * need not keep outside while no reticle is drawn about that mark: a ring's label names the
+   * ring, so it cannot be read as its own planet's name, but no label stands on a drawn bracket
+   * (plan 14, P14.T42.g; main's ruling on issue #96). None when absent, as for a zone or a belt,
+   * whose label beside its host would read as the host's name.
+   */
+  readonly aboutId?: string | undefined;
 }
 
 /**

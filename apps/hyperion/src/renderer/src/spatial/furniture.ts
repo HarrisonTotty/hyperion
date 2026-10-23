@@ -12,7 +12,8 @@
  * labels of the marks' stalks and symbols, each giving up that clearance only as its last resort.
  * An annulus's label has no last resort: it is placed after the marks' labels, or, a selected
  * annulus's, before them (plan 14, P14.T42.e), apart from every label and off every mark's
- * bracket's box, or not at all (plan 14, P14.T42.d).
+ * bracket's box but, for a ring's label, its own planet's while no reticle is drawn about it
+ * (P14.T42.g), or not at all (plan 14, P14.T42.d).
  */
 
 import {
@@ -1384,9 +1385,20 @@ export interface AnnulusLabelSurroundings {
   readonly marks: ReadonlyArray<InkPx>;
   /**
    * The box of the selection's bracket's place about every mark, drawn or not (`bracketBoxPx`),
-   * which each stands at least {@link LABEL_TEXT_CLEARANCE_REM} outside.
+   * with the mark's ID, which each stands at least {@link LABEL_TEXT_CLEARANCE_REM} outside, but a
+   * label with `RingLabel.aboutMarkId` that one mark's while no reticle is drawn about it
+   * ({@link AnnulusLabelSurroundings.reticledIds}), from which it then keeps none: a ring's label
+   * names a ring drawn about that very planet, so it cannot be read as the planet's name (plan 14,
+   * P14.T42.g).
    */
-  readonly brackets: ReadonlyArray<BoxPx>;
+  readonly brackets: ReadonlyArray<{ readonly id: string; readonly box: BoxPx }>;
+  /**
+   * The IDs of the marks a reticle is drawn about, the selection's bracket and the destination's
+   * chevrons, whose bracket's box even a ring's label about that mark keeps
+   * {@link LABEL_TEXT_CLEARANCE_REM} outside: a drawn bracket is the selection's marker, and no
+   * label stands on it (plan 14, P14.T42.g; main's ruling on issue #96).
+   */
+  readonly reticledIds: ReadonlySet<string>;
   /** The orbits and the annuli's edges, as {@link curveInksPx} gives them. */
   readonly curves: ReadonlyArray<InkPx>;
   /**
@@ -1413,14 +1425,19 @@ export interface AnnulusLabelSurroundings {
  * (decision-r07-quality-and-destination, addendum D, D4); stands at least
  * {@link LABEL_TEXT_CLEARANCE_REM}, 0.25 rem, outside the box of the selection's bracket's place
  * about every mark, where a mark's own label starts, so that it never stands nearer a body than the
- * body's own label and is never read as its name; and stands 0.125 rem clear of every stalk and of
- * the observer's eye (Q6 (d); R07.T16.j), the symbols among `marks` lying inside their brackets'
- * boxes; and no tick crosses it at its width, since a belt's ticks, in the label's own
- * `--text-muted`, take its letters out (plan 14, P14.T42.f). Of the places that qualify it takes
- * the first that no orbit or annulus edge crosses at its width, since a stroke through its letters
- * hides them; else the first that qualifies. Where none qualifies the label is not drawn, with no
- * last resort: the zone is still named in its host's readout and on its switch, and a belt, ring
- * or halo in the list. The `--line` grid and the plane's rings may pass under it.
+ * body's own label and is never read as its name, but that of the mark its annulus is drawn about
+ * (`RingLabel.aboutMarkId`), a ring's planet, whose bracket's box a ring's label may stand in,
+ * since it names a ring drawn about that very body, which the frame names (plan 14, P14.T42.g),
+ * while no reticle is drawn about it (`reticledIds`): a drawn bracket is the selection's marker,
+ * and no label stands on it (main's ruling on issue #96); and stands 0.125 rem clear of every stalk
+ * and of the observer's eye (Q6 (d); R07.T16.j), the symbols among `marks` lying inside their
+ * brackets' boxes, that planet's included; and no tick crosses it at its width, since a belt's
+ * ticks, in the label's own `--text-muted`, take its letters out (plan 14, P14.T42.f). Of the
+ * places that qualify it takes the first that no orbit or annulus edge crosses at its width, since
+ * a stroke through its letters hides them; else the first that qualifies. Where none qualifies the
+ * label is not drawn, with no last resort: the zone is still named in its host's readout and on its
+ * switch, and a belt, ring or halo in the list. The `--line` grid and the plane's rings may pass
+ * under it.
  *
  * The labels are taken in the order given, which is the scene's: the zones first, each zone's
  * `HABITABLE ZONE` before its others, then the populations; each placed label stands for the next.
@@ -1438,10 +1455,36 @@ export function placeAnnulusLabels(
   const neighbourPx = LABEL_NEIGHBOUR_CLEARANCE_REM * remPx;
   const standing: BoxPx[] = [...surroundings.standing];
   const nearMark = inksNear(surroundings.marks, viewport, CURVE_MARK_CLEAR_REM * remPx);
-  const nearBracket = boxesNear(surroundings.brackets, viewport, LABEL_TEXT_CLEARANCE_REM * remPx);
+  const bracketClearPx = LABEL_TEXT_CLEARANCE_REM * remPx;
+  const nearAnyBracket = boxesNear(
+    surroundings.brackets.map((bracket) => bracket.box),
+    viewport,
+    bracketClearPx,
+  );
+  // A ring's label tests every bracket's box but its own planet's, while no reticle is drawn about
+  // the planet: one test for each mark a label's annulus is drawn about, made when a label first
+  // asks for it, since a frame has a ring or two.
+  const nearOtherBrackets = new Map<string, (box: BoxPx) => boolean>();
+  const nearBracketFor = (aboutMarkId: string | undefined): ((box: BoxPx) => boolean) => {
+    if (aboutMarkId === undefined || surroundings.reticledIds.has(aboutMarkId)) {
+      return nearAnyBracket;
+    }
+    let near = nearOtherBrackets.get(aboutMarkId);
+    if (near === undefined) {
+      near = boxesNear(
+        surroundings.brackets
+          .filter((bracket) => bracket.id !== aboutMarkId)
+          .map((bracket) => bracket.box),
+        viewport,
+        bracketClearPx,
+      );
+      nearOtherBrackets.set(aboutMarkId, near);
+    }
+    return near;
+  };
   const crossesCurve = inksAcross(surroundings.curves, viewport);
   const crossesTick = inksAcross(surroundings.ticks, viewport);
-  const qualifies = (box: BoxPx): boolean =>
+  const qualifies = (box: BoxPx, nearBracket: (box: BoxPx) => boolean): boolean =>
     insideView(box, viewport, edgePx) &&
     standing.every((other) => boxGapPx(box, other) >= neighbourPx - GAP_TOLERANCE_PX) &&
     !nearBracket(box) &&
@@ -1449,10 +1492,13 @@ export function placeAnnulusLabels(
     !crossesTick(box);
   // A curve through a label's letters hides them, but it is a preference and not a rule: a place
   // that a curve crosses still beats leaving the label out.
-  const choose = (candidates: ReadonlyArray<BoxPx>): BoxPx | undefined => {
+  const choose = (
+    candidates: ReadonlyArray<BoxPx>,
+    nearBracket: (box: BoxPx) => boolean,
+  ): BoxPx | undefined => {
     let crossed: BoxPx | undefined;
     for (const candidate of candidates) {
-      if (!qualifies(candidate)) {
+      if (!qualifies(candidate, nearBracket)) {
         continue;
       }
       if (!crossesCurve(candidate)) {
@@ -1472,6 +1518,7 @@ export function placeAnnulusLabels(
       [{ xPx: label.xPx, yPx: label.yPx }, ...(label.alongPx ?? [])].flatMap((point) =>
         ringCandidates(point, size, remPx, label.clearOfPointPx),
       ),
+      nearBracketFor(label.aboutMarkId),
     );
     if (box === undefined) {
       continue;

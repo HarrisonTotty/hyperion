@@ -379,6 +379,14 @@ describe("bodyScene", () => {
     expect(sceneOf(RING).annuli?.map((annulus) => annulus.selected)).toEqual([true]);
   });
 
+  it("draws every ring about the planet's mark, selected or not (plan 14, P14.T42.g)", () => {
+    expect([
+      sceneOf().points[0]?.id,
+      sceneOf().annuli?.map((annulus) => annulus.aboutId),
+      sceneOf(RING).annuli?.map((annulus) => annulus.aboutId),
+    ]).toEqual([PLANET, [PLANET], [PLANET]]);
+  });
+
   it("draws no reticle for a selection outside the body's frame", () => {
     expect(sceneOf(BELT).selectedId).toBeNull();
   });
