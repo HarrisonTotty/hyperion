@@ -722,9 +722,10 @@ fn a_rule_s_mode_takes_its_optics_as_the_loop_s() {
 }
 
 /// Nothing on the record reaches the loop or the laws aloft before P14.T54.b wires them
-/// (decision-bump-plan-after-22 §1.3): no code of the crate's `src/` outside the two modules and
-/// their tests names them, comments and the modules' own declarations left out. **P14.T54.b
-/// deletes this tripwire** with `substance::aerosol`'s.
+/// (decision-bump-plan-after-22 §1.3): no code of the crate's `src/` outside the two modules,
+/// their tests and P14.T24.c's inventory (`hooks/aerosols`, pure itself until P14.T54.b) names
+/// them, comments and the modules' own declarations left out.
+/// **P14.T54.b deletes this tripwire** with `substance::aerosol`'s.
 #[test]
 fn nothing_on_the_record_calls_the_condensation_yet() {
     fn walk(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
@@ -745,7 +746,11 @@ fn nothing_on_the_record_calls_the_condensation_yet() {
     let mut files = Vec::new();
     walk(&src, &mut files);
     assert!(files.len() > 100, "the walk found the crate's sources");
-    let own = ["planetary/chem/condense", "substance/aloft"];
+    let own = [
+        "planetary/chem/condense",
+        "substance/aloft",
+        "planetary/hooks/aerosols",
+    ];
     let patterns = [
         "chem::condense",
         "condense::",
@@ -902,4 +907,79 @@ fn the_condensation_is_pinned() {
         }
     }
     golden!("planetary/condense", w.as_str());
+}
+
+/// A large `f_sed`'s column follows the balance's steady state, s `q_s` ÷ (`f_sed` − s), with no
+/// floor from the substeps (corrected 2026-10-22 under P14.T24.c): Uranus's methane column falls as
+/// 1 ÷ `f_sed` from 10³ to 10⁵, each decade to 2% (as built, 10.04 and 10.004), where the
+/// relaxation alone floored it near 14.6 kg m⁻².
+#[test]
+fn a_large_sedimentation_s_column_falls_as_its_inverse() {
+    let at = |efficiency: f64| {
+        let clouds = Condensation::derive(
+            uranus_gas(),
+            uranus,
+            &column(8.87, 2.64, 10.0, 30.0, 0.05, 50.0),
+            with(efficiency),
+            1.0,
+        )
+        .expect("Uranus's clouds");
+        deck(&clouds, "CH4").column_mass().value()
+    };
+    let (thick, middle, thin) = (at(1e3), at(1e4), at(1e5));
+    for (a, b) in [(thick, middle), (middle, thin)] {
+        assert!((a / b / 10.0 - 1.0).abs() < 0.01, "{a} against {b}");
+    }
+}
+
+/// Twice the substeps move a deck's column by under 10⁻³ of itself at `f_sed` 3 and at 10⁴: the
+/// exact step converges (decision-bump-plan-after-22, "The decks' `f_sed`, K and humidity", G4).
+#[test]
+fn twice_the_substeps_move_a_column_under_a_thousandth() {
+    for efficiency in [3.0, 1e4] {
+        let at = |substeps: u32| {
+            let clouds = Condensation::derive_in(
+                uranus_gas(),
+                uranus,
+                &column(8.87, 2.64, 10.0, 30.0, 0.05, 50.0),
+                with(efficiency),
+                1.0,
+                substeps,
+            )
+            .expect("Uranus's clouds");
+            ["CH4", "H2S"].map(|key| deck(&clouds, key).column_mass().value())
+        };
+        let (coarse, fine) = (at(SUBSTEPS), at(2 * SUBSTEPS));
+        for (a, b) in coarse.iter().zip(&fine) {
+            assert!(
+                (a / b - 1.0).abs() < 1e-3,
+                "f_sed {efficiency}: {a} against {b}"
+            );
+        }
+    }
+}
+
+/// At `f_sed` 3 the exact step moves T52.c's columns by under 1% from the relaxation's, its golden
+/// at 23 before the correction (2026-10-22): Jupiter's NH₃, NH₄SH and H₂O, Ackerman and Marley's
+/// Jupiter and Uranus's CH₄ and H₂S.
+#[test]
+fn the_exact_step_moves_the_baseline_s_columns_under_a_percent() {
+    for (name, key, before) in [
+        ("Jupiter", "NH3", 1.639_787_196_084_204_3),
+        ("Jupiter", "NH4SH", 3.767_188_712_851_041),
+        ("Jupiter", "H2O", 89.692_829_265_047_41),
+        (
+            "Ackerman and Marley's Jupiter",
+            "NH3",
+            0.105_268_665_704_398_02,
+        ),
+        ("Uranus", "CH4", 772.846_191_755_199_6),
+        ("Uranus", "H2S", 113.415_605_843_203_08),
+    ] {
+        let now = deck(&case(name), key).column_mass().value();
+        assert!(
+            (now / before - 1.0).abs() < 0.01,
+            "{name}'s {key}: {now} against {before}"
+        );
+    }
 }

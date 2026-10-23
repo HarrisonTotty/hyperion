@@ -34,7 +34,21 @@
 //!   2025's Virga take it): d`q_t` ÷ d ln p = `f_sed` `q_c`, with `q_c` = max(0, `q_t` − `q_s`)
 //!   and the vapour `q_v` = min(`q_t`, `q_s`), all excess vapour condensed (their `S_cloud` = 0).
 //!   It is integrated upward from the base, where `q_t` is the vapour below, in [`SUBSTEPS`] steps
-//!   to each scan step, each exact for a saturation held at its ends' geometric mean. The deck's
+//!   to each scan step. Within a cloud whose saturation falls across a step, the step is the
+//!   balance's own solution for `q_s` falling exponentially between its ends at the rate s, `q_t`
+//!   = `q_t0` e^(−`f_sed` Δ) + `f_sed` Δ `q_s,end` φ((`f_sed` − s) Δ), φ(δ) = (1 − e^(−δ)) ÷ δ,
+//!   so that a large `f_sed`'s condensate follows s `q_s` ÷ (`f_sed` − s) to any `f_sed` (P14.T24.c's
+//!   precipitating decks, `f_sed` up to 10⁴ and more); elsewhere (a saturation that rises with
+//!   height, or a vapour not yet saturated at the step's start) it relaxes toward the saturation
+//!   held at its ends' geometric mean. Where `f_sed` > 2 s (away from `f_sed` ≈ s, where the closed
+//!   form's two terms would cancel; it is exact for any `f_sed` ≠ s) the step's condensate, `q_c` = A
+//!   e^(−`f_sed` x) + B e^(−s x) with B = s `q_s0` ÷ (`f_sed` − s), is integrated against p in closed
+//!   form, so that a base's first step, whose condensate rises from 0 within 1 ÷ `f_sed` in ln p,
+//!   is counted exactly; elsewhere by the trapezoid. (Corrected 2026-10-22 under P14.T24.c: the
+//!   relaxation alone floored the column at about s Δ ÷ 2 of its vapour above `f_sed` ≈ 100, and
+//!   the trapezoid at a base under-counted it by about Δ (1 + s) ÷ 2; the exact step moves an
+//!   `f_sed` 3 column by under 1%, decision-bump-plan-after-22, "The decks' `f_sed`, K and humidity",
+//!   G4.) The deck's
 //!   column mass is ∫ ε `q_c` dp ÷ g, ε the condensate's molar mass per limiting vapour over the
 //!   gas's; its top is the shallowest level at which `q_c` still holds [`TOP_FRACTION`] of the
 //!   vapour below, or the column's top; above it the deck's mixing ratio goes as about
@@ -1135,6 +1149,19 @@ impl Condensation {
         sedimentation: impl Fn(SubstanceId) -> Sedimentation,
         coverage: f64,
     ) -> Result<Self, DeriveCondensationError> {
+        Self::derive_in(gas, profile, column, sedimentation, coverage, SUBSTEPS)
+    }
+
+    /// [`derive`](Self::derive) with each deck's column integrated in `substeps` steps to each scan
+    /// step: [`SUBSTEPS`] there, and others in the tests of its convergence.
+    fn derive_in(
+        gas: impl IntoIterator<Item = (SubstanceId, f64)>,
+        profile: impl Fn(Pascals) -> Kelvin,
+        column: &MixingColumn,
+        sedimentation: impl Fn(SubstanceId) -> Sedimentation,
+        coverage: f64,
+        substeps: u32,
+    ) -> Result<Self, DeriveCondensationError> {
         check(column, coverage)?;
         let mut mixture: Vec<(SubstanceId, f64)> = Vec::new();
         for (id, x) in gas {
@@ -1185,6 +1212,7 @@ impl Condensation {
             sedimentation: &sedimentation,
             coverage,
             background: background(&mixture),
+            substeps,
         };
         let mut placed: Vec<Placed> = Vec::new();
         loop {
@@ -1283,6 +1311,8 @@ struct Context<'a> {
     sedimentation: &'a dyn Fn(SubstanceId) -> Sedimentation,
     coverage: f64,
     background: Option<SubstanceId>,
+    /// The integration steps of a deck's column to each scan step ([`SUBSTEPS`]).
+    substeps: u32,
 }
 
 /// The scan levels of `column` with `profile`'s temperatures.
@@ -1528,7 +1558,7 @@ struct Column {
 /// The column above `base` of a vapour of mole fraction `below` whose saturated mole fraction at
 /// ln p is `saturation`, from the scan level `first`, with `f_sed` `efficiency` and `epsilon`
 /// kilograms of condensate per kilogram of gas per unit of the vapour's mole fraction, under
-/// `gravity` (the [module](self)'s documentation).
+/// `gravity`, in `substeps` steps to each scan step (the [module](self)'s documentation).
 #[must_use]
 fn integrate(
     base: Base,
@@ -1536,7 +1566,7 @@ fn integrate(
     saturation: impl Fn(f64) -> f64,
     first: usize,
     grid: &Grid,
-    (efficiency, epsilon, gravity): (f64, f64, f64),
+    (efficiency, epsilon, gravity, substeps): (f64, f64, f64, u32),
 ) -> Column {
     let levels = grid.len().saturating_sub(first);
     let mut column = Column {
@@ -1555,22 +1585,54 @@ fn integrate(
     let mut from = base.u;
     for level in first..grid.len() {
         let to = grid.u(level);
-        let step = (from - to) / f64::from(SUBSTEPS);
+        let step = (from - to) / f64::from(substeps);
         let mut level_mass = 0.0;
-        for substep in 1..=SUBSTEPS {
+        for substep in 1..=substeps {
             let end = from - step * f64::from(substep);
             let saturated_end = saturation(end);
-            let loaded_start = (total - saturated_from).max(0.0) * math::exp(end + step);
-            let mean = if saturated_from.is_finite() && saturated_end.is_finite() {
-                (saturated_from * saturated_end).sqrt()
+            let pressure_start = math::exp(end + step);
+            let loaded_start = (total - saturated_from).max(0.0) * pressure_start;
+            let finite = saturated_from.is_finite() && saturated_end.is_finite();
+            // The step's ∫ q_c p d ln p, where it is known in closed form.
+            let mut exact_load = None;
+            if finite
+                && saturated_end > 0.0
+                && saturated_end < saturated_from
+                && total >= saturated_from
+            {
+                // Within the cloud, under a saturation that falls across the step: the balance's
+                // exact solution for q_s falling exponentially at the rate `fall` (the module's
+                // documentation).
+                let fall = math::ln(saturated_from / saturated_end) / step;
+                if efficiency > 2.0 * fall {
+                    // q_c = A e^(−f x) + B e^(−s x): the transient that a base's first step holds
+                    // and the steady state, each integrated over the step exactly against p.
+                    let steady = fall * saturated_from / (efficiency - fall);
+                    let transient = total - saturated_from - steady;
+                    exact_load = Some(
+                        pressure_start
+                            * step
+                            * (transient * mean_decay((1.0 + efficiency) * step)
+                                + steady * mean_decay((1.0 + fall) * step)),
+                    );
+                }
+                total = total * math::exp(-efficiency * step)
+                    + efficiency * step * saturated_end * mean_decay((efficiency - fall) * step);
             } else {
-                f64::INFINITY
-            };
-            if total > mean {
-                total = mean + (total - mean) * math::exp(-efficiency * step);
+                let mean = if finite {
+                    (saturated_from * saturated_end).sqrt()
+                } else {
+                    f64::INFINITY
+                };
+                if total > mean {
+                    total = mean + (total - mean) * math::exp(-efficiency * step);
+                }
             }
             let loaded_end = (total - saturated_end).max(0.0) * math::exp(end);
-            level_mass += f64::midpoint(loaded_start, loaded_end) * step * epsilon / gravity;
+            let load = exact_load
+                .unwrap_or_else(|| f64::midpoint(loaded_start, loaded_end) * step)
+                .max(0.0);
+            level_mass += load * epsilon / gravity;
             saturated_from = saturated_end;
         }
         column.mass += level_mass;
@@ -1584,6 +1646,17 @@ fn integrate(
         from = to;
     }
     column
+}
+
+/// The mean of e^(−u) over u from 0 to `delta`, (1 − e^(−δ)) ÷ δ, and 1 at δ = 0: the weight of
+/// the saturation's share in a cloud's exact step (`integrate`), finite for every finite δ.
+#[must_use]
+fn mean_decay(delta: f64) -> f64 {
+    if delta.abs() < f64::EPSILON {
+        1.0
+    } else {
+        -math::exp_m1(-delta) / delta
+    }
 }
 
 /// The deck of the candidate at its base `base`, in the gas the decks `placed` leave: its column
@@ -1630,7 +1703,7 @@ fn place(
         saturation,
         first,
         grid,
-        (efficiency, epsilon, air.gravity.value()),
+        (efficiency, epsilon, air.gravity.value(), context.substeps),
     );
     let top_index = column
         .condensate
