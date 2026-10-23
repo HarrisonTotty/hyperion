@@ -2504,6 +2504,98 @@ describe("SpatialView's annulus labels, crossed by no tick (plan 14, P14.T42.f)"
   });
 });
 
+describe("SpatialView's ring label about its own planet (plan 14, P14.T42.g)", () => {
+  beforeEach(() => {
+    stubLayout(1200, 900);
+  });
+
+  /**
+   * A planet at the view centre, as `bodyScene` draws the focused body, and its ring 0.3 to 0.6 ly
+   * about it, its outer edge 5.02 px or less from its centre on the screen: every place beside that
+   * edge stands within 0.25 rem of the planet's bracket's box, 12 px about its centre, as the ring
+   * `A j RING 1` about its planet did at the `BODY` frame's fit at 1280 × 720.
+   */
+  const PLANET = aMark("p", {
+    position: vec3(0, 0, 0),
+    shape: "triangle-down",
+    label: "A-11",
+    labelPriority: Number.MAX_VALUE,
+  });
+  const PLANET_BRACKET = bracketAbout(600, 450);
+  const RING: AnnulusMark = {
+    id: "ring:r",
+    innerRadius: 0.3,
+    outerRadius: 0.6,
+    ticks: true,
+    label: "A j RING 1",
+    aboutId: "p",
+  };
+
+  /** Whether the ring's outer edge, at its points every 15°, lies inside the planet's bracket's box. */
+  function ringInsideBracket(): boolean {
+    const { leftPx, topPx, widthPx, heightPx } = PLANET_BRACKET;
+    return Array.from({ length: 24 }, (_, index) => (index * 15 * Math.PI) / 180).every((angle) => {
+      const at = drawnAt(
+        add(
+          scale(FRAME.coreward, RING.outerRadius * Math.cos(angle)),
+          scale(FRAME.spinward, RING.outerRadius * Math.sin(angle)),
+        ),
+      );
+      return (
+        at.xPx > leftPx && at.xPx < leftPx + widthPx && at.yPx > topPx && at.yPx < topPx + heightPx
+      );
+    });
+  }
+
+  it("draws a selected ring's label within 0.25 rem of its planet's bracket's box, no bracket drawn about the planet", () => {
+    // The ring selected from the list, as `bodyScene` gives it: the annulus selected, and no mark.
+    renderView({
+      scene: aScene({ points: [PLANET], annuli: [{ ...RING, selected: true }], selectedId: null }),
+    });
+
+    const ring = drawnBox("A j RING 1", 0.1);
+    expect([ringInsideBracket(), boxGapPx(ring, PLANET_BRACKET) < 4]).toEqual([true, true]);
+  });
+
+  it.each([
+    ["the selection", { selectedId: "p", destinationId: null }],
+    ["the destination", { selectedId: null, destinationId: "p" }],
+  ] as const)(
+    "keeps a ring's label 0.25 rem outside its planet's bracket's box while the planet is %s, or leaves it out (main's ruling on issue #96)",
+    (_, ids) => {
+      renderView({ scene: aScene({ points: [PLANET], annuli: [RING], ...ids }) });
+
+      const ring = annulusBox("A j RING 1");
+      expect([
+        ringInsideBracket(),
+        ring === null || boxGapPx(ring, PLANET_BRACKET) >= 4 - 1e-6,
+        overlayLabel("A-11").textContent,
+      ]).toEqual([true, true, "A-11"]);
+    },
+  );
+
+  it("draws an unselected ring's label within 0.25 rem of its planet's bracket's box, 0.5 rem from the planet's label", () => {
+    renderView({ scene: aScene({ points: [PLANET], annuli: [RING], selectedId: null }) });
+
+    const ring = drawnBox("A j RING 1", 0.1);
+    const planet = drawnBox("A-11", 0);
+    expect([
+      ringInsideBracket(),
+      boxGapPx(ring, PLANET_BRACKET) < 4,
+      boxGapPx(ring, planet) >= 8 - 1e-6,
+    ]).toEqual([true, true, true]);
+  });
+
+  it("draws an unselected ring's label within 0.25 rem of its planet's bracket's box while a moon is the selection", () => {
+    // A moon well away from the planet, up and to the right, its bracket drawn about it alone.
+    const moon = aMark("m", { position: onPlaneAt(800, 300), shape: "pentagon", label: "M" });
+    renderView({ scene: aScene({ points: [PLANET, moon], annuli: [RING], selectedId: "m" }) });
+
+    const ring = drawnBox("A j RING 1", 0.1);
+    expect([ringInsideBracket(), boxGapPx(ring, PLANET_BRACKET) < 4]).toEqual([true, true]);
+  });
+});
+
 describe("SpatialView picking", () => {
   beforeEach(() => {
     stubLayout(400, 300);

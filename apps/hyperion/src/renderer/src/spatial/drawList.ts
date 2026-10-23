@@ -222,11 +222,12 @@ export interface RingLabel extends CurveLabelBase {
   readonly clearOfPointPx?: number;
   /**
    * Whether the label is an annulus's, which gives way to the marks' labels: it is placed after
-   * them, 0.5 rem clear of every label, 0.25 rem outside every mark's bracket's box, and is not
-   * drawn where it has no such place (plan 14, P14.T42.d; `placeAnnulusLabels`). A selected
-   * annulus's label keeps those rules but is placed before them, and they give way to it
-   * ({@link RingLabel.selected}). Only an annulus's label has it; a plane ring's, a path's and the
-   * observer's do not.
+   * them, 0.5 rem clear of every label, 0.25 rem outside every mark's bracket's box but that of the
+   * mark its annulus is drawn about ({@link RingLabel.aboutMarkId}) while no reticle is drawn about
+   * it, and is not drawn where it has no such place (plan 14, P14.T42.d, T42.g;
+   * `placeAnnulusLabels`). A selected annulus's label keeps those rules but is placed before them,
+   * and they give way to it ({@link RingLabel.selected}). Only an annulus's label has it; a plane
+   * ring's, a path's and the observer's do not.
    */
   readonly yieldsToMarks?: true;
   /**
@@ -236,6 +237,13 @@ export interface RingLabel extends CurveLabelBase {
    * {@link RingLabel.yieldsToMarks}, while its annulus is selected.
    */
   readonly selected?: true;
+  /**
+   * The ID of the mark its annulus is drawn about (`AnnulusMark.aboutId`), from whose bracket's box
+   * it keeps no clearance while no reticle is drawn about that mark, since it names a ring of that
+   * very body (plan 14, P14.T42.g; main's ruling on issue #96). Only a ring's label in the `BODY`
+   * frame has it.
+   */
+  readonly aboutMarkId?: string;
 }
 
 /** Where to put the DOM label of a sphere, a ring, an annulus or a path. */
@@ -803,7 +811,8 @@ function ringLabels(
  * The labels of the annuli, each at its outer edge's rimward point, or its spinward point where it
  * asks, away from the rings' labels at their coreward points, and each giving way to the marks'
  * labels (`yieldsToMarks`; plan 14, P14.T42.d) but a selected annulus's, the selection's, to which
- * they give way (`selected`; P14.T42.e); then those of the paths, each at its anchor.
+ * they give way (`selected`; P14.T42.e), a ring's naming the planet it is drawn about
+ * (`aboutMarkId`; P14.T42.g); then those of the paths, each at its anchor.
  */
 function markCurveLabels(
   scene: SpatialScene,
@@ -830,6 +839,7 @@ function markCurveLabels(
       alongPx: ringPointsPx(band, annulus.outerRadius, fromDeg, toScreen),
       yieldsToMarks: true,
       ...(annulus.selected === true ? { selected: true as const } : {}),
+      ...(annulus.aboutId === undefined ? {} : { aboutMarkId: annulus.aboutId }),
     });
   }
   for (const path of scene.paths ?? []) {

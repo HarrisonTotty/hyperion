@@ -433,9 +433,12 @@ export function SpatialView({
       ? []
       : placeCurveLabels(drawList.curveLabels, viewport, furniture, marksInks);
   // The annuli's labels, and what both of their passes measure for them, once: every mark's
-  // bracket's box, which they keep 0.25 rem outside, the ticks, which they never cross, and the
-  // orbits and edges, which they prefer a place clear of. A view that labels no annulus, as the
-  // star chart, measures none of them (plan 14, P14.T42.d, T42.e, T42.f).
+  // bracket's box with its mark's ID, which they keep 0.25 rem outside but a ring's label its own
+  // planet's while no reticle is drawn about it, the marks the selection's bracket or the
+  // destination's chevrons are drawn about, as the draw list's own reticle ops say, the ticks,
+  // which they never cross, and the orbits and edges, which they prefer a place clear of. A view
+  // that labels no annulus, as the star chart, measures none of them (plan 14, P14.T42.d, T42.e,
+  // T42.f, T42.g; main's ruling on issue #96).
   const annuli =
     drawList === null || viewport === null || triadBox === null || coreArrow === null
       ? []
@@ -445,15 +448,24 @@ export function SpatialView({
       ? null
       : {
           marks: marksInks,
-          brackets: drawList.anchors.map((anchor) => bracketBoxPx(anchor, viewport.remPx, strokes)),
+          brackets: drawList.anchors.map((anchor) => ({
+            id: anchor.id,
+            box: bracketBoxPx(anchor, viewport.remPx, strokes),
+          })),
+          reticledIds: new Set(
+            drawList.ops.flatMap((op) =>
+              op.kind === "reticle" || op.kind === "chevrons" ? [op.id] : [],
+            ),
+          ),
           curves: curveInksPx(drawList.ops, pixelRatio),
           ticks: tickInksPx(drawList.ops, pixelRatio),
         };
   // A selected belt's, ring's or halo's label is the selection's: placed next, before the marks'
   // labels, which give way to it, by the annuli's rules, 0.5 rem from what stands before it, 0.25 rem
-  // outside every mark's bracket's box, crossed by no tick and preferring a place no orbit or edge
-  // crosses, or not drawn, with no last resort, as the selection's label has none (plan 14,
-  // P14.T42.e, T42.f). A scene that selects an annulus selects no mark, so the two never compete.
+  // outside every mark's bracket's box but a ring's its own planet's, crossed by no tick and
+  // preferring a place no orbit or edge crosses, or not drawn, with no last resort, as the
+  // selection's label has none (plan 14, P14.T42.e, T42.f, T42.g). A scene that selects an annulus
+  // selects no mark, so the two never compete, and the selection's bracket is drawn about no mark.
   const selectedAnnuli = annuli.filter((label) => label.selected === true);
   const selectedAnnulusLabels =
     viewport === null || annulusInks === null || selectedAnnuli.length === 0
@@ -484,8 +496,9 @@ export function SpatialView({
           observer: observerBoxPx(scene, camera, viewport),
         });
   // The other annuli's labels, placed last, give way to every body's and to a selected annulus's:
-  // 0.5 rem from everything placed, 0.25 rem outside every mark's bracket's box, preferring a place
-  // no curve crosses, or not drawn (plan 14, P14.T42.d); the zones' first, in the scene's order.
+  // 0.5 rem from everything placed, 0.25 rem outside every mark's bracket's box but a ring's its
+  // own planet's while no reticle is drawn about it, preferring a place no curve crosses, or not
+  // drawn (plan 14, P14.T42.d, T42.g); the zones' first, in the scene's order.
   const otherAnnuli = annuli.filter((label) => label.selected !== true);
   const annulusLabels =
     viewport === null || annulusInks === null || otherAnnuli.length === 0

@@ -1143,6 +1143,29 @@ describe("buildDrawList annuli", () => {
     ]);
   });
 
+  it("names the mark a ring's annulus is drawn about on its label alone, not a zone's or a belt's (plan 14, P14.T42.g)", () => {
+    const scene = bareScene({
+      annuli: [
+        annulus("hz", 10, 20, { label: "HABITABLE ZONE" }),
+        annulus("belt", 25, 30, { label: "BELT 1", ticks: true }),
+        annulus("ring:moon", 2, 3, { label: "A j RING 1", ticks: true, aboutId: "planet" }),
+      ],
+    });
+
+    const { curveLabels } = buildDrawList(scene, TOP, VIEWPORT, GAP_PX);
+
+    expect(
+      curveLabels.map((label) => [
+        label.key,
+        "aboutMarkId" in label ? label.aboutMarkId : "absent",
+      ]),
+    ).toEqual([
+      ["annulus:hz", "absent"],
+      ["annulus:belt", "absent"],
+      ["annulus:ring:moon", "planet"],
+    ]);
+  });
+
   it("gives an annulus's label the points along its outer edge either way from its rimward point (R07.T16.j)", () => {
     const scene = bareScene({ annuli: [annulus("hz", 10, 20, { label: "HABITABLE ZONE" })] });
 
