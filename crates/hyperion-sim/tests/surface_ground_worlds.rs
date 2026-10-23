@@ -28,7 +28,7 @@
 )]
 mod common;
 
-use common::surface_worlds::{SampleWorld, Tier, sample_worlds};
+use common::surface_worlds::{SampleWorld, Tier, sample_world, sample_worlds};
 use hyperion_base::rng::DetailSeed;
 use hyperion_surface::cube::{Face, PatchKey, unit_dir};
 use hyperion_surface::field::FieldView;
@@ -63,14 +63,6 @@ fn sampler(name: &str) -> Lcg {
     Lcg::new(name.bytes().fold(SAMPLES, |hash, b| {
         (hash ^ u64::from(b)).wrapping_mul(FNV_PRIME)
     }))
-}
-
-/// The sample world named `name`.
-fn world(name: &str) -> &'static SampleWorld {
-    sample_worlds()
-        .iter()
-        .find(|world| world.name() == name)
-        .unwrap_or_else(|| panic!("{name} is a sample world"))
 }
 
 /// Asserts that the ground on `world` is finite at every sampled point, that its normal there is
@@ -146,7 +138,7 @@ fn the_ground_holds_on_every_fast_sample_world() {
 #[test]
 #[ignore = "slow: the reference Earth's coarse pass at level 8, about 100 s in the test profile"]
 fn the_ground_holds_on_the_earth_like_sample_world() {
-    let earth = world(EARTH);
+    let earth = sample_world(EARTH);
     assert_eq!(earth.tier(), Tier::Slow);
     assert_the_ground_holds(earth);
 }
@@ -155,7 +147,7 @@ fn the_ground_holds_on_the_earth_like_sample_world() {
 #[ignore = "slow: the reference locked Earth's coarse pass at level 8, about 22 s in the test \
             profile"]
 fn the_ground_holds_on_the_locked_earth_like_sample_world() {
-    let locked = world(LOCKED_EARTH);
+    let locked = sample_world(LOCKED_EARTH);
     assert_eq!(locked.tier(), Tier::Slow);
     assert_the_ground_holds(locked);
 }

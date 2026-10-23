@@ -4950,7 +4950,8 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
     field puts it) follow R09.T16 as a later commit under T1.b's ID (main's ruling).
     `surface_material_worlds.rs` meanwhile runs the four reference worlds through `coarse_pass`.
     Their no-op pass leaves a smooth dry sphere with no ice, where every entry is the palette's and
-    the airless Moon's and Ceres's ground is their crusts' regolith.
+    the airless Moon's and Ceres's ground is their crusts' regolith. _Moved onto `sample_worlds()`
+    on 2026-10-23 (Risks, "Deviations in T1.b's `sample_worlds()` follow-up, as built")._
   - _Built fields_ (illustrative values, each noted):
     - the cliff field, a 2 km airless body with a 1 km step;
     - a cold snowy cliff, and a warm stepped field with a lapse rate;
@@ -13909,4 +13910,161 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
     binary and in `surface_coarse_golden.rs`, and T1.b's, T2's, T5's and T10.a's follow-ups may
     copy it again, with a name-seeded sampler like this one's. A `sample_world(name)` in
     `tests/common/surface_worlds.rs` would hold one copy, a change to the helper that this
-    follow-up leaves alone.
+    follow-up leaves alone. _Resolved for the R10 binaries on 2026-10-23: `sample_world(name)` is
+    in the helper, read by this binary and `surface_material_worlds.rs`; `surface_coarse_golden.rs`
+    keeps its own (Risks, "Deviations in T1.b's `sample_worlds()` follow-up, as built")._
+- **Deviations in T1.b's `sample_worlds()` follow-up, as built** (2026-10-23; lane
+  `lane/101-r10-t1b-sample-worlds`, on `rendering-and-planets` at `d795e2cc`; `GENERATOR_VERSION`
+  23, no bump). Test code and this record; nothing generated moves.
+  - _What moved._ `crates/hyperion-sim/tests/surface_material_worlds.rs` reads R09.T16's
+    `sample_worlds()` in place of its own four reference worlds (`World`, `WORLDS` and `field(n)`)
+    and its own `coarse_pass` calls: `mod common;` under `#[expect(dead_code, …)]`, as the ground
+    binary has it, and each world's field from `SampleWorld::field()`. Its checks are one function,
+    `assert_the_material_holds(&SampleWorld)`, and its tests are named for it, after
+    `surface_ground_worlds.rs` (#99):
+    - `the_material_holds_on_every_fast_sample_world`, in place of
+      `the_material_is_named_on_every_reference_world`, over the four `Tier::Fast` worlds (Mars,
+      the Moon, Ceres and the Europa), asserting there are four, and that its names and the slow
+      tests' two (`EARTH` and `LOCKED_EARTH`, listed in `SLOW`), sorted, are `sample_worlds()`'s
+      names sorted;
+    - `the_material_holds_on_the_earth_like_sample_world` and
+      `the_material_holds_on_the_locked_earth_like_sample_world`, each `#[ignore = "slow: …"]` with
+      its world's pass and its cost, each looking its world up by name and asserting `Tier::Slow`;
+    - `the_thin_air_threshold_is_the_sim_s`, unchanged.
+
+    `sample_world(name)`, `#[must_use]`, panicking with the name where no world has it, is in
+    `tests/common/surface_worlds.rs`: the ground binary's `world` moved (main's ruling 6,
+    2026-10-23). The ground binary calls it in its two slow tests, its only change.
+    `surface_coarse_golden.rs` keeps its own `world`.
+
+  - _The check: the material's ice is the field's, cell by cell_ (main's ruling 2, 2026-10-23). At
+    each point the binary reads the point's coarse cell with `Synthesiser::cell_at`, at the
+    classifier's own direction of the point's (face, u, v), and its share in 255ths. An answer is
+    of the ice rule where it is `SeaIce`, `Glacier` or `Frost`, or `Regolith` of an `Ice`-role
+    entry, which no other rule names (the binary's `IceForm`); `Snow` is a rule of its own.
+    - A share of 0: the answer is not of the ice rule.
+    - A full share: it is, of the cell's ice entry, `SeaIce` or `Glacier` under air and `Regolith`
+      on an airless world.
+    - A partial share: an answer of the ice rule is of the cell's ice entry, `Glacier` only at a
+      share of at least `MASSIVE_ICE_SHARE`, `Frost` only below it, and `SeaIce` only above ½
+      (`MAJORITY`). The binary keeps the full share's split by air here: `Glacier` and `SeaIce`
+      under air alone, and airless `Regolith` of the ice entry as massive ice's form on an airless
+      world, under the same share, by T1.b's "Glacier or frost" (massive ice is never `Glacier` on
+      an airless body). No airless sample world's field has a cell with ice, so none of the three
+      readings is reached.
+
+    The as-built checks stay: every point answers, its error named with the world and the point;
+    the header's air agrees with the binary's list of the three airless worlds (`AIRLESS`); the
+    entry, where there is one, is the palette's, and a point with none is only on an empty palette;
+    and, narrowed to cells of share 0, an airless world's ground is `Regolith` or `Bedrock` of a
+    crust entry. On a world whose field has a cell of full share some point in such a cell is of
+    the ice rule, so the full share's clause is not empty there (the brief's "at least one sampled
+    point is of the ice rule", taken in the full cells, after the review: an ice answer in a
+    partial cell alone would leave that clause unrun).
+
+  - _The points_, on each world:
+    - 64 random directions from `sampler(name)`, the testkit's `Lcg` seeded by FNV-1a 64 over the
+      world's name, with this binary's old sampler seed `0x6d61_7465_7269_6177` in place of the
+      offset basis (a copy of the ground binary's few lines: each binary keeps its own seed);
+    - the old three fixed directions, `(1, 1, −1)`, `(0, 1, 1)` and the north pole `(0, 0, 1)`, and
+      the south pole `(0, 0, −1)`;
+    - the centres (`vertex_dir(32, 32)` of `cell_at_index(level, index)`) of up to 16 cells of full
+      share and up to 16 of partial share, found by scanning `CoarseField::synthesis()`: of a
+      kind's n cells in `cell_index` order, those at the positions ⌊j n ÷ k⌋ for j below
+      k = min(n, 16).
+
+    A world's points so depend on its name and its field alone. The old binary drew every world's
+    points from one sampler in turn; no golden holds them. The detail seed `DETAIL` is unchanged.
+
+  - _The warm pole is replaced, not built_ (main's rulings 1 and 3, 2026-10-23). No sample world
+    has a warm pole: every one's equator–pole contrast is positive. The pole is the zonal fit's,
+    T̄ − ⅔ ΔT, and the cells with ice are the coarse goldens':
+
+    | World               | T̄ (K) | ΔT eq–pole (K)   | Pole (K) | Cells with ice (of) | Air      |
+    | ------------------- | ----- | ---------------- | -------- | ------------------- | -------- |
+    | `earth_like`        | 288.0 | 42               | ≈ 260    | 15,119 (393,216)    | 98.6 kPa |
+    | `mars_like`         | 214.0 | 55               | ≈ 177    | 774 (98,304)        | 636 Pa   |
+    | `moon_like`         | 270.3 | 120              | ≈ 190    | 0 (24,576)          | airless  |
+    | `ceres_like`        | 162.6 | 55               | ≈ 126    | 0 (6,144)           | airless  |
+    | `europa_like`       | 109.6 | 60.1             | ≈ 70     | 0 (24,576)          | airless  |
+    | `locked_earth_like` | 288.0 | 32.9 (+59.8 d–n) | ≈ 266    | 18,275 (393,216)    | 98.6 kPa |
+
+    The only warm pole in the code is R09's `a_warm_pole_gets_no_cap`, a library `cfg(test)` test
+    of the field on an 80°-obliquity Moon-like world. So "a warm pole has no ice cap" is held as
+    "no ice cap the field does not place": the property at both rotation poles on every world, its
+    share-0 clause wherever a pole's cell is bare (on the Earth, Mars and the locked Earth a pole's
+    cell may be iced, and the full or partial clause holds it; the print does not give the poles'
+    shares). On the Moon, Ceres and the Europa, whose fields ice no cell, every point, both poles
+    among them, is outside the ice rule: the classifier adds no cap by latitude. A warm-pole world
+    built in the binary would need `reference::builder_of` (crate-private) made public, a sim
+    change, or a copy of its ~30 setters, and a seventh pass, to re-assert what R09's test holds on
+    the field. The classifier reads the cell's share alone; only where a partial share lies inside
+    its cell leans poleward.
+
+  - _The locked world's limit_ (main's ruling 4, 2026-10-23). The locked Earth is held by the same
+    check, the plan's "a locked world's ice lies where R09's field puts it" read literally. Inside a
+    partial cell the share lies by the classifier's shadow index, whose tilt falls towards the
+    nearer rotation pole (T1.b's deferred "_A locked world's cold side_"), and the header carries
+    no substellar point, so which side of a partial cell the ice takes is not checked against the
+    night side. Whether the field's ice lies on the night side is R09's climate, not re-asserted
+    here. The binary's module documentation states the limit.
+  - _What the points found_ (the test's print). Each world's cells of full and of partial share
+    add up to the table's cells with ice:
+
+    | World               | Cells, full / partial (of) | Points, bare / full / partial | Of the ice rule, full / partial | Answers by form                                            |
+    | ------------------- | -------------------------- | ----------------------------- | ------------------------------- | ---------------------------------------------------------- |
+    | `mars_like`         | 772 / 2 (98,304)           | 66 / 18 / 2                   | 18 / 0                          | `Dust` 63, `Glacier` 18, `Sediment` 5                      |
+    | `moon_like`         | 0 / 0 (24,576)             | 68 / 0 / 0                    | 0 / 0                           | `Regolith` 68                                              |
+    | `ceres_like`        | 0 / 0 (6,144)              | 68 / 0 / 0                    | 0 / 0                           | `Regolith` 68                                              |
+    | `europa_like`       | 0 / 0 (24,576)             | 68 / 0 / 0                    | 0 / 0                           | `Regolith` 68                                              |
+    | `earth_like`        | 15,118 / 1 (393,216)       | 64 / 20 / 1                   | 20 / 1                          | `Seabed` 45, `Glacier` 15, `Soil` 14, `SeaIce` 6, `Sand` 5 |
+    | `locked_earth_like` | 18,274 / 1 (393,216)       | 66 / 18 / 1                   | 18 / 0                          | `Seabed` 53, `SeaIce` 13, `Sand` 11, `Glacier` 5, `Snow` 3 |
+
+    Beyond the 16 targeted full cells, 2 of Mars's 68 other points lie in full cells, 4 of the
+    Earth's and 2 of the locked Earth's. A one-off print of the partial cells (never committed):
+    Mars's two lie near its poles, at 88.7° N with a share of 77/255 and 82.9° S with 109/255, and
+    both centres are `Dust`, outside the cut; the locked Earth's, under water at 51/255, has a
+    `Seabed` centre, since a sea's ice goes by the majority; the Earth's centre is of the ice rule.
+
+  - _Times_ (dev profile under nextest, the laptop: an i7-8665U, 8 threads, nextest on 4, beside
+    #65's `atmosphere-reference` trace on 4 threads at nice 10, so provisional):
+    - `the_material_holds_on_every_fast_sample_world`, 23.2 s, at a 1-minute load of 4.1 before and
+      4.4 after (22.0 s under the plan's `cargo test` command, at 4.7 and 4.7). By R09.T16's
+      figures its four passes come to about 8.4 s on the desktop, Mars's 7.1 s in the test profile
+      most of it;
+    - by name, `--run-ignored only`, the two side by side:
+      `the_material_holds_on_the_locked_earth_like_sample_world` 42.2 s and
+      `the_material_holds_on_the_earth_like_sample_world` 150.5 s, at a load of 4.3 before and 4.8
+      after, against R09.T16's 22.4 s and about 100 s for their passes on the desktop;
+    - the ground binary's `the_ground_holds_on_every_fast_sample_world`, on `sample_world`'s
+      helper, 16.2 s, at 4.5 and 4.4 (#99's 16.4 s);
+    - the fast suite's saving: the reference Earth's pass, about 100 s in the test profile on the
+      desktop (94.9 s bench) and about 150 s here, leaves this binary's fast test, and so every
+      `ci`.
+  - _Acceptance, as built._ T1.b's acceptance,
+    `cargo test -p hyperion-sim --features testing --test surface_material_worlds`, runs the fast
+    test and the thin-air test and shows the slow two as ignored, so it covers the four fast worlds
+    alone. The slow two run by name with `cargo nextest run` over the same `-p`, `--features` and
+    `--test`, adding `--run-ignored only`, the command the binary's module documentation gives.
+  - _The gate's plan_ (`just smart-ci --plan origin/rendering-and-planets` over this change) is
+    #99's width, for #99's reason, this binary's new `mod common;`, with three counts above main's
+    mock of the change: nextest on 124 of the sim's 4,445 tests (the mock's 123), with the surface
+    crate's `tags::tests::native_only`; the wasip1 build and run of 119 (118); and 34 of the sim's
+    slow tests as reached (32), which no step runs: the 30 reached through `common`, the ground
+    binary's two, whose bodies now call `sample_world`, and this binary's two. The rest is the
+    mock's: the wasip1 tools, rustfmt for the sim, Prettier on this plan, Clippy and rustdoc for
+    the sim with `testing`, the test build of the sim, the surface crate and the testkit, the
+    fitted tables' check, the doctests of `tests/common/mod.rs`, and the testkit's one slow test
+    as reached.
+- **Deferred findings (2026-10-13 rule) (R10.T1.b's `sample_worlds()` follow-up)** (recorded, not
+  ruled; each leaves the algorithm and the contracts as built).
+  - _Perennial snow beside the field's ice._ On the locked Earth three of the 85 points answer
+    `Snow` of H₂O's `Ice` entry in cells the field leaves bare (share 0), at 24.3° S 153.5° E,
+    39.4° S 132.1° E and 39.7° N 128.3° E (longitude atan2(y, x) in the body's frame); no reference
+    Earth point is `Snow`. The snow rule reads the point's warmest month at its own height by the
+    lapse rate and the cell's precipitation, and the field's ice is R09's climate step's, a cell's,
+    so a console can show perennial snow where the field holds no ice. The first point lies in a
+    cell under water, above its water surface (T1.b's "_The coastline follows cells_"). Ruling 2
+    leaves `Snow` apart, so the binary does not check it. The brainstorm's "each ice lies where the
+    coarse pass placed it" (Materials) may be read to cover perennial snow too, so whether snow
+    should lie only where the field names ice is a question for main, then T1.b or R09.
