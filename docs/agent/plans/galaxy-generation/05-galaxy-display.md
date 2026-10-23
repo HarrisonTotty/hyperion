@@ -1672,6 +1672,12 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
     first, and a ring's or an annulus's label also tries points along its ring (Q6 (d));_
   - _stated limits: a ring that is a point on screen keeps its label across a stalk at the last
     resort (`PLANE 0.01 ly SET`), and D4 drops labels in a crowd, which the list still names._
+  - _Narrowed for annulus labels by P14.T42.d (plan 14; decision-zone-labels): an annulus's label
+    is placed after the marks' labels, 0.5 rem from every label and the furniture, 0.25 rem
+    outside every mark's bracket's box and 0.125 rem from every stalk, prefers a place that no
+    orbit, annulus edge or tick crosses, and is not drawn where it has no such place. The marks'
+    labels no longer give way to it, and spheres, plane rings, paths and the observer keep
+    R07.T16.j's last resort._
 
 - **P05.T13, as built (lane `gg-port-p05-t13`, 2026-10-16, at version 22).** Built on
   `rendering-and-planets` 93a0e0fd under decision-gg-port-a2 §7 and signoff-11 item 24, as
@@ -1971,3 +1977,14 @@ text-align: right`) stands beside `.stale, .stale-mark`; `.hr-diagram__count-slo
     (one must-fix and one should-fix against main's ruling, findings 2 and 3; one should-fix,
     the status's muting, done; two considers, findings 5 and 6) and plan conformance (all built;
     finding 1; the long lines rewrapped; the `starsStale` doc corrected).
+- **Mark labels over other marks' symbols (a deferred finding, 2026-10-23; look-79-81 and
+  look-90).** `placeLabels` keeps a mark's label off the labels placed, the furniture, the other
+  text and the observer's eye, but not off other marks' symbols, and P05's labels have no plate,
+  so a neighbour's symbol can stand on a label's letters: look-79-81 counted 5 to 36 in a run of
+  13 to 20 captures. It came before P14.T42.d, which keeps annulus labels off every mark's
+  bracket's box and leaves the marks' labels as they are. Not a blocker: the label still stands
+  beside its own mark, and the list names every mark; decision-r07-quality-and-destination, D2,
+  ruled the view's plates over other marks a stated limit on the same grounds. A look that finds
+  a label read as naming the mark it crosses, or a selection lost under a label, asks for a
+  ruling; the lean is T42.d's bracket's-box test for the lesser labels, which drops rather than
+  moves them, the selection's and the destination's excepted.
