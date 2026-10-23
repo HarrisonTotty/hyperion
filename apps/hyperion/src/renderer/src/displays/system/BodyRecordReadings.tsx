@@ -385,6 +385,68 @@ function coldTrapsKnown(condensates: Modelled<ReadonlyArray<SurfaceCondensate>>)
   );
 }
 
+/** The registry key of water, the one substance the wire appends to a cover list with no entry. */
+const WATER = "H2O";
+
+/**
+ * The liquid entry of `substance` among a surface's condensates, or `undefined` where none is
+ * listed, or the condensates are not a value.
+ */
+function liquidEntry(
+  condensates: Modelled<ReadonlyArray<SurfaceCondensate>>,
+  substance: string,
+): SurfaceCondensate | undefined {
+  return condensates.kind === "value"
+    ? condensates.value.find((entry) => entry.phase === "liquid" && entry.substance === substance)
+    : undefined;
+}
+
+/**
+ * The item of a surface's liquids that is the ocean under a `snowball`'s ice, which covers none of
+ * the surface, or `null` on every other surface (plan 14, P14.T43.h; decision-absurd-states-24).
+ *
+ * @remarks
+ * The wire's contract (`BodySurfaceDto.condensates`, decision-p14-t54a-water-consistency W3)
+ * appends that ocean to `surface_liquids` as an `H2O` item with no entry, on a `snowball` surface
+ * whose condensates list no `H2O` liquid, its water held inside the `H2O` solid. This reads the
+ * contract's own test and infers no state or phase: a sea of liquid water listed among the
+ * condensates, as at 273.15 K, is a liquid on the surface, and so is any `H2O` item of any other
+ * state. Moot once P14.T53.c ends the appended item.
+ */
+function oceanUnderIce(surface: BodySurface): SubstanceArea | null {
+  const noLiquidWaterListed =
+    surface.condensates.kind === "value" && liquidEntry(surface.condensates, WATER) === undefined;
+  return surface.state === "snowball" && noLiquidWaterListed
+    ? (surface.surfaceLiquids.find((area) => area.substance === WATER) ?? null)
+    : null;
+}
+
+/**
+ * The liquids on a `snowball`'s ice, as `LIQUID COVER` reads them where {@link oceanUnderIce}
+ * picks out `ocean`: every other item of the surface's liquids at its liquid entry's own area,
+ * the deposit's extent, divided by their total where it exceeds 1, as the wire divides its list
+ * without the ocean (decision-p14-t54a-water-consistency W2).
+ *
+ * @remarks
+ * The wire's list divides them by its total, the ocean's item included. An item with no liquid
+ * entry keeps its listed share. No server that keeps the contract sends one, since it builds the
+ * list from the condensates it sends, after their cut to eight, and appends the ocean alone: it is
+ * the fallback the task's rule gives.
+ */
+function liquidsOnIce(surface: BodySurface, ocean: SubstanceArea): ReadonlyArray<SubstanceArea> {
+  const onIce = surface.surfaceLiquids
+    .filter((area) => area !== ocean)
+    .map((area) => ({
+      substance: area.substance,
+      areaFraction:
+        liquidEntry(surface.condensates, area.substance)?.areaFraction ?? area.areaFraction,
+    }));
+  const total = onIce.reduce((sum, area) => sum + area.areaFraction, 0);
+  return total > 1
+    ? onIce.map((area) => ({ substance: area.substance, areaFraction: area.areaFraction / total }))
+    : onIce;
+}
+
 /**
  * The rows of a surface section (plan 14, P14.T43.b, _Amended for T35.e_): its state in words under
  * the section's own name, so that `SURFACE` keeps its place whether the section is shown or stands
@@ -393,7 +455,8 @@ function coldTrapsKnown(condensates: Modelled<ReadonlyArray<SurfaceCondensate>>)
  *
  * @remarks
  * The temperature and the pressure take a line each, so that `SURFACE PRESSURE`, the section's
- * longest label, stays in the first label track rather than widening the second.
+ * longest label but `SUBSURFACE OCEAN`, which takes a line of its own too, stays in the first label
+ * track rather than widening the second.
  *
  * An airless body's air is computed, with none in it: its pressure and its gases read `NONE`
  * unless it holds melt (below), and its exosphere, a quantity of its own that the generator does
@@ -427,11 +490,18 @@ function coldTrapsKnown(condensates: Modelled<ReadonlyArray<SurfaceCondensate>>)
  * ({@link coldTrapsKnown}), as T54.a labels an airless body's cold traps, so that its `ICE COVER` is
  * never read as all the ice it holds.
  *
+ * On a `snowball` surface whose condensates are a value with no `H2O` liquid entry, the `H2O` item
+ * of its liquids is the ocean under its ice ({@link oceanUnderIce}; plan 14, P14.T43.h), which
+ * covers none of the surface. `LIQUID COVER` then reads the liquids on the ice alone, at their own
+ * extents ({@link liquidsOnIce}), or `NONE`, and the ocean reads in a row of its own, the last of
+ * the section's, `SUBSURFACE OCEAN`, its liquid named with no share (`SUBSURFACE OCEAN H2O`).
+ *
  * The section's other members are on the wire and not yet read here: its material, climate regime
- * and global figures; the crusts that do not lie at the surface and the crust's provinces, which
- * the view's `MATERIAL` reading names point by point once the terrain is served; the mantle's redox
- * figure ({@link CrustComposition.mantleRedoxIw}), which waits on a name the guide does not have;
- * and the condensates' own figures, their reservoirs, layers and seasons.
+ * and global figures; a regular moon's ocean under its ice ({@link BodySurface.subsurfaceOcean},
+ * the wire's `subsurface_ocean`); the crusts that do not lie at the surface and the crust's
+ * provinces, which the view's `MATERIAL` reading names point by point once the terrain is served;
+ * the mantle's redox figure ({@link CrustComposition.mantleRedoxIw}), which waits on a name the
+ * guide does not have; and the condensates' own figures, their reservoirs, layers and seasons.
  */
 function surfaceRows(surface: BodySurface): ReactNode {
   const vapour = holdsMelt(surface) ? vapourReading(surface.silicateVapour) : null;
@@ -441,6 +511,8 @@ function surfaceRows(surface: BodySurface): ReactNode {
   // A server that models no condensates, as every one before P14.T54.a, sends its water alone in
   // the cover's lists, so they are not the whole cover and never read as it.
   const coverModelled = surface.condensates.kind !== "not_modelled";
+  const ocean = oceanUnderIce(surface);
+  const liquids = ocean === null ? surface.surfaceLiquids : liquidsOnIce(surface, ocean);
   const notModelled = value(sectionStateLabel("not_modelled"));
   return (
     <>
@@ -469,7 +541,7 @@ function surfaceRows(surface: BodySurface): ReactNode {
       {crustRows(surface.crust)}
       <ReadoutRow
         label="LIQUID COVER"
-        shown={coverModelled ? coverShown(surface.surfaceLiquids) : notModelled}
+        shown={coverModelled ? coverShown(liquids) : notModelled}
         wide
       />
       <ReadoutRow
@@ -480,6 +552,13 @@ function surfaceRows(surface: BodySurface): ReactNode {
       {surface.state === "airless" && !coldTrapsKnown(surface.condensates) ? (
         <ReadoutRow label="COLD TRAPS" shown={notModelled} wide />
       ) : null}
+      {ocean === null ? null : (
+        <ReadoutRow
+          label="SUBSURFACE OCEAN"
+          shown={value(substanceName(ocean.substance, "upper"))}
+          wide
+        />
+      )}
     </>
   );
 }
@@ -715,13 +794,14 @@ export interface BodyRecordReadingsProps {
  * where it lies; and, from the whole record only, its surface (its state, mean temperature,
  * pressure and gases, and, over a melt, its own vapour's state; then the crust at the surface, the
  * mantle's redox class, the melt's share of the surface, the liquids and ices that cover it by
- * substance, and, on an airless body, its cold traps' state), a gas-envelope body's envelope in
- * the surface's place, read as its `ATMOSPHERE` (its gases), and its hooks, whose detail seed is
- * the one hook the wire carries, the em dash until the server derives it. A section withheld or not
- * modelled reads so, once, in place of its rows; one that does not apply is left out. A server
- * since P14.T35.e sends one of `surface` and `envelope` as not applicable for every planet it
- * resolves to the `surface` level, so the planet's air is read from the other; an older server
- * sends no envelope, which reads `ATMOSPHERE NOT YET MODELLED`.
+ * substance and, beside them, an airless body's cold traps' state or the ocean under a Snowball's
+ * ice), a gas-envelope body's envelope in the surface's place, read as its `ATMOSPHERE` (its
+ * gases), and its hooks, whose detail seed is the one hook the wire carries, the em dash until the
+ * server derives it. A section withheld or not modelled reads so, once, in place of its rows; one
+ * that does not apply is left out. A server since P14.T35.e sends one of `surface` and `envelope`
+ * as not applicable for every planet it resolves to the `surface` level, so the planet's air is
+ * read from the other; an older server sends no envelope, which reads
+ * `ATMOSPHERE NOT YET MODELLED`.
  *
  * The distance is the one reading the display derives: from the server's elements at the display
  * time, by the solver that agrees with the server's to 10⁻⁹ (P14.T39), since the answer is up to a
