@@ -1973,5 +1973,7 @@ fit-check`; review-changes on this lane's diff.
        potential, and how the triaxial bulge's two in-plane lengths set the expansion's R.
     9. The trains of the bumps the plan leaves open: a moved default of T5.b, T5.c's verdict and
        F13, T7.b, T8's adoption, T9.b, T10 and T11.b.
-  - _Merges._ None. The sweep was made at the lane's base, 898a3c94, three commits past the brief's
-    607346de, none of which touches what this plan consumes.
+  - _Merges._ The sweep was made at the lane's base, 898a3c94, three commits past the brief's
+    607346de. The lane then merged `origin/rendering-and-planets` at 93396d5f, two R08.T8.e commits
+    in the client's atmosphere code and plan R08. None of these touches what this plan consumes,
+    and the versions stay 23 and 3, so the sweep stands.
