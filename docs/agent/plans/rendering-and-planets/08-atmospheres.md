@@ -370,7 +370,8 @@ low), the aerial-perspective volume (32³ and 32 × 32 × 16, 2 steps a slice, t
 (full resolution at 36 steps since R08.T7, 32 before; half at 16), `aerialPerspectiveScope`,
 since R08.T8 `marchBand`, and since R08.T8.e `marchSourceCap` (2 on both settings; `hillaire.ts`'s
 `marchSourcesOf`) and `marchDepthSteps` (the bare ground's steps by its optical depth on high,
-`marchSteps.ts`'s `MarchDepthSteps`; null on low). `ViewSettings` also holds
+and a sky segment's, 28 under a green optical depth of 0.05 from its lowest point along each side,
+`marchSteps.ts`'s `MarchDepthSteps` and `ThinSkyRule`; null on low). `ViewSettings` also holds
 R06's `sky` and R07's `internalScaleBounds`, `budget` and `photoreal` today. `settings.ts` is the
 module R12 reads for this plan's ladder entries.
 
@@ -4375,17 +4376,28 @@ added on 2026-10-22 by `decision-r08-t8-leans.md` §9):
   3. T8.d's lever 3 (§8): the bare ground's steps scaled by its optical depth, and a thin sky's at
      the floor the gate sets, through R05.T12.e's gate at 1 and 6 sources on all three media at no
      wider tolerance, the top's step under 0.2%, shader and twin together;
-  4. what moves no pixel (`decision-r08-t8-leans.md` §10): the march without the footprint where
-     no texel of the frame can blend; `curveDepth`'s pressure row by bisection, the scan's own row;
-     and the view paths' slot-independent curve work once a step for every slot;
-  5. if a row still misses, each light slot's optical depth to the top tabulated per planet beside
-     the transmittance table, under a medium with an absorber and for the stars' slots, read once a
-     source a step in the ray march (§10, Ruling 1);
-  6. if a far-limb camera still misses, T8.c's fewer nodes at small spans, through T8.c's
-     acceptance 2–5;
-  7. if a row still misses, the same table along each slot's view path from outside the air, the
-     top's step under 0.2%;
-  8. otherwise the lane reports to "main" before a tile cull or half resolution.
+  4. what moves no pixel (`decision-r08-t8-leans.md` §10): `curveDepth`'s pressure row by
+     bisection, the scan's own row; and the view paths' slot-independent curve work once a step
+     for every slot. The march without the footprint for a frame in which no texel can blend is
+     withdrawn (§11): every far-limb camera blends texels near the top and at the datum's edge;
+  5. T8.c's fewer nodes at small spans (§11): one round of schedules in the twin, through T8.c's
+     acceptance 2–5 at no wider tolerance, with each texel a schedule thins at 400 km and 10⁷ m
+     within 5% of its converged footprint or of 10⁻³ of the frame's brightest;
+  6. what moves no pixel, again (`decision-r08-t8-leans.md` §11, §12): the footprint held less
+     across the march, with one call site, where QW2 puts its code's shape at 0.3 ms or more; and
+     no centre ray where the footprint's blend is 1, since the mean reads none of it;
+  7. each light slot's optical depth to the top, tabulated per planet beside the transmittance
+     table, under a medium with an absorber and for the stars' slots, read once a source a step in
+     the ray march (§10, Ruling 1), and the same table along each slot's view path from outside the
+     air, the top's step under 0.2%: built together, since QW2's proxy shows the first alone
+     missing (§12);
+  8. if an edged medium's row still misses, the bare ground's steps on a ray that crosses march
+     edges, toward the floor of a medium without them, through R05.T12.e's gate at 1 and 6 sources
+     on all three media at no wider tolerance (§12);
+  9. if a row still misses and the twin's census of the footprint's node work shows a warp's
+     slowest lane doing at least 1.5 times its mean, the node rays shared out exactly, the same
+     rays summed in the same order (§12); otherwise the lane reports to "main", which weighs only
+     half resolution above the band.
 
   It is accepted when, in the smoke's timing frames on the RTX 3080, hidden, with `nvidia-smi`
   clocks at 100 ms, the atmosphere's sum is at most 10.0 ms p95 at 400 km and at every far-limb
@@ -4395,8 +4407,9 @@ added on 2026-10-22 by `decision-r08-t8-leans.md` §9):
   no idle gap between rounds and with per-frame times kept (§10) (R05 Design note 21's 0.8 T, less
   terrain from orbit and the frame's other passes). One source and `MAX_SKY_SOURCES` are recorded
   beside it, and low with the UHD 620 estimate. `pnpm test` and `just test-render` pass. It
-  follows T8.d and precedes R08.T10.b. _Levers 1 and 2 and lever 3's bare ground built 2026-10-23;
-  open for item 3's thin sky and items 4–8_ (Risks, "Deviations in T8.e, as built").
+  follows T8.d and precedes R08.T10.b. _Items 1–5 built and landed 2026-10-23 (levers 1–3, E2 and
+  E3, lever 4); QW2 timed them, and the hold misses at x2 on 8 rows, the measured and slab Earths
+  from 400 km to 2.55 × 10⁷ m; open for items 6–9_ (Risks, "Deviations in T8.e, as built", _QW2_).
 
 Widen R05's ray march to N terms and several sources: each body's list of Design note 7 (its stars
 and its planetshine sources), with no source skipped outside the air (since R08.T8.e both of
@@ -8528,7 +8541,15 @@ it rides a bump.
   - _The node schedule._ 8 shell nodes at every span (§6.1's ceiling). On the ruling's frames
     against a 1,024-row reference, 2 nodes under one local scale height put the Saturn-class
     figure's 1 H pixel from 10⁸ m at 10.9% (from 5.0%) and R05's Earth from 10⁸ m at 4.09% (from
-    3.22%); 2 under 1 and 4 under 4 the same; so no fewer.
+    3.22%); 2 under 1 and 4 under 4 the same; so no fewer. Since R08.T8.e
+    (`decision-r08-t8-leans.md` §11): the shell piece takes 8 nodes, but where its local scale height
+    is held to the room left to the top (top − h\* ≤ 1.01 H at the centre's tangent point) it takes
+    2 up to 2 H tall and 4 up to 4 H (`FAR_LIMB_SCHEDULE`, `FAR_LIMB_ROOM_SHARE`,
+    `FAR_LIMB_TWO_NODE_SCALE_HEIGHTS`, `FAR_LIMB_FOUR_NODE_SCALE_HEIGHTS`, a 4-node Gauss–Legendre
+    rule beside the 2 and the 8; `farLimb.wgsl`'s `farLimbFootprintOf`); the ground piece keeps 2,
+    and a NaN takes 8.
+    Acceptance 2–5 hold at no wider tolerance, `SATURN_ONSET_MISS` at 0.0502, no record moving at its
+    precision ("Deviations in T8.e, as built", _Lever 4_).
   - _What lies behind the limb_ (§6.1). The composite's per-channel transmittance from above the
     top, behind a sky pixel and through each disc, takes the same footprint mean at the output
     pixel's own footprint (`transmittanceAcrossFromAbove`): on high the march's texel's, on low the
@@ -8748,6 +8769,20 @@ it rides a bump.
   - _A footprint array live across the node marches._ `FarLimbFootprint` holds 10 `vec3f`, indexed
     by a loop variable and live across `marchRay`, outside the per-step path but the pattern §8
     suspects, and register pressure on every texel above the top: for T8.d's baseline.
+  - _The blend near the top_ (2026-10-23, `decision-r08-t8-leans.md` §11).
+    - The blend's H is the column's e-folding (`localScaleHeightM`). Near the medium's hard top
+      that falls to the room left above, floored at 1 km (`FIT_SCALE_FLOOR_M`, the slicing fit's
+      `f32` floor). Neither is the air's own scale height (about 8 km on R05's Earth's Rayleigh and
+      6.3 km on `EARTH_REFERENCE`'s column at its top).
+    - So texels within about 2 km of the top blend at any distance. From 400 km on high they are
+      89% of R05's Earth's blended texels and 77% of the measured Earth's, and roughly half of the
+      footprint's node work there. By day they carry about 10⁻⁵ of the limb's light.
+    - The mean is correct for the medium drawn (§7), and at the deep-twilight limb it keeps the
+      top's edge from aliasing. Not a blocker, and not changed.
+    - Candidates, for the task that takes the hard top (Risks, "The medium ends at a hard top") or
+      R12.T10: the blend's H from the medium's own extinction scale height, which the cut does not
+      shorten, or a taper at the top. Either moves pixels and goes through acceptance 2–5 and §7's
+      last-light window.
 
 - **Deviations in T8.d, as built** (2026-10-22). `shaders/source.wgsl`, `scattering.wgsl`,
   `rayMarch.wgsl`, `skyView.wgsl`, `aerialPerspective.wgsl`, `farLimb.wgsl`, `composite.wgsl` and
@@ -8940,7 +8975,7 @@ it rides a bump.
     function-scope arrays the static check does not count (fixed bounds; held by pointer). Neither
     showed in W1–W3's variants; for T8.e if a profile points there.
 
-- **Deviations in T8.e, as built** (2026-10-22–23; levers 1–3, the task open). `sources.ts`,
+- **Deviations in T8.e, as built** (2026-10-22–23; items 1–5, the task open). `sources.ts`,
   `settings.ts`, `hillaire.ts`, `marchSteps.ts`, `tablesCpu.ts`, `shaders/view.wgsl`,
   `composite.wgsl` and `rayMarch.wgsl`, `test/atmosphereGate.ts`, `test/marchGate.ts` and
   `smoke/atmosphere.ts`; tests in `sources.test.ts`, `settings.test.ts`, `hillaire.test.ts`,
@@ -8951,7 +8986,11 @@ it rides a bump.
   the view block gains `marchGround`, its thirteenth member, which the composite carries and does
   not read. Two commits,
   levers 1 and 2 and then lever 3's bare ground, landed as a linear series
-  (`decision-r08-t8-leans.md` §10, Ruling 4, item 1); the rest of §10's order follows.
+  (`decision-r08-t8-leans.md` §10, Ruling 4, item 1). A second interim landing (§12, Ruling 3)
+  brought three more: E2 and E3 (`common.wgsl`, `source.wgsl`), the thin sky at 28 (the view
+  block's `marchSky`, its fourteenth member) and lever 4 (`farLimb.wgsl`), with their tests in
+  `hillaire.test.ts`, `marchSteps.test.ts`, `farLimb.test.ts` and the gate's. The task stays open
+  for §12's order.
   - _Lever 1, the skips outside the air._ `horizonDipRad` is acos(R ÷ r_c): 19.8° from 400 km
     over Earth, where the twilight limit is 40.1°, and 50.5° and 70.7° from 10⁷ m from the centre
     over the equator (an upper bound on the spheroid, so that both rules lean toward keeping a
@@ -8982,15 +9021,16 @@ it rides a bump.
     `view.marchGround`, `rayMarchSamplesOf`). A ray that ends on the bare ground with nothing
     drawn takes 20 steps on high, 4 more for each of the medium's march edges (28 on the slab
     Earth), while its green optical depth from the ground back along the ray, absorbers included,
-    is at most 2, climbing back to 36 in even steps by 8; the sky and drawn surfaces keep 36, and
-    low its 16 (`marchDepthSteps` null). The kernel reads the depth through the sliced lookup at
-    light slot 0, the twins through theirs, and R05.T12.e's gate takes the rule on its ray-march
-    families. The gate's inside and near-level ground rays are drawn surfaces, so inside the air
-    the rule's bare ground is held by the sky families that meet the ground from the band's
-    cameras. The smoke's GPU-against-twin checks hold under it (`just test-render`, 2026-10-23),
-    the kernel's count read in `f32` and the twin's in `f64`. The face carries most of the step work from orbit, and its error does not follow
-    its optical depth: the worst disc rays are low suns at depths 0.45–1.27, the grazing ground
-    among the easiest; layer edges set the slab's floor.
+    is at most 2, climbing back to 36 in even steps by 8; the sky (but a thin sky since, below) and
+    drawn surfaces keep 36, and low its 16 (`marchDepthSteps` null). The kernel reads the depth
+    through the sliced lookup at light slot 0, the twins through theirs, and R05.T12.e's gate takes
+    the rule on its ray-march families. The gate's inside and near-level ground rays are drawn
+    surfaces, so inside the air the rule's bare ground is held by the sky families that meet the
+    ground from the band's cameras. The smoke's GPU-against-twin checks hold under it
+    (`just test-render`, 2026-10-23), the kernel's count read in `f32` and the twin's in `f64`.
+    The face carries most of the step work from orbit, and its error does not follow its optical
+    depth: the worst disc rays are low suns at depths 0.45–1.27, the grazing ground among the
+    easiest; layer edges set the slab's floor.
     - The gate, worst e (%), 36 → the rule, R05's Earth | measured | slab: at one source the disc
       .45→1.43 | .41→1.35 | 1.12→1.59 (ordinary) and .18→.70 | .14→.62 | .99→1.09 (twilight), the
       past .18→.54 | .18→.43 | .39→.63 and 1.57→1.79 | .36→.55 | 1.17→1.36; at six the disc
@@ -9016,8 +9056,90 @@ it rides a bump.
     the far limb's flicker (Saturn-class at 10⁹ m, sun 100°/0°, columns at 5.33% and 5.42% against
     5%; its fidelity's worst 1.30% → 14.59%) and the band's seam at the horizontal from 40 km
     (3.50 codes on R05's Earth and 3.02 on the drawn Earth against 2), with the last-light window
-    from 50–99.999 km at 3.7–9.6 codes from 1.2–1.7. Left out; §10 has the floor searched from 16
-    up.
+    from 50–99.999 km at 3.7–9.6 codes from 1.2–1.7. Left out of the first landing.
+    - _Its floor, searched_ (§10, Ruling 4, item 2; each floor on all three media at 1 and 6
+      sources through the gate, the far limb's flicker and fidelity, the band's seam, the top's
+      step and the last-light window, held at §5.4's 1.7 codes on high). At 16, 20 and 24 steps
+      the window failed (3.76, 2.70 and 2.27 codes, R05's Earth from 50, 80 and 99.999 km), all
+      else holding (the flicker 2.71%, 2.51%, 2.31%; the seam from 40 km 1.34, 0.70, 0.36 codes);
+      at 28 every check held (the window's worst 1.68 codes, from 95 km as at 36, the rows it moves
+      at most 1.26, from 80 km, from 1.21; the seam 0.29 and 0.22 codes; the flicker's worst 2.39% on
+      the measured Earth from 10⁸ m, from 1.99%, and 2.31% on the Saturn-class figure from 10⁹ m,
+      from 2.48%; the Saturn-class fidelity's worst 1.30%), and at 32 too. So a sky segment under
+      0.05 takes 28 (`MarchDepthSteps.thinSky`, a `ThinSkyRule`; the kernel reads the depth from
+      the segment's lowest point along each side, `view.marchSky`). The gate's sky family at six
+      sources moves from 0.07% to 0.12% on all three media, its worst at one source unchanged,
+      every other family as under the ground's rule. Inside the air the camera side's depth runs
+      from the lowest point back through the camera to the top, so it errs high there, and it is
+      the same 1 m under the top as 1 m over it (`tablesCpu.ts`'s `skyDepthG`).
+      Mean steps a marched pixel ÷ 36 from 400 km: .603 on R05's Earth, .604 on the measured Earth
+      and .792 on the slab, from .622, .622 and .812 (with the footprint's nodes .612, .615 and
+      .795); from 10⁷ m out the nodes over the thin upper limb take most of its 4–7%.
+  - _The march without the footprint, withdrawn_ (`decision-r08-t8-leans.md` §11). §10's E1
+    needs a frame in which no texel can blend, and none of T8.c's cameras has one.
+    - In the twin, over every texel on high: the largest s, and the texels over 0.6 for R05's
+      Earth | the measured Earth (the slab Earth matches the measured Earth). 400 km: 1.24, 5,666 |
+      6,846 of 160,422 that meet the shell. 10⁷ m: 5.64, 39,178 | 50,720. 1.54 × 10⁷ m: 11.2,
+      27,380 | 27,958. 2.55 × 10⁷ m: 20.6, 13,184. 10⁸ m: 84.9, 1,982.
+    - On low the largest s runs from 3.72 at 400 km to 255 at 10⁸ m.
+    - From 400 km on high, 5,038 | 5,262 lie at tangent heights of 90–110 km, where H is held to
+      the room left to the top and floors at 1 km; 628 | 1,584 lie at the datum's edge.
+    - The frame-wide bound (the span's bound times s over the least H, 1 km) is 8.35 at 400 km,
+      and even the largest actual span over 1 km is 2.53. So no bound on the CPU can apply E1.
+    - With it, the two-node figure in _QW1_ is the nodes' work.
+    - Below the top, the kernel forms no footprint, so a pipeline without it would be exact there.
+      That is a candidate for R08.T11's band frame, with QW2's split of the footprint's shape as its
+      figure: 0.56–0.86 ms from orbit on R05's and the measured Earth, and on the slab Earth −0.70
+      to +0.50 ms (_QW2_).
+    - The spans are in `.git/rm45-scratch/r08-t8e/lever3/b/`.
+  - _E2 and E3, which move no pixel_ (§10, Ruling 2). A curve's pressure row is found by bisection
+    with the scan's own predicate, the rows' ln p ascending as `tables.ts` requires: the same row,
+    in about log₂ of the rows' loads (Earth's line slots have 19). And a read comes in two parts,
+    what is the same for every light (`common.wgsl`'s `curveNodeOf`, the column's place on the
+    grid, and `curveRowsOf`, the pressure rows and their weights) and each light's own texels
+    (`curveDepthFrom`); the view's paths cross the same columns, so `viewMarchStep` forms the first
+    part once a step and each slot loads only its curve's texels, `ViewMarch` holding slot 0's
+    columns and the other slots' depths alone. On SwiftShader the per-frame outputs (the output,
+    the march target, the sky view and the aerial volume) are byte-identical to 93396d5f's curve
+    read at one source, a binary's two slots and six, on both settings and three media, at T8.c's
+    cameras and from 2 km and 40 km (42 of 42), and on the RTX 3080 at full size too (QW2, 42 of
+    42). Their payoff is in _QW2_: a binary's two slots gain, one source loses a little.
+    `viewAbsorberStep` is gone (`viewMarchStep` forms the step), and with it `curveDepth`'s
+    four-row `ys` array, one of T8.d's "Arrays left in locals". _SwiftShader and code size_: the
+    first forms, a struct for the read (by value or held by pointer), a matrix with the rows' reads
+    unrolled, and E3 calling each slot's read once a slot, crashed SwiftShader's GPU
+    process at the first frame (exit 139), as T8.d's two march call sites did, while the bisection
+    alone in the old shape passed; the form built keeps each read's rows in one call in a loop, as
+    the scan's had, and E3 calls a slot's read from one place in a loop over the slots.
+  - _Lever 4, one round of schedules_ (§11, Ruling 3; in the twin, each thinned texel on every
+    eighth column of the 400 km to 10⁸ m frames over seven suns, three media and both settings,
+    against its footprint converged at 8 sub-pieces of 8 nodes). Four nodes where T8.c's two failed,
+    keyed on the piece's extent: 13.44% at the datum's edge (R05's Earth, high, 10⁷ m, 0.96 H) and
+    12.73% in the slab Earth's ozone slab. Two nodes wherever H is held to the room, at any extent:
+    10.75% (R05's Earth, low, 10⁷ m, 7.23 H). Two to 2 H and four beyond there: the flicker from
+    10⁹ m at 13.5%, over its 5%. Four up to 8 H: passes, its worst rising with distance to 4.20%
+    (2.55 × 10⁷ m), not taken. Four up to 4 H (C4): passes, every thinned texel within 2.97%
+    (1.2 × 10⁷ m) and within 1.55% at T8.c's five cameras; taken. Mean nodes a blended texel, from
+    today's: on high 8.22 → 4.61 (R05's Earth) and 8.46 → 5.56 (the measured and slab Earths) at
+    400 km, 8.13 → 7.88 and 8.10 → 7.91 at 10⁷ m, 8.86 → 8.79 at 10⁸ m; on low 8.25 → 7.69 and
+    8.08 → 7.90 at 400 km. §11's acceptance 2 (the thinned texels) is a scratch measurement, not a
+    committed test, since a 10⁷ m frame takes 10–15 minutes against the 90 s guide
+    (`.git/rm45-scratch/r08-t8e/lever4/`); nothing under `pnpm test` guards it. C4's worst thinned
+    texel and the texels thinned, high, R05's Earth | measured | slab: 400 km 0.73% (2,975) | 0.03%
+    (2,877) | 0.03% (2,877); 10⁷ m 1.55% (1,806) | 0.31% (1,778) | 0.28% (1,778); 1.2 × 10⁷ m
+    2.97% (1,848) | 0.64% (1,834) | 0.52% (1,834); 1.54 × 10⁷ m 1.04% (882) | 0.21% | 0.18% (882);
+    2.55 × 10⁷ m 0.42% (350) | 0.10% | 0.10% (350); 10⁸ m 0.00% (14) on all three. Low: R05's
+    Earth 1.07% (511) at 400 km, 0.30% (217) at 10⁷ m, 0.04% (112) at 1.54 × 10⁷ m; the measured
+    and slab Earths at most 0.08%. `FarLimbSchedule` takes a `FarLimbShellPiece` (the extent in
+    local scale heights, h\* at the centre's tangent point, H there and the top) and returns a
+    `FarLimbNodeCount` (2, 4 or 8), since the near-top key needs the room; `farLimbFootprintTwin`'s
+    `schedule` takes the same. The extent is the piece's geometric tangent-height extent over the
+    table's H, which is in h\*, as the twin's `shellScaleHeights` has had it since T8.c: so "2 H"
+    is 2s scale heights in h\*, s ≈ 1 on the three Earths. On the RTX 3080 it saves only
+    0.13–0.17 ms at x2 from 400 km and nothing measurable farther (_QW2_). The nodes' work does not
+    follow their mean count; one reading, not measured, is that a warp on the limb's ring waits on
+    its slowest lane; the other, that a node ray, a limb ray, costs several mean centre rays. The
+    twin's census tells them apart (`decision-r08-t8-leans.md` §12).
   - _QW1_ (RTX 3080, hidden, 2026-10-22 21:21, load 0.27; P0 at a median 1,950 of 2,115 MHz, no
     busy sample under 90%). The atmosphere's sum on high at 1920 × 1080 from 400 km, median, ms,
     before lever 3: one source 7.27 (R05's Earth), 11.25 (`EARTH_REFERENCE`), 11.27 (slab); a
@@ -9028,7 +9150,8 @@ it rides a bump.
     2.84 → 1.40 on R05's Earth. The march is linear in its steps, 0.49 ms a step at x2 on
     `EARTH_REFERENCE` (0.27 on R05's Earth) and about 1.4 ms at none: 16 steps everywhere gives
     9.25 ms there, the face alone at 20 gives 13.51 and at 28 16.36, and the two-node footprint
-    16.61 (no texel blends at 400 km: its code's shape) and 14.60 from 19.95 at 10⁷ m. A second
+    16.61 (its nodes' work: 5,666–6,846 texels blend there on high, near the top and at the
+    datum's edge; `decision-r08-t8-leans.md` §11) and 14.60 from 19.95 at 10⁷ m. A second
     star on its own slot costs 2.40 ms over a slot-0 source on `EARTH_REFERENCE` (its view path).
     - _The p95s are the harness's._ A frame drawn after one of the harness's waits for the GPU
       ran about 10.7 times its median (the GPU's idle clock), and the waits' period aliased with
@@ -9036,19 +9159,103 @@ it rides a bump.
       and the other rows' p95s lie within 1–2% of them. T8.d's low p95 tail (W5) was likely the
       same: QW1's low frames lie within about 10% of their medians. QW2 runs without such a gap
       (§10), with per-frame times.
+  - _QW2_ (RTX 3080, hidden, 2026-10-23 04:26, load 2.88, with another lane's build until 04:27
+    and one single-threaded test; P0 throughout, a median 1,965 of 2,115 MHz busy, 5 of 1,815 busy
+    samples under 90%, 49–67 °C). Items 1–5, with each combination's frames back to back after its
+    own 10: two sweeps of 30, the second in reverse order, every frame's time kept, none dropped.
+    The atmosphere's sum on high at 1920 × 1080 at a binary's two light slots (x2), the hold's row,
+    p95 (median) in ms, with QW1's median before items 3–5:
+
+    | Camera       | R05's Earth             | `EARTH_REFERENCE`         | The slab Earth            |
+    | ------------ | ----------------------- | ------------------------- | ------------------------- |
+    | 400 km       | 7.49 (7.42), from 10.77 | 12.96 (12.61), from 19.06 | 14.50 (14.35), from 18.48 |
+    | 10⁷ m        | 9.09 (8.99), from 11.66 | 15.02 (14.90), from 19.95 | 15.97 (15.82), from 19.34 |
+    | 1.54 × 10⁷ m | 8.31 (8.18), from 10.06 | 16.79 (13.68), from 17.42 | 16.92 (14.68), from 17.13 |
+    | 2.55 × 10⁷ m | 6.27 (6.14), from 7.42  | 15.02 (10.15), from 12.64 | 11.12 (10.83), from 12.46 |
+    | 10⁸ m        | 3.12 (3.04), from 3.11  | 4.94 (4.78), from 4.94    | 4.90 (4.80), from 4.99    |
+
+    So the hold misses on 8 rows: the measured and slab Earths from 400 km to 2.55 × 10⁷ m. It
+    holds on R05's Earth and at 10⁸ m.
+    - _Beside it_, p95 from 400 km, R05's Earth | measured | slab: one source 5.61 | 8.20 | 9.51,
+      a star and planetshine on one slot (x2p) 7.51 | 11.91 | 14.14, four sources 7.66 | 12.79 |
+      14.57, six 7.77 | 16.32 | 14.70 (QW1's medians before the cap: 24.84, 41.79, 40.18). x2p
+      misses on the same 8 rows as x2, at 10.4–18.6 ms.
+    - _The splits_, x2 medians in ms, measured | slab Earth, from scratch variants of the kernel
+      that do not land:
+      - E2 and E3 (against 93396d5f's read): −0.47 | −0.92 at 400 km and −0.08 to −0.90 farther.
+        R05's Earth +0.04 to +0.17. At one source +0.06 to +0.34 on the measured Earth, about nil
+        on the slab.
+      - The thin sky at 28 (against 36): −0.46 | −0.43 at 400 km, −0.44 | −0.42 at 10⁷ m, under
+        0.07 from 2.55 × 10⁷ m.
+      - Lever 4 (against 8 nodes): −0.17 | −0.13 at 400 km, nothing measurable farther.
+      - The footprint's shape, Kn − K0: K0 has the footprint's code compiled out; Kn is the
+        footprint kernel with the blend's lower edge past every s, as a run-time value. On R05's
+        and the measured Earth at every camera: +0.56 to +0.86. On the slab from 400 km out: −0.70,
+        −0.35, −0.17, +0.05 and +0.50.
+      - The nodes' work, today − Kn: 3.0 | 2.9 at 400 km, 7.3 | 6.6 at 10⁷ m, 7.8 | 7.6 at
+        1.54 × 10⁷ m, 5.8 | 5.7 at 2.55 × 10⁷ m and 3.2 | 3.2 at 10⁸ m. It is the largest item from
+        10⁷ m out.
+      - Lever 5's sun path, as a proxy: each source's light one sliced read, with no absorber's
+        curve. −2.10 | −1.79 at 400 km, −2.58 | −1.98 at 10⁷ m and −0.80 | −0.69 at 10⁸ m. R05's
+        Earth +0.10 to +0.58; it keeps today's read (§10).
+      - With no view-path absorber read as well, a floor under items 6 and 7 together: 8.35 |
+        10.72 at 400 km, 9.73 | 11.74 at 10⁷ m, 8.97 | 10.84 at 1.54 × 10⁷ m and 6.64 | 7.99 at
+        2.55 × 10⁷ m, with p95s within 0.3 ms of these.
+      - So the slab Earth at 400 km, 10⁷ m and 1.54 × 10⁷ m misses after items 6 and 7, whatever
+        they cost, and E1′ cannot reach it, since its Kn − K0 is under zero there. Its centre rays
+        cost more: Kn takes 11.49 ms at 400 km against 9.57 on the measured Earth, and 1.64, 1.20
+        and 0.80 ms more at 10⁷, 1.54 × 10⁷ and 2.55 × 10⁷ m, while the nodes' work is about the
+        same on both. Before lever 3 the two cost the same (T8.d's W2; QW1's x2 had the slab 0.6 ms
+        faster), so this is lever 3's ground floor of 20 steps and 4 a march edge, 28 on the slab.
+        K0 is not the measure there: on the slab it compiles slower than Kn.
+    - _The frame._ The rest of the frame at these cameras is not measured on the RTX 3080. By the
+      disc's share of the timed frame (44, 38, 29, 20 and 2% from 400 km out), terrain is about
+      1.5, 1.3, 1.0, 0.7 and 0.1 ms, and the other built passes at most 1.7. So the atmosphere's
+      share of the 0.8 T row is about 10.1–11.6 ms. At x2 today the frame comes to about 17.9 ms
+      at 10⁷ m on the measured Earth, and 17.4–18.8 ms on the slab from 400 km to 1.54 × 10⁷ m,
+      past the 60 Hz frame (estimates; `decision-r08-t8-leans.md` §12).
+    - _The sweeps agree._ Every row that misses misses on its median in both sweeps, and every row
+      met is met in both.
+      - R05's Earth at 400 km and one source opens the run, and read 7–8% slower in the first
+        sweep.
+      - K0 and Kn on R05's Earth read 2–3% faster in the first sweep, at 1,980 MHz against 1,950.
+      - The tails are real: 2–7 frames of 60 at 1.3–1.9 times the median on the absorbing media,
+        in both sweeps and at no fixed place, the clocks in P0. They set the p95 at 1.54 × 10⁷ m
+        and 2.55 × 10⁷ m on the measured Earth. They come with the footprint's node work: at frame
+        medians of 4–16 ms, 2 of 1,860 frames of K0 and Kn run over 1.2 times their median, against
+        282 of 11,460 of the kernels that march nodes, and a tail's excess grows with the frame, to
+        about 5.5 ms on 14–16 ms frames (`decision-r08-t8-leans.md` §12).
+    - _Low_ at 1280 × 720, one source | x2, R05's Earth, measured, slab: from 400 km 0.90 | 1.29,
+      1.56 | 2.40, 1.55 | 2.34 (QW1's x2 2.54 and 2.50 on the measured and slab Earths); from 10⁷ m
+      0.98 | 1.39, 1.50 | 2.24, 1.52 | 2.22. E2 and E3 move low by under 0.11 ms.
+    - The logs: `.git/rm45-scratch/r08-t8e/rtx-q2.log` with its clocks, `qw2-tables.txt` and
+      `qw2-sweeps.txt`; the compare is in `rtx-q2-e23.log`.
+
   - _A binary's second star stays on its own path_ (§10, Ruling 3): the fold into slot 0's path is
     refused, since on the primary's night side and its night limb the companion lights the air
     alone and the curves differ there by 2.2–15.5% in red.
   - _The UHD 620_ (§10, Ruling 5; §9's 25–68 times). Low's QW1 medians at 400 km: R05's Earth
     0.91 ms at one source (23–62 ms on the laptop) and 1.30 at two (32–88 ms); `EARTH_REFERENCE`
-    1.57 (39–107 ms), 2.54 at a binary's two slots (64–173 ms) and 2.25 at x2p (56–153 ms). Low
-    misses its laptop rows at every count until R08.T11's knobs move.
+    1.57 (39–107 ms), 2.54 at a binary's two slots (64–173 ms) and 2.25 at x2p (56–153 ms). QW2's,
+    after items 1–5: 0.90 (23–61 ms) and 1.29 (32–88 ms) on R05's Earth, and 1.56 (39–106 ms), 2.40
+    (60–163 ms) and 2.24 (56–152 ms) on `EARTH_REFERENCE`. Low misses its laptop rows at every count
+    until R08.T11's knobs move.
 - **Deferred findings (2026-10-13 rule)** (R08.T8.e).
   - _The kept Sun's light from 10⁷ m._ With the Sun 1° beyond the twilight limit kept after a full
     Moon, the Moon's march moves by 2.86 × 10⁻⁵ of its largest from 10⁷ m against R08.T7's 10⁻⁶
     (1.83 × 10⁻⁸ from 400 km), all of it Hillaire's isotropic multiple-scattering term at the
     samples' own sun elevations, as inside the air (2.42 × 10⁻⁵, R08.T7): pinned under 3 × 10⁻⁵.
     The skip stands; for R08.T13.
+  - _E2 and E3 at one source_ (2026-10-23, `decision-r08-t8-leans.md` §12). Byte-identical, and
+    faster at a binary's two slots on the absorbing media (by 0.08–0.92 ms), but slower at one
+    source by 0.06–0.34 ms on the measured Earth, and by 0.02–0.17 ms on R05's Earth at one and two
+    sources (QW2, high); about nil on the slab, and under 0.11 ms on low. The rows it slows meet
+    the hold. For R08.T11.
+  - _Lever 4's payoff_ (§12). 0.13–0.17 ms at x2 from 400 km and nothing measurable farther, though
+    it cuts the mean nodes a blended texel by a third at 400 km. Its schedule stays; no further
+    round. For R08.T11.
+  - _The tile cull_ (§12). QW2's split puts its whole reach at Kn − K0: 0.56–0.86 ms on R05's and
+    the measured Earth, and nothing on the slab. Not built in T8.e; for R12.T10.
 
 - **Deviations in T6.e, as built** (2026-10-13). `tablesCpu.ts`, `oblate.ts` and `hillaire.ts`;
   tests in a new `tablesCpuOblate.test.ts` (inside the acceptance's `view/atmosphere/tablesCpu`
