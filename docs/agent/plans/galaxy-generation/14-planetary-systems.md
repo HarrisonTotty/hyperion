@@ -7652,6 +7652,37 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
   - _Moves at 24 (estimated):_ those captures' fractions, class (`Icy` → `Rocky`), surface
     material, photometry template, inventory and tidal material; their T_eq stays near 253 K under
     the same lid.
+- **P14.T56.g A hot ice bulk's surface, and its ice's history** (23 → 24, a serve-gate must-fix
+  for its first item; lane `p14-gate-24`, after P14.T49.k; decision-bump-plan-after-22, "Rulings
+  before T53.a lands" R1.6 and "p14-gate-24's questions" G2, with main's rulings of 2026-10-22).
+  - **The surface of a hot ice bulk (a must-fix before the serve gate).** Where P14.T56.f's
+    retention arm thinned a bulk's ice (t_hot > 0 and w′ < w₀), the bulk keeps its class (its
+    interior keeps its ice under the heated shell), but its surface is the shell's rock lag: its
+    surface material is rock, with the matching non-ice photometry template, not `AirlessIce`.
+    At T56.f an `Ice` surface sits on 9 such bodies at T0 345–1,021 K, a wrong state on the
+    published surface: the golden systems' subgiant 0101, red_giant 0503 and 0504, and the 400's
+    21fff6597ff00000.0401, 42002cb200000000.0501, 42002cae00000005.0301 and .0401,
+    42002cb1ff800003.0501 and .0601 (T56.f's census prints the count). It also takes the hot ice
+    bulks that are not moons (R1.6): the golden systems' red_giant e202 and e204, belt members at
+    `T_eq` 515 and 541 K with 0.41 and 0.36 water.
+  - **The lag's loss below the melting point,** sized by the body (Schorghofer 2008; Prialnik and
+    Rosenberg 2009): the ice bulks at T0 200–273 K that the lag may empty over Gyr.
+  - **The crossing time** from the host's luminosity track, in place of t_hot's upper bound (the
+    time since the main sequence about an evolved host).
+  - **A stripped large body's lost mass or compacted radius** (the record holds the mass, its
+    density read as 7–39% porosity at 56–5,417 MPa), and the sphere's Stefan solution in place of
+    the shell form (at subgiant 0101 the sphere keeps f 0.150 against 0.212).
+  - **A past peak's ice loss** (R1.6): the 36 remnant moons at 3–10 K, sized by the body (Jura and
+    Xu 2010; Malamud and Perets 2016, 2017).
+  - _Files:_ the surface material's derivation sites, each reading `SurfaceMaterial::of` of the
+    bulk's fractions: `planetary/derive/mod.rs` (the air's material, about :1721, and the cold
+    traps' regolith, about :1818); `planetary/system.rs` (`photometry_of`, about :686,
+    `record_spin`, about :4482, and the surface section, about :5363);
+    `planetary/hooks/figures.rs` (`GlobalFigures`' material, about :2063); and the crust's lid;
+    with `planetary/system/moon_ice.rs`.
+  - _Tests:_ no body with an `Ice` surface above water's melting point at T0 over the sample; the
+    9 bodies' surfaces rock, their classes and bulks unchanged; P14.T56.f's other tests hold.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::system`.
 
 #### P14.T57 The greenhouse's calibration (decision-p14-moons, 2026-10-10)
 
@@ -25542,6 +25573,110 @@ the_rayleigh_floor_lifts`; the two measurements by name with `-- --ignored --exa
   - _Landing:_ after P14.T52.a's commit B and P14.T52.b, whose `Network` and `MixingColumn` it
     reads. Then the golden is re-blessed by its exact name, and the commits are picked as a linear
     series.
+- **Deviations in P14.T56.f, as built (`p14-gate-24`, 2026-10-22).** A moon's bulk by its
+  birthplace and its ice's history, behind its own hold at 24 (`MOON_BULK_VERSION`,
+  `MoonBulkRules`, with the tripwire `the_moon_bulk_is_held_only_until_the_24_bump`; the tests reach
+  the batch's bulks through `with_moon_bulk`), in the new `planetary/system/moon_ice.rs`. The entry's
+  scope grew by decision-bump-plan-after-22's R1.6 (the retention arm), its "p14-gate-24's
+  questions" G2 (the arm's form) and main's two corrections to G2's arithmetic after the science
+  check (2026-10-22). At 23 no value on the record moves.
+  - _The birthplace arm_ (§C3.2): `stated_moon_bulk`'s capture arm reads the same
+    `MoonBirth::formed` the crust reads, with the parent's `HostOrbiter` and its neighbouring belt,
+    built once per parent in `primary_now_under` (`ParentNow::moon_ice`, `ParentMoonIce`); formed
+    `Inside` is `MassFractions::solid(0, 1, 0)`, the 1,700 kg m⁻³ read as porosity.
+  - _The retention arm_ (R1.6, G2), on every arm with ice, after the birthplace arm
+    (`kept_ice`, `moon_ice::kept_water`):
+    - T_lim is ice's melting point, `UNDER_ICE_MELTING_POINT`'s 273.15 K (`HOT_ICE_LIMIT`), not
+      Schorghofer 2008's 145 K, the top few metres' limit: below it the bulk keeps its ice under
+      its lag (Prialnik and Rosenberg 2009), which is P14.T56.g's.
+    - T0 is the zero-albedo temperature at the parent's stellar flux and its glow at the moon's
+      primordial orbit (`MoonIce::t0`), always, and in both paths alike (below).
+    - t_hot (`HotHistory`, a stated upper bound): the age about a zone of main-sequence stars; about
+      an evolved one, the time since the earliest main-sequence end among its stars
+      (`Track::main_sequence_end`), or the age where T0 at the zone's luminosity then (the evolved
+      star's at its main sequence's end, the others' now) already exceeded T_lim.
+    - d = √(κ t_hot), κ `ROCK_THERMAL_DIFFUSIVITY_M2_PER_S`'s 10⁻⁶ m² s⁻¹ (its doc now cites
+      Whittington, Hofmeister and Nabelek 2009 and Turcotte and Schubert 3rd ed. §4.13, not
+      re-read); the unheated core keeps f = (1 − d ÷ R)³ of the ice, none where d ≥ R.
+    - **The kept water is the remaining mass's, w′ = w₀f ÷ (1 − w₀ + w₀f)** (main's correction):
+      G2's w₀f with "iron and rock fill 1 − w" double-counted the rock. The record holds the moon's
+      mass and radius, its density read as porosity; the lost mass is P14.T56.g's.
+    - **The front's side** (main's second correction): √(κt) runs ahead of Neumann's flat front
+      2λ√(κt) below St 0.59 (every target is at St 0.17–0.58), on the side of loss; in a sphere
+      the front speeds up near the centre, so the shell form is not one-sided there (at subgiant
+      0101 the sphere keeps f = 0.150 against the shell form's 0.212). The doc says so.
+  - _A regular moon's arm_ (G2 amendment 3): where the arm thins a regular moon, its own bulk is
+    the new `MoonBulk::Kept { water }`, its derivation's radius and solids' split with only the kept
+    water, which its inventory, air and tides read (`place_moon`, `own_tides`), and `moon_figure`
+    thins the record's derived fractions to the same water. G2 wrote `MoonBulk::Stated` with the
+    shape's radius and the kept fractions read from `moon_bulk_before_passes`; `Kept` gives the same
+    water without a second placement and keeps the solve's iron-to-rock ratio (the record's iron and
+    rock may differ from the derivation's in their last bits, recomputed through `with_water`
+    twice). The kept water is the same in both paths to the bit (asserted).
+    `regular_ice_fraction` is taken out of `place_moon` so that both read the placement's ice.
+  - _The birthplace's one source:_ `moon_craters` is unchanged; `PlanetarySystem::moon_ice` works
+    out the same side from the same `host_orbiter` and neighbouring belt (for a capture
+    `MoonBirth::formed` reads only its kind and the belt), and the census asserts that each
+    capture's bulk and crust agree.
+  - `MoonBulk::Kept`'s water is refused outside [0, 1] (`DeriveMoonError::KeptWater`), and a
+    `DerivedMoon` keeps the placement's ice, its formation's, by which its radius and birthplace
+    are read.
+  - _Files beyond the plan's list:_ `planetary/system/moon_ice.rs` (new); `planetary/moons/regular.rs`
+    (`MoonBulk::Kept`, `DeriveMoonError::KeptWater`, `regular_ice_fraction`);
+    `planetary/hooks/figures/interior.rs` (κ's doc); `planetary/system/tests.rs` (the census).
+  - _Tests_ (`a_moon_s_bulk_reads_its_birthplace_and_its_ice_s_history`, and its census over the
+    400 run by name):
+    - the golden systems' 97 moons: 21 move, each by one of the two arms (asserted: 2 by the
+      birthplace, both beside rocky belts, 19 hot), 18 made `Rocky` and 3 thinned but `Icy`, and no
+      other record of the fifteen systems moves (asserted, every record's whole `Debug`):
+      - close_binary 0602 (1.9 km) and filler_c 0201 (3.1 km), the two small captures beside rocky
+        belts, at T0 260 K: water 0.3749 → 0, `Icy` → `Rocky`;
+      - wide_binary 0101–0104 (14–119 km, T0 678 K, t_hot 2.316 Gyr, the age, d 270 km): `Rocky`;
+      - subgiant 0201–0204 (26–77 km, T0 635 K) and 0301–0304 (52–166 km, 466 K), t_hot 7.253
+        Gyr, d 478 km: `Rocky`;
+      - red_giant 0505–0508 (26–84 km, T0 664 K, t_hot 1.066 Gyr since its host's main sequence,
+        d 183 km): `Rocky`;
+      - subgiant 0101 (1,184 km, T0 889 K, 7.253 Gyr): 0.3749 → 0.1127, `Icy`, a knife edge: its
+        class turns `Rocky` above κ 1.13 × 10⁻⁶, and three of the six front variants (shell or
+        sphere, St 0.36 or 0.58, w′ or w₀f) make it `Rocky`;
+      - red_giant 0503 (411 km, 0.4545 → 0.1239) and 0504 (482 km, 0.3713 → 0.1231), regulars at
+        t_hot 1.066 Gyr, below the 1.28 and 1.34 Gyr at which they would turn `Rocky`;
+      - eccentric_giant 0101–0103 (asserted), subgiant e181 and 0403–0406 and wide_binary e581
+        do not move, nor does any other moon. The plan's "a giant's irregulars are unchanged to
+        the bit" reads "below the melting point" (R1.6 moves a giant's hot irregulars, wide_binary
+        0101–0104 among them); the golden systems hold no small capture beside an icy belt.
+    - Over the 400: 1,060 moons, 160 move, 154 made `Rocky` and 6 thinned but `Icy`, the six
+      large captures listed below; 36 by the birthplace arm, every one beside a rocky belt (none
+      with no neighbouring belt), and 124 hot. The birthplace arm also makes rock of small captures
+      beside rocky belts far out (61ffd9680000000c.0201 and .0202 at T0 4.4 K,
+      41ffecb600000006.0101 and .0102 at 9.7 K, 42002cb1ffc00004.0401 at 11 K), as the rule reads.
+      No other record moves (asserted).
+    - _Hot ice bulks left `Icy`_ (w′ ≥ 0.1, G2 item 10, with their class; main ruled the class may
+      stay `Icy`, but their `Ice` surface at 345–1,021 K is a wrong state, P14.T56.g's must-fix
+      before the serve gate, 2026-10-22): the
+      golden systems' subgiant 0101 (0.113), red_giant 0503 (0.124) and 0504 (0.123); the sample's
+      21fff6597ff00000.0401 (1,120 km, 389 K, 0.125), 42002cb200000000.0501 (1,202 km, 483 K,
+      0.230), 42002cae00000005.0301 (1,072 km, 1,021 K, 0.247), 42002cae00000005.0401 (2,552 km,
+      750 K, 0.321), 42002cb1ff800003.0501 (3,662 km, 345 K, 0.350) and 42002cb1ff800003.0601 (1,176
+      km, 581 K, 0.297).
+    - _Stripped bodies above 200 km_, porosity against their kept bulk's grain density and the
+      uniform sphere's central pressure, (2π ÷ 3) G ρ² R²: subgiant 0101 34% at 567 MPa (G2's 38%
+      read w₀f's grain), red_giant 0503 39% at 56 MPa and 0504 32% at 95 MPa; the sample's six,
+      3–32% at 464–5,417 MPa. Recorded, not a blocker: no view draws porosity.
+    - _Ice bulks at T0 200–273 K under 10 km_, which the lag may empty over Gyr, by their kept
+      water: none in the golden systems or the 400 (the two at 260 K are the rocky-belt captures,
+      rock by their birthplace).
+    - _`Ice` surfaces above the melting point_ (`T_eq` > 273.15 K), printed for P14.T56.g: 5 in
+      the golden systems (subgiant 0101, red_giant 0503 and 0504, and the belt members red_giant
+      e202 and e204, hot ice bulks that are not moons, at 515 and 541 K) and 5 in the 400.
+    - _Accept, as built:_ `cargo test -p hyperion-sim planetary::system` (the golden census and
+      `moon_ice`'s unit tests) and `planetary::moons`; the 400's census by name with
+      `-- --ignored --exact`.
+  - _For P14.T56.g_ (its entry, now a 24 member and a serve-gate must-fix for its first item): the
+    surface material from the heated shell on the 9 hot `Icy` bulks and the 2 hot icy members;
+    the lag's loss below the melting point; the crossing time from the host's track; a stripped
+    large body's lost mass or compacted radius; the sphere's Stefan solution.
+
 - **Deviations in P14.T24.i, as built (`p14-gate-24`, 2026-10-22).** An airless body's mean
   surface temperature, behind its own hold at 24 (`UNLIT_MEAN_VERSION`, `UnlitMeanRules`, with the
   tripwire `the_unlit_mean_is_held_only_until_the_24_bump`; the tests reach it through

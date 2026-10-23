@@ -944,6 +944,17 @@ pub enum MoonBulk {
         /// Its mass fractions.
         fractions: MassFractions,
     },
+    /// As [`derive_moon`] derives it, with only `water` of its mass kept as ice: a regular moon
+    /// whose heated shell has lost its ice (P14.T56.f's retention arm), at its derivation's
+    /// radius, its solids split as [`Derived`](Self::Derived)'s are, which its inventory, air and
+    /// tides read. Its [`DerivedMoon`] keeps the placement's ice, the formation's, by which its
+    /// radius and its birthplace are read ([`DerivedMoon::ice_fraction`]); the record's bulk reads
+    /// the kept water.
+    Kept {
+        /// Its kept water's share of its mass, in [0, 1] ([`DeriveMoonError::KeptWater`]
+        /// otherwise).
+        water: f64,
+    },
 }
 
 /// What [`derive_moon`] reads of the moon itself (P14.T56.d gathers them): its mass, its orbit
@@ -1702,6 +1713,24 @@ struct MoonPlaced {
     shape: MoonShape,
 }
 
+/// A regular moon's ice fraction by its radius rank `radius_rank` at the semi-major axis `a` in
+/// `nursery` (P14.T17.b): [`ICY_MOON_ICE_FRACTION`]'s range beyond the nursery's ice line, none
+/// inside it or with no line.
+#[must_use]
+pub(crate) fn regular_ice_fraction(
+    nursery: &MoonNursery,
+    a: Metres,
+    radius_rank: UnitUniform,
+) -> f64 {
+    let icy = nursery.ice_line().is_some_and(|line| a >= line);
+    if icy {
+        let (lo, hi) = ICY_MOON_ICE_FRACTION;
+        lo + radius_rank.value() * (hi - lo)
+    } else {
+        0.0
+    }
+}
+
 /// The moon `moon` placed in `nursery` (P14.T17.b, P14.T56.c and its follow-up): its ice fraction
 /// by its radius rank beyond the nursery's ice line, its radius and density, and the placed body
 /// its derivation reads, with its volatiles and its own bulk.
@@ -1709,7 +1738,8 @@ struct MoonPlaced {
 /// # Errors
 ///
 /// [`DeriveMoonError::StatedRadius`] for a stated bulk whose radius is not positive and finite,
-/// and [`DeriveMoonError::Placed`] for a placement refused.
+/// [`DeriveMoonError::KeptWater`] for a kept water that is not a share in [0, 1], and
+/// [`DeriveMoonError::Placed`] for a placement refused.
 fn place_moon(moon: &MoonInputs, nursery: &MoonNursery) -> Result<MoonPlaced, DeriveMoonError> {
     let MoonInputs {
         mass,
@@ -1723,14 +1753,13 @@ fn place_moon(moon: &MoonInputs, nursery: &MoonNursery) -> Result<MoonPlaced, De
     {
         return Err(DeriveMoonError::StatedRadius);
     }
+    if let MoonBulk::Kept { water } = bulk
+        && !(0.0..=1.0).contains(&water)
+    {
+        return Err(DeriveMoonError::KeptWater);
+    }
     let a = orbit.semi_major_axis();
-    let icy = nursery.ice_line().is_some_and(|line| a >= line);
-    let ice_fraction = if icy {
-        let (lo, hi) = ICY_MOON_ICE_FRACTION;
-        lo + radius_rank.value() * (hi - lo)
-    } else {
-        0.0
-    };
+    let ice_fraction = regular_ice_fraction(nursery, a, radius_rank);
     let radius = moon_radius(mass, ice_fraction);
     let formation = match nursery.ice_line() {
         Some(_) => a,
@@ -1751,6 +1780,9 @@ fn place_moon(moon: &MoonInputs, nursery: &MoonNursery) -> Result<MoonPlaced, De
             radius: stated,
             fractions,
         } => placed.with_bulk(GivenBulk::new(stated, GivenFractions::Exactly(fractions))),
+        MoonBulk::Kept { water } => {
+            placed.with_bulk(GivenBulk::new(radius, GivenFractions::Water(water)))
+        }
     };
     Ok(MoonPlaced {
         placed,
@@ -1994,6 +2026,7 @@ fn own_tides(at: &TideOf<'_>, pass: &TideAt) -> TideState {
     let (radius, fractions) = match at.bulk {
         MoonBulk::Derived => (at.radius, at.fractions(pass)),
         MoonBulk::Stated { radius, fractions } => (radius, fractions),
+        MoonBulk::Kept { water } => (at.radius, pass.fractions.with_water(water)),
     };
     let class = PlanetClass::of(at.mass, &fractions);
     let kilograms = Kilograms::from(at.mass);
@@ -2082,6 +2115,8 @@ pub enum DeriveMoonError {
     Placed(BuildPlacedBodyError),
     /// The radius of the bulk stated for it ([`MoonBulk::Stated`]) was not positive and finite.
     StatedRadius,
+    /// The water kept of its bulk ([`MoonBulk::Kept`]) was not a share in [0, 1].
+    KeptWater,
     /// The moon's hosts could not be built.
     Hosts(BuildBodyHostsError),
     /// P14.T16's derivation refused the moon.
@@ -2097,6 +2132,7 @@ impl fmt::Display for DeriveMoonError {
             Self::Sky => "the planet's light could not be built",
             Self::Placed(_) => "the moon could not be placed",
             Self::StatedRadius => "the moon's stated radius was not positive and finite",
+            Self::KeptWater => "the moon's kept water was not a share of its mass",
             Self::Hosts(_) => "the moon's hosts could not be built",
             Self::Body(_) => "the moon could not be derived",
         })
@@ -2111,7 +2147,7 @@ impl Error for DeriveMoonError {
             Self::Placed(e) => Some(e),
             Self::Hosts(e) => Some(e),
             Self::Body(e) => Some(e),
-            Self::Nursery | Self::Sky | Self::StatedRadius => None,
+            Self::Nursery | Self::Sky | Self::StatedRadius | Self::KeptWater => None,
         }
     }
 }
@@ -3068,6 +3104,7 @@ mod tests {
                 let (radius, ice) = match bulk {
                     MoonBulk::Stated { radius, fractions } => (radius, fractions.water()),
                     MoonBulk::Derived => (derived.radius(), derived.ice_fraction()),
+                    MoonBulk::Kept { water } => (derived.radius(), water),
                 };
                 let placed =
                     Kilograms::from(EarthMasses::new(kg / crate::units::consts::EARTH_MASS_KG));
@@ -3443,6 +3480,54 @@ mod tests {
             assert_eq!(refused, DeriveMoonError::StatedRadius, "{bad}");
             let text = refused.to_string();
             assert_eq!(text, text.to_lowercase());
+            assert!(refused.source().is_none());
+        }
+    }
+
+    /// P14.T56.f: a regular moon whose heated shell lost its ice is derived at its placement's
+    /// radius, to the bit, with only its kept water as its air's and tides' bulk; a kept water that
+    /// is not a share of its mass is refused with its own error.
+    #[test]
+    fn a_regular_moon_keeps_its_radius_and_reads_its_kept_water() {
+        let jupiter = table_giant("Jupiter", 5, None);
+        let ((kg, rank), orbit) = table_moon(GANYMEDE, &jupiter);
+        let shared = MoonVolatiles::SHARED;
+        let whole = own_moon((kg, rank), &orbit, &jupiter, &shared, MoonBulk::Derived);
+        let kept = own_moon(
+            (kg, rank),
+            &orbit,
+            &jupiter,
+            &shared,
+            MoonBulk::Kept { water: 0.05 },
+        );
+        assert!(whole.ice_fraction() > 0.3, "{}", whole.ice_fraction());
+        assert_same_bits(kept.radius().value(), whole.radius().value());
+        assert_same_bits(kept.ice_fraction(), whole.ice_fraction());
+        // The air reads the kept bulk: less water to outgas than the whole ice's.
+        assert!(
+            kept.body().inventory().water().value() < whole.body().inventory().water().value(),
+            "{:?} against {:?}",
+            kept.body().inventory().water(),
+            whole.body().inventory().water()
+        );
+        for bad in [-0.1, 1.5, f64::NAN] {
+            let inputs = MoonInputs {
+                mass: EarthMasses::new(kg / crate::units::consts::EARTH_MASS_KG),
+                orbit,
+                radius_rank: rank,
+                volatiles: shared,
+                bulk: MoonBulk::Kept { water: bad },
+            };
+            let refused = derive_moon(
+                &inputs,
+                &jupiter.0,
+                &jupiter.1,
+                &jupiter.2,
+                SOLAR_AGE,
+                UniverseTime::EPOCH,
+            )
+            .unwrap_err();
+            assert_eq!(refused, DeriveMoonError::KeptWater, "{bad}");
             assert!(refused.source().is_none());
         }
     }

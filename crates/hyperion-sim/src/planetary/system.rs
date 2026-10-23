@@ -159,9 +159,9 @@ use crate::planetary::moons::regular::{
     MoonNursery, MoonPasses, MoonRecordOf, MoonShape, MoonSky, MoonTideAt, derive_moon_under,
     moon_before_passes,
 };
-use crate::planetary::moons::regular::{ICY_MOON_ICE_FRACTION, moon_radius};
+use crate::planetary::moons::regular::{ICY_MOON_ICE_FRACTION, moon_radius, regular_ice_fraction};
 use crate::planetary::moons::{
-    BeltAdjacency, MoonParent, MoonParentParts, NearestBelt, ParentKind,
+    BeltAdjacency, CaptureKind, MoonParent, MoonParentParts, NearestBelt, ParentKind,
 };
 use crate::planetary::params::{GIANT_LOVE_NUMBER, ROCKY_LOVE_NUMBER, SPACING_GIANT_MASS};
 use crate::planetary::placement::classes::orbits::{HostPlane, SystemPlane, host_plane};
@@ -197,6 +197,7 @@ use crate::units::{
     KilogramsPerCubicMetre, Megayears, Metres, MetresPerSecondSquared, Radians, Seconds,
     SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, WattsPerSquareMetre, Years,
 };
+use moon_ice::{HotHistory, MoonBulkRules, MoonIce, kept_water};
 
 /// Words of [`tags::PLANET_RADIUS`] a planet reads or reserves: word 0, its radius rank, then
 /// seven reserved.
@@ -3076,6 +3077,99 @@ impl PlanetarySystem {
         })
     }
 
+    /// What the moons of `body`, present as `now` says at `epoch`'s time, read of their birthplace
+    /// and their ice's history (P14.T56.f): its orbit about its host and its neighbouring belt, as
+    /// [`moon_craters`](Self::moon_craters) reads them, and its sky and its zone's history
+    /// ([`hot_history`](Self::hot_history)); `None` where the arms are held
+    /// ([`MoonBulkRules::Held`]).
+    #[must_use]
+    fn moon_ice(&self, epoch: &Epoch<'_>, body: &Body, now: &ParentNow) -> Option<ParentMoonIce> {
+        if MoonBulkRules::in_force() == MoonBulkRules::Held {
+            return None;
+        }
+        let neighbouring_belt = self
+            .nearest_belt(body.index)
+            .filter(|belt| belt.adjacency() == BeltAdjacency::Neighbouring)
+            .map(|belt| belt.composition());
+        let ice = now
+            .derived
+            .as_ref()
+            .zip(now.sky.as_ref())
+            .map(|(derived, sky)| MoonIce {
+                stellar_flux: derived.flux(),
+                glow: sky.planet_light().luminosity(),
+                history: self.hot_history(epoch, body),
+            });
+        Some(ParentMoonIce {
+            orbiter: self.host_orbiter(body),
+            neighbouring_belt,
+            ice,
+        })
+    }
+
+    /// How long the zone of `body` may have held its moons hot at `epoch`'s time (P14.T56.f's
+    /// `t_hot`, an upper bound): the age about stars all on their main sequence or before it; about
+    /// an evolved one, the time since the earliest main-sequence end among them, with the zone's
+    /// luminosity then over now (that star's at its main sequence's end, from its track, in place
+    /// of its own now), by which a moon's T0 then is read. A star with no track (below 0.1 M☉)
+    /// stays on its main sequence the clock window through.
+    #[must_use]
+    fn hot_history(&self, epoch: &Epoch<'_>, body: &Body) -> HotHistory {
+        /// The evolved star whose main sequence ended earliest, so far.
+        struct Earliest {
+            /// The time since its main sequence ended.
+            since: Years,
+            /// Its luminosity now.
+            now: SolarLuminosities,
+            /// Its luminosity at its main sequence's end.
+            then: SolarLuminosities,
+        }
+        let (ctx, t) = (epoch.ctx, epoch.t);
+        let age = ctx.age_at(t);
+        let mut total = SolarLuminosities::new(0.0);
+        let mut earliest: Option<Earliest> = None;
+        for member in self.zone_of(body).members() {
+            // The epoch's own states, which its sky's light reads.
+            let Some(state) = epoch.states[usize::from(member)].as_ref() else {
+                continue;
+            };
+            total = total + state.luminosity();
+            if !past_main_sequence(state.phase()) {
+                continue;
+            }
+            let star = &ctx.stars()[usize::from(member)];
+            let Some(track) = star.shared_track() else {
+                continue;
+            };
+            let Some(end) = track.main_sequence_end() else {
+                continue;
+            };
+            let since = Years::new(star.age_at(t).value() - end.value());
+            if earliest
+                .as_ref()
+                .is_none_or(|e| since.value() > e.since.value())
+            {
+                earliest = Some(Earliest {
+                    since,
+                    now: state.luminosity(),
+                    then: track.state_at(end).luminosity(),
+                });
+            }
+        }
+        match earliest {
+            None => HotHistory::MainSequence { age },
+            Some(Earliest { since, now, then }) => HotHistory::Evolved {
+                age,
+                since_main_sequence: Years::new(since.value().max(0.0)),
+                brightness_then: if total.value() > 0.0 {
+                    (total.value() - now.value() + then.value()) / total.value()
+                } else {
+                    1.0
+                },
+            },
+        }
+    }
+
     /// What the crater contract of the moon `moon` of `parent`, of ice fraction `ice_fraction`
     /// ([`DerivedMoon::ice_fraction`]) on `orbit`, reads beyond its bulk and its sources
     /// (P14.T24.b, T48.c): its parent as its impactors read it (with the parent's mass the moon
@@ -3445,6 +3539,7 @@ impl PlanetarySystem {
             sky: None,
             nursery: None,
             shades: None,
+            moon_ice: None,
         };
         match at.state() {
             BodyState::Present => {
@@ -3464,6 +3559,7 @@ impl PlanetarySystem {
                 });
                 now.sky = sky;
                 now.nursery = self.nursery(epoch.ctx, body);
+                now.moon_ice = self.moon_ice(epoch, body, &now);
             }
             BodyState::NotYetFormed | BodyState::Destroyed { .. } | BodyState::Unbound { .. } => {}
         }
@@ -3909,7 +4005,7 @@ impl PlanetarySystem {
             orbit: *orbit,
             radius_rank: satellite.radius_rank(),
             volatiles: satellite.own_volatiles(),
-            bulk: Self::moon_own_bulk(moon, parent),
+            bulk: Self::moon_own_bulk(moon, orbit, parent),
         }
     }
 
@@ -3917,19 +4013,90 @@ impl PlanetarySystem {
     /// atmosphere and tides are read (P14.T56.c's follow-up, P14.T56.d): a regular moon's as its
     /// derivation gives it, and a giant-impact moon's or a capture's radius and fractions as its
     /// record's bulk ([`moon_bulk_of`](Self::moon_bulk_of)) states them.
+    ///
+    /// A regular moon on `orbit` whose heated shell has lost its ice keeps only what P14.T56.f's
+    /// retention arm leaves ([`MoonBulk::Kept`]), its ice fraction and radius as its placement
+    /// gives them ([`regular_ice_fraction`], [`moon_radius`]), so that its inventory, air and tides
+    /// read the bulk its record's class does ([`moon_figure`](Self::moon_figure)).
     #[must_use]
-    fn moon_own_bulk(moon: &MoonPart, parent: &ParentNow) -> MoonBulk {
-        match Self::stated_moon_bulk(moon, parent) {
-            Some((radius, _, fractions)) => MoonBulk::Stated { radius, fractions },
-            None => MoonBulk::Derived,
+    fn moon_own_bulk(moon: &MoonPart, orbit: &KeplerElements, parent: &ParentNow) -> MoonBulk {
+        if let Some((radius, _, fractions)) = Self::stated_moon_bulk(moon, parent) {
+            return MoonBulk::Stated { radius, fractions };
         }
+        // Held, or with no sky, a regular moon keeps all its ice: no placement is redone.
+        let (Some(nursery), Some(_)) = (
+            &parent.nursery,
+            parent.moon_ice.as_ref().and_then(|m| m.ice.as_ref()),
+        ) else {
+            return MoonBulk::Derived;
+        };
+        let satellite = &moon.satellite;
+        let ice = regular_ice_fraction(nursery, orbit.semi_major_axis(), satellite.radius_rank());
+        let radius = moon_radius(satellite.mass(), ice);
+        let kept = Self::kept_ice_water(ice, radius, moon, parent);
+        if kept.total_cmp(&ice).is_eq() {
+            MoonBulk::Derived
+        } else {
+            MoonBulk::Kept { water: kept }
+        }
+    }
+
+    /// The water a moon `moon` of water fraction `water` and radius `radius`, whose parent is as
+    /// `parent` says, keeps after its time above ice's melting point (P14.T56.f's retention arm,
+    /// [`kept_water`]): its zero-albedo temperature `T0` from its parent's sky and the glow at its
+    /// primordial orbit, which every caller reads alike, and its zone's history. `water` itself,
+    /// to the bit, where the arm is held or the parent has no sky.
+    #[must_use]
+    fn kept_ice_water(water: f64, radius: Metres, moon: &MoonPart, parent: &ParentNow) -> f64 {
+        let Some(ice) = parent.moon_ice.as_ref().and_then(|m| m.ice.as_ref()) else {
+            return water;
+        };
+        let t0 = ice.t0(&moon.orbit);
+        kept_water(water, radius, ice.history.hot_for(t0))
+    }
+
+    /// The fractions `fractions` of a moon `moon` of radius `radius` with only the ice its
+    /// retention arm keeps ([`kept_ice_water`](Self::kept_ice_water)), iron and rock keeping their
+    /// ratio ([`MassFractions::with_water`]): `fractions` to the bit where it keeps all.
+    #[must_use]
+    fn kept_ice(
+        fractions: MassFractions,
+        radius: Metres,
+        moon: &MoonPart,
+        parent: &ParentNow,
+    ) -> MassFractions {
+        let water = fractions.water();
+        let kept = Self::kept_ice_water(water, radius, moon, parent);
+        if kept.total_cmp(&water).is_eq() {
+            fractions
+        } else {
+            fractions.with_water(kept)
+        }
+    }
+
+    /// Whether a capture of kind `kind`, whose parent is as `parent` says, formed inside the snow
+    /// line by the rule its crust reads ([`MoonBirth::formed`]; P14.T56.f's birthplace arm): never
+    /// where the arm is held or the parent has no orbit about its host.
+    #[must_use]
+    fn capture_formed_inside(kind: CaptureKind, parent: &ParentNow) -> bool {
+        let Some(ParentMoonIce {
+            orbiter: Some(orbiter),
+            neighbouring_belt,
+            ..
+        }) = parent.moon_ice
+        else {
+            return false;
+        };
+        MoonBirth::Captured(kind).formed(&orbiter, neighbouring_belt) == SnowLineSide::Inside
     }
 
     /// The radius, density and mass fractions that the origin of the moon `moon`, whose parent is
     /// as `parent` says, states apart from its derivation: a giant-impact moon's of its own
     /// density, with its parent's fractions if the parent is icy and rock otherwise, and a
-    /// capture's of its own radius, with the ice its density holds. `None` for a regular moon,
-    /// whose are its derivation's.
+    /// capture's of its own radius, with the ice its density holds where it formed beyond the snow
+    /// line and none where it formed inside (P14.T56.f's birthplace arm), each with only the ice
+    /// its retention arm keeps ([`kept_ice`](Self::kept_ice)). `None` for a regular moon, whose
+    /// are its derivation's.
     #[must_use]
     fn stated_moon_bulk(
         moon: &MoonPart,
@@ -3944,19 +4111,27 @@ impl PlanetarySystem {
                     (PlanetClass::Icy, Some(planet)) => planet.fractions(),
                     _ => MassFractions::solid(0.0, 1.0, 0.0),
                 };
+                let radius = sphere_radius(mass, impact.density());
                 Some((
-                    sphere_radius(mass, impact.density()),
+                    radius,
                     impact.density(),
-                    fractions,
+                    Self::kept_ice(fractions, radius, moon, parent),
                 ))
             }
             SatelliteMoon::Captured(captured) => {
                 let density = sphere_density(mass, captured.radius());
-                let ice = ice_fraction_of(density);
+                // P14.T56.f's birthplace arm: a capture formed inside the snow line is rock, its
+                // density read as a rubble pile's porosity (decision-p14-t54a-ganymede §C3.2).
+                let fractions = if Self::capture_formed_inside(captured.kind(), parent) {
+                    MassFractions::solid(0.0, 1.0, 0.0)
+                } else {
+                    let ice = ice_fraction_of(density);
+                    MassFractions::solid(0.0, 1.0 - ice, ice)
+                };
                 Some((
                     captured.radius(),
                     density,
-                    MassFractions::solid(0.0, 1.0 - ice, ice),
+                    Self::kept_ice(fractions, captured.radius(), moon, parent),
                 ))
             }
         }
@@ -3988,7 +4163,17 @@ impl PlanetarySystem {
         parent: &ParentNow,
     ) -> FigureBulk {
         let mass = moon.satellite.mass();
-        let (radius, density, fractions) = Self::stated_moon_bulk(moon, parent).unwrap_or(derived);
+        // A regular moon's derived bulk keeps only the ice its retention arm leaves (P14.T56.f), as
+        // its derivation's own bulk does (`moon_own_bulk`).
+        let (radius, density, fractions) =
+            Self::stated_moon_bulk(moon, parent).unwrap_or_else(|| {
+                let (radius, density, fractions) = derived;
+                (
+                    radius,
+                    density,
+                    Self::kept_ice(fractions, radius, moon, parent),
+                )
+            });
         let r = radius.value();
         FigureBulk {
             radius: EarthRadii::from(radius),
@@ -4789,6 +4974,22 @@ struct ParentNow {
     /// What its moons' shades share (lever (d)): its epoch's book with its own glow in it, if its
     /// epoch holds one and it has moons.
     shades: Option<ShadeBook>,
+    /// What its moons' bulk reads of their birthplace and their ice's history (P14.T56.f): `None`
+    /// held ([`MoonBulkRules::Held`]) or for a parent not present.
+    moon_ice: Option<ParentMoonIce>,
+}
+
+/// What a parent's moons' bulk reads of their birthplace and their ice's history (P14.T56.f;
+/// [`PlanetarySystem::moon_ice`]), built once for the parent at the time.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ParentMoonIce {
+    /// The parent as its crust's birthplace reads it ([`MoonBirth::formed`]), `None` for one with
+    /// no orbit about its host.
+    orbiter: Option<HostOrbiter>,
+    /// The composition of the belt next to it, with no planet between ([`BeltAdjacency::Neighbouring`]).
+    neighbouring_belt: Option<BeltComposition>,
+    /// Its moons' sky and their zone's history, `None` for a parent with no derivation or sky.
+    ice: Option<MoonIce>,
 }
 
 /// The bulk composition hook of a body of mass fractions `fractions` and element inventory
@@ -5505,6 +5706,32 @@ fn ice_fraction_of(density: KilogramsPerCubicMetre) -> f64 {
     ((1.0 / density.value() - 1.0 / rock) / (1.0 / ice - 1.0 / rock)).clamp(0.0, 1.0)
 }
 
+/// Whether a star in `phase` has left its main sequence (P14.T56.f's hot history): every phase
+/// after core hydrogen burning, its remnants and a naked helium star's included.
+#[must_use]
+const fn past_main_sequence(phase: Phase) -> bool {
+    match phase {
+        Phase::Protostar | Phase::PreMainSequence | Phase::MainSequence | Phase::Substellar => {
+            false
+        }
+        Phase::HertzsprungGap
+        | Phase::FirstGiantBranch
+        | Phase::CoreHeliumBurning
+        | Phase::EarlyAgb
+        | Phase::ThermallyPulsingAgb
+        | Phase::HeliumMainSequence
+        | Phase::HeliumHertzsprungGap
+        | Phase::HeliumGiantBranch
+        | Phase::PostAgb
+        | Phase::HeliumWhiteDwarf
+        | Phase::CarbonOxygenWhiteDwarf
+        | Phase::OxygenNeonWhiteDwarf
+        | Phase::NeutronStar
+        | Phase::BlackHole
+        | Phase::NoRemnant => true,
+    }
+}
+
 /// Whether a star in `phase` has reached its thermally pulsing asymptotic giant branch or passed
 /// it to a white dwarf.
 #[must_use]
@@ -5829,5 +6056,6 @@ impl<'c> Epoch<'c> {
     }
 }
 
+mod moon_ice;
 #[cfg(test)]
 pub(crate) mod tests;

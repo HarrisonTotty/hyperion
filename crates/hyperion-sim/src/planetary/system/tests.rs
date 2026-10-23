@@ -4649,10 +4649,11 @@ fn every_moon_s_inventory_is_its_own_ranks_at_its_own_bulk() {
             let label = label::label(system, planet.index).unwrap();
             let (_, now) = system.primary_record(&epoch, &HourCosines::new(), planet, label, &fate);
             let satellite = &part.satellite;
-            let bulk = PlanetarySystem::moon_own_bulk(part, &now);
+            let orbit = satellite.orbit_at(&part.parent, ctx.age_at(t));
+            let bulk = PlanetarySystem::moon_own_bulk(part, &orbit, &now);
             let mut inputs = MoonInputs {
                 mass: satellite.mass(),
-                orbit: satellite.orbit_at(&part.parent, ctx.age_at(t)),
+                orbit,
                 radius_rank: satellite.radius_rank(),
                 volatiles: satellite.own_volatiles(),
                 bulk,
@@ -4684,7 +4685,7 @@ fn every_moon_s_inventory_is_its_own_ranks_at_its_own_bulk() {
                     stated += 1;
                     radius
                 }
-                MoonBulk::Derived => derived.radius(),
+                MoonBulk::Derived | MoonBulk::Kept { .. } => derived.radius(),
             };
             let record = PlanetarySystem::moon_bulk_of(part, &derived, &now);
             assert_same_bits(EarthRadii::from(radius).value(), record.radius().value());
@@ -8207,6 +8208,305 @@ fn the_sample_s_unlit_records_read_their_night_floor() {
         (18, 10, 8)
     );
     assert_eq!(moves.moved, Vec::<String>::new());
+}
+
+/// What P14.T56.f moves over a set of systems ([`MoonBulkMoves::visit`]).
+#[derive(Debug, Default)]
+struct MoonBulkMoves {
+    /// Each moved moon's line: its R, T0, `t_hot`, d, water before and after, class and density.
+    lines: Vec<String>,
+    /// Moons made `Rocky`, and thinned but still `Icy`.
+    rocky: u32,
+    thinned_icy: u32,
+    /// Moves by arm: captures formed inside the snow line, beside a rocky belt and with no
+    /// neighbouring belt, and moons hot above the melting point.
+    inside_rocky_belt: u32,
+    inside_no_belt: u32,
+    hot: u32,
+    /// Hot ice bulks (T0 above the limit) left `Icy`, each with an `Ice` surface: a wrong state on
+    /// the published surface, P14.T56.g's serve-gate must-fix (main, 2026-10-22).
+    hot_icy: Vec<String>,
+    /// Stripped bodies above 200 km: porosity against their kept bulk's grain and the uniform
+    /// sphere's central pressure, (2π ÷ 3) G ρ² R².
+    stripped_large: Vec<String>,
+    /// Ice bulks at T0 of 200–273.15 K under 10 km, which the lag may empty over Gyr (G2), by their
+    /// kept water.
+    small_warm_ice: u32,
+    /// Bodies not moons whose bulk is icy and whose `T_eq` is above the melting point (R1.6's
+    /// "a hot ice bulk that is not a moon", for P14.T56.g).
+    hot_icy_not_moons: Vec<String>,
+    /// Records with an `Ice` surface whose T0 is above the melting point, after the arms.
+    ice_surfaces_above_melting: u32,
+    /// Every moon's bulk read; and records that moved beyond the moved moons (asserted none).
+    moons: u32,
+    other_moved: Vec<String>,
+}
+
+impl MoonBulkMoves {
+    /// Adds the moves of the system `name` of context `ctx`, held `held` and under the batch's
+    /// rules `batch`.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one walk of a system's records, held and under the batch, each classed and listed"
+    )]
+    fn visit(
+        &mut self,
+        name: &str,
+        ctx: &SystemContext,
+        (held, batch): (&PlanetarySystem, &PlanetarySystem),
+    ) {
+        use crate::planetary::hooks::figures::interior::ROCK_THERMAL_DIFFUSIVITY_M2_PER_S;
+        use crate::planetary::surface::RECORD_TIME;
+        use moon_ice::{HOT_ICE_LIMIT, MoonBulkRules, with_moon_bulk};
+
+        let t = RECORD_TIME;
+        if ctx.age_at(t).value() <= 0.0 {
+            return;
+        }
+        let before = held.snapshot_at(ctx, t);
+        with_moon_bulk(MoonBulkRules::Batch, || {
+            let after = batch.snapshot_at(ctx, t);
+            let epoch = Epoch::new(batch, ctx, t).with_shades();
+            let cosines = HourCosines::new();
+            let mut moved_moons = Vec::new();
+            for body in batch.bodies() {
+                let id = format!("{name} {}", body.index.body_id(ctx.id()));
+                let find = |records: &[BodyRecord]| {
+                    records
+                        .iter()
+                        .find(|r| r.index() == body.index)
+                        .and_then(|r| r.bulk().ok().copied())
+                };
+                let (Some(old), Some(new)) = (find(before.bodies()), find(after.bodies())) else {
+                    continue;
+                };
+                let (OrbitHost::Body(parent), Part::Moon(part)) = (body.host, &body.part) else {
+                    if new.class() == PlanetClass::Icy
+                        && new.equilibrium_temperature() > HOT_ICE_LIMIT
+                    {
+                        self.hot_icy_not_moons.push(format!(
+                            "{id}: T_eq {:.0} K, water {:.3}",
+                            new.equilibrium_temperature().value(),
+                            new.fractions().water()
+                        ));
+                    }
+                    continue;
+                };
+                self.moons += 1;
+                let primary = batch.body(parent).expect("a moon's parent is a body");
+                let fate_host = fate_host(ctx, batch.zone_of(primary));
+                let fate = batch.fate_of(primary, &fate_host);
+                let at = fate.at(t);
+                let now = batch.primary_now(&epoch, &cosines, primary, &fate, &at);
+                let ice = now.moon_ice.and_then(|m| m.ice);
+                let t0 = ice.map_or(f64::NAN, |ice| ice.t0(&part.orbit).value());
+                let hot_gyr = ice.map_or(0.0, |ice| {
+                    ice.history.hot_for(Kelvin::new(t0)).value() / 1e9
+                });
+                let r_km = Metres::from(new.radius()).value() / 1e3;
+                let (w0, w1) = (old.fractions().water(), new.fractions().water());
+                if w1 > 0.0 && r_km < 10.0 && (200.0..=HOT_ICE_LIMIT.value()).contains(&t0) {
+                    self.small_warm_ice += 1;
+                }
+                let hot = t0 > HOT_ICE_LIMIT.value();
+                if hot && new.class() == PlanetClass::Icy {
+                    self.hot_icy.push(format!(
+                        "{id}: {r_km:.0} km at T0 {t0:.0} K keeps {w1:.3}, {:?}",
+                        new.class()
+                    ));
+                }
+                let inside = match part.satellite.moon() {
+                    SatelliteMoon::Captured(captured) => {
+                        let inside = PlanetarySystem::capture_formed_inside(captured.kind(), &now);
+                        // The bulk and the crust read one birthplace (§C3.2).
+                        let craters = batch
+                            .moon_craters(primary, part, 0.0, &part.orbit)
+                            .expect("a capture's parent orbits its host");
+                        let ImpactorOrbit::Moon { formed, .. } = craters.orbit else {
+                            panic!("{id}: a moon's impactors are a moon's");
+                        };
+                        assert_eq!(formed == SnowLineSide::Inside, inside, "{id}");
+                        inside
+                    }
+                    SatelliteMoon::Regular(_) | SatelliteMoon::GiantImpact(_) => false,
+                };
+                if format!("{old:?}") == format!("{new:?}") {
+                    continue;
+                }
+                moved_moons.push(body.index);
+                // A bulk moves only by one of the two arms: a capture formed inside the snow
+                // line, or a moon hot above the melting point.
+                assert!(inside || hot, "{id}: moved neither inside nor hot");
+                if inside {
+                    let rocky_belt = batch
+                        .nearest_belt(primary.index)
+                        .is_some_and(|belt| belt.adjacency() == BeltAdjacency::Neighbouring);
+                    if rocky_belt {
+                        self.inside_rocky_belt += 1;
+                    } else {
+                        self.inside_no_belt += 1;
+                    }
+                    assert_same_bits(w1, 0.0);
+                } else {
+                    self.hot += 1;
+                }
+                // A thinned regular moon's derivation reads the water its record states (G2
+                // amendment 3): its own bulk keeps it, to the bit.
+                if let SatelliteMoon::Regular(_) = part.satellite.moon() {
+                    let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
+                    let own = PlanetarySystem::moon_own_bulk(part, &orbit, &now);
+                    let MoonBulk::Kept { water } = own else {
+                        panic!("{id}: {own:?}");
+                    };
+                    assert_same_bits(water, w1);
+                }
+                match new.class() {
+                    PlanetClass::Rocky => self.rocky += 1,
+                    PlanetClass::Icy => self.thinned_icy += 1,
+                    PlanetClass::GasGiant | PlanetClass::IceGiant | PlanetClass::SubNeptune => {}
+                }
+                let depth_km = (ROCK_THERMAL_DIFFUSIVITY_M2_PER_S
+                    * hot_gyr
+                    * 1e9
+                    * crate::units::consts::SECONDS_PER_JULIAN_YEAR)
+                    .sqrt()
+                    / 1e3;
+                let density = new.density().value();
+                if w1 < w0 && r_km > 200.0 {
+                    let pressure_mpa = 2.0 * PI / 3.0
+                        * crate::units::consts::GRAVITATIONAL_CONSTANT
+                        * density
+                        * density
+                        * (r_km * 1e3)
+                        * (r_km * 1e3)
+                        / 1e6;
+                    // Its grain density, the kept ice's and the rock's without pore space.
+                    let grain = 1.0
+                        / (w1 / MOON_ICE_DENSITY.value() + (1.0 - w1) / MOON_ROCK_DENSITY.value());
+                    self.stripped_large.push(format!(
+                        "{id}: {r_km:.0} km at {density:.0} kg m⁻³, porosity {:.0}% against its \
+                         grain's {grain:.0} kg m⁻³, central pressure {pressure_mpa:.0} MPa",
+                        100.0 * (1.0 - density / grain),
+                    ));
+                }
+                let kind = match part.satellite.moon() {
+                    SatelliteMoon::Regular(_) => "regular".to_owned(),
+                    SatelliteMoon::GiantImpact(_) => "giant impact".to_owned(),
+                    SatelliteMoon::Captured(captured) => format!("{:?} capture", captured.kind()),
+                };
+                self.lines.push(format!(
+                    "{id} ({kind}{}): R {r_km:.1} km, T0 {t0:.1} K, t_hot {hot_gyr:.3} Gyr, d \
+                     {depth_km:.0} km, water {w0:.4} → {w1:.4}, {:?} → {:?}, {density:.0} kg m⁻³",
+                    if inside { ", formed inside" } else { "" },
+                    old.class(),
+                    new.class(),
+                ));
+            }
+            // Every other record is unchanged to the bit, and an Ice surface above the melting
+            // point is counted.
+            for (old, new) in before.bodies().iter().zip(after.bodies()) {
+                if let (Some(surface), Some(bulk)) = (new.surface().ok(), new.bulk().ok())
+                    && surface.material() == SurfaceMaterial::Ice
+                    && bulk.equilibrium_temperature() > HOT_ICE_LIMIT
+                {
+                    self.ice_surfaces_above_melting += 1;
+                }
+                if !moved_moons.contains(&new.index()) && format!("{old:?}") != format!("{new:?}") {
+                    self.other_moved
+                        .push(format!("{name} {}", new.identity().id()));
+                }
+            }
+        });
+    }
+}
+
+/// P14.T56.f's tests over the golden systems (decision-p14-t54a-ganymede §C3.2;
+/// decision-bump-plan-after-22 R1.6 and G2, with main's corrections, 2026-10-22):
+///
+/// - the two small captures beside rocky belts (`close_binary` 0602 and `filler_c` 0201) are
+///   `Rocky` with no water, their bulk and crust one birthplace;
+/// - the hot ice bulks of `wide_binary` 0101–0104, `subgiant` 0201–0304 and `red_giant` 0505–0508
+///   lose their ice; `subgiant` 0101 and `red_giant` 0503 and 0504 are thinned and stay `Icy`;
+/// - every moved moon moved by one of the two arms, and is listed with its R, T0, `t_hot`, d and
+///   water; every other record is unchanged to the bit: the cold irregulars (R1.6 moves a giant's
+///   hot ones, so the plan's "a giant's irregulars, unchanged" reads "below the melting point"),
+///   `eccentric_giant` 0101–0103 among them.
+#[test]
+fn a_moon_s_bulk_reads_its_birthplace_and_its_ice_s_history() {
+    use moon_ice::{MoonBulkRules, with_moon_bulk};
+    let batch = with_moon_bulk(MoonBulkRules::Batch, golden_systems_afresh);
+    let mut moves = MoonBulkMoves::default();
+    for ((name, ctx, held), (_, _, batch)) in golden_systems().iter().zip(&batch) {
+        moves.visit(name, ctx, (held, batch));
+    }
+    eprintln!(
+        "the golden systems' {} moons: {} moved:\n  {}\n{moves:#?}",
+        moves.moons,
+        moves.lines.len(),
+        moves.lines.join("\n  ")
+    );
+    for capture in [
+        "close_binary 42002cb200000009.0602",
+        "filler_c 42002cb200000000.0201",
+    ] {
+        assert!(
+            moves
+                .lines
+                .iter()
+                .any(|line| line.starts_with(capture) && line.contains("formed inside")),
+            "{capture} is rock by its birthplace"
+        );
+    }
+    for unchanged in ["0101", "0102", "0103"] {
+        assert!(
+            !moves
+                .lines
+                .iter()
+                .any(|line| line.starts_with("eccentric_giant")
+                    && line.contains(&format!(".{unchanged} "))),
+            "eccentric_giant {unchanged} keeps its bulk"
+        );
+    }
+    // G2's expected, as main corrected it: 18 made Rocky (2 by birthplace, 16 hot), and 3 hot ice
+    // bulks left Icy (subgiant 0101 at 0.113, red_giant 0503 and 0504 at 0.124 and 0.123).
+    assert_eq!(
+        (moves.rocky, moves.thinned_icy),
+        (18, 3),
+        "{:#?}",
+        moves.lines
+    );
+    assert_eq!(
+        (moves.inside_rocky_belt + moves.inside_no_belt, moves.hot),
+        (2, 19)
+    );
+    assert_eq!(moves.hot_icy.len(), 3, "{:?}", moves.hot_icy);
+    assert_eq!(moves.other_moved, Vec::<String>::new());
+}
+
+/// P14.T56.f's census over the 400 whole systems, a measurement run by name: the moons it moves,
+/// by class and by arm (the birthplace arm beside a rocky belt and with no neighbouring belt), the
+/// hot ice bulks it leaves `Icy` (each to main at the gate, G2 item 10, and an `Ice` surface on
+/// them P14.T56.g's must-fix), the stripped bodies above 200 km, the small warm ice bulks, the hot
+/// ice bulks that are not moons, and the `Ice` surfaces above the melting point; no record moves
+/// beyond the moved moons.
+#[test]
+#[ignore = "a measurement for the bless note, run by name"]
+fn a_moon_s_bulk_reads_its_birthplace_over_the_sample() {
+    use moon_ice::{MoonBulkRules, with_moon_bulk};
+    let mut moves = MoonBulkMoves::default();
+    for ctx in sample() {
+        let held = generate(SEED, ctx);
+        let batch = with_moon_bulk(MoonBulkRules::Batch, || generate(SEED, ctx));
+        moves.visit("sample", ctx, (&held, &batch));
+    }
+    eprintln!(
+        "the sample's {} moons: {} moved:\n  {}\n{moves:#?}",
+        moves.moons,
+        moves.lines.len(),
+        moves.lines.join("\n  ")
+    );
+    assert!(moves.moons > 1_000, "{}", moves.moons);
+    assert_eq!(moves.other_moved, Vec::<String>::new());
 }
 
 /// The bistability re-check's driver from the generator's own first albedo, 0.3, is the solve to

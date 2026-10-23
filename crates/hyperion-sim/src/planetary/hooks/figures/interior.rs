@@ -235,9 +235,12 @@ pub fn radiogenic_heat_flow(
     WattsPerSquareMetre::new(rock.value() * per_kg / (4.0 * core::f64::consts::PI * r * r))
 }
 
-/// The thermal diffusivity of an icy body's rock, κ: 10⁻⁶ m² s⁻¹ (decision-p14-moons §F-ocean F1,
-/// from memory), a silicate's k ÷ ρ `c_p`, about 3 W m⁻¹ K⁻¹ over 3,300 kg m⁻³ and
-/// 1,000 J kg⁻¹ K⁻¹.
+/// The thermal diffusivity of an icy body's rock, κ: 10⁻⁶ m² s⁻¹ (decision-p14-moons §F-ocean F1),
+/// a silicate's k ÷ ρ `c_p`, about 3 W m⁻¹ K⁻¹ over 3,300 kg m⁻³ and 1,000 J kg⁻¹ K⁻¹: the
+/// "approximately 1 mm² s⁻¹" models assume, against measured values falling from 1.5–2.5 mm² s⁻¹
+/// at ambient conditions towards 0.5 at mid-crustal temperatures (Whittington, Hofmeister and
+/// Nabelek 2009, Nature 458, 319; Turcotte and Schubert, _Geodynamics_, 3rd ed., 2014, §4.13,
+/// not re-read). P14.T56.f's retention arm reads it too, on the side of loss.
 pub const ROCK_THERMAL_DIFFUSIVITY_M2_PER_S: f64 = 1e-6;
 
 /// The density at which an icy body's non-water mass is a rock sphere for its lag: 3,300 kg m⁻³, a
