@@ -4234,6 +4234,33 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
   - _Accept:_ `pnpm test`; the console-ux skill's lint on the changed files; a ux-reviewer pass.
     The visual check at 1920×1080 and 1280×720 is pending, as for T43.e.
   - _Commit:_ `feat(client): P14.T43.g The surface's crust and cover in the readout`.
+- **P14.T43.h The ocean under a Snowball's ice in the readout** (decision-absurd-states-24 R1;
+  decision-p14-t54a-water-consistency W2–W3; a display change only, with no wire, output or
+  protocol change; after P14.T43.g).
+  - `displays/system/BodyRecordReadings.tsx`'s `surfaceRows`: on a `snowball` surface whose
+    `condensates` is a value with no `H2O` liquid entry, the `H2O` item of `surface_liquids` is
+    the ocean under the ice (`BodySurfaceDto.condensates`' contract, W3 (b)). It is not read as
+    `LIQUID COVER`, which on that surface reads its other items at their liquid entries' own
+    `area_fraction`, divided by their total where it exceeds 1 (W2 without the item). A row of its
+    own after `ICE COVER`, `SUBSURFACE OCEAN` as signed off, names the liquid with no share
+    (`SUBSURFACE OCEAN H2O`). Every other surface, and `ICE COVER`, read as before.
+  - The guide's `LIQUID COVER`, `ICE COVER` row and a new `SUBSURFACE OCEAN` row, as signed off.
+  - _Tests_ (`SystemView.bodies.test.tsx`, from the fixture's `titanDetail()` changed in the test):
+    - LOOK72's 020e56ef60080003.0700: a `snowball` at 126 K with condensates H₂O solid (area 1),
+      `ch4_c2h6_n2` liquid (0.97277) and N₂ liquid (0.02723), and `surface_liquids` 0.48638,
+      0.01362 and H₂O 0.5, reads `LIQUID COVER CH4–C2H6–N2 MIXTURE 97.3 % · N2 2.72 %` and
+      `SUBSURFACE OCEAN H2O`, with no `H2O` in `LIQUID COVER`;
+    - a `snowball` with the item and no other liquid reads `LIQUID COVER NONE` and the row;
+    - a `snowball` with an `H2O` liquid entry, and a `temperate` surface with an `H2O` item, are
+      unchanged and have no row;
+    - a `snowball` whose condensates are not modelled reads `LIQUID COVER NOT YET MODELLED` and
+      has no row;
+    - a rebuilt list whose total exceeds 1 is divided by it;
+    - Earth's, Titan's and the lava world's rows unchanged to the string.
+  - _Accept:_ `pnpm test`; the console-ux skill's lint on the changed files; a ux-reviewer pass.
+  - _Commit:_ `fix(client): P14.T43.h The ocean under a Snowball's ice in the readout`.
+  - _Lifespan:_ moot once P14.T53.c ends W3 (b) with T51.g's shell; the "For 24" follow-up then
+    reads `subsurface_ocean` under the same row.
 
 #### P14.T44 Time control
 
@@ -15669,6 +15696,96 @@ tables::gauss_legendre`.
     crust computed as none, while `UNDIFFERENTIATED` is glossed "no crust". The same row names no
     `NOT YET MODELLED` reading, which the cover rows take from an older server (main's answer
     added no wording, the guide included).
+- **Deviations in P14.T43.h, as built (`lane/90-p14-t43h-subsurface-ocean`, 2026-10-22).** The
+  ocean under a Snowball's ice in the readout (decision-absurd-states-24 R1), in the client, the
+  guide and this plan only: no wire, protocol, binding, decoder, fixture, golden or output change.
+  `GENERATOR_VERSION` is 23 and `PROTOCOL_VERSION` 3 after the lane's last merge (ee64322f), and
+  `styles.css` changes in a comment alone.
+  - _The names._ `oceanUnderIce(surface)`, rule 1: the `H2O` item of `surfaceLiquids` where the
+    state is `snowball` and the condensates are a value with no `H2O` liquid entry, else `null`.
+    `liquidsOnIce(surface, ocean)`, the rebuilt list: every other item at its liquid entry's own
+    `areaFraction`, divided by their total where it exceeds 1, and read by the unchanged
+    `coverShown`. An item with no liquid entry keeps its listed share, the brief's fallback: no
+    server that keeps the contract sends one, since the sim builds the cover from the condensates
+    it sends, after their cut to eight (`Condensates::surface_liquids`), and appends the ocean
+    alone (conformance review). Both find an entry through `liquidEntry(condensates, substance)`,
+    a substance's liquid entry where the condensates are a value, and name water by the constant
+    `WATER`.
+  - _The row._ `SUBSURFACE OCEAN`, a wide row, the last child of `surfaceRows`' fragment after the
+    `COLD TRAPS` conditional, reading `substanceName(item.substance, "upper")` with no unit, only
+    where `oceanUnderIce` returns an item. `ICE COVER`, `coverShown`, `LIQUID COVER`'s
+    `NOT YET MODELLED` and every other row are unchanged.
+  - _The docs._ `surfaceRows`' TSDoc names rule 1 and the row, names `subsurfaceOcean` among the
+    members not yet read, and no longer calls `SURFACE PRESSURE` the section's longest label;
+    `BodyRecordReadings`' remarks name the ocean under a Snowball's ice beside the cover; the
+    comment over `.body-readout__values` names `SUBSURFACE OCEAN` as the widest label, both
+    `fit-content(11.5rem)` rules unchanged.
+  - _The guide._ Edited as the brief gives it: the `LIQUID COVER`, `ICE COVER` row, a new
+    `SUBSURFACE OCEAN` row after `COLD TRAPS`, and the `SNOWBALL` clause of the surface-state row,
+    which the entry's guide bullet does not name. Prettier kept the table's widths.
+  - _The readings the tests pin._
+    - LOOK72's `020e56ef60080003.0700`, in order: `SURFACE SNOWBALL`, `T SURF 126 K`,
+      `SURFACE PRESSURE 147 kPa`, `MOLE FRACTION N2 94.4 % · CH4 5.65 %`, `CRUST PRIMARY · H2O`,
+      `MANTLE REDOX OXIDISED`, `MELT COVER NONE`,
+      `LIQUID COVER CH4–C2H6–N2 MIXTURE 97.3 % · N2 2.72 %`, `ICE COVER H2O 100 %`,
+      `SUBSURFACE OCEAN H2O`.
+    - LOOK72's `620e377802000074.0703`: as `0700` but `T SURF 83 K`, `LIQUID COVER NONE`,
+      `ICE COVER H2O 97.8 % · CO2 2.20 %`, then `SUBSURFACE OCEAN H2O`.
+    - Seas' entries at 0.8 and 0.4: `LIQUID COVER CH4–C2H6–N2 MIXTURE 66.7 % · N2 33.3 %`, and the
+      row; `0700` with its `N2` entry dropped: `LIQUID COVER CH4–C2H6–N2 MIXTURE 97.3 % · N2 1.36 %`.
+    - No row: `0700` with an `H2O` liquid entry at 0.5, which reads the wire's list,
+      `LIQUID COVER H2O 50.0 % · CH4–C2H6–N2 MIXTURE 48.6 % · N2 1.36 %`; `0700` with no
+      `condensates` key, `LIQUID COVER NOT YET MODELLED` and `ICE COVER NOT YET MODELLED`; the
+      Earth with its liquid water's entry left out, a `temperate` surface; the fixture's Earth,
+      Titan and lava world.
+  - _Tests._ `SystemView.bodies.test.tsx`, 13 new cases, 105 in the file: the six of the
+    entry (the no-row cases an `it.each` of six, apart from their readings), the row's lack of a
+    unit, and an item with no liquid entry. The `temperate` surface with no liquid water entry is
+    beyond the entry, so that a test fails if rule 1 stops reading the state (conformance review).
+    The helpers `titanWithNoOceanKey`, `snowball0700`, `snowball0700WithWaterSea`,
+    `snowball0700OfAnOlderServer`, `snowball0703` and `earthWithNoLiquidWaterEntry`, and the
+    entries `ICE_0700`, `METHANE_SEA_0700` and `NITROGEN_SEA_0700`, build the surfaces, each
+    Snowball on the fixture's Titan's, its air and crust kept, its state set and its
+    `subsurface_ocean` key dropped. `0703`'s reservoirs and the water sea's are stand-ins, which
+    the readout does not read. No existing assertion changed.
+  - _The lint._ The console-ux lint: 0 errors; its 14 checks are all `styles.css` rules outside
+    this task's comment (it skips the test file).
+  - _Reviews._ TypeScript, UX and plan conformance.
+    - TypeScript: no must-fix. One should-fix not applied, since the brief asks for the test: the
+      row's no-unit test reads `.body-readout__unit`, which the exact rows already rule out. Three
+      considers: two applied (each Snowball helper sets `state: "snowball"`; `liquidsOnIce`'s
+      remark no longer says the wire halves the seas), one not, since the brief asks for it (the
+      over-1 test also reads the row).
+    - UX: `SUBSURFACE OCEAN` measured at 10.81rem, the readout's widest label. Two must-fixes and
+      one should-fix against main's ruling and sign-off, for main (deferred below). One should-fix
+      not applied, since the brief gives the entry as written (its guide bullet names two of the
+      three edits; recorded under _The guide_). One consider applied (`SURFACE PRESSURE`'s
+      remark).
+    - Plan conformance: no must-fix. Four should-fixes applied (the remark and the test comment
+      on an item with no entry; the test count; this bullet; the terrain bullet's source). Three
+      considers: two applied (the `temperate` no-row case; the `styles.css` comment's wording),
+      one not, as for the UX review's (the entry's guide bullet).
+  - _Pending:_ the visual check at 1280 × 720, 1920 × 1080 and 1920 × 1080 at 150 %, main's at
+    landing.
+- **Deferred findings (2026-10-13 rule)**, from P14.T43.h:
+  - A regular moon's computed `subsurface_ocean`, which the client decodes and the readout does
+    not read (the fixture's Titan carries one), so that a Snowball reads `SUBSURFACE OCEAN H2O`
+    and a Europa-like moon no row: reading it under the same row is main's follow-up. The UX
+    review adds that an airless regular moon's missing row may then read as no ocean (should-fix).
+  - For main, on the signed wording (UX review, must-fix, quoted on issue #90): the
+    surface-state row's `SNOWBALL` clause, "with any ocean under the ice read as
+    `SUBSURFACE OCEAN`", and the new row's "a regular moon's ocean … not read here" disagree on
+    the fixture's Titan, a `snowball` regular moon whose wire states an ocean and which reads no
+    row. The review's lean: read `subsurface_ocean` under the row, or reword the clause to "an
+    ocean under the ice that the generator places in its cover".
+  - For main, on rule 2 (UX review, must-fix, quoted on issue #90): an item with no entry keeps
+    the wire's divided share beside seas read at their entries' own (`N2 1.36 %` against
+    `N2 2.72 %`); the review would recover the divisor from another item's entry and share. No
+    server that keeps the contract sends such an item (above), and the brief's "by the contract
+    this happens only where the condensates are full at eight" does not hold of the sim.
+  - Until P14.T53.c ends the appended item, the terrain (plan R09) draws a Snowball's seas from
+    the wire's list, divided with the ocean's item, while the readout reads them at their own
+    extents (main's ruling on issue #90, §2.1: recorded, not a blocker).
 - **Deviations in P14.T49.j, as built (`lane/34-p14-t49j-thermal-columns`, 2026-10-16).** The
   condensed phases' thermal columns and the airless regolith's thermal-inertia law, a pure module,
   `substance::thermal` (`substance/thermal.rs`; its rows in `substance/thermal/rows.rs`, its tests
