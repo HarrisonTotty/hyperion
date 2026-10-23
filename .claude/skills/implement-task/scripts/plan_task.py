@@ -5,17 +5,30 @@ Usage:
     plan_task.py P02.T5.a              Task text with the plan header, the ordering notes, the
                                        phase intro and every design note the task cites.
     plan_task.py P02.T5.a --context    The same, plus the plan's Generator version and Risks
-                                       sections (earlier tasks' as-built records live there).
+                                       sections and, for a split plan, the task's record files
+                                       (earlier tasks' as-built records live there).
     plan_task.py P02.T5 --acceptance   Only the acceptance criteria (all subtasks, each labelled),
                                        with the list a lead-in such as `Acceptance:` introduces,
-                                       the commands quoted in them, and the Risks lines naming
-                                       the task.
-    plan_task.py --list [P02]          Every task ID and title, marked where a commit subject
-                                       starts with the ID.
+                                       the commands quoted in them, and the lines of Risks and of
+                                       the plan's record files naming the task.
+    plan_task.py P14.T53.b --records   The task's records as built: its record file's path (where
+                                       a new record goes) and its records, in either layout, with
+                                       its parent's, then the records of other tasks naming it.
+    plan_task.py --list [P02]          Every task ID and title under Tasks, marked [commit] where a
+                                       commit subject starts with the ID and [records] where the
+                                       task has records of its own.
     --feature <dir>                    Pick the plan set when an ID exists in several.
 
 IDs are case-insensitive: p02.t5.a is read as P02.T5.a. The prefix picks the plan set: `P` for
-galaxy-generation, `R` for rendering-and-planets (`--feature` overrides it).
+galaxy-generation, `R` for rendering-and-planets (`--feature` overrides it). `--records` also
+takes a sub-subtask (P14.T54.b.i), whose records are its subtask's.
+
+Records as built come in two layouts, read alike. Inline: top-level bullets of the plan's "Risks
+and open points". Split (plan_split.py beside this script makes it): one file per task,
+`<plan-dir>/<plan-stem>/records/<KEY>.md`, KEY the ID cut to one subtask letter, linked from the
+task's entry by a `Records:` line, while Risks keeps the open points and the records of no one
+task. In the inline layout `--records` shows the bullets the split would file under the task,
+by assign_records()'s rule.
 
 Task markers the parser understands: `### P01.T1 Title` / `#### P01.T1.a Title` headings,
 `**P05.T1.a Title.** body` paragraphs and `- **P08.T2.a Title.** body` bullets, whose bold title
@@ -53,7 +66,6 @@ sys.dont_write_bytecode = True
 # The task-ID prefix names the plan set: P for the galaxy plans, R for the rendering plans.
 PREFIX_SETS = {"P": "galaxy-generation", "R": "rendering-and-planets"}
 ID_RE = re.compile(r"([PR])(\d{2})\.T(\d+)(?:\.([a-z]+))?")
-LOOSE_ID_RE = re.compile(r"([PpRr])(\d{2})\.[Tt](\d+)(?:\.([A-Za-z]+))?")
 HEADING_TASK_RE = re.compile(r"^(#{2,6})\s+([PR]\d{2}\.T\d+(?:\.[a-z]+)?)\b\s*(.*)$")
 INLINE_TASK_RE = re.compile(r"^(?:[-*]\s+)?\*\*([PR]\d{2}\.T\d+(?:\.[a-z]+)?)\b\s*([^*]*?)\.?\*\*")
 # A bold title that wraps (R06.T8.g's `- **R06.T8.g Census cost: … P11.T16 and` / `  P11.T17.c).**`),
@@ -116,6 +128,263 @@ class Marker:
     level: int  # heading level, or 7 for an inline paragraph/bullet marker
 
 
+# The records layout. A plan's as-built records are either inline, as top-level bullets of its
+# "Risks and open points" (every plan until it is split), or split: each task's records in its own
+# file, `<plan-dir>/<plan-stem>/records/<KEY>.md`, which the task's entry under Tasks links with
+# RECORD_LINE, while the Risks section keeps the open points and the records of no one task, after
+# RECORDS_INDEX. plan_split.py (beside this script) makes and checks the split.
+RECORDS_DIR = "records"
+RECORD_LINE = "Records: [{rel}]({rel})."
+RECORDS_INDEX = (
+    "Task records as built: [{stem}/{dir}/]({stem}/{dir}/), one file per task, each linked from its"
+    " entry under Tasks."
+)
+RECORD_HEADER = (
+    "# {key}: records as built\n"
+    "\n"
+    "The as-built records of {key}, moved from the Risks and open points of\n"
+    "[{plan}](../../{plan}). A new record goes at the end, in the same form.\n"
+    "\n"
+)
+
+
+def records_dir(plan: Path) -> Path:
+    """Where a split plan keeps its task records: `<plan-dir>/<plan-stem>/records/`."""
+    return plan.parent / plan.stem / RECORDS_DIR
+
+
+def record_key(task_id: str) -> str:
+    """The record file a task's records go in: its ID cut to one subtask letter. A sub-subtask is
+    recorded with its subtask (P14.T54.b.i in P14.T54.b's file), and a subtask's parts and steps
+    in the subtask's own."""
+    return ".".join(task_id.split(".")[:3])
+
+
+def record_file_key(task_id: str, task_ids: set[str]) -> str | None:
+    """The record file of a task in a plan whose Tasks section has `task_ids`: record_key()'s if
+    that task has an entry there, else its parent's (P11.T4.h, added as built with no entry of its
+    own, is P11.T4's); None when neither has one."""
+    key = record_key(task_id)
+    if key in task_ids:
+        return key
+    parent = ".".join(key.split(".")[:2])
+    return parent if parent in task_ids else None
+
+
+def record_path(plan: Path, task_id: str, task_ids: set[str] | None = None) -> Path:
+    key = record_file_key(task_id, task_ids) if task_ids is not None else None
+    return records_dir(plan) / f"{key or record_key(task_id)}.md"
+
+
+def record_rel(plan: Path, key: str) -> str:
+    """A record file's path relative to the plan's directory, `/`-separated on every platform."""
+    return f"{plan.stem}/{RECORDS_DIR}/{key}.md"
+
+
+def is_split(plan: Path) -> bool:
+    return records_dir(plan).is_dir()
+
+
+@dataclass
+class RiskItem:
+    """A top-level block of the Risks section: a bullet with everything nested under it, a margin
+    paragraph or a heading. Lines [start, body_end) are its text, [body_end, end) the blank lines
+    after it."""
+
+    start: int
+    body_end: int
+    end: int
+    kind: str  # "bullet", "para" or "heading"
+    under_heading: bool  # after a sub-heading of the Risks section
+    names: list[str]  # the tasks of this plan it names (assign_records() says where it looks)
+    key: str | None  # the record file it belongs to, or None to stay in Risks
+    why: str  # how it was assigned, or why it stays
+
+
+ITEM_START_RE = re.compile(r"^(?:[-*+]\s|\d+[.)]\s|#)")
+CODE_SPAN_RE = re.compile(r"`[^`]*`")
+TITLE_RES = (re.compile(r"^\*\*(.+?)\*\*"), re.compile(r"^_(.+?)_(?=[\s.,:;)]|$)"))
+TAIL_END_RE = re.compile(r"[.:](?=\s|$)")
+REVALIDATED_RE = re.compile(r"\s*Re-validated\b", re.I)
+
+
+def risk_items(lines: list[str], span: tuple[int, int]) -> list[RiskItem]:
+    """The Risks section's top-level items (`span` is named_section's, heading line included)."""
+    return top_items(lines, span[0] + 1, span[1])
+
+
+def top_items(lines: list[str], start: int, stop: int) -> list[RiskItem]:
+    """The top-level items of lines[start:stop]. A new item starts at a margin bullet, a margin
+    numbered item, a heading, or a margin line after a blank line (or the first margin line); any
+    other margin line continues the item before it (Markdown's lazy continuation). Lines before the
+    first item belong to none."""
+    starts: list[int] = []
+    for i in range(start, stop):
+        line = lines[i]
+        if not line.strip() or line[:1].isspace():
+            continue
+        if ITEM_START_RE.match(line) or not starts or not lines[i - 1].strip():
+            starts.append(i)
+    items, under = [], False
+    for k, i in enumerate(starts):
+        stop_k = starts[k + 1] if k + 1 < len(starts) else stop
+        body_end = stop_k
+        while body_end > i + 1 and not lines[body_end - 1].strip():
+            body_end -= 1
+        line = lines[i]
+        kind = "heading" if line.startswith("#") else "bullet" if ITEM_START_RE.match(line) else "para"
+        under = under or kind == "heading"
+        items.append(RiskItem(i, body_end, stop_k, kind, under, [], None, ""))
+    return items
+
+
+def item_head(lines: list[str], item: RiskItem) -> tuple[str, str]:
+    """An item's title and the rest of its first sentence: the bold (or italic) span it opens with
+    and the text after it up to a full stop or colon (200 characters at most); for an item with no
+    such span, its first sentence (300 at most) and nothing."""
+    para = []
+    for i in range(item.start, item.body_end):
+        if i > item.start and (not lines[i].strip() or BULLET_RE.match(lines[i]) or HEADING_RE.match(lines[i])):
+            break
+        para.append(lines[i].strip())
+    text = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", " ".join(para))
+    for pattern in TITLE_RES:
+        if m := pattern.match(text):
+            tail = text[m.end() :]
+            stop = TAIL_END_RE.search(tail)
+            return m.group(1), tail[: stop.end() if stop else 200][:200]
+    stop = TAIL_END_RE.search(text)
+    return text[: stop.end() if stop else 300][:300], ""
+
+
+def decision_tasks(text: str, prefix: str) -> list[str]:
+    """The tasks of this plan that decision files named in `text` are about: for plan P14,
+    `decision-p14-t51a-partition` is P14.T51.a's, `decision-p14-t51-batch` P14.T51's, and
+    `decision-r08-t4ef-storage` (in R08) is R08.T4.e's and R08.T4.f's."""
+    found: list[str] = []
+    for m in re.finditer(r"\bdecision-" + re.escape(prefix.lower()) + r"-t(\d+)([a-z]*)(?=[-.\s,;)`]|$)", text):
+        base = f"{prefix}.T{int(m.group(1))}"
+        for name in [f"{base}.{c}" for c in m.group(2)] or [base]:
+            if name not in found:
+                found.append(name)
+    return found
+
+
+def named_tasks(text: str, prefix: str) -> list[str]:
+    """This plan's task IDs that `text` names, in order: `P14.T53.b` or `T53.b` for plan P14, ranges
+    expanded (`T11.a–c` is T11.a, T11.b and T11.c; `T41–T43` is T41, T42 and T43). Another plan's
+    IDs (`P06.T33` in plan 14) are not this plan's."""
+    own = r"(?:" + re.escape(prefix) + r"\.)?"
+    token = re.compile(r"(?<![\w.])" + own + r"T(\d+)((?:\.[a-z]+)*)(?!\w)")
+    # The rest of a range: `–T43`, `–P14.T43`, `–T5.c` or a subtask letter, `–c`.
+    range_re = re.compile(r"\s*[–-]\s*(?:" + own + r"T(\d+)((?:\.[a-z]+)*)(?!\w)|([a-z])(?!\w))")
+    found: list[str] = []
+
+    def add(number: str, letters: str) -> None:
+        name = f"{prefix}.T{int(number)}{letters}"
+        if name not in found:
+            found.append(name)
+
+    for m in token.finditer(text):
+        add(m.group(1), m.group(2))
+        r = range_re.match(text, m.end())
+        if r is None:
+            continue
+        first, letters = int(m.group(1)), m.group(2)
+        if r.group(3) and re.fullmatch(r"\.[a-z]", letters):  # T11.a–c
+            for c in range(ord(letters[1]) + 1, ord(r.group(3)) + 1):
+                add(str(first), f".{chr(c)}")
+        elif r.group(1):
+            last, last_letters = int(r.group(1)), r.group(2)
+            if not letters and not last_letters and 0 < last - first <= 30:  # T41–T43
+                for n in range(first + 1, last + 1):
+                    add(str(n), "")
+            elif last == first and re.fullmatch(r"\.[a-z]", letters) and re.fullmatch(r"\.[a-z]", last_letters):
+                for c in range(ord(letters[1]) + 1, ord(last_letters[1]) + 1):  # T5.b–T5.c
+                    add(str(first), f".{chr(c)}")
+            else:
+                add(r.group(1), last_letters)
+    return found
+
+
+def assign_records(lines: list[str], items: list[RiskItem], prefix: str, task_ids: set[str]) -> None:
+    """Give each Risks item the record file it belongs to (`key`), or None to stay in Risks, and
+    say why (`why`). The rule:
+
+    - Only a top-level bullet before any sub-heading of the section moves, and not a re-validation
+      (a title opening "Re-validated"): implement-task and revalidate-plan look for those in Risks.
+    - It belongs to the tasks of this plan that its title names (the bold or italic span it opens
+      with, code spans aside). If the title names none: those that the rest of its first sentence
+      names ("**Deferred findings (2026-10-13 rule)**, from P14.T49.e:"), else those whose
+      decision files its title or first sentence names ("**Ruled by "main"**
+      (decision-p14-t51a-partition, 2026-10-16)" is P14.T51.a's).
+    - Each named task is filed under record_file_key(): a sub-subtask with its subtask, a task with
+      no entry under Tasks with its parent; one with neither is not a file.
+    - One file: it moves there. Several files of one task's subtasks (T28.a–c): the task's own
+      file. A title that names several tasks ("Deviations in T4 and T5, as built"): the first
+      named, whose as-built it is, the others built beside it; plan_task.py's searches find it
+      from the others by name. A first sentence or decision files naming several tasks: it stays,
+      a record of no one task (a phase's validation, a ruling across tasks).
+    """
+    for item in items:
+        if item.kind != "bullet" or item.under_heading:
+            item.why = "a sub-heading's item" if item.under_heading else f"a {item.kind}, not a bullet"
+            continue
+        title, tail = item_head(lines, item)
+        if REVALIDATED_RE.match(title):
+            item.why = "a re-validation of the plan"
+            continue
+        names, where = named_tasks(CODE_SPAN_RE.sub(" ", title), prefix), "title"
+        if not names:
+            names, where = named_tasks(CODE_SPAN_RE.sub(" ", tail), prefix), "first sentence"
+        if not names:
+            names, where = decision_tasks(title + " " + tail, prefix), "decision file"
+        item.names = names
+        if not names:
+            item.why = "names no task"
+            continue
+        keys = list(dict.fromkeys(k for k in (record_file_key(n, task_ids) for n in names) if k))
+        if not keys:
+            item.why = f"its {where} names no task under Tasks: " + ", ".join(names)
+            continue
+        tops = list(dict.fromkeys(".".join(k.split(".")[:2]) for k in keys))
+        if len(keys) == 1:
+            item.key, item.why = keys[0], f"its {where} names it"
+        elif len(tops) == 1 and tops[0] in task_ids:
+            item.key, item.why = tops[0], f"its {where} names subtasks of it"
+        elif where == "title":
+            item.key, item.why = keys[0], "its title names it first, of " + ", ".join(keys)
+        else:
+            item.why = f"its {where} names several tasks: " + ", ".join(keys)
+
+
+def plan_prefix(plan: Path) -> str | None:
+    """The plan's task-ID prefix, `P14` or `R08`, from its set and number; None for a plan set
+    with no prefix of its own."""
+    letter = next((k for k, v in PREFIX_SETS.items() if v == plan.parent.name), None)
+    return letter + plan.name[:2] if letter else None
+
+
+def task_markers(lines: list[str], all_markers: list[Marker]) -> list[Marker]:
+    """The markers of the Tasks section (a Risks record such as `- **P14.T39 and ruling 35.6, as
+    built**` reads as a marker too), or every marker when the plan has no Tasks section."""
+    tasks = named_section(lines, "tasks")
+    return [m for m in all_markers if tasks is None or tasks[0] < m.line < tasks[1]]
+
+
+def classified_risks(plan: Path, lines: list[str]) -> list[RiskItem]:
+    """The plan's Risks items, each assigned as assign_records() says (none in a plan set with no
+    task-ID prefix)."""
+    span = named_section(lines, "risks")
+    prefix = plan_prefix(plan)
+    if span is None or prefix is None:
+        return []
+    items = risk_items(lines, span)
+    ids = {m.task_id for m in task_markers(lines, markers(lines))}
+    assign_records(lines, items, prefix, ids)
+    return items
+
+
 def repo_root() -> Path:
     try:
         out = subprocess.run(
@@ -128,11 +397,12 @@ def repo_root() -> Path:
 
 
 def normalise_id(task_id: str) -> str:
-    """P or R and T upper case, the subtask letter lower case: `p02.t5.A` -> `P02.T5.a`."""
-    m = LOOSE_ID_RE.fullmatch(task_id.strip())
+    """P or R and T upper case, the subtask letters lower case: `p02.t5.A` -> `P02.T5.a`,
+    `p14.t54.B.i` -> `P14.T54.b.i`."""
+    m = re.fullmatch(r"([PpRr])(\d{2})\.[Tt](\d+)((?:\.[A-Za-z]+)*)", task_id.strip())
     if m is None:
         return task_id
-    return f"{m.group(1).upper()}{m.group(2)}.T{m.group(3)}" + (f".{m.group(4).lower()}" if m.group(4) else "")
+    return f"{m.group(1).upper()}{m.group(2)}.T{m.group(3)}" + m.group(4).lower()
 
 
 def plan_code(m: re.Match[str]) -> str:
@@ -492,22 +762,39 @@ def acceptance_groups(lines, all_markers, target) -> list[tuple[str, list[str]]]
     return groups
 
 
+def record_files(plan: Path) -> list[Path]:
+    """A split plan's record files, by name; none for an inline plan."""
+    folder = records_dir(plan)
+    return sorted(folder.glob("*.md")) if folder.is_dir() else []
+
+
 def mentions(root: Path, plan: Path, lines: list[str], task_id: str, span: tuple[int, int], limit: int = 20) -> list[str]:
-    """Lines elsewhere in the plan set that name this task: the full ID in any plan, and the short
-    form (T6.e, or T6 for a parent) in its own plan, outside the task's own section. A short form in
+    """Lines elsewhere in the plan set that name this task: the full ID in any plan or record file,
+    and the short form (T6.e, or T6 for a parent) in its own plan and its record files, outside the
+    task's own section and its own record files (`--records` prints those). A short form in
     backticks is code (the spectral type `T6`), not a task."""
     short = task_id.split(".", 1)[1]
     short_re = re.compile(r"(?<![\w.`])" + re.escape(short) + r"(?![\w`])")
     full_re = re.compile(re.escape(task_id) + r"(?![\w])")
+    own = {record_path(plan, k) for k in task_and_parent(task_id)}
     hits: list[str] = []
-    for other in sorted(plan.parent.glob("[0-9][0-9]-*.md")):
+    plans = sorted(plan.parent.glob("[0-9][0-9]-*.md"))
+    for other in plans + [f for p in plans for f in record_files(p) if f not in own]:
+        mine = other == plan or other.parent == records_dir(plan)
         text = lines if other == plan else other.read_text(encoding="utf-8").splitlines()
         for i, line in enumerate(text):
             if other == plan and span[0] <= i < span[1]:
                 continue
-            if full_re.search(line) or (other == plan and short_re.search(line)):
+            if full_re.search(line) or (mine and short_re.search(line)):
                 hits.append(f"{other.relative_to(root)}:{i + 1}: {line.strip()[:140]}")
     return hits[:limit] + ([f"… {len(hits) - limit} more"] if len(hits) > limit else [])
+
+
+def task_and_parent(task_id: str) -> list[str]:
+    """The record keys whose records bind a task: its own and, for a subtask, its parent's."""
+    key = record_key(task_id)
+    parent = ".".join(key.split(".")[:2])
+    return [key] if parent == key else [key, parent]
 
 
 def tasks_intro(lines: list[str], all_markers: list[Marker]) -> str:
@@ -591,12 +878,19 @@ def show_task(root: Path, task_id: str, feature: str | None, context: bool = Fal
             if span:
                 print("\n".join(lines[span[0] : span[1]]).rstrip())
                 print()
+        for key in task_and_parent(task_id):
+            path = record_path(plan, key)
+            if path.is_file():
+                print(f"## Records of {key} ({path.relative_to(root)})\n")
+                print(path.read_text(encoding="utf-8").rstrip())
+                print()
 
     print("## Also read\n")
     print("- The plan's Provides and Consumes entries for what this task builds or uses.")
     print("- The brainstorm sections the header lists that this task touches (the brainstorm is the specification).")
     if not context:
-        print("- The plan's 'Generator version' and 'Risks and open points' sections (or rerun with --context).")
+        what = "and the task's records (`--records`)" if is_split(plan) else "sections"
+        print(f"- The plan's 'Generator version' and 'Risks and open points' {what} (or rerun with --context).")
 
 
 def cargo_filters(cmd: str) -> tuple[list[str], list[str], list[str]] | None:
@@ -650,10 +944,11 @@ def reads_stdin(cmd: str) -> bool:
     return len(operands) < (1 if pattern_given else 2)
 
 
-def risk_notes(rel: Path, lines: list[str], task_id: str) -> list[str]:
-    """Bullets of the plan's Risks and open points that name the task, or, for a subtask, its parent
-    as a whole: the whole bullet when its title names it, else only the clauses that do."""
-    span = named_section(lines, "risks")
+def risk_notes(rel: Path, lines: list[str], task_id: str, span: tuple[int, int] | None = None) -> list[str]:
+    """Bullets of the plan's Risks and open points (or of `span`, the heading line before it
+    excluded: a record file's) that name the task, or, for a subtask, its parent as a whole: the
+    whole bullet when its title names it, else only the clauses that do."""
+    span = span or named_section(lines, "risks")
     if span is None:
         return []
     short = task_id.split(".", 1)[1]
@@ -673,6 +968,17 @@ def risk_notes(rel: Path, lines: list[str], task_id: str) -> list[str]:
     return found
 
 
+def records_naming(root: Path, plan: Path, lines: list[str], task_id: str) -> list[str]:
+    """risk_notes() over the plan's Risks and then each of its record files, by name."""
+    found = risk_notes(plan.relative_to(root), lines, task_id)
+    for path in record_files(plan):
+        text = path.read_text(encoding="utf-8").splitlines()
+        # The records start at the first bullet, after the file's header (which names its task).
+        first = next((i for i, x in enumerate(text) if BULLET_RE.match(x) and not x[:1].isspace()), len(text))
+        found += risk_notes(path.relative_to(root), text, task_id, (first - 1, len(text)))
+    return found
+
+
 def show_acceptance(root: Path, task_id: str, feature: str | None) -> None:
     plan, lines, all_markers, target = load(root, task_id, feature)
     rel = plan.relative_to(root)
@@ -681,7 +987,7 @@ def show_acceptance(root: Path, task_id: str, feature: str | None) -> None:
         for label, paras in acceptance_groups(lines, all_markers, target)
     ]
     groups = [(label, hits) for label, hits in groups if hits]
-    risks = risk_notes(rel, lines, task_id)
+    risks = records_naming(root, plan, lines, task_id)
     print(f"# Acceptance for {task_id} ({rel})\n")
     if not groups:
         print("(no acceptance paragraph found; the roadmap still requires `just ci` green)")
@@ -726,9 +1032,64 @@ def show_acceptance(root: Path, task_id: str, feature: str | None) -> None:
     if risks:
         if commands or manual or not groups:  # otherwise the last paragraph ended with a blank line
             print()
-        print(f"## Risks and open points naming {task_id} (as-built corrections; they override the task text)\n")
+        where = "Risks and records" if is_split(plan) else "Risks and open points"
+        print(f"## {where} naming {task_id} (as-built corrections; they override the task text)\n")
         for note in risks:
             print(f"- {note}")
+
+
+def show_records(root: Path, task_id: str, feature: str | None) -> None:
+    """The task's record file and records (its own, then its parent's, for a subtask), in either
+    layout, then the records of other tasks and the Risks bullets that name it."""
+    key = record_key(task_id)
+    m = ID_RE.fullmatch(key)
+    if m is None:
+        sys.exit(f"{task_id!r} is not a task ID like P02.T5, P05.T1.a or P14.T54.b.i")
+    plan = find_plan(root, m.group(1), m.group(2), feature)
+    lines = plan.read_text(encoding="utf-8").splitlines()
+    ids = {mk.task_id for mk in task_markers(lines, markers(lines))}
+    file_key = record_file_key(key, ids)
+    if file_key is None:
+        sys.exit(f"{key} has no entry under Tasks in {plan.relative_to(root)}, nor has its parent")
+    split = is_split(plan)
+    print(f"# Records of {task_id} ({plan.relative_to(root)}, {'split' if split else 'inline'} records)\n")
+    path = records_dir(plan) / f"{file_key}.md"
+    print(f"Record file: {path.relative_to(root)}" + ("" if path.is_file() else " (not yet made)"))
+    if split:
+        print("A new record goes at the end of that file; if there is none, append it to the plan's Risks")
+        print(f"and run `python3 -I .claude/skills/implement-task/scripts/plan_split.py {plan.relative_to(root)} --write`.")
+    else:
+        print("This plan is not split: a new record goes at the end of its Risks and open points.")
+    print()
+    shown: set[str] = set()
+    items = [] if split else classified_risks(plan, lines)
+    for k in dict.fromkeys([file_key, *task_and_parent(key)[1:]]):
+        if split:
+            p = records_dir(plan) / f"{k}.md"
+            if p.is_file():
+                shown.add(str(p.relative_to(root)))
+                print(f"## {k}'s records ({p.relative_to(root)})\n")
+                print(p.read_text(encoding="utf-8").rstrip())
+                print()
+        else:
+            mine = [it for it in items if it.key == k]
+            if mine:
+                print(f"## {k}'s records (the Risks bullets filed under it)\n")
+                for it in mine:
+                    shown.add(f"{plan.relative_to(root)}:{it.start + 1}")
+                    print(f"[{plan.relative_to(root)}:{it.start + 1}]")
+                    print("\n".join(lines[it.start : it.body_end]))
+                    print()
+    if split:
+        rest = [n for n in records_naming(root, plan, lines, key) if n.split(":", 1)[0] not in shown]
+    else:
+        rest = [n for n in risk_notes(plan.relative_to(root), lines, key) if ":".join(n.split(":", 2)[:2]) not in shown]
+    if rest:
+        print(f"## Other records and Risks bullets naming {key}\n")
+        for note in rest:
+            print(f"- {note}")
+    if not shown and not rest:
+        print(f"(no records of {key} yet)")
 
 
 # A subject names a task when it starts with the ID, optionally after a Conventional Commits
@@ -762,11 +1123,15 @@ def show_list(root: Path, plan_filter: str | None, feature: str | None) -> None:
         for plan in files:
             found = True
             lines = plan.read_text(encoding="utf-8").splitlines()
+            if is_split(plan):
+                with_records = {f.stem for f in record_files(plan)}
+            else:
+                with_records = {it.key for it in classified_risks(plan, lines) if it.key}
             print(f"## {plan.relative_to(root)}")
-            for mk in markers(lines):
+            for mk in task_markers(lines, markers(lines)):
                 named = re.search(CONVENTIONAL_PREFIX + re.escape(mk.task_id) + r"(?![\w.])", log, re.M) is not None
                 indent = "  " if mk.task_id.count(".") == 2 else ""
-                flag = "  [commit]" if named else ""
+                flag = ("  [commit]" if named else "") + ("  [records]" if mk.task_id in with_records else "")
                 print(f"{indent}{mk.task_id}  {mk.title}{flag}")
             print()
     if plan_no and not found:
@@ -778,6 +1143,7 @@ def main() -> None:
     parser.add_argument("task_id", nargs="?", help="task ID such as P02.T5, P05.T1.a or R04.T3.c")
     parser.add_argument("--acceptance", action="store_true", help="print only the acceptance criteria")
     parser.add_argument("--context", action="store_true", help="also print the Generator version and Risks sections")
+    parser.add_argument("--records", action="store_true", help="print the task's records as built and its record file")
     parser.add_argument("--list", nargs="?", const="", metavar="PLAN", help="list tasks, optionally of one plan")
     parser.add_argument("--feature", help="plan set directory under docs/agent/plans/")
     args = parser.parse_args()
@@ -788,6 +1154,8 @@ def main() -> None:
         show_list(root, args.list or args.task_id, args.feature)
     elif task_id is None:
         parser.print_help()
+    elif args.records:
+        show_records(root, task_id, args.feature)
     elif args.acceptance:
         show_acceptance(root, task_id, args.feature)
     else:

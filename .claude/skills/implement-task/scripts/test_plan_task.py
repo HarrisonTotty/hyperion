@@ -163,8 +163,10 @@ class Listing(unittest.TestCase):
             with mock.patch.object(pt, "commit_subjects", return_value=log), contextlib.redirect_stdout(out):
                 pt.show_list(root, "R06", None)
             listing = out.getvalue().splitlines()
-        self.assertIn(f"  R06.T8.g  {WRAPPED_G}  [commit]", listing)
-        self.assertIn(f"  R06.T8.h  {WRAPPED_H}", listing)  # no commit names it: unbuilt
+        # Both have records: the Risks bullets that assign_records() files under them.
+        self.assertIn(f"  R06.T8.g  {WRAPPED_G}  [commit]  [records]", listing)
+        self.assertIn(f"  R06.T8.h  {WRAPPED_H}  [records]", listing)  # no commit names it: unbuilt
+        self.assertIn("  R06.T9.a  One line", listing)  # no records, no commit
         self.assertEqual(sum(line.split()[:1] == ["R06.T8.g"] for line in listing), 1)
 
     def test_load_finds_a_wrapped_task(self) -> None:

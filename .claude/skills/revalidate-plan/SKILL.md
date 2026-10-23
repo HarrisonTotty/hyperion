@@ -42,11 +42,16 @@ Read the target plan in full and the roadmap `README.md` of its plan set. List i
 root).
 
 Take the dependency plans from the plan's **Consumes** entries, not from the header's "Depends on"
-line, which folds in transitive dependencies. For each dependency, read its **Provides** and its
-whole **Risks and open points** section. That is where renamed items and changed behaviour are
-recorded, in one of two forms: "Deviations in …, as built." bullets, or numbered items tagged with
-a task, such as "R11. D4 re-checked (P02.T4)". Note any earlier "Re-validated at" record in the
-target plan too.
+line, which folds in transitive dependencies. For each dependency, read its **Provides**, its
+whole **Risks and open points** section and its records as built. That is where renamed items and
+changed behaviour are recorded, in one of two forms: "Deviations in …, as built." bullets, or
+numbered items tagged with a task, such as "R11. D4 re-checked (P02.T4)". An inline plan keeps
+its records in Risks. A split plan (one with `<plan-stem>/records/` beside it, and a
+`Task records as built:` line opening its Risks) keeps each task's in its own file there, and in
+Risks only the open points and the records of no one task: read the files of the tasks whose
+items the target consumes, with `plan_task.py <ID> --records` (the task's file, its parent's, and
+the other records that name it), or the whole folder when the dependency is consumed broadly.
+Note any earlier "Re-validated at" record in the target plan too.
 
 Then check what is built: grep for a few names from each dependency's Provides.
 
@@ -78,7 +83,7 @@ Steps 3 and 4 can go ahead while the agents run. Wait for every table before ste
 Compare every returned signature with its sketch yourself, including rows marked "match", and
 check other verdicts with grep before acting on them. A "missing" item means one of three things:
 a dependency task is unfinished (record it as pending, as in step 1), the item was deliberately
-dropped (the dependency's Risks records say so), or the plan invented it (fix the plan).
+dropped (the dependency's records say so), or the plan invented it (fix the plan).
 
 ## 3. Check for brainstorm drift
 
@@ -124,6 +129,8 @@ constants) are still what the plan assumes.
 
 Under **Risks and open points**, add an entry that says what changed and why, tersely, in the
 plan's existing style for such records (a bullet such as `**Re-validated at <short sha>.**`, or
-the plan's next numbered item), including any tasks pending re-validation. Then report to the
+the plan's next numbered item), including any tasks pending re-validation. It is a record of the
+whole plan: in a split plan it goes in Risks too, where its title's opening "Re-validated" keeps
+it when the plan is split again, and where `implement-task` looks for it. Then report to the
 user: the edits made, the questions that need the owner's ruling, and any risk found, such as a
 dependency's deviation that undermines a design note.
