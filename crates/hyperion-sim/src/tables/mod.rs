@@ -381,7 +381,7 @@ pub const MANIFEST: &[TableInfo] = &[
     },
     TableInfo {
         name: "substance_albedos",
-        revision: 1,
+        revision: 2,
         since_generator_version: 23,
         provisional: false,
     },

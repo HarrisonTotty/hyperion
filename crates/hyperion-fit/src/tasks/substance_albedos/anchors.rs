@@ -12,7 +12,7 @@ use hyperion_sim::substance::optics::{
 use hyperion_sim::substance::{self, by_key};
 
 use super::lab::{EndMemberGrain, cosines};
-use super::tests::{bond_albedo, fitted_row, manifest};
+use super::tests::{bond_albedo, fitted_darkened_row, fitted_row, manifest};
 use super::*;
 
 /// The allowance of every band, `Adopted`: a class passes within [lo ÷ 1.25, 1.25 × hi]
@@ -67,7 +67,10 @@ fn end_members() -> Vec<&'static EndMember> {
     for (_, optics) in substance::optics::rows() {
         match optics.input() {
             OpticsInput::Spectrum { end_member } => add(end_member),
-            OpticsInput::Mixture { parts } => parts.iter().for_each(|p| add(p.end_member())),
+            OpticsInput::Mixture { parts } => parts
+                .iter()
+                .filter_map(|p| p.end_member().lab())
+                .for_each(&mut add),
             OpticsInput::Index { .. }
             | OpticsInput::SizedIndex { .. }
             | OpticsInput::OpaqueSlab { .. }
@@ -517,4 +520,167 @@ fn substance_albedos_co_s_noise_floor_is_three_times_its_baseline_rms() {
             "{nm} nm: {k}"
         );
     }
+}
+
+/// The darkened row of `key` (P14.T49.k), as `substance::optics::darkened_rows` gives it.
+fn darkened_optics_of(key: &str) -> &'static CondensedOptics {
+    substance::optics::darkened_rows()
+        .find(|(id, _)| id.substance().key().as_str() == key)
+        .map_or_else(|| panic!("{key} is a darkened row"), |(_, optics)| optics)
+}
+
+/// The darkened row `key`'s w at `nm`, at its own grains, read from the task's own manifest.
+fn darkened_w_at(key: &str, nm: f64) -> f64 {
+    let manifest = manifest();
+    let mut inputs = FitInputs::load(&manifest).unwrap();
+    let optics = darkened_optics_of(key);
+    inputs
+        .grain(by_key(key).unwrap(), optics)
+        .unwrap()
+        .as_spectral()
+        .single_scattering_albedo(nm, optics.grain_diameter())
+}
+
+/// The reason or label a stand-in row of optics `optics` states.
+fn label_of(optics: &CondensedOptics) -> &'static str {
+    optics
+        .sources()
+        .iter()
+        .find(|s| s.covers() == "stand-in")
+        .map_or_else(
+            || panic!("{} states its reason", optics.key()),
+            hyperion_sim::substance::Source::citation,
+        )
+}
+
+/// The lower bound of the fresh `basalt_reduced` row's Bond albedo under a 5,772 K blackbody:
+/// 0.085, Mercury's mature spherical bolometric albedo 0.088 ± 0.003 less its 0.003 (Mallama 2017,
+/// "The Spherical Bolometric Albedo of Planet Mercury", arXiv:1703.02670, over 0–4 µm, a preprint;
+/// Domingue et al. 2011, PSS 59, 1853, a refereed 0.081 over 0.43–1.01 µm), a fresh row being
+/// brighter than its mature surface, whose weathering is P14.T54.b's (decision-p14-t49k Q5).
+const FRESH_MERCURY_FLOOR: f64 = 0.085;
+
+/// Mercury's fresh row from the bump (P14.T49.k; decision-p14-t49k Q5): the darkened
+/// `basalt_reduced`'s Bond albedo under a 5,772 K blackbody within its bounds, at or above
+/// [`FRESH_MERCURY_FLOOR`] and below 23's carbon-free mixture, with no allowance, as `basalt_fe`'s
+/// bounds take none; a stand-in labelled an upper bound, which states both, and, stated and not
+/// asserted, its reflectance factor at i 30°, e 0° and 750 nm against `feldspathic`'s, their ratio
+/// beside Braden and Robinson 2013's (JGR Planets 118, 1903) 1.9 ± 0.4, immature lunar over
+/// immature Mercurian material, and its spherical albedo in V beside NASA's V-band 0.068 (Mallama,
+/// Wang and Howard 2002, Icarus 155, 253: p 0.142 × q 0.478).
+#[test]
+fn substance_albedos_the_darkened_basalt_reduced_lies_within_its_bounds() {
+    let sun = |row: AlbedoRow| bond_albedo(&row[SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET], 5_772.0);
+    let carbon_free = sun(fitted_row("basalt_reduced"));
+    let darkened = fitted_darkened_row("basalt_reduced");
+    for (offset, reach) in fitted_row("basalt_reduced")
+        .into_iter()
+        .enumerate()
+        .skip(DATA_REACH_OFFSET)
+    {
+        assert!(
+            darkened[offset].total_cmp(&reach).is_eq(),
+            "the graphite part cuts no reach: {} against {reach} nm",
+            darkened[offset]
+        );
+    }
+    let bond = sun(darkened);
+    assert!(
+        bond >= FRESH_MERCURY_FLOOR && bond < carbon_free,
+        "basalt_reduced's Bond albedo {bond} against {FRESH_MERCURY_FLOOR} and {carbon_free}"
+    );
+    let optics = darkened_optics_of("basalt_reduced");
+    assert!(optics.is_stand_in());
+    let label = label_of(optics);
+    let r_row = reflectance_30(darkened_w_at("basalt_reduced", 750.0));
+    let r_highlands = reflectance_30(w_at("feldspathic", 750.0));
+    let ratio = r_highlands / r_row;
+    let a_s_v = darkened[7];
+    eprintln!(
+        "darkened basalt_reduced: Sun {bond:.4} (carbon-free {carbon_free:.4}), A_N V \
+         {:.4}, A_S V {a_s_v:.4}, REFF(30°) 750 nm {r_row:.4} against feldspathic's \
+         {r_highlands:.4}, ratio {ratio:.3}",
+        darkened[4]
+    );
+    for stated in [
+        "an upper bound".to_owned(),
+        format!("{bond:.4}"),
+        format!("{FRESH_MERCURY_FLOOR}"),
+        format!("{carbon_free:.4}"),
+        format!("{r_row:.3}"),
+        format!("{r_highlands:.3}"),
+        format!("ratio of {ratio:.2}"),
+        "1.9 ± 0.4".to_owned(),
+        format!("{a_s_v:.3}"),
+        "0.068".to_owned(),
+    ] {
+        assert!(
+            label.contains(&stated),
+            "basalt_reduced's label states {stated}"
+        );
+    }
+}
+
+/// `ferric`'s darkened row (P14.T49.k; decision-p14-t49k Q5): no band, its Bond albedo under a
+/// 5,772 K blackbody stated in its reason beside Mars's bright regions' 0.27 (Pleskot and Miner
+/// 1981, Icarus 45, 179, abstract), as context, and below 23's, its nanophase oxide fine.
+#[test]
+fn substance_albedos_the_darkened_ferric_states_its_value() {
+    let sun = |row: AlbedoRow| bond_albedo(&row[SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET], 5_772.0);
+    let (held, darkened) = (
+        sun(fitted_row("ferric")),
+        sun(fitted_darkened_row("ferric")),
+    );
+    eprintln!(
+        "darkened ferric: Sun {darkened:.4} (23's {held:.4}), A_N V {:.4}, A_S V {:.4}",
+        fitted_darkened_row("ferric")[4],
+        fitted_darkened_row("ferric")[7]
+    );
+    assert!(darkened < held, "{darkened} against 23's {held}");
+    let optics = darkened_optics_of("ferric");
+    assert!(optics.is_stand_in());
+    let label = label_of(optics);
+    for stated in [
+        format!("{darkened:.3}"),
+        "0.27".to_owned(),
+        "not a band".to_owned(),
+    ] {
+        assert!(label.contains(&stated), "ferric's reason states {stated}");
+    }
+}
+
+/// `basalt_fe` against undusted basaltic Mars (decision-p14-t49k Q4): its Bond albedo under a
+/// 5,772 K blackbody against the dark regions' 0.10–0.20 (Ruff and Christensen 2002, JGR 107,
+/// doi:10.1029/2001JE001580; Kieffer et al. 1977, JGR 82, 4249), within the allowance or, missing
+/// it, stated in its label with the miss's direction, as `mars_dust`'s test does; the row is
+/// unchanged by P14.T49.k, no fine opaque share being cited, and so is `komatiite`, whose reason
+/// says why.
+#[test]
+fn substance_albedos_basalt_fe_states_its_mars_miss() {
+    let row = fitted_row("basalt_fe");
+    let bond = bond_albedo(&row[SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET], 5_772.0);
+    let optics = optics_of("basalt_fe");
+    assert!(optics.is_stand_in());
+    let label = label_of(optics);
+    let verdict = if inside(bond, (0.10, 0.20)) {
+        "within"
+    } else if bond > 0.20 {
+        "brighter"
+    } else {
+        "darker"
+    };
+    for stated in [
+        format!("{bond:.4}"),
+        verdict.to_owned(),
+        "0.08–0.25".to_owned(),
+    ] {
+        assert!(
+            label.contains(&stated),
+            "basalt_fe's label states {stated} ({bond})"
+        );
+    }
+    assert!(
+        label_of(optics_of("komatiite")).contains("no fine phase"),
+        "komatiite states why it is unchanged"
+    );
 }

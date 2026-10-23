@@ -36,7 +36,9 @@
 //! An intimate mixture's w is the cross-section weighting w̄ = Σ (fⱼ ÷ Dⱼ) wⱼ ÷ Σ (fⱼ ÷ Dⱼ) (Hapke
 //! 2012, its section not read, as decision-p14-t49i-rock-mixtures §2.1 states it, with `Q_E` ≈ 1: a
 //! part's cross-section per volume is Nσ = 3f ÷ 2D), each part at the row's grains or at
-//! `FINE_GRAIN_DIAMETER` ([`MixtureGrain`]), over the wavelengths every part's spectrum covers.
+//! `FINE_GRAIN_DIAMETER` ([`MixtureGrain`]), over the wavelengths every part's spectrum covers. A
+//! part may be an opaque index file's slab (P14.T49.k: graphite), whose w holds its file's ends
+//! beyond them, so that it cuts no reach ([`PartGrain`]).
 //!
 //! # The opaque slab
 //!
@@ -51,8 +53,8 @@ use std::sync::Arc;
 use hyperion_sim::math;
 use hyperion_sim::substance::optics::{
     ASD_GEOMETRY, BECKMAN_INCIDENCE_DEG, EndMember, FINE_GRAIN_DIAMETER, Geometry, GrainClass,
-    GrainScaling, LabSpectrum, MixturePart, Photometry, ReflectanceLevels, SPECTRAL_BIN_EDGES_NM,
-    SPECTRAL_BINS, Spectrometer,
+    GrainScaling, LabSpectrum, MixturePart, OpaqueEndMember, PartEndMember, Photometry,
+    ReflectanceLevels, SPECTRAL_BIN_EDGES_NM, SPECTRAL_BINS, Spectrometer,
 };
 use hyperion_sim::tables::gauss_legendre::{GL32_NODES, GL32_WEIGHTS};
 use hyperion_sim::units::Metres;
@@ -780,10 +782,12 @@ impl SpectrometerTables {
     }
 }
 
-/// The end-members' grains, each inverted once in a fit, by name.
+/// The end-members' grains, each inverted once in a fit, by name, and the opaque index files'
+/// grains the mixtures read, each read once, by file.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct EndMemberCache {
     grains: BTreeMap<&'static str, Arc<EndMemberGrain>>,
+    opaque: BTreeMap<&'static str, Arc<OpaqueGrain>>,
 }
 
 impl EndMemberCache {
@@ -791,6 +795,35 @@ impl EndMemberCache {
     #[must_use]
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// Whether the opaque grain of index file `file` has been read.
+    #[must_use]
+    pub(crate) fn has_opaque(&self, file: &str) -> bool {
+        self.opaque.contains_key(file)
+    }
+
+    /// Holds `grain` as the opaque grain of index file `file`, which its reader read from R08's
+    /// file ([`super::infrared::visible_piece`]).
+    pub(crate) fn insert_opaque(&mut self, file: &'static str, grain: OpaqueGrain) {
+        self.opaque.insert(file, Arc::new(grain));
+    }
+
+    /// The opaque grain of `end_member`'s index file, read before.
+    ///
+    /// # Errors
+    ///
+    /// [`FitAlbedoError::OpaquePartNotRead`] if its file has not been read
+    /// ([`insert_opaque`](Self::insert_opaque)).
+    pub(crate) fn opaque(
+        &self,
+        end_member: &OpaqueEndMember,
+    ) -> Result<Arc<OpaqueGrain>, FitAlbedoError> {
+        self.opaque.get(end_member.file()).map(Arc::clone).ok_or(
+            FitAlbedoError::OpaquePartNotRead {
+                file: end_member.file(),
+            },
+        )
     }
 
     /// The grain of `end_member`, inverted on first use.
@@ -813,38 +846,100 @@ impl EndMemberCache {
     }
 }
 
+/// A mixture part's grain: a laboratory end-member's, or an opaque index file's (P14.T49.k), each
+/// shared with the fit's cache.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PartGrain {
+    /// A laboratory end-member's.
+    Lab(Arc<EndMemberGrain>),
+    /// An opaque index file's, its w `S_e`, held at its file's ends beyond them.
+    Opaque(Arc<OpaqueGrain>),
+}
+
+impl SpectralGrain for PartGrain {
+    fn reach_nm(&self) -> [f64; 2] {
+        match self {
+            Self::Lab(grain) => grain.reach_nm(),
+            Self::Opaque(grain) => grain.reach_nm(),
+        }
+    }
+
+    fn knots_nm(&self) -> Vec<f64> {
+        match self {
+            Self::Lab(grain) => grain.knots_nm(),
+            Self::Opaque(grain) => grain.knots_nm(),
+        }
+    }
+
+    /// The grain's w at the wavelength; an opaque grain's beyond its file's grid its value at the
+    /// grid's nearer end ([`OpaqueGrain`]'s piece holds its end knots).
+    fn single_scattering_albedo(&self, wavelength_nm: f64, diameter: Metres) -> f64 {
+        match self {
+            Self::Lab(grain) => grain.single_scattering_albedo(wavelength_nm, diameter),
+            Self::Opaque(grain) => grain.single_scattering_albedo(wavelength_nm, diameter),
+        }
+    }
+}
+
 /// An intimate mixture's grain (the [module documentation](self)): its parts' grains and weights.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MixtureGrain {
     /// Each part's grain, volume fraction and grain class.
-    parts: Vec<(Arc<EndMemberGrain>, f64, GrainClass)>,
+    parts: Vec<(PartGrain, f64, GrainClass)>,
     reach: [f64; 2],
 }
 
 impl MixtureGrain {
-    /// The mixture of `parts`, each end-member's grain from `cache`.
+    /// The mixture of `parts`, each end-member's grain from `cache`, its opaque index files' read
+    /// into it before. Its reach is its laboratory parts' shared wavelengths: an opaque part's w
+    /// holds its file's ends beyond them and cuts no reach (P14.T49.k; decision-p14-t49k Q2), and
+    /// only a mixture with no laboratory part takes its opaque parts' shared reach.
     ///
     /// # Errors
     ///
-    /// As [`EndMemberCache::grain`]; [`FitAlbedoError::EmptyMixture`] if there are no parts, and
-    /// [`FitAlbedoError::Spectrum`] if the parts' spectra share no wavelength.
+    /// As [`EndMemberCache::grain`] and [`EndMemberCache::opaque`];
+    /// [`FitAlbedoError::EmptyMixture`] if there are no parts, and [`FitAlbedoError::Spectrum`]
+    /// if the parts' spectra share no wavelength.
     pub(crate) fn new(
         parts: &[MixturePart],
         library: &LabLibrary,
         tables: &SpectrometerTables,
         cache: &mut EndMemberCache,
     ) -> Result<Self, FitAlbedoError> {
-        let first = parts.first().ok_or(FitAlbedoError::EmptyMixture)?;
+        parts.first().ok_or(FitAlbedoError::EmptyMixture)?;
         let mut grains = Vec::with_capacity(parts.len());
-        let mut reach = [BINS_FROM_NM, BINS_TO_NM];
+        let mut lab_reach = None;
+        let mut opaque_reach = [BINS_FROM_NM, BINS_TO_NM];
+        let shared = |reach: [f64; 2], [lo, hi]: [f64; 2]| [reach[0].max(lo), reach[1].min(hi)];
         for part in parts {
-            let grain = cache.grain(part.end_member(), library, tables)?;
-            let [lo, hi] = grain.reach_nm();
-            reach = [reach[0].max(lo), reach[1].min(hi)];
+            let grain = match part.end_member() {
+                PartEndMember::Lab(end_member) => {
+                    let grain = cache.grain(end_member, library, tables)?;
+                    let from = lab_reach.unwrap_or([BINS_FROM_NM, BINS_TO_NM]);
+                    lab_reach = Some(shared(from, grain.reach_nm()));
+                    PartGrain::Lab(grain)
+                }
+                PartEndMember::Opaque(end_member) => {
+                    let grain = cache.opaque(end_member)?;
+                    opaque_reach = shared(opaque_reach, grain.reach_nm());
+                    PartGrain::Opaque(grain)
+                }
+            };
             grains.push((grain, part.volume_fraction(), part.grain()));
         }
+        let reach = lab_reach.unwrap_or(opaque_reach);
         if reach[0] >= reach[1] {
-            let file = first.end_member().spectra()[0].file();
+            let lab_file = parts
+                .iter()
+                .find_map(|part| part.end_member().lab())
+                .map(|e| e.spectra()[0].file());
+            let opaque_file = parts.iter().find_map(|part| match part.end_member() {
+                PartEndMember::Opaque(e) => Some(e.file()),
+                PartEndMember::Lab(_) => None,
+            });
+            let file = lab_file
+                .or(opaque_file)
+                .expect("a mixture with parts has a laboratory or an opaque part");
             return Err(spectrum_error(
                 file,
                 "a mixture's spectra share no wavelength",

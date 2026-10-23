@@ -39,7 +39,9 @@ use std::path::{Path, PathBuf};
 
 use hyperion_sim::GENERATOR_VERSION;
 use hyperion_sim::substance::aerosol::{self, FileVariant};
-use hyperion_sim::substance::optics::{EndMember, GrainScaling, LabSpectrum, OpticsInput};
+use hyperion_sim::substance::optics::{
+    EndMember, GrainScaling, LabSpectrum, OpticsInput, PartEndMember,
+};
 use hyperion_sim::substance::rayleigh::rayleigh_cross_section;
 use hyperion_sim::substance::{
     self, CondensedColumns, CondensedPhase, EQUILIBRIUM_HYDROGEN, Element, GrainDensity, LevelSet,
@@ -428,7 +430,14 @@ fn input_lines(w: &mut GoldenWriter, label: &str, input: OpticsInput) {
                     ),
                     part.volume_fraction(),
                 );
-                end_member(w, &part_label, e);
+                match e {
+                    PartEndMember::Lab(e) => end_member(w, &part_label, e),
+                    PartEndMember::Opaque(e) => w.line(&format!(
+                        "{part_label}: {} by the opaque slab of {}",
+                        e.name(),
+                        e.file()
+                    )),
+                }
             }
         }
         OpticsInput::Levels { levels } => {

@@ -717,6 +717,87 @@ fn the_airless_cap_is_keyed_on_the_lid_s_row() {
     );
 }
 
+/// `run`'s result with every landed hold of version 24 at its bump's rules
+/// (decision-t24i-airless-state D3.3): the darkened rows (P14.T49.k), the read densities
+/// (P14.T49.n), the compressed liquids, the unlit mean, and the escape's batch with the Rayleigh
+/// floor it switches. The moon bulk's and the cold traps' rules are the system's and the record's,
+/// which no piece of the area mix reads.
+fn under_24_s_holds<R>(run: impl FnOnce() -> R) -> R {
+    use crate::planetary::chem::escape::{EscapeRules, with_rules};
+    use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
+    use crate::substance::optics::{RowDarkeningRules, with_row_darkening};
+    use crate::substance::{
+        CompressedLiquidsRules, ReadDensitiesRules, with_compressed_liquids, with_read_densities,
+    };
+    with_row_darkening(RowDarkeningRules::Darkened, || {
+        with_read_densities(ReadDensitiesRules::Read, || {
+            with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
+                with_unlit_mean(UnlitMeanRules::Floored, || {
+                    with_rules(EscapeRules::Batch, run)
+                })
+            })
+        })
+    })
+}
+
+/// Under 24's rows, every landed hold of 24 in force (P14.T49.k; decision-p14-t49k Q5): the
+/// darkened `basalt_reduced`, graphite-bearing, lies above the Moon's 0.11, so the cap still holds
+/// Mercury's lid at 0.11, and a Vesta-like `basalt_fe` lid too, its row unchanged, whose `A_N` in V
+/// is 23's to the bit (`reference.rs`'s 0.410); under air the two darkened rows are their own,
+/// darker than 23's, stated with Mars by decision-pre-23-review item 13's terms (its `basalt_fe`
+/// lid with `ferric` over 0.31 of the land, its ice and cloud aside).
+#[test]
+fn under_24_s_rows_the_airless_cap_holds_mercury_and_a_vesta_like_basalt() {
+    use crate::planetary::hooks::crust::CrustLithology;
+
+    let sun = sun_bands();
+    let moon = SurfaceState::Airless.albedo(SurfaceMaterial::Rock).value();
+    let read = || {
+        let lid = |lithology: CrustLithology, state| {
+            Regolith::with_lid(lithology.substance(), SurfaceMaterial::Rock).bond(state, &sun)
+        };
+        let basalt_fe = id("basalt_fe").substance().condensed_optics().unwrap();
+        (
+            solid_bond(id("basalt_reduced"), &sun).bond,
+            solid_bond(id("ferric"), &sun).bond,
+            solid_bond(id("basalt_fe"), &sun).bond,
+            basalt_fe.normal_albedo_bvr()[1],
+            lid(CrustLithology::ReducedBasalt, SurfaceState::Airless),
+            lid(CrustLithology::IronRichBasalt, SurfaceState::Airless),
+            lid(CrustLithology::ReducedBasalt, SurfaceState::Temperate),
+        )
+    };
+    let held = read();
+    let (reduced, ferric, basalt_fe, basalt_fe_v, mercury, vesta, under_air) =
+        under_24_s_holds(read);
+    assert!(
+        reduced > moon && reduced < held.0,
+        "basalt_reduced {reduced} against the cap {moon} and 23's {}",
+        held.0
+    );
+    assert!(ferric < held.1, "ferric {ferric} against 23's {}", held.1);
+    assert_same_bits(basalt_fe, held.2);
+    assert_same_bits(basalt_fe_v, held.3);
+    assert!((basalt_fe_v - 0.410).abs() < 5e-4, "{basalt_fe_v}");
+    for (body, capped) in [("Mercury", mercury), ("a Vesta-like basalt_fe", vesta)] {
+        assert_eq!(capped.stand_in, Some(StandIn::SpaceWeathering), "{body}");
+        assert_same_bits(capped.bond, moon);
+    }
+    assert_eq!(under_air.stand_in, None);
+    assert_same_bits(under_air.bond, reduced);
+    let mars = |lid: f64, deposit: f64| 0.69 * lid + 0.31 * deposit;
+    eprintln!(
+        "under 24's rows, about a Sun: basalt_reduced {:.4} → {reduced:.4} (airless, capped, \
+         {:.4}); ferric {:.4} → {ferric:.4}; basalt_fe {basalt_fe:.4} unchanged; Mars by item \
+         13's terms, ice and cloud aside, {:.4} → {:.4}",
+        held.0,
+        mercury.bond,
+        held.1,
+        mars(held.2, held.1),
+        mars(basalt_fe, ferric),
+    );
+}
+
 /// The column weights of an air of `fractions` by mole at a surface pressure `pressure` (the
 /// partition tests' rule): each x μ ÷ μ̄ of it.
 fn weights_of(pressure: f64, fractions: &[(&str, f64)]) -> Vec<(SubstanceId, Pascals)> {

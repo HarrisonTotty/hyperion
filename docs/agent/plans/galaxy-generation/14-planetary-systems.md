@@ -6118,31 +6118,66 @@ rows' values.
     worlds' and the reference Earth's liquid records, and the goldens.
   - _Accept:_ `cargo test -p hyperion-sim substance::liquid`;
     `cargo test -p hyperion-fit liquid_optics`; `cargo run -p hyperion-fit -- check`.
-- **P14.T49.k The crystalline rows' darkening** (23 → 24, a rider; lane `p14-gate-24`, after
-  P14.T49.n's rows; before P14.T54.b's Mars check and before T54.b lifts the 0.11 cap on
-  `basalt_reduced`, else T54.b states both; decision-pre-23-review §5 and items 3, 13, 16 and
-  34, 2026-10-20).
+- **P14.T49.k The crystalline rows' darkening** (a rider of 24 or 25; lane `p14-gate-24`, after
+  P14.T49.n's rows and after P14.T56.g; it rides 24 only if it lands before P14.T54.b's last
+  member checkpoint, T24.d with T52.d's, else 25, its hold renumbered; T54.b states Mars and
+  keeps the 0.11 cap on `basalt_reduced` either way; decision-pre-23-review §5 and
+  its items 3, 13, 16 and 34, 2026-10-20; decision-p14-t49k, 2026-10-23).
   - T49.i's crystalline rows are clean-separates upper bounds, fresh and unweathered. At 23 the
     generated Mars's `basalt_fe` lid gives it a Bond albedo of 0.344 against the measured 0.250,
     and Mercury's fresh `basalt_reduced` row is 0.53 about the Sun, held at 0.11 only by the
     airless cap.
-  - It re-derives `basalt_fe`, `ferric`, `komatiite` and `basalt_reduced` with their fine opaque
-    or carbon phases in T49.i's two-size mixture (decision-p14-t49i-rock-mixtures (b)), or from
-    licensed whole-rock spectra:
-    - `basalt_reduced` with Mercury's carbon as fine graphite at 1–3 wt% (Peplowski et al. 2016;
-      Klima et al. 2018);
-    - `basalt_fe` with its ilmenite at a cited fine fraction.
+  - It adds a row's fine opaque or carbon phase in T49.i's two-size mixture
+    (decision-p14-t49i-rock-mixtures (b)) only where a source gives the phase as fine and its
+    share, at the adopted 1 µm, never fitted:
+    - `basalt_reduced`: Mercury's global near-surface carbon, 1.4 ± 0.9 wt% (Peplowski et
+      al. 2015, PSS 108, 98, from the GRS, "not a definitive detection"), all as graphite, an
+      assumption (Xu et al. 2024, Nat. Astron. 8, 280, find under 1 wt% as intergrain graphite).
+      Graphite enters as an index-file part, `graphite.json`'s opaque slab (w = S_e, a 1 µm grain
+      being opaque), which holds its 700–780 nm bin beyond 780 nm as the `graphite` row does,
+      labelled, without cutting the mixture's reach. Murchie et al. 2015 (Icarus 254, 287) model
+      Mercury's dark phases the same way, as intimate mixtures at grains of 1 µm or more. The
+      low-reflectance material's 1–3 wt% (Peplowski et al. 2016) and Klima et al. 2018's 2.5
+      and 4 wt% are excesses over the local mean, and are not used. Carbon black is not used;
+    - `ferric`: the nanophase ferric oxide (Morris et al. 2013) at the fine size, as ferrihydrite
+      GDS75; its hematite, magnetite and `basalt_fe`'s parts stay at the form's grains;
+    - `basalt_fe` unchanged: no source gives its ilmenite's fine share or blade thickness (the
+      Lunar Sourcebook's §6.1.3 gives the habit only), and splib07a's whole-rock BR93-46B is a
+      rock surface, not the form's powder. Its Mars miss is stated in its label;
+    - `komatiite` unchanged: Arndt 1976's mode has no opaque, and no fine phase is cited.
   - It covers the crystalline silicate rows only (decision-p14-t54a-ganymede §1.3); the icy lids
     are P14.T49.m's. The darkening is this task's rows and P14.T54.b's weathering, and the two
-    never darken `basalt_fe` twice.
-  - It is a value change: the registry's `[albedo]` re-blesses, and the record moves at its bump.
-    It lands pure or held, as the batch's members do (decision-bump-plan-after-22 §6).
-  - _Tests:_ the bands, undusted basaltic Mars 0.10–0.20 (Ruff and Christensen 2002; Kieffer et
-    al. 1977) for `basalt_fe` and Mercury's 0.068–0.088 for `basalt_reduced`. For P14.T54.b, the
-    0.088's source is re-verified: the check found no bolometric Bond albedo in Mallama et al.
-    2017, and NASA's 0.068 is V-band spherical.
-  - _Files:_ the four rows in `substance/` and `tests/golden/substance/registry.golden`.
-  - _Accept:_ `cargo test -p hyperion-sim substance`.
+    never darken `basalt_fe` twice: Λ stays fitted on the unchanged `basalt_fe` and `feldspathic`.
+  - It does not lift the 0.11 cap on `basalt_reduced`. Its row stays above the cap, so Mercury
+    and the capped bodies keep 0.11. Mercury's mature 0.088 is carbon with metallic iron (Xu et
+    al. 2024; Trang et al. 2017), and part of it is weathering: P14.T54.b's.
+  - _The hold:_ `ROW_DARKENING_VERSION` at `Substance::condensed_optics()`, P14.T49.n's pattern:
+    a second static for the two rows, a test-only switch with its restore guard, and a tripwire.
+    Every golden is byte-identical before the bump. `substance_albedos` emits 57 items, the 55 to
+    the bit and the two rows' `*_DARKENED_ALBEDO`, an extension, and `tables.lock` moves. At the
+    bump the wiring lane swaps the rows and drops the superseded items, restamps
+    `substance_albedo`, blesses the registry's `[albedo]` and refits `space_weathering`, with Λ
+    checked to the bit.
+  - _Tests,_ in `hyperion-fit`, each by its Bond albedo under a 5,772 K blackbody:
+    - `basalt_reduced` within bounds: at or above 0.085, Mercury's mature 0.088 less its 0.003
+      (Mallama 2017, arXiv:1703.02670, a preprint; Domingue et al. 2011's refereed 0.081 over
+      the band 0.43–1.01 µm), a fresh row being brighter than its mature surface; and below the
+      carbon-free mixture's 0.5275. Stated in its label: its reflectance at i 30°, e 0°
+      and 750 nm over `feldspathic`'s, beside Braden and Robinson 2013's immature lunar over
+      Mercurian 1.9 ± 0.4, and its V-band spherical albedo beside NASA's 0.068;
+    - `basalt_fe`: its bounds stay. Undusted basaltic Mars's 0.10–0.20 (Ruff and
+      Christensen 2002; Kieffer et al. 1977) within the allowance of 1.25, or the miss stated in
+      its label with its direction, as `mars_dust`'s test does;
+    - `ferric` and `komatiite`: no band; `ferric`'s value stated;
+    - in the sim, under the switch with every landed hold of the version in force: Mercury and a
+      Vesta-like `basalt_fe` body still at the cap's 0.11, and `reference.rs`'s `basalt_fe` at
+      its 0.410; Mars stated.
+  - _Files:_ `substance/{optics, rows/optics, rows/optics/lab}.rs`, `tables/substance_albedo.rs`,
+    `tables.lock`, `hyperion-fit`'s `substance_albedos` task with its anchors, tests and
+    manifest, and `tests/substance_golden.rs` (the new part kind only); at the bump,
+    `tests/golden/substance/registry.golden`.
+  - _Accept:_ `cargo test -p hyperion-sim substance`;
+    `cargo test -p hyperion-fit substance_albedos`; `cargo run -p hyperion-fit -- check`.
 - **P14.T49.l The regolith's pore gas, and the airless ice's inertia** (rides 24 if ready, else the
   next planetary-moving train; joined to T49.j's law, which R09.T13.c reuses;
   decision-pre-23-review §5 and item 7, 2026-10-20; the `H2O` form's follow-up, "main",
@@ -8183,9 +8218,9 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
     material, photometry template, inventory and tidal material; their T_eq stays near 253 K under
     the same lid.
 - **P14.T56.g A hot ice bulk's surface, and its ice's history** (23 → 24, a serve-gate must-fix
-  for its first item; lane `p14-gate-24`, after P14.T49.n; decision-bump-plan-after-22, "Rulings
-  before T53.a lands" R1.6 and "p14-gate-24's questions" G2, with main's rulings of 2026-10-22;
-  decision-p14-t56g, 2026-10-23).
+  for its first item; lane `p14-gate-24`, after P14.T49.n and before P14.T49.k (decision-p14-t49k
+  Q0); decision-bump-plan-after-22, "Rulings before T53.a lands" R1.6 and "p14-gate-24's
+  questions" G2, with main's rulings of 2026-10-22; decision-p14-t56g, 2026-10-23).
   - **The surface of a hot ice bulk (a must-fix before the serve gate).** Where P14.T56.f's
     retention arm thinned a bulk's ice (t_hot > 0 and w′ < w₀), the bulk keeps its class (its
     interior keeps its ice under the heated shell), but its surface is the shell's rock lag: its
@@ -28087,3 +28122,64 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - _Deferred findings (2026-10-13 rule):_ `golden_systems()`'s cache pins the escape's rules
     but not the moon bulk's; every caller fills it outside a switch today (the determinism
     review's note).
+- **Deviations in P14.T49.k, as built (`p14-gate-24`, 2026-10-23).** `GENERATOR_VERSION` stays 23.
+  Every golden, `substances.json` and `space_weathering`'s lock entry are byte-identical.
+  `ROW_DARKENING_VERSION` = 24 (renumbered if T49.k rides 25; decision-p14-t49k Q0) sits at
+  `Substance::condensed_optics()`, on P14.T49.n's pattern: `RowDarkeningRules { Held, Darkened }`,
+  a `DARKENED: [_; 2]` static, a tripwire and its panic half under `cfg(panic = "unwind")`, and
+  the switch `with_row_darkening`, named for its enum as T49.n's are, not the ruling's
+  `with_darkened_rows`.
+  - _The part._ `PartEndMember { Lab, Opaque }`, `OpaqueEndMember`, `MixturePart::opaque`.
+    `GRAPHITE_SLAB` is `graphite.json`'s S_e (w = S_e, a 1 µm grain being opaque: its absorption
+    length λ ÷ 4πk is 0.015–0.093 µm over 0.31–2.48 µm). Beyond the file its w holds the 780 nm
+    value, and the 380 nm value below it, since the row's reach starts at 301 nm: the part-level
+    form of the `graphite` row's held bin, labelled. A mixture's reach is its laboratory parts'.
+    No row of 23 has the part.
+  - _The rows._ `basalt_reduced`: 23's silicates × 0.9817, plus graphite 0.0183 fine (1.4 wt% at
+    2,261 and 2,970 kg m⁻³: (1.4 ÷ 2,261) ÷ (1.4 ÷ 2,261 + 98.6 ÷ 2,970) = 1.831 vol%; Peplowski
+    et al. 2015's "not a definitive detection" as the ruling relays it, its abstract not re-read).
+    `ferric`: its nanophase ferric oxide fine as ferrihydrite at 0.0736 by volume, the rest 23's
+    rescaled (decision-p14-t49k's addendum, item 3, correcting the ruling's 0.0619): Morris et al.
+    2013's 6.8 wt% (Table 3) is the oxide's Fe₂O₃ equivalent, 0.8312 of ferrihydrite's mass (2.5 ×
+    159.687 ÷ 480.285), so 8.181 wt% ferrihydrite beside hematite 1.0, magnetite 1.8 and the
+    rock's 90.4, the water added to the light-element-free total (at 89.02 for the rock it would
+    be 0.0746); 23's held `FERRIC_MODE` is untouched. The labels of `basalt_fe` (its Mars
+    miss, 0.3385 against 0.10–0.20, brighter, outside 0.08–0.25) and `komatiite` (its own reason)
+    change at 23; no value changes, and no golden prints a label.
+  - _The fit._ A new `pub fn substance::optics::darkened_rows()`, read only by the fit before the
+    bump; `fit` returns `FittedRows { rows, darkened }`; `FitAlbedoError::OpaquePartNotRead`. The
+    table holds 57 items, the 55 to the bit, deleted and re-emitted `--since 23` at the task's
+    revision 2 (an algorithm change: the opaque part and its reach rule), an explicit exception to
+    decision-p14-t49h-liquids §5's conditions 5 and 6 (decision-p14-t49k's addendum, item 1: only
+    this table's lock entry, header and fingerprint move). The manifest stays: `graphite.json` is
+    already the `graphite` row's.
+  - _Computed_ (the ruling's prototype in brackets): `basalt_reduced` Sun 0.1940 [0.194], A_N V
+    0.2729 [0.273], A_S V 0.1963 [0.197]; its REFF(30°) at 750 nm 0.194 against `feldspathic`'s
+    0.636, a ratio of 3.27 [3.26] against Braden and Robinson 2013's immature lunar over Mercurian
+    1.9 ± 0.4, so the fresh row is 1.7× darker against `feldspathic` than measured (stated, not
+    asserted). `ferric` Sun 0.2123 [0.214 at 0.0619], A_N V 0.1154 [0.123], A_S V 0.0671. Under
+    24's holds
+    Mercury's and a Vesta-like `basalt_fe` lid stay at the cap's 0.11 and `basalt_fe`'s A_N V at
+    0.410, each to the bit; Mars by decision-pre-23-review item 13's terms goes 0.3318 → 0.2993
+    [0.30–0.31], ice and cloud aside.
+  - _The sim test_ uses its own `under_24_s_holds` (decision-t24i-airless-state D3.3's one helper
+    has not landed): it sets the holds the area mix reads. _Accept, as built:_ also
+    `cargo test -p hyperion-sim under_24_s_rows`, whose test the entry's `substance` filter
+    misses.
+  - The record of decision-pre-23-review's darkness ("Mercury's darkness at 24 is P14.T49.k's")
+    is superseded by Q0 and Q5: Mercury keeps the cap's 0.11 at 24, and T49.k may ride 25.
+  - _Deferred findings (2026-10-13 rule; decision-p14-t49k, plan text 5 and 6):_
+    - _The cap on `basalt_reduced`._ It stays past P14.T49.k (decision-p14-t49k Q5). Its deletion
+      needs the weathering of an Fe-poor, carbon-bearing regolith, which darkens without npFe
+      (Shackelford et al. 2025) and matures 2–4 times faster than the Moon's (Braden and
+      Robinson 2013). Owner not assigned.
+    - Draine's graphite infrared set: +0.007 on `basalt_reduced`, +0.009 on `graphite`.
+    - `basalt_fe`'s fine opaque share, and a Martian basalt mode.
+    - The carbon's form between free 1 µm grains (0.20) and embedded submicroscopic carbon (A_S V
+      about 0.03 from 0.2 wt%), ruling (d) with graphite's index.
+    - Amorphous carbon's share and spectrum.
+    - Also from the science check: at the fine size `ferric`'s ferrihydrite takes about 82% of
+      the cross-section; graphite's E∥c component alone is translucent at 1 µm beyond about 1 µm
+      (the ε-average hides it); the mode's own mean density, 2,981 kg m⁻³, gives 1.838 vol% of
+      graphite; for P14.T54.b, its Mercury allowance's edges, 0.070–0.114, mix bases (0.088 ÷
+      1.25 = 0.0704 but 0.091 × 1.25 = 0.114; from 0.085 the lower edge is 0.068).

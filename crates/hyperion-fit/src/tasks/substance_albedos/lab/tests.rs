@@ -220,8 +220,8 @@ fn substance_albedos_a_mixture_weights_by_cross_section() {
     };
     let mixture = MixtureGrain {
         parts: vec![
-            (Arc::new(grain(0.9)), 0.9, GrainClass::Form),
-            (Arc::new(grain(0.1)), 0.1, GrainClass::Fine),
+            (PartGrain::Lab(Arc::new(grain(0.9))), 0.9, GrainClass::Form),
+            (PartGrain::Lab(Arc::new(grain(0.1))), 0.1, GrainClass::Fine),
         ],
         reach: [400.0, 900.0],
     };
@@ -393,5 +393,77 @@ fn substance_albedos_spectra_that_share_no_wavelength_are_refused() {
     assert_eq!(
         MixtureGrain::new(&[], &lib, &tables, &mut cache),
         Err(FitAlbedoError::EmptyMixture)
+    );
+}
+
+/// An opaque index file's part (P14.T49.k; decision-p14-t49k Q2): refused until its file is read;
+/// its w, the slab's `S_e`, beyond its file's grid held at the grid's nearer end; weighted by
+/// cross-section as any part; and the mixture's reach its laboratory parts', which the opaque part
+/// does not cut, while a mixture of opaque parts alone takes theirs.
+#[test]
+fn substance_albedos_an_opaque_part_holds_its_file_s_ends_and_cuts_no_reach() {
+    static BLUE: [LabSpectrum; 1] = [LabSpectrum::new(
+        "splib07a_Blue_BECKa_AREF.txt",
+        Spectrometer::Beckman,
+    )];
+    let lib = library(&[(
+        "splib07a_Blue_BECKa_AREF.txt",
+        "Blue BECKa AREF",
+        &[0.3, 0.35, 0.4],
+    )]);
+    let tables = SpectrometerTables::new(&LUNAR_REGOLITH);
+    let source = hyperion_sim::substance::by_key("S8")
+        .and_then(|id| id.substance().condensed_optics())
+        .unwrap()
+        .sources()[0];
+    let blue: &'static EndMember = Box::leak(Box::new(EndMember::new(
+        "blue",
+        &BLUE,
+        GrainScaling::Held,
+        source,
+    )));
+    let slab: &'static OpaqueEndMember =
+        Box::leak(Box::new(OpaqueEndMember::new("slab", "slab.json", source)));
+    let parts = [
+        MixturePart::new(blue, 0.9, GrainClass::Form),
+        MixturePart::opaque(slab, 0.1, GrainClass::Fine),
+    ];
+    let mut cache = EndMemberCache::new();
+    assert_eq!(
+        MixtureGrain::new(&parts, &lib, &tables, &mut cache),
+        Err(FitAlbedoError::OpaquePartNotRead { file: "slab.json" })
+    );
+    assert!(!cache.has_opaque("slab.json"));
+    let piece = Piece::new(
+        420.0,
+        480.0,
+        Curve::new(&[(420.0, 2.0), (480.0, 3.0)], Interpolation::Linear),
+        Curve::new(&[(420.0, 1.0), (480.0, 1.5)], Interpolation::LogLinear),
+    );
+    cache.insert_opaque("slab.json", OpaqueGrain::new(piece));
+    assert!(cache.has_opaque("slab.json"));
+    let mixture = MixtureGrain::new(&parts, &lib, &tables, &mut cache).unwrap();
+    let [lo, hi] = mixture.reach_nm();
+    assert!(
+        lo.total_cmp(&400.0).is_eq() && hi.total_cmp(&500.0).is_eq(),
+        "{lo}-{hi}"
+    );
+    let d = Metres::new(70.0e-6);
+    let lab = cache.grain(blue, &lib, &tables).unwrap();
+    let (a, b) = (0.9 / 70.0e-6, 0.1 / 1.0e-6);
+    for (nm, (n, k)) in [(495.0, (3.0, 1.5)), (405.0, (2.0, 1.0))] {
+        let held = hemispherical_fresnel_reflectance(n, k);
+        let expected = (a * lab.single_scattering_albedo(nm, d) + b * held) / (a + b);
+        let w = mixture.single_scattering_albedo(nm, d);
+        assert!(
+            (w - expected).abs() < 1e-15,
+            "{nm} nm: {w} against {expected}"
+        );
+    }
+    let alone = MixtureGrain::new(&parts[1..], &lib, &tables, &mut cache).unwrap();
+    let [lo, hi] = alone.reach_nm();
+    assert!(
+        lo.total_cmp(&420.0).is_eq() && hi.total_cmp(&480.0).is_eq(),
+        "{lo}-{hi}"
     );
 }

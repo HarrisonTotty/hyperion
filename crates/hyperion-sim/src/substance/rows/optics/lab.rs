@@ -20,7 +20,7 @@
 //! 1.533 and anorthite's 1.582 in An). An opaque end-member's n is not used, since its w is held.
 
 use super::super::super::optics::{
-    EndMember, GrainClass, GrainScaling, LabSpectrum, MixturePart, Spectrometer,
+    EndMember, GrainClass, GrainScaling, LabSpectrum, MixturePart, OpaqueEndMember, Spectrometer,
 };
 use super::super::super::{Basis, Source};
 use crate::units::Metres;
@@ -77,6 +77,12 @@ const fn form(end_member: &'static EndMember, fraction: f64) -> MixturePart {
 #[must_use]
 const fn fine(end_member: &'static EndMember, fraction: f64) -> MixturePart {
     MixturePart::new(end_member, fraction, GrainClass::Fine)
+}
+
+/// An opaque index file's part at the fine grains (P14.T49.k).
+#[must_use]
+const fn fine_opaque(end_member: &'static OpaqueEndMember, fraction: f64) -> MixturePart {
+    MixturePart::opaque(end_member, fraction, GrainClass::Fine)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -689,6 +695,27 @@ pub(in crate::substance) const CARBON_BLACK: EndMember = EndMember::new(
     ),
 );
 
+/// Graphite, `graphite.json`'s opaque slab: an index file's end-member (P14.T49.k;
+/// decision-p14-t49k Q2).
+pub(in crate::substance) const GRAPHITE_SLAB: OpaqueEndMember = OpaqueEndMember::new(
+    "graphite.json opaque slab",
+    "graphite.json",
+    described(
+        "end-member graphite.json",
+        "graphite.json, the `graphite` row's index file (randomly oriented graphite at 20 K, from \
+         Draine 2003's dielectric functions for E ∥ c and E ⊥ c, ApJ 598, 1026, through Draine's \
+         site), as an opaque slab: w the hemispherically averaged complex Fresnel reflectance \
+         S_e of its n and k, the slab's own limit for a grain of 1 µm, graphite's absorption \
+         length λ ÷ (4πk), 1/α, being about 0.04 µm at 550 nm (decision-p14-t49k Q2); the file's \
+         data cover \
+         380–780 nm, and the part's w holds its 780 nm value beyond 780 nm and its 380 nm value \
+         below 380 nm, as the `graphite` row's bins hold its last covered bin's, labelled, so \
+         that it does not cut the mixture's reach, its spectra's; Draine's own infrared from the \
+         same two files, which would move a row's Bond albedo by about +0.007 (`basalt_reduced`, \
+         decision-p14-t49k Q2), is not read: a deferred finding",
+    ),
+);
+
 // ---------------------------------------------------------------------------------------------
 // The mixtures: each row's parts at its cited pristine mode, and the mode's source.
 
@@ -786,6 +813,50 @@ pub(in crate::substance) const BASALT_REDUCED_MODE: Source = assumed(
      anorthite, the Northern Volcanic Plains' sodic melts not drawn; sulphides not drawn",
 );
 
+/// `basalt_reduced`'s parts from `ROW_DARKENING_VERSION` (P14.T49.k): 23's scaled by 0.9817, and
+/// Mercury's global carbon as graphite at the fine grains.
+pub(in crate::substance) const BASALT_REDUCED_DARKENED: &[MixturePart] = &[
+    form(&ANORTHITE, 0.5301),
+    form(&ENSTATITE, 0.2753),
+    form(&DIOPSIDE, 0.0892),
+    form(&OLIVINE_FO91, 0.0870),
+    fine_opaque(&GRAPHITE_SLAB, 0.0183),
+];
+
+/// `basalt_reduced`'s mode from `ROW_DARKENING_VERSION` (P14.T49.k).
+pub(in crate::substance) const BASALT_REDUCED_DARKENED_MODE: Source = assumed(
+    "`basalt_reduced`'s silicate mode, an assumption inside Charlier and Namur 2017's bounds for \
+     Mercury's Intermediate Plains (IcP-HCT), whose solidus mineralogy has the most enstatite \
+     (above 25%) and much plagioclase (above 45%) (LPSC XLVIII, #1173, p. 2): 50 wt% plagioclase, \
+     30 enstatite, 10 diopside and 10 forsterite, to vol% 0.5400, 0.2804, 0.0909 and 0.0886 (23's \
+     row's), the plagioclase as anorthite, the Northern Volcanic Plains' sodic melts and the \
+     sulphides not drawn; with Mercury's global near-surface carbon, 1.4 ± 0.9 wt% (Peplowski et \
+     al. 2015, PSS 108, 98, from MESSENGER's gamma-ray spectrometer: \"consistent with 0-4.1 wt% \
+     C at the three-standard-deviation level and therefore does not represent a definitive \
+     detection\", its abstract as decision-p14-t49k relays it, not re-read here), all of it as \
+     graphite, an assumption (Xu et al. 2024, Nat. Astron. \
+     8, 280, find under 1 wt% as intergrain graphite; Trang, Lucey and Izenberg 2017, Icarus 293, \
+     206, model 1.9 wt% submicroscopic carbon); at the registry's grain densities, graphite's \
+     2,261 and the rock's 2,970 kg m⁻³, (1.4 ÷ 2,261) ÷ (1.4 ÷ 2,261 + 98.6 ÷ 2,970) = 1.831 vol% \
+     graphite, to 0.0183, and the silicates scaled by 0.9817, to 0.5301, 0.2753, 0.0892 and \
+     0.0870; the low-reflectance material's 1–3 wt% (Peplowski et al. 2016, Nat. Geosci. 9, 273) \
+     and Klima et al. 2018's 2.5 and 4 wt% (GRL 45, 2945) are excesses over the local mean, not \
+     used, and carbon black is not used (decision-p14-t49k Q2 and Q3)",
+);
+
+/// `basalt_reduced`'s fine grains from `ROW_DARKENING_VERSION` (P14.T49.k).
+pub(in crate::substance) const BASALT_REDUCED_DARKENED_FINE: Source = Source {
+    covers: "fine grains",
+    citation: "the graphite at 1 µm, all of it (decision-p14-t49i-rock-mixtures §2.2 and §2.3, \
+               `Adopted`, never fitted): Murchie et al. 2015 (Icarus 254, 287) model Mercury's \
+               dark phases as intimate mixtures \"under the assumption that the grain size is 1 \
+               μm or larger\"; at the form's 70 µm the same carbon would leave the row at about \
+               0.50 about a Sun, the carbon darkening only when fine (decision-p14-t49k Q2); \
+               beyond about 1.5 µm a 1 µm grain is below geometric optics (πD ÷ λ < 2), and the \
+               weights stay geometric there: an approximation in the row's infrared bins (§2.3)",
+    basis: Basis::Adopted,
+};
+
 /// `granite`'s parts.
 pub(in crate::substance) const GRANITE: &[MixturePart] = &[
     form(&QUARTZ, 0.2761),
@@ -838,6 +909,51 @@ pub(in crate::substance) const FERRIC_MODE: Source = assumed(
      split among them, an assumption no source gives; the nanophase oxide as ferrihydrite GDS75, \
      the rest at the form's grains",
 );
+
+/// `ferric`'s parts from `ROW_DARKENING_VERSION` (P14.T49.k): Rocknest's mode with its nanophase
+/// ferric oxide as ferrihydrite's own mass ([`FERRIC_DARKENED_MODE`]), the oxide at the fine
+/// grains.
+pub(in crate::substance) const FERRIC_DARKENED: &[MixturePart] = &[
+    form(&AUGITE, 0.2807),
+    form(&PIGEONITE, 0.2807),
+    form(&OLIVINE_FO66, 0.0585),
+    form(&ANORTHITE, 0.2256),
+    form(&ILMENITE, 0.0631),
+    fine(&FERRIHYDRITE, 0.0736),
+    form(&HEMATITE, 0.0063),
+    form(&MAGNETITE, 0.0116),
+];
+
+/// `ferric`'s mode from `ROW_DARKENING_VERSION` (P14.T49.k; decision-p14-t49k, its addendum's
+/// item 3).
+pub(in crate::substance) const FERRIC_DARKENED_MODE: Source = assumed(
+    "the registry's ferric soil (its grain density's source): Rocknest's hematite 1.0 and \
+     magnetite 1.8 wt% (Achilles et al. 2017, JGR Planets 122, 2344, Table 1) and nanophase ferric \
+     oxide 6.8 wt% as Fe2O3 (Morris et al. 2013, LPSC 44, 1653, Table 3, \"Fe2O3-npOx 6.8\"), in \
+     90.4 wt% `basalt_fe`; the nanophase oxide as ferrihydrite Fe5HO8·4H2O, whose Fe2O3 is 2.5 × \
+     159.687 ÷ 480.285 = 0.8312 of its mass, so 6.8 ÷ 0.8312 = 8.181 wt% of ferrihydrite; at 5,260 \
+     and 5,175 kg m⁻³ (the Handbook of Mineralogy's), ferrihydrite's 3,700 (the midpoint of \
+     Hiemstra and Van Riemsdijk 2009's 3.5–3.9 g cm⁻³) and `basalt_fe`'s 3,310, the volumes 1.0 ÷ \
+     5,260, 1.8 ÷ 5,175, 8.181 ÷ 3,700 and 90.4 ÷ 3,310 give, to vol%, 0.0063, 0.0116, 0.0736 and \
+     0.9086 (23's row and decision-p14-t49k Q5 took the 6.8 wt% Fe2O3 as ferrihydrite's own mass, \
+     0.0619, which this corrects), `basalt_fe`'s parts scaled by 0.9086, its pyroxene's 1:1 split \
+     among them, an assumption no source gives; the nanophase oxide as ferrihydrite GDS75 at the \
+     fine grains, the rest at the form's",
+);
+
+/// `ferric`'s fine grains from `ROW_DARKENING_VERSION` (P14.T49.k).
+pub(in crate::substance) const FERRIC_DARKENED_FINE: Source = Source {
+    covers: "fine grains",
+    citation: "the nanophase ferric oxide at 1 µm, all of it (decision-p14-t49i-rock-mixtures \
+               §2.2 and §2.3, `Adopted`, never fitted; decision-p14-t49k Q5): Morris et al. \
+               2013's nanophase ferric oxide (LPSC 44, 1653, Table 3), fine by definition, as \
+               ferrihydrite GDS75, a synthetic, X-ray amorphous ferrihydrite, whose measured w is \
+               a fine phase's; its hematite and magnetite, their sizes not cited, and \
+               `basalt_fe`'s parts stay at the form's grains; beyond about 1.5 µm a 1 µm grain is \
+               below geometric optics (πD ÷ λ < 2), and the weights stay geometric there: an \
+               approximation in the row's infrared bins (§2.3)",
+    basis: Basis::Adopted,
+};
 
 /// `chondrite_ci`'s parts.
 pub(in crate::substance) const CHONDRITE_CI: &[MixturePart] = &[

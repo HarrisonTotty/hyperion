@@ -177,9 +177,19 @@ pub(super) fn manifest() -> Manifest {
 }
 
 /// The task's fit of its own manifest, computed once for the tests that read it.
-pub(super) fn fitted() -> &'static [(SubstanceId, AlbedoRow)] {
-    static FITTED: std::sync::OnceLock<Vec<(SubstanceId, AlbedoRow)>> = std::sync::OnceLock::new();
+pub(super) fn fitted_rows() -> &'static FittedRows {
+    static FITTED: std::sync::OnceLock<FittedRows> = std::sync::OnceLock::new();
     FITTED.get_or_init(|| fit(&manifest()).unwrap())
+}
+
+/// The fit's rows with condensed optics, in registry order.
+pub(super) fn fitted() -> &'static [(SubstanceId, AlbedoRow)] {
+    fitted_rows().rows()
+}
+
+/// The fit's darkened rows (P14.T49.k), in registry order.
+pub(super) fn fitted_darkened() -> &'static [(SubstanceId, AlbedoRow)] {
+    fitted_rows().darkened()
 }
 
 /// The fitted row of `key`.
@@ -189,6 +199,16 @@ pub(super) fn fitted_row(key: &str) -> AlbedoRow {
         .iter()
         .find(|(r, _)| *r == id)
         .unwrap_or_else(|| panic!("{key} is fitted"))
+        .1
+}
+
+/// The fitted darkened row of `key` (P14.T49.k).
+pub(super) fn fitted_darkened_row(key: &str) -> AlbedoRow {
+    let id = by_key(key).unwrap();
+    fitted_darkened()
+        .iter()
+        .find(|(r, _)| *r == id)
+        .unwrap_or_else(|| panic!("{key} is a fitted darkened row"))
         .1
 }
 
@@ -277,16 +297,34 @@ fn substance_albedos_an_index_off_its_grid_or_below_unity_is_refused() {
 }
 
 /// The table's rows are the registry's rows with condensed optics, in registry order, each read
-/// from its own solid file by wavelength, the manifest listing those files; a row's provenance is
-/// at least as strict as its file's flag; and a row with no optics, a row whose optics read no
-/// index file, or a file not its own is refused.
+/// from its own solid file by wavelength, the manifest listing those files, then the darkened
+/// rows (P14.T49.k), `basalt_reduced` and `ferric`, whose only file, `graphite.json`, is the
+/// `graphite` row's; a row's provenance is at least as strict as its file's flag; and a row with no
+/// optics, a row whose optics read no index file, or a file not its own is refused.
 #[test]
 fn substance_albedos_the_items_are_the_registry_s_optics_rows() {
     let manifest = manifest();
     assert_eq!(manifest.materials(), row_files().as_slice());
-    let names: Vec<String> = fitted().iter().map(|(id, _)| item_name(*id)).collect();
+    let in_force: Vec<&str> = substance::optics::rows()
+        .filter_map(|(_, optics)| optics.index_file())
+        .collect();
+    assert_eq!(row_files(), in_force, "the darkened rows add no file");
+    let names: Vec<String> = fitted()
+        .iter()
+        .map(|(id, _)| item_name(*id))
+        .chain(
+            fitted_darkened()
+                .iter()
+                .map(|(id, _)| darkened_item_name(*id)),
+        )
+        .collect();
     assert_eq!(names, ITEMS);
-    let table = render(fitted().to_vec());
+    let keys: Vec<String> = fitted_darkened()
+        .iter()
+        .map(|(id, _)| id.substance().key().as_str().to_owned())
+        .collect();
+    assert_eq!(keys, ["basalt_reduced", "ferric"]);
+    let table = render(fitted_rows());
     assert_eq!(table.item_names(), ITEMS);
     for (id, optics) in substance::optics::rows() {
         let Some(name) = optics.index_file() else {
@@ -321,39 +359,62 @@ fn substance_albedos_the_items_are_the_registry_s_optics_rows() {
 }
 
 /// The acceptance line is written only when it is true: the fit's rows pass, and a row whose
-/// `A_N` passes 1.35 or whose `A_h` passes 1 is refused, as is no row at all.
+/// `A_N` passes 1.35 or whose `A_h` passes 1 is refused, as is no row at all; the darkened rows
+/// (P14.T49.k) are held to the same bounds and stated after the rows.
 #[test]
 fn substance_albedos_the_acceptance_refuses_a_fit_past_its_bounds() {
     let rows = fitted().to_vec();
-    let line = acceptance(&rows).unwrap();
+    let darkened = fitted_darkened().to_vec();
+    let line = acceptance(&rows, &darkened).unwrap();
     assert!(
         line.starts_with("55 rows (11 frosts, 44 regoliths)"),
         "{line}"
     );
+    assert!(line.contains("; the 2 darkened rows (P14.T49.k)"), "{line}");
     let mut bright = rows.clone();
     bright[0].1[4] = 1.4;
     assert!(matches!(
-        acceptance(&bright),
+        acceptance(&bright, &darkened),
         Err(RunTaskError::Input { .. })
     ));
     let mut over = rows.clone();
     over[0].1[9] = 1.01;
-    assert!(matches!(acceptance(&over), Err(RunTaskError::Input { .. })));
-    let mut binned = rows;
-    binned[0].1[SPECTRAL_BINS_OFFSET + 7] = 1.01;
     assert!(matches!(
-        acceptance(&binned),
+        acceptance(&over, &darkened),
         Err(RunTaskError::Input { .. })
     ));
-    assert!(matches!(acceptance(&[]), Err(RunTaskError::Input { .. })));
+    let mut binned = rows.clone();
+    binned[0].1[SPECTRAL_BINS_OFFSET + 7] = 1.01;
+    assert!(matches!(
+        acceptance(&binned, &darkened),
+        Err(RunTaskError::Input { .. })
+    ));
+    let mut dark_bright = darkened;
+    dark_bright[0].1[4] = 1.4;
+    assert!(matches!(
+        acceptance(&rows, &dark_bright),
+        Err(RunTaskError::Input { .. })
+    ));
+    assert!(matches!(
+        acceptance(&[], &[]),
+        Err(RunTaskError::Input { .. })
+    ));
 }
 
 /// The committed table is this fit, bit for bit, row by row, every value of each row through the
-/// sim's accessors.
+/// sim's accessors, the darkened rows' (P14.T49.k) through `darkened_rows`.
 #[test]
 fn substance_albedos_the_committed_table_is_the_fit() {
-    for &(id, values) in fitted() {
-        let optics = id.substance().condensed_optics().unwrap();
+    let darkened = fitted_darkened().iter().map(|&(id, values)| {
+        let (_, optics) = substance::optics::darkened_rows()
+            .find(|(row, _)| *row == id)
+            .unwrap();
+        (id, optics, values)
+    });
+    let rows = fitted()
+        .iter()
+        .map(|&(id, values)| (id, id.substance().condensed_optics().unwrap(), values));
+    for (id, optics, values) in rows.chain(darkened) {
         let committed: Vec<f64> = [
             optics.single_scattering_albedo_bvr(),
             optics.normal_albedo_bvr(),
@@ -380,10 +441,11 @@ fn substance_albedos_the_committed_table_is_the_fit() {
 /// IMSA directional-hemispherical albedo, from the same w, phase function and opposition amplitude
 /// as its `A_N`, is at most 1 at the four incidences in every band, and its `A_N` at most 1.35,
 /// R10's particulate ceiling; its tabled energy albedos, the similarity relation's, are in (0, 1];
-/// each w is in [0, 1], and a regolith's at most the lunar photometry's limit.
+/// each w is in [0, 1], and a regolith's at most the lunar photometry's limit; the darkened rows'
+/// (P14.T49.k) too.
 #[test]
 fn substance_albedos_every_row_conserves_energy() {
-    for &(id, values) in fitted() {
+    for &(id, values) in fitted().iter().chain(fitted_darkened()) {
         let key = id.substance().key();
         let form = id.substance().condensed_optics().unwrap().reference_form();
         for band in 0..3 {
@@ -614,14 +676,16 @@ fn substance_albedos_the_spherical_albedo_cache_is_exact_to_its_bound() {
     assert!(worst < 1e-7, "the cache's largest error {worst}");
 }
 
-/// The bins converge on the grid: halving its step moves no bin of any row by more than 10⁻⁴.
+/// The bins converge on the grid: halving its step moves no bin of any row, the darkened rows'
+/// (P14.T49.k) included, by more than 10⁻⁴.
 #[test]
 fn substance_albedos_the_bins_converge_on_the_grid() {
     let manifest = manifest();
     let coarse = fit_on_grid(&manifest, spectral::SPECTRAL_STEP_NM).unwrap();
     let fine = fit_on_grid(&manifest, spectral::SPECTRAL_STEP_NM / 2.0).unwrap();
     let mut worst = (0.0, String::new(), 0);
-    for ((id, a), (_, b)) in coarse.iter().zip(&fine) {
+    let coarse_rows = coarse.rows().iter().chain(coarse.darkened());
+    for ((id, a), (_, b)) in coarse_rows.zip(fine.rows().iter().chain(fine.darkened())) {
         for bin in 0..SPECTRAL_BINS {
             let moved = (a[SPECTRAL_BINS_OFFSET + bin] - b[SPECTRAL_BINS_OFFSET + bin]).abs();
             if moved > worst.0 {

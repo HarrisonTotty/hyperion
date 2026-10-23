@@ -40,6 +40,12 @@
 //!    read from the manifest's `datasets` and joined to the file there (`infrared`), and the
 //!    reach of the row's data.
 //!
+//! The table holds the darkened crystalline rows too (P14.T49.k; decision-p14-t49k), each its own
+//! `*_DARKENED_ALBEDO` item after the rows': `basalt_reduced` with Mercury's global carbon as fine
+//! graphite, a mixture's opaque index-file part, and `ferric` with its nanophase ferric oxide at
+//! the fine grains, which the sim reads from `ROW_DARKENING_VERSION`
+//! (`substance::optics::darkened_rows`), so that the bump swaps them in with no refit of theirs.
+//!
 //! Every transcendental goes through `hyperion_sim::math`, and every sum runs in a fixed order, so
 //! the table comes out the same to the bit on every platform.
 //!
@@ -83,8 +89,8 @@ use hyperion_sim::substance::optics::{
     self, ALBEDO_ROW_LEN, ASD_GEOMETRY, BAND_WAVELENGTHS_NM, BECKMAN_INCIDENCE_DEG, BVR_ROW_LEN,
     CondensedOptics, DATA_REACH_OFFSET, EndMember, FINE_GRAIN_DIAMETER,
     HEMISPHERICAL_INCIDENCE_COSINES, InfraredIndex, LUNAR_REGOLITH, LabSpectrum, OppositionEffect,
-    OpticsInput, PhaseFunction, Photometry, REGOLITH_MAX_SINGLE_SCATTERING_ALBEDO, ReferenceForm,
-    SPECTRAL_BIN_EDGES_NM, SPECTRAL_BINS, SPECTRAL_BINS_OFFSET,
+    OpticsInput, PartEndMember, PhaseFunction, Photometry, REGOLITH_MAX_SINGLE_SCATTERING_ALBEDO,
+    ReferenceForm, SPECTRAL_BIN_EDGES_NM, SPECTRAL_BINS, SPECTRAL_BINS_OFFSET,
 };
 use hyperion_sim::tables::gauss_legendre::{GL32_NODES, GL32_WEIGHTS, GL64_NODES, GL64_WEIGHTS};
 use hyperion_sim::units::Metres;
@@ -108,14 +114,18 @@ use spectral::{
     SPECTRAL_STEP_NM, SpectralGrain, SpectralIndex, SphericalAlbedoCache, spectral_bins,
 };
 
-/// The task's revision: 1 since P14.T49.i's spectral bins.
-pub const VERSION: u32 = 1;
+/// The task's revision: 2 since P14.T49.k's opaque part kind and the mixture's reach rule
+/// (decision-p14-t49k, its addendum's item 2; plan 15's design note 6), 1 from P14.T49.i's
+/// spectral bins.
+pub const VERSION: u32 = 2;
 
 /// The task's name.
 const NAME: &str = "substance_albedos";
 
-/// The table's items, one per row with condensed optics in registry order, named by its key.
-pub const ITEMS: [&str; 55] = [
+/// The table's items: one per row with condensed optics in registry order, named by its key
+/// ([`item_name`]), then one per darkened row in registry order (P14.T49.k; [`darkened_item_name`]),
+/// which the sim reads from `ROW_DARKENING_VERSION`.
+pub const ITEMS: [&str; 57] = [
     "H2O_ALBEDO",
     "CH4_ALBEDO",
     "NH3_ALBEDO",
@@ -171,6 +181,8 @@ pub const ITEMS: [&str; 55] = [
     "CHONDRITE_LL_ALBEDO",
     "CHONDRITE_E_ALBEDO",
     "COMETARY_ALBEDO",
+    "BASALT_REDUCED_DARKENED_ALBEDO",
+    "FERRIC_DARKENED_ALBEDO",
 ];
 
 /// The table item's name for row `id`: its key in capitals, then `_ALBEDO`.
@@ -178,6 +190,16 @@ pub const ITEMS: [&str; 55] = [
 pub fn item_name(id: SubstanceId) -> String {
     format!(
         "{}_ALBEDO",
+        id.substance().key().as_str().to_ascii_uppercase()
+    )
+}
+
+/// The table item's name for the darkened row `id` (P14.T49.k): its key in capitals, then
+/// `_DARKENED_ALBEDO`.
+#[must_use]
+pub fn darkened_item_name(id: SubstanceId) -> String {
+    format!(
+        "{}_DARKENED_ALBEDO",
         id.substance().key().as_str().to_ascii_uppercase()
     )
 }
@@ -580,6 +602,12 @@ pub enum FitAlbedoError {
     /// A mixture names no part.
     #[error("a mixture has no part")]
     EmptyMixture,
+    /// A mixture's opaque part's index file was not read before the mixture.
+    #[error("the opaque part's index file `{file}` was not read")]
+    OpaquePartNotRead {
+        /// The file.
+        file: &'static str,
+    },
     /// An infrared dataset is not as its reader expects.
     #[error("the infrared dataset `{dataset}` is malformed: {why}")]
     Infrared {
@@ -623,22 +651,48 @@ pub enum FitAlbedoError {
     },
 }
 
-/// The index files of the rows with condensed optics, in registry order: what the task's manifest
-/// lists under `materials`.
-#[must_use]
-pub fn row_files() -> Vec<&'static str> {
-    optics::rows()
-        .filter_map(|(_, optics)| optics.index_file())
-        .collect()
+/// The rows the table holds: the rows with condensed optics in registry order, then the darkened
+/// rows (P14.T49.k).
+fn all_rows() -> impl Iterator<Item = (SubstanceId, &'static CondensedOptics)> {
+    optics::rows().chain(optics::darkened_rows())
 }
 
-/// The datasets of the rows with condensed optics, each once, in the order the rows first name
-/// them: each row's infrared set's, and the laboratory spectra's (`lab::SPLIB_DATASET`) where a
-/// row reads one; what the task's manifest lists under `datasets`.
+/// The index files the rows read, each once, in the order the rows first name them, the rows with
+/// condensed optics in registry order and the darkened rows after them: each row's own, and each
+/// mixture's opaque parts' (P14.T49.k, `graphite.json`, the `graphite` row's own); what the task's
+/// manifest lists under `materials`.
+#[must_use]
+pub fn row_files() -> Vec<&'static str> {
+    let mut files = Vec::new();
+    for (_, optics) in all_rows() {
+        let parts = match optics.input() {
+            OpticsInput::Mixture { parts } => parts,
+            OpticsInput::Index { .. }
+            | OpticsInput::SizedIndex { .. }
+            | OpticsInput::OpaqueSlab { .. }
+            | OpticsInput::Spectrum { .. }
+            | OpticsInput::Levels { .. } => &[],
+        };
+        let opaque = parts.iter().filter_map(|part| match part.end_member() {
+            PartEndMember::Opaque(end_member) => Some(end_member.file()),
+            PartEndMember::Lab(_) => None,
+        });
+        for file in optics.index_file().into_iter().chain(opaque) {
+            if !files.contains(&file) {
+                files.push(file);
+            }
+        }
+    }
+    files
+}
+
+/// The datasets of the rows with condensed optics and the darkened rows, each once, in the order
+/// the rows first name them: each row's infrared set's, and the laboratory spectra's
+/// (`lab::SPLIB_DATASET`) where a row reads one; what the task's manifest lists under `datasets`.
 #[must_use]
 pub fn row_datasets() -> Vec<&'static str> {
     let mut datasets = Vec::new();
-    for (_, optics) in optics::rows() {
+    for (_, optics) in all_rows() {
         let lab = (!optics.lab_spectra().is_empty()).then_some(SPLIB_DATASET);
         for dataset in optics
             .infrared_source()
@@ -833,8 +887,10 @@ impl<'m> FitInputs<'m> {
     ///
     /// # Errors
     ///
-    /// [`RunTaskError::Dataset`] if its index file cannot be read; [`RunTaskError::Input`] as
-    /// [`row_index`] and [`infrared::spectral_index`], or if a spectrum is missing or malformed.
+    /// [`RunTaskError::Dataset`] if its index file or a mixture's opaque part's index file cannot
+    /// be read; [`RunTaskError::Input`] as [`row_index`] and [`infrared::spectral_index`], or if a
+    /// spectrum is missing or malformed, or a mixture's opaque part's index file is not as
+    /// `infrared::visible_piece` reads it.
     pub(crate) fn grain(
         &mut self,
         id: SubstanceId,
@@ -866,6 +922,18 @@ impl<'m> FitInputs<'m> {
                 limit,
             ))),
             OpticsInput::Mixture { parts } => {
+                for part in parts {
+                    let PartEndMember::Opaque(end_member) = part.end_member() else {
+                        continue;
+                    };
+                    let name = end_member.file();
+                    if !self.end_members.has_opaque(name) {
+                        let file = self.material(name)?;
+                        let piece = infrared::visible_piece(name, &file).map_err(input_error)?;
+                        self.end_members
+                            .insert_opaque(name, OpaqueGrain::new(piece));
+                    }
+                }
                 let grain =
                     MixtureGrain::new(parts, &self.library, &self.tables, &mut self.end_members)
                         .map_err(input_error)?;
@@ -894,14 +962,37 @@ fn input_error(e: FitAlbedoError) -> RunTaskError {
     }
 }
 
-/// Every row with condensed optics, in registry order, and its optics, its index file read from
-/// `manifest`'s material directory, its infrared set and laboratory spectra from the manifest's
-/// datasets, the bins on a grid of largest step `SPECTRAL_STEP_NM`.
+/// A fit's rows: each row with condensed optics, in registry order, and each darkened row
+/// (P14.T49.k), in registry order, which the sim reads from `ROW_DARKENING_VERSION`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FittedRows {
+    rows: Vec<(SubstanceId, AlbedoRow)>,
+    darkened: Vec<(SubstanceId, AlbedoRow)>,
+}
+
+impl FittedRows {
+    /// The rows with condensed optics, in registry order, as `substance::optics::rows` gives them.
+    #[must_use]
+    pub fn rows(&self) -> &[(SubstanceId, AlbedoRow)] {
+        &self.rows
+    }
+
+    /// The darkened rows, in registry order, as `substance::optics::darkened_rows` gives them.
+    #[must_use]
+    pub fn darkened(&self) -> &[(SubstanceId, AlbedoRow)] {
+        &self.darkened
+    }
+}
+
+/// Every row with condensed optics, in registry order, and its optics, and every darkened row
+/// after them ([`FittedRows`]), each index file read from `manifest`'s material directory, its
+/// infrared set and laboratory spectra from the manifest's datasets, the bins on a grid of largest
+/// step `SPECTRAL_STEP_NM`.
 ///
 /// # Errors
 ///
 /// As `FitInputs::load` and `FitInputs::grain`.
-pub fn fit(manifest: &Manifest) -> Result<Vec<(SubstanceId, AlbedoRow)>, RunTaskError> {
+pub fn fit(manifest: &Manifest) -> Result<FittedRows, RunTaskError> {
     fit_on_grid(manifest, SPECTRAL_STEP_NM)
 }
 
@@ -910,14 +1001,28 @@ pub fn fit(manifest: &Manifest) -> Result<Vec<(SubstanceId, AlbedoRow)>, RunTask
 /// # Errors
 ///
 /// As [`fit`].
-pub(crate) fn fit_on_grid(
-    manifest: &Manifest,
-    step_nm: f64,
-) -> Result<Vec<(SubstanceId, AlbedoRow)>, RunTaskError> {
+pub(crate) fn fit_on_grid(manifest: &Manifest, step_nm: f64) -> Result<FittedRows, RunTaskError> {
     let mut inputs = FitInputs::load(manifest)?;
     let cache = SphericalAlbedoCache::new();
+    let rows = fit_rows(&mut inputs, &cache, optics::rows(), step_nm)?;
+    let darkened = fit_rows(&mut inputs, &cache, optics::darkened_rows(), step_nm)?;
+    Ok(FittedRows { rows, darkened })
+}
+
+/// The values of each of `rows` from `inputs`, in order, the bins on a grid of largest step
+/// `step_nm`, nm, their spherical albedos from `cache`.
+///
+/// # Errors
+///
+/// As `FitInputs::grain`.
+fn fit_rows(
+    inputs: &mut FitInputs<'_>,
+    cache: &SphericalAlbedoCache,
+    optics_rows: impl IntoIterator<Item = (SubstanceId, &'static CondensedOptics)>,
+    step_nm: f64,
+) -> Result<Vec<(SubstanceId, AlbedoRow)>, RunTaskError> {
     let mut rows = Vec::new();
-    for (id, optics) in optics::rows() {
+    for (id, optics) in optics_rows {
         let grain = inputs.grain(id, optics)?;
         let form = optics.reference_form();
         let diameter = optics.grain_diameter();
@@ -928,7 +1033,7 @@ pub(crate) fn fit_on_grid(
             spectral,
             diameter,
             form.photometry().phase_function().asymmetry(),
-            &cache,
+            cache,
             step_nm,
         );
         row[SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET].copy_from_slice(&bins);
@@ -938,66 +1043,100 @@ pub(crate) fn fit_on_grid(
     Ok(rows)
 }
 
-/// The table's contents for `rows`.
+/// The table item of row `id`, of optics `optics` and fitted `values`, named `name`, its doc led
+/// by the line `lead` where it has one.
+#[must_use]
+fn render_item(
+    id: SubstanceId,
+    optics: &CondensedOptics,
+    values: &AlbedoRow,
+    name: String,
+    lead: Option<&str>,
+) -> TableItem {
+    let form = match optics.reference_form() {
+        ReferenceForm::Frost => "fresh snow or fine frost",
+        ReferenceForm::Regolith => "a fresh particulate regolith",
+    };
+    let input = match optics.input() {
+        OpticsInput::Index { file, .. } | OpticsInput::SizedIndex { file, .. } => {
+            format!("from `{file}`")
+        }
+        OpticsInput::OpaqueSlab { file } => format!("by the opaque slab of `{file}`"),
+        OpticsInput::Spectrum { end_member } => {
+            format!("from splib07a's {}", end_member.name())
+        }
+        OpticsInput::Mixture { parts } => {
+            let opaque: Vec<String> = parts
+                .iter()
+                .filter_map(|part| match part.end_member() {
+                    PartEndMember::Opaque(end_member) => Some(format!("`{}`", end_member.file())),
+                    PartEndMember::Lab(_) => None,
+                })
+                .collect();
+            let lab = parts.len() - opaque.len();
+            if opaque.is_empty() {
+                format!("a mixture of {lab} laboratory parts")
+            } else {
+                format!(
+                    "a mixture of {lab} laboratory parts and the opaque slab of {}",
+                    opaque.join(" and ")
+                )
+            }
+        }
+        OpticsInput::Levels { .. } => "from measured levels".to_owned(),
+    };
+    let lines = [
+        format!(
+            "`{}` as {form} of {} µm grains, {input}{}",
+            id.substance().key(),
+            optics.grain_diameter().value() * 1.0e6,
+            if optics.is_stand_in() {
+                ", a stand-in,"
+            } else {
+                ""
+            }
+        ),
+        format!(
+            "{}: w, `A_N` and the spherical albedo in",
+            optics.infrared_source().map_or_else(
+                || "and no infrared set".to_owned(),
+                |set| format!("and the infrared set `{set:?}`")
+            )
+        ),
+        "B, V and R, then `A_h` at μ₀ = 1, 0.5, 0.2 and 0.05 in B, V and R, then the".to_owned(),
+        "spherical albedo in the 12 spectral bins, then the data's reach, nm.".to_owned(),
+    ];
+    TableItem::Array {
+        name,
+        doc: lead.map(str::to_owned).into_iter().chain(lines).collect(),
+        values: values.to_vec(),
+    }
+}
+
+/// The table's contents for `fitted`: an item for each row, then one for each darkened row
+/// (P14.T49.k).
 ///
 /// # Panics
 ///
-/// If a row has no condensed optics: [`fit`]'s rows all have them.
+/// If a row has no condensed optics or a darkened row is not one: [`fit`]'s rows all are.
 #[must_use]
-pub fn render(rows: Vec<(SubstanceId, AlbedoRow)>) -> RustTable {
-    let items = rows
-        .into_iter()
-        .map(|(id, values)| {
-            let row = id.substance();
-            let optics = row
-                .condensed_optics()
-                .expect("a fitted row has condensed optics");
-            let form = match optics.reference_form() {
-                ReferenceForm::Frost => "fresh snow or fine frost",
-                ReferenceForm::Regolith => "a fresh particulate regolith",
-            };
-            let input = match optics.input() {
-                OpticsInput::Index { file, .. } | OpticsInput::SizedIndex { file, .. } => {
-                    format!("from `{file}`")
-                }
-                OpticsInput::OpaqueSlab { file } => format!("by the opaque slab of `{file}`"),
-                OpticsInput::Spectrum { end_member } => {
-                    format!("from splib07a's {}", end_member.name())
-                }
-                OpticsInput::Mixture { parts } => {
-                    format!("a mixture of {} laboratory parts", parts.len())
-                }
-                OpticsInput::Levels { .. } => "from measured levels".to_owned(),
-            };
-            TableItem::Array {
-                name: item_name(id),
-                doc: vec![
-                    format!(
-                        "`{}` as {form} of {} µm grains, {input}{}",
-                        row.key(),
-                        optics.grain_diameter().value() * 1.0e6,
-                        if optics.is_stand_in() {
-                            ", a stand-in,"
-                        } else {
-                            ""
-                        }
-                    ),
-                    format!(
-                        "{}: w, `A_N` and the spherical albedo in",
-                        optics.infrared_source().map_or_else(
-                            || "and no infrared set".to_owned(),
-                            |set| format!("and the infrared set `{set:?}`")
-                        )
-                    ),
-                    "B, V and R, then `A_h` at μ₀ = 1, 0.5, 0.2 and 0.05 in B, V and R, then the"
-                        .to_owned(),
-                    "spherical albedo in the 12 spectral bins, then the data's reach, nm."
-                        .to_owned(),
-                ],
-                values: values.to_vec(),
-            }
-        })
-        .collect();
+pub fn render(fitted: &FittedRows) -> RustTable {
+    let rows = fitted.rows().iter().map(|(id, values)| {
+        let optics = id
+            .substance()
+            .condensed_optics()
+            .expect("a fitted row has condensed optics");
+        render_item(*id, optics, values, item_name(*id), None)
+    });
+    let darkened = fitted.darkened().iter().map(|(id, values)| {
+        let (_, optics) = optics::darkened_rows()
+            .find(|(row, _)| row == id)
+            .expect("a fitted darkened row is a darkened row");
+        let lead =
+            "The darkened row of P14.T49.k, which the sim reads from `ROW_DARKENING_VERSION`:";
+        render_item(*id, optics, values, darkened_item_name(*id), Some(lead))
+    });
+    let items = rows.chain(darkened).collect();
     RustTable {
         summary: vec![
             "The condensed optics of the substance registry's solids (plan 14, P14.T49.c and"
@@ -1039,15 +1178,19 @@ pub fn render(rows: Vec<(SubstanceId, AlbedoRow)>) -> RustTable {
     }
 }
 
-/// The table's acceptance line for `rows`: the frosts and regoliths, the highest `A_N` and
-/// `A_h` with their rows, the bins' range, and every row's `A_N` in V.
+/// The table's acceptance line for `rows` and the darkened rows `darkened` (P14.T49.k): the
+/// frosts and regoliths, the highest `A_N` and `A_h` with their rows, the bins' range, every row's
+/// `A_N` in V, and the darkened rows' after them, the bounds held over both.
 ///
 /// # Errors
 ///
 /// [`RunTaskError::Input`] if there are no rows, if the highest `A_N` passes R10's particulate
 /// ceiling of 1.35 or the highest `A_h` passes 1, or if a bin lies outside [0, 1], so that the line
 /// is true whenever it is written.
-fn acceptance(rows: &[(SubstanceId, AlbedoRow)]) -> Result<String, RunTaskError> {
+fn acceptance(
+    rows: &[(SubstanceId, AlbedoRow)],
+    darkened: &[(SubstanceId, AlbedoRow)],
+) -> Result<String, RunTaskError> {
     if rows.is_empty() {
         return Err(RunTaskError::Input {
             task: NAME,
@@ -1062,12 +1205,13 @@ fn acceptance(rows: &[(SubstanceId, AlbedoRow)]) -> Result<String, RunTaskError>
                 .is_some_and(|o| o.reference_form() == ReferenceForm::Frost)
         })
         .count();
-    let (normal_max, normal_key, _) = highest(rows, 3..6);
+    let all: Vec<(SubstanceId, AlbedoRow)> = rows.iter().chain(darkened).copied().collect();
+    let (normal_max, normal_key, _) = highest(&all, 3..6);
     let (hemispherical_max, hemispherical_key, hemispherical_offset) =
-        highest(rows, 9..BVR_ROW_LEN);
-    let (bin_max, bin_max_key, _) = highest(rows, SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET);
+        highest(&all, 9..BVR_ROW_LEN);
+    let (bin_max, bin_max_key, _) = highest(&all, SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET);
     let (bin_min, bin_min_key, bin_min_offset) =
-        lowest(rows, SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET);
+        lowest(&all, SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET);
     if !(0.0..=1.0).contains(&bin_min) || !(0.0..=1.0).contains(&bin_max) {
         return Err(RunTaskError::Input {
             task: NAME,
@@ -1089,24 +1233,37 @@ fn acceptance(rows: &[(SubstanceId, AlbedoRow)]) -> Result<String, RunTaskError>
             .into(),
         });
     }
-    let mut normal = String::new();
-    for (id, values) in rows {
-        // Writing into a `String` cannot fail.
-        let _ = write!(
-            normal,
-            "{}`{}` {:.3}",
-            if normal.is_empty() { "" } else { ", " },
-            id.substance().key(),
-            values[4]
-        );
-    }
+    let in_v = |rows: &[(SubstanceId, AlbedoRow)]| {
+        let mut normal = String::new();
+        for (id, values) in rows {
+            // Writing into a `String` cannot fail.
+            let _ = write!(
+                normal,
+                "{}`{}` {:.3}",
+                if normal.is_empty() { "" } else { ", " },
+                id.substance().key(),
+                values[4]
+            );
+        }
+        normal
+    };
+    let normal = in_v(rows);
+    let darkened_line = if darkened.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "; the {} darkened rows (P14.T49.k), within the same bounds, `A_N` in V: {}",
+            darkened.len(),
+            in_v(darkened)
+        )
+    };
     let bin = bin_min_offset - SPECTRAL_BINS_OFFSET;
     Ok(format!(
         "{} rows ({frosts} frosts, {} regoliths); the highest `A_N` {normal_max:.4} \
          (`{normal_key}`), the highest `A_h` {hemispherical_max:.4} (`{hemispherical_key}`, {} \
          at μ₀ = {}), both within the bounds of {PARTICULATE_NORMAL_ALBEDO_CEILING} and 1; the \
          {SPECTRAL_BINS} bins' spherical albedos within [0, 1], the lowest {bin_min:.4} \
-         (`{bin_min_key}`, {}-{} nm); `A_N` in V: {normal}",
+         (`{bin_min_key}`, {}-{} nm); `A_N` in V: {normal}{darkened_line}",
         rows.len(),
         rows.len() - frosts,
         ["B", "V", "R"][(hemispherical_offset - 9) % 3],
@@ -1198,8 +1355,8 @@ pub(crate) const INFRARED_SETS: [InfraredIndex; 13] = {
 };
 
 /// A row's input in words and numbers, without its prose: each file's and spectrum's name, each
-/// set, each end-member's name, spectra and scaling, each part's fraction and grain class, the
-/// levels and their geometry, as the fingerprint hashes them.
+/// set, each end-member's name, spectra and scaling or its opaque slab's file, each part's fraction
+/// and grain class, the levels and their geometry, as the fingerprint hashes them.
 #[must_use]
 pub(crate) fn describe_input(input: OpticsInput) -> String {
     let end_member = |e: &EndMember| {
@@ -1219,20 +1376,45 @@ pub(crate) fn describe_input(input: OpticsInput) -> String {
         OpticsInput::OpaqueSlab { file } => format!("opaque slab {file}"),
         OpticsInput::Spectrum { end_member: e } => format!("spectrum {}", end_member(e)),
         OpticsInput::Mixture { parts } => parts.iter().fold("mixture".to_owned(), |mut text, p| {
+            let part = match p.end_member() {
+                PartEndMember::Lab(e) => end_member(e),
+                PartEndMember::Opaque(e) => format!("{} opaque slab {}", e.name(), e.file()),
+            };
             // Writing into a `String` cannot fail.
-            let _ = write!(
-                text,
-                "; {} {:?} {:?}",
-                end_member(p.end_member()),
-                p.volume_fraction(),
-                p.grain()
-            );
+            let _ = write!(text, "; {part} {:?} {:?}", p.volume_fraction(), p.grain());
             text
         }),
         OpticsInput::Levels { levels } => {
             format!("levels {:?} {:?}", levels.knots(), levels.geometry())
         }
     }
+}
+
+/// Every row's input in words and numbers ([`describe_input`]), a line each after its key, the
+/// rows' in registry order and the darkened rows' after them (P14.T49.k), as the fingerprint
+/// hashes them.
+#[must_use]
+fn described_inputs() -> String {
+    let mut described = optics::rows().fold(String::new(), |mut text, (id, optics)| {
+        // Writing into a `String` cannot fail.
+        let _ = writeln!(
+            text,
+            "{} {}",
+            id.substance().key(),
+            describe_input(optics.input())
+        );
+        text
+    });
+    for (id, optics) in optics::darkened_rows() {
+        // Writing into a `String` cannot fail.
+        let _ = writeln!(
+            described,
+            "{} darkened {}",
+            id.substance().key(),
+            describe_input(optics.input())
+        );
+    }
+    described
 }
 
 /// The 64-bit FNV-1a hash of `bytes` (Fowler, Noll and Vo's offset basis and prime).
@@ -1281,9 +1463,10 @@ impl FitTask for SubstanceAlbedosTask {
     ///   `INFRARED_SETS`, 0 for none;
     /// - the laboratory rows' constants: the fine grains' diameter, the Beckman's incidence, the
     ///   ASD's geometry and the regolith's highest w; and every row's input, its numbers and names
-    ///   without its prose (`describe_input`), as four 16-bit words of their FNV-1a hash, so that
-    ///   a changed end-member, part, fraction, grain size or level finds the table stale (each word
-    ///   is a probe of 1 to 65,536, which the lock file's relative tolerance tells apart).
+    ///   without its prose (`describe_input`), the darkened rows' after them (P14.T49.k), as four
+    ///   16-bit words of their FNV-1a hash, so that a changed end-member, part, fraction, grain
+    ///   size or level finds the table stale (each word is a probe of 1 to 65,536, which the lock
+    ///   file's relative tolerance tells apart).
     fn fingerprint(&self) -> SimFingerprint {
         let mut probes = Vec::new();
         for (band, wavelength) in ["B", "V", "R"].into_iter().zip(BAND_WAVELENGTHS_NM) {
@@ -1365,17 +1548,7 @@ impl FitTask for SubstanceAlbedosTask {
             "regolith highest w".to_owned(),
             REGOLITH_MAX_SINGLE_SCATTERING_ALBEDO,
         ));
-        let described = optics::rows().fold(String::new(), |mut text, (id, optics)| {
-            // Writing into a `String` cannot fail.
-            let _ = writeln!(
-                text,
-                "{} {}",
-                id.substance().key(),
-                describe_input(optics.input())
-            );
-            text
-        });
-        let hash = fnv1a64(described.as_bytes());
+        let hash = fnv1a64(described_inputs().as_bytes());
         for word in 0..4_u32 {
             let bits = (hash >> (16 * word)) & 0xffff;
             let value = f64::from(u32::try_from(bits).expect("16 bits")) + 1.0;
@@ -1386,8 +1559,18 @@ impl FitTask for SubstanceAlbedosTask {
 
     fn run(&self, manifest: &Manifest, _threads: NonZeroUsize) -> Result<TaskOutput, RunTaskError> {
         check_manifest(self, manifest)?;
-        let rows = fit(manifest)?;
-        let names: Vec<String> = rows.iter().map(|(id, _)| item_name(*id)).collect();
+        let fitted = fit(manifest)?;
+        let names: Vec<String> = fitted
+            .rows()
+            .iter()
+            .map(|(id, _)| item_name(*id))
+            .chain(
+                fitted
+                    .darkened()
+                    .iter()
+                    .map(|(id, _)| darkened_item_name(*id)),
+            )
+            .collect();
         if names != ITEMS {
             return Err(RunTaskError::Input {
                 task: NAME,
@@ -1397,9 +1580,9 @@ impl FitTask for SubstanceAlbedosTask {
                 .into(),
             });
         }
-        let acceptance = acceptance(&rows)?;
+        let acceptance = acceptance(fitted.rows(), fitted.darkened())?;
         Ok(TaskOutput {
-            table: render(rows),
+            table: render(&fitted),
             source: "Hapke's equivalent slab (Hapke 2012's surface-reflection fits, as Davalos \
                      2026 reproduces them) and reflectance factor with isotropic multiple \
                      scattering (Hapke et al. 2012, eqs. 2-4) with Chandrasekhar's H-function \

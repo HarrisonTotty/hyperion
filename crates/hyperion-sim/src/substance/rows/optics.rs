@@ -63,6 +63,13 @@
 //! - `mars_dust`: R08's index at its grains' size, 2.8 µm, a stand-in below geometric optics;
 //! - `SO2`: Nash, Fanale and Nelson 1980's measured levels, a stand-in.
 //!
+//! **The darkened crystalline rows** (P14.T49.k; decision-p14-t49k), [`DARKENED`], held until
+//! `ROW_DARKENING_VERSION`: `basalt_reduced` with Mercury's global carbon, 1.4 wt% as graphite at
+//! the fine grains, `graphite.json`'s opaque slab as a mixture's part, and `ferric` with its
+//! nanophase ferric oxide at the fine grains, a fine phase where a source gives it as fine and its
+//! share, never fitted. `basalt_fe` and `komatiite` are unchanged, no fine phase of theirs being
+//! cited, each with its reason in its label.
+//!
 //! **Not modelled here** (closed set, for the composition audit):
 //!
 //! - the ices with no index file and no open spectrum: `Kr`, `Xe`, `N2O`, `C2H6` and `CH3OH`
@@ -372,8 +379,52 @@ const BASALT_FE_UPPER_BOUND: Source = stand_in(
     "an upper bound, a mixture of clean mineral separates (decision-p14-t49i-rock-mixtures §2.7), \
      within its bounds, above the mature maria's normal albedo 0.09 and at most the HEDs' 0.5 \
      (Beck et al. 2021, Icarus 354, 114066), at 0.410 in V; the same method overstates \
-     `basalt`'s whole-rock normal albedo 5.3 times (its sources)",
+     `basalt`'s whole-rock normal albedo 5.3 times (its sources); its Bond albedo under a 5,772 \
+     K blackbody, 0.3385, against undusted basaltic Mars's 0.10–0.20 (Ruff and Christensen 2002, \
+     JGR 107, doi:10.1029/2001JE001580, its dark regions under 0.2; Kieffer et al. 1977, JGR 82, \
+     4249), is brighter, outside the allowance of 1.25 (0.08–0.25): a miss, stated, which moves \
+     no parameter; no source gives its opaques' fine share or a blade thickness (the Lunar \
+     Sourcebook's §6.1.3 gives the ilmenite's habit only), so they stay at the form's grains \
+     (decision-p14-t49k Q4)",
 );
+
+/// `komatiite`'s reason: an unvalidated mixture, with no fine phase.
+const KOMATIITE_STAND_IN: &str = "an unvalidated mixture: no band of its class's albedo was read \
+                                  (decision-p14-t49i-rock-mixtures §3), and clean mineral \
+                                  separates bound an anhydrous rock's albedo from above \
+                                  (`basalt`'s check, in its sources); no fine phase is drawn, \
+                                  Arndt 1976's mode having no opaque, its devitrified glass \
+                                  counted as augite, and no fine phase being cited \
+                                  (decision-p14-t49k Q5)";
+
+/// `basalt_reduced`'s label from `ROW_DARKENING_VERSION` (P14.T49.k; decision-p14-t49k Q5).
+const BASALT_REDUCED_UPPER_BOUND: Source = stand_in(
+    "an upper bound, a mixture of clean mineral separates with Mercury's global carbon as fine \
+     graphite, fresh and unweathered (decision-p14-t49k Q5), within its bounds: its Bond albedo \
+     under a 5,772 K blackbody, 0.1940, at or above 0.085, Mercury's mature 0.088 ± 0.003 less \
+     its 0.003 (Mallama 2017, arXiv:1703.02670, the spherical bolometric albedo over 0–4 µm, a \
+     preprint; Domingue et al. 2011, PSS 59, 1853, a refereed 0.081 over 0.43–1.01 µm), a fresh \
+     row being brighter than its mature surface, and below the carbon-free mixture's 0.5275; \
+     stated, not asserted: its reflectance factor at i 30°, e 0° and 750 nm, 0.194, against \
+     `feldspathic`'s 0.636, a ratio of 3.27, about 1.7 times darker than the measured 1.9 ± 0.4, \
+     immature lunar over immature Mercurian material (Braden and Robinson 2013, JGR Planets 118, \
+     1903; decision-p14-t49k, its addendum's item 4): against the method's own highland row the \
+     row is darker than measured, while its absolute brightness is the method's overstatement of \
+     crystalline rows (`basalt`'s check, in its sources); and its spherical albedo in V, 0.196, \
+     beside NASA's 0.068, the \
+     mature whole disc's V-band spherical albedo (Mallama, Wang and Howard 2002, Icarus 155, 253: \
+     p 0.142 × q 0.478); an airless body's lid of it keeps the space-weathering stand-in's 0.11",
+);
+
+/// `ferric`'s reason from `ROW_DARKENING_VERSION` (P14.T49.k; decision-p14-t49k Q5).
+const FERRIC_DARKENED_STAND_IN: &str = "an unvalidated mixture: no band of its class's albedo was \
+                                        read (decision-p14-t49i-rock-mixtures §3; \
+                                        decision-p14-t49k Q5), and clean mineral separates bound \
+                                        an anhydrous rock's albedo from above (`basalt`'s check, \
+                                        in its sources); its Bond albedo under a 5,772 K \
+                                        blackbody, 0.212, beside Mars's bright regions' clear-sky \
+                                        bolometric Lambert albedo, 0.27 (Pleskot and Miner 1981, \
+                                        Icarus 45, 179, abstract), context and not a band";
 
 /// `chondrite_ci`'s band.
 const CHONDRITE_CI_BAND: Source = source(
@@ -1117,7 +1168,7 @@ pub(in crate::substance) static OPTICS: [CondensedOptics; 55] = [
             lab::KOMATIITE_MODE,
             lab::OLIVINE_FO89.source(),
             lab::AUGITE.source(),
-            stand_in(UNVALIDATED),
+            stand_in(KOMATIITE_STAND_IN),
         ),
     ),
     row(
@@ -1478,6 +1529,56 @@ pub(in crate::substance) static OPTICS: [CondensedOptics; 55] = [
             lab::ENSTATITE.source(),
             lab::IRON_SULPHIDE.source(),
             stand_in(COMETARY_STAND_IN),
+        ),
+    ),
+];
+
+/// The darkened crystalline rows, in registry order (P14.T49.k; decision-p14-t49k Q1–Q5): each
+/// in place of its row in [`OPTICS`] from `ROW_DARKENING_VERSION`, when
+/// [`Substance::condensed_optics`](super::super::Substance::condensed_optics) serves them, their
+/// values fitted beside 23's rows'. `basalt_reduced` carries Mercury's global carbon as graphite
+/// at the fine grains, an opaque index file's part; `ferric` its nanophase ferric oxide at the
+/// fine grains. `basalt_fe` and `komatiite` are unchanged, each with its reason in its label.
+pub(in crate::substance) static DARKENED: [CondensedOptics; 2] = [
+    row(
+        "basalt_reduced",
+        ReferenceForm::Regolith,
+        OpticsInput::Mixture {
+            parts: lab::BASALT_REDUCED_DARKENED,
+        },
+        InputProvenance::StandIn,
+        &table::BASALT_REDUCED_DARKENED_ALBEDO,
+        lab_sources!(
+            lab::BASALT_REDUCED_DARKENED_MODE,
+            lab::BASALT_REDUCED_DARKENED_FINE,
+            lab::ANORTHITE.source(),
+            lab::ENSTATITE.source(),
+            lab::DIOPSIDE.source(),
+            lab::OLIVINE_FO91.source(),
+            lab::GRAPHITE_SLAB.source(),
+            BASALT_REDUCED_UPPER_BOUND,
+        ),
+    ),
+    row(
+        "ferric",
+        ReferenceForm::Regolith,
+        OpticsInput::Mixture {
+            parts: lab::FERRIC_DARKENED,
+        },
+        InputProvenance::StandIn,
+        &table::FERRIC_DARKENED_ALBEDO,
+        lab_sources!(
+            lab::FERRIC_DARKENED_MODE,
+            lab::FERRIC_DARKENED_FINE,
+            lab::AUGITE.source(),
+            lab::PIGEONITE.source(),
+            lab::OLIVINE_FO66.source(),
+            lab::ANORTHITE.source(),
+            lab::ILMENITE.source(),
+            lab::FERRIHYDRITE.source(),
+            lab::HEMATITE.source(),
+            lab::MAGNETITE.source(),
+            stand_in(FERRIC_DARKENED_STAND_IN),
         ),
     ),
 ];
