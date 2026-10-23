@@ -72,10 +72,10 @@ Not in scope:
   them and takes over the files. It defines the shapes of the rest.
 - Hand-entered constants that are not fits, such as plan 02's `tables::gauss_legendre`. They carry
   an `@static` header and the staleness check only verifies that nobody marks them generated.
-- Any code inside `hyperion-sim` other than `tables/`, the `fit.*` entries of `rng/tags.rs`, and the
-  one-line repointing of a consumer's constant at its table. Where a fit needs the generator's own
-  code (potential, tracks, kick law, binary formulae, stream spray) it calls the owning plan's
-  public API and never copies it.
+- Any code inside `hyperion-sim` other than `tables/`, the `fit.*` entries of its `rng/tags.rs`,
+  and the one-line repointing of a consumer's constant at its table. Where a fit needs the
+  generator's own code (potential, tracks, kick law, binary formulae, stream spray) it calls the
+  owning plan's public API and never copies it.
 - New physics. A fit chooses constants for forms the brainstorm already fixes.
 
 ## Provides
@@ -83,37 +83,60 @@ Not in scope:
 ### The crate `hyperion-fit` (`crates/hyperion-fit`)
 
 Created by P02.T6.a and extended here: a binary with a thin `main.rs` over a library, as
-`rust-dev.md` requires. It depends on `hyperion-sim`. Nothing may depend on it: a test fails if
-`hyperion-sim`, `hyperion-protocol` or `hyperion-server` names it in `Cargo.toml`.
+`rust-dev.md` requires. It depends on `hyperion-sim`, with the sim's `testing` feature, and on
+`hyperion-surface` (R09.T7.f's `TableCrate`), and reaches `hyperion-base` through the sim's
+re-exports (re-validated). Nothing may depend on it: `no_runtime_crate_depends_on_hyperion_fit`
+(`tests/toolchain.rs`) fails if `hyperion-base`, `hyperion-sim`, `hyperion-surface`,
+`hyperion-protocol` or `hyperion-server` names it in `Cargo.toml`.
 
 ```text
 hyperion-fit list                      # tasks, class (fast or slow), table path, state
 hyperion-fit run <task> [--since <generator version>] [--smoke] [--threads N] [--out PATH]
-hyperion-fit check [--rerun-fast]      # staleness; see Design note 8
+                        [--data DIR] [--manifest PATH]
+hyperion-fit check [--rerun-fast] [--threads N]   # staleness; see Design note 8
 hyperion-fit fingerprint <task>        # prints the sim probe values a task depends on
+hyperion-fit orbits [--smoke | --manifest PATH] [--threads N] [--out DIR] [--max-parts N]
 ```
 
 `run mge --out <path>` keeps working as plan 02 defined it. `--since` is required whenever the
-output goes into the sim's `tables/` (the default) and is not needed with `--out` elsewhere.
+output goes into its crate's `tables/` (the default) and is not needed with `--out` elsewhere.
+`--smoke` and `--manifest` need `--out`: a committed table is always made from
+`manifests/<task>.toml` (P15.T1 as built). `orbits` is P15.T6.b's (re-validated at 898a3c94;
+`cli.rs`'s `Command`, which also holds rendering plan R08's `atmosphere-reference`).
 
 ```rust
-hyperion_fit::task::{FitTask, TaskClass, TaskOutput, RunTaskError, registry}
+hyperion_fit::task::{FitTask, TaskClass, TaskOutput, RunTaskError, TableCrate, REGISTRY,
+                     registry, find}
 hyperion_fit::manifest::{Manifest, InputsHash, LockFile, LockEntry, SimFingerprint}
-hyperion_fit::emit::{RustTable, Header, HeaderKind, write_table, EmitTableError}
+hyperion_fit::emit::{RustTable, TableItem, Header, HeaderKind, Workspace, Destination,
+                     write_table, EmitTableError}
 hyperion_fit::parallel::map_reduce_chunks                      // deterministic reduction
-hyperion_fit::optimise::{nnls, nelder_mead, levenberg_marquardt}
+hyperion_fit::optimise::{golden_section, nelder_mead}          // P15.T8.a's
+hyperion_fit::optimise::{nnls, levenberg_marquardt}            // not built: P15.T3.a adds them
 hyperion_fit::data::{Dataset, Provenance, load_dataset, LoadDatasetError}
-hyperion_fit::stats::{total_variation, rms_log_residual, ks_distance}
+hyperion_fit::check::{check, CheckReport}
+hyperion_fit::pipeline::{prepare, rerender}
+hyperion_fit::cli::{Cli, run}
 
-pub trait FitTask {
-    fn name(&self) -> &'static str;                 // "mge", "displaced", ...
+pub trait FitTask: Sync + std::fmt::Debug {
+    fn name(&self) -> &'static str;                 // "mge", "displaced_forms", ...
     fn class(&self) -> TaskClass;                   // Fast (under 60 s; CI reruns it) or Slow
-    fn table_path(&self) -> &'static str;           // relative to crates/hyperion-sim/src/tables/
+    fn table_crate(&self) -> TableCrate { TableCrate::Sim }
+    fn table_path(&self) -> &'static str;           // relative to its crate's src/tables/
     fn revision(&self) -> u32;                      // bumped by hand when the algorithm changes
+    fn items(&self) -> &'static [&'static str];     // the table's items, for the smoke check
     fn fingerprint(&self) -> SimFingerprint;        // empty for tasks that use only `math`
     fn run(&self, manifest: &Manifest, threads: NonZeroUsize) -> Result<TaskOutput, RunTaskError>;
 }
 ```
+
+As built at 898a3c94 (re-validated): `write_table(emission, destination) -> Result<Written,
+EmitTableError>`, its `Destination` either the workspace's tables or `--out`. The sketch's
+`hyperion_fit::stats::{total_variation, rms_log_residual, ks_distance}` is not built: the displaced
+task keeps its own total-variation distance (`tasks::displaced_forms::cells::total_variation`) and
+a bounded Nelder–Mead (`displaced_forms::nelder_mead`), and a task's tests that need a
+Kolmogorov–Smirnov test take it from `hyperion-testkit`'s `stats` (a dev-dependency). `tasks::mge`
+has a private `nnls`, by projected coordinate descent.
 
 ### `hyperion_sim::tables`
 
@@ -130,7 +153,9 @@ pub const MANIFEST: &[TableInfo];       // fitted tables only, in name order
 `TableInfo` is `hyperion_base::version::TableInfo` since R09.T7.f, re-exported here. A crate
 beneath the sim lists its own fitted tables in its own `tables::MANIFEST` of the same type: the
 surface crate does, for `cold_trap`'s `bowl_permanent_shadow`. `hyperion-fit` compares every such
-`MANIFEST` with `tables.lock`, through `TableCrate` (decision-r09-t7f.md).
+`MANIFEST` with `tables.lock`, through `TableCrate` (decision-r09-t7f.md): `task::TableCrate`
+(`Sim`, `Sky` reserved for the sky crate's split, `Surface`), and `check::REPOSITORY_MANIFESTS`,
+which lists the sim's and the surface crate's (re-validated).
 
 | Module                          | Shape owned by | Consumer    | Contents                                                  |
 | ------------------------------- | -------------- | ----------- | --------------------------------------------------------- |
@@ -158,45 +183,113 @@ its manifest records, so a changed index file makes it stale.
 The owner of a shape states it in its own Provides, and this plan's task group restates what the fit
 must fill. P15.T2 checks each against the code as built, and the owner's code wins.
 
+**Built at 898a3c94** (re-validated). The module table's rows as built: `tables::mge` also holds
+`MGE_HOLED_EXP` (P02.T12.b), `tables::helium` also `LOG_Z_NODES`, and of `tables::binary`'s items
+only `CLASS_SHARES` exists. Registered: `mge` (provisional, P02.T6.a's first cut),
+`chabrier` (fitted, P15.T4.b), `kick_rank` (provisional, P06.T19.b's), `displaced_forms`
+(provisional, on the smoke histograms), `cluster_dynamics` (three provisional blocks, P15.T8.a–c)
+and `type_ia_delay` (fitted, P15.T9.a). Hand-made, with no `MANIFEST` row or lock entry: `helium`
+(P06.T17's identity), `binary` (P11.T7's `ClassShareTable`, `CLASS_SHARES` and
+`MILKY_WAY_FORMED_MASS`) and `streams` (P10.T3.b's 1.5), which P15.T7.b, P15.T9.b with T10.b, and
+P15.T11.a register. Not built: `MGE_BOXY` (P15.T3.b), `tables::lbv` (P09.T43's scratch, then
+P15.T10.a), and `IA_YIELD` and the samplers, whose shapes are P11.T6's and T8's. `task::REGISTRY`
+holds 47 tasks in name order. Beside this plan's eight (`chabrier`, `cluster_bh`,
+`displaced_forms`, `equipartition`, `kick_rank`, `mge`, `pulsars`, `type_ia_delay`) and Phase L's
+(`condensate_extinction` and `_2` to `_7`, one task in seven parts, `saturation_curves`,
+`substance_albedos`, `thermo_equilibrium`), it runs other plans' fits, whose tables and shapes
+their plans own: plan 06's `stellar_fates_high`, `_low` and `_mid` and `wd_cooling`; plan 08's
+`lifetime_bracket`; plan 09's `cluster_retention`; plan 11's `binary_cooling_floor`,
+`binary_pair_light_c` to `_e`, `binary_reach`, `period_correction` and `stripping`; plan 13's
+`giant_cooling`; plan 14's `liquid_optics`; R06's `limb_darkening`, `sky_binary_light_c` to `_e`,
+`sky_envelope`, `sky_phase_envelope`, `star_colour` and its five `star_colour_reddening` tables;
+and the surface crate's `bowl_permanent_shadow` (R09) and `space_weathering` (R10).
+
 ### Recipes and CI
 
 - `just fit <task>`: `cargo run --release -p hyperion-fit -- run <task> --since <current>`, writing
-  into the sim's `tables/` and updating `crates/hyperion-fit/tables.lock`.
+  into the sim's `tables/` and updating `crates/hyperion-fit/tables.lock`. As built (re-validated),
+  `just fit <task> *args`, with `<current>` the justfile's `generator_version`, read from
+  `crates/hyperion-base/src/version.rs`; a task whose `table_crate()` is `Surface` writes into that
+  crate's `tables/`.
 - `just fit-check`: `cargo run -p hyperion-fit -- check`. Part of `just ci`. It reruns no fit. Its
   cost is the fingerprints' probes, a few seconds at most, since the displaced table's probes build
-  plan 02's full potential once.
-- `just test-slow` additionally runs `hyperion-fit check --rerun-fast`.
+  plan 02's full potential once. As built, `just ci` runs it as `_fit-check-built`, the debug binary
+  that `_test-build` made.
+- `just test-slow` additionally runs `hyperion-fit check --rerun-fast` (as built, the justfile's
+  `slow_then_check`, after the slow tests and timed). `just ci-slow` runs `test-slow`.
 
 ## Consumes
 
 - **Plan 01:** `hyperion_sim::math` (every transcendental in a fit goes through it, so a table is
   bit-identical on every platform); `rng::{Seed, Stream, ObjectKey, tags}` with
-  `Stream::open(seed, tag, key)`: the fit's Monte Carlo draws use the sim's generator on tags named
-  `fit.<task>.<purpose>`, which each task group adds to plan 01's single registry in `rng/tags.rs`
-  under a "Plan 15" heading, with scope `Galaxy` and the key `ObjectKey::galaxy_item(chunk index)`,
-  so the collision test covers them; `GENERATOR_VERSION`; from `hyperion-testkit`, `golden!` and
-  `stats`; the slow-test marking and `just test-slow`.
+  `Stream::open(seed, tag, key)`. Since R04.T4.d, `math`, `rng`, `units` and `version` live in
+  `hyperion-base` and `hyperion_sim` re-exports them, so these paths hold (re-validated). The fit's
+  Monte Carlo draws use the sim's generator on tags named `fit.<task>.<purpose>`, which each task
+  group adds to the sim's registry, `crates/hyperion-sim/src/rng/tags.rs`, one of three since
+  R04.T4.d (base's holds `selftest.stream` alone and the surface crate's the `surface.*` tags). They
+  go under a "Plan 15" heading appended at the end of its `domain_tags!` list, since the macro's
+  order fixes `tags::ALL`, which the golden `rng/tags` pins (re-validated), with scope `Galaxy` and
+  the key `ObjectKey::galaxy_item(chunk index)`, so the collision test covers them: the sim's
+  `assert_registries_disjoint` over all three registries. No `fit.` tag exists yet (re-validated):
+  the built tasks draw through their consumers' functions (`score_quantiles` opens plan 06's
+  `stellar.reference`), and `displaced_forms`' births through a counter-based SplitMix64 of their
+  own (`tasks::displaced_forms::births::Draws`), which opens no tag. Also `GENERATOR_VERSION` (a
+  `GeneratorVersion`, read with `.get()`); from `hyperion-testkit`, `golden!`, `stats` and
+  `float::assert_same_bits`; the slow-test marking (`#[ignore = "slow: …"]`) and `just test-slow`.
 - **Plan 02:** the crate `crates/hyperion-fit` as P02.T6.a leaves it (`run mge [--out]`,
-  `RunFitError`, `tasks::mge::{fit, render, MgeTables}`, the test `mge_table_is_reproduced`) and
-  `tables/mge.rs` with `MGE_EXP` and `MGE_BAR`; `GalaxyParams::milky_way_like` and
-  `Galaxy::from_params`; from `potential`, `MassModel` (`v_circ_sq`, `potential`, `vertical_force`,
-  `enclosed_mass`) and `PotentialTables` (`v_circ`, `omega`, `kappa`, `potential`, `escape_speed`,
-  `bar_pattern_speed`, `bar_corotation`); `fields` (component densities) and
-  `ages::AgeDistribution`; `imf::{MassFunction, Kroupa, Chabrier}`, whose provisional scale of 0.68
-  P15.T4 replaces, and `fates::mean_present_mass`.
+  `RunFitError`, `tasks::mge::{fit, render, MgeTables}`, the test `mge_table_is_reproduced`), as
+  P15.T1–T2 grew it: `render` returns a `RustTable`, `MgeTables` has a third field, `holed_exp`,
+  and the test compares `pipeline::rerender` with the committed file through `tests/common`'s
+  `assert_reproduced` (re-validated). Also `tables/mge.rs` with `MGE_EXP` and `MGE_BAR`, and since
+  P02.T12.b `MGE_HOLED_EXP`, the holed thin disc's, with signed weights on `MGE_EXP`'s widths,
+  which the nuclear disc's inner part reuses since R26; each is `[(f64, f64); 14]` (re-validated).
+  `GalaxyParams::milky_way_like` and `Galaxy::from_params`, which takes the seed and returns a
+  `Result`: `from_params(seed, params) -> Result<Galaxy, BuildGalaxyError>` (re-validated). From
+  `potential`, `MassModel` (`v_circ_sq`, `potential`, `vertical_force`, `enclosed_mass`) and
+  `PotentialTables` (`v_circ`, `omega`, `kappa`, `potential`, `escape_speed`, `bar_pattern_speed`,
+  `bar_corotation`); as built, `MassModel::enclosed_mass` holds the spherical components only and
+  `expanded_enclosed_mass` adds the Gaussians (P02's R15), and both types have `force`, returning
+  `CylindricalForce` (ruling 101.4; the tables' far field conservative since P02.T6.f), beside
+  `PotentialTables::{v_circ_sq, escape_speed_in_plane}` (re-validated). `potential::mge`'s
+  Gaussian builders, and the moment-matched bulge, the crate-private `bulge_spheroid`, which T3.c
+  replaces. `fields` (component densities) and `ages::AgeDistribution`;
+  `imf::{MassFunction, Kroupa, Chabrier}`, whose provisional scale of 0.68 P15.T4 replaces
+  (replaced: P15.T4.b's 0.920 in `tables::chabrier`, re-validated), and `fates::mean_present_mass`,
+  with `imf::Truncated`, `fates::CensusFates` and `GalaxyParams::census_system_masses_under`, which
+  P15.T4.b added.
 - **Plan 06:**
   `stellar::remnant::reference::{ReferencePopulation, score_quantiles, kick_observables}` (P15.T5
   calls the same `score_quantiles(pop, n, seed)` that made the provisional table, and the six
-  kick-law tests of P06.T19.d through `kick_observables`), `KickLawParams`, `StandardKickLaw`,
-  `stellar::sse` tracks, `stellar::lifetime`, `StarDraws::median`, `SystemStars::lbv_window`, the
-  shapes `tables::kick_rank::SCORE_QUANTILES` and
+  kick-law tests of P06.T19.d through `kick_observables`; as built, `ReferencePopulation::scores`
+  and `quantiles_of` too, and `KickObservables` feeds seven tests, since ruling 96.3 added the
+  escape share: re-validated), `KickLawParams` (with `max_speed_km_s`, ruling 96.2),
+  `StandardKickLaw`, `KickRankTable`, `stellar::sse` tracks (`Track::full`), `stellar::lifetime`
+  (a function, `stellar::sse::lifetime`, re-exported: re-validated), `StarDraws::median`,
+  `SystemStars::lbv_window`, the shapes `tables::kick_rank::SCORE_QUANTILES` and
   `tables::helium::{LIFETIME_SLOPE, HB_TEMPERATURE_SHIFT}`, and the provisional and identity files
-  P06.T19.b and P06.T17 commit, whose ownership passes to this plan.
+  P06.T19.b and P06.T17 commit, whose ownership passes to this plan. As built (re-validated):
+  `tables::kick_rank` also holds the law's defaults, `LOW_RAMP`, `BH_FACTOR`, `EC_WINDOW_SINGLE`
+  and `EC_WINDOW_STRIPPED`, which `KickLawParams::default` reads, while the track reads its own
+  copies of the windows, `stellar::remnant::collapse`'s `SINGLE_STAR_WINDOW` and
+  `COMPANION_STRIPPED_WINDOW`; `tables::helium` also holds `LOG_Z_NODES`, and the track reads it
+  through `stellar/sse/track/excess.rs`'s crate-private `HeliumTable` and `HeliumHook`.
 - **Plan 08:** nothing. Plan 08 consumes `tables::displaced_forms`. The orbit integrator here is the
   fit's own and reads only plan 02's potential.
 - **Plan 09:** the cluster class code and its scratch constants (black-hole loss, equipartition,
-  pulsar counts), its scratch Type Ia samplers, which P15.T8 and P15.T9.a replace.
-- **Plan 10:** the stream generator, for P15.T11; its orphan multiplier.
+  pulsar counts), its scratch Type Ia samplers, which P15.T8 and P15.T9.a replace. As built
+  (re-validated): P15.T8.a moved the constants, unchanged, into `tables::cluster_dynamics`'s three
+  provisional blocks, which `features::cluster` and `features::interior::profile` read, and
+  P15.T9.a replaced the samplers with the fitted `tables::type_ia_delay`, which
+  `catalogue_classes::type_ia` reads. P15.T5.c reads P09.T9.b's neutron-star retention,
+  `features::interior::retention` (`retention`, and `retention_tabulated` over plan 09's fitted
+  `tables::cluster_retention`, ruling 139.5). P15.T10.a's consumer is P09.T43's `LbvProcess`, not
+  built. The Baumgardt–Hilker copy, `features::testing`, is behind the sim's `testing` feature.
+- **Plan 10:** the stream generator, for P15.T11; its orphan multiplier. As built (re-validated):
+  the multiplier is `tables::streams::ORPHAN_STREAMS_PER_GLOBULAR` (P10.T3.b, hand-made,
+  provisional 1.5), which `global_list::orphans` reads; the generator is
+  `global_list::Debris::generate`, which makes stream specifications, and the spray and the tubes
+  that P15.T11.b observes (`global_list::spray`, `TubeTable::build`) are P10.T5–T6's, not built:
+  `TubeTable` is a placeholder.
 - **Plan 11:** the shapes `IaYieldTable`, `ClassSamplerTable`, `ClassShareTable` and `IaPoolChannel`
   and the scratch contents at `tables/binary.rs` (`IA_YIELD`, `AWD_SAMPLER`, `XRB_SAMPLER`,
   `MERGER_SAMPLER`, `NSM_SAMPLER`, `CLASS_SHARES`);
@@ -205,16 +298,33 @@ must fill. P15.T2 checks each against the code as built, and the owner's code wi
   quadrature that P15.T4 fits against; `stellar::binary::testing::brute_force_class_members`, which
   plan 11 exports behind `hyperion-sim`'s `testing` feature because a file under the sim's
   `tests/common/` cannot be reached from another crate. `hyperion-fit` enables that feature in its
-  own dependency on the sim.
+  own dependency on the sim. As built (re-validated):
+  - `tables/binary.rs` holds only `ClassShareTable`, `ClassShareRow`, the scratch `CLASS_SHARES`
+    and `MILKY_WAY_FORMED_MASS` (P11.T7). `IaYieldTable`, `IA_YIELD`, `ClassSamplerTable` and the
+    four samplers are P11.T6's and T8's, not built.
+  - `IaPoolChannel` is `stellar::binary::IaPoolChannel` (`timeline.rs`, P11.T4), beside the
+    engine's pooled candidates, `PooledIaEvent`. The engine is
+    `stellar::binary::evolve(&BinaryInput, until_age) -> BinaryTimeline`.
+  - `MergedBinaryFate` and `CLUSTER_MERGED_BINARY_FATE` exist, and nothing reads them.
+  - `multiplicity::stripped_share` takes a fourth argument, the interacting periastron. The fit
+    reads the two-argument `galaxy::displaced::binarity::stripped_share(m, composition)`
+    (`kick_rank`'s fingerprint). The quadrature P15.T4.b used is
+    `multiplicity::all_stars_fraction_below_as_drawn`.
+  - `stellar::binary::testing` is private to the sim's own tests, and `brute_force_class_members`
+    is P11.T8's, not built.
 
 Plans 09 to 11 were written in parallel with this one. Each task that calls their code begins by
-reading their Provides as built.
+reading their Provides as built. This list was re-validated against the code at 898a3c94
+(2026-10-22): the items marked "(re-validated)" were corrected, and the rest were checked and stand
+(Risks, "Re-validated at 898a3c94").
 
 ## Design notes
 
 1. **Dependency direction.** `hyperion-fit` depends on `hyperion-sim`; the reverse is forbidden and
    tested. The bootstrap problem (plan 02 needs a table before this plan starts) is solved by plan
-   02 creating the crate with its one task, as above.
+   02 creating the crate with its one task, as above. (Re-validated: it also depends on
+   `hyperion-surface`, for the surface crate's tables, and the test guards base and the surface
+   crate too; see Provides.)
 2. **Deterministic given its inputs.** No wall clock, no OS randomness, no `HashMap` iteration in
    any output path. Threads are allowed, but work is cut into chunks whose boundaries depend only on
    the manifest, each chunk's result is a pure function of its index, and results are reduced in
@@ -226,7 +336,8 @@ reading their Provides as built.
    `[workspace.dependencies]`. Linear algebra and optimisers are written by hand (non-negative least
    squares after Lawson and Hanson, Nelder–Mead, Levenberg–Marquardt), about 400 lines, because an
    optimiser crate that changes its iteration order between releases would make a table
-   irreproducible in a way the lock file cannot see. `Cargo.lock` pins the rest.
+   irreproducible in a way the lock file cannot see. `Cargo.lock` pins the rest. (Re-validated:
+   `optimise` holds P15.T8.a's golden-section search and Nelder–Mead; P15.T3.a adds the other two.)
 4. **Tables are Rust source, not data files.** The sim does no I/O, so a table is a `const`. The
    emitter writes one file per table: the header, then items in a fixed order, numeric literals with
    `_` separators so that Clippy's `unreadable_literal` passes without an `expect`, and
@@ -273,7 +384,9 @@ reading their Provides as built.
    02, 06, 09, 10 and 11 each ship the brainstorm's rounded value, either at the table's final path
    with a provisional header (02's `mge`, 06, 11) or as a named constant in their own code (02's
    Chabrier scale, 09, 10). A task here that replaces a constant of the second kind first moves it
-   to its table at the same value, which changes no output, and then fits it.
+   to its table at the same value, which changes no output, and then fits it. (Re-validated: plans
+   09 and 10 shipped theirs at the tables' paths, hand-made with no fit header: `cluster_dynamics`,
+   which P15.T8.a took over, and `streams`, which P15.T11.a registers.)
 10. **Versioning with `GENERATOR_VERSION`.** A table belongs to the generator version. A commit that
     changes the body of a table which generated output reads must bump `GENERATOR_VERSION`, set the
     table's `since-generator-version` to the new value and regenerate goldens, all together. Three
@@ -317,6 +430,12 @@ reading their Provides as built.
 Every task starts after M1. P15.T1 to P15.T3 are sequential and open M2. After them the groups
 P15.T4 to P15.T11 are independent of each other and can run in parallel, each gated only by the code
 its [Schedule](#schedule) row names. P15.T12 closes the plan.
+
+Re-validated at 898a3c94: P15.T1 and P15.T2 are built, and the groups ran without waiting for
+P15.T3 (T4, T5.a, T6.a–g, T7.a, T8 and T9.a are built), because no group reads T3's tables. So T3
+is one of the parallel groups, gated by the toolchain and plan 02 alone, and its swap, T3.c, rides
+version 25 (S1). Within a group the subtasks run in letter order, but P15.T5.d comes before
+P15.T5.b, whose harness needs its seams.
 
 ### P15.T1 Task registry and command line
 
@@ -507,11 +626,28 @@ pub struct BoxyTerm { pub weight: f64, pub width: f64, pub q: f64 }
 pub const MGE_BOXY: [(f64, [BoxyTerm; 16]); 3];            // boxiness c = 3.0, 3.5, 4.0
 ```
 
+Re-validated at 898a3c94: `MGE_HOLED_EXP` (P02.T12.b) has the same shape as the other two, with
+signed weights on `MGE_EXP`'s widths, and all three hold 14 terms (`tasks::mge::WIDTHS`). An
+emitted table imports its row types from its consumer, as `tables::displaced_forms` imports
+`galaxy::displaced::forms`, so `BoxyTerm` is defined in `galaxy::potential::mge`, which T3.c adds,
+and T3.b's scratch output names it there.
+
 - **P15.T3.a Refit the one-dimensional expansions.** The task already lives at `src/tasks/mge.rs`
   (P02.T6.a) and is a `FitTask` since P15.T1. Give it a manifest, then refit with free widths in
   place of plan 02's fixed logarithmic ones: weights by non-negative least squares on 400
   logarithmically spaced points of s in [10⁻³, 12], widths polished by Levenberg–Marquardt in log
-  width. **Acceptance:** maximum relative error of e^(−s) under 0.5% on 0.05–10 with at most 14
+  width. (Re-validated: the manifest, `manifests/mge.toml`, exists since P15.T2 and records the
+  first cut's constants, which `Manifest::expect_params` holds to the code; the refit reads its
+  parameters from a manifest, as `kick_rank` and `chabrier` do. `optimise::nnls` and
+  `optimise::levenberg_marquardt` are new here. Plan 02's one-dimensional quadrature is
+  `potential::mge::Gaussian::v_circ_sq`, summed over `double_exponential`'s Gaussians as its test
+  `a_thin_double_exponential_peaks_near_two_point_two_scale_lengths` does (the sim's
+  `tests/galaxy_potential.rs`). `MGE_HOLED_EXP` is refitted with `MGE_EXP` by
+  P02.T12.b's construction, `MGE_EXP`'s weights less a non-negative fit of the deficit
+  e^(−s) (1 − e^(−x ÷ s)) on the same widths (`fit_holed_exp`), because plan 02's test holds its
+  widths to `MGE_EXP`'s bit for bit; it serves the thin discs and the nuclear disc's inner part,
+  P02's R25 and R26.)
+  **Acceptance:** maximum relative error of e^(−s) under 0.5% on 0.05–10 with at most 14
   terms; the three-dimensional mass of the spheroidal exponential to 0.05%; the circular speed of a
   thin exponential disc built from the table, by the one-dimensional quadrature plan 02 uses, within
   0.5% of Freeman's Bessel-function form over 0.2–8 scale lengths (Bessel functions by series and
@@ -520,10 +656,17 @@ pub const MGE_BOXY: [(f64, [BoxyTerm; 16]); 3];            // boxiness c = 3.0, 
   half-length with a Gaussian end of 0.15 half-lengths) to 3% of its central value and its mass to
   0.3%, and its cumulative mass within 5% everywhere; plan 02's own table tests (1%, 0.1%, 3%, 0.5%,
   and the 7% cumulative check) still pass, and `mge_table_is_reproduced` passes against the new
-  file. A local 2% is out of reach: plan 02's R14 shows by linear programming that no non-negative
+  file. (Re-validated: those are the sim's `tests/galaxy_potential.rs`, with
+  `mge_exp_reproduces_the_exponential`, `mge_bar_reproduces_the_bar_profile`,
+  `the_expansions_have_non_negative_weights_and_ascending_widths`, and P02.T12.b's
+  `mge_holed_exp_reproduces_the_holed_profile`, 1% and its mass fraction to 10⁻⁵.) A local 2% is
+  out of reach: plan 02's R14 shows by linear programming that no non-negative
   sum of centred Gaussians fits the profile's flat top and sharp end better than 12% locally inside
   one half-length, and that the best possible cumulative-mass error is 4.4%. Beating that needs
   another basis (off-centre or negative terms), which plan 02's potential code does not support.
+  (Re-validated: since P02.T12.b it takes signed weights for the holed disc alone, through
+  `holed_double_exponential`, and reads `MGE_EXP` and `MGE_BAR` through `nonzero`, which drops
+  every term that is not positive.)
 - **P15.T3.b The boxy bulge in two dimensions.** For each boxiness c, fit 16 terms with free width
   and q on a polar grid of 48 × 12 points by Levenberg–Marquardt from the one-dimensional solution,
   weights kept non-negative by a projected step. Plan 02 then drops its equal-second-moments
@@ -531,17 +674,35 @@ pub const MGE_BOXY: [(f64, [BoxyTerm; 16]); 3];            // boxiness c = 3.0, 
   rms relative density error under 3%; enclosed mass within spheres of 0.5, 1, 2 and 4 scale lengths
   within 1% of a direct integral of the profile; midplane radial force within 2% of a brute-force
   integral at six radii; at Milky Way values the rotation curve changes by under 3% anywhere and
-  plan 02's enclosed-mass test from 1 pc to 2 kpc still passes.
+  plan 02's enclosed-mass test from 1 pc to 2 kpc still passes. (Re-validated: the last two read
+  the expansion in plan 02's potential, which T3.c puts there. Before it, the task's tests can
+  compute the curve's change from the sim's public `potential::mge::Gaussian` (`new`,
+  `v_circ_sq`); plan 02's test, `the_fixture_s_enclosed_masses_are_the_milky_ways`
+  (`tests/galaxy_milky_way.rs`, slow), runs at the swap.)
 - **P15.T3.c Swap in.** A held checkpoint of version 25 (S1; decision-bump-plan-after-22,
   2026-10-14; updated 2026-10-15): one commit with the table at `--since 25` and plan 02's
   `MassModel` reading `MGE_BOXY` in place of its moment-matched spheroid, its goldens blessed at
   header 24 on its lane branch. It lands only with the S1 train, whose bump commit takes 24 → 25.
   Every star moves, because the potential sets the sub-disc heights.
   T3.a and T3.b are developed and reviewed with `--out` to a scratch path, so `just ci` stays green
-  until this commit.
+  until this commit. (Re-validated at 898a3c94. To land before T3.c without moving the committed
+  table, their runs take a manifest of their own, with `--manifest` and `--out`, as P15.T5.a's
+  `kick_rank.production.toml` does, while `mge.toml` and the task's revision still reproduce the
+  committed first cut for `mge_table_is_reproduced`, `just fit-check` and `--rerun-fast`. Their
+  tests check the fitted tables in memory, as `the_expansions_follow_their_profiles` does today.
+  T3.c moves the refit's parameters into `mge.toml`, bumps the task's revision (Design note 6) and
+  runs plan 02's table tests on the new file. `MassModel::new` builds the bulge in
+  `galaxy/potential/model.rs` from `bulge_spheroid` and `potential::mge::spheroidal_exponential`;
+  plan 08's kinematics read `bulge_spheroid` too, for the bulge's tracer
+  (`kinematics::spheroid::bulge_tracer_axes`), and `MGE_BAR` for the bar's
+  (`kinematics::ln_bar_surface_density`). Whether the bulge's tracer follows the potential, and how
+  the triaxial bulge's two in-plane lengths give the expansion's R, are open points: Risks,
+  "Re-validated at 898a3c94".)
 
 **Files.** `src/optimise.rs`, `src/tasks/mge.rs`, `manifests/mge.toml`, `tables/mge.rs`,
-`galaxy/potential/model.rs` (T3.c's swap).
+`galaxy/potential/model.rs` (T3.c's swap). Re-validated: also T3.a–b's own manifest, and
+`galaxy/potential/mge.rs` (T3.c's `BoxyTerm` and its Gaussians). The tests stay in the crate's
+`tests/mge.rs`, with `tests/common`'s `assert_reproduced` (since 7696bdbe).
 
 **Acceptance.** `just ci` and `just test-slow` green; the task is `Fast` (under ten seconds) and is
 rerun by `--rerun-fast`.
@@ -660,8 +821,15 @@ progenitor ordering of Mandel and Müller (2020) with the 45% scatter of Disberg
 (`stellar::remnant::KickLaw`); plans 08 and 09 read it through plan 06. **Format:** plan 06's,
 `tables::kick_rank::SCORE_QUANTILES: [f64; 257]`, the ordinary kick score at ranks i ÷ 256 over its
 `ReferencePopulation`, strictly increasing, which `KickRankTable` interpolates linearly. P06.T19.b
-commits it provisionally from 10⁶ draws. The law's four defaults are not in the table: three are
-fields of `KickLawParams::default` and the fourth is plan 11's `CLUSTER_MERGED_BINARY_FATE`.
+commits it provisionally from 10⁶ draws. The law's four defaults are the brainstorm's ramp,
+black-hole factor and window widths, which sit in the table beside the quantiles as four constants
+that `KickLawParams::default` reads (`LOW_RAMP` (2.0, 3.0) M☉, `BH_FACTOR` 0.75,
+`EC_WINDOW_SINGLE` 0.1 M☉ and `EC_WINDOW_STRIPPED` 1.0 M☉; plan 06's Provides), and plan 11's
+`CLUSTER_MERGED_BINARY_FATE` (`stellar::binary`), which is not in the table. (Re-validated at
+898a3c94: the plan said the table held none. The `kick_rank` task writes the four by copying the
+sim's own constants, in `tasks/kick_rank.rs`'s `render`. The track reads its own copies of the
+windows, `stellar::remnant::collapse`'s `SINGLE_STAR_WINDOW` and `COMPANION_STRIPPED_WINDOW`, which
+`kick.rs`'s `the_defaults_are_the_brainstorms_and_the_tracks` holds equal.)
 
 - **P15.T5.a Production rank table.** Call plan 06's `reference::score_quantiles(pop, n, seed)`, the
   function that made the provisional table, with n = 10⁷ in chunks through `map_reduce_chunks`
@@ -684,6 +852,23 @@ fields of `KickLawParams::default` and the fourth is plan 11's `CLUSTER_MERGED_B
   `KickLawParams::default` with a bump. **Acceptance:** at the committed defaults all six
   observables of P06.T19.d pass; for each default the harness reports the interval over which they
   keep passing, and the default lies inside it and not within a tenth of its width from an edge.
+  Re-validated at 898a3c94:
+  - The harness cannot vary the windows through `kick_observables`: the track reads `collapse`'s
+    constants, and the `ec_window_*` fields only record them (P06's "Deviations in T19.a–d", "For
+    P15.T5.b"). Nor can it vary the rank table's population, which `ReferencePopulation::score`
+    takes from `KickLawParams::default()` with only its scatter replaced, so a moved ramp or window
+    meets a table built at the defaults. P15.T5.d adds both seams first.
+  - Plan 06's six observables are seven tests since ruling 96.3 added the escape share
+    (`tests/stellar_kick.rs`, slow: `kick_observables` over 20,000 stars with
+    `KickLawParams::default()` and `KickRankTable::generator()`). Ruling 147.2 holds two of them at
+    measured values outside their windows, its ruling deferred: isolated pulsars under 50 km/s on
+    the sky, 0.0708 against 3–7%, and the escape share, 0.1159 against 12–20%. So the first
+    acceptance criterion waits on that ruling (an open point in Risks).
+  - A move changes the table's constant, which the `kick_rank` task then emits from its manifest
+    rather than by copying the sim's constant, and for a window `collapse`'s copy too, with a bump.
+  - Whether a grid point of the ramp or a window rebuilds the rank table, and where the
+    sensitivity table's lock entry lives, are open points. The smoke run's item check uses
+    `tests/common`'s `declared`.
 - **P15.T5.c Fate of merged binaries in clusters (M4).** With plan 09's cluster retention and plan
   11's engine: neutron-star retention of 18–26% at a birth escape speed of 100 km/s, 15–25% at 50
   and 5–17% at 20 (ruling 126.3, amending 106.4 and 96.3 for clusters: the low mode is judged on
@@ -691,6 +876,33 @@ fields of `KickLawParams::default` and the fourth is plan 11's `CLUSTER_MERGED_B
   11 (the merged object stays a member and is judged on the pair's velocity) and under the
   alternative. **Acceptance:**
   the default passes all four bands; if only the alternative does, the finding goes to plan 11.
+  Re-validated at 898a3c94:
+  - Nothing reads `CLUSTER_MERGED_BINARY_FATE` (`stellar/binary/mod.rs`). P09.T9.b's retention,
+    `features::interior::retention` (`retention`, and `retention_tabulated` over
+    `tables::cluster_retention`, which plan 09's slow `cluster_retention` task fits), is a
+    closed-form quadrature over plan 08's kick bins. It judges the low mode on the pair's systemic
+    speed (`PAIR_SYSTEMIC_SIGMA`, 12 km/s) and never runs plan 11's engine. So neither branch has a
+    reader to measure, an open point that comes before T5.c can run.
+  - Ruling 137.3 (P09's Risks, "Ruling 137.3, as applied") states ruling 126.3's windows at a
+    low-mode share w of 0.181 and shifts them with the measured w. At the fixture's 0.2675 the code
+    asserts 26–34%, 24–34% and 10–22%, and under 1% in the open cluster
+    (`neutron_stars_are_retained_as_the_brainstorm_says`, `retention.rs`).
+  - P11's finding F13 ("P11.T4.k as built": plan 06's remnant law should read the stripped mark,
+    as its kick law does) is routed here, with its own bump: an open point.
+- **P15.T5.d The kick law's seams for the defaults review** (re-validated at 898a3c94; new, and
+  before P15.T5.b). In plan 06's module, with plan 06's tests, as P15.T5.a allowed for
+  `score_quantiles`. The track's two electron-capture windows become a run-time option that
+  defaults to `collapse`'s constants (for example in `stellar/sse/track.rs`'s `TrackOptions`, read
+  by `track/phases.rs`'s `captures_electrons`). `ReferencePopulation` takes a `KickLawParams` for
+  its membership, in place of `KickLawParams::default()` with its scatter, and passes its windows to
+  its tracks, and `kick_observables` passes its params' windows on. At the defaults every output is
+  bit-identical. **Files:** `stellar/sse/track.rs`, `stellar/sse/track/phases.rs`,
+  `stellar/remnant/reference.rs`. **Tests:** at the defaults the committed table is still
+  reproduced (`the_committed_body_is_the_rendering_of_its_quantiles`, the fit's
+  `tests/kick_rank.rs`), as is `two_runs_give_the_same_table_bit_for_bit` (`tests/stellar_kick.rs`);
+  a narrower single-star window moves the captures at its edge in the reference population only.
+  **Acceptance:** `just ci` green, and `golden_diff.py` (the sim-determinism skill's) finds no
+  golden moved. Half a day.
 
 **Files.** `src/tasks/kick_rank.rs`, `src/tasks/kick_defaults.rs`, `manifests/kick_*.toml` with
 their smoke manifests, `tables/kick_rank.rs`. All three are `Slow`: 10⁷ tracks are tens of minutes
@@ -949,6 +1161,12 @@ crates/hyperion-fit/data/cache/displaced_smoke`; update `data/displaced_smoke/PR
 
 **Files.** `src/tasks/displaced/{mod,orbits,births,histogram,fit_disc,fit_old,kinematics}.rs`,
 `manifests/displaced.toml`, `manifests/displaced.smoke.toml`, `tables/displaced_forms.rs`.
+Re-validated at 898a3c94, as T6.a–f built them: under `src/tasks/displaced_forms/`, `mod`,
+`orbits`, `births`, `histogram`, `table`, `fit_disc`, `fit_old`, `kinematics`, `hypervelocity`,
+`cells` and `nelder_mead`; the orbit run's `manifests/displaced_orbits{,.smoke,.one_percent}.toml`,
+the fit's `manifests/displaced_forms{,.smoke,.one_percent}.toml`, `data/displaced_smoke/` and
+`data/displaced_one_percent/`, and `tables/displaced_forms.rs`; the production run adds
+`data/displaced/`.
 
 No scratch stand-in exists for this table. It is the long pole of M3 and starts as soon as plan 02's
 potential is numerically stable, in parallel with M2.
@@ -1265,6 +1483,13 @@ giant-branch timescales by exp(s × ΔY); and `HB_TEMPERATURE_SHIFT`, linear in 
 shifts log T_eff on the horizontal branch by its value × ΔY at constant luminosity. The first is the
 brainstorm's correction to lifetimes; the second sets the blue end of the horizontal branch. If the
 grid shows that the tip core mass must move too, that is a change of shape and goes to plan 06.
+(Re-validated at 898a3c94: the file holds `LOG_Z_NODES: [f64; 4]`, the log₁₀ Z of the four
+metallicities, [Fe/H] −2.2, −1.6, −1.0 and −0.5; `LIFETIME_SLOPE: [[f64; 3]; 4]`, the quadratic's
+coefficients in log₁₀ m at each of them; and `HB_TEMPERATURE_SHIFT: [f64; 2]`, in envelope mass;
+all zero. The track reads them through `stellar/sse/track/excess.rs`, whose `HeliumHook::of` builds
+no hook at ΔY ≤ 0, so grid stars are untouched by the code path, not only by the form. The file
+keeps P06.T17's hand-written header, with no `MANIFEST` row or lock entry, as P15.T2 left it: T7.b
+registers it.)
 
 - **P15.T7.a Select and record the source** and its terms, as a _committed_ or _fetched_ dataset.
 - **P15.T7.b Fit.** Least squares on the grid's turn-off ages and zero-age horizontal-branch
@@ -1273,10 +1498,36 @@ grid shows that the tip core mass must move too, that is a change of shape and g
   identity at ΔY = 0 by its form, so grid stars stay bit-identical (plan 06's golden); ΔY = 0.1
   shortens the lifetime of a 0.8 M☉ star by about a third (0.25–0.4), the sign plan 06 documents; a
   synthetic cluster of 10⁶ M☉ with ΔY up to 0.18 shows a horizontal branch whose blue end is hotter
-  than its first population's by the grid's amount to 10%.
+  than its first population's by the grid's amount to 10%. Re-validated at 898a3c94:
+  - _The data._ `data/basti_helium/` holds only `PROVENANCE.toml` and `urls.txt`, though the
+    provenance says the reduction script and its output are committed, and the T7.a record's
+    research notes are not in the repository. So T7.b first writes the script and its reduced
+    output there, from the raw files in `data/cache/basti_helium/`, reading only log age, mass,
+    log L and log T_eff, as the provenance says: the turn-off ages of the 0.6–0.9 M☉ tracks and
+    the zero-age horizontal branch's temperatures by envelope mass, at each Z and Y. With that
+    output committed the task runs where the raw files are absent, so `--rerun-fast` reruns it
+    (the Schedule's `fast`), unlike `wd_cooling`.
+  - _The grid's reach._ Y = 0.30, 0.35 and 0.40 (0.35 and 0.40 only at Z = 0.0198) against a
+    canonical Y of 0.245–0.256 over Z = 10⁻⁴ to 0.008 (`urls.txt`'s `zahbz104y245aes` to
+    `zahbz803y256aes`): ΔY reaches about 0.15, short of the acceptance's 0.18, an open point.
+  - _The hook._ `HeliumTable`, `HeliumHook` and `Track::build_with_helium` are crate-private, so
+    `hyperion-fit` cannot build a track under a candidate table, which the synthetic cluster's
+    figure for the header needs. T7.b first exposes such a builder behind the sim's `testing`
+    feature, which `hyperion-fit` enables, as P06.T31 does for `stellar::testing`; no output
+    moves.
+  - _Other fitted tables._ Rendering plan R06 builds `sky_envelope` and `sky_phase_envelope` at
+    ΔY = 0, and both must be refitted with helium-excess nodes when this table is fitted (R06's
+    "T6.b's fitted envelope, as built" and "Deviations in T8.m, as built"); the phase envelope's
+    larger table needs a ruling on its storage before P15.T7 lands. Their fingerprints probe
+    ΔY = 0 alone, so `just fit-check` will not flag them, and which lane refits them is an open
+    point.
+  - The reproduction test uses `tests/common`'s `assert_reproduced`.
 
 **Files.** `src/tasks/helium.rs`, `manifests/helium.toml`, `data/<grid>/`, `tables/helium.rs`. Bumps
 the version when it lands, although no grid star changes, because members with a helium excess do.
+Re-validated: the grid is `data/basti_helium/` (T7.a), and T7.b's builder adds the sim's
+`stellar/sse/track/excess.rs` (or `track.rs`); registering the table adds its task to
+`task::REGISTRY` and the table's row to `tables::MANIFEST` (P15.T1's "Adding a task").
 
 ### P15.T8 Cluster dynamics constants
 
@@ -1347,7 +1598,12 @@ Tout and Pols (2002) as plan 11 builds them; Claeys et al. (2014) for the known 
   pool channel to target ÷ pool, with a cap of 1. **Acceptance:** the mark averages about one in six
   (0.1–0.25); bins at the cap hold under a tenth of the yield, with the shortfall reported in the
   header; the pool's merger rate is 4.5–7 times the Ia rate; rerunning the fit with the fitted mark
-  in place returns it within its error (the mark thins a pool it does not shape).
+  in place returns it within its error (the mark thins a pool it does not shape). (Re-validated at
+  898a3c94: pending; it waits on P11.T6, which defines `IaYieldTable` and `IA_YIELD`.
+  `IaPoolChannel` is `stellar::binary::IaPoolChannel` (P11.T4), and the engine pools its candidates
+  as `PooledIaEvent`. P11's deferred finding in "P11.T11.a as built" is for this review of the
+  engine's white-dwarf channels: an oxygen–neon white dwarf grown to collapse by accretion, and
+  a carbon–oxygen one of 1.12 M☉, end as neutron stars, not as Type Ia.)
 
 **Files.** `src/tasks/{type_ia_delay,type_ia_yield}.rs`, manifests, `tables/type_ia_delay.rs`,
 `tables/binary.rs`.
@@ -1363,7 +1619,8 @@ plan 11's engine.
   the Humphreys–Davidson limit, from plan 06's `SystemStars::lbv_window`. **Acceptance:** over a
   10⁶-star layer-E sample the class holds every star with a window inside the source horizon and
   nothing else; the sampler's mass distribution passes a Kolmogorov–Smirnov test at the 1% level
-  against the brute-force members.
+  against the brute-force members. (Re-validated at 898a3c94: pending; it waits on P09.T43's
+  `LbvProcess` and its scratch `tables::lbv`. `SystemStars::lbv_window` exists.)
 - **P15.T10.b Binary classes (M4, consumer plan 11).** Fill `AWD_SAMPLER`, `XRB_SAMPLER`,
   `MERGER_SAMPLER`, `NSM_SAMPLER` and `CLASS_SHARES` of `tables::binary` in plan 11's shapes
   (`ClassSamplerTable`, `ClassShareTable`), one sub-task per class. **Acceptance per class:** the
@@ -1371,7 +1628,12 @@ plan 11's engine.
   about 1,300 black-hole transients; 6–12 × 10⁶ accreting white dwarfs; 0.2–0.5 luminous red novae a
   year; about 10 neutron-star merger entries); and for each mark a two-sample Kolmogorov–Smirnov
   test at the 1% level between hosts drawn through the table and plan 11's
-  `stellar::binary::testing::brute_force_class_members` over 10⁷ systems.
+  `stellar::binary::testing::brute_force_class_members` over 10⁷ systems. (Re-validated at
+  898a3c94: pending; it waits on P11.T8, which defines `ClassSamplerTable`, the four samplers and
+  `brute_force_class_members`. Plan 11's Provides puts that in the sim's `tests/common/binaries.rs`,
+  exported from `stellar::binary::testing` behind the `testing` feature, but `stellar::binary`'s
+  `testing` module is private to the sim's own tests today. `ClassShareTable` and `CLASS_SHARES`
+  exist (P11.T7). The two-sample test is `hyperion-testkit`'s `stats::ks_two_sample`.)
 
 **Files.** `src/tasks/{lbv,binary_classes}.rs`, manifests, `tables/lbv.rs`, `tables/binary.rs`.
 `tables/binary.rs` is filled by two tasks (T9.b and T10.b) with disjoint item lists. Each task's
@@ -1385,7 +1647,17 @@ and `check` support this from the start, and a test covers two toy tasks sharing
 and far from complete. **Consumer.** Plan 10 (M3). **Format** (`tables::streams`):
 `ORPHAN_STREAMS_PER_GLOBULAR: f64`, the brainstorm's 1.5, uncertain threefold.
 
-- **P15.T11.a Move plan 10** to the table, unchanged.
+- **P15.T11.a Move plan 10** to the table, unchanged. Re-validated at 898a3c94: P10.T3.b already
+  committed the table at its path, the brainstorm's 1.5, hand-made with no fit header, `MANIFEST`
+  row or lock entry, and `global_list::orphans` already reads it (`expected_count`), so nothing is
+  left to repoint. T11.a registers it, as P15.T4.a did for `chabrier`: a task `streams` (fast,
+  revision 0) emits its manifest's scratch value, 1.5, as a provisional `TableItem::Scalar`, with
+  its `manifests/streams.toml`, its `task::REGISTRY` entry, its lock entry and its `MANIFEST` row
+  (P15.T1's "Adding a task"). The value's bits are unchanged, so no bump, and nothing generated
+  reads the stream specifications yet (P10's "T3.a–c as built"). **Acceptance:** `just ci` green,
+  with `just fit-check` warning that `streams` is provisional; a test holds
+  `ORPHAN_STREAMS_PER_GLOBULAR` to 1.5 bit for bit (`assert_same_bits`) and the committed file to
+  the task's rerendering (`tests/common`'s `assert_reproduced`); no golden moves. Half a day.
 - **P15.T11.b Fit.** With plan 10's generator at Milky Way values, for a multiplier k on a grid from
   0.5 to 4.5: generate the streams, observe from the plane at 8 kpc, apply a detectability cut (mass
   above 10³ M☉ within 30 kpc, axis density at least ten times the smooth halo's, more than 15° from
@@ -1393,7 +1665,10 @@ and far from complete. **Consumer.** Plan 10 (M3). **Format** (`tables::streams`
   globular-like streams with the Poisson error. **Acceptance:** k inside 0.5–4.5 with a stated
   one-sigma interval; at the chosen k globular tubes hold 0.3–1% of the halo's budget. The value
   stays a parameter of the generator version whatever the fit says, and the header states how far
-  the detectability cut moves it. Bumps the version if the value moves.
+  the detectability cut moves it. Bumps the version if the value moves. (Re-validated at
+  898a3c94: pending; it waits on P10.T5–T6. The generator as built, `global_list::Debris`, makes
+  stream specifications only: the spray (`global_list::spray`) and the tubes (`TubeTable::build`,
+  `locate`) that this fit observes are not built, and `TubeTable` is a placeholder.)
 
 **Files.** `src/tasks/streams.rs`, `manifests/streams.toml` and its smoke manifest,
 `data/stream_census/` (the counts used, _committed_ as facts with their citations),
@@ -1404,7 +1679,10 @@ and far from complete. **Consumer.** Plan 10 (M3). **Format** (`tables::streams`
 No provisional table remains; `check` treats `provisional: true` as an error from here on; every
 header carries its acceptance figures. `hyperion-fit list` prints name, revision, class, runtime and
 acceptance for every table, pasted into the pull request. **Acceptance:** `just ci` and
-`just test-slow` green with zero provisional tables.
+`just test-slow` green with zero provisional tables. (Re-validated at 898a3c94: `check` sees only
+registered tables, so the hand-made `binary`, `helium` and `streams` must be registered first, by
+P15.T9.b and T10.b (with P11.T15), T7.b and T11.a. The registry also runs other plans' tasks,
+Provides' "Built at 898a3c94", whose provisional tables, if any remain, this error catches too.)
 
 ### Schedule
 
@@ -1414,20 +1692,27 @@ acceptance for every table, pasted into the pull request. **Acceptance:** `just 
 | Toolchain             | P15.T1, T2   | all      | start M2  | 01, 02 | n/a   | n/a               |
 | MGE, final and boxy   | P15.T3       | 02, 08   | M2        | 02     | fast  | P02.T6.a          |
 | Kick ranks, defaults  | P15.T5.a, b  | 06       | M2        | 06     | slow  | P06.T19.b         |
+| Kick-law seams        | P15.T5.d     | 06       | M2        | 06     | n/a   | n/a               |
 | Helium correction     | P15.T7       | 06, 09   | M3        | 06     | fast  | P06.T17           |
 | Displaced forms       | P15.T6       | 08       | M3        | 02, 06 | slow  | none: start in M2 |
 | Cluster dynamics      | P15.T8       | 09       | M3        | data   | fast  | plan 09           |
 | Type Ia delay         | P15.T9.a     | 09       | M3        | 06     | fast  | plan 09           |
-| LBV sampler           | P15.T10.a    | 09       | M3        | 06     | fast  | plan 09           |
+| LBV sampler           | P15.T10.a    | 09       | M3        | 06, 09 | fast  | plan 09           |
 | Orphan streams        | P15.T11      | 10       | M3        | 10     | slow  | plan 10           |
 | Chabrier branch scale | P15.T4       | 02       | M4        | 11     | fast  | plan 02           |
 | Merged-binary fate    | P15.T5.c     | 09, 11   | M4        | 09, 11 | slow  | plan 11           |
-| Type Ia yield, mark   | P15.T9.b     | 11       | M4        | 11     | slow  | plan 11           |
-| Binary class samplers | P15.T10.b    | 11       | M4        | 11     | slow  | plan 11           |
+| Type Ia yield, mark   | P15.T9.b     | 11       | M4        | P11.T6 | slow  | plan 11           |
+| Binary class samplers | P15.T10.b    | 11       | M4        | P11.T8 | slow  | plan 11           |
 
 Only the displaced table has no scratch stand-in, because its consumer cannot do anything useful
 without it. Everything else lets its consumer proceed on a scratch value and costs one version bump
 when the fit lands.
+
+Re-validated at 898a3c94, the Needs column by task: P15.T5.b runs after T5.d; T5.c also needs a
+reader of the merged binaries' fate, which nothing is yet (T5.c's text); P15.T9.b needs P11.T6,
+and T10.b P11.T8; T10.a needs P09.T43, its consumer; T11.b needs P10.T5–T6. T3.c rides version 25
+(S1), and T6's production run starts from 25's commit and lands with 26 (S2). Built: T1, T2, T4,
+T5.a (its production run is P06.T19.e's), T6.a–g, T7.a, T8.a–c (provisional) and T9.a.
 
 ## Verification
 
@@ -1452,12 +1737,20 @@ same value is not a bump. P15.T6 lands with plan 08's own bump at version 26 (S2
 production run runs once, from version 25's landed commit, under the potential freeze: from that
 commit until 26 lands, nothing may change plan 02's potential tables or the birth populations the
 run samples (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15). P15.T6.g's re-emission
-lands with the 21 → 22 batch, or as one unit with 22 → 23 if it misses it.
+landed with the 21 → 22 batch ("Landed in the 21 → 22 batch", T6.g as built; re-validated).
+
+Re-validated at 898a3c94, at version 23. P15.T4.b's bump is taken (its table says since 14).
+P15.T9.a moved no wired output and took no bump (its record), so P15.T9's is T9.b's. P15.T8's
+waits on the deferred ruling on its blocks. P15.T5.a's rides P06.T19.e at version 25 (S1, plan
+06's Generator version). P15.T5.d, T7.b's builder and T11.a move nothing. The trains of the rest
+(a moved default of T5.b, T5.c's verdict and P11's finding F13, T7.b, T9.b, T10 and T11.b) are
+open (Risks, "Re-validated at 898a3c94").
 
 Reserved so that later tables move nothing they need not: table paths and item names are final from
 the scratch stage on; the node arrays of `displaced_forms`, so that a finer dependence on the halo
 or the bar adds nodes and not fields; `HYPERVELOCITY`, which plan 08 registers at zero weight until
-plans 09 and 11 feed it; and the domain-tag prefix `"fit."`, which no generator code uses.
+plans 09 and 11 feed it; and the domain-tag prefix `"fit."`, which no generator code uses (in the
+sim's registry, where no `fit.` tag exists yet: re-validated).
 
 ## Risks and open points
 
@@ -1604,3 +1897,81 @@ fit-check`; review-changes on this lane's diff.
     `tests/toolchain.rs`; the reproduction tests' first-differing-line panic is copied in eleven
     other test files. Both belong in `tests/common/mod.rs` (rust-dev § Tests), for a lane whose
     scope holds those files: this one's held two paths.
+- **Re-validated at 898a3c94 (2026-10-22).** Against `origin/rendering-and-planets` at 898a3c94,
+  at `GENERATOR_VERSION` 23 and `PROTOCOL_VERSION` 3: this plan's first re-validation, anchored on
+  9d955b26, where it arrived on this branch. Docs only; no code, table or other plan changed. The
+  brainstorm's two commits since (0c115993, the contact pairs after Rucinski; 78a8c520,
+  composition) touch no fit here.
+  - _What changed, and why: the code as built._
+    - Provides: the crate's dependencies and its guard test; the command line's as-built options
+      and `orbits`; the Rust sketch as built (`TableCrate`, `REGISTRY`, `find`, `items()`,
+      `table_crate()`; `optimise` holds golden-section search and Nelder–Mead, NNLS and
+      Levenberg–Marquardt are P15.T3.a's, and there is no `stats` module); a paragraph under the
+      module table on its rows as built (`MGE_HOLED_EXP`, `LOG_Z_NODES`, `tables::binary`), on what
+      is built and on the registry's 47 tasks; the recipes as the justfile has them.
+    - Consumes: R04.T4.d's base crate and three registries (the `fit.*` tags go in the sim's, at
+      its end); `Galaxy::from_params`'s seed and `Result`; `MGE_HOLED_EXP`; what
+      `MassModel::enclosed_mass` holds; the forces; the kick law's defaults in `tables::kick_rank`
+      and the track's own windows; plan 09's retention and tables; plan 10's table and generator;
+      plan 11's shapes as built. Design notes 1, 3 and 9: their references to code.
+    - Tasks: the ordering paragraph (T3 is one of the parallel groups; T5.d comes before T5.b).
+      T3.a–c: the manifest exists; `MGE_HOLED_EXP` is refitted with `MGE_EXP` on its widths,
+      since plan 02's test holds them equal; how T3.a–b land before T3.c without staling the
+      committed table; the potential's signed weights; the other readers T3.c meets. T5's Format
+      (the defaults are in the table), T5.b (what its harness cannot vary; seven tests) and T5.c
+      (nothing reads the fate; ruling 137.3; finding F13). T6's Files line. T7: the table's three
+      items, the data, the grid's reach, the crate-private hook and R06's two tables. T11.a: it
+      registers the table that P10.T3.b committed, with an acceptance it lacked. Pointers in T9.b,
+      T10, T11.b and T12; the Schedule's T5.d row and its note; Generator version.
+  - _New subtask._ P15.T5.d, the kick law's seams for the defaults review: the windows the track
+    reads and the rank table's membership become run-time inputs that default to today's constants,
+    so that T5.b's grid can vary them. P06's "For P15.T5.b" says to vary them through the
+    constants, which are compile-time. It comes before T5.b, by the ordering paragraph and the
+    Schedule; no task is renumbered.
+  - _Records left as written, now stale in part._
+    - T1's record: five tasks registered, now 47 (Provides).
+    - T2's "Today's tables" and its `just fit-check` output. The provisional set at 898a3c94 is
+      `cluster_bh`, `equipartition` and `pulsars` at 15, `kick_rank` at 16, `mge` at 11 and
+      `displaced_forms` at 22.
+    - T5.a's record. Ruling 147.2 rebuilt the committed table at task revision 1 (P06's
+      "Ruling 147.2, as built"), and no run of `kick_rank.production.toml` is recorded, so the
+      production run is made at revision 1, and P06.T19.e reruns it rather than committing an older
+      scratch file.
+    - T7.a's record: its research notes are not in the repository, and T7.b's text now stands
+      without them.
+    - T8's tests record: its deferred finding on the shared helpers is closed by 7696bdbe
+      (2026-10-20), which moved `declared`, `first_difference` and `assert_reproduced` to
+      `tests/common/mod.rs`.
+    - This section's first bullet: plan 02 did not put the discs' cored vertical profiles into the
+      potential (its D6 keeps every disc exponential in height there), so T3 gains no expansion of
+      them.
+  - _Pending re-validation._ T3.c waits on T3.a–b and rides S1 (25). T5.b waits on T5.d and on
+    open point 2. T5.c waits on a reader of the merged binaries' fate (open point 4). T6's
+    production run waits on version 25's commit, and T6.c–f's production fits on it. T9.b waits on
+    P11.T6, T10.a on P09.T43, T10.b on P11.T8, T11.b on P10.T5–T6, and T12 on all of them.
+    Executable now: T3.a, T3.b, T5.d, T7.b and T11.a.
+  - _Awaiting a ruling, unchanged:_ the three cluster blocks of T8.a–c, provisional, their fitted
+    values and misses in their acceptance lines.
+  - _Open points, for a ruling; the plan's text on each stands._
+    1. T5.b: whether a grid point of the ramp or of a window rebuilds the rank table, whose
+       population both enter, or holds the committed table, as P06.T19.d's tests do.
+    2. T5.b: its first acceptance criterion, every observable passing at the committed defaults,
+       cannot pass while ruling 147.2 holds two of P06.T19.d's seven tests outside their windows:
+       isolated pulsars slow on the sky, 0.0708 against 3–7%, and the escape share, 0.1159 against
+       the window of 12–20%.
+    3. T5.b: where its sensitivity table's lock entry lives. The defaults are `kick_rank`'s items,
+       so a `kick_defaults` task needs a table of its own, or a block of `kick_rank.rs`, which
+       rewrites that table's body.
+    4. T5.c: which code reads `CLUSTER_MERGED_BINARY_FATE`, and so what its two branches measure,
+       since P09.T9.b's retention never meets a merged binary.
+    5. T5.c: P11's finding F13, plan 06's remnant law reading the stripped mark, is routed here
+       with its own bump, but it changes plan 06's remnant law, which this plan's Scope keeps out.
+    6. T7.b: the grid reaches a ΔY of about 0.15, and the acceptance asks for 0.18.
+    7. T7.b: the storage of R06's phase envelope with helium-excess nodes, which R06 says needs a
+       ruling before P15.T7 lands, and which lane refits `sky_envelope` and `sky_phase_envelope`.
+    8. T3.c: whether plan 08's bulge tracer (`bulge_tracer_axes`) moves to `MGE_BOXY` with the
+       potential, and how the triaxial bulge's two in-plane lengths set the expansion's R.
+    9. The trains of the bumps the plan leaves open: a moved default of T5.b, T5.c's verdict and
+       F13, T7.b, T8's adoption, T9.b, T10 and T11.b.
+  - _Merges._ None. The sweep was made at the lane's base, 898a3c94, three commits past the brief's
+    607346de, none of which touches what this plan consumes.
