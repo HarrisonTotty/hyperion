@@ -11,7 +11,8 @@
   plans 03 (cells, bounds, streams), 06 (tracks and photometry), 07 (extinction), 11 (pair
   evolution, through R06.T5.d's fit) and 12 (the retarded time). R13.T9's gate waits on the
   correction of R06.T5.f's count findings (`deferred-corrections.md`, "Galaxy physics and
-  calibration").
+  calibration") and on the tables lane's check of the inner disc's D beyond 10,000 ly by component
+  (R06's Risks, "Rulings on T17's findings"; re-validated).
 - **Brainstorm sections covered** (by heading, in
   [the brainstorm](../../brainstorming/rendering-and-planets.md)): "The sky", its subsection "The
   star field is the galaxy, not a photograph" (the census, the band, "a statistical layer of
@@ -19,7 +20,8 @@
   synthetic stars far" (signed off by the owner on 2026-10-08, its label wording still a draft;
   its amendment for the real limit, with R13.T1's and T1.b's measurements, signed off 2026-10-09
   by the sign-off agent under the owner's delegation, `signoff-brainstorm.md`); open questions 13,
-  16 and 19 as they touch the census's reach and cost. The decision it answers is the owner's of
+  16 and 19 as they touch the census's reach and cost (19 closed on 2026-10-13 at generator version
+  21, on R06.T17's counts). The decision it answers is the owner's of
   2026-10-08 on the full sky's time (`decision-p11-t17c-bright.md` §4), and its feasibility study
   is `.git/rm23-orchestration/feasibility-hybrid-sky.md`. The real limit is the owner's of
   2026-10-09, after R13.T1's measurement (`decision-r13-guard-trip.md`).
@@ -143,8 +145,9 @@ impl SkyQuery { pub fn with_synthetic_ceiling(self, v: Magnitudes) -> Result<Sel
 impl Completeness { pub fn lists_by_texel(&self) -> bool; }   // a layer not yet final, or C–E at a ceiling
 // sky::census (R13.T6)
 impl SkyCensus { pub fn synthetic(&self) -> &[SyntheticStar]; }   // by flux, then key, then index
-pub fn merge_shells(parts, synthetic: Vec<SyntheticStar>, n_max: NonZeroU32,
-    completeness: Completeness) -> SkyCensus;                      // N_max over both kinds
+pub fn merge_shells(parts: impl IntoIterator<Item = (Vec<SkyStar>, CensusTallies)>,
+    synthetic: Vec<SyntheticStar>, n_max: NonZeroU32, completeness: Completeness)
+    -> SkyCensus;                      // N_max over both kinds; parts as built (re-validated)
 // sky::band (R13.T3)
 pub struct RayProfiles;                  // each texel ray's node distances and A_V (f32), from the march
 impl BandMarch { pub fn profiles(&self) -> Option<&RayProfiles>; }   // kept when a ceiling is stated
@@ -176,17 +179,27 @@ impl LuminosityFunction {
 - `SkyResponse` also gains `real_limit_ly` (`REAL_LIMIT_LY`), and each `SkyLayerCensusDto`
   `bright_beyond`, the expected count brighter than V_P beyond its real boundary; both are absent
   where the reply states no ceiling (R13.T2).
-- No new kind, no byte of the star or texel records changes, and `PROTOCOL_VERSION` stays (an
-  additive field, R03 Design note 12).
+- No new kind, and no byte of the star or texel records changes. **`PROTOCOL_VERSION` moves up by
+  one in R13.T7.a** (re-validated; 3 at 3f8faac5), where this plan had it stay for an additive
+  field (R03 Design note 12). The synthetic records lie inside `stars_bytes`, whose doc reads
+  `listed` × `SKY_STAR_BYTES`, and a client built before them takes every record there for a listed
+  star: `decodeSkyStars` counts the records from the bytes, and nothing checks `listed`. So it
+  would draw synthetic stars unlabelled, as the galaxy's own. By the rule on the constant
+  (`crates/hyperion-protocol/src/lib.rs`), an optional field leaves the version as it is only where
+  an older reader ignores what it does not know and misreads nothing; changing a field bumps it.
 
 ### Client (`apps/hyperion/src/renderer/src/view/sky/`)
 
 `SkyModel.synthetic` (the index range of the synthetic stars), drawn, baked, culled and spritten as
-listed stars; `skyLabelValue(limitV, kind, gaps, notes)` composing the `STARS` line's notes in the
-order `STREAMING`, then the synthetic or the interim note, then `NOT YET MODELLED`; while an
-instrument is open, the primary's line holds its limit and the first of them that holds, and an
-instrument's its limit and `NOT YET MODELLED` (decision-r06-t11f-stars-line); the view list note
-`SYNTHETIC STARS` beside `INTEGRATED STARLIGHT`, in both styles.
+listed stars; `skyLabelValue(limitV, limitKind, gaps, standing)` composing the `STARS` line's notes
+in the order `STREAMING`, then the synthetic or the interim note, then `NOT YET MODELLED`, through
+`skyLineNotes(gaps, standing)`, whose `SkyNote` gains the synthetic kind beside `detail-limited`
+and whose `SkyLineStanding` its state beside `detailLimited` (re-validated: R06.T11.f's form, the
+limit's text `skyLimitReading`'s since R06.T13.j); while an instrument is open, the primary's line
+holds its limit and the first of them that holds, and an instrument's its limit and
+`NOT YET MODELLED` (decision-r06-t11f-stars-line); the view list note `SYNTHETIC STARS` beside
+`INTEGRATED STARLIGHT`, in both styles, among the list's notes (`displays/view/ViewMarkList.tsx`;
+re-validated).
 
 ### Test helpers
 
@@ -200,6 +213,9 @@ independent realisations.
 Names are as built at `rendering-and-planets` b6cb51b1 unless marked; R13.T1 re-checks each against
 the tree before building. **Re-checked by R13.T1 at cb724aca (2026-10-08) and again at 090d880d
 (2026-10-09):** every name below is in the tree as written, with the corrections marked "(R13.T1)".
+**Re-validated at 3f8faac5 (2026-10-22)** against `rendering-and-planets`: every name below is in
+the tree as written, with the corrections marked "(re-validated)" (Risks, "Re-validated at
+3f8faac5").
 
 - **R06** (`06-the-sky.md`):
   - `sky::luminosity::{LuminosityTables, LuminosityFunction, TablesPlan, MAGNITUDE_STEP,
@@ -224,7 +240,10 @@ AtmosphereGrid, surface_gravity}` and `StarColour::reddened`.
     on by default since the task under T2, "The sky on by default", `--serve-sky=false` turning it
     off),
     and **R06.T11.d**, built at 497a2a9d (R13.T1): shells as bulk jobs
-    (`compute::sky::delivery_steps`), `SkyLayerCensusDto::{complete_to_ly, complete_to_rays_ly,
+    (`compute::sky::delivery_steps(plan, DeliveryOrder)`, E's shells from 1,000 ly a step ahead
+    since R06.T11.h, six steps near the Sun; re-validated), each reply built by `requests::sky`'s
+    `each` and `of` (`compute::sky::march` once, then `merge_step`, `band`, `encoded` and
+    `response` a step; re-validated), `SkyLayerCensusDto::{complete_to_ly, complete_to_rays_ly,
 is_final}` and `SkyResponse::is_final`, both `final` on the wire, with R06.T11.g's inner shell
     edges at 125 and 250 ly (`SHELL_EDGES_LY`) at 090d880d.
   - The decision records the plan rests on: `decision-r06-census-cost.md`,
@@ -237,16 +256,34 @@ is_final}` and `SkyResponse::is_final`, both `final` on the wire, with R06.T11.g
   beside `displays/view/useViewSky.ts` and `displays/view/useInstruments.ts`). `INTEGRATED
 STARLIGHT` is R06 Design note 23's note and the guide's row; no client code composes it at
   cb724aca nor at 090d880d (R13.T1), so R13.T8 composes `SYNTHETIC STARS` beside it where R06's
-  owner composes it.
+  owner composes it. Nor at 3f8faac5, where `photorealStatements(run, lighting, drawn, labels)`
+  composes the label block's statements, and the view list's notes, where the guide's "Views" puts
+  `INTEGRATED STARLIGHT` after `GROUND AT LINE OF SIGHT` and `SURVEY EDGE`, are
+  `displays/view/ViewMarkList.tsx`'s (`view-list__notes`: its `groundNote` and its `notes`,
+  `viewRun.ts`'s `surveyEdgeNotes`), set by `ViewDisplay.tsx` and `InstrumentControls.tsx`
+  (re-validated). The `STARS` line's limit is a field since R06.T13.j (`skyLimitReading`,
+  `SkyLineReading`'s `fields` and `dotsLead`, 13ch), and since R10.T12.b `VIEW`'s room decides what
+  gives way (`displays/view/viewRoom.ts`; R10's Risks, "Deviations in R10.T12.b, as built"): the
+  lines before `STARS` scroll and the slots are held, but the `STARS` line and the statements never
+  give way (re-validated).
 - **Galaxy plan 03:** `galaxy::bounds::CellBox` and `Component::bound` (the per-component density
   bound on a cell, nearest corner and arm phase), the layer shares (`ShareMatrix`), and the rule
   that no cell straddles an axis plane.
 - **Galaxy plan 01** (through `hyperion-base`): `rng::Stream::open(seed, tag, ObjectKey)`, its
-  uniform and exponential draws, and `rng/tags.rs`'s registry, which gains one tag.
+  uniform and exponential draws, and `rng/tags.rs`'s registry, which gains one tag. As built
+  (re-validated): a cell's key is `ObjectKey::cell(word)`, one word, whose tag must have the `Cell`
+  scope (`open` asserts it); the uniform draws are `uniform` and its kin, one word each, and
+  `Stream` has no exponential draw, which is `−math::ln` of `uniform_open_low()` (in (0, 1], so its
+  logarithm is finite), one word, as `planetary/surface/steps/plates.rs` draws one; and the
+  registry is the sim's, `crates/hyperion-sim/src/rng/tags.rs`, not base's `rng/tags.rs`, which
+  holds only the tags base opens.
 - **Galaxy plans 06, 07, 11, 12:** through R06's tables, colour table and band only. Nothing here
   builds a track, a sightline or a pair.
 - **The tables lane:** the correction of R06.T5.f's single-star count findings (C 0.966 ± 0.004,
-  E 1.164 ± 0.034, realised over tabulated), for R13.T9's gate.
+  E 1.164 ± 0.034, realised over tabulated), for R13.T9's gate; and, ruled 2026-10-13 for the same
+  gate, its check by component of the inner disc's D beyond 10,000 ly at |b| over 30°, 3.18
+  expected brighter than V 10.06 (R06's Risks, "Rulings on T17's findings" and T17's finding;
+  re-validated). Neither is done at 3f8faac5.
 
 ## Design notes
 
@@ -520,14 +557,17 @@ STARLIGHT` is R06 Design note 23's note and the guide's row; no client code comp
       1.00–1.07 × 10⁵ at the cap at V_P alone with fix (i) (from R13.T1) and 0.4–1.0 × 10⁶ for the
       exact census. A camera's costs what the eye's does, since the boundary does not depend on the
       cut (T1: 0.98–1.00 times). In the inner disc, about 1.6 × 10⁵ CPU-s (3 h; R13.T1.b's estimate
-      at T1's costs per system, not benched);
+      at T1's costs per system), which R06.T17 benched at V<sub>P</sub> 5.0 at 1.70 × 10⁵ on the
+      fixture and 2.42 × 10⁵ on the server's galaxy (sampled, provisional; R06's Risks,
+      "Deviations in T17, as built"; re-validated);
     - the synthetic pass: about 1–5 CPU-s at 7.95 and 5–25 at 10.06;
     - the first sky: R06.T11.g's as built (6.96 s and 94.6 CPU-s to 125 ly), unchanged by the limit,
       but for a second caps count at V_P over the same rays, split as T11.g splits the first, and
       the synthetic pass, 10–40 CPU-s together;
     - warm after a jump: the real tier's warm ratio stays T8.n's (about 95–100% of cold at version
-      21), so after a jump the tier costs about its cold cost again; the synthetic pass needs no
-      cache.
+      21; measured 95–108% by R06.T8.n and T17, and the sky cache is off by default since
+      R06.T8.o; re-validated), so after a jump the tier costs about its cold cost again; the
+      synthetic pass needs no cache.
 
 ## Tasks
 
@@ -538,9 +578,19 @@ lands before RM3 closes. T2.a needs only T1.b and R06 as built, and T2.b needs R
 nothing of R13 and can run beside T1–T3.
 T3 needs T2.a. T5.a needs T4; T5.b needs T3, T4 and T5.a. T6 needs T5.b. T7 needs T6, T2.b and
 R06.T11.d. T8 needs T7. T9 needs T7 and T8, and its gate the tables lane's correction of R06.T5.f's
-findings.
+findings. Re-validated at 3f8faac5: T7 is split, T7.a before T7.b, and T8 needs T7.a alone; T9's
+gate also waits on the tables lane's check of the inner disc's D (Consumes). R06.T11.i, not yet
+built, splits `TablesPlan`'s stages (`sky/luminosity.rs`), whose accumulation T4 extends: whichever
+lands second takes the other's change.
 
-Rust files are under `crates/hyperion-sim/src/` unless a path says otherwise.
+Rust files are under `crates/hyperion-sim/src/` unless a path says otherwise. The sky's unit tests
+read the tables through `sky::testing::milky_way_tables()` (`#[cfg(test)]`, built once a run and
+shared through a file since 830ba181) and the galaxy through `milky_way_galaxy()`; integration
+tests build their own (`LuminosityTables::build`). A test that reads the tables joins
+`.config/nextest.toml`'s `sky-tables` group, whose filter names the sky's modules and
+`binary(/^sky_/)`; one past the fast tier's time is `#[ignore = "slow: …"]`, falls in the
+`sky-tables-slow` group, and its task's acceptance runs it by name with `just test-slow`
+(re-validated).
 
 ### R13.T1 The boundary measured
 
@@ -717,9 +767,21 @@ whether the reply carries synthetic stars, and beyond R(u) holds Design note 9's
   than the cut) equals it to rounding, texel by texel;
 - any split of the rows gives the same bits.
 
+As built at 3f8faac5 (re-validated): the march keeps no profile. A ray's nodes and A_V are the
+private `Rays`' scratch (`Rays::trace`, which calls `profile`), reused texel by texel in
+`march_rows_through`, which keeps of a ray's A_V only its `edge_a_v`; a ray's node count varies
+with its edge and radii, a ray that `trace` ends at once has none, and `heap_bytes` counts what the
+march keeps. Each slot (R06.T9.f) holds a kept radius's light fainter than the cut within it plus
+all of the light beyond it, so Design note 9's light beyond R(u) is the slot at the cut's caps,
+which a ceiling's plan states as no reply (`CensusPlan::replies` gives R(u)'s shells): where a
+reply carries synthetic stars, the march keeps the cut's caps too. T9.j's tests are mostly
+`sky::limits`', and `sky::pins` pins the band at the served ceiling on every target
+(`sky/near_sun.golden`).
+
 Record the march's heap and time at 64² near the Sun with and without the ceiling. Files:
 `sky/band.rs`, `benches/sky.rs` (`sky/band_near_sun/march_ceiling`). Acceptance:
-`cargo test -p hyperion-sim sky::band`, `cargo bench -p hyperion-sim --no-run`, `just ci`.
+`cargo test -p hyperion-sim sky::band`, `cargo test -p hyperion-sim sky::limits`,
+`cargo test -p hyperion-sim sky::pins`, `cargo bench -p hyperion-sim --no-run`, `just ci`.
 
 ### R13.T4 The colour–magnitude table
 
@@ -741,7 +803,18 @@ colour–magnitude CDF per component bin, layer C–E and snapshot; the light-co
   (`standard_nodes_match_the_full_build_where_the_tables_are_read` passes as it stands);
 - the heap stays within +16 MiB and the build within +10% (recorded).
 
-Files: `sky/luminosity.rs`, `sky/colour.rs`. Acceptance: `cargo test -p hyperion-sim sky::luminosity`,
+As built at 3f8faac5 (re-validated): a track sample's state is seen only where the samples are made
+(`NodeSamples::of_track` and `of_cooling`), and `Seen::of` keeps its bin, light and colour sums
+alone, so the table's T_eff, log g and grid need `Seen` to carry them (`sky/binary_light.rs`'s fit
+reads `Seen` too); `NodeSamples::accumulate` counts each sample by its weight, and `assemble`'s
+finish step is `correct_for_pairs`, then `BinSums::into_functions`. The new fields go into the
+shared tables' file (`luminosity::file`). `parallel_build_equals_serial` pins `fingerprint`, a hash
+of `bits` (`SERIAL_FINGERPRINT` and its two siblings), so those pins hold the existing fields'
+bits only while `bits` leaves the new fields out; the new fields take pins of their own.
+
+Files: `sky/luminosity.rs`, `sky/colour.rs`, `sky/binary_light.rs` (re-validated). Acceptance:
+`cargo test -p hyperion-sim sky::luminosity`, `cargo test -p hyperion-sim sky::colour`,
+`cargo test -p hyperion-sim sky::binary_light`,
 `just test-slow standard_nodes_match_the_full_build_where_the_tables_are_read
 luminosity_matches_realised_cells`, `just ci`.
 
@@ -765,8 +838,29 @@ luminosity_matches_realised_cells`, `just ci`.
     snapshots, per layer, and the stars that flip over a 10 ly move in the 200 salts (Design note
     6).
 
-  Files: `sky/synthetic.rs` (new), `sky/mod.rs`, `rng/tags.rs`. Acceptance:
-  `cargo test -p hyperion-sim sky::synthetic`, `just ci`.
+  As built at 3f8faac5 (re-validated; Consumes):
+  - the tag is the sim's (`rng/tags.rs`), of `Cell` scope, appended last under its own plan
+    heading, with a registration test as P14.T51.f's and its line in `rng/tags.golden`
+    (`tests/foundation_golden.rs`'s `domain_tags_are_pinned`); the module's compile-time
+    `assert_registries_disjoint` covers it as it stands;
+  - a cell's stream is `Stream::open(seed, tag, ObjectKey::cell(word))`, and no key takes a layer
+    and a word, so `SyntheticCellKey::word` packs the layer and the cell's coordinates;
+  - each arrival's exponential is `−math::ln(uniform_open_low())`, one word;
+  - the bound is `Component::bound` over the cell's `CellBox` (`Fields::component_bounds` gives
+    every component's at once), and `CellBox::new` refuses an edge that is no power of two or a box
+    across an axis plane;
+  - the order test is `hyperion_testkit::order::assert_order_independent`, a dev-dependency;
+  - `sky::synthetic` joins the `sky-tables` group's module list in `.config/nextest.toml`, since its
+    tests read the shared tables;
+  - moving `SYNTHETIC_CEILING_V` into `sky::synthetic` (Risks, "Deviations in T2.b, as built")
+    reaches its readers: the sim's `sky::{pins,limits}`, `benches/sky.rs` and
+    `tests/sky_caps.rs`, and the server's `compute::sky`, `requests::sky` and `tests/sky.rs`, unless
+    `sky::caps` re-exports it.
+
+  Files: `sky/synthetic.rs` (new), `sky/mod.rs`, `rng/tags.rs`,
+  `crates/hyperion-sim/tests/golden/rng/tags.golden`, `.config/nextest.toml` (re-validated).
+  Acceptance: `cargo test -p hyperion-sim sky::synthetic`, `cargo test -p hyperion-sim rng::tags`,
+  `cargo test -p hyperion-sim --test foundation_golden domain_tags_are_pinned`, `just ci`.
 
 - **R13.T5.b The photometry and the walk's cost.** Design note 7: the real-boundary test by texel,
   the profile's A_V, V, the window beyond R(u) (every star brighter than the cut), the class and
@@ -798,9 +892,14 @@ Tests:
 - T9.j's `the_eyes_light_is_independent_of_the_census_radius` holds with synthetic stars;
 - order independence of the merge over parts and slabs.
 
-Files: `sky/census/{merge,mod}.rs`, `sky/band.rs`, `sky/limits.rs`. Acceptance:
+`merge_shells`' new argument and `Glare::of_listed`'s second kind reach their callers at
+3f8faac5, which pass no synthetic stars until T7.a (re-validated): `sky/census/query.rs`,
+`sky/pins.rs`, `benches/sky.rs`, and the server's `compute/sky.rs` (`merge_step`, `band`),
+`requests/sky.rs` and `tests/sky.rs`.
+
+Files: `sky/census/{merge,mod}.rs`, `sky/band.rs`, `sky/limits.rs`, and those callers. Acceptance:
 `cargo test -p hyperion-sim sky::census`, `cargo test -p hyperion-sim sky::band`,
-`cargo test -p hyperion-sim sky::limits`, `just ci`.
+`cargo test -p hyperion-sim sky::limits`, `cargo test -p hyperion-sim sky::pins`, `just ci`.
 
 ### R13.T7 The protocol and the server
 
@@ -809,19 +908,57 @@ The response's `synthetic`, the payload's synthetic records after the listed one
 runs the synthetic plan's slabs as bulk jobs after the march, merges them into every reply
 (Design note 11), and sets `SYNTHETIC_CEILING_V` to 4.5, the owner's value; the switch
 `HYPERION_SKY_SYNTHETIC` (on by default, off giving T2's interim) lets T9 turn it off if it fails.
-Tests:
+Split at the re-validation, since the version's move, the switch's row, the server tests' extent
+and the ceiling's readers took it past a day (Risks, "Re-validated at 3f8faac5"): T7.a serves the
+synthetic stars at V<sub>P</sub> 5.0, and T7.b moves V<sub>P</sub> to 4.5.
 
-- a sky near the Sun returns the sim's listed and synthetic stars bit for bit, and every reply the
-  same synthetic set;
-- `stars_bytes` is 24 × (listed + synthetic), and a truncated payload is an error naming its length;
-- the switch off gives T2.b's replies bit for bit;
-- the first reply's time near the Sun is recorded against R06.T17's first-sky budget.
+- **R13.T7.a The wire and the served synthetic stars.** The response's `synthetic`, the payload's
+  synthetic records after the listed ones (`bulk::sky`'s `encode_sky_payload`, and above 50,000
+  stars `requests::sky`'s `encoded`, `PAYLOAD_JOB_STARS` a job), their decoding in
+  `@hyperion/protocol` (`just gen-protocol`), and `PROTOCOL_VERSION` one higher (Provides). The
+  server runs the synthetic plan's slabs as bulk jobs after the march (`requests::sky`'s `each`,
+  after `compute::sky::march`) and merges them into every reply (Design note 11; `of`'s
+  `merge_step`, `band` and `response`). The switch `HYPERION_SKY_SYNTHETIC`, in `--serve-sky`'s
+  form (`config.rs`, its module docs and tests, the root README's table), is on by default; off,
+  it gives T2's interim. Every sky in `tests/sky.rs` is served over forced caps (Risks, "Deviations
+  in T2.b, as built"), which count no cut's caps, while the synthetic plan reaches to them (Design
+  note 5), so its tests force that extent too, by a seam beside `SkyQuery::with_caps_forced`. Tests:
+  - a sky near the Sun returns the sim's listed and synthetic stars bit for bit, and every reply
+    the same synthetic set;
+  - `stars_bytes` is 24 × (listed + synthetic), and a truncated payload is an error naming its
+    length;
+  - the switch off gives T2.b's replies bit for bit.
 
-Files: `crates/hyperion-protocol/src/sky.rs`, `crates/hyperion-server/src/{requests/sky.rs,
-compute/sky.rs,bulk/sky.rs,config.rs}`, `crates/hyperion-server/tests/sky.rs`,
-`packages/protocol/src/{sky,index}.ts`, generated bindings. Acceptance:
-`cargo test -p hyperion-protocol sky`, `cargo test -p hyperion-server --test sky`,
-`pnpm --filter @hyperion/protocol test`, `just ci`.
+  Files: `crates/hyperion-protocol/src/{sky,lib}.rs`,
+  `crates/hyperion-server/src/{requests/sky.rs,compute/sky.rs,bulk/sky.rs,config.rs}`,
+  `crates/hyperion-server/tests/{sky,websocket}.rs`, `packages/protocol/src/{sky,index}.ts`,
+  generated bindings, `README.md`. Acceptance: `cargo test -p hyperion-protocol sky`,
+  `cargo test -p hyperion-protocol protocol_version`, `cargo test -p hyperion-server --test sky`,
+  `cargo test -p hyperion-server compute::sky`, `cargo test -p hyperion-server requests::sky`,
+  `cargo test -p hyperion-server config`, `pnpm --filter @hyperion/protocol test`, `just ci`.
+
+- **R13.T7.b V_P at 4.5.** `SYNTHETIC_CEILING_V` takes 4.5, the owner's value; the
+  switch off keeps T2's interim at its V 5.0, so that its replies stay T2.b's bit for bit. What
+  reads the ceiling follows it:
+  - `sky::pins`' and `sky::limits`' goldens, `sky/near_sun.golden` and `sky/eye_cut.golden`,
+    re-blessed with no bump (R06's Generator version: the sky's goldens are regenerated whenever
+    what they read moves);
+  - T2.b's tests of the served rule at V 5.0: `compute::sky`'s and `requests::sky`'s, and
+    `tests/sky.rs`'s `a_shallow_sky_within_the_limit_is_served_as_r06s`, at 4.6 and 5.0;
+  - the sim bench's `census_near_sun_served/*_5.0`, named by the constant;
+  - R06.T11.h's slow test in `tests/sky_caps.rs`, which reads the served ceiling, run again.
+
+  Tests: the above at 4.5; the first reply's time near the Sun (the server's
+  `sky_near_sun_cold/first_reply`) is recorded against R06.T17's first-sky budget.
+
+  Files: `sky/synthetic.rs`, `crates/hyperion-sim/tests/golden/sky/{near_sun,eye_cut}.golden`,
+  `crates/hyperion-sim/{benches/sky.rs,tests/sky_caps.rs}`,
+  `crates/hyperion-server/src/{compute,requests}/sky.rs`, `crates/hyperion-server/tests/sky.rs`.
+  Acceptance: `cargo test -p hyperion-sim sky::pins`, `cargo test -p hyperion-sim sky::limits`,
+  `cargo test -p hyperion-server compute::sky`, `cargo test -p hyperion-server requests::sky`,
+  `cargo test -p hyperion-server --test sky`,
+  `just test-slow beyond_1000_ly_d_holds_at_most_a_third_of_the_far_stars_brighter_than_v_3`, the
+  bench recorded, `just ci`.
 
 ### R13.T8 The client and the guide drafts
 
@@ -835,9 +972,27 @@ agent, for the owner's sign-off. Tests:
 - the list note in both styles, and its absence without synthetic stars;
 - a synthetic star is culled, baked and spritten as a listed star, its flux kept to 10⁻⁶ relative.
 
+As built at 3f8faac5 (re-validated; Provides, Consumes):
+
+- the note is a `SkyNote` kind beside `detail-limited` in `label.ts`'s
+  `skyLineNotes(gaps, standing)`, its state in `SkyLineStanding` beside `detailLimited`, which
+  `useViewSky.ts`'s `viewSkyLabel` builds and `detailLimited(response)` reads (its remark leaves
+  "and carries no synthetic stars" to this task);
+- `SkyModel` is built in `view/sky/useSky.ts` from the decoded stars, whose count is the records
+  in `stars_bytes`, so the synthetic stars are those after the response's `listed`;
+- the list note stands among the view list's notes (`displays/view/ViewMarkList.tsx`, after
+  `SURVEY EDGE`, where the guide orders `INTEGRATED STARLIGHT`, which no code composes yet), set
+  by `ViewDisplay.tsx` for the primary and `InstrumentControls.tsx` for an instrument.
+
 A hidden Electron check that the composed line fits the label block at 1280 × 720 and in the
-instrument slots, recorded. Files: `apps/hyperion/src/renderer/src/view/sky/{model,label}.ts`,
+instrument slots, recorded. It is measured in R10.T12.b's room (`displays/view/viewRoom.ts`),
+which came after T2.b's and R06.T13.j's measures: at 1280 × 720 the second instrument's `OPEN` is
+held back and the upper plate's lines before `STARS` scroll, but the `STARS` line and the
+statements never give way. So it covers 1280 × 720 with none and one instrument open and the full
+layout's least box (99 rem) with two, in both styles, each with nothing cut and what gave way
+recorded (re-validated). Files: `apps/hyperion/src/renderer/src/view/sky/{model,label,useSky}.ts`,
 `apps/hyperion/src/renderer/src/displays/view/{useViewSky,useInstruments}.ts`,
+`apps/hyperion/src/renderer/src/displays/view/{ViewMarkList,ViewDisplay,InstrumentControls}.tsx`,
 `docs/frontend/ux-guidelines.md`. Acceptance: `pnpm --filter hyperion exec vitest run
 src/renderer/src/view/sky`, `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view`,
 `pnpm format:check`, `just ci`.
@@ -853,10 +1008,11 @@ The owner's test (Design note 1), run by name and recorded:
   to R₁ and clipped at R₂, over 64 salts. Per layer, 1-mag bin of apparent V (the bins reaching the
   bright end, since stars brighter than V_P are synthetic beyond the limit) and |b| band: counts,
   light, the T_eff histogram and the shares above A_V 2, 5 and 10. Gate: each count and light ratio
-  within 1 ± 3σ, once the tables lane has corrected R06.T5.f's findings; until then the ratios are
-  recorded, not gated. The census's σ is its Poisson σ times √1.5, since its systems are Poisson
-  but their stars come in multiples (Σk² ÷ Σk is 1.46 for D and 1.54 for E, R06 Risks, "R06.T5.f's
-  measurements, as built"), combined with the tables' pair σ.
+  within 1 ± 3σ, once the tables lane has corrected R06.T5.f's findings and checked the inner
+  disc's D (Consumes; re-validated); until then the ratios are recorded, not gated. The census's σ
+  is its Poisson σ times √1.5, since its systems are Poisson but their stars come in multiples
+  (Σk² ÷ Σk is 1.46 for D and 1.54 for E, R06 Risks, "R06.T5.f's measurements, as built"),
+  combined with the tables' pair σ.
 - **`the_synthetic_seam_is_continuous`** (slow): near the Sun at 10.06, counts per magnitude in thin
   shells either side of R(u), in the plane and above it, on rays where R(u) is the cap at V_P and on
   rays held at the limit, real against synthetic, and the scatter of
@@ -865,19 +1021,29 @@ The owner's test (Design note 1), run by name and recorded:
   per-star sightlines for candidates near the cut, or a finer band.
 - **Benches** (sampled, `HYPERION_SKY_BENCH_SAMPLE`): the full hybrid sky cold near the Sun at the
   eye's cut and at 10.06, the time to each reply, the nuclear disc, and the same at
-  `HYPERION_WORKERS=4`; the synthetic share of the stars brighter than the eye's limit.
+  `HYPERION_WORKERS=4`; the synthetic share of the stars brighter than the eye's limit. The time to
+  each reply is the server's `sky_near_sun_cold` run to its final reply
+  (`HYPERION_SKY_BENCH_UNTIL_LY=final`); its camera's first sky at 10.06 is R06.T11.j's
+  `camera_first_reply`, not built at 3f8faac5 (re-validated).
 - **A golden**, `crates/hyperion-sim/tests/golden/sky/synthetic_near_sun.golden`: the synthetic
   stars of a few cells for a pinned observer near the Sun (keys, indices, positions to 10⁻⁶ ly, V
-  to 10⁻⁶ mag), at the current generator version.
+  to 10⁻⁶ mag), at the current generator version. Its test is a unit test of `sky::synthetic`
+  whose name holds `pinned` or `golden`, as R06.T17's sky goldens' are, so that `ci`'s wasip1 run
+  keeps it (the justfile's `wasm_sky`); `tests/sky_hybrid.rs` is native only (re-validated).
 - **By hand, hidden:** the photorealistic view near the Sun, with the asserted star counts per
   magnitude in annuli about R(u), recorded (no golden image).
 
 Record the figures in this plan's Risks. The brainstorm's subsection already carries R13.T1's and
 T1.b's measured boundary and costs (signed off 2026-10-09 by the sign-off agent, owner's
-delegation); where T9's figures differ from that text, draft the edit for a sign-off agent. Files:
-`crates/hyperion-sim/tests/sky_hybrid.rs`, the golden, `.config/nextest.toml`, this plan.
-Acceptance: `just test-slow the_synthetic_tier_matches_the_census the_synthetic_seam_is_continuous`,
-`just bench -- sky/synthetic`, `just ci`.
+delegation); where T9's figures differ from that text, draft the edit for a sign-off agent. The
+slow tests take `#[cfg(feature = "testing")]` where they read `SyntheticSalt`, as
+`the_capped_boundary_is_recorded` does, build their own tables, and fall in the `sky-tables-slow`
+group by `binary(/^sky_/)`, so `.config/nextest.toml` gains only their `threads-required`
+(re-validated). Files: `crates/hyperion-sim/tests/sky_hybrid.rs`, `sky/synthetic.rs` (the
+golden's test), the golden, `.config/nextest.toml`, this plan. Acceptance:
+`just test-slow the_synthetic_tier_matches_the_census the_synthetic_seam_is_continuous`,
+`just bench -- sky/synthetic`, the server's `sky_near_sun_cold` to its final reply, by name, the
+benches recorded, `just ci`.
 
 ## Verification
 
@@ -901,7 +1067,9 @@ No change to generated output and no bump. The sky only reads. The plan reserves
 output moves. The luminosity tables gain fields (T4), which change their fingerprint and leave every
 existing field's bits; nothing generated reads them. R06.T17's census golden is taken without a
 ceiling (the oracle's census); R13.T9 adds the synthetic golden, re-blessed whenever the tables, the
-colour table or the synthetic code moves, as R06's sky goldens are.
+colour table or the synthetic code moves, as R06's sky goldens are. R13.T7.b's ceiling of 4.5 moves
+`sky/near_sun.golden` and `sky/eye_cut.golden`, which read `SYNTHETIC_CEILING_V`, re-blessed the
+same way (re-validated).
 
 ## Risks and open points
 
@@ -1967,3 +2135,72 @@ caps_at_cut: &[LayerCap])` takes their count. The rule is the same: for C to E, 
     change touches (`tests/cli.rs`' 8, `config`'s 18, `requests`'
     `kinds_without_a_handler_are_answered_unsupported` and `tests/sky.rs`'s two switch-off tests)
     passed; the commit's hooks ran the workspace's clippy. `just ci` runs at integration.
+- **Re-validated at 3f8faac5 (2026-10-22).** Against `rendering-and-planets` 3f8faac5, at generator
+  version 23 and `PROTOCOL_VERSION` 3, by reading and comparing alone, for T3–T9; R13.T1 last
+  checked the names at 090d880d. Every name Consumes and the sketches use is in the tree, and those
+  marked "(re-validated)" are corrected to it. Every dependency is built, so no task is pending
+  re-validation.
+  - **What changed, and why.**
+    - **The version** (Provides; T7.a). The plan had `PROTOCOL_VERSION` stay for an additive
+      field. But a client built before T7 reads the synthetic records inside `stars_bytes` as
+      listed stars, since it counts the records from the bytes and checks no `listed`, and so
+      draws them unlabelled; and `stars_bytes`'s doc reads `listed` × `SKY_STAR_BYTES`. By the rule
+      on the constant, an optional field leaves the version only where an older reader misreads
+      nothing, so T7.a raises it by one. T2.b's "`PROTOCOL_VERSION` stays 2" stands as dated: it
+      was 3 from P06.T24.c.
+    - **The stream and the tag** (Consumes; T5.a). `Stream` has no exponential draw: −ln of
+      `uniform_open_low()`, one word. A `Cell` key takes one word, so the synthetic cell's word
+      packs its layer and coordinates. The tag goes in the sim's registry, with its line in the tags
+      golden, not in base's `rng/tags.rs`.
+    - **The client** (Provides, Consumes; T8). `skyLabelValue` takes `SkyLineStanding`, as R13.T1
+      recorded in Consumes but Provides did not. The view list's notes are `ViewMarkList.tsx`'s,
+      not `photorealStatements`', which are the label block's statements; and the layout check is
+      read in R10.T12.b's room, which came after T2.b's and R06.T13.j's measures.
+    - **T3.** The march keeps no profile today, and a slot is a radius's fainter light within it
+      plus all the light beyond, so Design note 9's light beyond R(u) is the slot at the cut's
+      caps, which the march must then keep too. T9.j's tests in `sky::limits` and the band pinned
+      in `sky::pins` join the acceptance.
+    - **T4.** `Seen` carries no T_eff, log g or grid; the shared tables' file takes the new fields;
+      and the tables' three fingerprint pins hold the existing bits only while `bits` leaves the
+      new fields out. `sky::colour` and `sky::binary_light` join the acceptance.
+    - **T6.** `merge_shells`' and `Glare::of_listed`'s callers, the server's among them, join its
+      files.
+    - **T7 is split** into T7.a, the wire and the served synthetic stars at V_P 5.0, and T7.b, V_P
+      at 4.5. T7 had grown past a day: the version's move; the switch's form, docs and README row;
+      a forced synthetic extent for the server's tests, whose skies are all at forced caps; and,
+      at 4.5, two sim goldens re-blessed and T2.b's tests of the served rule re-pinned. The switch
+      off keeps T2's interim at V 5.0, as its test of T2.b's replies bit for bit requires. The
+      ordering notes say T8 needs T7.a, and T9 T7.b.
+    - **T9.** Its golden's test is a `sky::synthetic` unit test, since `tests/sky_hybrid.rs` is
+      native only; its slow tests take the `testing` feature; its acceptance names the server's
+      bench for the time to each reply, which `just bench -- sky/synthetic` does not select; and
+      its gate waits on the inner disc's D too (R06's "Rulings on T17's findings").
+    - **Test data** (the Tasks' preamble). The sky's unit tests share the tables since 830ba181,
+      and the `sky-tables` group's filter names its modules, so `sky::synthetic` joins it.
+    - **Figures** (Design note 16). R06.T17 benched the inner disc at the limit, and R06.T8.n and
+      T17 measured the warm ratio; the sky cache is off by default since R06.T8.o.
+  - **The brainstorm since 090d880d.** Of its 12 commits, two after R13's own edits reach the
+    sky, its Decisions or its open questions: 8248dac5 (the sky's C cap and counts at version 21)
+    and 70d110a8 (Decisions). 8248dac5 closes open question 19, now noted in the header, and
+    states the exact census's caps at V 7.95 (2.7 × 10⁸ systems near the Sun) and its cost
+    (1.1 × 10⁶ CPU-s cold). R13 quotes none of those. Its 0.4–1.0 × 10⁶ for the exact census to
+    the eye's cut is the hybrid subsection's own, unchanged, and R06.T17's 7.19 × 10⁵ at the eye's
+    cut lies inside it. 70d110a8 touches no sky text. The rest edit other sections (the coarse
+    pass, atmospheres, the sources), or came with R13's own edits (bce2aef5, d2d5074b, 78a8c520,
+    3138e393), which this plan already follows. No design note contradicts the brainstorm.
+  - **Pointers to dated records now stale** (left as written): "Deviations in T2.b, as built", its
+    version, its hidden layout check and its "every sky in `tests/sky.rs` states V 5.0", which
+    T7.b moves; and the Risks' "The inner disc at the limit", unbenched there and benched by
+    R06.T17 (Design note 16).
+  - **The sky's crate.** CS.T1 (bf36baa8) prepared moving `sky` into a crate `hyperion-sky`; the
+    move is deferred. R13's paths stay under `crates/hyperion-sim/src/` and follow `sky` if it
+    moves.
+  - **Pending:** T9's gate, on the tables lane's correction of R06.T5.f's count findings (R06's
+    Risks and the roadmap's asks agree that it is open) and its check of the inner disc's D.
+  - **Open, for a ruling:** T8 keys the synthetic note on a reply carrying synthetic stars, but
+    T7.a's `synthetic: u32` is 0 both with the switch off and where the tier drew none. Where few
+    stars brighter than the cut lie beyond R(u), as in the nuclear disc at a cut just deeper than
+    V_P (T2.b counted some 4.6 there at 5.4, C to E), the line would then read the interim note.
+    Lean: `synthetic` absent where the tier is off, as `synthetic_ceiling_v` is absent with no
+    ceiling, with T8 keying the note on its presence. Provides and T7.a keep `synthetic: u32`
+    until ruled.
