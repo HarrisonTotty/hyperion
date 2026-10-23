@@ -13685,9 +13685,12 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     times Hynek, Beach and Hoke 2010's 0.0115 km⁻¹ for Noachian units: one trunk a 38 km cell.
   - _A channel-initiation area._ One sourced and independent of the grid, so that a cell carries a
     valley and the closure only above it, is a later item, with no owner until a source exists
-    (main's ruling); without it level 8's dependence on resolution stands (T14's (B) 1.94 times its
-    bound and (A2) 5.64 m at level 8), and a larger world dry now at level 8 draws twice the
-    density.
+    (main's ruling); without it level 8's dependence on resolution stands, and a larger world dry
+    now at level 8 draws twice the density. T6.c's closure narrows it: the reference Mars at level
+    8 (cells of about 19 km; rule 4's slow run, `the_reference_mars_s_slow_record`, 2026-10-22)
+    gives (B)'s p99 0.978 of its bound (175.3 m against 182 m) and (A2) 3.06 m, against level 7's
+    0.826 and 1.96 m, where T14's trunk closure gave 1.94 times and 5.64 m. Its (A1) trunk median
+    is 198.3 m, 27.0% deeper than 350 m.
   - _The depth tail: the plan's trigger is met._ The drawn valleys draining 10⁴–10⁵ km² on the
     final field: 14.66% deeper than 350 m, about three times the 4.6% of a log-normal of Williams
     and Phillips 2001's depths, p90 412.3 m, maximum 2,435.5 m. So the drawn valleys show T14's
