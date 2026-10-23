@@ -892,10 +892,16 @@ export async function checkAtmosphereSteps(engine: RenderEngine, checks: Checks)
     const reduced = reducedSizes(sizes);
     // R05.T12.e's GPU agreement, on the medium its bounds were measured on (plan R08, R08.T6.d).
     const shipped = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, reduced, WGS84);
+    // The converged march takes its count on every ray, the bare ground's rule off (R08.T8.e).
     const converged = new HillaireAtmosphere(
       engine,
       R05_EARTH_REFERENCE,
-      { ...reduced, skyViewSamples: CONVERGED_STEPS, rayMarchSamples: CONVERGED_STEPS },
+      {
+        ...reduced,
+        skyViewSamples: CONVERGED_STEPS,
+        rayMarchSamples: CONVERGED_STEPS,
+        marchDepthSteps: null,
+      },
       WGS84,
     );
     const marchWidthTexels = Math.ceil(FRAME_SIZE.widthPx * sizes.rayMarchScale);

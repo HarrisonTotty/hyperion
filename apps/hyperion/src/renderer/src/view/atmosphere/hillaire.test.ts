@@ -692,8 +692,8 @@ function memberOf(block: unknown, index: number): number[] {
   return [...block.subarray(index * 4, index * 4 + 4)];
 }
 
-/** The view's members before its sources: camera, up, sky, skyAxis, …, curvature. */
-const VIEW_HEAD_MEMBERS = 12;
+/** The view's members before its sources: camera, up, sky, skyAxis, …, curvature, marchGround. */
+const VIEW_HEAD_MEMBERS = 13;
 
 /** The place of the view's `sky` member. */
 const SKY_MEMBER = 2;
@@ -730,8 +730,6 @@ describe("the march's sources (R08.T8.e, decision-r08-t8-leans.md §9)", () => {
     expect(marchSourcesOf(four, 2)).toEqual([NOON, neighbour]);
     expect(marchSourcesOf(four, 2)[1]).toBe(neighbour);
     expect(four).toEqual([NOON, companion, moon, neighbour]);
-    expect(TABLE_SIZES.high.marchSourceCap).toBe(2);
-    expect(TABLE_SIZES.low.marchSourceCap).toBe(2);
   });
 
   it("takes every source as given at or under the cap, and the earlier of two alike", () => {
@@ -746,6 +744,14 @@ describe("the march's sources (R08.T8.e, decision-r08-t8-leans.md §9)", () => {
     for (const cap of [0, 1.5, Number.NaN, -2]) {
       expect(() => marchSourcesOf(four, cap)).toThrow(RangeError);
     }
+  });
+
+  it("refuses such a cap where the sizes are given", async () => {
+    const engine = await countingRenderEngine();
+    const sizes = { ...TABLE_SIZES.high, marchSourceCap: 0 };
+    expect(() => new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, sizes, WGS84)).toThrow(
+      /source cap/u,
+    );
   });
 
   it("marches the two brightest of four, where the sky view, the aerial perspective and the composite take all four", async () => {
@@ -1386,7 +1392,7 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
 
   it("gives the view's members in one order to the kernels and the composite, the sources last (R08.T7)", () => {
     const view = vec4Members(viewWgsl, "AtmosphereView");
-    expect(view.slice(-2)).toEqual(["exact", "curvature"]);
+    expect(view.slice(-3)).toEqual(["exact", "curvature", "marchGround"]);
     expect(vec4Members(viewWgsl, "SkySource")).toEqual(["direction", "weight", "disc"]);
     expect(viewWgsl).toMatch(/sources : array<SkySource, MAX_SKY_SOURCES>,\s*\}/u);
     const sources = Array.from({ length: MAX_SKY_SOURCES }, (_, i) =>
@@ -1486,12 +1492,20 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
     expect([...(draw.uniforms["exact"] ?? [])]).toEqual(expected);
     expect([...(draw.uniforms["shell"] ?? [])]).toEqual([100_000, 0, 0, 0]);
     // The kernels' view block: the members in order, `exact` the eleventh, `curvature` the twelfth
-    // (R08.T6.f), the sources after them.
+    // (R08.T6.f), `marchGround` the thirteenth (R08.T8.e), the sources after them.
     const block = engine.dispatched.find((d) => d.kernel === "atmosphere sky view")?.bindings
       .uniforms["view"];
     expect(Array.from(block ?? []).slice(40, 44)).toEqual(expected);
     expect(Array.from(block ?? []).slice(44, 48)).toEqual([...(draw.uniforms["curvature"] ?? [])]);
-    expect(block).toHaveLength((12 + 3 * 6) * 4);
+    expect(Array.from(block ?? []).slice(48, 52)).toEqual([20, 4, 2, 8]);
+    expect(block).toHaveLength((13 + 3 * 6) * 4);
+  });
+
+  it("gives the march no ground rule on low, so every ray takes its 16 steps (R08.T8.e)", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.low, WGS84);
+    const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+    expect([...(draw.uniforms["marchGround"] ?? [])]).toEqual([0, 0, 0, 0]);
   });
 
   it.each(["high", "low"] as const)(

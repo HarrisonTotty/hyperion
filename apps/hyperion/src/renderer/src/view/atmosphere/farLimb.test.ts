@@ -332,7 +332,7 @@ function placedMarch(
   samples: number,
 ): Rgb {
   const ray = { ...marched.ray, fromCamera: marched.ray.tStartM <= 0, skySegment: false };
-  const settings = { ...TABLE_SIZES.high, rayMarchSamples: samples };
+  const settings = { ...TABLE_SIZES.high, rayMarchSamples: samples, marchDepthSteps: null };
   return rgbOf(rayMarchTexelTwin(planet, view, settings, { ...marched, ray }));
 }
 
@@ -668,16 +668,18 @@ describe("the far limb's fidelity on high against the converged footprint (R08.T
   // limb from 10⁸ m stands at s 0.96–0.97, w_L 0.91, its one pixel over the centre ray's share
   // (`SATURN_ONSET_MISS`). From 10⁷ m (s 0.31–1.67 on high, by the local scale height at each
   // tangent point) the pixels over are the backlit 0.3 and 1 H rows that T8.b recorded as the edge's
-  // aliasing, the 0.1 H row's s over 1 now taking its footprint's mean.
+  // aliasing, the 0.1 H row's s over 1 now taking its footprint's mean. Since R08.T8.e the bare
+  // ground's count follows its optical depth on high: the medians on R05's Earth from 10⁸ m and the
+  // measured Earth from 10⁹ m moved (0.35% → 0.38%, 0.71% → 0.70%; 2026-10-22), no worst or count.
   it("records the worst and median e and the count over 5% per body and distance", () => {
     expect(figuresOf((p) => p.e)).toEqual(
       recordedFigures({
         "R05's Earth, 10⁷ m": { worst: 0.4221, median: 0.00594, over: 4 },
-        "R05's Earth, 10⁸ m": { worst: 0.03225, median: 0.00348, over: 0 },
+        "R05's Earth, 10⁸ m": { worst: 0.03225, median: 0.00382, over: 0 },
         "R05's Earth, 10⁹ m": { worst: 0.1086, median: 0.0147, over: 5 },
         "the measured Earth, 10⁷ m": { worst: 0.26588, median: 0.00095, over: 2 },
         "the measured Earth, 10⁸ m": { worst: 0.02854, median: 0.00201, over: 0 },
-        "the measured Earth, 10⁹ m": { worst: 0.09207, median: 0.0071, over: 5 },
+        "the measured Earth, 10⁹ m": { worst: 0.09207, median: 0.00697, over: 5 },
         "Saturn-class, 10⁸ m": { worst: 0.05016, median: 0.00096, over: 1 },
         "Saturn-class, 10⁹ m": { worst: 0.02953, median: 0.003, over: 0 },
         "R05's Earth, s = 1": { worst: 0.00153, median: 0.00012, over: 0 },
@@ -686,18 +688,19 @@ describe("the far limb's fidelity on high against the converged footprint (R08.T
   });
 
   // Measured 2026-10-22: the centre ray alone, against the converged footprint (T8.b recorded it
-  // against its 8 × 8 mean). From 10⁹ m the worst is 27 and 30 times the footprint's light.
+  // against its 8 × 8 mean). From 10⁹ m the worst is 27 and 30 times the footprint's light. Moved in
+  // the fourth or fifth figure by R08.T8.e's count on the bare ground (2026-10-22).
   it("records the same of the centre ray alone, the march as T8.b drew it", () => {
     expect(figuresOf((p) => p.eCentre)).toEqual(
       recordedFigures({
         "R05's Earth, 10⁷ m": { worst: 0.9489, median: 0.00789, over: 6 },
-        "R05's Earth, 10⁸ m": { worst: 1.92698, median: 0.55364, over: 35 },
-        "R05's Earth, 10⁹ m": { worst: 27.12469, median: 0.99945, over: 35 },
+        "R05's Earth, 10⁸ m": { worst: 1.92698, median: 0.55373, over: 35 },
+        "R05's Earth, 10⁹ m": { worst: 27.1252, median: 0.99945, over: 35 },
         "the measured Earth, 10⁷ m": { worst: 0.95701, median: 0.00757, over: 6 },
         "the measured Earth, 10⁸ m": { worst: 2.19016, median: 0.46668, over: 35 },
-        "the measured Earth, 10⁹ m": { worst: 29.7235, median: 0.99994, over: 35 },
+        "the measured Earth, 10⁹ m": { worst: 29.72396, median: 0.99994, over: 35 },
         "Saturn-class, 10⁸ m": { worst: 0.58009, median: 0.01077, over: 7 },
-        "Saturn-class, 10⁹ m": { worst: 3.23772, median: 0.52276, over: 35 },
+        "Saturn-class, 10⁹ m": { worst: 3.23772, median: 0.52268, over: 35 },
         "R05's Earth, s = 1": { worst: 0.8886, median: 0.02282, over: 10 },
       }),
     );

@@ -68,6 +68,8 @@ struct Draw {
   output : vec4f,
   exact : vec4f,
   curvature : vec4f,
+  // The march's ground rule (R08.T8.e), which the composite carries and does not read.
+  marchGround : vec4f,
   // The sources, `AtmosphereView.sources` member by member (R08.T7).
   sourceDirection0 : vec4f,
   sourceWeight0 : vec4f,
@@ -133,6 +135,7 @@ fn viewOf() -> AtmosphereView {
     draw.output,
     draw.exact,
     draw.curvature,
+    draw.marchGround,
     array<SkySource, MAX_SKY_SOURCES>(
       SkySource(draw.sourceDirection0, draw.sourceWeight0, draw.sourceDisc0),
       SkySource(draw.sourceDirection1, draw.sourceWeight1, draw.sourceDisc1),

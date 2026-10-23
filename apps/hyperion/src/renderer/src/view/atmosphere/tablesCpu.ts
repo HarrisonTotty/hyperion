@@ -101,12 +101,15 @@ import {
 } from "./absorbers";
 import { type ForwardLobe, forwardLobeAt, forwardLobeOfTable, lobeIsDrawn } from "./forwardLobe";
 import {
+  type MarchDepthSteps,
   marchEdgesM,
   marchEvenStep,
   marchEvenSteps,
   type MarchPieces,
   marchPieces,
   marchPiecesSteps,
+  marchSamplesOf,
+  type MarchSegmentKind,
   type MarchSplit,
   marchSplit,
   marchStep,
@@ -3169,10 +3172,13 @@ export function rayMarchRayAlongTwin(
   };
 }
 
-/** The ray march's settings: `TableSizes`' scale, steps, reach and march band (R08.T8). */
+/**
+ * The ray march's settings: `TableSizes`' scale, steps, reach and march band (R08.T8), and its
+ * count by the bare ground's optical depth (R08.T8.e), `null` for the setting's count everywhere.
+ */
 export type RayMarchSettings = Pick<
   TableSizes,
-  "rayMarchScale" | "rayMarchSamples" | "aerialPerspectiveReachM" | "marchBand"
+  "rayMarchScale" | "rayMarchSamples" | "aerialPerspectiveReachM" | "marchBand" | "marchDepthSteps"
 >;
 
 /**
@@ -3180,8 +3186,11 @@ export type RayMarchSettings = Pick<
  * in-scattered radiance in the view's sources' weights (R08.T7) and mean transmittance, with the bare ground
  * seen from above lit by the sun, and (0, 0, 0, 1) where the kernel marches nothing (`null`), its
  * steps as the kernel places them (a two-sided sky segment's under the sun-aware warp since R08.T8), cut at the
- * medium's layer edges on their shell quadrics ({@link piecedSteps}, R08.T6.i). The smoke marches a
- * texel's ray again, turned or moved, through it (R08.T6.g).
+ * medium's layer edges on their shell quadrics ({@link piecedSteps}, R08.T6.i), and since R08.T8.e
+ * on the bare ground as many as its optical depth asks under the settings' `marchDepthSteps`
+ * (`marchSteps.ts`'s `marchSamplesOf`; the light's from its ground point along −d), the sky and a
+ * drawn surface the setting's count. The smoke marches a texel's ray
+ * again, turned or moved, through it (R08.T6.g).
  *
  * @throws RangeError for a medium with a tabulated term that ends below its top at a density
  *   other than 0 (the module's remarks).
@@ -3209,6 +3218,8 @@ interface RayMarchContext {
   readonly geometry: MarchGeometry;
   readonly view: TwinView;
   readonly samples: number;
+  /** The count by the bare ground's optical depth (R08.T8.e), or `null` for `samples` everywhere. */
+  readonly depthSteps: MarchDepthSteps | null;
 }
 
 function rayMarchContext(
@@ -3226,6 +3237,7 @@ function rayMarchContext(
     geometry: { kind: "spheroid", figure: view.figure },
     view,
     samples: Math.max(Math.floor(settings.rayMarchSamples), 2),
+    depthSteps: settings.marchDepthSteps,
   };
 }
 
@@ -3235,12 +3247,30 @@ function rayMarchTexelInto(
   marched: RayMarchRay | null,
   out: Float64Array,
 ): void {
-  const { medium, terms, edgesM, pressureBarOf, reads, geometry, view, samples } = context;
+  const { medium, terms, edgesM, pressureBarOf, reads, geometry, view, depthSteps } = context;
   if (marched === null) {
     out.set([0, 0, 0, 1]);
     return;
   }
   const { ray, bareGroundM } = marched;
+  // The bare ground's count by its optical depth (R08.T8.e), as `rayMarch.wgsl`'s `marchRay` takes
+  // it: nothing drawn along the ray, and it ends on the bare ground.
+  let kind: MarchSegmentKind = "surface";
+  if (ray.skySegment === true) {
+    kind = bareGroundM === null ? "sky" : "ground";
+  }
+  const samples = marchSamplesOf(
+    kind,
+    depthSteps !== null && kind === "ground"
+      ? bareGroundDepthG(
+          (placeM, direction) => lightDepthGOf(reads, geometry, placeM, direction),
+          ray,
+        )
+      : Number.NaN,
+    context.samples,
+    edgesM.length,
+    depthSteps,
+  );
   const marcher = new Marcher(terms, pressureBarOf, reads, geometry, ray);
   for (const { tM, dtM } of piecedSteps(ray, samples, edgesM, geometry)) {
     marcher.step(tM, dtM);
@@ -3302,6 +3332,114 @@ function groundLightInto(
   const muSun = (s.x * nx + s.y * ny + s.z * nz) / length;
   reads.sources.sunTransmittance(0, muSun, out, light.slot);
   return muSun;
+}
+
+/**
+ * A place's light along a unit direction as the ray march's count reads it (plan R08, R08.T8.e):
+ * −ln of light slot 0's green transmittance, absorbers included, from the place to the top. On a
+ * sphere's tables at the place's height and its cosine against the normal, each as the march's
+ * steps take them ({@link Marcher}'s `step`); on an oblate body through the sliced lookup from the
+ * place's own geodetic datum point, as the bare ground's light is read (`rayMarch.wgsl`'s
+ * `sourceLightAt`).
+ */
+function lightDepthGOf(
+  reads: MarchReads,
+  geometry: MarchGeometry,
+  placeM: Vec3,
+  direction: Vec3,
+): number {
+  const out: TwinRgb = [0, 0, 0];
+  if (reads.kind === "oblate") {
+    const reader = reads.reader;
+    const bodyPlaceM = inBodyAxes(reads.frame, placeM, true);
+    reader.sunInto(
+      bodyPlaceM,
+      geodeticOf(bodyPlaceM, reader.figure),
+      inBodyAxes(reads.frame, direction, false),
+      0,
+      out,
+      [0, 0, 0],
+    );
+    return -Math.log(out[1]);
+  }
+  sphereLightInto(reads.sources.sunTransmittance, geometry, placeM, direction, out);
+  return -Math.log(out[1]);
+}
+
+/**
+ * The transmittance into `out` from a place along a unit direction through a sphere's table read
+ * (light slot 0), at the place's height and its cosine against the normal as the march's steps take
+ * them on `geometry` ({@link Marcher}'s `step`).
+ */
+function sphereLightInto(
+  transmittanceAt: TwinSources["sunTransmittance"],
+  geometry: MarchGeometry,
+  placeM: Vec3,
+  direction: Vec3,
+  out: TwinRgb,
+): void {
+  const { x: px, y: py, z: pz } = placeM;
+  const rP = Math.sqrt(px * px + py * py + pz * pz);
+  let heightM: number;
+  let gx: number;
+  let gy: number;
+  let gz: number;
+  switch (geometry.kind) {
+    case "sphere":
+      heightM = rP - geometry.bottomRadiusM;
+      gx = px;
+      gy = py;
+      gz = pz;
+      break;
+    case "spheroid":
+    case "gravitySpheroid": {
+      const a2 = geometry.figure.equatorialRadiusM ** 2;
+      const c2 = geometry.figure.polarRadiusM ** 2;
+      heightM =
+        rP - 1 / Math.sqrt((px * px + py * py) / (rP * rP * a2) + (pz * pz) / (rP * rP * c2));
+      gx = px / a2;
+      gy = py / a2;
+      gz = pz / c2;
+      break;
+    }
+  }
+  const mu =
+    (direction.x * gx + direction.y * gy + direction.z * gz) /
+    Math.sqrt(gx * gx + gy * gy + gz * gz);
+  transmittanceAt(heightM, mu, out, 0);
+}
+
+/**
+ * The bare ground's green optical depth as the ray march's count reads it (plan R08, R08.T8.e;
+ * `marchSteps.ts`'s `marchSamplesOf`): `depthAlong` (−ln T.g from a place along a unit direction to
+ * the top) from the segment's ground point at t_end along −d.
+ */
+function bareGroundDepthG(
+  depthAlong: (placeM: Vec3, direction: Vec3) => number,
+  ray: TwinSegment,
+): number {
+  const o = ray.originM;
+  const d = ray.direction;
+  return depthAlong(add(o, scale(d, ray.tEndM)), { x: -d.x, y: -d.y, z: -d.z });
+}
+
+/**
+ * The bare ground's green optical depth as the ray march's count reads it (plan R08, R08.T8.e) on a
+ * sphere's tables, `transmittanceAt` read at light slot 0: the light's from the segment's ground
+ * point at t_end along −d, at its height and cosine on `geometry` as {@link rayMarchTexelTwin}
+ * takes them. R05.T12.e's gate reads its bare-ground rays' counts through it
+ * (`test/atmosphereGate.ts`).
+ */
+export function sphereBareGroundDepthG(
+  transmittanceAt: TwinSources["sunTransmittance"],
+  geometry: MarchGeometry,
+  ray: TwinSegment,
+): number {
+  return bareGroundDepthG((placeM, direction) => {
+    const out: TwinRgb = [0, 0, 0];
+    sphereLightInto(transmittanceAt, geometry, placeM, direction, out);
+    return -Math.log(out[1]);
+  }, ray);
 }
 
 /**
@@ -5468,6 +5606,7 @@ function oblateRayMarchContext(
     },
     view,
     samples: Math.max(Math.floor(settings.rayMarchSamples), 2),
+    depthSteps: settings.marchDepthSteps,
   };
 }
 

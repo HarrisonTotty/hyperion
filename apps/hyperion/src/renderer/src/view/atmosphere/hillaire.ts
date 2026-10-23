@@ -70,6 +70,7 @@ import { photopicIlluminance } from "../lighting/illuminance";
 import type { Rgb } from "../photometry/toneCurve";
 import type { QualitySetting } from "../quality/qualitySetting";
 import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
+import type { MarchDepthSteps } from "./marchSteps";
 import { type AtmosphereMedium, localScaleHeightM } from "./medium";
 import { type BodyGravity, bodyGravity, gravityRatio, principalRadiiM } from "./oblate";
 import commonWgsl from "./shaders/common.wgsl?raw";
@@ -148,6 +149,14 @@ export interface TableSizes {
    * the sky view, the aerial perspective and the composite take every source drawn. At least 1.
    */
   readonly marchSourceCap: number;
+  /**
+   * The ray march's count scaled by each segment's optical depth (plan R08, R08.T8.e; lever 3 of
+   * `decision-r08-t8-leans.md` §8, §9's Ruling 2, item 3; `marchSteps.ts`'s
+   * {@link MarchDepthSteps} and `marchSamplesOf`): at most {@link TableSizes.rayMarchSamples}, the
+   * bare ground down to the floors R05.T12.e's gate sets, the sky and drawn surfaces at the setting's
+   * count; `null` where every segment takes the setting's count.
+   */
+  readonly marchDepthSteps: MarchDepthSteps | null;
 }
 
 /**
@@ -243,6 +252,15 @@ export function marchWeightOf(heightStarM: number, topHeightM: number, band: Mar
  * skips (plan R08, R08.T8.e; `decision-r08-t8-leans.md` §9, Ruling 2): each source costs it about
  * 3.5 ms on R05's Earth and 5.5 ms on `EARTH_REFERENCE` from 400 km on high on the RTX 3080 (plan
  * R08's Risks, "Deviations in T8.d, as built"), and two lets a binary's second star light its air.
+ *
+ * High's march scales the bare ground's count by its optical depth since R08.T8.e (lever 3 of
+ * `decision-r08-t8-leans.md` §8, §9's Ruling 2, item 3; {@link TableSizes.marchDepthSteps}): the
+ * bare ground takes 20 steps, 4 more for each of the medium's march edges, climbing back to 36 in
+ * even steps from a green optical depth of 2 to 8; the sky and a drawn surface keep 36 (12 steps on
+ * a thin sky broke the far limb's flicker and the band's seam, `marchSteps.ts`'s
+ * `MarchDepthSteps`). R05.T12.e's gate holds every ray within its tolerance at one source and at six
+ * on R05's Earth, the measured Earth and the slab Earth, the slab's named misses unmoved. Low keeps
+ * its 16.
  */
 export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
   high: {
@@ -258,6 +276,11 @@ export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
     aerialPerspectiveScope: "scene",
     marchBand: { lowerShareOfTop: 0.3, upperShareOfTop: 0.5 },
     marchSourceCap: 2,
+    marchDepthSteps: {
+      groundFloor: 20,
+      groundFloorPerEdge: 4,
+      groundRampDepths: [2, 8],
+    },
   },
   low: {
     transmittance: TRANSMITTANCE_SIZE,
@@ -272,6 +295,7 @@ export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
     aerialPerspectiveScope: "terrain",
     marchBand: { lowerShareOfTop: 0.2, upperShareOfTop: 0.3 },
     marchSourceCap: 2,
+    marchDepthSteps: null,
   },
 };
 
@@ -808,6 +832,7 @@ const VIEW_MEMBERS = [
   "output",
   "exact",
   "curvature",
+  "marchGround",
   ...SOURCE_MEMBERS,
 ] as const;
 
@@ -1285,7 +1310,8 @@ export class HillaireAtmosphere {
    * @param gravity - The body's gravity (R08.T3.d's `bodyGravity` on `figure`), whose slicing the
    *   tables are built in and whose s the lookups take (Design note 17; R08.T6.f); none for s ≡ 1,
    *   one slice and one band. R08.T10.a gives a body's.
-   * @throws RangeError as `AtmosphereTables`, for a slicing the tables cannot hold among the rest.
+   * @throws RangeError as `AtmosphereTables`, for a slicing the tables cannot hold among the rest,
+   *   or for a march source cap that is not an integer of at least 1 (`TableSizes.marchSourceCap`).
    */
   constructor(
     engine: RenderEngine,
@@ -1295,6 +1321,8 @@ export class HillaireAtmosphere {
     curves: AbsorberCurveSlots = NO_ABSORBER_CURVES,
     gravity: BodyGravity | null = null,
   ) {
+    // The cap is checked where the sizes are given, not first at a frame (R08.T8.e).
+    marchSourceIndices([], tables.marchSourceCap);
     this.#engine = engine;
     this.#sizes = tables;
     this.#figure = figure;
@@ -1879,6 +1907,20 @@ export class HillaireAtmosphere {
       curvature.gravityRatio,
       curvature.atmosphereM,
     ]);
+    // The march's count by optical depth on the bare ground (R08.T8.e, lever 3): its floor, what
+    // each layer edge adds, and the ramp's depths; a floor of 0 where every ray takes the setting's.
+    const ground = sizes.marchDepthSteps;
+    set(
+      "marchGround",
+      ground === null
+        ? [0, 0, 0, 0]
+        : [
+            ground.groundFloor,
+            ground.groundFloorPerEdge,
+            ground.groundRampDepths[0],
+            ground.groundRampDepths[1],
+          ],
+    );
     // The composite's own: the atmosphere's height, formed in f64 (R08.T6.g), how many of the
     // medium's terms are absorbers, whose columns its transmittance to space reads (R08.T6.c), and
     // its line slots, whose pressure channels the read takes (R08.T4.d).

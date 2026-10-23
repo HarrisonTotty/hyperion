@@ -21,7 +21,10 @@ describeMarchGate({
   // Neither is the warp's: both stood over 5% under §4's even steps, which this gate did not run
   // on the slab Earth before (measured 2026-10-21; `decision-r08-t8-leans.md` §4.3, named misses
   // reported to main). No tolerance or count moves. `LOW_TWIN_WORST` is not re-pinned on a test
-  // medium (`decision-r08-t6d-findings.md` §10.4.3): the rays over it are recorded.
+  // medium (`decision-r08-t6d-findings.md` §10.4.3): the rays over it are recorded. Since R08.T8.e
+  // high's count on the bare ground is scaled by its optical depth, the named misses' sky chords at
+  // 36: at one source the march's ordinary worst is the disc at 28 steps, 20 and 4 for each of the
+  // slab's two edges (1.59%; 1.12% at 36 steps throughout), measured 2026-10-22.
   record: {
     highMisses: [
       [
@@ -37,7 +40,7 @@ describeMarchGate({
     high: [
       {
         kernel: {
-          march: 0.01121,
+          march: 0.01589,
           marchTwilight: 0.06275,
           sky: 0.01188,
           skyTwilight: 0.06439,
@@ -53,7 +56,7 @@ describeMarchGate({
       },
       {
         kernel: {
-          march: 0.00728,
+          march: 0.01109,
           marchTwilight: 0.00963,
           sky: 0.00073,
           skyTwilight: 0.01124,

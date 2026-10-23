@@ -368,8 +368,9 @@ gains the thick table's size (R08.T14.c). As built it holds the transmittance (2
 multiple-scattering (32²) sizes, the sky view (192 × 108 at 75 steps on high, 128 × 64 at 16 on
 low), the aerial-perspective volume (32³ and 32 × 32 × 16, 2 steps a slice, to 32 km), the march
 (full resolution at 36 steps since R08.T7, 32 before; half at 16), `aerialPerspectiveScope`,
-since R08.T8 `marchBand` and since R08.T8.e `marchSourceCap` (2 on both settings; `hillaire.ts`'s
-`marchSourcesOf`). `ViewSettings` also holds
+since R08.T8 `marchBand`, and since R08.T8.e `marchSourceCap` (2 on both settings; `hillaire.ts`'s
+`marchSourcesOf`) and `marchDepthSteps` (the bare ground's steps by its optical depth on high,
+`marchSteps.ts`'s `MarchDepthSteps`; null on low). `ViewSettings` also holds
 R06's `sky` and R07's `internalScaleBounds`, `budget` and `photoreal` today. `settings.ts` is the
 module R12 reads for this plan's ladder entries.
 
@@ -1949,8 +1950,9 @@ The order:
   steps from outside the air, `decision-r08-t8-leans.md` §9) precedes T10.b; T9.a (aerial
   perspective) follows T6.d; T9.b (surface lighting, by band) follows T6.f.
 - T10.a assembles the medium from a body and needs T2–T6 (T5 for the aerosol terms); T10.b draws
-  it in the photorealistic view and follows T10.a, T7 and T8.e. T11 records the thin benchmarks
-  and needs T7–T10.
+  it in the photorealistic view and follows T10.a, T7 and T8.e; it may be built beside T8.e once
+  T10.a lands, touching none of T8.e's files, and lands after T8.e (`decision-r08-t8-leans.md`
+  §10). T11 records the thin benchmarks and needs T7–T10.
 - T12.a (the tracer) needs nothing of this plan and can start at once. T12.c (its benchmarks) and
   T12.d (the spheroid mode) follow it; T12.c's cases whose matrices come from R08's Mie
   (Kokhanovsky's aerosol and cloud, IPRT's spheres) also wait on T5.b, and its other cases do not.
@@ -4370,22 +4372,35 @@ added on 2026-10-22 by `decision-r08-t8-leans.md` §9):
   2. at most `atmosphereView.marchSourceCap` sources in the march (2 on both settings), the
      brightest first; the sky view, the aerial perspective and the surfaces keep every source
      the skips leave; recorded in `ATMOSPHERE_QUALITY_LIMITS`;
-  3. if a row still misses, T8.d's lever 3 (§8), through R05.T12.e's gate at 1 and 6 sources on
-     all three media at no wider tolerance, the top's step under 0.2%, shader and twin together;
-  4. if a far-limb camera still misses, T8.c's fewer nodes at small spans, through T8.c's
+  3. T8.d's lever 3 (§8): the bare ground's steps scaled by its optical depth, and a thin sky's at
+     the floor the gate sets, through R05.T12.e's gate at 1 and 6 sources on all three media at no
+     wider tolerance, the top's step under 0.2%, shader and twin together;
+  4. what moves no pixel (`decision-r08-t8-leans.md` §10): the march without the footprint where
+     no texel of the frame can blend; `curveDepth`'s pressure row by bisection, the scan's own row;
+     and the view paths' slot-independent curve work once a step for every slot;
+  5. if a row still misses, each light slot's optical depth to the top tabulated per planet beside
+     the transmittance table, under a medium with an absorber and for the stars' slots, read once a
+     source a step in the ray march (§10, Ruling 1);
+  6. if a far-limb camera still misses, T8.c's fewer nodes at small spans, through T8.c's
      acceptance 2–5;
-  5. otherwise the lane reports to "main" before lever 4, a tile cull or half resolution.
+  7. if a row still misses, the same table along each slot's view path from outside the air, the
+     top's step under 0.2%;
+  8. otherwise the lane reports to "main" before a tile cull or half resolution.
 
   It is accepted when, in the smoke's timing frames on the RTX 3080, hidden, with `nvidia-smi`
   clocks at 100 ms, the atmosphere's sum is at most 10.0 ms p95 at 400 km and at every far-limb
   camera, on high at 1920 × 1080, at the setting's count after the skips and the cap, on R05's
-  Earth, `EARTH_REFERENCE` and the slab Earth (R05 Design note 21's 0.8 T, less terrain from
-  orbit and the frame's other passes). One source and `MAX_SKY_SOURCES` are recorded beside it,
-  and low with the UHD 620 estimate. `pnpm test` and `just test-render` pass. It follows T8.d
-  and precedes R08.T10.b.
+  Earth, `EARTH_REFERENCE` and the slab Earth, at two sources on a binary's two light slots, with
+  a star and planetshine on one slot recorded beside it, its p95s from frames that leave the GPU
+  no idle gap between rounds and with per-frame times kept (§10) (R05 Design note 21's 0.8 T, less
+  terrain from orbit and the frame's other passes). One source and `MAX_SKY_SOURCES` are recorded
+  beside it, and low with the UHD 620 estimate. `pnpm test` and `just test-render` pass. It
+  follows T8.d and precedes R08.T10.b. _Levers 1 and 2 and lever 3's bare ground built 2026-10-23;
+  open for item 3's thin sky and items 4–8_ (Risks, "Deviations in T8.e, as built").
 
 Widen R05's ray march to N terms and several sources: each body's list of Design note 7 (its stars
-and its planetshine sources), with no source skipped outside the air. The march draws any body's
+and its planetshine sources), with no source skipped outside the air (since R08.T8.e both of
+Design note 7's skips also hold outside it, and the march takes at most two). The march draws any body's
 atmosphere other than the ship's local body (`SceneFrame.localBody`) at its `apparentM` from R03's
 `sceneAt(model, observer, time, previous)` (Design note 13), with the limb, the terminator and the
 planet's shadow in its own air; a `contact` body, which has no position, draws none. The switch to
@@ -7750,7 +7765,7 @@ it rides a bump.
     the far limb, the ascent) follows.
   - _Already built before T8._ The march's N terms (R08.T6.b), its several sources and its sky's
     sources from outside the air with no skip (R08.T7, `sources.ts`; "skips nothing from above the
-    air" in `sources.test.ts`), the spheroid's quadric constants formed in `f64` and the
+    air" in `sources.test.ts`, which R08.T8.e's skips outside the air replace), the spheroid's quadric constants formed in `f64` and the
     closest-approach form beyond a ÷ 2 (R08.T6.g, R08.T6.f).
   - _The switch band_ (§1). `TableSizes.marchBand` (`MarchBand`: `lowerShareOfTop`,
     `upperShareOfTop`), projected as `settings.ts`'s `MARCH_BAND`: 0.3–0.5 of the medium's top on
@@ -7998,6 +8013,13 @@ it rides a bump.
       direction (floor 10⁻³): 0.334% and 0.43% at high's edges (30 and 50 km), 3.49% and 3.57% at
       low's (20 and 30 km); the read against the march at the same pixels: 2.35% and 4.29% (high),
       4.11% and 5.81% (low). The figures here and below are the warp's (§5), measured 2026-10-21.
+    - _The band's edges at the setting's count_ (R08.T8.e, `decision-r08-t8-leans.md` §9 Ruling 2),
+      the same figure with high's 2 + 2 sources and low's 2 + 1 (a companion star at 0.1 of the
+      Sun's light and planetshine at 3% and 1%, the march over its two brightest, `marchSourcesOf`
+      with `marchSourceCap` 2, the sky view over every one): 7.67% and 8.00% at high's edges (30 and
+      50 km; 0.33% and 0.41% with every source marched) and 5.95% and 7.26% at low's (20 and 30 km;
+      3.42% and 3.46%), the light past the cap fading across the band; recorded, not held
+      (`marchBand.test.ts`, measured 2026-10-22).
     - _The sky view's interpolation across the limb_ (`marchBand.test.ts`; a 90-row column from
       0.2° under the visible horizon to 4.5° over it, suns 30°/0°, 30°/90° and 5°/180°, against a
       converged march of 1,024 placed steps, floor 6 × 10⁻³), the worst over the suns:
@@ -8917,6 +8939,116 @@ it rides a bump.
   - _Arrays left in locals._ `curveDepth`'s four-row `ys` and `MarchWalk`'s crossings are
     function-scope arrays the static check does not count (fixed bounds; held by pointer). Neither
     showed in W1–W3's variants; for T8.e if a profile points there.
+
+- **Deviations in T8.e, as built** (2026-10-22–23; levers 1–3, the task open). `sources.ts`,
+  `settings.ts`, `hillaire.ts`, `marchSteps.ts`, `tablesCpu.ts`, `shaders/view.wgsl`,
+  `composite.wgsl` and `rayMarch.wgsl`, `test/atmosphereGate.ts`, `test/marchGate.ts` and
+  `smoke/atmosphere.ts`; tests in `sources.test.ts`, `settings.test.ts`, `hillaire.test.ts`,
+  `severalSuns.test.ts`, `marchSteps.test.ts`, `tablesCpu.test.ts`, `tablesCpuOblate.test.ts`,
+  `highLimbNight.test.ts` and the gate's, and pins moved in `farLimb.test.ts`,
+  `farLimbFlicker.test.ts` and `marchBand.test.ts`; `sources.test.ts`'s "skips nothing from above
+  the air" gives way to the skips outside the air. No golden, version, wire or table layout moves;
+  the view block gains `marchGround`, its thirteenth member, which the composite carries and does
+  not read. Two commits,
+  levers 1 and 2 and then lever 3's bare ground, landed as a linear series
+  (`decision-r08-t8-leans.md` §10, Ruling 4, item 1); the rest of §10's order follows.
+  - _Lever 1, the skips outside the air._ `horizonDipRad` is acos(R ÷ r_c): 19.8° from 400 km
+    over Earth, where the twilight limit is 40.1°, and 50.5° and 70.7° from 10⁷ m from the centre
+    over the equator (an upper bound on the spheroid, so that both rules lean toward keeping a
+    source; the science check, 2026-10-23). The negligible
+    skip's reference is now the brightest source standing at least that far above the horizontal,
+    inside the air too, so that the list is the same 1 m under the top and 1 m over it: from 2 m,
+    a Sun under 0.0455° no longer skips a full Moon. In the twin, with R08.T7's two bounds: the
+    Sun 1° beyond the limit, kept after the Moon, moves the Moon's march by 1.83 × 10⁻⁸ from 400 km
+    and 2.86 × 10⁻⁵ from 10⁷ m (deferred findings, below), and with the multiple-scattering table
+    zeroed by nothing; the full Moon with the Sun 1° over the dip moves the day's march by
+    3.90 × 10⁻⁶ and 2.66 × 10⁻⁶, under 10⁻⁴.
+  - _Lever 2, the cap._ The value lives in `TableSizes.marchSourceCap` (2 on both settings), which
+    `hillaire.ts` reads, and `settings.ts`'s `atmosphereView.marchSourceCap` projects it, the field
+    §9 names; the other way round would make `hillaire.ts` import its own importer. The march takes
+    `marchSourcesOf`'s list, the brightest by photopic illuminance at the camera in their given
+    order, through a view block of its own; the shaders do not change, and at or under the cap the
+    block is the frame's own. "The brightest first" picks the sources; the march keeps the list's
+    order, so that at or under the cap its block is the frame's own to the bit and its sun-aware
+    warp keeps the same first source (the body's brightest star, which the cap does not drop). On SwiftShader and the RTX 3080 the march and the output at one and
+    two sources are byte-identical with and without the cap, and the march of four and six
+    sources is the two-source march to the bit, at every T8.c camera on both settings and three
+    media (QW1). The binary's smoke gains a 400 km frame with two bright planetshine sources past
+    the cap, whose march would stand about 3% off a twin that took them. A source past the cap
+    fades across the band: at its edges, with a companion at 0.1 of the Sun and planetshine at 3%
+    and 1% past the cap, the sky view stands 7.67% and 8.00% off the march on high and 5.95% and
+    7.26% on low, recorded beside §3's band figure ("Deviations in T8.a, as built").
+  - _Lever 3, the bare ground's steps by optical depth_ (`MarchDepthSteps`, `marchSamplesOf`,
+    `view.marchGround`, `rayMarchSamplesOf`). A ray that ends on the bare ground with nothing
+    drawn takes 20 steps on high, 4 more for each of the medium's march edges (28 on the slab
+    Earth), while its green optical depth from the ground back along the ray, absorbers included,
+    is at most 2, climbing back to 36 in even steps by 8; the sky and drawn surfaces keep 36, and
+    low its 16 (`marchDepthSteps` null). The kernel reads the depth through the sliced lookup at
+    light slot 0, the twins through theirs, and R05.T12.e's gate takes the rule on its ray-march
+    families. The gate's inside and near-level ground rays are drawn surfaces, so inside the air
+    the rule's bare ground is held by the sky families that meet the ground from the band's
+    cameras. The smoke's GPU-against-twin checks hold under it (`just test-render`, 2026-10-23),
+    the kernel's count read in `f32` and the twin's in `f64`. The face carries most of the step work from orbit, and its error does not follow
+    its optical depth: the worst disc rays are low suns at depths 0.45–1.27, the grazing ground
+    among the easiest; layer edges set the slab's floor.
+    - The gate, worst e (%), 36 → the rule, R05's Earth | measured | slab: at one source the disc
+      .45→1.43 | .41→1.35 | 1.12→1.59 (ordinary) and .18→.70 | .14→.62 | .99→1.09 (twilight), the
+      past .18→.54 | .18→.43 | .39→.63 and 1.57→1.79 | .36→.55 | 1.17→1.36; at six the disc
+      .33→1.08 | .29→.98 | .73→1.11 and the past's twilight .16→.50 | .17→.39 | .34→.56. Every other
+      family is unchanged; no ray is newly over its tolerance; the slab's named misses do not move.
+      The records moved with it: the gate files' high `march` and `tablesCpu.test.ts`'s disc rows
+      take these figures; `marchBand.test.ts`'s top step for its last sun 2.603 → 2.621 × 10⁻⁴
+      (0.056% at worst, under 0.2%); `farLimb.test.ts`'s medians and centre-ray records and
+      `farLimbFlicker.test.ts`'s Saturn-class rows by under 4 × 10⁻⁴.
+    - T8.c's frames (the oblate twin, every eighth pixel, against a 1,024-step reference): the
+      rule against 36 moves the marched texels by .23 / .56 / .60% (median / p99 / max) on R05's
+      Earth, .24 / .39 / .43% on the measured Earth and .08 / .11 / .13% on the slab at 400 km, and
+      .25 / .55 / .61%, .26 / .39 / .47% and .10 / .28 / .28% at 10⁷ m, the largest on the bare
+      ground at its floor near a depth of 1.1; the sky is unchanged at 400 km and within .05% at
+      10⁷ m. Against the reference the medians go from .11% to .33–.38% (.26–.29% to .33–.37% on
+      the slab), the p99 to at most .64%. Where the count steps between neighbouring rows it adds
+      at most .36% (median .05–.15%), against those rows' own step of 0.6–3.3%.
+    - Mean steps a marched pixel, ÷ 36, centre rays and with the footprint's nodes: 400 km .622 /
+      .638 (R05's Earth), .623 / .641 (measured), .812 / .821 (slab); 10⁷ m .582 / .694, .582 /
+      .717, .790 / .859; to 10⁸ m .564 / .699, .565 / .699, .777 / .850.
+  - _The thin sky_ (§8's lever 3 on a sky segment under a green optical depth of 0.05, at 12
+    steps, about 6% of the step work from 400 km). It held the gate but failed two other bounds:
+    the far limb's flicker (Saturn-class at 10⁹ m, sun 100°/0°, columns at 5.33% and 5.42% against
+    5%; its fidelity's worst 1.30% → 14.59%) and the band's seam at the horizontal from 40 km
+    (3.50 codes on R05's Earth and 3.02 on the drawn Earth against 2), with the last-light window
+    from 50–99.999 km at 3.7–9.6 codes from 1.2–1.7. Left out; §10 has the floor searched from 16
+    up.
+  - _QW1_ (RTX 3080, hidden, 2026-10-22 21:21, load 0.27; P0 at a median 1,950 of 2,115 MHz, no
+    busy sample under 90%). The atmosphere's sum on high at 1920 × 1080 from 400 km, median, ms,
+    before lever 3: one source 7.27 (R05's Earth), 11.25 (`EARTH_REFERENCE`), 11.27 (slab); a
+    binary's two light slots (x2) 10.77, 19.06, 18.48; a star and planetshine on one slot (x2p)
+    10.79, 16.66, 16.35; four sources 17.80, 30.24, 29.00 uncapped and 10.91, 19.20, 18.54 capped;
+    six 24.84, 41.79, 40.18 and 11.01, 19.30, 18.68. At 10⁷ m x2 is 11.66, 19.95, 19.34. Low at
+    1280 × 720 from 400 km: 0.91, 1.57, 1.62 at one source, 1.30, 2.54, 2.50 at x2, six sources
+    2.84 → 1.40 on R05's Earth. The march is linear in its steps, 0.49 ms a step at x2 on
+    `EARTH_REFERENCE` (0.27 on R05's Earth) and about 1.4 ms at none: 16 steps everywhere gives
+    9.25 ms there, the face alone at 20 gives 13.51 and at 28 16.36, and the two-node footprint
+    16.61 (no texel blends at 400 km: its code's shape) and 14.60 from 19.95 at 10⁷ m. A second
+    star on its own slot costs 2.40 ms over a slot-0 source on `EARTH_REFERENCE` (its view path).
+    - _The p95s are the harness's._ A frame drawn after one of the harness's waits for the GPU
+      ran about 10.7 times its median (the GPU's idle clock), and the waits' period aliased with
+      the rounds, so some rows read p95s of 40–90 ms on the same frames; the medians are clean,
+      and the other rows' p95s lie within 1–2% of them. T8.d's low p95 tail (W5) was likely the
+      same: QW1's low frames lie within about 10% of their medians. QW2 runs without such a gap
+      (§10), with per-frame times.
+  - _A binary's second star stays on its own path_ (§10, Ruling 3): the fold into slot 0's path is
+    refused, since on the primary's night side and its night limb the companion lights the air
+    alone and the curves differ there by 2.2–15.5% in red.
+  - _The UHD 620_ (§10, Ruling 5; §9's 25–68 times). Low's QW1 medians at 400 km: R05's Earth
+    0.91 ms at one source (23–62 ms on the laptop) and 1.30 at two (32–88 ms); `EARTH_REFERENCE`
+    1.57 (39–107 ms), 2.54 at a binary's two slots (64–173 ms) and 2.25 at x2p (56–153 ms). Low
+    misses its laptop rows at every count until R08.T11's knobs move.
+- **Deferred findings (2026-10-13 rule)** (R08.T8.e).
+  - _The kept Sun's light from 10⁷ m._ With the Sun 1° beyond the twilight limit kept after a full
+    Moon, the Moon's march moves by 2.86 × 10⁻⁵ of its largest from 10⁷ m against R08.T7's 10⁻⁶
+    (1.83 × 10⁻⁸ from 400 km), all of it Hillaire's isotropic multiple-scattering term at the
+    samples' own sun elevations, as inside the air (2.42 × 10⁻⁵, R08.T7): pinned under 3 × 10⁻⁵.
+    The skip stands; for R08.T13.
 
 - **Deviations in T6.e, as built** (2026-10-13). `tablesCpu.ts`, `oblate.ts` and `hillaire.ts`;
   tests in a new `tablesCpuOblate.test.ts` (inside the acceptance's `view/atmosphere/tablesCpu`

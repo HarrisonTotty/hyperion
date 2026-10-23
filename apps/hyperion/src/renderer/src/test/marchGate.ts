@@ -6,8 +6,10 @@
  * light, and the gate's other sky families from cameras at or above each setting's march band's
  * lower edge, which the ray march draws there, marched as the kernel marches a sky pixel (nothing
  * drawn: its two-sided segments under the sun-aware warp, its one-sided ones about the lowest
- * point), at the setting's march count; the references R05.T12.e's placed steps. The floor is each
- * kernel's family group's brightest reference over the setting's rays.
+ * point), at the setting's march count, the bare ground's scaled since R08.T8.e by its optical depth
+ * as the kernel scales it (`TableSizes`' `marchDepthSteps`, high's; `atmosphereGate.ts`'s
+ * `gateMarchSamples`); the references R05.T12.e's placed steps. The floor is each kernel's family
+ * group's brightest reference over the setting's rays.
  *
  * @remarks
  * Moved here from `view/atmosphere/marchGate.test.ts` (2026-10-22, main's infra ruling) and split
@@ -25,6 +27,7 @@ import { TABLE_SIZES } from "../view/atmosphere/hillaire";
 import {
   grazingTwilight,
   MARCH_TOLERANCE,
+  type MarchDepthSteps,
   type MarchStep,
   TWILIGHT_TOLERANCE,
 } from "../view/atmosphere/marchSteps";
@@ -48,6 +51,7 @@ import {
   evenAt,
   type Gate,
   type GateRay,
+  gateMarchSamples,
   GROUND_ALBEDO,
   HIGH,
   kernelOf,
@@ -130,11 +134,13 @@ const marchedAsSky = (ray: GateRay): boolean => kernelOf(ray) === "skyView" || s
  * the kernel's rule for the schemes (`rayMarch.wgsl`: a sky pixel's two-sided segment under the
  * sun-aware warp by its first source, the ray's sun, and a drawn surface's camera side toward the
  * camera), or even steps, each cut at the medium's layer edges as the kernels cut them; the gate's
- * lit ground through the ray's transmittance, each source's light on it.
+ * lit ground through the ray's transmittance, each source's light on it. Under the kernel's rule the
+ * bare ground's count is scaled by its optical depth where the scheme gives a rule (R08.T8.e;
+ * `gateMarchSamples`), read through the twin's own transmittance.
  */
 function pixelOf(medium: AtmosphereMedium, sources: TwinSources, count: SourceCount) {
   const edges = mediumMarchEdgesM(medium);
-  return (ray: GateRay, placement: Placement, n: number): Rgb3 => {
+  return (ray: GateRay, placement: Placement, n: number, rule: MarchDepthSteps | null): Rgb3 => {
     const lights = lightsOf(ray, count);
     const sky = marchedAsSky(ray);
     const twinRay: TwinRay = {
@@ -154,7 +160,7 @@ function pixelOf(medium: AtmosphereMedium, sources: TwinSources, count: SourceCo
       case "kernel":
         steps = piecedSteps(
           { ...twinRay, fromCamera: twinRay.fromCamera && !sky, skySegment: sky },
-          n,
+          gateMarchSamples(ray, n, rule, edges.length, sources.sunTransmittance),
           edges,
           GATE_SPHERE,
         );
@@ -195,10 +201,13 @@ export function raysOf(setting: QualitySetting): GateRay[] {
   return [...marchRays(), ...skyRays().filter((ray) => cameraHeightM(ray) >= lowerM)];
 }
 
-/** The setting's counts as the ray march takes them: its march count for every ray here. */
+/**
+ * The setting's counts as the ray march takes them: its march count for every ray here, the bare
+ * ground's scaled by its optical depth under the setting's rule (R08.T8.e).
+ */
 function marchScheme(setting: QualitySetting): Scheme {
   const scheme = setting === "high" ? HIGH : LOW;
-  return { ...scheme, skySteps: scheme.marchSteps };
+  return { ...scheme, skySteps: scheme.marchSteps, skyDepthSteps: scheme.marchDepthSteps };
 }
 
 /** The setting's rays of a gate, each kernel group's floor its own brightest reference. */

@@ -85,6 +85,15 @@
 // each step reading them from the view (`viewSourcesAt`), and the ground's bounce takes its slot's
 // throughput through `viewThroughputOf`; the footprint's nodes are formed as each is marched
 // (`farLimbNodeOf`), not held; the arithmetic unchanged.
+//
+// Changes (plan R08, R08.T8.e; lever 3 of `decision-r08-t8-leans.md` sections 8 and 9): a ray that
+// ends on the bare ground, nothing drawn, takes fewer steps where it is optically thin: the
+// ground's floor (20 on high, 4 more for each of the medium's layer edges) while its green optical
+// depth from the ground back along the ray, absorbers included, is at most 2, climbing back to the
+// setting's count in even steps by 8 (`rayMarchSamplesOf`, `view.marchGround`; `marchSteps.ts`'s
+// marchSamplesOf is its twin). Every other ray, the sky and drawn surfaces, keeps the setting's
+// count. From orbit the face is most of the march's step work; R05.T12.e's gate holds every ray at
+// the rule on all three media at 1 and 6 sources, at no wider tolerance.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -263,6 +272,41 @@ fn marchWalkCrossShell(
   marchWalkCross(walk, hits.y - lowestM);
 }
 
+// The green optical depth, absorbers included, along the unit body-fixed `d` from the place `p` to
+// the top, through the sliced lookup at light slot 0 from `p`'s own datum point (`sourceLightAt`;
+// plan R08, R08.T8.e): what a ray's count is chosen by. `bigQ` is `p`'s ground quadric, 0 on the
+// ground. As `tablesCpu.ts`'s twins read it.
+fn rayMarchDepthAlong(body : OblateBody, p : vec3f, bigQ : f32, d : vec3f) -> f32 {
+  let datum = datumPointOf(body, p, bigQ);
+  let s = gravityRatioAt(body, datum.normal.z * datum.normal.z);
+  let local = sampleMediumAt(s * datum.heightM);
+  let start = sampleStartOf(body, p, bigQ, datum.heightM, datum.normal, datum.normal, s, local);
+  return -log(sourceLightAt(body, start, d, 0u).toSun.g);
+}
+
+// The ray march's count for one ray (plan R08, R08.T8.e, lever 3 of `decision-r08-t8-leans.md`
+// sections 8 and 9; `marchSteps.ts`'s marchSamplesOf is its twin): `samples`, the setting's, but on
+// the bare ground (`bareGround`: nothing drawn, the ray ending on the ground) where
+// `view.marchGround` holds the rule, the ground's floor at the medium's `edges` layer edges while
+// the ray's green optical depth `depthG` is at most the ramp's first depth, climbing back to
+// `samples` in even steps by its last. R05.T12.e's gate holds every ray at it, on all three media,
+// at 1 and 6 sources. A depth that is not finite takes `samples`.
+fn rayMarchSamplesOf(bareGround : bool, depthG : f32, samples : u32, edges : u32) -> u32 {
+  let rule = view.marchGround;
+  if (!bareGround || rule.x <= 0.0 || !(abs(depthG) < 3.4e38)) {
+    return samples;
+  }
+  let floorSteps = min(samples, u32(rule.x) + u32(rule.y) * edges);
+  if (depthG <= rule.z) {
+    return floorSteps;
+  }
+  if (depthG >= rule.w) {
+    return samples;
+  }
+  let pairs = ceil(f32(samples - floorSteps) * (depthG - rule.z) / (2.0 * (rule.w - rule.z)));
+  return min(floorSteps + 2u * u32(pairs), samples);
+}
+
 // One ray of the march, through `uv` of the output, the scene's reversed-Z depth under the texel
 // `depth` (0 where nothing is drawn): its in-scatter (rgb) and mean transmittance (a), (0, 0, 0, 1)
 // where it misses the air. The texel's centre ray, and each node of its far-limb footprint
@@ -298,7 +342,18 @@ fn marchRay(uv : vec2f, depth : f32) -> vec4f {
   if (shell.y <= 0.0 || tEnd <= tStart) {
     return vec4f(0.0, 0.0, 0.0, 1.0);
   }
-  let samples = max(u32(view.figure.w), 2u);
+  // The medium's layer edges are the same for every pixel, so each branch on them is uniform
+  // (R08.T6.i).
+  let edgeCount = min(u32(layerEdges.count.x), MARCH_EDGES_MAX);
+  // The ray's count (lever 3, R08.T8.e): on the bare ground by its optical depth from the ground
+  // back along the ray, through the sliced lookup, before the march's own state is made.
+  let bareGround = depth == 0.0 && hitsGround;
+  var depthG = 0.0;
+  if (bareGround && view.marchGround.x > 0.0) {
+    depthG = rayMarchDepthAlong(body, origin + ground.x * dir, 0.0, -dir);
+  }
+  let setting = max(u32(view.figure.w), 2u);
+  let samples = max(rayMarchSamplesOf(bareGround, depthG, setting, edgeCount), 2u);
   let nearest = -dot(origin, dir);
   // Every two-sided sky segment, from inside the air or outside it, under the sun-aware warp
   // (R08.T8); a drawn surface's camera side from inside toward the camera, and every other segment's
@@ -330,9 +385,7 @@ fn marchRay(uv : vec2f, depth : f32) -> vec4f {
   );
   var march = viewMarchStart();
   let lobes = hasForwardLobes();
-  // A medium with no layer edge takes R05.T12.e's steps as they were, and declares no walk; the
-  // edges are the same for every pixel, so the branch is uniform (R08.T6.i).
-  let edgeCount = min(u32(layerEdges.count.x), MARCH_EDGES_MAX);
+  // A medium with no layer edge takes R05.T12.e's steps as they were, and declares no walk.
   // One loop a path, each step chosen in it (R08.T8), so that the step's work is compiled twice,
   // not once a placement and path.
   if (edgeCount == 0u) {

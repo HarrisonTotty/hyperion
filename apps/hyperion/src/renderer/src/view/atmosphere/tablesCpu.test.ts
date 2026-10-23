@@ -8,6 +8,7 @@ import {
   errorOf,
   errors,
   failures,
+  gateMarchSamples,
   type Gate,
   gateRays,
   type GateRay,
@@ -65,7 +66,13 @@ import {
   tableRadiusM,
 } from "./hillaire";
 import { type ForwardLobe, forwardLobeOfTable, lobeIsDrawn } from "./forwardLobe";
-import { marchSplit, marchStep, type MarchStep, TWILIGHT_TOLERANCE } from "./marchSteps";
+import {
+  type MarchDepthSteps,
+  marchSplit,
+  marchStep,
+  type MarchStep,
+  TWILIGHT_TOLERANCE,
+} from "./marchSteps";
 import {
   type AtmosphereMedium,
   type MediumTerm,
@@ -120,6 +127,7 @@ import {
   planetTwin,
   type PlanetTwin,
   rayMarchRayAlongTwin,
+  type RayMarchSettings,
   rayMarchRayTwin,
   rayMarchTexelTwin,
   rayMarchTwin,
@@ -213,11 +221,12 @@ function kernelRayOf(ray: GateRay): TwinRay {
  * placed steps (the references', R05.T12.e's) and the kernel's (the schemes', since R08.T8 the ray
  * march's two-sided sky segments under the sun-aware warp), cut at the medium's layer edges as the
  * kernels' are (R08.T6.i; on a medium with no edge, R05.T12.e's to the bit), plus the gate's lit
- * ground through the ray's transmittance.
+ * ground through the ray's transmittance. Under the kernel's placement the ray march's count on the
+ * bare ground is scaled by its optical depth where the scheme gives a rule (R08.T8.e).
  */
 function twinPixel(medium: AtmosphereMedium, sources: TwinSources) {
   const edges = mediumMarchEdgesM(medium);
-  return (ray: GateRay, placement: Placement, n: number): Rgb3 => {
+  return (ray: GateRay, placement: Placement, n: number, rule: MarchDepthSteps | null): Rgb3 => {
     const twinRay = twinRayOf(ray);
     let steps: MarchStep[];
     switch (placement) {
@@ -225,7 +234,12 @@ function twinPixel(medium: AtmosphereMedium, sources: TwinSources) {
         steps = piecedSteps(twinRay, n, edges, GATE_SPHERE);
         break;
       case "kernel":
-        steps = piecedSteps(kernelRayOf(ray), n, edges, GATE_SPHERE);
+        steps = piecedSteps(
+          kernelRayOf(ray),
+          gateMarchSamples(ray, n, rule, edges.length, sources.sunTransmittance),
+          edges,
+          GATE_SPHERE,
+        );
         break;
       case "even":
         steps = stepsFor(placement, ray, n);
@@ -328,9 +342,11 @@ describe("R05's constants as a medium", () => {
     const off: string[] = [];
     for (const ray of gateRays()) {
       for (const scheme of [HIGH, evenAt(HIGH), LOW, evenAt(LOW)]) {
-        const n = kernelOf(ray) === "skyView" ? scheme.skySteps : scheme.marchSteps;
-        const twin = pixelOf(ray, scheme.placement, n);
-        const r05 = singleScatteringPixel(ray, scheme.placement, n);
+        const sky = kernelOf(ray) === "skyView";
+        const n = sky ? scheme.skySteps : scheme.marchSteps;
+        const rule = sky ? scheme.skyDepthSteps : scheme.marchDepthSteps;
+        const twin = pixelOf(ray, scheme.placement, n, rule);
+        const r05 = singleScatteringPixel(ray, scheme.placement, n, rule);
         const agrees = CHANNELS.every((c) =>
           r05[c] === 0 ? twin[c] === 0 : Math.abs(twin[c] / r05[c] - 1) < 1e-6,
         );
@@ -399,7 +415,7 @@ describe("the sky view's and the march's twins under R05.T12.e's quadrature gate
     singleOnly = new Map(
       rays
         .filter((ray) => ray.family === "sky" && ray.sunZenithDeg < 80)
-        .map((ray) => [ray.name, noMultiple(ray, "placed", REFERENCE_STEPS)]),
+        .map((ray) => [ray.name, noMultiple(ray, "placed", REFERENCE_STEPS, null)]),
     );
   }, 600_000);
 
@@ -442,14 +458,16 @@ describe("the sky view's and the march's twins under R05.T12.e's quadrature gate
   });
 
   // Measured 2026-10-21 under the sun-aware warp and recorded in plan R08's Risks ("Deviations in
-  // T8.a, as built"); the sky families are the sky view's, the last light the ray march's.
+  // T8.a, as built"); the sky families are the sky view's, the last light the ray march's. Since
+  // R08.T8.e high's march count on the bare ground is scaled by its optical depth: the disc at 20
+  // steps, 1.43% and 0.70% (0.45% and 0.18% at 36), measured 2026-10-22.
   it("records the twin's worst by family and class at high's and low's counts", () => {
     expect({ high: worstByFamily(gate, HIGH), low: worstByFamily(gate, LOW) }).toEqual({
       high: asRecordedFigures({
         "band ordinary": 0.00212,
         "band twilight": 0.00377,
-        "disc ordinary": 0.00447,
-        "disc twilight": 0.00182,
+        "disc ordinary": 0.01429,
+        "disc twilight": 0.00699,
         "high band ordinary": 0.00177,
         "high band twilight": 0.02581,
         "high limb ordinary": 0.00309,
@@ -1031,6 +1049,17 @@ describe("the forward lobes in the twin (R08.T7)", () => {
 
 // --- The steps the twins place -------------------------------------------------------------------
 
+/** High's ray-march settings at a fixed count, no segment's count scaled by its optical depth. */
+const highAtFixedCount = (n: number): RayMarchSettings => ({
+  ...TABLE_SIZES.high,
+  rayMarchSamples: n,
+  marchDepthSteps: null,
+});
+
+/** Whether two texels agree to the bit in every channel. */
+const sameTexel = (p: readonly number[], q: readonly number[]): boolean =>
+  p.length === q.length && p.every((value, i) => value === q[i]);
+
 describe("the per-frame twins' steps", () => {
   const view = twinView(equatorCamera(WGS84, 5_000), sunAt(10), WGS84, 0.1);
 
@@ -1098,7 +1127,7 @@ describe("the per-frame twins' steps", () => {
   // texels span degrees, so every air texel takes its own) the mean is `farLimb.test.ts`'s.
   it("march each ray-march texel on the spheroid over its placed steps, as rayMarch.wgsl does", () => {
     const orbit = twinView(equatorCamera(WGS84, 400_000), sunAt(30), WGS84, 0.1);
-    const settings = { ...TABLE_SIZES.high, rayMarchSamples: 24 };
+    const settings = { ...TABLE_SIZES.high, rayMarchSamples: 24, marchDepthSteps: null };
     const target = rayMarchTwin(earth, orbit, settings, () => 0);
     const sources = tableSources(earth);
     const shells = farLimbShellsOf(earth, orbit);
@@ -1140,6 +1169,44 @@ describe("the per-frame twins' steps", () => {
     }
     expect(off).toEqual([]);
     expect(compared).toBeGreaterThan(0);
+  });
+
+  // R08.T8.e: high's count by the bare ground's optical depth (`marchSteps.ts`'s `marchSamplesOf`).
+  it("march the bare ground at 20 steps on high, and the sky, thin or thick, and a drawn surface at 36", () => {
+    const orbit = twinView(equatorCamera(WGS84, 400_000), sunAt(30), WGS84, 0.1);
+    const a = WGS84.equatorialRadiusM;
+    const r = a + 400_000;
+    // In the equatorial plane, where the datum is the circle of radius a.
+    const toTangent = (tangentM: number): Vec3 => {
+      const sin = (a + tangentM) / r;
+      return { x: -Math.sqrt(1 - sin * sin), y: sin, z: 0 };
+    };
+    const texel = (settings: RayMarchSettings, d: Vec3, tSurfaceM: number): readonly number[] =>
+      rayMarchTexelTwin(
+        earth,
+        orbit,
+        settings,
+        rayMarchRayAlongTwin(R05_EARTH_REFERENCE, orbit, orbit.cameraM, d, tSurfaceM),
+      );
+    const open = Number.POSITIVE_INFINITY;
+    const cases = [
+      { what: "thin sky, tangent 70 km", d: toTangent(70_000), tSurfaceM: open, n: 36 },
+      { what: "thick sky, tangent 5 km", d: toTangent(5_000), tSurfaceM: open, n: 36 },
+      { what: "bare ground, nadir", d: { x: -1, y: 0, z: 0 }, tSurfaceM: open, n: 20 },
+      { what: "drawn surface, nadir", d: { x: -1, y: 0, z: 0 }, tSurfaceM: 399_000, n: 36 },
+    ];
+    // Each texel is the march at its count to the bit, and only the 36-step ones the march at 36.
+    const drawn = cases.map(({ what, d, tSurfaceM, n }) => {
+      const texelAs = (settings: RayMarchSettings): readonly number[] =>
+        texel(settings, d, tSurfaceM);
+      const shipped = texelAs(TABLE_SIZES.high);
+      return {
+        what,
+        atItsCount: sameTexel(shipped, texelAs(highAtFixedCount(n))),
+        at36: sameTexel(shipped, texelAs(highAtFixedCount(36))),
+      };
+    });
+    expect(drawn).toEqual(cases.map(({ what, n }) => ({ what, atItsCount: true, at36: n === 36 })));
   });
 
   it("reduce the ray march's spheroid to the sky view's sphere when a = c", () => {
@@ -1959,14 +2026,15 @@ describe("R05.T12.e's quadrature gate on the measured Earth, the marches as buil
     expect(describeFailures(overLowBounds(gate, LOW))).toEqual([]);
   });
 
-  // Measured 2026-10-21 under the sun-aware warp, as R05's Earth's.
+  // Measured 2026-10-21 under the sun-aware warp, as R05's Earth's; since R08.T8.e (2026-10-22) the
+  // disc at 20 steps, 1.35% and 0.62% (0.41% and 0.14% at 36).
   it("records the twin's worst by family and class at high's and low's counts", () => {
     expect({ high: worstByFamily(gate, HIGH), low: worstByFamily(gate, LOW) }).toEqual({
       high: asRecordedFigures({
         "band ordinary": 0.0025,
         "band twilight": 0.00298,
-        "disc ordinary": 0.00412,
-        "disc twilight": 0.00136,
+        "disc ordinary": 0.0135,
+        "disc twilight": 0.00618,
         "high band ordinary": 0.00148,
         "high band twilight": 0.01085,
         "high limb ordinary": 0.00209,
@@ -2100,7 +2168,8 @@ const R05_HIGH_MARCH_STEPS = 32;
 
 describe("R05.T12.e's quadrature gate on the slab Earth, the marches cut at its layer edges (R08.T6.i)", () => {
   let gate: Gate = { results: [], lMax: new Map() };
-  const r05High = { ...HIGH, marchSteps: R05_HIGH_MARCH_STEPS };
+  // R05.T12.e's uniform 32 steps, with no count by optical depth.
+  const r05High = { ...HIGH, marchSteps: R05_HIGH_MARCH_STEPS, marchDepthSteps: null };
 
   beforeAll(() => {
     const sources = tableSources(
@@ -2143,14 +2212,15 @@ describe("R05.T12.e's quadrature gate on the slab Earth, the marches cut at its 
   });
 
   // Measured 2026-10-21 under the sun-aware warp, as R05's Earth's; `LOW_TWIN_WORST` is not
-  // re-pinned on a test medium.
+  // re-pinned on a test medium. Since R08.T8.e (2026-10-22) the disc at 28 steps, 20 and 4 for each
+  // of the slab's two edges, 1.59% and 1.09% (1.12% and 0.99% at 36).
   it("records the twin's worst by family and class at high's and low's counts", () => {
     expect({ high: worstByFamily(gate, HIGH), low: worstByFamily(gate, LOW) }).toEqual({
       high: asRecordedFigures({
         "band ordinary": 0.0058,
         "band twilight": 0.01658,
-        "disc ordinary": 0.01121,
-        "disc twilight": 0.00986,
+        "disc ordinary": 0.01589,
+        "disc twilight": 0.01087,
         "high band ordinary": 0.00605,
         "high band twilight": 0.0161,
         "high limb ordinary": 0.00367,
