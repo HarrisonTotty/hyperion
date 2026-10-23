@@ -663,12 +663,13 @@ Four classes, shared by the whole ship:
     a selection's bracket about every mark, whether or not it is drawn, so that it never stands
     nearer a body than the body's own label and is never read as its name; and `0.125rem` clear
     of every stalk. Of those places it takes one that no orbit, annulus edge or tick crosses,
-    where there is one. The bodies' labels are placed first, the selection's among them; then the
-    zones', the habitable zone's before the others'; then the belts', the scattered disc's, the
-    halo's and a planet's rings'. Where an annulus has no such place, its label is not shown: it
-    is never drawn over a mark. The zone is still named, with its distances, in its host's readout
-    and on its switch; a belt, ring or halo is named in the list, and selecting it there draws its
-    edges and ticks as the selected orbit is.
+    where there is one. The selection's label is placed first, a selected belt's, ring's or halo's
+    as a selected body's is; then the other bodies' labels; then the zones', the habitable zone's
+    before the others'; then the other belts', the scattered disc's, the halo's and a planet's
+    rings'. Where an annulus has no such place, its label is not shown: it is never drawn over a
+    mark. The zone is still named, with its distances, in its host's readout and on its switch; a
+    belt, ring or halo is named in the list, and selecting it there draws its edges and ticks as the
+    selected orbit is and places its label before the bodies'.
   - `--line` is for the reference plane's grid and scale rings only.
   - Distances are true to scale, with a 1-2-5 scale bar. Bodies are not, and the display says
     `BODIES NOT TO SCALE` once, in place of the legend's `SYMBOLS NOT TO SCALE`.
