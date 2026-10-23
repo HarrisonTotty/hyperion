@@ -49,6 +49,7 @@ use crate::planetary::fate::BodyState;
 use crate::planetary::frames::BodyFixedFrame;
 pub use crate::planetary::hooks::AerosolInventory;
 use crate::planetary::hooks::DetailSeed;
+pub use crate::planetary::hooks::SurfaceModifiers;
 use crate::planetary::hooks::cold_traps::ColdTrapRules;
 pub use crate::planetary::hooks::crust::CrustComposition;
 use crate::planetary::hooks::crust::CrustLithology;
@@ -596,9 +597,10 @@ impl BulkProperties {
 /// material, its surface conditions with their climate regime (P14.T24.a, T48.d), its global
 /// figures (P14.T24.b, T48.a–c), its condensates (P14.T51.a, from P14.T54.a) and its crust
 /// (P14.T51.c, from P14.T54.a, not modelled for a body whose passes took no lid), its air's
-/// vertical structure (P14.T24.e) and its aerosol and absorber inventory (P14.T24.c with T24.g),
-/// both held off the record until P14.T54.b's bump at generator version 24, every substance in
-/// them a [`SubstanceId`](crate::substance::SubstanceId), and the members
+/// vertical structure (P14.T24.e), its aerosol and absorber inventory (P14.T24.c with T24.g) and
+/// its modifiers (P14.T51.d with T51.j), each held off the record until P14.T54.b's bump at
+/// generator version 24, every substance in them a
+/// [`SubstanceId`](crate::substance::SubstanceId), and the members
 /// whose tasks land later, each [`Modelled::NotModelled`] until they do (decision-composition
 /// §1.10).
 ///
@@ -723,6 +725,14 @@ impl Surface {
         Self { aerosols, ..self }
     }
 
+    /// The surface with its modifiers `modifiers` (P14.T51.d with T51.j, wired by P14.T54.b.c):
+    /// not modelled while the air's sections' hold keeps them off the record, and for a surface
+    /// whose inputs they refuse or the record does not give (`system::modifiers::record_modifiers`).
+    #[must_use]
+    pub(crate) fn with_modifiers(self, modifiers: Modelled<SurfaceModifiers>) -> Self {
+        Self { modifiers, ..self }
+    }
+
     /// What its conditions and condensates were built on (rule (f)); `None` for a surface built
     /// apart from a record. The tests of rule (f) read it.
     #[cfg(test)]
@@ -845,8 +855,17 @@ impl Surface {
         self.crust.as_ref()
     }
 
-    /// The surface's modifiers, its maturity, organic cover and resurfacing (P14.T51.d), not
-    /// modelled until they land.
+    /// The surface's modifiers (P14.T51.d with T51.j, [`SurfaceModifiers`]): its space-weathering
+    /// rate and maturity, its organic cover, its resurfacing rate, an Io's volcanic deposits and an
+    /// oxidised surface's `ferric`, from the published surface, its host star, its orbit (a moon's
+    /// planet's, with that planet's magnetosphere from its record), its mantle's sulphur, its crust's
+    /// lid, its air's gases and its water's history.
+    ///
+    /// It is not modelled below generator version 24, which holds it off the record until
+    /// P14.T54.b's bump, as the air's sections are; for a body with no crust on the record, no host
+    /// star at the time, or a moon whose planet's field the record does not give; and for inputs
+    /// the derivation refuses, an unlit body's at 0 K among them
+    /// (`system::modifiers::record_modifiers`).
     #[must_use]
     pub const fn modifiers(&self) -> Modelled<&SurfaceModifiers> {
         self.modifiers.as_ref()
@@ -892,11 +911,6 @@ impl<T> Modelled<T> {
         }
     }
 }
-
-/// A surface's modifiers (P14.T51.d: its maturity, organic cover and resurfacing), which no task
-/// builds yet, so the type has no value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum SurfaceModifiers {}
 
 /// A biosphere's fluxes (P14.T53.d), which no task builds yet, so the type has no value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

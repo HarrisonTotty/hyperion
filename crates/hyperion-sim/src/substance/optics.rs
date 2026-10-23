@@ -144,7 +144,8 @@ use hyperion_surface::field::{
 use hyperion_surface::material::PhaseLaw;
 
 use super::condensed::{CondensedColumns, CondensedPhase};
-use super::{Source, Substance, SubstanceId, SubstanceKey, ids};
+use super::liquid::{LiquidColumns, Oxide};
+use super::{Element, Source, Substance, SubstanceId, SubstanceKey, SubstanceKind, ids};
 use crate::units::{Kelvin, Metres};
 use crate::{GENERATOR_VERSION, GeneratorVersion};
 
@@ -1314,6 +1315,80 @@ impl Substance {
         };
         darkened.or_else(|| OPTICS.iter().find(|optics| optics.key == self.key))
     }
+
+    /// Its `FeO_T`: its total non-metallic iron (silicate, oxide and sulphide) expressed as `FeO`,
+    /// as a mass fraction of the substance, dimensionless in [+0, 1], from its registry composition
+    /// (P14.T54.b.c; decision-p14-t51d-weathering §1.2 and §1.3); metallic iron is excluded, being
+    /// already metal. It is its solid's, so `None` for a row with no condensed columns (a gas
+    /// alone, as `FeH`, whose iron as `FeO` would outweigh the hydride), and otherwise `None`
+    /// where the registry does not model it:
+    ///
+    /// - a species of one formula (a molecule, a mineral, an ion): its iron atoms as `FeO`,
+    ///   n(Fe) M(`FeO`) ÷ M, M its molar mass, each from the registry's atomic weights, so +0 for an
+    ///   iron-free ice, salt or mineral and 0.8173 for troilite, `FeS`;
+    /// - an atom: +0, its solid its element's own, so that iron's is metal;
+    /// - an organic material with no formula (`tholin`, `soot`): +0, iron-free;
+    /// - a lithology with a melt row (P14.T49.h's step 4): its major oxides' FeO(T) over 100
+    ///   (`basalt` and `lava_glass` 0.1097, `basalt_fe`, `mars_dust` and `ferric` 0.202,
+    ///   `feldspathic` 0.051, `anorthosite` 0.0127, `komatiite` 0.129, `basalt_reduced` 0.0337,
+    ///   `granite` 0.0185, `ultramafic` 0.0805); `ferric`'s oxides are `basalt_fe`'s, a stated
+    ///   stand-in that leaves its few weight per cent of ferric phases out;
+    /// - a lithology of metal (its mechanics family `Metal`, `iron_nickel`): +0;
+    /// - `None` for every other lithology, whose oxides the registry does not carry (the
+    ///   chondrites, `phyllosilicate`, `cometary` and `ca_al_residue`), and for a solution, which
+    ///   lies as a liquid, whose palette entry carries none.
+    #[must_use]
+    pub(crate) fn feo_mass_fraction(&self) -> Option<f64> {
+        let condensed = self.condensed()?;
+        match self.kind {
+            SubstanceKind::Molecule | SubstanceKind::Mineral | SubstanceKind::Ion => {
+                let iron = self
+                    .elements
+                    .iter()
+                    .find(|&&(element, _)| element == Element::Fe)
+                    .map_or(0, |&(_, count)| count);
+                if iron == 0 {
+                    return Some(0.0);
+                }
+                let molar_mass = self.molar_mass_g_per_mol?;
+                Some(f64::from(iron) * Oxide::Ferrous.molar_mass_g_per_mol() / molar_mass)
+            }
+            SubstanceKind::Atom | SubstanceKind::Organic => Some(0.0),
+            SubstanceKind::Lithology => {
+                if let Some(feo) = self
+                    .liquid()
+                    .and_then(LiquidColumns::melt_feo_mass_fraction)
+                {
+                    return Some(feo);
+                }
+                (condensed.mechanics() == MechanicsFamily::Metal).then_some(0.0)
+            }
+            SubstanceKind::Solution => None,
+        }
+    }
+}
+
+/// The rows whose condensed optics hold an observed body's albedo, weathered where it lies, so
+/// that a palette carries no `FeO_T` for them and R10.T1.d's law does not darken them a second
+/// time (decision-p14-t51d-weathering §1.5): a closed list, for the composition audit. It is
+/// `mars_dust` alone, whose index Wolff et al. 2009 (JGR 114, E00D04) retrieved from CRISM's and
+/// the rovers' observations of Mars's dust (`rows/optics.rs`); every other row's input is a
+/// laboratory measurement or a cited pristine mode's.
+const OBSERVED_WEATHERED_ALBEDO: [&str; 1] = ["mars_dust"];
+
+/// The `FeO_T` a palette entry of row `id` carries on a body whose record's modifiers are
+/// modelled (P14.T54.b.c; decision-p14-t51d-weathering §1.6): its registry's
+/// ([`Substance::feo_mass_fraction`]), `None` where that is not modelled or the row's albedo is an
+/// observed, weathered value ([`OBSERVED_WEATHERED_ALBEDO`]). [`resolve_palette_entry`] gives
+/// none: the record's palette sets it, and R09's reference worlds keep their own.
+#[must_use]
+pub(crate) fn palette_feo_mass_fraction(id: SubstanceId) -> Option<f64> {
+    let row = id.substance();
+    if OBSERVED_WEATHERED_ALBEDO.contains(&row.key().as_str()) {
+        None
+    } else {
+        row.feo_mass_fraction()
+    }
 }
 
 /// Every row with condensed optics, in registry order, with its optics: the rules' in force
@@ -1464,8 +1539,9 @@ pub fn resolve_palette_entry(
         transition: condensed.transition().temperature(),
         mechanics: condensed.mechanics(),
         liquid: None,
-        // Not modelled until P14.T54.b fills it from the registry's composition
-        // (decision-p14-t51d-weathering §1.6).
+        // Not modelled here: the record's palette takes the registry's where its modifiers are
+        // modelled (`palette_feo_mass_fraction`, P14.T54.b.c), and R09's reference worlds keep
+        // none (decision-p14-t51d-weathering §1.6).
         feo_mass_fraction: None,
     })
 }

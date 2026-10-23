@@ -115,33 +115,39 @@ fn check_profile(record: &BodyRecord, surface: &Surface, profile: &RadiativeConv
 
 /// The air's sections are held until P14.T54.b's bump (P14.T54.b.l; decision-p14-t54b-open §3.3):
 /// below it the rules in force are the held ones, and under them every golden system's record, at
-/// both times its golden pins, holds its vertical structure and its aerosol inventory not
-/// modelled. The server's `the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed`
-/// holds the wire's members absent on every golden body. P14.T54.b.c, .d and .i add the modifiers
-/// and the envelope to the same check. That the held arm calls none of the pure modules is held
-/// by the source scans' `HELD` lists (`nothing_on_the_record_calls_the_inventory_yet`,
-/// `nothing_on_the_record_calls_the_condensation_yet`) and here by its arm: the table's Venus,
-/// whose inventory the batch builds, records none under `Held`.
+/// both times its golden pins, holds its vertical structure, its aerosol inventory and its
+/// modifiers (P14.T54.b.c, behind the same hold) not modelled. The server's
+/// `the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed` holds the wire's members
+/// absent on every golden body. P14.T54.b.d and .i add the envelope to the same check. That the
+/// held arm calls none of the pure modules is held by the source scans' `HELD` lists
+/// (`nothing_on_the_record_calls_the_inventory_yet`,
+/// `nothing_on_the_record_calls_the_condensation_yet`,
+/// `modifiers_nothing_on_the_record_reads_the_modifiers_yet`) and here by its arm: the table's
+/// Venus, whose inventory the batch builds, records none under `Held` (and the modifiers' arm in
+/// `system::modifiers`' tests, `the_held_record_computes_no_modifiers`).
 #[test]
 fn the_air_sections_are_held_only_until_the_24_bump() {
     assert!(
         GENERATOR_VERSION < AIR_SECTIONS_VERSION,
         "the 23 → 24 bump (P14.T54.b.l) puts the air's sections on the record: every surface's \
-         vertical structure (P14.T24.e), `null` for one with no air, and its aerosol and absorber \
+         vertical structure (P14.T24.e), `null` for one with no air, its aerosol and absorber \
          inventory (P14.T24.c with T24.g), the empty inventory for one with no air or a magma \
-         ocean, with the members P14.T54.b's later subtasks hold here. Delete \
-         `AIR_SECTIONS_VERSION`, `AirRules` with its `Held` arm, `record_structure`'s and \
-         `record_aerosols`' rules, `RecordRules::air` (and `RecordRules` with \
+         ocean, and its modifiers (P14.T51.d with T51.j, P14.T54.b.c), with the members \
+         P14.T54.b's later subtasks hold here. Delete `AIR_SECTIONS_VERSION`, `AirRules` with its \
+         `Held` arm, `record_structure`'s, `record_aerosols`', `record_modifiers`' and \
+         `planet_field`'s rules, `RecordRules::air` (and `RecordRules` with \
          `PlanetarySystem::with_record_rules` once the cold traps' hold goes too); the four source \
          scans with their `HELD` lists (`nothing_on_the_record_calls_the_inventory_yet`, \
          `nothing_on_the_record_calls_the_condensation_yet`, \
          `substance_aerosol_nothing_on_the_record_reads_the_extinction_yet`, \
          `modifiers_nothing_on_the_record_reads_the_modifiers_yet`); \
          `the_venus_test_is_rechecked_at_the_23_to_24_bump`, \
-         `the_held_record_carries_no_structure` and this test. The server's \
+         `the_held_record_carries_no_structure`, `the_held_record_computes_no_modifiers` and this \
+         test. The server's \
          `the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed` then takes the \
-         structure as present, `null` on an airless surface, and the aerosols as present, the \
-         empty object on an airless surface (decision-p14-t54b-open §1.3, §3.3)"
+         structure as present, `null` on an airless surface, the aerosols as present, the empty \
+         object on an airless surface, and the modifiers as present where the record models them \
+         (decision-p14-t54b-open §1.3, §3.3)"
     );
     assert_eq!(AirRules::in_force(), AirRules::Held);
     assert_eq!(RecordRules::in_force().air, AirRules::Held);
@@ -159,6 +165,7 @@ fn the_air_sections_are_held_only_until_the_24_bump() {
                     "{name} {id}"
                 );
                 assert_eq!(surface.aerosols(), Modelled::NotModelled, "{name} {id}");
+                assert_eq!(surface.modifiers(), Modelled::NotModelled, "{name} {id}");
                 surfaces += 1;
             }
         }
@@ -370,9 +377,10 @@ fn the_table_s_earth_venus_and_titan_carry_their_structures_under_the_switch() {
     }
 }
 
-/// The record at the version in force holds no structure and no aerosol inventory, and the
-/// batch's surface is the held one with those two alone added: over the first ten whole systems,
-/// every surface held is the batch's with both not modelled, so that every golden keeps 23's bits.
+/// The record at the version in force holds no structure, no aerosol inventory and no modifiers
+/// (P14.T54.b.c), and the batch's surface is the held one with those three alone added: over the
+/// first ten whole systems, every surface held is the batch's with all three not modelled, so that
+/// every golden keeps 23's bits.
 #[test]
 fn the_held_record_carries_no_structure() {
     let mut surfaces = 0_usize;
@@ -385,10 +393,12 @@ fn the_held_record_carries_no_structure() {
                 (Section::Ok(held), Section::Ok(batch)) => {
                     assert_eq!(held.vertical_structure(), Modelled::NotModelled, "{id}");
                     assert_eq!(held.aerosols(), Modelled::NotModelled, "{id}");
+                    assert_eq!(held.modifiers(), Modelled::NotModelled, "{id}");
                     let stripped = batch
                         .clone()
                         .with_vertical_structure(Modelled::NotModelled)
-                        .with_aerosols(Modelled::NotModelled);
+                        .with_aerosols(Modelled::NotModelled)
+                        .with_modifiers(Modelled::NotModelled);
                     assert_eq!(held, &stripped, "{id}");
                     surfaces += 1;
                 }

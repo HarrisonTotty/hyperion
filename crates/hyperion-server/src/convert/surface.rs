@@ -832,7 +832,8 @@ mod tests {
             );
             assert_eq!(entry.phase_row, held.phase_row);
             assert_eq!(entry.liquid, None, "{}", entry.substance);
-            // The sim's reference rows model no `FeO_T` until P14.T54.b fills it from the registry.
+            // R09's reference worlds keep their own palettes, with no `FeO_T`: a generated body's
+            // takes the registry's where its record's modifiers are modelled (P14.T54.b.c).
             assert_eq!(held.feo_mass_fraction, None, "{}", entry.substance);
             assert!(entry.feo_mass_fraction.is_not_modelled(), "{entry:?}");
         }

@@ -191,12 +191,13 @@ pub struct SurfaceHeaderDto {
     pub main_liquid: Option<u8>,
     /// The ground's space-weathering maturity, dimensionless from 0 for fresh ground to 1 for
     /// saturated weathering, which rendering plan R10's cover term reads; absent until galaxy plan
-    /// 14 computes it (P14.T51.d).
+    /// 14's record carries it (P14.T51.d, from P14.T54.b's bump at generator version 24).
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<f64>>", optional)]
     pub maturity: Modelled<f64>,
     /// The organic cover, dimensionless from 0 to 1: the covered fraction of the ground that can
-    /// take one; absent until galaxy plan 14 computes it (P14.T51.d).
+    /// take one, 0 where none can; absent until galaxy plan 14's record carries it (P14.T51.d,
+    /// from P14.T54.b's bump at generator version 24).
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<f64>>", optional)]
     pub organic_cover: Modelled<f64>,
@@ -208,7 +209,8 @@ pub struct SurfaceHeaderDto {
     /// may reach 10³. Rendering plan R10 fades a crater's ejecta to the background as
     /// `min(maturity, 1 − exp(−k t ÷ τ_L))`, `t` the crater's age and `τ_L` the lunar maturation
     /// time, through the shared Rust law. Present exactly when [`maturity`](Self::maturity) is, and
-    /// absent until galaxy plan 14 computes it (P14.T51.d).
+    /// absent until galaxy plan 14's record carries it (P14.T51.d, from P14.T54.b's bump at
+    /// generator version 24).
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<f64>>", optional)]
     pub weathering_rate: Modelled<f64>,

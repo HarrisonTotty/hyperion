@@ -108,18 +108,16 @@
 //! row's spectral type is Hu, Ehlmann and Seager 2012's "Fe-oxidized" (ApJ 752, 7, Table 2: 50%
 //! nanophase hematite and 50% basalt, by oxidative weathering, "Current Mars").
 //!
-//! # Which `SurfaceModifiers`
+//! # On the record
 //!
-//! [`SurfaceModifiers`] here is the derivation's value.
-//! [`record::SurfaceModifiers`](crate::planetary::record::SurfaceModifiers) is the record's
-//! uninhabited placeholder, which P14.T54.b replaces with this type, as P14.T54.a does the crust's.
-//!
-//! # Not on the record yet
-//!
-//! Nothing on the record calls this module at generator version 22 (decision-bump-plan-after-22
-//! §1.3: P14.T51.d is a pure rider of 24): P14.T54.b (23 → 24) puts [`SurfaceModifiers`] in the
-//! record's surface section, fills the field header's `maturity`, `weathering_rate` and
-//! `organic_cover` from it, and deletes the tripwire test that holds the line until then.
+//! [`record::SurfaceModifiers`](crate::planetary::record::SurfaceModifiers) is this type,
+//! re-exported, as the record's crust is P14.T51.c's. P14.T54.b.c's wiring puts it in the record's
+//! surface section (`system::modifiers`), from the published surface, behind the air's sections'
+//! hold at generator version 24 (`AIR_SECTIONS_VERSION`), so that no value on the record moves
+//! before the bump; with it R09's field header takes its `maturity`, `weathering_rate` and
+//! `organic_cover`, and the palette its entries' `FeO_T`, the `ferric` deposit and the `tholin`
+//! cover. The source scan `modifiers_nothing_on_the_record_reads_the_modifiers_yet` holds the
+//! wiring's files to the hold until the bump, P14.T54.b.l, deletes it with the hold.
 //!
 //! # Determinism
 //!
@@ -619,8 +617,8 @@ impl WeatheringDeposit {
 /// and maturity, its organic cover, its resurfacing rate, an Io's volcanic deposits and an oxidised
 /// surface's weathering deposit (P14.T51.j).
 ///
-/// The record's [`record::SurfaceModifiers`](crate::planetary::record::SurfaceModifiers) is a
-/// placeholder of the same name, which P14.T54.b replaces with this type.
+/// The record's [`record::SurfaceModifiers`](crate::planetary::record::SurfaceModifiers) is this
+/// type (the [module](self)'s "On the record").
 #[derive(Debug, Clone, PartialEq)]
 pub struct SurfaceModifiers {
     maturity: f64,
@@ -902,34 +900,44 @@ fn dry_ice_free_land(condensates: &Condensates) -> f64 {
 /// A seasonal ice takes no cover: its ground is bared every year.
 #[must_use]
 pub fn organic_ground(condensates: &Condensates) -> f64 {
-    let carbon_dioxide = Gas::CarbonDioxide.substance();
+    let ground = organic_ground_entries(condensates)
+        .iter()
+        .fold(0.0, |ground, entry| ground + entry.area_fraction());
+    if ground > 1.0 { 1.0 } else { ground }
+}
+
+/// The entries of `condensates` whose ground can take an organic cover, those [`organic_ground`]
+/// sums, in its order: the solid, non-seasonal entries with an area whose registry row carries
+/// carbon, CO₂ excepted, and then, where any is listed, nitrogen's. The surface crate's
+/// `takes_organic_cover` reads the same rule off a palette's keys (decision-r10-t1c-maturity §3.2),
+/// which P14.T54.b.c's test holds against this one on every generated body.
+#[must_use]
+pub(crate) fn organic_ground_entries(condensates: &Condensates) -> Vec<&CondensateEntry> {
     let nitrogen = Gas::Nitrogen.substance();
     let perennial_ices = || {
         condensates.entries().iter().filter(|e| {
             e.phase() == CondensatePhase::Solid && !e.is_seasonal() && e.area_fraction() > 0.0
         })
     };
-    let carbon_bearing = |e: &&CondensateEntry| {
-        let id = e.substance();
-        id != carbon_dioxide
-            && id
-                .substance()
-                .elements()
-                .iter()
-                .any(|&(element, _)| element == Element::C)
-    };
-    let mut ground = 0.0;
-    let mut carbon = false;
-    for entry in perennial_ices().filter(carbon_bearing) {
-        ground += entry.area_fraction();
-        carbon = true;
+    let mut entries: Vec<&CondensateEntry> = perennial_ices()
+        .filter(|e| bears_organic_cover(e.substance()))
+        .collect();
+    if !entries.is_empty() {
+        entries.extend(perennial_ices().filter(|e| e.substance() == nitrogen));
     }
-    if carbon {
-        for entry in perennial_ices().filter(|e| e.substance() == nitrogen) {
-            ground += entry.area_fraction();
-        }
-    }
-    if ground > 1.0 { 1.0 } else { ground }
+    entries
+}
+
+/// Whether an ice of the row `id` takes an organic cover by itself ([`organic_ground`]'s first
+/// kind): its registry row carries carbon, CO₂ excepted.
+#[must_use]
+pub(crate) fn bears_organic_cover(id: SubstanceId) -> bool {
+    id != Gas::CarbonDioxide.substance()
+        && id
+            .substance()
+            .elements()
+            .iter()
+            .any(|&(element, _)| element == Element::C)
 }
 
 /// The organic cover, dimensionless in [+0, 1], of ground that can take one under the

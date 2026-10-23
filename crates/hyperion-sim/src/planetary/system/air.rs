@@ -29,9 +29,10 @@ use crate::{GENERATOR_VERSION, GeneratorVersion};
 /// updated 2026-10-15).
 ///
 /// It holds the members P14.T54.b first puts on the record: a surface's vertical structure
-/// (P14.T24.e, P14.T54.b.a), and its aerosol and absorber inventory (P14.T24.c with T24.g), the
-/// modifiers and the envelope as P14.T54.b's later subtasks wire them (decision-p14-t54b-open
-/// §1.2 item 6). Below it [`AirRules::in_force`] is [`AirRules::Held`], so that each is not
+/// (P14.T24.e, P14.T54.b.a), its aerosol and absorber inventory (P14.T24.c with T24.g,
+/// P14.T54.b.b) and its modifiers (P14.T51.d with T51.j, P14.T54.b.c, `system::modifiers`), and the
+/// envelope as P14.T54.b's later subtasks wire it (decision-p14-t54b-open §1.2 item 6). Below it
+/// [`AirRules::in_force`] is [`AirRules::Held`], so that each is not
 /// modelled, as at 23, and every golden keeps its bits. The bump, P14.T54.b.l, deletes this hold,
 /// [`AirRules`] with its `Held` arm, `RecordRules::air`, the four source scans with their `HELD`
 /// lists, and its tripwire (`the_air_sections_are_held_only_until_the_24_bump`).
@@ -40,12 +41,13 @@ pub(crate) const AIR_SECTIONS_VERSION: GeneratorVersion = GeneratorVersion::new(
 /// Whether the record's surface carries its air's sections (the hold, [`AIR_SECTIONS_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum AirRules {
-    /// Versions 23's and before: the vertical structure and the aerosols are not modelled, and
-    /// nothing of either is computed.
+    /// Versions 23's and before: the vertical structure, the aerosols and the modifiers are not
+    /// modelled, and nothing of them is computed.
     Held,
     /// The 23 → 24 batch's: the surface carries its air's vertical structure, computed as none for
-    /// a surface with no air ([`record_structure`]), and its aerosol and absorber inventory, the
-    /// empty inventory for a surface with no air or a magma ocean ([`record_aerosols`]).
+    /// a surface with no air ([`record_structure`]), its aerosol and absorber inventory, the
+    /// empty inventory for a surface with no air or a magma ocean ([`record_aerosols`]), and its
+    /// modifiers (`system::modifiers::record_modifiers`).
     Batch,
 }
 

@@ -900,18 +900,54 @@ fn scanned_code(text: &str) -> String {
         .join("\n")
 }
 
-/// Nothing on the record calls the surface modifiers or the shared maturity law at generator
-/// version 22 (decision-bump-plan-after-22 §1.3: P14.T51.d is a pure rider of 24). P14.T54.b, the
-/// 23 → 24 bump, puts [`SurfaceModifiers`] in the record's surface section, fills the field
-/// header's `maturity`, `weathering_rate` and `organic_cover` from it, and deletes this test.
+/// The files outside this module whose code reaches the modifiers behind a named hold, each with
+/// the name of its hold, which its code (outside an inline test module, comments left out) must
+/// name: P14.T54.b.c's wiring of the record's modifiers (`system/modifiers.rs`, behind the air's
+/// sections' hold, `AirRules`) and its tests (decision-p14-t54b-open §1.2 item 6 and §3.3).
+/// **P14.T54.b.l deletes this list** with the tripwire below.
+const HELD: [(&str, &str); 2] = [
+    ("planetary/system/modifiers.rs", "AirRules"),
+    ("planetary/system/modifiers/tests.rs", "AirRules"),
+];
+
+/// Whether the code of `text` as the tripwire scans it ([`scanned_code`]) names `hold`.
+fn names_its_hold(text: &str, hold: &str) -> bool {
+    scanned_code(text).lines().any(|code| code.contains(hold))
+}
+
+/// The hold check reads the code alone: a comment naming the hold, or code inside an inline test
+/// module, does not count.
+#[test]
+fn the_modifiers_hold_check_reads_the_code_alone() {
+    assert!(names_its_hold(
+        "match rules { AirRules::Held => 0 }\n",
+        "AirRules"
+    ));
+    assert!(!names_its_hold("// AirRules\nfn f() {}\n", "AirRules"));
+    assert!(!names_its_hold(
+        "fn f() {}\n#[cfg(test)]\nmod tests {\n    use super::AirRules;\n}\n",
+        "AirRules"
+    ));
+}
+
+/// Nothing on the record reaches the surface modifiers or the shared maturity law but through
+/// their hold until the 23 → 24 bump (decision-bump-plan-after-22 §1.3: P14.T51.d is a pure rider
+/// of 24). P14.T54.b.c puts [`SurfaceModifiers`] in the record's surface section behind the air's
+/// sections' hold (`AIR_SECTIONS_VERSION`), from which R09's field header takes its `maturity`,
+/// `weathering_rate` and `organic_cover`; P14.T54.b.l deletes this test with the hold.
 ///
-/// It walks the sim's `src/` outside `planetary/hooks/modifiers*` and the surface crate's `src/`
-/// outside `material/maturity.rs`, in sorted order, and fails on a call form, path or name of
-/// either in each file's code (the file less its comment lines and its inline test module).
-/// `hooks/mod.rs`'s `pub mod modifiers;` and its one `pub use modifiers::{…};`, and
-/// `material/mod.rs`'s `mod maturity;` and its one `pub use maturity::{…};`, are allowed. The
-/// bare name `SurfaceModifiers` is not matched, since `record.rs` has its own placeholder of that
-/// name, nor `modifiers::{`, the galaxy's gas modifiers' path.
+/// It walks the sim's `src/` outside `planetary/hooks/modifiers*` and [`HELD`]'s files and the
+/// surface crate's `src/` outside `material/maturity.rs`, in sorted order, and fails on a call
+/// form, path or name of either in each file's code (the file less its comment lines and its
+/// inline test module); each of [`HELD`]'s files must be a source file whose code names its hold,
+/// so that a caller in any other file fails, and so does a listed file that drops its hold
+/// (decision-p14-t54b-open §3.3). `hooks/mod.rs`'s `pub mod modifiers;` and its one
+/// `pub use modifiers::{…};`, and `material/mod.rs`'s `mod maturity;` and its one
+/// `pub use maturity::{…};`, are allowed. The bare name `SurfaceModifiers` is not matched, nor its
+/// getters (`maturity()`, `organic_cover()`, `weathering_deposits()`): the record's member, its
+/// re-export in `record.rs` and the readers of it there and in R09's `surface/inputs.rs` and
+/// `surface/palette.rs` read only what the record holds, which the hold keeps not modelled, and
+/// compute nothing of the modifiers; nor `modifiers::{`, the galaxy's gas modifiers' path.
 #[test]
 fn modifiers_nothing_on_the_record_reads_the_modifiers_yet() {
     // `modifiers::{` alone would match the galaxy's gas modifiers.
@@ -933,9 +969,16 @@ fn modifiers_nothing_on_the_record_reads_the_modifiers_yet() {
         "LUNAR_MATURATION_TIME",
         "maturity::",
     ];
-    // (file, hold): files allowed to match while a named hold stands; none yet.
-    const HELD: [(&str, &str); 0] = [];
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for (held, hold) in HELD {
+        let path = manifest.join("src").join(held);
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("{held} is a source file: {e}"));
+        assert!(
+            names_its_hold(&text, hold),
+            "{held} reaches the modifiers behind {hold}, which its code no longer names"
+        );
+    }
     let crates = [
         (
             manifest.join("src"),
@@ -987,7 +1030,8 @@ fn modifiers_nothing_on_the_record_reads_the_modifiers_yet() {
     assert_eq!(
         readers,
         Vec::<String>::new(),
-        "the surface modifiers or the maturity law are read on the record before P14.T54.b"
+        "the surface modifiers or the maturity law are reached on the record outside their hold \
+         before P14.T54.b's bump"
     );
     // The allowed declarations are there, once each.
     let hooks = std::fs::read_to_string(manifest.join("src/planetary/hooks/mod.rs")).unwrap();

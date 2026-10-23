@@ -1473,6 +1473,12 @@ pub(crate) fn builder_of(inputs: &CoarseInputs) -> CoarseInputsBuilder {
     if let Some(inertia) = inputs.ground_inertia_j_per_m2_k_sqrt_s() {
         builder = builder.ground_inertia_j_per_m2_k_sqrt_s(inertia);
     }
+    if let Some(weathering) = inputs.weathering() {
+        builder = builder.weathering(*weathering);
+    }
+    if let Some(cover) = inputs.organic_cover() {
+        builder = builder.organic_cover(cover);
+    }
     builder
 }
 

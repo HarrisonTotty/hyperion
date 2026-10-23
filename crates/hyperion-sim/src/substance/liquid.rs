@@ -1245,6 +1245,22 @@ impl LiquidColumns {
         }
     }
 
+    /// A melt row's total iron as `FeO`, FeO(T), as a mass fraction of its analysis: its major
+    /// oxides' FeO(T) in weight per cent over 100 (P14.T54.b.c; decision-p14-t51d-weathering
+    /// §1.2), not over the analysis's own total, which lies within a weight per cent of 100.
+    /// `None` for a liquid that is not a lithology's melt.
+    #[must_use]
+    pub(crate) fn melt_feo_mass_fraction(&self) -> Option<f64> {
+        match &self.constitution {
+            LiquidConstitution::Melt(melt) => {
+                Some(melt::total_iron_as_feo_wt_pct(melt.oxides) / 100.0)
+            }
+            LiquidConstitution::Pure { .. }
+            | LiquidConstitution::Solution(_)
+            | LiquidConstitution::AwaitingSolute(_) => None,
+        }
+    }
+
     /// The index and absorption, from the row's R08 file.
     #[must_use]
     pub const fn optics(&self) -> Option<&LiquidOptics> {

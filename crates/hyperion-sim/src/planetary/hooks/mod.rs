@@ -32,10 +32,10 @@
 //!   envelope's own gas, its quenched and cold-trapped composition at 1 bar, its decks, its
 //!   photochemical hazes and its absorbers at 10 mbar. It is pure until P14.T54.b puts it in the
 //!   record's envelope section.
-//! - [`modifiers`]: a solid surface's [`SurfaceModifiers`] (P14.T51.d), its space-weathering rate
-//!   and maturity, organic cover, resurfacing rate and an Io's volcanic deposits. It is pure until
-//!   P14.T54.b, the 23 → 24 bump, puts it in the record's surface section in the place of the
-//!   record's placeholder of the same name.
+//! - [`modifiers`]: a solid surface's [`SurfaceModifiers`] (P14.T51.d, T51.j), its
+//!   space-weathering rate and maturity, organic cover, resurfacing rate, an Io's volcanic
+//!   deposits and an oxidised surface's `ferric`. It is pure: P14.T54.b's wiring puts it in the
+//!   record's surface section, held off the record until the 23 → 24 bump.
 //! - [`aerosols`]: a surface's [`AerosolInventory`] (P14.T24.c), its condensate decks from
 //!   P14.T52.c's loop, its hazes and dust as modes of particles and its absorbers. It is pure:
 //!   P14.T54.b's wiring puts it in the record's surface section, held off the record until the

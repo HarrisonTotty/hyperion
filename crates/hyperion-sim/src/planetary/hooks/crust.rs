@@ -1345,6 +1345,24 @@ impl CrustComposition {
         self.lid
     }
 
+    /// The lithology at the surface: the registry row of the crust or bulk material its
+    /// [`lid`](Self::lid) names, its primary, secondary or bulk member's (P14.T51.j's
+    /// `ModifierInputs::lid`, wired by P14.T54.b.c; the palette's lid entry).
+    ///
+    /// # Panics
+    ///
+    /// Never: [`derive`](Self::derive), as the record's crust, gives a lid that names a present
+    /// member.
+    #[must_use]
+    pub fn lid_lithology(&self) -> SubstanceId {
+        match self.lid {
+            LidCrust::Primary => self.primary,
+            LidCrust::Secondary => self.secondary,
+            LidCrust::Bulk => self.bulk,
+        }
+        .expect("a crust's lid names a present member, as its constructors give it")
+    }
+
     /// The lithology of its volcanic provinces.
     #[must_use]
     pub const fn provinces(&self) -> SubstanceId {

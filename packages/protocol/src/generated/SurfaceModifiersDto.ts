@@ -2,9 +2,10 @@
 import type { SubstanceAreaDto } from "./SubstanceAreaDto";
 
 /**
- * A surface's modifiers (plan 14, P14.T51.d; decision-p14-t51d-weathering §2). Absent from the
- * wire until P14.T54.b fills it. P14.T51.d gave it this shape, which may change until a build
- * sends a value.
+ * A surface's modifiers (plan 14, P14.T51.d with T51.j; decision-p14-t51d-weathering §2). Absent
+ * from the wire until P14.T54.b's bump at generator version 24 puts them on the record
+ * (P14.T54.b.c). P14.T51.d and T51.j gave it this shape, which may change until a build sends a
+ * value.
  */
 export type SurfaceModifiersDto = { 
 /**

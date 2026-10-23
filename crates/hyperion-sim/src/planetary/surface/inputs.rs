@@ -417,6 +417,23 @@ pub struct ColdTrapInputs {
     pub bond_albedo: f64,
 }
 
+/// The ground's space weathering, the field header's paired `maturity` and `weathering_rate`
+/// (decision-p14-t51d-weathering §2.3: present together or not at all), plan 14's
+/// `SurfaceModifiers` (P14.T51.d), which [`CoarseInputs::from_record`] reads from the record's
+/// modifiers where they are modelled (P14.T54.b.c).
+///
+/// Plain data with public fields: [`CoarseInputsBuilder::build`] validates them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroundWeathering {
+    /// The background regolith's maturity `m_body`, dimensionless in [+0, 1] (a −0 is refused, as
+    /// the header refuses it): 0 for fresh ground, 1 for the Moon's mature background.
+    pub maturity: f64,
+    /// The weathering rate k, the body's surface-reaching weathering dose rate relative to the
+    /// Moon's present one, dimensionless, finite and at least +0 (a −0 is refused), with no upper
+    /// bound.
+    pub weathering_rate: f64,
+}
+
 /// The most condensates plan 14 lists for a body (P14.T51.a).
 pub const MAX_CONDENSATES: usize = 8;
 
@@ -467,6 +484,8 @@ pub struct CoarseInputs {
     lid_entry: u8,
     main_liquid: Option<u8>,
     ground_inertia_j_per_m2_k_sqrt_s: Option<f64>,
+    weathering: Option<GroundWeathering>,
+    organic_cover: Option<f64>,
 }
 
 /// Why a record's sections cannot give a body's inputs: the surface section's tag, or a section
@@ -842,6 +861,12 @@ impl CoarseInputs {
     /// angular radius and the regolith's albedo they read (decision-r09-t13f-cold-traps §1.1,
     /// §2.2). Each ice's share is the record's whole share, its cold-trapped part included.
     ///
+    /// The ground's weathering ([`weathering`](Self::weathering), the maturity with the weathering
+    /// rate) and its [`organic_cover`](Self::organic_cover) are the surface section's modifiers'
+    /// (P14.T51.d, wired by P14.T54.b.c), to the bit, where the record models them, the cover +0
+    /// where no ground takes one; and none of the three where it does not, every record's below
+    /// generator version 24, which holds the modifiers off the record.
+    ///
     /// # Errors
     ///
     /// - [`ReadCoarseInputsError::Section`] as [`for_body`](Self::for_body) answers the surface
@@ -1025,6 +1050,16 @@ impl CoarseInputs {
             .ground_inertia_j_per_m2_k_sqrt_s(conditions.ground().inertia_j_per_m2_k_sqrt_s());
         if let Some(epoch) = figures.wet_epoch() {
             builder = builder.wet_epoch(WetEpoch::from(epoch));
+        }
+        // The header's weathering parts and organic cover, where the record's modifiers are
+        // modelled (P14.T54.b.c): absent together until then, so that every field keeps its bits.
+        if let Modelled::Ok(modifiers) = surface.modifiers() {
+            builder = builder
+                .weathering(GroundWeathering {
+                    maturity: modifiers.maturity(),
+                    weathering_rate: modifiers.weathering_rate(),
+                })
+                .organic_cover(modifiers.organic_cover());
         }
         Ok(builder.build()?)
     }
@@ -1344,6 +1379,24 @@ impl CoarseInputs {
     #[must_use]
     pub const fn ground_inertia_j_per_m2_k_sqrt_s(&self) -> Option<f64> {
         self.ground_inertia_j_per_m2_k_sqrt_s
+    }
+
+    /// The ground's space weathering, its maturity with the weathering rate, which the field's
+    /// header carries as its `maturity` and `weathering_rate` (R09's reserved parts, R10.T1.c's
+    /// fade): plan 14's modifiers' (P14.T51.d), `None` where the inputs carry none, as from a
+    /// record below generator version 24, whose modifiers are held off it (P14.T54.b.c).
+    #[must_use]
+    pub const fn weathering(&self) -> Option<&GroundWeathering> {
+        self.weathering.as_ref()
+    }
+
+    /// The organic cover, the covered fraction of the ground that can take one, dimensionless in
+    /// [+0, 1], which the field's header carries (R10.T1.c's cover blend): plan 14's modifiers'
+    /// (P14.T51.d), +0 where no ground takes one, and `None` where the inputs carry none, as from a
+    /// record below generator version 24 (P14.T54.b.c).
+    #[must_use]
+    pub const fn organic_cover(&self) -> Option<f64> {
+        self.organic_cover
     }
 
     /// The months of the field's year: 1 for a world with no seasonal forcing, a circular
@@ -1860,8 +1913,8 @@ impl Error for BuildCoarseInputsError {}
 ///
 /// Every value is required, the palette among them, but the body (by default
 /// [`BodyRef::default`]) and the lists and optional parts, whose default is none: no liquid, ice,
-/// cold-trapped share, gas or condensate, no cold-trap inputs, no seasonal orbit, no wet epoch and
-/// no ground inertia of plan 14's.
+/// cold-trapped share, gas or condensate, no cold-trap inputs, no seasonal orbit, no wet epoch, no
+/// ground inertia of plan 14's and no weathering or organic cover.
 /// The cold-trap inputs are required where a cold-trapped share is above zero.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CoarseInputsBuilder {
@@ -1896,6 +1949,8 @@ pub struct CoarseInputsBuilder {
     condensates: Vec<Condensate>,
     palette: Option<MaterialPalette>,
     ground_inertia_j_per_m2_k_sqrt_s: Option<f64>,
+    weathering: Option<GroundWeathering>,
+    organic_cover: Option<f64>,
 }
 
 /// `value`, or [`BuildCoarseInputsError::Missing`] naming `part`.
@@ -2280,6 +2335,21 @@ impl CoarseInputsBuilder {
         self
     }
 
+    /// The ground's space weathering, its maturity in [+0, 1] with its weathering rate, finite and
+    /// at least +0, neither a −0 ([`CoarseInputs::weathering`]). None by default.
+    #[must_use]
+    pub const fn weathering(mut self, weathering: GroundWeathering) -> Self {
+        self.weathering = Some(weathering);
+        self
+    }
+
+    /// The organic cover, in [+0, 1], not a −0 ([`CoarseInputs::organic_cover`]). None by default.
+    #[must_use]
+    pub const fn organic_cover(mut self, organic_cover: f64) -> Self {
+        self.organic_cover = Some(organic_cover);
+        self
+    }
+
     /// The inputs, validated, with every list in its documented order.
     ///
     /// # Errors
@@ -2374,6 +2444,18 @@ impl CoarseInputsBuilder {
         if let Some(inertia) = self.ground_inertia_j_per_m2_k_sqrt_s {
             check_positive("ground inertia", inertia)?;
         }
+        if let Some(weathering) = &self.weathering {
+            check_share("maturity", weathering.maturity)?;
+            let rate = weathering.weathering_rate;
+            check(
+                "weathering rate",
+                rate,
+                rate >= 0.0 && rate.is_sign_positive(),
+            )?;
+        }
+        if let Some(cover) = self.organic_cover {
+            check_share("organic cover", cover)?;
+        }
         Ok(CoarseInputs {
             body: self.body,
             figure,
@@ -2409,6 +2491,8 @@ impl CoarseInputsBuilder {
             lid_entry,
             main_liquid,
             ground_inertia_j_per_m2_k_sqrt_s: self.ground_inertia_j_per_m2_k_sqrt_s,
+            weathering: self.weathering,
+            organic_cover: self.organic_cover,
         })
     }
 }

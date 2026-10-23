@@ -657,8 +657,8 @@ fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
             )
             .map(|rebuilt| rebuilt.with_basis(*surface.basis().unwrap()))
             .map(|rebuilt| rebuilt.with_crust(surface.crust().ok().map(|crust| **crust)))
-            // And its air's vertical structure and aerosols (P14.T54.b), not modelled while the air
-            // is held.
+            // And its air's vertical structure and aerosols and its modifiers (P14.T54.b), not
+            // modelled while the air's sections are held.
             .map(|rebuilt| {
                 rebuilt.with_vertical_structure(match surface.vertical_structure() {
                     Modelled::Ok(structure) => Modelled::Ok(structure.cloned()),
@@ -668,6 +668,12 @@ fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
             .map(|rebuilt| {
                 rebuilt.with_aerosols(match surface.aerosols() {
                     Modelled::Ok(aerosols) => Modelled::Ok(aerosols.clone()),
+                    Modelled::NotModelled => Modelled::NotModelled,
+                })
+            })
+            .map(|rebuilt| {
+                rebuilt.with_modifiers(match surface.modifiers() {
+                    Modelled::Ok(modifiers) => Modelled::Ok(modifiers.clone()),
                     Modelled::NotModelled => Modelled::NotModelled,
                 })
             });

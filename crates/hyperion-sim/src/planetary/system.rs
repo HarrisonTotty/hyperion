@@ -103,7 +103,7 @@ use crate::planetary::architecture::{
 use crate::planetary::belts::{
     Belt, BeltComposition, BeltHost, BeltMember, FIRST_BELT_SLOT, LAST_BELT_SLOT, host_belts,
 };
-use crate::planetary::chem::inventory::ElementInventory;
+use crate::planetary::chem::inventory::{ElementInventory, Reservoir};
 use crate::planetary::chem::partition::{Condensates, CrustWater, Partition};
 use crate::planetary::chem::{AbundanceDraws, HostAbundances};
 use crate::planetary::context::{HostKind, SystemContext, XuvHistory};
@@ -192,6 +192,7 @@ use crate::stellar::draws::UnitUniform;
 use crate::stellar::multiplicity::{HierarchyNode, SlotKind, SystemHierarchy};
 use crate::stellar::system::StarModel;
 use crate::stellar::{Phase, StarState};
+use crate::substance::Element;
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::consts::{
     GM_EARTH, GRAVITATIONAL_CONSTANT, METRES_PER_AU, SECONDS_PER_JULIAN_YEAR,
@@ -202,6 +203,10 @@ use crate::units::{
     SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, WattsPerSquareMetre, Years,
 };
 use air::{AirRules, AirSurface, record_aerosols, record_structure};
+use modifiers::{
+    ModifierCase, ModifierStar, ModifierSurface, PlanetField, RecordPrimary, planet_field,
+    record_modifiers,
+};
 use moon_ice::{HotHistory, MoonBulkRules, MoonIce, kept_water, shell_lag};
 
 /// Words of [`tags::PLANET_RADIUS`] a planet reads or reserves: word 0, its radius rank, then
@@ -1007,8 +1012,9 @@ pub struct PlanetarySystem {
 }
 
 /// The rules a system's records' cold traps (P14.T51.f) and air's sections (P14.T24.e's vertical
-/// structure and P14.T24.c's aerosol inventory, P14.T54.b) follow: the generator version's, and for
-/// the tests the batch's ahead of its bump. P14.T54.b deletes it with the holds.
+/// structure, P14.T24.c's aerosol inventory and, under the same hold, P14.T51.d's modifiers,
+/// P14.T54.b) follow: the generator version's, and for the tests the batch's ahead of its bump.
+/// P14.T54.b deletes it with the holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RecordRules {
     /// Its cold traps: their hold at 24.
@@ -2516,6 +2522,11 @@ impl PlanetarySystem {
                 continental_asymptote: frame.continental_asymptote,
                 cold_traps: frame.cold_traps,
                 star_temperature: frame.star_temperature,
+                modifiers: ModifierCase {
+                    star: frame.modifier_star,
+                    primary: RecordPrimary::Star,
+                    mantle_sulphur: mantle_sulphur(derived.element_inventory()),
+                },
                 record: self.record,
             },
             SurfaceOf::Moon {
@@ -2523,6 +2534,7 @@ impl PlanetarySystem {
                 derived,
                 bulk,
                 orbit,
+                planet,
             } => SurfaceCase {
                 sky: SurfaceSky::of_moon(derived),
                 bulk,
@@ -2532,6 +2544,14 @@ impl PlanetarySystem {
                 continental_asymptote: frame.continental_asymptote,
                 cold_traps: frame.cold_traps,
                 star_temperature: frame.star_temperature,
+                modifiers: ModifierCase {
+                    star: frame.modifier_star,
+                    primary: RecordPrimary::Planet {
+                        field: planet,
+                        semi_major_axis: orbit.semi_major_axis(),
+                    },
+                    mantle_sulphur: mantle_sulphur(derived.element_inventory()),
+                },
                 record: self.record,
             },
         };
@@ -2554,7 +2574,9 @@ impl PlanetarySystem {
     /// the primary's past ([`PastSky`]), the primary's orbit then, which sets its seasons, its
     /// host's impactor sources (P14.T48.f), its continental asymptote (P14.T48.a), its cold traps'
     /// case (P14.T51.f), the effective temperature of the star its air's photochemistry reads
-    /// (P14.T24.c, wired by P14.T54.b.b), and the system's \[Fe/H\] and age then.
+    /// (P14.T24.c, wired by P14.T54.b.b), the same brightest star with its X-ray and ultraviolet
+    /// history, which its modifiers read (P14.T51.d, wired by P14.T54.b.c), and the system's
+    /// \[Fe/H\] and age then.
     #[must_use]
     fn surface_frame<'s>(
         &'s self,
@@ -2585,6 +2607,10 @@ impl PlanetarySystem {
                 star_radius: brightest.map(|(_, state)| state.radius()),
             },
             star_temperature: epoch.photochemistry_temperature(brightest),
+            modifier_star: brightest.map(|(member, state)| ModifierStar {
+                radius: state.radius(),
+                xuv: epoch.xuv[usize::from(member)],
+            }),
             fe_h: ctx.fe_h(),
             age: ctx.age_at(t),
         }
@@ -2920,8 +2946,13 @@ impl PlanetarySystem {
         #[cfg(test)]
         if let Some(read) = pass_free_read(PassFreeRead::Parent, now, || {
             let label = label::label(self, parent).expect("every body of a system has a label");
-            self.primary_record(epoch, &HourCosines::new(), primary, label, fate)
-                .1
+            let mut read = self
+                .primary_record(epoch, &HourCosines::new(), primary, label, fate)
+                .1;
+            // What only a built record gives its moons' surfaces (P14.T54.b.c), which no moon's law
+            // reads.
+            read.planet_field = None;
+            read
         }) {
             return read;
         }
@@ -3469,7 +3500,7 @@ impl PlanetarySystem {
         let spin = Self::primary_spin(body, &at, epoch.t);
         let owned = self.spin_frame(epoch, cosines, (body, fate), spin);
         let body_spin = BodySpin::of(owned.as_ref());
-        let now = self.primary_now_under(epoch, (body, fate), &at, body_spin);
+        let mut now = self.primary_now_under(epoch, (body, fate), &at, body_spin);
         let identity = BodyIdentity::new(
             self.system,
             body.index,
@@ -3541,6 +3572,8 @@ impl PlanetarySystem {
         let record = builder
             .build()
             .expect("a generated record withholds no section and has a known kind");
+        // What its moons' modifiers read of its magnetosphere, from the record it is (P14.T54.b.c).
+        now.planet_field = planet_field(self.record.air, &record);
         (record, now)
     }
 
@@ -3590,6 +3623,7 @@ impl PlanetarySystem {
             nursery: None,
             shades: None,
             moon_ice: None,
+            planet_field: None,
         };
         match at.state() {
             BodyState::Present => {
@@ -3790,8 +3824,7 @@ impl PlanetarySystem {
         parent: &ParentNow,
         fate: &BodyFate<'_>,
     ) -> BodyRecord {
-        let t = epoch.t;
-        let ctx = epoch.ctx;
+        let (t, ctx) = (epoch.t, epoch.ctx);
         let state = match &body.part {
             Part::Moon(moon) => moon_state(parent.state, &moon.satellite, ctx.age_at_epoch(), t),
             Part::Ring(_) => parent.state,
@@ -3856,6 +3889,7 @@ impl PlanetarySystem {
                             derived,
                             bulk: &bulk,
                             orbit: &orbit,
+                            planet: parent.planet_field,
                         };
                         self.surface_or_envelope(body, of, spun, (&bulk, derived.atmosphere()))
                     },
@@ -4589,6 +4623,9 @@ struct SurfaceFrame<'a> {
     /// The effective temperature of the star its air's photochemistry reads, its primary's
     /// brightest host's; `None` for a brown dwarf or no star (`Epoch::photochemistry_temperature`).
     star_temperature: Option<Kelvin>,
+    /// The star its modifiers read, its primary's brightest host with its X-ray and ultraviolet
+    /// history; `None` before any forms (`modifiers::ModifierStar`).
+    modifier_star: Option<ModifierStar>,
     /// The system's \[Fe/H\].
     fe_h: Dex,
     /// The system's age at the time.
@@ -5051,6 +5088,12 @@ struct ParentNow {
     /// What its moons' bulk reads of their birthplace and their ice's history (P14.T56.f): `None`
     /// held ([`MoonBulkRules::Held`]) or for a parent not present.
     moon_ice: Option<ParentMoonIce>,
+    /// Its magnetosphere as its moons' modifiers read it, from its record
+    /// (`modifiers::planet_field`, P14.T54.b.c): set by
+    /// [`primary_record`](PlanetarySystem::primary_record) once it has built the record; `None`
+    /// where no record is built ([`parent_now`](PlanetarySystem::parent_now)), while the air's
+    /// sections are held, and where the record gives no field.
+    planet_field: Option<PlanetField>,
 }
 
 /// What a parent's moons' bulk reads of their birthplace and their ice's history (P14.T56.f;
@@ -5250,6 +5293,8 @@ enum SurfaceOf<'a> {
         derived: &'a DerivedMoon,
         bulk: &'a BulkProperties,
         orbit: &'a KeplerElements,
+        /// Its planet's magnetosphere, from the planet's record (`ParentNow::planet_field`).
+        planet: Option<PlanetField>,
     },
 }
 
@@ -5271,6 +5316,9 @@ struct SurfaceCase<'a> {
     /// The effective temperature of the star its air's photochemistry reads (P14.T24.c's
     /// `star_temperature`), its frame's.
     star_temperature: Option<Kelvin>,
+    /// What its modifiers read beyond its published surface (P14.T51.d, wired by P14.T54.b.c):
+    /// its frame's star, what it orbits and its mantle's sulphur.
+    modifiers: ModifierCase,
     /// The rules its cold traps and its air's sections follow.
     record: RecordRules,
 }
@@ -5421,6 +5469,13 @@ struct SurfaceCraters {
 /// fraction, liquids' cover and outgassing, and the photochemistry's star; the empty inventory for
 /// a surface with no air and for a magma ocean. Not modelled while the air's sections are held, and
 /// nothing of it is computed then.
+///
+/// **The modifiers** (P14.T51.d with T51.j, wired by P14.T54.b.c; `modifiers::record_modifiers`):
+/// from the frame's brightest star, the orbit about it (a moon's planet's), what the body orbits (a
+/// moon's planet's magnetosphere from that planet's record), the bulk section's gravity, the
+/// conditions, figures, condensates and crust it publishes, the mantle's sulphur and the air's
+/// partial pressures; not modelled without a crust or a star, and while the air's sections are
+/// held, which computes nothing of them ([`with_held_members`]).
 #[must_use]
 fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<Surface> {
     let Some(seasonal) = time.seasonal else {
@@ -5521,18 +5576,64 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         ice_threshold: figures.ice_threshold(),
     });
     let crust = record_crust(sky.crust_lid, &figures, &conditions);
-    let (structure, aerosols) = record_air_sections(case, air.state(), &conditions, &figures);
-    Section::Ok(
-        Surface::new(air.state(), material, conditions, figures, published)
-            .expect(
-                "conditions exist only off the gas-envelope state, and `with_climate` gives their \
-                 regime",
-            )
-            .with_basis(basis)
-            .with_crust(crust)
-            .with_vertical_structure(structure)
-            .with_aerosols(aerosols),
-    )
+    let surface = Surface::new(air.state(), material, conditions, figures, published)
+        .expect(
+            "conditions exist only off the gas-envelope state, and `with_climate` gives their \
+             regime",
+        )
+        .with_basis(basis)
+        .with_crust(crust);
+    Section::Ok(with_held_members(surface, (seasonal, time.age), case))
+}
+
+/// The published surface `surface` of the body `case` describes, about its hosts on `seasonal` at
+/// the system's age `age`, with the members P14.T54.b first puts on the record, each built from
+/// what the surface publishes and held off the record until the bump: its air's sections
+/// ([`record_air_sections`]) and its modifiers (`modifiers::record_modifiers`, P14.T54.b.c), from
+/// the frame's star, the orbit, what the body orbits, the bulk section's gravity, the surface's
+/// conditions, figures, condensates and crust, the mantle's sulphur and the air's partial
+/// pressures. None of them is computed while the air's sections are held.
+#[must_use]
+fn with_held_members(
+    surface: Surface,
+    (seasonal, age): (&KeplerElements, Years),
+    case: &SurfaceCase<'_>,
+) -> Surface {
+    let (structure, aerosols) = record_air_sections(
+        case,
+        surface.state(),
+        surface.conditions(),
+        surface.figures(),
+    );
+    let crust = match surface.crust() {
+        Modelled::Ok(crust) => Some(crust),
+        Modelled::NotModelled => None,
+    };
+    let modifiers = record_modifiers(
+        case.record.air,
+        &case.modifiers,
+        &ModifierSurface {
+            seasonal,
+            age,
+            gravity: case.bulk.surface_gravity(),
+            conditions: surface.conditions(),
+            figures: surface.figures(),
+            condensates: surface.condensates(),
+            crust,
+            gases: case.sky.atmosphere.partial_pressures(),
+        },
+    );
+    surface
+        .with_vertical_structure(structure)
+        .with_aerosols(aerosols)
+        .with_modifiers(modifiers)
+}
+
+/// The mass of sulphur in the mantle of a body whose element inventory is `elements` (P14.T50.a),
+/// which an Io's volcanic deposits read (P14.T51.d's `ModifierInputs::mantle_sulphur`).
+#[must_use]
+fn mantle_sulphur(elements: &ElementInventory) -> Kilograms {
+    elements.mass(Element::S, Reservoir::Mantle)
 }
 
 /// The record's air's sections of the body `case` describes, whose surface is in the state `state`
@@ -6212,6 +6313,7 @@ impl<'c> Epoch<'c> {
 }
 
 mod air;
+mod modifiers;
 pub(crate) mod moon_ice;
 #[cfg(test)]
 pub(crate) mod tests;

@@ -116,8 +116,8 @@ pub mod steps;
 pub use grid::{BuildCellGraphError, CellGraph};
 pub use inputs::{
     AreaShare, BuildCoarseInputsError, ClimateRegime, CoarseInputs, CoarseInputsBuilder,
-    ColdTrapInputs, Condensate, CondensatePhase, CrustInputs, Forcing, GasShare, LidCrust,
-    MAX_CONDENSATES, Persistence, RECORD_TIME, ReadCoarseInputsError, SeasonalOrbit,
+    ColdTrapInputs, Condensate, CondensatePhase, CrustInputs, Forcing, GasShare, GroundWeathering,
+    LidCrust, MAX_CONDENSATES, Persistence, RECORD_TIME, ReadCoarseInputsError, SeasonalOrbit,
     SeasonsFromRecord, Spin, SurfaceInputsError, TectonicRegime, ThermalRegime, WetEpoch,
 };
 pub use quantise::{QuantiseFieldError, quantise};

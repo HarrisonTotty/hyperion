@@ -212,7 +212,10 @@ condensates?: Array<SurfaceCondensateDto> | null,
  */
 crust?: CrustCompositionDto | null, 
 /**
- * The surface's modifiers (P14.T51.d); absent until that task.
+ * The surface's modifiers (P14.T51.d with T51.j), absent from a server whose generator does
+ * not model them, every one before P14.T54.b's bump at generator version 24, and for a
+ * surface whose record gives no crust, no host star or, for a moon, no planet's field, or
+ * whose inputs the generator refuses (an unlit body at 0 K).
  */
 modifiers?: SurfaceModifiersDto | null, 
 /**

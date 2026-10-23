@@ -12,11 +12,14 @@
 //! - For this crate's tests alone, `with_every_24_hold` runs a closure with every landed hold at
 //!   generator version 24 in force together, so that a test of a 24 figure reads 24 as it will
 //!   ship (decision-t24i-airless-state D3.3).
+//! - [`partial_pressures`] states an air by hand, for other crates' tests of what a derivation
+//!   reads of one.
 
 use std::error::Error;
 use std::fmt;
 
 use super::context::{BuildSystemContextError, SystemContext};
+use super::derive::atmosphere::{Gas, PartialPressures};
 use crate::Seed;
 use crate::coords::GalacticPosition;
 use crate::galaxy::imf::MassBand;
@@ -27,7 +30,16 @@ use crate::galaxy::{BuildGalaxyError, Galaxy};
 use crate::id::SystemId;
 use crate::orbit::Eccentricity;
 use crate::time::UniverseTime;
-use crate::units::{Dex, LightYears, Metres, SolarMasses, Years};
+use crate::units::{Dex, LightYears, Metres, Pascals, SolarMasses, Years};
+
+/// An air's partial pressures stated by hand, each gas's `pressure(gas)` in [`Gas::ALL`]'s order,
+/// unvalidated, as the crate's own tests state one: for other crates' tests of what a derivation
+/// reads of an air, as the server's conversion of P14.T51.j's oxidised surface does (a caller's
+/// values are its own to check, as `SurfaceModifiers::derive` checks its inputs').
+#[must_use]
+pub fn partial_pressures(pressure: impl Fn(Gas) -> Pascals) -> PartialPressures {
+    PartialPressures::from_fn(pressure)
+}
 
 /// A single star of initial mass `mass` (0.08–150 M☉), \[Fe/H\] `fe_h` and age at the epoch
 /// `age`, as the system `id`: the builder's defaults otherwise (the median star's draws, the

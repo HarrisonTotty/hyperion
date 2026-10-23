@@ -127,6 +127,18 @@ fn moles(oxides: &[(Oxide, f64)], oxide: Oxide) -> f64 {
     weight_pct(oxides, oxide) / oxide.molar_mass_g_per_mol()
 }
 
+/// The total iron of `oxides`' analysis as `FeO`, FeO(T), weight per cent: its `FeO` and each
+/// `Fe₂O₃` as two `FeO`, mole for mole of iron ([`FERROUS_PER_FERRIC`]), each with the registry's
+/// molar masses, as Giordano, Russell and Dingwell 2008's calculator takes it ([`giordano_2008`])
+/// and as the registry's `FeO_T` reads it (P14.T54.b.c; decision-p14-t51d-weathering §1.2).
+#[must_use]
+pub(crate) fn total_iron_as_feo_wt_pct(oxides: &[(Oxide, f64)]) -> f64 {
+    let wt = |oxide| weight_pct(oxides, oxide);
+    wt(Oxide::Ferrous)
+        + FERROUS_PER_FERRIC * Oxide::Ferrous.molar_mass_g_per_mol() * wt(Oxide::Ferric)
+            / Oxide::Ferric.molar_mass_g_per_mol()
+}
+
 /// The index and the absorption a melt holds as they stand, from a glass's file at room
 /// temperature: neither carried by Lorentz–Lorenz to the melt's density, since the glass's own
 /// density is not stated, nor to the melt's temperature (decision-r11-palette-liquids §1.8's
@@ -217,9 +229,7 @@ const GRD_C: [f64; 7] = [2.75, 15.72, 8.32, 10.2, -12.29, -99.54, 0.3];
 #[must_use]
 fn giordano_2008(oxides: &[(Oxide, f64)]) -> Vft {
     let wt = |oxide| weight_pct(oxides, oxide);
-    let total_iron = wt(Oxide::Ferrous)
-        + FERROUS_PER_FERRIC * Oxide::Ferrous.molar_mass_g_per_mol() * wt(Oxide::Ferric)
-            / Oxide::Ferric.molar_mass_g_per_mol();
+    let total_iron = total_iron_as_feo_wt_pct(oxides);
     let anhydrous = [
         (Oxide::Silica, wt(Oxide::Silica)),
         (Oxide::Titania, wt(Oxide::Titania)),

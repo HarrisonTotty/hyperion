@@ -23,9 +23,10 @@ use hyperion_protocol::{
     PlanetClassDto, PopulationDto, ProfileNodeDto, RadiationClassDto, RedoxClassDto, RequestError,
     RingDto, RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto, SceneSystemDto, SectionDto,
     SeenPositionDto, SizeDistributionDto, SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto,
-    SubsurfaceOceanDto, SurfaceCondensateDto, SurfaceMaterialDto, SurfaceStateDto, SystemBodiesDto,
-    SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest, TectonicRegimeDto,
-    ThermalRegimeDto, VerticalStructureDto, WetEpochDto, ZoneDto,
+    SubsurfaceOceanDto, SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto,
+    SurfaceStateDto, SystemBodiesDto, SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto,
+    SystemSummaryRequest, TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
+    ZoneDto,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::placement::Existence;
@@ -52,7 +53,7 @@ use hyperion_sim::planetary::hooks::figures::WetEpoch;
 use hyperion_sim::planetary::hooks::surface::regime::{Forcing, ThermalRegime};
 use hyperion_sim::planetary::hooks::{
     AerosolInventory, ClimateRegime, MagneticField, OceanFloor, RadiationClass, Subsurface,
-    SubsurfaceOcean, TectonicRegime, VerticalStructure,
+    SubsurfaceOcean, SurfaceModifiers, TectonicRegime, VerticalStructure,
 };
 use hyperion_sim::planetary::placement::classes::orbits::SystemPlane;
 use hyperion_sim::planetary::placement::{OrbitHost, OrbitZone, ZoneDiscInputs};
@@ -997,6 +998,40 @@ fn crust(crust: &CrustComposition) -> CrustCompositionDto {
     }
 }
 
+/// A surface's modifiers as the wire carries them (P14.T51.d with T51.j, wired by P14.T54.b.c):
+/// the maturity, the weathering rate k, the organic cover and the resurfacing rate, each the
+/// record's to the bit, and an Io's volcanic and an oxidised surface's weathering deposits in the
+/// record's order, each substance by its registry key with its share of the surface.
+///
+/// The rate's two terms (the wind's and the micrometeoroids') and the ground that can take a cover
+/// are not sent: the wire's type has no member for them (P14.T51.d's shape, final at 24's first
+/// send).
+#[must_use]
+fn surface_modifiers(modifiers: &SurfaceModifiers) -> SurfaceModifiersDto {
+    SurfaceModifiersDto {
+        maturity: modifiers.maturity(),
+        weathering_rate: modifiers.weathering_rate(),
+        organic_cover: modifiers.organic_cover(),
+        resurfacing_m_per_yr: modifiers.resurfacing_m_per_yr(),
+        volcanic_deposits: modifiers
+            .volcanic_deposits()
+            .iter()
+            .map(|deposit| SubstanceAreaDto {
+                substance: key(deposit.substance()),
+                area_fraction: deposit.area_fraction(),
+            })
+            .collect(),
+        weathering_deposits: modifiers
+            .weathering_deposits()
+            .iter()
+            .map(|deposit| SubstanceAreaDto {
+                substance: key(deposit.substance()),
+                area_fraction: deposit.area_fraction(),
+            })
+            .collect(),
+    }
+}
+
 /// A member of the surface section that a later task fills, as the wire carries it (P14.T35.e):
 /// absent while this generator version does not model it, and once it does, its value converted
 /// by `value`, which is `None` for a member computed as none, sent `null`.
@@ -1071,7 +1106,9 @@ fn surface(surface: &Surface) -> BodySurfaceDto {
         }),
         condensates: Modelled::Value(condensates(surface.condensates())),
         crust: later(surface.crust(), |composition| Some(crust(composition))),
-        modifiers: later(surface.modifiers(), |modifiers| match *modifiers {}),
+        modifiers: later(surface.modifiers(), |modifiers| {
+            Some(surface_modifiers(modifiers))
+        }),
         biosphere: later(surface.biosphere(), |biosphere| match *biosphere {}),
         // P14.T55.b's: the record holds no such member, so every server sends it absent until
         // then (P14.T35.f).
@@ -1828,7 +1865,10 @@ mod tests {
     /// this is the wire's half of; at the bump, P14.T54.b.l, both are present here, the structure
     /// `null` and the inventory the empty object on an airless surface;
     /// `a_vertical_structure_is_sent_as_its_alpha_skin_and_adiabat` and
-    /// `an_aerosol_inventory_is_sent_as_the_record_holds_it` test their conversions).
+    /// `an_aerosol_inventory_is_sent_as_the_record_holds_it` test their conversions). So are the
+    /// modifiers, held behind the same hold (P14.T54.b.c; at the bump present on every surface
+    /// whose record models them; `a_surface_s_modifiers_are_sent_as_the_record_holds_them` tests
+    /// their conversion).
     #[test]
     fn the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed() {
         let (mut moons, mut absent) = (0, Vec::new());
@@ -1837,6 +1877,12 @@ mod tests {
                 (sim.vertical_structure(), sim.aerosols()),
                 (RecordModelled::NotModelled, RecordModelled::NotModelled),
                 "{}: the air's sections are held",
+                wire.id
+            );
+            assert_eq!(
+                sim.modifiers(),
+                RecordModelled::NotModelled,
+                "{}: the modifiers are held with the air's sections",
                 wire.id
             );
             assert_eq!(
@@ -1881,6 +1927,153 @@ mod tests {
         if hyperion_sim::GENERATOR_VERSION < hyperion_sim::GeneratorVersion::new(24) {
             assert_eq!(absent, Vec::<String>::new(), "absent at 23");
         }
+    }
+
+    /// P14.T54.b.c: a surface's modifiers are sent as the record holds them, each scalar to the bit
+    /// and each deposit by its registry key with its share, in the record's order: an Io-like
+    /// moon's SO₂ frost and sulphur, with no weathering deposit, and a Mars-like world's `ferric`,
+    /// with no volcanic one, each derived through the sim's public API from inputs by hand (Io's
+    /// 2.5 W m⁻² at 110 K inside a Jupiter's magnetopause; Mars's 636 Pa of CO₂, N₂ and Ar over
+    /// `basalt_fe`, dry for 3.5 Gyr), since no record carries them while the sim holds them off it
+    /// (below generator version 24).
+    #[test]
+    fn a_surface_s_modifiers_are_sent_as_the_record_holds_them() {
+        let none = Condensates::default();
+        let areas = |dto: &[SubstanceAreaDto]| {
+            dto.iter()
+                .map(|area| (area.substance.clone(), area.area_fraction.to_bits()))
+                .collect::<Vec<_>>()
+        };
+        let held = |deposits: &mut dyn Iterator<Item = (SubstanceId, f64)>| {
+            deposits
+                .map(|(id, area)| (key(id), area.to_bits()))
+                .collect::<Vec<_>>()
+        };
+        let expected: [(&[&str], &[&str]); 2] = [(&["SO2", "S8"], &[]), (&[], &["ferric"])];
+        for ((name, inputs), (volcanic, weathering)) in
+            io_and_mars_inputs(&none).into_iter().zip(expected)
+        {
+            let modifiers = SurfaceModifiers::derive(&inputs).expect("the inputs are in range");
+            let dto = surface_modifiers(&modifiers);
+            for (sent, kept, member) in [
+                (dto.maturity, modifiers.maturity(), "maturity"),
+                (dto.weathering_rate, modifiers.weathering_rate(), "rate"),
+                (dto.organic_cover, modifiers.organic_cover(), "cover"),
+                (
+                    dto.resurfacing_m_per_yr,
+                    modifiers.resurfacing_m_per_yr(),
+                    "resurfacing",
+                ),
+            ] {
+                assert_eq!(sent.to_bits(), kept.to_bits(), "{name}: {member}");
+            }
+            let mut erupted = modifiers
+                .volcanic_deposits()
+                .iter()
+                .map(|d| (d.substance(), d.area_fraction()));
+            assert_eq!(areas(&dto.volcanic_deposits), held(&mut erupted), "{name}");
+            let mut oxidised = modifiers
+                .weathering_deposits()
+                .iter()
+                .map(|d| (d.substance(), d.area_fraction()));
+            assert_eq!(
+                areas(&dto.weathering_deposits),
+                held(&mut oxidised),
+                "{name}"
+            );
+            let keys = |dto: &[SubstanceAreaDto]| {
+                dto.iter()
+                    .map(|area| area.substance.clone())
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(keys(&dto.volcanic_deposits), volcanic, "{name}");
+            assert_eq!(keys(&dto.weathering_deposits), weathering, "{name}");
+            eprintln!(
+                "{name}: m {:.4}, k {:.4e}, cover {:.3e}, resurfacing {:.3e} m/yr, volcanic {:?}, \
+                 weathering {:?}",
+                dto.maturity,
+                dto.weathering_rate,
+                dto.organic_cover,
+                dto.resurfacing_m_per_yr,
+                dto.volcanic_deposits,
+                dto.weathering_deposits
+            );
+        }
+    }
+
+    /// The Io-like and Mars-like modifiers' inputs of
+    /// `a_surface_s_modifiers_are_sent_as_the_record_holds_them`, by hand, with no condensates
+    /// (`none`): the figures quoted there, the Sun as the host.
+    fn io_and_mars_inputs(
+        none: &Condensates,
+    ) -> [(
+        &'static str,
+        hyperion_sim::planetary::hooks::ModifierInputs<'_>,
+    ); 2] {
+        use hyperion_sim::planetary::derive::atmosphere::Gas;
+        use hyperion_sim::planetary::hooks::modifiers::{
+            HeliocentricOrbit, ModifierHost, ModifierInputs, PlanetMagnetosphere, Primary,
+            WaterHistory,
+        };
+        use hyperion_sim::planetary::testing::partial_pressures;
+        use hyperion_sim::units::consts::METRES_PER_AU;
+        use hyperion_sim::units::{
+            Gigayears, MetresPerSecondSquared, Pascals, WattsPerSquareMetre, Years,
+        };
+
+        let row = |key: &str| substance::by_key(key).expect("a registry row");
+        let au = |a: f64| Metres::new(a * METRES_PER_AU);
+        let io = ModifierInputs {
+            host: ModifierHost::sun(),
+            orbit: HeliocentricOrbit {
+                semi_major_axis: au(5.2038),
+                eccentricity: 0.0489,
+            },
+            primary: Primary::Planet(PlanetMagnetosphere {
+                radius: Metres::new(6.9911e7),
+                field: MagneticField::Strong,
+                semi_major_axis: Metres::new(4.217e8),
+            }),
+            gravity: MetresPerSecondSquared::new(1.796),
+            surface_pressure: Pascals::ZERO,
+            field: MagneticField::None,
+            surface_age: Years::new(4.4e3),
+            resurfacing_time: Years::new(4.4e3),
+            heat_flow: WattsPerSquareMetre::new(2.5),
+            surface_temperature: Kelvin::new(110.0),
+            mantle_sulphur: Kilograms::new(1.0e21),
+            condensates: none,
+            lid: row("basalt"),
+            gases: partial_pressures(|_| Pascals::ZERO),
+            water: WaterHistory::NeverWet,
+        };
+        let air = [
+            (Gas::CarbonDioxide, 614.0),
+            (Gas::Nitrogen, 10.6),
+            (Gas::Argon, 11.4),
+        ];
+        let mars = ModifierInputs {
+            orbit: HeliocentricOrbit {
+                semi_major_axis: au(1.523_679),
+                eccentricity: 0.0934,
+            },
+            primary: Primary::Star,
+            gravity: MetresPerSecondSquared::new(3.73),
+            surface_pressure: Pascals::new(636.0),
+            surface_age: Years::new(3.9e9),
+            resurfacing_time: Years::new(4.2e9),
+            heat_flow: WattsPerSquareMetre::new(0.022),
+            surface_temperature: Kelvin::new(210.0),
+            lid: row("basalt_fe"),
+            gases: partial_pressures(|gas| {
+                air.iter()
+                    .find(|&&(listed, _)| listed == gas)
+                    .map_or(Pascals::ZERO, |&(_, pa)| Pascals::new(pa))
+            }),
+            water: WaterHistory::DrySince(Gigayears::new(3.5)),
+            ..io
+        };
+        [("Io-like", io), ("Mars-like", mars)]
     }
 
     /// P14.T54.b: a vertical structure is sent as its α, its skin's temperature and its adiabat's

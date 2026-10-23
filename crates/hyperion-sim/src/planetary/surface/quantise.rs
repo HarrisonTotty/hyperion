@@ -201,10 +201,13 @@ pub fn quantise(
         palette: inputs.palette().clone(),
         crust_palette: inputs.crust_palette(),
         main_liquid: inputs.main_liquid(),
-        // Reserved for P14.T51.d's figures, which P14.T54.b fills.
-        maturity: None,
-        organic_cover: None,
-        weathering_rate: None,
+        // P14.T51.d's figures, from the record's modifiers (P14.T54.b.c), each a −0 made +0 as the
+        // header asks; all three absent while the record holds the modifiers off it.
+        maturity: inputs.weathering().map(|w| unsigned_zero(w.maturity)),
+        organic_cover: inputs.organic_cover().map(unsigned_zero),
+        weathering_rate: inputs
+            .weathering()
+            .map(|w| unsigned_zero(w.weathering_rate)),
     })
     .map_err(QuantiseFieldError::Header)?;
     let level = header.level();
@@ -822,6 +825,58 @@ mod tests {
             mars.surface_pressure().value(),
         );
         assert!(header_pressure(&mars).value() > 0.0);
+    }
+
+    /// P14.T54.b.c: the header's maturity, weathering rate and organic cover are the inputs', to the
+    /// bit, and all three absent where the inputs carry none, as from every record below
+    /// generator version 24; the inputs refuse a −0, which the header would.
+    #[test]
+    fn the_header_carries_the_inputs_weathering_and_cover() {
+        use super::super::{BuildCoarseInputsError, GroundWeathering};
+        let (inputs, grid, climate) = moon_working();
+        assert_eq!((inputs.weathering(), inputs.organic_cover()), (None, None));
+        let pass = Pass::new(SurfaceSeed::new(1), &inputs, &grid, &climate);
+        let held = quantise(&inputs, Working::initial(&pass)).unwrap();
+        let parts = |header: &FieldHeader| {
+            (
+                header.maturity(),
+                header.weathering_rate(),
+                header.organic_cover(),
+            )
+        };
+        assert_eq!(parts(held.header()), (None, None, None));
+        let weathering = GroundWeathering {
+            maturity: 0.999_999_9,
+            weathering_rate: 1.0,
+        };
+        let weathered = reference::builder_of(&inputs)
+            .weathering(weathering)
+            .organic_cover(0.0)
+            .build()
+            .unwrap();
+        let pass = Pass::new(SurfaceSeed::new(1), &weathered, &grid, &climate);
+        let field = quantise(&weathered, Working::initial(&pass)).unwrap();
+        let (maturity, rate, cover) = parts(field.header());
+        assert_same_bits(maturity.unwrap(), weathering.maturity);
+        assert_same_bits(rate.unwrap(), weathering.weathering_rate);
+        assert_same_bits(cover.unwrap(), 0.0);
+        let refused =
+            |builder: crate::planetary::surface::CoarseInputsBuilder| match builder.build() {
+                Err(BuildCoarseInputsError::OutOfRange { part, .. }) => part,
+                other => panic!("{other:?}"),
+            };
+        assert_eq!(
+            refused(reference::builder_of(&inputs).organic_cover(-0.0)),
+            "organic cover"
+        );
+        let negative = GroundWeathering {
+            weathering_rate: -0.0,
+            ..weathering
+        };
+        assert_eq!(
+            refused(reference::builder_of(&inputs).weathering(negative)),
+            "weathering rate"
+        );
     }
 
     #[test]

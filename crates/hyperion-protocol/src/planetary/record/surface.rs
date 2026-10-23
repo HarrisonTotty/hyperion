@@ -804,9 +804,10 @@ pub struct CrustCompositionDto {
     pub melt_area_fraction: f64,
 }
 
-/// A surface's modifiers (plan 14, P14.T51.d; decision-p14-t51d-weathering §2). Absent from the
-/// wire until P14.T54.b fills it. P14.T51.d gave it this shape, which may change until a build
-/// sends a value.
+/// A surface's modifiers (plan 14, P14.T51.d with T51.j; decision-p14-t51d-weathering §2). Absent
+/// from the wire until P14.T54.b's bump at generator version 24 puts them on the record
+/// (P14.T54.b.c). P14.T51.d and T51.j gave it this shape, which may change until a build sends a
+/// value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SurfaceModifiersDto {
@@ -1003,7 +1004,10 @@ pub struct BodySurfaceDto {
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<CrustCompositionDto>>", optional)]
     pub crust: Modelled<CrustCompositionDto>,
-    /// The surface's modifiers (P14.T51.d); absent until that task.
+    /// The surface's modifiers (P14.T51.d with T51.j), absent from a server whose generator does
+    /// not model them, every one before P14.T54.b's bump at generator version 24, and for a
+    /// surface whose record gives no crust, no host star or, for a moon, no planet's field, or
+    /// whose inputs the generator refuses (an unlit body at 0 K).
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<SurfaceModifiersDto>>", optional)]
     pub modifiers: Modelled<SurfaceModifiersDto>,

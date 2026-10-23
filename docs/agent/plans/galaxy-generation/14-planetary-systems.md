@@ -29114,3 +29114,95 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
       absent members; the server's conversion of an Earth's, a Venus's and a Titan's inventory by
       hand to the bit, the reasons' mapping, a rule's mode without optics, the empty inventory, and
       the aerosols absent on every golden surface; the client's decoding and its refusals.
+  - _P14.T54.b.c, the modifiers, the header's parts and the palette's `FeO_T`, `ferric` and
+    `tholin`._ `GENERATOR_VERSION` stays 23 and `PROTOCOL_VERSION` 3; no golden moves
+    (`planetary_golden`, `observe_in_system_golden`, `liquids_golden`, `surface_inputs`, R09.T16's
+    coarse goldens but the two ignored slow reference Earths, and the server's `system_bodies` and
+    `scene` pass unchanged).
+    - _The hold:_ the modifiers ride `AIR_SECTIONS_VERSION` (`AirRules`), the new members' hold
+      (decision-p14-t54b-open §1.2 item 6), with no hold of their own, since c moves no published
+      value. The assembly is the new `planetary/system/modifiers.rs` (`record_modifiers`,
+      `planet_field`), the record path's one file that names `hooks::modifiers`. Under `Held` it
+      computes nothing and gives `NotModelled`, and no planet's field is read.
+    - _The member_ is `Modelled<SurfaceModifiers>`, `record::SurfaceModifiers` now the re-export
+      of `hooks::SurfaceModifiers`. `published_surface` builds the surface, then
+      `with_held_members` adds its structure, inventory and modifiers, each from what the surface
+      publishes (which keeps `published_surface` under Clippy's line limit).
+    - _The inputs:_ the host is the primary's zone's brightest star at the time (`Epoch::brightest`,
+      (b)'s fold), its radius and `XuvHistory::luminosity` at the system's age, the derivation's
+      own (a pair's zone reads its brightest star alone, labelled); G M, a and e are the seasonal
+      orbit's, a moon's planet's. A moon's primary is its planet's bulk radius with its surface
+      figures' field, or `Strong` for an envelope class (`magnetic_field`'s first clause), which
+      `primary_record` reads from the record it built into `ParentNow::planet_field` (`None` from
+      `parent_now`, which builds none, and under `Held`). The rest: the bulk section's g, the
+      conditions' p_s and T_s, the figures' field, surface age and heat flow, the resurfacing time
+      (`resurfacing_time` of the impactors' crust at the figures' heat flow, the surface age's
+      own), the element inventory's mantle sulphur, the published condensates, the lid
+      (`CrustComposition::lid_lithology`, new, which the palette's lid now reads too), the
+      atmosphere's partial pressures, and the water (wet now by the conditions' flag, else dry
+      since `WetEpoch::end`, else never). No crust, no star, or a moon whose planet's record gives
+      no field: not modelled. A refusal is not modelled too, with no reason carried.
+    - _R09's header:_ `CoarseInputs` gains `GroundWeathering { maturity, weathering_rate }` (the
+      header's pairing, plain data) and `organic_cover`, with getters and builder setters (a −0
+      refused); `from_record` fills all three from the record's modifiers where modelled, the
+      cover +0 where no ground takes one, and none of them where not; `quantise` passes them (−0
+      made +0); `builder_of` carries them. `for_body`'s and `from_record`'s signatures are
+      unchanged.
+    - _`FeO_T`:_ `Substance::feo_mass_fraction` (crate-private, `substance/optics.rs`): a solid's
+      alone (`FeH`'s iron as FeO would outweigh the hydride), n(Fe) M(FeO) ÷ M for a formula
+      (troilite 0.8173), +0 for an atom, an organic and a metal lithology (`iron_nickel`), a melt
+      row's FeO(T) ÷ 100 (melt.rs's `total_iron_as_feo_wt_pct`, split out of Giordano et al.'s
+      model in its own expression, so `liquids_golden` keeps its bits): `basalt` and `lava_glass`
+      0.1097, `basalt_fe`, `mars_dust` and `ferric` 0.202, `komatiite` 0.129, `ultramafic`
+      0.0805, `feldspathic` 0.051, `basalt_reduced` 0.0337, `granite` 0.0185, `anorthosite`
+      0.0127; `None` for the chondrites, `phyllosilicate`, `cometary`, `ca_al_residue` and the
+      solutions. `palette_feo_mass_fraction` is it but `None` for the closed list
+      `OBSERVED_WEATHERED_ALBEDO`, `mars_dust` alone (Wolff et al. 2009's index retrieved from
+      CRISM and MER; every other optics row is a laboratory or pristine-mode input).
+      `resolve_palette_entry` keeps `None`, so R09's reference worlds keep theirs. The generated
+      Moon-like bodies' highlands and maria carry 0.051 and 0.202, against the plan's 0.05 and 0.20.
+    - _The palette_, where the record's modifiers are modelled: every solid entry takes
+      `palette_feo_mass_fraction`, a liquid none; each weathering deposit a `Deposit` entry
+      (`ferric`) and, where the organic cover is above 0, `tholin` a `Cover` entry (the organic
+      family's, R10.T1.c's blend's), each at the mean surface temperature held at its first melt.
+      An Io's SO₂ and S₈ take no entry: their area is the area mix's (P14.T54.b.e), recorded.
+    - _The wire:_ the server's `surface_modifiers` sends `SurfaceModifiersDto`'s four scalars and
+      both deposit lists to the bit, by key in the record's order; the rate's two terms and the
+      ground that takes a cover stay off it (P14.T51.d's shape). The DTOs are unchanged but their
+      docs (`BodySurfaceDto::modifiers`, the header's three parts); bindings regenerated.
+      `planetary::testing::partial_pressures` (behind `testing`) lets the server state a Mars air.
+    - _The scan_ (`modifiers_nothing_on_the_record_reads_the_modifiers_yet`) keeps its patterns and
+      gains `HELD` = `system/modifiers.rs` and `system/modifiers/tests.rs`, each checked to name
+      `AirRules` in its code. Its patterns do not catch the readers of the record's member
+      (`record.rs`'s re-export, `surface/inputs.rs`, `surface/palette.rs`), which read getters of
+      what the record holds, `NotModelled` under the hold, and compute nothing of the modifiers;
+      a call of the derivation, its inputs or the maturity law in any of them still fails.
+    - _Figures under the batch_ (the first 40 whole systems at the epoch): 600 surfaces carry their
+      modifiers (91 moons), none refused and none without inputs, so no unlit body there; 527
+      airless, 73 aired (71 above 224 kg m⁻², their k, m and cover exactly +0); 6 Io-like moons
+      (SO₂ 0.27, S₈ 0.716), 9 with `ferric` (0.31 of their dry, ice-free land), 40 with a cover.
+      `for_body` reads 531 (69 not modelled, as held), their palettes 7 `ferric` and 23 `tholin`,
+      none over 15 entries. The sample holds no Moon- or Mercury-like body by the test's
+      criteria (a Sun-like host of 3.5–6 Gyr); the table's, through `record_modifiers`: the Moon
+      k 0.9994, m 0.999999; Mercury k 8.887 (wind 3.515, dust 14.26); Mars, under its 0.11 bar, k
+      and m +0 with `ferric` over 0.31; Titan k, m and cover +0.
+    - _The cover rule_ (decision-r10-t1c-maturity §3.2): on every generated body read, each ice
+      `organic_ground` counts (23) is an `Ice` entry `takes_organic_cover` marks; the palette marks
+      beyond them 114 seasonal ices and 2 with no area (deferred finding 5's gap, which the palette
+      cannot tell); registry-wide the two carbon tests agree on the 13 condensed rows with a phase
+      diagram (`bears_organic_cover`, split out of `organic_ground` to the bit).
+    - _Tests:_ the hold's tripwire takes the modifiers `NotModelled` on every golden surface, and
+      the held record equals the batch's with the three members stripped; the held arm computes
+      nothing; every batch surface's modifiers are `derive` over its inputs rebuilt by hand from
+      its published record and its own derivation, to the bit; the table's and the sample's
+      shapes; the inputs carry the record's parts, `FeO_T`, deposits and cover; held inputs none;
+      the header's parts the inputs' (`quantise`); the registry's `FeO_T`; the cover rule; the
+      same seed twice (58 bodies); the scan's hold check; the server's mapping on an Io-like and a
+      Mars-like derived by hand, and the modifiers absent on every golden surface.
+    - _Recorded:_ `ferric`'s oxides are `basalt_fe`'s (0.202), which leave its few weight per
+      cent of hematite, magnetite and ferrihydrite out (about 0.26 with them), moot while its
+      airs keep its maturity near 0; the host's G M is the seasonal orbit's, the planet's mass
+      included.
+    - _Left for P14.T54.b.l:_ `record_modifiers`' and `planet_field`'s rules arguments with the
+      hold; the scan with its `HELD` list; the server's absent-members test takes the modifiers as
+      present where the record models them.

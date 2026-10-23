@@ -18,14 +18,21 @@
 //!   (P14.T51.a) and each ice the figures put on the ground.
 //! - **The liquids**: a [`PaletteRole::Liquid`] entry, with its record, for each liquid condensate
 //!   and each liquid the figures put on the ground.
+//! - **The modifiers'** (P14.T51.d with T51.j, wired by P14.T54.b.c), where the record's surface
+//!   models them: a [`PaletteRole::Deposit`] entry for each weathering deposit, an oxidised
+//!   surface's `ferric`, the source of its sand and dust (decision-p14-t51-batch §5), and a
+//!   [`PaletteRole::Cover`] entry `tholin` where the organic cover is above 0, the organic family's
+//!   cover R10.T1.c's blend reads (decision-r10-t1c-maturity §3.2). An Io's volcanic deposits, SO₂
+//!   frost and sulphur, take no entry here: their area on the ground is the area mix's to place
+//!   (P14.T54.b.e), recorded.
 //!
 //! One palette holds one entry for each (role, key), so seas of one key at two compositions
 //! would share one entry: a recorded limitation (decision-r11-palette-liquids §1.7), unreached
-//! while P14.T51.a's entries are one a substance and phase. The record names no deposit and no
-//! cover until P14.T51.d (P14.T54.b), so a generated palette holds none; nor a cold-trapped
-//! [`PaletteRole::Ice`] entry on an airless body, which no condensate on the record names until
-//! P14.T51.f, wired by P14.T54.b (the census, P14.T33.c, lists cold-trapped `H2O` and `CO2` as
-//! unreached until then; science-composition-crusts.md §6).
+//! while P14.T51.a's entries are one a substance and phase. Below generator version 24 the record
+//! holds its modifiers off it (`AIR_SECTIONS_VERSION`), so a generated palette holds no deposit and
+//! no cover; nor a cold-trapped [`PaletteRole::Ice`] entry on an airless body, which no condensate
+//! on the record names until P14.T51.f, wired by P14.T54.b (the census, P14.T33.c, lists
+//! cold-trapped `H2O` and `CO2` as unreached until then; science-composition-crusts.md §6).
 //!
 //! # A solid's entry
 //!
@@ -33,9 +40,18 @@
 //! reference form, never scaled here (R10.T10.a's `field_albedo_scale` rescales the rendered mean),
 //! its family's photometric law's code as its phase row, 1 or 2 (no palette source writes row 3,
 //! Lambert's, which the form chooses: decision-r11-palette-liquids §2 item 6), its grain density
-//! where it lies, its transition and its mechanics family; its `FeO_T` not modelled until P14.T54.b
-//! (decision-p14-t51d-weathering §1.6). A row whose optics are a stand-in resolves the same way;
-//! the registry labels it (`CondensedOptics::is_stand_in`), and the bless note lists it.
+//! where it lies, its transition and its mechanics family. A row whose optics are a stand-in
+//! resolves the same way; the registry labels it (`CondensedOptics::is_stand_in`), and the bless
+//! note lists it.
+//!
+//! Its `FeO_T` (decision-p14-t51d-weathering §1.2 and §1.6) is the registry's
+//! (`palette_feo_mass_fraction`), where the record's modifiers are modelled, which R10.T1.d's
+//! space-weathering law reads beside the header's maturity: the row's iron as `FeO` of its
+//! formula or its melt's oxides, +0 for an ice, an iron-free solid and a metal, and not modelled
+//! where the registry carries no composition (the chondrites, `phyllosilicate`, `cometary`,
+//! `ca_al_residue`) or the row's albedo is an observed, weathered one (`mars_dust`). Where they are
+//! not modelled, below generator version 24 among them, no entry carries one, so that the law
+//! weathers nothing and every palette keeps its bytes.
 //!
 //! - **An ice** lies at the lower of its coldest zone's annual-mean temperature (the climate's
 //!   cold profile's coldest point, a locked world's night) and its frost point at its partial
@@ -43,6 +59,7 @@
 //!   item 3).
 //! - **A crust** lies at the record's mean surface temperature, held at most its first melt: a
 //!   rock's grain density is one value at every temperature, and an ice shell's is ice Ih's there.
+//!   So do a deposit and a cover.
 //!
 //! The record's mean surface temperature is finite and positive wherever `for_body` resolves a
 //! palette: it refuses an unlit body, whose record states 0 K, first. [`resolve`] itself reads
@@ -113,9 +130,10 @@ use super::inputs::LidCrust;
 use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
 use crate::planetary::hooks::crust::CrustComposition;
 use crate::planetary::hooks::surface::{ColdProfile, SurfaceConditions};
-use crate::planetary::record::Surface;
+use crate::planetary::record::{Modelled, Surface, SurfaceModifiers};
+use crate::substance::optics::palette_feo_mass_fraction;
 use crate::substance::{
-    Composition, ResolveLiquidError, ResolvePaletteEntryError, SubstanceId,
+    self, Composition, ResolveLiquidError, ResolvePaletteEntryError, SubstanceId,
     liquid_properties_at_pressure, resolve_palette_entry,
 };
 use crate::units::{Kelvin, Pascals};
@@ -194,7 +212,12 @@ impl Error for ResolveBodyPaletteError {
 /// # Errors
 ///
 /// [`ResolveBodyPaletteError`] for the first entry, in (role, key) order of the crust's, then the
-/// ices', then the liquids', that the registry does not resolve, and for entries no palette holds.
+/// ices', then the liquids', then the modifiers' deposits and cover, that the registry does not
+/// resolve, and for entries no palette holds.
+///
+/// # Panics
+///
+/// Never: the registry holds `tholin`.
 pub(crate) fn resolve(
     surface: &Surface,
     crust: &CrustComposition,
@@ -207,20 +230,18 @@ pub(crate) fn resolve(
             .map(|&(id, _)| id)
     }
     let conditions = surface.conditions();
+    let modifiers = surface.modifiers();
     let mut entries: BTreeMap<(PaletteRole, SubstanceKey), PaletteEntry> = BTreeMap::new();
-    let lid = match crust.lid() {
-        LidCrust::Primary => crust.primary(),
-        LidCrust::Secondary => crust.secondary(),
-        LidCrust::Bulk => crust.bulk(),
-    };
+    let lid = crust.lid_lithology();
     let melt_area = crust.melt_area_fraction();
     for (role, id) in crust_roles(crust) {
         let mut entry = solid(
             id,
             role,
             held_at_first_melt(id, mean_temperature(conditions)),
+            modifiers,
         )?;
-        let melting = (lid == Some(id) && melt_area > 0.0)
+        let melting = (lid == id && melt_area > 0.0)
             || entry.transition.value() < conditions.climate_range().1.value();
         let ice = matches!(
             entry.mechanics,
@@ -249,7 +270,7 @@ pub(crate) fn resolve(
         let lies_at = held_at_first_melt(id, ice_temperature(id, coldest, conditions));
         entries.insert(
             (PaletteRole::Ice, key),
-            solid(id, PaletteRole::Ice, lies_at)?,
+            solid(id, PaletteRole::Ice, lies_at, modifiers)?,
         );
     }
     let liquids = in_phase(CondensatePhase::Liquid).chain(on_the_ground(figures.surface_liquids()));
@@ -260,7 +281,39 @@ pub(crate) fn resolve(
         }
         entries.insert((PaletteRole::Liquid, key), liquid(id, conditions)?);
     }
+    if let Modelled::Ok(weathered) = modifiers {
+        for (role, id) in modifier_entries(weathered) {
+            let key = id.substance().key();
+            if entries.contains_key(&(role, key)) {
+                continue;
+            }
+            let lies_at = held_at_first_melt(id, mean_temperature(conditions));
+            entries.insert((role, key), solid(id, role, lies_at, modifiers)?);
+        }
+    }
     MaterialPalette::new(entries.into_values().collect()).map_err(ResolveBodyPaletteError::Palette)
+}
+
+/// The entries the modifiers `modifiers` add to a palette, with their roles (the [module](self)'s
+/// "The entries"): a [`PaletteRole::Deposit`] entry for each weathering deposit, an oxidised
+/// surface's `ferric`, in their order, and the `tholin` [`PaletteRole::Cover`] where the organic
+/// cover is above 0.
+///
+/// # Panics
+///
+/// Never: the registry holds `tholin`.
+#[must_use]
+fn modifier_entries(modifiers: &SurfaceModifiers) -> Vec<(PaletteRole, SubstanceId)> {
+    let mut entries: Vec<(PaletteRole, SubstanceId)> = modifiers
+        .weathering_deposits()
+        .iter()
+        .map(|deposit| (PaletteRole::Deposit, deposit.substance()))
+        .collect();
+    if modifiers.organic_cover() > 0.0 {
+        let tholin = substance::by_key("tholin").expect("tholin is a registry row");
+        entries.push((PaletteRole::Cover, tholin));
+    }
+    entries
 }
 
 /// The crust's lithologies with the roles their entries take (the [module](self)'s "The
@@ -319,17 +372,28 @@ fn held_at_first_melt(id: SubstanceId, temperature: Kelvin) -> Kelvin {
     }
 }
 
-/// The entry of the solid `id` in `role` where it lies at `temperature` ([`resolve_palette_entry`]).
+/// The entry of the solid `id` in `role` where it lies at `temperature` ([`resolve_palette_entry`]),
+/// on a body whose record's modifiers are `modifiers`: with the registry's `FeO_T`
+/// ([`palette_feo_mass_fraction`]) where they are modelled, and with none where they are not (the
+/// [module](self)'s "A solid's entry").
 fn solid(
     id: SubstanceId,
     role: PaletteRole,
     temperature: Kelvin,
+    modifiers: Modelled<&SurfaceModifiers>,
 ) -> Result<PaletteEntry, ResolveBodyPaletteError> {
-    resolve_palette_entry(id, role, temperature).map_err(|cause| ResolveBodyPaletteError::Solid {
-        substance: id.substance().key(),
-        role,
-        cause,
-    })
+    let mut entry = resolve_palette_entry(id, role, temperature).map_err(|cause| {
+        ResolveBodyPaletteError::Solid {
+            substance: id.substance().key(),
+            role,
+            cause,
+        }
+    })?;
+    entry.feo_mass_fraction = match modifiers {
+        Modelled::Ok(_) => palette_feo_mass_fraction(id),
+        Modelled::NotModelled => None,
+    };
+    Ok(entry)
 }
 
 /// The annual-mean temperature of the coldest zone of the climate `conditions` describes, K: the
