@@ -14,9 +14,9 @@
   plan 06, through R06, for each host's radius and absolute V. Phase
   C also depends on **the single-player sessions, ship state and closed-loop commands, for which no
   plan exists yet** (Design note 21). Phase C does not start until that plan is written and built.
-  Re-validated at `ce7aeb3` (2026-10-02): still no sessions plan (only the brainstorm
-  `single-player-experience.md`), so **Phase C (T22–T28) is out of scope for RM3**; RM3 is Phases A
-  and B.
+  Re-validated at `ce7aeb3`, now `2b75d16c` (2026-10-02): still no sessions plan (only
+  the brainstorm `single-player-experience.md`), so **Phase C (T22–T28) is out of scope
+  for RM3**; RM3 is Phases A and B.
 - **Brainstorm sections covered** (by heading, in
   [the brainstorm](../../brainstorming/rendering-and-planets.md)): step 5 of "Suggested order of
   attack"; the three regimes of "The scales the view spans"; the shading sentences of "Luminance in
@@ -601,9 +601,10 @@ where a name has changed by the time this plan runs, only the call sites here ch
   Design note 12 reads; and blend modes that all keep the destination alpha, `"additive"` and
   `"premultiplied"` (R01 Design note 21, R01.T8.i), so that every blended pass of R06, R08 and R11
   leaves `METER_CLASS` intact (Design note 10). _As built (`view/engine/types.ts`, re-checked at
-  `ce7aeb3`):_ `createView(canvas, name)` takes a name; `createMaterialAsync(spec, targets,
-meshes?)`; `createComputeAsync(pair)`; `dispatch(kernel, bindings, workgroups, pass?)`;
-  `readBuffer(buffer, access?)` makes a new staging buffer per call (no ring, no partial range);
+  `ce7aeb3`, now `2b75d16c`):_ `createView(canvas, name)` takes a name;
+  `createMaterialAsync(spec, targets, meshes?)`; `createComputeAsync(pair)`;
+  `dispatch(kernel, bindings, workgroups, pass?)`; `readBuffer(buffer, access?)`
+  makes a new staging buffer per call (no ring, no partial range);
   `createRenderTarget({ name, size, format, mips, depth, category })` with `RenderTarget.colour`
   sampled by later passes (sampling a target while rendering into it throws `ColourSelfSample`);
   post-processes are full-screen draws, `PostProcessItem { postProcess, uniforms, textures? }`,
@@ -628,14 +629,15 @@ meshes?)`; `createComputeAsync(pair)`; `dispatch(kernel, bindings, workgroups, p
   `starSprite.wgsl`, `ViewDisplay`, `ViewCanvas`, `ViewMarkList`, `ViewLabelBlock`, the
   `ExposureControl` panel, `CameraControls`, and the nine guide drafts (R02.T2), items 2, 3, 4, 6
   and 9 above all; `CameraPreset`, a union left open to this plan's Phase C member `slaved`
-  (R07.T25). _As built (re-checked at `ce7aeb3`):_ `Viewport` is `{ widthPx, heightPx }` and the
-  field of view `ProjectionCamera.fovXRad` (`CameraState.fovDeg` in degrees); `graticule` is in
-  `view/wireframe/bodies.ts`; `ExposureControl` is `manual { triple }` | `auto { ev100 }` |
-  `inhibited { ev100, reason: "operator" | "no_image_to_meter" }`, driven by `setManual`, `setAuto`
-  (refused with `no_image_to_meter` until a photorealistic view meters), `inhibit`, `enable` and
-  `onMetering(control, ev100 | null)`, which this plan's meter feeds (_R07.T16.b: `inhibited` also
-  takes `nothing_weighed` with its meter, `setAuto` refuses with `not_metered`, and `onMetering`
-  takes `number | SystemInhibitCause`; see "Deviations in T16.b, as built"_); the panel is
+  (R07.T25). _As built (re-checked at `ce7aeb3`, now `2b75d16c`):_ `Viewport` is
+  `{ widthPx, heightPx }` and the field of view `ProjectionCamera.fovXRad` (`CameraState.fovDeg` in
+  degrees); `graticule` is in `view/wireframe/bodies.ts`; `ExposureControl` is `manual { triple }` |
+  `auto { ev100 }` | `inhibited { ev100, reason: "operator" | "no_image_to_meter" }`,
+  driven by `setManual`, `setAuto` (refused with `no_image_to_meter` until a photorealistic
+  view meters), `inhibit`, `enable` and `onMetering(control, ev100 | null)`, which
+  this plan's meter feeds (_R07.T16.b: `inhibited` also takes `nothing_weighed`
+  with its meter, `setAuto` refuses with `not_metered`, and `onMetering` takes
+  `number | SystemInhibitCause`; see "Deviations in T16.b, as built"_); the panel is
   `ExposurePanel`;
   `buildWireframeDrawList(scene, camera: DrawCamera, viewport, tokens, options: DrawOptions)` with
   `CASING_PX` = 1, lines `premultiplied`, screen symbology at depth 1; `agx`, `agxSigmoid` and
@@ -650,12 +652,12 @@ meshes?)`; `createComputeAsync(pair)`; `dispatch(kernel, bindings, workgroups, p
   `emitted` and `hillRadiusM`), bodies as plan 14's `BodySummaryDto` inside R03's
   `SceneBodyDto` and `SceneSystemDto`, each with its granted `level`, `SceneClockDto`,
   `KinematicsDto`, `CameraReporter`, the two-clients-agree test, and the optional `main_screen`
-  field its Design note 4 reserves. _As built (re-checked at `ce7aeb3`):_ `sceneAt(model, observer,
-time, previous)` with `previous` required; a body's entry is `SceneBodyFrame`, and a `contact`
-  entry has no `geometricM` or `hillRadiusM`; levels come per body through `SceneSystemDto.grants`
-  (`BodyGrantDto { body, level, seen }`), not on each body; `main_screen` is room left by R03's
-  Design note 4, not a field (Phase C adds it); the two-clients test is
-  `crates/hyperion-server/tests/scene_agree.rs`. _R07.T10.a adds `emittedM` and
+  field its Design note 4 reserves. _As built (re-checked at `ce7aeb3`, now `2b75d16c`):_
+  `sceneAt(model, observer, time, previous)` with `previous` required; a body's entry is
+  `SceneBodyFrame`, and a `contact` entry has no `geometricM` or `hillRadiusM`; levels come
+  per body through `SceneSystemDto.grants` (`BodyGrantDto { body, level, seen }`), not on
+  each body; `main_screen` is room left by R03's Design note 4, not a field (Phase C adds it); the
+  two-clients test is `crates/hyperion-server/tests/scene_agree.rs`. _R07.T10.a adds `emittedM` and
   `emittedVelocityMPerS` to `placed` entries and to `SceneStarFrame`, the retarded centres lighting
   takes._
 - **R05:** `selectPatches`, `PlanetGeometry`, `PatchCache` and the patch geometry with per-patch
@@ -664,11 +666,11 @@ time, previous)` with `previous` required; a body's entry is `SceneBodyFrame`, a
   priority of secondary views; `BodyFigure`, which this plan re-exports; and, asked of R05 and met
   there, a `PlanetGeometry` of a reference spheroid drawn at zero height with no height worker,
   `planetGeometry(figure, null)` (R05.T7.a; Design notes 3 and 19), which R07.T9 uses. _Not built
-  at `ce7aeb3`_ (no `view/terrain/` or `view/quality/`); R05's Provides still match these names:
-  `BodyFigure` and `planetGeometry` from R05.T7.a (`view/terrain/planet.ts`, `pole: Vec3 | null`),
-  `QualitySetting`, `ViewSettings` and `SETTINGS` from R05.T7.b (`view/quality/`), the 0.25
-  secondary-view weight from R05.T7.d, `PatchCache` from R05.T8, the patch's `originM` from
-  R05.T10 and the terrain pass from R05.T11.
+  at `ce7aeb3`, now `2b75d16c`_ (no `view/terrain/` or `view/quality/`); R05's Provides still
+  match these names: `BodyFigure` and `planetGeometry` from R05.T7.a (`view/terrain/planet.ts`,
+  `pole: Vec3 | null`), `QualitySetting`, `ViewSettings` and `SETTINGS` from R05.T7.b
+  (`view/quality/`), the 0.25 secondary-view weight from R05.T7.d, `PatchCache` from R05.T8,
+  the patch's `originM` from R05.T10 and the terrain pass from R05.T11.
 - **R06:** `HostDiscDto` on `SkyResponse.hosts`: its radius, `mean_luminance_cd_m2` per channel
   (the disc mean, which E = π L̄ sin²ρ uses, never `central_luminance_cd_m2`), the power-2
   coefficients per channel, and the host's `teff_k`, `log_g`, `chroma` and `lux_per_v0`, since the
@@ -682,13 +684,14 @@ GlareSource[]` returns one `GlareSource` per disc, `excessLuminance` per channel
   65,504, in eye views also for a disc up to 45° outside the frame. Where this plan's `post/`
   module is absent, R06.T13.e declares `METER_CLASS` and `GlareSource` there under this plan's
   names, and this plan extends that file, so that R06 depends on nothing of R07 at build time.
-  _Not built at `ce7aeb3`_ (no `view/sky/`, `view/post/` or `sky` protocol module). Providers:
-  `HostDiscDto` R06.T10 (filled by R06.T11.c; its radius and coefficient field names are fixed
-  there, not yet in R06's text), `cameraLimitV` and `DEFAULT_VIEW_CAMERA` (N = 1.4, t = 1/30 s,
-  R06 Design note 18, the N and t of whose Design note this plan's `VIEW_CAMERA` holds with the
-  camera's ranges, T13.c) R06.T13.a, `HostDiscLayer`, `glareSources`, `DEFAULT_EYE_OBSERVER` and the
-  meter class R06.T13.e (`view/post/{meter,glare}.ts` if this plan's are absent). `angular_radius`
-  is Rust only (`sky::disc`); the client computes asin(R ÷ d) itself (T3).
+  _Not built at `ce7aeb3`, now `2b75d16c`_ (no `view/sky/`, `view/post/` or `sky` protocol
+  module). Providers: `HostDiscDto` R06.T10 (filled by R06.T11.c; its radius and coefficient
+  field names are fixed there, not yet in R06's text), `cameraLimitV` and `DEFAULT_VIEW_CAMERA`
+  (N = 1.4, t = 1/30 s, R06 Design note 18, the N and t of whose Design note this plan's
+  `VIEW_CAMERA` holds with the camera's ranges, T13.c) R06.T13.a, `HostDiscLayer`, `glareSources`,
+  `DEFAULT_EYE_OBSERVER` and the meter class R06.T13.e (`view/post/{meter,glare}.ts`
+  if this plan's are absent). `angular_radius` is Rust only (`sky::disc`); the client
+  computes asin(R ÷ d) itself (T3).
 - **R08:** `DiscReflectanceTable`, baked by R08's `bakeDiscReflectance(medium, appearance:
 BodyAppearance)`, for a body with an atmosphere, which replaces the albedo-only disc shading;
   R08.T16.b adds its read path to this plan's `shaders/bodyDisc.wgsl`. It reads `BodyAppearance`
@@ -713,9 +716,9 @@ BodyAppearance)`, for a body with an atmosphere, which replaces the albedo-only 
   radius; the `SurfaceState` and Bond albedo of P14.T13.c once carried; `body_fixed_at` (P14.T14.c)
   through R02's `BodyFixedRotation`; the surface pressure and cloud fraction of `Atmosphere`
   (`planetary/derive/atmosphere.rs`) that choose the law (Design note 5); the photometric section
-  and flattening asked for in R07.T1. _Re-checked on `main` at `ce7aeb3` (`GENERATOR_VERSION`
-  19):_ none of R07.T1's asks is drafted in plan 14 or built — no photometry section, no
-  flattening, no spheroid datum; `radius_m` on `BulkPropertiesDto` is the mean radius.
+  and flattening asked for in R07.T1. _Re-checked on `main` at `ce7aeb3`, now `2b75d16c`
+  (`GENERATOR_VERSION` 19):_ none of R07.T1's asks is drafted in plan 14 or built — no photometry
+  section, no flattening, no spheroid datum; `radius_m` on `BulkPropertiesDto` is the mean radius.
   `SurfaceState` (`atmosphere.rs:699`: `GasEnvelope`, `MagmaOcean`, `Airless`,
   `RunawayGreenhouse`, `Temperate`, `Snowball`), `Atmosphere::surface_pressure` and
   `cloud_fraction` exist in the sim only and are read by plan 14's section, never by the client;
@@ -738,8 +741,8 @@ BodyAppearance)`, for a body with an atmosphere, which replaces the albedo-only 
   replay log; the simulation, training, replay and pause modes; and ship alerts in the guide's four
   classes. None of it exists: `ClientMessage` has `Hello { client_version }`, `Ping`, `Request` and
   `Cancel` only (`crates/hyperion-protocol/src/envelope.rs:34`), and nothing identifies a station.
-  Still so at `ce7aeb3`: `Hello { client_version }` (`envelope.rs:41`), `PROTOCOL_VERSION` 2
-  (`lib.rs:108`), one ship stand-in per open universe, and no sessions plan in
+  Still so at `ce7aeb3`, now `2b75d16c`: `Hello { client_version }` (`envelope.rs:41`),
+  `PROTOCOL_VERSION` 2 (`lib.rs:108`), one ship stand-in per open universe, and no sessions plan in
   `docs/agent/plans/`.
 
 ## Design notes
@@ -754,11 +757,11 @@ client's command line takes `--address` and `--port` only (`apps/hyperion/src/ma
 `planetary/derive/rotation.rs` or `planetary/frames.rs`; no geometric albedo, phase integral or
 flattening anywhere; `usePrefersReducedMotion.ts` and the annunciation component
 `components/StatusLine.tsx` exist, the latter unrelated to the main screen's status line.
-Re-checked at `ce7aeb3` (RM1 merged): R01's engine, R02's `view/` and wireframe `VIEW` and R03's
-scene exist as the Consumes' "as built" notes give them; `lib/displays.ts` gains `view`; R05's and
-R06's modules and everything of plan 14 named above as absent are still absent, save rotation,
-which exists sim-side only; `PROTOCOL_VERSION` is still 2 and the command line still `--address`
-and `--port`.
+Re-checked at `ce7aeb3`, now `2b75d16c` (RM1 merged): R01's engine, R02's `view/` and wireframe
+`VIEW` and R03's scene exist as the Consumes' "as built" notes give them; `lib/displays.ts`
+gains `view`; R05's and R06's modules and everything of plan 14 named above as absent are
+still absent, save rotation, which exists sim-side only; `PROTOCOL_VERSION` is still 2 and
+the command line still `--address` and `--port`.
 
 1. **Three regimes, chosen per view per frame on the CPU.** A body is a `point` while its angular
    diameter is under 3 px of the view's own pixels (brainstorm, "The scales the view spans"): its
@@ -1216,8 +1219,8 @@ TypeScript paths follow the rule at the head of Provides. Every task that adds o
 registered in `WGSL_CATALOGUE`, or anything under `view/engine/`, runs `just test-render` in its
 acceptance, and gives each material and post-process a `displayName`.
 
-Waits on R05 and R06 (re-validated at `ce7aeb3`, neither built): T2.a on R05.T7.a (`BodyFigure`);
-T3 on R06.T10 (`HostDiscDto`'s field names); T5 on T2.a and R06.T10; T7 on R05.T7.b
+Waits on R05 and R06 (re-validated at `ce7aeb3`, now `2b75d16c`, neither built): T2.a on R05.T7.a
+(`BodyFigure`); T3 on R06.T10 (`HostDiscDto`'s field names); T5 on T2.a and R06.T10; T7 on R05.T7.b
 (`QualitySetting`); T8.a on T3, T7 and R06.T13.e (the host-disc pass it is ordered with); T9 on
 R05.T7.a–b, T8 and T11; T10 on T9 and R06.T13.e, except T10.b, on T6.b, T8.a and T11; T11 on T8.a;
 T14.b's injected sources on R06.T13.e's `glareSources` (synthetic sources in its tests until then);
@@ -1253,11 +1256,12 @@ Saturn-like, ice giant) defined by a criterion on plan 14's
 composition classes for its owner to set, and the six-planet check; and the spheroid as the
 reference figure that heights are measured from (Design note 19). Both subtasks are plan 14's to
 build; the edit ends in plan 14's owner accepting them. Draft them against plan 14 as built
-(re-validated at `ce7aeb3`, `GENERATOR_VERSION` 19): the law's inputs are the sim's `SurfaceState`
-and `Atmosphere::{surface_pressure, cloud_fraction}` (`planetary/derive/atmosphere.rs`) and its
-iterated Bond albedo, none of them on the wire, so the section is computed server-side and is
-the only photometric thing the client reads; P14.T14.b's moments of inertia are already per
-class as built (`params.rs`: rocky 0.33, icy 0.34, sub-Neptune and ice giant 0.23, gas giant 0.25,
+(re-validated at `ce7aeb3`, now `2b75d16c`, `GENERATOR_VERSION` 19): the law's inputs
+are the sim's `SurfaceState` and `Atmosphere::{surface_pressure, cloud_fraction}`
+(`planetary/derive/atmosphere.rs`) and its iterated Bond albedo, none of them on
+the wire, so the section is computed server-side and is the only photometric thing
+the client reads; P14.T14.b's moments of inertia are already per class as built
+(`params.rs`: rocky 0.33, icy 0.34, sub-Neptune and ice giant 0.23, gas giant 0.25,
 provisional), so the flattening draft reuses those constants and asks only for what they lack
 (a Saturn-like 0.21 inside `GasGiant`, by a criterion for the owner, and the six-planet check);
 and, since rotation reaches no DTO yet, the drafts name the pole and rotation on the wire (the
@@ -2973,8 +2977,8 @@ is available. Acceptance: the record.
 ### Phase C: the main screen (gated on the sessions plan)
 
 Each task begins by fitting its names to the sessions plan as built. **Out of scope for RM3**
-(re-validated at `ce7aeb3`: no sessions plan exists); these tasks were not re-validated against
-the code and are re-validated when that plan is built.
+(re-validated at `ce7aeb3`, now `2b75d16c`: no sessions plan exists); these tasks were not
+re-validated against the code and are re-validated when that plan is built.
 
 #### R07.T22 The client role
 
@@ -3100,9 +3104,9 @@ additive: optional sections parsed by the client, a defaulted `role` and `reduce
 `Hello`, R03's reserved
 optional field and new commands in the sessions plan's envelope, none of which moves
 `PROTOCOL_VERSION` by the brainstorm's rule. The plan reserves nothing in the generator.
-Re-validated at `ce7aeb3` (`GENERATOR_VERSION` 19): Phases A and B change no protocol type and
-generate nothing; T2.b only parses bindings that plan 14's subtasks generate, and those subtasks
-(T1's drafts) carry plan 14's own bump, coordinated through the orchestrator, and its
+Re-validated at `ce7aeb3`, now `2b75d16c` (`GENERATOR_VERSION` 19): Phases A and B change no
+protocol type and generate nothing; T2.b only parses bindings that plan 14's subtasks generate, and
+those subtasks (T1's drafts) carry plan 14's own bump, coordinated through the orchestrator, and its
 `just gen-protocol`.
 
 ## Risks and open points
@@ -3238,11 +3242,11 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   item 12). R02 draws hull edges uncased in the wireframe, since a casing would widen a 1.5 px
   edge past the 2 px that its occluder's slope bias covers. This plan's overlay (T16) must case them
   over the photorealistic image and raise the occluder's slope scale to 3 so that the casing is
-  covered (R02's Risks, T13 as built). As built at `ce7aeb3` the sphere occluder's `SLOPE_SCALE`
-  is already 3 (RM1 validation, for graticule strokes); the one to raise is the hull faces'
-  `occluder.wgsl` depth bias, `slopeScale` 2. _Built by T16.a (2026-10-06): cased over the image,
-  `slopeScale` 3 in both styles; see "Deviations in T16.a, as built"._ _The slope term moves into
-  the fragment and follows the strokes' scale in T16.d (decision-r07-t16a, items 1 and 2)._
+  covered (R02's Risks, T13 as built). As built at `ce7aeb3`, now `2b75d16c`, the sphere occluder's
+  `SLOPE_SCALE` is already 3 (RM1 validation, for graticule strokes); the one to raise is the hull
+  faces' `occluder.wgsl` depth bias, `slopeScale` 2. _Built by T16.a (2026-10-06): cased over the
+  image, `slopeScale` 3 in both styles; see "Deviations in T16.a, as built"._ _The slope term moves
+  into the fragment and follows the strokes' scale in T16.d (decision-r07-t16a, items 1 and 2)._
 - **The camera's local state, decided 2026-09-30 by a delegated decision** (the UX decisions,
   item 14). R02's `CameraState` keeps `free` (`FreeFlight`) and `move` (`EasedMove`), a local
   view's integration state. This plan moves them into a local wrapper, so that the server-held
@@ -3270,9 +3274,9 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   bounds are the setting value `ViewSettings.internalScaleBounds` (Design note 14, T17, T18). Not
   yet designed here: the instrument panels' sizes in the cockpit layout, which R12 needs for its
   runs.
-- **Re-validated at `ce7aeb3`** (2026-10-02, RM3; RM1 merged, R05 and R06 not built, `main`
-  equal to the integration branch). Consumes swept against R01–R04 as built and their Risks: the
-  "as built" notes in Consumes (R01's engine calls, `createView`'s name, per-call readback,
+- **Re-validated at `ce7aeb3`**, now `2b75d16c` (2026-10-02, RM3; RM1 merged, R05 and R06 not built,
+  `main` equal to the integration branch). Consumes swept against R01–R04 as built and their Risks:
+  the "as built" notes in Consumes (R01's engine calls, `createView`'s name, per-call readback,
   post-process labels and bindings, the canvas's sRGB view, per-format rounding, the timing
   switch's home; R02's `Viewport` without `fovXRad`, `ExposureControl`'s union and
   `onMetering`, `ExposurePanel`, `graticule`'s module, no client `BodyFixedRotation`; R03's
@@ -3286,10 +3290,10 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   14 as built; `pnpm exec prettier`; Phase C out of scope for RM3. RM1's decisions and follow-ups
   for this plan (UX items 12 and 14, the kept scene's `TRAINING`, hardware item 6's HDR and EDID,
   the hidden-window OUT_OF_DATE restart, Babylon dropped) were already folded in by the RM1-close
-  pass (`ca9b2ae`) and are kept. Brainstorm drift since `899db5e`: only the CSP ruling and
-  Babylon wording, neither touching this plan. **Pending re-validation:** T2.a waits on
-  R05.T7.a; T3 on R06.T10 (`HostDiscDto`'s field names); T5 on R06.T10; T7, T17 and T18 on
-  R05.T7.b; T8.a and T10 on R06.T13.e; T9 on R05.T7.a–b, T8 and T11; T19 on R05.T7.d; T2.b on
+  pass (`ca9b2ae`, now `e9023721`) and are kept. Brainstorm drift since `899db5e`, now `9d955b26`:
+  only the CSP ruling and Babylon wording, neither touching this plan. **Pending re-validation:**
+  T2.a waits on R05.T7.a; T3 on R06.T10 (`HostDiscDto`'s field names); T5 on R06.T10; T7, T17 and
+  T18 on R05.T7.b; T8.a and T10 on R06.T13.e; T9 on R05.T7.a–b, T8 and T11; T19 on R05.T7.d; T2.b on
   plan 14's subtasks from T1; T22–T28 on the sessions plan. **Missing galaxy work** (plan 14 on
   `main`): the photometry section (T2.b, T8.a's modelled albedos, T11's neighbours' p); the
   flattening and the Saturn-like moment of inertia (T8.a's and T9's oblate figures); rotation and
@@ -3608,9 +3612,9 @@ DARK`; the source shows the raw view id upper-cased until T7 names views as the 
   The CPU twin of the last step holds where the pass draws at the internal resolution; upscaled,
   the pass tents U₁ to the canvas's pixels and thresholds the interpolated colour. `just
 test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-02, merged with origin at
-  `7cb5d33`): every R07.T12, T14.b and T15 check passed but the T15 twin check, which failed on the
-  harness's half-float encoder for subnormal inputs; fixed in `3e51ef3`, to be re-run with the
-  owner's integrated `just ci` and `just test-render`.
+  `7cb5d33`, now `a40e50d2`): every R07.T12, T14.b and T15 check passed but the T15 twin check,
+  which failed on the harness's half-float encoder for subnormal inputs; fixed in `3e51ef3`, now
+  `19dd75e4`, to be re-run with the owner's integrated `just ci` and `just test-render`.
 - **Deviations in T4.c, as built.**
   - **`LunarLambert`'s last field is `table_row`, not `template`:** `template` is a reserved word in
     WGSL. It is the row of `phase_factor_table` that holds the law's f, one row per tabulated law
@@ -3634,8 +3638,9 @@ test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-02, merged with
     rename, review found the per-texel case's reference re-tabulating f with the per-texel L while
     the kernel reads the borrowed row; `expectedBrdf` now reads the borrowed row (fixed with
     T6.c). `just test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-03, with T6.c's
-    working tree over e641995): all five `body_brdf` checks pass, worst 1.3 × 10⁻⁷ relative; T6.c's
-    horizon factors within 9 × 10⁻⁵, eclipse terms within 2.3 × 10⁻⁵, and the stubs exact.
+    working tree over e641995, now 9404b64c): all five `body_brdf` checks pass, worst
+    1.3 × 10⁻⁷ relative; T6.c's horizon factors within 9 × 10⁻⁵, eclipse terms within
+    2.3 × 10⁻⁵, and the stubs exact.
 - **Deviations in T6.a, as built.**
   - **`sphereIrradianceFactor(h, phiRad, horizonRad = 0)`** returns H² F, Howell's view factor
     over that of the sphere face-on, so it is cos φ wherever the whole disc is up; `howellViewFactor`

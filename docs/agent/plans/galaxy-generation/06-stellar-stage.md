@@ -4333,9 +4333,10 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
     the measured value (provisional; ruling deferred).
   - Neutron stars above the escape speed 0.1159, against 12–20% (expected about 0.15): held at the
     measured value (provisional; ruling deferred).
-- **`absolute_v_mag`, added by rendering plan R02 (R02.T5, by agreement, `8dfe57b`; recorded in
-  RM1 validation, 2026-10-02).** P06.T33's `StellarBriefDto` gains `absolute_v_mag: Option<f32>`,
-  M_V in mag (Johnson V at 10 pc), with `#[serde(default, skip_serializing_if = "Option::is_none")]`
+- **`absolute_v_mag`, added by rendering plan R02 (R02.T5, by agreement,
+  `8dfe57b`, now `3f5b34d4`; recorded in RM1 validation, 2026-10-02).** P06.T33's
+  `StellarBriefDto` gains `absolute_v_mag: Option<f32>`, M_V in mag (Johnson V
+  at 10 pc), with `#[serde(default, skip_serializing_if = "Option::is_none")]`
   and `#[ts(optional)]`, so a brief without it keeps its wire form and `PROTOCOL_VERSION` is
   unchanged. The server fills it (`convert/stellar.rs`, `brief_absolute_v`) from the brief's log L
   and T_eff as M_V = 4.74 − 2.5 log L − BC_V (Pecaut and Mamajek's sequence in Mamajek's

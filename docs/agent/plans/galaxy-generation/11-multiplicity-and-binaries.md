@@ -841,8 +841,9 @@ P11.T4, as built"._
     - **Stop order.** A constructed pair where wind removes a `Shaped` star's envelope on the
       step that lands on its phase boundary, and one on its pin: the strip comes first (one
       segment fewer; the collapse's phase just before is HeMS/HeHG/HeGB).
-    - Keep 129.4c's and b64352e's tests (`a_held_bare_core_beside_a_main_sequence_star_merges_without_recursing`
-      becomes `…_stays_a_helium_star`, golden re-blessed).
+    - Keep 129.4c's and b64352e's tests
+      (`a_held_bare_core_beside_a_main_sequence_star_merges_without_recursing`
+      becomes `…_stays_a_helium_star`, golden re-blessed; b64352e is now 03065252).
   - **Goldens to re-bless** (at version 19, "for the version 20 batch"):
     `stellar/binary_timelines` (expected to move broadly: segment counts from the stop order),
     `stellar/held_bare_core_merger` (renamed if the test is), and any of `stellar/summaries`,
