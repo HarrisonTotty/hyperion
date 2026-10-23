@@ -479,7 +479,7 @@ fn bond_albedo(value: f64, state: SurfaceState, material: SurfaceMaterial) -> Bo
 ///   [`RAYLEIGH_FLOOR_VERSION`](area_mix::RAYLEIGH_FLOOR_VERSION) (P14.T24.h.a; [`floored`]).
 #[must_use]
 pub(super) fn area_mixed(
-    air: Atmosphere,
+    air: &Atmosphere,
     inputs: &AtmosphereInputs,
     surface: &PassSurface<'_>,
 ) -> (Atmosphere, Option<CrustLid>) {
@@ -499,7 +499,7 @@ pub(super) fn area_mixed(
         ),
         SurfaceState::MagmaOcean => {
             let lid = match surface.climate {
-                PassClimate::Spun(spun) => spun_lid(&air, inputs, spun, None),
+                PassClimate::Spun(spun) => spun_lid(air, inputs, spun, None),
                 PassClimate::Given(_) => None,
             };
             (area_mix::melt_bond(), 0.0, lid)
@@ -507,17 +507,17 @@ pub(super) fn area_mixed(
         SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
-        | SurfaceState::Snowball => surface_and_cloud(&air, inputs, surface, shade),
+        | SurfaceState::Snowball => surface_and_cloud(air, inputs, surface, shade),
     };
     #[cfg(test)]
     if let PassClimate::Spun(_) = surface.climate {
         spun_read::trace(lid.as_ref());
     }
-    let albedo = floored(albedo, &air, inputs, shade);
+    let albedo = floored(albedo, air, inputs, shade);
     let air = Atmosphere {
         albedo: bond_albedo(albedo, air.state, inputs.material),
         cloud_fraction,
-        ..air
+        ..*air
     };
     (air, lid)
 }

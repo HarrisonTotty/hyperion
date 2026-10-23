@@ -135,10 +135,11 @@ use hyperion_surface::field::MechanicsFamily;
 
 use crate::math;
 use crate::orbit::KeplerElements;
-use crate::planetary::chem::partition::{ClimateSpan, CondensatePhase, Condensates};
+use crate::planetary::chem::escape::EscapeRules;
+use crate::planetary::chem::partition::{ClimateSpan, CondensatePhase, Condensates, dominance};
 use crate::planetary::context::XuvHistory;
 use crate::planetary::derive::atmosphere::{
-    AIRLESS_PRESSURE, Atmosphere, EARTH_REFERENCE_AGE, Gas, GreenhouseConstants,
+    AIRLESS_PRESSURE, Atmosphere, EARTH_REFERENCE_AGE, Gas, GreenhouseCeiling, GreenhouseConstants,
     MOLAR_GAS_CONSTANT, PartialPressures, REFERENCE_SUN_ZAMS_LUMINOSITY, SurfaceMaterial,
     SurfaceState,
 };
@@ -249,6 +250,28 @@ pub const EARTH_OUTGOING_LONGWAVE_SLOPE_W_PER_M2_K: f64 = 2.09;
 /// temperature at sea level) diffusivity of moist static energy, 1.16 × 10⁶ m² s⁻¹, converted to
 /// temperature at 288 K and 80% relative humidity (× 2.33), 2.70 × 10⁶.
 pub const EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K: f64 = 0.676_013_14;
+
+/// Earth's meridional conductance D⊕ under P14.T53.a's broadened greenhouse, W m⁻² K⁻¹: 0.6618,
+/// refitted as [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] is, by bisection on the zonal solver
+/// with the 64-step bisection of each end as its oracle, so that Earth's measured state holds
+/// [`EARTH_EQUATOR_POLE_CONTRAST_K`] at its own restoring under the batch, `B_eff`⊕, at the
+/// unchanged Φ⊕ ([`WET_ALBEDO_GRADIENT`]; a test refits it). From generator version 24, behind the
+/// escape's hold (`ESCAPE_VERSION`), it replaces 0.6760.
+///
+/// It is the last of P14.T53.a's chain (N₂ on Titan, CO₂'s a, n and b on Earth's forcing, Mars and
+/// Venus, water's vapour and cloud on Earth, then D⊕ on Earth's contrast; decision-pre-23-review
+/// item 20(6), decision-p14-t54a-bands ruling 2 and §2.6's two-step fit): Φ⊕ is fitted in North,
+/// Cahalan and Coakley's measured balance, reads none of the chain, and refits under the batch to
+/// 1.505 462 21, unmoved. The measured Earth's state is
+/// [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`]'s, its water's term at
+/// [`BROADENED_GREENHOUSE_WATER_VAPOUR`](crate::planetary::derive::atmosphere::BROADENED_GREENHOUSE_WATER_VAPOUR),
+/// 4.17 per √bar, 0.382 of the τ of 0.8317 that holds 288 K (its cloud's term, which does not
+/// feed back, takes 0.19 more), and its gain's weight the batch's (1 − x)(1 − d), d 0 at its
+/// water's mole fraction of 0.017. Its gain is then g = 0.4022, its fixed relative humidity
+/// feedback `B_P` g 1.342 W m⁻² K⁻¹ against AR6's 1.36 ± 0.04, and `B_eff`⊕ 1.995, inside the fixed
+/// relative humidity Planck feedback's 1.7–2.3 (decision-p14-t54a-bands §1); 6D⊕ ÷ `B_eff`⊕ is
+/// 1.99, against North, Cahalan and Coakley's 1.86 at their B.
+pub const BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K: f64 = 0.661_844_07;
 
 /// The factor Φ⊕ by which a wet world's cold zones brighten its equator–pole forcing: 1.5055,
 /// multiplying the `P₂` mode of the annual insolation of a world of ocean weight 1, and 1 + (Φ⊕ −
@@ -1754,6 +1777,7 @@ impl Surface {
             surface_gravity: inputs.surface_gravity,
             radius: inputs.radius,
             inventory: air.inventory_weights(),
+            ceiling: air.greenhouse_ceiling(),
         }
         .column()
         .expect("every `Gas` row of the registry has a molar mass");
@@ -1867,6 +1891,9 @@ struct StepColumn<'a> {
     /// Its airborne inventory before any of it condensed, as column weights
     /// ([`Atmosphere::inventory_weights`]).
     inventory: &'a PartialPressures,
+    /// The ceiling its grey surface is held under: where it binds, the surface reads no τ and the
+    /// greenhouse gain is 0 (P14.T53.a; [`GreenhouseCeiling::binds`]).
+    ceiling: GreenhouseCeiling,
 }
 
 impl StepColumn<'_> {
@@ -1904,7 +1931,13 @@ impl StepColumn<'_> {
             molar_mass_g_per_mol: fractions.mean_molar_mass_g_per_mol.unwrap_or(0.0),
             surface_gravity: self.surface_gravity,
             optical_depth: if airless { 0.0 } else { self.optical_depth },
-            greenhouse_gain: if airless {
+            greenhouse_gain: if airless
+                || self.ceiling.binds(
+                    &GreenhouseConstants::in_force(),
+                    (self.partials, self.optical_depth),
+                    self.equilibrium_temperature,
+                    self.surface_gravity,
+                ) {
                 0.0
             } else {
                 greenhouse_gain(
@@ -1913,6 +1946,7 @@ impl StepColumn<'_> {
                     self.optical_depth,
                     fractions.as_slice(),
                     self.equilibrium_temperature,
+                    self.surface_gravity,
                     self.inventory,
                 )
             },
@@ -1985,6 +2019,9 @@ pub(crate) struct ClimateBody {
     /// The pass's airborne inventory before any of it condensed, as column weights
     /// ([`Atmosphere::inventory_weights`]): the condensate partition's inventory.
     pub(crate) inventory: PartialPressures,
+    /// The ceiling its grey surface is held under (P14.T53.a): where it binds, the greenhouse gain
+    /// is 0 ([`GreenhouseCeiling::binds`]).
+    pub(crate) ceiling: GreenhouseCeiling,
 }
 
 /// The span of the climate of the body `body` at a step of T13.c's passes whose mean surface
@@ -1995,8 +2032,9 @@ pub(crate) struct ClimateBody {
 /// It is P14.T24.a's range by the one computation the record's
 /// [`climate_range`](SurfaceConditions::climate_range) is (`climate_of`), on the column the
 /// conditions would build of an atmosphere of that temperature and those partial pressures: its
-/// greenhouse's optical depth T13.c's under P14.T57.a's constants
-/// ([`GreenhouseConstants::FITTED`]), and airless below
+/// greenhouse's optical depth T13.c's under the constants in force
+/// ([`GreenhouseConstants::in_force`]: P14.T57.a's to version 23, P14.T53.a's from 24), and
+/// airless below
 /// [`AIRLESS_PRESSURE`], as T13.c's state is but for a molten surface, which T13.c calls a
 /// `MagmaOcean` and on which nothing condenses. So a body's last step reads the range its record
 /// publishes, but where the range does not hold the mean, whose ends are then widened to it
@@ -2013,13 +2051,17 @@ pub(crate) fn step_climate(
         surface_temperature,
         partials,
         surface_pressure,
-        optical_depth: GreenhouseConstants::FITTED
-            .optical_depth(partials, body.equilibrium_temperature),
+        optical_depth: GreenhouseConstants::in_force().optical_depth(
+            partials,
+            body.equilibrium_temperature,
+            body.surface_gravity,
+        ),
         airless: surface_pressure < AIRLESS_PRESSURE,
         equilibrium_temperature: body.equilibrium_temperature,
         surface_gravity: body.surface_gravity,
         radius: body.radius,
         inventory: &body.inventory,
+        ceiling: body.ceiling,
     };
     let Ok((column, _)) = step.column() else {
         // A partial pressure that is not finite has no climate the contrasts can give.
@@ -2032,7 +2074,8 @@ pub(crate) fn step_climate(
 
 /// The greenhouse gain g of an air over a surface at `surface` under the partial pressures
 /// `partials`, whose greenhouse's optical depth is `optical_depth` and whose published mole
-/// fractions are `gases`, over a surface in equilibrium at `equilibrium`, its greenhouse taken from
+/// fractions are `gases`, over a surface in equilibrium at `equilibrium` under the surface gravity
+/// `gravity`, its greenhouse taken from
 /// the airborne inventory `inventory`, as column weights before any of it condensed
 /// ([`StepColumn::column`], at a step of T13.c's passes as on
 /// the record): the share of the grey column's Planck restoring that its condensing gases' vapour
@@ -2043,8 +2086,9 @@ pub(crate) fn step_climate(
 ///
 /// g = (`T_s` ÷ 4) ¾ Σᵢ (1 − xᵢ) ½τᵢ Lᵢ ÷ (R `T_s`²) ÷ (1 + ¾τ),
 ///
-/// summed in their order over T13.c's τ terms, at P14.T57.a's constants
-/// ([`GreenhouseConstants::FITTED`]), whose gas the surface holds at its cap: where P14.T51.a's
+/// summed in their order over T13.c's τ terms, at the constants in force
+/// ([`GreenhouseConstants::in_force`]: P14.T57.a's to version 23), whose gas the surface holds at
+/// its cap: where P14.T51.a's
 /// partition holds it at its cap, on either branch, by the partition's own state, some of its
 /// inventory condensed, so that its airborne weight lies below its inventory's. The partition holds
 /// a minor condensable's partial pressure at its humidity, below its saturation pressure (Earth's
@@ -2063,6 +2107,20 @@ pub(crate) fn step_climate(
 /// - xᵢ is the gas's published mole fraction: the factor 1 − xᵢ removes a dominant condensable,
 ///   whose pressure the cold trap sets globally, not locally, continuously in its share.
 ///
+/// From version 24 (P14.T53.a, behind the escape's hold, [`EscapeRules::in_force`]) the sum is
+///
+/// g = (`T_s` ÷ 4) ¾ Σᵢ (1 − xᵢ)(1 − dᵢ) (∂τᵢ ÷ ∂ln pᵢ) Lᵢ ÷ (R `T_s`²) ÷ (1 + ¾τ):
+///
+/// - ∂τᵢ ÷ ∂ln pᵢ is each term's own slope ([`GreenhouseConstants::terms`]): ½τᵢ for the terms in
+///   √pᵢ, water vapour's and nitrogen's, and n a Xⁿ (1 + x) + 2 b Y for the broadened carbon dioxide
+///   term, x its share of the surface pressure, which holds it. Water's cloud term, which has no
+///   fixed relative humidity feedback, and hydrogen's, which never condenses, are not read;
+/// - dᵢ = [`dominance`] of xᵢ (decision-pre-23-review item 21). The partition takes d of a
+///   condensable's share on its minor branch, a closed form of its inventory and climate, which
+///   the published mole fraction approximates here. At d = 1 the cap is the cold trap's, set
+///   globally: a cold-trapped dominant condensable, Mars's carbon dioxide, adds no local feedback,
+///   where 1 − x alone kept 1 − x of it.
+///
 /// The batch's measured Earth gives 0.4311 (`B_eff` 1.898 W m⁻² K⁻¹), as
 /// [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] is fitted on it (decision-p14-t57a-fits §1.3), the
 /// counterpart of Kaspi and Showman's prescribed τ, which they state stands in for water vapour,
@@ -2076,16 +2134,23 @@ fn greenhouse_gain(
     optical_depth: f64,
     gases: &[(SubstanceId, f64)],
     equilibrium: Kelvin,
+    gravity: MetresPerSecondSquared,
     inventory: &PartialPressures,
 ) -> f64 {
     let t = surface.value();
     if t.is_nan() || t <= 0.0 {
         return 0.0;
     }
-    let slope = GreenhouseConstants::FITTED
-        .terms(partials, equilibrium)
+    let rules = EscapeRules::in_force();
+    let slope = GreenhouseConstants::in_force()
+        .terms(partials, equilibrium, gravity)
         .into_iter()
-        .fold(0.0, |sum, (gas, term)| {
+        .fold(0.0, |sum, term| {
+            // Water's cloud has no fixed relative humidity feedback, and hydrogen never condenses.
+            if !term.absorber().feeds_back() {
+                return sum;
+            }
+            let gas = term.gas();
             let id = gas.substance();
             let Some(diagram) = id.substance().phase_diagram() else {
                 return sum;
@@ -2107,7 +2172,11 @@ fn greenhouse_gain(
                 .iter()
                 .find(|&&(gas, _)| gas == id)
                 .map_or(0.0, |&(_, x)| x);
-            sum + (1.0 - share) * 0.5 * term * enthalpy / (MOLAR_GAS_CONSTANT * t * t)
+            let feedback = match rules {
+                EscapeRules::Held => (1.0 - share) * 0.5 * term.depth(),
+                EscapeRules::Batch => (1.0 - share) * (1.0 - dominance(share)) * term.log_slope(),
+            };
+            sum + feedback * enthalpy / (MOLAR_GAS_CONSTANT * t * t)
         });
     grey_gain(surface, optical_depth, slope)
 }
@@ -2158,9 +2227,21 @@ pub fn rotation_transport_factor(rotation_period: Seconds) -> f64 {
     math::powf(ratio, if ratio <= 1.0 { slow } else { fast })
 }
 
+/// Earth's meridional conductance D⊕ under the rules in force, W m⁻² K⁻¹: P14.T24.a's fit,
+/// [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`], to version 23, and its refit at P14.T53.a's
+/// greenhouse, [`BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`], from 24 (the escape's hold,
+/// [`EscapeRules::in_force`]).
+#[must_use]
+fn earth_meridional_conductance_w_per_m2_k() -> f64 {
+    match EscapeRules::in_force() {
+        EscapeRules::Held => EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K,
+        EscapeRules::Batch => BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K,
+    }
+}
+
 /// The meridional conductance D of the column `column` under the spin `spin`, W m⁻² K⁻¹ (North,
-/// Cahalan and Coakley's units), before the dry world's halving: Earth's,
-/// [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`], times
+/// Cahalan and Coakley's units), before the dry world's halving: Earth's under the rules in force
+/// ([`earth_meridional_conductance_w_per_m2_k`]), times
 ///
 /// - the air's specific heat over [`EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K`];
 /// - s(m ÷ m⊕) = (m ÷ m⊕)^0.2 in the column's mass ([`COLUMN_TRANSPORT_EXPONENT`]), linear to zero
@@ -2186,7 +2267,7 @@ pub(crate) fn meridional_conductance_w_per_m2_k(column: &Column, spin: &Seasonal
     };
     let (g_low, g_high) = GRAVITY_TRANSPORT_RANGE;
     let gravity = (g / STANDARD_GRAVITY.value()).clamp(g_low, g_high);
-    EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K
+    earth_meridional_conductance_w_per_m2_k()
         * (column.specific_heat_j_per_kg_k / EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K)
         * mass_factor
         * math::powf(gravity, GRAVITY_TRANSPORT_EXPONENT)

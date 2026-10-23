@@ -43,25 +43,36 @@ pub(crate) fn sample() -> &'static [SystemContext] {
     CONTEXTS.get_or_init(|| sample_contexts(SAMPLE, SEED, SampleFilter::ALL).unwrap())
 }
 
-/// The sample's systems, generated once.
+/// The sample's systems, generated once, under the escape's hold whatever rules the test that
+/// first asks has set ([`with_rules`](crate::planetary::chem::escape::with_rules)), so that the
+/// cache is version 23's.
 pub(crate) fn generated() -> &'static [(SystemContext, PlanetarySystem)] {
+    use crate::planetary::chem::escape::{EscapeRules, with_rules};
     static SYSTEMS: OnceLock<Vec<(SystemContext, PlanetarySystem)>> = OnceLock::new();
     SYSTEMS.get_or_init(|| {
-        sample()
-            .iter()
-            .map(|ctx| (ctx.clone(), generate_planets(SEED, ctx)))
-            .collect()
+        with_rules(EscapeRules::Held, || {
+            sample()
+                .iter()
+                .map(|ctx| (ctx.clone(), generate_planets(SEED, ctx)))
+                .collect()
+        })
     })
 }
 
-/// The sample's systems, generated whole (P14.T30.a's `generate`), once.
+/// The sample's systems, generated whole (P14.T30.a's `generate`), once, under the escape's hold
+/// whatever rules the test that first asks has set
+/// ([`with_rules`](crate::planetary::chem::escape::with_rules)), so that the cache is version
+/// 23's.
 pub(crate) fn whole() -> &'static [(SystemContext, PlanetarySystem)] {
+    use crate::planetary::chem::escape::{EscapeRules, with_rules};
     static SYSTEMS: OnceLock<Vec<(SystemContext, PlanetarySystem)>> = OnceLock::new();
     SYSTEMS.get_or_init(|| {
-        sample()
-            .iter()
-            .map(|ctx| (ctx.clone(), generate(SEED, ctx)))
-            .collect()
+        with_rules(EscapeRules::Held, || {
+            sample()
+                .iter()
+                .map(|ctx| (ctx.clone(), generate(SEED, ctx)))
+                .collect()
+        })
     })
 }
 
@@ -105,6 +116,18 @@ fn generate_gives_the_same_system_twice() {
 fn generate_is_order_independent() {
     let contexts: Vec<SystemContext> = sample().iter().take(40).cloned().collect();
     assert_order_independent(&contexts, |ctx| generate_planets(SEED, ctx));
+}
+
+/// P14.T53.a: `generate_is_order_independent` under the escape's batch, with both 24 holds lifted
+/// (the Rayleigh floor's too): its thermostat's and its ceiling's solves read nothing a system
+/// leaves behind.
+#[test]
+fn under_the_escape_batch_generate_is_order_independent() {
+    use crate::planetary::chem::escape::{EscapeRules, with_rules};
+    let contexts: Vec<SystemContext> = sample().iter().take(40).cloned().collect();
+    assert_order_independent(&contexts, |ctx| {
+        with_rules(EscapeRules::Batch, || generate_planets(SEED, ctx))
+    });
 }
 
 #[test]
@@ -3523,9 +3546,13 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
             // which is the one the moon's τ was computed at.
             let air = derived.atmosphere();
             if air.state() != SurfaceState::Airless {
-                let terms = crate::planetary::derive::atmosphere::GreenhouseConstants::FITTED
-                    .terms(air.partial_pressures(), derived.equilibrium_temperature());
-                let sum = terms.iter().fold(0.0, |sum, &(_, term)| sum + term);
+                let terms = crate::planetary::derive::atmosphere::GreenhouseConstants::in_force()
+                    .terms(
+                        air.partial_pressures(),
+                        derived.equilibrium_temperature(),
+                        bulk.surface_gravity(),
+                    );
+                let sum = terms.iter().fold(0.0, |sum, term| sum + term.depth());
                 assert_same_bits(sum, air.optical_depth());
             }
             // Its conditions read its published pass's context's heat flow and θ (rule (f)).
@@ -7019,10 +7046,13 @@ const GOLDEN_SYSTEMS: [(&str, u64); 15] = [
 ];
 
 /// The golden systems ([`GOLDEN_SYSTEMS`]) in the Milky Way fixture at their seed, generated whole
-/// as `golden_systems_are_pinned` generates them, once.
+/// as `golden_systems_are_pinned` generates them, once, under the escape's hold whatever rules the
+/// test that first asks has set ([`with_rules`](crate::planetary::chem::escape::with_rules)), so
+/// that the cache is version 23's.
 fn golden_systems() -> &'static [(&'static str, SystemContext, PlanetarySystem)] {
+    use crate::planetary::chem::escape::{EscapeRules, with_rules};
     static SYSTEMS: OnceLock<Vec<(&'static str, SystemContext, PlanetarySystem)>> = OnceLock::new();
-    SYSTEMS.get_or_init(golden_systems_afresh)
+    SYSTEMS.get_or_init(|| with_rules(EscapeRules::Held, golden_systems_afresh))
 }
 
 /// The golden systems ([`GOLDEN_SYSTEMS`]) generated afresh, under the rules in force on the
@@ -7158,13 +7188,28 @@ fn zone_hosts(ctx: &SystemContext, zone: &OrbitZone, t: UniverseTime) -> (String
 /// along their pairs' orbits: `Sky::of`'s sum, at the luminosities now rather than at their
 /// largest past (decision-pre-23-review item 33). 1 or more inside the present runaway limit.
 fn runaway_now(epoch: &Epoch<'_>, zone: &OrbitZone, orbit: &KeplerElements) -> f64 {
-    use crate::planetary::derive::habitable_zone::HabitableLimit;
+    limit_now(
+        crate::planetary::derive::habitable_zone::HabitableLimit::RunawayGreenhouse,
+        epoch,
+        zone,
+        orbit,
+    )
+}
+
+/// Σ Fᵢ ÷ `S_eff,i` at the habitable zone's limit `limit` at the present luminosities of the stars
+/// `zone`'s bodies orbit, along `orbit`, and of the companions, along their pairs' orbits
+/// ([`runaway_now`]; at the maximum-greenhouse limit `Sky::of`'s sum now, the ceiling's: below 1
+/// beyond it).
+fn limit_now(
+    limit: crate::planetary::derive::habitable_zone::HabitableLimit,
+    epoch: &Epoch<'_>,
+    zone: &OrbitZone,
+    orbit: &KeplerElements,
+) -> f64 {
     let share = |light: &HostLight, (a, e): (crate::units::Metres, f64)| {
         if light.luminosity().value() > 0.0 {
             luminosity_flux(light.luminosity(), a, e).value()
-                / HabitableLimit::RunawayGreenhouse
-                    .flux(light.effective_temperature())
-                    .value()
+                / limit.flux(light.effective_temperature()).value()
         } else {
             0.0
         }
@@ -7321,15 +7366,16 @@ impl Census {
         );
         let g = derived.surface_gravity().value();
         let (ice, ocean) = (figures.ice_fraction(), figures.ocean_fraction());
-        let terms = GreenhouseConstants::FITTED.terms(
+        let terms = GreenhouseConstants::in_force().terms(
             derived.atmosphere().partial_pressures(),
             derived.equilibrium_temperature(),
+            derived.surface_gravity(),
         );
         let largest = terms
             .iter()
-            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .max_by(|a, b| a.depth().total_cmp(&b.depth()))
             .copied()
-            .expect("three terms");
+            .expect("the greenhouse has its five terms");
         *self
             .bodies
             .entry(format!("{group} {}", case.kind))
@@ -7348,7 +7394,7 @@ impl Census {
             case.key,
             case.record.identity().id(),
             case.kind,
-            largest.0,
+            largest.gas(),
             case.phases,
         );
         // G3: the dark-thick-air census (decision-p14-t54a-passes §G3.6).
@@ -7372,7 +7418,7 @@ impl Census {
                 if t_s > 273.15 {
                     self.hot
                         .push(format!("{line}; its largest τ term {largest:?}"));
-                    if largest.0 != Gas::CarbonDioxide {
+                    if largest.gas() != Gas::CarbonDioxide {
                         self.escalations.push(format!(
                             "a hot Snowball whose largest τ term is not CO₂'s: {line}"
                         ));
@@ -8509,6 +8555,1060 @@ fn a_moon_s_bulk_reads_its_birthplace_over_the_sample() {
     assert_eq!(moves.other_moved, Vec::<String>::new());
 }
 
+/// The class of the first star of `hosts`, [`zone_hosts`]'s "phase, effective temperature" list:
+/// a main-sequence star's spectral class by its effective temperature, at Pecaut and Mamajek's
+/// (2013, `ApJS` 208, 9) dwarf zero points (B0 31,400 K, A0 9,700 K, F0 7,220 K, G0 5,930 K, K0
+/// 5,270 K), an M dwarf below the escape's `M_DWARF_EDGE`, 3,900 K; or "pre-main-sequence",
+/// "evolved", "substellar" (plan 06's `Substellar`, the latest M dwarfs among them) or "remnant".
+fn host_class(hosts: &str) -> String {
+    let first = hosts.split(" + ").next().unwrap_or_default();
+    let mut words = first.split_whitespace();
+    let phase = words.next().unwrap_or_default();
+    let t: f64 = words
+        .next()
+        .and_then(|t| t.parse().ok())
+        .unwrap_or(f64::NAN);
+    let class = match phase {
+        "MainSequence" if t >= 31_400.0 => "main-sequence O",
+        "MainSequence" if t >= 9_700.0 => "main-sequence B",
+        "MainSequence" if t >= 7_220.0 => "main-sequence A",
+        "MainSequence" if t >= 5_930.0 => "main-sequence F",
+        "MainSequence" if t >= 5_270.0 => "main-sequence G",
+        "MainSequence" if t >= 3_900.0 => "main-sequence K",
+        "MainSequence" => "M dwarf",
+        "Protostar" | "PreMainSequence" => "pre-main-sequence",
+        "Substellar" => "substellar",
+        "HeliumWhiteDwarf"
+        | "CarbonOxygenWhiteDwarf"
+        | "OxygenNeonWhiteDwarf"
+        | "NeutronStar"
+        | "BlackHole"
+        | "NoRemnant" => "remnant",
+        "unformed" => "unformed",
+        _ => "evolved",
+    };
+    class.to_owned()
+}
+
+/// One body's figures as [`under_the_escape_batch_the_census_is_compared_body_by_body`] compares
+/// them: its record's and its derivation's at the epoch, under one set of rules.
+#[derive(Debug, Clone, PartialEq)]
+struct EscapeCensusBody {
+    /// "sample", or the golden system's name.
+    set: String,
+    /// The census's key ([`CensusCase::key`]).
+    key: String,
+    /// The body's ID, as its record gives it.
+    id: String,
+    /// Its index in its system.
+    index: u16,
+    /// "planets", "members" or "moons".
+    kind: &'static str,
+    /// Its zone's stars at the epoch.
+    hosts: String,
+    /// Its zone's first star's class ([`host_class`]).
+    host_class: String,
+    /// Its record's surface state.
+    state: SurfaceState,
+    /// Its record's mean surface temperature, K.
+    t_s: f64,
+    /// Its record's surface pressure, Pa.
+    p: f64,
+    /// Its derivation's equilibrium temperature, K.
+    t_eq: f64,
+    /// Its record's ice fraction, 0 to 1.
+    ice: f64,
+    /// Its record's coldest zone, the colder end of its climate range, K.
+    coldest: f64,
+    /// Carbon dioxide's mole fraction in its record's air, and whether it is the air's largest.
+    co2: (f64, bool),
+    /// Carbon dioxide's frost point at its partial pressure, its mole fraction of the surface
+    /// pressure, K, where it has one.
+    co2_frost: Option<f64>,
+    /// Its record's carbon dioxide ice: its area fraction and its reservoir, kg m⁻².
+    co2_ice: Option<(f64, f64)>,
+    /// Its derivation's partial pressures (column weights), bar, of each gas with any.
+    air: String,
+    /// The greenhouse's terms under the rules in force, each absorber's depth.
+    terms: String,
+    /// Its escape, the batch's alone: the shoreline, the weathering thermostat's airborne share of
+    /// the carbon, and the oxygen of its water the air keeps, kg.
+    escape: Option<(crate::planetary::chem::escape::Shoreline, f64, f64)>,
+    /// Its derivation's atmosphere passes.
+    passes: u32,
+    /// Its record's warmest zone, the warmer end of its climate range, K.
+    warmest: f64,
+    /// The maximum-greenhouse ceiling its grey surface is held under (P14.T53.a).
+    ceiling: crate::planetary::derive::atmosphere::GreenhouseCeiling,
+    /// The ceiling's temperature, max(273.15 K, `T_rest`), `T_rest` its nitrogen's and hydrogen's
+    /// grey surface, K.
+    cap: f64,
+    /// How its derivation's passes ended.
+    convergence: crate::planetary::derive::passes::Convergence,
+}
+
+impl EscapeCensusBody {
+    /// The figures of the body `case`, under the rules in force.
+    fn of(case: &CensusCase<'_>) -> Self {
+        use crate::planetary::chem::partition::CondensatePhase;
+        use crate::planetary::derive::atmosphere::GreenhouseConstants;
+        let (surface, derived) = (case.surface, case.derived);
+        let conditions = surface.conditions();
+        let p = conditions.surface_pressure().value();
+        let carbon_dioxide = Gas::CarbonDioxide.substance();
+        let fraction = conditions
+            .gases()
+            .iter()
+            .find(|&&(id, _)| id == carbon_dioxide)
+            .map_or(0.0, |&(_, x)| x);
+        let dominant = conditions
+            .gases()
+            .first()
+            .is_some_and(|&(id, _)| id == carbon_dioxide);
+        let co2_frost = carbon_dioxide
+            .substance()
+            .phase_diagram()
+            .and_then(|diagram| {
+                diagram.saturation_temperature(crate::units::Pascals::new(fraction * p))
+            })
+            .map(Kelvin::value);
+        let co2_ice = surface
+            .condensates()
+            .entry(carbon_dioxide, CondensatePhase::Solid)
+            .map(|entry| (entry.area_fraction(), entry.reservoir().value()));
+        let partials = derived.atmosphere().partial_pressures();
+        let air = Gas::ALL
+            .into_iter()
+            .filter(|&gas| partials.of(gas).value() > 0.0)
+            .map(|gas| format!("{gas:?} {:.4e}", partials.of(gas).value() / 1e5))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let grey_terms = GreenhouseConstants::in_force().terms(
+            partials,
+            derived.equilibrium_temperature(),
+            derived.surface_gravity(),
+        );
+        let terms = grey_terms
+            .iter()
+            .map(|term| format!("{:?} {:.4}", term.absorber(), term.depth()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let rest = grey_terms
+            .iter()
+            .filter(|term| {
+                matches!(
+                    term.absorber(),
+                    crate::planetary::derive::atmosphere::Absorber::Nitrogen
+                        | crate::planetary::derive::atmosphere::Absorber::Hydrogen
+                )
+            })
+            .fold(0.0, |sum, term| sum + term.depth());
+        let cap = crate::planetary::derive::atmosphere::grey_surface_temperature(
+            derived.equilibrium_temperature(),
+            rest,
+        )
+        .value()
+        .max(crate::planetary::derive::atmosphere::WATER_MELTING_POINT.value());
+        let escape = derived.atmosphere().escape().map(|escape| {
+            (
+                *escape.shoreline(),
+                escape.airborne_carbon_share(),
+                escape.oxygen().kept().value(),
+            )
+        });
+        Self {
+            set: case.set.to_owned(),
+            key: case.key.clone(),
+            id: case.record.identity().id().to_string(),
+            index: case.record.index().get(),
+            kind: case.kind,
+            hosts: case.hosts.clone(),
+            host_class: host_class(&case.hosts),
+            state: surface.state(),
+            t_s: conditions.mean_surface_temperature().value(),
+            p,
+            t_eq: derived.equilibrium_temperature().value(),
+            ice: surface.figures().ice_fraction(),
+            coldest: conditions.climate_range().0.value(),
+            co2: (fraction, dominant),
+            co2_frost,
+            co2_ice,
+            air,
+            terms,
+            escape,
+            passes: derived.atmosphere_passes(),
+            warmest: conditions.climate_range().1.value(),
+            ceiling: derived.atmosphere().greenhouse_ceiling(),
+            cap,
+            convergence: derived.convergence(),
+        }
+    }
+
+    /// What water its record's warmest zone holds under its surface pressure.
+    fn water(&self) -> crate::planetary::derive::atmosphere::WaterPhase {
+        crate::planetary::derive::atmosphere::water_phase(
+            Kelvin::new(self.warmest),
+            crate::units::Pascals::new(self.p),
+        )
+    }
+
+    /// Its name: its ID, after its golden system's name and its index for a golden.
+    fn label(&self) -> String {
+        if self.set == "sample" {
+            format!("{} {}", self.id, self.kind)
+        } else {
+            format!(
+                "{} {:04x} ({}) {}",
+                self.set, self.index, self.id, self.kind
+            )
+        }
+    }
+
+    /// Whether it holds no air: `Airless`, or under [`AIRLESS_PRESSURE`](crate::planetary::derive::atmosphere::AIRLESS_PRESSURE).
+    fn airless(&self) -> bool {
+        self.state == SurfaceState::Airless
+            || self.p < crate::planetary::derive::atmosphere::AIRLESS_PRESSURE.value()
+    }
+
+    /// Whether it is a Mars-like world on the warm branch: a `Temperate` world of 0.05–1 bar whose
+    /// largest gas is carbon dioxide, whose frost point at its partial pressure lies below the
+    /// coldest zone, so that no cold trap forms.
+    fn mars_like_warm(&self) -> bool {
+        self.state == SurfaceState::Temperate
+            && self.co2.1
+            && (5e3..=1e5).contains(&self.p)
+            && self.co2_frost.is_some_and(|frost| frost < self.coldest)
+    }
+
+    /// The shoreline's cause of its loss: "impact" where the impact term's share (its impact share
+    /// times its chronology) is the larger and at least a half, "XUV" where the X-ray and
+    /// ultraviolet term's is, "other" where neither takes half.
+    fn loss_cause(&self) -> &'static str {
+        match self.escape {
+            Some((shoreline, ..)) => {
+                let impact = shoreline.impact() * shoreline.chronology();
+                let xuv = shoreline.xuv();
+                if impact.max(xuv) < 0.5 {
+                    "other"
+                } else if impact > xuv {
+                    "impact"
+                } else {
+                    "XUV"
+                }
+            }
+            None => "no escape outcome",
+        }
+    }
+
+    /// One line of its figures.
+    fn describe(&self) -> String {
+        let escape = self.escape.map_or_else(
+            || "none".to_owned(),
+            |(shoreline, share, oxygen)| {
+                format!(
+                    "XUV {:.4}, impact {:.4} × chronology {:.4}, kept {:.4e}, airborne C share \
+                     {share:.4e}, O2 kept {oxygen:.3e} kg",
+                    shoreline.xuv(),
+                    shoreline.impact(),
+                    shoreline.chronology(),
+                    shoreline.kept(),
+                )
+            },
+        );
+        let frost = self
+            .co2_frost
+            .map_or_else(|| "none".to_owned(), |t| format!("{t:.2} K"));
+        let ice = self.co2_ice.map_or_else(
+            || "none".to_owned(),
+            |(area, reservoir)| format!("area {area:.4}, {reservoir:.4e} kg m⁻²"),
+        );
+        format!(
+            "{:?} {:.2} K, {:.4e} bar, T_eq {:.2} K, ice {:.3}, coldest {:.2} K, CO2 x {:.4}{} \
+             (frost {frost}), CO2 ice {ice}; air (bar) [{}]; τ [{}]; escape {escape}; {} passes",
+            self.state,
+            self.t_s,
+            self.p / 1e5,
+            self.t_eq,
+            self.ice,
+            self.coldest,
+            self.co2.0,
+            if self.co2.1 { ", the largest" } else { "" },
+            self.air,
+            self.terms,
+            self.passes,
+        )
+    }
+}
+
+/// One census run under one set of rules ([`under_the_escape_batch_the_census_is_compared_body_by_body`]).
+#[derive(Debug)]
+struct EscapeCensusRun {
+    /// The systems, in the census's order.
+    systems: Vec<PlanetarySystem>,
+    /// The bodies, in the census's order.
+    bodies: Vec<EscapeCensusBody>,
+    /// The systems' generation's wall time, ms.
+    generate_ms: f64,
+    /// The census walk's wall time, its records' derivations, ms.
+    walk_ms: f64,
+    /// What the batch's escape counted over the generation.
+    generated: crate::planetary::derive::atmosphere::ThermostatCounts,
+    /// What it counted over the walk.
+    walked: crate::planetary::derive::atmosphere::ThermostatCounts,
+    /// The partition's solves and the greenhouses' steps over the generation.
+    generated_exits: crate::planetary::chem::partition::ExitCounts,
+    /// And over the walk.
+    walked_exits: crate::planetary::chem::partition::ExitCounts,
+}
+
+impl EscapeCensusRun {
+    /// One line of its counts over the generation and one over the walk: the passes and the wall
+    /// time; the greenhouses and their steps (each step's evaluation and the last), the solves
+    /// the steps' bit-exact exit did not stop, by kind (each atmosphere's first, the thermostat's
+    /// all-airborne states, its trials and its states taken at the edge, and the cold traps' and
+    /// methane reservoirs' solves again); the partition's solves and their sweeps; the step climates
+    /// read; and the thermostat's outcomes.
+    fn counts_line(&self, label: &str) -> String {
+        let line =
+            |what: &str,
+             exits: &crate::planetary::chem::partition::ExitCounts,
+             counts: &crate::planetary::derive::atmosphere::ThermostatCounts| {
+                let per = |a: u64, b: u64| {
+                    u32::try_from(a).map_or(f64::NAN, f64::from)
+                        / u32::try_from(b).map_or(f64::NAN, f64::from)
+                };
+                let first = exits.greenhouses - counts.extra_solves();
+                let first_steps = exits.evaluations
+                    - counts.whole_steps
+                    - counts.trial_steps
+                    - counts.edge_steps
+                    - counts.resolve_steps;
+                format!(
+                    "{what}: greenhouses {} ({} steps, {:.3} each, {} not settled); first solves \
+                 {first} ({first_steps} steps, {:.3} each); the thermostat's all-airborne \
+                 {} ({} steps), trials {} ({} steps), edges {} ({} steps, {} of them a trial \
+                 solved again, {} of those hot in full); solves again {} ({} steps); partition \
+                 solves {} ({:.3} sweeps each), climates {}; searched {}, frozen {}, too cold {}, \
+                 hot {}, cold ends {}; \
+                 edges frozen {}, below the set point by {:.3e} K at most, above by {:.3e} K",
+                    exits.greenhouses,
+                    exits.evaluations,
+                    per(exits.evaluations, exits.greenhouses),
+                    exits.capped,
+                    per(first_steps, first),
+                    counts.whole,
+                    counts.whole_steps,
+                    counts.trials,
+                    counts.trial_steps,
+                    counts.edges,
+                    counts.edge_steps,
+                    counts.retaken,
+                    counts.retaken_hot,
+                    counts.cold_trap + counts.methane,
+                    counts.resolve_steps,
+                    exits.solves,
+                    per(exits.sweeps, exits.solves),
+                    exits.climates,
+                    counts.searched,
+                    counts.frozen,
+                    counts.too_cold,
+                    counts.hot,
+                    counts.cold_end,
+                    counts.taken_frozen,
+                    counts.taken_below,
+                    counts.taken_above,
+                )
+            };
+        format!(
+            "COUNTS {label}: passes {}, generate {:.1} ms, walk {:.1} ms\n  {}\n  {}",
+            self.bodies.iter().map(|b| b.passes).sum::<u32>(),
+            self.generate_ms,
+            self.walk_ms,
+            line("generate", &self.generated_exits, &self.generated),
+            line("walk", &self.walked_exits, &self.walked),
+        )
+    }
+}
+
+/// P14.T53.a's sample census under the escape's batch (spec C4), a measurement for its record:
+/// every present planet, member and moon with a surface of the first 60 sample systems and of the
+/// 15 golden systems at the epoch ([`census_walk`]), each system generated and derived afresh
+/// under the hold and under the batch ([`with_rules`](crate::planetary::chem::escape::with_rules)),
+/// compared body by body. [`whole`]'s and [`golden_systems`]'s systems are cached under the hold,
+/// so they are only checked against the hold's fresh ones (asserted). Stated:
+///
+/// - the bodies the shoreline's impact term and its X-ray and ultraviolet term make airless, by
+///   their hosts' class ([`host_class`]);
+/// - every body whose state or air moves: a state change, or a surface pressure moved by more than
+///   10% or across 100 Pa;
+/// - the moved `Temperate` worlds, bless note 23's iced ones (ices ≥ 0.5) first, with the weathering
+///   thermostat's airborne share;
+/// - the hot `Snowball`s (`T_s` ≥ 273.15 K) under either rules, by their cure under the batch: held
+///   cold, still hot at 10 bar or more (P14.T24.h.a's Rayleigh floor), or neither;
+/// - the Mars-like worlds on the warm branch ([`EscapeCensusBody::mars_like_warm`]), and the carbon
+///   dioxide ice of the moved worlds;
+/// - the bodies that flip from a cold branch (below 200 K) to a hot one (above 400 K);
+/// - the thermostat's extra greenhouse solves, and the generation's and the walk's wall time under
+///   each rules, the medians of three alternated rounds (provisional, the machine's load stated
+///   beside the run);
+/// - the work by kind under each rules ([`EscapeCensusRun::counts_line`]), and under the batch with
+///   the thermostat off (`with_thermostat`), run after the timed rounds: the Temperates the
+///   thermostat raises, their passes with it and without, and their warmest zones' distance from
+///   its set point;
+/// - decision-p14-t54a-ganymede C1.3's six O₂ airs;
+/// - every body of at least 0.5 bar under the hold left under 100 Pa by the batch, with its cause;
+/// - the maximum-greenhouse ceiling's bodies;
+/// - the Temperates the thermostat raises, each with how its passes end under the batch, converged
+///   or bracketed with its residual, any jump named, and its passes against the hold's
+///   (decision-24-cost).
+#[test]
+#[ignore = "a measurement for P14.T53.a's record, run by name"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one census's comparison across the spec's nine statements, each listed"
+)]
+fn under_the_escape_batch_the_census_is_compared_body_by_body() {
+    use std::collections::BTreeMap;
+    use std::time::Instant;
+
+    use crate::planetary::chem::escape::{EscapeRules, with_rules};
+    use crate::planetary::chem::partition::{Exits, with_exits};
+    use crate::planetary::derive::atmosphere::{
+        TEMPERATE_AIRBORNE_CARBON, Thermostat, with_thermostat,
+    };
+
+    let goldens = golden_systems();
+    let sets: Vec<(&str, Seed, &SystemContext)> = sample()
+        .iter()
+        .take(60)
+        .map(|ctx| ("sample", SEED, ctx))
+        .chain(
+            goldens
+                .iter()
+                .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx)),
+        )
+        .collect();
+    let run_with = |rules: EscapeRules, thermostat: Thermostat| {
+        with_rules(rules, || {
+            let start = Instant::now();
+            let ((systems, generated), generated_exits) = with_exits(Exits::Taken, || {
+                with_thermostat(thermostat, || {
+                    sets.iter()
+                        .map(|&(_, seed, ctx)| generate(seed, ctx))
+                        .collect::<Vec<_>>()
+                })
+            });
+            let generate_ms = start.elapsed().as_secs_f64() * 1e3;
+            let start = Instant::now();
+            let ((bodies, walked), walked_exits) = with_exits(Exits::Taken, || {
+                with_thermostat(thermostat, || {
+                    let mut bodies = Vec::new();
+                    for (&(set, _, ctx), system) in sets.iter().zip(&systems) {
+                        census_walk(set, ctx, system, &mut |case| {
+                            bodies.push(EscapeCensusBody::of(case));
+                        });
+                    }
+                    bodies
+                })
+            });
+            let walk_ms = start.elapsed().as_secs_f64() * 1e3;
+            EscapeCensusRun {
+                systems,
+                bodies,
+                generate_ms,
+                walk_ms,
+                generated,
+                walked,
+                generated_exits,
+                walked_exits,
+            }
+        })
+    };
+    let run = |rules: EscapeRules| run_with(rules, Thermostat::On);
+
+    // Three rounds, alternated; the first of each rules is the one compared, and the others must
+    // give it again.
+    let mut times: BTreeMap<EscapeRules, Vec<(f64, f64)>> = BTreeMap::new();
+    let mut first: BTreeMap<EscapeRules, EscapeCensusRun> = BTreeMap::new();
+    for order in [
+        [EscapeRules::Held, EscapeRules::Batch],
+        [EscapeRules::Batch, EscapeRules::Held],
+        [EscapeRules::Held, EscapeRules::Batch],
+    ] {
+        for rules in order {
+            let again = run(rules);
+            eprintln!(
+                "ROUND {rules:?}: generate {:.1} ms, walk {:.1} ms, {} bodies",
+                again.generate_ms,
+                again.walk_ms,
+                again.bodies.len()
+            );
+            times
+                .entry(rules)
+                .or_default()
+                .push((again.generate_ms, again.walk_ms));
+            if let Some(known) = first.get(&rules) {
+                let differing: Vec<String> = known
+                    .bodies
+                    .iter()
+                    .zip(&again.bodies)
+                    .filter(|(a, b)| a != b)
+                    .map(|(a, _)| a.label())
+                    .collect();
+                assert_eq!(differing, Vec::<String>::new(), "{rules:?} again");
+                assert_eq!(known.bodies.len(), again.bodies.len(), "{rules:?} again");
+            } else {
+                first.insert(rules, again);
+            }
+        }
+    }
+    let (held, batch) = (&first[&EscapeRules::Held], &first[&EscapeRules::Batch]);
+    // The work by kind under each, and under the batch with the thermostat off, for its share:
+    // the Temperates it moves, their passes with it and without, and their warmest zones' distance
+    // from its set point.
+    let off = run_with(EscapeRules::Batch, Thermostat::Off);
+    let set = crate::planetary::derive::atmosphere::THERMOSTAT_SET_POINT.value();
+    let thermostat_moved: Vec<(&EscapeCensusBody, &EscapeCensusBody)> = batch
+        .bodies
+        .iter()
+        .zip(&off.bodies)
+        .filter(|(b, _)| {
+            b.state == SurfaceState::Temperate
+                && b.escape.is_some_and(|(_, share, _)| {
+                    share > TEMPERATE_AIRBORNE_CARBON * (1.0 + 1e-9) && share < 1.0
+                })
+        })
+        .collect();
+    let (below, above) = thermostat_moved
+        .iter()
+        .fold((0.0_f64, 0.0_f64), |(below, above), (b, _)| {
+            (below.max(set - b.warmest), above.max(b.warmest - set))
+        });
+    let passes_of = |pick: fn(&(&EscapeCensusBody, &EscapeCensusBody)) -> u32| {
+        thermostat_moved.iter().map(pick).sum::<u32>()
+    };
+    eprintln!(
+        "{}\n{}\n{}\n  the Temperates the thermostat raises: {}, {} passes with it and {} without \
+         ({}), their warmest zones below the set point by {below:.3e} K at most, above by \
+         {above:.3e} K",
+        held.counts_line("Held"),
+        batch.counts_line("Batch"),
+        off.counts_line("Batch, the thermostat off"),
+        thermostat_moved.len(),
+        passes_of(|(b, _)| b.passes),
+        passes_of(|(_, o)| o.passes),
+        thermostat_moved
+            .iter()
+            .map(|(b, o)| format!("{} {} → {}", b.label(), b.passes, o.passes))
+            .collect::<Vec<_>>()
+            .join("; "),
+    );
+
+    // The cached systems are the hold's.
+    let cached: Vec<&PlanetarySystem> = whole()
+        .iter()
+        .take(60)
+        .map(|(_, system)| system)
+        .chain(goldens.iter().map(|(_, _, system)| system))
+        .collect();
+    let stale: Vec<String> = cached
+        .iter()
+        .zip(&held.systems)
+        .zip(&sets)
+        .filter(|((cached, fresh), _)| **cached != *fresh)
+        .map(|(_, (set, _, ctx))| format!("{set} {:?}", ctx.id()))
+        .collect();
+    assert_eq!(stale, Vec::<String>::new(), "cached systems not the hold's");
+    let generation_moved: Vec<String> = held
+        .systems
+        .iter()
+        .zip(&batch.systems)
+        .zip(&sets)
+        .filter(|((a, b), _)| a != b)
+        .map(|(_, (set, _, ctx))| format!("{set} {:?}", ctx.id()))
+        .collect();
+
+    // The bodies, joined by set and key.
+    let by_key = |run: &EscapeCensusRun| -> BTreeMap<(String, String), usize> {
+        run.bodies
+            .iter()
+            .enumerate()
+            .map(|(i, body)| ((body.set.clone(), body.key.clone()), i))
+            .collect()
+    };
+    let (held_keys, batch_keys) = (by_key(held), by_key(batch));
+    let pairs: Vec<(&EscapeCensusBody, &EscapeCensusBody)> = held
+        .bodies
+        .iter()
+        .filter_map(|h| {
+            batch_keys
+                .get(&(h.set.clone(), h.key.clone()))
+                .map(|&i| (h, &batch.bodies[i]))
+        })
+        .collect();
+    let unmatched: Vec<String> = held
+        .bodies
+        .iter()
+        .filter(|h| !batch_keys.contains_key(&(h.set.clone(), h.key.clone())))
+        .map(|h| format!("under the hold only: {}", h.label()))
+        .chain(
+            batch
+                .bodies
+                .iter()
+                .filter(|b| !held_keys.contains_key(&(b.set.clone(), b.key.clone())))
+                .map(|b| format!("under the batch only: {}", b.label())),
+        )
+        .collect();
+    let moved = |h: &EscapeCensusBody, b: &EscapeCensusBody| {
+        let airless_line = crate::planetary::derive::atmosphere::AIRLESS_PRESSURE.value();
+        h.state != b.state
+            || (h.p < airless_line) != (b.p < airless_line)
+            || (b.p - h.p).abs() > 0.1 * h.p
+    };
+    let pair_line = |h: &EscapeCensusBody, b: &EscapeCensusBody| {
+        format!(
+            "{} [{}; {}]\n      hold:  {}\n      batch: {}",
+            h.label(),
+            h.host_class,
+            h.hosts,
+            h.describe(),
+            b.describe()
+        )
+    };
+    let list = |items: &[String]| items.join("\n  ");
+    let count = |n: usize| u32::try_from(n).map_or(f64::NAN, f64::from);
+
+    eprintln!(
+        "bodies: {} under the hold, {} under the batch, {} joined; unmatched {}:\n  {}",
+        held.bodies.len(),
+        batch.bodies.len(),
+        pairs.len(),
+        unmatched.len(),
+        list(&unmatched)
+    );
+    eprintln!(
+        "systems whose generation the batch moves: {} of {}:\n  {}",
+        generation_moved.len(),
+        sets.len(),
+        list(&generation_moved)
+    );
+    for &(h, b) in &pairs {
+        eprintln!(
+            "BODY | {} | {} | {} | {:?} → {:?} | {:.3} → {:.3} K | {:.6e} → {:.6e} Pa | {} | {}",
+            h.set,
+            h.label(),
+            h.host_class,
+            h.state,
+            b.state,
+            h.t_s,
+            b.t_s,
+            h.p,
+            b.p,
+            if moved(h, b) { "moved" } else { "same" },
+            b.loss_cause(),
+        );
+    }
+
+    // 1. The bodies the shoreline makes airless, by host class.
+    let mut airless_by_class: BTreeMap<String, [u32; 4]> = BTreeMap::new();
+    let mut made_airless = Vec::new();
+    for &(h, b) in &pairs {
+        if h.airless() || !b.airless() {
+            continue;
+        }
+        let cause = b.loss_cause();
+        let entry = airless_by_class.entry(h.host_class.clone()).or_default();
+        let both = b
+            .escape
+            .is_some_and(|(s, ..)| s.xuv() >= 0.99 && s.impact() * s.chronology() >= 0.99);
+        match cause {
+            "impact" => entry[0] += 1,
+            "XUV" => entry[1] += 1,
+            _ => entry[2] += 1,
+        }
+        if both {
+            entry[3] += 1;
+        }
+        made_airless.push(format!("({cause}) {}", pair_line(h, b)));
+    }
+    eprintln!(
+        "1. made airless (air under the hold, none under the batch), by host class [impact, XUV, \
+         other, both terms ≥ 0.99]: {airless_by_class:?}; {}:\n  {}",
+        made_airless.len(),
+        list(&made_airless)
+    );
+
+    // 2. Every body whose state or air moves.
+    let mut transitions: BTreeMap<String, u32> = BTreeMap::new();
+    let mut moved_lines = Vec::new();
+    for &(h, b) in &pairs {
+        if !moved(h, b) {
+            continue;
+        }
+        *transitions
+            .entry(format!("{:?} → {:?}", h.state, b.state))
+            .or_default() += 1;
+        moved_lines.push(pair_line(h, b));
+    }
+    eprintln!(
+        "2. moved (a state change, or p_s by more than 10% or across 100 Pa): {} of {}; by \
+         transition {transitions:?}:\n  {}",
+        moved_lines.len(),
+        pairs.len(),
+        list(&moved_lines)
+    );
+
+    // 3. The moved Temperates, the iced ones first.
+    let share = |b: &EscapeCensusBody| b.escape.map_or(f64::NAN, |(_, share, _)| share);
+    let temperate_line = |h: &EscapeCensusBody, b: &EscapeCensusBody| {
+        format!(
+            "{} [{}]: hold {:?} {:.2} K, ice {:.3}, {:.4e} bar → batch {:?} {:.2} K, ice {:.3}, \
+             {:.4e} bar, airborne C share {:.4e}{}",
+            h.label(),
+            h.host_class,
+            h.state,
+            h.t_s,
+            h.ice,
+            h.p / 1e5,
+            b.state,
+            b.t_s,
+            b.ice,
+            b.p / 1e5,
+            share(b),
+            if moved(h, b) { "" } else { " (not moved)" }
+        )
+    };
+    let iced: Vec<String> = pairs
+        .iter()
+        .filter(|(h, _)| h.state == SurfaceState::Temperate && h.ice >= 0.5)
+        .map(|&(h, b)| temperate_line(h, b))
+        .collect();
+    let other_temperates: Vec<String> = pairs
+        .iter()
+        .filter(|(h, b)| {
+            (h.state == SurfaceState::Temperate || b.state == SurfaceState::Temperate)
+                && !(h.state == SurfaceState::Temperate && h.ice >= 0.5)
+                && moved(h, b)
+        })
+        .map(|&(h, b)| temperate_line(h, b))
+        .collect();
+    eprintln!(
+        "3. the iced Temperates under the hold (ices ≥ 0.5): {}:\n  {}\n   the other moved \
+         Temperates (under either rules): {}:\n  {}",
+        iced.len(),
+        list(&iced),
+        other_temperates.len(),
+        list(&other_temperates)
+    );
+
+    // 4. The hot Snowballs by cure.
+    let hot_snowball = |x: &EscapeCensusBody| x.state == SurfaceState::Snowball && x.t_s >= 273.15;
+    let mut cures: BTreeMap<&str, u32> = BTreeMap::new();
+    let mut hot = Vec::new();
+    for &(h, b) in &pairs {
+        if !(hot_snowball(h) || hot_snowball(b)) {
+            continue;
+        }
+        let cure = if b.t_s < 273.15 {
+            "held cold under the batch"
+        } else if b.p >= 1e6 {
+            "still hot at ≥ 10 bar (T24.h.a's Rayleigh)"
+        } else {
+            "neither"
+        };
+        *cures.entry(cure).or_default() += 1;
+        hot.push(format!(
+            "({cure}; hot Snowball under the {}) {}",
+            match (hot_snowball(h), hot_snowball(b)) {
+                (true, true) => "hold and the batch",
+                (true, false) => "hold",
+                (false, _) => "batch",
+            },
+            pair_line(h, b)
+        ));
+    }
+    eprintln!(
+        "4. the hot Snowballs (T_s ≥ 273.15 K) under either rules, by cure under the batch \
+         {cures:?}: {}:\n  {}",
+        hot.len(),
+        list(&hot)
+    );
+
+    // 5. The Mars-like worlds on the warm branch, and the moved worlds' carbon dioxide ice.
+    let warm_held = held.bodies.iter().filter(|x| x.mars_like_warm()).count();
+    let warm: Vec<String> = pairs
+        .iter()
+        .filter(|(_, b)| b.mars_like_warm())
+        .map(|&(h, b)| pair_line(h, b))
+        .collect();
+    let co2_temperates = batch
+        .bodies
+        .iter()
+        .filter(|x| x.state == SurfaceState::Temperate && x.co2.1 && (5e3..=1e5).contains(&x.p))
+        .count();
+    let co2_ice: Vec<String> = pairs
+        .iter()
+        .filter(|(h, b)| moved(h, b) && (h.co2_ice.is_some() || b.co2_ice.is_some()))
+        .map(|&(h, b)| {
+            format!(
+                "{}: CO2 ice {:?} → {:?} (area, kg m⁻²)",
+                h.label(),
+                h.co2_ice,
+                b.co2_ice
+            )
+        })
+        .collect();
+    let moved_without_co2_ice = pairs
+        .iter()
+        .filter(|(h, b)| moved(h, b) && h.co2_ice.is_none() && b.co2_ice.is_none())
+        .count();
+    eprintln!(
+        "5. Mars-like worlds on the warm branch (Temperate, CO2 the largest gas, 0.05–1 bar, CO2's \
+         frost point below the coldest zone): {warm_held} under the hold, {} under the batch (of \
+         {co2_temperates} CO2-led Temperates of 0.05–1 bar under the batch):\n  {}\n   the moved \
+         worlds' CO2 ice: {} with some, {moved_without_co2_ice} with none:\n  {}",
+        warm.len(),
+        list(&warm),
+        co2_ice.len(),
+        list(&co2_ice)
+    );
+
+    // 6. Cold-to-hot flips.
+    let flips: Vec<String> = pairs
+        .iter()
+        .filter(|(h, b)| h.t_s < 200.0 && b.t_s > 400.0)
+        .map(|&(h, b)| pair_line(h, b))
+        .collect();
+    let reverse = pairs
+        .iter()
+        .filter(|(h, b)| h.t_s > 400.0 && b.t_s < 200.0)
+        .count();
+    eprintln!(
+        "6. cold (< 200 K) → hot (> 400 K) flips: {} (and hot → cold {reverse}):\n  {}",
+        flips.len(),
+        list(&flips)
+    );
+
+    // 7. The thermostat's cost and the census's wall time.
+    let raised = batch
+        .bodies
+        .iter()
+        .filter(|b| share(b) > TEMPERATE_AIRBORNE_CARBON * (1.0 + 1e-9) && share(b) < 1.0)
+        .count();
+    let whole_share = batch
+        .bodies
+        .iter()
+        .filter(|b| b.state == SurfaceState::Temperate && share(b) >= 1.0)
+        .count();
+    let stored = batch
+        .bodies
+        .iter()
+        .filter(|b| share(b) <= TEMPERATE_AIRBORNE_CARBON * (1.0 + 1e-9))
+        .count();
+    // The thermostat's moved Temperates by the water at their warmest zone: all of it airborne
+    // only too cold (decision-bump-plan-after-22, "T53.a's thick-air ceiling", K5), and none above
+    // water's liquid range.
+    let by_water = |all: bool| {
+        let mut split: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for b in batch.bodies.iter().filter(|b| {
+            b.state == SurfaceState::Temperate
+                && share(b) > TEMPERATE_AIRBORNE_CARBON * (1.0 + 1e-9)
+                && (share(b) >= 1.0) == all
+        }) {
+            split
+                .entry(format!("{:?}", b.water()))
+                .or_default()
+                .push(format!(
+                    "{} ({:.2} K, warmest {:.5} K)",
+                    b.label(),
+                    b.t_s,
+                    b.warmest
+                ));
+        }
+        split
+    };
+    let (all_airborne, raised_by_water) = (by_water(true), by_water(false));
+    eprintln!(
+        "7a. the moved Temperates by the water at their warmest zone: all of it airborne {:?}; \
+         raised {:?}",
+        all_airborne
+            .iter()
+            .map(|(phase, bodies)| (phase.as_str(), bodies.len()))
+            .collect::<Vec<_>>(),
+        raised_by_water
+            .iter()
+            .map(|(phase, bodies)| (phase.as_str(), bodies.len()))
+            .collect::<Vec<_>>(),
+    );
+    for (phase, bodies) in all_airborne.iter().chain(&raised_by_water) {
+        eprintln!("  {phase}: {}", bodies.join("; "));
+    }
+    let boiled: Vec<&String> = all_airborne
+        .get("Hot")
+        .into_iter()
+        .chain(raised_by_water.get("Hot"))
+        .flatten()
+        .collect();
+    assert_eq!(
+        boiled,
+        Vec::<&String>::new(),
+        "a moved Temperate above water's liquid range"
+    );
+    let passes = |run: &EscapeCensusRun| run.bodies.iter().map(|b| b.passes).sum::<u32>();
+    let median = |values: &mut [f64]| {
+        values.sort_by(f64::total_cmp);
+        values[values.len() / 2]
+    };
+    let mut medians: BTreeMap<EscapeRules, (f64, f64)> = BTreeMap::new();
+    for (rules, rounds) in &times {
+        let mut generated: Vec<f64> = rounds.iter().map(|&(g, _)| g).collect();
+        let mut walked: Vec<f64> = rounds.iter().map(|&(_, w)| w).collect();
+        medians.insert(*rules, (median(&mut generated), median(&mut walked)));
+    }
+    let (held_time, batch_time) = (medians[&EscapeRules::Held], medians[&EscapeRules::Batch]);
+    eprintln!(
+        "7. the thermostat under the batch: generation {:?}, walk {:?}; under the hold: \
+         generation {:?}, walk {:?}. Batch bodies whose airborne C share the thermostat raised \
+         (between the stored {TEMPERATE_AIRBORNE_CARBON:e} and 1) {raised}, Temperate with all of \
+         it airborne {whole_share}, at the stored share {stored}, of {} bodies ({:.2}% raised, \
+         {:.2}% all airborne); the walk's atmosphere passes {} under the hold, {} under the batch \
+         (the walk's extra solves {:.2}% of the batch's passes)",
+        batch.generated,
+        batch.walked,
+        held.generated,
+        held.walked,
+        batch.bodies.len(),
+        100.0 * count(raised) / count(batch.bodies.len()),
+        100.0 * count(whole_share) / count(batch.bodies.len()),
+        passes(held),
+        passes(batch),
+        100.0 * u32::try_from(batch.walked.extra_solves()).map_or(f64::NAN, f64::from)
+            / f64::from(passes(batch)),
+    );
+    eprintln!(
+        "   wall time, medians of 3 alternated rounds (ms): hold generate {:.1}, walk {:.1}, total \
+         {:.1}; batch generate {:.1}, walk {:.1}, total {:.1}; batch ÷ hold: generate {:.3}, walk \
+         {:.3}, total {:.3}; every round {times:?}",
+        held_time.0,
+        held_time.1,
+        held_time.0 + held_time.1,
+        batch_time.0,
+        batch_time.1,
+        batch_time.0 + batch_time.1,
+        batch_time.0 / held_time.0,
+        batch_time.1 / held_time.1,
+        (batch_time.0 + batch_time.1) / (held_time.0 + held_time.1),
+    );
+
+    // 8. The six O₂ airs.
+    for (system, index) in OXYGEN_AIRS {
+        let id = format!("{system:016x}.{index:04x}");
+        let found = pairs.iter().find(|(h, _)| h.id == id);
+        eprintln!(
+            "8. {id}: {}",
+            found.map_or_else(|| "not in the census".to_owned(), |&(h, b)| pair_line(h, b))
+        );
+    }
+
+    // 9. The thick airs the batch removes.
+    let thick_airs_lost: Vec<String> = pairs
+        .iter()
+        .filter(|(h, b)| h.p >= 0.5e5 && b.p < 100.0)
+        .map(|&(h, b)| format!("({}) {}", b.loss_cause(), pair_line(h, b)))
+        .collect();
+    eprintln!(
+        "9. at least 0.5 bar under the hold, under 100 Pa under the batch: {}:\n  {}",
+        thick_airs_lost.len(),
+        list(&thick_airs_lost)
+    );
+
+    // 10. The maximum-greenhouse ceiling ("T53.a's thick-air ceiling", K4, test 3): no body beyond
+    // the limit above max(273.15 K, T_rest); those at it by host class.
+    let beyond: Vec<&EscapeCensusBody> = batch
+        .bodies
+        .iter()
+        .filter(|b| {
+            b.ceiling == crate::planetary::derive::atmosphere::GreenhouseCeiling::MaximumGreenhouse
+        })
+        .collect();
+    let mut at_cap: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for b in beyond
+        .iter()
+        .filter(|b| !b.airless() && b.t_s >= b.cap - 1e-6)
+    {
+        at_cap
+            .entry(b.host_class.as_str())
+            .or_default()
+            .push(format!(
+                "{} {:?} {:.2} K, {:.4e} bar",
+                b.label(),
+                b.state,
+                b.t_s,
+                b.p / 1e5
+            ));
+    }
+    let above: Vec<String> = beyond
+        .iter()
+        .filter(|b| b.t_s > b.cap + 1e-6)
+        .map(|b| format!("{}: {:.3} K over its cap {:.3} K", b.label(), b.t_s, b.cap))
+        .collect();
+    eprintln!(
+        "10. beyond the maximum-greenhouse limit under the batch: {} bodies; at the ceiling, by host \
+         class {:?}; above it {}",
+        beyond.len(),
+        at_cap
+            .iter()
+            .map(|(class, bodies)| (*class, bodies.len()))
+            .collect::<Vec<_>>(),
+        above.len()
+    );
+    for (class, bodies) in &at_cap {
+        eprintln!("  {class}: {}", bodies.join("; "));
+    }
+
+    // 11. The Temperates the thermostat raises (decision-24-cost): how each one's passes end under
+    // the batch, converged or bracketed with its residual, and whether at a jump, with its passes
+    // under the batch against the hold's.
+    let raised_endings: Vec<String> = thermostat_moved
+        .iter()
+        .map(|&(b, _)| {
+            use crate::planetary::derive::passes::Convergence;
+            let ending = match b.convergence {
+                Convergence::Converged => "converged".to_owned(),
+                Convergence::Bracketed { residual, fit } => format!(
+                    "bracketed, residual {residual:.3e}, {fit:?}{}",
+                    if b.convergence.is_jump() {
+                        ", a jump"
+                    } else {
+                        ", no jump"
+                    }
+                ),
+            };
+            let held_passes = held_keys
+                .get(&(b.set.clone(), b.key.clone()))
+                .map_or_else(|| "none".to_owned(), |&i| held.bodies[i].passes.to_string());
+            format!(
+                "{}: {ending}; {} passes under the batch, {held_passes} under the hold",
+                b.label(),
+                b.passes
+            )
+        })
+        .collect();
+    eprintln!(
+        "11. the Temperates the thermostat raises, by their passes' ending under the batch: {}",
+        raised_endings.len()
+    );
+    for (n, line) in raised_endings.iter().enumerate() {
+        eprintln!("  {}. {line}", n + 1);
+    }
+
+    assert_eq!(
+        above,
+        Vec::<String>::new(),
+        "beyond the limit, above the ceiling"
+    );
+}
+
 /// The bistability re-check's driver from the generator's own first albedo, 0.3, is the solve to
 /// the bit (`PassDriver::From`; decision-pre-23-review item 26): over the first 5 whole systems'
 /// present planets, members and moons with a surface, over their records at the epoch.
@@ -8588,4 +9688,429 @@ fn every_present_planet_s_keyed_members_hold_registry_keys_only() {
     }
     eprintln!("{planets} present planets with a surface, {keys} keys, each the registry's");
     assert!(planets > 50 && keys > 500, "{planets} {keys}");
+}
+
+// P14.T53.a part C: the escape's stated cases in the sample and the goldens, each system generated
+// afresh under the escape's batch rules (the cached systems were built under the rules in force).
+
+/// The present planet or member `index` of `system` (of `ctx`) derived at the epoch under the rules
+/// in force, as the record derives it: its derivation, its orbit then, and its hosts' mass then.
+fn derived_at_epoch(
+    ctx: &SystemContext,
+    system: &PlanetarySystem,
+    index: u16,
+) -> Option<(DerivedBody, KeplerElements, SolarMasses)> {
+    let t = UniverseTime::EPOCH;
+    let epoch = Epoch::new(system, ctx, t).with_shades();
+    let cosines = HourCosines::new();
+    let body = system
+        .bodies()
+        .iter()
+        .find(|body| body.index.get() == index)?;
+    if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+        return None;
+    }
+    let zone = system.zone_of(body);
+    let host = fate_host(ctx, zone);
+    let fate = system.fate_of(body, &host);
+    let at = fate.at(t);
+    let orbit = *at.orbit()?;
+    let (derived, _, _) =
+        system.primary_derived(&epoch, &cosines, (body, &fate), &at, PassDriver::Solve);
+    Some((derived, orbit, fate.host_mass(t)))
+}
+
+/// The cosmic shoreline's figures of a planet or member `derived` on `orbit` about hosts of mass
+/// `host`: its escape speed, its X-ray and ultraviolet fluence over Earth's and the insolation, each
+/// in dex from the line 0.66 (v ÷ 5 km s⁻¹)⁴ (Zahnle and Catling 2017, Fig. 1, as
+/// `SHORELINE_FLUENCE_AT_REFERENCE` reads it; positive on the airless side), and its impact speed
+/// over its escape speed at its circular orbital speed.
+fn shoreline_figures(derived: &DerivedBody, orbit: &KeplerElements, host: SolarMasses) -> String {
+    use crate::planetary::chem::escape::{
+        SHORELINE_FLUENCE_AT_REFERENCE, SHORELINE_REFERENCE_ESCAPE_SPEED, planet_impact_speed,
+        shoreline_distance_dex,
+    };
+    use crate::planetary::derive::atmosphere::earth_xuv_fluence;
+    use crate::units::consts::GRAVITATIONAL_CONSTANT;
+    use crate::units::{Kilograms, Metres, MetresPerSecond};
+    let (m, r) = (
+        Kilograms::from(derived.mass()).value(),
+        Metres::from(derived.radius()).value(),
+    );
+    let escape = MetresPerSecond::new((2.0 * GRAVITATIONAL_CONSTANT * m / r).sqrt());
+    let fluence = derived.xuv_fluence().value() / earth_xuv_fluence().value();
+    let line = SHORELINE_FLUENCE_AT_REFERENCE
+        * crate::math::powi(escape.value() / SHORELINE_REFERENCE_ESCAPE_SPEED.value(), 4);
+    let insolation = derived.flux().value();
+    let orbital = (GRAVITATIONAL_CONSTANT * Kilograms::from(host).value()
+        / orbit.semi_major_axis().value())
+    .sqrt();
+    let impact = planet_impact_speed(MetresPerSecond::new(orbital), escape);
+    format!(
+        "v_esc {:.3} km/s; XUV {fluence:.4} F⊕ at {:+.3} dex; insolation {insolation:.4} S⊕ at \
+         {:+.3} dex; impact {:.3} km/s, ratio {:.3}",
+        escape.value() / 1e3,
+        shoreline_distance_dex(fluence, escape),
+        crate::math::log10(insolation / line),
+        impact.value() / 1e3,
+        impact.value() / escape.value(),
+    )
+}
+
+/// A one-line statement of an air under the escape's batch: its state, temperature, pressure,
+/// oxygen and carbon dioxide, and its escape's shoreline and oxygen.
+fn escape_line(derived: &DerivedBody) -> String {
+    let air = derived.atmosphere();
+    let bar = |gas: Gas| air.partial_pressures().of(gas).value() / 1e5;
+    format!(
+        "{:?} {:.2} K at {:.4} bar (O2 {:.4} bar, CO2 {:.4} bar, N2 {:.4} bar, water inventory \
+         {:.4e} kg); escape {:?}",
+        air.state(),
+        air.surface_temperature().value(),
+        air.surface_pressure().map_or(0.0, |p| p.value() / 1e5),
+        bar(Gas::Oxygen),
+        bar(Gas::CarbonDioxide),
+        bar(Gas::Nitrogen),
+        derived.inventory().water().value(),
+        air.escape()
+            .map(|escape| (escape.shoreline(), escape.oxygen())),
+    )
+}
+
+/// decision-p14-t54a-ganymede C1.3's six O₂ airs, as the hold records them (98.7, 9.19, 2,678,
+/// 351, 100 and 14.9 bar of O₂), by system and body: 21fff6587ff80000.0200,
+/// 01ffeb2c20000000.0400, 01ffeb2c1ffe0000.0200 (the 2,678 bar case), 02001b2c9ffe0000.0100,
+/// 01ffeb2c20000000.0200 and 01ffeb2c20000000.0300.
+const OXYGEN_AIRS: [(u64, u16); 6] = [
+    (0x21ff_f658_7ff8_0000, 0x0200),
+    (0x01ff_eb2c_2000_0000, 0x0400),
+    (0x01ff_eb2c_1ffe_0000, 0x0200),
+    (0x0200_1b2c_9ffe_0000, 0x0100),
+    (0x01ff_eb2c_2000_0000, 0x0200),
+    (0x01ff_eb2c_2000_0000, 0x0300),
+];
+
+/// P14.T53.a: decision-p14-t54a-ganymede C1.3's six O₂ airs and the 2,678 bar case, recomputed
+/// under the batch's timed route (Luger and Barnes 2015's loss over the exposure, Schaefer et al.
+/// 2016's melt, Earth's sink per unit area after it, and the cosmic shoreline before), each stated
+/// beside the hold's, with its shoreline's figures (for P14.T54.b's bless note).
+#[test]
+#[ignore = "a measurement for P14.T53.a's record, run by name"]
+fn under_the_escape_batch_the_six_oxygen_airs_are_stated() {
+    use crate::planetary::chem::escape::{EscapeRules, with_rules};
+    let mut systems: Vec<(u64, PlanetarySystem, PlanetarySystem)> = Vec::new();
+    for (id, index) in OXYGEN_AIRS {
+        let ctx = sample()
+            .iter()
+            .find(|ctx| ctx.id().raw() == id)
+            .expect("the six O₂ airs' systems are in the sample");
+        if !systems.iter().any(|(known, ..)| *known == id) {
+            let held = generate(SEED, ctx);
+            let batch = with_rules(EscapeRules::Batch, || generate(SEED, ctx));
+            systems.push((id, held, batch));
+        }
+        let (_, held, batch) = systems.iter().find(|(known, ..)| *known == id).unwrap();
+        let (was, ..) = derived_at_epoch(ctx, held, index).expect("a present body");
+        let (now, orbit, host) =
+            with_rules(EscapeRules::Batch, || derived_at_epoch(ctx, batch, index))
+                .expect("a present body");
+        eprintln!(
+            "{id:016x}.{index:04x}: {:.3} M⊕, under the batch {}\n  {}\n  under the hold {}",
+            now.mass().value(),
+            escape_line(&now),
+            shoreline_figures(&now, &orbit, host),
+            escape_line(&was),
+        );
+    }
+}
+
+/// The present maximum-greenhouse ratio, Σ Fᵢ ÷ `S_eff,max`, of the planet or member `index` of
+/// `system` at the epoch ([`limit_now`]): below 1 beyond the limit.
+fn maximum_greenhouse_ratio_at_epoch(
+    ctx: &SystemContext,
+    system: &PlanetarySystem,
+    index: u16,
+) -> f64 {
+    let t = UniverseTime::EPOCH;
+    let epoch = Epoch::new(system, ctx, t);
+    let body = system
+        .bodies()
+        .iter()
+        .find(|body| body.index.get() == index)
+        .expect("a body");
+    let zone = system.zone_of(body);
+    let host = fate_host(ctx, zone);
+    let fate = system.fate_of(body, &host);
+    let orbit = *fate.at(t).orbit().expect("an orbit at the epoch");
+    limit_now(
+        crate::planetary::derive::habitable_zone::HabitableLimit::MaximumGreenhouse,
+        &epoch,
+        zone,
+        &orbit,
+    )
+}
+
+/// One line of the state of `derived` for the ceiling's and the thermostat's named bodies: its
+/// state, `T_s`, `p_s`, its carbon dioxide airborne and condensed (column weights, bar), the O₂
+/// it keeps and its thermostat's airborne carbon share.
+fn named_state(derived: &DerivedBody) -> String {
+    let air = derived.atmosphere();
+    let co2 = Gas::CarbonDioxide;
+    let (airborne, column) = (
+        air.partial_pressures().of(co2).value(),
+        air.inventory_weights().of(co2).value(),
+    );
+    let escape = air.escape();
+    format!(
+        "{:?} {:.3} K, {:.4e} bar; CO2 {:.4e} bar airborne, {:.4e} bar condensed; O2 kept {:.4e} \
+         kg, airborne C share {:.4e}",
+        air.state(),
+        air.surface_temperature().value(),
+        air.surface_pressure().map_or(0.0, |p| p.value() / 1e5),
+        airborne / 1e5,
+        (column - airborne).max(0.0) / 1e5,
+        escape.map_or(0.0, |e| e.oxygen().kept().value()),
+        escape.map_or(
+            f64::NAN,
+            crate::planetary::chem::escape::EscapeOutcome::airborne_carbon_share
+        ),
+    )
+}
+
+/// The census's three thick airs beyond the maximum-greenhouse limit that the batch, before its
+/// ceiling, made 2,469 K and 2,599 K magma oceans and a 671 K runaway (decision-bump-plan-after-22,
+/// "T53.a's thick-air ceiling", K1).
+const CEILING_BODIES: [(u64, u16); 3] = [
+    (0x0200_1b2c_dfff_0000, 0x0100),
+    (0x01ff_eb2c_2000_0000, 0x0500),
+    (0x01ff_eb2c_2000_0000, 0x0300),
+];
+
+/// The ceiling's three (K4, test 2), under both 24 holds (the escape's batch and the Rayleigh
+/// floor): each beyond the maximum-greenhouse limit now (its present ratio stated, and below 1),
+/// none a `MagmaOcean`, each at or under max(273.15 K, `T_rest`), its new state stated.
+#[test]
+fn under_the_escape_batch_the_ceiling_holds_the_three_thick_airs_at_or_under_freezing() {
+    use crate::planetary::chem::escape::{EscapeRules, with_rules};
+    use crate::planetary::derive::atmosphere::{
+        Absorber, GreenhouseConstants, WATER_MELTING_POINT, grey_surface_temperature,
+    };
+    with_rules(EscapeRules::Batch, || {
+        for (id, index) in CEILING_BODIES {
+            let ctx = sample()
+                .iter()
+                .find(|ctx| ctx.id().raw() == id)
+                .expect("the ceiling's three are in the sample");
+            let system = generate(SEED, ctx);
+            let ratio = maximum_greenhouse_ratio_at_epoch(ctx, &system, index);
+            let (derived, ..) = derived_at_epoch(ctx, &system, index).expect("a present body");
+            let air = derived.atmosphere();
+            let rest = GreenhouseConstants::in_force()
+                .terms(
+                    air.partial_pressures(),
+                    derived.equilibrium_temperature(),
+                    derived.surface_gravity(),
+                )
+                .iter()
+                .filter(|term| matches!(term.absorber(), Absorber::Nitrogen | Absorber::Hydrogen))
+                .fold(0.0, |sum, term| sum + term.depth());
+            let cap = grey_surface_temperature(derived.equilibrium_temperature(), rest)
+                .value()
+                .max(WATER_MELTING_POINT.value());
+            eprintln!(
+                "{id:016x}.{index:04x}: present ratio {ratio:.4}, T_eq {:.3} K, cap {cap:.3} K: {}",
+                derived.equilibrium_temperature().value(),
+                named_state(&derived)
+            );
+            assert!(
+                ratio < 1.0,
+                "{id:016x}.{index:04x}: inside the limit, at {ratio}"
+            );
+            assert_ne!(
+                air.state(),
+                SurfaceState::MagmaOcean,
+                "{id:016x}.{index:04x}"
+            );
+            assert!(
+                air.surface_temperature().value() <= cap + 1e-9,
+                "{id:016x}.{index:04x}: {} K over {cap} K",
+                air.surface_temperature().value()
+            );
+        }
+    });
+}
+
+/// The census's three Temperates the weathering thermostat took all-airborne past the liquid
+/// window before its correction (decision-bump-plan-after-22, "T53.a's thick-air ceiling", K5):
+/// 02000b2ce0010000.0200 (199 → 850 K, 577 bar), 01ffeb2c60020000.0400 (189 → 861 K, 490 bar),
+/// and `close_binary` .0600 (195 → 723 K, 183 bar).
+const OVERSHOT_TEMPERATES: [(&str, u64, u16); 3] = [
+    ("sample", 0x0200_0b2c_e001_0000, 0x0200),
+    ("sample", 0x01ff_eb2c_6002_0000, 0x0400),
+    ("close_binary", 0, 0x0600),
+];
+
+/// The thermostat's correction (R3 Q1 (3), as K5 applies it), on its three overshot Temperates,
+/// under both 24 holds: each stays `Temperate` with part of its carbon stored, its surface at the
+/// set point, liquid at its edge or frozen just below a jump, and none above water's liquid range
+/// (each state stated). Before it, each took all its carbon airborne at 723–861 K.
+#[test]
+fn under_the_escape_batch_the_three_overshot_temperates_stop_at_the_set_point() {
+    use crate::planetary::chem::escape::{EscapeRules, with_rules};
+    use crate::planetary::derive::atmosphere::{WaterPhase, water_phase};
+    with_rules(EscapeRules::Batch, || {
+        for (set, id, index) in OVERSHOT_TEMPERATES {
+            let (ctx, seed) = if set == "sample" {
+                let ctx = sample()
+                    .iter()
+                    .find(|ctx| ctx.id().raw() == id)
+                    .expect("the overshot Temperates' systems are in the sample");
+                (ctx, SEED)
+            } else {
+                let (_, ctx, _) = golden_systems()
+                    .iter()
+                    .find(|(golden, ..)| *golden == set)
+                    .expect("a golden system");
+                (ctx, Seed::new(GOLDEN_SYSTEMS_SEED))
+            };
+            let system = generate(seed, ctx);
+            let (derived, ..) = derived_at_epoch(ctx, &system, index).expect("a present body");
+            let air = derived.atmosphere();
+            let (t, p) = (
+                air.surface_temperature(),
+                air.surface_pressure()
+                    .unwrap_or(crate::units::Pascals::ZERO),
+            );
+            let share = air.escape().map_or(
+                f64::NAN,
+                crate::planetary::chem::escape::EscapeOutcome::airborne_carbon_share,
+            );
+            eprintln!("{set} {id:016x}.{index:04x}: {}", named_state(&derived));
+            assert_eq!(air.state(), SurfaceState::Temperate, "{set} {index:04x}");
+            assert!(share < 1.0, "{set} {index:04x}: all of its carbon airborne");
+            assert_ne!(water_phase(t, p), WaterPhase::Hot, "{set} {index:04x}");
+            assert!(t.value() < 330.0, "{set} {index:04x}: {} K", t.value());
+        }
+    });
+}
+
+/// P14.T53.a's cost lever: a methane reservoir whose air stays at its cap through its loss keeps
+/// the state its greenhouse solved, the partition holding the same air. Over the golden systems'
+/// generation and the sample's first 20, every such loss is solved again all the same and compared:
+/// the largest share by which a temperature or a partial pressure moves is under 10⁻⁹, the passes'
+/// own convergence (`ATMOSPHERE_CONVERGENCE`), with the counts stated.
+#[test]
+fn under_the_escape_batch_a_saturated_methane_reservoir_s_loss_keeps_its_state() {
+    use crate::planetary::chem::escape::{EscapeRules, with_rules};
+    use crate::planetary::derive::atmosphere::{Thermostat, with_resolve_check, with_thermostat};
+    let ((((), difference), counts), systems) = with_rules(EscapeRules::Batch, || {
+        let mut systems = 0;
+        let checked = with_thermostat(Thermostat::On, || {
+            with_resolve_check(|| {
+                for (_, ctx, _) in golden_systems() {
+                    let _ = generate(Seed::new(GOLDEN_SYSTEMS_SEED), ctx);
+                    systems += 1;
+                }
+                for ctx in sample().iter().take(20) {
+                    let _ = generate(SEED, ctx);
+                    systems += 1;
+                }
+            })
+        });
+        (checked, systems)
+    });
+    eprintln!(
+        "{systems} systems under the batch: {counts:?}; the largest share a saturated reservoir's \
+         solve again moves: {difference:e}"
+    );
+    assert!(counts.saturated > 0, "{counts:?}");
+    assert!(difference < 1e-9, "{difference:e}: {counts:?}");
+}
+
+/// The golden systems' knife edges of the cosmic shoreline (decision-p14-t54a-ganymede §1.7, C0
+/// item 1; decision-bump-plan-after-22, R3 Q2): `close_binary` e304, `hierarchical_triple` 0500
+/// and `solar_like` .0300.
+const KNIFE_EDGES: [(&str, u16); 3] = [
+    ("close_binary", 0xe304),
+    ("hierarchical_triple", 0x0500),
+    ("solar_like", 0x0300),
+];
+
+/// P14.T53.a: the shoreline's knife edges under the batch, stated, not asserted (R3 Q2): each one's
+/// verdict, its distance in dex on the XUV axis and on the insolation axis, and its impact ratio,
+/// beside the hold's state; and the weathering thermostat's solves over them.
+#[test]
+#[ignore = "a measurement for P14.T53.a's record, run by name"]
+fn under_the_escape_batch_the_shoreline_s_knife_edges_are_stated() {
+    use crate::planetary::chem::escape::{EscapeRules, with_rules};
+    use crate::planetary::derive::atmosphere::{Thermostat, with_thermostat};
+    for (name, index) in KNIFE_EDGES {
+        let (_, ctx, held) = golden_systems()
+            .iter()
+            .find(|(golden, ..)| *golden == name)
+            .expect("a golden system");
+        let (was, ..) = derived_at_epoch(ctx, held, index).expect("a present body");
+        let ((now, orbit, host), counts) = with_thermostat(Thermostat::On, || {
+            with_rules(EscapeRules::Batch, || {
+                let batch = generate(Seed::new(GOLDEN_SYSTEMS_SEED), ctx);
+                derived_at_epoch(ctx, &batch, index).expect("a present body")
+            })
+        });
+        eprintln!(
+            "{name} {index:04x}: {:.3} M⊕, under the batch {}\n  {}\n  under the hold {}\n  {counts:?}",
+            now.mass().value(),
+            escape_line(&now),
+            shoreline_figures(&now, &orbit, host),
+            escape_line(&was),
+        );
+    }
+}
+
+/// P14.T53.a: each golden envelope's He/H and helium mass fraction Y after its escape's
+/// fractionation, stated for P14.T54.b to pass to P14.T50.b as its primordial He/H
+/// (decision-p14-t50b-envelope §5): every planet of the golden systems that formed with an
+/// envelope, its envelope's share and loss, generated and derived under the batch. Stated with
+/// them, for the batch's cost against decision-p14-t54a-passes §C.6, the weathering thermostat's
+/// and the batch's extra greenhouse solves over the fifteen systems' generation and their planets'
+/// and members' derivations.
+#[test]
+#[ignore = "a measurement for P14.T53.a's record, run by name"]
+fn under_the_escape_batch_the_golden_envelopes_helium_is_stated() {
+    use crate::planetary::chem::escape::{EscapeRules, with_rules};
+    use crate::planetary::derive::atmosphere::{Thermostat, with_thermostat};
+    let ((), counts) = with_thermostat(Thermostat::On, || {
+        with_rules(EscapeRules::Batch, || {
+            for (name, ctx, _) in golden_systems() {
+                let system = generate(Seed::new(GOLDEN_SYSTEMS_SEED), ctx);
+                for body in system.bodies() {
+                    let Some((derived, ..)) = derived_at_epoch(ctx, &system, body.index.get())
+                    else {
+                        continue;
+                    };
+                    let Some(envelope) = derived
+                        .atmosphere()
+                        .escape()
+                        .and_then(|escape| escape.envelope().copied())
+                    else {
+                        continue;
+                    };
+                    eprintln!(
+                        "{name} {:04x}: {:.3} M⊕, {:?}, envelope {:.5} of its mass (formed with \
+                         {:.5}, {:.4e} M⊕ lost); He/H {:.6}, Y {:.6}, H kept {:.6}, He kept {:.6}",
+                        body.index.get(),
+                        derived.mass().value(),
+                        derived.atmosphere().state(),
+                        derived.fractions().envelope(),
+                        derived.initial_envelope_fraction(),
+                        derived.envelope_lost().value(),
+                        envelope.helium_to_hydrogen(),
+                        envelope.helium_mass_fraction(),
+                        envelope.hydrogen_kept_share(),
+                        envelope.helium_kept_share(),
+                    );
+                }
+            }
+        });
+    });
+    eprintln!("the batch's extra solves over the goldens: {counts:?}");
 }

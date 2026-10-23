@@ -121,7 +121,9 @@ use super::sun::Sunlight;
 use super::transport::{Diffusing, REFERENCE_PRESSURE_PA, rotation_ratio, transport_kg_m2_s};
 use crate::math;
 use crate::planetary::chem::partition::WATER_SURFACE_HUMIDITY;
-use crate::planetary::derive::atmosphere::{Gas, GreenhouseConstants, PartialPressures};
+use crate::planetary::derive::atmosphere::{
+    Absorber, Gas, GreenhouseConstants, GreyTerm, PartialPressures,
+};
 use crate::planetary::hooks::surface::{
     EARTH_AIR_MOLAR_MASS_G_PER_MOL, EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K,
     FLUX_OPTICAL_DEPTH_PER_GREY, night_floor,
@@ -1181,17 +1183,18 @@ const BAR_PA: f64 = 1e5;
 /// §2.2): the constants, and the share of water's saturation pressure, by weight, that the water
 /// term's partial pressure takes, for the air `air`.
 ///
-/// P14.T57.a's fits ([`GreenhouseConstants::FITTED`], water 4.47 per √bar) with the water held at
-/// [`WATER_SURFACE_HUMIDITY`] of its saturation pressure by mole (Manabe and Wetherald's 0.77,
-/// P14.T51.a's partition), so [`WATER_SURFACE_HUMIDITY`] × `M_w` ÷ μ of it by weight, μ the air's
-/// mean molar mass: 0.481 on the reference Earth's air (μ 28.82 g mol⁻¹; plan 14's
-/// `GREENHOUSE_WATER` documents 0.496 from its own conversion). P14.T54.a's deletion of the
-/// snapshot lane's hold left this, the batch's arm, the only one (main's ruling on
-/// decision-r09-t13i, 2026-10-20).
+/// The constants in force ([`GreenhouseConstants::in_force`]): P14.T57.a's fits (water 4.47 per
+/// √bar) to version 23, and P14.T53.a's broadened carbon dioxide term with its refits from 24,
+/// behind the escape's hold. The water is held at [`WATER_SURFACE_HUMIDITY`] of its saturation
+/// pressure by mole (Manabe and Wetherald's 0.77, P14.T51.a's partition), so
+/// [`WATER_SURFACE_HUMIDITY`] × `M_w` ÷ μ of it by weight, μ the air's mean molar mass: 0.481 on
+/// the reference Earth's air (μ 28.82 g mol⁻¹; plan 14's `GREENHOUSE_WATER` documents 0.496 from
+/// its own conversion). P14.T54.a's deletion of the snapshot lane's hold left the batch's humidity
+/// the only one (main's ruling on decision-r09-t13i, 2026-10-20).
 #[must_use]
 fn greenhouse_in_force(air: &Air) -> (GreenhouseConstants, f64) {
     (
-        GreenhouseConstants::FITTED,
+        GreenhouseConstants::in_force(),
         WATER_SURFACE_HUMIDITY * Gas::Water.molar_mass_g_per_mol() / air.molar_mass_g_per_mol,
     )
 }
@@ -1305,8 +1308,10 @@ impl Greenhouse {
     /// solution's water activity).
     ///
     /// `τ_d` takes plan 14's grey terms ([`GreenhouseConstants::terms`]) of the inputs' gases at
-    /// their column weights ([`partial_pressure_pa`]), water's left out, and nitrogen's collision
-    /// factor at the body's equilibrium
+    /// their column weights ([`partial_pressure_pa`]) under the body's gravity, water vapour's term
+    /// left out but its weight kept in the surface pressure that the broadened carbon dioxide term
+    /// reads from version 24, with water's cloud term, and nitrogen's collision factor at the
+    /// body's equilibrium
     /// temperature, here σ`T_eq`⁴ = (1 − α(T\*)) F ÷ 4 + `F_int`: F the light of its hosts
     /// ([`CoarseInputs::host_flux`]), α the model's albedo law at plan 14's mean T\* and `F_int`
     /// its heat flow, the model's own equilibrium with the sunlight at its mean (the lane's choice;
@@ -1352,21 +1357,19 @@ impl Greenhouse {
             / 4.0
             + inputs.heat_flow().value();
         let equilibrium = Kelvin::new((absorbed.max(0.0) / STEFAN_BOLTZMANN).sqrt().sqrt());
-        let dry = PartialPressures::from_fn(|gas| match gas {
-            Gas::Water => Pascals::ZERO,
-            Gas::CarbonDioxide
-            | Gas::Nitrogen
-            | Gas::Oxygen
-            | Gas::Argon
-            | Gas::Methane
-            | Gas::Ammonia
-            | Gas::Hydrogen
-            | Gas::Helium => Pascals::new(partial_pressure_pa(gas, fraction(gas), pressure, air)),
+        let column = PartialPressures::from_fn(|gas| {
+            Pascals::new(partial_pressure_pa(gas, fraction(gas), pressure, air))
         });
+        // Water vapour's term is left out, not its weight: the √p terms read their own gas alone,
+        // and from version 24 the broadened carbon dioxide term reads the whole column's pressure
+        // and water's cloud term, which follows no column temperature, stays in. Under P14.T57.a's
+        // constants the cloud's and hydrogen's zero depths leave the sum version 23's to the bit: a
+        // fold from +0 never holds −0, the one value a zero's sum changes.
         let dry_depth = constants
-            .terms(&dry, equilibrium)
+            .terms(&column, equilibrium, inputs.gravity())
             .iter()
-            .fold(0.0, |sum, &(_, term)| sum + term);
+            .filter(|term| term.absorber() != Absorber::WaterVapour)
+            .fold(0.0, |sum, term| sum + term.depth());
         let unit = PartialPressures::from_fn(|gas| match gas {
             Gas::Water => Pascals::new(BAR_PA),
             Gas::CarbonDioxide
@@ -1379,10 +1382,10 @@ impl Greenhouse {
             | Gas::Helium => Pascals::ZERO,
         });
         let constant = constants
-            .terms(&unit, equilibrium)
+            .terms(&unit, equilibrium, inputs.gravity())
             .iter()
-            .find(|(gas, _)| *gas == Gas::Water)
-            .map_or(0.0, |&(_, term)| term);
+            .find(|term| term.absorber() == Absorber::WaterVapour)
+            .map_or(0.0, GreyTerm::depth);
         Self::Vapour {
             dry_depth,
             water: WaterVapour {
@@ -6809,10 +6812,14 @@ mod tests {
                 | Gas::Helium => Pascals::ZERO,
             });
             constants
-                .terms(&unit, Kelvin::new(255.0))
+                .terms(
+                    &unit,
+                    Kelvin::new(255.0),
+                    crate::planetary::hooks::surface::STANDARD_GRAVITY,
+                )
                 .iter()
-                .find(|(gas, _)| *gas == Gas::Water)
-                .map_or(0.0, |&(_, term)| term)
+                .find(|term| term.absorber() == Absorber::WaterVapour)
+                .map_or(0.0, GreyTerm::depth)
         };
         let (batch, batch_humidity) = greenhouse_in_force(&air);
         assert!((water_term(&batch) - 4.47).abs() < 1e-12);

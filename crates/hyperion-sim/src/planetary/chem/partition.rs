@@ -1021,6 +1021,8 @@ pub(crate) struct ExitCounts {
     pub(crate) climates: u64,
     pub(crate) checked_solves: u64,
     pub(crate) checked_greenhouses: u64,
+    /// The greenhouses that took every step, none repeating the one before.
+    pub(crate) capped: u64,
 }
 
 #[cfg(test)]
@@ -1034,6 +1036,7 @@ impl ExitCounts {
         climates: 0,
         checked_solves: 0,
         checked_greenhouses: 0,
+        capped: 0,
     };
 }
 
@@ -1060,6 +1063,14 @@ pub(crate) fn with_exits<R>(exits: Exits, run: impl FnOnce() -> R) -> (R, ExitCo
         result,
         EXIT_COUNTS.with(|cell| cell.replace(ExitCounts::ZERO)),
     )
+}
+
+/// What the exits have counted on this thread so far, left as it is: the counts a caller inside
+/// [`with_exits`] reads before and after a step of its own.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn exit_counts() -> ExitCounts {
+    EXIT_COUNTS.with(core::cell::Cell::get)
 }
 
 /// Counts with `count` where the exits are taken on this thread: the generator's path, which

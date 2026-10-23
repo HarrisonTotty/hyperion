@@ -363,6 +363,31 @@ fn the_venus_test_is_rechecked_at_the_23_to_24_bump() {
     );
 }
 
+/// P14.T53.a: T24.e's Venus at 1 bar under the escape's batch, within T24.e's 300–370 K and stated
+/// beside the hold's, for P14.T54.b's re-check (`the_venus_test_is_rechecked_at_the_23_to_24_bump`):
+/// the table's median Venus under the broadened carbon dioxide term, about 305–310 K expected,
+/// inside 300–370 K near its floor (decision-bump-plan-after-22, "T53.a's CO₂ form", C3).
+#[test]
+fn under_the_escape_batch_t24e_s_venus_at_1_bar_is_stated() {
+    use crate::planetary::chem::escape::{EscapeRules, with_rules};
+    let at_1_bar =
+        |profile: &RadiativeConvective| profile.temperature_at(Pascals::new(1.0e5)).value();
+    let (_, _, held) = table_structure("Venus");
+    let (venus, _, batch) = with_rules(EscapeRules::Batch, || table_structure("Venus"));
+    eprintln!(
+        "the table's Venus at 1 bar: {:.3} K under the batch ({:.3} K at its surface), {:.3} K \
+         under the hold",
+        at_1_bar(&batch),
+        venus.atmosphere().surface_temperature().value(),
+        at_1_bar(&held),
+    );
+    assert!(
+        (300.0..=370.0).contains(&at_1_bar(&batch)),
+        "T24.e's 300–370 K: {} K",
+        at_1_bar(&batch)
+    );
+}
+
 /// Each refusal names what is not an air. Errors carrying a float are compared by their `Debug`
 /// form, Rust's shortest round-trip decimal, which tells every value but a NaN's sign apart.
 #[test]

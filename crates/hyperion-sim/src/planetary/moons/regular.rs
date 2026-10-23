@@ -122,8 +122,8 @@ use crate::time::UniverseTime;
 use crate::units::consts::{GM_EARTH, GRAVITATIONAL_CONSTANT, STEFAN_BOLTZMANN};
 use crate::units::{
     Degrees, Dex, EarthMasses, JupiterMasses, Kelvin, Kilograms, KilogramsPerCubicMetre, Metres,
-    MetresPerSecondSquared, Radians, Seconds, SolarLuminosities, SolarMasses, SolarRadii, Watts,
-    WattsPerSquareMetre, Years,
+    MetresPerSecond, MetresPerSecondSquared, Radians, Seconds, SolarLuminosities, SolarMasses,
+    SolarRadii, Watts, WattsPerSquareMetre, Years,
 };
 
 /// The least mass of a parent with regular moons: 10 M⊕, with an envelope (P14.T17.a), which the
@@ -977,12 +977,14 @@ pub struct MoonInputs {
 }
 
 /// What lights a moon at a time: its planet's own glow at the moon's distance, and the planet's
-/// hosts at the planet's orbit (P14.T17.b, "the star as the source of light").
+/// hosts at the planet's orbit (P14.T17.b, "the star as the source of light"); and the planet's
+/// orbital speed about them, which the moon's mean impact speed reads (P14.T53.a).
 #[derive(Debug, Clone, PartialEq)]
 pub struct MoonSky {
     planet: [HostLight; 1],
     stars: Vec<Illumination>,
     composition: Composition,
+    parent_orbital_speed: MetresPerSecond,
 }
 
 impl MoonSky {
@@ -1019,10 +1021,17 @@ impl MoonSky {
             .map(|host| Illumination::new(*host, a, e).ok_or(DeriveMoonError::Sky))
             .collect::<Result<_, _>>()?;
         stars.extend_from_slice(planet_hosts.companions());
+        // The planet's circular orbital speed about the mass its hosts give it, √(G M ÷ a), at its
+        // present semi-major axis: Zahnle et al.'s (2003) `V_p`, as the moon's impact speed reads it.
+        let orbital =
+            (GRAVITATIONAL_CONSTANT * planet_hosts.primary_mass().value() / a.value()).sqrt();
+        let parent_orbital_speed =
+            MetresPerSecond::new(if orbital.is_finite() { orbital } else { 0.0 });
         Ok(Self {
             planet: [planet],
             stars,
             composition: *planet_hosts.composition(),
+            parent_orbital_speed,
         })
     }
 
@@ -1812,7 +1821,8 @@ fn moon_hosts<'s>(
         &sky.stars,
     )
     .map_err(DeriveMoonError::Hosts)?
-    .with_shades(shades))
+    .with_shades(shades)
+    .with_parent_orbital_speed(sky.parent_orbital_speed))
 }
 
 /// [`derive_moon`] at the system's age `age` at the epoch and the time `t`, its shade reading the
@@ -2992,6 +3002,76 @@ mod tests {
                 assert!(lambda < JEANS_RETENTION_THRESHOLD, "{at}");
             }
         }
+    }
+
+    /// P14.T53.a (decision-p14-t54a-ganymede §1.8): under the escape's batch the table's Ganymede
+    /// and Callisto, at the rank that keeps their measured radii and at their measured bulk
+    /// (the measured-moon fixture's, as a capture's record states one), are airless by the impact
+    /// term in Jupiter's well, struck at about 7.1 and 6.2 times their escape speeds (Zahnle et
+    /// al. 2003, eq. 1): it takes all of their air once all their impacts have come, where their
+    /// X-ray and ultraviolet fluence takes under half. The table's Titan, struck at about 4.0
+    /// times its escape speed, at the ramp's foot, keeps over 0.99 of its air, over a bar of N₂ and
+    /// its methane reservoir (both stated).
+    #[test]
+    fn under_the_escape_batch_ganymede_and_callisto_are_airless_by_the_impact_term() {
+        use crate::planetary::chem::escape::{EscapeRules, with_rules};
+        use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
+        use crate::units::Pascals;
+        with_rules(EscapeRules::Batch, || {
+            let jupiter = table_giant("Jupiter", 5, None);
+            for (name, moon) in [("Ganymede", GANYMEDE), ("Callisto", CALLISTO)] {
+                let ((kg, keep), orbit) = table_moon(moon, &jupiter);
+                let (measured, _) = captured_bulk(kg, moon.1);
+                for (bulk, which) in [(MoonBulk::Derived, "derived"), (measured, "measured")] {
+                    let derived =
+                        own_moon((kg, keep), &orbit, &jupiter, &MoonVolatiles::SHARED, bulk);
+                    let air = derived.atmosphere();
+                    let escape = air.escape().expect("the batch records every body's escape");
+                    let shoreline = escape.shoreline();
+                    eprintln!(
+                        "{name} ({which} bulk): {:?} at {:.4e} Pa; shoreline xuv {:.4}, impact \
+                         {:.6}, chronology {:.6}, kept {:.3e}",
+                        air.state(),
+                        air.surface_pressure().map_or(f64::NAN, Pascals::value),
+                        shoreline.xuv(),
+                        shoreline.impact(),
+                        shoreline.chronology(),
+                        shoreline.kept(),
+                    );
+                    assert_eq!(air.state(), SurfaceState::Airless, "{name} {which}");
+                    assert!(
+                        1.0 - shoreline.impact() * shoreline.chronology() < 1e-9,
+                        "{name} {which}: {shoreline:?}"
+                    );
+                    assert!(shoreline.xuv() < 0.5, "{name} {which}: {shoreline:?}");
+                }
+            }
+            let saturn = table_giant("Saturn", 6, None);
+            let (mass, orbit) = table_moon(TITAN, &saturn);
+            let titan = own_moon(
+                mass,
+                &orbit,
+                &saturn,
+                &MoonVolatiles::SHARED,
+                MoonBulk::Derived,
+            );
+            let air = titan.atmosphere();
+            let escape = air.escape().expect("the batch records every body's escape");
+            let methane = escape.methane();
+            let nitrogen = air.partial_pressures().of(Gas::Nitrogen).value();
+            eprintln!(
+                "Titan: {:?} {:.3} K at {:.4e} Pa, N2 {nitrogen:.4e} Pa, CH4 {:.4e} Pa; shoreline \
+                 {:?}; methane {methane:?}",
+                air.state(),
+                air.surface_temperature().value(),
+                air.surface_pressure().map_or(f64::NAN, Pascals::value),
+                air.partial_pressures().of(Gas::Methane).value(),
+                escape.shoreline(),
+            );
+            assert!(nitrogen >= 1e5, "{nitrogen} Pa");
+            assert!(methane.kept().value() > 0.0, "{methane:?}");
+            assert!(escape.shoreline().kept() > 0.99, "{:?}", escape.shoreline());
+        });
     }
 
     /// Decision-p14-t54a-ganymede §1.4: over the fixture's radius ranks the window of

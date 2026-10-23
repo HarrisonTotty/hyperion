@@ -54,8 +54,18 @@
 //! a giant's internal heat enters only its gas envelope's temperature, so that the two can be
 //! told apart (ruling 112.7).
 
+mod escaping;
 mod surface_mix;
 
+pub(crate) use escaping::helium_left;
+pub use escaping::{
+    EARTH_MANTLE_FEO_MASS_FRACTION, EARTH_MANTLE_MASS_FRACTION, WATER_MELTING_POINT,
+};
+#[cfg(test)]
+pub(crate) use escaping::{
+    THERMOSTAT_SET_POINT, Thermostat, ThermostatCounts, WaterPhase, water_phase,
+    with_resolve_check, with_thermostat,
+};
 #[cfg(test)]
 pub(crate) use surface_mix::floor_read;
 #[cfg(test)]
@@ -69,8 +79,10 @@ pub(crate) use surface_mix::{UnlitMeanRules, with_unlit_mean};
 use crate::Seed;
 use crate::id::BodyId;
 use crate::math;
+use crate::planetary::chem::escape::{EnvelopeHelium, EscapeOutcome, EscapeRules};
 use crate::planetary::chem::partition::{
-    AirborneWeights, BuildColumnInventoryError, ClimateSpan, ColumnInventory, Ground, exits_taken,
+    AirborneWeights, BuildColumnInventoryError, ClimateSpan, ColumnInventory, Ground, dominance,
+    exits_taken,
 };
 use crate::planetary::chem::redox::SNOW_LINE_TEMPERATURE;
 use crate::planetary::context::XuvHistory;
@@ -78,8 +90,11 @@ use crate::planetary::derive::PlanetClass;
 use crate::planetary::derive::composition::{MassFractions, SnowLineSide};
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::derive::pass_record::{PassContext, WaterGate};
+use crate::planetary::derive::photometry::area_mix::reference_cloud_column;
 use crate::planetary::hooks::crust::CrustLid;
-use crate::planetary::hooks::surface::{ClimateBody, GroundInertia, step_climate};
+use crate::planetary::hooks::surface::{
+    ClimateBody, GroundInertia, STANDARD_GRAVITY, step_climate,
+};
 use crate::planetary::params::{ICY_WATER_FRACTION, THIN_ENVELOPE_FRACTION};
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::draws::UnitUniform;
@@ -89,8 +104,8 @@ use crate::units::consts::{
     SECONDS_PER_JULIAN_YEAR,
 };
 use crate::units::{
-    EarthMasses, JoulesPerSquareMetre, Kelvin, Kilograms, Metres, MetresPerSecondSquared, Pascals,
-    SolarLuminosities, SolarMasses, WattsPerSquareMetre, Years,
+    EarthFluxes, EarthMasses, JoulesPerSquareMetre, Kelvin, Kilograms, Metres, MetresPerSecond,
+    MetresPerSecondSquared, Pascals, SolarLuminosities, SolarMasses, WattsPerSquareMetre, Years,
 };
 
 /// The atomic mass constant, kg (CODATA 2022: 1.660 539 068 92 × 10⁻²⁷ kg), in which molecular
@@ -797,7 +812,8 @@ pub fn volatile_inventory(
 /// P14.T13.c's 18.5 was fitted at the median's 57 bar, and put the measured Venus at 778 K.
 ///
 /// It replaced P14.T13.c's 18.5, which version 22 read, when P14.T54.a deleted the
-/// `p14-snapshot` lane's hold.
+/// `p14-snapshot` lane's hold. From version 24 P14.T53.a's broadened term replaces the √p form
+/// ([`BROADENED_CARBON_DIOXIDE_BAND`]).
 pub const GREENHOUSE_CARBON_DIOXIDE: f64 = 14.86;
 
 /// The greenhouse constant of water vapour, per √bar: 4.47, fitted on Earth's measured state after
@@ -849,33 +865,473 @@ pub const GREENHOUSE_NITROGEN: f64 = 1.55;
 /// snowball albedo.
 pub const NITROGEN_REFERENCE_TEMPERATURE: Kelvin = Kelvin::new(75.6);
 
-/// The grey greenhouse's constants, per √bar (P14.T13.c, P14.T57.a): carbon dioxide's, water's and
-/// nitrogen's at [`NITROGEN_REFERENCE_TEMPERATURE`], P14.T57.a's fits
-/// ([`GreenhouseConstants::FITTED`]).
+/// The band constant a of the broadened carbon dioxide term of the grey optical depth,
+/// dimensionless: 1.95, fitted with its exponent ([`BROADENED_CARBON_DIOXIDE_EXPONENT`]) and the
+/// pairs' constant ([`BROADENED_CARBON_DIOXIDE_COLLISIONS`]) on three anchors (P14.T53.a;
+/// decision-p14-moons §4.2; decision-bump-plan-after-22, "T53.a's CO₂ form and H₂ CIA", C1). From
+/// generator version 24, behind the escape's hold (`ESCAPE_VERSION`), the term replaces P14.T57.a's
+/// √p form ([`GREENHOUSE_CARBON_DIOXIDE`]), which "cannot hold Venus and Mars together: their
+/// exponent would be 0.72" (decision-p14-moons §4.2), and put a Mars of 6 mbar near 252 K
+/// (decision-p14-t51a-partition §1).
+///
+/// The term is τ = a Xⁿ + b Y. X = `P_CO₂` `p_s` (g₀ ÷ g) ÷ 1 bar² is the absorber's column,
+/// `P_CO₂` ÷ g, times its broadening pressure, `p_s` the partial pressures' total, both column
+/// weights, g the surface gravity and g₀
+/// [`STANDARD_GRAVITY`]; Y = `P_CO₂`² (g₀ ÷
+/// g) ÷ 1 bar² is its column times its own pressure. The sources, as the science check gives them
+/// (not re-read here):
+///
+/// - a grey atmosphere's outgoing flux depends on its pressure and gravity "only in the
+///   combination `p_s`²/g" (Pierrehumbert and Gaidos 2011, `ApJL` 734, L13, p. 3);
+/// - in the strong-line limit a Lorentz line's equivalent width is W = 2√(S u α), u the absorber's
+///   column and its width α ∝ p (Goody and Yung 1989, _Atmospheric Radiation_, §4), and at a fixed
+///   mixing ratio the grey τ goes as pⁿ with n between 1 and 2 (Robinson and Catling 2012, ApJ 757,
+///   104, eq. 6);
+/// - the band term a Xⁿ saturates, as the 15 µm band's forcing is logarithmic (Myhre et al. 1998,
+///   GRL 25, 2715); b Y is the CO₂–CO₂ pairs' collision-induced and dimer absorption, which goes as
+///   the carbon dioxide's number density squared (Wordsworth, Forget and Eymet 2010, Icarus 210,
+///   992, from memory) and dominates Venus.
+///
+/// With b = 0 the same form is a single power law of X. The chain's order
+/// (decision-pre-23-review item 20(6); decision-p14-t54a-bands ruling 2), each fit at its body's
+/// measured state and measured Bond albedo under the generator's own irradiation: nitrogen on
+/// Titan, unchanged ([`GREENHOUSE_NITROGEN`], 1.55 at 75.6 K); carbon dioxide's a, n and b on
+/// Earth's forcing, Mars and Venus (these three constants); water's vapour and cloud on Earth
+/// ([`BROADENED_GREENHOUSE_WATER_VAPOUR`], [`BROADENED_GREENHOUSE_WATER_CLOUD`]); then Earth's
+/// meridional conductance D⊕ on its 42 K contrast
+/// ([`BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`](crate::planetary::hooks::surface::BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K)).
+/// Mars's water terms read water's constants, so carbon dioxide's and water's fits are iterated to
+/// their fixed point.
+///
+/// - _n, on Earth's forcing:_ the measured Earth ([`BROADENED_GREENHOUSE_WATER_VAPOUR`]'s state, X
+///   = 3.232 × 10⁻⁴ at 9.820 m s⁻²) under doubled `P_CO₂` gives AR6's effective radiative forcing
+///   of doubled carbon dioxide from 278 ppm, 3.93 ± 0.47 W m⁻² (IPCC AR6 WG1 ch. 7, §7.3.2.1), as
+///   the grey forcing at its fixed 288 K, σ `T_s`⁴ [1 ÷ (1 + ¾τ) − 1 ÷ (1 + ¾τ₂)], τ = 0.8314 its
+///   measured state's and τ₂ that with the doubled term: n = 0.326 45, by bisection.
+/// - _a, on Mars:_ NASA's Mars fact sheet (Williams): 6.36 mbar at the mean radius, 95.1% carbon
+///   dioxide, 2.59% nitrogen, 1.94% argon and 210 ppm water by volume, taken as column weights over
+///   those four gases at the registry's molar masses (613.9 Pa of carbon dioxide, 10.64 of nitrogen
+///   and 0.0555 of water; X = 1.027 × 10⁻⁴ at the generator's 3.728 m s⁻²), at the generator's
+///   irradiation for its measured Bond albedo of 0.250, 210.07 K (the fact sheet's black-body
+///   temperature is 209.8 K). Its surface is the fact sheet's 214 K, the emission mean ⟨T⁴⟩^¼
+///   against Haberle's (2013) 202 K arithmetic mean, as Méndez and Rivera-Valentín (2017,
+///   `ApJL` 837, L1, p. 4) quote them, which needs τ = 0.1027, less the vapour's 0.0031, the
+///   cloud's 0.0001 and nitrogen's 0.0021: a = 1.9528.
+/// - _b, on Venus:_ its measured air and its 737 K as [`GREENHOUSE_CARBON_DIOXIDE`] gives them,
+///   through the batch's passes: 90.42 bar of carbon dioxide and 2.088 of nitrogen by weight (X =
+///   9,249 and Y = 9,040 at 8.870 m s⁻²), at the generator's irradiation for its 0.76, 229.06 K,
+///   with no water. 737 K needs τ = 141.56, less nitrogen's 0.244, of which the band gives 38.49
+///   and the pairs 102.83: b = 0.011 375.
+///
+/// At each n, a and b solve a Xⁿ + b Y at Mars and Venus together; the test
+/// `under_the_escape_batch_the_greenhouse_constants_are_their_fits` recomputes all three. Under
+/// 1.95, 0.3265 and 0.011 38 the measured Venus reaches 737.0 K through the passes, the measured
+/// Mars 214.0 K and the measured Earth 287.95 K through the passes
+/// (`under_the_escape_batch_the_measured_venus_mars_and_earth_hold`), and the table's median
+/// Venus, 57.8 bar, 618.9 K, inside P14.T57.a's 680–710 K as restated, 590–700 K. At Earth's 42 Pa
+/// the term is 0.142, 17% of Earth's τ (Schmidt et al. 2010, JGR 115, D20106: about 20%), where
+/// the √p form gave 0.305.
+///
+/// Kopparapu et al.'s (2013, ApJ 765, 131) Fig. 5a, as the lane traced it, read by the clear sky
+/// (the vapour, no cloud) over 1 bar of nitrogen at 273 K, needs 1/1.24 of the term at 1 bar of
+/// carbon dioxide, 1/1.47 at 4 bar and 1/1.95 at 8: the term is that much too opaque there, against
+/// the 1.03–1.18× the ruling's replica found at Mars's black-body 209.8 K, since the generator's
+/// 210.07 K leaves Mars 6% less τ to fit. The fit is steep in Mars's target: at 213 K n is 0.402, at
+/// 215 K 0.276.
+///
+/// Recorded, not built (decision-bump-plan-after-22, "T53.a's CO₂ form", C1): under the grey
+/// closure `T_s` ∝ τ^¼, so the term's slope at Venus, d ln τ ÷ d ln `p_s` = 1.77, gives `T_s` ∝
+/// `p_s`^0.44, where an adiabat from a fixed radiative–convective boundary gives `p_s`^0.185
+/// (Robinson and Catling 2012, §4.1: Venus's lower air at 0.8 of a γ = 1.3 adiabat), which puts a
+/// 57.8-bar Venus near 676 K. No power form in X holds both Kopparapu's points and that slope; the
+/// fix is a radiative–convective closure.
+pub const BROADENED_CARBON_DIOXIDE_BAND: f64 = 1.95;
+
+/// The exponent n of the broadened carbon dioxide term's band ([`BROADENED_CARBON_DIOXIDE_BAND`]):
+/// 0.3265, fitted on the measured Earth's forcing of doubled carbon dioxide, AR6's 3.93 W m⁻²
+/// (P14.T53.a). It lies below the strong-line limit's ½, as a band that saturates grows.
+pub const BROADENED_CARBON_DIOXIDE_EXPONENT: f64 = 0.3265;
+
+/// The pairs' constant b of the broadened carbon dioxide term ([`BROADENED_CARBON_DIOXIDE_BAND`]),
+/// dimensionless: 0.011 38, fitted on the measured Venus (P14.T53.a), where it gives 103 of its τ
+/// of 141.6; at Mars's and Earth's Y it gives under 10⁻⁵.
+pub const BROADENED_CARBON_DIOXIDE_COLLISIONS: f64 = 0.011_38;
+
+/// The greenhouse constant of water vapour under the broadened carbon dioxide term, per √bar: 4.17,
+/// fitted with water's cloud ([`BROADENED_GREENHOUSE_WATER_CLOUD`]) on Earth's measured state after
+/// carbon dioxide's a, n and b (P14.T53.a; decision-bump-plan-after-22, "T53.a's CO₂ form", C2), as
+/// P14.T57.a fits [`GREENHOUSE_WATER`] ([`BROADENED_CARBON_DIOXIDE_BAND`] gives the chain's order).
+/// From generator version 24, behind the escape's hold (`ESCAPE_VERSION`), it replaces 4.47.
+///
+/// - _Earth's state_ is [`GREENHOUSE_WATER`]'s: the table's Earth's air, 42.08 Pa of carbon dioxide
+///   and 0.7474 bar of nitrogen by weight, its water at the partition's humidity at 288.0 K, 837.2
+///   Pa by weight, at the generator's irradiation for 0.294, 255.14 K, and its gravity, 9.820 m
+///   s⁻².
+/// - _The fit:_ 288 K needs τ = 0.8314; less the broadened carbon dioxide term's 0.1416 and
+///   nitrogen's 0.1177, that leaves 0.5721 for the water, split 2 : 1 between its vapour and its
+///   cloud, as Schmidt et al. (2010, JGR 115, D20106) give water vapour "∼50%" and clouds "∼25%" of
+///   the all-sky greenhouse. The vapour's 0.3814 gives 4.1685 (the test
+///   `under_the_escape_batch_the_greenhouse_constants_are_their_fits`).
+///
+/// Earth's τ is then 46% vapour, 23% cloud, 17% carbon dioxide and 14% nitrogen, against
+/// Schmidt et al.'s 50, 25 and 20, the rest other absorbers (they count no nitrogen). Only the vapour
+/// feeds back: at the measured Earth its fixed
+/// relative humidity feedback, `B_P` g, is 1.342 W m⁻² K⁻¹, against AR6's 1.36 ± 0.04 (WG1 ch. 7,
+/// §7.4.2.2), and `B_eff`⊕ 1.995, inside the fixed relative humidity Planck feedback's 1.7–2.3
+/// (decision-p14-t54a-bands §1). A wet world's own outgoing flux, band 4's, then peaks at 298 W m⁻²
+/// at 344 K (version 23's 291 at 340 K). Unsplit, the water would carry 69% of Earth's τ, `B_eff`⊕
+/// would fall to 1.32 and that peak to near 260 W m⁻², under the 282–297 of radiative–convective
+/// models, so that a temperate world absorbing more would run away.
+pub const BROADENED_GREENHOUSE_WATER_VAPOUR: f64 = 4.17;
+
+/// The longwave optical depth of water's cloud at its full availability, dimensionless: 0.19, the
+/// cloud's third of the water's 288 K residual on Earth's measured state
+/// ([`BROADENED_GREENHOUSE_WATER_VAPOUR`] gives the fit; P14.T53.a; decision-bump-plan-after-22,
+/// "T53.a's CO₂ form", C2): 0.1907 at an availability of 1. From generator version 24, behind the
+/// escape's hold (`ESCAPE_VERSION`).
+///
+/// The term is `τ_c` `A_w`, `A_w` water's cloud availability at the greenhouse step, the area mix's
+/// rule taken for water: min(1, (1 − d) W ÷ `W_ref`), W = `x_w` `p_s` ÷ g its airborne column, d
+/// the partition's dominance of its mole fraction (as the greenhouse gain's weight takes it) and
+/// `W_ref` the area mix's reference cloud column, 47.9 kg m⁻². It is 1 at Earth, whose column is
+/// some 130 kg m⁻², and 0 where water makes no cloud: a runaway, Mars (7.5 × 10⁻⁴), Titan, or a
+/// steam world, whose water is dominant. It reads the partition's column, not the state, so it is
+/// continuous. It has no fixed relative humidity feedback, so the greenhouse gain reads none of it.
+/// It is the cloud's longwave; P14.T24.h's re-split of Earth's cloud is its shortwave's.
+pub const BROADENED_GREENHOUSE_WATER_CLOUD: f64 = 0.19;
+
+/// The greenhouse constant of hydrogen's collision-induced absorption, dimensionless: 5.31, in
+/// τ = `k_H` √(`X_H` `x_H`) (`T_ref` ÷ `T_eq`), `X_H` = `P_H₂` `p_s` (g₀ ÷ g) ÷ 1 bar², `x_H` its mole
+/// fraction and `T_ref` [`HYDROGEN_REFERENCE_TEMPERATURE`] (P14.T53.a; decision-bump-plan-after-22,
+/// "T53.a's CO₂ form and H₂ CIA", C4). From generator version 24, behind the escape's hold
+/// (`ESCAPE_VERSION`).
+///
+/// It is calibrated on Pierrehumbert and Gaidos's (2011, `ApJL` 734, L13) pure-H₂ grid, their Fig.
+/// 1 as the lane traced it, within 9% rms, at whose 17 m s⁻² "Gravity enters the calculation of OLR
+/// only in the combination `p_s`²/g", which supports `X_H`. The factor √`x_H` follows unsaturated
+/// H₂–N₂ absorption, which goes as `x_H` "because of the dependence of CIA on the density of each
+/// interactant" (Wordsworth and Pierrehumbert 2013, Science 339, 64, as the ruling quotes them): a pure H₂ air is
+/// unchanged, and their Fig. 1b air (3× PAL N₂, 10% H₂) gives 21.2 W m⁻² against their 19.8.
+/// Hydrogen never condenses, so the greenhouse gain reads none of it.
+///
+/// Recorded, not built: at PAL N₂ and 10% H₂ it gives 7.6 W m⁻² against Wordsworth and
+/// Pierrehumbert's "only a few W m−2"; and beyond Pierrehumbert and Gaidos's 10-bar grid it is
+/// extrapolated, their 40 bar at 10 au and 100 bar at 15 au coming out 1.5× and 1.8× in τ, where an
+/// air below `THIN_ENVELOPE_FRACTION` can reach about 10³ bar on an Earth mass, which P14.T53.a's
+/// escape keeps as air under the same hold ([`Atmosphere::escape`]).
+pub const BROADENED_GREENHOUSE_HYDROGEN: f64 = 5.31;
+
+/// The equilibrium temperature at which [`BROADENED_GREENHOUSE_HYDROGEN`] holds, K: 200, the reference
+/// of the lane's fit to Pierrehumbert and Gaidos's (2011) Fig. 1 grid (decision-bump-plan-after-22,
+/// "T53.a's CO₂ form and H₂ CIA", C4); their paper has no temperature scaling.
+pub const HYDROGEN_REFERENCE_TEMPERATURE: Kelvin = Kelvin::new(200.0);
+
+/// Carbon dioxide's term of the grey optical depth ([`GreenhouseConstants`]): T13.c's √p form to
+/// version 23, and P14.T53.a's broadened form from version 24.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CarbonDioxideTerm {
+    /// τ = k (`P_CO₂` ÷ 1 bar)^½, k per √bar (P14.T13.c; P14.T57.a's [`GREENHOUSE_CARBON_DIOXIDE`]).
+    SquareRoot {
+        /// k, per √bar.
+        constant: f64,
+    },
+    /// τ = a Xⁿ + b Y, X = `P_CO₂` `p_s` (g₀ ÷ g) ÷ 1 bar² the absorber's column times its
+    /// broadening pressure and Y = `P_CO₂`² (g₀ ÷ g) ÷ 1 bar² its pairs' (P14.T53.a;
+    /// [`BROADENED_CARBON_DIOXIDE_BAND`]). With b = 0 it is a single power law of X.
+    Broadened {
+        /// a, dimensionless: the saturating band's.
+        band: f64,
+        /// n, the band's exponent.
+        exponent: f64,
+        /// b, dimensionless: the CO₂–CO₂ pairs' collision-induced and dimer absorption.
+        collisions: f64,
+    },
+}
+
+impl CarbonDioxideTerm {
+    /// The term's depth τ over the partial pressures `partials` under the surface gravity
+    /// `gravity`.
+    #[must_use]
+    fn depth(self, partials: &PartialPressures, gravity: MetresPerSecondSquared) -> f64 {
+        match self {
+            Self::SquareRoot { constant } => {
+                constant
+                    * (partials.of(Gas::CarbonDioxide).value().max(0.0) / PASCALS_PER_BAR).sqrt()
+            }
+            Self::Broadened {
+                band,
+                exponent,
+                collisions,
+            } => {
+                band * math::powf(broadened_variable(partials, gravity), exponent)
+                    + collisions * collision_variable(partials, gravity)
+            }
+        }
+    }
+
+    /// The term's slope ∂τ ÷ ∂ln `P_CO₂` at its depth `depth` over the partial pressures `partials`
+    /// under the surface gravity `gravity`: ½τ for the √p form, and n a Xⁿ (1 + x) + 2 b Y for the
+    /// broadened one, x = `P_CO₂` ÷ `p_s`, since `p_s` holds `P_CO₂` (∂ln X ÷ ∂ln `P_CO₂` = 1 + x).
+    #[must_use]
+    fn log_slope(
+        self,
+        depth: f64,
+        partials: &PartialPressures,
+        gravity: MetresPerSecondSquared,
+    ) -> f64 {
+        match self {
+            Self::SquareRoot { .. } => 0.5 * depth,
+            Self::Broadened {
+                band,
+                exponent,
+                collisions,
+            } => {
+                let p = partials.of(Gas::CarbonDioxide).value().max(0.0);
+                let surface = partials.total().value().max(0.0);
+                let share = if surface > 0.0 { p / surface } else { 0.0 };
+                exponent
+                    * band
+                    * math::powf(broadened_variable(partials, gravity), exponent)
+                    * (1.0 + share)
+                    + 2.0 * collisions * collision_variable(partials, gravity)
+            }
+        }
+    }
+}
+
+/// g₀ ÷ g for the surface gravity `gravity`, g₀ [`STANDARD_GRAVITY`]: zero for a gravity that is
+/// not positive and finite, which weighs no column.
+#[must_use]
+fn gravity_factor(gravity: MetresPerSecondSquared) -> f64 {
+    let g = gravity.value();
+    if g > 0.0 && g.is_finite() {
+        STANDARD_GRAVITY.value() / g
+    } else {
+        0.0
+    }
+}
+
+/// The broadened carbon dioxide term's band variable over the partial pressures `partials` under
+/// the surface gravity `gravity`: X = `P_CO₂` `p_s` (g₀ ÷ g) ÷ 1 bar², `P_CO₂` and `p_s` (the
+/// partial pressures' total) column weights, so that `P_CO₂` ÷ g is the absorber's column and `p_s`
+/// its broadening pressure ([`gravity_factor`]).
+#[must_use]
+fn broadened_variable(partials: &PartialPressures, gravity: MetresPerSecondSquared) -> f64 {
+    let p = partials.of(Gas::CarbonDioxide).value().max(0.0) / PASCALS_PER_BAR;
+    let surface = partials.total().value().max(0.0) / PASCALS_PER_BAR;
+    p * surface * gravity_factor(gravity)
+}
+
+/// The broadened carbon dioxide term's pairs' variable over the partial pressures `partials` under
+/// the surface gravity `gravity`: Y = `P_CO₂`² (g₀ ÷ g) ÷ 1 bar², the absorber's column times its
+/// own pressure, as CO₂–CO₂ collision-induced and dimer absorption goes as the carbon dioxide's
+/// number density squared ([`gravity_factor`]).
+#[must_use]
+fn collision_variable(partials: &PartialPressures, gravity: MetresPerSecondSquared) -> f64 {
+    let p = partials.of(Gas::CarbonDioxide).value().max(0.0) / PASCALS_PER_BAR;
+    p * p * gravity_factor(gravity)
+}
+
+/// The mole fraction of `gas` among the partial pressures `partials`, column weights, each over its
+/// gas's molar mass: zero for an empty or a non-finite column.
+#[must_use]
+fn mole_fraction_of(partials: &PartialPressures, gas: Gas) -> f64 {
+    let moles = |gas: Gas| partials.of(gas).value().max(0.0) / gas.molar_mass_g_per_mol();
+    let total = Gas::ALL.into_iter().fold(0.0, |sum, gas| sum + moles(gas));
+    let x = moles(gas) / total;
+    if x.is_finite() { x } else { 0.0 }
+}
+
+/// Water's cloud availability `A_w`, 0 to 1, over the partial pressures `partials` under the
+/// surface gravity `gravity`: the area mix's `cloud_availability` taken for water at a greenhouse
+/// step, min(1, (1 − d) W ÷ `W_ref`), W = `x_w` `p_s` ÷ g its airborne column, d its dominance
+/// ([`dominance`]) of its mole fraction `x_w`, which approximates the partition's d of its
+/// minor-branch share as the greenhouse gain's weight does, and `W_ref` the area mix's
+/// `reference_cloud_column`, 47.9 kg m⁻². It is 1 at Earth, whose column is some 130 kg m⁻², and
+/// near 0 where water makes no cloud: a runaway, Mars, Titan, or a steam world, whose water is
+/// dominant. Zero for no column or no gravity.
+#[must_use]
+fn water_cloud_availability(partials: &PartialPressures, gravity: MetresPerSecondSquared) -> f64 {
+    let g = gravity.value();
+    let surface = partials.total().value();
+    if !(g > 0.0 && g.is_finite() && surface > 0.0 && surface.is_finite()) {
+        return 0.0;
+    }
+    let x = mole_fraction_of(partials, Gas::Water);
+    let available = (1.0 - dominance(x)) * x * surface / g / reference_cloud_column().value();
+    if available.is_nan() {
+        0.0
+    } else {
+        available.clamp(0.0, 1.0)
+    }
+}
+
+/// What absorbs in a term of the grey optical depth ([`GreyTerm`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum Absorber {
+    /// Carbon dioxide.
+    CarbonDioxide,
+    /// Water vapour, with its fixed relative humidity feedback.
+    WaterVapour,
+    /// Water's cloud longwave, from version 24, with none.
+    WaterCloud,
+    /// Nitrogen's collision-induced absorption.
+    Nitrogen,
+    /// Hydrogen's collision-induced absorption, from version 24.
+    Hydrogen,
+}
+
+impl Absorber {
+    /// The gas whose partial pressure the term reads.
+    #[must_use]
+    pub(crate) const fn gas(self) -> Gas {
+        match self {
+            Self::CarbonDioxide => Gas::CarbonDioxide,
+            Self::WaterVapour | Self::WaterCloud => Gas::Water,
+            Self::Nitrogen => Gas::Nitrogen,
+            Self::Hydrogen => Gas::Hydrogen,
+        }
+    }
+
+    /// Whether the greenhouse gain reads the term, as its gas's vapour held at its cap feeds back:
+    /// not the cloud, which has no fixed relative humidity feedback, nor hydrogen, which never
+    /// condenses.
+    #[must_use]
+    pub(crate) const fn feeds_back(self) -> bool {
+        match self {
+            Self::CarbonDioxide | Self::WaterVapour | Self::Nitrogen => true,
+            Self::WaterCloud | Self::Hydrogen => false,
+        }
+    }
+}
+
+/// One term of the grey optical depth ([`GreenhouseConstants::terms`]): what absorbs, its depth
+/// τᵢ, and its slope ∂τᵢ ÷ ∂ln pᵢ in its own gas's partial pressure, which P14.T24.a's greenhouse
+/// gain reads (science-p14-t24a-climate.md §1) where the term feeds back
+/// ([`Absorber::feeds_back`]), and zero where it does not.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct GreyTerm {
+    absorber: Absorber,
+    depth: f64,
+    log_slope: f64,
+}
+
+impl GreyTerm {
+    /// What absorbs.
+    #[must_use]
+    pub(crate) const fn absorber(&self) -> Absorber {
+        self.absorber
+    }
+
+    /// The gas whose partial pressure the term reads.
+    #[must_use]
+    pub(crate) const fn gas(&self) -> Gas {
+        self.absorber.gas()
+    }
+
+    /// The term's depth τᵢ.
+    #[must_use]
+    pub(crate) const fn depth(&self) -> f64 {
+        self.depth
+    }
+
+    /// The term's slope ∂τᵢ ÷ ∂ln pᵢ in its own gas's partial pressure, zero for a term that does
+    /// not feed back.
+    #[must_use]
+    pub(crate) const fn log_slope(&self) -> f64 {
+        self.log_slope
+    }
+}
+
+/// The grey greenhouse's constants (P14.T13.c, P14.T57.a, P14.T53.a): carbon dioxide's term,
+/// water vapour's constant per √bar, water cloud's depth, nitrogen's constant per √bar at
+/// [`NITROGEN_REFERENCE_TEMPERATURE`] and hydrogen's: P14.T57.a's fits
+/// ([`GreenhouseConstants::FITTED`]), which have no cloud or hydrogen term, to version 23, and
+/// P14.T53.a's ([`GreenhouseConstants::BATCH`]) from 24, as the escape's hold gives them
+/// ([`GreenhouseConstants::in_force`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct GreenhouseConstants {
-    carbon_dioxide: f64,
+    carbon_dioxide: CarbonDioxideTerm,
     water: f64,
+    water_cloud: Option<f64>,
     nitrogen: f64,
+    hydrogen: Option<f64>,
 }
 
 impl GreenhouseConstants {
     /// P14.T57.a's [`GREENHOUSE_CARBON_DIOXIDE`] and [`GREENHOUSE_WATER`], with
-    /// [`GREENHOUSE_NITROGEN`].
+    /// [`GREENHOUSE_NITROGEN`]: versions 22's and 23's, T13.c's √p terms.
     pub(crate) const FITTED: Self = Self {
-        carbon_dioxide: GREENHOUSE_CARBON_DIOXIDE,
+        carbon_dioxide: CarbonDioxideTerm::SquareRoot {
+            constant: GREENHOUSE_CARBON_DIOXIDE,
+        },
         water: GREENHOUSE_WATER,
+        water_cloud: None,
         nitrogen: GREENHOUSE_NITROGEN,
+        hydrogen: None,
     };
 
-    /// Carbon dioxide's constant, per √bar, for the tests' values by hand.
+    /// P14.T53.a's: the broadened carbon dioxide term ([`BROADENED_CARBON_DIOXIDE_BAND`],
+    /// [`BROADENED_CARBON_DIOXIDE_EXPONENT`], [`BROADENED_CARBON_DIOXIDE_COLLISIONS`]), water split
+    /// and refitted after it ([`BROADENED_GREENHOUSE_WATER_VAPOUR`],
+    /// [`BROADENED_GREENHOUSE_WATER_CLOUD`]), [`GREENHOUSE_NITROGEN`], unchanged, and hydrogen's
+    /// ([`BROADENED_GREENHOUSE_HYDROGEN`]).
+    pub(crate) const BATCH: Self = Self {
+        carbon_dioxide: CarbonDioxideTerm::Broadened {
+            band: BROADENED_CARBON_DIOXIDE_BAND,
+            exponent: BROADENED_CARBON_DIOXIDE_EXPONENT,
+            collisions: BROADENED_CARBON_DIOXIDE_COLLISIONS,
+        },
+        water: BROADENED_GREENHOUSE_WATER_VAPOUR,
+        water_cloud: Some(BROADENED_GREENHOUSE_WATER_CLOUD),
+        nitrogen: GREENHOUSE_NITROGEN,
+        hydrogen: Some(BROADENED_GREENHOUSE_HYDROGEN),
+    };
+
+    /// The constants the rules in force give ([`EscapeRules::in_force`]): [`Self::FITTED`] under
+    /// the escape's hold, to version 23, and [`Self::BATCH`] from 24.
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        match EscapeRules::in_force() {
+            EscapeRules::Held => Self::FITTED,
+            EscapeRules::Batch => Self::BATCH,
+        }
+    }
+
+    /// The batch's form at carbon dioxide's (a, n, b) `(band, exponent, collisions)` and water's
+    /// (`k_v`, `τ_c`) `(vapour, cloud)`, with [`GREENHOUSE_NITROGEN`] and
+    /// [`BROADENED_GREENHOUSE_HYDROGEN`]: the trial constants of the tests' fits.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn broadened(
+        (band, exponent, collisions): (f64, f64, f64),
+        (vapour, cloud): (f64, f64),
+    ) -> Self {
+        Self {
+            carbon_dioxide: CarbonDioxideTerm::Broadened {
+                band,
+                exponent,
+                collisions,
+            },
+            water: vapour,
+            water_cloud: Some(cloud),
+            nitrogen: GREENHOUSE_NITROGEN,
+            hydrogen: Some(BROADENED_GREENHOUSE_HYDROGEN),
+        }
+    }
+
+    /// Carbon dioxide's constant, per √bar, of the √p form, for the tests' values by hand; its band
+    /// constant a for the broadened form.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn carbon_dioxide(&self) -> f64 {
-        self.carbon_dioxide
+        match self.carbon_dioxide {
+            CarbonDioxideTerm::SquareRoot { constant: k }
+            | CarbonDioxideTerm::Broadened { band: k, .. } => k,
+        }
     }
 
-    /// Water's constant, per √bar, for the tests' values by hand.
+    /// Water vapour's constant, per √bar, for the tests' values by hand.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn water(&self) -> f64 {
@@ -890,40 +1346,113 @@ impl GreenhouseConstants {
         self.nitrogen
     }
 
-    /// The grey optical depth of partial pressures `partials` over a surface in equilibrium at
-    /// `equilibrium` under these constants ([`optical_depth`]).
+    /// Water cloud's term, `τ_c` `A_w` ([`water_cloud_availability`]), over the partial pressures
+    /// `partials` under the surface gravity `gravity`: `None` under P14.T57.a's constants, which
+    /// have none.
     #[must_use]
-    pub(crate) fn optical_depth(&self, partials: &PartialPressures, equilibrium: Kelvin) -> f64 {
-        let root = |gas: Gas| (partials.of(gas).value().max(0.0) / PASCALS_PER_BAR).sqrt();
-        let collisions = collision_factor(equilibrium);
-        self.carbon_dioxide * root(Gas::CarbonDioxide)
-            + self.water * root(Gas::Water)
-            + self.nitrogen * collisions * root(Gas::Nitrogen)
+    fn cloud_depth(
+        &self,
+        partials: &PartialPressures,
+        gravity: MetresPerSecondSquared,
+    ) -> Option<f64> {
+        self.water_cloud
+            .map(|cloud| cloud * water_cloud_availability(partials, gravity))
     }
 
-    /// The terms of [`optical_depth`](Self::optical_depth) one by one, each with its gas, in its
-    /// order (carbon dioxide, water, nitrogen), so that their sum in that order is its τ to the bit
-    /// (tested). Each term goes as the square root of its gas's partial pressure, so that
-    /// ∂τᵢ ÷ ∂ln pᵢ = ½τᵢ, which P14.T24.a's greenhouse gain reads (science-p14-t24a-climate.md
-    /// §1). [`optical_depth`](Self::optical_depth)'s own arithmetic is T13.c's output, and stays as
-    /// it is.
+    /// Hydrogen's term, `k_H` √(`X_H` `x_H`) (`T_ref` ÷ `T_eq`), `X_H` = `P_H₂` `p_s` (g₀ ÷ g) ÷ 1
+    /// bar², `x_H` its mole fraction and `T_ref` [`HYDROGEN_REFERENCE_TEMPERATURE`], over the
+    /// partial pressures `partials` in equilibrium at `equilibrium` under the surface gravity
+    /// `gravity`: `None` under P14.T57.a's constants, which have none, and zero at or below 0 K.
+    #[must_use]
+    fn hydrogen_depth(
+        &self,
+        partials: &PartialPressures,
+        equilibrium: Kelvin,
+        gravity: MetresPerSecondSquared,
+    ) -> Option<f64> {
+        let constant = self.hydrogen?;
+        let t = equilibrium.value();
+        // By comparison, so that a NaN gives no term.
+        if t.is_nan() || t <= 0.0 {
+            return Some(0.0);
+        }
+        let p = partials.of(Gas::Hydrogen).value().max(0.0) / PASCALS_PER_BAR;
+        let surface = partials.total().value().max(0.0) / PASCALS_PER_BAR;
+        let x = p * surface * gravity_factor(gravity) * mole_fraction_of(partials, Gas::Hydrogen);
+        Some(constant * x.sqrt() * (HYDROGEN_REFERENCE_TEMPERATURE.value() / t))
+    }
+
+    /// The grey optical depth of partial pressures `partials` over a surface in equilibrium at
+    /// `equilibrium` under the surface gravity `gravity`, under these constants
+    /// ([`optical_depth`]).
+    ///
+    /// A term the constants do not have adds nothing, not a zero: under P14.T57.a's the sum is
+    /// version 23's (`τ_CO₂` + `τ_w`) + `τ_N₂` to the bit, a zero's sum not changing a negative
+    /// zero's sign.
+    #[must_use]
+    pub(crate) fn optical_depth(
+        &self,
+        partials: &PartialPressures,
+        equilibrium: Kelvin,
+        gravity: MetresPerSecondSquared,
+    ) -> f64 {
+        let root = |gas: Gas| (partials.of(gas).value().max(0.0) / PASCALS_PER_BAR).sqrt();
+        let collisions = collision_factor(equilibrium);
+        let tau = self.carbon_dioxide.depth(partials, gravity) + self.water * root(Gas::Water);
+        let tau = self
+            .cloud_depth(partials, gravity)
+            .map_or(tau, |cloud| tau + cloud);
+        let tau = tau + self.nitrogen * collisions * root(Gas::Nitrogen);
+        self.hydrogen_depth(partials, equilibrium, gravity)
+            .map_or(tau, |hydrogen| tau + hydrogen)
+    }
+
+    /// The terms of [`optical_depth`](Self::optical_depth) one by one, each with what absorbs, in
+    /// its order (carbon dioxide, water vapour, water cloud, nitrogen, hydrogen), so that their
+    /// depths' sum in that order is its τ to the bit (tested): P14.T57.a's constants have no cloud
+    /// or hydrogen term, whose depths are then zero. Each carries its slope ∂τᵢ ÷ ∂ln pᵢ, which
+    /// P14.T24.a's greenhouse gain reads (science-p14-t24a-climate.md §1): ½τᵢ for a term in √pᵢ,
+    /// water vapour's and nitrogen's and T13.c's carbon dioxide's; n a Xⁿ (1 + x) + 2 b Y for the
+    /// broadened carbon dioxide term, x its share of the partial pressures' total
+    /// ([`BROADENED_CARBON_DIOXIDE_BAND`]); and zero for the cloud and hydrogen, which do not feed
+    /// back ([`Absorber::feeds_back`]). [`optical_depth`](Self::optical_depth)'s own arithmetic is
+    /// T13.c's output, and stays as it is.
     #[must_use]
     pub(crate) fn terms(
         &self,
         partials: &PartialPressures,
         equilibrium: Kelvin,
-    ) -> [(Gas, f64); 3] {
+        gravity: MetresPerSecondSquared,
+    ) -> [GreyTerm; 5] {
         let root = |gas: Gas| (partials.of(gas).value().max(0.0) / PASCALS_PER_BAR).sqrt();
         let collisions = collision_factor(equilibrium);
+        let carbon_dioxide = self.carbon_dioxide.depth(partials, gravity);
+        let water = self.water * root(Gas::Water);
+        let nitrogen = self.nitrogen * collisions * root(Gas::Nitrogen);
+        let term = |absorber: Absorber, depth: f64, log_slope: f64| GreyTerm {
+            absorber,
+            depth,
+            log_slope,
+        };
         [
-            (
-                Gas::CarbonDioxide,
-                self.carbon_dioxide * root(Gas::CarbonDioxide),
+            term(
+                Absorber::CarbonDioxide,
+                carbon_dioxide,
+                self.carbon_dioxide
+                    .log_slope(carbon_dioxide, partials, gravity),
             ),
-            (Gas::Water, self.water * root(Gas::Water)),
-            (
-                Gas::Nitrogen,
-                self.nitrogen * collisions * root(Gas::Nitrogen),
+            term(Absorber::WaterVapour, water, 0.5 * water),
+            term(
+                Absorber::WaterCloud,
+                self.cloud_depth(partials, gravity).unwrap_or(0.0),
+                0.0,
+            ),
+            term(Absorber::Nitrogen, nitrogen, 0.5 * nitrogen),
+            term(
+                Absorber::Hydrogen,
+                self.hydrogen_depth(partials, equilibrium, gravity)
+                    .unwrap_or(0.0),
+                0.0,
             ),
         ]
     }
@@ -943,15 +1472,24 @@ fn collision_factor(equilibrium: Kelvin) -> f64 {
 }
 
 /// The grey optical depth of partial pressures `partials` over a surface in equilibrium at
-/// `equilibrium`: τ = Σ k × (p ÷ 1 bar)^½ over carbon dioxide, water and nitrogen (P14.T13.c), the
-/// plan's square root of each partial pressure, nitrogen's scaled for collision-induced
-/// absorption. Methane and oxygen enter no term ([`atmosphere`] says why).
+/// `equilibrium` under the surface gravity `gravity`: τ = Σ k × (p ÷ 1 bar)^½ over carbon dioxide,
+/// water and nitrogen (P14.T13.c), the plan's square root of each partial pressure, nitrogen's
+/// scaled for collision-induced absorption. Methane and oxygen enter no term ([`atmosphere`] says
+/// why).
 ///
 /// The constants are P14.T57.a's [`GREENHOUSE_CARBON_DIOXIDE`] and [`GREENHOUSE_WATER`], with
-/// [`GREENHOUSE_NITROGEN`] at [`NITROGEN_REFERENCE_TEMPERATURE`].
+/// [`GREENHOUSE_NITROGEN`] at [`NITROGEN_REFERENCE_TEMPERATURE`], to version 23, which read no
+/// gravity. From version 24 (P14.T53.a) carbon dioxide's term is the broadened a Xⁿ + b Y
+/// ([`BROADENED_CARBON_DIOXIDE_BAND`]), water's is split into its vapour and its cloud
+/// ([`BROADENED_GREENHOUSE_WATER_VAPOUR`], [`BROADENED_GREENHOUSE_WATER_CLOUD`]), and hydrogen
+/// takes a term ([`BROADENED_GREENHOUSE_HYDROGEN`]).
 #[must_use]
-pub fn optical_depth(partials: &PartialPressures, equilibrium: Kelvin) -> f64 {
-    GreenhouseConstants::FITTED.optical_depth(partials, equilibrium)
+pub fn optical_depth(
+    partials: &PartialPressures,
+    equilibrium: Kelvin,
+    gravity: MetresPerSecondSquared,
+) -> f64 {
+    GreenhouseConstants::in_force().optical_depth(partials, equilibrium, gravity)
 }
 
 /// The surface temperature of a grey atmosphere of optical depth `tau` over a surface in
@@ -959,6 +1497,162 @@ pub fn optical_depth(partials: &PartialPressures, equilibrium: Kelvin) -> f64 {
 #[must_use]
 pub fn grey_surface_temperature(equilibrium: Kelvin, tau: f64) -> Kelvin {
     Kelvin::new(equilibrium.value() * math::powf(1.0 + 0.75 * tau.max(0.0), 0.25))
+}
+
+/// The maximum-greenhouse ceiling on a grey surface (P14.T53.a; decision-bump-plan-after-22,
+/// "T53.a's thick-air ceiling", K4), which a body's derivation takes under the escape's batch rules
+/// ([`GreenhouseCeiling::of`]), held at 24 with them.
+///
+/// Beyond the maximum-greenhouse limit carbon dioxide and water cannot hold a surface above
+/// freezing. Kopparapu et al. (2013, ApJ 765, 131, §2) find the outer edge with "the surface
+/// temperature ... fixed at 273 K, and the CO2 partial pressure ... varied from 1 to 37.8 bar (the
+/// saturation CO2 partial pressure at that temperature)", the least flux "required to maintain a
+/// global mean surface temperature of 273 K"; past it carbon dioxide "begins to condense out of
+/// the atmosphere, lowering the tropospheric lapse rate and reducing the greenhouse effect" (also
+/// Kasting, Whitmire and Reynolds 1993, Icarus 101, 108, from memory). So there the grey surface is
+/// held at `T_s` = min(`T_grey`, max(273.15 K, `T_rest`)): `T_grey` = `T_eq` (1 + ¾τ)^¼ as
+/// before ([`grey_surface_temperature`]), and `T_rest` the same of `τ_rest`, the depth less carbon
+/// dioxide's term and water's vapour and cloud, nitrogen's and hydrogen's, which still warm (an H₂
+/// greenhouse beyond the limit, Pierrehumbert and Gaidos 2011, `ApJL` 734, L13; a thick N₂ air).
+/// 273.15 K is [`WATER_MELTING_POINT`], Kopparapu's 273 K. A min of a max of continuous functions
+/// is continuous, and the ceiling is fixed for a body's passes, so the greenhouse's solve stays
+/// continuous. Where it binds `T_s` reads no τ, so the greenhouse gain is 0 there
+/// ([`GreenhouseCeiling::binds`]). It builds science-p14-t24f's finding 1 ("No maximum-greenhouse
+/// ceiling").
+///
+/// It is a bound, not the expected state (recorded, deferred: decision-bump-plan-after-22 C1's
+/// radiative–convective closure): the true state is colder, its carbon dioxide condensing aloft,
+/// which the grey model lacks, and a body that starts cold beyond the limit
+/// (decision-p14-t54a-states §7, item 1) is that closure's option. Any carbon dioxide warming above
+/// a nitrogen or hydrogen `T_rest` is lost.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum GreenhouseCeiling {
+    /// No ceiling: inside the maximum-greenhouse limit now, on a molten crust, or under the
+    /// escape's hold, to generator version 23.
+    #[default]
+    None,
+    /// Beyond the maximum-greenhouse limit now, on a solid crust: `T_s` ≤ max(273.15 K, `T_rest`).
+    MaximumGreenhouse,
+}
+
+impl GreenhouseCeiling {
+    /// The ceiling of the body `inputs` describe: the maximum greenhouse's under the escape's batch
+    /// rules where its flux now lies beyond the limit
+    /// ([`AtmosphereInputs::maximum_greenhouse_flux_ratio`] below 1) on a solid crust, whatever
+    /// its state (so a past-only runaway's too); none elsewhere.
+    #[must_use]
+    pub(crate) fn of(inputs: &AtmosphereInputs) -> Self {
+        #[cfg(test)]
+        if CEILING_LIFTED.with(core::cell::Cell::get) {
+            return Self::None;
+        }
+        let beyond = inputs.maximum_greenhouse_flux_ratio < 1.0;
+        match (EscapeRules::in_force(), inputs.crust) {
+            (EscapeRules::Batch, Crust::Solid) if beyond => Self::MaximumGreenhouse,
+            (EscapeRules::Batch | EscapeRules::Held, Crust::Solid | Crust::Molten) => Self::None,
+        }
+    }
+
+    /// The ceiling over the partial pressures `partials` at the equilibrium temperature
+    /// `equilibrium` and surface gravity `gravity` under `constants`: max(273.15 K, `T_rest`),
+    /// `T_rest` the grey surface of nitrogen's and hydrogen's terms; infinite with none.
+    #[must_use]
+    fn temperature(
+        self,
+        constants: &GreenhouseConstants,
+        partials: &PartialPressures,
+        equilibrium: Kelvin,
+        gravity: MetresPerSecondSquared,
+    ) -> Kelvin {
+        match self {
+            Self::None => Kelvin::new(f64::INFINITY),
+            Self::MaximumGreenhouse => {
+                let rest = constants.terms(partials, equilibrium, gravity).iter().fold(
+                    0.0,
+                    |sum, term| match term.absorber() {
+                        Absorber::Nitrogen | Absorber::Hydrogen => sum + term.depth(),
+                        Absorber::CarbonDioxide | Absorber::WaterVapour | Absorber::WaterCloud => {
+                            sum
+                        }
+                    },
+                );
+                Kelvin::new(
+                    grey_surface_temperature(equilibrium, rest)
+                        .value()
+                        .max(WATER_MELTING_POINT.value()),
+                )
+            }
+        }
+    }
+
+    /// The surface of a grey air of optical depth `tau` over the partial pressures `partials`, at
+    /// the equilibrium temperature `equilibrium` and surface gravity `gravity` under `constants`,
+    /// held under the ceiling: [`grey_surface_temperature`]'s, to the bit, with none.
+    #[must_use]
+    pub(crate) fn surface_temperature(
+        self,
+        constants: &GreenhouseConstants,
+        (partials, tau): (&PartialPressures, f64),
+        equilibrium: Kelvin,
+        gravity: MetresPerSecondSquared,
+    ) -> Kelvin {
+        let grey = grey_surface_temperature(equilibrium, tau);
+        match self {
+            Self::None => grey,
+            Self::MaximumGreenhouse => Kelvin::new(
+                grey.value().min(
+                    self.temperature(constants, partials, equilibrium, gravity)
+                        .value(),
+                ),
+            ),
+        }
+    }
+
+    /// Whether the ceiling binds on a grey air of optical depth `tau` over the partial pressures
+    /// `partials` ([`surface_temperature`](Self::surface_temperature)): its grey surface above the
+    /// ceiling, where `T_s` reads no τ.
+    #[must_use]
+    pub(crate) fn binds(
+        self,
+        constants: &GreenhouseConstants,
+        (partials, tau): (&PartialPressures, f64),
+        equilibrium: Kelvin,
+        gravity: MetresPerSecondSquared,
+    ) -> bool {
+        match self {
+            Self::None => false,
+            Self::MaximumGreenhouse => {
+                grey_surface_temperature(equilibrium, tau).value()
+                    > self
+                        .temperature(constants, partials, equilibrium, gravity)
+                        .value()
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Whether a test has lifted the maximum-greenhouse ceiling on this thread
+    /// ([`without_ceiling`]).
+    static CEILING_LIFTED: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// `run`'s result with the maximum-greenhouse ceiling lifted on this thread
+/// ([`GreenhouseCeiling::of`] gives none), so that a test can show what it leaves to the bit; the
+/// switch before is set back after, a panic in `run` included, as
+/// [`with_rules`](crate::planetary::chem::escape::with_rules) sets its rules back.
+#[cfg(test)]
+pub(crate) fn without_ceiling<R>(run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's switch back as it drops.
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            CEILING_LIFTED.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(CEILING_LIFTED.with(|cell| cell.replace(true)));
+    run()
 }
 
 /// The partial pressure of every [`Gas`] at a body's surface.
@@ -1452,6 +2146,68 @@ pub struct AtmosphereInputs {
     pub age: Years,
     /// The hottest effective temperature of its luminous hosts, which no surface exceeds.
     pub hottest_host: Kelvin,
+    /// The mean speed at which it is struck, m s⁻¹, which the cosmic shoreline's impact term reads
+    /// against its escape speed (P14.T53.a, read only under the escape's batch rules): for a body
+    /// orbiting its star or stars, √(`v_orb`² + `v_esc`²), `v_orb` = √(G M ÷ a) of the mass it
+    /// orbits at its present semi-major axis (Zahnle and Catling 2017, ApJ 843, 122, eq. 41,
+    /// [`planet_impact_speed`](crate::planetary::chem::escape::planet_impact_speed)); for a moon,
+    /// Zahnle et al.'s (2003, Icarus 163, 263) eq. 1 from its orbital speed about its planet and
+    /// the planet's about its star
+    /// ([`moon_impact_speed`](crate::planetary::chem::escape::moon_impact_speed)). Zero, a test's
+    /// hand inputs whose orbit is not known, reads as no impact erosion.
+    pub impact_speed: MetresPerSecond,
+    /// How long its hosts' X-ray and ultraviolet activity stays saturated
+    /// ([`XuvHistory::saturation_time`]), under which
+    /// [`saturated_xuv_flux`](Self::saturated_xuv_flux) is received (P14.T53.a, read only under the
+    /// escape's batch rules): its hosts' saturation times weighted by their saturated fluxes at
+    /// the body, Σ `F_s,i` `t_sat,i` ÷ Σ `F_s,i`, as its derivation sums them (a moon's, its
+    /// planet's star's; the lane's), so that the saturated fluence and the whole history's, 3 Σ
+    /// `F_s,i` `t_sat,i`, are the hosts' own.
+    pub xuv_saturation_time: Years,
+    /// Its hydrogen and helium envelope's history, for the helium its escape leaves (P14.T53.a,
+    /// read only under the escape's batch rules): [`EnvelopeHistory::NONE`] for a body formed with
+    /// none.
+    pub envelope_history: EnvelopeHistory,
+    /// The bolometric flux it receives from its hosts now, averaged over its orbit (P14.T53.a,
+    /// read only under the escape's batch rules), by which a methane carrier's photolysis is
+    /// scaled ([`methane_outcome`](crate::planetary::chem::escape::methane_outcome)): the flux its
+    /// equilibrium temperature reads, a moon's its planet's star's.
+    pub flux: EarthFluxes,
+    /// Its flux now over the maximum-greenhouse limit's, Σ Fᵢ ÷ `S_eff,max`(`T_eff,i`) over its
+    /// luminous hosts, as Kopparapu et al.'s limits are summed in a multiple system (P14.T12.b):
+    /// beyond the limit below 1 (P14.T53.a, read only under the escape's batch rules, by the
+    /// maximum-greenhouse ceiling, `GreenhouseCeiling`). It is the sum the
+    /// [`insolation`](Self::insolation) reads now, not the state.
+    pub maximum_greenhouse_flux_ratio: f64,
+    /// The helium its envelope's escape left
+    /// ([`envelope_helium`](crate::planetary::chem::escape::envelope_helium)), where its derivation
+    /// took it once before its passes, which do not move it (P14.T53.a, read only under the
+    /// escape's batch rules); `None` for the atmosphere to take it from
+    /// [`envelope_history`](Self::envelope_history), as a hand input's is.
+    pub envelope_helium: Option<EnvelopeHelium>,
+}
+
+/// A body's hydrogen and helium envelope's history, as its envelope's escape gives it (P14.T13.b,
+/// read by P14.T53.a's helium): the envelope's mass at formation and the mass energy-limited escape
+/// has taken from it by the time.
+///
+/// The fields are plain masses with no invariant between them, so they are public, as
+/// [`AtmosphereInputs`]'s are.
+#[derive(Debug, Clone, Copy, Default, PartialEq, PartialOrd)]
+pub struct EnvelopeHistory {
+    /// The envelope's mass at formation: its share of the body's mass then, times that mass.
+    pub initial: Kilograms,
+    /// The mass energy-limited escape has taken from it
+    /// ([`energy_limited_loss`]).
+    pub lost: Kilograms,
+}
+
+impl EnvelopeHistory {
+    /// No envelope: none formed, none lost.
+    pub const NONE: Self = Self {
+        initial: Kilograms::ZERO,
+        lost: Kilograms::ZERO,
+    };
 }
 
 /// A body's atmosphere and surface at a time (P14.T13).
@@ -1469,9 +2225,29 @@ pub struct Atmosphere {
     cloud_fraction: f64,
     carbon_carrier: Option<CarbonCarrier>,
     column: PartialPressures,
+    escape: Option<EscapeOutcome>,
+    ceiling: GreenhouseCeiling,
 }
 
 impl Atmosphere {
+    /// The ceiling its grey surface is held under ([`GreenhouseCeiling`]): none but beyond the
+    /// maximum-greenhouse limit under the escape's batch rules (P14.T53.a), which the surface's
+    /// conditions read for the greenhouse gain.
+    #[must_use]
+    pub(crate) const fn greenhouse_ceiling(&self) -> GreenhouseCeiling {
+        self.ceiling
+    }
+
+    /// What escape and the climate made of the body's volatiles (P14.T53.a): each element's
+    /// outcome, the cosmic shoreline's shares, its water's oxygen, its envelope's helium, its
+    /// methane, the share of its carbon left airborne and the carbon monoxide its desiccated
+    /// carbon dioxide made. `None` under the escape's hold, to generator version 23; from 24
+    /// (`ESCAPE_VERSION`) every body's.
+    #[must_use]
+    pub const fn escape(&self) -> Option<&EscapeOutcome> {
+        self.escape.as_ref()
+    }
+
     /// What escape and the climate left free to fill the air, before any of it condensed, as
     /// column weights M g ÷ 4πR² by gas ([`column_inventory`](Self::column_inventory)'s): all
     /// zero for a gas envelope, a body of no mass or radius, and one whose weights are not finite.
@@ -1724,6 +2500,11 @@ struct Airborne {
     nitrogen: f64,
     argon: f64,
     oxygen: f64,
+    /// A thin envelope's hydrogen, kept as air under the escape's batch rules (P14.T53.a): none
+    /// under its hold, or where there is none.
+    hydrogen: f64,
+    /// A thin envelope's helium, as its hydrogen is.
+    helium: f64,
     /// The species the carbon is airborne as (P14.T24.f): set by where the body formed and where
     /// it lies, and carbon dioxide on a young magma ocean.
     carrier: CarbonCarrier,
@@ -1768,6 +2549,8 @@ impl Airborne {
             ),
             argon: kept(Gas::Argon, inventory.argon()),
             oxygen: 0.0,
+            hydrogen: 0.0,
+            helium: 0.0,
             carrier,
         }
     }
@@ -1836,7 +2619,8 @@ impl Airborne {
 
     /// What the climate leaves free to fill the air, as the condensate partition reads it: each
     /// gas's column weight, its mass times `weight` pascals per kilogram, in registry order, with
-    /// the carbon as its carrier and the oxygen only where there is some (P14.T51.a).
+    /// the carbon as its carrier, and the oxygen and a thin envelope's hydrogen and helium only
+    /// where there is some (P14.T51.a; P14.T53.a).
     ///
     /// # Errors
     ///
@@ -1847,12 +2631,14 @@ impl Airborne {
             CarbonCarrier::CarbonDioxide => (Gas::CarbonDioxide, self.carbon_dioxide),
             CarbonCarrier::Methane => (Gas::Methane, self.methane),
         };
-        let oxygen = (self.oxygen > 0.0).then_some((Gas::Oxygen, self.oxygen));
+        let some = |gas: Gas, mass: f64| (mass > 0.0).then_some((gas, mass));
         let gases = [
+            some(Gas::Hydrogen, self.hydrogen),
+            some(Gas::Helium, self.helium),
             Some((Gas::Water, self.water)),
             Some(carbon),
             Some((Gas::Nitrogen, self.nitrogen)),
-            oxygen,
+            some(Gas::Oxygen, self.oxygen),
             Some((Gas::Argon, self.argon)),
         ];
         ColumnInventory::new(
@@ -1929,13 +2715,18 @@ fn whole_column(inventory: &ColumnInventory) -> PartialPressures {
 }
 
 /// The surface temperature, partial pressures and optical depth of a body's air under the
-/// condensate partition (P14.T51.a): the temperature iterated [`GREENHOUSE_STEPS`] times upward
-/// from the equilibrium temperature through the grey greenhouse its partial pressures give, each
+/// condensate partition (P14.T51.a): the temperature iterated at most `steps` times upward from
+/// the equilibrium temperature through the grey greenhouse its partial pressures give, each
 /// step's partial pressures the partition's of the airborne inventory `inventory`, as column
 /// weights ([`Airborne::column`]), over the climate `climate` gives for the step's temperature and
 /// the previous step's partial pressures, on the ground `ground`, and held by `saturate` at the
-/// hottest host's. The greenhouse's constants are P14.T57.a's fits
-/// ([`GreenhouseConstants::FITTED`]).
+/// hottest host's. The greenhouse's constants are the rules' in force
+/// ([`GreenhouseConstants::in_force`]): P14.T57.a's fits to version 23, P14.T53.a's from 24.
+///
+/// `steps` is [`GREENHOUSE_STEPS`] for every solve whose state is taken. Only the weathering
+/// thermostat's trials ([`escaping::weathering_thermostat`], under the escape's batch rules) pass
+/// fewer, [`THERMOSTAT_TRIAL_STEPS`](escaping::THERMOSTAT_TRIAL_STEPS): a trial reads the full
+/// solve's own first steps, which only place its bracket.
 ///
 /// The climate reads the column of the step before, so that a column's contrasts can follow its
 /// pressure: a thin air's large contrast holds its dominant condensable at a cold trap, which keeps
@@ -1959,29 +2750,31 @@ fn partitioned_greenhouse(
     equilibrium: Kelvin,
     saturate: &impl Fn(f64) -> Kelvin,
     climate: &ClimateOf<'_>,
-    ground: &Ground,
+    ground: (&Ground, GreenhouseCeiling),
+    steps: u32,
 ) -> (f64, PartialPressures, f64) {
     #[cfg(test)]
     if let Some(checked) = crate::planetary::chem::partition::checked_exits(
         crate::planetary::chem::partition::ExitsChecked::Greenhouse,
-        || greenhouse_steps(inventory, equilibrium, saturate, climate, ground),
+        || greenhouse_steps(inventory, equilibrium, saturate, climate, ground, steps),
         same_greenhouse,
     ) {
         return checked;
     }
-    greenhouse_steps(inventory, equilibrium, saturate, climate, ground)
+    greenhouse_steps(inventory, equilibrium, saturate, climate, ground, steps)
 }
 
-/// [`partitioned_greenhouse`]'s steps.
+/// [`partitioned_greenhouse`]'s steps, at most `steps` of them.
 #[must_use]
 fn greenhouse_steps(
     inventory: &ColumnInventory,
     equilibrium: Kelvin,
     saturate: &impl Fn(f64) -> Kelvin,
     climate: &ClimateOf<'_>,
-    ground: &Ground,
+    (ground, ceiling): (&Ground, GreenhouseCeiling),
+    steps: u32,
 ) -> (f64, PartialPressures, f64) {
-    let constants = GreenhouseConstants::FITTED;
+    let constants = GreenhouseConstants::in_force();
     let exits = exits_taken();
     let reads_climate = !exits || inventory.condenses();
     let span_at = |t: f64, partials: &PartialPressures| {
@@ -2000,13 +2793,15 @@ fn greenhouse_steps(
     let mut weights = AirborneWeights::new();
     let mut partials = whole_column(inventory);
     let mut t = equilibrium.value();
-    for _ in 0..GREENHOUSE_STEPS {
+    for _ in 0..steps {
         #[cfg(test)]
         crate::planetary::chem::partition::count_exits(|counts| counts.evaluations += 1);
         let span = span_at(t, &partials);
         let next = partitioned_partials(inventory, &span, ground, &mut weights);
-        let tau = constants.optical_depth(&next, equilibrium);
-        let next_t = saturate(grey_surface_temperature(equilibrium, tau).value()).value();
+        let tau = constants.optical_depth(&next, equilibrium, ground.gravity());
+        let grey =
+            ceiling.surface_temperature(&constants, (&next, tau), equilibrium, ground.gravity());
+        let next_t = saturate(grey.value()).value();
         let settled = next_t.total_cmp(&t).is_eq() && same_partials(&next, &partials);
         t = next_t;
         partials = next;
@@ -2015,10 +2810,13 @@ fn greenhouse_steps(
         }
     }
     #[cfg(test)]
-    crate::planetary::chem::partition::count_exits(|counts| counts.evaluations += 1);
+    crate::planetary::chem::partition::count_exits(|counts| {
+        counts.evaluations += 1;
+        counts.capped += 1;
+    });
     let span = span_at(t, &partials);
     partials = partitioned_partials(inventory, &span, ground, &mut weights);
-    let tau = constants.optical_depth(&partials, equilibrium);
+    let tau = constants.optical_depth(&partials, equilibrium, ground.gravity());
     (t, partials, tau)
 }
 
@@ -2088,6 +2886,7 @@ impl<'a> StepClimate<'a> {
                     spin: spun.record.spin,
                     heat_flow: spun.context.heat_flow(),
                     inventory: column,
+                    ceiling: GreenhouseCeiling::of(inputs),
                 },
                 water: WaterGate::new(
                     state,
@@ -2198,6 +2997,26 @@ impl<'a> StepClimate<'a> {
 /// the surface temperature, is not modelled. No term is fitted for oxygen (the lane's,
 /// provisional).
 ///
+/// From version 24 (P14.T53.a, behind the escape's hold) oxygen still takes no term
+/// (decision-bump-plan-after-22, "T53.a's CO₂ form and H₂ CIA", C5): Lincowski et al. (2018, ApJ
+/// 867, 76, arXiv:1809.07498, Table 3) find desiccated 100-bar O₂ airs cooler than 10-bar ones, by
+/// "an anti-greenhouse effect": "O2-O2 directly absorbs M dwarf NIR irradiation, while O3 traps
+/// outgoing thermal radiation" (their §4), not Rayleigh scattering. Recorded, not built: the model has no shortwave absorption aloft,
+/// so under the broadened carbon dioxide term, which reads the surface pressure, a 100-bar O₂ air
+/// over 0.5 bar of carbon dioxide is warmer than its 10-bar one, against their cooler.
+///
+/// From version 24 P14.T53.a's escape joins steps 1 to 5 under the same hold, read from
+/// [`chem::escape`](crate::planetary::chem::escape)'s laws, and every body records it
+/// ([`Atmosphere::escape`]): a gas envelope's helium; Jeans's test and the ice as built; the cosmic
+/// shoreline on the bulk air (Zahnle and Catling 2017), at the body's
+/// [`impact_speed`](AtmosphereInputs::impact_speed); a thin envelope's hydrogen and helium kept as
+/// air; a runaway world's oxygen over its X-ray and ultraviolet history, its young melt's and its
+/// surface's sinks timed; a temperate world's weathering thermostat, which stores its carbon only
+/// while liquid water stands at its warmest zone, and the oxygen of its failed cold trap
+/// (Wordsworth and Pierrehumbert 2014); a cold world's methane escaped and photolysed; and the
+/// carbon monoxide a desiccated carbon dioxide air makes under an M dwarf (Gao et al. 2015), on
+/// the record only. Each element's outcome is mass-conserving.
+///
 /// # Examples
 ///
 /// An Earth with its median inventory keeps its air, warms to about 288 K and is temperate, at
@@ -2208,13 +3027,15 @@ impl<'a> StepClimate<'a> {
 /// record derives the body under its law, its basins and its lid (P14.T54.a).
 ///
 /// ```
+/// use hyperion_sim::planetary::context::XUV_SATURATION_FGK;
 /// use hyperion_sim::planetary::derive::atmosphere::{
-///     AtmosphereInputs, Crust, Insolation, SurfaceMaterial, SurfaceState, VolatileDraws,
-///     atmosphere, earth_xuv_fluence, formation_temperature, volatile_inventory,
+///     AtmosphereInputs, Crust, EnvelopeHistory, Insolation, SurfaceMaterial, SurfaceState,
+///     VolatileDraws, atmosphere, earth_xuv_fluence, formation_temperature, volatile_inventory,
 /// };
 /// use hyperion_sim::planetary::derive::{PlanetClass, SnowLineSide, composition};
 /// use hyperion_sim::units::{
-///     EarthMasses, EarthFluxes, EarthRadii, Kelvin, Kilograms, Metres, WattsPerSquareMetre, Years,
+///     EarthMasses, EarthFluxes, EarthRadii, Kelvin, Kilograms, Metres, MetresPerSecond,
+///     WattsPerSquareMetre, Years,
 /// };
 /// use hyperion_sim::units::consts::{EARTH_MASS_KG, EARTH_RADIUS_M, METRES_PER_AU};
 ///
@@ -2243,6 +3064,14 @@ impl<'a> StepClimate<'a> {
 ///     molten_for: Years::ZERO,
 ///     age: Years::new(4.57e9),
 ///     hottest_host: Kelvin::new(5_772.0),
+///     // What the escape reads from version 24: no orbit known, so no impact erosion; a Sun-like
+///     // star's saturation; no envelope.
+///     impact_speed: MetresPerSecond::ZERO,
+///     xuv_saturation_time: XUV_SATURATION_FGK,
+///     envelope_history: EnvelopeHistory::NONE,
+///     flux: EarthFluxes::new(1.0),
+///     maximum_greenhouse_flux_ratio: 2.85,
+///     envelope_helium: None,
 /// });
 /// assert_eq!(earth.state(), SurfaceState::Temperate);
 /// assert!((earth.surface_temperature().value() - 288.0).abs() < 2.0);
@@ -2267,8 +3096,9 @@ pub fn atmosphere(inputs: &AtmosphereInputs) -> Atmosphere {
 ///   the basins and with the water's surface share `surface` gives its own seas' weight
 ///   (decision-p14-t51a-partition §4; decision-p14-t51a-part2 §4.2): the previous pass's, from
 ///   P14.T54.a, whose spun climate takes θ from each step's partition ([`SpunClimate`]);
-/// - the grey greenhouse reads P14.T57.a's constants, refitted at Venus's and then Earth's
-///   measured states ([`GreenhouseConstants::FITTED`]);
+/// - the grey greenhouse reads the constants in force ([`GreenhouseConstants::in_force`]):
+///   P14.T57.a's, refitted at Venus's and then Earth's measured states, to version 23, and
+///   P14.T53.a's broadened carbon dioxide term with its refits from 24;
 /// - after step 5 the Bond albedo and cloud fraction are the area mix's (P14.T51.b) over the
 ///   condensates the pass's partition publishes at its final climate, its regolith and its cloud
 ///   (`surface_mix::area_mixed`).
@@ -2285,7 +3115,7 @@ pub(crate) fn atmosphere_and_lid(
     surface: &PassSurface<'_>,
 ) -> (Atmosphere, Option<CrustLid>) {
     let air = state_and_greenhouse(inputs, surface);
-    surface_mix::area_mixed(air, inputs, surface)
+    surface_mix::area_mixed(&air, inputs, surface)
 }
 
 /// The retention of the body `inputs` describe at the exobase temperature `exobase` and what its
@@ -2307,9 +3137,25 @@ fn retained(inputs: &AtmosphereInputs, exobase: Kelvin) -> (Retention, IceHeld) 
 
 /// Steps 1 to 5 of [`atmosphere_under`] over the surface `surface`: the state, the greenhouse and
 /// the partial pressures, with T13.c's table's Bond albedo and cloud fraction of the state, which
-/// the area mix then replaces.
+/// the area mix then replaces. Under the escape's hold, to version 23, they are version 23's
+/// ([`held_state_and_greenhouse`]); from 24, P14.T53.a's escape joins them
+/// ([`escaping::state_and_greenhouse`]).
 #[must_use]
 fn state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) -> Atmosphere {
+    match EscapeRules::in_force() {
+        EscapeRules::Held => held_state_and_greenhouse(inputs, surface),
+        EscapeRules::Batch => escaping::state_and_greenhouse(inputs, surface),
+    }
+}
+
+/// [`state_and_greenhouse`] under the escape's hold: version 23's steps, to the bit, with no
+/// escape outcome.
+#[must_use]
+#[expect(
+    clippy::too_many_lines,
+    reason = "version 23's steps kept as they were, to the bit, until P14.T54.b deletes the hold"
+)]
+fn held_state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) -> Atmosphere {
     let cap = inputs.hottest_host.value();
     let saturate = |t: f64| Kelvin::new(if cap > 0.0 { t.min(cap) } else { t });
     let exobase = exobase_temperature(inputs.irradiation_temperature, inputs.xuv_fluence);
@@ -2330,6 +3176,8 @@ fn state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) ->
         cloud_fraction: state.cloud_fraction(),
         carbon_carrier: carrier,
         column: PartialPressures::default(),
+        escape: None,
+        ceiling: GreenhouseCeiling::None,
     };
     if inputs.envelope_fraction >= THIN_ENVELOPE_FRACTION {
         let state = SurfaceState::GasEnvelope;
@@ -2377,8 +3225,14 @@ fn state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) ->
     let retained = retention.retains_against_escape(ice_held, Gas::Water);
     let step = StepClimate::of(surface, inputs, column, (climate, retained));
     let climate_of = |t: Kelvin, partials: &PartialPressures| step.at(t, partials);
-    let (mut t, mut partials, tau) =
-        partitioned_greenhouse(&inventory, equilibrium, &saturate, &climate_of, &ground);
+    let (mut t, mut partials, tau) = partitioned_greenhouse(
+        &inventory,
+        equilibrium,
+        &saturate,
+        &climate_of,
+        (&ground, GreenhouseCeiling::None),
+        GREENHOUSE_STEPS,
+    );
     let carrier = Some(airborne.carbon_carrier());
 
     // Step 5: the state.
@@ -2409,6 +3263,8 @@ fn state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) ->
         cloud_fraction: state.cloud_fraction(),
         carbon_carrier: carrier,
         column,
+        escape: None,
+        ceiling: GreenhouseCeiling::None,
     }
 }
 
