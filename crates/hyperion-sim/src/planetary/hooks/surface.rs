@@ -800,9 +800,10 @@ pub struct SurfaceInputs<'a> {
     pub surface_gravity: MetresPerSecondSquared,
     /// Its mean radius, the bulk section's.
     pub radius: Metres,
-    /// What its surface is made of, from its record's composition, the bulk section's mass
-    /// fractions ([`SurfaceMaterial::of`]), as its photometry section's Bond albedo reads it
-    /// (P14.T47): the regolith whose thermal inertia carries the day's heat into the night.
+    /// What its surface is made of, as its photometry section's Bond albedo reads it (P14.T47):
+    /// the body's surface material, its bulk's (its record's composition, the bulk section's mass
+    /// fractions, [`SurfaceMaterial::of`]), or rock where its heated shell lost its ice
+    /// (P14.T56.g); the regolith whose thermal inertia carries the day's heat into the night.
     ///
     /// The equilibrium temperature is the derivation's, whose albedo reads the placement's
     /// fractions. For an icy belt member, a moon, a giant-impact moon or a capture the two can

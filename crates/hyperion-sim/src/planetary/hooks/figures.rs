@@ -1866,8 +1866,14 @@ const YEARS_PER_GIGAYEAR: f64 = 1e9;
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlobalFigures {
     state: SurfaceState,
-    /// The material of the body's bulk, whose ice is an ice bulk's crust ([`WaterCover`]).
-    material: SurfaceMaterial,
+    /// The material of the fractions the figures were derived at ([`SurfaceMaterial::of`]), which
+    /// the tests' partition on the figures alone reads ([`water_cover`](Self::water_cover),
+    /// [`condensates_and_ice_under`](Self::condensates_and_ice_under)). The generator's figures
+    /// hold no material: the record passes its body's surface material to
+    /// [`partition_ground`](Self::partition_ground), its bulk's or its rock lag's (P14.T56.g;
+    /// decision-p14-t56g §6).
+    #[cfg(test)]
+    stand_in_material: SurfaceMaterial,
     radiogenic_heat_flow: WattsPerSquareMetre,
     non_tidal_heat_flow: WattsPerSquareMetre,
     heat_flow: WattsPerSquareMetre,
@@ -2060,7 +2066,8 @@ impl GlobalFigures {
         let potential_ocean = cover::potential_ocean(relief.hypsometry(), surface_water);
         Self {
             state: air.state(),
-            material: SurfaceMaterial::of(&inputs.fractions),
+            #[cfg(test)]
+            stand_in_material: SurfaceMaterial::of(&inputs.fractions),
             radiogenic_heat_flow: heat.radiogenic,
             non_tidal_heat_flow: heat.non_tidal,
             heat_flow: heat.heat_flow,
@@ -2363,7 +2370,7 @@ impl GlobalFigures {
         self.condensates_and_ice_over(
             atmosphere,
             conditions,
-            &self.partition_ground(gravity),
+            &self.partition_ground(gravity, self.stand_in_material),
             traps,
             table,
         )
@@ -2457,15 +2464,21 @@ impl GlobalFigures {
         (solved, published)
     }
 
-    /// These figures' own ground for the partition of a body of surface gravity `gravity`
-    /// ([`PartitionGround`]): their relief's basins ([`Basins::of`]), the water's surface share at
-    /// their outgassing ([`cover::water_surface_share`]), their surface water and potential ocean,
-    /// their craters' crust, and on a body whose bulk is ice its crust listed
-    /// ([`CrustWater::Listed`]; decision-p14-t54a-ganymede, C1 follow-up §C1.4): no lid is known
-    /// here (the passes' stand-in and the tests), so the regolith is the material's stand-in row,
-    /// `H2O` on an ice bulk ([`CrustWater::of_record`] of `None`, §C3.1).
+    /// These figures' own ground for the partition of a body of surface gravity `gravity` and
+    /// surface material `material` ([`PartitionGround`]): their relief's basins ([`Basins::of`]),
+    /// the water's surface share at their outgassing ([`cover::water_surface_share`]), their
+    /// surface water and potential ocean, their craters' crust, and on a body whose surface is ice
+    /// its crust listed ([`CrustWater::Listed`]; decision-p14-t54a-ganymede, C1 follow-up §C1.4):
+    /// no lid is known here (the passes' stand-in and the tests), so the regolith is the material's
+    /// stand-in row, `H2O` on an ice surface ([`CrustWater::of_record`] of `None`, §C3.1). The
+    /// material is the caller's, its body's surface material (P14.T56.g: rock on a lagged ice
+    /// bulk), since the figures hold none.
     #[must_use]
-    pub(crate) fn partition_ground(&self, gravity: MetresPerSecondSquared) -> PartitionGround {
+    pub(crate) fn partition_ground(
+        &self,
+        gravity: MetresPerSecondSquared,
+        material: SurfaceMaterial,
+    ) -> PartitionGround {
         PartitionGround {
             ground: Ground::new(
                 gravity,
@@ -2475,7 +2488,7 @@ impl GlobalFigures {
             surface_water: self.surface_water,
             potential_ocean: self.potential_ocean,
             crust: self.impactors.crust(),
-            crust_water: CrustWater::of_record(self.material, None),
+            crust_water: CrustWater::of_record(material, None),
         }
     }
 
@@ -2489,7 +2502,7 @@ impl GlobalFigures {
         profile: &ColdProfile,
     ) -> WaterCover {
         water_cover_over(
-            &self.partition_ground(MetresPerSecondSquared::new(0.0)),
+            &self.partition_ground(MetresPerSecondSquared::new(0.0), self.stand_in_material),
             self.state,
             conditions,
             profile,

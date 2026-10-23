@@ -100,9 +100,9 @@ use crate::planetary::derive::rotation::{
 };
 use crate::planetary::derive::{
     BodyHosts, BuildBodyHostsError, BuildFormationZoneError, BuildPlacedBodyError, DeriveBodyError,
-    DerivedBody, DerivedBulk, FormationZone, GivenBulk, GivenFractions, HostLight, Illumination,
-    MassFractions, PassDriver, PlacedBody, PlanetClass, SnowLineSide, derive_body_driven,
-    derive_bulk,
+    DerivedBody, DerivedBulk, FormationZone, GivenBulk, GivenFractions, GivenLag, HostLight,
+    Illumination, MassFractions, PassDriver, PlacedBody, PlanetClass, SnowLineSide, SurfaceLag,
+    derive_body_driven, derive_bulk,
 };
 use crate::planetary::disc::{self, DiscDraws, DiscHost, DiscProfile, Truncation};
 use crate::planetary::hooks::figures::{HeatInputs, PassFigures, Subsurface, non_tidal_heat_flow};
@@ -943,6 +943,10 @@ pub enum MoonBulk {
         radius: Metres,
         /// Its mass fractions.
         fractions: MassFractions,
+        /// Its surface lag (P14.T56.g): [`SurfaceLag::Lagged`] where its heated shell lost its
+        /// ice, its retention arm's verdict, so that its surface material is rock while its
+        /// fractions keep the ice its interior holds.
+        lag: SurfaceLag,
     },
     /// As [`derive_moon`] derives it, with only `water` of its mass kept as ice: a regular moon
     /// whose heated shell has lost its ice (P14.T56.f's retention arm), at its derivation's
@@ -954,6 +958,10 @@ pub enum MoonBulk {
         /// Its kept water's share of its mass, in [0, 1] ([`DeriveMoonError::KeptWater`]
         /// otherwise).
         water: f64,
+        /// Its surface lag (P14.T56.g): [`SurfaceLag::Lagged`], its retention arm's verdict on a
+        /// shell that lost its ice, so that its surface material is rock while its kept water
+        /// stays in its interior.
+        lag: SurfaceLag,
     },
 }
 
@@ -1140,6 +1148,12 @@ impl DerivedMoon {
     #[must_use]
     pub(crate) const fn crust_lid(&self) -> Option<&crate::planetary::hooks::crust::CrustLid> {
         self.body.crust_lid()
+    }
+
+    /// Its surface lag (P14.T56.g; [`DerivedBody::surface_lag`]): its given bulk's.
+    #[must_use]
+    pub(crate) const fn surface_lag(&self) -> SurfaceLag {
+        self.body.surface_lag()
     }
 
     /// How many passes its derivation took (P14.T51.b; [`DerivedBody::atmosphere_passes`]).
@@ -1762,7 +1776,7 @@ fn place_moon(moon: &MoonInputs, nursery: &MoonNursery) -> Result<MoonPlaced, De
     {
         return Err(DeriveMoonError::StatedRadius);
     }
-    if let MoonBulk::Kept { water } = bulk
+    if let MoonBulk::Kept { water, .. } = bulk
         && !(0.0..=1.0).contains(&water)
     {
         return Err(DeriveMoonError::KeptWater);
@@ -1788,10 +1802,14 @@ fn place_moon(moon: &MoonInputs, nursery: &MoonNursery) -> Result<MoonPlaced, De
         MoonBulk::Stated {
             radius: stated,
             fractions,
-        } => placed.with_bulk(GivenBulk::new(stated, GivenFractions::Exactly(fractions))),
-        MoonBulk::Kept { water } => {
-            placed.with_bulk(GivenBulk::new(radius, GivenFractions::Water(water)))
-        }
+            lag,
+        } => placed.with_bulk(
+            GivenBulk::new(stated, GivenFractions::Exactly(fractions))
+                .with_lag(GivenLag::Stated(lag)),
+        ),
+        MoonBulk::Kept { water, lag } => placed.with_bulk(
+            GivenBulk::new(radius, GivenFractions::Water(water)).with_lag(GivenLag::Stated(lag)),
+        ),
     };
     Ok(MoonPlaced {
         placed,
@@ -2035,8 +2053,10 @@ fn own_tides(at: &TideOf<'_>, pass: &TideAt) -> TideState {
     let (fe_h, age) = (at.fe_h, at.age);
     let (radius, fractions) = match at.bulk {
         MoonBulk::Derived => (at.radius, at.fractions(pass)),
-        MoonBulk::Stated { radius, fractions } => (radius, fractions),
-        MoonBulk::Kept { water } => (at.radius, pass.fractions.with_water(water)),
+        MoonBulk::Stated {
+            radius, fractions, ..
+        } => (radius, fractions),
+        MoonBulk::Kept { water, .. } => (at.radius, pass.fractions.with_water(water)),
     };
     let class = PlanetClass::of(at.mass, &fractions);
     let kilograms = Kilograms::from(at.mass);
@@ -2872,6 +2892,7 @@ mod tests {
         let bulk = MoonBulk::Stated {
             radius: Metres::new(r),
             fractions,
+            lag: SurfaceLag::Bare,
         };
         (bulk, ice)
     }
@@ -3182,9 +3203,11 @@ mod tests {
                 let air = derived.atmosphere();
                 let at = format!("{name} at {rank:?}: {air:?}");
                 let (radius, ice) = match bulk {
-                    MoonBulk::Stated { radius, fractions } => (radius, fractions.water()),
+                    MoonBulk::Stated {
+                        radius, fractions, ..
+                    } => (radius, fractions.water()),
                     MoonBulk::Derived => (derived.radius(), derived.ice_fraction()),
-                    MoonBulk::Kept { water } => (derived.radius(), water),
+                    MoonBulk::Kept { water, .. } => (derived.radius(), water),
                 };
                 let placed =
                     Kilograms::from(EarthMasses::new(kg / crate::units::consts::EARTH_MASS_KG));
@@ -3523,6 +3546,7 @@ mod tests {
                 let stated = MoonBulk::Stated {
                     radius: own.radius(),
                     fractions: own.fractions(),
+                    lag: SurfaceLag::Bare,
                 };
                 assert_eq!(own_moon(mass, &orbit, giant, shared, stated), own);
             }
@@ -3540,6 +3564,7 @@ mod tests {
             let bulk = MoonBulk::Stated {
                 radius: Metres::new(bad),
                 fractions,
+                lag: SurfaceLag::Bare,
             };
             let inputs = MoonInputs {
                 mass: EarthMasses::new(kg / crate::units::consts::EARTH_MASS_KG),
@@ -3578,7 +3603,10 @@ mod tests {
             &orbit,
             &jupiter,
             &shared,
-            MoonBulk::Kept { water: 0.05 },
+            MoonBulk::Kept {
+                water: 0.05,
+                lag: SurfaceLag::Lagged,
+            },
         );
         assert!(whole.ice_fraction() > 0.3, "{}", whole.ice_fraction());
         assert_same_bits(kept.radius().value(), whole.radius().value());
@@ -3596,7 +3624,10 @@ mod tests {
                 orbit,
                 radius_rank: rank,
                 volatiles: shared,
-                bulk: MoonBulk::Kept { water: bad },
+                bulk: MoonBulk::Kept {
+                    water: bad,
+                    lag: SurfaceLag::Lagged,
+                },
             };
             let refused = derive_moon(
                 &inputs,
@@ -4238,6 +4269,7 @@ mod tests {
         let impact = MoonBulk::Stated {
             radius: Metres::new(radius),
             fractions: MassFractions::solid(0.0, 1.0, 0.0),
+            lag: SurfaceLag::Bare,
         };
         let orbit = about(&rocky.0, 10.0 * rocky.0.radius().value() / 1e3, 0.0);
         let mass = (moon_kg, UnitUniform::HALF);

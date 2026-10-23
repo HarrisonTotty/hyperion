@@ -714,8 +714,8 @@ impl Surface {
         self.state
     }
 
-    /// The surface material, rock or ice, of the body's mass fractions (P14.T13.c,
-    /// [`SurfaceMaterial::of`]).
+    /// The body's surface material, rock or ice (P14.T13.c): its bulk's, of its mass fractions
+    /// ([`SurfaceMaterial::of`]), or rock where its heated shell lost its ice (P14.T56.g's lag).
     #[must_use]
     pub const fn material(&self) -> SurfaceMaterial {
         self.material

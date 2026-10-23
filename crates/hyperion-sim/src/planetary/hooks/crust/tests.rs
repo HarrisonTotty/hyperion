@@ -519,6 +519,47 @@ fn an_icy_body_whose_ice_melted_has_a_water_ice_primary_crust() {
     assert_eq!(crust.lid(), LidCrust::Primary);
 }
 
+/// P14.T56.g (decision-p14-t56g §1): the icy body above, whose ocean froze, keeps its `H2O` shell
+/// at a mean surface temperature of 266–273 K when bare, and has none under its heated shell's
+/// rock lag, which holds no ocean to freeze: its lid is then its bulk's.
+#[test]
+fn a_lagged_icy_body_has_no_ice_shell_below_the_melting_point() {
+    let surface = table_conditions("Ceres");
+    let t_s = table_equilibrium_temperature("Ceres").value();
+    let icy = small_body(&surface, 400.0, 0.4, 2.5, SnowLineSide::Beyond, t_s);
+    let bare = CrustBasisInputs::of(&icy);
+    assert_eq!(bare.lag, SurfaceLag::Bare);
+    let lagged = CrustBasisInputs {
+        lag: SurfaceLag::Lagged,
+        ..bare
+    };
+    for t in [266.0, 270.0, 272.9] {
+        let climate = LidClimate {
+            mean_surface_temperature: Kelvin::new(t),
+            warmest: Kelvin::new(t + 10.0),
+            ..LidClimate::of(&icy)
+        };
+        let lid = |inputs: &CrustBasisInputs| {
+            CrustBasis::derive(inputs)
+                .expect("the body's basis is in range")
+                .lid(&climate)
+                .expect("its lid is in range")
+        };
+        let (with, without) = (lid(&bare), lid(&lagged));
+        assert_eq!(
+            (with.crust(), with.lithology()),
+            (LidCrust::Primary, CrustLithology::Water),
+            "{t} K, bare"
+        );
+        assert_eq!(
+            without.crust(),
+            LidCrust::Bulk,
+            "{t} K, lagged: {without:?}"
+        );
+        assert_ne!(without.lithology(), CrustLithology::Water, "{t} K, lagged");
+    }
+}
+
 /// Henke et al. 2012's 100 km H-chondrite body, which "accreted at t = 2.3 Ma after CAI
 /// formation" and stayed below partial melting, at their surface's 300 K: an ordinary-chondrite
 /// `bulk`.

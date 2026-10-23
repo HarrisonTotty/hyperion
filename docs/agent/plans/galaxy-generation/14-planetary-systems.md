@@ -8179,8 +8179,9 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
     material, photometry template, inventory and tidal material; their T_eq stays near 253 K under
     the same lid.
 - **P14.T56.g A hot ice bulk's surface, and its ice's history** (23 → 24, a serve-gate must-fix
-  for its first item; lane `p14-gate-24`, after P14.T49.k; decision-bump-plan-after-22, "Rulings
-  before T53.a lands" R1.6 and "p14-gate-24's questions" G2, with main's rulings of 2026-10-22).
+  for its first item; lane `p14-gate-24`, after P14.T49.n; decision-bump-plan-after-22, "Rulings
+  before T53.a lands" R1.6 and "p14-gate-24's questions" G2, with main's rulings of 2026-10-22;
+  decision-p14-t56g, 2026-10-23).
   - **The surface of a hot ice bulk (a must-fix before the serve gate).** Where P14.T56.f's
     retention arm thinned a bulk's ice (t_hot > 0 and w′ < w₀), the bulk keeps its class (its
     interior keeps its ice under the heated shell), but its surface is the shell's rock lag: its
@@ -8191,24 +8192,89 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
     42002cb1ff800003.0501 and .0601 (T56.f's census prints the count). It also takes the hot ice
     bulks that are not moons (R1.6): the golden systems' red_giant e202 and e204, belt members at
     `T_eq` 515 and 541 K with 0.41 and 0.36 water.
+    - _The lag, decided once a body_ (decision-p14-t56g). A moon's is its retention arm's own
+      verdict, carried and not recomputed: `MoonBulk::Kept` is lagged, and a capture's or a
+      giant-impact moon's `MoonBulk::Stated` carries the verdict, a two-variant enum. An icy
+      belt member's is its derivation's own: lagged where the zero-albedo temperature at its
+      derivation's flux exceeds `UNDER_ICE_MELTING_POINT`, the limit `HOT_ICE_LIMIT` names. A
+      planet takes none: under an air a body's water is a sea, a cover or vapour, not a
+      sublimation lag. "Thinned" is the arm's t_hot > 0 with w₀ > 0, which is w′ < w₀.
+    - _One material._ The verdict rides `GivenBulk` into the derivation (`OfBulk` by default),
+      which gives the body's one surface material: rock where lagged, else
+      `SurfaceMaterial::of` of its fractions. Every site reads that value and none the
+      fractions: the air (`AtmosphereInputs.material`), the cold traps' regolith,
+      `photometry_of`, `record_spin`, `published_surface` (so the record, the wire and R09),
+      and the figures' partition ground, which takes it as an argument (`GlobalFigures` keeps
+      no material). A debug assertion holds a moon's record-side figure bulk to its
+      derivation's material.
+    - _The crust's lid._ `ocean_froze` is false on a lagged body at any mean temperature: its
+      heated shell holds no ocean to freeze. It reads the lag, not the material, since Europa
+      is a rock bulk with a true ice shell. Every lid the gate moves is listed.
+    - _The interior keeps its ice:_ the hydrostatic threshold (`derive/figure.rs`), the moment
+      of inertia factor, `PlanetClass::of`, the tides' rigidity, the crust's `holds_ice`,
+      `thermal_material` and `melting`, and `Crust::of` read the bulk, as before.
+    - _The hold._ It rides `MOON_BULK_VERSION`: the lag exists only under
+      `MoonBulkRules::Batch`. A test-only arm, `MoonBulkRules::BulkOnly`, runs T56.f's arms
+      without the lag, so that the bless note attributes each move by subtask, and T56.f's
+      tests take it. The tripwire's message names the lag's carriers and `BulkOnly`. If T56.g
+      lands after P14.T54.b.l's blessing message, it takes its own hold at 25.
+    - _Why rock:_ a bare ice surface near melting in vacuum retreats by kilometres a year (free
+      sublimation, about 4 km at 253 K and 24 km at 273.15 K, from Murphy and Koop 2005's
+      vapour pressure), so above melting the surface is the refractory lag at once, as on comet
+      nuclei and, far colder, on Callisto and Ceres. R09 then draws silicate relief at rock's
+      albedo under the lid's colours, with ice only in the cold traps, as on Mercury.
   - **The lag's loss below the melting point,** sized by the body (Schorghofer 2008; Prialnik and
     Rosenberg 2009): the ice bulks at T0 200–273 K that the lag may empty over Gyr.
   - **The crossing time** from the host's luminosity track, in place of t_hot's upper bound (the
     time since the main sequence about an evolved host).
+  - **A hot icy member's bulk** (R1.2, recorded): red_giant e202 and e204 keep their water
+    (0.41 and 0.36) under their lag. At t_hot's upper bound a member arm would keep e202 `Icy`
+    (0.112) and make e204 `Rocky` (0.023), but the members crossed the melting point only
+    late on their host's giant branch, and at a t_hot of 0.1 Gyr e204 keeps about 0.22: the
+    member's arm waits for the crossing time.
+  - **The arm's temperature under an air:** the arm reads T0 always (G2 amendment 4), which
+    may thin a bulk whose air keeps its ground below melting. On 42002cb1ff800003.0501 (at T0
+    of 344.5 K, its `T_eq` at most 273.15 K) it took 0.025 of the mass; recorded with its
+    state.
   - **A stripped large body's lost mass or compacted radius** (the record holds the mass, its
     density read as 7–39% porosity at 56–5,417 MPa), and the sphere's Stefan solution in place of
     the shell form (at subgiant 0101 the sphere keeps f 0.150 against 0.212).
   - **A past peak's ice loss** (R1.6): the 36 remnant moons at 3–10 K, sized by the body (Jura and
     Xu 2010; Malamud and Perets 2016, 2017).
-  - _Files:_ the surface material's derivation sites, each reading `SurfaceMaterial::of` of the
-    bulk's fractions: `planetary/derive/mod.rs` (the air's material, about :1721, and the cold
-    traps' regolith, about :1818); `planetary/system.rs` (`photometry_of`, about :686,
-    `record_spin`, about :4482, and the surface section, about :5363);
-    `planetary/hooks/figures.rs` (`GlobalFigures`' material, about :2063); and the crust's lid;
-    with `planetary/system/moon_ice.rs`.
-  - _Tests:_ no body with an `Ice` surface above water's melting point at T0 over the sample; the
-    9 bodies' surfaces rock, their classes and bulks unchanged; P14.T56.f's other tests hold.
-  - _Accept:_ `cargo test -p hyperion-sim planetary::system`.
+  - _Files_ (lines as of f8e35c73): `planetary/derive/mod.rs` (`GivenBulk`,
+    `derive_body_driven`, the air's material at :1812, `crust_basis` at :1849, the cold traps'
+    regolith at :1915); `planetary/derive/pass_record.rs` (`PassBulk`, `RecordSpin`);
+    `planetary/hooks/crust.rs` (`CrustBasisInputs`, `ocean_froze`);
+    `planetary/hooks/figures.rs` (`partition_ground`); `planetary/system.rs`
+    (`photometry_of`, `FigureBulk`, `record_spin`, `SurfaceSky`, `published_surface`,
+    `stated_moon_bulk`, `icy_member_given_bulk`); `planetary/moons/regular.rs` (`MoonBulk`,
+    `place_moon`); `planetary/system/moon_ice.rs` (the test-only arm and the tripwire); the
+    docs of `SurfaceMaterial` and `record::Surface::material`. `SurfaceMaterialDto`'s docs are
+    p14-wire-24's, whose wire types they are until P14.T54.b.l.
+  - _Tests_ (every 24 hold in force, through `planetary::testing::with_every_24_hold` once it
+    is on the tip; decision-t24i-airless-state D3.3):
+    - over the golden systems, the 400 by name and LOOK72's 62 (where their census is on the
+      tip), every lagged record's surface is `Rock`, with the `Mercury` template where it is
+      airless, and no `Airless` record has an `Ice` surface at T0 above 273.15 K: a moon's T0
+      is its arm's (`MoonIce::t0`), any other's the zero-albedo temperature at its
+      derivation's flux;
+    - every other record with an `Ice` surface at T0 above 273.15 K is listed with its kind,
+      class, state, T0, `T_eq`, T_s and p_s, for the bless note (none asserted);
+    - the 9 bodies and e202 and e204 have surface `Rock`, and their class, radius, density,
+      gravity and fractions are the same to the bit under `BulkOnly` and `Batch`; the move of
+      their `T_eq` is stated;
+    - against `BulkOnly` no record moves but lagged ones (asserted, every record's `Debug`),
+      and each lid the `ocean_froze` gate moves is listed by name;
+    - 42002cb1ff800003.0501's state, T_s, `T_eq`, p_s, lid and cover under both arms;
+    - P14.T56.f's tests hold under `BulkOnly`, and
+      `a_moon_s_published_conditions_read_its_planet_s_orbit` reads `surface.material()`.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::system`; the 400's census by name with
+    `-- --ignored --exact`.
+  - _Moves at 24 (estimated):_ in the systems goldens, subgiant 0101 and red_giant 0503, 0504,
+    e202 and e204, each in both places its file prints it: `photometry` `AirlessIce` →
+    `Mercury` with its geometric albedos, phase lines, `lunar_lambert_share` and `bond_ratio`,
+    and `surface_state` `Airless, Ice` → `Rock`; perhaps the last bits of `t_eq_k` and the
+    mean, as the passes' stand-in regolith moves. `surface_inputs.golden` does not move.
 
 #### P14.T57 The greenhouse's calibration (decision-p14-moons, 2026-10-10)
 
@@ -27966,3 +28032,54 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
     naming a ring, `<planet> RING <n>` from the server or `populationName`'s `MASSIVE RING` and
     `DUSTY RING`. A task that gives rings proper names revisits it; the comment at
     `aboutId: body.id` says so.
+- **Deviations in P14.T56.g, as built (`p14-gate-24`, 2026-10-23).** A hot ice bulk's surface is
+  its heated shell's rock lag, behind `MOON_BULK_VERSION` at 24 (decision-p14-t56g).
+  `GENERATOR_VERSION` stays 23, no golden moves, and no draw or domain tag is added.
+  - _The verdict_ is `derive::SurfaceLag` (`Bare`, `Lagged`), requested through `GivenLag`
+    (`Stated`, or `AboveMelting` for an icy belt member). `GivenBulk::new` gives `Stated(Bare)`,
+    the entry's "`OfBulk`". The material is `derive::surface_material`, in `derive/mod.rs`;
+    `derive/atmosphere*` is untouched, and `SurfaceMaterial`'s two doc lines go to `p14-escape`,
+    whose file it is (main, 2026-10-23).
+  - _Carriers:_ `GivenBulk`, `AirBulk`, `PassBulk`, `DerivedBody`, `FigureBulk`, `SurfaceSky`,
+    `CrustBasisInputs`, and `MoonBulk::Kept` and `Stated`, each carrying the retention arm's own
+    verdict. The record side reads the derivation's lag (`record_spin` takes it), and a debug
+    assertion in the derivation's record passes holds every body's record-side figure bulk to
+    its derivation's material. `CrustBasisInputs::of` is `Bare`, as the public
+    `CrustComposition::derive` is (its doc says so). `photometry_of` takes the lag. `moon_ice`
+    stays private.
+  - _Site 6:_ `GlobalFigures::partition_ground(gravity, material)` takes its material from
+    `surface_basis`, and from system/tests.rs's two closures (`surface.material()`).
+    `GlobalFigures` keeps a `#[cfg(test)] stand_in_material` for its two test helpers, in place
+    of §6's argument from their callers, which would need a line in `p14-escape`'s
+    derive/atmosphere/tests.rs (main).
+  - _Tests_ live in the new `system/moon_ice/lag_tests.rs` (main: nothing added to
+    system/tests.rs, whose changes are the ruled
+    `a_moon_s_published_conditions_read_its_planet_s_orbit`, P14.T56.f's census and its 400 twin
+    under `BulkOnly`, `MoonBulk::Kept`'s new field, the two closures, and the golden-systems
+    helpers made `pub(super)`). They run under `with_moon_bulk(Batch)` against
+    `BulkOnly`, with the other 24 holds held: `with_every_24_hold` and LOOK72's census are not on
+    the branch, so whichever lane lands second moves the tests into the helper and runs the 62.
+    A crust unit test holds `ocean_froze` to the lag (an ice shell when bare, none when lagged).
+  - _As measured_ (by T0):
+    - the golden systems: 363 records, 97 moons with an arm, 22 lagged; subgiant 0101 and
+      red_giant 0503, 0504, e202 and e204 go `Ice`/`AirlessIce` → `Rock`/`Mercury`, their bulks
+      and `T_eq` the same to the bit; the other 16 lagged moons are already `Rocky` and do not
+      move;
+    - red_giant e206 is lagged too, by the members' rule (main accepted it as the rule's): an
+      icy member at T0 289.0 K that sat on the cold branch under an H₂O lid at `T_eq` 220.18 K;
+      its lid goes H₂O primary → secondary and its `T_eq` 220.18 → 280.70 K. It joins "Moves at
+      24" and the bless note;
+    - the 400: 6,379 records, 1,060 moons with an arm, 124 lagged; the six named go
+      `Ice`/`AirlessIce` → `Rock`/`Mercury`, their bulks unchanged;
+    - count (ix) is 0 in both, no airless `Icy` planet lies above melting at T0, and no thinned
+      bulk is all water; lids moved: e206 and 42002cb1ff800003.0501 only;
+    - `BulkOnly` reproduces P14.T56.f's batch over all 8,053 records (a digest, compared and
+      removed).
+  - _42002cb1ff800003.0501_ is airless under both arms: under `BulkOnly` an H₂O primary lid on
+    the cold branch (T_s = `T_eq` 220.41 K, `IceHeld` `Retention(4)`); under the batch `Rock`/
+    `Mercury` with a secondary lid, T_s = `T_eq` 334.63 K (§5's estimate about 335 K) and
+    `Retention(0)`, with no state flip. Its low `T_eq` was its lid's, not an air's, so the item
+    "The arm's temperature under an air" has no example in either set.
+  - _Deferred findings (2026-10-13 rule):_ `golden_systems()`'s cache pins the escape's rules
+    but not the moon bulk's; every caller fills it outside a switch today (the determinism
+    review's note).

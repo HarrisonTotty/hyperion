@@ -836,7 +836,7 @@ fn check_ice_bulk(id: crate::id::BodyId, surface: &Surface, tally: &mut IceBulkT
     }
     // Over the ground its condensates were published on (rule (f)).
     let ground = surface.basis().map_or_else(
-        || figures.partition_ground(crate::units::MetresPerSecondSquared::new(0.0)),
+        || figures.partition_ground(MetresPerSecondSquared::new(0.0), surface.material()),
         |basis| basis.ground,
     );
     let ice = cover::ice_fraction(&cover::IceInputs {
@@ -894,7 +894,7 @@ fn check_cover_rule(
     let condensates = surface.condensates();
     // The ground its condensates were published on: its published pass's context's (rule (f)).
     let ground = surface.basis().map_or_else(
-        || figures.partition_ground(crate::units::MetresPerSecondSquared::new(0.0)),
+        || figures.partition_ground(MetresPerSecondSquared::new(0.0), surface.material()),
         |basis| basis.ground,
     );
     let mut liquids = condensates.surface_liquids();
@@ -3566,7 +3566,7 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
                 equilibrium_temperature: derived.equilibrium_temperature(),
                 surface_gravity: bulk.surface_gravity(),
                 radius: Metres::from(bulk.radius()),
-                material: SurfaceMaterial::of(&bulk.fractions()),
+                material: surface.material(),
                 lid: basis.lid,
                 stellar_flux: WattsPerSquareMetre::from(derived.flux()),
                 xuv_flux: derived.xuv_flux(),
@@ -7049,7 +7049,7 @@ const GOLDEN_SYSTEMS: [(&str, u64); 15] = [
 /// as `golden_systems_are_pinned` generates them, once, under the escape's hold whatever rules the
 /// test that first asks has set ([`with_rules`](crate::planetary::chem::escape::with_rules)), so
 /// that the cache is version 23's.
-fn golden_systems() -> &'static [(&'static str, SystemContext, PlanetarySystem)] {
+pub(super) fn golden_systems() -> &'static [(&'static str, SystemContext, PlanetarySystem)] {
     use crate::planetary::chem::escape::{EscapeRules, with_rules};
     static SYSTEMS: OnceLock<Vec<(&'static str, SystemContext, PlanetarySystem)>> = OnceLock::new();
     SYSTEMS.get_or_init(|| with_rules(EscapeRules::Held, golden_systems_afresh))
@@ -7057,7 +7057,7 @@ fn golden_systems() -> &'static [(&'static str, SystemContext, PlanetarySystem)]
 
 /// The golden systems ([`GOLDEN_SYSTEMS`]) generated afresh, under the rules in force on the
 /// calling thread (a test's switch among them, which a system generated once would not read).
-fn golden_systems_afresh() -> Vec<(&'static str, SystemContext, PlanetarySystem)> {
+pub(super) fn golden_systems_afresh() -> Vec<(&'static str, SystemContext, PlanetarySystem)> {
     let galaxy = crate::galaxy::Galaxy::from_params(
         Seed::new(GOLDEN_SYSTEMS_SEED),
         crate::galaxy::params::GalaxyParams::milky_way_like(),
@@ -8840,8 +8840,9 @@ struct MoonBulkMoves {
 }
 
 impl MoonBulkMoves {
-    /// Adds the moves of the system `name` of context `ctx`, held `held` and under the batch's
-    /// rules `batch`.
+    /// Adds the moves of the system `name` of context `ctx`, held `held` and under P14.T56.f's
+    /// arms alone `batch` ([`MoonBulkRules::BulkOnly`](moon_ice::MoonBulkRules::BulkOnly), with no
+    /// P14.T56.g lag).
     #[expect(
         clippy::too_many_lines,
         reason = "one walk of a system's records, held and under the batch, each classed and listed"
@@ -8861,7 +8862,7 @@ impl MoonBulkMoves {
             return;
         }
         let before = held.snapshot_at(ctx, t);
-        with_moon_bulk(MoonBulkRules::Batch, || {
+        with_moon_bulk(MoonBulkRules::BulkOnly, || {
             let after = batch.snapshot_at(ctx, t);
             let epoch = Epoch::new(batch, ctx, t).with_shades();
             let cosines = HourCosines::new();
@@ -8952,7 +8953,7 @@ impl MoonBulkMoves {
                 if let SatelliteMoon::Regular(_) = part.satellite.moon() {
                     let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
                     let own = PlanetarySystem::moon_own_bulk(part, &orbit, &now);
-                    let MoonBulk::Kept { water } = own else {
+                    let MoonBulk::Kept { water, .. } = own else {
                         panic!("{id}: {own:?}");
                     };
                     assert_same_bits(water, w1);
@@ -9028,10 +9029,13 @@ impl MoonBulkMoves {
 ///   water; every other record is unchanged to the bit: the cold irregulars (R1.6 moves a giant's
 ///   hot ones, so the plan's "a giant's irregulars, unchanged" reads "below the melting point"),
 ///   `eccentric_giant` 0101–0103 among them.
+///
+/// Under P14.T56.f's arms alone (`BulkOnly`), so that P14.T56.g's lag, which moves `red_giant`
+/// e202, e204 and e206's surfaces too, is attributed to its own subtask (decision-p14-t56g §2).
 #[test]
 fn a_moon_s_bulk_reads_its_birthplace_and_its_ice_s_history() {
     use moon_ice::{MoonBulkRules, with_moon_bulk};
-    let batch = with_moon_bulk(MoonBulkRules::Batch, golden_systems_afresh);
+    let batch = with_moon_bulk(MoonBulkRules::BulkOnly, golden_systems_afresh);
     let mut moves = MoonBulkMoves::default();
     for ((name, ctx, held), (_, _, batch)) in golden_systems().iter().zip(&batch) {
         moves.visit(name, ctx, (held, batch));
@@ -9085,7 +9089,7 @@ fn a_moon_s_bulk_reads_its_birthplace_and_its_ice_s_history() {
 /// hot ice bulks it leaves `Icy` (each to main at the gate, G2 item 10, and an `Ice` surface on
 /// them P14.T56.g's must-fix), the stripped bodies above 200 km, the small warm ice bulks, the hot
 /// ice bulks that are not moons, and the `Ice` surfaces above the melting point; no record moves
-/// beyond the moved moons.
+/// beyond the moved moons. Under P14.T56.f's arms alone (`BulkOnly`), as its golden twin.
 #[test]
 #[ignore = "a measurement for the bless note, run by name"]
 fn a_moon_s_bulk_reads_its_birthplace_over_the_sample() {
@@ -9093,7 +9097,7 @@ fn a_moon_s_bulk_reads_its_birthplace_over_the_sample() {
     let mut moves = MoonBulkMoves::default();
     for ctx in sample() {
         let held = generate(SEED, ctx);
-        let batch = with_moon_bulk(MoonBulkRules::Batch, || generate(SEED, ctx));
+        let batch = with_moon_bulk(MoonBulkRules::BulkOnly, || generate(SEED, ctx));
         moves.visit("sample", ctx, (&held, &batch));
     }
     eprintln!(

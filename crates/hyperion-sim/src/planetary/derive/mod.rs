@@ -143,6 +143,7 @@ use crate::planetary::disc::DiscProfile;
 use crate::planetary::hooks::crust::{
     AmmoniaIce, CrustBasis, CrustBasisInputs, CrustLid, DeriveCrustError,
 };
+use crate::planetary::hooks::figures::cover::UNDER_ICE_MELTING_POINT;
 use crate::planetary::hooks::surface::{COSMIC_BACKGROUND_TEMPERATURE, OceanWeight};
 use crate::planetary::params::{
     GAS_GIANT_ENVELOPE_FRACTION, ICE_GIANT_MASS, ICY_WATER_FRACTION, THIN_ENVELOPE_FRACTION,
@@ -467,22 +468,91 @@ impl Error for BuildFormationZoneError {}
 /// beyond the snow line, the larger of the drawn water and the bulk's, and the argon by its rock.
 /// The atmosphere reads this radius at that mass, so its Jeans escape, the weight of its air over
 /// the surface (its surface gravity) and an oxygen-losing runaway's escape are the stated bulk's,
-/// and its airless surface's material is these fractions'. The albedo the air's state gives, and
-/// the equilibrium and effective temperatures it sets, follow. Every other value of the derivation
-/// stays the solve's: its radius, density, gravity, class, fractions and core, its moon limit and
-/// its Hill radius.
+/// and its surface's material is these fractions', or rock under its surface lag ([`GivenLag`],
+/// P14.T56.g; [`surface_material`]), which every reader of its surface takes; a bulk built
+/// without one is bare. The albedo the air's state gives, and the equilibrium and effective
+/// temperatures it sets, follow. Every other value of the derivation stays the solve's: its
+/// radius, density, gravity, class, fractions and core, its moon limit and its Hill radius.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct GivenBulk {
     radius: Metres,
     fractions: GivenFractions,
+    lag: GivenLag,
 }
 
 impl GivenBulk {
-    /// The bulk of radius `radius` and mass fractions `fractions`. A radius that is not positive
-    /// and finite gives an airless body, as [`atmosphere::atmosphere`] takes one.
+    /// The bulk of radius `radius` and mass fractions `fractions`, bare. A radius that is not
+    /// positive and finite gives an airless body, as [`atmosphere::atmosphere`] takes one.
     #[must_use]
     pub(crate) const fn new(radius: Metres, fractions: GivenFractions) -> Self {
-        Self { radius, fractions }
+        Self {
+            radius,
+            fractions,
+            lag: GivenLag::Stated(SurfaceLag::Bare),
+        }
+    }
+
+    /// The same bulk with its surface lag decided as `lag` says (P14.T56.g).
+    #[must_use]
+    pub(crate) const fn with_lag(self, lag: GivenLag) -> Self {
+        Self { lag, ..self }
+    }
+}
+
+/// Whether a body's heated shell has lost its ice, leaving its rock as a lag over its bulk
+/// (P14.T56.g; decision-p14-t56g §1): the one verdict, decided once a body, that sets its surface
+/// material, rock where it is lagged.
+///
+/// - **Why rock.** A bare ice surface in vacuum near the melting point retreats by free
+///   sublimation, J = `p_sat` √(m ÷ 2πkT), about 4 km a year at 253 K and 24 km a year at
+///   273.15 K at Murphy and Koop's vapour pressure (2005, QJRMS 131, 1539). So above the melting
+///   point the surface is the refractory residue at once, as on comet nuclei (67P's dark,
+///   ice-poor mantle, geometric albedo 6.5%, Fornasier et al. 2015, A&A 583, A30) and, far
+///   colder, on Callisto and Ceres.
+/// - **Who takes it.** A moon whose bulk its retention arm thinned (`t_hot` > 0 with some water,
+///   so that it keeps w′ < w₀; P14.T56.f), `Rocky` ones included: its arm's own verdict, carried, as
+///   a regular moon's [`MoonBulk::Kept`](crate::planetary::moons::regular::MoonBulk::Kept) and a
+///   capture's or a giant-impact moon's
+///   [`MoonBulk::Stated`](crate::planetary::moons::regular::MoonBulk::Stated). An icy belt member
+///   where the zero-albedo temperature at its derivation's flux exceeds the melting point,
+///   273.15 K. No planet: under an air its water is a sea, a cover or vapour, not a sublimation
+///   lag.
+/// - **What it moves.** Only the surface: its material, so its airless albedo, its photometry's
+///   template, its regolith's inertia and stand-in row, its ice-held air, its ice-area rule and
+///   its crust's water, and its crust's ice shell, which a lagged shell cannot hold. Its interior
+///   keeps its ice: its class, its figure's hydrostatic threshold, its moment of inertia, its
+///   tides' rigidity and its crust's thermal history read its bulk's fractions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum SurfaceLag {
+    /// No lag: its surface is its bulk's material ([`SurfaceMaterial::of`]).
+    #[default]
+    Bare,
+    /// Its heated shell lost its ice: its surface is the rock lag ([`SurfaceMaterial::Rock`]).
+    Lagged,
+}
+
+/// How a [`GivenBulk`]'s surface lag is decided (P14.T56.g).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GivenLag {
+    /// As its caller states it: a moon's, its retention arm's verdict.
+    Stated(SurfaceLag),
+    /// By the derivation's own zero-albedo equilibrium temperature at its flux: lagged above
+    /// [`UNDER_ICE_MELTING_POINT`], an icy belt member's (decision-p14-t56g §3), whose bulk no arm
+    /// thins. The limit is the retention arm's, `system::moon_ice::HOT_ICE_LIMIT` (a module
+    /// private to the system), and the flux is [`DerivedBody::flux`], to the bit.
+    AboveMelting,
+}
+
+/// The surface material of a body of bulk fractions `fractions` whose surface lag is `lag`
+/// (P14.T56.g): rock where its heated shell lost its ice, and its bulk's otherwise
+/// ([`SurfaceMaterial::of`]). The one function every reader of a body's surface material takes:
+/// its air, its cold traps' regolith, its photometry, its spun climate, its record's surface and
+/// the figures' partition ground.
+#[must_use]
+pub(crate) fn surface_material(fractions: &MassFractions, lag: SurfaceLag) -> SurfaceMaterial {
+    match lag {
+        SurfaceLag::Bare => SurfaceMaterial::of(fractions),
+        SurfaceLag::Lagged => SurfaceMaterial::Rock,
     }
 }
 
@@ -738,6 +808,7 @@ pub struct DerivedBody {
     spun: Option<SpunPasses>,
     crust_lid: Option<CrustLid>,
     regolith_albedo: f64,
+    surface_lag: SurfaceLag,
     internal_luminosity: Watts,
     radius: EarthRadii,
     density: KilogramsPerCubicMetre,
@@ -911,6 +982,15 @@ impl DerivedBody {
     #[must_use]
     pub(crate) const fn crust_lid(&self) -> Option<&CrustLid> {
         self.crust_lid.as_ref()
+    }
+
+    /// The body's surface lag (P14.T56.g; [`SurfaceLag`]), decided once before its passes from
+    /// its given bulk ([`GivenBulk`]): whether its heated shell lost its ice, so that its surface
+    /// material is rock ([`surface_material`]). Its record's photometry and surface read it, as its
+    /// passes did; [`SurfaceLag::Bare`] for a body with no given bulk, a planet's.
+    #[must_use]
+    pub(crate) const fn surface_lag(&self) -> SurfaceLag {
+        self.surface_lag
     }
 
     /// The body's atmosphere and surface at the time (P14.T13).
@@ -1355,7 +1435,7 @@ pub(crate) fn derive_body_driven(
 
     // T12 and T13's passes (T13.c, P14.T51.b): the albedo of one pass's surface sets the
     // equilibrium temperature the next pass reads, at the bulk its air reads, with its inventory.
-    let bulk = placed.air_of(disc, formed, (mass, radius, &fractions), age_now);
+    let bulk = placed.air_of(disc, formed, (mass, radius, &fractions), age_now, sky.flux);
     let crust = match placed.molten_until {
         Some(until) if age_now < until => Crust::Molten,
         Some(_) | None => Crust::Solid,
@@ -1373,6 +1453,7 @@ pub(crate) fn derive_body_driven(
         class,
         fractions,
         inventory_water: bulk.elements.volatiles().water(),
+        lag: bulk.lag,
     };
     let history = envelope_history(&bulk, &escape);
     let passes = PassBody {
@@ -1421,6 +1502,7 @@ pub(crate) fn derive_body_driven(
         spun: passes.spun,
         crust_lid: passes.crust_lid,
         regolith_albedo,
+        surface_lag: bulk.lag,
         internal_luminosity,
         radius,
         density,
@@ -1809,7 +1891,7 @@ impl PassBody<'_> {
         let inputs = AtmosphereInputs {
             mass: bulk.mass,
             radius: bulk.radius,
-            material: SurfaceMaterial::of(&bulk.fractions),
+            material: surface_material(&bulk.fractions, bulk.lag),
             envelope_fraction: bulk.fractions.envelope(),
             class: self.class,
             inventory: *bulk.elements.volatiles(),
@@ -1868,6 +1950,7 @@ impl PassBody<'_> {
             alpha_fe: record.alpha_fe,
             fe_h: record.fe_h,
             formation_temperature,
+            lag: self.bulk.lag,
         };
         let basis = CrustBasis::derive(&inputs);
         // A formation time after the age is the one refusal a record's basis meets (a body seen
@@ -1912,7 +1995,7 @@ impl PassBody<'_> {
         };
         // The bare regolith the cold traps read (P14.T51.i): the published pass's row on an
         // airless body, under the hosts' light, by the area mix's one predicate.
-        let material = SurfaceMaterial::of(&self.bulk.fractions);
+        let material = surface_material(&self.bulk.fractions, self.bulk.lag);
         let regolith = ended.crust_lid.map_or_else(
             || (surface.regolith)(material),
             |lid| Regolith::with_lid(lid.row(), material),
@@ -2013,6 +2096,13 @@ impl PassBody<'_> {
     #[must_use]
     fn record_passes(&self, driver: PassDriver, of: &dyn PassRecordOf) -> Passes {
         let record = of.spin(self.pass_bulk);
+        // The record's figure bulk shows its derivation's surface material (P14.T56.g;
+        // decision-p14-t56g §8): its fractions' under the derivation's own lag, as its air reads.
+        debug_assert_eq!(
+            record.material,
+            surface_material(&self.bulk.fractions, self.bulk.lag),
+            "a record's figure bulk's surface material is its derivation's"
+        );
         let shade = &self.sky.shade;
         // The crust's basis, once a body before any pass, whatever the tide (item 17's
         // constraint 2): `body.formation`'s word 0 is read here, once a derivation.
@@ -2527,8 +2617,11 @@ struct AirBulk {
     mass: Kilograms,
     /// The radius its air is weighed and escapes at.
     radius: Metres,
-    /// The mass fractions its inventory and its airless surface read.
+    /// The mass fractions its inventory and its surface read.
     fractions: MassFractions,
+    /// Its surface lag (P14.T56.g; [`PlacedBody::surface_lag`]), which its surface material
+    /// ([`surface_material`]) and its crust's ice shell read.
+    lag: SurfaceLag,
     /// The side of the snow line its volatiles formed on, which its carbon's carrier follows: its
     /// own, or a captured or giant-impact moon's parent's (P14.T56.c).
     side: SnowLineSide,
@@ -2542,7 +2635,7 @@ struct AirBulk {
 
 impl PlacedBody {
     /// The [`AirBulk`] of this body at age `age`, whose solve gives it the mass, radius and
-    /// fractions `solved` at the time.
+    /// fractions `solved` at the time, under its hosts' flux `flux`.
     ///
     /// - Its bulk is the one [`with_bulk`](Self::with_bulk) states, at its placed mass, where it
     ///   has one (a moon's own, P14.T56.c's follow-up), and `solved` otherwise.
@@ -2556,6 +2649,7 @@ impl PlacedBody {
     ///   side and the [`formation_temperature`] of that distance and snow line, to the bit, which
     ///   is [`FormationZone::temperature`] for a zone; its ΔIW reads the same distance and snow
     ///   line.
+    /// - Its surface lag is its given bulk's at `flux` ([`surface_lag`](Self::surface_lag)).
     #[must_use]
     fn air_of(
         &self,
@@ -2563,6 +2657,7 @@ impl PlacedBody {
         formed: SnowLineSide,
         solved: (EarthMasses, EarthRadii, &MassFractions),
         age: Years,
+        flux: EarthFluxes,
     ) -> AirBulk {
         let (mass, radius, fractions) = match self.bulk {
             Some(bulk) => (self.mass, bulk.radius, bulk.fractions.over(solved.2)),
@@ -2590,9 +2685,32 @@ impl PlacedBody {
             mass: Kilograms::from(mass),
             radius,
             fractions,
+            lag: self.surface_lag(flux),
             side,
             elements,
             ammonia,
+        }
+    }
+
+    /// The body's surface lag under its hosts' flux `flux` (P14.T56.g; [`GivenLag`]): its given
+    /// bulk's as stated, or for an icy belt member's lagged where the zero-albedo equilibrium
+    /// temperature at `flux` exceeds [`UNDER_ICE_MELTING_POINT`]; bare with no given bulk, a
+    /// planet's.
+    #[must_use]
+    fn surface_lag(&self, flux: EarthFluxes) -> SurfaceLag {
+        match self.bulk.map(|bulk| bulk.lag) {
+            None => SurfaceLag::Bare,
+            Some(GivenLag::Stated(lag)) => lag,
+            Some(GivenLag::AboveMelting) => {
+                // A temperature that is not a number is not above the melting point.
+                if equilibrium_temperature(flux, BondAlbedo::from_fraction(0.0))
+                    > UNDER_ICE_MELTING_POINT
+                {
+                    SurfaceLag::Lagged
+                } else {
+                    SurfaceLag::Bare
+                }
+            }
         }
     }
 }

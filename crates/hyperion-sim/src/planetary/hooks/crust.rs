@@ -187,7 +187,7 @@ use crate::math;
 use crate::planetary::chem::redox::{RedoxClass, fmq_above_iw};
 use crate::planetary::chem::solar_magnesium_to_silicon;
 use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
-use crate::planetary::derive::{MassFractions, SnowLineSide};
+use crate::planetary::derive::{MassFractions, SnowLineSide, SurfaceLag};
 use crate::planetary::hooks::figures::interior::{
     ROCK_THERMAL_DIFFUSIVITY_M2_PER_S, RadiogenicIsotope, radiogenic_heat_production_w_per_kg,
 };
@@ -1158,6 +1158,10 @@ enum Crusts {
 impl CrustComposition {
     /// The crust of the body `inputs` describe (the [module](self)'s model).
     ///
+    /// It is a bare surface's crust ([`SurfaceLag::Bare`]): the inputs state no surface lag, and a
+    /// lagged body's (P14.T56.g), whose heated shell holds no ocean to freeze into an ice shell,
+    /// takes its crust from its record's passes.
+    ///
     /// # Errors
     ///
     /// A [`DeriveCrustError`] for an input out of range, the first found in this order: a body in
@@ -1452,12 +1456,16 @@ pub(crate) struct CrustBasisInputs {
     pub(crate) radius: Metres,
     /// Its mass, positive.
     pub(crate) mass: EarthMasses,
-    /// Its mass fractions, summing to 1.
+    /// Its mass fractions, summing to 1: its bulk's, whose ice its thermal history reads
+    /// ([`holds_ice`], [`thermal_material`], [`melting`]) under any surface lag.
     pub(crate) fractions: MassFractions,
     /// The side of the snow line it formed on.
     pub(crate) snow_line_side: SnowLineSide,
     /// Whether its ice carries ammonia.
     pub(crate) ammonia: AmmoniaIce,
+    /// Its surface lag (P14.T56.g; decision-p14-t56g §1): a lagged body's heated shell lost its
+    /// ice, so it holds no ocean to freeze into an ice shell ([`ocean_froze`]).
+    pub(crate) lag: SurfaceLag,
     /// Its mantle's ΔIW, log₁₀ units.
     pub(crate) delta_iw: Dex,
     /// Its host's Mg/Si by number, positive.
@@ -1471,7 +1479,7 @@ pub(crate) struct CrustBasisInputs {
 }
 
 impl CrustBasisInputs {
-    /// The pass-invariant fields of `inputs`.
+    /// The pass-invariant fields of `inputs`, with no surface lag, which they do not state.
     #[must_use]
     pub(crate) const fn of(inputs: &CrustCompositionInputs<'_>) -> Self {
         Self {
@@ -1489,6 +1497,7 @@ impl CrustBasisInputs {
             alpha_fe: inputs.alpha_fe,
             fe_h: inputs.fe_h,
             formation_temperature: inputs.formation_temperature,
+            lag: SurfaceLag::Bare,
         }
     }
 }
@@ -1915,14 +1924,24 @@ fn melting(inputs: &CrustBasisInputs) -> Melting {
 /// Whether the body's ocean froze into an ice-rich crust under the mean surface temperature
 /// `mean_surface_temperature`, by [`Crust::of`]: the craters' one ice-rich predicate, its
 /// birthplace icy for a body formed beyond the snow line.
+///
+/// Never on a lagged body (P14.T56.g; decision-p14-t56g §1), at any mean temperature: its heated
+/// shell lost its ice and holds no ocean to freeze, and an airless ice lid at 266–273 K would
+/// sublimate some 10–20 km a year. The gate reads the lag, not the surface material: Europa is a
+/// rock bulk with a true ice shell.
 #[must_use]
 fn ocean_froze(inputs: &CrustBasisInputs, mean_surface_temperature: Kelvin) -> bool {
     let birthplace = match inputs.snow_line_side {
         SnowLineSide::Beyond => Birthplace::Icy,
         SnowLineSide::Inside => Birthplace::Other,
     };
+    let unlagged = match inputs.lag {
+        SurfaceLag::Bare => true,
+        SurfaceLag::Lagged => false,
+    };
     let water = Kilograms::new(Kilograms::from(inputs.mass).value() * inputs.fractions.water());
-    inputs.fractions.water() > 0.0
+    unlagged
+        && inputs.fractions.water() > 0.0
         && Crust::of(birthplace, mean_surface_temperature, water, inputs.radius) == Crust::IceRich
 }
 

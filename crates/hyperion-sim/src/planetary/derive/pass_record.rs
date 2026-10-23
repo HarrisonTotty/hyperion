@@ -36,7 +36,7 @@ use core::fmt;
 use crate::planetary::chem::partition::{Basins, CrustWater, Ground};
 use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::passes::{Context, floats_agree};
-use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
+use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide, SurfaceLag};
 use crate::planetary::hooks::crust::{
     CrustLid, CrustLithology, CrustOrigin, LidCrust, TidalVolcanism,
 };
@@ -52,9 +52,9 @@ use crate::units::{
 };
 
 /// A body's bulk before its passes, which no pass moves (lever (e)): its mass, radius, density,
-/// surface gravity, class and mass fractions at the time, the derivation's own to the bit, and its
-/// volatile inventory's water. What the record's bulk rule reads to give a pass's figures and
-/// climate their bulk.
+/// surface gravity, class and mass fractions at the time, the derivation's own to the bit, its
+/// volatile inventory's water and its surface lag (P14.T56.g). What the record's bulk rule reads to
+/// give a pass's figures and climate their bulk.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PassBulk {
     /// The mass at the time, escape's loss taken.
@@ -71,6 +71,9 @@ pub(crate) struct PassBulk {
     pub(crate) fractions: MassFractions,
     /// The water of the volatile inventory (P14.T13.a), before escape and the climate divide it.
     pub(crate) inventory_water: Kilograms,
+    /// The surface lag its derivation decided (P14.T56.g), which its record's surface material
+    /// reads ([`surface_material`](super::surface_material)).
+    pub(crate) lag: SurfaceLag,
 }
 
 /// What a body's spun climate reads of its record beyond each pass (P14.T54.a): its spin under its
@@ -87,7 +90,9 @@ pub(crate) struct RecordSpin<'a> {
     pub(crate) surface_gravity: MetresPerSecondSquared,
     /// Its record's bulk's mean radius.
     pub(crate) radius: Metres,
-    /// The material of its record's bulk ([`SurfaceMaterial::of`] of its fractions).
+    /// The body's surface material: its bulk's, or rock where its heated shell lost its ice
+    /// ([`surface_material`](super::surface_material) of its record's bulk's fractions and its
+    /// surface lag, P14.T56.g).
     pub(crate) material: SurfaceMaterial,
 }
 

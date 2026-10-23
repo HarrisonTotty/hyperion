@@ -120,9 +120,10 @@ use crate::planetary::derive::rotation::{
     BodyRotation, ObliquityLaw, SpinDraws, SpinInputs, SpinState, SpinTides,
 };
 use crate::planetary::derive::{
-    BodyHosts, DerivedBody, DerivedBulk, GivenBulk, GivenFractions, HabitableZone, HostLight,
-    Illumination, MassFractions, PassDriver, PlacedBody, PlanetClass, SnowLineSide, SpunPasses,
-    derive_body, derive_body_driven, derive_bulk, habitable_zone_of, radius_chen_kipping,
+    BodyHosts, DerivedBody, DerivedBulk, GivenBulk, GivenFractions, GivenLag, HabitableZone,
+    HostLight, Illumination, MassFractions, PassDriver, PlacedBody, PlanetClass, SnowLineSide,
+    SpunPasses, SurfaceLag, derive_body, derive_body_driven, derive_bulk, habitable_zone_of,
+    radius_chen_kipping, surface_material,
 };
 use crate::planetary::disc::{self, Disc, DiscProfile, Truncation};
 use crate::planetary::drift::{DriftingOrbit, drift_cell};
@@ -197,7 +198,7 @@ use crate::units::{
     KilogramsPerCubicMetre, Megayears, Metres, MetresPerSecondSquared, Radians, Seconds,
     SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, WattsPerSquareMetre, Years,
 };
-use moon_ice::{HotHistory, MoonBulkRules, MoonIce, kept_water};
+use moon_ice::{HotHistory, MoonBulkRules, MoonIce, kept_water, shell_lag};
 
 /// Words of [`tags::PLANET_RADIUS`] a planet reads or reserves: word 0, its radius rank, then
 /// seven reserved.
@@ -669,8 +670,10 @@ impl Body {
 }
 
 /// The photometry of a present body whose bulk is `bulk`, whose last atmosphere pass is
-/// `atmosphere` and whose equilibrium temperature was taken at the albedo `albedo` (P14.T47.c):
-/// its surface state with the material of its record's composition, and its Bond albedo `albedo`
+/// `atmosphere`, whose equilibrium temperature was taken at the albedo `albedo` (P14.T47.c) and
+/// whose surface lag is `lag` (P14.T56.g): its surface state with its surface material, its
+/// record's composition's or its heated shell's rock lag's (so that an airless lagged ice bulk
+/// takes the rock template, `Mercury`, not `AirlessIce`), and its Bond albedo `albedo`
 /// itself, the area mix's, whose passes read the record's composition (P14.T51.b), so that the two
 /// agree to the bit by construction; its template's reference is the area mix's
 /// ([`TemplateRow::reference_bond`](crate::planetary::derive::photometry::TemplateRow::reference_bond)).
@@ -679,11 +682,12 @@ fn photometry_of(
     albedo: BondAlbedo,
     atmosphere: &Atmosphere,
     bulk: &BulkProperties,
+    lag: SurfaceLag,
 ) -> BodyPhotometry {
     let fractions = bulk.fractions();
     BodyPhotometry::derive(&PhotometryInputs {
         state: atmosphere.state(),
-        material: SurfaceMaterial::of(&fractions),
+        material: surface_material(&fractions, lag),
         surface_pressure: atmosphere.surface_pressure(),
         cloud_fraction: atmosphere.cloud_fraction(),
         surface_temperature: atmosphere.surface_temperature(),
@@ -789,13 +793,25 @@ fn icy_member_ice(body: &Body) -> Option<f64> {
 /// composition"; decision-triton-and-e101 §1.7): its record's ([`icy_member_bulk`]), the radius
 /// [`moon_radius`] gives its ice ([`icy_member_ice`]) at that mass and its rock-and-ice fractions,
 /// known before the derivation. `None` for anything else.
+///
+/// Under the moon bulk's batch rules its surface lag is its derivation's own
+/// ([`GivenLag::AboveMelting`], P14.T56.g; decision-p14-t56g §3): its heated shell's rock lag where
+/// its zero-albedo temperature lies above the melting point. Its bulk keeps its ice (R1.2).
 #[must_use]
 fn icy_member_given_bulk(body: &Body, mass: EarthMasses) -> Option<GivenBulk> {
     let ice = icy_member_ice(body)?;
-    Some(GivenBulk::new(
-        moon_radius(mass, ice),
-        GivenFractions::Exactly(MassFractions::solid(0.0, 1.0 - ice, ice)),
-    ))
+    let lag = if MoonBulkRules::in_force().lags() {
+        GivenLag::AboveMelting
+    } else {
+        GivenLag::Stated(SurfaceLag::Bare)
+    };
+    Some(
+        GivenBulk::new(
+            moon_radius(mass, ice),
+            GivenFractions::Exactly(MassFractions::solid(0.0, 1.0 - ice, ice)),
+        )
+        .with_lag(lag),
+    )
 }
 
 /// `placed`, the placement of `body`: with its record's bulk ([`icy_member_given_bulk`]) for an
@@ -2427,9 +2443,10 @@ impl PlanetarySystem {
     /// makes, before anything else is read.
     ///
     /// A present body's surface reads its derivation at the time, its bulk section's gravity,
-    /// radius and surface material (of its mass fractions, [`SurfaceMaterial::of`]), its spin
-    /// under its seasonal orbit then (its own for a planet or a member, its planet's for a moon,
-    /// [`SeasonalSpin::of`]) and the context its published pass read (rule (f)). The figures read
+    /// radius and surface material (of its mass fractions, [`SurfaceMaterial::of`], or its heated
+    /// shell's rock lag, P14.T56.g), its spin under its seasonal orbit then (its own for a planet
+    /// or a member, its planet's for a moon, [`SeasonalSpin::of`]) and the context its published
+    /// pass read (rule (f)). The figures read
     /// its mass, its bulk section's radius, gravity, class and fractions, its atmosphere and its
     /// volatile inventory's water, its sidereal rotation period, the system's \[Fe/H\] and age,
     /// and for a moon the tide its planet raises in it, its derivation's (P14.T17.b), with a
@@ -3084,7 +3101,7 @@ impl PlanetarySystem {
     /// ([`MoonBulkRules::Held`]).
     #[must_use]
     fn moon_ice(&self, epoch: &Epoch<'_>, body: &Body, now: &ParentNow) -> Option<ParentMoonIce> {
-        if MoonBulkRules::in_force() == MoonBulkRules::Held {
+        if !MoonBulkRules::in_force().thins() {
             return None;
         }
         let neighbouring_belt = self
@@ -3471,6 +3488,7 @@ impl PlanetarySystem {
                         derived.albedo(),
                         derived.atmosphere(),
                         &bulk,
+                        derived.surface_lag(),
                     )))
                     .figure(body.figure_section(Some(&bulk), derived.mass(), epoch.t))
                     .orbit(Section::Ok(section))
@@ -3788,7 +3806,12 @@ impl PlanetarySystem {
                     .as_ref()
                     .map(|derived| (Self::moon_bulk_of(moon, derived, parent), derived));
                 let photometry = bulk.map_or(Section::NotModelled, |(bulk, derived)| {
-                    Section::Ok(photometry_of(derived.albedo(), derived.atmosphere(), &bulk))
+                    Section::Ok(photometry_of(
+                        derived.albedo(),
+                        derived.atmosphere(),
+                        &bulk,
+                        derived.surface_lag(),
+                    ))
                 });
                 // P14.T48.e: a moon's surface section, and its envelope's tag, as a planet's. A
                 // moon's fractions hold no envelope, so its class always has a solid surface.
@@ -4015,13 +4038,18 @@ impl PlanetarySystem {
     /// record's bulk ([`moon_bulk_of`](Self::moon_bulk_of)) states them.
     ///
     /// A regular moon on `orbit` whose heated shell has lost its ice keeps only what P14.T56.f's
-    /// retention arm leaves ([`MoonBulk::Kept`]), its ice fraction and radius as its placement
+    /// retention arm leaves ([`MoonBulk::Kept`], with that arm's surface lag, P14.T56.g), its ice
+    /// fraction and radius as its placement
     /// gives them ([`regular_ice_fraction`], [`moon_radius`]), so that its inventory, air and tides
     /// read the bulk its record's class does ([`moon_figure`](Self::moon_figure)).
     #[must_use]
     fn moon_own_bulk(moon: &MoonPart, orbit: &KeplerElements, parent: &ParentNow) -> MoonBulk {
-        if let Some((radius, _, fractions)) = Self::stated_moon_bulk(moon, parent) {
-            return MoonBulk::Stated { radius, fractions };
+        if let Some((radius, _, fractions, lag)) = Self::stated_moon_bulk(moon, parent) {
+            return MoonBulk::Stated {
+                radius,
+                fractions,
+                lag,
+            };
         }
         // Held, or with no sky, a regular moon keeps all its ice: no placement is redone.
         let (Some(nursery), Some(_)) = (
@@ -4033,11 +4061,11 @@ impl PlanetarySystem {
         let satellite = &moon.satellite;
         let ice = regular_ice_fraction(nursery, orbit.semi_major_axis(), satellite.radius_rank());
         let radius = moon_radius(satellite.mass(), ice);
-        let kept = Self::kept_ice_water(ice, radius, moon, parent);
+        let (kept, lag) = Self::kept_ice_water(ice, radius, moon, parent);
         if kept.total_cmp(&ice).is_eq() {
             MoonBulk::Derived
         } else {
-            MoonBulk::Kept { water: kept }
+            MoonBulk::Kept { water: kept, lag }
         }
     }
 
@@ -4045,32 +4073,43 @@ impl PlanetarySystem {
     /// `parent` says, keeps after its time above ice's melting point (P14.T56.f's retention arm,
     /// [`kept_water`]): its zero-albedo temperature `T0` from its parent's sky and the glow at its
     /// primordial orbit, which every caller reads alike, and its zone's history. `water` itself,
-    /// to the bit, where the arm is held or the parent has no sky.
+    /// to the bit, where the arm is held or the parent has no sky. Beside it, the arm's verdict on
+    /// its surface ([`shell_lag`], P14.T56.g): its heated shell's rock lag where the arm thinned
+    /// it, and bare where the arm is held or the parent has no sky.
     #[must_use]
-    fn kept_ice_water(water: f64, radius: Metres, moon: &MoonPart, parent: &ParentNow) -> f64 {
+    fn kept_ice_water(
+        water: f64,
+        radius: Metres,
+        moon: &MoonPart,
+        parent: &ParentNow,
+    ) -> (f64, SurfaceLag) {
         let Some(ice) = parent.moon_ice.as_ref().and_then(|m| m.ice.as_ref()) else {
-            return water;
+            return (water, SurfaceLag::Bare);
         };
-        let t0 = ice.t0(&moon.orbit);
-        kept_water(water, radius, ice.history.hot_for(t0))
+        let hot_for = ice.history.hot_for(ice.t0(&moon.orbit));
+        (
+            kept_water(water, radius, hot_for),
+            shell_lag(water, radius, hot_for),
+        )
     }
 
     /// The fractions `fractions` of a moon `moon` of radius `radius` with only the ice its
     /// retention arm keeps ([`kept_ice_water`](Self::kept_ice_water)), iron and rock keeping their
-    /// ratio ([`MassFractions::with_water`]): `fractions` to the bit where it keeps all.
+    /// ratio ([`MassFractions::with_water`]): `fractions` to the bit where it keeps all. Beside
+    /// them, the arm's verdict on its surface (P14.T56.g).
     #[must_use]
     fn kept_ice(
         fractions: MassFractions,
         radius: Metres,
         moon: &MoonPart,
         parent: &ParentNow,
-    ) -> MassFractions {
+    ) -> (MassFractions, SurfaceLag) {
         let water = fractions.water();
-        let kept = Self::kept_ice_water(water, radius, moon, parent);
+        let (kept, lag) = Self::kept_ice_water(water, radius, moon, parent);
         if kept.total_cmp(&water).is_eq() {
-            fractions
+            (fractions, lag)
         } else {
-            fractions.with_water(kept)
+            (fractions.with_water(kept), lag)
         }
     }
 
@@ -4095,13 +4134,13 @@ impl PlanetarySystem {
     /// density, with its parent's fractions if the parent is icy and rock otherwise, and a
     /// capture's of its own radius, with the ice its density holds where it formed beyond the snow
     /// line and none where it formed inside (P14.T56.f's birthplace arm), each with only the ice
-    /// its retention arm keeps ([`kept_ice`](Self::kept_ice)). `None` for a regular moon, whose
-    /// are its derivation's.
+    /// its retention arm keeps ([`kept_ice`](Self::kept_ice)) and that arm's surface lag
+    /// (P14.T56.g). `None` for a regular moon, whose are its derivation's.
     #[must_use]
     fn stated_moon_bulk(
         moon: &MoonPart,
         parent: &ParentNow,
-    ) -> Option<(Metres, KilogramsPerCubicMetre, MassFractions)> {
+    ) -> Option<(Metres, KilogramsPerCubicMetre, MassFractions, SurfaceLag)> {
         let satellite = &moon.satellite;
         let mass = satellite.mass();
         match satellite.moon() {
@@ -4112,11 +4151,8 @@ impl PlanetarySystem {
                     _ => MassFractions::solid(0.0, 1.0, 0.0),
                 };
                 let radius = sphere_radius(mass, impact.density());
-                Some((
-                    radius,
-                    impact.density(),
-                    Self::kept_ice(fractions, radius, moon, parent),
-                ))
+                let (fractions, lag) = Self::kept_ice(fractions, radius, moon, parent);
+                Some((radius, impact.density(), fractions, lag))
             }
             SatelliteMoon::Captured(captured) => {
                 let density = sphere_density(mass, captured.radius());
@@ -4128,11 +4164,8 @@ impl PlanetarySystem {
                     let ice = ice_fraction_of(density);
                     MassFractions::solid(0.0, 1.0 - ice, ice)
                 };
-                Some((
-                    captured.radius(),
-                    density,
-                    Self::kept_ice(fractions, captured.radius(), moon, parent),
-                ))
+                let (fractions, lag) = Self::kept_ice(fractions, captured.radius(), moon, parent);
+                Some((captured.radius(), density, fractions, lag))
             }
         }
     }
@@ -4164,16 +4197,19 @@ impl PlanetarySystem {
     ) -> FigureBulk {
         let mass = moon.satellite.mass();
         // A regular moon's derived bulk keeps only the ice its retention arm leaves (P14.T56.f), as
-        // its derivation's own bulk does (`moon_own_bulk`).
-        let (radius, density, fractions) =
-            Self::stated_moon_bulk(moon, parent).unwrap_or_else(|| {
+        // its derivation's own bulk does (`moon_own_bulk`); its surface lag is its derivation's
+        // (P14.T56.g), which the record reads from there.
+        let (radius, density, fractions) = Self::stated_moon_bulk(moon, parent).map_or_else(
+            || {
                 let (radius, density, fractions) = derived;
                 (
                     radius,
                     density,
-                    Self::kept_ice(fractions, radius, moon, parent),
+                    Self::kept_ice(fractions, radius, moon, parent).0,
                 )
-            });
+            },
+            |(radius, density, fractions, _)| (radius, density, fractions),
+        );
         let r = radius.value();
         FigureBulk {
             radius: EarthRadii::from(radius),
@@ -4486,15 +4522,21 @@ impl FigureBulk {
     }
 
     /// The spun climate's record of this bulk under the spin `spin` and the insolation table
-    /// `table`: its gravity, its radius and its material ([`RecordSpin`]).
+    /// `table`: its gravity, its radius and its surface material ([`RecordSpin`]), its bulk's or,
+    /// under its derivation's surface lag `lag`, its rock lag's (P14.T56.g).
     #[must_use]
-    fn record_spin<'a>(&self, spin: SeasonalSpin, table: &'a ZonalInsolation) -> RecordSpin<'a> {
+    fn record_spin<'a>(
+        &self,
+        spin: SeasonalSpin,
+        table: &'a ZonalInsolation,
+        lag: SurfaceLag,
+    ) -> RecordSpin<'a> {
         RecordSpin {
             spin,
             table,
             surface_gravity: self.surface_gravity,
             radius: Metres::from(self.radius),
-            material: SurfaceMaterial::of(&self.fractions),
+            material: surface_material(&self.fractions, lag),
         }
     }
 }
@@ -4685,7 +4727,7 @@ struct PrimaryPasses<'a> {
 
 impl PassRecordOf for PrimaryPasses<'_> {
     fn spin(&self, bulk: &PassBulk) -> RecordSpin<'_> {
-        FigureBulk::of_primary(self.body, bulk).record_spin(self.spin, self.table)
+        FigureBulk::of_primary(self.body, bulk).record_spin(self.spin, self.table, bulk.lag)
     }
 
     fn crust(&self, bulk: &PassBulk) -> Option<RecordCrust> {
@@ -4746,7 +4788,7 @@ impl MoonRecordOf for SatellitePasses<'_> {
             &bulk.fractions,
             self.now.parent,
         )
-        .record_spin(self.spin, self.table)
+        .record_spin(self.spin, self.table, bulk.lag)
     }
 
     fn crust(&self, shape: &MoonShape, bulk: &PassBulk) -> Option<RecordCrust> {
@@ -5023,6 +5065,8 @@ struct SurfaceSky<'a> {
     /// Its published pass's lid, whose row its regolith read (P14.T54.a), from which its record's
     /// crust is built; `None` where its passes took none.
     crust_lid: Option<&'a CrustLid>,
+    /// Its surface lag (P14.T56.g), its derivation's, which its surface material reads.
+    lag: SurfaceLag,
 }
 
 /// What a body's global figures read at a time beyond its bulk section, its sky and its spin
@@ -5048,6 +5092,7 @@ impl SurfaceSky<'_> {
             regolith_albedo: derived.regolith_albedo(),
             spun: derived.spun(),
             crust_lid: derived.crust_lid(),
+            lag: derived.surface_lag(),
         }
     }
 
@@ -5062,6 +5107,7 @@ impl SurfaceSky<'_> {
             regolith_albedo: derived.regolith_albedo(),
             spun: derived.spun(),
             crust_lid: derived.crust_lid(),
+            lag: derived.surface_lag(),
         }
     }
 }
@@ -5375,7 +5421,7 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         Ok(None) => return Section::NotApplicable,
         Err(_) => return Section::NotModelled,
     };
-    let material = SurfaceMaterial::of(&bulk.fractions());
+    let material = surface_material(&bulk.fractions(), sky.lag);
     let basis = surface_basis(case, &figures, material);
     let inputs = SurfaceInputs {
         atmosphere: air,
@@ -5477,7 +5523,7 @@ fn surface_basis(
     let (sky, bulk) = (&case.sky, case.bulk);
     let Some(spun) = sky.spun else {
         return SurfaceBasis {
-            ground: figures.partition_ground(bulk.surface_gravity()),
+            ground: figures.partition_ground(bulk.surface_gravity(), material),
             heat_flow: figures.heat_flow(),
             ocean_weight: figures.ocean_weight(),
             lid: None,

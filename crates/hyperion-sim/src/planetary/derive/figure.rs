@@ -173,6 +173,8 @@ impl BodyFigure {
     #[must_use]
     pub fn derive(inputs: &FigureInputs) -> Self {
         let moment_factor = moment_of_inertia_factor(inputs.class, &inputs.fractions);
+        // The interior's rheology sets the threshold, so it reads the bulk, not the published
+        // surface: an ice bulk under its heated shell's rock lag (P14.T56.g) is still ice inside.
         let threshold = match SurfaceMaterial::of(&inputs.fractions) {
             SurfaceMaterial::Ice => HYDROSTATIC_RADIUS_ICE,
             SurfaceMaterial::Rock => HYDROSTATIC_RADIUS_ROCK,
