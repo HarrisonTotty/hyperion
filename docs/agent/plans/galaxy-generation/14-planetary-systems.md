@@ -2755,6 +2755,12 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
          2022), returning its sulphur to SO₂.
        - Only the surface removes SO₂, by reaction with calcite to anhydrite. Its column is
          N_SO₂ = Φ t_dry.
+       - Its mole fraction is capped at 10⁻² of the air column, in every case
+         (decision-thick-acid-decks, 2026-10-23). SO₂ enters none of T24.a's fractions, molar
+         mass or greenhouse, so the model holds it only as a trace, and Φ t_dry, fixed whatever
+         the air, would otherwise pass the air itself as p_s falls: 3.7 times it in a 10-mbar CO₂
+         air at O = 1 under Earth's gravity. A body at the cap is counted at the gate; SO₂ as a
+         major gas is P14.T55.a's.
        - t_dry is fixed on Venus's measured state: 130 ppm below its clouds (Marcq et al. 2008,
          130 ± 50 ppmv at 30–40 km) in its measured column (4.69 × 10²⁰ kg of CO₂ and
          1.08 × 10¹⁹ kg of N₂ [M], P14.T57.a's inventory), at T24.b's O for Venus. At O = 1 that is
@@ -2878,6 +2884,9 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
     - Every τ is non-negative, and every mode's base pressure is at least its top's.
     - The inventory is continuous in time but at T13.c's state changes, and T24.a's fractions are
       unchanged by this task.
+    - A runaway whose Φ t_dry passes 10⁻² of its air column carries x_SO₂ = 10⁻² exactly, and its
+      absorber's column is 10⁻² of the air's; Venus, the median Venus and the four case-1 bodies
+      of 23's census are unchanged to the bit (decision-thick-acid-decks).
     - No case-2 layer, and no world without a case-1 deck, carries `acid_uv_absorber`.
   - _Files:_ `planetary/hooks/{sulphur, aerosols, mod}.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::sulphur`.
@@ -11709,11 +11718,13 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
        - water is never limiting on a runaway world, though T13.c removes its water;
        - t_dry, ε_v and σ_d are fixed on Venus;
        - Hu et al.'s law is applied on cold, dry worlds and off 1 bar;
-       - a runaway world colder than about 430 K (rare, carbon-poor) still takes the cycling rule;
-         **amended** (decision-absurd-states-24 R3): a runaway world colder than about 430 K under
-         its deck is solved deckless from 24 and takes the thin layer (P14.T53.b part 1 (b)); one
-         whose deckless climate is hotter than that would hold a partial deck, not modelled
+       - a runaway world colder than about 430 K under its deck is solved deckless from 24 and
+         takes the thin layer (P14.T53.b part 1 (b), decision-absurd-states-24 R3); one whose
+         deckless climate is hotter than that would hold a partial deck, not modelled
          (P14.T53.e);
+       - the SO₂ column is Φ t_dry whatever the air, so a thinner runaway's deck spans more of
+         it and is thicker than Venus's (τ(550) 86–1,579 over 23's golden systems, against
+         Venus's 34.5), its mole fraction capped at 10⁻² (decision-thick-acid-decks);
        - a dry temperate world hot enough to cycle its acid, which T13.c's climate does not
          produce, would take the thin layer;
        - the UV is not modelled beyond "a star lights it";
@@ -26570,6 +26581,92 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
     τ monotonic in O and gone by T_eq 400 K; no deck on a temperate or snowball world to O 10³,
     its layer under 1, and no `acid_uv_absorber` there; the source and t_dry; continuity; the
     column as the flux times its life in each case; the same bits twice.
+  - _Amendment (`p14-chem`, 2026-10-23): the cycling temperature, and the case as an input_
+    (decision-absurd-states-24 R3, with decision-thick-acid-decks §3's cap; first commit of
+    P14.T24.d with T52.d's batch). No figure of T24.g moves: Venus and the median Venus stay case 1
+    to the bit, and `planetary/aerosols` holds to the bit. `GENERATOR_VERSION` stays 23; no hold.
+    - **`ACID_CYCLING_TEMPERATURE` = 430 K** in `hooks/sulphur.rs`, cited: VIRA's 432.5 K at 38 km
+      and 4.34 bar, 425.1 K at 39 km (Seiff et al. 1985, Adv. Space Res. 5(11), 3, the
+      low-latitude model); Magellan's acid vapour "dropping precipitously below 38 km" (Jenkins et
+      al. 1994, Icarus 110, 79); its thermal decomposition below the cloud base (Dai et al. 2022,
+      JGR Planets 127, e2021JE007060, §2.3 and §3.1). The module does not read it: it is P14.T53.b
+      part 1 (b)'s test of the decked solve's T_s.
+    - **The case is the caller's.** `SulphurInputs.cycle` replaces `state`.
+      `SulphurCycle::case_of(state, deck)` maps T13.c's state and `RunawayDeck` (`Kept`, the
+      default and every runaway at 23; `Deckless`, from 24) to the case:
+      - a runaway under its deck cycles;
+      - a deckless runaway, a temperate world and a snowball pass once through, wet or dry by
+        `liquid_water` (a deckless runaway, its water lost, is dry);
+      - any other state makes none.
+
+      `AerosolInputs.runaway_deck` carries the deck into the inventory, which calls `case_of`.
+      P14.T54.b routes the published state and arm (b)'s deck through it, and edits no line of
+      `sulphur.rs`.
+
+    - **`SULPHUR_DIOXIDE_TRACE_LIMIT` = 10⁻²**, in every case (decision-thick-acid-decks §3): the
+      column is Φ t, or 10⁻² of the air's column where Φ t passes it, its mole fraction then 10⁻²
+      exactly; below the cap the column and its mole fraction keep their bits. Its source is the
+      model's own contract (SO₂ in none of T24.a's fractions, molar mass or greenhouse, so only a
+      trace), at R3's 1% line, which the cap and its test replace. It binds on no golden or census
+      body.
+    - _Tests_ (+3 and a row): `a_deckless_runaway_passes_its_sulphur_once_through_dry` (the
+      measured Venus's air, deckless: no acid deck, no `acid_uv_absorber`, a sulphate layer under
+      τ 1, the column the flux times `DRY_ONCE_THROUGH_LIFETIME`),
+      `the_case_follows_the_state_and_the_deck`, `sulphur_dioxide_is_capped_at_a_trace_of_the_air`
+      (a 10-mbar CO₂ air at O 1 under Earth's gravity, Φ t_dry 3.7 times its column, carries 10⁻²
+      exactly and its absorber 10⁻² of the air's, as does a once-through world past the cap), a
+      deckless row in `the_column_is_the_flux_times_its_life` (now at O 0.2, below the cap on the
+      table's Earth's air), and `case_of`'s doctest.
+    - _The case-1 census_ (the 15 golden systems at the epoch, by a dev probe outside the
+      repository). There are four case-1 bodies, and no x_SO₂ reaches 1% of its air (the largest
+      is 0.10%), so none is at the cap; the probe's output is the same to the bit with it:
+
+      | Body               | T_s     | p_s      | O     | x_SO₂       | τ(550) | Δp ÷ p_s |
+      | ------------------ | ------- | -------- | ----- | ----------- | ------ | -------- |
+      | solar_like 256     | 536.6 K | 4.57 bar | 0.126 | 4.57 × 10⁻⁴ | 96.3   | 0.110    |
+      | solar_like 512     | 566.1 K | 30.2 bar | 0.157 | 9.24 × 10⁻⁵ | 86.0   | 0.078    |
+      | close_binary 58113 | 535.1 K | 11.5 bar | 0.524 | 6.75 × 10⁻⁴ | 598    | 0.163    |
+      | close_binary 58114 | 495.9 K | 9.25 bar | 0.707 | 1.02 × 10⁻³ | 1,579  | 0.320    |
+
+    - _The thinner runaways' decks (decision-thick-acid-decks, 2026-10-23)._ Recorded. At 24 only
+      the 10⁻² cap changes the module, and it moves no census body.
+      - The census's four case-1 decks carry τ(550) 86–1,579, 2.5–46 times Venus's 34.5. Φ t_dry
+        fixes the SO₂ column whatever the air, and τ = σ_d N_SO₂ Δp ÷ p_s, so a deck spanning
+        from 8% to 32% of a thinner air's column, against Venus's 1.4%, holds more of it. Their
+        low gravities (about 3.5–4.7 m s⁻² on a CO₂ air, from the census's x_SO₂) add to it, as
+        the entry's "a thicker or lower-gravity column holds more" says.
+      - It is not absurd. The acid is from 3 × 10⁻⁷ to 1.4 × 10⁻⁵ of the air's mass (0.21–3.8
+        kg m⁻² at the table's Venus's 2.39 × 10⁻³ kg m⁻² per unit τ) and at most 4.5 × 10⁻⁵
+        within the deck's layers, against Venus's 5.8 × 10⁻⁶ and a thin terrestrial water cloud's
+        some 5 × 10⁻⁵ (from memory). By σ_d its sulphur is about 2% of the SO₂ within those
+        layers in every body, so it never outruns its supply, and no x_SO₂ passes 0.10%.
+      - Nothing drawn or published moves with it. T51.b's area mix gives every runaway Venus's
+        cover 1 at 0.76 whatever its τ, and no climate reads the deck. R08 classes all four
+        `cloudDeck`, as it does Venus. A deck this thick reflects by its top's mixture, which the
+        fixed shares keep Venus's. Only the light under it is dimmer, about 1/40 of a Venus's at
+        τ 1,579 (two-stream, conservative).
+      - The figure is probably high. T24.c's other decks settle faster as their supply grows
+        (`f_sed` by supply, β 0.57). On a rough reading (τ ∝ M_vap^(1−β) ÷ H, normalised on
+        Venus, unfitted) close_binary 58114 would sit near 2–5 times Venus's, not 46. Lincowski
+        et al. 2018's Venus-like TRAPPIST-1 decks are "a few tens". The route, after 24, is the
+        acid deck's τ by T24.c's supply law with the measured Venus kept at 34.5, in a T24.g
+        follow-up that is not yet a task. A task that derives a runaway's albedo from its deck
+        takes it first.
+      - R08's discrete-ordinate check (f) holds τ 1,000. The bless note states the sample's
+        largest deck τ for R08.
+    - _The cycling temperature's pressure (decision-thick-acid-decks, 2026-10-23)._ Recorded, not
+      built. H₂SO₄ ⇌ SO₃ + H₂O is half done where K_p = p_H₂O, and NIST-JANAF's log K_f at 400
+      and 500 K (tables H-076, O-058 and H-064) give T_½ ≈ 11,656 K ÷ (17.46 − ln(x_H₂O p ÷ 1
+      bar)), which reproduces the science check's 406 K at 0.42 bar. At Venus's 31 ppm of water it
+      gives T_½ 337 K at 1.2 mbar, 420–432 K at 1.1–2.4 bar, 442 K at Venus's 4.34 bar (where the
+      adopted 430 K is VIRA's, at 38 km) and 455–477 K at 9–30 bar.
+      - No census body changes case. R3's five, at 273–360 K under their decks, lie below their
+        T_½ (337–432 K), and the four case-1 bodies, at 496–566 K, lie above theirs (443–477 K).
+      - Built, it would keep a thin air's deck down to its lower T_½ and drop a thick air's below
+        its higher one. It would rest on a runaway's water, which the model does not carry (it
+        keeps "the few ppm the acid needs"). If taken, it is P14.T53.e's, with the gate's count
+        (ii) of partial decks as its evidence, and the arm compares T_s with a function of p_s in
+        place of the constant.
 - **Deviations in P14.T53.a, as built (`p14-escape`, 2026-10-22).** Escape by regime and
   fractionation, the greenhouse's CO₂ form and its refits, the weathering thermostat and the
   maximum-greenhouse ceiling, all behind one hold, `ESCAPE_VERSION` = 24 (`EscapeRules`, `Held` at

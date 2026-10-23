@@ -71,6 +71,7 @@ fn inputs_of<'a>(
         }),
         outgassing: table_figures(body).map_or(0.0, |f| f.outgassing()),
         liquid_water: conditions.liquid_water(),
+        runaway_deck: RunawayDeck::Kept,
     }
 }
 
@@ -142,6 +143,7 @@ impl HandAir {
             surface_liquid_cover: 0.0,
             outgassing: 0.0,
             liquid_water: false,
+            runaway_deck: RunawayDeck::Kept,
         }
     }
 
@@ -1251,6 +1253,7 @@ fn measured_mars_inventory() -> AerosolInventory {
         surface_liquid_cover: 0.0,
         outgassing: 0.0,
         liquid_water: false,
+        runaway_deck: RunawayDeck::Kept,
     })
     .unwrap()
 }
@@ -1381,6 +1384,7 @@ fn a_mars_like_world_carries_dust_and_an_ocean_world_none() {
         surface_liquid_cover: 0.0,
         outgassing: 0.0,
         liquid_water: false,
+        runaway_deck: RunawayDeck::Kept,
     };
     let inventory = AerosolInventory::derive(&inputs).unwrap();
     let dust: Vec<&AerosolMode> = inventory

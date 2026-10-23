@@ -14,15 +14,24 @@
 //! sufficient"). SO₂ enters no escape, greenhouse or P14.T24.a fraction: P14.T13.c's grey fit,
 //! made on Venus, already holds its warming.
 //!
-//! # Where it goes, by P14.T13.c's state ([`SulphurCycle`])
+//! # Where it goes ([`SulphurCycle`], the caller's: [`SulphurCycle::case_of`])
 //!
-//! 1. **A runaway greenhouse: the sulphur cycles.** The falling acid evaporates and decomposes
-//!    below the deck, returning its sulphur to SO₂; only the surface removes it. Its column is Φ
+//! The case is an input, taken from P14.T13.c's state and whether the body's climate keeps the
+//! acid deck ([`RunawayDeck`]; decision-absurd-states-24 R3), so that the caller routes a deckless
+//! runaway without this module matching the state.
+//!
+//! 1. **A runaway greenhouse under its deck: the sulphur cycles.** The falling acid evaporates and
+//!    decomposes below the deck, returning its sulphur to SO₂, where the air there is hotter than
+//!    [`ACID_CYCLING_TEMPERATURE`]; only the surface removes it. Its column is Φ
 //!    [`DRY_SULPHUR_LIFETIME`], fixed on Venus's measured state.
-//! 2. **A temperate or snowball world: once through.** SO₂ lives [`WET_SULPHUR_LIFETIME`] on a
-//!    world with liquid water and [`DRY_ONCE_THROUGH_LIFETIME`] on one without; only a thin
-//!    stratospheric layer forms ([`sulphate_layer_optical_depth`]).
+//! 2. **A temperate or snowball world, or a runaway too cold beneath its deck to cycle it: once
+//!    through.** SO₂ lives [`WET_SULPHUR_LIFETIME`] on a world with liquid water and
+//!    [`DRY_ONCE_THROUGH_LIFETIME`] on one without (a runaway's, its water lost, is dry); only a
+//!    thin stratospheric layer forms ([`sulphate_layer_optical_depth`]).
 //! 3. **An airless body, a magma ocean or a gas envelope: none.**
+//!
+//! In every case the SO₂ is held a trace, its column at most [`SULPHUR_DIOXIDE_TRACE_LIMIT`] of
+//! the air's (decision-thick-acid-decks).
 //!
 //! # The deck (case 1)
 //!
@@ -56,7 +65,7 @@ use crate::substance::{
     BuildSizeDistributionError, CondensedPhase, MOLAR_GAS_CONSTANT, SizeDistribution, by_key,
 };
 use crate::units::consts::BOLTZMANN_CONSTANT;
-use crate::units::{Metres, MetresPerSecondSquared, Pascals, Seconds};
+use crate::units::{Kelvin, Metres, MetresPerSecondSquared, Pascals, Seconds};
 
 /// Avogadro's number, mol⁻¹: R ÷ k, both exact in the 2019 SI.
 const AVOGADRO: f64 = MOLAR_GAS_CONSTANT / BOLTZMANN_CONSTANT;
@@ -101,6 +110,35 @@ pub const VENUS_OUTGASSING: f64 = 0.363_470_162_966_442_9;
 pub const DRY_SULPHUR_LIFETIME: Seconds = Seconds::new(
     VENUS_SULPHUR_DIOXIDE * VENUS_AIR_COLUMN / (VENUS_OUTGASSING * EARTH_SULPHUR_DIOXIDE_FLUX),
 );
+
+/// The air temperature under a runaway greenhouse's acid deck at which its sulphur cycles (case
+/// 1): about 430 K. On Venus the falling acid evaporates at the cloud base (near 48 km), and its
+/// vapour is decomposed thermally, H₂SO₄ → SO₃ + H₂O, the SO₃ then going to SO₂ (Dai et al. 2022,
+/// JGR Planets 127, e2021JE007060, §2.3 and §3.1). Magellan's radio occultations find the vapour
+/// peaking at 18–24 ppm near 39 km and "dropping precipitously below 38 km" (Jenkins et al. 1994,
+/// Icarus 110, 79). VIRA puts 425.1 K at 39 km and 432.5 K at 38 km, 4.34 bar (Seiff et al. 1985,
+/// Adv. Space Res. 5(11), 3, the low-latitude model). The caller compares it with the climate's
+/// surface temperature, the warmest air below the deck. The figure is fixed at Venus's pressure
+/// there: one molecule splitting into two, the decomposition sets in cooler in thinner air (half
+/// at about 406 K at 0.42 bar by NIST-JANAF's free energies at 31 ppm of water, the science
+/// check's own estimate), so a thinner air under its deck is dropped from it somewhat sooner than
+/// its acid would stop cycling (recorded, not modelled).
+///
+/// It is the climate's test, not this module's: from generator version 24 a runaway greenhouse
+/// whose climate under Venus's deck is colder than this is solved without the deck and takes case
+/// 2's dry branch (P14.T53.b part 1 (b), decision-absurd-states-24 R3, through
+/// [`SulphurCycle::case_of`] and [`RunawayDeck::Deckless`]).
+pub const ACID_CYCLING_TEMPERATURE: Kelvin = Kelvin::new(430.0);
+
+/// The largest share of the air's column that SO₂ may hold, in every case, dimensionless: 10⁻²
+/// (decision-thick-acid-decks §3, 2026-10-23). The source is the model's own contract: SO₂ enters
+/// none of P14.T24.a's fractions, its mean molar mass or its greenhouse, so it may only be a
+/// trace, and at 1% T24.a's fractions are off by at most 1% and m̄ by at most 0.5%
+/// (decision-absurd-states-24 R3's line). Φ t is fixed whatever the air, so without the cap a thin
+/// air would carry more SO₂ than air: 3.7 times its own column in a 10-mbar CO₂ air at O = 1
+/// under Earth's gravity in case 1. SO₂ as a major gas is P14.T55.a's (the outgassing's
+/// speciation).
+pub const SULPHUR_DIOXIDE_TRACE_LIMIT: f64 = 1e-2;
 
 /// The acid deck's extinction per SO₂ molecule within its layers, m²: `σ_d` of τ(550) = `σ_d`
 /// `x_SO₂` (`p_base` − `p_top`) ÷ (m̄ `m_u` g), fitted through this plan's own model (signoff-3.md;
@@ -245,23 +283,70 @@ pub fn sulphate_layer_optical_depth(flux: f64) -> f64 {
     0.1 * math::powf(flux / 1e15, 0.7) * math::powf(SULPHATE_MEAN_DIAMETER.value() / 0.1e-6, -0.7)
 }
 
-/// Where a body's sulphur goes, by P14.T13.c's state (the [module](self)'s documentation).
+/// Where a body's sulphur goes (the [module](self)'s documentation): the caller's case, by
+/// [`SulphurCycle::case_of`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SulphurCycle {
-    /// A runaway greenhouse: the sulphur cycles, and its acid makes a deck.
+    /// A runaway greenhouse under its deck: the sulphur cycles, and its acid makes a deck.
     Cycling,
-    /// A temperate or snowball world: once through, a thin stratospheric layer.
+    /// A temperate or snowball world, or a deckless runaway: once through, a thin stratospheric
+    /// layer.
     OnceThrough,
     /// An airless body, a magma ocean, a gas envelope, a body with no star as host, or one that
     /// outgasses none: no sulphur.
     None,
 }
 
+/// Whether a runaway greenhouse's climate keeps Venus's acid deck (P14.T53.b part 1 (b),
+/// decision-absurd-states-24 R3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum RunawayDeck {
+    /// The climate is solved under the deck: a runaway's sulphur cycles. Every runaway at
+    /// generator version 23, and Venus's.
+    #[default]
+    Kept,
+    /// The climate under the deck is colder than [`ACID_CYCLING_TEMPERATURE`], so it is solved
+    /// without it: a runaway's sulphur passes once through, as a dry world's.
+    Deckless,
+}
+
+impl SulphurCycle {
+    /// The case of a body in P14.T13.c's state `state` whose climate keeps or drops the acid deck
+    /// (`deck`, read only for a runaway greenhouse): a runaway under its deck cycles; a deckless
+    /// runaway, a temperate world and a snowball pass it once through; any other state makes none.
+    /// The once-through branch, wet or dry, is [`SulphurInputs::liquid_water`]'s.
+    ///
+    /// # Examples
+    ///
+    /// A runaway too cold beneath its deck takes the once-through case (decision-absurd-states-24
+    /// R3):
+    ///
+    /// ```
+    /// use hyperion_sim::planetary::derive::atmosphere::SurfaceState;
+    /// use hyperion_sim::planetary::hooks::sulphur::{RunawayDeck, SulphurCycle};
+    ///
+    /// let runaway = SurfaceState::RunawayGreenhouse;
+    /// assert_eq!(SulphurCycle::case_of(runaway, RunawayDeck::Kept), SulphurCycle::Cycling);
+    /// assert_eq!(SulphurCycle::case_of(runaway, RunawayDeck::Deckless), SulphurCycle::OnceThrough);
+    /// ```
+    #[must_use]
+    pub const fn case_of(state: SurfaceState, deck: RunawayDeck) -> Self {
+        match (state, deck) {
+            (SurfaceState::RunawayGreenhouse, RunawayDeck::Kept) => Self::Cycling,
+            (SurfaceState::RunawayGreenhouse, RunawayDeck::Deckless)
+            | (SurfaceState::Temperate | SurfaceState::Snowball, _) => Self::OnceThrough,
+            (SurfaceState::Airless | SurfaceState::MagmaOcean | SurfaceState::GasEnvelope, _) => {
+                Self::None
+            }
+        }
+    }
+}
+
 /// What [`Sulphur::derive`] reads, as plain values. The derivation checks each, so they are public.
 #[derive(Debug, Clone, Copy)]
 pub struct SulphurInputs<'a> {
-    /// P14.T13.c's state.
-    pub state: SurfaceState,
+    /// The case, the caller's ([`SulphurCycle::case_of`]).
+    pub cycle: SulphurCycle,
     /// P14.T24.b's present outgassing O, relative to Earth's.
     pub outgassing: f64,
     /// Whether a star lights the body (its photochemistry's ultraviolet); a rogue planet or a brown
@@ -360,27 +445,30 @@ impl Sulphur {
         if !(inputs.starlit && positive(o) && positive(p) && positive(mu) && positive(g)) {
             return Self::NONE;
         }
-        let (cycle, lifetime) = match inputs.state {
-            SurfaceState::RunawayGreenhouse => (SulphurCycle::Cycling, DRY_SULPHUR_LIFETIME),
-            SurfaceState::Temperate | SurfaceState::Snowball => (
-                SulphurCycle::OnceThrough,
-                if inputs.liquid_water {
-                    WET_SULPHUR_LIFETIME
-                } else {
-                    DRY_ONCE_THROUGH_LIFETIME
-                },
-            ),
-            SurfaceState::Airless | SurfaceState::MagmaOcean | SurfaceState::GasEnvelope => {
-                return Self::NONE;
-            }
+        let cycle = inputs.cycle;
+        let lifetime = match cycle {
+            SulphurCycle::Cycling => DRY_SULPHUR_LIFETIME,
+            SulphurCycle::OnceThrough if inputs.liquid_water => WET_SULPHUR_LIFETIME,
+            SulphurCycle::OnceThrough => DRY_ONCE_THROUGH_LIFETIME,
+            SulphurCycle::None => return Self::NONE,
         };
         let flux = o * EARTH_SULPHUR_DIOXIDE_FLUX;
+        let air = air_column(p, mu, g);
         let column = flux * lifetime.value();
+        // Capped as a trace, the share exact at the cap and the column below it as it was.
+        let (column, mole_fraction) = if column <= SULPHUR_DIOXIDE_TRACE_LIMIT * air {
+            (column, column / air)
+        } else {
+            (
+                SULPHUR_DIOXIDE_TRACE_LIMIT * air,
+                SULPHUR_DIOXIDE_TRACE_LIMIT,
+            )
+        };
         Self {
             cycle,
             flux,
             column_per_m2: column,
-            mole_fraction: column / air_column(p, mu, g),
+            mole_fraction,
         }
     }
 
@@ -396,7 +484,8 @@ impl Sulphur {
         self.flux
     }
 
-    /// The SO₂ column, molecules m⁻².
+    /// The SO₂ column, molecules m⁻²: the flux times its life, at most
+    /// [`SULPHUR_DIOXIDE_TRACE_LIMIT`] of the air's.
     #[must_use]
     pub const fn column_per_m2(&self) -> f64 {
         self.column_per_m2
