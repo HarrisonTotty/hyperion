@@ -1188,6 +1188,24 @@ describe("the per-frame marches' steps (R08.T8.d)", () => {
     const main = wgslFunctions(RAY_MARCH_KERNEL.reference).get("main");
     expect(main?.body.match(/\bmarchRay\(/gu)).toHaveLength(1);
   });
+
+  // The footprint's state held across the march cost its shape 0.56–0.86 ms from orbit on the RTX
+  // 3080 (R08.T8.e, QW2): it is formed again for each ray inside the loop, and gives that ray, so
+  // that none of it is live across a march (E1′).
+  it("forms the far limb's footprint once, inside the ray-march kernel's loop", () => {
+    const body = wgslFunctions(RAY_MARCH_KERNEL.reference).get("main")?.body ?? "";
+    const loop = body.search(/\bfor \(/u);
+    const formed = [...body.matchAll(/\bfarLimbFootprintOf\(/gu)].map((call) => call.index);
+    expect({ loop: loop >= 0, formed: formed.length }).toEqual({ loop: true, formed: 1 });
+    expect(formed[0]).toBeGreaterThan(loop);
+  });
+
+  // Where w_L is 1 the mean reads none of the centre ray, so the loop starts at the first node
+  // (R08.T8.e, E4).
+  it("starts the ray-march kernel's loop at the first node where the footprint's blend is 1", () => {
+    const body = wgslFunctions(RAY_MARCH_KERNEL.reference).get("main")?.body ?? "";
+    expect(body).toMatch(/if \(blend >= 1\.0\) \{\s*j = 1u;\s*\}/u);
+  });
 });
 
 describe("the transmittance read as optical depth (R08.T6.c)", () => {
