@@ -524,7 +524,7 @@ Option<BulkPayload> }`, `BulkPayload::new(Bytes) -> Result<_, BuildBulkPayloadEr
   `ServerConfigBuilder::scene_knowledge`, and which T19 extends to surveyed cells; the client's
   `requestBulk(body, manifestOf, options)`, whose `manifestOf` returns `null` for a response with no
   bulk, such as `NotModelled`, and its limits `MAX_BULK_CHUNKS` (257) and `MAX_BULK_PAYLOAD_BYTES`
-  (64 MiB), above this plan's 15 MB. R03's camera reports are not used to bound the field (Design
+  (64 MiB), above this plan's 15 MiB. R03's camera reports are not used to bound the field (Design
   note 19), as R03 already records (its Design note 6 and Risks).
 - **Galaxy plan 04.** The reserved-kinds table in
   [its "Extending the convention"](../galaxy-generation/04-server-and-protocol.md#extending-the-convention),
@@ -1367,7 +1367,7 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     `decision-r09-t5.md`'s sea-floor byte, follow-up C's two runoff bytes and R09.T6.c's
     epoch-incision byte) plus 50 B per four
     (twelve months of anomaly, precipitation and wind): some 15.1 MB for an Earth at level 8,
-    3.8 MB for a Mars at 7 and 0.96 MB for the Moon, at the top of the brainstorm's "roughly 2 to
+    3.8 MB for a Mars at 7 and 0.96 MB for the Moon, at the top of the brainstorm's "about 4 to
     15 MB" and inside R03's 15 MiB check, the binding wire budget (main's ruling for R09.T6.c).
     Heights, elevations and sea level are measured along the normal of the body's
     rotational spheroid, R07's reference body (a = R_vol (1 − f)^(−⅓), c = a (1 − f), with plan 14's
@@ -13717,7 +13717,9 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
   - _The brainstorm, drafted for main's sign-off agent:_ its "Channels below the coarse cell" reads
     as one network to the band limit on every world, where a world dry now now draws its trunks
     alone (option A); and its "roughly 2 to 15 MB" and its 15 MB client field, where the Earth at
-    level 8 is 15.14 MB inside R03's 15 MiB.
+    level 8 is 15.14 MB inside R03's 15 MiB. _Signed off 2026-10-22
+    (`signoff-r09-t6c-brainstorm.md`: both amended; neither a blocker) and applied to the
+    brainstorm._
   - _The closure against the synthesis_, 5.5% in (A2) and 1.19 in the realised void (_The closure_
     above): the branch's inputs before the final routing, and the trunks' length and caps.
   - _The trunks' look._ Each trunk is two straight chords from key point to key point, its valley

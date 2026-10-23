@@ -3657,6 +3657,10 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   three workers. The size is one named constant, `SYNTHETIC_FIELD_BYTES`, in `spikeScene.ts`,
   citing the brainstorm for its value and R09 Design note 17 for the current estimate, so that a
   larger R09 layout changes one line.
+  _After R09.T6.c (2026-10-22) the Earth is 15,141,470 bytes, 141,470 more than this stand-in,
+  so 15 MB is no longer an upper bound; the gap, 0.42 MB across three workers, is immaterial
+  against this plan's measured 0.636 GB, and R12's `arrival-memory` run measures the real field
+  (`signoff-r09-t6c-brainstorm.md`)._
 - **Measurement switches in a shipped binary.** The timestamp and Dawn-toggle switches are set only
   when the spike flag is given; T14.b's test holds that the ordinary launch sets exactly R01's
   switches.

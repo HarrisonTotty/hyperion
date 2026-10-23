@@ -1215,11 +1215,21 @@ Names are those the owning plans give; the owning plan is authoritative.
    - **The cloud-deck split.** The rule is per body, never per column, so that it agrees with
      R11's boundary (R11 Design note 9): a body is `cloudDeck` when one of its condensate decks
      (P14.T24.c) has τ(550) above `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` and its cloud fraction
-     (P14.T24.b) is 1. A broken field whose cells exceed τ 10 stays R11's clouds. Under the split:
+     (P14.T24.b) is 1. The split's deck is the shallowest such deck: the inventory lists its decks
+     hottest base first, so the first that qualifies is the deepest, and a deck below the split's
+     lies in the medium beneath it. A broken field whose cells exceed τ 10 stays R11's clouds.
+     Under the split:
      - above the deck, the tables run with the deck as a baked reflecting boundary, and any
        thinner aerosol or cloud layer above the deck stays a term of the upper medium;
      - below it, a baked plane-parallel table of downwelling radiance by altitude, view angle and
-       sun angle gives both sky and aerial perspective.
+       sun angle gives both sky and aerial perspective;
+     - a gas envelope, which has no ground, is always split, at its floor: the shallowest level
+       at which the vertical τ(550) from the top, the gas's and every mode's at its coverage,
+       reaches `CLOUD_DECK_SPLIT_OPTICAL_DEPTH`, whether a deck or the gas sets it. The floor
+       takes the deck's place, and nothing below it is drawn: a mode enters the medium only with
+       the τ its own profile puts above the floor, and one whose top lies below it takes no term
+       and no label. Every cold giant's refractory and salt decks, of τ 10³–10⁶ some hundreds of
+       bar down, lie below it (R08.T16.a; decision-deep-decks-split).
    - **While a gated bake runs**, the analytic term is drawn and the label block says
      `ATMOSPHERE: COMPUTING`, which clears when the bake lands.
    - **Routing.** Thick regimes route to their bakes only once R08.T14's and R08.T15's gates pass.
@@ -1546,8 +1556,10 @@ Names are those the owning plans give; the owning plan is authoritative.
       time, the state collision uses (R03's Design note 7). A free camera's own local body, like
       every other body, is drawn at its `apparentM`, its orientation taken at the emitted time, by
       the march. That is how a moon's sky shows its planet.
-    - **Giants inside 10⁹ m** take the full passes. Their surface is the cloud deck of Design note
-      9, their visible atmosphere Rayleigh and absorption above it. They wait on P14.T24.d.
+    - **Giants inside 10⁹ m** take the full passes. Their surface is the floor of Design note 9's
+      split, where τ(550) from the top reaches `CLOUD_DECK_SPLIT_OPTICAL_DEPTH`, and their visible
+      atmosphere the decks, hazes, Rayleigh and absorption above it; nothing below the floor is
+      drawn. They wait on P14.T24.d.
     - **Beyond 10⁹ m** R07's analytic disc reads `DiscReflectanceTable`, baked from the same
       medium, so that a giant's colour does not jump at the boundary.
 14. **When tables are rebuilt.** Per-planet tables and bakes are rebuilt:
@@ -5280,7 +5292,8 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
     direct sun's transmittance is the deck's;
   - `classifyRegime` routes `cloudDeck` worlds once both gates pass, by the per-body rule of
     Design note 9: a deck above τ 10 with cloud fraction 1 splits, and a fraction below 1 does
-    not.
+    not; of two such decks the shallowest splits, though the inventory lists the deeper first,
+    and the deeper lies in the medium below; a gas envelope splits at its floor (R08.T16.a).
 
   By hand, the Venus-class surface and a descent through its deck are recorded here.
 
@@ -5293,13 +5306,25 @@ Acceptance: `pnpm test`.
   carries Jupiter's figure and rotation (f = 0.065), so that Design note 17's slicing runs on it.
   When P14.T24.d and P14.T35.e are on the wire, the medium comes from the giant's `envelope`
   section, and the tests re-run on it. Tests:
-  - the medium has no ground, and its deck lies at the pressure its input states; a gas-envelope
-    body with no deck above its column's base (a clear class III or a hot giant whose decks lie
-    below its photosphere) takes as its lower boundary the level where the vertical optical depth
-    at 550 nm reaches `CLOUD_DECK_SPLIT_OPTICAL_DEPTH`, baked by T15's deck machinery, so it has a
-    defined floor;
+  - the medium has no ground. Its floor (Design note 9) is the shallowest level at which the
+    vertical τ(550) from the top, the gas's and every mode's at its coverage, each mode's by its
+    published profile, reaches `CLOUD_DECK_SPLIT_OPTICAL_DEPTH`, whether a deck sets it or the
+    gas does (a clear class III, or a hot giant whose decks lie below its photosphere); it is
+    baked by T15's deck machinery, which reads the medium below it no deeper than τ(550) 1,000
+    from the top (the discrete-ordinate check (f)'s depth), so it has a defined floor;
+  - every deck and mode lies at the pressure its input states. One that straddles the floor
+    enters the medium with the τ its profile puts above it, the share
+    ((p ÷ p_b)^(f+1) − (p_t ÷ p_b)^(f+1)) ÷ (1 − (p_t ÷ p_b)^(f+1)) of its τ at the floor's p,
+    cut there and not rescaled: as built, `aerosolTerm` scales a mode's whole τ into the part of
+    it its column holds, and throws for one wholly outside it. One whose top lies below the
+    floor, or that has no τ and a top below it, takes no term and no label. The column's top
+    lies above every mode it reads (the giants' soot lies at 0.1–0.27 Pa);
   - once the envelope section exists, a generated Jupiter-class giant's medium places its NH₃
-    deck at 0.5–1 bar, as P14.T24.d's own test requires;
+    deck at 0.5–1 bar, as P14.T24.d's own test requires, and its floor below its water deck's
+    base. On the generated Jupiter (decision-deep-decks-split, estimated), τ(550) reaches 1 at
+    its NH₃ deck's 0.72 bar and the floor lies near 41 bar, Rayleigh some 3.6 of its 10; of its
+    salt decks (τ 6 × 10³ to 4 × 10⁵, bases at 351–2,783 bar) only KCl's and ZnS's tails enter,
+    each under 0.05;
   - its limb shell of about ten scale heights is resolved at 2.2 × 10⁸ m, at R02's centre-pixel
     scale, which R07 adopted on 2026-10-03 (R07's Risks, T5 as built); the brainstorm's 2.5 × 10⁸ m,
     under

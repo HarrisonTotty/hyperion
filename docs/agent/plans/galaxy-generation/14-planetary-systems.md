@@ -3000,6 +3000,11 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
     - **An envelope's own Bond albedo** from its decks and hazes (T52.d, T24.c with T24.g), after
       T52.d, replacing T51.b's class table and its two stand-ins, class I's hazy 0.48 about G2V
       and the ice giants' 0.32 (decision-p14-t54a-ganymede §2–3).
+      It reads the envelope above its floor alone, the level where τ(550) from the top (the
+      gas's Rayleigh, T24.h.a's, and each mode's τ by its profile) reaches 10, as plan 08's split
+      does, each mode with the τ its profile puts there (decision-deep-decks-split): every cold
+      giant's refractory and salt decks, of τ 10³–10⁶ some hundreds of bar down, lie below it,
+      and a conservative deck read whole would give the albedo of a semi-infinite cloud.
     - **The ocean weight at the sea's own density.** θ reads the potential ocean at the liquid's
       ρ_l at the previous pass's T_s, not at 999.79 kg m⁻³. On close_binary .0800 it is 0.443
       against the 0.592 its published sea gives; on Earth the two densities differ by 7 × 10⁻⁴.
@@ -4473,8 +4478,9 @@ src/renderer/src/spatial src/renderer/src/displays/system src/renderer/src/displ
     - Earth's, Titan's and the lava world's rows unchanged to the string.
   - _Accept:_ `pnpm test`; the console-ux skill's lint on the changed files; a ux-reviewer pass.
   - _Commit:_ `fix(client): P14.T43.h The ocean under a Snowball's ice in the readout`.
-  - _Lifespan:_ moot once P14.T53.c ends W3 (b) with T51.g's shell; the "For 24" follow-up then
-    reads `subsurface_ocean` under the same row.
+  - _Lifespan:_ moot once P14.T53.c ends W3 (b) with T51.g's shell. The "For 24" follow-up that
+    reads `subsurface_ocean` under the same row is P14.T43.i, built; what remains after T53.c is
+    to retire `oceanUnderIce` and `liquidsOnIce`, with T53.c's code.
 - **P14.T43.i A regular moon's ocean under its ice in the readout** (decision-p14-t43h-review
   §4; signoff-p14-t43h-ux, "Recorded, not blocking"; a display change only, with no wire, output
   or protocol change; after P14.T43.h).

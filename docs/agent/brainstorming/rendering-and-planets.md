@@ -749,8 +749,8 @@ because the lines are antialiased analytically, which costs less than MSAA would
 view to 10–15 ms. A station runs no server, so about three of its four cores serve height workers,
 some 75 patches a second at about 40 ms a patch, against the 6 to 20 a second the wireframe's
 tolerance asks on a low fast pass. Each station that draws terrain receives the surveyed coarse
-field, 2 to 15 MB a planet, about 0.1 s on gigabit Ethernet and a few seconds on Wi-Fi once per
-arrival, and runs its own height workers.
+field, about 4 to 15 MB a planet (15.1 MB for an Earth), about 0.1 s on gigabit Ethernet and a few
+seconds on Wi-Fi once per arrival, and runs its own height workers.
 
 ### The free camera
 
@@ -1033,13 +1033,18 @@ is no wider than about 40 km, floored at level 5 so that a small body still has 
 level 8 for the transfer. That is level 8 for an Earth (393,216 cells of about 36 km) and for a
 2 R⊕ world (cells of about 72 km, where the cap binds), level 7 for a Mars (98,304 cells of about
 38 km), level 6 for the Moon (24,576 of about 39 km) and level 5 for Ceres (6,144 of about 21 km),
-and **roughly 2 to 15 MB** from a Mars to an Earth. The simulation that produces it is then of order
-10⁷ to 10⁸ cell updates across its iterations, which is of order seconds to tens of seconds of Rust
-rather than minutes, with erosion and the climate model dominating: erosion alone is a few seconds at
-level 8 (step 4), and the climate model's published runs take 2 to 20 s each. Both figures need
-measuring rather than trusting, but they are the right order for "computed when a ship arrives", if
-the pass starts while the ship is still on approach. Everything finer than a coarse cell is the local
-synthesis's job.
+and **about 4 to 15 MB** from a Mars to an Earth. As built, at 26 bytes a cell and 50 for each four
+cells' climate, a Mars at level 7 is 3.8 MB, the Moon 0.96 MB and an Earth, like any world at
+level 8, 15,141,470 bytes (15.1 MB, 14.4 MiB): inside the 15 MiB (15,728,640 bytes) of R03's
+transfer check, which the field keeps as its wire budget, by 0.59 MB. _Corrected 2026-10-22 by the
+sign-off agent (owner's delegation; `signoff-r09-t6c-brainstorm.md`, passage 2), in place of
+"roughly 2 to 15 MB"._ The simulation that produces it is then of order 10⁷ to 10⁸ cell updates
+across its iterations, which is of order seconds to tens of seconds of Rust rather than minutes,
+with erosion and the climate model dominating: erosion alone is a few seconds at level 8 (step 4),
+and the climate model's published runs take 2 to 20 s each. Both figures need measuring rather
+than trusting, but they are the right order for "computed when a ship arrives", if the pass starts
+while the ship is still on approach. Everything finer than a coarse cell is the local synthesis's
+job.
 
 What the pass does, in order:
 
@@ -1209,8 +1214,13 @@ Both sides could run the coarse pass from the seed, since it is the same code. *
 computes it and sends it, and the client never runs it.** Three reasons, in increasing order of
 importance:
 
-1. It is roughly 2 to 15 MB, once per planet, at the level chosen above. That is an affordable
-   transfer for something a player will orbit for many minutes.
+1. It is about 4 to 15 MB, once per planet, at the level chosen above: 15.1 MB for an Earth, inside
+   the 15 MiB of R03's transfer check. That is an affordable transfer for something a player will
+   orbit for many minutes. Those 15 MiB are the field's wire budget, and they leave an Earth about
+   one and a half bytes a cell: room for one more byte in every cell's record and not for two, so a
+   field member that grows every cell is weighed against the budget before it is built.
+   _Corrected 2026-10-22 by the sign-off agent (owner's delegation;
+   `signoff-r09-t6c-brainstorm.md`, passage 2)._
 2. **It shrinks the determinism surface a great deal.** An iterative plate-and-flow simulation is
    exactly the kind of floating-point code most at risk of diverging between native x86-64 and
    WebAssembly: accumulation order, transcendental functions, fused multiply-add. If only the server
@@ -1263,25 +1273,48 @@ Per height query, on both sides, with no iteration and no global state:
    own path downstream, so the channels come from a Dendry-style network (Gaillard, Benes, Guérin,
    Galin, Rohmer and Cani 2019): jittered key points in hashed integer cells. Its first level is the
    server's coarse flow network itself, a key point per coarse cell joined to the cell its flow
-   direction names. At every later level each key point joins the nearest segment of all coarser
-   levels, found in the 3 × 3 neighbourhood of its cell, since a coarser level's segment ends at
-   most two cells from its key point and a bounding-box test prunes the rest, with elevations held
-   to a minimum slope by level. The paper's figures use up to four levels and its code allows six;
-   here one network spans the coarse cell to the band limit in about fourteen levels, their number
-   set by the body's coarse cell size, rather than several instances stacked, since a stacked
-   instance's first level would join the coarser network's segments exactly as a later level does.
-   The reference code's standard-library generator is replaced by the project's `Stream`, opened
-   from the detail seed on a registered tag such as `surface.channel` and keyed by face, level and
-   cell, the body being carried by the detail seed. The profiles follow the steady-state
-   stream-power slope, S = k_s·A^−θ, with the drainage area A from Hack's law in SI units, L = 0.320
-   A^0.6 with L in metres and A in square metres (Hack's coefficient of 1.4 is in miles; the 1.5
-   quoted with it would make streams 4.7 times too long), and the steepness k_s from the server's
-   solution; Hack's constants are Earth's, and overstate how integrated a network is on a world
-   whose wet epoch was short. The network's geometry is procedural and labelled so; the profiles are
-   physics. Incision only ever cuts down, so each channel level's incision has its mean over its
-   parent cell subtracted, which, since the cells nest, zeroes it over the coarse cell too;
-   otherwise the rule of
-   [Level-of-detail consistency](#level-of-detail-consistency-and-why-collision-agrees) breaks.
+   direction names, wherever water reaches the cell: one whose catchment sheds no runoff heads no
+   trunk, on any world. At every later level each key point joins the nearest segment of all
+   coarser levels, found in the 3 × 3 neighbourhood of its cell, since a coarser level's segment
+   ends at most two cells from its key point and a bounding-box test prunes the rest, with
+   elevations held to a minimum slope by level. The paper's figures use up to four levels and its
+   code allows six; on a world wet now one network spans the coarse cell to the band limit in about
+   fourteen levels, their number set by the body's coarse cell size, rather than several instances
+   stacked, since a stacked instance's first level would join the coarser network's segments
+   exactly as a later level does. The reference code's standard-library generator is replaced by
+   the project's `Stream`, opened from the detail seed on a registered tag such as
+   `surface.channel` and keyed by face, level and cell, the body being carried by the detail seed.
+   The profiles follow the steady-state stream-power slope, S = k_s·A^−θ, with the drainage area A
+   from Hack's law in SI units, L = 0.320 A^0.6 with L in metres and A in square metres (Hack's
+   coefficient of 1.4 is in miles; the 1.5 quoted with it would make streams 4.7 times too long),
+   and the steepness k_s from the server's solution. Hack's constants are Earth's, and a steady
+   state built on them would dissect a world whose wet epoch was short as if it were an Earth, so
+   **a world dry now draws its trunks alone**, each cutting its epoch's valley: no deeper than the
+   epoch's channel incision at the cell, which the coarse field carries in a byte a cell, nor than
+   the steady-state valley; its floor the width of its bankfull channel; and its walls rising over
+   five times its depth, so that it is about ten times as wide as deep (Luo, Cang and Howard 2017,
+   after Williams and Phillips 2001, whose walls also steepen with depth, which is not modelled;
+   medium-low confidence, the 5:1 walls being Mars's rock and an ice or methane epoch an
+   extrapolation). The upland between its valleys stays undissected, and ground the epoch did not
+   see, a surface renewed after it or the floor of a later crater, carries no valley. No finer
+   level is drawn there: carried to a tributary at the same erosion time in the short-time regime,
+   the epoch's incision equals its cell's on the steady-state profiles, so it ends no level, and
+   the tributaries the epoch's headward knickpoints reach would give a Mars fifteen times the
+   valley density that Hynek, Beach and Hoke 2010 map on its Noachian terrain and three times the
+   valley volume of Luo, Cang and Howard's combined estimate. Drawn alone, the trunks give it about
+   two metres of global layer, between their count's 1.2 m and that estimate, at about twice Hynek,
+   Beach and Hoke's density. That density is one trunk a coarse cell, so it moves with the body's
+   grid; a channel-initiation area that is sourced and independent of the grid would set it
+   instead, and none has been found (labelled). The network's geometry is procedural and labelled
+   so; the profiles are physics. Incision only ever cuts down, so each channel level's incision has
+   its mean over its parent cell subtracted, which, since the cells nest, zeroes it over the coarse
+   cell too; otherwise the rule of
+   [Level-of-detail consistency](#level-of-detail-consistency-and-why-collision-agrees) breaks. On
+   a world dry now the coarse pass has already lowered each eroded cell by the void of the valley
+   drawn in it, so that with its mean removed the upland stands at about its height before the
+   epoch and the valley is cut below it. _Amended 2026-10-22 by the sign-off agent (owner's
+   delegation; `signoff-r09-t6c-brainstorm.md`, passage 1): a world dry now draws its trunks alone
+   (R09.T6.c, main's ruling, option A), and no trunk heads where no water reaches._
 5. **Craters** below D_b, wherever plan 14's crater density is not zero, by sparse convolution. A
    single hashed cell holding every diameter cannot work: at a cumulative size–frequency slope of −2
    or steeper, a fixed cell holds some 10⁹ times more 1 m craters than 35 km ones, and a crater that
@@ -2389,9 +2422,10 @@ resident peak above 2 GB is a finding, and one above 3 GB a failure.
 | **Total, GPU**         | About 0.75–1.25 GB                                                                                                                                                | About 150–300 MB                                                                                                                                                 |
 
 On the CPU side each height worker holds its own copy of the surveyed coarse field, posted once on
-arrival and updated per chunk: at 2 to 15 MB and two or three workers, tens of megabytes. These
-figures are computed from formats and sizes, not measured, and a second window with a device of its
-own duplicates its caches in the same shared memory.
+arrival and updated per chunk: at about 4 to 15 MB and two or three workers, tens of megabytes,
+some 45 MB for an Earth's whole field in three. These figures are computed from formats and sizes,
+not measured, and a second window with a device of its own duplicates its caches in the same shared
+memory.
 
 The ladder, stated as policy rather than as a list of numbers:
 
@@ -2711,7 +2745,7 @@ hosted CI and no recipe runs Arm at all.
   first thought, about 0.4 kB at the least detail level, 0.8–0.9 kB with its mass and orbit and
   1.1 kB with its bulk section (measured), but bodies are pushed only on change, so that sets an
   arrival's size, not the rate; pushing some 100 bodies every tick would take 3–7 MB/s.
-- **Bulk payloads travel as binary frames.** The coarse field, 2 to 15 MB a planet, goes in
+- **Bulk payloads travel as binary frames.** The coarse field, about 4 to 15 MB a planet, goes in
   surveyed-region chunks of at most 1 MB, the first use of plan 04's reservation. The server refuses
   inbound binary frames today (`crates/hyperion-server/src/ws.rs`) and has no outbound binary
   framing, so the coarse field is the first to need it. Sent as base64 in JSON, the way the density
@@ -3128,8 +3162,10 @@ and the rest — and their answers are leans in the body, listed under [Decision
    erodes only for plan 14's wet epoch, above a base level from a depression-filling pass (step 4 of
    [The coarse global pass](#the-coarse-global-pass-once-per-planet)). Below a coarse cell, a
    Dendry-style network anchored to those flow directions supplies the channels, with stream-power
-   profiles. The network's geometry is a heuristic and labelled so. Dendry's paper draws networks of
-   up to four levels and its code allows six, so spanning a coarse cell down to the band limit takes
+   profiles; on a world dry now it is the coarse network's trunks alone, each cutting its wet
+   epoch's valley (step 4 of [The per-query evaluation](#the-per-query-evaluation)). The network's
+   geometry is a heuristic and labelled so. Dendry's paper draws networks of up to four levels and
+   its code allows six, so spanning a coarse cell down to the band limit on a world wet now takes
    one network of about fourteen levels, its first the coarse flow network, rather than several
    instances stacked. The reference code's 150 µs a point (10 s for a 512² grid on four cores) comes
    from rebuilding about 150 cells for every point, and a naive port to WebAssembly was estimated at
@@ -3456,7 +3492,8 @@ is made to say what runs.
    disabled, as the measurement runs do — patches a second sustained against the demand of
    (200 · _v_ + 290 · |_ḣ_|) ÷ _h_, the level-of-detail bound per level that the selection's _τ_
    rests on, upload bytes, pipeline-creation stalls, garbage-collection pauses, and resident memory
-   against the ceiling, a 15 MB coarse field posted to three workers included. It passes at 1080p on
+   against the ceiling, a synthetic 15 MB coarse field posted to three workers included (R09's
+   Earth, as built, is 15.1 MB, which R12's `arrival-memory` run measures). It passes at 1080p on
    the recommended specification, the development machine's RTX 3080, at the display's measured
    vsync period (16.68 ms at the projector's 59.94 Hz mode, which has no exact 60 Hz) with no
    scaling margin, and at 30 fps at 720p on the UHD 620's low setting. The RTX 3080 exceeds the
