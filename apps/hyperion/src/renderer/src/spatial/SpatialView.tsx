@@ -257,9 +257,10 @@ export interface SpatialViewProps {
  * `ELV +30°`), changing at most four times a second and not announced as they change; over the
  * canvas, the axis triad, the core arrow, and the labels of the chosen marks and of the spheres and
  * rings, all DOM text, since the canvas carries none (D15); and below it, in the same place on
- * every spatial view, the frame, the centre and the time, then a 1-2-5 scale bar, and after it the
- * mode where the display has one (`MODE NOW`, or `MODE OBSERVED FROM` and where from), in a `dl`
- * of its own (plan 12, P12.T11.d). While the view is stale each value there that the scene's
+ * every spatial view, the frame, the centre and the time, then a 1-2-5 scale bar, on the galactic
+ * axis the note that the centre's directions are undefined (plan 12, P12.T11.g), and after them
+ * the mode where the display has one (`MODE NOW`, or `MODE OBSERVED FROM` and where from), in a
+ * `dl` of its own (plan 12, P12.T11.d). While the view is stale each value there that the scene's
  * source gave, the centre's, the time's and the observer's, trails its own `S`, in a slot each
  * keeps while live, so that nothing moves as the marks come. The labels are hidden from assistive
  * technology, since the list and the readout beside the view carry the same text. The canvas takes

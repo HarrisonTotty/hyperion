@@ -16,8 +16,10 @@ import { describe, expect, it, vi } from "vitest";
 import { localFrameAt, type LocalFrame } from "../../geometry/frame";
 import { vec3 } from "../../geometry/vec3";
 import type { SpatialMode } from "../../spatial/ModeReading";
+import { AXIS_FALLBACK_MESSAGE } from "../../spatial/CoreArrow";
 import { SpatialView } from "../../spatial/SpatialView";
 import { stubCanvas } from "../../test/RecordingContext2D";
+import { statusLine } from "../../test/statusLine";
 import { stylesheetRule } from "../../test/stylesheet";
 import { StarShapeLegend } from "./StarShapeLegend";
 
@@ -36,9 +38,9 @@ const CIRCLE_KINDS = [
 function renderView(
   frame: LocalFrame = localFrameAt(vec3(26_000, 0, 0)),
   mode?: SpatialMode,
-): HTMLElement {
+): void {
   stubCanvas();
-  const { container } = render(
+  render(
     <SpatialView
       scene={{
         frame,
@@ -60,7 +62,6 @@ function renderView(
       {...(mode === undefined ? {} : { mode })}
     />,
   );
-  return container;
 }
 
 /** Lays every element out at 400 by 300 px, so that the view has a viewport and draws its scale bar. */
@@ -262,6 +263,10 @@ describe("the compact LOCAL CHART page's state lines in the census's room (plan 
     ).toMatch(/line-height: 1rem;/u);
   });
 
+  it("holds the census line to one 1rem line, its drawn sun hanging into the leading below", () => {
+    expect(stylesheetRule(".local-chart--compact .census-readout__line")).toMatch(/height: 1rem;/u);
+  });
+
   it("stands RETRY and CENSUS BY LAYER in columns of their own, 1rem after the summary by margin", () => {
     expect(stylesheetRule(".local-chart--compact .census-readout__summary")).toMatch(
       /grid-area: 1 \/ 1;/u,
@@ -301,14 +306,11 @@ describe("the compact LOCAL CHART page's state lines in the census's room (plan 
 
   it("sets the axis note after the time and the scale bar and before the mode", () => {
     stubLayout();
-    const view = renderView(localFrameAt(vec3(0, 0, 3000)), { name: "NOW", from: [] });
+    renderView(localFrameAt(vec3(0, 0, 3000)), { name: "NOW", from: [] });
     const time = screen.getByText("UT", { selector: "dt" });
-    const bar = view.querySelector(".spatial-view__furniture > .scale-bar");
-    const note = view.querySelector(".spatial-view__axis-note");
+    const bar = screen.getByRole("img", { name: /^Scale bar/u });
+    const note = screen.getByText(statusLine(AXIS_FALLBACK_MESSAGE));
     const mode = screen.getByText("MODE", { selector: "dt" });
-    if (bar === null || note === null) {
-      throw new Error("the furniture has no scale bar or no axis note on the axis");
-    }
 
     expect([follows(time, bar), follows(bar, note), follows(note, mode)]).toEqual([
       true,
@@ -319,14 +321,10 @@ describe("the compact LOCAL CHART page's state lines in the census's room (plan 
 
   it("sets the axis note last, after the scale bar, on a view with no mode", () => {
     stubLayout();
-    const view = renderView(localFrameAt(vec3(0, 0, 3000)));
-    const furniture = view.querySelector(".spatial-view__furniture");
-    const bar = view.querySelector(".spatial-view__furniture > .scale-bar");
-    const note = view.querySelector(".spatial-view__axis-note");
-    if (furniture === null || bar === null || note === null) {
-      throw new Error("the furniture has no scale bar or no axis note on the axis");
-    }
+    renderView(localFrameAt(vec3(0, 0, 3000)));
+    const bar = screen.getByRole("img", { name: /^Scale bar/u });
+    const note = screen.getByText(statusLine(AXIS_FALLBACK_MESSAGE));
 
-    expect([follows(bar, note), furniture.lastElementChild]).toEqual([true, note]);
+    expect([follows(bar, note), note.nextElementSibling]).toEqual([true, null]);
   });
 });

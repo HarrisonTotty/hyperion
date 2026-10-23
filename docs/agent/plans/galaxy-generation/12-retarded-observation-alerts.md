@@ -769,7 +769,8 @@ summary.
   galactic axis's note after the scale bar and before the mode, so that observed mode keeps three
   lines on the axis. The stage keeps 14 rem in every state but a hint with the summary on two
   lines, where it keeps 13.25 rem, and the column ends above its foot in every state. Two measured
-  deviations from §14.4 (the hint in the summary's column alone, and the census line one 1 rem
+  deviations from decision-p12-t11-look-followups §14.4 (the hint in the summary's column alone,
+  and the census line one 1 rem
   line high) are recorded at the end of Risks. Files: under
   `apps/hyperion/src/renderer/src/`: `displays/galaxy/CensusReadout.tsx`,
   `spatial/SpatialView.tsx`, `styles.css`, tests. Tests: Vitest for the hint's place in the row
@@ -2115,43 +2116,58 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     outside the `Census` region, and gives `RETRY` the class `census-readout__retry`. On the
     stacked page `.census-readout__row > .census-readout__hint` is `flex: 0 0 100%`, a line of its
     own under the row as before. The compact template has six rows, with no `hint` row, and the
-    compact census row is §14.4's grid: the summary at 1 / 1 in `minmax(0, max-content)`, `RETRY`
+    compact census row is the decision's §14.4 grid: the summary at 1 / 1 in `minmax(0, max-content)`, `RETRY`
     and the toggle in `max-content` columns 1 rem after it by margin, `gap: 0`, the summary's and
     the hint's lines 1 rem, the toggle spanning both lines from the top where a hint stands.
     `SpatialView` sets the axis note after the scale bar and before the mode's `dl`; it lost its
     `flex-basis: 100%`, and in compact it is `inline-block`, `nowrap`, 0.75 rem before what
-    follows. This amends §11.3's "the axis note stays last".
-  - _Deviations from §14.4, measured and accepted by main._ (1) The hint stands in the summary's
+    follows. This amends the decision's §11.3, "the axis note stays last".
+  - _Deviations from the decision's §14.4, measured and accepted by main._ (1) The hint stands in the summary's
     column alone, `grid-area: 2 / 1 / 3 / 2`, not across `RETRY`'s too: spanning it, the grid put
     the hint's width into `RETRY`'s empty column, whose minimum is its content, and left the
     summary 203 px on three lines (DENSE REGION at 50 ly, 1280 × 720). (2) The compact census line
     is one 1 rem line high (`height: 1rem`): its `M☉`'s drawn sun, set as a subscript, hung 0.8 px
     below a 1 rem line and made the census row 0.8 px taller, which left the state with both lines
     211.2 px, under its 212 px floor. The sun overhangs the next line's leading alone: whole, not
-    clipped, and clear of the glyphs under it in 3× crops.
+    clipped, and clear of the glyphs under it in 3× crops. Its cost, recorded: with a `RETRY` on
+    show the hint has the summary's column alone, 516.3 px at 1280 × 720, not about 602, and the
+    longest hint, `LARGE VOLUME`, fits it by 1.1 px (1.7 px at 150%), measured on Linux. (3) The
+    stacked page's hint rule is `.census-readout__row > .census-readout__hint`, the same layout as
+    the decision's `.census-readout__hint`, so that the stylesheet's tests read it apart from the
+    rule it shares with the census line. (4) With the census table shown the column is the table,
+    which takes the stage's row and so ends at the stage's foot (0 px), with 0 overlaps.
   - _Measured_ (look-79-81, hidden, 14 runs, 122 captures, every one passing; CSS px at
-    1280 × 720 and, after the slash, at 150%). In `OBSERVED`: nothing standing 228 / 232; the hint
+    1280 × 720 and, after the slash, at 150%, against the decision's §14.7). In `OBSERVED`: nothing standing 228 / 232; the hint
     228 / 232; the summary on two lines (`REMNANTS`, `LIVING`) 228 / 232; both (the finding,
     50 ly, `REMNANTS`, and `LIVING` with the hint, and `PENDING` under `ALL` with four-figure
     counts and the hint) 212 / 216, the column 2.5 / 6.5 px above the stage's foot; the census
     table shown in that state 212 / 216; on the galactic axis 228 / 232, with `REMNANTS` 228 /
     232, with the hint 228 / 232, with both 212 / 216, the note on the furniture's second line
-    (396.8 to 733.9 px), three furniture lines. In `NOW` each 34 px more: 262 / 266, both 246 /
-    250, the axis 246 / 250 and with both 230 / 234. One refusal and two changed nothing. Live and
+    (396.8 to 733.9 px), three furniture lines. In `NOW`, 34 px more off the axis (262 / 266, both
+    246 / 250) and 18 px more on it (246 / 250, both 230 / 234), since `MODE NOW` then takes the
+    third line. One refusal and two changed nothing. Live and
     stale alike. 0 overlapping boxes in every capture, `NO CHART` included; no page scroll; no
     row's `scrollWidth` past its `clientWidth`; the legend inside the page. The `LARGE VOLUME`
     hint, by probe, is 515.2 px on one line, and 1.1 px inside its column with a `RETRY` on show.
     The stacked page at 1920 × 1080: 509 px in `NOW` and 491 with the hint (491 and 473 in
     `OBSERVED`), the hint on its own line under the row, and on the axis the note after the scale
-    bar, `NOW` on two furniture lines and `OBSERVED` on three.
-  - _Tests._ `CensusReadout.test.tsx`: the hint in the census row after the toggle and outside
-    the region, and `RETRY`'s class. `LocalChartPanel.compact.test.tsx` (its header names this
+    bar, `NOW` on two furniture lines and `OBSERVED` on three; stale, the stacked axis stage is
+    18 px shorter (491 and 451 px), the link's reason taking a line in the controls, as before this
+    task.
+  - _Tests._ `CensusReadout.test.tsx`: the hint a child of the census row after the toggle and
+    outside the region, and `RETRY`'s class; one render covers both layouts, since the component
+    renders the same DOM in both and the layout is the page's. `LocalChartPanel.compact.test.tsx` (its header names this
     look): the template's six rows with no `hint` area; the row's grid, columns, `gap` and
     alignment; the 1 rem lines; `RETRY`'s and the toggle's columns and margins; the hint's area
-    and the toggle's span under `:has`; the stacked hint's own line; the axis note's base and
+    and the toggle's span under `:has`; the census line's 1 rem height, which deviation (2) rests
+    on; the stacked hint's own line; the axis note's base and
     compact rules; and the furniture's order on the axis, the time, the scale bar, the note and
     the mode, and the note last with no mode.
-  - _Recorded, not changed_ (§14.10): a `REJECTED:` reason long enough to set the summary on
-    three lines beside a hint would leave 196 px and overrun (§14.6); and P05.T14's sanctioned
+  - _Recorded, not changed_ (the decision's §14.10): a `REJECTED:` reason long enough to set the
+    summary on three lines beside a hint would leave 196 px and overrun (§14.6); the census's first
+    line meets the furniture's last with a hint or a summary on two lines, with no space or
+    hairline between the two groups (the guide's § Layout, "Separate groups with space first and a
+    hairline second"), since at 13.25 rem the stage has nothing left to give: a 1 px rule would
+    leave 211 px (ux-reviewer; main's call); and P05.T14's sanctioned
     unkept census marks lose one of their two reasons in compact, since the toggle no longer
     wraps.

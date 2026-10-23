@@ -1621,9 +1621,11 @@ body {
  * since the scale bar follows the time and the mode the scale bar: the frame and the centre fill
  * the first line, the time, the scale bar and in `NOW` the mode the second, and observed mode's
  * `MODE OBSERVED FROM` and the observer the third (plan 12's ruling of 2026-10-22, recorded under
- * P12.T11.d). A refused entry stands in its field's hint's place, on the field's own row, and
- * never wraps, and the mode and the command that moves the observer keep one row while a chart is
- * on show, so that no refusal, nor two at once, adds a line to the column (P12.T11.c). The
+ * P12.T11.d); on the galactic axis the note follows the scale bar on the second line, and `MODE`
+ * stands on the third in both modes (P12.T11.g). A refused entry stands in its field's hint's
+ * place, on the field's own row, and never wraps, and the mode and the command that moves the
+ * observer keep one row while a chart is on show, so that no refusal, nor two at once, adds a line
+ * to the column (P12.T11.c). The
  * circle's seventh kind, `STRIPPED HELIUM STAR` (P06.T24.c), gave the legend a seventh line in
  * `OBSERVED`, so the angles and keys left the column for the presets' row and the furniture's
  * lines are 1rem: the stage keeps at least 14rem at 80 x 45 rem, ruling 134.9's 15rem lowered for
@@ -1637,7 +1639,11 @@ body {
  * the summary, which wraps beside `CENSUS BY LAYER` at 1rem a line, and the axis note in the
  * furniture's run after the scale bar (plan 12, P12.T11.g): the stage keeps 14rem in every state
  * with at most one of the hint and the summary's second line, and 13.25rem with both, the column
- * ending above its foot in every state (decision-p12-t11-look-followups §14).
+ * ending above its foot in every state (decision-p12-t11-look-followups §14). Measured hidden at
+ * 1280 x 720 and 150% (look-79-81), live and stale: in `OBSERVED` 228 and 232 px with at most one
+ * of those lines, the axis note included, and 212 and 216 px with both, the column 2.5 and
+ * 6.5 px above the stage's foot; in `NOW` 262 and 266 px, 246 and 250 with both, and on the axis
+ * 246 and 250, 230 and 234 with both; one refused entry or two change nothing.
  */
 .local-chart--compact {
   /*
@@ -1735,7 +1741,8 @@ body {
  * line (`HEIGHT` ends near 718 px of the page's 831 at 1280 x 720; with `UT` the five readings come
  * to 802 px with no gap, past the line's 798), the time, the scale bar and `MODE NOW` share the
  * second, and observed mode's `MODE OBSERVED FROM` and the observer, near 729 px, take the third
- * (P12.T11.d).
+ * (P12.T11.d); on the galactic axis the note takes the second line's room after the scale bar, and
+ * `MODE NOW` the third (P12.T11.g).
  */
 .local-chart--compact .spatial-view__readings > .spatial-reading {
   display: inline-flex;
@@ -1747,7 +1754,10 @@ body {
   margin-left: 0.75rem;
 }
 
-/* The scale bar stands between the time and the mode, the readings' own 0.75rem from the mode. */
+/*
+ * The scale bar stands between the time and the mode, the readings' own 0.75rem from what follows
+ * it: the mode, or on the galactic axis the note (P12.T11.g).
+ */
 .local-chart--compact .spatial-view__furniture > .scale-bar {
   display: inline-flex;
   margin-right: 0.75rem;
@@ -1756,8 +1766,8 @@ body {
 
 /*
  * On the galactic axis, why the centre's directions are undefined, after the scale bar in the
- * furniture's run, so that it shares the time's and the bar's line (396.9 to 734 px of 831 at
- * 1280 x 720, reckoned) and observed mode keeps three lines (plan 12, P12.T11.g).
+ * furniture's run, so that it shares the time's and the bar's line (396.8 to 733.9 px of 831 at
+ * 1280 x 720, measured) and observed mode keeps three lines (plan 12, P12.T11.g).
  */
 .local-chart--compact .spatial-view__axis-note {
   display: inline-block;
@@ -1850,10 +1860,13 @@ body {
  * The census row as a grid (plan 12, P12.T11.g): the summary in a column as wide as it is, up to
  * what `RETRY` and `CENSUS BY LAYER` leave, its parts wrapping inside it; `RETRY` and the toggle in
  * columns of their own, 1rem after it by margin, so that an empty `RETRY` column adds no space; and
- * a hint under the summary, in its column, the toggle spanning both lines from the top. So a hint and a summary on two lines take one line from the stage between them, beside
- * the toggle's 2rem: the stage keeps 14rem in every state with at most one of them, and 13.25rem
- * with both. The census's lines are 1rem, as the furniture's are. No margin above: the toggle's
- * 2rem target already leaves room about its text.
+ * a hint under the summary, in its column, the toggle spanning both lines from the top. So a hint
+ * and a summary on two lines take one line from the stage between them, beside the toggle's 2rem:
+ * the stage keeps 14rem in every state with at most one of them, and 13.25rem with both. The
+ * census's lines are 1rem, as the furniture's are. No margin above, and no hairline: with a hint or
+ * a summary on two lines the census's first line meets the furniture's last, but at 13.25rem the
+ * stage has no room left to give, and the column ends 2.5 px above its foot (measured,
+ * look-79-81), so any space or rule here would come out of the stage's floor.
  */
 .local-chart--compact .census-readout__row {
   display: grid;
@@ -2363,8 +2376,9 @@ body {
 }
 
 /*
- * What the answer says, on one line with the control beside it. A box of its own because it is the
- * announced region and the control is not, so it lays its own three parts out as the row would.
+ * What the answer says, on one line with the control beside it, or on the compact page wrapping in
+ * its column beside the control (P12.T11.g). A box of its own because it is the announced region
+ * and the control is not, so it lays its own three parts out as the row would.
  */
 .census-readout__summary {
   display: flex;
@@ -2406,7 +2420,10 @@ body {
   padding-left: 0;
 }
 
-/* A line of its own under the row's controls, where it stood before it joined the row (P12.T11.g). */
+/*
+ * A line of its own under the row's controls, where it stood before it joined the row
+ * (P12.T11.g).
+ */
 .census-readout__row > .census-readout__hint {
   flex: 0 0 100%;
 }

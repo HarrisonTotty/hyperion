@@ -248,8 +248,9 @@ interface CensusReadoutProps {
  * and before the filter's words, which are the console's own, as the HR page has it) and
  * `IN RANGE 88 S`; `NOTHING FITS: …` is a caution, not a value, and takes none. The marks come
  * with the stale answer only and keep no slot while it is live: the counts keep no fixed width,
- * so a kept slot would buy no stillness, and in the compact layout the slots would push
- * `CENSUS BY LAYER` onto a line of its own whenever `PENDING` shows (plan 05, P05.T14).
+ * so a kept slot would buy no stillness (plan 05, P05.T14). Its second reason, that in the compact
+ * layout the slots would push `CENSUS BY LAYER` onto a line of its own whenever `PENDING` shows,
+ * ended with P12.T11.g, which gives the toggle a column of its own there; the marks are unchanged.
  *
  * The summary is a live region holding text only — the census line, the request's state in words
  * and the counts — read as a whole when it changes, so that a query given from the keyboard
@@ -259,9 +260,10 @@ interface CensusReadoutProps {
  * keeping the row's first line in a column of its own, so that a hint and a summary on two lines
  * take one line from the chart's stage between them, not two (plan 12, P12.T11.g). The camera's
  * readouts are deliberately silent; `CHART DATA INVALID`, the selected-system readout and the
- * cursor line announce from their own places, each being a region in its own right. `RETRY` goes as it is pressed, since the query is then pending, so it hands the
- * focus to `CENSUS BY LAYER` beside it, or, before the first answer, when there is no toggle, to
- * the page's tab: never to the document's body (the orchestrator's ruling 18).
+ * cursor line announce from their own places, each being a region in its own right. `RETRY` goes
+ * as it is pressed, since the query is then pending, so it hands the focus to `CENSUS BY LAYER`
+ * beside it, or, before the first answer, when there is no toggle, to the page's tab: never to the
+ * document's body (the orchestrator's ruling 18).
  */
 export function CensusReadout({
   result,

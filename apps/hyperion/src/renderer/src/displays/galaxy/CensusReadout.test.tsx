@@ -141,8 +141,10 @@ describe("CensusReadout", () => {
     const toggle = screen.getByRole("button", { name: "CENSUS BY LAYER" });
     const row = toggle.closest(".census-readout__row");
 
+    // A child of the row itself, as the stylesheet's `> .census-readout__hint` rules need, in
+    // either layout: the component renders the same DOM in both, the layout being the page's.
     expect([
-      row !== null && hint.closest(".census-readout__row") === row,
+      row !== null && hint.parentElement === row,
       (toggle.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
       summary().contains(hint),
     ]).toEqual([true, true, false]);

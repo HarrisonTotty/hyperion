@@ -5177,7 +5177,8 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
       line of some states only, measured and recorded (the layout ruling's §B); main records it as
       pre-existing, for P12.T11.e's look. _Mended by P12.T11.g (plan 12)._ (2) The census's hint
       leaves `OBSERVED` 206 px, under the floor, as the layout ruling's §D foresaw; 0 overlaps,
-      which closes look-74's and look-75's case. _Mended by P12.T11.g (plan 12)._ (3) The furniture's 1rem lines are shorter than B612's 0.875rem content boxes, so
+      which closes look-74's and look-75's case. _Mended by P12.T11.g (plan 12)._ (3) The
+      furniture's 1rem lines are shorter than B612's 0.875rem content boxes, so
       the boxes of adjacent lines meet by 1–2 px (`RADIUS`'s `ly` and the scale bar's `10 ly`;
       `UT`'s `yr` and `OBSERVED FROM`): up to 3 pairs at 100% and 1 at 150%, none at 1920 × 1080;
       the glyphs stand apart in 3× crops.
