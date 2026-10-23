@@ -43,7 +43,11 @@
 //! 6. **Gao et al. 2015**: a carbon dioxide air's photolysis under an M dwarf
 //!    ([`desiccated_carbon_dioxide`]), on the outcome only: the carbon monoxide has no gas row, so
 //!    the air keeps its carbon dioxide until P14.T54.b carries the CO and its O₂ (recorded).
-//! 7. **The greenhouse**: P14.T53.a's broadened form, in force under the batch.
+//! 7. **The greenhouse**: P14.T53.a's broadened form, in force under the batch, from the body's
+//!    base temperature, the airless mean (`surface_mix::airless_mean`: the larger of `T_eq` and
+//!    the night floor under the unlit mean's rules, `T_eq` to the bit under their hold; P14.T24.i's
+//!    follow-up, decision-t24i-airless-state D1.3), which the ice-held volatiles of step 2 read
+//!    too. Under 100 Pa of its partial pressures the body is airless at that base.
 //! 8. **The outcome** ([`EscapeOutcome`]): each element's, mass-conserving (tested).
 
 use core::f64::consts::PI;
@@ -70,7 +74,7 @@ use super::{
     EnvelopeHistory, GREENHOUSE_STEPS, Gas, GreenhouseCeiling, IceHeld, Insolation,
     PartialPressures, PassSurface, Retention, SILICATE_SOLIDUS, StepClimate, SurfaceState,
     TEMPERATE_AIRBORNE_CARBON, earth_xuv_fluence, exobase_temperature, mole_fraction_of,
-    partitioned_greenhouse, retained,
+    partitioned_greenhouse, retained, surface_mix,
 };
 
 /// The melting point of ice Ih at one standard atmosphere, K: 273.15, IAPWS R10-06's 273.152 519
@@ -1067,6 +1071,12 @@ fn hydrogen_atom_fraction(partials: &PartialPressures) -> f64 {
 struct Body<'a> {
     inputs: &'a AtmosphereInputs,
     exobase: Kelvin,
+    /// Its base temperature, `T_base`: the airless mean over the pass's surface
+    /// (`surface_mix::airless_mean`; P14.T24.i's follow-up, decision-t24i-airless-state D1.3),
+    /// the larger of `T_eq` and the night floor under the unlit mean's rules and `T_eq` to the bit
+    /// under their hold. The greenhouse starts from it, an airless body publishes at it, and the
+    /// ice-held stand-in reads it.
+    base: Kelvin,
     retention: Retention,
     held: IceHeld,
     exposure: XuvExposure,
@@ -1091,15 +1101,19 @@ struct Kept {
 }
 
 impl<'a> Body<'a> {
-    /// The body `inputs` describe.
+    /// The body `inputs` describe over the pass's surface `surface`, whose heat flow sets its
+    /// night floor and so its base temperature (its `base`; decision-t24i-airless-state D1.3).
+    /// The exobase stays the irradiation temperature's.
     #[must_use]
-    fn of(inputs: &'a AtmosphereInputs) -> Self {
+    fn of(inputs: &'a AtmosphereInputs, surface: &PassSurface<'_>) -> Self {
         let exobase = exobase_temperature(inputs.irradiation_temperature, inputs.xuv_fluence);
-        let (retention, held) = retained(inputs, exobase);
+        let base = surface_mix::airless_mean(inputs.equilibrium, surface);
+        let (retention, held) = retained(inputs, exobase, base);
         let exposure = XuvExposure::new(inputs.saturated_xuv_flux, inputs.xuv_saturation_time);
         Self {
             inputs,
             exobase,
+            base,
             retention,
             held,
             exposure,
@@ -1143,8 +1157,9 @@ impl<'a> Body<'a> {
         }
     }
 
-    /// The body as one that holds nothing, airless at its equilibrium temperature, every element
-    /// escaped: its envelope's hydrogen and helium `formed` and its inventory.
+    /// The body as one that holds nothing, airless at its base temperature, the airless mean (its
+    /// `base`, as the held path's airless arms publish; decision-t24i-airless-state D1.3), every
+    /// element escaped: its envelope's hydrogen and helium `formed` and its inventory.
     #[must_use]
     fn holding_nothing(&self, (hydrogen, helium): (f64, f64)) -> Atmosphere {
         let mut nothing = Ledger::default();
@@ -1156,7 +1171,7 @@ impl<'a> Body<'a> {
             ..self.airless(
                 SurfaceState::Airless,
                 PartialPressures::default(),
-                self.inputs.equilibrium.value(),
+                self.base.value(),
                 None,
             )
         }
@@ -1399,7 +1414,11 @@ impl<'b> Solver<'_, 'b> {
         self.solve_in(air, GREENHOUSE_STEPS)
     }
 
-    /// [`solve`](Self::solve) in at most `steps` greenhouse steps.
+    /// [`solve`](Self::solve) in at most `steps` greenhouse steps, from the body's base
+    /// temperature, the airless mean (P14.T24.i's follow-up, decision-t24i-airless-state D1.3): the
+    /// steps start there, the grey surface is `T_base` (1 + ¾τ)^¼, and N₂'s collision factor, the
+    /// batch's H₂ term and the ceiling's `T_rest` read it. The step climate keeps the body's own
+    /// `T_eq` and heat flow ([`StepClimate::of`]).
     #[must_use]
     fn solve_in(&self, air: &Airborne, steps: u32) -> Option<Solve<'b>> {
         let inputs = self.body.inputs;
@@ -1420,7 +1439,7 @@ impl<'b> Solver<'_, 'b> {
         let climate_of = |t: Kelvin, partials: &PartialPressures| step.at(t, partials);
         let (t, partials, tau) = partitioned_greenhouse(
             &inventory,
-            inputs.equilibrium,
+            self.body.base,
             &|t| self.body.saturate(t),
             &climate_of,
             (&self.ground, self.body.ceiling),
@@ -1644,7 +1663,7 @@ pub(super) fn state_and_greenhouse(
     inputs: &AtmosphereInputs,
     surface: &PassSurface<'_>,
 ) -> Atmosphere {
-    let body = Body::of(inputs);
+    let body = Body::of(inputs, surface);
     if inputs.envelope_fraction >= THIN_ENVELOPE_FRACTION {
         return body.gas_envelope();
     }
@@ -1708,7 +1727,9 @@ pub(super) fn state_and_greenhouse(
 
 /// The atmosphere of the body `body` from the solve that stands, `solved`, in the state of its
 /// climate's division at surface gravity `gravity`: its airborne gases counted to `ledger`, Gao et
-/// al.'s carbon monoxide (step 6) and the outcome `recorded` (step 8) with it.
+/// al.'s carbon monoxide (step 6) and the outcome `recorded` (step 8) with it. Under
+/// [`AIRLESS_PRESSURE`] of the solve's partial pressures it is airless at the body's base
+/// temperature, the airless mean (decision-t24i-airless-state D1.3).
 #[must_use]
 fn finish(
     body: &Body<'_>,
@@ -1784,12 +1805,10 @@ fn finish(
         t = t.max(SILICATE_SOLIDUS.value());
         SurfaceState::MagmaOcean
     } else if total < AIRLESS_PRESSURE {
-        let air = body.airless(
-            SurfaceState::Airless,
-            partials,
-            inputs.equilibrium.value(),
-            carrier,
-        );
+        // Under 100 Pa of the greenhouse's own partial pressures, from the base: published at the
+        // base, the airless mean, as the held path's airless arms are (decision-t24i-airless-state
+        // D1.3).
+        let air = body.airless(SurfaceState::Airless, partials, body.base.value(), carrier);
         return Atmosphere {
             column,
             escape,

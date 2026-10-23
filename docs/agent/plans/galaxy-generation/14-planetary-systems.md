@@ -3045,6 +3045,61 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
     tests.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive::atmosphere`;
     `cargo test -p hyperion-sim planetary::surface`.
+  - **Follow-up: the floored mean on the escape's batch path, and the state read at it** (a
+    must-fix of 24's serve gate, no waiver; lane `p14-escape`, the first commit of its T53.b
+    batch, under that batch's one gate; behind `UNLIT_MEAN_VERSION`, no new hold;
+    decision-t24i-airless-state D1–D3).
+    - _Found at P14.T49.n's science check, and at T53.a's landing:_ the greenhouse and the
+      100 Pa test read `T_eq` where the published mean, the record's conditions and the area
+      mix's partition read the floored mean. 01ffeb2b9ffc0000.0700 is published `Airless` from
+      its Ar at 0.22 Pa at its `T_eq` of 39.09 K, while its partition at its 57.15 K floor holds
+      331 Pa of a 4,900 Pa column airborne; 01ffdb2c1fff0001.0d00, 02000b2b60020000.0a00 and
+      01fffb2c20040000.0300 publish mPa against their partitions' 2.5–9.1 Pa. At 24 the state
+      is `escaping::state_and_greenhouse`'s (P14.T53.a), which reads `T_eq` at its three sites
+      and never `airless_mean`: with every 24 hold in force the floor applies to no body, and
+      the 18 unlit records return to 0 K.
+    - _The rule:_ one base temperature, `airless_mean` (the larger of `T_eq` and the night floor
+      under the floor's rules, `T_eq` to the bit under its hold), on every body with a surface
+      and on both paths.
+      - The greenhouse's temperature argument is the base (`Solver::solve_in` in
+        `atmosphere/escaping.rs`; the held path's `partitioned_greenhouse` call): its steps
+        start there, its grey surface is T_base (1 + ¾τ)^¼, and what reads that argument (N₂'s
+        collision factor, the batch's H₂ term, K4's `T_rest`) reads the base.
+      - The 100 Pa test reads that greenhouse's partial pressures; an airless body publishes
+        them at the base (`finish`'s airless arm and `holding_nothing` take `airless_mean`, as
+        the held path's three arms do).
+      - The ice-held stand-in (`IceHeld::of`, its vapour's escape at the airless surface's
+        mean) reads the base, until P14.T53.c gives the ice its own temperature.
+      - Unchanged: the exobase, a gas envelope's heated temperature, the magma ocean's
+        solidus, the hottest host's cap, and the climate body's own `T_eq` and heat flow.
+    - _Why the base, not the partition at `T_eq`:_ the floor is every point's lower bound, so no
+      ice lies colder; the max is T24.i's adopted lower bound on a grey air's base, the flux sum
+      (`T_eq`⁴ + `T_int`⁴)^¼ staying its recorded refinement; and one base keeps T_s continuous
+      across the 100 Pa line, where the airless arms alone jump by the floor less `T_eq`, and
+      would 2-cycle 01ffeb2b9ffc0000.0700. This widens main's ruling on T24.i's reach
+      (2026-10-22) from every airless body to every body with a surface.
+    - _Tests_ (with every landed 24 hold in force together, through one helper that later 24
+      tests use):
+      - 01ffeb2b9ffc0000.0700 keeps its Ar air at its floor, in its division's state; the other
+        three publish their floored mean's partial pressures, `Airless`;
+      - over the sample, the goldens and LOOK72's 62: no surface body's mean below its night
+        floor; no `Airless` record whose published partition holds at least `AIRLESS_PRESSURE`
+        airborne; the 18 unlit records at their floor, and `for_body` `Ok` on them (with
+        P14.T49.n's solid Ar, asserted after T49.n lands);
+      - every body whose `T_eq` is at or above its floor unchanged to the bit, Venus, Earth,
+        Mars and Titan among them; under the floor's hold the escape batch's census is
+        T53.a's to the bit, and with both held, version 23's;
+      - the moved bodies counted by class (airless partials, an air whose `T_eq` lies under its
+        floor, an ice-held verdict changed, a state flipped), each flip by name, with the moved
+        bodies' passes;
+      - T24.i's and T49.n's record tests move to the 24 combination, their counts restated; the
+        tripwire's message names the new tests.
+    - _Files:_ `derive/atmosphere/escaping.rs`, `derive/atmosphere.rs`, their tests and
+      `system/tests.rs`.
+    - _Accept:_ `cargo test -p hyperion-sim planetary::derive::atmosphere`;
+      `cargo test -p hyperion-sim planetary::system`, the 400's by name with `-- --ignored`.
+    - _Commit:_
+      `fix(planetary): P14.T24.i The floored mean on the escape's batch path, and the state read at it`.
 
 #### P14.T25 Habitability assessment
 
@@ -7411,7 +7466,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
   "Rulings before T53.a lands", R1; decision-absurd-states-24, R2–R4).
   - **Part 1, the state from the present insolation, and the runaway's deck** (a member of 24 and a
     must-fix of its serve gate, no waiver; R1.3; decision-absurd-states-24 R3–R4; after
-    decision-absurd-states-24 R4.3's LOOK72 census, run after T53.a's commit):
+    decision-absurd-states-24 R4.3's LOOK72 census, run after T53.a's commit and P14.T24.i's
+    follow-up, with every 24 hold in force; decision-t24i-airless-state D2):
     - _(a) The present insolation._
       - `Sky::of` (`derive/mod.rs`) sums the runaway ratio at the hosts' peak luminosity since the
         main sequence, as now, and also at the present flux. The published state's runaway arm reads
@@ -7577,6 +7633,12 @@ feeding back into p_s, T_s, the albedo or the bulk.
       `under_the_escape_batch_the_table_s_mars_keeps_3_to_10_mbar_of_carbon_dioxide` by name;
     - the record says `Tenuous`, not `Airless`, where a gas is held above the floor;
     - every `Airless` body has an empty gas list;
+    - 02000b2ca0000001.1100's Ar air (48.7 Pa at 24 over a night-side ice at 32 K, where Ar's
+      saturation pressure is 6 × 10⁻⁴ Pa, 8 × 10⁴ times supersaturated; at 23 a state edge, at
+      a published 99.86 Pa, bless-note-23) collapses to its cold trap under the collapse-first
+      start, or the reason it does not is stated; over the sample, no published air whose
+      dominant condensable lies above 10 times its saturation pressure at the record's coldest
+      zone where its ice lies (decision-t24i-airless-state D4);
     - no `surface_liquids` item is an ocean under ice, and every liquid entry's listed share equals
       its own `area_fraction` where the entries' total is at most 1 (decision-absurd-states-24 R1;
       decision-p14-t54a-water-consistency W2): LOOK72's 020e56ef60080003.0700 lists its sea at
@@ -26561,6 +26623,62 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
     2 kW m⁻², the figures' own (recorded for the figures' owner). At 24 the tests the tripwire
     names (the stand-in's 0 K, the unlit refusals, an airless mean equal to its `T_eq`) are settled
     with the bump.
+  - _Follow-up, as built (`p14-escape`, 2026-10-23; decision-t24i-airless-state D1–D3):_ one base
+    temperature, `surface_mix::airless_mean`, on both paths: the batch's `Body::base` (read by
+    `holding_nothing`, `Solver::solve_in`'s greenhouse, `finish`'s airless arm and the ice-held
+    stand-in through `retained` and `IceHeld::of`), and on the held path the same base for
+    `retained` and `partitioned_greenhouse` (its argument renamed `base`). No new hold, no draw;
+    version 23 to the bit (no golden moved); under the floor's hold T53.a's census is the same to
+    the bit. The helper `planetary::testing::with_every_24_hold` sets the escape's (with the
+    Rayleigh floor), the unlit mean's, the moon bulk's and the cold traps' holds (the last through a
+    new test switch, `with_cold_trap_rules`); `system::moon_ice` is `pub(crate)` for it.
+  - _The four bodies, every 24 hold in force_ (against D1.3's "Expected", which counted argon alone
+    with the escape held): their nitrogen ice sublimes at the floor too, and N₂'s √p greenhouse
+    warms them above it, each published in its division's state.
+    - 01ffeb2b9ffc0000.0700: `Snowball`, 69.69 K over its 57.15 K floor, 40.9 kPa (N₂ 35.4 kPa,
+      Ar 5.35 kPa, CH₄ 64.6 Pa);
+    - 01ffdb2c1fff0001.0d00: `Snowball`, 46.82 K over 45.77 K, 100.67 Pa (N₂ 89.8, Ar 10.9; a state
+      edge);
+    - 01fffb2c20040000.0300: `Snowball`, 62.35 K over 54.50 K, 11.5 kPa (N₂ 10.2 kPa, Ar 1.29 kPa);
+    - 02000b2b60020000.0a00: `Airless` at its 44.357 K floor to the bit, 55.8 Pa (N₂ 50.7, Ar 5.14),
+      its partition 54.6 Pa airborne.
+
+    All four were `Airless` at `T_eq` with 2 × 10⁻³–4.24 Pa under the unlit mean's hold. Built to
+    the rule as written; main told (2026-10-23).
+
+  - _The census_ (the first 60 sample systems, the goldens and LOOK72's 27 systems of the triage's
+    62 bodies; 1,600 bodies; `under_every_24_hold_the_floor_s_moved_bodies_are_stated`, run by
+    name): none below its floor; no `Airless` record's partition at 100 Pa or more; the 1,313
+    bodies above their floor unchanged to the bit; 287 moved, their passes 1,344 → 1,160:
+    - 19 unlit records (fallback_black_hole's; the 17 left airless at their 23.6–38.3 K floor);
+    - 190 airless bodies whose partial pressures moved, and 90 whose mean alone was raised;
+    - 7 airs whose `T_eq` lies under their floor: fallback_black_hole 0200 and 0300, subgiant's moon
+      0504 (52.6 K and 1.0 kPa → 89.9 K and 2.2 bar of N₂), and LOOK72's 820e6ee00000008d.e301,
+      e302, e303 and e307 (the last three state edges at 100 Pa that took 39–40 passes, converging
+      now in 4–5 passes at 332–944 Pa);
+    - 0 ice-held verdicts changed;
+    - 3 states flipped, `Airless` → `Snowball`: fallback_black_hole 8200b2e00000000a.0200 (0 K →
+      71.47 K, 43.2 kPa; 4 → 5 passes) and .0300 (0 K → 72.92 K, 58.4 kPa; 4 → 5), and LOOK72's
+      820e6ee00000008d.e301 (43.3 K and 49 Pa → 52.27 K and 869 Pa; 4 → 5).
+
+    A probe over the 400 (not kept): 5,978 bodies, 1,420 airless moved, 8 airs moved, 6 flips (the
+    three above and 02001b2b60010001.0300, .0500 and 42002cb200000000.0601), none below its floor,
+    no airless partition at 100 Pa; 6 bodies above their floor re-settle within 10⁻⁹ (T24.i's
+    re-settle class), so the to-the-bit test is asserted over the census's set.
+
+  - _The held path restated_ (the escape held, the floor on, a combination that never ships): the
+    goldens' unlit records 19/13/6 → 19/15/4 (fallback_black_hole 0200 and 0300 take N₂ airs and
+    lose their argon ice), with two airs raised (subgiant's moons 0503, 64.2 → 128.1 K, and 0504,
+    52.6 → 89.9 K); the 400's 18/10/8 unchanged, its raised and read 3 → 6, re-settled 3 → 4 (adding
+    02003b2be0000000.0700), argon-ice means 7.8–1,154.7 K (were to 451 K) and 7 airs raised. Some of
+    its moons reach 1,000 K (42002cae0000000a.0201, 70 → 1,000 K); with every 24 hold the same moon
+    is `Airless` at its 381.8 K floor.
+  - _Waiting for P14.T49.n's landing:_ the 18 unlit records' `for_body` `Ok` assertion, and the move
+    of T24.i's and T49.n's record tests to the 24 combination.
+  - _Deferred findings (2026-10-13 rule):_ the floor's heat flow moves with the air between runs
+    (01fffb2c20040000.0300's floor 47.16 → 54.50 K), every such body converging in 4–6 passes, no
+    2-cycle seen; the escape census's `cap` statistic still reads `T_eq`, not the base (a
+    measurement field).
 - **Deviations in P14.T24.c, as built (`p14-chem`, 2026-10-22).** `GENERATOR_VERSION` stays 23.
   The module is pure: nothing on the record calls it until P14.T54.b, which puts it in the
   record's surface section in the place of the record's placeholder `AerosolInventory` and on the

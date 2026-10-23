@@ -2094,7 +2094,8 @@ fn earth_inputs(equilibrium: f64, insolation: Insolation) -> AtmosphereInputs {
 fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) -> ClimateSpan {
     let (m, r) = (inputs.mass.value(), inputs.radius.value());
     let exobase = exobase_temperature(inputs.irradiation_temperature, inputs.xuv_fluence);
-    let (retention, held) = retained(inputs, exobase);
+    // The stand-in's base is the larger of `T_eq` and the background, `T_eq` for every body here.
+    let (retention, held) = retained(inputs, exobase, inputs.equilibrium);
     let mut airborne = Airborne::kept(inputs, retention, held);
     airborne.divide(inputs, retention, held);
     let weight = GRAVITATIONAL_CONSTANT * m / (r * r) / (4.0 * core::f64::consts::PI * r * r);
@@ -2224,7 +2225,7 @@ fn a_dry_earth_beyond_the_maximum_greenhouse_still_runs_away_past_its_cold_trap(
     // No state below freezing holds itself: at each, with its column held by the partition over
     // its own climate, the greenhouse warms the surface above it.
     let retention = air.retention();
-    let held = IceHeld::of(&earth, retention);
+    let held = IceHeld::of(&earth, retention, earth.equilibrium);
     let mut airborne = Airborne::kept(&earth, retention, held);
     assert_eq!(
         airborne.divide(&earth, retention, held),
@@ -3625,7 +3626,7 @@ fn under_the_escape_batch_the_dry_earth_beyond_the_maximum_greenhouse_is_stated(
             air.optical_depth(),
         );
         let retention = air.retention();
-        let held = IceHeld::of(&earth, retention);
+        let held = IceHeld::of(&earth, retention, earth.equilibrium);
         let mut airborne = Airborne::kept(&earth, retention, held);
         assert_eq!(
             airborne.divide(&earth, retention, held),

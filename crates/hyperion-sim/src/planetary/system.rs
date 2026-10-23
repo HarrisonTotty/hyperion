@@ -6102,6 +6102,6 @@ impl<'c> Epoch<'c> {
     }
 }
 
-mod moon_ice;
+pub(crate) mod moon_ice;
 #[cfg(test)]
 pub(crate) mod tests;

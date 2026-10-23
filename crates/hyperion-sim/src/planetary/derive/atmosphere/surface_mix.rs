@@ -595,6 +595,19 @@ pub(crate) fn with_unlit_mean<R>(rules: UnlitMeanRules, run: impl FnOnce() -> R)
 /// whose `T_eq` is above its floor keeps it to the bit. The passes' stand-in reads no heat flow,
 /// so its floor is the cosmic background's. The flux sum (`T_eq`⁴ + `T_floor`⁴)^¼ for lit bodies is a
 /// later refinement, since it moves every airless body (recorded).
+///
+/// It is the base temperature `T_base` of every body with a surface, on both paths of
+/// `state_and_greenhouse` (P14.T24.i's follow-up, decision-t24i-airless-state D1.3): the
+/// greenhouse's temperature argument, so that its steps start at it and its grey surface is
+/// `T_base` (1 + ¾τ)^¼; the 100 Pa test reads that greenhouse's partial pressures and an airless
+/// body publishes them at it; and the ice-held stand-in reads it. The floor is every point's lower
+/// bound, so no ice on the body lies colder, and the area mix partitions the column at the
+/// published mean: one base keeps the state, the `T_s` and the partition at one temperature, and
+/// keeps `T_s` continuous across the 100 Pa line (D1.2). The max is T24.i's adopted lower bound on a
+/// grey air's base over an internal flux, the flux sum (Eddington's grey solution with both
+/// fluxes) its recorded refinement. The exobase, a gas envelope's heated temperature, the magma
+/// ocean's solidus, the hottest host's cap and the climate body's own `T_eq` and heat flow do not
+/// read it.
 #[must_use]
 pub(super) fn airless_mean(equilibrium: Kelvin, surface: &PassSurface<'_>) -> Kelvin {
     if UnlitMeanRules::in_force() == UnlitMeanRules::Held {

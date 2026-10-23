@@ -125,6 +125,59 @@ fn a_lit_body_keeps_its_mean_to_the_bit_under_the_unlit_floor() {
     }
 }
 
+/// P14.T24.i's follow-up on the escape's batch path, every 24 hold in force
+/// (decision-t24i-airless-state D1.1, D1.3): the unlit airless body publishes its night floor there
+/// too, the passes' stand-in's cosmic background, where the batch's airless arms once published
+/// its `T_eq` of 0 K; with the unlit mean held it is 0 K, as at 23.
+#[test]
+fn under_every_24_hold_an_unlit_airless_body_takes_its_night_floor() {
+    use crate::planetary::derive::atmosphere::{SurfaceState, UnlitMeanRules, with_unlit_mean};
+    use crate::planetary::hooks::surface::COSMIC_BACKGROUND_TEMPERATURE;
+    use crate::planetary::testing::with_every_24_hold;
+
+    let held = with_every_24_hold(|| with_unlit_mean(UnlitMeanRules::Held, dark_body));
+    assert_eq!(held.atmosphere().state(), SurfaceState::Airless);
+    assert_same_bits(held.atmosphere().surface_temperature().value(), 0.0);
+    let floored = with_every_24_hold(dark_body);
+    assert_eq!(floored.atmosphere().state(), SurfaceState::Airless);
+    assert_same_bits(
+        floored.atmosphere().surface_temperature().value(),
+        COSMIC_BACKGROUND_TEMPERATURE.value(),
+    );
+    assert_same_bits(
+        floored.equilibrium_temperature().value(),
+        held.equilibrium_temperature().value(),
+    );
+}
+
+/// P14.T24.i's follow-up over the table, every 24 hold in force (decision-t24i-airless-state
+/// D1.4): every body, each lit above its floor, Venus, Earth, Mars and Titan among them, is the
+/// same to the bit, its whole derivation, with the unlit mean's rules floored as held, since its
+/// base temperature, the greenhouse's start and the ice-held stand-in's temperature, is then its
+/// `T_eq`.
+#[test]
+fn under_every_24_hold_a_lit_body_keeps_its_air_to_the_bit_under_the_unlit_floor() {
+    use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
+    use crate::planetary::testing::with_every_24_hold;
+    let held = with_every_24_hold(|| with_unlit_mean(UnlitMeanRules::Held, historic_table));
+    let floored = with_every_24_hold(historic_table);
+    assert_eq!(held.len(), floored.len());
+    for ((name, before), (again, after)) in held.iter().zip(&floored) {
+        assert_eq!(name, again);
+        assert!(
+            before.equilibrium_temperature().value() > 30.0,
+            "{name} is lit"
+        );
+        assert_eq!(format!("{before:?}"), format!("{after:?}"), "{name}");
+    }
+    for name in ["Venus", "Earth", "Mars", "Titan"] {
+        assert!(
+            held.iter().any(|(n, _)| *n == name),
+            "{name} is a table body"
+        );
+    }
+}
+
 /// The unlit mean is held until P14.T54.b's bump: below it every airless mean is its equilibrium
 /// temperature, and the tests' switch reaches the floor ahead of it.
 #[test]
@@ -143,7 +196,18 @@ fn the_unlit_mean_is_held_only_until_the_24_bump() {
          `under_the_batch_the_photometry_states_the_derivation_s_albedo` (an airless mean is its \
          T_eq only where it is lit), `a_surface_the_registry_or_the_record_does_not_model_answers_\
          not_modelled` and `every_generated_solid_body_reads_into_inputs_the_builder_takes` (no \
-         unlit refusal), and `the_radiative_model_reads_its_record_s_inertia_on_every_body`"
+         unlit refusal), and `the_radiative_model_reads_its_record_s_inertia_on_every_body`. \
+         The base temperature reads it on both paths (P14.T24.i's follow-up, \
+         decision-t24i-airless-state D1.3): delete its switch from \
+         `planetary::testing::with_every_24_hold`, and settle the follow-up's tests, which compare \
+         every 24 hold with every 24 hold but this one: \
+         `under_every_24_hold_an_unlit_airless_body_takes_its_night_floor`, \
+         `under_every_24_hold_a_lit_body_keeps_its_air_to_the_bit_under_the_unlit_floor`, and in \
+         `planetary::system`'s tests `under_every_24_hold_no_surface_lies_below_its_night_floor`, \
+         `under_every_24_hold_a_body_above_its_floor_is_unchanged_by_it`, \
+         `under_every_24_hold_the_four_split_bodies_read_their_floor` and \
+         `under_every_24_hold_the_floor_s_moved_bodies_are_stated` (their `FloorCensus` then needs \
+         no held run)"
     );
     assert_eq!(UnlitMeanRules::in_force(), UnlitMeanRules::Held);
     assert_eq!(

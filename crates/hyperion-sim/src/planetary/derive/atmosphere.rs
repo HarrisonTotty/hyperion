@@ -1459,7 +1459,9 @@ impl GreenhouseConstants {
 }
 
 /// Nitrogen's collision-induced scaling at the equilibrium temperature `equilibrium`:
-/// (`T_ref` ÷ `T_eq`)² with `T_ref` [`NITROGEN_REFERENCE_TEMPERATURE`], and 0 at or below 0 K.
+/// (`T_ref` ÷ `T_eq`)² with `T_ref` [`NITROGEN_REFERENCE_TEMPERATURE`], and 0 at or below 0 K. The
+/// greenhouse's steps pass the body's base temperature, the airless mean, at least its night floor
+/// under the unlit mean's rules (P14.T24.i's follow-up, decision-t24i-airless-state D1.3).
 #[must_use]
 fn collision_factor(equilibrium: Kelvin) -> f64 {
     let t = equilibrium.value();
@@ -2284,7 +2286,8 @@ impl Atmosphere {
     /// Which species the body retains: those that pass Jeans's test at the exobase
     /// ([`Retention::of`], P14.T13.b), and on an ice crust the water and nitrogen its ice holds
     /// that fail it (decision-p14-t54a-ganymede, C0 follow-up, rule (b): those whose ice's vapour
-    /// at the surface's mean temperature is under [`AIRLESS_PRESSURE`] keep their inventory less
+    /// at the base temperature, the airless surface's mean (decision-t24i-airless-state D1.3), is
+    /// under [`AIRLESS_PRESSURE`] keep their inventory less
     /// that vapour's escape over the age, Schaller and Brown 2007's criterion), with methane kept
     /// where nitrogen is (P14.T24.f).
     #[must_use]
@@ -2424,12 +2427,17 @@ impl From<CarbonCarrier> for Gas {
 /// The volatiles an ice crust holds as ice (decision-p14-t54a-ganymede, C0 follow-up, rule (b)):
 /// on a body whose bulk is ice ([`SurfaceMaterial::Ice`]) with a solid crust and no envelope, the
 /// water and nitrogen that fail Jeans's test at the exobase but whose ice's saturated vapour at the
-/// pass's equilibrium temperature, the airless surface's mean, cannot make a bulk air keep their
+/// pass's base temperature, the airless surface's mean (`surface_mix::airless_mean`: the larger of
+/// `T_eq` and the night floor under the unlit mean's rules, `T_eq` to the bit under their hold;
+/// P14.T24.i's follow-up, decision-t24i-airless-state D1.3), cannot make a bulk air keep their
 /// inventory less that vapour's own escape over the age ([`ice_vapour_escape`]).
 ///
 /// The bulk-air test does not judge them: a crust is not lost by the thermal, non-thermal and
 /// impact escape of an air it cannot form. It reads the pass's temperature, as a volatile ice's
-/// vapour does, so its verdict can change between passes. Methane follows nitrogen
+/// vapour does, so its verdict can change between passes. It reads the base, not `T_eq`, since no
+/// ice on the body lies colder than its floor: held by its ice at `T_eq` and airborne at the floor
+/// would split the escape as the state once was split (D1.3). P14.T53.c replaces it with the ice's
+/// controlling temperature, which is at least the base. Methane follows nitrogen
 /// ([`Retention::with_methane_as_nitrogen`]), held by the ice where the nitrogen is
 /// ([`retention`](Self::retention)); carbon dioxide and argon, and the
 /// rock bulks, keep T13.b's verdicts until P14.T53.c. A past runaway leaves the water it holds
@@ -2443,9 +2451,10 @@ struct IceHeld {
 }
 
 impl IceHeld {
-    /// The ice-held volatiles of the body `inputs` describe, whose bulk-air retention is `jeans`.
+    /// The ice-held volatiles of the body `inputs` describe, whose bulk-air retention is `jeans`,
+    /// at its base temperature `base`, the airless mean.
     #[must_use]
-    fn of(inputs: &AtmosphereInputs, jeans: Retention) -> Self {
+    fn of(inputs: &AtmosphereInputs, jeans: Retention, base: Kelvin) -> Self {
         let crusted = match (inputs.material, inputs.crust) {
             (SurfaceMaterial::Ice, Crust::Solid) => {
                 inputs.envelope_fraction < THIN_ENVELOPE_FRACTION
@@ -2459,13 +2468,7 @@ impl IceHeld {
             if jeans.retains(gas) {
                 return None;
             }
-            let loss = ice_vapour_escape(
-                inputs.mass,
-                inputs.radius,
-                gas,
-                inputs.equilibrium,
-                inputs.age,
-            )?;
+            let loss = ice_vapour_escape(inputs.mass, inputs.radius, gas, base, inputs.age)?;
             let kept = inventory.value() - loss.value();
             // By comparison, so that a NaN keeps none.
             (kept > 0.0).then_some(Kilograms::new(kept))
@@ -2716,12 +2719,19 @@ fn whole_column(inventory: &ColumnInventory) -> PartialPressures {
 
 /// The surface temperature, partial pressures and optical depth of a body's air under the
 /// condensate partition (P14.T51.a): the temperature iterated at most `steps` times upward from
-/// the equilibrium temperature through the grey greenhouse its partial pressures give, each
+/// the base temperature `base` through the grey greenhouse its partial pressures give, each
 /// step's partial pressures the partition's of the airborne inventory `inventory`, as column
 /// weights ([`Airborne::column`]), over the climate `climate` gives for the step's temperature and
 /// the previous step's partial pressures, on the ground `ground`, and held by `saturate` at the
 /// hottest host's. The greenhouse's constants are the rules' in force
 /// ([`GreenhouseConstants::in_force`]): P14.T57.a's fits to version 23, P14.T53.a's from 24.
+///
+/// `base` is the body's airless mean (`surface_mix::airless_mean`), the larger of `T_eq` and its
+/// night floor under the unlit mean's rules and `T_eq` to the bit under their hold, on both paths
+/// (P14.T24.i's follow-up, decision-t24i-airless-state D1.3): the steps start at it, the grey
+/// surface is `base` (1 + ¾τ)^¼, and what reads the temperature argument (N₂'s collision factor,
+/// the batch's H₂ term, the ceiling's `T_rest`) reads it, the air's density standing at its
+/// temperature, of which the floored mean is the better value.
 ///
 /// `steps` is [`GREENHOUSE_STEPS`] for every solve whose state is taken. Only the weathering
 /// thermostat's trials ([`escaping::weathering_thermostat`], under the escape's batch rules) pass
@@ -2747,7 +2757,7 @@ fn whole_column(inventory: &ColumnInventory) -> PartialPressures {
 #[must_use]
 fn partitioned_greenhouse(
     inventory: &ColumnInventory,
-    equilibrium: Kelvin,
+    base: Kelvin,
     saturate: &impl Fn(f64) -> Kelvin,
     climate: &ClimateOf<'_>,
     ground: (&Ground, GreenhouseCeiling),
@@ -2756,19 +2766,19 @@ fn partitioned_greenhouse(
     #[cfg(test)]
     if let Some(checked) = crate::planetary::chem::partition::checked_exits(
         crate::planetary::chem::partition::ExitsChecked::Greenhouse,
-        || greenhouse_steps(inventory, equilibrium, saturate, climate, ground, steps),
+        || greenhouse_steps(inventory, base, saturate, climate, ground, steps),
         same_greenhouse,
     ) {
         return checked;
     }
-    greenhouse_steps(inventory, equilibrium, saturate, climate, ground, steps)
+    greenhouse_steps(inventory, base, saturate, climate, ground, steps)
 }
 
-/// [`partitioned_greenhouse`]'s steps, at most `steps` of them.
+/// [`partitioned_greenhouse`]'s steps, at most `steps` of them, from the base temperature `base`.
 #[must_use]
 fn greenhouse_steps(
     inventory: &ColumnInventory,
-    equilibrium: Kelvin,
+    base: Kelvin,
     saturate: &impl Fn(f64) -> Kelvin,
     climate: &ClimateOf<'_>,
     (ground, ceiling): (&Ground, GreenhouseCeiling),
@@ -2792,15 +2802,14 @@ fn greenhouse_steps(
     crate::planetary::chem::partition::count_exits(|counts| counts.greenhouses += 1);
     let mut weights = AirborneWeights::new();
     let mut partials = whole_column(inventory);
-    let mut t = equilibrium.value();
+    let mut t = base.value();
     for _ in 0..steps {
         #[cfg(test)]
         crate::planetary::chem::partition::count_exits(|counts| counts.evaluations += 1);
         let span = span_at(t, &partials);
         let next = partitioned_partials(inventory, &span, ground, &mut weights);
-        let tau = constants.optical_depth(&next, equilibrium, ground.gravity());
-        let grey =
-            ceiling.surface_temperature(&constants, (&next, tau), equilibrium, ground.gravity());
+        let tau = constants.optical_depth(&next, base, ground.gravity());
+        let grey = ceiling.surface_temperature(&constants, (&next, tau), base, ground.gravity());
         let next_t = saturate(grey.value()).value();
         let settled = next_t.total_cmp(&t).is_eq() && same_partials(&next, &partials);
         t = next_t;
@@ -2816,7 +2825,7 @@ fn greenhouse_steps(
     });
     let span = span_at(t, &partials);
     partials = partitioned_partials(inventory, &span, ground, &mut weights);
-    let tau = constants.optical_depth(&partials, equilibrium, ground.gravity());
+    let tau = constants.optical_depth(&partials, base, ground.gravity());
     (t, partials, tau)
 }
 
@@ -2925,7 +2934,9 @@ impl<'a> StepClimate<'a> {
 /// 2. Otherwise each inventoried gas is kept if it is retained against Jeans escape at the exobase
 ///    temperature ([`exobase_temperature`], [`Retention`]). On a body whose bulk is ice
 ///    ([`SurfaceMaterial::Ice`]) with a solid crust, water and nitrogen that fail that test but
-///    whose ice's saturated vapour at the equilibrium temperature, the airless surface's mean, is
+///    whose ice's saturated vapour at the base temperature, the airless surface's mean (the
+///    larger of the equilibrium temperature and the night floor at the heat flow under the unlit
+///    mean's rules, held at 24; P14.T24.i's follow-up, decision-t24i-airless-state D1.3), is
 ///    under [`AIRLESS_PRESSURE`] are held by their ice: each keeps its inventory less its vapour's
 ///    own Jeans escape over the age with the exobase at the surface, where that leaves any
 ///    (Schaller and Brown 2007, ApJ 659, L61; decision-p14-t54a-ganymede, C0 follow-up, rule (b),
@@ -2971,12 +2982,12 @@ impl<'a> StepClimate<'a> {
 ///    one at its surface humidity of its saturation pressure at the mean (methane's
 ///    [`METHANE_RELATIVE_HUMIDITY`], signoff-3.md, item 1.7) and a dominant one at its saturation
 ///    pressure at the coldest, on the registry's phase diagrams. The temperature is iterated
-///    [`GREENHOUSE_STEPS`] times upward from the equilibrium temperature through the grey
+///    [`GREENHOUSE_STEPS`] times upward from the base temperature through the grey
 ///    greenhouse they give ([`optical_depth`], [`grey_surface_temperature`]). On a body formed
 ///    beyond the snow line that lies beyond the maximum-greenhouse limit the carbon is methane,
 ///    mole for mole ([`CarbonCarrier::Methane`]).
-/// 5. A surface pressure below [`AIRLESS_PRESSURE`] is [`SurfaceState::Airless`], at the
-///    equilibrium temperature; a surface over the [`SILICATE_SOLIDUS`], or a crust not yet formed,
+/// 5. A surface pressure below [`AIRLESS_PRESSURE`], of the greenhouse's own partial pressures,
+///    is [`SurfaceState::Airless`], at the base temperature; a surface over the [`SILICATE_SOLIDUS`], or a crust not yet formed,
 ///    a [`SurfaceState::MagmaOcean`] (the young one at least at the solidus), whose melt holds any
 ///    oxygen while it is molten (Luger and Barnes 2015, §2.5.3). The oxygen of the water lost while a young melt lasted
 ///    ([`AtmosphereInputs::molten_for`]) stays in it ([`runaway_oxygen`]; Schaefer et al.
@@ -3119,16 +3130,17 @@ pub(crate) fn atmosphere_and_lid(
 }
 
 /// The retention of the body `inputs` describe at the exobase temperature `exobase` and what its
-/// ice holds ([`atmosphere`]'s step 2): Jeans's test with the ice-held water and nitrogen beside
-/// it, methane following nitrogen; none for a body of no mass or radius.
+/// ice holds at its base temperature `base`, the airless mean ([`atmosphere`]'s step 2;
+/// [`IceHeld::of`]): Jeans's test with the ice-held water and nitrogen beside it, methane
+/// following nitrogen; none for a body of no mass or radius.
 #[must_use]
-fn retained(inputs: &AtmosphereInputs, exobase: Kelvin) -> (Retention, IceHeld) {
+fn retained(inputs: &AtmosphereInputs, exobase: Kelvin, base: Kelvin) -> (Retention, IceHeld) {
     let (m, r) = (inputs.mass.value(), inputs.radius.value());
     if !(m.is_finite() && m > 0.0 && r.is_finite() && r > 0.0) {
         return (Retention::default(), IceHeld::default());
     }
     let jeans = Retention::of(inputs.mass, inputs.radius, exobase);
-    let held = IceHeld::of(inputs, jeans);
+    let held = IceHeld::of(inputs, jeans, base);
     (
         jeans.with(held.retention()).with_methane_as_nitrogen(),
         held,
@@ -3150,6 +3162,13 @@ fn state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) ->
 
 /// [`state_and_greenhouse`] under the escape's hold: version 23's steps, to the bit, with no
 /// escape outcome.
+///
+/// One base temperature, the airless mean (`surface_mix::airless_mean`; P14.T24.i and its
+/// follow-up, decision-t24i-airless-state D1.3), on every body with a surface: the ice-held
+/// stand-in reads it, the greenhouse starts from it, and an airless body publishes at it. It is
+/// `T_eq` to the bit under the unlit mean's hold, so version 23's steps are unchanged; the exobase,
+/// a gas envelope's heated temperature, the magma ocean's solidus, the hottest host's cap and the
+/// step climate's own `T_eq` and heat flow are as they were.
 #[must_use]
 #[expect(
     clippy::too_many_lines,
@@ -3161,7 +3180,11 @@ fn held_state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_
     let exobase = exobase_temperature(inputs.irradiation_temperature, inputs.xuv_fluence);
     let (m, r) = (inputs.mass.value(), inputs.radius.value());
     let valid = m.is_finite() && m > 0.0 && r.is_finite() && r > 0.0;
-    let (retention, held) = retained(inputs, exobase);
+    // The base temperature: the airless mean, at least the night floor at the heat flow
+    // (P14.T24.i and its follow-up, decision-t24i-airless-state D1.3, held at 24).
+    let base = surface_mix::airless_mean(inputs.equilibrium, surface);
+    let airless_mean = base.value();
+    let (retention, held) = retained(inputs, exobase, base);
     let ice_held = held.retention();
     let airless = |state: SurfaceState, partials: PartialPressures, t: f64, carrier| Atmosphere {
         state,
@@ -3191,8 +3214,6 @@ fn held_state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_
             )
         };
     }
-    // An airless body's mean is at least its night floor at its heat flow (P14.T24.i, held at 24).
-    let airless_mean = surface_mix::airless_mean(inputs.equilibrium, surface).value();
     if !valid {
         return airless(
             SurfaceState::Airless,
@@ -3206,8 +3227,7 @@ fn held_state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_
     let mut airborne = Airborne::kept(inputs, retention, held);
     let climate = airborne.divide(inputs, retention, held);
 
-    // Step 4: the partial pressures and the greenhouse they hold.
-    let equilibrium = inputs.equilibrium;
+    // Step 4: the partial pressures and the greenhouse they hold, from the base.
     let gravity = MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r));
     let weight = gravity.value() / (4.0 * core::f64::consts::PI * r * r);
     let ground = Ground::new(gravity, surface.basins, surface.water_at_surface);
@@ -3227,7 +3247,7 @@ fn held_state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_
     let climate_of = |t: Kelvin, partials: &PartialPressures| step.at(t, partials);
     let (mut t, mut partials, tau) = partitioned_greenhouse(
         &inventory,
-        equilibrium,
+        base,
         &saturate,
         &climate_of,
         (&ground, GreenhouseCeiling::None),
