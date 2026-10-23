@@ -1342,8 +1342,8 @@ convention, and `PROTOCOL_VERSION` stays 2 (Design note 12).
 - **Body frames on the wire.** `FramePositionDto::Body` names a non-rotating body frame, plan 01's
   `Frame::Body`. R02's `BodyFixedPosition`, which rotates, is a position type and does not go on the
   wire here; if R02 needs it there, it adds a variant.
-- **Re-validated at `899db5e` (R03.T1, 2026-09-30).** No brainstorm change since the plan was
-  written. Found in the tree: P12.T9 has not landed (no `SubscribeRequest`, `Subscribed`,
+- **Re-validated at `899db5e`, now `9d955b26` (R03.T1, 2026-09-30).** No brainstorm change since the
+  plan was written. Found in the tree: P12.T9 has not landed (no `SubscribeRequest`, `Subscribed`,
   `SubscriptionTopic` or `ServerMessage::Notification` anywhere), so R03.T5.a builds the whole
   envelope; `PlanetarySystem::state_at`, `star_states_at` and `galaxy::frame::candidate_at` are
   absent, so R03.T3 and R03.T7.a add them by agreement. The velocities they need exist and are

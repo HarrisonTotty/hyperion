@@ -1176,10 +1176,10 @@ On the development machine (RTX 3080), and on the UHD 620 by the owner, with the
   PSF-weighted colour within 0.5 %: twelve R02 checks in all.
 - The recorded runs of R02.T18, below. No golden image is stored anywhere.
 - **R02.T16.a's census, measured 2026-10-02** (RM1 validation m4), at generator version 18, build
-  e4c5cfc, on the Milky Way fixture with Design note 19's seed `0x0311_1000_0000_0000` at the
-  Sun-like point [0, 26,000, 0] ly and time 0, through the server's own `systems_in_range` path
-  (`range_query`, `range_brief`, `systems_in_range`) with `limit` 20,000 and `include_stellar`, by
-  a scratch test that was not committed. The counts are exact for the seed; the times were taken
+  e4c5cfc, now c18c3708, on the Milky Way fixture with Design note 19's seed `0x0311_1000_0000_0000`
+  at the Sun-like point [0, 26,000, 0] ly and time 0, through the server's own `systems_in_range`
+  path (`range_query`, `range_brief`, `systems_in_range`) with `limit` 20,000 and `include_stellar`,
+  by a scratch test that was not committed. The counts are exact for the seed; the times were taken
   on the shared machine, a release build, and stay provisional.
 
   | Query         | Layers included (expected → returned)                           | Rows   | With V | Range query | Briefs   |
@@ -1220,7 +1220,7 @@ The performance rows were taken by a scratch variant of the smoke page (not comm
 each kept scene in real time for 20 s, builds its draw list as the display does and renders it
 through `WireframeRenderer` into a 1920 × 1080 `rgba16float` target, with Dawn's timestamp
 quantization lifted (`GraphicsStatus.timer` `full`); the GPU time is the `view:wireframe` pass's.
-No run failed, so no finding is filed.
+No run failed, so no finding is filed. The rows dated 2026-10-02 name build 5028cb7, now 8168268f.
 
 ## Generator version
 
@@ -1943,8 +1943,9 @@ highest step`, naming the key held back as the field of view's ends name theirs;
 - **RM1 validation's GPU runs (2026-10-02), for m2 and m3.** `just test-render` on SwiftShader
   passes in both variants with the three new checks. The whole harness, run hidden and offscreen on
   the RTX 3080 under the client's switches, passes 78 of 78 checks in both variants (`default`,
-  `no-subgroups`) at build 1394abb. With the shader's old `max()` form put back, the slope check
-  fails on the RTX 3080 (depth 0.02138445 against 0.02107446), so it is a real regression test.
+  `no-subgroups`) at build 1394abb, now e6b42914. With the shader's old `max()` form
+  put back, the slope check fails on the RTX 3080 (depth 0.02138445 against 0.02107446),
+  so it is a real regression test.
 - **Fixed in RM1 validation (2026-10-02, integration MINOR-2): no anchors outside the view.**
   `buildWireframeDrawList` culled only marks behind the camera, so a mark in front of it but outside
   the view still got a pickable anchor and a DOM label, laid out thousands of pixels off the stage.

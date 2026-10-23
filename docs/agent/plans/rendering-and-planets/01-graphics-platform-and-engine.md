@@ -2787,9 +2787,9 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
 - **T14, as built (2026-10-02, RTX 3080, Electron 44.4.3).**
   - **Gates:** `just ci` passes on the branch (T14's commit) and `just test-render` passes
     headless: both variants, 62 checks each, with an empty cancelled list. _Dated (RM1 validation,
-    m8): 62 was T14's branch. The integration branch at 964665b ran 75 a variant (R02.T14.c added
-    13), and after the RM1 validation fixes 82 (`default`) and 80 (`no-subgroups`): M2's path
-    and `subgroup_size` checks, m1's two and the mip check._
+    m8): 62 was T14's branch. The integration branch at 964665b, now 506a937a, ran 75 a variant
+    (R02.T14.c added 13), and after the RM1 validation fixes 82 (`default`) and 80 (`no-subgroups`):
+    M2's path and `subgroup_size` checks, m1's two and the mip check._
   - **Harness times (T9.e), on a quiet machine (load average 2.0 to 2.3):** ten runs of
     `just test-render`, build included, passed 10 of 10 in 3,043 to 3,290 ms (median 3,065 ms).
     Each of the two harness runs took 1,192 to 1,396 ms. These replace T9.e's provisional
@@ -2938,7 +2938,8 @@ path`). On the subgroup path each u32 twin checks that `subgroup_size` is a powe
     Scope bullets and the Non-goals' CSP sentence no longer describe a Babylon implementation.
   - **m8, T14's records.** The chunk figures and the 62-check count are dated as T14's branch, with
     a re-measure on this branch (no `loadEngine` chunk; `styles-*.js` reaches `engine-*.js` only
-    by `import()`; not minified) and the counts 75 (964665b) and 82 and 80 (after these fixes).
+    by `import()`; not minified) and the counts 75 (964665b, now 506a937a) and 82 and
+    80 (after these fixes).
   - **Hardware, after these fixes (2026-10-02, RTX 3080, hidden and offscreen, the client's
     Vulkan switches with `--disable-vulkan-surface` and the timing toggle):** both variants pass,
     82 checks (`default`) and 80 (`no-subgroups`), `uncaptured GPU errors 0`, no request out. The
