@@ -16,8 +16,10 @@
 //! - [`case`]: the case format and its validation;
 //! - `transport`: the estimator (absorption as a weight, delta tracking, a forced first
 //!   collision, next-event estimation to every sun, a Lambertian ground, Russian roulette, Buras
-//!   and Mayer 2011's VROOM where a medium is forward-peaked (R08.T12.f) and the Stokes mode,
-//!   which scores the scalar radiance of the same paths beside the vector one);
+//!   and Mayer 2011's VROOM where a medium is forward-peaked (R08.T12.f), the absorbers' curves of
+//!   growth on each path's whole column (R08.T12.b.1) and the Stokes mode, which scores the scalar
+//!   radiance of the same paths beside the vector one);
+//! - `absorber`: a curve of growth read by the client's rule (R08.T12.b.1);
 //! - `optics`: profiles, phase functions (closed forms, tables on u = √(Θ ÷ π) and Legendre
 //!   series) and the block-diagonal scattering matrices;
 //! - `geometry`: frames and the shells;
@@ -37,7 +39,14 @@
 //! that adding a geometry leaves the others' draws alone), and its number. Every transcendental
 //! goes through [`hyperion_sim::math`]. Nothing here is generated output: no domain tag and no
 //! generator version is involved (R08's Generator version).
+//!
+//! **Samples per geometry** (R08.T12.b.1). A geometry or an aggregate traces its own `samples`
+//! where the case gives them, and the command's count elsewhere; the key leaves one's count out of
+//! the others' draws. Each records its count, and the standard error of its own first quarter of
+//! samples beside the whole run's, for R08's N^(−1/2) check (`gate.ts`): the blocks are merged
+//! in index order, so the first quarter's moments are a part of the run's.
 
+mod absorber;
 #[cfg(test)]
 mod benchmarks;
 pub mod case;
@@ -130,7 +139,8 @@ fn wide(n: usize) -> u64 {
 }
 
 /// Traces `case`'s reference radiances: `samples` samples per geometry, aggregate and wavelength,
-/// on `threads` threads, with or without the Stokes vector.
+/// or the case's own count for a geometry or aggregate that gives one, on `threads` threads, with
+/// or without the Stokes vector.
 ///
 /// The output is the same, bit for bit, for any number of threads.
 ///
@@ -138,7 +148,7 @@ fn wide(n: usize) -> u64 {
 ///
 /// [`TraceReferenceError::StokesNeedsMatrix`] for the Stokes mode on a case with a term that has
 /// no scattering matrix and is not marked depolarising; [`TraceReferenceError::TooManySamples`]
-/// past [`MAX_SAMPLES`];
+/// past [`MAX_SAMPLES`], or for a run whose blocks of samples a `u64` cannot count;
 /// [`TraceReferenceError::ThreadPool`] if the threads cannot be started.
 ///
 /// # Panics
@@ -217,12 +227,24 @@ pub(crate) fn trace_reference_with(
             Source::flux(&grid, aggregate, Level::Top),
         ));
     }
-    let moments = trace_moments(
+    // Each source's samples, in the sources' order: an aggregate's two fluxes share its count.
+    let default = samples.get();
+    let counts: Vec<u64> = case
+        .geometries()
+        .iter()
+        .map(|g| g.samples.unwrap_or(default))
+        .chain(
+            case.aggregates()
+                .iter()
+                .flat_map(|a| [a.samples.unwrap_or(default); 2]),
+        )
+        .collect();
+    let traced = trace_moments(
         case.seed(),
         &media,
         &sources,
+        &counts,
         polarisation,
-        samples.get(),
         threads,
     )?;
     let run = Run {
@@ -230,7 +252,9 @@ pub(crate) fn trace_reference_with(
         grid: &grid,
         media: &media,
         sources: &sources,
-        moments,
+        counts: &counts,
+        moments: traced.whole,
+        quarters: traced.quarters,
     };
     Ok(ReferenceRadiances {
         format: REFERENCE_FORMAT,
@@ -255,25 +279,60 @@ const MOMENTS: usize = COMPONENTS + 1;
 /// Where the moments of a sample's radiance less its scalar radiance are kept.
 const DIFFERENCE: usize = COMPONENTS;
 
-/// Traces `samples` samples of every source at every wavelength: the moments of (I, Q, U, V), of
-/// the scalar radiance and of the radiance less it, per task, wavelength-major. The scalar mode
-/// fills the first alone.
+/// The moments of a traced case, per task, wavelength-major: of each source's whole run and of its
+/// first quarter of samples, ⌊N ÷ 4⌋.
+struct Traced {
+    whole: Vec<[Moments; MOMENTS]>,
+    quarters: Vec<[Moments; MOMENTS]>,
+}
+
+/// Pushes a sample's components `x` into `moments`: I alone in the scalar mode, and in the Stokes
+/// mode every component and the radiance less the scalar radiance.
+fn push_sample(
+    moments: &mut [Moments; MOMENTS],
+    x: &[f64; COMPONENTS],
+    polarisation: Polarisation,
+) {
+    match polarisation {
+        Polarisation::Scalar => moments[I].push(x[I]),
+        Polarisation::Stokes => {
+            for (m, &value) in moments.iter_mut().zip(x) {
+                m.push(value);
+            }
+            moments[DIFFERENCE].push(x[I] - x[SCALAR_I]);
+        }
+    }
+}
+
+/// Traces every source at every wavelength, source k `counts[k]` samples: the moments of
+/// (I, Q, U, V), of the scalar radiance and of the radiance less it, per task, wavelength-major,
+/// over the whole run and over its first quarter. The scalar mode fills the first alone.
 fn trace_moments(
     seed: u64,
     media: &[Medium<'_>],
     sources: &[(u64, Source)],
+    counts: &[u64],
     polarisation: Polarisation,
-    samples: u64,
     threads: NonZeroUsize,
-) -> Result<Vec<[Moments; MOMENTS]>, TraceReferenceError> {
+) -> Result<Traced, TraceReferenceError> {
     let per_wavelength = sources.len();
     let tasks = media.len() * per_wavelength;
-    let blocks = samples.div_ceil(BLOCK_SAMPLES);
-    let items = wide(tasks)
-        .checked_mul(blocks)
-        .ok_or(TraceReferenceError::TooManySamples { samples })?;
+    // Each task's first item, its blocks laid out task after task: for one count everywhere, the
+    // item `task × blocks + block` as before.
+    let mut starts = Vec::with_capacity(tasks + 1);
+    let mut items = 0_u64;
+    for task in 0..tasks {
+        starts.push(items);
+        let samples = counts[task % per_wavelength];
+        // Past 2⁶⁴ blocks the run's samples are more than any count, so it is refused as such.
+        items = items
+            .checked_add(samples.div_ceil(BLOCK_SAMPLES))
+            .ok_or(TraceReferenceError::TooManySamples { samples: u64::MAX })?;
+    }
+    starts.push(items);
     let seed = seed ^ ATMOSPHERE_STREAM;
-    let mut moments = vec![[Moments::default(); MOMENTS]; tasks];
+    let mut whole = vec![[Moments::default(); MOMENTS]; tasks];
+    let mut quarters = vec![[Moments::default(); MOMENTS]; tasks];
     map_reduce_chunks(
         items,
         1,
@@ -282,14 +341,16 @@ fn trace_moments(
             let mut scratch = Scratch::default();
             range
                 .map(|item| {
-                    let (task, block) = (item / blocks, item % blocks);
-                    let index =
-                        usize::try_from(task).expect("a task's index is below `tasks`, a usize");
+                    let index = starts.partition_point(|&start| start <= item) - 1;
+                    let block = item - starts[index];
                     let wavelength = index / per_wavelength;
                     let (key, source) = &sources[index % per_wavelength];
+                    let samples = counts[index % per_wavelength];
+                    let quarter = samples / 4;
                     // The case keeps its wavelengths below 2¹⁶ and its sources' keys below 2³⁴.
                     let stream = (wide(wavelength) << 34) | key;
                     let mut block_moments = [Moments::default(); MOMENTS];
+                    let mut quarter_moments = [Moments::default(); MOMENTS];
                     let end = ((block + 1) * BLOCK_SAMPLES).min(samples);
                     for sample in block * BLOCK_SAMPLES..end {
                         let mut draws = Draws::new(seed, stream, sample);
@@ -299,39 +360,40 @@ fn trace_moments(
                             &mut draws,
                             &mut scratch,
                         );
-                        match polarisation {
-                            Polarisation::Scalar => block_moments[I].push(x[I]),
-                            Polarisation::Stokes => {
-                                for (m, value) in block_moments.iter_mut().zip(x) {
-                                    m.push(value);
-                                }
-                                block_moments[DIFFERENCE].push(x[I] - x[SCALAR_I]);
-                            }
+                        push_sample(&mut block_moments, &x, polarisation);
+                        if sample < quarter {
+                            push_sample(&mut quarter_moments, &x, polarisation);
                         }
                     }
-                    (index, block_moments)
+                    (index, block_moments, quarter_moments)
                 })
                 .collect::<Vec<_>>()
         },
         |results| {
-            for (index, block_moments) in results {
-                for (total, part) in moments[index].iter_mut().zip(&block_moments) {
+            for (index, block_moments, quarter_moments) in results {
+                for (total, part) in whole[index].iter_mut().zip(&block_moments) {
+                    total.merge(part);
+                }
+                for (total, part) in quarters[index].iter_mut().zip(&quarter_moments) {
                     total.merge(part);
                 }
             }
         },
     )?;
-    Ok(moments)
+    Ok(Traced { whole, quarters })
 }
 
 /// A traced case: its media per wavelength, its sources (the geometries' detectors, then each
-/// aggregate's ground and top) and the moments of each task, wavelength-major.
+/// aggregate's ground and top) with their samples, and the moments of each task, wavelength-major,
+/// over the whole run and its first quarter.
 struct Run<'a> {
     case: &'a AtmosphereCase,
     grid: &'a ShellGrid,
     media: &'a [Medium<'a>],
     sources: &'a [(u64, Source)],
+    counts: &'a [u64],
     moments: Vec<[Moments; MOMENTS]>,
+    quarters: Vec<[Moments; MOMENTS]>,
 }
 
 /// `values`, after checking that each is finite.
@@ -358,6 +420,18 @@ impl Run<'_> {
         )
     }
 
+    /// The standard error of Stokes component `component` of source `source` over its first
+    /// quarter of samples, per wavelength.
+    #[must_use]
+    fn quarter_error(&self, source: usize, component: usize) -> Vec<f64> {
+        let per_wavelength = self.sources.len();
+        finite(
+            (0..self.media.len())
+                .map(|w| self.quarters[w * per_wavelength + source][component].standard_error())
+                .collect(),
+        )
+    }
+
     /// Geometry `g`'s radiances.
     fn geometry(&self, g: usize, polarisation: Polarisation) -> GeometryRadiance {
         let geometry = &self.case.geometries()[g];
@@ -365,8 +439,11 @@ impl Run<'_> {
         GeometryRadiance {
             name: geometry.name.clone(),
             detector_half_angle_deg: self.case.detector_half_angle_deg(geometry),
+            samples: self.counts[g],
+            quarter_samples: self.counts[g] / 4,
             radiance: self.column(g, I, Moments::mean),
             standard_error: self.column(g, I, Moments::standard_error),
+            quarter_standard_error: self.quarter_error(g, I),
             stokes: (polarisation == Polarisation::Stokes).then(|| StokesRadiance {
                 q: self.column(g, 1, Moments::mean),
                 q_standard_error: self.column(g, 1, Moments::standard_error),
@@ -376,15 +453,17 @@ impl Run<'_> {
                 v_standard_error: self.column(g, 3, Moments::standard_error),
                 scalar_radiance: self.column(g, SCALAR_I, Moments::mean),
                 scalar_standard_error: self.column(g, SCALAR_I, Moments::standard_error),
+                scalar_quarter_standard_error: self.quarter_error(g, SCALAR_I),
                 difference_standard_error: self.column(g, DIFFERENCE, Moments::standard_error),
             }),
             sun_optical_depth: source
                 .suns
                 .iter()
-                .map(|&sun| {
+                .enumerate()
+                .map(|(s, &sun)| {
                     self.media
                         .iter()
-                        .map(|m| m.optical_depth_to_space(source.origin_m, sun))
+                        .map(|m| m.beam_optical_depth(source.origin_m, sun, s))
                         .collect()
                 })
                 .collect(),
@@ -397,16 +476,18 @@ impl Run<'_> {
         let top = ground + 1;
         let source = &self.sources[ground].1;
         let up = self.grid.vertical(source.origin_m);
-        // Each sun above the horizon's μ₀F, with the transmittance of its beam to the ground.
+        // Each sun above the horizon's μ₀F, with the transmittance of its beam to the ground, the
+        // absorbers' curves read at the beam's own column.
         let beams = |w: usize| {
             source
                 .suns
                 .iter()
                 .zip(self.case.suns())
-                .filter(|(sun, _)| up.dot(**sun) > 0.0)
-                .map(move |(&sun, spectrum)| {
+                .enumerate()
+                .filter(|(_, (sun, _))| up.dot(**sun) > 0.0)
+                .map(move |(s, (&sun, spectrum))| {
                     let transmittance = self.media[w]
-                        .optical_depth_to_space(source.origin_m, sun)
+                        .beam_optical_depth(source.origin_m, sun, s)
                         .map_or(0.0, |depth| hyperion_sim::math::exp(-depth));
                     (up.dot(sun) * spectrum.irradiance[w], transmittance)
                 })
@@ -416,12 +497,16 @@ impl Run<'_> {
         let wavelengths = 0..self.media.len();
         FluxAggregate {
             name: self.case.aggregates()[a].name.clone(),
+            samples: self.counts[ground],
+            quarter_samples: self.counts[ground] / 4,
             incident_top: finite(wavelengths.clone().map(incident).collect()),
             direct_ground: finite(wavelengths.map(direct).collect()),
             diffuse_ground: self.column(ground, I, Moments::mean),
             diffuse_ground_standard_error: self.column(ground, I, Moments::standard_error),
+            diffuse_ground_quarter_standard_error: self.quarter_error(ground, I),
             upwelling_top: self.column(top, I, Moments::mean),
             upwelling_top_standard_error: self.column(top, I, Moments::standard_error),
+            upwelling_top_quarter_standard_error: self.quarter_error(top, I),
             scalar: (polarisation == Polarisation::Stokes).then(|| ScalarFlux {
                 diffuse_ground: self.column(ground, SCALAR_I, Moments::mean),
                 diffuse_ground_standard_error: self.column(
@@ -429,6 +514,7 @@ impl Run<'_> {
                     SCALAR_I,
                     Moments::standard_error,
                 ),
+                diffuse_ground_quarter_standard_error: self.quarter_error(ground, SCALAR_I),
                 diffuse_ground_difference_standard_error: self.column(
                     ground,
                     DIFFERENCE,
@@ -436,6 +522,7 @@ impl Run<'_> {
                 ),
                 upwelling_top: self.column(top, SCALAR_I, Moments::mean),
                 upwelling_top_standard_error: self.column(top, SCALAR_I, Moments::standard_error),
+                upwelling_top_quarter_standard_error: self.quarter_error(top, SCALAR_I),
                 upwelling_top_difference_standard_error: self.column(
                     top,
                     DIFFERENCE,
@@ -638,6 +725,14 @@ mod tests {
         let thick = thick_peaked_slab();
         let one = trace(&thick, Polarisation::Stokes, 64, 1).to_json();
         let four = trace(&thick, Polarisation::Stokes, 64, 4).to_json();
+        assert_eq!(one, four);
+        // And R08.T12.b.1's: an absorber's columns along every path, and a geometry and an
+        // aggregate of their own counts, whose blocks lie unevenly among the threads.
+        let mut absorbing = as_absorber(&case::tests::sample_case(), 2, 1e18, 1.5e22);
+        absorbing["geometries"][1]["samples"] = json!(2500);
+        absorbing["aggregates"][0]["samples"] = json!(1100);
+        let one = trace(&absorbing, Polarisation::Scalar, 300, 1).to_json();
+        let four = trace(&absorbing, Polarisation::Scalar, 300, 4).to_json();
         assert_eq!(one, four);
     }
 
@@ -1164,6 +1259,274 @@ mod tests {
                 fb.upwelling_top()[w]
             ));
         }
+    }
+
+    /// A curve row's JSON on 241 nodes, forty to a decade over six decades about `vertical_per_m2`,
+    /// whose optical depth at each wavelength is `depth(w, u)`.
+    fn curve_json(
+        vertical_per_m2: f64,
+        wavelengths: usize,
+        depth: impl Fn(usize, f64) -> f64,
+    ) -> Value {
+        let columns: Vec<f64> = (0..=240)
+            .map(|k| vertical_per_m2 * math::powf(10.0, -3.0 + f64::from(k) / 40.0))
+            .collect();
+        json!({
+            "logColumns": columns.iter().map(|&u| math::ln(u)).collect::<Vec<f64>>(),
+            "opticalDepth": (0..wavelengths)
+                .map(|w| columns.iter().map(|&u| depth(w, u)).collect::<Vec<f64>>())
+                .collect::<Vec<Vec<f64>>>()
+        })
+    }
+
+    /// `case` with term `term`'s absorption given instead as an absorber of density `n` per m³ at
+    /// relative density 1, whose curve under every sun is τ = (absorption ÷ n) u, a column of
+    /// `vertical_per_m2` its grid's centre.
+    fn as_absorber(case: &Value, term: usize, n: f64, vertical_per_m2: f64) -> Value {
+        let mut with = case.clone();
+        let absorption: Vec<f64> = case["terms"][term]["absorption"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a.as_f64().unwrap())
+            .collect();
+        let suns = case["suns"].as_array().unwrap().len();
+        let curve = curve_json(vertical_per_m2, absorption.len(), |w, u| {
+            absorption[w] / n * u
+        });
+        with["terms"][term]["absorption"] = json!(vec![0.0; absorption.len()]);
+        with["terms"][term]["absorber"] = json!({
+            "kind": "column", "numberDensityPerM3": n, "curves": vec![curve; suns]
+        });
+        with
+    }
+
+    /// Asserts that every radiance, flux and beam of `a` and `b` agrees to `relative`.
+    fn assert_same_reference(a: &ReferenceRadiances, b: &ReferenceRadiances, relative: f64) {
+        let close = |x: f64, y: f64, what: &str| {
+            assert!(
+                (x - y).abs() <= relative * x.abs().max(y.abs()),
+                "{what}: {x} against {y}"
+            );
+        };
+        for (x, y) in a.geometries().iter().zip(b.geometries()) {
+            for w in 0..x.radiance().len() {
+                close(x.radiance()[w], y.radiance()[w], x.name());
+                close(x.standard_error()[w], y.standard_error()[w], x.name());
+                if let (Some(p), Some(q)) = (x.stokes(), y.stokes()) {
+                    close(p.q()[w], q.q()[w], x.name());
+                    close(p.scalar_radiance()[w], q.scalar_radiance()[w], x.name());
+                }
+                for (dx, dy) in x.sun_optical_depth().iter().zip(y.sun_optical_depth()) {
+                    match (dx[w], dy[w]) {
+                        (Some(dx), Some(dy)) => close(dx, dy, x.name()),
+                        (None, None) => {}
+                        other => panic!("{}: {other:?}", x.name()),
+                    }
+                }
+            }
+        }
+        for (x, y) in a.aggregates().iter().zip(b.aggregates()) {
+            for w in 0..x.incident_top().len() {
+                close(x.direct_ground()[w], y.direct_ground()[w], x.name());
+                close(x.diffuse_ground()[w], y.diffuse_ground()[w], x.name());
+                close(x.upwelling_top()[w], y.upwelling_top()[w], x.name());
+            }
+        }
+    }
+
+    #[test]
+    fn atmosphere_an_absorber_whose_curve_is_beer_lambert_traces_as_its_absorption() {
+        // R08.T12.b.1: an absorber whose curve is τ = σu, e^(−σu), gives what the same σ n given as
+        // the term's absorption gives, to 10⁻¹²: the paths are the same (the term scatters
+        // nothing, so its shells and majorants are), and T(u_path + u_leg) at each score is the
+        // product of the flights' absorption weights and the leg's transmittance. Beer–Lambert:
+        // R08.T12.a's absorbing-only case, vertical and slant.
+        let absorbing = json!({
+            "format": 1, "name": "absorbing",
+            "wavelengthsNm": [550, 440],
+            "shells": { "kind": "sphere", "radiusM": 6_371_000.0 },
+            "topHeightM": 100_000.0,
+            "groundAlbedo": [0.3, 0.6],
+            "terms": [{
+                "name": "absorber", "density": { "kind": "exponential", "scaleHeightM": 8000.0 },
+                "scattering": [0.0, 0.0], "absorption": [1e-5, 3e-5], "phase": { "kind": "none" }
+            }],
+            "suns": [{ "name": "sun", "irradiance": [1.7, 2.0] }],
+            "detectorHalfAngleDeg": 0.0,
+            "geometries": [
+                geometry("nadir", 400_000.0, (180.0, 0.0), (60.0, 0.0)),
+                geometry("slant", 400_000.0, (150.0, 30.0), (70.0, 0.0)),
+                geometry("ground", 0.0, (0.0, 0.0), (60.0, 0.0))
+            ],
+            "aggregates": [{ "name": "low", "sunDirections": [{ "zenithDeg": 70.0, "azimuthDeg": 0.0 }] }]
+        });
+        // n so that the vertical column is 8 × 10²³ m⁻², the grid's centre.
+        let n = 1e20;
+        let with = as_absorber(&absorbing, 0, n, n * 8000.0);
+        for polarisation in [Polarisation::Scalar, Polarisation::Stokes] {
+            let [a, b] = [&absorbing, &with].map(|c| trace(c, polarisation, 64, 2));
+            assert_same_reference(&a, &b, 1e-12);
+            assert!(a.geometries()[0].radiance()[0] > 0.0);
+        }
+        // A scattering case: Rayleigh over a black ground with a thin absorbing layer, one sun, so
+        // that neither the roulette nor VROOM plays and the paths are the same draw for draw.
+        let mut scattering = slab(
+            &json!([
+                {
+                    "name": "gas", "density": uniform(),
+                    "scattering": [3e-4, 5e-4], "absorption": [0.0, 0.0],
+                    "phase": { "kind": "rayleigh", "depolarisation": [0.03, 0.03] }
+                },
+                {
+                    "name": "layer",
+                    "density": {
+                        "kind": "tabulated", "altitudesM": [0.0, 200.0, 600.0, 1000.0],
+                        "relative": [0.0, 1.0, 1.0, 0.2]
+                    },
+                    "scattering": [0.0, 0.0], "absorption": [2e-5, 4e-5], "phase": { "kind": "none" }
+                }
+            ]),
+            &json!([0.0, 0.0]),
+            &json!([
+                geometry("down", 0.0, (40.0, 120.0), (30.0, 0.0)),
+                geometry("up", 1000.0, (130.0, 60.0), (30.0, 0.0))
+            ]),
+        );
+        scattering["aggregates"] =
+            json!([{ "name": "sun", "sunDirections": [{ "zenithDeg": 30.0, "azimuthDeg": 0.0 }] }]);
+        let with = as_absorber(&scattering, 1, n, n * 640.0);
+        for polarisation in [Polarisation::Scalar, Polarisation::Stokes] {
+            let [a, b] = [&scattering, &with].map(|c| trace(c, polarisation, 2000, 2));
+            assert_same_reference(&a, &b, 1e-12);
+        }
+    }
+
+    #[test]
+    fn atmosphere_a_saturated_curve_takes_the_whole_paths_column() {
+        // R08.T12.b.1: an absorbing-only slab seen from above on a grey ground, so that every
+        // sample is the ground seen directly, its one next-event score at the end of two legs, the
+        // view's column u₁ and the sun's u₂. Under a curve whose depth is √(u ÷ U), log–log linear
+        // and so read exactly, the radiance is A ÷ π μ₀ F T(u₁ + u₂), not A ÷ π μ₀ F T(u₁) T(u₂).
+        let (n, length, albedo, irradiance) = (1e20, 1000.0, 0.5, 1.6);
+        let vertical = n * length;
+        let mut case = slab(
+            &json!([{
+                "name": "layer", "density": uniform(),
+                "scattering": [0.0, 0.0], "absorption": [0.0, 0.0], "phase": { "kind": "none" },
+                "absorber": {
+                    "kind": "column", "numberDensityPerM3": n,
+                    "curves": [curve_json(vertical, 2, |w, u| {
+                        (1.0 + f64::from(u8::try_from(w).unwrap())) * (u / vertical).sqrt()
+                    })]
+                }
+            }]),
+            &json!([albedo, albedo]),
+            &json!([geometry("down", 1001.0, (150.0, 0.0), (60.0, 0.0))]),
+        );
+        case["suns"] = json!([{ "name": "sun", "irradiance": [irradiance, irradiance] }]);
+        let reference = trace(&case, Polarisation::Scalar, 16, 1);
+        let down = &reference.geometries()[0];
+        let (mu_view, mu_sun) = (math::cos(radians(30.0)), math::cos(radians(60.0)));
+        let (u1, u2) = (vertical / mu_view, vertical / mu_sun);
+        for w in 0..2 {
+            let k = [1.0, 2.0][w];
+            let transmittance = |u: f64| math::exp(-k * (u / vertical).sqrt());
+            let expected = albedo / PI * mu_sun * irradiance * transmittance(u1 + u2);
+            let legs_apart =
+                albedo / PI * mu_sun * irradiance * transmittance(u1) * transmittance(u2);
+            // The slab lies on a sphere of 10¹² m, and the ground point lies 578 m from below the
+            // observer, 5.8 × 10⁻¹⁰ rad round the sphere, so the chords and the sun's cosine there
+            // are plane-parallel to about 2 × 10⁻⁹.
+            assert!(
+                (down.radiance()[w] / expected - 1.0).abs() < 1e-8,
+                "{w}: {} against {expected}",
+                down.radiance()[w]
+            );
+            assert!(
+                legs_apart / expected - 1.0 < -0.2,
+                "{w}: the curve saturates"
+            );
+            assert!(down.standard_error()[w] <= 1e-12 * expected);
+            // The beam's depth is the curve's of its own column, as Beer–Lambert's would be.
+            let beam = down.sun_optical_depth()[0][w].unwrap();
+            assert!(
+                beam.abs() < f64::MIN_POSITIVE,
+                "the observer is above the slab: {beam}"
+            );
+        }
+        // From the ground, the sun's beam crosses u₂ alone.
+        let mut ground = case.clone();
+        ground["geometries"] = json!([geometry("ground", 0.0, (0.0, 0.0), (60.0, 0.0))]);
+        let reference = trace(&ground, Polarisation::Scalar, 4, 1);
+        for w in 0..2 {
+            let k = [1.0, 2.0][w];
+            let beam = reference.geometries()[0].sun_optical_depth()[0][w].unwrap();
+            let expected = k * (u2 / vertical).sqrt();
+            assert!(
+                (beam / expected - 1.0).abs() < 1e-8,
+                "{w}: {beam} against {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn atmosphere_a_geometrys_own_samples_change_its_draws_alone() {
+        // R08.T12.b.1: a geometry's or an aggregate's own count leaves every other's draws alone,
+        // and its values are those of a trace of the whole case at that count; each records its
+        // count, and its first quarter's σ is the trace's at a quarter of it, across blocks too
+        // (a quarter of 5,000 spans two of `BLOCK_SAMPLES`).
+        let case = case::tests::sample_case();
+        let mut own = case.clone();
+        own["geometries"][1]["samples"] = json!(5000);
+        own["aggregates"][0]["samples"] = json!(3000);
+        let [base, mixed, at_5000, at_3000, at_1250, at_75] = [
+            (&case, 300),
+            (&own, 300),
+            (&case, 5000),
+            (&case, 3000),
+            (&case, 1250),
+            (&case, 75),
+        ]
+        .map(|(c, n)| trace(c, Polarisation::Scalar, n, 2));
+        let json = |g: &GeometryRadiance| serde_json::to_string(g).unwrap();
+        assert_eq!(json(&base.geometries()[0]), json(&mixed.geometries()[0]));
+        assert_eq!(json(&at_5000.geometries()[1]), json(&mixed.geometries()[1]));
+        let json = |a: &FluxAggregate| serde_json::to_string(a).unwrap();
+        assert_eq!(json(&at_3000.aggregates()[0]), json(&mixed.aggregates()[0]));
+        assert_ne!(json(&base.aggregates()[0]), json(&mixed.aggregates()[0]));
+        assert_eq!(mixed.samples(), 300);
+        assert_eq!(
+            [
+                mixed.geometries()[0].samples(),
+                mixed.geometries()[1].samples()
+            ],
+            [300, 5000]
+        );
+        assert_eq!(mixed.geometries()[1].quarter_samples(), 1250);
+        assert_eq!(mixed.aggregates()[0].samples(), 3000);
+        assert_eq!(mixed.aggregates()[0].quarter_samples(), 750);
+        // The first quarter's moments are the trace's at a quarter of the count, to the bit.
+        let bits = |values: &[f64]| {
+            values
+                .iter()
+                .map(|&v| hyperion_testkit::float::bits(v))
+                .collect::<Vec<u64>>()
+        };
+        assert_eq!(
+            bits(mixed.geometries()[1].quarter_standard_error()),
+            bits(at_1250.geometries()[1].standard_error())
+        );
+        assert_eq!(
+            bits(base.geometries()[0].quarter_standard_error()),
+            bits(at_75.geometries()[0].standard_error())
+        );
+        let mut refused = case;
+        refused["geometries"][0]["samples"] = json!(0);
+        assert!(matches!(
+            AtmosphereCase::from_json(&refused.to_string()),
+            Err(ReadCaseError::Invalid { field, .. }) if field == "geometries[0].samples"
+        ));
     }
 
     #[test]
