@@ -8,22 +8,22 @@
  * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
  * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in ten parts, each a run of its own under the harness's watchdog (perf-smoke,
- * 2026-10-13), parts 2 to 6 and 8 to 10 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
+ * groups are in eleven parts, each a run of its own under the harness's watchdog (perf-smoke,
+ * 2026-10-13), parts 2 to 6 and 8 to 11 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
  * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e), part 4 with R05.T12.e's marches before them
  * and part 6 with R05.T12.c's frames, part 7 R10's terrain groups, and part 1 every other; with no
  * part given the page runs them all, in its order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
  * Earth, in part 8; R08.T6.b's kernels over N terms in two, its medium of four absorbers in part 6
- * and the others in part 2; R08.T9.b's surface lighting in two, Earth's in part 6 and the
- * Saturn-class figure's in part 2; R08.T8.a's march band in part 9 (in part 6 it took the part from
+ * and the others in part 2; R08.T9.b's surface lighting in two, Earth's and the Saturn-class
+ * figure's, in part 11 before R08.T8.c's footprint; R08.T8.a's march band in part 9 (in part 6 it took the part from
  * 94 s to 140 to 146 s at a load of 2 to 5, the group 64 to 73 s, mostly its four atmospheres'
  * tables and kernels, 2026-10-21); R08.T7's several suns in part 10 with R08.T8.e's slot layers on
  * its binary; R08.T8.b's far limb, with the composite from above
  * the top, in part 4 after R05.T12.e's marches, and its low pick, which has no twin, in part 1;
- * R08.T8.c's far limb's footprint, its frames from 10⁸ m at the output's own pixel, in part 8
- * after R08.T6.f's Earth; and part 7 R10.T10.b's lit terrain, R10.T10.c's survey edge, R10.T16.c's
+ * R08.T8.c's far limb's footprint, its frames from 10⁸ m at the output's own pixel, in part 11;
+ * and part 7 R10.T10.b's lit terrain, R10.T10.c's survey edge, R10.T16.c's
  * frame, R10.T11's wireframe terrain, R10.T9.b's cascades and R10.T16.b's shared pass (on an
  * engine of its own, whose device it destroys). Two groups of part 1 run only when asked:
  * R08.T8.c's far limb's timings, after the low pick, when the run lifted timestamp quantization
@@ -127,13 +127,13 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
 };
 
 /**
- * A part of the page's groups: 2 to 6 and 8 to 10 the atmosphere's CPU-twin groups (R08.T6,
+ * A part of the page's groups: 2 to 6 and 8 to 11 the atmosphere's CPU-twin groups (R08.T6,
  * R08.T7, R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e), whose twins outweigh their GPU work
- * (2 R08.T6.b's but its medium of four absorbers, and R08.T9.b's Saturn-class figure, 3 R08.T6.g's,
- * 4 R08.T8.b's far limb, with the composite from above the top, 5 R08.T6.f's Saturn-class figure
- * and R08.T6.i's layer edges, 6 R08.T6.b's medium of four absorbers and R08.T9.b's Earth, 8
- * R08.T6.f's Earth and R08.T8.c's far limb's footprint, 9 R08.T8.a's march band, 10 R08.T7's
- * several suns and R08.T8.e's slot layers on its binary), 7 R10's terrain groups (R10.T10.b,
+ * (2 R08.T6.b's but its medium of four absorbers, 3 R08.T6.g's, 4 R08.T8.b's far limb, with the
+ * composite from above the top, 5 R08.T6.f's Saturn-class figure and R08.T6.i's layer edges, 6
+ * R08.T6.b's medium of four absorbers, 8 R08.T6.f's Earth, 9 R08.T8.a's march band, 10 R08.T7's
+ * several suns and R08.T8.e's slot layers on its binary, 11 R08.T9.b's Earth and Saturn-class
+ * figure and R08.T8.c's far limb's footprint), 7 R10's terrain groups (R10.T10.b,
  * T10.c, T11, T16 and T9.b), which took part 6 to 163 s at a load of 2 once R10.T9.b's cascades
  * joined them (2026-10-21), and 1 every other group but R05.T12.e's and R05.T12.c's frames, which
  * parts 4 and 6 run first, before their twins start, to even the parts out (R08.T9.b's lit
@@ -161,9 +161,17 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * part 10 joined, with R08.T7's several suns and the binary's slot layers beside it: on the whole
  * render at a load of 9 to 20 (median 14) part 1 holds 131 s, part 9 88 s and part 10 98 s
  * (R08.T7's 79 s, the binary's slot layers 15 s), its runs 3 s outside their groups, Electron's
- * start, the adapter and the page's load (2026-10-23).
+ * start, the adapter and the page's load (2026-10-23). Part 8 then
+ * stood at 151 to 153 s at a load of 8 to 13 (R08.T6.f's Earth 86 to 87 s, R08.T8.c's footprint
+ * 64 s), so part 11 joined too, with R08.T8.c's footprint alone. On the whole render at a load of
+ * 9 to 20 (median 14), each part's longer variant: part 1 131 s, 2 149, 3 121, 4 138, 5 131, 6 154,
+ * 7 126, 8 93 (R08.T6.f's Earth 91 s), 9 88, 10 98 and 11 51 (the footprint 50 s), each run 1 to
+ * 7 s outside its groups; the whole render 1,281 s, parts 9 and 10 together 186 s and parts 8 and
+ * 11 144 s against 152 to 154 s and 151 to 153 s as one part each at a load of 8 to 13, so the two
+ * parts' starts and their twins set up again cost about 30 s of the render's wall clock
+ * (2026-10-23).
  */
-type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -191,6 +199,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 9;
     case "10":
       return 10;
+    case "11":
+      return 11;
     default:
       return null;
   }
@@ -245,7 +255,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 10 or all");
+    return failed("the part asked for is not 1 to 11 or all");
   }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
@@ -380,10 +390,10 @@ async function run(
   await group(5, "R08.T6.i the marches cut at layer edges", () =>
     checkAtmosphereLayerEdges(engine, checks, twins),
   );
-  await group(6, "R08.T9.b surface lighting on Earth", () =>
+  await group(11, "R08.T9.b surface lighting on Earth", () =>
     checkSurfaceLightingEarth(engine, checks, twins),
   );
-  await group(2, "R08.T9.b surface lighting on a Saturn-class figure", () =>
+  await group(11, "R08.T9.b surface lighting on a Saturn-class figure", () =>
     checkSurfaceLightingSaturn(engine, checks, twins),
   );
   await group(9, "R08.T8.a the march band", () => checkMarchBand(engine, checks, twins));
@@ -414,7 +424,7 @@ async function run(
   );
   await group(10, "R08.T8.e the binary's slot layers", () => checkBinarySlotLayers(engine, checks));
   await group(4, "R08.T8.b the far limb", () => checkFarLimb(engine, checks, twins));
-  await group(8, "R08.T8.c the far limb's footprint", () =>
+  await group(11, "R08.T8.c the far limb's footprint", () =>
     checkFarLimbFootprint(engine, checks, twins),
   );
   await group(1, "R05.T11.a the terrain's resources", () => checkTerrainResources(engine, checks));

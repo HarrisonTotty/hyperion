@@ -9,7 +9,7 @@
  * Its switches come from the `just test-render` recipe's command line, never from the client's
  * `graphicsSwitches`, which a test keeps free of the unsafe flag and the adapter override. The
  * page's variant and fixture arrive as `--smoke-variant=` and `--smoke-fixture=`, and the part of
- * its groups to run as `--smoke-part=1` to `10` (every group without it), and
+ * its groups to run as `--smoke-part=1` to `11` (every group without it), and
  * `--smoke-twin-workers=<n>` the atmosphere twins' workers, at most 4 (a quarter of the hardware
  * threads, at most 4, without it);
  * `--smoke-gpu-timing=1` says the run lifted timestamp quantization (the hardware runs of T11),
