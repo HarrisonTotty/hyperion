@@ -1,8 +1,8 @@
 //! The authoritative material on the sample worlds (rendering plan R10, T1.b): `material_at`
 //! answers at every sampled point of each, its entry is one of the body's palette, its ice is the
-//! coarse field's, cell by cell, and an airless world's bare ground is its crust's regolith, or
-//! bedrock where a small crater's wall is steeper than the cliff slope; and the surface crate's
-//! copy of the sim's thin-air threshold is the sim's.
+//! coarse field's, cell by cell, its seabed lies exactly below the water surface, and an airless
+//! world's bare ground is its crust's regolith, or bedrock where a small crater's wall is steeper
+//! than the cliff slope; and the surface crate's copy of the sim's thin-air threshold is the sim's.
 //!
 //! The worlds are R09.T16's `sample_worlds()` (`tests/common/surface_worlds.rs`): the reference
 //! Earth, Mars, Moon and Ceres, the icy moon `europa_like` and the locked `locked_earth_like`, each
@@ -31,13 +31,31 @@
 //! towards the nearer rotation pole, and the header carries no substellar point, so which side of
 //! a partial cell the ice takes is not checked against the night side.
 //!
+//! **The seabed lies exactly below the water surface.** At each point the test reads the point's
+//! height at R05's finest level, metres above the datum (the spheroid, along its normal), the frame
+//! of the cell's water surface, as the classifier does (`Synthesiser::height_at` at
+//! `finest_level`'s band, at the classifier's own direction of the point). The point lies below
+//! the water surface where its cell is under water and the height is below the cell's water
+//! surface, the cell's and not the header's sea level (T1.b's "_The coastline follows cells_").
+//! There, and only there, the answer is `SeaIce` or `Seabed`, the first two of the classifier's
+//! rules; a `Seabed` is of the floor's entry, the crust's where the crust names one, and never the
+//! main liquid's (signoff-9).
+//!
 //! On each world the points are 64 random directions from a sampler seeded by the world's name
 //! ([`sampler`]), so that they do not depend on which test runs the world, the order the worlds
 //! run in or the world's place in the list; a cube corner `(1, 1, −1)`, a face edge's `(0, 1, 1)`
-//! and both poles; and the centres of up to 16 cells of full share and up to 16 of partial share,
-//! each set spaced evenly in `cell_index` order over the field's cells of its kind. On a world
-//! whose field has a cell of full share some point in such a cell is of the ice rule, so the check
-//! is not empty there. The test prints each world's counts of cells, points and answers.
+//! and both poles; the centres of up to 16 cells of full share and up to 16 of partial share,
+//! each set spaced evenly in `cell_index` order over the field's cells of its kind; and in each
+//! partial cell whose centre is sampled, the centres of its 4 × 4 equal steps
+//! ([`inner_points`]), since a partial cell's ice covers only its share of the cell and its centre
+//! may lie outside it. The checks are not empty where they could be:
+//!
+//! - on a world whose field has a cell of full share, some point in such a cell is of the ice rule;
+//! - on a world with sampled partial cells that are not under water, some point in one of them is
+//!   of the ice rule, so that the partial share's clause runs there;
+//! - on the two worlds with a sea ([`SEAS`]), some point lies below its cell's water surface.
+//!
+//! The test prints each world's counts of cells, points and answers.
 //!
 //! Under nextest each test runs in a process of its own, so each test pays for the passes of the
 //! worlds it reads. The four `Tier::Fast` worlds share one test, and each `Tier::Slow` world, the
@@ -59,12 +77,13 @@ use hyperion_base::rng::DetailSeed;
 use hyperion_sim::planetary::derive::photometry;
 use hyperion_surface::cube::{PATCH_QUADS, PatchKey, face_uv_to_xyz, unit_dir, xyz_to_face_uv};
 use hyperion_surface::field::{
-    FieldView, MaterialPalette, PaletteRole, SynthesisCell, cell_at_index,
+    FieldHeader, FieldView, MaterialPalette, PaletteRole, SynthesisCell, cell_at_index,
 };
+use hyperion_surface::geometry::finest_level;
 use hyperion_surface::material::{
     GroundMaterial, MASSIVE_ICE_SHARE, MaterialClass, THIN_ATMOSPHERE_PRESSURE, material_at,
 };
-use hyperion_surface::synth::{SynthCache, Synthesiser};
+use hyperion_surface::synth::{BandLevel, SynthCache, Synthesiser};
 use hyperion_testkit::float::bits;
 use hyperion_testkit::lcg::Lcg;
 
@@ -90,8 +109,16 @@ const SLOW: [&str; 2] = [EARTH, LOCKED_EARTH];
 /// The airless sample worlds, whose headers' surface pressure is zero.
 const AIRLESS: [&str; 3] = ["moon_like", "ceres_like", "europa_like"];
 
+/// The sample worlds with a sea, on each of which some sampled point lies below its cell's water
+/// surface.
+const SEAS: [&str; 2] = [EARTH, LOCKED_EARTH];
+
 /// The most cells of each kind, of full share and of partial share, whose centres a world samples.
 const TARGETED: usize = 16;
+
+/// The equal steps along each side of a sampled partial cell, at whose centres its inner points
+/// lie ([`inner_points`]).
+const INNER_STEPS: u8 = 4;
 
 /// The share above which a partial cell's sea ice covers a point under its water: the majority, by
 /// which the classifier places a sea's ice (T1.b's "Where a partial share lies").
@@ -119,11 +146,22 @@ fn centre(cell: PatchKey) -> [f64; 3] {
     cell.vertex_dir(half, half)
 }
 
+/// The unit directions of the centres of `cell`'s [`INNER_STEPS`] × [`INNER_STEPS`] equal steps:
+/// vertices (16a + 8, 16b + 8) of its patch's 65 × 65 for a and b below 4, each at least 8 vertices
+/// from the cell's edges.
+fn inner_points(cell: PatchKey) -> impl Iterator<Item = [f64; 3]> {
+    let step = u8::try_from(PATCH_QUADS).expect("a patch's side fits a byte") / INNER_STEPS;
+    let at = move |k: u8| step * k + step / 2;
+    (0..INNER_STEPS).flat_map(move |a| (0..INNER_STEPS).map(move |b| cell.vertex_dir(at(a), at(b))))
+}
+
 /// The points sampled on the world named `name`, whose field is of level `level` and whose cells of
 /// full and of partial share have the indices `full_cells` and `partial_cells`, in `cell_index`
 /// order: 64 random directions from its [`sampler`], the cube corner `(1, 1, −1)`, the face edge's
-/// `(0, 1, 1)` and both poles, and the centres of the cells [`spaced`] of each kind.
+/// `(0, 1, 1)` and both poles, the centres of the cells [`spaced`] of each kind, and then the
+/// [`inner_points`] of each partial cell whose centre is sampled, cell by cell in that order.
 fn sample_dirs(name: &str, level: u8, full_cells: &[u32], partial_cells: &[u32]) -> Vec<[f64; 3]> {
+    let cell = |index| cell_at_index(level, index).expect("a field's cell is of its level");
     let mut rng = sampler(name);
     let mut dirs: Vec<[f64; 3]> = (0..64)
         .map(|_| unit_dir([0, 1, 2].map(|_| rng.next_f64() * 2.0 - 1.0)))
@@ -137,10 +175,9 @@ fn sample_dirs(name: &str, level: u8, full_cells: &[u32], partial_cells: &[u32])
     dirs.extend(
         spaced(full_cells)
             .chain(spaced(partial_cells))
-            .map(|index| {
-                centre(cell_at_index(level, index).expect("a field's cell is of its level"))
-            }),
+            .map(|index| centre(cell(index))),
     );
+    dirs.extend(spaced(partial_cells).flat_map(|index| inner_points(cell(index))));
     dirs
 }
 
@@ -196,8 +233,91 @@ struct Tally {
     full_ice: usize,
     /// The answers of the ice rule in cells of partial share.
     partial_ice: usize,
+    /// The answers of the ice rule in cells of partial share, by their form.
+    partial_ice_classes: BTreeMap<MaterialClass, usize>,
+    /// The points in the sampled cells of partial share that are not under water.
+    dry_target: usize,
+    /// The answers of the ice rule in the sampled cells of partial share that are not under water.
+    dry_target_ice: usize,
+    /// The points below their cell's water surface.
+    below: usize,
+    /// The points in cells under water that lie at or above their cell's water surface.
+    above_in_sea: usize,
     /// Every answer, by its form.
     classes: BTreeMap<MaterialClass, usize>,
+}
+
+impl Tally {
+    /// Counts the answer `ground` at a point of `cell`, which is of the ice rule where `of_ice`,
+    /// lies below the cell's water surface where `below`, and is in a sampled partial cell not
+    /// under water where `in_dry_target`.
+    fn count(
+        &mut self,
+        ground: GroundMaterial,
+        cell: &SynthesisCell,
+        of_ice: bool,
+        below: bool,
+        in_dry_target: bool,
+    ) {
+        *self.classes.entry(ground.class()).or_default() += 1;
+        match cell.ice {
+            0 => self.bare += 1,
+            u8::MAX => {
+                self.full += 1;
+                self.full_ice += usize::from(of_ice);
+            }
+            _ => {
+                self.partial += 1;
+                self.partial_ice += usize::from(of_ice);
+                if of_ice {
+                    *self.partial_ice_classes.entry(ground.class()).or_default() += 1;
+                }
+            }
+        }
+        if in_dry_target {
+            self.dry_target += 1;
+            self.dry_target_ice += usize::from(of_ice);
+        }
+        if below {
+            self.below += 1;
+        } else if cell.is_under_water() {
+            self.above_in_sea += 1;
+        }
+    }
+
+    /// Asserts that the checks on the world named `name` were not empty: where its field has
+    /// `full_cells` cells of full share, some point in such a cell is of the ice rule; where
+    /// `dry_targets` of its sampled partial cells are not under water, some point in one of them
+    /// is; and on a world of [`SEAS`], some point lies below its cell's water surface.
+    fn assert_not_empty(&self, name: &str, full_cells: usize, dry_targets: usize) {
+        // The full share's clause has run on the world.
+        if full_cells > 0 {
+            assert!(
+                self.full_ice > 0,
+                "{name}: no point in a cell of full share is of the ice rule, though \
+                 {full_cells} cells are"
+            );
+        }
+        // The partial share's clause has run on the world, outside the majority by which a sea's
+        // ice lies.
+        if dry_targets > 0 {
+            assert!(
+                self.dry_target_ice > 0,
+                "{name}: no point in the {dry_targets} sampled partial cells not under water is of \
+                 the ice rule, of {} points in them",
+                self.dry_target
+            );
+        }
+        // The seabed's check has run on the world.
+        if SEAS.contains(&name) {
+            assert!(
+                self.below > 0,
+                "{name}: no sampled point lies below its cell's water surface, {} in cells under \
+                 water lying at or above it",
+                self.above_in_sea
+            );
+        }
+    }
 }
 
 /// Asserts that the answer `ground` at `site` holds `cell`'s ice (main's ruling 2), and returns
@@ -262,11 +382,60 @@ fn assert_the_ice_is_the_field_s(
     form.is_some()
 }
 
+/// Asserts that the answer `ground` at `site`, whose ground is `h_m` metres above the datum at the
+/// finest level, the frame of the cell's water surface, in `cell` on the body of `header`, is
+/// `SeaIce` or `Seabed` exactly where the point lies below the cell's water surface, the
+/// classifier's first two rules, and that a `Seabed` is of the floor's entry, the crust's where
+/// the crust names one, and never the main liquid's (signoff-9); and returns whether the point
+/// lies below the water surface.
+fn assert_the_seabed_is_below_the_water(
+    site: &str,
+    ground: GroundMaterial,
+    h_m: f64,
+    cell: &SynthesisCell,
+    header: &FieldHeader,
+) -> bool {
+    let surface_m = cell.water_surface().value();
+    let wet = cell.is_under_water();
+    let below = wet && h_m < surface_m;
+    let at = format!(
+        "{site}: {ground:?} at {h_m} m, its cell's water surface {surface_m} m, under water {wet}"
+    );
+    let of_the_sea = matches!(
+        ground.class(),
+        MaterialClass::SeaIce | MaterialClass::Seabed
+    );
+    assert_eq!(
+        of_the_sea, below,
+        "{at}: sea ice or seabed, and the point below the water surface"
+    );
+    if ground.class() == MaterialClass::Seabed {
+        if let Some(liquid) = header.main_liquid() {
+            assert_ne!(
+                ground.entry(),
+                Some(liquid),
+                "{at}: the seabed is never its liquid"
+            );
+        }
+        if let Some(crust) = header.crust_palette()[usize::from(u8::from(cell.crust))] {
+            assert_eq!(
+                ground.entry(),
+                Some(crust),
+                "{at}: the seabed is not of the crust's entry"
+            );
+        }
+    }
+    below
+}
+
 /// Asserts the material on `world` at every sampled point: it answers, its entry is its palette's
-/// (none only on an empty palette), its ice is the field's cell by cell, and on an airless world
-/// the ground of a cell without ice is a crust entry's regolith or bedrock; that the header's air
-/// agrees with [`AIRLESS`]; and that where the field has a cell of full share, some point in such a
-/// cell is of the ice rule.
+/// (none only on an empty palette), its ice is the field's cell by cell, its `SeaIce` and `Seabed`
+/// lie exactly below the cell's water surface, a `Seabed` of the crust's entry and never the
+/// liquid's, and on an airless world the ground of a cell without ice is a crust entry's regolith
+/// or bedrock; that the header's air agrees with [`AIRLESS`]; and that the checks are not empty:
+/// where the field has a cell of full share, some point in such a cell is of the ice rule; where
+/// sampled partial cells are not under water, some point in one of them is; and on a world of
+/// [`SEAS`], some point lies below its cell's water surface.
 fn assert_the_material_holds(world: &SampleWorld) {
     let name = world.name();
     let field = world.field();
@@ -287,7 +456,20 @@ fn assert_the_material_holds(world: &SampleWorld) {
             _ => partial_cells.push(index),
         }
     }
-    let dirs = sample_dirs(name, header.level().get(), &full_cells, &partial_cells);
+    let level = header.level().get();
+    let dirs = sample_dirs(name, level, &full_cells, &partial_cells);
+    let synthesis = field.synthesis();
+    // The sampled partial cells not under water, whose points run the partial share's clause.
+    let dry_targets: Vec<PatchKey> = spaced(&partial_cells)
+        .filter(|&index| {
+            let at = usize::try_from(index).expect("a cell index fits a usize");
+            !synthesis[at].is_under_water()
+        })
+        .map(|index| cell_at_index(level, index).expect("a field's cell is of its level"))
+        .collect();
+    // The classifier's level: R05's finest (the surface crate's `finest_band`).
+    let finest = BandLevel::new(finest_level(header.figure().equatorial_radius_m))
+        .expect("R05's finest level is a band level");
     let synth = Synthesiser::new(field, DETAIL);
     let mut cache = SynthCache::new();
     let mut tally = Tally::default();
@@ -295,23 +477,18 @@ fn assert_the_material_holds(world: &SampleWorld) {
         let site = format!("{name} {dir:?}");
         let at = xyz_to_face_uv(dir);
         let ground = material_at(&synth, &mut cache, at).unwrap_or_else(|e| panic!("{site}: {e}"));
-        // The cell the classifier reads: that of its own direction of `at`.
-        let (_, cell) = synth
-            .cell_at(unit_dir(face_uv_to_xyz(at)))
+        // The classifier's own direction of `at`, whose cell and height it reads.
+        let read = unit_dir(face_uv_to_xyz(at));
+        let (key, cell) = synth
+            .cell_at(read)
             .unwrap_or_else(|e| panic!("{site}: {e}"));
-        *tally.classes.entry(ground.class()).or_default() += 1;
+        let h_m = synth
+            .height_at(&mut cache, read, finest)
+            .unwrap_or_else(|e| panic!("{site}: {e}"))
+            .height_m;
         let of_ice = assert_the_ice_is_the_field_s(&site, ground, cell, palette, airless);
-        match cell.ice {
-            0 => tally.bare += 1,
-            u8::MAX => {
-                tally.full += 1;
-                tally.full_ice += usize::from(of_ice);
-            }
-            _ => {
-                tally.partial += 1;
-                tally.partial_ice += usize::from(of_ice);
-            }
-        }
+        let below = assert_the_seabed_is_below_the_water(&site, ground, h_m, cell, header);
+        tally.count(ground, cell, of_ice, below, dry_targets.contains(&key));
         if airless && cell.ice == 0 {
             assert!(
                 matches!(
@@ -335,25 +512,28 @@ fn assert_the_material_holds(world: &SampleWorld) {
     eprintln!(
         "{name}: cells of full share {}, of partial share {}, of {}; points in bare cells {}, \
          in full {}, in partial {}; answers of the ice rule in full cells {}, in partial {}; \
-         answers by form {:?}",
+         answers by form {:?}; sampled partial cells {}, of them not under water {}; points in \
+         those not under water {}, of the ice rule {}; the partial cells' answers of the ice rule \
+         by form {:?}; points below the water surface {}, in cells under water at or \
+         above it {}",
         full_cells.len(),
         partial_cells.len(),
-        field.synthesis().len(),
+        synthesis.len(),
         tally.bare,
         tally.full,
         tally.partial,
         tally.full_ice,
         tally.partial_ice,
         tally.classes,
+        spaced(&partial_cells).count(),
+        dry_targets.len(),
+        tally.dry_target,
+        tally.dry_target_ice,
+        tally.partial_ice_classes,
+        tally.below,
+        tally.above_in_sea,
     );
-    // A point of the ice rule in a full cell: the full share's clause has run on the world.
-    if !full_cells.is_empty() {
-        assert!(
-            tally.full_ice > 0,
-            "{name}: no point in a cell of full share is of the ice rule, though {} cells are",
-            full_cells.len()
-        );
-    }
+    tally.assert_not_empty(name, full_cells.len(), dry_targets.len());
 }
 
 /// The material holds on Mars, the Moon, Ceres and the Europa; and every sample world runs in
