@@ -1988,4 +1988,8 @@ text-align: right`) stands beside `.stale, .stale-mark`; `.hr-diagram__count-slo
   ruled the view's plates over other marks a stated limit on the same grounds. A look that finds
   a label read as naming the mark it crosses, or a selection lost under a label, asks for a
   ruling; the lean is T42.d's bracket's-box test for the lesser labels, which drops rather than
-  moves them, the selection's and the destination's excepted.
+  moves them, the selection's and the destination's excepted. _Seen too across curves (look-92-93,
+  2026-10-23): at `BELTS` on GDG 75DX08 A-7 at 1280 × 720 the host's `GDG 75DX08 A-7 /0` loses its
+  `75` under the selected belt's 2 px `--text` edges and ticks, since marks' labels keep off no
+  curve or tick (R07.T16.j's stated limit). Not a blocker: the gap reads as no other designation,
+  and the list names the host. The lean is P14.T42.f's tick rule for the lesser labels._

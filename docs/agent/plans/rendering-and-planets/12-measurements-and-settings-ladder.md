@@ -465,7 +465,7 @@ throttling in 35,900 s of uptime.
    `nvidia-smi` documentation). CPU memory is each process's from `app.getAppMetrics()`, which does
    not hold GEM pages (163 MB before and 166 MB after 256 MiB became resident), and each height
    worker reports its WebAssembly memory's byte length and its coarse-field copy, so the field in
-   three workers (about 12 MB each for an Earth, R09 Design note 17) is a line of its own. On the
+   three workers (15.1 MB each for an Earth, R09 Design note 17) is a line of its own. On the
    UHD 620 GPU and CPU memory are one pool, so the two are reported apart and never summed into a
    "free" figure.
 
@@ -544,8 +544,8 @@ throttling in 35,900 s of uptime.
      across the 10⁹ m boundary and the slab-to-particle criterion, which lights the rings row and
      the gas giant's atmosphere.
    - `arrival-memory`: arrival at the pinned Earth-sized world, fully surveyed first through R09's
-     explicit survey request, so that its whole coarse field (about 12 MB for an Earth at level 8,
-     R09 Design note 17, against the brainstorm's 2 to 15 MB) is posted to three workers; then the
+     explicit survey request, so that its whole coarse field (15.1 MB for an Earth at level 8,
+     R09 Design note 17, against the brainstorm's 4 to 15 MB) is posted to three workers; then the
      descent's deepest pose (1 m) held for a minute once the field and its patches are resident: the
      resident memory's peak against the ceiling. The record states the field's measured bytes, and
      the field's and the sky's transfer bytes and times over R03's binary frames.
@@ -1131,8 +1131,8 @@ generator version it ran at. The plan reserves nothing in the generator.
   `coarse-field-gpu` (R10's Risks, "Deferred findings (2026-10-13 rule) (R10.T10.g)"). T3.a only
   checks that `MEMORY_ITEMS` maps them.
 - **R05's memory run and R12's differ on purpose.** R05's criterion row keeps the brainstorm's 15 MB
-  synthetic field (R05 Risks, "The coarse field's size"); `arrival-memory` measures a real field,
-  about 12 MB for an Earth (R09 Design note 17).
+  synthetic field (R05 Risks, "The coarse field's size"); `arrival-memory` measures a real
+  field, 15.1 MB for an Earth (R09 Design note 17).
 - **Ask of R07, open.** The instrument panels' sizes in the cockpit layout (README, "Between
   rendering plans"). Until R07 designs them, T5.a takes the sizes from R07's code as built. R07's
   stable pass labels (`PHOTOREAL_PASS_LABELS`, R07.T7) and the controller's bounds as a setting

@@ -6603,7 +6603,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - the triad's labels stand 0.125 rem apart (Q6 (b)), not D4's 0.5 rem; the tier avoids the
       `OBLIQUE` stack, but not every stack;
     - curve labels do not count the selection's bracket or the destination's chevrons as ink (the
-      UX review's consider: count every mark's bracket place);
+      UX review's consider: count every mark's bracket place); _annulus labels count every mark's
+      bracket's place since P14.T42.d (plan 14)_;
     - a ring that is a point on screen has no other places; its label crosses a stalk at the last
       resort;
     - P05's labels have no hysteresis: a curve label can jump round its ring as a drag turns the

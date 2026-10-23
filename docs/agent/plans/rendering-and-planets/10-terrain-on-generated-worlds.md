@@ -429,15 +429,17 @@ alone and never on the sim, by R04's entry in `.claude/rules/rust-dev.md`):
   steeper than 40° needs a body small enough for two cells to span less than the cliff's run.
 - `crates/hyperion-sim/tests/common/surface_worlds.rs`: `sample_worlds()`, R09's reference worlds
   (`planetary::surface::reference::{earth_like, mars_like, moon_like, ceres_like}`) plus an icy
-  moon and a locked world built with `CoarseInputs::builder()`, each run through the coarse pass
-  once per test binary. The sim depends on the surface crate, so these tests call this plan's
-  functions directly. Tests on the reference Earth and Mars are slow, as R09.T16's are; the Moon,
-  Ceres and the two built worlds are fast. They run natively; the cross-target goldens use
-  `synthetic_worlds()`. As built, `reference::*` is behind the sim's `testing` feature
-  (`coarse_pass(seed, &inputs)`), so `cargo test -p hyperion-sim` needs `--features testing`; the
-  file is R09.T16's to create, and until R09.T11–T15 fill the coarse pass's steps the reference
-  worlds come out as T10's no-op pass leaves them, a smooth dry sphere with no fine relief (R09's
-  "Deviations in T10, as built"). The order of tasks says what waits on it.
+  moon and a locked world, `reference::europa_like` (level 6) and `reference::locked_earth_like`
+  (level 8), each run through the coarse pass under `reference::SEED` once per test binary
+  (`SampleWorld::field()`). The sim depends on the surface crate, so these tests call this plan's
+  functions directly. As built, each world's `tier()` says which tests may run it: the reference
+  Earth and the locked world are `Tier::Slow`, and Mars, the Moon, Ceres and the icy moon
+  `Tier::Fast`. They run natively; the cross-target goldens use `synthetic_worlds()`.
+  `reference::*` is behind the sim's `testing` feature (`coarse_pass(seed, &inputs)`), so
+  `cargo test -p hyperion-sim` needs `--features testing`, and the module is declared under
+  `cfg(feature = "testing")` in `tests/common/mod.rs`. R09.T16 built it, and
+  `tests/surface_coarse_golden.rs` ties each world's field to its golden (R09's "Deviations in
+  T16, as built"). The order of tasks says what waits on it.
   Under nextest each test runs in a process of its own, so "once per test binary" holds within one
   test (R09.T16's note). On a world wet now the coarse land hypsometry is its construction's by
   rule (decision-r09-t14-choices, T14.c follow-up 2 §2), so a test here that checks land
@@ -1292,6 +1294,11 @@ plan, then R09's server and coarse pass):
   built, on the reference worlds through `coarse_pass`, moving onto `sample_worlds()` when it lands).
   T5's `surface_reading_worlds` holds its pooled case on `synthetic_worlds()`'s four bodies (as
   built), and its `sample_worlds()` case follows R09.T16.
+  _R09.T16 is built (2026-10-23, 062a847f): `tests/common/surface_worlds.rs` exists and the
+  reference worlds are no longer a smooth dry sphere, so T4.a and the `sample_worlds()` cases of
+  T1.b, T2, T3, T5 and T10.a can start on it, each binary keeping its own list until its
+  follow-up moves it; its tiers are as Provides' test helpers give them (Mars fast, the locked
+  world slow)._
 - **T4.b** builds `levelBounds.ts` and the selection rule after T6.b, on a fixture from
   `synthetic_worlds()`, and records the owner's counts after T4.a's `level-bounds.json`.
 - **T6.a's bench** waits on R09's follow-up after T8, the fused interpolant pass that main has
