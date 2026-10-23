@@ -124,7 +124,8 @@ pub struct AtmosphereReferenceArgs {
     /// Where to write the reference.
     #[arg(long)]
     pub out: PathBuf,
-    /// Samples per geometry, aggregate and wavelength.
+    /// Samples per geometry, aggregate and wavelength, for each the case gives no count of its
+    /// own (R08.T12.b.1).
     #[arg(long, default_value_t = DEFAULT_REFERENCE_SAMPLES)]
     pub samples: NonZeroU64,
     /// Threads for the run; the output is the same for any number.
@@ -137,7 +138,7 @@ pub struct AtmosphereReferenceArgs {
 }
 
 /// `atmosphere-reference`'s samples per geometry, aggregate and wavelength unless `--samples`
-/// says otherwise.
+/// or the case's own count for a geometry or aggregate says otherwise.
 const DEFAULT_REFERENCE_SAMPLES: NonZeroU64 = NonZeroU64::new(100_000).expect("not zero");
 
 /// The threads to use: `threads`, or every core the machine offers.
@@ -353,8 +354,8 @@ fn atmosphere_reference(
     })?;
     writeln!(
         out,
-        "wrote {} ({} geometries and {} aggregates at {} wavelengths, {samples} samples each, \
-         {threads} threads, {seconds:.1} s)",
+        "wrote {} ({} geometries and {} aggregates at {} wavelengths, {samples} samples each \
+         where the case gives no count, {threads} threads, {seconds:.1} s)",
         args.out.display(),
         case.geometry_count(),
         case.aggregate_count(),

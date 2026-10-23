@@ -7,28 +7,42 @@
 //!   "wavelengthsNm": [...],
 //!   "geometries": [{
 //!     "name": "...", "detectorHalfAngleDeg": 0.5,
+//!     "samples": 400000, "quarterSamples": 100000,       // this geometry's, per wavelength
 //!     "radiance": [...], "standardError": [...],          // per wavelength
+//!     "quarterStandardError": [...],                      // over the first quarterSamples
 //!     "stokes": {                                          // only with --stokes
 //!       "q": [...], "qStandardError": [...], "u": [...], "uStandardError": [...],
 //!       "v": [...], "vStandardError": [...],
 //!       "scalarRadiance": [...], "scalarStandardError": [...],
+//!       "scalarQuarterStandardError": [...],
 //!       "differenceStandardError": [...]                   // of radiance − scalarRadiance
 //!     },
 //!     "sunOpticalDepth": [[...]]                           // per sun, per wavelength; null where
 //!   }],                                                    // the ground hides the sun
 //!   "aggregates": [{
-//!     "name": "...", "incidentTop": [...], "directGround": [...],
+//!     "name": "...", "samples": 200000, "quarterSamples": 50000,
+//!     "incidentTop": [...], "directGround": [...],
 //!     "diffuseGround": [...], "diffuseGroundStandardError": [...],
+//!     "diffuseGroundQuarterStandardError": [...],
 //!     "upwellingTop": [...], "upwellingTopStandardError": [...],
+//!     "upwellingTopQuarterStandardError": [...],
 //!     "scalar": {                                          // only with --stokes
 //!       "diffuseGround": [...], "diffuseGroundStandardError": [...],
+//!       "diffuseGroundQuarterStandardError": [...],
 //!       "diffuseGroundDifferenceStandardError": [...],
 //!       "upwellingTop": [...], "upwellingTopStandardError": [...],
+//!       "upwellingTopQuarterStandardError": [...],
 //!       "upwellingTopDifferenceStandardError": [...]
 //!     }
 //!   }]
 //! }
 //! ```
+//!
+//! The top-level `samples` is the command's count, which every geometry and aggregate that gives
+//! none of its own in the case takes; each records its own (R08.T12.b.1). Its first quarter is
+//! its first ⌊N ÷ 4⌋ samples, whose standard error, beside the whole run's, gives R08's N^(−1/2)
+//! check from the reference alone. `sunOpticalDepth` and `directGround` take each absorber's −ln T
+//! of the beam's own column beside the extinction (the `absorber` module).
 //!
 //! Radiances are in the unit of the case's irradiance per steradian, fluxes in its unit. In the
 //! Stokes mode `radiance` and the fluxes are the Stokes vector's I, every gate's reference (R08
@@ -74,8 +88,11 @@ pub struct ReferenceRadiances {
 pub struct GeometryRadiance {
     pub(crate) name: String,
     pub(crate) detector_half_angle_deg: f64,
+    pub(crate) samples: u64,
+    pub(crate) quarter_samples: u64,
     pub(crate) radiance: Vec<f64>,
     pub(crate) standard_error: Vec<f64>,
+    pub(crate) quarter_standard_error: Vec<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) stokes: Option<StokesRadiance>,
     pub(crate) sun_optical_depth: Vec<Vec<Option<f64>>>,
@@ -93,6 +110,7 @@ pub struct StokesRadiance {
     pub(crate) v_standard_error: Vec<f64>,
     pub(crate) scalar_radiance: Vec<f64>,
     pub(crate) scalar_standard_error: Vec<f64>,
+    pub(crate) scalar_quarter_standard_error: Vec<f64>,
     pub(crate) difference_standard_error: Vec<f64>,
 }
 
@@ -102,9 +120,11 @@ pub struct StokesRadiance {
 pub struct ScalarFlux {
     pub(crate) diffuse_ground: Vec<f64>,
     pub(crate) diffuse_ground_standard_error: Vec<f64>,
+    pub(crate) diffuse_ground_quarter_standard_error: Vec<f64>,
     pub(crate) diffuse_ground_difference_standard_error: Vec<f64>,
     pub(crate) upwelling_top: Vec<f64>,
     pub(crate) upwelling_top_standard_error: Vec<f64>,
+    pub(crate) upwelling_top_quarter_standard_error: Vec<f64>,
     pub(crate) upwelling_top_difference_standard_error: Vec<f64>,
 }
 
@@ -113,12 +133,16 @@ pub struct ScalarFlux {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FluxAggregate {
     pub(crate) name: String,
+    pub(crate) samples: u64,
+    pub(crate) quarter_samples: u64,
     pub(crate) incident_top: Vec<f64>,
     pub(crate) direct_ground: Vec<f64>,
     pub(crate) diffuse_ground: Vec<f64>,
     pub(crate) diffuse_ground_standard_error: Vec<f64>,
+    pub(crate) diffuse_ground_quarter_standard_error: Vec<f64>,
     pub(crate) upwelling_top: Vec<f64>,
     pub(crate) upwelling_top_standard_error: Vec<f64>,
+    pub(crate) upwelling_top_quarter_standard_error: Vec<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) scalar: Option<ScalarFlux>,
 }
@@ -136,7 +160,8 @@ impl ReferenceRadiances {
         self.polarisation
     }
 
-    /// Samples per geometry, aggregate and wavelength.
+    /// Samples per geometry, aggregate and wavelength where the case gives none of its own: the
+    /// command's `--samples`.
     #[must_use]
     pub fn samples(&self) -> u64 {
         self.samples
@@ -190,6 +215,18 @@ impl GeometryRadiance {
         self.detector_half_angle_deg
     }
 
+    /// The samples traced per wavelength: the case's for this geometry, or the command's.
+    #[must_use]
+    pub fn samples(&self) -> u64 {
+        self.samples
+    }
+
+    /// The first quarter's samples, ⌊[`samples`](Self::samples) ÷ 4⌋.
+    #[must_use]
+    pub fn quarter_samples(&self) -> u64 {
+        self.quarter_samples
+    }
+
     /// The diffuse radiance per wavelength, in the case's irradiance unit per steradian.
     #[must_use]
     pub fn radiance(&self) -> &[f64] {
@@ -200,6 +237,12 @@ impl GeometryRadiance {
     #[must_use]
     pub fn standard_error(&self) -> &[f64] {
         &self.standard_error
+    }
+
+    /// The radiance's standard error over the first quarter of its samples, per wavelength.
+    #[must_use]
+    pub fn quarter_standard_error(&self) -> &[f64] {
+        &self.quarter_standard_error
     }
 
     /// The polarisation and the scalar radiance of the same paths, from the Stokes mode only.
@@ -266,6 +309,12 @@ impl StokesRadiance {
         &self.scalar_standard_error
     }
 
+    /// The scalar radiance's standard error over the first quarter of the samples, per wavelength.
+    #[must_use]
+    pub fn scalar_quarter_standard_error(&self) -> &[f64] {
+        &self.scalar_quarter_standard_error
+    }
+
     /// The standard error of the radiance less the scalar radiance, per wavelength.
     #[must_use]
     pub fn difference_standard_error(&self) -> &[f64] {
@@ -286,6 +335,12 @@ impl ScalarFlux {
         &self.diffuse_ground_standard_error
     }
 
+    /// Its standard error over the first quarter of the samples, per wavelength.
+    #[must_use]
+    pub fn diffuse_ground_quarter_standard_error(&self) -> &[f64] {
+        &self.diffuse_ground_quarter_standard_error
+    }
+
     /// The standard error of the vector flux less the scalar one, per wavelength.
     #[must_use]
     pub fn diffuse_ground_difference_standard_error(&self) -> &[f64] {
@@ -304,6 +359,12 @@ impl ScalarFlux {
         &self.upwelling_top_standard_error
     }
 
+    /// Its standard error over the first quarter of the samples, per wavelength.
+    #[must_use]
+    pub fn upwelling_top_quarter_standard_error(&self) -> &[f64] {
+        &self.upwelling_top_quarter_standard_error
+    }
+
     /// The standard error of the vector flux less the scalar one, per wavelength.
     #[must_use]
     pub fn upwelling_top_difference_standard_error(&self) -> &[f64] {
@@ -316,6 +377,19 @@ impl FluxAggregate {
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// The samples traced per wavelength of each of its two fluxes: the case's for this
+    /// aggregate, or the command's.
+    #[must_use]
+    pub fn samples(&self) -> u64 {
+        self.samples
+    }
+
+    /// The first quarter's samples, ⌊[`samples`](Self::samples) ÷ 4⌋.
+    #[must_use]
+    pub fn quarter_samples(&self) -> u64 {
+        self.quarter_samples
     }
 
     /// The suns' flux onto a horizontal surface at the top, Σ μ₀F, per wavelength.
@@ -343,6 +417,13 @@ impl FluxAggregate {
         &self.diffuse_ground_standard_error
     }
 
+    /// The diffuse downwelling flux's standard error over the first quarter of the samples, per
+    /// wavelength.
+    #[must_use]
+    pub fn diffuse_ground_quarter_standard_error(&self) -> &[f64] {
+        &self.diffuse_ground_quarter_standard_error
+    }
+
     /// The upwelling flux at the top per wavelength; the plane albedo is this over
     /// [`incident_top`](Self::incident_top).
     #[must_use]
@@ -354,6 +435,12 @@ impl FluxAggregate {
     #[must_use]
     pub fn upwelling_top_standard_error(&self) -> &[f64] {
         &self.upwelling_top_standard_error
+    }
+
+    /// The upwelling flux's standard error over the first quarter of the samples, per wavelength.
+    #[must_use]
+    pub fn upwelling_top_quarter_standard_error(&self) -> &[f64] {
+        &self.upwelling_top_quarter_standard_error
     }
 
     /// The scalar fluxes of the same paths, from the Stokes mode only.

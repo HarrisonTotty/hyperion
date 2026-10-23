@@ -24,6 +24,15 @@
 //!   estimate, Marchuk et al. 1980 §2.6): the sun's transmittance from the vertex is computed, not
 //!   sampled, by Gauss–Legendre quadrature of the extinction along the ray, shell by shell. The
 //!   suns are points: a path that escapes adds nothing, so nothing is counted twice.
+//! - **Absorbers by their curves of growth** (R08.T12.b.1; Design note 5). An absorber term's
+//!   transmittance is its curve's T(u) of the column u = n ∫ρ ds crossed, which is not a product
+//!   over a path's legs, so it cannot be a weight. Each path carries each absorber's column from
+//!   the detector through every flight (the first, the forced collision's share of it, and every
+//!   later one, by the same 8-point rule per shell as the absorption), its clones and copies with
+//!   it; each next-event score towards sun s takes the sun leg's own column beside the
+//!   transmittance and multiplies by `T_s(u_path + u_leg)`, read by the client's rule (the
+//!   [`absorber`](super::absorber) module). The draws do not depend on it, and a case without an
+//!   absorber runs as before, bit for bit.
 //! - **The ground** is Lambertian: next-event estimation with A ÷ π, then a cosine-weighted
 //!   direction with the weight times A.
 //! - **Russian roulette** (Arvo and Kirk 1990) once a path's weight falls below
@@ -142,9 +151,10 @@ use hyperion_sim::math;
 use hyperion_sim::tables::gauss_legendre::{GL8_NODES, GL8_WEIGHTS};
 
 use super::Polarisation;
-use super::case::{Aggregate, AtmosphereCase, DensityProfile, Geometry, LocalDirection};
+use super::absorber::{CurveRow, MAX_ABSORBERS};
+use super::case::{Aggregate, AtmosphereCase, Geometry, LocalDirection, TermAbsorber};
 use super::geometry::{LocalFrame, Next, ShellGrid, Vec3, basis, cosine_weighted, in_cone, turned};
-use super::optics::{Phase, ScatteringMatrix};
+use super::optics::{Phase, ProfileLookup, ScatteringMatrix};
 use crate::tasks::displaced_forms::births::Draws;
 
 /// The components of a sample: the radiance (I, Q, U, V) and, in the Stokes mode, the scalar
@@ -225,7 +235,7 @@ const MAJORANT_MARGIN: f64 = 1.0 + 1e-6;
 #[derive(Debug)]
 pub(crate) struct Medium<'a> {
     grid: &'a ShellGrid,
-    profiles: Vec<&'a DensityProfile>,
+    profiles: Vec<ProfileLookup<'a>>,
     /// Per term, at relative density 1, m⁻¹.
     scattering_per_m: Vec<f64>,
     /// Per term, at relative density 1, m⁻¹.
@@ -244,6 +254,23 @@ pub(crate) struct Medium<'a> {
     vroom: bool,
     /// The orders of scattering the samples follow.
     orders: Orders,
+    /// The absorber terms, in the case's order of them (R08.T12.b.1): empty for most cases.
+    absorbers: Vec<AbsorberRead<'a>>,
+}
+
+/// Each absorber's column along a path, in the case's order of the absorber terms, molecules m⁻²:
+/// zero past the case's last.
+pub(crate) type ColumnsPerM2 = [f64; MAX_ABSORBERS];
+
+/// One absorber term at one wavelength: its profile, its density at relative density 1 and each
+/// sun's curve.
+#[derive(Debug)]
+struct AbsorberRead<'a> {
+    profile: ProfileLookup<'a>,
+    /// n at relative density 1, molecules m⁻³.
+    number_density_per_m3: f64,
+    /// Per sun, in the case's order.
+    curves: Vec<CurveRow<'a>>,
 }
 
 /// Which estimator a medium's samples run (module documentation; R08.T12.f).
@@ -422,6 +449,8 @@ struct Piece {
     shell: usize,
     scattering_depth: f64,
     absorption_depth: f64,
+    /// Each absorber's column across the piece, molecules m⁻².
+    columns_per_m2: ColumnsPerM2,
 }
 
 /// How the first flight ends.
@@ -555,11 +584,15 @@ struct Walker {
     /// flight's included: Buras and Mayer 2011's `w_redspl` (§2.4), which damps the splitting of a
     /// path that has pointed at a sun from the start. Infinite where VROOM is off.
     least_prediction: f64,
+    /// Each absorber's column from the detector to where the path is, molecules m⁻², which its
+    /// clones and copies inherit.
+    columns_per_m2: ColumnsPerM2,
 }
 
 impl Walker {
     /// A branch starting at `position_m` along `dir` in `shell` with `weight`, its first
-    /// direction's prediction `prediction` (infinite where VROOM is off).
+    /// direction's prediction `prediction` (infinite where VROOM is off), having crossed the
+    /// absorbers' `columns_per_m2` from the detector.
     #[must_use]
     fn new(
         position_m: Vec3,
@@ -568,6 +601,7 @@ impl Walker {
         weight: f64,
         stokes: Option<Stokes>,
         prediction: f64,
+        columns_per_m2: ColumnsPerM2,
     ) -> Self {
         Self {
             position_m,
@@ -579,6 +613,7 @@ impl Walker {
             order: 1,
             unit: weight,
             least_prediction: prediction,
+            columns_per_m2,
         }
     }
 }
@@ -688,7 +723,10 @@ impl<'a> Medium<'a> {
         orders: Orders,
     ) -> Self {
         let terms = case.terms();
-        let profiles: Vec<&DensityProfile> = terms.iter().map(|t| &t.density).collect();
+        let profiles: Vec<ProfileLookup<'a>> = terms
+            .iter()
+            .map(|t| ProfileLookup::new(&t.density))
+            .collect();
         let scattering_per_m: Vec<f64> = terms
             .iter()
             .map(|t| t.scattering_per_m[wavelength])
@@ -703,7 +741,7 @@ impl<'a> Medium<'a> {
                 profiles
                     .iter()
                     .zip(&scattering_per_m)
-                    .map(|(profile, &s)| s * profile.max_over(low_m, high_m))
+                    .map(|(profile, &s)| s * profile.profile().max_over(low_m, high_m))
                     .sum::<f64>()
                     * MAJORANT_MARGIN
             })
@@ -723,11 +761,30 @@ impl<'a> Medium<'a> {
             #[cfg(test)]
             Estimator::Vroom => true,
         };
+        let absorbers = terms
+            .iter()
+            .filter_map(|t| match &t.absorber {
+                Some(TermAbsorber::Column {
+                    number_density_per_m3,
+                    curves,
+                }) => Some(AbsorberRead {
+                    profile: ProfileLookup::new(&t.density),
+                    number_density_per_m3: *number_density_per_m3,
+                    curves: curves
+                        .iter()
+                        .map(|c| CurveRow::new(&c.log_columns, &c.optical_depth[wavelength]))
+                        .collect(),
+                }),
+                // The case refuses a pair absorber until R08.T12.b.2.
+                Some(TermAbsorber::Pair { .. }) | None => None,
+            })
+            .collect();
         Self {
             grid,
             forward_per_sr,
             vroom,
             orders,
+            absorbers,
             phases,
             absorbs: absorption_per_m.iter().any(|&a| a > 0.0),
             profiles,
@@ -872,6 +929,155 @@ impl<'a> Medium<'a> {
         }
     }
 
+    /// Adds each absorber's column over `[0, length_m]` along `dir` from `start_m` to
+    /// `columns_per_m2`, molecules m⁻², by the 8-point Gauss–Legendre rule, as the absorption's
+    /// depth is taken.
+    fn add_absorber_columns(
+        &self,
+        start_m: Vec3,
+        dir: Vec3,
+        length_m: f64,
+        columns_per_m2: &mut ColumnsPerM2,
+    ) {
+        let half = 0.5 * length_m;
+        let mut sums = [0.0; MAX_ABSORBERS];
+        for (&x, &w) in GL8_NODES.iter().zip(&GL8_WEIGHTS) {
+            let h = self.height_m(start_m + dir * (half * (1.0 + x)));
+            for (sum, absorber) in sums.iter_mut().zip(&self.absorbers) {
+                *sum += w * absorber.profile.at(h);
+            }
+        }
+        for ((column_per_m2, sum), absorber) in
+            columns_per_m2.iter_mut().zip(sums).zip(&self.absorbers)
+        {
+            *column_per_m2 += absorber.number_density_per_m3 * sum * half;
+        }
+    }
+
+    /// The extinction optical depth from `start_m` in shell `shell` along `dir` to space, and
+    /// `None` if the ground is in the way, as [`depth_to_space_from`](Self::depth_to_space_from)
+    /// takes it, adding each absorber's column along the way to `columns_per_m2`; it stops
+    /// counting once past `limit`, the columns then partial.
+    fn depth_and_columns_to_space_from(
+        &self,
+        start_m: Vec3,
+        dir: Vec3,
+        mut shell: usize,
+        limit: f64,
+        columns_per_m2: &mut ColumnsPerM2,
+    ) -> Option<f64> {
+        let mut point = start_m;
+        let mut depth = 0.0;
+        loop {
+            let exit = self.grid.exit(point, dir, shell);
+            let (scattering, absorption) = self.depths(point, dir, exit.distance_m);
+            depth += scattering + absorption;
+            if depth > limit {
+                return Some(depth);
+            }
+            self.add_absorber_columns(point, dir, exit.distance_m, columns_per_m2);
+            match exit.next {
+                Next::Shell(j) => {
+                    point = self
+                        .grid
+                        .cross(point, dir, exit.distance_m, shell, exit.next);
+                    shell = j;
+                }
+                Next::Ground => return None,
+                Next::Space => return Some(depth),
+            }
+        }
+    }
+
+    /// The absorbers' transmittance towards sun `sun` of a path that has crossed `path_per_m2` and
+    /// whose leg to the sun crosses `leg_per_m2`: each curve read at the whole path's column.
+    #[must_use]
+    fn absorber_transmittance(
+        &self,
+        sun: usize,
+        path_per_m2: &ColumnsPerM2,
+        leg_per_m2: &ColumnsPerM2,
+    ) -> f64 {
+        self.absorbers
+            .iter()
+            .zip(path_per_m2.iter().zip(leg_per_m2))
+            .map(|(absorber, (&u_path, &u_leg))| absorber.curves[sun].transmittance(u_path + u_leg))
+            .product()
+    }
+
+    /// The transmittance towards sun `sun`, along the unit vector `dir`, of a path at `start_m` in
+    /// shell `shell` that has crossed the absorbers' columns `path_per_m2`: zero if the ground is in
+    /// the way, or past [`NEGLIGIBLE_OPTICAL_DEPTH`]. With no absorber it is
+    /// [`transmittance_to_space`](Self::transmittance_to_space)'s, unchanged.
+    #[must_use]
+    fn sun_transmittance(
+        &self,
+        start_m: Vec3,
+        dir: Vec3,
+        shell: usize,
+        path_per_m2: &ColumnsPerM2,
+        sun: usize,
+    ) -> f64 {
+        if self.absorbers.is_empty() {
+            return self.transmittance_to_space(start_m, dir, shell);
+        }
+        let mut leg_per_m2 = [0.0; MAX_ABSORBERS];
+        match self.depth_and_columns_to_space_from(
+            start_m,
+            dir,
+            shell,
+            NEGLIGIBLE_OPTICAL_DEPTH,
+            &mut leg_per_m2,
+        ) {
+            Some(depth) if depth <= NEGLIGIBLE_OPTICAL_DEPTH => {
+                math::exp(-depth) * self.absorber_transmittance(sun, path_per_m2, &leg_per_m2)
+            }
+            Some(_) | None => 0.0,
+        }
+    }
+
+    /// The direct beam's optical depth from `origin_m`, anywhere, along the unit vector `dir`
+    /// towards sun `sun`: [`optical_depth_to_space`](Self::optical_depth_to_space)'s extinction
+    /// and, with absorbers, each one's −ln T of the beam's own column; `None` if the ground is in
+    /// the way.
+    #[must_use]
+    pub(crate) fn beam_optical_depth(&self, origin_m: Vec3, dir: Vec3, sun: usize) -> Option<f64> {
+        if self.absorbers.is_empty() {
+            return self.optical_depth_to_space(origin_m, dir);
+        }
+        let mut leg_per_m2 = [0.0; MAX_ABSORBERS];
+        let depth = match self.grid.locate(origin_m, dir) {
+            Some(shell) => self.depth_and_columns_to_space_from(
+                origin_m,
+                dir,
+                shell,
+                f64::INFINITY,
+                &mut leg_per_m2,
+            ),
+            None => match self.grid.entry_distance_m(origin_m, dir) {
+                None => Some(0.0),
+                Some(distance_m) => {
+                    let top = self.grid.len() - 1;
+                    let entry = self.grid.cross(origin_m, dir, distance_m, top, Next::Space);
+                    self.depth_and_columns_to_space_from(
+                        entry,
+                        dir,
+                        top,
+                        f64::INFINITY,
+                        &mut leg_per_m2,
+                    )
+                }
+            },
+        }?;
+        let absorbed: f64 = self
+            .absorbers
+            .iter()
+            .zip(&leg_per_m2)
+            .map(|(absorber, &u)| -math::ln(absorber.curves[sun].transmittance(u)))
+            .sum();
+        Some(depth + absorbed)
+    }
+
     /// One sample of the radiance (I, Q, U, V) and the scalar radiance of the same path at
     /// `source` ([`COMPONENTS`]), or of the fluxes for a hemisphere; all but [`I`] are zero in the
     /// scalar mode.
@@ -921,12 +1127,21 @@ impl<'a> Medium<'a> {
         if scattering_depth > 0.0 {
             let collided = -math::exp_m1(-scattering_depth);
             let target = -math::ln_1p(-draws.uniform() * collided);
-            let (at_m, shell, absorbed) = self.forced_collision(&scratch.pieces, look, target);
+            let (at_m, shell, absorbed, columns_per_m2) =
+                self.forced_collision(&scratch.pieces, look, target);
             let weight = collided * math::exp(-absorbed);
-            let walker = Walker::new(at_m, look, shell, weight, stokes, prediction);
+            let walker = Walker::new(
+                at_m,
+                look,
+                shell,
+                weight,
+                stokes,
+                prediction,
+                columns_per_m2,
+            );
             self.follow(
                 Vertex::Scatter,
-                walker,
+                &walker,
                 &source.suns,
                 draws,
                 scratch,
@@ -935,10 +1150,16 @@ impl<'a> Medium<'a> {
         }
         if let FirstEnd::Ground(at_m) = end {
             let weight = math::exp(-scattering_depth - absorption_depth);
-            let walker = Walker::new(at_m, look, 0, weight, stokes, prediction);
+            let mut columns_per_m2 = [0.0; MAX_ABSORBERS];
+            for piece in &scratch.pieces {
+                for (total, &part) in columns_per_m2.iter_mut().zip(&piece.columns_per_m2) {
+                    *total += part;
+                }
+            }
+            let walker = Walker::new(at_m, look, 0, weight, stokes, prediction, columns_per_m2);
             self.follow(
                 Vertex::Ground,
-                walker,
+                &walker,
                 &source.suns,
                 draws,
                 scratch,
@@ -966,12 +1187,17 @@ impl<'a> Medium<'a> {
             let exit = self.grid.exit(point, dir, shell);
             let length_m = exit.distance_m.min(cut_m - travelled_m);
             let (scattering_depth, absorption_depth) = self.depths(point, dir, length_m);
+            let mut columns_per_m2 = [0.0; MAX_ABSORBERS];
+            if !self.absorbers.is_empty() {
+                self.add_absorber_columns(point, dir, length_m, &mut columns_per_m2);
+            }
             pieces.push(Piece {
                 start_m: point,
                 length_m,
                 shell,
                 scattering_depth,
                 absorption_depth,
+                columns_per_m2,
             });
             if exit.distance_m >= cut_m - travelled_m {
                 return FirstEnd::Lost;
@@ -992,15 +1218,24 @@ impl<'a> Medium<'a> {
     }
 
     /// The point at scattering optical depth `target` along the first flight's `pieces`, m, its
-    /// shell, and the absorption optical depth up to it.
-    fn forced_collision(&self, pieces: &[Piece], dir: Vec3, target: f64) -> (Vec3, usize, f64) {
+    /// shell, the absorption optical depth up to it, and each absorber's column up to it.
+    fn forced_collision(
+        &self,
+        pieces: &[Piece],
+        dir: Vec3,
+        target: f64,
+    ) -> (Vec3, usize, f64, ColumnsPerM2) {
         let mut before = 0.0;
         let mut absorbed = 0.0;
+        let mut columns_per_m2 = [0.0; MAX_ABSORBERS];
         let last = pieces.len() - 1;
         for (i, piece) in pieces.iter().enumerate() {
             if i < last && before + piece.scattering_depth <= target {
                 before += piece.scattering_depth;
                 absorbed += piece.absorption_depth;
+                for (total, &part) in columns_per_m2.iter_mut().zip(&piece.columns_per_m2) {
+                    *total += part;
+                }
                 continue;
             }
             // The scattering coefficient's degree-15 interpolant on the piece, scaled to the
@@ -1020,10 +1255,14 @@ impl<'a> Medium<'a> {
                 piece.length_m,
                 64,
             );
+            if !self.absorbers.is_empty() {
+                self.add_absorber_columns(piece.start_m, dir, distance_m, &mut columns_per_m2);
+            }
             return (
                 piece.start_m + dir * distance_m,
                 piece.shell,
                 absorbed + self.absorption_depth(piece.start_m, dir, distance_m),
+                columns_per_m2,
             );
         }
         unreachable!("the first flight has at least one piece")
@@ -1046,6 +1285,14 @@ impl<'a> Medium<'a> {
                     if draws.uniform() * majorant < self.scattering_per_m_at(x) {
                         absorbed +=
                             self.absorption_depth(walker.position_m, walker.dir, distance_m);
+                        if !self.absorbers.is_empty() {
+                            self.add_absorber_columns(
+                                walker.position_m,
+                                walker.dir,
+                                distance_m,
+                                &mut walker.columns_per_m2,
+                            );
+                        }
                         walker.position_m = x;
                         walker.weight *= math::exp(-absorbed);
                         return Event::Scatter;
@@ -1053,6 +1300,14 @@ impl<'a> Medium<'a> {
                 }
             }
             absorbed += self.absorption_depth(walker.position_m, walker.dir, exit.distance_m);
+            if !self.absorbers.is_empty() && exit.next != Next::Space {
+                self.add_absorber_columns(
+                    walker.position_m,
+                    walker.dir,
+                    exit.distance_m,
+                    &mut walker.columns_per_m2,
+                );
+            }
             match exit.next {
                 Next::Shell(j) => {
                     walker.position_m = self.grid.cross(
@@ -1156,7 +1411,7 @@ impl<'a> Medium<'a> {
     fn follow(
         &self,
         vertex: Vertex,
-        walker: Walker,
+        walker: &Walker,
         suns: &[Vec3],
         draws: &mut Draws,
         scratch: &mut Scratch,
@@ -1167,7 +1422,7 @@ impl<'a> Medium<'a> {
         pending.push((
             Branch {
                 stage: Stage::At(vertex),
-                walker,
+                walker: *walker,
                 role: Role::Mother,
             },
             1,
@@ -1330,27 +1585,8 @@ impl<'a> Medium<'a> {
         if total_per_m <= 0.0 {
             return false;
         }
-        for (&sun, &irradiance) in suns.iter().zip(&self.irradiance) {
-            if !duty.estimates || irradiance <= 0.0 {
-                continue;
-            }
-            let transmittance = self.transmittance_to_space(walker.position_m, sun, walker.shell);
-            if transmittance <= 0.0 {
-                continue;
-            }
-            let scale = walker.weight * irradiance * transmittance;
-            let cos_theta = sun.dot(walker.dir);
-            let scalar = scale * self.phase_value(&scratch.terms_per_m, total_per_m, cos_theta);
-            match &walker.stokes {
-                None => out[I] += scalar,
-                Some(stokes) => {
-                    let z = self.phase_matrix(&scratch.terms_per_m, total_per_m, cos_theta);
-                    for (o, x) in out.iter_mut().zip(stokes.next_event(&z, walker.dir, sun)) {
-                        *o += scale * x;
-                    }
-                    out[SCALAR_I] += scalar;
-                }
-            }
+        if duty.estimates {
+            self.scattering_estimates(walker, suns, &scratch.terms_per_m, total_per_m, out);
         }
         // The scattering term, in proportion to its coefficient here: the last that scatters if
         // rounding leaves the pick past the total.
@@ -1432,6 +1668,46 @@ impl<'a> Medium<'a> {
         true
     }
 
+    /// Adds each sun's next-event estimate at a scattering vertex to `out`, the terms' scattering
+    /// coefficients there `terms_per_m`, totalling `total_per_m`.
+    fn scattering_estimates(
+        &self,
+        walker: &Walker,
+        suns: &[Vec3],
+        terms_per_m: &[f64],
+        total_per_m: f64,
+        out: &mut [f64; COMPONENTS],
+    ) {
+        for (s, (&sun, &irradiance)) in suns.iter().zip(&self.irradiance).enumerate() {
+            if irradiance <= 0.0 {
+                continue;
+            }
+            let transmittance = self.sun_transmittance(
+                walker.position_m,
+                sun,
+                walker.shell,
+                &walker.columns_per_m2,
+                s,
+            );
+            if transmittance <= 0.0 {
+                continue;
+            }
+            let scale = walker.weight * irradiance * transmittance;
+            let cos_theta = sun.dot(walker.dir);
+            let scalar = scale * self.phase_value(terms_per_m, total_per_m, cos_theta);
+            match &walker.stokes {
+                None => out[I] += scalar,
+                Some(stokes) => {
+                    let z = self.phase_matrix(terms_per_m, total_per_m, cos_theta);
+                    for (o, x) in out.iter_mut().zip(stokes.next_event(&z, walker.dir, sun)) {
+                        *o += scale * x;
+                    }
+                    out[SCALAR_I] += scalar;
+                }
+            }
+        }
+    }
+
     /// At the ground: adds each sun's next-event estimate to `out` if the path's `duty` is to
     /// estimate there, and reflects the walker into a cosine-weighted direction, its weight times
     /// the albedo.
@@ -1444,12 +1720,13 @@ impl<'a> Medium<'a> {
         out: &mut [f64; COMPONENTS],
     ) {
         let normal = self.grid.vertical(walker.position_m);
-        for (&sun, &irradiance) in suns.iter().zip(&self.irradiance) {
+        for (s, (&sun, &irradiance)) in suns.iter().zip(&self.irradiance).enumerate() {
             let cos_sun = normal.dot(sun);
             if !duty.estimates || irradiance <= 0.0 || cos_sun <= 0.0 || self.ground_albedo <= 0.0 {
                 continue;
             }
-            let transmittance = self.transmittance_to_space(walker.position_m, sun, 0);
+            let transmittance =
+                self.sun_transmittance(walker.position_m, sun, 0, &walker.columns_per_m2, s);
             let scale =
                 walker.weight * self.ground_albedo / PI * cos_sun * irradiance * transmittance;
             match &walker.stokes {

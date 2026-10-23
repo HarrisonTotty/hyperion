@@ -64,3 +64,11 @@ apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/n2oMerge.json
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lines/
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/alkaliPairs.json
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lineReferencesAtoms.json
+# The reference tracer's cloud-free cases, written by `reference/cases.test.ts` through `bless.ts`,
+# their references, `hyperion-fit atmosphere-reference`'s `serde_json` pretty form, and their
+# refusals (`references.test.ts`); the curves' shared values the tracer's `absorber` module reads
+# (`absorberCurves.test.ts`; plan R08, R08.T12.b.1)
+apps/hyperion/src/renderer/src/view/atmosphere/reference/*.case.json
+apps/hyperion/src/renderer/src/view/atmosphere/reference/*.reference.json
+apps/hyperion/src/renderer/src/view/atmosphere/reference/refusals.json
+crates/hyperion-fit/src/atmosphere/absorber_curves.json

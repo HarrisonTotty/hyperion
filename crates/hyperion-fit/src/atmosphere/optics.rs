@@ -139,6 +139,118 @@ impl DensityProfile {
 /// 2.3 × 10⁻¹⁶.
 pub(crate) const EXPONENTIAL_SHELL_HEIGHTS: f64 = 36.0;
 
+/// The buckets a tabulated profile's index has per node: four, so that a lookup's walk from its
+/// bucket's node is a step or two.
+const LOOKUP_BUCKETS_PER_NODE: usize = 4;
+
+/// A profile read as [`DensityProfile::at`] reads it, to the bit, with an index for a tabulated
+/// one's lookups (R08.T12.b.1).
+///
+/// A tabulated profile's node above the height is found from an even grid of buckets over its
+/// nodes' span, each holding the node above its lower edge, and a walk from there to the first
+/// node above the height, which is the node `partition_point` finds: the same node, and so the same
+/// interpolation, in a step or two rather than a bisection. On R08.T3.a's column of 1,026 levels,
+/// whose levels are every shell's boundaries, that bisection was half of a trace's time (measured
+/// on Earth's case, R08.T12.b.1); the other kinds are read as before.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ProfileLookup<'a> {
+    profile: &'a DensityProfile,
+    /// For a tabulated profile, the node above each bucket's lower edge; empty otherwise.
+    buckets: Vec<usize>,
+    /// The lowest node's height, m.
+    first_m: f64,
+    /// Buckets per metre.
+    per_m: f64,
+}
+
+impl<'a> ProfileLookup<'a> {
+    /// The lookup of `profile`.
+    #[must_use]
+    pub(crate) fn new(profile: &'a DensityProfile) -> Self {
+        let DensityProfile::Tabulated { altitudes_m, .. } = profile else {
+            return Self {
+                profile,
+                buckets: Vec::new(),
+                first_m: 0.0,
+                per_m: 0.0,
+            };
+        };
+        let first_m = altitudes_m[0];
+        let span_m = altitudes_m[altitudes_m.len() - 1] - first_m;
+        let count = LOOKUP_BUCKETS_PER_NODE * altitudes_m.len();
+        let per_m = count_f64(count) / span_m;
+        let buckets = (0..count)
+            .map(|b| {
+                let edge_m = first_m + count_f64(b) / per_m;
+                altitudes_m.partition_point(|&a| a <= edge_m)
+            })
+            .collect();
+        Self {
+            profile,
+            buckets,
+            first_m,
+            per_m,
+        }
+    }
+
+    /// The profile.
+    #[must_use]
+    pub(crate) fn profile(&self) -> &'a DensityProfile {
+        self.profile
+    }
+
+    /// [`DensityProfile::at`], to the bit.
+    #[must_use]
+    pub(crate) fn at(&self, height_m: f64) -> f64 {
+        let DensityProfile::Tabulated {
+            altitudes_m,
+            relative,
+        } = self.profile
+        else {
+            return self.profile.at(height_m);
+        };
+        let h = height_m.max(0.0);
+        let last = altitudes_m.len() - 1;
+        let mut above = self.buckets[self.bucket(h)];
+        // From any start, the first node above h: `at`'s `partition_point`.
+        while above > 0 && altitudes_m[above - 1] > h {
+            above -= 1;
+        }
+        while above <= last && altitudes_m[above] <= h {
+            above += 1;
+        }
+        if above == 0 {
+            relative[0]
+        } else if above > last {
+            relative[last]
+        } else {
+            let (a0, a1) = (altitudes_m[above - 1], altitudes_m[above]);
+            let (r0, r1) = (relative[above - 1], relative[above]);
+            r0 + (r1 - r0) * (h - a0) / (a1 - a0)
+        }
+    }
+
+    /// The bucket of height `h_m`, clamped to the buckets.
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss,
+        reason = "the bucket is clamped to [0, buckets − 1] first, a few thousand at most, exact in \
+                  an f64; any bucket only starts the walk, which finds the node whatever it is"
+    )]
+    #[must_use]
+    fn bucket(&self, h_m: f64) -> usize {
+        let top = (self.buckets.len() - 1) as f64;
+        ((h_m - self.first_m) * self.per_m).clamp(0.0, top) as usize
+    }
+}
+
+/// `n` as an `f64`, for a profile's few thousand buckets.
+#[must_use]
+fn count_f64(n: usize) -> f64 {
+    f64::from(u32::try_from(n).expect("a profile has fewer than 2³² lookup buckets"))
+}
+
 /// How far a table's or series' normalisation and mean cosine may stand from the source's: the
 /// plan's 10⁻⁴ (R08.T12.c).
 pub(crate) const PHASE_CHECK_TOLERANCE: f64 = 1e-4;
@@ -1052,5 +1164,52 @@ pub(crate) mod tests {
         assert!((tabulated.at(-5.0) - 0.5).abs() < f64::EPSILON);
         assert!((tabulated.at(2e3) - 0.6).abs() < 1e-15);
         assert!((tabulated.at(1e5) - 0.4).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn atmosphere_a_profiles_lookup_reads_it_to_the_bit() {
+        // R08.T12.b.1's indexed lookup: the same node, and so the same bits, as `at`'s bisection,
+        // on a column-like table of uneven levels, at its nodes, between them, below the first
+        // (and below the ground) and above the last, and for the other kinds.
+        let altitudes: Vec<f64> = (0..=1025)
+            .map(|i| {
+                let x = f64::from(i) / 1025.0;
+                1.2e5 * x * (0.4 + 0.6 * x) + 30.0
+            })
+            .collect();
+        let relative: Vec<f64> = altitudes.iter().map(|&h| math::exp(-h / 8e3)).collect();
+        let profiles = [
+            DensityProfile::Tabulated {
+                altitudes_m: altitudes.clone(),
+                relative,
+            },
+            DensityProfile::Tabulated {
+                altitudes_m: vec![0.0, 1e3, 3e3, 9e3],
+                relative: vec![0.5, 1.0, 0.2, 0.4],
+            },
+            DensityProfile::Exponential {
+                scale_height_m: 8000.0,
+            },
+            DensityProfile::Tent {
+                bottom_m: 10e3,
+                peak_m: 25e3,
+                top_m: 40e3,
+            },
+        ];
+        let mut heights: Vec<f64> = (-100..=130_000).map(|i| f64::from(i) * 1.0137).collect();
+        heights.extend(&altitudes);
+        heights.extend(altitudes.iter().map(|&a| a * (1.0 + f64::EPSILON)));
+        heights.extend(altitudes.iter().map(|&a| a * (1.0 - f64::EPSILON)));
+        heights.extend([-1e9, 0.0, 1e12]);
+        for profile in &profiles {
+            let lookup = ProfileLookup::new(profile);
+            for &h in &heights {
+                assert_eq!(
+                    hyperion_testkit::float::bits(lookup.at(h)),
+                    hyperion_testkit::float::bits(profile.at(h)),
+                    "{h} m in {profile:?}"
+                );
+            }
+        }
     }
 }

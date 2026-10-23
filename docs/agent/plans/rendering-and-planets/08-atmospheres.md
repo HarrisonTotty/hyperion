@@ -527,17 +527,18 @@ smooth mesh and the `disc cells` kernel share its source and `view/bodies/draw.t
 
 ```rust
 // crates/hyperion-fit/src/atmosphere/
-pub struct AtmosphereCase { /* a spectral medium, as the TypeScript writes it, its `Shells`,
-    and its geometry set */ }
+pub struct AtmosphereCase { /* a spectral medium, as the TypeScript writes it, an absorber term
+    carrying each sun's curve of growth (`absorber`, R08.T12.b.1), its `Shells`, and its geometry
+    set and aggregates, each with its own `samples` where the case gives them */ }
 pub enum Polarisation { Scalar, Stokes }                 // Stokes: every gate's reference, Design note 10
 pub enum Shells {                                        // Design note 17
     Sphere { radius_m: f64 },
     /// The level spheroid; density at the gravity-scaled height h·g(φ)/g_ref, by delta tracking.
     Spheroid { equatorial_radius_m: f64, polar_radius_m: f64, gm_m3_s2: f64, omega_rad_s: f64 },
 }
-pub struct ReferenceRadiances { /* per geometry and wavelength: radiance, standard error, samples,
-    detector cone; the two flux aggregates; in the Stokes mode also Q, U, V and the scalar
-    radiance of the same paths, each with its error */ }
+pub struct ReferenceRadiances { /* per geometry and wavelength: radiance, standard error and its
+    first quarter's, samples, detector cone; the two flux aggregates; in the Stokes mode also Q, U,
+    V and the scalar radiance of the same paths, each with its error */ }
 pub fn trace_reference(case: &AtmosphereCase, polarisation: Polarisation, samples: NonZeroU64,
     threads: NonZeroUsize) -> ReferenceRadiances;        // backward Monte Carlo, f64, over `Shells`
 ```
@@ -547,8 +548,12 @@ Command: `hyperion-fit atmosphere-reference <case.json> --out <reference.json> [
 `orbits` is; it is not a `FitTask`, so `tables.lock` and `just fit-check` do not cover its output.
 `--threads` is the crate's `Option<NonZeroUsize>`, and the output is the same for any number by the
 crate's convention (`parallel::map_reduce_chunks`, with counter-based draws keyed per item as
-`tasks/displaced_forms/births.rs`'s `Draws` are). Fixtures:
-`view/atmosphere/reference/{earth,earth-ozone,mars,venus-92bar,venus-58bar,titan-class,giant-deck,saturn-oblate}.case.json`
+`tasks/displaced_forms/births.rs`'s `Draws` are). `--samples` is the count of each geometry and
+aggregate the case gives none of its own; the reference records each one's count and the standard
+error of its own first quarter of samples, from which R08's N^(−1/2) check reads (R08.T12.b.1).
+An absorber term's curve is read at each path's whole column at every next-event score, and its
+−ln T of the beam's own column joins `sunOpticalDepth`. Fixtures:
+`view/atmosphere/reference/{earth,earth-ozone-slab,mars,venus-92bar,venus-58bar,titan-class,giant-deck,saturn-oblate}.case.json`
 and their `.reference.json`, formatted so that `prettier --check .` (in `just ci`) passes, or
 listed in `.prettierignore` as written data, and each under the repository's 500 kB added-file
 hook. The metric is `gate.ts` (R08.T12.b).
@@ -1947,7 +1952,9 @@ The order:
   the laptop.
 - T5.a (Mie) needs nothing of T3 or T4 and can start at once; T5.b follows it, and T5.c follows
   T5.b. T5.d follows T5.b, and precedes galaxy plan 14's P14.T49.e. T5.e follows T5.d and
-  R08.T12.e. It moves no generated output, so its place relative to P14.T49.e is free. T5.f (the
+  R08.T12.e, and is built inside R08.T12.b.2, after its Venus cases are written
+  (`decision-r08-t12b-scope.md`, ruling 1). It moves no generated output, so its place relative
+  to P14.T49.e is free. T5.f (the
   size quadrature on resonant spheres) follows T5.b and precedes T10.a.
 - T6 generalises R05's tables over N terms. T6.a needs T3.a's `tabulated` density; T6.b follows
   T6.a and T0; T6.g (heights and angles in `f32`, Design note 18) follows T6.b; T6.c follows T6.g
@@ -1971,10 +1978,11 @@ The order:
   (Kokhanovsky's aerosol and cloud, IPRT's spheres) also wait on T5.b, and its other cases do not.
   T12.e (the Mie-matrix writer and the sphere benchmarks) follows T12.c and T5.b. T12.f (variance
   reduction for thick, forward-peaked media) follows T12.e, and T12.g (the standard-error check in
-  the tracer's unit tests) follows T12.f; nothing waits for T12.g. T12.b's cloud-free cases need
-  T12.e;
-  its cloudy and hazy cases (the Venus-class and Titan-class cases and the decks) need T12.f.
-  T12.b (the cases and references) also needs T5, T10's fixtures, T12.c and T12.d.
+  the tracer's unit tests) follows T12.f; nothing waits for T12.g. T12.b is built in two parts
+  (`decision-r08-t12b-scope.md`): T12.b.1, its cloud-free cases, needs T12.c, T12.d and T12.e;
+  T12.b.2, its cloudy and hazy cases (the Venus-class and Titan-class cases and the decks), needs
+  T12.f and T5.b's files, and holds R08.T5.e, after its Venus cases are written and before their
+  references are traced. Each part builds its own media, which T10.a's kept scenes read.
 - T13 needs T6 (T6.e for `saturn-oblate`) and T12. T14 follows T13: T14.a, T14.b and T14.c in
   turn; T14.e (the polarisation correction) after T14.a and T14.b; T14.f (its read path and the
   vector gates) after T13, T14.c and T14.e; and T14.d (the gates) after T14.f. T15 follows T14,
@@ -3487,8 +3495,10 @@ Acceptance for T5.b and T5.c:
 
 - **R08.T5.e Venus's ultraviolet absorber, fitted** (science-r08-unowned-absorbers). After T5.d
   and R08.T12.e, on the reference tracer's Venus deck: R08.T12's `venus-92bar` case, with
-  T24.g's four modes, mode 2 `acid_uv_absorber`. It moves no generated output, since k_UA is 0
-  at 550 nm, so it may land before or after P14.T49.e.
+  T24.g's four modes, mode 2 `acid_uv_absorber`. It is built inside R08.T12.b.2, after the Venus
+  cases are written and before their references are traced (`decision-r08-t12b-scope.md`, ruling
+  1). It moves no generated output, since k_UA is 0 at 550 nm, so it may land before or after
+  P14.T49.e.
   - **The geometric albedo.** p(λ) = 2∫₀¹ R(μ, μ; α = 0) μ dμ, on Gauss nodes, from the tracer's
     plane-parallel runs. It is taken at 365 nm, and over Bessell 1990's B and V and SDSS's g′
     and r′ responses (or their effective wavelengths, stated, if a response's licence bars it).
@@ -4619,8 +4629,13 @@ figures (R08.T1's P14.T35.e), generated bodies draw no atmosphere and show
 `ATMOSPHERE: NOT YET MODELLED`, and so does a giant, whose surface section is `not_applicable`,
 until its `envelope` section exists (decision-r08-giant-label). The task runs on the fixtures of
 Design note 16: Earth, Earth with ozone, Mars with hand dust, Venus at 92 and at 58 bar, a hand
-Titan, and a hand giant. Those that need R08.T5.b's files (Venus's clouds, Mars's dust, Titan's
-haze) wait on those files. Their licences were ruled on 2026-10-09 (`decision-r08-licences.md`).
+Titan, and a hand giant. Their media are R08.T12.b's reference cases, built in
+`view/atmosphere/reference/cases.ts` (`decision-r08-t12b-scope.md`, ruling 3): `earth` (its
+measured ozone), `earth-ozone-slab`, `mars` and `saturn-oblate` from R08.T12.b.1, the thick ones
+(Venus, Titan, the giant's deck) from R08.T12.b.2, so that the kept scenes, the CPU twin and the
+reference read one medium on one figure. Those that need R08.T5.b's files (Venus's clouds, Mars's
+dust, Titan's haze) wait on those files. Their licences were ruled on 2026-10-09
+(`decision-r08-licences.md`).
 
 By the composition ruling (decision-composition):
 
@@ -5057,6 +5072,23 @@ record is here, and `pnpm test` passes.
   matrix from T5's tables, or marks it `depolarising`. The cases are written through `bless.ts`'s
   `toMatchFileSnapshot` and read as JSON imports; both kinds of file pass `prettier --check` or are
   listed in `.prettierignore`, and each stays under the 500 kB added-file hook.
+  - _The split_ (ruled 2026-10-21, `decision-r08-t12b-scope.md`, ruling 1). T12.b is built in two
+    parts. T12.b.1 writes the cloud-free cases, `earth`, `earth-ozone-slab`, `mars` and
+    `saturn-oblate`, and traces their references, with the tracer's absorber on each path's column
+    and its counts per geometry, `gate.ts`, and the checks on the committed files. T12.b.2 writes
+    the cloudy and hazy cases, `venus-92bar`, `venus-58bar`, `titan-class` and `giant-deck`, with
+    line absorbers' pressure rows and the `pair` kind in the tracer and the Venus-class and
+    Titan-class sanity ranges, and an extra `limb` image for `earth` and `earth-ozone-slab` at the
+    air's scale height, 8.45 km, tangent to about 85 km, with tangents at the slab's base and top
+    for R08.T13's layer-edge checks at the limb (main, 2026-10-21 and 2026-10-22: T12.b.1's limbs
+    stand at `localScaleHeightM`'s 2.10 km, the green extinction's e-folding, the air's and the
+    aerosol's together); R08.T5.e goes in it, after the Venus cases are written and before their
+    references are traced, so that Venus is traced once, with the fitted absorber. So T12.b needs
+    R08.T5 no longer as a whole, nor R08.T10's fixtures, whose media it now builds, and T5.e needs
+    only T12.b.2's `venus-92bar`.
+    `earth-ozone` is dropped: since R08.T6.h `earth` carries the measured ozone, Design note 16's
+    "Earth with ozone" (ruling 2). The media are T12.b's to build, in `reference/cases.ts`, and
+    R08.T10.a's kept scenes read them (ruling 3).
   - A vitest asserts that every case equals what the optics produce now, and names the commands to
     regenerate both files.
   - The metric of Design note 10 is written once as `gate.ts`, with its own tests on synthetic
@@ -13331,6 +13363,268 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     | `…_cornette_shanks_sampling_has_its_mean_cosine`             | 4      | 4.00  | 0.88 (g −0.3)                | 1.001–1.005 (4)             | 2 × 10⁵    | 0.04 s |
     | `…_tabulated_sampling_follows_the_table`                     | 4      | 4.00  | 1.41 (g −0.4, cos²)          | 0.997–1.010 (4)             | 2 × 10⁵    | 0.12 s |
     | `…_legendre_series_is_followed_exactly`                      | 2      | 4.00  | 0.27 (the mean weight)       | 1.002–1.025 (2)             | 2 × 10⁵    | 1.0 s  |
+- **Deviations in T12.b.1, as built** (2026-10-23; `view/atmosphere/reference/` (new): `cases.ts`,
+  `geometries.ts` and `references.ts`, the four `<name>.case.json` and `<name>.reference.json`,
+  `sampleCounts.json` and `refusals.json`, and `cases.test.ts`, `references.test.ts` and
+  `absorberCurves.test.ts`; `view/atmosphere/gate.ts` and its test (new); `test/atmosphereCases.ts`
+  and its test (new); `crates/hyperion-fit/src/atmosphere/`: `absorber.rs` and
+  `absorber_curves.json` (new), `case.rs`, `transport.rs`, `optics.rs`, `mod.rs`, `reference.rs`;
+  `cli.rs`; `.prettierignore`. Rulings: `decision-r08-t12b-scope.md`, and main's answer on the
+  issue, 2026-10-21).
+  - _The cases_ (`reference/cases.ts`, production code that imports nothing from the tests; R08.T10.a's
+    kept scenes read these media). Each traces at the fitted channels under the reference Sun's
+    per-channel illuminance at 1 au, lx, with a 0.5° cone, at a seed of its own (`earth` 0,
+    `earth-ozone-slab` 1, `mars` 2, `saturn-oblate` 3), so that two cases' noise is independent, as
+    Design note 10's false-failure count assumes; one seed would have given `earth` and
+    `earth-ozone-slab` the same paths but at the slab's edges (the plan-conformance check).
+    - `earth`: `EARTH_REFERENCE` (its measured ozone under `EARTH_REFERENCE_CURVES`) on a sphere of
+      `tableRadiusM(WGS 84)`, 6,371,008.77 m. Vertical τ 0.172, 0.228 and 0.394: Rayleigh 0.051,
+      0.102 and 0.258, the aerosol 0.081, 0.101 and 0.136, the ozone's curve at its vertical
+      column 0.039, 0.025 and 0.
+    - `earth-ozone-slab`: `EARTH_SLAB_REFERENCE` (`EARTH_SLAB_REFERENCE_CURVES`) on the same sphere;
+      the slab's vertical τ is the measured ozone's to 10⁻⁴.
+    - `mars`: `MARS_REFERENCE`, the first Mars medium: R08.T3.c's molecular term of `MARS_AIR` on
+      `MARS_FIT_COLUMN`, the dust by `aerosolTerm` (TAMUdust2020's hexahedra with their matrix and
+      forward delta; g 0.7089, 0.7272 and 0.7762), well mixed from the column's base to its top, and a
+      grey ground of 0.25, the NSSDCA sheet's Bond albedo (read by the science check; a whole-planet
+      figure, a hand value), on the column's 3,389.5 km, not `tableRadiusM` (ruled). Vertical τ 0.508,
+      0.502 and 0.498. Its ozone is not modelled: a vertical Chappuis depth under about 10⁻³ at
+      6 DU, the most on record, and at most 0.3 DU at the equator (Perrier et al. 2006), about
+      2 × 10⁻³ along the limb (the science check's estimate). Against `marsFitAir`, which interpolates
+      on a 20 nm grid, `aerosolTerm`'s dust differs by +0.035%, +0.024% and −0.005% in scattering,
+      −1.5%, −0.36% and −0.01% in absorption, and by at most 0.16% in phase (forward); neither is
+      changed.
+    - `saturn-oblate`: `SATURN_OBLATE_REFERENCE`, the fixture's `saturnClassMedium()` rebuilt from its
+      constants and held equal to it term for term, with its figure and gravity (`cases.test.ts`):
+      Saturn's level spheroid by `bodyGravity` with no figure law, H 49,722.7 m, its top 16 H (the
+      fixture's; T12.d's note named 40 H for an exponential), a grey ground of 0.3, no absorber
+      (CH₄'s 4,500 ppm is in its Rayleigh term, its bands T12.b.2's) and no aggregates. Vertical τ
+      0.142, 0.285 and 0.728, against the spheroid ruling's τ₅₅₀ 0.223 for its own model (μ 2.25 and
+      T3.a's column): a check, not a target. The quadrics' reach past the top at 16 H holds about
+      e⁻¹⁶ × 0.27 H of a column, under the beam check's 10⁻⁶, which every geometry passes, so the top
+      stays.
+  - _The writer_ (`test/atmosphereCases.ts`, beside `mieMatrices.ts`, whose `linearInUMoments` it
+    reads): `caseJson` writes every term from the full medium, a table's `asymmetry` the optics' g
+    and its entries normalised under the linear-in-u rule, Cornette–Shanks and a table without a
+    matrix marked `depolarising`, a `tabulated` density without `edgesM`; a curve with pressure rows,
+    a pair absorber, a missing curve or asymmetry, and curves not one an absorber are refused, each
+    tested in `atmosphereCases.test.ts`. `traceCommand` names the trace, with
+    `--samples 4096 --stokes --threads 4`.
+  - _The geometry sets_ (`reference/geometries.ts`), each geometry in an image as Design note 10
+    groups them, none within 3° of its sun but Mars's 3° points:
+    - Ground observers stand 1 m above the datum, the client's sky view's least camera height
+      (`skyViewHeight`). On Saturn's spheroid at 60° a sun exactly on the horizon was hidden by
+      rounding in the tracer, its ray starting on the datum and meeting it again, and not in the
+      client's march (the beam check found it); 1 m settles it in every case alike (accepted by
+      main, 2026-10-21).
+    - `earth`, `earth-ozone-slab`, `mars`: Design note 10's 107 ground views at latitude 0, the sun at
+      azimuth 0. The disc seen straight down from 1,000 km at phase angles 0°, 30°, 60°, 75° and 85°,
+      the sub-observer point's sun zenith (one point, not a disc integral), each an image. The limb
+      from 1,000 km tangent at 0.1, 0.3, 1, 3 and 10 H over the equator looking north, the sun 60°
+      from the tangent point's zenith at right angles to the line of sight, one image; H is
+      `localScaleHeightM(medium, 0)` (ruling 7): 2,102 m on Earth, the green extinction's e-folding
+      of the air and the aerosol together (the air's alone is 8.45 km, the aerosol's 1.2 km), so
+      Earth's limbs stand at 0.21–21 km, a deviation to revisit (main, 2026-10-21: kept as traced,
+      the higher limb T12.b.2's); 11,101 m on Mars. Aerial perspective 2 m up along the horizon east,
+      over 1, 10 and 32 km to a black target, the sun 60° from the zenith in the north, one image.
+      Aggregates at latitude 0 under suns at 0°, 30°, 60° and 80°. 120 geometries.
+    - `mars` adds R08.T13's eight points, 3°, 5°, 8° and 12° above a sun 5° and 30° up in its
+      vertical plane: those under the sun at 60° join that ground image and raise its floor, those
+      under 85° are an image of their own. 128 geometries.
+    - `saturn-oblate`: ground views at the equator (the sun in the east), at 60° (the sun along the
+      meridian, poleward) and at the pole, each looking north and east at Design note 10's view and
+      sun zeniths (azimuths collapse at a view zenith of 0°, and at the pole under the zenith sun),
+      51, 51 and 47; and the limb at 0.3, 1 and 3 H at the geodetic height n H ÷ s(φ) over the
+      equator, 45° and the pole, the line of sight east, the sun on the tangent point's horizon along
+      the meridian, poleward (at the terminator), seen from 24,000 km back along the line of sight
+      (about 5,000 km up), an image a latitude. 158 geometries. `cases.test.ts` marches each written
+      limb ray and finds its lowest point at the stated latitude and height, and the sun on its
+      horizon there.
+  - _The format's two additions_ (`CASE_FORMAT` and `REFERENCE_FORMAT` stay 1: none was committed
+    before). A term's optional `absorber`: its `kind`, `"column"`, its `numberDensityPerM3`, and its
+    `curves`, one a sun, each `{ logColumns, opticalDepth }`; it is carried only by a term of no
+    scattering, absorption or phase, and `pair` and a curve of several pressure rows are refused
+    until T12.b.2. And
+    an optional `samples` on each geometry and aggregate, the command's `--samples` the default; the
+    reference records each one's `samples`, `quarterSamples` (⌊N ÷ 4⌋) and the σ of its first quarter
+    (of the vector and the scalar radiance, and of both fluxes of an aggregate). A sample's key is
+    unchanged.
+  - _The estimator_ (`transport.rs`, `absorber.rs`): each path carries each absorber's column,
+    molecules m⁻², from the detector (the forced collision's piece, the ground seen directly, every
+    later flight, by the 8-point rule per shell piece; clones and copies inherit it), and each
+    next-event score towards sun s takes the sun leg's column beside its transmittance and
+    multiplies by T_s(u_path + u_leg), read by the client's rule; `sunOpticalDepth` and
+    `directGround` add −ln T of the beam's own column. The draws do not depend on it, and a case with
+    no absorber traces bit for bit as before: the three pins are unchanged. Each score being one
+    whole path, it is exact for a band mean where every other term's extinction, absorption and phase
+    and the ground are grey within the channel under the sun's and the response's weight, the curve
+    is one row, and several absorbers' spectra are uncorrelated (the multiplication property; the
+    science check). Tests: an e^(−σu) curve against the same σ as absorption to 10⁻¹² (Beer–Lambert,
+    and Rayleigh over a black ground, in both modes); a √u curve on a two-leg path, T(u₁ + u₂) to
+    10⁻⁸ where T(u₁)T(u₂) is 51% and 76% lower at its two wavelengths; per-geometry counts changing
+    their own draws alone, the first quarter's σ the trace's at N ÷ 4 to the bit across blocks; one
+    and four threads with an absorber and uneven counts; the refusals.
+  - _The shared values_ (`absorber_curves.json`, 80 kB, written by `absorberCurves.test.ts`): the
+    tracer's read against the client's `absorberTransmittance` on Earth's two ozone curves and a
+    saturated synthetic one (a step from τ 0 in green, the floor in red), 0 to 10⁵ times past the last
+    node: largest relative difference 1.6 × 10⁻¹⁶, held to 10⁻¹².
+  - _A faster lookup, the same bits_ (`optics.rs`'s `ProfileLookup`; accepted by main, 2026-10-21): a
+    tabulated profile's node is found from an even grid of buckets and a step or two, the node
+    `partition_point` finds and so the same interpolation (held to `at` to the bit by
+    `atmosphere_a_profiles_lookup_reads_it_to_the_bit`). Smoke traces of all four cases, one geometry
+    and aggregate in eight at 64 samples with `--stokes`, are byte for byte the same with and without
+    it, and Earth's runs some 15% faster.
+  - _`gate.ts`_: Design note 10's metric with its named constants (0.05, F = 3 × 10⁻⁴, 4 and 8; 0.02
+    and 0.0025 for the aggregates; 16 for a sanity range; 25% for the N^(−1/2) check), the images
+    and their floors, the refusals (`noisy`, σ > T ÷ 8, with the count it would need; `unscaled`,
+    σ beyond 25% of σ_q √(N_q ÷ N)), the cone average (uniform in solid angle, as the tracer draws),
+    the beam's two checks, the aggregates' and sanity ranges' tests, and the diagnostics: Δu′v′, ΔE*ab
+    through `toneCurve` at the AVG exposure, IPRT's relative RMS and L_max ÷ mean. Its test confirms
+    Design note 10's figure: 5% of a grey is at most 0.92 ΔE*ab (at the metered mean) anywhere from
+    10⁻⁴ to 10³ times it, held under its 0.96. `reference/references.ts` reads the references as its
+    readings, vector or scalar, and holds the client's own beam quadrature, converged below 10⁻⁷.
+    `gate()` reports a refused geometry, not holds it; from R08.T14.d a refused geometry does not
+    pass, which that task takes from the refusals.
+  - _The counts_ (`sampleCounts.json`): N_p (σ_p ÷ (0.85 T ÷ 8))², the most over the channels and over
+    the vector and the scalar radiance, in whole blocks of 1,024 (at least 4,096); an aggregate's from
+    σ_F ≤ 0.85 × 0.0025 F. Each case's needs passed 12 h, so every geometry past a common wall time
+    was traced at it (`earth` 14.5 min, `earth-ozone-slab` 14.8, `mars` 10.9, `saturn-oblate` 27;
+    accepted by main, 2026-10-21). Pilots: `--stokes` at seeds from 1000, one sub-case an image so
+    that each image's cost was measured, 4 threads at a load of about 4 (not committed). This departs
+    from T12.c's record, which had T12.b trace a twilight view until σ_ref ≤ T ÷ 8 held: under ruling
+    8 the costliest are capped and refused instead.
+  - _The traces_ (`hyperion-fit atmosphere-reference` with `--samples 4096 --threads 4 --stokes`;
+    the release profile, thin LTO, one binary for all four (SHA-256 `2236421e…`), built from this
+    task's tree before the Rust review's renames of the absorbers' columns to their unit; the
+    committed tree's build gives smoke traces of all four cases, one geometry and aggregate in eight
+    at 64 samples with `--stokes`, byte for byte the same; a laptop's Intel Core i7-8665U, 8 threads,
+    traced on 4 under `nice -n 10` and a 4 GB memory scope, one case at a time; load the 1-minute
+    average at the start and the end, the trace's own 4 threads in it). Counts over the geometries
+    and aggregates
+    together (over the geometries alone the medians are 36,864, 36,864, 115,200 and 47,616):
+
+    | Case               | Geometries × λ    | Seed | N_p                        | Counts min / median / max    | Needed | CPU    | Wall        | Load      |
+    | ------------------ | ----------------- | ---- | -------------------------- | ---------------------------- | ------ | ------ | ----------- | --------- |
+    | `earth`            | (120 + 4 × 2) × 3 | 0    | 4,096                      | 6,144 / 40,448 / 560,128     | 245 h  | 51.7 h | 13 h 16 min | 1.3, 4.2  |
+    | `earth-ozone-slab` | (120 + 4 × 2) × 3 | 1    | 4,096                      | 6,144 / 40,448 / 571,392     | 230 h  | 47.3 h | 12 h 0 min  | 4.2, 4.0  |
+    | `mars`             | (128 + 4 × 2) × 3 | 2    | 4,096; 16,384 near the sun | 7,168 / 132,096 / 648,192    | 55 h   | 47.3 h | 12 h 2 min  | 3.4, 4.2  |
+    | `saturn-oblate`    | 158 × 3           | 3    | 65,536                     | 13,312 / 47,616 / 52,109,312 | 29 h   | 53.4 h | 13 h 43 min | 3.2, 13.4 |
+    - Against the 12 h projection: `earth` ran 11% over, and `earth-ozone-slab`, the same work but
+      its slab, and `mars` on it; the projection took each image's cost per sample from its pilot,
+      and why `earth` ran slower was not measured. `saturn-oblate` ran 14% over, other lanes' gates
+      running beside it for hours (the load to 14 at its end).
+    - The first final trace of `earth-ozone-slab` was stopped by the machine's restart 6 h 20 min in,
+      before it wrote anything, and traced again from the start with the same case, seed and binary.
+    - _Refused_ (`refusals.json`; the vector and the scalar radiance alike but on `saturn-oblate`,
+      whose scalar radiance holds five the vector refuses, `equator-s60-v85-a0`, `equator-s95-v75-a0`,
+      `equator-s95-v85-a0`, `equator-s95-v85-a90` and `lat60-s95-v30-a0`; every refusal named
+      `noisy`, `gate.ts`'s first reason; each refused geometry's largest σ ÷ (T ÷ 8), the count it
+      would need, and that count's wall time on 4 threads at its pilot's cost):
+      - `earth`: all 21 `ground-s95` views in every channel, 3.5–9.8 at 560,128, needing 6.8 × 10⁶
+        to 5.4 × 10⁷ (2.9–23 h each); the five `ground-s90-v85` views in blue, 1.05–1.27 at
+        290,816, needing 3.2–4.7 × 10⁵ (0.3–0.4 h each); `flux-s80`, its upwelling in every channel
+        and its downwelling in blue, σ_F ÷ F up to 3.9 × 10⁻³ at 107,520, needing 2.6 × 10⁵ (0.6 h).
+      - `earth-ozone-slab`: the same 21 and five and `flux-s80`: `ground-s95` 3.4–9.8 at 571,392,
+        needing 6.7 × 10⁶ to 5.5 × 10⁷ (2.9–24 h each); `ground-s90-v85` in blue 1.02–1.24 at
+        310,272, needing 3.2–4.7 × 10⁵ (0.3–0.4 h each); `flux-s80` σ_F ÷ F up to 3.8 × 10⁻³ at
+        112,640, needing 2.6 × 10⁵ (0.6 h).
+      - `mars`: 19 of the 21 `ground-s95` views in every channel, 1.08–3.69 at 386,048 and 648,192,
+        needing 7.6 × 10⁵ to 8.8 × 10⁶ (0.2–2.5 h each); 15 of the 21 `ground-s90` views, 1.01–1.81
+        at 144,384 and 389,120, needing 1.6 × 10⁵ to 1.3 × 10⁶ (0.2–0.6 h each); and all four
+        aggregates, σ_F ÷ F up to 9.4 × 10⁻³ (`flux-s0`), 3.8 × 10⁻³ (`flux-s30`), 7.3 × 10⁻³
+        (`flux-s60`) and 1.5 × 10⁻² (`flux-s80`) at 165,888, needing 3.7 × 10⁵ to 5.7 × 10⁶
+        (0.4–6.2 h). Two were not capped and were refused all the same: `aerial-1km` in blue, 1.19
+        at 376,832, needing 5.3 × 10⁵ (0.3 h), its σ as its first quarter predicts; and `disc-p30`
+        in red, 2.51 at 61,440, needing 3.9 × 10⁵ (0.3 h), whose σ is 4.6 times its first quarter's
+        prediction, so it fails the N^(−1/2) check too: a rare heavy path after the first quarter,
+        like the aggregates' heavy tails (`flux-s0`'s green downwelling σ is 0.54 of its first
+        quarter's prediction, its heavy path in that quarter). `aerial-32km`, capped, is held.
+      - `saturn-oblate`: 19 of its 27 views under the sun at 95° (the equator's 3 of 9, 60°'s 7 and
+        the pole's 9), most in blue alone, 1.03–2.43 at 50,345,984 to 52,109,312, needing 5.3 × 10⁷
+        to 3.1 × 10⁸ (0.5–2.7 h each); and `equator-s60-v85-a0` in blue, not capped, 1.002 at 47,104,
+        needing 47,270, whose σ is 0.70 of its first quarter's prediction, so it fails the
+        N^(−1/2) check too.
+    - _Near the sun_ (Mars alone runs VROOM; `earth`'s Cornette–Shanks aerosol, 0.933 sr⁻¹ forward,
+      and `saturn-oblate`'s Rayleigh run R08.T12.c's estimator): its 14 geometries within 15° of the
+      sun (Design note 10's six and R08.T13's eight), piloted first at 16,384 samples, σ ÷ L from
+      0.33% (3° above the sun 30° up) to 5.4% (`ground-s95-v85-a0`), every σ falling as N^(−1/2)
+      from its first quarter (0.91–1.06). The aureole points needed 7,000–90,000 samples.
+      `ground-s90-v85-a0` and `ground-s95-v85-a0` were capped by the budget at Mars's 10.9 min a
+      geometry, short of σ ≤ T ÷ 8 and under the VROOM ruling's 30 minutes. In the final trace the
+      14 end at σ ÷ L 0.49–1.11%, every σ within 0.96–1.10 of its first quarter's prediction; three
+      are refused, each falling as N^(−1/2) but capped short of its cap: `ground-s90-v75-a0` (1.06
+      at 144,384), `ground-s90-v85-a0` (1.59 at 144,384) and `ground-s95-v85-a0` (1.78 at 386,048).
+      The aureole points and the other three are held.
+    - _The aggregates_ (the downwelling flux at the ground, direct and diffuse, and the plane albedo,
+      the upwelling flux at the top, each over the flux incident at the top; red, green and blue):
+
+      | Case    | Sun zenith | Downwelling         | Plane albedo        |
+      | ------- | ---------- | ------------------- | ------------------- |
+      | `earth` | 0°         | 0.929, 0.919, 0.878 | 0.105, 0.128, 0.192 |
+      | `earth` | 30°        | 0.916, 0.904, 0.857 | 0.109, 0.135, 0.207 |
+      | `earth` | 60°        | 0.848, 0.827, 0.759 | 0.130, 0.174, 0.286 |
+      | `earth` | 80°        | 0.616, 0.594, 0.536 | 0.210, 0.300, 0.493 |
+      | `mars`  | 0°         | 0.959, 0.946, 0.897 | 0.231, 0.214, 0.184 |
+      | `mars`  | 30°        | 0.944, 0.922, 0.869 | 0.239, 0.220, 0.187 |
+      | `mars`  | 60°        | 0.854, 0.830, 0.766 | 0.285, 0.255, 0.202 |
+      | `mars`  | 80°        | 0.627, 0.585, 0.477 | 0.464, 0.402, 0.296 |
+
+      σ ÷ F of each flux: `earth`'s 2.3 × 10⁻⁴ to 3.9 × 10⁻³ (`flux-s0`'s, which R08.T13 reads,
+      2.3–5.4 × 10⁻⁴ in the downwelling and 1.3–2.1 × 10⁻³ in the plane albedo's), `mars`'s
+      2.1 × 10⁻³ to 1.5 × 10⁻². The scalar fluxes of the same paths differ from these by at most
+      0.0008 (`earth`) and 0.00002 (`mars`), and `earth-ozone-slab`'s from `earth`'s by at most
+      0.004.
+
+    - _The beam_: every committed `sunOpticalDepth` equals the client's quadrature to 10⁻⁶ max(1, τ).
+      The worst |Δτ| ÷ max(1, τ): `earth` 3.8 × 10⁻¹⁰ (`ground-s60-v0-a0`, red, τ 0.342);
+      `earth-ozone-slab` 7.2 × 10⁻⁸ (`ground-s0-v30-a0`, red, τ 0.171); `mars` 3.8 × 10⁻¹⁰
+      (`ground-s0-v30-a0`, red, τ 0.508); `saturn-oblate`, against `spheroidOpticalDepth`,
+      2.0 × 10⁻⁸ (`lat60-s60-v0-a0`, blue, τ 1.352).
+    - _Sizes_, bytes, each under the 500 kB hook (`cases.test.ts`): the cases 145,432 (`earth`),
+      110,801 (`earth-ozone-slab`), 236,701 (`mars`) and 53,764 (`saturn-oblate`); the references
+      227,505, 227,518, 255,508 and 288,423; `sampleCounts.json` 18,606, `refusals.json` 9,212 and
+      `absorber_curves.json` 80,206.
+    - Merged with the integration branch at `GENERATOR_VERSION` 23 (the traces ran on 22's tree; the
+      tracer and the cases' inputs did not move, the cases are current, and the final tree's build
+      gives the smoke traces byte for byte).
+    - The pending benchmarks (Garcia and Siewert's, Loughman et al.'s) do not hold the references:
+      T12.c's seven families, T12.e's two and T12.f's two pass (ruling 8).
+- **Deferred findings (2026-10-13 rule)** (R08.T12.b.1). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The legs apart_: `tablesCpu.ts` takes T_view(u_view) T_sun(u_sun) where the reference takes
+    T(u_view + u_sun) (ruling 4): T13's to measure (ozone's red about +1.5% at 2 × 10 × 300 DU).
+  - _Earth's limb, a deviation to revisit_: `localScaleHeightM` is the green extinction's e-folding,
+    2.10 km on Earth against the air's 8.45 km, so its limbs stand at 0.21–21 km and none higher (the
+    science check, the TypeScript review). Main kept ruling 7 as traced (2026-10-21), and an extra
+    `limb` image for `earth` at the air's scale height, tangent to about 85 km, is T12.b.2's.
+  - _The slab's limb_: `earth-ozone-slab`'s limbs at 0.21–21 km leave only the 10 H ray tangent
+    inside the slab (18.6–38.5 km), none at its base or top, where R08.T13's layer-edge checks at the
+    limb look (the plan-conformance check). Traced as built; main, 2026-10-22: T12.b.2 adds the higher
+    `limb` image (tangents to about 85 km) to `earth-ozone-slab` as well as `earth`, and tangents at
+    the slab's base and top.
+  - _The twilight images_: with the sun 5° below the horizon a ground view needs up to 5.4 × 10⁷
+    samples on Earth and 3.1 × 10⁸ on Saturn (the final traces) for σ ≤ T ÷ 8, since few forced
+    collisions see the sun; those capped are refused. A variance reduction for a view whose lit air
+    is far along its ray is not built.
+  - _The aggregates under a low sun_: `earth`'s `flux-s80` misses its cap (σ_F ÷ F up to
+    3.9 × 10⁻³), and Mars's fluxes are heavy-tailed, the dust's forward delta caught only by the rare
+    hemisphere ray within 0.08° of the sun (`flux-s80` would need 1.2 × 10⁷ by the pilot).
+  - _Earth's cost_: R08.T3.a's column puts a shell boundary at each of its ~980 levels below the top,
+    so each estimate's transmittance crosses some thousand shells at eight points each, about 4 ms of
+    CPU a sample at a wavelength.
+  - _The depth-to-space walk_ is repeated, with the absorbers' columns, in
+    `depth_and_columns_to_space_from` and `beam_optical_depth`, so that a case with no absorber keeps
+    its bits by the old code: a later change to one must be made to both (the Rust review). A fused
+    walk that took the depths and the columns at the same nodes would save the second height of
+    each node on an absorber case's sun legs (the Rust review; not measured).
+  - _`TooManySamples`_ also names an overflow of the run's blocks past 2⁶⁴, as `u64::MAX` samples.
+  - §2.5 (circumsolar virtual importance sampling) stays unbuilt (ruling 8), main's deferred item:
+    three near-sun geometries of `mars` are refused, `ground-s90-v75-a0`, `ground-s90-v85-a0` and
+    `ground-s95-v85-a0`, each falling as N^(−1/2) and short of its cap only by the budget's 10.9 min;
+    no near-sun geometry failed to scale, in the pilots or the final trace.
+  - _Heavy tails away from the sun_: `mars`'s `disc-p30` (red) and green `flux-s0`, and
+    `saturn-oblate`'s `equator-s60-v85-a0` (blue), caught a rare heavy path, so their σ does not fall
+    as N^(−1/2) from the first quarter (4.6, 0.54 and 0.70 of its prediction); all three refused.
 - **Deviations in T0, as built** (2026-10-09; in `view/engine/webgpu/`, `compute.ts`,
   `kernelResources.ts`, `resources.ts`, `drawing.ts` and their tests; `smoke/work.ts` and
   `smoke/page.ts`). R01's seam as the task gives it. What differs:
