@@ -1,4 +1,5 @@
-//! The refit with free widths (plan 15, P15.T3.a), run from `manifests/mge.refit.toml`.
+//! The refit with free widths (plan 15, P15.T3.a), run from `manifests/mge.refit.toml`, with the
+//! boxy bulge's [`super::boxy`] (P15.T3.b).
 //!
 //! The first cut ([`super::fit`]) fixes its widths on a logarithmic grid and fits only the
 //! weights. The refit frees the widths, as Cappellari's method does (2002, MNRAS 333, 400): the
@@ -10,7 +11,11 @@
 //! Levenberg–Marquardt ([`levenberg_marquardt`]) moves the 14 logarithms of the
 //! widths. At every point it evaluates, the weights are the non-negative least-squares solution
 //! ([`nnls`]) for those widths, and the residual is what that solution leaves. Its Jacobian is
-//! taken by forward differences in ln width. At the end the widths are sorted, ascending, and the
+//! taken by forward differences in ln width, each shifted residual the plain least-squares one
+//! ([`least_squares`]) on the columns that NNLS left free at the point: near the point that is
+//! the NNLS solution, so this is the variable-projection derivative where the free set holds, and
+//! it costs one QR where a fresh NNLS would cost one per column freed. At the end the widths are
+//! sorted, ascending, and the
 //! weights solved once more on them, so each table's weights are a non-negative solve on its
 //! widths.
 //!
@@ -41,10 +46,11 @@
 use hyperion_sim::galaxy::fields::disc::{THIN_DISC_HOLE_LENGTHS, hole_mass_fraction};
 use hyperion_sim::math;
 
+use super::boxy::{self, BoxyFigures, BoxyParams, BoxyRow, ROWS};
 use super::{BAR_END, BAR_LEVEL, BAR_WIDTH, WIDTHS, bar_mass, bar_profile, expansion, index};
 use crate::emit::{RustTable, TableItem, literal};
 use crate::manifest::{Manifest, ManifestParamError};
-use crate::optimise::{levenberg_marquardt, nnls};
+use crate::optimise::{least_squares, levenberg_marquardt, nnls};
 use crate::task::{RunTaskError, TaskOutput};
 
 /// The manifest key whose presence selects the refit; its one accepted value is [`METHOD`]. A
@@ -54,7 +60,7 @@ pub(crate) const METHOD_KEY: &str = "method";
 /// The refit's method name in its manifest.
 pub const METHOD: &str = "free_widths";
 
-/// Every key the refit's manifest holds.
+/// Every key the one-dimensional refit reads; the boxy fit reads [`BoxyParams::KEYS`].
 const KEYS: [&str; 21] = [
     METHOD_KEY,
     "widths",
@@ -123,10 +129,16 @@ pub struct RefitParams {
     minimax_iterations: u32,
     /// The bar's rounds of a polish of its widths and a minimax solve of its weights, at least 1.
     bar_rounds: u32,
+    /// The boxy bulge's fit (P15.T3.b).
+    boxy: BoxyParams,
 }
 
 /// A count of the manifest's, from `min` to [`MAX_COUNT`].
-fn count(manifest: &Manifest, key: &str, min: usize) -> Result<usize, ManifestParamError> {
+pub(super) fn count(
+    manifest: &Manifest,
+    key: &str,
+    min: usize,
+) -> Result<usize, ManifestParamError> {
     usize::try_from(manifest.u64(key)?)
         .ok()
         .filter(|n| (min..=MAX_COUNT).contains(n))
@@ -134,13 +146,17 @@ fn count(manifest: &Manifest, key: &str, min: usize) -> Result<usize, ManifestPa
 }
 
 /// An iteration count of the manifest's, from `min` to [`MAX_COUNT`].
-fn iterations(manifest: &Manifest, key: &str, min: usize) -> Result<u32, ManifestParamError> {
+pub(super) fn iterations(
+    manifest: &Manifest,
+    key: &str,
+    min: usize,
+) -> Result<u32, ManifestParamError> {
     u32::try_from(count(manifest, key, min)?)
         .map_err(|_| ManifestParamError::new(key, &format!("a count from {min} to {MAX_COUNT}")))
 }
 
 /// A finite number above 0.
-fn positive(manifest: &Manifest, key: &str) -> Result<f64, ManifestParamError> {
+pub(super) fn positive(manifest: &Manifest, key: &str) -> Result<f64, ManifestParamError> {
     let x = manifest.f64(key)?;
     if x.is_finite() && x > 0.0 {
         Ok(x)
@@ -150,7 +166,7 @@ fn positive(manifest: &Manifest, key: &str) -> Result<f64, ManifestParamError> {
 }
 
 /// A finite number of at least 0.
-fn non_negative(manifest: &Manifest, key: &str) -> Result<f64, ManifestParamError> {
+pub(super) fn non_negative(manifest: &Manifest, key: &str) -> Result<f64, ManifestParamError> {
     let x = manifest.f64(key)?;
     if x.is_finite() && x >= 0.0 {
         Ok(x)
@@ -163,7 +179,7 @@ fn non_negative(manifest: &Manifest, key: &str) -> Result<f64, ManifestParamErro
 }
 
 /// The array of numbers at `key`, each finite and above 0, if it has `n` of them.
-fn positives(manifest: &Manifest, key: &str, n: usize) -> Option<Vec<f64>> {
+pub(super) fn positives(manifest: &Manifest, key: &str, n: usize) -> Option<Vec<f64>> {
     let array = manifest.params().get(key)?.as_array()?;
     let values: Vec<f64> = array
         .iter()
@@ -173,7 +189,7 @@ fn positives(manifest: &Manifest, key: &str, n: usize) -> Option<Vec<f64>> {
 }
 
 /// A positive range `[lo, hi]`, `lo < hi`, written as a two-number array.
-fn range(manifest: &Manifest, key: &str) -> Result<(f64, f64), ManifestParamError> {
+pub(super) fn range(manifest: &Manifest, key: &str) -> Result<(f64, f64), ManifestParamError> {
     match positives(manifest, key, 2).as_deref() {
         Some(&[lo, hi]) if lo < hi => Ok((lo, hi)),
         _ => Err(ManifestParamError::new(
@@ -222,7 +238,7 @@ impl RefitParams {
         if let Some(extra) = manifest
             .params()
             .keys()
-            .find(|k| !KEYS.contains(&k.as_str()))
+            .find(|k| !KEYS.contains(&k.as_str()) && !BoxyParams::KEYS.contains(&k.as_str()))
         {
             return Err(ManifestParamError::new(
                 extra,
@@ -263,7 +279,14 @@ impl RefitParams {
             bar_minimax_scales: three(manifest, "bar_minimax_scales")?,
             minimax_iterations: iterations(manifest, "minimax_iterations", 1)?,
             bar_rounds: iterations(manifest, "bar_rounds", 1)?,
+            boxy: BoxyParams::from_manifest(manifest)?,
         })
+    }
+
+    /// The boxy bulge's parameters.
+    #[must_use]
+    pub fn boxy(&self) -> &BoxyParams {
+        &self.boxy
     }
 
     /// Levenberg–Marquardt's iterations for each polish.
@@ -318,17 +341,50 @@ impl<F: Fn(&[f64; WIDTHS]) -> Vec<[f64; WIDTHS]>> Problem<F> {
         widths
     }
 
-    /// The residuals that the non-negative weights for widths `e^θ` leave, into `out`.
-    fn residuals(&self, theta: &[f64], out: &mut [f64]) {
+    /// The residuals that the non-negative weights for widths `e^θ` leave, into `out`, and those
+    /// weights.
+    fn residuals(&self, theta: &[f64], out: &mut [f64]) -> Vec<f64> {
         let rows = (self.rows)(&Self::widths(theta));
         let weights = nnls(&rows, &self.rhs);
-        for ((o, row), &b) in out.iter_mut().zip(&rows).zip(&self.rhs) {
+        Self::leave(&rows, &self.rhs, &weights, out);
+        weights
+    }
+
+    /// `rows · weights − rhs` into `out`.
+    fn leave(rows: &[[f64; WIDTHS]], rhs: &[f64], weights: &[f64], out: &mut [f64]) {
+        for ((o, row), &b) in out.iter_mut().zip(rows).zip(rhs) {
             *o = row
                 .iter()
-                .zip(&weights)
+                .zip(weights)
                 .fold(0.0, |sum, (&a, &w)| sum + a * w)
                 - b;
         }
+    }
+
+    /// The residuals for widths `e^θ` of the least-squares weights on the columns `free` alone
+    /// (the others 0), into `out`; the full non-negative solve if those columns are dependent.
+    fn residuals_on(&self, theta: &[f64], free: &[usize], out: &mut [f64]) {
+        let rows = (self.rows)(&Self::widths(theta));
+        let restricted: Vec<Vec<f64>> = rows
+            .iter()
+            .map(|row| free.iter().map(|&k| row[k]).collect())
+            .collect();
+        let solved = if free.is_empty() {
+            None
+        } else {
+            least_squares(&restricted, &self.rhs)
+        };
+        let weights = match solved {
+            Some(coefficients) => {
+                let mut weights = vec![0.0; WIDTHS];
+                for (&k, c) in free.iter().zip(coefficients) {
+                    weights[k] = c;
+                }
+                weights
+            }
+            None => nnls(&rows, &self.rhs),
+        };
+        Self::leave(&rows, &self.rhs, &weights, out);
     }
 
     /// Polishes `start`'s widths in ln width, then solves the weights on the sorted widths: the
@@ -342,13 +398,14 @@ impl<F: Fn(&[f64; WIDTHS]) -> Vec<[f64; WIDTHS]>> Problem<F> {
     ) -> ([(f64, f64); WIDTHS], u32) {
         let m = self.rhs.len();
         let model = |theta: &[f64], r: &mut [f64], jacobian: Option<&mut [f64]>| {
-            self.residuals(theta, r);
+            let weights = self.residuals(theta, r);
             if let Some(jacobian) = jacobian {
+                let free: Vec<usize> = (0..WIDTHS).filter(|&k| weights[k] > 0.0).collect();
                 let mut shifted = theta.to_vec();
                 for (k, column) in jacobian.chunks_exact_mut(m).enumerate() {
                     shifted[k] = theta[k] + step;
                     let h = shifted[k] - theta[k];
-                    self.residuals(&shifted, column);
+                    self.residuals_on(&shifted, &free, column);
                     for (c, &base) in column.iter_mut().zip(r.iter()) {
                         *c = (*c - base) / h;
                     }
@@ -357,7 +414,14 @@ impl<F: Fn(&[f64; WIDTHS]) -> Vec<[f64; WIDTHS]>> Problem<F> {
             }
         };
         let theta: Vec<f64> = start.iter().map(|&s| math::ln(s)).collect();
-        let fit = levenberg_marquardt(model, &theta, &[f64::NEG_INFINITY; WIDTHS], m, iterations);
+        let fit = levenberg_marquardt(
+            model,
+            &theta,
+            &[f64::NEG_INFINITY; WIDTHS],
+            &[f64::INFINITY; WIDTHS],
+            m,
+            iterations,
+        );
         let mut widths = Self::widths(&fit.params);
         widths.sort_by(f64::total_cmp);
         let weights = nnls(&(self.rows)(&widths), &self.rhs);
@@ -371,7 +435,7 @@ impl<F: Fn(&[f64; WIDTHS]) -> Vec<[f64; WIDTHS]>> Problem<F> {
 
 /// The largest of `errors`, a NaN counting as larger than any number.
 #[must_use]
-fn largest(errors: &[f64]) -> f64 {
+pub(super) fn largest(errors: &[f64]) -> f64 {
     errors
         .iter()
         .fold(0.0, |w: f64, &e| if e.is_nan() || e > w { e } else { w })
@@ -826,9 +890,14 @@ solved once more on the sorted widths. Inputs:
     )
 }
 
-/// The refit's table: its summary, its notes and its items, in the order T3.c commits them.
+/// The refit's table: its summary, its notes and its items, in the order T3.c commits them, after
+/// the `use` line of `MGE_BOXY`'s row type.
 #[must_use]
-pub(crate) fn render(params: &RefitParams, refit: &Refit) -> RustTable {
+pub(crate) fn render(
+    params: &RefitParams,
+    refit: &Refit,
+    boxy_rows: &[BoxyRow; ROWS],
+) -> RustTable {
     let rows = |table: &[(f64, f64); WIDTHS]| table.iter().map(|&(w, s)| vec![w, s]).collect();
     let doc = |lines: &[&str]| lines.iter().map(|&l| l.to_owned()).collect();
     RustTable {
@@ -837,8 +906,13 @@ pub(crate) fn render(params: &RefitParams, refit: &Refit) -> RustTable {
                 .to_owned(),
             "note 6).".to_owned(),
         ],
-        notes: notes(params).lines().map(str::to_owned).collect(),
+        notes: notes(params)
+            .lines()
+            .chain(boxy::notes(&params.boxy).lines())
+            .map(str::to_owned)
+            .collect(),
         items: vec![
+            TableItem::Source(boxy::USE_LINE.to_owned()),
             TableItem::Tuples {
                 name: "MGE_EXP".to_owned(),
                 doc: doc(&["`e^(−s) ≈ Σ weight × exp(−s² ÷ 2 width²)` for `s ≥ 0`."]),
@@ -860,12 +934,14 @@ pub(crate) fn render(params: &RefitParams, refit: &Refit) -> RustTable {
                 ]),
                 rows: rows(&refit.bar),
             },
+            TableItem::Source(boxy::item(boxy_rows)),
         ],
     }
 }
 
-/// The refit's run on `manifest`: its table, `@generated` if every figure passes
-/// ([`passes`]), else provisional by P15.T3.a with the figures in its acceptance line.
+/// The refit's run on `manifest`: its table, `@generated` if every figure passes ([`passes`] and
+/// [`BoxyFigures::passes`]), else provisional by the first subtask whose figures miss, P15.T3.a or
+/// P15.T3.b, with the figures in its acceptance line.
 ///
 /// # Errors
 ///
@@ -874,14 +950,23 @@ pub(crate) fn run(manifest: &Manifest) -> Result<TaskOutput, RunTaskError> {
     let params = RefitParams::from_manifest(manifest)?;
     let tables = refit(&params);
     let f = figures(&tables);
+    let boxy_rows = boxy::fit(&tables.exp, &params.boxy);
+    let boxy_figures = boxy_rows.each_ref().map(boxy::figures);
+    let provisional = if !passes(&f) {
+        Some("P15.T3.a")
+    } else if !boxy_figures.iter().all(BoxyFigures::passes) {
+        Some("P15.T3.b")
+    } else {
+        None
+    };
     Ok(TaskOutput {
-        table: render(&params, &tables),
+        table: render(&params, &tables, &boxy_rows),
         source: "the profiles of plan 02's mass model (Design note 6), expanded as sums of \
                  Gaussians after Emsellem, Monnet and Bacon (1994, A&A 285, 723), the widths \
                  free after Cappellari (2002, MNRAS 333, 400)"
             .to_owned(),
-        acceptance: acceptance(&f),
-        provisional: (!passes(&f)).then_some("P15.T3.a"),
+        acceptance: format!("{}; {}", acceptance(&f), boxy::acceptance(&boxy_figures)),
+        provisional,
     })
 }
 

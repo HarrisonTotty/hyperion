@@ -35,6 +35,7 @@
 //! in, it runs only with `--manifest` and `--out` to a scratch path, and `mge.toml` and
 //! [`VERSION`] still make the committed first cut, whose code here it leaves untouched.
 
+pub mod boxy;
 pub mod refit;
 
 use std::fmt::Write as _;

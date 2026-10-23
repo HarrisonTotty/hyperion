@@ -16,10 +16,12 @@ use hyperion_fit::emit::{HeaderKind, TableText, Workspace};
 use hyperion_fit::manifest::{Manifest, ManifestParamError};
 use hyperion_fit::pipeline::rerender;
 use hyperion_fit::task::{RunTaskError, find, registry};
+use hyperion_fit::tasks::mge::boxy::{self, BoxyRow};
 use hyperion_fit::tasks::mge::refit::{self, Refit, RefitParams, figures};
 use hyperion_fit::tasks::mge::{WIDTHS, fit, residuals};
 use hyperion_sim::GENERATOR_VERSION;
 use hyperion_sim::galaxy::consts::G;
+use hyperion_sim::galaxy::fields::bulge::BoxyBulge;
 use hyperion_sim::galaxy::fields::disc::{THIN_DISC_HOLE_LENGTHS, hole_mass_fraction};
 use hyperion_sim::galaxy::potential::mge::Gaussian;
 use hyperion_sim::galaxy::special::bessel_i0e;
@@ -403,7 +405,7 @@ fn the_refit_disc_s_circular_speed_follows_freeman() {
 // The refit's manifest end to end.
 
 /// The scratch run through the command line: `run mge --manifest manifests/mge.refit.toml --out
-/// <scratch>`, its header parsed back.
+/// <scratch>`, its header and items parsed back.
 #[test]
 fn the_refit_manifest_runs_end_to_end() {
     let dir = tempfile::tempdir().unwrap();
@@ -429,18 +431,40 @@ fn the_refit_manifest_runs_end_to_end() {
         header.manifest.as_deref(),
         Some("crates/hyperion-fit/manifests/mge.refit.toml")
     );
-    assert_eq!(header.kind, Some(HeaderKind::Generated));
+    // Every figure of T3.a passes; T3.b's density figure is its ruled structural miss, so the
+    // header is provisional by P15.T3.b with that figure in its acceptance line.
+    assert_eq!(
+        header.kind,
+        Some(HeaderKind::Provisional {
+            by: "P15.T3.b".to_owned()
+        })
+    );
     assert!(
         header
             .acceptance
             .as_deref()
-            .is_some_and(|a| a.contains("`MGE_EXP` within") && a.contains("cumulative mass")),
+            .is_some_and(|a| a.contains("`MGE_EXP` within")
+                && a.contains("cumulative mass")
+                && a.contains(
+                    "`MGE_BOXY` at c = 3, 3.5 and 4: mass-weighted rms relative density error"
+                )
+                && a.contains("a structural miss, ruled 2026-10-23")),
         "{header:?}"
     );
     // P15.T3.c adds `MGE_BOXY` to the task's `items()`; until then the refit's list is here.
     assert_eq!(
         common::declared(&split.body),
-        ["MGE_EXP", "MGE_HOLED_EXP", "MGE_BAR"]
+        ["MGE_EXP", "MGE_HOLED_EXP", "MGE_BAR", "MGE_BOXY"]
+    );
+    // Its rows' type is the sim's, which T3.c adds: three rows of sixteen terms.
+    assert!(
+        split
+            .body
+            .starts_with("\nuse crate::galaxy::potential::mge::BoxyTerm;\n")
+    );
+    assert_eq!(
+        split.body.matches("        BoxyTerm { weight: ").count(),
+        boxy::ROWS * boxy::TERMS
     );
     assert_eq!(
         common::declared(&TableText::of_file(COMMITTED).body),
@@ -525,8 +549,10 @@ fn a_manifest_that_is_neither_cut_nor_refit_is_refused() {
 }
 
 /// The refit's values out of their ranges are refused, before any fitting: a range that falls,
-/// an array of the wrong length, too few samples, too large a difference step, no rounds, and a
-/// negative weight.
+/// an array of the wrong length, too few samples, too large a difference step, no rounds, a
+/// negative weight, and for the boxy bulge another number of terms, boxinesses that fall, a
+/// split of q below 1 or outside the axis ratios' range, too few latitudes, and a grid past 100
+/// scale lengths.
 #[test]
 fn the_refit_refuses_values_out_of_range() {
     let param = |key: &str, line: &str| match run_on(&refit_params_with(key, line)) {
@@ -560,4 +586,176 @@ fn the_refit_refuses_values_out_of_range() {
         param("bar_mass_weight", "bar_mass_weight = -1.0"),
         ManifestParamError::new("bar_mass_weight", "a finite number of at least 0")
     );
+    assert_eq!(
+        param("boxy_terms", "boxy_terms = 12"),
+        ManifestParamError::new("boxy_terms", "16, the terms of each row of `MGE_BOXY`")
+    );
+    assert_eq!(
+        param("boxy_boxiness", "boxy_boxiness = [4.0, 3.5, 3.0]"),
+        ManifestParamError::new("boxy_boxiness", "an array of 3 positive numbers, ascending")
+    );
+    assert_eq!(
+        param("boxy_split", "boxy_split = 0.9"),
+        ManifestParamError::new(
+            "boxy_split",
+            "a number above 1 whose inverse and itself lie within `boxy_axis_ratios`"
+        )
+    );
+    assert_eq!(
+        param("boxy_axis_ratios", "boxy_axis_ratios = [0.05, 1.0]"),
+        ManifestParamError::new(
+            "boxy_split",
+            "a number above 1 whose inverse and itself lie within `boxy_axis_ratios`"
+        )
+    );
+    // Two latitudes would leave fewer residuals than the fit's 48 parameters.
+    assert_eq!(
+        param("boxy_angles", "boxy_angles = 2"),
+        ManifestParamError::new("boxy_angles", "a count from 3 to 1000000")
+    );
+    assert_eq!(
+        param("boxy_range", "boxy_range = [0.001, 800.0]"),
+        ManifestParamError::new("boxy_range", "a range that ends at 100 or below")
+    );
+}
+
+// Plan 15's boxy bulge (P15.T3.b), in memory from the refit's manifest.
+
+/// The spherical exponential's mass inside `r`, `8π [1 − e^(−r) (1 + r + r² ÷ 2)]`: the boxy body
+/// at `c` = 2.
+fn spherical_exponential_mass(r: f64) -> f64 {
+    8.0 * PI * (1.0 - math::exp(-r) * (1.0 + r + 0.5 * r * r))
+}
+
+/// The references against the spherical exponential, the body at `c` = 2: the direct mass to
+/// 10⁻¹², and both rules for the midplane force, `M(< R) ÷ R²`, the brute-force one to 10⁻⁶ and
+/// the multipole one to 10⁻⁸. At `c` = 3, 3.5 and 4 the whole mass is `3! V(c)` with `V` the sim's
+/// `BoxyBulge::unit_volume` to 10⁻¹², the mass inside 60 scale lengths is the whole to 10⁻¹², and
+/// the multipole rule, which the figures and the fit read, agrees with the brute-force integral
+/// to 10⁻⁶ at the six radii.
+#[test]
+fn the_boxy_references_hold_to_their_closed_forms_and_to_each_other() {
+    for r in boxy::MASS_RADII.into_iter().chain([8.0, 30.0]) {
+        let (got, want) = (boxy::enclosed_mass(2.0, r), spherical_exponential_mass(r));
+        assert!(
+            (got / want - 1.0).abs() < 1e-12,
+            "mass at {r}: {got} against {want}"
+        );
+    }
+    assert!((boxy::total_mass(2.0) / (8.0 * PI) - 1.0).abs() < 1e-12);
+    for c in [3.0, 3.5, 4.0] {
+        let whole = boxy::total_mass(c);
+        let volume = 6.0 * BoxyBulge::unit_volume(c);
+        assert!(
+            (whole / volume - 1.0).abs() < 1e-12,
+            "c = {c}: {whole} against {volume}"
+        );
+        let inside = boxy::enclosed_mass(c, 60.0);
+        assert!(
+            (inside / whole - 1.0).abs() < 1e-12,
+            "c = {c}: {inside} against {whole}"
+        );
+    }
+    for r in boxy::FORCE_RADII {
+        let want = spherical_exponential_mass(r) / (r * r);
+        let brute = boxy::midplane_force(2.0, r);
+        assert!(
+            (brute / want - 1.0).abs() < 1e-6,
+            "brute force at {r}: {brute} against {want}"
+        );
+        let multipole = boxy::multipole_force(2.0, r);
+        assert!(
+            (multipole / want - 1.0).abs() < 1e-8,
+            "multipole at {r}: {multipole} against {want}"
+        );
+    }
+    for c in [3.0, 3.5, 4.0] {
+        for r in boxy::FORCE_RADII {
+            let (brute, multipole) = (boxy::midplane_force(c, r), boxy::multipole_force(c, r));
+            assert!(
+                (multipole / brute - 1.0).abs() < 1e-6,
+                "c = {c} at {r}: multipole {multipole} against brute force {brute}"
+            );
+        }
+    }
+}
+
+/// The refit's three rows of `MGE_BOXY`, from its own `MGE_EXP`, as the manifest runs them.
+fn boxy_rows() -> [BoxyRow; 3] {
+    let params = refit_params();
+    boxy::fit(&refit::refit(&params).exp, params.boxy())
+}
+
+/// The inward pull in the plane of `terms` at radius `r`, `G` = 1: the sim's Gaussians, as T3.c
+/// builds them from the table.
+fn boxy_pull(terms: &[boxy::Term], r: f64) -> f64 {
+    terms.iter().fold(0.0, |sum, t| {
+        let g = Gaussian::new(SolarMasses::new(t.mass()), LightYears::new(t.width), t.q).unwrap();
+        sum + g.v_circ_sq(LightYears::new(r)) / (G * r)
+    })
+}
+
+/// P15.T3.b's figures for each boxiness, and plan 02's table checks for each row of `MGE_BOXY`:
+///
+/// - the mass inside spheres of 0.5, 1, 2 and 4 scale lengths within 1% of the direct integral,
+///   and the whole mass within 1%;
+/// - the midplane force within 1.9% of the multipole rule at the six radii, so within 2% of the
+///   brute-force integral, which the references test holds to it, and within 2% at 17 more radii
+///   between 0.2 and 12 scale lengths, so that the fit, whose force rows sit at the six, holds
+///   between them too;
+/// - the density's mass-weighted rms error is the structural miss main ruled on 2026-10-23
+///   (issue #94): above plan 15's 3%, which no non-negative sum of aligned Gaussians reaches, and
+///   held to the recorded best (13.3%, 17.5% and 20.7%) to half a percentage point;
+/// - non-negative weights, strictly ascending widths and positive axis ratios, which plan 02's
+///   `the_expansions_have_non_negative_weights_and_ascending_widths` gains at T3.c.
+#[test]
+fn mge_boxy_meets_plan_fifteen_s_mass_and_force_figures_and_holds_its_density_miss() {
+    let recorded = [0.133, 0.175, 0.207];
+    for (row, best) in boxy_rows().iter().zip(recorded) {
+        let f = boxy::figures(row);
+        assert!(f.worst_enclosed() < 0.01, "{f:?}");
+        assert!(f.total.abs() < 0.01, "{f:?}");
+        assert!(f.worst_force() < 0.019, "{f:?}");
+        for i in 0..=16 {
+            let r = 0.2 * math::exp(f64::from(i) / 16.0 * math::ln(60.0));
+            let error = boxy_pull(row.terms(), r) / boxy::multipole_force(row.c(), r) - 1.0;
+            assert!(
+                error.abs() < 0.02,
+                "c = {} at {r}: force off by {error:e}",
+                row.c()
+            );
+        }
+        assert!(
+            f.rms_density > 0.03 && f.rms_density < best + 0.005,
+            "{f:?}"
+        );
+        assert!(!f.passes(), "{f:?}");
+        // Every term carries weight: the seed splits after its weights are solved.
+        assert!(
+            row.terms()
+                .iter()
+                .all(|t| t.weight > 0.0 && t.width > 0.0 && t.q > 0.0),
+            "{row:?}"
+        );
+        assert!(
+            row.terms()
+                .windows(2)
+                .all(|pair| pair[0].width < pair[1].width),
+            "{row:?}"
+        );
+    }
+}
+
+/// Two fits of the boxiest row, the one Levenberg–Marquardt works hardest on, from the same
+/// one-dimensional table give the same bits: compared as their `Debug` text, the shortest
+/// decimals that read back to each bit pattern, so that a zero's sign counts, as it would in the
+/// table's literals. The rows are fitted independently by the same code; all three twice would
+/// take some 10 s.
+#[test]
+fn mge_boxy_is_deterministic() {
+    let params = refit_params();
+    let exp = refit::refit(&params).exp;
+    let c = params.boxy().boxiness()[2];
+    let once = format!("{:?}", boxy::fit_row(c, &exp, params.boxy()));
+    assert_eq!(once, format!("{:?}", boxy::fit_row(c, &exp, params.boxy())));
 }
