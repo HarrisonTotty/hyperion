@@ -503,6 +503,17 @@ provisional = false
 acceptance = "22044 full tracks; 135 of 1357 cells (9.9%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 1.1e-3, a 2.4e-4 and 8.2e-3, b 5.1e-4 and 1.3e-2"
 
 [[table]]
+name = "streams"
+path = "streams.rs"
+task = "streams"
+revision = 0
+inputs_sha256 = "5b9e18c781c760ab1b96fe7f7e19b781802b810454c2427d96417ac2a8bd9921"
+body_sha256 = "afca2ac98e6e0ab584d93c38c354e16ac4717184497ce3c096d9cb6b1829cdac"
+since_generator_version = 23
+provisional = true
+acceptance = "scratch: the brainstorm's 1.5, unfitted until P15.T11.b"
+
+[[table]]
 name = "stripping"
 path = "stripping.rs"
 task = "stripping"

@@ -1,0 +1,9 @@
+# Globular-cluster streams per globular cluster (plan 15, P15.T11), the multiplier plan 10's
+# `global_list::orphans` reads. P15.T11.a registers plan 10's hand-entered table with this task at
+# the same value, unfitted: revision 0 emits this scratch value, the brainstorm's 1.5 ("Streams and
+# accreted structure"), provisionally. P15.T11.b replaces the parameter with its fit against the
+# known globular-like streams, and bumps the revision.
+task = "streams"
+
+[params]
+scratch_streams_per_globular = 1.5

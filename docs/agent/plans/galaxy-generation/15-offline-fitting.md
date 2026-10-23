@@ -2276,3 +2276,69 @@ fit-check`; review-changes on this lane's diff.
     - The two Milky Way checks: the rotation curve against `bulge_spheroid`'s within 3% and
       `the_fixture_s_enclosed_masses_are_the_milky_ways`; the boxy figures here suggest the
       enclosed mass moves well under 1%.
+- **T11.a as built (lane `lane/98-p15-t11a`, 2026-10-23, at `GENERATOR_VERSION` 23; no value
+  moved, no bump).** The registration of the table that P10.T3.b committed by hand, by main's
+  ruling of 2026-10-23 on P15.T11.a's brief (issue #98). `galaxy::global_list::orphans` reads the
+  table as before, and nothing else of the sim changed.
+  - _Registered._ Task `streams` (`tasks::streams::StreamsTask`): revision 0 (`VERSION`),
+    `TaskClass::Fast`, the sim's `streams.rs`, one item, `ORPHAN_STREAMS_PER_GLOBULAR`, and an
+    empty fingerprint. `run` checks the manifest, reads its one parameter,
+    `scratch_streams_per_globular`, with `Manifest::f64`, refuses a value that is not positive and
+    finite with a `ManifestParamError`, and emits it as a `TableItem::Scalar`, `@provisional` by
+    P15.T11.a. `manifests/streams.toml` holds `scratch_streams_per_globular = 1.5`; there is no
+    smoke manifest. `task::REGISTRY` holds 48 tasks, `streams` between `stellar_fates_mid` and
+    `stripping`.
+  - _The emission._ `cargo run -q -p hyperion-fit -- run streams --since 23`, in the dev profile
+    (the bytes of `just fit streams`), which reported "body unchanged". The header is
+    ``@provisional by hyperion-fit 0.1.0, task `streams` revision 0 (P15.T11.a)``, with
+    `data: none`, `sim-fingerprint: none`, `since-generator-version: 23` (the hand-made table had
+    none, so it took the current version) and the acceptance "scratch: the brainstorm's 1.5,
+    unfitted until P15.T11.b". The lock entry's body SHA-256 is
+    `afca2ac98e6e0ab584d93c38c354e16ac4717184497ce3c096d9cb6b1829cdac`, its inputs SHA-256
+    `5b9e18c7…`; the `MANIFEST` row is revision 0, since 23, provisional.
+  - _The body is P10.T3.b's, byte for byte_, the item's doc comment included: its SHA-256 is the
+    same at the base. Only `//!` lines changed. The summary is the committed one, the fit header is
+    new, and the notes are rewritten: provisional by P15.T11.a, what P15.T11.b fits it against, and
+    a parameter of the generator version whatever the fit says.
+  - `just fit-check` gives `41 fresh, 6 warnings, 0 failures` at the base (37a38068) and
+    `41 fresh, 7 warnings, 0 failures` at the head, the seventh `streams`, provisional since 23.
+  - _Tests_, under nextest in the dev profile on an 8-thread laptop at load 5, four test threads (a
+    shared machine, so provisional). In `tests/streams.rs`: `streams_table_is_reproduced` (0.007
+    s) and `the_committed_multiplier_is_the_brainstorms_one_and_a_half` (0.006 s; 1.5 by
+    `assert_same_bits` against the test's own literal). In `tasks::streams`, each under 0.02 s:
+    `the_table_is_the_manifests_multiplier`, `the_run_emits_the_scratch_value_provisionally`,
+    `the_run_refuses_a_manifest_without_the_multiplier`,
+    `the_run_refuses_a_multiplier_that_is_not_positive_and_finite` (0, −1.5, ∞ and NaN) and
+    `the_run_refuses_another_tasks_manifest`. The registry's pinning test lists `streams`, and
+    `the_committed_tables_are_fresh` (15–19 s) and `every_committed_table_declares_its_tasks_items`
+    pass with it.
+  - _Deviations._
+    1. **The notes' census.** Checked against both sources: "over 120" is Bonaca and
+       Price-Whelan's (2025, New Astron. Rev. 100, 101713, §2.2) count of the streams reported,
+       wide and thin together, and Mateu (2023, MNRAS 520, 5225) lists 95. "Uncertain threefold" is
+       this plan's, not a source's. The notes say so, where the committed ones said "the census of
+       thin streams (over 120 known and far from complete; Bonaca and Price-Whelan 2025, Mateu
+       2023), uncertain threefold".
+    2. **The header's `source`** names the brainstorm's section and file, not its line (795 at the
+       base), which moves as the brainstorm is edited.
+  - _Deferred findings (2026-10-13 rule)._ P15.T11's Source line, "The census of thin streams:
+    over 120 known (Bonaca and Price-Whelan 2025; Mateu 2023)", has the wording of deviation 1: the
+    120 counts every stream and is Bonaca and Price-Whelan's alone. It is a wording fix for a lane
+    whose scope holds that line. The brainstorm's own sentence cites them alone and is right.
+  - _Records left as written, now stale in part._ Provides' "Built at 898a3c94" still lists
+    `streams` as hand-made, for P15.T11.a to register, and `task::REGISTRY` at 47 tasks; this record
+    supersedes both.
+  - _For T11.b._
+    - Replace `scratch_streams_per_globular` with the fit's parameters (the grid of k on 0.5–4.5,
+      the detectability cut's constants), and bump `VERSION` to 1: the inputs hash covers the
+      manifest and the revision, not the code (Design note 6).
+    - The item's doc comment is fixed text that quotes 1.5, so `render` must write the fitted
+      value and its source into it. `the_committed_multiplier_is_the_brainstorms_one_and_a_half`
+      pins 1.5, so a moved value changes that test, and its name, with the bump.
+    - A fit that runs plan 10's generator gains `fingerprint()` probes of the code it runs, as
+      `displaced_forms` and `kick_rank` do. If it runs over a minute it is `Slow`, and gains
+      `manifests/streams.smoke.toml`, a smoke test, and a slow `streams_table_is_reproduced`, as
+      `equipartition_block_is_reproduced` is.
+    - `provisional` becomes `None`, or `Some("P15.T11.b")` while the acceptance misses.
+    - `data/stream_census/` should mark each stream globular-like or not, explicitly: Bonaca and
+      Price-Whelan's census includes dwarf-galaxy streams, and mass alone does not split them.
