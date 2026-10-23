@@ -27,6 +27,7 @@ pub mod sky_phase_envelope;
 pub mod space_weathering;
 pub mod star_colour;
 pub mod stellar_fates;
+pub mod streams;
 pub mod stripping;
 pub mod substance_albedos;
 pub mod thermo_equilibrium;
