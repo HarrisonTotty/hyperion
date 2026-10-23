@@ -21,6 +21,7 @@ import {
   placeAnnulusLabels,
   placeCurveLabels,
   segmentBoxGapPx,
+  tickInksPx,
   TRIAD_BOX_REM,
   TRIAD_HEAD_REM,
   TRIAD_MARKER_REM,
@@ -1075,7 +1076,7 @@ describe("curveInksPx", () => {
     },
   ];
 
-  it("takes each orbit's segment and each line tick at the line scale, and no grid line, plane ring, eye, stalk or mark's tick, at 1.5", () => {
+  it("takes each orbit's segment at the line scale, and no grid line, plane ring, eye, stalk or tick, at 1.5", () => {
     // At 1.5 a line is drawn 2 device px a CSS px, 4/3 CSS px for each of its own: half of a 1 px
     // line's is 2/3 px, and of the selected orbit's 2 px, 4/3 px.
     const onePx = 2 / 1.5 / 2;
@@ -1085,16 +1086,23 @@ describe("curveInksPx", () => {
         [20, 20, expect.closeTo(onePx, 9)],
         [20, 70, expect.closeTo(onePx, 9)],
         [30, 30, expect.closeTo(2 * onePx, 9)],
-        [40, 44, expect.closeTo(onePx, 9)],
-        [40, 44, expect.closeTo(onePx, 9)],
       ],
     );
+  });
+
+  it("takes each line tick at the line scale, and no mark's tick, at 1.5", () => {
+    const onePx = 2 / 1.5 / 2;
+
+    expect(tickInksPx(OPS, 1.5).map((ink) => [ink.from.yPx, ink.to.yPx, ink.halfWidthPx])).toEqual([
+      [40, 44, expect.closeTo(onePx, 9)],
+      [40, 44, expect.closeTo(onePx, 9)],
+    ]);
   });
 });
 
 /** What the annuli's labels are placed among: nothing, but what is given. */
 function amid(surroundings: Partial<AnnulusLabelSurroundings> = {}): AnnulusLabelSurroundings {
-  return { standing: [], marks: [], brackets: [], curves: [], ...surroundings };
+  return { standing: [], marks: [], brackets: [], curves: [], ticks: [], ...surroundings };
 }
 
 /** An annulus's label beside a point, giving way to the marks', with the points it may move to. */
@@ -1363,6 +1371,28 @@ describe("placeAnnulusLabels (plan 14, P14.T42.d)", () => {
     expect(placed).toEqual([expect.objectContaining({ leftPx: 188, topPx: 150 - 4 - 17.5 })]);
   });
 
+  it("leaves an annulus label out where a tick crosses every place, rather than set it across one", () => {
+    // Ticks every 10 px across the view, as a belt's lie across the inner system at ALL.
+    expect(placeAnnulusLabels([ALONG], NARROW, amid({ ticks: stalksAcross(NARROW, 10) }))).toEqual(
+      [],
+    );
+  });
+
+  it("moves an annulus label along its edge to a place no tick crosses, though an orbit crosses it", () => {
+    // Two ticks across its first places, and an orbit across every place.
+    const ticks: InkPx[] = [200, 160].map((xPx) => ({
+      from: { xPx, yPx: 125 },
+      to: { xPx, yPx: 175 },
+      halfWidthPx: 1,
+    }));
+
+    const box = onlyBox(
+      placeAnnulusLabels([ALONG], NARROW, amid({ ticks, curves: stalksAcross(NARROW, 10) })),
+    );
+
+    expect(ticks.some((tick) => crosses(box, tick))).toBe(false);
+  });
+
   it("sets every annulus label at its first place where there is room, as built", () => {
     // Rings 100, 175, 220 and 250 px across about the centre of a 1214 x 625 stage, each labelled
     // on a side of its own, and no mark.
@@ -1583,6 +1613,7 @@ describe("placeAnnulusLabels on the orbit map's crowd at its three stages (plan 
         marks: markInksPx(ops, stage.ratio),
         brackets,
         curves: curveInksPx(ops, stage.ratio),
+        ticks: tickInksPx(ops, stage.ratio),
       });
 
       const inside: BoxPx = {

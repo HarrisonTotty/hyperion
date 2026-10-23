@@ -1219,10 +1219,10 @@ export function markInksPx(
  *
  * @remarks
  * Each segment of a polyline that is neither in `--line`, as the grid and the plane's rings are,
- * nor at a mark's weight, as the observer's eye is: the paths' and the annuli's edges; and each
- * tick of a `ticks` op at a line's weight: a belt's, the optimistic zone's edges' and a data
- * edge's. Each is its line at the line scale, `lineScale` ÷ the ratio times its width, as a stalk
- * is ({@link markInksPx}). The spheres' circles are not counted, nor are the scene's segments.
+ * nor at a mark's weight, as the observer's eye is: the paths' and the annuli's edges. Each is its
+ * line at the line scale, `lineScale` ÷ the ratio times its width, as a stalk is
+ * ({@link markInksPx}). The spheres' circles are not counted, nor are the scene's segments, nor
+ * the ticks, which {@link tickInksPx} gives.
  */
 export function curveInksPx(
   ops: ReadonlyArray<DrawOp>,
@@ -1240,7 +1240,25 @@ export function curveInksPx(
           inks.push({ from, to, halfWidthPx });
         }
       }
-    } else if (op.kind === "ticks" && op.weight === "line") {
+    }
+  }
+  return inks;
+}
+
+/**
+ * The ticks' strokes as `paint` draws them at a device-pixel ratio, CSS px: each tick of a `ticks`
+ * op at a line's weight, a belt's, the optimistic zone's edges' and a data edge's, at the line
+ * scale as {@link curveInksPx}'s lines are. No annulus label's box may cross one (plan 14,
+ * P14.T42.f).
+ */
+export function tickInksPx(
+  ops: ReadonlyArray<DrawOp>,
+  devicePixelRatio: number,
+): ReadonlyArray<InkPx> {
+  const lineFactor = lineScale(devicePixelRatio) / devicePixelRatio;
+  const inks: InkPx[] = [];
+  for (const op of ops) {
+    if (op.kind === "ticks" && op.weight === "line") {
       const halfWidthPx = (op.widthPx * lineFactor) / 2;
       for (const segment of op.segments) {
         inks.push({ from: segment.from, to: segment.to, halfWidthPx });
@@ -1369,8 +1387,13 @@ export interface AnnulusLabelSurroundings {
    * which each stands at least {@link LABEL_TEXT_CLEARANCE_REM} outside.
    */
   readonly brackets: ReadonlyArray<BoxPx>;
-  /** The orbits, the annuli's edges and the ticks, as {@link curveInksPx} gives them. */
+  /** The orbits and the annuli's edges, as {@link curveInksPx} gives them. */
   readonly curves: ReadonlyArray<InkPx>;
+  /**
+   * The belts' and the edges' ticks, as {@link tickInksPx} gives them, which no label's box may
+   * cross: a tick through a label's letters, in its own `--text-muted`, takes them out.
+   */
+  readonly ticks: ReadonlyArray<InkPx>;
 }
 
 /**
@@ -1392,11 +1415,12 @@ export interface AnnulusLabelSurroundings {
  * about every mark, where a mark's own label starts, so that it never stands nearer a body than the
  * body's own label and is never read as its name; and stands 0.125 rem clear of every stalk and of
  * the observer's eye (Q6 (d); R07.T16.j), the symbols among `marks` lying inside their brackets'
- * boxes. Of the places that qualify it takes the first that no orbit, annulus edge or tick crosses
- * at its width, since a stroke in the label's own `--text-muted` through its letters hides them;
- * else the first that qualifies. Where none qualifies the label is not drawn, with no last resort:
- * the zone is still named in its host's readout and on its switch, and a belt, ring or halo in the
- * list. The `--line` grid and the plane's rings may pass under it.
+ * boxes; and no tick crosses it at its width, since a belt's ticks, in the label's own
+ * `--text-muted`, take its letters out (plan 14, P14.T42.f). Of the places that qualify it takes
+ * the first that no orbit or annulus edge crosses at its width, since a stroke through its letters
+ * hides them; else the first that qualifies. Where none qualifies the label is not drawn, with no
+ * last resort: the zone is still named in its host's readout and on its switch, and a belt, ring
+ * or halo in the list. The `--line` grid and the plane's rings may pass under it.
  *
  * The labels are taken in the order given, which is the scene's: the zones first, each zone's
  * `HABITABLE ZONE` before its others, then the populations; each placed label stands for the next.
@@ -1416,11 +1440,13 @@ export function placeAnnulusLabels(
   const nearMark = inksNear(surroundings.marks, viewport, CURVE_MARK_CLEAR_REM * remPx);
   const nearBracket = boxesNear(surroundings.brackets, viewport, LABEL_TEXT_CLEARANCE_REM * remPx);
   const crossesCurve = inksAcross(surroundings.curves, viewport);
+  const crossesTick = inksAcross(surroundings.ticks, viewport);
   const qualifies = (box: BoxPx): boolean =>
     insideView(box, viewport, edgePx) &&
     standing.every((other) => boxGapPx(box, other) >= neighbourPx - GAP_TOLERANCE_PX) &&
     !nearBracket(box) &&
-    !nearMark(box);
+    !nearMark(box) &&
+    !crossesTick(box);
   // A curve through a label's letters hides them, but it is a preference and not a rule: a place
   // that a curve crosses still beats leaving the label out.
   const choose = (candidates: ReadonlyArray<BoxPx>): BoxPx | undefined => {

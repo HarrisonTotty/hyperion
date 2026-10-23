@@ -2478,6 +2478,32 @@ describe("SpatialView's selected annulus's label, placed as the selection's (pla
   });
 });
 
+describe("SpatialView's annulus labels, crossed by no tick (plan 14, P14.T42.f)", () => {
+  beforeEach(() => {
+    stubLayout(1200, 900);
+  });
+
+  it("leaves out a zone's label whose every place a belt's ticks cross, and draws it with the belt switched off", () => {
+    // A zone 1 to 2 ly about the view centre, its outer edge 17 px or less from it on the screen,
+    // inside a belt 0.5 to 45 ly about the same centre, ticked every 10° from 4 to 376 px out:
+    // every place beside the zone's outer edge, 8.8 rem long, lies across that fan of ticks. Before
+    // P14.T42.f, which makes the ticks a rule and not a preference, the label stood across them.
+    const zone: AnnulusMark = { ...ZONE, innerRadius: 1, outerRadius: 2 };
+    const belt: AnnulusMark = {
+      id: "belt",
+      innerRadius: 0.5,
+      outerRadius: 45,
+      ticks: true,
+      label: "",
+    };
+    const view = renderView({ scene: aScene({ points: [], annuli: [zone, belt] }) });
+    const withBelt = annulusBox("HABITABLE ZONE");
+    view.rerender({ scene: aScene({ points: [], annuli: [zone] }) });
+
+    expect([withBelt, annulusBox("HABITABLE ZONE") === null]).toEqual([null, false]);
+  });
+});
+
 describe("SpatialView picking", () => {
   beforeEach(() => {
     stubLayout(400, 300);
