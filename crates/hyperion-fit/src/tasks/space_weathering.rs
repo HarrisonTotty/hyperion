@@ -826,13 +826,15 @@ pub fn fresh_row(key: &str) -> Result<FreshRow, FitWeatheringError> {
 }
 
 /// The fixed solid grain density of row `key`, kg m⁻³, if it has one: a rock's, at every
-/// temperature (`GrainDensity::Fixed`).
+/// temperature (`GrainDensity::Fixed`), or a melt's solid beside its liquid by temperature
+/// (`GrainDensity::MeasuredLiquid`), the same value at generator version 23 and 24.
 #[must_use]
 fn fixed_solid_density(key: &str) -> Option<f64> {
     match by_key(key)?.substance().condensed()?.grain_density() {
         GrainDensity::Fixed {
             solid: Some(solid), ..
-        } => Some(solid.density().value()),
+        }
+        | GrainDensity::MeasuredLiquid { solid, .. } => Some(solid.density().value()),
         GrainDensity::Fixed { solid: None, .. } | GrainDensity::OfDiagram => None,
     }
 }

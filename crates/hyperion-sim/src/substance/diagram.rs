@@ -39,6 +39,7 @@
 //! The arithmetic is the crate's deterministic `math`, in fixed term order, and every inversion a
 //! fixed number of bisections, so that a value is the same bits on every target (sim-determinism).
 
+use super::condensed::ReadDensitiesRules;
 use super::phase::{MOLAR_GAS_CONSTANT, Phase, ice_ih_density};
 use super::{Source, SubstanceId, ids};
 use crate::math;
@@ -517,26 +518,42 @@ impl SolidDensity {
                 )
             }
             Self::Fixed { density, .. } => density,
-            Self::Measured(points) => {
-                let Some((&(t0, rho0), rest)) = points.split_first() else {
-                    return KilogramsPerCubicMetre::new(f64::NAN);
-                };
-                let (mut low_t, mut low_rho) = (t0.value(), rho0.value());
-                if t <= low_t {
-                    return KilogramsPerCubicMetre::new(low_rho);
-                }
-                for &(high, high_density) in rest {
-                    let (high_t, high_rho) = (high.value(), high_density.value());
-                    if t <= high_t {
-                        let f = (t - low_t) / (high_t - low_t);
-                        return KilogramsPerCubicMetre::new(low_rho + f * (high_rho - low_rho));
-                    }
-                    (low_t, low_rho) = (high_t, high_rho);
-                }
-                KilogramsPerCubicMetre::new(low_rho)
-            }
+            Self::Measured(points) => measured_at(points, temperature),
         }
     }
+}
+
+/// The density of the measured nodes `points` (rising in temperature) at `temperature`: linear
+/// between the two nodes about it, r₀ + f (r₁ − r₀) with f = (T − T₀) ÷ (T₁ − T₀), the lower
+/// node's segment at a node, and held at the first node's value below it and the last's above it;
+/// not a number for no nodes.
+///
+/// It is [`SolidDensity::Measured`]'s law and a [`GrainDensity::MeasuredLiquid`] liquid's, the
+/// same arithmetic as the fixture's readers' (decision-p14-t54a-grain-density §2.2), to the bit.
+///
+/// [`GrainDensity::MeasuredLiquid`]: super::GrainDensity::MeasuredLiquid
+#[must_use]
+pub(super) fn measured_at(
+    points: &[(Kelvin, KilogramsPerCubicMetre)],
+    temperature: Kelvin,
+) -> KilogramsPerCubicMetre {
+    let t = temperature.value();
+    let Some((&(t0, rho0), rest)) = points.split_first() else {
+        return KilogramsPerCubicMetre::new(f64::NAN);
+    };
+    let (mut low_t, mut low_rho) = (t0.value(), rho0.value());
+    if t <= low_t {
+        return KilogramsPerCubicMetre::new(low_rho);
+    }
+    for &(high, high_density) in rest {
+        let (high_t, high_rho) = (high.value(), high_density.value());
+        if t <= high_t {
+            let f = (t - low_t) / (high_t - low_t);
+            return KilogramsPerCubicMetre::new(low_rho + f * (high_rho - low_rho));
+        }
+        (low_t, low_rho) = (high_t, high_rho);
+    }
+    KilogramsPerCubicMetre::new(low_rho)
 }
 
 /// A solid phase, from `start` up to the next phase's start (the triple temperature for the
@@ -546,6 +563,10 @@ pub struct SolidPhase {
     pub(super) name: &'static str,
     pub(super) start: Kelvin,
     pub(super) density: Option<SolidDensity>,
+    /// Whether its density is one P14.T49.n read, which [`density`](Self::density) holds until
+    /// [`READ_DENSITIES_VERSION`](super::condensed::READ_DENSITIES_VERSION). P14.T54.b deletes the
+    /// flag with the hold.
+    pub(super) held: bool,
 }
 
 impl SolidPhase {
@@ -562,8 +583,14 @@ impl SolidPhase {
     }
 
     /// How its density is given, or `None` where no density was read.
+    ///
+    /// `None` too below generator version 24 (`READ_DENSITIES_VERSION`) for a density P14.T49.n
+    /// read (fcc argon's), which 23 does not model.
     #[must_use]
-    pub const fn density(&self) -> Option<&SolidDensity> {
+    pub fn density(&self) -> Option<&SolidDensity> {
+        if self.held && ReadDensitiesRules::in_force() == ReadDensitiesRules::Held {
+            return None;
+        }
         self.density.as_ref()
     }
 }
@@ -861,11 +888,12 @@ impl PhaseDiagram {
 
     /// The solid's density at `temperature` (at one atmosphere or its vapour's pressure, which
     /// differ by less than the measurements' errors), from 0 K to the triple temperature; `None`
-    /// outside them and in a phase whose density was not read.
+    /// outside them and in a phase whose density was not read, or is held
+    /// ([`SolidPhase::density`]).
     #[must_use]
     pub fn solid_density(&self, temperature: Kelvin) -> Option<KilogramsPerCubicMetre> {
         self.solid_phase_at(temperature)?
-            .density
+            .density()
             .map(|density| density.at(temperature))
     }
 
@@ -1799,7 +1827,8 @@ mod tests {
         // Sears and Klug's 50 K cell, and an interpolation.
         assert!((at("Xe", 50.0).unwrap() - 3_719.98).abs() < 1e-9);
         assert!((at("Xe", 52.5).unwrap() - f64::midpoint(3_719.98, 3_707.88)).abs() < 1e-9);
-        // Not read: argon's, hydrogen sulphide's, ethane's, β-oxygen's and β-carbon monoxide's.
+        // Not modelled at 23: argon's, which P14.T49.n reads and the registry holds until 24, and
+        // hydrogen sulphide's, ethane's, β-oxygen's and β-carbon monoxide's, not read.
         for (key, t) in [
             ("Ar", 50.0),
             ("H2S", 150.0),
@@ -1826,10 +1855,7 @@ mod tests {
             if d.melting().is_some() {
                 needed.push("p_melt");
             }
-            if d.solid_phases()
-                .iter()
-                .any(|phase| phase.density().is_some())
-            {
+            if d.solid_phases().iter().any(|phase| phase.density.is_some()) {
                 needed.push("ρ_s");
             }
             if d.triple_fusion_enthalpy_j_per_mol().is_some() {
@@ -1864,14 +1890,14 @@ mod tests {
             );
             assert!(d.sublimation()[0].lower() < d.triple_temperature(), "{key}");
         }
-        // A cell-volume fit's molar mass is its row's.
-        for key in ["CH4", "N2"] {
-            let row = by_key(key).unwrap().substance();
+        // A cell-volume fit's molar mass is its row's, held or not.
+        for id in condensables() {
+            let row = id.substance();
             for phase in row.phase_diagram().unwrap().solid_phases() {
                 if let Some(SolidDensity::CellVolume {
                     molar_mass_g_per_mol,
                     ..
-                }) = phase.density()
+                }) = phase.density.as_ref()
                 {
                     assert_same_bits(*molar_mass_g_per_mol, row.molar_mass_g_per_mol().unwrap());
                 }

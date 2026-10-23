@@ -6,7 +6,11 @@
 //! was not read, its source says what stands in and why, and an assumption is labelled one. One
 //! figure from memory stays, labelled so where it is cited: granite's solidus,
 //! `planetary::surface::reference`'s. The fourteen rows with a phase diagram take its densities
-//! and triple point ([`GrainDensity::OfDiagram`]). R09's reference rows (`basalt`, `basalt_fe`,
+//! and triple point ([`GrainDensity::OfDiagram`]). Six rows whose liquids lie hundreds of kelvin
+//! above their melting points, as cloud decks or lava, give their liquid by temperature beside a
+//! fixed solid ([`GrainDensity::MeasuredLiquid`]: `Fe`, `MgSiO3`, `Mg2SiO4`, `Al2O3`, `CaTiO3`
+//! and `S8`, each its source's `liquid grain density`; P14.T49.n, held until generator version
+//! 24). R09's reference rows (`basalt`, `basalt_fe`,
 //! `granite`, `feldspathic`, `phyllosilicate`, `Na2CO3`, `mars_dust`) are
 //! `planetary::surface::reference`'s, to the bit, which its tests hold.
 //!
@@ -57,6 +61,26 @@ const fn liquid(kg_m3: f64, at_k: f64) -> GrainDensity {
         solid: None,
         liquid: Some(density_at(kg_m3, at_k)),
     }
+}
+
+/// A [`GrainDensity::MeasuredLiquid`]: the solid's `kg_m3` kg m⁻³ at `at_k` kelvin and the
+/// liquid's `nodes`, rising in temperature (P14.T49.n; held until generator version 24).
+#[must_use]
+const fn solid_and_liquid(
+    kg_m3: f64,
+    at_k: f64,
+    nodes: &'static [(Kelvin, KilogramsPerCubicMetre)],
+) -> GrainDensity {
+    GrainDensity::MeasuredLiquid {
+        solid: density_at(kg_m3, at_k),
+        liquid: nodes,
+    }
+}
+
+/// A liquid's node: `kg_m3` kg m⁻³ at `k` kelvin.
+#[must_use]
+const fn node(k: f64, kg_m3: f64) -> (Kelvin, KilogramsPerCubicMetre) {
+    (Kelvin::new(k), KilogramsPerCubicMetre::new(kg_m3))
 }
 
 /// A transition of `kind` at `k` kelvin.
@@ -266,9 +290,15 @@ pub(in crate::substance) const METHANOL: CondensedColumns = CondensedColumns {
     ],
 };
 
-/// Iron's condensed phase, a giant's metal cloud: bcc iron.
+/// Iron's condensed phase, a giant's metal cloud: bcc iron, and its liquid by temperature,
+/// Assael et al. 2006's reference correlation in kg m⁻³ (the `liquid grain density` source; held
+/// until generator version 24).
 pub(in crate::substance) const IRON: CondensedColumns = CondensedColumns {
-    grain_density: solid(7_874.0, 293.0),
+    grain_density: solid_and_liquid(
+        7_874.0,
+        293.0,
+        &[node(1_811.15, 7_034.821_1), node(2_500.0, 6_396.946)],
+    ),
     transition: at(TransitionKind::Melting, 1_811.15),
     mechanics: MechanicsFamily::Metal,
     sources: &[
@@ -278,6 +308,22 @@ pub(in crate::substance) const IRON: CondensedColumns = CondensedColumns {
              at a 2.8664 Å, Z 2 (7.875 recomputed), ±0.1 per cent; its D(meas.) 7.3–7.87 \
              includes porous native iron",
             Basis::Fact,
+        ),
+        source(
+            "liquid grain density",
+            "liquid iron at one atmosphere, the reference correlation of Assael, Kakosimos, \
+             Banish, Brillo, Egry, Brooks, Quested, Mills, Nagashima, Sato and Wakeham 2006, J. \
+             Phys. Chem. Ref. Data 35, 285 (doi:10.1063/1.2149380), ρ = 7,034.96 − 0.926 (T − \
+             1,811 K) kg m⁻³, within ±0.8 per cent (its abstract's total uncertainty; 0.77 per \
+             cent at 95 per cent confidence): its values at the row's melting point, 1,811.15 K \
+             (the correlation's is 1,811 K), 7,034.8211, and at 2,500 K, 6,396.946, linear \
+             between and held beyond. The paper was not reached: its slope is as Boungou Dzaba \
+             et al. 2026 (J. Appl. Phys. 140, 115102) quote it and its 1,811 K as Assael et al. \
+             2017 (High Temp. High Press. 46, 391, Table 8) do, its intercept was seen only as \
+             citing papers' text matches, and its range of validity was not read. Boungou Dzaba \
+             et al.'s levitation to 3,100 K gives a slope of 0.487, from the same intercept 4 \
+             per cent denser at 2,400 K, recorded, not used",
+            Basis::Reduced,
         ),
         source(
             "transition",
@@ -438,11 +484,21 @@ pub(in crate::substance) const ACID_UV_ABSORBER: CondensedColumns = CondensedCol
 
 /// Elemental sulphur: α-S8, melting as β-sulphur.
 ///
-/// Its liquid, Io's flows and lakes, has no density here yet: decision-r11-palette-liquids §1.8
-/// asks for a measured liquid series (Meyer 1976, Chem. Rev. 76, 367, the finding aid), which was
-/// not read, so it is not modelled until P14.T49.b's last piece reads one.
+/// Its liquid, Io's flows and lakes, is the measured series decision-r11-palette-liquids §1.8 asks
+/// for, Kellas 1918's densities in kg m⁻³ as the International Critical Tables compile them, in
+/// three lines that change slope at the λ-transition (the `liquid grain density` source; read by
+/// P14.T49.n and held until generator version 24).
 pub(in crate::substance) const SULPHUR: CondensedColumns = CondensedColumns {
-    grain_density: solid(2_067.0, 298.0),
+    grain_density: solid_and_liquid(
+        2_067.0,
+        298.0,
+        &[
+            node(388.36, 1_808.7),
+            node(432.15, 1_772.1),
+            node(444.45, 1_770.45),
+            node(718.0, 1_606.9),
+        ],
+    ),
     transition: at(TransitionKind::Melting, 388.36),
     mechanics: MechanicsFamily::Salt,
     sources: &[
@@ -452,6 +508,23 @@ pub(in crate::substance) const SULPHUR: CondensedColumns = CondensedColumns {
              (COD 9011362: Fddd, a 10.4646, b 12.8660, c 24.4860 Å, Z 16): 2.0670 g cm⁻³, the \
              Handbook of Mineralogy's D(meas.) 2.07, ±0.1 per cent",
             Basis::Fact,
+        ),
+        source(
+            "liquid grain density",
+            "liquid sulphur at one atmosphere, Kellas 1918, J. Chem. Soc., Trans. 113, 903 \
+             (doi:10.1039/CT9181300903), as the International Critical Tables vol. III (1928), p. \
+             21, compile its densities d₄ᵗ from 115.1 to 445 °C (× 999.972 kg m⁻³ per g ml⁻¹, \
+             the mean of each pair of duplicates), reduced to three lines that meet at the \
+             λ-transition near 432 K (the ring liquid's by least squares, the plateau's and the \
+             polymer's through Kellas's 171.3 and 445 °C points), where the liquid polymerises \
+             and its expansion changes (Sauer and Borst 1967, Science 158, 1567; Zheng and Greer \
+             1992, J. Chem. Phys. 96, 2175, a change of slope with no minimum): the ring liquid's \
+             1,808.7 − 0.835 (T − 388.36 K) kg m⁻³ from the melting point to 432.15 K (1,772.1); \
+             the λ plateau's to Kellas's 1,770.45 at 444.45 K; and the polymer's 1,770.45 − 0.598 \
+             (T − 444.45 K) to the boiling point, 718 K (1,606.9), held beyond. They lie within \
+             3.5 kg m⁻³ (0.2 per cent) of Kellas's means, whose duplicates span ±2. Meyer 1976 \
+             (Chem. Rev. 76, 367), the finding aid §1.8 names, was not read",
+            Basis::Reduced,
         ),
         source(
             "transition",
@@ -626,9 +699,23 @@ pub(in crate::substance) const IRON_SULPHIDE: CondensedColumns = CondensedColumn
     ],
 };
 
-/// Enstatite, a silicate cloud: orthoenstatite.
+/// Enstatite, a silicate cloud: orthoenstatite, and its liquid by temperature, Lange 1997's
+/// partial molar volumes' M ÷ V in kg m⁻³ (the `liquid grain density` source; held until
+/// generator version 24).
 pub(in crate::substance) const ENSTATITE: CondensedColumns = CondensedColumns {
-    grain_density: solid(3_202.0, 298.0),
+    grain_density: solid_and_liquid(
+        3_202.0,
+        298.0,
+        &[
+            node(1_850.0, 2_565.36),
+            node(2_000.0, 2_533.60),
+            node(2_200.0, 2_492.46),
+            node(2_400.0, 2_452.63),
+            node(2_600.0, 2_414.06),
+            node(2_800.0, 2_376.68),
+            node(3_000.0, 2_340.44),
+        ],
+    ),
     transition: at(TransitionKind::Melting, 1_850.0),
     mechanics: MechanicsFamily::Silicate,
     sources: &[
@@ -643,6 +730,22 @@ pub(in crate::substance) const ENSTATITE: CondensedColumns = CondensedColumns {
             Basis::Fact,
         ),
         source(
+            "liquid grain density",
+            "liquid MgSiO3 at one bar, a melt model's, since no measurement was found (Thomas and \
+             Asimow 2013, J. Geophys. Res. Solid Earth 118, 5738, §1, on forsterite's): Lange \
+             1997's partial molar volumes at 1,773 K (Contrib. Mineral. Petrol. 130, 1, not read; \
+             as Iacovino and Till 2019, Volcanica 2, 1, Table 1, print them), SiO2 26.86 cm³ \
+             mol⁻¹ (dV/dT 0) and MgO 12.02 (3.27 × 10⁻³ cm³ mol⁻¹ K⁻¹), so V = 38.88 + 0.00327 \
+             (T − 1,773 K) cm³ mol⁻¹ and ρ = M ÷ V at the row's 100.387 g mol⁻¹: at the melting \
+             point, 1,850 K, 2,565.36 kg m⁻³ (falling 0.214 kg m⁻³ K⁻¹), at 2,000 K and every \
+             200 K to 3,000 K, 2,340.44, linear between (within 7 × 10⁻⁵ of M ÷ V) and held \
+             beyond. An extrapolation: MgO at 50 mol per cent against a calibration of at most \
+             38, and above the calibration's 1,900 K; its ±0.03–0.09 cm³ mol⁻¹ are the fit's \
+             errors only. MELTS's set (Lange and Carmichael 1990, `liquid::melt`'s) gives 1.1 \
+             per cent more at the 2,028.9 K cloud deck, recorded",
+            Basis::Reduced,
+        ),
+        source(
             "transition",
             "1,850 K, III to liquid (NIST-JANAF table Mg-014, Chase 1998), which takes the melt as \
              congruent; enstatite melts incongruently, to forsterite and a liquid",
@@ -652,9 +755,22 @@ pub(in crate::substance) const ENSTATITE: CondensedColumns = CondensedColumns {
     ],
 };
 
-/// Forsterite, a silicate cloud.
+/// Forsterite, a silicate cloud, and its liquid by temperature, Lange 1997's partial molar
+/// volumes' M ÷ V in kg m⁻³ (the `liquid grain density` source; held until generator version 24).
 pub(in crate::substance) const FORSTERITE: CondensedColumns = CondensedColumns {
-    grain_density: solid(3_219.0, 298.15),
+    grain_density: solid_and_liquid(
+        3_219.0,
+        298.15,
+        &[
+            node(2_171.0, 2_629.59),
+            node(2_300.0, 2_588.77),
+            node(2_450.0, 2_542.87),
+            node(2_600.0, 2_498.57),
+            node(2_750.0, 2_455.79),
+            node(2_900.0, 2_414.44),
+            node(3_000.0, 2_387.65),
+        ],
+    ),
     transition: at(TransitionKind::Melting, 2_171.0),
     mechanics: MechanicsFamily::Silicate,
     sources: &[
@@ -666,6 +782,22 @@ pub(in crate::substance) const FORSTERITE: CondensedColumns = CondensedColumns {
              2024; Kirfel et al. 2005; Takeuchi et al. 1984). The Handbook of Mineralogy's \
              D(meas.) 3.275 is a natural, iron-bearing olivine's. The crystal's, as enstatite's",
             Basis::Fact,
+        ),
+        source(
+            "liquid grain density",
+            "liquid Mg2SiO4 at one bar, a melt model's, since no measurement exists (Thomas and \
+             Asimow 2013, J. Geophys. Res. Solid Earth 118, 5738, §1): Lange 1997's partial molar \
+             volumes at 1,773 K as enstatite's liquid takes them, V = 50.90 + 0.00654 (T − 1,773 \
+             K) cm³ mol⁻¹ and ρ = M ÷ V at the row's 140.691 g mol⁻¹: at the melting point, \
+             2,171 K, 2,629.59 kg m⁻³ (falling 0.321 kg m⁻³ K⁻¹), at 2,300 K, every 150 K to \
+             2,900 K and at 3,000 K, 2,387.65, linear between (within 8 × 10⁻⁵ of M ÷ V) and \
+             held beyond. Thomas and Asimow 2013, Table 3, take the same law as forsterite \
+             liquid's one-bar state, 2,597 ± 11 kg m⁻³ at 2,273 K (here 2,597.2), as Davies et al. \
+             2021 (J. Geophys. Res. Planets 126, e2020JE006745, Table 2) do. An extrapolation: \
+             MgO at 67 mol per cent against a calibration of at most 38, and above the \
+             calibration's 1,900 K. MELTS's set (Lange and Carmichael 1990, `liquid::melt`'s) \
+             gives 2.3 per cent more at the 2,276.9 K cloud deck, recorded",
+            Basis::Reduced,
         ),
         source(
             "transition",
@@ -703,9 +835,15 @@ pub(in crate::substance) const SILICA: CondensedColumns = CondensedColumns {
     ],
 };
 
-/// Corundum, a hot giant's first condensate.
+/// Corundum, a hot giant's first condensate, and its liquid by temperature, Langstaff et al.
+/// 2013's levitated melt in kg m⁻³ (the `liquid grain density` source; held until generator
+/// version 24).
 pub(in crate::substance) const CORUNDUM: CondensedColumns = CondensedColumns {
-    grain_density: solid(3_989.0, 298.0),
+    grain_density: solid_and_liquid(
+        3_989.0,
+        298.0,
+        &[node(2_327.0, 2_900.0), node(3_240.0, 2_817.83)],
+    ),
     transition: at(TransitionKind::Melting, 2_327.0),
     mechanics: MechanicsFamily::Silicate,
     sources: &[
@@ -717,6 +855,19 @@ pub(in crate::substance) const CORUNDUM: CondensedColumns = CondensedColumns {
             Basis::Fact,
         ),
         source(
+            "liquid grain density",
+            "liquid alumina at one atmosphere by aerodynamic levitation, Langstaff et al. 2013, \
+             Rev. Sci. Instrum. 84, 124901, as Ishikawa, Paradis and Koyama 2022 (Front. Mater. \
+             9, 954126, Table 1) tabulate it: ρ = 2,900 − 0.09 (T − T_m) kg m⁻³ over 1,900–3,240 \
+             K, at the row's melting point, 2,327 K (Langstaff et al. give 2,323 K, 0.36 kg m⁻³ \
+             apart), 2,900, and at the range's end, 3,240 K, 2,817.83, linear between and held \
+             beyond. Paradis, Ishikawa, Saita and Yoda 2004 (Jpn. J. Appl. Phys. 43, 1496, \
+             electrostatic levitation) give 2,930 − 0.12 (T − 2,327 K) over 2,175–2,435 K, 1 per \
+             cent denser at the melting point; the review puts the containerless measurements \
+             within ±2.1 per cent",
+            Basis::Reduced,
+        ),
+        source(
             "transition",
             "2,327 K (NIST-JANAF table Al-101, Chase 1998); ICSC gives 2,054 °C through PubChem",
             Basis::Fact,
@@ -725,9 +876,24 @@ pub(in crate::substance) const CORUNDUM: CondensedColumns = CondensedColumns {
     ],
 };
 
-/// Perovskite, `CaTiO3`.
+/// Perovskite, `CaTiO3`, and its liquid by temperature, the code's melt model's M ÷ V in kg m⁻³
+/// (the `liquid grain density` source; held until generator version 24).
 pub(in crate::substance) const PEROVSKITE: CondensedColumns = CondensedColumns {
-    grain_density: solid(4_040.0, 298.0),
+    grain_density: solid_and_liquid(
+        4_040.0,
+        298.0,
+        &[
+            node(2_248.15, 2_982.69),
+            node(2_300.0, 2_948.59),
+            node(2_400.0, 2_884.98),
+            node(2_500.0, 2_824.05),
+            node(2_600.0, 2_765.64),
+            node(2_700.0, 2_709.60),
+            node(2_800.0, 2_655.79),
+            node(2_900.0, 2_604.07),
+            node(3_000.0, 2_554.33),
+        ],
+    ),
     transition: at(TransitionKind::Melting, 2_248.15),
     mechanics: MechanicsFamily::Silicate,
     sources: &[
@@ -738,6 +904,24 @@ pub(in crate::substance) const PEROVSKITE: CondensedColumns = CondensedColumns {
              Knight 2009, Can. Mineral. 47, 381 (COD 9013383), 4,039 kg m⁻³; ±0.1 per cent across \
              four modern cells (Büttner and Maslen 1992's, the Handbook of Mineralogy's, gives \
              4,020)",
+            Basis::Reduced,
+        ),
+        source(
+            "liquid grain density",
+            "liquid CaTiO3 at one bar, a melt model's, since no measurement was found (none by \
+             levitation or in a crucible, nor in Ishikawa, Paradis and Koyama 2022's table of \
+             levitated oxides, Front. Mater. 9, 954126): the partial molar volumes \
+             `liquid::melt`'s model takes, MELTS's set of Lange and Carmichael 1990, at 1,673 K, \
+             CaO 16.57 cm³ mol⁻¹ (2.92 × 10⁻³ cm³ mol⁻¹ K⁻¹) and TiO2 23.16 (7.246 × 10⁻³), so V \
+             = 39.73 + 0.010166 (T − 1,673 K) cm³ mol⁻¹ and ρ = M ÷ V at the row's 135.942 g \
+             mol⁻¹: at the melting point, 2,248.15 K, 2,982.69 kg m⁻³ (falling 0.665 kg m⁻³ \
+             K⁻¹), every 100 K from 2,300 K to 3,000 K, 2,554.33, linear between (within 1.2 × \
+             10⁻⁴ of M ÷ V) and held beyond. ±10 per cent, an assumption: TiO2 is 50 mol per \
+             cent against a calibration of at most 4, and Lange 1997's CaO with Lange and \
+             Carmichael 1987's TiO2, 28.32 cm³ mol⁻¹ at 1,773 K (Iacovino and Till 2019, \
+             Volcanica 2, 1, Table 1), give 2,547.5 kg m⁻³ at the 2,514.7 K cloud deck, this \
+             model 10.5 per cent more, recorded. The melting point is itself unverified (the \
+             transition's source)",
             Basis::Reduced,
         ),
         source(

@@ -2675,7 +2675,7 @@ fn condensates(mut list: Vec<Condensate>) -> Result<Vec<Condensate>, BuildCoarse
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::reference::{self, builder_of};
     use super::*;
     use crate::galaxy::placement::CellKey;
@@ -5027,7 +5027,8 @@ mod tests {
             "{read_ok} of {bodies}"
         );
         // The recorded gaps alone: no crust, an unlit record's 0 K, and the ices whose solid
-        // density the registry has not read (argon's, a phase of oxygen's).
+        // density the registry has not read under 23's rules (argon's, β-O2's: P14.T49.n reads
+        // them, held until 24; `under_24_s_densities_the_census_refuses_no_ice_for_its_density`).
         for cause in unread.keys() {
             let known = cause == NO_CRUST
                 || cause == UNLIT
@@ -5035,6 +5036,66 @@ mod tests {
                     .iter()
                     .any(|ice| cause == &format!("{ice}: DensityNotModelled"));
             assert!(known, "{cause}");
+        }
+    }
+
+    /// P14.T49.n's densities, held until 24 (`READ_DENSITIES_VERSION`): the census's systems,
+    /// generated and read under 24's densities, the census's walk of `for_body` alone. It refuses
+    /// no body for an ice whose solid density the registry has not read, solid argon's (fcc) and
+    /// β-O2's being read: only the census's other gaps remain, a crust not modelled and an unlit
+    /// record's 0 K. Under 23's rules the census
+    /// (`every_generated_solid_body_reads_into_inputs_the_builder_takes`) allows the "Ar Ice" and
+    /// "O2 Ice" refusals.
+    #[test]
+    fn under_24_s_densities_the_census_refuses_no_ice_for_its_density() {
+        use crate::substance::{ReadDensitiesRules, with_read_densities};
+        let contexts = sample_contexts(CENSUS, SEED, SampleFilter::ALL).unwrap();
+        let (bodies, read_ok, unread) = with_read_densities(ReadDensitiesRules::Read, || {
+            let (mut bodies, mut read_ok) = (0_usize, 0_usize);
+            let mut unread: std::collections::BTreeMap<String, usize> =
+                std::collections::BTreeMap::new();
+            for (ctx, records) in records_at_record_time(&contexts) {
+                for record in &records {
+                    let Section::Ok(surface) = record.surface() else {
+                        continue;
+                    };
+                    bodies += 1;
+                    let planet = planet_of(record, &records);
+                    match CoarseInputs::for_body(record, planet, &ctx) {
+                        Ok(_) => {
+                            assert_eq!(unread_cause(surface), None, "{:?}", record.index());
+                            read_ok += 1;
+                        }
+                        Err(error) => {
+                            assert_eq!(
+                                error,
+                                ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(
+                                    RecordSection::Surface
+                                )),
+                                "{:?}",
+                                record.index()
+                            );
+                            let cause = unread_cause(surface).unwrap_or_else(|| {
+                                panic!("{:?} reads no inputs for no cause", record.index())
+                            });
+                            *unread.entry(cause).or_default() += 1;
+                        }
+                    }
+                }
+            }
+            (bodies, read_ok, unread)
+        });
+        eprintln!(
+            "census under 24's densities: {bodies} bodies, {read_ok} read by `for_body`; not \
+             modelled: {unread:?}"
+        );
+        let unmodelled: usize = unread.values().sum();
+        assert!(
+            read_ok > 0 && read_ok + unmodelled == bodies,
+            "{read_ok} of {bodies}"
+        );
+        for cause in unread.keys() {
+            assert!(cause == NO_CRUST || cause == UNLIT, "{cause}");
         }
     }
 
@@ -5046,8 +5107,10 @@ mod tests {
 
     /// Why `for_body` reads no inputs for a body whose surface section is `surface`, or `None`
     /// where it reads them: its crust not modelled, its mean surface temperature not positive, or
-    /// the first palette entry the registry does not resolve, as `"<key> <role>: <cause>"`.
-    fn unread_cause(surface: &Surface) -> Option<String> {
+    /// the first palette entry the registry does not resolve, as `"<key> <role>: <cause>"`. Also
+    /// P14.T49.n's census's reading (`planetary/system/tests.rs`), which cannot reach the
+    /// palette's module.
+    pub(crate) fn unread_cause(surface: &Surface) -> Option<String> {
         let Modelled::Ok(crust) = surface.crust() else {
             return Some(NO_CRUST.to_owned());
         };
@@ -5517,10 +5580,11 @@ mod tests {
     }
 
     /// The recorded gaps, each answered not modelled (the lane's ruling, Batch E): a body whose
-    /// palette names an ice the registry has no solid density of, solid argon's on the coldest
-    /// airless members (P14.T49.b's `ARGON` diagram reads none), names the substance and the
-    /// cause in its palette's refusal; and an unlit body, whose record states its mean surface
-    /// temperature as its equilibrium temperature, 0 K, is not read.
+    /// palette names an ice the registry has no solid density of under 23's rules, solid argon's
+    /// on the coldest airless members (P14.T49.b's `ARGON` diagram reads none; P14.T49.n's fcc
+    /// density is held until 24, `under_24_s_densities_the_argon_ice_body_reads`), names the
+    /// substance and the cause in its palette's refusal; and an unlit body, whose record states
+    /// its mean surface temperature as its equilibrium temperature, 0 K, is not read.
     #[test]
     fn a_surface_the_registry_or_the_record_does_not_model_answers_not_modelled() {
         use crate::substance::ResolvePaletteEntryError;
@@ -5572,6 +5636,62 @@ mod tests {
             }
         }
         assert!(argon.is_some() && unlit.is_some(), "{argon:?}, {unlit:?}");
+    }
+
+    /// P14.T49.n's densities, held until 24 (`READ_DENSITIES_VERSION`): the first body of the
+    /// sample whose palette 23's rules refuse for its argon ice
+    /// (`a_surface_the_registry_or_the_record_does_not_model_answers_not_modelled`'s), generated
+    /// and read under 24's densities, reads into inputs, its argon ice's entry at solid argon's
+    /// density (fcc, about 1.6–1.77 × 10³ kg m⁻³ below its triple point).
+    #[test]
+    fn under_24_s_densities_the_argon_ice_body_reads() {
+        use crate::planetary::system::tests::{SEED as SYSTEMS_SEED, whole};
+        use crate::substance::{ReadDensitiesRules, ResolvePaletteEntryError, with_read_densities};
+        let refused = whole().iter().find_map(|(ctx, system)| {
+            let snapshot = system.snapshot_at(ctx, RECORD_TIME);
+            snapshot.bodies().iter().find_map(|record| {
+                let surface = record.surface().ok()?;
+                let Modelled::Ok(crust) = surface.crust() else {
+                    return None;
+                };
+                let mean = surface.conditions().mean_surface_temperature().value();
+                (mean > 0.0
+                    && palette::resolve(surface, crust)
+                        == Err(palette::ResolveBodyPaletteError::Solid {
+                            substance: key("Ar"),
+                            role: PaletteRole::Ice,
+                            cause: ResolvePaletteEntryError::DensityNotModelled,
+                        }))
+                .then(|| (ctx.clone(), record.index()))
+            })
+        });
+        let (ctx, index) = refused.expect("the sample holds an argon ice 23 refuses");
+        let (mean, ice) = with_read_densities(ReadDensitiesRules::Read, || {
+            let snapshot = generate(SYSTEMS_SEED, &ctx).snapshot_at(&ctx, RECORD_TIME);
+            let records = snapshot.bodies();
+            let record = records.iter().find(|r| r.index() == index).unwrap();
+            let Section::Ok(surface) = record.surface() else {
+                panic!("{index:?} has a surface under 24's densities");
+            };
+            let inputs = CoarseInputs::for_body(record, planet_of(record, records), &ctx)
+                .unwrap_or_else(|e| panic!("{index:?} reads under 24's densities: {e:?}"));
+            let ice = inputs
+                .palette()
+                .find(PaletteRole::Ice, key("Ar"))
+                .and_then(|at| inputs.palette().get(at))
+                .unwrap_or_else(|| panic!("{index:?} keeps its argon ice"))
+                .clone();
+            (surface.conditions().mean_surface_temperature().value(), ice)
+        });
+        assert!(
+            (1_550.0..1_800.0).contains(&ice.grain_density_kg_m3),
+            "{ice:?}"
+        );
+        eprintln!(
+            "{index:?} at T_s {mean:.1} K under 24's densities: its argon ice's entry at {:.1} \
+             kg m⁻³",
+            ice.grain_density_kg_m3
+        );
     }
 
     /// The surface tests' methane sea carries the registry's scattering, to the bit: its copy, as

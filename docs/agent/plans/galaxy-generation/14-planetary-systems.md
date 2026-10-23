@@ -6071,6 +6071,25 @@ rows' values.
   - _Files:_ the rows in `substance/rows/diagrams.rs`; `tests/golden/substance/registry.golden`;
     `packages/protocol/fixtures/substances.json`; the liquids' density law and its readers.
   - _Accept:_ `cargo test -p hyperion-sim substance`; `cargo test -p hyperion-sim planetary`.
+- **P14.T49.o The registry's named density gaps** (a registry rider after 24, the first
+  planetary bump it is ready for; no lane yet; decision-t24i-airless-state D5). P14.T49.n
+  closed with two solid phases unread, for want of a readable source. Both are labelled
+  `NoDensity` and named in §3.4's test as `GAPS_AT_24`.
+  - **β-CO**, from 61.585 K to its triple point at 68.16 K. Lead: Krupskii et al. 1975
+    (paywalled). No reader at 24: CO is neither a `Gas` row nor a deck's condensate.
+  - **H₂S's phase II**, 103.52–126.22 K. Leads: Giauque and Blue 1936; Cockcroft and Fitch
+    1990 (both paywalled); Yarnall and Hudson 2022 has neither phase. It is read at 24 through
+    P14.T52.c's decks by registry key, at a deck's base temperature: an ice giant's H₂S deck
+    based in the span carries a labelled `NoDensity` mode with no size or τ (24's gate counts
+    them).
+  - Liquid Fe's intercept, read at its primary source (P14.T49.n saw it only in citing papers).
+  - A stand-in between phase III's density at 103.52 K and phase I's at 126.22 K, labelled, only
+    by main's ruling at the rider, if no measured value is found.
+  - _Tests:_ `GAPS_AT_24` empties, or names what stays with its reason; the `NoDensity` list
+    shrinks; the decks 24's gate counted take a size and τ.
+  - _Files:_ the rows P14.T49.n read (`substance/rows/condensed.rs`, `rows/diagrams.rs`);
+    `tests/golden/substance/registry.golden`; `packages/protocol/fixtures/substances.json`.
+  - _Accept:_ `cargo test -p hyperion-sim substance`.
 
 #### P14.T50 Elements and redox
 
@@ -26621,6 +26640,114 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
 
     The 2-cycle is P14.T51.h's designed tail, not a defect: F′ is near −1 about a stable state,
     bracketed to its 10⁻⁹. Its lever, the superlinear bracketed root, is P14.T51.l, after 24.
+- **Deviations in P14.T49.n, as built (`p14-gate-24`, 2026-10-23).** `GENERATOR_VERSION` stays 23,
+  and nothing moves at 23: every golden, `registry.golden` and `substances.json` with them, is
+  byte-identical. Two holds at 24, each on `UNLIT_MEAN_VERSION`'s pattern (a rules enum, a
+  test-only thread-local switch with a restore guard, a tripwire naming what settles at the bump):
+  - _`READ_DENSITIES_VERSION`_ (`substance/condensed.rs`) sits at the registry's accessors, not at
+    its readers (main, 2026-10-22, against §6's "rows land pure, re-blessed at 23"): filling a
+    `none` moves existing bytes of `registry.golden`, `substances.json` and `condense.golden`, the
+    last p14-chem's. `SolidPhase` gains a `held` flag; `SolidPhase::density`, and through it
+    `PhaseDiagram::solid_density`, gives `None` for a held phase, and
+    `CondensedColumns::grain_density` gives the melts' `Fixed { solid, liquid: None }`, as at 23.
+    So substance_golden.rs's `check_named_shapes`, the client's `NO_GRAIN_DENSITY`
+    (parity.test.ts) and grainDensity.test.ts, which read the fixture, shrink at P14.T54.b's bless,
+    with the fixture's and `registry.golden`'s re-bless and `condense.golden`'s decks (the
+    prebless-24 list and the tripwire's text).
+  - _`COMPRESSED_LIQUIDS_VERSION`_ (`substance/liquid.rs`), for the compression, so that the bless
+    note attributes the two parts' moves apart.
+  - **The solid rows** (`rows/diagrams.rs`), every one held:
+    - fcc argon, a 17-node `Measured` table from Maltby, Hammer and Wilhelmsen 2024 (J. Phys.
+      Chem. Ref. Data 53, 043102, Eq. 27, fitted to Peterson, Batchelder and Simmons 1966 within
+      0.03%), 1,770.74 kg m⁻³ at 5 K to 1,621.60 at the triple point; Schwalbe 1973 lies
+      0.010–0.017% above. Dobbs and Jones 1957 was not read.
+    - β-O₂, Roder 1978's 11 points (J. Phys. Chem. Ref. Data 7, 949, Table 4), 1,527.39 at 23.88 K
+      to 1,463.14 at 43.801 K, held below 23.88 K, so the row's 23.14 K (the polynomials' crossing,
+      0.74 K below Roder's transition) takes 23.88 K's.
+    - H₂S's phase III, 1,230 at 80 K (Yarnall and Hudson 2022, Icarus 373, 114799, Table 1, from
+      Cockcroft and Fitch 1990's D₂S cell), and phase I, 1,162.01 from Vegard and Sinding-Oserød
+      1942's fcc cell (its temperature not read), with phase II a gap; and C₂H₆'s phase III, 719 at
+      85 K (van Nes and Vos 1978 as Yarnall and Hudson tabulate it), and the bcc phase I, 657.8 from
+      Klimenko, Gal'tsov and Prokhvatilov 2008's abstract, from 89.813 K (Atake and Chihara 1976);
+      the metastable phase II is not kept. Neither row is a `Gas` row, against the entry's "once
+      they are": a scope reading main accepted, so that §3.4's test covers all 14 condensables.
+  - **The brief's liquids** (brief-notes-24, "For T49.n"), a new `GrainDensity::MeasuredLiquid`
+    (a fixed solid and the liquid's nodes, linear between and held beyond, as `Measured` is):
+    liquid Fe (Assael et al. 2006's correlation, the paper not reached: its slope and 1,811 K as
+    later papers quote them, its intercept seen only in citing papers' text), Al₂O₃ (Langstaff et
+    al. 2013 as Ishikawa, Paradis and Koyama 2022 tabulate it, 1,900–3,240 K), MgSiO₃ and Mg₂SiO₄
+    (Lange 1997's partial molar volumes, extrapolated; Thomas and Asimow 2013's 2,597 ± 11 at 2,273
+    K agrees), CaTiO₃ (no measurement exists: the MELTS set that `melt.rs` reads, ±10%, against the
+    Lange set's 10.5% lower), and S₈ (Kellas 1918 via the International Critical Tables, three
+    lines meeting at the λ-transition; Meyer 1976 was not read).
+  - **The compression:** ρ_l(T, p) = ρ_reg(T) × ρ_eos(T, p′) ÷ ρ_eos(T, p_sat), p′ = max(p, p_sat)
+    held at 1,000 MPa, on the 13 pure rows with a reference equation of state (water's IAPWS-95),
+    by a new fixed 16-step Newton solve (`helmholtz.rs`, `compressed_density`) that keeps the last
+    finite density; `density_at_pressure` is unchanged. Water at 596.41 K and 22.5 MPa gives
+    690.64 kg m⁻³ (NIST 690.48); at 546.30 K and 8.25 MPa 766.01 (NIST 765.86); Earth's sea at 1
+    atm +4.66 × 10⁻⁵. The readers move together under the hold (W4): the partition's layers, its
+    seas' and other liquids' areas, its own-ocean weight, the palette's liquid entry (a
+    pressure-taking `liquid_properties_at_pressure`; `liquid_properties` stays saturated, so
+    liquids.golden does not move) and the photometry's liquid record (`area_mix.rs`, main,
+    2026-10-22). close_binary .0800 now carries 213 bar and 583.4 K, not the entry's 225 bar and
+    596 K: its sea's layer density goes 690.66 → 717.36 and its area 0.5623 → 0.5509 (the entry's
+    0.419 → 0.406 was an earlier record's).
+  - _Files beyond the plan's list:_
+    `substance/{condensed, diagram, helmholtz, liquid, mod, aerosol}.rs`,
+    `substance/liquid/{solution, tests}.rs`, `substance/rows/condensed.rs`;
+    `planetary/chem/partition.rs` and its tests, `planetary/surface/{palette, inputs}.rs`,
+    `planetary/surface/steps/climate/airless.rs`, `planetary/derive/photometry/area_mix.rs` and its
+    tests, `planetary/system/tests.rs`; `hyperion-fit/src/tasks/space_weathering.rs` (an exhaustive
+    match).
+  - _Tests:_
+    - `every_condensable_has_a_solid_density_over_its_solid_range` (decision-p14-t51a-part2 §3.4):
+      under the hold the gaps are F3's list exactly; under 24's rules only `GAPS_AT_24`'s two;
+      `the_hold_gives_none_exactly_where_the_read_densities_sit`;
+      `the_read_densities_follow_their_sources`; the aerosol refusals split (solid Ar, H₂S's phase
+      I and liquid S₈ resolve at 24; H₂S's phase II is refused under both).
+    - The record tests keep 23's case and gain 24's: the partition's argon cap 1,416.7 → 1,734.7
+      kg m⁻³ at 40 K, its layer none → 0.587 m; the inputs census over 40 systems 527 → 657 of 657
+      read, no "Ar Ice" refusal; the airless one-Γ walk over 60 systems 685 → 786 read, 0 unread;
+      `for_body` on the unlit records (moved from P14.T24.i): (19, 13, 6) → (19, 19, 0) over the
+      golden systems and (18, 10, 8) → (18, 18, 0) over the 400 (by name).
+    - Compression: the NIST isotherms, Earth's sea, p ≤ p_sat to the bit, the readers' same bits
+      (the sea, a CO₂ sea and its ocean weight, the palette, the area mix).
+    - _Accept, as built:_ the unit tests run under `substance` and `planetary`; the 400's tests by
+      name with `-- --ignored`: `under_24_s_densities_the_sample_s_unlit_records_all_read` and the
+      census `the_sample_s_argon_ices_under_24_s_rules`.
+  - _Science check_ (the serve gate's): argon ice is retained on the 15–19 K and colder airless
+    bodies. The census, under all of 24's rules at once (the densities read, the unlit mean
+    floored, `ColdTrapRules::Batch`, the compression), with P14.T53.a's escape held: `for_body`
+    refuses 850 `Ar` ices, 1 `O2` ice and 18 unlit records of the 400's 5,978 solid bodies at
+    23's rules, none at 24's; 559 records hold an argon ice at 24 (859 at 23), all lit, 452 under
+    the vacuum edge's rule (19.228 K, 415 of them below 19 K) and 107 under the partition's at
+    24–57 K means, beneath a collisional argon air or night-side cold-trapped. p_sat(Ar) is
+    10⁻¹⁹–10⁻¹² Pa at 15–19 K (the registry's curve, Tegeler, Span and Wagner 1999; Fray and
+    Schmitt 2009 within 1.25×); a 1.9 km sheet loses under 0.04% over its age by sublimation, and
+    Jeans escape is negligible (λ ≥ 51.7). Under 24's rules the 8 unlit 22–24 K bodies lose
+    their argon ice.
+  - _Closed with two gaps_ (decision-t24i-airless-state D5): β-CO (61.585 K to its triple
+    point) and H₂S's phase II (103.52–126.22 K) stay `NoDensity`, named in §3.4's
+    `GAPS_AT_24`, for want of a readable source; owner P14.T49.o. CO has no reader at 24. H₂S's
+    phase II is read through P14.T52.c's decks by registry key, not through a `Gas` row, where a
+    deck's base lies in its span: a labelled `NoDensity` mode with no size or τ, counted at 24's
+    gate.
+  - _Deferred findings (2026-10-13 rule):_ O₂'s α and γ 0.76% and 1.20% below Roder; liquid
+    Fe's intercept seen only in citing papers; C₂H₆'s phase I at 657.8 kg m⁻³ against about 685
+    from its own melting slope (no reader at 24); the compression held at 1 GPa beyond some
+    rows' equations of state; solutions, melts and SO₂ incompressible; the compression read at
+    p_s, not at the column's mean pressure.
+  - _Found at the science check, owned elsewhere:_ the state read at `T_eq` against the floored
+    mean, and the floor's absence on the escape's batch path (P14.T24.i's follow-up,
+    `p14-escape`); 02000b2ca0000001.1100's supersaturated Ar air (P14.T53.c). The refusals'
+    "→ 0 at 24" is with the escape held; under every 24 hold it needs the follow-up.
+  - _Also recorded:_ H₂S's transitions (103.52 and 126.22 K, Giauque and Blue 1936) were not
+    seen in a source read, and phase I's cell has no temperature; the compression does not check
+    the melting curve (water at 288 K above about 820 MPa is ice VI), so its callers gate by
+    phase; the reference Earth's ocean in the cloud calibration stays saturated (compressing it
+    moves every clouded body's calibration by about 3 × 10⁻⁶); argon's photoionisation and
+    pick-up loss are not modelled (for P14.T53.c); 19 argon ices have areas under 10⁻¹² of the
+    surface.
 
 - **Deferred findings (2026-10-13 rule)**, from look-90 (P14.T43.h's landing look, 2026-10-23) and
   decision-zone-labels, on the orbit map's zone labels (P14.T42):

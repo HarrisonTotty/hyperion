@@ -81,6 +81,8 @@ pub use aerosol::{
 pub use condensed::{
     CondensedColumns, CondensedPhase, DensityAt, GrainDensity, Transition, TransitionKind,
 };
+#[cfg(test)]
+pub(crate) use condensed::{ReadDensitiesRules, with_read_densities};
 pub use diagram::{
     DensityEquation, DensityForm, MeltingCurve, MeltingEquation, MeltingPiece, PhaseDiagram,
     SolidDensity, SolidPhase, SublimationEquation, SublimationPiece, WagnerEquation, condensables,
@@ -90,11 +92,14 @@ pub use element::Element;
 pub use formation::{BalanceReactionError, Reaction, formation_range, log10_formation_constant};
 pub use helmholtz::HelmholtzResidual;
 pub use hyperion_surface::substance_key::{SubstanceKey, SubstanceKeyForm};
+pub(crate) use liquid::liquid_properties_at_pressure;
 pub use liquid::{
     BuildLiquidCompositionError, Composition, LIQUID_BIN_EDGES_NM, LiquidColumns,
     LiquidComposition, LiquidMember, ResolveLiquidError, liquid_properties,
     pure_liquid_scattering_per_m,
 };
+#[cfg(test)]
+pub(crate) use liquid::{CompressedLiquidsRules, with_compressed_liquids};
 pub use mix::{GasColumns, mean_molar_mass_g_per_mol};
 pub use optics::{CondensedOptics, ReferenceForm, ResolvePaletteEntryError, resolve_palette_entry};
 pub use phase::{MOLAR_GAS_CONSTANT, Phase, ice_ih_density};
@@ -854,7 +859,15 @@ mod tests {
             }
             if let Some(condensed) = row.condensed() {
                 named(condensed.sources());
-                for value in ["grain density", "transition", "mechanics"] {
+                let measured_liquid = matches!(
+                    with_read_densities(ReadDensitiesRules::Read, || condensed.grain_density()),
+                    GrainDensity::MeasuredLiquid { .. }
+                );
+                let liquid = measured_liquid.then_some("liquid grain density");
+                for value in ["grain density", "transition", "mechanics"]
+                    .into_iter()
+                    .chain(liquid)
+                {
                     assert!(
                         condensed
                             .sources()
@@ -870,8 +883,10 @@ mod tests {
 
     /// Every row that is no gas has condensed columns, as has every row with a phase diagram, whose
     /// columns are its diagram's; every other row's are a fixed density, finite and positive, of a
-    /// stated phase at a stated temperature, and every transition is finite and positive, a
-    /// eutectic's composition a mass fraction.
+    /// stated phase at a stated temperature, or a fixed solid with a liquid by temperature, its
+    /// nodes from its melting point, rising in temperature and falling in density (as 24 reads
+    /// them, P14.T49.n); and every transition is finite and positive, a eutectic's composition a
+    /// mass fraction.
     #[test]
     fn substance_condensed_columns_cover_the_condensed_rows() {
         let mut count = 0;
@@ -888,7 +903,8 @@ mod tests {
             let transition = condensed.transition();
             let t = transition.temperature().value();
             assert!(t.is_finite() && t > 0.0, "{key}: transition {t} K");
-            match (condensed.grain_density(), row.phase_diagram()) {
+            let given = with_read_densities(ReadDensitiesRules::Read, || condensed.grain_density());
+            match (given, row.phase_diagram()) {
                 (GrainDensity::OfDiagram, Some(diagram)) => {
                     assert_eq!(transition.kind(), TransitionKind::TriplePoint, "{key}");
                     assert_same_bits(t, diagram.triple_temperature().value());
@@ -905,6 +921,30 @@ mod tests {
                         assert!(rho.is_finite() && rho > 0.0, "{key}: {rho} kg m⁻³");
                         assert!(given.at().value() > 0.0, "{key}: {:?}", given.at());
                     }
+                    assert_ne!(transition.kind(), TransitionKind::TriplePoint, "{key}");
+                }
+                (GrainDensity::MeasuredLiquid { solid, liquid }, diagram) => {
+                    assert!(
+                        diagram.is_none(),
+                        "{key} has a diagram, whose densities it takes"
+                    );
+                    let rho = solid.density().value();
+                    assert!(rho.is_finite() && rho > 0.0, "{key}: {rho} kg m⁻³");
+                    assert!(solid.at().value() > 0.0, "{key}: {:?}", solid.at());
+                    assert!(liquid.len() >= 2, "{key}'s liquid is a law in temperature");
+                    // The liquid's law starts at the row's own melting point.
+                    assert_same_bits(liquid[0].0.value(), t);
+                    for &(at, rho) in liquid {
+                        let (at, rho) = (at.value(), rho.value());
+                        assert!(at.is_finite() && at > 0.0, "{key}: a node at {at} K");
+                        assert!(rho.is_finite() && rho > 0.0, "{key}: {rho} kg m⁻³");
+                    }
+                    assert!(
+                        liquid
+                            .windows(2)
+                            .all(|w| w[0].0 < w[1].0 && w[0].1 >= w[1].1),
+                        "{key}'s liquid nodes rise in temperature and fall in density"
+                    );
                     assert_ne!(transition.kind(), TransitionKind::TriplePoint, "{key}");
                 }
             }

@@ -8055,7 +8055,8 @@ fn holds_argon_ice(record: &BodyRecord) -> bool {
 /// - Each record with a surface whose mean surface temperature is not positive held (an unlit
 ///   one) reads, floored, at least its conditions' coldest temperature, its night floor, above
 ///   0 K; `for_body` reads it, or refuses it for an argon ice with no solid density, the labelled
-///   refusal (asserted).
+///   refusal (asserted), which under P14.T49.n's densities (held until 24, a caller's switch) it
+///   gives none.
 /// - A lit airless record whose mean, its equilibrium temperature, lies under its night floor
 ///   rises to it, as the rule says: counted, with what else moves on it.
 /// - A record above its floor whose passes reached it on their way may move its `T_eq` and mean by
@@ -8205,7 +8206,8 @@ const RESETTLED: f64 = 1e-8;
 /// 23", V3.3, with main's ruling on its reach, 2026-10-22): `fallback_black_hole`'s 19 unlit
 /// bodies, whose records publish a mean surface temperature of 0 K at 23, read at least their
 /// night floor under the unlit mean's rules, and `for_body` reads 13 of them, refusing 6 for their
-/// argon ice (P14.T49.n's, whose tests take over "`Ok` on them"); 10 lit airless records under
+/// argon ice (P14.T49.n's, whose tests take over "`Ok` on them":
+/// `under_24_s_densities_the_golden_systems_unlit_records_all_read`); 10 lit airless records under
 /// their floor rise to it; and every other record of the fifteen systems is unchanged to the bit.
 #[test]
 fn the_golden_systems_unlit_records_read_their_night_floor() {
@@ -8254,6 +8256,555 @@ fn the_sample_s_unlit_records_read_their_night_floor() {
         (18, 10, 8)
     );
     assert_eq!(moves.moved, Vec::<String>::new());
+}
+
+/// P14.T49.n's case of T24.i's golden-systems test (main moved T24.i's "`for_body` answers `Ok` on
+/// them" here, 2026-10-22): generated, derived and read under 24's densities
+/// (`READ_DENSITIES_VERSION`, solid argon's fcc read), the held and the floored records alike,
+/// `fallback_black_hole`'s 19 unlit records read at least their night floor and `for_body` reads
+/// all 19, none refused for its argon ice; T24.i's other moves are as under 23's densities, 10 lit
+/// airless records under their floor rising to it, none settling again and no other record
+/// moving.
+#[test]
+fn under_24_s_densities_the_golden_systems_unlit_records_all_read() {
+    use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
+    use crate::substance::{ReadDensitiesRules, with_read_densities};
+    let moves = with_read_densities(ReadDensitiesRules::Read, || {
+        let held = golden_systems_afresh();
+        let floored = with_unlit_mean(UnlitMeanRules::Floored, golden_systems_afresh);
+        unlit_moves(&held, &floored)
+    });
+    eprintln!("the golden systems under the unlit mean and 24's densities: {moves:#?}");
+    assert!(
+        moves
+            .unlit
+            .iter()
+            .all(|line| line.starts_with("fallback_black_hole")),
+        "{:#?}",
+        moves.unlit
+    );
+    assert_eq!(
+        (moves.unlit.len(), moves.unlit_read, moves.unlit_argon),
+        (19, 19, 0)
+    );
+    assert_eq!(moves.raised, 10);
+    assert_eq!(moves.resettled, Vec::<String>::new());
+    assert_eq!(moves.moved, Vec::<String>::new());
+}
+
+/// P14.T49.n's case of T24.i's test over the 400 whole systems, a measurement run by name:
+/// generated, derived and read under 24's densities, the held and the floored records alike, the
+/// 18 unlit records read their night floor and `for_body` reads all 18, none refused for its argon
+/// ice; no other record moves.
+#[test]
+#[ignore = "a measurement for the bless note, run by name"]
+fn under_24_s_densities_the_sample_s_unlit_records_all_read() {
+    use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
+    use crate::substance::{ReadDensitiesRules, with_read_densities};
+    let systems = || -> Vec<(&'static str, SystemContext, PlanetarySystem)> {
+        sample()
+            .iter()
+            .map(|ctx| ("sample", ctx.clone(), generate(SEED, ctx)))
+            .collect()
+    };
+    let moves = with_read_densities(ReadDensitiesRules::Read, || {
+        let held = systems();
+        let floored = with_unlit_mean(UnlitMeanRules::Floored, systems);
+        unlit_moves(&held, &floored)
+    });
+    eprintln!("the sample under the unlit mean and 24's densities: {moves:#?}");
+    assert_eq!(
+        (moves.unlit.len(), moves.unlit_read, moves.unlit_argon),
+        (18, 18, 0)
+    );
+    assert_eq!(moves.moved, Vec::<String>::new());
+}
+
+/// What `for_body` answers on the record `record` of a system of records `records` and context
+/// `ctx`, under the rules in force on the calling thread: `None` where it reads it; otherwise its
+/// refusal's cause as the surface-inputs census names it (`unread_cause`: "no crust", "unlit", or
+/// the palette's first unresolved entry as `"<key> <role>: <cause>"`), and any other error's
+/// `Debug` text.
+fn refusal_of(record: &BodyRecord, records: &[BodyRecord], ctx: &SystemContext) -> Option<String> {
+    use crate::planetary::surface::inputs::tests::unread_cause;
+    use crate::planetary::surface::{CoarseInputs, ReadCoarseInputsError, SurfaceInputsError};
+    let planet = CoarseInputs::planet_of(record)
+        .and_then(|index| records.iter().find(|r| r.index() == index));
+    let error = CoarseInputs::for_body(record, planet, ctx).err()?;
+    let not_modelled =
+        ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(RecordSection::Surface));
+    match (record.surface(), error == not_modelled) {
+        (Section::Ok(surface), true) => Some(
+            unread_cause(surface).unwrap_or_else(|| format!("{error:?}, its palette resolved")),
+        ),
+        _ => Some(format!("{error:?}")),
+    }
+}
+
+/// The refusals by cause of `for_body` over the records of `snapshot`'s bodies with a surface, of
+/// the system of context `ctx`, added to `refused`, with those bodies counted into `bodies`.
+fn tally_refusals(
+    snapshot: &SystemSnapshot,
+    ctx: &SystemContext,
+    bodies: &mut usize,
+    refused: &mut std::collections::BTreeMap<String, usize>,
+) {
+    let records = snapshot.bodies();
+    for record in records {
+        if !matches!(record.surface(), Section::Ok(_)) {
+            continue;
+        }
+        *bodies += 1;
+        if let Some(cause) = refusal_of(record, records, ctx) {
+            *refused.entry(cause).or_default() += 1;
+        }
+    }
+}
+
+/// One argon-ice record of P14.T49.n's census ([`the_sample_s_argon_ices_under_24_s_rules`]):
+/// its line and what the summary counts.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "a census row's flags, each counted apart in the summary"
+)]
+struct ArgonIce {
+    line: String,
+    mean: f64,
+    lies_at: f64,
+    lit: bool,
+    airless: bool,
+    exosphere: bool,
+    /// Whether its profile is zonal (not a locked world's), and whether its derivation's air is
+    /// collisional (`cold_traps::is_collisional`): the cold traps' batch takes an airless body with
+    /// both a zonal profile and an air that is not.
+    zonal: bool,
+    collisional_air: bool,
+    /// The Hertz–Knudsen sublimation over the age over the ice's reservoir per unit area of the
+    /// ice, at the warmest temperature, at the mean and where the ice lies.
+    sublimed_warmest: f64,
+    sublimed_mean: f64,
+    sublimed_where_it_lies: f64,
+    /// The Jeans escape over the age of an exosphere at the ice's vapour pressure at the warmest
+    /// temperature, over the same reservoir.
+    escaped: f64,
+    /// Argon's Jeans parameter at the surface's warmest temperature.
+    lambda_surface: f64,
+    /// Whether argon's vapour at the mean, and at the temperature the ice lies at, is a
+    /// collisional air.
+    collisional_at_mean: bool,
+    collisional_where_it_lies: bool,
+}
+
+/// Argon's molecular mass, kg ([`Gas::molecular_mass`]).
+fn argon_molecule_kg() -> f64 {
+    Gas::Argon.molecular_mass().value()
+}
+
+/// Argon's vapour pressure over its solid at `t` K on the registry's sublimation curve (P14.T49.b's
+/// diagram), Pa; above its triple point its liquid's, and `NaN` where the curve gives none.
+fn argon_vapour_pa(t: f64) -> f64 {
+    crate::substance::saturation_pressure(Gas::Argon.substance(), Kelvin::new(t))
+        .map_or(f64::NAN, Pascals::value)
+}
+
+/// The Hertz–Knudsen flux of argon's ice into a vacuum at `t` K, kg m⁻² s⁻¹: `p_sat` √(m ÷ 2π k T)
+/// (no return flux), m argon's molecular mass.
+fn argon_hertz_knudsen(t: f64) -> f64 {
+    use crate::units::consts::BOLTZMANN_CONSTANT;
+    argon_vapour_pa(t) * (argon_molecule_kg() / (2.0 * PI * BOLTZMANN_CONSTANT * t)).sqrt()
+}
+
+/// The temperature, K, at which [`argon_hertz_knudsen`] is the airless ice line's loss of 144 kg
+/// m⁻² Gyr⁻¹ (`AIRLESS_ICE_LOSS_KG_PER_M2_GYR`), by bisection on 5–83 K: the census's check of
+/// its formula against the partition's vacuum edge (`exosphere_threshold`).
+fn argon_vacuum_edge_k() -> f64 {
+    use crate::planetary::chem::partition::AIRLESS_ICE_LOSS_KG_PER_M2_GYR;
+    use crate::units::consts::SECONDS_PER_GIGAYEAR;
+    let loss = AIRLESS_ICE_LOSS_KG_PER_M2_GYR / SECONDS_PER_GIGAYEAR;
+    let (mut lo, mut hi) = (5.0_f64, 83.0_f64);
+    for _ in 0..80 {
+        let mid = f64::midpoint(lo, hi);
+        if argon_hertz_knudsen(mid) < loss {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    f64::midpoint(lo, hi)
+}
+
+/// The [`ArgonIce`] of the census case `case`, whose system's context is `ctx`, at the rules in
+/// force; `None` where its record holds no argon ice.
+///
+/// The estimates, each per square metre of the ice (its reservoir over its area), with m argon's
+/// molecular mass, k Boltzmann's constant, M and R the body's mass and radius and t the system's
+/// age:
+///
+/// - the vapour pressure `p_sat`(T) on the registry's sublimation curve ([`argon_vapour_pa`]);
+/// - the Hertz–Knudsen flux J = `p_sat` √(m ÷ 2π k T), kg m⁻² s⁻¹, the gross sublimation into a
+///   vacuum with no return flux ([`argon_hertz_knudsen`]), times t;
+/// - the Jeans escape of a surface-bounded exosphere in equilibrium with the ice, n = `p_sat` ÷ k T
+///   at the surface as its exobase: Φ = m n √(2kT ÷ m) ÷ (2√π) (1 + λ) e^−λ = J (1 + λ) e^−λ,
+///   λ = G M m ÷ (k T R), times t;
+/// - J at the warmest temperature of the record's climate range, at its mean and where the ice
+///   lies (its condensate's `lies_at`), and Φ at the warmest;
+/// - whether an argon air at `p_sat` is collisional on the body (`cold_traps::collisional`, p ≥ m g
+///   ÷ `σ_c`), at the mean and where the ice lies.
+///
+/// Its solid edge's rule is the cold traps' batch's, which the census reads its records under: the
+/// zonal annual maxima's vacuum edge (`SolidEdges::Exosphere`) on a body the batch takes (a zonal
+/// profile, airless, its air not collisional: `cold_traps::qualifies`), T51.a's partition's edge
+/// elsewhere. Its dominance and `lies_at` are its published pass's partition's, the record's; its
+/// air's pressure is its derivation's atmosphere's, which an airless record's conditions state as
+/// none.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one record's census line, each figure read and formatted"
+)]
+fn argon_ice_of(case: &CensusCase<'_>, ctx: &SystemContext) -> Option<ArgonIce> {
+    use crate::planetary::chem::partition::{CondensatePhase, Partitioned};
+    use crate::planetary::derive::atmosphere::jeans_parameter;
+    use crate::planetary::derive::{PassDriver, Under};
+    use crate::planetary::hooks::cold_traps::{collisional, is_collisional};
+    use crate::planetary::hooks::surface::ColdProfile;
+    use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
+    use crate::units::{EarthMasses, Kilograms, Metres};
+    let ar = Gas::Argon.substance();
+    let surface = case.surface;
+    let entry = *surface.condensates().entry(ar, CondensatePhase::Solid)?;
+    let record = case.record;
+    let bulk = record.bulk().ok()?;
+    let conditions = surface.conditions();
+    let (coldest, warmest) = conditions.climate_range();
+    let (warmest, mean) = (
+        warmest.value(),
+        conditions.mean_surface_temperature().value(),
+    );
+    let profile = conditions.cold_profile();
+    let (zonal_lo, zonal_hi) = match &profile {
+        ColdProfile::Eyeball { day_k, night_k } => (*night_k, *day_k),
+        ColdProfile::Zonal(points) => points
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &(_, t)| {
+                (lo.min(t), hi.max(t))
+            }),
+    };
+    let air = case.derived.atmosphere();
+    let g = bulk.surface_gravity();
+    let airless = surface.state() == SurfaceState::Airless;
+    let zonal = matches!(profile, ColdProfile::Zonal(_));
+    let collisional_air = is_collisional(air, g);
+    let exosphere = zonal && airless && !collisional_air;
+    let (_, read) = (case.again)(PassDriver::Again(Under::Read));
+    let (d, lies_at, condensed, airborne) =
+        read.as_ref()
+            .map_or((f64::NAN, f64::NAN, f64::NAN, f64::NAN), |read| {
+                let partition = &read.partition;
+                let condensate = partition.condensate(ar);
+                (
+                    partition.of(ar).map_or(f64::NAN, Partitioned::dominance),
+                    condensate.map_or(f64::NAN, |c| c.lies_at().value()),
+                    condensate.map_or(f64::NAN, |c| c.reservoir().value()),
+                    partition
+                        .of(ar)
+                        .map_or(f64::NAN, |s| s.partial_pressure().value()),
+                )
+            });
+    let p_s = air.surface_pressure().map_or(f64::NAN, Pascals::value);
+    let p_ar = air.partial_pressures().of(Gas::Argon).value();
+    let t_exo = air.exobase_temperature().value();
+    let mass = Kilograms::from(
+        record
+            .mass()
+            .ok()
+            .copied()
+            .unwrap_or(EarthMasses::new(f64::NAN)),
+    );
+    let radius = Metres::from(bulk.radius());
+    let lambda_at = |t: f64| jeans_parameter(mass, radius, Gas::Argon, Kelvin::new(t));
+    let lambda_surface = lambda_at(warmest);
+    let lambda_exo = lambda_at(t_exo.max(warmest));
+    let age_s = ctx.age_at_epoch().value() * SECONDS_PER_JULIAN_YEAR;
+    let area = entry.area_fraction();
+    let per_ice = entry.reservoir().value() / area;
+    let j_warm = argon_hertz_knudsen(warmest);
+    let jeans = j_warm * (1.0 + lambda_surface) * crate::math::exp(-lambda_surface);
+    let over_reservoir = |flux: f64| flux * age_s / per_ice;
+    let collides = |t: f64| {
+        collisional(
+            Pascals::new(argon_vapour_pa(t)),
+            Gas::Argon.molar_mass_g_per_mol(),
+            g,
+        )
+    };
+    let ice = ArgonIce {
+        line: String::new(),
+        mean,
+        lies_at,
+        lit: bulk.equilibrium_temperature().value() > 0.0,
+        airless,
+        exosphere,
+        zonal,
+        collisional_air,
+        sublimed_warmest: over_reservoir(j_warm),
+        sublimed_mean: over_reservoir(argon_hertz_knudsen(mean)),
+        sublimed_where_it_lies: over_reservoir(argon_hertz_knudsen(lies_at)),
+        escaped: over_reservoir(jeans),
+        lambda_surface,
+        collisional_at_mean: collides(mean),
+        collisional_where_it_lies: collides(lies_at),
+    };
+    let line = format!(
+        "{} {} {:?} {:?}: M {:.3e} kg, R {:.1} km, g {:.3} m s⁻², age {:.3} Gyr; T_s {mean:.2} K \
+         (range {:.2}–{warmest:.2} K, zonal annual means {zonal_lo:.2}–{zonal_hi:.2} K), T_eq \
+         {:.2} K, {}; Ar ice: lies_at {lies_at:.2} K, area {area:.4e} (trapped {:.3e}), reservoir \
+         {:.4e} kg m⁻² ({per_ice:.4e} per m² of ice; the partition's {condensed:.4e}), layer {}; \
+         air p_s {p_s:.4e} Pa, p_Ar {p_ar:.4e} Pa (the partition's airborne {airborne:.4e}), {} \
+         profile, air {}collisional; edge {}, d {d:.4}; T_exo {t_exo:.1} K, λ_Ar {lambda_exo:.2} \
+         at max(T_exo, warmest), {lambda_surface:.2} at the warmest; p_sat(Ar) {:.3e} Pa at the \
+         warmest, {:.3e} at the mean, {:.3e} at lies_at; HK × age ÷ reservoir {:.3e} at the \
+         warmest, {:.3e} at the mean, {:.3e} at lies_at; Jeans × age ÷ reservoir {:.3e}; an Ar air \
+         at p_sat collisional at the mean {}, at lies_at {}",
+        record.identity().id(),
+        case.kind,
+        surface.state(),
+        bulk.class(),
+        mass.value(),
+        radius.value() / 1e3,
+        g.value(),
+        ctx.age_at_epoch().value() / 1e9,
+        coldest.value(),
+        bulk.equilibrium_temperature().value(),
+        if ice.lit { "lit" } else { "unlit" },
+        entry.trapped_area_fraction(),
+        entry.reservoir().value(),
+        entry
+            .reservoir_gel()
+            .map_or("none".to_owned(), |gel| format!("{:.4e} m", gel.value())),
+        if zonal { "zonal" } else { "locked" },
+        if collisional_air { "" } else { "not " },
+        if exosphere { "Exosphere" } else { "Partition" },
+        argon_vapour_pa(warmest),
+        argon_vapour_pa(mean),
+        argon_vapour_pa(lies_at),
+        ice.sublimed_warmest,
+        ice.sublimed_mean,
+        ice.sublimed_where_it_lies,
+        ice.escaped,
+        ice.collisional_at_mean,
+        ice.collisional_where_it_lies,
+    );
+    Some(ArgonIce { line, ..ice })
+}
+
+/// P14.T49.n's census of the argon ice, a measurement run by name for its science check ("that
+/// argon ice is retained on the airless bodies that hold it"; plan 14): over the 400 whole systems,
+/// `for_body`'s refusals by cause at 23's rules and at all of 24's at once (the read densities, the
+/// unlit mean floored, the compressed liquids and the cold traps' batch), and every record holding
+/// an argon ice at 24's rules, its state, its climate, its ice, its air, the solid edge's rule
+/// that applied, its dominance, its exobase and Jeans parameters, its ice's vapour pressure and the
+/// sublimation and escape over its age against its reservoir ([`argon_ice_of`]'s estimates), with
+/// the summary counts and what became at 24 of the records unlit at 23. It eprints and writes
+/// nothing to the tree; it asserts only that 24's rules refuse no ice for its density.
+#[test]
+#[ignore = "a measurement for P14.T49.n's science check, run by name"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one census at two rule sets, each argon-ice record listed and tallied"
+)]
+fn the_sample_s_argon_ices_under_24_s_rules() {
+    use crate::planetary::chem::partition::CondensatePhase;
+    use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
+    use crate::planetary::hooks::cold_traps::ColdTrapRules;
+    use crate::planetary::surface::RECORD_TIME;
+    use crate::substance::{
+        CompressedLiquidsRules, ReadDensitiesRules, with_compressed_liquids, with_read_densities,
+    };
+    let ar = Gas::Argon.substance();
+    let holds_ar = |record: &BodyRecord| {
+        record.surface().ok().is_some_and(|surface| {
+            surface
+                .condensates()
+                .entry(ar, CondensatePhase::Solid)
+                .is_some()
+        })
+    };
+    let ices_of = |record: &BodyRecord| {
+        record.surface().ok().map_or(String::new(), |surface| {
+            let keys: Vec<String> = surface
+                .condensates()
+                .entries()
+                .iter()
+                .filter(|e| e.phase() == CondensatePhase::Solid)
+                .map(|e| e.substance().substance().key().as_str().to_owned())
+                .collect();
+            keys.join(" ")
+        })
+    };
+    // 23's rules: every hold in force.
+    let (mut bodies_23, mut refused_23) = (0_usize, std::collections::BTreeMap::new());
+    let mut argon_23 = 0_usize;
+    let mut unlit_23: Vec<String> = Vec::new();
+    for (ctx, system) in whole() {
+        let snapshot = system.snapshot_at(ctx, RECORD_TIME);
+        for record in snapshot.bodies() {
+            argon_23 += usize::from(holds_ar(record));
+            let unlit = record.surface().ok().is_some_and(|surface| {
+                surface.conditions().mean_surface_temperature().value() <= 0.0
+            });
+            if unlit {
+                unlit_23.push(format!(
+                    "{} (ices {})",
+                    record.identity().id(),
+                    ices_of(record)
+                ));
+            }
+        }
+        tally_refusals(&snapshot, ctx, &mut bodies_23, &mut refused_23);
+    }
+    // 24's rules, all at once: generation, the snapshot, the census's derivations and `for_body`
+    // inside every switch, as the records derive lazily.
+    let (bodies_24, refused_24, argon_24, ices, unlit_at_24) =
+        with_read_densities(ReadDensitiesRules::Read, || {
+            with_unlit_mean(UnlitMeanRules::Floored, || {
+                with_compressed_liquids(CompressedLiquidsRules::Compressed, || {
+                    let (mut bodies, mut refused) = (0_usize, std::collections::BTreeMap::new());
+                    let mut argon = 0_usize;
+                    let mut ices: Vec<ArgonIce> = Vec::new();
+                    let mut unlit_at_24: Vec<String> = Vec::new();
+                    for ctx in sample() {
+                        let system = generate(SEED, ctx).with_record_rules(RecordRules {
+                            cold_traps: ColdTrapRules::Batch,
+                        });
+                        let snapshot = system.snapshot_at(ctx, RECORD_TIME);
+                        tally_refusals(&snapshot, ctx, &mut bodies, &mut refused);
+                        let mut any = false;
+                        for record in snapshot.bodies() {
+                            any |= holds_ar(record);
+                            argon += usize::from(holds_ar(record));
+                            let unlit = record
+                                .bulk()
+                                .ok()
+                                .is_some_and(|bulk| bulk.equilibrium_temperature().value() <= 0.0);
+                            if let (true, Some(surface)) = (unlit, record.surface().ok()) {
+                                unlit_at_24.push(format!(
+                                    "{}: {:?}, mean {:.3} K, ices {}",
+                                    record.identity().id(),
+                                    surface.state(),
+                                    surface.conditions().mean_surface_temperature().value(),
+                                    ices_of(record)
+                                ));
+                            }
+                        }
+                        if !any {
+                            continue;
+                        }
+                        census_walk("sample", ctx, &system, &mut |case| {
+                            if let Some(ice) = argon_ice_of(case, ctx) {
+                                ices.push(ice);
+                            }
+                        });
+                    }
+                    (bodies, refused, argon, ices, unlit_at_24)
+                })
+            })
+        });
+    let ice_refusals = |refused: &std::collections::BTreeMap<String, usize>, key: &str| {
+        refused
+            .get(&format!("{key} Ice: DensityNotModelled"))
+            .copied()
+            .unwrap_or(0)
+    };
+    eprintln!(
+        "(a) for_body over the sample's {bodies_23} solid bodies at 23's rules ({argon_23} with an \
+         argon ice entry): refused {refused_23:?}; Ar ice {}, O2 ice {}",
+        ice_refusals(&refused_23, "Ar"),
+        ice_refusals(&refused_23, "O2"),
+    );
+    eprintln!(
+        "(a) for_body over the sample's {bodies_24} solid bodies at 24's rules ({argon_24} with an \
+         argon ice entry): refused {refused_24:?}; Ar ice {}, O2 ice {}",
+        ice_refusals(&refused_24, "Ar"),
+        ice_refusals(&refused_24, "O2"),
+    );
+    eprintln!(
+        "(a) the {} records unlit at 23: {unlit_23:#?}",
+        unlit_23.len()
+    );
+    eprintln!(
+        "(a) the {} records with T_eq 0 at 24's rules: {unlit_at_24:#?}",
+        unlit_at_24.len()
+    );
+    let edge = crate::planetary::chem::partition::exosphere_threshold(
+        ar,
+        crate::planetary::chem::partition::AIRLESS_ICE_LOSS_KG_PER_M2_GYR,
+    )
+    .expect("argon's row has a phase diagram and a molar mass")
+    .value();
+    eprintln!(
+        "(b, c) the {} records holding an argon ice at 24's rules that the census derives (Ar's \
+         vacuum edge at 144 kg m⁻² Gyr⁻¹: the partition's {edge:.3} K, this census's Hertz–Knudsen \
+         {:.3} K):",
+        ices.len(),
+        argon_vacuum_edge_k()
+    );
+    for ice in &ices {
+        eprintln!("  {}", ice.line);
+    }
+    let bands = [15.0, 19.0, 25.0, 35.0, 50.0];
+    let mut by_band = [0_usize; 6];
+    for ice in &ices {
+        let band = bands.iter().take_while(|&&edge| ice.mean >= edge).count();
+        by_band[band] += 1;
+    }
+    let count = |test: &dyn Fn(&ArgonIce) -> bool| ices.iter().filter(|ice| test(ice)).count();
+    let warmest = ices
+        .iter()
+        .map(|ice| ice.mean)
+        .fold(f64::NEG_INFINITY, f64::max);
+    eprintln!(
+        "(d) argon-ice records by mean T_s: <15 K {}, 15–19 K {}, 19–25 K {}, 25–35 K {}, 35–50 K \
+         {}, >50 K {}; airless {}, under air {}; lit {}, unlit {}; edge Exosphere {}, Partition {} \
+         ({} of them airless: {} locked, {} zonal under a collisional air); lying above Ar's \
+         vacuum edge {} (Exosphere {}, Partition {}); HK × age > reservoir at the warmest {}, at \
+         the mean {}, at lies_at {}; Jeans × age > reservoir {}; λ_Ar < 25 at the warmest surface \
+         temperature {}; an Ar air at p_sat collisional at the mean {}, at lies_at {} (airless \
+         {}); the warmest mean T_s {warmest:.2} K",
+        by_band[0],
+        by_band[1],
+        by_band[2],
+        by_band[3],
+        by_band[4],
+        by_band[5],
+        count(&|ice| ice.airless),
+        count(&|ice| !ice.airless),
+        count(&|ice| ice.lit),
+        count(&|ice| !ice.lit),
+        count(&|ice| ice.exosphere),
+        count(&|ice| !ice.exosphere),
+        count(&|ice| !ice.exosphere && ice.airless),
+        count(&|ice| !ice.exosphere && ice.airless && !ice.zonal),
+        count(&|ice| !ice.exosphere && ice.airless && ice.zonal && ice.collisional_air),
+        count(&|ice| ice.lies_at > edge),
+        count(&|ice| ice.lies_at > edge && ice.exosphere),
+        count(&|ice| ice.lies_at > edge && !ice.exosphere),
+        count(&|ice| ice.sublimed_warmest > 1.0),
+        count(&|ice| ice.sublimed_mean > 1.0),
+        count(&|ice| ice.sublimed_where_it_lies > 1.0),
+        count(&|ice| ice.escaped > 1.0),
+        count(&|ice| ice.lambda_surface < 25.0),
+        count(&|ice| ice.collisional_at_mean),
+        count(&|ice| ice.collisional_where_it_lies),
+        count(&|ice| ice.collisional_where_it_lies && ice.airless),
+    );
+    let mut warm: Vec<&ArgonIce> = ices.iter().collect();
+    warm.sort_by(|a, b| b.mean.total_cmp(&a.mean));
+    eprintln!("(d) the ten warmest argon-ice records:");
+    for ice in warm.iter().take(10) {
+        eprintln!("  {}", ice.line);
+    }
+    assert_eq!(ice_refusals(&refused_24, "Ar"), 0, "{refused_24:?}");
+    assert_eq!(ice_refusals(&refused_24, "O2"), 0, "{refused_24:?}");
 }
 
 /// What P14.T56.f moves over a set of systems ([`MoonBulkMoves::visit`]).

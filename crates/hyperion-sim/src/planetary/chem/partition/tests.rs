@@ -1433,7 +1433,7 @@ fn with_no_ice_the_sea_is_the_whole_water_s_fill() {
     let earth = partition(&body.climate, &on_earth(EARTH_GRAVITY), &body.inventory);
     let c = earth.condensate(water).unwrap();
     let diagram = water.substance().phase_diagram().unwrap();
-    let rho_l = liquid_density_kg_per_m3(c, diagram).unwrap();
+    let rho_l = liquid_density_kg_per_m3(c, diagram, earth.surface_pressure()).unwrap();
     assert_same_bits(sea.reservoir().value(), sigma);
     assert_same_bits(
         sea.area_fraction(),
@@ -1756,8 +1756,9 @@ fn the_basins_weigh_a_sea_from_none_to_a_full_ocean() {
     assert!((area - FULL_OCEAN_FRACTION).abs() < 1e-9, "{area}");
 }
 
-/// A solid whose density the registry has not read (argon's) is capped at its liquid's density
-/// at its triple point and publishes no layer (decision-p14-t51a-part2 §3.4).
+/// A solid whose density the registry has not read (argon's, under 23's rules: P14.T49.n's read
+/// is held until 24) is capped at its liquid's density at its triple point and publishes no layer
+/// (decision-p14-t51a-part2 §3.4).
 #[test]
 fn a_solid_whose_density_was_not_read_has_a_stand_in_cap_and_no_layer() {
     let argon = id("Ar");
@@ -1790,6 +1791,80 @@ fn a_solid_whose_density_was_not_read_has_a_stand_in_cap_and_no_layer() {
     assert!(
         relative(ice.area_fraction(), cap) < 1e-12,
         "{ice:?} against {cap}"
+    );
+}
+
+/// P14.T49.n's solid argon (fcc), held until 24 (`READ_DENSITIES_VERSION`): under 24's rules the
+/// same argon ice is capped at its solid's density where it lies (its `lies_at`, held at most its
+/// first melt) and publishes its layer at that density, to the bit; its reservoir is unchanged and
+/// its area smaller than the stand-in's by the two densities' ratio. Under 23's rules it is the
+/// stand-in's (`a_solid_whose_density_was_not_read_has_a_stand_in_cap_and_no_layer`).
+#[test]
+fn under_24_s_densities_an_argon_ice_has_its_solid_s_cap_and_layer() {
+    use crate::substance::{ReadDensitiesRules, with_read_densities};
+    let argon = id("Ar");
+    let profile = linear_cold_area(30.0, 70.0);
+    let read = || {
+        let p = partition(
+            &span(40.0, 50.0, 60.0),
+            &gravity(EARTH_GRAVITY),
+            &inventory(&[("Ar", 1e4)]),
+        );
+        let published = p.publish(&Cover {
+            cold_area: &profile,
+            state: SurfaceState::Temperate,
+            water: water_cover(&p, &profile, 1.0),
+        });
+        let c = p.condensate(argon).unwrap();
+        let at = if c.lies_at() < c.first_melt() {
+            c.lies_at()
+        } else {
+            c.first_melt()
+        };
+        let rho = argon
+            .substance()
+            .grain_density(CondensedPhase::Solid, at)
+            .map(KilogramsPerCubicMetre::value);
+        let ice = *published.entry(argon, CondensatePhase::Solid).unwrap();
+        (ice, at, rho)
+    };
+    let (held, held_at, none) = read();
+    assert_eq!(none, None);
+    let (ice, at, rho) = with_read_densities(ReadDensitiesRules::Read, read);
+    assert_same_bits(at.value(), held_at.value());
+    let rho = rho.expect("solid argon's density is read at 24");
+    assert_same_bits(ice.reservoir().value(), held.reservoir().value());
+    assert_same_bits(
+        ice.reservoir_gel().expect("its layer is published").value(),
+        ice.reservoir().value() / rho,
+    );
+    let cap = ice.reservoir().value() / (rho * ICE_SHEET_THICKNESS.value());
+    assert!(
+        relative(ice.area_fraction(), cap) < 1e-12,
+        "{ice:?} against {cap}"
+    );
+    let triple = argon
+        .substance()
+        .phase_diagram()
+        .unwrap()
+        .triple_temperature();
+    let stand_in = argon
+        .substance()
+        .grain_density(CondensedPhase::Liquid, triple)
+        .unwrap()
+        .value();
+    assert!((1_550.0..1_800.0).contains(&rho), "{rho} kg m⁻³ at {at:?}");
+    assert!(
+        relative(ice.area_fraction() / held.area_fraction(), stand_in / rho) < 1e-12,
+        "{ice:?} against {held:?}"
+    );
+    eprintln!(
+        "an argon ice at {:.3} K: cap {stand_in:.1} → {rho:.1} kg m⁻³, area {:.6e} → {:.6e}, \
+         layer none → {:.6e} m",
+        at.value(),
+        held.area_fraction(),
+        ice.area_fraction(),
+        ice.reservoir().value() / rho
     );
 }
 
@@ -2024,4 +2099,257 @@ fn the_record_lists_an_ice_bulk_s_crust_water_only_under_an_h2o_lid() {
             "{lid:?}"
         );
     }
+}
+
+/// A dry cover over the profile `profile`: no surface water, ice Ih's density for a cap.
+fn dry_cover(profile: &dyn Fn(Kelvin) -> f64) -> Cover<'_> {
+    Cover {
+        cold_area: profile,
+        state: SurfaceState::Temperate,
+        water: WaterCover {
+            surface_water: KilogramsPerSquareMetre::ZERO,
+            potential_ocean: 0.0,
+            ice_fraction: 0.0,
+            ice_density: KilogramsPerCubicMetre::new(917.0),
+            crust_water: CrustWater::Unlisted,
+        },
+    }
+}
+
+/// P14.T49.n's compression, held until 24 (`COMPRESSED_LIQUIDS_VERSION`), moves the partition's
+/// readers of a liquid's density together, each to the registry's law at its own temperature under
+/// its own pressure, to the bit (W4: the layer and the area read one volume). Earth's sea, with no
+/// ice: its layer the whole surface water over its liquid's density where it lies under the
+/// surface pressure, its area that layer's fill of the basins, denser than the saturated liquid's
+/// by `κ_T` (`p_s` − `p_sat`) within 1% (3.5 × 10⁻⁵ under the by-hand Earth's 0.77 bar) and so a
+/// little smaller. Under 23's rules it is the saturated liquid's, as every other test of this file
+/// holds.
+#[test]
+fn under_compression_earth_s_sea_reads_one_density() {
+    use crate::substance::{CompressedLiquidsRules, with_compressed_liquids};
+    // Earth's sea: no zone below 263.15 K.
+    let profile = linear_cold_area(270.0, 330.0);
+    let sigma = 2.7e6;
+    let water = id("H2O");
+    let sea = || {
+        let (published, _) = earth_with_water(&profile, sigma);
+        let body = earth();
+        let earth = partition(&body.climate, &on_earth(EARTH_GRAVITY), &body.inventory);
+        let c = earth.condensate(water).unwrap();
+        let diagram = water.substance().phase_diagram().unwrap();
+        let rho = liquid_density_kg_per_m3(c, diagram, earth.surface_pressure()).unwrap();
+        let law = water
+            .substance()
+            .compressed_liquid_density(c.lies_at(), earth.surface_pressure())
+            .unwrap()
+            .value();
+        let entry = *published.entry(water, CondensatePhase::Liquid).unwrap();
+        (entry, rho, law)
+    };
+    let (held, held_rho, _) = sea();
+    let (moved, rho, law) = with_compressed_liquids(CompressedLiquidsRules::Compressed, sea);
+    assert_same_bits(rho, law);
+    for (entry, rho) in [(held, held_rho), (moved, rho)] {
+        assert_same_bits(entry.reservoir().value(), sigma);
+        assert_same_bits(entry.reservoir_gel().unwrap().value(), sigma / rho);
+        assert_same_bits(
+            entry.area_fraction(),
+            earth_basins().area_filled(Metres::new(sigma / rho)),
+        );
+    }
+    let relative = rho / held_rho - 1.0;
+    let body = earth();
+    let earth = partition(&body.climate, &on_earth(EARTH_GRAVITY), &body.inventory);
+    let lies_at = earth.condensate(water).unwrap().lies_at();
+    let equation = water
+        .substance()
+        .liquid()
+        .and_then(|columns| columns.scattering())
+        .unwrap()
+        .equation();
+    let kappa =
+        equation.isothermal_compressibility_per_pa(KilogramsPerCubicMetre::new(held_rho), lies_at);
+    let excess = earth.surface_pressure().value() - sat("H2O", lies_at.value());
+    assert!(
+        (relative / (kappa * excess) - 1.0).abs() < 1e-2,
+        "{relative:e} against κ_T Δp {:e}",
+        kappa * excess
+    );
+    assert!(moved.area_fraction() < held.area_fraction());
+    eprintln!(
+        "Earth's sea at {:.2} K under {:.0} Pa: ρ {held_rho:.6} → {rho:.6} kg m⁻³ \
+         ({relative:.3e}), area {:.9} → {:.9}",
+        lies_at.value(),
+        earth.surface_pressure().value(),
+        held.area_fraction(),
+        moved.area_fraction()
+    );
+}
+
+/// P14.T49.n's compression of a non-water liquid, held until 24: a carbon dioxide sea at 250 K
+/// under 30 bar of nitrogen takes its layer and its share of the basins' fill at the same
+/// compressed density, about 1.3% denser than the saturated liquid's, to the bit; and that carbon
+/// dioxide's own-ocean weight at its mean, under the pressure its minor branch gives, is its layer
+/// over the compressed density weighed by the basins, to the bit, and so lighter. Under 23's rules
+/// each is the saturated liquid's.
+#[test]
+fn under_compression_a_carbon_dioxide_sea_and_its_ocean_weight_read_one_density() {
+    use crate::substance::{CompressedLiquidsRules, with_compressed_liquids};
+    let co2 = id("CO2");
+    let climate = span(240.0, 250.0, 260.0);
+    let inv = inventory(&[("CO2", 1e7), ("N2", 3e6)]);
+    let cold = linear_cold_area(240.0, 260.0);
+    let carbon_sea = || {
+        let world = partition(&climate, &on_earth(EARTH_GRAVITY), &inv);
+        let c = world.condensate(co2).unwrap();
+        assert_eq!(c.phase(), CondensatePhase::Liquid, "{world:?}");
+        let published = world.publish(&dry_cover(&cold));
+        let entry = *published.entry(co2, CondensatePhase::Liquid).unwrap();
+        let law = co2
+            .substance()
+            .compressed_liquid_density(c.lies_at(), world.surface_pressure())
+            .unwrap()
+            .value();
+        let diagram = co2.substance().phase_diagram().unwrap();
+        let rho = liquid_density_kg_per_m3(c, diagram, world.surface_pressure()).unwrap();
+        (entry, rho, law)
+    };
+    let (held, held_rho, _) = carbon_sea();
+    let (moved, rho, law) = with_compressed_liquids(CompressedLiquidsRules::Compressed, carbon_sea);
+    assert_same_bits(rho, law);
+    for (entry, rho) in [(held, held_rho), (moved, rho)] {
+        let mass = entry.reservoir().value();
+        let layer = mass / rho;
+        assert_same_bits(entry.reservoir_gel().unwrap().value(), layer);
+        // The only liquid but water's: the whole fill is its share.
+        assert_same_bits(
+            entry.area_fraction(),
+            earth_basins().area_filled(Metres::new(layer)),
+        );
+    }
+    let relative = rho / held_rho - 1.0;
+    assert!((0.005..0.05).contains(&relative), "{relative:e}");
+    assert!(moved.area_fraction() < held.area_fraction());
+    eprintln!(
+        "a CO2 sea at 250 K under 30 bar of N2: ρ {held_rho:.4} → {rho:.4} kg m⁻³ \
+         ({relative:.3e}), area {:.6} → {:.6}",
+        held.area_fraction(),
+        moved.area_fraction()
+    );
+    // Its own-ocean weight, by hand: at the mean, under its minor branch's pressure.
+    let k = inv.species.iter().position(|s| s.substance == co2).unwrap();
+    let species = &inv.species[k];
+    let diagram = co2.substance().phase_diagram().unwrap();
+    let ground = on_earth(EARTH_GRAVITY);
+    let minor = diagram.saturation_pressure(climate.mean());
+    let others = Pascals::new(3e6);
+    let weight = || own_ocean_weight(species, diagram, &climate, &ground, others, minor);
+    let held = weight();
+    let moved = with_compressed_liquids(CompressedLiquidsRules::Compressed, weight);
+    let rho = co2
+        .substance()
+        .compressed_liquid_density(climate.mean(), others + minor)
+        .unwrap();
+    let depth = (species.weight - minor).value() / EARTH_GRAVITY / rho.value();
+    assert_same_bits(moved, ground.basins.ocean_weight(Metres::new(depth)));
+    assert!(
+        0.0 < moved && moved < held && held < 1.0,
+        "{moved} against {held}"
+    );
+    eprintln!("the CO2 sea's own-ocean weight: {held:.9} → {moved:.9}");
+}
+
+/// P14.T49.n's record test over a golden system: `close_binary`'s `.0800`, a steam world whose
+/// water sea lies under 213 bar at about 583 K on the record at 23 (decision-p14-t54a-water-
+/// consistency's figures, 225 bar and 596 K, a sea of 0.419 against 0.406 compressed, are an
+/// earlier record's), takes a compressed sea under 24's rules: its layer's density about 4%
+/// above the saturated liquid's, its area smaller, and the palette's liquid entry, read inside the
+/// switch, the registry's law at its record's temperature and the surface pressure, to the bit.
+#[test]
+fn close_binary_s_sea_shrinks_under_its_compressed_water() {
+    use hyperion_surface::field::PaletteRole;
+
+    use crate::Seed;
+    use crate::galaxy::Galaxy;
+    use crate::galaxy::params::GalaxyParams;
+    use crate::id::SystemId;
+    use crate::planetary::context::SystemContext;
+    use crate::planetary::surface::{CoarseInputs, RECORD_TIME};
+    use crate::planetary::system::generate;
+    use crate::substance::{CompressedLiquidsRules, with_compressed_liquids};
+    // tests/planetary_golden.rs's `SYSTEMS_SEED` and close_binary's pinned ID.
+    let galaxy = Galaxy::from_params(
+        Seed::new(0x5eed_0000_0014_0032),
+        GalaxyParams::milky_way_like(),
+    )
+    .expect("the Milky Way fixture's gas is mostly neutral");
+    let system = SystemId::from_raw(0x4200_2cb2_0000_0009).expect("a pinned ID is well formed");
+    let ctx = SystemContext::for_system(&galaxy, system).expect("a pinned ID names a system");
+    let water = id("H2O");
+    let read = || {
+        let snapshot = generate(galaxy.seed(), &ctx).snapshot_at(&ctx, RECORD_TIME);
+        let record = snapshot
+            .bodies()
+            .iter()
+            .find(|record| record.index().get() == 0x0800)
+            .expect("close_binary holds its .0800");
+        let surface = record.surface().ok().expect(".0800 has a surface");
+        let sea = *surface
+            .condensates()
+            .entry(water, CondensatePhase::Liquid)
+            .expect(".0800 holds a water sea");
+        let conditions = surface.conditions();
+        let pressure = conditions.surface_pressure();
+        let inputs = CoarseInputs::for_body(record, None, &ctx).expect(".0800 reads its inputs");
+        let entry = inputs
+            .palette()
+            .entries()
+            .iter()
+            .find(|e| e.role == PaletteRole::Liquid && e.substance.as_str() == "H2O")
+            .expect(".0800's palette holds its sea");
+        let t = entry
+            .liquid
+            .as_ref()
+            .expect("a sea carries its record")
+            .temperature;
+        let palette = (entry.grain_density_kg_m3, t);
+        (
+            sea,
+            pressure,
+            conditions.mean_surface_temperature(),
+            palette,
+        )
+    };
+    let (held, pressure, mean, held_palette) = read();
+    let (moved, moved_pressure, moved_mean, palette) =
+        with_compressed_liquids(CompressedLiquidsRules::Compressed, read);
+    let density = |entry: &CondensateEntry| {
+        entry.reservoir().value() / entry.reservoir_gel().unwrap().value()
+    };
+    let (held_rho, rho) = (density(&held), density(&moved));
+    let relative = rho / held_rho - 1.0;
+    eprintln!(
+        "close_binary .0800: {:.4} → {:.4} bar, T_s {:.3} → {:.3} K; the sea's layer density \
+         {held_rho:.3} → {rho:.3} kg m⁻³ ({relative:+.4}), area {:.6} → {:.6}; the palette's \
+         {held_palette:?} → {palette:?}",
+        pressure.value() / 1e5,
+        moved_pressure.value() / 1e5,
+        mean.value(),
+        moved_mean.value(),
+        held.area_fraction(),
+        moved.area_fraction(),
+    );
+    assert!((0.02..0.07).contains(&relative), "{relative}");
+    assert!(moved.area_fraction() < held.area_fraction());
+    let ((held_grain, t_held), (grain, t)) = (held_palette, palette);
+    let saturated = water
+        .substance()
+        .grain_density(CondensedPhase::Liquid, t_held)
+        .unwrap();
+    assert_same_bits(held_grain, saturated.value());
+    let law = water
+        .substance()
+        .compressed_liquid_density(t, moved_pressure)
+        .unwrap();
+    assert_same_bits(grain, law.value());
 }

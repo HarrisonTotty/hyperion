@@ -23,7 +23,11 @@
 //!   ([`SurfaceTensionEquation`]), and **the viscosity** a reference correlation
 //!   ([`ViscosityCorrelation`]);
 //! - **the density** is the condensed columns' (P14.T49.b): the saturated liquid's ancillary
-//!   equation for a row with a phase diagram, a stated value otherwise;
+//!   equation for a row with a phase diagram, a stated value otherwise. A pure liquid with a
+//!   reference equation of state is compressed to a pressure by it
+//!   (`Substance::compressed_liquid_density`, P14.T49.n), which the record's readers take from
+//!   generator version 24 (`COMPRESSED_LIQUIDS_VERSION`), its body's surface pressure; every
+//!   other liquid is incompressible;
 //! - **the specific heat** of the saturated liquid, `c_l`(T), J kg⁻¹ K⁻¹, is the row's reference
 //!   equation of state's `c_p` at its own saturated liquid over a range, held at its ends
 //!   ([`LiquidSpecificHeat`]; decision-r09-t13i §2.1, for the climate's sea of another liquid;
@@ -106,12 +110,13 @@ use hyperion_surface::substance_key::{SubstanceKey, SubstanceKeyForm};
 
 use super::condensed::{CondensedPhase, GrainDensity};
 use super::diagram::{AVOGADRO_PER_MOL, DensityEquation, DensityForm, PhaseDiagram};
-use super::helmholtz::{HelmholtzIdeal, HelmholtzResidual};
+use super::helmholtz::{COMPRESSION_CEILING, HelmholtzIdeal, HelmholtzResidual};
 use super::rows::liquids::LIQUIDS;
 use super::{Source, Substance, SubstanceId};
 use crate::math;
 use crate::units::consts::BOLTZMANN_CONSTANT;
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
+use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 mod melt;
 mod solution;
@@ -122,6 +127,82 @@ pub(crate) use solution::{
     LaliberteViscosity, MixingModel, MyhreDensity, RowlessSolute, SoluteAbsorption,
     SolutionColumns, VehkamakiSurfaceTension, WilliamsLongViscosity,
 };
+
+/// The generator version from which the record's liquids are compressed to their body's surface
+/// pressure (P14.T49.n): 24, the 23 → 24 batch's bump, P14.T54.b
+/// (decision-p14-t54a-water-consistency, its Batch B follow-up of 2026-10-20, F.1 and C;
+/// decision-bump-plan-after-22, "Version-24 lanes after 23", §6's holds).
+///
+/// Below it [`CompressedLiquidsRules::in_force`] is [`CompressedLiquidsRules::Saturated`]: every
+/// reader of a liquid's density on the record, the partition's layers, its seas' and its other
+/// liquids' areas and its own-ocean weight (`planetary::chem::partition`), the palette's liquid
+/// entry with its record (`planetary::surface::palette`), and the photometry's liquid record
+/// (`planetary::derive::photometry::area_mix`), reads the saturated liquid's
+/// ([`Substance::liquid_density_at_pressure`], [`liquid_properties_at_pressure`]), so that every
+/// golden keeps 23's bits. The five move together, so that a liquid's layer, its area, its palette
+/// entry and its Bond albedo's liquid read one `ρ_l`(T, p) (decision-p14-t54a-water-consistency's
+/// W4). P14.T54.b deletes this hold, [`CompressedLiquidsRules`] with its `Saturated` arm,
+/// [`with_compressed_liquids`] (and the switch in every test that sets it) and its tripwires
+/// (`the_compressed_liquids_are_held_only_until_the_24_bump` and
+/// `a_panic_inside_the_compressed_liquids_switch_sets_the_rules_back`).
+pub(crate) const COMPRESSED_LIQUIDS_VERSION: GeneratorVersion = GeneratorVersion::new(24);
+
+/// Whether the record's liquids are compressed to their body's surface pressure (the hold,
+/// [`COMPRESSED_LIQUIDS_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum CompressedLiquidsRules {
+    /// Versions 23's and before: every reader takes the saturated liquid's density, under its own
+    /// vapour's pressure, at its temperature.
+    Saturated,
+    /// The 23 → 24 batch's: every reader takes its liquid compressed to the body's surface
+    /// pressure ([`Substance::compressed_liquid_density`]).
+    Compressed,
+}
+
+impl CompressedLiquidsRules {
+    /// The rules this generator version gives: the compression from
+    /// [`COMPRESSED_LIQUIDS_VERSION`], the saturated liquid below it; in the tests, the rules a
+    /// test's switch sets on its thread ([`with_compressed_liquids`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = COMPRESSED_LIQUIDS_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= COMPRESSED_LIQUIDS_VERSION {
+            Self::Compressed
+        } else {
+            Self::Saturated
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The compressed liquids' rules a test sets on its thread, `None` for the version's.
+    static COMPRESSED_LIQUIDS_RULES: core::cell::Cell<Option<CompressedLiquidsRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the compressed liquids' rules `rules` on this thread, for the tests to
+/// reach 24's liquids ahead of the bump; the version's rules are set back after, a panic in `run`
+/// included. A record derives lazily, so a test reads it inside the switch. P14.T54.b deletes it
+/// with the hold.
+#[cfg(test)]
+pub(crate) fn with_compressed_liquids<R>(
+    rules: CompressedLiquidsRules,
+    run: impl FnOnce() -> R,
+) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<CompressedLiquidsRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            COMPRESSED_LIQUIDS_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(COMPRESSED_LIQUIDS_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
 
 /// The edges of the liquid bins, nm: 380 + 25.33 k for k = 0 to 15, R08's bake bins (Design note
 /// 5), whose centres are `hyperion_surface::field::LIQUID_BIN_CENTRES_NM`.
@@ -1618,9 +1699,132 @@ fn extended_liquid_density(
     }
 }
 
+impl Substance {
+    /// Its liquid's grain density at `temperature` compressed to `pressure`, kg m⁻³, without pore
+    /// space (P14.T49.n; decision-p14-t54a-water-consistency, its Batch B follow-up of 2026-10-20,
+    /// F.1 and C):
+    ///
+    /// `ρ_l`(T, p) = `ρ_reg`(T) × `ρ_eos`(T, p′) ÷ `ρ_eos`(T, `p_sat`(T)), with p′ = max(p,
+    /// `p_sat`(T)) held at most 1,000 MPa,
+    ///
+    /// for a pure liquid with a reference equation of state, its scattering's
+    /// ([`LiquidScattering::equation`]), and a phase diagram: `ρ_reg`(T) is the registry's
+    /// saturated liquid ([`Substance::grain_density`]), `p_sat`(T) the diagram's vapour pressure
+    /// ([`PhaseDiagram::saturation_pressure`]), and `ρ_eos`(T, p) the equation's density at p on
+    /// the liquid's isotherm: at `p_sat`, four Newton steps from `ρ_reg`, the equation's own
+    /// saturated liquid as [`LiquidSpecificHeat`] takes it
+    /// ([`HelmholtzResidual::density_at_pressure`]); at p′,
+    /// [`COMPRESSION_STEPS`](super::helmholtz::COMPRESSION_STEPS) more from there
+    /// ([`HelmholtzResidual::compressed_density`]). The equation's compression is carried onto the
+    /// registry's saturated density, so the law is the registry's own at saturation to the bit, and
+    /// it never expands a liquid: a pressure at or below `p_sat`(T) gives `ρ_reg`(T) itself, as
+    /// does a pressure that is not a number, and any pressure at the critical temperature, where
+    /// `p_sat` is infinite. Above 1,000 MPa, the upper bound of IAPWS-95's validity, the liquid is
+    /// held at its density there, a stated hold.
+    ///
+    /// The equations are IAPWS-95 for water (IAPWS R6-95(2018); Wagner and Pruß 2002, J. Phys.
+    /// Chem. Ref. Data 31, 387), and each other row's as its liquid columns cite it: Setzmann and
+    /// Wagner 1991's methane (J. Phys. Chem. Ref. Data 20, 1061), Span et al. 2000's nitrogen
+    /// (29, 1361), Bücker and Wagner 2006's ethane (35, 205), Gao et al. 2023's ammonia (52,
+    /// 013102), Span and Wagner 1996's carbon dioxide (25, 1509), Schmidt and Wagner 1985's oxygen
+    /// (Fluid Phase Equilib. 19, 175), Tegeler, Span and Wagner 1999's argon (J. Phys. Chem. Ref.
+    /// Data 28, 779), and Lemmon and Span 2006's krypton, xenon, carbon monoxide, nitrous oxide and
+    /// hydrogen sulphide (J. Chem. Eng. Data 51, 785).
+    ///
+    /// Every other liquid is incompressible here, its saturated or stated density at every
+    /// pressure, a recorded refinement: the solutions (the brines, ammonia–water, the aqueous acid
+    /// and Titan's seas), the silicate and metal melts, and a pure liquid with no equation of
+    /// state (sulphur dioxide's).
+    ///
+    /// `None` where the row has no liquid density at `temperature` ([`Substance::grain_density`]).
+    /// `water_s_compressed_liquid_meets_nist_s_isotherms` holds water at 596.41 K under a steam
+    /// world's 22.5 MPa to the NIST Chemistry WebBook's 690.48 kg m⁻³ (SRD 69, its evaluation of
+    /// IAPWS-95), about 4.8% denser than its saturated liquid under its vapour's 11.78 MPa.
+    ///
+    /// Crate-private while [`COMPRESSED_LIQUIDS_VERSION`] holds the record's liquids saturated,
+    /// so that no caller outside the crate publishes 24's law at 23.
+    #[must_use]
+    pub(crate) fn compressed_liquid_density(
+        &self,
+        temperature: Kelvin,
+        pressure: Pascals,
+    ) -> Option<KilogramsPerCubicMetre> {
+        self.grain_density(CondensedPhase::Liquid, temperature)
+            .map(|saturated| compressed(self, saturated, temperature, pressure))
+    }
+
+    /// Its liquid's grain density at `temperature` under `pressure`, kg m⁻³, as the record's
+    /// readers take it ([`COMPRESSED_LIQUIDS_VERSION`]'s hold): the saturated liquid's
+    /// ([`Substance::grain_density`]) under [`CompressedLiquidsRules::Saturated`], 23's to the bit,
+    /// and [`Substance::compressed_liquid_density`] under [`CompressedLiquidsRules::Compressed`].
+    #[must_use]
+    pub(crate) fn liquid_density_at_pressure(
+        &self,
+        temperature: Kelvin,
+        pressure: Pascals,
+    ) -> Option<KilogramsPerCubicMetre> {
+        match CompressedLiquidsRules::in_force() {
+            CompressedLiquidsRules::Saturated => {
+                self.grain_density(CondensedPhase::Liquid, temperature)
+            }
+            CompressedLiquidsRules::Compressed => {
+                self.compressed_liquid_density(temperature, pressure)
+            }
+        }
+    }
+}
+
+/// The reference equation of state a liquid's compression reads, with its row's phase diagram:
+/// a pure liquid's scattering's equation, where its grain density is its diagram's
+/// ([`GrainDensity::OfDiagram`], the saturated liquid's); `None` for any other row.
+#[must_use]
+fn equation_of_state(row: &Substance) -> Option<(&'static HelmholtzResidual, &PhaseDiagram)> {
+    let columns = row.liquid()?;
+    let LiquidConstitution::Pure { .. } = columns.constitution else {
+        return None;
+    };
+    let GrainDensity::OfDiagram = row.condensed()?.grain_density() else {
+        return None;
+    };
+    Some((columns.scattering?.equation, row.phase_diagram()?))
+}
+
+/// `saturated`, the row `row`'s saturated liquid density at `temperature`, compressed to
+/// `pressure` by its reference equation of state ([`Substance::compressed_liquid_density`]'s law);
+/// `saturated` itself, to the bit, for a row with no equation and at a pressure not above the
+/// vapour's.
+#[must_use]
+fn compressed(
+    row: &Substance,
+    saturated: KilogramsPerCubicMetre,
+    temperature: Kelvin,
+    pressure: Pascals,
+) -> KilogramsPerCubicMetre {
+    let Some((equation, diagram)) = equation_of_state(row) else {
+        return saturated;
+    };
+    let vapour = diagram.saturation_pressure(temperature);
+    // By comparison, so that a pressure that is not a number compresses nothing, nor any pressure
+    // where the vapour's is infinite, at the critical temperature.
+    let compresses = pressure > vapour;
+    if !compresses {
+        return saturated;
+    }
+    let held = if pressure < COMPRESSION_CEILING {
+        pressure
+    } else {
+        COMPRESSION_CEILING
+    };
+    let at_vapour = equation.density_at_pressure(saturated, vapour, temperature);
+    let at_pressure = equation.compressed_density(at_vapour, held, temperature);
+    KilogramsPerCubicMetre::new(saturated.value() * (at_pressure.value() / at_vapour.value()))
+}
+
 /// The row's liquid density at `temperature` with its basis, or `None` where it has none: a
 /// diagram row's saturated liquid inside [triple, critical], `Measured`; a stated value at any
-/// temperature, `Measured` at its own and `Derived` elsewhere.
+/// temperature, `Measured` at its own and `Derived` elsewhere; a liquid by temperature's nodes'
+/// law, `Derived` at every temperature, since a row's nodes may be a mixing rule's (the silicate
+/// melts', P14.T49.n), which its grain-density source states and the record cannot tell apart.
 #[must_use]
 fn record_density(
     row: &Substance,
@@ -1630,6 +1834,9 @@ fn record_density(
         GrainDensity::OfDiagram => row
             .grain_density(CondensedPhase::Liquid, temperature)
             .map(|density| (density, LiquidBasis::Measured)),
+        GrainDensity::MeasuredLiquid { .. } => row
+            .grain_density(CondensedPhase::Liquid, temperature)
+            .map(|density| (density, LiquidBasis::Derived)),
         GrainDensity::Fixed { liquid, .. } => liquid.map(|given| {
             let exact = (given.at().value() - temperature.value()).abs() < 1e-9;
             let basis = if exact {
@@ -1643,13 +1850,19 @@ fn record_density(
 }
 
 /// The row's liquid density at its optics file's state, kg m⁻³, and whether it is a stated
-/// extension (a line below the triple point, or a stated value away from its temperature).
+/// extension (a line below the triple point, a stated value away from its temperature, or a
+/// liquid by temperature held beyond its first or last node).
 #[must_use]
 fn state_density(row: &Substance, state: Kelvin) -> Option<(KilogramsPerCubicMetre, bool)> {
     match row.condensed()?.grain_density() {
         GrainDensity::OfDiagram => row
             .phase_diagram()
             .map(|diagram| extended_liquid_density(diagram, state)),
+        GrainDensity::MeasuredLiquid { liquid, .. } => {
+            let (first, last) = (liquid.first()?.0, liquid.last()?.0);
+            row.grain_density(CondensedPhase::Liquid, state)
+                .map(|density| (density, state < first || state > last))
+        }
         GrainDensity::Fixed { liquid, .. } => liquid.map(|given| {
             (
                 given.density(),
@@ -1949,6 +2162,47 @@ pub fn liquid_properties(
     temperature: Kelvin,
     composition: Composition<'_>,
 ) -> Result<LiquidProperties, ResolveLiquidError> {
+    // No pressure compresses a liquid beyond its saturated state: this is the saturated record.
+    resolve(id, temperature, composition, Pascals::ZERO)
+}
+
+/// The liquid's record for row `id` at `temperature` and `composition` under `pressure`, as the
+/// palette's liquid entry reads it ([`COMPRESSED_LIQUIDS_VERSION`]'s hold): [`liquid_properties`]
+/// to the bit under [`CompressedLiquidsRules::Saturated`]; under
+/// [`CompressedLiquidsRules::Compressed`], its record with a pure liquid's density compressed to
+/// `pressure`, Pa ([`Substance::compressed_liquid_density`]'s law, at the record's temperature),
+/// so that the members read at the record's density move with it: the index carried to it by
+/// Lorentz–Lorenz, the scattering's `κ_T`, depolarisation and critical-region basis there, and the
+/// viscosity there. A solution's and a melt's record is [`liquid_properties`]' under either, the
+/// law holding them incompressible.
+///
+/// # Errors
+///
+/// As [`liquid_properties`].
+pub(crate) fn liquid_properties_at_pressure(
+    id: SubstanceId,
+    temperature: Kelvin,
+    composition: Composition<'_>,
+    pressure: Pascals,
+) -> Result<LiquidProperties, ResolveLiquidError> {
+    match CompressedLiquidsRules::in_force() {
+        CompressedLiquidsRules::Saturated => liquid_properties(id, temperature, composition),
+        CompressedLiquidsRules::Compressed => resolve(id, temperature, composition, pressure),
+    }
+}
+
+/// [`liquid_properties`] under `pressure`, a pure liquid's density compressed to it
+/// ([`compressed`]); at zero pressure the saturated record.
+///
+/// # Errors
+///
+/// As [`liquid_properties`].
+fn resolve(
+    id: SubstanceId,
+    temperature: Kelvin,
+    composition: Composition<'_>,
+    pressure: Pascals,
+) -> Result<LiquidProperties, ResolveLiquidError> {
     let row = id.substance();
     let key = row.key();
     let columns = row.liquid().ok_or(ResolveLiquidError::NotALiquid { key })?;
@@ -1958,7 +2212,7 @@ pub fn liquid_properties(
     };
     match &columns.constitution {
         LiquidConstitution::Pure { .. } | LiquidConstitution::AwaitingSolute(_) => {
-            pure_record(row, columns, temperature)
+            pure_record(row, columns, temperature, pressure)
         }
         LiquidConstitution::Solution(solution) => {
             let composition = given.unwrap_or(LiquidComposition::of_reference(solution.reference));
@@ -2020,10 +2274,14 @@ fn checked_composition<'a>(
 /// row, at its reference, its range ending below its solvent's (decision-p14-t49h-step3-composition
 /// §3: the brines' salts have no phase diagram), so that above it the record is
 /// [`ResolveLiquidError::OutOfRange`] before any member is [`ResolveLiquidError::NotModelled`].
+/// Its density is compressed to `pressure` ([`compressed`]; none at or below the vapour's), its
+/// basis the saturated density's, and every member read at the record's density reads the
+/// compressed one.
 fn pure_record(
     row: &Substance,
     columns: &LiquidColumns,
     temperature: Kelvin,
+    pressure: Pascals,
 ) -> Result<LiquidProperties, ResolveLiquidError> {
     let key = row.key();
     let condensed = row.condensed().ok_or(ResolveLiquidError::NotModelled {
@@ -2049,11 +2307,12 @@ fn pure_record(
             below,
         });
     }
-    let (density, density_basis) =
+    let (saturated, density_basis) =
         record_density(row, temperature).ok_or(ResolveLiquidError::NotModelled {
             key,
             member: LiquidMember::Density,
         })?;
+    let density = compressed(row, saturated, temperature, pressure);
     let optics = columns.optics.ok_or(ResolveLiquidError::NotModelled {
         key,
         member: LiquidMember::RefractiveIndex,

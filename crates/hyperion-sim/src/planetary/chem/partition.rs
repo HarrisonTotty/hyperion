@@ -737,7 +737,9 @@ struct Caps {
 /// It is its reservoir at the mean, its inventory less its minor branch's weight (water's at its
 /// ground's surface share, [`Ground::water_at_surface`]), where its pure substance's phase at the
 /// mean and the surface pressure that branch gives is liquid ([`condensed_phase_at`]): that
-/// liquid's global layer, over its grain density at the mean, weighed by the basins
+/// liquid's global layer, over its grain density at the mean under that pressure (the saturated
+/// liquid's until generator version 24, then compressed to it:
+/// `Substance::liquid_density_at_pressure`, P14.T49.n), weighed by the basins
 /// ([`Basins::ocean_weight`]). A closed form of the inventory and the climate, as the dominance's
 /// share is, so that it needs no iteration of its own. A solution's first melt labels the phases
 /// after the solve and never moves the cap (decision-p14-t51a-part2 §2.2). Zero where the
@@ -772,7 +774,7 @@ fn own_ocean_weight(
     let Some(density) = species
         .substance
         .substance()
-        .grain_density(CondensedPhase::Liquid, climate.mean)
+        .liquid_density_at_pressure(climate.mean, pressure)
     else {
         return 0.0;
     };
@@ -2371,12 +2373,18 @@ impl Partition {
             }
             let [solid, liquid] =
                 if c.substance == Gas::Water.substance() && edges.water_keeps_cover() {
-                    water_parts(c, diagram, &cover.water, &self.ground.basins)
+                    water_parts(
+                        c,
+                        diagram,
+                        &cover.water,
+                        &self.ground.basins,
+                        self.surface_pressure,
+                    )
                 } else {
                     let held = self
                         .of(c.substance)
                         .map_or((0.0, Pascals::ZERO), |s| (s.dominance, s.partial_pressure));
-                    parts_of(c, diagram, (held, edges), cover)
+                    parts_of(c, diagram, (held, edges), cover, self.surface_pressure)
                 };
             if let Some(solid) = solid {
                 entries.push(solid.entry(solid.area));
@@ -2427,13 +2435,15 @@ impl Partition {
 /// fill bounds it by its volume, continuously.
 ///
 /// Where the surface water holds none, an ice bulk's crust gives the solid alone
-/// ([`crust_ice`]).
+/// ([`crust_ice`]). The sea's density is its liquid's under the surface pressure
+/// `surface_pressure` ([`liquid_density_kg_per_m3`]).
 #[must_use]
 fn water_parts(
     c: &Condensate,
     diagram: &PhaseDiagram,
     water: &WaterCover,
     basins: &Basins,
+    surface_pressure: Pascals,
 ) -> [Option<Part>; 2] {
     let reservoir = water.surface_water.value();
     // A NaN holds none.
@@ -2465,7 +2475,7 @@ fn water_parts(
     });
     let liquid_mass = reservoir - solid_mass;
     let liquid = (lies_as_liquid && liquid_mass > 0.0).then(|| {
-        let density = liquid_density_kg_per_m3(c, diagram);
+        let density = liquid_density_kg_per_m3(c, diagram, surface_pressure);
         Part {
             substance: c.liquid,
             phase: CondensatePhase::Liquid,
@@ -2507,9 +2517,17 @@ fn crust_ice(c: &Condensate, water: &WaterCover) -> Option<Part> {
 }
 
 /// The grain density, kg m⁻³, of the liquid row of the condensate `c` of `diagram` at the
-/// temperature it lies at, held within its liquid range, from its first melt to its critical point.
+/// temperature it lies at, held within its liquid range, from its first melt to its critical point,
+/// under the body's surface pressure `surface_pressure`: the saturated liquid's until generator
+/// version 24, and from it the liquid compressed to that pressure
+/// (`Substance::liquid_density_at_pressure`, P14.T49.n's hold), which the entry's layer, the
+/// sea's area and the other liquids' shared area all read.
 #[must_use]
-fn liquid_density_kg_per_m3(c: &Condensate, diagram: &PhaseDiagram) -> Option<f64> {
+fn liquid_density_kg_per_m3(
+    c: &Condensate,
+    diagram: &PhaseDiagram,
+    surface_pressure: Pascals,
+) -> Option<f64> {
     let critical = diagram.critical_temperature();
     let at = if c.lies_at < c.first_melt {
         c.first_melt
@@ -2520,20 +2538,22 @@ fn liquid_density_kg_per_m3(c: &Condensate, diagram: &PhaseDiagram) -> Option<f6
     };
     c.liquid
         .substance()
-        .grain_density(CondensedPhase::Liquid, at)
+        .liquid_density_at_pressure(at, surface_pressure)
         .map(KilogramsPerCubicMetre::value)
 }
 
 /// The solid and liquid parts of the condensed reservoir `c` of `diagram`, held at the dominance
 /// and the partial pressure `held`, with the solids' edges `edges`, over the cover `cover`, for
 /// every condensable but water, and for water too under [`SolidEdges::Exosphere`] on a crust that
-/// is not its own ice ([`Partition::publish_with`]'s split).
+/// is not its own ice ([`Partition::publish_with`]'s split); its liquid's density under the
+/// surface pressure `surface_pressure` ([`liquid_density_kg_per_m3`]).
 #[must_use]
 fn parts_of(
     c: &Condensate,
     diagram: &PhaseDiagram,
     (held, edges): ((f64, Pascals), SolidEdges),
     cover: &Cover<'_>,
+    surface_pressure: Pascals,
 ) -> [Option<Part>; 2] {
     let reservoir = c.reservoir.value();
     let lies_as_liquid = c.phase == CondensatePhase::Liquid;
@@ -2601,7 +2621,7 @@ fn parts_of(
         substance: c.liquid,
         phase: CondensatePhase::Liquid,
         mass_kg_per_m2: liquid_mass,
-        density_kg_per_m3: liquid_density_kg_per_m3(c, diagram),
+        density_kg_per_m3: liquid_density_kg_per_m3(c, diagram, surface_pressure),
         area: 0.0,
         seasonal: c.is_seasonal_as(CondensatePhase::Liquid),
     });

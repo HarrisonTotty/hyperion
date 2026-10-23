@@ -304,9 +304,10 @@ fn diagram_section(w: &mut GoldenWriter) {
 }
 
 /// The golden's condensed section: each row's grain density (a fixed row's solid's and liquid's,
-/// each with its temperature or none; a diagram row's solid at 0.9 of its triple temperature and
-/// its saturated liquid at it), its transition with its kind (a eutectic's composition too) and its
-/// mechanics family (P14.T49.b).
+/// each with its temperature or none; a liquid by temperature's solid with its temperature and
+/// its liquid's nodes, from generator version 24, P14.T49.n; a diagram row's solid at 0.9 of its
+/// triple temperature and its saturated liquid at it), its transition with its kind (a eutectic's
+/// composition too) and its mechanics family (P14.T49.b).
 fn condensed_section(w: &mut GoldenWriter) {
     w.line("[condensed]");
     for id in substance::ids() {
@@ -332,6 +333,26 @@ fn condensed_section(w: &mut GoldenWriter) {
                         }
                         None => w.line(&format!("{label}: {phase} grain_density_kg_per_m3 none")),
                     }
+                }
+            }
+            GrainDensity::MeasuredLiquid { solid, liquid } => {
+                w.line(&format!(
+                    "{label}: grain density fixed solid, liquid by temperature"
+                ));
+                w.f64(
+                    &format!("{label}: solid grain_density_kg_per_m3"),
+                    solid.density().value(),
+                );
+                w.f64(
+                    &format!("{label}: solid grain_density_at_k"),
+                    solid.at().value(),
+                );
+                for (i, (at, density)) in liquid.iter().enumerate() {
+                    w.f64(&format!("{label}: liquid node {i} at_k"), at.value());
+                    w.f64(
+                        &format!("{label}: liquid node {i} grain_density_kg_per_m3"),
+                        density.value(),
+                    );
                 }
             }
             GrainDensity::OfDiagram => {
@@ -712,6 +733,9 @@ fn kinks(law: &SolidDensity) -> Vec<f64> {
 ///
 /// - A [`GrainDensity::Fixed`] row's phase that was read is one piece with no bounds and one node
 ///   at its stated temperature, held at every temperature, as the sim holds it.
+/// - A [`GrainDensity::MeasuredLiquid`] row's solid is such a piece, and its liquid one piece with
+///   no bounds and the row's own nodes, which the fixture's rule reads exactly as the sim does
+///   (linear between them, held beyond them).
 /// - A [`GrainDensity::OfDiagram`] row's solid is a piece for each solid phase with a density,
 ///   from its start to the next phase's start, or to the triple temperature for the warmest; a
 ///   phase with no density is a gap. A last piece that ends where such a gap begins ends at the
@@ -733,6 +757,20 @@ fn grain_density_pieces(row: &Substance, phase: CondensedPhase) -> Option<Vec<Pi
                 densities_kg_per_m3: vec![given.density().value()],
             }]
         }
+        GrainDensity::MeasuredLiquid { solid, liquid } => match phase {
+            CondensedPhase::Solid => vec![Piece {
+                from_k: None,
+                to_k: None,
+                temperatures_k: vec![solid.at().value()],
+                densities_kg_per_m3: vec![solid.density().value()],
+            }],
+            CondensedPhase::Liquid => vec![Piece {
+                from_k: None,
+                to_k: None,
+                temperatures_k: liquid.iter().map(|(at, _)| at.value()).collect(),
+                densities_kg_per_m3: liquid.iter().map(|(_, rho)| rho.value()).collect(),
+            }],
+        },
         GrainDensity::OfDiagram => {
             let diagram = row
                 .phase_diagram()
@@ -1116,7 +1154,10 @@ fn sweep(low: f64, high: f64, count: u32) -> impl Iterator<Item = f64> {
 /// The temperatures, kelvin, at which a diagram row's or a fixed row's `phase` is compared beyond
 /// its pieces' own samples: a diagram's solid phases' starts, its triple and critical temperatures
 /// and 10⁻⁹ K either side of each, and a sweep of the solid over [0, 1.05 `T_t`] or of the liquid
-/// over [0.9 `T_t`, `T_c`]; a fixed row's 0 K, 300 K, 3,000 K and its stated temperature.
+/// over [0.9 `T_t`, `T_c`]; a fixed row's 0 K, 300 K, 3,000 K and its stated temperature; a row
+/// with a liquid by temperature the same for its solid, and for its liquid 0 K, 300 K, 3,000 K,
+/// its nodes and 10⁻⁹ K either side of each, and a sweep from 0.9 of its first node to 1.1 of its
+/// last.
 fn row_samples(row: &Substance, phase: CondensedPhase) -> Vec<f64> {
     let mut samples = Vec::new();
     match row.condensed().map(CondensedColumns::grain_density) {
@@ -1146,6 +1187,22 @@ fn row_samples(row: &Substance, phase: CondensedPhase) -> Vec<f64> {
             };
             samples.extend(given.map(|given| given.at().value()));
         }
+        Some(GrainDensity::MeasuredLiquid { solid, liquid }) => {
+            samples.extend([0.0, 300.0, 3_000.0]);
+            match phase {
+                CondensedPhase::Solid => samples.push(solid.at().value()),
+                CondensedPhase::Liquid => {
+                    for (at, _) in liquid {
+                        let at = at.value();
+                        samples.extend([at - 1e-9, at, at + 1e-9]);
+                    }
+                    if let (Some(first), Some(last)) = (liquid.first(), liquid.last()) {
+                        let (first, last) = (first.0.value(), last.0.value());
+                        samples.extend(sweep(0.9 * first, 1.1 * last, 4_096));
+                    }
+                }
+            }
+        }
         None => samples.extend([0.0, 300.0, 3_000.0]),
     }
     samples
@@ -1164,7 +1221,7 @@ fn compare_samples(
     let key = row.key();
     let diagram = match row.condensed().map(CondensedColumns::grain_density) {
         Some(GrainDensity::OfDiagram) => row.phase_diagram(),
-        Some(GrainDensity::Fixed { .. }) | None => None,
+        Some(GrainDensity::Fixed { .. } | GrainDensity::MeasuredLiquid { .. }) | None => None,
     };
     for &t in samples {
         let sim = row
@@ -1206,7 +1263,7 @@ fn check_pieces(row: &Substance, phase: CondensedPhase, pieces: &[Piece]) {
     let key = row.key();
     let diagram = match row.condensed().map(CondensedColumns::grain_density) {
         Some(GrainDensity::OfDiagram) => row.phase_diagram(),
-        Some(GrainDensity::Fixed { .. }) | None => None,
+        Some(GrainDensity::Fixed { .. } | GrainDensity::MeasuredLiquid { .. }) | None => None,
     };
     for (i, piece) in pieces.iter().enumerate() {
         let (ts, rs) = (&piece.temperatures_k, &piece.densities_kg_per_m3);
