@@ -1,7 +1,7 @@
 /**
  * The sky's sources for a body (plan R08, Design note 7; R08.T7): the one list R07 lights the
  * body's surface with, its stars and its planetshine sources, as the atmosphere's per-view
- * kernels draw them, with Design note 7's two skips inside the air.
+ * kernels draw them, with Design note 7's two skips, inside the air and outside it.
  *
  * @remarks
  * A body's air is lit by exactly the sources that light its surface in the same frame
@@ -16,17 +16,27 @@
  * square (a planetshine source's from its centre; Design note 7), its angular radius asin(R ÷ d).
  * The Moon's parallax from a camera on Earth's ground is about 1°, a Sun-like star's 4 × 10⁻⁵ rad.
  *
- * Inside the air (the camera below the medium's top), the sky loop skips two kinds of source whose
- * light on the sky cannot be seen; the surfaces keep both, and outside the air none is skipped
- * (R08.T8):
+ * The sky loop skips two kinds of source whose light on the sky cannot be seen, inside the air and,
+ * since R08.T8.e (`decision-r08-t8-leans.md` §9), outside it, one rule on both sides of the top so
+ * that no source appears or vanishes there; the surfaces keep both:
  * - below the twilight limit, a source whose upper limb lies below
  *   e = −[acos(R ÷ r_c) + 2 acos(R ÷ R_top)] at the camera, R the figure's smallest radius of
  *   curvature c² ÷ a, r_c = R + h the camera's geodetic height and R_top = R + the medium's top:
  *   it lights no air the camera can see, single scattering and no refraction (20.2° below the
- *   horizon on Earth's ground with a 100 km top, beside astronomical twilight's 18°);
+ *   horizon on Earth's ground with a 100 km top, beside astronomical twilight's 18°, and 40.1° from
+ *   400 km); the derivation, the farthest air the camera sees (`decision-r08-design.md` item 3),
+ *   holds at any r_c;
  * - negligible, one whose photopic illuminance at the camera is under `STAR_CUT_RELATIVE` of the
- *   brightest source whose centre stands above the camera's horizon: the Moon by day, at
- *   2.5 × 10⁻⁶ of the Sun.
+ *   brightest source standing at least acos(R ÷ r_c) above the camera's horizontal
+ *   ({@link horizonDipRad}): the Moon by day, at 2.5 × 10⁻⁶ of the Sun. That source stands above
+ *   the horizon of every ground point the camera sees, so it lights all the air the camera sees;
+ *   on the ground it is "above the camera's horizon", and above it the rule errs only toward
+ *   keeping a source. As inside the air, it compares light above the air, not the light at each
+ *   point. From 400 km over Earth it is 19.8°.
+ *
+ * The ray march then takes at most `SETTINGS[s].atmosphereView.marchSourceCap` of the sources left
+ * (`hillaire.ts`'s `marchSourcesOf`), the brightest first; the sky view, the aerial perspective and
+ * the surfaces take them all.
  */
 
 import { dot, norm, scale, sub, type Vec3 } from "../../geometry/vec3";
@@ -78,9 +88,23 @@ interface Carried {
 }
 
 /**
+ * The dip of the horizon at a camera `heightM` above a figure, rad: acos(R ÷ r_c), R = c² ÷ a, the
+ * figure's smallest radius of curvature, and r_c = R + the height (Design note 7). It is also the
+ * angle at the centre from the camera's nadir to the farthest ground point the camera sees, so a
+ * source standing at least this far above the camera's horizontal is above every such point's
+ * horizon (`decision-r08-t8-leans.md` §9, Ruling 2): 0 on the ground, 19.8° from 400 km over Earth.
+ */
+export function horizonDipRad(figure: SpheroidFigure, heightM: number): number {
+  const a = figure.equatorialRadiusM;
+  const c = figure.polarRadiusM;
+  const r = (c * c) / a;
+  return Math.acos(Math.min(r / (r + Math.max(heightM, 0)), 1));
+}
+
+/**
  * The twilight limit at a camera `heightM` above a figure under a medium `topHeightM` deep, rad
- * below the horizon (a positive angle): acos(R ÷ r_c) + 2 acos(R ÷ R_top), R = c² ÷ a, the
- * figure's smallest radius of curvature (Design note 7).
+ * below the horizontal (a positive angle): acos(R ÷ r_c) + 2 acos(R ÷ R_top), R = c² ÷ a, the
+ * figure's smallest radius of curvature (Design note 7), the first term {@link horizonDipRad}.
  */
 export function twilightLimitRad(
   figure: SpheroidFigure,
@@ -90,15 +114,14 @@ export function twilightLimitRad(
   const a = figure.equatorialRadiusM;
   const c = figure.polarRadiusM;
   const r = (c * c) / a;
-  const camera = r + Math.max(heightM, 0);
   const top = r + topHeightM;
-  return Math.acos(Math.min(r / camera, 1)) + 2 * Math.acos(Math.min(r / top, 1));
+  return horizonDipRad(figure, heightM) + 2 * Math.acos(Math.min(r / top, 1));
 }
 
 /**
  * The sky's sources for a body seen from `camera` (Design note 7): R07's `stars` and
- * `planetshine` for the body, each carried to the camera, less the two skips inside the air,
- * stars first, each in its array's order.
+ * `planetshine` for the body, each carried to the camera, less the two skips, inside the air or
+ * outside it (R08.T8.e), stars first, each in its array's order.
  *
  * @param stars - R07's `lightsAt(bodyCentre, hosts, MAX_BODY_LIGHTS)` for the body: each light's
  *   `toStarM` from the body's centre, in the frame of the lights' centres.
@@ -185,22 +208,22 @@ export function skySourcesWithSkips(
     ),
   ];
   const geodetic = geodeticOf(camera.positionM, figure);
-  const inside = geodetic.heightM < medium.topHeightM;
   const limitRad = twilightLimitRad(figure, geodetic.heightM, medium.topHeightM);
+  const dipRad = horizonDipRad(figure, geodetic.heightM);
   const elevationOf = (source: Carried): number =>
     Math.asin(Math.min(Math.max(dot(source.direction, geodetic.normal), -1), 1));
+  // The brightest source above the horizon of every ground point the camera sees (R08.T8.e).
   const brightestUp = Math.max(
     0,
     ...carried
-      .filter((source) => elevationOf(source) > 0)
+      .filter((source) => elevationOf(source) >= dipRad)
       .map((source) => photopicIlluminance(source.illuminanceLx)),
   );
   return carried.map((source) => {
     let skip: SkySkip = null;
-    if (inside && elevationOf(source) + source.angularRadiusRad < -limitRad) {
+    if (elevationOf(source) + source.angularRadiusRad < -limitRad) {
       skip = "below twilight limit";
     } else if (
-      inside &&
       brightestUp > 0 &&
       photopicIlluminance(source.illuminanceLx) < STAR_CUT_RELATIVE * brightestUp
     ) {

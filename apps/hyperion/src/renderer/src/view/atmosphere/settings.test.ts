@@ -78,6 +78,18 @@ describe("the atmosphere's view settings (R08.T7)", () => {
     }
   });
 
+  it("caps the march at two sources on both settings, the kernels' own count projected (R08.T8.e)", () => {
+    for (const setting of QUALITY_SETTINGS) {
+      expect(SETTINGS[setting].atmosphereView.marchSourceCap).toBe(
+        SETTINGS[setting].atmosphere.marchSourceCap,
+      );
+      expect(SETTINGS[setting].atmosphereView.marchSourceCap).toBe(2);
+      expect(ATMOSPHERE_QUALITY_LIMITS[setting].join(" ")).toMatch(
+        /a body's air takes at most 2 sources' light, the brightest left by Design note 7's skips/u,
+      );
+    }
+  });
+
   it("states low's one planetshine source as a limit of its own", () => {
     expect(ATMOSPHERE_QUALITY_LIMITS.low.length).toBe(ATMOSPHERE_QUALITY_LIMITS.high.length + 1);
   });

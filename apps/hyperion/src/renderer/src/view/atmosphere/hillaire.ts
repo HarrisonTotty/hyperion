@@ -66,6 +66,7 @@ import type {
   ViewSize,
   WgslMaterialSpec,
 } from "../engine/types";
+import { photopicIlluminance } from "../lighting/illuminance";
 import type { Rgb } from "../photometry/toneCurve";
 import type { QualitySetting } from "../quality/qualitySetting";
 import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
@@ -140,6 +141,13 @@ export interface TableSizes {
    * `MARCH_BAND`): {@link marchWeightOf}'s band.
    */
   readonly marchBand: MarchBand;
+  /**
+   * The most sources the per-pixel ray march takes, the brightest of the frame's by photopic
+   * illuminance at the camera ({@link marchSourcesOf}; plan R08, R08.T8.e,
+   * `decision-r08-t8-leans.md` §9; projected as `settings.ts`'s `atmosphereView.marchSourceCap`):
+   * the sky view, the aerial perspective and the composite take every source drawn. At least 1.
+   */
+  readonly marchSourceCap: number;
 }
 
 /**
@@ -230,6 +238,11 @@ export function marchWeightOf(heightStarM: number, topHeightM: number, band: Mar
  * even steps (`decision-r08-t8-leans.md` §4), stays within 0.40–1.55% on high from 20 km to 1 m under
  * the top and 2.0–3.5% on low from 20 to 30 km (`marchBand.test.ts`). Through high's band the
  * composite's blend stays within 2.31%, inside Design note 10's 5%.
+ *
+ * The march takes at most two sources on both settings, the brightest left by Design note 7's
+ * skips (plan R08, R08.T8.e; `decision-r08-t8-leans.md` §9, Ruling 2): each source costs it about
+ * 3.5 ms on R05's Earth and 5.5 ms on `EARTH_REFERENCE` from 400 km on high on the RTX 3080 (plan
+ * R08's Risks, "Deviations in T8.d, as built"), and two lets a binary's second star light its air.
  */
 export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
   high: {
@@ -244,6 +257,7 @@ export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
     rayMarchSamples: 36,
     aerialPerspectiveScope: "scene",
     marchBand: { lowerShareOfTop: 0.3, upperShareOfTop: 0.5 },
+    marchSourceCap: 2,
   },
   low: {
     transmittance: TRANSMITTANCE_SIZE,
@@ -257,6 +271,7 @@ export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
     rayMarchSamples: 16,
     aerialPerspectiveScope: "terrain",
     marchBand: { lowerShareOfTop: 0.2, upperShareOfTop: 0.3 },
+    marchSourceCap: 2,
   },
 };
 
@@ -689,6 +704,50 @@ export function frameSourcesOf(
       disc: [e[0] * disc, e[1] * disc, e[2] * disc, 0],
     };
   });
+}
+
+/**
+ * The indices of the sources the ray march takes among `suns` (plan R08, R08.T8.e;
+ * `decision-r08-t8-leans.md` §9, Ruling 2): the `cap` brightest by photopic illuminance at the
+ * camera, the earlier first of two alike, in their given order, so that a frame of at most `cap`
+ * sources marches them all as given.
+ *
+ * @throws RangeError for a cap that is not an integer of at least 1.
+ */
+function marchSourceIndices(suns: ReadonlyArray<SunState>, cap: number): number[] {
+  if (!(Number.isInteger(cap) && cap >= 1)) {
+    throw new RangeError(`the march's source cap must be an integer of at least 1, not ${cap}`);
+  }
+  if (suns.length <= cap) {
+    return suns.map((_, i) => i);
+  }
+  const brightness = suns.map((sun) => photopicIlluminance(sun.illuminanceLx));
+  return suns
+    .map((_, i) => i)
+    .toSorted((i, j) => (brightness[j] ?? 0) - (brightness[i] ?? 0) || i - j)
+    .slice(0, cap)
+    .toSorted((i, j) => i - j);
+}
+
+/**
+ * The sources the per-pixel ray march takes of a frame's `suns` (plan R08, R08.T8.e;
+ * `decision-r08-t8-leans.md` §9, Ruling 2): at most `cap`, `TableSizes.marchSourceCap`, the
+ * brightest by photopic illuminance at the camera, in their given order (the earlier first of two
+ * alike). The sky view, the aerial perspective and the composite take every source; the twins of
+ * the march take these, as {@link HillaireAtmosphere.drawFrame}'s march does.
+ *
+ * @remarks
+ * Design note 7's skips (`sources.ts`) leave most views from orbit one source, and a binary's
+ * second star past the skips is the case two serves. A third left by them, a terminator view with
+ * a moon and a neighbour or a binary with a moon, lights the march's air no longer: from the march
+ * band's upper edge up, and on surfaces beyond the aerial volume's reach, it is not drawn; inside
+ * the band, where the composite blends the march with the sky view, it fades
+ * (`ATMOSPHERE_QUALITY_LIMITS`).
+ *
+ * @throws RangeError for a cap that is not an integer of at least 1.
+ */
+export function marchSourcesOf(suns: ReadonlyArray<SunState>, cap: number): SunState[] {
+  return marchSourceIndices(suns, cap).flatMap((i) => suns[i] ?? []);
 }
 
 /**
@@ -1395,6 +1454,10 @@ export class HillaireAtmosphere {
    * of `decision-r08-t8-leans.md` §8, R08.T8.d. The next frame, a new medium, a restore or
    * {@link HillaireAtmosphere.dispose} drops what is left unread.
    *
+   * The ray march takes at most `TableSizes.marchSourceCap` of the sources, the brightest at the
+   * camera ({@link marchSourcesOf}; plan R08, R08.T8.e): the sky view, the aerial perspective and
+   * the composite take them all.
+   *
    * @param suns - The drawn sources, at most {@link MAX_SKY_SOURCES}: `sources.ts`'s `skySources`
    *   for a body, or a caller's own; none draws a sky of nothing but what lies behind it.
    * @throws RangeError as {@link frameSourcesOf}: too many sources, a light slot the medium's
@@ -1599,6 +1662,9 @@ export class HillaireAtmosphere {
       },
     };
     const viewUniforms = this.#viewBlock();
+    // The march takes at most `marchSourceCap` of the sources, the brightest (R08.T8.e); the sky
+    // view, the aerial perspective and the composite take them all.
+    const marchUniforms = this.#marchBlock(viewUniforms, suns, scene, medium);
     const skyView = (): void => {
       engine.dispatch(
         kernels.skyView,
@@ -1641,7 +1707,7 @@ export class HillaireAtmosphere {
       {
         buffers: common.buffers,
         sampled: { ...common.sampled, sceneDepth: scene.depth },
-        uniforms: { medium: perFrameMedium, view: viewUniforms, layerEdges: tables.layerEdges },
+        uniforms: { medium: perFrameMedium, view: marchUniforms, layerEdges: tables.layerEdges },
         storage: { rayMarchOut: { texture: outputs.rayMarch, level: 0 } },
       },
       groups8(
@@ -1685,16 +1751,55 @@ export class HillaireAtmosphere {
     return frame.rayMarch;
   }
 
-  /** The view's members as one `AtmosphereView` block, for the kernels. */
-  #viewBlock(): Float32Array {
+  /**
+   * The view's members as one `AtmosphereView` block, for the kernels: the frame's own, or
+   * `members` (the march's, `#marchBlock`).
+   */
+  #viewBlock(members: Readonly<Record<string, ArrayLike<number>>> = this.#uniforms): Float32Array {
     const block = new Float32Array(VIEW_MEMBERS.length * 4);
     for (const [i, name] of VIEW_MEMBERS.entries()) {
-      const member = this.#uniforms[name];
+      const member = members[name];
       if (member !== undefined) {
         block.set(member, i * 4);
       }
     }
     return block;
+  }
+
+  /**
+   * The ray march's `AtmosphereView` block (plan R08, R08.T8.e): the frame's `view`, its sources
+   * the march's ({@link marchSourcesOf} at `TableSizes.marchSourceCap`), in their order, with
+   * `sky.x` their count and `sky.y` the light slots their paths take; `view` itself where the
+   * frame draws no more sources than the cap, so that its march is the same to the bit.
+   */
+  #marchBlock(
+    view: Float32Array,
+    suns: ReadonlyArray<SunState>,
+    scene: AtmosphereScene,
+    medium: AtmosphereMedium,
+  ): Float32Array {
+    const marched = marchSourcesOf(suns, this.#sizes.marchSourceCap);
+    if (marched.length === suns.length) {
+      return view;
+    }
+    const sources = frameSourcesOf(
+      marched,
+      scene.exposureScale,
+      absorberCount(medium) > 0,
+      this.#tables.curves.length,
+    );
+    const sky = this.#uniforms["sky"] ?? new Float32Array(4);
+    const members: Record<string, ArrayLike<number>> = {
+      ...this.#uniforms,
+      sky: [sources.length, pathSlotsOf(sources), sky[2] ?? 0, sky[3] ?? 0],
+    };
+    for (let i = 0; i < MAX_SKY_SOURCES; i += 1) {
+      const source = sources[i];
+      members[`sourceDirection${i}`] = source?.direction ?? [0, 0, 1, 0];
+      members[`sourceWeight${i}`] = source?.weight ?? [0, 0, 0, 0];
+      members[`sourceDisc${i}`] = source?.disc ?? [0, 0, 0, 0];
+    }
+    return this.#viewBlock(members);
   }
 
   #fillView(

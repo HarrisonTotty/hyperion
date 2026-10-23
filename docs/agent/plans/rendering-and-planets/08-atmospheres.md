@@ -340,6 +340,9 @@ export interface AtmosphereViewSettings {
   readonly skySunCap: number; // 2 on both settings while R07's count is 2; R08.T7
   /** The planetshine sources the sky takes: R07's `SETTINGS[s].photoreal.planetshineSources`. */
   readonly skyPlanetshineSources: number; // 2 high, 1 low
+  /** The most sources the ray march takes, the brightest left by Design note 7's skips:
+   * `SETTINGS[s].atmosphere.marchSourceCap`, projected (R08.T8.e). */
+  readonly marchSourceCap: number; // 2 on both settings
   /** The quality limits this plan lists for R12's audit, one string each. */
   readonly qualityLimits: ReadonlyArray<string>;
 }
@@ -364,8 +367,9 @@ R05's `TABLE_SIZES` (`hillaire.ts`), which is `SETTINGS[s].atmosphere`, stays in
 gains the thick table's size (R08.T14.c). As built it holds the transmittance (256 × 64) and
 multiple-scattering (32²) sizes, the sky view (192 × 108 at 75 steps on high, 128 × 64 at 16 on
 low), the aerial-perspective volume (32³ and 32 × 32 × 16, 2 steps a slice, to 32 km), the march
-(full resolution at 36 steps since R08.T7, 32 before; half at 16), `aerialPerspectiveScope` and,
-since R08.T8, `marchBand`. `ViewSettings` also holds
+(full resolution at 36 steps since R08.T7, 32 before; half at 16), `aerialPerspectiveScope`,
+since R08.T8 `marchBand` and since R08.T8.e `marchSourceCap` (2 on both settings; `hillaire.ts`'s
+`marchSourcesOf`). `ViewSettings` also holds
 R06's `sky` and R07's `internalScaleBounds`, `budget` and `photoreal` today. `settings.ts` is the
 module R12 reads for this plan's ladder entries.
 
@@ -1107,7 +1111,12 @@ Names are those the owning plans give; the owning plan is authoritative.
      - _Negligible:_ one under `STAR_CUT_RELATIVE` of the brightest source above the camera's
        horizon, such as the Moon by day, at 2.5 × 10⁻⁶ of the Sun.
 
-     Outside the air (R08.T8) no source is skipped.
+     Since R08.T8.e (`decision-r08-t8-leans.md` §9) both skips also hold outside the air: the
+     twilight limit as written, whose derivation holds at any r_c, and the negligible skip against
+     the brightest source standing at least acos(R ÷ r_c) above the camera's horizontal, which on
+     the ground is the horizon. The march then takes at most `atmosphereView.marchSourceCap` of the
+     sources left, the brightest first (2 on both settings). The sky view and the aerial
+     perspective take them all.
 
    - **A star outside the body's list lights neither its surface nor its air.** Only triple and
      higher systems have one. The galaxy's multiplicity follows Moe and Di Stefano 2017 (galaxy
@@ -1472,7 +1481,8 @@ Names are those the owning plans give; the owning plan is authoritative.
       and its deferred, terrain-only aerial perspective are this plan's low setting.
     - This plan adds Design note 7's source count: the body's stars (`SKY_SUN_CAP`) and its
       planetshine sources. These bound the per-frame cost of the source loop, at most 4 sources on
-      high and 3 on low, against `MAX_SKY_SOURCES` = 6 in the kernels. It also adds the thick
+      high and 3 on low; the march at most 2 (R08.T8.e), against `MAX_SKY_SOURCES` = 6 in the
+      kernels. It also adds the thick
       table's size, and keeps both settings built together from R08.T6 on.
     - The thick bakes cost CPU at arrival, not frame time, so they run on both settings.
 12. **What the view says.** The atmosphere is computed physics, not decoration. Eight states are

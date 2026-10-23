@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import bakeSpectra from "../../../../../../../packages/protocol/fixtures/bake_spectra.json" with { type: "json" };
 import { cross, normalise, type Vec3 } from "../../geometry/vec3";
 import { fourAbsorberMedium } from "../../test/atmosphereFixtures";
+import { limbCamera, limbPitchRad } from "../../test/farLimb";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { quaternion } from "../camera/quaternion";
 import type { LightAtPoint } from "../lighting/hostLights";
@@ -39,7 +40,7 @@ import {
 } from "./hillaire";
 import { type AtmosphereMedium, CHANNEL_WAVELENGTHS_NM } from "./medium";
 import { maxDistanceM, opticalDepthToTop, texelUvFromUnit, unitFromTexelUv } from "./opticalDepth";
-import { skySources, twilightLimitRad } from "./sources";
+import { horizonDipRad, skySources, twilightLimitRad } from "./sources";
 import {
   bakeSpectrumOf,
   deltaUv,
@@ -622,6 +623,87 @@ describe("the Sun and a full Moon on the rebuilt Earth (R08.T7, Design note 7)",
     expect(Math.abs(moved[0] ?? Number.NaN)).toBeLessThan(1e-3);
     expect(Math.abs(moved[2] ?? Number.NaN)).toBeGreaterThan(0.03);
   }, 120_000);
+
+  // Design note 7's two skips also outside the air (R08.T8.e, `decision-r08-t8-leans.md` §9), held
+  // in the ray march's twin to R08.T7's two bounds, from 400 km and 10⁷ m with the datum's limb at
+  // the frame's centre (`test/farLimb.ts`'s `limbCamera`), the whole frame the march's.
+  describe("outside the air (R08.T8.e)", () => {
+    const viewport = { widthPx: 16, heightPx: 8 };
+    // Each place's bound on the Moon's march's largest change with the Sun 1° beyond the twilight
+    // limit kept, relative and floored at 10⁻³ of its largest: R08.T7's 10⁻⁶ from 400 km, where
+    // the twin gives 1.83 × 10⁻⁸; from 10⁷ m it gives 2.86 × 10⁻⁵, all of it Hillaire's isotropic
+    // term at the samples' own sun elevations, as inside the air ({@link KEPT_SUN_CHANGE}), held
+    // under 3 × 10⁻⁵: a deferred finding (plan R08's Risks, "Deviations in T8.e, as built").
+    const places = [
+      ["400 km", WGS84.equatorialRadiusM + 400_000, 1e-6],
+      ["10⁷ m", 1e7, 3e-5],
+    ] as const;
+    const orbitCamera = (distanceM: number): AtmosphereCamera =>
+      limbCamera(
+        distanceM,
+        limbPitchRad(distanceM, WGS84.equatorialRadiusM, 0, viewport, 7.5, 3.5),
+        viewport,
+      );
+    const marchOf = (at: AtmosphereCamera, suns: ReadonlyArray<SunState>): TwinTable =>
+      rayMarchTwin(planet, frameView(EARTH_REFERENCE, 1, at, suns), TABLE_SIZES.high, () => 0);
+
+    for (const [name, distanceM, keptSunChange] of places) {
+      const at = orbitCamera(distanceM);
+      const heightM = distanceM - WGS84.equatorialRadiusM;
+      const beyondDeg = twilightLimitRad(WGS84, heightM, EARTH_REFERENCE.topHeightM) / RAD + 1;
+      const overDipDeg = horizonDipRad(WGS84, heightM) / RAD + 1;
+
+      it(`skips the Sun 1° beyond the twilight limit from ${name}, the Moon's march moving by under ${keptSunChange} with it kept`, () => {
+        const [star, moon] = lights(-beyondDeg);
+        const listed = skySources(
+          [star],
+          [moon],
+          at,
+          WGS84,
+          EARTH_REFERENCE,
+          quaternion(1, 0, 0, 0),
+        );
+        expect(listed.map((s) => s.kind)).toEqual(["planetshine"]);
+        // The Sun kept after the Moon, so that the march's warp follows the Moon in both.
+        const sun = sourceAt(-beyondDeg, 0, star.illuminance, 0);
+        const moonOnly = marchOf(at, listed);
+        const kept = marchOf(at, [...listed, sun]);
+        expect(largestOf(moonOnly)).toBeGreaterThan(0);
+        expect(worstRelative(kept, moonOnly, 1e-3)).toBeLessThan(keptSunChange);
+        // Single scattering adds nothing beyond the limit: with the table zeroed the marches are
+        // equal.
+        const dark = new Float64Array(planet.multiScattering.texels.length);
+        const single = { ...planet, multiScattering: { ...planet.multiScattering, texels: dark } };
+        const singleMarch = (suns: ReadonlyArray<SunState>): TwinTable =>
+          rayMarchTwin(single, frameView(EARTH_REFERENCE, 1, at, suns), TABLE_SIZES.high, () => 0);
+        expect(singleMarch([...listed, sun]).texels).toEqual(singleMarch(listed).texels);
+      }, 120_000);
+
+      it(`skips a full Moon from ${name} with the Sun 1° above acos(R ÷ r_c), the march moving by under 10⁻⁴`, () => {
+        const [star, moon] = lights(overDipDeg);
+        const listed = skySources(
+          [star],
+          [moon],
+          at,
+          WGS84,
+          EARTH_REFERENCE,
+          quaternion(1, 0, 0, 0),
+        );
+        expect(listed.map((s) => s.kind)).toEqual(["star"]);
+        const moonSource = skySources(
+          [],
+          [moon],
+          at,
+          WGS84,
+          EARTH_REFERENCE,
+          quaternion(1, 0, 0, 0),
+        );
+        const day = marchOf(at, listed);
+        const both = marchOf(at, [...listed, ...moonSource]);
+        expect(worstRelative(both, day, 1e-6)).toBeLessThan(1e-4);
+      }, 120_000);
+    }
+  });
 });
 
 /**
