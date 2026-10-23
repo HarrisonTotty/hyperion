@@ -443,7 +443,10 @@ alone and never on the sim, by R04's entry in `.claude/rules/rust-dev.md`):
   Under nextest each test runs in a process of its own, so "once per test binary" holds within one
   test (R09.T16's note). On a world wet now the coarse land hypsometry is its construction's by
   rule (decision-r09-t14-choices, T14.c follow-up 2 §2), so a test here that checks land
-  hypsometry after erosion reads R09.T12.a's bands.
+  hypsometry after erosion reads R09.T12.a's bands. _As built (R10.T1.b's `sample_worlds()`
+  follow-up, 2026-10-23): `sample_world(name)` is the sample world of a name, panicking with the
+  name where none has it. `surface_material_worlds.rs` and `surface_ground_worlds.rs` read it, and
+  T2's, T5's and T10.a's `sample_worlds()` follow-ups read it in place of a lookup of their own._
 
 ## Consumes
 
@@ -14056,6 +14059,47 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
     the sim with `testing`, the test build of the sim, the surface crate and the testkit, the
     fitted tables' check, the doctests of `tests/common/mod.rs`, and the testkit's one slow test
     as reached.
+  - _The polish_ (2026-10-23; lane `lane/102-r10-sample-worlds-polish`, on `rendering-and-planets`
+    at `21f8e063`, the brief's base `e16ee90e` with R08.T12.b.1 above it; `GENERATOR_VERSION` 23,
+    no bump). #101's three suggestions, in the binary and this plan's text; nothing generated
+    moves.
+    - _The seabed below the water surface._ At each point `assert_the_material_holds` reads the
+      height at the classifier's level, `height_at` at `BandLevel::new(finest_level(radius))` and
+      the classifier's own direction, and `assert_the_seabed_is_below_the_water` checks the answer
+      against it. The answer is `SeaIce` or `Seabed` exactly where the cell is under water and the
+      height is below its `water_surface()`; a `Seabed`'s entry is never `main_liquid()`, and is
+      the crust's where `crust_palette()` names one. On the two worlds of `SEAS`, `earth_like` and
+      `locked_earth_like`, some point lies below.
+    - _Points inside each partial cell._ `sample_dirs` appends, for each partial cell whose centre
+      is sampled, the centres of its 4 × 4 equal steps, `vertex_dir(16a + 8, 16b + 8)`
+      (`inner_points`, `INNER_STEPS`). The 4 × 4 found ice, so the 8 × 8 was not needed. Where
+      sampled partial cells are not under water, some point in one of them is of the ice rule.
+      `Tally::count` and `Tally::assert_not_empty` (which takes #101's full-cell check too) keep
+      `assert_the_material_holds` under Clippy's `too_many_lines`.
+    - _`sample_world(name)`_ is named in Test helpers.
+
+    | World               | Points, bare / full / partial | Of the ice rule, full / partial | Partial cells' ice | Below the surface / at or above it in sea cells |
+    | ------------------- | ----------------------------- | ------------------------------- | ------------------ | ----------------------------------------------- |
+    | `mars_like`         | 66 / 18 / 34                  | 18 / 13                         | `Frost` 13         | 0 / 0                                           |
+    | `moon_like`         | 68 / 0 / 0                    | 0 / 0                           | none               | 0 / 0                                           |
+    | `ceres_like`        | 68 / 0 / 0                    | 0 / 0                           | none               | 0 / 0                                           |
+    | `europa_like`       | 68 / 0 / 0                    | 0 / 0                           | none               | 0 / 0                                           |
+    | `earth_like`        | 64 / 20 / 17                  | 20 / 16                         | `Glacier` 16       | 51 / 1                                          |
+    | `locked_earth_like` | 66 / 18 / 17                  | 18 / 0                          | none               | 82 / 2                                          |
+
+    Mars's two partial cells and the Earth's one are dry. On Mars 13 of the 34 points are `Frost`
+    and 21 `Dust` (shares 77/255 and 109/255, a mean of 0.37). The Earth's cell is `Glacier` at 16
+    of its 17 points and `Soil` at one, so its share is at least a half. The locked Earth's cell,
+    under water at 51/255, below the majority, is `Seabed` at all 17.
+    - _Times_ (dev profile on the final tree, the laptop: an i7-8665U, 8 threads, the `powersave`
+      governor, no other lane running; `--no-capture`, so nextest runs the tests one after the
+      other): `the_material_holds_on_every_fast_sample_world` 16.2 s under nextest, at a 1-minute
+      load of 0.94 before and 0.95 after (16.2 s under the plan's `cargo test` command with 4 test
+      threads, at 0.81 and 0.85); by name, `--run-ignored only`,
+      `the_material_holds_on_the_earth_like_sample_world` 66.0 s and
+      `the_material_holds_on_the_locked_earth_like_sample_world` 21.0 s, at 0.81 before and 0.96
+      after. A first run before the review's fixes, the same counts, took 17.5 s, 65.0 s and
+      21.3 s.
 - **Deferred findings (2026-10-13 rule) (R10.T1.b's `sample_worlds()` follow-up)** (recorded, not
   ruled; each leaves the algorithm and the contracts as built).
   - _Perennial snow beside the field's ice._ On the locked Earth three of the 85 points answer
