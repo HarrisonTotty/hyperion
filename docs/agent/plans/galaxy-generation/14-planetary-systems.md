@@ -15699,7 +15699,7 @@ tables::gauss_legendre`.
 - **Deviations in P14.T43.h, as built (`lane/90-p14-t43h-subsurface-ocean`, 2026-10-22).** The
   ocean under a Snowball's ice in the readout (decision-absurd-states-24 R1), in the client, the
   guide and this plan only: no wire, protocol, binding, decoder, fixture, golden or output change.
-  `GENERATOR_VERSION` is 23 and `PROTOCOL_VERSION` 3 after the lane's last merge (ee64322f), and
+  `GENERATOR_VERSION` is 23 and `PROTOCOL_VERSION` 3 after the lane's last merge (46ae4889), and
   `styles.css` changes in a comment alone.
   - _The names._ `oceanUnderIce(surface)`, rule 1: the `H2O` item of `surfaceLiquids` where the
     state is `snowball` and the condensates are a value with no `H2O` liquid entry, else `null`.
