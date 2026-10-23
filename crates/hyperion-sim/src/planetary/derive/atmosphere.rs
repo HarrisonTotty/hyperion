@@ -63,6 +63,8 @@ pub(crate) use surface_mix::spun_read;
 pub(crate) use surface_mix::{
     LARGEST_BOND_ALBEDO, PassClimate, PassLight, PassSurface, SpunClimate,
 };
+#[cfg(test)]
+pub(crate) use surface_mix::{UnlitMeanRules, with_unlit_mean};
 
 use crate::Seed;
 use crate::id::BodyId;
@@ -2341,11 +2343,13 @@ fn state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) ->
             )
         };
     }
+    // An airless body's mean is at least its night floor at its heat flow (P14.T24.i, held at 24).
+    let airless_mean = surface_mix::airless_mean(inputs.equilibrium, surface).value();
     if !valid {
         return airless(
             SurfaceState::Airless,
             PartialPressures::default(),
-            inputs.equilibrium.value(),
+            airless_mean,
             None,
         );
     }
@@ -2365,7 +2369,7 @@ fn state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) ->
         return airless(
             SurfaceState::Airless,
             PartialPressures::default(),
-            equilibrium.value(),
+            airless_mean,
             None,
         );
     };
@@ -2387,12 +2391,7 @@ fn state_and_greenhouse(inputs: &AtmosphereInputs, surface: &PassSurface<'_>) ->
         t = t.max(SILICATE_SOLIDUS.value());
         SurfaceState::MagmaOcean
     } else if total < AIRLESS_PRESSURE {
-        let air = airless(
-            SurfaceState::Airless,
-            partials,
-            equilibrium.value(),
-            carrier,
-        );
+        let air = airless(SurfaceState::Airless, partials, airless_mean, carrier);
         return Atmosphere { column, ..air };
     } else {
         climate

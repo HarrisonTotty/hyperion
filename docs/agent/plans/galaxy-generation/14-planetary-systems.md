@@ -25542,3 +25542,48 @@ the_rayleigh_floor_lifts`; the two measurements by name with `-- --ignored --exa
   - _Landing:_ after P14.T52.a's commit B and P14.T52.b, whose `Network` and `MixingColumn` it
     reads. Then the golden is re-blessed by its exact name, and the commits are picked as a linear
     series.
+- **Deviations in P14.T24.i, as built (`p14-gate-24`, 2026-10-22).** An airless body's mean
+  surface temperature, behind its own hold at 24 (`UNLIT_MEAN_VERSION`, `UnlitMeanRules`, with the
+  tripwire `the_unlit_mean_is_held_only_until_the_24_bump`; the tests reach it through
+  `with_unlit_mean`). At 23 no value moves.
+  - _The rule:_ the three airless arms of `state_and_greenhouse` take `surface_mix::airless_mean`,
+    the larger of `T_eq` and `night_floor` at the heat flow of the context the pass reads
+    (`PassClimate::Spun`'s, the record's conditions' own), and the cosmic background's 2.725 K in
+    the passes' stand-in, which reads no heat flow. It applies to every airless body, lit or not
+    (main's ruling on its reach, 2026-10-22, against V3.3's "18"): a mean below the body's own
+    coldest night is the inconsistency it removes. A body above its floor keeps its `T_eq` to the
+    bit, but for 3 of the 400 (01ffdb2c60020000.0700, 01fffb2d60010000.0601 and
+    41ffecb1ff800000.e486) whose passes reached the floor on their way and settled again within
+    10⁻⁸ of their `T_eq` and mean, their state unchanged.
+  - _Files beyond the plan's list:_ `derive/atmosphere/surface_mix.rs` (the hold and
+    `airless_mean`) and its tests; `derive/atmosphere.rs` (the three arms and a test-only
+    re-export); `system/tests.rs` (`unlit_moves` and two tests).
+  - _Tests:_
+    - `an_unlit_airless_body_takes_its_night_floor` (the stand-in's 2.725 K, its state and `T_eq`
+      unchanged), `a_lit_body_keeps_its_mean_to_the_bit_under_the_unlit_floor` (the table);
+    - `the_golden_systems_unlit_records_read_their_night_floor`: fallback_black_hole's 19 unlit
+      bodies read their conditions' coldest temperature, 23.6–51.2 K (above the entry's "12–20
+      K": their heat flows are a young system's), and `for_body` reads 13 of them, refusing 6, each
+      with the labelled refusal for an argon ice with no solid density (asserted, 19/13/6); 10 lit
+      airless records whose `T_eq` lay under their floor rise to it (hierarchical_triple 1700–1c00,
+      subgiant 0501–0502, filler_b e203 and e207: 8 change their ices or condensates, none their
+      `for_body` answer, 8 held an argon ice, now at 17.8–33.2 K); none re-settles, and no other
+      record moves (asserted);
+    - over the 400 (`the_sample_s_unlit_records_read_their_night_floor`, by name): the 18 unlit
+      records read their floor, `for_body` reading 10 and refusing 8 for their argon ice
+      (asserted, 18/10/8); 1,405 lit airless records rise to their floor, of which 1,144 change
+      their surface ices or condensates, 3 their `for_body` answer, and 622 held an argon ice (now
+      at 7.8–451 K); 3 re-settle (above); no other record moves (asserted).
+    - "`for_body` answers `Ok` on them" is met only with P14.T49.n's solid argon row: it moves to
+      T49.n's tests (main's ruling, 2026-10-22), with the 622 argon-ice bodies' new means for its
+      15–19 K science check.
+    - _Accept, as built:_ the unit tests run under `planetary::derive::atmosphere`; the record
+      tests live in `planetary/system/tests.rs` and run under `cargo test -p hyperion-sim
+planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --ignored`. The
+      lit-body unit test runs over the stand-in, whose floor is the background's, so only the
+      record tests reach the heat-flow floor.
+  - _Deferred findings (2026-10-13 rule):_ the flux sum (`T_eq`⁴ + `T_floor`⁴)^¼ for every airless
+    body stays the recorded refinement. A raised body's floor reaches 451 K, a heat flow of about
+    2 kW m⁻², the figures' own (recorded for the figures' owner). At 24 the tests the tripwire
+    names (the stand-in's 0 K, the unlit refusals, an airless mean equal to its `T_eq`) are settled
+    with the bump.

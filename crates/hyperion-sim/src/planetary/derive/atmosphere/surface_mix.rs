@@ -43,12 +43,15 @@ use crate::planetary::derive::photometry::area_mix::{
 };
 use crate::planetary::hooks::crust::{CrustBasis, CrustLid, LidAt};
 use crate::planetary::hooks::figures::{PartitionGround, PartitionOver, cover, partition_over};
-use crate::planetary::hooks::surface::{OceanWeight, SurfaceConditions, SurfaceInputs};
+use crate::planetary::hooks::surface::{
+    OceanWeight, SurfaceConditions, SurfaceInputs, night_floor,
+};
 use crate::substance::ice_ih_density;
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
 use crate::units::{
     Kelvin, Kilograms, KilogramsPerSquareMetre, MetresPerSecondSquared, WattsPerSquareMetre,
 };
+use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 #[cfg(doc)]
 use super::atmosphere_under;
@@ -517,6 +520,96 @@ pub(super) fn area_mixed(
         ..air
     };
     (air, lid)
+}
+
+/// The generator version from which an airless body's mean surface temperature is at least its
+/// night floor at its heat flow ([`airless_mean`]): 24, the 23 → 24 batch's bump, P14.T54.b
+/// (P14.T24.i, before the serve gate; decision-bump-plan-after-22, "Version-24 lanes after 23",
+/// V3.3).
+///
+/// Below it [`UnlitMeanRules::in_force`] is [`UnlitMeanRules::Held`], so that every airless mean
+/// is its equilibrium temperature bit for bit. P14.T54.b deletes this hold, [`UnlitMeanRules`]
+/// with its `Held` arm and the tests' switch, and its tripwire
+/// (`the_unlit_mean_is_held_only_until_the_24_bump`).
+pub(crate) const UNLIT_MEAN_VERSION: GeneratorVersion = GeneratorVersion::new(24);
+
+/// Whether an airless body's mean surface temperature is floored at its night floor (the hold,
+/// [`UNLIT_MEAN_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum UnlitMeanRules {
+    /// Versions 23's and before: an airless mean is its equilibrium temperature, 0 K unlit.
+    Held,
+    /// The 23 → 24 batch's: the larger of the equilibrium temperature and the night floor.
+    Floored,
+}
+
+impl UnlitMeanRules {
+    /// The rules this generator version gives: the floor from [`UNLIT_MEAN_VERSION`], none below
+    /// it; in the tests, the rules a test's switch sets on its thread ([`with_unlit_mean`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = UNLIT_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= UNLIT_MEAN_VERSION {
+            Self::Floored
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The unlit mean's rules a test sets on its thread, `None` for the version's.
+    static UNLIT_RULES: core::cell::Cell<Option<UnlitMeanRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the unlit mean's rules `rules` on this thread, for the tests to reach 24's
+/// airless means ahead of the bump; the version's rules are set back after, a panic in `run`
+/// included. P14.T54.b deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_unlit_mean<R>(rules: UnlitMeanRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<UnlitMeanRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            UNLIT_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(UNLIT_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
+/// The mean surface temperature of an airless body of equilibrium temperature `equilibrium` over
+/// the surface `surface` (P14.T24.i): the larger of `equilibrium` and the night floor at the heat
+/// flow of the context the pass reads, (`T_CMB`⁴ + F ÷ `ε_r` σ)^¼
+/// ([`night_floor`](crate::planetary::hooks::surface::night_floor)), where the floor's rules are in
+/// force ([`UnlitMeanRules`], held at 24), and `equilibrium` otherwise.
+///
+/// A record with no host light publishes `T_eq` = 0 K, under its own night floor of 12–20 K, and
+/// `for_body` refuses it (P14.T54.a's labelled refusals); the floor gives it the mean its
+/// conditions' climate already holds. A max of continuous functions is continuous, and a body
+/// whose `T_eq` is above its floor keeps it to the bit. The passes' stand-in reads no heat flow,
+/// so its floor is the cosmic background's. The flux sum (`T_eq`⁴ + `T_floor`⁴)^¼ for lit bodies is a
+/// later refinement, since it moves every airless body (recorded).
+#[must_use]
+pub(super) fn airless_mean(equilibrium: Kelvin, surface: &PassSurface<'_>) -> Kelvin {
+    if UnlitMeanRules::in_force() == UnlitMeanRules::Held {
+        return equilibrium;
+    }
+    let heat_flow = match surface.climate {
+        PassClimate::Spun(spun) => spun.context.heat_flow(),
+        PassClimate::Given(_) => WattsPerSquareMetre::ZERO,
+    };
+    let floor = night_floor(heat_flow);
+    if floor.value() > equilibrium.value() {
+        floor
+    } else {
+        equilibrium
+    }
 }
 
 /// The surface gravity of the body `inputs` describe, G M ÷ R², `None` for a body of no mass or

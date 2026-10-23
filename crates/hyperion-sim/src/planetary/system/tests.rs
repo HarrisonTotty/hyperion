@@ -7958,6 +7958,257 @@ fn the_rayleigh_floor_holds_over_the_sample_and_the_passes_guards_with_it() {
     );
 }
 
+/// What P14.T24.i moves over a set of systems ([`unlit_moves`]).
+#[derive(Debug, Default)]
+struct UnlitMoves {
+    /// Each unlit record's line: its state, its mean and coldest temperatures, its ices and what
+    /// `for_body` answers on it.
+    unlit: Vec<String>,
+    /// How many unlit records `for_body` reads, and how many it refuses for an argon ice with no
+    /// solid density (P14.T49.n's row).
+    unlit_read: usize,
+    unlit_argon: usize,
+    /// How many lit airless records rise to their night floor, and of them how many change their
+    /// surface ices or condensates, how many `for_body` answers differently on, and how many hold
+    /// an argon ice (the overlap with P14.T49.n's 15–19 K bodies), with their means' range.
+    raised: usize,
+    raised_cover: usize,
+    raised_read: usize,
+    raised_argon: usize,
+    raised_argon_means: Option<(f64, f64)>,
+    /// The records above their floor whose passes reached it on their way, settled again within
+    /// [`RESETTLED`]: their state unchanged, and their `T_eq` and mean within it.
+    resettled: Vec<String>,
+    /// Any other record that moved, with its first difference.
+    moved: Vec<String>,
+}
+
+/// The labelled refusal `for_body` gives a body whose ice the registry holds no solid density of,
+/// as `ReadCoarseInputsError`'s `Debug` writes it, and whether a refusal is it.
+fn is_unmodelled_surface(read: &str) -> bool {
+    read == "Section(NotModelled(Surface))"
+}
+
+/// Whether the record `record` lists an argon ice on its surface.
+fn holds_argon_ice(record: &BodyRecord) -> bool {
+    record.surface().ok().is_some_and(|surface| {
+        surface
+            .figures()
+            .surface_ices()
+            .iter()
+            .any(|&(ice, _)| ice.substance().key().as_str() == "Ar")
+    })
+}
+
+/// What P14.T24.i moves over the systems `held` and the same systems generated under the unlit
+/// mean's rules, `floored`, in order: their records at
+/// [`RECORD_TIME`](crate::planetary::surface::RECORD_TIME), each floored record derived under those
+/// rules.
+///
+/// - Each record with a surface whose mean surface temperature is not positive held (an unlit
+///   one) reads, floored, at least its conditions' coldest temperature, its night floor, above
+///   0 K; `for_body` reads it, or refuses it for an argon ice with no solid density, the labelled
+///   refusal (asserted).
+/// - A lit airless record whose mean, its equilibrium temperature, lies under its night floor
+///   rises to it, as the rule says: counted, with what else moves on it.
+/// - A record above its floor whose passes reached it on their way may move its `T_eq` and mean by
+///   [`RESETTLED`] of them, its state unchanged: listed.
+/// - Every other record is unchanged to the bit, its whole `Debug` text, or it is listed.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of the records, held and floored, each classed and listed"
+)]
+fn unlit_moves(
+    held: &[(&str, SystemContext, PlanetarySystem)],
+    floored: &[(&str, SystemContext, PlanetarySystem)],
+) -> UnlitMoves {
+    use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
+    use crate::planetary::surface::{CoarseInputs, RECORD_TIME};
+    let mut moves = UnlitMoves::default();
+    let mean_of = |record: &BodyRecord| {
+        record.surface().ok().map_or(f64::NAN, |surface| {
+            surface.conditions().mean_surface_temperature().value()
+        })
+    };
+    for ((name, ctx, before), (_, _, after)) in held.iter().zip(floored) {
+        let before = before.snapshot_at(ctx, RECORD_TIME);
+        // The records derive at the snapshot, so the floored ones under the floor's rules.
+        let after = with_unlit_mean(UnlitMeanRules::Floored, || {
+            after.snapshot_at(ctx, RECORD_TIME)
+        });
+        let (old_records, records) = (before.bodies(), after.bodies());
+        let read = |record: &BodyRecord, records: &[BodyRecord], rules: UnlitMeanRules| {
+            let planet = CoarseInputs::planet_of(record)
+                .and_then(|index| records.iter().find(|r| r.index() == index));
+            match with_unlit_mean(rules, || CoarseInputs::for_body(record, planet, ctx)) {
+                Ok(_) => "Ok".to_owned(),
+                Err(error) => format!("{error:?}"),
+            }
+        };
+        for (old, new) in old_records.iter().zip(records) {
+            let id = format!("{name} {}", new.identity().id());
+            let mean_held = mean_of(old);
+            // A mean that is not a number held is unlit too.
+            if (mean_held.is_nan() || mean_held <= 0.0)
+                && let Some(surface) = new.surface().ok()
+            {
+                let conditions = surface.conditions();
+                let mean = conditions.mean_surface_temperature().value();
+                let coldest = conditions.climate_range().0.value();
+                assert!(
+                    mean > 0.0 && mean >= coldest * (1.0 - 1e-12),
+                    "{id}: mean {mean} K under its coldest {coldest} K"
+                );
+                let answer = read(new, records, UnlitMeanRules::Floored);
+                let argon = holds_argon_ice(new);
+                if answer == "Ok" {
+                    moves.unlit_read += 1;
+                } else {
+                    assert!(
+                        is_unmodelled_surface(&answer) && argon,
+                        "{id}: for_body {answer} with no argon ice"
+                    );
+                    moves.unlit_argon += 1;
+                }
+                moves.unlit.push(format!(
+                    "{id}: {:?}, mean {mean:.3} K (0 K held), coldest {coldest:.3} K, argon ice \
+                     {argon}; for_body {answer}",
+                    surface.state()
+                ));
+                continue;
+            }
+            if format!("{old:?}") == format!("{new:?}") {
+                continue;
+            }
+            // A lit body whose equilibrium temperature lies under its night floor rises to it.
+            if let (Some(before_surface), Some(after_surface)) =
+                (old.surface().ok(), new.surface().ok())
+            {
+                let coldest = after_surface.conditions().climate_range().0.value();
+                let mean = mean_of(new);
+                if before_surface.state() == SurfaceState::Airless
+                    && mean_held < coldest
+                    && mean >= coldest * (1.0 - 1e-12)
+                {
+                    moves.raised += 1;
+                    let cover = |s: &Surface| {
+                        format!(
+                            "{:?} {:?}",
+                            s.figures().surface_ices(),
+                            s.condensates().entries()
+                        )
+                    };
+                    moves.raised_cover +=
+                        usize::from(cover(before_surface) != cover(after_surface));
+                    moves.raised_read += usize::from(
+                        read(old, old_records, UnlitMeanRules::Held)
+                            != read(new, records, UnlitMeanRules::Floored),
+                    );
+                    if holds_argon_ice(old) {
+                        moves.raised_argon += 1;
+                        let (lo, hi) = moves.raised_argon_means.unwrap_or((mean, mean));
+                        moves.raised_argon_means = Some((lo.min(mean), hi.max(mean)));
+                    }
+                    continue;
+                }
+            }
+            // A body above its floor whose passes reached it on their way (from the first pass's
+            // albedo) settles again within the passes' convergence, its state unchanged.
+            let t_eq = |record: &BodyRecord| {
+                record
+                    .bulk()
+                    .ok()
+                    .map_or(f64::NAN, |bulk| bulk.equilibrium_temperature().value())
+            };
+            let state = |record: &BodyRecord| record.surface().ok().map(Surface::state);
+            let (t0, t1) = (t_eq(old), t_eq(new));
+            let mean = mean_of(new);
+            if state(old) == state(new)
+                && (t1 - t0).abs() <= RESETTLED * t0
+                && (mean - mean_held).abs() <= RESETTLED * mean_held
+            {
+                moves.resettled.push(format!(
+                    "{id}: T_eq {t0} → {t1} K, mean {mean_held} → {mean} K"
+                ));
+                continue;
+            }
+            let (a, b) = (format!("{old:?}"), format!("{new:?}"));
+            let at = a
+                .char_indices()
+                .zip(b.chars())
+                .find(|((_, x), y)| x != y)
+                .map_or(0, |((i, _), _)| i);
+            let start = a[..at].char_indices().rev().nth(120).map_or(0, |(i, _)| i);
+            moves.moved.push(format!(
+                "{id}: mean {mean_held} → {mean} K; first difference after …{}",
+                &a[start..at]
+            ));
+        }
+    }
+    moves
+}
+
+/// How far a body above its night floor may move its equilibrium temperature and its mean under
+/// the unlit mean's rules, as a share of each: 10⁻⁸, ten times the passes' convergence
+/// ([`ATMOSPHERE_CONVERGENCE`](crate::planetary::derive::ATMOSPHERE_CONVERGENCE)'s 10⁻⁹), where an
+/// early pass reached the floor and the passes settled again at the same fixed point.
+const RESETTLED: f64 = 1e-8;
+
+/// P14.T24.i's tests over the golden systems (decision-bump-plan-after-22, "Version-24 lanes after
+/// 23", V3.3, with main's ruling on its reach, 2026-10-22): `fallback_black_hole`'s 19 unlit
+/// bodies, whose records publish a mean surface temperature of 0 K at 23, read at least their
+/// night floor under the unlit mean's rules, and `for_body` reads 13 of them, refusing 6 for their
+/// argon ice (P14.T49.n's, whose tests take over "`Ok` on them"); 10 lit airless records under
+/// their floor rise to it; and every other record of the fifteen systems is unchanged to the bit.
+#[test]
+fn the_golden_systems_unlit_records_read_their_night_floor() {
+    use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
+    let floored = with_unlit_mean(UnlitMeanRules::Floored, golden_systems_afresh);
+    let moves = unlit_moves(golden_systems(), &floored);
+    eprintln!("the golden systems under the unlit mean: {moves:#?}");
+    assert!(
+        moves
+            .unlit
+            .iter()
+            .all(|line| line.starts_with("fallback_black_hole")),
+        "{:#?}",
+        moves.unlit
+    );
+    assert_eq!(
+        (moves.unlit.len(), moves.unlit_read, moves.unlit_argon),
+        (19, 13, 6)
+    );
+    assert_eq!(moves.raised, 10);
+    assert_eq!(moves.resettled, Vec::<String>::new());
+    assert_eq!(moves.moved, Vec::<String>::new());
+}
+
+/// P14.T24.i's tests over the 400 whole systems, a measurement run by name: their 18 unlit records
+/// (bless-note-23's) read at least their night floor, and `for_body` reads 10, refusing 8 for
+/// their argon ice; the lit airless records raised to their floor are counted, with what else
+/// moves on them and their overlap with the argon-ice bodies (for P14.T49.n's science check);
+/// the records that settle again within [`RESETTLED`] are listed; and no other record moves.
+#[test]
+#[ignore = "a measurement for the bless note, run by name"]
+fn the_sample_s_unlit_records_read_their_night_floor() {
+    use crate::planetary::derive::atmosphere::{UnlitMeanRules, with_unlit_mean};
+    let systems = || -> Vec<(&'static str, SystemContext, PlanetarySystem)> {
+        sample()
+            .iter()
+            .map(|ctx| ("sample", ctx.clone(), generate(SEED, ctx)))
+            .collect()
+    };
+    let held = systems();
+    let floored = with_unlit_mean(UnlitMeanRules::Floored, systems);
+    let moves = unlit_moves(&held, &floored);
+    eprintln!("the sample under the unlit mean: {moves:#?}");
+    assert_eq!(
+        (moves.unlit.len(), moves.unlit_read, moves.unlit_argon),
+        (18, 10, 8)
+    );
+    assert_eq!(moves.moved, Vec::<String>::new());
+}
+
 /// The bistability re-check's driver from the generator's own first albedo, 0.3, is the solve to
 /// the bit (`PassDriver::From`; decision-pre-23-review item 26): over the first 5 whole systems'
 /// present planets, members and moons with a surface, over their records at the epoch.
