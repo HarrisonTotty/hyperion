@@ -229,20 +229,41 @@ const CURVE_NODES_PER_LN : f32 = 17.37177927613007;
 // an optical depth: -ln 10^-6.
 const CURVE_DEPTH_MAX : f32 = 13.815510557964274;
 
-// -ln T_c per channel through a path's column `x`, as u / U, from row `row` of `curves`, unclamped:
-// `absorbers.ts`'s depthAt. Linear in ln u on a log-log scale between the nodes about it, linear
-// between them where either is 0; proportional to u below the first node, the linear regime; the
-// last interval's power law beyond the last node.
-fn curveRowDepth(curves : texture_2d<f32>, row : u32, x : f32) -> vec3f {
-  let nodes = textureDimensions(curves).x;
-  // The column's place on the grid, in nodes from node 0.
+// A read of a curve of growth comes in two parts (plan R08, R08.T8.e, items E2 and E3 of
+// `decision-r08-t8-leans.md` section 10): what is the same for every light, the column's place on
+// the curves' grid (`curveNodeOf`) and the pressure rows the read takes with their weights
+// (`curveRowsOf`), and each light's own texels (`curveDepthFrom`). Every light's curve for a slot
+// holds light slot 0's rows and read top (`tables.ts`'s rowsRefusal), so a march's paths, which
+// cross the same columns, form the first part once and load only the second each (`source.wgsl`'s
+// viewMarchStep). Each part is a vector or a matrix, and each light's read takes its rows' depths
+// from one call in a loop, as the scan's read did: SwiftShader inlines every call, and its GPU
+// process crashed on more copies of the read's code (R08.T8.e's record).
+
+// A column's place on the curves' grid, as u / U (`absorbers.ts`'s depthAt): x its node from node
+// 0, at most 0 in the linear regime below the first node; above it, y the interval its row depths
+// interpolate in (a whole number) and z its fraction there.
+fn curveNodeOf(curves : texture_2d<f32>, x : f32) -> vec3f {
   let node = (log(x) - CURVE_FIRST_LN) * CURVE_NODES_PER_LN;
   if (node <= 0.0) {
+    return vec3f(node, 0.0, 0.0);
+  }
+  let nodes = textureDimensions(curves).x;
+  let k = min(u32(node), nodes - 2u);
+  return vec3f(node, f32(k), node - f32(k));
+}
+
+// -ln T_c per channel through a path's column `x`, at its place `place` on the grid
+// (`curveNodeOf`), from row `row` of `curves`, unclamped: `absorbers.ts`'s depthAt. Linear in ln u
+// on a log-log scale between the nodes about it, linear between them where either is 0;
+// proportional to u below the first node, the linear regime; the last interval's power law beyond
+// the last node.
+fn curveRowDepth(curves : texture_2d<f32>, row : u32, x : f32, place : vec3f) -> vec3f {
+  if (place.x <= 0.0) {
     // exp(ln u - ln u_0) = (u / U) / 10^-3.
     return textureLoad(curves, vec2u(0u, row), 0).rgb * (x * 1000.0);
   }
-  let k = min(u32(node), nodes - 2u);
-  let t = node - f32(k);
+  let k = u32(place.y);
+  let t = place.z;
   let a = textureLoad(curves, vec2u(k, row), 0).rgb;
   let b = textureLoad(curves, vec2u(k + 1u, row), 0).rgb;
   let logLog = exp(log(a) + (log(b) - log(a)) * t);
@@ -254,58 +275,117 @@ fn curveRowLogPressure(curves : texture_2d<f32>, row : u32) -> f32 {
   return textureLoad(curves, vec2u(0u, row), 0).a;
 }
 
+// The quotient (y - b) / (a - b), one factor of a Lagrange weight.
+fn curveLagrangeFactor(y : f32, a : f32, b : f32) -> f32 {
+  return (y - b) / (a - b);
+}
+
+// The pressure rows a read of absorber slot `k`'s curves at ln(p-bar / 1 Pa) `lnP` takes, from light
+// slot 0's (every light's are the same): `absorbers.ts`'s absorberTransmittance read rule (its
+// depthAtPressure, `decision-r08-t4d-kdist-chain.md` ruling 3 and section 8), p-bar held at the
+// first row below and at the read's top above. Column 0 the weights: on a curve of two or three rows
+// the fraction between the two rows about p-bar (x), on four or more the four nearest rows' Lagrange
+// weights, unclamped between them. Column 1: x the slot's rows, y its first row within a light's
+// block (the header's r), z the first row the read takes, each a whole number; one row, for an
+// absorber without lines, is read alone. The pressure row is the scan's (the first r of the rows
+// but the last two whose next row's ln p-bar is not under y), found by bisection, since the rows'
+// ln p ascend (`tables.ts` refuses others): the same row, so the same arithmetic, in about log2 of
+// the rows' loads rather than up to all of them (E2).
+fn curveRowsOf(curves : texture_2d<f32>, k : u32, lnP : f32) -> mat2x4f {
+  let header = textureLoad(curves, vec2u(k, 0u), 0);
+  let offset = u32(header.r);
+  let rows = u32(header.g);
+  if (rows <= 1u) {
+    return mat2x4f(vec4f(0.0), vec4f(f32(rows), f32(offset), 0.0, 0.0));
+  }
+  let first = 1u + offset;
+  let lowest = curveRowLogPressure(curves, first);
+  let top = min(curveRowLogPressure(curves, first + rows - 1u), header.b);
+  let y = clamp(lnP, lowest, top);
+  var lo = 0u;
+  var hi = rows - 2u;
+  while (lo < hi) {
+    let mid = (lo + hi) / 2u;
+    if (curveRowLogPressure(curves, first + mid + 1u) < y) {
+      lo = mid + 1u;
+    } else {
+      hi = mid;
+    }
+  }
+  let r = lo;
+  if (rows < 4u) {
+    let below = curveRowLogPressure(curves, first + r);
+    let above = curveRowLogPressure(curves, first + r + 1u);
+    return mat2x4f(
+      vec4f((y - below) / (above - below), 0.0, 0.0, 0.0),
+      vec4f(f32(rows), f32(offset), f32(r), 0.0),
+    );
+  }
+  let s0 = min(max(r, 1u) - 1u, rows - 4u);
+  let y0 = curveRowLogPressure(curves, first + s0);
+  let y1 = curveRowLogPressure(curves, first + s0 + 1u);
+  let y2 = curveRowLogPressure(curves, first + s0 + 2u);
+  let y3 = curveRowLogPressure(curves, first + s0 + 3u);
+  // Each row's weight the product over the other three rows, in their order, from 1.
+  var w0 = 1.0;
+  w0 *= curveLagrangeFactor(y, y0, y1);
+  w0 *= curveLagrangeFactor(y, y0, y2);
+  w0 *= curveLagrangeFactor(y, y0, y3);
+  var w1 = 1.0;
+  w1 *= curveLagrangeFactor(y, y1, y0);
+  w1 *= curveLagrangeFactor(y, y1, y2);
+  w1 *= curveLagrangeFactor(y, y1, y3);
+  var w2 = 1.0;
+  w2 *= curveLagrangeFactor(y, y2, y0);
+  w2 *= curveLagrangeFactor(y, y2, y1);
+  w2 *= curveLagrangeFactor(y, y2, y3);
+  var w3 = 1.0;
+  w3 *= curveLagrangeFactor(y, y3, y0);
+  w3 *= curveLagrangeFactor(y, y3, y1);
+  w3 *= curveLagrangeFactor(y, y3, y2);
+  return mat2x4f(vec4f(w0, w1, w2, w3), vec4f(f32(rows), f32(offset), f32(s0), 0.0));
+}
+
+// -ln T_c per channel of light slot `light`'s curve through a path's column `x` from its place
+// `place` (`curveNodeOf`) and its rows `read` (`curveRowsOf`), clamped to [0, -ln 10^-6] as the
+// curve is.
+fn curveDepthFrom(
+  curves : texture_2d<f32>,
+  light : u32,
+  x : f32,
+  place : vec3f,
+  read : mat2x4f,
+) -> vec3f {
+  let rows = u32(read[1].x);
+  let block = u32(textureLoad(curves, vec2u(ABSORBER_SLOTS, 0u), 0).r);
+  let first = 1u + light * block + u32(read[1].y);
+  let r = u32(read[1].z);
+  var depth : vec3f;
+  if (rows <= 1u) {
+    depth = curveRowDepth(curves, first, x, place);
+  } else if (rows < 4u) {
+    let a = curveRowDepth(curves, first + r, x, place);
+    let b = curveRowDepth(curves, first + r + 1u, x, place);
+    depth = a + (b - a) * read[0].x;
+  } else {
+    // One call of the row's depth in a loop, as the scan's read had it: SwiftShader inlines every
+    // call, and more copies of the read's code than that crashed its GPU process (R08.T8.e).
+    depth = vec3f(0.0);
+    for (var m = 0u; m < 4u; m++) {
+      depth += read[0][m] * curveRowDepth(curves, first + r + m, x, place);
+    }
+  }
+  return clamp(depth, vec3f(0.0), vec3f(CURVE_DEPTH_MAX));
+}
+
 // -ln T_c per channel through a path's column `x`, as u / U, at its absorber-weighted pressure
-// ln(p-bar / 1 Pa) `lnP`, from light slot `light`'s curve for absorber slot `k`: the read rule of
-// `absorbers.ts`'s absorberTransmittance (its depthAtPressure, `decision-r08-t4d-kdist-chain.md`
-// ruling 3 and section 8). Each row's depth (`curveRowDepth`), then 4-point Lagrange in ln p-bar
-// on the depth over the four rows nearest, its weights from the rows' own ln p-bar, unclamped
-// between them; linear between the two rows about p-bar on a curve of under four rows; p-bar held
-// at the first row below and at the read's top above; then clamped to [0, -ln 10^-6] as the curve
-// is. One row, for an absorber without lines, is read alone. 0 for no column.
+// ln(p-bar / 1 Pa) `lnP`, from light slot `light`'s curve for absorber slot `k`: the read's two
+// parts, then the light's own (`curveDepthFrom`). 0 for no column.
 fn curveDepth(curves : texture_2d<f32>, light : u32, k : u32, x : f32, lnP : f32) -> vec3f {
   if (x <= 0.0) {
     return vec3f(0.0);
   }
-  let header = textureLoad(curves, vec2u(k, 0u), 0);
-  let block = u32(textureLoad(curves, vec2u(ABSORBER_SLOTS, 0u), 0).r);
-  let first = 1u + light * block + u32(header.r);
-  let rows = u32(header.g);
-  var depth : vec3f;
-  if (rows <= 1u) {
-    depth = curveRowDepth(curves, first, x);
-  } else {
-    let lowest = curveRowLogPressure(curves, first);
-    let top = min(curveRowLogPressure(curves, first + rows - 1u), header.b);
-    let y = clamp(lnP, lowest, top);
-    var r = 0u;
-    while (r < rows - 2u && curveRowLogPressure(curves, first + r + 1u) < y) {
-      r++;
-    }
-    if (rows < 4u) {
-      let lo = curveRowLogPressure(curves, first + r);
-      let hi = curveRowLogPressure(curves, first + r + 1u);
-      let a = curveRowDepth(curves, first + r, x);
-      let b = curveRowDepth(curves, first + r + 1u, x);
-      depth = a + (b - a) * ((y - lo) / (hi - lo));
-    } else {
-      let s0 = min(max(r, 1u) - 1u, rows - 4u);
-      var ys : array<f32, 4>;
-      for (var m = 0u; m < 4u; m++) {
-        ys[m] = curveRowLogPressure(curves, first + s0 + m);
-      }
-      depth = vec3f(0.0);
-      for (var m = 0u; m < 4u; m++) {
-        var w = 1.0;
-        for (var n = 0u; n < 4u; n++) {
-          if (n != m) {
-            w *= (y - ys[n]) / (ys[m] - ys[n]);
-          }
-        }
-        depth += w * curveRowDepth(curves, first + s0 + m, x);
-      }
-    }
-  }
-  return clamp(depth, vec3f(0.0), vec3f(CURVE_DEPTH_MAX));
+  return curveDepthFrom(curves, light, x, curveNodeOf(curves, x), curveRowsOf(curves, k, lnP));
 }
 
 // ln(p-bar / 1 Pa) of a path's slot from its column `x` and pressure-weighted column `w`, both

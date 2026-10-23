@@ -32,7 +32,7 @@
 // constant's own error would grow as h0 (`decision-r08-f32.md` section 4.2).
 //
 // Changes (plan R08, R08.T6.c, Design notes 5 and 8): the ray's own path takes its absorbers by
-// the path's column, under the sun's curves of growth (`viewAbsorberStep` in source.wgsl), and
+// the path's column, under the sun's curves of growth (`viewMarchStep` in source.wgsl), and
 // the sun's transmittance, the bare ground's included, is the table's optical depth with them.
 //
 // Changes (plan R08, R08.T6.i; `decision-r08-t6d-findings.md` section 1): where the medium has

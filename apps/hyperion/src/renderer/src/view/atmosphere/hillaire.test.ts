@@ -1171,13 +1171,14 @@ describe("the per-frame marches' steps (R08.T8.d)", () => {
     const structs = wgslStructs(RAY_MARCH_KERNEL.reference);
     expect(structs.get("ViewShares")).toHaveLength(MAX_SKY_LIGHT_SLOTS);
     expect(structs.get("TermDensities")).toHaveLength(MAX_TERMS);
-    // The luminance and slot 0's throughput and path, then the other slots', held by pointer.
+    // The luminance and slot 0's throughput and path, then the other slots' throughputs and path
+    // depths, held by pointer; their columns are slot 0's (R08.T8.e, E3).
     expect(structs.get("ViewMarch")).toEqual([
       "vec3f",
       "vec3f",
       "AbsorberPath",
       "array<vec3f, MAX_SKY_LIGHT_SLOTS - 1u>",
-      "array<AbsorberPath, MAX_SKY_LIGHT_SLOTS - 1u>",
+      "array<vec3f, MAX_SKY_LIGHT_SLOTS - 1u>",
     ]);
   });
 

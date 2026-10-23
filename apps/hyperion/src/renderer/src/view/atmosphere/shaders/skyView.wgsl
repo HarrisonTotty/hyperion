@@ -25,7 +25,7 @@
 // shadow and the tables' coordinates from heights (`sourceAt`), and the texels stand at
 // Bruneton's mapping, which is sebh's write. Changes (plan R08, R08.T6.c, Design notes 5 and 8):
 // the view's own path takes its absorbers by the path's column, under the sun's curves of growth
-// (`viewAbsorberStep` in source.wgsl), and the sun's transmittance is the table's optical depth
+// (`viewMarchStep` in source.wgsl), and the sun's transmittance is the table's optical depth
 // with them. Changes (plan R08, R08.T6.i; `decision-r08-t6d-findings.md` section 1): where the
 // medium has layer edges, each side of the ray's split is cut into pieces where the ray crosses
 // them (`MarchWalk` in common.wgsl), at the same count; a medium with none takes the steps as

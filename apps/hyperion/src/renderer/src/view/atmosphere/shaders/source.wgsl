@@ -52,17 +52,11 @@
 // lobes' test is the kernel's, taken once a ray (or texel). The arithmetic is unchanged:
 // read-backs are byte-identical on SwiftShader, and on the RTX 3080 only its fused multiply-adds,
 // which follow the code's shape, move a half-float ulp in a few values (plan R08's Risks,
-// "Deviations in T8.d, as built").
-
-// A march's absorber path one step `dtM` on, through the sample `local` (`absorberStep`): the
-// view's own path under light slot `slot`'s curves, since what it carries is that light's
-// (R08.T6.c; a path a slot since R08.T7), its lines at the path's pressure (R08.T4.d).
-fn viewAbsorberStep(path : AbsorberPath, local : SampleMedium, dtM : f32, slot : u32) -> AbsorberPath {
-  return absorberStep(
-    absorberCurves, absorberCount(), slot, lineSlots(), path, local.columns, local.pressureColumns,
-    dtM
-  );
-}
+// "Deviations in T8.d, as built"). Changes (plan R08, R08.T8.e; E2 and E3 of
+// `decision-r08-t8-leans.md` section 10): the view's paths share their columns and each
+// absorber's read of the curves (`viewMarchStep`, `common.wgsl`'s `curveRowsOf`), each slot loading
+// only its own curve's texels, and a curve's pressure row is found by bisection; the arithmetic
+// unchanged.
 
 // One source's light at a sample through the sliced lookup (plan R08, Design note 17; R08.T6.f):
 // whether the ground leaves it lit, its transmittance to the sample under light slot `slot`'s
@@ -281,13 +275,15 @@ fn skySourcesAt(
 // own absorber path (R08.T7), slot 0's throughput the views' mean transmittance. Slot 0, which
 // every march steps, is a member of its own; slots 1 to MAX_SKY_LIGHT_SLOTS - 1, which only a
 // medium with absorbers lit by several stars' lights steps, stand apart in arrays, which a march
-// holds by pointer and its steps index only where the view has those slots (R08.T8.d).
+// holds by pointer and its steps index only where the view has those slots (R08.T8.d). Every slot's
+// path crosses the same columns, so slot 0's path holds them, and the other slots hold only their
+// own depths under their curves (R08.T8.e, E3 of `decision-r08-t8-leans.md` section 10).
 struct ViewMarch {
   luminance : vec3f,
   throughput0 : vec3f,
   path0 : AbsorberPath,
   throughputs : array<vec3f, MAX_SKY_LIGHT_SLOTS - 1u>,
-  paths : array<AbsorberPath, MAX_SKY_LIGHT_SLOTS - 1u>,
+  depths : array<vec3f, MAX_SKY_LIGHT_SLOTS - 1u>,
 }
 
 fn viewMarchStart() -> ViewMarch {
@@ -297,7 +293,7 @@ fn viewMarchStart() -> ViewMarch {
   march.path0 = absorberPathStart();
   for (var p = 0u; p < MAX_SKY_LIGHT_SLOTS - 1u; p++) {
     march.throughputs[p] = vec3f(1.0);
-    march.paths[p] = absorberPathStart();
+    march.depths[p] = vec3f(0.0);
   }
   return march;
 }
@@ -310,10 +306,29 @@ fn viewThroughputOf(march : ptr<function, ViewMarch>, slot : u32) -> vec3f {
   return (*march).throughputs[slot - 1u];
 }
 
+// Slot `slot`'s path depth among slots 1 to 3's, `depth1` to `depth3`, selected so that no step
+// holds them in an array (R08.T8.d).
+fn viewSlotDepthOf(depth1 : vec3f, depth2 : vec3f, depth3 : vec3f, slot : u32) -> vec3f {
+  switch (slot) {
+    case 1u: {
+      return depth1;
+    }
+    case 2u: {
+      return depth2;
+    }
+    default: {
+      return depth3;
+    }
+  }
+}
+
 // One step `dtM` of a march through the sample `local`, with each light slot's share of the
 // source there (`viewSourcesAt`, `skySourcesAt`): each slot's path one step on under its curves,
 // its share's in-scattering through its own throughput, without f32's cancellation (`stepFactor`),
-// and its throughput carried on, slot 0 first.
+// and its throughput carried on, slot 0 first. The paths' columns, each absorber's place on the
+// curves' grid, its pressure row and its weights are the same for every slot, so they are formed
+// once a step, and each slot loads only its own curve's texels (`curveNodeOf`, `curveRowsOf`, `curveDepthFrom`;
+// R08.T8.e, E3): the arithmetic each slot's depth takes is `absorberStep`'s under its own curves.
 fn viewMarchStep(
   march : ptr<function, ViewMarch>,
   local : SampleMedium,
@@ -321,19 +336,68 @@ fn viewMarchStep(
   dtM : f32,
 ) {
   let paths = viewPathCount();
+  let count = absorberCount();
   let path0 = (*march).path0;
   let throughput0 = (*march).throughput0;
-  let next0 = viewAbsorberStep(path0, local, dtM, 0u);
+  // The paths one step on: as `absorberStep` makes them, every slot's from the same columns.
+  var next0 = path0;
+  var depth1 = vec3f(0.0);
+  var depth2 = vec3f(0.0);
+  var depth3 = vec3f(0.0);
+  if (count > 0u) {
+    let lines = lineSlots();
+    next0.columns = addColumns(path0.columns, local.columns, dtM);
+    next0.pressureColumns = addColumns(path0.pressureColumns, local.pressureColumns, dtM);
+    var depth0 = vec3f(0.0);
+    for (var k = 0u; k < min(count, ABSORBER_SLOTS); k++) {
+      let x = columnAt(next0.columns, k);
+      let c = pressureChannelOf(lines, k);
+      var lnP = 0.0;
+      if (c >= 0) {
+        lnP = pathLogPressure(x, columnAt(next0.pressureColumns, u32(c)));
+      }
+      // `curveDepth` for each slot, its two light-independent parts formed once: a slot's depth
+      // takes nothing where the column is 0, as `curveDepth`'s 0 adds nothing.
+      if (x > 0.0) {
+        let place = curveNodeOf(absorberCurves, x);
+        let read = curveRowsOf(absorberCurves, k, lnP);
+        // One call of a slot's read in a loop, so that SwiftShader, which inlines every call, holds
+        // one copy of it (R08.T8.e).
+        for (var p = 0u; p < paths; p++) {
+          let one = curveDepthFrom(absorberCurves, p, x, place, read);
+          switch (p) {
+            case 0u: {
+              depth0 += one;
+            }
+            case 1u: {
+              depth1 += one;
+            }
+            case 2u: {
+              depth2 += one;
+            }
+            default: {
+              depth3 += one;
+            }
+          }
+        }
+      }
+    }
+    next0.depth = depth0;
+  }
   let stepDepth0 = local.extinction * dtM + (next0.depth - path0.depth);
   (*march).path0 = next0;
   (*march).luminance += throughput0 * shares.slot0 * dtM * stepFactor(stepDepth0);
   (*march).throughput0 = throughput0 * exp(-stepDepth0);
   for (var p = 1u; p < paths; p++) {
-    let path = (*march).paths[p - 1u];
+    let before = (*march).depths[p - 1u];
+    // With no absorber a slot's path keeps its depth, as `absorberStep` keeps the path.
+    var after = before;
+    if (count > 0u) {
+      after = viewSlotDepthOf(depth1, depth2, depth3, p);
+    }
     let throughput = (*march).throughputs[p - 1u];
-    let next = viewAbsorberStep(path, local, dtM, p);
-    let stepDepth = local.extinction * dtM + (next.depth - path.depth);
-    (*march).paths[p - 1u] = next;
+    let stepDepth = local.extinction * dtM + (after - before);
+    (*march).depths[p - 1u] = after;
     (*march).luminance += throughput * viewShareOf(shares, p) * dtM * stepFactor(stepDepth);
     (*march).throughputs[p - 1u] = throughput * exp(-stepDepth);
   }
