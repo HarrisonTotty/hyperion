@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { useState } from "react";
 
 import { AU_PER_LY, formatScaleLength, SCALE_AU_BELOW_LY } from "../lib/format";
+import { reticleStrokesCssPx } from "../lib/strokes";
 import { FakeResizeObserver } from "../test/FakeResizeObserver";
 import { fakeFramesAndTimeouts } from "../test/fakeFramesAndTimeouts";
 import { stubMatchMedia } from "../test/stubMatchMedia";
@@ -12,12 +13,14 @@ import { type RecordingContext2D, stubCanvas } from "../test/RecordingContext2D"
 import { type CameraAngles, PRESETS, project, viewBasis } from "./camera";
 import { easeOut, TRANSITION_MS, tweenCamera } from "./transition";
 import { localFrameAt, planeFrame } from "../geometry/frame";
-import type { PointMark, SpatialScene } from "./marks";
+import { type BoxPx, segmentBoxGapPx } from "./furniture";
+import type { AnnulusMark, PointMark, SpatialScene } from "./marks";
 import type { SpatialMode } from "./ModeReading";
 import type { ScaleUnit } from "./scale";
 import { SpatialView, type SpatialViewProps } from "./SpatialView";
 import { stylesheetRule } from "../test/stylesheet";
-import { textSizeRem } from "./labels";
+import { bracketBoxPx, textSizeRem } from "./labels";
+import { boxGapPx } from "./symbols";
 import { add, dot, scale, vec3, type Vec3 } from "../geometry/vec3";
 import { statusLine } from "../test/statusLine";
 
@@ -2195,6 +2198,155 @@ describe("SpatialView's furniture text clear of the marks (R07.T16.j)", () => {
       before,
       expect.stringContaining("- 100%"),
     ]);
+  });
+});
+
+/**
+ * A label's box over the view, from where it is placed and its estimated size, CSS px: a curve
+ * label's set with the overlay's 0.1 em letter spacing, a mark's on its right with none.
+ */
+function boxOfLabel(element: HTMLElement, text: string, letterSpacingEm: number): BoxPx {
+  const [leftRem = Number.NaN, topRem = Number.NaN] = (
+    /^translate\(([-\d.e]+)rem, ([-\d.e]+)rem\)$/u.exec(placement(element)) ?? []
+  )
+    .slice(1)
+    .map(Number);
+  const size = textSizeRem(text, letterSpacingEm);
+  return {
+    leftPx: 16 * leftRem,
+    topPx: 16 * topRem,
+    widthPx: size.widthRem * 16,
+    heightPx: size.heightRem * 16,
+  };
+}
+
+/** The box of a label that must be drawn over the view ({@link boxOfLabel}). */
+function drawnBox(text: string, letterSpacingEm: number): BoxPx {
+  return boxOfLabel(overlayLabel(text), text, letterSpacingEm);
+}
+
+/** The box of an annulus's label, `null` where it is not drawn, as it may not be. */
+function annulusBox(text: string): BoxPx | null {
+  const element = screen.queryByText(
+    (_, candidate) => candidate instanceof HTMLSpanElement && candidate.textContent === text,
+  );
+  return element === null ? null : boxOfLabel(element, text, 0.1);
+}
+
+/** Whether a box stands at another's place, to within rounding. */
+function sameBox(a: BoxPx, b: BoxPx): boolean {
+  return Math.abs(a.leftPx - b.leftPx) < 1e-6 && Math.abs(a.topPx - b.topPx) < 1e-6;
+}
+
+/** The box of the selection's bracket's place about a class-2 mark, 12 px about its centre at 1. */
+function bracketAbout(xPx: number, yPx: number): BoxPx {
+  return bracketBoxPx({ id: "m", xPx, yPx, depth: 0, radiusPx: 6 }, 16, reticleStrokesCssPx(1));
+}
+
+describe("SpatialView's annulus labels, placed after the marks' (plan 14, P14.T42.d)", () => {
+  beforeEach(() => {
+    stubLayout(1200, 900);
+  });
+
+  /** A habitable zone 14 to 20 ly about the view centre, labelled at its outer rimward point. */
+  const ZONE: AnnulusMark = {
+    id: "hz",
+    innerRadius: 14,
+    outerRadius: 20,
+    ticks: false,
+    label: "HABITABLE ZONE",
+  };
+  /** The zone's outer edge's rimward point, where the default camera draws it. */
+  const RIMWARD = drawnAt(scale(FRAME.coreward, -20));
+  /** The zone's label's first place: 0.5 rem right of the point, 0.25 rem below. */
+  const FIRST: BoxPx = {
+    leftPx: RIMWARD.xPx + 8,
+    topPx: RIMWARD.yPx + 4,
+    widthPx: textSizeRem("HABITABLE ZONE", 0.1).widthRem * 16,
+    heightPx: 17.5,
+  };
+  it("draws a lesser mark's label over an annulus label's first place, which stands 0.5 rem off it", () => {
+    // A mark 10 px left of and 12 px below the rimward point, clear of the zone's label's first
+    // place by its symbol, its label `M` across that place: dropped for it before (D4).
+    const at = onPlaneAt(RIMWARD.xPx - 10, RIMWARD.yPx + 12);
+    renderView({ scene: aScene({ points: [aMark("m", { position: at })], annuli: [ZONE] }) });
+
+    const mark = drawnBox("M", 0);
+    const zone = annulusBox("HABITABLE ZONE");
+    expect([
+      boxGapPx(mark, FIRST) === 0,
+      zone === null || boxGapPx(zone, mark) >= 8 - 1e-6,
+      zone === null || boxGapPx(zone, bracketAbout(RIMWARD.xPx - 10, RIMWARD.yPx + 12)) >= 4 - 1e-6,
+    ]).toEqual([true, true, true]);
+  });
+
+  it("keeps the label of a selection on an annulus's rimward point at its right", () => {
+    renderView({
+      scene: aScene({
+        points: [aMark("s", { position: onPlaneAt(RIMWARD.xPx, RIMWARD.yPx), label: "S /256" })],
+        selectedId: "s",
+        annuli: [ZONE],
+      }),
+    });
+
+    const selection = drawnBox("S /256", 0);
+    const zone = annulusBox("HABITABLE ZONE");
+    expect([
+      placement(overlayLabel("S /256")),
+      zone === null || boxGapPx(zone, selection) >= 8 - 1e-6,
+    ]).toEqual([expect.not.stringContaining("- 100%"), true]);
+  });
+
+  it("moves an annulus's label 0.25 rem outside a mark's bracket's box, 0.125 rem of which stood beside its first place", () => {
+    // A mark right of the zone's label's first place, its bracket's box 2 px from it, its symbol
+    // 7.5 px, its label 30 px: the first place met every rule but the bracket's before.
+    const xPx = FIRST.leftPx + FIRST.widthPx + 2 + 12;
+    const yPx = FIRST.topPx + FIRST.heightPx / 2;
+    renderView({
+      scene: aScene({ points: [aMark("m", { position: onPlaneAt(xPx, yPx) })], annuli: [ZONE] }),
+    });
+
+    const zone = drawnBox("HABITABLE ZONE", 0.1);
+    expect([
+      boxGapPx(FIRST, bracketAbout(xPx, yPx)),
+      sameBox(zone, FIRST),
+      boxGapPx(zone, bracketAbout(xPx, yPx)) >= 4 - 1e-6,
+    ]).toEqual([expect.closeTo(2, 6), false, true]);
+  });
+
+  it("moves an annulus's label off a belt's ticks across its first place", () => {
+    // A belt 5 to 25 ly about a point 44 ly rimward, ticked every 10°, whose ticks, and not its
+    // edges, cross the zone's label's first place.
+    const centre = scale(FRAME.coreward, -44);
+    const belt: AnnulusMark = {
+      id: "belt",
+      centre,
+      innerRadius: 5,
+      outerRadius: 25,
+      ticks: true,
+      label: "",
+    };
+    const onBelt = (radius: number, angleDeg: number) => {
+      const angle = (angleDeg * Math.PI) / 180;
+      return drawnAt(
+        add(
+          centre,
+          add(
+            scale(FRAME.coreward, radius * Math.cos(angle)),
+            scale(FRAME.spinward, radius * Math.sin(angle)),
+          ),
+        ),
+      );
+    };
+    // Each 1 px wide, drawn 2 px wide at a ratio of 1.
+    const across = (box: BoxPx): number =>
+      Array.from({ length: 36 }, (_, index) => index * 10).filter(
+        (angleDeg) => segmentBoxGapPx(onBelt(5, angleDeg), onBelt(25, angleDeg), box) <= 1,
+      ).length;
+    renderView({ scene: aScene({ points: [], annuli: [ZONE, belt] }) });
+
+    const zone = drawnBox("HABITABLE ZONE", 0.1);
+    expect([across(FIRST) > 0, sameBox(zone, FIRST), across(zone)]).toEqual([true, false, 0]);
   });
 });
 

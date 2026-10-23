@@ -299,11 +299,16 @@ export const ALL_ZONE_LAYERS: ZoneLayers = {
 
 /**
  * The zones as annuli on the reference plane about their hosts at the display time, labelled: each
- * zone's stable limits (`STABLE ZONE`), its snow line (`SNOW LINE`), its conservative habitable
- * zone (`HABITABLE ZONE`) and its optimistic one (`OPTIMISTIC`), drawn in `--text-muted` as the
- * orchestrator's ruling 35.6 has it.
+ * zone's conservative habitable zone (`HABITABLE ZONE`), its stable limits (`STABLE ZONE`), its
+ * snow line (`SNOW LINE`) and its optimistic habitable zone (`OPTIMISTIC`), in that order, drawn in
+ * `--text-muted` as the orchestrator's ruling 35.6 has it.
  *
  * @remarks
+ * The habitable zone comes first so that its label, which `INNER` fits and the readout's
+ * habitability class turns on, takes the first room that the bodies' labels leave the zones'
+ * (plan 14, P14.T42.d); the order of the edges, each 1 px in one colour, does not change the
+ * picture.
+ *
  * A stable zone is drawn where its companions bound it: an edge the disc bounds (`null`) is not
  * drawn, and a zone bounded on neither side, a single star's, draws nothing. A habitable zone runs
  * from the moist greenhouse to the maximum greenhouse; an inner edge beyond every orbit leaves no
@@ -336,18 +341,18 @@ export function zoneAnnuli(
       ticks: false,
       label,
     });
-    if (layers.stable && (zone.innerM !== null || zone.outerM !== null)) {
-      const innerM = zone.innerM ?? 0;
-      annuli.push(band("stable", innerM, zone.outerM ?? innerM, "STABLE ZONE"));
-    }
-    if (layers.snowLine) {
-      annuli.push(band("snow", zone.snowLineM, zone.snowLineM, "SNOW LINE"));
-    }
     const habitable = zone.habitableZone;
     const innerM = habitable?.moistGreenhouseM ?? null;
     if (layers.habitable && innerM !== null && innerM > 0) {
       const outerM = habitable?.maximumGreenhouseM ?? innerM;
       annuli.push(band("habitable", innerM, Math.max(innerM, outerM), "HABITABLE ZONE"));
+    }
+    if (layers.stable && (zone.innerM !== null || zone.outerM !== null)) {
+      const stableInnerM = zone.innerM ?? 0;
+      annuli.push(band("stable", stableInnerM, zone.outerM ?? stableInnerM, "STABLE ZONE"));
+    }
+    if (layers.snowLine) {
+      annuli.push(band("snow", zone.snowLineM, zone.snowLineM, "SNOW LINE"));
     }
     const optimisticInnerM = habitable?.recentVenusM ?? null;
     if (layers.optimistic && optimisticInnerM !== null && optimisticInnerM > 0) {

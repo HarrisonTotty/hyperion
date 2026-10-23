@@ -1083,7 +1083,33 @@ describe("buildDrawList annuli", () => {
         yPx: expect.closeTo(CENTRE.yPx + 20 * K, 9),
         stack: 0,
         alongPx: expect.any(Array),
+        yieldsToMarks: true,
       },
+    ]);
+  });
+
+  it("flags the annuli's labels alone as giving way to the marks' labels (plan 14, P14.T42.d)", () => {
+    const scene = sceneOf([], {
+      spheres: [{ radius: 50, role: "data_edge", label: "QUERY EDGE 50 AU" }],
+      plane: { spacing: 20, extent: 50, rings: [{ radius: 20, label: "20 AU" }] },
+      annuli: [annulus("hz", 10, 20, { label: "HABITABLE ZONE" })],
+      paths: [path("b", tiltedCircle(10, 0), { label: "b", labelAt: local(0, 10, 0) })],
+      observer: { position: local(5, 5, 0), label: "OBSERVER" },
+    });
+
+    const { curveLabels } = buildDrawList(scene, TOP, VIEWPORT, GAP_PX);
+
+    expect(
+      curveLabels.map((label) => [
+        label.key,
+        label.placement === "ring" && label.yieldsToMarks === true,
+      ]),
+    ).toEqual([
+      ["sphere:0:0", false],
+      ["ring:0", false],
+      ["annulus:hz", true],
+      ["path:b", false],
+      ["observer", false],
     ]);
   });
 

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { type CameraAngles, PRESETS, type Viewport } from "./camera";
-import type { CircleLabel, CurveLabel, DrawOp, RingLabel, ScreenPoint } from "./drawList";
+import { reticleStrokesCssPx } from "../lib/strokes";
+import { type CameraAngles, PRESETS, project, viewBasis, type Viewport } from "./camera";
+import type { Anchor, CircleLabel, CurveLabel, DrawOp, RingLabel, ScreenPoint } from "./drawList";
 import { type LocalFrame, localFrameAt, planeFrame } from "../geometry/frame";
 import {
   type BoxPx,
@@ -11,10 +12,13 @@ import {
   type CoreArrowLayout,
   coreArrowLayout,
   coreLabelText,
+  curveInksPx,
   type InkPx,
   inkGapPx,
   markInksPx,
+  type AnnulusLabelSurroundings,
   type PlacedCurveLabel,
+  placeAnnulusLabels,
   placeCurveLabels,
   segmentBoxGapPx,
   TRIAD_BOX_REM,
@@ -26,7 +30,7 @@ import {
   triadLayout,
   triadShiftRem,
 } from "./furniture";
-import { textSizeRem } from "./labels";
+import { bracketBoxPx, textSizeRem } from "./labels";
 import { boxGapPx } from "./symbols";
 import { add, scale, vec3 } from "../geometry/vec3";
 
@@ -993,4 +997,617 @@ describe("markInksPx", () => {
       expect.closeTo(5.25 + 3 * shiftPx + halfStrokePx, 9),
     ]);
   });
+});
+
+describe("curveInksPx", () => {
+  /** A grid line, a plane ring, an orbit, a selected orbit, an eye, a stalk and two tick sets. */
+  const OPS: ReadonlyArray<DrawOp> = [
+    {
+      kind: "line",
+      from: { xPx: 0, yPx: 0 },
+      to: { xPx: 100, yPx: 0 },
+      stroke: "line",
+      widthPx: 1,
+      markId: null,
+    },
+    {
+      kind: "polyline",
+      points: [
+        { xPx: 0, yPx: 10 },
+        { xPx: 50, yPx: 10 },
+      ],
+      stroke: "line",
+      widthPx: 1,
+    },
+    {
+      kind: "polyline",
+      points: [
+        { xPx: 0, yPx: 20 },
+        { xPx: 50, yPx: 20 },
+        { xPx: 50, yPx: 70 },
+      ],
+      stroke: "textMuted",
+      widthPx: 1,
+    },
+    {
+      kind: "polyline",
+      points: [
+        { xPx: 0, yPx: 30 },
+        { xPx: 50, yPx: 30 },
+      ],
+      stroke: "text",
+      widthPx: 2,
+    },
+    {
+      kind: "polyline",
+      points: [
+        { xPx: 60, yPx: 30 },
+        { xPx: 70, yPx: 30 },
+      ],
+      stroke: "text",
+      widthPx: 1.5,
+      weight: "mark",
+    },
+    {
+      kind: "line",
+      from: { xPx: 10, yPx: 10 },
+      to: { xPx: 10, yPx: 60 },
+      stroke: "text",
+      widthPx: 1,
+      markId: "a",
+    },
+    {
+      kind: "ticks",
+      segments: [
+        { from: { xPx: 0, yPx: 40 }, to: { xPx: 0, yPx: 44 } },
+        { from: { xPx: 10, yPx: 40 }, to: { xPx: 10, yPx: 44 } },
+      ],
+      stroke: "textMuted",
+      widthPx: 1,
+      weight: "line",
+    },
+    {
+      kind: "ticks",
+      segments: [{ from: { xPx: 0, yPx: 50 }, to: { xPx: 4, yPx: 54 } }],
+      stroke: "text",
+      widthPx: 1.5,
+      weight: "mark",
+    },
+  ];
+
+  it("takes each orbit's segment and each line tick at the line scale, and no grid line, plane ring, eye, stalk or mark's tick, at 1.5", () => {
+    // At 1.5 a line is drawn 2 device px a CSS px, 4/3 CSS px for each of its own: half of a 1 px
+    // line's is 2/3 px, and of the selected orbit's 2 px, 4/3 px.
+    const onePx = 2 / 1.5 / 2;
+
+    expect(curveInksPx(OPS, 1.5).map((ink) => [ink.from.yPx, ink.to.yPx, ink.halfWidthPx])).toEqual(
+      [
+        [20, 20, expect.closeTo(onePx, 9)],
+        [20, 70, expect.closeTo(onePx, 9)],
+        [30, 30, expect.closeTo(2 * onePx, 9)],
+        [40, 44, expect.closeTo(onePx, 9)],
+        [40, 44, expect.closeTo(onePx, 9)],
+      ],
+    );
+  });
+});
+
+/** What the annuli's labels are placed among: nothing, but what is given. */
+function amid(surroundings: Partial<AnnulusLabelSurroundings> = {}): AnnulusLabelSurroundings {
+  return { standing: [], marks: [], brackets: [], curves: [], ...surroundings };
+}
+
+/** An annulus's label beside a point, giving way to the marks', with the points it may move to. */
+function annulusLabel(
+  xPx: number,
+  yPx: number,
+  text: string,
+  alongPx: ReadonlyArray<ScreenPoint> = [],
+): RingLabel {
+  return { ...ringLabel(xPx, yPx, text), key: `annulus:${text}`, alongPx, yieldsToMarks: true };
+}
+
+/**
+ * An annulus's label on a ring about `centre` of `radiusPx` on the screen, at the point `fromDeg`
+ * round it (counter-clockwise from the right), with the points along it every 15° either way from
+ * there, nearest first, as the draw list gives them.
+ */
+function annulusLabelAlong(
+  centre: ScreenPoint,
+  radiusPx: number,
+  text: string,
+  fromDeg = 0,
+): RingLabel {
+  const turns = Array.from({ length: 12 }, (_, index) => (index + 1) * 15).flatMap((turnDeg) =>
+    turnDeg === 180 ? [180] : [turnDeg, -turnDeg],
+  );
+  const at = (deg: number): ScreenPoint => ({
+    xPx: centre.xPx + radiusPx * Math.cos((deg * Math.PI) / 180),
+    yPx: centre.yPx - radiusPx * Math.sin((deg * Math.PI) / 180),
+  });
+  const point = at(fromDeg);
+  return annulusLabel(
+    point.xPx,
+    point.yPx,
+    text,
+    turns.map((turnDeg) => at(fromDeg + turnDeg)),
+  );
+}
+
+/** A ring's or an annulus's label's first place: 0.5 rem right of its point and 0.25 rem below. */
+function firstPlace(label: RingLabel, remPx = 16): BoxPx {
+  return boxOf(
+    { leftPx: label.xPx + 0.5 * remPx, topPx: label.yPx + 0.25 * remPx, text: label.text },
+    remPx,
+  );
+}
+
+/** Whether a placed label stands at a box's place. */
+function standsAt(label: PlacedCurveLabel | undefined, box: BoxPx): boolean {
+  return label !== undefined && near(label.leftPx, box.leftPx) && near(label.topPx, box.topPx);
+}
+
+/** Whether a stroke crosses or touches a box at its width. */
+function crosses(box: BoxPx, ink: InkPx): boolean {
+  return segmentBoxGapPx(ink.from, ink.to, box) <= ink.halfWidthPx;
+}
+
+describe("placeAnnulusLabels (plan 14, P14.T42.d)", () => {
+  // `SNOW LINE` beside its point at (100, 100): its first place from 108 to 198.72 px across and
+  // from 104 to 121.5 px down.
+  const SNOW = annulusLabel(100, 100, "SNOW LINE");
+  const SNOW_BOX = firstPlace(SNOW);
+
+  /** How a label's first place stands to a box: below it, or end to end beyond either end. */
+  type Arrangement = "stacked" | "end to end" | "end to end, before it";
+
+  /**
+   * `BELT 1`, its first place `gapPx` below a box, or `gapPx` beyond its right-hand or left-hand
+   * end at its height, with a point well below to move to.
+   */
+  function besideBox(box: BoxPx, arrangement: Arrangement, gapPx: number): RingLabel {
+    const widthPx = textSizeRem("BELT 1", 0.1).widthRem * 16;
+    let xPx: number;
+    switch (arrangement) {
+      case "stacked":
+        xPx = box.leftPx - 8;
+        break;
+      case "end to end":
+        xPx = box.leftPx + box.widthPx + gapPx - 8;
+        break;
+      case "end to end, before it":
+        xPx = box.leftPx - gapPx - widthPx - 8;
+        break;
+    }
+    const yPx = arrangement === "stacked" ? box.topPx + box.heightPx + gapPx - 4 : box.topPx - 4;
+    return annulusLabel(xPx, yPx, "BELT 1", [{ xPx, yPx: yPx + 100 }]);
+  }
+
+  it.each([
+    ["stacked, 0.375 rem apart, moves the later", "stacked", 6, false],
+    ["stacked, 0.625 rem apart, keeps both", "stacked", 10, true],
+    ["end to end, 0.375 rem apart, moves the later", "end to end", 6, false],
+    ["end to end, 0.625 rem apart, keeps both", "end to end", 10, true],
+  ] as const)(
+    "sets two annulus labels at least 0.5 rem apart: their first places %s",
+    (_, arrangement, gapPx, keeps) => {
+      const later = besideBox(SNOW_BOX, arrangement, gapPx);
+
+      const placed = placeAnnulusLabels([SNOW, later], NARROW, amid());
+
+      const [first, second] = placed;
+      expect([
+        placed.length,
+        standsAt(first, SNOW_BOX),
+        standsAt(second, firstPlace(later)),
+        first !== undefined && second !== undefined && boxGapPx(first, second) >= 8 - 1e-9,
+      ]).toEqual([2, true, keeps, true]);
+    },
+  );
+
+  // A mark's label as `placeLabels` placed it, before the annuli's.
+  const MARK_LABEL: BoxPx = { leftPx: 108, topPx: 104, widthPx: 120, heightPx: 17.5 };
+
+  it.each([
+    ["stacked, 0.375 rem below it, moves", "stacked", 6, false],
+    ["stacked, 0.625 rem below it, stays", "stacked", 10, true],
+    ["end to end, 0.375 rem beyond it, moves", "end to end", 6, false],
+    ["end to end, 0.625 rem beyond it, stays", "end to end", 10, true],
+  ] as const)(
+    "sets an annulus label 0.5 rem from a mark's label placed before it: its first place %s",
+    (_, arrangement, gapPx, keeps) => {
+      const label = besideBox(MARK_LABEL, arrangement, gapPx);
+
+      const [placed] = placeAnnulusLabels([label], NARROW, amid({ standing: [MARK_LABEL] }));
+
+      expect([
+        standsAt(placed, firstPlace(label)),
+        placed !== undefined && boxGapPx(placed, MARK_LABEL) >= 8 - 1e-9,
+      ]).toEqual([keeps, true]);
+    },
+  );
+
+  it.each([
+    ["stacked, 0.375 rem below it, moves", "stacked", 6, false],
+    ["stacked, 0.625 rem below it, stays", "stacked", 10, true],
+    ["end to end, 0.375 rem before it, moves", "end to end, before it", 6, false],
+    ["end to end, 0.625 rem before it, stays", "end to end, before it", 10, true],
+  ] as const)(
+    "sets an annulus label 0.5 rem from the core arrow and its label: its first place %s",
+    (_, arrangement, gapPx, keeps) => {
+      // From the top the arrow points up from the view's centre, its label at its left, so the
+      // label's free end is its left-hand one.
+      const arrow = arrowOf(coreArrowLayout(FRAME, PRESETS.top, ROOMY, LABEL, []));
+      const furniture = coreArrowBoxes(arrow, 16);
+      const label = besideBox(arrow.label, arrangement, gapPx);
+
+      const [placed] = placeAnnulusLabels([label], ROOMY, amid({ standing: furniture }));
+
+      expect([
+        standsAt(placed, firstPlace(label)),
+        placed !== undefined && furniture.every((box) => boxGapPx(placed, box) >= 8 - 1e-9),
+      ]).toEqual([keeps, true]);
+    },
+  );
+
+  /**
+   * A planet's mark of radius 5 px straight below `SNOW LINE`'s first place, as the draw list
+   * gives it at a ratio of 1: its symbol's ink, and the box of the selection's bracket's place
+   * about it, 11 px about its centre, whose top stands `gapPx` below the label's first place.
+   */
+  function planetBelow(gapPx: number): { marks: ReadonlyArray<InkPx>; bracket: BoxPx } {
+    const anchor: Anchor = {
+      id: "p",
+      xPx: SNOW_BOX.leftPx + SNOW_BOX.widthPx / 2,
+      yPx: SNOW_BOX.topPx + SNOW_BOX.heightPx + gapPx + 11,
+      depth: 0,
+      radiusPx: 5,
+    };
+    const symbol: DrawOp = {
+      kind: "symbol",
+      id: "p",
+      centre: anchor,
+      shape: "triangle-down",
+      radiusPx: 5 - 0.75,
+      stroke: "text",
+      fill: null,
+      widthPx: 1.5,
+    };
+    return {
+      marks: markInksPx([symbol], 1),
+      bracket: bracketBoxPx(anchor, 16, reticleStrokesCssPx(1)),
+    };
+  }
+
+  it.each([
+    ["0.125 rem outside a mark's bracket's box, moves", 2, false],
+    ["0.375 rem outside it, stays", 6, true],
+  ] as const)(
+    "sets an annulus label 0.25 rem outside every mark's bracket's box: its first place %s",
+    (_, gapPx, keeps) => {
+      const { marks, bracket } = planetBelow(gapPx);
+
+      const [placed] = placeAnnulusLabels([SNOW], NARROW, amid({ marks, brackets: [bracket] }));
+
+      expect([
+        boxGapPx(SNOW_BOX, bracket),
+        standsAt(placed, SNOW_BOX),
+        placed !== undefined && boxGapPx(placed, bracket) >= 4 - 1e-9,
+      ]).toEqual([expect.closeTo(gapPx, 9), keeps, true]);
+    },
+  );
+
+  it("leaves a ring's label 0.125 rem outside a mark's bracket's box at its first place, clear of its symbol (R07.T16.j)", () => {
+    const { marks } = planetBelow(2);
+
+    const placed = placeCurveLabels(
+      [ringLabel(SNOW.xPx, SNOW.yPx, "SNOW LINE")],
+      NARROW,
+      [],
+      marks,
+    );
+
+    expect(placed).toEqual([expect.objectContaining({ leftPx: 108, topPx: 104 })]);
+  });
+
+  it("leaves out an annulus label that stalks hem in on every place, where a ring's label keeps its first", () => {
+    const stalks = stalksAcross(NARROW, 10);
+    const annulus = annulusLabelAlong({ xPx: 120, yPx: 150 }, 60, "PLANE 20 ly");
+    const ring = ringLabelAlong({ xPx: 120, yPx: 150 }, 60, "PLANE 20 ly");
+
+    expect([
+      placeAnnulusLabels([annulus], NARROW, amid({ marks: stalks })),
+      placeCurveLabels([ring], NARROW, [], stalks),
+    ]).toEqual([[], [expect.objectContaining({ leftPx: 188, topPx: 154 })]]);
+  });
+
+  it("leaves the annuli's labels to placeAnnulusLabels and the other curve labels to placeCurveLabels", () => {
+    const annulus = annulusLabel(100, 100, "SNOW LINE");
+    const ring = ringLabel(100, 200, "PLANE 20 ly");
+
+    expect([
+      placeCurveLabels([annulus, ring], NARROW, []).map((label) => label.key),
+      placeAnnulusLabels([annulus, ring], NARROW, amid()).map((label) => label.key),
+    ]).toEqual([["ring:PLANE 20 ly"], ["annulus:SNOW LINE"]]);
+  });
+
+  // `SNOW LINE` on a ring of 60 px about (120, 150), at its right-hand point, (180, 150).
+  const ALONG = annulusLabelAlong({ xPx: 120, yPx: 150 }, 60, "SNOW LINE");
+
+  it("moves an annulus label along its edge to the first place that no curve crosses", () => {
+    // Two ticks 50 px long, 2 px wide, across its places beside its point and the points 15° on
+    // either way, but not above right of the point 30° on.
+    const ticks: InkPx[] = [200, 160].map((xPx) => ({
+      from: { xPx, yPx: 125 },
+      to: { xPx, yPx: 175 },
+      halfWidthPx: 1,
+    }));
+
+    const box = onlyBox(placeAnnulusLabels([ALONG], NARROW, amid({ curves: ticks })));
+
+    expect([
+      besidePointIndex(box, [{ xPx: ALONG.xPx, yPx: ALONG.yPx }]),
+      besidePointIndex(box, ALONG.alongPx ?? []),
+      ticks.some((tick) => crosses(box, tick)),
+    ]).toEqual([-1, 2, false]);
+  });
+
+  it("takes an annulus label's first place clear of the marks where curves cross every place", () => {
+    // Curves every 10 px across the view, and a stalk across its first place.
+    const placed = placeAnnulusLabels(
+      [ALONG],
+      NARROW,
+      amid({ marks: [stalk(200, 150, 180)], curves: stalksAcross(NARROW, 10) }),
+    );
+
+    expect(placed).toEqual([expect.objectContaining({ leftPx: 188, topPx: 150 - 4 - 17.5 })]);
+  });
+
+  it("sets every annulus label at its first place where there is room, as built", () => {
+    // Rings 100, 175, 220 and 250 px across about the centre of a 1214 x 625 stage, each labelled
+    // on a side of its own, and no mark.
+    const stage: Viewport = { widthPx: 1214, heightPx: 625, remPx: 16 };
+    const centre = { xPx: 607, yPx: 312.5 };
+    const labels = [
+      annulusLabelAlong(centre, 50, "HABITABLE ZONE", -90),
+      annulusLabelAlong(centre, 87.5, "SNOW LINE", 0),
+      annulusLabelAlong(centre, 110, "OPTIMISTIC", 180),
+      annulusLabelAlong(centre, 125, "BELT 1", 90),
+    ];
+
+    const placed = placeAnnulusLabels(labels, stage, amid());
+
+    expect(labels.map((label, index) => standsAt(placed[index], firstPlace(label)))).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
+  });
+});
+
+/** One of the orbit map's supported stages: its canvas, CSS px, its ratio and its scale at ALL. */
+interface CrowdStage {
+  readonly name: string;
+  readonly viewport: Viewport;
+  readonly ratio: number;
+  readonly pxPerAu: number;
+}
+
+/** The scale at `ALL` at 1280 x 720 that draws a belt's outer edge 3.4 AU out 40 px across. */
+const CROWD_PX_PER_AU = 20 / 3.4;
+
+const CROWD_STAGES: ReadonlyArray<CrowdStage> = [
+  {
+    name: "787.33 x 184 px at a ratio of 1 (1280 x 720)",
+    viewport: { widthPx: 787.33, heightPx: 184, remPx: 16 },
+    ratio: 1,
+    pxPerAu: CROWD_PX_PER_AU,
+  },
+  {
+    name: "1214 x 625 px at a ratio of 1 (1920 x 1080)",
+    viewport: { widthPx: 1214, heightPx: 625, remPx: 16 },
+    ratio: 1,
+    pxPerAu: 3.4 * CROWD_PX_PER_AU,
+  },
+  {
+    name: "787.33 x 197.33 px at a ratio of 1.5 (1920 x 1080 at 150%)",
+    viewport: { widthPx: 787.33, heightPx: 197.33, remPx: 16 },
+    ratio: 1.5,
+    pxPerAu: CROWD_PX_PER_AU,
+  },
+];
+
+/**
+ * A synthetic crowd like the one look-90 found on the orbit map at `ALL` (GDG 75DX08 A-7), drawn
+ * from the default oblique view: a host at the centre; `HABITABLE ZONE` (0.989 to 1.69 AU),
+ * `SNOW LINE` (2.26 AU), `OPTIMISTIC` (0.749 to 1.77 AU, its edges ticked into the band) and
+ * `BELT 1` (2.5 to 3.4 AU, ticked across every 10°), each labelled at its outer edge's rimward
+ * point, the optimistic zone and the belt at their spinward points as the orbit map has them, in
+ * the scene's order; three planets on orbits between them (0.87, 1.38 and 2.05 AU), each with a
+ * short stalk; and the selection on the habitable zone's outer edge at its rimward point, where
+ * that zone's label starts, its orbit drawn as the selected one's and its label placed at its
+ * right, `GDG 75DX08 A-7 /256`'s 156.1 x 17.5 px. Each mark's anchor is 5 px in radius, the
+ * host's 8.
+ */
+function orbitCrowd(stage: CrowdStage): {
+  readonly labels: ReadonlyArray<RingLabel>;
+  readonly ops: ReadonlyArray<DrawOp>;
+  readonly anchors: ReadonlyArray<Anchor>;
+  readonly selectionLabel: BoxPx;
+} {
+  const { viewport, ratio, pxPerAu } = stage;
+  const camera = { ...PRESETS.oblique, pxPerUnit: pxPerAu };
+  const basis = viewBasis(FRAME, PRESETS.oblique);
+  const onPlane = (radiusAu: number, angleDeg: number): ScreenPoint => {
+    const angle = (angleDeg * Math.PI) / 180;
+    const { xPx, yPx } = project(
+      add(
+        scale(FRAME.coreward, radiusAu * Math.cos(angle)),
+        scale(FRAME.spinward, radiusAu * Math.sin(angle)),
+      ),
+      basis,
+      camera,
+      viewport,
+    );
+    return { xPx, yPx };
+  };
+  const turns = Array.from({ length: 12 }, (_, index) => (index + 1) * 15).flatMap((turnDeg) =>
+    turnDeg === 180 ? [180] : [turnDeg, -turnDeg],
+  );
+  const label = (text: string, radiusAu: number, fromDeg: number): RingLabel => {
+    const point = onPlane(radiusAu, fromDeg);
+    return annulusLabel(
+      point.xPx,
+      point.yPx,
+      text,
+      turns.map((turnDeg) => onPlane(radiusAu, fromDeg + turnDeg)),
+    );
+  };
+  const edge = (radiusAu: number, stroke: "textMuted" | "text" = "textMuted"): DrawOp => ({
+    kind: "polyline",
+    points: Array.from({ length: 97 }, (_, index) => onPlane(radiusAu, (index % 96) * 3.75)),
+    stroke,
+    widthPx: stroke === "text" ? 2 : 1,
+  });
+  const everyTenDeg = Array.from({ length: 36 }, (_, index) => index * 10);
+  // A tick from one edge towards another, at most `lengthPx` long, or the whole way across.
+  const tick = (fromAu: number, towardsAu: number, angleDeg: number, lengthPx = Infinity) => {
+    const from = onPlane(fromAu, angleDeg);
+    const aim = onPlane(towardsAu, angleDeg);
+    const spanPx = Math.hypot(aim.xPx - from.xPx, aim.yPx - from.yPx);
+    const share = spanPx > 0 ? Math.min(1, lengthPx / spanPx) : 0;
+    return {
+      from,
+      to: {
+        xPx: from.xPx + (aim.xPx - from.xPx) * share,
+        yPx: from.yPx + (aim.yPx - from.yPx) * share,
+      },
+    };
+  };
+  const planets = [
+    { id: "b", radiusAu: 0.87, angleDeg: 200 },
+    { id: "c", radiusAu: 1.38, angleDeg: 160 },
+    { id: "d", radiusAu: 2.05, angleDeg: 100 },
+    { id: "s", radiusAu: 1.69, angleDeg: 180 },
+  ];
+  const centre = onPlane(0, 0);
+  const anchors: Anchor[] = [
+    { id: "host", ...centre, depth: 0, radiusPx: 8 },
+    ...planets.map(({ id, radiusAu, angleDeg }): Anchor => {
+      const at = onPlane(radiusAu, angleDeg);
+      return { id, xPx: at.xPx, yPx: at.yPx, depth: 0, radiusPx: 5 };
+    }),
+  ];
+  const marks = anchors.flatMap((anchor): DrawOp[] => [
+    {
+      kind: "line",
+      from: anchor,
+      to: { xPx: anchor.xPx, yPx: anchor.yPx + (anchor.id === "host" ? 0 : 3) },
+      stroke: "text",
+      widthPx: 1,
+      markId: anchor.id,
+    },
+    {
+      kind: "symbol",
+      id: anchor.id,
+      centre: anchor,
+      shape: anchor.id === "host" ? "circle" : "triangle-down",
+      radiusPx: anchor.radiusPx - 0.75,
+      stroke: "text",
+      fill: "text",
+      widthPx: 1.5,
+    },
+  ]);
+  const ops: DrawOp[] = [
+    ...[0.87, 1.38, 2.05].map((radiusAu) => edge(radiusAu)),
+    edge(1.69, "text"),
+    ...[0.989, 1.69, 2.26, 0.749, 1.77, 2.5, 3.4].map((radiusAu) => edge(radiusAu)),
+    {
+      kind: "ticks",
+      segments: [
+        ...everyTenDeg.map((angleDeg) => tick(0.749, 1.77, angleDeg, 4)),
+        ...everyTenDeg.map((angleDeg) => tick(1.77, 0.749, angleDeg, 4)),
+      ],
+      stroke: "textMuted",
+      widthPx: 1,
+      weight: "line",
+    },
+    {
+      kind: "ticks",
+      segments: everyTenDeg.map((angleDeg) => tick(2.5, 3.4, angleDeg)),
+      stroke: "textMuted",
+      widthPx: 1,
+      weight: "line",
+    },
+    ...marks,
+  ];
+  const selection = anchors.at(-1) ?? anchors[0];
+  if (selection === undefined) {
+    throw new Error("the crowd has a selection");
+  }
+  const bracket = bracketBoxPx(selection, viewport.remPx, reticleStrokesCssPx(ratio));
+  return {
+    labels: [
+      label("HABITABLE ZONE", 1.69, 180),
+      label("SNOW LINE", 2.26, 180),
+      label("OPTIMISTIC", 1.77, 90),
+      label("BELT 1", 3.4, 90),
+    ],
+    ops,
+    anchors,
+    selectionLabel: {
+      leftPx: bracket.leftPx + bracket.widthPx + 0.25 * viewport.remPx,
+      topPx: selection.yPx - 17.5 / 2,
+      widthPx: 156.1,
+      heightPx: 17.5,
+    },
+  };
+}
+
+describe("placeAnnulusLabels on the orbit map's crowd at its three stages (plan 14, P14.T42.d; look-90)", () => {
+  it.each(CROWD_STAGES)(
+    "keeps every annulus label drawn 0.5 rem from every label, 0.25 rem outside every bracket's box, 0.125 rem from every stalk and 0.25 rem inside the stage at $name",
+    (stage) => {
+      const { labels, ops, anchors, selectionLabel } = orbitCrowd(stage);
+      const brackets = anchors.map((anchor) =>
+        bracketBoxPx(anchor, stage.viewport.remPx, reticleStrokesCssPx(stage.ratio)),
+      );
+      const stalks = markInksPx(
+        ops.filter((op) => op.kind === "line"),
+        stage.ratio,
+      );
+
+      const placed = placeAnnulusLabels(labels, stage.viewport, {
+        standing: [selectionLabel],
+        marks: markInksPx(ops, stage.ratio),
+        brackets,
+        curves: curveInksPx(ops, stage.ratio),
+      });
+
+      const inside: BoxPx = {
+        leftPx: 4,
+        topPx: 4,
+        widthPx: stage.viewport.widthPx - 8,
+        heightPx: stage.viewport.heightPx - 8,
+      };
+      const labelsDrawn = [selectionLabel, ...placed];
+      const faults: string[] = [];
+      for (const label of placed) {
+        if (labelsDrawn.some((other) => other !== label && boxGapPx(label, other) < 8 - 1e-9)) {
+          faults.push(`${label.text} within 0.5 rem of a label`);
+        }
+        if (brackets.some((box) => boxGapPx(label, box) < 4 - 1e-9)) {
+          faults.push(`${label.text} within 0.25 rem of a bracket's box`);
+        }
+        if (nearestInkPx(label, stalks) < 2 - 1e-9) {
+          faults.push(`${label.text} within 0.125 rem of a stalk`);
+        }
+        if (!within(label, inside)) {
+          faults.push(`${label.text} within 0.25 rem of the stage's edge`);
+        }
+      }
+      expect(faults).toEqual([]);
+    },
+  );
 });

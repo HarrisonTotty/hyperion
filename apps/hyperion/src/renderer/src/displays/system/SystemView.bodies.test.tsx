@@ -51,8 +51,8 @@ import { orbitNormal } from "../../lib/system/hierarchy";
 import { dot, type Vec3 } from "../../geometry/vec3";
 import { SystemView } from "./SystemView";
 
-const WIDTH_PX = 400;
-const HEIGHT_PX = 300;
+const WIDTH_PX = 1214;
+const HEIGHT_PX = 625;
 
 /** Plays the server's side, letting the outcomes it settles reach React. */
 async function server(play: () => void): Promise<void> {

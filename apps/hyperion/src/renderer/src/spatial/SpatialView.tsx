@@ -34,7 +34,9 @@ import {
   coreArrowBoxes,
   coreArrowLayout,
   coreLabelText,
+  curveInksPx,
   markInksPx,
+  placeAnnulusLabels,
   placeCurveLabels,
   TRIAD_BOX_REM,
   triadBoxRem as triadBoxOf,
@@ -42,7 +44,7 @@ import {
   triadLayout,
   triadShiftRem,
 } from "./furniture";
-import { chooseLabels, markLabelTransform, placeLabels } from "./labels";
+import { bracketBoxPx, chooseLabels, markLabelTransform, placeLabels } from "./labels";
 import type { LocalFrame } from "../geometry/frame";
 import type { SpatialScene } from "./marks";
 import { ModeReading, type SpatialMode } from "./ModeReading";
@@ -406,19 +408,22 @@ export function SpatialView({
           [triadBox],
           shownAxes,
         );
-  // The curve labels keep clear of the marks' stalks and symbols as well (R07.T16.j).
+  const furniture =
+    viewport === null || triadBox === null || coreArrow === null
+      ? []
+      : [triadBox, ...coreArrowBoxes(coreArrow, viewport.remPx)];
+  const marksInks = drawList === null ? [] : markInksPx(drawList.ops, pixelRatio);
+  const strokes = reticleStrokesCssPx(pixelRatio);
+  // The curve labels that do not give way to the marks', the spheres', the plane rings', the
+  // paths' and the observer's, keep clear of the marks' stalks and symbols as well (R07.T16.j).
   const curveLabels =
     drawList === null || viewport === null || triadBox === null || coreArrow === null
       ? []
-      : placeCurveLabels(
-          drawList.curveLabels,
-          viewport,
-          [triadBox, ...coreArrowBoxes(coreArrow, viewport.remPx)],
-          markInksPx(drawList.ops, pixelRatio),
-        );
-  // Marks' labels, placed last, keep off the core arrow and 0.5 rem from the other text: the triad,
-  // the core arrow's label and the curve labels (decision-r07-quality-and-destination, addendum D,
-  // D4; R07.T16.j); in observed mode they keep off the observer's eye too (plan 12, P12.T11.c).
+      : placeCurveLabels(drawList.curveLabels, viewport, furniture, marksInks);
+  // Marks' labels, placed after those, keep off the core arrow and 0.5 rem from the other text:
+  // the triad, the core arrow's label and those curve labels
+  // (decision-r07-quality-and-destination, addendum D, D4; R07.T16.j); in observed mode they keep
+  // off the observer's eye too (plan 12, P12.T11.c).
   const coreLabel = coreArrow === null || coreArrow.kind === "undefined" ? [] : [coreArrow.label];
   const markLabels =
     drawList === null ||
@@ -427,22 +432,34 @@ export function SpatialView({
     triadBox === null ||
     coreArrow === null
       ? []
-      : placeLabels(
-          chosenMarks,
-          drawList.anchors,
-          viewport,
-          reticleStrokesCssPx(pixelRatio),
-          scene.destinationId,
-          {
-            pinnedIds,
-            obstacles: coreArrowBoxes(coreArrow, viewport.remPx).filter(
-              (box) => !coreLabel.includes(box),
-            ),
-            texts: [triadBox, ...coreLabel, ...curveLabels],
-            unselectedIds,
-            observer: observerBoxPx(scene, camera, viewport),
-          },
-        );
+      : placeLabels(chosenMarks, drawList.anchors, viewport, strokes, scene.destinationId, {
+          pinnedIds,
+          obstacles: coreArrowBoxes(coreArrow, viewport.remPx).filter(
+            (box) => !coreLabel.includes(box),
+          ),
+          texts: [triadBox, ...coreLabel, ...curveLabels],
+          unselectedIds,
+          observer: observerBoxPx(scene, camera, viewport),
+        });
+  // The annuli's labels, placed last, give way to every body's: 0.5 rem from everything placed,
+  // 0.25 rem outside every mark's bracket's box, preferring a place no curve crosses, or not drawn
+  // (plan 14, P14.T42.d). A view that labels no annulus, as the star chart, measures nothing for
+  // them.
+  const annulusLabels =
+    drawList === null ||
+    viewport === null ||
+    triadBox === null ||
+    coreArrow === null ||
+    !drawList.curveLabels.some(
+      (label) => label.placement === "ring" && label.yieldsToMarks === true,
+    )
+      ? []
+      : placeAnnulusLabels(drawList.curveLabels, viewport, {
+          standing: [...furniture, ...curveLabels, ...markLabels],
+          marks: marksInks,
+          brackets: drawList.anchors.map((anchor) => bracketBoxPx(anchor, viewport.remPx, strokes)),
+          curves: curveInksPx(drawList.ops, pixelRatio),
+        });
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tokens, setTokens] = useState<ColourTokens | null>(null);
@@ -585,7 +602,7 @@ export function SpatialView({
           <div className="spatial-view__labels" aria-hidden="true">
             {viewport === null
               ? null
-              : curveLabels.map((label) => (
+              : [...curveLabels, ...annulusLabels].map((label) => (
                   <span
                     key={label.key}
                     className="spatial-label spatial-label--curve"
