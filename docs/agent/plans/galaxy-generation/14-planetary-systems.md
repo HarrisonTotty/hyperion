@@ -4046,6 +4046,77 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
     architecture `COMPACT MULTI` reads `COMPACT MULTIPLANET`. A selected belt (with its scattered
     component), halo or ring has its edges and ticks drawn as the selected orbit is, `--text` 2 px,
     and the legend's `SELECTED ORBIT` reads `SELECTED ORBIT OR EDGES`.
+- **P14.T42.d The zone and belt labels apart, off the bodies, and after the bodies' labels**
+  (added 2026-10-23 by main's UX decision on look-90's finding, decision-zone-labels). At `ALL`
+  the inner zones are 10–40 px across at 1280 × 720, and every annulus's label starts beside its
+  outer edge's rimward point, so `HABITABLE ZONE`, `SNOW LINE`, `OPTIMISTIC` and `BELT 1` stood
+  flush on one another and on the selection's label, across planets' symbols, and across a belt's
+  ticks in their own `--text-muted`, which hid letters (`TIMISTIC`; `BELT 1` unreadable at 150%).
+  Plan 05's `placeCurveLabels` kept curve labels apart by overlap alone, and its last resort
+  (R07.T16.j) drew them over marks. Client only; the star chart, which draws no annulus, is
+  unchanged. An annulus's label (`RingLabel.yieldsToMarks`, set by `markCurveLabels` alone):
+  - is placed after the marks' labels: `SpatialView` places the other curve labels as now, then
+    the marks' labels against them as now, then the annuli's labels against everything placed, so
+    that no body's label, the selection's included, gives way to a zone's;
+  - stands at least `LABEL_NEIGHBOUR_CLEARANCE_REM` (0.5 rem, D4) from every box placed before it:
+    the triad's footprint, the core arrow and its label, the other curve labels, the marks' labels
+    and the annuli's labels before it;
+  - stands at least `LABEL_TEXT_CLEARANCE_REM` (0.25 rem) outside the box of the selection's
+    bracket's place about every mark, to its line's outer edge, whether or not it is drawn, so
+    that it never stands nearer a body than the body's own label and is never read as its name;
+    and 0.125 rem clear of every stalk, as now;
+  - takes, of the places that meet those, the first that no orbit, annulus edge or tick crosses
+    (the paths' and annuli's polylines and `ticks` ops at the line scale; the `--line` grid and
+    rings excepted), else the first that meets them;
+  - tries its four places beside its outer edge's point (the optimistic zone's spinward one), then
+    beside each point along that edge every 15° either way, nearest first, as built; where none
+    meets them it is not drawn: no last resort.
+
+  The zones' labels come before the populations' (belts, the scattered disc, the halo, and a
+  planet's rings in the `BODY` frame), and within a zone `HABITABLE ZONE` comes first, then
+  `STABLE ZONE`, `SNOW LINE` and `OPTIMISTIC` as built (`zoneAnnuli`'s order). Spheres, plane
+  rings, paths and the observer keep R07.T16.j's search and last resort. The selection's ink band
+  (P12.T11.e, `INK_INSET_EM`) still sets its label against the text that does not yield, and
+  `labels.test.ts` is unchanged. A dropped zone is named in its host's readout and on its switch,
+  and `INNER` labels it; a dropped belt, ring or halo is named in the list. Closes look-90's
+  finding and its record R1 (the selection's label 0–2 px from the zone labels).
+  - _Files:_ under `apps/hyperion/src/renderer/src/`: `spatial/drawList.ts`, `spatial/furniture.ts`
+    (an annulus pass beside `placeCurveLabels`, which leaves annulus labels to it, and the curves'
+    inks beside `markInksPx`), `spatial/labels.ts` (the bracket's box, exported for that pass),
+    `spatial/SpatialView.tsx`, `displays/system/bodyMap.ts` (`zoneAnnuli`'s order), their tests;
+    and the guide's orbit-map bullet on annulus labels (decision-zone-labels §6.3, verbatim).
+  - _Tests:_ in `spatial/furniture.test.ts`, in its measured style: (a) two annulus labels whose
+    first places stand 0.375 rem apart, stacked and end to end: the later takes another place, at
+    least 0.5 rem from the first; 0.625 rem apart, both keep their first places; (b) the same
+    against a mark's label given as placed, and against the core arrow's label; (c) a first place
+    0.125 rem outside a mark's bracket's box: another place; 0.375 rem outside: its first; a ring's
+    label without the flag there keeps its first (R07.T16.j's 0.125 rem from the symbol); (d)
+    hemmed in by stalks on every place, an annulus's label is not drawn, while R07.T16.j's ring
+    label keeps its first place (that test unchanged); (e) a tick across its first place: the
+    first place along its edge that no curve crosses; curves across every place: its first place
+    clear of the marks and labels; (f) the orbit map's crowd at three stages, 787.33 × 184 px at a
+    device-pixel ratio of 1 (1280 × 720), 1214 × 625 at 1 (1920 × 1080) and 787.33 × 197.33 at
+    1.5 (1920 × 1080 at 150%): a host at the centre, `HABITABLE ZONE`, `OPTIMISTIC` (spinward),
+    `SNOW LINE` and a ticked `BELT 1` 10–40 px across at 1280 × 720 and 3.4 times that at
+    1920 × 1080, three planets on orbits between them, and the selection on the habitable zone's
+    outer edge with its label placed at its right: every annulus label drawn stands 0.5 rem from
+    every other label, 0.25 rem outside every bracket's box, 0.125 rem from every stalk and
+    0.25 rem inside the stage; (g) with room, no marks and rings 100–250 px across: every annulus
+    label at its first place, as built. In `spatial/drawList.test.ts`: annulus labels carry
+    `yieldsToMarks`, and ring, path and observer labels do not (the exact rimward test gains the
+    field). In `spatial/SpatialView.test.tsx`: a lesser mark's label over an annulus label's first
+    place is drawn, and the annulus's stands 0.5 rem off or is not drawn; a selection on an
+    annulus's rimward point keeps its right-hand label; an annulus's label leaves a mark's
+    bracket's box and a belt's ticks (the pass is wired). In `displays/system/bodyMap.test.ts`:
+    `zoneAnnuli` gives `HABITABLE ZONE` first, its order assertions updated. Unchanged and passing:
+    `labels.test.ts`, R07.T16.j's curve-label tests, `SpatialView.test.tsx`'s D4 test against the
+    query edge's label, the chart's `displays/galaxy` tests, and `SystemView.bodies.test.tsx`'s
+    zone switches (its stub stage may grow from 400 × 300 to 1214 × 625 if the first leaves a
+    label it names no room; recorded if so).
+  - _Accept:_ `pnpm typecheck`, `pnpm lint`, `pnpm --filter hyperion exec vitest run
+src/renderer/src/spatial src/renderer/src/displays/system src/renderer/src/displays/galaxy`,
+    the console-ux skill's lint on the changed renderer files; at landing, main's
+    `just smart-ci origin/rendering-and-planets` and hidden look (decision-zone-labels §6.5).
 
 #### P14.T43 Body list and readouts
 
@@ -26549,3 +26620,160 @@ planetary::system`, T56.f's, in the same gate, the 400's by name with `-- --igno
 
     The 2-cycle is P14.T51.h's designed tail, not a defect: F′ is near −1 about a stable state,
     bracketed to its 10⁻⁹. Its lever, the superlinear bracketed root, is P14.T51.l, after 24.
+
+- **Deferred findings (2026-10-13 rule)**, from look-90 (P14.T43.h's landing look, 2026-10-23) and
+  decision-zone-labels, on the orbit map's zone labels (P14.T42):
+  - _R1, the selection's label 0–2 px from `HABITABLE ZONE` and `SNOW LINE`_ (GDG 75DX08 A-7,
+    GDG 76DY08 A-11): closed by P14.T42.d, whose annulus labels keep 0.5 rem from every mark's
+    label; P12.T11.e's ink band stays the rule against the text that does not yield, and
+    `labels.test.ts` keeps its case.
+  - _R2, labels across orbits, annulus edges and ticks in their own `--text-muted`_ (`BELT 1` at
+    150% on A-11): P14.T42.d prefers a place that no orbit, edge or tick crosses. Where none has
+    one, as for the inner zones inside a belt at 1920 × 1080, a label still crosses orbits. If
+    T42.d's look finds one unreadable there, the follow-up is for a ruling between counting those
+    curves as obstacles (more labels left out) and a `1px` `--surface-0` casing round the curve
+    labels' glyphs (the lines cut under the letters, against R07's Q6 (d), which keeps lines
+    whole).
+  - _R4, a multiple's zones labelled without their host_ (GDG 0W1Q01 D-116: three `STABLE ZONE`
+    and three `SNOW LINE` labels set as a grid that does not say whose each is). T42.d's 0.5 rem
+    thins the grid but names no host. For a later ruling; the lean is the host's name after the
+    label, in the form the list names it, wherever more than one host's zones are drawn.
+  - _W1, an unlabelled zone reads as an orbit._ After T42.d most inner zones are unlabelled at
+    `ALL` at 1280 × 720 and 150%, and a zone's edge is a solid `--text-muted` line, as an orbit is,
+    which the legend names (`ORBIT`) while it names no zone. A zone is still named in its host's
+    readout and on its switch, `INNER` labels it, and a circle about a host with no body on it is a
+    zone. If a look finds one taken for an orbit, the lean is a legend entry for the zones' edges,
+    for a ruling.
+  - _W2, no hysteresis._ P05's labels have none (R07.T16.j's open point), and an annulus's label
+    now gives way to the marks' labels, which move with their bodies, so while the display time
+    runs or the camera turns a zone's label can hop along its edge or come and go. Watched at
+    T42.d's look; if it distracts, the lean is R07's Q6 (a) rule for the view's labels (a 0.25 rem
+    margin and at most three changes a second), for a ruling.
+- **Deviations in P14.T42.d, as built (`lane/93-p14-t42d-zone-labels`, 2026-10-23).** The zone and
+  belt labels apart, off the bodies, and after the bodies' labels (decision-zone-labels), in the
+  client, the guide and plans 14 and 05 only: no Rust, protocol, binding, server, sim, GPU, golden
+  or `styles.css` change. `GENERATOR_VERSION` is 23 and `PROTOCOL_VERSION` 3; the lane started from
+  f8e35c73, with #92 (P14.T43.i) in it, and needed no merge.
+  - _The names_, as the brief suggests: `RingLabel.yieldsToMarks?: true`, set by
+    `markCurveLabels`' annulus branch alone; `bracketBoxPx(anchor, remPx, reticles): BoxPx` in
+    `spatial/labels.ts`, which `clearOfItsBracket` and the destination's neighbours now use, with
+    no change in behaviour; and in `spatial/furniture.ts`,
+    `curveInksPx(ops, devicePixelRatio): ReadonlyArray<InkPx>` and
+    `placeAnnulusLabels(labels, viewport, surroundings)`, which returns
+    `ReadonlyArray<PlacedCurveLabel>`, its `surroundings` an `AnnulusLabelSurroundings`,
+    `{ standing, marks, brackets, curves }`. `placeAnnulusLabels` takes every curve label and places
+    the flagged ones alone, as `placeCurveLabels` now leaves them out, so `SpatialView` gives
+    `drawList.curveLabels` to both. `inksNear`'s grid became `nearInGrid`, which it, `inksAcross`
+    (the curves) and `boxesNear` (the brackets' boxes) share, its empty case `nearNoInk` renamed
+    `nearNothing`; `inksNear`'s behaviour is unchanged.
+  - _The rules, row by row, as main's table of obstacles gives them._
+    - Other annulus labels, 0.5 rem box to box: each placed label joins `standing` for the next
+      (`boxGapPx` ≥ `LABEL_NEIGHBOUR_CLEARANCE_REM` less `GAP_TOLERANCE_PX`); `furniture.test.ts`
+      (a), stacked and end to end at 0.375 and 0.625 rem.
+    - The other curve labels, 0.5 rem: the first pass's labels are in `standing`
+      (`SpatialView.tsx`); the same test as the next row's, since `standing` holds every box alike.
+    - Every mark's label drawn, 0.5 rem and after it: `SpatialView` places `placeLabels`' labels
+      before the pass and gives them as `standing`; `furniture.test.ts` (b) against a mark's label,
+      and `SpatialView.test.tsx`'s lesser mark's label over the zone's first place and the
+      selection on the rimward point.
+    - The furniture, 0.5 rem: the triad's footprint and `coreArrowBoxes` (the arrow's box and its
+      label) are in `standing`; `furniture.test.ts` (b) against the core arrow and its label,
+      stacked below the label and end to end before it, its free end, since from the top the arrow
+      stands at its right.
+    - Every mark's symbol, 0.25 rem outside the bracket's box: `brackets` is `bracketBoxPx` of
+      every anchor, tested with `boxGapPx` through `boxesNear`; `furniture.test.ts` (c) and (f),
+      and `SpatialView.test.tsx`'s mark 0.125 rem outside the first place's bracket's box. The
+      symbols are still among `marks` at 0.125 rem, as `markInksPx` gives them; each lies inside
+      its own bracket's box, so the bracket's rule is the one that binds.
+    - Every stalk and the observer's eye, 0.125 rem: `marks` is `markInksPx`, through `inksNear`
+      at `CURVE_MARK_CLEAR_REM`; `furniture.test.ts` (d), (e) and (f).
+    - Orbits, annulus edges and ticks, preferred: `curveInksPx`, through `inksAcross`, where a
+      stroke crosses a box when the box comes within its half-width at the line scale of its
+      segment, touching included; the first place in the search order that qualifies and no
+      curve crosses, else the first that qualifies; `furniture.test.ts` (e) and `curveInksPx`'s
+      test, and `SpatialView.test.tsx`'s belt whose ticks, and not its edges, cross the first place.
+    - The `--line` grid and the plane's rings: none, since `curveInksPx` leaves out every `line`
+      op and every polyline in `line`; `curveInksPx`'s test.
+    - The view's edges, 0.25 rem inside: `insideView` with `edgeInsetPx`; `furniture.test.ts` (f).
+    - No last resort: a label with no qualifying place is left out; `furniture.test.ts` (d).
+    - The order: the scene's, the zones' annuli before the populations' (`orbitScene`, as built),
+      `zoneAnnuli` putting `HABITABLE ZONE` first; `bodyMap.test.ts`.
+
+    Every row is built as ruled.
+
+  - _Tests._ `furniture.test.ts`, 24 new, 99 in the file: `curveInksPx`, 1; `placeAnnulusLabels`,
+    20 (a: 4; b: 4 against a mark's label and 4 against the core arrow; c: 2, and the ring's label
+    without the flag at its first place; d; the two passes leaving each other's labels; e: 2; g);
+    the crowd (f), 3, one a stage. Test (g) gives no marks and no curves, so it pins the order and
+    the 0.5 rem spacing where there is room; with the rings' own edges as curves, the outer rings
+    would cross the inner ones' first places. `drawList.test.ts`: 1, the flag on the annuli's
+    labels alone, beside a sphere's, a plane ring's, a path's and the observer's. `SpatialView.test.tsx`: 4, each failing on the base: the
+    lesser mark's label drawn over the zone's first place, the zone's 0.5 rem off it; the
+    selection's label on the rimward point at its right; the zone's label moved 0.25 rem outside a
+    mark's bracket's box that stood 0.125 rem beside its first place; the zone's label moved off a
+    belt's ticks. The existing assertions that changed, and why:
+    - `drawList.test.ts`'s exact rimward test gains `yieldsToMarks: true`, the flag;
+    - `bodyMap.test.ts`'s zone order puts `HABITABLE ZONE` first: the fixture's three annuli
+      (`HABITABLE ZONE`, `SNOW LINE`, `OPTIMISTIC`), the companion-bounded zone's four and its
+      three with `OPTIMISTIC` off, and the scene's annuli; the three with `HABITABLE ZONE` off keep
+      their order;
+    - `SystemView.bodies.test.tsx`'s stub stage, `WIDTH_PX` and `HEIGHT_PX`, from 400 × 300 to
+      1214 × 625, and nothing else in the file. The brief allowed it for a zone switch, and the
+      zone switches pass on 400 × 300. "Focuses the selected planet with C, in its own frame, and
+      returns with C" names `MASSIVE RING`, the planet's ring in the `BODY` frame, an annulus's
+      label, which on 400 × 300 has no qualifying place: of its 96 places, 88 stand within 0.5 rem
+      of the selection's or a moon's label and 8 within 0.125 rem of a stalk. On 1214 × 625 it is
+      drawn, and all 110 tests in the file pass. Asked on the issue, and accepted by main
+      (2026-10-23): the ring is an annulus's label, so leaving it out on a 400 × 300 stage is the
+      rule working as ruled.
+
+    Unchanged and passing: `labels.test.ts`, byte for byte; R07.T16.j's curve-label tests; the D4
+    test against the query edge's label and the ring-label test in `SpatialView.test.tsx`; every
+    `displays/galaxy` test. The spheres', plane rings', paths' and observer's search and last
+    resort are unchanged.
+
+  - _Test (f), the crowd_, synthetic: the habitable zone and snow line of the brief's readout
+    example (0.989–1.69 AU and 2.26 AU), the optimistic zone at the fixture's 0.749–1.77 AU and
+    `BELT 1` at 2.5–3.4 AU, the optimistic zone and the belt labelled at their spinward points as
+    the orbit map labels them; the planets at 0.87, 1.38 and 2.05 AU; the host at the centre and
+    the selection at the habitable zone's outer edge's rimward point; from the oblique default. At 787.33 × 184 px at 1 (1280 × 720), `SNOW LINE` and `OPTIMISTIC` drawn,
+    `HABITABLE ZONE` and `BELT 1` left out; at 1214 × 625 at 1 (1920 × 1080), all four drawn; at
+    787.33 × 197.33 at 1.5 (1920 × 1080 at 150%), `HABITABLE ZONE` and `SNOW LINE` drawn,
+    `OPTIMISTIC` and `BELT 1` left out. The test pins the gaps, not which are drawn.
+  - _The lint._ The console-ux lint on the five changed renderer files: 0 errors and 0 checks.
+  - _Reviews._ TypeScript, UX and plan conformance.
+    - TypeScript: one must-fix, done: a `//` comment in `placeAnnulusLabels` that said what and not
+      why. Three should-fix, done: `zoneAnnuli`'s and `bracketBoxPx`'s detail moved under
+      `@remarks`; the `SpatialView` tests get the labels that must be drawn through `getBy*`
+      (`drawnBox`) and query only an annulus's label, which may be left out (`annulusBox`); the
+      imported clearances linked with `{@link}`. One consider not taken: an annulus's label as a
+      variant of its own rather than the optional `yieldsToMarks`, which the brief names.
+    - UX: no finding in the code. Against main's guide text, for main and not applied: a must-fix,
+      that the sub-bullet's first sentence names the optimistic zone's spinward start alone, while
+      a belt's label (`populationAnnuli`) and every second ring's in the `BODY` frame
+      (`bodyFrame.ts`) start at their spinward points too; and a should-fix, that `INNER` fits the
+      nearer of the habitable zone's outer edge and the fifth body, so it does not always draw the
+      inner zones large enough for their labels. Two considers on the same text: the observer's
+      eye beside "every stalk", and the "labelled annuli" bullet not saying that a label can be
+      left out. Its other considers: a selected belt, ring or halo placed first among the annuli
+      (deferred below), and hysteresis (W2). After it, test (f) starts `BELT 1` at its spinward
+      point, as the map does.
+    - Plan conformance: no must-fix. One should-fix, done: test (b)'s end-to-end cases against the
+      core arrow's label. Two considers, done: planet b moved from 0.72 to 0.87 AU, between the
+      optimistic zone's inner edge and the habitable zone's, and test (f) described as synthetic.
+      Its note for main's look: §2.8 expects the inner system about 500 px across at 1214 × 625,
+      where test (f)'s 3.4 times the 1280 × 720 scale gives about 200 px.
+  - _Pending:_ main's look at 1280 × 720, 1920 × 1080 and 1920 × 1080 at 150 %, which expects most
+    inner zone labels left out at `ALL` on 1280 × 720 and at 150 % (§2.8).
+- **Deferred findings (2026-10-13 rule)**, from P14.T42.d:
+  - _The destination's chevrons._ An annulus's label keeps 0.25 rem outside every mark's
+    bracket's box, but a destination's chevrons stand outside that box (their apices 0.25 rem or
+    the reticles' least gap out, their arms beyond), and they are not among its obstacles, so a
+    label could stand on them. No display that draws an annulus sets a destination (`orbitScene`
+    and the `BODY` frame's scene set `destinationId` to `null`), so nothing shows it. If one ever
+    does, the lean is the chevron set's box (`destinationSetReachPx`, as `placeLabels` keeps the
+    lesser labels from it) at the same 0.25 rem.
+  - _A selected belt, ring or halo can lose its label_ (the UX review). Its edges and ticks are
+    drawn as the selected orbit is, but its label waits behind the zones' (main's order) and is
+    left out where no place qualifies; the list and its readout still name it. A change to the
+    order, so for a ruling; the lean is a selected annulus's label first among the annuli.
