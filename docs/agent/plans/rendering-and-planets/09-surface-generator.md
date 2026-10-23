@@ -3335,6 +3335,33 @@ and R09.T7.j's degradation bytes among them; `tests/common/surface_worlds.rs` gi
 `benches/surface.rs` gains `coarse/pass_l5` to `coarse/pass_l8`. The reference Earth's pass takes
 94.9 s at level 8, a finding.
 
+- **R09.T16.a The level-8 pass's cost since R09.T14.d** (a T16 follow-up; after R09.T16, in
+  either order with R09.T17.a, before R09.T20; decision-r09-pass-cost §B). No contract or golden
+  moves: every lever built here is bit for bit, and `golden_diff` shows nothing.
+  - _Attribution_, under the heavy lock on a quiet machine, one thread a pass. First
+    `coarse/erosion_l8` at `032a8c5f` and at its parent. If the phase-data switch does not account
+    for the erosion step's rise from 10.504 to 17.881 s within the runs' spread, the same bench
+    halves `01674b8c..898a3c94`, P14.T54.a's commits that touch the climate or the reference
+    worlds first (`840e319a`, `13875532`, `9f3f5e1a`, `013f2f90`, `d1271637`, `88a06096` and
+    `b9a17c55`), then the range's other registry commits. Then the climate step, by a probe as
+    R09.T13.i's (inserted, built and deleted), at the commit that names its rise and at that
+    commit's parent. Each run splits the model, the water cycle and the rest, and records G1's,
+    G2's and the zonal search's orbits. The figures go into this plan.
+  - _The levers_ that the attribution names, each bit for bit and tested against the path it
+    replaces, for one the saturation curve's per-call constants hoisted out of its sum. A lever
+    that moves bits, such as a tabulated curve or powers by multiplication, is a generator-version
+    change. It is proposed to main with its measured saving and not built here. The route back
+    under 30 s (RRE(2), or Newton on the G runs; I13) stays under its own ruling.
+  - _Reference figures_ (recorded, not gates): the reference Earth's climate step back within
+    R09.T13.i's landed band, at most 35 s quiet, and `coarse/erosion_l8` within 10% of R09.T14.d's
+    figure (10.504 s). After the levers, `coarse/pass_l8` with `HYPERION_COARSE_STEPS` is run, and
+    the fast `the_pass_is_order_independent` and
+    `the_pass_yields_a_valid_field_twice_with_identical_bytes` are timed quiet. If the order test
+    is still over 120 s, the lane reports it with each world's share and cuts nothing.
+  - _Acceptance:_ `cargo test -p hyperion-sim --lib planetary::surface::`,
+    `cargo test -p hyperion-sim --features testing --test surface_coarse_golden`, the surface
+    module's slow tests by name and the bench under the heavy lock.
+
 ### R09.T17 The surface service
 
 `crates/hyperion-server/src/surface/{mod,cache,service,inputs}.rs` and `config.rs`: Design note 19;
@@ -3353,6 +3380,35 @@ cancelled job leaves nothing cached; the server's field, from `reference_inputs`
 `NotModelled` naming its section until the serve gate opens (P14.T54.a's gate constant in
 `crates/hyperion-server/src/surface/inputs.rs`; updated 2026-10-15). Acceptance:
 `cargo test -p hyperion-server surface`.
+
+- **R09.T17.a The passes in flight** (a T17 follow-up, after R09.T16; decision-r09-pass-cost §C).
+  R09.T17's deferred _Concurrent passes_, which R09.T16 measured at 408 MB a level-8 pass.
+  `SurfaceService` bounds the passes it runs at once by a semaphore of `surface_passes` permits
+  (`--surface-passes`, `HYPERION_SURFACE_PASSES`, in `config.rs`'s table). The default is the
+  lesser of 4 and the pool's workers less one, and at least 1; 0 is refused, as `--num-workers`
+  refuses it. A pass takes its permit inside its flight, before its bulk job is submitted, and
+  holds it until the job ends, however it ends. A pass waiting for a permit is skipped once every
+  asker has given up, as a queued pass is, and a prefetched pass waits as a requested one does. So
+  at most four level-8 passes, about 1.6 GB, run at once, and on a pool of two workers or more one
+  worker stays free for the interactive jobs that the displays' requests wait on. No field,
+  payload or protocol moves.
+  - _Tests:_ with one permit on a two-worker pool, a second body's pass starts only when the
+    first ends, while an interactive job runs at once; a waiting pass whose askers give up never
+    runs; a pass that panics frees its permit; the default, and the refusal of 0.
+  - _Acceptance:_ `cargo test -p hyperion-server surface` and
+    `cargo test -p hyperion-server config`.
+  - _Built 2026-10-23_ (lane r09-t17a, on `71532a17`). `SurfaceService::new` takes the bound as a
+    fourth argument, `passes: NonZeroUsize`, which the server gives from
+    `ServerConfig::surface_passes()`; with no `--surface-passes` that resolves the default from
+    the configuration's own workers, so a builder's `workers` alone moves it. The permit is
+    awaited after the flight's second look at the cache and moved into the bulk job's closure, so
+    the job holds it, not the flight: a flight given up while its job runs leaves the pass counted
+    until the job ends. A bound past `Semaphore::MAX_PERMITS` is taken as that many. The service's
+    `Debug` shows the permits free, and the startup log `surface_passes`. As built, the variable's
+    fallback and its refusal of 0 are tested in `tests/cli.rs`, through the binary, since setting
+    a variable in a unit test needs `unsafe`, which the workspace forbids; the unit tests take a
+    `Turnstile` source that holds each body's pass until the test lets it through. The README's
+    and `config.rs`'s option tables were re-padded for the new default's text.
 
 ### R09.T18 Survey passes and coverage
 
@@ -3536,6 +3592,8 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
   the channel search and level cut, then the hash fallbacks; the band limit does not move. The
   coarse pass at level 8 may take tens of seconds with the climate model, which the brainstorm
   accepts if it starts on approach; until sessions exist it starts on first request.
+  R09.T16 measured it: 94.9 s for the reference Earth's pass at level 8, its climate step 68.9 s
+  (decision-r09-pass-cost; R09.T16.a).
 - **Plan 14's asks may not land in time.** The pass runs on builder inputs meanwhile, and `for_body`
   says `NotModelled(RecordSection::Surface)`; no generated world gets a surface until plan 14
   inhabits the record's surface section (P14.T24.a–b, unbuilt) and carries σ_h with f_c, the
@@ -14114,3 +14172,36 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
   - _Plan 10's amendment, drafted for main's docs agent:_ its Files' `sample_worlds()` (near its
     line 430) built in `reference` with the tiers as built (Mars fast; the locked world slow), and its
     R10.T1.b, T2, T3, T5 and T10.a follow-ups free to start on it.
+- **Main's rulings on R09.T16's cost findings** (decision-r09-pass-cost, 2026-10-23). None is a
+  blocker under the owner's rule of 2026-10-20, and T16 lands as built.
+  - _The 94.9 s pass breaks no contract._ It runs as one bulk job on the pool, off the runtime,
+    shared by one flight and kept in the field cache. `surface_field` waits for it, but the
+    terrain's store asks through the link's own request client, which has no timer. The client's
+    `REQUEST_TIMEOUT_MS` of 30 s belongs to `useServerRequest`, for the displays' requests, and
+    the server sets no deadline. Meanwhile the body has no coverage, so it stays on R07's disc
+    (R10.T10.e) with `SURVEY COVERAGE: PENDING` (R10.T12): a stated wait, not a wrong picture.
+    At version 23 no generated body runs a pass (the serve gate is shut until 24). The
+    brainstorm's "tens of seconds" and decision-r09-t14-choices C's 60 s are recorded references,
+    both missed; C's 60 s guarded the σ_h iteration, whose fallback T14.d took.
+  - _The climate step's 68.9 s is not R09.T13.i's G runs._ Those are inside the 31.8 s quiet at
+    which T13.i landed, and seed 3's 64–73 s is another world's, measured before the change below.
+    Both steps rose between `01674b8c` (T14.d) and `898a3c94` (this task's base): the climate
+    from 31.8 to 68.9 s, and the erosion from 10.50 to 17.88 s, though it runs no G run. In that
+    range only P14.T54.a's 22 → 23 batch touches the climate's code or the reference worlds'
+    inputs (R09.T6.c's change to the erosion is its dry-now branch, and other plan 14 commits
+    change only the registry that the climate reads). The batch's phase-data switch (`032a8c5f`)
+    makes every saturation pressure T49.b's curve: water's six `libm::pow`, an `ln` and an `exp`
+    a call, where the held curve took one `exp`. The erosion's two water balances make up to
+    some 28 million such calls a pass, which fits its rise. The energy balance reads its water
+    terms from tables, so the climate's rise is not attributed. It is a cost of ruled physics,
+    measured late: not a bug and not a ruled cost. R09.T16.a attributes it. P14.T53.a is not part
+    of it: it is not in this task's tree, and at version 23 `GreenhouseConstants::in_force` gives
+    the held constants, once a body.
+  - _A pass's 408 MB_ (the process's peak, its 22 MB floor included) is no crash risk at the
+    passes the client asks for, the bodies near a view's camera (one or two). Fifteen at once is
+    not reachable today. R09.T17.a bounds the passes in flight, which also keeps a pool worker
+    free for the displays' requests.
+  - _The fast order test's 909.5 s and the bytes test's 248.7 s_ stay in the fast tier as built,
+    unsplit and uncut. decision-p14-t54a-passes §C.7's pre-authorised split excludes determinism
+    and order tests, and decision-r09-t13-test-cost keeps their coverage first. The cost stays
+    I13's. R09.T16.a times both on a quiet machine.

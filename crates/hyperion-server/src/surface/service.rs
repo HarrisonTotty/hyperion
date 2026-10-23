@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
@@ -25,7 +26,7 @@ use hyperion_surface::material::{
     exposed_albedo_scale, haloed_albedo_scale, maturity_mix,
 };
 use hyperion_surface::synth::{SynthCache, Synthesiser};
-use tokio::sync::watch;
+use tokio::sync::{Semaphore, watch};
 use tokio::task::JoinSet;
 
 use super::{FieldCache, FieldKey, InputsSource};
@@ -158,6 +159,10 @@ pub struct SurfaceService {
     source: Arc<dyn InputsSource>,
     held: Arc<FieldCache>,
     flights: SingleFlight<FieldKey, CoarseField, SurfaceJobError>,
+    /// The coarse passes allowed to run at once, a permit each (rendering plan R09, R09.T17.a): a
+    /// pass takes its permit in its flight, before its bulk job is queued, and the job holds it
+    /// until it ends, however it ends. Never closed.
+    passes: Arc<Semaphore>,
     computed: Arc<AtomicU64>,
     /// The passes started by [`prefetch`](Self::prefetch), each waited on by a task of its own so
     /// that its flight lives with no request waiting; aborted by
@@ -176,17 +181,33 @@ pub struct SurfaceService {
 
 impl SurfaceService {
     /// A service that computes its fields on `pool` from the inputs `source` gives, keeping at
-    /// most `budget_bytes` of them.
+    /// most `budget_bytes` of them and running at most `passes` coarse passes at once.
     ///
     /// A budget of zero keeps nothing: every request computes its field, though requests made at
     /// once still share one pass.
+    ///
+    /// The server gives `passes` from
+    /// [`ServerConfig::surface_passes`](crate::ServerConfig::surface_passes), by default the lesser
+    /// of 4 and the pool's workers less one, at least 1 (rendering plan R09, R09.T17.a;
+    /// decision-r09-pass-cost §C): a level-8 pass peaks at 408 MB (R09.T16), so four at once hold
+    /// about 1.6 GB, and on a pool of two workers or more one stays free for the interactive jobs
+    /// that the displays' requests wait on. A pass past the bound waits for a permit before its job
+    /// is queued. A bound above [`Semaphore::MAX_PERMITS`] is taken as that many, which bounds
+    /// nothing either.
     #[must_use]
-    pub fn new(pool: Arc<CpuPool>, source: Arc<dyn InputsSource>, budget_bytes: usize) -> Self {
+    pub fn new(
+        pool: Arc<CpuPool>,
+        source: Arc<dyn InputsSource>,
+        budget_bytes: usize,
+        passes: NonZeroUsize,
+    ) -> Self {
         Self {
             pool,
             source,
             held: Arc::new(FieldCache::new(budget_bytes)),
             flights: SingleFlight::new(),
+            // `Semaphore::new` panics above its count's limit, and a bound past it bounds nothing.
+            passes: Arc::new(Semaphore::new(passes.get().min(Semaphore::MAX_PERMITS))),
             computed: Arc::new(AtomicU64::new(0)),
             prefetching: Mutex::new(JoinSet::new()),
             surveys: Arc::new(Mutex::new(HashMap::new())),
@@ -202,6 +223,10 @@ impl SurfaceService {
     /// its inputs from the service's source and runs the coarse pass under the body's surface
     /// seed. Callers that ask for one field at once share the job; if every one of them gives up,
     /// a job still queued is skipped and nothing is kept.
+    ///
+    /// At most the service's bound of passes run at once ([`new`](Self::new)): past it, the pass
+    /// waits for a permit before its job is queued, and if every caller gives up meanwhile it
+    /// never runs, as a queued job is skipped.
     ///
     /// # Errors
     ///
@@ -243,14 +268,15 @@ impl SurfaceService {
     /// held, and returns at once whether it started or joined a pass.
     ///
     /// The pass runs on the pool at bulk priority through the service's single flight, waited on
-    /// by a task the service owns, and a request made meanwhile joins it. Session code will call it
-    /// as the ship approaches a body (Design note 19), and is why it is public; `survey_pass` calls
-    /// it for a body whose inputs are modelled (R09.T19.a). It looks for the field as a request
-    /// does, so it counts a hit when the field is held; otherwise a miss, and one more inside the
-    /// flight where it starts the pass, but none there where it joins a pass already in flight. A
-    /// pass that
-    /// fails is logged (a refused body at `debug`, a job that did not run at `warn`), and the next
-    /// request asks again.
+    /// by a task the service owns, and a request made meanwhile joins it. It waits for a permit of
+    /// the service's bound of passes as a requested pass does ([`field`](Self::field)), so a
+    /// prefetch never runs a pass past the bound. Session code will call it as the ship approaches
+    /// a body (Design note 19), and is why it is public; `survey_pass` calls it for a body whose
+    /// inputs are modelled (R09.T19.a). It looks for the field as a request does, so it counts a
+    /// hit when the field is held; otherwise a miss, and one more inside the flight where it starts
+    /// the pass, but none there where it joins a pass already in flight. A pass that fails is
+    /// logged (a refused body at `debug`, a job that did not run at `warn`), and the next request
+    /// asks again.
     ///
     /// # Panics
     ///
@@ -433,17 +459,19 @@ impl SurfaceService {
     }
 
     /// The pass of `key`'s field, joined if one is in progress: it looks for the field once more
-    /// inside the flight, then computes it as one bulk job and keeps it.
+    /// inside the flight, waits for a permit of the bound of passes, then computes the field as
+    /// one bulk job, which holds the permit, and keeps it.
     fn flight(
         &self,
         key: FieldKey,
         system: &Arc<GeneratedSystem>,
     ) -> Flight<CoarseField, SurfaceJobError> {
-        let (pool, source, held, computed, system) = (
+        let (pool, source, held, computed, passes, system) = (
             Arc::clone(&self.pool),
             Arc::clone(&self.source),
             Arc::clone(&self.held),
             Arc::clone(&self.computed),
+            Arc::clone(&self.passes),
             Arc::clone(system),
         );
         self.flights.run(key, move || async move {
@@ -457,7 +485,21 @@ impl SurfaceService {
             // Cancels the pass's queued job once every waiter on this flight has gone.
             let _cancel_on_drop = CancelOnDrop::new(token.clone());
             let asked = Instant::now();
+            // Waited for before the job is queued, so that a pass past the bound holds no place in
+            // the bulk queue (R09.T17.a), and counted in `waited_ms`. Tokio's acquire is
+            // cancel-safe: a flight whose every waiter goes while it waits drops the wait, and its
+            // pass never runs, as a queued job is skipped.
+            let permit = passes
+                .acquire_owned()
+                .await
+                .expect("the service never closes its passes' semaphore");
             let (field, pass) = bulk(&pool, &token, move |_: &CancelToken| {
+                // The job holds the permit, not the flight, so that it is freed when the job ends
+                // however it ends: run to its end, or panicked (dropped as the pool's
+                // `catch_unwind` unwinds), or dropped unrun (cancelled, refused, or with the pool).
+                // A flight given up while its job runs leaves the job, and its pass's memory, still
+                // counted.
+                let _permit = permit;
                 let started = Instant::now();
                 compute(source.as_ref(), key, &system).map(|field| (field, started.elapsed()))
             })
@@ -494,6 +536,7 @@ impl fmt::Debug for SurfaceService {
             .field("source", &self.source)
             .field("counters", &self.counters())
             .field("computing", &self.flights.len())
+            .field("passes_free", &self.passes.available_permits())
             .field("prefetching", &prefetching)
             .field("survey_logs", &lock(&self.surveys).len())
             .finish_non_exhaustive()
@@ -812,10 +855,9 @@ fn log_refusal(key: FieldKey, error: ComputeError) {
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroUsize;
-    use std::sync::OnceLock;
+    use std::collections::HashSet;
     use std::sync::atomic::AtomicUsize;
-    use std::sync::mpsc;
+    use std::sync::{Condvar, OnceLock, mpsc};
 
     use futures_util::FutureExt;
     use futures_util::future::join3;
@@ -940,13 +982,15 @@ mod tests {
         }
     }
 
-    /// A service of `budget` bytes on `pool`, its source counted.
+    /// A service of `budget` bytes on `pool`, its source counted, running one pass at a time, the
+    /// default bound on a pool of one worker.
     fn service(pool: &Arc<CpuPool>, budget: usize) -> (SurfaceService, Arc<Counted>) {
         let source = Arc::new(Counted::default());
         let service = SurfaceService::new(
             Arc::clone(pool),
             Arc::clone(&source) as Arc<dyn InputsSource>,
             budget,
+            NonZeroUsize::MIN,
         );
         (service, source)
     }
@@ -1224,6 +1268,7 @@ mod tests {
             Arc::clone(&pool),
             Arc::clone(&source) as Arc<dyn InputsSource>,
             64 << 20,
+            NonZeroUsize::MIN,
         );
         let mut asking = Box::pin(service.field(nth(0), &system().0));
         assert!((&mut asking).now_or_never().is_none());
@@ -1333,6 +1378,300 @@ mod tests {
             (0, 0, 0),
             "{counters:?}"
         );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A pool of two workers, so that a job can run beside a pass.
+    fn two_workers() -> Arc<CpuPool> {
+        Arc::new(
+            CpuPool::new(
+                NonZeroUsize::new(2).unwrap(),
+                INTERACTIVE_QUEUE_CAPACITY,
+                BULK_QUEUE_CAPACITY,
+            )
+            .unwrap(),
+        )
+    }
+
+    /// A source that holds each body's pass in its inputs until the test opens the body's gate,
+    /// counting each body's entries, and panics for the bodies it is told to, so that a test can
+    /// tell which passes run and when.
+    #[derive(Debug, Default)]
+    struct Turnstile {
+        gates: Mutex<Gates>,
+        opened: Condvar,
+    }
+
+    /// What a [`Turnstile`] knows of each body, by its index.
+    #[derive(Debug, Default)]
+    struct Gates {
+        entered: HashMap<BodyIndex, usize>,
+        open: HashSet<BodyIndex>,
+        panics: HashSet<BodyIndex>,
+    }
+
+    impl Turnstile {
+        fn index(key: FieldKey) -> BodyIndex {
+            BodyIndex::try_from(key.body().body_index()).unwrap()
+        }
+
+        /// Lets the passes of `key`'s body through, those waiting and those to come.
+        fn open(&self, key: FieldKey) {
+            lock(&self.gates).open.insert(Self::index(key));
+            self.opened.notify_all();
+        }
+
+        /// Makes the passes of `key`'s body panic as they enter.
+        fn panic_on(&self, key: FieldKey) {
+            lock(&self.gates).panics.insert(Self::index(key));
+        }
+
+        /// How many passes of `key`'s body have entered.
+        fn entered(&self, key: FieldKey) -> usize {
+            lock(&self.gates)
+                .entered
+                .get(&Self::index(key))
+                .copied()
+                .unwrap_or(0)
+        }
+    }
+
+    impl InputsSource for Turnstile {
+        fn inputs(
+            &self,
+            record: &BodyRecord,
+            _: Option<&BodyRecord>,
+            _: &SystemContext,
+        ) -> Result<CoarseInputs, ReadCoarseInputsError> {
+            let index = record.index();
+            let mut gates = lock(&self.gates);
+            *gates.entered.entry(index).or_default() += 1;
+            if gates.panics.contains(&index) {
+                drop(gates);
+                panic!("the test makes this body's pass panic");
+            }
+            let timed_out = self
+                .opened
+                .wait_timeout_while(gates, WAIT, |gates| !gates.open.contains(&index))
+                .unwrap()
+                .1
+                .timed_out();
+            assert!(!timed_out, "the test opens the body's gate");
+            Ok(reference::ceres_like())
+        }
+    }
+
+    /// A service on `pool` that runs one pass at a time, its source a [`Turnstile`].
+    fn one_pass_at_a_time(pool: &Arc<CpuPool>) -> (SurfaceService, Arc<Turnstile>) {
+        let source = Arc::new(Turnstile::default());
+        let service = SurfaceService::new(
+            Arc::clone(pool),
+            Arc::clone(&source) as Arc<dyn InputsSource>,
+            64 << 20,
+            NonZeroUsize::MIN,
+        );
+        (service, source)
+    }
+
+    /// With one permit on a two-worker pool, a second body's pass waits for the first's permit
+    /// rather than taking the free worker: while the first runs, the second's job is never queued
+    /// and its source never entered, and a survey's level read, an interactive job, runs at once
+    /// beside the first. Once the first ends, the second runs, and both fields arrive (rendering
+    /// plan R09, R09.T17.a).
+    #[tokio::test]
+    async fn a_second_surface_pass_waits_for_the_first_s_permit_while_interactive_jobs_run() {
+        let pool = two_workers();
+        let (service, source) = one_pass_at_a_time(&pool);
+        let (first, second, read) = (nth(0), nth(1), nth(2));
+        let mut running = Box::pin(service.field(first, &system().0));
+        assert!((&mut running).now_or_never().is_none());
+        until("the first pass is running", || source.entered(first) == 1).await;
+        let mut waiting = Box::pin(service.field(second, &system().0));
+        assert!(
+            (&mut waiting).now_or_never().is_none(),
+            "the second pass waits"
+        );
+        source.open(read);
+        let level = timeout(
+            WAIT,
+            service.field_level(read, &system().0, CancelToken::new()),
+        )
+        .await
+        .expect("timed out reading a level beside a pass");
+        assert_eq!(
+            level,
+            Ok(FieldLevel::Modelled(coarse_level(
+                reference::ceres_like().radius()
+            )))
+        );
+        assert!(
+            (&mut waiting).now_or_never().is_none(),
+            "the second pass still waits"
+        );
+        let counters = pool.counters();
+        assert_eq!(
+            (
+                source.entered(second),
+                counters.running(),
+                counters.queued_bulk(),
+                service.passes.available_permits()
+            ),
+            (0, 1, 0, 0),
+            "the second pass holds no place in the queue and no worker: {counters:?}"
+        );
+        source.open(first);
+        let one = timeout(WAIT, running)
+            .await
+            .expect("timed out computing the first field")
+            .unwrap();
+        source.open(second);
+        let other = timeout(WAIT, waiting)
+            .await
+            .expect("timed out computing the second field")
+            .unwrap();
+        assert!(!Arc::ptr_eq(&one, &other));
+        assert_eq!(
+            (
+                source.entered(first),
+                source.entered(second),
+                service.counters().computed(),
+                service.passes.available_permits()
+            ),
+            (1, 1, 2, 1)
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A pass waiting for its permit is given up with its askers, as a queued pass is: a request
+    /// dropped while it waits, and a prefetch that joined it stopped, leave no flight, and once the
+    /// running pass ends the given-up pass never runs, nor is its job ever queued. Its place is not
+    /// lost: a third body's pass then takes the one permit and runs.
+    #[tokio::test]
+    async fn a_surface_pass_whose_askers_give_up_while_it_waits_for_its_permit_never_runs() {
+        let pool = two_workers();
+        let (service, source) = one_pass_at_a_time(&pool);
+        let (first, given_up, later) = (nth(0), nth(1), nth(2));
+        let mut running = Box::pin(service.field(first, &system().0));
+        assert!((&mut running).now_or_never().is_none());
+        until("the first pass is running", || source.entered(first) == 1).await;
+        let mut asking = Box::pin(service.field(given_up, &system().0));
+        assert!(
+            (&mut asking).now_or_never().is_none(),
+            "the pass waits for a permit"
+        );
+        assert!(service.prefetch(given_up, &system().0));
+        drop(asking);
+        assert_eq!(service.flights.len(), 2, "the prefetch keeps the pass");
+        service.stop_prefetching();
+        until("the waiting pass is given up", || {
+            service.flights.len() == 1
+        })
+        .await;
+        source.open(given_up);
+        source.open(first);
+        timeout(WAIT, running).await.unwrap().unwrap();
+        source.open(later);
+        field(&service, later).await.unwrap();
+        let counters = pool.counters();
+        assert_eq!(
+            (
+                source.entered(given_up),
+                source.entered(later),
+                service.counters().computed(),
+                counters.completed(),
+                counters.cancelled()
+            ),
+            (0, 1, 2, 2, 0),
+            "{counters:?}"
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A prefetched pass waits for its permit as a requested one does: while another body's pass
+    /// holds the one permit, the prefetch queues no job and enters no source, though a worker is
+    /// free; once that pass ends, the prefetched pass runs and its field is kept, no request made.
+    #[tokio::test]
+    async fn a_prefetched_surface_pass_waits_for_its_permit_as_a_requested_one_does() {
+        let pool = two_workers();
+        let (service, source) = one_pass_at_a_time(&pool);
+        let (first, prefetched) = (nth(0), nth(1));
+        let mut running = Box::pin(service.field(first, &system().0));
+        assert!((&mut running).now_or_never().is_none());
+        until("the first pass is running", || source.entered(first) == 1).await;
+        assert!(service.prefetch(prefetched, &system().0));
+        // A job on the free worker, waited for, during which the prefetch's task is polled.
+        let token = CancelToken::new();
+        timeout(WAIT, bulk(&pool, &token, |_: &CancelToken| ()))
+            .await
+            .expect("timed out running a job beside a pass")
+            .unwrap();
+        let counters = pool.counters();
+        assert_eq!(
+            (
+                source.entered(prefetched),
+                counters.running(),
+                counters.queued_bulk()
+            ),
+            (0, 1, 0),
+            "the prefetched pass holds no place in the queue and no worker: {counters:?}"
+        );
+        source.open(prefetched);
+        source.open(first);
+        timeout(WAIT, running).await.unwrap().unwrap();
+        until("the prefetched field is held", || {
+            service.counters().cache().entries() == 2
+        })
+        .await;
+        assert_eq!(
+            (source.entered(prefetched), service.counters().computed()),
+            (1, 2)
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A pass that panics frees its permit: its askers are answered that the job panicked, and the
+    /// next body's pass then takes the one permit and runs.
+    #[tokio::test]
+    async fn a_surface_pass_that_panics_frees_its_permit() {
+        let pool = two_workers();
+        let (service, source) = one_pass_at_a_time(&pool);
+        let (panicking, next) = (nth(0), nth(1));
+        source.panic_on(panicking);
+        assert_eq!(
+            field(&service, panicking).await.unwrap_err(),
+            SurfaceJobError::Compute(ComputeError::Job(JobError::Panicked))
+        );
+        assert_eq!(
+            service.passes.available_permits(),
+            1,
+            "the permit is freed before the job's answer is sent"
+        );
+        source.open(next);
+        field(&service, next).await.unwrap();
+        assert_eq!(
+            (
+                source.entered(panicking),
+                source.entered(next),
+                service.counters().computed(),
+                pool.counters().panicked()
+            ),
+            (1, 1, 1, 1)
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A bound of passes past the most a semaphore counts is taken as that many, which bounds
+    /// nothing either, rather than refused or panicking.
+    #[tokio::test]
+    async fn a_surface_pass_bound_past_a_semaphore_s_count_is_taken_as_its_most() {
+        let pool = one_worker();
+        let service = SurfaceService::new(
+            Arc::clone(&pool),
+            Arc::new(Counted::default()),
+            0,
+            NonZeroUsize::MAX,
+        );
+        assert_eq!(service.passes.available_permits(), Semaphore::MAX_PERMITS);
         timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
     }
 
@@ -1647,6 +1986,7 @@ mod tests {
             Arc::clone(&pool),
             Arc::clone(&source) as Arc<dyn InputsSource>,
             64 << 20,
+            NonZeroUsize::MIN,
         );
         let not_modelled =
             ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(RecordSection::Surface));

@@ -1,6 +1,7 @@
 //! The server binary's command line, run as a process: that options fall back to their
-//! environment variables, that an option given wins over its variable, and that the sky is served
-//! unless it is turned off.
+//! environment variables, that an option given wins over its variable, that the sky is served
+//! unless it is turned off, and that the surface passes run at once follow the workers unless
+//! given.
 //!
 //! Each run listens on port 0 and is killed if it does not exit within the harness's
 //! [`patience`](common::patience), so a regression that starts the server fails the test instead of
@@ -15,7 +16,8 @@ use std::process::Output;
 use common::patiently;
 use common::process::{Running, server_binary};
 use hyperion_server::config::{
-    ENV_DATA_DIR, ENV_SERVE_SKY, ENV_SKY_CACHE_MB, ENV_STOP_ON_STDIN_CLOSE, ENV_WORKERS,
+    ENV_DATA_DIR, ENV_SERVE_SKY, ENV_SKY_CACHE_MB, ENV_STOP_ON_STDIN_CLOSE, ENV_SURFACE_PASSES,
+    ENV_WORKERS,
 };
 
 /// The exit code for a command line clap refuses.
@@ -153,18 +155,27 @@ async fn the_sky_caches_budget_falls_back_to_its_variable() {
     );
 }
 
-/// The sky's service a server started with `configure` states as it starts.
-async fn started_sky_service(configure: impl FnOnce(&mut tokio::process::Command)) -> String {
+/// The value of the field `name` that a server started with `configure` states as it starts.
+async fn stated_at_start(
+    name: &str,
+    configure: impl FnOnce(&mut tokio::process::Command),
+) -> String {
     let dir = tempfile::tempdir().unwrap();
     let stopped = Running::start(dir.path(), configure).await.kill().await;
     let started = stopped
         .line_with(&["server started"])
         .unwrap_or_else(|| panic!("the server logs its start: {stopped}"));
+    let prefix = format!("{name}=");
     stopped.lines[started]
         .split_whitespace()
-        .find_map(|field| field.strip_prefix("sky_service="))
-        .unwrap_or_else(|| panic!("the start states the sky's service: {stopped}"))
+        .find_map(|field| field.strip_prefix(prefix.as_str()))
+        .unwrap_or_else(|| panic!("the start states its {name}: {stopped}"))
         .to_owned()
+}
+
+/// The sky's service a server started with `configure` states as it starts.
+async fn started_sky_service(configure: impl FnOnce(&mut tokio::process::Command)) -> String {
+    stated_at_start("sky_service", configure).await
 }
 
 /// The server serves the sky by default, and `--serve-sky=false` or its variable turns it off
@@ -213,4 +224,48 @@ async fn the_serve_sky_variable_takes_only_a_yes_or_a_no() {
             stderr(&output)
         );
     }
+}
+
+/// The surface passes run at once (rendering plan R09, R09.T17.a) take their count from
+/// `HYPERION_SURFACE_PASSES` when `--surface-passes` is not given, and the option wins over it;
+/// given neither way, they follow the workers: one on the harness's one worker (the config's
+/// tests cover the rest of the rule). The server states the count as it starts.
+#[tokio::test]
+async fn the_surface_passes_fall_back_to_their_variable() {
+    assert_eq!(stated_at_start("surface_passes", |_| {}).await, "1");
+    assert_eq!(
+        stated_at_start("surface_passes", |command| {
+            command.env(ENV_SURFACE_PASSES, "3");
+        })
+        .await,
+        "3"
+    );
+    assert_eq!(
+        stated_at_start("surface_passes", |command| {
+            command
+                .env(ENV_SURFACE_PASSES, "3")
+                .arg("--surface-passes=2");
+        })
+        .await,
+        "2"
+    );
+}
+
+/// A count of surface passes of 0 in the variable is refused as the option's is, before the
+/// server starts.
+#[tokio::test]
+async fn a_surface_passes_variable_of_nought_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = run(dir.path(), &[], &[(ENV_SURFACE_PASSES, Path::new("0"))]).await;
+    assert_eq!(
+        output.status.code(),
+        Some(USAGE_ERROR),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("invalid value '0' for '--surface-passes <COUNT>'"),
+        "{}",
+        stderr(&output)
+    );
 }

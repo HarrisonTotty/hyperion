@@ -154,22 +154,23 @@ scene of every client of that universe.
 The server takes these options, each of which can instead be set by its environment variable.
 An option given on the command line wins over its variable.
 
-| Option                  | Variable                       | Default                                      | What                                         |
-| ----------------------- | ------------------------------ | -------------------------------------------- | -------------------------------------------- |
-| `--address`             | `HYPERION_ADDR`                | `127.0.0.1`                                  | IP address to listen on                      |
-| `--port`                | `HYPERION_PORT`                | `7878`                                       | Port to listen on                            |
-| `--data-dir`            | `HYPERION_DATA_DIR`            | `./hyperion-data`                            | Where universes are saved                    |
-| `--num-workers`         | `HYPERION_WORKERS`             | available parallelism less one, at least one | Generation worker threads                    |
-| `--cell-cache`          | `HYPERION_CELL_CACHE_MB`       | `256`                                        | Cache of generated cells, in MiB             |
-| `--map-cache`           | `HYPERION_MAP_CACHE_MB`        | `64`                                         | Cache of galaxy density maps, in MiB         |
-| `--system-cache`        | `HYPERION_SYSTEM_CACHE_MB`     | `128`                                        | Cache of generated systems' stars, in MiB    |
-| `--body-cache`          | `HYPERION_BODY_CACHE_MB`       | `128`                                        | Cache of generated planetary systems, in MiB |
-| `--brief-cache`         | `HYPERION_BRIEF_CACHE_MB`      | `64`                                         | Cache of range briefs' star models, in MiB   |
-| `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | `0`, off                                     | Cache of the sky census's cells, in MiB      |
-| `--sky-tables`          | `HYPERION_SKY_TABLES_MB`       | `160`                                        | Cache of each galaxy's sky tables, in MiB    |
-| `--surface-cache`       | `HYPERION_SURFACE_CACHE_MB`    | `128`                                        | Cache of bodies' surface fields, in MiB      |
-| `--serve-sky`           | `HYPERION_SERVE_SKY`           | on                                           | Serve `sky` requests                         |
-| `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                          | Stop gracefully when standard input closes   |
+| Option                  | Variable                       | Default                                                | What                                         |
+| ----------------------- | ------------------------------ | ------------------------------------------------------ | -------------------------------------------- |
+| `--address`             | `HYPERION_ADDR`                | `127.0.0.1`                                            | IP address to listen on                      |
+| `--port`                | `HYPERION_PORT`                | `7878`                                                 | Port to listen on                            |
+| `--data-dir`            | `HYPERION_DATA_DIR`            | `./hyperion-data`                                      | Where universes are saved                    |
+| `--num-workers`         | `HYPERION_WORKERS`             | available parallelism less one, at least one           | Generation worker threads                    |
+| `--cell-cache`          | `HYPERION_CELL_CACHE_MB`       | `256`                                                  | Cache of generated cells, in MiB             |
+| `--map-cache`           | `HYPERION_MAP_CACHE_MB`        | `64`                                                   | Cache of galaxy density maps, in MiB         |
+| `--system-cache`        | `HYPERION_SYSTEM_CACHE_MB`     | `128`                                                  | Cache of generated systems' stars, in MiB    |
+| `--body-cache`          | `HYPERION_BODY_CACHE_MB`       | `128`                                                  | Cache of generated planetary systems, in MiB |
+| `--brief-cache`         | `HYPERION_BRIEF_CACHE_MB`      | `64`                                                   | Cache of range briefs' star models, in MiB   |
+| `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | `0`, off                                               | Cache of the sky census's cells, in MiB      |
+| `--sky-tables`          | `HYPERION_SKY_TABLES_MB`       | `160`                                                  | Cache of each galaxy's sky tables, in MiB    |
+| `--surface-cache`       | `HYPERION_SURFACE_CACHE_MB`    | `128`                                                  | Cache of bodies' surface fields, in MiB      |
+| `--surface-passes`      | `HYPERION_SURFACE_PASSES`      | the lesser of 4 and the workers less one, at least one | Coarse surface passes run at once            |
+| `--serve-sky`           | `HYPERION_SERVE_SKY`           | on                                                     | Serve `sky` requests                         |
+| `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                                    | Stop gracefully when standard input closes   |
 
 `--stop-on-stdin-close` is for a server run as another program's child. The parent stops it by
 closing its standard input, which on Windows is the only graceful stop a parent has, and if the

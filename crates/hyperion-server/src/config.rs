@@ -4,24 +4,25 @@
 //! can instead be set by an environment variable; one given on the command line wins. Tests and
 //! embedders build a [`ServerConfig`] with [`ServerConfig::builder`].
 //!
-//! | Option                   | Variable                           | Default                                      |
-//! | ------------------------ | ---------------------------------- | -------------------------------------------- |
-//! | `--address`              | `HYPERION_ADDR`                    | `127.0.0.1`                                  |
-//! | `--port`                 | `HYPERION_PORT`                    | `7878`                                       |
-//! | `--data-dir`             | `HYPERION_DATA_DIR`                | `./hyperion-data`                            |
-//! | `--num-workers`          | `HYPERION_WORKERS`                 | available parallelism less one, at least one |
-//! | `--cell-cache`           | `HYPERION_CELL_CACHE_MB`           | 256 (MiB)                                    |
-//! | `--map-cache`            | `HYPERION_MAP_CACHE_MB`            | 64 (MiB)                                     |
-//! | `--system-cache`         | `HYPERION_SYSTEM_CACHE_MB`         | 128 (MiB)                                    |
-//! | `--body-cache`           | `HYPERION_BODY_CACHE_MB`           | 128 (MiB)                                    |
-//! | `--brief-cache`          | `HYPERION_BRIEF_CACHE_MB`          | 64 (MiB)                                     |
-//! | `--extinction-map-cache` | `HYPERION_EXTINCTION_MAP_CACHE_MB` | 16 (MiB)                                     |
-//! | `--sightline-cache`      | `HYPERION_SIGHTLINE_CACHE_MB`      | 4 (MiB)                                      |
-//! | `--sky-cache`            | `HYPERION_SKY_CACHE_MB`            | 0 (MiB), off                                 |
-//! | `--sky-tables`           | `HYPERION_SKY_TABLES_MB`           | 160 (MiB)                                    |
-//! | `--surface-cache`        | `HYPERION_SURFACE_CACHE_MB`        | 128 (MiB)                                    |
-//! | `--serve-sky`            | `HYPERION_SERVE_SKY`               | on                                           |
-//! | `--stop-on-stdin-close`  | `HYPERION_STOP_ON_STDIN_CLOSE`     | off                                          |
+//! | Option                   | Variable                           | Default                                                |
+//! | ------------------------ | ---------------------------------- | ------------------------------------------------------ |
+//! | `--address`              | `HYPERION_ADDR`                    | `127.0.0.1`                                            |
+//! | `--port`                 | `HYPERION_PORT`                    | `7878`                                                 |
+//! | `--data-dir`             | `HYPERION_DATA_DIR`                | `./hyperion-data`                                      |
+//! | `--num-workers`          | `HYPERION_WORKERS`                 | available parallelism less one, at least one           |
+//! | `--cell-cache`           | `HYPERION_CELL_CACHE_MB`           | 256 (MiB)                                              |
+//! | `--map-cache`            | `HYPERION_MAP_CACHE_MB`            | 64 (MiB)                                               |
+//! | `--system-cache`         | `HYPERION_SYSTEM_CACHE_MB`         | 128 (MiB)                                              |
+//! | `--body-cache`           | `HYPERION_BODY_CACHE_MB`           | 128 (MiB)                                              |
+//! | `--brief-cache`          | `HYPERION_BRIEF_CACHE_MB`          | 64 (MiB)                                               |
+//! | `--extinction-map-cache` | `HYPERION_EXTINCTION_MAP_CACHE_MB` | 16 (MiB)                                               |
+//! | `--sightline-cache`      | `HYPERION_SIGHTLINE_CACHE_MB`      | 4 (MiB)                                                |
+//! | `--sky-cache`            | `HYPERION_SKY_CACHE_MB`            | 0 (MiB), off                                           |
+//! | `--sky-tables`           | `HYPERION_SKY_TABLES_MB`           | 160 (MiB)                                              |
+//! | `--surface-cache`        | `HYPERION_SURFACE_CACHE_MB`        | 128 (MiB)                                              |
+//! | `--surface-passes`       | `HYPERION_SURFACE_PASSES`          | the lesser of 4 and the workers less one, at least one |
+//! | `--serve-sky`            | `HYPERION_SERVE_SKY`               | on                                                     |
+//! | `--stop-on-stdin-close`  | `HYPERION_STOP_ON_STDIN_CLOSE`     | off                                                    |
 //!
 //! `--serve-sky` and `--stop-on-stdin-close` are switches. Their variables take clap's boolish
 //! values, in any case: `y`, `yes`, `t`, `true`, `on` or `1` for on, and `n`, `no`, `f`, `false`,
@@ -90,6 +91,8 @@ pub const ENV_SKY_CACHE_MB: &str = "HYPERION_SKY_CACHE_MB";
 pub const ENV_SKY_TABLES_MB: &str = "HYPERION_SKY_TABLES_MB";
 /// The variable giving the surface service's cache budget in MiB, for `--surface-cache`.
 pub const ENV_SURFACE_CACHE_MB: &str = "HYPERION_SURFACE_CACHE_MB";
+/// The variable giving the number of coarse surface passes run at once, for `--surface-passes`.
+pub const ENV_SURFACE_PASSES: &str = "HYPERION_SURFACE_PASSES";
 /// The variable that turns the sky off, or on, for `--serve-sky`.
 pub const ENV_SERVE_SKY: &str = "HYPERION_SERVE_SKY";
 /// The variable that makes the end of standard input stop the server, for `--stop-on-stdin-close`.
@@ -256,6 +259,11 @@ pub struct ServerArgs {
     #[arg(long, value_name = "MIB", env = ENV_SURFACE_CACHE_MB, default_value_t = DEFAULT_SURFACE_CACHE)]
     surface_cache: CacheBudget,
 
+    /// Coarse surface passes run at once; defaults to the lesser of 4 and the workers less one, at
+    /// least one
+    #[arg(long, value_name = "COUNT", env = ENV_SURFACE_PASSES)]
+    surface_passes: Option<NonZeroUsize>,
+
     /// Serve `sky` requests; `--serve-sky=false` answers them `unsupported`
     #[arg(
         long,
@@ -334,10 +342,11 @@ impl From<ServerArgs> for ServerConfig {
             sky_cache,
             sky_tables,
             surface_cache,
+            surface_passes,
             serve_sky,
             stop_on_stdin_close,
         } = args;
-        Self::builder()
+        let builder = Self::builder()
             .addr(SocketAddr::new(address, port))
             .data_dir(data_dir)
             .workers(num_workers)
@@ -352,8 +361,13 @@ impl From<ServerArgs> for ServerConfig {
             .sky_tables_bytes(sky_tables.bytes)
             .surface_cache_bytes(surface_cache.bytes)
             .sky_service(serve_sky)
-            .stdin_stop(stop_on_stdin_close)
-            .build()
+            .stdin_stop(stop_on_stdin_close);
+        // Not given, the bound follows the workers (`ServerConfig::surface_passes`).
+        match surface_passes {
+            Some(passes) => builder.surface_passes(passes),
+            None => builder,
+        }
+        .build()
     }
 }
 
@@ -419,6 +433,9 @@ pub struct ServerConfig {
     sky_cache_bytes: usize,
     sky_tables_bytes: usize,
     surface_cache_bytes: usize,
+    /// The coarse passes run at once, if given; if not, they follow `workers`
+    /// (`default_surface_passes`).
+    surface_passes: Option<NonZeroUsize>,
     sky_service: SkyService,
     stdin_stop: StdinStop,
     entropy: Arc<dyn Entropy>,
@@ -513,6 +530,14 @@ impl ServerConfig {
         self.surface_cache_bytes
     }
 
+    /// Coarse surface passes the surface service runs at once (rendering plan R09, R09.T17.a): the
+    /// count given, or else the lesser of 4 and the [workers](Self::workers) less one, at least 1.
+    #[must_use]
+    pub fn surface_passes(&self) -> NonZeroUsize {
+        self.surface_passes
+            .unwrap_or_else(|| default_surface_passes(self.workers))
+    }
+
     /// Whether the server answers `sky` (rendering plan R06, R06.T11.c's switch).
     #[must_use]
     pub fn sky_service(&self) -> SkyService {
@@ -583,6 +608,7 @@ impl Default for ServerConfigBuilder {
                 sky_cache_bytes: DEFAULT_SKY_CACHE.bytes,
                 sky_tables_bytes: DEFAULT_SKY_TABLES.bytes,
                 surface_cache_bytes: DEFAULT_SURFACE_CACHE.bytes,
+                surface_passes: None,
                 sky_service: SkyService::default(),
                 stdin_stop: StdinStop::default(),
                 entropy: Arc::new(OsEntropy),
@@ -611,6 +637,9 @@ impl ServerConfigBuilder {
     }
 
     /// Worker threads in the CPU pool.
+    ///
+    /// Unless they are given, the surface passes run at once follow them
+    /// ([`ServerConfig::surface_passes`]).
     #[must_use]
     pub fn workers(mut self, workers: NonZeroUsize) -> Self {
         self.config.workers = workers;
@@ -698,6 +727,16 @@ impl ServerConfigBuilder {
         self
     }
 
+    /// Coarse surface passes the surface service runs at once.
+    ///
+    /// Not given, the bound follows the [workers](Self::workers), whenever they are set: the lesser
+    /// of 4 and the workers less one, at least 1 ([`ServerConfig::surface_passes`]).
+    #[must_use]
+    pub fn surface_passes(mut self, passes: NonZeroUsize) -> Self {
+        self.config.surface_passes = Some(passes);
+        self
+    }
+
     /// Whether the server answers `sky`; [`SkyService::Served`] by default, since rendering plan
     /// R13's R13.T2.
     #[must_use]
@@ -772,6 +811,28 @@ fn default_workers() -> NonZeroUsize {
         .unwrap_or(NonZeroUsize::MIN)
 }
 
+/// The most coarse surface passes run at once by default, whatever the workers.
+const MOST_DEFAULT_SURFACE_PASSES: usize = 4;
+
+/// The coarse surface passes run at once on a pool of `workers` when none is given: the lesser of
+/// 4 and the workers less one, at least 1 (rendering plan R09, R09.T17.a; decision-r09-pass-cost
+/// §C).
+///
+/// A level-8 pass, an Earth-sized wet world's, peaks at 408 MB (R09.T16's bench, its 22.3 MB floor
+/// included), so four at once hold about 1.6 GB. One worker less than the pool's leaves a worker,
+/// on a pool of two or more, for the interactive jobs that the displays' requests wait on, which a
+/// pass on every worker would hold back by a whole pass. A one-worker pool still runs its passes,
+/// one at a time.
+fn default_surface_passes(workers: NonZeroUsize) -> NonZeroUsize {
+    NonZeroUsize::new(
+        workers
+            .get()
+            .saturating_sub(1)
+            .min(MOST_DEFAULT_SURFACE_PASSES),
+    )
+    .unwrap_or(NonZeroUsize::MIN)
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::{OsStr, OsString};
@@ -803,12 +864,13 @@ mod tests {
         parse(args).unwrap_err().kind()
     }
 
-    /// The address, the data directory, the workers, the caches' budgets (cells, maps, systems,
-    /// bodies, briefs, extinction maps, lines of sight, the sky's cells, the sky tables and the
-    /// surface), the sky's switch and the stop on standard input.
+    /// The address, the data directory, the workers, the surface passes run at once, the caches'
+    /// budgets (cells, maps, systems, bodies, briefs, extinction maps, lines of sight, the sky's
+    /// cells, the sky tables and the surface), the sky's switch and the stop on standard input.
     type Fields<'a> = (
         SocketAddr,
         &'a Path,
+        usize,
         usize,
         [usize; 10],
         SkyService,
@@ -820,6 +882,7 @@ mod tests {
             config.addr(),
             config.data_dir(),
             config.workers().get(),
+            config.surface_passes().get(),
             [
                 config.cell_cache_bytes(),
                 config.map_cache_bytes(),
@@ -847,12 +910,14 @@ mod tests {
         let config = config(&[]);
         assert_eq!(fields(&config), fields(&ServerConfig::builder().build()));
         let cores = std::thread::available_parallelism().map_or(1, NonZeroUsize::get);
+        let workers = cores.saturating_sub(1).max(1);
         assert_eq!(
             fields(&config),
             (
                 SocketAddr::from((Ipv4Addr::LOCALHOST, 7878)),
                 Path::new("./hyperion-data"),
-                cores.saturating_sub(1).max(1),
+                workers,
+                workers.saturating_sub(1).clamp(1, 4),
                 [
                     256 * 1024 * 1024,
                     64 * 1024 * 1024,
@@ -902,6 +967,8 @@ mod tests {
             "19",
             "--surface-cache",
             "23",
+            "--surface-passes",
+            "29",
             "--serve-sky=false",
             "--stop-on-stdin-close",
         ]);
@@ -911,6 +978,7 @@ mod tests {
                 SocketAddr::from((Ipv4Addr::UNSPECIFIED, 9000)),
                 Path::new("/srv/hyperion"),
                 3,
+                29,
                 [
                     1 << 20,
                     0,
@@ -1009,6 +1077,7 @@ mod tests {
                 (Some("sky-cache"), Some("HYPERION_SKY_CACHE_MB")),
                 (Some("sky-tables"), Some("HYPERION_SKY_TABLES_MB")),
                 (Some("surface-cache"), Some("HYPERION_SURFACE_CACHE_MB")),
+                (Some("surface-passes"), Some("HYPERION_SURFACE_PASSES")),
                 (Some("serve-sky"), Some("HYPERION_SERVE_SKY")),
                 (
                     Some("stop-on-stdin-close"),
@@ -1061,6 +1130,64 @@ mod tests {
                 ErrorKind::ValueValidation,
                 "{count:?}"
             );
+        }
+    }
+
+    /// A count of surface passes is a whole number above 0, as a count of workers is: 0 is refused
+    /// whether written after an equals sign or as the next word (rendering plan R09, R09.T17.a).
+    #[test]
+    fn a_bad_surface_pass_count_is_refused() {
+        for count in ["0", "four", "-2", "1.5"] {
+            assert_eq!(
+                refusal(&[&format!("--surface-passes={count}")]),
+                ErrorKind::ValueValidation,
+                "{count:?}"
+            );
+        }
+        assert_eq!(
+            refusal(&["--surface-passes", "0"]),
+            ErrorKind::ValueValidation
+        );
+    }
+
+    /// Not given, the surface passes run at once are the lesser of 4 and the workers less one, at
+    /// least one, whether the workers come from the command line or the builder, in either order;
+    /// given, the count wins, whatever the workers (rendering plan R09, R09.T17.a).
+    #[test]
+    fn the_surface_passes_follow_the_workers_unless_given() {
+        for (workers, passes) in [(1, 1), (2, 1), (3, 2), (4, 3), (5, 4), (16, 4)] {
+            let workers = NonZeroUsize::new(workers).unwrap();
+            assert_eq!(default_surface_passes(workers).get(), passes, "{workers}");
+            assert_eq!(
+                ServerConfig::builder()
+                    .workers(workers)
+                    .build()
+                    .surface_passes()
+                    .get(),
+                passes,
+                "{workers}"
+            );
+            assert_eq!(
+                config(&["--num-workers", &workers.to_string()])
+                    .surface_passes()
+                    .get(),
+                passes,
+                "{workers}"
+            );
+        }
+        let given = NonZeroUsize::new(7).unwrap();
+        for chosen in [
+            ServerConfig::builder()
+                .surface_passes(given)
+                .workers(NonZeroUsize::MIN)
+                .build(),
+            ServerConfig::builder()
+                .workers(NonZeroUsize::new(16).unwrap())
+                .surface_passes(given)
+                .build(),
+            config(&["--surface-passes", "7", "--num-workers", "1"]),
+        ] {
+            assert_eq!(chosen.surface_passes(), given, "{chosen:?}");
         }
     }
 
@@ -1216,6 +1343,7 @@ mod tests {
             .sky_cache_bytes(80)
             .sky_tables_bytes(90)
             .surface_cache_bytes(100)
+            .surface_passes(NonZeroUsize::new(3).unwrap())
             .sky_service(SkyService::Unsupported)
             .stdin_stop(StdinStop::Watch)
             .build();
@@ -1225,6 +1353,7 @@ mod tests {
                 SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
                 Path::new("/tmp/x"),
                 2,
+                3,
                 [10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
                 SkyService::Unsupported,
                 StdinStop::Watch,

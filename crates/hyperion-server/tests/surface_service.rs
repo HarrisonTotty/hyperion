@@ -42,8 +42,15 @@ fn pool() -> Arc<CpuPool> {
     )
 }
 
+/// A service on `pool` of the given source, running one pass at a time, the default bound on the
+/// pool's two workers.
 fn service(pool: &Arc<CpuPool>, source: impl InputsSource + 'static) -> SurfaceService {
-    SurfaceService::new(Arc::clone(pool), Arc::new(source), 64 << 20)
+    SurfaceService::new(
+        Arc::clone(pool),
+        Arc::new(source),
+        64 << 20,
+        NonZeroUsize::MIN,
+    )
 }
 
 fn key(body: hyperion_sim::id::BodyId) -> FieldKey {

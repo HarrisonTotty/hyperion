@@ -15,6 +15,15 @@
 //! more is not kept. A field is never persisted (the plan's open question 4): after an eviction or
 //! a restart it is computed again, to the bit.
 //!
+//! At most `HYPERION_SURFACE_PASSES` passes run at once (`--surface-passes`; by default the lesser
+//! of 4 and the pool's workers less one, at least 1; rendering plan R09, R09.T17.a), each holding a
+//! permit of the service's semaphore from just before its job is queued until the job ends,
+//! however it ends. A level-8 pass peaks at 408 MB (R09.T16), so four at once hold about 1.6 GB,
+//! and on a pool of two workers or more one stays free for the interactive jobs that the displays'
+//! requests wait on (decision-r09-pass-cost §C). A pass waiting for its permit is a pass still
+//! queued: given up by every caller, it never runs. A prefetched pass waits as a requested one
+//! does.
+//!
 //! # Where the inputs come from
 //!
 //! The pass's inputs come through the [`InputsSource`] seam, which reads them from the body's

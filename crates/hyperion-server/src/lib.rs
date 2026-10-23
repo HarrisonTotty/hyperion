@@ -205,6 +205,7 @@ impl Server {
             Arc::clone(&pool),
             Arc::clone(config.surface_inputs()),
             config.surface_cache_bytes(),
+            config.surface_passes(),
         );
         tracing::info!(
             data_dir = %config.data_dir().display(),
@@ -217,6 +218,7 @@ impl Server {
             sky_cache_mib = config.sky_cache_bytes() / (1 << 20),
             sky_tables_mib = config.sky_tables_bytes() / (1 << 20),
             surface_cache_mib = config.surface_cache_bytes() / (1 << 20),
+            surface_passes = config.surface_passes().get(),
             sky_service = ?config.sky_service(),
             extinction_map_cache_mib = config.extinction_map_cache_bytes() / (1 << 20),
             sightline_cache_mib = config.sightline_cache_bytes() / (1 << 20),
