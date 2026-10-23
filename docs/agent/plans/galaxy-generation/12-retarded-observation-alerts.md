@@ -2011,19 +2011,24 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     alone on its row, with nothing selected too; as observed, unchanged. The readout at
     1280 × 720 and 150%: the break after `AT` as before, the time's line one width, and no
     sideways scroll.
-  - _Main's landing look (2026-10-22, at 1177743a): the selection's label yields to the other
-    text._ The look found the selection's label over the core arrow's label, text over text, on
-    the compact stage at 150% in `OBSERVED`: `GDG 75DY08 A-3` at (145.5, 47.7) on the
-    256.67 × 232 px stage, its left side (17.3–132.8 px across, 38.9–56.4 px down) across
-    `CORE 8914.7 ly` (4–128.6, 37–54.5), and the same at 1280 × 720 in `NOW` once turned and
-    zoomed. It came before this task, since a pinned label was never dropped for other text. By
-    main's ruling it is a blocker, and `placeLabels` now has the selection's label yield to an
-    overlap with `texts` (the triad's footprint, the core arrow's label, the curve labels) as it
-    yields to the eye: it takes its other side, and is not drawn where that is not clear either.
-    This narrows R07.T16.j's "pinned labels are unchanged" (D4 against the other text) for the
-    selection's overlap alone; the 0.5 rem clearance stays the lesser labels', and the
-    destination's places are unchanged. Tests: the measured case, its other side taken, and both
-    sides over text, in `spatial/labels.test.ts`.
+  - _Main's landing look (2026-10-22): the selection's label yields to the other text's glyphs._
+    The look found the selection's label over the core arrow's label, text over text, on the
+    compact stage at 150% in `OBSERVED`: `GDG 75DY08 A-3` at (145.5, 47.7) on the 256.67 × 232 px
+    stage, its left side (17.3–132.8 px across, 38.9–56.4 px down) across `CORE 8914.7 ly`
+    (4–128.6, 37–54.5), and the same at 1280 × 720 in `NOW` once turned and zoomed. It came before
+    this task, since a pinned label was never dropped for other text. By main's ruling it is a
+    blocker, and `placeLabels` now has the selection's label yield to `texts` (the triad's
+    footprint, the core arrow's label, the curve labels) as it yields to the eye: it takes its
+    other side, and is not drawn where that is not clear either. The test is of the glyphs' ink,
+    not the line boxes (`INK_INSET_EM`, 0.275 em inside each box's top and bottom, from B612's
+    ascender, descender and cap height against the 1.25 line), by main's second ruling: tested by
+    box, the orbit map's selected planet between `HABITABLE ZONE` and `SNOW LINE`, whose boxes
+    overlap by their leading alone, about 5 px, lost its label at 1280 × 720 and 150%. This
+    narrows R07.T16.j's "pinned labels are unchanged" (D4 against the other text) for the
+    selection's glyphs alone; the 0.5 rem clearance stays the lesser labels', and the
+    destination's places are unchanged. Tests, in `spatial/labels.test.ts`: the measured case, its
+    other side taken, both sides over text, the orbit map's case kept, and the band's edge at 7.6
+    and 7.8 px of overlap.
 - **P12.T11.f as built (`lane/84-p12-t11f-reading-state`, 2026-10-22, at `GENERATOR_VERSION` 23).**
   Client and plan only: no Rust, protocol, binding, server, sim, GPU, golden or guide change.
   Nothing on screen changes: the DOM text is the same live, stale, own and missing, the slot keeps

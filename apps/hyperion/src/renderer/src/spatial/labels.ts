@@ -41,6 +41,27 @@ export const LABEL_FONT_REM = 0.875;
 const CHARACTER_EM = 0.62;
 const LINE_EM = 1.25;
 
+/**
+ * How far inside a line of text's box, above and below, the ink of its capitals and figures lies,
+ * in ems of its font size: the band in which the selection's label and the other text over the
+ * view are tested for overlap, so that glyphs over glyphs are refused and lines that only share
+ * their leading are not (plan 12, P12.T11.e).
+ *
+ * @remarks
+ * From the bundled B612 (`@fontsource/b612` 5.3.0, regular and bold) and B612 Mono
+ * (`@fontsource/b612-mono` 5.3.0), whose `head`, `hhea` and `OS/2` tables give 2,000 units per em,
+ * an ascender of 1,930, a descender of 500, no line gap and a cap height of 1,500. In a line 1.25 em
+ * high ({@link LINE_EM}) the 1.215 em content area stands 0.0175 em below the box's top, so the
+ * baseline lies 0.9825 em down and the capitals' tops 0.2325 em down: the capitals and figures span
+ * 0.2325 to 0.9825 em of the box. Taking 0.275 em off each edge keeps 0.7 em inside that band. Two
+ * lines set one under the other, whose boxes overlap by about 5 px of their 17.5 px at 100% (the
+ * orbit map's `HABITABLE ZONE`, a selected planet's label and `SNOW LINE`, at main's landing look
+ * at #79 to #81), keep their ink apart and are not overlapping text; a label 1.9 px below the core
+ * arrow's (15.6 px of overlap) is. A lower-case unit's descender, the `y` of `ly`, lies below the
+ * band.
+ */
+const INK_INSET_EM = 0.275;
+
 /** The estimated size of a line of text over a spatial view. */
 export interface TextSizeRem {
   readonly widthRem: number;
@@ -133,6 +154,20 @@ function overlaps(a: BoxPx, b: BoxPx): boolean {
  */
 function clampInto(startPx: number, sizePx: number, extentPx: number, edgePx: number): number {
   return Math.max(edgePx, Math.min(startPx, extentPx - edgePx - sizePx));
+}
+
+/**
+ * A text box narrowed to the ink of its capitals and figures ({@link INK_INSET_EM}), at the labels'
+ * size ({@link LABEL_FONT_REM}).
+ */
+function inkBandPx(box: BoxPx, remPx: number): BoxPx {
+  const insetPx = INK_INSET_EM * LABEL_FONT_REM * remPx;
+  return {
+    leftPx: box.leftPx,
+    topPx: box.topPx + insetPx,
+    widthPx: box.widthPx,
+    heightPx: Math.max(0, box.heightPx - 2 * insetPx),
+  };
 }
 
 /** How far a label stands inside the view's edges, CSS px: {@link LABEL_EDGE_CLEARANCE_REM}. */
@@ -394,8 +429,9 @@ export interface LabelSurroundings {
   /**
    * Marks whose labels are never dropped for a neighbour, furniture or a mark out of view: the
    * selection and the destination. The selection's still yields to the destination's, keeps off
-   * the observer's eye (`observer`) and off the other text over the view (`texts`), which it never
-   * overlaps, and is never held back across its own mark or bracket (plan 12, P12.T11.e).
+   * the observer's eye (`observer`) and off the other text over the view (`texts`), whose glyphs
+   * its own never overlap, and is never held back across its own mark or bracket (plan 12,
+   * P12.T11.e).
    */
   readonly pinnedIds?: ReadonlyArray<string>;
   /** Furniture over the view that a label must not cover: the core arrow's mark. */
@@ -403,8 +439,8 @@ export interface LabelSurroundings {
   /**
    * Other text over the view, which a label that may be dropped stands 0.5 rem from, as from
    * another mark's label (decision-r07-quality-and-destination, addendum D, D4; R07.T16.j), and
-   * which the selection's label never overlaps (plan 12, P12.T11.e): the triad's footprint, the
-   * core arrow's label and the curve labels.
+   * whose glyphs the selection's label never overlaps (plan 12, P12.T11.e): the triad's footprint,
+   * the core arrow's label and the curve labels.
    */
   readonly texts?: ReadonlyArray<BoxPx>;
   /**
@@ -456,11 +492,12 @@ export interface LabelSurroundings {
  * of those, only the labels a chart with no selection draws, none whose mark is out of view and
  * none that would be held back across its own mark or bracket (P12.T11.e). The selection's label
  * comes next. Where it stands within 0.5 rem of the destination's label or 0.25 rem of its chevron
- * set, overlaps other text over the view (`texts`: the triad's, the core arrow's label, a curve
- * label), or would be held back across its own mark or bracket, it takes its other side, and where
- * that is not clear either, or not beside its mark, it is not drawn: the bracket, the readout and
- * the list still name the selection (P12.T11.e: text over text is a wrong picture, so the
- * selection's label yields to the other text where a lesser label is dropped 0.5 rem from it). The rest follow in order. A lesser label within 0.5 rem of
+ * set, overlaps other text over the view by its glyphs (`texts`: the triad's, the core arrow's
+ * label, a curve label; their ink bands, {@link INK_INSET_EM}), or would be held back across its
+ * own mark or bracket, it takes its other side, and where that is not clear either, or not beside
+ * its mark, it is not drawn: the bracket, the readout and the list still name the selection
+ * (P12.T11.e: text over text is a wrong picture, so the selection's label yields to the other text
+ * where a lesser label is dropped 0.5 rem from it). The rest follow in order. A lesser label within 0.5 rem of
  * the destination's, or within 0.25 rem of its chevron set, is dropped, so that no other name
  * stands nearer the destination's than its own, or runs through its chevrons. The labels are
  * returned in the order given.
@@ -493,11 +530,15 @@ export function placeLabels(
     observer = null,
   } = surroundings;
   // The eye is furniture to every label; the selection's, which furniture does not move, keeps off
-  // it alone (`coversEye`), and off the other text over the view, so that no text stands over
-  // another (`coversText`; P12.T11.e).
+  // it alone (`coversEye`), and off the other text over the view, so that no glyph stands over
+  // another: their ink bands, not their line boxes, are tested (`coversText`; P12.T11.e).
   const obstacles = observer === null ? furniture : [...furniture, observer];
   const coversEye = (label: BoxPx): boolean => observer !== null && overlaps(label, observer);
-  const coversText = (label: BoxPx): boolean => texts.some((other) => overlaps(label, other));
+  const textInk = texts.map((other) => inkBandPx(other, viewport.remPx));
+  const coversText = (label: BoxPx): boolean => {
+    const ink = inkBandPx(label, viewport.remPx);
+    return textInk.some((other) => overlaps(ink, other));
+  };
   const anchorOf = new Map(anchors.map((anchor) => [anchor.id, anchor]));
   const isInView = (id: string): boolean => {
     const anchor = anchorOf.get(id);

@@ -1240,6 +1240,52 @@ describe("placeLabels: the selection's label off the other text over the view (p
     expect((label?.leftPx ?? 0) + (label?.widthPx ?? 0)).toBeCloseTo(200 - 6 - OFFSET_AT_TWO_PX, 9);
   });
 
+  it("keeps the selection's label between two lines whose boxes it overlaps by their leading alone", () => {
+    // Main's landing look, the orbit map at 1280 x 720 (787.33 x 184 px): `GDG 75DX08 A-7 /256`
+    // selected at (393.8, 92.1), its line box from 83.35 to 100.85 px down, between
+    // `HABITABLE ZONE` (70.7 to 88.2) and `SNOW LINE` (96.3 to 113.8), with `BELT 1` and
+    // `OPTIMISTIC` to its left. The boxes overlap by about 5 px; the capitals' ink does not.
+    const orbit: Viewport = { widthPx: 787.328125, heightPx: 184, remPx: 16 };
+    const texts = [
+      textBox(401.9, 70.7, 538.4, 88.2),
+      textBox(402.2, 96.3, 492.5, 113.8),
+      textBox(338.8, 63.7, 392.7, 81.2),
+      textBox(285.4, 95.9, 377.1, 113.4),
+    ];
+    const [label] = placeLabels(
+      [mark("p", 1, "GDG 75DX08 A-7 /256")],
+      [anchor("p", 393.8, 92.1, 5)],
+      orbit,
+      reticleStrokesCssPx(1),
+      null,
+      { pinnedIds: ["p"], texts },
+    );
+
+    expect([label?.side, label?.leftPx]).toEqual(["right", 393.8 + 5 + 0.5 * 16 + 2]);
+  });
+
+  it.each([
+    ["7.6 px, within their leading, keeps its side", 7.6, "right"],
+    ["7.8 px, across their capitals, takes its other side", 7.8, "left"],
+  ] as const)(
+    "of the selection's label under other text whose box it overlaps by %s",
+    (_, overlapPx, side) => {
+      // `SOL-1`'s line box at (200, 150) runs from 141.25 to 158.75 px down; the ink band of each
+      // box lies 0.275 em, 3.85 px, inside its top and bottom at 0.875 rem.
+      const above = textBox(210, 141.25 + overlapPx - 17.5, 300, 141.25 + overlapPx);
+      const [label] = placeLabels(
+        [mark("a", 1, "SOL-1")],
+        [anchor("a", 200, 150)],
+        VIEWPORT,
+        AT_TWO,
+        null,
+        { pinnedIds: ["a"], texts: [above] },
+      );
+
+      expect(label?.side).toBe(side);
+    },
+  );
+
   it("draws no label for the selection where both of its sides lie over other text", () => {
     const chosen = [mark("a", 1, "SOL-1")];
     const anchors = [anchor("a", 200, 150)];
